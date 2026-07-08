@@ -1,0 +1,28 @@
+; Engine configuration file.
+; Project Ikari — deterministic twin-stick vertical run-and-gun (P0 greybox).
+
+config_version=5
+
+[application]
+
+config/name="Project Ikari"
+config/description="Modern remake of the classic vertical-scrolling run-and-gun. P0 greybox prototype."
+run/main_scene="res://src/main.tscn"
+config/features=PackedStringArray("4.6")
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/stretch/mode="viewport"
+window/stretch/aspect="keep"
+window/size/window_width_override=1280
+window/size/window_height_override=720
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0

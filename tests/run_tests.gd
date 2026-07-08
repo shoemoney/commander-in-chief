@@ -1,0 +1,48 @@
+extends SceneTree
+## Headless test runner: godot --headless --path . -s res://tests/run_tests.gd
+##
+## Zero-dependency (no GUT addon needed in P0). Each test script extends
+## RefCounted and exposes methods named test_*; assertions go through T.
+
+const TEST_SCRIPTS: Array[String] = [
+	"res://tests/test_fixed.gd",
+	"res://tests/test_sim_rng.gd",
+	"res://tests/test_gameplay.gd",
+	"res://tests/test_war_chest.gd",
+	"res://tests/test_determinism.gd",
+]
+
+
+class T:
+	static var failures: Array[String] = []
+	static var checks := 0
+
+	static func ok(cond: bool, msg: String) -> void:
+		checks += 1
+		if not cond:
+			failures.append(msg)
+			push_error("FAIL: " + msg)
+
+	static func eq(a, b, msg: String) -> void:
+		ok(a == b, "%s (got %s, want %s)" % [msg, str(a), str(b)])
+
+
+func _init() -> void:
+	var total_methods := 0
+	for path in TEST_SCRIPTS:
+		var script: GDScript = load(path)
+		var suite: RefCounted = script.new()
+		for m in suite.get_method_list():
+			if m["name"].begins_with("test_"):
+				total_methods += 1
+				print("  • %s :: %s" % [path.get_file(), m["name"]])
+				suite.call(m["name"])
+	print("")
+	if T.failures.is_empty():
+		print("PASS — %d test methods, %d assertions, 0 failures" % [total_methods, T.checks])
+		quit(0)
+	else:
+		print("FAIL — %d of %d assertions failed:" % [T.failures.size(), T.checks])
+		for f in T.failures:
+			print("   ✗ " + f)
+		quit(1)

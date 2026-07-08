@@ -1,0 +1,5 @@
+# Toolchain lock — upgrades only at phase boundaries after the replay
+# regression suite passes on all platforms (see docs/PLAN.md §4).
+godot_version=4.6.3-stable
+godot_linux_x86_64_zip_sha256=d0bc2113065e481c9c2c2b2c37daa4e8be3fe9e27f0ab9ab0b6096e9a37907f3
+godot_download_base=https://downloads.godotengine.org/
