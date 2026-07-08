@@ -13,7 +13,9 @@ var aim_y: int = 0
 var fire: bool = false
 var grenade: bool = false
 var revive: bool = false
+var roll: bool = false
+var interact: bool = false
 
 
 func hash_ints() -> Array[int]:
-	return [move_x, move_y, aim_x, aim_y, int(fire), int(grenade), int(revive)]
+	return [move_x, move_y, aim_x, aim_y, int(fire), int(grenade), int(revive), int(roll), int(interact)]

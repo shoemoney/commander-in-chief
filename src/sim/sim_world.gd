@@ -3,13 +3,15 @@ extends RefCounted
 ## The deterministic gameplay core. Fixed 60 Hz tick, 16.16 fixed-point math,
 ## seeded RNG, no floats, no engine RNG, no wall-clock time, no scene tree.
 ##
-## Everything the game IS lives here: players, bullets, grenades (fake-Z
-## parabolas), rusher/elite infantry, infinite-spawn bunkers sealed only by
-## grenades, pickups, the ratchet scroll camera, one-hit death, and the
+## Everything the game IS lives here: players (with dodge roll), bullets,
+## grenades and tank shells (fake-Z parabolas), rusher/elite infantry,
+## infinite-spawn bunkers sealed only by grenades, enterable tanks with fuel
+## and bail windows, the Mortar Observer pacing whip, zone gates that become
+## checkpoints, pickups, the ratchet scroll camera, one-hit death, and the
 ## War Chest shared economy. The scene tree is only a view over this state.
 ##
-## P0 scope (greybox): 1-2 players, endless vertical scroll, rusher + red
-## elite + bunker enemy grammar, ammo economy, War Chest revives.
+## P1 scope: P0 systems + dodge roll, tank vehicle (crush/shells/fuel/bail/
+## kamikaze), Mortar Observer with tracked strikes, gates → checkpoints.
 
 # --- Tuning constants (all fixed-point unless suffixed _TICKS/_RAW) ---
 const F_ONE := Fixed.ONE
@@ -43,6 +45,35 @@ const COIN_BUNKER := 50
 const CAMERA_LEAD := 160 * F_ONE
 const BUNKER_W := 48 * F_ONE
 const BUNKER_H := 32 * F_ONE
+# Dodge roll: 0.3 s i-frames, 1.2 s cooldown, 2× speed in the move direction.
+const ROLL_TICKS := 18
+const ROLL_CD_TICKS := 72
+# Tank: 0.8× player speed, cannon draws from grenade ammo, ~20 s of fuel,
+# guaranteed 3.0 s bail window once burning.
+const TANK_SPEED := (PLAYER_SPEED * 4) / 5
+const TANK_BOARD_RADIUS := 24 * F_ONE
+const TANK_CRUSH_RADIUS := 18 * F_ONE
+const TANK_FIRE_COOLDOWN_TICKS := 45
+const TANK_FUEL_TICKS := 1200
+const TANK_BAIL_TICKS := 180
+const TANK_KAMIKAZE_PAD := 20 * F_ONE
+const SHELL_SPEED := 5 * F_ONE
+const SHELL_ZVEL := F_ONE
+const BAIL_BOOST_TICKS := 90
+# Mortar Observer: spawns after an 8 s stall; strike every 1.5 s with a
+# 0.75 s telegraph; despawns once the players push 150 px past his arrival.
+const OBSERVER_STALL_TICKS := 480
+const OBSERVER_STRIKE_CD_TICKS := 90
+const STRIKE_TELEGRAPH_TICKS := 45
+const OBSERVER_DESPAWN_ADVANCE := 150 * F_ONE
+const OBSERVER_Y_OFFSET := 14 * F_ONE
+# Gates: a full-width barrier every 1000 world units, flanked by two bunkers;
+# both bunkers down = gate opens and becomes the checkpoint. (Greybox gates
+# block movement and camera, not bullets — the arena bunkers sit south of the
+# wall and are fought from below.)
+const GATE_SPACING := 1000 * F_ONE
+const GATE_BLOCK_PAD := 14 * F_ONE
+const GATE_CAMERA_PAD := 60 * F_ONE
 
 var tick_count: int = 0
 var rng: SimRng
@@ -52,17 +83,32 @@ var grenades: Array[Dictionary] = []
 var enemies: Array[Dictionary] = []
 var bunkers: Array[Dictionary] = []
 var pickups: Array[Dictionary] = []
+var tanks: Array[Dictionary] = []
+var gates: Array[Dictionary] = []
+var strikes: Array[Dictionary] = []
+var observer: Dictionary = {}
 var war_chest: int = 0
 var score: int = 0
 var camera_top: int = 0
+var last_gate_y: int = 0          # 0 = no checkpoint yet (sentinel)
+var stall_ticks: int = 0
+## Transient per-tick view events ({"t": "explosion"|"kill"|"gate_open", "x", "y"}).
+## Derived from state transitions; cleared every step; excluded from checksums.
+var events: Array[Dictionary] = []
 var _spawn_counter: int = 0
 var _next_bunker_y: int = 0
+var _next_gate_y: int = 0
+var _next_tank_y: int = 0
+var _prev_camera_top: int = 0
 
 
 func _init(seed_value: int, player_count: int) -> void:
 	rng = SimRng.new(seed_value)
 	camera_top = -VIEW_H
+	_prev_camera_top = camera_top
 	_next_bunker_y = -(500 * F_ONE)
+	_next_gate_y = -GATE_SPACING
+	_next_tank_y = -(750 * F_ONE)
 	for i in player_count:
 		players.append({
 			"x": (280 + i * 80) * F_ONE,
@@ -74,6 +120,11 @@ func _init(seed_value: int, player_count: int) -> void:
 			"grenade_ammo": GRENADE_AMMO_MAX,
 			"fire_cd": 0, "grenade_cd": 0,
 			"broke_timer": 0,
+			"roll_ticks": 0, "roll_cd": 0,
+			"roll_dx": 0, "roll_dy": -F_ONE,
+			"boost_ticks": 0,
+			"in_tank": -1,
+			"interact_prev": false,
 		})
 
 
@@ -91,14 +142,21 @@ func revive_cost(p: Dictionary) -> int:
 func step(inputs: Array) -> void:
 	## Advance one tick. `inputs` is one SimInput per player.
 	tick_count += 1
+	events.clear()
+	_prev_camera_top = camera_top
 	_step_players(inputs)
+	_step_tanks()
 	_step_bullets()
 	_step_grenades()
 	_step_enemies()
 	_step_bunkers()
 	_step_spawner()
+	_step_gates()
 	_step_camera()
+	_step_observer()
 
+
+# --- Players ---
 
 func _step_players(inputs: Array) -> void:
 	for i in players.size():
@@ -106,22 +164,42 @@ func _step_players(inputs: Array) -> void:
 		var inp: SimInput = inputs[i] if i < inputs.size() else SimInput.new()
 		p["fire_cd"] = maxi(0, p["fire_cd"] - 1)
 		p["grenade_cd"] = maxi(0, p["grenade_cd"] - 1)
+		p["roll_cd"] = maxi(0, p["roll_cd"] - 1)
+		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
+		var interact_edge: bool = inp.interact and not p["interact_prev"]
+		p["interact_prev"] = inp.interact
 
 		if not p["alive"]:
 			_step_dead_player(i, p, inp)
+			continue
+
+		if p["in_tank"] >= 0:
+			_drive_tank(i, p, inp, interact_edge)
 			continue
 
 		# Movement: quantized stick [-256,256] -> fixed direction, normalized.
 		var mx: int = inp.move_x * 256   # 256*256 = 65536 = 1.0 fixed at full deflection
 		var my: int = inp.move_y * 256
 		var mlen := Fixed.length(mx, my)
-		if mlen > F_ONE / 8:
-			var nx := Fixed.div(mx, mlen)
-			var ny := Fixed.div(my, mlen)
-			p["x"] = p["x"] + Fixed.mul(nx, PLAYER_SPEED)
-			p["y"] = p["y"] + Fixed.mul(ny, PLAYER_SPEED)
-		p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
-		p["y"] = Fixed.clampi_fixed(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
+		var moving: bool = mlen > F_ONE / 8
+
+		# Dodge roll: locks direction at trigger, 2× speed, i-frames.
+		if inp.roll and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and moving:
+			p["roll_ticks"] = ROLL_TICKS
+			p["roll_cd"] = ROLL_CD_TICKS
+			p["roll_dx"] = Fixed.div(mx, mlen)
+			p["roll_dy"] = Fixed.div(my, mlen)
+		if p["roll_ticks"] > 0:
+			p["roll_ticks"] = p["roll_ticks"] - 1
+			p["x"] = p["x"] + Fixed.mul(p["roll_dx"], PLAYER_SPEED * 2)
+			p["y"] = p["y"] + Fixed.mul(p["roll_dy"], PLAYER_SPEED * 2)
+		elif moving:
+			var spd := PLAYER_SPEED
+			if p["boost_ticks"] > 0:
+				spd = (PLAYER_SPEED * 3) / 2
+			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
+			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
+		_clamp_actor(p)
 
 		# Aim: decoupled from movement (the loop-lever identity).
 		var ax: int = inp.aim_x * 256
@@ -148,41 +226,61 @@ func _step_players(inputs: Array) -> void:
 				"x": p["x"], "y": p["y"],
 				"vx": Fixed.mul(p["aim_x"], GRENADE_SPEED),
 				"vy": Fixed.mul(p["aim_y"], GRENADE_SPEED),
-				"z": 0, "zv": GRENADE_ZVEL, "owner": i,
+				"z": 0, "zv": GRENADE_ZVEL, "owner": i, "shell": false,
 			})
 
 		if inp.revive:
 			_try_revive(i, p)
 
-		# Contact with any enemy = one-hit death.
-		for e in enemies:
-			if e["alive"] and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
-				_kill_player(p)
-				break
+		if interact_edge:
+			_try_board_tank(i, p)
+
+		# Contact with any enemy = one-hit death (roll i-frames protect).
+		if p["roll_ticks"] == 0 and p["in_tank"] < 0:
+			for e in enemies:
+				if e["alive"] and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+					_kill_player(p)
+					break
 
 		# Pickups.
-		for k in range(pickups.size() - 1, -1, -1):
-			var pk := pickups[k]
-			if _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
-				if pk["kind"] == 0:
-					p["mg_ammo"] = mini(MG_AMMO_MAX, p["mg_ammo"] + 30)
-				else:
-					p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 4)
-				pickups.remove_at(k)
+		if p["alive"]:
+			for k in range(pickups.size() - 1, -1, -1):
+				var pk := pickups[k]
+				if _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
+					if pk["kind"] == 0:
+						p["mg_ammo"] = mini(MG_AMMO_MAX, p["mg_ammo"] + 30)
+					else:
+						p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 4)
+					pickups.remove_at(k)
+
+
+func _clamp_actor(p: Dictionary) -> void:
+	p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
+	p["y"] = Fixed.clampi_fixed(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
+	# Closed gates are a hard wall to the north.
+	for g in gates:
+		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
+			p["y"] = g["y"] + GATE_BLOCK_PAD
 
 
 func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 	# Broke fallback: if nobody can afford a revive, a timer respawns you at
-	# the bottom of the current screen (the "last gate" stand-in for P0).
+	# the last opened gate (or the bottom of the screen before any gate).
 	if p["broke_timer"] > 0:
 		p["broke_timer"] = p["broke_timer"] - 1
 		if p["broke_timer"] == 0:
-			_respawn(p, camera_top + 330 * F_ONE)
+			_respawn(p, _checkpoint_y())
 			return
 	# Dead player pressing revive = feeding the War Chest coin reader (solo,
 	# or when the partner is also down).
 	if inp.revive:
 		_try_revive(-1, p)
+
+
+func _checkpoint_y() -> int:
+	if last_gate_y != 0:
+		return last_gate_y + 30 * F_ONE
+	return camera_top + 330 * F_ONE
 
 
 func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
@@ -197,7 +295,7 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 		var cost := revive_cost(target)
 		if war_chest >= cost:
 			war_chest -= cost
-			var at_y: int = reviver["y"] if reviver["alive"] else camera_top + 330 * F_ONE
+			var at_y: int = reviver["y"] if reviver["alive"] else _checkpoint_y()
 			_respawn(target, at_y)
 		else:
 			if target["broke_timer"] == 0:
@@ -209,6 +307,9 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["mg_ammo"] = MG_AMMO_MAX         # death restores ammo (1986 rule)
 	p["grenade_ammo"] = GRENADE_AMMO_MAX
 	p["broke_timer"] = 0
+	p["roll_ticks"] = 0
+	p["boost_ticks"] = 0
+	p["in_tank"] = -1
 	p["y"] = Fixed.clampi_fixed(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
 
@@ -217,7 +318,123 @@ func _kill_player(p: Dictionary) -> void:
 	p["alive"] = false
 	p["deaths"] = p["deaths"] + 1
 	p["broke_timer"] = 0
+	p["in_tank"] = -1
+	events.append({"t": "kill", "x": p["x"], "y": p["y"]})
 
+
+# --- Tank ---
+
+func _try_board_tank(player_index: int, p: Dictionary) -> void:
+	for t in tanks.size():
+		var tank := tanks[t]
+		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+			tank["occupant"] = player_index
+			p["in_tank"] = t
+			return
+
+
+func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge: bool) -> void:
+	var tank := tanks[p["in_tank"]]
+	if not tank["alive"]:
+		p["in_tank"] = -1
+		return
+
+	if interact_edge:
+		_dismount(p, tank)
+		return
+
+	var mx: int = inp.move_x * 256
+	var my: int = inp.move_y * 256
+	var mlen := Fixed.length(mx, my)
+	if mlen > F_ONE / 8:
+		tank["x"] = tank["x"] + Fixed.mul(Fixed.div(mx, mlen), TANK_SPEED)
+		tank["y"] = tank["y"] + Fixed.mul(Fixed.div(my, mlen), TANK_SPEED)
+	_clamp_actor(tank)
+	p["x"] = tank["x"]
+	p["y"] = tank["y"]
+
+	var ax: int = inp.aim_x * 256
+	var ay: int = inp.aim_y * 256
+	var alen := Fixed.length(ax, ay)
+	if alen > F_ONE / 4:
+		p["aim_x"] = Fixed.div(ax, alen)
+		p["aim_y"] = Fixed.div(ay, alen)
+
+	# Cannon: draws from the grenade pool (1986 rule) and lands like one.
+	if inp.fire and tank["fire_cd"] == 0 and p["grenade_ammo"] > 0:
+		tank["fire_cd"] = TANK_FIRE_COOLDOWN_TICKS
+		p["grenade_ammo"] = p["grenade_ammo"] - 1
+		grenades.append({
+			"x": tank["x"], "y": tank["y"],
+			"vx": Fixed.mul(p["aim_x"], SHELL_SPEED),
+			"vy": Fixed.mul(p["aim_y"], SHELL_SPEED),
+			"z": 0, "zv": SHELL_ZVEL, "owner": player_index, "shell": true,
+		})
+
+	# Treads: crush infantry, mint coin.
+	for e in enemies:
+		if e["alive"] and _dist_lte(tank["x"], tank["y"], e["x"], e["y"], TANK_CRUSH_RADIUS):
+			_kill_enemy(e)
+
+
+func _dismount(p: Dictionary, tank: Dictionary) -> void:
+	tank["occupant"] = -1
+	p["in_tank"] = -1
+	p["y"] = tank["y"] + 24 * F_ONE
+	if tank["burning"]:
+		p["boost_ticks"] = BAIL_BOOST_TICKS   # bailing gets the speed boost
+	_clamp_actor(p)
+
+
+func _step_tanks() -> void:
+	for tank in tanks:
+		if not tank["alive"]:
+			continue
+		tank["fire_cd"] = maxi(0, tank["fire_cd"] - 1)
+
+		if tank["occupant"] >= 0 and not tank["burning"]:
+			tank["fuel"] = tank["fuel"] - 1
+			if tank["fuel"] <= 0:
+				_ignite_tank(tank)
+
+		if tank["burning"]:
+			# Kamikaze verb: a burning tank driven into a bunker detonates it.
+			# The driver is thrown clear (the cinematic leap) with the boost.
+			for bk in bunkers:
+				if bk["alive"] and _point_in_aabb_expanded(tank["x"], tank["y"], bk, TANK_KAMIKAZE_PAD):
+					bk["alive"] = false
+					war_chest += COIN_BUNKER * 2
+					score += COIN_BUNKER * 20
+					if tank["occupant"] >= 0:
+						var driver := players[tank["occupant"]]
+						_dismount(driver, tank)
+					_detonate_tank(tank)
+					break
+			if not tank["alive"]:
+				continue
+			tank["burn_ticks"] = tank["burn_ticks"] - 1
+			if tank["burn_ticks"] <= 0:
+				# Bail window expired: anyone still inside goes with it.
+				if tank["occupant"] >= 0:
+					_kill_player(players[tank["occupant"]])
+					tank["occupant"] = -1
+				_detonate_tank(tank)
+
+
+func _ignite_tank(tank: Dictionary) -> void:
+	if not tank["burning"]:
+		tank["burning"] = true
+		tank["burn_ticks"] = TANK_BAIL_TICKS
+
+
+func _detonate_tank(tank: Dictionary) -> void:
+	tank["alive"] = false
+	tank["occupant"] = -1
+	_explode(tank["x"], tank["y"])
+
+
+# --- Projectiles ---
 
 func _step_bullets() -> void:
 	for i in range(bullets.size() - 1, -1, -1):
@@ -239,6 +456,10 @@ func _step_bullets() -> void:
 					_kill_enemy(e)
 					dead = true
 					break
+		if not dead and not observer.is_empty():
+			if _dist_lte(b["x"], b["y"], observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
+				_kill_observer()
+				dead = true
 		if dead:
 			bullets.remove_at(i)
 
@@ -256,6 +477,7 @@ func _step_grenades() -> void:
 
 
 func _explode(x: int, y: int) -> void:
+	events.append({"t": "explosion", "x": x, "y": y})
 	for e in enemies:
 		if e["alive"] and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
 			_kill_enemy(e)
@@ -264,10 +486,13 @@ func _explode(x: int, y: int) -> void:
 			bk["alive"] = false
 			war_chest += COIN_BUNKER
 			score += COIN_BUNKER * 10
+	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, GRENADE_RADIUS):
+		_kill_observer()
 
 
 func _kill_enemy(e: Dictionary) -> void:
 	e["alive"] = false
+	events.append({"t": "kill", "x": e["x"], "y": e["y"]})
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	war_chest += coin
 	score += coin * 10
@@ -277,6 +502,8 @@ func _kill_enemy(e: Dictionary) -> void:
 			"kind": rng.range_i(0, 1),   # 0 = Ammo Cache, 1 = Grenade Crate
 		})
 
+
+# --- Enemies / bunkers / spawner ---
 
 func _step_enemies() -> void:
 	for i in range(enemies.size() - 1, -1, -1):
@@ -333,6 +560,20 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 	enemies.append({"x": x, "y": y, "alive": true, "elite": elite})
 
 
+# --- Gates ---
+
+func _step_gates() -> void:
+	for g in gates:
+		if g["open"]:
+			continue
+		if not g["b1"]["alive"] and not g["b2"]["alive"]:
+			g["open"] = true
+			last_gate_y = g["y"]
+			events.append({"t": "gate_open", "x": 320 * F_ONE, "y": g["y"]})
+
+
+# --- Camera & world streaming ---
+
 func _step_camera() -> void:
 	# Ratchet: follows the highest (most advanced) alive player, never scrolls back.
 	var focus := 0
@@ -341,22 +582,108 @@ func _step_camera() -> void:
 		if p["alive"] and (not found or p["y"] < focus):
 			focus = p["y"]
 			found = true
-	if not found:
-		return
-	var desired := focus - CAMERA_LEAD
-	if desired < camera_top:
-		camera_top = desired
-	# Lay bunkers ahead of the scroll, alternating flanks — the P0 "level".
-	while _next_bunker_y > camera_top - VIEW_H:
-		var flank := (absi(_next_bunker_y / (500 * F_ONE))) % 2
-		bunkers.append({
-			"x": (120 if flank == 0 else 460) * F_ONE,
-			"y": _next_bunker_y,
-			"alive": true,
-			"spawn_cd": BUNKER_SPAWN_INTERVAL_TICKS,
-		})
-		_next_bunker_y -= 500 * F_ONE
+	if found:
+		var desired := focus - CAMERA_LEAD
+		# Closed gates hold the camera so the arena stays on one screen.
+		for g in gates:
+			if not g["open"] and desired < g["y"] - GATE_CAMERA_PAD:
+				desired = g["y"] - GATE_CAMERA_PAD
+		if desired < camera_top:
+			camera_top = desired
 
+	# Stream the world ahead of the scroll: bunkers between gates, a gate
+	# arena every GATE_SPACING, a parked tank between each pair of gates.
+	while _next_bunker_y > camera_top - 2 * VIEW_H:
+		# Positions that coincide with a gate row are handled by the gate arena.
+		var idx: int = absi(_next_bunker_y / (500 * F_ONE))
+		if idx % 2 == 1:
+			var flank := (idx / 2) % 2
+			bunkers.append(_make_bunker((120 if flank == 0 else 460) * F_ONE, _next_bunker_y))
+		_next_bunker_y -= 500 * F_ONE
+	while _next_gate_y > camera_top - 2 * VIEW_H:
+		var b1 := _make_bunker(180 * F_ONE, _next_gate_y + 50 * F_ONE)
+		var b2 := _make_bunker(412 * F_ONE, _next_gate_y + 50 * F_ONE)
+		bunkers.append(b1)
+		bunkers.append(b2)
+		gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2})
+		_next_gate_y -= GATE_SPACING
+	while _next_tank_y > camera_top - 2 * VIEW_H:
+		tanks.append({
+			"x": 320 * F_ONE, "y": _next_tank_y,
+			"alive": true, "burning": false,
+			"fuel": TANK_FUEL_TICKS, "burn_ticks": 0,
+			"fire_cd": 0, "occupant": -1,
+		})
+		_next_tank_y -= GATE_SPACING
+
+
+func _make_bunker(x: int, y: int) -> Dictionary:
+	return {"x": x, "y": y, "alive": true, "spawn_cd": BUNKER_SPAWN_INTERVAL_TICKS}
+
+
+# --- Mortar Observer ---
+
+func _step_observer() -> void:
+	# Stall detection runs after the camera step: no advance this tick = stall.
+	var any_alive := false
+	for p in players:
+		if p["alive"]:
+			any_alive = true
+			break
+	if camera_top < _prev_camera_top:
+		stall_ticks = 0
+	elif any_alive:
+		stall_ticks += 1
+
+	if observer.is_empty():
+		if stall_ticks >= OBSERVER_STALL_TICKS:
+			observer = {
+				"x": rng.range_i(60, 580) * F_ONE,
+				"strike_cd": OBSERVER_STRIKE_CD_TICKS,
+				"spawn_cam": camera_top,
+			}
+	else:
+		# Pushing well past the observer despawns him (pressure released).
+		if camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
+			observer = {}
+			strikes.clear()
+			stall_ticks = 0
+		else:
+			observer["strike_cd"] = observer["strike_cd"] - 1
+			if observer["strike_cd"] <= 0:
+				observer["strike_cd"] = OBSERVER_STRIKE_CD_TICKS
+				var target := _nearest_alive_player(observer["x"], camera_top + OBSERVER_Y_OFFSET)
+				if not target.is_empty():
+					strikes.append({"x": target["x"], "y": target["y"], "ticks": STRIKE_TELEGRAPH_TICKS})
+
+	# Resolve telegraphed strikes: lethal to players (roll i-frames dodge it),
+	# ignites tanks, harmless to enemy infantry.
+	for i in range(strikes.size() - 1, -1, -1):
+		var s := strikes[i]
+		s["ticks"] = s["ticks"] - 1
+		if s["ticks"] > 0:
+			continue
+		events.append({"t": "explosion", "x": s["x"], "y": s["y"]})
+		for p in players:
+			if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
+					and _dist_lte(s["x"], s["y"], p["x"], p["y"], GRENADE_RADIUS):
+				_kill_player(p)
+		for tank in tanks:
+			if tank["alive"] and _dist_lte(s["x"], s["y"], tank["x"], tank["y"], GRENADE_RADIUS):
+				_ignite_tank(tank)
+		strikes.remove_at(i)
+
+
+func _kill_observer() -> void:
+	events.append({"t": "kill", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET})
+	war_chest += COIN_ELITE * 2
+	score += COIN_ELITE * 20
+	observer = {}
+	strikes.clear()
+	stall_ticks = 0
+
+
+# --- Geometry helpers ---
 
 func _dist_lte(x1: int, y1: int, x2: int, y2: int, r: int) -> bool:
 	var dx := x1 - x2
@@ -379,6 +706,7 @@ func checksum() -> int:
 	## FNV-1a over the full ordered sim state. Bit-identical across platforms
 	## and architectures; the golden values asserted in CI on x86_64 Linux and
 	## Apple Silicon macOS runners are the cross-arch determinism proof.
+	## (Transient view `events` are intentionally excluded.)
 	# FNV-1a offset basis with the top bit dropped — GDScript int literals are
 	# signed 64-bit, and the state is masked to 63 bits each step anyway.
 	var h := 0x4BF29CE484222325
@@ -389,14 +717,28 @@ func checksum() -> int:
 	h = feed.call(war_chest, h)
 	h = feed.call(score, h)
 	h = feed.call(camera_top, h)
+	h = feed.call(last_gate_y, h)
+	h = feed.call(stall_ticks, h)
 	for s in [rng._s0, rng._s1, rng._s2, rng._s3]:
 		h = feed.call(s, h)
 	for p in players:
-		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"], p["fire_cd"], p["broke_timer"]]:
+		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
+				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["boost_ticks"], p["in_tank"]]:
 			h = feed.call(v, h)
-	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups]:
+	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes]:
 		h = feed.call(arrs.size(), h)
 		for d: Dictionary in arrs:
 			h = feed.call(d.get("x", 0), h)
 			h = feed.call(d.get("y", 0), h)
+	h = feed.call(tanks.size(), h)
+	for t in tanks:
+		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:
+			h = feed.call(v, h)
+	h = feed.call(gates.size(), h)
+	for g in gates:
+		h = feed.call(g["y"], h)
+		h = feed.call(int(g["open"]), h)
+	if not observer.is_empty():
+		h = feed.call(observer["x"], h)
+		h = feed.call(observer["strike_cd"], h)
 	return h

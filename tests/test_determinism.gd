@@ -14,13 +14,18 @@ const SEED := 0xDEADBEEF
 ## Golden checksums recorded on first green run (Linux x86_64, Godot 4.6.3).
 ## If these ever change, determinism broke — do NOT re-record without
 ## understanding why. An empty array prints values to record.
+## RE-RECORDED at the P1 phase boundary (2026-07-08): the sim legitimately
+## changed — dodge roll, tank vehicle, Mortar Observer strikes, and zone
+## gates all alter the state stream and the input script now exercises
+## roll/interact. P0 goldens are retired with this note, per the plan's
+## "upgrades/behavior changes only at phase boundaries" policy.
 const GOLDEN: Array[int] = [
-	967805031207683951,
-	4938902845347037019,
-	350628218668459496,
-	1077266616765511997,
-	2355208360061335946,
-	7391595445045929945,
+	3310278622838979121,
+	7282408627998066470,
+	3523138520321241396,
+	4872790277431049417,
+	842717901354625989,
+	8330232999275283171,
 ]
 
 
@@ -36,6 +41,8 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 	inp.fire = (t % 3) != 0
 	inp.grenade = (t % 97) == 0
 	inp.revive = (t % 53) == 0
+	inp.roll = (t % 41) == 0
+	inp.interact = (t % 67) < 2
 	return inp
 
 

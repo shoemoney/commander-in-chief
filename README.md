@@ -33,17 +33,25 @@ runner and must reproduce the same golden checksums as Linux x86_64
 (`tests/test_determinism.gd`). The sim is pure 64-bit integer math, so results are
 bit-identical across architectures by construction.
 
-## Controls (P0 greybox)
+## Controls (P1 greybox)
 
 | Action | Keyboard (P1) | Gamepad |
 |---|---|---|
 | Move | WASD | Left stick |
 | Aim (decoupled) | Arrow keys | Right stick |
-| Fire | Space | RT / R1 |
+| Fire / tank cannon | Space | RT / R1 |
 | Grenade | Shift | L1 |
+| Dodge roll (i-frames) | C | B |
+| Interact (board/exit tank) | F | X |
 | Revive (spend War Chest) | E | Y |
 | Toggle 2-player local | F2 | — |
 | Restart | R | — |
+
+P1 systems: enterable tank (fuel clock, grenade-ammo cannon, crush, burning
+bail window, kamikaze-a-bunker), the Mortar Observer who shells you for
+stalling (kill him or push forward), zone gates every 1000 units that open
+when their arena bunkers fall and become your broke-respawn checkpoint, and
+a view-side feel stack (trauma shake, explosion hit-stop, kill flash).
 
 ## Headless test suite
 
@@ -52,9 +60,11 @@ godot --headless --path . --import      # first time only
 godot --headless --path . -s res://tests/run_tests.gd
 ```
 
-20 test methods / 560+ assertions: fixed-point math, seeded RNG streams, the 1986
+35 test methods / 610 assertions: fixed-point math, seeded RNG streams, the 1986
 mechanic grammar (grenades-vs-armor, one-hit death + ammo restore, ratchet camera,
 elite drops), the War Chest economy (escalating revives, solo pricing, broke fallback),
+the tank (board/crush/shells/fuel/bail/kamikaze), the Mortar Observer (stall spawn,
+tracked strikes, roll i-frames, cancel-on-kill), zone gates (block, open, checkpoint),
 and replay determinism against committed golden checksums.
 
 ## Layout
