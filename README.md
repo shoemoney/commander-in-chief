@@ -53,6 +53,15 @@ stalling (kill him or push forward), zone gates every 1000 units that open
 when their arena bunkers fall and become your broke-respawn checkpoint, and
 a view-side feel stack (trauma shake, explosion hit-stop, kill flash).
 
+P2 systems: rivers with dry fords (wading halves speed, no rolling, tanks
+walled out) hiding submerged frogmen that only grenades can kill until they
+surface to lunge; the **Bridge Gunship** mini-boss holding every 3rd gate
+(strafe sprays + mortar volleys; bullets chip it, grenades chunk it); and
+`src/net/lockstep.gd` — the transport-agnostic deterministic lockstep core
+(3-tick input delay, per-second checksum exchange, desync detection) proven
+by a two-sim loopback test over a jittery fake wire. Steam Networking
+Messages plugs into it later without touching the loop.
+
 ## Headless test suite
 
 ```sh
@@ -60,12 +69,17 @@ godot --headless --path . --import      # first time only
 godot --headless --path . -s res://tests/run_tests.gd
 ```
 
-35 test methods / 610 assertions: fixed-point math, seeded RNG streams, the 1986
+50 test methods / 687 assertions: fixed-point math, seeded RNG streams, the 1986
 mechanic grammar (grenades-vs-armor, one-hit death + ammo restore, ratchet camera,
 elite drops), the War Chest economy (escalating revives, solo pricing, broke fallback),
 the tank (board/crush/shells/fuel/bail/kamikaze), the Mortar Observer (stall spawn,
 tracked strikes, roll i-frames, cancel-on-kill), zone gates (block, open, checkpoint),
-and replay determinism against committed golden checksums.
+water rules (half speed, no roll, tank walls, frogman submersion), the Bridge Gunship
+(chip/chunk damage, patterns, gate key), lockstep netcode (loopback identity, stall
+semantics, desync detection), and replay determinism against committed golden checksums.
+
+Note: after pulling new `class_name` scripts, run `--import` once before the test
+suite — Godot's global class cache must pick them up (CI already does this).
 
 ## Layout
 

@@ -74,6 +74,28 @@ const OBSERVER_Y_OFFSET := 14 * F_ONE
 const GATE_SPACING := 1000 * F_ONE
 const GATE_BLOCK_PAD := 14 * F_ONE
 const GATE_CAMERA_PAD := 60 * F_ONE
+# Water: rivers between gate arenas. Wading halves speed, disables the roll,
+# and walls out tanks; submerged frogmen answer only to grenades (1986 rule).
+const WATER_H := 80 * F_ONE
+const FORD_HALF_W := 32 * F_ONE
+const FROGMAN_NOTICE_RADIUS := 60 * F_ONE
+const FROGMAN_CALM_RADIUS := 100 * F_ONE
+const FROGMAN_LUNGE_SPEED := 3 * F_ONE
+const FROGMAN_LUNGE_TICKS := 45
+# Bridge Gunship: every 3rd gate is a bridge boss fight. Bullets chip it,
+# grenades chunk it; strafe sprays and mortar volleys alternate.
+const BOSS_GATE_EVERY := 3
+const BOSS_HP := 40
+const BOSS_GRENADE_DAMAGE := 8
+const BOSS_HIT_RADIUS := 20 * F_ONE
+const BOSS_SPEED := 2 * F_ONE
+const BOSS_Y_OFFSET := 40 * F_ONE
+const BOSS_CYCLE_TICKS := 360
+const BOSS_SPRAY_INTERVAL_TICKS := 12
+const BOSS_BOUNTY := COIN_BUNKER * 4
+const ENEMY_BULLET_SPEED := 3 * F_ONE
+const ENEMY_BULLET_TTL_TICKS := 180
+const ENEMY_BULLET_HIT_RADIUS := 8 * F_ONE
 
 var tick_count: int = 0
 var rng: SimRng
@@ -86,6 +108,8 @@ var pickups: Array[Dictionary] = []
 var tanks: Array[Dictionary] = []
 var gates: Array[Dictionary] = []
 var strikes: Array[Dictionary] = []
+var waters: Array[Dictionary] = []
+var enemy_bullets: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
 var score: int = 0
@@ -99,6 +123,8 @@ var _spawn_counter: int = 0
 var _next_bunker_y: int = 0
 var _next_gate_y: int = 0
 var _next_tank_y: int = 0
+var _next_water_y: int = 0
+var _gate_counter: int = 0
 var _prev_camera_top: int = 0
 
 
@@ -109,6 +135,7 @@ func _init(seed_value: int, player_count: int) -> void:
 	_next_bunker_y = -(500 * F_ONE)
 	_next_gate_y = -GATE_SPACING
 	_next_tank_y = -(750 * F_ONE)
+	_next_water_y = -(1500 * F_ONE)
 	for i in player_count:
 		players.append({
 			"x": (280 + i * 80) * F_ONE,
@@ -147,10 +174,12 @@ func step(inputs: Array) -> void:
 	_step_players(inputs)
 	_step_tanks()
 	_step_bullets()
+	_step_enemy_bullets()
 	_step_grenades()
 	_step_enemies()
 	_step_bunkers()
 	_step_spawner()
+	_step_boss()
 	_step_gates()
 	_step_camera()
 	_step_observer()
@@ -183,8 +212,11 @@ func _step_players(inputs: Array) -> void:
 		var mlen := Fixed.length(mx, my)
 		var moving: bool = mlen > F_ONE / 8
 
+		var wading := _in_water(p["x"], p["y"])
+
 		# Dodge roll: locks direction at trigger, 2× speed, i-frames.
-		if inp.roll and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and moving:
+		# You cannot roll while wading (1986 water grammar).
+		if inp.roll and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and moving and not wading:
 			p["roll_ticks"] = ROLL_TICKS
 			p["roll_cd"] = ROLL_CD_TICKS
 			p["roll_dx"] = Fixed.div(mx, mlen)
@@ -197,6 +229,8 @@ func _step_players(inputs: Array) -> void:
 			var spd := PLAYER_SPEED
 			if p["boost_ticks"] > 0:
 				spd = (PLAYER_SPEED * 3) / 2
+			if wading:
+				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
 		_clamp_actor(p)
@@ -235,10 +269,12 @@ func _step_players(inputs: Array) -> void:
 		if interact_edge:
 			_try_board_tank(i, p)
 
-		# Contact with any enemy = one-hit death (roll i-frames protect).
+		# Contact with any enemy = one-hit death (roll i-frames protect;
+		# submerged frogmen must surface before they can strike).
 		if p["roll_ticks"] == 0 and p["in_tank"] < 0:
 			for e in enemies:
-				if e["alive"] and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+				if e["alive"] and not e.get("submerged", false) \
+						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					_kill_player(p)
 					break
 
@@ -348,8 +384,14 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	var my: int = inp.move_y * 256
 	var mlen := Fixed.length(mx, my)
 	if mlen > F_ONE / 8:
+		# Water is a hard wall to armor: revert the move if it would wade.
+		var prev_x: int = tank["x"]
+		var prev_y: int = tank["y"]
 		tank["x"] = tank["x"] + Fixed.mul(Fixed.div(mx, mlen), TANK_SPEED)
 		tank["y"] = tank["y"] + Fixed.mul(Fixed.div(my, mlen), TANK_SPEED)
+		if _in_water(tank["x"], tank["y"]):
+			tank["x"] = prev_x
+			tank["y"] = prev_y
 	_clamp_actor(tank)
 	p["x"] = tank["x"]
 	p["y"] = tank["y"]
@@ -452,10 +494,14 @@ func _step_bullets() -> void:
 					break
 		if not dead:
 			for e in enemies:
-				if e["alive"] and _dist_lte(b["x"], b["y"], e["x"], e["y"], BULLET_HIT_RADIUS):
+				# Bullets pass clean over submerged frogmen — grenades only.
+				if e["alive"] and not e.get("submerged", false) \
+						and _dist_lte(b["x"], b["y"], e["x"], e["y"], BULLET_HIT_RADIUS):
 					_kill_enemy(e)
 					dead = true
 					break
+		if not dead:
+			dead = _bullet_hits_boss(b)
 		if not dead and not observer.is_empty():
 			if _dist_lte(b["x"], b["y"], observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
 				_kill_observer()
@@ -488,6 +534,10 @@ func _explode(x: int, y: int) -> void:
 			score += COIN_BUNKER * 10
 	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, GRENADE_RADIUS):
 		_kill_observer()
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
+			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
 
 
 func _kill_enemy(e: Dictionary) -> void:
@@ -511,6 +561,9 @@ func _step_enemies() -> void:
 		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
 			enemies.remove_at(i)
 			continue
+		if e["kind"] == "frogman":
+			_step_frogman(e)
+			continue
 		var target := _nearest_alive_player(e["x"], e["y"])
 		if target.is_empty():
 			continue
@@ -519,8 +572,35 @@ func _step_enemies() -> void:
 		var dlen := Fixed.length(dx, dy)
 		if dlen > F_ONE:
 			var spd: int = ELITE_SPEED if e["elite"] else ENEMY_SPEED
+			if _in_water(e["x"], e["y"]):
+				spd = spd / 2   # infantry wades too
 			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
 			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+
+
+func _step_frogman(e: Dictionary) -> void:
+	## Lurks submerged (grenades only), surfaces to lunge when prey wades close,
+	## re-submerges when the water calms.
+	var target := _nearest_alive_player(e["x"], e["y"])
+	if target.is_empty():
+		return
+	var dx: int = target["x"] - e["x"]
+	var dy: int = target["y"] - e["y"]
+	if e["submerged"]:
+		if Fixed.mul(dx, dx) + Fixed.mul(dy, dy) <= Fixed.mul(FROGMAN_NOTICE_RADIUS, FROGMAN_NOTICE_RADIUS):
+			e["submerged"] = false
+			e["lunge_ticks"] = FROGMAN_LUNGE_TICKS
+		return
+	var dlen := Fixed.length(dx, dy)
+	if e["lunge_ticks"] > 0:
+		e["lunge_ticks"] = e["lunge_ticks"] - 1
+		if dlen > F_ONE:
+			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), FROGMAN_LUNGE_SPEED)
+			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), FROGMAN_LUNGE_SPEED)
+	elif dlen > FROGMAN_CALM_RADIUS and _in_water(e["x"], e["y"]):
+		e["submerged"] = true
+	else:
+		e["lunge_ticks"] = FROGMAN_LUNGE_TICKS   # rewind for another lunge
 
 
 func _nearest_alive_player(x: int, y: int) -> Dictionary:
@@ -557,7 +637,13 @@ func _step_spawner() -> void:
 
 
 func _spawn_enemy(x: int, y: int, elite: bool) -> void:
-	enemies.append({"x": x, "y": y, "alive": true, "elite": elite})
+	enemies.append({"x": x, "y": y, "alive": true, "elite": elite,
+		"kind": "elite" if elite else "rusher"})
+
+
+func _spawn_frogman(x: int, y: int) -> void:
+	enemies.append({"x": x, "y": y, "alive": true, "elite": false,
+		"kind": "frogman", "submerged": true, "lunge_ticks": 0})
 
 
 # --- Gates ---
@@ -566,10 +652,23 @@ func _step_gates() -> void:
 	for g in gates:
 		if g["open"]:
 			continue
-		if not g["b1"]["alive"] and not g["b2"]["alive"]:
+		var cleared: bool
+		if not g["boss"].is_empty():
+			cleared = not g["boss"]["alive"]
+		else:
+			cleared = not g["b1"]["alive"] and not g["b2"]["alive"]
+		if cleared:
 			g["open"] = true
 			last_gate_y = g["y"]
 			events.append({"t": "gate_open", "x": 320 * F_ONE, "y": g["y"]})
+
+
+func _in_water(x: int, y: int) -> bool:
+	for w in waters:
+		if y >= w["y"] and y <= w["y"] + WATER_H:
+			if x < w["ford_x"] - FORD_HALF_W or x > w["ford_x"] + FORD_HALF_W:
+				return true
+	return false
 
 
 # --- Camera & world streaming ---
@@ -601,11 +700,18 @@ func _step_camera() -> void:
 			bunkers.append(_make_bunker((120 if flank == 0 else 460) * F_ONE, _next_bunker_y))
 		_next_bunker_y -= 500 * F_ONE
 	while _next_gate_y > camera_top - 2 * VIEW_H:
-		var b1 := _make_bunker(180 * F_ONE, _next_gate_y + 50 * F_ONE)
-		var b2 := _make_bunker(412 * F_ONE, _next_gate_y + 50 * F_ONE)
-		bunkers.append(b1)
-		bunkers.append(b2)
-		gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2})
+		_gate_counter += 1
+		if _gate_counter % BOSS_GATE_EVERY == 0:
+			# Bridge boss gate: no arena bunkers — the Gunship IS the lock.
+			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
+				"boss": {"alive": true, "hp": BOSS_HP, "x": 320 * F_ONE,
+					"dir": 1, "phase_t": 0, "gate_y": _next_gate_y}})
+		else:
+			var b1 := _make_bunker(180 * F_ONE, _next_gate_y + 50 * F_ONE)
+			var b2 := _make_bunker(412 * F_ONE, _next_gate_y + 50 * F_ONE)
+			bunkers.append(b1)
+			bunkers.append(b2)
+			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {}})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > camera_top - 2 * VIEW_H:
 		tanks.append({
@@ -615,10 +721,99 @@ func _step_camera() -> void:
 			"fire_cd": 0, "occupant": -1,
 		})
 		_next_tank_y -= GATE_SPACING
+	while _next_water_y > camera_top - 2 * VIEW_H:
+		var water := {"y": _next_water_y, "ford_x": rng.range_i(80, 560) * F_ONE}
+		waters.append(water)
+		# Frogmen lurk in every river.
+		for f in 3:
+			_spawn_frogman(rng.range_i(40, 600) * F_ONE, _next_water_y + rng.range_i(10, 70) * F_ONE)
+		_next_water_y -= GATE_SPACING
 
 
 func _make_bunker(x: int, y: int) -> Dictionary:
 	return {"x": x, "y": y, "alive": true, "spawn_cd": BUNKER_SPAWN_INTERVAL_TICKS}
+
+
+# --- Bridge Gunship boss ---
+
+func _step_boss() -> void:
+	for g in gates:
+		if g["open"] or g["boss"].is_empty() or not g["boss"]["alive"]:
+			continue
+		var boss: Dictionary = g["boss"]
+		# Engage only while the bridge is in view.
+		if g["y"] < camera_top or g["y"] > camera_top + VIEW_H:
+			continue
+		boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
+		var t: int = boss["phase_t"]
+		if t < BOSS_CYCLE_TICKS / 2:
+			# Strafe run: sweep the bridge, spraying aimed-with-spread fire.
+			boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
+			if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
+				boss["dir"] = -boss["dir"]
+				boss["x"] = Fixed.clampi_fixed(boss["x"], 60 * F_ONE, 580 * F_ONE)
+			if t % BOSS_SPRAY_INTERVAL_TICKS == 0:
+				var by: int = boss["gate_y"] - BOSS_Y_OFFSET
+				var target := _nearest_alive_player(boss["x"], by)
+				if not target.is_empty():
+					var dx: int = target["x"] - boss["x"] + rng.range_i(-40, 40) * F_ONE
+					var dy: int = target["y"] - by
+					var dlen := Fixed.length(dx, dy)
+					if dlen > F_ONE:
+						enemy_bullets.append({
+							"x": boss["x"], "y": by,
+							"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
+							"vy": Fixed.mul(Fixed.div(dy, dlen), ENEMY_BULLET_SPEED),
+							"ttl": ENEMY_BULLET_TTL_TICKS,
+						})
+		else:
+			# Mortar volley: three tracked strikes, reusing the Observer machinery.
+			if t == 200 or t == 240 or t == 280:
+				var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
+				var target2 := _nearest_alive_player(boss["x"], by2)
+				if not target2.is_empty():
+					strikes.append({"x": target2["x"], "y": target2["y"], "ticks": STRIKE_TELEGRAPH_TICKS})
+
+
+func _bullet_hits_boss(b: Dictionary) -> bool:
+	for g in gates:
+		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
+			continue
+		var boss: Dictionary = g["boss"]
+		if _dist_lte(b["x"], b["y"], boss["x"], boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
+			_damage_boss(boss, 1)
+			return true
+	return false
+
+
+func _damage_boss(boss: Dictionary, amount: int) -> void:
+	boss["hp"] = boss["hp"] - amount
+	if boss["hp"] <= 0 and boss["alive"]:
+		boss["alive"] = false
+		war_chest += BOSS_BOUNTY
+		score += BOSS_BOUNTY * 10
+		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
+		events.append({"t": "explosion", "x": boss["x"], "y": by})
+		events.append({"t": "kill", "x": boss["x"], "y": by})
+
+
+func _step_enemy_bullets() -> void:
+	for i in range(enemy_bullets.size() - 1, -1, -1):
+		var b := enemy_bullets[i]
+		b["x"] = b["x"] + b["vx"]
+		b["y"] = b["y"] + b["vy"]
+		b["ttl"] = b["ttl"] - 1
+		var dead: bool = b["ttl"] <= 0 or b["y"] < camera_top - 40 * F_ONE \
+			or b["y"] > camera_top + 400 * F_ONE or b["x"] < 0 or b["x"] > 640 * F_ONE
+		if not dead:
+			for p in players:
+				if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
+						and _dist_lte(b["x"], b["y"], p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
+					_kill_player(p)
+					dead = true
+					break
+		if dead:
+			enemy_bullets.remove_at(i)
 
 
 # --- Mortar Observer ---
@@ -725,11 +920,16 @@ func checksum() -> int:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["boost_ticks"], p["in_tank"]]:
 			h = feed.call(v, h)
-	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes]:
+	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)
 		for d: Dictionary in arrs:
 			h = feed.call(d.get("x", 0), h)
 			h = feed.call(d.get("y", 0), h)
+	for e in enemies:
+		h = feed.call(int(e.get("submerged", false)), h)
+		h = feed.call(e.get("lunge_ticks", 0), h)
+	for w in waters:
+		h = feed.call(w["ford_x"], h)
 	h = feed.call(tanks.size(), h)
 	for t in tanks:
 		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:
@@ -738,6 +938,9 @@ func checksum() -> int:
 	for g in gates:
 		h = feed.call(g["y"], h)
 		h = feed.call(int(g["open"]), h)
+		if not g["boss"].is_empty():
+			for v in [g["boss"]["hp"], g["boss"]["x"], int(g["boss"]["alive"]), g["boss"]["phase_t"], g["boss"]["dir"]]:
+				h = feed.call(v, h)
 	if not observer.is_empty():
 		h = feed.call(observer["x"], h)
 		h = feed.call(observer["strike_cd"], h)

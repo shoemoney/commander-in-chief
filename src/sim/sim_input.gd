@@ -19,3 +19,26 @@ var interact: bool = false
 
 func hash_ints() -> Array[int]:
 	return [move_x, move_y, aim_x, aim_y, int(fire), int(grenade), int(revive), int(roll), int(interact)]
+
+
+func encode() -> Array[int]:
+	## Compact wire format: 4 quantized axes + a button bitmask. Int-only —
+	## this is what lockstep sends and what replays store.
+	var flags := int(fire) | (int(grenade) << 1) | (int(revive) << 2) \
+		| (int(roll) << 3) | (int(interact) << 4)
+	return [move_x, move_y, aim_x, aim_y, flags]
+
+
+static func decode(data: Array) -> SimInput:
+	var inp := SimInput.new()
+	inp.move_x = data[0]
+	inp.move_y = data[1]
+	inp.aim_x = data[2]
+	inp.aim_y = data[3]
+	var flags: int = data[4]
+	inp.fire = (flags & 1) != 0
+	inp.grenade = (flags & 2) != 0
+	inp.revive = (flags & 4) != 0
+	inp.roll = (flags & 8) != 0
+	inp.interact = (flags & 16) != 0
+	return inp

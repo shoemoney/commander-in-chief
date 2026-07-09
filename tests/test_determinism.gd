@@ -14,18 +14,17 @@ const SEED := 0xDEADBEEF
 ## Golden checksums recorded on first green run (Linux x86_64, Godot 4.6.3).
 ## If these ever change, determinism broke — do NOT re-record without
 ## understanding why. An empty array prints values to record.
-## RE-RECORDED at the P1 phase boundary (2026-07-08): the sim legitimately
-## changed — dodge roll, tank vehicle, Mortar Observer strikes, and zone
-## gates all alter the state stream and the input script now exercises
-## roll/interact. P0 goldens are retired with this note, per the plan's
-## "upgrades/behavior changes only at phase boundaries" policy.
+## RE-RECORDED at the P2 session boundary (2026-07-08): water bands with
+## frogmen, the Bridge Gunship boss (every 3rd gate), and enemy bullets all
+## legitimately alter the state stream. P1 goldens retired with this note,
+## per the plan's "behavior changes only at phase boundaries" policy.
 const GOLDEN: Array[int] = [
-	3310278622838979121,
-	7282408627998066470,
-	3523138520321241396,
-	4872790277431049417,
-	842717901354625989,
-	8330232999275283171,
+	4633784459098316027,
+	2420548031558002310,
+	5340588805926256127,
+	6394683348547338884,
+	5750895841541609289,
+	9173744912740942170,
 ]
 
 

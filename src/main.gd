@@ -135,6 +135,13 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 
 func _draw() -> void:
 	draw_rect(Rect2(0, 0, 640, 360), Color(0.10, 0.13, 0.09))
+	# Rivers: band with a dry ford gap.
+	for w in sim.waters:
+		var wy := _to_screen(0, w["y"]).y
+		var wh := SimWorld.WATER_H * PX
+		draw_rect(Rect2(0, wy, 640, wh), Color(0.13, 0.22, 0.30))
+		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
+		draw_rect(Rect2(ford_left, wy, SimWorld.FORD_HALF_W * 2.0 * PX, wh), Color(0.25, 0.23, 0.16))
 	# Gates: closed = solid wall; open = broken stumps at the flanks.
 	for g in sim.gates:
 		var gy := _to_screen(0, g["y"]).y
@@ -178,11 +185,33 @@ func _draw() -> void:
 	for pk in sim.pickups:
 		var c := Color(0.9, 0.75, 0.2) if pk["kind"] == 0 else Color(0.4, 0.8, 0.3)
 		draw_rect(Rect2(_to_screen(pk["x"], pk["y"]) - Vector2(5, 5), Vector2(10, 10)), c)
-	# Enemies.
+	# Enemies (submerged frogmen are just a ripple).
 	for e in sim.enemies:
-		if e["alive"]:
+		if not e["alive"]:
+			continue
+		var epos := _to_screen(e["x"], e["y"])
+		if e["kind"] == "frogman":
+			if e["submerged"]:
+				draw_arc(epos, 5.0, 0, TAU, 12, Color(0.5, 0.75, 0.85, 0.5), 1.5)
+			else:
+				draw_circle(epos, 7.0, Color(0.2, 0.55, 0.5))
+		else:
 			var col := Color(0.85, 0.25, 0.2) if e["elite"] else Color(0.7, 0.5, 0.3)
-			draw_circle(_to_screen(e["x"], e["y"]), 7.0, col)
+			draw_circle(epos, 7.0, col)
+	# Bridge Gunship bosses + HP bars.
+	for g in sim.gates:
+		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
+			continue
+		var boss: Dictionary = g["boss"]
+		var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+		draw_rect(Rect2(bpos - Vector2(18, 8), Vector2(36, 16)), Color(0.45, 0.2, 0.2))
+		draw_rect(Rect2(bpos - Vector2(18, 8), Vector2(36, 16)), Color(0.9, 0.5, 0.4), false, 2.0)
+		draw_line(bpos + Vector2(-22, 0), bpos + Vector2(22, 0), Color(0.3, 0.3, 0.3), 1.0)
+		var frac: float = float(boss["hp"]) / float(SimWorld.BOSS_HP)
+		draw_rect(Rect2(bpos + Vector2(-18, -14), Vector2(36.0 * frac, 3)), Color(0.9, 0.25, 0.2))
+	# Enemy fire.
+	for b in sim.enemy_bullets:
+		draw_circle(_to_screen(b["x"], b["y"]), 2.5, Color(1.0, 0.45, 0.25))
 	# Grenades and tank shells (fake-Z shadow + body).
 	for g in sim.grenades:
 		var base := _to_screen(g["x"], g["y"])
