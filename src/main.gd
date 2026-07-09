@@ -11,6 +11,7 @@ const PX := 1.0 / Fixed.ONE
 
 var sim: SimWorld
 var _two_players := false
+var _endless := false
 # Feel stack v0 (view-only; the sim never sees any of this).
 var _trauma := 0.0
 var _hitstop_frames := 0
@@ -24,7 +25,7 @@ func _ready() -> void:
 
 
 func _reset() -> void:
-	sim = SimWorld.new(0xC0FFEE, 2 if _two_players else 1)
+	sim = SimWorld.new(0xC0FFEE, 2 if _two_players else 1, "endless" if _endless else "campaign")
 	_trauma = 0.0
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
@@ -34,6 +35,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F2:
 			_two_players = not _two_players
+			_reset()
+		elif event.keycode == KEY_F3:
+			_endless = not _endless
 			_reset()
 		elif event.keycode == KEY_R:
 			_reset()
@@ -62,6 +66,14 @@ func _consume_events() -> void:
 				_flash_alpha = maxf(_flash_alpha, 0.25)
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
+			"vest_break":
+				_flash_alpha = maxf(_flash_alpha, 0.35)
+			"colossus_engage":
+				_trauma = 1.0
+				_hitstop_frames = maxi(_hitstop_frames, 8)
+			"victory":
+				_trauma = 1.0
+				_flash_alpha = 0.6
 
 
 func _update_feel() -> void:
@@ -181,10 +193,30 @@ func _draw() -> void:
 		var op := _to_screen(sim.observer["x"], sim.camera_top + SimWorld.OBSERVER_Y_OFFSET)
 		draw_circle(op, 6.0, Color(0.95, 0.8, 0.2))
 		draw_line(op, op + Vector2(0, -10), Color(0.95, 0.8, 0.2), 2.0)
-	# Pickups.
+	# Pickups (shop crates show a price tag).
 	for pk in sim.pickups:
-		var c := Color(0.9, 0.75, 0.2) if pk["kind"] == 0 else Color(0.4, 0.8, 0.3)
-		draw_rect(Rect2(_to_screen(pk["x"], pk["y"]) - Vector2(5, 5), Vector2(10, 10)), c)
+		var ppos := _to_screen(pk["x"], pk["y"])
+		var c: Color
+		match pk["kind"]:
+			0: c = Color(0.9, 0.75, 0.2)
+			1: c = Color(0.4, 0.8, 0.3)
+			2: c = Color(0.5, 0.6, 0.95)
+			_: c = Color(0.95, 0.4, 0.15)
+		draw_rect(Rect2(ppos - Vector2(5, 5), Vector2(10, 10)), c)
+		if pk.get("cost", 0) > 0:
+			draw_string(ThemeDB.fallback_font, ppos + Vector2(-10, -8), "%d¢" % pk["cost"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.95, 0.9, 0.6))
+	# The Foundry Colossus.
+	if not sim.colossus.is_empty() and sim.colossus["alive"]:
+		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
+		var phase := sim.colossus_phase()
+		var hull := Color(0.32, 0.30, 0.34) if phase < 3 else Color(0.5, 0.25, 0.2)
+		draw_rect(Rect2(cpos - Vector2(30, 22), Vector2(60, 44)), hull)
+		draw_rect(Rect2(cpos - Vector2(30, 22), Vector2(60, 44)), Color(0.75, 0.7, 0.6), false, 2.5)
+		draw_circle(cpos, 8.0, Color(0.85, 0.3, 0.2))
+		var cfrac: float = float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
+		draw_rect(Rect2(Vector2(170, 8), Vector2(300, 6)), Color(0.2, 0.2, 0.2))
+		draw_rect(Rect2(Vector2(170, 8), Vector2(300.0 * cfrac, 6)), Color(0.9, 0.25, 0.2))
 	# Enemies (submerged frogmen are just a ripple).
 	for e in sim.enemies:
 		if not e["alive"]:
@@ -233,17 +265,31 @@ func _draw() -> void:
 				draw_circle(pos, 8.0, col.lightened(0.5))   # i-frame shimmer
 			else:
 				draw_circle(pos, 8.0, col)
+			if p["vest"]:
+				draw_arc(pos, 11.0, 0, TAU, 24, Color(0.6, 0.7, 1.0), 2.0)   # vest ring
 			draw_line(pos, pos + Vector2(p["aim_x"] * PX, p["aim_y"] * PX) * 18.0, col.lightened(0.4), 2.0)
 		else:
 			draw_arc(pos, 9.0, 0, TAU, 24, col.darkened(0.3), 2.0)
 	# Kill flash overlay.
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha))
+	# Victory / Last Stand banners.
+	if sim.victory:
+		draw_rect(Rect2(160, 150, 320, 60), Color(0, 0, 0, 0.7))
+		draw_string(ThemeDB.fallback_font, Vector2(238, 186), "V I C T O L Y !",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.3))
+	elif sim.last_stand:
+		draw_string(ThemeDB.fallback_font, Vector2(250, 350), "LAST STAND — NO REVIVES",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
 
 
 func _update_hud() -> void:
 	var lines: Array[String] = []
-	lines.append("WAR CHEST %d   SCORE %d   DIST %dm" % [sim.war_chest, sim.score, -Fixed.to_int(sim.camera_top) / 10])
+	if sim.mode == "endless":
+		var wave_state := "INTERMISSION %ds — SHOP OPEN" % [sim.intermission_ticks / 60] if sim.intermission_ticks > 0 else "WAVE %d" % sim.wave
+		lines.append("ENDLESS WAR — %s   CHEST %d   SCORE %d" % [wave_state, sim.war_chest, sim.score])
+	else:
+		lines.append("WAR CHEST %d   SCORE %d   DIST %dm" % [sim.war_chest, sim.score, -Fixed.to_int(sim.camera_top) / 10])
 	for i in sim.players.size():
 		var p := sim.players[i]
 		if not p["alive"]:

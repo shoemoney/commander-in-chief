@@ -74,6 +74,30 @@ const OBSERVER_Y_OFFSET := 14 * F_ONE
 const GATE_SPACING := 1000 * F_ONE
 const GATE_BLOCK_PAD := 14 * F_ONE
 const GATE_CAMERA_PAD := 60 * F_ONE
+# Flak Vest: absorbs exactly one hit, then a mercy window.
+const VEST_IFRAME_TICKS := 90
+# Endless War: escalating waves with a between-wave War Chest shop.
+const WAVE_BASE_ENEMIES := 4
+const WAVE_ENEMIES_PER_WAVE := 2
+const WAVE_SPAWN_INTERVAL_TICKS := 20
+const WAVE_INTERMISSION_TICKS := 300
+const SHOP_AMMO_COST := 30
+const SHOP_VEST_COST := 60
+const SHOP_AIRSTRIKE_COST := 100
+# Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
+# it advances DOWN the map at the players. Armor: grenades only. Three
+# phases by HP thirds. Engaging it triggers the Last Stand rule: no more
+# War Chest revives; on victory the remaining chest converts to score.
+const FINAL_GATE_INDEX := 5
+const COLOSSUS_HP := 60
+const COLOSSUS_GRENADE_DAMAGE := 4
+const COLOSSUS_SPEED := F_ONE / 2
+const COLOSSUS_HIT_RADIUS := 34 * F_ONE
+const COLOSSUS_CRUSH_RADIUS := 26 * F_ONE
+const COLOSSUS_SPRAY_CD_TICKS := 30
+const COLOSSUS_VOLLEY_CD_TICKS := 120
+const COLOSSUS_SPAWN_CD_TICKS := 90
+const SUPPLY_DROP_INTERVAL_TICKS := 300
 # Water: rivers between gate arenas. Wading halves speed, disables the roll,
 # and walls out tanks; submerged frogmen answer only to grenades (1986 rule).
 const WATER_H := 80 * F_ONE
@@ -116,6 +140,16 @@ var score: int = 0
 var camera_top: int = 0
 var last_gate_y: int = 0          # 0 = no checkpoint yet (sentinel)
 var stall_ticks: int = 0
+var mode: String = "campaign"     # "campaign" | "endless"
+var wave: int = 0
+var wave_pending: int = 0
+var wave_spawn_cd: int = 0
+var intermission_ticks: int = 0
+var colossus: Dictionary = {}
+var last_stand: bool = false
+var victory: bool = false
+var _supply_cd: int = 0
+var _world_ended: bool = false    # final gate streamed; no more world
 ## Transient per-tick view events ({"t": "explosion"|"kill"|"gate_open", "x", "y"}).
 ## Derived from state transitions; cleared every step; excluded from checksums.
 var events: Array[Dictionary] = []
@@ -128,7 +162,8 @@ var _gate_counter: int = 0
 var _prev_camera_top: int = 0
 
 
-func _init(seed_value: int, player_count: int) -> void:
+func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -> void:
+	mode = game_mode
 	rng = SimRng.new(seed_value)
 	camera_top = -VIEW_H
 	_prev_camera_top = camera_top
@@ -152,6 +187,8 @@ func _init(seed_value: int, player_count: int) -> void:
 			"boost_ticks": 0,
 			"in_tank": -1,
 			"interact_prev": false,
+			"vest": false,
+			"hurt_iframes": 0,
 		})
 
 
@@ -178,11 +215,15 @@ func step(inputs: Array) -> void:
 	_step_grenades()
 	_step_enemies()
 	_step_bunkers()
-	_step_spawner()
-	_step_boss()
-	_step_gates()
-	_step_camera()
-	_step_observer()
+	if mode == "endless":
+		_step_waves()
+	else:
+		_step_spawner()
+		_step_boss()
+		_step_colossus()
+		_step_gates()
+		_step_camera()
+		_step_observer()
 
 
 # --- Players ---
@@ -195,6 +236,7 @@ func _step_players(inputs: Array) -> void:
 		p["grenade_cd"] = maxi(0, p["grenade_cd"] - 1)
 		p["roll_cd"] = maxi(0, p["roll_cd"] - 1)
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
+		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
 
@@ -275,19 +317,30 @@ func _step_players(inputs: Array) -> void:
 			for e in enemies:
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
-					_kill_player(p)
+					_hurt_player(p)
 					break
 
-		# Pickups.
+		# Pickups. Shop crates carry a price paid from the shared War Chest;
+		# an unaffordable crate stays on the ground.
 		if p["alive"]:
 			for k in range(pickups.size() - 1, -1, -1):
 				var pk := pickups[k]
-				if _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
-					if pk["kind"] == 0:
+				if not _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
+					continue
+				var cost: int = pk.get("cost", 0)
+				if cost > 0 and war_chest < cost:
+					continue
+				war_chest -= cost
+				match pk["kind"]:
+					0:
 						p["mg_ammo"] = mini(MG_AMMO_MAX, p["mg_ammo"] + 30)
-					else:
+					1:
 						p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 4)
-					pickups.remove_at(k)
+					2:
+						p["vest"] = true
+					3:
+						_fire_mission()
+				pickups.remove_at(k)
 
 
 func _clamp_actor(p: Dictionary) -> void:
@@ -300,6 +353,9 @@ func _clamp_actor(p: Dictionary) -> void:
 
 
 func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
+	# Last Stand: past the final gate, dead is dead — no timer, no coin reader.
+	if last_stand:
+		return
 	# Broke fallback: if nobody can afford a revive, a timer respawns you at
 	# the last opened gate (or the bottom of the screen before any gate).
 	if p["broke_timer"] > 0:
@@ -322,6 +378,10 @@ func _checkpoint_y() -> int:
 func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 	## An alive player revives all dead partners at their side; a dead player
 	## (reviver_index == -1) revives themself. Spends the shared War Chest.
+	## LAST STAND: once the Colossus is engaged, the coin reader is dead —
+	## no revives past the final gate (the arcade's no-continue finale).
+	if last_stand:
+		return
 	for j in players.size():
 		var target := players[j]
 		if target["alive"]:
@@ -346,8 +406,23 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["roll_ticks"] = 0
 	p["boost_ticks"] = 0
 	p["in_tank"] = -1
+	p["vest"] = false                  # death strips upgrades (1986 rule)
+	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = Fixed.clampi_fixed(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
+
+
+func _hurt_player(p: Dictionary) -> void:
+	## Every lethal touch funnels here: the Flak Vest absorbs exactly one hit
+	## (with a mercy window), otherwise it's the 1986 rule — one hit, done.
+	if p["hurt_iframes"] > 0:
+		return
+	if p["vest"]:
+		p["vest"] = false
+		p["hurt_iframes"] = VEST_IFRAME_TICKS
+		events.append({"t": "vest_break", "x": p["x"], "y": p["y"]})
+		return
+	_kill_player(p)
 
 
 func _kill_player(p: Dictionary) -> void:
@@ -356,6 +431,15 @@ func _kill_player(p: Dictionary) -> void:
 	p["broke_timer"] = 0
 	p["in_tank"] = -1
 	events.append({"t": "kill", "x": p["x"], "y": p["y"]})
+
+
+func _fire_mission() -> void:
+	## The screen-clear: wipes every surfaced enemy. Spares the submerged
+	## (1986 rule) and armor (bosses, bunkers).
+	events.append({"t": "explosion", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+	for e in enemies:
+		if e["alive"] and not e.get("submerged", false):
+			_kill_enemy(e)
 
 
 # --- Tank ---
@@ -538,6 +622,10 @@ func _explode(x: int, y: int) -> void:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
 				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
+	# The Colossus is pure armor: grenades are the only thing it respects.
+	if not colossus.is_empty() and colossus["alive"] \
+			and _dist_lte(x, y, colossus["x"], colossus["y"], GRENADE_RADIUS + COLOSSUS_HIT_RADIUS):
+		_damage_colossus(COLOSSUS_GRENADE_DAMAGE)
 
 
 func _kill_enemy(e: Dictionary) -> void:
@@ -650,8 +738,8 @@ func _spawn_frogman(x: int, y: int) -> void:
 
 func _step_gates() -> void:
 	for g in gates:
-		if g["open"]:
-			continue
+		if g["open"] or g.get("final", false):
+			continue   # the final gate is opened by the Colossus's death alone
 		var cleared: bool
 		if not g["boss"].is_empty():
 			cleared = not g["boss"]["alive"]
@@ -699,8 +787,14 @@ func _step_camera() -> void:
 			var flank := (idx / 2) % 2
 			bunkers.append(_make_bunker((120 if flank == 0 else 460) * F_ONE, _next_bunker_y))
 		_next_bunker_y -= 500 * F_ONE
-	while _next_gate_y > camera_top - 2 * VIEW_H:
+	while _next_gate_y > camera_top - 2 * VIEW_H and not _world_ended:
 		_gate_counter += 1
+		if _gate_counter == FINAL_GATE_INDEX:
+			# The end of the road: the Foundry. Nothing streams past it.
+			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
+				"boss": {}, "final": true})
+			_world_ended = true
+			break
 		if _gate_counter % BOSS_GATE_EVERY == 0:
 			# Bridge boss gate: no arena bunkers — the Gunship IS the lock.
 			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
@@ -732,6 +826,147 @@ func _step_camera() -> void:
 
 func _make_bunker(x: int, y: int) -> Dictionary:
 	return {"x": x, "y": y, "alive": true, "spawn_cd": BUNKER_SPAWN_INTERVAL_TICKS}
+
+
+# --- Endless War (roguelite survival mode) ---
+
+func _step_waves() -> void:
+	if intermission_ticks > 0:
+		intermission_ticks -= 1
+		if intermission_ticks == 0:
+			# Unbought shop stock is packed up when the next wave lands.
+			for k in range(pickups.size() - 1, -1, -1):
+				if pickups[k].get("cost", 0) > 0:
+					pickups.remove_at(k)
+			_start_wave()
+		return
+	if wave == 0:
+		_start_wave()
+		return
+	# Trickle the wave in from the top edge; every 4th soldier is an elite.
+	if wave_pending > 0:
+		wave_spawn_cd -= 1
+		if wave_spawn_cd <= 0 and enemies.size() < MAX_ENEMIES:
+			wave_spawn_cd = WAVE_SPAWN_INTERVAL_TICKS
+			wave_pending -= 1
+			var x := rng.range_i(24, 616) * F_ONE
+			_spawn_enemy(x, camera_top - 24 * F_ONE, (wave_pending % 4) == 0)
+	elif enemies.is_empty():
+		# Wave cleared: open the shop for the intermission.
+		intermission_ticks = WAVE_INTERMISSION_TICKS
+		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+		var shop_y: int = camera_top + 120 * F_ONE
+		pickups.append({"x": 200 * F_ONE, "y": shop_y, "kind": 0, "cost": SHOP_AMMO_COST})
+		pickups.append({"x": 320 * F_ONE, "y": shop_y, "kind": 2, "cost": SHOP_VEST_COST})
+		pickups.append({"x": 440 * F_ONE, "y": shop_y, "kind": 3, "cost": SHOP_AIRSTRIKE_COST})
+
+
+func _start_wave() -> void:
+	wave += 1
+	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
+	wave_spawn_cd = 1
+	events.append({"t": "wave_start", "x": 320 * F_ONE, "y": camera_top + 40 * F_ONE})
+
+
+# --- Foundry Colossus (the finale) ---
+
+func colossus_phase() -> int:
+	## 1..3 by HP thirds; 0 when absent.
+	if colossus.is_empty() or not colossus["alive"]:
+		return 0
+	var hp: int = colossus["hp"]
+	if hp > (COLOSSUS_HP * 2) / 3:
+		return 1
+	if hp > COLOSSUS_HP / 3:
+		return 2
+	return 3
+
+
+func _step_colossus() -> void:
+	# Engage when the final gate scrolls into view.
+	if colossus.is_empty():
+		for g in gates:
+			if g.get("final", false) and g["y"] >= camera_top and g["y"] <= camera_top + VIEW_H and not victory:
+				colossus = {
+					"alive": true, "hp": COLOSSUS_HP,
+					"x": 320 * F_ONE, "y": g["y"] - 120 * F_ONE,
+					"spray_cd": COLOSSUS_SPRAY_CD_TICKS,
+					"volley_cd": COLOSSUS_VOLLEY_CD_TICKS,
+					"spawn_cd": COLOSSUS_SPAWN_CD_TICKS,
+				}
+				last_stand = true
+				events.append({"t": "colossus_engage", "x": colossus["x"], "y": colossus["y"]})
+				break
+		return
+	if not colossus["alive"]:
+		return
+	var target := _nearest_alive_player(colossus["x"], colossus["y"])
+	if target.is_empty():
+		return
+	var phase := colossus_phase()
+
+	# The scroll inverts: the fortress advances DOWN the map at the players.
+	var descent: int = COLOSSUS_SPEED * (2 if phase == 3 else 1)
+	if colossus["y"] < target["y"] - 60 * F_ONE:
+		colossus["y"] = colossus["y"] + descent
+	var dx: int = target["x"] - colossus["x"]
+	colossus["x"] = colossus["x"] + Fixed.clampi_fixed(dx, -COLOSSUS_SPEED, COLOSSUS_SPEED)
+
+	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: sapper drops.
+	colossus["spray_cd"] = colossus["spray_cd"] - 1
+	if colossus["spray_cd"] <= 0:
+		colossus["spray_cd"] = COLOSSUS_SPRAY_CD_TICKS
+		for spread in [-64, 0, 64]:
+			var bx: int = target["x"] - colossus["x"] + spread * F_ONE / 4
+			var by: int = target["y"] - colossus["y"]
+			var blen := Fixed.length(bx, by)
+			if blen > F_ONE:
+				enemy_bullets.append({
+					"x": colossus["x"], "y": colossus["y"],
+					"vx": Fixed.mul(Fixed.div(bx, blen), ENEMY_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(by, blen), ENEMY_BULLET_SPEED),
+					"ttl": ENEMY_BULLET_TTL_TICKS,
+				})
+	if phase >= 2:
+		colossus["volley_cd"] = colossus["volley_cd"] - 1
+		if colossus["volley_cd"] <= 0:
+			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
+			strikes.append({"x": target["x"], "y": target["y"], "ticks": STRIKE_TELEGRAPH_TICKS})
+	if phase == 3:
+		colossus["spawn_cd"] = colossus["spawn_cd"] - 1
+		if colossus["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
+			colossus["spawn_cd"] = COLOSSUS_SPAWN_CD_TICKS
+			_spawn_enemy(colossus["x"], colossus["y"] + 30 * F_ONE, false)
+
+	# Treads: contact with the crawler is death (vest rules apply).
+	for p in players:
+		if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
+				and _dist_lte(colossus["x"], colossus["y"], p["x"], p["y"], COLOSSUS_CRUSH_RADIUS):
+			_hurt_player(p)
+
+	# Supply drops keep the grenade economy alive during the siege.
+	_supply_cd -= 1
+	if _supply_cd <= 0:
+		_supply_cd = SUPPLY_DROP_INTERVAL_TICKS
+		pickups.append({"x": rng.range_i(60, 580) * F_ONE, "y": camera_top + rng.range_i(200, 320) * F_ONE, "kind": 1})
+
+
+func _damage_colossus(amount: int) -> void:
+	if colossus.is_empty() or not colossus["alive"]:
+		return
+	colossus["hp"] = colossus["hp"] - amount
+	if colossus["hp"] <= 0:
+		colossus["alive"] = false
+		victory = true
+		events.append({"t": "explosion", "x": colossus["x"], "y": colossus["y"]})
+		events.append({"t": "victory", "x": colossus["x"], "y": colossus["y"]})
+		# Last Stand payout: the unspent War Chest converts to score.
+		score += war_chest * 10 + 5000
+		war_chest = 0
+		for g in gates:
+			if g.get("final", false):
+				g["open"] = true
+				last_gate_y = g["y"]
 
 
 # --- Bridge Gunship boss ---
@@ -809,7 +1044,7 @@ func _step_enemy_bullets() -> void:
 			for p in players:
 				if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
 						and _dist_lte(b["x"], b["y"], p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
-					_kill_player(p)
+					_hurt_player(p)
 					dead = true
 					break
 		if dead:
@@ -862,7 +1097,7 @@ func _step_observer() -> void:
 		for p in players:
 			if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
 					and _dist_lte(s["x"], s["y"], p["x"], p["y"], GRENADE_RADIUS):
-				_kill_player(p)
+				_hurt_player(p)
 		for tank in tanks:
 			if tank["alive"] and _dist_lte(s["x"], s["y"], tank["x"], tank["y"], GRENADE_RADIUS):
 				_ignite_tank(tank)
@@ -914,11 +1149,21 @@ func checksum() -> int:
 	h = feed.call(camera_top, h)
 	h = feed.call(last_gate_y, h)
 	h = feed.call(stall_ticks, h)
+	h = feed.call(1 if mode == "endless" else 0, h)
+	h = feed.call(wave, h)
+	h = feed.call(wave_pending, h)
+	h = feed.call(intermission_ticks, h)
+	h = feed.call(int(last_stand), h)
+	h = feed.call(int(victory), h)
+	if not colossus.is_empty():
+		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"])]:
+			h = feed.call(v, h)
 	for s in [rng._s0, rng._s1, rng._s2, rng._s3]:
 		h = feed.call(s, h)
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
-				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["boost_ticks"], p["in_tank"]]:
+				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["boost_ticks"], p["in_tank"],
+				int(p["vest"]), p["hurt_iframes"]]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)
@@ -928,6 +1173,9 @@ func checksum() -> int:
 	for e in enemies:
 		h = feed.call(int(e.get("submerged", false)), h)
 		h = feed.call(e.get("lunge_ticks", 0), h)
+	for pk in pickups:
+		h = feed.call(pk["kind"], h)
+		h = feed.call(pk.get("cost", 0), h)
 	for w in waters:
 		h = feed.call(w["ford_x"], h)
 	h = feed.call(tanks.size(), h)

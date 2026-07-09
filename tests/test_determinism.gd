@@ -14,17 +14,18 @@ const SEED := 0xDEADBEEF
 ## Golden checksums recorded on first green run (Linux x86_64, Godot 4.6.3).
 ## If these ever change, determinism broke — do NOT re-record without
 ## understanding why. An empty array prints values to record.
-## RE-RECORDED at the P2 session boundary (2026-07-08): water bands with
-## frogmen, the Bridge Gunship boss (every 3rd gate), and enemy bullets all
-## legitimately alter the state stream. P1 goldens retired with this note,
-## per the plan's "behavior changes only at phase boundaries" policy.
+## RE-RECORDED at the P3 session boundary (2026-07-08): the hurt pipeline
+## (Flak Vest + post-respawn mercy window), priced pickups, the final gate
+## ending world streaming, and Endless War state all legitimately alter the
+## state stream. P2 goldens retired with this note, per the plan's
+## "behavior changes only at phase boundaries" policy.
 const GOLDEN: Array[int] = [
-	4633784459098316027,
-	2420548031558002310,
-	5340588805926256127,
-	6394683348547338884,
-	5750895841541609289,
-	9173744912740942170,
+	773354317880238666,
+	2508724612177287087,
+	228594662002098860,
+	1235200999049932687,
+	3892702864710552432,
+	4289214714268874591,
 ]
 
 
