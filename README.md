@@ -104,3 +104,11 @@ tools/versions.lock  Pinned engine version + SHA-256
 export_presets.cfg   macOS universal (Apple Silicon native) / Linux / Windows
 docs/PLAN.md         The master build plan (P0–P7)
 ```
+
+## Art
+
+Interim sprite pass uses **Kenney** CC0 assets (kenney.nl) — "Top-down Shooter"
+and "Top-down Tanks" packs (`assets/kenney/`, license included). CC0 = public
+domain, no attribution required (but Kenney is great — consider donating).
+Final art per the master plan is a commissioned pixel-art pass; these sprites
+are the readability layer until then. No generative-AI assets are used.
