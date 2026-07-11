@@ -81,6 +81,11 @@ func _ready() -> void:
 	_menu.main = self
 	$HUD.add_child(_menu)   # after HudIcons: menu draws on top
 	_reset()
+	if OS.has_feature("movie"):
+		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
+		sim.players[0]["vest"] = true       # opening-ambush insurance (trailer only)
+		# NOTE: for HD captures drop an override.cfg with stretch mode
+		# "canvas_items" — the movie recorder sizes itself before _ready runs.
 
 
 func start_game(endless: bool) -> void:
@@ -285,7 +290,27 @@ func _update_feel() -> void:
 	position = shake + _kick
 
 
+static func demo_input(tick: int) -> SimInput:
+	## Scripted "player" for Movie Maker captures (--write-movie): march
+	## north weaving, burst-fire, lob grenades, roll, radio in supplies,
+	## and feed the coin reader if downed. Deterministic against the fixed
+	## seed, so every render is the same playthrough.
+	var inp := SimInput.new()
+	inp.move_y = -256
+	inp.move_x = [0, 256, 0, -256][(tick / 120) % 4]   # wide weave: reach the flank bunkers
+	inp.aim_y = -256
+	inp.aim_x = [0, 150, -150, 0][(tick / 60) % 4]     # sweeping fire
+	inp.fire = (tick % 8) != 7                          # MG never sleeps
+	inp.grenade = (tick % 90) == 70                     # crack armor often
+	inp.roll = (tick % 150) == 90
+	inp.buy = 2 if tick == 880 else 0   # "+4 GRENADES" moment (post-revive)
+	inp.revive = (tick % 90) == 0       # downed: feed the coin reader
+	return inp
+
+
 func _gather_inputs() -> Array:
+	if OS.has_feature("movie"):
+		return [demo_input(sim.tick_count)]
 	var inputs: Array = []
 	var p1 := SimInput.new()
 	var kx := (1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
