@@ -29,13 +29,18 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-11): elites became ranged skirmishers (standoff +
 ## telegraphed wind-up shot; new fire_cd/windup enemy state in checksum) —
 ## design-review iteration 1 behavior change.
+## RE-RECORDED (2026-07-11, design-loop iter 4 balance): revive-cost
+## multiplier soft-capped at 3 deaths (death-spiral guard) — only samples
+## 2-5 moved (the cap bites only once the 2P torture exceeds 3 deaths).
+## Same pass: airstrike screen-clear mints no coin + endless spawn scaling,
+## both campaign-torture-inert, so they did NOT move these values.
 const GOLDEN: Array[int] = [
 	8340780119376351956,
 	6345185127394226400,
-	447115406617573745,
-	753412334351876725,
-	7738070117799955651,
-	586976185476678933,
+	8964335448652624686,
+	565685721398068558,
+	6727277923065113226,
+	4871685255518214231,
 ]
 
 

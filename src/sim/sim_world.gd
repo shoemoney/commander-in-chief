@@ -211,7 +211,9 @@ func is_solo() -> bool:
 
 
 func revive_cost(p: Dictionary) -> int:
-	var cost: int = REVIVE_BASE_COST * (p["deaths"])
+	# Soft-cap the multiplier at 3 deaths: a linear ramp against flat kill
+	# income becomes an unrecoverable death spiral otherwise.
+	var cost: int = REVIVE_BASE_COST * mini(p["deaths"], 3)
 	if is_solo():
 		cost = cost / 2
 	return maxi(cost, REVIVE_BASE_COST / (2 if is_solo() else 1))
@@ -461,11 +463,12 @@ func _kill_player(p: Dictionary) -> void:
 
 func _fire_mission() -> void:
 	## The screen-clear: wipes every surfaced enemy. Spares the submerged
-	## (1986 rule) and armor (bosses, bunkers).
+	## (1986 rule) and armor (bosses, bunkers). Mints NO coin — a 100-coin
+	## buy that reaped a full screen's bounty was a net-positive money printer.
 	events.append({"t": "explosion", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false):
-			_kill_enemy(e)
+			_kill_enemy(e, true)
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -689,13 +692,14 @@ func _explode(x: int, y: int) -> void:
 		_damage_colossus(COLOSSUS_GRENADE_DAMAGE)
 
 
-func _kill_enemy(e: Dictionary) -> void:
+func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
-	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": coin})
-	war_chest += coin
-	score += coin * 10
-	if e["elite"]:
+	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin})
+	if not no_coin:
+		war_chest += coin
+	score += coin * 10   # score always credits — the airstrike still counts
+	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],
 			"kind": rng.range_i(0, 1),   # 0 = Ammo Cache, 1 = Grenade Crate
@@ -952,14 +956,18 @@ func _step_waves() -> void:
 	if wave == 0:
 		_start_wave()
 		return
-	# Trickle the wave in from the top edge; every 4th soldier is an elite.
+	# Trickle the wave in from the top edge. Deeper waves spawn FASTER (down
+	# to 8 ticks) and pack more elites (every 4th → every 2nd by wave 10) so
+	# threat scales, not just raw count. (Endless-only; campaign torture never
+	# reaches here, so campaign goldens are unaffected.)
 	if wave_pending > 0:
 		wave_spawn_cd -= 1
 		if wave_spawn_cd <= 0 and enemies.size() < MAX_ENEMIES:
-			wave_spawn_cd = WAVE_SPAWN_INTERVAL_TICKS
+			wave_spawn_cd = maxi(8, WAVE_SPAWN_INTERVAL_TICKS - wave)
 			wave_pending -= 1
 			var x := rng.range_i(24, 616) * F_ONE
-			_spawn_enemy(x, camera_top - 24 * F_ONE, (wave_pending % 4) == 0)
+			var elite_every: int = maxi(2, 4 - wave / 5)
+			_spawn_enemy(x, camera_top - 24 * F_ONE, (wave_pending % elite_every) == 0)
 	elif enemies.is_empty():
 		# Wave cleared: open the shop for the intermission.
 		intermission_ticks = WAVE_INTERMISSION_TICKS
