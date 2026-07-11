@@ -47,6 +47,15 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch * randf_range(0.94, 1.06))
 
 
+func set_music_intensity(level: float) -> void:
+	## Ease the drum bed toward a target intensity (0 = quiet lull heartbeat,
+	## 1 = full-tilt combat): louder and a touch faster as the fight swells.
+	level = clampf(level, 0.0, 1.0)
+	var target_db := lerpf(-24.0, -9.0, level)
+	_music.volume_db = lerpf(_music.volume_db, target_db, 0.04)
+	_music.pitch_scale = lerpf(_music.pitch_scale, lerpf(0.9, 1.08, level), 0.04)
+
+
 # --- Synthesis toolkit -------------------------------------------------------
 
 static func _nz(i: int) -> float:
@@ -209,6 +218,17 @@ func _synth_all() -> void:
 	s["wave_start"] = _notes([262.0, 330.0], 0.14)
 	s["wave_clear"] = _notes([523.0, 659.0, 784.0], 0.1)
 	s["victory"] = _notes([523.0, 587.0, 659.0, 784.0, 1047.0], 0.16)
+
+	# Heartbeat: lub-dub for the last-stand dread bed.
+	var heart := _buf(0.5)
+	for i in heart.size():
+		var t := float(i) / RATE
+		var v := _sweep(t, 90.0, 45.0, 0.12) * exp(-t * 22.0) * 0.9
+		if t > 0.18:
+			var t2 := t - 0.18
+			v += _sweep(t2, 78.0, 40.0, 0.12) * exp(-t2 * 22.0) * 0.6
+		heart[i] = v
+	s["heartbeat"] = heart
 
 	for k in s:
 		_sounds[k] = _to_wav(s[k])

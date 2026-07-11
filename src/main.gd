@@ -32,6 +32,9 @@ var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
+var _punch := 0.0                # camera zoom-punch on heavy impacts
+var _tension := 0.0              # last-stand dread level (desat/heartbeat)
+var _heart_frame := -100         # heartbeat pacing
 var _hitmarker := 0.0            # reticle confirm pop on a landed hit
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
 var _hit_dir_t := 0.0
@@ -139,6 +142,8 @@ func _reset() -> void:
 	_hit_dir_t = 0.0
 	_record_fired = false
 	_boss_ghost.clear()
+	_punch = 0.0
+	_tension = 0.0
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -230,17 +235,29 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.35)
 				_hitstop_frames = maxi(_hitstop_frames, 4)
 				_rumble = maxf(_rumble, 0.7)
+				_punch = maxf(_punch, 0.05)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
+				var wet: bool = sim._in_water(ev["x"], ev["y"])
 				for d in 8:
 					var da := d * TAU / 8.0 + randf() * 0.3
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.06,
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+						"kind": "splash" if wet else "dust", "rate": 0.06,
 						"vx": cos(da) * randf_range(1.5, 3.0), "vy": sin(da) * randf_range(1.5, 3.0)})
-				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+				if not wet:
+					_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
 			"kill":
 				# No screen flash here: at kill-spam rates it strobes
 				# (photosensitivity); smoke + gib burst + blip + coin carry it.
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+				# Wet kills die in a splash, not a puff — the terrain reacts.
+				if sim._in_water(ev["x"], ev["y"]):
+					_sfx.play("splash", -10.0, 1.2)
+					for d in 6:
+						var wa := d * TAU / 6.0
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "splash", "rate": 0.08,
+							"vx": cos(wa) * randf_range(0.8, 1.8), "vy": sin(wa) * randf_range(0.8, 1.8)})
+				else:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Directional gib/spark burst — the kill hits back.
 				for g in 5:
 					var ga := randf() * TAU
@@ -259,6 +276,7 @@ func _consume_events() -> void:
 				if big:
 					_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
 					_rumble = maxf(_rumble, 0.35)
+					_punch = maxf(_punch, 0.03)
 				if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 						"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
@@ -301,6 +319,7 @@ func _consume_events() -> void:
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
+				_punch = maxf(_punch, 0.08)
 			"victory":
 				_trauma = 1.0
 				_flash_alpha = 0.6
@@ -398,6 +417,8 @@ func _update_feel() -> void:
 	_banner_t = maxf(0.0, _banner_t - 0.008)
 	_hitmarker = maxf(0.0, _hitmarker - 0.12)
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
+	_punch = maxf(0.0, _punch - 0.006)
+	_drive_audio()
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
 		fx["t"] += fx.get("rate", 0.09)
@@ -425,7 +446,34 @@ func _update_feel() -> void:
 	if mag > 0.01:
 		var t := float(Engine.get_physics_frames())
 		shake = Vector2(sin(t * 1.7) * mag, cos(t * 2.3) * mag)
-	position = shake + _kick * _motion
+	# Camera zoom-punch pivots around screen center, not the top-left origin.
+	var pz := 1.0 + _punch * _motion
+	scale = Vector2(pz, pz)
+	position = shake + _kick * _motion + Vector2(320, 180) * (1.0 - pz)
+
+
+func _drive_audio() -> void:
+	# Adaptive score: the drum bed swells with the fight and ducks in lulls;
+	# the last-stand heartbeat bed rises as the finale closes in.
+	var boss_on: bool = not sim.colossus.is_empty() and sim.colossus.get("alive", false)
+	for g in sim.gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"]:
+			boss_on = true
+	var alive_enemies := 0
+	for e in sim.enemies:
+		if e["alive"]:
+			alive_enemies += 1
+	var intensity := minf(1.0, alive_enemies / 12.0) * 0.6 + _trauma * 0.4
+	if boss_on:
+		intensity = maxf(intensity, 0.85)
+	_sfx.set_music_intensity(intensity)
+	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
+	var want := 1.0 if sim.last_stand and not sim.victory else 0.0
+	_tension = lerpf(_tension, want, 0.03)
+	if _tension > 0.3 and Engine.get_physics_frames() - _heart_frame > 55:
+		_heart_frame = Engine.get_physics_frames()
+		_sfx.play("heartbeat", -14.0 + _tension * 6.0, 1.0)
+		_rumble = maxf(_rumble, _tension * 0.4)
 
 
 static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
@@ -1037,6 +1085,8 @@ func _draw_fx() -> void:
 			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(0.5, 0.1, 0.08, 1.0 - t))
 		elif fx["kind"] == "dust":
 			draw_circle(pos, 2.0 + t * 5.0, Color(0.7, 0.65, 0.5, 0.4 * (1.0 - t)))
+		elif fx["kind"] == "splash":
+			draw_arc(pos, 2.0 + t * 6.0, 0, TAU, 14, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)), 1.3)
 
 
 func _draw_scorch() -> void:
@@ -1174,6 +1224,12 @@ func _draw_banners() -> void:
 			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha * _motion))
+	# Last-stand dread: darken the edges + a slow red pulse as the finale
+	# closes in (heartbeat plays under it). Scaled by the reduce-motion toggle.
+	if _tension > 0.02:
+		var hb := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.11)
+		draw_rect(Rect2(0, 0, 640, 360),
+			Color(0.15, 0.0, 0.0, _tension * (0.12 + 0.1 * hb) * _motion))
 	# Directional damage wedge: a red arc on the screen edge pointing at the
 	# threat that hit you — the "where from?" answer in a one-hit game.
 	if _hit_dir_t > 0.01:
