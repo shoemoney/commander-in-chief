@@ -20,6 +20,8 @@ var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 var _sfx := Sfx.new()
+var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
+var _kick := Vector2.ZERO         # directional screen nudge from firing
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
@@ -60,6 +62,8 @@ func _reset() -> void:
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
 	_fx.clear()
+	_recoil = [Vector2.ZERO, Vector2.ZERO]
+	_kick = Vector2.ZERO
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -94,6 +98,27 @@ func _consume_events() -> void:
 			var snd: Array = _EVENT_SOUND[kind]
 			_sfx.play(snd[0], snd[1], snd[2])
 		match kind:
+			"shot":
+				var shooter := sim.players[ev["i"]]
+				var aim := Vector2(shooter["aim_x"], shooter["aim_y"]) * PX
+				_recoil[ev["i"]] -= aim * 2.2
+				_kick -= aim * 0.5
+				_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
+					"y": ev["y"] + int(shooter["aim_y"] * 13),
+					"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
+				var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
+					"rate": 0.055, "spin": randf() * TAU,
+					"vx": perp.x * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4),
+					"vy": perp.y * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4)})
+			"tank_shot":
+				var gunner := sim.players[ev["i"]]
+				var taim := Vector2(gunner["aim_x"], gunner["aim_y"]) * PX
+				_kick -= taim * 2.5
+				_trauma = minf(1.0, _trauma + 0.15)
+				_fx.append({"x": ev["x"] + int(gunner["aim_x"] * 18),
+					"y": ev["y"] + int(gunner["aim_y"] * 18),
+					"t": 0.0, "kind": "muzzle", "rate": 0.22, "a": taim.angle(), "big": true})
 			"explosion":
 				_trauma = minf(1.0, _trauma + 0.35)
 				_hitstop_frames = maxi(_hitstop_frames, 4)
@@ -110,6 +135,8 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.2)
 			"vest_break":
 				_flash_alpha = maxf(_flash_alpha, 0.35)
+			"observer_spawn":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -122,15 +149,24 @@ func _update_feel() -> void:
 	_trauma = maxf(0.0, _trauma - 0.03)
 	_flash_alpha = maxf(0.0, _flash_alpha - 0.08)
 	for i in range(_fx.size() - 1, -1, -1):
-		_fx[i]["t"] += 0.09
-		if _fx[i]["t"] >= 1.0:
+		var fx := _fx[i]
+		fx["t"] += fx.get("rate", 0.09)
+		if fx["kind"] == "casing":
+			fx["x"] += int(fx["vx"] * Fixed.ONE)
+			fx["y"] += int(fx["vy"] * Fixed.ONE)
+			fx["vx"] *= 0.86
+			fx["vy"] *= 0.86
+		if fx["t"] >= 1.0:
 			_fx.remove_at(i)
+	for i in _recoil.size():
+		_recoil[i] *= 0.72
+	_kick *= 0.78
 	var mag := _trauma * _trauma * 6.0
+	var shake := Vector2.ZERO
 	if mag > 0.01:
 		var t := float(Engine.get_physics_frames())
-		position = Vector2(sin(t * 1.7) * mag, cos(t * 2.3) * mag)
-	else:
-		position = Vector2.ZERO
+		shake = Vector2(sin(t * 1.7) * mag, cos(t * 2.3) * mag)
+	position = shake + _kick
 
 
 func _gather_inputs() -> Array:
@@ -194,11 +230,12 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 ]
 
 
-func _spr(name: String, pos: Vector2, angle := 0.0, scale := 1.0, mod := Color.WHITE) -> void:
+func _spr(name: String, pos: Vector2, angle := 0.0, scale := 1.0, mod := Color.WHITE,
+		stretch := 1.0) -> void:
 	var t: Texture2D = Art.tex(name)
 	var s := scale * Art.draw_scale(name)
 	var tint := mod * Art.tint(name)
-	draw_set_transform(pos, angle, Vector2(s, s))
+	draw_set_transform(pos, angle, Vector2(s, s * stretch))
 	var origin := -t.get_size() / 2.0
 	if Art.outlined(name):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
@@ -365,9 +402,21 @@ func _draw_enemies() -> void:
 		if not target.is_empty():
 			face = atan2(float(target["y"] - e["y"]), float(target["x"] - e["x"]))
 		if e["kind"] == "frogman":
+			var st: int = e.get("surface_ticks", 0)
 			if e["submerged"]:
+				# Idle ripple loop so occupied water reads as occupied.
+				var ph := float((Engine.get_physics_frames() + e["x"] / 7919) % 90) / 90.0
+				draw_arc(epos, 4.0 + ph * 9.0, 0, TAU, 16, Color(0.6, 0.8, 0.9, 0.4 * (1.0 - ph)), 1.0)
 				draw_arc(epos, 5.0, 0, TAU, 12, Color(0.6, 0.8, 0.9, 0.55), 1.5)
 				_spr("frogman", epos, face, 0.4, Color(0.5, 0.8, 0.8, 0.35))
+			elif st > 0:
+				# Surfacing telegraph: bold ripple burst + the body rising up.
+				var sfrac := 1.0 - float(st) / float(SimWorld.FROGMAN_SURFACE_TICKS)
+				for k in 2:
+					draw_arc(epos, 6.0 + sfrac * 14.0 + k * 5.0, 0, TAU, 20,
+						Color(0.85, 0.95, 1.0, 0.7 - k * 0.25 - sfrac * 0.3), 2.0)
+				_spr("frogman", epos, face, 0.4 + sfrac * 0.1,
+					Color(0.7, 0.9, 0.95, 0.4 + sfrac * 0.6))
 			else:
 				_spr("frogman", epos, face, 0.5)
 		elif e["elite"]:
@@ -391,8 +440,14 @@ func _draw_gunships() -> void:
 			continue
 		var boss: Dictionary = g["boss"]
 		var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
-		_spr("gunship_body", bpos, PI, 0.8)
-		_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8)
+		# Mortar-phase warning: the hull flashes red while volleys are near
+		# (they land at phase_t 200/240/280 of the 360-tick cycle).
+		var pt: int = boss["phase_t"]
+		var hull_mod := Color.WHITE
+		if pt >= 170 and pt <= 290 and (Engine.get_physics_frames() / 6) % 2 == 0:
+			hull_mod = Color(1.5, 0.6, 0.5)
+		_spr("gunship_body", bpos, PI, 0.8, hull_mod)
+		_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8, hull_mod)
 		# Rotor blur.
 		var rt := float(Engine.get_physics_frames()) * 0.9
 		for i in 2:
@@ -414,6 +469,11 @@ func _draw_colossus() -> void:
 	_spr("colossus_body", cpos, PI, 1.9, mod)
 	_spr("colossus_barrel", cpos + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cpos + Vector2(24, 26), PI + 0.5, 1.3, mod)
+	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
+	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
+	for bx in [-24.0, 24.0]:
+		draw_circle(cpos + Vector2(bx, 34.0), 2.0 + warm * 3.5,
+			Color(1.0, 0.55, 0.15, 0.15 + warm * 0.55))
 	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
 	draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	var cfrac: float = float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
@@ -429,11 +489,17 @@ func _draw_projectiles() -> void:
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
 		_spr("grenade", body, spin, 0.75 if g.get("shell", false) else 0.55)
 	for b in sim.bullets:
-		var a := Vector2(b["vx"], b["vy"]).angle()
-		_spr("bullet", _to_screen(b["x"], b["y"]), a + PI / 2, 0.5)
+		var bpos := _to_screen(b["x"], b["y"])
+		var vel := Vector2(b["vx"], b["vy"]) * PX
+		# Tracer: a fading tail plus a stretched round.
+		draw_line(bpos - vel * 1.8, bpos - vel * 0.4, Color(1.0, 0.9, 0.5, 0.35), 1.2)
+		_spr("bullet", bpos, vel.angle() + PI / 2, 0.42, Color.WHITE, 2.2)
 	for b in sim.enemy_bullets:
 		var a2 := Vector2(b["vx"], b["vy"]).angle()
-		_spr("enemy_bullet", _to_screen(b["x"], b["y"]), a2 + PI / 2, 0.55)
+		var bpos := _to_screen(b["x"], b["y"])
+		# Soft red glow underlay: lethal things must read at a glance.
+		draw_circle(bpos, 5.0, Color(1.0, 0.3, 0.2, 0.28))
+		_spr("enemy_bullet", bpos, a2 + PI / 2, 0.55)
 
 
 func _draw_players() -> void:
@@ -441,15 +507,18 @@ func _draw_players() -> void:
 		var p := sim.players[i]
 		if p["in_tank"] >= 0:
 			continue   # rendered as the tank
-		var pos := _to_screen(p["x"], p["y"])
+		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
 		var tex_name := "player1" if i == 0 else "player2"
 		if p["alive"]:
 			var angle := _aim_angle(p)
 			var mod := Color.WHITE
 			if p["roll_ticks"] > 0:
-				# Roll: spin the sprite through the dodge.
+				# Roll: spin the sprite through the dodge, ghosts trailing it.
 				angle += (1.0 - float(p["roll_ticks"]) / float(SimWorld.ROLL_TICKS)) * TAU
 				mod = Color(1.2, 1.2, 1.2, 0.85)
+				var rdir := Vector2(p["roll_dx"], p["roll_dy"]) * PX
+				_spr(tex_name, pos - rdir * 10.0, angle, 0.52, Color(1, 1, 1, 0.14))
+				_spr(tex_name, pos - rdir * 5.0, angle, 0.52, Color(1, 1, 1, 0.28))
 			elif p["hurt_iframes"] > 0 and (p["hurt_iframes"] / 4) % 2 == 0:
 				mod = Color(1, 1, 1, 0.4)   # mercy-window blink
 			_spr(tex_name, pos, angle, 0.52, mod)
@@ -467,17 +536,41 @@ func _draw_fx() -> void:
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
 			_spr("explosion%d" % frame, pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
-		else:
+		elif fx["kind"] == "alert":
+			# Expanding "spotted!" ring (observer arrival).
+			draw_arc(pos, 6.0 + t * 42.0, 0, TAU, 28, Color(1.0, 0.25, 0.2, 0.8 - t * 0.7), 2.5)
+			draw_arc(pos, 3.0 + t * 26.0, 0, TAU, 24, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6), 1.5)
+		elif fx["kind"] == "muzzle":
+			var sz := (13.0 if fx.get("big", false) else 9.0) * (1.0 - t * 0.6)
+			var dirv := Vector2.from_angle(fx["a"])
+			var pv := Vector2(-dirv.y, dirv.x)
+			var mc := Color(1.0, 0.95, 0.55, 0.95 - t * 0.85)
+			draw_line(pos, pos + dirv * sz * 1.6, mc, 2.5)
+			draw_line(pos - pv * sz * 0.55, pos + pv * sz * 0.55, mc, 2.0)
+			draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.9 - t * 0.8))
+		elif fx["kind"] == "casing":
+			draw_set_transform(pos, fx["spin"] + t * 6.0, Vector2.ONE)
+			draw_rect(Rect2(-1.5, -0.75, 3.0, 1.5), Color(0.95, 0.8, 0.3, 1.0 - t * 0.8))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		elif fx["kind"] == "smoke":
 			_spr("smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
 
 
 func _draw_telegraphs() -> void:
+	# Truthful mortar telegraph: the outer ring IS the kill radius, the disc
+	# filling toward it is the timer, and the last fifth strobes white.
 	for s in sim.strikes:
 		var sp := _to_screen(s["x"], s["y"])
-		var frac: float = float(s["ticks"]) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
-		draw_arc(sp, 6.0 + 22.0 * frac, 0, TAU, 24, Color(1.0, 0.35, 0.2, 0.9), 2.0)
-		draw_line(sp + Vector2(-4, 0), sp + Vector2(4, 0), Color(1.0, 0.35, 0.2), 1.5)
-		draw_line(sp + Vector2(0, -4), sp + Vector2(0, 4), Color(1.0, 0.35, 0.2), 1.5)
+		var frac: float = 1.0 - float(s["ticks"]) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
+		var r := SimWorld.GRENADE_RADIUS * PX
+		var col := Color(1.0, 0.9 - frac * 0.6, 0.2, 0.9)
+		if s["ticks"] <= 10 and (s["ticks"] / 3) % 2 == 0:
+			col = Color(1.0, 1.0, 1.0, 0.95)
+		draw_arc(sp, r, 0, TAU, 32, col, 1.5)
+		draw_circle(sp, r * frac, Color(col.r, col.g, col.b, 0.20))
+		draw_arc(sp, r * frac, 0, TAU, 28, col, 2.0)
+		draw_line(sp + Vector2(-5, 0), sp + Vector2(5, 0), col, 1.5)
+		draw_line(sp + Vector2(0, -5), sp + Vector2(0, 5), col, 1.5)
 
 
 func _draw_banners() -> void:

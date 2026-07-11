@@ -53,6 +53,8 @@ func _advance() -> void:
 		return
 	var sim: SimWorld = shots[current]["build"].call()
 	main.sim = sim
+	if shots[current].has("dress"):
+		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
 	main._update_hud()
 	main.queue_redraw()
 	wait = 6
@@ -66,7 +68,7 @@ func _cam(sim: SimWorld, offset_px: int) -> int:
 
 func _build_shots() -> void:
 	shots = [
-		{"name": "jungle-firefight", "build": _shot_firefight},
+		{"name": "jungle-firefight", "build": _shot_firefight, "dress": _dress_firefight},
 		{"name": "tank-assault", "build": _shot_tank},
 		{"name": "river-crossing", "build": _shot_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},
@@ -98,6 +100,19 @@ func _shot_firefight() -> SimWorld:
 	sim.pickups.append({"x": 380 * F, "y": _cam(sim, 240), "kind": 0})
 	sim.pickups.append({"x": 150 * F, "y": _cam(sim, 200), "kind": 1})
 	return sim
+
+
+func _dress_firefight(m: Node2D) -> void:
+	# Mid-burst garnish: muzzle flash at the gun tip, casings, recoil kick.
+	var sim: SimWorld = m.sim
+	var p := sim.players[0]
+	m._fx.append({"x": p["x"], "y": p["y"] - 13 * F, "t": 0.05, "kind": "muzzle",
+		"rate": 0.34, "a": -PI / 2})
+	m._recoil[0] = Vector2(0, 2.2)
+	for i in 3:
+		m._fx.append({"x": p["x"] + (6 + i * 5) * F, "y": p["y"] + (2 + i) * F,
+			"t": 0.15 + i * 0.22, "kind": "casing", "rate": 0.055,
+			"vx": 1.5, "vy": 0.3, "spin": i * 2.1})
 
 
 func _shot_tank() -> SimWorld:
@@ -144,6 +159,10 @@ func _shot_river() -> SimWorld:
 	var lunger := sim.enemies[1]
 	lunger["submerged"] = false
 	lunger["lunge_ticks"] = 30
+	# Third frogman caught mid-surface: the new telegraph ripple burst.
+	var surfacing := sim.enemies[2]
+	surfacing["submerged"] = false
+	surfacing["surface_ticks"] = 12
 	sim.grenades.append({"x": 200 * F, "y": _cam(sim, 145), "vx": -F, "vy": -2 * F,
 		"z": 12 * F, "zv": F / 4, "owner": 0, "shell": false})
 	sim._spawn_enemy(520 * F, _cam(sim, 60), false)
@@ -155,7 +174,7 @@ func _shot_gunship() -> SimWorld:
 	var sim := SimWorld.new(7, 2)
 	var gy := _cam(sim, 90)
 	var gate := {"y": gy, "open": false, "b1": {}, "b2": {}, "final": false,
-		"boss": {"alive": true, "hp": 23, "x": 360 * F, "dir": 1, "phase_t": 60, "gate_y": gy}}
+		"boss": {"alive": true, "hp": 23, "x": 360 * F, "dir": 1, "phase_t": 210, "gate_y": gy}}
 	sim.gates.append(gate)
 	var p := sim.players[0]
 	p["x"] = 260 * F
