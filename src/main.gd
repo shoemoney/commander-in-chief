@@ -40,6 +40,13 @@ var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
 var _hit_dir_t := 0.0
 var _record_fired := false       # NEW RECORD banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
+var _seen := {}                  # persisted first-time-hint flags
+var _hint_text := ""             # current just-in-time onboarding cue
+var _hint_t := 0.0
+var _run_kills := 0              # this-run tally for the debrief card
+var _run_best_streak := 0
+var _down_frames := 0            # sustained all-players-down → debrief
+var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
@@ -148,6 +155,11 @@ func _reset() -> void:
 	_boss_ghost.clear()
 	_punch = 0.0
 	_tension = 0.0
+	_hint_t = 0.0
+	_run_kills = 0
+	_run_best_streak = 0
+	_down_frames = 0
+	_debrief = false
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -195,6 +207,7 @@ func _consume_events() -> void:
 		match kind:
 			"armor_block":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
+				_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -16.0, 1.7)
@@ -269,6 +282,7 @@ func _consume_events() -> void:
 						"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
 						"spin": randf() * TAU})
 				_hitmarker = 1.0   # kill also confirms on the reticle
+				_run_kills += 1
 				# Kill-streak: rising blip pitch + milestone combo pop.
 				var big: bool = ev.get("coin", 0) >= 25
 				if Engine.get_physics_frames() - _last_kill_frame < 90:
@@ -299,6 +313,7 @@ func _consume_events() -> void:
 				_damage_vignette = 1.0
 				_rumble = maxf(_rumble, 1.0)
 				_mark_hit_dir(ev["x"], ev["y"])
+				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [E] / [Y]")
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 			"roll":
 				# Launch poof grounds the dodge.
@@ -359,9 +374,40 @@ func _load_bests() -> void:
 		best_score = cf.get_value("best", "score", 0)
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
+		_seen = cf.get_value("seen", "hints", {})
+
+
+func _hint(id: String, text: String) -> void:
+	# Fire a just-in-time onboarding cue the FIRST time ever, then never again.
+	if _seen.get(id, false):
+		return
+	_seen[id] = true
+	_hint_text = text
+	_hint_t = 1.0
+	var cf := ConfigFile.new()
+	cf.load("user://ikari_best.cfg")
+	cf.set_value("seen", "hints", _seen)
+	cf.save("user://ikari_best.cfg")
 
 
 func _track_bests() -> void:
+	_run_best_streak = maxi(_run_best_streak, _kill_streak)
+	# Supply-wheel discoverability: the first time the chest can afford the
+	# cheapest buy, nudge the player toward the hold-to-open wheel.
+	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
+		_hint("supply", "HOLD [Q] / BACK FOR THE SUPPLY WHEEL")
+	# After-Action Debrief trigger: victory, or all players down for ~2.5s
+	# with no rescue coming (last stand, or broke with no chest).
+	var any_alive := false
+	for p in sim.players:
+		if p["alive"]:
+			any_alive = true
+	if any_alive:
+		_down_frames = 0
+	else:
+		_down_frames += 1
+	if sim.victory or (_down_frames > 150 and sim.last_stand):
+		_debrief = true
 	# NEW RECORD moment: the instant this run's score passes the standing best.
 	if not _record_fired and best_score > 0 and sim.score > best_score:
 		_record_fired = true
@@ -422,6 +468,7 @@ func _update_feel() -> void:
 	_hitmarker = maxf(0.0, _hitmarker - 0.12)
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
 	_punch = maxf(0.0, _punch - 0.006)
+	_hint_t = maxf(0.0, _hint_t - 0.006)
 	_drive_audio()
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
@@ -1396,9 +1443,41 @@ func _draw_banners() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.92, 0.55))
 		draw_string(vf, Vector2(260, 220), "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.84, 0.74))
+	elif _debrief:
+		# Defeat debrief: the death bookend the victory tally always had —
+		# tells the story of the run and points at 'one more'.
+		var df := ThemeDB.fallback_font
+		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 110, 300, 150), false, Color(1, 1, 1, 0.96))
+		var tw2 := df.get_string_size("K.I.A.", HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+		draw_string(df, Vector2(320 - tw2 / 2.0, 146), "K.I.A.",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.95, 0.4, 0.35))
+		var opened := 0
+		for g in sim.gates:
+			if g["open"]:
+				opened += 1
+		var dist := -Fixed.to_int(sim.camera_top) / 10
+		var lines := ["SECTOR %d/5   %dm PUSHED" % [mini(opened + 1, 5), dist],
+			"SCORE %d   KILLS %d" % [sim.score, _run_kills],
+			"LONGEST STREAK  x%d" % _run_best_streak]
+		if best_score > 0:
+			lines.append("BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""))
+		for li in lines.size():
+			draw_string(df, Vector2(210, 168 + li * 16), lines[li],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.92, 0.85))
+		var rp := 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
+		draw_string(df, Vector2(232, 250), "PRESS  R  — REDEPLOY",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.9, 0.4, rp))
 	elif sim.last_stand:
 		draw_string(ThemeDB.fallback_font, Vector2(250, 350), "LAST STAND — NO REVIVES",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
+	# Just-in-time onboarding cue (first-time-ever, persisted).
+	if _hint_t > 0.02 and not _hint_text.is_empty():
+		var ha := minf(1.0, _hint_t * 3.0)
+		var hf := ThemeDB.fallback_font
+		var hw := hf.get_string_size(_hint_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		draw_rect(Rect2(320 - hw / 2.0 - 8, 92, hw + 16, 18), Color(0.05, 0.07, 0.05, 0.8 * ha))
+		draw_string(hf, Vector2(320 - hw / 2.0, 105), _hint_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.95, 0.7, ha))
 
 
 func _update_hud() -> void:
