@@ -90,6 +90,9 @@ func _ready() -> void:
 	_reset()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
+		# Seed 18 won the 40-seed audition: vest break, two escalating
+		# revives, ends alive — the War Chest pitch in 16 seconds.
+		sim = SimWorld.new(18, 1)
 		sim.players[0]["vest"] = true       # opening-ambush insurance (trailer only)
 		# NOTE: for HD captures drop an override.cfg with stretch mode
 		# "canvas_items" — the movie recorder sizes itself before _ready runs.
