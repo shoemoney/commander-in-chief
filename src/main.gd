@@ -822,7 +822,7 @@ func _draw_threat_edges() -> void:
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
 			continue
-		var sy := (e["y"] - sim.camera_top) * PX
+		var sy: float = (e["y"] - sim.camera_top) * PX
 		if sy <= 364.0:
 			continue
 		var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
