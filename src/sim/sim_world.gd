@@ -587,7 +587,8 @@ func _step_tanks() -> void:
 					bk["alive"] = false
 					war_chest += COIN_BUNKER * 2
 					score += COIN_BUNKER * 20
-					events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2, "y": bk["y"] + BUNKER_H / 2})
+					events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
+						"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER * 2})
 					if tank["occupant"] >= 0:
 						var driver := players[tank["occupant"]]
 						_dismount(driver, tank)
@@ -674,7 +675,8 @@ func _explode(x: int, y: int) -> void:
 			bk["alive"] = false
 			war_chest += COIN_BUNKER
 			score += COIN_BUNKER * 10
-			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2, "y": bk["y"] + BUNKER_H / 2})
+			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
+				"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER})
 	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, GRENADE_RADIUS):
 		_kill_observer()
 	for g in gates:
@@ -689,8 +691,8 @@ func _explode(x: int, y: int) -> void:
 
 func _kill_enemy(e: Dictionary) -> void:
 	e["alive"] = false
-	events.append({"t": "kill", "x": e["x"], "y": e["y"]})
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
+	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": coin})
 	war_chest += coin
 	score += coin * 10
 	if e["elite"]:
@@ -1132,7 +1134,7 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		score += BOSS_BOUNTY * 10
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
-		events.append({"t": "kill", "x": boss["x"], "y": by})
+		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY})
 
 
 func _step_enemy_bullets() -> void:
@@ -1217,7 +1219,8 @@ func _step_observer() -> void:
 
 
 func _kill_observer() -> void:
-	events.append({"t": "kill", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET})
+	events.append({"t": "kill", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET,
+		"coin": COIN_ELITE * 2})
 	war_chest += COIN_ELITE * 2
 	score += COIN_ELITE * 20
 	observer = {}

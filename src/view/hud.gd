@@ -8,6 +8,8 @@ const ICON := 13.0
 const FONT_SIZE := 10
 
 var main: Node2D
+var _prev_chest := 0
+var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 
 
 func _draw() -> void:
@@ -20,9 +22,14 @@ func _draw() -> void:
 		Rect2(2, 2, 262, 26 + sim.players.size() * 16), false, Color(1, 1, 1, 0.9))
 
 	# Row 0: the shared economy — the twist the whole game hangs on.
+	if sim.war_chest > _prev_chest:
+		_chest_pulse = 1.0
+	_prev_chest = sim.war_chest
+	_chest_pulse = maxf(0.0, _chest_pulse - 0.05)
 	var x := 8.0
 	var y := 6.0
-	x = _stat("icon_coin", str(sim.war_chest), x, y)
+	x = _stat("icon_coin", str(sim.war_chest), x, y,
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse))
 	x = _stat("icon_medal", str(sim.score), x, y)
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:

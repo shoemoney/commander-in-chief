@@ -190,6 +190,13 @@ func _consume_events() -> void:
 			"kill":
 				_flash_alpha = maxf(_flash_alpha, 0.2)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+				# Big bounties get a moment; rusher pennies would be spam.
+				if ev.get("coin", 0) >= 25:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+						"rate": 0.025, "text": "+%d¢" % ev["coin"], "col": Color(1.0, 0.9, 0.45)})
+			"bunker_break":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.025, "text": "+%d¢" % ev.get("coin", 0), "col": Color(1.0, 0.9, 0.45)})
 			"player_down":
 				_trauma = minf(1.0, _trauma + 0.5)
 				_hitstop_frames = maxi(_hitstop_frames, 6)
@@ -496,6 +503,10 @@ func _draw_tanks() -> void:
 			_spr("smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
 		elif t["occupant"] < 0:
 			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0)
+		# Cannon reload ring: the trigger isn't dead, it's cycling.
+		if t["occupant"] >= 0 and t["fire_cd"] > 0:
+			var rdy := 1.0 - float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS)
+			draw_arc(c, 17.0, -PI / 2, -PI / 2 + TAU * rdy, 24, Color(1.0, 0.8, 0.4, 0.6), 2.0)
 
 
 func _draw_enemies() -> void:
@@ -599,6 +610,16 @@ func _draw_projectiles() -> void:
 		var spin := float(Engine.get_physics_frames()) * 0.4
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
 		_spr("grenade", body, spin, 0.75 if g.get("shell", false) else 0.55)
+		# Landing marker: the parabola is deterministic — solve where it lands.
+		var zv := float(g["zv"])
+		var grav := float(SimWorld.GRENADE_GRAV)
+		var tt := (zv + sqrt(zv * zv + 2.0 * grav * maxf(0.0, float(g["z"])))) / grav
+		var land := base + Vector2(g["vx"], g["vy"]) * PX * tt
+		var lr := 6.0 if g.get("shell", false) else 4.5
+		var lc := Color(1.0, 0.95, 0.7, 0.55)
+		draw_arc(land, lr, 0, TAU, 16, lc, 1.0)
+		draw_line(land + Vector2(-2.5, 0), land + Vector2(2.5, 0), lc, 1.0)
+		draw_line(land + Vector2(0, -2.5), land + Vector2(0, 2.5), lc, 1.0)
 	for b in sim.bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		var vel := Vector2(b["vx"], b["vy"]) * PX
