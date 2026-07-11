@@ -51,7 +51,16 @@ func _draw() -> void:
 			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
 	Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
-	_text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8))
+	x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+
+	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
+	# can manage — it climbs while the camera isn't advancing, drains on push.
+	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
+		var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
+		_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
+		draw_rect(Rect2(x + 48, y + 3, 46, 7), Color(0.1, 0.09, 0.08))
+		draw_rect(Rect2(x + 48, y + 3, 46 * pf, 7),
+			Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
 
 	# Player rows.
 	var ry := y + 17.0

@@ -121,7 +121,11 @@ func start_game(endless: bool) -> void:
 
 
 func _reset() -> void:
-	sim = SimWorld.new(0xC0FFEE, 2 if _two_players else 1, "endless" if _endless else "campaign")
+	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
+	# positions), but spawn geometry, fords and drop luck differ each run —
+	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
+	var seed_v := 0xC0FFEE if OS.has_feature("movie") else randi()
+	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
 	_trauma = 0.0
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
@@ -683,6 +687,7 @@ func _draw() -> void:
 	_draw_fx()
 	_draw_telegraphs()
 	_draw_threat_edges()
+	_draw_progress_rail()
 	_draw_wheel()
 	_draw_banners()
 
@@ -1041,6 +1046,11 @@ func _draw_players() -> void:
 			continue   # rendered as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
 		var tex_name := "player1" if i == 0 else "player2"
+		# Co-op identity ring under each soldier so you never lose your guy in
+		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
+		if _two_players and p["alive"]:
+			var idc := Color(0.4, 1.0, 0.4, 0.6) if i == 0 else Color(1.0, 0.85, 0.3, 0.6)
+			draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
 		if p["alive"]:
 			var angle := _aim_angle(p)
 			var mod := Color.WHITE
@@ -1087,6 +1097,17 @@ func _draw_players() -> void:
 		else:
 			_spr(tex_name, pos, PI / 2, 0.52, Color(0.35, 0.35, 0.35, 0.6))
 			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8), 1.5)
+			# Downed beacon: when a partner is up, a rising pulse pulls their
+			# eye to the body so the revive has a spatial target.
+			if _two_players and not sim.last_stand:
+				var partner_up := false
+				for q in sim.players.size():
+					if q != i and sim.players[q]["alive"]:
+						partner_up = true
+				if partner_up:
+					var bp := float(Engine.get_physics_frames() % 45) / 45.0
+					draw_arc(pos, 6.0 + bp * 20.0, 0, TAU, 24,
+						Color(0.5, 0.9, 1.0, 0.8 * (1.0 - bp)), 2.0)
 
 
 func _draw_fx() -> void:
@@ -1196,6 +1217,34 @@ func _bar_ghost(key: String, frac: float) -> float:
 		g = frac
 	_boss_ghost[key] = g
 	return g
+
+
+func _draw_progress_rail() -> void:
+	# Right-edge vertical rail: the shape of the campaign run — gates (locked
+	# red / open green), the Foundry finale up top, and a 'you' dot. Answers
+	# 'how far is the next checkpoint' that SECTOR n/5 only says in the abstract.
+	if sim.mode != "campaign":
+		return
+	var rx := 632.0
+	var top := 30.0
+	var bot := 330.0
+	draw_line(Vector2(rx, top), Vector2(rx, bot), Color(0.2, 0.22, 0.18, 0.7), 2.0)
+	# Map world-y over the run span to the rail. Gates stream at -1000/unit.
+	var span := SimWorld.GATE_SPACING * SimWorld.FINAL_GATE_INDEX
+	var to_rail := func(wy: int) -> float:
+		return bot - clampf(float(-wy) / float(span), 0.0, 1.0) * (bot - top)
+	for g in sim.gates:
+		var yy: float = to_rail.call(g["y"])
+		var gc := Color(0.4, 0.9, 0.4) if g["open"] else Color(0.95, 0.3, 0.2)
+		if g.get("final", false):
+			gc = Color(1.0, 0.6, 0.2)
+		draw_circle(Vector2(rx, yy), 3.5, gc)
+	# Finale marker at the top even before it streams in.
+	draw_rect(Rect2(rx - 3, top - 3, 6, 6), Color(1.0, 0.6, 0.2))
+	# You-are-here.
+	var you: float = to_rail.call(sim.camera_top + int(SimWorld.VIEW_H / 2))
+	draw_circle(Vector2(rx, you), 2.5, Color(1, 1, 1))
+	draw_arc(Vector2(rx, you), 4.5, 0, TAU, 12, Color(1, 1, 1, 0.7), 1.0)
 
 
 func _draw_threat_edges() -> void:
