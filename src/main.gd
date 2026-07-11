@@ -473,7 +473,7 @@ func _draw() -> void:
 	for bk in sim.bunkers:
 		if bk["alive"]:
 			var c := _to_screen(bk["x"], bk["y"]) + Vector2(24, 16)
-			_spr("sandbag", c, 0.0, 0.78)
+			_spr("bunker", c, 0.0, 0.78)
 	_draw_pickups()
 	_draw_tanks()
 	_draw_enemies()
@@ -952,6 +952,9 @@ func _draw_banners() -> void:
 		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 115, 300, 135), false,
 			Color(1, 1, 1, 0.96))
 		var vpulse := 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
+		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
+		draw_texture_rect(Art.tex("trophy"),
+			Rect2(Vector2(196.0 - tsz / 2.0, 182.0 - tsz / 2.0), Vector2(tsz, tsz)), false)
 		var tw := vf.get_string_size("V I C T O L Y !", HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
 		draw_string(vf, Vector2(320 - tw / 2.0, 152), "V I C T O L Y !",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.85 * vpulse, 0.3 * vpulse))

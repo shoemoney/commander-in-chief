@@ -15,12 +15,16 @@ const KN := "res://assets/kenney/"
 
 const TEX := {
 	# --- legacy 3D pack Military (top-down bakes) ---
-	"player1": preload(SY + "player1.png"),
-	"player2": preload(SY + "player2.png"),
-	"rusher": preload(SY + "rusher.png"),
-	"elite": preload(SY + "elite.png"),
+	# Cast v2: heroes are regular army (Leader + Soldier_Female), hostiles
+	# are the Insurgent faction — different silhouettes, different wardrobe.
+	"player1": preload(SY + "cast2/hero1.png"),
+	"player2": preload(SY + "cast2/hero2.png"),
+	"rusher": preload(SY + "cast2/insurgent1.png"),
+	"elite": preload(SY + "cast2/insurgent2.png"),
 	"frogman": preload(SY + "frogman.png"),
-	"observer": preload(SY + "observer.png"),
+	"observer": preload(SY + "cast2/observer2.png"),
+	"bunker": preload(SY + "cast2/bunker.png"),
+	"trophy": preload(SY + "cast2/trophy.png"),
 	"tank_body": preload(SY + "tank_body.png"),
 	"tank_barrel": preload(SY + "tank_barrel.png"),
 	"gunship_body": preload(SY + "gunship_body.png"),
@@ -75,8 +79,9 @@ const TEX := {
 ## Per-sprite draw multiplier so a legacy art bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
 const SCALE := {
-	"player1": 0.81, "player2": 0.77, "rusher": 0.77, "elite": 0.77,
-	"frogman": 0.77, "observer": 0.77,
+	# cast2 bakes use a 300px canvas — folded to the old 64px footprints.
+	"player1": 0.30, "player2": 0.24, "rusher": 0.25, "elite": 0.27,
+	"frogman": 0.77, "observer": 0.13, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
 	"sandbag": 0.83, "sandbag_beige": 0.83,
@@ -91,8 +96,14 @@ const UNIT := Color(0.85, 0.81, 0.58)
 const OLIVE_VEH := Color(0.76, 0.85, 0.52)
 const FOLIAGE := Color(0.82, 1.0, 0.66)
 const TINT := {
-	"player1": Color(0.80, 0.87, 0.62), "player2": Color(0.88, 0.78, 0.5),
-	"rusher": UNIT, "elite": UNIT, "frogman": UNIT, "observer": UNIT,
+	# Heroes render bright, not olive-washed — the tan Leader model in the
+	# old jungle tint was literal camouflage (invisible on grass).
+	"player1": Color(1.1, 1.12, 0.95), "player2": Color(1.18, 1.05, 0.85),
+	# Insurgents keep their own dark wardrobe — lifted, not olive-washed,
+	# so the factions never read as the same army.
+	"rusher": Color(1.15, 1.05, 0.9), "elite": Color(1.35, 0.75, 0.7),
+	"frogman": UNIT, "observer": Color(1.15, 1.0, 0.9),
+	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
 	"gunship_body": OLIVE_VEH, "colossus_body": OLIVE_VEH,
 	"sandbag": Color(0.82, 0.88, 0.62), "sandbag_beige": Color(0.88, 0.92, 0.66),
@@ -104,7 +115,7 @@ const TINT := {
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
 const OUTLINE := {
 	"player1": true, "player2": true, "rusher": true, "elite": true,
-	"frogman": true, "observer": true,
+	"frogman": true, "observer": true, "bunker": true,
 	"tank_body": true, "tank_barrel": true, "gunship_body": true,
 	"colossus_body": true, "sandbag": true, "sandbag_beige": true,
 	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
