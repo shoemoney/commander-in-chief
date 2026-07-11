@@ -92,6 +92,7 @@ func _build_shots() -> void:
 		{"name": "victoly", "build": _shot_victoly},
 		{"name": "endless-war-shop", "build": _shot_shop, "dress": _dress_shop},
 		{"name": "title-screen", "build": _shot_firefight, "dress": _dress_title},
+		{"name": "pause-menu", "build": _shot_firefight, "dress": _dress_pause},
 	]
 
 
@@ -297,3 +298,8 @@ func _dress_colossus(m: Node2D) -> void:
 func _dress_title(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.TITLE)
 	m._hud_icons.visible = false
+
+
+func _dress_pause(m: Node2D) -> void:
+	m._menu.open(GameMenu.Mode.PAUSE)
+	m._menu.sel = 4   # RESTART highlighted

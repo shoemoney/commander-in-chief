@@ -31,6 +31,7 @@ var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
+var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
@@ -155,6 +156,7 @@ func _reset() -> void:
 	_boss_ghost.clear()
 	_punch = 0.0
 	_tension = 0.0
+	_heat = [0.0, 0.0]
 	_hint_t = 0.0
 	_run_kills = 0
 	_run_best_streak = 0
@@ -232,6 +234,8 @@ func _consume_events() -> void:
 				var aim := Vector2(shooter["aim_x"], shooter["aim_y"]) * PX
 				_recoil[ev["i"]] -= aim * 2.2
 				_kick -= aim * 0.5
+				if ev["i"] < _heat.size():
+					_heat[ev["i"]] = minf(1.0, _heat[ev["i"]] + 0.09)
 				_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
 					"y": ev["y"] + int(shooter["aim_y"] * 13),
 					"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
@@ -490,6 +494,8 @@ func _update_feel() -> void:
 			_scorch.remove_at(i)
 	for i in _recoil.size():
 		_recoil[i] *= 0.72
+	for i in _heat.size():
+		_heat[i] = maxf(0.0, _heat[i] - 0.02)
 	_kick *= 0.78
 	# Gamepad rumble: one pooled pulse per frame across connected pads.
 	if _rumble > 0.01:
@@ -1083,9 +1089,12 @@ func _draw_projectiles() -> void:
 		if deflect:
 			continue
 		var dir := Vector2(b["vx"], b["vy"]).normalized()
-		# Real tracer rounds: a thin hot streak with a bright head — small,
-		# fast-reading, and impossible to confuse with a person.
-		draw_line(bpos - dir * 7.0, bpos, Color(1.0, 0.8, 0.35, 0.45), 1.2)
+		# Real tracer rounds: a thin hot streak with a bright head. Sustained
+		# fire heats the barrel — tracers shift yellow → white-hot.
+		var owner: int = b.get("owner", 0)
+		var heat: float = _heat[owner] if owner < _heat.size() else 0.0
+		var tail := Color(1.0, 0.8, 0.35, 0.45).lerp(Color(1.0, 0.95, 0.85, 0.6), heat)
+		draw_line(bpos - dir * (7.0 + heat * 3.0), bpos, tail, 1.2)
 		draw_line(bpos - dir * 3.0, bpos, Color(1.0, 0.95, 0.7, 0.95), 1.4)
 		draw_circle(bpos, 1.1, Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
