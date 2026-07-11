@@ -329,7 +329,8 @@ func _consume_events() -> void:
 				_damage_vignette = maxf(_damage_vignette, 0.75)
 				_mark_hit_dir(ev["x"], ev["y"])
 			"wave_start":
-				_show_banner("WAVE %d" % sim.wave)
+				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER"][ev.get("mod", 0)]
+				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
 			"wave_clear":
 				_show_banner("WAVE CLEARED — SHOP OPEN")
 			"observer_spawn":
@@ -339,6 +340,9 @@ func _consume_events() -> void:
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
 				_punch = maxf(_punch, 0.08)
+			"core_open":
+				_show_banner("CORE EXPOSED — OPEN FIRE")
+				_sfx.play("alarm", -6.0, 1.3)
 			"victory":
 				_trauma = 1.0
 				_flash_alpha = 0.6
@@ -1010,7 +1014,13 @@ func _draw_colossus() -> void:
 		draw_circle(cpos + Vector2(bx, 34.0), 2.0 + warm * 3.5,
 			Color(1.0, 0.55, 0.15, 0.15 + warm * 0.55))
 	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
-	draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
+	# Core window: when the plating is retracted, the core glows white-hot and
+	# a 'CORE EXPOSED' ring says 'shoot it NOW' — bullets chip it this beat.
+	if sim.colossus.get("core_open", 0) > 0:
+		draw_circle(cpos, 9.0 + pulse * 4.0, Color(1.0, 0.95, 0.7, 0.9))
+		draw_arc(cpos, 16.0 + pulse * 3.0, 0, TAU, 28, Color(1.0, 1.0, 0.6, 0.9), 2.5)
+	else:
+		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center so the fill never hides under the HUD panel.
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
 	draw_string(ThemeDB.fallback_font, Vector2(172, 326), "FOUNDRY COLOSSUS — PHASE %d/3" % phase,

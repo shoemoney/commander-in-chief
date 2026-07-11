@@ -107,6 +107,11 @@ const COLOSSUS_CRUSH_RADIUS := 26 * F_ONE
 const COLOSSUS_SPRAY_CD_TICKS := 30
 const COLOSSUS_VOLLEY_CD_TICKS := 120
 const COLOSSUS_SPAWN_CD_TICKS := 90
+# Core window: every cycle the plating retracts for a beat during which
+# BULLETS also chip the Colossus — a timing/aggression path for a dry pool.
+const COLOSSUS_CORE_CYCLE_TICKS := 240
+const COLOSSUS_CORE_OPEN_TICKS := 90
+const COLOSSUS_BULLET_DAMAGE := 1
 const SUPPLY_DROP_INTERVAL_TICKS := 300
 # Water: rivers between gate arenas. Wading halves speed, disables the roll,
 # and walls out tanks; submerged frogmen answer only to grenades (1986 rule).
@@ -157,6 +162,7 @@ var mode: String = "campaign"     # "campaign" | "endless"
 var wave: int = 0
 var wave_pending: int = 0
 var wave_spawn_cd: int = 0
+var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter)
 var intermission_ticks: int = 0
 var colossus: Dictionary = {}
 var last_stand: bool = false
@@ -648,6 +654,14 @@ func _step_bullets() -> void:
 					break
 		if not dead:
 			dead = _bullet_hits_boss(b)
+		# Colossus core window: while the plating is retracted, bullets chip it
+		# too (otherwise grenades-only). A timing/aggression path for the finale.
+		if not dead and not colossus.is_empty() and colossus["alive"] \
+				and colossus.get("core_open", 0) > 0 \
+				and _dist_lte(b["x"], b["y"], colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+			_damage_colossus(COLOSSUS_BULLET_DAMAGE)
+			dead = true
 		if not dead and not observer.is_empty():
 			if _dist_lte(b["x"], b["y"], observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
 				_kill_observer()
@@ -963,11 +977,15 @@ func _step_waves() -> void:
 	if wave_pending > 0:
 		wave_spawn_cd -= 1
 		if wave_spawn_cd <= 0 and enemies.size() < MAX_ENEMIES:
-			wave_spawn_cd = maxi(8, WAVE_SPAWN_INTERVAL_TICKS - wave)
+			var interval := maxi(8, WAVE_SPAWN_INTERVAL_TICKS - wave)
+			if wave_mod == 1:   # Blitz: spawns pour in twice as fast
+				interval = maxi(4, interval / 2)
+			wave_spawn_cd = interval
 			wave_pending -= 1
 			var x := rng.range_i(24, 616) * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
-			_spawn_enemy(x, camera_top - 24 * F_ONE, (wave_pending % elite_every) == 0)
+			var is_elite: bool = wave_mod == 2 or (wave_pending % elite_every) == 0
+			_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
 	elif enemies.is_empty():
 		# Wave cleared: open the shop for the intermission.
 		intermission_ticks = WAVE_INTERMISSION_TICKS
@@ -983,7 +1001,18 @@ func _start_wave() -> void:
 	wave += 1
 	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
 	wave_spawn_cd = 1
-	events.append({"t": "wave_start", "x": 320 * F_ONE, "y": camera_top + 40 * F_ONE})
+	# Wave mutators give each wave an identity (and make the shop a counter-
+	# pick). None on the first two waves; then roll one. Endless-only.
+	wave_mod = 0 if wave <= 2 else rng.range_i(0, 3)
+	if wave_mod == 3:
+		# Spotter wave: a Mortar Observer joins the fray.
+		observer = {
+			"x": rng.range_i(60, 580) * F_ONE,
+			"strike_cd": OBSERVER_STRIKE_CD_TICKS,
+			"spawn_cam": camera_top,
+		}
+		events.append({"t": "observer_spawn", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET})
+	events.append({"t": "wave_start", "x": 320 * F_ONE, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
 
 
 # --- Foundry Colossus (the finale) ---
@@ -1011,6 +1040,7 @@ func _step_colossus() -> void:
 					"spray_cd": COLOSSUS_SPRAY_CD_TICKS,
 					"volley_cd": COLOSSUS_VOLLEY_CD_TICKS,
 					"spawn_cd": COLOSSUS_SPAWN_CD_TICKS,
+					"core_cd": COLOSSUS_CORE_CYCLE_TICKS, "core_open": 0,
 				}
 				last_stand = true
 				events.append({"t": "colossus_engage", "x": colossus["x"], "y": colossus["y"]})
@@ -1029,6 +1059,17 @@ func _step_colossus() -> void:
 		colossus["y"] = colossus["y"] + descent
 	var dx: int = target["x"] - colossus["x"]
 	colossus["x"] = colossus["x"] + Fixed.clampi_fixed(dx, -COLOSSUS_SPEED, COLOSSUS_SPEED)
+
+	# Core window cycle: plating retracts (core_open ticks) then re-seals.
+	if colossus["core_open"] > 0:
+		colossus["core_open"] = colossus["core_open"] - 1
+		if colossus["core_open"] == 0:
+			colossus["core_cd"] = COLOSSUS_CORE_CYCLE_TICKS
+	else:
+		colossus["core_cd"] = colossus["core_cd"] - 1
+		if colossus["core_cd"] <= 0:
+			colossus["core_open"] = COLOSSUS_CORE_OPEN_TICKS
+			events.append({"t": "core_open", "x": colossus["x"], "y": colossus["y"]})
 
 	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: sapper drops.
 	colossus["spray_cd"] = colossus["spray_cd"] - 1
@@ -1283,11 +1324,14 @@ func checksum() -> int:
 	h = feed.call(1 if mode == "endless" else 0, h)
 	h = feed.call(wave, h)
 	h = feed.call(wave_pending, h)
+	if mode == "endless":
+		h = feed.call(wave_mod, h)   # endless-only: campaign checksums unchanged
 	h = feed.call(intermission_ticks, h)
 	h = feed.call(int(last_stand), h)
 	h = feed.call(int(victory), h)
 	if not colossus.is_empty():
-		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"])]:
+		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
+				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:
 			h = feed.call(v, h)
 	for s in [rng._s0, rng._s1, rng._s2, rng._s3]:
 		h = feed.call(s, h)
