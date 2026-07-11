@@ -93,6 +93,31 @@ func test_one_hit_death_and_ammo_restore() -> void:
 	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX, "death restores MG ammo")
 
 
+func test_roll_press_buffered_through_cooldown() -> void:
+	# An early roll press (within ROLL_BUFFER_TICKS of cooldown end) must queue
+	# and fire the moment the roll is ready — not be silently dropped.
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	var move := SimInput.new()
+	move.move_x = 256
+	var roll := SimInput.new()
+	roll.move_x = 256
+	roll.roll = true
+	sim.step(_inputs(roll))
+	Runner.T.ok(p["roll_ticks"] > 0, "first roll triggered")
+	while p["roll_cd"] > 5:
+		sim.step(_inputs(move))
+	sim.step(_inputs(roll))   # pressed 4 ticks early: buffered, not rolling yet
+	Runner.T.eq(p["roll_ticks"], 0, "early press does not roll while on cooldown")
+	var fired := false
+	for i in SimWorld.ROLL_BUFFER_TICKS:
+		sim.step(_inputs(move))   # roll released; only the buffer can fire it
+		if p["roll_ticks"] > 0:
+			fired = true
+			break
+	Runner.T.ok(fired, "buffered press fires the roll when the cooldown ends")
+
+
 func test_ratchet_camera_never_scrolls_back() -> void:
 	var sim := SimWorld.new(1, 1)
 	var up := SimInput.new()

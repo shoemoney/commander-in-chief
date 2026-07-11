@@ -46,8 +46,10 @@ const CAMERA_LEAD := 160 * F_ONE
 const BUNKER_W := 48 * F_ONE
 const BUNKER_H := 32 * F_ONE
 # Dodge roll: 0.3 s i-frames, 1.2 s cooldown, 2× speed in the move direction.
+# A press up to ROLL_BUFFER_TICKS early is queued and fires when the roll is ready.
 const ROLL_TICKS := 18
 const ROLL_CD_TICKS := 72
+const ROLL_BUFFER_TICKS := 8
 # Tank: 0.8× player speed, cannon draws from grenade ammo, ~20 s of fuel,
 # guaranteed 3.0 s bail window once burning.
 const TANK_SPEED := (PLAYER_SPEED * 4) / 5
@@ -106,6 +108,9 @@ const FROGMAN_NOTICE_RADIUS := 60 * F_ONE
 const FROGMAN_CALM_RADIUS := 100 * F_ONE
 const FROGMAN_LUNGE_SPEED := 3 * F_ONE
 const FROGMAN_LUNGE_TICKS := 45
+# Surfacing telegraph: the frogman is visible, rooted and harmless (but
+# shootable) for this window before the lunge — one-hit-death fairness.
+const FROGMAN_SURFACE_TICKS := 30
 # Bridge Gunship: every 3rd gate is a bridge boss fight. Bullets chip it,
 # grenades chunk it; strafe sprays and mortar volleys alternate.
 const BOSS_GATE_EVERY := 3
@@ -182,7 +187,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"grenade_ammo": GRENADE_AMMO_MAX,
 			"fire_cd": 0, "grenade_cd": 0,
 			"broke_timer": 0,
-			"roll_ticks": 0, "roll_cd": 0,
+			"roll_ticks": 0, "roll_cd": 0, "roll_buf": 0,
 			"roll_dx": 0, "roll_dy": -F_ONE,
 			"boost_ticks": 0,
 			"in_tank": -1,
@@ -235,6 +240,7 @@ func _step_players(inputs: Array) -> void:
 		p["fire_cd"] = maxi(0, p["fire_cd"] - 1)
 		p["grenade_cd"] = maxi(0, p["grenade_cd"] - 1)
 		p["roll_cd"] = maxi(0, p["roll_cd"] - 1)
+		p["roll_buf"] = maxi(0, p["roll_buf"] - 1)
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
@@ -257,12 +263,17 @@ func _step_players(inputs: Array) -> void:
 		var wading := _in_water(p["x"], p["y"])
 
 		# Dodge roll: locks direction at trigger, 2× speed, i-frames.
-		# You cannot roll while wading (1986 water grammar).
-		if inp.roll and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and moving and not wading:
+		# You cannot roll while wading (1986 water grammar). Presses buffer for
+		# ROLL_BUFFER_TICKS so a slightly-early press still rolls on cd end.
+		if inp.roll:
+			p["roll_buf"] = ROLL_BUFFER_TICKS
+		if p["roll_buf"] > 0 and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and moving and not wading:
+			p["roll_buf"] = 0
 			p["roll_ticks"] = ROLL_TICKS
 			p["roll_cd"] = ROLL_CD_TICKS
 			p["roll_dx"] = Fixed.div(mx, mlen)
 			p["roll_dy"] = Fixed.div(my, mlen)
+			events.append({"t": "roll", "x": p["x"], "y": p["y"], "i": i})
 		if p["roll_ticks"] > 0:
 			p["roll_ticks"] = p["roll_ticks"] - 1
 			p["x"] = p["x"] + Fixed.mul(p["roll_dx"], PLAYER_SPEED * 2)
@@ -288,6 +299,7 @@ func _step_players(inputs: Array) -> void:
 		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
+			events.append({"t": "shot", "x": p["x"], "y": p["y"], "i": i})
 			bullets.append({
 				"x": p["x"], "y": p["y"],
 				"vx": Fixed.mul(p["aim_x"], BULLET_SPEED),
@@ -298,6 +310,7 @@ func _step_players(inputs: Array) -> void:
 		if inp.grenade and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
 			p["grenade_cd"] = GRENADE_COOLDOWN_TICKS
 			p["grenade_ammo"] = p["grenade_ammo"] - 1
+			events.append({"t": "throw", "x": p["x"], "y": p["y"], "i": i})
 			grenades.append({
 				"x": p["x"], "y": p["y"],
 				"vx": Fixed.mul(p["aim_x"], GRENADE_SPEED),
@@ -316,6 +329,7 @@ func _step_players(inputs: Array) -> void:
 		if p["roll_ticks"] == 0 and p["in_tank"] < 0:
 			for e in enemies:
 				if e["alive"] and not e.get("submerged", false) \
+						and e.get("surface_ticks", 0) == 0 \
 						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					_hurt_player(p)
 					break
@@ -340,6 +354,8 @@ func _step_players(inputs: Array) -> void:
 						p["vest"] = true
 					3:
 						_fire_mission()
+				events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
+					"kind": pk["kind"], "cost": cost})
 				pickups.remove_at(k)
 
 
@@ -410,6 +426,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = Fixed.clampi_fixed(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
+	events.append({"t": "revive", "x": p["x"], "y": p["y"]})
 
 
 func _hurt_player(p: Dictionary) -> void:
@@ -430,7 +447,7 @@ func _kill_player(p: Dictionary) -> void:
 	p["deaths"] = p["deaths"] + 1
 	p["broke_timer"] = 0
 	p["in_tank"] = -1
-	events.append({"t": "kill", "x": p["x"], "y": p["y"]})
+	events.append({"t": "player_down", "x": p["x"], "y": p["y"]})
 
 
 func _fire_mission() -> void:
@@ -451,6 +468,7 @@ func _try_board_tank(player_index: int, p: Dictionary) -> void:
 				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
 			tank["occupant"] = player_index
 			p["in_tank"] = t
+			events.append({"t": "tank_board", "x": tank["x"], "y": tank["y"]})
 			return
 
 
@@ -491,6 +509,7 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	if inp.fire and tank["fire_cd"] == 0 and p["grenade_ammo"] > 0:
 		tank["fire_cd"] = TANK_FIRE_COOLDOWN_TICKS
 		p["grenade_ammo"] = p["grenade_ammo"] - 1
+		events.append({"t": "tank_shot", "x": tank["x"], "y": tank["y"], "i": player_index})
 		grenades.append({
 			"x": tank["x"], "y": tank["y"],
 			"vx": Fixed.mul(p["aim_x"], SHELL_SPEED),
@@ -532,6 +551,7 @@ func _step_tanks() -> void:
 					bk["alive"] = false
 					war_chest += COIN_BUNKER * 2
 					score += COIN_BUNKER * 20
+					events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2, "y": bk["y"] + BUNKER_H / 2})
 					if tank["occupant"] >= 0:
 						var driver := players[tank["occupant"]]
 						_dismount(driver, tank)
@@ -552,6 +572,7 @@ func _ignite_tank(tank: Dictionary) -> void:
 	if not tank["burning"]:
 		tank["burning"] = true
 		tank["burn_ticks"] = TANK_BAIL_TICKS
+		events.append({"t": "tank_ignite", "x": tank["x"], "y": tank["y"]})
 
 
 func _detonate_tank(tank: Dictionary) -> void:
@@ -616,6 +637,7 @@ func _explode(x: int, y: int) -> void:
 			bk["alive"] = false
 			war_chest += COIN_BUNKER
 			score += COIN_BUNKER * 10
+			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2, "y": bk["y"] + BUNKER_H / 2})
 	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, GRENADE_RADIUS):
 		_kill_observer()
 	for g in gates:
@@ -667,7 +689,8 @@ func _step_enemies() -> void:
 
 
 func _step_frogman(e: Dictionary) -> void:
-	## Lurks submerged (grenades only), surfaces to lunge when prey wades close,
+	## Lurks submerged (grenades only), telegraphs by surfacing (rooted and
+	## harmless for FROGMAN_SURFACE_TICKS, but shootable), then lunges;
 	## re-submerges when the water calms.
 	var target := _nearest_alive_player(e["x"], e["y"])
 	if target.is_empty():
@@ -677,6 +700,12 @@ func _step_frogman(e: Dictionary) -> void:
 	if e["submerged"]:
 		if Fixed.mul(dx, dx) + Fixed.mul(dy, dy) <= Fixed.mul(FROGMAN_NOTICE_RADIUS, FROGMAN_NOTICE_RADIUS):
 			e["submerged"] = false
+			e["surface_ticks"] = FROGMAN_SURFACE_TICKS
+			events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
+		return
+	if e["surface_ticks"] > 0:
+		e["surface_ticks"] = e["surface_ticks"] - 1
+		if e["surface_ticks"] == 0:
 			e["lunge_ticks"] = FROGMAN_LUNGE_TICKS
 		return
 	var dlen := Fixed.length(dx, dy)
@@ -731,7 +760,7 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 
 func _spawn_frogman(x: int, y: int) -> void:
 	enemies.append({"x": x, "y": y, "alive": true, "elite": false,
-		"kind": "frogman", "submerged": true, "lunge_ticks": 0})
+		"kind": "frogman", "submerged": true, "lunge_ticks": 0, "surface_ticks": 0})
 
 
 # --- Gates ---
@@ -916,6 +945,7 @@ func _step_colossus() -> void:
 	colossus["spray_cd"] = colossus["spray_cd"] - 1
 	if colossus["spray_cd"] <= 0:
 		colossus["spray_cd"] = COLOSSUS_SPRAY_CD_TICKS
+		events.append({"t": "enemy_shot", "x": colossus["x"], "y": colossus["y"]})
 		for spread in [-64, 0, 64]:
 			var bx: int = target["x"] - colossus["x"] + spread * F_ONE / 4
 			var by: int = target["y"] - colossus["y"]
@@ -931,7 +961,7 @@ func _step_colossus() -> void:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
 		if colossus["volley_cd"] <= 0:
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
-			strikes.append({"x": target["x"], "y": target["y"], "ticks": STRIKE_TELEGRAPH_TICKS})
+			_add_strike(target["x"], target["y"])
 	if phase == 3:
 		colossus["spawn_cd"] = colossus["spawn_cd"] - 1
 		if colossus["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
@@ -995,6 +1025,7 @@ func _step_boss() -> void:
 					var dy: int = target["y"] - by
 					var dlen := Fixed.length(dx, dy)
 					if dlen > F_ONE:
+						events.append({"t": "enemy_shot", "x": boss["x"], "y": by})
 						enemy_bullets.append({
 							"x": boss["x"], "y": by,
 							"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
@@ -1007,7 +1038,7 @@ func _step_boss() -> void:
 				var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 				var target2 := _nearest_alive_player(boss["x"], by2)
 				if not target2.is_empty():
-					strikes.append({"x": target2["x"], "y": target2["y"], "ticks": STRIKE_TELEGRAPH_TICKS})
+					_add_strike(target2["x"], target2["y"])
 
 
 func _bullet_hits_boss(b: Dictionary) -> bool:
@@ -1051,6 +1082,13 @@ func _step_enemy_bullets() -> void:
 			enemy_bullets.remove_at(i)
 
 
+func _add_strike(x: int, y: int) -> void:
+	## Every tracked mortar strike funnels here so the view/audio get one
+	## consistent "incoming" warning event alongside the telegraph state.
+	strikes.append({"x": x, "y": y, "ticks": STRIKE_TELEGRAPH_TICKS})
+	events.append({"t": "strike_warn", "x": x, "y": y})
+
+
 # --- Mortar Observer ---
 
 func _step_observer() -> void:
@@ -1072,6 +1110,8 @@ func _step_observer() -> void:
 				"strike_cd": OBSERVER_STRIKE_CD_TICKS,
 				"spawn_cam": camera_top,
 			}
+			events.append({"t": "observer_spawn", "x": observer["x"],
+				"y": camera_top + OBSERVER_Y_OFFSET})
 	else:
 		# Pushing well past the observer despawns him (pressure released).
 		if camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
@@ -1084,7 +1124,7 @@ func _step_observer() -> void:
 				observer["strike_cd"] = OBSERVER_STRIKE_CD_TICKS
 				var target := _nearest_alive_player(observer["x"], camera_top + OBSERVER_Y_OFFSET)
 				if not target.is_empty():
-					strikes.append({"x": target["x"], "y": target["y"], "ticks": STRIKE_TELEGRAPH_TICKS})
+					_add_strike(target["x"], target["y"])
 
 	# Resolve telegraphed strikes: lethal to players (roll i-frames dodge it),
 	# ignites tanks, harmless to enemy infantry.
@@ -1162,8 +1202,8 @@ func checksum() -> int:
 		h = feed.call(s, h)
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
-				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["boost_ticks"], p["in_tank"],
-				int(p["vest"]), p["hurt_iframes"]]:
+				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
+				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"]]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)
@@ -1173,6 +1213,7 @@ func checksum() -> int:
 	for e in enemies:
 		h = feed.call(int(e.get("submerged", false)), h)
 		h = feed.call(e.get("lunge_ticks", 0), h)
+		h = feed.call(e.get("surface_ticks", 0), h)
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)

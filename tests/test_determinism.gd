@@ -20,13 +20,19 @@ const SEED := 0xDEADBEEF
 ## ending world streaming, and Endless War state all legitimately alter the
 ## state stream. P2 goldens retired with this note, per the plan's
 ## "behavior changes only at phase boundaries" policy.
+## RE-RECORDED for the P3.5 fairness pass (2026-07-10): roll input buffering
+## (new roll_buf player state — the torture script's rolls now land more
+## often) and the frogman surfacing telegraph (new surface_ticks enemy state,
+## rooted+harmless wind-up) legitimately alter the state stream. Both fields
+## joined checksum(). View-event additions in the same pass are checksum-
+## excluded by design and did not move these values.
 const GOLDEN: Array[int] = [
-	773354317880238666,
-	2508724612177287087,
-	228594662002098860,
-	1235200999049932687,
-	3892702864710552432,
-	4289214714268874591,
+	1563656263962593042,
+	1025084281296806279,
+	6468401251583080186,
+	4907345319799029613,
+	5319646040914216424,
+	8416800718413890593,
 ]
 
 

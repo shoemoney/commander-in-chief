@@ -92,6 +92,27 @@ func test_frogman_submerged_immune_to_bullets_grenades_kill() -> void:
 	Runner.T.ok(not frog["alive"], "grenade kills the submerged frogman")
 
 
+func test_frogman_surfacing_is_telegraphed_and_harmless() -> void:
+	# One-hit-death fairness: a noticing frogman is rooted and harmless for the
+	# whole FROGMAN_SURFACE_TICKS wind-up, and only kills once it lunges.
+	var sim := SimWorld.new(31, 1)
+	var p := sim.players[0]
+	sim.waters.append({"y": p["y"] - 60 * Fixed.ONE, "ford_x": -500 * Fixed.ONE})
+	sim._spawn_frogman(p["x"], p["y"] - 4 * Fixed.ONE)   # point-blank ambush
+	var frog := sim.enemies[sim.enemies.size() - 1]
+	sim.step([_idle()])
+	Runner.T.ok(not frog["submerged"], "frogman noticed and began surfacing")
+	Runner.T.ok(frog["surface_ticks"] > 0, "surface wind-up is running")
+	var fy: int = frog["y"]
+	for i in SimWorld.FROGMAN_SURFACE_TICKS - 1:
+		sim.step([_idle()])
+	Runner.T.ok(p["alive"], "player unharmed through the whole surface telegraph")
+	Runner.T.eq(frog["y"], fy, "surfacing frogman is rooted in place")
+	for i in 5:
+		sim.step([_idle()])
+	Runner.T.ok(not p["alive"], "after the wind-up the point-blank lunge kills")
+
+
 func test_frogman_surfaces_and_is_shootable() -> void:
 	var sim := SimWorld.new(31, 1)
 	var p := sim.players[0]
