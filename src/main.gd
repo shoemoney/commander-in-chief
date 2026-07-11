@@ -62,6 +62,7 @@ const _EVENT_SOUND := {
 
 @onready var hud: Label = $HUD/Label
 var _hud_icons := HudIcons.new()
+var _menu := GameMenu.new()
 
 
 func _ready() -> void:
@@ -69,7 +70,15 @@ func _ready() -> void:
 	hud.visible = false   # superseded by the icon HUD
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
+	_menu.main = self
+	$HUD.add_child(_menu)   # after HudIcons: menu draws on top
 	_reset()
+
+
+func start_game(endless: bool) -> void:
+	_endless = endless
+	_reset()
+	_menu.mode = GameMenu.Mode.HIDDEN
 
 
 func _reset() -> void:
@@ -84,6 +93,8 @@ func _reset() -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if _menu.is_active():
+		return   # menu owns input while open
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F2:
 			_two_players = not _two_players
@@ -96,6 +107,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	if _menu.is_active():
+		# World freezes as the menu backdrop; the sim never steps.
+		_hud_icons.visible = _menu.mode != GameMenu.Mode.TITLE
+		queue_redraw()
+		return
+	_hud_icons.visible = true
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
 	else:

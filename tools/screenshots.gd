@@ -25,6 +25,7 @@ func _initialize() -> void:
 	# _physics_process for main AND children (set_physics_process(false)
 	# alone still let a few ticks through — staged sims drifted).
 	main.process_mode = Node.PROCESS_MODE_DISABLED
+	main._menu.mode = GameMenu.Mode.HIDDEN   # staged shots show gameplay, not the title
 	_build_shots()
 	process_frame.connect(_on_frame)
 	# First _advance happens on the first frame — after main._ready() has run
@@ -78,6 +79,7 @@ func _build_shots() -> void:
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus},
 		{"name": "victoly", "build": _shot_victoly},
 		{"name": "endless-war-shop", "build": _shot_shop, "dress": _dress_shop},
+		{"name": "title-screen", "build": _shot_firefight, "dress": _dress_title},
 	]
 
 
@@ -271,3 +273,8 @@ func _shot_shop() -> SimWorld:
 func _dress_shop(m: Node2D) -> void:
 	# P1 mid-decision on the spend-wheel, grenades highlighted.
 	m._wheel[0] = {"open": true, "sel": 3}
+
+
+func _dress_title(m: Node2D) -> void:
+	m._menu.open(GameMenu.Mode.TITLE)
+	m._hud_icons.visible = false
