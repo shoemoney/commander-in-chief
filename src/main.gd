@@ -29,6 +29,11 @@ var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
 var _dry_frame := -100            # rate-limits the dry-fire click
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
+# Persistent bests (user://ikari_best.cfg) — the roguelite carrot.
+var best_score := 0
+var best_wave := 0
+var best_dist := 0
+var _best_dirty := false
 var _prev_colossus_phase := 0     # phase-change escalation banners
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
@@ -81,6 +86,7 @@ func _ready() -> void:
 	$HUD.add_child(_hud_icons)
 	_menu.main = self
 	$HUD.add_child(_menu)   # after HudIcons: menu draws on top
+	_load_bests()
 	_reset()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
@@ -138,6 +144,7 @@ func _physics_process(_delta: float) -> void:
 		sim.step(_gather_inputs())
 		_consume_events()
 		_check_boss_intro()
+		_track_bests()
 	_update_feel()
 	queue_redraw()
 	_update_hud()
@@ -258,6 +265,35 @@ func _check_boss_intro() -> void:
 		_sfx.play("alarm", -3.0, 0.7)
 	if phase != _prev_colossus_phase:
 		_prev_colossus_phase = phase
+
+
+func _load_bests() -> void:
+	var cf := ConfigFile.new()
+	if cf.load("user://ikari_best.cfg") == OK:
+		best_score = cf.get_value("best", "score", 0)
+		best_wave = cf.get_value("best", "wave", 0)
+		best_dist = cf.get_value("best", "dist", 0)
+
+
+func _track_bests() -> void:
+	# Ratchet the records; write at most once a second when something moved.
+	if sim.score > best_score:
+		best_score = sim.score
+		_best_dirty = true
+	if sim.mode == "endless" and sim.wave > best_wave:
+		best_wave = sim.wave
+		_best_dirty = true
+	var dist := -Fixed.to_int(sim.camera_top) / 10
+	if sim.mode == "campaign" and dist > best_dist:
+		best_dist = dist
+		_best_dirty = true
+	if _best_dirty and Engine.get_physics_frames() % 60 == 0:
+		_best_dirty = false
+		var cf := ConfigFile.new()
+		cf.set_value("best", "score", best_score)
+		cf.set_value("best", "wave", best_wave)
+		cf.set_value("best", "dist", best_dist)
+		cf.save("user://ikari_best.cfg")
 
 
 func _show_banner(text: String) -> void:

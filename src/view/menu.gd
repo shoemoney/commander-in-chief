@@ -93,6 +93,9 @@ func _draw() -> void:
 	if mode == Mode.TITLE:
 		_center_text("PROJECT IKARI", 88, 34, Color(1.0, 0.85, 0.3))
 		_center_text("ONE HIT. ONE WAR CHEST. NO MERCY.", 112, 10, Color(0.85, 0.9, 0.8, 0.85))
+		if main.best_score > 0:
+			_center_text("BEST — SCORE %d · WAVE %d · %dm" % [main.best_score,
+				main.best_wave, main.best_dist], 132, 9, Color(1.0, 0.92, 0.55, 0.85))
 	else:
 		_center_text("PAUSED", 100, 24, Color(0.95, 0.95, 0.85))
 	var items := _items()
