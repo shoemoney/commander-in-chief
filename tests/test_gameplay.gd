@@ -133,6 +133,22 @@ func test_ratchet_camera_never_scrolls_back() -> void:
 	Runner.T.eq(sim.camera_top, top_after_advance, "ratchet: camera never scrolls back down")
 
 
+func test_elite_skirmisher_telegraphed_shot() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	sim._spawn_enemy(p["x"], p["y"] - 100 * Fixed.ONE, true)   # inside standoff
+	var elite := sim.enemies[sim.enemies.size() - 1]
+	elite["fire_cd"] = 1
+	sim.step([_idle()])
+	Runner.T.ok(elite["windup"] > 0, "elite winds up inside standoff range")
+	sim.step([_idle()])
+	var ey: int = elite["y"]
+	for i in SimWorld.ELITE_WINDUP_TICKS:
+		sim.step([_idle()])
+	Runner.T.eq(elite["y"], ey, "elite rooted while winding up")
+	Runner.T.ok(sim.enemy_bullets.size() >= 1, "wind-up resolved into an aimed shot")
+
+
 func test_elite_drops_pickup() -> void:
 	var sim := SimWorld.new(1, 1)
 	var p := sim.players[0]

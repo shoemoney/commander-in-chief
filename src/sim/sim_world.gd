@@ -29,6 +29,11 @@ const GRENADE_RADIUS := 28 * F_ONE
 const GRENADE_COOLDOWN_TICKS := 30
 const ENEMY_SPEED := (F_ONE * 8) / 5          # 1.6 px/tick
 const ELITE_SPEED := 2 * F_ONE
+# Elites are ranged skirmishers: close to standoff range, telegraph a wind-up,
+# then loose one aimed shot. Starting values (tune via playtest).
+const ELITE_STANDOFF := 120 * F_ONE
+const ELITE_FIRE_CD_TICKS := 150
+const ELITE_WINDUP_TICKS := 24
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
@@ -712,12 +717,42 @@ func _step_enemies() -> void:
 		var dx: int = target["x"] - e["x"]
 		var dy: int = target["y"] - e["y"]
 		var dlen := Fixed.length(dx, dy)
+		if e["elite"]:
+			_step_elite(e, target, dx, dy, dlen)
+			continue
 		if dlen > F_ONE:
-			var spd: int = ELITE_SPEED if e["elite"] else ENEMY_SPEED
+			var spd: int = ENEMY_SPEED
 			if _in_water(e["x"], e["y"]):
 				spd = spd / 2   # infantry wades too
 			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
 			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+
+
+func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Skirmisher: advance to standoff range, wind up (visible, interruptible
+	## by killing him), fire one aimed shot. Touch still kills.
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0 and dlen > F_ONE:
+			events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
+			enemy_bullets.append({
+				"x": e["x"], "y": e["y"],
+				"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
+				"vy": Fixed.mul(Fixed.div(dy, dlen), ENEMY_BULLET_SPEED),
+				"ttl": ENEMY_BULLET_TTL_TICKS,
+			})
+		return   # rooted while winding up
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if dlen > ELITE_STANDOFF:
+		var spd := ELITE_SPEED
+		if _in_water(e["x"], e["y"]):
+			spd = spd / 2
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+	elif e["fire_cd"] == 0:
+		e["fire_cd"] = ELITE_FIRE_CD_TICKS
+		e["windup"] = ELITE_WINDUP_TICKS
+		events.append({"t": "elite_windup", "x": e["x"], "y": e["y"]})
 
 
 func _step_frogman(e: Dictionary) -> void:
@@ -786,8 +821,12 @@ func _step_spawner() -> void:
 
 
 func _spawn_enemy(x: int, y: int, elite: bool) -> void:
-	enemies.append({"x": x, "y": y, "alive": true, "elite": elite,
-		"kind": "elite" if elite else "rusher"})
+	var e := {"x": x, "y": y, "alive": true, "elite": elite,
+		"kind": "elite" if elite else "rusher"}
+	if elite:
+		e["fire_cd"] = ELITE_FIRE_CD_TICKS / 2   # first shot comes sooner
+		e["windup"] = 0
+	enemies.append(e)
 
 
 func _spawn_frogman(x: int, y: int) -> void:
@@ -1247,6 +1286,8 @@ func checksum() -> int:
 		h = feed.call(int(e.get("submerged", false)), h)
 		h = feed.call(e.get("lunge_ticks", 0), h)
 		h = feed.call(e.get("surface_ticks", 0), h)
+		h = feed.call(e.get("fire_cd", 0), h)
+		h = feed.call(e.get("windup", 0), h)
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)

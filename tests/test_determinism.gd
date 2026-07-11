@@ -26,13 +26,16 @@ const SEED := 0xDEADBEEF
 ## rooted+harmless wind-up) legitimately alter the state stream. Both fields
 ## joined checksum(). View-event additions in the same pass are checksum-
 ## excluded by design and did not move these values.
+## RE-RECORDED (2026-07-11): elites became ranged skirmishers (standoff +
+## telegraphed wind-up shot; new fire_cd/windup enemy state in checksum) —
+## design-review iteration 1 behavior change.
 const GOLDEN: Array[int] = [
-	1563656263962593042,
-	1025084281296806279,
-	6468401251583080186,
-	4907345319799029613,
-	5319646040914216424,
-	8416800718413890593,
+	8340780119376351956,
+	6345185127394226400,
+	447115406617573745,
+	753412334351876725,
+	7738070117799955651,
+	586976185476678933,
 ]
 
 

@@ -55,6 +55,7 @@ const _EVENT_SOUND := {
 	"observer_spawn": ["alarm", -3.0, 1.0],
 	"strike_warn": ["whistle", -6.0, 1.0],
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
+	"elite_windup": ["pickup", -10.0, 0.7],
 	"bunker_break": ["explosion", -4.0, 0.72],
 	"frogman_surface": ["splash", -4.0, 1.0],
 	"wave_start": ["wave_start", -5.0, 1.0],
@@ -525,6 +526,12 @@ func _draw_enemies() -> void:
 			else:
 				_spr("frogman", epos, face, 0.5)
 		elif e["elite"]:
+			# Wind-up telegraph: muzzle ember swells red before the shot.
+			var wu: int = e.get("windup", 0)
+			if wu > 0:
+				var wfrac := 1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)
+				draw_circle(epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
+					Color(1.0, 0.85 - wfrac * 0.55, 0.2, 0.4 + wfrac * 0.6))
 			_spr("elite", epos, face, 0.5, Color(1.35, 0.75, 0.7))
 		else:
 			_spr("rusher", epos, face, 0.5)
