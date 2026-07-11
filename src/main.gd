@@ -12,6 +12,9 @@ extends Node2D
 ##   F2 toggles local 2P · F3 toggles Endless War · R restarts.
 
 const PX := 1.0 / Fixed.ONE
+# Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
+const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
+	"watchtower", "barbedwire", "barrier", "ammobox"]
 
 var sim: SimWorld
 var _two_players := false
@@ -352,6 +355,19 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 		inp.move_x = [0, 128, -128, 0][(tick / 100) % 4]
 		inp.roll = false
 		inp.grenade = false
+		# Shell the nearest bunker in reach — crack the gate on camera.
+		for bk in dsim.bunkers:
+			if bk["alive"]:
+				var bdx: int = bk["x"] + SimWorld.BUNKER_W / 2 - p["x"]
+				var bdy: int = bk["y"] + SimWorld.BUNKER_H / 2 - p["y"]
+				if absi(bdx) < 170 * Fixed.ONE and absi(bdy) < 170 * Fixed.ONE:
+					var blen := Fixed.length(bdx, bdy)
+					if blen > Fixed.ONE:
+						inp.aim_x = clampi(Fixed.div(bdx, blen) / 256, -256, 256)
+						inp.aim_y = clampi(Fixed.div(bdy, blen) / 256, -256, 256)
+					if absi(bdx) > 30 * Fixed.ONE:
+						inp.move_x = 256 * signi(bdx)
+					break
 		return inp
 	# Commandeer: steer at a parked healthy tank once it's near.
 	for t in dsim.tanks:
@@ -562,6 +578,23 @@ func _draw_terrain() -> void:
 				_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
 					float(h2 % 628) / 100.0, 0.42 if big else 0.34, Color(0.75, 0.85, 0.72))
 
+	# War-torn battlefield litter: sparse, deterministic scatter of the
+	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
+	# Hash grid decorrelated from trees/ferns so nothing stacks on a cell.
+	for ty in 6:
+		var ly := oy + ty * 80.0
+		var liy := int(floor((cam_y + ly) / 80.0))
+		for tx in 8:
+			var hl := Art.cell_hash(tx * 53 + 11, liy * 7 + 3)
+			if hl % 9 != 0:   # ~1 in 9 cells gets a prop
+				continue
+			var lx := tx * 84.0 + float(hl % 40) - 20.0
+			var ly_px := ly + float((hl / 9) % 40)
+			if sim._in_water(int(lx / PX), sim.camera_top + int(ly_px / PX)):
+				continue
+			_spr(_LITTER[(hl / 40) % _LITTER.size()], Vector2(lx, ly_px),
+				float(hl % 628) / 100.0, 1.0)
+
 
 func _draw_water() -> void:
 	for w in sim.waters:
@@ -736,7 +769,17 @@ func _draw_projectiles() -> void:
 		draw_circle(base + Vector2(2, 2), 3.0, Color(0, 0, 0, 0.35))   # shadow
 		var spin := float(Engine.get_physics_frames()) * 0.4
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
-		_spr("grenade", body, spin, 0.75 if g.get("shell", false) else 0.55)
+		# Real frag silhouette (the capsule sprite read as a pill). Shells
+		# fly steel-dark and bigger.
+		if g.get("shell", false):
+			draw_set_transform(body, spin, Vector2.ONE)
+			draw_texture_rect(Art.tex("icon_grenade"), Rect2(-6, -6, 12, 12), false,
+				Color(0.55, 0.6, 0.7))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		else:
+			draw_set_transform(body, spin, Vector2.ONE)
+			draw_texture_rect(Art.tex("icon_grenade"), Rect2(-5, -5, 10, 10), false)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# Landing marker: the parabola is deterministic — solve where it lands.
 		var zv := float(g["zv"])
 		var grav := float(SimWorld.GRENADE_GRAV)
@@ -953,6 +996,25 @@ func _draw_banners() -> void:
 			Color(0.85, 0.12, 0.08, minf(1.0, vig)))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha))
+	# Arena-lock directive: the camera holds at closed gates by design, but
+	# the objective must be said out loud (playtest: "scrolling just stops").
+	for g in sim.gates:
+		if g["open"] or g.get("final", false):
+			continue
+		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
+			continue
+		if sim.stall_ticks > 90:
+			var gpulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.15)
+			var gtxt := "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty() \
+				else "GRENADE THE BUNKERS TO ADVANCE"
+			var gf := ThemeDB.fallback_font
+			var gw := gf.get_string_size(gtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			var gy: float = (g["y"] - sim.camera_top) * PX + 30.0
+			draw_string(gf, Vector2(320 - gw / 2.0 + 1, gy + 1), gtxt,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0, 0, 0, 0.7 * gpulse))
+			draw_string(gf, Vector2(320 - gw / 2.0, gy), gtxt,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.9, 0.4, gpulse))
+		break
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if sim.mode == "campaign" and sim.observer.is_empty() \

@@ -62,6 +62,18 @@ const TEX := {
 	"ui_menu_button_sel": preload(SY + "ui/menu_button_sel.png"),
 	"ui_reticle": preload(SY + "ui/reticle.png"),
 	"ui_vignette": preload(SY + "ui/vignette.png"),
+	# --- legacy art Military decor (war-torn battlefield litter) ---
+	"barrel": preload(SY + "decor/barrel.png"),
+	"crate_stack": preload(SY + "decor/crate_stack.png"),
+	"rock1": preload(SY + "decor/rock1.png"),
+	"rock2": preload(SY + "decor/rock2.png"),
+	"wreck": preload(SY + "decor/wreck.png"),
+	"tent": preload(SY + "decor/tent.png"),
+	"watchtower": preload(SY + "decor/watchtower.png"),
+	"barbedwire": preload(SY + "decor/barbedwire.png"),
+	"barrier": preload(SY + "decor/barrier.png"),
+	"ammobox": preload(SY + "decor/ammobox.png"),
+	"landmine": preload(SY + "decor/landmine.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
@@ -82,13 +94,19 @@ const SCALE := {
 	# cast2 bakes use a 300px canvas. Enemies run LARGER than the strict
 	# old-footprint math: at ~7px the dark insurgents read as "black dots,
 	# or is that a bullet?" — straight from playtest.
-	"player1": 0.33, "player2": 0.27, "rusher": 0.36, "elite": 0.37,
-	"frogman": 0.77, "observer": 0.17, "bunker": 0.17,
+	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
+	# elites largest infantry (they shoot), sprites ≥3× bullet size.
+	"player1": 0.50, "player2": 0.42, "rusher": 0.47, "elite": 0.52,
+	"frogman": 1.05, "observer": 0.24, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
 	"sandbag": 0.83, "sandbag_beige": 0.83,
 	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
 	"tree_large": 0.89, "tree_small": 0.91, "fern": 0.9,
+	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
+	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
+	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
+	"barrier": 0.13, "ammobox": 0.1, "landmine": 0.07,
 }
 
 ## Desert→jungle shift, multiplied onto the draw modulate. Units/vehicles take
@@ -101,10 +119,11 @@ const TINT := {
 	# Heroes render bright, not olive-washed — the tan Leader model in the
 	# old jungle tint was literal camouflage (invisible on grass).
 	"player1": Color(1.1, 1.12, 0.95), "player2": Color(1.18, 1.05, 0.85),
-	# Insurgents keep their own dark wardrobe — lifted, not olive-washed,
-	# so the factions never read as the same army.
-	"rusher": Color(1.35, 1.22, 1.0), "elite": Color(1.5, 0.8, 0.72),
-	"frogman": UNIT, "observer": Color(1.3, 1.12, 1.0),
+	# Insurgents run BRIGHT and WARM so they read as threats — not as the
+	# grey decor rocks, not as the red enemy orbs. Threats pop, scenery
+	# recedes (see decor tints below).
+	"rusher": Color(2.1, 1.7, 1.15), "elite": Color(1.75, 0.85, 0.68),
+	"frogman": UNIT, "observer": Color(1.6, 1.2, 1.0),
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
 	"gunship_body": OLIVE_VEH, "colossus_body": OLIVE_VEH,
@@ -112,6 +131,14 @@ const TINT := {
 	"crate_ammo": Color(0.82, 0.88, 0.62), "crate_grenade": Color(0.82, 0.88, 0.62),
 	"crate_airstrike": Color(0.82, 0.88, 0.62),
 	"tree_large": FOLIAGE, "tree_small": FOLIAGE, "fern": FOLIAGE,
+	# Decor is SCENERY — muted and mossy so it recedes into the terrain and
+	# never competes with the warm-bright enemies for the player's eye.
+	"barrel": Color(0.72, 0.8, 0.6), "crate_stack": Color(0.78, 0.76, 0.62),
+	"rock1": Color(0.68, 0.76, 0.62), "rock2": Color(0.68, 0.76, 0.62),
+	"wreck": Color(0.62, 0.66, 0.58), "tent": Color(0.72, 0.82, 0.6),
+	"watchtower": Color(0.72, 0.78, 0.62), "barbedwire": Color(0.7, 0.74, 0.68),
+	"barrier": Color(0.76, 0.76, 0.62), "ammobox": Color(0.72, 0.8, 0.58),
+	"landmine": Color(0.7, 0.72, 0.62),
 }
 
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
@@ -121,6 +148,8 @@ const OUTLINE := {
 	"tank_body": true, "tank_barrel": true, "gunship_body": true,
 	"colossus_body": true, "sandbag": true, "sandbag_beige": true,
 	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
+	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
+	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
 }
 
 
