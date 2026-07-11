@@ -56,6 +56,8 @@ const TEX := {
 	"ui_pad_back": preload(SY + "ui/pad_back.png"),
 	"ui_menu_button": preload(SY + "ui/menu_button.png"),
 	"ui_menu_button_sel": preload(SY + "ui/menu_button_sel.png"),
+	"ui_reticle": preload(SY + "ui/reticle.png"),
+	"ui_vignette": preload(SY + "ui/vignette.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),

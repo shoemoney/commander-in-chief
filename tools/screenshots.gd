@@ -76,7 +76,7 @@ func _build_shots() -> void:
 		{"name": "tank-assault", "build": _shot_tank},
 		{"name": "river-crossing", "build": _shot_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},
-		{"name": "foundry-colossus-last-stand", "build": _shot_colossus},
+		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
 		{"name": "victoly", "build": _shot_victoly},
 		{"name": "endless-war-shop", "build": _shot_shop, "dress": _dress_shop},
 		{"name": "title-screen", "build": _shot_firefight, "dress": _dress_title},
@@ -273,6 +273,13 @@ func _shot_shop() -> SimWorld:
 func _dress_shop(m: Node2D) -> void:
 	# P1 mid-decision on the spend-wheel, grenades highlighted.
 	m._wheel[0] = {"open": true, "sel": 3}
+	m._banner_text = "WAVE CLEARED — SHOP OPEN"
+	m._banner_t = 0.5
+
+
+func _dress_colossus(m: Node2D) -> void:
+	# Vest just broke: damage vignette mid-pulse.
+	m._damage_vignette = 0.55
 
 
 func _dress_title(m: Node2D) -> void:

@@ -23,6 +23,9 @@ var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _kick := Vector2.ZERO         # directional screen nudge from firing
+var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
+var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
+var _banner_t := 0.0
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 const WHEEL_ITEMS := [
@@ -90,6 +93,9 @@ func _reset() -> void:
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
+	_damage_vignette = 0.0
+	_banner_text = ""
+	_banner_t = 0.0
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -164,13 +170,21 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.5)
 				_hitstop_frames = maxi(_hitstop_frames, 6)
 				_flash_alpha = maxf(_flash_alpha, 0.35)
+				_damage_vignette = 1.0
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
+				_show_banner("GATE SECURED — CHECKPOINT")
 			"vest_break":
 				_flash_alpha = maxf(_flash_alpha, 0.35)
+				_damage_vignette = maxf(_damage_vignette, 0.75)
+			"wave_start":
+				_show_banner("WAVE %d" % sim.wave)
+			"wave_clear":
+				_show_banner("WAVE CLEARED — SHOP OPEN")
 			"observer_spawn":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
+				_show_banner("MORTAR OBSERVER SPOTTED")
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -179,9 +193,16 @@ func _consume_events() -> void:
 				_flash_alpha = 0.6
 
 
+func _show_banner(text: String) -> void:
+	_banner_text = text
+	_banner_t = 1.0
+
+
 func _update_feel() -> void:
 	_trauma = maxf(0.0, _trauma - 0.03)
 	_flash_alpha = maxf(0.0, _flash_alpha - 0.08)
+	_damage_vignette = maxf(0.0, _damage_vignette - 0.02)
+	_banner_t = maxf(0.0, _banner_t - 0.008)
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
 		fx["t"] += fx.get("rate", 0.09)
@@ -536,7 +557,8 @@ func _draw_colossus() -> void:
 			Color(1.0, 0.55, 0.15, 0.15 + warm * 0.55))
 	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
 	draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
-	_draw_bar(Rect2(Vector2(170, 5), Vector2(300, 13)),
+	# Bottom-center so the fill never hides under the HUD panel.
+	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)),
 		float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP))
 
 
@@ -583,6 +605,14 @@ func _draw_players() -> void:
 			_spr(tex_name, pos, angle, 0.52, mod)
 			if p["vest"]:
 				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
+			# Aim reticle: the gun tells you where it points.
+			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
+			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
+				var rrect := Rect2(pos + aim * 27.0 - Vector2(8, 8), Vector2(16, 16))
+				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
+					false, Color(0, 0, 0, 0.55))
+				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
 		else:
 			_spr(tex_name, pos, PI / 2, 0.52, Color(0.35, 0.35, 0.35, 0.6))
 			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8), 1.5)
@@ -684,8 +714,25 @@ func _draw_wheel() -> void:
 
 
 func _draw_banners() -> void:
+	# Damage vignette: pulses on hits, sustains through the mercy window.
+	var vig := _damage_vignette
+	for p in sim.players:
+		if p["alive"] and p["hurt_iframes"] > 0:
+			vig = maxf(vig, 0.3 * float(p["hurt_iframes"]) / float(SimWorld.VEST_IFRAME_TICKS))
+	if vig > 0.01:
+		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, 640, 360), false,
+			Color(0.85, 0.12, 0.08, minf(1.0, vig)))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha))
+	# Splash banner (wave starts, checkpoints, observer warning).
+	if _banner_t > 0.01 and not _banner_text.is_empty():
+		var a := minf(1.0, _banner_t * 4.0) * minf(1.0, (1.0 - _banner_t) * 8.0 + 0.2)
+		var f := ThemeDB.fallback_font
+		var w := f.get_string_size(_banner_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+		draw_string(f, Vector2(320 - w / 2.0 + 1, 71), _banner_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0, 0, 0, 0.7 * a))
+		draw_string(f, Vector2(320 - w / 2.0, 70), _banner_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.92, 0.55, a))
 	if sim.victory:
 		draw_rect(Rect2(160, 150, 320, 60), Color(0, 0, 0, 0.7))
 		draw_string(ThemeDB.fallback_font, Vector2(238, 186), "V I C T O L Y !",
