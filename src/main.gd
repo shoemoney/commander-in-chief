@@ -24,9 +24,13 @@ var _trauma := 0.0
 var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _kick := Vector2.ZERO         # directional screen nudge from firing
+var _kill_streak := 0             # decaying combo counter for kill-blip pitch
+var _last_kill_frame := -100
+var _rumble := 0.0                # pending gamepad vibration this frame
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
@@ -56,7 +60,7 @@ const _EVENT_SOUND := {
 	"throw": ["throw", -8.0, 1.0],
 	"roll": ["roll", -8.0, 1.0],
 	"explosion": ["explosion", -2.0, 1.0],
-	"kill": ["kill", -7.0, 1.0],
+	# "kill" plays in the match branch with streak-scaled pitch, not here.
 	"player_down": ["player_down", 0.0, 1.0],
 	"vest_break": ["vest_break", -2.0, 1.0],
 	"gate_open": ["gate_open", -4.0, 1.0],
@@ -113,8 +117,12 @@ func _reset() -> void:
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
 	_fx.clear()
+	_scorch.clear()
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
+	_kill_streak = 0
+	_last_kill_frame = -100
+	_rumble = 0.0
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
 	_banner_text = ""
@@ -210,13 +218,41 @@ func _consume_events() -> void:
 			"explosion":
 				_trauma = minf(1.0, _trauma + 0.35)
 				_hitstop_frames = maxi(_hitstop_frames, 4)
+				_rumble = maxf(_rumble, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
+				for d in 8:
+					var da := d * TAU / 8.0 + randf() * 0.3
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.06,
+						"vx": cos(da) * randf_range(1.5, 3.0), "vy": sin(da) * randf_range(1.5, 3.0)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
 			"kill":
 				# No screen flash here: at kill-spam rates it strobes
-				# (photosensitivity); smoke + blip + coin float carry it.
+				# (photosensitivity); smoke + gib burst + blip + coin carry it.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
-				# Big bounties get a moment; rusher pennies would be spam.
-				if ev.get("coin", 0) >= 25:
+				# Directional gib/spark burst — the kill hits back.
+				for g in 5:
+					var ga := randf() * TAU
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
+						"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
+						"spin": randf() * TAU})
+				# Kill-streak: rising blip pitch + milestone combo pop.
+				var big: bool = ev.get("coin", 0) >= 25
+				if Engine.get_physics_frames() - _last_kill_frame < 90:
+					_kill_streak += 1
+				else:
+					_kill_streak = 1
+				_last_kill_frame = Engine.get_physics_frames()
+				_sfx.play("kill", -7.0, 1.0 + minf(0.9, _kill_streak * 0.06))
+				if big:
+					_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
+					_rumble = maxf(_rumble, 0.35)
+				if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+						"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
+					_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
+				# Big bounties get a coin moment; rusher pennies would be spam.
+				if big:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 						"rate": 0.025, "text": "+%d¢" % ev["coin"], "col": Color(1.0, 0.9, 0.45)})
 			"bunker_break":
@@ -227,7 +263,14 @@ func _consume_events() -> void:
 				_hitstop_frames = maxi(_hitstop_frames, 6)
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = 1.0
+				_rumble = maxf(_rumble, 1.0)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+			"roll":
+				# Launch poof grounds the dodge.
+				for d in 4:
+					var ra := d * TAU / 4.0 + randf() * 0.5
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.08,
+						"vx": cos(ra) * randf_range(0.6, 1.4), "vy": sin(ra) * randf_range(0.6, 1.4)})
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
 				_show_banner("GATE SECURED — CHECKPOINT")
@@ -315,16 +358,25 @@ func _update_feel() -> void:
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
 		fx["t"] += fx.get("rate", 0.09)
-		if fx["kind"] == "casing":
+		if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust":
 			fx["x"] += int(fx["vx"] * Fixed.ONE)
 			fx["y"] += int(fx["vy"] * Fixed.ONE)
 			fx["vx"] *= 0.86
 			fx["vy"] *= 0.86
 		if fx["t"] >= 1.0:
 			_fx.remove_at(i)
+	for i in range(_scorch.size() - 1, -1, -1):
+		_scorch[i]["t"] += 0.012
+		if _scorch[i]["t"] >= 1.0:
+			_scorch.remove_at(i)
 	for i in _recoil.size():
 		_recoil[i] *= 0.72
 	_kick *= 0.78
+	# Gamepad rumble: one pooled pulse per frame across connected pads.
+	if _rumble > 0.01:
+		for pad in Input.get_connected_joypads():
+			Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
+		_rumble = 0.0
 	var mag := _trauma * _trauma * 6.0
 	var shake := Vector2.ZERO
 	if mag > 0.01:
@@ -507,6 +559,7 @@ func _aim_angle(p: Dictionary) -> float:
 
 func _draw() -> void:
 	_draw_terrain()
+	_draw_scorch()
 	_draw_water()
 	_draw_gates()
 	for bk in sim.bunkers:
@@ -891,6 +944,22 @@ func _draw_fx() -> void:
 				fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, fc)
 		elif fx["kind"] == "smoke":
 			_spr("smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
+		elif fx["kind"] == "shockwave":
+			# Concussive ring: snaps out fast and thin.
+			draw_arc(pos, 4.0 + t * 34.0, 0, TAU, 32, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)), 2.5 * (1.0 - t))
+		elif fx["kind"] == "gib":
+			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(0.5, 0.1, 0.08, 1.0 - t))
+		elif fx["kind"] == "dust":
+			draw_circle(pos, 2.0 + t * 5.0, Color(0.7, 0.65, 0.5, 0.4 * (1.0 - t)))
+
+
+func _draw_scorch() -> void:
+	# Lingering ground scorch under everything — battlefield keeps its scars.
+	for s in _scorch:
+		var pos := _to_screen(s["x"], s["y"])
+		var a: float = 0.4 * (1.0 - s["t"])
+		draw_circle(pos, s["r"], Color(0.12, 0.1, 0.08, a))
+		draw_circle(pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
 
 
 func _draw_telegraphs() -> void:
