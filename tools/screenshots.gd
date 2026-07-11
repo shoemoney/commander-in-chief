@@ -62,8 +62,13 @@ func _advance() -> void:
 	main._fx.clear()
 	main._damage_vignette = 0.0
 	main._banner_t = 0.0
-	main._recoil = [Vector2.ZERO, Vector2.ZERO]
-	main._wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
+	# Mutate in place: cross-script assignment of a fresh Array into the
+	# typed Array[...] properties fails at runtime.
+	for k in main._recoil.size():
+		main._recoil[k] = Vector2.ZERO
+	for w in main._wheel:
+		w["open"] = false
+		w["sel"] = -1
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
 	main._update_hud()
