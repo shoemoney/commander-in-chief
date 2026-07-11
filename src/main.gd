@@ -330,11 +330,12 @@ func _update_feel() -> void:
 	position = shake + _kick
 
 
-static func demo_input(tick: int) -> SimInput:
+static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	## Scripted "player" for Movie Maker captures (--write-movie): march
 	## north weaving, burst-fire, lob grenades, roll, radio in supplies,
-	## and feed the coin reader if downed. Deterministic against the fixed
-	## seed, so every render is the same playthrough.
+	## feed the coin reader if downed — and commandeer any parked tank on
+	## the way. Deterministic against the fixed seed: every render is the
+	## same playthrough.
 	var inp := SimInput.new()
 	inp.move_y = -256
 	inp.move_x = [0, 256, 0, -256][(tick / 120) % 4]   # wide weave: reach the flank bunkers
@@ -343,14 +344,33 @@ static func demo_input(tick: int) -> SimInput:
 	inp.fire = (tick % 8) != 7                          # MG never sleeps
 	inp.grenade = (tick % 90) == 70                     # crack armor often
 	inp.roll = (tick % 150) == 90
-	inp.buy = 2 if tick == 880 else 0   # "+4 GRENADES" moment (post-revive)
+	inp.buy = 2 if tick == 880 else 0   # "+4 GRENADES" moment
 	inp.revive = (tick % 90) == 0       # downed: feed the coin reader
+	var p := dsim.players[0]
+	if p["in_tank"] >= 0:
+		# Tank time: gentler weave, cannon on the same trigger, stay aboard.
+		inp.move_x = [0, 128, -128, 0][(tick / 100) % 4]
+		inp.roll = false
+		inp.grenade = false
+		return inp
+	# Commandeer: steer at a parked healthy tank once it's near.
+	for t in dsim.tanks:
+		if t["alive"] and not t["burning"] and t["occupant"] < 0:
+			var dx: int = t["x"] - p["x"]
+			var dy: int = t["y"] - p["y"]
+			if absi(dx) < 150 * Fixed.ONE and absi(dy) < 150 * Fixed.ONE:
+				inp.move_x = 256 * signi(dx) if absi(dx) > 4 * Fixed.ONE else 0
+				inp.move_y = 256 * signi(dy) if absi(dy) > 4 * Fixed.ONE else 0
+				inp.roll = false
+				inp.interact = absi(dx) < 20 * Fixed.ONE and absi(dy) < 20 * Fixed.ONE \
+					and (tick % 3) == 0
+				break
 	return inp
 
 
 func _gather_inputs() -> Array:
 	if OS.has_feature("movie"):
-		return [demo_input(sim.tick_count)]
+		return [demo_input(sim.tick_count, sim)]
 	var inputs: Array = []
 	var p1 := SimInput.new()
 	var kx := (1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
@@ -729,16 +749,18 @@ func _draw_projectiles() -> void:
 		draw_line(land + Vector2(0, -2.5), land + Vector2(0, 2.5), lc, 1.0)
 	for b in sim.bullets:
 		var bpos := _to_screen(b["x"], b["y"])
-		var vel := Vector2(b["vx"], b["vy"]) * PX
-		# Tracer: a fading tail plus a stretched round.
-		draw_line(bpos - vel * 1.8, bpos - vel * 0.4, Color(1.0, 0.9, 0.5, 0.35), 1.2)
-		_spr("bullet", bpos, vel.angle() + PI / 2, 0.42, Color.WHITE, 2.2)
+		var dir := Vector2(b["vx"], b["vy"]).normalized()
+		# Real tracer rounds: a thin hot streak with a bright head — small,
+		# fast-reading, and impossible to confuse with a person.
+		draw_line(bpos - dir * 7.0, bpos, Color(1.0, 0.8, 0.35, 0.45), 1.2)
+		draw_line(bpos - dir * 3.0, bpos, Color(1.0, 0.95, 0.7, 0.95), 1.4)
+		draw_circle(bpos, 1.1, Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
-		var a2 := Vector2(b["vx"], b["vy"]).angle()
 		var bpos := _to_screen(b["x"], b["y"])
-		# Soft red glow underlay: lethal things must read at a glance.
-		draw_circle(bpos, 5.0, Color(1.0, 0.3, 0.2, 0.28))
-		_spr("enemy_bullet", bpos, a2 + PI / 2, 0.55)
+		# Hostile fire: small glowing red orb — ordnance, not infantry.
+		draw_circle(bpos, 3.4, Color(1.0, 0.25, 0.15, 0.25))
+		draw_circle(bpos, 1.7, Color(1.0, 0.5, 0.3))
+		draw_circle(bpos, 0.9, Color(1.0, 0.9, 0.7))
 
 
 func _draw_players() -> void:

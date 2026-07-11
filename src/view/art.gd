@@ -79,9 +79,11 @@ const TEX := {
 ## Per-sprite draw multiplier so a legacy art bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
 const SCALE := {
-	# cast2 bakes use a 300px canvas — folded to the old 64px footprints.
-	"player1": 0.30, "player2": 0.24, "rusher": 0.25, "elite": 0.27,
-	"frogman": 0.77, "observer": 0.13, "bunker": 0.17,
+	# cast2 bakes use a 300px canvas. Enemies run LARGER than the strict
+	# old-footprint math: at ~7px the dark insurgents read as "black dots,
+	# or is that a bullet?" — straight from playtest.
+	"player1": 0.33, "player2": 0.27, "rusher": 0.36, "elite": 0.37,
+	"frogman": 0.77, "observer": 0.17, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
 	"sandbag": 0.83, "sandbag_beige": 0.83,
@@ -101,8 +103,8 @@ const TINT := {
 	"player1": Color(1.1, 1.12, 0.95), "player2": Color(1.18, 1.05, 0.85),
 	# Insurgents keep their own dark wardrobe — lifted, not olive-washed,
 	# so the factions never read as the same army.
-	"rusher": Color(1.15, 1.05, 0.9), "elite": Color(1.35, 0.75, 0.7),
-	"frogman": UNIT, "observer": Color(1.15, 1.0, 0.9),
+	"rusher": Color(1.35, 1.22, 1.0), "elite": Color(1.5, 0.8, 0.72),
+	"frogman": UNIT, "observer": Color(1.3, 1.12, 1.0),
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
 	"gunship_body": OLIVE_VEH, "colossus_body": OLIVE_VEH,
