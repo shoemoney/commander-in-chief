@@ -213,6 +213,22 @@ func _draw_terrain() -> void:
 			if h % 6 == 0:
 				draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(8, 8), Vector2(48, 48)), false,
 					Color(0.65, 0.6, 0.5, 0.55))
+	# Low fern understory scattered through the field (hash decorrelated from
+	# the tree grid so ferns and trees don't stack on the same cell).
+	for ty in 10:
+		var fy := oy + ty * 40.0
+		var fiy := int(floor((cam_y + fy) / 40.0))
+		for tx in 16:
+			var hf := Art.cell_hash(tx * 17 + 5, fiy * 3)
+			if hf % 5 != 0:
+				continue
+			var fx := tx * 42.0 + float(hf % 20) - 10.0
+			var fy_px := fy + float((hf / 5) % 16)
+			if sim._in_water(int(fx / PX), sim.camera_top + int(fy_px / PX)):
+				continue
+			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0,
+				0.28 + float(hf % 3) * 0.03, Color(0.82, 0.92, 0.72))
+
 	# Jungle tree lines on the flanks, sparse singles in the field.
 	for ty in 9:
 		var wy := oy + ty * 48.0
