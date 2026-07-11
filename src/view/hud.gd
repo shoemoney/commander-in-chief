@@ -55,9 +55,17 @@ func _draw() -> void:
 			if sim.last_stand:
 				_text("K.I.A.", px, ry + ICON - 3.0, Color(0.9, 0.35, 0.3))
 			else:
+				# Affordability at a glance: green if the chest covers it, red
+				# if not — the revive-or-hoard decision made legible.
+				var cost := sim.revive_cost(p)
+				var afford: bool = sim.war_chest >= cost
 				var blink := (Engine.get_physics_frames() / 20) % 2 == 0
-				var tx := _text("REVIVE %d" % sim.revive_cost(p), px, ry + ICON - 3.0,
-					Color(1.0, 0.85, 0.4) if blink else Color(0.85, 0.65, 0.35))
+				var col: Color
+				if afford:
+					col = Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4)
+				else:
+					col = Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3)
+				var tx := _text("REVIVE %d" % cost, px, ry + ICON - 3.0, col)
 				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0)
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]

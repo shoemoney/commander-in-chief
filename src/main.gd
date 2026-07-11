@@ -714,6 +714,10 @@ func _draw_tanks() -> void:
 		_spr("tank_barrel", c + Vector2.from_angle(barrel_angle) * 10.0, barrel_angle + PI / 2, 0.62, burn_mod)
 		if t["burning"]:
 			_spr("smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
+			# Bail-out countdown: the hidden ~3s lethal timer, made visible.
+			var bail := float(t["burn_ticks"]) / float(SimWorld.TANK_BAIL_TICKS)
+			var bc := Color(1.0, 0.35, 0.2) if bail > 0.35 else Color(1.0, 0.85, 0.2)
+			draw_arc(c, 20.0, -PI / 2, -PI / 2 + TAU * bail, 28, bc, 2.5)
 		elif t["occupant"] < 0:
 			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0)
 		# Cannon reload ring: the trigger isn't dead, it's cycling.
@@ -768,6 +772,16 @@ func _draw_observer() -> void:
 	_spr("observer", op, PI / 2, 0.5)
 	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
 	draw_rect(Rect2(op + Vector2(8, -12), Vector2(7, 5)), Color(0.9, 0.25, 0.2))
+	# Kill-me target reticle: the spotter is one-hit-killable and killing him
+	# ends the barrage — a second way out the ADVANCE directive never mentions.
+	var tp := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
+	var tr := 13.0 + tp * 3.0
+	var tcol := Color(1.0, 0.3, 0.25, 0.85)
+	for q in 4:
+		var qa := q * TAU / 4.0 + PI / 4.0
+		draw_arc(op, tr, qa - 0.5, qa + 0.5, 8, tcol, 1.5)
+	draw_string(ThemeDB.fallback_font, op + Vector2(-38, -20), "SILENCE THE SPOTTER",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
 
 
 func _draw_gunships() -> void:
@@ -840,11 +854,24 @@ func _draw_projectiles() -> void:
 		var land := base + Vector2(g["vx"], g["vy"]) * PX * tt
 		var lr := 6.0 if g.get("shell", false) else 4.5
 		var lc := Color(1.0, 0.95, 0.7, 0.55)
+		# Blast-radius preview: grenades are the ONLY armor damage, so show the
+		# true kill circle at the landing point — will this throw catch it?
+		var blast := SimWorld.GRENADE_RADIUS * PX
+		draw_arc(land, blast, 0, TAU, 28, Color(1.0, 0.55, 0.25, 0.35), 1.0)
 		draw_arc(land, lr, 0, TAU, 16, lc, 1.0)
 		draw_line(land + Vector2(-2.5, 0), land + Vector2(2.5, 0), lc, 1.0)
 		draw_line(land + Vector2(0, -2.5), land + Vector2(0, 2.5), lc, 1.0)
+	# Colossus ricochet: bullets do NOTHING to the finale (grenades only), but
+	# the sim never collides them — so ping them off the armor here to teach it.
+	var col_on: bool = not sim.colossus.is_empty() and sim.colossus.get("alive", false)
+	var col_pos := _to_screen(sim.colossus.get("x", 0), sim.colossus.get("y", 0)) if col_on else Vector2.ZERO
 	for b in sim.bullets:
 		var bpos := _to_screen(b["x"], b["y"])
+		if col_on and bpos.distance_to(col_pos) < SimWorld.COLOSSUS_HIT_RADIUS * PX + 4.0:
+			if (b["x"] / 4099 + Engine.get_physics_frames()) % 2 == 0:
+				draw_circle(bpos, 2.4, Color(1.0, 0.85, 0.4, 0.8))
+				draw_circle(bpos, 1.0, Color(1.0, 1.0, 0.9))
+			continue
 		var dir := Vector2(b["vx"], b["vy"]).normalized()
 		# Real tracer rounds: a thin hot streak with a bright head — small,
 		# fast-reading, and impossible to confuse with a person.
