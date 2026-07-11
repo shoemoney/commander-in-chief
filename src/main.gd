@@ -448,6 +448,7 @@ func _draw() -> void:
 	_draw_players()
 	_draw_fx()
 	_draw_telegraphs()
+	_draw_threat_edges()
 	_draw_wheel()
 	_draw_banners()
 
@@ -815,6 +816,21 @@ func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18)) -> voi
 	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
 
 
+func _draw_threat_edges() -> void:
+	# Chevrons on the bottom edge for live hostiles below the viewport —
+	# bypassed bunkers keep spawning behind you.
+	for e in sim.enemies:
+		if not e["alive"] or e.get("submerged", false):
+			continue
+		var sy := (e["y"] - sim.camera_top) * PX
+		if sy <= 364.0:
+			continue
+		var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
+		var col := Color(1.0, 0.35, 0.2, clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85))
+		draw_line(Vector2(sx - 4, 353), Vector2(sx, 358), col, 2.0)
+		draw_line(Vector2(sx, 358), Vector2(sx + 4, 353), col, 2.0)
+
+
 func _draw_wheel() -> void:
 	for i in sim.players.size():
 		if i >= _wheel.size() or not _wheel[i]["open"]:
@@ -896,9 +912,21 @@ func _draw_banners() -> void:
 		draw_string(f, Vector2(320 - w / 2.0, 70), _banner_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.92, 0.55, a))
 	if sim.victory:
-		draw_rect(Rect2(160, 150, 320, 60), Color(0, 0, 0, 0.7))
-		draw_string(ThemeDB.fallback_font, Vector2(238, 186), "V I C T O L Y !",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.3))
+		var vf := ThemeDB.fallback_font
+		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 115, 300, 135), false,
+			Color(1, 1, 1, 0.96))
+		var vpulse := 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
+		var tw := vf.get_string_size("V I C T O L Y !", HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+		draw_string(vf, Vector2(320 - tw / 2.0, 152), "V I C T O L Y !",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.85 * vpulse, 0.3 * vpulse))
+		draw_texture_rect(Art.tex("icon_medal"), Rect2(238, 168, 16, 16), false)
+		draw_string(vf, Vector2(260, 181), "SCORE  %d" % sim.score,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.96, 0.9))
+		draw_texture_rect(Art.tex("icon_coin"), Rect2(238, 190, 14, 14), false)
+		draw_string(vf, Vector2(260, 201), "WAR CHEST BANKED",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.92, 0.55))
+		draw_string(vf, Vector2(260, 220), "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.84, 0.74))
 	elif sim.last_stand:
 		draw_string(ThemeDB.fallback_font, Vector2(250, 350), "LAST STAND — NO REVIVES",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
