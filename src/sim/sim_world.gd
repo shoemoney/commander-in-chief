@@ -84,8 +84,11 @@ const WAVE_ENEMIES_PER_WAVE := 2
 const WAVE_SPAWN_INTERVAL_TICKS := 20
 const WAVE_INTERMISSION_TICKS := 300
 const SHOP_AMMO_COST := 30
+const SHOP_GRENADE_COST := 30
 const SHOP_VEST_COST := 60
 const SHOP_AIRSTRIKE_COST := 100
+# Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
+const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST]
 # Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
 # it advances DOWN the map at the players. Armor: grenades only. Three
 # phases by HP thirds. Engaging it triggers the Last Stand rule: no more
@@ -192,6 +195,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"boost_ticks": 0,
 			"in_tank": -1,
 			"interact_prev": false,
+			"buy_prev": 0,
 			"vest": false,
 			"hurt_iframes": 0,
 		})
@@ -245,10 +249,16 @@ func _step_players(inputs: Array) -> void:
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
+		var buy_edge: bool = inp.buy > 0 and p["buy_prev"] == 0
+		p["buy_prev"] = inp.buy
 
 		if not p["alive"]:
 			_step_dead_player(i, p, inp)
 			continue
+
+		# Spend-wheel purchases work on foot and from the tank (radio op).
+		if buy_edge:
+			_try_buy(p, inp.buy - 1)
 
 		if p["in_tank"] >= 0:
 			_drive_tank(i, p, inp, interact_edge)
@@ -345,15 +355,7 @@ func _step_players(inputs: Array) -> void:
 				if cost > 0 and war_chest < cost:
 					continue
 				war_chest -= cost
-				match pk["kind"]:
-					0:
-						p["mg_ammo"] = mini(MG_AMMO_MAX, p["mg_ammo"] + 30)
-					1:
-						p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 4)
-					2:
-						p["vest"] = true
-					3:
-						_fire_mission()
+				_apply_supply(p, pk["kind"])
 				events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
 					"kind": pk["kind"], "cost": cost})
 				pickups.remove_at(k)
@@ -457,6 +459,33 @@ func _fire_mission() -> void:
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false):
 			_kill_enemy(e)
+
+
+func _apply_supply(p: Dictionary, kind: int) -> void:
+	## One supply grammar shared by ground pickups, shop crates and buys.
+	match kind:
+		0:
+			p["mg_ammo"] = mini(MG_AMMO_MAX, p["mg_ammo"] + 30)
+		1:
+			p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 4)
+		2:
+			p["vest"] = true
+		3:
+			_fire_mission()
+
+
+func _try_buy(p: Dictionary, kind: int) -> void:
+	## Spend-wheel purchase: supplies radioed in, paid from the shared
+	## War Chest — the same pool that funds revives. That's the decision.
+	if kind < 0 or kind >= SUPPLY_COSTS.size():
+		return
+	var cost: int = SUPPLY_COSTS[kind]
+	if war_chest < cost:
+		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
+		return
+	war_chest -= cost
+	_apply_supply(p, kind)
+	events.append({"t": "buy", "x": p["x"], "y": p["y"], "kind": kind})
 
 
 # --- Tank ---

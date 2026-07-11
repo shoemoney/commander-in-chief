@@ -5,8 +5,9 @@ extends Node2D
 ##
 ## Controls (P3):
 ##   P1 — WASD move, arrow keys aim, Space fire, Shift grenade, C roll,
-##        F interact (board/exit tank), E revive
-##   Gamepad — LS move, RS aim, RT/R1 fire, L1 grenade, B roll, X interact, Y revive
+##        F interact (board/exit tank), E revive, Q (hold) spend-wheel
+##   Gamepad — LS move, RS aim, RT/R1 fire, L1 grenade, B roll, X interact,
+##        Y revive, BACK (hold) spend-wheel
 ##   F2 toggles local 2P · F3 toggles Endless War · R restarts.
 
 const PX := 1.0 / Fixed.ONE
@@ -22,6 +23,15 @@ var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _kick := Vector2.ZERO         # directional screen nudge from firing
+# War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
+var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
+const WHEEL_ITEMS := [
+	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST},
+	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST},
+	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST},
+	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST},
+]
+const _SECTOR_TO_ITEM := [2, 3, 0, 1]   # right=vest, down=airstrike, left=ammo, up=grenade
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
@@ -46,6 +56,8 @@ const _EVENT_SOUND := {
 	"wave_clear": ["wave_clear", -5.0, 1.0],
 	"colossus_engage": ["alarm", 0.0, 0.75],
 	"victory": ["victory", 0.0, 1.0],
+	"buy": ["buy", -4.0, 1.0],
+	"deny": ["deny", -6.0, 1.0],
 }
 
 @onready var hud: Label = $HUD/Label
@@ -68,6 +80,7 @@ func _reset() -> void:
 	_fx.clear()
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
+	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -201,6 +214,9 @@ func _gather_inputs() -> Array:
 	p1.roll = Input.is_physical_key_pressed(KEY_C) or Input.is_joy_button_pressed(0, JOY_BUTTON_B)
 	p1.interact = Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(0, JOY_BUTTON_X)
 	p1.revive = Input.is_physical_key_pressed(KEY_E) or Input.is_joy_button_pressed(0, JOY_BUTTON_Y)
+	p1.buy = _update_wheel(0,
+		Input.is_physical_key_pressed(KEY_Q) or Input.is_joy_button_pressed(0, JOY_BUTTON_BACK),
+		Vector2(ax, ay), Vector2(kx, ky))
 	inputs.append(p1)
 
 	if _two_players:
@@ -215,8 +231,31 @@ func _gather_inputs() -> Array:
 		p2.roll = Input.is_joy_button_pressed(1, JOY_BUTTON_B)
 		p2.interact = Input.is_joy_button_pressed(1, JOY_BUTTON_X)
 		p2.revive = Input.is_joy_button_pressed(1, JOY_BUTTON_Y)
+		p2.buy = _update_wheel(1, Input.is_joy_button_pressed(1, JOY_BUTTON_BACK),
+			Vector2(Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)),
+			Vector2(Input.get_joy_axis(1, JOY_AXIS_LEFT_X), Input.get_joy_axis(1, JOY_AXIS_LEFT_Y)))
 		inputs.append(p2)
 	return inputs
+
+
+func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
+	## Hold to open, flick aim (or move) to pick a sector, release to buy.
+	## Selection is sticky; releasing with nothing picked cancels. Returns the
+	## SimInput.buy value (kind + 1) for exactly one tick on purchase.
+	var w := _wheel[i]
+	if held:
+		w["open"] = true
+		var dir := aim if aim.length() > 0.3 else move
+		if dir.length() > 0.3:
+			w["sel"] = int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4
+		return 0
+	if w["open"]:
+		w["open"] = false
+		var sel: int = w["sel"]
+		w["sel"] = -1
+		if sel >= 0:
+			return WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]["kind"] + 1
+	return 0
 
 
 func _quantize_axis(v: float) -> int:
@@ -273,6 +312,7 @@ func _draw() -> void:
 	_draw_players()
 	_draw_fx()
 	_draw_telegraphs()
+	_draw_wheel()
 	_draw_banners()
 
 
@@ -576,6 +616,31 @@ func _draw_telegraphs() -> void:
 		draw_arc(sp, r * frac, 0, TAU, 28, col, 2.0)
 		draw_line(sp + Vector2(-5, 0), sp + Vector2(5, 0), col, 1.5)
 		draw_line(sp + Vector2(0, -5), sp + Vector2(0, 5), col, 1.5)
+
+
+func _draw_wheel() -> void:
+	for i in sim.players.size():
+		if i >= _wheel.size() or not _wheel[i]["open"]:
+			continue
+		var p := sim.players[i]
+		if not p["alive"]:
+			continue
+		var c := _to_screen(p["x"], p["y"])
+		draw_circle(c, 36.0, Color(0.04, 0.07, 0.04, 0.6))
+		draw_arc(c, 36.0, 0, TAU, 40, Color(0.9, 0.95, 0.8, 0.5), 1.5)
+		for s in 4:
+			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
+			var ipos := c + Vector2.from_angle(s * TAU / 4.0) * 23.0
+			var afford: bool = sim.war_chest >= item["cost"]
+			if _wheel[i]["sel"] == s:
+				draw_circle(ipos, 12.0, Color(1.0, 0.9, 0.4, 0.28 if afford else 0.12))
+				draw_arc(ipos, 12.0, 0, TAU, 24, Color(1.0, 0.9, 0.4, 0.9), 1.5)
+			var mod := Color.WHITE if afford else Color(0.8, 0.35, 0.35, 0.55)
+			draw_texture_rect(Art.tex(item["icon"]), Rect2(ipos - Vector2(8, 8), Vector2(16, 16)),
+				false, mod)
+			draw_string(ThemeDB.fallback_font, ipos + Vector2(-7, 17), str(item["cost"]),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
+				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
 
 
 func _draw_banners() -> void:

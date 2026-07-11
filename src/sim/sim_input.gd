@@ -15,17 +15,19 @@ var grenade: bool = false
 var revive: bool = false
 var roll: bool = false
 var interact: bool = false
+var buy: int = 0   # War Chest spend-wheel: 0 = none, 1..4 = supply kind + 1
 
 
 func hash_ints() -> Array[int]:
-	return [move_x, move_y, aim_x, aim_y, int(fire), int(grenade), int(revive), int(roll), int(interact)]
+	return [move_x, move_y, aim_x, aim_y, int(fire), int(grenade), int(revive), int(roll),
+		int(interact), buy]
 
 
 func encode() -> Array[int]:
-	## Compact wire format: 4 quantized axes + a button bitmask. Int-only —
-	## this is what lockstep sends and what replays store.
+	## Compact wire format: 4 quantized axes + a button bitmask (buy rides in
+	## bits 5-7). Int-only — this is what lockstep sends and what replays store.
 	var flags := int(fire) | (int(grenade) << 1) | (int(revive) << 2) \
-		| (int(roll) << 3) | (int(interact) << 4)
+		| (int(roll) << 3) | (int(interact) << 4) | ((buy & 7) << 5)
 	return [move_x, move_y, aim_x, aim_y, flags]
 
 
@@ -41,4 +43,5 @@ static func decode(data: Array) -> SimInput:
 	inp.revive = (flags & 4) != 0
 	inp.roll = (flags & 8) != 0
 	inp.interact = (flags & 16) != 0
+	inp.buy = (flags >> 5) & 7
 	return inp

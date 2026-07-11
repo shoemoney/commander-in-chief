@@ -55,6 +55,50 @@ func test_broke_fallback_respawns_at_gate() -> void:
 	Runner.T.ok(p["alive"], "broke fallback respawned player after penalty wait")
 
 
+func test_buy_spends_chest_and_delivers() -> void:
+	var sim := SimWorld.new(7, 1)
+	var p := sim.players[0]
+	p["mg_ammo"] = 10
+	sim.war_chest = 100
+	var buy := SimInput.new()
+	buy.buy = 1   # kind 0 = ammo
+	sim.step([buy])
+	Runner.T.eq(sim.war_chest, 100 - SimWorld.SHOP_AMMO_COST, "buy spent the chest")
+	Runner.T.eq(p["mg_ammo"], 40, "ammo delivered (+30)")
+
+
+func test_buy_denied_when_broke() -> void:
+	var sim := SimWorld.new(7, 1)
+	var p := sim.players[0]
+	sim.war_chest = SimWorld.SHOP_VEST_COST - 1
+	var buy := SimInput.new()
+	buy.buy = 3   # kind 2 = vest
+	sim.step([buy])
+	Runner.T.eq(sim.war_chest, SimWorld.SHOP_VEST_COST - 1, "broke buy left the chest alone")
+	Runner.T.ok(not p["vest"], "no vest delivered")
+
+
+func test_buy_is_edge_triggered() -> void:
+	# Holding the buy input across ticks must purchase exactly once.
+	var sim := SimWorld.new(7, 1)
+	sim.war_chest = 500
+	var buy := SimInput.new()
+	buy.buy = 2   # kind 1 = grenades
+	for i in 10:
+		sim.step([buy])
+	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_GRENADE_COST, "held buy purchased once")
+
+
+func test_buy_survives_input_wire_roundtrip() -> void:
+	var inp := SimInput.new()
+	inp.buy = 4
+	inp.fire = true
+	inp.interact = true
+	var back := SimInput.decode(inp.encode())
+	Runner.T.eq(back.buy, 4, "buy survives encode/decode")
+	Runner.T.ok(back.fire and back.interact, "existing buttons unharmed by buy bits")
+
+
 func test_kills_mint_coin() -> void:
 	var sim := SimWorld.new(7, 1)
 	sim._spawn_enemy(100 * Fixed.ONE, -100 * Fixed.ONE, false)
