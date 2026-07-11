@@ -19,11 +19,38 @@ var _trauma := 0.0
 var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+var _sfx := Sfx.new()
+
+## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
+const _EVENT_SOUND := {
+	"shot": ["shot", -9.0, 1.0],
+	"tank_shot": ["tank_shot", -3.0, 1.0],
+	"throw": ["throw", -8.0, 1.0],
+	"roll": ["roll", -8.0, 1.0],
+	"explosion": ["explosion", -2.0, 1.0],
+	"kill": ["kill", -7.0, 1.0],
+	"player_down": ["player_down", 0.0, 1.0],
+	"vest_break": ["vest_break", -2.0, 1.0],
+	"gate_open": ["gate_open", -4.0, 1.0],
+	"revive": ["revive", -5.0, 1.0],
+	"tank_board": ["tank_board", -5.0, 1.0],
+	"tank_ignite": ["alarm", -4.0, 1.1],
+	"observer_spawn": ["alarm", -3.0, 1.0],
+	"strike_warn": ["whistle", -6.0, 1.0],
+	"enemy_shot": ["enemy_shot", -12.0, 1.0],
+	"bunker_break": ["explosion", -4.0, 0.72],
+	"frogman_surface": ["splash", -4.0, 1.0],
+	"wave_start": ["wave_start", -5.0, 1.0],
+	"wave_clear": ["wave_clear", -5.0, 1.0],
+	"colossus_engage": ["alarm", 0.0, 0.75],
+	"victory": ["victory", 0.0, 1.0],
+}
 
 @onready var hud: Label = $HUD/Label
 
 
 func _ready() -> void:
+	add_child(_sfx)
 	_reset()
 
 
@@ -60,13 +87,24 @@ func _physics_process(_delta: float) -> void:
 
 func _consume_events() -> void:
 	for ev in sim.events:
-		match ev["t"]:
+		var kind: String = ev["t"]
+		if kind == "pickup":
+			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
+		elif _EVENT_SOUND.has(kind):
+			var snd: Array = _EVENT_SOUND[kind]
+			_sfx.play(snd[0], snd[1], snd[2])
+		match kind:
 			"explosion":
 				_trauma = minf(1.0, _trauma + 0.35)
 				_hitstop_frames = maxi(_hitstop_frames, 4)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 			"kill":
 				_flash_alpha = maxf(_flash_alpha, 0.2)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+			"player_down":
+				_trauma = minf(1.0, _trauma + 0.5)
+				_hitstop_frames = maxi(_hitstop_frames, 6)
+				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)

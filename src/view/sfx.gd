@@ -1,0 +1,202 @@
+class_name Sfx
+extends Node
+## Procedural SFX for the view layer. Every sound is synthesized once at load
+## into an AudioStreamWAV (no audio assets, nothing to license), then fired
+## through a single polyphonic player on a dedicated "SFX" bus with a hard
+## limiter so stacked MG fire can't clip. View-only: the sim never hears this.
+
+const RATE := 22050
+
+var _sounds: Dictionary = {}
+var _player := AudioStreamPlayer.new()
+var _pb: AudioStreamPlaybackPolyphonic
+
+
+func _ready() -> void:
+	if AudioServer.get_bus_index("SFX") == -1:
+		var idx := AudioServer.get_bus_count()
+		AudioServer.add_bus(idx)
+		AudioServer.set_bus_name(idx, "SFX")
+		AudioServer.set_bus_send(idx, "Master")
+		AudioServer.add_bus_effect(idx, AudioEffectHardLimiter.new())
+	var poly := AudioStreamPolyphonic.new()
+	poly.polyphony = 32
+	_player.stream = poly
+	_player.bus = "SFX"
+	add_child(_player)
+	_player.play()
+	_pb = _player.get_stream_playback()
+	_synth_all()
+
+
+func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
+	if _pb == null or not _sounds.has(sound):
+		return
+	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch * randf_range(0.94, 1.06))
+
+
+# --- Synthesis toolkit -------------------------------------------------------
+
+static func _nz(i: int) -> float:
+	# Stateless hash noise: same sound every run, no RNG state.
+	var x := sin(float(i) * 12.9898) * 43758.5453
+	return 2.0 * (x - floor(x)) - 1.0
+
+
+static func _sq(t: float, f: float) -> float:
+	return 1.0 if sin(TAU * f * t) >= 0.0 else -1.0
+
+
+static func _sweep(t: float, f0: float, f1: float, dur: float) -> float:
+	# Sine with linearly swept frequency (integrated phase).
+	return sin(TAU * (f0 * t + (f1 - f0) * t * t / (2.0 * dur)))
+
+
+func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
+	var data := PackedByteArray()
+	data.resize(samples.size() * 2)
+	for i in samples.size():
+		data.encode_s16(i * 2, int(clampf(samples[i], -1.0, 1.0) * 32000.0))
+	var s := AudioStreamWAV.new()
+	s.format = AudioStreamWAV.FORMAT_16_BITS
+	s.mix_rate = RATE
+	s.data = data
+	return s
+
+
+func _buf(dur: float) -> PackedFloat32Array:
+	var b := PackedFloat32Array()
+	b.resize(int(dur * RATE))
+	return b
+
+
+func _notes(freqs: Array, note_dur: float, gap := 0.0, square := true) -> PackedFloat32Array:
+	# Simple arpeggio: each note decays, optional gap between notes.
+	var step := note_dur + gap
+	var b := _buf(freqs.size() * step)
+	for k in freqs.size():
+		var f: float = freqs[k]
+		var start := int(k * step * RATE)
+		for j in int(note_dur * RATE):
+			var t := float(j) / RATE
+			var v := (_sq(t, f) if square else sin(TAU * f * t)) * exp(-t * 9.0) * 0.5
+			b[start + j] += v
+	return b
+
+
+func _synth_all() -> void:
+	var s := {}
+
+	# MG shot: noise crack + swept thump. Short and punchy — it plays a lot.
+	var shot := _buf(0.09)
+	for i in shot.size():
+		var t := float(i) / RATE
+		shot[i] = _nz(i) * exp(-t * 55.0) * 0.9 + _sweep(t, 240.0, 150.0, 0.09) * exp(-t * 28.0) * 0.5
+	s["shot"] = shot
+
+	# Enemy fire: duller, quieter cousin of the MG so it reads as "not yours".
+	var eshot := _buf(0.08)
+	for i in eshot.size():
+		var t := float(i) / RATE
+		eshot[i] = _nz(i * 3 + 7) * exp(-t * 40.0) * 0.5 + sin(TAU * 130.0 * t) * exp(-t * 30.0) * 0.4
+	s["enemy_shot"] = eshot
+
+	# Tank cannon: long low sweep + heavy noise.
+	var cannon := _buf(0.5)
+	for i in cannon.size():
+		var t := float(i) / RATE
+		cannon[i] = _sweep(t, 150.0, 45.0, 0.5) * exp(-t * 6.0) * 0.9 + _nz(i) * exp(-t * 12.0) * 0.6
+	s["tank_shot"] = cannon
+
+	# Grenade throw: quick airy fwip.
+	var fwip := _buf(0.12)
+	for i in fwip.size():
+		var t := float(i) / RATE
+		fwip[i] = _sweep(t, 520.0, 160.0, 0.12) * sin(PI * t / 0.12) * 0.5
+	s["throw"] = fwip
+
+	# Explosion: crack, darkened-noise body, sub rumble.
+	var boom := _buf(0.7)
+	var lp := 0.0
+	for i in boom.size():
+		var t := float(i) / RATE
+		lp = lp * 0.92 + _nz(i) * 0.08   # one-pole lowpass = dark rumble noise
+		boom[i] = _nz(i) * exp(-t * 60.0) * 0.9 + lp * 8.0 * exp(-t * 5.0) \
+			+ _sweep(t, 95.0, 40.0, 0.7) * exp(-t * 4.5) * 0.7
+	s["explosion"] = boom
+
+	# Enemy kill: classic arcade falling blip.
+	var kill := _buf(0.15)
+	for i in kill.size():
+		var t := float(i) / RATE
+		kill[i] = _sq(t, 400.0 - t * 2000.0) * exp(-t * 18.0) * 0.45
+	s["kill"] = kill
+
+	# Player down: dramatic dive + noise — must cut through everything.
+	var down := _buf(0.6)
+	for i in down.size():
+		var t := float(i) / RATE
+		down[i] = _sq(t, 320.0 - t * 450.0) * exp(-t * 5.0) * 0.6 + _nz(i) * exp(-t * 9.0) * 0.35
+	s["player_down"] = down
+
+	# Roll: short whoosh (shaped noise).
+	var roll := _buf(0.16)
+	var lp2 := 0.0
+	for i in roll.size():
+		var t := float(i) / RATE
+		lp2 = lp2 * 0.85 + _nz(i) * 0.15
+		var env := sin(PI * t / 0.16)
+		roll[i] = lp2 * 3.0 * env * env * 0.8
+	s["roll"] = roll
+
+	# Splash: frogman surfacing — dark noise burst with a falling body.
+	var splash := _buf(0.3)
+	var lp3 := 0.0
+	for i in splash.size():
+		var t := float(i) / RATE
+		lp3 = lp3 * 0.9 + _nz(i) * 0.1
+		splash[i] = lp3 * 5.0 * exp(-t * 11.0) + _sweep(t, 300.0, 90.0, 0.3) * exp(-t * 10.0) * 0.4
+	s["splash"] = splash
+
+	# Mortar whistle: the falling shell — long, quiet, unmistakable.
+	var whis := _buf(0.55)
+	for i in whis.size():
+		var t := float(i) / RATE
+		whis[i] = _sweep(t, 1500.0, 650.0, 0.55) * sin(PI * t / 0.55) * 0.28
+	s["whistle"] = whis
+
+	# Alarm: two-tone siren beep (observer spotted, tank on fire).
+	var alarm := _buf(0.44)
+	for i in alarm.size():
+		var t := float(i) / RATE
+		var f := 820.0 if fmod(t, 0.22) < 0.11 else 620.0
+		alarm[i] = _sq(t, f) * 0.3 * minf(1.0, (0.44 - t) * 14.0)
+	s["alarm"] = alarm
+
+	# Vest break: metallic clang — detuned partials + noise snap.
+	var clang := _buf(0.28)
+	for i in clang.size():
+		var t := float(i) / RATE
+		clang[i] = (sin(TAU * 1180.0 * t) + sin(TAU * 1620.0 * t) * 0.7 + sin(TAU * 2140.0 * t) * 0.5) \
+			* exp(-t * 13.0) * 0.35 + _nz(i) * exp(-t * 50.0) * 0.5
+	s["vest_break"] = clang
+
+	# Tank board: mechanical clunk.
+	var clunk := _buf(0.18)
+	for i in clunk.size():
+		var t := float(i) / RATE
+		clunk[i] = sin(TAU * 85.0 * t) * exp(-t * 25.0) * 0.9 + _nz(i) * exp(-t * 70.0) * 0.6
+	s["tank_board"] = clunk
+
+	# Jingles and blips.
+	s["pickup"] = _notes([660.0, 990.0], 0.07)
+	s["buy"] = _notes([523.0, 659.0, 784.0], 0.07)
+	s["deny"] = _notes([220.0, 196.0], 0.09)
+	s["revive"] = _notes([392.0, 523.0, 659.0], 0.08, 0.0, false)
+	s["gate_open"] = _notes([392.0, 494.0, 587.0, 784.0], 0.1)
+	s["wave_start"] = _notes([262.0, 330.0], 0.14)
+	s["wave_clear"] = _notes([523.0, 659.0, 784.0], 0.1)
+	s["victory"] = _notes([523.0, 587.0, 659.0, 784.0, 1047.0], 0.16)
+
+	for k in s:
+		_sounds[k] = _to_wav(s[k])
