@@ -1,5 +1,8 @@
 # Toolchain lock — upgrades only at phase boundaries after the replay
 # regression suite passes on all platforms (see docs/PLAN.md §4).
-godot_version=4.6.3-stable
-godot_linux_x86_64_zip_sha256=d0bc2113065e481c9c2c2b2c37daa4e8be3fe9e27f0ab9ab0b6096e9a37907f3
-godot_download_base=https://downloads.godotengine.org/
+# 4.6.3 → 4.7: full suite incl. determinism goldens passed unchanged on 4.7
+# (the pure-int sim reproduces the committed checksums — no golden re-record).
+# Hash is sha256 of the official GitHub release zip, verified against 4.6.3's.
+godot_version=4.7-stable
+godot_linux_x86_64_zip_sha256=0b1a6c54c2c619c12e169fe9241edda4b81080b519451cec2984bf0d2c6cb73c
+godot_download_base=https://github.com/godotengine/godot/releases/download/

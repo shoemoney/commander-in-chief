@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Project Ikari is a deterministic twin-stick vertical run-and-gun (modern *Ikari Warriors* remake) on **Godot 4.6.3 / GDScript**. The repo is currently at the **P3 greybox** milestone; `docs/PLAN.md` is the full P0–P7 production plan (much of it aspirational). **The sim code is the source of truth for what actually exists** — don't assume a feature described in the plan or README is implemented.
+Project Ikari is a deterministic twin-stick vertical run-and-gun (modern *Ikari Warriors* remake) on **Godot 4.7 / GDScript**. The repo is currently at the **P3 greybox** milestone; `docs/PLAN.md` is the full P0–P7 production plan (much of it aspirational). **The sim code is the source of truth for what actually exists** — don't assume a feature described in the plan or README is implemented.
 
 ## Commands
 
@@ -50,6 +50,6 @@ The same discipline applies to `checksum()` itself: if you add a sim field that 
 
 - **Modes**: `SimWorld._init(seed, player_count, mode)` where mode is `"campaign"` or `"endless"`. `main.gd` hard-codes seed `0xC0FFEE`; F2 toggles 2P, F3 toggles Endless War, R restarts.
 - **Fixed-point**: multiply/divide via `Fixed.mul`/`Fixed.div`, never `*`/`/` on two fixed values directly. Constants suffixed `_TICKS`/`_RAW` are not fixed-point; everything else in the sim is.
-- **`.gd.uid` files** are Godot 4.6 script-UID sidecars — committed, machine-generated, don't hand-edit.
+- **`.gd.uid` files** are Godot 4.x script-UID sidecars — committed, machine-generated, don't hand-edit.
 - **Assets** in `assets/kenney/` are CC0 (Kenney) interim greybox art; no generative-AI assets ship (per plan policy). `.import` files are generated on `--import`.
 - The README/PLAN reference a CI pipeline (float/RNG lint, cross-arch runners). There is currently **no `.github/workflows` in the repo** — the determinism guarantee is carried by `test_determinism.gd`, which you should run locally.

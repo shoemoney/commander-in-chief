@@ -11,7 +11,8 @@ const TICKS := 3600           # 60 seconds of 2P combat
 const SAMPLE_EVERY := 600     # checksum every 10 seconds
 const SEED := 0xDEADBEEF
 
-## Golden checksums recorded on first green run (Linux x86_64, Godot 4.6.3).
+## Golden checksums recorded on first green run (Linux x86_64, Godot 4.6.3;
+## re-verified unchanged on Godot 4.7 and Apple Silicon arm64).
 ## If these ever change, determinism broke — do NOT re-record without
 ## understanding why. An empty array prints values to record.
 ## RE-RECORDED at the P3 session boundary (2026-07-08): the hurt pipeline

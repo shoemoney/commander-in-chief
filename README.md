@@ -5,7 +5,7 @@ twin-stick move/aim, grenades-vs-armor, one-hit deaths, red-elite power-up drops
 infinite-spawn bunkers, a ratchet scroll camera, and the **War Chest** — a shared
 coin economy where every kill mints and every revive spends.
 
-Built on **Godot 4.6.3 / GDScript** around a deterministic, render-free simulation core
+Built on **Godot 4.7 / GDScript** around a deterministic, render-free simulation core
 (`src/sim/`, fixed 60 Hz, 16.16 fixed-point integer math, seeded RNG). The scene tree
 (`src/main.gd`) is only a view. Determinism is enforced by CI lint and replay-checksum
 golden tests, and does triple duty per the master plan: lockstep netcode, regression
@@ -15,8 +15,8 @@ The full production plan is in [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Running on a Mac (M4 / any Apple Silicon)
 
-1. Download **Godot 4.6.3 (stable)** — the standard build, `macos.universal.zip` — from
-   <https://godotengine.org/download/archive/4.6.3-stable/>. The `.app` is a universal
+1. Download **Godot 4.7 (stable)** — the standard build, `macos.universal.zip` — from
+   <https://godotengine.org/download/archive/4.7-stable/>. The `.app` is a universal
    binary and runs **natively on Apple Silicon (M1–M4)**.
 2. Unzip, then either:
    - Open Godot, click **Import**, and select this folder's `project.godot`, then press **⌘R**; or
@@ -96,7 +96,7 @@ suite — Godot's global class cache must pick them up (CI already does this).
 ## Layout
 
 ```
-project.godot        Godot 4.6.3 project (640×360 virtual res, 60 Hz physics)
+project.godot        Godot 4.7 project (640×360 virtual res, 60 Hz physics)
 src/sim/             Deterministic core — int-only; floats/engine RNG banned by CI lint
 src/main.gd|.tscn    Greybox view + input quantization boundary
 tests/               Headless runner + suites (incl. determinism goldens)
