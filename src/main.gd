@@ -27,6 +27,8 @@ var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
 var _dry_frame := -100            # rate-limits the dry-fire click
+var _seen_bosses := {}            # gate_y → true once the gunship intro played
+var _prev_colossus_phase := 0     # phase-change escalation banners
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 const WHEEL_ITEMS := [
@@ -99,6 +101,8 @@ func _reset() -> void:
 	_damage_vignette = 0.0
 	_banner_text = ""
 	_banner_t = 0.0
+	_seen_bosses = {}
+	_prev_colossus_phase = 0
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -127,6 +131,7 @@ func _physics_process(_delta: float) -> void:
 	else:
 		sim.step(_gather_inputs())
 		_consume_events()
+		_check_boss_intro()
 	_update_feel()
 	queue_redraw()
 	_update_hud()
@@ -188,7 +193,8 @@ func _consume_events() -> void:
 				_hitstop_frames = maxi(_hitstop_frames, 4)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 			"kill":
-				_flash_alpha = maxf(_flash_alpha, 0.2)
+				# No screen flash here: at kill-spam rates it strobes
+				# (photosensitivity); smoke + blip + coin float carry it.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Big bounties get a moment; rusher pennies would be spam.
 				if ev.get("coin", 0) >= 25:
@@ -222,6 +228,30 @@ func _consume_events() -> void:
 			"victory":
 				_trauma = 1.0
 				_flash_alpha = 0.6
+
+
+func _check_boss_intro() -> void:
+	# The Gunship deserves an arrival moment; the sim has no "engage" state,
+	# so first-sight detection lives here in the view.
+	for g in sim.gates:
+		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
+			continue
+		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
+			continue
+		if _seen_bosses.has(g["y"]):
+			continue
+		_seen_bosses[g["y"]] = true
+		_show_banner("BRIDGE GUNSHIP")
+		_sfx.play("alarm", -2.0, 0.85)
+		_trauma = minf(1.0, _trauma + 0.3)
+	# Colossus escalation announcements.
+	var phase := sim.colossus_phase()
+	if phase > _prev_colossus_phase and phase >= 2:
+		_show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
+			else "COLOSSUS CRITICAL — SAPPERS OUT")
+		_sfx.play("alarm", -3.0, 0.7)
+	if phase != _prev_colossus_phase:
+		_prev_colossus_phase = phase
 
 
 func _show_banner(text: String) -> void:
@@ -653,6 +683,12 @@ func _draw_players() -> void:
 				_spr(tex_name, pos - rdir * 5.0, angle, 0.52, Color(1, 1, 1, 0.28))
 			elif p["hurt_iframes"] > 0 and (p["hurt_iframes"] / 4) % 2 == 0:
 				mod = Color(1, 1, 1, 0.4)   # mercy-window blink
+			# Wading: ripple rings at the feet say "slow, no roll" at a glance.
+			if sim._in_water(p["x"], p["y"]):
+				var wt := float((Engine.get_physics_frames() + i * 31) % 50) / 50.0
+				draw_arc(pos + Vector2(0, 4), 4.0 + wt * 8.0, 0, TAU, 16,
+					Color(0.75, 0.9, 1.0, 0.5 * (1.0 - wt)), 1.2)
+				draw_arc(pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
 			_spr(tex_name, pos, angle, 0.52, mod)
 			if p["vest"]:
 				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
@@ -803,6 +839,16 @@ func _draw_banners() -> void:
 			Color(0.85, 0.12, 0.08, minf(1.0, vig)))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha))
+	# Stall warning: the observer's clock is running — telegraph the
+	# punishment before it arrives, not after.
+	if sim.mode == "campaign" and sim.observer.is_empty() \
+			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180:
+		var pulse := 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
+		var wtxt := "MORTARS RANGING — ADVANCE!"
+		var wf := ThemeDB.fallback_font
+		var ww := wf.get_string_size(wtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		draw_string(wf, Vector2(320 - ww / 2.0, 46), wtxt,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.4, 0.25, pulse))
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if _banner_t > 0.01 and not _banner_text.is_empty():
 		var a := minf(1.0, _banner_t * 4.0) * minf(1.0, (1.0 - _banner_t) * 8.0 + 0.2)

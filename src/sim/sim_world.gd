@@ -958,9 +958,10 @@ func _step_waves() -> void:
 		intermission_ticks = WAVE_INTERMISSION_TICKS
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
-		pickups.append({"x": 200 * F_ONE, "y": shop_y, "kind": 0, "cost": SHOP_AMMO_COST})
-		pickups.append({"x": 320 * F_ONE, "y": shop_y, "kind": 2, "cost": SHOP_VEST_COST})
-		pickups.append({"x": 440 * F_ONE, "y": shop_y, "kind": 3, "cost": SHOP_AIRSTRIKE_COST})
+		pickups.append({"x": 170 * F_ONE, "y": shop_y, "kind": 0, "cost": SHOP_AMMO_COST})
+		pickups.append({"x": 290 * F_ONE, "y": shop_y, "kind": 1, "cost": SHOP_GRENADE_COST})
+		pickups.append({"x": 410 * F_ONE, "y": shop_y, "kind": 2, "cost": SHOP_VEST_COST})
+		pickups.append({"x": 530 * F_ONE, "y": shop_y, "kind": 3, "cost": SHOP_AIRSTRIKE_COST})
 
 
 func _start_wave() -> void:

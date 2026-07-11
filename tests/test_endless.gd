@@ -29,7 +29,7 @@ func test_wave_one_spawns_and_escalates() -> void:
 	for pk in sim.pickups:
 		if pk.get("cost", 0) > 0:
 			shop_crates += 1
-	Runner.T.eq(shop_crates, 3, "shop stocked three priced crates")
+	Runner.T.eq(shop_crates, 4, "shop stocked four priced crates (ammo/grenade/vest/airstrike)")
 	# Ride out the intermission: wave 2 with a bigger budget.
 	for i in SimWorld.WAVE_INTERMISSION_TICKS + 2:
 		sim.step([_idle()])
