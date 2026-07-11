@@ -35,6 +35,15 @@ const TEX := {
 	"tree_large": preload(SY + "tree_large.png"),
 	"tree_small": preload(SY + "tree_small.png"),
 	"fern": preload(SY + "fern.png"),
+	# --- legacy art icon bakes (HUD + spend-wheel) ---
+	"icon_ammo": preload(SY + "icons/icon_ammo.png"),
+	"icon_grenade": preload(SY + "icons/icon_grenade.png"),
+	"icon_coin": preload(SY + "icons/icon_coin.png"),
+	"icon_fuel": preload(SY + "icons/icon_fuel.png"),
+	"icon_vest": preload(SY + "icons/icon_vest.png"),
+	"icon_skull": preload(SY + "icons/icon_skull.png"),
+	"icon_medal": preload(SY + "icons/icon_medal.png"),
+	"icon_airstrike": preload(SY + "icons/icon_airstrike.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),

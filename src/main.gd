@@ -49,10 +49,14 @@ const _EVENT_SOUND := {
 }
 
 @onready var hud: Label = $HUD/Label
+var _hud_icons := HudIcons.new()
 
 
 func _ready() -> void:
 	add_child(_sfx)
+	hud.visible = false   # superseded by the icon HUD
+	_hud_icons.main = self
+	$HUD.add_child(_hud_icons)
 	_reset()
 
 
@@ -367,7 +371,8 @@ func _draw_pickups() -> void:
 			_: tex_name = "crate_airstrike"
 		_spr(tex_name, ppos, 0.0, 0.55, mod)
 		if pk.get("cost", 0) > 0:
-			draw_string(ThemeDB.fallback_font, ppos + Vector2(-11, -14), "%d¢" % pk["cost"],
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -21), Vector2(9, 9)), false)
+			draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -13), str(pk["cost"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.95, 0.65))
 
 
@@ -586,21 +591,4 @@ func _draw_banners() -> void:
 
 
 func _update_hud() -> void:
-	var lines: Array[String] = []
-	if sim.mode == "endless":
-		var wave_state := "INTERMISSION %ds — SHOP OPEN" % [sim.intermission_ticks / 60] if sim.intermission_ticks > 0 else "WAVE %d" % sim.wave
-		lines.append("ENDLESS WAR — %s   CHEST %d   SCORE %d" % [wave_state, sim.war_chest, sim.score])
-	else:
-		lines.append("WAR CHEST %d   SCORE %d   DIST %dm" % [sim.war_chest, sim.score, -Fixed.to_int(sim.camera_top) / 10])
-	for i in sim.players.size():
-		var p := sim.players[i]
-		if not p["alive"]:
-			lines.append("P%d  DOWN — revive costs %d [E/Y]" % [i + 1, sim.revive_cost(p)])
-		elif p["in_tank"] >= 0:
-			var t := sim.tanks[p["in_tank"]]
-			var state := "BAIL OUT! [F]" if t["burning"] else "fuel %ds" % [t["fuel"] / 60]
-			lines.append("P%d  TANK — shells %02d  %s" % [i + 1, p["grenade_ammo"], state])
-		else:
-			var vest_tag := "  +VEST" if p["vest"] else ""
-			lines.append("P%d  MG %02d  GRN %02d%s" % [i + 1, p["mg_ammo"], p["grenade_ammo"], vest_tag])
-	hud.text = "\n".join(lines)
+	_hud_icons.queue_redraw()
