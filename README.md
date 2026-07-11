@@ -107,8 +107,16 @@ docs/PLAN.md         The master build plan (P0–P7)
 
 ## Art
 
-Interim sprite pass uses **Kenney** CC0 assets (kenney.nl) — "Top-down Shooter"
-and "Top-down Tanks" packs (`assets/kenney/`, license included). CC0 = public
-domain, no attribution required (but Kenney is great — consider donating).
-Final art per the master plan is a commissioned pixel-art pass; these sprites
-are the readability layer until then. No generative-AI assets are used.
+Units, vehicles, bosses, structures and foliage (`assets/legacy-art/`) are **top-down
+renders of legacy 3D pack Military** 3D models, baked to sprites by
+`tools/bake_sprites.gd` (orthographic overhead camera; characters posed out of
+the T-pose; hero-vehicle turrets split from hulls so they rotate). The
+desert→jungle look is a per-sprite olive/green tint plus a 1px readability
+outline applied in the view (`src/view/art.gd` → `main._spr()`), not baked in.
+Ground tiles, projectiles and FX stay **Kenney** CC0 (`assets/kenney/`) — legacy art
+ships no seamless 2D tilesets.
+
+> ⚠️ The legacy art-derived sprites are proprietary (from a purchased legacy art license),
+> **not** CC0 — clear them before making this repo public. Final art per the
+> master plan is still a commissioned pixel-art pass; these are the readability
+> layer until then. No generative-AI assets are used.

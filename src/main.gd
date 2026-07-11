@@ -150,10 +150,25 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 	return Vector2(fx * PX, (fy - sim.camera_top) * PX)
 
 
+const _OUTLINE_OFFSETS: Array[Vector2] = [
+	Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1),
+	Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1),
+]
+
+
 func _spr(name: String, pos: Vector2, angle := 0.0, scale := 1.0, mod := Color.WHITE) -> void:
 	var t: Texture2D = Art.tex(name)
-	draw_set_transform(pos, angle, Vector2(scale, scale))
-	draw_texture(t, -t.get_size() / 2.0, mod)
+	var s := scale * Art.draw_scale(name)
+	var tint := mod * Art.tint(name)
+	draw_set_transform(pos, angle, Vector2(s, s))
+	var origin := -t.get_size() / 2.0
+	if Art.outlined(name):
+		# 1.4px screen-space dark rim so units/vehicles read on any ground.
+		var oc := Color(0.05, 0.06, 0.04, tint.a)
+		var d := 1.1 / s
+		for o in _OUTLINE_OFFSETS:
+			draw_texture(t, origin + o * d, oc)
+	draw_texture(t, origin, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
