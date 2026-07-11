@@ -306,6 +306,8 @@ func _step_players(inputs: Array) -> void:
 			p["aim_x"] = Fixed.div(ax, alen)
 			p["aim_y"] = Fixed.div(ay, alen)
 
+		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
+			events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
 		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
@@ -624,6 +626,7 @@ func _step_bullets() -> void:
 			# Bullets are stopped by armor: bunkers block, only grenades hurt them.
 			for bk in bunkers:
 				if bk["alive"] and _point_in_aabb(b["x"], b["y"], bk):
+					events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
 					dead = true
 					break
 		if not dead:
@@ -1076,6 +1079,7 @@ func _bullet_hits_boss(b: Dictionary) -> bool:
 			continue
 		var boss: Dictionary = g["boss"]
 		if _dist_lte(b["x"], b["y"], boss["x"], boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
 			return true
 	return false

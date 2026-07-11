@@ -60,7 +60,15 @@ func _draw() -> void:
 				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
 		else:
-			px = _stat("icon_ammo", "%02d" % p["mg_ammo"], px, ry)
+			# Low-ammo escalation: amber under 20, blinking red when dry.
+			var ammo: int = p["mg_ammo"]
+			var acol := Color(0.95, 0.96, 0.9)
+			if ammo == 0:
+				acol = Color(1.0, 0.25, 0.2) if (Engine.get_physics_frames() / 10) % 2 == 0 \
+					else Color(0.6, 0.2, 0.18)
+			elif ammo <= 20:
+				acol = Color(1.0, 0.75, 0.35)
+			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
@@ -79,9 +87,10 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 	return _text("%ds" % maxi(0, t["fuel"] / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0
 
 
-func _stat(icon: String, txt: String, x: float, y: float) -> float:
+func _stat(icon: String, txt: String, x: float, y: float,
+		col := Color(0.95, 0.96, 0.9)) -> float:
 	draw_texture_rect(Art.tex(icon), Rect2(x, y, ICON, ICON), false)
-	return _text(txt, x + ICON + 3.0, y + ICON - 3.0) + 10.0
+	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col) + 10.0
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:

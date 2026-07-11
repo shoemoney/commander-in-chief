@@ -26,14 +26,16 @@ var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
+var _dry_frame := -100            # rate-limits the dry-fire click
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 const WHEEL_ITEMS := [
-	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST},
-	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST},
-	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST},
-	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST},
+	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST, "label": "AMMO +30"},
+	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES +4"},
+	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST"},
+	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE"},
 ]
+const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND"]
 const _SECTOR_TO_ITEM := [2, 3, 0, 1]   # right=vest, down=airstrike, left=ammo, up=grenade
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
@@ -130,6 +132,7 @@ func _physics_process(_delta: float) -> void:
 
 
 func _consume_events() -> void:
+	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	for ev in sim.events:
 		var kind: String = ev["t"]
 		if kind == "pickup":
@@ -138,6 +141,26 @@ func _consume_events() -> void:
 			var snd: Array = _EVENT_SOUND[kind]
 			_sfx.play(snd[0], snd[1], snd[2])
 		match kind:
+			"armor_block":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
+				if not armor_pinged:
+					armor_pinged = true
+					_sfx.play("vest_break", -16.0, 1.7)
+			"boss_hit":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
+				if not armor_pinged:
+					armor_pinged = true
+					_sfx.play("vest_break", -10.0, 1.35)
+			"dry_fire":
+				if Engine.get_physics_frames() - _dry_frame >= 14:
+					_dry_frame = Engine.get_physics_frames()
+					_sfx.play("tank_board", -12.0, 2.2)
+			"buy":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})
+			"deny":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.03, "text": "NEED COINS", "col": Color(1.0, 0.45, 0.35)})
 			"shot":
 				var shooter := sim.players[ev["i"]]
 				var aim := Vector2(shooter["aim_x"], shooter["aim_y"]) * PX
@@ -613,6 +636,11 @@ func _draw_players() -> void:
 				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
 					false, Color(0, 0, 0, 0.55))
 				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
+			# Roll recharge: arc sweeps closed while the dodge is on cooldown.
+			if p["roll_cd"] > 0 and p["roll_ticks"] == 0:
+				var ready := 1.0 - float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS)
+				draw_arc(pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20,
+					Color(0.7, 0.9, 1.0, 0.55), 1.5)
 		else:
 			_spr(tex_name, pos, PI / 2, 0.52, Color(0.35, 0.35, 0.35, 0.6))
 			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8), 1.5)
@@ -641,6 +669,20 @@ func _draw_fx() -> void:
 			draw_set_transform(pos, fx["spin"] + t * 6.0, Vector2.ONE)
 			draw_rect(Rect2(-1.5, -0.75, 3.0, 1.5), Color(0.95, 0.8, 0.3, 1.0 - t * 0.8))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		elif fx["kind"] == "spark":
+			# Ricochet: short radial ticks — armor says no.
+			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
+			for k in 3:
+				var sa := k * TAU / 3.0 + t * 2.0
+				draw_line(pos + Vector2.from_angle(sa) * (2.0 + t * 5.0),
+					pos + Vector2.from_angle(sa) * (5.0 + t * 7.0), sc, 1.2)
+		elif fx["kind"] == "floattext":
+			var fc: Color = fx["col"]
+			fc.a = 1.0 - t * t
+			var fw := ThemeDB.fallback_font.get_string_size(fx["text"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			draw_string(ThemeDB.fallback_font, pos + Vector2(-fw / 2.0, -18.0 - t * 14.0),
+				fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, fc)
 		elif fx["kind"] == "smoke":
 			_spr("smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
 
@@ -711,6 +753,15 @@ func _draw_wheel() -> void:
 			draw_string(f, ipos + Vector2(-7, 24), str(item["cost"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
+		# What the selected socket actually delivers.
+		var sel: int = _wheel[i]["sel"]
+		if sel >= 0:
+			var lbl: String = WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]["label"]
+			var lw := f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			draw_string(f, c + Vector2(-lw / 2.0 + 1, 72.0), lbl,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 0, 0, 0.7))
+			draw_string(f, c + Vector2(-lw / 2.0, 71.0), lbl,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.95, 0.7))
 
 
 func _draw_banners() -> void:

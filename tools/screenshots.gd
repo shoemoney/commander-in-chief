@@ -57,6 +57,13 @@ func _advance() -> void:
 		return
 	var sim: SimWorld = shots[current]["build"].call()
 	main.sim = sim
+	# Feel decay never runs while posing — scrub prior dress state so one
+	# shot's garnish can't leak into the next.
+	main._fx.clear()
+	main._damage_vignette = 0.0
+	main._banner_t = 0.0
+	main._recoil = [Vector2.ZERO, Vector2.ZERO]
+	main._wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
 	main._update_hud()
