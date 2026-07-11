@@ -31,6 +31,10 @@ func _draw() -> void:
 	x = _stat("icon_coin", str(sim.war_chest), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse))
 	x = _stat("icon_medal", str(sim.score), x, y)
+	# Live BEST target: the record to beat, right next to the current score.
+	if main.best_score > 0:
+		x = _text("BEST %d" % main.best_score, x, y + ICON - 3.0,
+			Color(0.75, 0.7, 0.5)) + 8.0
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
 			x = _text("SHOP OPEN %ds" % [sim.intermission_ticks / 60], x, y + ICON - 3.0,
@@ -38,7 +42,13 @@ func _draw() -> void:
 		else:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 10.0
 	else:
-		x = _text("%dm" % [-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
+		# SECTOR n/5: campaign progress toward the Foundry finale.
+		var opened := 0
+		for g in sim.gates:
+			if g["open"]:
+				opened += 1
+		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
+			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
 	Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
 	_text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8))

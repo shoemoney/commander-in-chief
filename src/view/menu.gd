@@ -29,7 +29,9 @@ func _items() -> Array:
 		return ["CAMPAIGN", "ENDLESS WAR",
 			"CO-OP: %s" % ("ON" if main._two_players else "OFF"), "QUIT"]
 	var muted := AudioServer.is_bus_mute(0)   # Master: SFX + music together
-	return ["RESUME", "SOUND: %s" % ("OFF" if muted else "ON"), "RESTART", "TITLE SCREEN"]
+	var reduced: bool = main._motion < 0.5
+	return ["RESUME", "SOUND: %s" % ("OFF" if muted else "ON"),
+		"REDUCE MOTION: %s" % ("ON" if reduced else "OFF"), "RESTART", "TITLE SCREEN"]
 
 
 func _unhandled_input(ev: InputEvent) -> void:
@@ -78,9 +80,11 @@ func _activate() -> void:
 			1:
 				AudioServer.set_bus_mute(0, not AudioServer.is_bus_mute(0))
 			2:
+				main._motion = 0.0 if main._motion >= 0.5 else 1.0
+			3:
 				main._reset()
 				mode = Mode.HIDDEN
-			3:
+			4:
 				main._reset()
 				open(Mode.TITLE)
 

@@ -31,6 +31,12 @@ var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
+var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
+var _hitmarker := 0.0            # reticle confirm pop on a landed hit
+var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
+var _hit_dir_t := 0.0
+var _record_fired := false       # NEW RECORD banner once per run
+var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
@@ -129,6 +135,10 @@ func _reset() -> void:
 	_banner_t = 0.0
 	_seen_bosses = {}
 	_prev_colossus_phase = 0
+	_hitmarker = 0.0
+	_hit_dir_t = 0.0
+	_record_fired = false
+	_boss_ghost.clear()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -181,6 +191,7 @@ func _consume_events() -> void:
 					_sfx.play("vest_break", -16.0, 1.7)
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
+				_hitmarker = 1.0
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -10.0, 1.35)
@@ -236,6 +247,7 @@ func _consume_events() -> void:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
 						"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
 						"spin": randf() * TAU})
+				_hitmarker = 1.0   # kill also confirms on the reticle
 				# Kill-streak: rising blip pitch + milestone combo pop.
 				var big: bool = ev.get("coin", 0) >= 25
 				if Engine.get_physics_frames() - _last_kill_frame < 90:
@@ -264,6 +276,7 @@ func _consume_events() -> void:
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = 1.0
 				_rumble = maxf(_rumble, 1.0)
+				_mark_hit_dir(ev["x"], ev["y"])
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 			"roll":
 				# Launch poof grounds the dodge.
@@ -277,6 +290,7 @@ func _consume_events() -> void:
 			"vest_break":
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = maxf(_damage_vignette, 0.75)
+				_mark_hit_dir(ev["x"], ev["y"])
 			"wave_start":
 				_show_banner("WAVE %d" % sim.wave)
 			"wave_clear":
@@ -325,6 +339,11 @@ func _load_bests() -> void:
 
 
 func _track_bests() -> void:
+	# NEW RECORD moment: the instant this run's score passes the standing best.
+	if not _record_fired and best_score > 0 and sim.score > best_score:
+		_record_fired = true
+		_show_banner("NEW RECORD!")
+		_sfx.play("wave_clear", -3.0, 1.15)
 	# Ratchet the records; write at most once a second when something moved.
 	if sim.score > best_score:
 		best_score = sim.score
@@ -350,11 +369,35 @@ func _show_banner(text: String) -> void:
 	_banner_t = 1.0
 
 
+func _mark_hit_dir(px: int, py: int) -> void:
+	# Point the damage wedge at the nearest lethal source at hit time — the
+	# "where did that come from?" answer a one-hit game owes the player.
+	var best := 1 << 62
+	var dir := Vector2.ZERO
+	for b in sim.enemy_bullets:
+		var d: int = (b["x"] - px) * (b["x"] - px) + (b["y"] - py) * (b["y"] - py)
+		if d < best:
+			best = d
+			dir = Vector2(b["x"] - px, b["y"] - py)
+	for e in sim.enemies:
+		if not e["alive"]:
+			continue
+		var d2: int = (e["x"] - px) * (e["x"] - px) + (e["y"] - py) * (e["y"] - py)
+		if d2 < best:
+			best = d2
+			dir = Vector2(e["x"] - px, e["y"] - py)
+	if dir.length() > 1.0:
+		_hit_dir = dir.normalized()
+		_hit_dir_t = 1.0
+
+
 func _update_feel() -> void:
 	_trauma = maxf(0.0, _trauma - 0.03)
 	_flash_alpha = maxf(0.0, _flash_alpha - 0.08)
 	_damage_vignette = maxf(0.0, _damage_vignette - 0.02)
 	_banner_t = maxf(0.0, _banner_t - 0.008)
+	_hitmarker = maxf(0.0, _hitmarker - 0.12)
+	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
 		fx["t"] += fx.get("rate", 0.09)
@@ -377,12 +420,12 @@ func _update_feel() -> void:
 		for pad in Input.get_connected_joypads():
 			Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
 		_rumble = 0.0
-	var mag := _trauma * _trauma * 6.0
+	var mag := _trauma * _trauma * 6.0 * _motion
 	var shake := Vector2.ZERO
 	if mag > 0.01:
 		var t := float(Engine.get_physics_frames())
 		shake = Vector2(sin(t * 1.7) * mag, cos(t * 2.3) * mag)
-	position = shake + _kick
+	position = shake + _kick * _motion
 
 
 static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
@@ -805,8 +848,12 @@ func _draw_gunships() -> void:
 			draw_line(bpos - Vector2.from_angle(a) * 26.0, bpos + Vector2.from_angle(a) * 26.0,
 				Color(0.85, 0.85, 0.85, 0.5), 2.0)
 		draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
-		_draw_bar(Rect2(bpos + Vector2(-23, -32), Vector2(46, 10)),
-			float(boss["hp"]) / float(SimWorld.BOSS_HP))
+		var bfrac := float(boss["hp"]) / float(SimWorld.BOSS_HP)
+		var bkey := "boss%d" % boss["gate_y"]
+		draw_string(ThemeDB.fallback_font, bpos + Vector2(-23, -34), "BRIDGE GUNSHIP",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.5, 0.4))
+		_draw_bar(Rect2(bpos + Vector2(-23, -30), Vector2(46, 8)), bfrac,
+			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 
 
 func _draw_colossus() -> void:
@@ -826,8 +873,11 @@ func _draw_colossus() -> void:
 	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
 	draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center so the fill never hides under the HUD panel.
-	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)),
-		float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP))
+	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
+	draw_string(ThemeDB.fallback_font, Vector2(172, 326), "FOUNDRY COLOSSUS — PHASE %d/3" % phase,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.55, 0.45))
+	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
+		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 
 
 func _draw_projectiles() -> void:
@@ -922,6 +972,15 @@ func _draw_players() -> void:
 				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
 					false, Color(0, 0, 0, 0.55))
 				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
+				# Hitmarker: reticle flicks bright + kicks four ticks on a landed hit.
+				if i == 0 and _hitmarker > 0.01:
+					var hc := Color(1.0, 1.0, 0.85, _hitmarker)
+					var rc := rrect.get_center()
+					var off := 8.0 + (1.0 - _hitmarker) * 4.0
+					for q in 4:
+						var qa := q * TAU / 4.0 + PI / 4.0
+						var qd := Vector2.from_angle(qa)
+						draw_line(rc + qd * off, rc + qd * (off + 4.0), hc, 1.5)
 			# Roll recharge: arc sweeps closed while the dodge is on cooldown.
 			if p["roll_cd"] > 0 and p["roll_ticks"] == 0:
 				var ready := 1.0 - float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS)
@@ -1006,14 +1065,37 @@ func _draw_telegraphs() -> void:
 		draw_line(sp + Vector2(0, -5), sp + Vector2(0, 5), col, 1.5)
 
 
-func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18)) -> void:
-	## Sprite-framed progress bar: dark well, colored fill, metal frame on top.
+func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18),
+		ghost := -1.0, ticks := 0) -> void:
+	## Sprite-framed progress bar: dark well, draining ghost chip, colored
+	## fill, phase-threshold ticks, metal frame on top.
 	var inset := Vector2(rect.size.x * 0.06, rect.size.y * 0.22)
 	var well := Rect2(rect.position + inset, rect.size - inset * 2.0)
 	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
-	well.size.x *= clampf(frac, 0.0, 1.0)
-	draw_rect(well, fill)
+	var fw := well.size.x
+	frac = clampf(frac, 0.0, 1.0)
+	# Ghost chip: the recently-lost HP lingers as a pale chunk, then catches up.
+	if ghost > frac:
+		draw_rect(Rect2(well.position + Vector2(fw * frac, 0),
+			Vector2(fw * (ghost - frac), well.size.y)), Color(1.0, 0.9, 0.6, 0.5))
+	draw_rect(Rect2(well.position, Vector2(fw * frac, well.size.y)), fill)
+	# Phase ticks: thirds/halves so the fight's structure is legible.
+	for k in range(1, ticks):
+		var tx := well.position.x + fw * float(k) / float(ticks)
+		draw_line(Vector2(tx, well.position.y), Vector2(tx, well.position.y + well.size.y),
+			Color(0.05, 0.04, 0.03, 0.8), 1.0)
 	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
+
+
+func _bar_ghost(key: String, frac: float) -> float:
+	# View-side prev-HP tracker feeding the draining chip; eases toward frac.
+	var g: float = _boss_ghost.get(key, frac)
+	if frac < g:
+		g = maxf(frac, g - 0.02)
+	else:
+		g = frac
+	_boss_ghost[key] = g
+	return g
 
 
 func _draw_threat_edges() -> void:
@@ -1089,9 +1171,19 @@ func _draw_banners() -> void:
 			vig = maxf(vig, 0.3 * float(p["hurt_iframes"]) / float(SimWorld.VEST_IFRAME_TICKS))
 	if vig > 0.01:
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, 640, 360), false,
-			Color(0.85, 0.12, 0.08, minf(1.0, vig)))
+			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
 	if _flash_alpha > 0.01:
-		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha))
+		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha * _motion))
+	# Directional damage wedge: a red arc on the screen edge pointing at the
+	# threat that hit you — the "where from?" answer in a one-hit game.
+	if _hit_dir_t > 0.01:
+		var ang := _hit_dir.angle()
+		var mid := Vector2(320, 180) + _hit_dir * 210.0
+		var perp := Vector2(-_hit_dir.y, _hit_dir.x)
+		var wc := Color(1.0, 0.2, 0.15, _hit_dir_t * 0.8)
+		var pts := PackedVector2Array([mid + perp * 46.0, mid - perp * 46.0,
+			mid + _hit_dir * 26.0])
+		draw_colored_polygon(pts, wc)
 	# Arena-lock directive: the camera holds at closed gates by design, but
 	# the objective must be said out loud (playtest: "scrolling just stops").
 	for g in sim.gates:
