@@ -653,9 +653,24 @@ func _draw() -> void:
 	_draw_scorch()
 	_draw_water()
 	_draw_gates()
+	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
+	# field bunkers stream in independently and look identical otherwise.
+	var lockers: Array = []
+	for g in sim.gates:
+		if not g["open"] and not g.get("b1", {}).is_empty():
+			lockers.append(g["b1"])
+			lockers.append(g["b2"])
 	for bk in sim.bunkers:
 		if bk["alive"]:
 			var c := _to_screen(bk["x"], bk["y"]) + Vector2(24, 16)
+			var is_locker := false
+			for lk in lockers:
+				if is_same(lk, bk):
+					is_locker = true
+					break
+			if is_locker:
+				var lp := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.15)
+				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
 			_spr("bunker", c, 0.0, 0.78)
 	_draw_pickups()
 	_draw_tanks()
@@ -768,6 +783,15 @@ func _draw_gates() -> void:
 		else:
 			for i in 14:
 				_spr("sandbag_beige", Vector2(24 + i * 46, gy), 0.0, 0.72)
+			# Lock pips: how many of the two locking bunkers are still up —
+			# turns a black-box wall into 'one down, one to go'.
+			if not g.get("b1", {}).is_empty():
+				var down := int(not g["b1"]["alive"]) + int(not g["b2"]["alive"])
+				for k in 2:
+					var lit: bool = k >= down
+					draw_circle(Vector2(300 + k * 40, gy), 5.0,
+						Color(1.0, 0.3, 0.2) if lit else Color(0.3, 0.7, 0.3))
+					draw_arc(Vector2(300 + k * 40, gy), 5.0, 0, TAU, 12, Color(0, 0, 0, 0.6), 1.0)
 
 
 func _draw_pickups() -> void:
@@ -803,6 +827,15 @@ func _draw_tanks() -> void:
 		if t["occupant"] >= 0:
 			barrel_angle = _aim_angle(sim.players[t["occupant"]])
 		_spr("tank_barrel", c + Vector2.from_angle(barrel_angle) * 10.0, barrel_angle + PI / 2, 0.62, burn_mod)
+		# Low-fuel telegraph: sputter smoke + warning before the ignite, so a
+		# cruising tank doesn't abruptly become 'on fire, 3s to live'.
+		if not t["burning"] and t["occupant"] >= 0 and t["fuel"] < 300:
+			if (Engine.get_physics_frames() / 8) % 2 == 0:
+				_spr("smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
+					Color(0.5, 0.5, 0.5, 0.5))
+			if (Engine.get_physics_frames() / 14) % 2 == 0:
+				draw_string(ThemeDB.fallback_font, c + Vector2(-16, -26), "LOW FUEL",
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.7, 0.2))
 		if t["burning"]:
 			_spr("smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
 			# Bail-out countdown: the hidden ~3s lethal timer, made visible.
@@ -909,6 +942,12 @@ func _draw_colossus() -> void:
 		return
 	var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 	var phase := sim.colossus_phase()
+	# Crush footprint: the true instant-death contact radius, drawn on the
+	# ground like a mortar telegraph — 'do not enter' in the no-revive finale.
+	var crush := SimWorld.COLOSSUS_CRUSH_RADIUS * PX
+	var cpulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.18)
+	draw_arc(cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
+	draw_circle(cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
 	var mod := Color.WHITE if phase < 3 else Color(1.4, 0.62, 0.55)
 	_spr("colossus_body", cpos, PI, 1.9, mod)
 	_spr("colossus_barrel", cpos + Vector2(-24, 26), PI - 0.5, 1.3, mod)
@@ -969,6 +1008,17 @@ func _draw_projectiles() -> void:
 			if (b["x"] / 4099 + Engine.get_physics_frames()) % 2 == 0:
 				draw_circle(bpos, 2.4, Color(1.0, 0.85, 0.4, 0.8))
 				draw_circle(bpos, 1.0, Color(1.0, 1.0, 0.9))
+			continue
+		# Submerged frogmen are grenades-only too — ping bullets off the ripple
+		# so 'I emptied a mag into the water and nothing died' becomes legible.
+		var deflect := false
+		for e in sim.enemies:
+			if e["alive"] and e.get("submerged", false) \
+					and bpos.distance_to(_to_screen(e["x"], e["y"])) < 7.0:
+				draw_circle(bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
+				deflect = true
+				break
+		if deflect:
 			continue
 		var dir := Vector2(b["vx"], b["vy"]).normalized()
 		# Real tracer rounds: a thin hot streak with a bright head — small,

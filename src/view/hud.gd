@@ -64,6 +64,10 @@ func _draw() -> void:
 			px = _stat("icon_skull", "x%d" % p["deaths"], px, ry)
 			if sim.last_stand:
 				_text("K.I.A.", px, ry + ICON - 3.0, Color(0.9, 0.35, 0.3))
+			elif p["broke_timer"] > 0:
+				# A free rescue is already ticking — say so, or it reads as death.
+				_text("RALLYING %ds" % (p["broke_timer"] / 60 + 1), px, ry + ICON - 3.0,
+					Color(0.6, 0.85, 1.0))
 			else:
 				# Affordability at a glance: green if the chest covers it, red
 				# if not — the revive-or-hoard decision made legible.
