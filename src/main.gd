@@ -433,8 +433,7 @@ func _draw_tanks() -> void:
 		if t["burning"]:
 			_spr("smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
 		elif t["occupant"] < 0:
-			draw_string(ThemeDB.fallback_font, c + Vector2(-10, -30), "[F]",
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.95, 0.95, 0.75))
+			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0)
 
 
 func _draw_enemies() -> void:
@@ -500,9 +499,8 @@ func _draw_gunships() -> void:
 			draw_line(bpos - Vector2.from_angle(a) * 26.0, bpos + Vector2.from_angle(a) * 26.0,
 				Color(0.85, 0.85, 0.85, 0.5), 2.0)
 		draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
-		var frac: float = float(boss["hp"]) / float(SimWorld.BOSS_HP)
-		draw_rect(Rect2(bpos + Vector2(-20, -26), Vector2(40, 4)), Color(0.15, 0.15, 0.15))
-		draw_rect(Rect2(bpos + Vector2(-20, -26), Vector2(40.0 * frac, 4)), Color(0.9, 0.3, 0.2))
+		_draw_bar(Rect2(bpos + Vector2(-23, -32), Vector2(46, 10)),
+			float(boss["hp"]) / float(SimWorld.BOSS_HP))
 
 
 func _draw_colossus() -> void:
@@ -521,9 +519,8 @@ func _draw_colossus() -> void:
 			Color(1.0, 0.55, 0.15, 0.15 + warm * 0.55))
 	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
 	draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
-	var cfrac: float = float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
-	draw_rect(Rect2(Vector2(170, 8), Vector2(300, 6)), Color(0.15, 0.15, 0.15))
-	draw_rect(Rect2(Vector2(170, 8), Vector2(300.0 * cfrac, 6)), Color(0.9, 0.25, 0.2))
+	_draw_bar(Rect2(Vector2(170, 5), Vector2(300, 13)),
+		float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP))
 
 
 func _draw_projectiles() -> void:
@@ -618,6 +615,16 @@ func _draw_telegraphs() -> void:
 		draw_line(sp + Vector2(0, -5), sp + Vector2(0, 5), col, 1.5)
 
 
+func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18)) -> void:
+	## Sprite-framed progress bar: dark well, colored fill, metal frame on top.
+	var inset := Vector2(rect.size.x * 0.06, rect.size.y * 0.22)
+	var well := Rect2(rect.position + inset, rect.size - inset * 2.0)
+	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
+	well.size.x *= clampf(frac, 0.0, 1.0)
+	draw_rect(well, fill)
+	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
+
+
 func _draw_wheel() -> void:
 	for i in sim.players.size():
 		if i >= _wheel.size() or not _wheel[i]["open"]:
@@ -626,19 +633,35 @@ func _draw_wheel() -> void:
 		if not p["alive"]:
 			continue
 		var c := _to_screen(p["x"], p["y"])
-		draw_circle(c, 36.0, Color(0.04, 0.07, 0.04, 0.6))
-		draw_arc(c, 36.0, 0, TAU, 40, Color(0.9, 0.95, 0.8, 0.5), 1.5)
+		draw_circle(c, 42.0, Color(0.04, 0.07, 0.04, 0.55))
+		# Center hub: the fuel-cap ring framing the War Chest itself — this
+		# wheel drains the same pool that funds revives.
+		_spr("ui_dial_fuel", c, 0.0, 34.0 / 600.0)
+		var f := ThemeDB.fallback_font
+		var chest := str(sim.war_chest)
+		var cw := f.get_string_size(chest, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+		var cx := c.x - (10.0 + cw) / 2.0
+		draw_texture_rect(Art.tex("icon_coin"), Rect2(cx, c.y - 5.0, 9, 9), false)
+		draw_string(f, Vector2(cx + 10.0, c.y + 3.0), chest,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.95, 0.65))
 		for s in 4:
 			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
-			var ipos := c + Vector2.from_angle(s * TAU / 4.0) * 23.0
+			var ang := s * TAU / 4.0
+			var ipos := c + Vector2.from_angle(ang) * 31.0
 			var afford: bool = sim.war_chest >= item["cost"]
-			if _wheel[i]["sel"] == s:
-				draw_circle(ipos, 12.0, Color(1.0, 0.9, 0.4, 0.28 if afford else 0.12))
-				draw_arc(ipos, 12.0, 0, TAU, 24, Color(1.0, 0.9, 0.4, 0.9), 1.5)
-			var mod := Color.WHITE if afford else Color(0.8, 0.35, 0.35, 0.55)
-			draw_texture_rect(Art.tex(item["icon"]), Rect2(ipos - Vector2(8, 8), Vector2(16, 16)),
-				false, mod)
-			draw_string(ThemeDB.fallback_font, ipos + Vector2(-7, 17), str(item["cost"]),
+			var selected: bool = _wheel[i]["sel"] == s
+			# Socket sprite authored nub-down (north slot); +90° per sector
+			# keeps the connector nub pointing at the hub.
+			var sock_mod := Color.WHITE
+			if selected:
+				sock_mod = Color(1.3, 1.18, 0.7) if afford else Color(1.2, 0.6, 0.55)
+			_spr("ui_wheel_socket", ipos, ang + PI / 2.0,
+				(38.0 if selected else 31.0) / 512.0, sock_mod)
+			var icon_mod := Color.WHITE if afford else Color(0.8, 0.35, 0.35, 0.55)
+			var isz := 18.0 if selected else 14.0
+			draw_texture_rect(Art.tex(item["icon"]),
+				Rect2(ipos - Vector2(isz, isz) / 2.0, Vector2(isz, isz)), false, icon_mod)
+			draw_string(f, ipos + Vector2(-7, 24), str(item["cost"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
 

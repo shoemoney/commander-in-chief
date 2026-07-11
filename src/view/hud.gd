@@ -15,6 +15,10 @@ func _draw() -> void:
 		return
 	var sim: SimWorld = main.sim
 
+	# Scavenged-metal panel backing the whole readout.
+	draw_texture_rect(Art.tex("ui_panel"),
+		Rect2(2, 2, 262, 26 + sim.players.size() * 16), false, Color(1, 1, 1, 0.9))
+
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
 	var y := 6.0
@@ -22,12 +26,15 @@ func _draw() -> void:
 	x = _stat("icon_medal", str(sim.score), x, y)
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
-			_text("SHOP OPEN %ds" % [sim.intermission_ticks / 60], x, y + ICON - 3.0,
-				Color(1.0, 0.9, 0.5))
+			x = _text("SHOP OPEN %ds" % [sim.intermission_ticks / 60], x, y + ICON - 3.0,
+				Color(1.0, 0.9, 0.5)) + 10.0
 		else:
-			_text("WAVE %d" % sim.wave, x, y + ICON - 3.0)
+			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 10.0
 	else:
-		_text("%dm" % [-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0)
+		x = _text("%dm" % [-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
+	# Discoverability: the supply wheel exists (hold to open).
+	Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
+	_text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8))
 
 	# Player rows.
 	var ry := y + 17.0
@@ -42,20 +49,34 @@ func _draw() -> void:
 				_text("K.I.A.", px, ry + ICON - 3.0, Color(0.9, 0.35, 0.3))
 			else:
 				var blink := (Engine.get_physics_frames() / 20) % 2 == 0
-				_text("REVIVE %d [E/Y]" % sim.revive_cost(p), px, ry + ICON - 3.0,
+				var tx := _text("REVIVE %d" % sim.revive_cost(p), px, ry + ICON - 3.0,
 					Color(1.0, 0.85, 0.4) if blink else Color(0.85, 0.65, 0.35))
+				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0)
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
-			px = _stat("icon_fuel", "%ds" % maxi(0, t["fuel"] / 60), px, ry)
+			px = _fuel_dial(t, px, ry)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
 			if t["burning"] and (Engine.get_physics_frames() / 8) % 2 == 0:
-				_text("BAIL OUT! [F]", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
 		else:
 			px = _stat("icon_ammo", "%02d" % p["mg_ammo"], px, ry)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 		ry += 16.0
+
+
+func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
+	# Fuel-cap gauge: ring frames an arc that drains green → red.
+	var frac := clampf(float(t["fuel"]) / float(SimWorld.TANK_FUEL_TICKS), 0.0, 1.0)
+	var c := Vector2(x + ICON / 2.0, y + ICON / 2.0)
+	draw_circle(c, ICON * 0.34, Color(0.08, 0.07, 0.06))
+	if frac > 0.0:
+		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20,
+			Color(0.9 - frac * 0.7, 0.15 + frac * 0.65, 0.12), 2.5)
+	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
+	return _text("%ds" % maxi(0, t["fuel"] / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0
 
 
 func _stat(icon: String, txt: String, x: float, y: float) -> float:

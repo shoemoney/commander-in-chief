@@ -44,6 +44,18 @@ const TEX := {
 	"icon_skull": preload(SY + "icons/icon_skull.png"),
 	"icon_medal": preload(SY + "icons/icon_medal.png"),
 	"icon_airstrike": preload(SY + "icons/icon_airstrike.png"),
+	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
+	"ui_wheel_socket": preload(SY + "ui/wheel_socket.png"),
+	"ui_bar_frame": preload(SY + "ui/bar_frame.png"),
+	"ui_dial_fuel": preload(SY + "ui/dial_fuel.png"),
+	"ui_panel": preload(SY + "ui/panel.png"),
+	"ui_key_blank": preload(SY + "ui/key_blank.png"),
+	"ui_pad_x": preload(SY + "ui/pad_x.png"),
+	"ui_pad_y": preload(SY + "ui/pad_y.png"),
+	"ui_pad_b": preload(SY + "ui/pad_b.png"),
+	"ui_pad_back": preload(SY + "ui/pad_back.png"),
+	"ui_menu_button": preload(SY + "ui/menu_button.png"),
+	"ui_menu_button_sel": preload(SY + "ui/menu_button_sel.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
@@ -111,6 +123,27 @@ static func tint(name: String) -> Color:
 
 static func outlined(name: String) -> bool:
 	return OUTLINE.has(name)
+
+
+## Input-prompt glyphs: pad button art when a gamepad is connected, else a
+## blank keycap stamped with the key letter. Draws centered at pos.
+const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
+	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
+const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+
+
+static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0) -> void:
+	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
+	if Input.get_connected_joypads().size() > 0:
+		ci.draw_texture_rect(tex(_GLYPH_PAD[action]), rect, false)
+	else:
+		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88))
+		var letter: String = _GLYPH_KEY[action]
+		var f := ThemeDB.fallback_font
+		var fs := int(size * 0.62)
+		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
 
 
 static func cell_hash(ix: int, iy: int) -> int:
