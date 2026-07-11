@@ -149,6 +149,20 @@ func test_elite_skirmisher_telegraphed_shot() -> void:
 	Runner.T.ok(sim.enemy_bullets.size() >= 1, "wind-up resolved into an aimed shot")
 
 
+func test_spawner_escalates_with_opened_gates() -> void:
+	# Same seed, same ticks: a run with cleared gates must field more spawns.
+	var calm := SimWorld.new(5, 1)
+	var hot := SimWorld.new(5, 1)
+	for i in 3:
+		hot.gates.append({"y": -(2000 + i * 1000) * Fixed.ONE, "open": true,
+			"b1": {}, "b2": {}, "boss": {}})
+	for i in 450:
+		calm.step([_idle()])
+		hot.step([_idle()])
+	Runner.T.ok(hot.enemies.size() > calm.enemies.size(),
+		"opened gates tighten the spawn interval (got %d vs %d)" % [hot.enemies.size(), calm.enemies.size()])
+
+
 func test_elite_drops_pickup() -> void:
 	var sim := SimWorld.new(1, 1)
 	var p := sim.players[0]

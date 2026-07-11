@@ -814,8 +814,15 @@ func _step_bunkers() -> void:
 
 
 func _step_spawner() -> void:
-	# Field spawner: pressure from above the screen edge; every 8th is a red elite.
-	if tick_count % SPAWN_INTERVAL_TICKS != 0 or enemies.size() >= MAX_ENEMIES:
+	# Field spawner: pressure from above the screen edge; every 8th is a red
+	# elite. Each opened gate tightens the interval — the campaign's
+	# difficulty ratchet (45 → 24 ticks by gate 5).
+	var opened := 0
+	for g in gates:
+		if g["open"]:
+			opened += 1
+	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 4)
+	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE

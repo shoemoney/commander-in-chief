@@ -9,6 +9,7 @@ const RATE := 22050
 
 var _sounds: Dictionary = {}
 var _player := AudioStreamPlayer.new()
+var _music := AudioStreamPlayer.new()
 var _pb: AudioStreamPlaybackPolyphonic
 
 
@@ -19,6 +20,11 @@ func _ready() -> void:
 		AudioServer.set_bus_name(idx, "SFX")
 		AudioServer.set_bus_send(idx, "Master")
 		AudioServer.add_bus_effect(idx, AudioEffectHardLimiter.new())
+	if AudioServer.get_bus_index("Music") == -1:
+		var mi := AudioServer.get_bus_count()
+		AudioServer.add_bus(mi)
+		AudioServer.set_bus_name(mi, "Music")
+		AudioServer.set_bus_send(mi, "Master")
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -27,6 +33,12 @@ func _ready() -> void:
 	_player.play()
 	_pb = _player.get_stream_playback()
 	_synth_all()
+	# War-drums bed: synthesized like everything else, looping under the SFX.
+	_music.stream = _synth_drums()
+	_music.bus = "Music"
+	_music.volume_db = -15.0
+	add_child(_music)
+	_music.play()
 
 
 func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
@@ -200,3 +212,36 @@ func _synth_all() -> void:
 
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
+
+
+func _synth_drums() -> AudioStreamWAV:
+	# Two bars of jungle war drums at 110 BPM (8th-note grid), seamless loop.
+	var step := int(RATE * 60.0 / 110.0 / 2.0)
+	var pattern := [   # per 8th step: [kick, tom_hi, tom_lo, snare]
+		[1, 0, 0, 0], [0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0],
+		[0, 0, 0, 1], [0, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0],
+		[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0],
+		[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1],
+	]
+	var buf := _buf(float(step * pattern.size()) / RATE)
+	for k in pattern.size():
+		var ofs := k * step
+		var hit: Array = pattern[k]
+		for j in int(0.25 * RATE):
+			if ofs + j >= buf.size():
+				break
+			var t := float(j) / RATE
+			var v := 0.0
+			if hit[0]:
+				v += _sweep(t, 95.0, 42.0, 0.25) * exp(-t * 14.0) * 0.85
+			if hit[1]:
+				v += sin(TAU * 138.0 * t) * exp(-t * 20.0) * 0.4
+			if hit[2]:
+				v += sin(TAU * 96.0 * t) * exp(-t * 16.0) * 0.45
+			if hit[3]:
+				v += _nz(ofs + j) * exp(-t * 24.0) * 0.3 + sin(TAU * 190.0 * t) * exp(-t * 28.0) * 0.2
+			buf[ofs + j] += v
+	var wav := _to_wav(buf)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_end = buf.size()
+	return wav

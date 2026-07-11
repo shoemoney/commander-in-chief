@@ -4,8 +4,9 @@ extends Node2D
 ## only reads it.
 ##
 ## Controls (P3):
-##   P1 — WASD move, arrow keys aim, Space fire, Shift grenade, C roll,
-##        F interact (board/exit tank), E revive, Q (hold) spend-wheel
+##   P1 — WASD move, mouse or arrow keys aim, Space/LMB fire, Shift/RMB
+##        grenade, C roll, F interact (board/exit tank), E revive,
+##        Q (hold) spend-wheel
 ##   Gamepad — LS move, RS aim, RT/R1 fire, L1 grenade, B roll, X interact,
 ##        Y revive, BACK (hold) spend-wheel
 ##   F2 toggles local 2P · F3 toggles Endless War · R restarts.
@@ -323,6 +324,15 @@ func _gather_inputs() -> Array:
 	if pad_move.length() > 0.2:
 		kx = pad_move.x
 		ky = pad_move.y
+	# Aim priority: pad stick > arrow keys > mouse. The mouse always has a
+	# position, so it's the fallback that makes keyboard play feel twin-stick.
+	if ax == 0.0 and ay == 0.0 and sim.players[0]["alive"]:
+		var to_mouse := get_local_mouse_position() \
+			- _to_screen(sim.players[0]["x"], sim.players[0]["y"])
+		if to_mouse.length() > 4.0:
+			var md := to_mouse.normalized()
+			ax = md.x
+			ay = md.y
 	if pad_aim.length() > 0.25:
 		ax = pad_aim.x
 		ay = pad_aim.y
@@ -331,9 +341,11 @@ func _gather_inputs() -> Array:
 	p1.aim_x = _quantize_axis(ax)
 	p1.aim_y = _quantize_axis(ay)
 	p1.fire = Input.is_physical_key_pressed(KEY_SPACE) \
+		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
 		or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
 		or Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
 	p1.grenade = Input.is_physical_key_pressed(KEY_SHIFT) \
+		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
 		or Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
 	p1.roll = Input.is_physical_key_pressed(KEY_C) or Input.is_joy_button_pressed(0, JOY_BUTTON_B)
 	p1.interact = Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(0, JOY_BUTTON_X)
