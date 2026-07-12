@@ -228,3 +228,22 @@ func test_landmine_kills_player_but_vest_absorbs() -> void:
 	sim2.mines = [{"x": p2["x"], "y": p2["y"], "armed": true}]
 	sim2._step_mines()
 	Runner.T.ok(p2["alive"] and not p2["vest"], "vest absorbs the mine hit (player lives, vest gone)")
+
+
+func test_empty_clip_bash_kills_adjacent_enemy_no_coin() -> void:
+	# Out of MG ammo + an enemy in reach + fire = a melee bash: enemy dies, no
+	# coin, no bullet. It's the panic counter, not a free weapon.
+	var sim := SimWorld.new(5, 1, "campaign")
+	var p := sim.players[0]
+	p["mg_ammo"] = 0
+	sim.enemies.clear()
+	sim._spawn_enemy(p["x"] + 12 * Fixed.ONE, p["y"], false)   # within BASH_RADIUS (16)
+	var e := sim.enemies[sim.enemies.size() - 1]
+	var chest_before := sim.war_chest
+	var inp := SimInput.new()
+	inp.fire = true
+	sim.step(_inputs(inp))
+	Runner.T.ok(not e["alive"], "empty-clip bash kills the adjacent enemy")
+	Runner.T.eq(sim.war_chest, chest_before, "bash mints no coin")
+	Runner.T.eq(sim.bullets.size(), 0, "bash spends no ammo and spawns no bullet")
+	Runner.T.ok(p["alive"], "the bash pre-empts the touch-kill — player survives")

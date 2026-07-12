@@ -103,6 +103,7 @@ const _EVENT_SOUND := {
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
 	"bunker_break": ["explosion", -4.0, 0.72],
+	"bash": ["vest_break", -3.0, 0.8],
 	"frogman_surface": ["splash", -4.0, 1.0],
 	"wave_start": ["wave_start", -5.0, 1.0],
 	"wave_clear": ["wave_clear", -5.0, 1.0],
@@ -280,6 +281,14 @@ func _consume_events() -> void:
 				if Engine.get_physics_frames() - _dry_frame >= 14:
 					_dry_frame = Engine.get_physics_frames()
 					_sfx.play("tank_board", -12.0, 2.2)
+			"bash":
+				# Brutal point-blank melee: hit-stop + a spark toward the aim.
+				_hitstop_frames = maxi(_hitstop_frames, 3)
+				_trauma = minf(1.0, _trauma + 0.18)
+				var bp := sim.players[ev["i"]]
+				_recoil[ev["i"]] -= Vector2(bp["aim_x"], bp["aim_y"]) * PX * 3.0
+				_fx.append({"x": ev["x"] + int(bp["aim_x"] * 12), "y": ev["y"] + int(bp["aim_y"] * 12),
+					"t": 0.0, "kind": "spark", "rate": 0.3})
 			"buy":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})

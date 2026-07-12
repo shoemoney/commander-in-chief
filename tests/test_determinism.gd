@@ -92,13 +92,18 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## paint-locked aim vector shift the endless stream too — all 6 samples moved.
 ## RE-RECORDED (2026-07-12, iter 5): the new mines[] checksum block (size 0 in endless) shifts
 ## the endless hash even though mines never stream outside campaign.
+## RE-RECORDED (2026-07-12, iter 6 agency&cover): empty-clip bash (dry MG becomes a point-blank
+## melee kill), bunkers now block ENEMY bullets too, and Last-Stand doubles score. Only endless
+## samples 1-5 moved (the endless torture depletes ammo + fields ranged shooters near bunkers);
+## CAMPAIGN golden is bit-identical (the torture never runs dry near an enemy, and never reaches
+## last_stand). Sample 0 (t=600) unchanged — too early for any of the three to bite.
 const ENDLESS_GOLDEN: Array[int] = [
 	5024174134145019459,
-	2321841675063926060,
-	6467129102305223709,
-	7424271448030304724,
-	4621638617768800352,
-	4631126509128861982,
+	3811316569843741565,
+	6021462306528794600,
+	493826583473238850,
+	2012266684157600236,
+	2650581102790456043,
 ]
 
 

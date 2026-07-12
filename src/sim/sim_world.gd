@@ -22,6 +22,11 @@ const PLAYER_SPEED := (F_ONE * 12) / 5        # 2.4 px/tick = 144 px/s (+35% ove
 const BULLET_SPEED := 6 * F_ONE
 const BULLET_TTL_TICKS := 120
 const FIRE_COOLDOWN_TICKS := 8
+# Empty-clip bash: a point-blank melee counter when the MG runs dry. Reach is a
+# touch wider than a rusher's kill radius so you can pre-empt one; the long
+# cooldown keeps it a last resort, not a replacement weapon.
+const BASH_RADIUS := 16 * F_ONE
+const BASH_COOLDOWN_TICKS := 40
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -361,7 +366,21 @@ func _step_players(inputs: Array) -> void:
 			p["aim_y"] = Fixed.div(ay, alen)
 
 		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
-			events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
+			# Empty-clip bash: one enemy in reach dies (no coin), on a long
+			# cooldown — running dry is a beat of danger, not pure helplessness.
+			var bashed := false
+			if p["in_tank"] < 0:
+				for e in enemies:
+					if e["alive"] and not e.get("submerged", false) \
+							and e.get("surface_ticks", 0) == 0 \
+							and _dist_lte(p["x"], p["y"], e["x"], e["y"], BASH_RADIUS):
+						_kill_enemy(e, true)
+						p["fire_cd"] = BASH_COOLDOWN_TICKS
+						events.append({"t": "bash", "x": p["x"], "y": p["y"], "i": i})
+						bashed = true
+						break
+			if not bashed:
+				events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
 		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
@@ -771,7 +790,9 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		"kind": e["kind"]})
 	if not no_coin:
 		war_chest += coin
-	score += coin * 10   # score always credits — the airstrike still counts
+	# Last Stand doubles the score credit — the finale strips revives, so reward
+	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
+	score += coin * 10 * (2 if last_stand else 1)
 	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
 	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
 	# the streak rewards aggression on the leaderboard, not the economy.
@@ -1425,6 +1446,14 @@ func _step_enemy_bullets() -> void:
 		b["ttl"] = b["ttl"] - 1
 		var dead: bool = b["ttl"] <= 0 or b["y"] < camera_top - 40 * F_ONE \
 			or b["y"] > camera_top + 400 * F_ONE or b["x"] < 0 or b["x"] > 640 * F_ONE
+		if not dead:
+			# Cover is real both ways now: a bunker between you and a shooter eats
+			# the round, same as it eats yours (player bullets already block here).
+			for bk in bunkers:
+				if bk["alive"] and _point_in_aabb(b["x"], b["y"], bk):
+					events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+					dead = true
+					break
 		if not dead:
 			for p in players:
 				if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
