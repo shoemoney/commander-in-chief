@@ -975,6 +975,7 @@ func _draw() -> void:
 	_draw_terrain()
 	_draw_scorch()
 	_draw_water()
+	_draw_mines()
 	_draw_gates()
 	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
 	# field bunkers stream in independently and look identical otherwise.
@@ -1098,6 +1099,21 @@ func _draw_terrain() -> void:
 				continue
 			_spr(_LITTER[(hl / 40) % _LITTER.size()], Vector2(lx, ly_px),
 				float(hl % 628) / 100.0, 1.0)
+
+
+func _draw_mines() -> void:
+	for m in sim.mines:
+		if not m["armed"]:
+			continue
+		var mp := _to_screen(m["x"], m["y"])
+		# Danger telegraph keeps the mine FAIR: a pulsing red ring + a blinking
+		# armed-indicator so you can spot it and herd rushers onto it (or route
+		# around it yourself).
+		var mb := Art.pulse(0.1)
+		draw_circle(mp, 8.0 + mb * 3.0, Color(0.9, 0.2, 0.15, 0.14 + mb * 0.12))
+		draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(1.0, 0.35, 0.2, 0.5 + mb * 0.3), 1.2)
+		_spr("landmine", mp, 0.0, 4.5)
+		draw_circle(mp, 2.0, Color(0.95, 0.3, 0.18, 0.65 + mb * 0.35))
 
 
 func _draw_water() -> void:

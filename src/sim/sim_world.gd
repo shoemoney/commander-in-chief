@@ -46,6 +46,11 @@ const SNIPER_BULLET_SPEED := 6 * F_ONE
 # Shield (endless-only): slow heavy; front-arc blocks bullets, flank/grenade kills.
 const SHIELD_SPEED := F_ONE
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
+# Landmines: deterministic field hazards. Any grounded unit (player on foot, or
+# an enemy) that steps within the trigger radius detonates them via _explode() —
+# herd rushers onto them, or respect them yourself. Rolling clears them safely.
+const MINE_TRIGGER_RADIUS := 9 * F_ONE
+const MINE_SPACING := 340 * F_ONE
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
 const MG_AMMO_MAX := 99
@@ -169,6 +174,7 @@ var gates: Array[Dictionary] = []
 var strikes: Array[Dictionary] = []
 var waters: Array[Dictionary] = []
 var enemy_bullets: Array[Dictionary] = []
+var mines: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
 var score: int = 0
@@ -194,6 +200,7 @@ var _next_bunker_y: int = 0
 var _next_gate_y: int = 0
 var _next_tank_y: int = 0
 var _next_water_y: int = 0
+var _next_mine_y: int = 0
 var _gate_counter: int = 0
 var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
 var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
@@ -210,6 +217,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_gate_y = -GATE_SPACING
 	_next_tank_y = -(750 * F_ONE)
 	_next_water_y = -(1500 * F_ONE)
+	_next_mine_y = -(700 * F_ONE)
 	for i in player_count:
 		players.append({
 			"x": (280 + i * 80) * F_ONE,
@@ -272,6 +280,7 @@ func step(inputs: Array) -> void:
 		_resolve_strikes()   # grenadier lobs detonate even with no observer
 	else:
 		_step_spawner()
+		_step_mines()
 		_step_boss()
 		_step_colossus()
 		_step_gates()
@@ -970,6 +979,31 @@ func _step_bunkers() -> void:
 			_spawn_enemy(bk["x"] + BUNKER_W / 2, bk["y"] + BUNKER_H + 8 * F_ONE, false)
 
 
+func _step_mines() -> void:
+	for i in range(mines.size() - 1, -1, -1):
+		var m := mines[i]
+		if not m["armed"] or m["y"] > camera_top + 420 * F_ONE:
+			mines.remove_at(i)
+			continue
+		var triggered := false
+		# A player on foot (not rolling) stepping on it takes the hit + detonates.
+		for p in players:
+			if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
+					and _dist_lte(p["x"], p["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
+				_hurt_player(p)
+				triggered = true
+		# Or an enemy walks onto it — herd rushers into the minefield.
+		if not triggered:
+			for e in enemies:
+				if e["alive"] and not e.get("submerged", false) \
+						and _dist_lte(e["x"], e["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
+					triggered = true
+					break
+		if triggered:
+			m["armed"] = false
+			_explode(m["x"], m["y"])
+
+
 func _step_spawner() -> void:
 	# Field spawner: pressure from above the screen edge; every 8th is a red
 	# elite. Each opened gate tightens the interval — the campaign's
@@ -1085,6 +1119,11 @@ func _step_camera() -> void:
 			var flank := (idx / 2) % 2
 			bunkers.append(_make_bunker((120 if flank == 0 else 460) * F_ONE, _next_bunker_y))
 		_next_bunker_y -= 500 * F_ONE
+	# Stream landmines between the arenas — deterministic x, off the gate rows.
+	while _next_mine_y > camera_top - 2 * VIEW_H:
+		if absi(_next_mine_y / MINE_SPACING) % 2 == 0:
+			mines.append({"x": rng.range_i(70, 570) * F_ONE, "y": _next_mine_y, "armed": true})
+		_next_mine_y -= MINE_SPACING
 	while _next_gate_y > camera_top - 2 * VIEW_H and not _world_ended:
 		_gate_counter += 1
 		if _gate_counter == FINAL_GATE_INDEX:
@@ -1552,6 +1591,11 @@ func checksum() -> int:
 		h = feed.call(pk.get("cost", 0), h)
 	for w in waters:
 		h = feed.call(w["ford_x"], h)
+	h = feed.call(mines.size(), h)
+	for m in mines:
+		h = feed.call(m["x"], h)
+		h = feed.call(m["y"], h)
+		h = feed.call(int(m["armed"]), h)
 	h = feed.call(tanks.size(), h)
 	for t in tanks:
 		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:

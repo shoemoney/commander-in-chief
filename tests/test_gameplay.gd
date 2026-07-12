@@ -196,3 +196,35 @@ func test_kill_streak_bonuses_score_not_chest() -> void:
 	for t in SimWorld.KILL_STREAK_WINDOW_TICKS + 1:
 		sim.step(_inputs(_idle()))
 	Runner.T.eq(sim.kill_streak, 0, "streak lapses after the window with no kills")
+
+
+func test_landmine_detonates_and_kills_enemy() -> void:
+	# An enemy walking onto an armed mine is killed by the blast; the mine disarms.
+	var sim := SimWorld.new(3, 1, "campaign")
+	var p := sim.players[0]
+	sim.mines.clear()
+	var mx: int = p["x"] + 200 * Fixed.ONE
+	sim.mines.append({"x": mx, "y": p["y"], "armed": true})
+	sim._spawn_enemy(mx, p["y"], false)   # enemy standing on the mine
+	var enemy := sim.enemies[sim.enemies.size() - 1]
+	sim._step_mines()
+	Runner.T.ok(not enemy["alive"], "enemy on a mine is killed by the blast")
+	Runner.T.ok(sim.mines.is_empty() or not sim.mines[0]["armed"], "mine disarms after detonating")
+
+
+func test_landmine_kills_player_but_vest_absorbs() -> void:
+	# Standing on a mine is lethal — unless a Flak Vest eats the one hit.
+	var sim := SimWorld.new(3, 1, "campaign")
+	var p := sim.players[0]
+	sim.enemies.clear()
+	sim.mines = [{"x": p["x"], "y": p["y"], "armed": true}]
+	sim._step_mines()
+	Runner.T.ok(not p["alive"], "player standing on a mine is killed")
+	# With a vest, the same hit is absorbed (mine still detonates).
+	var sim2 := SimWorld.new(3, 1, "campaign")
+	var p2 := sim2.players[0]
+	sim2.enemies.clear()
+	p2["vest"] = true
+	sim2.mines = [{"x": p2["x"], "y": p2["y"], "armed": true}]
+	sim2._step_mines()
+	Runner.T.ok(p2["alive"] and not p2["vest"], "vest absorbs the mine hit (player lives, vest gone)")

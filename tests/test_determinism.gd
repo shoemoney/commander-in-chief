@@ -43,13 +43,17 @@ const SEED := 0xDEADBEEF
 ## grace holds the field spawner off so "GATE SECURED" isn't stepped on; and a SCORE-ONLY
 ## kill-streak bonus (5/10/20 tiers) lands. New checksummed state: _spawn_grace,
 ## kill_streak, kill_streak_timer, and the sniper's paint-locked aim (aim_lx/aim_ly).
+## RE-RECORDED (2026-07-12, design-loop iter 5): landmines — a new deterministic field-hazard
+## entity (mines[] w/ x/y/armed, hashed) that streams into the campaign world and detonates via
+## _explode() when any grounded unit steps on it. All 6 campaign samples moved (the torture walks
+## the minefield); endless moved too (the new mines.size() hash block feeds even when empty).
 const GOLDEN: Array[int] = [
-	1155310348896724263,
-	4571653001976119658,
-	4946087467878201582,
-	8692305162284886034,
-	3936728001528560014,
-	6351474121277013006,
+	180274737480887099,
+	2578271929563034843,
+	8497729799219670663,
+	7020148603900881034,
+	2578480308981637099,
+	1491716892420367491,
 ]
 
 
@@ -86,13 +90,15 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-12, design-loop iter 2): the score-only kill-streak bonus plus the
 ## new checksummed scalars (kill_streak/kill_streak_timer/_spawn_grace) and the sniper's
 ## paint-locked aim vector shift the endless stream too — all 6 samples moved.
+## RE-RECORDED (2026-07-12, iter 5): the new mines[] checksum block (size 0 in endless) shifts
+## the endless hash even though mines never stream outside campaign.
 const ENDLESS_GOLDEN: Array[int] = [
-	8718596335628777777,
-	7960723626119307300,
-	5809129050624293615,
-	3077933044801342684,
-	3114050996516494880,
-	7859028305187215210,
+	5024174134145019459,
+	2321841675063926060,
+	6467129102305223709,
+	7424271448030304724,
+	4621638617768800352,
+	4631126509128861982,
 ]
 
 
