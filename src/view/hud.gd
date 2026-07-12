@@ -12,6 +12,12 @@ var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 
 
+## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
+## so the amber/red states stay legible without flashing.
+func _mblink(period: int) -> bool:
+	return main._motion < 0.5 or Art.blink(period)
+
+
 func _draw() -> void:
 	if main == null or main.sim == null:
 		return
@@ -98,7 +104,7 @@ func _draw() -> void:
 				# if not — the revive-or-hoard decision made legible.
 				var cost := sim.revive_cost(p)
 				var afford: bool = sim.war_chest >= cost
-				var blink := (Engine.get_physics_frames() / 20) % 2 == 0
+				var blink := _mblink(20)
 				var col: Color
 				if afford:
 					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
@@ -110,7 +116,7 @@ func _draw() -> void:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
-			if t["burning"] and (Engine.get_physics_frames() / 8) % 2 == 0:
+			if t["burning"] and _mblink(8):
 				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
 		else:
@@ -118,14 +124,13 @@ func _draw() -> void:
 			var ammo: int = p["mg_ammo"]
 			var acol := Color(0.95, 0.96, 0.9)
 			if ammo == 0:
-				acol = Color(1.0, 0.25, 0.2) if (Engine.get_physics_frames() / 10) % 2 == 0 \
-					else Color(0.6, 0.2, 0.18)
+				acol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
 			elif ammo <= 20:
 				acol = Color(1.0, 0.75, 0.35)
 			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
-			if main._grenade_dry > 0 and (Engine.get_physics_frames() / 4) % 2 == 0:
+			if main._grenade_dry > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 			if p["vest"]:

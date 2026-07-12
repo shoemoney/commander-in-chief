@@ -6,10 +6,3 @@
 script = ExtResource("1_main")
 
 [node name="HUD" type="CanvasLayer" parent="."]
-
-[node name="Label" type="Label" parent="HUD"]
-offset_left = 8.0
-offset_top = 6.0
-offset_right = 400.0
-offset_bottom = 80.0
-theme_override_font_sizes/font_size = 10

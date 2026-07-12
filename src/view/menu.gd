@@ -162,6 +162,8 @@ func _draw() -> void:
 				else "SECTOR %d/5  ·  %dm" % [mini(opened + 1, 5), -Fixed.to_int(s.camera_top) / 10]
 			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
 				100, 10, Color(0.8, 0.85, 0.72))
+			if main._current_seed > 0:
+				_center_text("RUN #%d" % main._current_seed, 114, 8, Color(0.6, 0.66, 0.56, 0.75))
 	var items := _items()
 	# Compress spacing so 6-7 item menus fit the 360px screen without the
 	# bottom button colliding with the title control legend.

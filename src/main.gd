@@ -49,6 +49,7 @@ var _hit_dir_t := 0.0
 var _record_fired := false       # NEW RECORD banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _seen := {}                  # persisted first-time-hint flags
+var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
 var _run_kills := 0              # this-run tally for the debrief card
@@ -109,14 +110,12 @@ const _EVENT_SOUND := {
 	"deny": ["deny", -6.0, 1.0],
 }
 
-@onready var hud: Label = $HUD/Label
 var _hud_icons := HudIcons.new()
 var _menu := GameMenu.new()
 
 
 func _ready() -> void:
 	add_child(_sfx)
-	hud.visible = false   # superseded by the icon HUD
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
 	_menu.main = self
@@ -145,6 +144,7 @@ func _reset() -> void:
 	# positions), but spawn geometry, fords and drop luck differ each run —
 	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
 	var seed_v := 0xC0FFEE if OS.has_feature("movie") else randi()
+	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
 	_trauma = 0.0
 	_hitstop_frames = 0
@@ -291,6 +291,11 @@ func _consume_events() -> void:
 				_kick -= aim * 0.5
 				if ev["i"] < _heat.size():
 					_heat[ev["i"]] = minf(1.0, _heat[ev["i"]] + 0.09)
+					# Overheated barrel vents steam at the muzzle — the heat
+					# mechanic gets a physical tell, not just reticle bloom.
+					if _heat[ev["i"]] >= 0.95 and Engine.get_physics_frames() % 8 == 0:
+						_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
+							"y": ev["y"] + int(shooter["aim_y"] * 13), "t": 0.35, "kind": "smoke"})
 				_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
 					"y": ev["y"] + int(shooter["aim_y"] * 13),
 					"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
@@ -378,8 +383,36 @@ func _consume_events() -> void:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 						"rate": 0.025, "text": "+%d¢" % ev["coin"], "col": Color(1.0, 0.9, 0.45)})
 			"bunker_break":
+				# The "explosion" SFX already fires (_EVENT_SOUND) but nothing
+				# detonated on screen — give the demolished bunker its blast.
+				_trauma = minf(1.0, _trauma + 0.22)
+				_rumble = maxf(_rumble, 0.5)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.14})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
+					"r": 46.0, "col": Color(1.0, 0.7, 0.35)})
+				for d in 6:
+					var bka := d * TAU / 6.0 + randf() * 0.3
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.06,
+						"vx": cos(bka) * randf_range(1.2, 2.6), "vy": sin(bka) * randf_range(1.2, 2.6)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.025, "text": "+%d¢" % ev.get("coin", 0), "col": Color(1.0, 0.9, 0.45)})
+			"sniper_fire":
+				# Crack + red flash so the kill-shot leaving the barrel is visible —
+				# the paint-line telegraph vanishes the instant it fires.
+				for k in 4:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "muzzle",
+						"rate": 0.32, "a": k * TAU / 4.0})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.14,
+					"r": 22.0, "col": Color(1.0, 0.3, 0.25)})
+			"tank_ignite":
+				# The bail-out clock just started (alarm already sounds) — punch the
+				# camera + throw an alert ring so it lands as a real "get out" beat.
+				_trauma = minf(1.0, _trauma + 0.28)
+				_rumble = maxf(_rumble, 0.55)
+				_kick += Vector2(0, -3)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
 				_trauma = minf(1.0, _trauma + 0.5)
 				_hitstop_frames = maxi(_hitstop_frames, 6)
@@ -427,6 +460,18 @@ func _consume_events() -> void:
 			"victory":
 				_trauma = 1.0
 				_flash_alpha = 0.6
+				# The one win-state of the whole run deserves a payoff: a gold
+				# shockwave + light bloom off the wreck and a fountain of gold
+				# confetti casings, not just a bare white flash.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.08})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.05,
+					"r": 80.0, "col": Color(1.0, 0.85, 0.4)})
+				for d in 22:
+					var vca := randf() * TAU
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
+						"rate": 0.018, "spin": randf() * TAU,
+						"vx": cos(vca) * randf_range(1.2, 3.6),
+						"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
 
 
 func _check_boss_intro() -> void:
@@ -909,7 +954,7 @@ func _draw() -> void:
 					is_locker = true
 					break
 			if is_locker:
-				var lp := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.15)
+				var lp := Art.pulse(0.15)
 				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
 			_spr("bunker", c, 0.0, 0.78)
 	_draw_pickups()
@@ -938,12 +983,12 @@ func _draw_terrain() -> void:
 		for tx in 10:
 			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
 			var h := Art.cell_hash(tx, base_iy + ty)
-			var shade := 0.52 + float(h % 7) * 0.012
+			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
 			draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
 				Color(shade, shade + 0.06, shade * 0.82))
 			if h % 6 == 0:
 				draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(8, 8), Vector2(48, 48)), false,
-					Color(0.65, 0.6, 0.5, 0.55))
+					Color(0.58, 0.5, 0.38, 0.7))   # warmer, more opaque "no cover" dirt
 	# Drifting cloud shadows: large soft dark blobs scrolling diagonally at a
 	# slower rate than the camera — instant depth, the jungle feels alive.
 	var ct := float(Engine.get_physics_frames()) * 0.15
@@ -1098,7 +1143,7 @@ func _draw_tanks() -> void:
 			draw_arc(c, SimWorld.TANK_BOARD_RADIUS * PX, 0, TAU, 28,
 				Color(0.85, 0.95, 0.6, 0.35), 1.0)
 		elif t["occupant"] >= 0:
-			var cp := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
+			var cp := Art.pulse(0.2)
 			draw_arc(c, SimWorld.TANK_CRUSH_RADIUS * PX, 0, TAU, 24,
 				Color(1.0, 0.3, 0.2, 0.25 + cp * 0.2), 1.5)
 		var burn_mod := Color.WHITE
@@ -1173,13 +1218,15 @@ func _draw_enemies() -> void:
 				var pf := 1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)
 				draw_line(epos, tp, Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5), 1.0 + pf)
 				draw_circle(tp, 2.0 + pf * 2.0, Color(1.0, 0.2, 0.15, 0.4 + pf * 0.4))
-			_spr("elite", epos, face, 0.5, Color(1.1, 0.6, 1.2))   # violet marksman
+			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
+			_spr("elite", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # violet marksman
 		elif e["kind"] == "grenadier":
 			var gwu: int = e.get("windup", 0)
 			if gwu > 0:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
-			_spr("elite", epos, face, 0.52, Color(1.3, 1.1, 0.55))   # amber lobber
+			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
+			_spr("elite", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber
 		elif e["kind"] == "shield":
 			_spr("rusher", epos, face, 0.55, Color(0.85, 0.9, 1.0))
 			# The riot shield: a bright arc across the front — this side deflects.
@@ -1192,7 +1239,8 @@ func _draw_enemies() -> void:
 				var wfrac := 1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)
 				draw_circle(epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
 					Color(1.0, 0.85 - wfrac * 0.55, 0.2, 0.4 + wfrac * 0.6))
-			_spr("elite", epos, face, 0.5, Color(1.35, 0.75, 0.7))
+			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
+			_spr("elite", epos, face, 0.5 * esw, Color(1.35, 0.75, 0.7))
 		else:
 			_spr("rusher", epos, face, 0.5)
 
@@ -1206,7 +1254,7 @@ func _draw_observer() -> void:
 	draw_rect(Rect2(op + Vector2(8, -12), Vector2(7, 5)), Color(0.9, 0.25, 0.2))
 	# Kill-me target reticle: the spotter is one-hit-killable and killing him
 	# ends the barrage — a second way out the ADVANCE directive never mentions.
-	var tp := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
+	var tp := Art.pulse(0.2)
 	var tr := 13.0 + tp * 3.0
 	var tcol := Color(1.0, 0.3, 0.25, 0.85)
 	for q in 4:
@@ -1253,7 +1301,7 @@ func _draw_colossus() -> void:
 	# Crush footprint: the true instant-death contact radius, drawn on the
 	# ground like a mortar telegraph — 'do not enter' in the no-revive finale.
 	var crush := SimWorld.COLOSSUS_CRUSH_RADIUS * PX
-	var cpulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.18)
+	var cpulse := Art.pulse(0.18)
 	draw_arc(cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
 	draw_circle(cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
 	var mod := Color.WHITE if phase < 3 else Color(1.4, 0.62, 0.55)
@@ -1265,7 +1313,7 @@ func _draw_colossus() -> void:
 	for bx in [-24.0, 24.0]:
 		draw_circle(cpos + Vector2(bx, 34.0), 2.0 + warm * 3.5,
 			Color(1.0, 0.55, 0.15, 0.15 + warm * 0.55))
-	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
+	var pulse := Art.pulse(0.2)
 	# Core window: when the plating is retracted, the core glows white-hot and
 	# a 'CORE EXPOSED' ring says 'shoot it NOW' — bullets chip it this beat.
 	if sim.colossus.get("core_open", 0) > 0:
@@ -1512,7 +1560,11 @@ func _draw_scorch() -> void:
 		var fade := 1.0 - ct
 		# A dark blood pool spreads under it early, then everything fades.
 		draw_circle(cp + Vector2(0, 2), 3.0 + minf(ct, 0.2) * 20.0, Color(0.28, 0.03, 0.03, 0.4 * fade))
-		_spr(c["kind"], cp, c["spin"], 0.5, Color(0.45, 0.42, 0.4, 0.85 * fade))
+		# Death squash-pop: a quick scale bump on impact that settles into a
+		# flattened corpse (uses _spr's stretch param, wired but never called).
+		var pop := 1.0 + maxf(0.0, 0.35 - ct * 3.0)
+		var squash := 1.0 - minf(ct * 2.5, 1.0) * 0.2
+		_spr(c["kind"], cp, c["spin"], 0.5 * pop, Color(0.45, 0.42, 0.4, 0.85 * fade), squash)
 
 
 func _draw_telegraphs() -> void:
@@ -1647,6 +1699,17 @@ func _draw_wheel() -> void:
 			draw_string(f, ipos + Vector2(-7, 24), str(item["cost"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
+			# Current stock vs cap under each socket — the buy decision no longer
+			# needs an eye-flick to the corner HUD.
+			var stock := ""
+			match int(item["kind"]):
+				0: stock = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
+				1: stock = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
+				2: stock = "VEST ON" if p["vest"] else "NO VEST"
+			if stock != "":
+				var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 7).x
+				draw_string(f, ipos + Vector2(-sw2 / 2.0, 33), stock,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.72, 0.77, 0.66, 0.85))
 		# What the selected socket actually delivers.
 		var sel: int = _wheel[i]["sel"]
 		if sel >= 0:
@@ -1676,7 +1739,7 @@ func _draw_banners() -> void:
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
 	# closes in (heartbeat plays under it). Scaled by the reduce-motion toggle.
 	if _tension > 0.02:
-		var hb := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.11)
+		var hb := Art.pulse(0.11)
 		draw_rect(Rect2(0, 0, 640, 360),
 			Color(0.15, 0.0, 0.0, _tension * (0.12 + 0.1 * hb) * _motion))
 	# Directional damage wedge: a red arc on the screen edge pointing at the
@@ -1697,7 +1760,7 @@ func _draw_banners() -> void:
 		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
 			continue
 		if sim.stall_ticks > 90:
-			var gpulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.15)
+			var gpulse := Art.pulse(0.15)
 			var gtxt := "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty() \
 				else "GRENADE THE BUNKERS TO ADVANCE"
 			var gf := ThemeDB.fallback_font

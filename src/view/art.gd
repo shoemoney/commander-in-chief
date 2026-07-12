@@ -31,7 +31,6 @@ const TEX := {
 	"gunship_barrel": preload(SY + "gunship_barrel.png"),
 	"colossus_body": preload(SY + "colossus_body.png"),
 	"colossus_barrel": preload(SY + "colossus_barrel.png"),
-	"sandbag": preload(SY + "sandbag.png"),
 	"sandbag_beige": preload(SY + "sandbag.png"),
 	"crate_ammo": preload(SY + "crate_ammo.png"),
 	"crate_grenade": preload(SY + "crate_grenade.png"),
@@ -100,7 +99,7 @@ const SCALE := {
 	"frogman": 1.05, "observer": 0.24, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
-	"sandbag": 0.83, "sandbag_beige": 0.83,
+	"sandbag_beige": 0.83,
 	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
 	"tree_large": 0.89, "tree_small": 0.91, "fern": 0.9,
 	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
@@ -127,7 +126,7 @@ const TINT := {
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
 	"gunship_body": OLIVE_VEH, "colossus_body": OLIVE_VEH,
-	"sandbag": Color(0.82, 0.88, 0.62), "sandbag_beige": Color(0.88, 0.92, 0.66),
+	"sandbag_beige": Color(0.88, 0.92, 0.66),
 	"crate_ammo": Color(0.82, 0.88, 0.62), "crate_grenade": Color(0.82, 0.88, 0.62),
 	"crate_airstrike": Color(0.82, 0.88, 0.62),
 	"tree_large": FOLIAGE, "tree_small": FOLIAGE, "fern": FOLIAGE,
@@ -146,7 +145,7 @@ const OUTLINE := {
 	"player1": true, "player2": true, "rusher": true, "elite": true,
 	"frogman": true, "observer": true, "bunker": true,
 	"tank_body": true, "tank_barrel": true, "gunship_body": true,
-	"colossus_body": true, "sandbag": true, "sandbag_beige": true,
+	"colossus_body": true, "sandbag_beige": true,
 	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
 	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
@@ -184,6 +183,16 @@ static func safe(green: Color) -> Color:
 	if not colorblind:
 		return green
 	return Color(0.35, 0.75, 1.0, green.a)
+
+
+## Shared view-clock helpers — one source for the sine-pulse and square-blink
+## expressions that were retyped ~10× across main.gd/hud.gd.
+static func pulse(rate: float) -> float:
+	return 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * rate)
+
+
+static func blink(period: int) -> bool:
+	return (Engine.get_physics_frames() / period) % 2 == 0
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
