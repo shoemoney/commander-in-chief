@@ -25,6 +25,7 @@ var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
+var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _kick := Vector2.ZERO         # directional screen nudge from firing
@@ -150,6 +151,7 @@ func _reset() -> void:
 	_flash_alpha = 0.0
 	_fx.clear()
 	_scorch.clear()
+	_corpses.clear()
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
 	_kill_streak = 0
@@ -331,6 +333,13 @@ func _consume_events() -> void:
 			"kill":
 				# No screen flash here: at kill-spam rates it strobes
 				# (photosensitivity); smoke + gib burst + blip + coin carry it.
+				# A per-type death throe + a fading corpse so a cleared field
+				# reads as fought-over, not swept clean.
+				var kkind: String = ev.get("kind", "rusher")
+				if kkind != "frogman":
+					_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+						"kind": "elite" if kkind in ["elite", "grenadier", "sniper"] else "rusher",
+						"spin": randf() * TAU})
 				# Wet kills die in a splash, not a puff — the terrain reacts.
 				if sim._in_water(ev["x"], ev["y"]):
 					_sfx.play("splash", -10.0, 1.2)
@@ -640,6 +649,12 @@ func _update_feel() -> void:
 		_scorch[i]["t"] += 0.012
 		if _scorch[i]["t"] >= 1.0:
 			_scorch.remove_at(i)
+	for i in range(_corpses.size() - 1, -1, -1):
+		_corpses[i]["t"] += 0.004   # linger ~4s
+		if _corpses[i]["t"] >= 1.0:
+			_corpses.remove_at(i)
+	while _corpses.size() > 40:     # cap the field's body count
+		_corpses.remove_at(0)
 	for i in _recoil.size():
 		_recoil[i] *= 0.72
 	for i in _heat.size():
@@ -1485,6 +1500,14 @@ func _draw_scorch() -> void:
 		var a: float = 0.4 * (1.0 - s["t"])
 		draw_circle(pos, s["r"], Color(0.12, 0.1, 0.08, a))
 		draw_circle(pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
+	# Fallen bodies: the enemy sprite, darkened and sprawled, fading over ~4s.
+	for c in _corpses:
+		var cp := _to_screen(c["x"], c["y"])
+		var ct: float = c["t"]
+		var fade := 1.0 - ct
+		# A dark blood pool spreads under it early, then everything fades.
+		draw_circle(cp + Vector2(0, 2), 3.0 + minf(ct, 0.2) * 20.0, Color(0.28, 0.03, 0.03, 0.4 * fade))
+		_spr(c["kind"], cp, c["spin"], 0.5, Color(0.45, 0.42, 0.4, 0.85 * fade))
 
 
 func _draw_telegraphs() -> void:

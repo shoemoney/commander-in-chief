@@ -731,7 +731,10 @@ func _explode(x: int, y: int) -> void:
 func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
-	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin})
+	# kind rides the (checksum-excluded) kill event so the view can spawn a
+	# per-type death throe + corpse — golden-safe.
+	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin,
+		"kind": e["kind"]})
 	if not no_coin:
 		war_chest += coin
 	score += coin * 10   # score always credits — the airstrike still counts
