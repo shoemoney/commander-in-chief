@@ -57,6 +57,7 @@ var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
 var _dry_frame := -100            # rate-limits the dry-fire click
+var _grenade_dry := 0            # HUD grenade-pip red flash on empty throw
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 # Persistent bests (user://ikari_best.cfg) — the roguelite carrot.
 var best_score := 0
@@ -222,7 +223,9 @@ func _physics_process(_delta: float) -> void:
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
 	else:
-		sim.step(_gather_inputs())
+		var inputs := _gather_inputs()
+		_check_dry_throw(inputs)
+		sim.step(inputs)
 		_consume_events()
 		_check_boss_intro()
 		_track_bests()
@@ -500,6 +503,22 @@ func _show_banner(text: String) -> void:
 	_banner_t = 1.0
 
 
+func _check_dry_throw(inputs: Array) -> void:
+	# Empty-grenade click: pressing grenade at 0 ammo on foot does nothing in
+	# the sim (grenades are the ONLY armor-cracker, so silent = maximally
+	# confusing). View-side click keeps it golden-safe. Throttled like dry-fire.
+	if Engine.get_physics_frames() - _dry_frame < 14:
+		return
+	for pi in mini(inputs.size(), sim.players.size()):
+		var p := sim.players[pi]
+		if inputs[pi].grenade and p["alive"] and p["in_tank"] < 0 \
+				and p["grenade_ammo"] == 0 and p["grenade_cd"] == 0:
+			_dry_frame = Engine.get_physics_frames()
+			_sfx.play("tank_board", -12.0, 2.4)
+			_grenade_dry = 12   # HUD grenade pip flashes red
+			return
+
+
 func _check_near_miss() -> void:
 	# A crack past the ear when an enemy round barely misses a live player —
 	# rewards the dodge, amplifies one-hit tension. Throttled so it can't spam.
@@ -562,6 +581,7 @@ func _update_feel() -> void:
 	_duck = maxf(0.0, _duck - 0.05)
 	_concussion = maxf(0.0, _concussion - 0.035)
 	_music_hold = maxi(0, _music_hold - 1)
+	_grenade_dry = maxi(0, _grenade_dry - 1)
 	_hint_t = maxf(0.0, _hint_t - 0.006)
 	_check_near_miss()
 	_drive_audio()
@@ -945,8 +965,24 @@ func _draw_water() -> void:
 			draw_line(Vector2(0, ly), Vector2(640, ly), Color(0.35, 0.5, 0.6, 0.35), 1.0)
 		# The dry ford.
 		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
-		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, SimWorld.FORD_HALF_W * 2.0 * PX, wh + 4),
+		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
+		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, ford_w, wh + 4),
 			true, Color(0.85, 0.8, 0.65))
+		# Armor-barrier telegraph: a tank can't ford deep water (it just stops
+		# dead at the bank, reading as a broken control). When an occupied tank
+		# is near this band, hatch the deep-water banks red and flag the ford.
+		var tank_near := false
+		for tk in sim.tanks:
+			if tk["alive"] and tk["occupant"] >= 0 \
+					and absf((tk["y"] - w["y"]) * PX) < 90.0:
+				tank_near = true
+		if tank_near:
+			var hy := wy if (w["y"] > sim.camera_top) else wy + wh
+			for hx in range(0, 640, 16):
+				if hx + 8 < ford_left or hx > ford_left + ford_w:
+					draw_line(Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
+			draw_string(ThemeDB.fallback_font, Vector2(ford_left + ford_w / 2.0 - 12, wy - 8),
+				"FORD", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.6, 1.0, 0.6))
 
 
 func _draw_gates() -> void:
@@ -982,10 +1018,17 @@ func _draw_pickups() -> void:
 				mod = Color(0.6, 0.7, 1.4)   # vest = blue-shifted barrel
 			_: tex_name = "crate_airstrike"
 		_spr(tex_name, ppos, 0.0, 0.55, mod)
+		# Identity glyph floats above every crate (the vest crate reuses the
+		# ammo sprite, so it's ambiguous without this).
+		var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
+		draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if pk.get("cost", 0) > 0:
-			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -21), Vector2(9, 9)), false)
-			draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -13), str(pk["cost"]),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.95, 0.65))
+			# Price tinted by affordability (matches the spend-wheel language).
+			var afford: bool = sim.war_chest >= pk["cost"]
+			var pcol := Color(0.5, 1.0, 0.5) if afford else Color(1.0, 0.45, 0.35)
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
+			draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -25), str(pk["cost"]),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
 
 
 func _draw_tanks() -> void:
@@ -993,6 +1036,15 @@ func _draw_tanks() -> void:
 		if not t["alive"]:
 			continue
 		var c := _to_screen(t["x"], t["y"])
+		# Board-range ring on a parked tank; tread-crush footprint under an
+		# occupied one (mirrors the colossus crush grammar players already know).
+		if t["occupant"] < 0 and not t["burning"]:
+			draw_arc(c, SimWorld.TANK_BOARD_RADIUS * PX, 0, TAU, 28,
+				Color(0.85, 0.95, 0.6, 0.35), 1.0)
+		elif t["occupant"] >= 0:
+			var cp := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.2)
+			draw_arc(c, SimWorld.TANK_CRUSH_RADIUS * PX, 0, TAU, 24,
+				Color(1.0, 0.3, 0.2, 0.25 + cp * 0.2), 1.5)
 		var burn_mod := Color.WHITE
 		if t["burning"]:
 			burn_mod = Color(1.3, 0.6, 0.45) if (t["burn_ticks"] / 6) % 2 == 0 else Color(0.9, 0.5, 0.4)
@@ -1234,6 +1286,22 @@ func _draw_players() -> void:
 		if _two_players and p["alive"]:
 			var idc := Color(0.4, 1.0, 0.4, 0.6) if i == 0 else Color(1.0, 0.85, 0.3, 0.6)
 			draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+			# Revive-from-here affordance: revive has NO range check (the buddy
+			# teleports to you), but the beacon on the body implies you must run
+			# to it. Tell the reviver they can pay from where they stand.
+			for q in sim.players.size():
+				var dp := sim.players[q]
+				if q == i or dp["alive"] or sim.last_stand:
+					continue
+				var cost := sim.revive_cost(dp)
+				if sim.war_chest < cost:
+					continue
+				var dpos := _to_screen(dp["x"], dp["y"])
+				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
+				var rtxt := "REVIVE %d" % cost
+				draw_string(ThemeDB.fallback_font, pos + Vector2(-18, -16), rtxt,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 1.0, 0.6))
+				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0)
 		if p["alive"]:
 			var angle := _aim_angle(p)
 			var mod := Color.WHITE

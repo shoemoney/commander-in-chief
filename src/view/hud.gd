@@ -107,7 +107,11 @@ func _draw() -> void:
 			elif ammo <= 20:
 				acol = Color(1.0, 0.75, 0.35)
 			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
-			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
+			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
+			var gcol := Color(0.95, 0.96, 0.9)
+			if main._grenade_dry > 0 and (Engine.get_physics_frames() / 4) % 2 == 0:
+				gcol = Color(1.0, 0.3, 0.25)
+			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 		ry += 16.0
