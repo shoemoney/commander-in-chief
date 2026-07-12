@@ -59,10 +59,12 @@ var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
 var _banner_t := 0.0
-var _dry_frame := -100            # rate-limits the dry-fire click
+var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
+var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry := 0            # HUD grenade-pip red flash on empty throw
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
-# Persistent bests (user://ikari_best.cfg) — the roguelite carrot.
+# Persistent bests — the roguelite carrot.
+const SAVE_PATH := "user://ikari_best.cfg"
 var best_score := 0
 var best_wave := 0
 var best_dist := 0
@@ -342,9 +344,15 @@ func _consume_events() -> void:
 				# reads as fought-over, not swept clean.
 				var kkind: String = ev.get("kind", "rusher")
 				if kkind != "frogman":
+					# Sprawl the corpse along the shot that felled it (away from the
+					# nearest shooter), not a random spin.
+					var killer := sim._nearest_alive_player(ev["x"], ev["y"])
+					var cspin := randf() * TAU
+					if not killer.is_empty():
+						cspin = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
 					_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
 						"kind": "rusher" if kkind == "rusher" else "elite",
-						"spin": randf() * TAU})
+						"spin": cspin})
 				# Wet kills die in a splash, not a puff — the terrain reacts.
 				if sim._in_water(ev["x"], ev["y"]):
 					_sfx.play("splash", -10.0, 1.2)
@@ -434,12 +442,42 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.2)
 				_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
 				_punch = maxf(_punch, 0.04)
+				# The wall bursts apart — dust cloud + tumbling debris.
+				for d in 12:
+					var ga := d * TAU / 12.0 + randf() * 0.3
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.05,
+						"vx": cos(ga) * randf_range(1.5, 4.0), "vy": sin(ga) * randf_range(1.0, 3.0)})
+				for d in 6:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing", "rate": 0.03,
+						"spin": randf() * TAU, "vx": randf_range(-3.0, 3.0), "vy": randf_range(-3.0, 1.0)})
 				_show_banner("GATE SECURED — CHECKPOINT")
+			"revive":
+				# The run's biggest co-op payoff finally gets a picture: a green
+				# heal-burst + rising motes off the revived body.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.09})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
+					"r": 34.0, "col": Color(0.4, 1.0, 0.5)})
+				for d in 8:
+					var rva := d * TAU / 8.0 + randf() * 0.3
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.05,
+						"vx": cos(rva) * randf_range(0.6, 1.6), "vy": sin(rva) * randf_range(0.6, 1.6) - 1.0,
+						"spin": 0.0, "col": Color(0.5, 1.0, 0.6)})
+			"enemy_shot":
+				# Incoming fire was audio-only — a brief red muzzle glow so you can
+				# SEE where a shot left from in the chaos.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.2,
+					"r": 12.0, "col": Color(1.0, 0.4, 0.3)})
 			"vest_break":
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = maxf(_damage_vignette, 0.75)
 				_concussion = maxf(_concussion, 0.7)
 				_mark_hit_dir(ev["x"], ev["y"])
+				# The flak vest shatters — blue armor shards burst outward.
+				for d in 8:
+					var va := d * TAU / 8.0 + randf() * 0.3
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.06,
+						"vx": cos(va) * randf_range(1.2, 2.8), "vy": sin(va) * randf_range(1.2, 2.8),
+						"spin": randf() * TAU, "col": Color(0.55, 0.7, 1.0)})
 			"wave_start":
 				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
@@ -504,7 +542,7 @@ var hall: Array = []   # top-N run history for the Hall of Fame
 
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
-	if cf.load("user://ikari_best.cfg") == OK:
+	if cf.load(SAVE_PATH) == OK:
 		best_score = cf.get_value("best", "score", 0)
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
@@ -525,9 +563,9 @@ func _record_run() -> void:
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
 	var cf := ConfigFile.new()
-	cf.load("user://ikari_best.cfg")
+	cf.load(SAVE_PATH)
 	cf.set_value("hall", "runs", hall)
-	cf.save("user://ikari_best.cfg")
+	cf.save(SAVE_PATH)
 
 
 func _hint(id: String, text: String) -> void:
@@ -542,9 +580,9 @@ func _hint(id: String, text: String) -> void:
 	_hint_text = text
 	_hint_t = 1.0
 	var cf := ConfigFile.new()
-	cf.load("user://ikari_best.cfg")
+	cf.load(SAVE_PATH)
 	cf.set_value("seen", "hints", _seen)
-	cf.save("user://ikari_best.cfg")
+	cf.save(SAVE_PATH)
 
 
 func _track_bests() -> void:
@@ -586,11 +624,11 @@ func _track_bests() -> void:
 	if _best_dirty and Engine.get_physics_frames() % 60 == 0:
 		_best_dirty = false
 		var cf := ConfigFile.new()
-		cf.load("user://ikari_best.cfg")   # merge — don't clobber hall/seen sections
+		cf.load(SAVE_PATH)   # merge — don't clobber hall/seen sections
 		cf.set_value("best", "score", best_score)
 		cf.set_value("best", "wave", best_wave)
 		cf.set_value("best", "dist", best_dist)
-		cf.save("user://ikari_best.cfg")
+		cf.save(SAVE_PATH)
 
 
 func _show_banner(text: String) -> void:
@@ -602,13 +640,13 @@ func _check_dry_throw(inputs: Array) -> void:
 	# Empty-grenade click: pressing grenade at 0 ammo on foot does nothing in
 	# the sim (grenades are the ONLY armor-cracker, so silent = maximally
 	# confusing). View-side click keeps it golden-safe. Throttled like dry-fire.
-	if Engine.get_physics_frames() - _dry_frame < 14:
+	if Engine.get_physics_frames() - _dry_grenade_frame < 14:
 		return
 	for pi in mini(inputs.size(), sim.players.size()):
 		var p := sim.players[pi]
 		if inputs[pi].grenade and p["alive"] and p["in_tank"] < 0 \
 				and p["grenade_ammo"] == 0 and p["grenade_cd"] == 0:
-			_dry_frame = Engine.get_physics_frames()
+			_dry_grenade_frame = Engine.get_physics_frames()
 			_sfx.play("tank_board", -12.0, 2.4)
 			_grenade_dry = 12   # HUD grenade pip flashes red
 			return
@@ -1533,7 +1571,8 @@ func _draw_fx() -> void:
 			# Concussive ring: snaps out fast and thin.
 			draw_arc(pos, 4.0 + t * 34.0, 0, TAU, 32, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)), 2.5 * (1.0 - t))
 		elif fx["kind"] == "gib":
-			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(0.5, 0.1, 0.08, 1.0 - t))
+			var gc: Color = fx.get("col", Color(0.5, 0.1, 0.08))
+			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(gc.r, gc.g, gc.b, 1.0 - t))
 		elif fx["kind"] == "dust":
 			draw_circle(pos, 2.0 + t * 5.0, Color(0.7, 0.65, 0.5, 0.4 * (1.0 - t)))
 		elif fx["kind"] == "splash":
@@ -1561,7 +1600,7 @@ func _draw_scorch() -> void:
 		# A dark blood pool spreads under it early, then everything fades.
 		draw_circle(cp + Vector2(0, 2), 3.0 + minf(ct, 0.2) * 20.0, Color(0.28, 0.03, 0.03, 0.4 * fade))
 		# Death squash-pop: a quick scale bump on impact that settles into a
-		# flattened corpse (uses _spr's stretch param, wired but never called).
+		# flattened corpse (via _spr's stretch param).
 		var pop := 1.0 + maxf(0.0, 0.35 - ct * 3.0)
 		var squash := 1.0 - minf(ct * 2.5, 1.0) * 0.2
 		_spr(c["kind"], cp, c["spin"], 0.5 * pop, Color(0.45, 0.42, 0.4, 0.85 * fade), squash)

@@ -10,6 +10,8 @@ const FONT_SIZE := 10
 var main: Node2D
 var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
+var _prev_score := 0
+var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
@@ -36,17 +38,33 @@ func _draw() -> void:
 	var y := 6.0
 	x = _stat("icon_coin", str(sim.war_chest), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse))
-	x = _stat("icon_medal", str(sim.score), x, y)
+	if sim.score > _prev_score:
+		_score_pulse = 1.0
+	_prev_score = sim.score
+	_score_pulse = maxf(0.0, _score_pulse - 0.05)
+	x = _stat("icon_medal", str(sim.score), x, y,
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse))
 	# Live BEST target: the record to beat, right next to the current score.
 	if main.best_score > 0:
 		x = _text("BEST %d" % main.best_score, x, y + ICON - 3.0,
 			Color(0.75, 0.7, 0.5)) + 8.0
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
+			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
+			# blinking red under 1s so the shop window doesn't lapse unnoticed.
+			var shop_col := Color(1.0, 0.9, 0.5)
+			if sim.intermission_ticks < 60:
+				shop_col = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.7, 0.2, 0.18)
+			elif sim.intermission_ticks < 120:
+				shop_col = Color(1.0, 0.6, 0.3)
 			x = _text("SHOP OPEN %ds" % [sim.intermission_ticks / 60], x, y + ICON - 3.0,
-				Color(1.0, 0.9, 0.5)) + 10.0
+				shop_col) + 10.0
 		else:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
+			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
+			if sim.wave_mod > 0:
+				var mchip: String = ["", "BLITZ", "ELITE GUARD", "SPOTTER"][sim.wave_mod]
+				x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
 			# Live wave-clear dashboard: how close is this wave to done? (the
 			# push-or-hold decision was blind — enemy count already computed
 			# every frame for the music bed).
@@ -144,8 +162,11 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 	var c := Vector2(x + ICON / 2.0, y + ICON / 2.0)
 	draw_circle(c, ICON * 0.34, Color(0.08, 0.07, 0.06))
 	if frac > 0.0:
-		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20,
-			Color(0.9 - frac * 0.7, 0.15 + frac * 0.65, 0.12), 2.5)
+		# Full→empty reads red↔green normally; red↔blue under colorblind (green is
+		# the indistinguishable end), so the drain stays legible either way.
+		var fuel_col := Color(0.9 - frac * 0.7, 0.15, 0.12 + frac * 0.75) if Art.colorblind \
+			else Color(0.9 - frac * 0.7, 0.15 + frac * 0.65, 0.12)
+		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
 	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
 	return _text("%ds" % maxi(0, t["fuel"] / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0
 
