@@ -189,6 +189,23 @@ func _specials_run() -> int:
 	return sim.checksum()
 
 
+func test_endless_boss_determinism() -> void:
+	# The wave-5 miniboss never spawns in the wiping 2P torture, so prove its
+	# (gunship-schema) stepper is deterministic on its own — A==B.
+	var a := _boss_run()
+	var b := _boss_run()
+	Runner.T.eq(a, b, "endless miniboss run A/B checksum diverged")
+
+
+func _boss_run() -> int:
+	var sim := SimWorld.new(SEED, 1, "endless")
+	sim.wave = 4
+	sim._start_wave()
+	for tick in 300:
+		sim.step([scripted_input(tick, 0)])
+	return sim.checksum()
+
+
 func test_colossus_replay_determinism() -> void:
 	# Force-engage the finale so the core-window cycle + bullet core-chip get a
 	# determinism proof (the 60s torture never reaches gate 5).

@@ -537,6 +537,11 @@ func _consume_events() -> void:
 				_hitstop_frames = maxi(_hitstop_frames, 8)
 				_punch = maxf(_punch, 0.08)
 				_music_hold = 48   # held breath before the finale
+			"endless_boss":
+				_trauma = minf(1.0, _trauma + 0.4)
+				_music_hold = maxi(_music_hold, 48)
+				_show_banner("GUNSHIP INBOUND")
+				_sfx.play("alarm", -4.0, 0.9)
 			"core_open":
 				_show_banner("CORE EXPOSED — OPEN FIRE")
 				_sfx.play("alarm", -6.0, 1.3)
@@ -1434,7 +1439,12 @@ func _draw_gunships() -> void:
 	for g in sim.gates:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
-		var boss: Dictionary = g["boss"]
+		_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP")
+	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
+		_draw_one_gunship(sim.endless_boss, "GUNSHIP")
+
+
+func _draw_one_gunship(boss: Dictionary, label: String) -> void:
 		var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 		# Mortar-phase warning: the hull flashes red while volleys are near
 		# (they land at phase_t 200/240/280 of the 360-tick cycle).
@@ -1451,9 +1461,9 @@ func _draw_gunships() -> void:
 			draw_line(bpos - Vector2.from_angle(a) * 26.0, bpos + Vector2.from_angle(a) * 26.0,
 				Color(0.85, 0.85, 0.85, 0.5), 2.0)
 		draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
-		var bfrac := float(boss["hp"]) / float(SimWorld.BOSS_HP)
+		var bfrac := minf(1.0, float(boss["hp"]) / float(SimWorld.BOSS_HP))
 		var bkey := "boss%d" % boss["gate_y"]
-		draw_string(ThemeDB.fallback_font, bpos + Vector2(-23, -34), "BRIDGE GUNSHIP",
+		draw_string(ThemeDB.fallback_font, bpos + Vector2(-23, -34), label,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.5, 0.4))
 		_draw_bar(Rect2(bpos + Vector2(-23, -30), Vector2(46, 8)), bfrac,
 			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)

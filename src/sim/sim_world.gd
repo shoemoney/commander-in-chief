@@ -195,6 +195,7 @@ var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz,
 var intermission_ticks: int = 0
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
 var colossus: Dictionary = {}
+var endless_boss: Dictionary = {}   # endless-only miniboss (reuses the gunship schema)
 var last_stand: bool = false
 var victory: bool = false
 var wiped: bool = false            # endless: whole party down with no rescue → run over
@@ -289,6 +290,8 @@ func step(inputs: Array) -> void:
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
+		if not endless_boss.is_empty() and endless_boss["alive"]:
+			_step_one_boss(endless_boss)
 		# The Spotter wave-mutator drops an Observer; step it so its barrage is
 		# real (endless has no camera advance, so the despawn path never fires
 		# — the observer lives until shot, which is the intended pressure).
@@ -824,6 +827,9 @@ func _explode(x: int, y: int) -> void:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
 				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
+	if not endless_boss.is_empty() and endless_boss["alive"] \
+			and _dist_lte(x, y, endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
+		_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
 	# The Colossus is pure armor: grenades are the only thing it respects.
 	if not colossus.is_empty() and colossus["alive"] \
 			and _dist_lte(x, y, colossus["x"], colossus["y"], GRENADE_RADIUS + COLOSSUS_HIT_RADIUS):
@@ -1312,8 +1318,8 @@ func _step_waves() -> void:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
-	elif enemies.is_empty():
-		# Wave cleared: open the shop for the intermission.
+	elif enemies.is_empty() and (endless_boss.is_empty() or not endless_boss["alive"]):
+		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
@@ -1338,6 +1344,12 @@ func _start_wave() -> void:
 			"spawn_cam": camera_top,
 		}
 		events.append({"t": "observer_spawn", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET})
+	if wave % 5 == 0:
+		# Milestone miniboss: a Bridge Gunship parked over the arena, HP scaling
+		# with depth. Reuses the campaign boss schema + state machine wholesale.
+		endless_boss = {"alive": true, "hp": BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2),
+			"x": 320 * F_ONE, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
+		events.append({"t": "endless_boss", "x": 320 * F_ONE, "y": camera_top + 50 * F_ONE})
 	events.append({"t": "wave_start", "x": 320 * F_ONE, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
 
 
@@ -1461,10 +1473,13 @@ func _step_boss() -> void:
 	for g in gates:
 		if g["open"] or g["boss"].is_empty() or not g["boss"]["alive"]:
 			continue
-		var boss: Dictionary = g["boss"]
 		# Engage only while the bridge is in view.
 		if g["y"] < camera_top or g["y"] > camera_top + VIEW_H:
 			continue
+		_step_one_boss(g["boss"])
+
+
+func _step_one_boss(boss: Dictionary) -> void:
 		boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 		var t: int = boss["phase_t"]
 		if t < BOSS_CYCLE_TICKS / 2:
@@ -1506,6 +1521,11 @@ func _bullet_hits_boss(b: Dictionary) -> bool:
 			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
 			return true
+	if not endless_boss.is_empty() and endless_boss["alive"] \
+			and _dist_lte(b["x"], b["y"], endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
+		events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+		_damage_boss(endless_boss, 1)
+		return true
 	return false
 
 
@@ -1725,4 +1745,8 @@ func checksum() -> int:
 	if not observer.is_empty():
 		h = feed.call(observer["x"], h)
 		h = feed.call(observer["strike_cd"], h)
+	if not endless_boss.is_empty():
+		for v in [endless_boss["hp"], endless_boss["x"], int(endless_boss["alive"]),
+				endless_boss["phase_t"], endless_boss["dir"]]:
+			h = feed.call(v, h)
 	return h

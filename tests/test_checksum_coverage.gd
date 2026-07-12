@@ -83,6 +83,8 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("observer", sim.observer)
 		if not sim.colossus.is_empty():
 			_check("colossus", sim.colossus)
+		if not sim.endless_boss.is_empty():
+			_check("boss", sim.endless_boss)
 	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 

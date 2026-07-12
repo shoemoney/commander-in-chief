@@ -112,3 +112,19 @@ func test_endless_wipe_ends_run_when_party_down() -> void:
 	cp["broke_timer"] = 1
 	camp.step([SimInput.new()])
 	Runner.T.ok(not camp.wiped and cp["alive"], "campaign respawns at checkpoint, never wipes")
+
+
+func test_endless_miniboss_spawns_holds_wave_and_pays() -> void:
+	var sim := SimWorld.new(7, 1, "endless")
+	sim.wave = 4
+	sim._start_wave()   # -> wave 5, spawns the miniboss
+	Runner.T.ok(not sim.endless_boss.is_empty() and sim.endless_boss["alive"], "wave 5 spawns the miniboss")
+	sim.wave_pending = 0
+	sim.enemies.clear()
+	sim.step([SimInput.new()])
+	Runner.T.eq(sim.intermission_ticks, 0, "a live miniboss holds the wave open (shop stays shut)")
+	var chest0 := sim.war_chest
+	sim._damage_boss(sim.endless_boss, sim.endless_boss["hp"])
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.BOSS_BOUNTY, "killing the miniboss pays the boss bounty")
+	sim.step([SimInput.new()])
+	Runner.T.ok(sim.intermission_ticks > 0, "boss down + field clear opens the shop")
