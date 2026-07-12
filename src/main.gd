@@ -94,6 +94,9 @@ const _EVENT_SOUND := {
 	"strike_warn": ["whistle", -6.0, 1.0],
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["pickup", -10.0, 0.7],
+	"grenadier_windup": ["throw", -8.0, 0.7],
+	"sniper_paint": ["alarm", -12.0, 1.4],
+	"sniper_fire": ["shot", -4.0, 0.6],
 	"bunker_break": ["explosion", -4.0, 0.72],
 	"frogman_surface": ["splash", -4.0, 1.0],
 	"wave_start": ["wave_start", -5.0, 1.0],
@@ -1143,6 +1146,22 @@ func _draw_enemies() -> void:
 					Color(0.7, 0.9, 0.95, 0.4 + sfrac * 0.6))
 			else:
 				_spr("frogman", epos, face, 0.5)
+		elif e["kind"] == "sniper":
+			# Paints a laser line on its target during the long windup — the
+			# 'get off this line NOW' telegraph. Break LOS or sidestep.
+			var swu: int = e.get("windup", 0)
+			if swu > 0 and not target.is_empty():
+				var tp := _to_screen(target["x"], target["y"])
+				var pf := 1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)
+				draw_line(epos, tp, Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5), 1.0 + pf)
+				draw_circle(tp, 2.0 + pf * 2.0, Color(1.0, 0.2, 0.15, 0.4 + pf * 0.4))
+			_spr("elite", epos, face, 0.5, Color(1.1, 0.6, 1.2))   # violet marksman
+		elif e["kind"] == "grenadier":
+			var gwu: int = e.get("windup", 0)
+			if gwu > 0:
+				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
+				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
+			_spr("elite", epos, face, 0.52, Color(1.3, 1.1, 0.55))   # amber lobber
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)

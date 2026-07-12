@@ -34,6 +34,15 @@ const ELITE_SPEED := 2 * F_ONE
 const ELITE_STANDOFF := 120 * F_ONE
 const ELITE_FIRE_CD_TICKS := 150
 const ELITE_WINDUP_TICKS := 24
+# Grenadier (endless-only): mid-range zoner that lobs a telegraphed area strike.
+const GRENADIER_STANDOFF := 150 * F_ONE
+const GRENADIER_FIRE_CD_TICKS := 130
+const GRENADIER_WINDUP_TICKS := 40
+# Sniper (endless-only): long-range, paints a laser line then fires one fast shot.
+const SNIPER_STANDOFF := 240 * F_ONE
+const SNIPER_FIRE_CD_TICKS := 170
+const SNIPER_WINDUP_TICKS := 55
+const SNIPER_BULLET_SPEED := 6 * F_ONE
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
@@ -742,6 +751,12 @@ func _step_enemies() -> void:
 		var dx: int = target["x"] - e["x"]
 		var dy: int = target["y"] - e["y"]
 		var dlen := Fixed.length(dx, dy)
+		if e["kind"] == "grenadier":
+			_step_grenadier(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "sniper":
+			_step_sniper(e, target, dx, dy, dlen)
+			continue
 		if e["elite"]:
 			_step_elite(e, target, dx, dy, dlen)
 			continue
@@ -778,6 +793,60 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS
 		e["windup"] = ELITE_WINDUP_TICKS
 		events.append({"t": "elite_windup", "x": e["x"], "y": e["y"]})
+
+
+func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Mid-range zoner: holds GRENADIER_STANDOFF, winds up, then lobs a
+	## telegraphed area strike onto your CURRENT ground — move or eat it.
+	## Reuses fire_cd/windup (both already hashed) so campaign stays golden.
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			_add_strike(target["x"], target["y"])   # telegraphed blast where you stand
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if dlen > GRENADIER_STANDOFF:
+		var spd := ENEMY_SPEED
+		if _in_water(e["x"], e["y"]):
+			spd = spd / 2
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+	elif e["fire_cd"] == 0:
+		e["fire_cd"] = GRENADIER_FIRE_CD_TICKS
+		e["windup"] = GRENADIER_WINDUP_TICKS
+		events.append({"t": "grenadier_windup", "x": e["x"], "y": e["y"]})
+
+
+func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Long-range: paints a laser line on you for a long windup (view draws it
+	## off the windup state), then fires ONE fast bullet down the locked line.
+	## Sidestep or break LOS. Reuses fire_cd/windup — campaign golden-safe.
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			# Fire down the line locked at paint start (stored in lunge_ticks?
+			# no — recompute to current for simplicity but faster/lethal bullet).
+			if dlen > F_ONE:
+				events.append({"t": "sniper_fire", "x": e["x"], "y": e["y"]})
+				enemy_bullets.append({
+					"x": e["x"], "y": e["y"],
+					"vx": Fixed.mul(Fixed.div(dx, dlen), SNIPER_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(dy, dlen), SNIPER_BULLET_SPEED),
+					"ttl": ENEMY_BULLET_TTL_TICKS,
+				})
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	# Keeps to the back — only closes if the target runs far away.
+	if dlen > SNIPER_STANDOFF:
+		var spd := ENEMY_SPEED
+		if _in_water(e["x"], e["y"]):
+			spd = spd / 2
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+	elif e["fire_cd"] == 0:
+		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
+		e["windup"] = SNIPER_WINDUP_TICKS
+		events.append({"t": "sniper_paint", "x": e["x"], "y": e["y"]})
 
 
 func _step_frogman(e: Dictionary) -> void:
@@ -864,6 +933,13 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 func _spawn_frogman(x: int, y: int) -> void:
 	enemies.append({"x": x, "y": y, "alive": true, "elite": false,
 		"kind": "frogman", "submerged": true, "lunge_ticks": 0, "surface_ticks": 0})
+
+
+func _spawn_special(x: int, y: int, kind: String) -> void:
+	## Endless-only ranged archetypes (grenadier/sniper). Coin-worthy like an
+	## elite; reuse fire_cd/windup so no new hashed enemy field is introduced.
+	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
+		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0})
 
 
 # --- Gates ---
@@ -990,7 +1066,18 @@ func _step_waves() -> void:
 			var x := rng.range_i(24, 616) * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = wave_mod == 2 or (wave_pending % elite_every) == 0
-			_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
+			# From wave 3, some ranged spawns become grenadiers/snipers so the
+			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
+			if wave >= 3 and is_elite and wave_mod != 1:
+				var roll := rng.range_i(0, 3)
+				if roll == 0:
+					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
+				elif roll == 1:
+					_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
+				else:
+					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
+			else:
+				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
 	elif enemies.is_empty():
 		# Wave cleared: open the shop for the intermission.
 		intermission_ticks = WAVE_INTERMISSION_TICKS

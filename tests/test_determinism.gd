@@ -63,13 +63,17 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 
 ## Endless golden: the campaign torture never enters _step_waves, so the
 ## wave-mutator + spotter-observer state has no cross-arch golden without this.
+## RE-RECORDED (2026-07-12): endless waves 3+ now spawn grenadier/sniper
+## ranged archetypes — only samples 3-5 moved (waves 1-2 have no specials);
+## campaign golden is bit-identical (the new kinds are endless-only, and they
+## reuse the already-hashed fire_cd/windup enemy fields).
 const ENDLESS_GOLDEN: Array[int] = [
 	586311806716809943,
 	5628042505202006876,
 	3362890099836553207,
-	865321301938224610,
-	2612579928305506234,
-	9009644142062819877,
+	1577991378673560792,
+	5451074008481912581,
+	1378020686060569927,
 ]
 
 
