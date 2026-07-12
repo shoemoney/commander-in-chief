@@ -242,10 +242,20 @@ func _draw_howto() -> void:
 		["elite", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — lurks in water, grenades only"]]
 	for i in roster.size():
-		var yy := 190.0 + i * 34.0
-		draw_texture_rect(Art.tex(roster[i][0]), Rect2(80, yy - 10, 22, 22), false, Art.tint(roster[i][0]))
-		draw_string(f, Vector2(112, yy + 4), roster[i][1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
+		var yy := 176.0 + i * 26.0
+		draw_texture_rect(Art.tex(roster[i][0]), Rect2(80, yy - 10, 20, 20), false, Art.tint(roster[i][0]))
+		draw_string(f, Vector2(108, yy + 3), roster[i][1], HORIZONTAL_ALIGNMENT_LEFT, -1, 10,
 			Color(0.9, 0.92, 0.82))
+	# Endless War fields ranged specialists (wave 3+) — teach their counters.
+	draw_string(f, Vector2(60, 258), "ENDLESS WAR — RANGED THREATS:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.7, 0.4))
+	var special := [
+		"GRENADIER — lobs a telegraphed blast on your spot. Keep moving.",
+		"SNIPER — paints a laser line, then fires. Sidestep it.",
+		"SHIELD — front blocks bullets. Flank it or grenade it."]
+	for i in special.size():
+		draw_string(f, Vector2(72, 274 + i * 15), special[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 10,
+			Color(0.88, 0.9, 0.8))
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
