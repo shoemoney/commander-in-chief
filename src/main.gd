@@ -205,6 +205,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	Art.colorblind = colorblind   # apply on menu/attract frames too, not just gameplay
 	if _menu.is_active():
 		_hud_icons.visible = _menu.mode != GameMenu.Mode.TITLE
 		# Attract mode: the title runs a LIVE firefight behind the overlay
@@ -235,7 +236,6 @@ func _physics_process(_delta: float) -> void:
 		queue_redraw()
 		return
 	_hud_icons.visible = true
-	Art.colorblind = colorblind
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
 	else:
@@ -532,6 +532,7 @@ func _track_bests() -> void:
 	if _best_dirty and Engine.get_physics_frames() % 60 == 0:
 		_best_dirty = false
 		var cf := ConfigFile.new()
+		cf.load("user://ikari_best.cfg")   # merge — don't clobber hall/seen sections
 		cf.set_value("best", "score", best_score)
 		cf.set_value("best", "wave", best_wave)
 		cf.set_value("best", "dist", best_dist)

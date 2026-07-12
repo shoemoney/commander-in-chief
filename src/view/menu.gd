@@ -163,9 +163,11 @@ func _draw() -> void:
 			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
 				100, 10, Color(0.8, 0.85, 0.72))
 	var items := _items()
-	# Compress spacing so the 6-item pause menu fits the 360px screen.
-	var top := 120.0 if mode == Mode.PAUSE else 150.0
-	var gap := 34.0 if items.size() > 4 else 46.0
+	# Compress spacing so 6-7 item menus fit the 360px screen without the
+	# bottom button colliding with the title control legend.
+	var many: bool = items.size() > 4
+	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 140.0)
+	var gap := 30.0 if many else 46.0
 	for k in items.size():
 		var r := Rect2(Vector2(320 - BTN.x / 2.0, top + k * gap), BTN)
 		var selected := k == sel

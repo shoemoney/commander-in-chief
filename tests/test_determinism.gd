@@ -67,12 +67,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## ranged archetypes — only samples 3-5 moved (waves 1-2 have no specials);
 ## campaign golden is bit-identical (the new kinds are endless-only, and they
 ## reuse the already-hashed fire_cd/windup enemy fields).
+## RE-RECORDED again (bug fix): grenadier lobs (telegraphed strikes) now
+## detonate in endless — strike resolution was extracted from _step_observer
+## (which endless only runs when an observer is present) into _resolve_strikes
+## called every tick. Only sample 4 moved; campaign order/behavior identical.
 const ENDLESS_GOLDEN: Array[int] = [
 	586311806716809943,
 	5628042505202006876,
 	3362890099836553207,
 	1577991378673560792,
-	5451074008481912581,
+	2865413148273778650,
 	1378020686060569927,
 ]
 

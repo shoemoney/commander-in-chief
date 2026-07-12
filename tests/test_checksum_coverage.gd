@@ -80,7 +80,8 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("observer", sim.observer)
 		if not sim.colossus.is_empty():
 			_check("colossus", sim.colossus)
-	Runner.T.ok(seen.size() >= 2, "staged multiple enemy kinds (%s)" % str(seen.keys()))
+	for k in ["rusher", "elite", "frogman", "grenadier", "sniper"]:
+		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 
 
 func _stage(kind: String) -> SimWorld:
@@ -93,6 +94,10 @@ func _stage(kind: String) -> SimWorld:
 	# Seed a water band + frogman so those entity types appear.
 	sim.waters.append({"y": sim.camera_top - 100 * Fixed.ONE, "ford_x": 400 * Fixed.ONE})
 	sim._spawn_frogman(300 * Fixed.ONE, sim.camera_top - 90 * Fixed.ONE)
+	# Directly stage the endless ranged archetypes — the 400-tick budget never
+	# organically reaches wave 3, so the tripwire wouldn't otherwise cover them.
+	sim._spawn_special(200 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "grenadier")
+	sim._spawn_special(440 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sniper")
 	return sim
 
 

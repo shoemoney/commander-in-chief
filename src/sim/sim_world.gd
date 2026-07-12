@@ -253,6 +253,7 @@ func step(inputs: Array) -> void:
 		# — the observer lives until shot, which is the intended pressure).
 		if not observer.is_empty():
 			_step_observer()
+		_resolve_strikes()   # grenadier lobs detonate even with no observer
 	else:
 		_step_spawner()
 		_step_boss()
@@ -260,6 +261,7 @@ func step(inputs: Array) -> void:
 		_step_gates()
 		_step_camera()
 		_step_observer()
+		_resolve_strikes()   # was the tail of _step_observer; same order
 
 
 # --- Players ---
@@ -1349,8 +1351,14 @@ func _step_observer() -> void:
 				if not target.is_empty():
 					_add_strike(target["x"], target["y"])
 
+	_resolve_strikes()
+
+
+func _resolve_strikes() -> void:
 	# Resolve telegraphed strikes: lethal to players (roll i-frames dodge it),
-	# ignites tanks, harmless to enemy infantry.
+	# ignites tanks, harmless to enemy infantry. Extracted from _step_observer
+	# so it also runs in endless (where the observer step is conditional) —
+	# otherwise grenadier lobs never detonate and pile up.
 	for i in range(strikes.size() - 1, -1, -1):
 		var s := strikes[i]
 		s["ticks"] = s["ticks"] - 1
