@@ -169,8 +169,11 @@ static func outlined(name: String) -> bool:
 	return OUTLINE.has(name)
 
 
-## Input-prompt glyphs: pad button art when a gamepad is connected, else a
-## blank keycap stamped with the key letter. Draws centered at pos.
+## Input-prompt glyphs: pad button art when the pad is the LAST-USED device,
+## else a blank keycap stamped with the key letter. `use_pad` is driven from
+## main by the last InputEvent class — a merely-connected idle pad no longer
+## mis-teaches a keyboard player pad buttons. Draws centered at pos.
+static var use_pad := false
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
@@ -178,7 +181,7 @@ const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0) -> void:
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
-	if Input.get_connected_joypads().size() > 0:
+	if use_pad:
 		ci.draw_texture_rect(tex(_GLYPH_PAD[action]), rect, false)
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88))

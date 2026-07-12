@@ -159,10 +159,18 @@ func _draw() -> void:
 			col = Color(1.0, 0.5, 0.4)
 		_center_text(label, r.position.y + gap / 2.0 + 4.0, 11, col)
 	if mode == Mode.TITLE:
-		_center_text("WASD MOVE · ARROWS AIM · SPACE FIRE · SHIFT GRENADE · C ROLL", 332, 8,
-			Color(0.75, 0.8, 0.7, 0.75))
-		_center_text("F INTERACT · E REVIVE · Q SUPPLY WHEEL · ENTER SELECT", 344, 8,
-			Color(0.75, 0.8, 0.7, 0.6))
+		# Legend adapts to the last-used device (was hardcoded keyboard, wrong
+		# for the pad-driven 2P audience).
+		if Art.use_pad:
+			_center_text("LS MOVE · RS AIM · RT FIRE · L1 GRENADE · B ROLL", 332, 8,
+				Color(0.75, 0.8, 0.7, 0.75))
+			_center_text("X INTERACT · Y REVIVE · BACK SUPPLY WHEEL · A SELECT", 344, 8,
+				Color(0.75, 0.8, 0.7, 0.6))
+		else:
+			_center_text("WASD MOVE · MOUSE/ARROWS AIM · LMB/SPACE FIRE · RMB/SHIFT GRENADE · C ROLL", 332, 8,
+				Color(0.75, 0.8, 0.7, 0.75))
+			_center_text("F INTERACT · E REVIVE · Q SUPPLY WHEEL · ENTER SELECT", 344, 8,
+				Color(0.75, 0.8, 0.7, 0.6))
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:

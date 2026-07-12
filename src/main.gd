@@ -175,6 +175,17 @@ func _reset() -> void:
 	_debrief = false
 
 
+func _input(event: InputEvent) -> void:
+	# Track the LAST-USED device so glyphs/legends teach the right buttons —
+	# a merely-connected idle pad shouldn't override an active keyboard.
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		if event is InputEventJoypadMotion and absf(event.axis_value) < 0.5:
+			return
+		Art.use_pad = true
+	elif event is InputEventKey or event is InputEventMouse:
+		Art.use_pad = false
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if _menu.is_active():
 		return   # menu owns input while open

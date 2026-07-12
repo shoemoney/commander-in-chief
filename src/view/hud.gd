@@ -40,7 +40,23 @@ func _draw() -> void:
 			x = _text("SHOP OPEN %ds" % [sim.intermission_ticks / 60], x, y + ICON - 3.0,
 				Color(1.0, 0.9, 0.5)) + 10.0
 		else:
-			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 10.0
+			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
+			# Live wave-clear dashboard: how close is this wave to done? (the
+			# push-or-hold decision was blind — enemy count already computed
+			# every frame for the music bed).
+			var alive := 0
+			for e in sim.enemies:
+				if e["alive"]:
+					alive += 1
+			var remaining: int = alive + sim.wave_pending
+			# The wave's starting budget (same formula _start_wave uses).
+			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
+				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
+			x = _text("HOSTILES %d" % remaining, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
+			var cleared := 1.0 - float(remaining) / float(wave_total)
+			draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
+			draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Color(0.4, 0.85, 0.4))
+			x += 48.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
 		var opened := 0
