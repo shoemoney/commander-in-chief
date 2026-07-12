@@ -278,6 +278,11 @@ func _consume_events() -> void:
 					"rate": 0.055, "spin": randf() * TAU,
 					"vx": perp.x * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4),
 					"vy": perp.y * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4)})
+				# Faint muzzle light on the ground (rate-capped so MG spam can't wash out).
+				if Engine.get_physics_frames() % 2 == 0:
+					_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 11), "y": ev["y"] + int(shooter["aim_y"] * 11),
+						"t": 0.0, "kind": "light", "rate": 0.28, "r": 16.0,
+						"col": Color(1.0, 0.9, 0.5)})
 			"tank_shot":
 				var gunner := sim.players[ev["i"]]
 				var taim := Vector2(gunner["aim_x"], gunner["aim_y"]) * PX
@@ -294,6 +299,8 @@ func _consume_events() -> void:
 				_duck = maxf(_duck, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+					"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
 				var wet: bool = sim._in_water(ev["x"], ev["y"])
 				for d in 8:
 					var da := d * TAU / 8.0 + randf() * 0.3
@@ -861,6 +868,14 @@ func _draw_terrain() -> void:
 			if h % 6 == 0:
 				draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(8, 8), Vector2(48, 48)), false,
 					Color(0.65, 0.6, 0.5, 0.55))
+	# Drifting cloud shadows: large soft dark blobs scrolling diagonally at a
+	# slower rate than the camera — instant depth, the jungle feels alive.
+	var ct := float(Engine.get_physics_frames()) * 0.15
+	for c in 3:
+		var cxw := fposmod(ct * (0.6 + c * 0.2) + c * 260.0, 900.0) - 130.0
+		var cyw := fposmod(-cam_y * 0.35 + c * 190.0 + ct * 0.3, 620.0) - 130.0
+		draw_circle(Vector2(cxw, cyw), 90.0 + c * 22.0, Color(0.0, 0.02, 0.0, 0.05))
+		draw_circle(Vector2(cxw + 40, cyw + 24), 70.0, Color(0.0, 0.02, 0.0, 0.045))
 	# Low fern understory scattered through the field (hash decorrelated from
 	# the tree grid so ferns and trees don't stack on the same cell).
 	for ty in 10:
@@ -874,7 +889,8 @@ func _draw_terrain() -> void:
 			var fy_px := fy + float((hf / 5) % 16)
 			if sim._in_water(int(fx / PX), sim.camera_top + int(fy_px / PX)):
 				continue
-			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0,
+			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07
+			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway,
 				0.28 + float(hf % 3) * 0.03, Color(0.82, 0.92, 0.72))
 
 	# Jungle tree lines on the flanks, sparse singles in the field.
@@ -892,8 +908,9 @@ func _draw_terrain() -> void:
 				if sim._in_water(world_x, world_y):
 					continue
 				var big := h2 % 5 == 0
+				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04
 				_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
-					float(h2 % 628) / 100.0, 0.42 if big else 0.34, Color(0.75, 0.85, 0.72))
+					float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34, Color(0.75, 0.85, 0.72))
 
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
@@ -1013,6 +1030,10 @@ func _draw_enemies() -> void:
 		if not e["alive"]:
 			continue
 		var epos := _to_screen(e["x"], e["y"])
+		# Run-cycle bob: a small per-unit-phased vertical hop so a charging
+		# swarm has cadence instead of gliding in lockstep (foot infantry only).
+		if e["kind"] != "frogman" and e.get("windup", 0) == 0:
+			epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4
 		var target := sim._nearest_alive_player(e["x"], e["y"])
 		var face := PI / 2
 		if not target.is_empty():
@@ -1324,6 +1345,12 @@ func _draw_fx() -> void:
 			draw_circle(pos, 2.0 + t * 5.0, Color(0.7, 0.65, 0.5, 0.4 * (1.0 - t)))
 		elif fx["kind"] == "splash":
 			draw_arc(pos, 2.0 + t * 6.0, 0, TAU, 14, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)), 1.3)
+		elif fx["kind"] == "light":
+			# The gun/blast throws light onto the world (bright, brief, soft).
+			var lc: Color = fx["col"]
+			var la := (1.0 - t) * 0.45
+			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
+			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
 
 
 func _draw_scorch() -> void:
