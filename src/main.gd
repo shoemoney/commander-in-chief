@@ -419,6 +419,16 @@ func _consume_events() -> void:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 						"rate": 0.025, "text": "+%d¢" % ev["coin"], "col": Color(1.0, 0.9, 0.45)})
 					_coin_trail(ev["x"], ev["y"], 3)
+			"bounty_kill":
+				# Marked target down — a gold coin fountain + a distinct sting.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.02, "text": "BOUNTY +%d¢" % ev["coin"], "col": Color(1.0, 0.85, 0.3)})
+				_coin_trail(ev["x"], ev["y"], 5)
+				_sfx.play("buy", -3.0, 1.6)
+			"frag_bonus":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.02, "text": "FRAG x%d" % ev["n"], "col": Color(1.0, 0.7, 0.35)})
+				_sfx.play("buy", -6.0, 1.2)
 			"bunker_break":
 				# The "explosion" SFX already fires (_EVENT_SOUND) but nothing
 				# detonated on screen — give the demolished bunker its blast.
@@ -1329,6 +1339,16 @@ func _draw_enemies() -> void:
 		var epos := _to_screen(e["x"], e["y"])
 		if e["kind"] != "frogman":
 			_ground_shadow(epos, 6.0)
+		if e.get("marked", false):
+			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff
+			# reads across a chaotic field before you commit to chasing it.
+			var mb := Art.pulse(0.16)
+			draw_arc(epos, 11.0 + mb * 2.0, 0, TAU, 20, Color(1.0, 0.85, 0.3, 0.5 + mb * 0.4), 1.5)
+			var cy := epos.y - 12.0
+			for ci in 3:
+				var cx := epos.x - 4.0 + ci * 4.0
+				draw_line(Vector2(cx, cy), Vector2(cx, cy - 3.0), Color(1.0, 0.85, 0.3), 1.5)
+			draw_line(Vector2(epos.x - 5, cy), Vector2(epos.x + 5, cy), Color(1.0, 0.85, 0.3), 1.5)
 		# Run-cycle bob: a small per-unit-phased vertical hop so a charging
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
 		if e["kind"] != "frogman" and e.get("windup", 0) == 0:

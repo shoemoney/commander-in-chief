@@ -55,13 +55,16 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 10): airstrike now telegraphs (pending_airstrike joins checksum;
 ## the wipe resolves after STRIKE_TELEGRAPH_TICKS instead of instantly) + a guaranteed free cache
 ## spawns past every gate open. Campaign torture opens gates → cache pickups + rng shift → all moved.
+## RE-RECORDED (2026-07-12, iter 14 economy&bounty): ~1-in-7 elites are now marked BOUNTY targets
+## (new checksummed enemy field `marked`; triple coin+score) and a grenade blast catching 3+ pays a
+## frag bonus. The marked roll consumes rng on every elite spawn → all samples moved.
 const GOLDEN: Array[int] = [
-	3512743250288233932,
-	4313989637038503236,
-	2517893656888264959,
-	2029837171902075225,
-	61920154406589193,
-	5397767549124450523,
+	5893161432772115161,
+	3104894246447378262,
+	4474533482647290462,
+	2497745980443256520,
+	4185200011841864534,
+	1047279838299482185,
 ]
 
 
@@ -114,13 +117,15 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## plus the streak-20 boost + bail mercy window shift the endless stream; all samples moved.
 ## RE-RECORDED (2026-07-12, iter 10): pending_airstrike joins checksum (shifts the endless hash;
 ## the gate cache is campaign-only so endless moves only from the new field).
+## RE-RECORDED (2026-07-12, iter 14): marked-elite roll + bounty/frag scoring shift the endless
+## stream too (elites spawn in the endless torture before it wipes at wave 2).
 const ENDLESS_GOLDEN: Array[int] = [
-	9069434203626988220,
-	8279158949608968770,
-	7504171151743781219,
-	743768110535347611,
-	4112478394069345299,
-	8144375565817769291,
+	4912268405505136350,
+	1827507015815678347,
+	7669150169177465872,
+	3665744028009041176,
+	4780185957939597632,
+	8155126860570646920,
 ]
 
 

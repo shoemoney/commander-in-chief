@@ -22,7 +22,7 @@ const KNOWN := {
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell"],
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
-		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly"],
+		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked"],
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant"],

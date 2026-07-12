@@ -794,9 +794,15 @@ func _step_grenades() -> void:
 
 func _explode(x: int, y: int) -> void:
 	events.append({"t": "explosion", "x": x, "y": y})
+	var frags := 0
 	for e in enemies:
 		if e["alive"] and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
 			_kill_enemy(e)
+			frags += 1
+	if frags >= 3:
+		# Frag bonus: a single blast that catches a pack rewards reading the field.
+		score += frags * 50
+		events.append({"t": "frag_bonus", "x": x, "y": y, "n": frags})
 	for bk in bunkers:
 		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, GRENADE_RADIUS):
 			bk["alive"] = false
@@ -827,6 +833,9 @@ func _explode(x: int, y: int) -> void:
 func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
+	if e.get("marked", false):
+		coin *= 3   # bounty target pays triple (chest + score)
+		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
 	# kind rides the (checksum-excluded) kill event so the view can spawn a
 	# per-type death throe + corpse — golden-safe.
 	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin,
@@ -1109,6 +1118,10 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 	if elite:
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS / 2   # first shot comes sooner
 		e["windup"] = 0
+		# ~1 in 7 elites is a marked BOUNTY target — triple pay, worth chasing
+		# across the field (the view crowns it so the payoff reads before you commit).
+		if rng.range_i(0, 6) == 0:
+			e["marked"] = true
 	enemies.append(e)
 
 
@@ -1687,6 +1700,7 @@ func checksum() -> int:
 		h = feed.call(e.get("windup", 0), h)
 		h = feed.call(e.get("aim_lx", 0), h)
 		h = feed.call(e.get("aim_ly", 0), h)
+		h = feed.call(int(e.get("marked", false)), h)
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)

@@ -247,3 +247,25 @@ func test_empty_clip_bash_kills_adjacent_enemy_no_coin() -> void:
 	Runner.T.eq(sim.war_chest, chest_before, "bash mints no coin")
 	Runner.T.eq(sim.bullets.size(), 0, "bash spends no ammo and spawns no bullet")
 	Runner.T.ok(p["alive"], "the bash pre-empts the touch-kill — player survives")
+
+
+func test_marked_elite_pays_triple_bounty() -> void:
+	# A marked bounty elite mints 3× the normal elite coin into the War Chest.
+	var sim := SimWorld.new(1, 1, "campaign")
+	var chest0 := sim.war_chest
+	var e := {"x": 0, "y": 0, "alive": true, "elite": true, "kind": "elite", "marked": true}
+	sim.enemies.append(e)
+	sim._kill_enemy(e)
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_ELITE * 3, "marked elite pays triple coin")
+
+
+func test_grenade_frag_bonus_on_multikill() -> void:
+	# One blast catching 3+ enemies awards a frag score bonus.
+	var sim := SimWorld.new(1, 1, "campaign")
+	for k in 4:
+		sim.enemies.append({"x": 100 * Fixed.ONE + k, "y": 100 * Fixed.ONE, "alive": true,
+			"elite": false, "kind": "rusher"})
+	var score0 := sim.score
+	sim._explode(100 * Fixed.ONE, 100 * Fixed.ONE)
+	var base := SimWorld.COIN_RUSHER * 10 * 4   # four rusher kills, base score
+	Runner.T.ok(sim.score - score0 > base, "a 4-kill blast pays a frag bonus over the base kills")
