@@ -34,6 +34,7 @@ var _rumble := 0.0                # pending gamepad vibration this frame
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var _punch := 0.0                # camera zoom-punch on heavy impacts
+var _fade := 0.0                 # black fade-in on boot-into-combat
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
 var _heart_frame := -100         # heartbeat pacing
 var _hitmarker := 0.0            # reticle confirm pop on a landed hit
@@ -126,6 +127,7 @@ func start_game(endless: bool) -> void:
 	_endless = endless
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
+	_fade = 1.0   # cut from the title into combat, not a hard snap
 
 
 func _reset() -> void:
@@ -180,8 +182,22 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _physics_process(_delta: float) -> void:
 	if _menu.is_active():
-		# World freezes as the menu backdrop; the sim never steps.
 		_hud_icons.visible = _menu.mode != GameMenu.Mode.TITLE
+		# Attract mode: the title runs a LIVE firefight behind the overlay
+		# (reusing the tuned trailer bot) so the game sells itself before a
+		# button is pressed. Pause freezes as before.
+		if _menu.mode == GameMenu.Mode.TITLE:
+			if sim.victory or _down_frames > 150:
+				_reset()
+			sim.step([demo_input(sim.tick_count, sim)])
+			_consume_events()
+			_check_boss_intro()
+			var any := false
+			for p in sim.players:
+				if p["alive"]:
+					any = true
+			_down_frames = 0 if any else _down_frames + 1
+			_update_feel()
 		queue_redraw()
 		return
 	_hud_icons.visible = true
@@ -327,6 +343,8 @@ func _consume_events() -> void:
 						"vx": cos(ra) * randf_range(0.6, 1.4), "vy": sin(ra) * randf_range(0.6, 1.4)})
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
+				_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
+				_punch = maxf(_punch, 0.04)
 				_show_banner("GATE SECURED — CHECKPOINT")
 			"vest_break":
 				_flash_alpha = maxf(_flash_alpha, 0.35)
@@ -488,6 +506,7 @@ func _update_feel() -> void:
 	_hitmarker = maxf(0.0, _hitmarker - 0.12)
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
 	_punch = maxf(0.0, _punch - 0.006)
+	_fade = maxf(0.0, _fade - 0.06)
 	_hint_t = maxf(0.0, _hint_t - 0.006)
 	_drive_audio()
 	for i in range(_fx.size() - 1, -1, -1):
@@ -1159,7 +1178,11 @@ func _draw_players() -> void:
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
 			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
-				var rrect := Rect2(pos + aim * 27.0 - Vector2(8, 8), Vector2(16, 16))
+				# Heat-bloom: the crosshair spreads with sustained fire (the
+				# barrel-heat mechanic, made visible at the point of attention).
+				var bloom: float = (_heat[i] if i < _heat.size() else 0.0) * 5.0
+				var rrect := Rect2(pos + aim * 27.0 - Vector2(8 + bloom, 8 + bloom),
+					Vector2(16 + bloom * 2.0, 16 + bloom * 2.0))
 				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
 				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
 					false, Color(0, 0, 0, 0.55))
@@ -1397,6 +1420,10 @@ func _draw_wheel() -> void:
 
 
 func _draw_banners() -> void:
+	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
+	# (static, so it stays even under reduce-motion).
+	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, 640, 360), false,
+		Color(0.0, 0.0, 0.0, 0.16))
 	# Damage vignette: pulses on hits, sustains through the mercy window.
 	var vig := _damage_vignette
 	for p in sim.players:
@@ -1507,6 +1534,9 @@ func _draw_banners() -> void:
 	elif sim.last_stand:
 		draw_string(ThemeDB.fallback_font, Vector2(250, 350), "LAST STAND — NO REVIVES",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
+	# Black fade covering the title→combat cut.
+	if _fade > 0.01:
+		draw_rect(Rect2(0, 0, 640, 360), Color(0, 0, 0, _fade))
 	# Just-in-time onboarding cue (first-time-ever, persisted).
 	if _hint_t > 0.02 and not _hint_text.is_empty():
 		var ha := minf(1.0, _hint_t * 3.0)
