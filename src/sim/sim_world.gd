@@ -581,12 +581,21 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			events.append({"t": "airstrike_called", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 
 
+func _supply_cost(kind: int) -> int:
+	## Endless prices creep up every 3 waves so a fat late-game chest still faces
+	## a real spend decision (income scales with the wave, so the shop must too).
+	## Campaign is wave 0 → base price, unchanged.
+	if kind < 0 or kind >= SUPPLY_COSTS.size():
+		return 0
+	return SUPPLY_COSTS[kind] + (wave / 3) * 10
+
+
 func _try_buy(p: Dictionary, kind: int) -> void:
 	## Spend-wheel purchase: supplies radioed in, paid from the shared
 	## War Chest — the same pool that funds revives. That's the decision.
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return
-	var cost: int = SUPPLY_COSTS[kind]
+	var cost: int = _supply_cost(kind)
 	if war_chest < cost:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
 		return
@@ -1081,10 +1090,17 @@ func _step_spawner() -> void:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE
-	# Elite ratio tightens with each opened gate (every 8th → every 3rd by gate 5)
-	# so late campaign escalates composition, not just cadence.
-	var elite_every := maxi(3, 8 - opened)
-	_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
+	# Sector 4+ (3 gates opened): the endless ranged roster starts bleeding into
+	# the campaign field, so late sectors get a genuinely new threat vocabulary
+	# (laser-paint sniper, riot shield) — not just faster rushers.
+	if opened >= 3 and rng.range_i(0, 4) == 0:
+		var specials := ["grenadier", "sniper", "shield"]
+		_spawn_special(x, camera_top - 24 * F_ONE, specials[rng.range_i(0, 2)])
+	else:
+		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
+		# gate 5) so late campaign escalates composition, not just cadence.
+		var elite_every := maxi(3, 8 - opened)
+		_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
 
 
 func _spawn_enemy(x: int, y: int, elite: bool) -> void:
@@ -1288,10 +1304,10 @@ func _step_waves() -> void:
 		intermission_ticks = WAVE_INTERMISSION_TICKS
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
-		pickups.append({"x": 170 * F_ONE, "y": shop_y, "kind": 0, "cost": SHOP_AMMO_COST})
-		pickups.append({"x": 290 * F_ONE, "y": shop_y, "kind": 1, "cost": SHOP_GRENADE_COST})
-		pickups.append({"x": 410 * F_ONE, "y": shop_y, "kind": 2, "cost": SHOP_VEST_COST})
-		pickups.append({"x": 530 * F_ONE, "y": shop_y, "kind": 3, "cost": SHOP_AIRSTRIKE_COST})
+		pickups.append({"x": 170 * F_ONE, "y": shop_y, "kind": 0, "cost": _supply_cost(0)})
+		pickups.append({"x": 290 * F_ONE, "y": shop_y, "kind": 1, "cost": _supply_cost(1)})
+		pickups.append({"x": 410 * F_ONE, "y": shop_y, "kind": 2, "cost": _supply_cost(2)})
+		pickups.append({"x": 530 * F_ONE, "y": shop_y, "kind": 3, "cost": _supply_cost(3)})
 
 
 func _start_wave() -> void:

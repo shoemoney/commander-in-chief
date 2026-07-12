@@ -1810,7 +1810,8 @@ func _draw_wheel() -> void:
 			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
 			var ang := s * TAU / 4.0
 			var ipos := c + Vector2.from_angle(ang) * 31.0
-			var afford: bool = sim.war_chest >= item["cost"]
+			var acost: int = sim._supply_cost(item["kind"])   # wave-scaled in endless
+			var afford: bool = sim.war_chest >= acost
 			var selected: bool = _wheel[i]["sel"] == s
 			# Socket sprite authored nub-down (north slot); +90° per sector
 			# keeps the connector nub pointing at the hub.
@@ -1823,7 +1824,7 @@ func _draw_wheel() -> void:
 			var isz := 18.0 if selected else 14.0
 			draw_texture_rect(Art.tex(item["icon"]),
 				Rect2(ipos - Vector2(isz, isz) / 2.0, Vector2(isz, isz)), false, icon_mod)
-			draw_string(f, ipos + Vector2(-7, 24), str(item["cost"]),
+			draw_string(f, ipos + Vector2(-7, 24), str(acost),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
 			# Current stock vs cap under each socket — the buy decision no longer
