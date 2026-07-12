@@ -110,6 +110,7 @@ func _activate() -> void:
 				main._reset()
 				mode = Mode.HIDDEN
 			5:
+				main._endless = false   # attract showcases the campaign
 				main._reset()
 				open(Mode.TITLE)
 

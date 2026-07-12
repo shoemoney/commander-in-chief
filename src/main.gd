@@ -197,7 +197,11 @@ func _physics_process(_delta: float) -> void:
 		if _menu.mode == GameMenu.Mode.TITLE:
 			if sim.victory or _down_frames > 150:
 				_reset()
-			sim.step([demo_input(sim.tick_count, sim)])
+			# Feed one demo input per player so 2P attract isn't lopsided.
+			var demo_inputs: Array = []
+			for pi in sim.players.size():
+				demo_inputs.append(demo_input(sim.tick_count + pi * 53, sim))
+			sim.step(demo_inputs)
 			_consume_events()
 			_check_boss_intro()
 			var any := false
@@ -205,7 +209,13 @@ func _physics_process(_delta: float) -> void:
 				if p["alive"]:
 					any = true
 			_down_frames = 0 if any else _down_frames + 1
+			_rumble = 0.0   # never buzz a controller on the menu
 			_update_feel()
+		else:
+			# Pause: clear the underwater LPF/duck so the menu sounds clean.
+			_concussion = 0.0
+			_duck = 0.0
+			_sfx.set_concussion(0.0)
 		queue_redraw()
 		return
 	_hud_icons.visible = true
@@ -420,6 +430,10 @@ func _load_bests() -> void:
 
 func _hint(id: String, text: String) -> void:
 	# Fire a just-in-time onboarding cue the FIRST time ever, then never again.
+	# Never during attract mode — the demo bot would burn every hint to disk
+	# before the player ever plays.
+	if _menu.mode == GameMenu.Mode.TITLE:
+		return
 	if _seen.get(id, false):
 		return
 	_seen[id] = true
