@@ -883,6 +883,8 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		for pl in players:
 			if pl["alive"]:
 				pl["boost_ticks"] = maxi(pl["boost_ticks"], BAIL_BOOST_TICKS * 2)
+		# One-shot view cue; events[] is checksum-excluded -> golden-safe.
+		events.append({"t": "surge", "x": e["x"], "y": e["y"]})
 	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],

@@ -491,6 +491,20 @@ func _consume_events() -> void:
 			"avenge":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "AVENGED +5¢", "col": Color(0.7, 0.9, 1.0)})
+			"surge":
+				# The 20-streak adrenaline rush lands as a body-blow of feedback —
+				# shockwave, warm light, an upward kick, and a rising sting — so the
+				# 1.5x speed you now HOLD announces itself, not just a HUD number.
+				_trauma = minf(1.0, _trauma + 0.22)
+				_punch = maxf(_punch, 0.05)
+				_rumble = maxf(_rumble, 0.5)
+				_kick += Vector2(0, -4)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.1})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
+					"r": 60.0, "col": Color(1.0, 0.6, 0.2)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "ADRENALINE", "col": Color(1.0, 0.6, 0.25)})
+				_sfx.play("gate_open", -3.0, 1.3)
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
 				_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
@@ -1634,6 +1648,20 @@ func _draw_players() -> void:
 			_spr(tex_name, pos, angle, 0.52, mod)
 			if p["vest"]:
 				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
+				# Adrenaline aura: the 20-streak / tank-bail speed surge (boost_ticks) is a
+				# real 1.5x buff that was otherwise invisible. A hot ring that fades as the
+				# surge drains says "empowered — and here is when it ends".
+				if p["boost_ticks"] > 0:
+					var bo_frac: float = clampf(float(p["boost_ticks"]) / float(SimWorld.BAIL_BOOST_TICKS * 2), 0.0, 1.0)
+					var bo_ph := float(Engine.get_physics_frames() + i * 17)
+					var bo_pulse := 0.5 + 0.5 * sin(bo_ph * 0.45)
+					draw_arc(pos, 16.0 + bo_pulse * 3.0, 0, TAU, 28,
+						Color(1.0, 0.55, 0.15, (0.35 + 0.4 * bo_pulse) * bo_frac), 2.0 + bo_frac)
+					for bo_s in 6:
+						var bo_ang := bo_s * TAU / 6.0 + bo_ph * 0.08
+						var bo_dir := Vector2.from_angle(bo_ang)
+						draw_line(pos + bo_dir * 12.0, pos + bo_dir * (17.0 + bo_pulse * 4.0),
+							Color(1.0, 0.72, 0.3, 0.5 * bo_frac), 1.5)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
 			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
