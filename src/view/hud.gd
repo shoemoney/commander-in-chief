@@ -6,12 +6,14 @@ extends Control
 
 const ICON := 13.0
 const FONT_SIZE := 10
+const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
 
 var main: Node2D
 var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
+var _row_w := 262.0       # panel backing, sized to last frame's content (1-frame lag)
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
@@ -27,7 +29,7 @@ func _draw() -> void:
 
 	# Scavenged-metal panel backing the whole readout.
 	draw_texture_rect(Art.tex("ui_panel"),
-		Rect2(2, 2, 262, 26 + sim.players.size() * 16), false, Color(1, 1, 1, 0.9))
+		Rect2(2, 2, _row_w, 26 + sim.players.size() * 16), false, Color(1, 1, 1, 0.9))
 
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	if sim.war_chest > _prev_chest:
@@ -47,15 +49,18 @@ func _draw() -> void:
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:
-		var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
-		x = _text("x%d" % sim.kill_streak, x, y + ICON - 3.0, scol) + 3.0
-		var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
-		draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
-		x += 13.0
+		var stxt := "x%d" % sim.kill_streak
+		if _fits(x, _tw(stxt) + 16.0):
+			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
+			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
+			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
+			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
+			x += 13.0
 	# Live BEST target: the record to beat, right next to the current score.
 	if main.best_score > 0:
-		x = _text("BEST %d" % main.best_score, x, y + ICON - 3.0,
-			Color(0.75, 0.7, 0.5)) + 8.0
+		var btxt := "BEST %d" % main.best_score
+		if _fits(x, _tw(btxt) + 8.0):
+			x = _text(btxt, x, y + ICON - 3.0, Color(0.75, 0.7, 0.5)) + 8.0
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
 			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
@@ -72,7 +77,8 @@ func _draw() -> void:
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
 				var mchip: String = ["", "BLITZ", "ELITE GUARD", "SPOTTER"][sim.wave_mod]
-				x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
+				if _fits(x, _tw(mchip) + 8.0):
+					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
 			# Live wave-clear dashboard: how close is this wave to done? (the
 			# push-or-hold decision was blind — enemy count already computed
 			# every frame for the music bed).
@@ -84,11 +90,13 @@ func _draw() -> void:
 			# The wave's starting budget (same formula _start_wave uses).
 			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
 				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
-			x = _text("HOSTILES %d" % remaining, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
-			var cleared := 1.0 - float(remaining) / float(wave_total)
-			draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
-			draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
-			x += 48.0
+			var htxt := "HOSTILES %d" % remaining
+			if _fits(x, _tw(htxt) + 54.0):
+				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
+				var cleared := 1.0 - float(remaining) / float(wave_total)
+				draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
+				draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
+				x += 48.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
 		var opened := 0
@@ -98,8 +106,10 @@ func _draw() -> void:
 		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
 			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
-	Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
-	x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+	if _fits(x, _tw("SUPPLIES") + 25.0):
+		Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
+		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+	var row_r := x
 
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
 	# can manage — it climbs while the camera isn't advancing, drains on push.
@@ -109,6 +119,9 @@ func _draw() -> void:
 		draw_rect(Rect2(x + 48, y + 3, 46, 7), Color(0.1, 0.09, 0.08))
 		draw_rect(Rect2(x + 48, y + 3, 46 * pf, 7),
 			Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
+		row_r = x + 94.0
+	# ponytail: cached width sizes the panel to content without a measure pass; a 1-frame lag is imperceptible.
+	_row_w = clampf(row_r + 4.0, 262.0, RIGHT - 2.0)
 
 	# Player rows.
 	var ry := y + 17.0
@@ -163,7 +176,7 @@ func _draw() -> void:
 					-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
-			if main._grenade_dry > 0 and _mblink(4):
+			if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 			if p["vest"]:
@@ -198,3 +211,13 @@ func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> fl
 		Color(0, 0, 0, 0.65))
 	draw_string(f, Vector2(x, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, col)
 	return x + f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+
+
+## Right-margin fit test for an optional chip of pixel-width `w` starting at `x`.
+func _fits(x: float, w: float) -> bool:
+	return x + w <= RIGHT
+
+
+## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).
+func _tw(txt: String) -> float:
+	return ThemeDB.fallback_font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x

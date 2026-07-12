@@ -17,6 +17,8 @@ const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
 	"watchtower", "barbedwire", "barrier", "ammobox"]
 
 var sim: SimWorld
+var _recorder: Replay             # captures this run's inputs → user://last_run.replay (view-only)
+var _replay_saved := false        # save the replay once per run, at the debrief
 var _two_players := false
 var _endless := false
 var _daily := false              # seed-of-the-day challenge run
@@ -45,7 +47,7 @@ var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
 var _heart_frame := -100         # heartbeat pacing
-var _hitmarker := 0.0            # reticle confirm pop on a landed hit
+var _hitmarker: Array[float] = [0.0, 0.0]   # reticle confirm pop on a landed hit (per-player)
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
 var _hit_dir_t := 0.0
 var _record_fired := false       # NEW RECORD banner once per run
@@ -54,19 +56,21 @@ var _seen := {}                  # persisted first-time-hint flags
 var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
+var _hint_queue: Array = []      # pending first-time hints, drained one at a time
 var _run_kills := 0              # this-run tally for the debrief card
 var _run_best_streak := 0
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
-var _banner_text := ""            # center-screen splash ("WAVE 5", checkpoint)
-var _banner_t := 0.0
+var _banners: Array = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
-var _grenade_dry := 0            # HUD grenade-pip red flash on empty throw
+var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
+const SAVE_TMP := "user://ikari_best.cfg.tmp"
+const SAVE_BAK := "user://ikari_best.cfg.bak"
 var best_score := 0
 var best_wave := 0
 var best_dist := 0
@@ -167,6 +171,11 @@ func _reset() -> void:
 	var seed_v := 0xC0FFEE if OS.has_feature("movie") else (_daily_seed() if _daily else randi())
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
+	_recorder = Replay.new()   # record this run's inputs for a replayable last-run (passive; sim untouched)
+	_recorder.seed_value = seed_v
+	_recorder.mode = sim.mode
+	_recorder.player_count = sim.players.size()
+	_replay_saved = false
 	_trauma = 0.0
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
@@ -180,11 +189,10 @@ func _reset() -> void:
 	_rumble = 0.0
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
-	_banner_text = ""
-	_banner_t = 0.0
+	_banners.clear()
 	_seen_bosses = {}
 	_prev_colossus_phase = 0
-	_hitmarker = 0.0
+	_hitmarker = [0.0, 0.0]
 	_hit_dir_t = 0.0
 	_record_fired = false
 	_boss_ghost.clear()
@@ -197,6 +205,7 @@ func _reset() -> void:
 	_heat = [0.0, 0.0]
 	_down_anim = [0.0, 0.0]
 	_hint_t = 0.0
+	_hint_queue.clear()
 	_run_kills = 0
 	_run_best_streak = 0
 	_down_frames = 0
@@ -265,6 +274,7 @@ func _physics_process(_delta: float) -> void:
 	else:
 		var inputs := _gather_inputs()
 		_check_dry_throw(inputs)
+		_recorder.record_tick(inputs)   # same inputs the sim gets → bit-exact replay
 		sim.step(inputs)
 		_consume_events()
 		_check_boss_intro()
@@ -292,7 +302,7 @@ func _consume_events() -> void:
 					_sfx.play("vest_break", -16.0, 1.7)
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
-				_hitmarker = 1.0
+				_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -10.0, 1.35)
@@ -396,7 +406,7 @@ func _consume_events() -> void:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
 						"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
 						"spin": randf() * TAU})
-				_hitmarker = 1.0   # kill also confirms on the reticle
+				_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0   # kill confirms on the shooter's reticle
 				_run_kills += 1
 				# Kill-streak: rising blip pitch + milestone combo pop.
 				var big: bool = ev.get("coin", 0) >= 25
@@ -491,6 +501,7 @@ func _consume_events() -> void:
 			"avenge":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "AVENGED +5¢", "col": Color(0.7, 0.9, 1.0)})
+				_sfx.play("avenge", -5.0)
 			"surge":
 				# The 20-streak adrenaline rush lands as a body-blow of feedback —
 				# shockwave, warm light, an upward kick, and a rising sting — so the
@@ -578,6 +589,7 @@ func _consume_events() -> void:
 				_hitstop_frames = maxi(_hitstop_frames, 8)
 				_rumble = maxf(_rumble, 1.0)
 				_show_banner("OVERRUN — RUN OVER")
+				_sfx.play("wiped", -2.0)
 			"victory":
 				_trauma = 1.0
 				_flash_alpha = 0.6
@@ -623,14 +635,48 @@ func _check_boss_intro() -> void:
 var hall: Array = []   # top-N run history for the Hall of Fame
 
 
+func _save_cfg(cf: ConfigFile) -> void:
+	# Atomic, crash-safe write: a mid-save crash must never corrupt the single
+	# ikari_best.cfg (= total progress wipe). Write to .tmp; on success snapshot
+	# the current real file to .bak, then atomically rename .tmp over the real
+	# path. rename_absolute is an OS rename — atomic on the same filesystem.
+	if cf.save(SAVE_TMP) != OK:
+		return
+	if FileAccess.file_exists(SAVE_PATH):
+		DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
+	DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
+
+
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
-	if cf.load(SAVE_PATH) == OK:
+	# Fall back to the .bak snapshot if the primary is missing/corrupt, before
+	# giving up to zeros (a silent wipe).
+	if cf.load(SAVE_PATH) == OK or cf.load(SAVE_BAK) == OK:
 		best_score = cf.get_value("best", "score", 0)
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
 		_seen = cf.get_value("seen", "hints", {})
 		hall = cf.get_value("hall", "runs", [])
+		colorblind = cf.get_value("settings", "colorblind", false)
+		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
+		AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"),
+			cf.get_value("settings", "sfx_muted", false))
+		AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"),
+			cf.get_value("settings", "music_muted", false))
+
+
+func _save_settings() -> void:
+	# Persist only the [settings] keys; load-then-set so we never clobber
+	# [best]/[hall]/[seen]. Called from the pause-menu a11y/audio toggles.
+	var cf := ConfigFile.new()
+	cf.load(SAVE_PATH)
+	cf.set_value("settings", "colorblind", colorblind)
+	cf.set_value("settings", "reduce_motion", _motion < 0.5)
+	cf.set_value("settings", "sfx_muted",
+		AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")))
+	cf.set_value("settings", "music_muted",
+		AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")))
+	_save_cfg(cf)
 
 
 func _record_run() -> void:
@@ -648,7 +694,7 @@ func _record_run() -> void:
 	var cf := ConfigFile.new()
 	cf.load(SAVE_PATH)
 	cf.set_value("hall", "runs", hall)
-	cf.save(SAVE_PATH)
+	_save_cfg(cf)
 
 
 func _hint(id: String, text: String) -> void:
@@ -660,12 +706,11 @@ func _hint(id: String, text: String) -> void:
 	if _seen.get(id, false):
 		return
 	_seen[id] = true
-	_hint_text = text
-	_hint_t = 1.0
+	_hint_queue.append(text)
 	var cf := ConfigFile.new()
 	cf.load(SAVE_PATH)
 	cf.set_value("seen", "hints", _seen)
-	cf.save(SAVE_PATH)
+	_save_cfg(cf)
 
 
 func _track_bests() -> void:
@@ -687,6 +732,9 @@ func _track_bests() -> void:
 	if sim.victory or sim.wiped or (_down_frames > 150 and sim.last_stand):
 		if not _debrief:
 			_record_run()   # bank this run into the Hall of Fame once
+			if not _replay_saved and _recorder != null:
+				_recorder.save("user://last_run.replay")   # replayable capture of the finished run
+				_replay_saved = true
 		_debrief = true
 	# NEW RECORD moment: the instant this run's score passes the standing best.
 	if not _record_fired and best_score > 0 and sim.score > best_score:
@@ -711,12 +759,11 @@ func _track_bests() -> void:
 		cf.set_value("best", "score", best_score)
 		cf.set_value("best", "wave", best_wave)
 		cf.set_value("best", "dist", best_dist)
-		cf.save(SAVE_PATH)
+		_save_cfg(cf)
 
 
-func _show_banner(text: String) -> void:
-	_banner_text = text
-	_banner_t = 1.0
+func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
+	_banners.append({"text": text, "t": 1.0, "col": col})
 
 
 func _check_dry_throw(inputs: Array) -> void:
@@ -731,7 +778,7 @@ func _check_dry_throw(inputs: Array) -> void:
 				and p["grenade_ammo"] == 0 and p["grenade_cd"] == 0:
 			_dry_grenade_frame = Engine.get_physics_frames()
 			_sfx.play("tank_board", -12.0, 2.4)
-			_grenade_dry = 12   # HUD grenade pip flashes red
+			_grenade_dry[pi] = 12   # HUD grenade pip flashes red
 			return
 
 
@@ -749,6 +796,32 @@ func _check_near_miss() -> void:
 				_whiz_frame = Engine.get_physics_frames()
 				_sfx.play("whiz", -13.0, randf_range(0.95, 1.1))
 				return
+
+
+func _hit_owner(ex: int, ey: int) -> int:
+	# View-only shot attribution: the live player whose gun points nearest the
+	# hit takes the reticle confirm, so P2's landed shots pop P2's reticle (not
+	# P1's) without touching the checksummed sim. Bullets fly straight along aim,
+	# so a hit a few ticks downrange still lines up with the shooter's aim.
+	var best := 0
+	var best_dot := -2.0
+	for pi in sim.players.size():
+		var pl: Dictionary = sim.players[pi]
+		if not pl["alive"]:
+			continue
+		var ax := float(pl["aim_x"])
+		var ay := float(pl["aim_y"])
+		var dx := float(ex - pl["x"])
+		var dy := float(ey - pl["y"])
+		var alen := sqrt(ax * ax + ay * ay)
+		var dlen := sqrt(dx * dx + dy * dy)
+		if alen < 1.0 or dlen < 1.0:
+			continue
+		var d := (ax * dx + ay * dy) / (alen * dlen)
+		if d > best_dot:
+			best_dot = d
+			best = pi
+	return best
 
 
 func _mark_hit_dir(px: int, py: int) -> void:
@@ -789,16 +862,24 @@ func _update_feel() -> void:
 	_trauma = maxf(0.0, _trauma - 0.03)
 	_flash_alpha = maxf(0.0, _flash_alpha - 0.08)
 	_damage_vignette = maxf(0.0, _damage_vignette - 0.02)
-	_banner_t = maxf(0.0, _banner_t - 0.008)
-	_hitmarker = maxf(0.0, _hitmarker - 0.12)
+	if not _banners.is_empty():
+		_banners[0]["t"] -= 0.008
+		if _banners[0]["t"] <= 0.0:
+			_banners.pop_front()
+	for _hi in _hitmarker.size():
+		_hitmarker[_hi] = maxf(0.0, _hitmarker[_hi] - 0.12)
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
 	_punch = maxf(0.0, _punch - 0.006)
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
 	_concussion = maxf(0.0, _concussion - 0.035)
 	_music_hold = maxi(0, _music_hold - 1)
-	_grenade_dry = maxi(0, _grenade_dry - 1)
+	for _gi in _grenade_dry.size():
+		_grenade_dry[_gi] = maxi(0, _grenade_dry[_gi] - 1)
 	_hint_t = maxf(0.0, _hint_t - 0.006)
+	if _hint_t <= 0.02 and not _hint_queue.is_empty():
+		_hint_text = _hint_queue.pop_front()
+		_hint_t = 1.0
 	_check_near_miss()
 	_drive_audio()
 	for i in range(_fx.size() - 1, -1, -1):
@@ -983,10 +1064,14 @@ func _gather_inputs() -> Array:
 
 	if _two_players:
 		var p2 := SimInput.new()
-		p2.move_x = _quantize_axis(Input.get_joy_axis(1, JOY_AXIS_LEFT_X))
-		p2.move_y = _quantize_axis(Input.get_joy_axis(1, JOY_AXIS_LEFT_Y))
-		p2.aim_x = _quantize_axis(Input.get_joy_axis(1, JOY_AXIS_RIGHT_X))
-		p2.aim_y = _quantize_axis(Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y))
+		var p2_move := _pad_deadzone(Vector2(
+			Input.get_joy_axis(1, JOY_AXIS_LEFT_X), Input.get_joy_axis(1, JOY_AXIS_LEFT_Y)), 0.2)
+		var p2_aim := _pad_deadzone(Vector2(
+			Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)), 0.25)
+		p2.move_x = _quantize_axis(p2_move.x)
+		p2.move_y = _quantize_axis(p2_move.y)
+		p2.aim_x = _quantize_axis(p2_aim.x)
+		p2.aim_y = _quantize_axis(p2_aim.y)
 		p2.fire = Input.get_joy_axis(1, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
 			or Input.is_joy_button_pressed(1, JOY_BUTTON_RIGHT_SHOULDER)
 		p2.grenade = Input.is_joy_button_pressed(1, JOY_BUTTON_LEFT_SHOULDER)
@@ -994,8 +1079,7 @@ func _gather_inputs() -> Array:
 		p2.interact = Input.is_joy_button_pressed(1, JOY_BUTTON_X)
 		p2.revive = Input.is_joy_button_pressed(1, JOY_BUTTON_Y)
 		p2.buy = _update_wheel(1, Input.is_joy_button_pressed(1, JOY_BUTTON_BACK),
-			Vector2(Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)),
-			Vector2(Input.get_joy_axis(1, JOY_AXIS_LEFT_X), Input.get_joy_axis(1, JOY_AXIS_LEFT_Y)))
+			p2_aim, p2_move)
 		inputs.append(p2)
 	return inputs
 
@@ -1021,6 +1105,13 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		if sel >= 0:
 			return WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]["kind"] + 1
 	return 0
+
+
+func _pad_deadzone(v: Vector2, threshold: float) -> Vector2:
+	## Radial deadzone: a stick resting below `threshold` reads as centered.
+	## The sim normalizes any nonzero move vector to full speed, so an
+	## un-deadzoned drifting stick would be a permanent full-speed crawl.
+	return v if v.length() > threshold else Vector2.ZERO
 
 
 func _quantize_axis(v: float) -> int:
@@ -1675,10 +1766,10 @@ func _draw_players() -> void:
 					false, Color(0, 0, 0, 0.55))
 				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
 				# Hitmarker: reticle flicks bright + kicks four ticks on a landed hit.
-				if i == 0 and _hitmarker > 0.01:
-					var hc := Color(1.0, 1.0, 0.85, _hitmarker)
+				if i < _hitmarker.size() and _hitmarker[i] > 0.01:
+					var hc := Color(1.0, 1.0, 0.85, _hitmarker[i])
 					var rc := rrect.get_center()
-					var off := 8.0 + (1.0 - _hitmarker) * 4.0
+					var off := 8.0 + (1.0 - _hitmarker[i]) * 4.0
 					for q in 4:
 						var qa := q * TAU / 4.0 + PI / 4.0
 						var qd := Vector2.from_angle(qa)
@@ -2051,14 +2142,19 @@ func _draw_banners() -> void:
 		draw_string(wf, Vector2(320 - ww / 2.0, 46), wtxt,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.4, 0.25, pulse))
 	# Splash banner (wave starts, checkpoints, observer warning).
-	if _banner_t > 0.01 and not _banner_text.is_empty():
-		var a := minf(1.0, _banner_t * 4.0) * minf(1.0, (1.0 - _banner_t) * 8.0 + 0.2)
-		var f := ThemeDB.fallback_font
-		var w := f.get_string_size(_banner_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-		draw_string(f, Vector2(320 - w / 2.0 + 1, 71), _banner_text,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0, 0, 0, 0.7 * a))
-		draw_string(f, Vector2(320 - w / 2.0, 70), _banner_text,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.92, 0.55, a))
+	if not _banners.is_empty():
+		var bn: Dictionary = _banners[0]
+		var bt: float = bn["t"]
+		var btext: String = bn["text"]
+		if bt > 0.01 and not btext.is_empty():
+			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
+			var f := ThemeDB.fallback_font
+			var w := f.get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
+			draw_string(f, Vector2(320 - w / 2.0 + 1, 71), btext,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0, 0, 0, 0.7 * a))
+			draw_string(f, Vector2(320 - w / 2.0, 70), btext,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
 		var vf := ThemeDB.fallback_font
 		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 115, 300, 135), false,

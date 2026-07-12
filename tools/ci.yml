@@ -1,0 +1,100 @@
+name: CI
+
+# Carries the cross-arch determinism guarantee: same SimWorld checksums on
+# x86_64 (ubuntu) and arm64 (macos). Runs the full test suite plus the sim
+# determinism lint on both. Godot version/URL come from tools/versions.lock.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Godot from tools/versions.lock
+        id: godot
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -E '^godot_version=' tools/versions.lock | cut -d= -f2)"
+          BASE="$(grep -E '^godot_download_base=' tools/versions.lock | cut -d= -f2)"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            ZIP="Godot_v${VERSION}_linux.x86_64.zip"
+            BIN="Godot_v${VERSION}_linux.x86_64"
+          else
+            ZIP="Godot_v${VERSION}_macos.universal.zip"
+            BIN="Godot.app/Contents/MacOS/Godot"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "GODOT=$GITHUB_WORKSPACE/godot-bin/$BIN" >> "$GITHUB_ENV"
+
+      - name: Cache Godot
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: godot-bin
+          key: godot-${{ runner.os }}-${{ steps.godot.outputs.version }}
+
+      - name: Download Godot
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="${{ steps.godot.outputs.base }}${{ steps.godot.outputs.version }}/${{ steps.godot.outputs.zip }}"
+          echo "Downloading $URL"
+          curl -fL --retry 3 -o godot.zip "$URL"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            SHA="$(grep -E '^godot_linux_x86_64_zip_sha256=' tools/versions.lock | cut -d= -f2 || true)"
+            if [ -n "${SHA:-}" ]; then
+              echo "Verifying sha256"
+              echo "$SHA  godot.zip" | sha256sum -c -
+            fi
+          fi
+          mkdir -p godot-bin
+          unzip -q godot.zip -d godot-bin
+          rm -f godot.zip
+
+      - name: Import assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "$GODOT"
+          "$GODOT" --headless --path . --import
+
+      - name: Run test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GODOT" --headless --path . -s res://tests/run_tests.gd 2>&1 | tee test-output.log
+          # Fail on either a non-zero Godot exit (pipefail handles that above)
+          # or the runner printing "FAIL" (parse errors can still exit 0).
+          if grep -q "FAIL" test-output.log; then
+            echo "::error::Test suite reported FAIL"
+            exit 1
+          fi
+
+      - name: Sim determinism lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GODOT" --headless --path . -s res://tools/lint_sim.gd 2>&1 | tee lint-output.log
+          if grep -q "FAIL" lint-output.log; then
+            echo "::error::Sim determinism lint found forbidden tokens in src/sim"
+            exit 1
+          fi

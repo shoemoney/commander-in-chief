@@ -250,6 +250,12 @@ func _synth_all() -> void:
 		whiz[i] = _sweep(t, 2600.0, 900.0, 0.09) * sin(PI * t / 0.09) * 0.35
 	s["whiz"] = whiz
 
+	# Wiped: descending death-march resolve — the endless run is over.
+	s["wiped"] = _notes([294.0, 247.0, 196.0, 147.0], 0.2, 0.03, false)
+
+	# Avenge: short rising two-note sting — a kill by a downed ally.
+	s["avenge"] = _notes([523.0, 784.0], 0.09, 0.0, false)
+
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
 

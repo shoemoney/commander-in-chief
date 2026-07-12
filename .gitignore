@@ -2,3 +2,8 @@
 build/
 *.tmp
 tmp_*
+
+# OS / tool cruft
+.DS_Store
+**/.DS_Store
+.opencode/

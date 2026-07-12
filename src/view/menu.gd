@@ -130,10 +130,18 @@ func _activate() -> void:
 	else:
 		match sel:
 			0: mode = Mode.HIDDEN
-			1: _toggle_bus("SFX")
-			2: _toggle_bus("Music")
-			3: main._motion = 0.0 if main._motion >= 0.5 else 1.0
-			4: main.colorblind = not main.colorblind
+			1:
+				_toggle_bus("SFX")
+				main._save_settings()
+			2:
+				_toggle_bus("Music")
+				main._save_settings()
+			3:
+				main._motion = 0.0 if main._motion >= 0.5 else 1.0
+				main._save_settings()
+			4:
+				main.colorblind = not main.colorblind
+				main._save_settings()
 			5:
 				main._reset()
 				mode = Mode.HIDDEN
