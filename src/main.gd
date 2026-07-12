@@ -401,6 +401,7 @@ func _consume_events() -> void:
 				if big:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 						"rate": 0.025, "text": "+%d¢" % ev["coin"], "col": Color(1.0, 0.9, 0.45)})
+					_coin_trail(ev["x"], ev["y"], 3)
 			"bunker_break":
 				# The "explosion" SFX already fires (_EVENT_SOUND) but nothing
 				# detonated on screen — give the demolished bunker its blast.
@@ -417,6 +418,7 @@ func _consume_events() -> void:
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.025, "text": "+%d¢" % ev.get("coin", 0), "col": Color(1.0, 0.9, 0.45)})
+				_coin_trail(ev["x"], ev["y"], 4)
 			"sniper_fire":
 				# Crack + red flash so the kill-shot leaving the barrel is visible —
 				# the paint-line telegraph vanishes the instant it fires.
@@ -1171,6 +1173,14 @@ func _draw_water() -> void:
 		for i in 4:
 			var ly := wy + wh * (0.2 + 0.2 * i) + sin(t + i * 1.7) * 2.0
 			draw_line(Vector2(0, ly), Vector2(640, ly), Color(0.35, 0.5, 0.6, 0.35), 1.0)
+		# Sun glint: bright specular flecks drifting across the surface so the
+		# river reads as moving water, not a flat blue bar.
+		var gt := float(Engine.get_physics_frames()) * 0.02
+		for gi in 6:
+			var gx := fposmod(gt * 34.0 + gi * 131.0, 680.0) - 20.0
+			var gy := wy + wh * (0.18 + 0.62 * float((gi * 7) % 10) / 10.0)
+			var ga := 0.12 + 0.16 * (0.5 + 0.5 * sin(gt * 3.0 + gi * 1.3))
+			draw_line(Vector2(gx, gy), Vector2(gx + 9, gy - 2), Color(0.82, 0.95, 1.0, ga), 1.5)
 		# The dry ford.
 		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
 		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
@@ -1616,6 +1626,13 @@ func _draw_players() -> void:
 						Color(0.5, 0.9, 1.0, 0.8 * (1.0 - bp)), 2.0)
 
 
+func _coin_trail(wx: int, wy: int, n: int) -> void:
+	# Fling a few bounty coins from a kill toward the HUD War Chest icon.
+	for cc in n:
+		_fx.append({"x": wx, "y": wy, "t": 0.0, "kind": "coin",
+			"rate": 0.028 + cc * 0.005, "ox": randf_range(-6, 6), "oy": randf_range(-6, 6)})
+
+
 func _draw_fx() -> void:
 	for fx in _fx:
 		var pos := _to_screen(fx["x"], fx["y"])
@@ -1671,6 +1688,16 @@ func _draw_fx() -> void:
 			var la := (1.0 - t) * 0.45
 			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
 			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
+		elif fx["kind"] == "coin":
+			# Bounty coin arcs from the kill up to the HUD War Chest icon, landing
+			# just as the counter pulses — the kill funded the chest, made visible.
+			var start := _to_screen(fx["x"], fx["y"]) + Vector2(fx.get("ox", 0.0), fx.get("oy", 0.0))
+			var ease := t * t * (3.0 - 2.0 * t)
+			var cp := start.lerp(Vector2(16.0, 13.0), ease)
+			cp.y -= sin(t * PI) * 16.0
+			var csz := 8.0 - t * 3.0
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(cp - Vector2(csz, csz) / 2.0, Vector2(csz, csz)),
+				false, Color(1.0, 0.92, 0.45, 1.0 - t * t))
 
 
 func _draw_scorch() -> void:
