@@ -38,13 +38,18 @@ const SEED := 0xDEADBEEF
 ## tanks in radius (emergent: torch a tank to deny it, or ignite-and-ride the
 ## bail-boost kamikaze). Only samples 3-5 moved (the torture reaches streamed
 ## tanks late and its grenade tosses now catch them). Endless golden unaffected.
+## RE-RECORDED (2026-07-12, design-loop iter 2 sim/balance): campaign elite ratio now
+## tightens with each opened gate (every 8th → 3rd by gate 5); a post-checkpoint spawn
+## grace holds the field spawner off so "GATE SECURED" isn't stepped on; and a SCORE-ONLY
+## kill-streak bonus (5/10/20 tiers) lands. New checksummed state: _spawn_grace,
+## kill_streak, kill_streak_timer, and the sniper's paint-locked aim (aim_lx/aim_ly).
 const GOLDEN: Array[int] = [
-	8340780119376351956,
-	6345185127394226400,
-	8964335448652624686,
-	9185907062058768848,
-	353042556080381680,
-	8123122256033991449,
+	1155310348896724263,
+	4571653001976119658,
+	4946087467878201582,
+	8692305162284886034,
+	3936728001528560014,
+	6351474121277013006,
 ]
 
 
@@ -78,13 +83,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (iter 26): endless spawn roll gained the shield archetype
 ## (front-arc bullet block, flank/grenade kill) — the 5-way roll shifts rng
 ## consumption + spawns shields; samples 3-5 moved, campaign untouched.
+## RE-RECORDED (2026-07-12, design-loop iter 2): the score-only kill-streak bonus plus the
+## new checksummed scalars (kill_streak/kill_streak_timer/_spawn_grace) and the sniper's
+## paint-locked aim vector shift the endless stream too — all 6 samples moved.
 const ENDLESS_GOLDEN: Array[int] = [
-	586311806716809943,
-	5628042505202006876,
-	3362890099836553207,
-	1103643236005711438,
-	5397779376171610692,
-	6321235159921832753,
+	8718596335628777777,
+	7960723626119307300,
+	5809129050624293615,
+	3077933044801342684,
+	3114050996516494880,
+	7859028305187215210,
 ]
 
 

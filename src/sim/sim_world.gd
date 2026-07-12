@@ -58,6 +58,12 @@ const BROKE_RESPAWN_TICKS := 300
 const COIN_RUSHER := 10
 const COIN_ELITE := 25
 const COIN_BUNKER := 50
+# Kill-streak: consecutive kills inside this window escalate a SCORE-ONLY bonus
+# at the 5/10/20 tiers the view already telegraphs (matches the view's window).
+const KILL_STREAK_WINDOW_TICKS := 90
+# Post-checkpoint spawn lull: the field spawner holds fire this long after a gate
+# opens so the "GATE SECURED" beat isn't stepped on by a fresh rusher.
+const GATE_SPAWN_GRACE_TICKS := 90
 const CAMERA_LEAD := 160 * F_ONE
 const BUNKER_W := 48 * F_ONE
 const BUNKER_H := 32 * F_ONE
@@ -189,6 +195,9 @@ var _next_gate_y: int = 0
 var _next_tank_y: int = 0
 var _next_water_y: int = 0
 var _gate_counter: int = 0
+var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
+var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
+var kill_streak_timer: int = 0     # ticks left before the streak lapses
 var _prev_camera_top: int = 0
 
 
@@ -247,6 +256,11 @@ func step(inputs: Array) -> void:
 	_step_enemy_bullets()
 	_step_grenades()
 	_step_enemies()
+	# Kill-streak lapses if no kill lands within the window.
+	if kill_streak_timer > 0:
+		kill_streak_timer -= 1
+		if kill_streak_timer == 0:
+			kill_streak = 0
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
@@ -749,6 +763,20 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	if not no_coin:
 		war_chest += coin
 	score += coin * 10   # score always credits — the airstrike still counts
+	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
+	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
+	# the streak rewards aggression on the leaderboard, not the economy.
+	kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
+	kill_streak_timer = KILL_STREAK_WINDOW_TICKS
+	var streak_bonus_pct := 0
+	if kill_streak >= 20:
+		streak_bonus_pct = 100
+	elif kill_streak >= 10:
+		streak_bonus_pct = 50
+	elif kill_streak >= 5:
+		streak_bonus_pct = 25
+	if streak_bonus_pct > 0:
+		score += (coin * 10 * streak_bonus_pct) / 100
 	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],
@@ -856,14 +884,17 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0:
-			# Fire down the line locked at paint start (stored in lunge_ticks?
-			# no — recompute to current for simplicity but faster/lethal bullet).
-			if dlen > F_ONE:
+			# Fire down the vector LOCKED at paint start — the laser line the view
+			# drew is a promise: sidestepping it must actually dodge the bullet.
+			var lx: int = e.get("aim_lx", dx)
+			var ly: int = e.get("aim_ly", dy)
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
 				events.append({"t": "sniper_fire", "x": e["x"], "y": e["y"]})
 				enemy_bullets.append({
 					"x": e["x"], "y": e["y"],
-					"vx": Fixed.mul(Fixed.div(dx, dlen), SNIPER_BULLET_SPEED),
-					"vy": Fixed.mul(Fixed.div(dy, dlen), SNIPER_BULLET_SPEED),
+					"vx": Fixed.mul(Fixed.div(lx, llen), SNIPER_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(ly, llen), SNIPER_BULLET_SPEED),
 					"ttl": ENEMY_BULLET_TTL_TICKS,
 				})
 		return
@@ -878,6 +909,8 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 	elif e["fire_cd"] == 0:
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
+		e["aim_lx"] = dx   # lock the shot vector at paint start (see fire branch)
+		e["aim_ly"] = dy
 		events.append({"t": "sniper_paint", "x": e["x"], "y": e["y"]})
 
 
@@ -945,12 +978,17 @@ func _step_spawner() -> void:
 	for g in gates:
 		if g["open"]:
 			opened += 1
+	if _spawn_grace > 0:
+		_spawn_grace -= 1
 	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 4)
-	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES:
+	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE
-	_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % 8 == 0)
+	# Elite ratio tightens with each opened gate (every 8th → every 3rd by gate 5)
+	# so late campaign escalates composition, not just cadence.
+	var elite_every := maxi(3, 8 - opened)
+	_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
 
 
 func _spawn_enemy(x: int, y: int, elite: bool) -> void:
@@ -1007,6 +1045,7 @@ func _step_gates() -> void:
 		if cleared:
 			g["open"] = true
 			last_gate_y = g["y"]
+			_spawn_grace = GATE_SPAWN_GRACE_TICKS   # let the checkpoint beat breathe
 			events.append({"t": "gate_open", "x": 320 * F_ONE, "y": g["y"]})
 
 
@@ -1473,6 +1512,9 @@ func checksum() -> int:
 	h = feed.call(camera_top, h)
 	h = feed.call(last_gate_y, h)
 	h = feed.call(stall_ticks, h)
+	h = feed.call(_spawn_grace, h)
+	h = feed.call(kill_streak, h)
+	h = feed.call(kill_streak_timer, h)
 	h = feed.call(1 if mode == "endless" else 0, h)
 	h = feed.call(wave, h)
 	h = feed.call(wave_pending, h)
@@ -1503,6 +1545,8 @@ func checksum() -> int:
 		h = feed.call(e.get("surface_ticks", 0), h)
 		h = feed.call(e.get("fire_cd", 0), h)
 		h = feed.call(e.get("windup", 0), h)
+		h = feed.call(e.get("aim_lx", 0), h)
+		h = feed.call(e.get("aim_ly", 0), h)
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)

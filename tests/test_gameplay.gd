@@ -173,3 +173,26 @@ func test_elite_drops_pickup() -> void:
 	for i in 20:
 		sim.step(_inputs(inp if i == 0 else _idle()))
 	Runner.T.eq(sim.pickups.size(), 1, "red elite dropped a crate")
+
+
+func test_kill_streak_bonuses_score_not_chest() -> void:
+	# The streak is a leaderboard reward, never an economy pump: the chest mints
+	# the flat bounty on every kill; score gets an escalating bonus at 5/10/20.
+	var sim := SimWorld.new(7, 1)
+	var base := SimWorld.COIN_RUSHER * 10
+	for k in range(1, 7):
+		var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+		sim.enemies.append(e)
+		var chest_before := sim.war_chest
+		var score_before := sim.score
+		sim._kill_enemy(e)
+		Runner.T.eq(sim.war_chest - chest_before, SimWorld.COIN_RUSHER,
+			"kill %d mints flat rusher coin — streak never touches the chest" % k)
+		if k >= 5:
+			Runner.T.ok(sim.score - score_before > base, "streak tier adds a score bonus (kill %d)" % k)
+		else:
+			Runner.T.eq(sim.score - score_before, base, "pre-streak kill %d scores base only" % k)
+	# The streak lapses after the window elapses with no further kills.
+	for t in SimWorld.KILL_STREAK_WINDOW_TICKS + 1:
+		sim.step(_inputs(_idle()))
+	Runner.T.eq(sim.kill_streak, 0, "streak lapses after the window with no kills")
