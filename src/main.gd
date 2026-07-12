@@ -463,6 +463,18 @@ func _mark_hit_dir(px: int, py: int) -> void:
 		if d2 < best:
 			best = d2
 			dir = Vector2(e["x"] - px, e["y"] - py)
+	# Mortar strikes and the colossus crush kill too — a wedge that only
+	# scanned bullets/infantry pointed at the wrong threat for those deaths.
+	for s in sim.strikes:
+		var ds: int = (s["x"] - px) * (s["x"] - px) + (s["y"] - py) * (s["y"] - py)
+		if ds < best:
+			best = ds
+			dir = Vector2(s["x"] - px, s["y"] - py)
+	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+		var cx: int = sim.colossus["x"] - px
+		var cy: int = sim.colossus["y"] - py
+		if cx * cx + cy * cy < best:
+			dir = Vector2(cx, cy)
 	if dir.length() > 1.0:
 		_hit_dir = dir.normalized()
 		_hit_dir_t = 1.0
@@ -597,9 +609,15 @@ func _gather_inputs() -> Array:
 	var ky := (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0)
 	var ax := (1.0 if Input.is_physical_key_pressed(KEY_RIGHT) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_LEFT) else 0.0)
 	var ay := (1.0 if Input.is_physical_key_pressed(KEY_DOWN) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_UP) else 0.0)
+	# Explicit aim only (arrow keys / pad stick, NOT the mouse fallback) — the
+	# spend-wheel selects from this so tapping Q with the mouse off-center
+	# can't auto-buy on release.
+	var wheel_dir := Vector2(ax, ay)
 	var pad_move := Vector2(
 		Input.get_joy_axis(0, JOY_AXIS_LEFT_X), Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
 	var pad_aim := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	if pad_aim.length() > 0.25:
+		wheel_dir = pad_aim
 	if pad_move.length() > 0.2:
 		kx = pad_move.x
 		ky = pad_move.y
@@ -631,7 +649,7 @@ func _gather_inputs() -> Array:
 	p1.revive = Input.is_physical_key_pressed(KEY_E) or Input.is_joy_button_pressed(0, JOY_BUTTON_Y)
 	p1.buy = _update_wheel(0,
 		Input.is_physical_key_pressed(KEY_Q) or Input.is_joy_button_pressed(0, JOY_BUTTON_BACK),
-		Vector2(ax, ay), Vector2(kx, ky))
+		wheel_dir, Vector2(kx, ky))
 	inputs.append(p1)
 
 	if _two_players:

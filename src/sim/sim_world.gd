@@ -239,6 +239,11 @@ func step(inputs: Array) -> void:
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
+		# The Spotter wave-mutator drops an Observer; step it so its barrage is
+		# real (endless has no camera advance, so the despawn path never fires
+		# — the observer lives until shot, which is the intended pressure).
+		if not observer.is_empty():
+			_step_observer()
 	else:
 		_step_spawner()
 		_step_boss()

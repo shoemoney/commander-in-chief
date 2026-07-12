@@ -61,8 +61,20 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 	return inp
 
 
-func _run_sim() -> Array[int]:
-	var sim := SimWorld.new(SEED, 2)
+## Endless golden: the campaign torture never enters _step_waves, so the
+## wave-mutator + spotter-observer state has no cross-arch golden without this.
+const ENDLESS_GOLDEN: Array[int] = [
+	586311806716809943,
+	5628042505202006876,
+	3362890099836553207,
+	865321301938224610,
+	2612579928305506234,
+	9009644142062819877,
+]
+
+
+func _run_sim(mode := "campaign") -> Array[int]:
+	var sim := SimWorld.new(SEED, 2, mode)
 	var samples: Array[int] = []
 	for tick in TICKS:
 		sim.step([scripted_input(tick, 0), scripted_input(tick, 1)])
@@ -84,6 +96,39 @@ func test_replay_determinism() -> void:
 		for i in mini(run_a.size(), GOLDEN.size()):
 			Runner.T.eq(run_a[i], GOLDEN[i],
 				"cross-platform golden checksum mismatch at sample %d — determinism broke" % i)
+
+
+func test_endless_replay_determinism() -> void:
+	# Exercises _step_waves: wave mutators (blitz/elite-guard/spotter) and the
+	# spotter Observer's barrage — none of which the campaign torture reaches.
+	var run_a := _run_sim("endless")
+	var run_b := _run_sim("endless")
+	for i in run_a.size():
+		Runner.T.eq(run_a[i], run_b[i], "endless run A/B diverged at sample %d" % i)
+	if ENDLESS_GOLDEN.is_empty():
+		print("      ENDLESS GOLDEN (record these): ", run_a)
+	else:
+		for i in mini(run_a.size(), ENDLESS_GOLDEN.size()):
+			Runner.T.eq(run_a[i], ENDLESS_GOLDEN[i],
+				"endless golden mismatch at sample %d — determinism broke" % i)
+
+
+func test_colossus_replay_determinism() -> void:
+	# Force-engage the finale so the core-window cycle + bullet core-chip get a
+	# determinism proof (the 60s torture never reaches gate 5).
+	var a := _colossus_run()
+	var b := _colossus_run()
+	Runner.T.eq(a, b, "colossus run A/B checksum diverged")
+
+
+func _colossus_run() -> int:
+	var sim := SimWorld.new(SEED, 1)
+	var g := {"y": sim.camera_top + 40 * Fixed.ONE, "open": false, "b1": {}, "b2": {},
+		"boss": {}, "final": true}
+	sim.gates.append(g)
+	for tick in 600:
+		sim.step([scripted_input(tick, 0)])
+	return sim.checksum()
 
 
 func test_checksum_is_idempotent() -> void:
