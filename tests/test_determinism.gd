@@ -34,13 +34,17 @@ const SEED := 0xDEADBEEF
 ## 2-5 moved (the cap bites only once the 2P torture exceeds 3 deaths).
 ## Same pass: airstrike screen-clear mints no coin + endless spawn scaling,
 ## both campaign-torture-inert, so they did NOT move these values.
+## RE-RECORDED (2026-07-12, iter 24): grenade/shell explosions now ignite
+## tanks in radius (emergent: torch a tank to deny it, or ignite-and-ride the
+## bail-boost kamikaze). Only samples 3-5 moved (the torture reaches streamed
+## tanks late and its grenade tosses now catch them). Endless golden unaffected.
 const GOLDEN: Array[int] = [
 	8340780119376351956,
 	6345185127394226400,
 	8964335448652624686,
-	565685721398068558,
-	6727277923065113226,
-	4871685255518214231,
+	9185907062058768848,
+	353042556080381680,
+	8123122256033991449,
 ]
 
 

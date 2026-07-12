@@ -710,6 +710,12 @@ func _explode(x: int, y: int) -> void:
 			score += COIN_BUNKER * 10
 			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
 				"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER})
+	# Explosions torch tanks in radius (the observer mortar already did; a
+	# player's own grenade now does too) — deny a tank to a partner, or ignite
+	# one and ride the bail-boost into a bunker cluster as a rolling bomb.
+	for tank in tanks:
+		if tank["alive"] and _dist_lte(x, y, tank["x"], tank["y"], GRENADE_RADIUS):
+			_ignite_tank(tank)
 	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, GRENADE_RADIUS):
 		_kill_observer()
 	for g in gates:
