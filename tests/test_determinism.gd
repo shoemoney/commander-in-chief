@@ -49,13 +49,16 @@ const SEED := 0xDEADBEEF
 ## entity (mines[] w/ x/y/armed, hashed) that streams into the campaign world and detonates via
 ## _explode() when any grounded unit steps on it. All 6 campaign samples moved (the torture walks
 ## the minefield); endless moved too (the new mines.size() hash block feeds even when empty).
+## RE-RECORDED (2026-07-12, iter 9 reward&fairness): Flawless-Gate bonus (deaths_since_gate joins
+## checksum; +50 chest/+2000 score on a deathless checkpoint), streak-20 grants a speed boost,
+## and a bail-out mercy window. Campaign torture opens gates flawlessly → all samples moved.
 const GOLDEN: Array[int] = [
-	8018799156609757195,
-	4400843318917796689,
-	9031836498106235801,
-	5596387279214181354,
-	1393423115676250995,
-	1854754938499721829,
+	7131930377178128786,
+	3861147012918723304,
+	7562007633918822509,
+	6251175533080818199,
+	2124068762335254007,
+	2891158485743563333,
 ]
 
 
@@ -104,13 +107,15 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## at ~tick 1413 (wave 2), so samples 2-5 sample a frozen post-wipe sim. Because the torture no
 ## longer organically reaches wave 3+, the ranged-specialist steppers get their own determinism
 ## proof in test_endless_specials_determinism (force-staged, A==B) below.
+## RE-RECORDED (2026-07-12, iter 9): deaths_since_gate joins checksum (0 in endless — no gates)
+## plus the streak-20 boost + bail mercy window shift the endless stream; all samples moved.
 const ENDLESS_GOLDEN: Array[int] = [
-	7768378376824927241,
-	5197857099213698819,
-	7882039568770441310,
-	3413723099628770198,
-	1057108276090880142,
-	6452541763541395078,
+	6857575974762845512,
+	4835522212688398702,
+	2547943130663196847,
+	8329319923793565463,
+	375833488204185343,
+	6780372232909282599,
 ]
 
 

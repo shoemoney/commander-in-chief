@@ -94,6 +94,7 @@ const TANK_KAMIKAZE_PAD := 20 * F_ONE
 const SHELL_SPEED := 5 * F_ONE
 const SHELL_ZVEL := F_ONE
 const BAIL_BOOST_TICKS := 90
+const BAIL_IFRAME_TICKS := 20   # a forced dismount can't insta-die on landing
 # Mortar Observer: spawns after an 8 s stall; strike every 1.5 s with a
 # 0.75 s telegraph; despawns once the players push 150 px past his arrival.
 const OBSERVER_STALL_TICKS := 480
@@ -211,6 +212,7 @@ var _gate_counter: int = 0
 var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
 var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
+var deaths_since_gate: int = 0     # for the Flawless Gate bonus (reset on gate open)
 var _prev_camera_top: int = 0
 
 
@@ -541,6 +543,7 @@ func _kill_player(p: Dictionary) -> void:
 	p["deaths"] = p["deaths"] + 1
 	p["broke_timer"] = 0
 	p["in_tank"] = -1
+	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"]})
 
 
@@ -651,6 +654,9 @@ func _dismount(p: Dictionary, tank: Dictionary) -> void:
 	p["y"] = tank["y"] + 24 * F_ONE
 	if tank["burning"]:
 		p["boost_ticks"] = BAIL_BOOST_TICKS   # bailing gets the speed boost
+		# ...and a brief mercy window — a forced bail can't hand you a corpse the
+		# instant you land on an enemy (matches the respawn/frogman-surface grace).
+		p["hurt_iframes"] = maxi(p["hurt_iframes"], BAIL_IFRAME_TICKS)
 	_clamp_actor(p)
 
 
@@ -824,6 +830,13 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		streak_bonus_pct = 25
 	if streak_bonus_pct > 0:
 		score += (coin * 10 * streak_bonus_pct) / 100
+	if kill_streak == 20:
+		# The 20-streak stops being just a number: every alive fighter gets a
+		# ~3s adrenaline surge (reuses the tank-bail speed boost), so the reward
+		# is felt in the hands, not just read on the HUD.
+		for pl in players:
+			if pl["alive"]:
+				pl["boost_ticks"] = maxi(pl["boost_ticks"], BAIL_BOOST_TICKS * 2)
 	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],
@@ -1118,6 +1131,13 @@ func _step_gates() -> void:
 			g["open"] = true
 			last_gate_y = g["y"]
 			_spawn_grace = GATE_SPAWN_GRACE_TICKS   # let the checkpoint beat breathe
+			# Flawless Gate: clear a checkpoint with zero deaths since the last one
+			# and the discipline pays — a legible reward for playing tight.
+			if deaths_since_gate == 0:
+				war_chest += 50
+				score += 2000
+				events.append({"t": "gate_flawless", "x": 320 * F_ONE, "y": g["y"]})
+			deaths_since_gate = 0
 			events.append({"t": "gate_open", "x": 320 * F_ONE, "y": g["y"]})
 
 
@@ -1600,6 +1620,7 @@ func checksum() -> int:
 	h = feed.call(_spawn_grace, h)
 	h = feed.call(kill_streak, h)
 	h = feed.call(kill_streak_timer, h)
+	h = feed.call(deaths_since_gate, h)
 	h = feed.call(1 if mode == "endless" else 0, h)
 	h = feed.call(wave, h)
 	h = feed.call(wave_pending, h)

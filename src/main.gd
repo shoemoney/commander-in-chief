@@ -449,6 +449,11 @@ func _consume_events() -> void:
 					var ra := d * TAU / 4.0 + randf() * 0.5
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.08,
 						"vx": cos(ra) * randf_range(0.6, 1.4), "vy": sin(ra) * randf_range(0.6, 1.4)})
+			"gate_flawless":
+				# A disciplined, deathless checkpoint clear — gold payoff + sting.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.016, "text": "FLAWLESS  +50¢  +2000", "col": Color(1.0, 0.92, 0.45)})
+				_sfx.play("buy", -3.0, 1.5)
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
 				_kick += Vector2(0, 6)   # the wall gives way — a forward lurch

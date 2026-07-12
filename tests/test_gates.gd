@@ -77,3 +77,27 @@ func test_broke_respawn_uses_checkpoint() -> void:
 	Runner.T.ok(p["y"] >= sim.last_gate_y + 30 * Fixed.ONE, "respawn never north of the checkpoint")
 	Runner.T.ok(p["y"] >= sim.camera_top + 16 * Fixed.ONE
 		and p["y"] <= sim.camera_top + 344 * Fixed.ONE, "respawn inside the current view")
+
+
+func test_flawless_gate_pays_bonus_only_when_deathless() -> void:
+	# Opening a checkpoint with zero deaths since the last one pays +50/+2000.
+	var sim := SimWorld.new(11, 1, "campaign")
+	sim.gates.clear()
+	sim.gates.append({"y": 100 * Fixed.ONE, "open": false,
+		"b1": {"alive": false}, "b2": {"alive": false}, "boss": {}})
+	sim.deaths_since_gate = 0
+	var chest0 := sim.war_chest
+	var score0 := sim.score
+	sim._step_gates()
+	Runner.T.ok(sim.gates[0]["open"], "gate with two dead bunkers opens")
+	Runner.T.eq(sim.war_chest - chest0, 50, "flawless gate paid the chest bonus")
+	Runner.T.eq(sim.score - score0, 2000, "flawless gate paid the score bonus")
+	# A death since the last gate forfeits it.
+	var sim2 := SimWorld.new(11, 1, "campaign")
+	sim2.gates.clear()
+	sim2.gates.append({"y": 100 * Fixed.ONE, "open": false,
+		"b1": {"alive": false}, "b2": {"alive": false}, "boss": {}})
+	sim2.deaths_since_gate = 1
+	var score0b := sim2.score
+	sim2._step_gates()
+	Runner.T.eq(sim2.score - score0b, 0, "a death since the last gate forfeits the bonus")
