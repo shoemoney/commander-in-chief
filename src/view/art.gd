@@ -174,6 +174,16 @@ static func outlined(name: String) -> bool:
 ## main by the last InputEvent class — a merely-connected idle pad no longer
 ## mis-teaches a keyboard player pad buttons. Draws centered at pos.
 static var use_pad := false
+## Deuteran-safe remap: 'affordable/safe/open' greens become cyan-blue when
+## colorblind mode is on (red↔blue is distinguishable where red↔green isn't).
+## Reds are left alone. Driven from main.
+static var colorblind := false
+
+
+static func safe(green: Color) -> Color:
+	if not colorblind:
+		return green
+	return Color(0.35, 0.75, 1.0, green.a)
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}

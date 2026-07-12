@@ -38,10 +38,12 @@ func _items() -> Array:
 			"CO-OP: %s" % ("ON" if main._two_players else "OFF"),
 			"HALL OF FAME", "HOW TO PLAY", "QUIT"]
 	var reduced: bool = main._motion < 0.5
+	var cb: bool = main.colorblind
 	return ["RESUME",
 		"SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"),
 		"MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"),
-		"REDUCE MOTION: %s" % ("ON" if reduced else "OFF"), "RESTART", "TITLE SCREEN"]
+		"REDUCE MOTION: %s" % ("ON" if reduced else "OFF"),
+		"COLORBLIND: %s" % ("ON" if cb else "OFF"), "RESTART", "TITLE SCREEN"]
 
 
 # Pause-menu indices that discard the run and need a confirm press.
@@ -49,7 +51,7 @@ func _is_destructive(i: int) -> bool:
 	if mode == Mode.TITLE:
 		return i == 5   # QUIT
 	if mode == Mode.PAUSE:
-		return i == 4 or i == 5   # RESTART / TITLE SCREEN
+		return i == 5 or i == 6   # RESTART / TITLE SCREEN
 	return false
 
 
@@ -118,10 +120,11 @@ func _activate() -> void:
 			1: _toggle_bus("SFX")
 			2: _toggle_bus("Music")
 			3: main._motion = 0.0 if main._motion >= 0.5 else 1.0
-			4:
+			4: main.colorblind = not main.colorblind
+			5:
 				main._reset()
 				mode = Mode.HIDDEN
-			5:
+			6:
 				main._endless = false   # attract showcases the campaign
 				main._reset()
 				open(Mode.TITLE)

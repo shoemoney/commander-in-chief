@@ -33,6 +33,7 @@ var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
+var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
 var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
 var _duck := 0.0                 # music-duck under heavy hits
@@ -234,6 +235,7 @@ func _physics_process(_delta: float) -> void:
 		queue_redraw()
 		return
 	_hud_icons.visible = true
+	Art.colorblind = colorblind
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
 	else:
@@ -1039,7 +1041,7 @@ func _draw_gates() -> void:
 				for k in 2:
 					var lit: bool = k >= down
 					draw_circle(Vector2(300 + k * 40, gy), 5.0,
-						Color(1.0, 0.3, 0.2) if lit else Color(0.3, 0.7, 0.3))
+						Color(1.0, 0.3, 0.2) if lit else Art.safe(Color(0.3, 0.7, 0.3)))
 					draw_arc(Vector2(300 + k * 40, gy), 5.0, 0, TAU, 12, Color(0, 0, 0, 0.6), 1.0)
 
 
@@ -1063,7 +1065,7 @@ func _draw_pickups() -> void:
 		if pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= pk["cost"]
-			var pcol := Color(0.5, 1.0, 0.5) if afford else Color(1.0, 0.45, 0.35)
+			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
 			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
 			draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -25), str(pk["cost"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
@@ -1354,7 +1356,7 @@ func _draw_players() -> void:
 				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
 				draw_string(ThemeDB.fallback_font, pos + Vector2(-18, -16), rtxt,
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 1.0, 0.6))
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(0.5, 1.0, 0.6)))
 				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0)
 		if p["alive"]:
 			var angle := _aim_angle(p)
@@ -1550,7 +1552,7 @@ func _draw_progress_rail() -> void:
 		return bot - clampf(float(-wy) / float(span), 0.0, 1.0) * (bot - top)
 	for g in sim.gates:
 		var yy: float = to_rail.call(g["y"])
-		var gc := Color(0.4, 0.9, 0.4) if g["open"] else Color(0.95, 0.3, 0.2)
+		var gc := Art.safe(Color(0.4, 0.9, 0.4)) if g["open"] else Color(0.95, 0.3, 0.2)
 		if g.get("final", false):
 			gc = Color(1.0, 0.6, 0.2)
 		draw_circle(Vector2(rx, yy), 3.5, gc)

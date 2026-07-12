@@ -55,7 +55,7 @@ func _draw() -> void:
 			x = _text("HOSTILES %d" % remaining, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
 			var cleared := 1.0 - float(remaining) / float(wave_total)
 			draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
-			draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Color(0.4, 0.85, 0.4))
+			draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
 			x += 48.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
@@ -101,7 +101,7 @@ func _draw() -> void:
 				var blink := (Engine.get_physics_frames() / 20) % 2 == 0
 				var col: Color
 				if afford:
-					col = Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4)
+					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
 				else:
 					col = Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3)
 				var tx := _text("REVIVE %d" % cost, px, ry + ICON - 3.0, col)
