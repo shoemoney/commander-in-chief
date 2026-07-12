@@ -33,6 +33,7 @@ var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
+var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
 var _punch := 0.0                # camera zoom-punch on heavy impacts
@@ -177,6 +178,7 @@ func _reset() -> void:
 	_music_hold = 0
 	_tension = 0.0
 	_heat = [0.0, 0.0]
+	_down_anim = [0.0, 0.0]
 	_hint_t = 0.0
 	_run_kills = 0
 	_run_best_streak = 0
@@ -751,6 +753,11 @@ func _update_feel() -> void:
 		_recoil[i] *= 0.72
 	for i in _heat.size():
 		_heat[i] = maxf(0.0, _heat[i] - 0.02)
+	for i in mini(_down_anim.size(), sim.players.size()):
+		if sim.players[i]["alive"]:
+			_down_anim[i] = 0.0
+		else:
+			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
 	_kick *= 0.78
 	# Gamepad rumble: one pooled pulse per frame across connected pads.
 	if _rumble > 0.01:
@@ -980,6 +987,14 @@ func _aim_angle(p: Dictionary) -> float:
 	return atan2(p["aim_y"] * PX, p["aim_x"] * PX)
 
 
+func _ground_shadow(pos: Vector2, r: float) -> void:
+	# Soft flattened drop-shadow so units/vehicles sit ON the ground instead of
+	# floating over it — the one grounding cue the renderer was missing.
+	draw_set_transform(pos + Vector2(0, r * 0.32), 0.0, Vector2(1.0, 0.45))
+	draw_circle(Vector2.ZERO, r, Color(0.0, 0.03, 0.0, 0.22))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func _draw() -> void:
 	_draw_terrain()
 	_draw_scorch()
@@ -1004,6 +1019,7 @@ func _draw() -> void:
 			if is_locker:
 				var lp := Art.pulse(0.15)
 				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
+			_ground_shadow(c, 17.0)
 			_spr("bunker", c, 0.0, 0.78)
 	_draw_pickups()
 	_draw_tanks()
@@ -1232,6 +1248,7 @@ func _draw_tanks() -> void:
 		var burn_mod := Color.WHITE
 		if t["burning"]:
 			burn_mod = Color(1.3, 0.6, 0.45) if (t["burn_ticks"] / 6) % 2 == 0 else Color(0.9, 0.5, 0.4)
+		_ground_shadow(c, 15.0)
 		_spr("tank_body", c, 0.0, 0.62, burn_mod)
 		# Barrel follows the driver's aim; parked barrel points up.
 		var barrel_angle := -PI / 2
@@ -1266,6 +1283,8 @@ func _draw_enemies() -> void:
 		if not e["alive"]:
 			continue
 		var epos := _to_screen(e["x"], e["y"])
+		if e["kind"] != "frogman":
+			_ground_shadow(epos, 6.0)
 		# Run-cycle bob: a small per-unit-phased vertical hop so a charging
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
 		if e["kind"] != "frogman" and e.get("windup", 0) == 0:
@@ -1388,6 +1407,7 @@ func _draw_colossus() -> void:
 	draw_arc(cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
 	draw_circle(cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
 	var mod := Color.WHITE if phase < 3 else Color(1.4, 0.62, 0.55)
+	_ground_shadow(cpos, 30.0)
 	_spr("colossus_body", cpos, PI, 1.9, mod)
 	_spr("colossus_barrel", cpos + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cpos + Vector2(24, 26), PI + 0.5, 1.3, mod)
@@ -1489,6 +1509,7 @@ func _draw_players() -> void:
 			continue   # rendered as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
 		var tex_name := "player1" if i == 0 else "player2"
+		_ground_shadow(pos, 7.0)
 		# Co-op identity ring under each soldier so you never lose your guy in
 		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
 		if _two_players and p["alive"]:
@@ -1558,8 +1579,13 @@ func _draw_players() -> void:
 				draw_arc(pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20,
 					Color(0.7, 0.9, 1.0, 0.55), 1.5)
 		else:
-			_spr(tex_name, pos, PI / 2, 0.52, Color(0.35, 0.35, 0.35, 0.6))
-			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8), 1.5)
+			# Knockdown tween: topple from the last aim into the fallen pose, colour
+			# and scale settling over ~8 frames instead of snapping in one tick.
+			var da: float = _down_anim[i] if i < _down_anim.size() else 1.0
+			var dpose := lerp_angle(_aim_angle(p), PI / 2, da)
+			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), da)
+			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - da) * 0.12), dcol)
+			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
