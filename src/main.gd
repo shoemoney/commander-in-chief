@@ -479,10 +479,18 @@ func _consume_events() -> void:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.08,
 						"vx": cos(ra) * randf_range(0.6, 1.4), "vy": sin(ra) * randf_range(0.6, 1.4)})
 			"gate_flawless":
-				# A disciplined, deathless checkpoint clear — gold payoff + sting.
+				# A disciplined, deathless checkpoint clear — gold payoff + sting,
+				# louder as the clean-gate streak compounds.
+				var fm: int = ev.get("mult", 1)
+				var ftxt := "FLAWLESS  +%d¢  +%d" % [50 * fm, 2000 * fm]
+				if fm > 1:
+					ftxt = "FLAWLESS x%d  +%d¢  +%d" % [fm, 50 * fm, 2000 * fm]
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.016, "text": "FLAWLESS  +50¢  +2000", "col": Color(1.0, 0.92, 0.45)})
-				_sfx.play("buy", -3.0, 1.5)
+					"rate": 0.016, "text": ftxt, "col": Color(1.0, 0.92, 0.45)})
+				_sfx.play("buy", -3.0, 1.4 + fm * 0.08)
+			"avenge":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.03, "text": "AVENGED +5¢", "col": Color(0.7, 0.9, 1.0)})
 			"gate_open":
 				_trauma = minf(1.0, _trauma + 0.2)
 				_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
