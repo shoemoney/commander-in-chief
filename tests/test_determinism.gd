@@ -75,13 +75,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## detonate in endless — strike resolution was extracted from _step_observer
 ## (which endless only runs when an observer is present) into _resolve_strikes
 ## called every tick. Only sample 4 moved; campaign order/behavior identical.
+## RE-RECORDED (iter 26): endless spawn roll gained the shield archetype
+## (front-arc bullet block, flank/grenade kill) — the 5-way roll shifts rng
+## consumption + spawns shields; samples 3-5 moved, campaign untouched.
 const ENDLESS_GOLDEN: Array[int] = [
 	586311806716809943,
 	5628042505202006876,
 	3362890099836553207,
-	1577991378673560792,
-	2865413148273778650,
-	1378020686060569927,
+	1103643236005711438,
+	5397779376171610692,
+	6321235159921832753,
 ]
 
 

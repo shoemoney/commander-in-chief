@@ -80,7 +80,7 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("observer", sim.observer)
 		if not sim.colossus.is_empty():
 			_check("colossus", sim.colossus)
-	for k in ["rusher", "elite", "frogman", "grenadier", "sniper"]:
+	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 
 
@@ -98,6 +98,7 @@ func _stage(kind: String) -> SimWorld:
 	# organically reaches wave 3, so the tripwire wouldn't otherwise cover them.
 	sim._spawn_special(200 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "grenadier")
 	sim._spawn_special(440 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sniper")
+	sim._spawn_special(320 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "shield")
 	return sim
 
 

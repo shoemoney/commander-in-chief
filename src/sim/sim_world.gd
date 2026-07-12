@@ -43,6 +43,8 @@ const SNIPER_STANDOFF := 240 * F_ONE
 const SNIPER_FIRE_CD_TICKS := 170
 const SNIPER_WINDUP_TICKS := 55
 const SNIPER_BULLET_SPEED := 6 * F_ONE
+# Shield (endless-only): slow heavy; front-arc blocks bullets, flank/grenade kills.
+const SHIELD_SPEED := F_ONE
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
@@ -665,6 +667,13 @@ func _step_bullets() -> void:
 				# Bullets pass clean over submerged frogmen — grenades only.
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(b["x"], b["y"], e["x"], e["y"], BULLET_HIT_RADIUS):
+					# Shield: a bullet arriving into the front arc (roughly
+					# opposite the shieldman's facing-toward-you) is deflected;
+					# flank it or use a grenade. Front cone ~120°.
+					if e["kind"] == "shield" and _shield_blocks(e, b):
+						events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+						dead = true
+						break
 					_kill_enemy(e)
 					dead = true
 					break
@@ -767,6 +776,16 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "sniper":
 			_step_sniper(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "shield":
+			# Advances slowly behind a frontal shield (bullet block handled in
+			# _step_bullets); touch still kills. No ranged attack.
+			if dlen > F_ONE:
+				var sspd := SHIELD_SPEED
+				if _in_water(e["x"], e["y"]):
+					sspd = sspd / 2
+				e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), sspd)
+				e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), sspd)
 			continue
 		if e["elite"]:
 			_step_elite(e, target, dx, dy, dlen)
@@ -946,6 +965,25 @@ func _spawn_frogman(x: int, y: int) -> void:
 		"kind": "frogman", "submerged": true, "lunge_ticks": 0, "surface_ticks": 0})
 
 
+func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
+	## True if bullet b hits the shieldman's front arc. Facing = toward the
+	## nearest player; a head-on bullet travels roughly opposite that, so a
+	## strongly-negative dot(bullet_dir, facing) means 'into the shield'.
+	var target := _nearest_alive_player(e["x"], e["y"])
+	if target.is_empty():
+		return false
+	var fx: int = target["x"] - e["x"]
+	var fy: int = target["y"] - e["y"]
+	var flen := Fixed.length(fx, fy)
+	var blen := Fixed.length(b["vx"], b["vy"])
+	if flen <= 0 or blen <= 0:
+		return false
+	# dot of unit vectors, in fixed-point; block when < -0.5 (front 120° cone).
+	var dot := Fixed.mul(Fixed.div(fx, flen), Fixed.div(b["vx"], blen)) \
+		+ Fixed.mul(Fixed.div(fy, flen), Fixed.div(b["vy"], blen))
+	return dot < -(F_ONE / 2)
+
+
 func _spawn_special(x: int, y: int, kind: String) -> void:
 	## Endless-only ranged archetypes (grenadier/sniper). Coin-worthy like an
 	## elite; reuse fire_cd/windup so no new hashed enemy field is introduced.
@@ -1080,11 +1118,13 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 3)
+				var roll := rng.range_i(0, 4)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
+				elif roll == 2:
+					_spawn_special(x, camera_top - 24 * F_ONE, "shield")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:

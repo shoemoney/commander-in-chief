@@ -1180,6 +1180,11 @@ func _draw_enemies() -> void:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
 			_spr("elite", epos, face, 0.52, Color(1.3, 1.1, 0.55))   # amber lobber
+		elif e["kind"] == "shield":
+			_spr("rusher", epos, face, 0.55, Color(0.85, 0.9, 1.0))
+			# The riot shield: a bright arc across the front — this side deflects.
+			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
+			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)
