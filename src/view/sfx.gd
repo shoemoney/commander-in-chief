@@ -25,6 +25,12 @@ func _ready() -> void:
 		AudioServer.add_bus(mi)
 		AudioServer.set_bus_name(mi, "Music")
 		AudioServer.set_bus_send(mi, "Master")
+	# Concussion low-pass on Master: swept open normally, clamped down for the
+	# 'ears ringing, world underwater' beat right after a near-death hit.
+	if AudioServer.get_bus_effect_count(0) == 0:
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = 20500.0
+		AudioServer.add_bus_effect(0, lp)
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -47,13 +53,20 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch * randf_range(0.94, 1.06))
 
 
-func set_music_intensity(level: float) -> void:
+func set_music_intensity(level: float, duck := 0.0) -> void:
 	## Ease the drum bed toward a target intensity (0 = quiet lull heartbeat,
-	## 1 = full-tilt combat): louder and a touch faster as the fight swells.
+	## 1 = full-tilt combat), minus a fast-attack duck under heavy hits.
 	level = clampf(level, 0.0, 1.0)
-	var target_db := lerpf(-24.0, -9.0, level)
-	_music.volume_db = lerpf(_music.volume_db, target_db, 0.04)
+	var target_db := lerpf(-24.0, -9.0, level) - duck * 16.0
+	_music.volume_db = lerpf(_music.volume_db, target_db, 0.15 if duck > 0.3 else 0.04)
 	_music.pitch_scale = lerpf(_music.pitch_scale, lerpf(0.9, 1.08, level), 0.04)
+
+
+func set_concussion(amount: float) -> void:
+	## amount 0 = clear (20.5kHz), 1 = fully muffled (~500Hz).
+	var lp := AudioServer.get_bus_effect(0, 0) as AudioEffectLowPassFilter
+	if lp != null:
+		lp.cutoff_hz = lerpf(20500.0, 500.0, clampf(amount, 0.0, 1.0))
 
 
 # --- Synthesis toolkit -------------------------------------------------------
@@ -229,6 +242,13 @@ func _synth_all() -> void:
 			v += _sweep(t2, 78.0, 40.0, 0.12) * exp(-t2 * 22.0) * 0.6
 		heart[i] = v
 	s["heartbeat"] = heart
+
+	# Whiz: a short descending zip for a round cracking past the ear.
+	var whiz := _buf(0.09)
+	for i in whiz.size():
+		var t := float(i) / RATE
+		whiz[i] = _sweep(t, 2600.0, 900.0, 0.09) * sin(PI * t / 0.09) * 0.35
+	s["whiz"] = whiz
 
 	for k in s:
 		_sounds[k] = _to_wav(s[k])

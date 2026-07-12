@@ -35,6 +35,10 @@ var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fi
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
+var _duck := 0.0                 # music-duck under heavy hits
+var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
+var _music_hold := 0             # held-breath drum dropout before a big beat
+var _whiz_frame := -100          # near-miss whiz throttle
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
 var _heart_frame := -100         # heartbeat pacing
 var _hitmarker := 0.0            # reticle confirm pop on a landed hit
@@ -157,6 +161,10 @@ func _reset() -> void:
 	_record_fired = false
 	_boss_ghost.clear()
 	_punch = 0.0
+	_fade = 0.0
+	_duck = 0.0
+	_concussion = 0.0
+	_music_hold = 0
 	_tension = 0.0
 	_heat = [0.0, 0.0]
 	_hint_t = 0.0
@@ -273,6 +281,7 @@ func _consume_events() -> void:
 				_hitstop_frames = maxi(_hitstop_frames, 4)
 				_rumble = maxf(_rumble, 0.7)
 				_punch = maxf(_punch, 0.05)
+				_duck = maxf(_duck, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 				var wet: bool = sim._in_water(ev["x"], ev["y"])
@@ -332,6 +341,8 @@ func _consume_events() -> void:
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = 1.0
 				_rumble = maxf(_rumble, 1.0)
+				_duck = 1.0
+				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"])
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [E] / [Y]")
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
@@ -349,10 +360,12 @@ func _consume_events() -> void:
 			"vest_break":
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = maxf(_damage_vignette, 0.75)
+				_concussion = maxf(_concussion, 0.7)
 				_mark_hit_dir(ev["x"], ev["y"])
 			"wave_start":
 				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
+				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 			"wave_clear":
 				_show_banner("WAVE CLEARED — SHOP OPEN")
 			"observer_spawn":
@@ -362,6 +375,7 @@ func _consume_events() -> void:
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
 				_punch = maxf(_punch, 0.08)
+				_music_hold = 48   # held breath before the finale
 			"core_open":
 				_show_banner("CORE EXPOSED — OPEN FIRE")
 				_sfx.play("alarm", -6.0, 1.3)
@@ -384,6 +398,7 @@ func _check_boss_intro() -> void:
 		_show_banner("BRIDGE GUNSHIP")
 		_sfx.play("alarm", -2.0, 0.85)
 		_trauma = minf(1.0, _trauma + 0.3)
+		_music_hold = 48
 	# Colossus escalation announcements.
 	var phase := sim.colossus_phase()
 	if phase > _prev_colossus_phase and phase >= 2:
@@ -464,6 +479,22 @@ func _show_banner(text: String) -> void:
 	_banner_t = 1.0
 
 
+func _check_near_miss() -> void:
+	# A crack past the ear when an enemy round barely misses a live player —
+	# rewards the dodge, amplifies one-hit tension. Throttled so it can't spam.
+	if Engine.get_physics_frames() - _whiz_frame < 10:
+		return
+	var near_r := 15 * Fixed.ONE
+	for b in sim.enemy_bullets:
+		for p in sim.players:
+			if not p["alive"] or p["roll_ticks"] > 0:
+				continue
+			if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], near_r):
+				_whiz_frame = Engine.get_physics_frames()
+				_sfx.play("whiz", -13.0, randf_range(0.95, 1.1))
+				return
+
+
 func _mark_hit_dir(px: int, py: int) -> void:
 	# Point the damage wedge at the nearest lethal source at hit time — the
 	# "where did that come from?" answer a one-hit game owes the player.
@@ -507,7 +538,11 @@ func _update_feel() -> void:
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
 	_punch = maxf(0.0, _punch - 0.006)
 	_fade = maxf(0.0, _fade - 0.06)
+	_duck = maxf(0.0, _duck - 0.05)
+	_concussion = maxf(0.0, _concussion - 0.035)
+	_music_hold = maxi(0, _music_hold - 1)
 	_hint_t = maxf(0.0, _hint_t - 0.006)
+	_check_near_miss()
 	_drive_audio()
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
@@ -558,7 +593,14 @@ func _drive_audio() -> void:
 	var intensity := minf(1.0, alive_enemies / 12.0) * 0.6 + _trauma * 0.4
 	if boss_on:
 		intensity = maxf(intensity, 0.85)
-	_sfx.set_music_intensity(intensity)
+	# Held-breath dropout before a big beat; drums duck out under last-stand
+	# so the heartbeat plays alone.
+	if _music_hold > 0:
+		intensity = 0.0
+	if _tension > 0.4:
+		intensity = minf(intensity, 0.15)
+	_sfx.set_music_intensity(intensity, _duck)
+	_sfx.set_concussion(_concussion)
 	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
 	var want := 1.0 if sim.last_stand and not sim.victory else 0.0
 	_tension = lerpf(_tension, want, 0.03)
@@ -699,7 +741,10 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		w["open"] = true
 		var dir := aim if aim.length() > 0.3 else move
 		if dir.length() > 0.3:
-			w["sel"] = int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4
+			var new_sel := int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4
+			if new_sel != w["sel"]:
+				_sfx.play("pickup", -16.0, 1.5)   # hover tick confirms the flick
+			w["sel"] = new_sel
 		return 0
 	if w["open"]:
 		w["open"] = false
