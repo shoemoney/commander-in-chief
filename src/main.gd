@@ -19,6 +19,7 @@ const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
 var sim: SimWorld
 var _two_players := false
 var _endless := false
+var _daily := false              # seed-of-the-day challenge run
 # Feel stack (view-only; the sim never sees any of this).
 var _trauma := 0.0
 var _hitstop_frames := 0
@@ -138,16 +139,32 @@ func _ready() -> void:
 
 func start_game(endless: bool) -> void:
 	_endless = endless
+	_daily = false
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0   # cut from the title into combat, not a hard snap
+
+
+func start_daily() -> void:
+	# Seed-of-the-day: everyone who plays today fights the identical layout — the
+	# deterministic core turned into a shared, comparable challenge.
+	_endless = false
+	_daily = true
+	_reset()
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_fade = 1.0
+
+
+func _daily_seed() -> int:
+	var d := Time.get_date_dict_from_system()
+	return ((d["year"] * 10000 + d["month"] * 100 + d["day"]) * 2654435761) & 0x7FFFFFFF
 
 
 func _reset() -> void:
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
 	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
-	var seed_v := 0xC0FFEE if OS.has_feature("movie") else randi()
+	var seed_v := 0xC0FFEE if OS.has_feature("movie") else (_daily_seed() if _daily else randi())
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
 	_trauma = 0.0
@@ -587,7 +604,7 @@ func _record_run() -> void:
 			opened += 1
 	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
-		"streak": _run_best_streak, "won": sim.victory})
+		"streak": _run_best_streak, "won": sim.victory, "daily": _daily})
 	hall.sort_custom(func(a, b): return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)

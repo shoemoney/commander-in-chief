@@ -13,6 +13,7 @@ var mode: int = Mode.TITLE
 var sel := 0
 var main: Node2D
 var _confirm := -1   # index of a destructive item awaiting a 2nd press
+var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
 
 
 func is_active() -> bool:
@@ -34,7 +35,7 @@ func _items() -> Array:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return ["BACK"]
 	if mode == Mode.TITLE:
-		return ["CAMPAIGN", "ENDLESS WAR",
+		return ["CAMPAIGN", "ENDLESS WAR", "DAILY RUN",
 			"CO-OP: %s" % ("ON" if main._two_players else "OFF"),
 			"HALL OF FAME", "HOW TO PLAY", "QUIT"]
 	var reduced: bool = main._motion < 0.5
@@ -49,7 +50,7 @@ func _items() -> Array:
 # Pause-menu indices that discard the run and need a confirm press.
 func _is_destructive(i: int) -> bool:
 	if mode == Mode.TITLE:
-		return i == 5   # QUIT
+		return i == 6   # QUIT
 	if mode == Mode.PAUSE:
 		return i == 5 or i == 6   # RESTART / TITLE SCREEN
 	return false
@@ -57,18 +58,23 @@ func _is_destructive(i: int) -> bool:
 
 func _unhandled_input(ev: InputEvent) -> void:
 	var move := 0
+	var hmove := 0
 	var act := false
 	var back := false
 	if ev is InputEventKey and ev.pressed and not ev.echo:
 		match ev.keycode:
 			KEY_W, KEY_UP: move = -1
 			KEY_S, KEY_DOWN: move = 1
+			KEY_A, KEY_LEFT: hmove = -1
+			KEY_D, KEY_RIGHT: hmove = 1
 			KEY_ENTER, KEY_SPACE: act = true
 			KEY_ESCAPE: back = true
 	elif ev is InputEventJoypadButton and ev.pressed:
 		match ev.button_index:
 			JOY_BUTTON_DPAD_UP: move = -1
 			JOY_BUTTON_DPAD_DOWN: move = 1
+			JOY_BUTTON_DPAD_LEFT: hmove = -1
+			JOY_BUTTON_DPAD_RIGHT: hmove = 1
 			JOY_BUTTON_A: act = true
 			JOY_BUTTON_START: back = true
 
@@ -76,6 +82,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 		if back:
 			open(Mode.PAUSE)
 			main._sfx.play("tank_board", -8.0)
+		return
+	# Hall of Fame: left/right cycles the mode filter (ALL / CAMPAIGN / ENDLESS).
+	if mode == Mode.HALL and hmove != 0:
+		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
+		main._sfx.play("pickup", -14.0, 1.3)
+		queue_redraw()
 		return
 	if move != 0:
 		sel = wrapi(sel + move, 0, _items().size())
@@ -110,10 +122,11 @@ func _activate() -> void:
 		match sel:
 			0: main.start_game(false)
 			1: main.start_game(true)
-			2: main._two_players = not main._two_players
-			3: open(Mode.HALL)
-			4: open(Mode.HOWTO)
-			5: get_tree().quit()
+			2: main.start_daily()
+			3: main._two_players = not main._two_players
+			4: open(Mode.HALL)
+			5: open(Mode.HOWTO)
+			6: get_tree().quit()
 	else:
 		match sel:
 			0: mode = Mode.HIDDEN
@@ -208,21 +221,33 @@ func _draw_back_button() -> void:
 
 
 func _draw_hall() -> void:
-	_center_text("HALL OF FAME", 40, 22, Color(1.0, 0.85, 0.3))
+	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
+	_center_text("HALL OF FAME", 38, 22, Color(1.0, 0.85, 0.3))
+	_center_text("◄  %s  ►" % names[_hall_filter], 64, 10, Color(0.85, 0.88, 0.68))
 	var f := ThemeDB.fallback_font
-	if main.hall.is_empty():
-		_center_text("NO RUNS YET — GO EARN YOUR PLACE", 170, 11, Color(0.8, 0.84, 0.74))
+	# Filter to the selected mode (ALL shows everything), keeping score order.
+	var rows: Array = []
+	for run in main.hall:
+		if _hall_filter == 1 and run["mode"] == "endless":
+			continue
+		if _hall_filter == 2 and run["mode"] != "endless":
+			continue
+		rows.append(run)
+	if rows.is_empty():
+		_center_text("NO %s RUNS YET — GO EARN YOUR PLACE" % names[_hall_filter], 170, 11,
+			Color(0.8, 0.84, 0.74))
 		return
-	draw_string(f, Vector2(120, 78), "#   SCORE     MODE      REACHED    STREAK",
+	draw_string(f, Vector2(112, 92), "#   SCORE     MODE      REACHED    STREAK",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.75, 0.6))
-	for i in mini(main.hall.size(), 8):
-		var run: Dictionary = main.hall[i]
+	for i in mini(rows.size(), 8):
+		var run: Dictionary = rows[i]
 		var mode_s: String = "ENDLESS" if run["mode"] == "endless" else "CAMPAIGN"
 		var reached: String = "WAVE %d" % run["wave"] if run["mode"] == "endless" \
 			else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run["sector"])
 		var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
-		draw_string(f, Vector2(120, 100 + i * 26),
-			"%d   %-8d  %-8s  %-9s  x%d" % [i + 1, run["score"], mode_s, reached, run["streak"]],
+		var tag: String = "  *DAILY" if run.get("daily", false) else ""
+		draw_string(f, Vector2(112, 112 + i * 24),
+			"%d   %-8d  %-8s  %-9s  x%d%s" % [i + 1, run["score"], mode_s, reached, run["streak"], tag],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, col)
 
 
