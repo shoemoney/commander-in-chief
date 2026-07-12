@@ -44,6 +44,14 @@ func _draw() -> void:
 	_score_pulse = maxf(0.0, _score_pulse - 0.05)
 	x = _stat("icon_medal", str(sim.score), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse))
+	# Live kill-streak: the count + a draining timer ring, so the score-bonus
+	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
+	if sim.kill_streak >= 2:
+		var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
+		x = _text("x%d" % sim.kill_streak, x, y + ICON - 3.0, scol) + 3.0
+		var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
+		draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
+		x += 13.0
 	# Live BEST target: the record to beat, right next to the current score.
 	if main.best_score > 0:
 		x = _text("BEST %d" % main.best_score, x, y + ICON - 3.0,
@@ -145,7 +153,14 @@ func _draw() -> void:
 				acol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
 			elif ammo <= 20:
 				acol = Color(1.0, 0.75, 0.35)
+			var ammo_x := px
 			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
+			# Empty-clip bash on cooldown: a draining ring on the dry ammo icon
+			# so "melee not ready" reads distinctly from "input ignored".
+			if ammo == 0 and p["fire_cd"] > 0:
+				var bfrac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
 			if main._grenade_dry > 0 and _mblink(4):

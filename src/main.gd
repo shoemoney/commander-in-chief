@@ -1849,6 +1849,20 @@ func _draw_threat_edges() -> void:
 		var col := Color(1.0, 0.35, 0.2, clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85))
 		draw_line(Vector2(sx - 4, 353), Vector2(sx, 358), col, 2.0)
 		draw_line(Vector2(sx, 358), Vector2(sx + 4, 353), col, 2.0)
+	# Top-edge chevrons for hostiles about to enter from the spawn edge above —
+	# an off-screen threat you'd otherwise only meet as it crosses into view.
+	for e in sim.enemies:
+		if not e["alive"] or e.get("submerged", false):
+			continue
+		var ty: float = (e["y"] - sim.camera_top) * PX
+		if ty >= 0.0 or ty < -180.0:
+			continue
+		var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
+		if tx < 262.0:
+			continue   # don't clutter under the corner HUD panel
+		var tcol := Color(1.0, 0.55, 0.25, clampf(1.0 + ty / 180.0, 0.2, 0.7))
+		draw_line(Vector2(tx - 4, 28), Vector2(tx, 24), tcol, 2.0)
+		draw_line(Vector2(tx, 24), Vector2(tx + 4, 28), tcol, 2.0)
 
 
 func _draw_wheel() -> void:
