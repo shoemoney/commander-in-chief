@@ -511,6 +511,10 @@ func _consume_events() -> void:
 			"core_open":
 				_show_banner("CORE EXPOSED — OPEN FIRE")
 				_sfx.play("alarm", -6.0, 1.3)
+			"airstrike_called":
+				# Commit beat: the strike is inbound, not instant — announce it.
+				_show_banner("AIRSTRIKE INBOUND")
+				_sfx.play("whistle", -3.0, 0.85)
 			"wiped":
 				# Whole squad down with no rescue — the endless run is over.
 				_trauma = minf(1.0, _trauma + 0.6)
@@ -1046,6 +1050,7 @@ func _draw() -> void:
 	_draw_threat_edges()
 	_draw_progress_rail()
 	_draw_wheel()
+	_draw_airstrike_telegraph()
 	_draw_banners()
 
 
@@ -1841,6 +1846,23 @@ func _draw_wheel() -> void:
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 0, 0, 0.7))
 			draw_string(f, c + Vector2(-lw / 2.0, 71.0), lbl,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.95, 0.7))
+
+
+func _draw_airstrike_telegraph() -> void:
+	# The called airstrike's incoming window: a red wash that ramps and strobes as
+	# impact nears, so the wipe reads as an anticipated event, not a silent zap.
+	if sim.pending_airstrike <= 0:
+		return
+	var frac := 1.0 - float(sim.pending_airstrike) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
+	var a := 0.05 + frac * 0.16
+	if sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
+		a = 0.34
+	draw_rect(Rect2(0, 0, 640, 360), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
+	var f := ThemeDB.fallback_font
+	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
+	var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	draw_string(f, Vector2(320 - w / 2.0 + 1, 47), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0, 0, 0, 0.6))
+	draw_string(f, Vector2(320 - w / 2.0, 46), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.85, 0.3))
 
 
 func _draw_banners() -> void:

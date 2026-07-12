@@ -79,7 +79,10 @@ func test_fire_mission_clears_surfaced_spares_submerged() -> void:
 	sim._spawn_enemy(p["x"] - 200 * Fixed.ONE, p["y"] - 100 * Fixed.ONE, true)
 	sim._spawn_frogman(p["x"], p["y"] - 200 * Fixed.ONE)
 	sim.pickups.append({"x": p["x"], "y": p["y"], "kind": 3, "cost": 0})
-	sim.step([_idle()])
+	# Airstrike is now CALLED IN — it resolves after the telegraph window, so step
+	# through the delay before checking the clear.
+	for _t in SimWorld.STRIKE_TELEGRAPH_TICKS + 2:
+		sim.step([_idle()])
 	var surfaced_alive := 0
 	var frog_alive := false
 	for e in sim.enemies:

@@ -52,13 +52,16 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 9 reward&fairness): Flawless-Gate bonus (deaths_since_gate joins
 ## checksum; +50 chest/+2000 score on a deathless checkpoint), streak-20 grants a speed boost,
 ## and a bail-out mercy window. Campaign torture opens gates flawlessly → all samples moved.
+## RE-RECORDED (2026-07-12, iter 10): airstrike now telegraphs (pending_airstrike joins checksum;
+## the wipe resolves after STRIKE_TELEGRAPH_TICKS instead of instantly) + a guaranteed free cache
+## spawns past every gate open. Campaign torture opens gates → cache pickups + rng shift → all moved.
 const GOLDEN: Array[int] = [
-	7131930377178128786,
-	3861147012918723304,
-	7562007633918822509,
-	6251175533080818199,
-	2124068762335254007,
-	2891158485743563333,
+	3512743250288233932,
+	4313989637038503236,
+	2517893656888264959,
+	2029837171902075225,
+	61920154406589193,
+	5397767549124450523,
 ]
 
 
@@ -109,13 +112,15 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## proof in test_endless_specials_determinism (force-staged, A==B) below.
 ## RE-RECORDED (2026-07-12, iter 9): deaths_since_gate joins checksum (0 in endless — no gates)
 ## plus the streak-20 boost + bail mercy window shift the endless stream; all samples moved.
+## RE-RECORDED (2026-07-12, iter 10): pending_airstrike joins checksum (shifts the endless hash;
+## the gate cache is campaign-only so endless moves only from the new field).
 const ENDLESS_GOLDEN: Array[int] = [
-	6857575974762845512,
-	4835522212688398702,
-	2547943130663196847,
-	8329319923793565463,
-	375833488204185343,
-	6780372232909282599,
+	9069434203626988220,
+	8279158949608968770,
+	7504171151743781219,
+	743768110535347611,
+	4112478394069345299,
+	8144375565817769291,
 ]
 
 

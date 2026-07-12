@@ -193,6 +193,7 @@ var wave_pending: int = 0
 var wave_spawn_cd: int = 0
 var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter)
 var intermission_ticks: int = 0
+var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
 var colossus: Dictionary = {}
 var last_stand: bool = false
 var victory: bool = false
@@ -279,6 +280,12 @@ func step(inputs: Array) -> void:
 		kill_streak_timer -= 1
 		if kill_streak_timer == 0:
 			kill_streak = 0
+	# A called airstrike resolves after its telegraph window (enemies keep acting
+	# through it — the buyer commits before seeing the result).
+	if pending_airstrike > 0:
+		pending_airstrike -= 1
+		if pending_airstrike == 0:
+			_fire_mission()
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
@@ -567,7 +574,11 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 		2:
 			p["vest"] = true
 		3:
-			_fire_mission()
+			# Airstrike is CALLED IN, not instant — it now telegraphs like every
+			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
+			# giving a commit-then-wait beat instead of a silent screen-wipe.
+			pending_airstrike = STRIKE_TELEGRAPH_TICKS
+			events.append({"t": "airstrike_called", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 
 
 func _try_buy(p: Dictionary, kind: int) -> void:
@@ -1138,6 +1149,11 @@ func _step_gates() -> void:
 				score += 2000
 				events.append({"t": "gate_flawless", "x": 320 * F_ONE, "y": g["y"]})
 			deaths_since_gate = 0
+			# Guaranteed cache past every checkpoint — the gate-open beat had a big
+			# audiovisual payoff but no mechanical reward; a free grenade/vest crate
+			# closes that loop.
+			pickups.append({"x": (200 + rng.range_i(0, 240)) * F_ONE, "y": g["y"] - 40 * F_ONE,
+				"kind": 1 + rng.range_i(0, 1), "cost": 0})
 			events.append({"t": "gate_open", "x": 320 * F_ONE, "y": g["y"]})
 
 
@@ -1627,6 +1643,7 @@ func checksum() -> int:
 	if mode == "endless":
 		h = feed.call(wave_mod, h)   # endless-only: campaign checksums unchanged
 	h = feed.call(intermission_ticks, h)
+	h = feed.call(pending_airstrike, h)
 	h = feed.call(int(last_stand), h)
 	h = feed.call(int(wiped), h)
 	h = feed.call(int(victory), h)
