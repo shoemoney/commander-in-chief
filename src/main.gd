@@ -440,6 +440,9 @@ func _check_boss_intro() -> void:
 		_prev_colossus_phase = phase
 
 
+var hall: Array = []   # top-N run history for the Hall of Fame
+
+
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
 	if cf.load("user://ikari_best.cfg") == OK:
@@ -447,6 +450,25 @@ func _load_bests() -> void:
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
 		_seen = cf.get_value("seen", "hints", {})
+		hall = cf.get_value("hall", "runs", [])
+
+
+func _record_run() -> void:
+	# Bank the finished run into the top-8 Hall of Fame (by score).
+	var opened := 0
+	for g in sim.gates:
+		if g["open"]:
+			opened += 1
+	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
+		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
+		"streak": _run_best_streak, "won": sim.victory})
+	hall.sort_custom(func(a, b): return a["score"] > b["score"])
+	if hall.size() > 8:
+		hall = hall.slice(0, 8)
+	var cf := ConfigFile.new()
+	cf.load("user://ikari_best.cfg")
+	cf.set_value("hall", "runs", hall)
+	cf.save("user://ikari_best.cfg")
 
 
 func _hint(id: String, text: String) -> void:
@@ -483,6 +505,8 @@ func _track_bests() -> void:
 	else:
 		_down_frames += 1
 	if sim.victory or (_down_frames > 150 and sim.last_stand):
+		if not _debrief:
+			_record_run()   # bank this run into the Hall of Fame once
 		_debrief = true
 	# NEW RECORD moment: the instant this run's score passes the standing best.
 	if not _record_fired and best_score > 0 and sim.score > best_score:
