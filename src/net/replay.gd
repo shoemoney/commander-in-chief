@@ -44,9 +44,15 @@ static func load_from(path: String) -> Replay:
 	var data = JSON.parse_string(f.get_as_text())
 	if typeof(data) != TYPE_DICTIONARY or data.get("magic", "") != MAGIC:
 		return null
+	# These files arrive from other machines (bug reports) — a trust boundary.
+	# Validate every field rather than relying on error-abort behavior.
+	if not (data.has("seed") and data.has("mode") and data.has("players") and data.has("frames")):
+		return null
+	if typeof(data["frames"]) != TYPE_ARRAY:
+		return null
 	var r := Replay.new()
 	r.seed_value = int(data["seed"])
-	r.mode = data["mode"]
+	r.mode = str(data["mode"])
 	r.player_count = int(data["players"])
 	r.frames = data["frames"]
 	return r

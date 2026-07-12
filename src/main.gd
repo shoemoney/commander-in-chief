@@ -338,7 +338,7 @@ func _consume_events() -> void:
 				var kkind: String = ev.get("kind", "rusher")
 				if kkind != "frogman":
 					_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
-						"kind": "elite" if kkind in ["elite", "grenadier", "sniper"] else "rusher",
+						"kind": "rusher" if kkind == "rusher" else "elite",
 						"spin": randf() * TAU})
 				# Wet kills die in a splash, not a puff — the terrain reacts.
 				if sim._in_water(ev["x"], ev["y"]):

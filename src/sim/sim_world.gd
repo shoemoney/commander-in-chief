@@ -720,8 +720,10 @@ func _explode(x: int, y: int) -> void:
 			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
 				"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER})
 	# Explosions torch tanks in radius (the observer mortar already did; a
-	# player's own grenade now does too) — deny a tank to a partner, or ignite
-	# one and ride the bail-boost into a bunker cluster as a rolling bomb.
+	# player's own grenade now does too) — deny a parked tank to a partner, or
+	# torch the tank a partner is driving (they get the bail-boost / kamikaze
+	# path). Boarding a burning tank is still guarded, so you can't self-ignite
+	# and re-board your own — the ride is a co-op / already-aboard beat.
 	for tank in tanks:
 		if tank["alive"] and _dist_lte(x, y, tank["x"], tank["y"], GRENADE_RADIUS):
 			_ignite_tank(tank)
@@ -1399,8 +1401,9 @@ func _step_observer() -> void:
 				var target := _nearest_alive_player(observer["x"], camera_top + OBSERVER_Y_OFFSET)
 				if not target.is_empty():
 					_add_strike(target["x"], target["y"])
-
-	_resolve_strikes()
+	# NOTE: strike resolution is NOT here — step() calls _resolve_strikes()
+	# once per tick for both modes. (Calling it here too double-decremented
+	# every strike, halving its telegraph window; fixed iter 28.)
 
 
 func _resolve_strikes() -> void:
