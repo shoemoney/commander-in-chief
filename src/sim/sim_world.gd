@@ -195,6 +195,7 @@ var intermission_ticks: int = 0
 var colossus: Dictionary = {}
 var last_stand: bool = false
 var victory: bool = false
+var wiped: bool = false            # endless: whole party down with no rescue → run over
 var _supply_cd: int = 0
 var _world_ended: bool = false    # final gate streamed; no more world
 ## Transient per-tick view events ({"t": "explosion"|"kill"|"gate_open", "x", "y"}).
@@ -262,6 +263,8 @@ func step(inputs: Array) -> void:
 	## Advance one tick. `inputs` is one SimInput per player.
 	tick_count += 1
 	events.clear()
+	if wiped:
+		return   # the run is over; the sim is frozen behind the debrief
 	_prev_camera_top = camera_top
 	_step_players(inputs)
 	_step_tanks()
@@ -454,12 +457,26 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 	if p["broke_timer"] > 0:
 		p["broke_timer"] = p["broke_timer"] - 1
 		if p["broke_timer"] == 0:
-			_respawn(p, _checkpoint_y())
+			# Endless has NO free respawn once the whole party is down — that is
+			# the wipe, and the only way an endless run ends (and records). A
+			# partner still up rescues you; campaign still respawns at checkpoint.
+			if mode == "endless" and _all_players_down():
+				wiped = true
+				events.append({"t": "wiped", "x": p["x"], "y": p["y"]})
+			else:
+				_respawn(p, _checkpoint_y())
 			return
 	# Dead player pressing revive = feeding the War Chest coin reader (solo,
 	# or when the partner is also down).
 	if inp.revive:
 		_try_revive(-1, p)
+
+
+func _all_players_down() -> bool:
+	for p in players:
+		if p["alive"]:
+			return false
+	return true
 
 
 func _checkpoint_y() -> int:
@@ -1590,6 +1607,7 @@ func checksum() -> int:
 		h = feed.call(wave_mod, h)   # endless-only: campaign checksums unchanged
 	h = feed.call(intermission_ticks, h)
 	h = feed.call(int(last_stand), h)
+	h = feed.call(int(wiped), h)
 	h = feed.call(int(victory), h)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),

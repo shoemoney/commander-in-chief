@@ -219,7 +219,7 @@ func _physics_process(_delta: float) -> void:
 		# (reusing the tuned trailer bot) so the game sells itself before a
 		# button is pressed. Pause freezes as before.
 		if _menu.mode == GameMenu.Mode.TITLE:
-			if sim.victory or _down_frames > 150:
+			if sim.victory or sim.wiped or _down_frames > 150:
 				_reset()
 			# Feed one demo input per player so 2P attract isn't lopsided.
 			var demo_inputs: Array = []
@@ -506,6 +506,13 @@ func _consume_events() -> void:
 			"core_open":
 				_show_banner("CORE EXPOSED — OPEN FIRE")
 				_sfx.play("alarm", -6.0, 1.3)
+			"wiped":
+				# Whole squad down with no rescue — the endless run is over.
+				_trauma = minf(1.0, _trauma + 0.6)
+				_flash_alpha = maxf(_flash_alpha, 0.4)
+				_hitstop_frames = maxi(_hitstop_frames, 8)
+				_rumble = maxf(_rumble, 1.0)
+				_show_banner("OVERRUN — RUN OVER")
 			"victory":
 				_trauma = 1.0
 				_flash_alpha = 0.6
@@ -612,7 +619,7 @@ func _track_bests() -> void:
 		_down_frames = 0
 	else:
 		_down_frames += 1
-	if sim.victory or (_down_frames > 150 and sim.last_stand):
+	if sim.victory or sim.wiped or (_down_frames > 150 and sim.last_stand):
 		if not _debrief:
 			_record_run()   # bank this run into the Hall of Fame once
 		_debrief = true

@@ -91,3 +91,21 @@ func test_fire_mission_clears_surfaced_spares_submerged() -> void:
 			surfaced_alive += 1
 	Runner.T.eq(surfaced_alive, 0, "fire mission cleared every surfaced enemy")
 	Runner.T.ok(frog_alive, "the submerged frogman was spared (1986 rule)")
+
+func test_endless_wipe_ends_run_when_party_down() -> void:
+	# The fix for "Endless War can't be lost": a solo (all-down) party whose
+	# broke-timer expires with no rescue wipes the run instead of free-respawning.
+	var sim := SimWorld.new(9, 1, "endless")
+	var p := sim.players[0]
+	p["alive"] = false
+	p["broke_timer"] = 1
+	sim.war_chest = 0
+	sim.step([SimInput.new()])
+	Runner.T.ok(sim.wiped, "broke-timer expiry with the whole party down wipes the endless run")
+	# Campaign still free-respawns instead of wiping.
+	var camp := SimWorld.new(9, 1, "campaign")
+	var cp := camp.players[0]
+	cp["alive"] = false
+	cp["broke_timer"] = 1
+	camp.step([SimInput.new()])
+	Runner.T.ok(not camp.wiped and cp["alive"], "campaign respawns at checkpoint, never wipes")

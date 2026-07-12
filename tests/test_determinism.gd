@@ -43,17 +43,19 @@ const SEED := 0xDEADBEEF
 ## grace holds the field spawner off so "GATE SECURED" isn't stepped on; and a SCORE-ONLY
 ## kill-streak bonus (5/10/20 tiers) lands. New checksummed state: _spawn_grace,
 ## kill_streak, kill_streak_timer, and the sniper's paint-locked aim (aim_lx/aim_ly).
+## RE-RECORDED (2026-07-12, iter 8): new `wiped` end-state joins checksum (0 in campaign, so
+## all campaign samples shift by the added field but behavior is identical). See ENDLESS note.
 ## RE-RECORDED (2026-07-12, design-loop iter 5): landmines — a new deterministic field-hazard
 ## entity (mines[] w/ x/y/armed, hashed) that streams into the campaign world and detonates via
 ## _explode() when any grounded unit steps on it. All 6 campaign samples moved (the torture walks
 ## the minefield); endless moved too (the new mines.size() hash block feeds even when empty).
 const GOLDEN: Array[int] = [
-	180274737480887099,
-	2578271929563034843,
-	8497729799219670663,
-	7020148603900881034,
-	2578480308981637099,
-	1491716892420367491,
+	8018799156609757195,
+	4400843318917796689,
+	9031836498106235801,
+	5596387279214181354,
+	1393423115676250995,
+	1854754938499721829,
 ]
 
 
@@ -97,13 +99,18 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## samples 1-5 moved (the endless torture depletes ammo + fields ranged shooters near bunkers);
 ## CAMPAIGN golden is bit-identical (the torture never runs dry near an enemy, and never reaches
 ## last_stand). Sample 0 (t=600) unchanged — too early for any of the three to bite.
+## RE-RECORDED (2026-07-12, iter 8): endless now has a WIPED end-state — an all-down party with
+## no rescue ends the run (fixes "endless can't be lost / never records"). The 2P torture wipes
+## at ~tick 1413 (wave 2), so samples 2-5 sample a frozen post-wipe sim. Because the torture no
+## longer organically reaches wave 3+, the ranged-specialist steppers get their own determinism
+## proof in test_endless_specials_determinism (force-staged, A==B) below.
 const ENDLESS_GOLDEN: Array[int] = [
-	5024174134145019459,
-	3811316569843741565,
-	6021462306528794600,
-	493826583473238850,
-	2012266684157600236,
-	2650581102790456043,
+	7768378376824927241,
+	5197857099213698819,
+	7882039568770441310,
+	3413723099628770198,
+	1057108276090880142,
+	6452541763541395078,
 ]
 
 
@@ -145,6 +152,26 @@ func test_endless_replay_determinism() -> void:
 		for i in mini(run_a.size(), ENDLESS_GOLDEN.size()):
 			Runner.T.eq(run_a[i], ENDLESS_GOLDEN[i],
 				"endless golden mismatch at sample %d — determinism broke" % i)
+
+
+func test_endless_specials_determinism() -> void:
+	# The endless wipe now ends the 2P torture at ~wave 2, so it no longer
+	# organically reaches the wave-3+ ranged archetypes. Prove those (incl. the
+	# sniper's paint-locked aim) step deterministically by force-staging them —
+	# A==B, mirroring the colossus proof.
+	var a := _specials_run()
+	var b := _specials_run()
+	Runner.T.eq(a, b, "endless ranged-specials run A/B checksum diverged")
+
+
+func _specials_run() -> int:
+	var sim := SimWorld.new(SEED, 1, "endless")
+	sim._spawn_special(200 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "grenadier")
+	sim._spawn_special(440 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sniper")
+	sim._spawn_special(320 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "shield")
+	for tick in 400:
+		sim.step([scripted_input(tick, 0)])
+	return sim.checksum()
 
 
 func test_colossus_replay_determinism() -> void:
