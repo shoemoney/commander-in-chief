@@ -1017,16 +1017,27 @@ func _draw_terrain() -> void:
 	var cam_y := sim.camera_top * PX
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
+	# Sector march: the ground shifts jungle-olive → ashen/scorched as the run
+	# pushes toward the Foundry finale (campaign: opened gates; endless: wave).
+	var march := 0.0
+	if sim.mode == "campaign":
+		var mopened := 0
+		for g in sim.gates:
+			if g["open"]:
+				mopened += 1
+		march = clampf(float(mopened) / 5.0, 0.0, 1.0)
+	else:
+		march = clampf(float(sim.wave) / 12.0, 0.0, 1.0)
 	for ty in 8:
 		for tx in 10:
 			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
 			var h := Art.cell_hash(tx, base_iy + ty)
 			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
 			draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
-				Color(shade, shade + 0.06, shade * 0.82))
+				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
 			if h % 6 == 0:
-				draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(8, 8), Vector2(48, 48)), false,
-					Color(0.58, 0.5, 0.38, 0.7))   # warmer, more opaque "no cover" dirt
+				draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
+					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
 	# Drifting cloud shadows: large soft dark blobs scrolling diagonally at a
 	# slower rate than the camera — instant depth, the jungle feels alive.
 	var ct := float(Engine.get_physics_frames()) * 0.15
@@ -1107,6 +1118,15 @@ func _draw_water() -> void:
 		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
 		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, ford_w, wh + 4),
 			true, Color(0.85, 0.8, 0.65))
+		# A few deterministic rocks break up the deep water (never in the ford).
+		var wseed := Art.cell_hash(int(w["y"] / 4096) * 13, 7)
+		for r in 3:
+			var rx := float((wseed / (r + 2)) % 600 + 20)
+			if rx > ford_left - 12.0 and rx < ford_left + ford_w + 12.0:
+				continue
+			var ry := wy + wh * (0.3 + 0.4 * float((wseed / (r + 5)) % 90) / 90.0)
+			_spr("rock1" if (wseed + r) % 2 == 0 else "rock2", Vector2(rx, ry),
+				float((wseed / (r + 1)) % 628) / 100.0, 1.4, Color(0.5, 0.58, 0.6))
 		# Armor-barrier telegraph: a tank can't ford deep water (it just stops
 		# dead at the bank, reading as a broken control). When an occupied tank
 		# is near this band, hatch the deep-water banks red and flag the ford.
