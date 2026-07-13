@@ -6,12 +6,16 @@ extends Control
 
 const ICON := 13.0
 const FONT_SIZE := 10
+const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
 
 var main: Node2D
 var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
+var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
+var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
+var _row_w := 262.0       # panel backing, sized to last frame's content (1-frame lag)
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
@@ -24,34 +28,59 @@ func _draw() -> void:
 	if main == null or main.sim == null:
 		return
 	var sim: SimWorld = main.sim
+	# Shop preview strip adds one row while the SHOP OPEN window is live, so
+	# the buy list is readable without holding the spend-wheel open.
+	var shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
 
 	# Scavenged-metal panel backing the whole readout.
 	draw_texture_rect(Art.tex("ui_panel"),
-		Rect2(2, 2, 262, 26 + sim.players.size() * 16), false, Color(1, 1, 1, 0.9))
+		Rect2(2, 2, _row_w, 26 + sim.players.size() * 16 + (16 if shop_row else 0)),
+		false, Color(1, 1, 1, 0.9))
 
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	if sim.war_chest > _prev_chest:
 		_chest_pulse = 1.0
 	_prev_chest = sim.war_chest
 	_chest_pulse = maxf(0.0, _chest_pulse - 0.05)
+	if _disp_chest < 0.0:
+		_disp_chest = float(sim.war_chest)
+	_disp_chest = _rollup(_disp_chest, float(sim.war_chest))
 	var x := 8.0
 	var y := 6.0
-	x = _stat("icon_coin", str(sim.war_chest), x, y,
+	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse))
 	if sim.score > _prev_score:
 		_score_pulse = 1.0
 	_prev_score = sim.score
 	_score_pulse = maxf(0.0, _score_pulse - 0.05)
-	x = _stat("icon_medal", str(sim.score), x, y,
+	if _disp_score < 0.0:
+		_disp_score = float(sim.score)
+	_disp_score = _rollup(_disp_score, float(sim.score))
+	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse))
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:
-		var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
-		x = _text("x%d" % sim.kill_streak, x, y + ICON - 3.0, scol) + 3.0
-		var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
-		draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
-		x += 13.0
+		var stxt := "x%d" % sim.kill_streak
+		if _fits(x, _tw(stxt) + 16.0):
+			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
+			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
+			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
+			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
+			x += 13.0
+			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
+			# ring alone only reads "streak alive", not "how close".
+			var snext := 0
+			if sim.kill_streak < 5:
+				snext = 5
+			elif sim.kill_streak < 10:
+				snext = 10
+			elif sim.kill_streak < 20:
+				snext = 20
+			if snext > 0:
+				var shint := ">x%d" % snext
+				if _fits(x, _tw(shint) + 6.0):
+					x = _text(shint, x, y + ICON - 3.0, Color(0.85, 0.85, 0.8, 0.65)) + 6.0
 	# Flawless Gate streak: the compounding clean-checkpoint multiplier, shown as
 	# a gold star chip so the discipline reward is visible before the payoff.
 	if sim.mode == "campaign" and sim.flawless_streak >= 1:
@@ -59,9 +88,17 @@ func _draw() -> void:
 		x = _text("x%d" % sim.flawless_streak, x + ICON + 1.0, y + ICON - 3.0,
 			Color(1.0, 0.9, 0.45)) + 8.0
 	# Live BEST target: the record to beat, right next to the current score.
+	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
+	# the chip gold and pulse it the instant the live score passes it.
 	if main.best_score > 0:
-		x = _text("BEST %d" % main.best_score, x, y + ICON - 3.0,
-			Color(0.75, 0.7, 0.5)) + 8.0
+		var beating: bool = sim.score > main.best_score
+		var btxt := ("RECORD! %d" % sim.score) if beating else ("BEST %d" % main.best_score)
+		if _fits(x, _tw(btxt) + 8.0):
+			var bcol := Color(0.75, 0.7, 0.5)
+			if beating:
+				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
+				bcol = Color(0.75, 0.7, 0.5).lerp(Color(1.0, 0.85, 0.25), 0.5 + 0.5 * rp)
+			x = _text(btxt, x, y + ICON - 3.0, bcol) + 8.0
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
 			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
@@ -77,8 +114,10 @@ func _draw() -> void:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
-				var mchip: String = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY"][sim.wave_mod]
-				x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
+				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY"]
+				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
+				if mchip != "" and _fits(x, _tw(mchip) + 8.0):
+					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
 			# Live wave-clear dashboard: how close is this wave to done? (the
 			# push-or-hold decision was blind — enemy count already computed
 			# every frame for the music bed).
@@ -90,11 +129,13 @@ func _draw() -> void:
 			# The wave's starting budget (same formula _start_wave uses).
 			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
 				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
-			x = _text("HOSTILES %d" % remaining, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
-			var cleared := 1.0 - float(remaining) / float(wave_total)
-			draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
-			draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
-			x += 48.0
+			var htxt := "HOSTILES %d" % remaining
+			if _fits(x, _tw(htxt) + 54.0):
+				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
+				var cleared := 1.0 - float(remaining) / float(wave_total)
+				draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
+				draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
+				x += 48.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
 		var opened := 0
@@ -104,8 +145,10 @@ func _draw() -> void:
 		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
 			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
-	Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
-	x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+	if _fits(x, _tw("SUPPLIES") + 25.0):
+		Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
+		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+	var row_r := x
 
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
 	# can manage — it climbs while the camera isn't advancing, drains on push.
@@ -115,9 +158,24 @@ func _draw() -> void:
 		draw_rect(Rect2(x + 48, y + 3, 46, 7), Color(0.1, 0.09, 0.08))
 		draw_rect(Rect2(x + 48, y + 3, 46 * pf, 7),
 			Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
+		row_r = x + 94.0
+	# ponytail: cached width sizes the panel to content without a measure pass; a 1-frame lag is imperceptible.
+	_row_w = clampf(row_r + 4.0, 262.0, RIGHT - 2.0)
+
+	# Shop preview strip: the 4 buyables at a glance (cost + green/red
+	# affordability), matching the spend-wheel's own price coloring.
+	var ry := y + 17.0
+	if shop_row:
+		var sx := 8.0
+		for kind in 4:
+			var icon: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][kind]
+			var cost: int = sim._supply_cost(kind)
+			var afford: bool = sim.war_chest >= cost
+			var scol := Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4)
+			sx = _stat(icon, str(cost), sx, ry, scol)
+		ry += 16.0
 
 	# Player rows.
-	var ry := y + 17.0
 	for i in sim.players.size():
 		var p := sim.players[i]
 		var px := 8.0
@@ -147,7 +205,9 @@ func _draw() -> void:
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
-			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
+			var gcol_tank := Color(0.6, 0.85, 1.0) if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX \
+				else Color(0.95, 0.96, 0.9)
+			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
 			if t["burning"] and _mblink(8):
 				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
@@ -159,6 +219,8 @@ func _draw() -> void:
 				acol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
 			elif ammo <= 20:
 				acol = Color(1.0, 0.75, 0.35)
+			elif ammo == SimWorld.MG_AMMO_MAX:
+				acol = Color(0.6, 0.85, 1.0)
 			var ammo_x := px
 			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
 			# Empty-clip bash on cooldown: a draining ring on the dry ammo icon
@@ -171,7 +233,9 @@ func _draw() -> void:
 			px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
-			if main._grenade_dry > 0 and _mblink(4):
+			if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+				gcol = Color(0.6, 0.85, 1.0)
+			if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 			if p["vest"]:
@@ -184,6 +248,19 @@ func _draw() -> void:
 			if sim._in_water(p["x"], p["y"]):
 				px = _pip(px, ry, Color(0.5, 0.8, 1.0), "~")
 		ry += 16.0
+
+	_accessibility_pips()
+
+
+## Tiny top-right corner pips confirming REDUCE MOTION / COLORBLIND are live —
+## both toggles reshape the whole HUD but had no on-screen state readout.
+func _accessibility_pips() -> void:
+	var acc_y := 8.0
+	if Art.colorblind:
+		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
+		acc_y += 11.0
+	if main._motion < 0.5:
+		_text("RM", RIGHT - _tw("RM"), acc_y, Color(0.75, 0.95, 0.7, 0.85))
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
@@ -199,6 +276,15 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
 	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
 	return _text("%ds" % maxi(0, t["fuel"] / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0
+
+
+## Exponential catch-up toward `target`, snapping once close — a big jump
+## visibly rolls up over a few frames instead of teleporting to the new value.
+func _rollup(disp: float, target: float) -> float:
+	var diff := target - disp
+	if absf(diff) < 0.6:
+		return target
+	return disp + diff * 0.15
 
 
 func _stat(icon: String, txt: String, x: float, y: float,
@@ -233,8 +319,15 @@ func _pip(x: float, y: float, col: Color, sym: String) -> float:
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
-	var f := ThemeDB.fallback_font
-	draw_string(f, Vector2(x + 1, y + 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE,
-		Color(0, 0, 0, 0.65))
-	draw_string(f, Vector2(x, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, col)
-	return x + f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+	Art.text(self, txt, Vector2(x, y), FONT_SIZE, col)
+	return x + _tw(txt)
+
+
+## Right-margin fit test for an optional chip of pixel-width `w` starting at `x`.
+func _fits(x: float, w: float) -> bool:
+	return x + w <= RIGHT
+
+
+## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).
+func _tw(txt: String) -> float:
+	return Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x

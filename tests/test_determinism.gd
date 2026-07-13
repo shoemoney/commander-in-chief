@@ -58,12 +58,11 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 14 economy&bounty): ~1-in-7 elites are now marked BOUNTY targets
 ## (new checksummed enemy field `marked`; triple coin+score) and a grenade blast catching 3+ pays a
 ## frag bonus. The marked roll consumes rng on every elite spawn → all samples moved.
-## RE-RECORDED (2026-07-12, iter 17 economy&anti-stall): compounding Flawless-Gate streak
-## (new checksummed flawless_streak; consecutive clean gates pay up to 3×) + an avenge bounty for
-## kills next to a downed ally. Campaign torture opens gates + 2P deaths → all samples moved.
-## RE-RECORDED (2026-07-12, iter 19 endless-depth): Clean-Wave bonus (new checksummed
-## deaths_this_wave; endless-only reward) + PAYDAY wave mutator + per-wave shop-crate shuffle.
-## The deaths_this_wave field (0 in campaign) shifts every campaign sample.
+## RE-RECORDED (2026-07-13, PR#1 reconcile merge): the iter17-32 quality-loop branch merged
+## onto main's iter17-25 loop. The reconciled sim is bit-identical to main's canonical core on
+## this torture — the branch's roll-iframe fix / pickup + strikeable refactors don't perturb the
+## sampled trajectory (the new test_combat roll test exercises the closed gap directly), so these
+## match main's committed campaign checksums exactly.
 const GOLDEN: Array[int] = [
 	8115790318362077857,
 	7194404661752016069,
@@ -125,12 +124,9 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## the gate cache is campaign-only so endless moves only from the new field).
 ## RE-RECORDED (2026-07-12, iter 14): marked-elite roll + bounty/frag scoring shift the endless
 ## stream too (elites spawn in the endless torture before it wipes at wave 2).
-## RE-RECORDED (2026-07-12, iter 17): flawless_streak joins checksum (0 in endless) + the avenge
-## bounty fires in the 2P endless torture too; all samples moved. (Endless revive-cost scaling is
-## wave-5+ only, so it's inert here — the torture wipes at wave 2.)
-## RE-RECORDED (2026-07-12, iter 19): deaths_this_wave joins checksum + the wave-1 clear now
-## shuffles the shop crates (rng shift) and can pay a Clean Wave bonus; all endless samples moved.
-## (PAYDAY only rolls at wave 3+, which the wave-2-wiping torture never reaches.)
+## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
+## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
+## match main's committed endless checksums exactly.
 const ENDLESS_GOLDEN: Array[int] = [
 	3301942127190038769,
 	3964200460934290926,

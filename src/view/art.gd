@@ -158,6 +158,10 @@ const OUTLINE := {
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
 }
 
+const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
+	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
+const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+
 
 static func tex(name: String) -> Texture2D:
 	return TEX[name]
@@ -200,9 +204,36 @@ static func pulse(rate: float) -> float:
 
 static func blink(period: int) -> bool:
 	return (Engine.get_physics_frames() / period) % 2 == 0
-const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
-	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
-const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+
+
+## Cached fallback font — ThemeDB.fallback_font was being re-fetched at every
+## call site; fetch once and hand back the same Font resource.
+static var _font: Font = null
+
+
+static func font() -> Font:
+	if _font == null:
+		_font = ThemeDB.fallback_font
+	return _font
+
+
+## Shadowed text: black copy offset +1px, then the colored text on top — the
+## drop-shadow pattern hand-inlined across the view, now in one place.
+## max_w > 0 clips the string to that width instead of letting it bleed past the bound.
+static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
+	var f := font()
+	var w := max_w if max_w > 0.0 else -1.0
+	var flags := TextServer.JUSTIFICATION_WORD_BOUND | TextServer.JUSTIFICATION_KASHIDA
+	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7), flags)
+	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col, flags)
+
+
+## Same shadow+color text, horizontally centered on cx at y.
+static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0) -> void:
+	var w := font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	if max_w > 0.0:
+		w = minf(w, max_w)
+	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
 
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0) -> void:
@@ -212,7 +243,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88))
 		var letter: String = _GLYPH_KEY[action]
-		var f := ThemeDB.fallback_font
+		var f := font()
 		var fs := int(size * 0.62)
 		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,

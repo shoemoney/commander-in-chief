@@ -18,6 +18,9 @@ window/stretch/mode="viewport"
 window/stretch/aspect="keep"
 window/size/window_width_override=1280
 window/size/window_height_override=720
+window/size/window_min_width=640
+window/size/window_min_height=360
+window/stretch/scale_mode="integer"
 
 [physics]
 

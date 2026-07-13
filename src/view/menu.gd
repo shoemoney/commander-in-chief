@@ -31,29 +31,42 @@ func _bus_off(name: String) -> bool:
 	return AudioServer.is_bus_mute(AudioServer.get_bus_index(name))
 
 
-func _items() -> Array:
+func _menu_items() -> Array[Dictionary]:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
-		return ["BACK"]
+		return [{"id": "back", "label": "BACK", "destructive": false}]
 	if mode == Mode.TITLE:
-		return ["CAMPAIGN", "ENDLESS WAR", "DAILY RUN",
-			"CO-OP: %s" % ("ON" if main._two_players else "OFF"),
-			"HALL OF FAME", "HOW TO PLAY", "QUIT"]
+		return [
+			{"id": "campaign", "label": "CAMPAIGN", "destructive": false},
+			{"id": "endless", "label": "ENDLESS WAR", "destructive": false},
+			{"id": "daily", "label": "DAILY RUN", "destructive": false},
+			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false},
+			{"id": "hall", "label": "HALL OF FAME", "destructive": false},
+			{"id": "howto", "label": "HOW TO PLAY", "destructive": false},
+			{"id": "quit", "label": "QUIT", "destructive": true},
+		]
 	var reduced: bool = main._motion < 0.5
 	var cb: bool = main.colorblind
-	return ["RESUME",
-		"SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"),
-		"MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"),
-		"REDUCE MOTION: %s" % ("ON" if reduced else "OFF"),
-		"COLORBLIND: %s" % ("ON" if cb else "OFF"), "RESTART", "TITLE SCREEN"]
+	return [
+		{"id": "resume", "label": "RESUME", "destructive": false},
+		{"id": "sfx", "label": "SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"), "destructive": false},
+		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false},
+		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if reduced else "OFF"), "destructive": false},
+		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if cb else "OFF"), "destructive": false},
+		{"id": "restart", "label": "RESTART", "destructive": true},
+		{"id": "title", "label": "TITLE SCREEN", "destructive": true},
+	]
+
+
+func _items() -> Array[String]:
+	var out: Array[String] = []
+	for item in _menu_items():
+		out.append(item["label"])
+	return out
 
 
 # Pause-menu indices that discard the run and need a confirm press.
 func _is_destructive(i: int) -> bool:
-	if mode == Mode.TITLE:
-		return i == 6   # QUIT
-	if mode == Mode.PAUSE:
-		return i == 5 or i == 6   # RESTART / TITLE SCREEN
-	return false
+	return _menu_items()[i]["destructive"]
 
 
 func _unhandled_input(ev: InputEvent) -> void:
@@ -105,6 +118,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 		mode = Mode.HIDDEN
 	elif back and (mode == Mode.HALL or mode == Mode.HOWTO):
 		open(Mode.TITLE)
+	if move != 0 or hmove != 0 or act or back:
+		accept_event()
 	queue_redraw()
 
 
@@ -118,26 +133,35 @@ func _activate() -> void:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		open(Mode.TITLE)
 		return
+	var id: String = _menu_items()[sel]["id"]
 	if mode == Mode.TITLE:
-		match sel:
-			0: main.start_game(false)
-			1: main.start_game(true)
-			2: main.start_daily()
-			3: main._two_players = not main._two_players
-			4: open(Mode.HALL)
-			5: open(Mode.HOWTO)
-			6: get_tree().quit()
+		match id:
+			"campaign": main.start_game(false)
+			"endless": main.start_game(true)
+			"daily": main.start_daily()
+			"coop": main._two_players = not main._two_players
+			"hall": open(Mode.HALL)
+			"howto": open(Mode.HOWTO)
+			"quit": get_tree().quit()
 	else:
-		match sel:
-			0: mode = Mode.HIDDEN
-			1: _toggle_bus("SFX")
-			2: _toggle_bus("Music")
-			3: main._motion = 0.0 if main._motion >= 0.5 else 1.0
-			4: main.colorblind = not main.colorblind
-			5:
+		match id:
+			"resume": mode = Mode.HIDDEN
+			"sfx":
+				_toggle_bus("SFX")
+				main._save_settings()
+			"music":
+				_toggle_bus("Music")
+				main._save_settings()
+			"motion":
+				main._motion = 0.0 if main._motion >= 0.5 else 1.0
+				main._save_settings()
+			"colorblind":
+				main.colorblind = not main.colorblind
+				main._save_settings()
+			"restart":
 				main._reset()
 				mode = Mode.HIDDEN
-			6:
+			"title":
 				main._endless = false   # attract showcases the campaign
 				main._reset()
 				open(Mode.TITLE)
@@ -224,7 +248,6 @@ func _draw_hall() -> void:
 	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
 	_center_text("HALL OF FAME", 38, 22, Color(1.0, 0.85, 0.3))
 	_center_text("◄  %s  ►" % names[_hall_filter], 64, 10, Color(0.85, 0.88, 0.68))
-	var f := ThemeDB.fallback_font
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows: Array = []
 	for run in main.hall:
@@ -237,8 +260,12 @@ func _draw_hall() -> void:
 		_center_text("NO %s RUNS YET — GO EARN YOUR PLACE" % names[_hall_filter], 170, 11,
 			Color(0.8, 0.84, 0.74))
 		return
-	draw_string(f, Vector2(112, 92), "#   SCORE     MODE      REACHED    STREAK",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.75, 0.6))
+	# Fixed x offsets per column — ThemeDB.fallback_font is proportional, so
+	# space-padded strings stagger; each column draws at its own x instead.
+	var col_x := [112, 148, 226, 306, 396]
+	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
+	for c in headers.size():
+		Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.7, 0.75, 0.6))
 	for i in mini(rows.size(), 8):
 		var run: Dictionary = rows[i]
 		var mode_s: String = "ENDLESS" if run["mode"] == "endless" else "CAMPAIGN"
@@ -246,14 +273,14 @@ func _draw_hall() -> void:
 			else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run["sector"])
 		var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
 		var tag: String = "  *DAILY" if run.get("daily", false) else ""
-		draw_string(f, Vector2(112, 112 + i * 24),
-			"%d   %-8d  %-8s  %-9s  x%d%s" % [i + 1, run["score"], mode_s, reached, run["streak"], tag],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, col)
+		var y := 112 + i * 24
+		var cells := [str(i + 1), str(run["score"]), mode_s, reached, "x%d%s" % [run["streak"], tag]]
+		for c in cells.size():
+			Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
 
 
 func _draw_howto() -> void:
 	_center_text("HOW TO PLAY", 34, 22, Color(1.0, 0.85, 0.3))
-	var f := ThemeDB.fallback_font
 	var lines := [
 		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
 		["pays to REVIVE you or BUY supplies (hold Q). That's the choice.", Color(0.85, 0.9, 0.8)],
@@ -263,7 +290,7 @@ func _draw_howto() -> void:
 		["", Color.WHITE],
 	]
 	for i in lines.size():
-		draw_string(f, Vector2(60, 70 + i * 18), lines[i][0], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, lines[i][1])
+		Art.text(self, lines[i][0], Vector2(60, 70 + i * 18), 11, lines[i][1])
 	# The enemy roster with live sprites.
 	var roster := [["rusher", "RUSHER — charges, touch kills"],
 		["elite", "ELITE — keeps range, telegraphs one shot"],
@@ -271,23 +298,16 @@ func _draw_howto() -> void:
 	for i in roster.size():
 		var yy := 176.0 + i * 26.0
 		draw_texture_rect(Art.tex(roster[i][0]), Rect2(80, yy - 10, 20, 20), false, Art.tint(roster[i][0]))
-		draw_string(f, Vector2(108, yy + 3), roster[i][1], HORIZONTAL_ALIGNMENT_LEFT, -1, 10,
-			Color(0.9, 0.92, 0.82))
+		Art.text(self, roster[i][1], Vector2(108, yy + 3), 10, Color(0.9, 0.92, 0.82))
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
-	draw_string(f, Vector2(60, 258), "ENDLESS WAR — RANGED THREATS:",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 258), 10, Color(1.0, 0.7, 0.4))
 	var special := [
 		"GRENADIER — lobs a telegraphed blast on your spot. Keep moving.",
 		"SNIPER — paints a laser line, then fires. Sidestep it.",
 		"SHIELD — front blocks bullets. Flank it or grenade it."]
 	for i in special.size():
-		draw_string(f, Vector2(72, 274 + i * 15), special[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 10,
-			Color(0.88, 0.9, 0.8))
+		Art.text(self, special[i], Vector2(72, 274 + i * 15), 10, Color(0.88, 0.9, 0.8))
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
-	var f := ThemeDB.fallback_font
-	var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	draw_string(f, Vector2(320 - w / 2.0 + 1, y + 1), txt,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.7))
-	draw_string(f, Vector2(320 - w / 2.0, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+	Art.text_center(self, txt, 320.0, y, size, col)

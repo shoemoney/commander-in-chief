@@ -8,18 +8,25 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_fixed.gd",
 	"res://tests/test_sim_rng.gd",
 	"res://tests/test_gameplay.gd",
+	"res://tests/test_archetypes.gd",
+	"res://tests/test_combat.gd",
 	"res://tests/test_war_chest.gd",
+	"res://tests/test_shop.gd",
 	"res://tests/test_tank.gd",
 	"res://tests/test_observer.gd",
 	"res://tests/test_gates.gd",
+	"res://tests/test_mechanics.gd",
 	"res://tests/test_water.gd",
 	"res://tests/test_boss.gd",
 	"res://tests/test_lockstep.gd",
 	"res://tests/test_endless.gd",
+	"res://tests/test_mutators.gd",
 	"res://tests/test_colossus.gd",
 	"res://tests/test_determinism.gd",
 	"res://tests/test_checksum_coverage.gd",
+	"res://tests/test_event_coverage.gd",
 	"res://tests/test_replay.gd",
+	"res://tests/test_robustness.gd",
 ]
 
 
@@ -38,8 +45,11 @@ class T:
 
 
 func _init() -> void:
+	var suite_filter := OS.get_environment("SUITE")
+	var scripts: Array[String] = TEST_SCRIPTS if suite_filter.is_empty() else \
+		TEST_SCRIPTS.filter(func(p: String) -> bool: return p.contains(suite_filter))
 	var total_methods := 0
-	for path in TEST_SCRIPTS:
+	for path in scripts:
 		var script: GDScript = load(path)
 		var suite: RefCounted = script.new()
 		for m in suite.get_method_list():

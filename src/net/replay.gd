@@ -14,7 +14,7 @@ const MAGIC := "IKARI_REPLAY_1"
 var seed_value: int = 0
 var mode: String = "campaign"
 var player_count: int = 1
-var frames: Array = []   # each element: Array of per-player encoded SimInput ([ax,ay,mx,my,flags])
+var frames: Array = []   # each element: Array of per-player encoded SimInput ([move_x,move_y,aim_x,aim_y,flags])
 
 
 func record_tick(inputs: Array) -> void:

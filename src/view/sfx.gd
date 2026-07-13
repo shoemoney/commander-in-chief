@@ -104,7 +104,7 @@ func _buf(dur: float) -> PackedFloat32Array:
 	return b
 
 
-func _notes(freqs: Array, note_dur: float, gap := 0.0, square := true) -> PackedFloat32Array:
+func _notes(freqs: Array[float], note_dur: float, gap := 0.0, square := true) -> PackedFloat32Array:
 	# Simple arpeggio: each note decays, optional gap between notes.
 	var step := note_dur + gap
 	var b := _buf(freqs.size() * step)
@@ -250,6 +250,12 @@ func _synth_all() -> void:
 		whiz[i] = _sweep(t, 2600.0, 900.0, 0.09) * sin(PI * t / 0.09) * 0.35
 	s["whiz"] = whiz
 
+	# Wiped: descending death-march resolve — the endless run is over.
+	s["wiped"] = _notes([294.0, 247.0, 196.0, 147.0], 0.2, 0.03, false)
+
+	# Avenge: short rising two-note sting — a kill by a downed ally.
+	s["avenge"] = _notes([523.0, 784.0], 0.09, 0.0, false)
+
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
 
@@ -257,7 +263,7 @@ func _synth_all() -> void:
 func _synth_drums() -> AudioStreamWAV:
 	# Two bars of jungle war drums at 110 BPM (8th-note grid), seamless loop.
 	var step := int(RATE * 60.0 / 110.0 / 2.0)
-	var pattern := [   # per 8th step: [kick, tom_hi, tom_lo, snare]
+	var pattern: Array[Array] = [   # per 8th step: [kick, tom_hi, tom_lo, snare]
 		[1, 0, 0, 0], [0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0],
 		[0, 0, 0, 1], [0, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0],
 		[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0],
@@ -266,7 +272,7 @@ func _synth_drums() -> AudioStreamWAV:
 	var buf := _buf(float(step * pattern.size()) / RATE)
 	for k in pattern.size():
 		var ofs := k * step
-		var hit: Array = pattern[k]
+		var hit := pattern[k]
 		for j in int(0.25 * RATE):
 			if ofs + j >= buf.size():
 				break
