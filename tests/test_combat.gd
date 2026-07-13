@@ -13,16 +13,14 @@ func _idle() -> SimInput:
 
 
 func test_roll_iframes_block_contact_damage_then_expire() -> void:
-	# A rolling player is immune to contact damage while mid-roll — EXCEPT the
-	# very last active-roll tick. _step_players decrements roll_ticks and then,
-	# later the same tick, gates the contact-kill check on the POST-decrement
-	# value (`if p["roll_ticks"] == 0 ...`). So the tick where roll_ticks counts
-	# down from 1 to 0 is read as "not rolling" for i-frame purposes even
-	# though the player is still executing that tick's roll movement — a
-	# genuine one-tick gap in the "roll i-frames protect" contract (the exact
-	# frame most likely to be passing directly over an enemy is the one frame
-	# that isn't covered). This test documents the real behavior rather than
-	# the intended one; see the found-bug note in the review report.
+	# A rolling player is immune to contact damage for every tick that actually
+	# executes roll movement — including the final active-roll tick, where
+	# roll_ticks decrements to 0 but the player still moved at roll speed this
+	# tick. The `roll_iframe` flag is set for the duration of that movement (set
+	# true right after the decrement, cleared at the top of next tick), so the
+	# contact-kill guards read "was this tick a roll-move tick", not the
+	# post-decrement roll_ticks value. Protection lapses only once roll has
+	# fully ended — i.e. the tick *after* the last roll-move tick.
 	var sim := SimWorld.new(3, 1, "campaign")
 	var p := sim.players[0]
 	sim.enemies.clear()
@@ -40,13 +38,19 @@ func test_roll_iframes_block_contact_damage_then_expire() -> void:
 		e["y"] = p["y"]
 		sim._step_players([idle])
 	Runner.T.ok(p["alive"], "player survived every roll tick except the last")
-	# Final active-roll tick: roll_ticks decrements to 0 THIS tick, and the
-	# i-frame guard reads that post-decrement value — contact is lethal here.
+	# Final active-roll tick: roll_ticks decrements to 0 THIS tick, but the
+	# player still executed roll movement this tick, so i-frames still protect.
 	e["x"] = p["x"]
 	e["y"] = p["y"]
 	sim._step_players([idle])
 	Runner.T.eq(p["roll_ticks"], 0, "roll has ended")
-	Runner.T.ok(not p["alive"], "known gap: the last active-roll tick is unprotected (see comment above)")
+	Runner.T.ok(p["alive"], "the final active-roll tick is still protected")
+	# One more idle tick: roll has fully ended (no roll-move happened this
+	# tick), so contact damage resumes.
+	e["x"] = p["x"]
+	e["y"] = p["y"]
+	sim._step_players([idle])
+	Runner.T.ok(not p["alive"], "contact damage resumes once the roll fully ends")
 
 
 func test_bash_cooldown_leaves_player_vulnerable_to_second_attacker() -> void:

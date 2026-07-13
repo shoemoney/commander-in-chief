@@ -17,7 +17,7 @@ const Runner := preload("res://tests/run_tests.gd")
 const KNOWN := {
 	"player": ["idx", "x", "y", "aim_x", "aim_y", "alive", "deaths", "mg_ammo", "grenade_ammo",
 		"fire_cd", "grenade_cd", "broke_timer", "roll_ticks", "roll_cd", "roll_buf",
-		"roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
+		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
 		"vest", "hurt_iframes"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell"],

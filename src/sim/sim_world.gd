@@ -247,6 +247,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"fire_cd": 0, "grenade_cd": 0,
 			"broke_timer": 0,
 			"roll_ticks": 0, "roll_cd": 0, "roll_buf": 0,
+			"roll_iframe": false,
 			"roll_dx": 0, "roll_dy": -F_ONE,
 			"boost_ticks": 0,
 			"in_tank": -1,
@@ -320,6 +321,10 @@ func step(inputs: Array) -> void:
 
 # --- Players ---
 
+func _enemy_strikeable(e: Dictionary) -> bool:
+	return e["alive"] and not e.get("submerged", false) and e.get("surface_ticks", 0) == 0
+
+
 func _step_players(inputs: Array) -> void:
 	for i in players.size():
 		var p := players[i]
@@ -330,6 +335,7 @@ func _step_players(inputs: Array) -> void:
 		p["roll_buf"] = maxi(0, p["roll_buf"] - 1)
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
+		p["roll_iframe"] = false
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
 		var buy_edge: bool = inp.buy > 0 and p["buy_prev"] == 0
@@ -369,6 +375,7 @@ func _step_players(inputs: Array) -> void:
 			events.append({"t": "roll", "x": p["x"], "y": p["y"], "i": i})
 		if p["roll_ticks"] > 0:
 			p["roll_ticks"] = p["roll_ticks"] - 1
+			p["roll_iframe"] = true
 			p["x"] = p["x"] + Fixed.mul(p["roll_dx"], PLAYER_SPEED * 2)
 			p["y"] = p["y"] + Fixed.mul(p["roll_dy"], PLAYER_SPEED * 2)
 		elif moving:
@@ -395,8 +402,7 @@ func _step_players(inputs: Array) -> void:
 			var bashed := false
 			if p["in_tank"] < 0:
 				for e in enemies:
-					if e["alive"] and not e.get("submerged", false) \
-							and e.get("surface_ticks", 0) == 0 \
+					if _enemy_strikeable(e) \
 							and _dist_lte(p["x"], p["y"], e["x"], e["y"], BASH_RADIUS):
 						_kill_enemy(e, true)
 						p["fire_cd"] = BASH_COOLDOWN_TICKS
@@ -435,10 +441,9 @@ func _step_players(inputs: Array) -> void:
 
 		# Contact with any enemy = one-hit death (roll i-frames protect;
 		# submerged frogmen must surface before they can strike).
-		if p["roll_ticks"] == 0 and p["in_tank"] < 0:
+		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
-				if e["alive"] and not e.get("submerged", false) \
-						and e.get("surface_ticks", 0) == 0 \
+				if _enemy_strikeable(e) \
 						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					_hurt_player(p)
 					break
@@ -1098,7 +1103,7 @@ func _step_mines() -> void:
 		var triggered := false
 		# A player on foot (not rolling) stepping on it takes the hit + detonates.
 		for p in players:
-			if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
+			if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
 				_hurt_player(p)
 				triggered = true
@@ -1462,7 +1467,7 @@ func _step_colossus() -> void:
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
-		if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
+		if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
 				and _dist_lte(colossus["x"], colossus["y"], p["x"], p["y"], COLOSSUS_CRUSH_RADIUS):
 			_hurt_player(p)
 
@@ -1576,7 +1581,7 @@ func _step_enemy_bullets() -> void:
 					break
 		if not dead:
 			for p in players:
-				if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
+				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
 						and _dist_lte(b["x"], b["y"], p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
 					_hurt_player(p)
 					dead = true
@@ -1645,7 +1650,7 @@ func _resolve_strikes() -> void:
 			continue
 		events.append({"t": "explosion", "x": s["x"], "y": s["y"]})
 		for p in players:
-			if p["alive"] and p["roll_ticks"] == 0 and p["in_tank"] < 0 \
+			if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
 					and _dist_lte(s["x"], s["y"], p["x"], p["y"], GRENADE_RADIUS):
 				_hurt_player(p)
 		for tank in tanks:

@@ -8,8 +8,10 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_fixed.gd",
 	"res://tests/test_sim_rng.gd",
 	"res://tests/test_gameplay.gd",
+	"res://tests/test_archetypes.gd",
 	"res://tests/test_combat.gd",
 	"res://tests/test_war_chest.gd",
+	"res://tests/test_shop.gd",
 	"res://tests/test_tank.gd",
 	"res://tests/test_observer.gd",
 	"res://tests/test_gates.gd",
@@ -18,11 +20,13 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_boss.gd",
 	"res://tests/test_lockstep.gd",
 	"res://tests/test_endless.gd",
+	"res://tests/test_mutators.gd",
 	"res://tests/test_colossus.gd",
 	"res://tests/test_determinism.gd",
 	"res://tests/test_checksum_coverage.gd",
 	"res://tests/test_event_coverage.gd",
 	"res://tests/test_replay.gd",
+	"res://tests/test_robustness.gd",
 ]
 
 
