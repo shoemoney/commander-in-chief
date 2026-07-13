@@ -1792,14 +1792,14 @@ func _draw_enemies() -> void:
 				draw_line(epos, tp, lcol, 1.0 + pf * 2.0)
 				draw_circle(tp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
 			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
-			_spr("elite", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # violet marksman
+			_spr("m_contractor2", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # spec-ops marksman, violet-keyed
 		elif e["kind"] == "grenadier":
 			var gwu: int = e.get("windup", 0)
 			if gwu > 0:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
-			_spr("elite", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber
+			_spr("m_soldier2", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber, own silhouette
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: gold-tinted, a bobbing loot sack overhead +
 			# a pulsing ring so "catch this one" reads across the field.
@@ -1808,7 +1808,7 @@ func _draw_enemies() -> void:
 			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 			draw_circle(epos + Vector2(0, -11 - lb * 1.5), 2.6, Color(1.0, 0.85, 0.3))
 		elif e["kind"] == "shield":
-			_spr("rusher", epos, face, 0.55, Color(0.85, 0.9, 1.0))
+			_spr("m_bombsuit", epos, face, 0.55, Color(0.85, 0.9, 1.0))   # armored EOD bulk sells the block
 			# The riot shield: a bright arc across the front — this side deflects.
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
@@ -1858,7 +1858,7 @@ func _draw_observer() -> void:
 	if sim.observer.is_empty():
 		return
 	var op := _to_screen(sim.observer["x"], sim.camera_top + SimWorld.OBSERVER_Y_OFFSET)
-	_spr("observer", op, PI / 2, 0.5)
+	_spr("m_radar_tank", op, PI / 2, 0.5)   # radar-spotter vehicle: reads as "painting you for artillery"
 	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
 	draw_rect(Rect2(op + Vector2(8, -12), Vector2(7, 5)), Color(0.9, 0.25, 0.2))
 	# Kill-me target reticle: the spotter is one-hit-killable and killing him
