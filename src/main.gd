@@ -52,6 +52,7 @@ var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _rumble_on := true            # accessibility: gamepad vibration on/off
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
+var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
@@ -590,6 +591,7 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
 					"sz": 8.0, "fade": 1.5, "rate": 0.15, "col": Color(0.15, 0.13, 0.12, 0.7)})
 				_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0
+				_boss_flash = minf(1.0, _boss_flash + 0.35)   # the big body reacts, not just a spark
 				if not boss_pinged:
 					boss_pinged = true
 					_sfx.play("vest_break", -10.0, 1.35)
@@ -1422,6 +1424,7 @@ func _update_feel() -> void:
 			_hit_flinch[i] *= 0.8
 	for i in _heat.size():
 		_heat[i] = maxf(0.0, _heat[i] - 0.02)
+	_boss_flash = maxf(0.0, _boss_flash - 0.08)
 	for i in mini(_down_anim.size(), sim.players.size()):
 		if sim.players[i]["alive"]:
 			_down_anim[i] = 0.0
@@ -1695,6 +1698,7 @@ func _draw() -> void:
 	if _bg_root != null:
 		_bg_root.queue_redraw()
 	_draw_terrain()
+	_draw_skyglow()
 	_draw_scorch()
 	_draw_water()
 	_draw_mines()
@@ -1743,6 +1747,22 @@ func _draw() -> void:
 	var top_msg := _top_center_priority()
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
+
+
+func _draw_skyglow() -> void:
+	# Foundry skyglow: as the run pushes toward the finale a warm forge-light bleeds
+	# over the top edge — "something huge is burning ahead", a light source above the
+	# field rather than just the ground recolor. Near-free when the march is low.
+	var march := _sector_march()
+	if march < 0.15:
+		return
+	var glow := (march - 0.15) / 0.85
+	var pul := 1.0 if _motion < 0.5 else (0.85 + 0.15 * Art.pulse(0.1))
+	var gcol := Color(1.0, 0.55, 0.25).lerp(Color(1.0, 0.3, 0.15), glow)
+	for b in 5:
+		var h := 8.0 + b * 7.0
+		var a := glow * 0.16 * (1.0 - b / 5.0) * pul
+		draw_rect(Rect2(0, 0, SCREEN_W, h), Color(gcol.r, gcol.g, gcol.b, a))
 
 
 func _sector_march() -> float:
@@ -2185,6 +2205,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 	var hull_mod := Color.WHITE
 	if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
+	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	_spr("gunship_body", bpos, PI, 0.8, hull_mod)
 	_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8, hull_mod)
 	# Rotor blur.
@@ -2244,6 +2265,7 @@ func _draw_colossus() -> void:
 	draw_arc(cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
 	draw_circle(cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
 	var mod := Color.WHITE if phase < 3 else Color(1.4, 0.62, 0.55)
+	mod = mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	# Foundry-stomp: a slow settle-squash gives the heaviest thing on the field weight,
 	# so it lands with each stride instead of gliding in flat. Pure per-frame visual
 	# (no fx spawn from _draw — that would be frame-rate-dependent).
