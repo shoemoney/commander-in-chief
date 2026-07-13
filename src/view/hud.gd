@@ -112,6 +112,19 @@ func _draw() -> void:
 				shop_col) + 10.0
 		else:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
+			# Live WAVE record chip — endless is the mode players grind, but the wave
+			# count (the number they chase) only got record feedback in the K.I.A.
+			# debrief. Same idiom as the score BEST chip: grey while chasing a prior
+			# best, gold the instant this run ties/beats it.
+			if main.best_wave > 0:
+				var wbeat: bool = sim.wave >= main.best_wave
+				var wtxt := "WAVE RECORD!" if wbeat else ("BEST W%d" % main.best_wave)
+				if _fits(x, _tw(wtxt) + 8.0):
+					var wcol := Color(0.75, 0.7, 0.5)
+					if wbeat:
+						var wp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
+						wcol = Color(0.75, 0.7, 0.5).lerp(Color(1.0, 0.85, 0.25), 0.5 + 0.5 * wp)
+					x = _text(wtxt, x, y + ICON - 3.0, wcol) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
 				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]

@@ -480,8 +480,8 @@ func _consume_events() -> void:
 					# Empty-mag tell: a weak grey puff + a red "CLICK" at the muzzle — unmistakable
 					# from the yellow shot flash, so a no-fire reads as "out of ammo", not a lost input.
 					var dp := sim.players[ev["i"]]
-					var mzx := ev["x"] + int(dp["aim_x"] * 10)
-					var mzy := ev["y"] + int(dp["aim_y"] * 10)
+					var mzx: int = ev["x"] + int(dp["aim_x"] * 10)
+					var mzy: int = ev["y"] + int(dp["aim_y"] * 10)
 					_fx.append({"x": mzx, "y": mzy, "t": 0.0, "kind": "smoke", "rate": 0.14})
 					_fx.append({"x": mzx, "y": mzy, "t": 0.0, "kind": "floattext",
 						"rate": 0.05, "text": "CLICK", "col": Color(1.0, 0.42, 0.36)})
