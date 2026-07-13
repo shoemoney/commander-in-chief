@@ -2334,12 +2334,20 @@ func _draw_players() -> void:
 		var walk_bob := 0.0
 		if p["alive"] and p["roll_ticks"] == 0 and i < _dust_prev.size() and Vector2i(p["x"], p["y"]) != _dust_prev[i]:
 			walk_bob = absf(sin(Engine.get_physics_frames() * 0.35 + i * PI)) * 1.2
+		elif p["alive"] and p["roll_ticks"] == 0:
+			# Idle breathing: the standing-still soldier was the one frozen thing on an
+			# otherwise fully-animated field — a tiny slow micro-bob keeps it alive.
+			walk_bob = sin(Engine.get_physics_frames() * 0.045 + i * PI) * 0.35
 		var tex_name := "player1" if i == 0 else "player2"
 		if p["alive"] and not sim._in_water(p["x"], p["y"]):
 			_kick_dust(i, p["x"], p["y"], _dust_prev, false)
 		else:
 			_dust_prev[i] = Vector2i(p["x"], p["y"])
 		_ground_shadow(pos, 7.0)
+		if not p["alive"]:
+			# Downed but not gone: a greyed prone body so a waiting-for-revive
+			# teammate is visibly THERE on the field, not just a floating beacon.
+			_spr(tex_name, pos, PI / 2, 0.46, Color(0.55, 0.55, 0.6, 0.7))
 		# Co-op identity ring under each soldier so you never lose your guy in
 		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
 		if _two_players and p["alive"]:
@@ -2885,7 +2893,7 @@ func _draw_threat_edges() -> void:
 		var sy: float = (e["y"] - sim.camera_top) * PX
 		if sy <= 364.0:
 			continue
-		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
+		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
 		_bottom_threats.append({"e": e, "off": sy, "danger": danger})
 	# A dense endless wave can stack a dozen+ off-screen hostiles on one edge,
 	# painting a near-solid chevron row that drowns the lethality signal —
@@ -2900,7 +2908,7 @@ func _draw_threat_edges() -> void:
 		var ty: float = (e["y"] - sim.camera_top) * PX
 		if ty >= 0.0 or ty < -180.0:
 			continue
-		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
+		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
 		_top_threats.append({"e": e, "off": ty, "danger": tdanger})
 	# Same swarm cap as the bottom edge — nearest few only, ties favor the
 	# lethal ranged killers.
@@ -3347,7 +3355,7 @@ func _draw_banners(top_msg: String) -> void:
 			Art.text_center(self, btext, 320, 70, 16, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
-		_draw_result_panel("V I C T O L Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
+		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
 			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
 			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
