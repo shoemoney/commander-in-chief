@@ -215,6 +215,7 @@ var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
 var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
 var deaths_since_gate: int = 0     # for the Flawless Gate bonus (reset on gate open)
+var flawless_streak: int = 0       # consecutive deathless gates (compounds the bonus)
 var _prev_camera_top: int = 0
 
 
@@ -258,6 +259,8 @@ func revive_cost(p: Dictionary) -> int:
 	# Soft-cap the multiplier at 3 deaths: a linear ramp against flat kill
 	# income becomes an unrecoverable death spiral otherwise.
 	var cost: int = REVIVE_BASE_COST * mini(p["deaths"], 3)
+	if mode == "endless":
+		cost += (wave / 5) * 20   # deep-endless revives cost more (kill income scales too)
 	if is_solo():
 		cost = cost / 2
 	return maxi(cost, REVIVE_BASE_COST / (2 if is_solo() else 1))
@@ -554,6 +557,7 @@ func _kill_player(p: Dictionary) -> void:
 	p["broke_timer"] = 0
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
+	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"]})
 
 
@@ -848,6 +852,13 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		"kind": e["kind"]})
 	if not no_coin:
 		war_chest += coin
+		# Avenge bounty: a kill next to a downed ally pays a little extra and
+		# calls it out — standing your ground over a partner's body is rewarded.
+		for pl in players:
+			if not pl["alive"] and _dist_lte(e["x"], e["y"], pl["x"], pl["y"], 60 * F_ONE):
+				war_chest += 5
+				events.append({"t": "avenge", "x": e["x"], "y": e["y"]})
+				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
 	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
 	score += coin * 10 * (2 if last_stand else 1)
@@ -1180,9 +1191,13 @@ func _step_gates() -> void:
 			# Flawless Gate: clear a checkpoint with zero deaths since the last one
 			# and the discipline pays — a legible reward for playing tight.
 			if deaths_since_gate == 0:
-				war_chest += 50
-				score += 2000
-				events.append({"t": "gate_flawless", "x": 320 * F_ONE, "y": g["y"]})
+				# Compounding: consecutive clean checkpoints pay more (capped 3×),
+				# rewarding sustained discipline across the campaign, not one clean gate.
+				flawless_streak += 1
+				var fmult: int = mini(flawless_streak, 3)
+				war_chest += 50 * fmult
+				score += 2000 * fmult
+				events.append({"t": "gate_flawless", "x": 320 * F_ONE, "y": g["y"], "mult": fmult})
 			deaths_since_gate = 0
 			# Guaranteed cache past every checkpoint — the gate-open beat had a big
 			# audiovisual payoff but no mechanical reward; a free grenade/vest crate
@@ -1686,6 +1701,7 @@ func checksum() -> int:
 	h = feed.call(kill_streak, h)
 	h = feed.call(kill_streak_timer, h)
 	h = feed.call(deaths_since_gate, h)
+	h = feed.call(flawless_streak, h)
 	h = feed.call(1 if mode == "endless" else 0, h)
 	h = feed.call(wave, h)
 	h = feed.call(wave_pending, h)
