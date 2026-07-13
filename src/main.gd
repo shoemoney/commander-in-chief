@@ -653,6 +653,9 @@ func _ev_explosion(ev: Dictionary) -> void:
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
+	# Textured hot-disc flash (legacy art fx_disc) over the procedural burst.
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
+		"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
 	var wet: bool = sim._in_water(ev["x"], ev["y"])
 	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
 	_blast_debris(ev["x"], ev["y"], wet)
@@ -1639,6 +1642,8 @@ func _draw_pickups() -> void:
 			2:
 				tex_name = "crate_ammo"
 				mod = Color(0.6, 0.7, 1.4)   # vest = blue-shifted barrel
+			4: tex_name = "wep_rifle"        # Piercing Rounds capsule (elite drop)
+			5: tex_name = "wep_shotgun"      # Trench Gun / Spread capsule (elite drop)
 			_: tex_name = "crate_airstrike"
 		# Maxed check: the sim clamps a buy via mini() against the ammo/grenade
 		# cap (or no-ops if vest is already on), so a priced crate at cap would
@@ -1656,8 +1661,19 @@ func _draw_pickups() -> void:
 		_spr(tex_name, ppos, 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
-		var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
-		draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
+		if pk["kind"] >= 4:
+			# Rare power-up capsule (pierce/spread): a pulsing glow + ring + rising
+			# beam + label so a 1-in-6 elite drop stands out in the chaos (and the
+			# out-of-range glyph lookup below is skipped — those kinds have no icon).
+			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else Color(1.0, 0.8, 0.45)
+			var pg := Art.pulse(0.18)
+			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
+			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
+			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
+			Art.text(self, "PIERCE" if pk["kind"] == 4 else "SPREAD", ppos + Vector2(-13, -24), 8, pcol)
+		else:
+			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
+			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if pk.get("cost", 0) > 0:
 			if maxed:
 				Art.text(self, "MAXED", ppos + Vector2(-15, -25), 9, Color(0.6, 0.6, 0.6))
@@ -1699,12 +1715,12 @@ func _draw_tanks() -> void:
 		# cruising tank doesn't abruptly become 'on fire, 3s to live'.
 		if not t["burning"] and t["occupant"] >= 0 and t["fuel"] < 300:
 			if (Engine.get_physics_frames() / 8) % 2 == 0:
-				_spr("smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
+				_spr("fx_smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
 					Color(0.5, 0.5, 0.5, 0.5))
 			if (Engine.get_physics_frames() / 14) % 2 == 0:
 				Art.text(self, "LOW FUEL", c + Vector2(-16, -26), 8, Color(1.0, 0.7, 0.2))
 		if t["burning"]:
-			_spr("smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
+			_spr("fx_smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
 			# Bail-out countdown: the hidden ~3s lethal timer, made visible.
 			var bail := float(t["burn_ticks"]) / float(SimWorld.TANK_BAIL_TICKS)
 			var bc := Color(1.0, 0.35, 0.2) if bail > 0.35 else Color(1.0, 0.85, 0.2)
@@ -2374,7 +2390,7 @@ func _draw_fx() -> void:
 			draw_string(ThemeDB.fallback_font, fpos, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, fc)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
-			_spr("smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
+			_spr("fx_smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
 		elif fx["kind"] == "shockwave":
 			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
 			# snaps out — reads as a pressure wave, not a flat UI stroke.
@@ -2449,6 +2465,12 @@ func _draw_scorch() -> void:
 	for s in _scorch:
 		var pos := _to_screen(s["x"], s["y"])
 		var a: float = 0.4 * (1.0 - s["t"])
+		# Cracked-earth decal (legacy art fx_groundbreak) under the scorch blobs,
+		# rotated per-decal off its world x so no two craters look identical.
+		var gr: float = s["r"] * 1.7
+		draw_set_transform(pos, float(int(s["x"]) % 360) * 0.01745, Vector2.ONE)
+		draw_texture_rect(Art.tex("fx_groundbreak"), Rect2(-gr, -gr, gr * 2.0, gr * 2.0), false, Color(0.16, 0.13, 0.1, a * 1.15))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_circle(pos, s["r"], Color(0.12, 0.1, 0.08, a))
 		draw_circle(pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
 		if s.get("crack", false):

@@ -139,6 +139,9 @@ const TEX := {
 ## Per-sprite draw multiplier so a legacy art bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
 const SCALE := {
+	# legacy art Particle_FX cards are large (fx_smoke_01 is 200px vs Kenney smoke.png's
+	# 92px), so scale down to keep the same on-screen puff footprint.
+	"fx_smoke": 0.46,
 	# cast2 bakes use a 300px canvas. Enemies run LARGER than the strict
 	# old-footprint math: at ~7px the dark insurgents read as "black dots,
 	# or is that a bullet?" — straight from playtest.
