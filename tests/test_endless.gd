@@ -128,3 +128,38 @@ func test_endless_miniboss_spawns_holds_wave_and_pays() -> void:
 	Runner.T.eq(sim.war_chest - chest0, SimWorld.BOSS_BOUNTY, "killing the miniboss pays the boss bounty")
 	sim.step([SimInput.new()])
 	Runner.T.ok(sim.intermission_ticks > 0, "boss down + field clear opens the shop")
+
+
+func test_clean_wave_and_payday_bonus() -> void:
+	# PAYDAY doubles coin; a deathless wave clear pays the Clean Wave bonus.
+	var sim := SimWorld.new(21, 1, "endless")
+	sim.wave_mod = 4   # PAYDAY
+	var chest0 := sim.war_chest
+	var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+	sim.enemies.append(e)
+	sim._kill_enemy(e)
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_RUSHER * 2, "PAYDAY doubles the coin")
+	# Clean wave: force a wave>1 clear with zero deaths → bonus fires.
+	sim.wave = 3
+	sim.deaths_this_wave = 0
+	sim.wave_pending = 0
+	sim.enemies.clear()
+	var score0 := sim.score
+	sim.step([SimInput.new()])
+	Runner.T.ok(sim.score - score0 >= 1500, "a deathless wave clear pays the Clean Wave bonus")
+
+
+func test_courier_is_harmless_and_pays_a_fat_bounty() -> void:
+	# The fleeing supply courier never touch-kills; caught, it drops 4× elite coin.
+	var sim := SimWorld.new(55, 1, "endless")
+	var p := sim.players[0]
+	sim.enemies.clear()
+	sim._spawn_courier()
+	var c := sim.enemies[0]
+	p["x"] = c["x"]
+	p["y"] = c["y"]
+	sim.step([SimInput.new()])
+	Runner.T.ok(p["alive"], "the courier is harmless on contact (it flees, never attacks)")
+	var chest0 := sim.war_chest
+	sim._kill_enemy(c)
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_ELITE * 4, "a caught courier drops a 4× elite bounty")

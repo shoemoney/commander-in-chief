@@ -101,3 +101,22 @@ func test_flawless_gate_pays_bonus_only_when_deathless() -> void:
 	var score0b := sim2.score
 	sim2._step_gates()
 	Runner.T.eq(sim2.score - score0b, 0, "a death since the last gate forfeits the bonus")
+
+
+func test_flawless_streak_compounds_and_resets_on_death() -> void:
+	var sim := SimWorld.new(13, 1, "campaign")
+	sim.gates = [{"y": 100 * Fixed.ONE, "open": false,
+		"b1": {"alive": false}, "b2": {"alive": false}, "boss": {}}]
+	sim.deaths_since_gate = 0
+	var s0 := sim.score
+	sim._step_gates()
+	Runner.T.eq(sim.score - s0, 2000, "first flawless gate pays 1×")
+	Runner.T.eq(sim.flawless_streak, 1, "flawless streak = 1")
+	sim.gates = [{"y": 200 * Fixed.ONE, "open": false,
+		"b1": {"alive": false}, "b2": {"alive": false}, "boss": {}}]
+	sim.deaths_since_gate = 0
+	var s1 := sim.score
+	sim._step_gates()
+	Runner.T.eq(sim.score - s1, 4000, "second consecutive flawless gate pays 2×")
+	sim._kill_player(sim.players[0])
+	Runner.T.eq(sim.flawless_streak, 0, "a death resets the flawless streak")

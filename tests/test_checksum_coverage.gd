@@ -52,6 +52,12 @@ func test_all_entity_fields_are_classified() -> void:
 		var sim := _stage(setup)
 		for i in 400:
 			sim.step(_inputs(sim))
+			# Record kinds every tick — short-lived spawns (a sapper that lays its
+			# mines then dies, a ghillie that reveals and is shot) would otherwise
+			# vanish before the final-state field sweep below. Their fields are all
+			# already-classified (shared with sniper/frogman), so no field gap.
+			for e in sim.enemies:
+				seen[e["kind"]] = true
 		for p in sim.players:
 			_check("player", p)
 		for b in sim.bullets:
@@ -85,7 +91,7 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("colossus", sim.colossus)
 		if not sim.endless_boss.is_empty():
 			_check("boss", sim.endless_boss)
-	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield"]:
+	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 
 
@@ -104,6 +110,8 @@ func _stage(kind: String) -> SimWorld:
 	sim._spawn_special(200 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "grenadier")
 	sim._spawn_special(440 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sniper")
 	sim._spawn_special(320 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "shield")
+	sim._spawn_special(260 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sapper")
+	sim._spawn_special(380 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "ghillie")
 	return sim
 
 

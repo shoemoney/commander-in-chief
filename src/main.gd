@@ -486,15 +486,28 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
 				_trauma = minf(1.0, _trauma + 0.5)
-				_hitstop_frames = maxi(_hitstop_frames, 6)
+				# A one-hit death is the loudest beat in the game — hold the
+				# freeze longer and punch the camera in so the loss lands.
+				_hitstop_frames = maxi(_hitstop_frames, 10)
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = 1.0
+				_punch = maxf(_punch, 0.14)
 				_rumble = maxf(_rumble, 1.0)
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [E] / [Y]")
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+				# Directional death-gore: the felling round's exit spray carries
+				# past the body, opposite the threat the wedge (_hit_dir) marks.
+				var exitv := (-_hit_dir) if _hit_dir.length() > 0.5 else Vector2.from_angle(randf() * TAU)
+				for g in 10:
+					var pa := (exitv.angle() + randf_range(-0.8, 0.8)) if g < 7 else (randf() * TAU)
+					var pspd := randf_range(1.8, 3.8) if g < 7 else randf_range(0.7, 1.4)
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib",
+						"rate": randf_range(0.05, 0.075),
+						"vx": cos(pa) * pspd, "vy": sin(pa) * pspd, "spin": randf() * TAU,
+						"col": Color(0.55, 0.08, 0.06)})
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
@@ -538,11 +551,18 @@ func _consume_events() -> void:
 			"vest_break":
 				_ev_vest_break(ev)
 			"wave_start":
-				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER"][ev.get("mod", 0)]
+				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 			"wave_clear":
 				_show_banner("WAVE CLEARED — SHOP OPEN")
+			"wave_flawless":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Color(0.5, 1.0, 0.7)})
+				_sfx.play("buy", -3.0, 1.5)
+			"courier_escape":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
 			"observer_spawn":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
 				_show_banner("MORTAR OBSERVER SPOTTED")
@@ -1334,6 +1354,7 @@ func _draw() -> void:
 	_draw_fx()
 	_draw_telegraphs()
 	_draw_threat_edges()
+	_draw_objective_markers()
 	_draw_progress_rail()
 	_draw_wheel()
 	var top_msg := _top_center_priority()
@@ -1591,7 +1612,9 @@ func _draw_enemies() -> void:
 		if not e["alive"]:
 			continue
 		var epos := _to_screen(e["x"], e["y"])
-		if e["kind"] != "frogman":
+		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
+		# would give the ambush away — the laser paint is the only warning).
+		if e["kind"] != "frogman" and not (e["kind"] == "ghillie" and e.get("submerged", false)):
 			_ground_shadow(epos, 6.0)
 		if e.get("marked", false):
 			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff
@@ -1647,11 +1670,47 @@ func _draw_enemies() -> void:
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("elite", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber
+		elif e["kind"] == "courier":
+			# Fleeing supply runner: gold-tinted, a bobbing loot sack overhead +
+			# a pulsing ring so "catch this one" reads across the field.
+			_spr("rusher", epos, face, 0.5, Color(1.4, 1.15, 0.4))
+			var lb := Art.pulse(0.2)
+			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
+			draw_circle(epos + Vector2(0, -11 - lb * 1.5), 2.6, Color(1.0, 0.85, 0.3))
 		elif e["kind"] == "shield":
 			_spr("rusher", epos, face, 0.55, Color(0.85, 0.9, 1.0))
 			# The riot shield: a bright arc across the front — this side deflects.
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
+		elif e["kind"] == "sapper":
+			# Mine-layer EOD: a warm-tinted insurgent with a pulsing armed-satchel
+			# pip so "he's seeding the ground behind him" reads before the trail does.
+			_spr("rusher", epos, face, 0.5, Color(1.5, 1.05, 0.5))
+			var spp := Art.pulse(0.25)
+			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+		elif e["kind"] == "ghillie":
+			var gst: int = e.get("surface_ticks", 0)
+			var gwu2: int = e.get("windup", 0)
+			if e.get("submerged", false):
+				# Dug in and cloaked: only a faint foliage shimmer betrays it —
+				# the laser paint on reveal is the real warning. Kept very subtle.
+				var gcp := Art.pulse(0.08)
+				draw_circle(epos, 5.0, Color(0.34, 0.5, 0.24, 0.10 + gcp * 0.06))
+			elif gst > 0:
+				# Rising out of cover: a bold leaf/dust burst as it reveals.
+				var rf := 1.0 - float(gst) / float(SimWorld.GHILLIE_REVEAL_TICKS)
+				for k in 2:
+					draw_arc(epos, 6.0 + rf * 12.0 + k * 4.0, 0, TAU, 18,
+						Color(0.6, 0.75, 0.4, 0.6 - k * 0.2 - rf * 0.3), 2.0)
+				_spr("frogman", epos, face, 0.42 + rf * 0.08, Color(0.7, 0.85, 0.5, 0.4 + rf * 0.6))
+			else:
+				# Revealed marksman: paints the sniper line during windup, then fires.
+				if gwu2 > 0 and not target.is_empty():
+					var tp2 := _to_screen(target["x"], target["y"])
+					var pf2 := 1.0 - float(gwu2) / float(SimWorld.SNIPER_WINDUP_TICKS)
+					draw_line(epos, tp2, Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5), 1.0 + pf2)
+					draw_circle(tp2, 2.0 + pf2 * 2.0, Color(1.0, 0.2, 0.15, 0.4 + pf2 * 0.4))
+				_spr("frogman", epos, face, 0.5, Color(0.7, 0.95, 0.5))   # ghillie-green
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)
@@ -1894,10 +1953,20 @@ func _draw_players() -> void:
 				var dp := sim.players[q]
 				if q == i or dp["alive"] or sim.last_stand:
 					continue
+				var dpos := _to_screen(dp["x"], dp["y"])
+				# Off-screen partner: an edge chevron in their colour points the way
+				# to the body — shown regardless of affordability so you can FIND a
+				# far-south downed buddy even before the chest covers the revive.
+				if dpos.x < 8 or dpos.x > 632 or dpos.y < 30 or dpos.y > 352:
+					var edge := Vector2(clampf(dpos.x, 12, 628), clampf(dpos.y, 34, 348))
+					var pcol := Color(0.4, 1.0, 0.4) if q == 0 else Color(1.0, 0.85, 0.3)
+					var bdir := (dpos - edge).normalized()
+					draw_circle(edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
+					draw_line(edge, edge + bdir * 9.0, pcol, 2.0)
+					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
 					continue
-				var dpos := _to_screen(dp["x"], dp["y"])
 				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
 				draw_string(ThemeDB.fallback_font, pos + Vector2(-18, -16), rtxt,
@@ -1968,7 +2037,22 @@ func _draw_players() -> void:
 				var bloom: float = (_heat[i] if i < _heat.size() else 0.0) * 5.0
 				var rrect := Rect2(pos + aim * 27.0 - Vector2(8 + bloom, 8 + bloom),
 					Vector2(16 + bloom * 2.0, 16 + bloom * 2.0))
+				# Bash-in-range tell: dry MG + an enemy in melee reach + off cooldown
+				# → the reticle goes orange and the bash reach ring shows, so you
+				# know the empty-clip counter is LIVE before you press fire.
+				var bash_ready := false
+				if p["mg_ammo"] == 0 and p["fire_cd"] == 0:
+					for e in sim.enemies:
+						if e["alive"] and not e.get("submerged", false) \
+								and sim._dist_lte(p["x"], p["y"], e["x"], e["y"], SimWorld.BASH_RADIUS):
+							bash_ready = true
+							break
 				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				if bash_ready:
+					rcol = Color(1.0, 0.55, 0.2)
+					var bp := Art.pulse(0.25)
+					draw_arc(pos, SimWorld.BASH_RADIUS * PX, 0, TAU, 20,
+						Color(1.0, 0.55, 0.2, 0.3 + bp * 0.2), 1.5)
 				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
 					false, Color(0, 0, 0, 0.55))
 				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
@@ -2106,6 +2190,21 @@ func _draw_fx() -> void:
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
 			_spr("explosion%d" % frame, pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
+		elif fx["kind"] == "flash":
+			# White-hot detonation core: swells a touch, then snaps out.
+			var fa := (1.0 - t) * (1.0 - t)
+			var fr := 9.0 + t * 15.0
+			draw_circle(pos, fr, Color(1.0, 0.85, 0.55, 0.5 * fa))
+			draw_circle(pos, fr * 0.6, Color(1.0, 0.97, 0.8, 0.75 * fa))
+			draw_circle(pos, fr * 0.3, Color(1.0, 1.0, 1.0, 0.95 * fa))
+		elif fx["kind"] == "debris":
+			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
+			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
+			var dsz: float = fx.get("sz", 2.0)
+			draw_set_transform(pos, fx["spin"] + t * 9.0, Vector2.ONE)
+			draw_rect(Rect2(-dsz, -dsz * 0.55, dsz * 2.0, dsz * 1.1),
+				Color(dcol.r, dcol.g, dcol.b, 1.0 - t * 0.5))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "alert":
 			# Expanding "spotted!" ring (observer arrival).
 			draw_arc(pos, 6.0 + t * 42.0, 0, TAU, 28, Color(1.0, 0.25, 0.2, 0.8 - t * 0.7), 2.5)
@@ -2191,6 +2290,14 @@ func _draw_scorch() -> void:
 		var a: float = 0.4 * (1.0 - s["t"])
 		draw_circle(pos, s["r"], Color(0.12, 0.1, 0.08, a))
 		draw_circle(pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
+		if s.get("crack", false):
+			# Radial fracture lines, stable per-decal via the stored seed.
+			var sd: int = s.get("seed", 0)
+			var ca: float = 0.55 * (1.0 - s["t"])
+			for k in 5:
+				var ka := k * TAU / 5.0 + float(sd % 13) * 0.24
+				var cl: float = s["r"] * (0.7 + float((sd >> (k * 2)) & 3) * 0.12)
+				draw_line(pos, pos + Vector2.from_angle(ka) * cl, Color(0.03, 0.02, 0.02, ca), 1.0)
 	# Fallen bodies: the enemy sprite, darkened and sprawled, fading over ~4s.
 	for c in _corpses:
 		var cp := _to_screen(c["x"], c["y"])
@@ -2430,6 +2537,73 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var tip := 361.0 if danger else 358.0
 			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
 			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
+
+
+func _draw_objective_markers() -> void:
+	# The battlefield self-labels "go here / kill this / grab this". On-screen
+	# objectives get a small bobbing icon overhead; off-screen ones become a
+	# directional diamond pinned to the nearest edge (distinct from the red
+	# threat chevrons — these are objectives, not generic hostiles).
+	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0
+	var marks: Array = []
+	for g in sim.gates:
+		if not g["open"] and not g.get("final", false):
+			marks.append({"sx": 320.0, "sy": (g["y"] - sim.camera_top) * PX,
+				"icon": "hud_flag", "col": Color(1.0, 0.9, 0.4)})
+			break
+	if not sim.endless_boss.is_empty() and sim.endless_boss.get("alive", false):
+		marks.append({"sx": sim.endless_boss["x"] * PX,
+			"sy": (sim.endless_boss.get("gate_y", sim.camera_top) - sim.camera_top) * PX,
+			"icon": "hud_skull", "col": Color(1.0, 0.5, 0.35)})
+	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+		marks.append({"sx": sim.colossus["x"] * PX, "sy": (sim.colossus["y"] - sim.camera_top) * PX,
+			"icon": "hud_skull", "col": Color(1.0, 0.45, 0.3)})
+	for e in sim.enemies:
+		if not e["alive"]:
+			continue
+		if e["kind"] == "courier":
+			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
+				"icon": "hud_vehicle", "col": Color(1.0, 0.85, 0.35)})
+		elif e.get("marked", false):
+			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
+				"icon": "hud_target", "col": Color(1.0, 0.82, 0.3)})
+	for pk in sim.pickups:
+		if pk.get("cost", 0) > 0:
+			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
+				"icon": "hud_gunshop", "col": Color(0.6, 0.9, 1.0)})
+	for m in marks:
+		var mp := Vector2(m["sx"], m["sy"])
+		var on := mp.x >= 6.0 and mp.x <= 634.0 and mp.y >= 32.0 and mp.y <= 354.0
+		if on:
+			draw_texture_rect(Art.tex(m["icon"]),
+				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
+		else:
+			var ep := _marker_edge(mp)
+			_marker_diamond(ep, 5.0, m["col"])
+			draw_texture_rect(Art.tex(m["icon"]), Rect2(ep - Vector2(4, 4), Vector2(8, 8)), false, m["col"])
+
+
+func _marker_edge(pos: Vector2) -> Vector2:
+	# Project from screen center to the point, clamped to the viewport border.
+	var c := Vector2(320.0, 190.0)
+	var d := pos - c
+	if d.length() < 1.0:
+		return pos
+	var s := 1.0
+	if d.x > 0.01:
+		s = minf(s, (624.0 - c.x) / d.x)
+	elif d.x < -0.01:
+		s = minf(s, (16.0 - c.x) / d.x)
+	if d.y > 0.01:
+		s = minf(s, (344.0 - c.y) / d.y)
+	elif d.y < -0.01:
+		s = minf(s, (36.0 - c.y) / d.y)
+	return c + d * maxf(s, 0.0)
+
+
+func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
+		p + Vector2(0, r), p + Vector2(-r, 0)]), Color(col.r, col.g, col.b, 0.85))
 
 
 func _draw_wheel() -> void:

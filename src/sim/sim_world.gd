@@ -35,6 +35,10 @@ const GRENADE_GRAV := F_ONE / 8
 const GRENADE_RADIUS := 28 * F_ONE
 const GRENADE_COOLDOWN_TICKS := 30
 const ENEMY_SPEED := (F_ONE * 8) / 5          # 1.6 px/tick
+# Supply courier: the roster's only enemy that FLEES. Runs for the top edge at
+# just under player speed (so it's a real chase, catchable by cutting it off or
+# shooting it down); killed before it escapes it drops a fat bounty.
+const COURIER_SPEED := (PLAYER_SPEED * 9) / 10
 const ELITE_SPEED := 2 * F_ONE
 # Elites are ranged skirmishers: close to standoff range, telegraph a wind-up,
 # then loose one aimed shot. Starting values (tune via playtest).
@@ -52,6 +56,17 @@ const SNIPER_WINDUP_TICKS := 55
 const SNIPER_BULLET_SPEED := 6 * F_ONE
 # Shield (endless-only): slow heavy; front-arc blocks bullets, flank/grenade kills.
 const SHIELD_SPEED := F_ONE
+# Sapper (endless-only): advances like a rusher but seeds armed mines behind it,
+# authoring a hazard trail between you and the top edge. Reuses fire_cd as the
+# mine-drop timer — no new hashed field.
+const SAPPER_MINE_CD_TICKS := 40
+const SAPPER_MAX_MINES := 40
+# Ghillie (endless-only): a cloaked sniper dug into LAND. Sits 'submerged' (no
+# threat arrow, bullet-immune) until you enter notice range, briefly reveals,
+# then runs the STATIONARY sniper paint→fire cycle. Reuses submerged/
+# surface_ticks/windup/aim_lx/aim_ly/fire_cd — no new hashed field.
+const GHILLIE_NOTICE_RADIUS := 210 * F_ONE
+const GHILLIE_REVEAL_TICKS := 26
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 # Landmines: deterministic field hazards. Any grounded unit (player on foot, or
 # an enemy) that steps within the trigger radius detonates them via _explode() —
@@ -221,6 +236,7 @@ var kill_streak: int = 0           # consecutive kills (drives the score-bonus t
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
 var deaths_since_gate: int = 0     # for the Flawless Gate bonus (reset on gate open)
 var flawless_streak: int = 0       # consecutive deathless gates (compounds the bonus)
+var deaths_this_wave: int = 0      # endless: for the Clean Wave bonus
 var _prev_camera_top: int = 0
 
 
@@ -443,7 +459,7 @@ func _step_players(inputs: Array) -> void:
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
-				if _enemy_strikeable(e) \
+				if _enemy_strikeable(e) and e["kind"] != "courier" \
 						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					_hurt_player(p)
 					break
@@ -575,6 +591,8 @@ func _kill_player(p: Dictionary) -> void:
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
+	if mode == "endless":
+		deaths_this_wave += 1   # ...and forfeits this wave's Clean Wave bonus
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"]})
 
 
@@ -866,9 +884,13 @@ func _explode(x: int, y: int) -> void:
 func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
+	if e["kind"] == "courier":
+		coin = COIN_ELITE * 4   # fat bounty for catching the runner
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
+	if wave_mod == 4:
+		coin *= 2   # PAYDAY wave: every bounty doubles
 	# kind rides the (checksum-excluded) kill event so the view can spawn a
 	# per-type death throe + corpse — golden-safe.
 	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin,
@@ -955,6 +977,19 @@ func _step_enemies() -> void:
 		var dx: int = target["x"] - e["x"]
 		var dy: int = target["y"] - e["y"]
 		var dlen := Fixed.length(dx, dy)
+		if e["kind"] == "courier":
+			# Flee AWAY from the nearest player, biased up toward the top edge;
+			# crossing above the view means it escaped (and forfeits its bounty).
+			var fx: int = -dx
+			var fy: int = -dy - 40 * F_ONE
+			var flen := Fixed.length(fx, fy)
+			if flen > F_ONE:
+				e["x"] = e["x"] + Fixed.mul(Fixed.div(fx, flen), COURIER_SPEED)
+				e["y"] = e["y"] + Fixed.mul(Fixed.div(fy, flen), COURIER_SPEED)
+			if e["y"] < camera_top - 30 * F_ONE:
+				e["alive"] = false
+				events.append({"t": "courier_escape", "x": e["x"], "y": e["y"]})
+			continue
 		if e["kind"] == "grenadier":
 			_step_grenadier(e, target, dx, dy, dlen)
 			continue
@@ -966,6 +1001,12 @@ func _step_enemies() -> void:
 			# _step_bullets); touch still kills. No ranged attack.
 			if dlen > F_ONE:
 				_advance_toward(e, dx, dy, dlen, SHIELD_SPEED)
+			continue
+		if e["kind"] == "sapper":
+			_step_sapper(e, dx, dy, dlen)
+			continue
+		if e["kind"] == "ghillie":
+			_step_ghillie(e, target, dx, dy, dlen)
 			continue
 		if e["elite"]:
 			_step_elite(e, target, dx, dy, dlen)
@@ -1068,6 +1109,64 @@ func _step_frogman(e: Dictionary) -> void:
 		e["submerged"] = true
 	else:
 		e["lunge_ticks"] = FROGMAN_LUNGE_TICKS   # rewind for another lunge
+
+
+func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Advances like a rusher (touch still kills) but drops an armed mine on a
+	## cooldown, authoring a hazard trail across the arena. Reuses fire_cd as the
+	## drop timer, and the existing landmine array/detonation — no new state.
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if e["fire_cd"] == 0 and mines.size() < SAPPER_MAX_MINES:
+		e["fire_cd"] = SAPPER_MINE_CD_TICKS
+		mines.append({"x": e["x"], "y": e["y"], "armed": true})
+		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
+	if dlen > F_ONE:
+		var spd := ENEMY_SPEED
+		if _in_water(e["x"], e["y"]):
+			spd = spd / 2
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+
+
+func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## A cloaked sniper dug into the ground: bullet-immune + harmless + no threat
+	## arrow while submerged, reveals when you enter notice range, then paints and
+	## fires ONE locked shot from cover (stationary — never chases). Killing it
+	## during the reveal/paint window defuses the shot. Reuses sniper paint state.
+	if e["submerged"]:
+		if dlen <= GHILLIE_NOTICE_RADIUS:
+			e["submerged"] = false
+			e["surface_ticks"] = GHILLIE_REVEAL_TICKS
+			events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
+		return
+	if e["surface_ticks"] > 0:
+		e["surface_ticks"] = e["surface_ticks"] - 1
+		return
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			var lx: int = e.get("aim_lx", dx)
+			var ly: int = e.get("aim_ly", dy)
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
+				events.append({"t": "sniper_fire", "x": e["x"], "y": e["y"]})
+				enemy_bullets.append({
+					"x": e["x"], "y": e["y"],
+					"vx": Fixed.mul(Fixed.div(lx, llen), SNIPER_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(ly, llen), SNIPER_BULLET_SPEED),
+					"ttl": ENEMY_BULLET_TTL_TICKS,
+				})
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if dlen > GHILLIE_NOTICE_RADIUS:
+		e["submerged"] = true   # you slipped out of range — re-cloak and wait
+		return
+	if e["fire_cd"] == 0:
+		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
+		e["windup"] = SNIPER_WINDUP_TICKS
+		e["aim_lx"] = dx   # lock the shot vector at paint start (view draws the line)
+		e["aim_ly"] = dy
+		events.append({"t": "sniper_paint", "x": e["x"], "y": e["y"]})
 
 
 func _nearest_alive_player(x: int, y: int) -> Dictionary:
@@ -1184,11 +1283,23 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	return dot < -(F_ONE / 2)
 
 
+func _spawn_courier() -> void:
+	# A fleeing supply runner, dropped into the lower-middle so it has to cross
+	# the arena on its way to the top edge — a window to catch it.
+	enemies.append({"x": rng.range_i(80, 560) * F_ONE, "y": camera_top + 240 * F_ONE,
+		"alive": true, "elite": false, "kind": "courier"})
+
+
 func _spawn_special(x: int, y: int, kind: String) -> void:
-	## Endless-only ranged archetypes (grenadier/sniper/shield). Coin-worthy like an
-	## elite; reuse fire_cd/windup so no new hashed enemy field is introduced.
-	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
-		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0})
+	## Endless-only ranged/hazard archetypes (grenadier/sniper/shield/sapper/
+	## ghillie). Coin-worthy like an elite; reuse fire_cd/windup/submerged so no
+	## new hashed enemy field is introduced.
+	var e := {"x": x, "y": y, "alive": true, "elite": true,
+		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0}
+	if kind == "ghillie":
+		e["submerged"] = true   # dug in, cloaked until you close the distance
+		e["surface_ticks"] = 0
+	enemies.append(e)
 
 
 # --- Gates ---
@@ -1341,13 +1452,17 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 4)
+				var roll := rng.range_i(0, 6)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
 				elif roll == 2:
 					_spawn_special(x, camera_top - 24 * F_ONE, "shield")
+				elif roll == 3:
+					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
+				elif roll == 4:
+					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
@@ -1355,21 +1470,39 @@ func _step_waves() -> void:
 	elif enemies.is_empty() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
-		events.append({"t": "wave_clear", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
+		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
+		# this wave pays a bonus, so cautious and reckless play stop earning alike.
+		if deaths_this_wave == 0 and wave > 1:
+			war_chest += 40
+			score += 1500
+			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
-		pickups.append({"x": 170 * F_ONE, "y": shop_y, "kind": 0, "cost": _supply_cost(0)})
-		pickups.append({"x": 290 * F_ONE, "y": shop_y, "kind": 1, "cost": _supply_cost(1)})
-		pickups.append({"x": 410 * F_ONE, "y": shop_y, "kind": 2, "cost": _supply_cost(2)})
-		pickups.append({"x": 530 * F_ONE, "y": shop_y, "kind": 3, "cost": _supply_cost(3)})
+		# Shuffle the crate→slot mapping each wave so the shop stays a live read
+		# (far-left ≠ always ammo), Fisher-Yates on the seeded SimRng.
+		var kinds := [0, 1, 2, 3]
+		for si in range(3, 0, -1):
+			var sj := rng.range_i(0, si)
+			var tmp: int = kinds[si]
+			kinds[si] = kinds[sj]
+			kinds[sj] = tmp
+		var xs := [170, 290, 410, 530]
+		for ci in 4:
+			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
+				"cost": _supply_cost(kinds[ci])})
 
 
 func _start_wave() -> void:
 	wave += 1
 	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
 	wave_spawn_cd = 1
+	deaths_this_wave = 0
+	if wave >= 3 and rng.range_i(0, 2) == 0:
+		_spawn_courier()   # ~1-in-3 waves field a fleeing bounty runner
 	# Wave mutators give each wave an identity (and make the shop a counter-
 	# pick). None on the first two waves; then roll one. Endless-only.
-	wave_mod = 0 if wave <= 2 else rng.range_i(0, 3)
+	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
+	wave_mod = 0 if wave <= 2 else rng.range_i(0, 4)
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -1710,6 +1843,7 @@ func checksum() -> int:
 	h = feed.call(kill_streak_timer, h)
 	h = feed.call(deaths_since_gate, h)
 	h = feed.call(flawless_streak, h)
+	h = feed.call(deaths_this_wave, h)
 	h = feed.call(1 if mode == "endless" else 0, h)
 	h = feed.call(wave, h)
 	h = feed.call(wave_pending, h)

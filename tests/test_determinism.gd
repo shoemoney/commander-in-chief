@@ -58,16 +58,18 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 14 economy&bounty): ~1-in-7 elites are now marked BOUNTY targets
 ## (new checksummed enemy field `marked`; triple coin+score) and a grenade blast catching 3+ pays a
 ## frag bonus. The marked roll consumes rng on every elite spawn → all samples moved.
-## RE-RECORDED (2026-07-12, design-loop iter 17): compounding Flawless Gate (new checksummed
-## `flawless_streak`; consecutive clean checkpoints pay up to 3×) + avenge bounty (a kill within
-## 60px of a downed ally pays +5). The new field joins the checksum → all 6 campaign samples moved.
+## RE-RECORDED (2026-07-13, PR#1 reconcile merge): the iter17-32 quality-loop branch merged
+## onto main's iter17-25 loop. The reconciled sim is bit-identical to main's canonical core on
+## this torture — the branch's roll-iframe fix / pickup + strikeable refactors don't perturb the
+## sampled trajectory (the new test_combat roll test exercises the closed gap directly), so these
+## match main's committed campaign checksums exactly.
 const GOLDEN: Array[int] = [
-	5415768351136730559,
-	5964438992717087203,
-	2246678724761708659,
-	3613761592137134509,
-	7354413151323941803,
-	6861914696690715396,
+	8115790318362077857,
+	7194404661752016069,
+	924774564009016043,
+	7538835225478606903,
+	768985619869056713,
+	4767029557005767388,
 ]
 
 
@@ -122,16 +124,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## the gate cache is campaign-only so endless moves only from the new field).
 ## RE-RECORDED (2026-07-12, iter 14): marked-elite roll + bounty/frag scoring shift the endless
 ## stream too (elites spawn in the endless torture before it wipes at wave 2).
-## RE-RECORDED (2026-07-12, iter 17): flawless_streak joins the checksum (0 in endless — no gates,
-## but the new hashed field shifts every sample) and the avenge bounty can fire before the wipe.
-## Endless revive-cost scaling is inert here (torture wipes at wave 2, below the wave-5 threshold).
+## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
+## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
+## match main's committed endless checksums exactly.
 const ENDLESS_GOLDEN: Array[int] = [
-	6235426198087942326,
-	6068615805984751221,
-	2500205223678894506,
-	2523127580162594306,
-	6478453569125951994,
-	8262094038849914066,
+	3301942127190038769,
+	3964200460934290926,
+	6818002345657424903,
+	3645506853848391951,
+	7504729960263157399,
+	2541515141754833631,
 ]
 
 
