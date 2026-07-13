@@ -2848,6 +2848,16 @@ func _draw_banners(top_msg: String) -> void:
 	if vig > 0.01:
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
+	# Sniper-paint danger: a strobing red edge while any sniper winds up its
+	# locked shot, so "you're painted, MOVE" is unmissable even off the reticle.
+	var paint := 0.0
+	for pe in sim.enemies:
+		if pe["alive"] and pe["kind"] == "sniper" and pe.get("windup", 0) > 0:
+			paint = maxf(paint, 1.0 - float(pe["windup"]) / float(SimWorld.SNIPER_WINDUP_TICKS))
+	if paint > 0.01:
+		var pv := (0.1 + 0.24 * paint) * (0.4 + 0.6 * Art.pulse(0.4))
+		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
+			Color(1.0, 0.15, 0.12, pv * _motion))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, _flash_alpha * _motion))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
