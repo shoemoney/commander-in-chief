@@ -48,6 +48,11 @@ var _whiz_frame := -100          # near-miss whiz throttle
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
 var _heart_frame := -100         # heartbeat pacing
 var _hitmarker: Array[float] = [0.0, 0.0]   # reticle confirm pop on a landed hit (per-player)
+var _dust_prev: Array[Vector2i] = [Vector2i.ZERO, Vector2i.ZERO]        # per-player prev world pos (movement dust)
+var _tank_dust_prev: Array[Vector2i] = [Vector2i.ZERO, Vector2i.ZERO]   # per-driver prev tank world pos (movement dust)
+var _water_prev: Array[bool] = [false, false]   # per-player prev in-water state (edge-triggers entry droplets)
+var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
+                                                 # death mid-array can misalign one slot for a frame — cosmetic only)
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
 var _hit_dir_t := 0.0
 var _hit_dir_player := 0         # which player's body the wedge emanates from
@@ -899,12 +904,14 @@ func _update_feel() -> void:
 	if _hint_t <= 0.02 and not _hint_queue.is_empty():
 		_hint_text = _hint_queue.pop_front()
 		_hint_t = 1.0
+	_spawn_ambient_motes()
 	_check_near_miss()
+	_check_water_entry()
 	_drive_audio()
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
 		fx["t"] += fx.get("rate", 0.09)
-		if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust":
+		if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust" or fx.get("move", false):
 			fx["x"] += int(fx["vx"] * Fixed.ONE)
 			fx["y"] += int(fx["vy"] * Fixed.ONE)
 			fx["vx"] *= 0.86
@@ -1221,23 +1228,25 @@ func _draw() -> void:
 	_draw_banners(top_msg)
 
 
+func _sector_march() -> float:
+	# Sector march: the ground shifts jungle-olive → ashen/scorched as the run
+	# pushes toward the Foundry finale (campaign: opened gates; endless: wave).
+	if sim.mode == "campaign":
+		var mopened := 0
+		for g in sim.gates:
+			if g["open"]:
+				mopened += 1
+		return clampf(float(mopened) / 5.0, 0.0, 1.0)
+	return clampf(float(sim.wave) / 12.0, 0.0, 1.0)
+
+
 func _draw_terrain() -> void:
 	# World-anchored grass tiling, darkened toward jungle; deterministic dirt
 	# patches and tree lines from a cell hash (decor only, not sim state).
 	var cam_y := sim.camera_top * PX
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
-	# Sector march: the ground shifts jungle-olive → ashen/scorched as the run
-	# pushes toward the Foundry finale (campaign: opened gates; endless: wave).
-	var march := 0.0
-	if sim.mode == "campaign":
-		var mopened := 0
-		for g in sim.gates:
-			if g["open"]:
-				mopened += 1
-		march = clampf(float(mopened) / 5.0, 0.0, 1.0)
-	else:
-		march = clampf(float(sim.wave) / 12.0, 0.0, 1.0)
+	var march := _sector_march()
 	for ty in 8:
 		for tx in 10:
 			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
@@ -1455,6 +1464,8 @@ func _draw_tanks() -> void:
 		var burn_mod := Color.WHITE
 		if t["burning"]:
 			burn_mod = Color(1.3, 0.6, 0.45) if (t["burn_ticks"] / 6) % 2 == 0 else Color(0.9, 0.5, 0.4)
+		if t["occupant"] >= 0 and not t["burning"] and not sim._in_water(t["x"], t["y"]):
+			_kick_dust(t["occupant"], t["x"], t["y"], _tank_dust_prev, true)
 		_ground_shadow(c, 15.0)
 		_spr("tank_body", c, 0.0, 0.62, burn_mod)
 		# Barrel follows the driver's aim; parked barrel points up.
@@ -1769,6 +1780,10 @@ func _draw_players() -> void:
 			continue   # rendered as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
 		var tex_name := "player1" if i == 0 else "player2"
+		if p["alive"] and not sim._in_water(p["x"], p["y"]):
+			_kick_dust(i, p["x"], p["y"], _dust_prev, false)
+		else:
+			_dust_prev[i] = Vector2i(p["x"], p["y"])
 		_ground_shadow(pos, 7.0)
 		# Co-op identity ring under each soldier so you never lose your guy in
 		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
@@ -1909,12 +1924,81 @@ func _coin_pop(x: int, y: int, txt: String, trail_n: int, col: Color, rate: floa
 	_coin_trail(x, y, trail_n)
 
 
-func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, jitter: float, rate: float = 0.06) -> void:
+func _spawn_ambient_motes() -> void:
+	# Sparse world-space drift field, tinted by sector march: cool pollen in
+	# the jungle, grey ash mid-run, warm cinders at the Foundry. Background
+	# atmosphere only — rate-limited so it can't crowd out combat fx, and
+	# gated down (not off) under reduce-motion.
+	var reduced := _motion < 0.5
+	var cap := 6 if reduced else 16
+	if Engine.get_physics_frames() % 3 != 0 or randf() > (0.10 if reduced else 0.35):
+		return
+	var live := 0
+	for fx in _fx:
+		if fx["kind"] == "mote":
+			live += 1
+			if live >= cap:
+				return
+	var march := _sector_march()
+	var col := Color(0.66, 0.78, 0.6)   # cool green-grey pollen
+	if march < 0.5:
+		col = col.lerp(Color(0.58, 0.56, 0.52), march * 2.0)   # → grey ash
+	else:
+		col = Color(0.58, 0.56, 0.52).lerp(Color(1.0, 0.55, 0.18), (march - 0.5) * 2.0)   # → ember
+	var wx := int(randf_range(0.0, 640.0) * Fixed.ONE)
+	var wy := sim.camera_top + int(randf_range(-40.0, 400.0) * Fixed.ONE)
+	_fx.append({"x": wx, "y": wy, "t": 0.0, "kind": "mote",
+		"rate": randf_range(0.0025, 0.004), "dx": randf_range(-4.0, 4.0),
+		"dy": randf_range(-9.0, -3.0), "col": col, "sz": randf_range(0.7, 1.3)})
+
+
+func _kick_dust(i: int, wx: int, wy: int, prev: Array, big: bool) -> void:
+	# Grounded-motion read: a small puff behind a moving player/tank, rate-limited
+	# to a frame-modulo so a whole squad marching doesn't flood _fx.
+	var pv: Vector2i = prev[i]
+	var dx: int = wx - pv.x
+	var dy: int = wy - pv.y
+	if (dx != 0 or dy != 0) and (Engine.get_physics_frames() + i * 3) % 5 == 0:
+		var mdir := Vector2(dx, dy).normalized()
+		var back := mdir * (10.0 if big else 6.0) * Fixed.ONE
+		_fx.append({"x": wx - int(back.x), "y": wy - int(back.y), "t": 0.0, "kind": "dust",
+			"rate": 0.08, "vx": -mdir.x * (0.5 if big else 0.3), "vy": -mdir.y * (0.5 if big else 0.3),
+			"col": Color(0.32, 0.28, 0.2) if big else Color(0.7, 0.65, 0.5), "sz": 1.7 if big else 1.0})
+	prev[i] = Vector2i(wx, wy)
+
+
+func _check_water_entry() -> void:
+	# Land->water edge detection: a small one-shot droplet burst under the
+	# continuous wading ripple (drawn elsewhere) so entry reads as displaced
+	# water, not just a speed change.
+	for i in sim.players.size():
+		var p := sim.players[i]
+		var wet: bool = p["alive"] and sim._in_water(p["x"], p["y"])
+		if i < _water_prev.size():
+			if wet and not _water_prev[i]:
+				_burst(p["x"], p["y"], "splash", 5, 1.0, 2.4, 0.5, 0.1, 1.4, true)
+			_water_prev[i] = wet
+	_enemy_water_prev.resize(sim.enemies.size())
+	for i in sim.enemies.size():
+		var e := sim.enemies[i]
+		# Frogmen own their submerge/surface ripple already; skip them here.
+		var wet: bool = e["alive"] and e["kind"] != "frogman" and sim._in_water(e["x"], e["y"])
+		if wet and not _enemy_water_prev[i]:
+			_burst(e["x"], e["y"], "splash", 4, 0.8, 1.8, 0.5, 0.1, 1.1, true)
+		_enemy_water_prev[i] = wet
+
+
+func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, jitter: float, rate: float = 0.06, vy_bias: float = 0.0, move: bool = false) -> void:
 	# Clean radial dust/debris ring — evenly spaced directions with a little jitter.
+	# vy_bias skews the burst upward (negative Y); move opts these particles into
+	# the position-integration pass below without touching other "kind" call sites.
 	for d in n:
 		var a := d * TAU / float(n) + randf() * jitter
-		_fx.append({"x": x, "y": y, "t": 0.0, "kind": kind, "rate": rate,
-			"vx": cos(a) * randf_range(spd_lo, spd_hi), "vy": sin(a) * randf_range(spd_lo, spd_hi)})
+		var entry := {"x": x, "y": y, "t": 0.0, "kind": kind, "rate": rate,
+			"vx": cos(a) * randf_range(spd_lo, spd_hi), "vy": sin(a) * randf_range(spd_lo, spd_hi) - vy_bias}
+		if move:
+			entry["move"] = true
+		_fx.append(entry)
 
 
 func _draw_fx() -> void:
@@ -1971,7 +2055,9 @@ func _draw_fx() -> void:
 			var gc: Color = fx.get("col", Color(0.5, 0.1, 0.08))
 			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(gc.r, gc.g, gc.b, 1.0 - t))
 		elif fx["kind"] == "dust":
-			draw_circle(pos, 2.0 + t * 5.0, Color(0.7, 0.65, 0.5, 0.4 * (1.0 - t)))
+			var dust_col: Color = fx.get("col", Color(0.7, 0.65, 0.5))
+			var dust_sz: float = fx.get("sz", 1.0)
+			draw_circle(pos, (2.0 + t * 5.0) * dust_sz, Color(dust_col.r, dust_col.g, dust_col.b, 0.4 * (1.0 - t)))
 		elif fx["kind"] == "splash":
 			draw_arc(pos, 2.0 + t * 6.0, 0, TAU, 14, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)), 1.3)
 		elif fx["kind"] == "light":
@@ -1980,6 +2066,15 @@ func _draw_fx() -> void:
 			var la := (1.0 - t) * 0.45
 			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
 			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
+		elif fx["kind"] == "mote":
+			# Ambient drift: position offset is computed from age (t) rather than
+			# stepped/decayed each frame, so it stays slow and steady for its
+			# whole (long) life instead of the burst-style vx/vy decay other
+			# kinds use.
+			var mpos := pos + Vector2(fx["dx"], fx["dy"]) * t
+			var menv := smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.7, 1.0, t))
+			var mcol: Color = fx["col"]
+			draw_circle(mpos, fx["sz"], Color(mcol.r, mcol.g, mcol.b, 0.35 * menv))
 		elif fx["kind"] == "coin":
 			# Bounty coin arcs from the kill up to the HUD War Chest icon, landing
 			# just as the counter pulses — the kill funded the chest, made visible.
