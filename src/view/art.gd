@@ -68,6 +68,12 @@ const TEX := {
 	"ui_menu_button_sel": preload(SY + "ui/menu_button_sel.png"),
 	"ui_reticle": preload(SY + "ui/reticle.png"),
 	"ui_vignette": preload(SY + "ui/vignette.png"),
+	# Apocalypse HUD screen-space combat-feedback cards.
+	"hudfx_hitlines": preload(SY + "hud/hudfx_hitlines.png"),
+	"hudfx_blood": preload(SY + "hud/hudfx_blood.png"),
+	"hudfx_dmgvig": preload(SY + "hud/hudfx_dmgvig.png"),
+	"hudfx_glow": preload(SY + "hud/hudfx_glow.png"),
+	"hudfx_dmgdir": preload(SY + "hud/hudfx_dmgdir.png"),
 	# --- legacy art Military decor (war-torn battlefield litter) ---
 	"barrel": preload(SY + "decor/barrel.png"),
 	"crate_stack": preload(SY + "decor/crate_stack.png"),

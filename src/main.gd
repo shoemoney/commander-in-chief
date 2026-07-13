@@ -635,6 +635,9 @@ func _consume_events() -> void:
 				_music_hold = maxi(_music_hold, 48)
 				_show_banner("GUNSHIP INBOUND")
 				_sfx.play("alarm", -4.0, 0.9)
+				# A fast attack-heli escort streaks the top band ahead of the boss.
+				_fx.append({"x": 0, "y": 0, "t": 0.0, "kind": "chopper", "rate": 0.02,
+					"tex": "m_heli_attack2", "scl": 0.5, "sy": 52.0})
 			"core_open":
 				_show_banner("CORE EXPOSED — OPEN FIRE")
 				_sfx.play("alarm", -6.0, 1.3)
@@ -904,6 +907,10 @@ func _ev_victory(ev: Dictionary) -> void:
 			"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
 	# The colossus is the campaign's last boss — give its wreck the full finale.
 	_boss_death_finale(ev["x"], ev["y"])
+	# Extraction inbound: a transport chopper sweeps in over the win — you're
+	# getting out. Slow, high in the frame, riding the fx flyover kind.
+	_fx.append({"x": 0, "y": 0, "t": 0.0, "kind": "chopper", "rate": 0.006,
+		"tex": "m_heli_transport", "scl": 0.62, "sy": 60.0})
 
 
 func _check_boss_intro() -> void:
@@ -1513,6 +1520,7 @@ func _draw() -> void:
 	_draw_pickups()
 	_draw_tanks()
 	_draw_enemies()
+	_draw_threat_pips()
 	_draw_observer()
 	_draw_gunships()
 	_draw_colossus()
@@ -2267,10 +2275,13 @@ func _draw_players() -> void:
 					var hc := Color(1.0, 1.0, 0.85, _hitmarker[i])
 					var rc := rrect.get_center()
 					var off := 8.0 + (1.0 - _hitmarker[i]) * 4.0
+					var hl := Art.tex("hudfx_hitlines")
 					for q in 4:
 						var qa := q * TAU / 4.0 + PI / 4.0
-						var qd := Vector2.from_angle(qa)
-						draw_line(rc + qd * off, rc + qd * (off + 4.0), hc, 1.5)
+						# Soft textured hit-streak radiating from the reticle on a landed hit.
+						draw_set_transform(rc, qa, Vector2.ONE)
+						draw_texture_rect(hl, Rect2(off, -1.6, 9.0, 3.2), false, hc)
+					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			# Roll recharge: arc sweeps closed while the dodge is on cooldown.
 			if p["roll_cd"] > 0 and p["roll_ticks"] == 0:
 				var ready := 1.0 - float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS)
@@ -2436,6 +2447,18 @@ func _draw_fx() -> void:
 				var sa := k * TAU / 3.0 + t * 2.0
 				var sp2: Vector2 = pos + Vector2.from_angle(sa) * (3.0 + t * 7.0)
 				draw_texture_rect(stex, Rect2(sp2 - Vector2.ONE * ssz, Vector2.ONE * ssz * 2.0), false, sc)
+		elif fx["kind"] == "chopper":
+			# Cinematic flyover (victory extraction / endless-boss escort): sweeps
+			# screen-space left->right over its lifetime with a gentle bob + rotor
+			# blur. Screen-anchored (ignores world pos); nose-right at PI/2.
+			var cx := lerpf(-70.0, SCREEN_W + 70.0, t)
+			var cpos := Vector2(cx, fx.get("sy", 70.0) + sin(t * PI) * -6.0)
+			_spr(fx.get("tex", "m_heli_transport"), cpos, PI / 2, fx.get("scl", 0.6))
+			var rr := float(Engine.get_physics_frames()) * 0.9
+			for ri in 2:
+				var ra := rr + ri * PI / 2
+				draw_line(cpos - Vector2.from_angle(ra) * 15.0, cpos + Vector2.from_angle(ra) * 15.0,
+					Color(0.85, 0.85, 0.85, 0.35), 1.5)
 		elif fx["kind"] == "floattext":
 			# Stack same-tick texts (e.g. streak + bounty on one kill) so they
 			# don't overprint into a smear, and outline each so it reads over
@@ -2955,6 +2978,35 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	Art.text_center(self, txt, 320, 46, 12, Color(1.0, 0.85, 0.3))
 
 
+func _draw_threat_pips() -> void:
+	# Off-screen one-shot telegraphs (sniper / grenadier / ghillie winding up) get a
+	# clamped screen-edge arrow so a lethal shot from beyond the 640x360 viewport reads
+	# as a threat, not a cheap death. Stateless — recomputed from live sim state each
+	# frame, so it self-clears when the windup ends or the source scrolls on-screen.
+	for e in sim.enemies:
+		if not e["alive"] or e.get("windup", 0) <= 0:
+			continue
+		var k: String = e["kind"]
+		if k != "sniper" and k != "grenadier" and k != "ghillie":
+			continue
+		var sp := _to_screen(e["x"], e["y"])
+		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:
+			continue   # on-screen — the on-body telegraph already covers it
+		var edge := Vector2(clampf(sp.x, 12.0, SCREEN_W - 12.0), clampf(sp.y, 12.0, SCREEN_H - 12.0))
+		var dir := (sp - edge).normalized()
+		if dir == Vector2.ZERO:
+			continue
+		var col := Color(1.0, 0.7, 0.25) if k == "grenadier" else Color(1.0, 0.32, 0.32)
+		var pf := Art.pulse(0.12)
+		var perp := Vector2(-dir.y, dir.x)
+		var tip := edge + dir * (7.0 + pf * 3.0)
+		var base := edge - dir * 4.0
+		var tri := PackedVector2Array([tip, base + perp * 5.0, base - perp * 5.0])
+		draw_circle(edge, 9.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.14 + pf * 0.08))
+		draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
+		draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
+
+
 func _draw_banners(top_msg: String) -> void:
 	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
 	# (static, so it stays even under reduce-motion).
@@ -2968,6 +3020,15 @@ func _draw_banners(top_msg: String) -> void:
 	if vig > 0.01:
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
+	# Blood on the lens at the death/near-death moment only — gated well above
+	# the routine vest-graze pulse (0.3) so a normal hit never triggers it.
+	if vig > 0.62:
+		var bt := Art.tex("hudfx_blood")
+		var qsz: float = bt.get_size().x / 2.0
+		var quad := (Engine.get_physics_frames() / 37) % 4
+		draw_texture_rect_region(bt, Rect2(0, 0, SCREEN_W, SCREEN_H),
+			Rect2(float(quad % 2) * qsz, float(quad / 2) * qsz, qsz, qsz),
+			Color(0.5, 0.02, 0.02, (vig - 0.62) * 1.5))
 	# Sniper-paint danger: a strobing red edge while any sniper winds up its
 	# locked shot, so "you're painted, MOVE" is unmissable even off the reticle.
 	var paint := 0.0
