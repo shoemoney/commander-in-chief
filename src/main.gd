@@ -428,6 +428,16 @@ func _consume_events() -> void:
 		var kind: String = ev["t"]
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
+			# Rare power-up grab (pierce=4 / spread=5): a bold rising callout + a
+			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
+			# silent stat bump. floattext + sfx + trauma are all view-only.
+			if ev.get("kind", 0) >= 4:
+				var is_pierce: bool = ev["kind"] == 4
+				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
+					"rate": 0.013, "size": 13, "text": "PIERCING ROUNDS!" if is_pierce else "SPREAD SHOT!",
+					"col": Color(0.55, 0.95, 1.0) if is_pierce else Color(1.0, 0.82, 0.45)})
+				_trauma = minf(1.0, _trauma + 0.12)
+				_sfx.play("buy", -2.0, 1.4)
 		elif _EVENT_SOUND.has(kind):
 			var snd: Array = _EVENT_SOUND[kind]
 			_sfx.play(snd[0], snd[1], snd[2])
@@ -2384,13 +2394,14 @@ func _draw_fx() -> void:
 			# bright terrain, not just the 1px shadow used to give.
 			var fc: Color = fx["col"]
 			fc.a = 1.0 - t * t
+			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
 			var fw := ThemeDB.fallback_font.get_string_size(fx["text"],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
 			var fpos := pos + Vector2(-fw / 2.0, -18.0 - t * 14.0 - floattext_i * 11.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
-				draw_string(ThemeDB.fallback_font, fpos + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, oc)
-			draw_string(ThemeDB.fallback_font, fpos, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, fc)
+				draw_string(ThemeDB.fallback_font, fpos + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+			draw_string(ThemeDB.fallback_font, fpos, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
 			_spr("fx_smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
