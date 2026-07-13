@@ -385,16 +385,16 @@ func _consume_events() -> void:
 				# A per-type death throe + a fading corpse so a cleared field
 				# reads as fought-over, not swept clean.
 				var kkind: String = ev.get("kind", "rusher")
+				# The shot vector that felled it (away from the nearest shooter) —
+				# the corpse sprawl AND the gore spray both ride this direction.
+				var killer := sim._nearest_alive_player(ev["x"], ev["y"])
+				var felled := randf() * TAU
+				if not killer.is_empty():
+					felled = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
 				if kkind != "frogman":
-					# Sprawl the corpse along the shot that felled it (away from the
-					# nearest shooter), not a random spin.
-					var killer := sim._nearest_alive_player(ev["x"], ev["y"])
-					var cspin := randf() * TAU
-					if not killer.is_empty():
-						cspin = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
 					_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
 						"kind": "rusher" if kkind == "rusher" else "elite",
-						"spin": cspin})
+						"spin": felled})
 				# Wet kills die in a splash, not a puff — the terrain reacts.
 				if sim._in_water(ev["x"], ev["y"]):
 					_sfx.play("splash", -10.0, 1.2)
@@ -404,12 +404,16 @@ func _consume_events() -> void:
 							"vx": cos(wa) * randf_range(0.8, 1.8), "vy": sin(wa) * randf_range(0.8, 1.8)})
 				else:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
-				# Directional gib/spark burst — the kill hits back.
-				for g in 5:
-					var ga := randf() * TAU
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
-						"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
-						"spin": randf() * TAU})
+					# Directional gore spray: chunks arc out in a tight cone along the
+					# felling shot (mostly forward, a little back-spatter) — the kill
+					# visibly hits back instead of a symmetric random puff.
+					for g in 8:
+						var ga := (felled + randf_range(-0.7, 0.7)) if g < 6 else (randf() * TAU)
+						var spd := randf_range(1.7, 3.5) if g < 6 else randf_range(0.6, 1.2)
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib",
+							"rate": randf_range(0.055, 0.08),
+							"vx": cos(ga) * spd, "vy": sin(ga) * spd, "spin": randf() * TAU,
+							"col": Color(0.5, 0.09, 0.07)})
 				_hitmarker = 1.0   # kill also confirms on the reticle
 				_run_kills += 1
 				# Kill-streak: rising blip pitch + milestone combo pop.
@@ -484,15 +488,28 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
 				_trauma = minf(1.0, _trauma + 0.5)
-				_hitstop_frames = maxi(_hitstop_frames, 6)
+				# A one-hit death is the loudest beat in the game — hold the
+				# freeze longer and punch the camera in so the loss lands.
+				_hitstop_frames = maxi(_hitstop_frames, 10)
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = 1.0
+				_punch = maxf(_punch, 0.14)
 				_rumble = maxf(_rumble, 1.0)
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"])
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [E] / [Y]")
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+				# Directional death-gore: the felling round's exit spray carries
+				# past the body, opposite the threat the wedge (_hit_dir) marks.
+				var exitv := (-_hit_dir) if _hit_dir.length() > 0.5 else Vector2.from_angle(randf() * TAU)
+				for g in 10:
+					var pa := (exitv.angle() + randf_range(-0.8, 0.8)) if g < 7 else (randf() * TAU)
+					var pspd := randf_range(1.8, 3.8) if g < 7 else randf_range(0.7, 1.4)
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib",
+						"rate": randf_range(0.05, 0.075),
+						"vx": cos(pa) * pspd, "vy": sin(pa) * pspd, "spin": randf() * TAU,
+						"col": Color(0.55, 0.08, 0.06)})
 			"roll":
 				# Launch poof grounds the dodge.
 				for d in 4:
