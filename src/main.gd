@@ -2105,6 +2105,13 @@ func _draw_observer() -> void:
 	_spr("m_radar_tank", op, PI / 2, 0.5)   # radar-spotter vehicle: reads as "painting you for artillery"
 	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
 	draw_rect(Rect2(op + Vector2(8, -12), Vector2(7, 5)), Color(0.9, 0.25, 0.2))
+	# Radar sweep: a rotating scan beam off the antenna sells the spotter's whole job
+	# (actively painting you for artillery) instead of a static flag.
+	var sweep := float(Engine.get_physics_frames()) * 0.09
+	var atop := op + Vector2(8, -12)
+	var sdir := Vector2(cos(sweep), sin(sweep) * 0.5)
+	draw_line(atop, atop + sdir * 9.0, Color(0.4, 1.0, 0.5, 0.7), 1.5)
+	draw_arc(atop, 9.0, sweep - 0.4, sweep + 0.4, 6, Color(0.4, 1.0, 0.5, 0.25), 2.0)
 	# Kill-me target reticle: the spotter is one-hit-killable and killing him
 	# ends the barrage — a second way out the ADVANCE directive never mentions.
 	var tp := Art.pulse(0.2)
@@ -3064,6 +3071,15 @@ func _draw_objective_markers() -> void:
 		if pk.get("cost", 0) > 0:
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
 				"icon": "hud_gunshop", "col": Color(0.6, 0.9, 1.0)})
+		elif pk["kind"] >= 4:
+			# Rare power-up capsule (pierce/spread) — the game makes a fuss on pickup but
+			# never pointed you to it; colour-keyed cyan/amber like the ground glow.
+			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
+				"icon": "hud_gunshop", "col": Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else Color(1.0, 0.8, 0.45)})
+		else:
+			# Free crate (guaranteed gate cache) — supplies worth pathing to.
+			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
+				"icon": "hud_gunshop", "col": Color(0.7, 0.85, 0.6)})
 	for m in marks:
 		var mp := Vector2(m["sx"], m["sy"])
 		var on := mp.x >= 6.0 and mp.x <= 634.0 and mp.y >= 32.0 and mp.y <= 354.0
