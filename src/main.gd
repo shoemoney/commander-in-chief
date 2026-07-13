@@ -1490,6 +1490,12 @@ func _draw() -> void:
 				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
 			_ground_shadow(c, 17.0)
 			_spr("bunker", c, 0.0, 0.78)
+			# A recon drone loiters above an active strongpoint — a small orbiting
+			# silhouette that reads the bunker as 'watched'. Phase offset per bunker
+			# so multiples don't fly in lockstep. Pure ambient view.
+			var da := float(Engine.get_physics_frames()) * 0.03 + float(bk["x"] / 4096)
+			var dp := c + Vector2(cos(da) * 15.0, sin(da) * 7.0 - 22.0)
+			_spr("m_drone", dp, da + PI / 2, 0.4)
 	_draw_pickups()
 	_draw_tanks()
 	_draw_enemies()
@@ -1536,6 +1542,13 @@ func _draw_terrain() -> void:
 		var cyw := fposmod(-cam_y * 0.35 + c * 190.0 + ct * 0.3, 620.0) - 130.0
 		draw_circle(Vector2(cxw, cyw), 90.0 + c * 22.0, Color(0.0, 0.02, 0.0, 0.05))
 		draw_circle(Vector2(cxw + 40, cyw + 24), 70.0, Color(0.0, 0.02, 0.0, 0.045))
+	# A jet-shadow streaks across the ground on a long cycle — an aircraft passing
+	# high overhead, same shadow idiom as the cloud blobs above (nose-right at PI/2,
+	# matching the gunship's PI=down facing). Decor, not the called-airstrike jet.
+	var jst := fposmod(ct * 6.0 + 200.0, 1600.0)
+	if jst < 820.0:
+		_spr("m_jet", Vector2(jst - 90.0, 120.0 + fposmod(-cam_y * 0.2, 300.0)),
+			PI / 2, 0.34, Color(0.0, 0.02, 0.0, 0.16))
 	# Low fern understory scattered through the field (hash decorrelated from
 	# the tree grid so ferns and trees don't stack on the same cell).
 	for ty in 10:
