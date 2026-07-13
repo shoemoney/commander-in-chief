@@ -1399,7 +1399,14 @@ func _update_feel() -> void:
 	# Camera zoom-punch pivots around screen center, not the top-left origin.
 	var pz := 1.0 + _punch * _motion
 	scale = Vector2(pz, pz)
-	position = shake + _kick * _motion + SCREEN_CENTER * (1.0 - pz)
+	# Rotational judder: only the biggest hits (boss deaths, phase breaks) get a hair
+	# of dutch-angle roll — a juice axis untouched until now. Pivots on screen center
+	# with the zoom, so the frame twists in place instead of sliding off.
+	var rot := 0.0
+	if _trauma > 0.5:
+		rot = sin(float(Engine.get_physics_frames()) * 2.9) * _trauma * _trauma * 0.035 * _motion
+	rotation = rot
+	position = shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)
 
 
 func _drive_audio() -> void:
@@ -3215,6 +3222,24 @@ func _draw_threat_pips() -> void:
 		draw_circle(edge, 9.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.14 + pf * 0.08))
 		draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
 		draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
+	# Off-screen mortar strikes: a telegraph that scrolls off-frame between cast and
+	# impact gave zero warning; clamp an urgency-scaled amber-red wedge to the edge.
+	for st in sim.strikes:
+		var ssp := _to_screen(st["x"], st["y"])
+		if ssp.x >= 0.0 and ssp.x <= SCREEN_W and ssp.y >= 0.0 and ssp.y <= SCREEN_H:
+			continue
+		var sedge := Vector2(clampf(ssp.x, 12.0, SCREEN_W - 12.0), clampf(ssp.y, 12.0, SCREEN_H - 12.0))
+		var sdir := (ssp - sedge).normalized()
+		if sdir == Vector2.ZERO:
+			continue
+		var urg := 1.0 - float(st.get("ticks", 0)) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
+		var sperp := Vector2(-sdir.y, sdir.x)
+		var stip := sedge + sdir * (8.0 + urg * 5.0)
+		var sbase := sedge - sdir * 4.0
+		var stri := PackedVector2Array([stip, sbase + sperp * 6.0, sbase - sperp * 6.0])
+		draw_circle(sedge, 10.0 + urg * 3.0, Color(1.0, 0.5, 0.2, 0.14 + urg * 0.14))
+		draw_colored_polygon(stri, Color(1.0, 0.5, 0.2, 0.75 + urg * 0.25))
+		draw_polyline(PackedVector2Array([stri[0], stri[1], stri[2], stri[0]]), Color(0, 0, 0, 0.55), 1.0)
 
 
 func _draw_banners(top_msg: String) -> void:
