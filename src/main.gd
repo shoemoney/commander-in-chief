@@ -2094,6 +2094,8 @@ func _draw_projectiles() -> void:
 		# Blast-radius preview: grenades are the ONLY armor damage, so show the
 		# true kill circle at the landing point — will this throw catch it?
 		var blast := SimWorld.GRENADE_RADIUS * PX
+		draw_texture_rect(Art.tex("fx_ring"), Rect2(land - Vector2.ONE * blast, Vector2.ONE * blast * 2.0),
+			false, Color(1.0, 0.55, 0.25, 0.18))
 		draw_arc(land, blast, 0, TAU, 28, Color(1.0, 0.55, 0.25, 0.35), 1.0)
 		draw_arc(land, lr, 0, TAU, 16, lc, 1.0)
 		draw_line(land + Vector2(-2.5, 0), land + Vector2(2.5, 0), lc, 1.0)
@@ -2147,8 +2149,10 @@ func _draw_projectiles() -> void:
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		# Hostile fire: small glowing red orb — ordnance, not infantry.
-		draw_circle(bpos, 3.4, Color(1.0, 0.25, 0.15, 0.25))
-		draw_circle(bpos, 1.7, Color(1.0, 0.5, 0.3))
+		var egr := 4.4
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
+			false, Color(1.0, 0.3, 0.15, 0.55))
+		draw_circle(bpos, 1.6, Color(1.0, 0.55, 0.35))
 		draw_circle(bpos, 0.9, Color(1.0, 0.9, 0.7))
 
 
@@ -2502,7 +2506,9 @@ func _draw_fx() -> void:
 		elif fx["kind"] == "dust":
 			var dust_col: Color = fx.get("col", Color(0.7, 0.65, 0.5))
 			var dust_sz: float = fx.get("sz", 1.0)
-			draw_circle(pos, (2.0 + t * 5.0) * dust_sz, Color(dust_col.r, dust_col.g, dust_col.b, 0.4 * (1.0 - t)))
+			var dr: float = (2.4 + t * 5.5) * dust_sz
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * dr, Vector2.ONE * dr * 2.0),
+				false, Color(dust_col.r, dust_col.g, dust_col.b, 0.4 * (1.0 - t)))
 		elif fx["kind"] == "splash":
 			draw_arc(pos, 2.0 + t * 6.0, 0, TAU, 14, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)), 1.3)
 		elif fx["kind"] == "light":
@@ -3033,7 +3039,7 @@ func _draw_banners(top_msg: String) -> void:
 		if p["alive"] and p["hurt_iframes"] > 0:
 			vig = maxf(vig, 0.3 * float(p["hurt_iframes"]) / float(SimWorld.VEST_IFRAME_TICKS))
 	if vig > 0.01:
-		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
+		draw_texture_rect(Art.tex("hudfx_dmgvig"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
 	# Blood on the lens at the death/near-death moment only — gated well above
 	# the routine vest-graze pulse (0.3) so a normal hit never triggers it.
@@ -3054,6 +3060,13 @@ func _draw_banners(top_msg: String) -> void:
 		var pv := (0.1 + 0.24 * paint) * (0.4 + 0.6 * Art.pulse(0.4))
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(1.0, 0.15, 0.12, pv * _motion))
+		# 'You're being sighted' as an icon, not only a red edge: a binoculars
+		# glyph pulses top-center for the windup. Alpha is NOT gated by _motion,
+		# so it still warns under reduce-motion (where the vignette is damped).
+		var bsz := 15.0 + 4.0 * paint
+		draw_texture_rect(Art.tex("item_binoculars"),
+			Rect2(SCREEN_W / 2.0 - bsz / 2.0, 22.0, bsz, bsz), false,
+			Color(1.0, 0.55, 0.4, 0.4 + 0.45 * paint))
 	# NIGHT OPS mutator: dim the field to a blue dusk so the tracers, muzzle
 	# flashes and threat markers become your eyes. No hit-radius change — the
 	# challenge is visibility, not fairness.
