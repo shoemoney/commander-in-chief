@@ -1604,10 +1604,20 @@ func _draw_players() -> void:
 				var dp := sim.players[q]
 				if q == i or dp["alive"] or sim.last_stand:
 					continue
+				var dpos := _to_screen(dp["x"], dp["y"])
+				# Off-screen partner: an edge chevron in their colour points the way
+				# to the body — shown regardless of affordability so you can FIND a
+				# far-south downed buddy even before the chest covers the revive.
+				if dpos.x < 8 or dpos.x > 632 or dpos.y < 30 or dpos.y > 352:
+					var edge := Vector2(clampf(dpos.x, 12, 628), clampf(dpos.y, 34, 348))
+					var pcol := Color(0.4, 1.0, 0.4) if q == 0 else Color(1.0, 0.85, 0.3)
+					var bdir := (dpos - edge).normalized()
+					draw_circle(edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
+					draw_line(edge, edge + bdir * 9.0, pcol, 2.0)
+					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
 					continue
-				var dpos := _to_screen(dp["x"], dp["y"])
 				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
 				draw_string(ThemeDB.fallback_font, pos + Vector2(-18, -16), rtxt,
@@ -1642,7 +1652,22 @@ func _draw_players() -> void:
 				var bloom: float = (_heat[i] if i < _heat.size() else 0.0) * 5.0
 				var rrect := Rect2(pos + aim * 27.0 - Vector2(8 + bloom, 8 + bloom),
 					Vector2(16 + bloom * 2.0, 16 + bloom * 2.0))
+				# Bash-in-range tell: dry MG + an enemy in melee reach + off cooldown
+				# → the reticle goes orange and the bash reach ring shows, so you
+				# know the empty-clip counter is LIVE before you press fire.
+				var bash_ready := false
+				if p["mg_ammo"] == 0 and p["fire_cd"] == 0:
+					for e in sim.enemies:
+						if e["alive"] and not e.get("submerged", false) \
+								and sim._dist_lte(p["x"], p["y"], e["x"], e["y"], SimWorld.BASH_RADIUS):
+							bash_ready = true
+							break
 				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				if bash_ready:
+					rcol = Color(1.0, 0.55, 0.2)
+					var bp := Art.pulse(0.25)
+					draw_arc(pos, SimWorld.BASH_RADIUS * PX, 0, TAU, 20,
+						Color(1.0, 0.55, 0.2, 0.3 + bp * 0.2), 1.5)
 				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
 					false, Color(0, 0, 0, 0.55))
 				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
@@ -1743,6 +1768,7 @@ func _draw_fx() -> void:
 			var la := (1.0 - t) * 0.45
 			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
 			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
+			draw_circle(pos, fx["r"] * 0.22, Color(1.0, 1.0, 0.95, la * 0.85))   # hot core: fake-additive punch
 		elif fx["kind"] == "coin":
 			# Bounty coin arcs from the kill up to the HUD War Chest icon, landing
 			# just as the counter pulses — the kill funded the chest, made visible.
