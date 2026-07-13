@@ -48,6 +48,9 @@ var _duck := 0.0                 # music-duck under heavy hits
 var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
+var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
+var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
+var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
@@ -142,6 +145,7 @@ func _ready() -> void:
 	_menu.main = self
 	$HUD.add_child(_menu)   # after HudIcons: menu draws on top
 	_setup_screen_fx()
+	_setup_water()
 	_load_bests()
 	_reset()
 	if OS.has_feature("movie"):
@@ -170,6 +174,84 @@ func _setup_screen_fx() -> void:
 	_screen_fx_mat.shader = load("res://src/view/screen_fx.gdshader")
 	_screen_fx_rect.material = _screen_fx_mat
 	fx_layer.add_child(_screen_fx_rect)
+
+
+func _setup_water() -> void:
+	# River water is a shader, not immediate-mode draws. Two world-space child
+	# layers of `self` (so they ride the same shake/zoom as the units):
+	#   • _bg_root (z=-2): the opaque grass/dirt base, relocated out of _draw() so
+	#     it renders UNDER the water quads (grass would otherwise cover them).
+	#   • a small pool of water ColorRects (z=-1): one shader quad per on-screen
+	#     band, under the immediate-mode units (z=0) but over the grass. Absolute z
+	#     (z_as_relative=false) pins the ordering. Bands are GATE_SPACING (1000px)
+	#     apart on a 360px screen, so ≤1 shows at a time — 4 is ample headroom.
+	# The pool is pre-built here (never grown inside _draw, which forbids add_child).
+	_water_shader = load("res://src/view/water.gdshader")
+	_bg_root = Node2D.new()
+	_bg_root.z_index = -2
+	_bg_root.z_as_relative = false
+	_bg_root.draw.connect(_paint_bg.bind(_bg_root))
+	add_child(_bg_root)
+	for _i in 4:
+		var r := ColorRect.new()
+		r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		r.visible = false
+		r.z_index = -1
+		r.z_as_relative = false
+		var m := ShaderMaterial.new()
+		m.shader = _water_shader
+		m.set_shader_parameter("rect_size", Vector2(640.0, SimWorld.WATER_H * PX))
+		r.material = m
+		add_child(r)
+		_water_rects.append(r)
+
+
+func _sync_water() -> void:
+	# Place a shader quad over every on-screen water band, faithful to _draw_water's
+	# geometry (full width, WATER_H tall, at the band's screen-y). View-only: reads
+	# sim state, never writes it. Called from _draw() so it also runs under the
+	# screenshot harness (which disables _process). Unused pool entries are hidden.
+	if sim == null:
+		return
+	var vis := 0
+	for w in sim.waters:
+		if vis >= _water_rects.size():
+			break
+		var wy: float = (w["y"] - sim.camera_top) * PX
+		if wy > 360.0 or wy + SimWorld.WATER_H * PX < 0.0:
+			continue   # band fully off-screen
+		var rect := _water_rects[vis]
+		vis += 1
+		rect.visible = true
+		rect.position = Vector2(0.0, wy)
+		rect.size = Vector2(640.0, SimWorld.WATER_H * PX)
+		var mat: ShaderMaterial = rect.material
+		mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
+		mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
+	for i in range(vis, _water_rects.size()):
+		_water_rects[i].visible = false
+
+
+func _paint_bg(canvas: Node2D) -> void:
+	# The opaque grass/dirt base, relocated verbatim from _draw_terrain so it can
+	# render on _bg_root (below the water). Drawn onto `canvas` (== _bg_root); the
+	# rest of the terrain decor (clouds, ferns, trees, litter) stays in _draw().
+	if sim == null:
+		return
+	var cam_y := sim.camera_top * PX
+	var oy := -fposmod(cam_y, 64.0)
+	var base_iy := int(floor(cam_y / 64.0))
+	var march := _sector_march()
+	for ty in 8:
+		for tx in 10:
+			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
+			var h := Art.cell_hash(tx, base_iy + ty)
+			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
+			canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
+				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
+			if h % 6 == 0:
+				canvas.draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
+					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
 
 
 func _process(_delta: float) -> void:
@@ -1208,6 +1290,14 @@ func _ground_shadow(pos: Vector2, r: float) -> void:
 
 
 func _draw() -> void:
+	# Position the water shader quads under the world and requeue the grass base.
+	# Driven from _draw (not _process) so it also runs under the screenshot harness,
+	# which disables main's processing but still calls queue_redraw(). The 1-frame
+	# lag on _bg_root's requeue only affects decorative grass tiling — the water
+	# quads themselves are positioned in-frame here, so they stay aligned to units.
+	_sync_water()
+	if _bg_root != null:
+		_bg_root.queue_redraw()
 	_draw_terrain()
 	_draw_scorch()
 	_draw_water()
@@ -1266,20 +1356,10 @@ func _sector_march() -> float:
 func _draw_terrain() -> void:
 	# World-anchored grass tiling, darkened toward jungle; deterministic dirt
 	# patches and tree lines from a cell hash (decor only, not sim state).
+	# The opaque grass/dirt base moved to _paint_bg (renders on _bg_root, below the
+	# water quads). Everything below still draws in _draw() over the water.
 	var cam_y := sim.camera_top * PX
 	var oy := -fposmod(cam_y, 64.0)
-	var base_iy := int(floor(cam_y / 64.0))
-	var march := _sector_march()
-	for ty in 8:
-		for tx in 10:
-			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
-			var h := Art.cell_hash(tx, base_iy + ty)
-			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
-			draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
-				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
-			if h % 6 == 0:
-				draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
-					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
 	# Drifting cloud shadows: large soft dark blobs scrolling diagonally at a
 	# slower rate than the camera — instant depth, the jungle feels alive.
 	var ct := float(Engine.get_physics_frames()) * 0.15
@@ -1361,23 +1441,11 @@ func _draw_water() -> void:
 	for w in sim.waters:
 		var wy := _to_screen(0, w["y"]).y
 		var wh := SimWorld.WATER_H * PX
-		# Banks.
+		# Water body, wave ripples and sun glint are the water.gdshader quad synced
+		# under the units by _sync_water(); here we only draw what sits ON the water.
+		# Banks (drawn over the shader's shore edges).
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, Color(0.9, 0.85, 0.7))
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, Color(0.9, 0.85, 0.7))
-		# Water body + animated wave lines.
-		draw_rect(Rect2(0, wy, 640, wh), Color(0.16, 0.30, 0.42))
-		var t := float(Engine.get_physics_frames()) * 0.03
-		for i in 4:
-			var ly := wy + wh * (0.2 + 0.2 * i) + sin(t + i * 1.7) * 2.0
-			draw_line(Vector2(0, ly), Vector2(640, ly), Color(0.35, 0.5, 0.6, 0.35), 1.0)
-		# Sun glint: bright specular flecks drifting across the surface so the
-		# river reads as moving water, not a flat blue bar.
-		var gt := float(Engine.get_physics_frames()) * 0.02
-		for gi in 6:
-			var gx := fposmod(gt * 34.0 + gi * 131.0, 680.0) - 20.0
-			var gy := wy + wh * (0.18 + 0.62 * float((gi * 7) % 10) / 10.0)
-			var ga := 0.12 + 0.16 * (0.5 + 0.5 * sin(gt * 3.0 + gi * 1.3))
-			draw_line(Vector2(gx, gy), Vector2(gx + 9, gy - 2), Color(0.82, 0.95, 1.0, ga), 1.5)
 		# The dry ford.
 		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
 		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
