@@ -1769,8 +1769,12 @@ func _draw_enemies() -> void:
 			if swu > 0 and not target.is_empty():
 				var tp := _to_screen(target["x"], target["y"])
 				var pf := 1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)
-				draw_line(epos, tp, Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5), 1.0 + pf)
-				draw_circle(tp, 2.0 + pf * 2.0, Color(1.0, 0.2, 0.15, 0.4 + pf * 0.4))
+				# Final moments: strobe white (matches the mortar-telegraph grammar).
+				var lcol := Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5)
+				if swu <= 10 and (swu / 2) % 2 == 0:
+					lcol = Color(1.0, 1.0, 1.0, 0.95)
+				draw_line(epos, tp, lcol, 1.0 + pf * 2.0)
+				draw_circle(tp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
 			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
 			_spr("elite", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # violet marksman
 		elif e["kind"] == "grenadier":
