@@ -22,6 +22,8 @@ const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
+# Dead hulks that slump beside a parked tank (convoy-graveyard set-dressing).
+const _TANK_HULKS := ["wreck_apc", "wreck_technical", "wreck_light_tank"]
 
 var sim: SimWorld
 var _recorder: Replay             # captures this run's inputs → user://last_run.replay (view-only)
@@ -1786,6 +1788,14 @@ func _draw_tanks() -> void:
 		if not t["alive"]:
 			continue
 		var c := _to_screen(t["x"], t["y"])
+		# Convoy graveyard: a dead hulk slumps beside a PARKED tank (position is
+		# stable only while unoccupied), so the boardable reads as the last
+		# runner of a wiped-out column. Deterministic hulk + side from position.
+		if t["occupant"] < 0:
+			var wh := Art.cell_hash(t["x"], t["y"])
+			var wside := 32.0 if (wh / 3) % 2 == 0 else -32.0
+			_spr(_TANK_HULKS[wh % _TANK_HULKS.size()], c + Vector2(wside, 9.0),
+				float(wh % 628) / 100.0, 1.0)
 		# Board-range ring on a parked tank; tread-crush footprint under an
 		# occupied one (mirrors the colossus crush grammar players already know).
 		if t["occupant"] < 0 and not t["burning"]:
