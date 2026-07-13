@@ -90,7 +90,7 @@ func checksum_at(tick: int) -> int:
 	return _checksums.get(tick, 0)
 
 
-func checksum_ticks() -> Array:
+func checksum_ticks() -> Array[int]:
 	var ticks := _checksums.keys()
 	ticks.sort()
 	return ticks

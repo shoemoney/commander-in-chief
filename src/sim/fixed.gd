@@ -9,7 +9,6 @@ extends RefCounted
 
 const SHIFT := 16
 const ONE := 1 << SHIFT
-const HALF := ONE >> 1
 
 static func from_int(v: int) -> int:
 	return v << SHIFT

@@ -12,6 +12,9 @@ extends Node2D
 ##   F2 toggles local 2P · F3 toggles Endless War · R restarts.
 
 const PX := 1.0 / Fixed.ONE
+const SCREEN_W := 640.0
+const SCREEN_H := 360.0
+const SCREEN_CENTER := Vector2(320, 180)
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
 	"watchtower", "barbedwire", "barrier", "ammobox"]
@@ -82,6 +85,7 @@ const SAVE_BAK := "user://ikari_best.cfg.bak"
 var best_score := 0
 var best_wave := 0
 var best_dist := 0
+var hall: Array[Dictionary] = []   # top-N run history for the Hall of Fame
 var _best_dirty := false
 var _prev_colossus_phase := 0     # phase-change escalation banners
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
@@ -687,15 +691,13 @@ func _check_boss_intro() -> void:
 		_prev_colossus_phase = phase
 
 
-var hall: Array = []   # top-N run history for the Hall of Fame
-
-
 func _save_cfg(cf: ConfigFile) -> void:
 	# Atomic, crash-safe write: a mid-save crash must never corrupt the single
 	# ikari_best.cfg (= total progress wipe). Write to .tmp; on success snapshot
 	# the current real file to .bak, then atomically rename .tmp over the real
 	# path. rename_absolute is an OS rename — atomic on the same filesystem.
 	if cf.save(SAVE_TMP) != OK:
+		push_warning("ikari: config save failed")
 		return
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
@@ -711,7 +713,7 @@ func _load_bests() -> void:
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
 		_seen = cf.get_value("seen", "hints", {})
-		hall = cf.get_value("hall", "runs", [])
+		hall.assign(cf.get_value("hall", "runs", []))
 		colorblind = cf.get_value("settings", "colorblind", false)
 		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"),
@@ -743,7 +745,7 @@ func _record_run() -> void:
 	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily})
-	hall.sort_custom(func(a, b): return a["score"] > b["score"])
+	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
 	var cf := ConfigFile.new()
@@ -821,7 +823,7 @@ func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
 	_banners.append({"text": text, "t": 1.0, "col": col})
 
 
-func _check_dry_throw(inputs: Array) -> void:
+func _check_dry_throw(inputs: Array[SimInput]) -> void:
 	# Empty-grenade click: pressing grenade at 0 ammo on foot does nothing in
 	# the sim (grenades are the ONLY armor-cracker, so silent = maximally
 	# confusing). View-side click keeps it golden-safe. Throttled like dry-fire.
@@ -983,7 +985,7 @@ func _update_feel() -> void:
 	# Camera zoom-punch pivots around screen center, not the top-left origin.
 	var pz := 1.0 + _punch * _motion
 	scale = Vector2(pz, pz)
-	position = shake + _kick * _motion + Vector2(320, 180) * (1.0 - pz)
+	position = shake + _kick * _motion + SCREEN_CENTER * (1.0 - pz)
 
 
 func _drive_audio() -> void:
@@ -1068,10 +1070,10 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	return inp
 
 
-func _gather_inputs() -> Array:
+func _gather_inputs() -> Array[SimInput]:
 	if OS.has_feature("movie"):
 		return [demo_input(sim.tick_count, sim)]
-	var inputs: Array = []
+	var inputs: Array[SimInput] = []
 	var p1 := SimInput.new()
 	var kx := (1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
 	var ky := (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0)
@@ -1187,14 +1189,14 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 ]
 
 
-func _spr(name: String, pos: Vector2, angle := 0.0, scale := 1.0, mod := Color.WHITE,
+func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
 		stretch := 1.0) -> void:
-	var t: Texture2D = Art.tex(name)
-	var s := scale * Art.draw_scale(name)
-	var tint := mod * Art.tint(name)
+	var t: Texture2D = Art.tex(tex_name)
+	var s := spr_scale * Art.draw_scale(tex_name)
+	var tint := mod * Art.tint(tex_name)
 	draw_set_transform(pos, angle, Vector2(s, s * stretch))
 	var origin := -t.get_size() / 2.0
-	if Art.outlined(name):
+	if Art.outlined(tex_name):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
 		var oc := Color(0.05, 0.06, 0.04, tint.a)
 		var d := 1.1 / s
@@ -1636,58 +1638,58 @@ func _draw_gunships() -> void:
 
 
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
-		var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
-		# Mortar-phase warning: the hull flashes red while volleys are near
-		# (they land at phase_t 200/240/280 of the 360-tick cycle).
-		var pt: int = boss["phase_t"]
-		var hull_mod := Color.WHITE
-		if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
-			hull_mod = Color(1.5, 0.6, 0.5)
-		_spr("gunship_body", bpos, PI, 0.8, hull_mod)
-		_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8, hull_mod)
-		# Rotor blur.
-		var rt := float(Engine.get_physics_frames()) * 0.9
-		for i in 2:
-			var a := rt + i * PI / 2
-			draw_line(bpos - Vector2.from_angle(a) * 26.0, bpos + Vector2.from_angle(a) * 26.0,
-				Color(0.85, 0.85, 0.85, 0.5), 2.0)
-		draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
-		var bfrac := minf(1.0, float(boss["hp"]) / float(SimWorld.BOSS_HP))
-		var bkey := "boss%d" % boss["gate_y"]
-		# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
-		# bar, ~1618): the boss's screen pos can sit above the held camera or
-		# off-screen, and a world-anchored bar would go with it. Stacked by
-		# slot so two simultaneous bosses don't overlap each other, and started
-		# below the corner HUD panel's max height (~60px) so they never clash.
-		var bar_w := 160.0
-		var bar_x := 320.0 - bar_w / 2.0
-		var bar_y := 64.0 + float(slot) * 22.0
-		# Same strafe/mortar half-cycle the sim uses to pick behavior in
-		# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
-		# colossus bar labels its phase.
-		var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
-		Art.text(self, "%s — PHASE %d/2" % [label, gphase], Vector2(bar_x, bar_y), 8, Color(1.0, 0.5, 0.4))
-		_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
-			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
-		# Next-volley countdown: a tick that sweeps left->right across the HP
-		# bar and lands on the right edge exactly as each mortar strike lands
-		# (170->200, 200->240, 240->280) — the barrage is now anticipable on
-		# the bar you're already watching, not just the hull-flash that can
-		# sit off-screen above the held camera.
-		if pt >= 170 and pt < 280:
-			var vseg_start := 170
-			var vseg_end := 200
-			if pt >= 240:
-				vseg_start = 240
-				vseg_end = 280
-			elif pt >= 200:
-				vseg_start = 200
-				vseg_end = 240
-			var vfrac := float(pt - vseg_start) / float(vseg_end - vseg_start)
-			var vx := bar_x + bar_w * vfrac
-			draw_line(Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
-				Color(1.0, 0.85, 0.3, 0.9), 2.0)
-			draw_arc(Vector2(vx, bar_y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
+	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+	# Mortar-phase warning: the hull flashes red while volleys are near
+	# (they land at phase_t 200/240/280 of the 360-tick cycle).
+	var pt: int = boss["phase_t"]
+	var hull_mod := Color.WHITE
+	if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
+		hull_mod = Color(1.5, 0.6, 0.5)
+	_spr("gunship_body", bpos, PI, 0.8, hull_mod)
+	_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8, hull_mod)
+	# Rotor blur.
+	var rt := float(Engine.get_physics_frames()) * 0.9
+	for i in 2:
+		var a := rt + i * PI / 2
+		draw_line(bpos - Vector2.from_angle(a) * 26.0, bpos + Vector2.from_angle(a) * 26.0,
+			Color(0.85, 0.85, 0.85, 0.5), 2.0)
+	draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
+	var bfrac := minf(1.0, float(boss["hp"]) / float(SimWorld.BOSS_HP))
+	var bkey := "boss%d" % boss["gate_y"]
+	# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
+	# bar, ~1618): the boss's screen pos can sit above the held camera or
+	# off-screen, and a world-anchored bar would go with it. Stacked by
+	# slot so two simultaneous bosses don't overlap each other, and started
+	# below the corner HUD panel's max height (~60px) so they never clash.
+	var bar_w := 160.0
+	var bar_x := 320.0 - bar_w / 2.0
+	var bar_y := 64.0 + float(slot) * 22.0
+	# Same strafe/mortar half-cycle the sim uses to pick behavior in
+	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
+	# colossus bar labels its phase.
+	var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
+	Art.text(self, "%s — PHASE %d/2" % [label, gphase], Vector2(bar_x, bar_y), 8, Color(1.0, 0.5, 0.4))
+	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
+		Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
+	# Next-volley countdown: a tick that sweeps left->right across the HP
+	# bar and lands on the right edge exactly as each mortar strike lands
+	# (170->200, 200->240, 240->280) — the barrage is now anticipable on
+	# the bar you're already watching, not just the hull-flash that can
+	# sit off-screen above the held camera.
+	if pt >= 170 and pt < 280:
+		var vseg_start := 170
+		var vseg_end := 200
+		if pt >= 240:
+			vseg_start = 240
+			vseg_end = 280
+		elif pt >= 200:
+			vseg_start = 200
+			vseg_end = 240
+		var vfrac := float(pt - vseg_start) / float(vseg_end - vseg_start)
+		var vx := bar_x + bar_w * vfrac
+		draw_line(Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
+			Color(1.0, 0.85, 0.3, 0.9), 2.0)
+		draw_arc(Vector2(vx, bar_y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 
 
 func _draw_colossus() -> void:
@@ -1770,6 +1772,11 @@ func _draw_projectiles() -> void:
 	# the sim never collides them — so ping them off the armor here to teach it.
 	var col_on: bool = not sim.colossus.is_empty() and sim.colossus.get("alive", false)
 	var col_pos := _to_screen(sim.colossus.get("x", 0), sim.colossus.get("y", 0)) if col_on else Vector2.ZERO
+	var has_submerged := false
+	for e in sim.enemies:
+		if e["alive"] and e.get("submerged", false):
+			has_submerged = true
+			break
 	for b in sim.bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		if col_on and bpos.distance_to(col_pos) < SimWorld.COLOSSUS_HIT_RADIUS * PX + 4.0:
@@ -1780,12 +1787,13 @@ func _draw_projectiles() -> void:
 		# Submerged frogmen are grenades-only too — ping bullets off the ripple
 		# so 'I emptied a mag into the water and nothing died' becomes legible.
 		var deflect := false
-		for e in sim.enemies:
-			if e["alive"] and e.get("submerged", false) \
-					and bpos.distance_to(_to_screen(e["x"], e["y"])) < 7.0:
-				draw_circle(bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
-				deflect = true
-				break
+		if has_submerged:
+			for e in sim.enemies:
+				if e["alive"] and e.get("submerged", false) \
+						and bpos.distance_to(_to_screen(e["x"], e["y"])) < 7.0:
+					draw_circle(bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
+					deflect = true
+					break
 		if deflect:
 			continue
 		var dir := Vector2(b["vx"], b["vy"]).normalized()
@@ -2229,35 +2237,13 @@ func _draw_threat_edges() -> void:
 		if sy <= 364.0:
 			continue
 		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
-		_bottom_threats.append({"e": e, "sy": sy, "danger": danger})
+		_bottom_threats.append({"e": e, "off": sy, "danger": danger})
 	# A dense endless wave can stack a dozen+ off-screen hostiles on one edge,
 	# painting a near-solid chevron row that drowns the lethality signal —
 	# cap to the nearest few; ties prefer the lethal ranged killers.
-	_bottom_threats.sort_custom(func(a, b):
-		if a["sy"] != b["sy"]:
-			return a["sy"] < b["sy"]
-		return a["danger"] and not b["danger"])
-	for i in mini(6, _bottom_threats.size()):
-		var e = _bottom_threats[i]["e"]
-		var sy: float = _bottom_threats[i]["sy"]
-		var danger: bool = _bottom_threats[i]["danger"]
-		var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
-		if sim.last_stand and sx > 165.0 and sx < 475.0:
-			# keep clear of the colossus HP bar / LAST STAND readout parked
-			# at bottom-center of the screen in the finale
-			sx = 165.0 if sx < 320.0 else 475.0
-		var a := clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85)
-		if e.get("windup", 0) > 0:
-			a = clampf(a + Art.pulse(0.28) * 0.35, 0.25, 1.0)
-		var col := Color(1.0, 0.1, 0.1, a) if danger else Color(1.0, 0.35, 0.2, a)
-		var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
-		var tip := 361.0 if danger else 358.0
-		draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
-		draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
+	_draw_edge_chevrons(_bottom_threats, false)
 	# Top-edge chevrons for hostiles about to enter from the spawn edge above —
 	# an off-screen threat you'd otherwise only meet as it crosses into view.
-	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
-	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
 	var _top_threats: Array = []
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
@@ -2266,32 +2252,10 @@ func _draw_threat_edges() -> void:
 		if ty >= 0.0 or ty < -180.0:
 			continue
 		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
-		_top_threats.append({"e": e, "ty": ty, "danger": tdanger})
+		_top_threats.append({"e": e, "off": ty, "danger": tdanger})
 	# Same swarm cap as the bottom edge — nearest few only, ties favor the
 	# lethal ranged killers.
-	_top_threats.sort_custom(func(a, b):
-		if a["ty"] != b["ty"]:
-			return a["ty"] > b["ty"]
-		return a["danger"] and not b["danger"])
-	for i in mini(6, _top_threats.size()):
-		var e = _top_threats[i]["e"]
-		var ty: float = _top_threats[i]["ty"]
-		var tdanger: bool = _top_threats[i]["danger"]
-		var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
-		# Under the corner HUD panel's real footprint (x<262), drop the chevron
-		# below the panel's bottom edge instead of skipping it outright — still
-		# a warning, just relocated clear of the opaque HUD art.
-		var tbase := 28.0
-		if tx < 262.0:
-			tbase = _panel_bot + 12.0
-		var ta := clampf(1.0 + ty / 180.0, 0.2, 0.7)
-		if e.get("windup", 0) > 0:
-			ta = clampf(ta + Art.pulse(0.28) * 0.3, 0.2, 1.0)
-		var tcol := Color(1.0, 0.1, 0.1, ta) if tdanger else Color(1.0, 0.55, 0.25, ta)
-		var tspr := 6.0 if tdanger else 4.0   # spikier spread for ranged killers
-		var ttip := tbase - (6.0 if tdanger else 4.0)
-		draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
-		draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
+	_draw_edge_chevrons(_top_threats, true)
 	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
 	# while an already-streamed boss (or the observer) sits above the visible
 	# view — its HP bar/label live in the fixed HUD but the arena-lock
@@ -2357,6 +2321,58 @@ func _draw_threat_edges() -> void:
 				draw_line(Vector2(rx - 6, 40), Vector2(rx, 31), rcol, 2.5)
 				draw_line(Vector2(rx, 31), Vector2(rx + 6, 40), rcol, 2.5)
 				Art.text(self, "REVIVE", Vector2(rx - 18, 50), 9, rcol)
+
+
+func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
+	## Shared sort->cap->draw pass for the top/bottom off-screen threat
+	## chevrons: ties prefer the lethal ranged killers, capped to the
+	## nearest 6 so a dense swarm can't paint a solid warning row.
+	if is_top:
+		threats.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			if a["off"] != b["off"]:
+				return a["off"] > b["off"]
+			return a["danger"] and not b["danger"])
+	else:
+		threats.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			if a["off"] != b["off"]:
+				return a["off"] < b["off"]
+			return a["danger"] and not b["danger"])
+	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
+	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
+	for i in mini(6, threats.size()):
+		var e = threats[i]["e"]
+		var off: float = threats[i]["off"]
+		var danger: bool = threats[i]["danger"]
+		if is_top:
+			var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
+			# Under the corner HUD panel's real footprint (x<262), drop the chevron
+			# below the panel's bottom edge instead of skipping it outright — still
+			# a warning, just relocated clear of the opaque HUD art.
+			var tbase := 28.0
+			if tx < 262.0:
+				tbase = _panel_bot + 12.0
+			var ta := clampf(1.0 + off / 180.0, 0.2, 0.7)
+			if e.get("windup", 0) > 0:
+				ta = clampf(ta + Art.pulse(0.28) * 0.3, 0.2, 1.0)
+			var tcol := Color(1.0, 0.1, 0.1, ta) if danger else Color(1.0, 0.55, 0.25, ta)
+			var tspr := 6.0 if danger else 4.0   # spikier spread for ranged killers
+			var ttip := tbase - (6.0 if danger else 4.0)
+			draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
+			draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
+		else:
+			var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
+			if sim.last_stand and sx > 165.0 and sx < 475.0:
+				# keep clear of the colossus HP bar / LAST STAND readout parked
+				# at bottom-center of the screen in the finale
+				sx = 165.0 if sx < 320.0 else 475.0
+			var a := clampf(1.2 - (off - 360.0) / 200.0, 0.25, 0.85)
+			if e.get("windup", 0) > 0:
+				a = clampf(a + Art.pulse(0.28) * 0.35, 0.25, 1.0)
+			var col := Color(1.0, 0.1, 0.1, a) if danger else Color(1.0, 0.35, 0.2, a)
+			var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
+			var tip := 361.0 if danger else 358.0
+			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
+			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
 
 
 func _draw_wheel() -> void:
@@ -2451,7 +2467,7 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	var a := 0.05 + frac * 0.16
 	if sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
 		a = 0.34
-	draw_rect(Rect2(0, 0, 640, 360), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
+	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
 	if top_msg != "airstrike":
 		return
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
@@ -2461,7 +2477,7 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 func _draw_banners(top_msg: String) -> void:
 	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
 	# (static, so it stays even under reduce-motion).
-	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, 640, 360), false,
+	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 		Color(0.0, 0.0, 0.0, 0.16))
 	# Damage vignette: pulses on hits, sustains through the mercy window.
 	var vig := _damage_vignette
@@ -2469,21 +2485,21 @@ func _draw_banners(top_msg: String) -> void:
 		if p["alive"] and p["hurt_iframes"] > 0:
 			vig = maxf(vig, 0.3 * float(p["hurt_iframes"]) / float(SimWorld.VEST_IFRAME_TICKS))
 	if vig > 0.01:
-		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, 640, 360), false,
+		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
 	if _flash_alpha > 0.01:
-		draw_rect(Rect2(0, 0, 640, 360), Color(1, 1, 1, _flash_alpha * _motion))
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, _flash_alpha * _motion))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
 	# closes in (heartbeat plays under it). Scaled by the reduce-motion toggle.
 	if _tension > 0.02:
 		var hb := Art.pulse(0.11)
-		draw_rect(Rect2(0, 0, 640, 360),
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H),
 			Color(0.15, 0.0, 0.0, _tension * (0.12 + 0.1 * hb) * _motion))
 	# Directional damage wedge: a red arc on the screen edge pointing at the
 	# threat that hit you — the "where from?" answer in a one-hit game.
 	if _hit_dir_t > 0.01:
 		var ang := _hit_dir.angle()
-		var origin := Vector2(320, 180)
+		var origin := SCREEN_CENTER
 		if _hit_dir_player >= 0 and _hit_dir_player < sim.players.size():
 			var hp: Dictionary = sim.players[_hit_dir_player]
 			origin = _to_screen(hp["x"], hp["y"])
@@ -2560,7 +2576,7 @@ func _draw_banners(top_msg: String) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
 	# Black fade covering the title→combat cut.
 	if _fade > 0.01:
-		draw_rect(Rect2(0, 0, 640, 360), Color(0, 0, 0, _fade))
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, _fade))
 	# Just-in-time onboarding cue (first-time-ever, persisted).
 	if _hint_t > 0.02 and not _hint_text.is_empty():
 		var ha := minf(1.0, _hint_t * 3.0)

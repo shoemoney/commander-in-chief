@@ -151,6 +151,10 @@ const OUTLINE := {
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
 }
 
+const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
+	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
+const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+
 
 static func tex(name: String) -> Texture2D:
 	return TEX[name]
@@ -225,9 +229,6 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 	if max_w > 0.0:
 		w = minf(w, max_w)
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
-const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
-	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
-const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
 
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0) -> void:
@@ -237,7 +238,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88))
 		var letter: String = _GLYPH_KEY[action]
-		var f := ThemeDB.fallback_font
+		var f := font()
 		var fs := int(size * 0.62)
 		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,

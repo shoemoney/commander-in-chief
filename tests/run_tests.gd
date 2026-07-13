@@ -39,8 +39,11 @@ class T:
 
 
 func _init() -> void:
+	var suite_filter := OS.get_environment("SUITE")
+	var scripts: Array[String] = TEST_SCRIPTS if suite_filter.is_empty() else \
+		TEST_SCRIPTS.filter(func(p: String) -> bool: return p.contains(suite_filter))
 	var total_methods := 0
-	for path in TEST_SCRIPTS:
+	for path in scripts:
 		var script: GDScript = load(path)
 		var suite: RefCounted = script.new()
 		for m in suite.get_method_list():

@@ -12,7 +12,7 @@ extends SceneTree
 const NUM_SEEDS := 40
 const TICKS := 3600
 
-var results: Array = []
+var results: Array[Dictionary] = []
 
 
 func _init() -> void:
@@ -20,7 +20,7 @@ func _init() -> void:
 	var group_id := WorkerThreadPool.add_group_task(_run_one, NUM_SEEDS)
 	WorkerThreadPool.wait_for_group_task_completion(group_id)
 
-	results.sort_custom(func(a, b): return a["drama"] > b["drama"])
+	results.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["drama"] > b["drama"])
 
 	print("%-6s %-8s %-6s %-8s %-8s %s" % ["seed", "drama", "wave", "score", "deaths", "checksum"])
 	for r in results:

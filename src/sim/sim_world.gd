@@ -18,6 +18,8 @@ const F_ONE := Fixed.ONE
 const WORLD_LEFT := 16 * F_ONE
 const WORLD_RIGHT := 624 * F_ONE
 const VIEW_H := 360 * F_ONE
+const SCREEN_CX := 320 * F_ONE
+const SCREEN_W_FP := 640 * F_ONE
 const PLAYER_SPEED := (F_ONE * 12) / 5        # 2.4 px/tick = 144 px/s (+35% over 1986 feel)
 const BULLET_SPEED := 6 * F_ONE
 const BULLET_TTL_TICKS := 120
@@ -163,6 +165,8 @@ const BOSS_Y_OFFSET := 40 * F_ONE
 const BOSS_CYCLE_TICKS := 360
 const BOSS_SPRAY_INTERVAL_TICKS := 12
 const BOSS_BOUNTY := COIN_BUNKER * 4
+# Mortar volley: the three strike ticks within the second half of the phase cycle.
+const BOSS_MORTAR_TICKS := [200, 240, 280]
 const ENEMY_BULLET_SPEED := 3 * F_ONE
 const ENEMY_BULLET_TTL_TICKS := 180
 const ENEMY_BULLET_HIT_RADIUS := 8 * F_ONE
@@ -442,18 +446,7 @@ func _step_players(inputs: Array) -> void:
 		# Pickups. Shop crates carry a price paid from the shared War Chest;
 		# an unaffordable crate stays on the ground.
 		if p["alive"]:
-			for k in range(pickups.size() - 1, -1, -1):
-				var pk := pickups[k]
-				if not _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
-					continue
-				var cost: int = pk.get("cost", 0)
-				if cost > 0 and war_chest < cost:
-					continue
-				war_chest -= cost
-				_apply_supply(p, pk["kind"])
-				events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
-					"kind": pk["kind"], "cost": cost})
-				pickups.remove_at(k)
+			_collect_pickups(p, i)
 
 
 func _clamp_actor(p: Dictionary) -> void:
@@ -463,6 +456,23 @@ func _clamp_actor(p: Dictionary) -> void:
 	for g in gates:
 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
 			p["y"] = g["y"] + GATE_BLOCK_PAD
+
+
+func _collect_pickups(p: Dictionary, i: int) -> void:
+	## Extracted, same-order pass over the tail of _step_players: a player
+	## in range of an affordable (or free) pickup collects it immediately.
+	for k in range(pickups.size() - 1, -1, -1):
+		var pk := pickups[k]
+		if not _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
+			continue
+		var cost: int = pk.get("cost", 0)
+		if cost > 0 and war_chest < cost:
+			continue
+		war_chest -= cost
+		_apply_supply(p, pk["kind"])
+		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
+			"kind": pk["kind"], "cost": cost})
+		pickups.remove_at(k)
 
 
 func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
@@ -567,7 +577,7 @@ func _fire_mission() -> void:
 	## The screen-clear: wipes every surfaced enemy. Spares the submerged
 	## (1986 rule) and armor (bosses, bunkers). Mints NO coin — a 100-coin
 	## buy that reaped a full screen's bounty was a net-positive money printer.
-	events.append({"t": "explosion", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+	events.append({"t": "explosion", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false):
 			_kill_enemy(e, true)
@@ -587,7 +597,7 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
 			# giving a commit-then-wait beat instead of a silent screen-wipe.
 			pending_airstrike = STRIKE_TELEGRAPH_TICKS
-			events.append({"t": "airstrike_called", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+			events.append({"t": "airstrike_called", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 
 
 func _supply_cost(kind: int) -> int:
@@ -741,14 +751,20 @@ func _detonate_tank(tank: Dictionary) -> void:
 
 # --- Projectiles ---
 
+func _offscreen(x: int, y: int) -> bool:
+	## Shared screen-bounds cull for bullets: past the vertical strike zone or
+	## off either horizontal edge. Callers still add their own TTL check.
+	return y < camera_top - 40 * F_ONE or y > camera_top + 400 * F_ONE \
+		or x < 0 or x > SCREEN_W_FP
+
+
 func _step_bullets() -> void:
 	for i in range(bullets.size() - 1, -1, -1):
 		var b := bullets[i]
 		b["x"] = b["x"] + b["vx"]
 		b["y"] = b["y"] + b["vy"]
 		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or b["y"] < camera_top - 40 * F_ONE \
-			or b["y"] > camera_top + 400 * F_ONE or b["x"] < 0 or b["x"] > 640 * F_ONE
+		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
 		if not dead:
 			# Bullets are stopped by armor: bunkers block, only grenades hurt them.
 			for bk in bunkers:
@@ -896,6 +912,17 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 
 # --- Enemies / bunkers / spawner ---
 
+func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) -> void:
+	## Shared "move toward target at base_spd, halved while wading" step used by
+	## rushers, shieldmen, elites, grenadiers and snipers. Same fixed-point ops,
+	## same order, as the code this replaces — golden-safe.
+	var spd := base_spd
+	if _in_water(e["x"], e["y"]):
+		spd = spd / 2
+	e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
+	e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+
+
 func _step_enemies() -> void:
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
@@ -921,21 +948,13 @@ func _step_enemies() -> void:
 			# Advances slowly behind a frontal shield (bullet block handled in
 			# _step_bullets); touch still kills. No ranged attack.
 			if dlen > F_ONE:
-				var sspd := SHIELD_SPEED
-				if _in_water(e["x"], e["y"]):
-					sspd = sspd / 2
-				e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), sspd)
-				e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), sspd)
+				_advance_toward(e, dx, dy, dlen, SHIELD_SPEED)
 			continue
 		if e["elite"]:
 			_step_elite(e, target, dx, dy, dlen)
 			continue
 		if dlen > F_ONE:
-			var spd: int = ENEMY_SPEED
-			if _in_water(e["x"], e["y"]):
-				spd = spd / 2   # infantry wades too
-			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 
 
 func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
@@ -954,11 +973,7 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 		return   # rooted while winding up
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > ELITE_STANDOFF:
-		var spd := ELITE_SPEED
-		if _in_water(e["x"], e["y"]):
-			spd = spd / 2
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+		_advance_toward(e, dx, dy, dlen, ELITE_SPEED)
 	elif e["fire_cd"] == 0:
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS
 		e["windup"] = ELITE_WINDUP_TICKS
@@ -976,11 +991,7 @@ func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > GRENADIER_STANDOFF:
-		var spd := ENEMY_SPEED
-		if _in_water(e["x"], e["y"]):
-			spd = spd / 2
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 	elif e["fire_cd"] == 0:
 		e["fire_cd"] = GRENADIER_FIRE_CD_TICKS
 		e["windup"] = GRENADIER_WINDUP_TICKS
@@ -1011,11 +1022,7 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	# Keeps to the back — only closes if the target runs far away.
 	if dlen > SNIPER_STANDOFF:
-		var spd := ENEMY_SPEED
-		if _in_water(e["x"], e["y"]):
-			spd = spd / 2
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 	elif e["fire_cd"] == 0:
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
@@ -1171,7 +1178,7 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 
 
 func _spawn_special(x: int, y: int, kind: String) -> void:
-	## Endless-only ranged archetypes (grenadier/sniper). Coin-worthy like an
+	## Endless-only ranged archetypes (grenadier/sniper/shield). Coin-worthy like an
 	## elite; reuse fire_cd/windup so no new hashed enemy field is introduced.
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
 		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0})
@@ -1201,14 +1208,14 @@ func _step_gates() -> void:
 				var fmult: int = mini(flawless_streak, 3)
 				war_chest += 50 * fmult
 				score += 2000 * fmult
-				events.append({"t": "gate_flawless", "x": 320 * F_ONE, "y": g["y"], "mult": fmult})
+				events.append({"t": "gate_flawless", "x": SCREEN_CX, "y": g["y"], "mult": fmult})
 			deaths_since_gate = 0
 			# Guaranteed cache past every checkpoint — the gate-open beat had a big
 			# audiovisual payoff but no mechanical reward; a free grenade/vest crate
 			# closes that loop.
 			pickups.append({"x": (200 + rng.range_i(0, 240)) * F_ONE, "y": g["y"] - 40 * F_ONE,
 				"kind": 1 + rng.range_i(0, 1), "cost": 0})
-			events.append({"t": "gate_open", "x": 320 * F_ONE, "y": g["y"]})
+			events.append({"t": "gate_open", "x": SCREEN_CX, "y": g["y"]})
 
 
 func _in_water(x: int, y: int) -> bool:
@@ -1240,7 +1247,8 @@ func _step_camera() -> void:
 
 	# Stream the world ahead of the scroll: bunkers between gates, a gate
 	# arena every GATE_SPACING, a parked tank between each pair of gates.
-	while _next_bunker_y > camera_top - 2 * VIEW_H:
+	var horizon := camera_top - 2 * VIEW_H
+	while _next_bunker_y > horizon:
 		# Positions that coincide with a gate row are handled by the gate arena.
 		var idx: int = absi(_next_bunker_y / (500 * F_ONE))
 		if idx % 2 == 1:
@@ -1248,11 +1256,11 @@ func _step_camera() -> void:
 			bunkers.append(_make_bunker((120 if flank == 0 else 460) * F_ONE, _next_bunker_y))
 		_next_bunker_y -= 500 * F_ONE
 	# Stream landmines between the arenas — deterministic x, off the gate rows.
-	while _next_mine_y > camera_top - 2 * VIEW_H:
+	while _next_mine_y > horizon:
 		if absi(_next_mine_y / MINE_SPACING) % 2 == 0:
 			mines.append({"x": rng.range_i(70, 570) * F_ONE, "y": _next_mine_y, "armed": true})
 		_next_mine_y -= MINE_SPACING
-	while _next_gate_y > camera_top - 2 * VIEW_H and not _world_ended:
+	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
 		if _gate_counter == FINAL_GATE_INDEX:
 			# The end of the road: the Foundry. Nothing streams past it.
@@ -1263,7 +1271,7 @@ func _step_camera() -> void:
 		if _gate_counter % BOSS_GATE_EVERY == 0:
 			# Bridge boss gate: no arena bunkers — the Gunship IS the lock.
 			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
-				"boss": {"alive": true, "hp": BOSS_HP, "x": 320 * F_ONE,
+				"boss": {"alive": true, "hp": BOSS_HP, "x": SCREEN_CX,
 					"dir": 1, "phase_t": 0, "gate_y": _next_gate_y}})
 		else:
 			var b1 := _make_bunker(180 * F_ONE, _next_gate_y + 50 * F_ONE)
@@ -1272,15 +1280,15 @@ func _step_camera() -> void:
 			bunkers.append(b2)
 			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {}})
 		_next_gate_y -= GATE_SPACING
-	while _next_tank_y > camera_top - 2 * VIEW_H:
+	while _next_tank_y > horizon:
 		tanks.append({
-			"x": 320 * F_ONE, "y": _next_tank_y,
+			"x": SCREEN_CX, "y": _next_tank_y,
 			"alive": true, "burning": false,
 			"fuel": TANK_FUEL_TICKS, "burn_ticks": 0,
 			"fire_cd": 0, "occupant": -1,
 		})
 		_next_tank_y -= GATE_SPACING
-	while _next_water_y > camera_top - 2 * VIEW_H:
+	while _next_water_y > horizon:
 		var water := {"y": _next_water_y, "ford_x": rng.range_i(80, 560) * F_ONE}
 		waters.append(water)
 		# Frogmen lurk in every river.
@@ -1340,7 +1348,7 @@ func _step_waves() -> void:
 	elif enemies.is_empty() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
-		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+		events.append({"t": "wave_clear", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
 		pickups.append({"x": 170 * F_ONE, "y": shop_y, "kind": 0, "cost": _supply_cost(0)})
 		pickups.append({"x": 290 * F_ONE, "y": shop_y, "kind": 1, "cost": _supply_cost(1)})
@@ -1367,9 +1375,9 @@ func _start_wave() -> void:
 		# Milestone miniboss: a Bridge Gunship parked over the arena, HP scaling
 		# with depth. Reuses the campaign boss schema + state machine wholesale.
 		endless_boss = {"alive": true, "hp": BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2),
-			"x": 320 * F_ONE, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
-		events.append({"t": "endless_boss", "x": 320 * F_ONE, "y": camera_top + 50 * F_ONE})
-	events.append({"t": "wave_start", "x": 320 * F_ONE, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
+			"x": SCREEN_CX, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
+		events.append({"t": "endless_boss", "x": SCREEN_CX, "y": camera_top + 50 * F_ONE})
+	events.append({"t": "wave_start", "x": SCREEN_CX, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
 
 
 # --- Foundry Colossus (the finale) ---
@@ -1393,7 +1401,7 @@ func _step_colossus() -> void:
 			if g.get("final", false) and g["y"] >= camera_top and g["y"] <= camera_top + VIEW_H and not victory:
 				colossus = {
 					"alive": true, "hp": COLOSSUS_HP,
-					"x": 320 * F_ONE, "y": g["y"] - 120 * F_ONE,
+					"x": SCREEN_CX, "y": g["y"] - 120 * F_ONE,
 					"spray_cd": COLOSSUS_SPRAY_CD_TICKS,
 					"volley_cd": COLOSSUS_VOLLEY_CD_TICKS,
 					"spawn_cd": COLOSSUS_SPAWN_CD_TICKS,
@@ -1499,36 +1507,36 @@ func _step_boss() -> void:
 
 
 func _step_one_boss(boss: Dictionary) -> void:
-		boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
-		var t: int = boss["phase_t"]
-		if t < BOSS_CYCLE_TICKS / 2:
-			# Strafe run: sweep the bridge, spraying aimed-with-spread fire.
-			boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
-			if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
-				boss["dir"] = -boss["dir"]
-				boss["x"] = Fixed.clampi_fixed(boss["x"], 60 * F_ONE, 580 * F_ONE)
-			if t % BOSS_SPRAY_INTERVAL_TICKS == 0:
-				var by: int = boss["gate_y"] - BOSS_Y_OFFSET
-				var target := _nearest_alive_player(boss["x"], by)
-				if not target.is_empty():
-					var dx: int = target["x"] - boss["x"] + rng.range_i(-40, 40) * F_ONE
-					var dy: int = target["y"] - by
-					var dlen := Fixed.length(dx, dy)
-					if dlen > F_ONE:
-						events.append({"t": "enemy_shot", "x": boss["x"], "y": by})
-						enemy_bullets.append({
-							"x": boss["x"], "y": by,
-							"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
-							"vy": Fixed.mul(Fixed.div(dy, dlen), ENEMY_BULLET_SPEED),
-							"ttl": ENEMY_BULLET_TTL_TICKS,
-						})
-		else:
-			# Mortar volley: three tracked strikes, reusing the Observer machinery.
-			if t == 200 or t == 240 or t == 280:
-				var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
-				var target2 := _nearest_alive_player(boss["x"], by2)
-				if not target2.is_empty():
-					_add_strike(target2["x"], target2["y"])
+	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
+	var t: int = boss["phase_t"]
+	if t < BOSS_CYCLE_TICKS / 2:
+		# Strafe run: sweep the bridge, spraying aimed-with-spread fire.
+		boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
+		if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
+			boss["dir"] = -boss["dir"]
+			boss["x"] = Fixed.clampi_fixed(boss["x"], 60 * F_ONE, 580 * F_ONE)
+		if t % BOSS_SPRAY_INTERVAL_TICKS == 0:
+			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
+			var target := _nearest_alive_player(boss["x"], by)
+			if not target.is_empty():
+				var dx: int = target["x"] - boss["x"] + rng.range_i(-40, 40) * F_ONE
+				var dy: int = target["y"] - by
+				var dlen := Fixed.length(dx, dy)
+				if dlen > F_ONE:
+					events.append({"t": "enemy_shot", "x": boss["x"], "y": by})
+					enemy_bullets.append({
+						"x": boss["x"], "y": by,
+						"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
+						"vy": Fixed.mul(Fixed.div(dy, dlen), ENEMY_BULLET_SPEED),
+						"ttl": ENEMY_BULLET_TTL_TICKS,
+					})
+	else:
+		# Mortar volley: three tracked strikes, reusing the Observer machinery.
+		if t in BOSS_MORTAR_TICKS:
+			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
+			var target2 := _nearest_alive_player(boss["x"], by2)
+			if not target2.is_empty():
+				_add_strike(target2["x"], target2["y"])
 
 
 func _bullet_hits_boss(b: Dictionary) -> bool:
@@ -1565,8 +1573,7 @@ func _step_enemy_bullets() -> void:
 		b["x"] = b["x"] + b["vx"]
 		b["y"] = b["y"] + b["vy"]
 		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or b["y"] < camera_top - 40 * F_ONE \
-			or b["y"] > camera_top + 400 * F_ONE or b["x"] < 0 or b["x"] > 640 * F_ONE
+		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
 		if not dead:
 			# Cover is real both ways now: a bunker between you and a shooter eats
 			# the round, same as it eats yours (player bullets already block here).

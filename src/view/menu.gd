@@ -31,7 +31,7 @@ func _bus_off(name: String) -> bool:
 	return AudioServer.is_bus_mute(AudioServer.get_bus_index(name))
 
 
-func _menu_items() -> Array:
+func _menu_items() -> Array[Dictionary]:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return [{"id": "back", "label": "BACK", "destructive": false}]
 	if mode == Mode.TITLE:
@@ -57,8 +57,8 @@ func _menu_items() -> Array:
 	]
 
 
-func _items() -> Array:
-	var out: Array = []
+func _items() -> Array[String]:
+	var out: Array[String] = []
 	for item in _menu_items():
 		out.append(item["label"])
 	return out
@@ -118,6 +118,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 		mode = Mode.HIDDEN
 	elif back and (mode == Mode.HALL or mode == Mode.HOWTO):
 		open(Mode.TITLE)
+	if move != 0 or hmove != 0 or act or back:
+		accept_event()
 	queue_redraw()
 
 

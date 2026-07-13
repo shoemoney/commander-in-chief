@@ -279,7 +279,7 @@ func _stat(icon: String, txt: String, x: float, y: float,
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
-	var f := ThemeDB.fallback_font
+	var f := Art.font()
 	draw_string(f, Vector2(x + 1, y + 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE,
 		Color(0, 0, 0, 0.65))
 	draw_string(f, Vector2(x, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, col)
@@ -293,4 +293,4 @@ func _fits(x: float, w: float) -> bool:
 
 ## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).
 func _tw(txt: String) -> float:
-	return ThemeDB.fallback_font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+	return Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
