@@ -1395,7 +1395,9 @@ func _draw_enemies() -> void:
 		if not e["alive"]:
 			continue
 		var epos := _to_screen(e["x"], e["y"])
-		if e["kind"] != "frogman":
+		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
+		# would give the ambush away — the laser paint is the only warning).
+		if e["kind"] != "frogman" and not (e["kind"] == "ghillie" and e.get("submerged", false)):
 			_ground_shadow(epos, 6.0)
 		if e.get("marked", false):
 			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff
@@ -1463,6 +1465,35 @@ func _draw_enemies() -> void:
 			# The riot shield: a bright arc across the front — this side deflects.
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
+		elif e["kind"] == "sapper":
+			# Mine-layer EOD: a warm-tinted insurgent with a pulsing armed-satchel
+			# pip so "he's seeding the ground behind him" reads before the trail does.
+			_spr("rusher", epos, face, 0.5, Color(1.5, 1.05, 0.5))
+			var spp := Art.pulse(0.25)
+			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+		elif e["kind"] == "ghillie":
+			var gst: int = e.get("surface_ticks", 0)
+			var gwu2: int = e.get("windup", 0)
+			if e.get("submerged", false):
+				# Dug in and cloaked: only a faint foliage shimmer betrays it —
+				# the laser paint on reveal is the real warning. Kept very subtle.
+				var gcp := Art.pulse(0.08)
+				draw_circle(epos, 5.0, Color(0.34, 0.5, 0.24, 0.10 + gcp * 0.06))
+			elif gst > 0:
+				# Rising out of cover: a bold leaf/dust burst as it reveals.
+				var rf := 1.0 - float(gst) / float(SimWorld.GHILLIE_REVEAL_TICKS)
+				for k in 2:
+					draw_arc(epos, 6.0 + rf * 12.0 + k * 4.0, 0, TAU, 18,
+						Color(0.6, 0.75, 0.4, 0.6 - k * 0.2 - rf * 0.3), 2.0)
+				_spr("frogman", epos, face, 0.42 + rf * 0.08, Color(0.7, 0.85, 0.5, 0.4 + rf * 0.6))
+			else:
+				# Revealed marksman: paints the sniper line during windup, then fires.
+				if gwu2 > 0 and not target.is_empty():
+					var tp2 := _to_screen(target["x"], target["y"])
+					var pf2 := 1.0 - float(gwu2) / float(SimWorld.SNIPER_WINDUP_TICKS)
+					draw_line(epos, tp2, Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5), 1.0 + pf2)
+					draw_circle(tp2, 2.0 + pf2 * 2.0, Color(1.0, 0.2, 0.15, 0.4 + pf2 * 0.4))
+				_spr("frogman", epos, face, 0.5, Color(0.7, 0.95, 0.5))   # ghillie-green
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)

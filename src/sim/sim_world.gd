@@ -54,6 +54,17 @@ const SNIPER_WINDUP_TICKS := 55
 const SNIPER_BULLET_SPEED := 6 * F_ONE
 # Shield (endless-only): slow heavy; front-arc blocks bullets, flank/grenade kills.
 const SHIELD_SPEED := F_ONE
+# Sapper (endless-only): advances like a rusher but seeds armed mines behind it,
+# authoring a hazard trail between you and the top edge. Reuses fire_cd as the
+# mine-drop timer — no new hashed field.
+const SAPPER_MINE_CD_TICKS := 40
+const SAPPER_MAX_MINES := 40
+# Ghillie (endless-only): a cloaked sniper dug into LAND. Sits 'submerged' (no
+# threat arrow, bullet-immune) until you enter notice range, briefly reveals,
+# then runs the STATIONARY sniper paint→fire cycle. Reuses submerged/
+# surface_ticks/windup/aim_lx/aim_ly/fire_cd — no new hashed field.
+const GHILLIE_NOTICE_RADIUS := 210 * F_ONE
+const GHILLIE_REVEAL_TICKS := 26
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 # Landmines: deterministic field hazards. Any grounded unit (player on foot, or
 # an enemy) that steps within the trigger radius detonates them via _explode() —
@@ -947,6 +958,12 @@ func _step_enemies() -> void:
 				e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), sspd)
 				e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), sspd)
 			continue
+		if e["kind"] == "sapper":
+			_step_sapper(e, dx, dy, dlen)
+			continue
+		if e["kind"] == "ghillie":
+			_step_ghillie(e, target, dx, dy, dlen)
+			continue
 		if e["elite"]:
 			_step_elite(e, target, dx, dy, dlen)
 			continue
@@ -1076,6 +1093,64 @@ func _step_frogman(e: Dictionary) -> void:
 		e["lunge_ticks"] = FROGMAN_LUNGE_TICKS   # rewind for another lunge
 
 
+func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Advances like a rusher (touch still kills) but drops an armed mine on a
+	## cooldown, authoring a hazard trail across the arena. Reuses fire_cd as the
+	## drop timer, and the existing landmine array/detonation — no new state.
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if e["fire_cd"] == 0 and mines.size() < SAPPER_MAX_MINES:
+		e["fire_cd"] = SAPPER_MINE_CD_TICKS
+		mines.append({"x": e["x"], "y": e["y"], "armed": true})
+		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
+	if dlen > F_ONE:
+		var spd := ENEMY_SPEED
+		if _in_water(e["x"], e["y"]):
+			spd = spd / 2
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+
+
+func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## A cloaked sniper dug into the ground: bullet-immune + harmless + no threat
+	## arrow while submerged, reveals when you enter notice range, then paints and
+	## fires ONE locked shot from cover (stationary — never chases). Killing it
+	## during the reveal/paint window defuses the shot. Reuses sniper paint state.
+	if e["submerged"]:
+		if dlen <= GHILLIE_NOTICE_RADIUS:
+			e["submerged"] = false
+			e["surface_ticks"] = GHILLIE_REVEAL_TICKS
+			events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
+		return
+	if e["surface_ticks"] > 0:
+		e["surface_ticks"] = e["surface_ticks"] - 1
+		return
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			var lx: int = e.get("aim_lx", dx)
+			var ly: int = e.get("aim_ly", dy)
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
+				events.append({"t": "sniper_fire", "x": e["x"], "y": e["y"]})
+				enemy_bullets.append({
+					"x": e["x"], "y": e["y"],
+					"vx": Fixed.mul(Fixed.div(lx, llen), SNIPER_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(ly, llen), SNIPER_BULLET_SPEED),
+					"ttl": ENEMY_BULLET_TTL_TICKS,
+				})
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if dlen > GHILLIE_NOTICE_RADIUS:
+		e["submerged"] = true   # you slipped out of range — re-cloak and wait
+		return
+	if e["fire_cd"] == 0:
+		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
+		e["windup"] = SNIPER_WINDUP_TICKS
+		e["aim_lx"] = dx   # lock the shot vector at paint start (view draws the line)
+		e["aim_ly"] = dy
+		events.append({"t": "sniper_paint", "x": e["x"], "y": e["y"]})
+
+
 func _nearest_alive_player(x: int, y: int) -> Dictionary:
 	var best := {}
 	var best_d := 0
@@ -1198,10 +1273,15 @@ func _spawn_courier() -> void:
 
 
 func _spawn_special(x: int, y: int, kind: String) -> void:
-	## Endless-only ranged archetypes (grenadier/sniper). Coin-worthy like an
-	## elite; reuse fire_cd/windup so no new hashed enemy field is introduced.
-	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
-		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0})
+	## Endless-only ranged/hazard archetypes (grenadier/sniper/shield/sapper/
+	## ghillie). Coin-worthy like an elite; reuse fire_cd/windup/submerged so no
+	## new hashed enemy field is introduced.
+	var e := {"x": x, "y": y, "alive": true, "elite": true,
+		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0}
+	if kind == "ghillie":
+		e["submerged"] = true   # dug in, cloaked until you close the distance
+		e["surface_ticks"] = 0
+	enemies.append(e)
 
 
 # --- Gates ---
@@ -1353,13 +1433,17 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 4)
+				var roll := rng.range_i(0, 6)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
 				elif roll == 2:
 					_spawn_special(x, camera_top - 24 * F_ONE, "shield")
+				elif roll == 3:
+					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
+				elif roll == 4:
+					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
