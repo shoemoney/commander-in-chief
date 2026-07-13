@@ -1152,6 +1152,8 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
 	if dlen > F_ONE:
 		var spd := ENEMY_SPEED
+		if wave_mod == 6:
+			spd = (spd * 7) / 5   # FRENZY wave: the swarm rushes 40% faster
 		if _in_water(e["x"], e["y"]):
 			spd = spd / 2
 		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
@@ -1542,8 +1544,8 @@ func _start_wave() -> void:
 	# Wave mutators give each wave an identity (and make the shop a counter-
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
-	# 5 = NIGHT OPS (vision tightens; no hit-radius/telegraph change — view only).
-	wave_mod = 0 if wave <= 2 else rng.range_i(0, 5)
+	# 5 = NIGHT OPS (vision tightens; view only). 6 = FRENZY (swarm +40% speed).
+	wave_mod = 0 if wave <= 2 else rng.range_i(0, 6)
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {

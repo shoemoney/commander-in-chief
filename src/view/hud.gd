@@ -114,7 +114,7 @@ func _draw() -> void:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
-				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS"]
+				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]
 				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
 				if mchip != "" and _fits(x, _tw(mchip) + 8.0):
 					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
