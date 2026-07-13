@@ -2587,8 +2587,13 @@ func _draw_fx() -> void:
 			var cp := start.lerp(Vector2(16.0, 13.0), ease)
 			cp.y -= sin(t * PI) * 16.0
 			var csz := 8.0 - t * 3.0
-			draw_texture_rect(Art.tex("icon_coin"), Rect2(cp - Vector2(csz, csz) / 2.0, Vector2(csz, csz)),
+			# Flip the coin as it arcs to the War Chest (horizontal squash oscillation)
+			# — the classic tumbling-gold read instead of a disc sliding up the screen.
+			var flip := 0.15 + 0.85 * absf(cos(t * TAU * 2.5))
+			draw_set_transform(cp, 0.0, Vector2(flip, 1.0))
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(-Vector2(csz, csz) / 2.0, Vector2(csz, csz)),
 				false, Color(1.0, 0.92, 0.45, 1.0 - t * t))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "tex":
 			# Generic textured particle (legacy art Particle_FX): grows + fades over its
 			# lifetime t; optional spin. Drives the beefier muzzle/blast/impact FX.
