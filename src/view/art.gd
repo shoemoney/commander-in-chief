@@ -212,13 +212,11 @@ static func font() -> Font:
 
 ## Shadowed text: black copy offset +1px, then the colored text on top — the
 ## drop-shadow pattern hand-inlined across the view, now in one place.
-## max_w > 0 clips/ellipsizes the string instead of letting it bleed past the bound.
+## max_w > 0 clips the string to that width instead of letting it bleed past the bound.
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
 	var flags := TextServer.JUSTIFICATION_WORD_BOUND | TextServer.JUSTIFICATION_KASHIDA
-	if max_w > 0.0:
-		flags |= TextServer.JUSTIFICATION_CONSTRAIN_ELLIPSIS
 	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7), flags)
 	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col, flags)
 

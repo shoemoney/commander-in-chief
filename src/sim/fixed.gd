@@ -50,11 +50,3 @@ static func fsqrt(v: int) -> int:
 static func length(x: int, y: int) -> int:
 	## Magnitude of a fixed-point vector. Safe for |x|,|y| up to ~2^23 (128 world units << SHIFT).
 	return fsqrt(mul(x, x) + mul(y, y))
-
-
-static func clampi_fixed(v: int, lo: int, hi: int) -> int:
-	if v < lo:
-		return lo
-	if v > hi:
-		return hi
-	return v

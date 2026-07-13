@@ -450,8 +450,8 @@ func _step_players(inputs: Array) -> void:
 
 
 func _clamp_actor(p: Dictionary) -> void:
-	p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
-	p["y"] = Fixed.clampi_fixed(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
+	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
+	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	# Closed gates are a hard wall to the north.
 	for g in gates:
 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
@@ -545,8 +545,8 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["in_tank"] = -1
 	p["vest"] = false                  # death strips upgrades (1986 rule)
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
-	p["y"] = Fixed.clampi_fixed(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
-	p["x"] = Fixed.clampi_fixed(p["x"], WORLD_LEFT, WORLD_RIGHT)
+	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
+	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
 	events.append({"t": "revive", "x": p["x"], "y": p["y"]})
 
 
@@ -923,6 +923,18 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
 
 
+func _spawn_enemy_bullet(x: int, y: int, dx: int, dy: int, dlen: int, speed: int = ENEMY_BULLET_SPEED) -> void:
+	## Shared enemy-bullet-spawn dict used by elites, snipers, the colossus and
+	## the bridge boss. Same fixed-point ops, same order, as the code this
+	## replaces — golden-safe.
+	enemy_bullets.append({
+		"x": x, "y": y,
+		"vx": Fixed.mul(Fixed.div(dx, dlen), speed),
+		"vy": Fixed.mul(Fixed.div(dy, dlen), speed),
+		"ttl": ENEMY_BULLET_TTL_TICKS,
+	})
+
+
 func _step_enemies() -> void:
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
@@ -964,12 +976,7 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0 and dlen > F_ONE:
 			events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
-			enemy_bullets.append({
-				"x": e["x"], "y": e["y"],
-				"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
-				"vy": Fixed.mul(Fixed.div(dy, dlen), ENEMY_BULLET_SPEED),
-				"ttl": ENEMY_BULLET_TTL_TICKS,
-			})
+			_spawn_enemy_bullet(e["x"], e["y"], dx, dy, dlen)
 		return   # rooted while winding up
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > ELITE_STANDOFF:
@@ -1012,12 +1019,7 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 			var llen := Fixed.length(lx, ly)
 			if llen > F_ONE:
 				events.append({"t": "sniper_fire", "x": e["x"], "y": e["y"]})
-				enemy_bullets.append({
-					"x": e["x"], "y": e["y"],
-					"vx": Fixed.mul(Fixed.div(lx, llen), SNIPER_BULLET_SPEED),
-					"vy": Fixed.mul(Fixed.div(ly, llen), SNIPER_BULLET_SPEED),
-					"ttl": ENEMY_BULLET_TTL_TICKS,
-				})
+				_spawn_enemy_bullet(e["x"], e["y"], lx, ly, llen, SNIPER_BULLET_SPEED)
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	# Keeps to the back — only closes if the target runs far away.
@@ -1423,7 +1425,7 @@ func _step_colossus() -> void:
 	if colossus["y"] < target["y"] - 60 * F_ONE:
 		colossus["y"] = colossus["y"] + descent
 	var dx: int = target["x"] - colossus["x"]
-	colossus["x"] = colossus["x"] + Fixed.clampi_fixed(dx, -COLOSSUS_SPEED, COLOSSUS_SPEED)
+	colossus["x"] = colossus["x"] + clampi(dx, -COLOSSUS_SPEED, COLOSSUS_SPEED)
 
 	# Core window cycle: plating retracts (core_open ticks) then re-seals.
 	if colossus["core_open"] > 0:
@@ -1446,12 +1448,7 @@ func _step_colossus() -> void:
 			var by: int = target["y"] - colossus["y"]
 			var blen := Fixed.length(bx, by)
 			if blen > F_ONE:
-				enemy_bullets.append({
-					"x": colossus["x"], "y": colossus["y"],
-					"vx": Fixed.mul(Fixed.div(bx, blen), ENEMY_BULLET_SPEED),
-					"vy": Fixed.mul(Fixed.div(by, blen), ENEMY_BULLET_SPEED),
-					"ttl": ENEMY_BULLET_TTL_TICKS,
-				})
+				_spawn_enemy_bullet(colossus["x"], colossus["y"], bx, by, blen)
 	if phase >= 2:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
 		if colossus["volley_cd"] <= 0:
@@ -1514,7 +1511,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 		boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
 		if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
 			boss["dir"] = -boss["dir"]
-			boss["x"] = Fixed.clampi_fixed(boss["x"], 60 * F_ONE, 580 * F_ONE)
+			boss["x"] = clampi(boss["x"], 60 * F_ONE, 580 * F_ONE)
 		if t % BOSS_SPRAY_INTERVAL_TICKS == 0:
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target := _nearest_alive_player(boss["x"], by)
@@ -1524,12 +1521,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 				var dlen := Fixed.length(dx, dy)
 				if dlen > F_ONE:
 					events.append({"t": "enemy_shot", "x": boss["x"], "y": by})
-					enemy_bullets.append({
-						"x": boss["x"], "y": by,
-						"vx": Fixed.mul(Fixed.div(dx, dlen), ENEMY_BULLET_SPEED),
-						"vy": Fixed.mul(Fixed.div(dy, dlen), ENEMY_BULLET_SPEED),
-						"ttl": ENEMY_BULLET_TTL_TICKS,
-					})
+					_spawn_enemy_bullet(boss["x"], by, dx, dy, dlen)
 	else:
 		# Mortar volley: three tracked strikes, reusing the Observer machinery.
 		if t in BOSS_MORTAR_TICKS:

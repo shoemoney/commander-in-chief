@@ -310,5 +310,4 @@ func _draw_howto() -> void:
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
-	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	Art.text(self, txt, Vector2(320 - w / 2.0, y), size, col)
+	Art.text_center(self, txt, 320.0, y, size, col)

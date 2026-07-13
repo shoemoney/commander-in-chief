@@ -67,13 +67,13 @@ var _seen := {}                  # persisted first-time-hint flags
 var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
-var _hint_queue: Array = []      # pending first-time hints, drained one at a time
+var _hint_queue: Array[String] = []      # pending first-time hints, drained one at a time
 var _run_kills := 0              # this-run tally for the debrief card
 var _run_best_streak := 0
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
-var _banners: Array = []          # FIFO of center-screen splashes {text, t, col}
+var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
@@ -97,7 +97,7 @@ const WHEEL_ITEMS := [
 	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE"},
 ]
 const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND"]
-const _SECTOR_TO_ITEM := [2, 3, 0, 1]   # right=vest, down=airstrike, left=ammo, up=grenade
+const _SECTOR_TO_ITEM: Array[int] = [2, 3, 0, 1]   # right=vest, down=airstrike, left=ammo, up=grenade
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
@@ -290,17 +290,13 @@ func _physics_process(_delta: float) -> void:
 			if sim.victory or sim.wiped or _down_frames > 150:
 				_reset()
 			# Feed one demo input per player so 2P attract isn't lopsided.
-			var demo_inputs: Array = []
+			var demo_inputs: Array[SimInput] = []
 			for pi in sim.players.size():
 				demo_inputs.append(demo_input(sim.tick_count + pi * 53, sim))
 			sim.step(demo_inputs)
 			_consume_events()
 			_check_boss_intro()
-			var any := false
-			for p in sim.players:
-				if p["alive"]:
-					any = true
-			_down_frames = 0 if any else _down_frames + 1
+			_down_frames = 0 if not sim._all_players_down() else _down_frames + 1
 			_rumble = 0.0   # never buzz a controller on the menu
 			_update_feel()
 		else:
@@ -704,6 +700,17 @@ func _save_cfg(cf: ConfigFile) -> void:
 	DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
 
 
+func _persist(section: String, values: Dictionary) -> void:
+	# Shared load-then-merge-then-save boilerplate: load first so sibling
+	# sections ([best]/[hall]/[seen]/[settings]) already on disk never get
+	# clobbered by a save that only knows about its own section.
+	var cf := ConfigFile.new()
+	cf.load(SAVE_PATH)
+	for k in values:
+		cf.set_value(section, k, values[k])
+	_save_cfg(cf)
+
+
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
 	# Fall back to the .bak snapshot if the primary is missing/corrupt, before
@@ -725,15 +732,12 @@ func _load_bests() -> void:
 func _save_settings() -> void:
 	# Persist only the [settings] keys; load-then-set so we never clobber
 	# [best]/[hall]/[seen]. Called from the pause-menu a11y/audio toggles.
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
-	cf.set_value("settings", "colorblind", colorblind)
-	cf.set_value("settings", "reduce_motion", _motion < 0.5)
-	cf.set_value("settings", "sfx_muted",
-		AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")))
-	cf.set_value("settings", "music_muted",
-		AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")))
-	_save_cfg(cf)
+	_persist("settings", {
+		"colorblind": colorblind,
+		"reduce_motion": _motion < 0.5,
+		"sfx_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")),
+		"music_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")),
+	})
 
 
 func _record_run() -> void:
@@ -748,10 +752,7 @@ func _record_run() -> void:
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
-	cf.set_value("hall", "runs", hall)
-	_save_cfg(cf)
+	_persist("hall", {"runs": hall})
 
 
 func _hint(id: String, text: String) -> void:
@@ -764,10 +765,7 @@ func _hint(id: String, text: String) -> void:
 		return
 	_seen[id] = true
 	_hint_queue.append(text)
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
-	cf.set_value("seen", "hints", _seen)
-	_save_cfg(cf)
+	_persist("seen", {"hints": _seen})
 
 
 func _track_bests() -> void:
@@ -778,11 +776,7 @@ func _track_bests() -> void:
 		_hint("supply", "HOLD [Q] / BACK FOR THE SUPPLY WHEEL")
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).
-	var any_alive := false
-	for p in sim.players:
-		if p["alive"]:
-			any_alive = true
-	if any_alive:
+	if not sim._all_players_down():
 		_down_frames = 0
 	else:
 		_down_frames += 1
@@ -811,12 +805,7 @@ func _track_bests() -> void:
 		_best_dirty = true
 	if _best_dirty and Engine.get_physics_frames() % 60 == 0:
 		_best_dirty = false
-		var cf := ConfigFile.new()
-		cf.load(SAVE_PATH)   # merge — don't clobber hall/seen sections
-		cf.set_value("best", "score", best_score)
-		cf.set_value("best", "wave", best_wave)
-		cf.set_value("best", "dist", best_dist)
-		_save_cfg(cf)
+		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
 
 
 func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
@@ -1676,15 +1665,15 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 	# (170->200, 200->240, 240->280) — the barrage is now anticipable on
 	# the bar you're already watching, not just the hull-flash that can
 	# sit off-screen above the held camera.
-	if pt >= 170 and pt < 280:
+	if pt >= 170 and pt < SimWorld.BOSS_MORTAR_TICKS[2]:
 		var vseg_start := 170
-		var vseg_end := 200
-		if pt >= 240:
-			vseg_start = 240
-			vseg_end = 280
-		elif pt >= 200:
-			vseg_start = 200
-			vseg_end = 240
+		var vseg_end := SimWorld.BOSS_MORTAR_TICKS[0]
+		if pt >= SimWorld.BOSS_MORTAR_TICKS[1]:
+			vseg_start = SimWorld.BOSS_MORTAR_TICKS[1]
+			vseg_end = SimWorld.BOSS_MORTAR_TICKS[2]
+		elif pt >= SimWorld.BOSS_MORTAR_TICKS[0]:
+			vseg_start = SimWorld.BOSS_MORTAR_TICKS[0]
+			vseg_end = SimWorld.BOSS_MORTAR_TICKS[1]
 		var vfrac := float(pt - vseg_start) / float(vseg_end - vseg_start)
 		var vx := bar_x + bar_w * vfrac
 		draw_line(Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
@@ -2340,7 +2329,7 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
 	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
 	for i in mini(6, threats.size()):
-		var e = threats[i]["e"]
+		var e: Dictionary = threats[i]["e"]
 		var off: float = threats[i]["off"]
 		var danger: bool = threats[i]["danger"]
 		if is_top:

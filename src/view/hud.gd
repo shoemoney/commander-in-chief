@@ -279,11 +279,8 @@ func _stat(icon: String, txt: String, x: float, y: float,
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
-	var f := Art.font()
-	draw_string(f, Vector2(x + 1, y + 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE,
-		Color(0, 0, 0, 0.65))
-	draw_string(f, Vector2(x, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, col)
-	return x + f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+	Art.text(self, txt, Vector2(x, y), FONT_SIZE, col)
+	return x + _tw(txt)
 
 
 ## Right-margin fit test for an optional chip of pixel-width `w` starting at `x`.
