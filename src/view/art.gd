@@ -208,10 +208,23 @@ static func font() -> Font:
 
 ## Shadowed text: black copy offset +1px, then the colored text on top — the
 ## drop-shadow pattern hand-inlined across the view, now in one place.
-static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color) -> void:
+## max_w > 0 clips/ellipsizes the string instead of letting it bleed past the bound.
+static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
 	var f := font()
-	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.7))
-	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+	var w := max_w if max_w > 0.0 else -1.0
+	var flags := TextServer.JUSTIFICATION_WORD_BOUND | TextServer.JUSTIFICATION_KASHIDA
+	if max_w > 0.0:
+		flags |= TextServer.JUSTIFICATION_CONSTRAIN_ELLIPSIS
+	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7), flags)
+	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col, flags)
+
+
+## Same shadow+color text, horizontally centered on cx at y.
+static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0) -> void:
+	var w := font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	if max_w > 0.0:
+		w = minf(w, max_w)
+	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}

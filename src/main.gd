@@ -1425,15 +1425,13 @@ func _draw_pickups() -> void:
 		draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if pk.get("cost", 0) > 0:
 			if maxed:
-				draw_string(ThemeDB.fallback_font, ppos + Vector2(-15, -25), "MAXED",
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.6, 0.6, 0.6))
+				Art.text(self, "MAXED", ppos + Vector2(-15, -25), 9, Color(0.6, 0.6, 0.6))
 			else:
 				# Price tinted by affordability (matches the spend-wheel language).
 				var afford: bool = sim.war_chest >= pk["cost"]
 				var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
 				draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
-				draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -25), str(pk["cost"]),
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
+				Art.text(self, str(pk["cost"]), ppos + Vector2(-4, -25), 9, pcol)
 
 
 func _draw_tanks() -> void:
@@ -1467,8 +1465,7 @@ func _draw_tanks() -> void:
 				_spr("smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
 					Color(0.5, 0.5, 0.5, 0.5))
 			if (Engine.get_physics_frames() / 14) % 2 == 0:
-				draw_string(ThemeDB.fallback_font, c + Vector2(-16, -26), "LOW FUEL",
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.7, 0.2))
+				Art.text(self, "LOW FUEL", c + Vector2(-16, -26), 8, Color(1.0, 0.7, 0.2))
 		if t["burning"]:
 			_spr("smoke", c + Vector2(4, -14), 0.0, 0.5, Color(1, 1, 1, 0.75))
 			# Bail-out countdown: the hidden ~3s lethal timer, made visible.
@@ -1577,8 +1574,7 @@ func _draw_observer() -> void:
 	for q in 4:
 		var qa := q * TAU / 4.0 + PI / 4.0
 		draw_arc(op, tr, qa - 0.5, qa + 0.5, 8, tcol, 1.5)
-	draw_string(ThemeDB.fallback_font, op + Vector2(-38, -20), "SILENCE THE SPOTTER",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
+	Art.text(self, "SILENCE THE SPOTTER", op + Vector2(-38, -20), 8, Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
 
 
 func _draw_gunships() -> void:
@@ -1623,8 +1619,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 		# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 		# colossus bar labels its phase.
 		var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
-		draw_string(ThemeDB.fallback_font, Vector2(bar_x, bar_y), "%s — PHASE %d/2" % [label, gphase],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.5, 0.4))
+		Art.text(self, "%s — PHASE %d/2" % [label, gphase], Vector2(bar_x, bar_y), 8, Color(1.0, 0.5, 0.4))
 		_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 		# Next-volley countdown: a tick that sweeps left->right across the HP
@@ -1679,8 +1674,7 @@ func _draw_colossus() -> void:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center so the fill never hides under the HUD panel.
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
-	draw_string(ThemeDB.fallback_font, Vector2(172, 326), "FOUNDRY COLOSSUS — PHASE %d/3" % phase,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.55, 0.45))
+	Art.text(self, "FOUNDRY COLOSSUS — PHASE %d/3" % phase, Vector2(172, 326), 9, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar
@@ -1812,6 +1806,18 @@ func _draw_players() -> void:
 					Color(0.75, 0.9, 1.0, 0.5 * (1.0 - wt)), 1.2)
 				draw_arc(pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
 			_spr(tex_name, pos, angle, 0.52, mod)
+			# Empty-clip body cue: the corner ammo icon already blinks, but the
+			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
+			# (draining arc while the bash swing is on cooldown, steady dry
+			# pip otherwise), anchored on the body instead of the corner.
+			if p["mg_ammo"] == 0:
+				var dry_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.3)
+				if p["fire_cd"] > 0:
+					var dry_frac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
+					draw_arc(pos, 8.0, -PI / 2, -PI / 2 + TAU * dry_frac, 14,
+						Color(0.9, 0.6, 0.3, 0.55 + 0.35 * dry_pulse), 1.5)
+				else:
+					draw_arc(pos, 8.0, 0, TAU, 14, Color(1.0, 0.3, 0.25, 0.4 + 0.35 * dry_pulse), 1.5)
 			if p["vest"]:
 				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
 				# Adrenaline aura: the 20-streak / tank-bail speed surge (boost_ticks) is a
@@ -1828,6 +1834,16 @@ func _draw_players() -> void:
 						var bo_dir := Vector2.from_angle(bo_ang)
 						draw_line(pos + bo_dir * 12.0, pos + bo_dir * (17.0 + bo_pulse * 4.0),
 							Color(1.0, 0.72, 0.3, 0.5 * bo_frac), 1.5)
+			else:
+				# No-vest fragility: one hit from death, and the exposed stakes
+				# should read where the eye already is. A faint, gapped
+				# (broken-looking) desaturated ring in place of the solid
+				# vest ring — never as loud as the real thing.
+				var frag_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.1)
+				var frag_col := Color(0.55, 0.4, 0.4, 0.15 + 0.12 * frag_pulse)
+				for frag_s in 5:
+					var frag_a0 := frag_s * TAU / 5.0 + 0.15
+					draw_arc(pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
 			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
@@ -2242,11 +2258,7 @@ func _draw_wheel() -> void:
 		var sel: int = _wheel[i]["sel"]
 		if sel >= 0:
 			var lbl: String = WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]["label"]
-			var lw := f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			draw_string(f, c + Vector2(-lw / 2.0 + 1, 72.0), lbl,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 0, 0, 0.7))
-			draw_string(f, c + Vector2(-lw / 2.0, 71.0), lbl,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.95, 0.7))
+			Art.text_center(self, lbl, c.x, 71.0, 9, Color(1.0, 0.95, 0.7))
 
 
 func _top_center_priority() -> String:
@@ -2286,11 +2298,8 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	draw_rect(Rect2(0, 0, 640, 360), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
 	if top_msg != "airstrike":
 		return
-	var f := ThemeDB.fallback_font
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
-	var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	draw_string(f, Vector2(320 - w / 2.0 + 1, 47), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0, 0, 0, 0.6))
-	draw_string(f, Vector2(320 - w / 2.0, 46), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.85, 0.3))
+	Art.text_center(self, txt, 320, 46, 12, Color(1.0, 0.85, 0.3))
 
 
 func _draw_banners(top_msg: String) -> void:
@@ -2339,23 +2348,15 @@ func _draw_banners(top_msg: String) -> void:
 			var gpulse := 1.0 if _motion < 0.5 else Art.pulse(0.15)
 			var gtxt := "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty() \
 				else "GRENADE THE BUNKERS TO ADVANCE"
-			var gf := ThemeDB.fallback_font
-			var gw := gf.get_string_size(gtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 			var gy: float = (g["y"] - sim.camera_top) * PX + 30.0
-			draw_string(gf, Vector2(320 - gw / 2.0 + 1, gy + 1), gtxt,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0, 0, 0, 0.7 * gpulse))
-			draw_string(gf, Vector2(320 - gw / 2.0, gy), gtxt,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.9, 0.4, gpulse))
+			Art.text_center(self, gtxt, 320, gy, 11, Color(1.0, 0.9, 0.4, gpulse))
 		break
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if top_msg == "mortar":
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
 		var wtxt := "MORTARS RANGING — ADVANCE!"
-		var wf := ThemeDB.fallback_font
-		var ww := wf.get_string_size(wtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		draw_string(wf, Vector2(320 - ww / 2.0, 46), wtxt,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.4, 0.25, pulse))
+		Art.text_center(self, wtxt, 320, 46, 11, Color(1.0, 0.4, 0.25, pulse))
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
@@ -2363,56 +2364,41 @@ func _draw_banners(top_msg: String) -> void:
 		var btext: String = bn["text"]
 		if top_msg == "splash" and bt > 0.01 and not btext.is_empty():
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
-			var f := ThemeDB.fallback_font
-			var w := f.get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			draw_string(f, Vector2(320 - w / 2.0 + 1, 71), btext,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0, 0, 0, 0.7 * a))
-			draw_string(f, Vector2(320 - w / 2.0, 70), btext,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(bc.r, bc.g, bc.b, a))
+			Art.text_center(self, btext, 320, 70, 16, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
-		var vf := ThemeDB.fallback_font
-		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 115, 300, 135), false,
-			Color(1, 1, 1, 0.96))
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
+		_draw_result_panel("V I C T O L Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
+			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
+				"icon": "icon_medal", "icon_size": 16.0},
+			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
+				"icon": "icon_coin", "icon_size": 14.0},
+			{"text": "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10], "color": Color(0.8, 0.84, 0.74)},
+		], Color(1, 1, 1, 0.96))
+		# Trophy overlaps blank panel space only (no row text under it), so it's
+		# safe to draw after the shared panel/title/rows without reordering.
 		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
 		draw_texture_rect(Art.tex("trophy"),
 			Rect2(Vector2(196.0 - tsz / 2.0, 182.0 - tsz / 2.0), Vector2(tsz, tsz)), false)
-		var tw := vf.get_string_size("V I C T O L Y !", HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
-		draw_string(vf, Vector2(320 - tw / 2.0, 152), "V I C T O L Y !",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.85 * vpulse, 0.3 * vpulse))
-		draw_texture_rect(Art.tex("icon_medal"), Rect2(238, 168, 16, 16), false)
-		draw_string(vf, Vector2(260, 181), "SCORE  %d" % sim.score,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.96, 0.9))
-		draw_texture_rect(Art.tex("icon_coin"), Rect2(238, 190, 14, 14), false)
-		draw_string(vf, Vector2(260, 201), "WAR CHEST BANKED",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.92, 0.55))
-		draw_string(vf, Vector2(260, 220), "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.84, 0.74))
 	elif _debrief:
 		# Defeat debrief: the death bookend the victory tally always had —
 		# tells the story of the run and points at 'one more'.
-		var df := ThemeDB.fallback_font
-		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 110, 300, 150), false, Color(1, 1, 1, 0.96))
-		var tw2 := df.get_string_size("K.I.A.", HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
-		draw_string(df, Vector2(320 - tw2 / 2.0, 146), "K.I.A.",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.95, 0.4, 0.35))
 		var opened := 0
 		for g in sim.gates:
 			if g["open"]:
 				opened += 1
 		var dist := -Fixed.to_int(sim.camera_top) / 10
-		var lines := ["SECTOR %d/5   %dm PUSHED" % [mini(opened + 1, 5), dist],
-			"SCORE %d   KILLS %d" % [sim.score, _run_kills],
-			"LONGEST STREAK  x%d" % _run_best_streak]
+		var rows := [
+			{"text": "SECTOR %d/5   %dm PUSHED" % [mini(opened + 1, 5), dist], "color": Color(0.9, 0.92, 0.85)},
+			{"text": "SCORE %d   KILLS %d" % [sim.score, _run_kills], "color": Color(0.9, 0.92, 0.85)},
+			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
+		]
 		if best_score > 0:
-			lines.append("BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""))
-		for li in lines.size():
-			draw_string(df, Vector2(210, 168 + li * 16), lines[li],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.92, 0.85))
+			rows.append({"text": "BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""),
+				"color": Color(0.9, 0.92, 0.85)})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
-		draw_string(df, Vector2(232, 250), "PRESS  R  — REDEPLOY",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.9, 0.4, rp))
+		rows.append({"text": "PRESS  R  — REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp)})
+		_draw_result_panel("K.I.A.", Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96))
 	elif sim.last_stand:
 		draw_string(ThemeDB.fallback_font, Vector2(250, 350), "LAST STAND — NO REVIVES",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
@@ -2425,8 +2411,39 @@ func _draw_banners(top_msg: String) -> void:
 		var hf := ThemeDB.fallback_font
 		var hw := hf.get_string_size(_hint_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 		draw_rect(Rect2(320 - hw / 2.0 - 8, 92, hw + 16, 18), Color(0.05, 0.07, 0.05, 0.8 * ha))
-		draw_string(hf, Vector2(320 - hw / 2.0, 105), _hint_text,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.95, 0.7, ha))
+		Art.text_center(self, _hint_text, 320, 105, 11, Color(1.0, 0.95, 0.7, ha))
+
+
+## Shared victory/debrief result-card scaffold: translucent panel + centered
+## title + a stack of centered stat rows (each optionally icon-prefixed).
+## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?}.
+func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color) -> void:
+	var rf := Art.font()
+	var panel_x := 170.0
+	var panel_w := 300.0
+	var panel_top := 112.0
+	var title_y := 150.0
+	var row_start_y := 178.0
+	var row_h := 19.0
+	var panel_h := (row_start_y - panel_top) + maxi(rows.size(), 1) * row_h + 14.0
+	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
+	Art.text_center(self, title, 320, title_y, 24, title_col)
+	for i in rows.size():
+		var row: Dictionary = rows[i]
+		var row_text: String = row["text"]
+		var col: Color = row["color"]
+		var row_size: int = row.get("size", 11)
+		var icon: String = row.get("icon", "")
+		var icon_size: float = row.get("icon_size", 14.0)
+		var y := row_start_y + i * row_h
+		var text_w := rf.get_string_size(row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size).x
+		var gap := 6.0
+		var total_w := text_w + (icon_size + gap if not icon.is_empty() else 0.0)
+		var x := 320.0 - total_w / 2.0
+		if not icon.is_empty():
+			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size), false)
+			x += icon_size + gap
+		draw_string(rf, Vector2(x, y), row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size, col)
 
 
 func _update_hud() -> void:

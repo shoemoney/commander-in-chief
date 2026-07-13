@@ -227,6 +227,19 @@ func _draw() -> void:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 		ry += 16.0
 
+	_accessibility_pips()
+
+
+## Tiny top-right corner pips confirming REDUCE MOTION / COLORBLIND are live —
+## both toggles reshape the whole HUD but had no on-screen state readout.
+func _accessibility_pips() -> void:
+	var acc_y := 8.0
+	if Art.colorblind:
+		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
+		acc_y += 11.0
+	if main._motion < 0.5:
+		_text("RM", RIGHT - _tw("RM"), acc_y, Color(0.75, 0.95, 0.7, 0.85))
+
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 	# Fuel-cap gauge: ring frames an arc that drains green → red.
