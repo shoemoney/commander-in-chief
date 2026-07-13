@@ -105,6 +105,12 @@ const TEX := {
 	"fx_sparkle": preload(SY + "fx/fx_sparkle.png"),
 	"fx_swipe": preload(SY + "fx/fx_swipe_01.png"),
 	"fx_softspot": preload(SY + "fx/fx_soft_spot.png"),
+	"fx_shadow": preload(SY + "fx/fx_shadow.png"),
+	"fx_impactdark": preload(SY + "fx/fx_impactdark.png"),
+	"fx_wind": preload(SY + "fx/fx_wind.png"),
+	"fx_fumes4": preload(SY + "fx/fx_fumes4.png"),
+	"fx_halfcircle": preload(SY + "fx/fx_halfcircle.png"),
+	"fx_swipe2": preload(SY + "fx/fx_swipe2.png"),
 	# --- POLYGON Military mil2 bake (enemies, vehicles, weapon pickups, items) ---
 	"m_bombsuit": preload(SY + "mil2/bombsuit.png"),
 	"m_contractor2": preload(SY + "mil2/contractor2.png"),

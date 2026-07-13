@@ -1416,9 +1416,12 @@ func _aim_angle(p: Dictionary) -> float:
 
 func _ground_shadow(pos: Vector2, r: float) -> void:
 	# Soft flattened drop-shadow so units/vehicles sit ON the ground instead of
-	# floating over it — the one grounding cue the renderer was missing.
-	draw_set_transform(pos + Vector2(0, r * 0.32), 0.0, Vector2(1.0, 0.45))
-	draw_circle(Vector2.ZERO, r, Color(0.0, 0.03, 0.0, 0.22))
+	# floating over it — a legacy art soft-dark card (fx_shadow) with baked falloff
+	# replaces the hard-edged squashed circle, so the shadow edge feathers out.
+	var sh := Art.tex("fx_shadow")
+	var ss := (r * 1.15) / (sh.get_size().x * 0.5)
+	draw_set_transform(pos + Vector2(0, r * 0.32), 0.0, Vector2(ss, ss * 0.45))
+	draw_texture(sh, -sh.get_size() / 2.0, Color(0.0, 0.03, 0.0, 0.32))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
