@@ -272,6 +272,10 @@ func start_game(endless: bool) -> void:
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0   # cut from the title into combat, not a hard snap
+	# Co-op with no pad for P2 reads as a broken game (P2 gets zero input and no
+	# on-screen reason). Say so — it's a setup step, not a bug.
+	if _two_players and Input.get_connected_joypads().size() < 2:
+		_show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
 
 
 func start_daily() -> void:
@@ -2897,6 +2901,15 @@ func _draw_banners(top_msg: String) -> void:
 		if best_score > 0:
 			rows.append({"text": "BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""),
 				"color": Color(0.9, 0.92, 0.85)})
+		# Near-miss hook: turn a loss into a legible 'so close' — the strongest
+		# one-more-run lever in a session-based arcade loop.
+		if sim.mode == "endless" and best_wave > 0 and sim.wave < best_wave:
+			var dw := best_wave - sim.wave
+			rows.append({"text": "%d WAVE%s SHORT OF YOUR BEST" % [dw, "" if dw == 1 else "S"],
+				"color": Color(1.0, 0.85, 0.5)})
+		elif sim.mode == "campaign" and best_dist > 0 and dist < best_dist:
+			rows.append({"text": "%dm SHORT OF YOUR BEST PUSH" % (best_dist - dist),
+				"color": Color(1.0, 0.85, 0.5)})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
 		rows.append({"text": "PRESS  R  — REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp)})
 		_draw_result_panel("K.I.A.", Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96))
