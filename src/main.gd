@@ -44,6 +44,8 @@ var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
+var _last_gate_tick := 0         # view-side gate-split timer (speedrun read)
+var _best_gate_split := 0        # fastest gate split this run
 var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
 var _duck := 0.0                 # music-duck under heavy hits
@@ -342,6 +344,8 @@ func _reset() -> void:
 	_hint_t = 0.0
 	_hint_queue.clear()
 	_run_kills = 0
+	_last_gate_tick = 0
+	_best_gate_split = 0
 	_run_best_streak = 0
 	_down_frames = 0
 	_debrief = false
@@ -791,7 +795,16 @@ func _ev_gate_open(ev: Dictionary) -> void:
 	for d in 6:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing", "rate": 0.03,
 			"spin": randf() * TAU, "vx": randf_range(-3.0, 3.0), "vy": randf_range(-3.0, 1.0)})
-	_show_banner("GATE SECURED — CHECKPOINT")
+	# Per-gate split from the deterministic tick clock (view-side, golden-safe) —
+	# the speedrun read the plan promised: how fast you took this checkpoint.
+	var split := sim.tick_count - _last_gate_tick
+	_last_gate_tick = sim.tick_count
+	var tag := ""
+	if _best_gate_split > 0 and split < _best_gate_split:
+		tag = "  ⚡FAST"
+	if _best_gate_split == 0 or split < _best_gate_split:
+		_best_gate_split = split
+	_show_banner("GATE SECURED — %.1fs%s" % [split / 60.0, tag])
 
 
 func _ev_revive(ev: Dictionary) -> void:
