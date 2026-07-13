@@ -43,6 +43,7 @@ var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fi
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
+var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
 var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
 var _duck := 0.0                 # music-duck under heavy hits
@@ -300,6 +301,10 @@ func _reset() -> void:
 	var seed_v := 0xC0FFEE if OS.has_feature("movie") else (_daily_seed() if _daily else randi())
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
+	sim.assist_mode = _assist   # accessibility: 2-hit vest each life, flagged on the leaderboard
+	if _assist:
+		for pl in sim.players:
+			pl["vest"] = true
 	_recorder = Replay.new()   # record this run's inputs for a replayable last-run (passive; sim untouched)
 	_recorder.seed_value = seed_v
 	_recorder.mode = sim.mode
@@ -894,6 +899,7 @@ func _load_bests() -> void:
 		_seen = cf.get_value("seen", "hints", {})
 		hall.assign(cf.get_value("hall", "runs", []))
 		colorblind = cf.get_value("settings", "colorblind", false)
+		_assist = cf.get_value("settings", "assist", false)
 		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"),
 			cf.get_value("settings", "sfx_muted", false))
@@ -906,6 +912,7 @@ func _save_settings() -> void:
 	# [best]/[hall]/[seen]. Called from the pause-menu a11y/audio toggles.
 	_persist("settings", {
 		"colorblind": colorblind,
+		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
 		"sfx_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")),
 		"music_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")),
@@ -920,7 +927,7 @@ func _record_run() -> void:
 			opened += 1
 	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
-		"streak": _run_best_streak, "won": sim.victory, "daily": _daily})
+		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist})
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)

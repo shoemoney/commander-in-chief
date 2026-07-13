@@ -223,6 +223,7 @@ var intermission_ticks: int = 0
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
 var colossus: Dictionary = {}
 var endless_boss: Dictionary = {}   # endless-only miniboss (reuses the gunship schema)
+var assist_mode: bool = false       # accessibility: every life starts with a flak vest (2-hit)
 var last_stand: bool = false
 var victory: bool = false
 var wiped: bool = false            # endless: whole party down with no rescue → run over
@@ -579,7 +580,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["roll_ticks"] = 0
 	p["boost_ticks"] = 0
 	p["in_tank"] = -1
-	p["vest"] = false                  # death strips upgrades (1986 rule)
+	p["vest"] = assist_mode            # death strips upgrades (1986 rule; assist re-issues a vest)
 	p["pierce_ticks"] = 0              # ...including the Piercing Rounds buff
 	p["spread_ticks"] = 0             # ...and the Trench Gun spread buff
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
@@ -1888,6 +1889,8 @@ func checksum() -> int:
 	h = feed.call(int(last_stand), h)
 	h = feed.call(int(wiped), h)
 	h = feed.call(int(victory), h)
+	if assist_mode:
+		h = feed.call(2166136261, h)   # only perturbs the hash when assist is ON (torture: OFF)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
 				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:

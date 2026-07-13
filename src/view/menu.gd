@@ -52,6 +52,7 @@ func _menu_items() -> Array[Dictionary]:
 		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false},
 		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if reduced else "OFF"), "destructive": false},
 		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if cb else "OFF"), "destructive": false},
+		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false},
 		{"id": "restart", "label": "RESTART", "destructive": true},
 		{"id": "title", "label": "TITLE SCREEN", "destructive": true},
 	]
@@ -157,6 +158,9 @@ func _activate() -> void:
 				main._save_settings()
 			"colorblind":
 				main.colorblind = not main.colorblind
+				main._save_settings()
+			"assist":
+				main._assist = not main._assist
 				main._save_settings()
 			"restart":
 				main._reset()

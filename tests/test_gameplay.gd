@@ -305,3 +305,16 @@ func test_spread_shot_fires_three_bullets() -> void:
 	sim.step(_inputs(inp))
 	Runner.T.eq(sim.bullets.size(), 3, "spread shot spawns a 3-bullet fan")
 	Runner.T.eq(p["mg_ammo"], ammo0 - 1, "spread shot still costs one round of ammo")
+
+
+func test_assist_mode_gives_a_two_hit_vest_each_life() -> void:
+	# Assist Mode: every life starts with a flak vest, so the first hit is absorbed.
+	var sim := SimWorld.new(3, 1, "campaign")
+	sim.assist_mode = true
+	var p := sim.players[0]
+	p["vest"] = true   # what main._reset issues under assist
+	p["hurt_iframes"] = 0
+	sim._hurt_player(p)
+	Runner.T.ok(p["alive"] and not p["vest"], "assist: first hit breaks the vest, player survives")
+	sim._respawn(p, sim.camera_top)
+	Runner.T.ok(p["vest"], "assist re-issues a vest on respawn")
