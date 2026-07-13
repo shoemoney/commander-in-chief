@@ -30,6 +30,7 @@ var _trauma := 0.0
 var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+var _pending_blasts: Array[Dictionary] = []   # scheduled boss-death secondary detonations
 var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
 var _sfx := Sfx.new()
@@ -304,6 +305,7 @@ func _reset() -> void:
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
 	_fx.clear()
+	_pending_blasts.clear()
 	_scorch.clear()
 	_corpses.clear()
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
@@ -671,6 +673,9 @@ func _ev_kill(ev: Dictionary) -> void:
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
 		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, Color(1.0, 0.9, 0.45), 0.025)
+	# A downed gunship is a finale, not a kill blip — ripple it apart.
+	if kkind == "boss":
+		_boss_death_finale(ev["x"], ev["y"])
 
 
 func _ev_bunker_break(ev: Dictionary) -> void:
@@ -709,6 +714,40 @@ func _blast_debris(x: int, y: int, wet: bool = false) -> void:
 	for _s in 2:
 		_fx.append({"x": x + (randi() % 9 - 4) * Fixed.ONE, "y": y, "t": 0.0,
 			"kind": "smoke", "rate": 0.035})
+
+
+func _boss_death_finale(x: int, y: int) -> void:
+	# THE finale — the biggest spectacle in the game. A staggered chain of
+	# secondary detonations marches across the wreck's footprint over ~0.8s, a
+	# smoke pillar rises up its center, and the screen-feel is scaled well past a
+	# normal explosion. Additive view spectacle only: score/coin payout untouched.
+	# Reduce-motion gets a quieter version (fewer blasts, no big shake).
+	var reduced := _motion < 0.5
+	# Peak screen feel — the one moment that earns a full-strength hit.
+	_trauma = 1.0
+	_hitstop_frames = maxi(_hitstop_frames, 10)
+	_flash_alpha = maxf(_flash_alpha, 0.5)
+	if not reduced:
+		_rumble = maxf(_rumble, 1.0)
+		_punch = maxf(_punch, 0.09)
+	# Rising smoke pillar: puffs stacked up the center, drifting up and thinning
+	# (long life via a low rate; move+vy carries them skyward as a column).
+	var puffs := 3 if reduced else 6
+	for s in puffs:
+		_fx.append({"x": x + (randi() % 11 - 5) * Fixed.ONE, "y": y - s * 7 * Fixed.ONE,
+			"t": 0.0, "kind": "smoke", "rate": 0.016, "move": true,
+			"vx": randf_range(-0.3, 0.3), "vy": -1.4 - randf() * 0.8})
+	# Staggered secondary blasts across the footprint (flatter than round so it
+	# reads as a wreck breaking apart, not a sphere).
+	var blasts := 3 if reduced else 10
+	var step := 7 if reduced else 5
+	for b in blasts:
+		var ba := randf() * TAU
+		var rad := randf_range(6.0, 40.0)
+		_pending_blasts.append({
+			"x": x + int(cos(ba) * rad * Fixed.ONE),
+			"y": y + int(sin(ba) * rad * 0.6 * Fixed.ONE),
+			"delay": 3 + b * step})
 
 
 func _ev_gate_open(ev: Dictionary) -> void:
@@ -767,6 +806,8 @@ func _ev_victory(ev: Dictionary) -> void:
 			"rate": 0.018, "spin": randf() * TAU,
 			"vx": cos(vca) * randf_range(1.2, 3.6),
 			"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
+	# The colossus is the campaign's last boss — give its wreck the full finale.
+	_boss_death_finale(ev["x"], ev["y"])
 
 
 func _check_boss_intro() -> void:
@@ -1048,6 +1089,20 @@ func _update_feel() -> void:
 			fx["vy"] *= 0.86
 		if fx["t"] >= 1.0:
 			_fx.remove_at(i)
+	# Scheduled boss-death secondaries: each pops a full _blast_debris when its
+	# timer elapses, so detonations ripple across the wreck instead of at once.
+	for i in range(_pending_blasts.size() - 1, -1, -1):
+		var pb := _pending_blasts[i]
+		pb["delay"] -= 1
+		if pb["delay"] <= 0:
+			_fx.append({"x": pb["x"], "y": pb["y"], "t": 0.0, "kind": "explosion"})
+			_fx.append({"x": pb["x"], "y": pb["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+				"r": 40.0, "col": Color(1.0, 0.7, 0.35)})
+			_blast_debris(pb["x"], pb["y"])
+			if _motion >= 0.5:
+				_trauma = minf(1.0, _trauma + 0.12)
+				_rumble = maxf(_rumble, 0.4)
+			_pending_blasts.remove_at(i)
 	for i in range(_scorch.size() - 1, -1, -1):
 		_scorch[i]["t"] += 0.012
 		if _scorch[i]["t"] >= 1.0:
