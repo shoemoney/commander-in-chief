@@ -2345,12 +2345,14 @@ func _draw_fx() -> void:
 			draw_rect(Rect2(-1.5, -0.75, 3.0, 1.5), Color(0.95, 0.8, 0.3, 1.0 - t * 0.8))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "spark":
-			# Ricochet: short radial ticks — armor says no.
+			# Ricochet: legacy art sparkle cards flung radially — armor says no.
 			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
+			var stex := Art.tex("fx_sparkle")
+			var ssz := 5.0 + t * 5.0
 			for k in 3:
 				var sa := k * TAU / 3.0 + t * 2.0
-				draw_line(pos + Vector2.from_angle(sa) * (2.0 + t * 5.0),
-					pos + Vector2.from_angle(sa) * (5.0 + t * 7.0), sc, 1.2)
+				var sp2: Vector2 = pos + Vector2.from_angle(sa) * (3.0 + t * 7.0)
+				draw_texture_rect(stex, Rect2(sp2 - Vector2.ONE * ssz, Vector2.ONE * ssz * 2.0), false, sc)
 		elif fx["kind"] == "floattext":
 			# Stack same-tick texts (e.g. streak + bounty on one kill) so they
 			# don't overprint into a smear, and outline each so it reads over
@@ -2368,8 +2370,10 @@ func _draw_fx() -> void:
 		elif fx["kind"] == "smoke":
 			_spr("smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
 		elif fx["kind"] == "shockwave":
-			# Concussive ring: snaps out fast and thin.
-			draw_arc(pos, 4.0 + t * 34.0, 0, TAU, 32, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)), 2.5 * (1.0 - t))
+			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
+			# snaps out — reads as a pressure wave, not a flat UI stroke.
+			var swr := 4.0 + t * 34.0
+			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * swr, Vector2.ONE * swr * 2.0), false, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)))
 		elif fx["kind"] == "gib":
 			var gc: Color = fx.get("col", Color(0.5, 0.1, 0.08))
 			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(gc.r, gc.g, gc.b, 1.0 - t))
@@ -2380,11 +2384,13 @@ func _draw_fx() -> void:
 		elif fx["kind"] == "splash":
 			draw_arc(pos, 2.0 + t * 6.0, 0, TAU, 14, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)), 1.3)
 		elif fx["kind"] == "light":
-			# The gun/blast throws light onto the world (bright, brief, soft).
+			# The gun/blast throws light onto the world — a soft radial card
+			# (fx_softspot) instead of two hand-nested flat discs. One draw
+			# upgrades muzzle glow, enemy/sniper fire, vest_break, revive, surge.
 			var lc: Color = fx["col"]
 			var la := (1.0 - t) * 0.45
-			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
-			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
+			var lr: float = fx["r"] * (0.7 + t * 0.4)
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * lr, Vector2.ONE * lr * 2.0), false, Color(lc.r, lc.g, lc.b, la))
 		elif fx["kind"] == "ember":
 			# Hot spark: white-hot core over a soft glow, cooling yellow->orange and
 			# dimming fast as it flies. Additive-ish read from layered translucent discs.
