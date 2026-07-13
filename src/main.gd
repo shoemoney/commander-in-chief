@@ -2284,6 +2284,12 @@ func _draw_players() -> void:
 		if p["in_tank"] >= 0:
 			continue   # rendered as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
+		# Run-cycle bob: a per-step vertical hop while moving, matching the charging
+		# enemies' cadence so the player sprite isn't the one flat-gliding thing on the
+		# field. _dust_prev still holds LAST frame's pos here (updated by _kick_dust below).
+		var walk_bob := 0.0
+		if p["alive"] and p["roll_ticks"] == 0 and i < _dust_prev.size() and Vector2i(p["x"], p["y"]) != _dust_prev[i]:
+			walk_bob = absf(sin(Engine.get_physics_frames() * 0.35 + i * PI)) * 1.2
 		var tex_name := "player1" if i == 0 else "player2"
 		if p["alive"] and not sim._in_water(p["x"], p["y"]):
 			_kick_dust(i, p["x"], p["y"], _dust_prev, false)
@@ -2339,7 +2345,7 @@ func _draw_players() -> void:
 				draw_arc(pos + Vector2(0, 4), 4.0 + wt * 8.0, 0, TAU, 16,
 					Color(0.75, 0.9, 1.0, 0.5 * (1.0 - wt)), 1.2)
 				draw_arc(pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
-			_spr(tex_name, pos, angle, 0.52, mod)
+			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
 			# (draining arc while the bash swing is on cooldown, steady dry
@@ -2397,6 +2403,11 @@ func _draw_players() -> void:
 							bash_ready = true
 							break
 				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				# Dry-and-waiting: empty MG with bash NOT ready → grey the reticle so
+				# "nothing will fire" stops reading as "locked and loaded". Pierce/spread/
+				# bash overrides below still win when they apply.
+				if p["mg_ammo"] == 0 and not bash_ready:
+					rcol = Color(0.55, 0.55, 0.5, 0.6)
 				# Weapon-state at the point of attention: cyan while Piercing Rounds
 				# are up, amber while the Trench Gun spread is up.
 				if p["pierce_ticks"] > 0:
