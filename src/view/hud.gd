@@ -235,7 +235,14 @@ func _draw() -> void:
 			elif ammo == SimWorld.MG_AMMO_MAX:
 				acol = Color(0.6, 0.85, 1.0)
 			var ammo_x := px
-			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
+			# The ammo glyph reflects what's actually chambered: shotgun shells
+			# during the Trench Gun window, AP rounds during Piercing, else MG.
+			var acon := "icon_ammo"
+			if p["spread_ticks"] > 0:
+				acon = "item_bullet_shotgun"
+			elif p["pierce_ticks"] > 0:
+				acon = "item_bullet"
+			px = _stat(acon, "%02d" % ammo, px, ry, acol)
 			# Empty-clip bash on cooldown: a draining ring on the dry ammo icon
 			# so "melee not ready" reads distinctly from "input ignored".
 			if ammo == 0 and p["fire_cd"] > 0:
