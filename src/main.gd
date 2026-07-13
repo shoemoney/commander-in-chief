@@ -939,6 +939,14 @@ func _ev_gate_open(ev: Dictionary) -> void:
 	for d in 6:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing", "rate": 0.03,
 			"spin": randf() * TAU, "vx": randf_range(-3.0, 3.0), "vy": randf_range(-3.0, 1.0)})
+	# Breach haze: a low bank of settling dust spread across the opened corridor,
+	# lingering a few seconds after the burst — you push THROUGH the breach, not
+	# past an instant puff. Wide, slow-fading fx_smoke cards along the gate width.
+	for d in 5:
+		var hx: int = ev["x"] + (d - 2) * 140 * Fixed.ONE + int(randf_range(-30.0, 30.0)) * Fixed.ONE
+		_fx.append({"x": hx, "y": ev["y"] + 8 * Fixed.ONE, "t": 0.0, "kind": "tex",
+			"tex": "fx_smoke", "sz": 34.0, "grow": 0.7, "fade": 2.2, "rate": 0.006,
+			"col": Color(0.72, 0.7, 0.66, 0.32)})
 	# Per-gate split from the deterministic tick clock (view-side, golden-safe) —
 	# the speedrun read the plan promised: how fast you took this checkpoint.
 	var split := sim.tick_count - _last_gate_tick
