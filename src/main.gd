@@ -614,6 +614,7 @@ func _ev_explosion(ev: Dictionary) -> void:
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
 	var wet: bool = sim._in_water(ev["x"], ev["y"])
 	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
+	_blast_debris(ev["x"], ev["y"], wet)
 	if not wet:
 		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
 
@@ -682,8 +683,32 @@ func _ev_bunker_break(ev: Dictionary) -> void:
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
 		"r": 46.0, "col": Color(1.0, 0.7, 0.35)})
 	_burst(ev["x"], ev["y"], "dust", 6, 1.2, 2.6, 0.3)
+	_blast_debris(ev["x"], ev["y"])
 	_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
 	_coin_pop(ev["x"], ev["y"], "+%d¢" % ev.get("coin", 0), 4, Color(1.0, 0.9, 0.45), 0.025)
+
+
+func _blast_debris(x: int, y: int, wet: bool = false) -> void:
+	# Layers a real detonation on top of the base explosion sprite + shockwave +
+	# light: hot embers, dark thrown chunks, a delayed secondary core flash, and a
+	# slow rising smoke curl. Gated off under reduce-motion; a water blast is a
+	# splash, so it skips the fire/debris entirely.
+	if wet or _motion < 0.5:
+		return
+	# Hot embers fly out radially, skew upward, and cool + dim fast.
+	_burst(x, y, "ember", 8, 1.5, 3.6, 0.6, 0.05, 1.2, true)
+	# Dark tumbling chunks thrown with wide speed variance — the blast throws material.
+	for _d in 5:
+		var da := randf() * TAU
+		_fx.append({"x": x, "y": y, "t": 0.0, "kind": "gib", "rate": 0.05,
+			"vx": cos(da) * randf_range(1.0, 4.5), "vy": sin(da) * randf_range(1.0, 4.5),
+			"col": Color(0.2, 0.17, 0.14), "spin": randf() * TAU})
+	# Secondary inner flash: a bright core that pops ~2 frames after the main flash.
+	_fx.append({"x": x, "y": y, "t": -0.24, "kind": "flash", "rate": 0.16})
+	# Slow rising smoke curl lingers after the fire.
+	for _s in 2:
+		_fx.append({"x": x + (randi() % 9 - 4) * Fixed.ONE, "y": y, "t": 0.0,
+			"kind": "smoke", "rate": 0.035})
 
 
 func _ev_gate_open(ev: Dictionary) -> void:
@@ -2163,6 +2188,21 @@ func _draw_fx() -> void:
 			var la := (1.0 - t) * 0.45
 			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
 			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
+		elif fx["kind"] == "ember":
+			# Hot spark: white-hot core over a soft glow, cooling yellow->orange and
+			# dimming fast as it flies. Additive-ish read from layered translucent discs.
+			var ea := 1.0 - t
+			var ec := Color(1.0, 0.85 - t * 0.4, 0.35 - t * 0.3)
+			draw_circle(pos, 2.0 * (1.0 - t * 0.5), Color(ec.r, ec.g, ec.b, ea * 0.5))
+			draw_circle(pos, 0.9, Color(1.0, 0.95, 0.75, ea))
+		elif fx["kind"] == "flash":
+			# Delayed secondary core: negative t holds it dark for ~2 frames after the
+			# main blast, then it pops bright and fades — a two-stage punch.
+			if t < 0.0:
+				continue
+			var la2 := 1.0 - t
+			draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.85 * la2 * la2))
+			draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, la2))
 		elif fx["kind"] == "mote":
 			# Ambient drift: position offset is computed from age (t) rather than
 			# stepped/decayed each frame, so it stays slow and steady for its
