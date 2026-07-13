@@ -2035,7 +2035,13 @@ func _draw_projectiles() -> void:
 		var piercing: bool = owner < sim.players.size() and sim.players[owner]["pierce_ticks"] > 0
 		var tail := Color(0.5, 0.9, 1.0, 0.7) if piercing \
 			else Color(1.0, 0.8, 0.35, 0.45).lerp(Color(1.0, 0.95, 0.85, 0.6), heat)
-		draw_line(bpos - dir * (7.0 + heat * 3.0 + (4.0 if piercing else 0.0)), bpos, tail, 1.4 if piercing else 1.2)
+		# Body: a legacy art streak card (fx_bullettrail) stretched back along -velocity,
+		# tinted by the same hot/AP tail color; the crisp core + head stay procedural.
+		var tlen := 8.0 + heat * 3.0 + (5.0 if piercing else 0.0)
+		var twid := 5.0 if piercing else 4.0
+		draw_set_transform(bpos, dir.angle(), Vector2.ONE)
+		draw_texture_rect(Art.tex("fx_bullettrail"), Rect2(-tlen, -twid / 2.0, tlen, twid), false, tail)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_line(bpos - dir * 3.0, bpos, Color(0.7, 0.95, 1.0, 0.95) if piercing else Color(1.0, 0.95, 0.7, 0.95), 1.4)
 		draw_circle(bpos, 1.3 if piercing else 1.1, Color(0.9, 1.0, 1.0) if piercing else Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
@@ -2342,7 +2348,7 @@ func _draw_fx() -> void:
 			draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.9 - t * 0.8))
 		elif fx["kind"] == "casing":
 			draw_set_transform(pos, fx["spin"] + t * 6.0, Vector2.ONE)
-			draw_rect(Rect2(-1.5, -0.75, 3.0, 1.5), Color(0.95, 0.8, 0.3, 1.0 - t * 0.8))
+			draw_texture_rect(Art.tex("fx_shell"), Rect2(-3.0, -1.5, 6.0, 3.0), false, Color(1, 1, 1, 1.0 - t * 0.8))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "spark":
 			# Ricochet: legacy art sparkle cards flung radially — armor says no.
