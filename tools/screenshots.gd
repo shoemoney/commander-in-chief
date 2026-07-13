@@ -312,10 +312,12 @@ func _dress_howto(m: Node2D) -> void:
 
 
 func _dress_hall(m: Node2D) -> void:
-	m.hall = [
+	# main.gd's `hall` is typed Array[Dictionary]; assign() converts the untyped
+	# literal (a bare `=` throws "Invalid assignment ... value of type 'Array'").
+	m.hall.assign([
 		{"score": 264500, "mode": "campaign", "wave": 0, "sector": 5, "dist": 512, "streak": 14, "won": true},
 		{"score": 88900, "mode": "endless", "wave": 12, "sector": 1, "dist": 40, "streak": 9, "won": false},
 		{"score": 41200, "mode": "campaign", "wave": 0, "sector": 3, "dist": 210, "streak": 6, "won": false},
-	]
+	])
 	m._menu.open(GameMenu.Mode.HALL)
 	m._hud_icons.visible = false
