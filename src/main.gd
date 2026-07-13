@@ -43,6 +43,7 @@ var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
+var _rumble_on := true            # accessibility: gamepad vibration on/off
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
@@ -984,6 +985,7 @@ func _load_bests() -> void:
 		colorblind = cf.get_value("settings", "colorblind", false)
 		_assist = cf.get_value("settings", "assist", false)
 		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
+		_rumble_on = cf.get_value("settings", "rumble", true)
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"),
 			cf.get_value("settings", "sfx_muted", false))
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"),
@@ -997,6 +999,7 @@ func _save_settings() -> void:
 		"colorblind": colorblind,
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
+		"rumble": _rumble_on,
 		"sfx_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")),
 		"music_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")),
 	})
@@ -1245,8 +1248,9 @@ func _update_feel() -> void:
 	_kick *= 0.78
 	# Gamepad rumble: one pooled pulse per frame across connected pads.
 	if _rumble > 0.01:
-		for pad in Input.get_connected_joypads():
-			Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
+		if _rumble_on:
+			for pad in Input.get_connected_joypads():
+				Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
 		_rumble = 0.0
 	var mag := _trauma * _trauma * 6.0 * _motion
 	var shake := Vector2.ZERO
@@ -2432,8 +2436,8 @@ func _draw_fx() -> void:
 			# White-hot detonation core: swells a touch, then snaps out.
 			var fa := (1.0 - t) * (1.0 - t)
 			var fr := 9.0 + t * 15.0
-			draw_circle(pos, fr, Color(1.0, 0.85, 0.55, 0.5 * fa))
-			draw_circle(pos, fr * 0.6, Color(1.0, 0.97, 0.8, 0.75 * fa))
+			draw_texture_rect(Art.tex("fx_disc"), Rect2(pos - Vector2.ONE * fr, Vector2.ONE * fr * 2.0),
+				false, Color(1.0, 0.9, 0.6, 0.7 * fa))
 			draw_circle(pos, fr * 0.3, Color(1.0, 1.0, 1.0, 0.95 * fa))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
@@ -2445,8 +2449,12 @@ func _draw_fx() -> void:
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "alert":
 			# Expanding "spotted!" ring (observer arrival).
-			draw_arc(pos, 6.0 + t * 42.0, 0, TAU, 28, Color(1.0, 0.25, 0.2, 0.8 - t * 0.7), 2.5)
-			draw_arc(pos, 3.0 + t * 26.0, 0, TAU, 24, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6), 1.5)
+			var ar1 := 6.0 + t * 42.0
+			var ar2 := 3.0 + t * 26.0
+			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * ar1, Vector2.ONE * ar1 * 2.0),
+				false, Color(1.0, 0.25, 0.2, 0.8 - t * 0.7))
+			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * ar2, Vector2.ONE * ar2 * 2.0),
+				false, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6))
 		elif fx["kind"] == "muzzle":
 			var sz := (13.0 if fx.get("big", false) else 9.0) * (1.0 - t * 0.6)
 			var dirv := Vector2.from_angle(fx["a"])
@@ -2512,7 +2520,9 @@ func _draw_fx() -> void:
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * dr, Vector2.ONE * dr * 2.0),
 				false, Color(dust_col.r, dust_col.g, dust_col.b, 0.4 * (1.0 - t)))
 		elif fx["kind"] == "splash":
-			draw_arc(pos, 2.0 + t * 6.0, 0, TAU, 14, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)), 1.3)
+			var spr := 2.5 + t * 7.0
+			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * spr, Vector2.ONE * spr * 2.0),
+				false, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)))
 		elif fx["kind"] == "light":
 			# The gun/blast throws light onto the world — a soft radial card
 			# (fx_softspot) instead of two hand-nested flat discs. One draw
