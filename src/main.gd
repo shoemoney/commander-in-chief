@@ -1094,6 +1094,12 @@ func _check_near_miss() -> void:
 			if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], near_r):
 				_whiz_frame = Engine.get_physics_frames()
 				_sfx.play("whiz", -13.0, randf_range(0.95, 1.1))
+				# Visible graze streak at the miss point so the dodge reads on-screen, not
+				# just in the ears — a muted player still sees the round rip past.
+				_fx.append({"x": b["x"], "y": b["y"], "t": 0.0, "kind": "tex",
+					"tex": "fx_bullettrail", "sz": 11.0, "fade": 2.6, "rate": 0.28,
+					"rot": Vector2(b.get("vx", 0), b.get("vy", 0)).angle(),
+					"col": Color(1.0, 0.96, 0.72, 0.85)})
 				return
 
 
