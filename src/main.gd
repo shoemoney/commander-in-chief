@@ -444,12 +444,16 @@ func _consume_events() -> void:
 		match kind:
 			"armor_block":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
+					"sz": 8.0, "fade": 1.5, "rate": 0.15, "col": Color(0.15, 0.13, 0.12, 0.7)})
 				_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -16.0, 1.7)
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
+					"sz": 8.0, "fade": 1.5, "rate": 0.15, "col": Color(0.15, 0.13, 0.12, 0.7)})
 				_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0
 				if not boss_pinged:
 					boss_pinged = true
@@ -466,6 +470,9 @@ func _consume_events() -> void:
 				_recoil[ev["i"]] -= Vector2(bp["aim_x"], bp["aim_y"]) * PX * 3.0
 				_fx.append({"x": ev["x"] + int(bp["aim_x"] * 12), "y": ev["y"] + int(bp["aim_y"] * 12),
 					"t": 0.0, "kind": "spark", "rate": 0.3})
+				_fx.append({"x": ev["x"] + int(bp["aim_x"] * 12), "y": ev["y"] + int(bp["aim_y"] * 12),
+					"t": 0.0, "kind": "tex", "tex": "fx_swipe2", "sz": 16.0, "fade": 2.0, "rate": 0.1,
+					"rot": Vector2(bp["aim_x"], bp["aim_y"]).angle(), "col": Color(1, 1, 1, 0.85)})
 			"buy":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})
@@ -482,6 +489,9 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"] + int(gunner["aim_x"] * 18),
 					"y": ev["y"] + int(gunner["aim_y"] * 18),
 					"t": 0.0, "kind": "muzzle", "rate": 0.22, "a": taim.angle(), "big": true})
+				_fx.append({"x": ev["x"] + int(gunner["aim_x"] * 18),
+					"y": ev["y"] + int(gunner["aim_y"] * 18), "t": 0.0, "kind": "tex", "tex": "fx_swipe",
+					"sz": 22.0, "fade": 1.6, "rate": 0.15, "rot": taim.angle(), "col": Color(1.0, 0.85, 0.5, 0.8)})
 			"explosion":
 				_ev_explosion(ev)
 			"kill":
@@ -504,6 +514,8 @@ func _consume_events() -> void:
 						"rate": 0.32, "a": k * TAU / 4.0})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.14,
 					"r": 22.0, "col": Color(1.0, 0.3, 0.25)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_lightning",
+					"sz": 26.0, "fade": 2.5, "rate": 0.05, "rot": float(ev["y"] % 628) * 0.01, "col": Color(1.0, 0.95, 0.9, 0.85)})
 			"tank_ignite":
 				# The bail-out clock just started (alarm already sounds) — punch the
 				# camera + throw an alert ring so it lands as a real "get out" beat.
@@ -538,6 +550,10 @@ func _consume_events() -> void:
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
+				var rp: Dictionary = sim.players[ev["i"]]
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_wind",
+					"sz": 15.0, "grow": 0.4, "fade": 1.2, "rate": 0.05,
+					"rot": Vector2(rp["aim_x"], rp["aim_y"]).angle(), "col": Color(1, 1, 1, 0.5)})
 			"gate_flawless":
 				# A disciplined, deathless checkpoint clear — gold payoff + sting,
 				# louder as the clean-gate streak compounds.
@@ -563,6 +579,8 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.1})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
 					"r": 60.0, "col": Color(1.0, 0.6, 0.2)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_circle",
+					"sz": 24.0, "grow": 1.2, "fade": 1.0, "rate": 0.04, "col": Color(1.0, 0.7, 0.3, 0.6)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "ADRENALINE", "col": Color(1.0, 0.6, 0.25)})
 				_sfx.play("gate_open", -3.0, 1.3)
@@ -666,6 +684,9 @@ func _ev_explosion(ev: Dictionary) -> void:
 	# Textured hot-disc flash (legacy art fx_disc) over the procedural burst.
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
 		"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
+	# Dark crater stamp bridges the instant flash and the slow-building scorch.
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
+		"sz": 20.0, "grow": 0.2, "fade": 0.8, "rate": 0.02, "col": Color(1, 1, 1, 0.6)})
 	var wet: bool = sim._in_water(ev["x"], ev["y"])
 	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
 	_blast_debris(ev["x"], ev["y"], wet)
