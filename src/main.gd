@@ -18,6 +18,9 @@ const SCREEN_CENTER := Vector2(320, 180)
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
 	"watchtower", "barbedwire", "barrier", "ammobox"]
+# Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
+# (spawn-derived, checksum-excluded) so a rush reads as varied troops.
+const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
 
 var sim: SimWorld
 var _recorder: Replay             # captures this run's inputs → user://last_run.replay (view-only)
@@ -376,6 +379,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_reset()
 		elif event.keycode == KEY_R:
 			_reset()
+
+
+func _notification(what: int) -> void:
+	# One-death sim: alt-tabbing away keeps sim.step() ticking blind and hands the
+	# player a death that reads as a bug, not a loss. Auto-open pause the instant the
+	# window loses focus during live play. sim.step() is already gated behind
+	# _menu.is_active(), so this is a pure view gate with zero sim contact — golden-safe.
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		if _menu.mode == GameMenu.Mode.HIDDEN and not sim.wiped and not sim.victory:
+			_menu.open(GameMenu.Mode.PAUSE)
+			queue_redraw()
 
 
 func _physics_process(_delta: float) -> void:
@@ -1898,7 +1912,7 @@ func _draw_enemies() -> void:
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			_spr("elite", epos, face, 0.5 * esw, Color(1.35, 0.75, 0.7))
 		else:
-			_spr("rusher", epos, face, 0.5)
+			_spr(_RUSHER_SKINS[e.get("skin", 0)], epos, face, 0.5)
 
 
 func _draw_observer() -> void:

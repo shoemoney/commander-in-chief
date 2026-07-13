@@ -1292,6 +1292,11 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 		# across the field (the view crowns it so the payoff reads before you commit).
 		if rng.range_i(0, 6) == 0:
 			e["marked"] = true
+	else:
+		# Cosmetic sprite variant so a rusher wave reads as varied troops, not one
+		# silhouette cloned N times. Derived from spawn position (NO rng draw) and
+		# excluded from checksum() -> golden-safe (see KNOWN["enemy"] in coverage).
+		e["skin"] = (x / F_ONE + y / F_ONE) & 3
 	enemies.append(e)
 
 
