@@ -318,3 +318,19 @@ func test_assist_mode_gives_a_two_hit_vest_each_life() -> void:
 	Runner.T.ok(p["alive"] and not p["vest"], "assist: first hit breaks the vest, player survives")
 	sim._respawn(p, sim.camera_top)
 	Runner.T.ok(p["vest"], "assist re-issues a vest on respawn")
+
+
+func _hard_spawn_count(hard: bool) -> int:
+	var sim := SimWorld.new(77, 1, "campaign")
+	sim.hard = hard
+	for g in 3:
+		sim.gates.append({"y": -1000000 * g, "open": true, "b1": {}, "b2": {}, "boss": {}})
+	for t in 1200:
+		sim._step_spawner()
+		sim.tick_count += 1
+	return sim.enemies.size()
+
+
+func test_ng_plus_hard_tightens_the_spawn_curve() -> void:
+	Runner.T.ok(_hard_spawn_count(true) > _hard_spawn_count(false),
+		"NG+ HARD fields more enemies than the normal campaign curve")

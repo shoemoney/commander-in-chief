@@ -44,6 +44,7 @@ var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
+var _hard := false               # New Game+ HARD: tighter campaign spawn curve
 var _last_gate_tick := 0         # view-side gate-split timer (speedrun read)
 var _best_gate_split := 0        # fastest gate split this run
 var _punch := 0.0                # camera zoom-punch on heavy impacts
@@ -304,6 +305,7 @@ func _reset() -> void:
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
 	sim.assist_mode = _assist   # accessibility: 2-hit vest each life, flagged on the leaderboard
+	sim.hard = _hard and not _endless   # NG+ HARD applies to campaign only
 	if _assist:
 		for pl in sim.players:
 			pl["vest"] = true

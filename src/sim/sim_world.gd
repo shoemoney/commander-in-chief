@@ -224,6 +224,7 @@ var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 
 var colossus: Dictionary = {}
 var endless_boss: Dictionary = {}   # endless-only miniboss (reuses the gunship schema)
 var assist_mode: bool = false       # accessibility: every life starts with a flak vest (2-hit)
+var hard: bool = false              # New Game+ HARD: a tighter campaign spawn curve
 var last_stand: bool = false
 var victory: bool = false
 var wiped: bool = false            # endless: whole party down with no rescue → run over
@@ -1258,6 +1259,8 @@ func _step_spawner() -> void:
 	if _spawn_grace > 0:
 		_spawn_grace -= 1
 	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 4)
+	if hard:
+		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
@@ -1272,6 +1275,8 @@ func _step_spawner() -> void:
 		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
 		# gate 5) so late campaign escalates composition, not just cadence.
 		var elite_every := maxi(3, 8 - opened)
+		if hard:
+			elite_every = maxi(2, elite_every - 2)   # NG+ fields far more red elites
 		_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
 
 
@@ -1891,6 +1896,8 @@ func checksum() -> int:
 	h = feed.call(int(victory), h)
 	if assist_mode:
 		h = feed.call(2166136261, h)   # only perturbs the hash when assist is ON (torture: OFF)
+	if hard:
+		h = feed.call(40503, h)        # only perturbs the hash when HARD is ON (torture: OFF)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
 				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:
