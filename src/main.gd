@@ -1135,6 +1135,7 @@ func _draw() -> void:
 	_draw_fx()
 	_draw_telegraphs()
 	_draw_threat_edges()
+	_draw_objective_markers()
 	_draw_progress_rail()
 	_draw_wheel()
 	_draw_airstrike_telegraph()
@@ -2013,6 +2014,73 @@ func _draw_threat_edges() -> void:
 		var tcol := Color(1.0, 0.55, 0.25, clampf(1.0 + ty / 180.0, 0.2, 0.7))
 		draw_line(Vector2(tx - 4, 28), Vector2(tx, 24), tcol, 2.0)
 		draw_line(Vector2(tx, 24), Vector2(tx + 4, 28), tcol, 2.0)
+
+
+func _draw_objective_markers() -> void:
+	# The battlefield self-labels "go here / kill this / grab this". On-screen
+	# objectives get a small bobbing icon overhead; off-screen ones become a
+	# directional diamond pinned to the nearest edge (distinct from the red
+	# threat chevrons — these are objectives, not generic hostiles).
+	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0
+	var marks: Array = []
+	for g in sim.gates:
+		if not g["open"] and not g.get("final", false):
+			marks.append({"sx": 320.0, "sy": (g["y"] - sim.camera_top) * PX,
+				"icon": "hud_flag", "col": Color(1.0, 0.9, 0.4)})
+			break
+	if not sim.endless_boss.is_empty() and sim.endless_boss.get("alive", false):
+		marks.append({"sx": sim.endless_boss["x"] * PX,
+			"sy": (sim.endless_boss.get("gate_y", sim.camera_top) - sim.camera_top) * PX,
+			"icon": "hud_skull", "col": Color(1.0, 0.5, 0.35)})
+	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+		marks.append({"sx": sim.colossus["x"] * PX, "sy": (sim.colossus["y"] - sim.camera_top) * PX,
+			"icon": "hud_skull", "col": Color(1.0, 0.45, 0.3)})
+	for e in sim.enemies:
+		if not e["alive"]:
+			continue
+		if e["kind"] == "courier":
+			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
+				"icon": "hud_vehicle", "col": Color(1.0, 0.85, 0.35)})
+		elif e.get("marked", false):
+			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
+				"icon": "hud_target", "col": Color(1.0, 0.82, 0.3)})
+	for pk in sim.pickups:
+		if pk.get("cost", 0) > 0:
+			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
+				"icon": "hud_gunshop", "col": Color(0.6, 0.9, 1.0)})
+	for m in marks:
+		var mp := Vector2(m["sx"], m["sy"])
+		var on := mp.x >= 6.0 and mp.x <= 634.0 and mp.y >= 32.0 and mp.y <= 354.0
+		if on:
+			draw_texture_rect(Art.tex(m["icon"]),
+				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
+		else:
+			var ep := _marker_edge(mp)
+			_marker_diamond(ep, 5.0, m["col"])
+			draw_texture_rect(Art.tex(m["icon"]), Rect2(ep - Vector2(4, 4), Vector2(8, 8)), false, m["col"])
+
+
+func _marker_edge(pos: Vector2) -> Vector2:
+	# Project from screen center to the point, clamped to the viewport border.
+	var c := Vector2(320.0, 190.0)
+	var d := pos - c
+	if d.length() < 1.0:
+		return pos
+	var s := 1.0
+	if d.x > 0.01:
+		s = minf(s, (624.0 - c.x) / d.x)
+	elif d.x < -0.01:
+		s = minf(s, (16.0 - c.x) / d.x)
+	if d.y > 0.01:
+		s = minf(s, (344.0 - c.y) / d.y)
+	elif d.y < -0.01:
+		s = minf(s, (36.0 - c.y) / d.y)
+	return c + d * maxf(s, 0.0)
+
+
+func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
+		p + Vector2(0, r), p + Vector2(-r, 0)]), Color(col.r, col.g, col.b, 0.85))
 
 
 func _draw_wheel() -> void:

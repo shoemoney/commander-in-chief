@@ -49,6 +49,11 @@ const TEX := {
 	"icon_airstrike": preload(SY + "icons/icon_airstrike.png"),
 	# Apocalypse HUD sprites (imported 2D kit, assets/legacy-art/hud/).
 	"hud_star": preload(SY + "hud/ICON_Map_Star.png"),
+	"hud_flag": preload(SY + "hud/ICON_Map_Flag.png"),
+	"hud_skull": preload(SY + "hud/ICON_Map_Skull.png"),
+	"hud_target": preload(SY + "hud/ICON_Map_Target.png"),
+	"hud_gunshop": preload(SY + "hud/ICON_Map_GunShop.png"),
+	"hud_vehicle": preload(SY + "hud/ICON_Map_Vehicle.png"),
 	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
 	"ui_wheel_socket": preload(SY + "ui/wheel_socket.png"),
 	"ui_bar_frame": preload(SY + "ui/bar_frame.png"),
