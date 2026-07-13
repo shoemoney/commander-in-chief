@@ -541,6 +541,9 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Color(0.5, 1.0, 0.7)})
 				_sfx.play("buy", -3.0, 1.5)
+			"courier_escape":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
 			"observer_spawn":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
 				_show_banner("MORTAR OBSERVER SPOTTED")
@@ -1410,6 +1413,13 @@ func _draw_enemies() -> void:
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("elite", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber
+		elif e["kind"] == "courier":
+			# Fleeing supply runner: gold-tinted, a bobbing loot sack overhead +
+			# a pulsing ring so "catch this one" reads across the field.
+			_spr("rusher", epos, face, 0.5, Color(1.4, 1.15, 0.4))
+			var lb := Art.pulse(0.2)
+			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
+			draw_circle(epos + Vector2(0, -11 - lb * 1.5), 2.6, Color(1.0, 0.85, 0.3))
 		elif e["kind"] == "shield":
 			_spr("rusher", epos, face, 0.55, Color(0.85, 0.9, 1.0))
 			# The riot shield: a bright arc across the front — this side deflects.

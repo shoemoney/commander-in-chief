@@ -33,6 +33,10 @@ const GRENADE_GRAV := F_ONE / 8
 const GRENADE_RADIUS := 28 * F_ONE
 const GRENADE_COOLDOWN_TICKS := 30
 const ENEMY_SPEED := (F_ONE * 8) / 5          # 1.6 px/tick
+# Supply courier: the roster's only enemy that FLEES. Runs for the top edge at
+# just under player speed (so it's a real chase, catchable by cutting it off or
+# shooting it down); killed before it escapes it drops a fat bounty.
+const COURIER_SPEED := (PLAYER_SPEED * 9) / 10
 const ELITE_SPEED := 2 * F_ONE
 # Elites are ranged skirmishers: close to standoff range, telegraph a wind-up,
 # then loose one aimed shot. Starting values (tune via playtest).
@@ -433,7 +437,7 @@ func _step_players(inputs: Array) -> void:
 		if p["roll_ticks"] == 0 and p["in_tank"] < 0:
 			for e in enemies:
 				if e["alive"] and not e.get("submerged", false) \
-						and e.get("surface_ticks", 0) == 0 \
+						and e.get("surface_ticks", 0) == 0 and e["kind"] != "courier" \
 						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					_hurt_player(p)
 					break
@@ -846,6 +850,8 @@ func _explode(x: int, y: int) -> void:
 func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
+	if e["kind"] == "courier":
+		coin = COIN_ELITE * 4   # fat bounty for catching the runner
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
@@ -912,6 +918,19 @@ func _step_enemies() -> void:
 		var dx: int = target["x"] - e["x"]
 		var dy: int = target["y"] - e["y"]
 		var dlen := Fixed.length(dx, dy)
+		if e["kind"] == "courier":
+			# Flee AWAY from the nearest player, biased up toward the top edge;
+			# crossing above the view means it escaped (and forfeits its bounty).
+			var fx: int = -dx
+			var fy: int = -dy - 40 * F_ONE
+			var flen := Fixed.length(fx, fy)
+			if flen > F_ONE:
+				e["x"] = e["x"] + Fixed.mul(Fixed.div(fx, flen), COURIER_SPEED)
+				e["y"] = e["y"] + Fixed.mul(Fixed.div(fy, flen), COURIER_SPEED)
+			if e["y"] < camera_top - 30 * F_ONE:
+				e["alive"] = false
+				events.append({"t": "courier_escape", "x": e["x"], "y": e["y"]})
+			continue
 		if e["kind"] == "grenadier":
 			_step_grenadier(e, target, dx, dy, dlen)
 			continue
@@ -1171,6 +1190,13 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	return dot < -(F_ONE / 2)
 
 
+func _spawn_courier() -> void:
+	# A fleeing supply runner, dropped into the lower-middle so it has to cross
+	# the arena on its way to the top edge — a window to catch it.
+	enemies.append({"x": rng.range_i(80, 560) * F_ONE, "y": camera_top + 240 * F_ONE,
+		"alive": true, "elite": false, "kind": "courier"})
+
+
 func _spawn_special(x: int, y: int, kind: String) -> void:
 	## Endless-only ranged archetypes (grenadier/sniper). Coin-worthy like an
 	## elite; reuse fire_cd/windup so no new hashed enemy field is introduced.
@@ -1368,6 +1394,8 @@ func _start_wave() -> void:
 	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
 	wave_spawn_cd = 1
 	deaths_this_wave = 0
+	if wave >= 3 and rng.range_i(0, 2) == 0:
+		_spawn_courier()   # ~1-in-3 waves field a fleeing bounty runner
 	# Wave mutators give each wave an identity (and make the shop a counter-
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.

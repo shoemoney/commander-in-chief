@@ -147,3 +147,19 @@ func test_clean_wave_and_payday_bonus() -> void:
 	var score0 := sim.score
 	sim.step([SimInput.new()])
 	Runner.T.ok(sim.score - score0 >= 1500, "a deathless wave clear pays the Clean Wave bonus")
+
+
+func test_courier_is_harmless_and_pays_a_fat_bounty() -> void:
+	# The fleeing supply courier never touch-kills; caught, it drops 4× elite coin.
+	var sim := SimWorld.new(55, 1, "endless")
+	var p := sim.players[0]
+	sim.enemies.clear()
+	sim._spawn_courier()
+	var c := sim.enemies[0]
+	p["x"] = c["x"]
+	p["y"] = c["y"]
+	sim.step([SimInput.new()])
+	Runner.T.ok(p["alive"], "the courier is harmless on contact (it flees, never attacks)")
+	var chest0 := sim.war_chest
+	sim._kill_enemy(c)
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_ELITE * 4, "a caught courier drops a 4× elite bounty")
