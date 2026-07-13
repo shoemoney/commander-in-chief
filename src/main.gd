@@ -101,6 +101,9 @@ const SAVE_BAK := "user://ikari_best.cfg.bak"
 var best_score := 0
 var best_wave := 0
 var best_dist := 0
+var _life_runs := 0              # career totals (title screen), separate from the top-8 hall
+var _life_kills := 0
+var _life_wins := 0
 var hall: Array[Dictionary] = []   # top-N run history for the Hall of Fame
 var _best_dirty := false
 var _prev_colossus_phase := 0     # phase-change escalation banners
@@ -1079,6 +1082,9 @@ func _load_bests() -> void:
 		best_dist = cf.get_value("best", "dist", 0)
 		_seen = cf.get_value("seen", "hints", {})
 		hall.assign(cf.get_value("hall", "runs", []))
+		_life_runs = cf.get_value("life", "runs", 0)
+		_life_kills = cf.get_value("life", "kills", 0)
+		_life_wins = cf.get_value("life", "wins", 0)
 		colorblind = cf.get_value("settings", "colorblind", false)
 		_assist = cf.get_value("settings", "assist", false)
 		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
@@ -1115,6 +1121,11 @@ func _record_run() -> void:
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
 	_persist("hall", {"runs": hall})
+	_life_runs += 1
+	_life_kills += _run_kills
+	if sim.victory:
+		_life_wins += 1
+	_persist("life", {"runs": _life_runs, "kills": _life_kills, "wins": _life_wins})
 
 
 func _hint(id: String, text: String) -> void:

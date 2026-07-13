@@ -198,6 +198,10 @@ func _draw() -> void:
 		if main.best_score > 0:
 			_center_text("BEST — SCORE %d · WAVE %d · %dm" % [main.best_score,
 				main.best_wave, main.best_dist], 132, 9, Color(1.0, 0.92, 0.55, 0.85))
+		if main._life_runs > 0:
+			var wpct: int = main._life_wins * 100 / main._life_runs
+			_center_text("CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
+				main._life_kills, wpct], 145, 8, Color(0.6, 0.72, 0.62, 0.7))
 	else:
 		_center_text("PAUSED", 78, 22, Color(0.95, 0.95, 0.85))
 		# Pause doubles as a status check — the run so far.
