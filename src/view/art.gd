@@ -134,6 +134,11 @@ const TEX := {
 	"m_drone": preload(SY + "mil2/drone.png"),
 	"m_light_tank": preload(SY + "mil2/light_tank.png"),
 	"m_technical": preload(SY + "mil2/technical.png"),
+	# Wreck variants: same vehicle art, but muted/small/outlined for battlefield
+	# litter (see SCALE/TINT below) — dead hulks, not live vehicles.
+	"wreck_apc": preload(SY + "mil2/apc.png"),
+	"wreck_technical": preload(SY + "mil2/technical.png"),
+	"wreck_light_tank": preload(SY + "mil2/light_tank.png"),
 	"wep_grenade": preload(SY + "mil2/wep_grenade.png"),
 	"wep_rpg": preload(SY + "mil2/wep_rpg.png"),
 	"wep_shotgun": preload(SY + "mil2/wep_shotgun.png"),
@@ -176,6 +181,7 @@ const SCALE := {
 	"m_apc": 0.7, "m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34, "m_light_tank": 0.6,
 	"m_technical": 0.6,
+	"wreck_apc": 0.3, "wreck_technical": 0.28, "wreck_light_tank": 0.28,
 	"wep_grenade": 0.34, "wep_rpg": 0.4, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
 	"wep_pistol": 0.32, "wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
 	"item_bullet": 0.32, "item_bullet_shotgun": 0.32, "item_binoculars": 0.34,
@@ -219,6 +225,8 @@ const TINT := {
 	"m_apc": OLIVE_VEH, "m_radar_tank": OLIVE_VEH, "m_rocket_truck": OLIVE_VEH,
 	"m_jet": OLIVE_VEH, "m_heli_transport": OLIVE_VEH, "m_heli_attack2": OLIVE_VEH,
 	"m_drone": Color(1.2, 1.3, 1.4), "m_light_tank": OLIVE_VEH, "m_technical": OLIVE_VEH,
+	"wreck_apc": Color(0.55, 0.58, 0.52), "wreck_technical": Color(0.55, 0.58, 0.52),
+	"wreck_light_tank": Color(0.55, 0.58, 0.52),
 	"wep_grenade": Color(1.1, 1.15, 0.95), "wep_rpg": Color(1.15, 1.05, 0.9),
 	"wep_shotgun": Color(1.1, 1.1, 1.0), "wep_rifle": Color(1.1, 1.1, 1.0),
 	"wep_mg": Color(1.1, 1.1, 1.0), "wep_pistol": Color(1.1, 1.1, 1.0),
@@ -241,7 +249,8 @@ const OUTLINE := {
 	"m_insurgent5": true, "m_pilot": true, "m_soldier2": true,
 	"m_apc": true, "m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true, "m_light_tank": true,
-	"m_technical": true, "wep_grenade": true, "wep_rpg": true, "wep_shotgun": true,
+	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
+	"wep_grenade": true, "wep_rpg": true, "wep_shotgun": true,
 	"wep_rifle": true, "wep_mg": true, "item_bullet": true, "item_bullet_shotgun": true,
 }
 

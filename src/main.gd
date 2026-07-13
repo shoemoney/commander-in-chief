@@ -17,7 +17,8 @@ const SCREEN_H := 360.0
 const SCREEN_CENTER := Vector2(320, 180)
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
-	"watchtower", "barbedwire", "barrier", "ammobox"]
+	"watchtower", "barbedwire", "barrier", "ammobox",
+	"wreck_apc", "wreck_technical", "wreck_light_tank"]
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
