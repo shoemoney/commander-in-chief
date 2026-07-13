@@ -527,6 +527,12 @@ func _consume_events() -> void:
 			"frag_bonus":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": "FRAG x%d" % ev["n"], "col": Color(1.0, 0.7, 0.35)})
+				# One mini frag icon per kill (capped at 4) flung outward for the pop.
+				for fk in mini(int(ev["n"]), 4):
+					var fa := float(fk) * TAU / 3.0 + 0.4
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "fragpop",
+						"rate": 0.03, "move": true, "spin": fa,
+						"vx": cos(fa) * 2.2, "vy": sin(fa) * 2.2 - 0.8})
 				_sfx.play("buy", -6.0, 1.2)
 			"bunker_break":
 				_ev_bunker_break(ev)
@@ -2488,6 +2494,14 @@ func _draw_fx() -> void:
 				var ra := rr + ri * PI / 2
 				draw_line(cpos - Vector2.from_angle(ra) * 15.0, cpos + Vector2.from_angle(ra) * 15.0,
 					Color(0.85, 0.85, 0.85, 0.35), 1.5)
+		elif fx["kind"] == "fragpop":
+			# Mini frag icons flung outward on a grenade multi-kill — extra pop
+			# under the "FRAG xN" text. Rides the fx move/aging like a casing.
+			var fs := 6.0 * (1.0 - t * 0.4)
+			draw_set_transform(pos, fx.get("spin", 0.0) + t * 5.0, Vector2.ONE)
+			draw_texture_rect(Art.tex("wep_grenade"), Rect2(-fs, -fs, fs * 2.0, fs * 2.0), false,
+				Color(1, 1, 1, 1.0 - t))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "floattext":
 			# Stack same-tick texts (e.g. streak + bounty on one kill) so they
 			# don't overprint into a smear, and outline each so it reads over
