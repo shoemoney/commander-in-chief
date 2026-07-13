@@ -98,3 +98,13 @@ jobs:
             echo "::error::Sim determinism lint found forbidden tokens in src/sim"
             exit 1
           fi
+
+      - name: Headless boot smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GODOT" --headless --path . -s res://tools/smoke.gd 2>&1 | tee smoke-output.log
+          if grep -qE "SCRIPT ERROR|Parse Error" smoke-output.log; then
+            echo "::error::Headless boot smoke test hit a script/parse error in main.gd/view"
+            exit 1
+          fi
