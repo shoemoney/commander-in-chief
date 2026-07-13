@@ -71,7 +71,7 @@ func _draw() -> void:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
-				var mchip: String = ["", "BLITZ", "ELITE GUARD", "SPOTTER"][sim.wave_mod]
+				var mchip: String = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY"][sim.wave_mod]
 				x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
 			# Live wave-clear dashboard: how close is this wave to done? (the
 			# push-or-hold decision was blind — enemy count already computed

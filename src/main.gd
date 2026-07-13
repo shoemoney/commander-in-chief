@@ -532,11 +532,15 @@ func _consume_events() -> void:
 						"vx": cos(va) * randf_range(1.2, 2.8), "vy": sin(va) * randf_range(1.2, 2.8),
 						"spin": randf() * TAU, "col": Color(0.55, 0.7, 1.0)})
 			"wave_start":
-				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER"][ev.get("mod", 0)]
+				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 			"wave_clear":
 				_show_banner("WAVE CLEARED — SHOP OPEN")
+			"wave_flawless":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Color(0.5, 1.0, 0.7)})
+				_sfx.play("buy", -3.0, 1.5)
 			"observer_spawn":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
 				_show_banner("MORTAR OBSERVER SPOTTED")

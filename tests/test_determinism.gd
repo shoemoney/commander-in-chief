@@ -61,13 +61,16 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 17 economy&anti-stall): compounding Flawless-Gate streak
 ## (new checksummed flawless_streak; consecutive clean gates pay up to 3×) + an avenge bounty for
 ## kills next to a downed ally. Campaign torture opens gates + 2P deaths → all samples moved.
+## RE-RECORDED (2026-07-12, iter 19 endless-depth): Clean-Wave bonus (new checksummed
+## deaths_this_wave; endless-only reward) + PAYDAY wave mutator + per-wave shop-crate shuffle.
+## The deaths_this_wave field (0 in campaign) shifts every campaign sample.
 const GOLDEN: Array[int] = [
-	5415768351136730559,
-	5964438992717087203,
-	2246678724761708659,
-	3613761592137134509,
-	7354413151323941803,
-	6861914696690715396,
+	8115790318362077857,
+	7194404661752016069,
+	924774564009016043,
+	7538835225478606903,
+	768985619869056713,
+	4767029557005767388,
 ]
 
 
@@ -125,13 +128,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-12, iter 17): flawless_streak joins checksum (0 in endless) + the avenge
 ## bounty fires in the 2P endless torture too; all samples moved. (Endless revive-cost scaling is
 ## wave-5+ only, so it's inert here — the torture wipes at wave 2.)
+## RE-RECORDED (2026-07-12, iter 19): deaths_this_wave joins checksum + the wave-1 clear now
+## shuffles the shop crates (rng shift) and can pay a Clean Wave bonus; all endless samples moved.
+## (PAYDAY only rolls at wave 3+, which the wave-2-wiping torture never reaches.)
 const ENDLESS_GOLDEN: Array[int] = [
-	6235426198087942326,
-	6068615805984751221,
-	2500205223678894506,
-	2523127580162594306,
-	6478453569125951994,
-	8262094038849914066,
+	3301942127190038769,
+	3964200460934290926,
+	6818002345657424903,
+	3645506853848391951,
+	7504729960263157399,
+	2541515141754833631,
 ]
 
 

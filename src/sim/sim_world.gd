@@ -216,6 +216,7 @@ var kill_streak: int = 0           # consecutive kills (drives the score-bonus t
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
 var deaths_since_gate: int = 0     # for the Flawless Gate bonus (reset on gate open)
 var flawless_streak: int = 0       # consecutive deathless gates (compounds the bonus)
+var deaths_this_wave: int = 0      # endless: for the Clean Wave bonus
 var _prev_camera_top: int = 0
 
 
@@ -558,6 +559,8 @@ func _kill_player(p: Dictionary) -> void:
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
+	if mode == "endless":
+		deaths_this_wave += 1   # ...and forfeits this wave's Clean Wave bonus
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"]})
 
 
@@ -846,6 +849,8 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
+	if wave_mod == 4:
+		coin *= 2   # PAYDAY wave: every bounty doubles
 	# kind rides the (checksum-excluded) kill event so the view can spawn a
 	# per-type death throe + corpse — golden-safe.
 	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin,
@@ -1337,20 +1342,36 @@ func _step_waves() -> void:
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
+		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
+		# this wave pays a bonus, so cautious and reckless play stop earning alike.
+		if deaths_this_wave == 0 and wave > 1:
+			war_chest += 40
+			score += 1500
+			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
-		pickups.append({"x": 170 * F_ONE, "y": shop_y, "kind": 0, "cost": _supply_cost(0)})
-		pickups.append({"x": 290 * F_ONE, "y": shop_y, "kind": 1, "cost": _supply_cost(1)})
-		pickups.append({"x": 410 * F_ONE, "y": shop_y, "kind": 2, "cost": _supply_cost(2)})
-		pickups.append({"x": 530 * F_ONE, "y": shop_y, "kind": 3, "cost": _supply_cost(3)})
+		# Shuffle the crate→slot mapping each wave so the shop stays a live read
+		# (far-left ≠ always ammo), Fisher-Yates on the seeded SimRng.
+		var kinds := [0, 1, 2, 3]
+		for si in range(3, 0, -1):
+			var sj := rng.range_i(0, si)
+			var tmp: int = kinds[si]
+			kinds[si] = kinds[sj]
+			kinds[sj] = tmp
+		var xs := [170, 290, 410, 530]
+		for ci in 4:
+			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
+				"cost": _supply_cost(kinds[ci])})
 
 
 func _start_wave() -> void:
 	wave += 1
 	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
 	wave_spawn_cd = 1
+	deaths_this_wave = 0
 	# Wave mutators give each wave an identity (and make the shop a counter-
 	# pick). None on the first two waves; then roll one. Endless-only.
-	wave_mod = 0 if wave <= 2 else rng.range_i(0, 3)
+	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
+	wave_mod = 0 if wave <= 2 else rng.range_i(0, 4)
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -1702,6 +1723,7 @@ func checksum() -> int:
 	h = feed.call(kill_streak_timer, h)
 	h = feed.call(deaths_since_gate, h)
 	h = feed.call(flawless_streak, h)
+	h = feed.call(deaths_this_wave, h)
 	h = feed.call(1 if mode == "endless" else 0, h)
 	h = feed.call(wave, h)
 	h = feed.call(wave_pending, h)
