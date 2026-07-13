@@ -1542,7 +1542,8 @@ func _start_wave() -> void:
 	# Wave mutators give each wave an identity (and make the shop a counter-
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
-	wave_mod = 0 if wave <= 2 else rng.range_i(0, 4)
+	# 5 = NIGHT OPS (vision tightens; no hit-radius/telegraph change — view only).
+	wave_mod = 0 if wave <= 2 else rng.range_i(0, 5)
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {

@@ -568,7 +568,7 @@ func _consume_events() -> void:
 			"vest_break":
 				_ev_vest_break(ev)
 			"wave_start":
-				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY"][ev.get("mod", 0)]
+				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 			"wave_clear":
@@ -627,6 +627,10 @@ func _ev_shot(ev: Dictionary) -> void:
 	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
 		"y": ev["y"] + int(shooter["aim_y"] * 13),
 		"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
+	# Textured muzzle bloom (legacy art Particle_FX soft-spot) under the line flash.
+	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 12), "y": ev["y"] + int(shooter["aim_y"] * 12),
+		"t": 0.0, "kind": "tex", "tex": "fx_softspot", "sz": 12.0, "grow": 0.5, "fade": 1.7,
+		"rate": 0.3, "col": Color(1.0, 0.92, 0.55, 0.65)})
 	var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
 		"rate": 0.055, "spin": randf() * TAU,
@@ -2411,6 +2415,17 @@ func _draw_fx() -> void:
 			var csz := 8.0 - t * 3.0
 			draw_texture_rect(Art.tex("icon_coin"), Rect2(cp - Vector2(csz, csz) / 2.0, Vector2(csz, csz)),
 				false, Color(1.0, 0.92, 0.45, 1.0 - t * t))
+		elif fx["kind"] == "tex":
+			# Generic textured particle (legacy art Particle_FX): grows + fades over its
+			# lifetime t; optional spin. Drives the beefier muzzle/blast/impact FX.
+			var tx: Texture2D = Art.tex(fx["tex"])
+			var gsz: float = float(fx["sz"]) * (1.0 + t * float(fx.get("grow", 0.0)))
+			var tcol: Color = fx.get("col", Color.WHITE)
+			var ta: float = tcol.a * pow(1.0 - t, float(fx.get("fade", 1.0)))
+			var tsc: float = gsz / maxf(1.0, tx.get_size().x)
+			draw_set_transform(pos, float(fx.get("rot", 0.0)) + t * float(fx.get("spin", 0.0)), Vector2(tsc, tsc))
+			draw_texture(tx, -tx.get_size() / 2.0, Color(tcol.r, tcol.g, tcol.b, ta))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_scorch() -> void:
@@ -2858,6 +2873,13 @@ func _draw_banners(top_msg: String) -> void:
 		var pv := (0.1 + 0.24 * paint) * (0.4 + 0.6 * Art.pulse(0.4))
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(1.0, 0.15, 0.12, pv * _motion))
+	# NIGHT OPS mutator: dim the field to a blue dusk so the tracers, muzzle
+	# flashes and threat markers become your eyes. No hit-radius change — the
+	# challenge is visibility, not fairness.
+	if sim.mode == "endless" and sim.wave_mod == 5:
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.02, 0.03, 0.09, 0.34))
+		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
+			Color(0.0, 0.02, 0.12, 0.55))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, _flash_alpha * _motion))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
