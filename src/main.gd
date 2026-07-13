@@ -1651,7 +1651,9 @@ func _draw_mines() -> void:
 		var mb := Art.pulse(0.1)
 		draw_circle(mp, 8.0 + mb * 3.0, Color(0.9, 0.2, 0.15, 0.14 + mb * 0.12))
 		draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(1.0, 0.35, 0.2, 0.5 + mb * 0.3), 1.2)
-		_spr("landmine", mp, 0.0, 4.5)
+		# Real claymore silhouette (was the plain 'landmine' decor pip). Scale 1.05
+		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
+		_spr("wep_claymore", mp, 0.0, 1.05)
 		draw_circle(mp, 2.0, Color(0.95, 0.3, 0.18, 0.65 + mb * 0.35))
 
 
