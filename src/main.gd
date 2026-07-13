@@ -1029,6 +1029,18 @@ func _check_boss_intro() -> void:
 		_show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
 			else "COLOSSUS CRITICAL — SAPPERS OUT")
 		_sfx.play("alarm", -3.0, 0.7)
+		# Phase-break shockfront: the world flinches when the boss escalates — an
+		# arena-wide ground ring bursts from the colossus + a heavy camera hit.
+		if not sim.colossus.is_empty():
+			_fx.append({"x": sim.colossus["x"], "y": sim.colossus["y"], "t": 0.0, "kind": "tex",
+				"tex": "fx_circle", "sz": 40.0, "grow": 9.0, "fade": 1.6, "rate": 0.02,
+				"col": Color(1.0, 0.55, 0.3, 0.7)})
+			for d in 10:
+				var sa := d * TAU / 10.0
+				_fx.append({"x": sim.colossus["x"], "y": sim.colossus["y"], "t": 0.0, "kind": "dust",
+					"rate": 0.03, "vx": cos(sa) * randf_range(3.0, 6.0), "vy": sin(sa) * randf_range(2.0, 4.0)})
+		_trauma = minf(1.0, _trauma + 0.4)
+		_kick += Vector2(0, 8)
 	if phase != _prev_colossus_phase:
 		_prev_colossus_phase = phase
 
