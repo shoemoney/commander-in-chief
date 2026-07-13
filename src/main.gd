@@ -1996,12 +1996,12 @@ func _draw_projectiles() -> void:
 		# fly steel-dark and bigger.
 		if g.get("shell", false):
 			draw_set_transform(body, spin, Vector2.ONE)
-			draw_texture_rect(Art.tex("icon_grenade"), Rect2(-6, -6, 12, 12), false,
+			draw_texture_rect(Art.tex("wep_grenade"), Rect2(-6, -6, 12, 12), false,
 				Color(0.55, 0.6, 0.7))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			draw_set_transform(body, spin, Vector2.ONE)
-			draw_texture_rect(Art.tex("icon_grenade"), Rect2(-5, -5, 10, 10), false)
+			draw_texture_rect(Art.tex("wep_grenade"), Rect2(-5, -5, 10, 10), false)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# Landing marker: the parabola is deterministic — solve where it lands.
 		var zv := float(g["zv"])
@@ -2885,6 +2885,11 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	if sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
 		a = 0.34
 	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
+	# A strike jet dives down the field as the payload arrives — turns a bare
+	# countdown into an anticipated run. Reuses the gunship's 'facing down' angle
+	# (PI) so the nose leads; rides the already-checksummed pending_airstrike int.
+	var jy := lerpf(-30.0, SCREEN_H + 30.0, frac)
+	_spr("m_jet", Vector2(SCREEN_W * 0.5, jy), PI, 0.6)
 	if top_msg != "airstrike":
 		return
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
