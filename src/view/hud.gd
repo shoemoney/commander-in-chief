@@ -241,13 +241,12 @@ func _draw() -> void:
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 				px += ICON + 2.0
-			# Piercing Rounds buff: a cyan countdown so you spend the window.
+			# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
+			# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
 			if p["pierce_ticks"] > 0:
-				px = _text("PIERCE %ds" % (p["pierce_ticks"] / 60 + 1), px, ry + ICON - 3.0,
-					Color(0.6, 0.95, 1.0)) + 6.0
+				px = _stat("wep_rifle", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, Color(0.6, 0.95, 1.0))
 			if p["spread_ticks"] > 0:
-				px = _text("SPREAD %ds" % (p["spread_ticks"] / 60 + 1), px, ry + ICON - 3.0,
-					Color(1.0, 0.8, 0.5)) + 6.0
+				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, Color(1.0, 0.8, 0.5))
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
 			if p["boost_ticks"] > 0:
