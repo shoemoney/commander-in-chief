@@ -354,6 +354,9 @@ func _consume_events() -> void:
 				_punch = maxf(_punch, 0.05)
 				_duck = maxf(_duck, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+				# White-hot flash-core: the blast's first frames read as a
+				# detonation, not just a sprite fading in.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "flash", "rate": 0.3})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 					"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
@@ -364,7 +367,18 @@ func _consume_events() -> void:
 						"kind": "splash" if wet else "dust", "rate": 0.06,
 						"vx": cos(da) * randf_range(1.5, 3.0), "vy": sin(da) * randf_range(1.5, 3.0)})
 				if not wet:
-					_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+					# Cracked-earth fracture decal + flung rock/wood shrapnel: dry
+					# ground takes the hit and throws debris that arcs and settles.
+					_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+						"r": randf_range(11.0, 16.0), "crack": true, "seed": randi()})
+					for d in 7:
+						var dba := d * TAU / 7.0 + randf() * 0.5
+						var wood := randf() < 0.4
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "debris",
+							"rate": randf_range(0.03, 0.05),
+							"vx": cos(dba) * randf_range(1.8, 3.6), "vy": sin(dba) * randf_range(1.8, 3.6),
+							"spin": randf() * TAU, "sz": randf_range(1.4, 2.6),
+							"col": Color(0.42, 0.3, 0.2) if wood else Color(0.4, 0.4, 0.38)})
 			"kill":
 				# No screen flash here: at kill-spam rates it strobes
 				# (photosensitivity); smoke + gib burst + blip + coin carry it.
@@ -435,6 +449,7 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.22)
 				_rumble = maxf(_rumble, 0.5)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "flash", "rate": 0.28})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.14})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
 					"r": 46.0, "col": Color(1.0, 0.7, 0.35)})
@@ -442,7 +457,13 @@ func _consume_events() -> void:
 					var bka := d * TAU / 6.0 + randf() * 0.3
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.06,
 						"vx": cos(bka) * randf_range(1.2, 2.6), "vy": sin(bka) * randf_range(1.2, 2.6)})
-				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "debris",
+						"rate": randf_range(0.03, 0.05),
+						"vx": cos(bka) * randf_range(1.6, 3.4), "vy": sin(bka) * randf_range(1.6, 3.4),
+						"spin": randf() * TAU, "sz": randf_range(1.6, 2.8),
+						"col": Color(0.44, 0.4, 0.36) if randf() < 0.7 else Color(0.42, 0.3, 0.2)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+					"r": randf_range(12.0, 17.0), "crack": true, "seed": randi()})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.025, "text": "+%d¢" % ev.get("coin", 0), "col": Color(1.0, 0.9, 0.45)})
 				_coin_trail(ev["x"], ev["y"], 4)
@@ -1734,6 +1755,21 @@ func _draw_fx() -> void:
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
 			_spr("explosion%d" % frame, pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
+		elif fx["kind"] == "flash":
+			# White-hot detonation core: swells a touch, then snaps out.
+			var fa := (1.0 - t) * (1.0 - t)
+			var fr := 9.0 + t * 15.0
+			draw_circle(pos, fr, Color(1.0, 0.85, 0.55, 0.5 * fa))
+			draw_circle(pos, fr * 0.6, Color(1.0, 0.97, 0.8, 0.75 * fa))
+			draw_circle(pos, fr * 0.3, Color(1.0, 1.0, 1.0, 0.95 * fa))
+		elif fx["kind"] == "debris":
+			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
+			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
+			var dsz: float = fx.get("sz", 2.0)
+			draw_set_transform(pos, fx["spin"] + t * 9.0, Vector2.ONE)
+			draw_rect(Rect2(-dsz, -dsz * 0.55, dsz * 2.0, dsz * 1.1),
+				Color(dcol.r, dcol.g, dcol.b, 1.0 - t * 0.5))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "alert":
 			# Expanding "spotted!" ring (observer arrival).
 			draw_arc(pos, 6.0 + t * 42.0, 0, TAU, 28, Color(1.0, 0.25, 0.2, 0.8 - t * 0.7), 2.5)
@@ -1802,6 +1838,14 @@ func _draw_scorch() -> void:
 		var a: float = 0.4 * (1.0 - s["t"])
 		draw_circle(pos, s["r"], Color(0.12, 0.1, 0.08, a))
 		draw_circle(pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
+		if s.get("crack", false):
+			# Radial fracture lines, stable per-decal via the stored seed.
+			var sd: int = s.get("seed", 0)
+			var ca: float = 0.55 * (1.0 - s["t"])
+			for k in 5:
+				var ka := k * TAU / 5.0 + float(sd % 13) * 0.24
+				var cl: float = s["r"] * (0.7 + float((sd >> (k * 2)) & 3) * 0.12)
+				draw_line(pos, pos + Vector2.from_angle(ka) * cl, Color(0.03, 0.02, 0.02, ca), 1.0)
 	# Fallen bodies: the enemy sprite, darkened and sprawled, fading over ~4s.
 	for c in _corpses:
 		var cp := _to_screen(c["x"], c["y"])
