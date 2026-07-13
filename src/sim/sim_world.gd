@@ -973,7 +973,12 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	## Shared "move toward target at base_spd, halved while wading" step used by
 	## rushers, shieldmen, elites, grenadiers and snipers. Same fixed-point ops,
 	## same order, as the code this replaces — golden-safe.
+	## FRENZY (wave_mod 6) belongs HERE, not just in _step_sapper: "the swarm
+	## rushes 40% faster" means the WHOLE swarm. wave_mod is endless-only and the
+	## torture wipes long before wave 6, so this stays golden-inert.
 	var spd := base_spd
+	if wave_mod == 6:
+		spd = (spd * 7) / 5
 	if _in_water(e["x"], e["y"]):
 		spd = spd / 2
 	e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
