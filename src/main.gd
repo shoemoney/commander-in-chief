@@ -383,6 +383,40 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_reset()
 		elif event.keycode == KEY_R:
 			_reset()
+		elif event.keycode == KEY_C and (_debrief or sim.victory):
+			_copy_share_text()
+
+
+func _run_rank() -> Dictionary:
+	# One source of truth for the run's rank grammar, shared by the K.I.A. debrief
+	# row and the share-card export. Pure read of view-tracked run stats.
+	# ponytail: thresholds are rough hand-tuned bands, tune to taste.
+	var opened := 0
+	for g in sim.gates:
+		if g["open"]:
+			opened += 1
+	var mvp := _run_kills * 2 + _run_best_streak * 5 + opened * 20
+	if sim.mode == "endless":
+		mvp += sim.wave * 12
+	var grade := "S" if mvp >= 300 else "A" if mvp >= 200 else "B" if mvp >= 120 else "C" if mvp >= 60 else "D"
+	var gtitle := "GRUNT"
+	if _run_best_streak >= 20: gtitle = "ONE-MAN ARMY"
+	elif _run_best_streak >= 12: gtitle = "IRON NERVES"
+	elif _run_kills >= 60: gtitle = "EXTERMINATOR"
+	elif opened >= 3: gtitle = "TRAILBLAZER"
+	elif _run_kills >= 25: gtitle = "SHARPSHOOTER"
+	var gcol := Color(1.0, 0.85, 0.3) if grade == "S" else Color(0.55, 0.9, 1.0) if grade == "A" else Color(0.6, 0.9, 0.5) if grade == "B" else Color(0.85, 0.85, 0.8) if grade == "C" else Color(0.7, 0.7, 0.7)
+	return {"grade": grade, "title": gtitle, "col": gcol}
+
+
+func _copy_share_text() -> void:
+	# Turn a finished run into a pasteable one-liner (Discord/bug reports). The seed
+	# is deterministic, so a friend can replay the exact layout via CHALLENGE SEED.
+	var rr := _run_rank()
+	var where := ("WAVE %d" % sim.wave) if sim.mode == "endless" else ("%dm PUSHED" % (-Fixed.to_int(sim.camera_top) / 10))
+	var txt := "IKARI — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
+	DisplayServer.clipboard_set(txt)
+	_show_banner("COPIED TO CLIPBOARD")
 
 
 func _notification(what: int) -> void:
@@ -3193,21 +3227,8 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "SCORE %d   KILLS %d" % [sim.score, _run_kills], "color": Color(0.9, 0.92, 0.85)},
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]
-		# MVP grade: a memorable rank + title stamped on every run from stats the
-		# view already tracks — the roguelite "one more run" carrot.
-		# ponytail: thresholds are rough hand-tuned bands, tune to taste.
-		var mvp := _run_kills * 2 + _run_best_streak * 5 + opened * 20
-		if sim.mode == "endless":
-			mvp += sim.wave * 12
-		var grade := "S" if mvp >= 300 else "A" if mvp >= 200 else "B" if mvp >= 120 else "C" if mvp >= 60 else "D"
-		var gtitle := "GRUNT"
-		if _run_best_streak >= 20: gtitle = "ONE-MAN ARMY"
-		elif _run_best_streak >= 12: gtitle = "IRON NERVES"
-		elif _run_kills >= 60: gtitle = "EXTERMINATOR"
-		elif opened >= 3: gtitle = "TRAILBLAZER"
-		elif _run_kills >= 25: gtitle = "SHARPSHOOTER"
-		var gcol := Color(1.0, 0.85, 0.3) if grade == "S" else Color(0.55, 0.9, 1.0) if grade == "A" else Color(0.6, 0.9, 0.5) if grade == "B" else Color(0.85, 0.85, 0.8) if grade == "C" else Color(0.7, 0.7, 0.7)
-		rows.insert(0, {"text": "RANK  %s  —  %s" % [grade, gtitle], "color": gcol})
+		var rr := _run_rank()
+		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col})
 		if best_score > 0:
 			rows.append({"text": "BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""),
 				"color": Color(0.9, 0.92, 0.85)})
