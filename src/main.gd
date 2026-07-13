@@ -50,6 +50,7 @@ var _heart_frame := -100         # heartbeat pacing
 var _hitmarker: Array[float] = [0.0, 0.0]   # reticle confirm pop on a landed hit (per-player)
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
 var _hit_dir_t := 0.0
+var _hit_dir_player := 0         # which player's body the wedge emanates from
 var _record_fired := false       # NEW RECORD banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _seen := {}                  # persisted first-time-hint flags
@@ -479,7 +480,7 @@ func _consume_events() -> void:
 				_rumble = maxf(_rumble, 1.0)
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
-				_mark_hit_dir(ev["x"], ev["y"])
+				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [E] / [Y]")
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 			"roll":
@@ -549,7 +550,7 @@ func _consume_events() -> void:
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = maxf(_damage_vignette, 0.75)
 				_concussion = maxf(_concussion, 0.7)
-				_mark_hit_dir(ev["x"], ev["y"])
+				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				# The flak vest shatters — blue armor shards burst outward.
 				for d in 8:
 					var va := d * TAU / 8.0 + randf() * 0.3
@@ -824,7 +825,7 @@ func _hit_owner(ex: int, ey: int) -> int:
 	return best
 
 
-func _mark_hit_dir(px: int, py: int) -> void:
+func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 	# Point the damage wedge at the nearest lethal source at hit time — the
 	# "where did that come from?" answer a one-hit game owes the player.
 	var best := 1 << 62
@@ -856,6 +857,7 @@ func _mark_hit_dir(px: int, py: int) -> void:
 	if dir.length() > 1.0:
 		_hit_dir = dir.normalized()
 		_hit_dir_t = 1.0
+		_hit_dir_player = pidx
 
 
 func _update_feel() -> void:
@@ -1549,15 +1551,17 @@ func _draw_observer() -> void:
 
 
 func _draw_gunships() -> void:
+	var slot := 0
 	for g in sim.gates:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
-		_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP")
+		_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP", slot)
+		slot += 1
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
-		_draw_one_gunship(sim.endless_boss, "GUNSHIP")
+		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot)
 
 
-func _draw_one_gunship(boss: Dictionary, label: String) -> void:
+func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 		var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 		# Mortar-phase warning: the hull flashes red while volleys are near
 		# (they land at phase_t 200/240/280 of the 360-tick cycle).
@@ -1576,9 +1580,17 @@ func _draw_one_gunship(boss: Dictionary, label: String) -> void:
 		draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
 		var bfrac := minf(1.0, float(boss["hp"]) / float(SimWorld.BOSS_HP))
 		var bkey := "boss%d" % boss["gate_y"]
-		draw_string(ThemeDB.fallback_font, bpos + Vector2(-23, -34), label,
+		# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
+		# bar, ~1618): the boss's screen pos can sit above the held camera or
+		# off-screen, and a world-anchored bar would go with it. Stacked by
+		# slot so two simultaneous bosses don't overlap each other, and started
+		# below the corner HUD panel's max height (~60px) so they never clash.
+		var bar_w := 160.0
+		var bar_x := 320.0 - bar_w / 2.0
+		var bar_y := 64.0 + float(slot) * 22.0
+		draw_string(ThemeDB.fallback_font, Vector2(bar_x, bar_y), label,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.5, 0.4))
-		_draw_bar(Rect2(bpos + Vector2(-23, -30), Vector2(46, 8)), bfrac,
+		_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 
 
@@ -1808,6 +1820,7 @@ func _coin_trail(wx: int, wy: int, n: int) -> void:
 
 
 func _draw_fx() -> void:
+	var floattext_i := 0
 	for fx in _fx:
 		var pos := _to_screen(fx["x"], fx["y"])
 		var t: float = fx["t"]
@@ -1838,12 +1851,19 @@ func _draw_fx() -> void:
 				draw_line(pos + Vector2.from_angle(sa) * (2.0 + t * 5.0),
 					pos + Vector2.from_angle(sa) * (5.0 + t * 7.0), sc, 1.2)
 		elif fx["kind"] == "floattext":
+			# Stack same-tick texts (e.g. streak + bounty on one kill) so they
+			# don't overprint into a smear, and outline each so it reads over
+			# bright terrain, not just the 1px shadow used to give.
 			var fc: Color = fx["col"]
 			fc.a = 1.0 - t * t
 			var fw := ThemeDB.fallback_font.get_string_size(fx["text"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			draw_string(ThemeDB.fallback_font, pos + Vector2(-fw / 2.0, -18.0 - t * 14.0),
-				fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, fc)
+			var fpos := pos + Vector2(-fw / 2.0, -18.0 - t * 14.0 - floattext_i * 11.0)
+			var oc := Color(0, 0, 0, fc.a * 0.85)
+			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
+				draw_string(ThemeDB.fallback_font, fpos + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, oc)
+			draw_string(ThemeDB.fallback_font, fpos, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, fc)
+			floattext_i += 1
 		elif fx["kind"] == "smoke":
 			_spr("smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
 		elif fx["kind"] == "shockwave":
@@ -1983,9 +2003,15 @@ func _draw_threat_edges() -> void:
 		if sy <= 364.0:
 			continue
 		var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
-		var col := Color(1.0, 0.35, 0.2, clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85))
-		draw_line(Vector2(sx - 4, 353), Vector2(sx, 358), col, 2.0)
-		draw_line(Vector2(sx, 358), Vector2(sx + 4, 353), col, 2.0)
+		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
+		var a := clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85)
+		if e.get("windup", 0) > 0:
+			a = clampf(a + Art.pulse(0.28) * 0.35, 0.25, 1.0)
+		var col := Color(1.0, 0.1, 0.1, a) if danger else Color(1.0, 0.35, 0.2, a)
+		var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
+		var tip := 361.0 if danger else 358.0
+		draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
+		draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
 	# Top-edge chevrons for hostiles about to enter from the spawn edge above —
 	# an off-screen threat you'd otherwise only meet as it crosses into view.
 	for e in sim.enemies:
@@ -1997,9 +2023,50 @@ func _draw_threat_edges() -> void:
 		var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
 		if tx < 262.0:
 			continue   # don't clutter under the corner HUD panel
-		var tcol := Color(1.0, 0.55, 0.25, clampf(1.0 + ty / 180.0, 0.2, 0.7))
-		draw_line(Vector2(tx - 4, 28), Vector2(tx, 24), tcol, 2.0)
-		draw_line(Vector2(tx, 24), Vector2(tx + 4, 28), tcol, 2.0)
+		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
+		var ta := clampf(1.0 + ty / 180.0, 0.2, 0.7)
+		if e.get("windup", 0) > 0:
+			ta = clampf(ta + Art.pulse(0.28) * 0.3, 0.2, 1.0)
+		var tcol := Color(1.0, 0.1, 0.1, ta) if tdanger else Color(1.0, 0.55, 0.25, ta)
+		var tspr := 6.0 if tdanger else 4.0   # spikier spread for ranged killers
+		var ttip := 22.0 if tdanger else 24.0
+		draw_line(Vector2(tx - tspr, 28), Vector2(tx, ttip), tcol, 2.0)
+		draw_line(Vector2(tx, ttip), Vector2(tx + tspr, 28), tcol, 2.0)
+	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
+	# while an already-streamed boss (or the observer) sits above the visible
+	# view — its HP bar/label live in the fixed HUD but the arena-lock
+	# "destroy it" text points at nothing on screen. One double-chevron at the
+	# nearest such target, so "look up" is unambiguous.
+	var near_sy := -100000.0
+	var near_x := 0.0
+	var near_found := false
+	for g in sim.gates:
+		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
+			continue
+		var gsy: float = (g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET - sim.camera_top) * PX
+		if gsy < 0.0 and gsy > near_sy:
+			near_sy = gsy
+			near_x = clampf(g["boss"]["x"] * PX, 8.0, 632.0)
+			near_found = true
+	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
+		var esy: float = (sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET - sim.camera_top) * PX
+		if esy < 0.0 and esy > near_sy:
+			near_sy = esy
+			near_x = clampf(sim.endless_boss["x"] * PX, 8.0, 632.0)
+			near_found = true
+	if not sim.observer.is_empty():
+		var osy: float = SimWorld.OBSERVER_Y_OFFSET * PX
+		if osy < 0.0 and osy > near_sy:
+			near_sy = osy
+			near_x = clampf(sim.observer["x"] * PX, 8.0, 632.0)
+			near_found = true
+	if near_found:
+		var bp := Art.pulse(0.25)
+		var bcol := Color(1.0, 0.3, 0.2, 0.55 + bp * 0.35)
+		draw_line(Vector2(near_x - 6, 14), Vector2(near_x, 5), bcol, 2.5)
+		draw_line(Vector2(near_x, 5), Vector2(near_x + 6, 14), bcol, 2.5)
+		draw_line(Vector2(near_x - 6, 22), Vector2(near_x, 13), bcol, 2.5)
+		draw_line(Vector2(near_x, 13), Vector2(near_x + 6, 22), bcol, 2.5)
 
 
 func _draw_wheel() -> void:
@@ -2106,7 +2173,11 @@ func _draw_banners() -> void:
 	# threat that hit you — the "where from?" answer in a one-hit game.
 	if _hit_dir_t > 0.01:
 		var ang := _hit_dir.angle()
-		var mid := Vector2(320, 180) + _hit_dir * 210.0
+		var origin := Vector2(320, 180)
+		if _hit_dir_player >= 0 and _hit_dir_player < sim.players.size():
+			var hp: Dictionary = sim.players[_hit_dir_player]
+			origin = _to_screen(hp["x"], hp["y"])
+		var mid := origin + _hit_dir * 210.0
 		var perp := Vector2(-_hit_dir.y, _hit_dir.x)
 		var wc := Color(1.0, 0.2, 0.15, _hit_dir_t * 0.8)
 		var pts := PackedVector2Array([mid + perp * 46.0, mid - perp * 46.0,

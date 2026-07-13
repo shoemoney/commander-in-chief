@@ -193,6 +193,25 @@ static func pulse(rate: float) -> float:
 
 static func blink(period: int) -> bool:
 	return (Engine.get_physics_frames() / period) % 2 == 0
+
+
+## Cached fallback font — ThemeDB.fallback_font was being re-fetched at every
+## call site; fetch once and hand back the same Font resource.
+static var _font: Font = null
+
+
+static func font() -> Font:
+	if _font == null:
+		_font = ThemeDB.fallback_font
+	return _font
+
+
+## Shadowed text: black copy offset +1px, then the colored text on top — the
+## drop-shadow pattern hand-inlined across the view, now in one place.
+static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color) -> void:
+	var f := font()
+	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.7))
+	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}

@@ -231,6 +231,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_mine_y = -(700 * F_ONE)
 	for i in player_count:
 		players.append({
+			"idx": i,
 			"x": (280 + i * 80) * F_ONE,
 			"y": -(60 * F_ONE),
 			"aim_x": 0, "aim_y": -F_ONE,
@@ -546,7 +547,7 @@ func _hurt_player(p: Dictionary) -> void:
 	if p["vest"]:
 		p["vest"] = false
 		p["hurt_iframes"] = VEST_IFRAME_TICKS
-		events.append({"t": "vest_break", "x": p["x"], "y": p["y"]})
+		events.append({"t": "vest_break", "x": p["x"], "y": p["y"], "p": p["idx"]})
 		return
 	_kill_player(p)
 
@@ -558,7 +559,7 @@ func _kill_player(p: Dictionary) -> void:
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
-	events.append({"t": "player_down", "x": p["x"], "y": p["y"]})
+	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"]})
 
 
 func _fire_mission() -> void:
