@@ -32,6 +32,11 @@ const BASH_COOLDOWN_TICKS := 40
 # Piercing Rounds power-up (1986 capsule grammar): a timed buff, rarely dropped
 # by elites, that lets MG bullets punch clean through a kill to the next target.
 const PIERCE_TICKS := 600
+# Spread Shot power-up ("Trench Gun"): a timed buff that fires a 3-bullet fan per
+# shot (one round of ammo, three pellets). ±12° fan via fixed-point rotation.
+const SPREAD_TICKS := 480
+const SPREAD_COS := 64102   # cos(12°) * F_ONE
+const SPREAD_SIN := 13626   # sin(12°) * F_ONE
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -275,6 +280,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"vest": false,
 			"hurt_iframes": 0,
 			"pierce_ticks": 0,
+			"spread_ticks": 0,
 		})
 
 
@@ -356,6 +362,7 @@ func _step_players(inputs: Array) -> void:
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
 		p["pierce_ticks"] = maxi(0, p["pierce_ticks"] - 1)
+		p["spread_ticks"] = maxi(0, p["spread_ticks"] - 1)
 		p["roll_iframe"] = false
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
@@ -436,12 +443,15 @@ func _step_players(inputs: Array) -> void:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
 			events.append({"t": "shot", "x": p["x"], "y": p["y"], "i": i})
-			bullets.append({
-				"x": p["x"], "y": p["y"],
-				"vx": Fixed.mul(p["aim_x"], BULLET_SPEED),
-				"vy": Fixed.mul(p["aim_y"], BULLET_SPEED),
-				"ttl": BULLET_TTL_TICKS, "owner": i,
-			})
+			var fax: int = p["aim_x"]
+			var fay: int = p["aim_y"]
+			_spawn_mg_bullet(p, i, fax, fay)
+			if p["spread_ticks"] > 0:
+				# Trench Gun: two extra pellets fanned +/-12 deg (fixed-point rotate).
+				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
+					Fixed.mul(fax, SPREAD_SIN) + Fixed.mul(fay, SPREAD_COS))
+				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) + Fixed.mul(fay, SPREAD_SIN),
+					Fixed.mul(fay, SPREAD_COS) - Fixed.mul(fax, SPREAD_SIN))
 
 		if inp.grenade and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
 			p["grenade_cd"] = GRENADE_COOLDOWN_TICKS
@@ -571,6 +581,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["in_tank"] = -1
 	p["vest"] = false                  # death strips upgrades (1986 rule)
 	p["pierce_ticks"] = 0              # ...including the Piercing Rounds buff
+	p["spread_ticks"] = 0             # ...and the Trench Gun spread buff
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -623,6 +634,8 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			p["vest"] = true
 		4:
 			p["pierce_ticks"] = PIERCE_TICKS   # Piercing Rounds capsule (drop-only)
+		5:
+			p["spread_ticks"] = SPREAD_TICKS   # Trench Gun spread capsule (drop-only)
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
@@ -946,7 +959,9 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],
-			"kind": 4 if rng.range_i(0, 11) == 0 else rng.range_i(0, 1),   # rare Piercing Rounds
+			# ~1-in-6 elites drop a rare power-up capsule (Piercing or Spread);
+			# otherwise the usual Ammo/Grenade.
+			"kind": (4 + rng.range_i(0, 1)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
 		})
 
 
@@ -1294,6 +1309,12 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	var dot := Fixed.mul(Fixed.div(fx, flen), Fixed.div(b["vx"], blen)) \
 		+ Fixed.mul(Fixed.div(fy, flen), Fixed.div(b["vy"], blen))
 	return dot < -(F_ONE / 2)
+
+
+func _spawn_mg_bullet(p: Dictionary, i: int, ax: int, ay: int) -> void:
+	bullets.append({"x": p["x"], "y": p["y"],
+		"vx": Fixed.mul(ax, BULLET_SPEED), "vy": Fixed.mul(ay, BULLET_SPEED),
+		"ttl": BULLET_TTL_TICKS, "owner": i})
 
 
 func _spawn_courier() -> void:
@@ -1876,7 +1897,7 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
-				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"]]:
+				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"]]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)

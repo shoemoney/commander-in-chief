@@ -66,13 +66,16 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 26 power-ups, post-merge): Piercing Rounds — a rare elite-drop
 ## capsule (new checksummed player field pierce_ticks; kind-4 pickup) that lets bullets punch
 ## through a kill. The 1-in-12 drop roll shifts rng on every elite kill → all samples moved.
+## RE-RECORDED (2026-07-12, iter 27): Spread Shot / Trench Gun — a 2nd power-up capsule (kind 5,
+## new checksummed player field spread_ticks) firing a 3-bullet fan; the elite drop table now
+## rolls a rare capsule (pierce OR spread), shifting rng on every elite kill → all samples moved.
 const GOLDEN: Array[int] = [
-	8549363251984477193,
-	7475641192134167970,
-	4605440515711384222,
-	8906751050653530216,
-	256780727183263544,
-	3659946109071164932,
+	1942392792714788905,
+	5254693104462641548,
+	1869508768180451128,
+	2957909663780844898,
+	1766040305575453794,
+	2825294671139700342,
 ]
 
 
@@ -131,12 +134,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
 const ENDLESS_GOLDEN: Array[int] = [
-	6850586449262244221,
-	3937459854660825806,
-	3423777578327844640,
-	8681535473527522840,
-	4059724756335624752,
-	5674402616539079336,
+	8681953085351081569,
+	6059987203174684048,
+	3174963771928234834,
+	1740422521085536138,
+	2445779400911443234,
+	7263092349450529370,
 ]
 
 

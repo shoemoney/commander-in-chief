@@ -291,3 +291,17 @@ func test_piercing_rounds_punch_through_two_enemies() -> void:
 	for t in 18:
 		sim.step(_inputs(aim))
 	Runner.T.ok(not e1["alive"] and not e2["alive"], "one piercing bullet punched through both enemies")
+
+
+func test_spread_shot_fires_three_bullets() -> void:
+	# With the Spread Shot buff, one fire tick spawns a 3-bullet fan (1 ammo).
+	var sim := SimWorld.new(3, 1, "campaign")
+	var p := sim.players[0]
+	p["spread_ticks"] = 200
+	var ammo0: int = p["mg_ammo"]
+	var inp := SimInput.new()
+	inp.aim_y = -256
+	inp.fire = true
+	sim.step(_inputs(inp))
+	Runner.T.eq(sim.bullets.size(), 3, "spread shot spawns a 3-bullet fan")
+	Runner.T.eq(p["mg_ammo"], ammo0 - 1, "spread shot still costs one round of ammo")

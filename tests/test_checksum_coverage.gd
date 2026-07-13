@@ -18,7 +18,7 @@ const KNOWN := {
 	"player": ["idx", "x", "y", "aim_x", "aim_y", "alive", "deaths", "mg_ammo", "grenade_ammo",
 		"fire_cd", "grenade_cd", "broke_timer", "roll_ticks", "roll_cd", "roll_buf",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
-		"vest", "hurt_iframes", "pierce_ticks"],
+		"vest", "hurt_iframes", "pierce_ticks", "spread_ticks"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell"],
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",

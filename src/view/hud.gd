@@ -245,6 +245,9 @@ func _draw() -> void:
 			if p["pierce_ticks"] > 0:
 				px = _text("PIERCE %ds" % (p["pierce_ticks"] / 60 + 1), px, ry + ICON - 3.0,
 					Color(0.6, 0.95, 1.0)) + 6.0
+			if p["spread_ticks"] > 0:
+				px = _text("SPREAD %ds" % (p["spread_ticks"] / 60 + 1), px, ry + ICON - 3.0,
+					Color(1.0, 0.8, 0.5)) + 6.0
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
 			if p["boost_ticks"] > 0:
