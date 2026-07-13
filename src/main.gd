@@ -703,6 +703,14 @@ func _consume_events() -> void:
 				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS", "  — FRENZY"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
+				# Horde dust-bank: a wide low roll of dust at the top edge before the
+				# spawns arrive — see the horde coming, tinted by the wave's mutator.
+				var wm: int = ev.get("mod", 0)
+				var dbcol := Color(0.4, 0.46, 0.6, 0.42) if wm == 5 else (Color(0.7, 0.45, 0.4, 0.42) if wm == 6 else Color(0.62, 0.6, 0.55, 0.4))
+				for d in 7:
+					var dbx: int = (320 + d * 100 - 300) * Fixed.ONE + int(randf_range(-25.0, 25.0)) * Fixed.ONE
+					_fx.append({"x": dbx, "y": sim.camera_top + 18 * Fixed.ONE, "t": 0.0, "kind": "tex",
+						"tex": "fx_smoke", "sz": 42.0, "grow": 0.6, "fade": 2.4, "rate": 0.007, "col": dbcol})
 			"wave_clear":
 				_show_banner("WAVE CLEARED — SHOP OPEN")
 			"wave_flawless":
@@ -2156,10 +2164,16 @@ func _draw_colossus() -> void:
 	draw_arc(cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
 	draw_circle(cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
 	var mod := Color.WHITE if phase < 3 else Color(1.4, 0.62, 0.55)
+	# Foundry-stomp: a slow settle-squash gives the heaviest thing on the field weight,
+	# so it lands with each stride instead of gliding in flat. Pure per-frame visual
+	# (no fx spawn from _draw — that would be frame-rate-dependent).
+	var stomp := sin(float(Engine.get_physics_frames()) * 0.12) * 0.5 + 0.5
+	var cbody := cpos + Vector2(0, stomp * 2.0)
+	var csquash := 1.0 - stomp * 0.06
 	_ground_shadow(cpos, 30.0)
-	_spr("colossus_body", cpos, PI, 1.9, mod)
-	_spr("colossus_barrel", cpos + Vector2(-24, 26), PI - 0.5, 1.3, mod)
-	_spr("colossus_barrel", cpos + Vector2(24, 26), PI + 0.5, 1.3, mod)
+	_spr("colossus_body", cbody, PI, 1.9, mod, csquash)
+	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
+	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
 	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
 	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
 	for bx in [-24.0, 24.0]:
