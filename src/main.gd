@@ -27,6 +27,9 @@ const _TANK_HULKS := ["wreck_apc", "wreck_technical", "wreck_light_tank"]
 
 var sim: SimWorld
 var _recorder: Replay             # captures this run's inputs → user://last_run.replay (view-only)
+var _watching := false            # Watch Last Run playback mode
+var _watch_replay: Replay = null
+var _watch_frame := 0
 var _replay_saved := false        # save the replay once per run, at the debrief
 var _two_players := false
 var _endless := false
@@ -337,6 +340,25 @@ func start_seed_from_clipboard() -> void:
 	start_seeded(seed_str.to_int())
 
 
+func start_watch() -> void:
+	# Watch Last Run: re-step the saved replay through the real draw pipeline — the
+	# replay's recorded inputs drive the sim in _physics_process instead of the pad.
+	# Reuses _reset() (via _seed_override) to build the matching sim; nothing recorded,
+	# no bests banked. The whole record→replay path was built but never player-facing.
+	var r := Replay.load_from("user://last_run.replay")
+	if r == null or r.frames.is_empty():
+		_show_banner("NO REPLAY SAVED YET")
+		return
+	_endless = r.mode == "endless"
+	_two_players = r.player_count >= 2
+	_seed_override = r.seed_value
+	_reset()
+	_watch_replay = r
+	_watch_frame = 0
+	_watching = true
+	_show_banner("REPLAY — PRESS R TO EXIT", Color(0.55, 0.9, 1.0))
+
+
 func _reset() -> void:
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
@@ -422,7 +444,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_endless = not _endless
 			_reset()
 		elif event.keycode == KEY_R:
-			_reset()
+			if _watching:
+				_watching = false
+				_menu.open(GameMenu.Mode.TITLE)
+			else:
+				_reset()
 		elif event.keycode == KEY_C and (_debrief or sim.victory):
 			_copy_share_text()
 
@@ -498,6 +524,23 @@ func _physics_process(_delta: float) -> void:
 		queue_redraw()
 		return
 	_hud_icons.visible = true
+	if _watching:
+		if _watch_replay == null or _watch_frame >= _watch_replay.frames.size() or sim.victory or sim.wiped:
+			_watching = false
+			_menu.open(GameMenu.Mode.TITLE)
+			queue_redraw()
+			return
+		var rin: Array[SimInput] = []
+		for enc in _watch_replay.frames[_watch_frame]:
+			rin.append(SimInput.decode(enc))
+		_watch_frame += 1
+		sim.step(rin)
+		_consume_events()
+		_check_boss_intro()
+		_update_feel()
+		queue_redraw()
+		_update_hud()
+		return
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
 	else:
@@ -3414,8 +3457,9 @@ func _draw_banners(top_msg: String) -> void:
 		rows.append({"text": "PRESS  R  — REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp)})
 		_draw_result_panel("K.I.A.", Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96))
 	elif sim.last_stand:
-		draw_string(ThemeDB.fallback_font, Vector2(250, 350), "LAST STAND — NO REVIVES",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.95, 0.4, 0.3))
+		# Shadowed + centered via the shared helper — was the one banner holdout
+		# still drawing raw, unshadowed, hardcoded-position text.
+		Art.text_center(self, "LAST STAND — NO REVIVES", 320.0, 350.0, 10, Color(0.95, 0.4, 0.3))
 	# Black fade covering the title→combat cut.
 	if _fade > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, _fade))

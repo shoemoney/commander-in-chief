@@ -35,7 +35,7 @@ func _menu_items() -> Array[Dictionary]:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return [{"id": "back", "label": "BACK", "destructive": false}]
 	if mode == Mode.TITLE:
-		return [
+		var titems: Array[Dictionary] = [
 			{"id": "campaign", "label": "CAMPAIGN", "destructive": false},
 			{"id": "endless", "label": "ENDLESS WAR", "destructive": false},
 			{"id": "daily", "label": "DAILY RUN", "destructive": false},
@@ -44,8 +44,11 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false},
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false},
-			{"id": "quit", "label": "QUIT", "destructive": true},
 		]
+		if FileAccess.file_exists("user://last_run.replay"):
+			titems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false})
+		titems.append({"id": "quit", "label": "QUIT", "destructive": true})
+		return titems
 	var reduced: bool = main._motion < 0.5
 	var cb: bool = main.colorblind
 	return [
@@ -143,6 +146,7 @@ func _activate() -> void:
 			"campaign": main.start_game(false)
 			"endless": main.start_game(true)
 			"daily": main.start_daily()
+			"watch": main.start_watch()
 			"paste_seed": main.start_seed_from_clipboard()
 			"coop": main._two_players = not main._two_players
 			"hard": main._hard = not main._hard
