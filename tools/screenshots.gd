@@ -61,7 +61,7 @@ func _advance() -> void:
 	# shot's garnish can't leak into the next.
 	main._fx.clear()
 	main._damage_vignette = 0.0
-	main._banner_t = 0.0
+	main._banners.clear()
 	# Mutate in place: cross-script assignment of a fresh Array into the
 	# typed Array[...] properties fails at runtime.
 	for k in main._recoil.size():
@@ -288,8 +288,7 @@ func _shot_shop() -> SimWorld:
 func _dress_shop(m: Node2D) -> void:
 	# P1 mid-decision on the spend-wheel, grenades highlighted.
 	m._wheel[0] = {"open": true, "sel": 3}
-	m._banner_text = "WAVE CLEARED — SHOP OPEN"
-	m._banner_t = 0.5
+	m._show_banner("WAVE CLEARED — SHOP OPEN")
 
 
 func _dress_colossus(m: Node2D) -> void:
