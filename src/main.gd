@@ -42,6 +42,7 @@ var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn un
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
+var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
 var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
@@ -66,6 +67,7 @@ var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, u
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
+var _dodge_frame := -100         # perfect-dodge callout throttle
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
 var _heart_frame := -100         # heartbeat pacing
 var _hitmarker: Array[float] = [0.0, 0.0]   # reticle confirm pop on a landed hit (per-player)
@@ -1212,6 +1214,23 @@ func _check_dry_throw(inputs: Array[SimInput]) -> void:
 func _check_near_miss() -> void:
 	# A crack past the ear when an enemy round barely misses a live player —
 	# rewards the dodge, amplifies one-hit tension. Throttled so it can't spam.
+	# Perfect Dodge: a bullet passing through a player DURING roll i-frames would
+	# have killed them — the most skill-expressive save, and it was fully silent.
+	# Own throttle, checked before the whiz gate so a recent whiz can't swallow it.
+	if Engine.get_physics_frames() - _dodge_frame >= 24:
+		for b in sim.enemy_bullets:
+			for p in sim.players:
+				if not p["alive"] or p["roll_ticks"] == 0:
+					continue
+				if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], 11 * Fixed.ONE):
+					_dodge_frame = Engine.get_physics_frames()
+					_show_banner("PERFECT DODGE!", Color(0.5, 0.95, 1.0))
+					_hitstop_frames = maxi(_hitstop_frames, 3)
+					_sfx.play("buy", -4.0, 1.8)
+					_fx.append({"x": p["x"], "y": p["y"], "t": 0.0, "kind": "tex",
+						"tex": "fx_circle", "sz": 16.0, "grow": 3.0, "fade": 1.8, "rate": 0.04,
+						"col": Color(0.5, 0.95, 1.0, 0.7)})
+					return
 	if Engine.get_physics_frames() - _whiz_frame < 10:
 		return
 	var near_r := 15 * Fixed.ONE
@@ -1290,6 +1309,8 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 		_hit_dir = dir.normalized()
 		_hit_dir_t = 1.0
 		_hit_dir_player = pidx
+		if pidx >= 0 and pidx < _hit_flinch.size():
+			_hit_flinch[pidx] -= _hit_dir * 3.0   # shove the body AWAY from the source
 
 
 func _update_feel() -> void:
@@ -1354,6 +1375,8 @@ func _update_feel() -> void:
 		_corpses.remove_at(0)
 	for i in _recoil.size():
 		_recoil[i] *= 0.72
+		if i < _hit_flinch.size():
+			_hit_flinch[i] *= 0.8
 	for i in _heat.size():
 		_heat[i] = maxf(0.0, _heat[i] - 0.02)
 	for i in mini(_down_anim.size(), sim.players.size()):
@@ -2297,7 +2320,7 @@ func _draw_players() -> void:
 		var p := sim.players[i]
 		if p["in_tank"] >= 0:
 			continue   # rendered as the tank
-		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
+		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO) + (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO)
 		# Run-cycle bob: a per-step vertical hop while moving, matching the charging
 		# enemies' cadence so the player sprite isn't the one flat-gliding thing on the
 		# field. _dust_prev still holds LAST frame's pos here (updated by _kick_dust below).
