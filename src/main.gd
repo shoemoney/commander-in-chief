@@ -30,6 +30,7 @@ var _trauma := 0.0
 var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+var _pending_blasts: Array[Dictionary] = []   # scheduled boss-death secondary detonations
 var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
 var _sfx := Sfx.new()
@@ -304,6 +305,7 @@ func _reset() -> void:
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
 	_fx.clear()
+	_pending_blasts.clear()
 	_scorch.clear()
 	_corpses.clear()
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
@@ -634,6 +636,7 @@ func _ev_explosion(ev: Dictionary) -> void:
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
 	var wet: bool = sim._in_water(ev["x"], ev["y"])
 	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
+	_blast_debris(ev["x"], ev["y"], wet)
 	if not wet:
 		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
 
@@ -690,6 +693,9 @@ func _ev_kill(ev: Dictionary) -> void:
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
 		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, Color(1.0, 0.9, 0.45), 0.025)
+	# A downed gunship is a finale, not a kill blip — ripple it apart.
+	if kkind == "boss":
+		_boss_death_finale(ev["x"], ev["y"])
 
 
 func _ev_bunker_break(ev: Dictionary) -> void:
@@ -702,8 +708,66 @@ func _ev_bunker_break(ev: Dictionary) -> void:
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
 		"r": 46.0, "col": Color(1.0, 0.7, 0.35)})
 	_burst(ev["x"], ev["y"], "dust", 6, 1.2, 2.6, 0.3)
+	_blast_debris(ev["x"], ev["y"])
 	_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
 	_coin_pop(ev["x"], ev["y"], "+%d¢" % ev.get("coin", 0), 4, Color(1.0, 0.9, 0.45), 0.025)
+
+
+func _blast_debris(x: int, y: int, wet: bool = false) -> void:
+	# Layers a real detonation on top of the base explosion sprite + shockwave +
+	# light: hot embers, dark thrown chunks, a delayed secondary core flash, and a
+	# slow rising smoke curl. Gated off under reduce-motion; a water blast is a
+	# splash, so it skips the fire/debris entirely.
+	if wet or _motion < 0.5:
+		return
+	# Hot embers fly out radially, skew upward, and cool + dim fast.
+	_burst(x, y, "ember", 8, 1.5, 3.6, 0.6, 0.05, 1.2, true)
+	# Dark tumbling chunks thrown with wide speed variance — the blast throws material.
+	for _d in 5:
+		var da := randf() * TAU
+		_fx.append({"x": x, "y": y, "t": 0.0, "kind": "gib", "rate": 0.05,
+			"vx": cos(da) * randf_range(1.0, 4.5), "vy": sin(da) * randf_range(1.0, 4.5),
+			"col": Color(0.2, 0.17, 0.14), "spin": randf() * TAU})
+	# Secondary inner flash: a bright core that pops ~2 frames after the main flash.
+	_fx.append({"x": x, "y": y, "t": -0.24, "kind": "flash", "rate": 0.16})
+	# Slow rising smoke curl lingers after the fire.
+	for _s in 2:
+		_fx.append({"x": x + (randi() % 9 - 4) * Fixed.ONE, "y": y, "t": 0.0,
+			"kind": "smoke", "rate": 0.035})
+
+
+func _boss_death_finale(x: int, y: int) -> void:
+	# THE finale — the biggest spectacle in the game. A staggered chain of
+	# secondary detonations marches across the wreck's footprint over ~0.8s, a
+	# smoke pillar rises up its center, and the screen-feel is scaled well past a
+	# normal explosion. Additive view spectacle only: score/coin payout untouched.
+	# Reduce-motion gets a quieter version (fewer blasts, no big shake).
+	var reduced := _motion < 0.5
+	# Peak screen feel — the one moment that earns a full-strength hit.
+	_trauma = 1.0
+	_hitstop_frames = maxi(_hitstop_frames, 10)
+	_flash_alpha = maxf(_flash_alpha, 0.5)
+	if not reduced:
+		_rumble = maxf(_rumble, 1.0)
+		_punch = maxf(_punch, 0.09)
+	# Rising smoke pillar: puffs stacked up the center, drifting up and thinning
+	# (long life via a low rate; move+vy carries them skyward as a column).
+	var puffs := 3 if reduced else 6
+	for s in puffs:
+		_fx.append({"x": x + (randi() % 11 - 5) * Fixed.ONE, "y": y - s * 7 * Fixed.ONE,
+			"t": 0.0, "kind": "smoke", "rate": 0.016, "move": true,
+			"vx": randf_range(-0.3, 0.3), "vy": -1.4 - randf() * 0.8})
+	# Staggered secondary blasts across the footprint (flatter than round so it
+	# reads as a wreck breaking apart, not a sphere).
+	var blasts := 3 if reduced else 10
+	var step := 7 if reduced else 5
+	for b in blasts:
+		var ba := randf() * TAU
+		var rad := randf_range(6.0, 40.0)
+		_pending_blasts.append({
+			"x": x + int(cos(ba) * rad * Fixed.ONE),
+			"y": y + int(sin(ba) * rad * 0.6 * Fixed.ONE),
+			"delay": 3 + b * step})
 
 
 func _ev_gate_open(ev: Dictionary) -> void:
@@ -762,6 +826,8 @@ func _ev_victory(ev: Dictionary) -> void:
 			"rate": 0.018, "spin": randf() * TAU,
 			"vx": cos(vca) * randf_range(1.2, 3.6),
 			"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
+	# The colossus is the campaign's last boss — give its wreck the full finale.
+	_boss_death_finale(ev["x"], ev["y"])
 
 
 func _check_boss_intro() -> void:
@@ -1043,6 +1109,20 @@ func _update_feel() -> void:
 			fx["vy"] *= 0.86
 		if fx["t"] >= 1.0:
 			_fx.remove_at(i)
+	# Scheduled boss-death secondaries: each pops a full _blast_debris when its
+	# timer elapses, so detonations ripple across the wreck instead of at once.
+	for i in range(_pending_blasts.size() - 1, -1, -1):
+		var pb := _pending_blasts[i]
+		pb["delay"] -= 1
+		if pb["delay"] <= 0:
+			_fx.append({"x": pb["x"], "y": pb["y"], "t": 0.0, "kind": "explosion"})
+			_fx.append({"x": pb["x"], "y": pb["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+				"r": 40.0, "col": Color(1.0, 0.7, 0.35)})
+			_blast_debris(pb["x"], pb["y"])
+			if _motion >= 0.5:
+				_trauma = minf(1.0, _trauma + 0.12)
+				_rumble = maxf(_rumble, 0.4)
+			_pending_blasts.remove_at(i)
 	for i in range(_scorch.size() - 1, -1, -1):
 		_scorch[i]["t"] += 0.012
 		if _scorch[i]["t"] >= 1.0:
@@ -2262,6 +2342,21 @@ func _draw_fx() -> void:
 			var la := (1.0 - t) * 0.45
 			draw_circle(pos, fx["r"] * (0.6 + t * 0.4), Color(lc.r, lc.g, lc.b, la * 0.5))
 			draw_circle(pos, fx["r"] * 0.5, Color(lc.r, lc.g, lc.b, la))
+		elif fx["kind"] == "ember":
+			# Hot spark: white-hot core over a soft glow, cooling yellow->orange and
+			# dimming fast as it flies. Additive-ish read from layered translucent discs.
+			var ea := 1.0 - t
+			var ec := Color(1.0, 0.85 - t * 0.4, 0.35 - t * 0.3)
+			draw_circle(pos, 2.0 * (1.0 - t * 0.5), Color(ec.r, ec.g, ec.b, ea * 0.5))
+			draw_circle(pos, 0.9, Color(1.0, 0.95, 0.75, ea))
+		elif fx["kind"] == "flash":
+			# Delayed secondary core: negative t holds it dark for ~2 frames after the
+			# main blast, then it pops bright and fades — a two-stage punch.
+			if t < 0.0:
+				continue
+			var la2 := 1.0 - t
+			draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.85 * la2 * la2))
+			draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, la2))
 		elif fx["kind"] == "mote":
 			# Ambient drift: position offset is computed from age (t) rather than
 			# stepped/decayed each frame, so it stays slow and steady for its
