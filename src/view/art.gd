@@ -47,6 +47,8 @@ const TEX := {
 	"icon_skull": preload(SY + "icons/icon_skull.png"),
 	"icon_medal": preload(SY + "icons/icon_medal.png"),
 	"icon_airstrike": preload(SY + "icons/icon_airstrike.png"),
+	# Apocalypse HUD sprites (imported 2D kit, assets/legacy-art/hud/).
+	"hud_star": preload(SY + "hud/ICON_Map_Star.png"),
 	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
 	"ui_wheel_socket": preload(SY + "ui/wheel_socket.png"),
 	"ui_bar_frame": preload(SY + "ui/bar_frame.png"),

@@ -52,6 +52,12 @@ func _draw() -> void:
 		var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
 		draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
 		x += 13.0
+	# Flawless Gate streak: the compounding clean-checkpoint multiplier, shown as
+	# a gold star chip so the discipline reward is visible before the payoff.
+	if sim.mode == "campaign" and sim.flawless_streak >= 1:
+		draw_texture_rect(Art.tex("hud_star"), Rect2(x, y, ICON, ICON), false, Color(1.0, 0.9, 0.4))
+		x = _text("x%d" % sim.flawless_streak, x + ICON + 1.0, y + ICON - 3.0,
+			Color(1.0, 0.9, 0.45)) + 8.0
 	# Live BEST target: the record to beat, right next to the current score.
 	if main.best_score > 0:
 		x = _text("BEST %d" % main.best_score, x, y + ICON - 3.0,
@@ -161,6 +167,8 @@ func _draw() -> void:
 				var bfrac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
 				draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
+			# Segmented magazine bar next to the numeral — clip fill at a glance.
+			px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
 			if main._grenade_dry > 0 and _mblink(4):
@@ -168,6 +176,13 @@ func _draw() -> void:
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
+				px += ICON + 2.0
+			# Live status pips: adrenaline speed-boost + wading — state you feel in
+			# the hands, surfaced so it also reads on the HUD.
+			if p["boost_ticks"] > 0:
+				px = _pip(px, ry, Color(0.4, 0.95, 1.0), ">")
+			if sim._in_water(p["x"], p["y"]):
+				px = _pip(px, ry, Color(0.5, 0.8, 1.0), "~")
 		ry += 16.0
 
 
@@ -190,6 +205,31 @@ func _stat(icon: String, txt: String, x: float, y: float,
 		col := Color(0.95, 0.96, 0.9)) -> float:
 	draw_texture_rect(Art.tex(icon), Rect2(x, y, ICON, ICON), false)
 	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col) + 10.0
+
+
+## Segmented magazine bar: reads the clip fill at a glance (peripheral vision)
+## instead of parsing a two-digit numeral. Colors escalate amber→red as it drains.
+func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
+	var segs := 8
+	var frac := clampf(float(ammo) / float(maxa), 0.0, 1.0)
+	var filled := int(ceil(frac * segs))
+	var lit := Art.safe(Color(0.5, 0.85, 0.45))
+	if frac <= 0.2:
+		lit = Color(1.0, 0.25, 0.2)
+	elif frac <= 0.45:
+		lit = Color(1.0, 0.72, 0.32)
+	for s in segs:
+		draw_rect(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else Color(0.22, 0.2, 0.18))
+	return x + segs * 3.6 + 4.0
+
+
+## A small labeled status pip (speed-boost, wading, …) — state you feel in the
+## hands, surfaced as a legible chip on the player row.
+func _pip(x: float, y: float, col: Color, sym: String) -> float:
+	draw_rect(Rect2(x, y + 2.0, 10.0, 9.0), Color(0.1, 0.11, 0.09, 0.85))
+	draw_string(ThemeDB.fallback_font, Vector2(x + 2.5, y + ICON - 3.0), sym,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE - 1, col)
+	return x + 12.0
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
