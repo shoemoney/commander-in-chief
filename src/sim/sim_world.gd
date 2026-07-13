@@ -201,8 +201,9 @@ var victory: bool = false
 var wiped: bool = false            # endless: whole party down with no rescue → run over
 var _supply_cd: int = 0
 var _world_ended: bool = false    # final gate streamed; no more world
-## Transient per-tick view events ({"t": "explosion"|"kill"|"gate_open", "x", "y"}).
-## Derived from state transitions; cleared every step; excluded from checksums.
+## Transient per-tick view events: {"t": <kind>, "x", "y", ...kind-specific fields}.
+## Rebuilt every step() from state transitions; EXCLUDED from the checksum.
+## ~40 kinds exist now — see main._consume_events() + _EVENT_SOUND for the full set.
 var events: Array[Dictionary] = []
 var _spawn_counter: int = 0
 var _next_bunker_y: int = 0

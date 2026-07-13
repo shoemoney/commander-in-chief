@@ -327,30 +327,7 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "NEED COINS", "col": Color(1.0, 0.45, 0.35)})
 			"shot":
-				var shooter := sim.players[ev["i"]]
-				var aim := Vector2(shooter["aim_x"], shooter["aim_y"]) * PX
-				_recoil[ev["i"]] -= aim * 2.2
-				_kick -= aim * 0.5
-				if ev["i"] < _heat.size():
-					_heat[ev["i"]] = minf(1.0, _heat[ev["i"]] + 0.09)
-					# Overheated barrel vents steam at the muzzle — the heat
-					# mechanic gets a physical tell, not just reticle bloom.
-					if _heat[ev["i"]] >= 0.95 and Engine.get_physics_frames() % 8 == 0:
-						_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
-							"y": ev["y"] + int(shooter["aim_y"] * 13), "t": 0.35, "kind": "smoke"})
-				_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
-					"y": ev["y"] + int(shooter["aim_y"] * 13),
-					"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
-				var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
-					"rate": 0.055, "spin": randf() * TAU,
-					"vx": perp.x * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4),
-					"vy": perp.y * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4)})
-				# Faint muzzle light on the ground (rate-capped so MG spam can't wash out).
-				if Engine.get_physics_frames() % 2 == 0:
-					_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 11), "y": ev["y"] + int(shooter["aim_y"] * 11),
-						"t": 0.0, "kind": "light", "rate": 0.28, "r": 16.0,
-						"col": Color(1.0, 0.9, 0.5)})
+				_ev_shot(ev)
 			"tank_shot":
 				var gunner := sim.players[ev["i"]]
 				var taim := Vector2(gunner["aim_x"], gunner["aim_y"]) * PX
@@ -477,6 +454,33 @@ func _consume_events() -> void:
 				_sfx.play("wiped", -2.0)
 			"victory":
 				_ev_victory(ev)
+
+
+func _ev_shot(ev: Dictionary) -> void:
+	var shooter := sim.players[ev["i"]]
+	var aim := Vector2(shooter["aim_x"], shooter["aim_y"]) * PX
+	_recoil[ev["i"]] -= aim * 2.2
+	_kick -= aim * 0.5
+	if ev["i"] < _heat.size():
+		_heat[ev["i"]] = minf(1.0, _heat[ev["i"]] + 0.09)
+		# Overheated barrel vents steam at the muzzle — the heat
+		# mechanic gets a physical tell, not just reticle bloom.
+		if _heat[ev["i"]] >= 0.95 and Engine.get_physics_frames() % 8 == 0:
+			_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
+				"y": ev["y"] + int(shooter["aim_y"] * 13), "t": 0.35, "kind": "smoke"})
+	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
+		"y": ev["y"] + int(shooter["aim_y"] * 13),
+		"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
+	var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
+		"rate": 0.055, "spin": randf() * TAU,
+		"vx": perp.x * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4),
+		"vy": perp.y * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4)})
+	# Faint muzzle light on the ground (rate-capped so MG spam can't wash out).
+	if Engine.get_physics_frames() % 2 == 0:
+		_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 11), "y": ev["y"] + int(shooter["aim_y"] * 11),
+			"t": 0.0, "kind": "light", "rate": 0.28, "r": 16.0,
+			"col": Color(1.0, 0.9, 0.5)})
 
 
 func _ev_explosion(ev: Dictionary) -> void:
@@ -2090,18 +2094,31 @@ func _draw_progress_rail() -> void:
 func _draw_threat_edges() -> void:
 	# Chevrons on the bottom edge for live hostiles below the viewport —
 	# bypassed bunkers keep spawning behind you.
+	var _bottom_threats: Array = []
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
 			continue
 		var sy: float = (e["y"] - sim.camera_top) * PX
 		if sy <= 364.0:
 			continue
+		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
+		_bottom_threats.append({"e": e, "sy": sy, "danger": danger})
+	# A dense endless wave can stack a dozen+ off-screen hostiles on one edge,
+	# painting a near-solid chevron row that drowns the lethality signal —
+	# cap to the nearest few; ties prefer the lethal ranged killers.
+	_bottom_threats.sort_custom(func(a, b):
+		if a["sy"] != b["sy"]:
+			return a["sy"] < b["sy"]
+		return a["danger"] and not b["danger"])
+	for i in mini(6, _bottom_threats.size()):
+		var e = _bottom_threats[i]["e"]
+		var sy: float = _bottom_threats[i]["sy"]
+		var danger: bool = _bottom_threats[i]["danger"]
 		var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
 		if sim.last_stand and sx > 165.0 and sx < 475.0:
 			# keep clear of the colossus HP bar / LAST STAND readout parked
 			# at bottom-center of the screen in the finale
 			sx = 165.0 if sx < 320.0 else 475.0
-		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
 		var a := clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85)
 		if e.get("windup", 0) > 0:
 			a = clampf(a + Art.pulse(0.28) * 0.35, 0.25, 1.0)
@@ -2114,12 +2131,25 @@ func _draw_threat_edges() -> void:
 	# an off-screen threat you'd otherwise only meet as it crosses into view.
 	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
 	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
+	var _top_threats: Array = []
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
 			continue
 		var ty: float = (e["y"] - sim.camera_top) * PX
 		if ty >= 0.0 or ty < -180.0:
 			continue
+		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
+		_top_threats.append({"e": e, "ty": ty, "danger": tdanger})
+	# Same swarm cap as the bottom edge — nearest few only, ties favor the
+	# lethal ranged killers.
+	_top_threats.sort_custom(func(a, b):
+		if a["ty"] != b["ty"]:
+			return a["ty"] > b["ty"]
+		return a["danger"] and not b["danger"])
+	for i in mini(6, _top_threats.size()):
+		var e = _top_threats[i]["e"]
+		var ty: float = _top_threats[i]["ty"]
+		var tdanger: bool = _top_threats[i]["danger"]
 		var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
 		# Under the corner HUD panel's real footprint (x<262), drop the chevron
 		# below the panel's bottom edge instead of skipping it outright — still
@@ -2127,7 +2157,6 @@ func _draw_threat_edges() -> void:
 		var tbase := 28.0
 		if tx < 262.0:
 			tbase = _panel_bot + 12.0
-		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
 		var ta := clampf(1.0 + ty / 180.0, 0.2, 0.7)
 		if e.get("windup", 0) > 0:
 			ta = clampf(ta + Art.pulse(0.28) * 0.3, 0.2, 1.0)
