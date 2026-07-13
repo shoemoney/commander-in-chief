@@ -1799,6 +1799,12 @@ func _draw_terrain() -> void:
 	if jst < 820.0:
 		_spr("m_jet", Vector2(jst - 90.0, 120.0 + fposmod(-cam_y * 0.2, 300.0)),
 			PI / 2, 0.34, Color(0.0, 0.02, 0.0, 0.16))
+	# The foliage joins the grass/skyglow in shifting jungle -> scorched toward the
+	# Foundry finale (grass already recolors via march; the green ferns/trees used
+	# to stay lush, breaking the progression). Lerp their tint ashen by march.
+	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
+	var fern_col := Color(0.82, 0.92, 0.72).lerp(Color(0.6, 0.52, 0.42), ash)
+	var tree_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
 	# Low fern understory scattered through the field (hash decorrelated from
 	# the tree grid so ferns and trees don't stack on the same cell).
 	for ty in 10:
@@ -1814,7 +1820,7 @@ func _draw_terrain() -> void:
 				continue
 			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07
 			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway,
-				0.28 + float(hf % 3) * 0.03, Color(0.82, 0.92, 0.72))
+				0.28 + float(hf % 3) * 0.03, fern_col)
 
 	# Jungle tree lines on the flanks, sparse singles in the field.
 	for ty in 9:
@@ -1833,7 +1839,7 @@ func _draw_terrain() -> void:
 				var big := h2 % 5 == 0
 				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04
 				_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
-					float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34, Color(0.75, 0.85, 0.72))
+					float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34, tree_col)
 
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
