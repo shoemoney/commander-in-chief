@@ -2157,6 +2157,12 @@ func _draw_players() -> void:
 							bash_ready = true
 							break
 				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				# Weapon-state at the point of attention: cyan while Piercing Rounds
+				# are up, amber while the Trench Gun spread is up.
+				if p["pierce_ticks"] > 0:
+					rcol = Color(0.55, 0.9, 1.0)
+				elif p["spread_ticks"] > 0:
+					rcol = Color(1.0, 0.8, 0.45)
 				if bash_ready:
 					rcol = Color(1.0, 0.55, 0.2)
 					var bp := Art.pulse(0.25)
