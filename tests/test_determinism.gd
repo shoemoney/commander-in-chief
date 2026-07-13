@@ -63,13 +63,16 @@ const SEED := 0xDEADBEEF
 ## this torture — the branch's roll-iframe fix / pickup + strikeable refactors don't perturb the
 ## sampled trajectory (the new test_combat roll test exercises the closed gap directly), so these
 ## match main's committed campaign checksums exactly.
+## RE-RECORDED (2026-07-12, iter 26 power-ups, post-merge): Piercing Rounds — a rare elite-drop
+## capsule (new checksummed player field pierce_ticks; kind-4 pickup) that lets bullets punch
+## through a kill. The 1-in-12 drop roll shifts rng on every elite kill → all samples moved.
 const GOLDEN: Array[int] = [
-	8115790318362077857,
-	7194404661752016069,
-	924774564009016043,
-	7538835225478606903,
-	768985619869056713,
-	4767029557005767388,
+	8549363251984477193,
+	7475641192134167970,
+	4605440515711384222,
+	8906751050653530216,
+	256780727183263544,
+	3659946109071164932,
 ]
 
 
@@ -128,12 +131,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
 const ENDLESS_GOLDEN: Array[int] = [
-	3301942127190038769,
-	3964200460934290926,
-	6818002345657424903,
-	3645506853848391951,
-	7504729960263157399,
-	2541515141754833631,
+	6850586449262244221,
+	3937459854660825806,
+	3423777578327844640,
+	8681535473527522840,
+	4059724756335624752,
+	5674402616539079336,
 ]
 
 

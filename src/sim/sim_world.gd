@@ -29,6 +29,9 @@ const FIRE_COOLDOWN_TICKS := 8
 # cooldown keeps it a last resort, not a replacement weapon.
 const BASH_RADIUS := 16 * F_ONE
 const BASH_COOLDOWN_TICKS := 40
+# Piercing Rounds power-up (1986 capsule grammar): a timed buff, rarely dropped
+# by elites, that lets MG bullets punch clean through a kill to the next target.
+const PIERCE_TICKS := 600
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -271,6 +274,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"buy_prev": 0,
 			"vest": false,
 			"hurt_iframes": 0,
+			"pierce_ticks": 0,
 		})
 
 
@@ -351,6 +355,7 @@ func _step_players(inputs: Array) -> void:
 		p["roll_buf"] = maxi(0, p["roll_buf"] - 1)
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
+		p["pierce_ticks"] = maxi(0, p["pierce_ticks"] - 1)
 		p["roll_iframe"] = false
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
@@ -565,6 +570,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["boost_ticks"] = 0
 	p["in_tank"] = -1
 	p["vest"] = false                  # death strips upgrades (1986 rule)
+	p["pierce_ticks"] = 0              # ...including the Piercing Rounds buff
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -615,6 +621,8 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 4)
 		2:
 			p["vest"] = true
+		4:
+			p["pierce_ticks"] = PIERCE_TICKS   # Piercing Rounds capsule (drop-only)
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
@@ -808,6 +816,11 @@ func _step_bullets() -> void:
 						dead = true
 						break
 					_kill_enemy(e)
+					# Piercing Rounds: the shooter's active buff lets the bullet punch
+					# through the kill and keep going to the next target this tick.
+					var powner: int = b.get("owner", -1)
+					if powner >= 0 and powner < players.size() and players[powner]["pierce_ticks"] > 0:
+						continue
 					dead = true
 					break
 		if not dead:
@@ -933,7 +946,7 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],
-			"kind": rng.range_i(0, 1),   # 0 = Ammo Cache, 1 = Grenade Crate
+			"kind": 4 if rng.range_i(0, 11) == 0 else rng.range_i(0, 1),   # rare Piercing Rounds
 		})
 
 
@@ -1863,7 +1876,7 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
-				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"]]:
+				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"]]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)

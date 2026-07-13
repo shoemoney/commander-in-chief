@@ -269,3 +269,25 @@ func test_grenade_frag_bonus_on_multikill() -> void:
 	sim._explode(100 * Fixed.ONE, 100 * Fixed.ONE)
 	var base := SimWorld.COIN_RUSHER * 10 * 4   # four rusher kills, base score
 	Runner.T.ok(sim.score - score0 > base, "a 4-kill blast pays a frag bonus over the base kills")
+
+
+func test_piercing_rounds_punch_through_two_enemies() -> void:
+	# With the Piercing Rounds buff active, a single MG bullet kills a line of
+	# enemies instead of stopping at the first.
+	var sim := SimWorld.new(3, 1, "campaign")
+	var p := sim.players[0]
+	p["pierce_ticks"] = 200
+	sim.enemies.clear()
+	var e1 := {"x": p["x"], "y": p["y"] - 30 * Fixed.ONE, "alive": true, "elite": false, "kind": "rusher"}
+	var e2 := {"x": p["x"], "y": p["y"] - 55 * Fixed.ONE, "alive": true, "elite": false, "kind": "rusher"}
+	sim.enemies.append(e1)
+	sim.enemies.append(e2)
+	var fire := SimInput.new()
+	fire.aim_y = -256
+	fire.fire = true
+	sim.step(_inputs(fire))
+	var aim := SimInput.new()
+	aim.aim_y = -256
+	for t in 18:
+		sim.step(_inputs(aim))
+	Runner.T.ok(not e1["alive"] and not e2["alive"], "one piercing bullet punched through both enemies")

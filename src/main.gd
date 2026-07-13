@@ -1997,10 +1997,13 @@ func _draw_projectiles() -> void:
 		# fire heats the barrel — tracers shift yellow → white-hot.
 		var owner: int = b.get("owner", 0)
 		var heat: float = _heat[owner] if owner < _heat.size() else 0.0
-		var tail := Color(1.0, 0.8, 0.35, 0.45).lerp(Color(1.0, 0.95, 0.85, 0.6), heat)
-		draw_line(bpos - dir * (7.0 + heat * 3.0), bpos, tail, 1.2)
-		draw_line(bpos - dir * 3.0, bpos, Color(1.0, 0.95, 0.7, 0.95), 1.4)
-		draw_circle(bpos, 1.1, Color(1.0, 1.0, 0.85))
+		# Piercing Rounds read as cyan AP tracers, distinct from the hot MG streak.
+		var piercing: bool = owner < sim.players.size() and sim.players[owner]["pierce_ticks"] > 0
+		var tail := Color(0.5, 0.9, 1.0, 0.7) if piercing \
+			else Color(1.0, 0.8, 0.35, 0.45).lerp(Color(1.0, 0.95, 0.85, 0.6), heat)
+		draw_line(bpos - dir * (7.0 + heat * 3.0 + (4.0 if piercing else 0.0)), bpos, tail, 1.4 if piercing else 1.2)
+		draw_line(bpos - dir * 3.0, bpos, Color(0.7, 0.95, 1.0, 0.95) if piercing else Color(1.0, 0.95, 0.7, 0.95), 1.4)
+		draw_circle(bpos, 1.3 if piercing else 1.1, Color(0.9, 1.0, 1.0) if piercing else Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		# Hostile fire: small glowing red orb — ordnance, not infantry.
