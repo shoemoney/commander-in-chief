@@ -31,6 +31,7 @@ var _replay_saved := false        # save the replay once per run, at the debrief
 var _two_players := false
 var _endless := false
 var _daily := false              # seed-of-the-day challenge run
+var _seed_override := -1         # CHALLENGE SEED: one-shot forced seed (-1 = none)
 # Feel stack (view-only; the sim never sees any of this).
 var _trauma := 0.0
 var _hitstop_frames := 0
@@ -304,11 +305,45 @@ func _daily_seed() -> int:
 	return ((d["year"] * 10000 + d["month"] * 100 + d["day"]) * 2654435761) & 0x7FFFFFFF
 
 
+func start_seeded(seed_v: int) -> void:
+	# Challenge a friend: play a pasted seed's exact layout. Determinism makes the
+	# whole run reproducible from the integer alone. Not a daily, so it won't claim
+	# a daily-tagged Hall of Fame slot.
+	_endless = false
+	_daily = false
+	_seed_override = seed_v
+	_reset()
+
+
+func start_seed_from_clipboard() -> void:
+	# CHALLENGE SEED: pull the seed out of the clipboard — accepts a bare integer or
+	# a full share-card line ("... seed 12345"), grabbing the LAST digit run.
+	var clip := DisplayServer.clipboard_get()
+	var seed_str := ""
+	for i in range(clip.length() - 1, -1, -1):
+		var c := clip[i]
+		if c >= "0" and c <= "9":
+			seed_str = c + seed_str
+		elif not seed_str.is_empty():
+			break
+	if seed_str.is_empty():
+		_show_banner("CLIPBOARD HAS NO SEED")
+		return
+	start_seeded(seed_str.to_int())
+
+
 func _reset() -> void:
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
 	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
-	var seed_v := 0xC0FFEE if OS.has_feature("movie") else (_daily_seed() if _daily else randi())
+	var seed_v: int
+	if _seed_override >= 0:
+		seed_v = _seed_override
+		_seed_override = -1   # one-shot: consumed for this run only
+	elif OS.has_feature("movie"):
+		seed_v = 0xC0FFEE
+	else:
+		seed_v = _daily_seed() if _daily else randi()
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
 	sim.assist_mode = _assist   # accessibility: 2-hit vest each life, flagged on the leaderboard

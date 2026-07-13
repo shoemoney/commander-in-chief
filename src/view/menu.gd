@@ -39,6 +39,7 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "campaign", "label": "CAMPAIGN", "destructive": false},
 			{"id": "endless", "label": "ENDLESS WAR", "destructive": false},
 			{"id": "daily", "label": "DAILY RUN", "destructive": false},
+			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false},
 			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false},
 			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false},
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false},
@@ -142,6 +143,7 @@ func _activate() -> void:
 			"campaign": main.start_game(false)
 			"endless": main.start_game(true)
 			"daily": main.start_daily()
+			"paste_seed": main.start_seed_from_clipboard()
 			"coop": main._two_players = not main._two_players
 			"hard": main._hard = not main._hard
 			"hall": open(Mode.HALL)
