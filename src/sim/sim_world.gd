@@ -1555,7 +1555,7 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		score += BOSS_BOUNTY * 10
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
-		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY})
+		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY, "kind": "boss"})
 
 
 func _step_enemy_bullets() -> void:
@@ -1656,7 +1656,7 @@ func _resolve_strikes() -> void:
 
 func _kill_observer() -> void:
 	events.append({"t": "kill", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET,
-		"coin": COIN_ELITE * 2})
+		"coin": COIN_ELITE * 2, "kind": "observer"})
 	war_chest += COIN_ELITE * 2
 	score += COIN_ELITE * 20
 	observer = {}

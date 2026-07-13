@@ -13,6 +13,8 @@ var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
+var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
+var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _row_w := 262.0       # panel backing, sized to last frame's content (1-frame lag)
 
 
@@ -26,25 +28,35 @@ func _draw() -> void:
 	if main == null or main.sim == null:
 		return
 	var sim: SimWorld = main.sim
+	# Shop preview strip adds one row while the SHOP OPEN window is live, so
+	# the buy list is readable without holding the spend-wheel open.
+	var shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
 
 	# Scavenged-metal panel backing the whole readout.
 	draw_texture_rect(Art.tex("ui_panel"),
-		Rect2(2, 2, _row_w, 26 + sim.players.size() * 16), false, Color(1, 1, 1, 0.9))
+		Rect2(2, 2, _row_w, 26 + sim.players.size() * 16 + (16 if shop_row else 0)),
+		false, Color(1, 1, 1, 0.9))
 
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	if sim.war_chest > _prev_chest:
 		_chest_pulse = 1.0
 	_prev_chest = sim.war_chest
 	_chest_pulse = maxf(0.0, _chest_pulse - 0.05)
+	if _disp_chest < 0.0:
+		_disp_chest = float(sim.war_chest)
+	_disp_chest = _rollup(_disp_chest, float(sim.war_chest))
 	var x := 8.0
 	var y := 6.0
-	x = _stat("icon_coin", str(sim.war_chest), x, y,
+	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse))
 	if sim.score > _prev_score:
 		_score_pulse = 1.0
 	_prev_score = sim.score
 	_score_pulse = maxf(0.0, _score_pulse - 0.05)
-	x = _stat("icon_medal", str(sim.score), x, y,
+	if _disp_score < 0.0:
+		_disp_score = float(sim.score)
+	_disp_score = _rollup(_disp_score, float(sim.score))
+	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
 		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse))
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
@@ -76,8 +88,9 @@ func _draw() -> void:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
-				var mchip: String = ["", "BLITZ", "ELITE GUARD", "SPOTTER"][sim.wave_mod]
-				if _fits(x, _tw(mchip) + 8.0):
+				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER"]
+				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
+				if mchip != "" and _fits(x, _tw(mchip) + 8.0):
 					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
 			# Live wave-clear dashboard: how close is this wave to done? (the
 			# push-or-hold decision was blind — enemy count already computed
@@ -123,8 +136,20 @@ func _draw() -> void:
 	# ponytail: cached width sizes the panel to content without a measure pass; a 1-frame lag is imperceptible.
 	_row_w = clampf(row_r + 4.0, 262.0, RIGHT - 2.0)
 
-	# Player rows.
+	# Shop preview strip: the 4 buyables at a glance (cost + green/red
+	# affordability), matching the spend-wheel's own price coloring.
 	var ry := y + 17.0
+	if shop_row:
+		var sx := 8.0
+		for kind in 4:
+			var icon: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][kind]
+			var cost: int = sim._supply_cost(kind)
+			var afford: bool = sim.war_chest >= cost
+			var scol := Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4)
+			sx = _stat(icon, str(cost), sx, ry, scol)
+		ry += 16.0
+
+	# Player rows.
 	for i in sim.players.size():
 		var p := sim.players[i]
 		var px := 8.0
@@ -197,6 +222,15 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
 	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
 	return _text("%ds" % maxi(0, t["fuel"] / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0
+
+
+## Exponential catch-up toward `target`, snapping once close — a big jump
+## visibly rolls up over a few frames instead of teleporting to the new value.
+func _rollup(disp: float, target: float) -> float:
+	var diff := target - disp
+	if absf(diff) < 0.6:
+		return target
+	return disp + diff * 0.15
 
 
 func _stat(icon: String, txt: String, x: float, y: float,

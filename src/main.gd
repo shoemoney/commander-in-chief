@@ -1199,8 +1199,9 @@ func _draw() -> void:
 	_draw_threat_edges()
 	_draw_progress_rail()
 	_draw_wheel()
-	_draw_airstrike_telegraph()
-	_draw_banners()
+	var top_msg := _top_center_priority()
+	_draw_airstrike_telegraph(top_msg)
+	_draw_banners(top_msg)
 
 
 func _draw_terrain() -> void:
@@ -1567,7 +1568,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 		# (they land at phase_t 200/240/280 of the 360-tick cycle).
 		var pt: int = boss["phase_t"]
 		var hull_mod := Color.WHITE
-		if pt >= 170 and pt <= 290 and (Engine.get_physics_frames() / 6) % 2 == 0:
+		if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 			hull_mod = Color(1.5, 0.6, 0.5)
 		_spr("gunship_body", bpos, PI, 0.8, hull_mod)
 		_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8, hull_mod)
@@ -1592,6 +1593,25 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.5, 0.4))
 		_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
+		# Next-volley countdown: a tick that sweeps left->right across the HP
+		# bar and lands on the right edge exactly as each mortar strike lands
+		# (170->200, 200->240, 240->280) — the barrage is now anticipable on
+		# the bar you're already watching, not just the hull-flash that can
+		# sit off-screen above the held camera.
+		if pt >= 170 and pt < 280:
+			var vseg_start := 170
+			var vseg_end := 200
+			if pt >= 240:
+				vseg_start = 240
+				vseg_end = 280
+			elif pt >= 200:
+				vseg_start = 200
+				vseg_end = 240
+			var vfrac := float(pt - vseg_start) / float(vseg_end - vseg_start)
+			var vx := bar_x + bar_w * vfrac
+			draw_line(Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
+				Color(1.0, 0.85, 0.3, 0.9), 2.0)
+			draw_arc(Vector2(vx, bar_y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 
 
 func _draw_colossus() -> void:
@@ -1629,6 +1649,15 @@ func _draw_colossus() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
+	# Next-core-open countdown: same sweeping tick as the gunship's mortar
+	# marker above, so the plating-retract window is timeable off the fixed
+	# bottom bar instead of the small warm-up glow on the barrels.
+	if sim.colossus.get("core_open", 0) == 0:
+		var cc: int = sim.colossus.get("core_cd", SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
+		var cvfrac := 1.0 - float(cc) / float(SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
+		var cvx := 170.0 + 300.0 * clampf(cvfrac, 0.0, 1.0)
+		draw_line(Vector2(cvx, 328.0), Vector2(cvx, 345.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
+		draw_arc(Vector2(cvx, 327.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 
 
 func _draw_projectiles() -> void:
@@ -2003,6 +2032,10 @@ func _draw_threat_edges() -> void:
 		if sy <= 364.0:
 			continue
 		var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
+		if sim.last_stand and sx > 165.0 and sx < 475.0:
+			# keep clear of the colossus HP bar / LAST STAND readout parked
+			# at bottom-center of the screen in the finale
+			sx = 165.0 if sx < 320.0 else 475.0
 		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
 		var a := clampf(1.2 - (sy - 360.0) / 200.0, 0.25, 0.85)
 		if e.get("windup", 0) > 0:
@@ -2014,6 +2047,8 @@ func _draw_threat_edges() -> void:
 		draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
 	# Top-edge chevrons for hostiles about to enter from the spawn edge above —
 	# an off-screen threat you'd otherwise only meet as it crosses into view.
+	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
+	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
 			continue
@@ -2021,17 +2056,21 @@ func _draw_threat_edges() -> void:
 		if ty >= 0.0 or ty < -180.0:
 			continue
 		var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
+		# Under the corner HUD panel's real footprint (x<262), drop the chevron
+		# below the panel's bottom edge instead of skipping it outright — still
+		# a warning, just relocated clear of the opaque HUD art.
+		var tbase := 28.0
 		if tx < 262.0:
-			continue   # don't clutter under the corner HUD panel
+			tbase = _panel_bot + 12.0
 		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier"
 		var ta := clampf(1.0 + ty / 180.0, 0.2, 0.7)
 		if e.get("windup", 0) > 0:
 			ta = clampf(ta + Art.pulse(0.28) * 0.3, 0.2, 1.0)
 		var tcol := Color(1.0, 0.1, 0.1, ta) if tdanger else Color(1.0, 0.55, 0.25, ta)
 		var tspr := 6.0 if tdanger else 4.0   # spikier spread for ranged killers
-		var ttip := 22.0 if tdanger else 24.0
-		draw_line(Vector2(tx - tspr, 28), Vector2(tx, ttip), tcol, 2.0)
-		draw_line(Vector2(tx, ttip), Vector2(tx + tspr, 28), tcol, 2.0)
+		var ttip := tbase - (6.0 if tdanger else 4.0)
+		draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
+		draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
 	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
 	# while an already-streamed boss (or the observer) sits above the visible
 	# view — its HP bar/label live in the fixed HUD but the arena-lock
@@ -2067,6 +2106,36 @@ func _draw_threat_edges() -> void:
 		draw_line(Vector2(near_x, 5), Vector2(near_x + 6, 14), bcol, 2.5)
 		draw_line(Vector2(near_x - 6, 22), Vector2(near_x, 13), bcol, 2.5)
 		draw_line(Vector2(near_x, 13), Vector2(near_x + 6, 22), bcol, 2.5)
+	# Off-screen downed-partner revive locator: the revive beacon + dashed
+	# tether in _draw_players only render at the body's on-screen world pos,
+	# so a KO'd partner scrolled past the held camera's edge is invisible and
+	# the revive has no spatial target. One labeled chevron at the edge
+	# nearest the body, same idiom as the boss/spotter locator above.
+	if _two_players and not sim.last_stand:
+		for i in sim.players.size():
+			var dp2 := sim.players[i]
+			if dp2["alive"]:
+				continue
+			var partner_up2 := false
+			for q in sim.players.size():
+				if q != i and sim.players[q]["alive"]:
+					partner_up2 = true
+			if not partner_up2 or sim.war_chest < sim.revive_cost(dp2):
+				continue
+			var rsy: float = (dp2["y"] - sim.camera_top) * PX
+			if rsy >= 0.0 and rsy <= 360.0:
+				continue   # on screen already — the body beacon covers it
+			var rx := clampf(dp2["x"] * PX, 8.0, 632.0)
+			var rp := Art.pulse(0.3)
+			var rcol := Art.safe(Color(0.5, 0.9, 1.0, 0.6 + rp * 0.3))
+			if rsy > 360.0:
+				draw_line(Vector2(rx - 6, 336), Vector2(rx, 345), rcol, 2.5)
+				draw_line(Vector2(rx, 345), Vector2(rx + 6, 336), rcol, 2.5)
+				Art.text(self, "REVIVE", Vector2(rx - 18, 332), 9, rcol)
+			else:
+				draw_line(Vector2(rx - 6, 40), Vector2(rx, 31), rcol, 2.5)
+				draw_line(Vector2(rx, 31), Vector2(rx + 6, 40), rcol, 2.5)
+				Art.text(self, "REVIVE", Vector2(rx - 18, 50), 9, rcol)
 
 
 func _draw_wheel() -> void:
@@ -2131,7 +2200,32 @@ func _draw_wheel() -> void:
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.95, 0.7))
 
 
-func _draw_airstrike_telegraph() -> void:
+func _top_center_priority() -> String:
+	# Arbiter for the top-center text band: AIRSTRIKE INBOUND, MORTARS RANGING,
+	# the splash banner, and the closed-gate objective line all want the same
+	# ~y46-90 strip and used to overprint into a smear when several fired in
+	# the same frame. Only the single most-urgent one renders per frame.
+	for g in sim.gates:
+		if g["open"] or g.get("final", false):
+			continue
+		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
+			continue
+		if sim.stall_ticks > 90:
+			return "boss"
+		break
+	if sim.pending_airstrike > 0:
+		return "airstrike"
+	if sim.mode == "campaign" and sim.observer.is_empty() \
+			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180:
+		return "mortar"
+	if not _banners.is_empty():
+		var bn: Dictionary = _banners[0]
+		if float(bn["t"]) > 0.01 and not String(bn["text"]).is_empty():
+			return "splash"
+	return ""
+
+
+func _draw_airstrike_telegraph(top_msg: String) -> void:
 	# The called airstrike's incoming window: a red wash that ramps and strobes as
 	# impact nears, so the wipe reads as an anticipated event, not a silent zap.
 	if sim.pending_airstrike <= 0:
@@ -2141,6 +2235,8 @@ func _draw_airstrike_telegraph() -> void:
 	if sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
 		a = 0.34
 	draw_rect(Rect2(0, 0, 640, 360), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
+	if top_msg != "airstrike":
+		return
 	var f := ThemeDB.fallback_font
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
 	var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
@@ -2148,7 +2244,7 @@ func _draw_airstrike_telegraph() -> void:
 	draw_string(f, Vector2(320 - w / 2.0, 46), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.85, 0.3))
 
 
-func _draw_banners() -> void:
+func _draw_banners(top_msg: String) -> void:
 	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
 	# (static, so it stays even under reduce-motion).
 	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, 640, 360), false,
@@ -2190,8 +2286,8 @@ func _draw_banners() -> void:
 			continue
 		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
 			continue
-		if sim.stall_ticks > 90:
-			var gpulse := Art.pulse(0.15)
+		if top_msg == "boss" and sim.stall_ticks > 90:
+			var gpulse := 1.0 if _motion < 0.5 else Art.pulse(0.15)
 			var gtxt := "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty() \
 				else "GRENADE THE BUNKERS TO ADVANCE"
 			var gf := ThemeDB.fallback_font
@@ -2204,9 +2300,8 @@ func _draw_banners() -> void:
 		break
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
-	if sim.mode == "campaign" and sim.observer.is_empty() \
-			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180:
-		var pulse := 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
+	if top_msg == "mortar":
+		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
 		var wtxt := "MORTARS RANGING — ADVANCE!"
 		var wf := ThemeDB.fallback_font
 		var ww := wf.get_string_size(wtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
@@ -2217,7 +2312,7 @@ func _draw_banners() -> void:
 		var bn: Dictionary = _banners[0]
 		var bt: float = bn["t"]
 		var btext: String = bn["text"]
-		if bt > 0.01 and not btext.is_empty():
+		if top_msg == "splash" and bt > 0.01 and not btext.is_empty():
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
 			var f := ThemeDB.fallback_font
 			var w := f.get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
@@ -2230,7 +2325,7 @@ func _draw_banners() -> void:
 		var vf := ThemeDB.fallback_font
 		draw_texture_rect(Art.tex("ui_panel"), Rect2(170, 115, 300, 135), false,
 			Color(1, 1, 1, 0.96))
-		var vpulse := 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
+		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
 		draw_texture_rect(Art.tex("trophy"),
 			Rect2(Vector2(196.0 - tsz / 2.0, 182.0 - tsz / 2.0), Vector2(tsz, tsz)), false)
@@ -2266,7 +2361,7 @@ func _draw_banners() -> void:
 		for li in lines.size():
 			draw_string(df, Vector2(210, 168 + li * 16), lines[li],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.92, 0.85))
-		var rp := 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
+		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
 		draw_string(df, Vector2(232, 250), "PRESS  R  — REDEPLOY",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.9, 0.4, rp))
 	elif sim.last_stand:
