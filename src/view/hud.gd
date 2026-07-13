@@ -68,6 +68,19 @@ func _draw() -> void:
 			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
 			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
 			x += 13.0
+			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
+			# ring alone only reads "streak alive", not "how close".
+			var snext := 0
+			if sim.kill_streak < 5:
+				snext = 5
+			elif sim.kill_streak < 10:
+				snext = 10
+			elif sim.kill_streak < 20:
+				snext = 20
+			if snext > 0:
+				var shint := ">x%d" % snext
+				if _fits(x, _tw(shint) + 6.0):
+					x = _text(shint, x, y + ICON - 3.0, Color(0.85, 0.85, 0.8, 0.65)) + 6.0
 	# Live BEST target: the record to beat, right next to the current score.
 	if main.best_score > 0:
 		var btxt := "BEST %d" % main.best_score
@@ -179,7 +192,9 @@ func _draw() -> void:
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
-			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry)
+			var gcol_tank := Color(0.6, 0.85, 1.0) if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX \
+				else Color(0.95, 0.96, 0.9)
+			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
 			if t["burning"] and _mblink(8):
 				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
@@ -191,6 +206,8 @@ func _draw() -> void:
 				acol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
 			elif ammo <= 20:
 				acol = Color(1.0, 0.75, 0.35)
+			elif ammo == SimWorld.MG_AMMO_MAX:
+				acol = Color(0.6, 0.85, 1.0)
 			var ammo_x := px
 			px = _stat("icon_ammo", "%02d" % ammo, px, ry, acol)
 			# Empty-clip bash on cooldown: a draining ring on the dry ammo icon
@@ -201,6 +218,8 @@ func _draw() -> void:
 					-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
+			if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+				gcol = Color(0.6, 0.85, 1.0)
 			if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)

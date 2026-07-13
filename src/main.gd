@@ -287,6 +287,7 @@ func _physics_process(_delta: float) -> void:
 
 func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
+	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
 	for ev in sim.events:
 		var kind: String = ev["t"]
 		if kind == "pickup":
@@ -304,8 +305,8 @@ func _consume_events() -> void:
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
 				_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0
-				if not armor_pinged:
-					armor_pinged = true
+				if not boss_pinged:
+					boss_pinged = true
 					_sfx.play("vest_break", -10.0, 1.35)
 			"dry_fire":
 				if Engine.get_physics_frames() - _dry_frame >= 14:
@@ -359,104 +360,19 @@ func _consume_events() -> void:
 					"y": ev["y"] + int(gunner["aim_y"] * 18),
 					"t": 0.0, "kind": "muzzle", "rate": 0.22, "a": taim.angle(), "big": true})
 			"explosion":
-				_trauma = minf(1.0, _trauma + 0.35)
-				_hitstop_frames = maxi(_hitstop_frames, 4)
-				_rumble = maxf(_rumble, 0.7)
-				_punch = maxf(_punch, 0.05)
-				_duck = maxf(_duck, 0.7)
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
-					"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
-				var wet: bool = sim._in_water(ev["x"], ev["y"])
-				for d in 8:
-					var da := d * TAU / 8.0 + randf() * 0.3
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
-						"kind": "splash" if wet else "dust", "rate": 0.06,
-						"vx": cos(da) * randf_range(1.5, 3.0), "vy": sin(da) * randf_range(1.5, 3.0)})
-				if not wet:
-					_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+				_ev_explosion(ev)
 			"kill":
-				# No screen flash here: at kill-spam rates it strobes
-				# (photosensitivity); smoke + gib burst + blip + coin carry it.
-				# A per-type death throe + a fading corpse so a cleared field
-				# reads as fought-over, not swept clean.
-				var kkind: String = ev.get("kind", "rusher")
-				if kkind != "frogman":
-					# Sprawl the corpse along the shot that felled it (away from the
-					# nearest shooter), not a random spin.
-					var killer := sim._nearest_alive_player(ev["x"], ev["y"])
-					var cspin := randf() * TAU
-					if not killer.is_empty():
-						cspin = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
-					_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
-						"kind": "rusher" if kkind == "rusher" else "elite",
-						"spin": cspin})
-				# Wet kills die in a splash, not a puff — the terrain reacts.
-				if sim._in_water(ev["x"], ev["y"]):
-					_sfx.play("splash", -10.0, 1.2)
-					for d in 6:
-						var wa := d * TAU / 6.0
-						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "splash", "rate": 0.08,
-							"vx": cos(wa) * randf_range(0.8, 1.8), "vy": sin(wa) * randf_range(0.8, 1.8)})
-				else:
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
-				# Directional gib/spark burst — the kill hits back.
-				for g in 5:
-					var ga := randf() * TAU
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
-						"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
-						"spin": randf() * TAU})
-				_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0   # kill confirms on the shooter's reticle
-				_run_kills += 1
-				# Kill-streak: rising blip pitch + milestone combo pop.
-				var big: bool = ev.get("coin", 0) >= 25
-				if Engine.get_physics_frames() - _last_kill_frame < 90:
-					_kill_streak += 1
-				else:
-					_kill_streak = 1
-				_last_kill_frame = Engine.get_physics_frames()
-				_sfx.play("kill", -7.0, 1.0 + minf(0.9, _kill_streak * 0.06))
-				if big:
-					_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
-					_rumble = maxf(_rumble, 0.35)
-					_punch = maxf(_punch, 0.03)
-				if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-						"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
-					_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
-				# Big bounties get a coin moment; rusher pennies would be spam.
-				if big:
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-						"rate": 0.025, "text": "+%d¢" % ev["coin"], "col": Color(1.0, 0.9, 0.45)})
-					_coin_trail(ev["x"], ev["y"], 3)
+				_ev_kill(ev)
 			"bounty_kill":
 				# Marked target down — a gold coin fountain + a distinct sting.
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.02, "text": "BOUNTY +%d¢" % ev["coin"], "col": Color(1.0, 0.85, 0.3)})
-				_coin_trail(ev["x"], ev["y"], 5)
+				_coin_pop(ev["x"], ev["y"], "BOUNTY +%d¢" % ev["coin"], 5, Color(1.0, 0.85, 0.3), 0.02)
 				_sfx.play("buy", -3.0, 1.6)
 			"frag_bonus":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": "FRAG x%d" % ev["n"], "col": Color(1.0, 0.7, 0.35)})
 				_sfx.play("buy", -6.0, 1.2)
 			"bunker_break":
-				# The "explosion" SFX already fires (_EVENT_SOUND) but nothing
-				# detonated on screen — give the demolished bunker its blast.
-				_trauma = minf(1.0, _trauma + 0.22)
-				_rumble = maxf(_rumble, 0.5)
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.14})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
-					"r": 46.0, "col": Color(1.0, 0.7, 0.35)})
-				for d in 6:
-					var bka := d * TAU / 6.0 + randf() * 0.3
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.06,
-						"vx": cos(bka) * randf_range(1.2, 2.6), "vy": sin(bka) * randf_range(1.2, 2.6)})
-				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.025, "text": "+%d¢" % ev.get("coin", 0), "col": Color(1.0, 0.9, 0.45)})
-				_coin_trail(ev["x"], ev["y"], 4)
+				_ev_bunker_break(ev)
 			"sniper_fire":
 				# Crack + red flash so the kill-shot leaving the barrel is visible —
 				# the paint-line telegraph vanishes the instant it fires.
@@ -485,10 +401,7 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 			"roll":
 				# Launch poof grounds the dodge.
-				for d in 4:
-					var ra := d * TAU / 4.0 + randf() * 0.5
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.08,
-						"vx": cos(ra) * randf_range(0.6, 1.4), "vy": sin(ra) * randf_range(0.6, 1.4)})
+				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
 			"gate_flawless":
 				# A disciplined, deathless checkpoint clear — gold payoff + sting,
 				# louder as the clean-gate streak compounds.
@@ -518,45 +431,16 @@ func _consume_events() -> void:
 					"rate": 0.014, "text": "ADRENALINE", "col": Color(1.0, 0.6, 0.25)})
 				_sfx.play("gate_open", -3.0, 1.3)
 			"gate_open":
-				_trauma = minf(1.0, _trauma + 0.2)
-				_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
-				_punch = maxf(_punch, 0.04)
-				# The wall bursts apart — dust cloud + tumbling debris.
-				for d in 12:
-					var ga := d * TAU / 12.0 + randf() * 0.3
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.05,
-						"vx": cos(ga) * randf_range(1.5, 4.0), "vy": sin(ga) * randf_range(1.0, 3.0)})
-				for d in 6:
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing", "rate": 0.03,
-						"spin": randf() * TAU, "vx": randf_range(-3.0, 3.0), "vy": randf_range(-3.0, 1.0)})
-				_show_banner("GATE SECURED — CHECKPOINT")
+				_ev_gate_open(ev)
 			"revive":
-				# The run's biggest co-op payoff finally gets a picture: a green
-				# heal-burst + rising motes off the revived body.
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.09})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
-					"r": 34.0, "col": Color(0.4, 1.0, 0.5)})
-				for d in 8:
-					var rva := d * TAU / 8.0 + randf() * 0.3
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.05,
-						"vx": cos(rva) * randf_range(0.6, 1.6), "vy": sin(rva) * randf_range(0.6, 1.6) - 1.0,
-						"spin": 0.0, "col": Color(0.5, 1.0, 0.6)})
+				_ev_revive(ev)
 			"enemy_shot":
 				# Incoming fire was audio-only — a brief red muzzle glow so you can
 				# SEE where a shot left from in the chaos.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.2,
 					"r": 12.0, "col": Color(1.0, 0.4, 0.3)})
 			"vest_break":
-				_flash_alpha = maxf(_flash_alpha, 0.35)
-				_damage_vignette = maxf(_damage_vignette, 0.75)
-				_concussion = maxf(_concussion, 0.7)
-				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
-				# The flak vest shatters — blue armor shards burst outward.
-				for d in 8:
-					var va := d * TAU / 8.0 + randf() * 0.3
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.06,
-						"vx": cos(va) * randf_range(1.2, 2.8), "vy": sin(va) * randf_range(1.2, 2.8),
-						"spin": randf() * TAU, "col": Color(0.55, 0.7, 1.0)})
+				_ev_vest_break(ev)
 			"wave_start":
 				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
@@ -592,20 +476,149 @@ func _consume_events() -> void:
 				_show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
 			"victory":
-				_trauma = 1.0
-				_flash_alpha = 0.6
-				# The one win-state of the whole run deserves a payoff: a gold
-				# shockwave + light bloom off the wreck and a fountain of gold
-				# confetti casings, not just a bare white flash.
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.08})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.05,
-					"r": 80.0, "col": Color(1.0, 0.85, 0.4)})
-				for d in 22:
-					var vca := randf() * TAU
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
-						"rate": 0.018, "spin": randf() * TAU,
-						"vx": cos(vca) * randf_range(1.2, 3.6),
-						"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
+				_ev_victory(ev)
+
+
+func _ev_explosion(ev: Dictionary) -> void:
+	_trauma = minf(1.0, _trauma + 0.35)
+	_hitstop_frames = maxi(_hitstop_frames, 4)
+	_rumble = maxf(_rumble, 0.7)
+	_punch = maxf(_punch, 0.05)
+	_duck = maxf(_duck, 0.7)
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
+	var wet: bool = sim._in_water(ev["x"], ev["y"])
+	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
+	if not wet:
+		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+
+
+func _ev_kill(ev: Dictionary) -> void:
+	# No screen flash here: at kill-spam rates it strobes
+	# (photosensitivity); smoke + gib burst + blip + coin carry it.
+	# A per-type death throe + a fading corpse so a cleared field
+	# reads as fought-over, not swept clean.
+	var kkind: String = ev.get("kind", "rusher")
+	if kkind != "frogman":
+		# Sprawl the corpse along the shot that felled it (away from the
+		# nearest shooter), not a random spin.
+		var killer := sim._nearest_alive_player(ev["x"], ev["y"])
+		var cspin := randf() * TAU
+		if not killer.is_empty():
+			cspin = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
+		_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+			"kind": "rusher" if kkind == "rusher" else "elite",
+			"spin": cspin})
+	# Wet kills die in a splash, not a puff — the terrain reacts.
+	if sim._in_water(ev["x"], ev["y"]):
+		_sfx.play("splash", -10.0, 1.2)
+		for d in 6:
+			var wa := d * TAU / 6.0
+			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "splash", "rate": 0.08,
+				"vx": cos(wa) * randf_range(0.8, 1.8), "vy": sin(wa) * randf_range(0.8, 1.8)})
+	else:
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
+	# Directional gib/spark burst — the kill hits back.
+	for g in 5:
+		var ga := randf() * TAU
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
+			"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
+			"spin": randf() * TAU})
+	_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0   # kill confirms on the shooter's reticle
+	_run_kills += 1
+	# Kill-streak: rising blip pitch + milestone combo pop.
+	var big: bool = ev.get("coin", 0) >= 25
+	if Engine.get_physics_frames() - _last_kill_frame < 90:
+		_kill_streak += 1
+	else:
+		_kill_streak = 1
+	_last_kill_frame = Engine.get_physics_frames()
+	_sfx.play("kill", -7.0, 1.0 + minf(0.9, _kill_streak * 0.06))
+	if big:
+		_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
+		_rumble = maxf(_rumble, 0.35)
+		_punch = maxf(_punch, 0.03)
+	if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+			"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
+		_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
+	# Big bounties get a coin moment; rusher pennies would be spam.
+	if big:
+		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, Color(1.0, 0.9, 0.45), 0.025)
+
+
+func _ev_bunker_break(ev: Dictionary) -> void:
+	# The "explosion" SFX already fires (_EVENT_SOUND) but nothing
+	# detonated on screen — give the demolished bunker its blast.
+	_trauma = minf(1.0, _trauma + 0.22)
+	_rumble = maxf(_rumble, 0.5)
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.14})
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
+		"r": 46.0, "col": Color(1.0, 0.7, 0.35)})
+	_burst(ev["x"], ev["y"], "dust", 6, 1.2, 2.6, 0.3)
+	_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
+	_coin_pop(ev["x"], ev["y"], "+%d¢" % ev.get("coin", 0), 4, Color(1.0, 0.9, 0.45), 0.025)
+
+
+func _ev_gate_open(ev: Dictionary) -> void:
+	_trauma = minf(1.0, _trauma + 0.2)
+	_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
+	_punch = maxf(_punch, 0.04)
+	# The wall bursts apart — dust cloud + tumbling debris.
+	for d in 12:
+		var ga := d * TAU / 12.0 + randf() * 0.3
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "dust", "rate": 0.05,
+			"vx": cos(ga) * randf_range(1.5, 4.0), "vy": sin(ga) * randf_range(1.0, 3.0)})
+	for d in 6:
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing", "rate": 0.03,
+			"spin": randf() * TAU, "vx": randf_range(-3.0, 3.0), "vy": randf_range(-3.0, 1.0)})
+	_show_banner("GATE SECURED — CHECKPOINT")
+
+
+func _ev_revive(ev: Dictionary) -> void:
+	# The run's biggest co-op payoff finally gets a picture: a green
+	# heal-burst + rising motes off the revived body.
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.09})
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
+		"r": 34.0, "col": Color(0.4, 1.0, 0.5)})
+	for d in 8:
+		var rva := d * TAU / 8.0 + randf() * 0.3
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.05,
+			"vx": cos(rva) * randf_range(0.6, 1.6), "vy": sin(rva) * randf_range(0.6, 1.6) - 1.0,
+			"spin": 0.0, "col": Color(0.5, 1.0, 0.6)})
+
+
+func _ev_vest_break(ev: Dictionary) -> void:
+	_flash_alpha = maxf(_flash_alpha, 0.35)
+	_damage_vignette = maxf(_damage_vignette, 0.75)
+	_concussion = maxf(_concussion, 0.7)
+	_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
+	# The flak vest shatters — blue armor shards burst outward.
+	for d in 8:
+		var va := d * TAU / 8.0 + randf() * 0.3
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.06,
+			"vx": cos(va) * randf_range(1.2, 2.8), "vy": sin(va) * randf_range(1.2, 2.8),
+			"spin": randf() * TAU, "col": Color(0.55, 0.7, 1.0)})
+
+
+func _ev_victory(ev: Dictionary) -> void:
+	_trauma = 1.0
+	_flash_alpha = 0.6
+	# The one win-state of the whole run deserves a payoff: a gold
+	# shockwave + light bloom off the wreck and a fountain of gold
+	# confetti casings, not just a bare white flash.
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.08})
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.05,
+		"r": 80.0, "col": Color(1.0, 0.85, 0.4)})
+	for d in 22:
+		var vca := randf() * TAU
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
+			"rate": 0.018, "spin": randf() * TAU,
+			"vx": cos(vca) * randf_range(1.2, 3.6),
+			"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
 
 
 func _check_boss_intro() -> void:
@@ -1392,18 +1405,35 @@ func _draw_pickups() -> void:
 				tex_name = "crate_ammo"
 				mod = Color(0.6, 0.7, 1.4)   # vest = blue-shifted barrel
 			_: tex_name = "crate_airstrike"
+		# Maxed check: the sim clamps a buy via mini() against the ammo/grenade
+		# cap (or no-ops if vest is already on), so a priced crate at cap would
+		# silently eat the coin — grey the crate and swap price for "MAXED".
+		var maxed := false
+		if pk.get("cost", 0) > 0 and pk["kind"] <= 2:
+			var buyer := sim._nearest_alive_player(pk["x"], pk["y"])
+			if not buyer.is_empty():
+				match pk["kind"]:
+					0: maxed = buyer["mg_ammo"] >= SimWorld.MG_AMMO_MAX
+					1: maxed = buyer["grenade_ammo"] >= SimWorld.GRENADE_AMMO_MAX
+					2: maxed = buyer["vest"]
+		if maxed:
+			mod = Color(0.55, 0.55, 0.55)
 		_spr(tex_name, ppos, 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
 		var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 		draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if pk.get("cost", 0) > 0:
-			# Price tinted by affordability (matches the spend-wheel language).
-			var afford: bool = sim.war_chest >= pk["cost"]
-			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
-			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
-			draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -25), str(pk["cost"]),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
+			if maxed:
+				draw_string(ThemeDB.fallback_font, ppos + Vector2(-15, -25), "MAXED",
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.6, 0.6, 0.6))
+			else:
+				# Price tinted by affordability (matches the spend-wheel language).
+				var afford: bool = sim.war_chest >= pk["cost"]
+				var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
+				draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
+				draw_string(ThemeDB.fallback_font, ppos + Vector2(-4, -25), str(pk["cost"]),
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
 
 
 func _draw_tanks() -> void:
@@ -1589,7 +1619,11 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 		var bar_w := 160.0
 		var bar_x := 320.0 - bar_w / 2.0
 		var bar_y := 64.0 + float(slot) * 22.0
-		draw_string(ThemeDB.fallback_font, Vector2(bar_x, bar_y), label,
+		# Same strafe/mortar half-cycle the sim uses to pick behavior in
+		# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
+		# colossus bar labels its phase.
+		var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
+		draw_string(ThemeDB.fallback_font, Vector2(bar_x, bar_y), "%s — PHASE %d/2" % [label, gphase],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.5, 0.4))
 		_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 			Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
@@ -1846,6 +1880,21 @@ func _coin_trail(wx: int, wy: int, n: int) -> void:
 	for cc in n:
 		_fx.append({"x": wx, "y": wy, "t": 0.0, "kind": "coin",
 			"rate": 0.028 + cc * 0.005, "ox": randf_range(-6, 6), "oy": randf_range(-6, 6)})
+
+
+func _coin_pop(x: int, y: int, txt: String, trail_n: int, col: Color, rate: float) -> void:
+	# Payoff floattext + a matching coin trail — the common "you got paid" beat.
+	_fx.append({"x": x, "y": y, "t": 0.0, "kind": "floattext",
+		"rate": rate, "text": txt, "col": col})
+	_coin_trail(x, y, trail_n)
+
+
+func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, jitter: float, rate: float = 0.06) -> void:
+	# Clean radial dust/debris ring — evenly spaced directions with a little jitter.
+	for d in n:
+		var a := d * TAU / float(n) + randf() * jitter
+		_fx.append({"x": x, "y": y, "t": 0.0, "kind": kind, "rate": rate,
+			"vx": cos(a) * randf_range(spd_lo, spd_hi), "vy": sin(a) * randf_range(spd_lo, spd_hi)})
 
 
 func _draw_fx() -> void:
