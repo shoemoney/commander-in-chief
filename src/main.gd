@@ -476,6 +476,14 @@ func _consume_events() -> void:
 				if Engine.get_physics_frames() - _dry_frame >= 14:
 					_dry_frame = Engine.get_physics_frames()
 					_sfx.play("tank_board", -12.0, 2.2)
+					# Empty-mag tell: a weak grey puff + a red "CLICK" at the muzzle — unmistakable
+					# from the yellow shot flash, so a no-fire reads as "out of ammo", not a lost input.
+					var dp := sim.players[ev["i"]]
+					var mzx := ev["x"] + int(dp["aim_x"] * 10)
+					var mzy := ev["y"] + int(dp["aim_y"] * 10)
+					_fx.append({"x": mzx, "y": mzy, "t": 0.0, "kind": "smoke", "rate": 0.14})
+					_fx.append({"x": mzx, "y": mzy, "t": 0.0, "kind": "floattext",
+						"rate": 0.05, "text": "CLICK", "col": Color(1.0, 0.42, 0.36)})
 			"bash":
 				# Brutal point-blank melee: hit-stop + a spark toward the aim.
 				_hitstop_frames = maxi(_hitstop_frames, 3)
