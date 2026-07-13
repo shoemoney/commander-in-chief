@@ -250,7 +250,14 @@ func _draw() -> void:
 				gcol = Color(0.6, 0.85, 1.0)
 			if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
+			var gren_x := px
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
+			# Throw on cooldown: a draining ring on the grenade pip so a throw-while-
+			# recharging reads as "wait a beat", not a dropped input (matches the bash ring).
+			if p["grenade_cd"] > 0:
+				var gfrac := clampf(float(p["grenade_cd"]) / float(SimWorld.GRENADE_COOLDOWN_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 				px += ICON + 2.0
