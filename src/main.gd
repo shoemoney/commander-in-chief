@@ -3204,6 +3204,12 @@ func _draw_banners(top_msg: String) -> void:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.02, 0.03, 0.09, 0.34))
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.0, 0.02, 0.12, 0.55))
+		# Sheet-lightning: a silent-thunder flash every ~7s turns "just dark" into a
+		# storm — diffuse white-blue sky flash, no bolt. Stateless (frame clock), and
+		# reduce-motion scales it to nothing.
+		var lt := Engine.get_physics_frames() % 431
+		if lt < 3:
+			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
 	if _flash_alpha > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, _flash_alpha * _motion))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
