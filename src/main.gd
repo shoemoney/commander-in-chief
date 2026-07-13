@@ -43,6 +43,8 @@ var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
 var _duck := 0.0                 # music-duck under heavy hits
 var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
+var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
+var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
 var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
 var _tension := 0.0              # last-stand dread level (desat/heartbeat)
@@ -135,6 +137,7 @@ func _ready() -> void:
 	$HUD.add_child(_hud_icons)
 	_menu.main = self
 	$HUD.add_child(_menu)   # after HudIcons: menu draws on top
+	_setup_screen_fx()
 	_load_bests()
 	_reset()
 	if OS.has_feature("movie"):
@@ -145,6 +148,35 @@ func _ready() -> void:
 		sim.players[0]["vest"] = true       # opening-ambush insurance (trailer only)
 		# NOTE: for HD captures drop an override.cfg with stretch mode
 		# "canvas_items" — the movie recorder sizes itself before _ready runs.
+
+
+func _setup_screen_fx() -> void:
+	# Full-screen concussion warp on its own high CanvasLayer so it rides ABOVE
+	# the world + HUD and is immune to the Node2D shake/zoom applied to `self`.
+	# The rect stays hidden (a true no-op — no backbuffer copy) until concussed.
+	var fx_layer := CanvasLayer.new()
+	fx_layer.layer = 100
+	add_child(fx_layer)
+	_screen_fx_rect = ColorRect.new()
+	_screen_fx_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_screen_fx_rect.size = get_viewport_rect().size
+	_screen_fx_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE   # never eats input
+	_screen_fx_rect.visible = false
+	_screen_fx_mat = ShaderMaterial.new()
+	_screen_fx_mat.shader = load("res://src/view/screen_fx.gdshader")
+	_screen_fx_rect.material = _screen_fx_mat
+	fx_layer.add_child(_screen_fx_rect)
+
+
+func _process(_delta: float) -> void:
+	# Sync the concussion overlay every rendered frame (covers gameplay, attract,
+	# and pause — where _concussion is force-zeroed). Hidden at zero = pure no-op.
+	if _screen_fx_rect == null:
+		return
+	var on := _concussion > 0.001
+	_screen_fx_rect.visible = on
+	if on:
+		_screen_fx_mat.set_shader_parameter("concussion", _concussion)
 
 
 func start_game(endless: bool) -> void:
