@@ -255,7 +255,8 @@ func _draw() -> void:
 	# (skipped under reduce-motion — the fade alone still smooths the cut).
 	if main._motion >= 0.5:
 		top += (1.0 - _open_t) * 12.0
-	var gap := minf(30.0 if many else 46.0, (326.0 - top) / maxf(1.0, float(items.size() - 1)))
+	# 310 budget = last row TOP; its ~18px cell bottom then clears the y=332 legend.
+	var gap := minf(30.0 if many else 46.0, (310.0 - top) / maxf(1.0, float(items.size() - 1)))
 	# Cell height tracks the gap so metal frames stop overprinting each other.
 	var bh := minf(BTN.y, gap - 3.0)
 	for k in items.size():

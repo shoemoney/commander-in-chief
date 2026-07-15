@@ -1828,6 +1828,7 @@ func _draw() -> void:
 	_draw_players()
 	_draw_fx()
 	_draw_telegraphs()
+	_draw_wheel()   # world-anchored (rings the player) — must ride the shake
 	# From here down everything is screen-anchored HUD/overlay: cancel the node's
 	# shake/zoom/roll so bars, markers and banners stay rock-steady while the world
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
@@ -1838,7 +1839,6 @@ func _draw() -> void:
 	_draw_threat_edges()
 	_draw_objective_markers()
 	_draw_progress_rail()
-	_draw_wheel()
 	var top_msg := _top_center_priority()
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
