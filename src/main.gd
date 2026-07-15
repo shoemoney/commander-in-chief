@@ -1046,6 +1046,7 @@ func _ev_vest_break(ev: Dictionary) -> void:
 func _ev_victory(ev: Dictionary) -> void:
 	_trauma = 1.0
 	_flash_alpha = 0.6
+	_punch = maxf(_punch, 0.18)   # the run's one win-state finally out-hits a common kill
 	# The one win-state of the whole run deserves a payoff: a gold
 	# shockwave + light bloom off the wreck and a fountain of gold
 	# confetti casings, not just a bare white flash.
@@ -1080,6 +1081,7 @@ func _check_boss_intro() -> void:
 		_show_banner("BRIDGE GUNSHIP")
 		_sfx.play("alarm", -2.0, 0.85)
 		_trauma = minf(1.0, _trauma + 0.3)
+		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
 		_music_hold = 48
 	# Colossus escalation announcements.
 	var phase := sim.colossus_phase()
@@ -1360,16 +1362,18 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 
 func _update_feel() -> void:
 	_trauma = maxf(0.0, _trauma - 0.03)
-	_flash_alpha = maxf(0.0, _flash_alpha - 0.08)
+	# Impact envelopes decay multiplicatively (fast drop, long tail) so hits snap;
+	# linear release reads flat. Floors avoid a lingering near-zero tail.
+	_flash_alpha = _flash_alpha * 0.7 if _flash_alpha > 0.01 else 0.0
 	_damage_vignette = maxf(0.0, _damage_vignette - 0.02)
 	if not _banners.is_empty():
 		_banners[0]["t"] -= 0.008
 		if _banners[0]["t"] <= 0.0:
 			_banners.pop_front()
 	for _hi in _hitmarker.size():
-		_hitmarker[_hi] = maxf(0.0, _hitmarker[_hi] - 0.12)
+		_hitmarker[_hi] = _hitmarker[_hi] * 0.6 if _hitmarker[_hi] > 0.01 else 0.0
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
-	_punch = maxf(0.0, _punch - 0.006)
+	_punch = _punch * 0.82 if _punch > 0.002 else 0.0
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
 	_concussion = maxf(0.0, _concussion - 0.035)
@@ -1424,7 +1428,7 @@ func _update_feel() -> void:
 			_hit_flinch[i] *= 0.8
 	for i in _heat.size():
 		_heat[i] = maxf(0.0, _heat[i] - 0.02)
-	_boss_flash = maxf(0.0, _boss_flash - 0.08)
+	_boss_flash = _boss_flash * 0.8 if _boss_flash > 0.01 else 0.0
 	for i in mini(_down_anim.size(), sim.players.size()):
 		if sim.players[i]["alive"]:
 			_down_anim[i] = 0.0
@@ -1437,20 +1441,21 @@ func _update_feel() -> void:
 			for pad in Input.get_connected_joypads():
 				Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
 		_rumble = 0.0
-	var mag := _trauma * _trauma * 6.0 * _motion
+	# Random per-axis rattle (not a smooth Lissajous sway), biased vertical to match
+	# the scroll axis; trauma² keeps small hits subtle while big ones land.
+	var mag := _trauma * _trauma * 11.0 * _motion
 	var shake := Vector2.ZERO
 	if mag > 0.01:
-		var t := float(Engine.get_physics_frames())
-		shake = Vector2(sin(t * 1.7) * mag, cos(t * 2.3) * mag)
+		shake = Vector2(randf_range(-0.8, 0.8) * mag, randf_range(-1.0, 1.0) * mag)
 	# Camera zoom-punch pivots around screen center, not the top-left origin.
 	var pz := 1.0 + _punch * _motion
 	scale = Vector2(pz, pz)
 	# Rotational judder: only the biggest hits (boss deaths, phase breaks) get a hair
 	# of dutch-angle roll — a juice axis untouched until now. Pivots on screen center
 	# with the zoom, so the frame twists in place instead of sliding off.
-	var rot := 0.0
-	if _trauma > 0.5:
-		rot = sin(float(Engine.get_physics_frames()) * 2.9) * _trauma * _trauma * 0.035 * _motion
+	# No threshold gate: trauma² already scales roll to ~nothing on small hits, and
+	# a hard gate popped visibly as trauma crossed it mid-decay.
+	var rot := sin(float(Engine.get_physics_frames()) * 2.9) * _trauma * _trauma * 0.035 * _motion
 	rotation = rot
 	position = shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)
 
