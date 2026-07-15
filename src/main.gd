@@ -208,14 +208,17 @@ func _setup_screen_fx() -> void:
 	add_child(fx_layer)
 	# Always-on subtle scanlines: the frame is explicitly framed as an arcade
 	# cabinet — sell it. Cheap fixed-math shader, no screen reads, both backends.
-	var scan := ColorRect.new()
-	scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scan.size = get_viewport_rect().size
-	scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var scan_mat := ShaderMaterial.new()
-	scan_mat.shader = load("res://src/view/crt.gdshader")
-	scan.material = scan_mat
-	fx_layer.add_child(scan)
+	# Skipped for movie capture: the HD override.cfg switches stretch to
+	# canvas_items, which puts FRAGCOORD in physical pixels → 1px moiré lines.
+	if not OS.has_feature("movie"):
+		var scan := ColorRect.new()
+		scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		scan.size = get_viewport_rect().size
+		scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var scan_mat := ShaderMaterial.new()
+		scan_mat.shader = load("res://src/view/crt.gdshader")
+		scan.material = scan_mat
+		fx_layer.add_child(scan)
 	_screen_fx_rect = ColorRect.new()
 	_screen_fx_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_screen_fx_rect.size = get_viewport_rect().size
