@@ -319,9 +319,8 @@ static func font() -> Font:
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
-	var flags := TextServer.JUSTIFICATION_WORD_BOUND | TextServer.JUSTIFICATION_KASHIDA
-	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7), flags)
-	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col, flags)
+	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7))
+	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col)
 
 
 ## Same shadow+color text, horizontally centered on cx at y.

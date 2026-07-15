@@ -1657,10 +1657,14 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 	return Vector2(fx * PX, (fy - sim.camera_top) * PX)
 
 
+# 4 diagonal offsets cover both axes at once — visually ≈ the old 8-neighbor rim
+# at half the draw calls (~60 of 90 textures are outlined; this is the hot loop).
 const _OUTLINE_OFFSETS: Array[Vector2] = [
-	Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1),
 	Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1),
 ]
+
+# Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
+const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
 
 
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
@@ -2054,6 +2058,12 @@ func _draw_tanks() -> void:
 
 
 func _draw_enemies() -> void:
+	# ≤2 alive players, cached once — replaces an O(players) sim scan per enemy
+	# per frame that existed purely to pick a facing/laser target.
+	var alive_players: Array[Dictionary] = []
+	for p in sim.players:
+		if p["alive"]:
+			alive_players.append(p)
 	for e in sim.enemies:
 		if not e["alive"]:
 			continue
@@ -2076,7 +2086,15 @@ func _draw_enemies() -> void:
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
 		if e["kind"] != "frogman" and e.get("windup", 0) == 0:
 			epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4
-		var target := sim._nearest_alive_player(e["x"], e["y"])
+		var target: Dictionary = {}
+		var best_d2 := 0.0
+		for p in alive_players:
+			var pdx := float(p["x"] - e["x"])
+			var pdy := float(p["y"] - e["y"])
+			var d2 := pdx * pdx + pdy * pdy
+			if target.is_empty() or d2 < best_d2:
+				target = p
+				best_d2 = d2
 		var face := PI / 2
 		if not target.is_empty():
 			face = atan2(float(target["y"] - e["y"]), float(target["x"] - e["x"]))
@@ -2355,11 +2373,12 @@ func _draw_projectiles() -> void:
 	# the sim never collides them — so ping them off the armor here to teach it.
 	var col_on: bool = not sim.colossus.is_empty() and sim.colossus.get("alive", false)
 	var col_pos := _to_screen(sim.colossus.get("x", 0), sim.colossus.get("y", 0)) if col_on else Vector2.ZERO
-	var has_submerged := false
+	# Collect submerged-frogman screen positions ONCE — the old per-bullet rescan of
+	# sim.enemies was O(bullets × enemies) with a Vector2 alloc per pair.
+	var submerged_pos: Array[Vector2] = []
 	for e in sim.enemies:
 		if e["alive"] and e.get("submerged", false):
-			has_submerged = true
-			break
+			submerged_pos.append(_to_screen(e["x"], e["y"]))
 	for b in sim.bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		if col_on and bpos.distance_to(col_pos) < SimWorld.COLOSSUS_HIT_RADIUS * PX + 4.0:
@@ -2370,13 +2389,11 @@ func _draw_projectiles() -> void:
 		# Submerged frogmen are grenades-only too — ping bullets off the ripple
 		# so 'I emptied a mag into the water and nothing died' becomes legible.
 		var deflect := false
-		if has_submerged:
-			for e in sim.enemies:
-				if e["alive"] and e.get("submerged", false) \
-						and bpos.distance_to(_to_screen(e["x"], e["y"])) < 7.0:
-					draw_circle(bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
-					deflect = true
-					break
+		for sp in submerged_pos:
+			if bpos.distance_to(sp) < 7.0:
+				draw_circle(bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
+				deflect = true
+				break
 		if deflect:
 			continue
 		var dir := Vector2(b["vx"], b["vy"]).normalized()
@@ -2697,7 +2714,7 @@ func _draw_fx() -> void:
 		var t: float = fx["t"]
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
-			_spr("explosion%d" % frame, pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
+			_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
 			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
