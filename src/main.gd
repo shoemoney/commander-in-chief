@@ -78,6 +78,8 @@ var _heart_frame := -100         # heartbeat pacing
 var _hitmarker: Array[float] = [0.0, 0.0]   # reticle confirm pop on a landed hit (per-player)
 var _dust_prev: Array[Vector2i] = [Vector2i.ZERO, Vector2i.ZERO]        # per-player prev world pos (movement dust)
 var _tank_dust_prev: Array[Vector2i] = [Vector2i.ZERO, Vector2i.ZERO]   # per-driver prev tank world pos (movement dust)
+var _tank_hull := {}             # per-tank-index eased hull heading (view-only; 0.0 = baked "up")
+var _tank_prev := {}             # per-tank-index prev world pos, feeds the hull heading
 var _water_prev: Array[bool] = [false, false]   # per-player prev in-water state (edge-triggers entry droplets)
 var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
                                                  # death mid-array can misalign one slot for a frame — cosmetic only)
@@ -400,6 +402,8 @@ func _reset() -> void:
 	_pending_blasts.clear()
 	_scorch.clear()
 	_corpses.clear()
+	_tank_hull.clear()
+	_tank_prev.clear()
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
 	_kill_streak = 0
@@ -873,18 +877,20 @@ func _ev_kill(ev: Dictionary) -> void:
 	# A per-type death throe + a fading corpse so a cleared field
 	# reads as fought-over, not swept clean.
 	var kkind: String = ev.get("kind", "rusher")
-	if kkind != "frogman":
-		# Sprawl the corpse along the shot that felled it (away from the
-		# nearest shooter), not a random spin.
-		var killer := sim._nearest_alive_player(ev["x"], ev["y"])
-		var cspin := randf() * TAU
-		if not killer.is_empty():
-			cspin = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
-		_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
-			"kind": "rusher" if kkind == "rusher" else "elite",
-			"spin": cspin})
+	var kwet: bool = sim._in_water(ev["x"], ev["y"])
+	# Sprawl the corpse along the shot that felled it (away from the
+	# nearest shooter), not a random spin. Every specialist leaves its OWN
+	# silhouette (the kill event carries kind for exactly this); wet kills
+	# leave a floating body with no blood pool instead of vanishing.
+	var killer := sim._nearest_alive_player(ev["x"], ev["y"])
+	var cspin := randf() * TAU
+	if not killer.is_empty():
+		cspin = atan2(float(ev["y"] - killer["y"]), float(ev["x"] - killer["x"]))
+	_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+		"kind": _CORPSE_TEX.get(kkind, "elite"),
+		"spin": cspin, "wet": kwet})
 	# Wet kills die in a splash, not a puff — the terrain reacts.
-	if sim._in_water(ev["x"], ev["y"]):
+	if kwet:
 		_sfx.play("splash", -10.0, 1.2)
 		for d in 6:
 			var wa := d * TAU / 6.0
@@ -1679,6 +1685,11 @@ const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
+# Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
+const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contractor2",
+	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "rusher",
+	"courier": "rusher", "frogman": "frogman", "ghillie": "frogman"}
+
 
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
 		stretch := 1.0) -> void:
@@ -2017,7 +2028,8 @@ func _draw_pickups() -> void:
 
 
 func _draw_tanks() -> void:
-	for t in sim.tanks:
+	for ti in sim.tanks.size():
+		var t: Dictionary = sim.tanks[ti]
 		if not t["alive"]:
 			continue
 		var c := _to_screen(t["x"], t["y"])
@@ -2044,7 +2056,18 @@ func _draw_tanks() -> void:
 		if t["occupant"] >= 0 and not t["burning"] and not sim._in_water(t["x"], t["y"]):
 			_kick_dust(t["occupant"], t["x"], t["y"], _tank_dust_prev, true)
 		_ground_shadow(c, 15.0)
-		_spr("tank_body", c, 0.0, 0.62, burn_mod)
+		# Hull turns toward travel (eased with lerp_angle, so it swings like treads,
+		# not a swivel chair) — a sideways-driving tank no longer slides like a
+		# hovercraft with a detached barrel. Parked tanks keep their last heading.
+		var hull: float = _tank_hull.get(ti, 0.0)
+		if t["occupant"] >= 0:
+			var prevp: Vector2 = _tank_prev.get(ti, Vector2(t["x"], t["y"]))
+			var dv := Vector2(t["x"] - prevp.x, t["y"] - prevp.y)
+			if dv.length_squared() > 4.0e8:   # moved ≥ ~0.3px this frame (16.16 fixed units)
+				hull = lerp_angle(hull, dv.angle() + PI / 2, 0.10)
+				_tank_hull[ti] = hull
+			_tank_prev[ti] = Vector2(t["x"], t["y"])
+		_spr("tank_body", c, hull, 0.62, burn_mod)
 		# Barrel follows the driver's aim; parked barrel points up.
 		var barrel_angle := -PI / 2
 		if t["occupant"] >= 0:
@@ -2099,8 +2122,13 @@ func _draw_enemies() -> void:
 			draw_line(Vector2(epos.x - 5, cy), Vector2(epos.x + 5, cy), Color(1.0, 0.85, 0.3), 1.5)
 		# Run-cycle bob: a small per-unit-phased vertical hop so a charging
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
-		if e["kind"] != "frogman" and e.get("windup", 0) == 0:
-			epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4
+		if e["kind"] != "frogman":
+			if e.get("windup", 0) == 0:
+				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4
+			else:
+				# Winding up: the run-bob stops but a slow breath keeps the unit alive —
+				# nothing on the field should be a frozen statue.
+				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(e["x"] / 4093)) * -0.5
 		var target: Dictionary = {}
 		var best_d2 := 0.0
 		for p in alive_players:
@@ -2211,6 +2239,7 @@ func _draw_observer() -> void:
 	if sim.observer.is_empty():
 		return
 	var op := _to_screen(sim.observer["x"], sim.camera_top + SimWorld.OBSERVER_Y_OFFSET)
+	op.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8   # engine-idle breath — not a statue
 	_spr("m_radar_tank", op, PI / 2, 0.5)   # radar-spotter vehicle: reads as "painting you for artillery"
 	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
 	draw_rect(Rect2(op + Vector2(8, -12), Vector2(7, 5)), Color(0.9, 0.25, 0.2))
@@ -2927,7 +2956,9 @@ func _draw_scorch() -> void:
 		var ct: float = c["t"]
 		var fade := 1.0 - ct
 		# A dark blood pool spreads under it early, then everything fades.
-		draw_circle(cp + Vector2(0, 2), 3.0 + minf(ct, 0.2) * 20.0, Color(0.28, 0.03, 0.03, 0.4 * fade))
+		# (skipped for water kills — a puddle in a river reads wrong)
+		if not c.get("wet", false):
+			draw_circle(cp + Vector2(0, 2), 3.0 + minf(ct, 0.2) * 20.0, Color(0.28, 0.03, 0.03, 0.4 * fade))
 		# Death squash-pop: a quick scale bump on impact that settles into a
 		# flattened corpse (via _spr's stretch param).
 		var pop := 1.0 + maxf(0.0, 0.35 - ct * 3.0)
