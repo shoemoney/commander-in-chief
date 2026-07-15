@@ -165,7 +165,10 @@ func _draw() -> void:
 		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
 			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
-	if _fits(x, _tw("SUPPLIES") + 25.0):
+	# Suppressed while the endless shop strip is open — two buy affordances at
+	# once (wheel cue + priced strip) read as conflicting instructions.
+	var shop_open: bool = sim.mode == "endless" and sim.intermission_ticks > 0
+	if not shop_open and _fits(x, _tw("SUPPLIES") + 25.0):
 		Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
 		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
 	var row_r := x

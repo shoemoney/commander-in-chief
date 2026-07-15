@@ -351,6 +351,8 @@ func _draw_hall() -> void:
 			else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run["sector"])
 		var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
 		var tag: String = "  *DAILY" if run.get("daily", false) else ""
+		if run.get("assist", false):
+			tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
 		var y := 112 + i * 24
 		var cells := [str(i + 1), str(run["score"]), mode_s, reached, "x%d%s" % [run["streak"], tag]]
 		for c in cells.size():

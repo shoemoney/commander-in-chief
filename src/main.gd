@@ -503,6 +503,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_R:
 			if _watching:
 				_watching = false
+				_banners.clear()   # a mid-replay splash shouldn't linger over attract
 				_menu.open(GameMenu.Mode.TITLE)
 			else:
 				_reset()
@@ -3482,7 +3483,9 @@ func _draw_wheel() -> void:
 		var sel: int = _wheel[i]["sel"]
 		if sel >= 0:
 			var lbl: String = WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]["label"]
-			Art.text_center(self, lbl, c.x, 71.0, 9, Color(1.0, 0.95, 0.7))
+			# Anchored ABOVE this player's hub — the old global y=71 left P2's
+			# pick floating at the top of the screen, nowhere near their wheel.
+			Art.text_center(self, lbl, c.x, c.y - 52.0, 9, Color(1.0, 0.95, 0.7))
 
 
 func _top_center_priority() -> String:
@@ -3734,7 +3737,12 @@ func _draw_banners(top_msg: String) -> void:
 	if _fade > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, _fade))
 	# Just-in-time onboarding cue (first-time-ever, persisted).
-	if _hint_t > 0.02 and not _hint_text.is_empty():
+	# Persistent replay chrome: after the one-shot banner decays, SOMETHING must
+	# keep saying "this is playback, inputs are frozen" for the whole watch.
+	if _watching:
+		var wpul := 1.0 if _motion < 0.5 else (0.7 + 0.3 * Art.pulse(0.15))
+		Art.text_center(self, "— REPLAY — R TO EXIT —", 320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
+	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
 		var ha := minf(1.0, _hint_t * 3.0)
 		var hf := ThemeDB.fallback_font
 		var hw := hf.get_string_size(_hint_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
