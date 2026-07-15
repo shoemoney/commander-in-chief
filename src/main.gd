@@ -814,9 +814,11 @@ func _ev_shot(ev: Dictionary) -> void:
 		if _heat[ev["i"]] >= 0.95 and Engine.get_physics_frames() % 8 == 0:
 			_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
 				"y": ev["y"] + int(shooter["aim_y"] * 13), "t": 0.35, "kind": "smoke"})
+	# Size/angle jitter per shot — MG spam reads as live gunfire, not a repeated decal.
 	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
 		"y": ev["y"] + int(shooter["aim_y"] * 13),
-		"t": 0.0, "kind": "muzzle", "rate": 0.34, "a": aim.angle()})
+		"t": 0.0, "kind": "muzzle", "rate": 0.34,
+		"a": aim.angle() + randf_range(-0.09, 0.09), "szj": randf_range(0.82, 1.18)})
 	# Textured muzzle bloom (legacy art Particle_FX soft-spot) under the line flash.
 	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 12), "y": ev["y"] + int(shooter["aim_y"] * 12),
 		"t": 0.0, "kind": "tex", "tex": "fx_softspot", "sz": 12.0, "grow": 0.5, "fade": 1.7,
@@ -2677,6 +2679,8 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 	# Clean radial dust/debris ring — evenly spaced directions with a little jitter.
 	# vy_bias skews the burst upward (negative Y); move opts these particles into
 	# the position-integration pass below without touching other "kind" call sites.
+	if _fx.size() > 260:   # ponytail: soft cap — boss-finale kill spam can't stack unbounded draws
+		return
 	for d in n:
 		var a := d * TAU / float(n) + randf() * jitter
 		var entry := {"x": x, "y": y, "t": 0.0, "kind": kind, "rate": rate,
@@ -2694,13 +2698,6 @@ func _draw_fx() -> void:
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
 			_spr("explosion%d" % frame, pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
-		elif fx["kind"] == "flash":
-			# White-hot detonation core: swells a touch, then snaps out.
-			var fa := (1.0 - t) * (1.0 - t)
-			var fr := 9.0 + t * 15.0
-			draw_texture_rect(Art.tex("fx_disc"), Rect2(pos - Vector2.ONE * fr, Vector2.ONE * fr * 2.0),
-				false, Color(1.0, 0.9, 0.6, 0.7 * fa))
-			draw_circle(pos, fr * 0.3, Color(1.0, 1.0, 1.0, 0.95 * fa))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
 			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
@@ -2718,7 +2715,7 @@ func _draw_fx() -> void:
 			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * ar2, Vector2.ONE * ar2 * 2.0),
 				false, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6))
 		elif fx["kind"] == "muzzle":
-			var sz := (13.0 if fx.get("big", false) else 9.0) * (1.0 - t * 0.6)
+			var sz := (13.0 if fx.get("big", false) else 9.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
 			var dirv := Vector2.from_angle(fx["a"])
 			var pv := Vector2(-dirv.y, dirv.x)
 			var mc := Color(1.0, 0.95, 0.55, 0.95 - t * 0.85)
@@ -2774,7 +2771,9 @@ func _draw_fx() -> void:
 			draw_string(ThemeDB.fallback_font, fpos, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
-			_spr("fx_smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25, Color(1, 1, 1, 0.6 - t * 0.55))
+			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha
+			_spr("fx_smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25,
+				Color(1, 1, 1, (0.6 - t * 0.55) * smoothstep(0.0, 0.15, t)))
 		elif fx["kind"] == "shockwave":
 			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
 			# snaps out — reads as a pressure wave, not a flat UI stroke.
@@ -2788,7 +2787,7 @@ func _draw_fx() -> void:
 			var dust_sz: float = fx.get("sz", 1.0)
 			var dr: float = (2.4 + t * 5.5) * dust_sz
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * dr, Vector2.ONE * dr * 2.0),
-				false, Color(dust_col.r, dust_col.g, dust_col.b, 0.4 * (1.0 - t)))
+				false, Color(dust_col.r, dust_col.g, dust_col.b, 0.4 * (1.0 - t) * smoothstep(0.0, 0.15, t)))
 		elif fx["kind"] == "splash":
 			var spr := 2.5 + t * 7.0
 			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * spr, Vector2.ONE * spr * 2.0),
