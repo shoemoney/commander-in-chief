@@ -65,6 +65,9 @@ var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
 var _duck := 0.0                 # music-duck under heavy hits
 var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
+var _blast_warp := 0.0           # brief heat-shock screen warp on marquee detonations
+var _cinematic := 0.0            # letterbox envelope for boss intro / victory beats
+var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
@@ -307,10 +310,13 @@ func _process(_delta: float) -> void:
 	# and pause — where _concussion is force-zeroed). Hidden at zero = pure no-op.
 	if _screen_fx_rect == null:
 		return
-	var on := _concussion > 0.001
+	# Blast heat-warp rides the same shader at low strength — a marquee detonation
+	# briefly shocks the whole frame (blur+chroma pulse), then it snaps clear.
+	var amt := maxf(_concussion, _blast_warp)
+	var on := amt > 0.001
 	_screen_fx_rect.visible = on
 	if on:
-		_screen_fx_mat.set_shader_parameter("concussion", _concussion)
+		_screen_fx_mat.set_shader_parameter("concussion", amt)
 
 
 func start_game(endless: bool) -> void:
@@ -419,6 +425,9 @@ func _reset() -> void:
 	_corpses.clear()
 	_tank_hull.clear()
 	_tank_prev.clear()
+	_enemy_face.clear()
+	_blast_warp = 0.0
+	_cinematic = 0.0
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
 	_kill_streak = 0
@@ -988,6 +997,8 @@ func _blast_debris(x: int, y: int, wet: bool = false) -> void:
 
 
 func _boss_death_finale(x: int, y: int) -> void:
+	if _motion >= 0.5:
+		_blast_warp = maxf(_blast_warp, 0.30)   # heat-shock the frame on the kill
 	# THE finale — the biggest spectacle in the game. A staggered chain of
 	# secondary detonations marches across the wreck's footprint over ~0.8s, a
 	# smoke pillar rises up its center, and the screen-feel is scaled well past a
@@ -1083,6 +1094,7 @@ func _ev_victory(ev: Dictionary) -> void:
 	_trauma = 1.0
 	_flash_alpha = 0.6
 	_punch = maxf(_punch, 0.18)   # the run's one win-state finally out-hits a common kill
+	_cinematic = 1.0              # letterbox the extraction flyover
 	# The one win-state of the whole run deserves a payoff: a gold
 	# shockwave + light bloom off the wreck and a fountain of gold
 	# confetti casings, not just a bare white flash.
@@ -1118,6 +1130,7 @@ func _check_boss_intro() -> void:
 		_sfx.play("alarm", -2.0, 0.85)
 		_trauma = minf(1.0, _trauma + 0.3)
 		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
+		_cinematic = maxf(_cinematic, 0.6)   # brief letterbox sells the arrival moment
 		_music_hold = 48
 	# Colossus escalation announcements.
 	var phase := sim.colossus_phase()
@@ -1413,6 +1426,8 @@ func _update_feel() -> void:
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
 	_concussion = maxf(0.0, _concussion - 0.035)
+	_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
+	_cinematic = maxf(0.0, _cinematic - 0.004)
 	_music_hold = maxi(0, _music_hold - 1)
 	for _gi in _grenade_dry.size():
 		_grenade_dry[_gi] = maxi(0, _grenade_dry[_gi] - 1)
@@ -1803,6 +1818,11 @@ func _draw() -> void:
 	var top_msg := _top_center_priority()
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
+	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
+	if _cinematic > 0.01:
+		var ch := 16.0 * clampf(_cinematic * 4.0, 0.0, 1.0)
+		draw_rect(Rect2(0, 0, SCREEN_W, ch), Color(0, 0, 0, 0.9))
+		draw_rect(Rect2(0, SCREEN_H - ch, SCREEN_W, ch), Color(0, 0, 0, 0.9))
 
 
 func _draw_skyglow() -> void:
@@ -2165,6 +2185,10 @@ func _draw_enemies() -> void:
 		var face := PI / 2
 		if not target.is_empty():
 			face = atan2(float(target["y"] - e["y"]), float(target["x"] - e["x"]))
+		# Smoothed per-slot facing: when the nearest player flips sides the sprite
+		# swings instead of snapping 180° in one frame. Slot-keyed like _enemy_water_prev.
+		face = lerp_angle(_enemy_face.get(eidx, face), face, 0.18)
+		_enemy_face[eidx] = face
 		if e["kind"] == "frogman":
 			var st: int = e.get("surface_ticks", 0)
 			if e["submerged"]:

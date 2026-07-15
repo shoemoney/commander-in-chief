@@ -14,6 +14,12 @@ var sel := 0
 var main: Node2D
 var _confirm := -1   # index of a destructive item awaiting a 2nd press
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
+var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
+
+
+func _process(_delta: float) -> void:
+	if mode != Mode.HIDDEN:
+		queue_redraw()   # pulse + glide animate every frame while a menu is open
 
 
 func is_active() -> bool:
@@ -24,6 +30,7 @@ func open(m: int) -> void:
 	mode = m
 	sel = 0
 	_confirm = -1
+	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
 	queue_redraw()
 
 
@@ -234,9 +241,14 @@ func _draw() -> void:
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
 			Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8))
 		if selected:
-			# Breathing selection glow — the highlight reads as alive, not a static swap.
+			# Breathing selection glow that GLIDES between rows instead of teleporting.
+			var ty := top + k * gap
+			if _sel_y < 0.0:
+				_sel_y = ty
+			_sel_y = lerpf(_sel_y, ty, 0.35)
+			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), BTN)
 			var mp := Art.pulse(0.2)
-			draw_texture_rect(Art.tex("ui_menu_button_sel"), r.grow(3.0 + mp * 1.5), false,
+			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
 				Color(1.0, 0.9, 0.4, 0.7 + mp * 0.3))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
 		var label: String = items[k]
