@@ -175,6 +175,8 @@ func _ready() -> void:
 	# Additive glow layer: a plain child Node2D renders after main's own _draw but
 	# under the $HUD CanvasLayer — muzzle/light/ember FX finally emit instead of tint.
 	_glow_root = Node2D.new()
+	_glow_root.z_index = 20            # explicit pin over all z=0 world draws (belt-and-braces
+	_glow_root.z_as_relative = false   # vs relying on tree order alone; HUD CanvasLayer still wins)
 	var glow_mat := CanvasItemMaterial.new()
 	glow_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	_glow_root.material = glow_mat
