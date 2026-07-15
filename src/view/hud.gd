@@ -112,6 +112,24 @@ func _draw() -> void:
 				shop_col) + 10.0
 		else:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
+			# Live wave-clear dashboard FIRST: when the row overflows, the
+			# push-or-hold gauge must survive and the vanity chips must drop —
+			# it used to be the other way around, vanishing exactly mid-chaos.
+			var alive := 0
+			for e in sim.enemies:
+				if e["alive"]:
+					alive += 1
+			var remaining: int = alive + sim.wave_pending
+			# The wave's starting budget (same formula _start_wave uses).
+			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
+				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
+			var htxt := "HOSTILES %d" % remaining
+			if _fits(x, _tw(htxt) + 54.0):
+				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
+				var cleared := 1.0 - float(remaining) / float(wave_total)
+				draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
+				draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
+				x += 48.0
 			# Live WAVE record chip — endless is the mode players grind, but the wave
 			# count (the number they chase) only got record feedback in the K.I.A.
 			# debrief. Same idiom as the score BEST chip: grey while chasing a prior
@@ -138,24 +156,6 @@ func _draw() -> void:
 				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
 				if mchip != "" and _fits(x, _tw(mchip) + 8.0):
 					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
-			# Live wave-clear dashboard: how close is this wave to done? (the
-			# push-or-hold decision was blind — enemy count already computed
-			# every frame for the music bed).
-			var alive := 0
-			for e in sim.enemies:
-				if e["alive"]:
-					alive += 1
-			var remaining: int = alive + sim.wave_pending
-			# The wave's starting budget (same formula _start_wave uses).
-			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
-				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
-			var htxt := "HOSTILES %d" % remaining
-			if _fits(x, _tw(htxt) + 54.0):
-				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
-				var cleared := 1.0 - float(remaining) / float(wave_total)
-				draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
-				draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
-				x += 48.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
 		var opened := 0

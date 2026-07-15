@@ -214,9 +214,9 @@ func _setup_screen_fx() -> void:
 	add_child(fx_layer)
 	# Always-on subtle scanlines: the frame is explicitly framed as an arcade
 	# cabinet — sell it. Cheap fixed-math shader, no screen reads, both backends.
-	# Skipped for movie capture: the HD override.cfg switches stretch to
-	# canvas_items, which puts FRAGCOORD in physical pixels → 1px moiré lines.
-	if not OS.has_feature("movie"):
+	# Skipped whenever the effective stretch is canvas_items (the HD override.cfg
+	# path — movies AND stills): FRAGCOORD lands in physical pixels there → 1px moiré.
+	if str(ProjectSettings.get_setting("display/window/stretch/mode", "viewport")) != "canvas_items":
 		var scan := ColorRect.new()
 		scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		scan.size = get_viewport_rect().size
@@ -1691,6 +1691,16 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 	var w := _wheel[i]
 	if held:
 		w["open"] = true
+		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
+		# selection used to be a one-way trap: any flick force-bought on release.
+		var cancel := Input.is_key_pressed(KEY_C)
+		for pad in Input.get_connected_joypads():
+			if Input.is_joy_button_pressed(pad, JOY_BUTTON_B):
+				cancel = true
+				break
+		if cancel and w["sel"] >= 0:
+			w["sel"] = -1
+			_sfx.play("dry_fire", -14.0, 1.1)   # soft declined tick
 		var dir := aim if aim.length() > 0.3 else move
 		if dir.length() > 0.3:
 			var new_sel := int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4
@@ -3359,13 +3369,18 @@ func _draw_objective_markers() -> void:
 			# Free crate (guaranteed gate cache) — supplies worth pathing to.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
 				"icon": "hud_gunshop", "col": Color(0.7, 0.85, 0.6)})
+	# Off-screen diamonds are capped like the threat chevrons (6): marks[] is
+	# built objectives-first, so a PAYDAY crate flood can't ring the viewport
+	# and drown the gate/boss pointers. On-screen icons are uncapped (anchored).
+	var edge_used := 0
 	for m in marks:
 		var mp := Vector2(m["sx"], m["sy"])
 		var on := mp.x >= 6.0 and mp.x <= 634.0 and mp.y >= 32.0 and mp.y <= 354.0
 		if on:
 			draw_texture_rect(Art.tex(m["icon"]),
 				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
-		else:
+		elif edge_used < 6:
+			edge_used += 1
 			var ep := _marker_edge(mp)
 			_marker_diamond(ep, 5.0, m["col"])
 			draw_texture_rect(Art.tex(m["icon"]), Rect2(ep - Vector2(4, 4), Vector2(8, 8)), false, m["col"])
