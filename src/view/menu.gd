@@ -107,7 +107,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 			JOY_BUTTON_DPAD_LEFT: hmove = -1
 			JOY_BUTTON_DPAD_RIGHT: hmove = 1
 			JOY_BUTTON_A: act = true
-			JOY_BUTTON_B: back = true       # console convention: B = back/cancel
+			JOY_BUTTON_B:
+				# Console convention: B = back/cancel — but ONLY inside menus.
+				# In gameplay B is ROLL; letting it through here made every dodge
+				# open the pause menu (mode==HIDDEN + back → PAUSE).
+				if mode != Mode.HIDDEN:
+					back = true
 			JOY_BUTTON_START: back = true
 	elif ev is InputEventJoypadMotion and (ev.axis == JOY_AXIS_LEFT_Y or ev.axis == JOY_AXIS_LEFT_X):
 		# Analog-stick menu nav: fire ONE step when the axis crosses the threshold,
@@ -247,6 +252,7 @@ func _draw() -> void:
 				100, 10, Color(0.8, 0.85, 0.72))
 			if main._current_seed > 0:
 				_center_text("RUN #%d" % main._current_seed, 114, 8, Color(0.6, 0.66, 0.56, 0.75))
+	var mitems := _menu_items()   # dicts: label + destructive flag for pre-press tinting
 	var items := _items()
 	# Fit-to-height: gap derives from the item count so long lists (title = up to
 	# 10 rows, pause = 9) always land above the y=332 legend instead of running
@@ -280,6 +286,10 @@ func _draw() -> void:
 			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
 				Color(1.0, 0.9, 0.4, 0.7 + mp * 0.3))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
+		# Destructive rows carry a warm tint BEFORE the first press — the warning
+		# used to appear only after you'd already pressed once.
+		if k < mitems.size() and mitems[k].get("destructive", false):
+			col = Color(1.0, 0.78, 0.65) if selected else Color(0.9, 0.7, 0.6)
 		var label: String = items[k]
 		if _confirm == k:
 			label = "PRESS AGAIN TO CONFIRM"
@@ -290,8 +300,9 @@ func _draw() -> void:
 	if mode == Mode.TITLE:
 		# Legend adapts to the last-used device (was hardcoded keyboard, wrong
 		# for the pad-driven 2P audience).
-		# Near-opaque: 8px text over the live attract firefight was ~0.6 alpha —
-		# well under readable contrast on sunlit grass.
+		# Near-opaque over a dark plate: 8px text straight on the live attract
+		# firefight loses to bright terrain and particles no matter the alpha.
+		draw_rect(Rect2(0, 324, 640, 30), Color(0.03, 0.05, 0.03, 0.55))
 		if Art.use_pad:
 			_center_text("LS MOVE · RS AIM · RT FIRE · L1 GRENADE · B ROLL", 332, 8,
 				Color(0.82, 0.87, 0.77, 1.0))
@@ -350,7 +361,8 @@ func _draw_howto() -> void:
 	_center_text("HOW TO PLAY", 34, 22, Color(1.0, 0.85, 0.3))
 	var lines := [
 		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
-		["pays to REVIVE you or BUY supplies (hold Q). That's the choice.", Color(0.85, 0.9, 0.8)],
+		["pays to REVIVE you or BUY supplies (hold %s). That's the choice." %
+			("BACK" if Art.use_pad else "Q"), Color(0.85, 0.9, 0.8)],
 		["", Color.WHITE],
 		["GRENADES crack armor — bunkers, bosses, the Colossus. Bullets don't.", Color(0.9, 0.92, 0.8)],
 		["ROLL to dodge (brief invulnerability). BOARD tanks for crush + shells.", Color(0.9, 0.92, 0.8)],

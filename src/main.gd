@@ -480,6 +480,14 @@ func _input(event: InputEvent) -> void:
 		Art.use_pad = true
 	elif event is InputEventKey or event is InputEventMouse:
 		Art.use_pad = false
+	# Pad redeploy: START on the debrief/victory card mirrors keyboard R — pad
+	# players otherwise had to reach for a keyboard (or tunnel through pause →
+	# RESTART → confirm). Consumed here so the menu doesn't also open pause.
+	if event is InputEventJoypadButton and event.pressed \
+			and event.button_index == JOY_BUTTON_START \
+			and not _menu.is_active() and (_debrief or sim.victory):
+		_reset()
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -3382,7 +3390,10 @@ func _draw_objective_markers() -> void:
 		elif edge_used < 6:
 			edge_used += 1
 			var ep := _marker_edge(mp)
-			_marker_diamond(ep, 5.0, m["col"])
+			# Priority reads at a glance: objectives (gate/boss) get a bigger
+			# diamond than loot pointers — no need to parse the 8px icon first.
+			var pr: float = 6.5 if (m["icon"] == "hud_flag" or m["icon"] == "hud_skull") else 4.5
+			_marker_diamond(ep, pr, m["col"])
 			draw_texture_rect(Art.tex(m["icon"]), Rect2(ep - Vector2(4, 4), Vector2(8, 8)), false, m["col"])
 
 
@@ -3459,6 +3470,14 @@ func _draw_wheel() -> void:
 			if stock != "":
 				var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 7).x
 				Art.text(self, stock, ipos + Vector2(-sw2 / 2.0, 33), 7, Color(0.72, 0.77, 0.66, 0.85))
+		# Device-aware verb cue under the hub: the wheel finally states its own
+		# controls instead of relying on recall from the title legend.
+		var cue: String
+		if _wheel[i]["sel"] >= 0:
+			cue = "RELEASE TO BUY · B CANCEL" if Art.use_pad else "RELEASE TO BUY · C CANCEL"
+		else:
+			cue = "FLICK TO PICK · RELEASE TO CLOSE"
+		Art.text_center(self, cue, c.x, c.y + 52.0, 8, Color(0.9, 0.92, 0.8, 0.85))
 		# What the selected socket actually delivers.
 		var sel: int = _wheel[i]["sel"]
 		if sel >= 0:
@@ -3704,7 +3723,8 @@ func _draw_banners(top_msg: String) -> void:
 			rows.append({"text": "%dm SHORT OF YOUR BEST PUSH" % (best_dist - dist),
 				"color": Color(1.0, 0.85, 0.5)})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
-		rows.append({"text": "PRESS  R  — REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp)})
+		rows.append({"text": "PRESS  START  — REDEPLOY" if Art.use_pad else "PRESS  R  — REDEPLOY",
+			"color": Color(1.0, 0.9, 0.4, rp)})
 		_draw_result_panel("K.I.A.", Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96))
 	elif sim.last_stand:
 		# Shadowed + centered via the shared helper — was the one banner holdout
