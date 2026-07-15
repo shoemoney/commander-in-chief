@@ -201,6 +201,16 @@ func _setup_screen_fx() -> void:
 	var fx_layer := CanvasLayer.new()
 	fx_layer.layer = 100
 	add_child(fx_layer)
+	# Always-on subtle scanlines: the frame is explicitly framed as an arcade
+	# cabinet — sell it. Cheap fixed-math shader, no screen reads, both backends.
+	var scan := ColorRect.new()
+	scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scan.size = get_viewport_rect().size
+	scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var scan_mat := ShaderMaterial.new()
+	scan_mat.shader = load("res://src/view/crt.gdshader")
+	scan.material = scan_mat
+	fx_layer.add_child(scan)
 	_screen_fx_rect = ColorRect.new()
 	_screen_fx_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_screen_fx_rect.size = get_viewport_rect().size
@@ -844,6 +854,8 @@ func _ev_shot(ev: Dictionary) -> void:
 		"t": 0.0, "kind": "tex", "tex": "fx_softspot", "sz": 12.0, "grow": 0.5, "fade": 1.7,
 		"rate": 0.3, "col": Color(1.0, 0.92, 0.55, 0.65)})
 	var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
+	if _fx.size() > 300:
+		return   # spam guard: past this, casings/decals add draws, not information
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
 		"rate": 0.055, "spin": randf() * TAU,
 		"vx": perp.x * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4),
@@ -2109,7 +2121,12 @@ func _draw_enemies() -> void:
 	for p in sim.players:
 		if p["alive"]:
 			alive_players.append(p)
-	for e in sim.enemies:
+	# Y-sorted draw order: in a dense rush a nearer (lower) troop must render over
+	# a farther one — sim array order broke that overlap. View-only index sort.
+	var order := range(sim.enemies.size())
+	order.sort_custom(func(a: int, b: int) -> bool: return sim.enemies[a]["y"] < sim.enemies[b]["y"])
+	for eidx in order:
+		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			continue
 		var epos := _to_screen(e["x"], e["y"])
@@ -2901,13 +2918,15 @@ func _draw_glow() -> void:
 		var pos := _to_screen(fx["x"], fx["y"])
 		var t: float = fx["t"]
 		if fx["kind"] == "muzzle":
+			# Alphas trimmed ~0.8x vs the old mix-blend draws: a single additive glow
+			# stays tasteful, MG-spam stacks still sum white-hot without washing out.
 			var sz := (13.0 if fx.get("big", false) else 9.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
 			var dirv := Vector2.from_angle(fx["a"])
 			var pv := Vector2(-dirv.y, dirv.x)
-			var mc := Color(1.0, 0.95, 0.55, 0.95 - t * 0.85)
+			var mc := Color(1.0, 0.95, 0.55, 0.8 * (0.95 - t * 0.85))
 			g.draw_line(pos, pos + dirv * sz * 1.6, mc, 2.5)
 			g.draw_line(pos - pv * sz * 0.55, pos + pv * sz * 0.55, mc, 2.0)
-			g.draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.9 - t * 0.8))
+			g.draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.8 * (0.9 - t * 0.8)))
 		elif fx["kind"] == "spark":
 			# Ricochet: legacy art sparkle cards flung radially — armor says no.
 			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
@@ -2945,8 +2964,8 @@ func _draw_glow() -> void:
 			if t < 0.0:
 				continue
 			var la2 := 1.0 - t
-			g.draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.85 * la2 * la2))
-			g.draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, la2))
+			g.draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.68 * la2 * la2))
+			g.draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, 0.8 * la2))
 
 
 func _draw_scorch() -> void:
@@ -3493,7 +3512,13 @@ func _draw_banners(top_msg: String) -> void:
 		if lt < 3:
 			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
 	if _flash_alpha > 0.01:
-		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, _flash_alpha * _motion))
+		# Radial flash: hottest at screen center, falling off toward the edges
+		# (oversized softspot card) over a faint flat base — punchier than a
+		# uniform white sheet at the same energy.
+		var fla := _flash_alpha * _motion
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, fla * 0.45))
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
+			false, Color(1, 1, 1, fla))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
 	# closes in (heartbeat plays under it). Scaled by the reduce-motion toggle.
 	if _tension > 0.02:
