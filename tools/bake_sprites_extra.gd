@@ -8,7 +8,7 @@ extends SceneTree
 ## (never the game project — it needs the pack's meshes/materials imported).
 ## To reproduce (vendor stays read-only; only PNGs are written):
 ##
-##   SRC=<GameAssets>/vendor/POLYGON_Military/Godot/polygon-military-01
+##   SRC="<GameAssets>/vendor/alt Military/Godot/polygon-military-01"   # (vendor flattened 2026-07)
 ##   cp -R "$SRC/Assets" "$SRC/project.godot" /tmp/legacy-art-bake/
 ##   # patch /tmp/legacy-art-bake/project.godot renderer → "gl_compatibility"
 ##   cp tools/bake_sprites.gd /tmp/legacy-art-bake/
@@ -132,11 +132,25 @@ func _on_frame() -> void:
 		var job := jobs[idx]
 		var img := vp.get_texture().get_image()
 		var px: int = job["px"]
+		# Premultiply → resize → unpremultiply: kills the Lanczos dark-halo fringe
+		# (straight-alpha resize drags transparent black into edge texels).
+		img.premultiply_alpha()
 		img.resize(px, px, Image.INTERPOLATE_LANCZOS)
+		_unpremultiply(img)
 		var path := "%s/%s.png" % [out_dir, job["name"]]
 		img.save_png(path)
 		print("SAVED ", path, "  (", px, "px)")
 		_advance()
+
+
+func _unpremultiply(img: Image) -> void:
+	# Inverse of premultiply_alpha (Godot has no built-in): divide RGB back out.
+	for y in img.get_height():
+		for x in img.get_width():
+			var c := img.get_pixel(x, y)
+			if c.a > 0.001:
+				img.set_pixel(x, y, Color(minf(c.r / c.a, 1.0), minf(c.g / c.a, 1.0),
+					minf(c.b / c.a, 1.0), c.a))
 
 
 func _advance() -> void:
