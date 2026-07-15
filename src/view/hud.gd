@@ -192,7 +192,8 @@ func _draw() -> void:
 			var cost: int = sim._supply_cost(kind)
 			var afford: bool = sim.war_chest >= cost
 			var scol := Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4)
-			sx = _stat(icon, str(cost), sx, ry, scol)
+			# "!" suffix: affordability readable without color vision.
+			sx = _stat(icon, str(cost) + ("" if afford else "!"), sx, ry, scol)
 		ry += 16.0
 
 	# Player rows.
@@ -220,7 +221,10 @@ func _draw() -> void:
 					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
 				else:
 					col = Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3)
-				var tx := _text("REVIVE %d" % cost, px, ry + ICON - 3.0, col)
+				# "LOW" tag = non-color affordability cue (cyan-vs-red is still
+				# color-only for protan players even with colorblind mode on).
+				var rlabel := ("REVIVE %d" if afford else "REVIVE %d · LOW") % cost
+				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
 				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0)
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]

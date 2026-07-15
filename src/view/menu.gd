@@ -103,6 +103,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			JOY_BUTTON_DPAD_LEFT: hmove = -1
 			JOY_BUTTON_DPAD_RIGHT: hmove = 1
 			JOY_BUTTON_A: act = true
+			JOY_BUTTON_B: back = true       # console convention: B = back/cancel
 			JOY_BUTTON_START: back = true
 
 	if mode == Mode.HIDDEN:
@@ -194,7 +195,7 @@ func _draw() -> void:
 	if mode == Mode.HIDDEN:
 		return
 	draw_rect(Rect2(0, 0, 640, 360),
-		Color(0.02, 0.05, 0.02, 0.42 if mode == Mode.TITLE else 0.6))
+		Color(0.02, 0.05, 0.02, 0.55 if mode == Mode.TITLE else 0.6))   # scrim ≥0.55: 8px text over a LIVE firefight needs it
 	if mode == Mode.HALL:
 		_draw_hall()
 		_draw_back_button()
@@ -229,25 +230,30 @@ func _draw() -> void:
 			if main._current_seed > 0:
 				_center_text("RUN #%d" % main._current_seed, 114, 8, Color(0.6, 0.66, 0.56, 0.75))
 	var items := _items()
-	# Compress spacing so 6-7 item menus fit the 360px screen without the
-	# bottom button colliding with the title control legend.
+	# Fit-to-height: gap derives from the item count so long lists (title = up to
+	# 10 rows, pause = 9) always land above the y=332 legend instead of running
+	# off the 360px screen — the old fixed gap drew PAUSE's last row at y=358.
 	var many: bool = items.size() > 4
-	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 140.0)
-	var gap := 30.0 if many else 46.0
+	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 156.0)
+	var gap := minf(30.0 if many else 46.0, (326.0 - top) / maxf(1.0, float(items.size() - 1)))
+	# Cell height tracks the gap so metal frames stop overprinting each other.
+	var bh := minf(BTN.y, gap - 3.0)
 	for k in items.size():
-		var r := Rect2(Vector2(320 - BTN.x / 2.0, top + k * gap), BTN)
+		var r := Rect2(Vector2(320 - BTN.x / 2.0, top + k * gap), Vector2(BTN.x, bh))
 		var selected := k == sel
 		draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
 			Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8))
 		if selected:
 			# Breathing selection glow that GLIDES between rows instead of teleporting.
+			# Both are stilled under REDUCE MOTION — the pause menu is where a
+			# motion-sensitive player spends the most time.
 			var ty := top + k * gap
-			if _sel_y < 0.0:
+			if _sel_y < 0.0 or main._motion < 0.5:
 				_sel_y = ty
 			_sel_y = lerpf(_sel_y, ty, 0.35)
-			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), BTN)
-			var mp := Art.pulse(0.2)
+			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
+			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
 			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
 				Color(1.0, 0.9, 0.4, 0.7 + mp * 0.3))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
@@ -255,20 +261,24 @@ func _draw() -> void:
 		if _confirm == k:
 			label = "PRESS AGAIN TO CONFIRM"
 			col = Color(1.0, 0.5, 0.4)
-		_center_text(label, r.position.y + gap / 2.0 + 4.0, 11, col)
+		# Center on the actual cell, not the gap (the two drifted apart in the
+		# spacious few-items layout).
+		_center_text(label, r.position.y + bh / 2.0 + 4.0, 11, col)
 	if mode == Mode.TITLE:
 		# Legend adapts to the last-used device (was hardcoded keyboard, wrong
 		# for the pad-driven 2P audience).
+		# Near-opaque: 8px text over the live attract firefight was ~0.6 alpha —
+		# well under readable contrast on sunlit grass.
 		if Art.use_pad:
 			_center_text("LS MOVE · RS AIM · RT FIRE · L1 GRENADE · B ROLL", 332, 8,
-				Color(0.75, 0.8, 0.7, 0.75))
+				Color(0.82, 0.87, 0.77, 1.0))
 			_center_text("X INTERACT · Y REVIVE · BACK SUPPLY WHEEL · A SELECT", 344, 8,
-				Color(0.75, 0.8, 0.7, 0.6))
+				Color(0.82, 0.87, 0.77, 0.9))
 		else:
 			_center_text("WASD MOVE · MOUSE/ARROWS AIM · LMB/SPACE FIRE · RMB/SHIFT GRENADE · C ROLL", 332, 8,
-				Color(0.75, 0.8, 0.7, 0.75))
+				Color(0.82, 0.87, 0.77, 1.0))
 			_center_text("F INTERACT · E REVIVE · Q SUPPLY WHEEL · ENTER SELECT", 344, 8,
-				Color(0.75, 0.8, 0.7, 0.6))
+				Color(0.82, 0.87, 0.77, 0.9))
 
 
 func _draw_back_button() -> void:

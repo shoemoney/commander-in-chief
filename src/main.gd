@@ -67,6 +67,7 @@ var _duck := 0.0                 # music-duck under heavy hits
 var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
 var _blast_warp := 0.0           # brief heat-shock screen warp on marquee detonations
 var _cinematic := 0.0            # letterbox envelope for boss intro / victory beats
+var _boss_bar_slots := 0         # top-center bars drawn this frame (banner ducks below them)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
 var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame alloc)
 var _esort_ys: Array[int] = []
@@ -1820,6 +1821,13 @@ func _draw() -> void:
 	_draw_players()
 	_draw_fx()
 	_draw_telegraphs()
+	# From here down everything is screen-anchored HUD/overlay: cancel the node's
+	# shake/zoom/roll so bars, markers and banners stay rock-steady while the world
+	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
+	draw_set_transform_matrix(get_transform().affine_inverse())
+	# Field dim (NIGHT OPS) draws BEFORE the threat/objective markers now — the
+	# markers are "your eyes" in the dark, so the dusk wash must sit under them.
+	_draw_field_dim()
 	_draw_threat_edges()
 	_draw_objective_markers()
 	_draw_progress_rail()
@@ -1828,10 +1836,27 @@ func _draw() -> void:
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
 	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
-	if _cinematic > 0.01:
+	# Gated by reduce-motion like every sibling effect — this was the one holdout.
+	if _cinematic > 0.01 and _motion >= 0.5:
 		var ch := 16.0 * clampf(_cinematic * 4.0, 0.0, 1.0)
 		draw_rect(Rect2(0, 0, SCREEN_W, ch), Color(0, 0, 0, 0.9))
 		draw_rect(Rect2(0, SCREEN_H - ch, SCREEN_W, ch), Color(0, 0, 0, 0.9))
+
+
+func _draw_field_dim() -> void:
+	# NIGHT OPS mutator: dim the field to a blue dusk so the tracers, muzzle
+	# flashes and threat markers become your eyes. No hit-radius change — the
+	# challenge is visibility, not fairness.
+	if sim.mode == "endless" and sim.wave_mod == 5:
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.02, 0.03, 0.09, 0.34))
+		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
+			Color(0.0, 0.02, 0.12, 0.55))
+		# Sheet-lightning: a silent-thunder flash every ~7s turns "just dark" into a
+		# storm — diffuse white-blue sky flash, no bolt. Stateless (frame clock), and
+		# reduce-motion scales it to nothing.
+		var lt := Engine.get_physics_frames() % 431
+		if lt < 3:
+			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
 
 
 func _draw_skyglow() -> void:
@@ -2338,6 +2363,8 @@ func _draw_gunships() -> void:
 		slot += 1
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
 		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot)
+		slot += 1
+	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
@@ -2365,6 +2392,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 	# off-screen, and a world-anchored bar would go with it. Stacked by
 	# slot so two simultaneous bosses don't overlap each other, and started
 	# below the corner HUD panel's max height (~60px) so they never clash.
+	# Shake-immune: the bar is a fixed HUD slot, so cancel the node's shake/zoom
+	# for the rest of this function (restored by the caller's next world draw
+	# via the reset at the bottom).
+	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
 	var bar_y := 64.0 + float(slot) * 22.0
@@ -2394,6 +2425,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 		draw_line(Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
 			Color(1.0, 0.85, 0.3, 0.9), 2.0)
 		draw_arc(Vector2(vx, bar_y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
 func _draw_colossus() -> void:
@@ -2432,7 +2464,9 @@ func _draw_colossus() -> void:
 		draw_arc(cpos, 16.0 + pulse * 3.0, 0, TAU, 28, Color(1.0, 1.0, 0.6, 0.9), 2.5)
 	else:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
-	# Bottom-center so the fill never hides under the HUD panel.
+	# Bottom-center so the fill never hides under the HUD panel. Shake-immune:
+	# fixed HUD slot, cancel the node transform for the bar block.
+	draw_set_transform_matrix(get_transform().affine_inverse())
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
 	Art.text(self, "FOUNDRY COLOSSUS — PHASE %d/3" % phase, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
@@ -2446,6 +2480,7 @@ func _draw_colossus() -> void:
 		var cvx := 170.0 + 300.0 * clampf(cvfrac, 0.0, 1.0)
 		draw_line(Vector2(cvx, 328.0), Vector2(cvx, 345.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
 		draw_arc(Vector2(cvx, 327.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
 func _draw_projectiles() -> void:
@@ -3369,8 +3404,7 @@ func _draw_wheel() -> void:
 		var cw := f.get_string_size(chest, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 		var cx := c.x - (10.0 + cw) / 2.0
 		draw_texture_rect(Art.tex("icon_coin"), Rect2(cx, c.y - 5.0, 9, 9), false)
-		draw_string(f, Vector2(cx + 10.0, c.y + 3.0), chest,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.95, 0.65))
+		Art.text(self, chest, Vector2(cx + 10.0, c.y + 3.0), 8, Color(1.0, 0.95, 0.65))
 		for s in 4:
 			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
 			var ang := s * TAU / 4.0
@@ -3389,8 +3423,9 @@ func _draw_wheel() -> void:
 			var isz := 18.0 if selected else 14.0
 			draw_texture_rect(Art.tex(item["icon"]),
 				Rect2(ipos - Vector2(isz, isz) / 2.0, Vector2(isz, isz)), false, icon_mod)
-			draw_string(f, ipos + Vector2(-7, 24), str(acost),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
+			# Shadowed like every other HUD string — the wheel opens over the most
+			# chaotic pixels on screen, exactly where the shadow matters most.
+			Art.text(self, str(acost), ipos + Vector2(-7, 24), 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
 			# Current stock vs cap under each socket — the buy decision no longer
 			# needs an eye-flick to the corner HUD.
@@ -3401,8 +3436,7 @@ func _draw_wheel() -> void:
 				2: stock = "VEST ON" if p["vest"] else "NO VEST"
 			if stock != "":
 				var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 7).x
-				draw_string(f, ipos + Vector2(-sw2 / 2.0, 33), stock,
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.72, 0.77, 0.66, 0.85))
+				Art.text(self, stock, ipos + Vector2(-sw2 / 2.0, 33), 7, Color(0.72, 0.77, 0.66, 0.85))
 		# What the selected socket actually delivers.
 		var sel: int = _wheel[i]["sel"]
 		if sel >= 0:
@@ -3542,19 +3576,6 @@ func _draw_banners(top_msg: String) -> void:
 		draw_texture_rect(Art.tex("item_binoculars"),
 			Rect2(SCREEN_W / 2.0 - bsz / 2.0, 22.0, bsz, bsz), false,
 			Color(1.0, 0.55, 0.4, 0.4 + 0.45 * paint))
-	# NIGHT OPS mutator: dim the field to a blue dusk so the tracers, muzzle
-	# flashes and threat markers become your eyes. No hit-radius change — the
-	# challenge is visibility, not fairness.
-	if sim.mode == "endless" and sim.wave_mod == 5:
-		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.02, 0.03, 0.09, 0.34))
-		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
-			Color(0.0, 0.02, 0.12, 0.55))
-		# Sheet-lightning: a silent-thunder flash every ~7s turns "just dark" into a
-		# storm — diffuse white-blue sky flash, no bolt. Stateless (frame clock), and
-		# reduce-motion scales it to nothing.
-		var lt := Engine.get_physics_frames() % 431
-		if lt < 3:
-			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
 	if _flash_alpha > 0.01:
 		# Radial flash: hottest at screen center, falling off toward the edges
 		# (oversized softspot card) over a faint flat base — punchier than a
@@ -3611,7 +3632,14 @@ func _draw_banners(top_msg: String) -> void:
 		if top_msg == "splash" and bt > 0.01 and not btext.is_empty():
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			Art.text_center(self, btext, 320, 70, 16, Color(bc.r, bc.g, bc.b, a))
+			# Duck below any active boss bars (they own y64+slot*22) instead of
+			# overprinting the PHASE label; pop-in scale punch on the first ~10%
+			# of life, stilled under reduce-motion.
+			var by := 70.0 + 22.0 * float(_boss_bar_slots)
+			var bsize := 16
+			if _motion >= 0.5:
+				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
+			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
