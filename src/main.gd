@@ -2304,7 +2304,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 	# colossus bar labels its phase.
 	var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
-	Art.text(self, "%s — PHASE %d/2" % [label, gphase], Vector2(bar_x, bar_y), 8, Color(1.0, 0.5, 0.4))
+	Art.text(self, "%s — PHASE %d/2" % [label, gphase], Vector2(bar_x, bar_y), 10, Color(1.0, 0.5, 0.4))
 	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 	# Next-volley countdown: a tick that sweeps left->right across the HP
@@ -2366,7 +2366,7 @@ func _draw_colossus() -> void:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center so the fill never hides under the HUD panel.
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
-	Art.text(self, "FOUNDRY COLOSSUS — PHASE %d/3" % phase, Vector2(172, 326), 9, Color(1.0, 0.55, 0.45))
+	Art.text(self, "FOUNDRY COLOSSUS — PHASE %d/3" % phase, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar
@@ -2617,14 +2617,20 @@ func _draw_players() -> void:
 					var bp := Art.pulse(0.25)
 					draw_arc(pos, SimWorld.BASH_RADIUS * PX, 0, TAU, 20,
 						Color(1.0, 0.55, 0.2, 0.3 + bp * 0.2), 1.5)
-				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position + Vector2(1, 1), rrect.size),
+				# Confirm-thump: the reticle itself scale-punches on a landed hit.
+				var rpunch := 1.0 + (_hitmarker[i] if i < _hitmarker.size() else 0.0) * 0.3
+				var rcen := rrect.get_center()
+				draw_set_transform(rcen, 0.0, Vector2.ONE * rpunch)
+				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position - rcen + Vector2(1, 1), rrect.size),
 					false, Color(0, 0, 0, 0.55))
-				draw_texture_rect(Art.tex("ui_reticle"), rrect, false, rcol)
+				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position - rcen, rrect.size), false, rcol)
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				# Hitmarker: reticle flicks bright + kicks four ticks on a landed hit.
 				if i < _hitmarker.size() and _hitmarker[i] > 0.01:
 					var hc := Color(1.0, 1.0, 0.85, _hitmarker[i])
 					var rc := rrect.get_center()
-					var off := 8.0 + (1.0 - _hitmarker[i]) * 4.0
+					# Eased fling: ticks shoot out fast, then settle.
+					var off := 8.0 + (1.0 - _hitmarker[i] * _hitmarker[i]) * 4.0
 					var hl := Art.tex("hudfx_hitlines")
 					for q in 4:
 						var qa := q * TAU / 4.0 + PI / 4.0
@@ -2810,11 +2816,18 @@ func _draw_fx() -> void:
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
 			var fw := ThemeDB.fallback_font.get_string_size(fx["text"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
-			var fpos := pos + Vector2(-fw / 2.0, -18.0 - t * 14.0 - floattext_i * 11.0)
+			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
+			# punch pivoted on the text center — pops in, then glides.
+			var rise := 1.0 - (1.0 - t) * (1.0 - t)
+			var fpivot := pos + Vector2(0.0, -18.0 - rise * 22.0 - floattext_i * 11.0)
+			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
+			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
+			var frel := Vector2(-fw / 2.0, 0.0)
 			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
-				draw_string(ThemeDB.fallback_font, fpos + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
-			draw_string(ThemeDB.fallback_font, fpos, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+				draw_string(ThemeDB.fallback_font, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+			draw_string(ThemeDB.fallback_font, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
 			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha

@@ -48,7 +48,7 @@ func _draw() -> void:
 	var x := 8.0
 	var y := 6.0
 	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse))
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse), _chest_pulse)
 	if sim.score > _prev_score:
 		_score_pulse = 1.0
 	_prev_score = sim.score
@@ -57,7 +57,7 @@ func _draw() -> void:
 		_disp_score = float(sim.score)
 	_disp_score = _rollup(_disp_score, float(sim.score))
 	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse))
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse), _score_pulse)
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:
@@ -328,8 +328,17 @@ func _rollup(disp: float, target: float) -> float:
 
 
 func _stat(icon: String, txt: String, x: float, y: float,
-		col := Color(0.95, 0.96, 0.9)) -> float:
-	draw_texture_rect(Art.tex(icon), Rect2(x, y, ICON, ICON), false)
+		col := Color(0.95, 0.96, 0.9), pulse := 0.0) -> float:
+	# pulse > 0 scale-thumps the icon around its center — a payout visibly hits
+	# the badge instead of only tinting the numeral.
+	var r := Rect2(x, y, ICON, ICON)
+	if pulse > 0.01:
+		var gc := r.get_center()
+		draw_set_transform(gc, 0.0, Vector2.ONE * (1.0 + pulse * 0.25))
+		draw_texture_rect(Art.tex(icon), Rect2(r.position - gc, r.size), false)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	else:
+		draw_texture_rect(Art.tex(icon), r, false)
 	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col) + 10.0
 
 

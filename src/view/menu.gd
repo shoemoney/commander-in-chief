@@ -234,8 +234,10 @@ func _draw() -> void:
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
 			Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8))
 		if selected:
-			draw_texture_rect(Art.tex("ui_menu_button_sel"), r.grow(3), false,
-				Color(1.0, 0.9, 0.4, 0.95))
+			# Breathing selection glow — the highlight reads as alive, not a static swap.
+			var mp := Art.pulse(0.2)
+			draw_texture_rect(Art.tex("ui_menu_button_sel"), r.grow(3.0 + mp * 1.5), false,
+				Color(1.0, 0.9, 0.4, 0.7 + mp * 0.3))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
 		var label: String = items[k]
 		if _confirm == k:
