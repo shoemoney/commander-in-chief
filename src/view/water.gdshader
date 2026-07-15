@@ -20,6 +20,7 @@ uniform float ford_halfw = 0.05;                      // ford half-width, in UV.
 uniform vec4 shallow_col : source_color = vec4(0.21, 0.44, 0.47, 1.0);
 uniform vec4 deep_col : source_color = vec4(0.08, 0.19, 0.31, 1.0);
 uniform float speed : hint_range(0.0, 2.0) = 0.32;
+uniform float phase = 0.0;   // per-band time offset so two visible bands never ripple in lockstep
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 345.45));
@@ -54,7 +55,7 @@ void fragment() {
 	// Aspect-correct sample coords (~36px per noise cell) so ripples read square
 	// on the wide, short band instead of horizontally smeared.
 	vec2 p = uv * (rect_size / 36.0);
-	float t = TIME * speed;
+	float t = (TIME + phase) * speed;
 
 	// Two layers drifting in different directions -> a churning surface.
 	float n1 = fbm(p + vec2(t * 1.3, t * 0.6));
@@ -72,7 +73,7 @@ void fragment() {
 	col += vec3(0.10, 0.17, 0.19) * crest * 1.3;
 
 	// Animated sun-glint: a broad specular band drifting across, broken by ripple.
-	float glintband = 0.5 + 0.5 * sin(uv.x * 3.2 + uv.y * 6.0 - TIME * 1.4);
+	float glintband = 0.5 + 0.5 * sin(uv.x * 3.2 + uv.y * 6.0 - (TIME + phase) * 1.4);
 	float glint = smoothstep(0.70, 1.0, glintband * (0.55 + 0.5 * ripple));
 	col += vec3(0.58, 0.64, 0.55) * glint * 0.40;
 

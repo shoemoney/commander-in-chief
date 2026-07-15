@@ -262,6 +262,8 @@ func _sync_water() -> void:
 		var mat: ShaderMaterial = rect.material
 		mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
 		mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
+		# De-sync ripples per band: derive a stable phase from the band's world y.
+		mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
 	for i in range(vis, _water_rects.size()):
 		_water_rects[i].visible = false
 
