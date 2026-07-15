@@ -29,4 +29,4 @@ common/physics_ticks_per_second=60
 [rendering]
 
 textures/canvas_textures/default_texture_filter=3
-anti_aliasing/quality/msaa_2d=2
+anti_aliasing/quality/msaa_2d=1

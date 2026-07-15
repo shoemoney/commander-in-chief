@@ -68,6 +68,8 @@ var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
 var _blast_warp := 0.0           # brief heat-shock screen warp on marquee detonations
 var _cinematic := 0.0            # letterbox envelope for boss intro / victory beats
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
+var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame alloc)
+var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
@@ -2134,6 +2136,10 @@ func _draw_tanks() -> void:
 			draw_arc(c, 17.0, -PI / 2, -PI / 2 + TAU * rdy, 24, Color(1.0, 0.8, 0.4, 0.6), 2.0)
 
 
+func _esort_cmp(a: int, b: int) -> bool:
+	return _esort_ys[a] < _esort_ys[b]
+
+
 func _draw_enemies() -> void:
 	# ≤2 alive players, cached once — replaces an O(players) sim scan per enemy
 	# per frame that existed purely to pick a facing/laser target.
@@ -2142,10 +2148,17 @@ func _draw_enemies() -> void:
 		if p["alive"]:
 			alive_players.append(p)
 	# Y-sorted draw order: in a dense rush a nearer (lower) troop must render over
-	# a farther one — sim array order broke that overlap. View-only index sort.
-	var order := range(sim.enemies.size())
-	order.sort_custom(func(a: int, b: int) -> bool: return sim.enemies[a]["y"] < sim.enemies[b]["y"])
-	for eidx in order:
+	# a farther one — sim array order broke that overlap. Buffers + comparator are
+	# reused members so the per-frame sort allocates nothing and never hashes a dict.
+	var ecount := sim.enemies.size()
+	if _esort_order.size() != ecount:
+		_esort_order.resize(ecount)
+		_esort_ys.resize(ecount)
+	for si in ecount:
+		_esort_order[si] = si
+		_esort_ys[si] = sim.enemies[si]["y"]
+	_esort_order.sort_custom(_esort_cmp)
+	for eidx in _esort_order:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			continue
