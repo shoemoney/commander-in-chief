@@ -68,6 +68,7 @@ var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
 var _blast_warp := 0.0           # brief heat-shock screen warp on marquee detonations
 var _cinematic := 0.0            # letterbox envelope for boss intro / victory beats
 var _boss_bar_slots := 0         # top-center bars drawn this frame (banner ducks below them)
+var _result_t := 0.0             # debrief/victory card entrance ease (0→1)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
 var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame alloc)
 var _esort_ys: Array[int] = []
@@ -1438,6 +1439,12 @@ func _update_feel() -> void:
 	_concussion = maxf(0.0, _concussion - 0.035)
 	_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
 	_cinematic = maxf(0.0, _cinematic - 0.004)
+	# Debrief/victory card entrance clock: eases 0→1 while a result is showing,
+	# snaps back to 0 the moment it isn't (so a restart re-plays the entrance).
+	if sim.victory or _debrief:
+		_result_t = minf(1.0, _result_t + 0.08)
+	else:
+		_result_t = 0.0
 	_music_hold = maxi(0, _music_hold - 1)
 	for _gi in _grenade_dry.size():
 		_grenade_dry[_gi] = maxi(0, _grenade_dry[_gi] - 1)
@@ -3704,6 +3711,14 @@ func _draw_banners(top_msg: String) -> void:
 ## title + a stack of centered stat rows (each optionally icon-prefixed).
 ## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?}.
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color) -> void:
+	# Entrance: the run's final beat scales in over ~12 frames instead of
+	# teleporting onto the screen. Composes WITH the shake-cancel matrix the
+	# caller set (plain draw_set_transform would clobber it).
+	if _motion >= 0.5 and _result_t < 1.0:
+		var re := 1.0 - pow(1.0 - _result_t, 3.0)
+		var rscale := 0.92 + 0.08 * re
+		draw_set_transform_matrix(get_transform().affine_inverse()
+			* Transform2D(0.0, Vector2.ONE * rscale, 0.0, Vector2(320.0, 180.0) * (1.0 - rscale)))
 	var rf := Art.font()
 	var panel_x := 170.0
 	var panel_w := 300.0
@@ -3730,6 +3745,8 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size), false)
 			x += icon_size + gap
 		draw_string(rf, Vector2(x, y), row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size, col)
+	# Back to the plain shake-cancel matrix for whatever the caller draws next.
+	draw_set_transform_matrix(get_transform().affine_inverse())
 
 
 func _update_hud() -> void:
