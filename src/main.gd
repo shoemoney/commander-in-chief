@@ -69,6 +69,7 @@ var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play u
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
+var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
 var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
 var _dodge_frame := -100         # perfect-dodge callout throttle
@@ -168,6 +169,14 @@ func _ready() -> void:
 	$HUD.add_child(_menu)   # after HudIcons: menu draws on top
 	_setup_screen_fx()
 	_setup_water()
+	# Additive glow layer: a plain child Node2D renders after main's own _draw but
+	# under the $HUD CanvasLayer — muzzle/light/ember FX finally emit instead of tint.
+	_glow_root = Node2D.new()
+	var glow_mat := CanvasItemMaterial.new()
+	glow_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	_glow_root.material = glow_mat
+	_glow_root.draw.connect(_draw_glow)
+	add_child(_glow_root)
 	_load_bests()
 	_reset()
 	if OS.has_feature("movie"):
@@ -1666,6 +1675,10 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 # Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
 const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
 
+# FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
+const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
+	"light": true, "ember": true, "flash": true}
+
 
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
 		stretch := 1.0) -> void:
@@ -1708,6 +1721,8 @@ func _draw() -> void:
 	_sync_water()
 	if _bg_root != null:
 		_bg_root.queue_redraw()
+	if _glow_root != null:
+		_glow_root.queue_redraw()
 	_draw_terrain()
 	_draw_skyglow()
 	_draw_scorch()
@@ -2710,6 +2725,8 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 func _draw_fx() -> void:
 	var floattext_i := 0
 	for fx in _fx:
+		if _GLOW_KINDS.has(fx["kind"]):
+			continue   # drawn by _draw_glow on the additive layer
 		var pos := _to_screen(fx["x"], fx["y"])
 		var t: float = fx["t"]
 		if fx["kind"] == "explosion":
@@ -2731,27 +2748,10 @@ func _draw_fx() -> void:
 				false, Color(1.0, 0.25, 0.2, 0.8 - t * 0.7))
 			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * ar2, Vector2.ONE * ar2 * 2.0),
 				false, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6))
-		elif fx["kind"] == "muzzle":
-			var sz := (13.0 if fx.get("big", false) else 9.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
-			var dirv := Vector2.from_angle(fx["a"])
-			var pv := Vector2(-dirv.y, dirv.x)
-			var mc := Color(1.0, 0.95, 0.55, 0.95 - t * 0.85)
-			draw_line(pos, pos + dirv * sz * 1.6, mc, 2.5)
-			draw_line(pos - pv * sz * 0.55, pos + pv * sz * 0.55, mc, 2.0)
-			draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.9 - t * 0.8))
 		elif fx["kind"] == "casing":
 			draw_set_transform(pos, fx["spin"] + t * 6.0, Vector2.ONE)
 			draw_texture_rect(Art.tex("fx_shell"), Rect2(-3.0, -1.5, 6.0, 3.0), false, Color(1, 1, 1, 1.0 - t * 0.8))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		elif fx["kind"] == "spark":
-			# Ricochet: legacy art sparkle cards flung radially — armor says no.
-			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
-			var stex := Art.tex("fx_sparkle")
-			var ssz := 5.0 + t * 5.0
-			for k in 3:
-				var sa := k * TAU / 3.0 + t * 2.0
-				var sp2: Vector2 = pos + Vector2.from_angle(sa) * (3.0 + t * 7.0)
-				draw_texture_rect(stex, Rect2(sp2 - Vector2.ONE * ssz, Vector2.ONE * ssz * 2.0), false, sc)
 		elif fx["kind"] == "chopper":
 			# Cinematic flyover (victory extraction / endless-boss escort): sweeps
 			# screen-space left->right over its lifetime with a gentle bob + rotor
@@ -2791,11 +2791,6 @@ func _draw_fx() -> void:
 			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha
 			_spr("fx_smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25,
 				Color(1, 1, 1, (0.6 - t * 0.55) * smoothstep(0.0, 0.15, t)))
-		elif fx["kind"] == "shockwave":
-			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
-			# snaps out — reads as a pressure wave, not a flat UI stroke.
-			var swr := 4.0 + t * 34.0
-			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * swr, Vector2.ONE * swr * 2.0), false, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)))
 		elif fx["kind"] == "gib":
 			var gc: Color = fx.get("col", Color(0.5, 0.1, 0.08))
 			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(gc.r, gc.g, gc.b, 1.0 - t))
@@ -2809,29 +2804,6 @@ func _draw_fx() -> void:
 			var spr := 2.5 + t * 7.0
 			draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * spr, Vector2.ONE * spr * 2.0),
 				false, Color(0.7, 0.9, 1.0, 0.6 * (1.0 - t)))
-		elif fx["kind"] == "light":
-			# The gun/blast throws light onto the world — a soft radial card
-			# (fx_softspot) instead of two hand-nested flat discs. One draw
-			# upgrades muzzle glow, enemy/sniper fire, vest_break, revive, surge.
-			var lc: Color = fx["col"]
-			var la := (1.0 - t) * 0.45
-			var lr: float = fx["r"] * (0.7 + t * 0.4)
-			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * lr, Vector2.ONE * lr * 2.0), false, Color(lc.r, lc.g, lc.b, la))
-		elif fx["kind"] == "ember":
-			# Hot spark: white-hot core over a soft glow, cooling yellow->orange and
-			# dimming fast as it flies. Additive-ish read from layered translucent discs.
-			var ea := 1.0 - t
-			var ec := Color(1.0, 0.85 - t * 0.4, 0.35 - t * 0.3)
-			draw_circle(pos, 2.0 * (1.0 - t * 0.5), Color(ec.r, ec.g, ec.b, ea * 0.5))
-			draw_circle(pos, 0.9, Color(1.0, 0.95, 0.75, ea))
-		elif fx["kind"] == "flash":
-			# Delayed secondary core: negative t holds it dark for ~2 frames after the
-			# main blast, then it pops bright and fades — a two-stage punch.
-			if t < 0.0:
-				continue
-			var la2 := 1.0 - t
-			draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.85 * la2 * la2))
-			draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, la2))
 		elif fx["kind"] == "mote":
 			# Ambient drift: position offset is computed from age (t) rather than
 			# stepped/decayed each frame, so it stays slow and steady for its
@@ -2867,6 +2839,65 @@ func _draw_fx() -> void:
 			draw_set_transform(pos, float(fx.get("rot", 0.0)) + t * float(fx.get("spin", 0.0)), Vector2(tsc, tsc))
 			draw_texture(tx, -tx.get_size() / 2.0, Color(tcol.r, tcol.g, tcol.b, ta))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_glow() -> void:
+	# Additive pass (runs as _glow_root's draw): light-emitting FX brighten the
+	# ground instead of tinting/darkening it, which mix-blend always did. Same _fx
+	# entries as _draw_fx; _glow_root is a child of main so shake/zoom carry over.
+	var g := _glow_root
+	for fx in _fx:
+		if not _GLOW_KINDS.has(fx["kind"]):
+			continue
+		var pos := _to_screen(fx["x"], fx["y"])
+		var t: float = fx["t"]
+		if fx["kind"] == "muzzle":
+			var sz := (13.0 if fx.get("big", false) else 9.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
+			var dirv := Vector2.from_angle(fx["a"])
+			var pv := Vector2(-dirv.y, dirv.x)
+			var mc := Color(1.0, 0.95, 0.55, 0.95 - t * 0.85)
+			g.draw_line(pos, pos + dirv * sz * 1.6, mc, 2.5)
+			g.draw_line(pos - pv * sz * 0.55, pos + pv * sz * 0.55, mc, 2.0)
+			g.draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.9 - t * 0.8))
+		elif fx["kind"] == "spark":
+			# Ricochet: legacy art sparkle cards flung radially — armor says no.
+			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
+			var stex := Art.tex("fx_sparkle")
+			var ssz := 5.0 + t * 5.0
+			for k in 3:
+				var sa := k * TAU / 3.0 + t * 2.0
+				var sp2: Vector2 = pos + Vector2.from_angle(sa) * (3.0 + t * 7.0)
+				g.draw_texture_rect(stex, Rect2(sp2 - Vector2.ONE * ssz, Vector2.ONE * ssz * 2.0), false, sc)
+		elif fx["kind"] == "shockwave":
+			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
+			# snaps out — reads as a pressure wave, not a flat UI stroke.
+			var swr := 4.0 + t * 34.0
+			g.draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * swr, Vector2.ONE * swr * 2.0),
+				false, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)))
+		elif fx["kind"] == "light":
+			# The gun/blast throws light onto the world — a soft radial card
+			# (fx_softspot) instead of two hand-nested flat discs. One draw
+			# upgrades muzzle glow, enemy/sniper fire, vest_break, revive, surge.
+			var lc: Color = fx["col"]
+			var la := (1.0 - t) * 0.45
+			var lr: float = fx["r"] * (0.7 + t * 0.4)
+			g.draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * lr, Vector2.ONE * lr * 2.0),
+				false, Color(lc.r, lc.g, lc.b, la))
+		elif fx["kind"] == "ember":
+			# Hot spark: white-hot core over a soft glow, cooling yellow->orange and
+			# dimming fast as it flies — now genuinely additive.
+			var ea := 1.0 - t
+			var ec := Color(1.0, 0.85 - t * 0.4, 0.35 - t * 0.3)
+			g.draw_circle(pos, 2.0 * (1.0 - t * 0.5), Color(ec.r, ec.g, ec.b, ea * 0.5))
+			g.draw_circle(pos, 0.9, Color(1.0, 0.95, 0.75, ea))
+		elif fx["kind"] == "flash":
+			# Delayed secondary core: negative t holds it dark for ~2 frames after the
+			# main blast, then it pops bright and fades — a two-stage punch.
+			if t < 0.0:
+				continue
+			var la2 := 1.0 - t
+			g.draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.85 * la2 * la2))
+			g.draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, la2))
 
 
 func _draw_scorch() -> void:
