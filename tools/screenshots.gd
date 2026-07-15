@@ -26,6 +26,7 @@ func _initialize() -> void:
 	# alone still let a few ticks through — staged sims drifted).
 	main.process_mode = Node.PROCESS_MODE_DISABLED
 	main._menu.mode = GameMenu.Mode.HIDDEN   # staged shots show gameplay, not the title
+	main.no_autopause = true   # harness window never holds focus; don't pause-overlay every shot
 	_build_shots()
 	process_frame.connect(_on_frame)
 	# First _advance happens on the first frame — after main._ready() has run

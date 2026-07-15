@@ -51,6 +51,7 @@ var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _rumble_on := true            # accessibility: gamepad vibration on/off
+var no_autopause := false         # set by dev harnesses whose window never holds focus
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
@@ -505,7 +506,9 @@ func _notification(what: int) -> void:
 	# window loses focus during live play. sim.step() is already gated behind
 	# _menu.is_active(), so this is a pure view gate with zero sim contact — golden-safe.
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
-		if _menu.mode == GameMenu.Mode.HIDDEN and not sim.wiped and not sim.victory:
+		# no_autopause: the screenshot harness runs unfocused by design — without
+		# this every staged gameplay shot captures the pause overlay instead.
+		if _menu.mode == GameMenu.Mode.HIDDEN and not sim.wiped and not sim.victory and not no_autopause:
 			_menu.open(GameMenu.Mode.PAUSE)
 			queue_redraw()
 
