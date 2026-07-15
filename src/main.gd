@@ -187,6 +187,10 @@ func _ready() -> void:
 	_glow_root.material = glow_mat
 	_glow_root.draw.connect(_draw_glow)
 	add_child(_glow_root)
+	# ORDER MATTERS: _load_bests() restores mute via set_bus_mute, which only works
+	# because add_child(_sfx) above already ran Sfx._ready() synchronously (main is
+	# in-tree) and created the SFX/Music buses. Move _sfx to an autoload or deferred
+	# add and this silently no-ops (get_bus_index returns -1).
 	_load_bests()
 	_reset()
 	if OS.has_feature("movie"):
