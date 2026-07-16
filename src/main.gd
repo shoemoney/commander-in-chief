@@ -182,6 +182,7 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
+	"mg_nest_aim": ["tank_board", -11.0, 1.4],
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -838,10 +839,10 @@ func _consume_events() -> void:
 			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
 			# silent stat bump. floattext + sfx + trauma are all view-only.
 			if ev.get("kind", 0) >= 4:
-				var is_pierce: bool = ev["kind"] == 4
-				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
-					"rate": 0.013, "size": 13, "text": "PIERCING ROUNDS!" if is_pierce else "SPREAD SHOT!",
-					"col": Color(0.55, 0.95, 1.0) if is_pierce else Color(1.0, 0.82, 0.45)})
+				var pk_kind: int = ev["kind"]
+				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext", "rate": 0.013, "size": 13,
+					"text": "PIERCING ROUNDS!" if pk_kind == 4 else ("SPREAD SHOT!" if pk_kind == 5 else "TRIPLE SHOT!"),
+					"col": Color(0.55, 0.95, 1.0) if pk_kind == 4 else (Color(1.0, 0.82, 0.45) if pk_kind == 5 else Color(1.0, 0.6, 0.9))})
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
 		elif kind == "explosion":
@@ -956,6 +957,14 @@ func _consume_events() -> void:
 					"sz": 22.0, "fade": 1.6, "rate": 0.15, "rot": taim.angle(), "col": Color(1.0, 0.85, 0.5, 0.8)})
 			"explosion":
 				_ev_explosion(ev)
+			"barrel_blast":
+				# A fuel drum cooks off: heavy punch + a fireball light + a scorch mark.
+				_trauma = minf(1.0, _trauma + 0.3)
+				_rumble = maxf(_rumble, 0.55)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"kill":
 				_ev_kill(ev)
 			"bounty_kill":
@@ -2243,6 +2252,7 @@ func _draw() -> void:
 	_draw_scorch()
 	_draw_water()
 	_draw_mines()
+	_draw_barrels()
 	_draw_gates()
 	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
 	# field bunkers stream in independently and look identical otherwise.
@@ -2496,6 +2506,26 @@ func _draw_mines() -> void:
 		draw_circle(mp, 2.0, Color(0.95, 0.3, 0.18, 0.65 + mb * 0.35))
 
 
+func _draw_barrels() -> void:
+	for bl in sim.barrels:
+		if not bl["armed"]:
+			continue
+		var bp := _to_screen(bl["x"], bl["y"])
+		_ground_shadow(bp, 4.0)
+		# Hazard-orange live ordnance, distinct from the mossy scenery barrels.
+		var wb := 1.0 if _motion < 0.5 else Art.pulse(0.09)   # steady under reduce-motion
+		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
+		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
+		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
+		# Blast-radius ring: grenades telegraph their kill circle (the ONLY other
+		# radius damage) and barrels share the same GRENADE_RADIUS — show it.
+		draw_arc(bp, SimWorld.GRENADE_RADIUS * PX, 0, TAU, 24,
+			Color(1.0, 0.45, 0.15, 0.10 + wb * 0.06), 1.0)
+		# Non-color danger cue: hue-blind players got only orange — the "!" pip
+		# carries "live ordnance" on the shape channel (destructive-row grammar).
+		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
+
+
 func _draw_water() -> void:
 	for w in sim.waters:
 		var wy := _to_screen(0, w["y"]).y
@@ -2602,12 +2632,12 @@ func _draw_pickups() -> void:
 			# Rare power-up capsule (pierce/spread): a pulsing glow + ring + rising
 			# beam + label so a 1-in-6 elite drop stands out in the chaos (and the
 			# out-of-range glyph lookup below is skipped — those kinds have no icon).
-			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else Color(1.0, 0.8, 0.45)
-			var pg := Art.pulse(0.18)
+			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else (Color(1.0, 0.8, 0.45) if pk["kind"] == 5 else Color(1.0, 0.55, 0.85))
+			var pg := 1.0 if _motion < 0.5 else Art.pulse(0.18)   # steady under reduce-motion
 			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			Art.text(self, "PIERCE" if pk["kind"] == 4 else "SPREAD", ppos + Vector2(-13, -24), 8, pcol)
+			Art.text(self, "PIERCE" if pk["kind"] == 4 else ("SPREAD" if pk["kind"] == 5 else "TRIPLE"), ppos + Vector2(-13, -24), 8, pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
@@ -2868,6 +2898,34 @@ func _draw_enemies() -> void:
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
 			var spp := Art.pulse(0.25)
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+		elif e["kind"] == "mg_nest":
+			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
+			# (6/9 panel reviewers: the old telegraph was one flat 44px stub that
+			# only existed mid-burst — aim was invisible, reload erased the lane).
+			_spr("sandbag_beige", epos, 0.0, 0.5, Color(0.82, 0.8, 0.62))
+			_spr("elite", epos + Vector2(0, -2), face, 0.4, Color(0.9, 0.85, 0.7))
+			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+			if nlv.length() > 1.0:
+				var nld := nlv.normalized()
+				var nburst: int = e.get("lunge_ticks", 0)
+				var nwu: int = e.get("windup", 0)
+				# The lane runs the bullet's actual flight, not a 44px stub.
+				var lane_end := epos + nld * 640.0
+				if nburst == SimWorld.MG_NEST_BURST_ROUNDS and nwu > 0:
+					# AIM: locked, winding up (the mg_nest_aim sting's visual twin) —
+					# amber lane fades in as the first round closes. Static alphas,
+					# so reduce-motion needs no gate.
+					var af := 1.0 - float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
+					draw_line(epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
+				elif nburst > 0:
+					# FIRING: hot lethal-red, sniper-line vocabulary — holds through
+					# the 8-tick gaps so the 3-round burst reads as one rake.
+					draw_line(epos, lane_end, Color(1.0, 0.15, 0.12, 0.7), 2.0)
+					draw_circle(epos + nld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
+				else:
+					# RELOAD: a dim stub down the LAST lane — the rooted-turret
+					# threat must not vanish for the whole 1.5s between bursts.
+					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.12), 1.0)
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)

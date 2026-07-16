@@ -69,13 +69,16 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 27): Spread Shot / Trench Gun — a 2nd power-up capsule (kind 5,
 ## new checksummed player field spread_ticks) firing a 3-bullet fan; the elite drop table now
 ## rolls a rare capsule (pierce OR spread), shifting rng on every elite kill → all samples moved.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 29 — Explosive Fuel Barrels): a new
+## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
+## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
+## structural add shifts every endless sample too.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
+## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
+## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
 const GOLDEN: Array[int] = [
-	1942392792714788905,
-	5254693104462641548,
-	1869508768180451128,
-	2957909663780844898,
-	1766040305575453794,
-	2825294671139700342,
+	5492265342370716625, 5329418804242622598, 8072099053918525192,
+	4457606292700231691, 8711883446497700766, 4882331979285349249,
 ]
 
 
@@ -133,17 +136,13 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
-## RE-RECORDED (2026-07-16, P3b design changes): roll-along-aim, grenade edge-detect, airstrike
-## out of crate pool, boss HP player-count scaling, score-on-purchase, early specials gate. The
-## airstrike-out-of-pool change shifts endless RNG (one fewer Fisher-Yates swap per shop) and the
-## early-specials/score-on-buy changes move the stream; samples 1-5 recomputed (sample 0 unchanged).
+## RE-RECORDED (2026-07-16, merge reconcile — P3b design fixes + grafted iter25/iter29): the P3b
+## fixes (roll-along-aim, grenade edge-detect, airstrike out of crate pool, boss HP player-count
+## scaling, score-on-purchase, early specials gate) stack with Triple Shot (hashed p["triple"]) and
+## Explosive Fuel Barrels (checksummed barrels[]); all endless samples recomputed for the merged sim.
 const ENDLESS_GOLDEN: Array[int] = [
-	8681953085351081569,
-	1643062305181061384,
-	3990697898952355881,
-	4545877323475357233,
-	54479342541401273,
-	9213604703022512321,
+	9023438600815067543, 4739873706484850096, 7055349867750677465,
+	4832767246026688017, 8007662793683766665, 1658233155002909313,
 ]
 
 

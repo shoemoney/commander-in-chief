@@ -81,6 +81,12 @@ const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 # herd rushers onto them, or respect them yourself. Rolling clears them safely.
 const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
+const BARREL_SPACING := 420 * F_ONE
+const BARREL_CLUSTER_GAP := 18 * F_ONE
+const MG_NEST_AIM_TICKS := 30       # telegraph before the first round of a burst
+const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
+const MG_NEST_BURST_ROUNDS := 3
+const MG_NEST_BURST_CD_TICKS := 90  # reload between bursts
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
 const MG_AMMO_MAX := 99
@@ -208,6 +214,7 @@ var strikes: Array[Dictionary] = []
 var waters: Array[Dictionary] = []
 var enemy_bullets: Array[Dictionary] = []
 var mines: Array[Dictionary] = []
+var barrels: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
 var score: int = 0
@@ -240,6 +247,7 @@ var _next_gate_y: int = 0
 var _next_tank_y: int = 0
 var _next_water_y: int = 0
 var _next_mine_y: int = 0
+var _next_barrel_y: int = 0
 var _gate_counter: int = 0
 var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
 var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
@@ -260,6 +268,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_tank_y = -(750 * F_ONE)
 	_next_water_y = -(1500 * F_ONE)
 	_next_mine_y = -(700 * F_ONE)
+	_next_barrel_y = -(900 * F_ONE)
 	for i in player_count:
 		players.append({
 			"idx": i,
@@ -284,6 +293,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"hurt_iframes": 0,
 			"pierce_ticks": 0,
 			"spread_ticks": 0,
+			"triple": false,
 		})
 
 
@@ -344,6 +354,7 @@ func step(inputs: Array) -> void:
 	else:
 		_step_spawner()
 		_step_mines()
+		_step_barrels()
 		_step_boss()
 		_step_colossus()
 		_step_gates()
@@ -462,8 +473,9 @@ func _step_players(inputs: Array) -> void:
 			var fax: int = p["aim_x"]
 			var fay: int = p["aim_y"]
 			_spawn_mg_bullet(p, i, fax, fay)
-			if p["spread_ticks"] > 0:
-				# Trench Gun: two extra pellets fanned +/-12 deg (fixed-point rotate).
+			if p["spread_ticks"] > 0 or p["triple"]:
+				# Trench Gun (timed) / Triple Shot (permanent mod) both spray this one
+				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
 					Fixed.mul(fax, SPREAD_SIN) + Fixed.mul(fay, SPREAD_COS))
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) + Fixed.mul(fay, SPREAD_SIN),
@@ -602,6 +614,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["vest"] = assist_mode            # death strips upgrades (1986 rule; assist re-issues a vest)
 	p["pierce_ticks"] = 0              # ...including the Piercing Rounds buff
 	p["spread_ticks"] = 0             # ...and the Trench Gun spread buff
+	p["triple"] = false               # ...and the Triple Shot permanent mod
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -656,6 +669,8 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			p["pierce_ticks"] = PIERCE_TICKS   # Piercing Rounds capsule (drop-only)
 		5:
 			p["spread_ticks"] = SPREAD_TICKS   # Trench Gun spread capsule (drop-only)
+		6:
+			p["triple"] = true                 # Triple Shot: a permanent 3-round fan mod
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
@@ -753,6 +768,12 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	for e in enemies:
 		if e["alive"] and _dist_lte(tank["x"], tank["y"], e["x"], e["y"], TANK_CRUSH_RADIUS):
 			_kill_enemy(e)
+	# ...and roll over fuel barrels to set them off (chains via _explode).
+	for bl in barrels:
+		if bl["armed"] and _dist_lte(tank["x"], tank["y"], bl["x"], bl["y"], TANK_CRUSH_RADIUS):
+			bl["armed"] = false
+			events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
+			_explode(bl["x"], bl["y"])
 
 
 func _dismount(p: Dictionary, tank: Dictionary) -> void:
@@ -916,6 +937,18 @@ func _explode(x: int, y: int) -> void:
 	# torch the tank a partner is driving (they get the bail-boost / kamikaze
 	# path). Boarding a burning tank is still guarded, so you can't self-ignite
 	# and re-board your own — the ride is a co-op / already-aboard beat.
+	# Explosive barrels in the blast pop — they HURT players in radius (unlike a
+	# friendly grenade; roll i-frames dodge it) and re-detonate so a cluster chains.
+	# armed=false BEFORE the recursion bounds the chain to the cluster (2-3).
+	for bl in barrels:
+		if bl["armed"] and _dist_lte(x, y, bl["x"], bl["y"], GRENADE_RADIUS):
+			bl["armed"] = false
+			events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
+			for p in players:
+				if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
+						and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
+					_hurt_player(p)
+			_explode(bl["x"], bl["y"])
 	for tank in tanks:
 		if tank["alive"] and _dist_lte(x, y, tank["x"], tank["y"], GRENADE_RADIUS):
 			_ignite_tank(tank)
@@ -988,7 +1021,7 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 			"x": e["x"], "y": e["y"],
 			# ~1-in-6 elites drop a rare power-up capsule (Piercing or Spread);
 			# otherwise the usual Ammo/Grenade.
-			"kind": (4 + rng.range_i(0, 1)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
+			"kind": (4 + rng.range_i(0, 2)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
 		})
 
 
@@ -1055,6 +1088,9 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "sniper":
 			_step_sniper(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "mg_nest":
+			_step_mg_nest(e, target, dx, dy, dlen)
 			continue
 		if e["kind"] == "shield":
 			# Advances slowly behind a frontal shield (bullet block handled in
@@ -1280,6 +1316,13 @@ func _step_mines() -> void:
 			_explode(m["x"], m["y"])
 
 
+func _step_barrels() -> void:
+	# Barrels are passive ordnance — just cull the spent/off-screen ones.
+	for i in range(barrels.size() - 1, -1, -1):
+		if not barrels[i]["armed"] or barrels[i]["y"] > camera_top + 420 * F_ONE:
+			barrels.remove_at(i)
+
+
 func _step_spawner() -> void:
 	# Field spawner: pressure from above the screen edge; every 8th is a red
 	# elite. Each opened gate tightens the interval — the campaign's
@@ -1301,8 +1344,11 @@ func _step_spawner() -> void:
 	# the campaign field, so late sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
 	if opened >= 1 and rng.range_i(0, 4) == 0:
-		var specials := ["grenadier", "sniper", "shield"]
-		_spawn_special(x, camera_top - 24 * F_ONE, specials[rng.range_i(0, 2)])
+		var spick := rng.range_i(0, 3)   # +mg_nest turret
+		if spick == 3:
+			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+		else:
+			_spawn_special(x, camera_top - 24 * F_ONE, ["grenadier", "sniper", "shield"][spick])
 	else:
 		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
 		# gate 5) so late campaign escalates composition, not just cadence.
@@ -1377,6 +1423,45 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 		e["submerged"] = true   # dug in, cloaked until you close the distance
 		e["surface_ticks"] = 0
 	enemies.append(e)
+
+
+func _spawn_mg_nest(x: int, y: int) -> void:
+	## Rooted fixed turret: rakes its lane with aimed 3-round bursts, never moves.
+	## Reuses fire_cd/windup/lunge_ticks/aim_lx/aim_ly — all already hashed.
+	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
+		"kind": "mg_nest", "fire_cd": MG_NEST_AIM_TICKS, "windup": 0,
+		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0})
+
+
+func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Break LOS, flank, or grenade it. windup = inter-round spacing, lunge_ticks =
+	## rounds left, aim_lx/ly = the LOCKED burst vector, fire_cd = reload.
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0 and e["lunge_ticks"] > 0:
+			var lx: int = e["aim_lx"]
+			var ly: int = e["aim_ly"]
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
+				events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
+				enemy_bullets.append({"x": e["x"], "y": e["y"],
+					"vx": Fixed.mul(Fixed.div(lx, llen), ENEMY_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(ly, llen), ENEMY_BULLET_SPEED),
+					"ttl": ENEMY_BULLET_TTL_TICKS})
+			e["lunge_ticks"] = e["lunge_ticks"] - 1
+			if e["lunge_ticks"] > 0:
+				e["windup"] = MG_NEST_BURST_GAP_TICKS
+			else:
+				e["fire_cd"] = MG_NEST_BURST_CD_TICKS
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if e["fire_cd"] == 0 and dlen > F_ONE:
+		# Lock the aim on the target NOW and open a 3-round burst down that line.
+		e["aim_lx"] = dx
+		e["aim_ly"] = dy
+		e["lunge_ticks"] = MG_NEST_BURST_ROUNDS
+		e["windup"] = MG_NEST_AIM_TICKS
+		events.append({"t": "mg_nest_aim", "x": e["x"], "y": e["y"]})
 
 
 # --- Gates ---
@@ -1455,6 +1540,15 @@ func _step_camera() -> void:
 		if absi(_next_mine_y / MINE_SPACING) % 2 == 0:
 			mines.append({"x": rng.range_i(70, 570) * F_ONE, "y": _next_mine_y, "armed": true})
 		_next_mine_y -= MINE_SPACING
+	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
+	# grenade chains through (and that catches you if you stand too close).
+	while _next_barrel_y > camera_top - 2 * VIEW_H:
+		if absi(_next_barrel_y / BARREL_SPACING) % 2 == 1:
+			var bx := rng.range_i(60, 520) * F_ONE
+			for c in rng.range_i(2, 3):
+				barrels.append({"x": bx + c * BARREL_CLUSTER_GAP,
+					"y": _next_barrel_y + rng.range_i(-8, 8) * F_ONE, "armed": true})
+		_next_barrel_y -= BARREL_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
 		if _gate_counter == FINAL_GATE_INDEX:
@@ -1529,7 +1623,7 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 6)
+				var roll := rng.range_i(0, 7)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -1540,6 +1634,8 @@ func _step_waves() -> void:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
 				elif roll == 4:
 					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
+				elif roll == 5:
+					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
@@ -1964,7 +2060,7 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
-				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"]]:
+				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"], int(p["triple"])]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)
@@ -1990,6 +2086,11 @@ func checksum() -> int:
 		h = feed.call(m["x"], h)
 		h = feed.call(m["y"], h)
 		h = feed.call(int(m["armed"]), h)
+	h = feed.call(barrels.size(), h)
+	for bl in barrels:
+		h = feed.call(bl["x"], h)
+		h = feed.call(bl["y"], h)
+		h = feed.call(int(bl["armed"]), h)
 	h = feed.call(tanks.size(), h)
 	for t in tanks:
 		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:

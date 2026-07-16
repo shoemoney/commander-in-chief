@@ -74,7 +74,11 @@ func test_broke_respawn_uses_checkpoint() -> void:
 	# tick; the ratchet may then follow the respawned player within the same
 	# step, so assert the invariants rather than re-deriving the exact clamp:
 	# never north of the checkpoint line, and always inside the current view.
-	Runner.T.ok(p["y"] >= sim.last_gate_y + 30 * Fixed.ONE, "respawn never north of the checkpoint")
+	# If the player out-marched the checkpoint off the bottom of the screen, the
+	# never-retreating ratchet caps the respawn at the south view edge (you can't
+	# spawn off-screen south), so the reachable floor is min(checkpoint, view bottom).
+	Runner.T.ok(p["y"] >= mini(sim.last_gate_y + 30 * Fixed.ONE, sim.camera_top + 344 * Fixed.ONE),
+		"respawn never north of the checkpoint (clamped into the current view)")
 	Runner.T.ok(p["y"] >= sim.camera_top + 16 * Fixed.ONE
 		and p["y"] <= sim.camera_top + 344 * Fixed.ONE, "respawn inside the current view")
 

@@ -334,3 +334,86 @@ func _hard_spawn_count(hard: bool) -> int:
 func test_ng_plus_hard_tightens_the_spawn_curve() -> void:
 	Runner.T.ok(_hard_spawn_count(true) > _hard_spawn_count(false),
 		"NG+ HARD fields more enemies than the normal campaign curve")
+
+
+func test_barrels_chain_and_frag_the_pack() -> void:
+	# One grenade on a barrel chains down a line and kills an enemy between them.
+	var sim := SimWorld.new(1, 1)
+	var y: int = sim.camera_top + 120 * Fixed.ONE
+	sim.barrels.clear()
+	sim.enemies.clear()
+	sim.barrels.append({"x": 200 * Fixed.ONE, "y": y, "armed": true})
+	sim.barrels.append({"x": 218 * Fixed.ONE, "y": y, "armed": true})   # 18px apart < GRENADE_RADIUS
+	sim.barrels.append({"x": 236 * Fixed.ONE, "y": y, "armed": true})
+	sim.enemies.append({"x": 236 * Fixed.ONE, "y": y, "alive": true, "elite": false, "kind": "rusher"})
+	var foe: Dictionary = sim.enemies[0]
+	sim._explode(200 * Fixed.ONE, y)   # detonate only the first barrel
+	for bl in sim.barrels:
+		Runner.T.ok(not bl["armed"], "the whole barrel line chained")
+	Runner.T.ok(not foe["alive"], "the chain reaction fragged the enemy at the far end")
+
+
+func test_barrel_blast_hurts_a_close_player() -> void:
+	# Stand too close to a barrel you detonate and it takes you with it.
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["vest"] = true
+	sim.barrels.clear()
+	sim.barrels.append({"x": p["x"] + 10 * Fixed.ONE, "y": p["y"], "armed": true})
+	sim._explode(p["x"] + 10 * Fixed.ONE, p["y"])
+	Runner.T.ok(not p["vest"], "the barrel blast broke the too-close player's vest")
+
+
+func test_mg_nest_is_rooted_and_bursts() -> void:
+	var sim := SimWorld.new(1, 1)
+	var ct: int = sim.camera_top
+	sim.enemies.clear()
+	sim._spawn_mg_nest(320 * Fixed.ONE, ct + 80 * Fixed.ONE)
+	var nest: Dictionary = sim.enemies[0]
+	var x0: int = nest["x"]
+	var y0: int = nest["y"]
+	sim.players[0]["x"] = 200 * Fixed.ONE   # in its field of fire, but the nest never chases
+	sim.players[0]["y"] = ct + 220 * Fixed.ONE
+	var bullets_seen := 0
+	for i in 200:
+		sim.step(_inputs(_idle()))
+		bullets_seen = maxi(bullets_seen, sim.enemy_bullets.size())
+	Runner.T.eq(nest["x"], x0, "the MG nest never moves in x")
+	Runner.T.eq(nest["y"], y0, "the MG nest never moves in y")
+	Runner.T.ok(bullets_seen > 0, "the MG nest rakes the lane with aimed fire")
+
+
+func test_mg_nest_dies_to_a_grenade() -> void:
+	var sim := SimWorld.new(1, 1)
+	sim.enemies.clear()
+	sim._spawn_mg_nest(300 * Fixed.ONE, sim.camera_top + 90 * Fixed.ONE)
+	var nest: Dictionary = sim.enemies[0]
+	sim._explode(nest["x"], nest["y"])
+	Runner.T.ok(not nest["alive"], "a grenade silences the MG nest")
+
+
+func test_triple_shot_sprays_three_bullets() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["triple"] = true
+	var inp := SimInput.new()
+	inp.aim_y = -256   # aim straight up
+	inp.fire = true
+	sim.step(_inputs(inp))
+	Runner.T.eq(sim.bullets.size(), 3, "triple shot fires three bullets on one trigger pull")
+	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX - 1, "the 3-round fan still costs a single round")
+	var vmin := 1 << 40
+	var vmax := -(1 << 40)
+	for b in sim.bullets:
+		vmin = mini(vmin, b["vx"])
+		vmax = maxi(vmax, b["vx"])
+	Runner.T.ok(vmin < 0 and vmax > 0, "the fan spreads left and right of the aim")
+
+
+func test_triple_pickup_grants_and_death_strips() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	sim._apply_supply(p, 6)   # kind 6 = Triple Shot (4=pierce, 5=spread already taken)
+	Runner.T.ok(p["triple"], "the triple-shot supply kind grants the mod")
+	sim._respawn(p, p["y"])   # revive path = the 1986 upgrade strip
+	Runner.T.ok(not p["triple"], "death/respawn strips the Triple Shot mod")

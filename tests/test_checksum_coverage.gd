@@ -18,7 +18,7 @@ const KNOWN := {
 	"player": ["idx", "x", "y", "aim_x", "aim_y", "alive", "deaths", "mg_ammo", "grenade_ammo",
 		"fire_cd", "grenade_cd", "broke_timer", "roll_ticks", "roll_cd", "roll_buf",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
-		"grenade_prev", "vest", "hurt_iframes", "pierce_ticks", "spread_ticks"],
+		"grenade_prev", "vest", "hurt_iframes", "pierce_ticks", "spread_ticks", "triple"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell"],
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
@@ -32,6 +32,7 @@ const KNOWN := {
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	"mine": ["x", "y", "armed"],
+	"barrel": ["x", "y", "armed"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
 		"core_cd", "core_open"],
@@ -77,6 +78,8 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("enemy_bullet", eb)
 		for m in sim.mines:
 			_check("mine", m)
+		for bl in sim.barrels:
+			_check("barrel", bl)
 		for s in sim.strikes:
 			_check("strike", s)
 		for w in sim.waters:
