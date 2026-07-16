@@ -151,6 +151,53 @@ const TEX := {
 	"item_bullet": preload(SY + "mil2/item_bullet.png"),
 	"item_bullet_shotgun": preload(SY + "mil2/item_bullet_shotgun.png"),
 	"item_binoculars": preload(SY + "mil2/item_binoculars.png"),
+	# --- POLYGON Military/Battle Royale p2 bake (specialists, hulks, litter) ---
+	"ghillie": preload(SY + "p2/ghillie.png"),
+	"courier": preload(SY + "p2/courier.png"),
+	"sapper": preload(SY + "p2/sapper.png"),
+	"tank_shell": preload(SY + "p2/tank_shell.png"),
+	"pickup_vest": preload(SY + "p2/pickup_vest.png"),
+	"tank_hulk": preload(SY + "p2/tank_hulk.png"),
+	"tree_dead1": preload(SY + "p2/tree_dead1.png"),
+	"tree_dead2": preload(SY + "p2/tree_dead2.png"),
+	"tree_dead3": preload(SY + "p2/tree_dead3.png"),
+	"wall_sandbag": preload(SY + "p2/wall_sandbag.png"),
+	"wall_sandbag_end": preload(SY + "p2/wall_sandbag_end.png"),
+	"bunker2": preload(SY + "p2/bunker2.png"),
+	"corpse_soldier1": preload(SY + "p2/corpse_soldier1.png"),
+	"corpse_soldier2": preload(SY + "p2/corpse_soldier2.png"),
+	"fx_flame": preload(SY + "p2/fx_flame.png"),
+	"fx_bubble1": preload(SY + "fx/bubble1.png"),
+	"fx_bubble2": preload(SY + "fx/bubble2.png"),
+	# --- Apocalypse HUD input glyphs (device-aware prompts; see glyph_key) ---
+	"glyph_pad_a": preload(SY + "ui/glyphs/pad_a.png"),
+	"glyph_pad_start": preload(SY + "ui/glyphs/pad_start.png"),
+	"glyph_rt": preload(SY + "ui/glyphs/pad_rt.png"),
+	"glyph_lb": preload(SY + "ui/glyphs/pad_lb.png"),
+	"glyph_dpad_lr": preload(SY + "ui/glyphs/dpad_lr.png"),
+	"glyph_stick_l": preload(SY + "ui/glyphs/stick_l.png"),
+	"glyph_stick_r": preload(SY + "ui/glyphs/stick_r.png"),
+	"glyph_mouse_l": preload(SY + "ui/glyphs/mouse_l.png"),
+	"glyph_mouse_r": preload(SY + "ui/glyphs/mouse_r.png"),
+	"glyph_key_space": preload(SY + "ui/glyphs/key_space.png"),
+	"glyph_key_enter": preload(SY + "ui/glyphs/key_enter.png"),
+	"glyph_key_wide": preload(SY + "ui/glyphs/key_wide.png"),
+	# --- Modern Menus ortho icons (menu rows / toggles) ---
+	"mi_snd_on": preload(SY + "ui/menuicons/snd_on.png"),
+	"mi_snd_off": preload(SY + "ui/menuicons/snd_off.png"),
+	"mi_mus_on": preload(SY + "ui/menuicons/mus_on.png"),
+	"mi_mus_off": preload(SY + "ui/menuicons/mus_off.png"),
+	"mi_trophy": preload(SY + "ui/menuicons/trophy.png"),
+	"mi_book": preload(SY + "ui/menuicons/book.png"),
+	"mi_play": preload(SY + "ui/menuicons/play.png"),
+	"mi_controller": preload(SY + "ui/menuicons/controller.png"),
+	"mi_keyboard": preload(SY + "ui/menuicons/keyboard.png"),
+	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
+	"ui_tooltip": preload(SY + "hud/SPR_HUD_Tooltip.png"),
+	"ui_frame_lrg": preload(SY + "hud/SPR_HUD_Frame_Lrg.png"),
+	"ui_frame_lrg_under": preload(SY + "hud/SPR_HUD_Frame_Lrg_Underlay.png"),
+	"ui_wheel_plate": preload(SY + "hud/SPR_Apocalypse_WeaponWheel.png"),
+	"ui_cursor": preload(SY + "ui/cursor.png"),
 }
 
 ## Per-sprite draw multiplier so a legacy art bake lands at the Kenney footprint the
@@ -185,6 +232,18 @@ const SCALE := {
 	"wep_grenade": 0.34, "wep_rpg": 0.4, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
 	"wep_pistol": 0.32, "wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
 	"item_bullet": 0.32, "item_bullet_shotgun": 0.32, "item_binoculars": 0.34,
+	# p2: specialists match cast2 unit footprints (64px canvas vs cast2's 300px,
+	# so raw multipliers run larger); litter/hulks fold to their swap targets.
+	"ghillie": 2.2, "courier": 2.2, "sapper": 2.2,
+	"tank_shell": 0.8,               # ~grenade footprint (26px)
+	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
+	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)
+	"tree_dead1": 0.89, "tree_dead2": 0.89, "tree_dead3": 0.89,   # ~tree_large
+	"wall_sandbag": 0.28, "wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
+	"bunker2": 0.17,                 # ~bunker (same 440px canvas)
+	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
+	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
+	"fx_bubble1": 0.18, "fx_bubble2": 0.18,   # 512px cards → ~92px FX footprint
 }
 
 ## Desert→jungle shift, multiplied onto the draw modulate. Units/vehicles take
@@ -234,6 +293,17 @@ const TINT := {
 	"wep_flashbang": Color(1.1, 1.1, 1.0),
 	"item_bullet": Color(1.3, 1.2, 0.9), "item_bullet_shotgun": Color(1.3, 1.2, 0.9),
 	"item_binoculars": Color(1.15, 1.2, 1.1),
+	# p2 specialists are threats — warm/bright per the insurgent readability rule.
+	"ghillie": Color(1.7, 1.5, 1.05), "courier": Color(2.1, 1.7, 1.15),
+	"sapper": Color(1.7, 1.35, 0.9),
+	"bunker2": Color(1.0, 0.95, 0.82),
+	"pickup_vest": Color(0.82, 0.88, 0.62),
+	# Dead things recede like the wreck/decor litter.
+	"tank_hulk": Color(0.55, 0.58, 0.52),
+	"tree_dead1": Color(0.72, 0.68, 0.55), "tree_dead2": Color(0.72, 0.68, 0.55),
+	"tree_dead3": Color(0.72, 0.68, 0.55),
+	"corpse_soldier1": Color(0.7, 0.68, 0.58), "corpse_soldier2": Color(0.7, 0.68, 0.58),
+	"wall_sandbag": Color(0.88, 0.92, 0.66), "wall_sandbag_end": Color(0.88, 0.92, 0.66),
 }
 
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
@@ -252,11 +322,25 @@ const OUTLINE := {
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
 	"wep_grenade": true, "wep_rpg": true, "wep_shotgun": true,
 	"wep_rifle": true, "wep_mg": true, "item_bullet": true, "item_bullet_shotgun": true,
+	"ghillie": true, "courier": true, "sapper": true,
+	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
+	"wall_sandbag": true, "wall_sandbag_end": true,
 }
 
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+
+## Semantic hint → registry key for the device-aware prompt sprites (see
+## glyph_key below). Pad column mirrors the bindings in main._gather_inputs;
+## keyboard column favors the mouse/keycap art (WASD/arrows land on the wide
+## blank keycap for callers to stamp, per the ui_key_blank letter pattern).
+const _HINT_PAD := {"confirm": "glyph_pad_a", "back": "ui_pad_b",
+	"start": "glyph_pad_start", "fire": "glyph_rt", "grenade": "glyph_lb",
+	"move": "glyph_stick_l", "aim": "glyph_stick_r", "nav_lr": "glyph_dpad_lr"}
+const _HINT_KB := {"confirm": "glyph_key_enter", "back": "ui_key_blank",
+	"start": "glyph_key_enter", "fire": "glyph_mouse_l", "grenade": "glyph_mouse_r",
+	"move": "glyph_key_wide", "aim": "glyph_key_wide", "nav_lr": "glyph_key_wide"}
 
 
 static func tex(name: String) -> Texture2D:
@@ -343,6 +427,16 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
+
+
+## Device-aware prompt lookup: semantic action hint ('confirm', 'back',
+## 'start', 'fire', 'grenade', 'move', 'aim', 'nav_lr') → TEX registry key for
+## the current device (use_pad). Total: unknown hints fall back to the
+## confirm glyph so callers always get a drawable key.
+static func glyph_key(action_hint: String) -> String:
+	if use_pad:
+		return _HINT_PAD.get(action_hint, "glyph_pad_a")
+	return _HINT_KB.get(action_hint, "glyph_key_enter")
 
 
 static func cell_hash(ix: int, iy: int) -> int:
