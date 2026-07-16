@@ -125,6 +125,9 @@ func _notes(freqs: Array[float], note_dur: float, gap := 0.0, square := true) ->
 		for j in int(note_dur * RATE):
 			var t := float(j) / RATE
 			var v := (_sq(t, f) if square else sin(TAU * f * t)) * exp(-t * 9.0) * 0.5
+			# 6ms release ramp: the decay envelope is still ~53% when the note ends,
+			# and that hard step is an audible click on every pickup/buy jingle.
+			v *= minf(1.0, (note_dur - t) / 0.006)
 			b[start + j] += v
 	return b
 
