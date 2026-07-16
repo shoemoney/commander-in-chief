@@ -75,6 +75,7 @@ var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame allo
 var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
+var _scan_mat: ShaderMaterial        # CRT scanline quad material; strength pulses on hitstop
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
@@ -226,9 +227,9 @@ func _setup_screen_fx() -> void:
 		scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		scan.size = get_viewport_rect().size
 		scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var scan_mat := ShaderMaterial.new()
-		scan_mat.shader = load("res://src/view/crt.gdshader")
-		scan.material = scan_mat
+		_scan_mat = ShaderMaterial.new()
+		_scan_mat.shader = load("res://src/view/crt.gdshader")
+		scan.material = _scan_mat
 		fx_layer.add_child(scan)
 	_screen_fx_rect = ColorRect.new()
 	_screen_fx_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -340,6 +341,13 @@ func _process(_delta: float) -> void:
 	_screen_fx_rect.visible = on
 	if on:
 		_screen_fx_mat.set_shader_parameter("concussion", amt)
+	# CRT scanlines surge darker on a big hit and ease back as the freeze decays —
+	# reuses the already-drawn scan quad (zero added fillrate). Baseline 0.08 = the
+	# shader default, so at rest the look is unchanged. Null when the scan quad is
+	# skipped (canvas_items stretch / movie capture); _motion-gated for reduce-motion.
+	if _scan_mat != null:
+		var hs := clampf(float(_hitstop_frames) / 10.0, 0.0, 1.0) * _motion
+		_scan_mat.set_shader_parameter("strength", 0.08 + hs * 0.12)
 
 
 func start_game(endless: bool) -> void:
@@ -1460,7 +1468,12 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 
 
 func _update_feel() -> void:
-	_trauma = maxf(0.0, _trauma - 0.03)
+	# Impact envelopes (_trauma/_punch/_kick) HOLD at peak through the hitstop
+	# freeze — otherwise the biggest hits (which set the longest freeze) bleed
+	# ~85% of their shake+zoom-punch off before the world unfreezes, gutting the
+	# springback that should play over the resuming motion.
+	if _hitstop_frames == 0:
+		_trauma = maxf(0.0, _trauma - 0.03)
 	# Impact envelopes decay multiplicatively (fast drop, long tail) so hits snap;
 	# linear release reads flat. Floors avoid a lingering near-zero tail.
 	_flash_alpha = _flash_alpha * 0.7 if _flash_alpha > 0.01 else 0.0
@@ -1472,7 +1485,8 @@ func _update_feel() -> void:
 	for _hi in _hitmarker.size():
 		_hitmarker[_hi] = _hitmarker[_hi] * 0.6 if _hitmarker[_hi] > 0.01 else 0.0
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
-	_punch = _punch * 0.82 if _punch > 0.002 else 0.0
+	if _hitstop_frames == 0:
+		_punch = _punch * 0.82 if _punch > 0.002 else 0.0
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
 	_concussion = maxf(0.0, _concussion - 0.035)
@@ -1541,7 +1555,8 @@ func _update_feel() -> void:
 			_down_anim[i] = 0.0
 		else:
 			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
-	_kick *= 0.78
+	if _hitstop_frames == 0:
+		_kick *= 0.78
 	# Gamepad rumble: one pooled pulse per frame across connected pads.
 	if _rumble > 0.01:
 		if _rumble_on:
