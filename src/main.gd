@@ -95,6 +95,7 @@ var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water s
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
 var _hit_dir_t := 0.0
 var _hit_dir_player := 0         # which player's body the wedge emanates from
+var _downed_by := ""             # label of the last lethal source, shown in the K.I.A. debrief
 var _record_fired := false       # NEW RECORD banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _seen := {}                  # persisted first-time-hint flags
@@ -475,6 +476,7 @@ func _reset() -> void:
 	_hint_t = 0.0
 	_hint_queue.clear()
 	_run_kills = 0
+	_downed_by = ""
 	_last_gate_tick = 0
 	_best_gate_split = 0
 	_run_best_streak = 0
@@ -1408,11 +1410,13 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 	# "where did that come from?" answer a one-hit game owes the player.
 	var best := 1 << 62
 	var dir := Vector2.ZERO
+	var src := ""
 	for b in sim.enemy_bullets:
 		var d: int = (b["x"] - px) * (b["x"] - px) + (b["y"] - py) * (b["y"] - py)
 		if d < best:
 			best = d
 			dir = Vector2(b["x"] - px, b["y"] - py)
+			src = "GUNFIRE"
 	for e in sim.enemies:
 		if not e["alive"]:
 			continue
@@ -1420,6 +1424,7 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 		if d2 < best:
 			best = d2
 			dir = Vector2(e["x"] - px, e["y"] - py)
+			src = String(e["kind"]).to_upper()
 	# Mortar strikes and the colossus crush kill too — a wedge that only
 	# scanned bullets/infantry pointed at the wrong threat for those deaths.
 	for s in sim.strikes:
@@ -1427,15 +1432,19 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 		if ds < best:
 			best = ds
 			dir = Vector2(s["x"] - px, s["y"] - py)
+			src = "MORTAR FIRE"
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		var cx: int = sim.colossus["x"] - px
 		var cy: int = sim.colossus["y"] - py
 		if cx * cx + cy * cy < best:
 			dir = Vector2(cx, cy)
+			src = "THE COLOSSUS"
 	if dir.length() > 1.0:
 		_hit_dir = dir.normalized()
 		_hit_dir_t = 1.0
 		_hit_dir_player = pidx
+		if src != "":
+			_downed_by = src
 		if pidx >= 0 and pidx < _hit_flinch.size():
 			_hit_flinch[pidx] -= _hit_dir * 3.0   # shove the body AWAY from the source
 
@@ -3752,6 +3761,8 @@ func _draw_banners(top_msg: String) -> void:
 		]
 		var rr := _run_rank()
 		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col})
+		if _downed_by != "":
+			rows.insert(1, {"text": "DOWNED BY  %s" % _downed_by, "color": Color(1.0, 0.55, 0.5)})
 		if best_score > 0:
 			rows.append({"text": "BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""),
 				"color": Color(0.9, 0.92, 0.85)})
