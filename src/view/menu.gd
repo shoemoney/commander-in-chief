@@ -452,6 +452,8 @@ func _draw_howto() -> void:
 	var special := [
 		"GRENADIER — lobs a telegraphed blast on your spot. Keep moving.",
 		"SNIPER — paints a laser line, then fires. Sidestep it.",
+		"GHILLIE — hidden sniper; only its laser gives it away. Close in.",
+		"SAPPER — seeds mines behind it. Don't chase over its trail.",
 		"SHIELD — front blocks bullets. Flank it or grenade it."]
 	for i in special.size():
 		Art.text(self, special[i], Vector2(72, 274 + i * 15), 10, Color(0.88, 0.9, 0.8))
