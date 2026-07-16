@@ -50,6 +50,8 @@ var _hulks: Array[Dictionary] = []    # dead-tank wrecks, persistent (view-only 
 var _tank_alive_prev := {}            # per-tank-index prev alive flag (edge-detects the death)
 var _cursor_styled := false           # custom OS cursor active (menus/debrief only)
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
+var _cursor_menu: ImageTexture        # boot-baked scaled menu pointer (from ui_cursor)
+var _cursor_s := 1                     # window integer scale the cursors were baked at
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
@@ -108,6 +110,7 @@ var _hit_dir_t := 0.0
 var _hit_dir_player := 0         # which player's body the wedge emanates from
 var _downed_by := ""             # label of the last lethal source, shown in the K.I.A. debrief
 var _record_fired := false       # NEW RECORD banner once per run
+var _deep_fired := false         # DEEPEST WAVE banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _boss_hpmax := {}            # view-side max HP seen per boss key: the endless gunship spawns above BOSS_HP (sim_world.gd:1581), which pegged its bar at 100% for half the fight
 var _seen := {}                  # persisted first-time-hint flags
@@ -123,10 +126,22 @@ var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
+var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
+var _seen_kinds := {}             # enemy kind → true once its first-encounter banner fired
+# First-sighting teaching cards for the lethal archetypes that debut deep (sector 4+)
+# in a one-hit game — named + told how to answer, once per run. View-only.
+const _KIND_TEACH := {
+	"sniper": "LASER SNIPER — BREAK THE LINE",
+	"ghillie": "GHILLIE SNIPER — FLUSH IT OUT",
+	"grenadier": "GRENADIER — MOVE OFF YOUR GROUND",
+	"shield": "RIOT SHIELD — FLANK OR GRENADE",
+	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
+	"sapper": "SAPPER — MIND THE MINE TRAIL",
+}
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
 const SAVE_TMP := "user://ikari_best.cfg.tmp"
@@ -225,6 +240,7 @@ func _ready() -> void:
 	# Deferred: fullscreen (restored in _load_bests) resizes the window after
 	# this frame, and the cursor bake reads the window size for its scale.
 	call_deferred("_bake_cursor")
+	get_viewport().size_changed.connect(_on_window_resized)   # re-bake cursor on scale-crossing resize
 	_reset()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
@@ -540,10 +556,12 @@ func _reset() -> void:
 	_damage_vignette = 0.0
 	_banners.clear()
 	_seen_bosses = {}
+	_seen_kinds = {}
 	_prev_colossus_phase = 0
 	_hitmarker = [0.0, 0.0]
 	_hit_dir_t = 0.0
 	_record_fired = false
+	_deep_fired = false
 	_boss_ghost.clear()
 	_boss_hpmax.clear()
 	_punch = 0.0
@@ -601,8 +619,22 @@ func _bake_cursor() -> void:
 		cur_img.decompress()   # reticle ships VRAM-compressed; resize needs raw pixels
 	cur_img.resize(24 * s, 24 * s, Image.INTERPOLATE_LANCZOS)
 	_cursor_crosshair = ImageTexture.create_from_image(cur_img)
-	Input.set_custom_mouse_cursor(_cursor_crosshair,
-		Input.CURSOR_ARROW, Vector2.ONE * 12.0 * s)
+	# Menu pointer scaled to match (was native-size — a speck at 2x/3x).
+	var men_img := Art.tex("ui_cursor").get_image()
+	if men_img.is_compressed():
+		men_img.decompress()
+	men_img.resize(men_img.get_width() * s, men_img.get_height() * s, Image.INTERPOLATE_LANCZOS)
+	_cursor_menu = ImageTexture.create_from_image(men_img)
+	_cursor_s = s
+	_apply_cursor(_cursor_styled)   # re-apply the current cursor at the freshly-baked scale
+
+
+func _apply_cursor(styled: bool) -> void:
+	# Hotspots scale with the baked art (_cursor_s), so the aim/click point never
+	# drifts off the pointer at 2x/3x/fullscreen.
+	Input.set_custom_mouse_cursor(_cursor_menu if styled else _cursor_crosshair,
+		Input.CURSOR_ARROW,
+		(Vector2.ONE * 2.0 * _cursor_s) if styled else (Vector2.ONE * 12.0 * _cursor_s))
 
 
 func _input(event: InputEvent) -> void:
@@ -731,9 +763,15 @@ func _update_cursor() -> void:
 	if styled == _cursor_styled:
 		return
 	_cursor_styled = styled
-	# Restore the gameplay crosshair (not null → the OS arrow) on menu close.
-	Input.set_custom_mouse_cursor(Art.tex("ui_cursor") if styled else _cursor_crosshair,
-		Input.CURSOR_ARROW, Vector2(2, 2) if styled else Vector2(12, 12))
+	_apply_cursor(styled)
+
+
+func _on_window_resized() -> void:
+	# A free resize that crosses an integer-scale boundary re-bakes the cursors
+	# (guarded so the decompress+resize doesn't run on every drag frame).
+	var win := DisplayServer.window_get_size()
+	if maxi(1, mini(win.x / 640, win.y / 360)) != _cursor_s:
+		call_deferred("_bake_cursor")
 
 
 func _physics_process(_delta: float) -> void:
@@ -882,6 +920,22 @@ func _consume_events() -> void:
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -16.0, 1.7)
+				# Riot-shield deflect: armor_block fires for bunkers AND shields, but a
+				# shieldman eating your frontal rounds looked identical to plinking a
+				# wall. If the block landed on a shieldman, add a bright cyan ricochet
+				# flash + a throttled metallic ping so "wasted from the front — flank
+				# him" reads at the impact. Reads the event + existing enemy state.
+				for se in sim.enemies:
+					if se["alive"] and se.get("kind", "") == "shield" \
+							and absi(se["x"] - ev["x"]) < 14 * Fixed.ONE \
+							and absi(se["y"] - ev["y"]) < 14 * Fixed.ONE:
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+							"tex": "fx_sparkle", "sz": 6.0, "fade": 2.0, "rate": 0.16,
+							"col": Color(0.55, 0.85, 1.0, 0.9)})
+						if Engine.get_physics_frames() - _deflect_frame >= 10:
+							_deflect_frame = Engine.get_physics_frames()
+							_sfx.play_at("tank_board", _to_screen(ev["x"], ev["y"]), -15.0, 2.5)
+						break
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
@@ -1280,6 +1334,13 @@ func _ev_kill(ev: Dictionary) -> void:
 	if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 			"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
+		# The sim awards a real +25/50/100% score bonus at these tiers, but only
+		# the 20-streak ever FELT it. Pop the earned bonus as a bold gold headline
+		# + a brief white flash so hitting 5 and 10 read as milestones, not noise.
+		var streak_bonus := 25 if _kill_streak == 5 else 50 if _kill_streak == 10 else 100
+		_fx.append({"x": ev["x"], "y": ev["y"] - 12, "t": -0.14, "kind": "floattext",
+			"rate": 0.016, "size": 13, "text": "+%d%%!" % streak_bonus, "col": Color(1.0, 0.92, 0.4)})
+		_flash_alpha = maxf(_flash_alpha, 0.14 + _kill_streak * 0.006)
 		_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
@@ -1562,9 +1623,11 @@ func _record_run() -> void:
 	for g in sim.gates:
 		if g["open"]:
 			opened += 1
+	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
 	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
-		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist})
+		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
+		"grade": rr.grade, "title": rr.title})
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
@@ -1657,6 +1720,13 @@ func _track_bests() -> void:
 		best_score = sim.score
 		_best_dirty = true
 	if sim.mode == "endless" and sim.wave > best_wave:
+		# DEEPEST WAVE milestone: the first wave this run pushes past the standing
+		# best (from prior runs) is a real record — fire it once. best_wave>0 skips
+		# the every-wave noise on a first-ever endless run (mirrors the score guard).
+		if not _deep_fired and best_wave > 0:
+			_deep_fired = true
+			_show_banner("DEEPEST WAVE %d" % sim.wave)
+			_sfx.play("wave_clear", -4.0, 1.25)
 		best_wave = sim.wave
 		_best_dirty = true
 	var dist := -Fixed.to_int(sim.camera_top) / 10
@@ -2140,11 +2210,11 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		w["t"] = lerpf(float(w.get("t", 1.0)), 1.0, 0.35)
 		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
 		# selection used to be a one-way trap: any flick force-bought on release.
-		var cancel := Input.is_key_pressed(KEY_C)
-		for pad in Input.get_connected_joypads():
-			if Input.is_joy_button_pressed(pad, JOY_BUTTON_B):
-				cancel = true
-				break
+		# Per-device (matches the wheel's own open/aim split): P1 = keyboard C +
+		# pad 0, P2 = pad 1 only — so one player's roll can't cancel the OTHER's
+		# pick. Physical KEY_C matches the roll bind (AZERTY-safe).
+		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(KEY_C)) \
+			or Input.is_joy_button_pressed(i, JOY_BUTTON_B)
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("dry_fire", -14.0, 1.1)   # soft declined tick
@@ -2301,6 +2371,18 @@ func _draw() -> void:
 				_spr("bunker2", c, 0.0, 0.78)
 			else:
 				_spr("bunker", c, PI, 0.78, Color.WHITE, -1.0)
+			# Hatch charging: a front-mouth glow that swells as the 120-tick spawn
+			# timer nears zero and peaks into a bright emit flash the instant it
+			# fires — a rusher popping out of the mouth is no longer a free hit.
+			# Derived from the existing spawn_cd; no sim state touched.
+			var charge := 1.0 - float(bk["spawn_cd"]) / float(SimWorld.BUNKER_SPAWN_INTERVAL_TICKS)
+			if charge > 0.45:
+				var cr := ease(clampf((charge - 0.45) / 0.55, 0.0, 1.0), 2.0)
+				var mouth := c + Vector2(0, 10)
+				draw_texture_rect(Art.tex("fx_softspot"),
+					Rect2(mouth - Vector2.ONE * (4.0 + cr * 7.0), Vector2.ONE * (8.0 + cr * 14.0)),
+					false, Color(1.0, 0.6, 0.25, 0.22 + cr * 0.5))
+				draw_circle(mouth, 1.5 + cr * 2.5, Color(1.0, 0.85, 0.5, 0.4 + cr * 0.5))
 			# A recon drone loiters above an active strongpoint — a small orbiting
 			# silhouette that reads the bunker as 'watched'. Phase offset per bunker
 			# so multiples don't fly in lockstep. Pure ambient view.
@@ -2534,6 +2616,13 @@ func _draw_barrels() -> void:
 		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
 		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
 		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
+		# Blast-radius ring: grenades telegraph their kill circle (the ONLY other
+		# radius damage) and barrels share the same GRENADE_RADIUS — show it.
+		draw_arc(bp, SimWorld.GRENADE_RADIUS * PX, 0, TAU, 24,
+			Color(1.0, 0.45, 0.15, 0.10 + wb * 0.06), 1.0)
+		# Non-color danger cue: hue-blind players got only orange — the "!" pip
+		# carries "live ordnance" on the shape channel (destructive-row grammar).
+		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
 
 
 func _draw_water() -> void:
@@ -2760,6 +2849,12 @@ func _draw_enemies() -> void:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			continue
+		# First-sighting teaching card: name the archetype + its counter the first
+		# time it appears this run (these debut at sector 4 with no introduction).
+		var ekind: String = e["kind"]
+		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
+			_seen_kinds[ekind] = true
+			_show_banner(_KIND_TEACH[ekind], Color(1.0, 0.55, 0.4))
 		var epos := _to_screen(e["x"], e["y"])
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).
@@ -2831,20 +2926,35 @@ func _draw_enemies() -> void:
 				_spr("frogman", epos, face, 0.4 + sfrac * 0.1,
 					Color(0.7, 0.9, 0.95, 0.4 + sfrac * 0.6))
 			else:
-				_spr("frogman", epos, face, 0.5)
+				var flunge: int = e.get("lunge_ticks", 0)
+				if flunge > 0:
+					# Lethal lunge: the safe surface window is over — contact now
+					# kills. Hot-red tint + a forward wake smear along its facing
+					# sell "this is the dangerous frame", so the kill window that
+					# just closed isn't followed by a silent death.
+					var fdir := Vector2.from_angle(face)
+					draw_line(epos - fdir * 10.0, epos + fdir * 2.0, Color(1.0, 0.3, 0.2, 0.5), 3.0)
+					_spr("frogman", epos, face, 0.52, Color(1.5, 0.5, 0.4))
+				else:
+					_spr("frogman", epos, face, 0.5)
 		elif e["kind"] == "sniper":
 			# Paints a laser line on its target during the long windup — the
 			# 'get off this line NOW' telegraph. Break LOS or sidestep.
 			var swu: int = e.get("windup", 0)
-			if swu > 0 and not target.is_empty():
-				var tp := _to_screen(target["x"], target["y"])
+			if swu > 0:
+				# Beam follows the LOCKED shot vector (aim_lx/aim_ly at paint start),
+				# not the live target — sidestepping must visibly clear the line the
+				# same way it dodges the fired bullet.
+				var lp := _to_screen(e["x"] + e.get("aim_lx", 0), e["y"] + e.get("aim_ly", 0))
 				var pf := 1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)
+				var bdir := lp - epos
+				bdir = bdir.normalized() if bdir.length() > 0.001 else Vector2.RIGHT
 				# Final moments: strobe white (matches the mortar-telegraph grammar).
 				var lcol := Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5)
 				if swu <= 10 and (swu / 2) % 2 == 0:
 					lcol = Color(1.0, 1.0, 1.0, 0.95)
-				draw_line(epos, tp, lcol, 1.0 + pf * 2.0)
-				draw_circle(tp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
+				draw_line(epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
+				draw_circle(lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
 			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
 			_spr("m_contractor2", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # spec-ops marksman, violet-keyed
 		elif e["kind"] == "grenadier":
@@ -2852,6 +2962,15 @@ func _draw_enemies() -> void:
 			if gwu > 0:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
+				# Where the mortar lands: a faint amber ground ring at the LIVE
+				# target (the grenadier re-aims at fire time, so following it is
+				# honest), sized to the real kill footprint and filling as the lob
+				# nears — hands straight off to the strike telegraph on fire.
+				if not target.is_empty():
+					var mtp := _to_screen(target["x"], target["y"])
+					var mr := SimWorld.GRENADE_RADIUS * PX
+					draw_arc(mtp, mr, 0, TAU, 28, Color(1.0, 0.6, 0.15, 0.12 + gf * 0.35), 1.5)
+					draw_arc(mtp, mr * gf, 0, TAU, 24, Color(1.0, 0.55, 0.1, 0.15 + gf * 0.4), 1.5)
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("m_soldier2", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber, own silhouette
 		elif e["kind"] == "drone":
@@ -2885,6 +3004,12 @@ func _draw_enemies() -> void:
 			# The riot shield: a bright arc across the front — this side deflects.
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
+			# Rear SAFE-arc: the shield only eats the front cone, so its back is the
+			# flank counter. A faint green arc behind it (opposite the bright front
+			# arc) teaches "get around him" — Art.safe keeps it legible in colorblind.
+			var srear := face + PI
+			draw_arc(epos, 13.0, srear - 1.15, srear + 1.15, 14,
+				Art.safe(Color(0.4, 1.0, 0.5, 0.4)), 2.0)
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
 			# "he's seeding the ground behind him" is a gameplay telegraph.
@@ -2892,18 +3017,33 @@ func _draw_enemies() -> void:
 			var spp := Art.pulse(0.25)
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "mg_nest":
-			# Rooted emplacement: sandbag nest + gunner + a burst-line telegraph
-			# flashing down the LOCKED vector while it rakes.
+			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
+			# (6/9 panel reviewers: the old telegraph was one flat 44px stub that
+			# only existed mid-burst — aim was invisible, reload erased the lane).
 			_spr("sandbag_beige", epos, 0.0, 0.5, Color(0.82, 0.8, 0.62))
 			_spr("elite", epos + Vector2(0, -2), face, 0.4, Color(0.9, 0.85, 0.7))
-			if e.get("lunge_ticks", 0) > 0:
-				var lv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
-				if lv.length() > 1.0:
-					var ld := lv.normalized()
-					# Red lethal-lane vocabulary (matches the sniper "get off this line"),
-					# long enough to read as a whole lane, louder than a windup (ACTIVE fire).
-					draw_line(epos, epos + ld * 44.0, Color(1.0, 0.15, 0.12, 0.7), 2.0)
-					draw_circle(epos + ld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
+			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+			if nlv.length() > 1.0:
+				var nld := nlv.normalized()
+				var nburst: int = e.get("lunge_ticks", 0)
+				var nwu: int = e.get("windup", 0)
+				# The lane runs the bullet's actual flight, not a 44px stub.
+				var lane_end := epos + nld * 640.0
+				if nburst == SimWorld.MG_NEST_BURST_ROUNDS and nwu > 0:
+					# AIM: locked, winding up (the mg_nest_aim sting's visual twin) —
+					# amber lane fades in as the first round closes. Static alphas,
+					# so reduce-motion needs no gate.
+					var af := 1.0 - float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
+					draw_line(epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
+				elif nburst > 0:
+					# FIRING: hot lethal-red, sniper-line vocabulary — holds through
+					# the 8-tick gaps so the 3-round burst reads as one rake.
+					draw_line(epos, lane_end, Color(1.0, 0.15, 0.12, 0.7), 2.0)
+					draw_circle(epos + nld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
+				else:
+					# RELOAD: a dim stub down the LAST lane — the rooted-turret
+					# threat must not vanish for the whole 1.5s between bursts.
+					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.12), 1.0)
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
@@ -2921,17 +3061,21 @@ func _draw_enemies() -> void:
 				_spr("ghillie", epos, face, 0.42 + rf * 0.08, Color(1, 1, 1, 0.4 + rf * 0.6))
 			else:
 				# Revealed marksman: paints the sniper line during windup, then fires.
-				if gwu2 > 0 and not target.is_empty():
-					var tp2 := _to_screen(target["x"], target["y"])
+				if gwu2 > 0:
+					# Beam rides the LOCKED shot vector, not the live target — the
+					# fired bullet flies down aim_lx/aim_ly, so must the tell.
+					var lp2 := _to_screen(e["x"] + e.get("aim_lx", 0), e["y"] + e.get("aim_ly", 0))
 					var pf2 := 1.0 - float(gwu2) / float(SimWorld.SNIPER_WINDUP_TICKS)
+					var bdir2 := lp2 - epos
+					bdir2 = bdir2.normalized() if bdir2.length() > 0.001 else Vector2.RIGHT
 					# Same final-moment white strobe the sniper gets — a revealed
 					# ghillie fires the same lethal shot and deserves the same fair
 					# 'get off the line NOW' warning, not a silent kill.
 					var lcol2 := Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5)
 					if gwu2 <= 10 and (gwu2 / 2) % 2 == 0:
 						lcol2 = Color(1.0, 1.0, 1.0, 0.95)
-					draw_line(epos, tp2, lcol2, 1.0 + pf2)
-					draw_circle(tp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
+					draw_line(epos, epos + bdir2 * 900.0, lcol2, 1.0 + pf2)
+					draw_circle(lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
 				_spr("ghillie", epos, face, 0.5)   # real ghillie bake (was a green-keyed frogman)
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
@@ -2940,6 +3084,12 @@ func _draw_enemies() -> void:
 				var wfrac := 1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)
 				draw_circle(epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
 					Color(1.0, 0.85 - wfrac * 0.55, 0.2, 0.4 + wfrac * 0.6))
+				# Aim-stub: a short dashed lane toward the target, borrowing the sniper
+				# beam grammar so the elite's "I'm drawing a bead on YOU" reads instead
+				# of a lone chest ember. Kept a stub — the sim only aims at fire-time.
+				var edir := Vector2.from_angle(face)
+				draw_dashed_line(epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
+					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac, 3.0)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			_spr("elite", epos, face, 0.5 * esw, Color(1.35, 0.75, 0.7))
 		else:
@@ -3105,9 +3255,22 @@ func _draw_colossus() -> void:
 	var pulse := Art.pulse(0.2)
 	# Core window: when the plating is retracted, the core glows white-hot and
 	# a 'CORE EXPOSED' ring says 'shoot it NOW' — bullets chip it this beat.
-	if sim.colossus.get("core_open", 0) > 0:
-		draw_circle(cpos, 9.0 + pulse * 4.0, Color(1.0, 0.95, 0.7, 0.9))
-		draw_arc(cpos, 16.0 + pulse * 3.0, 0, TAU, 28, Color(1.0, 1.0, 0.6, 0.9), 2.5)
+	var co: int = sim.colossus.get("core_open", 0)
+	if co > 0:
+		# About-to-seal cue: in the final ~15 ticks the plating is retracting, so
+		# strobe the exposed-core ring toward red AND shrink it — "the window is
+		# closing, land it NOW" — instead of the window snapping shut silently and
+		# eating late bullets on sealed steel. Reuses the white-strobe grammar.
+		var sealf := clampf(1.0 - co / 15.0, 0.0, 1.0)   # 0 until the last 15 ticks, →1 at seal
+		var cshrink := 1.0 - sealf * 0.45
+		var ccore := Color(1.0, 0.95, 0.7, 0.9)
+		var cring := Color(1.0, 1.0, 0.6, 0.9)
+		if sealf > 0.0:
+			var seal_strobe := Color(1.0, 0.2, 0.15) if (co / 2) % 2 == 0 else Color(1.0, 0.85, 0.45)
+			ccore = ccore.lerp(seal_strobe, sealf)
+			cring = cring.lerp(Color(1.0, 0.2, 0.15, 0.95), sealf)
+		draw_circle(cpos, (9.0 + pulse * 4.0) * cshrink, ccore)
+		draw_arc(cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
 	else:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center so the fill never hides under the HUD panel. Shake-immune:
@@ -3218,15 +3381,21 @@ func _draw_projectiles() -> void:
 		var bpos := _to_screen(b["x"], b["y"])
 		# Travel streak behind the orb so incoming fire reads as moving ordnance,
 		# not a hovering dot (the player tracers already get this motion read).
-		var edir := Vector2(b["vx"], b["vy"]).normalized()
+		var evel := Vector2(b["vx"], b["vy"])
+		var edir := evel.normalized()
+		# Streak length scales with speed so a 2× round (sniper/ghillie, speed 6)
+		# visibly reads 2× the standard round (speed 3): ~5px → ~11px tail.
+		var espd := evel.length() / float(SimWorld.ENEMY_BULLET_SPEED)   # 1.0 standard, ~2.0 fast
+		var fast: bool = espd > 1.4
 		if edir.length() > 0.5:
-			draw_line(bpos - edir * 5.0, bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
-		# Hostile fire: small glowing red orb — ordnance, not infantry.
+			draw_line(bpos - edir * (5.0 + maxf(0.0, espd - 1.0) * 6.0), bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
+		# Hostile fire: small glowing red orb — ordnance, not infantry. Fast rounds
+		# burn a white-hot core so their speed reads before they reach you.
 		var egr := 4.4
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
 			false, Color(1.0, 0.3, 0.15, 0.55))
-		draw_circle(bpos, 1.6, Color(1.0, 0.55, 0.35))
-		draw_circle(bpos, 0.9, Color(1.0, 0.9, 0.7))
+		draw_circle(bpos, 1.6, Color(0.75, 0.9, 1.0) if fast else Color(1.0, 0.55, 0.35))
+		draw_circle(bpos, 0.9, Color(0.95, 1.0, 1.0) if fast else Color(1.0, 0.9, 0.7))
 
 
 func _draw_players() -> void:
@@ -3458,6 +3627,18 @@ func _draw_players() -> void:
 			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), de)
 			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - de) * 0.12), dcol)
 			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
+			# Broke-respawn clock: a downed player with no coins to revive earns a
+			# free reinforcement at broke_timer==0 (BROKE_RESPAWN_TICKS from the KO).
+			# The co-op partner — and the solo player — had no idea when help lands;
+			# surface the ticking countdown over the body. Reads existing sim state.
+			var bt: int = p.get("broke_timer", 0)
+			if bt > 0:
+				var btxt := "REINFORCEMENTS IN %.1fs" % (bt / 60.0)
+				var brw := Art.font().get_string_size(btxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+				# Warms toward amber in the final second so "almost back" reads.
+				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
+				Art.text(self, btxt, pos + Vector2(-brw / 2.0, -26), 8,
+					Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
@@ -4044,7 +4225,7 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			# below the panel's bottom edge instead of skipping it outright — still
 			# a warning, just relocated clear of the opaque HUD art.
 			var tbase := 28.0
-			if tx < 262.0:
+			if tx < _hud_icons.plate_right():
 				tbase = _panel_bot + 12.0
 			var ta := clampf(1.0 + off / 180.0, 0.2, 0.7)
 			if e.get("windup", 0) > 0:
@@ -4058,6 +4239,11 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			draw_line(Vector2(tx, ttip + 1.0), Vector2(tx + tspr, tbase + 1.0), tuc, 2.0)
 			draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
 			draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
+			if colorblind and danger:
+				# Colorblind: red-vs-orange hue alone can't carry "lethal ranged". Add
+				# a second nested caret so SHAPE (a doubled chevron) encodes danger too.
+				draw_line(Vector2(tx - tspr, tbase + 5.0), Vector2(tx, ttip + 5.0), tcol, 2.0)
+				draw_line(Vector2(tx, ttip + 5.0), Vector2(tx + tspr, tbase + 5.0), tcol, 2.0)
 		else:
 			var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
 			if sim.last_stand and sx > 165.0 and sx < 475.0:
@@ -4075,6 +4261,10 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			draw_line(Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
 			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
 			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
+			if colorblind and danger:
+				# Doubled chevron: shape-redundant danger cue for colorblind mode.
+				draw_line(Vector2(sx - spr, 348), Vector2(sx, tip - 5.0), col, 2.0)
+				draw_line(Vector2(sx, tip - 5.0), Vector2(sx + spr, 348), col, 2.0)
 	if threats.size() > 6:
 		# The cap hides the tail — say so, so a drowned edge still reads as "many"
 		# instead of "exactly six".
@@ -4147,7 +4337,7 @@ func _draw_objective_markers() -> void:
 			var ep := _marker_edge(mp)
 			# Never under the corner HUD panel (it reaches ~y58 in 2P, deeper with
 			# the endless shop row) — drop the marker below its bottom edge.
-			if ep.x < 262.0 and ep.y < panel_bot + 8.0:
+			if ep.x < _hud_icons.plate_right() and ep.y < panel_bot + 8.0:
 				ep.y = panel_bot + 8.0
 			# Min spacing on a shared edge: slide along the edge until clear so
 			# stacked marks can't overprint into one unreadable diamond.

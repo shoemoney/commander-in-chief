@@ -464,12 +464,12 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
 
 
-static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0) -> void:
+static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE) -> void:
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
 	if use_pad:
-		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false)
+		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false, mod)
 	else:
-		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88))
+		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88) * mod)
 		var letter: String = _GLYPH_KEY[action]
 		var f := font()
 		var fs := int(size * 0.62)

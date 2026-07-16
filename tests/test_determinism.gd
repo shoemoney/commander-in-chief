@@ -96,6 +96,12 @@ const SEED := 0xDEADBEEF
 ## this branch's capsule stack — the four tools renumber 7=Rend/8=Claymore/9=Smoke/10=Flashbang,
 ## the rare table becomes a 10-entry weighted pick [4,4,5,5,6,6,7,8,9,10], and the endless special
 ## roll widens 0..7 → 0..8 to seat drone AND mg_nest. Union sim = new state stream in both modes.
+## RE-RECORDED (2026-07-16, PR#9 final merge-to-main): union of this branch's capsule/drone stack
+## with main's PR#10 P3b sim batch (dodge-along-aim, grenade edge, wheel-only airstrike, boss HP
+## scaling, score-on-buy, earlier specials) — both parents had re-recorded independently. The
+## campaign samples match the previous reconcile exactly (every P3b campaign path is torture-inert:
+## stationary panic-roll needs a neutral stick, buys/specials/boss-HP need progress the 60s torture
+## never reaches); only the endless stream moved.
 const GOLDEN: Array[int] = [
 	8422831759359552435,
 	7568204556783353249,
@@ -173,13 +179,20 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
 ## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
 ## RE-RECORDED (2026-07-16, PR#9 reconcile merge): see GOLDEN note.
+## RE-RECORDED (2026-07-16, merge reconcile — P3b design fixes + grafted iter25/iter29): the P3b
+## fixes (roll-along-aim, grenade edge-detect, airstrike out of crate pool, boss HP player-count
+## scaling, score-on-purchase, early specials gate) stack with Triple Shot (hashed p["triple"]) and
+## Explosive Fuel Barrels (checksummed barrels[]); all endless samples recomputed for the merged sim.
+## RE-RECORDED (2026-07-16, PR#9 final merge-to-main): union of this branch's capsule/drone stack
+## with main's PR#10 P3b sim batch (dodge-along-aim, grenade edge behavior, wheel-only airstrike,
+## boss HP scaling, score-on-buy, earlier specials) — both parents had re-recorded independently.
 const ENDLESS_GOLDEN: Array[int] = [
 	2235960687345413449,
-	2380765536200709976,
-	3058470567505438014,
-	6687158149247349942,
-	7306203801979240590,
-	8228958824033731846,
+	6738593773207975264,
+	7724535518553991907,
+	8987834056005165675,
+	5877657229760763315,
+	4795367969849645755,
 ]
 
 

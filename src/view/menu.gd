@@ -713,9 +713,12 @@ func _draw_hall() -> void:
 	for c in headers.size():
 		if c == 1:
 			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(0.84, 0.86, 0.78))
+			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(1.0, 0.82, 0.4))
 		else:
-			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.84, 0.86, 0.78))
+			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(1.0, 0.82, 0.4))
+	# RANK header sits in the gap between the # and the right-aligned SCORE — drawn
+	# outside the parallel header/col_x arrays so it doesn't reshuffle the columns.
+	Art.text(self, "RANK", Vector2(130.0, 92), 10, Color(1.0, 0.82, 0.4))
 	for i in mini(rows.size(), 8):
 		var run: Dictionary = rows[i]
 		var mode_s: String = "ENDLESS" if run.get("mode", "campaign") == "endless" else "CAMPAIGN"
@@ -741,6 +744,13 @@ func _draw_hall() -> void:
 				Art.text(self, cells[c], Vector2(214.0 - sw, y), 11, col)
 			else:
 				Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
+		# Earned run grade (S/A/B/C/D), colored by tier. Old saves predate the key —
+		# guard with .get and only draw when present so the board never crashes.
+		var gr: String = run.get("grade", "")
+		if gr != "":
+			var gcol: Color = {"S": Color(1.0, 0.85, 0.3), "A": Color(0.55, 0.9, 1.0),
+				"B": Color(0.6, 0.9, 0.5), "C": Color(0.85, 0.85, 0.8)}.get(gr, Color(0.7, 0.7, 0.7))
+			Art.text(self, gr, Vector2(132.0, y), 11, gcol)
 
 
 func _draw_howto() -> void:

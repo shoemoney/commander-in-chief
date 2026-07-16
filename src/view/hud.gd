@@ -16,6 +16,7 @@ var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
 var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
+var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
@@ -63,14 +64,24 @@ func _process(delta: float) -> void:
 		_disp_chest = float(sim.war_chest)
 	if _disp_score < 0.0:
 		_disp_score = float(sim.score)
-	_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
-	_disp_score = _rollup(_disp_score, float(sim.score), delta)
+	if main._motion < 0.5:
+		_disp_chest = float(sim.war_chest)   # REDUCE MOTION: snap, no odometer spin-up
+		_disp_score = float(sim.score)
+	else:
+		_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
+		_disp_score = _rollup(_disp_score, float(sim.score), delta)
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
 ## so the amber/red states stay legible without flashing.
 func _mblink(period: int) -> bool:
 	return main._motion < 0.5 or Art.blink(period)
+
+
+func plate_right() -> float:
+	# Dynamic right edge of the corner plate (was hardcoded 262, its MINIMUM) so
+	# off-screen markers relocate clear of the ACTUAL panel, not a stale literal.
+	return _plate_r
 
 
 func panel_bottom() -> float:
@@ -247,17 +258,31 @@ func _draw() -> void:
 		# gauge's fixed 94px footprint ran off the 640px viewport — clamp it
 		# back over the tail of whatever optional chip came before.
 		x = minf(x, RIGHT - 94.0)
-		var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-		_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
-		_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
-			Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
+		# A closed gate/boss/colossus pinning the camera means advancing is
+		# impossible until the fight is won — the "advance!" PRESSURE read would be
+		# lying, so swap it for the real objective and drop the climbing fill.
+		var gate_locked := false
+		for g in sim.gates:
+			if not g["open"] and sim.camera_top >= g["y"] - SimWorld.GATE_CAMERA_PAD \
+					and g["y"] >= sim.camera_top:
+				gate_locked = true
+				break
+		if gate_locked:
+			var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
+			_text("CLEAR THE GATE", x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+		else:
+			var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
+			_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
+			_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
+				Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
 		row_r = x + 94.0
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame.
 	RenderingServer.canvas_item_clear(_plate_ci)
+	_plate_r = clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0)
 	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
-		Rect2(2, 2, clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0), panel_h),
+		Rect2(2, 2, _plate_r, panel_h),
 		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.9))
 
 	# Shop preview strip: the 4 buyables at a glance (cost + green/red
@@ -359,6 +384,21 @@ func _draw() -> void:
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			# Dodge availability: the roll's long cooldown was only shown as a faint
+			# arc at the player's feet — a mashing player couldn't tell recharging
+			# from unbound. Bright glyph when ready, dimmed + draining ring while
+			# recharging (same grammar as the grenade/bash rings above).
+			var roll_x := px
+			var roll_ready: bool = p["roll_cd"] == 0
+			Art.draw_glyph(self, "roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
+				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6))
+			px = roll_x + ICON + 2.0
+			if p["roll_cd"] > 0:
+				var rfrac := clampf(float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
+				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					-PI / 2, -PI / 2 + TAU * (1.0 - rfrac), 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 				px += ICON + 2.0
