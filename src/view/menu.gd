@@ -759,6 +759,8 @@ func _draw_howto() -> void:
 		124.0, Color(0.9, 0.92, 0.8))
 	_verb_line(["Bullets don't. ", "@roll", "ROLL to dodge. ", "@interact",
 		"BOARD tanks for crush + shells."], 142.0, Color(0.9, 0.92, 0.8))
+	_verb_line(["@interact", "with no tank near PLANTS a carried claymore — it hurts BOTH sides."],
+		158.0, Color(0.9, 0.92, 0.8))
 	# The supply-wheel hold prompt is the DEVICE GLYPH, not a key-name string.
 	var px := 60.0 + Art.font().get_string_size(hold_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 9.0
 	Art.draw_glyph(self, "wheel", Vector2(px, 84.0), 12.0)
@@ -778,11 +780,12 @@ func _draw_howto() -> void:
 		"SNIPER — paints a laser line, then fires. Sidestep it.",
 		"GHILLIE — hidden sniper; only its laser gives it away. Close in.",
 		"SAPPER — seeds mines behind it. Don't chase over its trail.",
-		"SHIELD — front blocks bullets. Flank it or grenade it."]
+		"SHIELD — front blocks bullets. Flank it or grenade it.",
+		"DRONE — flying spotter, calls mortars on your spot. Shoot it down."]
 	for i in special.size():
-		# 13px leading + 244 header start: the SHIELD line must clear the BACK
-		# button plate (~y315) — it sat under it after the pixel-font swap.
-		Art.text(self, special[i], Vector2(72, 258 + i * 13), 10, Color(0.88, 0.9, 0.8))
+		# 11px leading + 254 start: SIX lines now (DRONE joined the roster) and
+		# the last must still clear the BACK button plate (~y315).
+		Art.text(self, special[i], Vector2(72, 254 + i * 11), 10, Color(0.88, 0.9, 0.8))
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:

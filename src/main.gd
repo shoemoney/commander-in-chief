@@ -125,6 +125,7 @@ var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
+var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -171,6 +172,9 @@ const _EVENT_SOUND := {
 	"grenadier_windup": ["throw", -8.0, 0.7],
 	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
 	"flashbang": ["explosion", -8.0, 2.2],   # sharp crack, not a boom
+	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
+	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
+	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -798,6 +802,7 @@ func _physics_process(_delta: float) -> void:
 		_recorder.record_tick(inputs)   # same inputs the sim gets → bit-exact replay
 		sim.step(inputs)
 		_consume_events()
+		_check_smoke_edges()
 		_check_boss_intro()
 		_track_bests()
 	_update_feel()
@@ -829,6 +834,14 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
 					"rate": 0.013, "size": 13, "text": _CAPSULE_CALLOUT[cap_i],
 					"col": _CAPSULE_COL[cap_i]})
+				# First-grab teaching: the new capsules are rules, not just stats —
+				# one-shot hints (persisted) say what each actually DOES.
+				match int(ev["kind"]):
+					6: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
+					7: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
+						% ("X" if Art.use_pad else "F"))
+					8: _hint("smoke", "SMOKE SCREEN — ENEMIES CAN'T AIM AT YOU WHILE IT HOLDS")
+					9: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
 		elif kind == "explosion":
@@ -996,6 +1009,19 @@ func _consume_events() -> void:
 				# frozen roster reads as an effect, not a bug.
 				_flash_alpha = maxf(_flash_alpha, 0.45)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.06})
+			"claymore_plant":
+				# A deliberate resource-spend verb gets its own beat (the sapper's
+				# ambient mine_lay clink read as background noise): dust scuff +
+				# an ARMED pop naming what just happened.
+				_burst(ev["x"], ev["y"], "dust", 3, 0.4, 1.0, 0.4, 0.06)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.03, "text": "CLAYMORE ARMED", "col": Art.safe(Color(0.5, 0.95, 0.7))})
+			"rend_pierce":
+				# Rend beat the shield block: white-hot shear AT the shield so the
+				# buff's payoff reads on the field, not just the HUD corner.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.25})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.12,
+					"r": 16.0, "col": Color(1.0, 0.75, 0.6)})
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
@@ -1550,6 +1576,21 @@ func _record_run() -> void:
 	cf.set_value("best", "dist", best_dist)
 	_best_dirty = false
 	_save_cfg(cf)
+
+
+func _check_smoke_edges() -> void:
+	# Concealment ending silently got players shot the instant the shroud
+	# thinned — a falling-edge tick + EXPOSED pop closes the window fairly.
+	# (The rising edge is the pickup itself, which already celebrates.)
+	for i in sim.players.size():
+		if i >= _smoke_prev.size():
+			break
+		var st: int = sim.players[i]["smoke_ticks"]
+		if _smoke_prev[i] > 0 and st == 0 and sim.players[i]["alive"]:
+			_sfx.play("alarm", -18.0, 2.6)
+			_fx.append({"x": sim.players[i]["x"], "y": sim.players[i]["y"], "t": 0.0,
+				"kind": "floattext", "rate": 0.03, "text": "EXPOSED", "col": Color(1.0, 0.6, 0.4)})
+		_smoke_prev[i] = st
 
 
 func _hint(id: String, text: String) -> void:
@@ -2445,16 +2486,19 @@ func _draw_mines() -> void:
 		if not m["armed"]:
 			continue
 		var mp := _to_screen(m["x"], m["y"])
-		# Danger telegraph keeps the mine FAIR: a pulsing red ring + a blinking
+		# Danger telegraph keeps the mine FAIR: a pulsing ring + a blinking
 		# armed-indicator so you can spot it and herd rushers onto it (or route
-		# around it yourself).
+		# around it yourself). YOUR planted claymore rings cyan instead of the
+		# hostile red — same blast, but "my trap" vs "their trap" must read
+		# (both sides still trip both; the color is identity, not safety).
 		var mb := Art.pulse(0.1)
-		draw_circle(mp, 8.0 + mb * 3.0, Color(0.9, 0.2, 0.15, 0.14 + mb * 0.12))
-		draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(1.0, 0.35, 0.2, 0.5 + mb * 0.3), 1.2)
+		var mc := Art.safe(Color(0.3, 0.9, 0.75)) if m.get("friendly", false) else Color(1.0, 0.35, 0.2)
+		draw_circle(mp, 8.0 + mb * 3.0, Color(mc.r, mc.g, mc.b, 0.14 + mb * 0.12))
+		draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
 		# Real claymore silhouette (was the plain 'landmine' decor pip). Scale 1.05
 		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
 		_spr("wep_claymore", mp, 0.0, 1.05)
-		draw_circle(mp, 2.0, Color(0.95, 0.3, 0.18, 0.65 + mb * 0.35))
+		draw_circle(mp, 2.0, Color(mc.r, mc.g, mc.b, 0.65 + mb * 0.35))
 
 
 func _draw_water() -> void:
@@ -2845,6 +2889,18 @@ func _draw_enemies() -> void:
 			_spr("elite", epos, face, 0.5 * esw, Color(1.35, 0.75, 0.7))
 		else:
 			_spr(_RUSHER_SKINS[e.get("skin", 0)], epos, face, 0.5)
+		# Flashbang stun state ON the body: the wash decays in ~0.2s but the
+		# freeze lasts 1.5s — and reduce-motion zeroes the wash entirely, so
+		# frozen enemies with no mark read as a bug. Steady ring + orbit dots
+		# (no strobe); a slow 3Hz blink only in the last 20t is the wake-up
+		# warning (under the 3-flashes/s photosensitivity line).
+		if sim.flash_ticks > 0 and not e.get("submerged", false):
+			if sim.flash_ticks > 20 or (sim.flash_ticks / 10) % 2 == 0:
+				draw_arc(epos + Vector2(0, -10.0), 3.5, 0, TAU, 10, Color(0.75, 0.88, 1.0, 0.85), 1.3)
+				for sd in 3:
+					var sa := float(Engine.get_physics_frames()) * 0.12 + sd * TAU / 3.0
+					draw_circle(epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
+						Color(1.0, 1.0, 0.8, 0.9))
 
 
 func _draw_observer() -> void:
@@ -3139,6 +3195,19 @@ func _draw_players() -> void:
 			# Downed but not gone: a greyed prone body so a waiting-for-revive
 			# teammate is visibly THERE on the field, not just a floating beacon.
 			_spr(tex_name, pos, PI / 2, 0.46, Color(0.55, 0.55, 0.6, 0.7))
+		# Smoke concealment: a drifting grey shroud — drawn UNDER the soldier and
+		# the co-op identity ring (drawn over, it buried both for ~4 of its 5
+		# seconds, exactly when co-op players need their avatar). Thins over the
+		# final second so the expiry never blindsides you.
+		if p["alive"] and p["smoke_ticks"] > 0:
+			var sm_frac := clampf(float(p["smoke_ticks"]) / float(SimWorld.SMOKE_TICKS), 0.0, 1.0)
+			var sm_a := 0.45 * minf(1.0, sm_frac * 5.0)
+			var sm_ph := float(Engine.get_physics_frames() + i * 43)
+			for sm_k in 4:
+				var sm_off := Vector2(sin(sm_ph * 0.03 + sm_k * 1.7) * 7.0,
+					cos(sm_ph * 0.025 + sm_k * 2.3) * 5.0 - 4.0)
+				draw_circle(pos + sm_off, 8.0 + 2.0 * sin(sm_ph * 0.04 + sm_k * 0.9),
+					Color(0.75, 0.78, 0.8, sm_a))
 		# Co-op identity ring under each soldier so you never lose your guy in
 		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
 		if _two_players and p["alive"]:
@@ -3199,18 +3268,6 @@ func _draw_players() -> void:
 				angle = lerp_angle(angle, PI / 2, de_res)
 				mod = mod.lerp(Color(0.35, 0.35, 0.35, 0.6), de_res)
 			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
-			# Smoke concealment: a drifting grey shroud over the soldier while the
-			# sim's smoke_ticks guard blinds enemy targeting; it thins out over the
-			# final second so the expiry never blindsides you.
-			if p["smoke_ticks"] > 0:
-				var sm_frac := clampf(float(p["smoke_ticks"]) / float(SimWorld.SMOKE_TICKS), 0.0, 1.0)
-				var sm_a := 0.45 * minf(1.0, sm_frac * 5.0)
-				var sm_ph := float(Engine.get_physics_frames() + i * 43)
-				for sm_k in 4:
-					var sm_off := Vector2(sin(sm_ph * 0.03 + sm_k * 1.7) * 7.0,
-						cos(sm_ph * 0.025 + sm_k * 2.3) * 5.0 - 4.0)
-					draw_circle(pos + sm_off, 8.0 + 2.0 * sin(sm_ph * 0.04 + sm_k * 0.9),
-						Color(0.75, 0.78, 0.8, sm_a))
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
 			# (draining arc while the bash swing is on cooldown, steady dry
@@ -4252,7 +4309,14 @@ func _draw_threat_pips() -> void:
 		var base := edge - dir * 4.0
 		var tri := PackedVector2Array([tip, base + perp * 5.0, base - perp * 5.0])
 		draw_circle(edge, 9.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.14 + pf * 0.08))
-		draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
+		if k == "grenadier" or k == "drone":
+			# AREA strike incoming = HOLLOW arrow; aimed shot = filled. The
+			# amber/red hue split collapses under deuteranopia, so the shape
+			# carries the "move off this spot" vs "break the line" semantic.
+			draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]),
+				Color(col.r, col.g, col.b, 0.95), 2.0)
+		else:
+			draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
 		draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
 	# Off-screen mortar strikes: a telegraph that scrolls off-frame between cast and
 	# impact gave zero warning; clamp an urgency-scaled amber-red wedge to the edge.
