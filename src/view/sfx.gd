@@ -102,10 +102,14 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 
 
 func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
+	# Jingles ride the UI bus even when a caller passes coordinates — the
+	# positional pool re-introduces limiter ducking + voice-steal on payoffs.
+	if _MUSICAL.has(sound):
+		play(sound, vol_db, pitch)
+		return
 	if _pool.is_empty() or not _sounds.has(sound):
 		return
-	if not _MUSICAL.has(sound):
-		pitch *= randf_range(0.94, 1.06)
+	pitch *= randf_range(0.94, 1.06)
 	# Steal policy: prefer an idle voice; else take the one closest to finishing —
 	# index-0 stealing cut long booms mid-tail under heavy fire.
 	var p: AudioStreamPlayer2D = _pool[0]

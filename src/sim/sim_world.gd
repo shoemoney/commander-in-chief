@@ -574,7 +574,8 @@ func _step_players(inputs: Array) -> void:
 		if inp.revive:
 			_try_revive(i, p)
 
-		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0:
+		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0 \
+				and not _boardable_tank_near(p):
 			# Claymore: no tank in reach, so INTERACT plants a carried charge one
 			# step ALONG the aim — into the enemy lane you're already shooting,
 			# clear of your own kiting path (planting behind the aim dropped it
@@ -689,6 +690,13 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 	## no revives past the final gate (the arcade's no-continue finale).
 	if last_stand:
 		return
+	if reviver_index == -1:
+		# Dead self-revive is the solo/all-down fallback ONLY: with a partner
+		# still standing, the rescue is theirs to perform — the co-op decision
+		# (walk to the body, spend together) must not be mashable from the floor.
+		for pl in players:
+			if pl["alive"]:
+				return
 	for j in players.size():
 		var target := players[j]
 		if target["alive"]:
@@ -756,6 +764,10 @@ func _kill_player(p: Dictionary) -> void:
 	# excluded) event so the view can sting a "LOADOUT LOST" beat. Golden-safe.
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"],
 		"triple": p["triple"], "pierce": p["pierce_ticks"] > 0, "spread": p["spread_ticks"] > 0})
+	# Arm the broke fallback on death itself, not only on a revive press: the
+	# wipe (endless's only run-ender) must not require a button press.
+	if war_chest < revive_cost(p):
+		p["broke_timer"] = BROKE_RESPAWN_TICKS
 
 
 func _fire_mission() -> void:
@@ -849,6 +861,16 @@ func _try_board_tank(player_index: int, p: Dictionary) -> bool:
 			tank["occupant"] = player_index
 			p["in_tank"] = t
 			events.append({"t": "tank_board", "x": tank["x"], "y": tank["y"]})
+			return true
+	return false
+
+
+func _boardable_tank_near(p: Dictionary) -> bool:
+	## Near-miss board taps must not arm a claymore at your feet: a boardable
+	## tank just outside TANK_BOARD_RADIUS means INTERACT read as "board".
+	for tank in tanks:
+		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], 2 * TANK_BOARD_RADIUS):
 			return true
 	return false
 
@@ -1171,7 +1193,9 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		# calls it out — standing your ground over a partner's body is rewarded.
 		for pl in players:
 			if not pl["alive"] and _dist_lte(e["x"], e["y"], pl["x"], pl["y"], 60 * F_ONE):
-				war_chest += 5
+				# Scales with the same wave/5 step as revive_cost, or deep-endless
+				# revive inflation turns the avenge beat into pocket change.
+				war_chest += 5 + ((wave / 5) * 5 if mode == "endless" else 0)
 				events.append({"t": "avenge", "x": e["x"], "y": e["y"]})
 				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
@@ -1649,24 +1673,25 @@ func _step_barrels() -> void:
 
 
 func _step_spawner() -> void:
-	# Field spawner: pressure from above the screen edge; every 8th is a red
+	# Field spawner: pressure from above the screen edge; every 7th is a red
 	# elite. Each opened gate tightens the interval — the campaign's
-	# difficulty ratchet (45 → 24 ticks by gate 5).
+	# difficulty ratchet (45 → 24 ticks by gate 4; the final gate only opens
+	# on Colossus death, so gate 4 is the last one the ramp can see).
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
 	if _spawn_grace > 0:
 		_spawn_grace -= 1
-	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 4)
+	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE
-	# Sector 4+ (3 gates opened): the endless ranged roster starts bleeding into
-	# the campaign field, so late sectors get a genuinely new threat vocabulary
+	# Sector 2+ (1 gate opened): the endless ranged roster starts bleeding into
+	# the campaign field, so later sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
 	if opened >= 1 and rng.range_i(0, 4) == 0:
 		var spick := rng.range_i(0, 3)   # +mg_nest turret
@@ -1675,9 +1700,9 @@ func _step_spawner() -> void:
 		else:
 			_spawn_special(x, camera_top - 24 * F_ONE, ["grenadier", "sniper", "shield"][spick])
 	else:
-		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
-		# gate 5) so late campaign escalates composition, not just cadence.
-		var elite_every := maxi(3, 8 - opened)
+		# Elite ratio tightens with each opened gate (every 7th → every 3rd by
+		# gate 4) so late campaign escalates composition, not just cadence.
+		var elite_every := maxi(3, 7 - opened)
 		if hard:
 			elite_every = maxi(2, elite_every - 2)   # NG+ fields far more red elites
 		_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
@@ -1722,15 +1747,16 @@ func _windup_for(kind: String) -> int:
 
 
 func _shields_possible() -> bool:
-	## True once the shield archetype can actually spawn (campaign: 3 gates
-	## opened; endless: wave 3+) — gates the Rend drop so it's never inert.
+	## True once the shield archetype can actually spawn (campaign: 1 gate
+	## opened, matching _step_spawner's special roster; endless: wave 3+) —
+	## gates the Rend drop so it's never inert.
 	if mode == "endless":
 		return wave >= 3
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
-	return opened >= 3
+	return opened >= 1
 
 
 func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
@@ -2019,7 +2045,9 @@ func _step_waves() -> void:
 		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
 		# this wave pays a bonus, so cautious and reckless play stop earning alike.
 		if deaths_this_wave == 0 and wave > 1:
-			war_chest += 40
+			# Bonus rides the same creep curve as _supply_cost, or price inflation
+			# quietly erodes it into a rounding error by deep waves.
+			war_chest += 40 + (wave / 3) * 10
 			score += 1500
 			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
@@ -2284,6 +2312,8 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		var bounty: int = BOSS_BOUNTY
 		if mode == "endless" and wave >= 5:
 			bounty += (wave / 5 - 1) * (BOSS_BOUNTY / 2)
+		if wave_mod == 4:
+			bounty *= 2   # PAYDAY wave: every bounty doubles (same rule as _kill_enemy)
 		war_chest += bounty
 		score += bounty * 10
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
@@ -2424,6 +2454,10 @@ func _clear_observer_strikes() -> void:
 # --- Geometry helpers ---
 
 func _dist_lte(x1: int, y1: int, x2: int, y2: int, r: int) -> bool:
+	# Axis early-out: |dx| > r implies dx^2 > r^2 — byte-identical result,
+	# skips the fixed-point multiplies on the (common) far-apart case.
+	if absi(x1 - x2) > r or absi(y1 - y2) > r:
+		return false
 	var dx := x1 - x2
 	var dy := y1 - y2
 	return Fixed.mul(dx, dx) + Fixed.mul(dy, dy) <= Fixed.mul(r, r)

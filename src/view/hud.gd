@@ -270,6 +270,9 @@ func _draw() -> void:
 		# gauge's fixed 94px footprint ran off the 640px viewport — clamp it
 		# back over the tail of whatever optional chip came before.
 		x = minf(x, RIGHT - 94.0)
+		# The clamp can land the gauge on the tail of the preceding chip — a
+		# dark backing rect makes the overlap read as layering, not text-on-text.
+		draw_rect(Rect2(x - 2.0, y, 96.0, ICON), Color(0.08, 0.09, 0.08, 0.85))
 		# A closed gate/boss/colossus pinning the camera means advancing is
 		# impossible until the fight is won — the "advance!" PRESSURE read would be
 		# lying, so swap it for the real objective and drop the climbing fill.
