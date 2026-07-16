@@ -3028,9 +3028,22 @@ func _draw_colossus() -> void:
 	var pulse := Art.pulse(0.2)
 	# Core window: when the plating is retracted, the core glows white-hot and
 	# a 'CORE EXPOSED' ring says 'shoot it NOW' — bullets chip it this beat.
-	if sim.colossus.get("core_open", 0) > 0:
-		draw_circle(cpos, 9.0 + pulse * 4.0, Color(1.0, 0.95, 0.7, 0.9))
-		draw_arc(cpos, 16.0 + pulse * 3.0, 0, TAU, 28, Color(1.0, 1.0, 0.6, 0.9), 2.5)
+	var co: int = sim.colossus.get("core_open", 0)
+	if co > 0:
+		# About-to-seal cue: in the final ~15 ticks the plating is retracting, so
+		# strobe the exposed-core ring toward red AND shrink it — "the window is
+		# closing, land it NOW" — instead of the window snapping shut silently and
+		# eating late bullets on sealed steel. Reuses the white-strobe grammar.
+		var sealf := clampf(1.0 - co / 15.0, 0.0, 1.0)   # 0 until the last 15 ticks, →1 at seal
+		var cshrink := 1.0 - sealf * 0.45
+		var ccore := Color(1.0, 0.95, 0.7, 0.9)
+		var cring := Color(1.0, 1.0, 0.6, 0.9)
+		if sealf > 0.0:
+			var seal_strobe := Color(1.0, 0.2, 0.15) if (co / 2) % 2 == 0 else Color(1.0, 0.85, 0.45)
+			ccore = ccore.lerp(seal_strobe, sealf)
+			cring = cring.lerp(Color(1.0, 0.2, 0.15, 0.95), sealf)
+		draw_circle(cpos, (9.0 + pulse * 4.0) * cshrink, ccore)
+		draw_arc(cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
 	else:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center so the fill never hides under the HUD panel. Shake-immune:
