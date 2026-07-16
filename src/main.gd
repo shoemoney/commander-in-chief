@@ -2874,6 +2874,12 @@ func _draw_enemies() -> void:
 				var wfrac := 1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)
 				draw_circle(epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
 					Color(1.0, 0.85 - wfrac * 0.55, 0.2, 0.4 + wfrac * 0.6))
+				# Aim-stub: a short dashed lane toward the target, borrowing the sniper
+				# beam grammar so the elite's "I'm drawing a bead on YOU" reads instead
+				# of a lone chest ember. Kept a stub — the sim only aims at fire-time.
+				var edir := Vector2.from_angle(face)
+				draw_dashed_line(epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
+					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac, 3.0)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			_spr("elite", epos, face, 0.5 * esw, Color(1.35, 0.75, 0.7))
 		else:
