@@ -3459,7 +3459,7 @@ func _draw_players() -> void:
 				# are up, amber while the Trench Gun spread is up.
 				if p["pierce_ticks"] > 0:
 					rcol = Color(0.55, 0.9, 1.0)
-				elif p["spread_ticks"] > 0:
+				elif p["spread_ticks"] > 0 and not p["triple"]:   # Triple (permanent) fires the same fan; a Spread pickup on top is no gain — do not flip to amber
 					rcol = Color(1.0, 0.8, 0.45)
 				elif p["triple"]:
 					rcol = Color(1.0, 0.6, 0.9)   # permanent Triple Shot: magenta, matches the pickup + HUD x3 pip
