@@ -144,7 +144,7 @@ const _EVENT_SOUND := {
 	"tank_shot": ["tank_shot", -3.0, 1.0],
 	"throw": ["throw", -8.0, 1.0],
 	"roll": ["roll", -8.0, 1.0],
-	"explosion": ["explosion", -2.0, 1.0],
+	# "explosion" plays in _ev_explosion with proximity-scaled volume, not here.
 	# "kill" plays in the match branch with streak-scaled pitch, not here.
 	"player_down": ["player_down", 0.0, 1.0],
 	"vest_break": ["vest_break", -2.0, 1.0],
@@ -200,6 +200,13 @@ func _ready() -> void:
 	# in-tree) and created the SFX/Music buses. Move _sfx to an autoload or deferred
 	# add and this silently no-ops (get_bus_index returns -1).
 	_load_bests()
+	# The OS arrow floated over the battlefield (mouse is the default keyboard-
+	# player aim device, LMB fires). Restyle it as a small crosshair baked from
+	# the game's own reticle art — menus keep a working, clickable pointer.
+	var cur_img := Art.tex("ui_reticle").get_image()
+	cur_img.resize(24, 24, Image.INTERPOLATE_LANCZOS)
+	Input.set_custom_mouse_cursor(ImageTexture.create_from_image(cur_img),
+		Input.CURSOR_ARROW, Vector2(12, 12))
 	_reset()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
@@ -664,7 +671,10 @@ func _consume_events() -> void:
 				_sfx.play("buy", -2.0, 1.4)
 		elif _EVENT_SOUND.has(kind):
 			var snd: Array = _EVENT_SOUND[kind]
-			_sfx.play(snd[0], snd[1], snd[2])
+			# World events pan to where they happen; events without a position
+			# (or screen-global beats) stay center via the flat polyphonic player.
+			var spos := _to_screen(ev["x"], ev["y"]) if ev.has("x") and ev.has("y") else Vector2.INF
+			_sfx.play(snd[0], snd[1], snd[2], spos)
 		match kind:
 			"armor_block":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
@@ -946,6 +956,8 @@ func _ev_explosion(ev: Dictionary) -> void:
 		var dist_px := Vector2(float(ev["x"] - near["x"]), float(ev["y"] - near["y"])).length() * PX
 		prox = remap(clampf(dist_px, 60.0, 340.0), 60.0, 340.0, 1.0, 0.35)
 	_trauma = minf(1.0, _trauma + 0.35 * prox)
+	# The ear agrees with the camera: a far blast is quieter, not just gentler.
+	_sfx.play("explosion", lerpf(-12.0, -2.0, prox), 1.0, _to_screen(ev["x"], ev["y"]))
 	if prox > 0.7:
 		_hitstop_frames = maxi(_hitstop_frames, 4)
 	_rumble = maxf(_rumble, 0.7 * prox)
@@ -1533,6 +1545,11 @@ func _update_feel() -> void:
 				fx["y"] += int(fx["vy"] * Fixed.ONE)
 				fx["vx"] *= 0.86
 				fx["vy"] *= 0.86
+				# Brass and body chunks fall: pure damping stopped them mid-air like
+				# zero-G syrup. ponytail: fake gravity, no floor/bounce — lifetimes
+				# are ~15 frames, so they settle into an arc, not sink forever.
+				if fx["kind"] == "casing" or fx["kind"] == "gib":
+					fx["vy"] += 0.3
 			if fx["t"] >= 1.0:
 				_fx.remove_at(i)
 		# Scheduled boss-death secondaries: each pops a full _blast_debris when its
@@ -1549,15 +1566,17 @@ func _update_feel() -> void:
 					_trauma = minf(1.0, _trauma + 0.12)
 					_rumble = maxf(_rumble, 0.4)
 				_pending_blasts.remove_at(i)
-	for i in range(_scorch.size() - 1, -1, -1):
-		_scorch[i]["t"] += 0.012
-		if _scorch[i]["t"] >= 1.0:
-			_scorch.remove_at(i)
-	for i in range(_corpses.size() - 1, -1, -1):
-		_corpses[i]["t"] += 0.004   # linger ~4s
-		if _corpses[i]["t"] >= 1.0:
-			_corpses.remove_at(i)
-	while _corpses.size() > 40:     # cap the field's body count
+		# Decal clocks freeze with the particles: a crater fading or a corpse
+		# aging under a "frozen" explosion breaks the freeze-frame read.
+		for i in range(_scorch.size() - 1, -1, -1):
+			_scorch[i]["t"] += 0.012
+			if _scorch[i]["t"] >= 1.0:
+				_scorch.remove_at(i)
+		for i in range(_corpses.size() - 1, -1, -1):
+			_corpses[i]["t"] += 0.004   # linger ~4s
+			if _corpses[i]["t"] >= 1.0:
+				_corpses.remove_at(i)
+	while _corpses.size() > 40:     # cap stays live even mid-freeze
 		_corpses.remove_at(0)
 	for i in _recoil.size():
 		_recoil[i] *= 0.72
@@ -2129,7 +2148,7 @@ func _draw_water() -> void:
 			for hx in range(0, 640, 16):
 				if hx + 8 < ford_left or hx > ford_left + ford_w:
 					draw_line(Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
-			draw_string(ThemeDB.fallback_font, Vector2(ford_left + ford_w / 2.0 - 12, wy - 8),
+			draw_string(Art.font(), Vector2(ford_left + ford_w / 2.0 - 12, wy - 8),
 				"FORD", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.6, 1.0, 0.6))
 
 
@@ -2759,7 +2778,7 @@ func _draw_players() -> void:
 					continue
 				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
-				draw_string(ThemeDB.fallback_font, pos + Vector2(-18, -16), rtxt,
+				draw_string(Art.font(), pos + Vector2(-18, -16), rtxt,
 					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(0.5, 1.0, 0.6)))
 				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0)
 		if p["alive"]:
@@ -3056,7 +3075,7 @@ func _draw_fx() -> void:
 			var fc: Color = fx["col"]
 			fc.a = 1.0 - t * t
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
-			var fw := ThemeDB.fallback_font.get_string_size(fx["text"],
+			var fw := Art.font().get_string_size(fx["text"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
@@ -3067,8 +3086,8 @@ func _draw_fx() -> void:
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
 			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
-				draw_string(ThemeDB.fallback_font, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
-			draw_string(ThemeDB.fallback_font, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+				draw_string(Art.font(), frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+			draw_string(Art.font(), frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
@@ -3553,7 +3572,7 @@ func _draw_wheel() -> void:
 		# Center hub: the fuel-cap ring framing the War Chest itself — this
 		# wheel drains the same pool that funds revives.
 		_spr("ui_dial_fuel", c, 0.0, 34.0 / 600.0)
-		var f := ThemeDB.fallback_font
+		var f := Art.font()
 		var chest := str(sim.war_chest)
 		var cw := f.get_string_size(chest, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 		var cx := c.x - (10.0 + cw) / 2.0
@@ -3868,7 +3887,7 @@ func _draw_banners(top_msg: String) -> void:
 		Art.text_center(self, "— REPLAY — R TO EXIT —", 320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
 	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
 		var ha := minf(1.0, _hint_t * 3.0)
-		var hf := ThemeDB.fallback_font
+		var hf := Art.font()
 		var hw := hf.get_string_size(_hint_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 		draw_rect(Rect2(320 - hw / 2.0 - 8, 92, hw + 16, 18), Color(0.05, 0.07, 0.05, 0.8 * ha))
 		Art.text_center(self, _hint_text, 320, 105, 11, Color(1.0, 0.95, 0.7, ha))
