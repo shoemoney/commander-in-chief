@@ -22,7 +22,8 @@ const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammo
 	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
 	"corpse_soldier1", "corpse_soldier2", "crater",
-	"trench", "barricade", "radio_tower", "wreck_halftrack", "crater_field", "crater_water"]
+	"trench", "barricade", "radio_tower", "wreck_halftrack", "crater_field", "crater_water",
+	"dropped_shield", "fallen_merc"]
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]

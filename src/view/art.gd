@@ -108,6 +108,10 @@ const TEX := {
 	"crater_field": preload(SY + "decor/crater_field.png"),
 	"crater_water": preload(SY + "decor/crater_water.png"),
 	"mg_tripod": preload(SY + "decor/mg_tripod.png"),
+	# BattleRoyale bakes repurposed as battlefield litter (a dropped riot shield
+	# + a fallen soldier body) — the live shield enemy keeps its on-theme bombsuit.
+	"dropped_shield": preload(SY + "decor/dropped_shield.png"),
+	"fallen_merc": preload(SY + "decor/fallen_merc.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
@@ -301,6 +305,7 @@ const SCALE := {
 	"tank_trap": 0.14, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
 	"flag_marker": 0.16, "radio_tower": 0.18, "hedge": 0.15, "fern2": 0.14,
 	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
+	"dropped_shield": 0.12, "fallen_merc": 0.2,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
@@ -375,6 +380,9 @@ const TINT := {
 	"wreck_halftrack": Color(0.55, 0.58, 0.52),
 	"crater_field": Color(0.6, 0.6, 0.54), "crater_water": Color(0.62, 0.68, 0.72),
 	"mg_tripod": Color(0.66, 0.7, 0.62),
+	# fallen merc: heavy desert-olive multiply to pull the BR urban-blue kit onto
+	# the battlefield palette; dropped shield muted like the wreck litter.
+	"fallen_merc": Color(0.62, 0.64, 0.44), "dropped_shield": Color(0.6, 0.64, 0.56),
 	# mil2 enemies read warm/bright (threats); vehicles olive-drab; pickups bright.
 	"m_bombsuit": Color(1.7, 1.35, 0.9), "m_contractor2": Color(1.75, 0.85, 0.68),
 	"m_insurgent3": Color(2.1, 1.7, 1.15), "m_insurgent4": Color(2.1, 1.7, 1.15),
@@ -430,6 +438,7 @@ const OUTLINE := {
 	"tank_trap": true, "barricade": true, "flak_gun": true, "trench": true,
 	"flag_marker": true, "radio_tower": true, "hedge": true, "fern2": true,
 	"wreck_halftrack": true, "crater_field": true, "crater_water": true, "mg_tripod": true,
+	"dropped_shield": true, "fallen_merc": true,
 }
 
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
