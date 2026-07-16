@@ -20,7 +20,7 @@ const SCREEN_CENTER := Vector2(320, 180)
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
 const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammobox", "barrier"]
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
-	"corpse_soldier1", "corpse_soldier2"]
+	"corpse_soldier1", "corpse_soldier2", "crater"]
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
@@ -1044,6 +1044,15 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
+				# Same fireball/smoke grammar as _ev_explosion, slightly smaller — the
+				# cooking drum used to pop with ring+light only, no combustion body.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
+					"sz": 24.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.75, 0.4, 0.85)})
+				for si in 2:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+						"sz": 16.0 + si * 7.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
+						"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+						"col": Color(0.25, 0.22, 0.2, 0.7)})
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"kill":
 				_ev_kill(ev)
@@ -1144,6 +1153,10 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"] - 8, "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "size": 12, "text": "PILOT DOWN — REACH HIM",
 					"col": Art.safe(Color(0.5, 1.0, 0.7))})
+				# Small zoom-hit pulls the eye to a time-limited off-path objective
+				# (a boss SIGHTING got one; the ransom window got only text).
+				# _punch is motion-scaled at application — RM-safe by construction.
+				_punch = maxf(_punch, 0.06)
 				# The banner carries the stakes BEFORE the player commits to the
 				# chase: the payout number, and the friendly-fire trap (a stray
 				# round pays nothing — sim rule the green ring alone can't teach).
@@ -1225,7 +1238,7 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
 			"observer_spawn":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
-				_show_banner("MORTAR OBSERVER SPOTTED")
+				_show_banner("MORTAR OBSERVER SPOTTED", Color(1.0, 0.92, 0.55), "hud_lightning")
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -1234,13 +1247,13 @@ func _consume_events() -> void:
 			"endless_boss":
 				_trauma = minf(1.0, _trauma + 0.4)
 				_music_hold = maxi(_music_hold, 48)
-				_show_banner("GUNSHIP INBOUND")
+				_show_banner("GUNSHIP INBOUND", Color(1.0, 0.92, 0.55), "hud_skull")
 				_sfx.play("alarm", -4.0, 0.9)
 				# A fast attack-heli escort streaks the top band ahead of the boss.
 				_fx.append({"x": 0, "y": 0, "t": 0.0, "kind": "chopper", "rate": 0.02,
 					"tex": "m_heli_attack2", "scl": 0.5, "sy": 52.0})
 			"core_open":
-				_show_banner("CORE EXPOSED — OPEN FIRE")
+				_show_banner("CORE EXPOSED — OPEN FIRE", Color(1.0, 0.92, 0.55), "hud_target")
 				_sfx.play("alarm", -6.0, 1.3)
 			"airstrike_called":
 				# Commit beat: the strike is inbound, not instant — announce it.
@@ -1623,7 +1636,7 @@ func _check_boss_intro() -> void:
 		if _seen_bosses.has(g["y"]):
 			continue
 		_seen_bosses[g["y"]] = true
-		_show_banner("BRIDGE GUNSHIP")
+		_show_banner("BRIDGE GUNSHIP", Color(1.0, 0.92, 0.55), "hud_skull")
 		_sfx.play("alarm", -2.0, 0.85)
 		_trauma = minf(1.0, _trauma + 0.3)
 		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
@@ -1633,7 +1646,7 @@ func _check_boss_intro() -> void:
 	var phase := sim.colossus_phase()
 	if phase > _prev_colossus_phase and phase >= 2:
 		_show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
-			else "COLOSSUS CRITICAL — SAPPERS OUT")
+			else "COLOSSUS CRITICAL — SAPPERS OUT", Color(1.0, 0.92, 0.55), "hud_skull")
 		_sfx.play("alarm", -3.0, 0.7)
 		# Phase-break shockfront: the world flinches when the boss escalates — an
 		# arena-wide ground ring bursts from the colossus + a heavy camera hit.
@@ -1848,12 +1861,13 @@ func _track_bests() -> void:
 	# _record_run() at the debrief and _flush_bests() on reset/exit.
 
 
-func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
+func _show_banner(text: String, col := Color(1.0, 0.92, 0.55), icon := "") -> void:
 	# No dupe-stacking: PERFECT DODGE! can re-fire every 24 frames and used to
-	# queue itself several deep.
+	# queue itself several deep. Icon: threat callouts only — every banner
+	# wearing a badge would dilute the alarm grammar.
 	if not _banners.is_empty() and _banners.back()["text"] == text:
 		return
-	_banners.append({"text": text, "t": 1.0, "col": col})
+	_banners.append({"text": text, "t": 1.0, "col": col, "icon": icon})
 
 
 func _check_dry_throw(inputs: Array[SimInput]) -> void:
@@ -2394,7 +2408,7 @@ const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contrac
 # ground draw, the collect callout and the off-screen marker. Always index via
 # clampi(kind - 4, 0, size-1) — an unknown kind must degrade, never crash (the
 # kind-4/5 glyph OOB bug once errored the pickup draw every frame).
-const _CAPSULE_TEX: Array[String] = ["wep_rifle", "wep_shotgun", "wep_mg", "wep_mg",
+const _CAPSULE_TEX: Array[String] = ["wep_rifle", "wep_shotgun", "wep_mg", "icon_rend",
 	"wep_claymore", "wep_smoke", "wep_flashbang"]
 const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH"]
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
@@ -2572,11 +2586,15 @@ func _draw_skyglow() -> void:
 		var sky := Color(0.05, 0.04, 0.05, sa)
 		var stx := _SKYLINE_X   # const — was two array literals rebuilt every finale frame
 		var sth := _SKYLINE_H
+		# Baked side-view silhouettes replace the flat rect stacks + 3-line mast:
+		# same anchors (base at _SKYLINE_H, rising to the frame top), same soot
+		# tint — `sky` is near-black so the sprite content flattens to silhouette.
+		var chim := Art.tex("skyline_chimney")
 		for k in stx.size():
-			draw_rect(Rect2(stx[k], 0.0, 14.0, sth[k]), sky)
-		draw_line(Vector2(300, 0), Vector2(300, 46), sky, 2.0)
-		draw_line(Vector2(300, 0), Vector2(315, 44), sky, 1.5)
-		draw_line(Vector2(300, 0), Vector2(285, 44), sky, 1.5)
+			var ch := sth[k] * 1.2
+			draw_texture_rect(chim, Rect2(stx[k] - ch * 0.5 + 7.0, sth[k] - ch, ch, ch), false, sky)
+		# Mast needs >=60px drawn height or the lattice aliases away.
+		draw_texture_rect(Art.tex("skyline_mast"), Rect2(270.0, 0.0, 60.0, 60.0), false, sky)
 
 
 func _sector_march() -> float:
@@ -2776,6 +2794,17 @@ func _draw_water() -> void:
 		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
 		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, ford_w, wh + 4),
 			true, Color(0.85, 0.8, 0.65))
+		# Baked bridge deck over the dry ford (decor only — the sim's ford/collision
+		# is untouched; the sand bed stays underneath as the shore blend). Mid planks
+		# tile the crossing, ramp caps land on each bank.
+		var bspan := 220.0 * Art.draw_scale("bridge_mid")   # ~97px square bake
+		var bsc := clampf(ford_w / bspan, 0.5, 1.2)         # fit the deck to the ford width
+		var bx := ford_left + ford_w / 2.0
+		var bseg := maxi(1, int(ceil(wh / (bspan * bsc))))
+		for bi in bseg:
+			_spr("bridge_mid", Vector2(bx, wy + (float(bi) + 0.5) * wh / float(bseg)), 0.0, bsc)
+		_spr("bridge_ramp", Vector2(bx, wy - 2.0), 0.0, bsc)
+		_spr("bridge_ramp", Vector2(bx, wy + wh + 2.0), PI, bsc)
 		# A few deterministic rocks break up the deep water (never in the ford).
 		var wseed := Art.cell_hash(int(w["y"] / 4096) * 13, 7)
 		for r in 3:
@@ -3203,7 +3232,9 @@ func _draw_enemies() -> void:
 					_sfx.play("alarm", -18.0, 0.6)
 				Art.text(self, "ESCAPING!", epos + Vector2(-20, -18), 8, pi_col)
 			else:
-				Art.text(self, "RESCUE", epos + Vector2(-16, -18), 8, pi_col)
+				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
+				# same gap): "is this dive worth it" needs the number up front.
+				Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), 8, pi_col)
 			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
@@ -3232,9 +3263,11 @@ func _draw_enemies() -> void:
 			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 		elif e["kind"] == "shield":
 			_spr("m_bombsuit", epos, face, 0.55, Color(0.85, 0.9, 1.0))   # armored EOD bulk sells the block
-			# The riot shield: a bright arc across the front — this side deflects.
-			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
-			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
+			# The riot shield: the baked plate held across the front — this side
+			# deflects. Image-up = shield-top, so rotation = face + PI/2; faint cyan
+			# modulate keeps the established deflect-color language.
+			_spr("riot_shield", epos + Vector2.from_angle(face) * 11.0, face + PI / 2,
+				1.0, Color(0.72, 0.88, 1.05, 0.95))
 			# Rear SAFE-arc: the shield only eats the front cone, so its back is the
 			# flank counter. A faint green arc behind it (opposite the bright front
 			# arc) teaches "get around him" — Art.safe keeps it legible in colorblind.
@@ -3258,13 +3291,20 @@ func _draw_enemies() -> void:
 			var n_dmg := float(clampi(3 - n_hp, 0, 2))
 			_spr("sandbag_beige", epos, 0.0, 0.5,
 				Color(0.82 - n_dmg * 0.13, 0.8 - n_dmg * 0.15, 0.62 - n_dmg * 0.12))
-			_spr("elite", epos + Vector2(0, -2), face, 0.4, Color(0.9, 0.85, 0.7))
+			# Baked tripod MG on the sandbag ring (was a shrunken red elite gunner).
+			# Image-up = muzzle, so the emplacement swivels with the live aim lane;
+			# it darkens with the bags as the nest cracks.
+			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+			var nang: float = nlv.angle() if nlv.length() > 1.0 else face
+			_spr("mg_stand", epos + Vector2(0, -2), nang + PI / 2, 1.0,
+				Color(1.0 - n_dmg * 0.15, 1.0 - n_dmg * 0.17, 1.0 - n_dmg * 0.15))
 			# Armor pips (gate lock-pip grammar): filled = hits still to crack.
 			for npi in 3:
 				draw_circle(epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8,
 					Color(1.0, 0.78, 0.35, 0.9) if npi < n_hp else Color(0.22, 0.2, 0.18, 0.75))
-			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
-			if nlv.length() > 1.0:
+			# Lane band-cull (7/9 panel): an off-band nest drew its full 640px lane
+			# every aim frame. Sandbags + pips above still draw — only the lane skips.
+			if nlv.length() > 1.0 and epos.y > -80.0 and epos.y < 420.0:
 				var nld := nlv.normalized()
 				var nburst: int = e.get("lunge_ticks", 0)
 				var nwu: int = e.get("windup", 0)
@@ -3287,7 +3327,7 @@ func _draw_enemies() -> void:
 				else:
 					# RELOAD: a dim stub down the LAST lane — the rooted-turret
 					# threat must not vanish for the whole 1.5s between bursts.
-					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.12), 1.0)
+					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.2), 1.0)   # 0.12 read as a dead lane, not a reloading turret
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
@@ -3394,12 +3434,14 @@ func _draw_gunships() -> void:
 		_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP", slot)
 		slot += 1
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
-		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot)
+		# Endless miniboss wears the attack-heli bake so it reads as its own threat,
+		# not a reskin of the campaign bridge boss (same PI = nose-down convention).
+		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot, "m_heli_attack2")
 		slot += 1
 	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 
-func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
+func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "gunship_body") -> void:
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 	# Idle hover: a slow vertical bob + faint sway so the gunship reads as airborne,
 	# not a parked sprite. Slot-offset so two bosses don't bob in lockstep; scaled
@@ -3413,8 +3455,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 	if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
-	_spr("gunship_body", bpos, PI, 0.8, hull_mod)
-	_spr("gunship_barrel", bpos + Vector2(0, 12), 0.0, 0.8, hull_mod)
+	_spr(body_tex, bpos, PI, 0.8, hull_mod)
+	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
+	# muzzle points down-screen at the players, same convention as the colossus.
+	_spr("gunship_barrel", bpos + Vector2(0, 12), PI, 0.8, hull_mod)
 	# Rotor blur.
 	var rt := float(Engine.get_physics_frames()) * 0.9
 	for i in 2:
@@ -3634,7 +3678,13 @@ func _draw_projectiles() -> void:
 		var espd := evel.length() / float(SimWorld.ENEMY_BULLET_SPEED)   # 1.0 standard, ~2.0 fast
 		var fast: bool = espd > 1.4
 		if edir.length() > 0.5:
-			draw_line(bpos - edir * (5.0 + maxf(0.0, espd - 1.0) * 6.0), bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
+			# Same fx_bullettrail streak card the player tracers wear, modulated
+			# hostile-red — incoming fire gets the identical motion vocabulary.
+			var etlen := 5.0 + maxf(0.0, espd - 1.0) * 6.0
+			draw_set_transform(bpos, edir.angle(), Vector2.ONE)
+			draw_texture_rect(Art.tex("fx_bullettrail"), Rect2(-etlen, -2.0, etlen, 4.0),
+				false, Color(1.0, 0.25, 0.25, 0.55))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# Hostile fire: small glowing red orb — ordnance, not infantry. Fast rounds
 		# burn a white-hot core so their speed reads before they reach you.
 		var egr := 4.4
@@ -3685,8 +3735,16 @@ func _draw_players() -> void:
 			for sm_k in 4:
 				var sm_off := Vector2(sin(sm_ph * 0.03 + sm_k * 1.7) * 7.0,
 					cos(sm_ph * 0.025 + sm_k * 2.3) * 5.0 - 4.0)
-				draw_circle(pos + sm_off, 8.0 + 2.0 * sin(sm_ph * 0.04 + sm_k * 0.9),
-					Color(0.75, 0.78, 0.8, sm_a))
+				# Baked smoke cards (alternating fx_smoke/fx_fumes4) with a slow
+				# view-side tumble — the 4 flat grey discs read as a UI blob, not
+				# gas. Sized via explicit rect: the two cards have different canvas
+				# norms (200px vs 1024px), so per-tex draw_scale would mismatch.
+				var sm_r := 8.0 + 2.0 * sin(sm_ph * 0.04 + sm_k * 0.9)
+				draw_set_transform(pos + sm_off, sm_ph * 0.008 + sm_k * 1.6, Vector2.ONE)
+				draw_texture_rect(Art.tex("fx_smoke" if sm_k % 2 == 0 else "fx_fumes4"),
+					Rect2(-sm_r * 1.4, -sm_r * 1.4, sm_r * 2.8, sm_r * 2.8),
+					false, Color(0.75, 0.78, 0.8, sm_a))
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# Co-op identity ring under each soldier so you never lose your guy in
 		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
 		if _two_players and p["alive"]:
@@ -4161,11 +4219,14 @@ func _draw_glow() -> void:
 			# Alphas trimmed ~0.8x vs the old mix-blend draws: a single additive glow
 			# stays tasteful, MG-spam stacks still sum white-hot without washing out.
 			var sz := (13.0 if fx.get("big", false) else 9.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
-			var dirv := Vector2.from_angle(fx["a"])
-			var pv := Vector2(-dirv.y, dirv.x)
 			var mc := Color(1.0, 0.95, 0.55, 0.8 * (0.95 - t * 0.85))
-			g.draw_line(pos, pos + dirv * sz * 1.6, mc, 2.5)
-			g.draw_line(pos - pv * sz * 0.55, pos + pv * sz * 0.55, mc, 2.0)
+			# Baked semicircle fan (flat edge at image bottom): rotate image-up onto
+			# the aim angle so the flat edge sits on the muzzle, fan blooming forward.
+			# Same lifetime/fade, still on the additive glow layer; hot core stays.
+			var fl := sz * 1.6
+			g.draw_set_transform(pos, fx["a"] + PI / 2, Vector2.ONE)
+			g.draw_texture_rect(Art.tex("fx_muzzle_fan"), Rect2(-fl * 0.7, -fl, fl * 1.4, fl), false, mc)
+			g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			g.draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.8 * (0.9 - t * 0.8)))
 		elif fx["kind"] == "spark":
 			# Ricochet: legacy art sparkle cards flung radially — armor says no.
@@ -4919,7 +4980,10 @@ func _draw_banners(top_msg: String) -> void:
 		# Radial flash: hottest at screen center, falling off toward the edges
 		# (oversized softspot card) over a faint flat base — punchier than a
 		# uniform white sheet at the same energy.
-		var fla := _flash_alpha * _motion
+		# maxf floor (6/9 panel): zeroing the wash under reduce-motion erased the
+		# whole-field-stun gestalt entirely; siblings (damage vignette, airstrike
+		# wash) keep a dimmed floor. The decay is a fade, not a strobe — RM-safe.
+		var fla := _flash_alpha * maxf(_motion, 0.4)
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, fla * 0.45))
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
 			false, Color(1, 1, 1, fla))
@@ -4986,11 +5050,21 @@ func _draw_banners(top_msg: String) -> void:
 				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
 			_banner_plate(btext, by, bsize, a)
 			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
+			# Threat-callout badge (skull/target/lightning) fronting the text —
+			# only set by the alarm banners, so routine splashes stay clean.
+			var bic: String = bn.get("icon", "")
+			if not bic.is_empty():
+				var biw := Art.font().get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, bsize).x
+				var bis := float(bsize) + 4.0
+				draw_texture_rect(Art.tex(bic),
+					Rect2(320.0 - biw / 2.0 - bis - 6.0, by - float(bsize) / 2.0 - bis / 2.0, bis, bis),
+					false, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		var vrr := _run_rank()
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
-			{"text": "RANK  %s — %s" % [vrr.grade, vrr.title], "color": vrr.col, "size": 13},
+			{"text": "RANK  %s — %s" % [vrr.grade, vrr.title], "color": vrr.col, "size": 13,
+				"icon": "mi_medal_%d" % ("DCBAS".find(vrr.grade) + 1), "icon_size": 15.0},
 			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
 			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
@@ -5016,7 +5090,9 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]
 		var rr := _run_rank()
-		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col})
+		# Grade medal (D=1 … S=5) rides the panel's existing icon slot.
+		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col,
+			"icon": "mi_medal_%d" % ("DCBAS".find(rr.grade) + 1), "icon_size": 15.0})
 		if _downed_by != "":
 			rows.insert(1, {"text": "DOWNED BY  %s" % _downed_by, "color": Color(1.0, 0.55, 0.5)})
 		if best_score > 0:
@@ -5058,8 +5134,7 @@ func _draw_banners(top_msg: String) -> void:
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
 		var hx := 320.0 - hw / 2.0 - 8.0
-		draw_rect(Rect2(hx, 92, hw + 16, 18), Color(0.05, 0.07, 0.05, 0.8 * ha))
-		draw_rect(Rect2(hx, 92, hw + 16, 18), Color(0.85, 0.9, 0.7, 0.35 * ha), false, 1.0)
+		_metal_plate(Rect2(hx, 92, hw + 16, 18), ha)
 		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, 90.0, 22, 22), false,
 			Color(1.0, 0.95, 0.75, ha))
 		Art.text_center(self, _hint_text, 320, 105, 11, Color(1.0, 0.95, 0.7, ha))
@@ -5072,8 +5147,22 @@ func _banner_plate(txt: String, y: float, size: int, a: float) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
 	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	draw_rect(Rect2(320.0 - w / 2.0 - 5.0, y - size - 2.0, w + 10.0, size + 7.0),
-		Color(0.05, 0.06, 0.04, 0.55 * a))
+	_metal_plate(Rect2(320.0 - w / 2.0 - 5.0, y - size - 2.0, w + 10.0, size + 7.0), a)
+
+
+func _metal_plate(r: Rect2, a: float) -> void:
+	# Hand 3-slice from the baked plate_metal_* set (190x230 slices): caps at the
+	# ends + a stretched center, laid over the old dark rect (text contrast) and
+	# tinted way down so it stays muted retro-metal under the text, not chrome.
+	draw_rect(r, Color(0.05, 0.06, 0.04, 0.5 * a))
+	var cap := minf(r.size.y * (190.0 / 230.0), r.size.x / 2.0)
+	var mcol := Color(0.5, 0.52, 0.5, 0.5 * a)
+	draw_texture_rect(Art.tex("plate_metal_l"), Rect2(r.position, Vector2(cap, r.size.y)), false, mcol)
+	if r.size.x > cap * 2.0:
+		draw_texture_rect(Art.tex("plate_metal_c"),
+			Rect2(r.position + Vector2(cap, 0.0), Vector2(r.size.x - cap * 2.0, r.size.y)), false, mcol)
+	draw_texture_rect(Art.tex("plate_metal_r"),
+		Rect2(r.position + Vector2(r.size.x - cap, 0.0), Vector2(cap, r.size.y)), false, mcol)
 
 
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color) -> void:
