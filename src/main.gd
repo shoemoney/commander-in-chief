@@ -847,6 +847,7 @@ func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
 	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
+	var barrel_pinged := false      # one cook-off boom per tick — a fuse chain emits several
 	var dirt_puffs := 0             # spent-round dust cap per tick — MG spam guard
 	for ev in sim.events:
 		var kind: String = ev["t"]
@@ -983,6 +984,11 @@ func _consume_events() -> void:
 				_ev_explosion(ev)
 			"barrel_blast":
 				# A fuel drum cooks off: heavy punch + a fireball light + a scorch mark.
+				# One boom per tick (a fuse chain fires several) — same idiom as the
+				# clustered explosion ping, so a ripple doesn't stack into a roar.
+				if not barrel_pinged:
+					barrel_pinged = true
+					_sfx.play_at("explosion", _to_screen(ev["x"], ev["y"]), -6.0, 0.8)
 				_trauma = minf(1.0, _trauma + 0.3)
 				_rumble = maxf(_rumble, 0.55)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
@@ -1037,6 +1043,13 @@ func _consume_events() -> void:
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % ("Y" if Art.use_pad else "E"))
+				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
+				# out with a red descending sting so it registers as a setback, not a
+				# silent reset. Flags ride the checksum-excluded event (golden-safe).
+				if ev.get("triple", false) or ev.get("pierce", false) or ev.get("spread", false):
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+						"rate": 0.02, "drop": true, "text": "LOADOUT LOST", "col": Color(0.95, 0.25, 0.2)})
+					_sfx.play("deny", -5.0, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Directional death-gore: the felling round's exit spray carries
 				# past the body, opposite the threat the wedge (_hit_dir) marks.
@@ -3687,7 +3700,10 @@ func _draw_fx() -> void:
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
 			var rise := 1.0 - (1.0 - t) * (1.0 - t)
-			var fpivot := pos + Vector2(0.0, -18.0 - rise * 22.0 - floattext_i * 11.0)
+			# A "drop" floater (e.g. LOADOUT LOST) sinks instead of rising — a felt
+			# down-beat. Default is the rise every other callout uses.
+			var fydir: float = 1.0 if fx.get("drop", false) else -1.0
+			var fpivot := pos + Vector2(0.0, fydir * (18.0 + rise * 22.0) - floattext_i * 11.0)
 			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
