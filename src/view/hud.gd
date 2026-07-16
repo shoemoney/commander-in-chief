@@ -363,7 +363,8 @@ func _draw() -> void:
 				# one dialect with the shop strip and the spend wheel's socket mark.
 				var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
 				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
-				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0)
+				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
+					Color.WHITE, i == 1)
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
@@ -392,12 +393,13 @@ func _draw() -> void:
 					# this HUD (RALLYING/fuel/SHOP OPEN) — ceil grammar from the
 					# fuel dial, so it reads 3s → 2s → 1s → boom.
 					var bx := _text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
-					Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
+					Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
+						Color.WHITE, i == 1)
 			else:
 				# The sim decrements pierce/spread/rend/smoke unconditionally while
 				# riding — without the shared chip row a Trench Gun expired invisibly
 				# mid-ride and the 2s red expiry warning could never fire in a tank.
-				px = _buff_chips(p, px, ry)
+				px = _buff_chips(p, px, ry, i)
 		else:
 			# Low-ammo escalation: amber under 20, blinking red when dry.
 			var ammo: int = p["mg_ammo"]
@@ -454,7 +456,7 @@ func _draw() -> void:
 			var roll_x := px
 			var roll_ready: bool = p["roll_cd"] == 0
 			Art.draw_glyph(self, "roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
-				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6))
+				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6), i == 1)
 			px = roll_x + ICON + 2.0
 			if p["roll_cd"] > 0:
 				var rfrac := clampf(float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS), 0.0, 1.0)
@@ -462,7 +464,7 @@ func _draw() -> void:
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * rfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-			px = _buff_chips(p, px, ry)
+			px = _buff_chips(p, px, ry, i)
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
 			if p["boost_ticks"] > 0:
@@ -505,7 +507,7 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 ## Vest + timed-buff + claymore chip run, shared by the on-foot AND in-tank player
 ## rows — the sim decrements the buff timers unconditionally while riding, so the
 ## tank row must show (and expiry-warn) the same chips instead of dropping them.
-func _buff_chips(p: Dictionary, px: float, ry: float) -> float:
+func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	if p["vest"]:
 		draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 		px += ICON + 2.0
@@ -530,7 +532,8 @@ func _buff_chips(p: Dictionary, px: float, ry: float) -> float:
 	# glyph rides along so "how do I plant this" never dead-ends here.
 	if p["claymores"] > 0:
 		px = _stat("wep_claymore", "x%d" % p["claymores"], px, ry, Color(0.75, 0.9, 0.6))
-		Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0)
+		Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
+			Color.WHITE, pi == 1)
 		px += 12.0
 	return px
 

@@ -540,9 +540,12 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
 
 
-static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE) -> void:
+static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false) -> void:
+	# force_pad: P2 is hardwired to pad 1 (main._gather_inputs), so P2's OWN
+	# prompts must show pad buttons even while P1's mouse aim keeps the global
+	# use_pad false — per-player call sites pass `i == 1`.
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
-	if use_pad:
+	if use_pad or force_pad:
 		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false, mod)
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88) * mod)
