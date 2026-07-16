@@ -15,6 +15,7 @@ var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
 var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
+var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
@@ -256,7 +257,7 @@ func _draw() -> void:
 	# rollover digits never overhang the backing for a frame.
 	RenderingServer.canvas_item_clear(_plate_ci)
 	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
-		Rect2(2, 2, clampf(row_r + 4.0, 262.0, RIGHT - 2.0), panel_h),
+		Rect2(2, 2, clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0), panel_h),
 		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.9))
 
 	# Shop preview strip: the 4 buyables at a glance (cost + green/red
@@ -274,6 +275,7 @@ func _draw() -> void:
 		ry += 16.0
 
 	# Player rows.
+	var prow := 0.0
 	for i in sim.players.size():
 		var p := sim.players[i]
 		var px := 8.0
@@ -366,6 +368,8 @@ func _draw() -> void:
 				px = _stat("wep_rifle", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, Color(0.6, 0.95, 1.0))
 			if p["spread_ticks"] > 0:
 				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, Color(1.0, 0.8, 0.5))
+			if p["triple"]:
+				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
 			if p["rend_ticks"] > 0:
 				px = _stat("wep_mg", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, Color(1.0, 0.55, 0.4))
 			if p["smoke_ticks"] > 0:
@@ -382,7 +386,9 @@ func _draw() -> void:
 				px = _pip(px, ry, Color(0.4, 0.95, 1.0), ">")
 			if sim._in_water(p["x"], p["y"]):
 				px = _pip(px, ry, Color(0.5, 0.8, 1.0), "~")
+		prow = maxf(prow, px)
 		ry += 16.0
+	_prow_r = prow
 
 	_accessibility_pips()
 

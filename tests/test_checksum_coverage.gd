@@ -18,7 +18,7 @@ const KNOWN := {
 	"player": ["idx", "x", "y", "aim_x", "aim_y", "alive", "deaths", "mg_ammo", "grenade_ammo",
 		"fire_cd", "grenade_cd", "broke_timer", "roll_ticks", "roll_cd", "roll_buf",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
-		"vest", "hurt_iframes", "pierce_ticks", "spread_ticks",
+		"vest", "hurt_iframes", "pierce_ticks", "spread_ticks", "triple",
 		"rend_ticks", "smoke_ticks", "claymores"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell"],
@@ -33,6 +33,7 @@ const KNOWN := {
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	"mine": ["x", "y", "armed", "friendly"],
+	"barrel": ["x", "y", "armed"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
 		"core_cd", "core_open"],
@@ -78,6 +79,8 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("enemy_bullet", eb)
 		for m in sim.mines:
 			_check("mine", m)
+		for bl in sim.barrels:
+			_check("barrel", bl)
 		for s in sim.strikes:
 			_check("strike", s)
 		for w in sim.waters:
@@ -92,7 +95,7 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("colossus", sim.colossus)
 		if not sim.endless_boss.is_empty():
 			_check("boss", sim.endless_boss)
-	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone"]:
+	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone", "mg_nest"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 
 
@@ -114,6 +117,7 @@ func _stage(kind: String) -> SimWorld:
 	sim._spawn_special(260 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sapper")
 	sim._spawn_special(380 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "ghillie")
 	sim._spawn_special(160 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "drone")
+	sim._spawn_mg_nest(500 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE)
 	return sim
 
 

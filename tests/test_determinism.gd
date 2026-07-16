@@ -84,13 +84,25 @@ const SEED := 0xDEADBEEF
 ## rare capsule (same rng draw count either way), the endless torture wipes at wave 2 before any
 ## special spawns, and no torture player ever holds smoke/claymores — so every changed path is
 ## golden-inert here and proven instead by the direct tests in test_mechanics/test_observer.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 29 — Explosive Fuel Barrels): a new
+## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
+## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
+## structural add shifts every endless sample too.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
+## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
+## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
+## RE-RECORDED (2026-07-16, PR#9 reconcile merge): origin/main's grafted iters (Triple Shot kind 6
+## w/ hashed p["triple"], Explosive Fuel Barrels barrels[] block, MG-nest emplacement) merged with
+## this branch's capsule stack — the four tools renumber 7=Rend/8=Claymore/9=Smoke/10=Flashbang,
+## the rare table becomes a 10-entry weighted pick [4,4,5,5,6,6,7,8,9,10], and the endless special
+## roll widens 0..7 → 0..8 to seat drone AND mg_nest. Union sim = new state stream in both modes.
 const GOLDEN: Array[int] = [
-	6881935581614822723,
-	4879838447662794480,
-	2198325912895373288,
-	6706819898954627062,
-	3010519642405925012,
-	6903141292426660752,
+	8422831759359552435,
+	7568204556783353249,
+	2250169827864321848,
+	6186396691166597871,
+	9127211295622998863,
+	1261887275657627611,
 ]
 
 
@@ -153,13 +165,21 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## the Recon Drone (rng values shift on every special spawn).
 ## VERIFIED UNCHANGED (2026-07-16, design-loop iter1): see GOLDEN note — the wave-2 wipe keeps
 ## the torture short of every touched endless path (specials, capsules, drones).
+## RE-RECORDED (2026-07-16, grafted design-loop iter 29 — Explosive Fuel Barrels): a new
+## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
+## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
+## structural add shifts every endless sample too.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
+## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
+## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
+## RE-RECORDED (2026-07-16, PR#9 reconcile merge): see GOLDEN note.
 const ENDLESS_GOLDEN: Array[int] = [
-	6939951692539117039,
-	4671723467842338406,
-	3153443996219769528,
-	1832279794560748576,
-	7776770503295677544,
-	9184766731615844432,
+	2235960687345413449,
+	2380765536200709976,
+	3058470567505438014,
+	6687158149247349942,
+	7306203801979240590,
+	8228958824033731846,
 ]
 
 

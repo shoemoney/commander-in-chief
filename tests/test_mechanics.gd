@@ -151,8 +151,8 @@ func test_rend_rounds_punch_through_the_shield_block() -> void:
 func test_claymore_plants_on_interact_and_consumes_a_charge() -> void:
 	var sim := SimWorld.new(12, 1)
 	var p := sim.players[0]
-	sim._apply_supply(p, 7)
-	sim._apply_supply(p, 7)
+	sim._apply_supply(p, 8)
+	sim._apply_supply(p, 8)
 	Runner.T.eq(p["claymores"], 2, "capsule grants carried charges")
 	sim.step([SimInput.new()])   # let the initial world-stream settle
 	var before := sim.mines.size()
@@ -195,7 +195,7 @@ func test_flashbang_stuns_field_enemies_then_releases() -> void:
 	sim._spawn_enemy(320 * Fixed.ONE, p["y"] - 120 * Fixed.ONE, false)
 	var e := sim.enemies[0]
 	var y0: int = e["y"]
-	sim._apply_supply(p, 9)
+	sim._apply_supply(p, 10)
 	Runner.T.eq(sim.flash_ticks, SimWorld.FLASH_STUN_TICKS, "flashbang arms the stun window")
 	sim.step([SimInput.new()])
 	Runner.T.eq(e["y"], y0, "stunned rusher holds position")

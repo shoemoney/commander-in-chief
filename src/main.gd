@@ -175,6 +175,7 @@ const _EVENT_SOUND := {
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
+	"mg_nest_aim": ["tank_board", -11.0, 1.4],
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -837,11 +838,11 @@ func _consume_events() -> void:
 				# First-grab teaching: the new capsules are rules, not just stats —
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
-					6: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
-					7: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
+					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
+					8: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
 						% ("X" if Art.use_pad else "F"))
-					8: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
-					9: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
+					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
+					10: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
 		elif kind == "explosion":
@@ -940,6 +941,14 @@ func _consume_events() -> void:
 					"sz": 22.0, "fade": 1.6, "rate": 0.15, "rot": taim.angle(), "col": Color(1.0, 0.85, 0.5, 0.8)})
 			"explosion":
 				_ev_explosion(ev)
+			"barrel_blast":
+				# A fuel drum cooks off: heavy punch + a fireball light + a scorch mark.
+				_trauma = minf(1.0, _trauma + 0.3)
+				_rumble = maxf(_rumble, 0.55)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"kill":
 				_ev_kill(ev)
 			"bounty_kill":
@@ -2205,12 +2214,12 @@ const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contrac
 # ground draw, the collect callout and the off-screen marker. Always index via
 # clampi(kind - 4, 0, size-1) — an unknown kind must degrade, never crash (the
 # kind-4/5 glyph OOB bug once errored the pickup draw every frame).
-const _CAPSULE_TEX: Array[String] = ["wep_rifle", "wep_shotgun", "wep_mg",
+const _CAPSULE_TEX: Array[String] = ["wep_rifle", "wep_shotgun", "wep_mg", "wep_mg",
 	"wep_claymore", "wep_smoke", "wep_flashbang"]
-const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "REND", "CLAYMORE", "SMOKE", "FLASH"]
-const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "REND ROUNDS!",
-	"CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
-const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45),
+const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH"]
+const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
+	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
+const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
 	Color(1.0, 0.55, 0.4), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]
 
 
@@ -2262,6 +2271,7 @@ func _draw() -> void:
 	_draw_scorch()
 	_draw_water()
 	_draw_mines()
+	_draw_barrels()
 	_draw_gates()
 	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
 	# field bunkers stream in independently and look identical otherwise.
@@ -2513,6 +2523,19 @@ func _draw_mines() -> void:
 		draw_circle(mp, 2.0, Color(mc.r, mc.g, mc.b, 0.65 + mb * 0.35))
 
 
+func _draw_barrels() -> void:
+	for bl in sim.barrels:
+		if not bl["armed"]:
+			continue
+		var bp := _to_screen(bl["x"], bl["y"])
+		_ground_shadow(bp, 4.0)
+		# Hazard-orange live ordnance, distinct from the mossy scenery barrels.
+		var wb := 1.0 if _motion < 0.5 else Art.pulse(0.09)   # steady under reduce-motion
+		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
+		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
+		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
+
+
 func _draw_water() -> void:
 	for w in sim.waters:
 		var wy := _to_screen(0, w["y"]).y
@@ -2620,7 +2643,7 @@ func _draw_pickups() -> void:
 			# out-of-range glyph lookup below is skipped — those kinds have no icon).
 			var cap_i: int = clampi(pk["kind"] - 4, 0, _CAPSULE_LABEL.size() - 1)
 			var pcol := _CAPSULE_COL[cap_i]
-			var pg := Art.pulse(0.18)
+			var pg := 1.0 if _motion < 0.5 else Art.pulse(0.18)   # steady under reduce-motion
 			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
@@ -2868,6 +2891,19 @@ func _draw_enemies() -> void:
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
 			var spp := Art.pulse(0.25)
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+		elif e["kind"] == "mg_nest":
+			# Rooted emplacement: sandbag nest + gunner + a burst-line telegraph
+			# flashing down the LOCKED vector while it rakes.
+			_spr("sandbag_beige", epos, 0.0, 0.5, Color(0.82, 0.8, 0.62))
+			_spr("elite", epos + Vector2(0, -2), face, 0.4, Color(0.9, 0.85, 0.7))
+			if e.get("lunge_ticks", 0) > 0:
+				var lv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+				if lv.length() > 1.0:
+					var ld := lv.normalized()
+					# Red lethal-lane vocabulary (matches the sniper "get off this line"),
+					# long enough to read as a whole lane, louder than a windup (ACTIVE fire).
+					draw_line(epos, epos + ld * 44.0, Color(1.0, 0.15, 0.12, 0.7), 2.0)
+					draw_circle(epos + ld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
