@@ -21,6 +21,9 @@ uniform vec4 shallow_col : source_color = vec4(0.21, 0.44, 0.47, 1.0);
 uniform vec4 deep_col : source_color = vec4(0.08, 0.19, 0.31, 1.0);
 uniform float speed : hint_range(0.0, 2.0) = 0.32;
 uniform float phase = 0.0;   // per-band time offset so two visible bands never ripple in lockstep
+// One expanding splash ring (wet explosion): center in band UV, t 1→0 as it spreads.
+uniform vec2 splash_uv = vec2(-10.0, 0.5);
+uniform float splash_t = 0.0;
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 345.45));
@@ -80,6 +83,15 @@ void fragment() {
 	// Shore foam at the top/bottom edges where the noise peaks.
 	float foam = smoothstep(0.90, 1.0, ripple) * (1.0 - bank);
 	col += vec3(0.42, 0.46, 0.44) * foam * 0.35;
+
+	// Wet-blast splash ring: an expanding foam circle displacing the surface —
+	// a river detonation used to leave the water glass-calm underneath it.
+	if (splash_t > 0.001) {
+		// Aspect-correct so the ring is round on the wide, short band.
+		float sd = length((uv - splash_uv) * vec2(rect_size.x / rect_size.y, 1.0));
+		float sring = smoothstep(0.14, 0.02, abs(sd - (1.0 - splash_t) * 1.5)) * splash_t;
+		col += vec3(0.55, 0.60, 0.58) * sring;
+	}
 
 	// Dry ford: fade the water to transparent across the crossing so the sand
 	// strip (drawn over the grass gap in main.gd) reads as a dry path; a soft

@@ -86,7 +86,7 @@ var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play u
 var _scan_mat: ShaderMaterial        # CRT scanline quad material; strength pulses on hitstop
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
-var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot] last sent to the shader
+var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot, splash_t] last sent to the shader
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
 var _music_hold := 0             # held-breath drum dropout before a big beat
@@ -118,6 +118,7 @@ var _run_best_streak := 0
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
+var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
@@ -297,7 +298,7 @@ func _setup_water() -> void:
 		r.material = m
 		add_child(r)
 		_water_rects.append(r)
-		_water_pushed.append([-1, -1.0])
+		_water_pushed.append([-1, -1.0, 0.0])
 	# Warm the water shader too (same first-draw compile hitch as screen_fx):
 	# show one rect as a 1px off-screen-bottom sliver for the boot frame —
 	# _sync_water repositions or hides it on the first real draw.
@@ -343,6 +344,18 @@ func _sync_water() -> void:
 			mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
 			mat.set_shader_parameter("shallow_col", w_shallow)
 			mat.set_shader_parameter("deep_col", w_deep)
+		# Wet-blast splash ring: only the band containing the blast animates it.
+		# Guarded like the uniforms above — pushes only while a ring is live.
+		var in_band: bool = _water_splash["t"] > 0.0 and _water_splash["y"] >= w["y"] \
+			and _water_splash["y"] < w["y"] + SimWorld.WATER_H
+		var st: float = _water_splash["t"] if in_band else 0.0
+		if absf(pushed[2] - st) > 0.004:
+			pushed[2] = st
+			var smat: ShaderMaterial = rect.material
+			smat.set_shader_parameter("splash_t", st)
+			if in_band:
+				smat.set_shader_parameter("splash_uv", Vector2((_water_splash["x"] * PX) / 640.0,
+					float(_water_splash["y"] - w["y"]) / float(SimWorld.WATER_H)))
 	for i in range(vis, _water_rects.size()):
 		_water_rects[i].visible = false
 
@@ -688,6 +701,10 @@ func _physics_process(_delta: float) -> void:
 			_check_boss_intro()
 			_down_frames = 0 if not sim._all_players_down() else _down_frames + 1
 			_rumble = 0.0   # never buzz a controller on the menu
+			# Attract steps the sim every frame and never decrements hit-stop, but
+			# _consume_events can SET it (near demo blasts) — a stuck freeze would
+			# wedge every feel gate (particles/envelopes/camera) forever. Clear it.
+			_hitstop_frames = 0
 			_update_feel()
 		else:
 			# Pause: clear the underwater LPF/duck so the menu sounds clean, and
@@ -715,6 +732,10 @@ func _physics_process(_delta: float) -> void:
 		sim.step(rin)
 		_consume_events()
 		_check_boss_intro()
+		# Replay steps the sim every frame (a recorded run can't re-freeze), so a
+		# hit-stop set by _consume_events would never decrement — clear it or the
+		# feel gates wedge frozen while the replayed world keeps moving.
+		_hitstop_frames = 0
 		_update_feel()
 		queue_redraw()
 		_update_hud()
@@ -1076,6 +1097,10 @@ func _ev_explosion(ev: Dictionary) -> void:
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
+	# Glow-decay bridge: a dimmer, slower light spanning flash → smoke, so the
+	# blast reads as combustion cooling off instead of a strobe that just stops.
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.03,
+		"r": 38.0, "col": Color(0.9, 0.45, 0.18, 0.5)})
 	# Textured hot-disc flash (legacy art fx_disc) over the procedural burst.
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
 		"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
@@ -1095,6 +1120,16 @@ func _ev_explosion(ev: Dictionary) -> void:
 				"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
 				"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
 				"col": Color(0.25, 0.22, 0.2, 0.7)})
+	else:
+		# Wet blast: the aftermath is steam, not soot — pale spray columns rising
+		# fast, plus an expanding foam ring pushed to the water shader (the river
+		# used to stay glass-calm under a detonation).
+		for si in 2:
+			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+				"sz": 15.0 + si * 6.0, "grow": 1.1, "fade": 2.0, "rate": 0.015, "move": true,
+				"vx": randf_range(-0.3, 0.3), "vy": -0.8 - si * 0.3,
+				"col": Color(0.82, 0.88, 0.9, 0.55)})
+		_water_splash = {"x": ev["x"], "y": ev["y"], "t": 1.0}
 
 
 func _ev_kill(ev: Dictionary) -> void:
@@ -1661,8 +1696,12 @@ func _update_feel() -> void:
 		_punch = _punch * 0.82 if _punch > 0.002 else 0.0
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
-	_concussion = _concussion * 0.9 if _concussion > 0.01 else 0.0   # match the multiplicative grammar above
-	_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
+	# Concussion haze + heat-warp hold through hit-stop like the other impact
+	# envelopes — the longest freezes were bleeding the residual before resume.
+	if _hitstop_frames == 0:
+		_concussion = _concussion * 0.9 if _concussion > 0.01 else 0.0   # match the multiplicative grammar above
+		_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
+		_water_splash["t"] = maxf(0.0, _water_splash["t"] - 0.03)
 	_cinematic = maxf(0.0, _cinematic - 0.004)
 	# Debrief/victory card entrance clock: eases 0→1 while a result is showing,
 	# snaps back to 0 the moment it isn't (so a restart re-plays the entrance).
@@ -1692,6 +1731,7 @@ func _update_feel() -> void:
 	# brightest frame and gibs hang mid-air through the freeze, then resume —
 	# completing the freeze-frame the held impact envelopes above start.
 	if _hitstop_frames == 0:
+		var tinks := 0   # brass-landing tick budget: 2/frame keeps MG spam from ringing
 		for i in range(_fx.size() - 1, -1, -1):
 			var fx := _fx[i]
 			fx["t"] += fx.get("rate", 0.09)
@@ -1706,6 +1746,13 @@ func _update_feel() -> void:
 				if fx["kind"] == "casing" or fx["kind"] == "gib":
 					fx["vy"] += 0.3
 			if fx["t"] >= 1.0:
+				# Brass lands with a tink (the mine-plant clink, pitched up + panned):
+				# gravity made casings fall, but the landing was mute — MG fire was
+				# all muzzle and no ground chatter.
+				if fx["kind"] == "casing" and tinks < 2:
+					tinks += 1
+					_sfx.play_at("tank_board", _to_screen(fx["x"], fx["y"]),
+						-24.0, randf_range(2.2, 2.7))
 				_fx.remove_at(i)
 		# Scheduled boss-death secondaries: each pops a full _blast_debris when its
 		# timer elapses, so detonations ripple across the wreck instead of at once.
@@ -1768,6 +1815,11 @@ func _update_feel() -> void:
 			for pad in Input.get_connected_joypads():
 				Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
 		_rumble = 0.0
+	# A held freeze-frame holds the whole transform: envelopes are pinned at peak
+	# above, but re-rolling a fresh random rattle from held trauma every frame
+	# made the "frozen" world buzz at max amplitude through the freeze.
+	if _hitstop_frames > 0:
+		return
 	# Random per-axis rattle (not a smooth Lissajous sway), biased vertical to match
 	# the scroll axis; trauma² keeps small hits subtle while big ones land.
 	var mag := _trauma * _trauma * 11.0 * _motion
@@ -3053,6 +3105,16 @@ func _draw_players() -> void:
 						Color(0.9, 0.6, 0.3, 0.55 + 0.35 * dry_pulse), 1.5)
 				else:
 					draw_arc(pos, 8.0, 0, TAU, 14, Color(1.0, 0.3, 0.25, 0.4 + 0.35 * dry_pulse), 1.5)
+			# Directional damage wedge — _hit_dir/_hit_dir_t were set on every hit,
+			# decayed in feel, and even aim the death gore, yet nothing ever DREW
+			# them: flank fire and frontal fire looked identical. A red arc on the
+			# hit body, opening toward the shooter (5 of 9 panel reviewers flagged it).
+			if i == _hit_dir_player and _hit_dir_t > 0.02 and _hit_dir.length_squared() > 0.25:
+				var wa := _hit_dir.angle()
+				draw_arc(pos, 21.0, wa - 0.55, wa + 0.55, 12,
+					Color(1.0, 0.18, 0.1, 0.85 * _hit_dir_t), 3.0)
+				draw_arc(pos, 24.0, wa - 0.3, wa + 0.3, 8,
+					Color(1.0, 0.45, 0.3, 0.5 * _hit_dir_t), 1.5)
 			if p["vest"]:
 				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
 				# Adrenaline aura: the 20-streak / tank-bail speed surge (boost_ticks) is a
