@@ -416,9 +416,9 @@ func _draw() -> void:
 			if p["triple"]:
 				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
 			if p["rend_ticks"] > 0:
-				# wep_rifle, NOT wep_mg — Triple's chip is wep_mg two lines up, and
-				# identical icons made two different buffs read as one (panel catch).
-				px = _stat("wep_rifle", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, Color(1.0, 0.55, 0.4))
+				# icon_rend, NOT wep_rifle — Pierce's chip is wep_rifle above, and
+				# tint-only difference failed for protan eyes (panel catch).
+				px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, Color(1.0, 0.55, 0.4))
 			if p["smoke_ticks"] > 0:
 				px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, Color(0.8, 0.85, 0.9))
 			# Carried claymore charges: a count, not a countdown — and the verb
