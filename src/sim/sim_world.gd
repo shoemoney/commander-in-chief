@@ -37,6 +37,26 @@ const PIERCE_TICKS := 600
 const SPREAD_TICKS := 480
 const SPREAD_COS := 64102   # cos(12°) * F_ONE
 const SPREAD_SIN := 13626   # sin(12°) * F_ONE
+# Rend Rounds power-up: a timed buff that lets MG bullets punch THROUGH a
+# shieldman's front-arc block — the shield archetype's missing item counter.
+const REND_TICKS := 480
+# Player Claymore: a carried charge (capped) planted with INTERACT on foot away
+# from any tank. Reuses the landmine array wholesale — it hurts both sides.
+const CLAYMORE_CAP := 3
+const CLAYMORE_PLANT_OFFSET := 20 * F_ONE   # behind the aim, outside its own trigger radius
+# Smoke capsule: personal concealment — while active NO enemy AI can target you
+# (one guard in _nearest_alive_player covers every ranged/mortar/chase caller).
+const SMOKE_TICKS := 300
+# Flashbang capsule: stuns the whole field roster (enemies array only — bosses,
+# the observer and the colossus shrug it off) for 1.5 s.
+const FLASH_STUN_TICKS := 90
+# Recon Drone (endless-only): a flying spotter that holds a standoff hover and
+# paints tracked mortar strikes on your CURRENT ground. Flying: never water-
+# slowed, but bullets still swat it. Reuses fire_cd/windup — no new hashed field.
+const DRONE_STANDOFF := 130 * F_ONE
+const DRONE_SPEED := 2 * F_ONE
+const DRONE_FIRE_CD_TICKS := 140
+const DRONE_WINDUP_TICKS := 45
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -221,6 +241,7 @@ var wave_spawn_cd: int = 0
 var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter)
 var intermission_ticks: int = 0
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
+var flash_ticks: int = 0           # flashbang stun: field enemies skip their step while > 0
 var colossus: Dictionary = {}
 var endless_boss: Dictionary = {}   # endless-only miniboss (reuses the gunship schema)
 var assist_mode: bool = false       # accessibility: every life starts with a flak vest (2-hit)
@@ -283,6 +304,9 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"hurt_iframes": 0,
 			"pierce_ticks": 0,
 			"spread_ticks": 0,
+			"rend_ticks": 0,
+			"smoke_ticks": 0,
+			"claymores": 0,
 		})
 
 
@@ -319,6 +343,10 @@ func step(inputs: Array) -> void:
 		kill_streak_timer -= 1
 		if kill_streak_timer == 0:
 			kill_streak = 0
+	# Flashbang stun runs down AFTER the enemy step, so a fresh bang buys the
+	# full window (the collecting tick already skipped their step).
+	if flash_ticks > 0:
+		flash_ticks -= 1
 	# A called airstrike resolves after its telegraph window (enemies keep acting
 	# through it — the buyer commits before seeing the result).
 	if pending_airstrike > 0:
@@ -369,6 +397,8 @@ func _step_players(inputs: Array) -> void:
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
 		p["pierce_ticks"] = maxi(0, p["pierce_ticks"] - 1)
 		p["spread_ticks"] = maxi(0, p["spread_ticks"] - 1)
+		p["rend_ticks"] = maxi(0, p["rend_ticks"] - 1)
+		p["smoke_ticks"] = maxi(0, p["smoke_ticks"] - 1)
 		p["roll_iframe"] = false
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
@@ -473,8 +503,15 @@ func _step_players(inputs: Array) -> void:
 		if inp.revive:
 			_try_revive(i, p)
 
-		if interact_edge:
-			_try_board_tank(i, p)
+		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0:
+			# Claymore: no tank in reach, so INTERACT plants a carried charge one
+			# step BEHIND the aim (outside its own 9px trigger). It joins mines[]
+			# wholesale — armed instantly, and it hurts both sides (1986 grammar).
+			p["claymores"] = p["claymores"] - 1
+			var cmx: int = p["x"] - Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
+			var cmy: int = p["y"] - Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
+			mines.append({"x": cmx, "y": cmy, "armed": true})
+			events.append({"t": "mine_lay", "x": cmx, "y": cmy})
 
 		# Contact with any enemy = one-hit death (roll i-frames protect;
 		# submerged frogmen must surface before they can strike).
@@ -592,6 +629,9 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["vest"] = assist_mode            # death strips upgrades (1986 rule; assist re-issues a vest)
 	p["pierce_ticks"] = 0              # ...including the Piercing Rounds buff
 	p["spread_ticks"] = 0             # ...and the Trench Gun spread buff
+	p["rend_ticks"] = 0               # ...and Rend Rounds
+	p["smoke_ticks"] = 0              # ...and the smoke concealment
+	p["claymores"] = 0                # ...and any carried claymore charges
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -646,6 +686,16 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			p["pierce_ticks"] = PIERCE_TICKS   # Piercing Rounds capsule (drop-only)
 		5:
 			p["spread_ticks"] = SPREAD_TICKS   # Trench Gun spread capsule (drop-only)
+		6:
+			p["rend_ticks"] = REND_TICKS       # Rend Rounds capsule (drop-only)
+		7:
+			p["claymores"] = mini(CLAYMORE_CAP, p["claymores"] + 1)   # a carried charge
+		8:
+			p["smoke_ticks"] = SMOKE_TICKS     # smoke concealment capsule (drop-only)
+		9:
+			# Flashbang: one field-wide stun, resolved the instant it's grabbed.
+			flash_ticks = FLASH_STUN_TICKS
+			events.append({"t": "flashbang", "x": p["x"], "y": p["y"]})
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
@@ -679,7 +729,9 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 
 # --- Tank ---
 
-func _try_board_tank(player_index: int, p: Dictionary) -> void:
+func _try_board_tank(player_index: int, p: Dictionary) -> bool:
+	## True if a tank was boarded — INTERACT falls through to the claymore plant
+	## only when there was nothing to board.
 	for t in tanks.size():
 		var tank := tanks[t]
 		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
@@ -687,7 +739,8 @@ func _try_board_tank(player_index: int, p: Dictionary) -> void:
 			tank["occupant"] = player_index
 			p["in_tank"] = t
 			events.append({"t": "tank_board", "x": tank["x"], "y": tank["y"]})
-			return
+			return true
+	return false
 
 
 func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge: bool) -> void:
@@ -838,9 +891,13 @@ func _step_bullets() -> void:
 					# opposite the shieldman's facing-toward-you) is deflected;
 					# flank it or use a grenade. Front cone ~120°.
 					if e["kind"] == "shield" and _shield_blocks(e, b):
-						events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
-						dead = true
-						break
+						# Rend Rounds: the shooter's active buff punches clean through
+						# the front-arc block — otherwise the shield eats the round.
+						var rw: int = b.get("owner", -1)
+						if rw < 0 or rw >= players.size() or players[rw]["rend_ticks"] <= 0:
+							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+							dead = true
+							break
 					_kill_enemy(e)
 					# Piercing Rounds: the shooter's active buff lets the bullet punch
 					# through the kill and keep going to the next target this tick.
@@ -972,9 +1029,9 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	if e["elite"] and not no_coin:
 		pickups.append({
 			"x": e["x"], "y": e["y"],
-			# ~1-in-6 elites drop a rare power-up capsule (Piercing or Spread);
-			# otherwise the usual Ammo/Grenade.
-			"kind": (4 + rng.range_i(0, 1)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
+			# ~1-in-6 elites drop a rare power-up capsule (Pierce/Spread/Rend/
+			# Claymore/Smoke/Flashbang, uniform); otherwise the usual Ammo/Grenade.
+			"kind": (4 + rng.range_i(0, 5)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
 		})
 
 
@@ -1014,6 +1071,8 @@ func _step_enemies() -> void:
 		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
 			enemies.remove_at(i)
 			continue
+		if flash_ticks > 0:
+			continue   # flashbang: the whole field roster is stunned in place
 		if e["kind"] == "frogman":
 			_step_frogman(e)
 			continue
@@ -1041,6 +1100,9 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "sniper":
 			_step_sniper(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "drone":
+			_step_drone(e, target, dx, dy, dlen)
 			continue
 		if e["kind"] == "shield":
 			# Advances slowly behind a frontal shield (bullet block handled in
@@ -1123,6 +1185,27 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 		e["aim_lx"] = dx   # lock the shot vector at paint start (see fire branch)
 		e["aim_ly"] = dy
 		events.append({"t": "sniper_paint", "x": e["x"], "y": e["y"]})
+
+
+func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Recon Drone (endless-only): a flying spotter that holds a standoff hover,
+	## winds up a paint, then calls a tracked mortar strike on the target's
+	## CURRENT ground via _add_strike (the strike telegraph is the dodge window).
+	## Flying: never water-slowed. Bullets still swat it; touch still kills.
+	## Reuses fire_cd/windup — no new hashed enemy field.
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			_add_strike(target["x"], target["y"])
+		return   # holds position while painting
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if dlen > DRONE_STANDOFF:
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), DRONE_SPEED)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), DRONE_SPEED)
+	elif e["fire_cd"] == 0:
+		e["fire_cd"] = DRONE_FIRE_CD_TICKS
+		e["windup"] = DRONE_WINDUP_TICKS
+		events.append({"t": "drone_windup", "x": e["x"], "y": e["y"]})
 
 
 func _step_frogman(e: Dictionary) -> void:
@@ -1221,7 +1304,10 @@ func _nearest_alive_player(x: int, y: int) -> Dictionary:
 	var best := {}
 	var best_d := 0
 	for p in players:
-		if not p["alive"]:
+		# Smoke concealment breaks LOS for EVERY targeting caller at once
+		# (rusher chase, elite/sniper aim, mortar/boss/colossus fire missions).
+		# Touch still kills — smoke hides you, it doesn't armor you.
+		if not p["alive"] or p["smoke_ticks"] > 0:
 			continue
 		var d := Fixed.mul(p["x"] - x, p["x"] - x) + Fixed.mul(p["y"] - y, p["y"] - y)
 		if best.is_empty() or d < best_d:
@@ -1515,7 +1601,7 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 6)
+				var roll := rng.range_i(0, 7)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -1526,6 +1612,8 @@ func _step_waves() -> void:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
 				elif roll == 4:
 					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
+				elif roll == 5:
+					_spawn_special(x, camera_top - 24 * F_ONE, "drone")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
@@ -1918,6 +2006,7 @@ func checksum() -> int:
 		h = feed.call(wave_mod, h)   # endless-only: campaign checksums unchanged
 	h = feed.call(intermission_ticks, h)
 	h = feed.call(pending_airstrike, h)
+	h = feed.call(flash_ticks, h)
 	h = feed.call(int(last_stand), h)
 	h = feed.call(int(wiped), h)
 	h = feed.call(int(victory), h)
@@ -1934,7 +2023,8 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
-				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"]]:
+				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"],
+				p["rend_ticks"], p["smoke_ticks"], p["claymores"]]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)

@@ -169,6 +169,8 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
+	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
+	"flashbang": ["explosion", -8.0, 2.2],   # sharp crack, not a boom
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -823,10 +825,10 @@ func _consume_events() -> void:
 			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
 			# silent stat bump. floattext + sfx + trauma are all view-only.
 			if ev.get("kind", 0) >= 4:
-				var is_pierce: bool = ev["kind"] == 4
+				var cap_i: int = clampi(int(ev["kind"]) - 4, 0, _CAPSULE_CALLOUT.size() - 1)
 				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
-					"rate": 0.013, "size": 13, "text": "PIERCING ROUNDS!" if is_pierce else "SPREAD SHOT!",
-					"col": Color(0.55, 0.95, 1.0) if is_pierce else Color(1.0, 0.82, 0.45)})
+					"rate": 0.013, "size": 13, "text": _CAPSULE_CALLOUT[cap_i],
+					"col": _CAPSULE_COL[cap_i]})
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
 		elif kind == "explosion":
@@ -988,6 +990,12 @@ func _consume_events() -> void:
 				# The sapper digs a mine in: a small low dust scuff to pair with the
 				# faint clink, so the trail he's seeding reads even before the ring.
 				_burst(ev["x"], ev["y"], "dust", 3, 0.4, 1.0, 0.4, 0.06)
+			"flashbang":
+				# Field-wide stun: ONE white wash (a single flash, never a strobe —
+				# stays under the photosensitivity line) + a shockwave ring so the
+				# frozen roster reads as an effect, not a bug.
+				_flash_alpha = maxf(_flash_alpha, 0.45)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.06})
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
@@ -2145,7 +2153,19 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contractor2",
 	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "sapper",
-	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie"}
+	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone"}
+
+# Rare capsule identity (pickup kinds 4..9): sprite/label/colour shared by the
+# ground draw, the collect callout and the off-screen marker. Always index via
+# clampi(kind - 4, 0, size-1) — an unknown kind must degrade, never crash (the
+# kind-4/5 glyph OOB bug once errored the pickup draw every frame).
+const _CAPSULE_TEX: Array[String] = ["wep_rifle", "wep_shotgun", "wep_mg",
+	"wep_claymore", "wep_smoke", "wep_flashbang"]
+const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "REND", "CLAYMORE", "SMOKE", "FLASH"]
+const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "REND ROUNDS!",
+	"CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
+const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45),
+	Color(1.0, 0.55, 0.4), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]
 
 
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
@@ -2520,9 +2540,8 @@ func _draw_pickups() -> void:
 			0: tex_name = "crate_ammo"
 			1: tex_name = "crate_grenade"
 			2: tex_name = "pickup_vest"     # real vest bake (was a blue-shifted ammo crate)
-			4: tex_name = "wep_rifle"        # Piercing Rounds capsule (elite drop)
-			5: tex_name = "wep_shotgun"      # Trench Gun / Spread capsule (elite drop)
-			_: tex_name = "crate_airstrike"
+			3: tex_name = "crate_airstrike"
+			_: tex_name = _CAPSULE_TEX[clampi(pk["kind"] - 4, 0, _CAPSULE_TEX.size() - 1)]
 		# Maxed check: the sim clamps a buy via mini() against the ammo/grenade
 		# cap (or no-ops if vest is already on), so a priced crate at cap would
 		# silently eat the coin — grey the crate and swap price for "MAXED".
@@ -2543,12 +2562,13 @@ func _draw_pickups() -> void:
 			# Rare power-up capsule (pierce/spread): a pulsing glow + ring + rising
 			# beam + label so a 1-in-6 elite drop stands out in the chaos (and the
 			# out-of-range glyph lookup below is skipped — those kinds have no icon).
-			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else Color(1.0, 0.8, 0.45)
+			var cap_i: int = clampi(pk["kind"] - 4, 0, _CAPSULE_LABEL.size() - 1)
+			var pcol := _CAPSULE_COL[cap_i]
 			var pg := Art.pulse(0.18)
 			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			Art.text(self, "PIERCE" if pk["kind"] == 4 else "SPREAD", ppos + Vector2(-13, -24), 8, pcol)
+			Art.text(self, _CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), 8, pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
@@ -2755,6 +2775,18 @@ func _draw_enemies() -> void:
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("m_soldier2", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber, own silhouette
+		elif e["kind"] == "drone":
+			# Recon drone: airborne spotter. Hover bob + an offset ground shadow
+			# sell the altitude; the amber paint-lens swells through the windup
+			# (grenadier grammar — it calls the same tracked strike).
+			var dwu: int = e.get("windup", 0)
+			var hb := sin(float(Engine.get_physics_frames()) * 0.11 + float(e["x"] % 6283) * 0.001) * 1.5
+			draw_circle(epos + Vector2(3.0, 8.0), 4.0, Color(0, 0, 0, 0.18))
+			if dwu > 0:
+				var df := 1.0 - float(dwu) / float(SimWorld.DRONE_WINDUP_TICKS)
+				draw_circle(epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
+					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
+			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: real courier bake (the loot pack is in the
 			# sprite now); the pulsing gold ring stays — "catch this one" must
@@ -3167,6 +3199,18 @@ func _draw_players() -> void:
 				angle = lerp_angle(angle, PI / 2, de_res)
 				mod = mod.lerp(Color(0.35, 0.35, 0.35, 0.6), de_res)
 			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
+			# Smoke concealment: a drifting grey shroud over the soldier while the
+			# sim's smoke_ticks guard blinds enemy targeting; it thins out over the
+			# final second so the expiry never blindsides you.
+			if p["smoke_ticks"] > 0:
+				var sm_frac := clampf(float(p["smoke_ticks"]) / float(SimWorld.SMOKE_TICKS), 0.0, 1.0)
+				var sm_a := 0.45 * minf(1.0, sm_frac * 5.0)
+				var sm_ph := float(Engine.get_physics_frames() + i * 43)
+				for sm_k in 4:
+					var sm_off := Vector2(sin(sm_ph * 0.03 + sm_k * 1.7) * 7.0,
+						cos(sm_ph * 0.025 + sm_k * 2.3) * 5.0 - 4.0)
+					draw_circle(pos + sm_off, 8.0 + 2.0 * sin(sm_ph * 0.04 + sm_k * 0.9),
+						Color(0.75, 0.78, 0.8, sm_a))
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
 			# (draining arc while the bash swing is on cooldown, steady dry
@@ -3759,7 +3803,8 @@ func _draw_threat_edges() -> void:
 		var sy: float = (e["y"] - sim.camera_top) * PX
 		if sy <= 364.0 and (sy >= 0.0 or sy < -180.0):
 			continue
-		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
+		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" \
+			or e["kind"] == "ghillie" or e["kind"] == "drone"
 		if sy > 364.0:
 			bottom_threats.append({"e": e, "off": sy, "danger": danger})
 		else:
@@ -3944,11 +3989,11 @@ func _draw_objective_markers() -> void:
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
 				"icon": "hud_gunshop", "col": Color(0.6, 0.9, 1.0), "pr": 2})
 		elif pk["kind"] >= 4:
-			# Rare power-up capsule (pierce/spread) — the game makes a fuss on pickup but
-			# never pointed you to it; colour-keyed cyan/amber like the ground glow.
+			# Rare power-up capsule — the game makes a fuss on pickup but never
+			# pointed you to it; colour-keyed to match the ground glow.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
 				"icon": "hud_gunshop", "pr": 2,
-				"col": Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else Color(1.0, 0.8, 0.45)})
+				"col": _CAPSULE_COL[clampi(pk["kind"] - 4, 0, _CAPSULE_COL.size() - 1)]})
 		else:
 			# Free crate (guaranteed gate cache) — supplies worth pathing to.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
@@ -4190,7 +4235,7 @@ func _draw_threat_pips() -> void:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
 		var k: String = e["kind"]
-		if k != "sniper" and k != "grenadier" and k != "ghillie":
+		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone":
 			continue
 		var sp := _to_screen(e["x"], e["y"])
 		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:
@@ -4199,7 +4244,8 @@ func _draw_threat_pips() -> void:
 		var dir := (sp - edge).normalized()
 		if dir == Vector2.ZERO:
 			continue
-		var col := Color(1.0, 0.7, 0.25) if k == "grenadier" else Color(1.0, 0.32, 0.32)
+		# Amber = incoming AREA strike (grenadier lob / drone paint), red = aimed shot.
+		var col := Color(1.0, 0.7, 0.25) if (k == "grenadier" or k == "drone") else Color(1.0, 0.32, 0.32)
 		var pf := 1.0 if _motion < 0.5 else Art.pulse(0.12)   # steady under reduce-motion
 		var perp := Vector2(-dir.y, dir.x)
 		var tip := edge + dir * (7.0 + pf * 3.0)

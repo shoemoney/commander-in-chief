@@ -127,3 +127,81 @@ func test_boss_and_observer_kills_carry_their_kind() -> void:
 		if e["t"] == "kill" and e.get("kind", "") == "observer":
 			observer_kind = e["kind"]
 	Runner.T.eq(observer_kind, "observer", "observer kill event carries kind == observer")
+
+
+func test_rend_rounds_punch_through_the_shield_block() -> void:
+	var sim := SimWorld.new(11, 1)
+	var p := sim.players[0]
+	# Shield ABOVE the player: its facing (toward the nearest player) points
+	# south, so a bullet travelling north arrives square into the front arc.
+	sim._spawn_special(320 * Fixed.ONE, p["y"] - 100 * Fixed.ONE, "shield")
+	var e := sim.enemies[0]
+	sim.bullets.append({"x": e["x"], "y": e["y"] + 6 * Fixed.ONE,
+		"vx": 0, "vy": -Fixed.ONE, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.ok(e["alive"], "without Rend the front arc blocks the round")
+	Runner.T.eq(sim.bullets.size(), 0, "the blocked round dies on the shield")
+	p["rend_ticks"] = 100
+	sim.bullets.append({"x": e["x"], "y": e["y"] + 6 * Fixed.ONE,
+		"vx": 0, "vy": -Fixed.ONE, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.ok(not e["alive"], "with Rend the same round punches through the block")
+
+
+func test_claymore_plants_on_interact_and_consumes_a_charge() -> void:
+	var sim := SimWorld.new(12, 1)
+	var p := sim.players[0]
+	sim._apply_supply(p, 7)
+	sim._apply_supply(p, 7)
+	Runner.T.eq(p["claymores"], 2, "capsule grants carried charges")
+	sim.step([SimInput.new()])   # let the initial world-stream settle
+	var before := sim.mines.size()
+	var inp := SimInput.new()
+	inp.interact = true
+	sim.step([inp])
+	Runner.T.eq(sim.mines.size(), before + 1, "INTERACT on foot plants an armed mine")
+	Runner.T.eq(p["claymores"], 1, "the plant consumes one charge")
+	var m: Dictionary = sim.mines[sim.mines.size() - 1]
+	Runner.T.ok(m["armed"], "the planted claymore is armed")
+	Runner.T.ok(not sim._dist_lte(p["x"], p["y"], m["x"], m["y"], SimWorld.MINE_TRIGGER_RADIUS),
+		"the plant lands outside its own trigger radius")
+
+
+func test_smoke_conceals_from_all_targeting() -> void:
+	var sim := SimWorld.new(13, 1)
+	var p := sim.players[0]
+	Runner.T.ok(not sim._nearest_alive_player(0, 0).is_empty(),
+		"unsmoked player is targetable")
+	p["smoke_ticks"] = 100
+	Runner.T.ok(sim._nearest_alive_player(0, 0).is_empty(),
+		"smoked player vanishes from every targeting caller")
+
+
+func test_flashbang_stuns_field_enemies_then_releases() -> void:
+	var sim := SimWorld.new(14, 1)
+	var p := sim.players[0]
+	sim._spawn_enemy(320 * Fixed.ONE, p["y"] - 120 * Fixed.ONE, false)
+	var e := sim.enemies[0]
+	var y0: int = e["y"]
+	sim._apply_supply(p, 9)
+	Runner.T.eq(sim.flash_ticks, SimWorld.FLASH_STUN_TICKS, "flashbang arms the stun window")
+	sim.step([SimInput.new()])
+	Runner.T.eq(e["y"], y0, "stunned rusher holds position")
+	sim.flash_ticks = 0
+	sim.step([SimInput.new()])
+	Runner.T.ok(e["y"] != y0, "released rusher advances again")
+
+
+func test_drone_paints_a_tracked_strike() -> void:
+	var sim := SimWorld.new(15, 1, "endless")
+	var p := sim.players[0]
+	sim._spawn_special(320 * Fixed.ONE, p["y"] - 60 * Fixed.ONE, "drone")
+	var e := sim.enemies[0]
+	e["fire_cd"] = 0
+	var painted := false
+	for t in 120:
+		sim.step([SimInput.new()])
+		if not sim.strikes.is_empty():
+			painted = true
+			break
+	Runner.T.ok(painted, "the drone paints a tracked mortar strike within one cycle")

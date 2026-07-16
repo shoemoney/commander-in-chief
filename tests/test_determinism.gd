@@ -69,13 +69,18 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 27): Spread Shot / Trench Gun — a 2nd power-up capsule (kind 5,
 ## new checksummed player field spread_ticks) firing a 3-bullet fan; the elite drop table now
 ## rolls a rare capsule (pierce OR spread), shifting rng on every elite kill → all samples moved.
+## RE-RECORDED (2026-07-16, sim gameplay backlog): four new capsules — Rend (kind 6, bullets punch
+## the shield block), Claymore (kind 7, INTERACT plants a mine), Smoke (kind 8, breaks all enemy
+## targeting), Flashbang (kind 9, field-wide stun) — plus the endless Recon Drone spotter. New
+## checksummed state: player rend_ticks/smoke_ticks/claymores + world flash_ticks; the rare-drop
+## table widens to six capsules (rng values shift on every elite kill) → all samples moved.
 const GOLDEN: Array[int] = [
-	1942392792714788905,
-	5254693104462641548,
-	1869508768180451128,
-	2957909663780844898,
-	1766040305575453794,
-	2825294671139700342,
+	6881935581614822723,
+	4879838447662794480,
+	2198325912895373288,
+	6706819898954627062,
+	3010519642405925012,
+	6903141292426660752,
 ]
 
 
@@ -133,13 +138,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
+## RE-RECORDED (2026-07-16, sim gameplay backlog): see GOLDEN note — new hashed player/world
+## fields shift the endless stream too, and the wave-3+ special roll widens 0..6 → 0..7 to seat
+## the Recon Drone (rng values shift on every special spawn).
 const ENDLESS_GOLDEN: Array[int] = [
-	8681953085351081569,
-	6059987203174684048,
-	3174963771928234834,
-	1740422521085536138,
-	2445779400911443234,
-	7263092349450529370,
+	6939951692539117039,
+	4671723467842338406,
+	3153443996219769528,
+	1832279794560748576,
+	7776770503295677544,
+	9184766731615844432,
 ]
 
 
@@ -198,6 +206,7 @@ func _specials_run() -> int:
 	sim._spawn_special(200 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "grenadier")
 	sim._spawn_special(440 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "sniper")
 	sim._spawn_special(320 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "shield")
+	sim._spawn_special(260 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "drone")
 	for tick in 400:
 		sim.step([scripted_input(tick, 0)])
 	return sim.checksum()
