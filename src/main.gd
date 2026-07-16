@@ -58,6 +58,7 @@ var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _rumble_on := true            # accessibility: gamepad vibration on/off
+var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
 var no_autopause := false         # set by dev harnesses whose window never holds focus
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyboard 8-way aim snapped in 45° pops (enemies already lerp via _enemy_face)
@@ -108,6 +109,7 @@ var _hit_dir_player := 0         # which player's body the wedge emanates from
 var _downed_by := ""             # label of the last lethal source, shown in the K.I.A. debrief
 var _record_fired := false       # NEW RECORD banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
+var _boss_hpmax := {}            # view-side max HP seen per boss key: the endless gunship spawns above BOSS_HP (sim_world.gd:1581), which pegged its bar at 100% for half the fight
 var _seen := {}                  # persisted first-time-hint flags
 var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
@@ -213,16 +215,9 @@ func _ready() -> void:
 	# in-tree) and created the SFX/Music buses. Move _sfx to an autoload or deferred
 	# add and this silently no-ops (get_bus_index returns -1).
 	_load_bests()
-	# The OS arrow floated over the battlefield (mouse is the default keyboard-
-	# player aim device, LMB fires). Restyle it as a small crosshair baked from
-	# the game's own reticle art — menus keep a working, clickable pointer.
-	var cur_img := Art.tex("ui_reticle").get_image()
-	if cur_img.is_compressed():
-		cur_img.decompress()   # reticle ships VRAM-compressed; resize needs raw pixels
-	cur_img.resize(24, 24, Image.INTERPOLATE_LANCZOS)
-	_cursor_crosshair = ImageTexture.create_from_image(cur_img)
-	Input.set_custom_mouse_cursor(_cursor_crosshair,
-		Input.CURSOR_ARROW, Vector2(12, 12))
+	# Deferred: fullscreen (restored in _load_bests) resizes the window after
+	# this frame, and the cursor bake reads the window size for its scale.
+	call_deferred("_bake_cursor")
 	_reset()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
@@ -543,6 +538,7 @@ func _reset() -> void:
 	_hit_dir_t = 0.0
 	_record_fired = false
 	_boss_ghost.clear()
+	_boss_hpmax.clear()
 	_punch = 0.0
 	_fade = 0.0
 	_duck = 0.0
@@ -585,7 +581,35 @@ func _joy_brand(device: int) -> String:
 	return brand
 
 
+func _bake_cursor() -> void:
+	# The OS arrow floated over the battlefield (mouse is the default keyboard-
+	# player aim device, LMB fires). Restyle it as a crosshair baked from the
+	# game's own reticle art — menus keep a working, clickable pointer.
+	# OS cursors render in PHYSICAL pixels and ignore the viewport stretch, so
+	# bake at the window's integer scale (24px at 1x looked half-size at 2x).
+	var win := DisplayServer.window_get_size()
+	var s := maxi(1, mini(win.x / 640, win.y / 360))
+	var cur_img := Art.tex("ui_reticle").get_image()
+	if cur_img.is_compressed():
+		cur_img.decompress()   # reticle ships VRAM-compressed; resize needs raw pixels
+	cur_img.resize(24 * s, 24 * s, Image.INTERPOLATE_LANCZOS)
+	_cursor_crosshair = ImageTexture.create_from_image(cur_img)
+	Input.set_custom_mouse_cursor(_cursor_crosshair,
+		Input.CURSOR_ARROW, Vector2.ONE * 12.0 * s)
+
+
 func _input(event: InputEvent) -> void:
+	# Fullscreen: F11 / Alt+Enter — the game had NO fullscreen path at all.
+	# Handled in _input so it works with menus open; persisted with settings.
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
+			_fullscreen = not _fullscreen
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
+				if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
+			call_deferred("_bake_cursor")   # cursor scale follows the new window size
+			_save_settings()
+			get_viewport().set_input_as_handled()
+			return
 	# Track the LAST-USED device so glyphs/legends teach the right buttons —
 	# a merely-connected idle pad shouldn't override an active keyboard.
 	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
@@ -1468,6 +1492,9 @@ func _load_bests() -> void:
 			cf.get_value("settings", "sfx_muted", false))
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"),
 			cf.get_value("settings", "music_muted", false))
+		_fullscreen = cf.get_value("settings", "fullscreen", false)
+		if _fullscreen:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 
 func _save_settings() -> void:
@@ -1480,6 +1507,7 @@ func _save_settings() -> void:
 		"rumble": _rumble_on,
 		"sfx_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")),
 		"music_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")),
+		"fullscreen": _fullscreen,
 	})
 
 
@@ -1577,6 +1605,10 @@ func _track_bests() -> void:
 
 
 func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
+	# No dupe-stacking: PERFECT DODGE! can re-fire every 24 frames and used to
+	# queue itself several deep.
+	if not _banners.is_empty() and _banners.back()["text"] == text:
+		return
 	_banners.append({"text": text, "t": 1.0, "col": col})
 
 
@@ -1717,7 +1749,10 @@ func _update_feel() -> void:
 	_flash_alpha = _flash_alpha * 0.7 if _flash_alpha > 0.01 else 0.0
 	_damage_vignette = maxf(0.0, _damage_vignette - 0.02)
 	if not _banners.is_empty():
-		_banners[0]["t"] -= 0.008
+		# Depth-scaled drain: a lone banner keeps its full ~2s, but a backlog
+		# fast-forwards — GUNSHIP INBOUND used to surface 6s stale behind
+		# PERFECT DODGE! vanity news (4 of 7 lenses flagged the FIFO).
+		_banners[0]["t"] -= 0.008 * (1.0 + 0.75 * float(_banners.size() - 1))
 		if _banners[0]["t"] <= 0.0:
 			_banners.pop_front()
 	for _hi in _hitmarker.size():
@@ -2034,7 +2069,10 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 	## SimInput.buy value (kind + 1) for exactly one tick on purchase.
 	var w := _wheel[i]
 	if held:
+		if not w["open"]:
+			w["t"] = 0.0   # entrance envelope: the wheel used to teleport on at full size
 		w["open"] = true
+		w["t"] = lerpf(float(w.get("t", 1.0)), 1.0, 0.35)
 		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
 		# selection used to be a one-way trap: any flick force-bought on release.
 		var cancel := Input.is_key_pressed(KEY_C)
@@ -2840,8 +2878,11 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 		draw_line(bpos - Vector2.from_angle(a) * 26.0, bpos + Vector2.from_angle(a) * 26.0,
 			Color(0.85, 0.85, 0.85, 0.5), 2.0)
 	draw_circle(bpos, 3.5, Color(0.3, 0.3, 0.35))
-	var bfrac := minf(1.0, float(boss["hp"]) / float(SimWorld.BOSS_HP))
 	var bkey := "boss%d" % boss["gate_y"]
+	# Divide by the most HP this boss has ever shown, not the campaign constant —
+	# exact for any scaling without duplicating the sim's spawn formula.
+	_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
+	var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
 	# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
 	# bar, ~1618): the boss's screen pos can sit above the held camera or
 	# off-screen, and a world-anchored bar would go with it. Stacked by
@@ -3755,7 +3796,7 @@ func _draw_threat_edges() -> void:
 			near_x = clampf(sim.observer["x"] * PX, 8.0, 632.0)
 			near_found = true
 	if near_found:
-		var bp := Art.pulse(0.25)
+		var bp := 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady under reduce-motion
 		var bcol := Color(1.0, 0.3, 0.2, 0.55 + bp * 0.35)
 		draw_line(Vector2(near_x - 6, 14), Vector2(near_x, 5), bcol, 2.5)
 		draw_line(Vector2(near_x, 5), Vector2(near_x + 6, 14), bcol, 2.5)
@@ -3781,7 +3822,7 @@ func _draw_threat_edges() -> void:
 			if rsy >= 0.0 and rsy <= 360.0:
 				continue   # on screen already — the body beacon covers it
 			var rx := clampf(dp2["x"] * PX, 8.0, 632.0)
-			var rp := Art.pulse(0.3)
+			var rp := 1.0 if _motion < 0.5 else Art.pulse(0.3)   # steady under reduce-motion
 			var rcol := Art.safe(Color(0.5, 0.9, 1.0, 0.6 + rp * 0.3))
 			# Label clamps by its own width (rx pins to 8/632 at the corners, and
 			# rx-18 used to start the text off-screen there).
@@ -3817,8 +3858,7 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	## chevrons: ties prefer the lethal ranged killers, capped to the
 	## nearest 6 so a dense swarm can't paint a solid warning row.
 	threats.sort_custom(_cmp_threat_top if is_top else _cmp_threat_bottom)
-	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
-	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
+	var _panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
 	for i in mini(6, threats.size()):
 		var e: Dictionary = threats[i]["e"]
 		var off: float = threats[i]["off"]
@@ -3914,8 +3954,7 @@ func _draw_objective_markers() -> void:
 	# Weight-sort BEFORE the edge cap of 6, so the cap always spends its slots on
 	# the highest-priority marks. On-screen icons are uncapped (anchored).
 	marks.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["pr"] < b["pr"])
-	var shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
-	var panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if shop_row else 0.0)
+	var panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
 	var placed: Array[Vector2] = []
 	var edge_used := 0
 	for m in marks:
@@ -3998,6 +4037,10 @@ func _draw_wheel() -> void:
 		# (c.y-52) and cue line (c.y+52) must all stay on-screen.
 		c.x = clampf(c.x, 78.0, 562.0)
 		c.y = clampf(c.y, 96.0, 296.0)
+		# Entrance envelope: scale in around the hub (fed at 60Hz in _update_wheel,
+		# same exp-ease family as the menus). Reduce-motion gets it instant.
+		var wes := 1.0 if _motion < 0.5 else 0.85 + 0.15 * float(_wheel[i].get("t", 1.0))
+		draw_set_transform(c * (1.0 - wes), 0.0, Vector2(wes, wes))
 		# Baked wheel plate behind the hub (the Apocalypse sheet is a 4x2 socket
 		# atlas — one cell is the round plate) instead of a flat alpha disc.
 		var plate := Art.tex("ui_wheel_plate")
@@ -4037,7 +4080,10 @@ func _draw_wheel() -> void:
 				Art.text(self, "×", ipos + Vector2(12.0, -8.0), 9, Color(1.0, 0.5, 0.4))
 			# Shadowed like every other HUD string — the wheel opens over the most
 			# chaotic pixels on screen, exactly where the shadow matters most.
-			Art.text(self, str(acost), ipos + Vector2(-7, 24), 8,
+			# Width-centered like the stock line below — the fixed -7 anchor let a
+			# 3-digit cost lean right of its socket while "5" floated off-center.
+			var costw := f.get_string_size(str(acost), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			Art.text(self, str(acost), ipos + Vector2(-costw / 2.0, 24), 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
 			# Current stock vs cap under each socket — the buy decision no longer
 			# needs an eye-flick to the corner HUD.
@@ -4074,6 +4120,7 @@ func _draw_wheel() -> void:
 			# Anchored ABOVE this player's hub — the old global y=71 left P2's
 			# pick floating at the top of the screen, nowhere near their wheel.
 			Art.text_center(self, lbl, c.x, c.y - 52.0, 9, Color(1.0, 0.95, 0.7))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # end entrance-envelope scale
 
 
 func _top_center_priority() -> String:
@@ -4151,7 +4198,7 @@ func _draw_threat_pips() -> void:
 		if dir == Vector2.ZERO:
 			continue
 		var col := Color(1.0, 0.7, 0.25) if k == "grenadier" else Color(1.0, 0.32, 0.32)
-		var pf := Art.pulse(0.12)
+		var pf := 1.0 if _motion < 0.5 else Art.pulse(0.12)   # steady under reduce-motion
 		var perp := Vector2(-dir.y, dir.x)
 		var tip := edge + dir * (7.0 + pf * 3.0)
 		var base := edge - dir * 4.0
@@ -4208,7 +4255,9 @@ func _draw_banners(top_msg: String) -> void:
 		if pe["alive"] and pe["kind"] == "sniper" and pe.get("windup", 0) > 0:
 			paint = maxf(paint, 1.0 - float(pe["windup"]) / float(SimWorld.SNIPER_WINDUP_TICKS))
 	if paint > 0.01:
-		var pv := (0.1 + 0.24 * paint) * (0.4 + 0.6 * Art.pulse(0.4))
+		# 0.25 rad/frame ≈ 2.4 flashes/s — the old 0.4 strobed at ~3.8/s, over
+		# the 3/s photosensitivity threshold, sustained for the whole windup.
+		var pv := (0.1 + 0.24 * paint) * (0.4 + 0.6 * Art.pulse(0.25))
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(1.0, 0.15, 0.12, pv * _motion))
 		# 'You're being sighted' as an icon, not only a red edge: a binoculars

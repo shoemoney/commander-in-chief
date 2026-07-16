@@ -72,6 +72,17 @@ func _mblink(period: int) -> bool:
 	return main._motion < 0.5 or Art.blink(period)
 
 
+func panel_bottom() -> float:
+	# Bottom edge of the corner panel — THE source of the layout rule (incl.
+	# the 2P shop-strip height drop). main.gd's overlay-avoidance used to carry
+	# its own copy of this formula minus the drop rule and desynced by 16px.
+	var sim: SimWorld = main.sim
+	var shop_row: bool = sim.mode == "endless" and sim.intermission_ticks > 0
+	if shop_row and 26 + (sim.players.size() + 1) * 16 > 60:
+		shop_row = false
+	return 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if shop_row else 0.0)
+
+
 func _draw() -> void:
 	if main == null or main.sim == null:
 		# No sim to size the plate against — clear it so no stale panel lingers.
@@ -92,7 +103,7 @@ func _draw() -> void:
 	# on the width axis. Its timer chip in row 0 survives.
 	if shop_row and 26 + (sim.players.size() + 1) * 16 > 60:
 		shop_row = false
-	var panel_h := 26 + sim.players.size() * 16 + (16 if shop_row else 0)
+	var panel_h := int(panel_bottom()) - 2
 	if _disp_chest < 0.0:
 		_disp_chest = float(sim.war_chest)   # first draw can beat first _process
 	if _disp_score < 0.0:
@@ -163,7 +174,8 @@ func _draw() -> void:
 				shop_col = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.7, 0.2, 0.18)
 			elif sim.intermission_ticks < 120:
 				shop_col = Color(1.0, 0.6, 0.3)
-			x = _text("SHOP OPEN %ds" % [sim.intermission_ticks / 60], x, y + ICON - 3.0,
+			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
+			x = _text("SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y + ICON - 3.0,
 				shop_col) + 10.0
 		else:
 			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
@@ -230,6 +242,10 @@ func _draw() -> void:
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
 	# can manage — it climbs while the camera isn't advancing, drains on push.
 	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
+		# The punishment telegraph outranks vanity chips: on a full row the
+		# gauge's fixed 94px footprint ran off the 640px viewport — clamp it
+		# back over the tail of whatever optional chip came before.
+		x = minf(x, RIGHT - 94.0)
 		var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
 		_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
 		_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
@@ -384,7 +400,7 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 			else Color(0.9 - frac * 0.7, 0.15 + frac * 0.65, 0.12)
 		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
 	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
-	return _text("%ds" % maxi(0, t["fuel"] / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0
+	return _text("%ds" % maxi(0, (t["fuel"] + 59) / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0   # ceil: "0s" only when actually empty
 
 
 ## Exponential catch-up toward `target`, snapping once close — a big jump
