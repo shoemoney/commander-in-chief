@@ -91,6 +91,8 @@ var _water_shader: Shader            # animated river water (view-only, see wate
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
 var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot, splash_t] last sent to the shader
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
+var _bg_cam := -1                    # last (camera_top, march) painted onto _bg_root —
+var _bg_march := -1.0                # its ~90-rect rebuild is a pure function of these
 var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
 var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
@@ -2522,7 +2524,15 @@ func _draw() -> void:
 	# quads themselves are positioned in-frame here, so they stay aligned to units.
 	_sync_water()
 	if _bg_root != null:
-		_bg_root.queue_redraw()
+		# _paint_bg is a pure function of (camera_top, sector march): skip the
+		# ~90-rect grass/dirt rebuild whenever the camera is parked (wave fights,
+		# pause, debrief) and no gate/wave advanced — its retained canvas
+		# commands re-render as-is. _glow_root stays per-frame (animated FX).
+		var march := _sector_march()
+		if sim.camera_top != _bg_cam or march != _bg_march:
+			_bg_cam = sim.camera_top
+			_bg_march = march
+			_bg_root.queue_redraw()
 	if _glow_root != null:
 		_glow_root.queue_redraw()
 	_draw_terrain()
