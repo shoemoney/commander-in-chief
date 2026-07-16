@@ -185,7 +185,7 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
-	"mg_nest_aim": ["tank_board", -11.0, 1.4],
+	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead: an alarm sting (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
