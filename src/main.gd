@@ -1249,6 +1249,13 @@ func _ev_kill(ev: Dictionary) -> void:
 	if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 			"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
+		# The sim awards a real +25/50/100% score bonus at these tiers, but only
+		# the 20-streak ever FELT it. Pop the earned bonus as a bold gold headline
+		# + a brief white flash so hitting 5 and 10 read as milestones, not noise.
+		var streak_bonus := 25 if _kill_streak == 5 else 50 if _kill_streak == 10 else 100
+		_fx.append({"x": ev["x"], "y": ev["y"] - 12, "t": -0.14, "kind": "floattext",
+			"rate": 0.016, "size": 13, "text": "+%d%%!" % streak_bonus, "col": Color(1.0, 0.92, 0.4)})
+		_flash_alpha = maxf(_flash_alpha, 0.14 + _kill_streak * 0.006)
 		_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
