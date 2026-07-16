@@ -142,6 +142,12 @@ static func _sweep(t: float, f0: float, f1: float, dur: float) -> float:
 
 
 func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
+	# Shared tail declick: several exp-decay buffers (explosion ~0.05-0.10,
+	# splash ~0.07) are still audible at the hard cut — ramp the last 5ms to
+	# zero here so every synth inherits it (the 6ms ramp in _notes is note-level).
+	var fade := mini(int(0.005 * RATE), samples.size())
+	for k in fade:
+		samples[samples.size() - fade + k] *= 1.0 - float(k + 1) / float(fade)
 	var data := PackedByteArray()
 	data.resize(samples.size() * 2)
 	for i in samples.size():
