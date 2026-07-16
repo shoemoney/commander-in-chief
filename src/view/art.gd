@@ -112,6 +112,15 @@ const TEX := {
 	# + a fallen soldier body) — the live shield enemy keeps its on-theme bombsuit.
 	"dropped_shield": preload(SY + "decor/dropped_shield.png"),
 	"fallen_merc": preload(SY + "decor/fallen_merc.png"),
+	# Apocalypse-HUD capsule pickup glyphs (clean UI-icon set): each power-up
+	# capsule floats its own icon (mine for claymore, smoke-grenade for smoke, …).
+	"cap_pierce": preload(SY + "icons/cap_pierce.png"),
+	"cap_spread": preload(SY + "icons/cap_spread.png"),
+	"cap_triple": preload(SY + "icons/cap_triple.png"),
+	"cap_rend": preload(SY + "icons/cap_rend.png"),
+	"cap_claymore": preload(SY + "icons/cap_claymore.png"),
+	"cap_smoke": preload(SY + "icons/cap_smoke.png"),
+	"cap_flash": preload(SY + "icons/cap_flash.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
@@ -306,6 +315,10 @@ const SCALE := {
 	"flag_marker": 0.16, "radio_tower": 0.18, "hedge": 0.15, "fern2": 0.14,
 	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
 	"dropped_shield": 0.12, "fallen_merc": 0.2,
+	# capsule glyphs: large Apocalypse UI icons folded to pickup footprint
+	# (weapons 512x256, explosives 1024²) — retuned by eye.
+	"cap_pierce": 0.14, "cap_spread": 0.14, "cap_triple": 0.14, "cap_rend": 0.14,
+	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
@@ -439,6 +452,8 @@ const OUTLINE := {
 	"flag_marker": true, "radio_tower": true, "hedge": true, "fern2": true,
 	"wreck_halftrack": true, "crater_field": true, "crater_water": true, "mg_tripod": true,
 	"dropped_shield": true, "fallen_merc": true,
+	"cap_pierce": true, "cap_spread": true, "cap_triple": true, "cap_rend": true,
+	"cap_claymore": true, "cap_smoke": true, "cap_flash": true,
 }
 
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",

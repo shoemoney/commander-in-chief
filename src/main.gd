@@ -2411,8 +2411,8 @@ const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contrac
 # ground draw, the collect callout and the off-screen marker. Always index via
 # clampi(kind - 4, 0, size-1) — an unknown kind must degrade, never crash (the
 # kind-4/5 glyph OOB bug once errored the pickup draw every frame).
-const _CAPSULE_TEX: Array[String] = ["wep_rifle", "wep_shotgun", "wep_mg", "icon_rend",
-	"wep_claymore", "wep_smoke", "wep_flashbang"]
+const _CAPSULE_TEX: Array[String] = ["cap_pierce", "cap_spread", "cap_triple", "cap_rend",
+	"cap_claymore", "cap_smoke", "cap_flash"]
 const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH"]
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
 	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
