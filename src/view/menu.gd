@@ -191,6 +191,12 @@ func _row_icon(id: String) -> String:
 		"howto": return "mi_book"
 		"sfx": return "mi_snd_off" if _bus_off("SFX") else "mi_snd_on"
 		"music": return "mi_mus_off" if _bus_off("Music") else "mi_mus_on"
+		"options": return "mi_settings"
+		"restart": return "mi_reload"
+		"title": return "mi_home"
+		"rumble": return "mi_controller"
+		"watch": return "mi_camera"
+		"back": return "mi_back"
 	return ""
 
 
@@ -612,11 +618,14 @@ func _draw() -> void:
 			else:
 				draw_arc(dc, 3.0, 0, TAU, 10, Color(0.55, 0.6, 0.5, 0.8), 1.2)
 		# Left/right cycle affordance on the selected toggle row — toggles flipped
-		# silently and read identical to action rows. ("<"/">" — ◄► not in the font.)
+		# silently and read identical to action rows. mi_arrow points RIGHT;
+		# a negative rect width flips it for the left side.
 		if selected and mitems[k]["id"] in _TOGGLES:
 			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
-			Art.text(self, "<", Vector2(r.position.x - 12.0, r.position.y + bh / 2.0 + 4.0), 10, fcol)
-			Art.text(self, ">", Vector2(r.end.x + 6.0, r.position.y + bh / 2.0 + 4.0), 10, fcol)
+			var at := Art.tex("mi_arrow")
+			var ay := r.position.y + (bh - 10.0) / 2.0
+			draw_texture_rect(at, Rect2(r.position.x - 13.0, ay, -10.0, 10.0), false, fcol)
+			draw_texture_rect(at, Rect2(r.end.x + 5.0, ay, 10.0, 10.0), false, fcol)
 		if mitems[k]["id"] == "paste_seed":
 			# Where the seed comes from — the row name alone didn't say.
 			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0,
@@ -714,9 +723,11 @@ func _draw_hall() -> void:
 		var gw := 13.0 * float(t.get_width()) / float(t.get_height())
 		draw_texture_rect(t, Rect2(320.0 - total / 2.0 - gw - 12.0, 56.0, gw, 13.0), false)
 	else:
-		# "<"/">" — PixelOperator8 has no U+25C4/25BA; ◄► rendered as .notdef boxes.
-		Art.text(self, "<", Vector2(320.0 - total / 2.0 - 18.0, 66), 10, Color(0.84, 0.86, 0.78))
-		Art.text(self, ">", Vector2(320.0 + total / 2.0 + 8.0, 66), 10, Color(0.84, 0.86, 0.78))
+		# mi_arrow points RIGHT; negative rect width flips it for the left side.
+		var at := Art.tex("mi_arrow")
+		var acol := Color(0.84, 0.86, 0.78)
+		draw_texture_rect(at, Rect2(320.0 - total / 2.0 - 19.0, 56.0, -11.0, 11.0), false, acol)
+		draw_texture_rect(at, Rect2(320.0 + total / 2.0 + 8.0, 56.0, 11.0, 11.0), false, acol)
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows: Array = []
 	for run in main.hall:
@@ -784,6 +795,12 @@ func _draw_hall() -> void:
 			var gcol: Color = {"S": Color(1.0, 0.85, 0.3), "A": Color(0.55, 0.9, 1.0),
 				"B": Color(0.6, 0.9, 0.5), "C": Color(0.85, 0.85, 0.8)}.get(gr, Color(0.7, 0.7, 0.7))
 			Art.text(self, gr, Vector2(132.0, y), 11, gcol)
+			# Tier medal beside the letter (D=1 … S=5) — sprite is white-with-alpha,
+			# tinted to the tier color so medal and letter read as one badge.
+			var med: int = {"D": 1, "C": 2, "B": 3, "A": 4, "S": 5}.get(gr, 0)
+			if med > 0:
+				draw_texture_rect(Art.tex("mi_medal_%d" % med),
+					Rect2(142.0, y - 10.0, 12.0, 12.0), false, gcol)
 
 
 func _draw_howto() -> void:

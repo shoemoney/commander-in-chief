@@ -80,6 +80,13 @@ func _mblink(period: int) -> bool:
 	return main._motion < 0.5 or Art.blink(period)
 
 
+func _buff_col(ticks: int, base: Color) -> Color:
+	# Expiry warning (8/9 panel consensus): the last 2s a timed buff's chip goes
+	# urgent red — smoke warned before dropping, the others snapped off mid-fight.
+	# _mblink holds the red STEADY under reduce-motion (blink only when allowed).
+	return (Color(1.0, 0.3, 0.25) if _mblink(10) else base) if ticks < 120 else base
+
+
 func plate_right() -> float:
 	# Dynamic right edge of the corner plate (was hardcoded 262, its MINIMUM) so
 	# off-screen markers relocate clear of the ACTUAL panel, not a stale literal.
@@ -419,17 +426,17 @@ func _draw() -> void:
 				# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
 				# icon is the non-color channel (pierce+rend both active = twin rifles
 				# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
-				px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, Color(0.6, 0.95, 1.0))
+				px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)))
 			if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
-				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, Color(1.0, 0.8, 0.5))
+				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)))
 			if p["triple"]:
 				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
 			if p["rend_ticks"] > 0:
-				# wep_rifle, NOT wep_mg — Triple's chip is wep_mg two lines up, and
-				# identical icons made two different buffs read as one (panel catch).
-				px = _stat("wep_rifle", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, Color(1.0, 0.55, 0.4))
+				# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
+				# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
+				px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)))
 			if p["smoke_ticks"] > 0:
-				px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, Color(0.8, 0.85, 0.9))
+				px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)))
 			# Carried claymore charges: a count, not a countdown — and the verb
 			# glyph rides along so "how do I plant this" never dead-ends here.
 			if p["claymores"] > 0:

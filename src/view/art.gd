@@ -47,6 +47,7 @@ const TEX := {
 	"icon_skull": preload(SY + "icons/icon_skull.png"),
 	"icon_medal": preload(SY + "icons/icon_medal.png"),
 	"icon_airstrike": preload(SY + "icons/icon_airstrike.png"),
+	"icon_rend": preload(SY + "icons/icon_rend.png"),  # 64px canvas (siblings 128) — drawn scaled
 	# Apocalypse HUD sprites (imported 2D kit, assets/legacy-art/hud/).
 	"hud_star": preload(SY + "hud/ICON_Map_Star.png"),
 	"hud_flag": preload(SY + "hud/ICON_Map_Flag.png"),
@@ -54,6 +55,7 @@ const TEX := {
 	"hud_target": preload(SY + "hud/ICON_Map_Target.png"),
 	"hud_gunshop": preload(SY + "hud/ICON_Map_GunShop.png"),
 	"hud_vehicle": preload(SY + "hud/ICON_Map_Vehicle.png"),
+	"hud_lightning": preload(SY + "hud/ICON_Map_Lightning.png"),
 	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
 	"ui_wheel_socket": preload(SY + "ui/wheel_socket.png"),
 	"ui_bar_frame": preload(SY + "ui/bar_frame.png"),
@@ -86,6 +88,13 @@ const TEX := {
 	"barrier": preload(SY + "decor/barrier.png"),
 	"ammobox": preload(SY + "decor/ammobox.png"),
 	"landmine": preload(SY + "decor/landmine.png"),
+	# Terrain/skyline set (War FBX bakes). Bridges are grey concrete terrain,
+	# skyline pieces are horizon silhouettes (side views, drawn dark, no outline).
+	"bridge_mid": preload(SY + "decor/bridge_mid.png"),
+	"bridge_ramp": preload(SY + "decor/bridge_ramp.png"),
+	"skyline_chimney": preload(SY + "decor/skyline_chimney.png"),
+	"skyline_mast": preload(SY + "decor/skyline_mast.png"),
+	"crater": preload(SY + "decor/crater.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
@@ -117,6 +126,8 @@ const TEX := {
 	"fx_fumes4": preload(SY + "fx/fx_fumes4.png"),
 	"fx_halfcircle": preload(SY + "fx/fx_halfcircle.png"),
 	"fx_swipe2": preload(SY + "fx/fx_swipe2.png"),
+	# Semicircle flash card (512x256, flat edge at BOTTOM — orient flat edge to muzzle).
+	"fx_muzzle_fan": preload(SY + "fx/fx_muzzle_fan.png"),
 	# --- POLYGON Military mil2 bake (enemies, vehicles, weapon pickups, items) ---
 	"m_bombsuit": preload(SY + "mil2/bombsuit.png"),
 	"m_contractor2": preload(SY + "mil2/contractor2.png"),
@@ -151,6 +162,8 @@ const TEX := {
 	"item_bullet": preload(SY + "mil2/item_bullet.png"),
 	"item_bullet_shotgun": preload(SY + "mil2/item_bullet_shotgun.png"),
 	"item_binoculars": preload(SY + "mil2/item_binoculars.png"),
+	# MG emplacement (barrel points screen-up at rotation 0; ammo box on left).
+	"mg_stand": preload(SY + "mil2/mg_stand.png"),
 	# --- POLYGON Military/Battle Royale p2 bake (specialists, hulks, litter) ---
 	"ghillie": preload(SY + "p2/ghillie.png"),
 	"courier": preload(SY + "p2/courier.png"),
@@ -166,6 +179,8 @@ const TEX := {
 	"bunker2": preload(SY + "p2/bunker2.png"),
 	"corpse_soldier1": preload(SY + "p2/corpse_soldier1.png"),
 	"corpse_soldier2": preload(SY + "p2/corpse_soldier2.png"),
+	# Front face toward viewer, shield-top = image-up; rotate to carrier facing.
+	"riot_shield": preload(SY + "p2/riot_shield.png"),
 	"fx_flame": preload(SY + "p2/fx_flame.png"),
 	"fx_bubble1": preload(SY + "fx/bubble1.png"),
 	"fx_bubble2": preload(SY + "fx/bubble2.png"),
@@ -213,12 +228,30 @@ const TEX := {
 	"mi_play": preload(SY + "ui/menuicons/play.png"),
 	"mi_controller": preload(SY + "ui/menuicons/controller.png"),
 	"mi_keyboard": preload(SY + "ui/menuicons/keyboard.png"),
+	# Modern Menus batch 2 (256px, white with alpha — modulate for color).
+	# NOTE: mi_controller.png also landed on disk but the "mi_controller" key
+	# above already serves controller.png — kept as-is, duplicate art unregistered.
+	"mi_arrow": preload(SY + "ui/menuicons/mi_arrow.png"),  # points RIGHT — flip/rotate at call site
+	"mi_medal_1": preload(SY + "ui/menuicons/mi_medal_1.png"),
+	"mi_medal_2": preload(SY + "ui/menuicons/mi_medal_2.png"),
+	"mi_medal_3": preload(SY + "ui/menuicons/mi_medal_3.png"),
+	"mi_medal_4": preload(SY + "ui/menuicons/mi_medal_4.png"),
+	"mi_medal_5": preload(SY + "ui/menuicons/mi_medal_5.png"),
+	"mi_settings": preload(SY + "ui/menuicons/mi_settings.png"),
+	"mi_reload": preload(SY + "ui/menuicons/mi_reload.png"),
+	"mi_home": preload(SY + "ui/menuicons/mi_home.png"),
+	"mi_camera": preload(SY + "ui/menuicons/mi_camera.png"),
+	"mi_back": preload(SY + "ui/menuicons/mi_back.png"),
 	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
 	"ui_tooltip": preload(SY + "hud/SPR_HUD_Tooltip.png"),
 	"ui_frame_lrg": preload(SY + "hud/SPR_HUD_Frame_Lrg.png"),
 	"ui_frame_lrg_under": preload(SY + "hud/SPR_HUD_Frame_Lrg_Underlay.png"),
 	"ui_wheel_plate": preload(SY + "hud/SPR_Apocalypse_WeaponWheel.png"),
 	"ui_cursor": preload(SY + "ui/cursor.png"),
+	# Modern Menus 3-slice metal plate (L/C/R, 190x230 each; tile C horizontally).
+	"plate_metal_l": preload(SY + "ui/plate_metal_l.png"),
+	"plate_metal_c": preload(SY + "ui/plate_metal_c.png"),
+	"plate_metal_r": preload(SY + "ui/plate_metal_r.png"),
 }
 
 ## Per-sprite draw multiplier so a legacy art bake lands at the Kenney footprint the
@@ -236,6 +269,10 @@ const SCALE := {
 	"frogman": 1.05, "observer": 0.24, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
+	# Real barrel bakes replacing the 4x4 blanks: sized so the minigun sits
+	# under the ~60px hull and the twin turrets under the ~143px colossus body
+	# (main.gd draws them at 0.8 / 1.3). Tune visually.
+	"gunship_barrel": 0.5, "colossus_barrel": 0.6,
 	"sandbag_beige": 0.83,
 	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
 	"tree_large": 0.89, "tree_small": 0.91, "fern": 0.9,
@@ -243,6 +280,11 @@ const SCALE := {
 	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
 	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
 	"barrier": 0.13, "ammobox": 0.1, "landmine": 0.07,
+	# Terrain set is baked big (160-220px) but drawn at 1.0 like the litter;
+	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
+	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
+	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
+	"skyline_chimney": 0.4, "skyline_mast": 0.4,
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
 	"m_insurgent5": 0.47, "m_pilot": 0.46, "m_soldier2": 0.5,
@@ -253,6 +295,7 @@ const SCALE := {
 	"wep_grenade": 0.34, "wep_rpg": 0.4, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
 	"wep_pistol": 0.32, "wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
 	"item_bullet": 0.32, "item_bullet_shotgun": 0.32, "item_binoculars": 0.34,
+	"mg_stand": 0.3,   # 160px canvas → ~48px emplacement
 	# p2: specialists match cast2 unit footprints (64px canvas vs cast2's 300px,
 	# so raw multipliers run larger); litter/hulks fold to their swap targets.
 	"ghillie": 2.2, "courier": 2.2, "sapper": 2.2,
@@ -265,6 +308,8 @@ const SCALE := {
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
 	"fx_bubble1": 0.18, "fx_bubble2": 0.18,   # 512px cards → ~92px FX footprint
+	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles
+	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
 }
 
 ## Desert→jungle shift, multiplied onto the draw modulate. Units/vehicles take
@@ -284,7 +329,8 @@ const TINT := {
 	"frogman": UNIT, "observer": Color(1.6, 1.2, 1.0),
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
-	"gunship_body": OLIVE_VEH, "colossus_body": OLIVE_VEH,
+	"gunship_body": OLIVE_VEH, "gunship_barrel": OLIVE_VEH,
+	"colossus_body": OLIVE_VEH, "colossus_barrel": OLIVE_VEH,
 	"sandbag_beige": Color(0.88, 0.92, 0.66),
 	"crate_ammo": Color(0.82, 0.88, 0.62), "crate_grenade": Color(0.82, 0.88, 0.62),
 	"crate_airstrike": Color(0.82, 0.88, 0.62),
@@ -297,6 +343,12 @@ const TINT := {
 	"watchtower": Color(0.72, 0.78, 0.62), "barbedwire": Color(0.7, 0.74, 0.68),
 	"barrier": Color(0.76, 0.76, 0.62), "ammobox": Color(0.72, 0.8, 0.58),
 	"landmine": Color(0.7, 0.72, 0.62),
+	# Bridges are TERRAIN, not litter — warm neutral concrete (no mossy wash,
+	# same class as the sandbag walls, not the receding scenery).
+	"bridge_mid": Color(0.94, 0.9, 0.8), "bridge_ramp": Color(0.94, 0.9, 0.8),
+	# Skyline pieces read as dark horizon silhouettes.
+	"skyline_chimney": Color(0.3, 0.33, 0.38), "skyline_mast": Color(0.3, 0.33, 0.38),
+	"crater": Color(0.6, 0.6, 0.54),   # scorched ground, recedes like the wrecks
 	# mil2 enemies read warm/bright (threats); vehicles olive-drab; pickups bright.
 	"m_bombsuit": Color(1.7, 1.35, 0.9), "m_contractor2": Color(1.75, 0.85, 0.68),
 	"m_insurgent3": Color(2.1, 1.7, 1.15), "m_insurgent4": Color(2.1, 1.7, 1.15),
@@ -314,6 +366,8 @@ const TINT := {
 	"wep_flashbang": Color(1.1, 1.1, 1.0),
 	"item_bullet": Color(1.3, 1.2, 0.9), "item_bullet_shotgun": Color(1.3, 1.2, 0.9),
 	"item_binoculars": Color(1.15, 1.2, 1.1),
+	"mg_stand": OLIVE_VEH,
+	"riot_shield": Color(1.1, 1.1, 1.05),
 	# p2 specialists are threats — warm/bright per the insurgent readability rule.
 	"ghillie": Color(1.7, 1.5, 1.05), "courier": Color(2.1, 1.7, 1.15),
 	"sapper": Color(1.7, 1.35, 0.9),
@@ -332,7 +386,8 @@ const OUTLINE := {
 	"player1": true, "player2": true, "rusher": true, "elite": true,
 	"frogman": true, "observer": true, "bunker": true,
 	"tank_body": true, "tank_barrel": true, "gunship_body": true,
-	"colossus_body": true, "sandbag_beige": true,
+	"gunship_barrel": true, "colossus_body": true, "colossus_barrel": true,
+	"sandbag_beige": true, "mg_stand": true, "riot_shield": true,
 	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
 	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
