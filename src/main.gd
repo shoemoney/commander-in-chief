@@ -2435,6 +2435,8 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 
 # Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
 const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
+# Same idiom for the late-run dead canopy — "tree_dead%d" % allocated per tree per frame.
+const _TREE_DEAD := ["tree_dead1", "tree_dead2", "tree_dead3"]
 
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
@@ -2519,6 +2521,11 @@ func _draw() -> void:
 	for bk in sim.bunkers:
 		if bk["alive"]:
 			var c := _to_screen(bk["x"], bk["y"]) + Vector2(24, 16)
+			# Band cull (same idiom as _draw_barrels): the sim never removes
+			# bunkers, so every bypassed one kept paying shadow + outlined bake +
+			# hatch glow + orbiting drone (~13 items) off-screen forever.
+			if c.y < -60.0 or c.y > 420.0:
+				continue
 			var is_locker := false
 			for lk in lockers:
 				if is_same(lk, bk):
@@ -2726,7 +2733,7 @@ func _draw_terrain() -> void:
 				if ash > 0.33:
 					# Past the ash midpoint the canopy dies for real: swap to the baked
 					# dead-tree set (hash-picked per tree) instead of only tinting green art.
-					_spr("tree_dead%d" % (h2 % 3 + 1), Vector2(px, wy_px),
+					_spr(_TREE_DEAD[h2 % 3], Vector2(px, wy_px),
 						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34)
 				else:
 					_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
@@ -2757,6 +2764,10 @@ func _draw_mines() -> void:
 		if not m["armed"]:
 			continue
 		var mp := _to_screen(m["x"], m["y"])
+		# Band cull (same idiom as _draw_barrels): mines stream up to 2 view-
+		# heights ahead and each draws ring + claymore + pips invisibly up there.
+		if mp.y < -40.0 or mp.y > 400.0:
+			continue
 		# Danger telegraph keeps the mine FAIR: a pulsing ring + a blinking
 		# armed-indicator so you can spot it and herd rushers onto it (or route
 		# around it yourself). YOUR planted claymore rings cyan instead of the
@@ -2830,6 +2841,10 @@ func _draw_water() -> void:
 	for w in sim.waters:
 		var wy := _to_screen(0, w["y"]).y
 		var wh := SimWorld.WATER_H * PX
+		# Band cull (mirrors _sync_water): the sim never removes water bands, so
+		# every crossed river kept drawing banks + bridge + rocks off-screen.
+		if wy + wh < -20.0 or wy > 380.0:
+			continue
 		# Water body, wave ripples and sun glint are the water.gdshader quad synced
 		# under the units by _sync_water(); here we only draw what sits ON the water.
 		# Banks (drawn over the shader's shore edges).
@@ -2891,6 +2906,11 @@ func _draw_gates() -> void:
 	var shut_wall := Color(1, 1, 1).lerp(Color(0.5, 0.44, 0.42), soot)
 	for g in sim.gates:
 		var gy := _to_screen(0, g["y"]).y
+		# Band cull: gates are never removed from the sim — every opened gate
+		# kept stamping its end caps (and a streamed-ahead shut gate its full
+		# 11-sprite wall) invisibly, +1 per gate forever.
+		if gy < -40.0 or gy > 400.0:
+			continue
 		var gh := Art.cell_hash(g["y"], 3)
 		if g["open"]:
 			# Blown-open remnants: a lone end cap survives at each flank.
@@ -2972,6 +2992,12 @@ func _draw_tanks() -> void:
 		if not t["alive"]:
 			continue
 		var c := _to_screen(t["x"], t["y"])
+		# Band cull PARKED tanks only (pure drawing — no _tank_hull/_kick_dust
+		# state on that path): one parked tank streams per gate and is never
+		# despawned, so every bypassed one kept drawing hulk + board ring +
+		# glyph off-screen. An occupied tank is always with its player.
+		if t["occupant"] < 0 and (c.y < -60.0 or c.y > 420.0):
+			continue
 		# Convoy graveyard: a dead hulk slumps beside a PARKED tank (position is
 		# stable only while unoccupied), so the boardable reads as the last
 		# runner of a wiped-out column. Deterministic hulk + side from position.
