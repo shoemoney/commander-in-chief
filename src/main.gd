@@ -2577,7 +2577,8 @@ func _draw_projectiles() -> void:
 	for g in sim.grenades:
 		var base := _to_screen(g["x"], g["y"])
 		draw_circle(base + Vector2(2, 2), 3.0, Color(0, 0, 0, 0.35))   # shadow
-		var spin := float(Engine.get_physics_frames()) * 0.4
+		# Per-grenade spin phase (hashed off x) — a volley no longer rotates in lockstep.
+		var spin := float(Engine.get_physics_frames()) * 0.4 + float(g["x"] % 6283) * 0.001
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
 		# Real frag silhouette (the capsule sprite read as a pill). Shells
 		# fly steel-dark and bigger.
@@ -2959,7 +2960,9 @@ func _draw_fx() -> void:
 		var t: float = fx["t"]
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
-			_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, 1.0 - t * 0.7))
+			# Ease to zero alpha before removal — 1.0-t*0.7 left the last frame at
+			# ~0.3 alpha and it blinked out instead of fading (gib already fades to 0).
+			_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, pow(1.0 - t, 1.5)))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
 			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
@@ -2978,7 +2981,7 @@ func _draw_fx() -> void:
 				false, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6))
 		elif fx["kind"] == "casing":
 			draw_set_transform(pos, fx["spin"] + t * 6.0, Vector2.ONE)
-			draw_texture_rect(Art.tex("fx_shell"), Rect2(-3.0, -1.5, 6.0, 3.0), false, Color(1, 1, 1, 1.0 - t * 0.8))
+			draw_texture_rect(Art.tex("fx_shell"), Rect2(-3.0, -1.5, 6.0, 3.0), false, Color(1, 1, 1, 1.0 - t))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "chopper":
 			# Cinematic flyover (victory extraction / endless-boss escort): sweeps
@@ -3023,8 +3026,11 @@ func _draw_fx() -> void:
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
-			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha
-			_spr("fx_smoke", pos - Vector2(0, t * 10.0), t, 0.3 + t * 0.25,
+			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha.
+			# Hash-seeded horizontal sway (grows with rise) so stacked plumes lean and
+			# separate instead of sliding up in a rigid column.
+			var sway := sin(t * PI * 1.5 + float(fx["x"] % 6283) * 0.001) * 4.0 * t
+			_spr("fx_smoke", pos + Vector2(sway, -t * 10.0), t, 0.3 + t * 0.25,
 				Color(1, 1, 1, (0.6 - t * 0.55) * smoothstep(0.0, 0.15, t)))
 		elif fx["kind"] == "gib":
 			var gc: Color = fx.get("col", Color(0.5, 0.1, 0.08))
@@ -3101,8 +3107,12 @@ func _draw_glow() -> void:
 			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
 			var stex := Art.tex("fx_sparkle")
 			var ssz := 5.0 + t * 5.0
-			for k in 3:
-				var sa := k * TAU / 3.0 + t * 2.0
+			# Hash-seeded base angle + 3-5 count so each ricochet scatters its own
+			# way — the fixed k*TAU/3 triad read as one spinning triangle.
+			var sbase := float(fx["x"] % 6283) * 0.001
+			var scount := 3 + absi(fx["x"]) % 3
+			for k in scount:
+				var sa := sbase + k * TAU / float(scount) + t * 2.0
 				var sp2: Vector2 = pos + Vector2.from_angle(sa) * (3.0 + t * 7.0)
 				g.draw_texture_rect(stex, Rect2(sp2 - Vector2.ONE * ssz, Vector2.ONE * ssz * 2.0), false, sc)
 		elif fx["kind"] == "shockwave":
