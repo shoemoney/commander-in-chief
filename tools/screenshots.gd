@@ -27,6 +27,12 @@ func _initialize() -> void:
 	main.process_mode = Node.PROCESS_MODE_DISABLED
 	main._menu.mode = GameMenu.Mode.HIDDEN   # staged shots show gameplay, not the title
 	main.no_autopause = true   # harness window never holds focus; don't pause-overlay every shot
+	# SHOT_PAD=xbox|ps|switch forces the pad-glyph path for prompt verification —
+	# the harness has no gamepad, so brand glyphs otherwise never render in shots.
+	var pad := OS.get_environment("SHOT_PAD")
+	if not pad.is_empty():
+		Art.use_pad = true
+		Art.pad_brand = pad
 	_build_shots()
 	process_frame.connect(_on_frame)
 	# First _advance happens on the first frame — after main._ready() has run
