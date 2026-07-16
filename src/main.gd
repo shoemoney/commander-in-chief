@@ -32,6 +32,7 @@ var _watching := false            # Watch Last Run playback mode
 var _watch_replay: Replay = null
 var _watch_frame := 0
 var _replay_saved := false        # save the replay once per run, at the debrief
+var _replay_task := -1            # WorkerThreadPool id of the async replay write
 var _two_players := false
 var _endless := false
 var _daily := false              # seed-of-the-day challenge run
@@ -426,6 +427,7 @@ func start_watch() -> void:
 
 
 func _reset() -> void:
+	_flush_bests()   # a run torn down without a debrief still banks its records
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
 	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
@@ -564,6 +566,21 @@ func _copy_share_text() -> void:
 	var txt := "IKARI — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
 	DisplayServer.clipboard_set(txt)
 	_show_banner("COPIED TO CLIPBOARD")
+
+
+func _flush_bests() -> void:
+	# Bests ratchet in memory during play; this is the only place they hit disk
+	# outside _record_run. Called from _reset (covers restart/new game/attract
+	# rollover) and _exit_tree (covers app quit).
+	if _best_dirty:
+		_best_dirty = false
+		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
+
+
+func _exit_tree() -> void:
+	_flush_bests()
+	if _replay_task != -1:
+		WorkerThreadPool.wait_for_task_completion(_replay_task)
 
 
 func _notification(what: int) -> void:
@@ -911,10 +928,8 @@ func _ev_shot(ev: Dictionary) -> void:
 		"y": ev["y"] + int(shooter["aim_y"] * 13),
 		"t": 0.0, "kind": "muzzle", "rate": 0.34,
 		"a": aim.angle() + randf_range(-0.09, 0.09), "szj": randf_range(0.82, 1.18)})
-	# Textured muzzle bloom (legacy art Particle_FX soft-spot) under the line flash.
-	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 12), "y": ev["y"] + int(shooter["aim_y"] * 12),
-		"t": 0.0, "kind": "tex", "tex": "fx_softspot", "sz": 12.0, "grow": 0.5, "fade": 1.7,
-		"rate": 0.3, "col": Color(1.0, 0.92, 0.55, 0.65)})
+	# (Dropped: the textured soft-spot bloom that sat directly under the additive
+	# muzzle glow — same flash drawn twice; one fewer translucent quad per shot.)
 	var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
 	if _fx.size() > 300:
 		return   # spam guard: past this, casings/decals add draws, not information
@@ -1279,12 +1294,23 @@ func _record_run() -> void:
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
-	_persist("hall", {"runs": hall})
 	_life_runs += 1
 	_life_kills += _run_kills
 	if sim.victory:
 		_life_wins += 1
-	_persist("life", {"runs": _life_runs, "kills": _life_kills, "wins": _life_wins})
+	# One load+save for hall/life/best together — this lands on the debrief
+	# frame, and each _persist() is a full read/write/backup/rename dance.
+	var cf := ConfigFile.new()
+	cf.load(SAVE_PATH)
+	cf.set_value("hall", "runs", hall)
+	cf.set_value("life", "runs", _life_runs)
+	cf.set_value("life", "kills", _life_kills)
+	cf.set_value("life", "wins", _life_wins)
+	cf.set_value("best", "score", best_score)
+	cf.set_value("best", "wave", best_wave)
+	cf.set_value("best", "dist", best_dist)
+	_best_dirty = false
+	_save_cfg(cf)
 
 
 func _hint(id: String, text: String) -> void:
@@ -1316,7 +1342,15 @@ func _track_bests() -> void:
 		if not _debrief:
 			_record_run()   # bank this run into the Hall of Fame once
 			if not _replay_saved and _recorder != null:
-				_recorder.save("user://last_run.replay")   # replayable capture of the finished run
+				# Stringifying a whole run's input log is the biggest one-frame
+				# stall in the view — push it to a worker so the debrief card
+				# doesn't hitch. Shallow-duplicate the outer frames array: the
+				# main thread may still append, but per-frame arrays are
+				# immutable once recorded, so the snapshot is race-free.
+				var snap := _recorder.to_dict()
+				snap["frames"] = _recorder.frames.duplicate()
+				_replay_task = WorkerThreadPool.add_task(
+					Replay.save_dict.bind(snap, "user://last_run.replay"))
 				_replay_saved = true
 		_debrief = true
 	# NEW RECORD moment: the instant this run's score passes the standing best.
@@ -1335,9 +1369,10 @@ func _track_bests() -> void:
 	if sim.mode == "campaign" and dist > best_dist:
 		best_dist = dist
 		_best_dirty = true
-	if _best_dirty and Engine.get_physics_frames() % 60 == 0:
-		_best_dirty = false
-		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
+	# No mid-run disk write: the old once-a-second _persist() here was a full
+	# ConfigFile load+save+copy+rename on the main thread during the hottest
+	# play (a ~1 Hz frame spike). The ratchet stays in memory; it hits disk in
+	# _record_run() at the debrief and _flush_bests() on reset/exit.
 
 
 func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
@@ -1505,6 +1540,12 @@ func _update_feel() -> void:
 	_check_near_miss()
 	_check_water_entry()
 	_drive_audio()
+	# Global hard cap above the per-path soft guards (300 shot / 260 burst):
+	# explosions, gibs and boss-death secondaries append uncapped, and every
+	# live entry is walked twice per frame (_draw_fx + _draw_glow). Oldest
+	# entries are the closest to expiring anyway.
+	while _fx.size() > 400:
+		_fx.remove_at(0)
 	for i in range(_fx.size() - 1, -1, -1):
 		var fx := _fx[i]
 		fx["t"] += fx.get("rate", 0.09)
@@ -1790,6 +1831,8 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 
 # Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
 const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
+# Floattext 4-way outline offsets — was a fresh Array literal per text per frame.
+const _OUTLINE_OFFS := [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]
 
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
@@ -3017,7 +3060,8 @@ func _draw_fx() -> void:
 			var fc: Color = fx["col"]
 			fc.a = 1.0 - t * t
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
-			var fw := ThemeDB.fallback_font.get_string_size(fx["text"],
+			var ffont := Art.font()
+			var fw := ffont.get_string_size(fx["text"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
@@ -3027,9 +3071,9 @@ func _draw_fx() -> void:
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
-			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
-				draw_string(ThemeDB.fallback_font, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
-			draw_string(ThemeDB.fallback_font, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+			for od in _OUTLINE_OFFS:
+				draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+			draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
@@ -3263,35 +3307,29 @@ func _draw_progress_rail() -> void:
 
 
 func _draw_threat_edges() -> void:
-	# Chevrons on the bottom edge for live hostiles below the viewport —
-	# bypassed bunkers keep spawning behind you.
-	var _bottom_threats: Array = []
+	# One pass over sim.enemies classifies both edges (this used to be two full
+	# scans, each allocating a dict per qualifying enemy every frame).
+	# Bottom edge: live hostiles below the viewport — bypassed bunkers keep
+	# spawning behind you. Top edge: hostiles about to enter from the spawn
+	# edge above, otherwise only met as they cross into view.
+	var bottom_threats: Array = []
+	var top_threats: Array = []
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
 			continue
 		var sy: float = (e["y"] - sim.camera_top) * PX
-		if sy <= 364.0:
+		if sy <= 364.0 and (sy >= 0.0 or sy < -180.0):
 			continue
 		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
-		_bottom_threats.append({"e": e, "off": sy, "danger": danger})
+		if sy > 364.0:
+			bottom_threats.append({"e": e, "off": sy, "danger": danger})
+		else:
+			top_threats.append({"e": e, "off": sy, "danger": danger})
 	# A dense endless wave can stack a dozen+ off-screen hostiles on one edge,
 	# painting a near-solid chevron row that drowns the lethality signal —
 	# cap to the nearest few; ties prefer the lethal ranged killers.
-	_draw_edge_chevrons(_bottom_threats, false)
-	# Top-edge chevrons for hostiles about to enter from the spawn edge above —
-	# an off-screen threat you'd otherwise only meet as it crosses into view.
-	var _top_threats: Array = []
-	for e in sim.enemies:
-		if not e["alive"] or e.get("submerged", false):
-			continue
-		var ty: float = (e["y"] - sim.camera_top) * PX
-		if ty >= 0.0 or ty < -180.0:
-			continue
-		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
-		_top_threats.append({"e": e, "off": ty, "danger": tdanger})
-	# Same swarm cap as the bottom edge — nearest few only, ties favor the
-	# lethal ranged killers.
-	_draw_edge_chevrons(_top_threats, true)
+	_draw_edge_chevrons(bottom_threats, false)
+	_draw_edge_chevrons(top_threats, true)
 	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
 	# while an already-streamed boss (or the observer) sits above the visible
 	# view — its HP bar/label live in the fixed HUD but the arena-lock
@@ -3359,20 +3397,24 @@ func _draw_threat_edges() -> void:
 				Art.text(self, "REVIVE", Vector2(rx - 18, 50), 9, rcol)
 
 
+static func _cmp_threat_top(a: Dictionary, b: Dictionary) -> bool:
+	# Nearest-first (least negative off), ties prefer the lethal ranged killers.
+	if a["off"] != b["off"]:
+		return a["off"] > b["off"]
+	return a["danger"] and not b["danger"]
+
+
+static func _cmp_threat_bottom(a: Dictionary, b: Dictionary) -> bool:
+	if a["off"] != b["off"]:
+		return a["off"] < b["off"]
+	return a["danger"] and not b["danger"]
+
+
 func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	## Shared sort->cap->draw pass for the top/bottom off-screen threat
 	## chevrons: ties prefer the lethal ranged killers, capped to the
 	## nearest 6 so a dense swarm can't paint a solid warning row.
-	if is_top:
-		threats.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			if a["off"] != b["off"]:
-				return a["off"] > b["off"]
-			return a["danger"] and not b["danger"])
-	else:
-		threats.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			if a["off"] != b["off"]:
-				return a["off"] < b["off"]
-			return a["danger"] and not b["danger"])
+	threats.sort_custom(_cmp_threat_top if is_top else _cmp_threat_bottom)
 	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
 	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
 	for i in mini(6, threats.size()):
