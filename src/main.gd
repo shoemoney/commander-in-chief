@@ -698,6 +698,12 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": "NEED COINS", "col": Color(1.0, 0.45, 0.35)})
 			"shot":
 				_ev_shot(ev)
+			"throw":
+				# The lob has weight too: kick the thrower's body back along the aim,
+				# lighter than a gunshot — throwing was the one action with no feedback.
+				if ev["i"] < _recoil.size():
+					var thrower := sim.players[ev["i"]]
+					_recoil[ev["i"]] -= Vector2(thrower["aim_x"], thrower["aim_y"]) * PX * 1.6
 			"tank_shot":
 				var gunner := sim.players[ev["i"]]
 				var taim := Vector2(gunner["aim_x"], gunner["aim_y"]) * PX
