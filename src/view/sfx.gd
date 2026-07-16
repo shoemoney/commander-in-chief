@@ -22,6 +22,7 @@ var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
 var _ui_player := AudioStreamPlayer.new()   # jingles/stings: own bus, no combat limiter
 var _music := AudioStreamPlayer.new()
+var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
@@ -87,11 +88,20 @@ func _ready() -> void:
 		_pool.append(p)
 	_synth_all()
 	# War-drums bed: synthesized like everything else, looping under the SFX.
-	_music.stream = _synth_drums()
+	# TWO phase-locked loops on the same 110 BPM grid — full combat phrase and a
+	# sparse kick/low-tom lull — crossfaded by set_music_intensity, so a lull is
+	# a different PATTERN, not just full combat played quieter. Both start
+	# together and always share a pitch_scale, so the bars never drift.
+	_music.stream = _synth_drums(_PATTERN_COMBAT)
 	_music.bus = "Music"
 	_music.volume_db = -15.0
 	add_child(_music)
+	_music_lull.stream = _synth_drums(_PATTERN_LULL)
+	_music_lull.bus = "Music"
+	_music_lull.volume_db = -60.0
+	add_child(_music_lull)
 	_music.play()
+	_music_lull.play()
 
 
 func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
@@ -137,12 +147,20 @@ func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) ->
 
 
 func set_music_intensity(level: float, duck := 0.0) -> void:
-	## Ease the drum bed toward a target intensity (0 = quiet lull heartbeat,
-	## 1 = full-tilt combat), minus a fast-attack duck under heavy hits.
+	## Ease the drum bed toward a target intensity (0 = sparse lull pattern,
+	## 1 = full-tilt combat phrase), minus a fast-attack duck under heavy hits.
+	## Equal-power crossfade between the two phase-locked loops; mix by volume
+	## only — never stop/restart one, or the bars lose phase alignment.
 	level = clampf(level, 0.0, 1.0)
-	var target_db := lerpf(-24.0, -9.0, level) - duck * 16.0
-	_music.volume_db = lerpf(_music.volume_db, target_db, 0.15 if duck > 0.3 else 0.04)
-	_music.pitch_scale = lerpf(_music.pitch_scale, lerpf(0.9, 1.08, level), 0.04)
+	var rate := 0.15 if duck > 0.3 else 0.04
+	var base_db := lerpf(-24.0, -9.0, level) - duck * 16.0
+	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0)))
+	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0)))
+	_music.volume_db = lerpf(_music.volume_db, combat_db, rate)
+	_music_lull.volume_db = lerpf(_music_lull.volume_db, lull_db, rate)
+	var p := lerpf(_music.pitch_scale, lerpf(0.9, 1.08, level), 0.04)
+	_music.pitch_scale = p
+	_music_lull.pitch_scale = p   # identical playback speed = zero drift
 
 
 func set_concussion(amount: float) -> void:
@@ -369,15 +387,25 @@ func _synth_all() -> void:
 		_sounds[k] = _to_wav(s[k])
 
 
-func _synth_drums() -> AudioStreamWAV:
+# Per 8th step: [kick, tom_hi, tom_lo, snare]. Same 16-step grid, same BPM —
+# the two loops are the same length in samples, so they stay bar-aligned.
+const _PATTERN_COMBAT: Array[Array] = [
+	[1, 0, 0, 0], [0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0],
+	[0, 0, 0, 1], [0, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0],
+	[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0],
+	[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1],
+]
+const _PATTERN_LULL: Array[Array] = [   # kick + low tom only: a wary heartbeat
+	[1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0],
+	[0, 0, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0],
+	[1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 0],
+	[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0],
+]
+
+
+func _synth_drums(pattern: Array[Array]) -> AudioStreamWAV:
 	# Two bars of jungle war drums at 110 BPM (8th-note grid), seamless loop.
 	var step := int(RATE * 60.0 / 110.0 / 2.0)
-	var pattern: Array[Array] = [   # per 8th step: [kick, tom_hi, tom_lo, snare]
-		[1, 0, 0, 0], [0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0],
-		[0, 0, 0, 1], [0, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0],
-		[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0],
-		[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1],
-	]
 	var buf := _buf(float(step * pattern.size()) / RATE)
 	for k in pattern.size():
 		var ofs := k * step
