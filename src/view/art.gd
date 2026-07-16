@@ -48,7 +48,9 @@ const TEX := {
 	"icon_ammo": preload(SY + "icons/icon_ammo.png"),
 	"icon_grenade": preload(SY + "icons/icon_grenade.png"),
 	"icon_coin": preload(SY + "icons/icon_coin.png"),
-	"icon_fuel": preload(SY + "icons/icon_fuel.png"),
+	# Referenced nowhere (bake tools only write the PNGs) — commented out like
+	# hudfx_glow/hudfx_dmgdir above: ~270KB of boot VRAM for zero drawn pixels.
+	#"icon_fuel": preload(SY + "icons/icon_fuel.png"),
 	"icon_vest": preload(SY + "icons/icon_vest.png"),
 	"icon_skull": preload(SY + "icons/icon_skull.png"),
 	"icon_medal": preload(SY + "icons/icon_medal.png"),
@@ -101,7 +103,7 @@ const TEX := {
 	"barbedwire": preload(SY + "decor/barbedwire.png"),
 	"barrier": preload(SY + "decor/barrier.png"),
 	"ammobox": preload(SY + "decor/ammobox.png"),
-	"landmine": preload(SY + "decor/landmine.png"),
+	#"landmine": preload(SY + "decor/landmine.png"),
 	# Terrain/skyline set (War FBX bakes). Bridges are grey concrete terrain,
 	# skyline pieces are horizon silhouettes (side views, drawn dark, no outline).
 	"bridge_mid": preload(SY + "decor/bridge_mid.png"),
@@ -141,7 +143,7 @@ const TEX := {
 	"fx_impactdark": preload(SY + "fx/fx_impactdark.png"),
 	"fx_wind": preload(SY + "fx/fx_wind.png"),
 	"fx_fumes4": preload(SY + "fx/fx_fumes4.png"),
-	"fx_halfcircle": preload(SY + "fx/fx_halfcircle.png"),
+	#"fx_halfcircle": preload(SY + "fx/fx_halfcircle.png"),  # 175KB, never drawn
 	"fx_swipe2": preload(SY + "fx/fx_swipe2.png"),
 	# Semicircle flash card (512x256, flat edge at BOTTOM — orient flat edge to muzzle).
 	"fx_muzzle_fan": preload(SY + "fx/fx_muzzle_fan.png"),
@@ -153,14 +155,14 @@ const TEX := {
 	"m_insurgent5": preload(SY + "mil2/insurgent5.png"),
 	"m_pilot": preload(SY + "mil2/pilot.png"),
 	"m_soldier2": preload(SY + "mil2/soldier2.png"),
-	"m_apc": preload(SY + "mil2/apc.png"),
+	#"m_apc": preload(SY + "mil2/apc.png"),
 	"m_radar_tank": preload(SY + "mil2/radar_tank.png"),
 	"m_rocket_truck": preload(SY + "mil2/rocket_truck.png"),
 	"m_jet": preload(SY + "mil2/jet.png"),
 	"m_heli_transport": preload(SY + "mil2/heli_transport.png"),
 	"m_heli_attack2": preload(SY + "mil2/heli_attack2.png"),
 	"m_drone": preload(SY + "mil2/drone.png"),
-	"m_light_tank": preload(SY + "mil2/light_tank.png"),
+	#"m_light_tank": preload(SY + "mil2/light_tank.png"),
 	"m_technical": preload(SY + "mil2/technical.png"),
 	# Wreck variants: same vehicle art, but muted/small/outlined for battlefield
 	# litter (see SCALE/TINT below) — dead hulks, not live vehicles.
@@ -168,11 +170,11 @@ const TEX := {
 	"wreck_technical": preload(SY + "mil2/technical.png"),
 	"wreck_light_tank": preload(SY + "mil2/light_tank.png"),
 	"wep_grenade": preload(SY + "mil2/wep_grenade.png"),
-	"wep_rpg": preload(SY + "mil2/wep_rpg.png"),
+	#"wep_rpg": preload(SY + "mil2/wep_rpg.png"),
 	"wep_shotgun": preload(SY + "mil2/wep_shotgun.png"),
 	"wep_rifle": preload(SY + "mil2/wep_rifle.png"),
 	"wep_mg": preload(SY + "mil2/wep_mg.png"),
-	"wep_pistol": preload(SY + "mil2/wep_pistol.png"),
+	#"wep_pistol": preload(SY + "mil2/wep_pistol.png"),
 	"wep_claymore": preload(SY + "mil2/wep_claymore.png"),
 	"wep_smoke": preload(SY + "mil2/wep_smoke.png"),
 	"wep_flashbang": preload(SY + "mil2/wep_flashbang.png"),
@@ -244,7 +246,7 @@ const TEX := {
 	"mi_book": preload(SY + "ui/menuicons/book.png"),
 	"mi_play": preload(SY + "ui/menuicons/play.png"),
 	"mi_controller": preload(SY + "ui/menuicons/controller.png"),
-	"mi_keyboard": preload(SY + "ui/menuicons/keyboard.png"),
+	#"mi_keyboard": preload(SY + "ui/menuicons/keyboard.png"),
 	# Modern Menus batch 2 (256px, white with alpha — modulate for color).
 	# NOTE: mi_controller.png also landed on disk but the "mi_controller" key
 	# above already serves controller.png — kept as-is, duplicate art unregistered.
