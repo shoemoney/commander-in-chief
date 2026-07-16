@@ -369,7 +369,7 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 ## hands, surfaced as a legible chip on the player row.
 func _pip(x: float, y: float, col: Color, sym: String) -> float:
 	draw_rect(Rect2(x, y + 2.0, 10.0, 9.0), Color(0.1, 0.11, 0.09, 0.85))
-	draw_string(ThemeDB.fallback_font, Vector2(x + 2.5, y + ICON - 3.0), sym,
+	draw_string(Art.font(), Vector2(x + 2.5, y + ICON - 3.0), sym,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE - 1, col)
 	return x + 12.0
 

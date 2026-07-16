@@ -396,7 +396,7 @@ func _draw_hall() -> void:
 		_center_text("NO %s RUNS YET — GO EARN YOUR PLACE" % names[_hall_filter], 170, 11,
 			Color(0.8, 0.84, 0.74))
 		return
-	# Fixed x offsets per column — ThemeDB.fallback_font is proportional, so
+	# Fixed x offsets per column — Art.font() is proportional, so
 	# space-padded strings stagger; each column draws at its own x instead.
 	var col_x := [112, 148, 226, 306, 396]
 	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
