@@ -430,7 +430,10 @@ func _process(_delta: float) -> void:
 		return
 	# Blast heat-warp rides the same shader at low strength — a marquee detonation
 	# briefly shocks the whole frame (blur+chroma pulse), then it snaps clear.
-	var amt := maxf(_concussion, _blast_warp)
+	# REDUCE MOTION: the strongest motion effect in the game (wobble + radial blur
+	# + chroma) was the one screen-feel channel that missed the _motion pass. The
+	# 0.25 floor mirrors the flash-alpha floor — a faint 'hurt' read, no warp.
+	var amt := maxf(_concussion, _blast_warp) * maxf(_motion, 0.25)
 	var on := amt > 0.001
 	_screen_fx_rect.visible = on
 	if on:
@@ -2659,7 +2662,7 @@ func _draw_terrain() -> void:
 			var fy_px := fy + float((hf / 5) % 16)
 			if sim._in_water(int(fx / PX), sim.camera_top + int(fy_px / PX)):
 				continue
-			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07
+			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07 * _motion
 			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway,
 				0.28 + float(hf % 3) * 0.03, fern_col)
 
@@ -2678,7 +2681,7 @@ func _draw_terrain() -> void:
 				if sim._in_water(world_x, world_y):
 					continue
 				var big := h2 % 5 == 0
-				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04
+				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04 * _motion
 				_ground_shadow(Vector2(px, wy_px), 6.0 if big else 4.0)
 				if ash > 0.33:
 					# Past the ash midpoint the canopy dies for real: swap to the baked
@@ -3052,11 +3055,12 @@ func _draw_enemies() -> void:
 		_enemy_pos_prev[eidx] = e_now
 		if e["kind"] != "frogman":
 			if e.get("windup", 0) == 0 and e_moved:
-				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4
+				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4 * _motion
 			else:
 				# Winding up / standing: the run-bob stops but a slow breath keeps the
 				# unit alive — nothing on the field should be a frozen statue.
-				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(e["x"] / 4093)) * -0.5
+				# (Stilled under REDUCE MOTION like the parked jeep/boss hover.)
+				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(e["x"] / 4093)) * -0.5 * _motion
 		var target: Dictionary = {}
 		var best_d2 := 0.0
 		for p in alive_players:
@@ -3708,11 +3712,12 @@ func _draw_players() -> void:
 		# field. _dust_prev still holds LAST frame's pos here (updated by _kick_dust below).
 		var walk_bob := 0.0
 		if p["alive"] and p["roll_ticks"] == 0 and i < _dust_prev.size() and Vector2i(p["x"], p["y"]) != _dust_prev[i]:
-			walk_bob = absf(sin(Engine.get_physics_frames() * 0.35 + i * PI)) * 1.2
+			walk_bob = absf(sin(Engine.get_physics_frames() * 0.35 + i * PI)) * 1.2 * _motion
 		elif p["alive"] and p["roll_ticks"] == 0:
 			# Idle breathing: the standing-still soldier was the one frozen thing on an
 			# otherwise fully-animated field — a tiny slow micro-bob keeps it alive.
-			walk_bob = sin(Engine.get_physics_frames() * 0.045 + i * PI) * 0.35
+			# (Both stilled by _motion, like the jeep bob and boss hover already are.)
+			walk_bob = sin(Engine.get_physics_frames() * 0.045 + i * PI) * 0.35 * _motion
 		var tex_name := "player1" if i == 0 else "player2"
 		if p["alive"] and not sim._in_water(p["x"], p["y"]):
 			_kick_dust(i, p["x"], p["y"], _dust_prev, false)
