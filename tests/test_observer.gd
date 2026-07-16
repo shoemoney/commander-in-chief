@@ -62,16 +62,21 @@ func test_roll_iframes_survive_strike() -> void:
 	Runner.T.ok(p["alive"], "i-frames beat the mortar strike")
 
 
-func test_kill_observer_cancels_strikes() -> void:
+func test_kill_observer_cancels_only_his_strikes() -> void:
+	# Design-loop iter1: strikes[] is shared by the observer, grenadiers, drones
+	# and boss volleys — killing the spotter must defuse ONLY the obs-tagged
+	# barrage, not hand out a free field-wide defuse of everyone else's shots.
 	var sim := SimWorld.new(11, 1)
 	var p := sim.players[0]
 	sim.observer = {"x": p["x"], "strike_cd": 999999, "spawn_cam": sim.camera_top}
-	sim.strikes.append({"x": p["x"] + 100 * Fixed.ONE, "y": p["y"], "ticks": 40})
+	sim._add_strike(p["x"] + 100 * Fixed.ONE, p["y"], true)    # the observer's own
+	sim._add_strike(p["x"] - 100 * Fixed.ONE, p["y"])          # a grenadier's lob
 	sim.stall_ticks = 400
 	var chest_before := sim.war_chest
 	sim._kill_observer()
 	Runner.T.ok(sim.observer.is_empty(), "observer down")
-	Runner.T.eq(sim.strikes.size(), 0, "pending strikes cancelled")
+	Runner.T.eq(sim.strikes.size(), 1, "observer strikes cancelled, the grenadier's lob still falls")
+	Runner.T.ok(not sim.strikes[0].get("obs", false), "the surviving strike is the non-observer one")
 	Runner.T.eq(sim.stall_ticks, 0, "stall pressure reset")
 	Runner.T.eq(sim.war_chest, chest_before + SimWorld.COIN_ELITE * 2, "observer bounty minted")
 

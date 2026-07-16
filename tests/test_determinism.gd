@@ -74,6 +74,16 @@ const SEED := 0xDEADBEEF
 ## targeting), Flashbang (kind 9, field-wide stun) — plus the endless Recon Drone spotter. New
 ## checksummed state: player rend_ticks/smoke_ticks/claymores + world flash_ticks; the rare-drop
 ## table widens to six capsules (rng values shift on every elite kill) → all samples moved.
+## VERIFIED UNCHANGED (2026-07-16, design-loop iter1 — lens-audit batch on the new mechanics):
+## smoke now denies only ranged FIRE-COMMITS (the _nearest_alive_player guard froze all pathing —
+## a free-kill printer that even halted the colossus finale), claymore plants ALONG the aim, the
+## rare-capsule table is weighted 2:2:1:1:1:1 with Rend gated until shields can spawn, the drone
+## tightens to 24t paint / 100t cd + wave-5 gate + marked bounty, flashbang re-arms frozen
+## windups, ghillies force-reveal when they alone hold a wave open, and the observer defuses only
+## his own obs-tagged strikes. Both goldens came back BYTE-IDENTICAL: the torture never rolls a
+## rare capsule (same rng draw count either way), the endless torture wipes at wave 2 before any
+## special spawns, and no torture player ever holds smoke/claymores — so every changed path is
+## golden-inert here and proven instead by the direct tests in test_mechanics/test_observer.
 const GOLDEN: Array[int] = [
 	6881935581614822723,
 	4879838447662794480,
@@ -141,6 +151,8 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-16, sim gameplay backlog): see GOLDEN note — new hashed player/world
 ## fields shift the endless stream too, and the wave-3+ special roll widens 0..6 → 0..7 to seat
 ## the Recon Drone (rng values shift on every special spawn).
+## VERIFIED UNCHANGED (2026-07-16, design-loop iter1): see GOLDEN note — the wave-2 wipe keeps
+## the torture short of every touched endless path (specials, capsules, drones).
 const ENDLESS_GOLDEN: Array[int] = [
 	6939951692539117039,
 	4671723467842338406,

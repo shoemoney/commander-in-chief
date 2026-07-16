@@ -167,14 +167,26 @@ func test_claymore_plants_on_interact_and_consumes_a_charge() -> void:
 		"the plant lands outside its own trigger radius")
 
 
-func test_smoke_conceals_from_all_targeting() -> void:
+func test_smoke_blinds_ranged_fire_but_not_pathing() -> void:
+	# Design-loop iter1: smoke denies the FIRE-COMMIT (windup/paint starts),
+	# never the pathing — blinding _nearest_alive_player wholesale froze the
+	# entire field (and the colossus finale) into a free-kill printer.
 	var sim := SimWorld.new(13, 1)
 	var p := sim.players[0]
-	Runner.T.ok(not sim._nearest_alive_player(0, 0).is_empty(),
-		"unsmoked player is targetable")
 	p["smoke_ticks"] = 100
-	Runner.T.ok(sim._nearest_alive_player(0, 0).is_empty(),
-		"smoked player vanishes from every targeting caller")
+	sim._spawn_enemy(p["x"] + 60 * Fixed.ONE, p["y"], true)   # elite inside standoff
+	var e := sim.enemies[0]
+	e["fire_cd"] = 0
+	sim._step_enemies()
+	Runner.T.eq(e.get("windup", 0), 0, "elite cannot start a windup into smoke")
+	sim._spawn_enemy(p["x"], p["y"] - 150 * Fixed.ONE, false)   # rusher above
+	var r: Dictionary = sim.enemies[1]
+	var ry0: int = r["y"]
+	sim._step_enemies()
+	Runner.T.ok(r["y"] != ry0, "rusher still closes on a smoked player")
+	p["smoke_ticks"] = 0
+	sim._step_enemies()
+	Runner.T.ok(e.get("windup", 0) > 0, "elite opens fire once the smoke clears")
 
 
 func test_flashbang_stuns_field_enemies_then_releases() -> void:

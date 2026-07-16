@@ -55,8 +55,13 @@ const FLASH_STUN_TICKS := 90
 # slowed, but bullets still swat it. Reuses fire_cd/windup — no new hashed field.
 const DRONE_STANDOFF := 130 * F_ONE
 const DRONE_SPEED := 2 * F_ONE
-const DRONE_FIRE_CD_TICKS := 140
-const DRONE_WINDUP_TICKS := 45
+# Cadence tightened from 140/45: paint(45t) + strike telegraph(45t) double-tell
+# every 2.3s was ignorable clutter. Keep a SHORT paint (feeds the off-screen
+# threat pip + fairness) but let the strike ring be the main dodge window.
+# Starting values; test: a hovering drone must restrict player footing — if
+# players still ignore it, lower fire_cd toward 80.
+const DRONE_FIRE_CD_TICKS := 100
+const DRONE_WINDUP_TICKS := 24
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -347,6 +352,11 @@ func step(inputs: Array) -> void:
 	# full window (the collecting tick already skipped their step).
 	if flash_ticks > 0:
 		flash_ticks -= 1
+		if flash_ticks == 20:
+			# Wake-up warning ~0.33s out so the stun window closing never
+			# blindsides (starting value; if the resume still surprises in
+			# playtest, raise by 10t). Event only — checksum-excluded.
+			events.append({"t": "flash_recover", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	# A called airstrike resolves after its telegraph window (enemies keep acting
 	# through it — the buyer commits before seeing the result).
 	if pending_airstrike > 0:
@@ -505,13 +515,18 @@ func _step_players(inputs: Array) -> void:
 
 		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0:
 			# Claymore: no tank in reach, so INTERACT plants a carried charge one
-			# step BEHIND the aim (outside its own 9px trigger). It joins mines[]
+			# step ALONG the aim — into the enemy lane you're already shooting,
+			# clear of your own kiting path (planting behind the aim dropped it
+			# straight into the retreat line: ~5 ticks from a self-kill at full
+			# backpedal). Still outside its own 9px trigger. It joins mines[]
 			# wholesale — armed instantly, and it hurts both sides (1986 grammar).
 			p["claymores"] = p["claymores"] - 1
-			var cmx: int = p["x"] - Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
-			var cmy: int = p["y"] - Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
-			mines.append({"x": cmx, "y": cmy, "armed": true})
-			events.append({"t": "mine_lay", "x": cmx, "y": cmy})
+			var cmx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
+			var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
+			# `friendly` is view-only identity (yours vs the sapper's) — same
+			# trigger, same blast, NOT hashed (see test_checksum_coverage).
+			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true})
+			events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
 
 		# Contact with any enemy = one-hit death (roll i-frames protect;
 		# submerged frogmen must surface before they can strike).
@@ -695,6 +710,13 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 		9:
 			# Flashbang: one field-wide stun, resolved the instant it's grabbed.
 			flash_ticks = FLASH_STUN_TICKS
+			# Fairness re-arm: a windup frozen mid-telegraph would otherwise
+			# resume with the player's dodge window already burned — floor every
+			# in-flight windup back to the elite-tell length (24t, the shortest
+			# ranged telegraph in the roster) so the resumed shot re-telegraphs.
+			for fe in enemies:
+				if fe["alive"] and fe.get("windup", 0) > 0:
+					fe["windup"] = maxi(fe["windup"], ELITE_WINDUP_TICKS)
 			events.append({"t": "flashbang", "x": p["x"], "y": p["y"]})
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
@@ -898,6 +920,9 @@ func _step_bullets() -> void:
 							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
 							dead = true
 							break
+						# Rend beat the block — a distinct shear event so the payoff
+						# reads AT the shield (a silent skip looked like a normal kill).
+						events.append({"t": "rend_pierce", "x": b["x"], "y": b["y"]})
 					_kill_enemy(e)
 					# Piercing Rounds: the shooter's active buff lets the bullet punch
 					# through the kill and keep going to the next target this tick.
@@ -1027,12 +1052,20 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		# One-shot view cue; events[] is checksum-excluded -> golden-safe.
 		events.append({"t": "surge", "x": e["x"], "y": e["y"]})
 	if e["elite"] and not no_coin:
-		pickups.append({
-			"x": e["x"], "y": e["y"],
-			# ~1-in-6 elites drop a rare power-up capsule (Pierce/Spread/Rend/
-			# Claymore/Smoke/Flashbang, uniform); otherwise the usual Ammo/Grenade.
-			"kind": (4 + rng.range_i(0, 5)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
-		})
+		# ~1-in-6 elites drop a rare capsule; otherwise the usual Ammo/Grenade.
+		# The rare table is WEIGHTED 2:2:1:1:1:1 (pierce/spread/rend/claymore/
+		# smoke/flash) — a uniform six-way roll made the two flat-DPS buffs that
+		# drive a run's offense 3× rarer while diluting the pool with situational
+		# utility. Starting weights; test: over ~100 elite kills, offensive
+		# capsules should be ≥40% of rare drops — if <30%, raise their weight.
+		var pkind: int
+		if rng.range_i(0, 5) == 0:
+			pkind = [4, 4, 5, 5, 6, 7, 8, 9][rng.range_i(0, 7)]
+			if pkind == 6 and not _shields_possible():
+				pkind = 4   # Rend before any shield can exist is a dead draw — give Pierce
+		else:
+			pkind = rng.range_i(0, 1)
+		pickups.append({"x": e["x"], "y": e["y"], "kind": pkind})
 
 
 # --- Enemies / bunkers / spawner ---
@@ -1135,7 +1168,7 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > ELITE_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ELITE_SPEED)
-	elif e["fire_cd"] == 0:
+	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't aim into smoke
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS
 		e["windup"] = ELITE_WINDUP_TICKS
 		events.append({"t": "elite_windup", "x": e["x"], "y": e["y"]})
@@ -1153,7 +1186,7 @@ func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > GRENADIER_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
-	elif e["fire_cd"] == 0:
+	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
 		e["fire_cd"] = GRENADIER_FIRE_CD_TICKS
 		e["windup"] = GRENADIER_WINDUP_TICKS
 		events.append({"t": "grenadier_windup", "x": e["x"], "y": e["y"]})
@@ -1179,7 +1212,7 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 	# Keeps to the back — only closes if the target runs far away.
 	if dlen > SNIPER_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
-	elif e["fire_cd"] == 0:
+	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
 		e["aim_lx"] = dx   # lock the shot vector at paint start (see fire branch)
@@ -1202,7 +1235,7 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	if dlen > DRONE_STANDOFF:
 		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), DRONE_SPEED)
 		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), DRONE_SPEED)
-	elif e["fire_cd"] == 0:
+	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
 		e["fire_cd"] = DRONE_FIRE_CD_TICKS
 		e["windup"] = DRONE_WINDUP_TICKS
 		events.append({"t": "drone_windup", "x": e["x"], "y": e["y"]})
@@ -1292,7 +1325,7 @@ func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: in
 	if dlen > GHILLIE_NOTICE_RADIUS:
 		e["submerged"] = true   # you slipped out of range — re-cloak and wait
 		return
-	if e["fire_cd"] == 0:
+	if e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
 		e["aim_lx"] = dx   # lock the shot vector at paint start (view draws the line)
@@ -1304,10 +1337,12 @@ func _nearest_alive_player(x: int, y: int) -> Dictionary:
 	var best := {}
 	var best_d := 0
 	for p in players:
-		# Smoke concealment breaks LOS for EVERY targeting caller at once
-		# (rusher chase, elite/sniper aim, mortar/boss/colossus fire missions).
-		# Touch still kills — smoke hides you, it doesn't armor you.
-		if not p["alive"] or p["smoke_ticks"] > 0:
+		# NOTE: smoke concealment is NOT applied here — this lookup also drives
+		# MOVEMENT (rusher chase, courier flee, colossus descent, frogman
+		# proximity), and blinding it froze the whole field into a free-kill
+		# printer. Smoke instead gates the ranged FIRE-COMMIT sites (windup/
+		# paint/strike starts) via smoke_ticks checks at each shooter.
+		if not p["alive"]:
 			continue
 		var d := Fixed.mul(p["x"] - x, p["x"] - x) + Fixed.mul(p["y"] - y, p["y"] - y)
 		if best.is_empty() or d < best_d:
@@ -1407,6 +1442,18 @@ func _spawn_frogman(x: int, y: int) -> void:
 		"kind": "frogman", "submerged": true, "lunge_ticks": 0, "surface_ticks": 0})
 
 
+func _shields_possible() -> bool:
+	## True once the shield archetype can actually spawn (campaign: 3 gates
+	## opened; endless: wave 3+) — gates the Rend drop so it's never inert.
+	if mode == "endless":
+		return wave >= 3
+	var opened := 0
+	for g in gates:
+		if g["open"]:
+			opened += 1
+	return opened >= 3
+
+
 func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	## True if bullet b hits the shieldman's front arc. Facing = toward the
 	## nearest player; a head-on bullet travels roughly opposite that, so a
@@ -1448,6 +1495,10 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 	if kind == "ghillie":
 		e["submerged"] = true   # dug in, cloaked until you close the distance
 		e["surface_ticks"] = 0
+	if kind == "drone":
+		# The marquee aerial threat kills like a trophy, not a grunt: marked
+		# rides the existing bounty grammar (3× pay + gold fountain + crown).
+		e["marked"] = true
 	enemies.append(e)
 
 
@@ -1613,11 +1664,30 @@ func _step_waves() -> void:
 				elif roll == 4:
 					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
 				elif roll == 5:
-					_spawn_special(x, camera_top - 24 * F_ONE, "drone")
+					# Tracked-AoE is the hardest special to answer — waves 3-4 teach
+					# the dodge-by-aim shooters first, then the drone layers on at 5
+					# (the same beat the first miniboss lands).
+					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
+	elif not enemies.is_empty():
+		# Anti-stall: a passed-by ghillie re-cloaks (bullet-immune) yet stays
+		# alive, holding the wave open until the player backtracks into its
+		# notice radius — a soft-lock they trip without understanding why. When
+		# ONLY cloaked ghillies remain, force the reveal: the wave must always
+		# be finishable from where the player stands.
+		var all_cloaked := true
+		for e in enemies:
+			if not (e["kind"] == "ghillie" and e.get("submerged", false)):
+				all_cloaked = false
+				break
+		if all_cloaked:
+			for e in enemies:
+				e["submerged"] = false
+				e["surface_ticks"] = GHILLIE_REVEAL_TICKS
+				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
 	elif enemies.is_empty() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
@@ -1730,7 +1800,7 @@ func _step_colossus() -> void:
 
 	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: sapper drops.
 	colossus["spray_cd"] = colossus["spray_cd"] - 1
-	if colossus["spray_cd"] <= 0:
+	if colossus["spray_cd"] <= 0 and target["smoke_ticks"] == 0:   # can't aim into smoke (descent continues)
 		colossus["spray_cd"] = COLOSSUS_SPRAY_CD_TICKS
 		events.append({"t": "enemy_shot", "x": colossus["x"], "y": colossus["y"]})
 		for spread in [-64, 0, 64]:
@@ -1741,7 +1811,7 @@ func _step_colossus() -> void:
 				_spawn_enemy_bullet(colossus["x"], colossus["y"], bx, by, blen)
 	if phase >= 2:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
-		if colossus["volley_cd"] <= 0:
+		if colossus["volley_cd"] <= 0 and target["smoke_ticks"] == 0:
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
 			_add_strike(target["x"], target["y"])
 	if phase == 3:
@@ -1805,7 +1875,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 		if t % BOSS_SPRAY_INTERVAL_TICKS == 0:
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target := _nearest_alive_player(boss["x"], by)
-			if not target.is_empty():
+			if not target.is_empty() and target["smoke_ticks"] == 0:
 				var dx: int = target["x"] - boss["x"] + rng.range_i(-40, 40) * F_ONE
 				var dy: int = target["y"] - by
 				var dlen := Fixed.length(dx, dy)
@@ -1817,7 +1887,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 		if t in BOSS_MORTAR_TICKS:
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
-			if not target2.is_empty():
+			if not target2.is_empty() and target2["smoke_ticks"] == 0:
 				_add_strike(target2["x"], target2["y"])
 
 
@@ -1878,10 +1948,13 @@ func _step_enemy_bullets() -> void:
 			enemy_bullets.remove_at(i)
 
 
-func _add_strike(x: int, y: int) -> void:
+func _add_strike(x: int, y: int, obs := false) -> void:
 	## Every tracked mortar strike funnels here so the view/audio get one
 	## consistent "incoming" warning event alongside the telegraph state.
-	strikes.append({"x": x, "y": y, "ticks": STRIKE_TELEGRAPH_TICKS})
+	## `obs` tags the Observer's own barrage: killing/outrunning him defuses
+	## ONLY his strikes — grenadier lobs, drone paints and boss volleys sharing
+	## this array keep falling (they have their own living owners).
+	strikes.append({"x": x, "y": y, "ticks": STRIKE_TELEGRAPH_TICKS, "obs": obs})
 	events.append({"t": "strike_warn", "x": x, "y": y})
 
 
@@ -1912,15 +1985,15 @@ func _step_observer() -> void:
 		# Pushing well past the observer despawns him (pressure released).
 		if camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
 			observer = {}
-			strikes.clear()
+			_clear_observer_strikes()
 			stall_ticks = 0
 		else:
 			observer["strike_cd"] = observer["strike_cd"] - 1
 			if observer["strike_cd"] <= 0:
 				observer["strike_cd"] = OBSERVER_STRIKE_CD_TICKS
 				var target := _nearest_alive_player(observer["x"], camera_top + OBSERVER_Y_OFFSET)
-				if not target.is_empty():
-					_add_strike(target["x"], target["y"])
+				if not target.is_empty() and target["smoke_ticks"] == 0:   # can't paint into smoke
+					_add_strike(target["x"], target["y"], true)
 	# NOTE: strike resolution is NOT here — step() calls _resolve_strikes()
 	# once per tick for both modes. (Calling it here too double-decremented
 	# every strike, halving its telegraph window; fixed iter 28.)
@@ -1953,8 +2026,17 @@ func _kill_observer() -> void:
 	war_chest += COIN_ELITE * 2
 	score += COIN_ELITE * 20
 	observer = {}
-	strikes.clear()
+	_clear_observer_strikes()
 	stall_ticks = 0
+
+
+func _clear_observer_strikes() -> void:
+	# Downing the spotter defuses HIS barrage only — a shared strikes.clear()
+	# used to also cancel every in-flight grenadier/drone/boss strike, a free
+	# field-wide defuse that had nothing to do with the observer.
+	for i in range(strikes.size() - 1, -1, -1):
+		if strikes[i].get("obs", false):
+			strikes.remove_at(i)
 
 
 # --- Geometry helpers ---
