@@ -2366,8 +2366,14 @@ func _draw_enemies() -> void:
 				if gwu2 > 0 and not target.is_empty():
 					var tp2 := _to_screen(target["x"], target["y"])
 					var pf2 := 1.0 - float(gwu2) / float(SimWorld.SNIPER_WINDUP_TICKS)
-					draw_line(epos, tp2, Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5), 1.0 + pf2)
-					draw_circle(tp2, 2.0 + pf2 * 2.0, Color(1.0, 0.2, 0.15, 0.4 + pf2 * 0.4))
+					# Same final-moment white strobe the sniper gets — a revealed
+					# ghillie fires the same lethal shot and deserves the same fair
+					# 'get off the line NOW' warning, not a silent kill.
+					var lcol2 := Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5)
+					if gwu2 <= 10 and (gwu2 / 2) % 2 == 0:
+						lcol2 = Color(1.0, 1.0, 1.0, 0.95)
+					draw_line(epos, tp2, lcol2, 1.0 + pf2)
+					draw_circle(tp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
 				_spr("frogman", epos, face, 0.5, Color(0.7, 0.95, 0.5))   # ghillie-green
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
