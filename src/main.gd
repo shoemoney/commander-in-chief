@@ -141,6 +141,7 @@ const _KIND_TEACH := {
 	"shield": "RIOT SHIELD — FLANK OR GRENADE",
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
 	"sapper": "SAPPER — MIND THE MINE TRAIL",
+	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -190,7 +191,7 @@ const _EVENT_SOUND := {
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
-	"mg_nest_aim": ["tank_board", -11.0, 1.4],
+	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -853,6 +854,7 @@ func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
 	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
+	var barrel_pinged := false      # one cook-off boom per tick — a fuse chain emits several
 	var dirt_puffs := 0             # spent-round dust cap per tick — MG spam guard
 	for ev in sim.events:
 		var kind: String = ev["t"]
@@ -997,6 +999,11 @@ func _consume_events() -> void:
 				_ev_explosion(ev)
 			"barrel_blast":
 				# A fuel drum cooks off: heavy punch + a fireball light + a scorch mark.
+				# One boom per tick (a fuse chain fires several) — same idiom as the
+				# clustered explosion ping, so a ripple doesn't stack into a roar.
+				if not barrel_pinged:
+					barrel_pinged = true
+					_sfx.play_at("explosion", _to_screen(ev["x"], ev["y"]), -6.0, 0.8)
 				_trauma = minf(1.0, _trauma + 0.3)
 				_rumble = maxf(_rumble, 0.55)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
@@ -1051,6 +1058,13 @@ func _consume_events() -> void:
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % ("Y" if Art.use_pad else "E"))
+				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
+				# out with a red descending sting so it registers as a setback, not a
+				# silent reset. Flags ride the checksum-excluded event (golden-safe).
+				if ev.get("triple", false) or ev.get("pierce", false) or ev.get("spread", false):
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+						"rate": 0.02, "drop": true, "text": "LOADOUT LOST", "col": Color(0.95, 0.25, 0.2)})
+					_sfx.play("deny", -5.0, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Directional death-gore: the felling round's exit spray carries
 				# past the body, opposite the threat the wedge (_hit_dir) marks.
@@ -2621,10 +2635,17 @@ func _draw_barrels() -> void:
 		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
 		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
 		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
-		# Blast-radius ring: grenades telegraph their kill circle (the ONLY other
-		# radius damage) and barrels share the same GRENADE_RADIUS — show it.
-		draw_arc(bp, SimWorld.GRENADE_RADIUS * PX, 0, TAU, 24,
-			Color(1.0, 0.45, 0.15, 0.10 + wb * 0.06), 1.0)
+		# Blast-radius ring: shares GRENADE_RADIUS with the player's grenade circle,
+		# but a chained barrel HURTS YOU inside it (the grenade never does) — so draw
+		# it as a DASHED RED hazard ring (mine/danger grammar), not the friendly
+		# smooth-orange kill circle, to flag "opposite consequence".
+		var br := SimWorld.GRENADE_RADIUS * PX
+		var brc := Color(1.0, 0.2, 0.15, 0.5 + wb * 0.3)
+		for di in range(20):   # every-other-segment dashes read as a hazard boundary
+			if di % 2 == 1:
+				continue
+			var a0 := TAU * di / 20.0
+			draw_arc(bp, br, a0, a0 + TAU / 20.0, 3, brc, 1.4)
 		# Non-color danger cue: hue-blind players got only orange — the "!" pip
 		# carries "live ordnance" on the shape channel (destructive-row grammar).
 		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
@@ -3046,7 +3067,10 @@ func _draw_enemies() -> void:
 					# AIM: locked, winding up (the mg_nest_aim sting's visual twin) —
 					# amber lane fades in as the first round closes. Static alphas,
 					# so reduce-motion needs no gate.
-					var af := 1.0 - float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
+					# Bright AT lock (windup full, most time to react) and EASES as it
+					# commits — the old ramp was inverted (dimmest when you could still
+					# dodge, brightest when you couldn't). Firing draws its own hot line.
+					var af := float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
 					draw_line(epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
 				elif nburst > 0:
 					# FIRING: hot lethal-red, sniper-line vocabulary — holds through
@@ -3597,8 +3621,10 @@ func _draw_players() -> void:
 				# are up, amber while the Trench Gun spread is up.
 				if p["pierce_ticks"] > 0:
 					rcol = Color(0.55, 0.9, 1.0)
-				elif p["spread_ticks"] > 0:
+				elif p["spread_ticks"] > 0 and not p["triple"]:   # Triple (permanent) fires the same fan; a Spread pickup on top is no gain — do not flip to amber
 					rcol = Color(1.0, 0.8, 0.45)
+				elif p["triple"]:
+					rcol = Color(1.0, 0.6, 0.9)   # permanent Triple Shot: magenta, matches the pickup + HUD x3 pip
 				if bash_ready:
 					rcol = Color(1.0, 0.55, 0.2)
 					var bp := Art.pulse(0.25)
@@ -3823,7 +3849,10 @@ func _draw_fx() -> void:
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
 			var rise := 1.0 - (1.0 - t) * (1.0 - t)
-			var fpivot := pos + Vector2(0.0, -18.0 - rise * 22.0 - floattext_i * 11.0)
+			# A "drop" floater (e.g. LOADOUT LOST) sinks instead of rising — a felt
+			# down-beat. Default is the rise every other callout uses.
+			var fydir: float = 1.0 if fx.get("drop", false) else -1.0
+			var fpivot := pos + Vector2(0.0, fydir * (18.0 + rise * 22.0) - floattext_i * 11.0)
 			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)

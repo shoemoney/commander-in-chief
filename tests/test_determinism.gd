@@ -91,24 +91,14 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
 ## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
 ## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
-## RE-RECORDED (2026-07-16, PR#9 reconcile merge): origin/main's grafted iters (Triple Shot kind 6
-## w/ hashed p["triple"], Explosive Fuel Barrels barrels[] block, MG-nest emplacement) merged with
-## this branch's capsule stack — the four tools renumber 7=Rend/8=Claymore/9=Smoke/10=Flashbang,
-## the rare table becomes a 10-entry weighted pick [4,4,5,5,6,6,7,8,9,10], and the endless special
-## roll widens 0..7 → 0..8 to seat drone AND mg_nest. Union sim = new state stream in both modes.
-## RE-RECORDED (2026-07-16, PR#9 final merge-to-main): union of this branch's capsule/drone stack
-## with main's PR#10 P3b sim batch (dodge-along-aim, grenade edge, wheel-only airstrike, boss HP
-## scaling, score-on-buy, earlier specials) — both parents had re-recorded independently. The
-## campaign samples match the previous reconcile exactly (every P3b campaign path is torture-inert:
-## stationary panic-roll needs a neutral stick, buys/specials/boss-HP need progress the 60s torture
-## never reaches); only the endless stream moved.
+## RE-RECORDED (2026-07-16, PR#11 merge-to-main): union of main (capsule/drone stack + PR#10
+## P3b batch + grafted Triple/Nest/Barrels) with pass2's P3 design changes (MG Nest hp armor +
+## coin retier + aim re-acquire + streak/drop exclusion, barrels react to bullets/enemy-contact/
+## fuse/coin-neutral, Triple+Spread 5-fan via SPREAD2, shop score parity). Both parents had
+## re-recorded independently; new hashed fields e["hp"] and barrel fuse_ticks -> new stream.
 const GOLDEN: Array[int] = [
-	8422831759359552435,
-	7568204556783353249,
-	2250169827864321848,
-	6186396691166597871,
-	9127211295622998863,
-	1261887275657627611,
+	9047643037908952255, 1759994758934664153, 7766134935096958484,
+	3329481962086528547, 5504197230152306677, 616294942130258451,
 ]
 
 
@@ -183,16 +173,14 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## fixes (roll-along-aim, grenade edge-detect, airstrike out of crate pool, boss HP player-count
 ## scaling, score-on-purchase, early specials gate) stack with Triple Shot (hashed p["triple"]) and
 ## Explosive Fuel Barrels (checksummed barrels[]); all endless samples recomputed for the merged sim.
-## RE-RECORDED (2026-07-16, PR#9 final merge-to-main): union of this branch's capsule/drone stack
-## with main's PR#10 P3b sim batch (dodge-along-aim, grenade edge behavior, wheel-only airstrike,
-## boss HP scaling, score-on-buy, earlier specials) — both parents had re-recorded independently.
+## RE-RECORDED (2026-07-16, PR#11 merge-to-main): union of main (capsule/drone stack + PR#10
+## P3b batch + grafted Triple/Nest/Barrels) with pass2's P3 design changes (MG Nest hp armor +
+## coin retier + aim re-acquire + streak/drop exclusion, barrels react to bullets/enemy-contact/
+## fuse/coin-neutral, Triple+Spread 5-fan via SPREAD2, shop score parity). Both parents had
+## re-recorded independently; new hashed fields e["hp"] and barrel fuse_ticks -> new stream.
 const ENDLESS_GOLDEN: Array[int] = [
-	2235960687345413449,
-	6738593773207975264,
-	7724535518553991907,
-	8987834056005165675,
-	5877657229760763315,
-	4795367969849645755,
+	3481005823424918283, 4855886998412571982, 893260034959611459,
+	5903077874106772747, 6661913665578598227, 1621007134709677211,
 ]
 
 

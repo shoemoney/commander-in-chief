@@ -337,30 +337,39 @@ func test_ng_plus_hard_tightens_the_spawn_curve() -> void:
 
 
 func test_barrels_chain_and_frag_the_pack() -> void:
-	# One grenade on a barrel chains down a line and kills an enemy between them.
+	# One grenade lights a barrel; the chain now ripples down the line over a
+	# short fuse (_step_barrels), not all in one frame — but still frags the pack.
 	var sim := SimWorld.new(1, 1)
 	var y: int = sim.camera_top + 120 * Fixed.ONE
 	sim.barrels.clear()
 	sim.enemies.clear()
-	sim.barrels.append({"x": 200 * Fixed.ONE, "y": y, "armed": true})
-	sim.barrels.append({"x": 218 * Fixed.ONE, "y": y, "armed": true})   # 18px apart < GRENADE_RADIUS
-	sim.barrels.append({"x": 236 * Fixed.ONE, "y": y, "armed": true})
+	var b0 := {"x": 200 * Fixed.ONE, "y": y, "armed": true, "fuse_ticks": 0}
+	var b1 := {"x": 218 * Fixed.ONE, "y": y, "armed": true, "fuse_ticks": 0}   # 18px apart < GRENADE_RADIUS
+	var b2 := {"x": 236 * Fixed.ONE, "y": y, "armed": true, "fuse_ticks": 0}
+	sim.barrels.append(b0)
+	sim.barrels.append(b1)
+	sim.barrels.append(b2)
 	sim.enemies.append({"x": 236 * Fixed.ONE, "y": y, "alive": true, "elite": false, "kind": "rusher"})
 	var foe: Dictionary = sim.enemies[0]
-	sim._explode(200 * Fixed.ONE, y)   # detonate only the first barrel
-	for bl in sim.barrels:
-		Runner.T.ok(not bl["armed"], "the whole barrel line chained")
+	sim._explode(200 * Fixed.ONE, y)   # light the first barrel's fuse
+	for i in 40:                       # let the fuse ripple down the cluster
+		sim._step_barrels()
+	for bl in [b0, b1, b2]:
+		Runner.T.ok(not bl["armed"], "the whole barrel line chained (via fuse)")
 	Runner.T.ok(not foe["alive"], "the chain reaction fragged the enemy at the far end")
 
 
 func test_barrel_blast_hurts_a_close_player() -> void:
-	# Stand too close to a barrel you detonate and it takes you with it.
+	# Stand too close to a barrel you detonate and it takes you with it — the
+	# fuse makes it rollable, but standing in it once it cooks off still hits.
 	var sim := SimWorld.new(1, 1)
 	var p := sim.players[0]
 	p["vest"] = true
 	sim.barrels.clear()
-	sim.barrels.append({"x": p["x"] + 10 * Fixed.ONE, "y": p["y"], "armed": true})
-	sim._explode(p["x"] + 10 * Fixed.ONE, p["y"])
+	sim.barrels.append({"x": p["x"] + 10 * Fixed.ONE, "y": p["y"], "armed": true, "fuse_ticks": 0})
+	sim._explode(p["x"] + 10 * Fixed.ONE, p["y"])   # light the fuse
+	for i in 12:
+		sim._step_barrels()
 	Runner.T.ok(not p["vest"], "the barrel blast broke the too-close player's vest")
 
 
