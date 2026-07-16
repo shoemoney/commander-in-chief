@@ -538,8 +538,11 @@ func _draw() -> void:
 				_sel_y = ty
 			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
 			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
+			# Fade the glow while it's still catching up to the row — a lagging box
+			# at full alpha reads as misplaced; dimming it makes the glide read as motion.
+			var lag := clampf(absf(_sel_y - _sel_target) / 40.0, 0.0, 1.0)
 			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
-				Color(1.0, 0.9, 0.4, 0.7 + mp * 0.3))
+				Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
 		# Destructive rows carry a warm tint BEFORE the first press — the warning
 		# used to appear only after you'd already pressed once.
