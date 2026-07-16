@@ -465,8 +465,14 @@ func _activate() -> void:
 func _draw() -> void:
 	if mode == Mode.HIDDEN:
 		return
-	draw_rect(Rect2(0, 0, 640, 360),
-		Color(0.02, 0.05, 0.02, (0.55 if mode == Mode.TITLE else 0.6) * _open_t))   # scrim ≥0.55: 8px text over a LIVE firefight; fades in over the open settle
+	# Scrim ≥0.55: 8px text over a LIVE firefight; fades in over the open settle.
+	# REDUCE MOTION near-blacks the TITLE backdrop — the live attract fight
+	# (scroll + tracers + explosions) is the biggest motion source on the exact
+	# screen where the setting is toggled, and it isn't _motion-gated itself.
+	var sa := 0.55 if mode == Mode.TITLE else 0.6
+	if mode == Mode.TITLE and main._motion < 0.5:
+		sa = 0.92
+	draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.05, 0.02, sa * _open_t))
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		# Plate the bare text on the Apocalypse frame, debrief-style (underlay
 		# darkens the well, frame carries the chrome).
@@ -489,8 +495,14 @@ func _draw() -> void:
 				main.best_wave, main.best_dist], 132, 9, Color(1.0, 0.92, 0.55, 1.0))
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
-			_center_text("CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
-				main._life_kills, wpct], 145, 8, Color(0.6, 0.72, 0.62, 0.7))
+			var career := "CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
+				main._life_kills, wpct]
+			# Plated like the input legend: 8px dim text straight on the live
+			# attract firefight loses to bright terrain no matter the alpha.
+			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			draw_rect(Rect2(320.0 - cpw / 2.0 - 4.0, 136.0, cpw + 8.0, 12.0),
+				Color(0.03, 0.05, 0.03, 0.55))
+			_center_text(career, 145, 8, Color(0.6, 0.72, 0.62, 0.7))
 	elif mode == Mode.OPTS:
 		_center_text("OPTIONS", 88, 22, Color(0.95, 0.95, 0.85))
 	else:
@@ -522,6 +534,10 @@ func _draw() -> void:
 		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
 		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
 		var r := Rect2(Vector2(320 - BTN.x / 2.0, floorf(top + k * gap)), Vector2(BTN.x, floorf(bh)))
+		# Whole-pixel row center: bh is odd on PAUSE (21) and 11-row TITLE (11), so
+		# every bh/2-derived y (label baseline, state dot, arrows, confirm glyph)
+		# landed on .5 — the exact sub-pixel shimmer _sel_y snapping guards against.
+		var cy := floorf(r.position.y + bh / 2.0)
 		# Group divider: a faint rule in the gap above the FIRST destructive row splits
 		# the navigation block from the destructive exits (QUIT on TITLE, RESTART on
 		# PAUSE) — hierarchy cue without touching the shared row geometry/hit-test.
@@ -579,18 +595,17 @@ func _draw() -> void:
 				Color(1.0, 0.62, 0.3, 0.95))
 			var ct := Art.tex(Art.glyph_key("confirm"))
 			var cw := 12.0 * float(ct.get_width()) / float(ct.get_height())
-			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0,
-				r.position.y + (bh - 12.0) / 2.0, cw, 12.0), false)
+			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
 			label_r = r.end.x - cw - 10.0
 		# Fixed icon gutter: iconless rows indent the same, so every label
 		# left-aligns to one column. Overlong labels ellipsize inside the button.
 		var lx := r.position.x + 30.0
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
-			Vector2(lx, r.position.y + bh / 2.0 + 4.0), 11, col)
+			Vector2(lx, cy + 4.0), 11, col)
 		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
 		# shape+fill carry the state (hue alone fails protan players).
 		if mitems[k].has("on"):
-			var dc := Vector2(r.end.x - 10.0, r.position.y + bh / 2.0)
+			var dc := Vector2(r.end.x - 10.0, cy)
 			if mitems[k]["on"]:
 				draw_circle(dc, 3.0, Art.safe(Color(0.55, 0.95, 0.5)))
 			else:
@@ -601,13 +616,18 @@ func _draw() -> void:
 		if selected and mitems[k]["id"] in _TOGGLES:
 			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
 			var at := Art.tex("mi_arrow")
-			var ay := r.position.y + (bh - 10.0) / 2.0
+			var ay := cy - 5.0
 			draw_texture_rect(at, Rect2(r.position.x - 13.0, ay, -10.0, 10.0), false, fcol)
 			draw_texture_rect(at, Rect2(r.end.x + 5.0, ay, 10.0, 10.0), false, fcol)
 		if mitems[k]["id"] == "paste_seed":
-			# Where the seed comes from — the row name alone didn't say.
-			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0,
-				r.position.y + bh / 2.0 + 3.0), 8, Color(0.84, 0.86, 0.78, 0.75))
+			# Where the seed comes from — the row name alone didn't say. Plated:
+			# it draws OUTSIDE the button over the live attract fight, and 8px
+			# text loses to bright terrain (the input legend's own lesson).
+			var apw := Art.font().get_string_size("(FROM CLIPBOARD)", HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			draw_rect(Rect2(r.end.x + 2.0, cy - 6.0, apw + 8.0, 12.0),
+				Color(0.03, 0.05, 0.03, 0.55))
+			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0, cy + 3.0),
+				8, Color(0.84, 0.86, 0.78, 0.75))
 		if selected:
 			# 1px focus ring on the actual row rect — always crisp and present,
 			# independent of the glow glide, for keyboard/pad a11y.
