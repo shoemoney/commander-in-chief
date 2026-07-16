@@ -123,6 +123,7 @@ var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
+var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
@@ -878,6 +879,22 @@ func _consume_events() -> void:
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -16.0, 1.7)
+				# Riot-shield deflect: armor_block fires for bunkers AND shields, but a
+				# shieldman eating your frontal rounds looked identical to plinking a
+				# wall. If the block landed on a shieldman, add a bright cyan ricochet
+				# flash + a throttled metallic ping so "wasted from the front — flank
+				# him" reads at the impact. Reads the event + existing enemy state.
+				for se in sim.enemies:
+					if se["alive"] and se.get("kind", "") == "shield" \
+							and absi(se["x"] - ev["x"]) < 14 * Fixed.ONE \
+							and absi(se["y"] - ev["y"]) < 14 * Fixed.ONE:
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+							"tex": "fx_sparkle", "sz": 6.0, "fade": 2.0, "rate": 0.16,
+							"col": Color(0.55, 0.85, 1.0, 0.9)})
+						if Engine.get_physics_frames() - _deflect_frame >= 10:
+							_deflect_frame = Engine.get_physics_frames()
+							_sfx.play_at("tank_board", _to_screen(ev["x"], ev["y"]), -15.0, 2.5)
+						break
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
@@ -2828,6 +2845,12 @@ func _draw_enemies() -> void:
 			# The riot shield: a bright arc across the front — this side deflects.
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.7, 0.85, 1.0, 0.95), 3.0)
 			draw_arc(epos, 11.0, face - 1.05, face + 1.05, 14, Color(0.3, 0.5, 0.8, 0.6), 5.0)
+			# Rear SAFE-arc: the shield only eats the front cone, so its back is the
+			# flank counter. A faint green arc behind it (opposite the bright front
+			# arc) teaches "get around him" — Art.safe keeps it legible in colorblind.
+			var srear := face + PI
+			draw_arc(epos, 13.0, srear - 1.15, srear + 1.15, 14,
+				Art.safe(Color(0.4, 1.0, 0.5, 0.4)), 2.0)
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
 			# "he's seeding the ground behind him" is a gameplay telegraph.
