@@ -172,8 +172,10 @@ func _settings_rows() -> Array[Dictionary]:
 	# "on" drives the row's state dot (filled/hollow — position+shape carry it,
 	# not hue alone) so toggle state reads without parsing the label tail.
 	return [
-		{"id": "sfx", "label": "SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"), "destructive": false, "on": not _bus_off("SFX")},
-		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false, "on": not _bus_off("Music")},
+		# SFX/MUSIC are stepped 0..10 levels (8-of-9 panel consensus), not mute
+		# toggles: "vol" drives a 10-segment bar where the state dot would sit.
+		{"id": "sfx", "label": "SFX: %d" % main._bus_vol("SFX"), "destructive": false, "vol": main._bus_vol("SFX")},
+		{"id": "music", "label": "MUSIC: %d" % main._bus_vol("Music"), "destructive": false, "vol": main._bus_vol("Music")},
 		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5},
 		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind},
 		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on},
@@ -337,9 +339,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 				var ry := floorf(float(g["top"]) + float(sel) * float(g["gap"]))
 				var ay := floorf(ry + float(g["bh"]) / 2.0) - 5.0   # same snap as _draw's cy
 				var lx := 320.0 - BTN.x / 2.0
-				if Rect2(lx - 23.0, ay, 10.0, 10.0).grow(3.0).has_point(ev.position) \
-						or Rect2(lx + BTN.x + 5.0, ay, 10.0, 10.0).grow(3.0).has_point(ev.position):
-					_activate()
+				var la := Rect2(lx - 23.0, ay, 10.0, 10.0).grow(3.0)
+				var ra := Rect2(lx + BTN.x + 5.0, ay, 10.0, 10.0).grow(3.0)
+				if la.has_point(ev.position) or ra.has_point(ev.position):
+					# Side matters now: volume rows step down/up per arrow
+					# (plain toggles flip either way, exactly as before).
+					_nav(0, -1 if la.has_point(ev.position) else 1)
 					queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
@@ -369,6 +374,18 @@ func _nav(move: int, hmove: int) -> void:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
 		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 		main._sfx.play("pickup", -14.0, 1.3)
+		queue_redraw()
+		return
+	# ◄/► on a volume row steps the 0..10 level (Enter still mute-toggles, and
+	# the bus keeps its volume_db through a mute, so unmute restores the level).
+	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
+		var bus: String = "SFX" if _menu_items()[sel]["id"] == "sfx" else "Music"
+		var nv: int = clampi(main._bus_vol(bus) + hmove, 0, 10)
+		if nv != main._bus_vol(bus):
+			main._set_bus_vol(bus, nv)
+			main._save_settings()
+			# The tick doubles as a live level demo — pitch rides the new step.
+			main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
 		queue_redraw()
 		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
@@ -632,6 +649,17 @@ func _draw() -> void:
 		var lx := r.position.x + 30.0
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
 			Vector2(lx, cy + 4.0), 11, col)
+		# Volume rows: a 10-step level bar where the toggle dot would sit —
+		# level reads as fill COUNT (shape, not hue alone); 0 = all hollow.
+		if mitems[k].has("vol"):
+			var vv: int = mitems[k]["vol"]
+			var vbx := r.end.x - 8.0 - 49.0   # 10 segments * 5px pitch - 1px, right-aligned with the dot slot
+			for sgi in 10:
+				var sr := Rect2(vbx + float(sgi) * 5.0, cy - 3.0, 4.0, 6.0)
+				if sgi < vv:
+					draw_rect(sr, Art.safe(Color(0.55, 0.95, 0.5, 1.0 if selected else 0.8)))
+				else:
+					draw_rect(sr, Color(0.55, 0.6, 0.5, 0.6), false, 1.0)
 		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
 		# shape+fill carry the state (hue alone fails protan players).
 		if mitems[k].has("on"):

@@ -1715,12 +1715,12 @@ func _load_bests() -> void:
 		_assist = cf.get_value("settings", "assist", false)
 		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
 		_rumble_on = cf.get_value("settings", "rumble", true)
-		AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"),
-			cf.get_value("settings", "sfx_muted", false))
-		AudioServer.set_bus_mute(AudioServer.get_bus_index("UI"),
-			cf.get_value("settings", "sfx_muted", false))   # jingle bus slaves to the SFX mute
-		AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"),
-			cf.get_value("settings", "music_muted", false))
+		# Volume steps 0..10 (legacy saves only carried the mute bools — map
+		# them). _set_bus_vol also slaves the UI jingle bus to the SFX level.
+		_set_bus_vol("SFX", cf.get_value("settings", "sfx_vol",
+			0 if cf.get_value("settings", "sfx_muted", false) else 10))
+		_set_bus_vol("Music", cf.get_value("settings", "music_vol",
+			0 if cf.get_value("settings", "music_muted", false) else 10))
 		_fullscreen = cf.get_value("settings", "fullscreen", false)
 		if _fullscreen:
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
@@ -1734,10 +1734,34 @@ func _save_settings() -> void:
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
 		"rumble": _rumble_on,
-		"sfx_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")),
-		"music_muted": AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")),
+		"sfx_vol": _bus_vol("SFX"),
+		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
 	})
+
+
+func _bus_vol(name: String) -> int:
+	# SFX/MUSIC level in 0..10 steps. The AudioServer IS the state: mute carries
+	# the 0, volume_db carries the level — so the row's Enter mute-toggle
+	# naturally remembers (and restores) the pre-mute level.
+	var b := AudioServer.get_bus_index(name)
+	if AudioServer.is_bus_mute(b):
+		return 0
+	return clampi(int(round(db_to_linear(AudioServer.get_bus_volume_db(b)) * 10.0)), 1, 10)
+
+
+func _set_bus_vol(name: String, v: int) -> void:
+	v = clampi(v, 0, 10)
+	var b := AudioServer.get_bus_index(name)
+	AudioServer.set_bus_mute(b, v == 0)
+	if v > 0:
+		AudioServer.set_bus_volume_db(b, linear_to_db(v / 10.0))
+	if name == "SFX":
+		# The jingle "UI" bus slaves to the SFX control — one user-facing knob.
+		var u := AudioServer.get_bus_index("UI")
+		AudioServer.set_bus_mute(u, v == 0)
+		if v > 0:
+			AudioServer.set_bus_volume_db(u, linear_to_db(v / 10.0))
 
 
 func _record_run() -> void:
