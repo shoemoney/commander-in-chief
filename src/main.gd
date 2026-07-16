@@ -2458,6 +2458,13 @@ func _draw_barrels() -> void:
 		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
 		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
 		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
+		# Blast-radius ring: grenades telegraph their kill circle (the ONLY other
+		# radius damage) and barrels share the same GRENADE_RADIUS — show it.
+		draw_arc(bp, SimWorld.GRENADE_RADIUS * PX, 0, TAU, 24,
+			Color(1.0, 0.45, 0.15, 0.10 + wb * 0.06), 1.0)
+		# Non-color danger cue: hue-blind players got only orange — the "!" pip
+		# carries "live ordnance" on the shape channel (destructive-row grammar).
+		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
 
 
 func _draw_water() -> void:
@@ -2797,18 +2804,33 @@ func _draw_enemies() -> void:
 			var spp := Art.pulse(0.25)
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "mg_nest":
-			# Rooted emplacement: sandbag nest + gunner + a burst-line telegraph
-			# flashing down the LOCKED vector while it rakes.
+			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
+			# (6/9 panel reviewers: the old telegraph was one flat 44px stub that
+			# only existed mid-burst — aim was invisible, reload erased the lane).
 			_spr("sandbag_beige", epos, 0.0, 0.5, Color(0.82, 0.8, 0.62))
 			_spr("elite", epos + Vector2(0, -2), face, 0.4, Color(0.9, 0.85, 0.7))
-			if e.get("lunge_ticks", 0) > 0:
-				var lv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
-				if lv.length() > 1.0:
-					var ld := lv.normalized()
-					# Red lethal-lane vocabulary (matches the sniper "get off this line"),
-					# long enough to read as a whole lane, louder than a windup (ACTIVE fire).
-					draw_line(epos, epos + ld * 44.0, Color(1.0, 0.15, 0.12, 0.7), 2.0)
-					draw_circle(epos + ld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
+			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+			if nlv.length() > 1.0:
+				var nld := nlv.normalized()
+				var nburst: int = e.get("lunge_ticks", 0)
+				var nwu: int = e.get("windup", 0)
+				# The lane runs the bullet's actual flight, not a 44px stub.
+				var lane_end := epos + nld * 640.0
+				if nburst == SimWorld.MG_NEST_BURST_ROUNDS and nwu > 0:
+					# AIM: locked, winding up (the mg_nest_aim sting's visual twin) —
+					# amber lane fades in as the first round closes. Static alphas,
+					# so reduce-motion needs no gate.
+					var af := 1.0 - float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
+					draw_line(epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
+				elif nburst > 0:
+					# FIRING: hot lethal-red, sniper-line vocabulary — holds through
+					# the 8-tick gaps so the 3-round burst reads as one rake.
+					draw_line(epos, lane_end, Color(1.0, 0.15, 0.12, 0.7), 2.0)
+					draw_circle(epos + nld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
+				else:
+					# RELOAD: a dim stub down the LAST lane — the rooted-turret
+					# threat must not vanish for the whole 1.5s between bursts.
+					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.12), 1.0)
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
