@@ -1986,6 +1986,7 @@ func _draw_terrain() -> void:
 					continue
 				var big := h2 % 5 == 0
 				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04
+				_ground_shadow(Vector2(px, wy_px), 6.0 if big else 4.0)
 				_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
 					float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34, tree_col)
 
@@ -2003,6 +2004,7 @@ func _draw_terrain() -> void:
 			var ly_px := ly + float((hl / 9) % 40)
 			if sim._in_water(int(lx / PX), sim.camera_top + int(ly_px / PX)):
 				continue
+			_ground_shadow(Vector2(lx, ly_px), 5.0)
 			_spr(_LITTER[(hl / 40) % _LITTER.size()], Vector2(lx, ly_px),
 				float(hl % 628) / 100.0, 1.0)
 
@@ -2065,14 +2067,19 @@ func _draw_water() -> void:
 
 
 func _draw_gates() -> void:
+	# The one man-made structure in frame scorches with the run too (grass/foliage/
+	# sky already do), so the walls at gate 5 aren't pristine beige like gate 1.
+	var soot := clampf(_sector_march() * 0.7, 0.0, 0.7)
+	var open_wall := Color(0.7, 0.68, 0.62).lerp(Color(0.34, 0.3, 0.3), soot)
+	var shut_wall := Color(1, 1, 1).lerp(Color(0.5, 0.44, 0.42), soot)
 	for g in sim.gates:
 		var gy := _to_screen(0, g["y"]).y
 		if g["open"]:
 			for i in 2:
-				_spr("sandbag_beige", Vector2(24 + i * 592, gy), 0.0, 0.6, Color(0.7, 0.68, 0.62))
+				_spr("sandbag_beige", Vector2(24 + i * 592, gy), 0.0, 0.6, open_wall)
 		else:
 			for i in 14:
-				_spr("sandbag_beige", Vector2(24 + i * 46, gy), 0.0, 0.72)
+				_spr("sandbag_beige", Vector2(24 + i * 46, gy), 0.0, 0.72, shut_wall)
 			# Lock pips: how many of the two locking bunkers are still up —
 			# turns a black-box wall into 'one down, one to go'.
 			if not g.get("b1", {}).is_empty():
