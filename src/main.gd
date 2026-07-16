@@ -2946,7 +2946,10 @@ func _draw_enemies() -> void:
 					# AIM: locked, winding up (the mg_nest_aim sting's visual twin) —
 					# amber lane fades in as the first round closes. Static alphas,
 					# so reduce-motion needs no gate.
-					var af := 1.0 - float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
+					# Bright AT lock (windup full, most time to react) and EASES as it
+					# commits — the old ramp was inverted (dimmest when you could still
+					# dodge, brightest when you couldn't). Firing draws its own hot line.
+					var af := float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
 					draw_line(epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
 				elif nburst > 0:
 					# FIRING: hot lethal-red, sniper-line vocabulary — holds through
