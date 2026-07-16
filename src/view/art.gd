@@ -351,6 +351,19 @@ const OUTLINE := {
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+## Brand-correct button WORDS for inline hint TEXT (toasts can't embed a sprite,
+## so they name the button). Keyboard uses the keycap letter (_GLYPH_KEY); pad
+## uses the face/name for the button that action binds to, per brand — a
+## DualSense player told to "PLANT WITH [X]" was aimed at the wrong (bottom) face.
+const _PAD_WORD := {
+	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK"},
+	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "CREATE"},
+	"switch": {"interact": "X", "revive": "Y", "wheel": "MINUS"},
+}
+static func prompt_word(action: String) -> String:
+	if use_pad:
+		return _PAD_WORD.get(pad_brand, _PAD_WORD["xbox"]).get(action, "?")
+	return _GLYPH_KEY.get(action, "?")
 
 ## Semantic hint → registry key for the device-aware prompt sprites (see
 ## glyph_key below). Pad column mirrors the bindings in main._gather_inputs;

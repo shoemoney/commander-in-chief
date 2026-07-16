@@ -878,7 +878,7 @@ func _consume_events() -> void:
 				match int(ev["kind"]):
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
-						% ("X" if Art.use_pad else "F"))
+						% Art.prompt_word("interact"))
 					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
@@ -1050,7 +1050,7 @@ func _consume_events() -> void:
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
-				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % ("Y" if Art.use_pad else "E"))
+				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % Art.prompt_word("revive"))
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Directional death-gore: the felling round's exit spray carries
 				# past the body, opposite the threat the wedge (_hit_dir) marks.
@@ -1688,12 +1688,12 @@ func _track_bests() -> void:
 	# Supply-wheel discoverability: the first time the chest can afford the
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
-		_hint("supply", "HOLD [%s] FOR THE SUPPLY WHEEL" % ("BACK" if Art.use_pad else "Q"))
+		_hint("supply", "HOLD [%s] FOR THE SUPPLY WHEEL" % Art.prompt_word("wheel"))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
 	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
 		_hint("airstrike_wheel", "AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]"
-			% ("BACK" if Art.use_pad else "Q"))
+			% Art.prompt_word("wheel"))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).
 	if not sim._all_players_down():
@@ -2364,7 +2364,7 @@ func _draw() -> void:
 					is_locker = true
 					break
 			if is_locker:
-				var lp := Art.pulse(0.15)
+				var lp: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)   # steady-bright under reduce-motion
 				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
 			_ground_shadow(c, 17.0)
 			# Hash-picked bunker variant: bunker / bunker2 / mirrored bunker (the
@@ -2391,13 +2391,16 @@ func _draw() -> void:
 			# A recon drone loiters above an active strongpoint — a small orbiting
 			# silhouette that reads the bunker as 'watched'. Phase offset per bunker
 			# so multiples don't fly in lockstep. Pure ambient view.
-			var da := float(Engine.get_physics_frames()) * 0.03 + float(bk["x"] / 4096)
+			# Loiter angle freezes at each drone's phase-offset rest under reduce-motion
+			# (the orbit is pure ambient motion — its siblings, the observer orbit dots,
+			# are gated the same way).
+			var da := float(bk["x"] / 4096) if _motion < 0.5 \
+				else float(Engine.get_physics_frames()) * 0.03 + float(bk["x"] / 4096)
 			var dp := c + Vector2(cos(da) * 15.0, sin(da) * 7.0 - 22.0)
 			_spr("m_drone", dp, da + PI / 2, 0.4)
 	_draw_pickups()
 	_draw_tanks()
 	_draw_enemies()
-	_draw_threat_pips()
 	_draw_observer()
 	_draw_gunships()
 	_draw_colossus()
@@ -2417,6 +2420,11 @@ func _draw() -> void:
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	_draw_threat_edges()
+	# Threat pips clamp their arrows to the viewport border in screen coords, so
+	# they belong in the shake-immune block — drawn under the live shake they slid
+	# off the very edge they pin to, worst exactly when a lethal off-screen shot
+	# (heaviest shake) is incoming.
+	_draw_threat_pips()
 	_draw_objective_markers()
 	_draw_progress_rail()
 	var top_msg := _top_center_priority()
@@ -3010,7 +3018,7 @@ func _draw_enemies() -> void:
 			# sprite now); the pulsing gold ring stays — "catch this one" must
 			# still read across a chaotic field. Forward lean = closing momentum.
 			_spr("courier", epos, face, 0.5, Color.WHITE, 1.12)
-			var lb := Art.pulse(0.2)
+			var lb: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)   # steady-bright under reduce-motion
 			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 		elif e["kind"] == "shield":
 			_spr("m_bombsuit", epos, face, 0.55, Color(0.85, 0.9, 1.0))   # armored EOD bulk sells the block
@@ -3027,7 +3035,7 @@ func _draw_enemies() -> void:
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
 			# "he's seeding the ground behind him" is a gameplay telegraph.
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
-			var spp := Art.pulse(0.25)
+			var spp: float = 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady-bright under reduce-motion
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "mg_nest":
 			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle

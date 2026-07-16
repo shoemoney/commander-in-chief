@@ -67,7 +67,11 @@ func _process(delta: float) -> void:
 			_stick_rep -= delta
 			if _stick_rep <= 0.0:
 				_stick_rep = 0.12
-				_nav(_stick_y, _stick_x)
+				# Auto-repeat drives VERTICAL nav and HALL filter cycling only.
+				# A held sideways stick used to machine-gun toggle activation ~8×/s
+				# (buy sfx spam + bus mute flip + a settings disk-write every step);
+				# the deliberate first flip still fires on the press edge in _unhandled_input.
+				_nav(_stick_y, _stick_x if mode == Mode.HALL else 0)
 		# Held up/down KEYS get the same repeat cadence as the stick.
 		if _key_move != 0:
 			_key_rep -= delta
@@ -372,7 +376,12 @@ func _row_geometry() -> Dictionary:
 	# hit-test must agree or hover selects the wrong row.
 	var n := _items().size()
 	var many := n > 4
-	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 156.0)
+	# OPTS gets its own top: the 156 floor exists to clear TITLE's tagline/BEST/
+	# CAREER block, but OPTIONS has only a lone header at y88 — at 156 it left a
+	# ~46px void, then squeezed its 7 rows to a 25px pitch. 120 seats them right
+	# under the header at the full gap.
+	var top := 118.0 if mode == Mode.PAUSE \
+		else (120.0 if mode == Mode.OPTS else (150.0 if not many else 156.0))
 	# TITLE's bottom bound clears the y~322 input legend strip — at 310 the QUIT
 	# row sat flush against it (6/8 panel reviewers, unanimous top item).
 	var bottom := 296.0 if mode == Mode.TITLE else 310.0
@@ -532,7 +541,10 @@ func _draw() -> void:
 		# by live state) — rows without one just stay text.
 		var icon := _row_icon(mitems[k]["id"])
 		if icon != "":
-			var isz := minf(bh - 6.0, 16.0)
+			# Floor at 8px: with WATCH LAST RUN present the TITLE list is 11 rows,
+			# which drove bh-6 down to a ~5px illegible speck. 8px still centers
+			# cleanly in an 11px row.
+			var isz := clampf(bh - 6.0, 8.0, 16.0)
 			draw_texture_rect(Art.tex(icon), Rect2(Vector2(r.position.x + 9.0,
 				r.position.y + (bh - isz) / 2.0), Vector2(isz, isz)), false,
 				Color(1, 1, 1, 1.0 if selected else 0.7))
