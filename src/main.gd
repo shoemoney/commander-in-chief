@@ -142,6 +142,9 @@ const _KIND_TEACH := {
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
 	"sapper": "SAPPER — MIND THE MINE TRAIL",
 	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
+	# The counterplay is counterintuitive (it outruns a straight sprint at
+	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
+	"technical": "TECHNICAL — SIDESTEP ITS CHARGE LINE, ONE SHOT DROPS IT",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -1138,7 +1141,10 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"] - 8, "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "size": 12, "text": "PILOT DOWN — REACH HIM",
 					"col": Art.safe(Color(0.5, 1.0, 0.7))})
-				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH HIM BEFORE HE'S MARCHED OFF THE TOP")
+				# The banner carries the stakes BEFORE the player commits to the
+				# chase: the payout number, and the friendly-fire trap (a stray
+				# round pays nothing — sim rule the green ring alone can't teach).
+				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM" % sim.PILOT_RANSOM)
 			"pilot_rescued":
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
 				_sfx.play("buy", -2.0, 1.5)
@@ -1351,6 +1357,18 @@ func _ev_kill(ev: Dictionary) -> void:
 	# reads as fought-over, not swept clean.
 	var kkind: String = ev.get("kind", "rusher")
 	var kwet: bool = sim._in_water(ev["x"], ev["y"])
+	if kkind == "pilot":
+		# The sim pays NOTHING for gunning down the rescue — so the view must
+		# not pay either. The generic path below is reward-shaped (hitmarker
+		# confirm, streak feed, rising kill blip); running it here teaches the
+		# exact opposite of the rule. Corpse + red receipt + the same low fail
+		# tone as PILOT CAPTURED, and out.
+		_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+			"kind": _CORPSE_TEX.get(kkind, "elite"), "spin": randf() * TAU, "wet": kwet})
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+			"rate": 0.02, "text": "RANSOM LOST", "col": Art.safe(Color(1.0, 0.4, 0.3))})
+		_sfx.play("alarm", -14.0, 0.6)
+		return
 	# Sprawl the corpse along the shot that felled it (away from the
 	# nearest shooter), not a random spin. Every specialist leaves its OWN
 	# silhouette (the kill event carries kind for exactly this); wet kills
