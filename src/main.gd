@@ -134,6 +134,8 @@ var _pilot_alarm_frame := -999    # one-shot for the pilot's ESCAPING warning to
 var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
+var _fire_swallow := false       # eat SPACE/LMB held over from a menu click / debrief redeploy —
+                                 # clicking RESUME must not spend MG ammo on the first resumed ticks
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 var _seen_kinds := {}             # enemy kind → true once its first-encounter banner fired
@@ -284,15 +286,15 @@ func _setup_screen_fx() -> void:
 	if str(ProjectSettings.get_setting("display/window/stretch/mode", "viewport")) != "canvas_items":
 		var scan := ColorRect.new()
 		scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		scan.size = get_viewport_rect().size
 		scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_scan_mat = ShaderMaterial.new()
 		_scan_mat.shader = load("res://src/view/crt.gdshader")
 		scan.material = _scan_mat
 		fx_layer.add_child(scan)
 	_screen_fx_rect = ColorRect.new()
+	# (No explicit .size — PRESET_FULL_RECT already sizes it, and setting both
+	# printed a "size overridden after _ready()" warning on every boot.)
 	_screen_fx_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_screen_fx_rect.size = get_viewport_rect().size
 	_screen_fx_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE   # never eats input
 	_screen_fx_rect.visible = false
 	_screen_fx_mat = ShaderMaterial.new()
@@ -609,6 +611,7 @@ func _reset() -> void:
 	_run_best_streak = 0
 	_down_frames = 0
 	_debrief = false
+	_fire_swallow = true   # a SPACE/Enter/LMB redeploy press must not open the run firing
 
 
 var _joy_brand_cache := {}   # device id → "xbox"/"ps"/"switch" (name lookup once per pad)
@@ -809,6 +812,9 @@ func _physics_process(_delta: float) -> void:
 	Art.colorblind = colorblind   # apply on menu/attract frames too, not just gameplay
 	_update_cursor()
 	if _menu.is_active():
+		# Arm the fire-swallow every menu frame: the SPACE/LMB press that closes
+		# the menu (RESUME click, title confirm) must not fire on resume.
+		_fire_swallow = true
 		_hud_icons.visible = _menu.mode != GameMenu.Mode.TITLE
 		# Attract mode: the title runs a LIVE firefight behind the overlay
 		# (reusing the tuned trailer bot) so the game sells itself before a
@@ -2377,8 +2383,15 @@ func _gather_inputs() -> Array[SimInput]:
 	p1.move_y = _quantize_axis(ky)
 	p1.aim_x = _quantize_axis(ax)
 	p1.aim_y = _quantize_axis(ay)
-	p1.fire = Input.is_physical_key_pressed(KEY_SPACE) \
-		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
+	# Fire-swallow: menu rows activate on LMB press and SPACE is menu-confirm /
+	# debrief-redeploy — without this, clicking RESUME fired live rounds at the
+	# crosshair on the first resumed ticks. Re-arms once both keys read released.
+	# View-only (the input never reaches the sim), golden-safe.
+	if _fire_swallow and not Input.is_physical_key_pressed(KEY_SPACE) \
+			and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_fire_swallow = false
+	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(KEY_SPACE)
+		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))) \
 		or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
 		or Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
 	p1.grenade = Input.is_physical_key_pressed(KEY_SHIFT) \
