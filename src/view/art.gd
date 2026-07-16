@@ -326,7 +326,11 @@ const SCALE := {
 	"bunker2": 0.17,                 # ~bunker (same 440px canvas)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
-	"fx_bubble1": 0.18, "fx_bubble2": 0.18,   # 512px cards → ~92px FX footprint
+	# _spr sizes off the IMPORTED texture, so size_limit changes must land here
+	# too: bubbles import at 64px now (was 512) — 1.44 keeps the same ~92px FX
+	# footprint the 512×0.18 original had (the 0.18 silently shrank them 8×).
+	"fx_bubble1": 1.44, "fx_bubble2": 1.44,
+	"fx_fumes": 4.0,   # 128px import (was 512-effective) → same _spr plume size
 	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles
 	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
 }
