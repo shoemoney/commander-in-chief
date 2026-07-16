@@ -203,7 +203,10 @@ func _draw() -> void:
 			# it used to be the other way around, vanishing exactly mid-chaos.
 			var alive := 0
 			for e in sim.enemies:
-				if e["alive"]:
+				# The pilot is an optional side objective — the sim's own
+				# _wave_hostiles_cleared() skips it, so counting it here made the
+				# HUD hunt one more "hostile" that can't be shot (rescued by touch).
+				if e["alive"] and e["kind"] != "pilot":
 					alive += 1
 			var remaining: int = alive + sim.wave_pending
 			# The wave's starting budget (same formula _start_wave uses).
@@ -324,8 +327,9 @@ func _draw() -> void:
 			var cost: int = sim._supply_cost(kind)
 			var afford: bool = sim.war_chest >= cost
 			var scol := Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4)
-			# "!" suffix: affordability readable without color vision.
-			sx = _stat(icon, str(cost) + ("" if afford else "!"), sx, ry, scol)
+			# "×" suffix: affordability readable without color vision — same mark
+			# the spend wheel (the primary buy surface) draws beside its sockets.
+			sx = _stat(icon, str(cost) + ("" if afford else "×"), sx, ry, scol)
 		ry += 16.0
 
 	# Player rows.
@@ -354,9 +358,10 @@ func _draw() -> void:
 					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
 				else:
 					col = Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3)
-				# "LOW" tag = non-color affordability cue (cyan-vs-red is still
-				# color-only for protan players even with colorblind mode on).
-				var rlabel := ("REVIVE %d" if afford else "REVIVE %d · LOW") % cost
+				# "×" tag = non-color affordability cue (cyan-vs-red is still
+				# color-only for protan players even with colorblind mode on) —
+				# one dialect with the shop strip and the spend wheel's socket mark.
+				var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
 				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
 				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0)
 		elif p["in_tank"] >= 0:
@@ -383,7 +388,10 @@ func _draw() -> void:
 					-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if t["burning"]:
 				if _mblink(8):
-					var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+					# The 3s fuse gets a number, like every other lethal window on
+					# this HUD (RALLYING/fuel/SHOP OPEN) — ceil grammar from the
+					# fuel dial, so it reads 3s → 2s → 1s → boom.
+					var bx := _text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 					Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
 			else:
 				# The sim decrements pierce/spread/rend/smoke unconditionally while
@@ -453,7 +461,7 @@ func _draw() -> void:
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
-					-PI / 2, -PI / 2 + TAU * (1.0 - rfrac), 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+					-PI / 2, -PI / 2 + TAU * rfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			px = _buff_chips(p, px, ry)
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
