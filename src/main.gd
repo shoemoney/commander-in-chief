@@ -104,6 +104,7 @@ var _dust_prev: Array[Vector2i] = [Vector2i.ZERO, Vector2i.ZERO]        # per-pl
 var _tank_dust_prev: Array[Vector2i] = [Vector2i.ZERO, Vector2i.ZERO]   # per-driver prev tank world pos (movement dust)
 var _tank_hull := {}             # per-tank-index eased hull heading (view-only; 0.0 = baked "up")
 var _tank_prev := {}             # per-tank-index prev world pos, feeds the hull heading
+var _tank_turret := {}           # per-tank-index eased turret heading (kills the 8-way 45° snap)
 var _water_prev: Array[bool] = [false, false]   # per-player prev in-water state (edge-triggers entry droplets)
 var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
                                                  # death mid-array can misalign one slot for a frame — cosmetic only)
@@ -569,6 +570,7 @@ func _reset() -> void:
 	_tank_alive_prev.clear()
 	_tank_hull.clear()
 	_tank_prev.clear()
+	_tank_turret.clear()
 	_enemy_face.clear()
 	_enemy_pos_prev.clear()
 	_blast_warp = 0.0
@@ -1550,8 +1552,12 @@ func _boss_death_finale(x: int, y: int) -> void:
 	_trauma = 1.0
 	_hitstop_frames = maxi(_hitstop_frames, 10)
 	_flash_alpha = maxf(_flash_alpha, 0.5)
+	# Rumble is UNGATED by reduce-motion: haptics have their own toggle
+	# (_rumble_on) and should compensate for damped visuals, not vanish with
+	# them — every other rumble site (player_down, wiped, proximity) fires
+	# under RM already; only the boss kill was silent.
+	_rumble = maxf(_rumble, 1.0)
 	if not reduced:
-		_rumble = maxf(_rumble, 1.0)
 		_punch = maxf(_punch, 0.09)
 	# Rising smoke pillar: puffs stacked up the center, drifting up and thinning
 	# (long life via a low rate; move+vy carries them skyward as a column).
@@ -1678,7 +1684,11 @@ func _check_boss_intro() -> void:
 	if phase > _prev_colossus_phase and phase >= 2:
 		_show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
 			else "COLOSSUS CRITICAL — SAPPERS OUT", Color(1.0, 0.92, 0.55), "hud_skull")
-		_sfx.play("alarm", -3.0, 0.7)
+		# 0.65, NOT 0.7: the alarm ladder's exact pitch IS the threat identity
+		# (sfx.gd _LADDERED) and 0.7 is elite_windup's recurring incoming-attack
+		# cue — same class of collision pilot_down already fixed. 0.65 is an
+		# unoccupied step between the 0.6 fail family and elite's 0.7.
+		_sfx.play("alarm", -3.0, 0.65)
 		# Phase-break shockfront: the world flinches when the boss escalates — an
 		# arena-wide ground ring bursts from the colossus + a heavy camera hit.
 		if not sim.colossus.is_empty():
@@ -2123,8 +2133,17 @@ func _update_feel() -> void:
 	# live entry is walked twice per frame (_draw_fx + _draw_glow). Oldest
 	# entries are the closest to expiring anyway. Stays live mid-freeze, like
 	# the corpse cap below.
+	# Protected kinds: the once-per-run cinematic sweeps (victory extraction /
+	# boss-escort chopper, rate 0.006 ≈ 167 frames alive) ride this same array
+	# and were evictable exactly when boss-finale secondaries trip the cap —
+	# skip past them to the oldest expendable entry (≤2 exist, so it converges).
 	while _fx.size() > 400:
-		_fx.remove_at(0)
+		var vi := 0
+		while vi < _fx.size() and _fx[vi]["kind"] == "chopper":
+			vi += 1
+		if vi >= _fx.size():
+			break
+		_fx.remove_at(vi)
 	# Hit-stop freezes the particles WITH the sim: explosions hang at their
 	# brightest frame and gibs hang mid-air through the freeze, then resume —
 	# completing the freeze-frame the held impact envelopes above start.
@@ -2162,9 +2181,9 @@ func _update_feel() -> void:
 				_fx.append({"x": pb["x"], "y": pb["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 					"r": 40.0, "col": Color(1.0, 0.7, 0.35)})
 				_blast_debris(pb["x"], pb["y"])
+				_rumble = maxf(_rumble, 0.4)   # haptics ride _rumble_on, not reduce-motion
 				if _motion >= 0.5:
 					_trauma = minf(1.0, _trauma + 0.12)
-					_rumble = maxf(_rumble, 0.4)
 				_pending_blasts.remove_at(i)
 		# Decal clocks freeze with the particles: a crater fading or a corpse
 		# aging under a "frozen" explosion breaks the freeze-frame read.
@@ -2546,8 +2565,12 @@ func _draw() -> void:
 		_glow_root.queue_redraw()
 	_draw_terrain()
 	_draw_skyglow()
-	_draw_scorch()
+	# Water (banks/ford/bridge deck) BEFORE scorch: the deck sprites fully tile
+	# the ford choke point, and decals drawn first were overpainted the same
+	# frame — every corpse/crater/hulk at a river crossing vanished. The water
+	# body itself is a shader quad on _bg_root (z=-2), so it stays below anyway.
 	_draw_water()
+	_draw_scorch()
 	_draw_mines()
 	_draw_barrels()
 	_draw_gates()
@@ -2998,6 +3021,11 @@ func _draw_pickups() -> void:
 					2: maxed = buyer["vest"]
 		if maxed:
 			mod = Color(0.55, 0.55, 0.55)
+		# Crates sit on the ground like every other grounded prop (litter, barrels,
+		# bunkers all cast the soft ellipse) — without it a priced crate read as a
+		# floating sticker. Capsules (kind >= 4) keep their pulsing glow disc instead.
+		if pk["kind"] <= 3:
+			_ground_shadow(ppos, 6.0)
 		_spr(tex_name, ppos, 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
@@ -3073,10 +3101,14 @@ func _draw_tanks() -> void:
 				_tank_hull[ti] = hull
 			_tank_prev[ti] = Vector2(t["x"], t["y"])
 		_spr("tank_body", c, hull, 0.62, burn_mod)
-		# Barrel follows the driver's aim; parked barrel points up.
-		var barrel_angle := -PI / 2
+		# Barrel follows the driver's aim, eased like everything else that turns
+		# (player 0.35, enemies 0.18, hull 0.10) — raw _aim_angle snapped the
+		# turret in 45° pops on 8-way aim and slewed park→aim in one frame.
+		# A vacated tank keeps its last turret heading, matching the hull.
+		var barrel_angle: float = _tank_turret.get(ti, -PI / 2)
 		if t["occupant"] >= 0:
-			barrel_angle = _aim_angle(sim.players[t["occupant"]])
+			barrel_angle = lerp_angle(barrel_angle, _aim_angle(sim.players[t["occupant"]]), 0.35)
+			_tank_turret[ti] = barrel_angle
 		# Recoil: the barrel kicks back ~4px the instant it fires (fire_cd peaks),
 		# then eases forward as the cannon recovers — a fired shot now has weight.
 		var brecoil := float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS) * 4.0
