@@ -18,9 +18,11 @@ const SCREEN_CENTER := Vector2(320, 180)
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 # Litter biases with the run: early sectors are an intact outpost (tents/crates/
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
-const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammobox", "barrier"]
+const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammobox", "barrier",
+	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
-	"corpse_soldier1", "corpse_soldier2", "crater"]
+	"corpse_soldier1", "corpse_soldier2", "crater",
+	"trench", "barricade", "radio_tower", "wreck_halftrack", "crater_field", "crater_water"]
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
@@ -4326,10 +4328,14 @@ func _draw_scorch() -> void:
 		var cp := _to_screen(c["x"], c["y"])
 		var ct: float = c["t"]
 		var fade := 1.0 - ct
-		# A dark blood pool spreads under it early, then everything fades.
+		# A dark blood pool spreads under it early, then everything fades. Uses the
+		# owned Apocalypse-HUD blood-splat card (organic edge) instead of a flat disc.
 		# (skipped for water kills — a puddle in a river reads wrong)
 		if not c.get("wet", false):
-			draw_circle(cp + Vector2(0, 2), 3.0 + minf(ct, 0.2) * 20.0, Color(0.28, 0.03, 0.03, 0.4 * fade))
+			var bpr := (3.0 + minf(ct, 0.2) * 20.0) * 2.1   # splat radius ≈ the old disc footprint
+			draw_texture_rect(Art.tex("hudfx_blood"),
+				Rect2(cp + Vector2(0, 2) - Vector2.ONE * bpr, Vector2.ONE * bpr * 2.0),
+				false, Color(0.34, 0.04, 0.04, 0.45 * fade))
 		# Death squash-pop: a quick scale bump on impact that settles into a
 		# flattened corpse (via _spr's stretch param).
 		var pop := 1.0 + maxf(0.0, 0.35 - ct * 3.0)
