@@ -590,10 +590,15 @@ func _physics_process(_delta: float) -> void:
 			_rumble = 0.0   # never buzz a controller on the menu
 			_update_feel()
 		else:
-			# Pause: clear the underwater LPF/duck so the menu sounds clean.
+			# Pause: clear the underwater LPF/duck so the menu sounds clean, and
+			# square the camera — pausing mid-shake froze the world offset/tilted
+			# behind the overlay.
 			_concussion = 0.0
 			_duck = 0.0
 			_sfx.set_concussion(0.0)
+			position = Vector2.ZERO
+			scale = Vector2.ONE
+			rotation = 0.0
 		queue_redraw()
 		return
 	_hud_icons.visible = true
@@ -1475,7 +1480,7 @@ func _update_feel() -> void:
 	_punch = _punch * 0.82 if _punch > 0.002 else 0.0
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
-	_concussion = maxf(0.0, _concussion - 0.035)
+	_concussion = _concussion * 0.9 if _concussion > 0.01 else 0.0   # match the multiplicative grammar above
 	_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
 	_cinematic = maxf(0.0, _cinematic - 0.004)
 	# Debrief/victory card entrance clock: eases 0→1 while a result is showing,
@@ -1562,7 +1567,9 @@ func _update_feel() -> void:
 	# with the zoom, so the frame twists in place instead of sliding off.
 	# No threshold gate: trauma² already scales roll to ~nothing on small hits, and
 	# a hard gate popped visibly as trauma crossed it mid-decay.
-	var rot := sin(float(Engine.get_physics_frames()) * 2.9) * _trauma * _trauma * 0.035 * _motion
+	# 0.55 rad/frame ≈ 5Hz: a readable held twist. The old 2.9 sat near Nyquist
+	# (π rad/frame), flipping sign almost every frame — buzz, not roll.
+	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _motion
 	rotation = rot
 	position = shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)
 
