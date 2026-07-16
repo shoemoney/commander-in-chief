@@ -153,7 +153,7 @@ const _EVENT_SOUND := {
 	"observer_spawn": ["alarm", -3.0, 1.0],
 	"strike_warn": ["whistle", -6.0, 1.0],
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
-	"elite_windup": ["pickup", -10.0, 0.7],
+	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
@@ -167,6 +167,7 @@ const _EVENT_SOUND := {
 	"victory": ["victory", 0.0, 1.0],
 	"buy": ["buy", -4.0, 1.0],
 	"deny": ["deny", -6.0, 1.0],
+	"courier_escape": ["deny", -5.0, 0.7],   # the bounty runner got away with your coin — a low 'you lost it' sting
 }
 
 var _hud_icons := HudIcons.new()
