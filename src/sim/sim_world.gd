@@ -83,6 +83,10 @@ const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
 const BARREL_SPACING := 420 * F_ONE
 const BARREL_CLUSTER_GAP := 18 * F_ONE
+const MG_NEST_AIM_TICKS := 30       # telegraph before the first round of a burst
+const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
+const MG_NEST_BURST_ROUNDS := 3
+const MG_NEST_BURST_CD_TICKS := 90  # reload between bursts
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
 const MG_AMMO_MAX := 99
@@ -1066,6 +1070,9 @@ func _step_enemies() -> void:
 		if e["kind"] == "sniper":
 			_step_sniper(e, target, dx, dy, dlen)
 			continue
+		if e["kind"] == "mg_nest":
+			_step_mg_nest(e, target, dx, dy, dlen)
+			continue
 		if e["kind"] == "shield":
 			# Advances slowly behind a frontal shield (bullet block handled in
 			# _step_bullets); touch still kills. No ranged attack.
@@ -1318,8 +1325,11 @@ func _step_spawner() -> void:
 	# the campaign field, so late sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
 	if opened >= 3 and rng.range_i(0, 4) == 0:
-		var specials := ["grenadier", "sniper", "shield"]
-		_spawn_special(x, camera_top - 24 * F_ONE, specials[rng.range_i(0, 2)])
+		var spick := rng.range_i(0, 3)   # +mg_nest turret
+		if spick == 3:
+			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+		else:
+			_spawn_special(x, camera_top - 24 * F_ONE, ["grenadier", "sniper", "shield"][spick])
 	else:
 		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
 		# gate 5) so late campaign escalates composition, not just cadence.
@@ -1394,6 +1404,45 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 		e["submerged"] = true   # dug in, cloaked until you close the distance
 		e["surface_ticks"] = 0
 	enemies.append(e)
+
+
+func _spawn_mg_nest(x: int, y: int) -> void:
+	## Rooted fixed turret: rakes its lane with aimed 3-round bursts, never moves.
+	## Reuses fire_cd/windup/lunge_ticks/aim_lx/aim_ly — all already hashed.
+	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
+		"kind": "mg_nest", "fire_cd": MG_NEST_AIM_TICKS, "windup": 0,
+		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0})
+
+
+func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Break LOS, flank, or grenade it. windup = inter-round spacing, lunge_ticks =
+	## rounds left, aim_lx/ly = the LOCKED burst vector, fire_cd = reload.
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0 and e["lunge_ticks"] > 0:
+			var lx: int = e["aim_lx"]
+			var ly: int = e["aim_ly"]
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
+				events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
+				enemy_bullets.append({"x": e["x"], "y": e["y"],
+					"vx": Fixed.mul(Fixed.div(lx, llen), ENEMY_BULLET_SPEED),
+					"vy": Fixed.mul(Fixed.div(ly, llen), ENEMY_BULLET_SPEED),
+					"ttl": ENEMY_BULLET_TTL_TICKS})
+			e["lunge_ticks"] = e["lunge_ticks"] - 1
+			if e["lunge_ticks"] > 0:
+				e["windup"] = MG_NEST_BURST_GAP_TICKS
+			else:
+				e["fire_cd"] = MG_NEST_BURST_CD_TICKS
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if e["fire_cd"] == 0 and dlen > F_ONE:
+		# Lock the aim on the target NOW and open a 3-round burst down that line.
+		e["aim_lx"] = dx
+		e["aim_ly"] = dy
+		e["lunge_ticks"] = MG_NEST_BURST_ROUNDS
+		e["windup"] = MG_NEST_AIM_TICKS
+		events.append({"t": "mg_nest_aim", "x": e["x"], "y": e["y"]})
 
 
 # --- Gates ---
@@ -1555,7 +1604,7 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 6)
+				var roll := rng.range_i(0, 7)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -1566,6 +1615,8 @@ func _step_waves() -> void:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
 				elif roll == 4:
 					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
+				elif roll == 5:
+					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:

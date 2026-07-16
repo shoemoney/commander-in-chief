@@ -362,3 +362,31 @@ func test_barrel_blast_hurts_a_close_player() -> void:
 	sim.barrels.append({"x": p["x"] + 10 * Fixed.ONE, "y": p["y"], "armed": true})
 	sim._explode(p["x"] + 10 * Fixed.ONE, p["y"])
 	Runner.T.ok(not p["vest"], "the barrel blast broke the too-close player's vest")
+
+
+func test_mg_nest_is_rooted_and_bursts() -> void:
+	var sim := SimWorld.new(1, 1)
+	var ct: int = sim.camera_top
+	sim.enemies.clear()
+	sim._spawn_mg_nest(320 * Fixed.ONE, ct + 80 * Fixed.ONE)
+	var nest: Dictionary = sim.enemies[0]
+	var x0: int = nest["x"]
+	var y0: int = nest["y"]
+	sim.players[0]["x"] = 200 * Fixed.ONE   # in its field of fire, but the nest never chases
+	sim.players[0]["y"] = ct + 220 * Fixed.ONE
+	var bullets_seen := 0
+	for i in 200:
+		sim.step(_inputs(_idle()))
+		bullets_seen = maxi(bullets_seen, sim.enemy_bullets.size())
+	Runner.T.eq(nest["x"], x0, "the MG nest never moves in x")
+	Runner.T.eq(nest["y"], y0, "the MG nest never moves in y")
+	Runner.T.ok(bullets_seen > 0, "the MG nest rakes the lane with aimed fire")
+
+
+func test_mg_nest_dies_to_a_grenade() -> void:
+	var sim := SimWorld.new(1, 1)
+	sim.enemies.clear()
+	sim._spawn_mg_nest(300 * Fixed.ONE, sim.camera_top + 90 * Fixed.ONE)
+	var nest: Dictionary = sim.enemies[0]
+	sim._explode(nest["x"], nest["y"])
+	Runner.T.ok(not nest["alive"], "a grenade silences the MG nest")

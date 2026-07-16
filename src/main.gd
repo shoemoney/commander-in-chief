@@ -169,6 +169,7 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
+	"mg_nest_aim": ["tank_board", -11.0, 1.4],
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -2795,6 +2796,17 @@ func _draw_enemies() -> void:
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
 			var spp := Art.pulse(0.25)
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+		elif e["kind"] == "mg_nest":
+			# Rooted emplacement: sandbag nest + gunner + a burst-line telegraph
+			# flashing down the LOCKED vector while it rakes.
+			_spr("sandbag_beige", epos, 0.0, 0.5, Color(0.82, 0.8, 0.62))
+			_spr("elite", epos + Vector2(0, -2), face, 0.4, Color(0.9, 0.85, 0.7))
+			if e.get("lunge_ticks", 0) > 0:
+				var lv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+				if lv.length() > 1.0:
+					var ld := lv.normalized()
+					draw_line(epos, epos + ld * 18.0, Color(1.0, 0.65, 0.28, 0.5), 1.5)
+					draw_circle(epos + ld * 9.0, 1.6, Color(1.0, 0.85, 0.4, 0.7))
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
