@@ -1435,6 +1435,10 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 				e["x"] = prev_x
 				e["y"] = prev_y
 				e["lunge_ticks"] = 0   # wheels don't swim
+				# The bank-stop needs a receipt — a silent zero-frame halt read
+				# as a sim glitch, and the water counter never taught. (Events
+				# are checksum-excluded: golden-safe.)
+				events.append({"t": "technical_stall", "x": e["x"], "y": e["y"]})
 		return
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1

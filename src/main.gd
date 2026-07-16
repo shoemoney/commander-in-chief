@@ -127,6 +127,8 @@ var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
+var _pilot_alarm_frame := -999    # one-shot for the pilot's ESCAPING warning tone
+var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
@@ -196,6 +198,7 @@ const _EVENT_SOUND := {
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"technical_rev": ["tank_board", -8.0, 0.75],   # low engine snarl: a charge is coming (0.75 pitch — well under mine_lay's 1.9 clink)
+	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
 	"pilot_down": ["alarm", -10.0, 1.1],           # crash-site distress ping
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
@@ -1350,6 +1353,13 @@ func _ev_explosion(ev: Dictionary) -> void:
 		_water_splash = {"x": ev["x"], "y": ev["y"], "t": 1.0}
 
 
+func _any_player_smoked() -> bool:
+	for sp in sim.players:
+		if sp["alive"] and sp["smoke_ticks"] > 0:
+			return true
+	return false
+
+
 func _ev_kill(ev: Dictionary) -> void:
 	# No screen flash here: at kill-spam rates it strobes
 	# (photosensitivity); smoke + gib burst + blip + coin carry it.
@@ -1369,6 +1379,18 @@ func _ev_kill(ev: Dictionary) -> void:
 			"rate": 0.02, "text": "RANSOM LOST", "col": Art.safe(Color(1.0, 0.4, 0.3))})
 		_sfx.play("alarm", -14.0, 0.6)
 		return
+	if kkind == "technical":
+		# A gun-truck must die like a vehicle, not pop like infantry (panel
+		# compromise: threat identity through spectacle, coin stays at elite
+		# parity). Shockwave + hot flash + oily smoke on top of the generic
+		# treatment below — the trophy is the wreck, not the payout.
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.15})
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
+			"r": 34.0, "col": Color(1.0, 0.6, 0.25)})
+		for ts in 3:
+			_fx.append({"x": ev["x"] + (ts - 1) * 5 * Fixed.ONE, "y": ev["y"], "t": -0.05 * ts,
+				"kind": "smoke"})
+		_sfx.play_at("explosion", _to_screen(ev["x"], ev["y"]), -10.0, 1.3)
 	# Sprawl the corpse along the shot that felled it (away from the
 	# nearest shooter), not a random spin. Every specialist leaves its OWN
 	# silhouette (the kill event carries kind for exactly this); wet kills
@@ -3133,6 +3155,13 @@ func _draw_enemies() -> void:
 			if t_lunge > 0:
 				t_face = Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0))).angle()
 				var t_dir := Vector2.from_angle(t_face)
+				# The LOCKED corridor: the rev line promised a lane, but it used to
+				# vanish the moment the charge began — the exact 50-tick window the
+				# player must sidestep (6-reviewer consensus). Solid line, remaining
+				# travel length (lunge_ticks × 3px), cooling as the charge spends.
+				var t_left := float(t_lunge) / float(SimWorld.TECHNICAL_CHARGE_TICKS)
+				draw_line(epos, epos + t_dir * (t_lunge * 3.0 * PX),
+					Color(1.0, 0.4, 0.25, 0.2 + t_left * 0.35), 1.5)
 				draw_line(epos - t_dir * 14.0, epos - t_dir * 26.0,
 					Color(0.85, 0.8, 0.7, 0.45), 2.0)
 				# Churned-ground dust: the fastest thing on the field was leaving no
@@ -3146,15 +3175,35 @@ func _draw_enemies() -> void:
 			elif t_wu > 0:
 				var t_rf := 1.0 - float(t_wu) / float(SimWorld.TECHNICAL_REV_TICKS)
 				epos.x += sin(float(Engine.get_physics_frames()) * 0.9) * (0.6 + t_rf) * _motion
-				# The rev line IS the dodge promise: where it points is where it charges.
-				draw_line(epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
-					Color(1.0, 0.45, 0.3, 0.25 + t_rf * 0.45), 1.5)
+				# The rev line IS the dodge promise — but DASHED while it still
+				# tracks you (the sim locks at rev-end, not rev-start): dashed =
+				# "still aiming", the solid charge corridor = "committed".
+				draw_dashed_line(epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
+					Color(1.0, 0.45, 0.3, 0.25 + t_rf * 0.45), 1.5, 5.0)
+			elif e.get("fire_cd", 0) == 0 and _any_player_smoked():
+				# Smoke-deny tell: cooldown is spent but the truck can't line up a
+				# charge into smoke — without this it read as the AI breaking, and
+				# the smoke special never got credit for the block (3 reviewers).
+				Art.text(self, "?", epos + Vector2(-2, -22), 10, Color(0.75, 0.75, 0.7, 0.5 + Art.pulse(0.2) * 0.4))
 			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
 			# RESCUE label so "touch, don't shoot" reads across a firefight.
 			var pi_pulse := Art.pulse(0.15)
 			var pi_col := Art.safe(Color(0.45, 1.0, 0.65))
+			# Escape imminence: the capture threshold (camera_top - 30) was an
+			# invisible cliff — the ransom vanished to geometry the player could
+			# not read (6-reviewer consensus). Inside the last 60px the label
+			# turns red ESCAPING! and the fail tone pre-fires once, quieter.
+			var pi_esc := float(e["y"] - (sim.camera_top - 30 * Fixed.ONE)) / float(Fixed.ONE)
+			if pi_esc < 60.0 and not e.get("submerged", false):
+				pi_col = Art.safe(Color(1.0, 0.45, 0.35))
+				if Engine.get_physics_frames() - _pilot_alarm_frame >= 120:
+					_pilot_alarm_frame = Engine.get_physics_frames()
+					_sfx.play("alarm", -18.0, 0.6)
+				Art.text(self, "ESCAPING!", epos + Vector2(-20, -18), 8, pi_col)
+			else:
+				Art.text(self, "RESCUE", epos + Vector2(-16, -18), 8, pi_col)
 			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
@@ -3164,9 +3213,16 @@ func _draw_enemies() -> void:
 				var pi_up := 1.0 - float(e.get("surface_ticks", 0)) / float(SimWorld.PILOT_PUNCHOUT_TICKS)
 				_spr("m_pilot", epos, -PI / 2 + (1.0 - pi_up) * 1.1,
 					0.48, Color(1, 1, 1, 0.35 + pi_up * 0.65))
+				# Standing on him during the grace: a soft deny chirp instead of
+				# silence, so the early touch reads "not yet" rather than "broken".
+				for dp in sim.players:
+					if dp["alive"] and _to_screen(dp["x"], dp["y"]).distance_to(epos) < 10.0 \
+							and Engine.get_physics_frames() - _pilot_deny_frame >= 20:
+						_pilot_deny_frame = Engine.get_physics_frames()
+						_sfx.play("alarm", -22.0, 2.6)
+						break
 			else:
 				_spr("m_pilot", epos, -PI / 2, 0.48)
-			Art.text(self, "RESCUE", epos + Vector2(-16, -18), 8, pi_col)
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: real courier bake (the loot pack is in the
 			# sprite now); the pulsing gold ring stays — "catch this one" must
