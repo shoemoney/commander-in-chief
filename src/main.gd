@@ -2156,11 +2156,11 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		w["t"] = lerpf(float(w.get("t", 1.0)), 1.0, 0.35)
 		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
 		# selection used to be a one-way trap: any flick force-bought on release.
-		var cancel := Input.is_physical_key_pressed(KEY_C)   # physical, matching the roll bind (AZERTY-safe)
-		for pad in Input.get_connected_joypads():
-			if Input.is_joy_button_pressed(pad, JOY_BUTTON_B):
-				cancel = true
-				break
+		# Per-device (matches the wheel's own open/aim split): P1 = keyboard C +
+		# pad 0, P2 = pad 1 only — so one player's roll can't cancel the OTHER's
+		# pick. Physical KEY_C matches the roll bind (AZERTY-safe).
+		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(KEY_C)) \
+			or Input.is_joy_button_pressed(i, JOY_BUTTON_B)
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("dry_fire", -14.0, 1.1)   # soft declined tick
