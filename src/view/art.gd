@@ -8,6 +8,10 @@ extends RefCounted
 ## parked on an art-direction call: painterly terrain vs the pixel-integer
 ## look. View-layer only; the sim never touches textures.
 ##
+## VERIFIED non-fits (asset loops: skip): City/Nightclubs/Heist/Gang_Warfare/
+## Spy_Kit/Racer are off-theme (urban/neon) for this jungle war; War_Map is WWI
+## tabletop props; no owned pack ships audio (all SFX/music stay synthesized).
+##
 ## SCALE folds each legacy art render down to the on-screen footprint of the Kenney
 ## sprite it replaced, so the draw calls in main.gd keep their original scale
 ## numbers. TINT is the desert→jungle olive shift, applied in _spr().
@@ -109,16 +113,17 @@ const TEX := {
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
 	"sand": preload(KN + "sand.png"),
-	"bullet": preload(KN + "bullet.png"),
-	"enemy_bullet": preload(KN + "enemy_bullet.png"),
-	"grenade": preload(KN + "grenade.png"),
+	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
+	# live draw site moved on long ago: player rounds are procedural tracers +
+	# fx_bullettrail streaks, enemy fire is the red-streak orb, thrown frags wear
+	# the wep_grenade bake (AP shells tank_shell), and every smoke puff draws
+	# fx_smoke. Dead preloads cost VRAM and mislead asset audits; skip in loops.
 	# Explosion frames: VERIFIED vendor non-match (no owned pack ships explosion
 	# art — Particle_FX is crystals/trails/rings). Keep Kenney; skip in asset loops.
 	"explosion0": preload(KN + "explosion0.png"),
 	"explosion1": preload(KN + "explosion1.png"),
 	"explosion2": preload(KN + "explosion2.png"),
 	"explosion3": preload(KN + "explosion3.png"),
-	"smoke": preload(KN + "smoke.png"),
 	# --- legacy 3D pack Particle FX (2D textures, assets/legacy-art/fx/) ---
 	"fx_bullettrail": preload(SY + "fx/fx_bullettrail.png"),
 	"fx_smoke": preload(SY + "fx/fx_smoke_01.png"),
