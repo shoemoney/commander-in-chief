@@ -279,6 +279,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"in_tank": -1,
 			"interact_prev": false,
 			"buy_prev": 0,
+			"grenade_prev": false,
 			"vest": false,
 			"hurt_iframes": 0,
 			"pierce_ticks": 0,
@@ -374,6 +375,8 @@ func _step_players(inputs: Array) -> void:
 		p["interact_prev"] = inp.interact
 		var buy_edge: bool = inp.buy > 0 and p["buy_prev"] == 0
 		p["buy_prev"] = inp.buy
+		var grenade_edge: bool = inp.grenade and not p["grenade_prev"]
+		p["grenade_prev"] = inp.grenade
 
 		if not p["alive"]:
 			_step_dead_player(i, p, inp)
@@ -400,12 +403,19 @@ func _step_players(inputs: Array) -> void:
 		# ROLL_BUFFER_TICKS so a slightly-early press still rolls on cd end.
 		if inp.roll:
 			p["roll_buf"] = ROLL_BUFFER_TICKS
-		if p["roll_buf"] > 0 and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and moving and not wading:
+		if p["roll_buf"] > 0 and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and not wading:
 			p["roll_buf"] = 0
 			p["roll_ticks"] = ROLL_TICKS
 			p["roll_cd"] = ROLL_CD_TICKS
-			p["roll_dx"] = Fixed.div(mx, mlen)
-			p["roll_dy"] = Fixed.div(my, mlen)
+			# Stationary panic-roll: with the move stick neutral, dodge along the
+			# aim vector (always a unit vector) so a standing aim-spray can still
+			# bail from a closing rusher.
+			if moving:
+				p["roll_dx"] = Fixed.div(mx, mlen)
+				p["roll_dy"] = Fixed.div(my, mlen)
+			else:
+				p["roll_dx"] = p["aim_x"]
+				p["roll_dy"] = p["aim_y"]
 			events.append({"t": "roll", "x": p["x"], "y": p["y"], "i": i})
 		if p["roll_ticks"] > 0:
 			p["roll_ticks"] = p["roll_ticks"] - 1
@@ -459,7 +469,7 @@ func _step_players(inputs: Array) -> void:
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) + Fixed.mul(fay, SPREAD_SIN),
 					Fixed.mul(fay, SPREAD_COS) - Fixed.mul(fax, SPREAD_SIN))
 
-		if inp.grenade and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
+		if grenade_edge and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
 			p["grenade_cd"] = GRENADE_COOLDOWN_TICKS
 			p["grenade_ammo"] = p["grenade_ammo"] - 1
 			events.append({"t": "throw", "x": p["x"], "y": p["y"], "i": i})
@@ -673,6 +683,10 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
 		return
 	war_chest -= cost
+	# Spending is not a score cut: credit the same 10x the Last Stand victory
+	# payout gives unspent chest, so a run-saving buy trades power-now for
+	# banked-score rather than costing points outright.
+	score += cost * 10
 	_apply_supply(p, kind)
 	events.append({"t": "buy", "x": p["x"], "y": p["y"], "kind": kind})
 
@@ -1286,7 +1300,7 @@ func _step_spawner() -> void:
 	# Sector 4+ (3 gates opened): the endless ranged roster starts bleeding into
 	# the campaign field, so late sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
-	if opened >= 3 and rng.range_i(0, 4) == 0:
+	if opened >= 1 and rng.range_i(0, 4) == 0:
 		var specials := ["grenadier", "sniper", "shield"]
 		_spawn_special(x, camera_top - 24 * F_ONE, specials[rng.range_i(0, 2)])
 	else:
@@ -1452,7 +1466,7 @@ func _step_camera() -> void:
 		if _gate_counter % BOSS_GATE_EVERY == 0:
 			# Bridge boss gate: no arena bunkers — the Gunship IS the lock.
 			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
-				"boss": {"alive": true, "hp": BOSS_HP, "x": SCREEN_CX,
+				"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP), "x": SCREEN_CX,
 					"dir": 1, "phase_t": 0, "gate_y": _next_gate_y}})
 		else:
 			var b1 := _make_bunker(180 * F_ONE, _next_gate_y + 50 * F_ONE)
@@ -1543,14 +1557,17 @@ func _step_waves() -> void:
 		var shop_y: int = camera_top + 120 * F_ONE
 		# Shuffle the crate→slot mapping each wave so the shop stays a live read
 		# (far-left ≠ always ammo), Fisher-Yates on the seeded SimRng.
-		var kinds := [0, 1, 2, 3]
-		for si in range(3, 0, -1):
+		# Airstrike (kind 3) is deliberately absent: it stays a WHEEL-ONLY
+		# telegraphed buy so a priced crate can't auto-buy it into an empty shop
+		# on proximity. Ammo/grenade/vest remain the crate pool.
+		var kinds := [0, 1, 2]
+		for si in range(2, 0, -1):
 			var sj := rng.range_i(0, si)
 			var tmp: int = kinds[si]
 			kinds[si] = kinds[sj]
 			kinds[sj] = tmp
-		var xs := [170, 290, 410, 530]
-		for ci in 4:
+		var xs := [190, 350, 510]
+		for ci in 3:
 			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
 				"cost": _supply_cost(kinds[ci])})
 
@@ -1578,13 +1595,26 @@ func _start_wave() -> void:
 	if wave % 5 == 0:
 		# Milestone miniboss: a Bridge Gunship parked over the arena, HP scaling
 		# with depth. Reuses the campaign boss schema + state machine wholesale.
-		endless_boss = {"alive": true, "hp": BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2),
+		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
 			"x": SCREEN_CX, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
 		events.append({"t": "endless_boss", "x": SCREEN_CX, "y": camera_top + 50 * F_ONE})
 	events.append({"t": "wave_start", "x": SCREEN_CX, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
 
 
 # --- Foundry Colossus (the finale) ---
+
+func _scaled_boss_hp(base: int) -> int:
+	## Boss/colossus starting HP scales with the living player count at spawn:
+	## +60% per extra player (integer math). Grenade DPS is per-player, so a
+	## flat pool let 2P melt a boss ~2x faster; this keeps the fight length even.
+	var pc := 0
+	for pl in players:
+		if pl["alive"]:
+			pc += 1
+	if pc < 1:
+		pc = 1
+	return base + base * 6 * (pc - 1) / 10
+
 
 func colossus_phase() -> int:
 	## 1..3 by HP thirds; 0 when absent.
@@ -1604,7 +1634,7 @@ func _step_colossus() -> void:
 		for g in gates:
 			if g.get("final", false) and g["y"] >= camera_top and g["y"] <= camera_top + VIEW_H and not victory:
 				colossus = {
-					"alive": true, "hp": COLOSSUS_HP,
+					"alive": true, "hp": _scaled_boss_hp(COLOSSUS_HP),
 					"x": SCREEN_CX, "y": g["y"] - 120 * F_ONE,
 					"spray_cd": COLOSSUS_SPRAY_CD_TICKS,
 					"volley_cd": COLOSSUS_VOLLEY_CD_TICKS,
