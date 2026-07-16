@@ -2237,6 +2237,18 @@ func _draw() -> void:
 				_spr("bunker2", c, 0.0, 0.78)
 			else:
 				_spr("bunker", c, PI, 0.78, Color.WHITE, -1.0)
+			# Hatch charging: a front-mouth glow that swells as the 120-tick spawn
+			# timer nears zero and peaks into a bright emit flash the instant it
+			# fires — a rusher popping out of the mouth is no longer a free hit.
+			# Derived from the existing spawn_cd; no sim state touched.
+			var charge := 1.0 - float(bk["spawn_cd"]) / float(SimWorld.BUNKER_SPAWN_INTERVAL_TICKS)
+			if charge > 0.45:
+				var cr := ease(clampf((charge - 0.45) / 0.55, 0.0, 1.0), 2.0)
+				var mouth := c + Vector2(0, 10)
+				draw_texture_rect(Art.tex("fx_softspot"),
+					Rect2(mouth - Vector2.ONE * (4.0 + cr * 7.0), Vector2.ONE * (8.0 + cr * 14.0)),
+					false, Color(1.0, 0.6, 0.25, 0.22 + cr * 0.5))
+				draw_circle(mouth, 1.5 + cr * 2.5, Color(1.0, 0.85, 0.5, 0.4 + cr * 0.5))
 			# A recon drone loiters above an active strongpoint — a small orbiting
 			# silhouette that reads the bunker as 'watched'. Phase offset per bunker
 			# so multiples don't fly in lockstep. Pure ambient view.
