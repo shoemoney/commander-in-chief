@@ -43,7 +43,15 @@ func _ready() -> void:
 
 
 func _on_joy_changed(_device: int, connected: bool) -> void:
-	if not connected and mode == Mode.HIDDEN and main != null and main.sim != null:
+	if connected:
+		return
+	# A pad yanked while the stick is deflected emits no further motion events,
+	# so the <0.45 re-arm can never fire — clear the latches or _process
+	# auto-repeats _nav every 0.12s forever (endless scroll + sfx loop).
+	_stick_x = 0
+	_stick_y = 0
+	_nav_frame = -1
+	if mode == Mode.HIDDEN and main != null and main.sim != null:
 		open(Mode.PAUSE)
 		# A pad yanked mid-flail can spray phantom presses — ignore
 		# confirm/activate for a beat so nothing destructive can fire.
@@ -313,6 +321,19 @@ func _unhandled_input(ev: InputEvent) -> void:
 				sel = crow
 				_press()
 				queue_redraw()
+			elif mode != Mode.HALL and mode != Mode.HOWTO \
+					and _menu_items()[sel]["id"] in _TOGGLES:
+				# The ◄/► cycle affordances draw OUTSIDE the row plate — without
+				# their own hitbox a click on a visible, pulsing arrow was silently
+				# swallowed (the same parity gap the hall tabs got fixed for).
+				var g := _row_geometry()
+				var ry := floorf(float(g["top"]) + float(sel) * float(g["gap"]))
+				var ay := floorf(ry + float(g["bh"]) / 2.0) - 5.0   # same snap as _draw's cy
+				var lx := 320.0 - BTN.x / 2.0
+				if Rect2(lx - 23.0, ay, 10.0, 10.0).grow(3.0).has_point(ev.position) \
+						or Rect2(lx + BTN.x + 5.0, ay, 10.0, 10.0).grow(3.0).has_point(ev.position):
+					_activate()
+					queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
 			if mode == Mode.HALL:
@@ -351,6 +372,8 @@ func _nav(move: int, hmove: int) -> void:
 		return
 	if move == 0:
 		return
+	if _items().size() < 2:
+		return   # 1-row menu (HOWTO's BACK): sel wraps 0→0 — no phantom nav sfx
 	var prev := sel
 	sel = wrapi(sel + move, 0, _items().size())
 	if absi(sel - prev) > 1:
