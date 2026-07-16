@@ -160,6 +160,7 @@ var _life_kills := 0
 var _life_wins := 0
 var hall: Array[Dictionary] = []   # top-N run history for the Hall of Fame
 var _best_dirty := false
+var _seen_dirty := false          # first-time hints ratchet in memory, flushed with bests
 var _prev_colossus_phase := 0     # phase-change escalation banners
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
@@ -510,6 +511,12 @@ func start_watch() -> void:
 	# replay's recorded inputs drive the sim in _physics_process instead of the pad.
 	# Reuses _reset() (via _seed_override) to build the matching sim; nothing recorded,
 	# no bests banked. The whole record→replay path was built but never player-facing.
+	# The last run's replay may still be mid-write on the worker pool — a fast
+	# debrief → R → WATCH could read a truncated file. Normally finished long
+	# ago, so the wait is ~0ms.
+	if _replay_task != -1:
+		WorkerThreadPool.wait_for_task_completion(_replay_task)
+		_replay_task = -1
 	var r := Replay.load_from("user://last_run.replay")
 	if r == null or r.frames.is_empty():
 		_show_banner("NO REPLAY SAVED YET")
@@ -751,6 +758,9 @@ func _flush_bests() -> void:
 	if _best_dirty:
 		_best_dirty = false
 		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
+	if _seen_dirty:
+		_seen_dirty = false
+		_persist("seen", {"hints": _seen})
 
 
 func _exit_tree() -> void:
@@ -1793,7 +1803,9 @@ func _record_run() -> void:
 	cf.set_value("best", "score", best_score)
 	cf.set_value("best", "wave", best_wave)
 	cf.set_value("best", "dist", best_dist)
+	cf.set_value("seen", "hints", _seen)
 	_best_dirty = false
+	_seen_dirty = false
 	_save_cfg(cf)
 
 
@@ -1839,7 +1851,11 @@ func _hint(id: String, text: String, urgent := false) -> void:
 		_hint_t = minf(_hint_t, 0.25)
 	else:
 		_hint_queue.append(text)
-	_persist("seen", {"hints": _seen})
+	# No inline disk write: hints fire at the hottest moments (first affordable
+	# buy mid-combat, urgent revive cues) and _persist is a synchronous 4-op
+	# load/save/backup/rename — the same ~1-5ms frame spike deleted for bests.
+	# Flushed in _flush_bests/_record_run; a crash merely re-shows a hint.
+	_seen_dirty = true
 
 
 func _track_bests() -> void:
@@ -1870,6 +1886,11 @@ func _track_bests() -> void:
 				# immutable once recorded, so the snapshot is race-free.
 				var snap := _recorder.to_dict()
 				snap["frames"] = _recorder.frames.duplicate()
+				# Retire the previous run's write first: the pool only frees a
+				# task record inside wait_for_task_completion, and two writers
+				# on the same path must never interleave. Long done → ~0ms.
+				if _replay_task != -1:
+					WorkerThreadPool.wait_for_task_completion(_replay_task)
 				_replay_task = WorkerThreadPool.add_task(
 					Replay.save_dict.bind(snap, "user://last_run.replay"))
 				_replay_saved = true
