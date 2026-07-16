@@ -925,6 +925,14 @@ func _consume_events() -> void:
 					"sz": 22.0, "fade": 1.6, "rate": 0.15, "rot": taim.angle(), "col": Color(1.0, 0.85, 0.5, 0.8)})
 			"explosion":
 				_ev_explosion(ev)
+			"barrel_blast":
+				# A fuel drum cooks off: heavy punch + a fireball light + a scorch mark.
+				_trauma = minf(1.0, _trauma + 0.3)
+				_rumble = maxf(_rumble, 0.55)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"kill":
 				_ev_kill(ev)
 			"bounty_kill":
@@ -2196,6 +2204,7 @@ func _draw() -> void:
 	_draw_scorch()
 	_draw_water()
 	_draw_mines()
+	_draw_barrels()
 	_draw_gates()
 	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
 	# field bunkers stream in independently and look identical otherwise.
@@ -2435,6 +2444,19 @@ func _draw_mines() -> void:
 		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
 		_spr("wep_claymore", mp, 0.0, 1.05)
 		draw_circle(mp, 2.0, Color(0.95, 0.3, 0.18, 0.65 + mb * 0.35))
+
+
+func _draw_barrels() -> void:
+	for bl in sim.barrels:
+		if not bl["armed"]:
+			continue
+		var bp := _to_screen(bl["x"], bl["y"])
+		_ground_shadow(bp, 4.0)
+		# Hazard-orange live ordnance, distinct from the mossy scenery barrels.
+		var wb := Art.pulse(0.09)
+		_spr("barrel", bp, 0.0, 1.4, Color(1.9, 0.85, 0.45))
+		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
+		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
 
 
 func _draw_water() -> void:

@@ -69,13 +69,13 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-12, iter 27): Spread Shot / Trench Gun — a 2nd power-up capsule (kind 5,
 ## new checksummed player field spread_ticks) firing a 3-bullet fan; the elite drop table now
 ## rolls a rare capsule (pierce OR spread), shifting rng on every elite kill → all samples moved.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 29 — Explosive Fuel Barrels): a new
+## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
+## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
+## structural add shifts every endless sample too.
 const GOLDEN: Array[int] = [
-	1942392792714788905,
-	5254693104462641548,
-	1869508768180451128,
-	2957909663780844898,
-	1766040305575453794,
-	2825294671139700342,
+	3626110480562057577, 3975691661801363386, 1859312371087080034,
+	8259811706601596291, 5119972681984962103, 9221062858152296681,
 ]
 
 
@@ -133,13 +133,13 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 29 — Explosive Fuel Barrels): a new
+## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
+## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
+## structural add shifts every endless sample too.
 const ENDLESS_GOLDEN: Array[int] = [
-	8681953085351081569,
-	6059987203174684048,
-	3174963771928234834,
-	1740422521085536138,
-	2445779400911443234,
-	7263092349450529370,
+	3513101821070239443, 792159131562927024, 7136238456779045974,
+	8020207107624710014, 8654537467438934214, 2397725332311963374,
 ]
 
 

@@ -334,3 +334,31 @@ func _hard_spawn_count(hard: bool) -> int:
 func test_ng_plus_hard_tightens_the_spawn_curve() -> void:
 	Runner.T.ok(_hard_spawn_count(true) > _hard_spawn_count(false),
 		"NG+ HARD fields more enemies than the normal campaign curve")
+
+
+func test_barrels_chain_and_frag_the_pack() -> void:
+	# One grenade on a barrel chains down a line and kills an enemy between them.
+	var sim := SimWorld.new(1, 1)
+	var y: int = sim.camera_top + 120 * Fixed.ONE
+	sim.barrels.clear()
+	sim.enemies.clear()
+	sim.barrels.append({"x": 200 * Fixed.ONE, "y": y, "armed": true})
+	sim.barrels.append({"x": 218 * Fixed.ONE, "y": y, "armed": true})   # 18px apart < GRENADE_RADIUS
+	sim.barrels.append({"x": 236 * Fixed.ONE, "y": y, "armed": true})
+	sim.enemies.append({"x": 236 * Fixed.ONE, "y": y, "alive": true, "elite": false, "kind": "rusher"})
+	var foe: Dictionary = sim.enemies[0]
+	sim._explode(200 * Fixed.ONE, y)   # detonate only the first barrel
+	for bl in sim.barrels:
+		Runner.T.ok(not bl["armed"], "the whole barrel line chained")
+	Runner.T.ok(not foe["alive"], "the chain reaction fragged the enemy at the far end")
+
+
+func test_barrel_blast_hurts_a_close_player() -> void:
+	# Stand too close to a barrel you detonate and it takes you with it.
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["vest"] = true
+	sim.barrels.clear()
+	sim.barrels.append({"x": p["x"] + 10 * Fixed.ONE, "y": p["y"], "armed": true})
+	sim._explode(p["x"] + 10 * Fixed.ONE, p["y"])
+	Runner.T.ok(not p["vest"], "the barrel blast broke the too-close player's vest")

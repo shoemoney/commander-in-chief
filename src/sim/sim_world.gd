@@ -81,6 +81,8 @@ const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 # herd rushers onto them, or respect them yourself. Rolling clears them safely.
 const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
+const BARREL_SPACING := 420 * F_ONE
+const BARREL_CLUSTER_GAP := 18 * F_ONE
 const BULLET_HIT_RADIUS := 9 * F_ONE
 const PICKUP_RADIUS := 12 * F_ONE
 const MG_AMMO_MAX := 99
@@ -208,6 +210,7 @@ var strikes: Array[Dictionary] = []
 var waters: Array[Dictionary] = []
 var enemy_bullets: Array[Dictionary] = []
 var mines: Array[Dictionary] = []
+var barrels: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
 var score: int = 0
@@ -240,6 +243,7 @@ var _next_gate_y: int = 0
 var _next_tank_y: int = 0
 var _next_water_y: int = 0
 var _next_mine_y: int = 0
+var _next_barrel_y: int = 0
 var _gate_counter: int = 0
 var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
 var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
@@ -260,6 +264,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_tank_y = -(750 * F_ONE)
 	_next_water_y = -(1500 * F_ONE)
 	_next_mine_y = -(700 * F_ONE)
+	_next_barrel_y = -(900 * F_ONE)
 	for i in player_count:
 		players.append({
 			"idx": i,
@@ -343,6 +348,7 @@ func step(inputs: Array) -> void:
 	else:
 		_step_spawner()
 		_step_mines()
+		_step_barrels()
 		_step_boss()
 		_step_colossus()
 		_step_gates()
@@ -739,6 +745,12 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	for e in enemies:
 		if e["alive"] and _dist_lte(tank["x"], tank["y"], e["x"], e["y"], TANK_CRUSH_RADIUS):
 			_kill_enemy(e)
+	# ...and roll over fuel barrels to set them off (chains via _explode).
+	for bl in barrels:
+		if bl["armed"] and _dist_lte(tank["x"], tank["y"], bl["x"], bl["y"], TANK_CRUSH_RADIUS):
+			bl["armed"] = false
+			events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
+			_explode(bl["x"], bl["y"])
 
 
 func _dismount(p: Dictionary, tank: Dictionary) -> void:
@@ -902,6 +914,18 @@ func _explode(x: int, y: int) -> void:
 	# torch the tank a partner is driving (they get the bail-boost / kamikaze
 	# path). Boarding a burning tank is still guarded, so you can't self-ignite
 	# and re-board your own — the ride is a co-op / already-aboard beat.
+	# Explosive barrels in the blast pop — they HURT players in radius (unlike a
+	# friendly grenade; roll i-frames dodge it) and re-detonate so a cluster chains.
+	# armed=false BEFORE the recursion bounds the chain to the cluster (2-3).
+	for bl in barrels:
+		if bl["armed"] and _dist_lte(x, y, bl["x"], bl["y"], GRENADE_RADIUS):
+			bl["armed"] = false
+			events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
+			for p in players:
+				if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
+						and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
+					_hurt_player(p)
+			_explode(bl["x"], bl["y"])
 	for tank in tanks:
 		if tank["alive"] and _dist_lte(x, y, tank["x"], tank["y"], GRENADE_RADIUS):
 			_ignite_tank(tank)
@@ -1266,6 +1290,13 @@ func _step_mines() -> void:
 			_explode(m["x"], m["y"])
 
 
+func _step_barrels() -> void:
+	# Barrels are passive ordnance — just cull the spent/off-screen ones.
+	for i in range(barrels.size() - 1, -1, -1):
+		if not barrels[i]["armed"] or barrels[i]["y"] > camera_top + 420 * F_ONE:
+			barrels.remove_at(i)
+
+
 func _step_spawner() -> void:
 	# Field spawner: pressure from above the screen edge; every 8th is a red
 	# elite. Each opened gate tightens the interval — the campaign's
@@ -1441,6 +1472,15 @@ func _step_camera() -> void:
 		if absi(_next_mine_y / MINE_SPACING) % 2 == 0:
 			mines.append({"x": rng.range_i(70, 570) * F_ONE, "y": _next_mine_y, "armed": true})
 		_next_mine_y -= MINE_SPACING
+	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
+	# grenade chains through (and that catches you if you stand too close).
+	while _next_barrel_y > camera_top - 2 * VIEW_H:
+		if absi(_next_barrel_y / BARREL_SPACING) % 2 == 1:
+			var bx := rng.range_i(60, 520) * F_ONE
+			for c in rng.range_i(2, 3):
+				barrels.append({"x": bx + c * BARREL_CLUSTER_GAP,
+					"y": _next_barrel_y + rng.range_i(-8, 8) * F_ONE, "armed": true})
+		_next_barrel_y -= BARREL_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
 		if _gate_counter == FINAL_GATE_INDEX:
@@ -1960,6 +2000,11 @@ func checksum() -> int:
 		h = feed.call(m["x"], h)
 		h = feed.call(m["y"], h)
 		h = feed.call(int(m["armed"]), h)
+	h = feed.call(barrels.size(), h)
+	for bl in barrels:
+		h = feed.call(bl["x"], h)
+		h = feed.call(bl["y"], h)
+		h = feed.call(int(bl["armed"]), h)
 	h = feed.call(tanks.size(), h)
 	for t in tanks:
 		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:
