@@ -1111,7 +1111,7 @@ func _consume_events() -> void:
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
-				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % ("Y" if Art.use_pad else "E"))
+				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % ("Y" if Art.use_pad else "E"), true)
 				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
 				# out with a red descending sting so it registers as a setback, not a
 				# silent reset. Flags ride the checksum-excluded event (golden-safe).
@@ -1170,7 +1170,7 @@ func _consume_events() -> void:
 				# The banner carries the stakes BEFORE the player commits to the
 				# chase: the payout number, and the friendly-fire trap (a stray
 				# round pays nothing — sim rule the green ring alone can't teach).
-				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM" % sim.PILOT_RANSOM)
+				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM" % sim.PILOT_RANSOM, true)
 			"pilot_rescued":
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
 				_sfx.play("buy", -2.0, 1.5)
@@ -1821,7 +1821,7 @@ func _check_smoke_edges() -> void:
 		_smoke_prev[i] = st
 
 
-func _hint(id: String, text: String) -> void:
+func _hint(id: String, text: String, urgent := false) -> void:
 	# Fire a just-in-time onboarding cue the FIRST time ever, then never again.
 	# Never during attract mode — the demo bot would burn every hint to disk
 	# before the player ever plays.
@@ -1830,7 +1830,15 @@ func _hint(id: String, text: String) -> void:
 	if _seen.get(id, false):
 		return
 	_seen[id] = true
-	_hint_queue.append(text)
+	if urgent:
+		# Queue-jump (8-of-9 panel consensus on toast priority): a time-critical
+		# cue — a downed buddy's revive, an escaping ransom — must not wait ~3s
+		# behind each queued teach line. Jump the queue AND fast-out whatever
+		# is currently showing (0.25 ≈ half a second of fade left).
+		_hint_queue.push_front(text)
+		_hint_t = minf(_hint_t, 0.25)
+	else:
+		_hint_queue.append(text)
 	_persist("seen", {"hints": _seen})
 
 
