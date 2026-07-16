@@ -3451,6 +3451,8 @@ func _draw_players() -> void:
 					rcol = Color(0.55, 0.9, 1.0)
 				elif p["spread_ticks"] > 0:
 					rcol = Color(1.0, 0.8, 0.45)
+				elif p["triple"]:
+					rcol = Color(1.0, 0.6, 0.9)   # permanent Triple Shot: magenta, matches the pickup + HUD x3 pip
 				if bash_ready:
 					rcol = Color(1.0, 0.55, 0.2)
 					var bp := Art.pulse(0.25)
