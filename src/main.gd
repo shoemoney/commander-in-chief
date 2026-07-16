@@ -3690,14 +3690,20 @@ func _draw_threat_edges() -> void:
 			var rx := clampf(dp2["x"] * PX, 8.0, 632.0)
 			var rp := Art.pulse(0.3)
 			var rcol := Art.safe(Color(0.5, 0.9, 1.0, 0.6 + rp * 0.3))
+			# Label clamps by its own width (rx pins to 8/632 at the corners, and
+			# rx-18 used to start the text off-screen there).
+			var rlx := clampf(rx - 18.0, 4.0, 596.0)
 			if rsy > 360.0:
 				draw_line(Vector2(rx - 6, 336), Vector2(rx, 345), rcol, 2.5)
 				draw_line(Vector2(rx, 345), Vector2(rx + 6, 336), rcol, 2.5)
-				Art.text(self, "REVIVE", Vector2(rx - 18, 332), 9, rcol)
+				Art.text(self, "REVIVE", Vector2(rlx, 332), 9, rcol)
 			else:
 				draw_line(Vector2(rx - 6, 40), Vector2(rx, 31), rcol, 2.5)
 				draw_line(Vector2(rx, 31), Vector2(rx + 6, 40), rcol, 2.5)
-				Art.text(self, "REVIVE", Vector2(rx - 18, 50), 9, rcol)
+				# Slot bump: the top-center strip owns y46 when a banner/directive
+				# is live — drop the label a slot so the two never overprint.
+				var rly := 62.0 if _top_center_priority() != "" and absf(rx - 320.0) < 90.0 else 50.0
+				Art.text(self, "REVIVE", Vector2(rlx, rly), 9, rcol)
 
 
 static func _cmp_threat_top(a: Dictionary, b: Dictionary) -> bool:
@@ -3734,7 +3740,8 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 				tbase = _panel_bot + 12.0
 			var ta := clampf(1.0 + off / 180.0, 0.2, 0.7)
 			if e.get("windup", 0) > 0:
-				ta = clampf(ta + Art.pulse(0.28) * 0.3, 0.2, 1.0)
+				# Steady full boost under reduce-motion — the windup must still read.
+				ta = clampf(ta + (0.3 if _motion < 0.5 else Art.pulse(0.28) * 0.3), 0.2, 1.0)
 			var tcol := Color(1.0, 0.1, 0.1, ta) if danger else Color(1.0, 0.55, 0.25, ta)
 			var tspr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var ttip := tbase - (6.0 if danger else 4.0)
@@ -3751,7 +3758,7 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 				sx = 165.0 if sx < 320.0 else 475.0
 			var a := clampf(1.2 - (off - 360.0) / 200.0, 0.25, 0.85)
 			if e.get("windup", 0) > 0:
-				a = clampf(a + Art.pulse(0.28) * 0.35, 0.25, 1.0)
+				a = clampf(a + (0.35 if _motion < 0.5 else Art.pulse(0.28) * 0.35), 0.25, 1.0)
 			var col := Color(1.0, 0.1, 0.1, a) if danger else Color(1.0, 0.35, 0.2, a)
 			var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var tip := 361.0 if danger else 358.0
@@ -3760,6 +3767,11 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			draw_line(Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
 			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
 			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
+	if threats.size() > 6:
+		# The cap hides the tail — say so, so a drowned edge still reads as "many"
+		# instead of "exactly six".
+		Art.text(self, "+%d" % (threats.size() - 6),
+			Vector2(606.0, 40.0 if is_top else 350.0), 8, Color(1.0, 0.5, 0.3, 0.75))
 
 
 func _draw_objective_markers() -> void:
@@ -4003,9 +4015,13 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 		return
 	var frac := 1.0 - float(sim.pending_airstrike) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
 	var a := 0.05 + frac * 0.16
-	if sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
-		a = 0.34
-	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1.0, 0.2, 0.1, a * _motion + 0.03))
+	if _motion >= 0.5 and sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
+		a = 0.34   # final-second strobe — full-motion only
+	# Reduce-motion: no strobe, but the wash must stay VISIBLE — the old
+	# a*_motion+0.03 dimmed a lethal warning to alpha 0.03 for exactly the
+	# players who asked for a steadier signal, not a hidden one.
+	var wash_a := (a * _motion + 0.03) if _motion >= 0.5 else maxf(0.15, a)
+	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1.0, 0.2, 0.1, wash_a))
 	# A strike jet dives down the field as the payload arrives — turns a bare
 	# countdown into an anticipated run. Reuses the gunship's 'facing down' angle
 	# (PI) so the nose leads; rides the already-checksummed pending_airstrike int.
@@ -4105,9 +4121,9 @@ func _draw_banners(top_msg: String) -> void:
 		# 'You're being sighted' as an icon, not only a red edge: a binoculars
 		# glyph pulses top-center for the windup. Alpha is NOT gated by _motion,
 		# so it still warns under reduce-motion (where the vignette is damped).
-		var bsz := 15.0 + 4.0 * paint
+		var bsz := roundf(15.0 + 4.0 * paint)   # integer-snap: subpixel scale shimmers at nearest-filter
 		draw_texture_rect(Art.tex("item_binoculars"),
-			Rect2(SCREEN_W / 2.0 - bsz / 2.0, 22.0, bsz, bsz), false,
+			Rect2(floorf(SCREEN_W / 2.0 - bsz / 2.0), 22.0, bsz, bsz), false,
 			Color(1.0, 0.55, 0.4, 0.4 + 0.45 * paint))
 	if _flash_alpha > 0.01:
 		# Radial flash: hottest at screen center, falling off toward the edges
@@ -4132,6 +4148,9 @@ func _draw_banners(top_msg: String) -> void:
 			var hp: Dictionary = sim.players[_hit_dir_player]
 			origin = _to_screen(hp["x"], hp["y"])
 		var mid := origin + _hit_dir * 210.0
+		# Keep the wedge tip inside an inset rect — near a viewport corner the
+		# whole arc used to project off-screen and the "where from?" vanished.
+		mid = Vector2(clampf(mid.x, 12.0, 628.0), clampf(mid.y, 12.0, 348.0))
 		var perp := Vector2(-_hit_dir.y, _hit_dir.x)
 		var wc := Color(1.0, 0.2, 0.15, _hit_dir_t * 0.8)
 		var pts := PackedVector2Array([mid + perp * 46.0, mid - perp * 46.0,
@@ -4149,6 +4168,7 @@ func _draw_banners(top_msg: String) -> void:
 			var gtxt := "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty() \
 				else "GRENADE THE BUNKERS TO ADVANCE"
 			var gy: float = (g["y"] - sim.camera_top) * PX + 30.0
+			_banner_plate(gtxt, gy, 11, 1.0)
 			Art.text_center(self, gtxt, 320, gy, 11, Color(1.0, 0.9, 0.4, gpulse))
 		break
 	# Stall warning: the observer's clock is running — telegraph the
@@ -4156,13 +4176,15 @@ func _draw_banners(top_msg: String) -> void:
 	if top_msg == "mortar":
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
 		var wtxt := "MORTARS RANGING — ADVANCE!"
+		_banner_plate(wtxt, 46.0, 11, 1.0)
 		Art.text_center(self, wtxt, 320, 46, 11, Color(1.0, 0.4, 0.25, pulse))
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
 		var bt: float = bn["t"]
 		var btext: String = bn["text"]
-		if top_msg == "splash" and bt > 0.01 and not btext.is_empty():
+		if top_msg == "splash" and bt > 0.01 and not btext.is_empty() \
+				and not _debrief and not sim.victory:   # never overprint the result card
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
 			# Duck below any active boss bars (they own y64+slot*22) instead of
@@ -4172,6 +4194,7 @@ func _draw_banners(top_msg: String) -> void:
 			var bsize := 16
 			if _motion >= 0.5:
 				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
+			_banner_plate(btext, by, bsize, a)
 			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
@@ -4255,23 +4278,41 @@ func _draw_banners(top_msg: String) -> void:
 ## Shared victory/debrief result-card scaffold: translucent panel + centered
 ## title + a stack of centered stat rows (each optionally icon-prefixed).
 ## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?}.
+func _banner_plate(txt: String, y: float, size: int, a: float) -> void:
+	# Dark under-plate behind top-strip text: bare glyphs smear over bright
+	# jungle + shake; the plate is what makes the words instant.
+	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	draw_rect(Rect2(320.0 - w / 2.0 - 5.0, y - size - 2.0, w + 10.0, size + 7.0),
+		Color(0.05, 0.06, 0.04, 0.55 * a))
+
+
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color) -> void:
-	# Entrance: the run's final beat scales in over ~12 frames instead of
-	# teleporting onto the screen. Composes WITH the shake-cancel matrix the
-	# caller set (plain draw_set_transform would clobber it).
-	if _motion >= 0.5 and _result_t < 1.0:
-		var re := 1.0 - pow(1.0 - _result_t, 3.0)
-		var rscale := 0.92 + 0.08 * re
-		draw_set_transform_matrix(get_transform().affine_inverse()
-			* Transform2D(0.0, Vector2.ONE * rscale, 0.0, Vector2(320.0, 180.0) * (1.0 - rscale)))
 	var rf := Art.font()
-	var panel_x := 170.0
-	var panel_w := 300.0
 	var panel_top := 112.0
 	var title_y := 150.0
 	var row_start_y := 178.0
 	var row_h := 19.0
 	var panel_h := (row_start_y - panel_top) + maxi(rows.size(), 1) * row_h + 14.0
+	# Width adapts to the widest row (icon included) so a long DOWNED-BY line
+	# can't escape the plate; 300 stays the floor so short tallies keep their shape.
+	var max_w := rf.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+	for row in rows:
+		var rw: float = rf.get_string_size(row["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, row.get("size", 11)).x
+		if not String(row.get("icon", "")).is_empty():
+			rw += row.get("icon_size", 14.0) + 6.0
+		max_w = maxf(max_w, rw)
+	var panel_w := clampf(max_w + 44.0, 300.0, 620.0)
+	var panel_x := 320.0 - panel_w / 2.0
+	# Entrance: the run's final beat scales in over ~12 frames instead of
+	# teleporting onto the screen. Composes WITH the shake-cancel matrix the
+	# caller set (plain draw_set_transform would clobber it). Pivot sits at the
+	# PANEL's center, not screen center — the card used to slide while scaling.
+	if _motion >= 0.5 and _result_t < 1.0:
+		var re := 1.0 - pow(1.0 - _result_t, 3.0)
+		var rscale := 0.92 + 0.08 * re
+		draw_set_transform_matrix(get_transform().affine_inverse()
+			* Transform2D(0.0, Vector2.ONE * rscale, 0.0,
+				Vector2(320.0, panel_top + panel_h / 2.0) * (1.0 - rscale)))
 	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
 	Art.text_center(self, title, 320, title_y, 24, title_col)
 	for i in rows.size():
