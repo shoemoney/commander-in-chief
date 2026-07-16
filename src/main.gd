@@ -3111,7 +3111,11 @@ func _draw_tanks() -> void:
 			_tank_turret[ti] = barrel_angle
 		# Recoil: the barrel kicks back ~4px the instant it fires (fire_cd peaks),
 		# then eases forward as the cannon recovers — a fired shot now has weight.
-		var brecoil := float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS) * 4.0
+		# Squared, not linear: a raw fire_cd ratio crept the barrel forward at
+		# constant speed for the full 45-tick cooldown, which read as machinery.
+		# t² front-loads the return (recuperator snap) and settles the tail.
+		var br_t := float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS)
+		var brecoil := br_t * br_t * 4.0
 		_spr("tank_barrel", c + Vector2.from_angle(barrel_angle) * (10.0 - brecoil), barrel_angle + PI / 2, 0.62, burn_mod)
 		# Low-fuel telegraph: sputter smoke + warning before the ignite, so a
 		# cruising tank doesn't abruptly become 'on fire, 3s to live'.
