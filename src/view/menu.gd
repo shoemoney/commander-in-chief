@@ -516,6 +516,14 @@ func _draw() -> void:
 		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
 		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
 		var r := Rect2(Vector2(320 - BTN.x / 2.0, floorf(top + k * gap)), Vector2(BTN.x, floorf(bh)))
+		# Group divider: a faint rule in the gap above the FIRST destructive row splits
+		# the navigation block from the destructive exits (QUIT on TITLE, RESTART on
+		# PAUSE) — hierarchy cue without touching the shared row geometry/hit-test.
+		if k > 0 and k < mitems.size() and mitems[k].get("destructive", false) \
+				and not mitems[k - 1].get("destructive", false):
+			var sy := floorf(top + k * gap) - floorf((gap - bh) / 2.0)
+			draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
+				Color(0.62, 0.66, 0.5, 0.55))
 		var selected := k == sel
 		draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
