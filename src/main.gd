@@ -274,6 +274,11 @@ func _sync_water() -> void:
 	# screenshot harness (which disables _process). Unused pool entries are hidden.
 	if sim == null:
 		return
+	# The river was the last terrain layer still postcard-blue at the Foundry's
+	# doorstep — murk it toward rust/ash with the run like everything else.
+	var wsoot := clampf(_sector_march() * 0.7, 0.0, 0.7)
+	var w_shallow := Color(0.21, 0.44, 0.47).lerp(Color(0.34, 0.3, 0.2), wsoot)
+	var w_deep := Color(0.08, 0.19, 0.31).lerp(Color(0.16, 0.11, 0.1), wsoot)
 	var vis := 0
 	for w in sim.waters:
 		if vis >= _water_rects.size():
@@ -291,6 +296,8 @@ func _sync_water() -> void:
 		mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
 		# De-sync ripples per band: derive a stable phase from the band's world y.
 		mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
+		mat.set_shader_parameter("shallow_col", w_shallow)
+		mat.set_shader_parameter("deep_col", w_deep)
 	for i in range(vis, _water_rects.size()):
 		_water_rects[i].visible = false
 
