@@ -126,6 +126,17 @@ var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
+var _seen_kinds := {}             # enemy kind → true once its first-encounter banner fired
+# First-sighting teaching cards for the lethal archetypes that debut deep (sector 4+)
+# in a one-hit game — named + told how to answer, once per run. View-only.
+const _KIND_TEACH := {
+	"sniper": "LASER SNIPER — BREAK THE LINE",
+	"ghillie": "GHILLIE SNIPER — FLUSH IT OUT",
+	"grenadier": "GRENADIER — MOVE OFF YOUR GROUND",
+	"shield": "RIOT SHIELD — FLANK OR GRENADE",
+	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
+	"sapper": "SAPPER — MIND THE MINE TRAIL",
+}
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
 const SAVE_TMP := "user://ikari_best.cfg.tmp"
@@ -533,6 +544,7 @@ func _reset() -> void:
 	_damage_vignette = 0.0
 	_banners.clear()
 	_seen_bosses = {}
+	_seen_kinds = {}
 	_prev_colossus_phase = 0
 	_hitmarker = [0.0, 0.0]
 	_hit_dir_t = 0.0
@@ -2661,6 +2673,12 @@ func _draw_enemies() -> void:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			continue
+		# First-sighting teaching card: name the archetype + its counter the first
+		# time it appears this run (these debut at sector 4 with no introduction).
+		var ekind: String = e["kind"]
+		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
+			_seen_kinds[ekind] = true
+			_show_banner(_KIND_TEACH[ekind], Color(1.0, 0.55, 0.4))
 		var epos := _to_screen(e["x"], e["y"])
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).
