@@ -344,3 +344,38 @@ func test_technical_cruises_between_charges() -> void:
 	sim._step_enemies()
 	Runner.T.ok(e["y"] > y0, "between charges the raider closes on the player")
 	Runner.T.eq(e.get("windup", 0), 0, "closing is a cruise, not a rev")
+
+
+func test_technical_is_armored_like_the_nest() -> void:
+	# iter2 salvage: a truck one-shot by a pistol round died before it ever
+	# charged twice — 3 bullets to crack, same grammar as the MG nest.
+	var sim := SimWorld.new(31, 1, "endless")
+	var p := sim.players[0]
+	sim._spawn_special(p["x"], p["y"] - 60 * Fixed.ONE, "technical")
+	var e := sim.enemies[0]
+	Runner.T.eq(e.get("hp", 0), SimWorld.TECHNICAL_HP, "technical spawns with armor")
+	for i in 2:
+		sim.bullets.append({"x": e["x"], "y": e["y"], "vx": 0, "vy": -Fixed.ONE,
+			"ttl": 10, "owner": 0})
+		sim._step_bullets()
+	Runner.T.ok(e["alive"], "two rounds dent, don't kill")
+	sim.bullets.append({"x": e["x"], "y": e["y"], "vx": 0, "vy": -Fixed.ONE,
+		"ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.ok(not e["alive"], "the third round cracks it")
+
+
+func test_pilot_ignores_blasts_and_mines_past_his_grace() -> void:
+	# iter2 salvage: the punch-out grace covered bullets/mines via the frogman
+	# flags, but a POST-grace pilot still died to sapper mines and grenadier
+	# lobs on his fixed walk — a ransom coin-flip. Blasts/mines now pass over
+	# him permanently; bullets still kill (the lesson stays player-owned).
+	var sim := SimWorld.new(32, 1)
+	sim.enemies.append({"x": 300 * Fixed.ONE, "y": sim.camera_top + 100 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "pilot"})
+	var pilot := sim.enemies[sim.enemies.size() - 1]
+	sim._explode(pilot["x"], pilot["y"])
+	Runner.T.ok(pilot["alive"], "a blast on his position passes over the pilot")
+	sim.mines.append({"x": pilot["x"], "y": pilot["y"], "armed": true})
+	sim._step_mines()
+	Runner.T.ok(sim.mines[sim.mines.size() - 1]["armed"], "the pilot doesn't trip mines")

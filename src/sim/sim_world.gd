@@ -70,13 +70,21 @@ const DRONE_WINDUP_TICKS := 24
 # round kills it (fragile). Starting values; test: a strafing player at
 # 100px+ must dodge every charge — if charges land on movers, widen REV_TICKS.
 const TECHNICAL_SPEED := 3 * F_ONE            # player is 2.4 px/t — it outruns you on a straight
-const TECHNICAL_REV_TICKS := 30               # rev-up telegraph (same class as MG_NEST_AIM)
+const TECHNICAL_REV_TICKS := 18               # rev tell, cut from 30: a lock landing 80t before
+	# impact let a 2.4px/t strafer clear the point with a 4-tick nudge. Starting
+	# value; test: a late-reacting strafer eats ~2/10 charges — widen toward 24
+	# if first contact feels unreactable (the sighting card teaches the rule).
 const TECHNICAL_CHARGE_TICKS := 50            # one charge = ~150px of travel
 const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge rhythm)
+const TECHNICAL_HP := 3                       # a truck is not a paper target (nest precedent)
 # Downed Pilot ransom: a dead gunship's pilot punches out at the crash site and
 # staggers for the enemy line at the TOP edge. TOUCH him to rescue (+ransom);
 # let him cross the edge and he's captured. Shooting him pays NOTHING.
-const PILOT_SPEED := (F_ONE * 4) / 5          # 0.8 px/t — a generous but real chase window
+# 1.4px/t (0.58x player): at 0.8 the rescue was a ~100% grab — he ejects at the
+# crash site you already stand on (the courier, this file's "real chase"
+# benchmark, runs 0.9x player). Starting value; test: mid-arena catch rate
+# should land 50-70% — at ~100% raise again, below 50% drop toward 1.1.
+const PILOT_SPEED := (F_ONE * 7) / 5
 const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
 # Punch-out grace: the pilot spawns unshootable (and unrescuable) for one
 # reaction window, because he appears ON the boss the player is still firing
@@ -1016,7 +1024,7 @@ func _step_bullets() -> void:
 						events.append({"t": "rend_pierce", "x": b["x"], "y": b["y"]})
 					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
 					# it via _explode). Only a lethal round routes through _kill_enemy.
-					if e["kind"] == "mg_nest":
+					if e["kind"] == "mg_nest" or e["kind"] == "technical":
 						e["hp"] = e["hp"] - 1
 						if e["hp"] > 0:
 							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
@@ -1075,7 +1083,11 @@ func _explode(x: int, y: int, no_coin := false) -> void:
 	events.append({"t": "explosion", "x": x, "y": y})
 	var frags := 0
 	for e in enemies:
-		if e["alive"] and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
+		# The pilot is a non-combatant objective PAST his punch-out grace too:
+		# a sapper mine or grenadier lob on his fixed walk was a ransom
+		# coin-flip the player couldn't influence. Bullets still kill him —
+		# "don't shoot the rescue" stays the player's lesson.
+		if e["alive"] and e["kind"] != "pilot" and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
 			_kill_enemy(e, no_coin)
 			frags += 1
 	if frags >= 3:
@@ -1607,7 +1619,7 @@ func _step_mines() -> void:
 		# Or an enemy walks onto it — herd rushers into the minefield.
 		if not triggered:
 			for e in enemies:
-				if e["alive"] and not e.get("submerged", false) \
+				if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot" \
 						and _dist_lte(e["x"], e["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
 					triggered = true
 					break
@@ -1766,6 +1778,8 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 		# The marquee aerial threat kills like a trophy, not a grunt: marked
 		# rides the existing bounty grammar (3× pay + gold fountain + crown).
 		e["marked"] = true
+	if kind == "technical":
+		e["hp"] = TECHNICAL_HP   # armored like the nest — hp is already hashed
 	enemies.append(e)
 
 
@@ -2263,17 +2277,28 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 	boss["hp"] = boss["hp"] - amount
 	if boss["hp"] <= 0 and boss["alive"]:
 		boss["alive"] = false
-		war_chest += BOSS_BOUNTY
-		score += BOSS_BOUNTY * 10
+		# Endless minibosses pay with their depth: HP scales +50%/milestone
+		# (x1.6/player) while the flat 200c shrank into a time-tax. Campaign
+		# gunships stay flat (wave = 0). Test: coins/sec on the w5 vs w25
+		# miniboss within ~25%.
+		var bounty: int = BOSS_BOUNTY
+		if mode == "endless" and wave >= 5:
+			bounty += (wave / 5 - 1) * (BOSS_BOUNTY / 2)
+		war_chest += bounty
+		score += bounty * 10
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
-		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY, "kind": "boss"})
+		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": bounty, "kind": "boss"})
 		# The gunship's pilot punches out at the crash site and staggers for the
 		# enemy line — reach him before the top edge for the ransom.
-		if enemies.size() < MAX_ENEMIES:
-			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot",
-				"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
-			events.append({"t": "pilot_down", "x": boss["x"], "y": by})
+		# Unconditional + floor-clamped: the MAX_ENEMIES gate silently voided the
+		# advertised ransom at capped waves (one transient non-combatant just
+		# delays the next gated spawn), and a top-edge gunship kill ejected a
+		# pilot with a ~1s unavoidable fail (120px floor -> 50-70% catch target).
+		var pilot_y: int = maxi(by, camera_top + 120 * F_ONE)
+		enemies.append({"x": boss["x"], "y": pilot_y, "alive": true, "elite": false, "kind": "pilot",
+			"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
+		events.append({"t": "pilot_down", "x": boss["x"], "y": pilot_y})
 
 
 func _step_enemy_bullets() -> void:

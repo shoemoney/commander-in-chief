@@ -819,11 +819,12 @@ func _draw_howto() -> void:
 		"GHILLIE — hidden sniper; only its laser gives it away. Close in.",
 		"SAPPER — seeds mines behind it. Don't chase over its trail.",
 		"SHIELD — front blocks bullets. Flank it or grenade it.",
-		"DRONE — flying spotter, calls mortars on your spot. Shoot it down."]
+		"DRONE — flying spotter, calls mortars on your spot. Shoot it down.",
+		"TECHNICAL — revs, then charges a LOCKED line. Step off it."]
 	for i in special.size():
-		# 11px leading + 254 start: SIX lines now (DRONE joined the roster) and
-		# the last must still clear the BACK button plate (~y315).
-		Art.text(self, special[i], Vector2(72, 254 + i * 11), 10, Color(0.88, 0.9, 0.8))
+		# 10px leading + 252 start: SEVEN lines now (TECHNICAL joined) and the
+		# last must still clear the BACK button plate (~y315).
+		Art.text(self, special[i], Vector2(72, 252 + i * 10), 10, Color(0.88, 0.9, 0.8))
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:

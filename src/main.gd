@@ -132,6 +132,7 @@ var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
+var _tech_lunge_prev := {}              # per-slot technical lunge_ticks — charge-end skid cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 var _seen_kinds := {}             # enemy kind → true once its first-encounter banner fired
 # First-sighting teaching cards for the lethal archetypes that debut deep (sector 4+)
@@ -3174,6 +3175,12 @@ func _draw_enemies() -> void:
 			# Charging raider: face the LOCKED line mid-charge (the sprite is the
 			# promise), shake + dust while revving, speed streaks while barreling.
 			var t_lunge: int = e.get("lunge_ticks", 0)
+			# Missed-charge skid: the lethal lunge snapping straight to a quiet
+			# cruise read as a state glitch — a dust plume sells the stop (and
+			# the vulnerability beat).
+			if _tech_lunge_prev.get(eidx, 0) > 0 and t_lunge == 0:
+				_burst(e["x"], e["y"], "dust", 5, 0.6, 1.6, 0.5, 0.08)
+			_tech_lunge_prev[eidx] = t_lunge
 			var t_wu: int = e.get("windup", 0)
 			var t_face := face
 			# Vehicle-width shadow (the generic 6.0 infantry disc made the truck
@@ -3860,6 +3867,19 @@ func _draw_players() -> void:
 					draw_arc(pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
+			# HOLD FIRE cue: the reticle warns when the gun is trained on the
+			# rescue target — the RANSOM LOST ceremony teaches the rule only
+			# AFTER the 100¢ is gone; this is the aim-time save.
+			if aim.length_squared() > 0.01:
+				for pe2 in sim.enemies:
+					if not pe2["alive"] or pe2["kind"] != "pilot":
+						continue
+					var pi_rel := _to_screen(pe2["x"], pe2["y"]) - pos
+					var pi_along := pi_rel.dot(aim)
+					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
+						Art.text(self, "HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), 8,
+							Color(1.0, 0.45, 0.35))
+						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
 			# will land if INTERACT fires now — ghost sprite + the 9px trigger
 			# ring, so a plant is a plan, not a surprise.
