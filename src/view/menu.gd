@@ -528,7 +528,9 @@ func _draw_hall() -> void:
 		return
 	# Fixed x offsets per column — Art.font() is proportional, so
 	# space-padded strings stagger; each column draws at its own x instead.
-	var col_x := [112, 148, 226, 306, 396]
+	# Spread for PixelOperator8 — it runs ~15% wider per glyph than the old
+	# vector fallback, and MODE ("CAMPAIGN") was kissing REACHED at 306.
+	var col_x := [112, 148, 226, 316, 414]
 	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
 	for c in headers.size():
 		if c == 1:
@@ -563,8 +565,9 @@ func _draw_howto() -> void:
 		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
 		[hold_pre, Color(0.85, 0.9, 0.8)],
 		["", Color.WHITE],
-		["GRENADES crack armor — bunkers, bosses, the Colossus. Bullets don't.", Color(0.9, 0.92, 0.8)],
-		["ROLL to dodge (brief invulnerability). BOARD tanks for crush + shells.", Color(0.9, 0.92, 0.8)],
+		# Re-wrapped for the wider pixel font: >64 chars clips at x=640.
+		["GRENADES crack armor — bunkers, bosses, the Colossus.", Color(0.9, 0.92, 0.8)],
+		["Bullets don't. ROLL to dodge. BOARD tanks for crush + shells.", Color(0.9, 0.92, 0.8)],
 		["", Color.WHITE],
 	]
 	for i in lines.size():
@@ -582,7 +585,7 @@ func _draw_howto() -> void:
 		draw_texture_rect(Art.tex(roster[i][0]), Rect2(80, yy - 10, 20, 20), false, Art.tint(roster[i][0]))
 		Art.text(self, roster[i][1], Vector2(108, yy + 3), 10, Color(0.9, 0.92, 0.82))
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
-	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 258), 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 244), 10, Color(1.0, 0.7, 0.4))
 	var special := [
 		"GRENADIER — lobs a telegraphed blast on your spot. Keep moving.",
 		"SNIPER — paints a laser line, then fires. Sidestep it.",
@@ -590,7 +593,9 @@ func _draw_howto() -> void:
 		"SAPPER — seeds mines behind it. Don't chase over its trail.",
 		"SHIELD — front blocks bullets. Flank it or grenade it."]
 	for i in special.size():
-		Art.text(self, special[i], Vector2(72, 274 + i * 15), 10, Color(0.88, 0.9, 0.8))
+		# 13px leading + 244 header start: the SHIELD line must clear the BACK
+		# button plate (~y315) — it sat under it after the pixel-font swap.
+		Art.text(self, special[i], Vector2(72, 258 + i * 13), 10, Color(0.88, 0.9, 0.8))
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
