@@ -3157,7 +3157,15 @@ func _draw_enemies() -> void:
 			var pi_col := Art.safe(Color(0.45, 1.0, 0.65))
 			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
-			_spr("m_pilot", epos, -PI / 2, 0.48)
+			if e.get("submerged", false):
+				# Punch-out grace: he's climbing out of the wreck — sprawled and
+				# fading in, so the no-shoot window reads as "not up yet", not
+				# as bullets mysteriously missing a standing man.
+				var pi_up := 1.0 - float(e.get("surface_ticks", 0)) / float(SimWorld.PILOT_PUNCHOUT_TICKS)
+				_spr("m_pilot", epos, -PI / 2 + (1.0 - pi_up) * 1.1,
+					0.48, Color(1, 1, 1, 0.35 + pi_up * 0.65))
+			else:
+				_spr("m_pilot", epos, -PI / 2, 0.48)
 			Art.text(self, "RESCUE", epos + Vector2(-16, -18), 8, pi_col)
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: real courier bake (the loot pack is in the
@@ -3520,7 +3528,9 @@ func _draw_projectiles() -> void:
 	# sim.enemies was O(bullets × enemies) with a Vector2 alloc per pair.
 	var submerged_pos: Array[Vector2] = []
 	for e in sim.enemies:
-		if e["alive"] and e.get("submerged", false):
+		# kind-gate: a punch-out-grace pilot wears the submerged flag too, but
+		# a water-deflect ripple on dry land would misread as a frogman.
+		if e["alive"] and e.get("submerged", false) and e["kind"] != "pilot":
 			submerged_pos.append(_to_screen(e["x"], e["y"]))
 	for b in sim.bullets:
 		var bpos := _to_screen(b["x"], b["y"])

@@ -274,3 +274,73 @@ func test_boss_death_spawns_a_pilot_and_shooting_him_pays_nothing() -> void:
 	sim._kill_enemy(pilot)
 	Runner.T.eq(sim.war_chest, chest0, "gunning down the pilot mints no coin")
 	Runner.T.eq(sim.score, score0, "and no score")
+
+
+func test_pilot_punchout_grace_blocks_the_touch_then_expires() -> void:
+	var sim := SimWorld.new(24, 1)
+	var p := sim.players[0]
+	var boss := {"hp": 1, "alive": true, "x": p["x"], "gate_y": p["y"] + SimWorld.BOSS_Y_OFFSET}
+	sim._damage_boss(boss, 99)
+	var pilot: Dictionary = sim.enemies[sim.enemies.size() - 1]
+	Runner.T.ok(pilot.get("submerged", false), "the pilot punches out under a no-shoot grace")
+	var chest0 := sim.war_chest
+	sim._step_players([SimInput.new()])
+	Runner.T.eq(sim.war_chest, chest0, "no rescue while he climbs out")
+	var y0: int = pilot["y"]
+	for t in SimWorld.PILOT_PUNCHOUT_TICKS:
+		sim._step_enemies()
+	Runner.T.ok(not pilot["submerged"], "the grace expires on schedule")
+	Runner.T.eq(pilot["y"], y0, "he holds the crash site while getting up")
+	sim._step_players([SimInput.new()])
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.PILOT_RANSOM, "then the touch rescues")
+
+
+func test_roll_iframes_do_not_block_the_rescue() -> void:
+	var sim := SimWorld.new(25, 1)
+	var p := sim.players[0]
+	sim.enemies.append({"x": p["x"], "y": p["y"], "alive": true, "elite": false, "kind": "pilot"})
+	p["roll_ticks"] = 3   # mid-roll: i-frames active this step
+	p["roll_dx"] = 0
+	p["roll_dy"] = 0
+	var chest0 := sim.war_chest
+	sim.step([SimInput.new()])
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.PILOT_RANSOM,
+		"rolling onto the pilot still grabs him — i-frames stop deaths, not rescues")
+
+
+func test_tank_treads_rescue_not_crush_the_pilot() -> void:
+	var sim := SimWorld.new(26, 1)
+	var p := sim.players[0]
+	var tank := {"x": p["x"], "y": p["y"], "alive": true, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": 0, "fire_cd": 0, "occupant": 0}
+	sim.tanks.append(tank)
+	p["in_tank"] = 0
+	# Hold the dict reference — step() sweeps dead enemies out of the array.
+	var pilot := {"x": tank["x"], "y": tank["y"], "alive": true, "elite": false, "kind": "pilot"}
+	sim.enemies.append(pilot)
+	var chest0 := sim.war_chest
+	sim.step([SimInput.new()])
+	Runner.T.ok(not pilot["alive"], "the treads picked him up")
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.PILOT_RANSOM, "treads grab the ransom, not a corpse")
+
+
+func test_airstrike_spares_the_pilot() -> void:
+	var sim := SimWorld.new(27, 1)
+	sim.enemies.append({"x": 100 * Fixed.ONE, "y": sim.camera_top + 100 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "pilot"})
+	sim._spawn_enemy(200 * Fixed.ONE, sim.camera_top + 100 * Fixed.ONE, false)
+	sim._fire_mission()
+	Runner.T.ok(sim.enemies[0]["alive"], "the screen-clear spares the objective")
+	Runner.T.ok(not sim.enemies[1]["alive"], "but still wipes the hostiles")
+
+
+func test_technical_cruises_between_charges() -> void:
+	var sim := SimWorld.new(28, 1, "endless")
+	var p := sim.players[0]
+	sim._spawn_special(p["x"], p["y"] - 300 * Fixed.ONE, "technical")
+	var e := sim.enemies[0]
+	e["fire_cd"] = 50   # mid-cooldown: no rev this tick — the old truck just parked here
+	var y0: int = e["y"]
+	sim._step_enemies()
+	Runner.T.ok(e["y"] > y0, "between charges the raider closes on the player")
+	Runner.T.eq(e.get("windup", 0), 0, "closing is a cruise, not a rev")

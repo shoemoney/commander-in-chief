@@ -78,6 +78,12 @@ const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge
 # let him cross the edge and he's captured. Shooting him pays NOTHING.
 const PILOT_SPEED := (F_ONE * 4) / 5          # 0.8 px/t — a generous but real chase window
 const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
+# Punch-out grace: the pilot spawns unshootable (and unrescuable) for one
+# reaction window, because he appears ON the boss the player is still firing
+# at — trigger inertia gunned him down before the RESCUE banner even existed.
+# Starting value 36t (0.6s); test: a bot holding fire through 10 boss kills
+# must leave the pilot rescuable ≥9/10 — raise by 12t increments if not.
+const PILOT_PUNCHOUT_TICKS := 36
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -575,20 +581,22 @@ func _step_players(inputs: Array) -> void:
 			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true})
 			events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
 
+		# The rescue touch ignores roll i-frames — i-frames stop contact DEATH,
+		# not a friendly grab (rolling through fire onto the pilot is the
+		# natural approach; gating it made the intuitive input do nothing).
+		# The punch-out grace (submerged) must elapse first. Tank treads
+		# rescue in _step_tank.
+		for e in enemies:
+			if e["alive"] and e["kind"] == "pilot" and not e.get("submerged", false) \
+					and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+				_rescue_pilot(e)
+
 		# Contact with any enemy = one-hit death (roll i-frames protect;
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
-				if not _enemy_strikeable(e) or e["kind"] == "courier" \
+				if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
 						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
-					continue
-				if e["kind"] == "pilot":
-					# Reaching the downed pilot RESCUES him — the one touch on
-					# this field that pays instead of kills.
-					e["alive"] = false
-					war_chest += PILOT_RANSOM
-					score += PILOT_RANSOM * 10
-					events.append({"t": "pilot_rescued", "x": e["x"], "y": e["y"], "coin": PILOT_RANSOM})
 					continue
 				_hurt_player(p)
 				break
@@ -744,11 +752,13 @@ func _kill_player(p: Dictionary) -> void:
 
 func _fire_mission() -> void:
 	## The screen-clear: wipes every surfaced enemy. Spares the submerged
-	## (1986 rule) and armor (bosses, bunkers). Mints NO coin — a 100-coin
-	## buy that reaped a full screen's bounty was a net-positive money printer.
+	## (1986 rule), armor (bosses, bunkers), and the downed pilot — the
+	## objective is not a hostile, and an unaimed 100-coin buy silently
+	## deleting the 100-coin ransom read as the game cheating. Mints NO coin —
+	## a 100-coin buy that reaped a full screen's bounty was a money printer.
 	events.append({"t": "explosion", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
-		if e["alive"] and not e.get("submerged", false):
+		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
 			_kill_enemy(e, true)
 
 
@@ -883,6 +893,13 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	# Treads: crush infantry, mint coin.
 	for e in enemies:
 		if e["alive"] and _dist_lte(tank["x"], tank["y"], e["x"], e["y"], TANK_CRUSH_RADIUS):
+			if e["kind"] == "pilot":
+				# Treads GRAB, not shred: the tank is the best chase tool for a
+				# 0.8px/t walker, and crushing the objective it's built to reach
+				# was a silent ransom forfeit. Grace still applies.
+				if not e.get("submerged", false):
+					_rescue_pilot(e)
+				continue
 			_kill_enemy(e)
 	# ...and roll over fuel barrels to set them off (chains via the fuse in _step_barrels).
 	for bl in barrels:
@@ -1221,6 +1238,15 @@ func _spawn_enemy_bullet(x: int, y: int, dx: int, dy: int, dlen: int, speed: int
 	})
 
 
+func _rescue_pilot(e: Dictionary) -> void:
+	## The one touch on this field that pays instead of kills — shared by the
+	## on-foot grab (incl. mid-roll) and the tank treads.
+	e["alive"] = false
+	war_chest += PILOT_RANSOM
+	score += PILOT_RANSOM * 10
+	events.append({"t": "pilot_rescued", "x": e["x"], "y": e["y"], "coin": PILOT_RANSOM})
+
+
 func _step_enemies() -> void:
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
@@ -1230,6 +1256,15 @@ func _step_enemies() -> void:
 		if flash_ticks > 0:
 			continue   # flashbang: the whole field roster is stunned in place
 		if e["kind"] == "pilot":
+			# Punch-out grace first: he wears the frogman's no-shoot grammar
+			# (submerged + surface_ticks — both already hashed, zero new
+			# fields) while he staggers to his feet, so trigger inertia held
+			# through the boss kill can't gun him down before the banner lands.
+			if e.get("surface_ticks", 0) > 0:
+				e["surface_ticks"] = e["surface_ticks"] - 1
+				if e["surface_ticks"] == 0:
+					e["submerged"] = false
+				continue
 			# Downed pilot: no AI, no target — he just staggers for the enemy
 			# line at the top. Crossing it = captured, ransom forfeit. (Rescue
 			# by touch lives in _step_players; killing him pays nothing.)
@@ -1408,6 +1443,22 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 			e["aim_ly"] = dy
 			e["lunge_ticks"] = TECHNICAL_CHARGE_TICKS
 		return
+	# Between charges the raider CLOSES at infantry pace — a parked gun-truck
+	# sold as "the fastest thing on the field" was stationary ~100 of every
+	# 150 ticks, and one that spawned or overshot >150px from the player (a
+	# charge travels ~150px) lobbed charges that died short forever. The rev
+	# itself stays rooted (honest telegraph); the charge is still the only
+	# kill move. Starting value ENEMY_SPEED; test: a technical spawned 250px
+	# from a strafing player must force ≥1 dodged charge within 4s — if it
+	# still never engages, drop TECHNICAL_LOCK_CD_TICKS toward 50.
+	if dlen > F_ONE:
+		var cpx: int = e["x"]
+		var cpy: int = e["y"]
+		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), ENEMY_SPEED)
+		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), ENEMY_SPEED)
+		if _in_water(e["x"], e["y"]):   # wheels don't swim (tank rule)
+			e["x"] = cpx
+			e["y"] = cpy
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't line up a charge into smoke
 		e["fire_cd"] = TECHNICAL_LOCK_CD_TICKS
@@ -2216,7 +2267,8 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		# The gunship's pilot punches out at the crash site and staggers for the
 		# enemy line — reach him before the top edge for the ransom.
 		if enemies.size() < MAX_ENEMIES:
-			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot"})
+			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot",
+				"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
 			events.append({"t": "pilot_down", "x": boss["x"], "y": by})
 
 
