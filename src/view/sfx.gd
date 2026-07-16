@@ -14,6 +14,7 @@ const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 	"wiped": true, "avenge": true}
 
 var _sounds: Dictionary = {}
+var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
 var _music := AudioStreamPlayer.new()
 var _pb: AudioStreamPlaybackPolyphonic
@@ -48,6 +49,20 @@ func _ready() -> void:
 	add_child(_player)
 	_player.play()
 	_pb = _player.get_stream_playback()
+	# Positional pool: the game draws in 640x360 screen space with no Camera2D,
+	# so a listener pinned at screen center anchors the stereo pan. Gentle
+	# attenuation only — arcade panning, not distance silence.
+	var listener := AudioListener2D.new()
+	listener.position = Vector2(320, 180)
+	add_child(listener)
+	listener.make_current()
+	for i in 12:
+		var p := AudioStreamPlayer2D.new()
+		p.bus = "SFX"
+		p.max_distance = 700.0
+		p.attenuation = 1.0
+		add_child(p)
+		_pool.append(p)
 	_synth_all()
 	# War-drums bed: synthesized like everything else, looping under the SFX.
 	_music.stream = _synth_drums()
@@ -63,6 +78,23 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	if not _MUSICAL.has(sound):
 		pitch *= randf_range(0.94, 1.06)
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
+
+
+func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
+	if _pool.is_empty() or not _sounds.has(sound):
+		return
+	if not _MUSICAL.has(sound):
+		pitch *= randf_range(0.94, 1.06)
+	var p := _pool[0]   # steal the first if all 12 are busy
+	for c in _pool:
+		if not c.playing:
+			p = c
+			break
+	p.position = screen_pos
+	p.volume_db = vol_db
+	p.pitch_scale = pitch
+	p.stream = _sounds[sound]
+	p.play()
 
 
 func set_music_intensity(level: float, duck := 0.0) -> void:
