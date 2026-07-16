@@ -3722,7 +3722,9 @@ func _draw_banners(top_msg: String) -> void:
 			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
+		var vrr := _run_rank()
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
+			{"text": "RANK  %s — %s" % [vrr.grade, vrr.title], "color": vrr.col, "size": 13},
 			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
 			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
