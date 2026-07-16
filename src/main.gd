@@ -640,6 +640,7 @@ func _physics_process(_delta: float) -> void:
 func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
+	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
 	for ev in sim.events:
 		var kind: String = ev["t"]
 		if kind == "pickup":
@@ -654,6 +655,14 @@ func _consume_events() -> void:
 					"col": Color(0.55, 0.95, 1.0) if is_pierce else Color(1.0, 0.82, 0.45)})
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
+		elif kind == "explosion":
+			# Up to 5 explosion events fire in one tick (colossus death-ring, bunker
+			# clusters); stacking 5 full booms pumps the HardLimiter to mush. Gate to
+			# one boom per tick — same idiom as the armor/boss pings above.
+			if not explosion_pinged:
+				explosion_pinged = true
+				var esnd: Array = _EVENT_SOUND["explosion"]
+				_sfx.play(esnd[0], esnd[1], esnd[2])
 		elif _EVENT_SOUND.has(kind):
 			var snd: Array = _EVENT_SOUND[kind]
 			_sfx.play(snd[0], snd[1], snd[2])
@@ -948,6 +957,14 @@ func _ev_explosion(ev: Dictionary) -> void:
 	_blast_debris(ev["x"], ev["y"], wet)
 	if not wet:
 		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+		# Lingering smoke drifts up after the flash — a blast site used to clear to
+		# bare scorch in ~0.3s while wave/gate spawns billow. Reuses the proven
+		# long-life fx_smoke card + a gentle rise (move) so it reads as air.
+		for si in 2:
+			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+				"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
+				"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+				"col": Color(0.25, 0.22, 0.2, 0.7)})
 
 
 func _ev_kill(ev: Dictionary) -> void:
