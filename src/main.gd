@@ -2444,6 +2444,11 @@ func _draw_gunships() -> void:
 
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int) -> void:
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+	# Idle hover: a slow vertical bob + faint sway so the gunship reads as airborne,
+	# not a parked sprite. Slot-offset so two bosses don't bob in lockstep; scaled
+	# by _motion so REDUCE MOTION damps it.
+	var _bf := float(Engine.get_physics_frames())
+	bpos += Vector2(sin(_bf * 0.05 + slot) * 1.5, sin(_bf * 0.08 + slot * 2.0) * 2.5) * _motion
 	# Mortar-phase warning: the hull flashes red while volleys are near
 	# (they land at phase_t 200/240/280 of the 360-tick cycle).
 	var pt: int = boss["phase_t"]
