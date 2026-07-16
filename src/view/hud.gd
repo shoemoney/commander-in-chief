@@ -370,6 +370,21 @@ func _draw() -> void:
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			# Dodge availability: the roll's long cooldown was only shown as a faint
+			# arc at the player's feet — a mashing player couldn't tell recharging
+			# from unbound. Bright glyph when ready, dimmed + draining ring while
+			# recharging (same grammar as the grenade/bash rings above).
+			var roll_x := px
+			var roll_ready: bool = p["roll_cd"] == 0
+			Art.draw_glyph(self, "roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
+				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6))
+			px = roll_x + ICON + 2.0
+			if p["roll_cd"] > 0:
+				var rfrac := clampf(float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
+				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					-PI / 2, -PI / 2 + TAU * (1.0 - rfrac), 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if p["vest"]:
 				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
 				px += ICON + 2.0
