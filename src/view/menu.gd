@@ -113,6 +113,13 @@ func open(m: int, select_id := "") -> void:
 	_sel_target = -1.0
 	_key_move = 0   # a key held across the transition must not auto-repeat here
 	_has_replay = FileAccess.file_exists("user://last_run.replay")   # hoisted: _menu_items ran this disk stat ~180x/s while TITLE was open
+	# Any menu opening freezes the sim mid-hold — cancel open supply wheels, or a
+	# hold+pick released WHILE paused commits a stale buy on the first resumed
+	# frame (the release the player meant as an abort).
+	if main != null:
+		for w in main._wheel:
+			w["open"] = false
+			w["sel"] = -1
 	# Backing out of a submenu re-selects the row that opened it — landing on
 	# CAMPAIGN after OPTIONS broke muscle memory (and risks a misfired start).
 	if select_id != "":

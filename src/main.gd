@@ -4848,12 +4848,18 @@ func _draw_wheel() -> void:
 							c.x, c.y - 63.0, 8, Color(1.0, 0.7, 0.3))
 						break
 		if _wheel[i]["sel"] >= 0:
-			var cue_l := "RELEASE TO BUY · "
+			# The verb line must not promise a purchase the sim will deny — an
+			# unaffordable pick tints its socket red, so the cue says so too
+			# (release on it fires the deny path, not a buy).
+			var cue_item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[_wheel[i]["sel"]]]
+			var cue_afford: bool = sim.war_chest >= sim._supply_cost(cue_item["kind"])
+			var cue_l := "RELEASE TO BUY · " if cue_afford else "CAN'T AFFORD · "
 			var cue_r := " CANCEL"
 			var wl := f.get_string_size(cue_l, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 			var wr := f.get_string_size(cue_r, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 			var cx0 := c.x - (wl + 10.0 + wr) / 2.0
-			Art.text(self, cue_l, Vector2(cx0, c.y + 52.0), 8, Color(0.9, 0.92, 0.8, 0.85))
+			Art.text(self, cue_l, Vector2(cx0, c.y + 52.0), 8,
+				Color(0.9, 0.92, 0.8, 0.85) if cue_afford else Color(1.0, 0.55, 0.45, 0.9))
 			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + 48.5), 10.0)
 			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + 52.0), 8, Color(0.9, 0.92, 0.8, 0.85))
 		else:
