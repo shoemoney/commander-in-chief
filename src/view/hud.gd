@@ -246,10 +246,23 @@ func _draw() -> void:
 		# gauge's fixed 94px footprint ran off the 640px viewport — clamp it
 		# back over the tail of whatever optional chip came before.
 		x = minf(x, RIGHT - 94.0)
-		var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-		_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
-		_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
-			Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
+		# A closed gate/boss/colossus pinning the camera means advancing is
+		# impossible until the fight is won — the "advance!" PRESSURE read would be
+		# lying, so swap it for the real objective and drop the climbing fill.
+		var gate_locked := false
+		for g in sim.gates:
+			if not g["open"] and sim.camera_top >= g["y"] - SimWorld.GATE_CAMERA_PAD \
+					and g["y"] >= sim.camera_top:
+				gate_locked = true
+				break
+		if gate_locked:
+			var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
+			_text("CLEAR THE GATE", x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+		else:
+			var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
+			_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
+			_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
+				Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
 		row_r = x + 94.0
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
