@@ -516,6 +516,14 @@ func _draw() -> void:
 		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
 		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
 		var r := Rect2(Vector2(320 - BTN.x / 2.0, floorf(top + k * gap)), Vector2(BTN.x, floorf(bh)))
+		# Group divider: a faint rule in the gap above the FIRST destructive row splits
+		# the navigation block from the destructive exits (QUIT on TITLE, RESTART on
+		# PAUSE) — hierarchy cue without touching the shared row geometry/hit-test.
+		if k > 0 and k < mitems.size() and mitems[k].get("destructive", false) \
+				and not mitems[k - 1].get("destructive", false):
+			var sy := floorf(top + k * gap) - floorf((gap - bh) / 2.0)
+			draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
+				Color(0.62, 0.66, 0.5, 0.55))
 		var selected := k == sel
 		draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
@@ -538,8 +546,11 @@ func _draw() -> void:
 				_sel_y = ty
 			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
 			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
+			# Fade the glow while it's still catching up to the row — a lagging box
+			# at full alpha reads as misplaced; dimming it makes the glide read as motion.
+			var lag := clampf(absf(_sel_y - _sel_target) / 40.0, 0.0, 1.0)
 			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
-				Color(1.0, 0.9, 0.4, 0.7 + mp * 0.3))
+				Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
 		# Destructive rows carry a warm tint BEFORE the first press — the warning
 		# used to appear only after you'd already pressed once.
