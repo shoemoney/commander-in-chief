@@ -191,6 +191,9 @@ const _EVENT_SOUND := {
 	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mg_nest_aim": ["tank_board", -11.0, 1.4],
+	"technical_rev": ["tank_board", -8.0, 0.75],   # low engine snarl: a charge is coming
+	"pilot_down": ["alarm", -10.0, 1.1],           # crash-site distress ping
+	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -1085,6 +1088,21 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.25})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.12,
 					"r": 16.0, "col": Color(1.0, 0.75, 0.6)})
+			"technical_rev":
+				# Rev-up: dust kicked behind the wheels — the charge tell has a
+				# body, not just an engine snarl.
+				_burst(ev["x"], ev["y"], "dust", 4, 0.5, 1.2, 0.5, 0.07)
+			"pilot_down":
+				_fx.append({"x": ev["x"], "y": ev["y"] - 8, "t": 0.0, "kind": "floattext",
+					"rate": 0.012, "size": 12, "text": "PILOT DOWN — REACH HIM",
+					"col": Art.safe(Color(0.5, 1.0, 0.7))})
+				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH HIM BEFORE HE'S MARCHED OFF THE TOP")
+			"pilot_rescued":
+				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
+				_sfx.play("buy", -2.0, 1.5)
+			"pilot_lost":
+				_fx.append({"x": ev["x"], "y": ev["y"] + 20, "t": 0.0, "kind": "floattext",
+					"rate": 0.02, "text": "PILOT CAPTURED", "col": Color(0.7, 0.65, 0.6)})
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
@@ -2278,7 +2296,8 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contractor2",
 	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "sapper",
-	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone"}
+	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone",
+	"technical": "m_technical", "pilot": "m_pilot"}
 
 # Rare capsule identity (pickup kinds 4..9): sprite/label/colour shared by the
 # ground draw, the collect callout and the off-screen marker. Always index via
@@ -2992,6 +3011,33 @@ func _draw_enemies() -> void:
 				draw_circle(epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
 					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
 			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
+		elif e["kind"] == "technical":
+			# Charging raider: face the LOCKED line mid-charge (the sprite is the
+			# promise), shake + dust while revving, speed streaks while barreling.
+			var t_lunge: int = e.get("lunge_ticks", 0)
+			var t_wu: int = e.get("windup", 0)
+			var t_face := face
+			if t_lunge > 0:
+				t_face = Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0))).angle()
+				var t_dir := Vector2.from_angle(t_face)
+				draw_line(epos - t_dir * 14.0, epos - t_dir * 26.0,
+					Color(0.85, 0.8, 0.7, 0.45), 2.0)
+			elif t_wu > 0:
+				var t_rf := 1.0 - float(t_wu) / float(SimWorld.TECHNICAL_REV_TICKS)
+				epos.x += sin(float(Engine.get_physics_frames()) * 0.9) * (0.6 + t_rf)
+				# The rev line IS the dodge promise: where it points is where it charges.
+				draw_line(epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
+					Color(1.0, 0.45, 0.3, 0.25 + t_rf * 0.45), 1.5)
+			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
+		elif e["kind"] == "pilot":
+			# Downed pilot: the one green thing among hostiles — objective ring +
+			# RESCUE label so "touch, don't shoot" reads across a firefight.
+			var pi_pulse := Art.pulse(0.15)
+			var pi_col := Art.safe(Color(0.45, 1.0, 0.65))
+			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
+				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
+			_spr("m_pilot", epos, -PI / 2, 0.48)
+			Art.text(self, "RESCUE", epos + Vector2(-16, -18), 8, pi_col)
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: real courier bake (the loot pack is in the
 			# sprite now); the pulsing gold ring stays — "catch this one" must
@@ -4299,6 +4345,11 @@ func _draw_objective_markers() -> void:
 		if e["kind"] == "courier":
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
 				"icon": "hud_vehicle", "col": Color(1.0, 0.85, 0.35), "pr": 1})
+		elif e["kind"] == "pilot":
+			# The rescue is an OBJECTIVE, not a threat — green mark, top priority,
+			# so a pilot drifting off-screen is findable before the edge takes him.
+			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
+				"icon": "hud_target", "col": Art.safe(Color(0.45, 1.0, 0.65)), "pr": 1})
 		elif e.get("marked", false):
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
 				"icon": "hud_target", "col": Color(1.0, 0.82, 0.3), "pr": 1})
@@ -4566,7 +4617,8 @@ func _draw_threat_pips() -> void:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
 		var k: String = e["kind"]
-		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone":
+		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone" \
+				and k != "technical":
 			continue
 		var sp := _to_screen(e["x"], e["y"])
 		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:

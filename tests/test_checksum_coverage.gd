@@ -95,7 +95,7 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("colossus", sim.colossus)
 		if not sim.endless_boss.is_empty():
 			_check("boss", sim.endless_boss)
-	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone", "mg_nest"]:
+	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone", "mg_nest", "technical", "pilot"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 
 
@@ -118,6 +118,9 @@ func _stage(kind: String) -> SimWorld:
 	sim._spawn_special(380 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "ghillie")
 	sim._spawn_special(160 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "drone")
 	sim._spawn_mg_nest(500 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE)
+	sim._spawn_special(560 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "technical")
+	sim.enemies.append({"x": 100 * Fixed.ONE, "y": sim.camera_top + 200 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "pilot"})
 	return sim
 
 

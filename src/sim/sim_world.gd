@@ -62,6 +62,20 @@ const DRONE_SPEED := 2 * F_ONE
 # players still ignore it, lower fire_cd toward 80.
 const DRONE_FIRE_CD_TICKS := 100
 const DRONE_WINDUP_TICKS := 24
+# Technical raider (endless-only): the fastest thing on the field. Revs in
+# place, LOCKS a charge line at your position, then barrels down it — it
+# cannot steer mid-charge, so repositioning off the line is the dodge. One
+# round kills it (fragile). Starting values; test: a strafing player at
+# 100px+ must dodge every charge — if charges land on movers, widen REV_TICKS.
+const TECHNICAL_SPEED := 3 * F_ONE            # player is 2.4 px/t — it outruns you on a straight
+const TECHNICAL_REV_TICKS := 30               # rev-up telegraph (same class as MG_NEST_AIM)
+const TECHNICAL_CHARGE_TICKS := 50            # one charge = ~150px of travel
+const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge rhythm)
+# Downed Pilot ransom: a dead gunship's pilot punches out at the crash site and
+# staggers for the enemy line at the TOP edge. TOUCH him to rescue (+ransom);
+# let him cross the edge and he's captured. Shooting him pays NOTHING.
+const PILOT_SPEED := (F_ONE * 4) / 5          # 0.8 px/t — a generous but real chase window
+const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -554,10 +568,19 @@ func _step_players(inputs: Array) -> void:
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
-				if _enemy_strikeable(e) and e["kind"] != "courier" \
-						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
-					_hurt_player(p)
-					break
+				if not _enemy_strikeable(e) or e["kind"] == "courier" \
+						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+					continue
+				if e["kind"] == "pilot":
+					# Reaching the downed pilot RESCUES him — the one touch on
+					# this field that pays instead of kills.
+					e["alive"] = false
+					war_chest += PILOT_RANSOM
+					score += PILOT_RANSOM * 10
+					events.append({"t": "pilot_rescued", "x": e["x"], "y": e["y"], "coin": PILOT_RANSOM})
+					continue
+				_hurt_player(p)
+				break
 
 		# Pickups. Shop crates carry a price paid from the shared War Chest;
 		# an unaffordable crate stays on the ground.
@@ -1054,6 +1077,11 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	if e["kind"] == "courier":
 		coin = COIN_ELITE * 4   # fat bounty for catching the runner
+	if e["kind"] == "pilot":
+		# Gunning down the man you were meant to rescue pays NOTHING — no
+		# chest, no score, no avenge. The corpse is the only receipt.
+		coin = 0
+		no_coin = true
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
@@ -1153,6 +1181,15 @@ func _step_enemies() -> void:
 			continue
 		if flash_ticks > 0:
 			continue   # flashbang: the whole field roster is stunned in place
+		if e["kind"] == "pilot":
+			# Downed pilot: no AI, no target — he just staggers for the enemy
+			# line at the top. Crossing it = captured, ransom forfeit. (Rescue
+			# by touch lives in _step_players; killing him pays nothing.)
+			e["y"] = e["y"] - PILOT_SPEED
+			if e["y"] < camera_top - 30 * F_ONE:
+				e["alive"] = false
+				events.append({"t": "pilot_lost", "x": e["x"], "y": e["y"]})
+			continue
 		if e["kind"] == "frogman":
 			_step_frogman(e)
 			continue
@@ -1183,6 +1220,9 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "drone":
 			_step_drone(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "technical":
+			_step_technical(e, target, dx, dy, dlen)
 			continue
 		if e["kind"] == "mg_nest":
 			_step_mg_nest(e, target, dx, dy, dlen)
@@ -1289,6 +1329,42 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 		e["fire_cd"] = DRONE_FIRE_CD_TICKS
 		e["windup"] = DRONE_WINDUP_TICKS
 		events.append({"t": "drone_windup", "x": e["x"], "y": e["y"]})
+
+
+func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Technical raider (endless-only): rev telegraph → LOCK a charge line at
+	## the target's position → barrel down it at TECHNICAL_SPEED. It cannot
+	## steer mid-charge (repositioning off the line is the dodge), water is a
+	## hard wall to wheels (tank rule — the charge dies at the bank), and an
+	## overshot charge just keeps going (a raider that misses barrels past).
+	## Reuses windup/aim_lx/aim_ly/lunge_ticks/fire_cd — no new hashed field.
+	if e.get("lunge_ticks", 0) > 0:
+		e["lunge_ticks"] = e["lunge_ticks"] - 1
+		var lx: int = e.get("aim_lx", 0)
+		var ly: int = e.get("aim_ly", 0)
+		var llen := Fixed.length(lx, ly)
+		if llen > F_ONE:
+			var prev_x: int = e["x"]
+			var prev_y: int = e["y"]
+			e["x"] = e["x"] + Fixed.mul(Fixed.div(lx, llen), TECHNICAL_SPEED)
+			e["y"] = e["y"] + Fixed.mul(Fixed.div(ly, llen), TECHNICAL_SPEED)
+			if _in_water(e["x"], e["y"]):
+				e["x"] = prev_x
+				e["y"] = prev_y
+				e["lunge_ticks"] = 0   # wheels don't swim
+		return
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			e["aim_lx"] = dx   # the drawn rev line is a promise: charge follows IT, not you
+			e["aim_ly"] = dy
+			e["lunge_ticks"] = TECHNICAL_CHARGE_TICKS
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't line up a charge into smoke
+		e["fire_cd"] = TECHNICAL_LOCK_CD_TICKS
+		e["windup"] = TECHNICAL_REV_TICKS
+		events.append({"t": "technical_rev", "x": e["x"], "y": e["y"]})
 
 
 func _step_frogman(e: Dictionary) -> void:
@@ -1512,6 +1588,8 @@ func _windup_for(kind: String) -> int:
 			return GRENADIER_WINDUP_TICKS
 		"drone":
 			return DRONE_WINDUP_TICKS
+		"technical":
+			return TECHNICAL_REV_TICKS
 	return ELITE_WINDUP_TICKS
 
 
@@ -1773,7 +1851,7 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 8)
+				var roll := rng.range_i(0, 9)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -1791,27 +1869,13 @@ func _step_waves() -> void:
 					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
 				elif roll == 6:
 					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+				elif roll == 7:
+					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
-	elif not enemies.is_empty():
-		# Anti-stall: a passed-by ghillie re-cloaks (bullet-immune) yet stays
-		# alive, holding the wave open until the player backtracks into its
-		# notice radius — a soft-lock they trip without understanding why. When
-		# ONLY cloaked ghillies remain, force the reveal: the wave must always
-		# be finishable from where the player stands.
-		var all_cloaked := true
-		for e in enemies:
-			if not (e["kind"] == "ghillie" and e.get("submerged", false)):
-				all_cloaked = false
-				break
-		if all_cloaked:
-			for e in enemies:
-				e["submerged"] = false
-				e["surface_ticks"] = GHILLIE_REVEAL_TICKS
-				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
-	elif enemies.is_empty() and (endless_boss.is_empty() or not endless_boss["alive"]):
+	elif _wave_hostiles_cleared() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
@@ -1837,6 +1901,31 @@ func _step_waves() -> void:
 		for ci in 3:
 			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
 				"cost": _supply_cost(kinds[ci])})
+	else:
+		# Anti-stall: a passed-by ghillie re-cloaks (bullet-immune) yet stays
+		# alive, holding the wave open until the player backtracks into its
+		# notice radius — a soft-lock they trip without understanding why. When
+		# ONLY cloaked ghillies remain, force the reveal: the wave must always
+		# be finishable from where the player stands.
+		var all_cloaked := not enemies.is_empty()
+		for e in enemies:
+			if not (e["kind"] == "ghillie" and e.get("submerged", false)):
+				all_cloaked = false
+				break
+		if all_cloaked:
+			for e in enemies:
+				e["submerged"] = false
+				e["surface_ticks"] = GHILLIE_REVEAL_TICKS
+				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
+
+
+func _wave_hostiles_cleared() -> bool:
+	## The wave is beaten when no HOSTILE remains — a walking downed pilot is
+	## an optional side objective, never a reason to hold the shop hostage.
+	for e in enemies:
+		if e["kind"] != "pilot":
+			return false
+	return true
 
 
 func _start_wave() -> void:
@@ -2056,6 +2145,11 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
 		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY, "kind": "boss"})
+		# The gunship's pilot punches out at the crash site and staggers for the
+		# enemy line — reach him before the top edge for the ransom.
+		if enemies.size() < MAX_ENEMIES:
+			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot"})
+			events.append({"t": "pilot_down", "x": boss["x"], "y": by})
 
 
 func _step_enemy_bullets() -> void:

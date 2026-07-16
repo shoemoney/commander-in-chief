@@ -102,6 +102,11 @@ const SEED := 0xDEADBEEF
 ## campaign samples match the previous reconcile exactly (every P3b campaign path is torture-inert:
 ## stationary panic-roll needs a neutral stick, buys/specials/boss-HP need progress the 60s torture
 ## never reaches); only the endless stream moved.
+## VERIFIED UNCHANGED (2026-07-16, backlog items 6-7 — Technical raider + Downed Pilot ransom):
+## the endless special roll widens 0..8 → 0..9 (slot 7 = technical) but the endless torture wipes
+## before wave 3; the pilot spawns only on a gunship death the campaign torture never reaches; the
+## wave-clear check now ignores pilots (reordered ahead of the ghillie anti-stall) in states the
+## torture never enters. Proven instead by the three new direct tests in test_mechanics.
 const GOLDEN: Array[int] = [
 	8422831759359552435,
 	7568204556783353249,
