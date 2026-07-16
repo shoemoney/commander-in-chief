@@ -140,6 +140,7 @@ const _KIND_TEACH := {
 	"shield": "RIOT SHIELD — FLANK OR GRENADE",
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
 	"sapper": "SAPPER — MIND THE MINE TRAIL",
+	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
