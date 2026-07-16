@@ -2541,10 +2541,17 @@ func _draw_barrels() -> void:
 		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
 		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
 		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
-		# Blast-radius ring: grenades telegraph their kill circle (the ONLY other
-		# radius damage) and barrels share the same GRENADE_RADIUS — show it.
-		draw_arc(bp, SimWorld.GRENADE_RADIUS * PX, 0, TAU, 24,
-			Color(1.0, 0.45, 0.15, 0.10 + wb * 0.06), 1.0)
+		# Blast-radius ring: shares GRENADE_RADIUS with the player's grenade circle,
+		# but a chained barrel HURTS YOU inside it (the grenade never does) — so draw
+		# it as a DASHED RED hazard ring (mine/danger grammar), not the friendly
+		# smooth-orange kill circle, to flag "opposite consequence".
+		var br := SimWorld.GRENADE_RADIUS * PX
+		var brc := Color(1.0, 0.2, 0.15, 0.5 + wb * 0.3)
+		for di in range(20):   # every-other-segment dashes read as a hazard boundary
+			if di % 2 == 1:
+				continue
+			var a0 := TAU * di / 20.0
+			draw_arc(bp, br, a0, a0 + TAU / 20.0, 3, brc, 1.4)
 		# Non-color danger cue: hue-blind players got only orange — the "!" pip
 		# carries "live ordnance" on the shape channel (destructive-row grammar).
 		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
