@@ -7,7 +7,9 @@ extends Control
 
 enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO }
 
-const BTN := Vector2(190, 36)
+# 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
+# 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
+const BTN := Vector2(222, 36)
 
 var mode: int = Mode.TITLE
 var sel := 0
@@ -25,6 +27,12 @@ var _stick_rep := 0.0   # countdown to the next held-stick auto-repeat step
 var _nav_frame := -1    # frame stamp: one stick nav per frame (diagonal guard)
 var _confirm_t := 0.0   # armed destructive row disarms when this runs out
 var _filter_pulse := 0.0   # hall filter tab flash on change
+var _key_move := 0      # held up/down key direction (hold-repeat, mirrors stick)
+var _key_rep := 0.0     # countdown to the next held-key auto-repeat step
+var _lockout := 0.0     # post-disconnect confirm lockout (flailing pad guard)
+
+# Row ids that flip on left/right without a confirm press.
+const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist"]
 
 
 func _ready() -> void:
@@ -36,6 +44,9 @@ func _ready() -> void:
 func _on_joy_changed(_device: int, connected: bool) -> void:
 	if not connected and mode == Mode.HIDDEN and main != null and main.sim != null:
 		open(Mode.PAUSE)
+		# A pad yanked mid-flail can spray phantom presses — ignore
+		# confirm/activate for a beat so nothing destructive can fire.
+		_lockout = 0.25
 
 
 func _process(delta: float) -> void:
@@ -46,7 +57,9 @@ func _process(delta: float) -> void:
 			_confirm_t -= delta
 			if _confirm_t <= 0.0:
 				_confirm = -1
-		_filter_pulse = maxf(0.0, _filter_pulse - delta * 3.0)
+		_lockout = maxf(0.0, _lockout - delta)
+		# Tab flash is pure animation — reduce-motion snaps it off entirely.
+		_filter_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _filter_pulse - delta * 3.0)
 		# Held-stick auto-repeat: first step fired in _unhandled_input, then
 		# after 0.35 s held it steps every 0.12 s (framerate-independent).
 		if _stick_x != 0 or _stick_y != 0:
@@ -54,6 +67,12 @@ func _process(delta: float) -> void:
 			if _stick_rep <= 0.0:
 				_stick_rep = 0.12
 				_nav(_stick_y, _stick_x)
+		# Held up/down KEYS get the same repeat cadence as the stick.
+		if _key_move != 0:
+			_key_rep -= delta
+			if _key_rep <= 0.0:
+				_key_rep = 0.12
+				_nav(_key_move, 0)
 		# Exp-decay easing: framerate-independent (per-frame lerpf ran ~2.4x
 		# faster on a 144Hz display). Reduce-motion snaps both instantly.
 		if main._motion < 0.5:
@@ -64,6 +83,8 @@ func _process(delta: float) -> void:
 			_open_t = lerpf(_open_t, 1.0, 1.0 - exp(-20.0 * delta))
 			if _sel_target >= 0.0:
 				_sel_y = lerpf(_sel_y, _sel_target, 1.0 - exp(-22.0 * delta))
+				if absf(_sel_y - _sel_target) < 1.0:
+					_sel_y = _sel_target   # snap: sub-pixel drift shimmers the pixel font
 		queue_redraw()   # pulse + glide + open-settle animate every frame while open
 
 
@@ -78,6 +99,7 @@ func open(m: int) -> void:
 	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
 	_sel_target = -1.0
 	_open_t = 0.0   # replay the open settle
+	_key_move = 0   # a key held across the transition must not auto-repeat here
 	queue_redraw()
 
 
@@ -149,12 +171,27 @@ func _unhandled_input(ev: InputEvent) -> void:
 	var back := false
 	if ev is InputEventKey and ev.pressed and not ev.echo:
 		match ev.keycode:
-			KEY_W, KEY_UP: move = -1
-			KEY_S, KEY_DOWN: move = 1
+			KEY_W, KEY_UP:
+				move = -1
+				_key_move = -1
+				_key_rep = 0.35   # same hold-repeat cadence as the stick
+			KEY_S, KEY_DOWN:
+				move = 1
+				_key_move = 1
+				_key_rep = 0.35
 			KEY_A, KEY_LEFT: hmove = -1
 			KEY_D, KEY_RIGHT: hmove = 1
 			KEY_ENTER, KEY_SPACE: act = true
 			KEY_ESCAPE: back = true
+	elif ev is InputEventKey and not ev.pressed:
+		# Release clears the hold-repeat latch (repeat itself runs in _process).
+		match ev.keycode:
+			KEY_W, KEY_UP:
+				if _key_move == -1:
+					_key_move = 0
+			KEY_S, KEY_DOWN:
+				if _key_move == 1:
+					_key_move = 0
 	elif ev is InputEventJoypadButton and ev.pressed:
 		match ev.button_index:
 			JOY_BUTTON_DPAD_UP: move = -1
@@ -198,6 +235,10 @@ func _unhandled_input(ev: InputEvent) -> void:
 			_stick_y = latch
 		else:
 			_stick_x = latch
+		# Both axes back in the deadband = fresh gesture: clear the one-nav-per-
+		# frame stamp so a released-then-repushed diagonal can't wedge nav.
+		if _stick_x == 0 and _stick_y == 0:
+			_nav_frame = -1
 
 	if mode == Mode.HIDDEN:
 		if back:
@@ -215,17 +256,20 @@ func _unhandled_input(ev: InputEvent) -> void:
 				_confirm = -1
 				queue_redraw()
 		return
-	if ev is InputEventMouseButton and ev.pressed:
+	if ev is InputEventMouseButton:
+		# Menus swallow EVERY click, hit or miss, press or release — a stray
+		# click through an open menu must never bleed into gameplay.
+		get_viewport().set_input_as_handled()
+		if not ev.pressed:
+			return
 		if ev.button_index == MOUSE_BUTTON_LEFT:
 			var crow := _row_at(ev.position)
 			if crow >= 0:
 				sel = crow
 				_press()
-				get_viewport().set_input_as_handled()
 				queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_nav(-1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1, 0)
-			get_viewport().set_input_as_handled()
 		return
 	if move != 0 or hmove != 0:
 		_nav(move, hmove)
@@ -246,8 +290,14 @@ func _nav(move: int, hmove: int) -> void:
 	# Hall of Fame: left/right cycles the mode filter (ALL / CAMPAIGN / ENDLESS).
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
-		_filter_pulse = 1.0
+		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 		main._sfx.play("pickup", -14.0, 1.3)
+		queue_redraw()
+		return
+	# Left/right on a toggle row flips it directly — no confirm press needed
+	# (same activation path, so save/sfx behavior stays identical).
+	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in _TOGGLES:
+		_activate()
 		queue_redraw()
 		return
 	if move == 0:
@@ -262,6 +312,8 @@ func _nav(move: int, hmove: int) -> void:
 
 
 func _press() -> void:
+	if _lockout > 0.0:
+		return   # disconnect just auto-paused — swallow phantom confirms
 	# Destructive items need a second press (mis-press guard on a run).
 	if _is_destructive(sel) and _confirm != sel:
 		_confirm = sel
@@ -441,12 +493,36 @@ func _draw() -> void:
 		var label: String = items[k]
 		if k < mitems.size() and mitems[k].get("destructive", false):
 			label += "  !"   # non-color destructive cue (hue alone fails protan players)
+		var label_r := r.end.x - 8.0   # label right bound (shrinks for the confirm glyph)
 		if _confirm == k:
-			label = "PRESS AGAIN TO CONFIRM"
+			# "TO CONFIRM" is now said by the glyph + countdown bar — the full
+			# string measured 197px and never actually fit the 190px button.
+			label = "PRESS AGAIN"
 			col = Color(1.0, 0.5, 0.4)
-		# Center on the actual cell, not the gap (the two drifted apart in the
-		# spacious few-items layout).
-		_center_text(label, r.position.y + bh / 2.0 + 4.0, 11, col)
+			# Armed state reads without the text: warm plate tint, a countdown
+			# bar draining along the bottom edge, and the device confirm glyph.
+			draw_rect(r.grow(-3), Color(0.75, 0.28, 0.12, 0.4))
+			draw_rect(Rect2(r.position.x + 3.0, r.end.y - 5.0,
+				(r.size.x - 6.0) * clampf(_confirm_t / 2.5, 0.0, 1.0), 2.0),
+				Color(1.0, 0.62, 0.3, 0.95))
+			var ct := Art.tex(Art.glyph_key("confirm"))
+			var cw := 12.0 * float(ct.get_width()) / float(ct.get_height())
+			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0,
+				r.position.y + (bh - 12.0) / 2.0, cw, 12.0), false)
+			label_r = r.end.x - cw - 10.0
+		# Fixed icon gutter: iconless rows indent the same, so every label
+		# left-aligns to one column. Overlong labels ellipsize inside the button.
+		var lx := r.position.x + 30.0
+		Art.text(self, _ellipsize(label, 11, label_r - lx),
+			Vector2(lx, r.position.y + bh / 2.0 + 4.0), 11, col)
+		if mitems[k]["id"] == "paste_seed":
+			# Where the seed comes from — the row name alone didn't say.
+			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0,
+				r.position.y + bh / 2.0 + 3.0), 8, Color(0.84, 0.86, 0.78, 0.75))
+		if selected:
+			# 1px focus ring on the actual row rect — always crisp and present,
+			# independent of the glow glide, for keyboard/pad a11y.
+			draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)
 	if mode == Mode.TITLE:
 		# Legend adapts to the last-used device and draws the REAL prompt art
 		# (stick/trigger/mouse glyphs from the registry) beside each verb —
@@ -479,6 +555,7 @@ func _draw_back_button() -> void:
 	var r := Rect2(Vector2(320 - BTN.x / 2.0, 316), BTN * Vector2(1, 0.7))
 	draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 	draw_texture_rect(Art.tex("ui_menu_button_sel"), r.grow(3), false, Color(1.0, 0.9, 0.4, 0.95))
+	draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)   # focus ring (only row here)
 	_center_text("BACK", r.position.y + 16.0, 11, Color(1.0, 0.95, 0.75))
 
 
@@ -498,9 +575,13 @@ func _draw_hall() -> void:
 	var x := 320.0 - total / 2.0
 	for i in names.size():
 		var on := i == _hall_filter
-		var col := Color(1.0, 0.92, 0.55) if on else Color(0.6, 0.66, 0.56, 0.8)
+		var col := Color(1.0, 0.95, 0.65) if on else Color(0.6, 0.66, 0.56, 0.8)
 		if on and _filter_pulse > 0.0:
 			col = col.lightened(_filter_pulse * 0.45)
+		if on:
+			# Filled plate under the live tab — the underline alone read as
+			# decoration, not state, next to two equally-bright neighbors.
+			draw_rect(Rect2(x - 4.0, 54.0, tw[i] + 8.0, 16.0), Color(0.05, 0.08, 0.04, 0.9))
 		Art.text(self, names[i], Vector2(x, 66), 10, col)
 		if on:
 			draw_rect(Rect2(x - 2.0, 70.0, tw[i] + 4.0, 2.0),
@@ -512,43 +593,58 @@ func _draw_hall() -> void:
 		var gw := 13.0 * float(t.get_width()) / float(t.get_height())
 		draw_texture_rect(t, Rect2(320.0 - total / 2.0 - gw - 12.0, 56.0, gw, 13.0), false)
 	else:
-		Art.text(self, "◄", Vector2(320.0 - total / 2.0 - 18.0, 66), 10, Color(0.7, 0.75, 0.6))
-		Art.text(self, "►", Vector2(320.0 + total / 2.0 + 8.0, 66), 10, Color(0.7, 0.75, 0.6))
+		Art.text(self, "◄", Vector2(320.0 - total / 2.0 - 18.0, 66), 10, Color(0.84, 0.86, 0.78))
+		Art.text(self, "►", Vector2(320.0 + total / 2.0 + 8.0, 66), 10, Color(0.84, 0.86, 0.78))
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows: Array = []
 	for run in main.hall:
-		if _hall_filter == 1 and run["mode"] == "endless":
+		# .get fallbacks everywhere a hall row is read — old save files
+		# predate some keys and must not crash the board.
+		if _hall_filter == 1 and run.get("mode", "campaign") == "endless":
 			continue
-		if _hall_filter == 2 and run["mode"] != "endless":
+		if _hall_filter == 2 and run.get("mode", "campaign") != "endless":
 			continue
 		rows.append(run)
 	if rows.is_empty():
 		_center_text("NO %s RUNS YET — GO EARN YOUR PLACE" % names[_hall_filter], 170, 11,
 			Color(0.8, 0.84, 0.74))
 		return
-	# Fixed x offsets per column — Art.font() is proportional, so
-	# space-padded strings stagger; each column draws at its own x instead.
-	# Spread for PixelOperator8 — it runs ~15% wider per glyph than the old
-	# vector fallback, and MODE ("CAMPAIGN") was kissing REACHED at 306.
-	var col_x := [112, 148, 226, 316, 414]
+	# Measured column layout — Art.font() is proportional, so each column draws
+	# at its own x. MODE/REACHED/STREAK x-starts come from the widest possible
+	# header/cell at draw size + 14px gutters, after the right-aligned SCORE
+	# column (right edge 214); hardcoded offsets drifted on every font change.
+	var mode_w := f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	mode_w = maxf(mode_w, f.get_string_size("CAMPAIGN", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	for s in ["SECTOR 9", "VICTORY", "WAVE 99"]:
+		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	var streak_x := 214.0 + 14.0 + mode_w + 14.0 + reach_w + 14.0
+	var col_x := [112.0, 148.0, 214.0 + 14.0, 214.0 + 14.0 + mode_w + 14.0, streak_x]
 	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
 	for c in headers.size():
 		if c == 1:
-			var hw := Art.font().get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(0.7, 0.75, 0.6))
+			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(0.84, 0.86, 0.78))
 		else:
-			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.7, 0.75, 0.6))
+			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.84, 0.86, 0.78))
 	for i in mini(rows.size(), 8):
 		var run: Dictionary = rows[i]
-		var mode_s: String = "ENDLESS" if run["mode"] == "endless" else "CAMPAIGN"
-		var reached: String = "WAVE %d" % run["wave"] if run["mode"] == "endless" \
-			else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run["sector"])
+		var mode_s: String = "ENDLESS" if run.get("mode", "campaign") == "endless" else "CAMPAIGN"
+		var reached: String = "WAVE %d" % run.get("wave", 0) if run.get("mode", "campaign") == "endless" \
+			else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run.get("sector", 0))
 		var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
 		var tag: String = "  *DAILY" if run.get("daily", false) else ""
 		if run.get("assist", false):
 			tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
+		var streak_s := "x%d%s" % [run.get("streak", 0), tag]
+		if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > 628.0:
+			# Cell would run off the frame — abbreviate the tags for this row.
+			tag = ("  *D" if run.get("daily", false) else "")
+			if run.get("assist", false):
+				tag += "  *A"
+			streak_s = "x%d%s" % [run.get("streak", 0), tag]
 		var y := 112 + i * 24
-		var cells := [str(i + 1), str(run["score"]), mode_s, reached, "x%d%s" % [run["streak"], tag]]
+		var cells := [str(i + 1), str(run.get("score", 0)), mode_s, reached, streak_s]
 		for c in cells.size():
 			if c == 1:
 				# Right-aligned numerals: a 6-digit endless score can't crowd MODE.
@@ -564,14 +660,16 @@ func _draw_howto() -> void:
 	var lines := [
 		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
 		[hold_pre, Color(0.85, 0.9, 0.8)],
-		["", Color.WHITE],
-		# Re-wrapped for the wider pixel font: >64 chars clips at x=640.
-		["GRENADES crack armor — bunkers, bosses, the Colossus.", Color(0.9, 0.92, 0.8)],
-		["Bullets don't. ROLL to dodge. BOARD tanks for crush + shells.", Color(0.9, 0.92, 0.8)],
-		["", Color.WHITE],
 	]
 	for i in lines.size():
 		Art.text(self, lines[i][0], Vector2(60, 70 + i * 18), 11, lines[i][1])
+	# Verb lines carry the actual input glyph inline (device-aware), like the
+	# wheel line below — text-only verbs made players hunt the legend.
+	# Re-wrapped for the wider pixel font: >64 chars clips at x=640.
+	_verb_line(["@grenade", "GRENADES crack armor — bunkers, bosses, the Colossus."],
+		124.0, Color(0.9, 0.92, 0.8))
+	_verb_line(["Bullets don't. ", "@roll", "ROLL to dodge. ", "@interact",
+		"BOARD tanks for crush + shells."], 142.0, Color(0.9, 0.92, 0.8))
 	# The supply-wheel hold prompt is the DEVICE GLYPH, not a key-name string.
 	var px := 60.0 + Art.font().get_string_size(hold_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 9.0
 	Art.draw_glyph(self, "wheel", Vector2(px, 84.0), 12.0)
@@ -600,6 +698,42 @@ func _draw_howto() -> void:
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, 320.0, y, size, col)
+
+
+# Trim a label to max_w with a trailing ellipsis (raw clipping ate whole glyphs
+# mid-character; dynamic labels like the seed row can outgrow the button).
+func _ellipsize(txt: String, size: int, max_w: float) -> String:
+	var f := Art.font()
+	if f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+		return txt
+	var ell := "…" if f.has_char(0x2026) else "..."
+	while txt.length() > 1 and f.get_string_size(txt + ell, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+		txt = txt.substr(0, txt.length() - 1)
+	return txt + ell
+
+
+# One howto line at x=60: "@action" segments draw the device glyph inline,
+# plain segments draw as text; x flows left to right (same measure-then-place
+# pattern as the wheel line above).
+func _verb_line(segs: Array, base_y: float, col: Color) -> void:
+	var f := Art.font()
+	var x := 60.0
+	for seg: String in segs:
+		if seg.begins_with("@"):
+			var action := seg.substr(1)
+			if action == "grenade" or action == "fire":
+				# No Art.draw_glyph entry for these — use the device hint art
+				# (mouse button / trigger sprite), aspect preserved.
+				var t := Art.tex(Art.glyph_key(action))
+				var gw := 12.0 * float(t.get_width()) / float(t.get_height())
+				draw_texture_rect(t, Rect2(x, base_y - 10.0, gw, 12.0), false)
+				x += gw + 4.0
+			else:
+				Art.draw_glyph(self, action, Vector2(x + 6.0, base_y - 4.0), 12.0)
+				x += 16.0
+		else:
+			Art.text(self, seg, Vector2(x, base_y), 11, col)
+			x += f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 
 
 const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)

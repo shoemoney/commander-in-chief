@@ -24,11 +24,22 @@ func _ready() -> void:
 	_plate_ci = RenderingServer.canvas_item_create()
 	RenderingServer.canvas_item_set_parent(_plate_ci, get_canvas_item())
 	RenderingServer.canvas_item_set_z_index(_plate_ci, -1)
+	RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE and _plate_ci.is_valid():
-		RenderingServer.free_rid(_plate_ci)
+	if not _plate_ci.is_valid():
+		return
+	match what:
+		# PREDELETE fires on every Object destruction (free/queue_free), in or
+		# out of the tree — so an _exit_tree-then-free path still lands here.
+		NOTIFICATION_PREDELETE:
+			RenderingServer.free_rid(_plate_ci)
+			_plate_ci = RID()
+		# Sync plate visibility only when it can actually change (show/hide or
+		# tree membership), never per-frame.
+		NOTIFICATION_VISIBILITY_CHANGED, NOTIFICATION_ENTER_TREE, NOTIFICATION_EXIT_TREE:
+			RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
 
 
 ## Pulse decay + rollup catch-up step here, delta-scaled — they used to tick
@@ -63,8 +74,15 @@ func _mblink(period: int) -> bool:
 
 func _draw() -> void:
 	if main == null or main.sim == null:
+		# No sim to size the plate against — clear it so no stale panel lingers.
+		if _plate_ci.is_valid():
+			RenderingServer.canvas_item_clear(_plate_ci)
 		return
 	var sim: SimWorld = main.sim
+	# REDUCE MOTION: the value rollup still runs (_process), but the visual
+	# pulse (scale-thump + gold color lerp) holds at 0 — no animated flash.
+	var chest_pulse: float = 0.0 if main._motion < 0.5 else _chest_pulse
+	var score_pulse: float = 0.0 if main._motion < 0.5 else _score_pulse
 	# Shop preview strip adds one row while the SHOP OPEN window is live, so
 	# the buy list is readable without holding the spend-wheel open.
 	var shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
@@ -84,9 +102,9 @@ func _draw() -> void:
 	var x := 8.0
 	var y := 6.0
 	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse), _chest_pulse)
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
 	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse), _score_pulse)
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:
@@ -351,7 +369,7 @@ func _accessibility_pips() -> void:
 		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
 		acc_y += 11.0
 	if main._motion < 0.5:
-		_text("RM", RIGHT - _tw("RM"), acc_y, Color(0.75, 0.95, 0.7, 0.85))
+		_text("RM", RIGHT - _tw("RM"), acc_y, Art.safe(Color(0.75, 0.95, 0.7, 0.85)))
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
@@ -373,7 +391,9 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 ## visibly rolls up over a few frames instead of teleporting to the new value.
 func _rollup(disp: float, target: float, delta: float) -> float:
 	var diff := target - disp
-	if absf(diff) < 0.6:
+	# Threshold snap: a gap past 1000 (huge payout, restart) teleports instead
+	# of a multi-second rollup that would lag the whole readout.
+	if absf(diff) < 0.6 or absf(diff) > 1000.0:
 		return target
 	return disp + diff * (1.0 - exp(-9.7 * delta))   # ~0.15/frame at 60 Hz
 
