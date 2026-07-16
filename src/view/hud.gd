@@ -277,10 +277,6 @@ func _draw() -> void:
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
 	# can manage — it climbs while the camera isn't advancing, drains on push.
 	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
-		# The punishment telegraph outranks vanity chips: on a full row the
-		# gauge's fixed 94px footprint ran off the 640px viewport — clamp it
-		# back over the tail of whatever optional chip came before.
-		x = minf(x, RIGHT - 94.0)
 		# A closed gate/boss/colossus pinning the camera means advancing is
 		# impossible until the fight is won — the "advance!" PRESSURE read would be
 		# lying, so swap it for the real objective and drop the climbing fill.
@@ -290,15 +286,25 @@ func _draw() -> void:
 					and g["y"] >= sim.camera_top:
 				gate_locked = true
 				break
+		# The punishment telegraph outranks vanity chips: clamp back over the
+		# tail of whatever optional chip came before, by MEASURED width — the
+		# old fixed 94px was narrower than both the 'PRESSURE'+bar row (the
+		# bar's dark well overpainted the label's last ~22px) and 'CLEAR THE
+		# GATE' (115px, which ran past the 640px viewport on a full row).
 		if gate_locked:
+			var gtxt := "CLEAR THE GATE"
+			x = minf(x, RIGHT - _tw(gtxt))
 			var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-			_text("CLEAR THE GATE", x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+			_text(gtxt, x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+			row_r = x + _tw(gtxt)
 		else:
+			var pw := _tw("PRESSURE") + 4.0
+			x = minf(x, RIGHT - (pw + 48.0))
 			var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
 			_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
-			_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
+			_mini_bar(Rect2(x + pw, y + 2, 46, 9), pf,
 				Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
-		row_r = x + 94.0
+			row_r = x + pw + 48.0
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame.
