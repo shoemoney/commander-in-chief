@@ -4840,7 +4840,9 @@ func _draw_wheel() -> void:
 			Rect2(Vector2.ZERO, pcell), Color(0.72, 0.78, 0.7, 0.92))
 		# Center hub: the fuel-cap ring framing the War Chest itself — this
 		# wheel drains the same pool that funds revives.
-		_spr("ui_dial_fuel", c, 0.0, 34.0 / 600.0)
+		# Scale off the imported size, not the 600px source — dial_fuel imports
+		# at size_limit=64 now (it never draws bigger than 34px).
+		_spr("ui_dial_fuel", c, 0.0, 34.0 / Art.tex("ui_dial_fuel").get_size().x)
 		var f := Art.font()
 		var chest := str(sim.war_chest)
 		var cw := f.get_string_size(chest, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
@@ -4861,7 +4863,8 @@ func _draw_wheel() -> void:
 				sock_mod = Color(1.3, 1.18, 0.7) if afford else Color(1.2, 0.6, 0.55)
 			# Eased 31→38 pop on the picked socket (pop advances in _update_wheel).
 			var pop: float = float(_wheel[i].get("pop", 1.0)) if selected else 0.0
-			_spr("ui_wheel_socket", ipos, ang + PI / 2.0, lerpf(31.0, 38.0, pop) / 512.0, sock_mod)
+			_spr("ui_wheel_socket", ipos, ang + PI / 2.0,
+				lerpf(31.0, 38.0, pop) / Art.tex("ui_wheel_socket").get_size().x, sock_mod)
 			var icon_mod := Color.WHITE if afford else Color(0.8, 0.35, 0.35, 0.55)
 			var isz := lerpf(14.0, 18.0, pop)
 			draw_texture_rect(Art.tex(item["icon"]),
