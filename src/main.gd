@@ -177,6 +177,9 @@ var _menu := GameMenu.new()
 
 
 func _ready() -> void:
+	# draw_texture_rect(tile=true) silently edge-clamps unless the canvas item
+	# enables repeat — the 640px river banks were one stretched sand column.
+	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 	add_child(_sfx)
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
@@ -316,6 +319,9 @@ func _paint_bg(canvas: Node2D) -> void:
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
 	var march := _sector_march()
+	# Two passes (all grass, then dirt) instead of interleaving: keeps the 80
+	# same-texture grass draws one batch instead of ~13. Z-order is unchanged
+	# (dirt still lands on top of every grass tile).
 	for ty in 8:
 		for tx in 10:
 			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
@@ -323,7 +329,11 @@ func _paint_bg(canvas: Node2D) -> void:
 			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
 			canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
 				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
+	for ty in 8:
+		for tx in 10:
+			var h := Art.cell_hash(tx, base_iy + ty)
 			if h % 6 == 0:
+				var pos := Vector2(tx * 64.0, oy + ty * 64.0)
 				canvas.draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
 					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
 
@@ -1781,6 +1791,11 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 
 # 4 diagonal offsets cover both axes at once — visually ≈ the old 8-neighbor rim
 # at half the draw calls (~60 of 90 textures are outlined; this is the hot loop).
+const _SKYLINE_X: Array[float] = [80.0, 118.0, 150.0, 468.0, 520.0, 560.0]
+const _SKYLINE_H: Array[float] = [26.0, 34.0, 22.0, 30.0, 40.0, 24.0]
+# Axis-aligned text outline (floattext) — hoisted like _OUTLINE_OFFSETS below.
+const _TEXT_OUTLINE_OFFSETS: Array[Vector2] = [
+	Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]
 const _OUTLINE_OFFSETS: Array[Vector2] = [
 	Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1),
 ]
@@ -1941,8 +1956,8 @@ func _draw_skyglow() -> void:
 	if march > 0.6:
 		var sa := clampf((march - 0.6) / 0.4, 0.0, 1.0) * 0.7
 		var sky := Color(0.05, 0.04, 0.05, sa)
-		var stx := [80.0, 118.0, 150.0, 468.0, 520.0, 560.0]
-		var sth := [26.0, 34.0, 22.0, 30.0, 40.0, 24.0]
+		var stx := _SKYLINE_X   # const — was two array literals rebuilt every finale frame
+		var sth := _SKYLINE_H
 		for k in stx.size():
 			draw_rect(Rect2(stx[k], 0.0, 14.0, sth[k]), sky)
 		draw_line(Vector2(300, 0), Vector2(300, 46), sky, 2.0)
@@ -3027,7 +3042,7 @@ func _draw_fx() -> void:
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
-			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
+			for od in _TEXT_OUTLINE_OFFSETS:
 				draw_string(ThemeDB.fallback_font, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
 			draw_string(ThemeDB.fallback_font, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
