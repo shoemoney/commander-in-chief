@@ -3143,7 +3143,7 @@ func _draw_enemies() -> void:
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
 			# RESCUE label so "touch, don't shoot" reads across a firefight.
-			var pi_pulse := Art.pulse(0.15)
+			var pi_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)   # steady-bright under reduce-motion, like its courier sibling
 			var pi_col := Art.safe(Color(0.45, 1.0, 0.65))
 			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
