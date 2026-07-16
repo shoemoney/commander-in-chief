@@ -33,6 +33,7 @@ var _watching := false            # Watch Last Run playback mode
 var _watch_replay: Replay = null
 var _watch_frame := 0
 var _replay_saved := false        # save the replay once per run, at the debrief
+var _replay_task := -1            # WorkerThreadPool id of the async replay write
 var _two_players := false
 var _endless := false
 var _daily := false              # seed-of-the-day challenge run
@@ -48,6 +49,7 @@ var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under unit
 var _hulks: Array[Dictionary] = []    # dead-tank wrecks, persistent (view-only pool)
 var _tank_alive_prev := {}            # per-tank-index prev alive flag (edge-detects the death)
 var _cursor_styled := false           # custom OS cursor active (menus/debrief only)
+var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
@@ -84,6 +86,7 @@ var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play u
 var _scan_mat: ShaderMaterial        # CRT scanline quad material; strength pulses on hitstop
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
+var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot] last sent to the shader
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
 var _music_hold := 0             # held-breath drum dropout before a big beat
@@ -213,8 +216,11 @@ func _ready() -> void:
 	# player aim device, LMB fires). Restyle it as a small crosshair baked from
 	# the game's own reticle art — menus keep a working, clickable pointer.
 	var cur_img := Art.tex("ui_reticle").get_image()
+	if cur_img.is_compressed():
+		cur_img.decompress()   # reticle ships VRAM-compressed; resize needs raw pixels
 	cur_img.resize(24, 24, Image.INTERPOLATE_LANCZOS)
-	Input.set_custom_mouse_cursor(ImageTexture.create_from_image(cur_img),
+	_cursor_crosshair = ImageTexture.create_from_image(cur_img)
+	Input.set_custom_mouse_cursor(_cursor_crosshair,
 		Input.CURSOR_ARROW, Vector2(12, 12))
 	_reset()
 	if OS.has_feature("movie"):
@@ -291,6 +297,7 @@ func _setup_water() -> void:
 		r.material = m
 		add_child(r)
 		_water_rects.append(r)
+		_water_pushed.append([-1, -1.0])
 	# Warm the water shader too (same first-draw compile hitch as screen_fx):
 	# show one rect as a 1px off-screen-bottom sliver for the boot frame —
 	# _sync_water repositions or hides it on the first real draw.
@@ -318,17 +325,24 @@ func _sync_water() -> void:
 		if wy > 360.0 or wy + SimWorld.WATER_H * PX < 0.0:
 			continue   # band fully off-screen
 		var rect := _water_rects[vis]
+		var pushed: Array = _water_pushed[vis]
 		vis += 1
 		rect.visible = true
 		rect.position = Vector2(0.0, wy)
 		rect.size = Vector2(640.0, SimWorld.WATER_H * PX)
-		var mat: ShaderMaterial = rect.material
-		mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
-		mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
-		# De-sync ripples per band: derive a stable phase from the band's world y.
-		mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
-		mat.set_shader_parameter("shallow_col", w_shallow)
-		mat.set_shader_parameter("deep_col", w_deep)
+		# All five uniforms are constant per band + soot level, and each
+		# set_shader_parameter dirties the material. Re-push only when this pool
+		# rect is re-assigned to a different band or the sector soot moves.
+		if pushed[0] != w["y"] or absf(pushed[1] - wsoot) > 0.004:
+			pushed[0] = w["y"]
+			pushed[1] = wsoot
+			var mat: ShaderMaterial = rect.material
+			mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
+			mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
+			# De-sync ripples per band: derive a stable phase from the band's world y.
+			mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
+			mat.set_shader_parameter("shallow_col", w_shallow)
+			mat.set_shader_parameter("deep_col", w_deep)
 	for i in range(vis, _water_rects.size()):
 		_water_rects[i].visible = false
 
@@ -343,9 +357,14 @@ func _paint_bg(canvas: Node2D) -> void:
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
 	var march := _sector_march()
-	# Two passes (all grass, then dirt) instead of interleaving: keeps the 80
-	# same-texture grass draws one batch instead of ~13. Z-order is unchanged
-	# (dirt still lands on top of every grass tile).
+	# Two passes (all grass, then all dirt): interleaving the dirt patches split
+	# the 80-rect grass run into ~27 texture-switch batches (~20 extra draw calls
+	# per frame). One hash pass: dirt rects are collected during the grass loop
+	# and drawn after. Dirt widths are clamped to their tile so the deferred
+	# draws stay pixel-identical to the old order, where the next column's
+	# grass painted over any bleed.
+	var dirt_rects: Array[Rect2] = []
+	var dirt_col := Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7)   # churned dirt, cinders late
 	for ty in 8:
 		for tx in 10:
 			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
@@ -355,13 +374,12 @@ func _paint_bg(canvas: Node2D) -> void:
 			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
 			canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
 				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
-	for ty in 8:
-		for tx in 10:
-			var h := Art.cell_hash(tx, base_iy + ty)
 			if h % 6 == 0:
-				var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
-				canvas.draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
-					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
+				var doff := Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7))
+				dirt_rects.append(Rect2(pos + doff,
+					Vector2(minf(40.0 + float(h % 5) * 6.0, 64.0 - doff.x), 34.0 + float(h % 4) * 6.0)))
+	for r in dirt_rects:
+		canvas.draw_texture_rect(Art.tex("dirt"), r, false, dirt_col)
 
 
 func _process(_delta: float) -> void:
@@ -459,6 +477,7 @@ func start_watch() -> void:
 
 
 func _reset() -> void:
+	_flush_bests()   # a run torn down without a debrief still banks its records
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
 	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
@@ -608,6 +627,21 @@ func _copy_share_text() -> void:
 	_show_banner("COPIED TO CLIPBOARD")
 
 
+func _flush_bests() -> void:
+	# Bests ratchet in memory during play; this is the only place they hit disk
+	# outside _record_run. Called from _reset (covers restart/new game/attract
+	# rollover) and _exit_tree (covers app quit).
+	if _best_dirty:
+		_best_dirty = false
+		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
+
+
+func _exit_tree() -> void:
+	_flush_bests()
+	if _replay_task != -1:
+		WorkerThreadPool.wait_for_task_completion(_replay_task)
+
+
 func _notification(what: int) -> void:
 	# One-death sim: alt-tabbing away keeps sim.step() ticking blind and hands the
 	# player a death that reads as a bug, not a loss. Auto-open pause the instant the
@@ -629,8 +663,9 @@ func _update_cursor() -> void:
 	if styled == _cursor_styled:
 		return
 	_cursor_styled = styled
-	Input.set_custom_mouse_cursor(Art.tex("ui_cursor") if styled else null,
-		Input.CURSOR_ARROW, Vector2(2, 2))
+	# Restore the gameplay crosshair (not null → the OS arrow) on menu close.
+	Input.set_custom_mouse_cursor(Art.tex("ui_cursor") if styled else _cursor_crosshair,
+		Input.CURSOR_ARROW, Vector2(2, 2) if styled else Vector2(12, 12))
 
 
 func _physics_process(_delta: float) -> void:
@@ -988,10 +1023,8 @@ func _ev_shot(ev: Dictionary) -> void:
 		"y": ev["y"] + int(shooter["aim_y"] * 13),
 		"t": 0.0, "kind": "muzzle", "rate": 0.34,
 		"a": aim.angle() + randf_range(-0.09, 0.09), "szj": randf_range(0.82, 1.18)})
-	# Textured muzzle bloom (legacy art Particle_FX soft-spot) under the line flash.
-	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 12), "y": ev["y"] + int(shooter["aim_y"] * 12),
-		"t": 0.0, "kind": "tex", "tex": "fx_softspot", "sz": 12.0, "grow": 0.5, "fade": 1.7,
-		"rate": 0.3, "col": Color(1.0, 0.92, 0.55, 0.65)})
+	# (Dropped: the textured soft-spot bloom that sat directly under the additive
+	# muzzle glow — same flash drawn twice; one fewer translucent quad per shot.)
 	var perp := Vector2(-aim.y, aim.x) * (1.0 if randf() < 0.5 else -1.0)
 	if _fx.size() > 300:
 		return   # spam guard: past this, casings/decals add draws, not information
@@ -1386,12 +1419,23 @@ func _record_run() -> void:
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
-	_persist("hall", {"runs": hall})
 	_life_runs += 1
 	_life_kills += _run_kills
 	if sim.victory:
 		_life_wins += 1
-	_persist("life", {"runs": _life_runs, "kills": _life_kills, "wins": _life_wins})
+	# One load+save for hall/life/best together — this lands on the debrief
+	# frame, and each _persist() is a full read/write/backup/rename dance.
+	var cf := ConfigFile.new()
+	cf.load(SAVE_PATH)
+	cf.set_value("hall", "runs", hall)
+	cf.set_value("life", "runs", _life_runs)
+	cf.set_value("life", "kills", _life_kills)
+	cf.set_value("life", "wins", _life_wins)
+	cf.set_value("best", "score", best_score)
+	cf.set_value("best", "wave", best_wave)
+	cf.set_value("best", "dist", best_dist)
+	_best_dirty = false
+	_save_cfg(cf)
 
 
 func _hint(id: String, text: String) -> void:
@@ -1423,7 +1467,15 @@ func _track_bests() -> void:
 		if not _debrief:
 			_record_run()   # bank this run into the Hall of Fame once
 			if not _replay_saved and _recorder != null:
-				_recorder.save("user://last_run.replay")   # replayable capture of the finished run
+				# Stringifying a whole run's input log is the biggest one-frame
+				# stall in the view — push it to a worker so the debrief card
+				# doesn't hitch. Shallow-duplicate the outer frames array: the
+				# main thread may still append, but per-frame arrays are
+				# immutable once recorded, so the snapshot is race-free.
+				var snap := _recorder.to_dict()
+				snap["frames"] = _recorder.frames.duplicate()
+				_replay_task = WorkerThreadPool.add_task(
+					Replay.save_dict.bind(snap, "user://last_run.replay"))
 				_replay_saved = true
 		_debrief = true
 	# NEW RECORD moment: the instant this run's score passes the standing best.
@@ -1442,9 +1494,10 @@ func _track_bests() -> void:
 	if sim.mode == "campaign" and dist > best_dist:
 		best_dist = dist
 		_best_dirty = true
-	if _best_dirty and Engine.get_physics_frames() % 60 == 0:
-		_best_dirty = false
-		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
+	# No mid-run disk write: the old once-a-second _persist() here was a full
+	# ConfigFile load+save+copy+rename on the main thread during the hottest
+	# play (a ~1 Hz frame spike). The ratchet stays in memory; it hits disk in
+	# _record_run() at the debrief and _flush_bests() on reset/exit.
 
 
 func _show_banner(text: String, col := Color(1.0, 0.92, 0.55)) -> void:
@@ -1618,6 +1671,13 @@ func _update_feel() -> void:
 	_check_near_miss()
 	_check_water_entry()
 	_drive_audio()
+	# Global hard cap above the per-path soft guards (300 shot / 260 burst):
+	# explosions, gibs and boss-death secondaries append uncapped, and every
+	# live entry is walked twice per frame (_draw_fx + _draw_glow). Oldest
+	# entries are the closest to expiring anyway. Stays live mid-freeze, like
+	# the corpse cap below.
+	while _fx.size() > 400:
+		_fx.remove_at(0)
 	# Hit-stop freezes the particles WITH the sim: explosions hang at their
 	# brightest frame and gibs hang mid-air through the freeze, then resume —
 	# completing the freeze-frame the held impact envelopes above start.
@@ -3245,7 +3305,8 @@ func _draw_fx() -> void:
 			var fc: Color = fx["col"]
 			fc.a = 1.0 - t * t
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
-			var fw := Art.font().get_string_size(fx["text"],
+			var ffont := Art.font()
+			var fw := ffont.get_string_size(fx["text"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
@@ -3256,8 +3317,8 @@ func _draw_fx() -> void:
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
 			for od in _TEXT_OUTLINE_OFFSETS:
-				draw_string(Art.font(), frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
-			draw_string(Art.font(), frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+				draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+			draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			floattext_i += 1
 		elif fx["kind"] == "smoke":
@@ -3539,35 +3600,29 @@ func _draw_progress_rail() -> void:
 
 
 func _draw_threat_edges() -> void:
-	# Chevrons on the bottom edge for live hostiles below the viewport —
-	# bypassed bunkers keep spawning behind you.
-	var _bottom_threats: Array = []
+	# One pass over sim.enemies classifies both edges (this used to be two full
+	# scans, each allocating a dict per qualifying enemy every frame).
+	# Bottom edge: live hostiles below the viewport — bypassed bunkers keep
+	# spawning behind you. Top edge: hostiles about to enter from the spawn
+	# edge above, otherwise only met as they cross into view.
+	var bottom_threats: Array = []
+	var top_threats: Array = []
 	for e in sim.enemies:
 		if not e["alive"] or e.get("submerged", false):
 			continue
 		var sy: float = (e["y"] - sim.camera_top) * PX
-		if sy <= 364.0:
+		if sy <= 364.0 and (sy >= 0.0 or sy < -180.0):
 			continue
 		var danger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
-		_bottom_threats.append({"e": e, "off": sy, "danger": danger})
+		if sy > 364.0:
+			bottom_threats.append({"e": e, "off": sy, "danger": danger})
+		else:
+			top_threats.append({"e": e, "off": sy, "danger": danger})
 	# A dense endless wave can stack a dozen+ off-screen hostiles on one edge,
 	# painting a near-solid chevron row that drowns the lethality signal —
 	# cap to the nearest few; ties prefer the lethal ranged killers.
-	_draw_edge_chevrons(_bottom_threats, false)
-	# Top-edge chevrons for hostiles about to enter from the spawn edge above —
-	# an off-screen threat you'd otherwise only meet as it crosses into view.
-	var _top_threats: Array = []
-	for e in sim.enemies:
-		if not e["alive"] or e.get("submerged", false):
-			continue
-		var ty: float = (e["y"] - sim.camera_top) * PX
-		if ty >= 0.0 or ty < -180.0:
-			continue
-		var tdanger: bool = e["kind"] == "sniper" or e["kind"] == "grenadier" or e["kind"] == "ghillie"
-		_top_threats.append({"e": e, "off": ty, "danger": tdanger})
-	# Same swarm cap as the bottom edge — nearest few only, ties favor the
-	# lethal ranged killers.
-	_draw_edge_chevrons(_top_threats, true)
+	_draw_edge_chevrons(bottom_threats, false)
+	_draw_edge_chevrons(top_threats, true)
 	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
 	# while an already-streamed boss (or the observer) sits above the visible
 	# view — its HP bar/label live in the fixed HUD but the arena-lock
@@ -3635,20 +3690,24 @@ func _draw_threat_edges() -> void:
 				Art.text(self, "REVIVE", Vector2(rx - 18, 50), 9, rcol)
 
 
+static func _cmp_threat_top(a: Dictionary, b: Dictionary) -> bool:
+	# Nearest-first (least negative off), ties prefer the lethal ranged killers.
+	if a["off"] != b["off"]:
+		return a["off"] > b["off"]
+	return a["danger"] and not b["danger"]
+
+
+static func _cmp_threat_bottom(a: Dictionary, b: Dictionary) -> bool:
+	if a["off"] != b["off"]:
+		return a["off"] < b["off"]
+	return a["danger"] and not b["danger"]
+
+
 func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	## Shared sort->cap->draw pass for the top/bottom off-screen threat
 	## chevrons: ties prefer the lethal ranged killers, capped to the
 	## nearest 6 so a dense swarm can't paint a solid warning row.
-	if is_top:
-		threats.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			if a["off"] != b["off"]:
-				return a["off"] > b["off"]
-			return a["danger"] and not b["danger"])
-	else:
-		threats.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			if a["off"] != b["off"]:
-				return a["off"] < b["off"]
-			return a["danger"] and not b["danger"])
+	threats.sort_custom(_cmp_threat_top if is_top else _cmp_threat_bottom)
 	var _shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
 	var _panel_bot := 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if _shop_row else 0.0)
 	for i in mini(6, threats.size()):

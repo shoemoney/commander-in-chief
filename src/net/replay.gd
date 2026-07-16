@@ -30,10 +30,17 @@ func to_dict() -> Dictionary:
 
 
 func save(path: String) -> Error:
+	return save_dict(to_dict(), path)
+
+
+static func save_dict(d: Dictionary, path: String) -> Error:
+	## Pure-data write, safe to run on a WorkerThreadPool thread (no scene tree,
+	## no member state) — main.gd hands it a snapshot so the debrief frame
+	## doesn't pay for JSON.stringify of the whole run.
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return FileAccess.get_open_error()
-	f.store_string(JSON.stringify(to_dict()))
+	f.store_string(JSON.stringify(d))
 	return OK
 
 
