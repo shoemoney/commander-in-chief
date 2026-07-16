@@ -984,8 +984,9 @@ func _step_bullets() -> void:
 		b["x"] = b["x"] + b["vx"]
 		b["y"] = b["y"] + b["vy"]
 		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
-		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+		var off := _offscreen(b["x"], b["y"])   # hoisted — was computed twice per bullet
+		var dead: bool = b["ttl"] <= 0 or off
+		if b["ttl"] <= 0 and not off:
 			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
 			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
 		if not dead:
@@ -997,6 +998,13 @@ func _step_bullets() -> void:
 					break
 		if not dead:
 			for e in enemies:
+				# Cheap axis pre-reject for the hottest O(bullets×enemies) scan.
+				# Checksum-neutral by construction: |dx| ≥ r+1 raw units makes
+				# dx² ≥ r² + 2r + 1 with 2r+1 > 1<<16 for any radius ≥ 0.5px, so
+				# Fixed.mul(dx,dx) > Fixed.mul(r,r) even after >>16 truncation —
+				# _dist_lte was already false for every pair skipped here.
+				if absi(b["x"] - e["x"]) > BULLET_HIT_RADIUS:
+					continue
 				# Bullets pass clean over submerged frogmen — grenades only.
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(b["x"], b["y"], e["x"], e["y"], BULLET_HIT_RADIUS):
@@ -1607,6 +1615,9 @@ func _step_mines() -> void:
 		# Or an enemy walks onto it — herd rushers into the minefield.
 		if not triggered:
 			for e in enemies:
+				# Axis pre-reject — same truncation-safe proof as _step_bullets.
+				if absi(e["x"] - m["x"]) > MINE_TRIGGER_RADIUS:
+					continue
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(e["x"], e["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
 					triggered = true
@@ -1628,6 +1639,9 @@ func _step_barrels() -> void:
 			# Enemy contact detonates it (like a mine) — a two-way hazard that
 			# auto-clears the rows enemies wade through. No coin (enemy-suicide farm).
 			for e in enemies:
+				# Axis pre-reject — same truncation-safe proof as _step_bullets.
+				if absi(e["x"] - bl["x"]) > MINE_TRIGGER_RADIUS:
+					continue
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(e["x"], e["y"], bl["x"], bl["y"], MINE_TRIGGER_RADIUS):
 					_detonate_barrel(bl, true)
@@ -2282,8 +2296,9 @@ func _step_enemy_bullets() -> void:
 		b["x"] = b["x"] + b["vx"]
 		b["y"] = b["y"] + b["vy"]
 		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
-		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+		var off := _offscreen(b["x"], b["y"])   # hoisted — was computed twice per bullet
+		var dead: bool = b["ttl"] <= 0 or off
+		if b["ttl"] <= 0 and not off:
 			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
 			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
 		if not dead:
