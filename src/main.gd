@@ -1237,7 +1237,7 @@ func _consume_events() -> void:
 				_show_banner("WAVE CLEARED — SHOP OPEN")
 			"wave_flawless":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Color(0.5, 1.0, 0.7)})
+					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Art.safe(Color(0.5, 1.0, 0.7))})
 				_sfx.play("buy", -3.0, 1.5)
 			"courier_escape":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
@@ -4932,6 +4932,10 @@ func _draw_threat_pips() -> void:
 	# clamped screen-edge arrow so a lethal shot from beyond the 640x360 viewport reads
 	# as a threat, not a cheap death. Stateless — recomputed from live sim state each
 	# frame, so it self-clears when the windup ends or the source scrolls on-screen.
+	# Corner-HUD avoidance mirrors the edge chevrons: a pip clamped to the top edge
+	# under the opaque icon plate would be over-painted by the $HUD CanvasLayer.
+	var plate_r := _hud_icons.plate_right()
+	var panel_b := _hud_icons.panel_bottom() + 12.0
 	for e in sim.enemies:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
@@ -4943,6 +4947,8 @@ func _draw_threat_pips() -> void:
 		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:
 			continue   # on-screen — the on-body telegraph already covers it
 		var edge := Vector2(clampf(sp.x, 12.0, SCREEN_W - 12.0), clampf(sp.y, 12.0, SCREEN_H - 12.0))
+		if edge.x < plate_r and edge.y < panel_b:
+			edge.y = panel_b
 		var dir := (sp - edge).normalized()
 		if dir == Vector2.ZERO:
 			continue
@@ -4970,6 +4976,8 @@ func _draw_threat_pips() -> void:
 		if ssp.x >= 0.0 and ssp.x <= SCREEN_W and ssp.y >= 0.0 and ssp.y <= SCREEN_H:
 			continue
 		var sedge := Vector2(clampf(ssp.x, 12.0, SCREEN_W - 12.0), clampf(ssp.y, 12.0, SCREEN_H - 12.0))
+		if sedge.x < plate_r and sedge.y < panel_b:
+			sedge.y = panel_b
 		var sdir := (ssp - sedge).normalized()
 		if sdir == Vector2.ZERO:
 			continue
