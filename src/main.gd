@@ -738,6 +738,7 @@ func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
 	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
+	var dirt_puffs := 0             # spent-round dust cap per tick — MG spam guard
 	for ev in sim.events:
 		var kind: String = ev["t"]
 		if kind == "pickup":
@@ -772,6 +773,15 @@ func _consume_events() -> void:
 			else:
 				_sfx.play(snd[0], snd[1], snd[2])
 		match kind:
+			"bullet_dirt":
+				# Spent rounds kick dirt (or a splash) where they land — bullets
+				# used to just vanish mid-field. Silent by design (whiz covers
+				# near-misses); capped so MG spam can't sandstorm the screen.
+				if dirt_puffs < 2:
+					dirt_puffs += 1
+					_burst(ev["x"], ev["y"],
+						"splash" if sim._in_water(ev["x"], ev["y"]) else "dust",
+						2, 0.3, 0.8, 0.3, 0.05)
 			"armor_block":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",

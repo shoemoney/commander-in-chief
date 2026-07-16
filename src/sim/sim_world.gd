@@ -819,6 +819,9 @@ func _step_bullets() -> void:
 		b["y"] = b["y"] + b["vy"]
 		b["ttl"] = b["ttl"] - 1
 		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
+		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
+			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
 		if not dead:
 			# Bullets are stopped by armor: bunkers block, only grenades hurt them.
 			for bk in bunkers:
@@ -1765,6 +1768,9 @@ func _step_enemy_bullets() -> void:
 		b["y"] = b["y"] + b["vy"]
 		b["ttl"] = b["ttl"] - 1
 		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
+		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
+			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
 		if not dead:
 			# Cover is real both ways now: a bunker between you and a shooter eats
 			# the round, same as it eats yours (player bullets already block here).
