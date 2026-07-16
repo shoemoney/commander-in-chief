@@ -328,6 +328,10 @@ func step(inputs: Array) -> void:
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
+		# Sappers are ENDLESS-ONLY, but _step_mines() (the only code that detonates or
+		# culls a laid mine) ran only in the campaign branch — so every mine a Sapper
+		# armed here just sat forever, inert. Step them here too.
+		_step_mines()
 		if not endless_boss.is_empty() and endless_boss["alive"]:
 			_step_one_boss(endless_boss)
 		# The Spotter wave-mutator drops an Observer; step it so its barrage is
