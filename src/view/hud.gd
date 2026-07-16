@@ -410,7 +410,10 @@ func _draw() -> void:
 			# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
 			# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
 			if p["pierce_ticks"] > 0:
-				px = _stat("wep_rifle", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, Color(0.6, 0.95, 1.0))
+				# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
+				# icon is the non-color channel (pierce+rend both active = twin rifles
+				# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
+				px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, Color(0.6, 0.95, 1.0))
 			if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
 				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, Color(1.0, 0.8, 0.5))
 			if p["triple"]:
