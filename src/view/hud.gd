@@ -249,6 +249,11 @@ func _draw() -> void:
 	if not shop_row and _fits(x, _tw("SUPPLIES") + 25.0):
 		Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
 		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
+	# zero HUD read — the countdown says how long the free-fire window lasts.
+	if sim.flash_ticks > 0 and _fits(x, 42.0):
+		x = _stat("wep_flashbang", "%ds" % ((sim.flash_ticks + 59) / 60), x, y,
+			Color(1.0, 0.95, 0.7)) + 4.0
 	var row_r := x
 
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
@@ -411,7 +416,9 @@ func _draw() -> void:
 			if p["triple"]:
 				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
 			if p["rend_ticks"] > 0:
-				px = _stat("wep_mg", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, Color(1.0, 0.55, 0.4))
+				# wep_rifle, NOT wep_mg — Triple's chip is wep_mg two lines up, and
+				# identical icons made two different buffs read as one (panel catch).
+				px = _stat("wep_rifle", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, Color(1.0, 0.55, 0.4))
 			if p["smoke_ticks"] > 0:
 				px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, Color(0.8, 0.85, 0.9))
 			# Carried claymore charges: a count, not a countdown — and the verb

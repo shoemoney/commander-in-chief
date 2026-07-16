@@ -1689,6 +1689,11 @@ func _track_bests() -> void:
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
 		_hint("supply", "HOLD [%s] FOR THE SUPPLY WHEEL" % ("BACK" if Art.use_pad else "Q"))
+	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
+	# path get one teaching line the first time the chest can afford it.
+	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
+		_hint("airstrike_wheel", "AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]"
+			% ("BACK" if Art.use_pad else "Q"))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).
 	if not sim._all_players_down():
@@ -2979,16 +2984,24 @@ func _draw_enemies() -> void:
 			# (grenadier grammar — it calls the same tracked strike).
 			var dwu: int = e.get("windup", 0)
 			var hb := sin(float(Engine.get_physics_frames()) * 0.11 + float(e["x"] % 6283) * 0.001) * 1.5
-			draw_circle(epos + Vector2(3.0, 8.0), 4.0, Color(0, 0, 0, 0.18))
+			# Shadow breathes opposite the bob — higher drone, smaller/fainter shadow.
+			draw_circle(epos + Vector2(3.0, 8.0), 4.0 - hb * 0.5, Color(0, 0, 0, 0.18 - hb * 0.03))
 			if dwu > 0:
 				var df := 1.0 - float(dwu) / float(SimWorld.DRONE_WINDUP_TICKS)
 				# Lock-line to the tracked target (6-vote panel item): the paint
 				# follows YOUR ground, and nothing said so — a dashed amber tether
 				# makes "it's tracking me, keep moving" readable mid-windup.
 				if not target.is_empty():
-					draw_dashed_line(epos + Vector2(0, -5.0 + hb),
-						_to_screen(target["x"], target["y"]),
+					var dtp := _to_screen(target["x"], target["y"])
+					# Dark under-line (the chevron under-lay grammar) so the amber
+					# dash survives bright grass and hue-blindness; the endpoint
+					# ring marks WHO is painted — the tether used to just stop.
+					draw_dashed_line(epos + Vector2(1, -4.0 + hb), dtp + Vector2(1, 1),
+						Color(0, 0, 0, 0.3 + df * 0.25), 1.0, 6.0)
+					draw_dashed_line(epos + Vector2(0, -5.0 + hb), dtp,
 						Color(1.0, 0.7, 0.25, 0.35 + df * 0.35), 1.0, 6.0)
+					draw_arc(dtp, 9.0 + df * 3.0, 0, TAU, 14,
+						Color(1.0, 0.7, 0.25, 0.3 + df * 0.4), 1.2)
 				draw_circle(epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
 					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
 			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
