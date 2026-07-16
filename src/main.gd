@@ -225,6 +225,10 @@ func _ready() -> void:
 	# draw_texture_rect(tile=true) silently edge-clamps unless the canvas item
 	# enables repeat — the 640px river banks were one stretched sand column.
 	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+	# 1x design-size floor. display/window/size/window_min_width|height are NOT
+	# real Godot settings (silent no-op) — Window.min_size is the actual API, so
+	# the integer-scaled 640x360 canvas can't be shrunk into a cropped degenerate.
+	get_window().min_size = Vector2i(640, 360)
 	add_child(_sfx)
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
