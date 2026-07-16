@@ -14,14 +14,11 @@ const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 	"wiped": true, "avenge": true}
 
 var _sounds: Dictionary = {}
+var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
 var _music := AudioStreamPlayer.new()
 var _pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
-# Positional pool: world SFX pan to where they happen (a flank explosion should
-# sound flanking). Sfx is a plain Node, so these Node2Ds sit OUTSIDE main's
-# shake/zoom transform chain — screen-space positions land 1:1, shake-immune.
-var _pool: Array[AudioStreamPlayer2D] = []
 
 
 func _ready() -> void:
@@ -52,20 +49,21 @@ func _ready() -> void:
 	add_child(_player)
 	_player.play()
 	_pb = _player.get_stream_playback()
-	# Stereo listener pinned to screen center + a small pool of 2D players for
-	# positional one-shots. max_distance generous: panning is the point here,
-	# not distance rolloff (everything audible is on a 640x360 screen anyway).
+	# Positional pool: the game draws in 640x360 screen space with no Camera2D,
+	# so a listener pinned at screen center anchors the stereo pan. Gentle
+	# attenuation only — arcade panning, not distance silence. (Sfx is a plain
+	# Node, so these Node2Ds sit outside main's shake/zoom chain — shake-immune.)
 	var listener := AudioListener2D.new()
-	listener.position = Vector2(320.0, 180.0)
+	listener.position = Vector2(320, 180)
 	add_child(listener)
 	listener.make_current()
-	for _i in 6:
-		var sp := AudioStreamPlayer2D.new()
-		sp.bus = "SFX"
-		sp.max_distance = 4000.0
-		sp.panning_strength = 1.4
-		add_child(sp)
-		_pool.append(sp)
+	for i in 12:
+		var p := AudioStreamPlayer2D.new()
+		p.bus = "SFX"
+		p.max_distance = 700.0
+		p.attenuation = 1.0
+		add_child(p)
+		_pool.append(p)
 	_synth_all()
 	# War-drums bed: synthesized like everything else, looping under the SFX.
 	_music.stream = _synth_drums()
@@ -75,24 +73,29 @@ func _ready() -> void:
 	_music.play()
 
 
-func play(sound: String, vol_db := 0.0, pitch := 1.0, screen_pos := Vector2.INF) -> void:
+func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	if _pb == null or not _sounds.has(sound):
 		return
 	if not _MUSICAL.has(sound):
 		pitch *= randf_range(0.94, 1.06)
-	# Positional path: pan from screen position via a pooled 2D player. Pool
-	# exhausted (7+ simultaneous positional shots) falls back to the flat player —
-	# in that din nobody can localize an 8th source anyway.
-	if screen_pos.is_finite():
-		for sp in _pool:
-			if not sp.playing:
-				sp.stream = _sounds[sound]
-				sp.position = screen_pos
-				sp.volume_db = vol_db
-				sp.pitch_scale = pitch
-				sp.play()
-				return
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
+
+
+func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
+	if _pool.is_empty() or not _sounds.has(sound):
+		return
+	if not _MUSICAL.has(sound):
+		pitch *= randf_range(0.94, 1.06)
+	var p := _pool[0]   # steal the first if all 12 are busy
+	for c in _pool:
+		if not c.playing:
+			p = c
+			break
+	p.position = screen_pos
+	p.volume_db = vol_db
+	p.pitch_scale = pitch
+	p.stream = _sounds[sound]
+	p.play()
 
 
 func set_music_intensity(level: float, duck := 0.0) -> void:

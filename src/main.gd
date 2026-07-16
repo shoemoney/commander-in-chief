@@ -72,6 +72,7 @@ var _cinematic := 0.0            # letterbox envelope for boss intro / victory b
 var _boss_bar_slots := 0         # top-center bars drawn this frame (banner ducks below them)
 var _result_t := 0.0             # debrief/victory card entrance ease (0→1)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
+var _enemy_pos_prev := {}        # per-slot prev sim pos — gates the run-bob to actual movement
 var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame alloc)
 var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
@@ -179,6 +180,9 @@ var _menu := GameMenu.new()
 
 
 func _ready() -> void:
+	# draw_texture_rect(tile=true) silently edge-clamps unless the canvas item
+	# enables repeat — the 640px river banks were one stretched sand column.
+	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 	add_child(_sfx)
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
@@ -335,14 +339,23 @@ func _paint_bg(canvas: Node2D) -> void:
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
 	var march := _sector_march()
+	# Two passes (all grass, then dirt) instead of interleaving: keeps the 80
+	# same-texture grass draws one batch instead of ~13. Z-order is unchanged
+	# (dirt still lands on top of every grass tile).
 	for ty in 8:
 		for tx in 10:
-			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
+			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
+			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
+			var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 			var h := Art.cell_hash(tx, base_iy + ty)
 			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
 			canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
 				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
+	for ty in 8:
+		for tx in 10:
+			var h := Art.cell_hash(tx, base_iy + ty)
 			if h % 6 == 0:
+				var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 				canvas.draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
 					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
 
@@ -475,6 +488,7 @@ func _reset() -> void:
 	_tank_hull.clear()
 	_tank_prev.clear()
 	_enemy_face.clear()
+	_enemy_pos_prev.clear()
 	_blast_warp = 0.0
 	_cinematic = 0.0
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
@@ -616,15 +630,15 @@ func _physics_process(_delta: float) -> void:
 			_rumble = 0.0   # never buzz a controller on the menu
 			_update_feel()
 		else:
-			# Pause: clear the underwater LPF/duck so the menu sounds clean.
+			# Pause: clear the underwater LPF/duck so the menu sounds clean, and
+			# square the camera — pausing mid-shake froze the world offset/tilted
+			# behind the overlay.
 			_concussion = 0.0
 			_duck = 0.0
 			_sfx.set_concussion(0.0)
-			# Settle the camera: without this, pausing mid-impact freezes the world
-			# behind the menu in its shaken pose — offset, dutch-rolled, zoom-punched.
-			rotation = 0.0
-			scale = Vector2.ONE
 			position = Vector2.ZERO
+			scale = Vector2.ONE
+			rotation = 0.0
 		queue_redraw()
 		return
 	_hud_icons.visible = true
@@ -686,14 +700,17 @@ func _consume_events() -> void:
 				explosion_pinged = true
 				# One boom — but the ear still agrees with the camera: volume scales
 				# with proximity and pans to the blast (the cluster's lead event).
-				_sfx.play("explosion", lerpf(-12.0, -2.0, _blast_prox(ev["x"], ev["y"])),
-					1.0, _to_screen(ev["x"], ev["y"]))
+				_sfx.play_at("explosion", _to_screen(ev["x"], ev["y"]),
+					lerpf(-12.0, -2.0, _blast_prox(ev["x"], ev["y"])))
 		elif _EVENT_SOUND.has(kind):
 			var snd: Array = _EVENT_SOUND[kind]
-			# World events pan to where they happen; events without a position
-			# (or screen-global beats) stay center via the flat polyphonic player.
-			var spos := _to_screen(ev["x"], ev["y"]) if ev.has("x") and ev.has("y") else Vector2.INF
-			_sfx.play(snd[0], snd[1], snd[2], spos)
+			# Any world event that carries coordinates pans/attenuates from where
+			# it happened (a flank alarm tells you WHICH flank); coordinate-less
+			# screen-global beats stay centered on the flat polyphonic player.
+			if ev.has("x") and ev.has("y"):
+				_sfx.play_at(snd[0], _to_screen(ev["x"], ev["y"]), snd[1], snd[2])
+			else:
+				_sfx.play(snd[0], snd[1], snd[2])
 		match kind:
 			"armor_block":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
@@ -1032,7 +1049,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		"spin": cspin, "wet": kwet})
 	# Wet kills die in a splash, not a puff — the terrain reacts.
 	if kwet:
-		_sfx.play("splash", -10.0, 1.2)
+		_sfx.play_at("splash", _to_screen(ev["x"], ev["y"]), -10.0, 1.2)
 		for d in 6:
 			var wa := d * TAU / 6.0
 			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "splash", "rate": 0.08,
@@ -1095,12 +1112,17 @@ func _blast_debris(x: int, y: int, wet: bool = false) -> void:
 		return
 	# Hot embers fly out radially, skew upward, and cool + dim fast.
 	_burst(x, y, "ember", 8, 1.5, 3.6, 0.6, 0.05, 1.2, true)
-	# Dark tumbling chunks thrown with wide speed variance — the blast throws material.
+	# Dark tumbling chunks thrown with wide speed variance — the blast throws
+	# material. "debris" (oriented tumbling shard), not "gib" (blood dot):
+	# inanimate shrapnel should read as rock/wood, not meat. "move" rides the
+	# same vx/vy decay pass as casings/gibs.
 	for _d in 5:
 		var da := randf() * TAU
-		_fx.append({"x": x, "y": y, "t": 0.0, "kind": "gib", "rate": 0.05,
+		var dh := (x / Fixed.ONE + _d * 131) % 97
+		_fx.append({"x": x, "y": y, "t": 0.0, "kind": "debris", "rate": 0.05, "move": true,
 			"vx": cos(da) * randf_range(1.0, 4.5), "vy": sin(da) * randf_range(1.0, 4.5),
-			"col": Color(0.2, 0.17, 0.14), "spin": randf() * TAU})
+			"col": Color(0.2, 0.17, 0.14), "spin": float(dh) * 0.35,
+			"sz": 1.5 + float(dh % 11) * 0.1})
 	# Secondary inner flash: a bright core that pops ~2 frames after the main flash.
 	_fx.append({"x": x, "y": y, "t": -0.24, "kind": "flash", "rate": 0.16})
 	# Slow rising smoke curl lingers after the fire.
@@ -1449,7 +1471,7 @@ func _check_near_miss() -> void:
 				continue
 			if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], near_r):
 				_whiz_frame = Engine.get_physics_frames()
-				_sfx.play("whiz", -13.0, randf_range(0.95, 1.1))
+				_sfx.play_at("whiz", _to_screen(b["x"], b["y"]), -13.0, randf_range(0.95, 1.1))
 				# Visible graze streak at the miss point so the dodge reads on-screen, not
 				# just in the ears — a muted player still sees the round rip past.
 				_fx.append({"x": b["x"], "y": b["y"], "t": 0.0, "kind": "tex",
@@ -1551,7 +1573,7 @@ func _update_feel() -> void:
 		_punch = _punch * 0.82 if _punch > 0.002 else 0.0
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
-	_concussion = maxf(0.0, _concussion - 0.035)
+	_concussion = _concussion * 0.9 if _concussion > 0.01 else 0.0   # match the multiplicative grammar above
 	_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
 	_cinematic = maxf(0.0, _cinematic - 0.004)
 	# Debrief/victory card entrance clock: eases 0→1 while a result is showing,
@@ -1625,7 +1647,9 @@ func _update_feel() -> void:
 	_boss_flash = _boss_flash * 0.8 if _boss_flash > 0.01 else 0.0
 	for i in mini(_down_anim.size(), sim.players.size()):
 		if sim.players[i]["alive"]:
-			_down_anim[i] = 0.0
+			# Decay, don't snap: a revived soldier rises out of the topple pose
+			# over a few frames (residual blended in the alive draw branch).
+			_down_anim[i] = maxf(0.0, _down_anim[i] - 0.15)
 		else:
 			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
 	if _hitstop_frames == 0:
@@ -1650,7 +1674,9 @@ func _update_feel() -> void:
 	# with the zoom, so the frame twists in place instead of sliding off.
 	# No threshold gate: trauma² already scales roll to ~nothing on small hits, and
 	# a hard gate popped visibly as trauma crossed it mid-decay.
-	var rot := sin(float(Engine.get_physics_frames()) * 2.9) * _trauma * _trauma * 0.035 * _motion
+	# 0.55 rad/frame ≈ 5Hz: a readable held twist. The old 2.9 sat near Nyquist
+	# (π rad/frame), flipping sign almost every frame — buzz, not roll.
+	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _motion
 	rotation = rot
 	position = shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)
 
@@ -1862,6 +1888,11 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 
 # 4 diagonal offsets cover both axes at once — visually ≈ the old 8-neighbor rim
 # at half the draw calls (~60 of 90 textures are outlined; this is the hot loop).
+const _SKYLINE_X: Array[float] = [80.0, 118.0, 150.0, 468.0, 520.0, 560.0]
+const _SKYLINE_H: Array[float] = [26.0, 34.0, 22.0, 30.0, 40.0, 24.0]
+# Axis-aligned text outline (floattext) — hoisted like _OUTLINE_OFFSETS below.
+const _TEXT_OUTLINE_OFFSETS: Array[Vector2] = [
+	Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]
 const _OUTLINE_OFFSETS: Array[Vector2] = [
 	Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1),
 ]
@@ -1961,6 +1992,12 @@ func _draw() -> void:
 	_draw_observer()
 	_draw_gunships()
 	_draw_colossus()
+	# Field dim (NIGHT OPS) sits UNDER the tracers/players/fx — they're "your
+	# eyes" in the dark, so it must not wash them out. It draws in screen space:
+	# cancel the shake transform, dim, then restore for the world passes below.
+	draw_set_transform_matrix(get_transform().affine_inverse())
+	_draw_field_dim()
+	draw_set_transform_matrix(Transform2D())
 	_draw_projectiles()
 	_draw_players()
 	_draw_fx()
@@ -1970,9 +2007,6 @@ func _draw() -> void:
 	# shake/zoom/roll so bars, markers and banners stay rock-steady while the world
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
 	draw_set_transform_matrix(get_transform().affine_inverse())
-	# Field dim (NIGHT OPS) draws BEFORE the threat/objective markers now — the
-	# markers are "your eyes" in the dark, so the dusk wash must sit under them.
-	_draw_field_dim()
 	_draw_threat_edges()
 	_draw_objective_markers()
 	_draw_progress_rail()
@@ -2022,8 +2056,8 @@ func _draw_skyglow() -> void:
 	if march > 0.6:
 		var sa := clampf((march - 0.6) / 0.4, 0.0, 1.0) * 0.7
 		var sky := Color(0.05, 0.04, 0.05, sa)
-		var stx := [80.0, 118.0, 150.0, 468.0, 520.0, 560.0]
-		var sth := [26.0, 34.0, 22.0, 30.0, 40.0, 24.0]
+		var stx := _SKYLINE_X   # const — was two array literals rebuilt every finale frame
+		var sth := _SKYLINE_H
 		for k in stx.size():
 			draw_rect(Rect2(stx[k], 0.0, 14.0, sth[k]), sky)
 		draw_line(Vector2(300, 0), Vector2(300, 46), sky, 2.0)
@@ -2384,12 +2418,17 @@ func _draw_enemies() -> void:
 			draw_line(Vector2(epos.x - 5, cy), Vector2(epos.x + 5, cy), Color(1.0, 0.85, 0.3), 1.5)
 		# Run-cycle bob: a small per-unit-phased vertical hop so a charging
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
+		# Gated on actual movement (like the player bob) — a standing unit
+		# breathes instead of jogging in place.
+		var e_now := Vector2i(e["x"], e["y"])
+		var e_moved: bool = _enemy_pos_prev.get(eidx, Vector2i(-1, -1)) != e_now
+		_enemy_pos_prev[eidx] = e_now
 		if e["kind"] != "frogman":
-			if e.get("windup", 0) == 0:
+			if e.get("windup", 0) == 0 and e_moved:
 				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4
 			else:
-				# Winding up: the run-bob stops but a slow breath keeps the unit alive —
-				# nothing on the field should be a frozen statue.
+				# Winding up / standing: the run-bob stops but a slow breath keeps the
+				# unit alive — nothing on the field should be a frozen statue.
 				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(e["x"] / 4093)) * -0.5
 		var target: Dictionary = {}
 		var best_d2 := 0.0
@@ -2847,6 +2886,13 @@ func _draw_players() -> void:
 				draw_arc(pos + Vector2(0, 4), 4.0 + wt * 8.0, 0, TAU, 16,
 					Color(0.75, 0.9, 1.0, 0.5 * (1.0 - wt)), 1.2)
 				draw_arc(pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
+			# Get-up: blend the residual knockdown topple back out while the decaying
+			# _down_anim drains, so a revive rises instead of snapping upright.
+			var da_res: float = _down_anim[i] if i < _down_anim.size() else 0.0
+			if da_res > 0.0:
+				var de_res := 1.0 - pow(1.0 - da_res, 3.0)
+				angle = lerp_angle(angle, PI / 2, de_res)
+				mod = mod.lerp(Color(0.35, 0.35, 0.35, 0.6), de_res)
 			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
@@ -2951,9 +2997,11 @@ func _draw_players() -> void:
 			# Knockdown tween: topple from the last aim into the fallen pose, colour
 			# and scale settling over ~8 frames instead of snapping in one tick.
 			var da: float = _down_anim[i] if i < _down_anim.size() else 1.0
-			var dpose := lerp_angle(_aim_angle(p), PI / 2, da)
-			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), da)
-			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - da) * 0.12), dcol)
+			# Cubic ease-out: the fall decelerates into the dirt instead of ramping linearly.
+			var de := 1.0 - pow(1.0 - da, 3.0)
+			var dpose := lerp_angle(_aim_angle(p), PI / 2, de)
+			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), de)
+			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - de) * 0.12), dcol)
 			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
@@ -3130,7 +3178,7 @@ func _draw_fx() -> void:
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
-			for od in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
+			for od in _TEXT_OUTLINE_OFFSETS:
 				draw_string(Art.font(), frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
 			draw_string(Art.font(), frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -3503,6 +3551,9 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var tcol := Color(1.0, 0.1, 0.1, ta) if danger else Color(1.0, 0.55, 0.25, ta)
 			var tspr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var ttip := tbase - (6.0 if danger else 4.0)
+			var tuc := Color(0, 0, 0, ta * 0.55)   # 1px drop under-lay: reads over bright terrain
+			draw_line(Vector2(tx - tspr, tbase + 1.0), Vector2(tx, ttip + 1.0), tuc, 2.0)
+			draw_line(Vector2(tx, ttip + 1.0), Vector2(tx + tspr, tbase + 1.0), tuc, 2.0)
 			draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
 			draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
 		else:
@@ -3517,6 +3568,9 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var col := Color(1.0, 0.1, 0.1, a) if danger else Color(1.0, 0.35, 0.2, a)
 			var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var tip := 361.0 if danger else 358.0
+			var uc := Color(0, 0, 0, a * 0.55)   # 1px drop under-lay: reads over bright terrain
+			draw_line(Vector2(sx - spr, 354), Vector2(sx, tip + 1.0), uc, 2.0)
+			draw_line(Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
 			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
 			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
 
@@ -3526,7 +3580,7 @@ func _draw_objective_markers() -> void:
 	# objectives get a small bobbing icon overhead; off-screen ones become a
 	# directional diamond pinned to the nearest edge (distinct from the red
 	# threat chevrons — these are objectives, not generic hostiles).
-	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0
+	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0 * _motion   # stills under REDUCE MOTION
 	var marks: Array = []
 	for g in sim.gates:
 		if not g["open"] and not g.get("final", false):
@@ -3570,6 +3624,10 @@ func _draw_objective_markers() -> void:
 		var mp := Vector2(m["sx"], m["sy"])
 		var on := mp.x >= 6.0 and mp.x <= 634.0 and mp.y >= 32.0 and mp.y <= 354.0
 		if on:
+			# 1px dark under-copy (Art.text's shadow pattern) — a cyan/amber icon
+			# washed out over bright water/sand where the outlined pips stay crisp.
+			draw_texture_rect(Art.tex(m["icon"]),
+				Rect2(mp + Vector2(-4.0, -19.0 + bob), Vector2(10, 10)), false, Color(0, 0, 0, 0.55))
 			draw_texture_rect(Art.tex(m["icon"]),
 				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
 		elif edge_used < 6:
@@ -3601,8 +3659,13 @@ func _marker_edge(pos: Vector2) -> Vector2:
 
 
 func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
-	draw_colored_polygon(PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
-		p + Vector2(0, r), p + Vector2(-r, 0)]), Color(col.r, col.g, col.b, 0.85))
+	var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
+		p + Vector2(0, r), p + Vector2(-r, 0)])
+	draw_colored_polygon(pts, Color(col.r, col.g, col.b, 0.85))
+	# Dark outline, same treatment the threat pips get — keeps the diamond
+	# readable over bright water/sand.
+	pts.append(pts[0])
+	draw_polyline(pts, Color(0, 0, 0, 0.55), 1.0)
 
 
 func _draw_wheel() -> void:
@@ -3975,7 +4038,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		if not icon.is_empty():
 			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size), false)
 			x += icon_size + gap
-		draw_string(rf, Vector2(x, y), row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size, col)
+		Art.text(self, row_text, Vector2(x, y), row_size, col)   # shadowed like every other HUD string
 	# Back to the plain shake-cancel matrix for whatever the caller draws next.
 	draw_set_transform_matrix(get_transform().affine_inverse())
 
