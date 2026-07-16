@@ -83,8 +83,9 @@ const TEX := {
 	"hudfx_hitlines": preload(SY + "hud/hudfx_hitlines.png"),
 	"hudfx_blood": preload(SY + "hud/hudfx_blood.png"),
 	"hudfx_dmgvig": preload(SY + "hud/hudfx_dmgvig.png"),
-	"hudfx_glow": preload(SY + "hud/hudfx_glow.png"),
-	"hudfx_dmgdir": preload(SY + "hud/hudfx_dmgdir.png"),
+	# hudfx_glow / hudfx_dmgdir: preloaded here for months, referenced nowhere —
+	# ~0.7 MB of VRAM at boot for zero drawn pixels. Files stay for when a
+	# damage-direction or glow pass actually wants them.
 	# --- legacy art Military decor (war-torn battlefield litter) ---
 	"barrel": preload(SY + "decor/barrel.png"),
 	"crate_stack": preload(SY + "decor/crate_stack.png"),
