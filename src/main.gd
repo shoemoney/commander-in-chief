@@ -764,6 +764,13 @@ func _consume_events() -> void:
 		var kind: String = ev["t"]
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
+			# Collect pop: common crates used to vanish on a quiet blip — a spark
+			# kiss + brief ground light marks WHERE the supply went. Reuses the
+			# existing glow-layer fx grammar; rare drops keep their bigger
+			# celebration below.
+			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.07})
+			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+				"rate": 0.14, "r": 12.0, "col": Color(1.0, 0.95, 0.6)})
 			# Rare power-up grab (pierce=4 / spread=5): a bold rising callout + a
 			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
 			# silent stat bump. floattext + sfx + trauma are all view-only.
