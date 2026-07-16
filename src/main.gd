@@ -2737,15 +2737,20 @@ func _draw_enemies() -> void:
 			# Paints a laser line on its target during the long windup — the
 			# 'get off this line NOW' telegraph. Break LOS or sidestep.
 			var swu: int = e.get("windup", 0)
-			if swu > 0 and not target.is_empty():
-				var tp := _to_screen(target["x"], target["y"])
+			if swu > 0:
+				# Beam follows the LOCKED shot vector (aim_lx/aim_ly at paint start),
+				# not the live target — sidestepping must visibly clear the line the
+				# same way it dodges the fired bullet.
+				var lp := _to_screen(e["x"] + e.get("aim_lx", 0), e["y"] + e.get("aim_ly", 0))
 				var pf := 1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)
+				var bdir := lp - epos
+				bdir = bdir.normalized() if bdir.length() > 0.001 else Vector2.RIGHT
 				# Final moments: strobe white (matches the mortar-telegraph grammar).
 				var lcol := Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5)
 				if swu <= 10 and (swu / 2) % 2 == 0:
 					lcol = Color(1.0, 1.0, 1.0, 0.95)
-				draw_line(epos, tp, lcol, 1.0 + pf * 2.0)
-				draw_circle(tp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
+				draw_line(epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
+				draw_circle(lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
 			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
 			_spr("m_contractor2", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # spec-ops marksman, violet-keyed
 		elif e["kind"] == "grenadier":
@@ -2790,17 +2795,21 @@ func _draw_enemies() -> void:
 				_spr("ghillie", epos, face, 0.42 + rf * 0.08, Color(1, 1, 1, 0.4 + rf * 0.6))
 			else:
 				# Revealed marksman: paints the sniper line during windup, then fires.
-				if gwu2 > 0 and not target.is_empty():
-					var tp2 := _to_screen(target["x"], target["y"])
+				if gwu2 > 0:
+					# Beam rides the LOCKED shot vector, not the live target — the
+					# fired bullet flies down aim_lx/aim_ly, so must the tell.
+					var lp2 := _to_screen(e["x"] + e.get("aim_lx", 0), e["y"] + e.get("aim_ly", 0))
 					var pf2 := 1.0 - float(gwu2) / float(SimWorld.SNIPER_WINDUP_TICKS)
+					var bdir2 := lp2 - epos
+					bdir2 = bdir2.normalized() if bdir2.length() > 0.001 else Vector2.RIGHT
 					# Same final-moment white strobe the sniper gets — a revealed
 					# ghillie fires the same lethal shot and deserves the same fair
 					# 'get off the line NOW' warning, not a silent kill.
 					var lcol2 := Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5)
 					if gwu2 <= 10 and (gwu2 / 2) % 2 == 0:
 						lcol2 = Color(1.0, 1.0, 1.0, 0.95)
-					draw_line(epos, tp2, lcol2, 1.0 + pf2)
-					draw_circle(tp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
+					draw_line(epos, epos + bdir2 * 900.0, lcol2, 1.0 + pf2)
+					draw_circle(lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
 				_spr("ghillie", epos, face, 0.5)   # real ghillie bake (was a green-keyed frogman)
 		elif e["elite"]:
 			# Wind-up telegraph: muzzle ember swells red before the shot.
