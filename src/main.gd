@@ -2798,6 +2798,15 @@ func _draw_enemies() -> void:
 			if gwu > 0:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
 				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
+				# Where the mortar lands: a faint amber ground ring at the LIVE
+				# target (the grenadier re-aims at fire time, so following it is
+				# honest), sized to the real kill footprint and filling as the lob
+				# nears — hands straight off to the strike telegraph on fire.
+				if not target.is_empty():
+					var mtp := _to_screen(target["x"], target["y"])
+					var mr := SimWorld.GRENADE_RADIUS * PX
+					draw_arc(mtp, mr, 0, TAU, 28, Color(1.0, 0.6, 0.15, 0.12 + gf * 0.35), 1.5)
+					draw_arc(mtp, mr * gf, 0, TAU, 24, Color(1.0, 0.55, 0.1, 0.15 + gf * 0.4), 1.5)
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("m_soldier2", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber, own silhouette
 		elif e["kind"] == "courier":
