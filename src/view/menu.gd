@@ -15,13 +15,23 @@ var main: Node2D
 var _confirm := -1   # index of a destructive item awaiting a 2nd press
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
+var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
 var _open_t := 0.0      # menu-open settle envelope (backdrop fade + row drop-in)
 var _stick_held := 0    # analog-stick nav latch: -1/1 while pushed, 0 when centered
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if mode != Mode.HIDDEN:
-		_open_t = lerpf(_open_t, 1.0, 0.3)
+		# Exp-decay easing: framerate-independent (per-frame lerpf ran ~2.4x
+		# faster on a 144Hz display). Reduce-motion snaps both instantly.
+		if main._motion < 0.5:
+			_open_t = 1.0
+			if _sel_target >= 0.0:
+				_sel_y = _sel_target
+		else:
+			_open_t = lerpf(_open_t, 1.0, 1.0 - exp(-20.0 * delta))
+			if _sel_target >= 0.0:
+				_sel_y = lerpf(_sel_y, _sel_target, 1.0 - exp(-22.0 * delta))
 		queue_redraw()   # pulse + glide + open-settle animate every frame while open
 
 
@@ -34,6 +44,7 @@ func open(m: int) -> void:
 	sel = 0
 	_confirm = -1
 	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
+	_sel_target = -1.0
 	_open_t = 0.0   # replay the open settle
 	queue_redraw()
 
@@ -132,6 +143,23 @@ func _unhandled_input(ev: InputEvent) -> void:
 			open(Mode.PAUSE)
 			main._sfx.play("tank_board", -8.0)
 		return
+	# Mouse drives menus too: hover selects, LMB activates — mouse-aim players
+	# shouldn't have to switch devices to press RESUME. Same geometry as _draw.
+	if ev is InputEventMouseMotion:
+		var hrow := _row_at(ev.position)
+		if hrow >= 0 and hrow != sel:
+			sel = hrow
+			_confirm = -1
+			queue_redraw()
+		return
+	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+		var crow := _row_at(ev.position)
+		if crow >= 0:
+			sel = crow
+			_press()
+			accept_event()
+			queue_redraw()
+		return
 	# Hall of Fame: left/right cycles the mode filter (ALL / CAMPAIGN / ENDLESS).
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
@@ -139,17 +167,14 @@ func _unhandled_input(ev: InputEvent) -> void:
 		queue_redraw()
 		return
 	if move != 0:
+		var prev := sel
 		sel = wrapi(sel + move, 0, _items().size())
+		if absi(sel - prev) > 1:
+			_sel_y = -1.0   # wrap: snap to the far end instead of gliding the whole list
 		_confirm = -1
 		main._sfx.play("pickup", -14.0, 1.3)
 	elif act:
-		# Destructive items need a second press (mis-press guard on a run).
-		if _is_destructive(sel) and _confirm != sel:
-			_confirm = sel
-			main._sfx.play("deny", -8.0)
-		else:
-			_confirm = -1
-			_activate()
+		_press()
 	elif back and mode == Mode.PAUSE:
 		mode = Mode.HIDDEN
 	elif back and (mode == Mode.HALL or mode == Mode.HOWTO):
@@ -157,6 +182,40 @@ func _unhandled_input(ev: InputEvent) -> void:
 	if move != 0 or hmove != 0 or act or back:
 		accept_event()
 	queue_redraw()
+
+
+func _press() -> void:
+	# Destructive items need a second press (mis-press guard on a run).
+	if _is_destructive(sel) and _confirm != sel:
+		_confirm = sel
+		main._sfx.play("deny", -8.0)
+	else:
+		_confirm = -1
+		_activate()
+
+
+func _row_geometry() -> Dictionary:
+	# Single source of truth for the button column layout — _draw and the mouse
+	# hit-test must agree or hover selects the wrong row.
+	var n := _items().size()
+	var many := n > 4
+	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 156.0)
+	var gap := minf(30.0 if many else 46.0, (310.0 - top) / maxf(1.0, float(n - 1)))
+	return {"top": top, "gap": gap, "bh": minf(BTN.y, gap - 3.0), "n": n}
+
+
+func _row_at(p: Vector2) -> int:
+	if mode == Mode.HALL or mode == Mode.HOWTO:
+		var r := Rect2(Vector2(320 - BTN.x / 2.0, 316), BTN * Vector2(1, 0.7))
+		return 0 if r.has_point(p) else -1
+	if absf(p.x - 320.0) > BTN.x / 2.0:
+		return -1
+	var g := _row_geometry()
+	for k in int(g["n"]):
+		var ry: float = float(g["top"]) + float(k) * float(g["gap"])
+		if p.y >= ry and p.y <= ry + float(g["bh"]):
+			return k
+	return -1
 
 
 func _toggle_bus(name: String) -> void:
@@ -254,19 +313,16 @@ func _draw() -> void:
 				_center_text("RUN #%d" % main._current_seed, 114, 8, Color(0.6, 0.66, 0.56, 0.75))
 	var mitems := _menu_items()   # dicts: label + destructive flag for pre-press tinting
 	var items := _items()
-	# Fit-to-height: gap derives from the item count so long lists (title = up to
-	# 10 rows, pause = 9) always land above the y=332 legend instead of running
-	# off the 360px screen — the old fixed gap drew PAUSE's last row at y=358.
-	var many: bool = items.size() > 4
-	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 156.0)
+	# Fit-to-height layout via the shared helper (the mouse hit-test reads the
+	# SAME numbers — drift here means hover selects the wrong row).
+	var g := _row_geometry()
+	var gap: float = g["gap"]
+	var bh: float = g["bh"]
+	var top: float = g["top"]
 	# Open settle: rows drop the last 12px into place as the scrim fades in
 	# (skipped under reduce-motion — the fade alone still smooths the cut).
 	if main._motion >= 0.5:
 		top += (1.0 - _open_t) * 12.0
-	# 310 budget = last row TOP; its ~18px cell bottom then clears the y=332 legend.
-	var gap := minf(30.0 if many else 46.0, (310.0 - top) / maxf(1.0, float(items.size() - 1)))
-	# Cell height tracks the gap so metal frames stop overprinting each other.
-	var bh := minf(BTN.y, gap - 3.0)
 	for k in items.size():
 		var r := Rect2(Vector2(320 - BTN.x / 2.0, top + k * gap), Vector2(BTN.x, bh))
 		var selected := k == sel
@@ -274,13 +330,13 @@ func _draw() -> void:
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
 			Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8))
 		if selected:
-			# Breathing selection glow that GLIDES between rows instead of teleporting.
-			# Both are stilled under REDUCE MOTION — the pause menu is where a
-			# motion-sensitive player spends the most time.
+			# Breathing selection glow that GLIDES between rows instead of teleporting
+			# (the ease itself runs framerate-independent in _process). Stilled under
+			# REDUCE MOTION — the pause menu is where a motion-sensitive player lives.
 			var ty := top + k * gap
+			_sel_target = ty
 			if _sel_y < 0.0 or main._motion < 0.5:
 				_sel_y = ty
-			_sel_y = lerpf(_sel_y, ty, 0.35)
 			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
 			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
 			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
@@ -291,6 +347,8 @@ func _draw() -> void:
 		if k < mitems.size() and mitems[k].get("destructive", false):
 			col = Color(1.0, 0.78, 0.65) if selected else Color(0.9, 0.7, 0.6)
 		var label: String = items[k]
+		if k < mitems.size() and mitems[k].get("destructive", false):
+			label += "  !"   # non-color destructive cue (hue alone fails protan players)
 		if _confirm == k:
 			label = "PRESS AGAIN TO CONFIRM"
 			col = Color(1.0, 0.5, 0.4)
@@ -343,7 +401,11 @@ func _draw_hall() -> void:
 	var col_x := [112, 148, 226, 306, 396]
 	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
 	for c in headers.size():
-		Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.7, 0.75, 0.6))
+		if c == 1:
+			var hw := Art.font().get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(0.7, 0.75, 0.6))
+		else:
+			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.7, 0.75, 0.6))
 	for i in mini(rows.size(), 8):
 		var run: Dictionary = rows[i]
 		var mode_s: String = "ENDLESS" if run["mode"] == "endless" else "CAMPAIGN"
@@ -356,7 +418,12 @@ func _draw_hall() -> void:
 		var y := 112 + i * 24
 		var cells := [str(i + 1), str(run["score"]), mode_s, reached, "x%d%s" % [run["streak"], tag]]
 		for c in cells.size():
-			Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
+			if c == 1:
+				# Right-aligned numerals: a 6-digit endless score can't crowd MODE.
+				var sw := Art.font().get_string_size(cells[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+				Art.text(self, cells[c], Vector2(214.0 - sw, y), 11, col)
+			else:
+				Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
 
 
 func _draw_howto() -> void:
