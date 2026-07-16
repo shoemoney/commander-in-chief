@@ -155,6 +155,7 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["pickup", -10.0, 0.7],
 	"grenadier_windup": ["throw", -8.0, 0.7],
+	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
 	"bunker_break": ["explosion", -4.0, 0.72],
