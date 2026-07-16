@@ -85,11 +85,18 @@ func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) ->
 		return
 	if not _MUSICAL.has(sound):
 		pitch *= randf_range(0.94, 1.06)
-	var p := _pool[0]   # steal the first if all 12 are busy
+	# Steal policy: prefer an idle voice; else take the one closest to finishing —
+	# index-0 stealing cut long booms mid-tail under heavy fire.
+	var p: AudioStreamPlayer2D = _pool[0]
+	var best_done := -1.0
 	for c in _pool:
 		if not c.playing:
 			p = c
 			break
+		var done := c.get_playback_position() / maxf(0.05, c.stream.get_length())
+		if done > best_done:
+			best_done = done
+			p = c
 	p.position = screen_pos
 	p.volume_db = vol_db
 	p.pitch_scale = pitch
