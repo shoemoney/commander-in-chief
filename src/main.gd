@@ -3097,15 +3097,21 @@ func _draw_projectiles() -> void:
 		var bpos := _to_screen(b["x"], b["y"])
 		# Travel streak behind the orb so incoming fire reads as moving ordnance,
 		# not a hovering dot (the player tracers already get this motion read).
-		var edir := Vector2(b["vx"], b["vy"]).normalized()
+		var evel := Vector2(b["vx"], b["vy"])
+		var edir := evel.normalized()
+		# Streak length scales with speed so a 2× round (sniper/ghillie, speed 6)
+		# visibly reads 2× the standard round (speed 3): ~5px → ~11px tail.
+		var espd := evel.length() / float(SimWorld.ENEMY_BULLET_SPEED)   # 1.0 standard, ~2.0 fast
+		var fast: bool = espd > 1.4
 		if edir.length() > 0.5:
-			draw_line(bpos - edir * 5.0, bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
-		# Hostile fire: small glowing red orb — ordnance, not infantry.
+			draw_line(bpos - edir * (5.0 + maxf(0.0, espd - 1.0) * 6.0), bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
+		# Hostile fire: small glowing red orb — ordnance, not infantry. Fast rounds
+		# burn a white-hot core so their speed reads before they reach you.
 		var egr := 4.4
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
 			false, Color(1.0, 0.3, 0.15, 0.55))
-		draw_circle(bpos, 1.6, Color(1.0, 0.55, 0.35))
-		draw_circle(bpos, 0.9, Color(1.0, 0.9, 0.7))
+		draw_circle(bpos, 1.6, Color(0.75, 0.9, 1.0) if fast else Color(1.0, 0.55, 0.35))
+		draw_circle(bpos, 0.9, Color(0.95, 1.0, 1.0) if fast else Color(1.0, 0.9, 0.7))
 
 
 func _draw_players() -> void:
