@@ -2211,7 +2211,10 @@ func _draw_tanks() -> void:
 		var barrel_angle := -PI / 2
 		if t["occupant"] >= 0:
 			barrel_angle = _aim_angle(sim.players[t["occupant"]])
-		_spr("tank_barrel", c + Vector2.from_angle(barrel_angle) * 10.0, barrel_angle + PI / 2, 0.62, burn_mod)
+		# Recoil: the barrel kicks back ~4px the instant it fires (fire_cd peaks),
+		# then eases forward as the cannon recovers — a fired shot now has weight.
+		var brecoil := float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS) * 4.0
+		_spr("tank_barrel", c + Vector2.from_angle(barrel_angle) * (10.0 - brecoil), barrel_angle + PI / 2, 0.62, burn_mod)
 		# Low-fuel telegraph: sputter smoke + warning before the ignite, so a
 		# cruising tank doesn't abruptly become 'on fire, 3s to live'.
 		if not t["burning"] and t["occupant"] >= 0 and t["fuel"] < 300:
