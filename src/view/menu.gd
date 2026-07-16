@@ -401,6 +401,9 @@ func _row_at(p: Vector2) -> int:
 func _toggle_bus(name: String) -> void:
 	var b := AudioServer.get_bus_index(name)
 	AudioServer.set_bus_mute(b, not AudioServer.is_bus_mute(b))
+	if name == "SFX":
+		# The jingle "UI" bus slaves to the SFX mute — one user-facing toggle.
+		AudioServer.set_bus_mute(AudioServer.get_bus_index("UI"), AudioServer.is_bus_mute(b))
 
 
 func _activate() -> void:

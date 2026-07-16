@@ -1490,6 +1490,8 @@ func _load_bests() -> void:
 		_rumble_on = cf.get_value("settings", "rumble", true)
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"),
 			cf.get_value("settings", "sfx_muted", false))
+		AudioServer.set_bus_mute(AudioServer.get_bus_index("UI"),
+			cf.get_value("settings", "sfx_muted", false))   # jingle bus slaves to the SFX mute
 		AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"),
 			cf.get_value("settings", "music_muted", false))
 		_fullscreen = cf.get_value("settings", "fullscreen", false)

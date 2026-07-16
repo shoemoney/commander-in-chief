@@ -16,8 +16,10 @@ const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
+var _ui_player := AudioStreamPlayer.new()   # jingles/stings: own bus, no combat limiter
 var _music := AudioStreamPlayer.new()
 var _pb: AudioStreamPlaybackPolyphonic
+var _ui_pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
 
 
@@ -33,6 +35,14 @@ func _ready() -> void:
 		AudioServer.add_bus(mi)
 		AudioServer.set_bus_name(mi, "Music")
 		AudioServer.set_bus_send(mi, "Master")
+	if AudioServer.get_bus_index("UI") == -1:
+		# Reward jingles bypass the SFX limiter: MG-spam pumping was ducking the
+		# buy/pickup/victory cues at the exact moment they fired (8/9 panel vote).
+		# Master's own limiter still backstops the sum.
+		var ui := AudioServer.get_bus_count()
+		AudioServer.add_bus(ui)
+		AudioServer.set_bus_name(ui, "UI")
+		AudioServer.set_bus_send(ui, "Master")
 	# Concussion low-pass on Master: swept open normally, clamped down for the
 	# 'ears ringing, world underwater' beat right after a near-death hit. Held
 	# by reference so a later Master effect can't shift its index out from us.
@@ -49,6 +59,13 @@ func _ready() -> void:
 	add_child(_player)
 	_player.play()
 	_pb = _player.get_stream_playback()
+	var ui_poly := AudioStreamPolyphonic.new()
+	ui_poly.polyphony = 8
+	_ui_player.stream = ui_poly
+	_ui_player.bus = "UI"
+	add_child(_ui_player)
+	_ui_player.play()
+	_ui_pb = _ui_player.get_stream_playback()
 	# Positional pool: the game draws in 640x360 screen space with no Camera2D,
 	# so a listener pinned at screen center anchors the stereo pan. Gentle
 	# attenuation only — arcade panning, not distance silence. (Sfx is a plain
@@ -76,8 +93,11 @@ func _ready() -> void:
 func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	if _pb == null or not _sounds.has(sound):
 		return
-	if not _MUSICAL.has(sound):
-		pitch *= randf_range(0.94, 1.06)
+	if _MUSICAL.has(sound):
+		if _ui_pb != null:   # jingles ride the unlimited UI bus, in key
+			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
+		return
+	pitch *= randf_range(0.94, 1.06)
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 
 
@@ -136,12 +156,30 @@ static func _sq(t: float, f: float) -> float:
 	return 1.0 if sin(TAU * f * t) >= 0.0 else -1.0
 
 
+static func _sqbl(t: float, f: float) -> float:
+	# Band-limited square: odd-harmonic sum capped below Nyquist. The naive ±1
+	# square aliases its upper harmonics into inharmonic grit — audible on the
+	# tonal cues even at 44.1k. Synthesis is load-time, so the loop is free.
+	var v := 0.0
+	var k := 1.0
+	while k * f < RATE * 0.45 and k <= 19.0:
+		v += sin(TAU * f * k * t) / k
+		k += 2.0
+	return v * (4.0 / PI) * 0.85
+
+
 static func _sweep(t: float, f0: float, f1: float, dur: float) -> float:
 	# Sine with linearly swept frequency (integrated phase).
 	return sin(TAU * (f0 * t + (f1 - f0) * t * t / (2.0 * dur)))
 
 
 func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
+	# Shared tail declick: several exp-decay buffers (explosion ~0.05-0.10,
+	# splash ~0.07) are still audible at the hard cut — ramp the last 5ms to
+	# zero here so every synth inherits it (the 6ms ramp in _notes is note-level).
+	var fade := mini(int(0.005 * RATE), samples.size())
+	for k in fade:
+		samples[samples.size() - fade + k] *= 1.0 - float(k + 1) / float(fade)
 	var data := PackedByteArray()
 	data.resize(samples.size() * 2)
 	for i in samples.size():
@@ -168,7 +206,7 @@ func _notes(freqs: Array[float], note_dur: float, gap := 0.0, square := true) ->
 		var start := int(k * step * RATE)
 		for j in int(note_dur * RATE):
 			var t := float(j) / RATE
-			var v := (_sq(t, f) if square else sin(TAU * f * t)) * exp(-t * 9.0) * 0.5
+			var v := (_sqbl(t, f) if square else sin(TAU * f * t)) * exp(-t * 9.0) * 0.5
 			# 6ms release ramp: the decay envelope is still ~53% when the note ends,
 			# and that hard step is an audible click on every pickup/buy jingle.
 			v *= minf(1.0, (note_dur - t) / 0.006)
@@ -221,14 +259,14 @@ func _synth_all() -> void:
 	var kill := _buf(0.15)
 	for i in kill.size():
 		var t := float(i) / RATE
-		kill[i] = _sq(t, 400.0 - t * 2000.0) * exp(-t * 18.0) * 0.45
+		kill[i] = _sqbl(t, maxf(60.0, 400.0 - t * 2000.0)) * exp(-t * 18.0) * 0.45
 	s["kill"] = kill
 
 	# Player down: dramatic dive + noise — must cut through everything.
 	var down := _buf(0.6)
 	for i in down.size():
 		var t := float(i) / RATE
-		down[i] = _sq(t, 320.0 - t * 450.0) * exp(-t * 5.0) * 0.6 + _nz(i) * exp(-t * 9.0) * 0.35
+		down[i] = _sqbl(t, maxf(50.0, 320.0 - t * 450.0)) * exp(-t * 5.0) * 0.6 + _nz(i) * exp(-t * 9.0) * 0.35
 	s["player_down"] = down
 
 	# Roll: short whoosh (shaped noise).
@@ -259,10 +297,12 @@ func _synth_all() -> void:
 
 	# Alarm: two-tone siren beep (observer spotted, tank on fire).
 	var alarm := _buf(0.44)
-	for i in alarm.size():
+	var aph := 0.0   # accumulated phase: sin(TAU*f*t) with stepping f jumped
+	for i in alarm.size():   # phase at each 820<->620 toggle = a click every 0.11s
 		var t := float(i) / RATE
 		var f := 820.0 if fmod(t, 0.22) < 0.11 else 620.0
-		alarm[i] = _sq(t, f) * 0.3 * minf(1.0, (0.44 - t) * 14.0)
+		aph += TAU * f / RATE
+		alarm[i] = (1.0 if sin(aph) >= 0.0 else -1.0) * 0.3 * minf(1.0, (0.44 - t) * 14.0)
 	s["alarm"] = alarm
 
 	# Vest break: metallic clang — detuned partials + noise snap.
