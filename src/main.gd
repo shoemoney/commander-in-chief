@@ -2591,7 +2591,8 @@ func _draw_colossus() -> void:
 func _draw_projectiles() -> void:
 	for g in sim.grenades:
 		var base := _to_screen(g["x"], g["y"])
-		draw_circle(base + Vector2(2, 2), 3.0, Color(0, 0, 0, 0.35))   # shadow
+		var zf := clampf(float(g["z"]) * PX * 0.02, 0.0, 0.6)   # shadow shrinks+fades as the frag climbs = reads as height
+		draw_circle(base + Vector2(2, 2), 3.0 * (1.0 - zf), Color(0, 0, 0, 0.35 * (1.0 - zf)))
 		var spin := float(Engine.get_physics_frames()) * 0.4
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
 		# Real frag silhouette (the capsule sprite read as a pill). Shells
@@ -2668,6 +2669,11 @@ func _draw_projectiles() -> void:
 		draw_circle(bpos, 1.3 if piercing else 1.1, Color(0.9, 1.0, 1.0) if piercing else Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
+		# Travel streak behind the orb so incoming fire reads as moving ordnance,
+		# not a hovering dot (the player tracers already get this motion read).
+		var edir := Vector2(b["vx"], b["vy"]).normalized()
+		if edir.length() > 0.5:
+			draw_line(bpos - edir * 5.0, bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
 		# Hostile fire: small glowing red orb — ordnance, not infantry.
 		var egr := 4.4
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
