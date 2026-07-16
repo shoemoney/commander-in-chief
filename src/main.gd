@@ -2454,8 +2454,8 @@ func _draw_barrels() -> void:
 		var bp := _to_screen(bl["x"], bl["y"])
 		_ground_shadow(bp, 4.0)
 		# Hazard-orange live ordnance, distinct from the mossy scenery barrels.
-		var wb := Art.pulse(0.09)
-		_spr("barrel", bp, 0.0, 1.4, Color(1.9, 0.85, 0.45))
+		var wb := 1.0 if _motion < 0.5 else Art.pulse(0.09)   # steady under reduce-motion
+		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
 		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
 		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
 
@@ -2805,8 +2805,10 @@ func _draw_enemies() -> void:
 				var lv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
 				if lv.length() > 1.0:
 					var ld := lv.normalized()
-					draw_line(epos, epos + ld * 18.0, Color(1.0, 0.65, 0.28, 0.5), 1.5)
-					draw_circle(epos + ld * 9.0, 1.6, Color(1.0, 0.85, 0.4, 0.7))
+					# Red lethal-lane vocabulary (matches the sniper "get off this line"),
+					# long enough to read as a whole lane, louder than a windup (ACTIVE fire).
+					draw_line(epos, epos + ld * 44.0, Color(1.0, 0.15, 0.12, 0.7), 2.0)
+					draw_circle(epos + ld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
