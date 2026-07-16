@@ -2762,7 +2762,17 @@ func _draw_enemies() -> void:
 				_spr("frogman", epos, face, 0.4 + sfrac * 0.1,
 					Color(0.7, 0.9, 0.95, 0.4 + sfrac * 0.6))
 			else:
-				_spr("frogman", epos, face, 0.5)
+				var flunge: int = e.get("lunge_ticks", 0)
+				if flunge > 0:
+					# Lethal lunge: the safe surface window is over — contact now
+					# kills. Hot-red tint + a forward wake smear along its facing
+					# sell "this is the dangerous frame", so the kill window that
+					# just closed isn't followed by a silent death.
+					var fdir := Vector2.from_angle(face)
+					draw_line(epos - fdir * 10.0, epos + fdir * 2.0, Color(1.0, 0.3, 0.2, 0.5), 3.0)
+					_spr("frogman", epos, face, 0.52, Color(1.5, 0.5, 0.4))
+				else:
+					_spr("frogman", epos, face, 0.5)
 		elif e["kind"] == "sniper":
 			# Paints a laser line on its target during the long windup — the
 			# 'get off this line NOW' telegraph. Break LOS or sidestep.
