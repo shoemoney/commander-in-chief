@@ -133,13 +133,17 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
+## RE-RECORDED (2026-07-16, P3b design changes): roll-along-aim, grenade edge-detect, airstrike
+## out of crate pool, boss HP player-count scaling, score-on-purchase, early specials gate. The
+## airstrike-out-of-pool change shifts endless RNG (one fewer Fisher-Yates swap per shop) and the
+## early-specials/score-on-buy changes move the stream; samples 1-5 recomputed (sample 0 unchanged).
 const ENDLESS_GOLDEN: Array[int] = [
 	8681953085351081569,
-	6059987203174684048,
-	3174963771928234834,
-	1740422521085536138,
-	2445779400911443234,
-	7263092349450529370,
+	1643062305181061384,
+	3990697898952355881,
+	4545877323475357233,
+	54479342541401273,
+	9213604703022512321,
 ]
 
 
