@@ -356,12 +356,34 @@ func _draw() -> void:
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
-			var gcol_tank := Color(0.6, 0.85, 1.0) if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX \
-				else Color(0.95, 0.96, 0.9)
+			var gcol_tank := Color(0.95, 0.96, 0.9)
+			if p["grenade_ammo"] == 0:
+				# 0 shells = the cannon is dead — same proactive dry escalation as
+				# MG ammo (the old dry-flash only fired AFTER a wasted attempt).
+				gcol_tank = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+				gcol_tank = Color(0.6, 0.85, 1.0)
+			var tg_x := px
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
-			if t["burning"] and _mblink(8):
-				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
-				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
+			# Cannon cooldown (45t — longer than bash or grenade): the same draining
+			# ring every other fire cooldown got, so a mid-cooldown shot reads as
+			# "wait a beat", not dropped input. The cannon draws from the grenade
+			# pool, so the ring rides the grenade chip.
+			if t["fire_cd"] > 0:
+				var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(tg_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
+				draw_arc(Vector2(tg_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			if t["burning"]:
+				if _mblink(8):
+					var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+					Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
+			else:
+				# The sim decrements pierce/spread/rend/smoke unconditionally while
+				# riding — without the shared chip row a Trench Gun expired invisibly
+				# mid-ride and the 2s red expiry warning could never fire in a tank.
+				px = _buff_chips(p, px, ry)
 		else:
 			# Low-ammo escalation: amber under 20, blinking red when dry.
 			var ammo: int = p["mg_ammo"]
@@ -393,7 +415,11 @@ func _draw() -> void:
 			px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
-			if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+			if p["grenade_ammo"] == 0:
+				# Proactive dry state, matching the MG ammo escalation — the dry-flash
+				# below only fires AFTER a wasted throw attempt.
+				gcol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 				gcol = Color(0.6, 0.85, 1.0)
 			if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
@@ -422,32 +448,7 @@ func _draw() -> void:
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * (1.0 - rfrac), 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-			if p["vest"]:
-				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
-				px += ICON + 2.0
-			# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
-			# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
-			if p["pierce_ticks"] > 0:
-				# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
-				# icon is the non-color channel (pierce+rend both active = twin rifles
-				# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
-				px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)))
-			if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
-				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)))
-			if p["triple"]:
-				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
-			if p["rend_ticks"] > 0:
-				# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
-				# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
-				px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)))
-			if p["smoke_ticks"] > 0:
-				px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)))
-			# Carried claymore charges: a count, not a countdown — and the verb
-			# glyph rides along so "how do I plant this" never dead-ends here.
-			if p["claymores"] > 0:
-				px = _stat("wep_claymore", "x%d" % p["claymores"], px, ry, Color(0.75, 0.9, 0.6))
-				Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0)
-				px += 12.0
+			px = _buff_chips(p, px, ry)
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
 			if p["boost_ticks"] > 0:
@@ -485,6 +486,39 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
 	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
 	return _text("%ds" % maxi(0, (t["fuel"] + 59) / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0   # ceil: "0s" only when actually empty
+
+
+## Vest + timed-buff + claymore chip run, shared by the on-foot AND in-tank player
+## rows — the sim decrements the buff timers unconditionally while riding, so the
+## tank row must show (and expiry-warn) the same chips instead of dropping them.
+func _buff_chips(p: Dictionary, px: float, ry: float) -> float:
+	if p["vest"]:
+		draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
+		px += ICON + 2.0
+	# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
+	# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
+	if p["pierce_ticks"] > 0:
+		# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
+		# icon is the non-color channel (pierce+rend both active = twin rifles
+		# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
+		px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)))
+	if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
+		px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)))
+	if p["triple"]:
+		px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
+	if p["rend_ticks"] > 0:
+		# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
+		# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
+		px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)))
+	if p["smoke_ticks"] > 0:
+		px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)))
+	# Carried claymore charges: a count, not a countdown — and the verb
+	# glyph rides along so "how do I plant this" never dead-ends here.
+	if p["claymores"] > 0:
+		px = _stat("wep_claymore", "x%d" % p["claymores"], px, ry, Color(0.75, 0.9, 0.6))
+		Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0)
+		px += 12.0
+	return px
 
 
 ## Exponential catch-up toward `target`, snapping once close — a big jump
