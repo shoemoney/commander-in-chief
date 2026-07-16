@@ -316,6 +316,13 @@ func _paint_bg(canvas: Node2D) -> void:
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
 	var march := _sector_march()
+	# Two passes (all grass, then all dirt): interleaving the dirt patches split
+	# the 80-rect grass run into ~27 texture-switch batches (~20 extra draw calls
+	# per frame). Dirt widths are clamped to their tile so the deferred draws
+	# stay pixel-identical to the old order, where the next column's grass
+	# painted over any bleed.
+	var dirt_rects: Array[Rect2] = []
+	var dirt_col := Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7)   # churned dirt, cinders late
 	for ty in 8:
 		for tx in 10:
 			var pos := Vector2(tx * 64.0, oy + ty * 64.0)
@@ -324,8 +331,11 @@ func _paint_bg(canvas: Node2D) -> void:
 			canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
 				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
 			if h % 6 == 0:
-				canvas.draw_texture_rect(Art.tex("dirt"), Rect2(pos + Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7)), Vector2(40.0 + float(h % 5) * 6.0, 34.0 + float(h % 4) * 6.0)), false,
-					Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7))   # churned dirt, cinders late
+				var doff := Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7))
+				dirt_rects.append(Rect2(pos + doff,
+					Vector2(minf(40.0 + float(h % 5) * 6.0, 64.0 - doff.x), 34.0 + float(h % 4) * 6.0)))
+	for r in dirt_rects:
+		canvas.draw_texture_rect(Art.tex("dirt"), r, false, dirt_col)
 
 
 func _process(_delta: float) -> void:
