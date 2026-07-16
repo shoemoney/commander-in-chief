@@ -2109,7 +2109,7 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		w["t"] = lerpf(float(w.get("t", 1.0)), 1.0, 0.35)
 		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
 		# selection used to be a one-way trap: any flick force-bought on release.
-		var cancel := Input.is_key_pressed(KEY_C)
+		var cancel := Input.is_physical_key_pressed(KEY_C)   # physical, matching the roll bind (AZERTY-safe)
 		for pad in Input.get_connected_joypads():
 			if Input.is_joy_button_pressed(pad, JOY_BUTTON_B):
 				cancel = true

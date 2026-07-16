@@ -713,9 +713,9 @@ func _draw_hall() -> void:
 	for c in headers.size():
 		if c == 1:
 			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(0.84, 0.86, 0.78))
+			Art.text(self, headers[c], Vector2(214.0 - hw, 92), 10, Color(1.0, 0.82, 0.4))
 		else:
-			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(0.84, 0.86, 0.78))
+			Art.text(self, headers[c], Vector2(col_x[c], 92), 10, Color(1.0, 0.82, 0.4))
 	for i in mini(rows.size(), 8):
 		var run: Dictionary = rows[i]
 		var mode_s: String = "ENDLESS" if run.get("mode", "campaign") == "endless" else "CAMPAIGN"
