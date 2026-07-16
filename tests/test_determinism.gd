@@ -136,16 +136,13 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-13, PR#1 reconcile merge): see GOLDEN note. Endless samples recomputed
 ## from the merged sim (deaths_this_wave + wave mutators + sapper/ghillie enemies all live) and
 ## match main's committed endless checksums exactly.
-## RE-RECORDED (2026-07-16, grafted design-loop iter 29 — Explosive Fuel Barrels): a new
-## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
-## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
-## structural add shifts every endless sample too.
-## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
-## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
-## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
+## RE-RECORDED (2026-07-16, merge reconcile — P3b design fixes + grafted iter25/iter29): the P3b
+## fixes (roll-along-aim, grenade edge-detect, airstrike out of crate pool, boss HP player-count
+## scaling, score-on-purchase, early specials gate) stack with Triple Shot (hashed p["triple"]) and
+## Explosive Fuel Barrels (checksummed barrels[]); all endless samples recomputed for the merged sim.
 const ENDLESS_GOLDEN: Array[int] = [
-	9023438600815067543, 9125626483154539698, 1978090213708781256,
-	3166977500830568304, 2765709581460001016, 674941985957074656,
+	9023438600815067543, 4739873706484850096, 7055349867750677465,
+	4832767246026688017, 8007662793683766665, 1658233155002909313,
 ]
 
 

@@ -159,7 +159,7 @@ func test_wave_clear_advances_wave_and_opens_shop() -> void:
 	sim.enemies.clear()
 	sim.step([_idle()])
 	Runner.T.ok(sim.intermission_ticks > 0, "clearing the wave opens the intermission")
-	Runner.T.eq(sim.pickups.size(), 4, "shop stocked four crates")
+	Runner.T.eq(sim.pickups.size(), 3, "shop stocked three crates (airstrike is wheel-only)")
 	Runner.T.eq(sim.wave, wave_before, "wave number itself hasn't advanced yet")
 	for i in SimWorld.WAVE_INTERMISSION_TICKS + 2:
 		sim.step([_idle()])
