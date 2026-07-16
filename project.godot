@@ -22,6 +22,17 @@ window/size/window_min_width=640
 window/size/window_min_height=360
 window/stretch/scale_mode="integer"
 
+[importer_defaults]
+
+; New textures default to VRAM-compressed (mode 2) — three separate art drops
+; (legacy-art bakes, asset-loop p2, brand glyphs) each landed Lossless and re-grew
+; the VRAM debt the opt-loop keeps collecting. CPU-read art (custom cursors,
+; anything .get_image()d without decompress) must OPT OUT with an explicit
+; compress/mode=0 in its .import.
+texture={
+"compress/mode": 2
+}
+
 [physics]
 
 common/physics_ticks_per_second=60
