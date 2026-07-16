@@ -76,6 +76,7 @@ var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame allo
 var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
+var _scan_mat: ShaderMaterial        # CRT scanline quad material; strength pulses on hitstop
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
@@ -230,9 +231,9 @@ func _setup_screen_fx() -> void:
 		scan.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		scan.size = get_viewport_rect().size
 		scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var scan_mat := ShaderMaterial.new()
-		scan_mat.shader = load("res://src/view/crt.gdshader")
-		scan.material = scan_mat
+		_scan_mat = ShaderMaterial.new()
+		_scan_mat.shader = load("res://src/view/crt.gdshader")
+		scan.material = _scan_mat
 		fx_layer.add_child(scan)
 	_screen_fx_rect = ColorRect.new()
 	_screen_fx_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -353,6 +354,13 @@ func _process(_delta: float) -> void:
 	_screen_fx_rect.visible = on
 	if on:
 		_screen_fx_mat.set_shader_parameter("concussion", amt)
+	# CRT scanlines surge darker on a big hit and ease back as the freeze decays —
+	# reuses the already-drawn scan quad (zero added fillrate). Baseline 0.08 = the
+	# shader default, so at rest the look is unchanged. Null when the scan quad is
+	# skipped (canvas_items stretch / movie capture); _motion-gated for reduce-motion.
+	if _scan_mat != null:
+		var hs := clampf(float(_hitstop_frames) / 10.0, 0.0, 1.0) * _motion
+		_scan_mat.set_shader_parameter("strength", 0.08 + hs * 0.12)
 
 
 func start_game(endless: bool) -> void:
@@ -651,6 +659,7 @@ func _physics_process(_delta: float) -> void:
 func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
+	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
 	for ev in sim.events:
 		var kind: String = ev["t"]
 		if kind == "pickup":
@@ -665,11 +674,19 @@ func _consume_events() -> void:
 					"col": Color(0.55, 0.95, 1.0) if is_pierce else Color(1.0, 0.82, 0.45)})
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
+		elif kind == "explosion":
+			# Up to 5 explosion events fire in one tick (colossus death-ring, bunker
+			# clusters); stacking 5 full booms pumps the HardLimiter to mush. Gate to
+			# one boom per tick — same idiom as the armor/boss pings above.
+			if not explosion_pinged:
+				explosion_pinged = true
+				var esnd: Array = _EVENT_SOUND["explosion"]
+				_sfx.play_at(esnd[0], _to_screen(ev["x"], ev["y"]), esnd[1], esnd[2])
 		elif _EVENT_SOUND.has(kind):
 			var snd: Array = _EVENT_SOUND[kind]
 			# Positional combat sounds pan/attenuate from where they happened;
 			# UI/jingle/alarm cues stay centered.
-			if kind == "explosion" or kind == "enemy_shot":
+			if kind == "enemy_shot":
 				_sfx.play_at(snd[0], _to_screen(ev["x"], ev["y"]), snd[1], snd[2])
 			else:
 				_sfx.play(snd[0], snd[1], snd[2])
@@ -964,6 +981,14 @@ func _ev_explosion(ev: Dictionary) -> void:
 	_blast_debris(ev["x"], ev["y"], wet)
 	if not wet:
 		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+		# Lingering smoke drifts up after the flash — a blast site used to clear to
+		# bare scorch in ~0.3s while wave/gate spawns billow. Reuses the proven
+		# long-life fx_smoke card + a gentle rise (move) so it reads as air.
+		for si in 2:
+			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+				"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
+				"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+				"col": Color(0.25, 0.22, 0.2, 0.7)})
 
 
 func _ev_kill(ev: Dictionary) -> void:
@@ -1489,7 +1514,12 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 
 
 func _update_feel() -> void:
-	_trauma = maxf(0.0, _trauma - 0.03)
+	# Impact envelopes (_trauma/_punch/_kick) HOLD at peak through the hitstop
+	# freeze — otherwise the biggest hits (which set the longest freeze) bleed
+	# ~85% of their shake+zoom-punch off before the world unfreezes, gutting the
+	# springback that should play over the resuming motion.
+	if _hitstop_frames == 0:
+		_trauma = maxf(0.0, _trauma - 0.03)
 	# Impact envelopes decay multiplicatively (fast drop, long tail) so hits snap;
 	# linear release reads flat. Floors avoid a lingering near-zero tail.
 	_flash_alpha = _flash_alpha * 0.7 if _flash_alpha > 0.01 else 0.0
@@ -1501,7 +1531,8 @@ func _update_feel() -> void:
 	for _hi in _hitmarker.size():
 		_hitmarker[_hi] = _hitmarker[_hi] * 0.6 if _hitmarker[_hi] > 0.01 else 0.0
 	_hit_dir_t = maxf(0.0, _hit_dir_t - 0.03)
-	_punch = _punch * 0.82 if _punch > 0.002 else 0.0
+	if _hitstop_frames == 0:
+		_punch = _punch * 0.82 if _punch > 0.002 else 0.0
 	_fade = maxf(0.0, _fade - 0.06)
 	_duck = maxf(0.0, _duck - 0.05)
 	_concussion = _concussion * 0.9 if _concussion > 0.01 else 0.0   # match the multiplicative grammar above
@@ -1572,7 +1603,8 @@ func _update_feel() -> void:
 			_down_anim[i] = maxf(0.0, _down_anim[i] - 0.15)
 		else:
 			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
-	_kick *= 0.78
+	if _hitstop_frames == 0:
+		_kick *= 0.78
 	# Gamepad rumble: one pooled pulse per frame across connected pads.
 	if _rumble > 0.01:
 		if _rumble_on:
@@ -2622,7 +2654,8 @@ func _draw_colossus() -> void:
 func _draw_projectiles() -> void:
 	for g in sim.grenades:
 		var base := _to_screen(g["x"], g["y"])
-		draw_circle(base + Vector2(2, 2), 3.0, Color(0, 0, 0, 0.35))   # shadow
+		var zf := clampf(float(g["z"]) * PX * 0.02, 0.0, 0.6)   # shadow shrinks+fades as the frag climbs = reads as height
+		draw_circle(base + Vector2(2, 2), 3.0 * (1.0 - zf), Color(0, 0, 0, 0.35 * (1.0 - zf)))
 		# Per-grenade spin phase (hashed off x) — a volley no longer rotates in lockstep.
 		var spin := float(Engine.get_physics_frames()) * 0.4 + float(g["x"] % 6283) * 0.001
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
@@ -2700,6 +2733,11 @@ func _draw_projectiles() -> void:
 		draw_circle(bpos, 1.3 if piercing else 1.1, Color(0.9, 1.0, 1.0) if piercing else Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
+		# Travel streak behind the orb so incoming fire reads as moving ordnance,
+		# not a hovering dot (the player tracers already get this motion read).
+		var edir := Vector2(b["vx"], b["vy"]).normalized()
+		if edir.length() > 0.5:
+			draw_line(bpos - edir * 5.0, bpos, Color(1.0, 0.3, 0.15, 0.5), 2.0)
 		# Hostile fire: small glowing red orb — ordnance, not infantry.
 		var egr := 4.4
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
