@@ -148,7 +148,7 @@ func _draw() -> void:
 			# instant a player goes down. Reads the hashed sim field, no view state.
 			if sim.wave > 1 and sim.deaths_this_wave == 0 and _fits(x, _tw("DEATHLESS") + 8.0):
 				var dpul: float = 1.0 if main._motion < 0.5 else Art.pulse(0.25)
-				var dcol := Color(0.55, 0.9, 0.5).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
+				var dcol := Art.safe(Color(0.55, 0.9, 0.5)).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
 				x = _text("DEATHLESS", x, y + ICON - 3.0, dcol) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:

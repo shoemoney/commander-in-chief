@@ -3389,7 +3389,7 @@ func _draw_objective_markers() -> void:
 		else:
 			# Free crate (guaranteed gate cache) — supplies worth pathing to.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
-				"icon": "hud_gunshop", "col": Color(0.7, 0.85, 0.6)})
+				"icon": "hud_gunshop", "col": Art.safe(Color(0.7, 0.85, 0.6))})
 	# Off-screen diamonds are capped like the threat chevrons (6): marks[] is
 	# built objectives-first, so a PAYDAY crate flood can't ring the viewport
 	# and drown the gate/boss pointers. On-screen icons are uncapped (anchored).
