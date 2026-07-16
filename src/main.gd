@@ -5048,14 +5048,19 @@ func _draw_banners(top_msg: String) -> void:
 			var bsize := 16
 			if _motion >= 0.5:
 				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
-			_banner_plate(btext, by, bsize, a)
+			# A badge (if any) sits left of the centered text — the plate must
+			# extend to cover it, or the skull/target/lightning floats off the
+			# metal onto bare shaking terrain (the plate exists to prevent exactly
+			# that). Measure it BEFORE plating so the plate can reserve its width.
+			var bic: String = bn.get("icon", "")
+			var bis := float(bsize) + 4.0
+			var pad_left := (bis + 8.0) if not bic.is_empty() else 0.0
+			_banner_plate(btext, by, bsize, a, pad_left)
 			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
 			# Threat-callout badge (skull/target/lightning) fronting the text —
 			# only set by the alarm banners, so routine splashes stay clean.
-			var bic: String = bn.get("icon", "")
 			if not bic.is_empty():
 				var biw := Art.font().get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, bsize).x
-				var bis := float(bsize) + 4.0
 				draw_texture_rect(Art.tex(bic),
 					Rect2(320.0 - biw / 2.0 - bis - 6.0, by - float(bsize) / 2.0 - bis / 2.0, bis, bis),
 					false, Color(bc.r, bc.g, bc.b, a))
@@ -5143,11 +5148,14 @@ func _draw_banners(top_msg: String) -> void:
 ## Shared victory/debrief result-card scaffold: translucent panel + centered
 ## title + a stack of centered stat rows (each optionally icon-prefixed).
 ## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?}.
-func _banner_plate(txt: String, y: float, size: int, a: float) -> void:
+func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
 	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	_metal_plate(Rect2(320.0 - w / 2.0 - 5.0, y - size - 2.0, w + 10.0, size + 7.0), a)
+	# pad_left extends the plate leftward under a fronting badge; the text stays
+	# centered on 320, so only the left edge grows (right stays symmetric to text).
+	_metal_plate(Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0,
+		w + 10.0 + pad_left, size + 7.0), a)
 
 
 func _metal_plate(r: Rect2, a: float) -> void:
