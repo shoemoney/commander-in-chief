@@ -16,9 +16,10 @@ const SCREEN_W := 640.0
 const SCREEN_H := 360.0
 const SCREEN_CENTER := Vector2(320, 180)
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
-const _LITTER := ["barrel", "crate_stack", "rock1", "rock2", "wreck", "tent",
-	"watchtower", "barbedwire", "barrier", "ammobox",
-	"wreck_apc", "wreck_technical", "wreck_light_tank"]
+# Litter biases with the run: early sectors are an intact outpost (tents/crates/
+# rocks), late sectors a wrecked front (hulks/wire/towers). Picked by _sector_march.
+const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammobox", "barrier"]
+const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank"]
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
@@ -2004,8 +2005,9 @@ func _draw_terrain() -> void:
 			var ly_px := ly + float((hl / 9) % 40)
 			if sim._in_water(int(lx / PX), sim.camera_top + int(ly_px / PX)):
 				continue
+			var pool := _LITTER_LATE if (hl % 100) < int(_sector_march() * 100.0) else _LITTER_EARLY
 			_ground_shadow(Vector2(lx, ly_px), 5.0)
-			_spr(_LITTER[(hl / 40) % _LITTER.size()], Vector2(lx, ly_px),
+			_spr(pool[(hl / 40) % pool.size()], Vector2(lx, ly_px),
 				float(hl % 628) / 100.0, 1.0)
 
 
