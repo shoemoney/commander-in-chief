@@ -3902,13 +3902,29 @@ func _draw_players() -> void:
 					var bp := Art.pulse(0.25)
 					draw_arc(pos, SimWorld.BASH_RADIUS * PX, 0, TAU, 20,
 						Color(1.0, 0.55, 0.2, 0.3 + bp * 0.2), 1.5)
+				# Shape follows the fire pattern, not just hue (protan-safe): the
+				# pierce octagon rings the point it punches through; the fan
+				# (Spread pickup AND permanent Triple) wears a WIDE mirrored
+				# bracket pair ( ) — the shotgun-bracket card is a single half,
+				# drawn twice (negative rect width = horizontal flip).
+				var rtex := Art.tex("ui_reticle")
+				var rects: Array[Rect2] = [Rect2(-rrect.size / 2.0, rrect.size)]
+				if p["pierce_ticks"] > 0:
+					rtex = Art.tex("ui_ret_pierce")
+				elif p["spread_ticks"] > 0 or p["triple"]:
+					rtex = Art.tex("ui_ret_spread")
+					var bw := rrect.size.x * 0.45
+					rects = [Rect2(-rrect.size.x * 0.62, -rrect.size.y / 2.0, bw, rrect.size.y),
+						Rect2(rrect.size.x * 0.62, -rrect.size.y / 2.0, -bw, rrect.size.y)]
 				# Confirm-thump: the reticle itself scale-punches on a landed hit.
 				var rpunch := 1.0 + (_hitmarker[i] if i < _hitmarker.size() else 0.0) * 0.3
 				var rcen := rrect.get_center()
 				draw_set_transform(rcen, 0.0, Vector2.ONE * rpunch)
-				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position - rcen + Vector2(1, 1), rrect.size),
-					false, Color(0, 0, 0, 0.55))
-				draw_texture_rect(Art.tex("ui_reticle"), Rect2(rrect.position - rcen, rrect.size), false, rcol)
+				for rd in rects:
+					draw_texture_rect(rtex, Rect2(rd.position + Vector2(1, 1), rd.size),
+						false, Color(0, 0, 0, 0.55))
+				for rd in rects:
+					draw_texture_rect(rtex, rd, false, rcol)
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				# Hitmarker: reticle flicks bright + kicks four ticks on a landed hit.
 				if i < _hitmarker.size() and _hitmarker[i] > 0.01:
@@ -4869,10 +4885,16 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	_spr("m_jet", Vector2(SCREEN_W * 0.5, jy), PI, 0.6)
 	# Ground-zero marker: a billowing smoke column at the strike center for the
 	# whole telegraph (scale pulse = billow) — the red wash finally points somewhere.
+	# Real plume card (Particle_FX fumes), not the wep_smoke grenade-canister
+	# pickup sprite that stood in for it since p2. Second card rides higher and
+	# fainter so the column reads as RISING, not a stamped decal.
 	var bil := 1.0 + 0.12 * sin(float(Engine.get_physics_frames()) * 0.2)
 	var msz := (34.0 + frac * 20.0) * bil
-	draw_texture_rect(Art.tex("wep_smoke"), Rect2(SCREEN_CENTER - Vector2(msz / 2.0, msz),
+	draw_texture_rect(Art.tex("fx_fumes"), Rect2(SCREEN_CENTER - Vector2(msz / 2.0, msz),
 		Vector2(msz, msz)), false, Color(1.0, 0.75, 0.5, 0.45 + frac * 0.3))
+	var msz2 := msz * 0.7
+	draw_texture_rect(Art.tex("fx_smoke"), Rect2(SCREEN_CENTER - Vector2(msz2 / 2.0, msz + msz2 * 0.6),
+		Vector2(msz2, msz2)), false, Color(1.0, 0.8, 0.6, 0.2 + frac * 0.15))
 	if top_msg != "airstrike":
 		return
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)

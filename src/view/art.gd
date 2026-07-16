@@ -3,8 +3,10 @@ extends RefCounted
 ## Sprite registry for the view. Units/vehicles/props are top-down renders of
 ## legacy 3D pack Military 3D models, baked to sprites by tools/bake_sprites.gd
 ## (see assets/legacy-art/). Ground tiles, projectiles and FX remain Kenney CC0
-## (kenney.nl) — legacy art ships no seamless 2D tilesets. View-layer only; the sim
-## never touches textures.
+## (kenney.nl). POLYGON_Nature DOES ship tiling terrain PNGs (vendor
+## Ground_Textures/: Grass, Mud, Sand + normals) — swapping the ground is
+## parked on an art-direction call: painterly terrain vs the pixel-integer
+## look. View-layer only; the sim never touches textures.
 ##
 ## SCALE folds each legacy art render down to the on-screen footprint of the Kenney
 ## sprite it replaced, so the draw calls in main.gd keep their original scale
@@ -56,6 +58,8 @@ const TEX := {
 	"hud_gunshop": preload(SY + "hud/ICON_Map_GunShop.png"),
 	"hud_vehicle": preload(SY + "hud/ICON_Map_Vehicle.png"),
 	"hud_lightning": preload(SY + "hud/ICON_Map_Lightning.png"),
+	"hud_fire": preload(SY + "hud/ICON_Map_Fire.png"),
+	"hud_radiation": preload(SY + "hud/ICON_Map_Radiation.png"),
 	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
 	"ui_wheel_socket": preload(SY + "ui/wheel_socket.png"),
 	"ui_bar_frame": preload(SY + "ui/bar_frame.png"),
@@ -69,6 +73,11 @@ const TEX := {
 	"ui_menu_button": preload(SY + "ui/menu_button.png"),
 	"ui_menu_button_sel": preload(SY + "ui/menu_button_sel.png"),
 	"ui_reticle": preload(SY + "ui/reticle.png"),
+	# Weapon-state reticle silhouettes (Apocalypse HUD) — pierce/spread stop being
+	# hue-only signals (protan-safe). Bracket_Sml is byte-identical to ui_reticle,
+	# so the default keeps its file; these two are genuinely different shapes.
+	"ui_ret_spread": preload(SY + "hud/SPR_HUD_Reticle_Bracket_Shotgun.png"),  # 128x256 — draw at half width
+	"ui_ret_pierce": preload(SY + "hud/SPR_HUD_Reticle_Circle_Med.png"),
 	"ui_vignette": preload(SY + "ui/vignette.png"),
 	# Apocalypse HUD screen-space combat-feedback cards.
 	"hudfx_hitlines": preload(SY + "hud/hudfx_hitlines.png"),
@@ -102,6 +111,8 @@ const TEX := {
 	"bullet": preload(KN + "bullet.png"),
 	"enemy_bullet": preload(KN + "enemy_bullet.png"),
 	"grenade": preload(KN + "grenade.png"),
+	# Explosion frames: VERIFIED vendor non-match (no owned pack ships explosion
+	# art — Particle_FX is crystals/trails/rings). Keep Kenney; skip in asset loops.
 	"explosion0": preload(KN + "explosion0.png"),
 	"explosion1": preload(KN + "explosion1.png"),
 	"explosion2": preload(KN + "explosion2.png"),

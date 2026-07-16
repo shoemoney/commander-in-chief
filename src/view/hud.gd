@@ -238,9 +238,20 @@ func _draw() -> void:
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
 				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]
+				# Icon badge per mutator (every other threat callout got one in p3):
+				# lightning=fast spawns, skull=elites, target=spotted, coin=double
+				# bounties, radiation=hazard field (vision dims), fire=frenzy speed.
+				var micons: Array[String] = ["", "hud_lightning", "hud_skull", "hud_target",
+					"icon_coin", "hud_radiation", "hud_fire"]
 				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
-				if mchip != "" and _fits(x, _tw(mchip) + 8.0):
-					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
+				if mchip != "" and _fits(x, ICON + 3.0 + _tw(mchip) + 8.0):
+					var mcol := Color(1.0, 0.6, 0.35)
+					# icon_coin is a colored bake — keep it gold; the white map
+					# glyphs take the chip tint.
+					var micon: String = micons[sim.wave_mod]
+					draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
+						Color.WHITE if micon == "icon_coin" else mcol)
+					x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
 		var opened := 0
