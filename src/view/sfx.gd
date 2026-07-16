@@ -51,7 +51,8 @@ func _ready() -> void:
 	_pb = _player.get_stream_playback()
 	# Positional pool: the game draws in 640x360 screen space with no Camera2D,
 	# so a listener pinned at screen center anchors the stereo pan. Gentle
-	# attenuation only — arcade panning, not distance silence.
+	# attenuation only — arcade panning, not distance silence. (Sfx is a plain
+	# Node, so these Node2Ds sit outside main's shake/zoom chain — shake-immune.)
 	var listener := AudioListener2D.new()
 	listener.position = Vector2(320, 180)
 	add_child(listener)
@@ -116,7 +117,11 @@ func set_music_intensity(level: float, duck := 0.0) -> void:
 func set_concussion(amount: float) -> void:
 	## amount 0 = clear (20.5kHz), 1 = fully muffled (~500Hz).
 	if _lpf != null:
-		_lpf.cutoff_hz = lerpf(20500.0, 500.0, clampf(amount, 0.0, 1.0))
+		var a := clampf(amount, 0.0, 1.0)
+		_lpf.cutoff_hz = lerpf(20500.0, 500.0, a)
+		# Resonant peak at the cutoff: a flat LPF sweep is just a blanket — the
+		# bump adds the boxy 'underwater, ears ringing' coloration the beat wants.
+		_lpf.resonance = lerpf(0.5, 2.4, a)
 
 
 # --- Synthesis toolkit -------------------------------------------------------
@@ -164,6 +169,9 @@ func _notes(freqs: Array[float], note_dur: float, gap := 0.0, square := true) ->
 		for j in int(note_dur * RATE):
 			var t := float(j) / RATE
 			var v := (_sq(t, f) if square else sin(TAU * f * t)) * exp(-t * 9.0) * 0.5
+			# 6ms release ramp: the decay envelope is still ~53% when the note ends,
+			# and that hard step is an audible click on every pickup/buy jingle.
+			v *= minf(1.0, (note_dur - t) / 0.006)
 			b[start + j] += v
 	return b
 

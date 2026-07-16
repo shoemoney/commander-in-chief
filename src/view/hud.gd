@@ -15,7 +15,55 @@ var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
 var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
-var _row_w := 262.0       # panel backing, sized to last frame's content (1-frame lag)
+var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
+                          # behind the chips but SIZED after the row is laid out,
+                          # so it fits THIS frame's content (no 1-frame overhang)
+
+
+func _ready() -> void:
+	_plate_ci = RenderingServer.canvas_item_create()
+	RenderingServer.canvas_item_set_parent(_plate_ci, get_canvas_item())
+	RenderingServer.canvas_item_set_z_index(_plate_ci, -1)
+	RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
+
+
+func _notification(what: int) -> void:
+	if not _plate_ci.is_valid():
+		return
+	match what:
+		# PREDELETE fires on every Object destruction (free/queue_free), in or
+		# out of the tree — so an _exit_tree-then-free path still lands here.
+		NOTIFICATION_PREDELETE:
+			RenderingServer.free_rid(_plate_ci)
+			_plate_ci = RID()
+		# Sync plate visibility only when it can actually change (show/hide or
+		# tree membership), never per-frame.
+		NOTIFICATION_VISIBILITY_CHANGED, NOTIFICATION_ENTER_TREE, NOTIFICATION_EXIT_TREE:
+			RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
+
+
+## Pulse decay + rollup catch-up step here, delta-scaled — they used to tick
+## per-_draw (-0.05/frame), which ran 2x fast on a 120 Hz display. Rates match
+## the old 60 Hz feel; exp() keeps the ease framerate-independent (menu.gd idiom).
+func _process(delta: float) -> void:
+	if main == null or main.sim == null:
+		return
+	var sim: SimWorld = main.sim
+	if sim.war_chest > _prev_chest:
+		_chest_pulse = 1.0
+	_prev_chest = sim.war_chest
+	if sim.score > _prev_score:
+		_score_pulse = 1.0
+	_prev_score = sim.score
+	var decay := 3.0 * delta   # == the old -0.05/frame at 60 Hz
+	_chest_pulse = maxf(0.0, _chest_pulse - decay)
+	_score_pulse = maxf(0.0, _score_pulse - decay)
+	if _disp_chest < 0.0:
+		_disp_chest = float(sim.war_chest)
+	if _disp_score < 0.0:
+		_disp_score = float(sim.score)
+	_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
+	_disp_score = _rollup(_disp_score, float(sim.score), delta)
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
@@ -26,38 +74,37 @@ func _mblink(period: int) -> bool:
 
 func _draw() -> void:
 	if main == null or main.sim == null:
+		# No sim to size the plate against — clear it so no stale panel lingers.
+		if _plate_ci.is_valid():
+			RenderingServer.canvas_item_clear(_plate_ci)
 		return
 	var sim: SimWorld = main.sim
+	# REDUCE MOTION: the value rollup still runs (_process), but the visual
+	# pulse (scale-thump + gold color lerp) holds at 0 — no animated flash.
+	var chest_pulse: float = 0.0 if main._motion < 0.5 else _chest_pulse
+	var score_pulse: float = 0.0 if main._motion < 0.5 else _score_pulse
 	# Shop preview strip adds one row while the SHOP OPEN window is live, so
 	# the buy list is readable without holding the spend-wheel open.
 	var shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
-
-	# Scavenged-metal panel backing the whole readout.
-	draw_texture_rect(Art.tex("ui_panel"),
-		Rect2(2, 2, _row_w, 26 + sim.players.size() * 16 + (16 if shop_row else 0)),
-		false, Color(1, 1, 1, 0.9))
+	# Safe-height clamp: boss HP bars dock at y=64 (main sizes them to a ~60px
+	# panel max), so when player rows + strip would cross that line the strip
+	# drops first — lowest-priority row, same outrank rule as HOSTILES-vs-vanity
+	# on the width axis. Its timer chip in row 0 survives.
+	if shop_row and 26 + (sim.players.size() + 1) * 16 > 60:
+		shop_row = false
+	var panel_h := 26 + sim.players.size() * 16 + (16 if shop_row else 0)
+	if _disp_chest < 0.0:
+		_disp_chest = float(sim.war_chest)   # first draw can beat first _process
+	if _disp_score < 0.0:
+		_disp_score = float(sim.score)
 
 	# Row 0: the shared economy — the twist the whole game hangs on.
-	if sim.war_chest > _prev_chest:
-		_chest_pulse = 1.0
-	_prev_chest = sim.war_chest
-	_chest_pulse = maxf(0.0, _chest_pulse - 0.05)
-	if _disp_chest < 0.0:
-		_disp_chest = float(sim.war_chest)
-	_disp_chest = _rollup(_disp_chest, float(sim.war_chest))
 	var x := 8.0
 	var y := 6.0
 	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), _chest_pulse), _chest_pulse)
-	if sim.score > _prev_score:
-		_score_pulse = 1.0
-	_prev_score = sim.score
-	_score_pulse = maxf(0.0, _score_pulse - 0.05)
-	if _disp_score < 0.0:
-		_disp_score = float(sim.score)
-	_disp_score = _rollup(_disp_score, float(sim.score))
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
 	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), _score_pulse), _score_pulse)
+		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:
@@ -66,11 +113,15 @@ func _draw() -> void:
 			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
 			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
 			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
-			# Faint full track under the draining arc — "how much is left" needs a
-			# reference frame (the fuel dial already draws one).
-			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, 0, TAU, 14,
-				Color(scol.r, scol.g, scol.b, 0.18), 1.5)
-			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
+			var sc := Vector2(x + 4.0, y + ICON / 2.0)
+			# Dim full-circle track under the drain, so remaining time reads
+			# against a whole instead of a floating partial arc.
+			draw_arc(sc, 4.5, 0, TAU, 8, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
+			if main._motion < 0.5:
+				# REDUCE MOTION: quarter-snapped instead of a per-frame drain —
+				# the ring steps 4 times per window rather than animating.
+				sfrac = ceilf(sfrac * 4.0) / 4.0
+			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 8, scol, 1.5)
 			x += 13.0
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
 			# ring alone only reads "streak alive", not "how close".
@@ -131,8 +182,7 @@ func _draw() -> void:
 			if _fits(x, _tw(htxt) + 54.0):
 				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
 				var cleared := 1.0 - float(remaining) / float(wave_total)
-				draw_rect(Rect2(x, y + 3, 40, 7), Color(0.1, 0.09, 0.08))
-				draw_rect(Rect2(x, y + 3, 40 * clampf(cleared, 0.0, 1.0), 7), Art.safe(Color(0.4, 0.85, 0.4)))
+				_mini_bar(Rect2(x, y + 2, 40, 9), cleared, Art.safe(Color(0.4, 0.85, 0.4)))
 				x += 48.0
 			# Live WAVE record chip — endless is the mode players grind, but the wave
 			# count (the number they chase) only got record feedback in the K.I.A.
@@ -169,10 +219,10 @@ func _draw() -> void:
 		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
 			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
-	# Suppressed while the endless shop strip is open — two buy affordances at
-	# once (wheel cue + priced strip) read as conflicting instructions.
-	var shop_open: bool = sim.mode == "endless" and sim.intermission_ticks > 0
-	if not shop_open and _fits(x, _tw("SUPPLIES") + 25.0):
+	# Suppressed while the endless shop strip is SHOWN — two buy affordances at
+	# once (wheel cue + priced strip) read as conflicting instructions. When the
+	# strip drops for height, the wheel cue is the buy affordance again.
+	if not shop_row and _fits(x, _tw("SUPPLIES") + 25.0):
 		Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
 		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
 	var row_r := x
@@ -182,12 +232,16 @@ func _draw() -> void:
 	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
 		var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
 		_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
-		draw_rect(Rect2(x + 48, y + 3, 46, 7), Color(0.1, 0.09, 0.08))
-		draw_rect(Rect2(x + 48, y + 3, 46 * pf, 7),
+		_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
 			Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
 		row_r = x + 94.0
-	# ponytail: cached width sizes the panel to content without a measure pass; a 1-frame lag is imperceptible.
-	_row_w = clampf(row_r + 4.0, 262.0, RIGHT - 2.0)
+	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
+	# plate item now that this frame's row width is known, so new chips and
+	# rollover digits never overhang the backing for a frame.
+	RenderingServer.canvas_item_clear(_plate_ci)
+	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
+		Rect2(2, 2, clampf(row_r + 4.0, 262.0, RIGHT - 2.0), panel_h),
+		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.9))
 
 	# Shop preview strip: the 4 buyables at a glance (cost + green/red
 	# affordability), matching the spend-wheel's own price coloring.
@@ -315,7 +369,7 @@ func _accessibility_pips() -> void:
 		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
 		acc_y += 11.0
 	if main._motion < 0.5:
-		_text("RM", RIGHT - _tw("RM"), acc_y, Color(0.75, 0.95, 0.7, 0.85))
+		_text("RM", RIGHT - _tw("RM"), acc_y, Art.safe(Color(0.75, 0.95, 0.7, 0.85)))
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
@@ -335,11 +389,25 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 
 ## Exponential catch-up toward `target`, snapping once close — a big jump
 ## visibly rolls up over a few frames instead of teleporting to the new value.
-func _rollup(disp: float, target: float) -> float:
+func _rollup(disp: float, target: float, delta: float) -> float:
 	var diff := target - disp
-	if absf(diff) < 0.6:
+	# Threshold snap: a gap past 1000 (huge payout, restart) teleports instead
+	# of a multi-second rollup that would lag the whole readout.
+	if absf(diff) < 0.6 or absf(diff) > 1000.0:
 		return target
-	return disp + diff * 0.15
+	return disp + diff * (1.0 - exp(-9.7 * delta))   # ~0.15/frame at 60 Hz
+
+
+## Mini sprite-framed gauge: HUD-scale twin of main._draw_bar (dark well,
+## colored fill, ui_bar_frame on top) so the HOSTILES/PRESSURE minis share the
+## boss/vest bars' chrome instead of floating as naked rects. Local copy —
+## main's helper draws on main's canvas item; no ghost/ticks at this size.
+func _mini_bar(rect: Rect2, frac: float, fill: Color) -> void:
+	var inset := Vector2(rect.size.x * 0.06, rect.size.y * 0.22)
+	var well := Rect2(rect.position + inset, rect.size - inset * 2.0)
+	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
+	draw_rect(Rect2(well.position, Vector2(well.size.x * clampf(frac, 0.0, 1.0), well.size.y)), fill)
+	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
 
 
 func _stat(icon: String, txt: String, x: float, y: float,
@@ -377,7 +445,7 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 ## hands, surfaced as a legible chip on the player row.
 func _pip(x: float, y: float, col: Color, sym: String) -> float:
 	draw_rect(Rect2(x, y + 2.0, 10.0, 9.0), Color(0.1, 0.11, 0.09, 0.85))
-	draw_string(ThemeDB.fallback_font, Vector2(x + 2.5, y + ICON - 3.0), sym,
+	draw_string(Art.font(), Vector2(x + 2.5, y + ICON - 3.0), sym,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE - 1, col)
 	return x + 12.0
 
