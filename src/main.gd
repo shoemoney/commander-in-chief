@@ -3221,7 +3221,8 @@ func _draw_enemies() -> void:
 				# Smoke-deny tell: cooldown is spent but the truck can't line up a
 				# charge into smoke — without this it read as the AI breaking, and
 				# the smoke special never got credit for the block (3 reviewers).
-				Art.text(self, "?", epos + Vector2(-2, -22), 10, Color(0.75, 0.75, 0.7, 0.5 + Art.pulse(0.2) * 0.4))
+				var qa: float = 0.4 if _motion < 0.5 else Art.pulse(0.2) * 0.4   # steady under reduce-motion, like the other marker throbs
+				Art.text(self, "?", epos + Vector2(-2, -22), 10, Color(0.75, 0.75, 0.7, 0.5 + qa))
 			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
