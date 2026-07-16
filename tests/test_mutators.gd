@@ -138,6 +138,18 @@ func test_night_ops_is_sim_inert() -> void:
 	Runner.T.eq(night.war_chest, plain.war_chest, "NIGHT OPS doesn't change the economy")
 
 
+func test_sapper_mines_detonate_in_endless() -> void:
+	# Regression: _step_mines() was called only in the campaign branch, so the
+	# ENDLESS-only Sapper's mines armed but never fired. An armed mine on the
+	# player must now resolve (detonate -> death, or get culled) in endless.
+	var sim := SimWorld.new(3, 1, "endless")
+	var p := sim.players[0]
+	sim.mines.append({"x": p["x"], "y": p["y"], "armed": true})
+	sim.step([SimInput.new()])
+	Runner.T.ok(sim.mines.is_empty() or not sim.players[0]["alive"],
+		"an armed mine on a player resolves in endless (was inert before the fix)")
+
+
 func test_wave_clear_advances_wave_and_opens_shop() -> void:
 	var sim := SimWorld.new(31, 1, "endless")
 	sim.wave = 3

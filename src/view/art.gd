@@ -386,14 +386,21 @@ static func blink(period: int) -> bool:
 	return (Engine.get_physics_frames() / period) % 2 == 0
 
 
-## Cached fallback font — ThemeDB.fallback_font was being re-fetched at every
-## call site; fetch once and hand back the same Font resource.
+## The game font — PixelOperator8 (public domain), replacing the antialiased
+## proportional ThemeDB fallback that rasterized to grey mush at 7-13px inside
+## the 640x360 integer-scaled frame. Rendering flags are forced here at the
+## single hand-out site instead of via .import surgery: no AA, no hinting, no
+## subpixel — glyphs land on whole pixels and upscale crisp.
 static var _font: Font = null
 
 
 static func font() -> Font:
 	if _font == null:
-		_font = ThemeDB.fallback_font
+		var f: FontFile = preload("res://assets/fonts/PixelOperator8.ttf")
+		f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+		f.hinting = TextServer.HINTING_NONE
+		f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+		_font = f
 	return _font
 
 

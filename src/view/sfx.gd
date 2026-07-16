@@ -5,9 +5,16 @@ extends Node
 ## through a single polyphonic player on a dedicated "SFX" bus with a hard
 ## limiter so stacked MG fire can't clip. View-only: the sim never hears this.
 
-const RATE := 22050
+const RATE := 44100   # square-wave synth aliased at 22050 (Nyquist ~11kHz); buffers are tiny
+
+# Tonal jingles/stings keep their key — the ±6% humanizing detune in play() is
+# for noise/percussive SFX only (a pitch-wandering "buy" arpeggio reads as a bug).
+const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
+	"gate_open": true, "wave_start": true, "wave_clear": true, "victory": true,
+	"wiped": true, "avenge": true}
 
 var _sounds: Dictionary = {}
+var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
 var _music := AudioStreamPlayer.new()
 var _pb: AudioStreamPlaybackPolyphonic
@@ -32,6 +39,9 @@ func _ready() -> void:
 	_lpf = AudioEffectLowPassFilter.new()
 	_lpf.cutoff_hz = 20500.0
 	AudioServer.add_bus_effect(0, _lpf)
+	# Master safety limiter AFTER the LPF: the SFX bus limits itself, but the drum
+	# bed sums into Master past it — loud combat + a kick could land ~+2dBFS.
+	AudioServer.add_bus_effect(0, AudioEffectHardLimiter.new())
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -39,6 +49,21 @@ func _ready() -> void:
 	add_child(_player)
 	_player.play()
 	_pb = _player.get_stream_playback()
+	# Positional pool: the game draws in 640x360 screen space with no Camera2D,
+	# so a listener pinned at screen center anchors the stereo pan. Gentle
+	# attenuation only — arcade panning, not distance silence. (Sfx is a plain
+	# Node, so these Node2Ds sit outside main's shake/zoom chain — shake-immune.)
+	var listener := AudioListener2D.new()
+	listener.position = Vector2(320, 180)
+	add_child(listener)
+	listener.make_current()
+	for i in 12:
+		var p := AudioStreamPlayer2D.new()
+		p.bus = "SFX"
+		p.max_distance = 700.0
+		p.attenuation = 1.0
+		add_child(p)
+		_pool.append(p)
 	_synth_all()
 	# War-drums bed: synthesized like everything else, looping under the SFX.
 	_music.stream = _synth_drums()
@@ -51,7 +76,26 @@ func _ready() -> void:
 func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	if _pb == null or not _sounds.has(sound):
 		return
-	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch * randf_range(0.94, 1.06))
+	if not _MUSICAL.has(sound):
+		pitch *= randf_range(0.94, 1.06)
+	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
+
+
+func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
+	if _pool.is_empty() or not _sounds.has(sound):
+		return
+	if not _MUSICAL.has(sound):
+		pitch *= randf_range(0.94, 1.06)
+	var p := _pool[0]   # steal the first if all 12 are busy
+	for c in _pool:
+		if not c.playing:
+			p = c
+			break
+	p.position = screen_pos
+	p.volume_db = vol_db
+	p.pitch_scale = pitch
+	p.stream = _sounds[sound]
+	p.play()
 
 
 func set_music_intensity(level: float, duck := 0.0) -> void:
@@ -66,7 +110,11 @@ func set_music_intensity(level: float, duck := 0.0) -> void:
 func set_concussion(amount: float) -> void:
 	## amount 0 = clear (20.5kHz), 1 = fully muffled (~500Hz).
 	if _lpf != null:
-		_lpf.cutoff_hz = lerpf(20500.0, 500.0, clampf(amount, 0.0, 1.0))
+		var a := clampf(amount, 0.0, 1.0)
+		_lpf.cutoff_hz = lerpf(20500.0, 500.0, a)
+		# Resonant peak at the cutoff: a flat LPF sweep is just a blanket — the
+		# bump adds the boxy 'underwater, ears ringing' coloration the beat wants.
+		_lpf.resonance = lerpf(0.5, 2.4, a)
 
 
 # --- Synthesis toolkit -------------------------------------------------------
@@ -114,6 +162,9 @@ func _notes(freqs: Array[float], note_dur: float, gap := 0.0, square := true) ->
 		for j in int(note_dur * RATE):
 			var t := float(j) / RATE
 			var v := (_sq(t, f) if square else sin(TAU * f * t)) * exp(-t * 9.0) * 0.5
+			# 6ms release ramp: the decay envelope is still ~53% when the note ends,
+			# and that hard step is an audible click on every pickup/buy jingle.
+			v *= minf(1.0, (note_dur - t) / 0.006)
 			b[start + j] += v
 	return b
 
@@ -154,8 +205,8 @@ func _synth_all() -> void:
 	var lp := 0.0
 	for i in boom.size():
 		var t := float(i) / RATE
-		lp = lp * 0.92 + _nz(i) * 0.08   # one-pole lowpass = dark rumble noise
-		boom[i] = _nz(i) * exp(-t * 60.0) * 0.9 + lp * 8.0 * exp(-t * 5.0) \
+		lp = lp * 0.96 + _nz(i) * 0.04   # one-pole lowpass = dark rumble noise (coef sqrt'd for 44.1k)
+		boom[i] = _nz(i) * exp(-t * 60.0) * 0.9 + lp * 11.0 * exp(-t * 5.0) \
 			+ _sweep(t, 95.0, 40.0, 0.7) * exp(-t * 4.5) * 0.7
 	s["explosion"] = boom
 
@@ -178,9 +229,9 @@ func _synth_all() -> void:
 	var lp2 := 0.0
 	for i in roll.size():
 		var t := float(i) / RATE
-		lp2 = lp2 * 0.85 + _nz(i) * 0.15
+		lp2 = lp2 * 0.92 + _nz(i) * 0.08
 		var env := sin(PI * t / 0.16)
-		roll[i] = lp2 * 3.0 * env * env * 0.8
+		roll[i] = lp2 * 4.2 * env * env * 0.8
 	s["roll"] = roll
 
 	# Splash: frogman surfacing — dark noise burst with a falling body.
@@ -188,8 +239,8 @@ func _synth_all() -> void:
 	var lp3 := 0.0
 	for i in splash.size():
 		var t := float(i) / RATE
-		lp3 = lp3 * 0.9 + _nz(i) * 0.1
-		splash[i] = lp3 * 5.0 * exp(-t * 11.0) + _sweep(t, 300.0, 90.0, 0.3) * exp(-t * 10.0) * 0.4
+		lp3 = lp3 * 0.95 + _nz(i) * 0.05
+		splash[i] = lp3 * 7.0 * exp(-t * 11.0) + _sweep(t, 300.0, 90.0, 0.3) * exp(-t * 10.0) * 0.4
 	s["splash"] = splash
 
 	# Mortar whistle: the falling shell — long, quiet, unmistakable.

@@ -184,7 +184,7 @@ func _draw() -> void:
 			# instant a player goes down. Reads the hashed sim field, no view state.
 			if sim.wave > 1 and sim.deaths_this_wave == 0 and _fits(x, _tw("DEATHLESS") + 8.0):
 				var dpul: float = 1.0 if main._motion < 0.5 else Art.pulse(0.25)
-				var dcol := Color(0.55, 0.9, 0.5).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
+				var dcol := Art.safe(Color(0.55, 0.9, 0.5)).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
 				x = _text("DEATHLESS", x, y + ICON - 3.0, dcol) + 8.0
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
@@ -302,6 +302,8 @@ func _draw() -> void:
 			if ammo == 0 and p["fire_cd"] > 0:
 				var bfrac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
 				draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.9, 0.6, 0.3, 0.18), 1.5)
+				draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 			# Segmented magazine bar next to the numeral — clip fill at a glance.
 			px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
@@ -317,6 +319,8 @@ func _draw() -> void:
 			# recharging reads as "wait a beat", not a dropped input (matches the bash ring).
 			if p["grenade_cd"] > 0:
 				var gfrac := clampf(float(p["grenade_cd"]) / float(SimWorld.GRENADE_COOLDOWN_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if p["vest"]:
@@ -421,7 +425,7 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 ## hands, surfaced as a legible chip on the player row.
 func _pip(x: float, y: float, col: Color, sym: String) -> float:
 	draw_rect(Rect2(x, y + 2.0, 10.0, 9.0), Color(0.1, 0.11, 0.09, 0.85))
-	draw_string(ThemeDB.fallback_font, Vector2(x + 2.5, y + ICON - 3.0), sym,
+	draw_string(Art.font(), Vector2(x + 2.5, y + ICON - 3.0), sym,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE - 1, col)
 	return x + 12.0
 

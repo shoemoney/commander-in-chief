@@ -328,6 +328,10 @@ func step(inputs: Array) -> void:
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
+		# Sappers are ENDLESS-ONLY, but _step_mines() (the only code that detonates or
+		# culls a laid mine) ran only in the campaign branch — so every mine a Sapper
+		# armed here just sat forever, inert. Step them here too.
+		_step_mines()
 		if not endless_boss.is_empty() and endless_boss["alive"]:
 			_step_one_boss(endless_boss)
 		# The Spotter wave-mutator drops an Observer; step it so its barrage is
@@ -571,6 +575,10 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 		else:
 			if target["broke_timer"] == 0:
 				target["broke_timer"] = BROKE_RESPAWN_TICKS
+				# One 'can't afford it' cue on the first denial (not per-mash) — a
+				# denied revive was as silent as a denied buy is loud. Event only,
+				# checksum-excluded, so golden-safe.
+				events.append({"t": "revive_deny", "x": target["x"], "y": target["y"]})
 
 
 func _respawn(p: Dictionary, at_y: int) -> void:
