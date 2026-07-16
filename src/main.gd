@@ -78,6 +78,7 @@ var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
+var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot] last sent to the shader
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
 var _music_hold := 0             # held-breath drum dropout before a big beat
@@ -270,6 +271,7 @@ func _setup_water() -> void:
 		r.material = m
 		add_child(r)
 		_water_rects.append(r)
+		_water_pushed.append([-1, -1.0])
 
 
 func _sync_water() -> void:
@@ -292,17 +294,24 @@ func _sync_water() -> void:
 		if wy > 360.0 or wy + SimWorld.WATER_H * PX < 0.0:
 			continue   # band fully off-screen
 		var rect := _water_rects[vis]
+		var pushed: Array = _water_pushed[vis]
 		vis += 1
 		rect.visible = true
 		rect.position = Vector2(0.0, wy)
 		rect.size = Vector2(640.0, SimWorld.WATER_H * PX)
-		var mat: ShaderMaterial = rect.material
-		mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
-		mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
-		# De-sync ripples per band: derive a stable phase from the band's world y.
-		mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
-		mat.set_shader_parameter("shallow_col", w_shallow)
-		mat.set_shader_parameter("deep_col", w_deep)
+		# All five uniforms are constant per band + soot level, and each
+		# set_shader_parameter dirties the material. Re-push only when this pool
+		# rect is re-assigned to a different band or the sector soot moves.
+		if pushed[0] != w["y"] or absf(pushed[1] - wsoot) > 0.004:
+			pushed[0] = w["y"]
+			pushed[1] = wsoot
+			var mat: ShaderMaterial = rect.material
+			mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
+			mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
+			# De-sync ripples per band: derive a stable phase from the band's world y.
+			mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
+			mat.set_shader_parameter("shallow_col", w_shallow)
+			mat.set_shader_parameter("deep_col", w_deep)
 	for i in range(vis, _water_rects.size()):
 		_water_rects[i].visible = false
 
