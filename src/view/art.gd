@@ -182,6 +182,27 @@ const TEX := {
 	"glyph_key_space": preload(SY + "ui/glyphs/key_space.png"),
 	"glyph_key_enter": preload(SY + "ui/glyphs/key_enter.png"),
 	"glyph_key_wide": preload(SY + "ui/glyphs/key_wide.png"),
+	# Brand-correct pad sets (PlayStation / Switch), swapped in by pad_brand.
+	# PS has no Share sprite in the pack — TouchPad stands in for JOY_BUTTON_BACK
+	# (same vendor-gap class as Xbox's missing View button).
+	"glyph_ps_a": preload(SY + "ui/glyphs/ps_a.png"),
+	"glyph_ps_b": preload(SY + "ui/glyphs/ps_b.png"),
+	"glyph_ps_x": preload(SY + "ui/glyphs/ps_x.png"),
+	"glyph_ps_y": preload(SY + "ui/glyphs/ps_y.png"),
+	"glyph_ps_start": preload(SY + "ui/glyphs/ps_start.png"),
+	"glyph_ps_rt": preload(SY + "ui/glyphs/ps_rt.png"),
+	"glyph_ps_lb": preload(SY + "ui/glyphs/ps_lb.png"),
+	"glyph_ps_back": preload(SY + "ui/glyphs/ps_back.png"),
+	"glyph_ps_dpad_lr": preload(SY + "ui/glyphs/ps_dpad_lr.png"),
+	"glyph_sw_a": preload(SY + "ui/glyphs/sw_a.png"),
+	"glyph_sw_b": preload(SY + "ui/glyphs/sw_b.png"),
+	"glyph_sw_x": preload(SY + "ui/glyphs/sw_x.png"),
+	"glyph_sw_y": preload(SY + "ui/glyphs/sw_y.png"),
+	"glyph_sw_start": preload(SY + "ui/glyphs/sw_start.png"),
+	"glyph_sw_rt": preload(SY + "ui/glyphs/sw_rt.png"),
+	"glyph_sw_lb": preload(SY + "ui/glyphs/sw_lb.png"),
+	"glyph_sw_back": preload(SY + "ui/glyphs/sw_back.png"),
+	"glyph_sw_dpad_lr": preload(SY + "ui/glyphs/sw_dpad_lr.png"),
 	# --- Modern Menus ortho icons (menu rows / toggles) ---
 	"mi_snd_on": preload(SY + "ui/menuicons/snd_on.png"),
 	"mi_snd_off": preload(SY + "ui/menuicons/snd_off.png"),
@@ -364,6 +385,27 @@ static func outlined(name: String) -> bool:
 ## main by the last InputEvent class — a merely-connected idle pad no longer
 ## mis-teaches a keyboard player pad buttons. Draws centered at pos.
 static var use_pad := false
+## Last-used pad's glyph family: "xbox" (default/fallback), "ps", "switch".
+## Driven from main._input via the joy name; every pad-glyph lookup routes
+## through _brand() so unknown pads safely teach Xbox labels.
+static var pad_brand := "xbox"
+
+const _BRAND_MAP := {
+	"ps": {"glyph_pad_a": "glyph_ps_a", "ui_pad_b": "glyph_ps_b",
+		"ui_pad_x": "glyph_ps_x", "ui_pad_y": "glyph_ps_y",
+		"glyph_pad_start": "glyph_ps_start", "glyph_rt": "glyph_ps_rt",
+		"glyph_lb": "glyph_ps_lb", "ui_pad_back": "glyph_ps_back",
+		"glyph_dpad_lr": "glyph_ps_dpad_lr"},
+	"switch": {"glyph_pad_a": "glyph_sw_a", "ui_pad_b": "glyph_sw_b",
+		"ui_pad_x": "glyph_sw_x", "ui_pad_y": "glyph_sw_y",
+		"glyph_pad_start": "glyph_sw_start", "glyph_rt": "glyph_sw_rt",
+		"glyph_lb": "glyph_sw_lb", "ui_pad_back": "glyph_sw_back",
+		"glyph_dpad_lr": "glyph_sw_dpad_lr"},
+}
+
+
+static func _brand(key: String) -> String:
+	return _BRAND_MAP.get(pad_brand, {}).get(key, key)
 ## Deuteran-safe remap: 'affordable/safe/open' greens become cyan-blue when
 ## colorblind mode is on (red↔blue is distinguishable where red↔green isn't).
 ## Reds are left alone. Driven from main.
@@ -425,7 +467,7 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0) -> void:
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
 	if use_pad:
-		ci.draw_texture_rect(tex(_GLYPH_PAD[action]), rect, false)
+		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false)
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88))
 		var letter: String = _GLYPH_KEY[action]
@@ -442,7 +484,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 ## confirm glyph so callers always get a drawable key.
 static func glyph_key(action_hint: String) -> String:
 	if use_pad:
-		return _HINT_PAD.get(action_hint, "glyph_pad_a")
+		return _brand(_HINT_PAD.get(action_hint, "glyph_pad_a"))
 	return _HINT_KB.get(action_hint, "glyph_key_enter")
 
 

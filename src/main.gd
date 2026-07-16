@@ -562,6 +562,29 @@ func _reset() -> void:
 	_debrief = false
 
 
+var _joy_brand_cache := {}   # device id → "xbox"/"ps"/"switch" (name lookup once per pad)
+
+
+func _joy_brand(device: int) -> String:
+	# Conservative name-prefix detection; anything unrecognized teaches Xbox
+	# labels (the generic fallback every pad-glyph lookup already has).
+	if _joy_brand_cache.has(device):
+		return _joy_brand_cache[device]
+	var jn := Input.get_joy_name(device).to_lower()
+	var brand := "xbox"
+	for tag in ["dualsense", "dualshock", "ps5", "ps4", "ps3", "playstation", "sony"]:
+		if tag in jn:
+			brand = "ps"
+			break
+	if brand == "xbox":
+		for tag in ["switch", "joy-con", "joycon", "pro controller"]:
+			if tag in jn:
+				brand = "switch"
+				break
+	_joy_brand_cache[device] = brand
+	return brand
+
+
 func _input(event: InputEvent) -> void:
 	# Track the LAST-USED device so glyphs/legends teach the right buttons —
 	# a merely-connected idle pad shouldn't override an active keyboard.
@@ -569,6 +592,7 @@ func _input(event: InputEvent) -> void:
 		if event is InputEventJoypadMotion and absf(event.axis_value) < 0.5:
 			return
 		Art.use_pad = true
+		Art.pad_brand = _joy_brand(event.device)
 	elif event is InputEventKey or event is InputEventMouse:
 		Art.use_pad = false
 	# Pad redeploy: START on the debrief/victory card mirrors keyboard R — pad
