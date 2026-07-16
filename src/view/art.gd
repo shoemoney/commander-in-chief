@@ -409,6 +409,10 @@ const OUTLINE := {
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
 	"wep_grenade": true, "wep_rpg": true, "wep_shotgun": true,
 	"wep_rifle": true, "wep_mg": true, "item_bullet": true, "item_bullet_shotgun": true,
+	# The rare-capsule set: same ground-pickup class as the rifle/shotgun/mg
+	# capsules above (plus the planted claymore + its ghost — rim alpha follows
+	# tint.a, so the 0.28-alpha preview stays subtle).
+	"icon_rend": true, "wep_claymore": true, "wep_smoke": true, "wep_flashbang": true,
 	"ghillie": true, "courier": true, "sapper": true,
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
 	"wall_sandbag": true, "wall_sandbag_end": true,
@@ -538,7 +542,9 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88) * mod)
 		var letter: String = _GLYPH_KEY[action]
 		var f := font()
-		var fs := int(size * 0.62)
+		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
+		# whole strokes below native scale (a 6px 'E' loses horizontals).
+		var fs := maxi(8, int(size * 0.62))
 		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))

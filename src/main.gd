@@ -2837,8 +2837,11 @@ func _draw_water() -> void:
 			for hx in range(0, 640, 16):
 				if hx + 8 < ford_left or hx > ford_left + ford_w:
 					draw_line(Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
-			draw_string(Art.font(), Vector2(ford_left + ford_w / 2.0 - 12, wy - 8),
-				"FORD", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.6, 1.0, 0.6))
+			# Shadowed + colorblind-routed like the gate pips/price tints that share
+			# this green — raw unshadowed green over red-hatched sand was the
+			# worst-case read for the tank driver it guides.
+			Art.text(self, "FORD", Vector2(ford_left + ford_w / 2.0 - 12, wy - 8),
+				8, Art.safe(Color(0.6, 1.0, 0.6)))
 
 
 func _draw_gates() -> void:
