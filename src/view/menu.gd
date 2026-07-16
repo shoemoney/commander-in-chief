@@ -5,7 +5,7 @@ extends Control
 ## knows nothing about menus. Keyboard (W/S + Enter, Esc) and pad
 ## (dpad + A, Start) navigation.
 
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO }
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -30,6 +30,7 @@ var _filter_pulse := 0.0   # hall filter tab flash on change
 var _key_move := 0      # held up/down key direction (hold-repeat, mirrors stick)
 var _key_rep := 0.0     # countdown to the next held-key auto-repeat step
 var _lockout := 0.0     # post-disconnect confirm lockout (flailing pad guard)
+var _has_replay := false   # user://last_run.replay existence, sampled in open()
 
 # Row ids that flip on left/right without a confirm press.
 const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist"]
@@ -93,13 +94,17 @@ func is_active() -> bool:
 
 
 func open(m: int) -> void:
+	# Menu-to-menu keeps ~60% scrim — a full _open_t reset dipped the backdrop
+	# to ~0 for a frame and flashed the live attract firefight between screens.
+	# Only entering from gameplay replays the full fade + drop-in.
+	_open_t = 0.0 if mode == Mode.HIDDEN else 0.6
 	mode = m
 	sel = 0
 	_confirm = -1
 	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
 	_sel_target = -1.0
-	_open_t = 0.0   # replay the open settle
 	_key_move = 0   # a key held across the transition must not auto-repeat here
+	_has_replay = FileAccess.file_exists("user://last_run.replay")   # hoisted: _menu_items ran this disk stat ~180x/s while TITLE was open
 	queue_redraw()
 
 
@@ -121,22 +126,33 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false},
 		]
-		if FileAccess.file_exists("user://last_run.replay"):
+		titems.append({"id": "options", "label": "OPTIONS", "destructive": false})
+		if _has_replay:
 			titems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false})
 		titems.append({"id": "quit", "label": "QUIT", "destructive": true})
 		return titems
-	var reduced: bool = main._motion < 0.5
-	var cb: bool = main.colorblind
+	if mode == Mode.OPTS:
+		# Settings reachable BEFORE a run: reduce-motion/colorblind/assist lived
+		# only in PAUSE while the title played a live, flashing attract fight —
+		# exactly the players who need them couldn't reach them.
+		var oitems := _settings_rows()
+		oitems.append({"id": "back", "label": "BACK", "destructive": false})
+		return oitems
+	var pitems: Array[Dictionary] = [{"id": "resume", "label": "RESUME", "destructive": false}]
+	pitems.append_array(_settings_rows())
+	pitems.append({"id": "restart", "label": "RESTART", "destructive": true})
+	pitems.append({"id": "title", "label": "TITLE SCREEN", "destructive": true})
+	return pitems
+
+
+func _settings_rows() -> Array[Dictionary]:
 	return [
-		{"id": "resume", "label": "RESUME", "destructive": false},
 		{"id": "sfx", "label": "SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"), "destructive": false},
 		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false},
-		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if reduced else "OFF"), "destructive": false},
-		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if cb else "OFF"), "destructive": false},
+		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false},
+		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false},
 		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false},
 		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false},
-		{"id": "restart", "label": "RESTART", "destructive": true},
-		{"id": "title", "label": "TITLE SCREEN", "destructive": true},
 	]
 
 
@@ -181,7 +197,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 				_key_rep = 0.35
 			KEY_A, KEY_LEFT: hmove = -1
 			KEY_D, KEY_RIGHT: hmove = 1
-			KEY_ENTER, KEY_SPACE: act = true
+			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE: act = true   # numpad Enter redeploys from the debrief; menus must match
 			KEY_ESCAPE: back = true
 	elif ev is InputEventKey and not ev.pressed:
 		# Release clears the hold-repeat latch (repeat itself runs in _process).
@@ -263,13 +279,30 @@ func _unhandled_input(ev: InputEvent) -> void:
 		if not ev.pressed:
 			return
 		if ev.button_index == MOUSE_BUTTON_LEFT:
+			# Hall filter tabs are clickable — they were the one visible control
+			# a mouse-only player couldn't operate (every other surface has
+			# hover/click/wheel parity).
+			if mode == Mode.HALL:
+				var tabs := _hall_tab_rects()
+				for ti in tabs.size():
+					if tabs[ti].has_point(ev.position):
+						if ti != _hall_filter:
+							_hall_filter = ti
+							_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
+							main._sfx.play("pickup", -14.0, 1.3)
+						queue_redraw()
+						return
 			var crow := _row_at(ev.position)
 			if crow >= 0:
 				sel = crow
 				_press()
 				queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_nav(-1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1, 0)
+			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
+			if mode == Mode.HALL:
+				_nav(0, wdir)   # HALL's only control is the filter — wheel cycles it instead of wrapping a 1-row list
+			else:
+				_nav(wdir, 0)
 		return
 	if move != 0 or hmove != 0:
 		_nav(move, hmove)
@@ -277,7 +310,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 		_press()
 	elif back and mode == Mode.PAUSE:
 		mode = Mode.HIDDEN
-	elif back and (mode == Mode.HALL or mode == Mode.HOWTO):
+	elif back and (mode == Mode.HALL or mode == Mode.HOWTO or mode == Mode.OPTS):
 		open(Mode.TITLE)
 	if move != 0 or hmove != 0 or act or back:
 		accept_event()
@@ -346,7 +379,7 @@ func _row_at(p: Vector2) -> int:
 		return -1
 	var g := _row_geometry()
 	for k in int(g["n"]):
-		var ry: float = float(g["top"]) + float(k) * float(g["gap"])
+		var ry := floorf(float(g["top"]) + float(k) * float(g["gap"]))   # same snap as _draw
 		if p.y >= ry and p.y <= ry + float(g["bh"]):
 			return k
 	return -1
@@ -374,10 +407,12 @@ func _activate() -> void:
 			"hard": main._hard = not main._hard
 			"hall": open(Mode.HALL)
 			"howto": open(Mode.HOWTO)
+			"options": open(Mode.OPTS)
 			"quit": get_tree().quit()
 	else:
 		match id:
 			"resume": mode = Mode.HIDDEN
+			"back": open(Mode.TITLE)   # OPTS returns to the title
 			"sfx":
 				_toggle_bus("SFX")
 				main._save_settings()
@@ -434,6 +469,8 @@ func _draw() -> void:
 			var wpct: int = main._life_wins * 100 / main._life_runs
 			_center_text("CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
 				main._life_kills, wpct], 145, 8, Color(0.6, 0.72, 0.62, 0.7))
+	elif mode == Mode.OPTS:
+		_center_text("OPTIONS", 88, 22, Color(0.95, 0.95, 0.85))
 	else:
 		_center_text("PAUSED", 78, 22, Color(0.95, 0.95, 0.85))
 		# Pause doubles as a status check — the run so far.
@@ -460,7 +497,9 @@ func _draw() -> void:
 	# (offset applied inside _row_geometry so the mouse hit-test tracks it).
 	var top: float = g["top"]
 	for k in items.size():
-		var r := Rect2(Vector2(320 - BTN.x / 2.0, top + k * gap), Vector2(BTN.x, bh))
+		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
+		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
+		var r := Rect2(Vector2(320 - BTN.x / 2.0, floorf(top + k * gap)), Vector2(BTN.x, floorf(bh)))
 		var selected := k == sel
 		draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
@@ -515,6 +554,12 @@ func _draw() -> void:
 		var lx := r.position.x + 30.0
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
 			Vector2(lx, r.position.y + bh / 2.0 + 4.0), 11, col)
+		# Left/right cycle affordance on the selected toggle row — toggles flipped
+		# silently and read identical to action rows. ("<"/">" — ◄► not in the font.)
+		if selected and mitems[k]["id"] in _TOGGLES:
+			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
+			Art.text(self, "<", Vector2(r.position.x - 12.0, r.position.y + bh / 2.0 + 4.0), 10, fcol)
+			Art.text(self, ">", Vector2(r.end.x + 6.0, r.position.y + bh / 2.0 + 4.0), 10, fcol)
 		if mitems[k]["id"] == "paste_seed":
 			# Where the seed comes from — the row name alone didn't say.
 			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0,
@@ -559,6 +604,25 @@ func _draw_back_button() -> void:
 	_center_text("BACK", r.position.y + 16.0, 11, Color(1.0, 0.95, 0.75))
 
 
+func _hall_tab_rects() -> Array[Rect2]:
+	# The same measured tab layout _draw_hall renders, as clickable rects —
+	# keep the width math in lockstep with the loop below.
+	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
+	var f := Art.font()
+	var tw: Array[float] = []
+	var total := -22.0
+	for n in names:
+		var w := f.get_string_size(n, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		tw.append(w)
+		total += w + 22.0
+	var x := 320.0 - total / 2.0
+	var out: Array[Rect2] = []
+	for i in names.size():
+		out.append(Rect2(x - 4.0, 52.0, tw[i] + 8.0, 20.0))
+		x += tw[i] + 22.0
+	return out
+
+
 func _draw_hall() -> void:
 	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
 	_center_text("HALL OF FAME", 38, 22, Color(1.0, 0.85, 0.3))
@@ -593,8 +657,9 @@ func _draw_hall() -> void:
 		var gw := 13.0 * float(t.get_width()) / float(t.get_height())
 		draw_texture_rect(t, Rect2(320.0 - total / 2.0 - gw - 12.0, 56.0, gw, 13.0), false)
 	else:
-		Art.text(self, "◄", Vector2(320.0 - total / 2.0 - 18.0, 66), 10, Color(0.84, 0.86, 0.78))
-		Art.text(self, "►", Vector2(320.0 + total / 2.0 + 8.0, 66), 10, Color(0.84, 0.86, 0.78))
+		# "<"/">" — PixelOperator8 has no U+25C4/25BA; ◄► rendered as .notdef boxes.
+		Art.text(self, "<", Vector2(320.0 - total / 2.0 - 18.0, 66), 10, Color(0.84, 0.86, 0.78))
+		Art.text(self, ">", Vector2(320.0 + total / 2.0 + 8.0, 66), 10, Color(0.84, 0.86, 0.78))
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows: Array = []
 	for run in main.hall:
