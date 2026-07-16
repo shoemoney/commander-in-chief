@@ -3357,6 +3357,18 @@ func _draw_players() -> void:
 			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), de)
 			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - de) * 0.12), dcol)
 			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
+			# Broke-respawn clock: a downed player with no coins to revive earns a
+			# free reinforcement at broke_timer==0 (BROKE_RESPAWN_TICKS from the KO).
+			# The co-op partner — and the solo player — had no idea when help lands;
+			# surface the ticking countdown over the body. Reads existing sim state.
+			var bt: int = p.get("broke_timer", 0)
+			if bt > 0:
+				var btxt := "REINFORCEMENTS IN %.1fs" % (bt / 60.0)
+				var brw := Art.font().get_string_size(btxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+				# Warms toward amber in the final second so "almost back" reads.
+				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
+				Art.text(self, btxt, pos + Vector2(-brw / 2.0, -26), 8,
+					Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
