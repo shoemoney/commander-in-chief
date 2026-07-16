@@ -587,6 +587,10 @@ func _step_players(inputs: Array) -> void:
 		# The punch-out grace (submerged) must elapse first. Tank treads
 		# rescue in _step_tank.
 		for e in enemies:
+			# Same axis pre-reject + truncation proof as the bullet scan (:1007):
+			# |dx| > r means _dist_lte was already false — checksum-neutral.
+			if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+				continue
 			if e["alive"] and e["kind"] == "pilot" and not e.get("submerged", false) \
 					and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 				_rescue_pilot(e)
@@ -595,6 +599,8 @@ func _step_players(inputs: Array) -> void:
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
+				if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+					continue
 				if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
 						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					continue
@@ -982,6 +988,22 @@ func _step_bullets() -> void:
 	# loop was paying 5+ times per bullet per tick.
 	var ylo := camera_top - 40 * F_ONE
 	var yhi := camera_top + 400 * F_ONE
+	# Bunker band prefilter: any bullet reaching the cover scan has by in
+	# [ylo,yhi] (off-band bullets die above), so a bunker whose AABB misses that
+	# band can never contain it — checksum-neutral by construction. Positions
+	# never move; alive is RE-CHECKED per bullet (a barrel cook-off via
+	# _detonate_barrel below can _explode a bunker mid-loop).
+	var near_bks: Array[Dictionary] = []
+	for bk in bunkers:
+		if bk["alive"] and bk["y"] <= yhi and bk["y"] + BUNKER_H >= ylo:
+			near_bks.append(bk)
+	# Boss prefilter: gate boss dicts are never emptied and g["open"] mutates
+	# only in _step_gates, so both gates are stable within this call; the
+	# per-bullet boss["alive"] re-check stays (_damage_boss kills mid-loop).
+	var boss_gates: Array[Dictionary] = []
+	for g in gates:
+		if not g["boss"].is_empty() and not g["open"]:
+			boss_gates.append(g)
 	for i in range(bullets.size() - 1, -1, -1):
 		var b := bullets[i]
 		var bx: int = b["x"] + b["vx"]
@@ -997,7 +1019,7 @@ func _step_bullets() -> void:
 			events.append({"t": "bullet_dirt", "x": bx, "y": by})
 		if not dead:
 			# Bullets are stopped by armor: bunkers block, only grenades hurt them.
-			for bk in bunkers:
+			for bk in near_bks:
 				if bk["alive"] and _point_in_aabb(bx, by, bk):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
@@ -1056,7 +1078,7 @@ func _step_bullets() -> void:
 					dead = true
 					break
 		if not dead:
-			dead = _bullet_hits_boss(b)
+			dead = _bullet_hits_boss(b, boss_gates)
 		# Colossus core window: while the plating is retracted, bullets chip it
 		# too (otherwise grenades-only). A timing/aggression path for the finale.
 		if not dead and not colossus.is_empty() and colossus["alive"] \
@@ -2268,8 +2290,13 @@ func _step_one_boss(boss: Dictionary) -> void:
 				_add_strike(target2["x"], target2["y"])
 
 
-func _bullet_hits_boss(b: Dictionary) -> bool:
-	for g in gates:
+func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
+	# boss_gates: _step_bullets passes its per-call prefilter (gates with a
+	# non-empty boss, still closed) so ~150 live rounds don't re-interrogate
+	# all ~5 gates each tick; direct test callers omit it and scan everything.
+	# The full guard stays — it's what makes both paths identical.
+	var cands: Array = boss_gates if boss_gates != null else gates
+	for g in cands:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
 		var boss: Dictionary = g["boss"]
@@ -2306,6 +2333,12 @@ func _step_enemy_bullets() -> void:
 	# Same locals hoist as _step_bullets: identical values, checksum-neutral.
 	var ylo := camera_top - 40 * F_ONE
 	var yhi := camera_top + 400 * F_ONE
+	# Same bunker band prefilter as _step_bullets (nothing here can kill a
+	# bunker mid-loop, but the per-bullet alive re-check is kept for symmetry).
+	var near_bks: Array[Dictionary] = []
+	for bk in bunkers:
+		if bk["alive"] and bk["y"] <= yhi and bk["y"] + BUNKER_H >= ylo:
+			near_bks.append(bk)
 	for i in range(enemy_bullets.size() - 1, -1, -1):
 		var b := enemy_bullets[i]
 		var bx: int = b["x"] + b["vx"]
@@ -2322,7 +2355,7 @@ func _step_enemy_bullets() -> void:
 		if not dead:
 			# Cover is real both ways now: a bunker between you and a shooter eats
 			# the round, same as it eats yours (player bullets already block here).
-			for bk in bunkers:
+			for bk in near_bks:
 				if bk["alive"] and _point_in_aabb(bx, by, bk):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
