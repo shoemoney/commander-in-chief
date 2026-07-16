@@ -1138,6 +1138,10 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"] - 8, "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "size": 12, "text": "PILOT DOWN — REACH HIM",
 					"col": Art.safe(Color(0.5, 1.0, 0.7))})
+				# Small zoom-hit pulls the eye to a time-limited off-path objective
+				# (a boss SIGHTING got one; the ransom window got only text).
+				# _punch is motion-scaled at application — RM-safe by construction.
+				_punch = maxf(_punch, 0.06)
 				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH HIM BEFORE HE'S MARCHED OFF THE TOP")
 			"pilot_rescued":
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
@@ -3140,7 +3144,9 @@ func _draw_enemies() -> void:
 			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			_spr("m_pilot", epos, -PI / 2, 0.48)
-			Art.text(self, "RESCUE", epos + Vector2(-16, -18), 8, pi_col)
+			# Ransom on the label (6/9 panel): the stake was invisible until AFTER
+			# the touch — "is this dive worth it" needs the number up front.
+			Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), 8, pi_col)
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: real courier bake (the loot pack is in the
 			# sprite now); the pulsing gold ring stays — "catch this one" must
@@ -3182,7 +3188,9 @@ func _draw_enemies() -> void:
 				draw_circle(epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8,
 					Color(1.0, 0.78, 0.35, 0.9) if npi < n_hp else Color(0.22, 0.2, 0.18, 0.75))
 			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
-			if nlv.length() > 1.0:
+			# Lane band-cull (7/9 panel): an off-band nest drew its full 640px lane
+			# every aim frame. Sandbags + pips above still draw — only the lane skips.
+			if nlv.length() > 1.0 and epos.y > -80.0 and epos.y < 420.0:
 				var nld := nlv.normalized()
 				var nburst: int = e.get("lunge_ticks", 0)
 				var nwu: int = e.get("windup", 0)
@@ -3205,7 +3213,7 @@ func _draw_enemies() -> void:
 				else:
 					# RELOAD: a dim stub down the LAST lane — the rooted-turret
 					# threat must not vanish for the whole 1.5s between bursts.
-					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.12), 1.0)
+					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.2), 1.0)   # 0.12 read as a dead lane, not a reloading turret
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
@@ -4835,7 +4843,10 @@ func _draw_banners(top_msg: String) -> void:
 		# Radial flash: hottest at screen center, falling off toward the edges
 		# (oversized softspot card) over a faint flat base — punchier than a
 		# uniform white sheet at the same energy.
-		var fla := _flash_alpha * _motion
+		# maxf floor (6/9 panel): zeroing the wash under reduce-motion erased the
+		# whole-field-stun gestalt entirely; siblings (damage vignette, airstrike
+		# wash) keep a dimmed floor. The decay is a fade, not a strobe — RM-safe.
+		var fla := _flash_alpha * maxf(_motion, 0.4)
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, fla * 0.45))
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
 			false, Color(1, 1, 1, fla))
