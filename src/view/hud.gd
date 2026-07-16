@@ -16,6 +16,7 @@ var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
 var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
+var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
@@ -75,6 +76,12 @@ func _process(delta: float) -> void:
 ## so the amber/red states stay legible without flashing.
 func _mblink(period: int) -> bool:
 	return main._motion < 0.5 or Art.blink(period)
+
+
+func plate_right() -> float:
+	# Dynamic right edge of the corner plate (was hardcoded 262, its MINIMUM) so
+	# off-screen markers relocate clear of the ACTUAL panel, not a stale literal.
+	return _plate_r
 
 
 func panel_bottom() -> float:
@@ -273,8 +280,9 @@ func _draw() -> void:
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame.
 	RenderingServer.canvas_item_clear(_plate_ci)
+	_plate_r = clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0)
 	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
-		Rect2(2, 2, clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0), panel_h),
+		Rect2(2, 2, _plate_r, panel_h),
 		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.9))
 
 	# Shop preview strip: the 4 buyables at a glance (cost + green/red

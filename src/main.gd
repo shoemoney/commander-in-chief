@@ -4088,7 +4088,7 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			# below the panel's bottom edge instead of skipping it outright — still
 			# a warning, just relocated clear of the opaque HUD art.
 			var tbase := 28.0
-			if tx < 262.0:
+			if tx < _hud_icons.plate_right():
 				tbase = _panel_bot + 12.0
 			var ta := clampf(1.0 + off / 180.0, 0.2, 0.7)
 			if e.get("windup", 0) > 0:
@@ -4200,7 +4200,7 @@ func _draw_objective_markers() -> void:
 			var ep := _marker_edge(mp)
 			# Never under the corner HUD panel (it reaches ~y58 in 2P, deeper with
 			# the endless shop row) — drop the marker below its bottom edge.
-			if ep.x < 262.0 and ep.y < panel_bot + 8.0:
+			if ep.x < _hud_icons.plate_right() and ep.y < panel_bot + 8.0:
 				ep.y = panel_bot + 8.0
 			# Min spacing on a shared edge: slide along the edge until clear so
 			# stacked marks can't overprint into one unreadable diamond.
