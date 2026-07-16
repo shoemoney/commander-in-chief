@@ -192,6 +192,9 @@ const _EVENT_SOUND := {
 	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
+	"technical_rev": ["tank_board", -8.0, 0.75],   # low engine snarl: a charge is coming (0.75 pitch — well under mine_lay's 1.9 clink)
+	"pilot_down": ["alarm", -10.0, 1.1],           # crash-site distress ping
+	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
@@ -884,7 +887,9 @@ func _consume_events() -> void:
 					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
-				_sfx.play("buy", -2.0, 1.4)
+				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
+				# REND sounded identical to grabbing FLASHBANG. kind 7..10 -> 1.2..1.56.
+				_sfx.play("buy", -2.0, 1.2 + float(int(ev["kind"]) - 7) * 0.12)
 		elif kind == "explosion":
 			# Up to 5 explosion events fire in one tick (colossus death-ring, bunker
 			# clusters); stacking 5 full booms pumps the HardLimiter to mush. Gate to
@@ -918,7 +923,28 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
 					"sz": 8.0, "fade": 1.5, "rate": 0.15, "col": Color(0.15, 0.13, 0.12, 0.7)})
-				_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
+				# MG Nest crack: armor_block also fires for the nest's 3-hit armor,
+				# but the wall grammar taught the WRONG lesson — bullets DO crack
+				# the nest. Distinct rising ping (hear "2 left / 1 left") + sand
+				# chips + an honest hint; the bunker hint only fires off-nest.
+				var nest_hit := false
+				for ne in sim.enemies:
+					if ne["alive"] and ne.get("kind", "") == "mg_nest" \
+							and absi(ne["x"] - ev["x"]) < 14 * Fixed.ONE \
+							and absi(ne["y"] - ev["y"]) < 14 * Fixed.ONE:
+						nest_hit = true
+						var nh: int = ne.get("hp", 0)
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+							"tex": "fx_sparkle", "sz": 5.0, "fade": 1.8, "rate": 0.18,
+							"col": Color(0.85, 0.78, 0.5, 0.9)})
+						if Engine.get_physics_frames() - _deflect_frame >= 10:
+							_deflect_frame = Engine.get_physics_frames()
+							_sfx.play_at("vest_break", _to_screen(ev["x"], ev["y"]), -12.0,
+								1.0 + float(3 - nh) * 0.3)
+						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
+						break
+				if not nest_hit:
+					_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("vest_break", -16.0, 1.7)
@@ -1004,8 +1030,11 @@ func _consume_events() -> void:
 				if not barrel_pinged:
 					barrel_pinged = true
 					_sfx.play_at("explosion", _to_screen(ev["x"], ev["y"]), -6.0, 0.8)
-				_trauma = minf(1.0, _trauma + 0.3)
-				_rumble = maxf(_rumble, 0.55)
+					# Shake joins the one-per-tick gate too: an 8-tick cluster ripple
+					# re-adding 0.3 trauma EVERY tick pinned the shake at max for the
+					# whole chain — the sound was gated but the nausea wasn't.
+					_trauma = minf(1.0, _trauma + 0.3)
+					_rumble = maxf(_rumble, 0.55)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
@@ -1108,6 +1137,27 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.25})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.12,
 					"r": 16.0, "col": Color(1.0, 0.75, 0.6)})
+			"technical_rev":
+				# Rev-up: dust kicked behind the wheels + engine rumble in the pad —
+				# a gun-truck's charge tell should carry more weight than infantry
+				# (it previously had less camera acknowledgment than a grenade lob).
+				_burst(ev["x"], ev["y"], "dust", 4, 0.5, 1.2, 0.5, 0.07)
+				_rumble = maxf(_rumble, 0.35)
+			"pilot_down":
+				_fx.append({"x": ev["x"], "y": ev["y"] - 8, "t": 0.0, "kind": "floattext",
+					"rate": 0.012, "size": 12, "text": "PILOT DOWN — REACH HIM",
+					"col": Art.safe(Color(0.5, 1.0, 0.7))})
+				# Small zoom-hit pulls the eye to a time-limited off-path objective
+				# (a boss SIGHTING got one; the ransom window got only text).
+				# _punch is motion-scaled at application — RM-safe by construction.
+				_punch = maxf(_punch, 0.06)
+				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH HIM BEFORE HE'S MARCHED OFF THE TOP")
+			"pilot_rescued":
+				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
+				_sfx.play("buy", -2.0, 1.5)
+			"pilot_lost":
+				_fx.append({"x": ev["x"], "y": ev["y"] + 20, "t": 0.0, "kind": "floattext",
+					"rate": 0.02, "text": "PILOT CAPTURED", "col": Color(0.7, 0.65, 0.6)})
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
@@ -1682,14 +1732,18 @@ func _check_smoke_edges() -> void:
 			break
 		var st: int = sim.players[i]["smoke_ticks"]
 		if _smoke_prev[i] > 0 and st == 0 and sim.players[i]["alive"]:
-			_sfx.play("alarm", -18.0, 2.6)
+			# "pickup" voice, NOT "alarm": these are SELF-status ticks, and they sat
+			# 0.1-0.2 pitch from drone_windup (1.9) / flash_recover (2.4) on the same
+			# alarm timbre — a "my cover is fading" cue was indistinguishable from an
+			# "incoming threat" cue demanding the opposite response. alarm = threat, only.
+			_sfx.play("pickup", -14.0, 0.7)
 			_fx.append({"x": sim.players[i]["x"], "y": sim.players[i]["y"], "t": 0.0,
 				"kind": "floattext", "rate": 0.03, "text": "EXPOSED", "col": Color(1.0, 0.6, 0.4)})
 		elif _smoke_prev[i] > 60 and st <= 60 and sim.players[i]["alive"]:
 			# Pre-expiry warning (6-vote panel item): one soft tick a second out,
 			# paired with the shroud's blink — a 55t sniper paint can begin the
 			# frame smoke clears, so "about to be exposed" must land in advance.
-			_sfx.play("alarm", -20.0, 2.0)
+			_sfx.play("pickup", -18.0, 0.9)
 		_smoke_prev[i] = st
 
 
@@ -2307,7 +2361,8 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contractor2",
 	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "sapper",
-	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone"}
+	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone",
+	"technical": "m_technical", "pilot": "m_pilot"}
 
 # Rare capsule identity (pickup kinds 4..9): sprite/label/colour shared by the
 # ground draw, the collect callout and the off-screen marker. Always index via
@@ -2643,12 +2698,32 @@ func _draw_barrels() -> void:
 		if not bl["armed"]:
 			continue
 		var bp := _to_screen(bl["x"], bl["y"])
+		# Band cull: barrels stream in up to 2 view-heights above the camera and
+		# each draws ~15 primitives (10 dash arcs) — the off-screen field was the
+		# priciest invisible thing in the frame (same idiom as _draw_water).
+		if bp.y < -40.0 or bp.y > 400.0:
+			continue
 		_ground_shadow(bp, 4.0)
 		# Hazard-orange live ordnance, distinct from the mossy scenery barrels.
 		var wb := 1.0 if _motion < 0.5 else Art.pulse(0.09)   # steady under reduce-motion
-		_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
-		draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
-		draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
+		# CHAIN-LIT: fuse_ticks counts 8->0 to the boom. The lit barrel goes
+		# white-hot and its ring flares — the 8-tick "flee NOW" window existed in
+		# the sim but was invisible (3-lens consensus: the anticipation beat is
+		# where the drama lives). Fast blink is the tell; reduce-motion holds it
+		# at full-bright instead (steady, but unmissably hotter than armed).
+		var bfuse: int = bl.get("fuse_ticks", 0)
+		if bfuse > 0:
+			var bheat := 1.0 - float(bfuse) / 8.0
+			var bblink := 1.0 if _motion < 0.5 else (0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 1.6))
+			_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.75 + bheat * 0.25, 0.55 + bheat * 0.45))
+			draw_circle(bp + Vector2(0, -2), 2.2 + bheat * 2.0,
+				Color(1.0, 0.95, 0.75, (0.6 + bheat * 0.4) * bblink))
+			draw_arc(bp, 7.0 + bheat * 3.0, 0, TAU, 16,
+				Color(1.0, 0.85, 0.5, (0.5 + bheat * 0.5) * bblink), 1.6 + bheat)
+		else:
+			_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
+			draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
+			draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
 		# Blast-radius ring: shares GRENADE_RADIUS with the player's grenade circle,
 		# but a chained barrel HURTS YOU inside it (the grenade never does) — so draw
 		# it as a DASHED RED hazard ring (mine/danger grammar), not the friendly
@@ -2909,7 +2984,11 @@ func _draw_enemies() -> void:
 		var epos := _to_screen(e["x"], e["y"])
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).
-		if e["kind"] != "frogman" and not (e["kind"] == "ghillie" and e.get("submerged", false)):
+		# Drone excluded: it draws its own OFFSET altitude shadow — a second
+		# centered contact shadow under a hovering unit flattened the airborne read.
+		# Technical excluded: it gets a vehicle-width shadow in its own branch.
+		if e["kind"] != "frogman" and e["kind"] != "drone" and e["kind"] != "technical" \
+				and not (e["kind"] == "ghillie" and e.get("submerged", false)):
 			_ground_shadow(epos, 6.0)
 		if e.get("marked", false):
 			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff
@@ -3051,6 +3130,48 @@ func _draw_enemies() -> void:
 				draw_circle(epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
 					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
 			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
+		elif e["kind"] == "technical":
+			# Charging raider: face the LOCKED line mid-charge (the sprite is the
+			# promise), shake + dust while revving, speed streaks while barreling.
+			var t_lunge: int = e.get("lunge_ticks", 0)
+			var t_wu: int = e.get("windup", 0)
+			var t_face := face
+			# Vehicle-width shadow (the generic 6.0 infantry disc made the truck
+			# read as floating on a man's shadow — the tank uses 15.0). Drawn
+			# BEFORE the rev shake mutates epos: the shadow staying put while the
+			# body vibrates above it is what sells the revving.
+			_ground_shadow(epos, 11.0)
+			if t_lunge > 0:
+				t_face = Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0))).angle()
+				var t_dir := Vector2.from_angle(t_face)
+				draw_line(epos - t_dir * 14.0, epos - t_dir * 26.0,
+					Color(0.85, 0.8, 0.7, 0.45), 2.0)
+				# Churned-ground dust: the fastest thing on the field was leaving no
+				# trail. Frame-clock phase, no state; count halves under reduce-motion.
+				var t_ph := float(Engine.get_physics_frames())
+				for dk in (1 if _motion < 0.5 else 3):
+					var d_off := -t_dir * (16.0 + dk * 9.0 + fmod(t_ph * 2.0 + dk * 13.0, 9.0))
+					d_off += Vector2.from_angle(t_face + PI / 2.0) * sin(t_ph * 0.7 + dk * 2.1) * 4.0
+					draw_circle(epos + d_off, 2.4 - dk * 0.5,
+						Color(0.62, 0.55, 0.42, 0.30 - dk * 0.07))
+			elif t_wu > 0:
+				var t_rf := 1.0 - float(t_wu) / float(SimWorld.TECHNICAL_REV_TICKS)
+				epos.x += sin(float(Engine.get_physics_frames()) * 0.9) * (0.6 + t_rf) * _motion
+				# The rev line IS the dodge promise: where it points is where it charges.
+				draw_line(epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
+					Color(1.0, 0.45, 0.3, 0.25 + t_rf * 0.45), 1.5)
+			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
+		elif e["kind"] == "pilot":
+			# Downed pilot: the one green thing among hostiles — objective ring +
+			# RESCUE label so "touch, don't shoot" reads across a firefight.
+			var pi_pulse := Art.pulse(0.15)
+			var pi_col := Art.safe(Color(0.45, 1.0, 0.65))
+			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
+				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
+			_spr("m_pilot", epos, -PI / 2, 0.48)
+			# Ransom on the label (6/9 panel): the stake was invisible until AFTER
+			# the touch — "is this dive worth it" needs the number up front.
+			Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), 8, pi_col)
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: real courier bake (the loot pack is in the
 			# sprite now); the pulsing gold ring stays — "catch this one" must
@@ -3081,13 +3202,27 @@ func _draw_enemies() -> void:
 			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
 			# (6/9 panel reviewers: the old telegraph was one flat 44px stub that
 			# only existed mid-burst — aim was invisible, reload erased the lane).
-			_spr("sandbag_beige", epos, 0.0, 0.5, Color(0.82, 0.8, 0.62))
+			# Damage state: hp 3->1 darkens the bags and empties the pip row —
+			# the one chip-HP enemy was visually identical fresh vs nearly-dead
+			# (5/7 lens consensus). Static reads, no reduce-motion gate needed.
+			var n_hp: int = e.get("hp", 3)
+			var n_dmg := float(clampi(3 - n_hp, 0, 2))
+			_spr("sandbag_beige", epos, 0.0, 0.5,
+				Color(0.82 - n_dmg * 0.13, 0.8 - n_dmg * 0.15, 0.62 - n_dmg * 0.12))
 			# Baked tripod MG on the sandbag ring (was a shrunken red elite gunner).
-			# Image-up = muzzle, so the emplacement swivels with the live aim lane.
+			# Image-up = muzzle, so the emplacement swivels with the live aim lane;
+			# it darkens with the bags as the nest cracks.
 			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
 			var nang: float = nlv.angle() if nlv.length() > 1.0 else face
-			_spr("mg_stand", epos + Vector2(0, -2), nang + PI / 2, 1.0)
-			if nlv.length() > 1.0:
+			_spr("mg_stand", epos + Vector2(0, -2), nang + PI / 2, 1.0,
+				Color(1.0 - n_dmg * 0.15, 1.0 - n_dmg * 0.17, 1.0 - n_dmg * 0.15))
+			# Armor pips (gate lock-pip grammar): filled = hits still to crack.
+			for npi in 3:
+				draw_circle(epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8,
+					Color(1.0, 0.78, 0.35, 0.9) if npi < n_hp else Color(0.22, 0.2, 0.18, 0.75))
+			# Lane band-cull (7/9 panel): an off-band nest drew its full 640px lane
+			# every aim frame. Sandbags + pips above still draw — only the lane skips.
+			if nlv.length() > 1.0 and epos.y > -80.0 and epos.y < 420.0:
 				var nld := nlv.normalized()
 				var nburst: int = e.get("lunge_ticks", 0)
 				var nwu: int = e.get("windup", 0)
@@ -3110,7 +3245,7 @@ func _draw_enemies() -> void:
 				else:
 					# RELOAD: a dim stub down the LAST lane — the rooted-turret
 					# threat must not vanish for the whole 1.5s between bursts.
-					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.12), 1.0)
+					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.2), 1.0)   # 0.12 read as a dead lane, not a reloading turret
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
@@ -3608,22 +3743,27 @@ func _draw_players() -> void:
 					Color(1.0, 0.18, 0.1, 0.85 * _hit_dir_t), 3.0)
 				draw_arc(pos, 24.0, wa - 0.3, wa + 0.3, 8,
 					Color(1.0, 0.45, 0.3, 0.5 * _hit_dir_t), 1.5)
+			# Adrenaline aura: the 20-streak / tank-bail speed surge (boost_ticks) is a
+			# real 1.5x buff that was otherwise invisible. A hot ring that fades as the
+			# surge drains says "empowered — and here is when it ends". Hoisted OUT of
+			# the vest branch — the surge has zero relation to vest state, and a
+			# vestless player earning x20 got the speed with no on-body feedback.
+			# Reduce-motion: steady ring + static spokes (the pulse/rotation was the
+			# one aura in this file ignoring the gate).
+			if p["boost_ticks"] > 0:
+				var bo_frac: float = clampf(float(p["boost_ticks"]) / float(SimWorld.BAIL_BOOST_TICKS * 2), 0.0, 1.0)
+				var bo_ph := float(Engine.get_physics_frames() + i * 17)
+				var bo_pulse := 1.0 if _motion < 0.5 else 0.5 + 0.5 * sin(bo_ph * 0.45)
+				var bo_spin := 0.0 if _motion < 0.5 else bo_ph * 0.08
+				draw_arc(pos, 16.0 + bo_pulse * 3.0, 0, TAU, 28,
+					Color(1.0, 0.55, 0.15, (0.35 + 0.4 * bo_pulse) * bo_frac), 2.0 + bo_frac)
+				for bo_s in 6:
+					var bo_ang := bo_s * TAU / 6.0 + bo_spin
+					var bo_dir := Vector2.from_angle(bo_ang)
+					draw_line(pos + bo_dir * 12.0, pos + bo_dir * (17.0 + bo_pulse * 4.0),
+						Color(1.0, 0.72, 0.3, 0.5 * bo_frac), 1.5)
 			if p["vest"]:
 				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
-				# Adrenaline aura: the 20-streak / tank-bail speed surge (boost_ticks) is a
-				# real 1.5x buff that was otherwise invisible. A hot ring that fades as the
-				# surge drains says "empowered — and here is when it ends".
-				if p["boost_ticks"] > 0:
-					var bo_frac: float = clampf(float(p["boost_ticks"]) / float(SimWorld.BAIL_BOOST_TICKS * 2), 0.0, 1.0)
-					var bo_ph := float(Engine.get_physics_frames() + i * 17)
-					var bo_pulse := 0.5 + 0.5 * sin(bo_ph * 0.45)
-					draw_arc(pos, 16.0 + bo_pulse * 3.0, 0, TAU, 28,
-						Color(1.0, 0.55, 0.15, (0.35 + 0.4 * bo_pulse) * bo_frac), 2.0 + bo_frac)
-					for bo_s in 6:
-						var bo_ang := bo_s * TAU / 6.0 + bo_ph * 0.08
-						var bo_dir := Vector2.from_angle(bo_ang)
-						draw_line(pos + bo_dir * 12.0, pos + bo_dir * (17.0 + bo_pulse * 4.0),
-							Color(1.0, 0.72, 0.3, 0.5 * bo_frac), 1.5)
 			else:
 				# No-vest fragility: one hit from death, and the exposed stakes
 				# should read where the eye already is. A faint, gapped
@@ -4392,6 +4532,11 @@ func _draw_objective_markers() -> void:
 		if e["kind"] == "courier":
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
 				"icon": "hud_vehicle", "col": Color(1.0, 0.85, 0.35), "pr": 1})
+		elif e["kind"] == "pilot":
+			# The rescue is an OBJECTIVE, not a threat — green mark, top priority,
+			# so a pilot drifting off-screen is findable before the edge takes him.
+			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
+				"icon": "hud_target", "col": Art.safe(Color(0.45, 1.0, 0.65)), "pr": 1})
 		elif e.get("marked", false):
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
 				"icon": "hud_target", "col": Color(1.0, 0.82, 0.3), "pr": 1})
@@ -4659,7 +4804,8 @@ func _draw_threat_pips() -> void:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
 		var k: String = e["kind"]
-		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone":
+		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone" \
+				and k != "technical":
 			continue
 		var sp := _to_screen(e["x"], e["y"])
 		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:
@@ -4750,7 +4896,10 @@ func _draw_banners(top_msg: String) -> void:
 		# Radial flash: hottest at screen center, falling off toward the edges
 		# (oversized softspot card) over a faint flat base — punchier than a
 		# uniform white sheet at the same energy.
-		var fla := _flash_alpha * _motion
+		# maxf floor (6/9 panel): zeroing the wash under reduce-motion erased the
+		# whole-field-stun gestalt entirely; siblings (damage vignette, airstrike
+		# wash) keep a dimmed floor. The decay is a fade, not a strobe — RM-safe.
+		var fla := _flash_alpha * maxf(_motion, 0.4)
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, fla * 0.45))
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
 			false, Color(1, 1, 1, fla))
