@@ -76,9 +76,14 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
 ## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
 ## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
+## RE-RECORDED (2026-07-16, Pass2 P3 design changes): MG Nest hp, barrels react to bullets +
+## enemy-contact + fuse + coin-neutral, MG Nest coin retier + aim re-acquire, Triple+Spread 5-fan
+## stack + Triple drop de-weight, shop score parity. New hashed fields e["hp"] (per-enemy) and
+## barrel fuse_ticks shift every campaign sample; the barrel fuse/coin/aim behavior + reweighted
+## capsule rng move the streamed-barrel samples too.
 const GOLDEN: Array[int] = [
-	5492265342370716625, 5329418804242622598, 8072099053918525192,
-	4457606292700231691, 8711883446497700766, 4882331979285349249,
+	8189771216162955145, 1782150494265825701, 3790999717198289683,
+	9085955070817780151, 5940526485347526381, 9035592334289449502,
 ]
 
 
@@ -140,9 +145,14 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## fixes (roll-along-aim, grenade edge-detect, airstrike out of crate pool, boss HP player-count
 ## scaling, score-on-purchase, early specials gate) stack with Triple Shot (hashed p["triple"]) and
 ## Explosive Fuel Barrels (checksummed barrels[]); all endless samples recomputed for the merged sim.
+## RE-RECORDED (2026-07-16, Pass2 P3 design changes): MG Nest hp, barrels react to bullets +
+## enemy-contact + fuse + coin-neutral, MG Nest coin retier + aim re-acquire, Triple+Spread 5-fan
+## stack + Triple drop de-weight, shop score parity. The unconditional per-enemy feed.call(e["hp"])
+## and per-barrel fuse_ticks structural adds shift every endless sample even though endless streams
+## no barrels; the reweighted elite-capsule rng + mg_nest exclusions move the enemy stream too.
 const ENDLESS_GOLDEN: Array[int] = [
-	9023438600815067543, 4739873706484850096, 7055349867750677465,
-	4832767246026688017, 8007662793683766665, 1658233155002909313,
+	7659038194268271509, 6051440633271242566, 1413930935188860893,
+	584009387631034901, 5103168990330970317, 8269650524214835205,
 ]
 
 
