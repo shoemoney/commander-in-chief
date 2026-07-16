@@ -711,12 +711,12 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			# Flashbang: one field-wide stun, resolved the instant it's grabbed.
 			flash_ticks = FLASH_STUN_TICKS
 			# Fairness re-arm: a windup frozen mid-telegraph would otherwise
-			# resume with the player's dodge window already burned — floor every
-			# in-flight windup back to the elite-tell length (24t, the shortest
-			# ranged telegraph in the roster) so the resumed shot re-telegraphs.
+			# resume with the player's dodge window already burned — restore every
+			# in-flight windup to ITS OWN archetype's full tell (a flat 24t floor
+			# compressed a sniper's 55t laser paint to less than half its promise).
 			for fe in enemies:
 				if fe["alive"] and fe.get("windup", 0) > 0:
-					fe["windup"] = maxi(fe["windup"], ELITE_WINDUP_TICKS)
+					fe["windup"] = maxi(fe["windup"], _windup_for(fe["kind"]))
 			events.append({"t": "flashbang", "x": p["x"], "y": p["y"]})
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
@@ -1440,6 +1440,19 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 func _spawn_frogman(x: int, y: int) -> void:
 	enemies.append({"x": x, "y": y, "alive": true, "elite": false,
 		"kind": "frogman", "submerged": true, "lunge_ticks": 0, "surface_ticks": 0})
+
+
+func _windup_for(kind: String) -> int:
+	## The archetype's full telegraph length (the flashbang re-arm restores a
+	## frozen shot to its own tell, keeping every telegraph a truthful promise).
+	match kind:
+		"sniper", "ghillie":
+			return SNIPER_WINDUP_TICKS
+		"grenadier":
+			return GRENADIER_WINDUP_TICKS
+		"drone":
+			return DRONE_WINDUP_TICKS
+	return ELITE_WINDUP_TICKS
 
 
 func _shields_possible() -> bool:

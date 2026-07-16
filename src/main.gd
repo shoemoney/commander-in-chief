@@ -840,7 +840,7 @@ func _consume_events() -> void:
 					6: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					7: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
 						% ("X" if Art.use_pad else "F"))
-					8: _hint("smoke", "SMOKE SCREEN — ENEMIES CAN'T AIM AT YOU WHILE IT HOLDS")
+					8: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
 					9: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
@@ -1590,6 +1590,11 @@ func _check_smoke_edges() -> void:
 			_sfx.play("alarm", -18.0, 2.6)
 			_fx.append({"x": sim.players[i]["x"], "y": sim.players[i]["y"], "t": 0.0,
 				"kind": "floattext", "rate": 0.03, "text": "EXPOSED", "col": Color(1.0, 0.6, 0.4)})
+		elif _smoke_prev[i] > 60 and st <= 60 and sim.players[i]["alive"]:
+			# Pre-expiry warning (6-vote panel item): one soft tick a second out,
+			# paired with the shroud's blink — a 55t sniper paint can begin the
+			# frame smoke clears, so "about to be exposed" must land in advance.
+			_sfx.play("alarm", -20.0, 2.0)
 		_smoke_prev[i] = st
 
 
@@ -2494,7 +2499,14 @@ func _draw_mines() -> void:
 		var mb := Art.pulse(0.1)
 		var mc := Art.safe(Color(0.3, 0.9, 0.75)) if m.get("friendly", false) else Color(1.0, 0.35, 0.2)
 		draw_circle(mp, 8.0 + mb * 3.0, Color(mc.r, mc.g, mc.b, 0.14 + mb * 0.12))
-		draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
+		if m.get("friendly", false):
+			# Dashed ring: ownership must survive colorblindness — shape, not hue.
+			for seg in 6:
+				var a0 := seg * TAU / 6.0
+				draw_arc(mp, 7.0 + mb * 2.0, a0, a0 + TAU / 12.0, 5,
+					Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
+		else:
+			draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
 		# Real claymore silhouette (was the plain 'landmine' decor pip). Scale 1.05
 		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
 		_spr("wep_claymore", mp, 0.0, 1.05)
@@ -2828,6 +2840,13 @@ func _draw_enemies() -> void:
 			draw_circle(epos + Vector2(3.0, 8.0), 4.0, Color(0, 0, 0, 0.18))
 			if dwu > 0:
 				var df := 1.0 - float(dwu) / float(SimWorld.DRONE_WINDUP_TICKS)
+				# Lock-line to the tracked target (6-vote panel item): the paint
+				# follows YOUR ground, and nothing said so — a dashed amber tether
+				# makes "it's tracking me, keep moving" readable mid-windup.
+				if not target.is_empty():
+					draw_dashed_line(epos + Vector2(0, -5.0 + hb),
+						_to_screen(target["x"], target["y"]),
+						Color(1.0, 0.7, 0.25, 0.35 + df * 0.35), 1.0, 6.0)
 				draw_circle(epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
 					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
 			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
@@ -2896,11 +2915,16 @@ func _draw_enemies() -> void:
 		# warning (under the 3-flashes/s photosensitivity line).
 		if sim.flash_ticks > 0 and not e.get("submerged", false):
 			if sim.flash_ticks > 20 or (sim.flash_ticks / 10) % 2 == 0:
-				draw_arc(epos + Vector2(0, -10.0), 3.5, 0, TAU, 10, Color(0.75, 0.88, 1.0, 0.85), 1.3)
-				for sd in 3:
-					var sa := float(Engine.get_physics_frames()) * 0.12 + sd * TAU / 3.0
-					draw_circle(epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
-						Color(1.0, 1.0, 0.8, 0.9))
+				# The ring DEPLETES with the stun (4-vote panel item): the whole
+				# tactical window is readable per body, not just its edges.
+				var stf := float(sim.flash_ticks) / float(SimWorld.FLASH_STUN_TICKS)
+				draw_arc(epos + Vector2(0, -10.0), 3.5, -PI / 2, -PI / 2 + TAU * stf, 10,
+					Color(0.75, 0.88, 1.0, 0.85), 1.3)
+				if _motion >= 0.5:   # orbit dots are motion — the ring alone under reduce-motion
+					for sd in 3:
+						var sa := float(Engine.get_physics_frames()) * 0.12 + sd * TAU / 3.0
+						draw_circle(epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
+							Color(1.0, 1.0, 0.8, 0.9))
 
 
 func _draw_observer() -> void:
@@ -3202,6 +3226,10 @@ func _draw_players() -> void:
 		if p["alive"] and p["smoke_ticks"] > 0:
 			var sm_frac := clampf(float(p["smoke_ticks"]) / float(SimWorld.SMOKE_TICKS), 0.0, 1.0)
 			var sm_a := 0.45 * minf(1.0, sm_frac * 5.0)
+			# Final-second blink (2.5 flashes/s — under the photosensitivity
+			# line): pairs with the pre-expiry tick so the window closing reads.
+			if p["smoke_ticks"] <= 60 and (p["smoke_ticks"] / 12) % 2 == 1:
+				sm_a *= 0.35
 			var sm_ph := float(Engine.get_physics_frames() + i * 43)
 			for sm_k in 4:
 				var sm_off := Vector2(sin(sm_ph * 0.03 + sm_k * 1.7) * 7.0,
@@ -3318,6 +3346,13 @@ func _draw_players() -> void:
 					draw_arc(pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
+			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
+			# will land if INTERACT fires now — ghost sprite + the 9px trigger
+			# ring, so a plant is a plan, not a surprise.
+			if p["claymores"] > 0 and aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
+				var gpos := pos + aim * 20.0
+				_spr("wep_claymore", gpos, 0.0, 1.05, Color(1, 1, 1, 0.28))
+				draw_arc(gpos, 9.0, 0, TAU, 12, Art.safe(Color(0.5, 0.95, 0.7, 0.35)), 1.0)
 			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
 				# Heat-bloom: the crosshair spreads with sustained fire (the
 				# barrel-heat mechanic, made visible at the point of attention).
@@ -4205,6 +4240,19 @@ func _draw_wheel() -> void:
 					Color(1.0, 0.55, 0.45) if empty else Color(1.0, 0.97, 0.9))
 		# Device-aware verb cue under the hub: the wheel states its own controls,
 		# and the cancel button is the real glyph (pad B / keycap C), not a letter.
+		# Revive-guard (5-vote panel item): with a teammate down, a buy that
+		# would price their revive out of the shared chest is a silent trap —
+		# name it BEFORE the release commits the coin.
+		if _wheel[i]["sel"] >= 0 and not sim.last_stand:
+			var gitem: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[_wheel[i]["sel"]]]
+			var gcost: int = sim._supply_cost(gitem["kind"])
+			if sim.war_chest >= gcost:
+				for q in sim.players.size():
+					var dq := sim.players[q]
+					if not dq["alive"] and sim.war_chest - gcost < sim.revive_cost(dq):
+						Art.text_center(self, "BUY LEAVES NO REVIVE FOR P%d" % (q + 1),
+							c.x, c.y - 63.0, 8, Color(1.0, 0.7, 0.3))
+						break
 		if _wheel[i]["sel"] >= 0:
 			var cue_l := "RELEASE TO BUY · "
 			var cue_r := " CANCEL"
