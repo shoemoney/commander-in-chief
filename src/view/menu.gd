@@ -93,7 +93,7 @@ func is_active() -> bool:
 	return mode != Mode.HIDDEN
 
 
-func open(m: int) -> void:
+func open(m: int, select_id := "") -> void:
 	# Menu-to-menu keeps ~60% scrim — a full _open_t reset dipped the backdrop
 	# to ~0 for a frame and flashed the live attract firefight between screens.
 	# Only entering from gameplay replays the full fade + drop-in.
@@ -105,6 +105,14 @@ func open(m: int) -> void:
 	_sel_target = -1.0
 	_key_move = 0   # a key held across the transition must not auto-repeat here
 	_has_replay = FileAccess.file_exists("user://last_run.replay")   # hoisted: _menu_items ran this disk stat ~180x/s while TITLE was open
+	# Backing out of a submenu re-selects the row that opened it — landing on
+	# CAMPAIGN after OPTIONS broke muscle memory (and risks a misfired start).
+	if select_id != "":
+		var mi := _menu_items()
+		for k in mi.size():
+			if mi[k]["id"] == select_id:
+				sel = k
+				break
 	queue_redraw()
 
 
@@ -121,8 +129,8 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "endless", "label": "ENDLESS WAR", "destructive": false},
 			{"id": "daily", "label": "DAILY RUN", "destructive": false},
 			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false},
-			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false},
-			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false},
+			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players},
+			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard},
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false},
 		]
@@ -146,13 +154,15 @@ func _menu_items() -> Array[Dictionary]:
 
 
 func _settings_rows() -> Array[Dictionary]:
+	# "on" drives the row's state dot (filled/hollow — position+shape carry it,
+	# not hue alone) so toggle state reads without parsing the label tail.
 	return [
-		{"id": "sfx", "label": "SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"), "destructive": false},
-		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false},
-		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false},
-		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false},
-		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false},
-		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false},
+		{"id": "sfx", "label": "SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"), "destructive": false, "on": not _bus_off("SFX")},
+		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false, "on": not _bus_off("Music")},
+		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5},
+		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind},
+		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on},
+		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist},
 	]
 
 
@@ -311,7 +321,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 	elif back and mode == Mode.PAUSE:
 		mode = Mode.HIDDEN
 	elif back and (mode == Mode.HALL or mode == Mode.HOWTO or mode == Mode.OPTS):
-		open(Mode.TITLE)
+		open(Mode.TITLE, {Mode.HALL: "hall", Mode.HOWTO: "howto", Mode.OPTS: "options"}[mode])
 	if move != 0 or hmove != 0 or act or back:
 		accept_event()
 	queue_redraw()
@@ -363,12 +373,15 @@ func _row_geometry() -> Dictionary:
 	var n := _items().size()
 	var many := n > 4
 	var top := 118.0 if mode == Mode.PAUSE else (150.0 if not many else 156.0)
-	var gap := minf(30.0 if many else 46.0, (310.0 - top) / maxf(1.0, float(n - 1)))
+	# TITLE's bottom bound clears the y~322 input legend strip — at 310 the QUIT
+	# row sat flush against it (6/8 panel reviewers, unanimous top item).
+	var bottom := 296.0 if mode == Mode.TITLE else 310.0
+	var gap := minf(30.0 if many else 46.0, (bottom - top) / maxf(1.0, float(n - 1)))
 	# Open-settle drop-in offset lives HERE (after the gap math it must not
 	# perturb) so a click during the settle hits the same rows _draw renders.
 	if main._motion >= 0.5:
 		top += (1.0 - _open_t) * 12.0
-	return {"top": top, "gap": gap, "bh": minf(BTN.y, gap - 3.0), "n": n}
+	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - 3.0)), "n": n}   # floored HERE so _draw and the mouse hit-test share one height
 
 
 func _row_at(p: Vector2) -> int:
@@ -393,7 +406,7 @@ func _toggle_bus(name: String) -> void:
 func _activate() -> void:
 	main._sfx.play("buy", -8.0)
 	if mode == Mode.HALL or mode == Mode.HOWTO:
-		open(Mode.TITLE)
+		open(Mode.TITLE, "hall" if mode == Mode.HALL else "howto")
 		return
 	var id: String = _menu_items()[sel]["id"]
 	if mode == Mode.TITLE:
@@ -412,7 +425,7 @@ func _activate() -> void:
 	else:
 		match id:
 			"resume": mode = Mode.HIDDEN
-			"back": open(Mode.TITLE)   # OPTS returns to the title
+			"back": open(Mode.TITLE, "options")   # OPTS returns to the title, cursor on OPTIONS
 			"sfx":
 				_toggle_bus("SFX")
 				main._save_settings()
@@ -554,6 +567,14 @@ func _draw() -> void:
 		var lx := r.position.x + 30.0
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
 			Vector2(lx, r.position.y + bh / 2.0 + 4.0), 11, col)
+		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
+		# shape+fill carry the state (hue alone fails protan players).
+		if mitems[k].has("on"):
+			var dc := Vector2(r.end.x - 10.0, r.position.y + bh / 2.0)
+			if mitems[k]["on"]:
+				draw_circle(dc, 3.0, Art.safe(Color(0.55, 0.95, 0.5)))
+			else:
+				draw_arc(dc, 3.0, 0, TAU, 10, Color(0.55, 0.6, 0.5, 0.8), 1.2)
 		# Left/right cycle affordance on the selected toggle row — toggles flipped
 		# silently and read identical to action rows. ("<"/">" — ◄► not in the font.)
 		if selected and mitems[k]["id"] in _TOGGLES:
