@@ -108,6 +108,7 @@ var _hit_dir_t := 0.0
 var _hit_dir_player := 0         # which player's body the wedge emanates from
 var _downed_by := ""             # label of the last lethal source, shown in the K.I.A. debrief
 var _record_fired := false       # NEW RECORD banner once per run
+var _deep_fired := false         # DEEPEST WAVE banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _boss_hpmax := {}            # view-side max HP seen per boss key: the endless gunship spawns above BOSS_HP (sim_world.gd:1581), which pegged its bar at 100% for half the fight
 var _seen := {}                  # persisted first-time-hint flags
@@ -550,6 +551,7 @@ func _reset() -> void:
 	_hitmarker = [0.0, 0.0]
 	_hit_dir_t = 0.0
 	_record_fired = false
+	_deep_fired = false
 	_boss_ghost.clear()
 	_boss_hpmax.clear()
 	_punch = 0.0
@@ -1555,9 +1557,11 @@ func _record_run() -> void:
 	for g in sim.gates:
 		if g["open"]:
 			opened += 1
+	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
 	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
-		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist})
+		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
+		"grade": rr.grade, "title": rr.title})
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
@@ -1630,6 +1634,13 @@ func _track_bests() -> void:
 		best_score = sim.score
 		_best_dirty = true
 	if sim.mode == "endless" and sim.wave > best_wave:
+		# DEEPEST WAVE milestone: the first wave this run pushes past the standing
+		# best (from prior runs) is a real record — fire it once. best_wave>0 skips
+		# the every-wave noise on a first-ever endless run (mirrors the score guard).
+		if not _deep_fired and best_wave > 0:
+			_deep_fired = true
+			_show_banner("DEEPEST WAVE %d" % sim.wave)
+			_sfx.play("wave_clear", -4.0, 1.25)
 		best_wave = sim.wave
 		_best_dirty = true
 	var dist := -Fixed.to_int(sim.camera_top) / 10
