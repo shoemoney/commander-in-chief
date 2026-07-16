@@ -168,6 +168,7 @@ const _EVENT_SOUND := {
 	"buy": ["buy", -4.0, 1.0],
 	"deny": ["deny", -6.0, 1.0],
 	"courier_escape": ["deny", -5.0, 0.7],   # the bounty runner got away with your coin — a low 'you lost it' sting
+	"revive_deny": ["deny", -7.0, 0.9],      # pressed revive but can't afford it
 }
 
 var _hud_icons := HudIcons.new()

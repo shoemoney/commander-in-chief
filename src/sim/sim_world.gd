@@ -575,6 +575,10 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 		else:
 			if target["broke_timer"] == 0:
 				target["broke_timer"] = BROKE_RESPAWN_TICKS
+				# One 'can't afford it' cue on the first denial (not per-mash) — a
+				# denied revive was as silent as a denied buy is loud. Event only,
+				# checksum-excluded, so golden-safe.
+				events.append({"t": "revive_deny", "x": target["x"], "y": target["y"]})
 
 
 func _respawn(p: Dictionary, at_y: int) -> void:
