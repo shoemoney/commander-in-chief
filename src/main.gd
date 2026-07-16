@@ -1899,6 +1899,18 @@ func _draw_skyglow() -> void:
 		var h := 8.0 + b * 7.0
 		var a := glow * 0.16 * (1.0 - b / 5.0) * pul
 		draw_rect(Rect2(0, 0, SCREEN_W, h), Color(gcol.r, gcol.g, gcol.b, a))
+	# Foundry skyline: once past mid-run, fixed dark silhouettes (smoke stacks + a
+	# radio mast) fade in along the top edge — you can SEE where you are headed.
+	if march > 0.6:
+		var sa := clampf((march - 0.6) / 0.4, 0.0, 1.0) * 0.7
+		var sky := Color(0.05, 0.04, 0.05, sa)
+		var stx := [80.0, 118.0, 150.0, 468.0, 520.0, 560.0]
+		var sth := [26.0, 34.0, 22.0, 30.0, 40.0, 24.0]
+		for k in stx.size():
+			draw_rect(Rect2(stx[k], 0.0, 14.0, sth[k]), sky)
+		draw_line(Vector2(300, 0), Vector2(300, 46), sky, 2.0)
+		draw_line(Vector2(300, 0), Vector2(315, 44), sky, 1.5)
+		draw_line(Vector2(300, 0), Vector2(285, 44), sky, 1.5)
 
 
 func _sector_march() -> float:
@@ -2303,7 +2315,7 @@ func _draw_enemies() -> void:
 		elif e["kind"] == "courier":
 			# Fleeing supply runner: gold-tinted, a bobbing loot sack overhead +
 			# a pulsing ring so "catch this one" reads across the field.
-			_spr("rusher", epos, face, 0.5, Color(1.4, 1.15, 0.4))
+			_spr("rusher", epos, face, 0.5, Color(1.4, 1.15, 0.4), 1.12)   # forward lean = closing momentum
 			var lb := Art.pulse(0.2)
 			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 			draw_circle(epos + Vector2(0, -11 - lb * 1.5), 2.6, Color(1.0, 0.85, 0.3))
@@ -2315,7 +2327,7 @@ func _draw_enemies() -> void:
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: a warm-tinted insurgent with a pulsing armed-satchel
 			# pip so "he's seeding the ground behind him" reads before the trail does.
-			_spr("rusher", epos, face, 0.5, Color(1.5, 1.05, 0.5))
+			_spr("rusher", epos, face, 0.5, Color(1.5, 1.05, 0.5), 1.12)
 			var spp := Art.pulse(0.25)
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "ghillie":
