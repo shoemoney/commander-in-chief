@@ -2567,7 +2567,7 @@ func _draw_pickups() -> void:
 			# beam + label so a 1-in-6 elite drop stands out in the chaos (and the
 			# out-of-range glyph lookup below is skipped — those kinds have no icon).
 			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else (Color(1.0, 0.8, 0.45) if pk["kind"] == 5 else Color(1.0, 0.55, 0.85))
-			var pg := Art.pulse(0.18)
+			var pg := 1.0 if _motion < 0.5 else Art.pulse(0.18)   # steady under reduce-motion
 			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
