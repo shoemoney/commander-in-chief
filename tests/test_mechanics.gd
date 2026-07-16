@@ -217,3 +217,60 @@ func test_drone_paints_a_tracked_strike() -> void:
 			painted = true
 			break
 	Runner.T.ok(painted, "the drone paints a tracked mortar strike within one cycle")
+
+
+func test_technical_charge_follows_the_locked_line_not_the_player() -> void:
+	var sim := SimWorld.new(21, 1, "endless")
+	var p := sim.players[0]
+	sim._spawn_special(p["x"], p["y"] - 200 * Fixed.ONE, "technical")
+	var e := sim.enemies[0]
+	e["fire_cd"] = 0
+	sim._step_enemies()   # rev starts (windup armed)
+	Runner.T.ok(e["windup"] > 0, "technical revs before charging")
+	for t in SimWorld.TECHNICAL_REV_TICKS:
+		sim._step_enemies()
+	Runner.T.ok(e.get("lunge_ticks", 0) > 0, "rev end locks the charge")
+	var lock_lx: int = e["aim_lx"]
+	# Teleport the player far sideways — the charge must NOT re-aim.
+	p["x"] = p["x"] + 300 * Fixed.ONE
+	var x0: int = e["x"]
+	var y0: int = e["y"]
+	sim._step_enemies()
+	Runner.T.eq(e["aim_lx"], lock_lx, "mid-charge the locked vector never re-aims")
+	Runner.T.ok(e["y"] != y0, "the charge travels")
+	Runner.T.eq(e["x"], x0, "a straight-down lock gains no sideways ground on a dodger")
+
+
+func test_pilot_rescue_pays_ransom_and_escape_forfeits() -> void:
+	var sim := SimWorld.new(22, 1)
+	var p := sim.players[0]
+	# Rescue: pilot under the player's feet — touch pays, never hurts.
+	sim.enemies.append({"x": p["x"], "y": p["y"], "alive": true, "elite": false, "kind": "pilot"})
+	var chest0 := sim.war_chest
+	sim.step([SimInput.new()])
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.PILOT_RANSOM, "touching the pilot pays the ransom")
+	Runner.T.ok(p["alive"], "the rescue touch does not kill the rescuer")
+	# Escape: a pilot at the top edge crosses it and is captured (no pay).
+	sim.enemies.append({"x": 100 * Fixed.ONE, "y": sim.camera_top - 30 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "pilot"})
+	var chest1 := sim.war_chest
+	sim._step_enemies()
+	var esc: Dictionary = sim.enemies[sim.enemies.size() - 1]
+	Runner.T.ok(not esc["alive"], "crossing the top edge captures the pilot")
+	Runner.T.eq(sim.war_chest, chest1, "a captured pilot pays nothing")
+
+
+func test_boss_death_spawns_a_pilot_and_shooting_him_pays_nothing() -> void:
+	var sim := SimWorld.new(23, 1)
+	var boss := {"hp": 1, "alive": true, "x": 320 * Fixed.ONE, "gate_y": 0}
+	sim._damage_boss(boss, 99)
+	var pilot := {}
+	for e in sim.enemies:
+		if e["kind"] == "pilot":
+			pilot = e
+	Runner.T.ok(not pilot.is_empty(), "a downed gunship ejects its pilot")
+	var chest0 := sim.war_chest
+	var score0 := sim.score
+	sim._kill_enemy(pilot)
+	Runner.T.eq(sim.war_chest, chest0, "gunning down the pilot mints no coin")
+	Runner.T.eq(sim.score, score0, "and no score")

@@ -23,7 +23,7 @@ const KNOWN := {
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell"],
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
-		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin"],
+		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin", "hp"],
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant"],
@@ -33,7 +33,7 @@ const KNOWN := {
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	"mine": ["x", "y", "armed", "friendly"],
-	"barrel": ["x", "y", "armed"],
+	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
 		"core_cd", "core_open"],
@@ -95,7 +95,7 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("colossus", sim.colossus)
 		if not sim.endless_boss.is_empty():
 			_check("boss", sim.endless_boss)
-	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone", "mg_nest"]:
+	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone", "mg_nest", "technical", "pilot"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
 
 
@@ -118,6 +118,9 @@ func _stage(kind: String) -> SimWorld:
 	sim._spawn_special(380 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "ghillie")
 	sim._spawn_special(160 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "drone")
 	sim._spawn_mg_nest(500 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE)
+	sim._spawn_special(560 * Fixed.ONE, sim.camera_top - 60 * Fixed.ONE, "technical")
+	sim.enemies.append({"x": 100 * Fixed.ONE, "y": sim.camera_top + 200 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "pilot"})
 	return sim
 
 

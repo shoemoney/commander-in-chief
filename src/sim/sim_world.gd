@@ -37,6 +37,8 @@ const PIERCE_TICKS := 600
 const SPREAD_TICKS := 480
 const SPREAD_COS := 64102   # cos(12°) * F_ONE
 const SPREAD_SIN := 13626   # sin(12°) * F_ONE
+const SPREAD2_COS := 59876  # cos(24°) * F_ONE — outer pair for the Triple+Spread 5-fan
+const SPREAD2_SIN := 26657  # sin(24°) * F_ONE
 # Rend Rounds power-up: a timed buff that lets MG bullets punch THROUGH a
 # shieldman's front-arc block — the shield archetype's missing item counter.
 const REND_TICKS := 480
@@ -62,6 +64,20 @@ const DRONE_SPEED := 2 * F_ONE
 # players still ignore it, lower fire_cd toward 80.
 const DRONE_FIRE_CD_TICKS := 100
 const DRONE_WINDUP_TICKS := 24
+# Technical raider (endless-only): the fastest thing on the field. Revs in
+# place, LOCKS a charge line at your position, then barrels down it — it
+# cannot steer mid-charge, so repositioning off the line is the dodge. One
+# round kills it (fragile). Starting values; test: a strafing player at
+# 100px+ must dodge every charge — if charges land on movers, widen REV_TICKS.
+const TECHNICAL_SPEED := 3 * F_ONE            # player is 2.4 px/t — it outruns you on a straight
+const TECHNICAL_REV_TICKS := 30               # rev-up telegraph (same class as MG_NEST_AIM)
+const TECHNICAL_CHARGE_TICKS := 50            # one charge = ~150px of travel
+const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge rhythm)
+# Downed Pilot ransom: a dead gunship's pilot punches out at the crash site and
+# staggers for the enemy line at the TOP edge. TOUCH him to rescue (+ransom);
+# let him cross the edge and he's captured. Shooting him pays NOTHING.
+const PILOT_SPEED := (F_ONE * 4) / 5          # 0.8 px/t — a generous but real chase window
+const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
 const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
@@ -108,6 +124,7 @@ const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
 const BARREL_SPACING := 420 * F_ONE
 const BARREL_CLUSTER_GAP := 18 * F_ONE
+const BARREL_FUSE_TICKS := 8         # chained barrels cook this long before detonating (rollable ripple)
 const MG_NEST_AIM_TICKS := 30       # telegraph before the first round of a burst
 const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
 const MG_NEST_BURST_ROUNDS := 3
@@ -122,6 +139,7 @@ const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
 const BROKE_RESPAWN_TICKS := 300
 const COIN_RUSHER := 10
+const COIN_MG_NEST := 15   # stationary/telegraphed: pays less than a mobile elite
 const COIN_ELITE := 25
 const COIN_BUNKER := 50
 # Kill-streak: consecutive kills inside this window escalate a SCORE-ONLY bonus
@@ -520,6 +538,13 @@ func _step_players(inputs: Array) -> void:
 					Fixed.mul(fax, SPREAD_SIN) + Fixed.mul(fay, SPREAD_COS))
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) + Fixed.mul(fay, SPREAD_SIN),
 					Fixed.mul(fay, SPREAD_COS) - Fixed.mul(fax, SPREAD_SIN))
+				if p["spread_ticks"] > 0 and p["triple"]:
+					# Both active: a real burst-DPS spike — add an outer +/-24 deg pair
+					# so stacking Spread onto Triple is a 5-pellet fan, not a no-op.
+					_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD2_COS) - Fixed.mul(fay, SPREAD2_SIN),
+						Fixed.mul(fax, SPREAD2_SIN) + Fixed.mul(fay, SPREAD2_COS))
+					_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD2_COS) + Fixed.mul(fay, SPREAD2_SIN),
+						Fixed.mul(fay, SPREAD2_COS) - Fixed.mul(fax, SPREAD2_SIN))
 
 		if grenade_edge and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
 			p["grenade_cd"] = GRENADE_COOLDOWN_TICKS
@@ -554,10 +579,19 @@ func _step_players(inputs: Array) -> void:
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
-				if _enemy_strikeable(e) and e["kind"] != "courier" \
-						and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
-					_hurt_player(p)
-					break
+				if not _enemy_strikeable(e) or e["kind"] == "courier" \
+						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+					continue
+				if e["kind"] == "pilot":
+					# Reaching the downed pilot RESCUES him — the one touch on
+					# this field that pays instead of kills.
+					e["alive"] = false
+					war_chest += PILOT_RANSOM
+					score += PILOT_RANSOM * 10
+					events.append({"t": "pilot_rescued", "x": e["x"], "y": e["y"], "coin": PILOT_RANSOM})
+					continue
+				_hurt_player(p)
+				break
 
 		# Pickups. Shop crates carry a price paid from the shared War Chest;
 		# an unaffordable crate stays on the ground.
@@ -585,6 +619,10 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		if cost > 0 and war_chest < cost:
 			continue
 		war_chest -= cost
+		# Same score credit as the spend-wheel buy: a priced ground crate must not
+		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
+		if cost > 0:
+			score += cost * 10
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
 			"kind": pk["kind"], "cost": cost})
@@ -698,7 +736,10 @@ func _kill_player(p: Dictionary) -> void:
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
 	if mode == "endless":
 		deaths_this_wave += 1   # ...and forfeits this wave's Clean Wave bonus
-	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"]})
+	# Death strips Triple/Pierce/Spread (see _respawn); flag it on the (checksum-
+	# excluded) event so the view can sting a "LOADOUT LOST" beat. Golden-safe.
+	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"],
+		"triple": p["triple"], "pierce": p["pierce_ticks"] > 0, "spread": p["spread_ticks"] > 0})
 
 
 func _fire_mission() -> void:
@@ -843,12 +884,10 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	for e in enemies:
 		if e["alive"] and _dist_lte(tank["x"], tank["y"], e["x"], e["y"], TANK_CRUSH_RADIUS):
 			_kill_enemy(e)
-	# ...and roll over fuel barrels to set them off (chains via _explode).
+	# ...and roll over fuel barrels to set them off (chains via the fuse in _step_barrels).
 	for bl in barrels:
 		if bl["armed"] and _dist_lte(tank["x"], tank["y"], bl["x"], bl["y"], TANK_CRUSH_RADIUS):
-			bl["armed"] = false
-			events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
-			_explode(bl["x"], bl["y"])
+			_detonate_barrel(bl, true)
 
 
 func _dismount(p: Dictionary, tank: Dictionary) -> void:
@@ -958,12 +997,31 @@ func _step_bullets() -> void:
 						# Rend beat the block — a distinct shear event so the payoff
 						# reads AT the shield (a silent skip looked like a normal kill).
 						events.append({"t": "rend_pierce", "x": b["x"], "y": b["y"]})
+					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
+					# it via _explode). Only a lethal round routes through _kill_enemy.
+					if e["kind"] == "mg_nest":
+						e["hp"] = e["hp"] - 1
+						if e["hp"] > 0:
+							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+							var mgowner: int = b.get("owner", -1)
+							if mgowner >= 0 and mgowner < players.size() and players[mgowner]["pierce_ticks"] > 0:
+								continue
+							dead = true
+							break
 					_kill_enemy(e)
 					# Piercing Rounds: the shooter's active buff lets the bullet punch
 					# through the kill and keep going to the next target this tick.
 					var powner: int = b.get("owner", -1)
 					if powner >= 0 and powner < players.size() and players[powner]["pierce_ticks"] > 0:
 						continue
+					dead = true
+					break
+		if not dead:
+			# A player round into a live fuel drum cooks it off (same blast path as a
+			# tank rollover). Barrel kills mint no coin (no_coin) — no bullet farm.
+			for bl in barrels:
+				if bl["armed"] and _dist_lte(b["x"], b["y"], bl["x"], bl["y"], BULLET_HIT_RADIUS):
+					_detonate_barrel(bl, true)
 					dead = true
 					break
 		if not dead:
@@ -996,12 +1054,12 @@ func _step_grenades() -> void:
 			grenades.remove_at(i)
 
 
-func _explode(x: int, y: int) -> void:
+func _explode(x: int, y: int, no_coin := false) -> void:
 	events.append({"t": "explosion", "x": x, "y": y})
 	var frags := 0
 	for e in enemies:
 		if e["alive"] and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
-			_kill_enemy(e)
+			_kill_enemy(e, no_coin)
 			frags += 1
 	if frags >= 3:
 		# Frag bonus: a single blast that catches a pack rewards reading the field.
@@ -1019,18 +1077,13 @@ func _explode(x: int, y: int) -> void:
 	# torch the tank a partner is driving (they get the bail-boost / kamikaze
 	# path). Boarding a burning tank is still guarded, so you can't self-ignite
 	# and re-board your own — the ride is a co-op / already-aboard beat.
-	# Explosive barrels in the blast pop — they HURT players in radius (unlike a
-	# friendly grenade; roll i-frames dodge it) and re-detonate so a cluster chains.
-	# armed=false BEFORE the recursion bounds the chain to the cluster (2-3).
+	# Explosive barrels in the blast don't chain in the SAME frame — they light a
+	# short fuse (_step_barrels detonates it) so a cluster ripples over ~8 ticks:
+	# visible, and rollable. Already-cooking barrels aren't re-lit.
 	for bl in barrels:
-		if bl["armed"] and _dist_lte(x, y, bl["x"], bl["y"], GRENADE_RADIUS):
-			bl["armed"] = false
-			events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
-			for p in players:
-				if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
-						and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
-					_hurt_player(p)
-			_explode(bl["x"], bl["y"])
+		if bl["armed"] and bl["fuse_ticks"] == 0 \
+				and _dist_lte(x, y, bl["x"], bl["y"], GRENADE_RADIUS):
+			bl["fuse_ticks"] = BARREL_FUSE_TICKS
 	for tank in tanks:
 		if tank["alive"] and _dist_lte(x, y, tank["x"], tank["y"], GRENADE_RADIUS):
 			_ignite_tank(tank)
@@ -1049,11 +1102,31 @@ func _explode(x: int, y: int) -> void:
 		_damage_colossus(COLOSSUS_GRENADE_DAMAGE)
 
 
+func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
+	## One detonation path for every barrel trigger (tank rollover, player bullet,
+	## enemy contact, chain fuse). Hurts players in radius (roll i-frames dodge it),
+	## then blasts. Barrel kills mint NO coin — a self-detonating farm was free money.
+	bl["armed"] = false
+	events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
+	for p in players:
+		if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
+				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
+			_hurt_player(p)
+	_explode(bl["x"], bl["y"], no_coin)
+
+
 func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
+	if e["kind"] == "mg_nest":
+		coin = COIN_MG_NEST   # own tier: stationary/telegraphed pays between rusher and elite
 	if e["kind"] == "courier":
 		coin = COIN_ELITE * 4   # fat bounty for catching the runner
+	if e["kind"] == "pilot":
+		# Gunning down the man you were meant to rescue pays NOTHING — no
+		# chest, no score, no avenge. The corpse is the only receipt.
+		coin = 0
+		no_coin = true
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
@@ -1078,27 +1151,30 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
 	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
 	# the streak rewards aggression on the leaderboard, not the economy.
-	kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
-	kill_streak_timer = KILL_STREAK_WINDOW_TICKS
-	var streak_bonus_pct := 0
-	if kill_streak >= 20:
-		streak_bonus_pct = 100
-	elif kill_streak >= 10:
-		streak_bonus_pct = 50
-	elif kill_streak >= 5:
-		streak_bonus_pct = 25
-	if streak_bonus_pct > 0:
-		score += (coin * 10 * streak_bonus_pct) / 100
-	if kill_streak == 20:
-		# The 20-streak stops being just a number: every alive fighter gets a
-		# ~3s adrenaline surge (reuses the tank-bail speed boost), so the reward
-		# is felt in the hands, not just read on the HUD.
-		for pl in players:
-			if pl["alive"]:
-				pl["boost_ticks"] = maxi(pl["boost_ticks"], BAIL_BOOST_TICKS * 2)
-		# One-shot view cue; events[] is checksum-excluded -> golden-safe.
-		events.append({"t": "surge", "x": e["x"], "y": e["y"]})
-	if e["elite"] and not no_coin:
+	# The MG Nest is excluded: it's the lowest-risk target, so it can't feed the
+	# streak (nor drop the elite capsule below) despite carrying elite:true.
+	if e["kind"] != "mg_nest":
+		kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
+		kill_streak_timer = KILL_STREAK_WINDOW_TICKS
+		var streak_bonus_pct := 0
+		if kill_streak >= 20:
+			streak_bonus_pct = 100
+		elif kill_streak >= 10:
+			streak_bonus_pct = 50
+		elif kill_streak >= 5:
+			streak_bonus_pct = 25
+		if streak_bonus_pct > 0:
+			score += (coin * 10 * streak_bonus_pct) / 100
+		if kill_streak == 20:
+			# The 20-streak stops being just a number: every alive fighter gets a
+			# ~3s adrenaline surge (reuses the tank-bail speed boost), so the reward
+			# is felt in the hands, not just read on the HUD.
+			for pl in players:
+				if pl["alive"]:
+					pl["boost_ticks"] = maxi(pl["boost_ticks"], BAIL_BOOST_TICKS * 2)
+			# One-shot view cue; events[] is checksum-excluded -> golden-safe.
+			events.append({"t": "surge", "x": e["x"], "y": e["y"]})
+	if e["elite"] and e["kind"] != "mg_nest" and not no_coin:
 		# ~1-in-6 elites drop a rare capsule; otherwise the usual Ammo/Grenade.
 		# The rare table is WEIGHTED: the three offense mods (pierce/spread/
 		# triple) at double the four situational tools (rend/claymore/smoke/
@@ -1153,6 +1229,15 @@ func _step_enemies() -> void:
 			continue
 		if flash_ticks > 0:
 			continue   # flashbang: the whole field roster is stunned in place
+		if e["kind"] == "pilot":
+			# Downed pilot: no AI, no target — he just staggers for the enemy
+			# line at the top. Crossing it = captured, ransom forfeit. (Rescue
+			# by touch lives in _step_players; killing him pays nothing.)
+			e["y"] = e["y"] - PILOT_SPEED
+			if e["y"] < camera_top - 30 * F_ONE:
+				e["alive"] = false
+				events.append({"t": "pilot_lost", "x": e["x"], "y": e["y"]})
+			continue
 		if e["kind"] == "frogman":
 			_step_frogman(e)
 			continue
@@ -1183,6 +1268,9 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "drone":
 			_step_drone(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "technical":
+			_step_technical(e, target, dx, dy, dlen)
 			continue
 		if e["kind"] == "mg_nest":
 			_step_mg_nest(e, target, dx, dy, dlen)
@@ -1289,6 +1377,42 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 		e["fire_cd"] = DRONE_FIRE_CD_TICKS
 		e["windup"] = DRONE_WINDUP_TICKS
 		events.append({"t": "drone_windup", "x": e["x"], "y": e["y"]})
+
+
+func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Technical raider (endless-only): rev telegraph → LOCK a charge line at
+	## the target's position → barrel down it at TECHNICAL_SPEED. It cannot
+	## steer mid-charge (repositioning off the line is the dodge), water is a
+	## hard wall to wheels (tank rule — the charge dies at the bank), and an
+	## overshot charge just keeps going (a raider that misses barrels past).
+	## Reuses windup/aim_lx/aim_ly/lunge_ticks/fire_cd — no new hashed field.
+	if e.get("lunge_ticks", 0) > 0:
+		e["lunge_ticks"] = e["lunge_ticks"] - 1
+		var lx: int = e.get("aim_lx", 0)
+		var ly: int = e.get("aim_ly", 0)
+		var llen := Fixed.length(lx, ly)
+		if llen > F_ONE:
+			var prev_x: int = e["x"]
+			var prev_y: int = e["y"]
+			e["x"] = e["x"] + Fixed.mul(Fixed.div(lx, llen), TECHNICAL_SPEED)
+			e["y"] = e["y"] + Fixed.mul(Fixed.div(ly, llen), TECHNICAL_SPEED)
+			if _in_water(e["x"], e["y"]):
+				e["x"] = prev_x
+				e["y"] = prev_y
+				e["lunge_ticks"] = 0   # wheels don't swim
+		return
+	if e["windup"] > 0:
+		e["windup"] = e["windup"] - 1
+		if e["windup"] == 0:
+			e["aim_lx"] = dx   # the drawn rev line is a promise: charge follows IT, not you
+			e["aim_ly"] = dy
+			e["lunge_ticks"] = TECHNICAL_CHARGE_TICKS
+		return
+	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+	if e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't line up a charge into smoke
+		e["fire_cd"] = TECHNICAL_LOCK_CD_TICKS
+		e["windup"] = TECHNICAL_REV_TICKS
+		events.append({"t": "technical_rev", "x": e["x"], "y": e["y"]})
 
 
 func _step_frogman(e: Dictionary) -> void:
@@ -1438,9 +1562,22 @@ func _step_mines() -> void:
 
 
 func _step_barrels() -> void:
-	# Barrels are passive ordnance — just cull the spent/off-screen ones.
 	for i in range(barrels.size() - 1, -1, -1):
-		if not barrels[i]["armed"] or barrels[i]["y"] > camera_top + 420 * F_ONE:
+		var bl := barrels[i]
+		if bl["armed"] and bl["fuse_ticks"] > 0:
+			# Chain fuse counting down — detonates when it hits 0 (coin-neutral).
+			bl["fuse_ticks"] = bl["fuse_ticks"] - 1
+			if bl["fuse_ticks"] == 0:
+				_detonate_barrel(bl, true)
+		elif bl["armed"]:
+			# Enemy contact detonates it (like a mine) — a two-way hazard that
+			# auto-clears the rows enemies wade through. No coin (enemy-suicide farm).
+			for e in enemies:
+				if e["alive"] and not e.get("submerged", false) \
+						and _dist_lte(e["x"], e["y"], bl["x"], bl["y"], MINE_TRIGGER_RADIUS):
+					_detonate_barrel(bl, true)
+					break
+		if not bl["armed"] or bl["y"] > camera_top + 420 * F_ONE:
 			barrels.remove_at(i)
 
 
@@ -1512,6 +1649,8 @@ func _windup_for(kind: String) -> int:
 			return GRENADIER_WINDUP_TICKS
 		"drone":
 			return DRONE_WINDUP_TICKS
+		"technical":
+			return TECHNICAL_REV_TICKS
 	return ELITE_WINDUP_TICKS
 
 
@@ -1579,7 +1718,7 @@ func _spawn_mg_nest(x: int, y: int) -> void:
 	## Rooted fixed turret: rakes its lane with aimed 3-round bursts, never moves.
 	## Reuses fire_cd/windup/lunge_ticks/aim_lx/aim_ly — all already hashed.
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
-		"kind": "mg_nest", "fire_cd": MG_NEST_AIM_TICKS, "windup": 0,
+		"kind": "mg_nest", "hp": 3, "fire_cd": MG_NEST_AIM_TICKS, "windup": 0,
 		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0})
 
 
@@ -1589,6 +1728,13 @@ func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: i
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0 and e["lunge_ticks"] > 0:
+			# Re-acquire toward the CURRENT nearest player at each round: a tracking
+			# rake that punishes standing still (one sidestep no longer clears the
+			# burst). Deterministic — reads hashed player positions.
+			var tgt := _nearest_alive_player(e["x"], e["y"])
+			if not tgt.is_empty():
+				e["aim_lx"] = tgt["x"] - e["x"]
+				e["aim_ly"] = tgt["y"] - e["y"]
 			var lx: int = e["aim_lx"]
 			var ly: int = e["aim_ly"]
 			var llen := Fixed.length(lx, ly)
@@ -1697,7 +1843,7 @@ func _step_camera() -> void:
 			var bx := rng.range_i(60, 520) * F_ONE
 			for c in rng.range_i(2, 3):
 				barrels.append({"x": bx + c * BARREL_CLUSTER_GAP,
-					"y": _next_barrel_y + rng.range_i(-8, 8) * F_ONE, "armed": true})
+					"y": _next_barrel_y + rng.range_i(-8, 8) * F_ONE, "armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
@@ -1773,7 +1919,7 @@ func _step_waves() -> void:
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
-				var roll := rng.range_i(0, 8)
+				var roll := rng.range_i(0, 9)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -1791,27 +1937,13 @@ func _step_waves() -> void:
 					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
 				elif roll == 6:
 					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+				elif roll == 7:
+					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
-	elif not enemies.is_empty():
-		# Anti-stall: a passed-by ghillie re-cloaks (bullet-immune) yet stays
-		# alive, holding the wave open until the player backtracks into its
-		# notice radius — a soft-lock they trip without understanding why. When
-		# ONLY cloaked ghillies remain, force the reveal: the wave must always
-		# be finishable from where the player stands.
-		var all_cloaked := true
-		for e in enemies:
-			if not (e["kind"] == "ghillie" and e.get("submerged", false)):
-				all_cloaked = false
-				break
-		if all_cloaked:
-			for e in enemies:
-				e["submerged"] = false
-				e["surface_ticks"] = GHILLIE_REVEAL_TICKS
-				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
-	elif enemies.is_empty() and (endless_boss.is_empty() or not endless_boss["alive"]):
+	elif _wave_hostiles_cleared() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = WAVE_INTERMISSION_TICKS
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
@@ -1837,6 +1969,31 @@ func _step_waves() -> void:
 		for ci in 3:
 			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
 				"cost": _supply_cost(kinds[ci])})
+	else:
+		# Anti-stall: a passed-by ghillie re-cloaks (bullet-immune) yet stays
+		# alive, holding the wave open until the player backtracks into its
+		# notice radius — a soft-lock they trip without understanding why. When
+		# ONLY cloaked ghillies remain, force the reveal: the wave must always
+		# be finishable from where the player stands.
+		var all_cloaked := not enemies.is_empty()
+		for e in enemies:
+			if not (e["kind"] == "ghillie" and e.get("submerged", false)):
+				all_cloaked = false
+				break
+		if all_cloaked:
+			for e in enemies:
+				e["submerged"] = false
+				e["surface_ticks"] = GHILLIE_REVEAL_TICKS
+				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
+
+
+func _wave_hostiles_cleared() -> bool:
+	## The wave is beaten when no HOSTILE remains — a walking downed pilot is
+	## an optional side objective, never a reason to hold the shop hostage.
+	for e in enemies:
+		if e["kind"] != "pilot":
+			return false
+	return true
 
 
 func _start_wave() -> void:
@@ -2056,6 +2213,11 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
 		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY, "kind": "boss"})
+		# The gunship's pilot punches out at the crash site and staggers for the
+		# enemy line — reach him before the top edge for the ransom.
+		if enemies.size() < MAX_ENEMIES:
+			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot"})
+			events.append({"t": "pilot_down", "x": boss["x"], "y": by})
 
 
 func _step_enemy_bullets() -> void:
@@ -2261,6 +2423,7 @@ func checksum() -> int:
 		h = feed.call(e.get("aim_lx", 0), h)
 		h = feed.call(e.get("aim_ly", 0), h)
 		h = feed.call(int(e.get("marked", false)), h)
+		h = feed.call(e.get("hp", 0), h)   # MG Nest armor (other kinds have none)
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)
@@ -2276,6 +2439,7 @@ func checksum() -> int:
 		h = feed.call(bl["x"], h)
 		h = feed.call(bl["y"], h)
 		h = feed.call(int(bl["armed"]), h)
+		h = feed.call(bl.get("fuse_ticks", 0), h)   # chain-fuse countdown
 	h = feed.call(tanks.size(), h)
 	for t in tanks:
 		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:
