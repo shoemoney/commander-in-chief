@@ -199,7 +199,7 @@ const _EVENT_SOUND := {
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"technical_rev": ["tank_board", -8.0, 0.75],   # low engine snarl: a charge is coming (0.75 pitch — well under mine_lay's 1.9 clink)
 	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
-	"pilot_down": ["alarm", -10.0, 1.1],           # crash-site distress ping
+	"pilot_down": ["avenge", -8.0, 0.8],           # crash-site ransom ping — friendly rising two-note (the alarm voice at 1.1 was byte-identical to tank_ignite's 'bail out now')
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
 	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
 	"sniper_paint": ["alarm", -12.0, 1.4],
@@ -816,6 +816,9 @@ func _physics_process(_delta: float) -> void:
 			_concussion = 0.0
 			_duck = 0.0
 			_sfx.set_concussion(0.0)
+			# _drive_audio stops on pause, so the drums would stay frozen at combat
+			# level behind the menu — ease them to the lull instead.
+			_sfx.set_music_intensity(0.0, 0.0)
 			position = Vector2.ZERO
 			scale = Vector2.ONE
 			rotation = 0.0
@@ -2340,7 +2343,7 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 			or Input.is_joy_button_pressed(i, JOY_BUTTON_B)
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
-			_sfx.play("dry_fire", -14.0, 1.1)   # soft declined tick
+			_sfx.play("tank_board", -14.0, 2.2)   # soft declined tick (the dry-fire click grammar; "dry_fire" is an event name, not a synth key)
 		var dir := aim if aim.length() > 0.3 else move
 		if dir.length() > 0.3:
 			var new_sel := int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4

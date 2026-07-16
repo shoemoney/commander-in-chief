@@ -97,14 +97,21 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 		if _ui_pb != null:   # jingles ride the unlimited UI bus, in key
 			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 		return
-	pitch *= randf_range(0.94, 1.06)
+	if sound != "alarm":   # the alarm pitch ladder is threat-ID grammar — keep steps strictly ordered
+		pitch *= randf_range(0.94, 1.06)
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 
 
 func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
 	if _pool.is_empty() or not _sounds.has(sound):
 		return
-	if not _MUSICAL.has(sound):
+	if _MUSICAL.has(sound):
+		# Jingles are screen-global rewards: same UI-bus routing as play() (the
+		# MG-spam limiter was ducking positional gate_open/revive cues), centered.
+		if _ui_pb != null:
+			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
+		return
+	if sound != "alarm":
 		pitch *= randf_range(0.94, 1.06)
 	# Steal policy: prefer an idle voice; else take the one closest to finishing —
 	# index-0 stealing cut long booms mid-tail under heavy fire.
