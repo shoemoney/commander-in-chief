@@ -66,6 +66,10 @@ func _draw() -> void:
 			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
 			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
 			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
+			# Faint full track under the draining arc — "how much is left" needs a
+			# reference frame (the fuel dial already draws one).
+			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, 0, TAU, 14,
+				Color(scol.r, scol.g, scol.b, 0.18), 1.5)
 			draw_arc(Vector2(x + 4.0, y + ICON / 2.0), 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 14, scol, 1.5)
 			x += 13.0
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
@@ -262,6 +266,8 @@ func _draw() -> void:
 			if ammo == 0 and p["fire_cd"] > 0:
 				var bfrac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
 				draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.9, 0.6, 0.3, 0.18), 1.5)
+				draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 			# Segmented magazine bar next to the numeral — clip fill at a glance.
 			px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
@@ -277,6 +283,8 @@ func _draw() -> void:
 			# recharging reads as "wait a beat", not a dropped input (matches the bash ring).
 			if p["grenade_cd"] > 0:
 				var gfrac := clampf(float(p["grenade_cd"]) / float(SimWorld.GRENADE_COOLDOWN_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if p["vest"]:

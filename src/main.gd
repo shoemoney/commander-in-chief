@@ -3393,6 +3393,9 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var tcol := Color(1.0, 0.1, 0.1, ta) if danger else Color(1.0, 0.55, 0.25, ta)
 			var tspr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var ttip := tbase - (6.0 if danger else 4.0)
+			var tuc := Color(0, 0, 0, ta * 0.55)   # 1px drop under-lay: reads over bright terrain
+			draw_line(Vector2(tx - tspr, tbase + 1.0), Vector2(tx, ttip + 1.0), tuc, 2.0)
+			draw_line(Vector2(tx, ttip + 1.0), Vector2(tx + tspr, tbase + 1.0), tuc, 2.0)
 			draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
 			draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
 		else:
@@ -3407,6 +3410,9 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var col := Color(1.0, 0.1, 0.1, a) if danger else Color(1.0, 0.35, 0.2, a)
 			var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var tip := 361.0 if danger else 358.0
+			var uc := Color(0, 0, 0, a * 0.55)   # 1px drop under-lay: reads over bright terrain
+			draw_line(Vector2(sx - spr, 354), Vector2(sx, tip + 1.0), uc, 2.0)
+			draw_line(Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
 			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
 			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
 
@@ -3416,7 +3422,7 @@ func _draw_objective_markers() -> void:
 	# objectives get a small bobbing icon overhead; off-screen ones become a
 	# directional diamond pinned to the nearest edge (distinct from the red
 	# threat chevrons — these are objectives, not generic hostiles).
-	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0
+	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0 * _motion   # stills under REDUCE MOTION
 	var marks: Array = []
 	for g in sim.gates:
 		if not g["open"] and not g.get("final", false):
@@ -3460,6 +3466,10 @@ func _draw_objective_markers() -> void:
 		var mp := Vector2(m["sx"], m["sy"])
 		var on := mp.x >= 6.0 and mp.x <= 634.0 and mp.y >= 32.0 and mp.y <= 354.0
 		if on:
+			# 1px dark under-copy (Art.text's shadow pattern) — a cyan/amber icon
+			# washed out over bright water/sand where the outlined pips stay crisp.
+			draw_texture_rect(Art.tex(m["icon"]),
+				Rect2(mp + Vector2(-4.0, -19.0 + bob), Vector2(10, 10)), false, Color(0, 0, 0, 0.55))
 			draw_texture_rect(Art.tex(m["icon"]),
 				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
 		elif edge_used < 6:
@@ -3491,8 +3501,13 @@ func _marker_edge(pos: Vector2) -> Vector2:
 
 
 func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
-	draw_colored_polygon(PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
-		p + Vector2(0, r), p + Vector2(-r, 0)]), Color(col.r, col.g, col.b, 0.85))
+	var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
+		p + Vector2(0, r), p + Vector2(-r, 0)])
+	draw_colored_polygon(pts, Color(col.r, col.g, col.b, 0.85))
+	# Dark outline, same treatment the threat pips get — keeps the diamond
+	# readable over bright water/sand.
+	pts.append(pts[0])
+	draw_polyline(pts, Color(0, 0, 0, 0.55), 1.0)
 
 
 func _draw_wheel() -> void:
@@ -3865,7 +3880,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		if not icon.is_empty():
 			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size), false)
 			x += icon_size + gap
-		draw_string(rf, Vector2(x, y), row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size, col)
+		Art.text(self, row_text, Vector2(x, y), row_size, col)   # shadowed like every other HUD string
 	# Back to the plain shake-cancel matrix for whatever the caller draws next.
 	draw_set_transform_matrix(get_transform().affine_inverse())
 
