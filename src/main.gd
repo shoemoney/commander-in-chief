@@ -824,10 +824,10 @@ func _consume_events() -> void:
 			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
 			# silent stat bump. floattext + sfx + trauma are all view-only.
 			if ev.get("kind", 0) >= 4:
-				var is_pierce: bool = ev["kind"] == 4
-				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
-					"rate": 0.013, "size": 13, "text": "PIERCING ROUNDS!" if is_pierce else "SPREAD SHOT!",
-					"col": Color(0.55, 0.95, 1.0) if is_pierce else Color(1.0, 0.82, 0.45)})
+				var pk_kind: int = ev["kind"]
+				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext", "rate": 0.013, "size": 13,
+					"text": "PIERCING ROUNDS!" if pk_kind == 4 else ("SPREAD SHOT!" if pk_kind == 5 else "TRIPLE SHOT!"),
+					"col": Color(0.55, 0.95, 1.0) if pk_kind == 4 else (Color(1.0, 0.82, 0.45) if pk_kind == 5 else Color(1.0, 0.6, 0.9))})
 				_trauma = minf(1.0, _trauma + 0.12)
 				_sfx.play("buy", -2.0, 1.4)
 		elif kind == "explosion":
@@ -2566,12 +2566,12 @@ func _draw_pickups() -> void:
 			# Rare power-up capsule (pierce/spread): a pulsing glow + ring + rising
 			# beam + label so a 1-in-6 elite drop stands out in the chaos (and the
 			# out-of-range glyph lookup below is skipped — those kinds have no icon).
-			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else Color(1.0, 0.8, 0.45)
+			var pcol := Color(0.5, 0.9, 1.0) if pk["kind"] == 4 else (Color(1.0, 0.8, 0.45) if pk["kind"] == 5 else Color(1.0, 0.55, 0.85))
 			var pg := Art.pulse(0.18)
 			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			Art.text(self, "PIERCE" if pk["kind"] == 4 else "SPREAD", ppos + Vector2(-13, -24), 8, pcol)
+			Art.text(self, "PIERCE" if pk["kind"] == 4 else ("SPREAD" if pk["kind"] == 5 else "TRIPLE"), ppos + Vector2(-13, -24), 8, pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)

@@ -390,3 +390,30 @@ func test_mg_nest_dies_to_a_grenade() -> void:
 	var nest: Dictionary = sim.enemies[0]
 	sim._explode(nest["x"], nest["y"])
 	Runner.T.ok(not nest["alive"], "a grenade silences the MG nest")
+
+
+func test_triple_shot_sprays_three_bullets() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["triple"] = true
+	var inp := SimInput.new()
+	inp.aim_y = -256   # aim straight up
+	inp.fire = true
+	sim.step(_inputs(inp))
+	Runner.T.eq(sim.bullets.size(), 3, "triple shot fires three bullets on one trigger pull")
+	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX - 1, "the 3-round fan still costs a single round")
+	var vmin := 1 << 40
+	var vmax := -(1 << 40)
+	for b in sim.bullets:
+		vmin = mini(vmin, b["vx"])
+		vmax = maxi(vmax, b["vx"])
+	Runner.T.ok(vmin < 0 and vmax > 0, "the fan spreads left and right of the aim")
+
+
+func test_triple_pickup_grants_and_death_strips() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	sim._apply_supply(p, 6)   # kind 6 = Triple Shot (4=pierce, 5=spread already taken)
+	Runner.T.ok(p["triple"], "the triple-shot supply kind grants the mod")
+	sim._respawn(p, p["y"])   # revive path = the 1986 upgrade strip
+	Runner.T.ok(not p["triple"], "death/respawn strips the Triple Shot mod")

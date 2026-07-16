@@ -73,9 +73,12 @@ const SEED := 0xDEADBEEF
 ## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
 ## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
 ## structural add shifts every endless sample too.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
+## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
+## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
 const GOLDEN: Array[int] = [
-	3626110480562057577, 3975691661801363386, 1859312371087080034,
-	8259811706601596291, 5119972681984962103, 9221062858152296681,
+	5492265342370716625, 5329418804242622598, 8072099053918525192,
+	4457606292700231691, 8711883446497700766, 4882331979285349249,
 ]
 
 
@@ -137,9 +140,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## checksummed barrels[] block joins checksum(). Campaign torture streams + chains barrels
 ## (all samples moved); endless spawns none, but the unconditional feed.call(barrels.size()=0)
 ## structural add shifts every endless sample too.
+## RE-RECORDED (2026-07-16, grafted design-loop iter 25 — Triple Shot): a new hashed player
+## field int(p["triple"]) joins checksum() (unconditional per-player -> all samples shift), and the
+## elite-drop roll widened 4+range_i(0,1) -> (0,2) to add the kind-6 capsule (shifts rng on drops).
 const ENDLESS_GOLDEN: Array[int] = [
-	3513101821070239443, 792159131562927024, 7136238456779045974,
-	8020207107624710014, 8654537467438934214, 2397725332311963374,
+	9023438600815067543, 9125626483154539698, 1978090213708781256,
+	3166977500830568304, 2765709581460001016, 674941985957074656,
 ]
 
 

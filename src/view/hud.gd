@@ -366,6 +366,8 @@ func _draw() -> void:
 				px = _stat("wep_rifle", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, Color(0.6, 0.95, 1.0))
 			if p["spread_ticks"] > 0:
 				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, Color(1.0, 0.8, 0.5))
+			if p["triple"]:
+				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
 			if p["boost_ticks"] > 0:

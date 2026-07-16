@@ -292,6 +292,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"hurt_iframes": 0,
 			"pierce_ticks": 0,
 			"spread_ticks": 0,
+			"triple": false,
 		})
 
 
@@ -462,8 +463,9 @@ func _step_players(inputs: Array) -> void:
 			var fax: int = p["aim_x"]
 			var fay: int = p["aim_y"]
 			_spawn_mg_bullet(p, i, fax, fay)
-			if p["spread_ticks"] > 0:
-				# Trench Gun: two extra pellets fanned +/-12 deg (fixed-point rotate).
+			if p["spread_ticks"] > 0 or p["triple"]:
+				# Trench Gun (timed) / Triple Shot (permanent mod) both spray this one
+				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
 					Fixed.mul(fax, SPREAD_SIN) + Fixed.mul(fay, SPREAD_COS))
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) + Fixed.mul(fay, SPREAD_SIN),
@@ -602,6 +604,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["vest"] = assist_mode            # death strips upgrades (1986 rule; assist re-issues a vest)
 	p["pierce_ticks"] = 0              # ...including the Piercing Rounds buff
 	p["spread_ticks"] = 0             # ...and the Trench Gun spread buff
+	p["triple"] = false               # ...and the Triple Shot permanent mod
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -656,6 +659,8 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			p["pierce_ticks"] = PIERCE_TICKS   # Piercing Rounds capsule (drop-only)
 		5:
 			p["spread_ticks"] = SPREAD_TICKS   # Trench Gun spread capsule (drop-only)
+		6:
+			p["triple"] = true                 # Triple Shot: a permanent 3-round fan mod
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
@@ -1002,7 +1007,7 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 			"x": e["x"], "y": e["y"],
 			# ~1-in-6 elites drop a rare power-up capsule (Piercing or Spread);
 			# otherwise the usual Ammo/Grenade.
-			"kind": (4 + rng.range_i(0, 1)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
+			"kind": (4 + rng.range_i(0, 2)) if rng.range_i(0, 5) == 0 else rng.range_i(0, 1),
 		})
 
 
@@ -2025,7 +2030,7 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
-				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"]]:
+				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"], int(p["triple"])]:
 			h = feed.call(v, h)
 	for arrs: Array in [bullets, grenades, enemies, bunkers, pickups, strikes, enemy_bullets, waters]:
 		h = feed.call(arrs.size(), h)
