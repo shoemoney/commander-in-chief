@@ -50,6 +50,8 @@ var _hulks: Array[Dictionary] = []    # dead-tank wrecks, persistent (view-only 
 var _tank_alive_prev := {}            # per-tank-index prev alive flag (edge-detects the death)
 var _cursor_styled := false           # custom OS cursor active (menus/debrief only)
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
+var _cursor_menu: ImageTexture        # boot-baked scaled menu pointer (from ui_cursor)
+var _cursor_s := 1                     # window integer scale the cursors were baked at
 var _sfx := Sfx.new()
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
@@ -232,6 +234,7 @@ func _ready() -> void:
 	# Deferred: fullscreen (restored in _load_bests) resizes the window after
 	# this frame, and the cursor bake reads the window size for its scale.
 	call_deferred("_bake_cursor")
+	get_viewport().size_changed.connect(_on_window_resized)   # re-bake cursor on scale-crossing resize
 	_reset()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
@@ -610,8 +613,22 @@ func _bake_cursor() -> void:
 		cur_img.decompress()   # reticle ships VRAM-compressed; resize needs raw pixels
 	cur_img.resize(24 * s, 24 * s, Image.INTERPOLATE_LANCZOS)
 	_cursor_crosshair = ImageTexture.create_from_image(cur_img)
-	Input.set_custom_mouse_cursor(_cursor_crosshair,
-		Input.CURSOR_ARROW, Vector2.ONE * 12.0 * s)
+	# Menu pointer scaled to match (was native-size — a speck at 2x/3x).
+	var men_img := Art.tex("ui_cursor").get_image()
+	if men_img.is_compressed():
+		men_img.decompress()
+	men_img.resize(men_img.get_width() * s, men_img.get_height() * s, Image.INTERPOLATE_LANCZOS)
+	_cursor_menu = ImageTexture.create_from_image(men_img)
+	_cursor_s = s
+	_apply_cursor(_cursor_styled)   # re-apply the current cursor at the freshly-baked scale
+
+
+func _apply_cursor(styled: bool) -> void:
+	# Hotspots scale with the baked art (_cursor_s), so the aim/click point never
+	# drifts off the pointer at 2x/3x/fullscreen.
+	Input.set_custom_mouse_cursor(_cursor_menu if styled else _cursor_crosshair,
+		Input.CURSOR_ARROW,
+		(Vector2.ONE * 2.0 * _cursor_s) if styled else (Vector2.ONE * 12.0 * _cursor_s))
 
 
 func _input(event: InputEvent) -> void:
@@ -740,9 +757,15 @@ func _update_cursor() -> void:
 	if styled == _cursor_styled:
 		return
 	_cursor_styled = styled
-	# Restore the gameplay crosshair (not null → the OS arrow) on menu close.
-	Input.set_custom_mouse_cursor(Art.tex("ui_cursor") if styled else _cursor_crosshair,
-		Input.CURSOR_ARROW, Vector2(2, 2) if styled else Vector2(12, 12))
+	_apply_cursor(styled)
+
+
+func _on_window_resized() -> void:
+	# A free resize that crosses an integer-scale boundary re-bakes the cursors
+	# (guarded so the decompress+resize doesn't run on every drag frame).
+	var win := DisplayServer.window_get_size()
+	if maxi(1, mini(win.x / 640, win.y / 360)) != _cursor_s:
+		call_deferred("_bake_cursor")
 
 
 func _physics_process(_delta: float) -> void:
@@ -2133,7 +2156,7 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		w["t"] = lerpf(float(w.get("t", 1.0)), 1.0, 0.35)
 		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
 		# selection used to be a one-way trap: any flick force-bought on release.
-		var cancel := Input.is_key_pressed(KEY_C)
+		var cancel := Input.is_physical_key_pressed(KEY_C)   # physical, matching the roll bind (AZERTY-safe)
 		for pad in Input.get_connected_joypads():
 			if Input.is_joy_button_pressed(pad, JOY_BUTTON_B):
 				cancel = true

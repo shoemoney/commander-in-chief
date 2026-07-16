@@ -63,8 +63,12 @@ func _process(delta: float) -> void:
 		_disp_chest = float(sim.war_chest)
 	if _disp_score < 0.0:
 		_disp_score = float(sim.score)
-	_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
-	_disp_score = _rollup(_disp_score, float(sim.score), delta)
+	if main._motion < 0.5:
+		_disp_chest = float(sim.war_chest)   # REDUCE MOTION: snap, no odometer spin-up
+		_disp_score = float(sim.score)
+	else:
+		_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
+		_disp_score = _rollup(_disp_score, float(sim.score), delta)
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
