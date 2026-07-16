@@ -16,15 +16,18 @@ Godot lives at `/Applications/Godot.app/Contents/MacOS/Godot` (universal binary,
 # class_name script (Godot's global class cache must re-scan). CI does this.
 godot --headless --path . --import
 
-# Full test suite (60 methods / 725 assertions, ~seconds)
+# Full test suite (~seconds; count grows constantly — 147 methods / 1698 assertions as of P3 pass 3)
 godot --headless --path . -s res://tests/run_tests.gd
+
+# Single suite: filter by substring of the script filename
+SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd
 
 # Signature-moment screenshots (dev tool; needs a GL context — X or Xvfb)
 SHOT_DIR=/abs/path godot --path . --rendering-method gl_compatibility \
     -s res://tools/screenshots.gd
 ```
 
-**Running a single test suite:** the runner has no filter flag — it iterates the `TEST_SCRIPTS` array in `tests/run_tests.gd`. To run one suite, temporarily narrow that array. Each suite is a plain `RefCounted` whose `test_*` methods assert via the `Runner.T.ok/eq` helpers (no GUT addon).
+**Running a single test suite:** set the `SUITE` env var to a substring of the suite filename (e.g. `SUITE=mechanics`) — the runner filters its `TEST_SCRIPTS` array on it. Each suite is a plain `RefCounted` whose `test_*` methods assert via the `Runner.T.ok/eq` helpers (no GUT addon). ⚠️ A runtime error mid-method silently aborts that method's remaining assertions without failing the run — grep the output for `SCRIPT ERROR`, and hold dict references across `sim.step()` (dead entities are swept from the sim arrays).
 
 ## Architecture: the sim/view split
 

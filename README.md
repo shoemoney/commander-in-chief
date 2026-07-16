@@ -1,122 +1,266 @@
-# Project Ikari — P0 Greybox Prototype
+# ⚔️ PROJECT IKARI
 
-A modern remake of the classic vertical-scrolling run-and-gun (*Ikari Warriors*, SNK 1986):
-twin-stick move/aim, grenades-vs-armor, one-hit deaths, red-elite power-up drops,
-infinite-spawn bunkers, a ratchet scroll camera, and the **War Chest** — a shared
-coin economy where every kill mints and every revive spends.
+<div align="center">
 
-Built on **Godot 4.7 / GDScript** around a deterministic, render-free simulation core
-(`src/sim/`, fixed 60 Hz, 16.16 fixed-point integer math, seeded RNG). The scene tree
-(`src/main.gd`) is only a view. Determinism is enforced by CI lint and replay-checksum
-golden tests, and does triple duty per the master plan: lockstep netcode, regression
-testing, and leaderboard anti-cheat.
-
-The full production plan is in [`docs/PLAN.md`](docs/PLAN.md).
-
-## Running on a Mac (M4 / any Apple Silicon)
-
-1. Download **Godot 4.7 (stable)** — the standard build, `macos.universal.zip` — from
-   <https://godotengine.org/download/archive/4.7-stable/>. The `.app` is a universal
-   binary and runs **natively on Apple Silicon (M1–M4)**.
-2. Unzip, then either:
-   - Open Godot, click **Import**, and select this folder's `project.godot`, then press **⌘R**; or
-   - From a terminal:
-     ```sh
-     /Applications/Godot.app/Contents/MacOS/Godot --path /path/to/project-ikari
-     ```
-3. First launch: if macOS Gatekeeper complains about the unsigned editor, right-click →
-   Open once (or `xattr -dr com.apple.quarantine Godot.app`).
-
-Determinism on Apple Silicon is not assumed — it is **asserted in CI**: the
-`test-macos-apple-silicon` job runs the identical test suite on an arm64 M-series
-runner and must reproduce the same golden checksums as Linux x86_64
-(`tests/test_determinism.gd`). The sim is pure 64-bit integer math, so results are
-bit-identical across architectures by construction.
-
-## Controls (P1 greybox)
-
-| Action | Keyboard (P1) | Gamepad |
-|---|---|---|
-| Move | WASD | Left stick |
-| Aim (decoupled) | Arrow keys | Right stick |
-| Fire / tank cannon | Space | RT / R1 |
-| Grenade | Shift | L1 |
-| Dodge roll (i-frames) | C | B |
-| Interact (board/exit tank) | F | X |
-| Revive (spend War Chest) | E | Y |
-| Toggle 2-player local | F2 | — |
-| Restart | R | — |
-
-P1 systems: enterable tank (fuel clock, grenade-ammo cannon, crush, burning
-bail window, kamikaze-a-bunker), the Mortar Observer who shells you for
-stalling (kill him or push forward), zone gates every 1000 units that open
-when their arena bunkers fall and become your broke-respawn checkpoint, and
-a view-side feel stack (trauma shake, explosion hit-stop, kill flash).
-
-P2 systems: rivers with dry fords (wading halves speed, no rolling, tanks
-walled out) hiding submerged frogmen that only grenades can kill until they
-surface to lunge; the **Bridge Gunship** mini-boss holding every 3rd gate
-(strafe sprays + mortar volleys; bullets chip it, grenades chunk it); and
-`src/net/lockstep.gd` — the transport-agnostic deterministic lockstep core
-(3-tick input delay, per-second checksum exchange, desync detection) proven
-by a two-sim loopback test over a jittery fake wire. Steam Networking
-Messages plugs into it later without touching the loop.
-
-P3 systems: the campaign now ENDS — gate 5 is the **Foundry Colossus**, a
-fortress-crawler that inverts the scroll and advances down the map through
-three phases (turret spray → mortar volleys → enraged + sappers); it's pure
-armor (grenades only), engaging it triggers the **Last Stand rule** (the
-coin reader dies — no revives), and killing it converts the remaining War
-Chest to score. **VICTOLY!** Also: the **Flak Vest** (absorbs exactly one
-hit) and **Fire Mission** screen-clear (spares the submerged) power-ups, and
-**Endless War mode** (F3) — escalating waves with a between-wave War Chest
-shop selling ammo, vests, and airstrikes.
-
-## Headless test suite
-
-```sh
-godot --headless --path . --import      # first time only
-godot --headless --path . -s res://tests/run_tests.gd
+```
+ ██▓ ██ ▄█▀ ▄▄▄       ██▀███   ██▓
+▓██▒ ██▄█▒ ▒████▄    ▓██ ▒ ██▒▓██▒
+▒██▒▓███▄░ ▒██  ▀█▄  ▓██ ░▄█ ▒▒██▒
+░██░▓██ █▄ ░██▄▄▄▄██ ▒██▀▀█▄  ░██░
+░██░▒██▒ █▄ ▓█   ▓██▒░██▓ ▒██▒░██░
+░▓  ▒ ▒▒ ▓▒ ▒▒   ▓▒█░░ ▒▓ ░▒▓░░▓
+ ▒ ░░ ░▒ ▒░  ▒   ▒▒ ░  ░▒ ░ ▒░ ▒ ░
 ```
 
-60 test methods / 725 assertions: fixed-point math, seeded RNG streams, the 1986
-mechanic grammar (grenades-vs-armor, one-hit death + ammo restore, ratchet camera,
-elite drops), the War Chest economy (escalating revives, solo pricing, broke fallback),
-the tank (board/crush/shells/fuel/bail/kamikaze), the Mortar Observer (stall spawn,
-tracked strikes, roll i-frames, cancel-on-kill), zone gates (block, open, checkpoint),
-water rules (half speed, no roll, tank walls, frogman submersion), the Bridge Gunship
-(chip/chunk damage, patterns, gate key), lockstep netcode (loopback identity, stall
-semantics, desync detection), Endless War (waves, shop economics, vest, fire mission),
-the Foundry Colossus (world end, Last Stand, phases, armor rules, victory payout),
-and replay determinism against committed golden checksums.
+![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
+![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
+![Tests](https://img.shields.io/badge/tests-147%20methods%20%2F%201698%20asserts-brightgreen)
+![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
+![Milestone](https://img.shields.io/badge/milestone-P3%20greybox-orange)
+![License](https://img.shields.io/badge/assets-legacy art%20licensed%20%C2%B7%20not%20public--ready-red)
 
-Note: after pulling new `class_name` scripts, run `--import` once before the test
-suite — Godot's global class cache must pick them up (CI already does this).
+**A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
+twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
+a shared coin economy where every kill mints and every revive spends.
 
-## Layout
+</div>
+
+> ⚠️ **Status: P3 greybox.** Playable start-to-finish (campaign ends at the Foundry
+> Colossus 🏭), Endless War is deep, the feel stack is real — but the art is baked
+> greybox stand-ins and there is **no CI pipeline yet**: determinism is enforced by
+> the golden-checksum suite **run locally**. `docs/PLAN.md` is the aspirational P0–P7
+> master plan — **the sim code is the source of truth for what exists.**
+
+---
+
+## 🗺️ Table of Contents
+
+| 🧭 | | |
+|---|---|---|
+| [🏗️ Architecture](#%EF%B8%8F-architecture--the-simview-split) | [🎮 Controls](#-controls) | [🕹️ Modes](#%EF%B8%8F-modes) |
+| [👹 The Roster](#-the-roster) | [🎁 Drops & the Wheel](#-drops--the-supply-wheel) | [🧪 Testing](#-headless-test-suite) |
+| [🌐 Netcode](#-netcode-deterministic-lockstep) | [🚀 Quick Start](#-quick-start-macos--apple-silicon) | [🎨 Art](#-art) |
+
+---
+
+## 🏗️ Architecture — the sim/view split
+
+Everything the game *is* lives in a deterministic, render-free core. The scene tree
+is just a camera pointed at it. 📽️
+
+```mermaid
+flowchart LR
+    subgraph VIEW ["🖼️ src/main.gd + src/view/ — floats allowed"]
+        IN["🎮 Input<br/>(floats)"] --> Q["_quantize_axis<br/>clamp to ±256"]
+        EV["✨ events → shake, hit-stop,<br/>particles, SFX, banners"]
+        HUD["📊 hud.gd · menu.gd<br/>art.gd · sfx.gd"]
+    end
+    subgraph SIM ["🔒 src/sim/ — deterministic core"]
+        Q --> STEP["SimWorld.step()<br/>60 Hz fixed order"]
+        STEP --> F["Fixed 16.16 int math<br/>SimRng xoshiro128**<br/>NO floats · NO Time.* · NO scene tree"]
+        STEP --> CS["checksum()<br/>FNV-1a over full state"]
+    end
+    STEP -.->|"events (checksum-EXCLUDED)"| EV
+    CS ==>|"golden values"| T["🧪 test_determinism.gd"]
+```
+
+- **`src/sim/`** — `SimWorld.step(inputs)` advances one tick: players → tanks →
+  projectiles → enemies → bunkers → spawner/boss/colossus/gates/camera/observer.
+  State is plain `Array[Dictionary]`. Bit-identical across x86_64 and Apple Silicon.
+- **`src/main.gd` + `src/view/`** — the *only* view. Owns all floats, reads sim
+  state, draws, and turns per-tick **events** into feel. The sim never knows juice exists.
+- **`SimWorld.events`** — rebuilt every tick, **excluded from the checksum**: view
+  and audio triggers never break determinism goldens. 🔓
+
+<details>
+<summary>🔐 <b>The golden-checksum discipline</b> (read before touching <code>src/sim/</code>)</summary>
+
+Any change to sim logic, hashed state, or step order shifts the committed `GOLDEN`
+checksums and fails `test_determinism.gd` — **by design**. When intentional:
+set `GOLDEN = []`, run, paste the printed values back, note *why* in the comment.
+`test_checksum_coverage.gd` is the tripwire — every sim entity field must be
+classified hashed-or-excluded. If the **idempotency or cross-run** checks fail
+instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
+
+</details>
+
+---
+
+## 🎮 Controls
+
+| Action | ⌨️ Keyboard (P1) | 🎮 Gamepad |
+|---|---|---|
+| Move | WASD | Left stick |
+| Aim (decoupled) | Mouse or arrow keys | Right stick |
+| Fire / tank cannon 🔫 | Space / LMB | RT / R1 |
+| Grenade 💣 | Shift / RMB | L1 |
+| Dodge roll (i-frames) 🤸 | C | B |
+| Interact (board/exit tank) 🚜 | F | X |
+| Revive (spend War Chest) 💸 | E | Y |
+| **Supply wheel** (hold, flick, release) 🎡 | Q | BACK |
+| Toggle local 2P 👥 | F2 | — |
+| Toggle Endless War ♾️ | F3 | — |
+| Restart 🔁 | R | — |
+
+---
+
+## 🕹️ Modes
+
+| Mode | What it is |
+|---|---|
+| 🏔️ **Campaign** | 5 gated sectors → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**) |
+| ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, minibosses holding the shop hostage |
+| 👥 **Local 2P co-op** | Shared War Chest, revive tether, per-device input glyphs |
+| 📅 **Daily Run** | Seed-of-the-day challenge run (Hall entries wear a `*DAILY` tag) |
+| 🎞️ **Watch Last Run** | Every run records inputs → `user://last_run.replay`, replayable from the menu |
+| 💀 **NG+ HARD** / 🛟 **ASSIST (2-hit)** | Difficulty toggles, both checksum-honest |
+
+Persistent carrots 🥕: top-8 **Hall of Fame**, career totals, and best score/wave/distance
+survive across runs (`user://ikari_best.cfg`, atomic tmp+bak writes).
+
+---
+
+## 👹 The Roster
+
+Every threat telegraphs before it resolves — that's the **readable chaos** pillar. 📖
+
+| Threat | The deal | The counter |
+|---|---|---|
+| 🏃 Rushers & red elites | The 1986 grammar — touch = death, elites drop capsules | Shoot, dodge, kite |
+| 💥 Grenadier | Telegraphed lob, edge-detect markers | Move off your ground |
+| 🔭 Sniper | Laser paint line before the shot | Break the line |
+| 🌿 Ghillie sniper | Cloaked ambush, bullet-immune dug in | Flush it out |
+| 🛡️ Riot shield | Front-arc bullet block | Flank, grenade, or **Rend** through it |
+| 🧨 Sapper | Lays a live mine trail | Mind your feet |
+| 🏅 Courier | Flees with a fat bounty (4× elite) | Cut it off |
+| 🐸 Frogman | Submerged in rivers, grenades-only until it surfaces to lunge | Kill it on the surface |
+| 🛸 Drone | Hovering strafer, spawns **marked** (3× trophy bounty + crown) | Watch the tether, claim the crown |
+| 🔩 MG Nest | 3-hit armor, alarm lock-on, teaching card | Break its line or flank — it cracks under fire |
+| 🚙 **Technical** | *The fastest thing on the field.* Cruises, revs 30t (dashed line = still aiming), then **locks a charge lane** (solid line = committed) — 3 px/t, can't steer | Sidestep the lane; one shot drops it; smoke denies the lock; water kills the charge 🌊 |
+| 🛢️ Explosive barrels | Bullets & enemy contact detonate; 8-tick chain fuse goes white-hot | Feed the chain — or flee it |
+| 🗼 Mortar Observer | Shells you for stalling | Kill him or push forward |
+| 🚁 Bridge Gunship | Gate boss every 3rd gate — bullets chip, grenades chunk | When it dies, see below 👇 |
+| 🪂 **Downed Pilot** | Ejects from any dead gunship, staggers for the enemy line. **TOUCH to rescue (+100¢). Shooting him pays NOTHING.** Tank treads *grab* him, the airstrike spares him, roll-touch works | Reach him before the top edge — the label turns red **ESCAPING!** at the cliff |
+| 🏭 Foundry Colossus | The world ends here: 3 phases, pure armor, inverts the scroll | Grenades only. Last Stand. 🫡 |
+
+---
+
+## 🎁 Drops & the Supply Wheel
+
+**Rare capsules** (elite drops, weighted table): 🔵 PIERCE · 🟠 SPREAD · 🩷 TRIPLE
+(permanent 3-fan — stacks with Spread into a 5-fan!) · 🔴 REND (shears riot shields) ·
+🟢 CLAYMORE · ⚪ SMOKE (breaks locks) · 🟡 FLASHBANG (field-wide stun, fair re-arm).
+
+**The wheel** 🎡 (hold Q / BACK, flick, release — prices from the shared War Chest):
+
+| Direction | Buy | Effect |
+|---|---|---|
+| ⬅️ | AMMO +30 | MG belt top-up |
+| ⬆️ | GRENADES +4 | The armor-opener |
+| ➡️ | FLAK VEST | Absorbs exactly one hit 🦺 |
+| ⬇️ | AIRSTRIKE | **Called in**, telegraphed, spares the submerged *and the pilot* ✈️ |
+
+---
+
+## 🧪 Headless test suite
+
+```sh
+godot --headless --path . --import                      # once after cloning / new class_name scripts
+godot --headless --path . -s res://tests/run_tests.gd   # full suite
+SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter by suite name 🎯
+```
+
+**147 test methods / 1698 assertions** — fixed-point math, seeded RNG streams, the 1986
+mechanic grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus,
+every archetype's behavior contract (nest armor, technical charge lock, pilot
+rescue/grace/forfeit), Endless War waves & shop, lockstep loopback, replay integrity,
+checksum coverage classification, and the campaign+endless **golden determinism** runs.
+
+> 🧷 Gotcha: the runner counts a method green even if a runtime error aborts it
+> mid-way — watch for `SCRIPT ERROR` lines, and hold dict references across
+> `sim.step()` (dead entities are swept from the arrays).
+
+---
+
+## 🌐 Netcode: deterministic lockstep
+
+`src/net/lockstep.gd` — transport-agnostic; only encoded inputs cross the wire. 📡
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as 🎮 Peer A (SimWorld)
+    participant B as 🎮 Peer B (SimWorld)
+    A->>B: SimInput @ tick T+delay (3 ticks ahead)
+    B->>A: SimInput @ tick T+delay
+    Note over A,B: each sim advances ONLY when both inputs for the next tick exist
+    A-->>B: checksum every 60 ticks
+    B-->>A: checksum every 60 ticks
+    Note over A,B: mismatch ⇒ 🚨 desync detected — proven by two-sim loopback over a jittery fake wire
+```
+
+Steam Networking Messages plugs into `on_send` / `receive_remote_input` later
+without touching the loop.
+
+---
+
+## 🚀 Quick Start (macOS / Apple Silicon)
+
+1. Grab **Godot 4.7 (stable)** `macos.universal.zip` from
+   <https://godotengine.org/download/archive/4.7-stable/> — native on M1–M4. 🍎
+2. Run it:
+   ```sh
+   /Applications/Godot.app/Contents/MacOS/Godot --path /path/to/project-ikari
+   ```
+   …or open the editor, **Import** → `project.godot` → ⌘R.
+3. Gatekeeper complains? Right-click → Open once, or
+   `xattr -dr com.apple.quarantine Godot.app`. 🔓
+
+Determinism across architectures is by construction (pure 64-bit int math) and
+asserted by the golden suite — run it locally on your arch; the values must match
+the committed goldens recorded on Apple Silicon. 🤝
+
+---
+
+## 📁 Layout
 
 ```
 project.godot        Godot 4.7 project (640×360 virtual res, 60 Hz physics)
-src/sim/             Deterministic core — int-only; floats/engine RNG banned by CI lint
-src/main.gd|.tscn    Greybox view + input quantization boundary
-tests/               Headless runner + suites (incl. determinism goldens)
-tools/versions.lock  Pinned engine version + SHA-256
-export_presets.cfg   macOS universal (Apple Silicon native) / Linux / Windows
-docs/PLAN.md         The master build plan (P0–P7)
+src/sim/             🔒 Deterministic core — int-only, no engine RNG, no Time.*
+src/main.gd|.tscn    🖼️ The view + input quantization boundary
+src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · sfx.gd
+src/net/             lockstep.gd (netcode core) · replay.gd (run recorder)
+tests/               Headless runner + suites (SUITE=<name> filter, golden checksums)
+tools/               bake_sprites*.gd (legacy art→sprite pipeline) · screenshots.gd
+docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
 
-## Art
+---
 
-Units, vehicles, bosses, structures and foliage (`assets/legacy-art/`) are **top-down
-renders of legacy 3D pack Military** 3D models, baked to sprites by
-`tools/bake_sprites.gd` (orthographic overhead camera; characters posed out of
-the T-pose; hero-vehicle turrets split from hulls so they rotate). The
-desert→jungle look is a per-sprite olive/green tint plus a 1px readability
-outline applied in the view (`src/view/art.gd` → `main._spr()`), not baked in.
-Ground tiles, projectiles and FX stay **Kenney** CC0 (`assets/kenney/`) — legacy art
-ships no seamless 2D tilesets.
+## 🎨 Art
 
-> ⚠️ The legacy art-derived sprites are proprietary (from a purchased legacy art license),
-> **not** CC0 — clear them before making this repo public. Final art per the
-> master plan is still a commissioned pixel-art pass; these are the readability
-> layer until then. No generative-AI assets are used.
+Units, vehicles, bosses, structures (`assets/legacy-art/`) are **top-down renders of legacy art
+POLYGON Military** 3D models, baked to sprites by the `tools/bake_sprites*.gd` family
+(orthographic overhead camera, posed characters, turrets split from hulls so they
+rotate). The desert→jungle look is a per-sprite olive tint + 1px readability outline
+applied in the view (`src/view/art.gd`), not baked in. Ground tiles, projectiles and
+FX stay **Kenney CC0** (`assets/kenney/`).
+
+> ⚠️ The legacy art-derived sprites are proprietary (purchased license), **not** CC0 —
+> clear them before making this repo public. Final art per the master plan is a
+> commissioned pixel-art pass; these are the readability layer until then.
+> **No generative-AI assets ship.** 🚫🤖
+
+Accessibility baked into the view 🧏: colorblind-safe palette routing (`Art.safe`),
+reduce-motion mode (steady lights instead of strobes/pulses), photosensitivity
+discipline (no kill-flash spam), SFX/music/rumble toggles, device-adaptive glyphs.
+
+---
+
+<div align="center">
+
+**⚔️ VICTOLY awaits. Feed the War Chest. Rescue the pilot. Sidestep the lane. ⚔️**
+
+*Built at 60 Hz. Bit-identical everywhere. The sim never knows juice exists.* ✨
+
+</div>
