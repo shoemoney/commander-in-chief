@@ -776,6 +776,10 @@ func _consume_events() -> void:
 						"rate": randf_range(0.05, 0.075),
 						"vx": cos(pa) * pspd, "vy": sin(pa) * pspd, "spin": randf() * TAU,
 						"col": Color(0.55, 0.08, 0.06)})
+			"mine_lay":
+				# The sapper digs a mine in: a small low dust scuff to pair with the
+				# faint clink, so the trail he's seeding reads even before the ring.
+				_burst(ev["x"], ev["y"], "dust", 3, 0.4, 1.0, 0.4, 0.06)
 			"roll":
 				# Launch poof grounds the dodge.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
