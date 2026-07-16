@@ -12,6 +12,10 @@ const RATE := 44100   # square-wave synth aliased at 22050 (Nyquist ~11kHz); buf
 const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 	"gate_open": true, "wave_start": true, "wave_clear": true, "victory": true,
 	"wiped": true, "avenge": true}
+# Pitch-laddered grammar sounds: their exact pitch IS the information (alarm's
+# threat-ID steps, the kill blip's +0.06/streak rise), so the ±6% humanize would
+# swamp adjacent steps — play them dead on pitch.
+const _LADDERED := {"alarm": true, "kill": true}
 
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
@@ -97,7 +101,7 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 		if _ui_pb != null:   # jingles ride the unlimited UI bus, in key
 			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 		return
-	if sound != "alarm":   # the alarm pitch ladder is threat-ID grammar — keep steps strictly ordered
+	if not _LADDERED.has(sound):   # pitch-ladder grammar plays dead on pitch
 		pitch *= randf_range(0.94, 1.06)
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 
@@ -111,7 +115,7 @@ func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) ->
 		if _ui_pb != null:
 			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 		return
-	if sound != "alarm":
+	if not _LADDERED.has(sound):
 		pitch *= randf_range(0.94, 1.06)
 	# Steal policy: prefer an idle voice; else take the one closest to finishing —
 	# index-0 stealing cut long booms mid-tail under heavy fire.
