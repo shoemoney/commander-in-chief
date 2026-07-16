@@ -631,9 +631,13 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
 			score += cost * 10
+		# Claymore capsule grabbed at the 3-charge cap grants nothing (mini()
+		# eats it) — flag the event so the view can stop paying the celebratory
+		# callout for a no-op. Events are checksum-excluded: golden-safe.
+		var full: bool = pk["kind"] == 8 and p["claymores"] >= CLAYMORE_CAP
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
-			"kind": pk["kind"], "cost": cost})
+			"kind": pk["kind"], "cost": cost, "full": full})
 		pickups.remove_at(k)
 
 

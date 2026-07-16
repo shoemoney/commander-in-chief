@@ -901,7 +901,16 @@ func _consume_events() -> void:
 			# Rare power-up grab (pierce=4 / spread=5): a bold rising callout + a
 			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
 			# silent stat bump. floattext + sfx + trauma are all view-only.
-			if ev.get("kind", 0) >= 4:
+			if ev.get("kind", 0) >= 4 and ev.get("full", false):
+				# Claymore grabbed at the 3-charge cap granted NOTHING but still
+				# paid the gold callout + trauma + jingle — the last reward-shaped
+				# lie in the pickup grammar (same rule that stripped the pilot
+				# kill's hitmarker). Honest grey receipt, dull tone, no trauma.
+				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
+					"rate": 0.013, "size": 11, "text": "CLAYMORES FULL",
+					"col": Color(0.72, 0.7, 0.66)})
+				_sfx.play("buy", -9.0, 0.8)
+			elif ev.get("kind", 0) >= 4:
 				var cap_i: int = clampi(int(ev["kind"]) - 4, 0, _CAPSULE_CALLOUT.size() - 1)
 				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
 					"rate": 0.013, "size": 13, "text": _CAPSULE_CALLOUT[cap_i],
@@ -3089,6 +3098,15 @@ func _draw_tanks() -> void:
 			draw_arc(c, 20.0, -PI / 2, -PI / 2 + TAU * bail, 28, bc, 2.5)
 		elif t["occupant"] < 0:
 			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0)
+		else:
+			# Fuel gauge: the ~20s tank clock was invisible until the 300t LOW FUEL
+			# sputter (last 25%). Same ring radius the bail countdown uses, so the
+			# slow fuel drain and the 3s burn clock read as one draining dial —
+			# dim amber while healthy, hot red once the sputter threshold trips.
+			# View-only readout of TANK_FUEL_TICKS; no sim numbers move.
+			var ffrac := clampf(float(t["fuel"]) / float(SimWorld.TANK_FUEL_TICKS), 0.0, 1.0)
+			var fcol := Color(1.0, 0.75, 0.35, 0.35) if t["fuel"] >= 300 else Color(1.0, 0.4, 0.22, 0.6)
+			draw_arc(c, 20.0, -PI / 2, -PI / 2 + TAU * ffrac, 28, fcol, 1.5)
 		# Cannon reload ring: the trigger isn't dead, it's cycling.
 		if t["occupant"] >= 0 and t["fire_cd"] > 0:
 			var rdy := 1.0 - float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS)
@@ -3882,6 +3900,12 @@ func _draw_players() -> void:
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
+					# Broke reviver still needs the TARGET number — the price was
+					# hidden exactly when you're short of it, so "feed the war
+					# chest" had no answer to "with how much?". Warm red, no
+					# pay-from-here dashes (you can't).
+					draw_string(Art.font(), pos + Vector2(-18, -16), "REVIVE %d" % cost,
+						HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(1.0, 0.5, 0.4)))
 					continue
 				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
