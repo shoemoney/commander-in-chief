@@ -11,7 +11,10 @@ shader_type canvas_item;
 // hides the ColorRect entirely when not concussed, so normal play never even
 // triggers the backbuffer copy — this early-out is the belt to that suspenders.
 
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+// filter_linear (not _mipmap): every sample here is a plain texture() on a
+// full-screen quad at ~1:1 UV, so LOD always lands on mip 0 — the _mipmap hint
+// just forced a full backbuffer mip chain to be generated every visible frame.
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float concussion : hint_range(0.0, 1.0) = 0.0;
 
 void fragment() {
