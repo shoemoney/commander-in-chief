@@ -762,12 +762,15 @@ func _flush_bests() -> void:
 	# Bests ratchet in memory during play; this is the only place they hit disk
 	# outside _record_run. Called from _reset (covers restart/new game/attract
 	# rollover) and _exit_tree (covers app quit).
+	var sections := {}
 	if _best_dirty:
 		_best_dirty = false
-		_persist("best", {"score": best_score, "wave": best_wave, "dist": best_dist})
+		sections["best"] = {"score": best_score, "wave": best_wave, "dist": best_dist}
 	if _seen_dirty:
 		_seen_dirty = false
-		_persist("seen", {"hints": _seen})
+		sections["seen"] = {"hints": _seen}
+	if not sections.is_empty():
+		_persist(sections)
 
 
 func _exit_tree() -> void:
@@ -1724,14 +1727,18 @@ func _save_cfg(cf: ConfigFile) -> void:
 	DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
 
 
-func _persist(section: String, values: Dictionary) -> void:
+func _persist(sections: Dictionary) -> void:
 	# Shared load-then-merge-then-save boilerplate: load first so sibling
 	# sections ([best]/[hall]/[seen]/[settings]) already on disk never get
-	# clobbered by a save that only knows about its own section.
+	# clobbered by a save that only knows about its own section. Takes
+	# {section: {key: value}} so multiple dirty sections share ONE disk dance
+	# (an R-restart with best+seen both dirty used to pay the 4-op load/tmp/
+	# bak/rename twice back-to-back on the keypress frame).
 	var cf := ConfigFile.new()
 	cf.load(SAVE_PATH)
-	for k in values:
-		cf.set_value(section, k, values[k])
+	for section in sections:
+		for k in sections[section]:
+			cf.set_value(section, k, sections[section][k])
 	_save_cfg(cf)
 
 
@@ -1766,7 +1773,7 @@ func _load_bests() -> void:
 func _save_settings() -> void:
 	# Persist only the [settings] keys; load-then-set so we never clobber
 	# [best]/[hall]/[seen]. Called from the pause-menu a11y/audio toggles.
-	_persist("settings", {
+	_persist({"settings": {
 		"colorblind": colorblind,
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
@@ -1774,7 +1781,7 @@ func _save_settings() -> void:
 		"sfx_vol": _bus_vol("SFX"),
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
-	})
+	}})
 
 
 func _bus_vol(name: String) -> int:
@@ -1982,7 +1989,15 @@ func _check_near_miss() -> void:
 	# Perfect Dodge: a bullet passing through a player DURING roll i-frames would
 	# have killed them — the most skill-expressive save, and it was fully silent.
 	# Own throttle, checked before the whiz gate so a recent whiz can't swallow it.
-	if Engine.get_physics_frames() - _dodge_frame >= 24:
+	# The dodge scan is dead work outside a roll window (roll_ticks > 0 for
+	# only 18 of every ~78 ticks per player) — skip the O(bullets × players)
+	# pass entirely unless someone is actually mid-roll.
+	var any_roll := false
+	for p in sim.players:
+		if p["alive"] and p["roll_ticks"] > 0:
+			any_roll = true
+			break
+	if any_roll and Engine.get_physics_frames() - _dodge_frame >= 24:
 		for b in sim.enemy_bullets:
 			for p in sim.players:
 				if not p["alive"] or p["roll_ticks"] == 0:
@@ -2772,6 +2787,19 @@ func _draw_terrain() -> void:
 	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
 	var fern_col := Color(0.82, 0.92, 0.72).lerp(Color(0.6, 0.52, 0.42), ash)
 	var tree_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
+	# Water-band snapshot: sim.waters is append-only (never swept), so the ~50
+	# sim._in_water calls below were each scanning EVERY band ever streamed.
+	# Only the <=2 bands overlapping the view can matter for on-screen decor —
+	# snapshot those once into flat int quads and test cells locally.
+	var wbands: Array = []
+	# [-64, 460]px covers every cell the three loops below can test (litter
+	# reaches ~440px past camera_top), so this is exactly sim._in_water for them.
+	var wlo: int = sim.camera_top - 64 * Fixed.ONE
+	var whi: int = sim.camera_top + 460 * Fixed.ONE
+	for w in sim.waters:
+		if w["y"] <= whi and w["y"] + SimWorld.WATER_H >= wlo:
+			wbands.append([w["y"], w["y"] + SimWorld.WATER_H,
+				w["ford_x"] - SimWorld.FORD_HALF_W, w["ford_x"] + SimWorld.FORD_HALF_W])
 	# Low fern understory scattered through the field (hash decorrelated from
 	# the tree grid so ferns and trees don't stack on the same cell).
 	for ty in 10:
@@ -2783,7 +2811,7 @@ func _draw_terrain() -> void:
 				continue
 			var fx := tx * 42.0 + float(hf % 20) - 10.0
 			var fy_px := fy + float((hf / 5) % 16)
-			if sim._in_water(int(fx / PX), sim.camera_top + int(fy_px / PX)):
+			if _in_wbands(wbands, int(fx / PX), sim.camera_top + int(fy_px / PX)):
 				continue
 			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07 * _motion
 			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway,
@@ -2801,7 +2829,7 @@ func _draw_terrain() -> void:
 				var wy_px := wy + float((h2 / 7) % 20)
 				var world_x := int(px / PX)
 				var world_y := sim.camera_top + int(wy_px / PX)
-				if sim._in_water(world_x, world_y):
+				if _in_wbands(wbands, world_x, world_y):
 					continue
 				var big := h2 % 5 == 0
 				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04 * _motion
@@ -2827,12 +2855,21 @@ func _draw_terrain() -> void:
 				continue
 			var lx := tx * 84.0 + float(hl % 40) - 20.0
 			var ly_px := ly + float((hl / 9) % 40)
-			if sim._in_water(int(lx / PX), sim.camera_top + int(ly_px / PX)):
+			if _in_wbands(wbands, int(lx / PX), sim.camera_top + int(ly_px / PX)):
 				continue
 			var pool := _LITTER_LATE if (hl % 100) < int(_sector_march() * 100.0) else _LITTER_EARLY
 			_ground_shadow(Vector2(lx, ly_px), 5.0)
 			_spr(pool[(hl / 40) % pool.size()], Vector2(lx, ly_px),
 				float(hl % 628) / 100.0, 1.0)
+
+
+func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
+	# View-local mirror of sim._in_water over the pre-snapshotted in-view bands
+	# (see _draw_terrain) — same fixed-point semantics, no per-cell sim scan.
+	for b4: Array in wbands:
+		if wy >= b4[0] and wy <= b4[1] and (wx < b4[2] or wx > b4[3]):
+			return true
+	return false
 
 
 func _draw_mines() -> void:
@@ -3013,6 +3050,12 @@ func _draw_gates() -> void:
 func _draw_pickups() -> void:
 	for pk in sim.pickups:
 		var ppos := _to_screen(pk["x"], pk["y"])
+		# Band cull (same idiom as _draw_barrels/_draw_mines): the sim never
+		# sweeps pickups behind the ratchet camera, so every uncollected elite
+		# drop otherwise pays 4-8 draw ops (and priced crates a player scan)
+		# per frame forever.
+		if ppos.y < -40.0 or ppos.y > 400.0:
+			continue
 		var tex_name: String
 		var mod := Color.WHITE
 		match pk["kind"]:
@@ -4417,7 +4460,12 @@ func _draw_glow() -> void:
 	for h in _hulks:
 		var hstr: float = 1.0 - h["t"]
 		if hstr > 0.05:
-			_draw_flame(g, _to_screen(h["x"], h["y"]), hstr, flick)
+			var hpos := _to_screen(h["x"], h["y"])
+			# Same off-screen cull as _draw_scorch's hulk pass — an off-screen
+			# wreck smolders for ~8s of invisible flame cards otherwise.
+			if hpos.y < -60.0 or hpos.y > 420.0:
+				continue
+			_draw_flame(g, hpos, hstr, flick)
 	for fx in _fx:
 		if not _GLOW_KINDS.has(fx["kind"]):
 			continue
@@ -4516,6 +4564,11 @@ func _draw_scorch() -> void:
 	# decal under the hulk sprite, plus a drifting smolder fume while fresh.
 	for h in _hulks:
 		var hp := _to_screen(h["x"], h["y"])
+		# Screen cull (same idiom as the parked-tank cull): the ratchet camera
+		# leaves every wreck behind, where it kept paying ~7 draw ops per frame
+		# until the cap evicted it.
+		if hp.y < -60.0 or hp.y > 420.0:
+			continue
 		var hrot: float = h["rot"]
 		draw_set_transform(hp, hrot, Vector2.ONE)
 		draw_texture_rect(Art.tex("fx_groundbreak"), Rect2(-26, -26, 52, 52), false,
