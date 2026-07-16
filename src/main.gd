@@ -4010,6 +4010,11 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			draw_line(Vector2(tx, ttip + 1.0), Vector2(tx + tspr, tbase + 1.0), tuc, 2.0)
 			draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
 			draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
+			if colorblind and danger:
+				# Colorblind: red-vs-orange hue alone can't carry "lethal ranged". Add
+				# a second nested caret so SHAPE (a doubled chevron) encodes danger too.
+				draw_line(Vector2(tx - tspr, tbase + 5.0), Vector2(tx, ttip + 5.0), tcol, 2.0)
+				draw_line(Vector2(tx, ttip + 5.0), Vector2(tx + tspr, tbase + 5.0), tcol, 2.0)
 		else:
 			var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
 			if sim.last_stand and sx > 165.0 and sx < 475.0:
@@ -4027,6 +4032,10 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			draw_line(Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
 			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
 			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
+			if colorblind and danger:
+				# Doubled chevron: shape-redundant danger cue for colorblind mode.
+				draw_line(Vector2(sx - spr, 348), Vector2(sx, tip - 5.0), col, 2.0)
+				draw_line(Vector2(sx, tip - 5.0), Vector2(sx + spr, 348), col, 2.0)
 	if threats.size() > 6:
 		# The cap hides the tail — say so, so a drowned edge still reads as "many"
 		# instead of "exactly six".
