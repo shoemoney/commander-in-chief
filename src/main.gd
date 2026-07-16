@@ -4423,10 +4423,10 @@ func _draw_wheel() -> void:
 		# (c.y-52) and cue line (c.y+52) must all stay on-screen.
 		c.x = clampf(c.x, 78.0, 562.0)
 		c.y = clampf(c.y, 96.0, 296.0)
-		# Entrance envelope: scale in around the hub (fed at 60Hz in _update_wheel,
-		# same exp-ease family as the menus). Reduce-motion gets it instant.
-		var wes := 1.0 if _motion < 0.5 else 0.85 + 0.15 * float(_wheel[i].get("t", 1.0))
-		draw_set_transform(c * (1.0 - wes), 0.0, Vector2(wes, wes))
+		# (No entrance-scale envelope: the old draw_set_transform pop was clobbered by
+		# the first nested _spr's identity reset, so only the plate ever scaled — the
+		# hub/sockets/labels popped in at full size, which read worse than no pop at
+		# all. Dropped it; the wheel now appears clean, matching the reduce-motion path.)
 		# Baked wheel plate behind the hub (the Apocalypse sheet is a 4x2 socket
 		# atlas — one cell is the round plate) instead of a flat alpha disc.
 		var plate := Art.tex("ui_wheel_plate")
@@ -4519,7 +4519,6 @@ func _draw_wheel() -> void:
 			# Anchored ABOVE this player's hub — the old global y=71 left P2's
 			# pick floating at the top of the screen, nowhere near their wheel.
 			Art.text_center(self, lbl, c.x, c.y - 52.0, 9, Color(1.0, 0.95, 0.7))
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # end entrance-envelope scale
 
 
 func _top_center_priority() -> String:

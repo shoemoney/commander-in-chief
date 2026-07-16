@@ -395,16 +395,26 @@ func _row_geometry() -> Dictionary:
 
 func _row_at(p: Vector2) -> int:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
-		var r := Rect2(Vector2(320 - BTN.x / 2.0, 316), BTN * Vector2(1, 0.7))
-		return 0 if r.has_point(p) else -1
+		return 0 if _back_rect().has_point(p) else -1
 	if absf(p.x - 320.0) > BTN.x / 2.0:
 		return -1
 	var g := _row_geometry()
+	# Extend each row's hit-box by half the row-to-row dead band so adjacent boxes
+	# meet exactly — hovering the gap between plates used to fall through to -1 and
+	# the highlight blinked out mid-move.
+	var pad := maxf(0.0, (float(g["gap"]) - float(g["bh"])) / 2.0)
 	for k in int(g["n"]):
 		var ry := floorf(float(g["top"]) + float(k) * float(g["gap"]))   # same snap as _draw
-		if p.y >= ry and p.y <= ry + float(g["bh"]):
+		if p.y >= ry - pad and p.y < ry + float(g["bh"]) + pad:
 			return k
 	return -1
+
+
+## Single source of truth for the HALL/HOWTO back button geometry — _row_at and
+## _draw_back_button both read it, so a tweak to one can't drift the click target
+## off the pixels (same discipline as _row_geometry / panel_bottom()).
+func _back_rect() -> Rect2:
+	return Rect2(Vector2(320 - BTN.x / 2.0, 316), BTN * Vector2(1, 0.7))
 
 
 func _toggle_bus(name: String) -> void:
@@ -644,7 +654,7 @@ func _draw() -> void:
 
 
 func _draw_back_button() -> void:
-	var r := Rect2(Vector2(320 - BTN.x / 2.0, 316), BTN * Vector2(1, 0.7))
+	var r := _back_rect()
 	draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 	draw_texture_rect(Art.tex("ui_menu_button_sel"), r.grow(3), false, Color(1.0, 0.9, 0.4, 0.95))
 	draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)   # focus ring (only row here)

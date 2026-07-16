@@ -465,6 +465,10 @@ static func font() -> Font:
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
+	# Snap to whole pixels: centered strings land on fractional x (cx - w/2 with
+	# odd w), which smears a bitmap pixel font across two source texels under the
+	# canvas's linear-mipmap filter. View-only, so golden-safe.
+	pos = pos.floor()
 	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7))
 	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col)
 

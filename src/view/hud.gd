@@ -145,12 +145,12 @@ func _draw() -> void:
 			var sc := Vector2(x + 4.0, y + ICON / 2.0)
 			# Dim full-circle track under the drain, so remaining time reads
 			# against a whole instead of a floating partial arc.
-			draw_arc(sc, 4.5, 0, TAU, 8, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
+			draw_arc(sc, 4.5, 0, TAU, 20, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
 			if main._motion < 0.5:
 				# REDUCE MOTION: quarter-snapped instead of a per-frame drain —
 				# the ring steps 4 times per window rather than animating.
 				sfrac = ceilf(sfrac * 4.0) / 4.0
-			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 8, scol, 1.5)
+			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 20, scol, 1.5)
 			x += 13.0
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
 			# ring alone only reads "streak alive", not "how close".
@@ -452,7 +452,7 @@ func _accessibility_pips() -> void:
 	var acc_y := 8.0
 	if Art.colorblind:
 		_pip_plate("CB", acc_y)
-		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
+		_text("CB", RIGHT - _tw("CB"), acc_y, Art.safe(Color(0.6, 0.85, 1.0, 0.85)))
 		acc_y += 11.0
 	if main._motion < 0.5:
 		_pip_plate("RM", acc_y)
@@ -464,7 +464,11 @@ func _accessibility_pips() -> void:
 ## grass/water. A small scrim rect restores contrast without a full plate.
 func _pip_plate(txt: String, py: float) -> void:
 	var w := _tw(txt)
-	draw_rect(Rect2(RIGHT - w - 2.0, py - 1.0, w + 3.0, 10.0), Color(0.05, 0.07, 0.05, 0.55))
+	# Kept fully left of RIGHT (was overhanging by 1px). 0.8 fill + a faint hairline
+	# so the pip holds contrast over an explosion flash or bright water, not just grass.
+	var r := Rect2(RIGHT - w - 3.0, py - 1.0, w + 3.0, 10.0)
+	draw_rect(r, Color(0.05, 0.07, 0.05, 0.8))
+	draw_rect(r, Color(0.7, 0.75, 0.7, 0.35), false, 1.0)
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
