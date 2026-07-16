@@ -4092,7 +4092,10 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 
 
 func _draw_fx() -> void:
-	var floattext_i := 0
+	# Floattext anchors drawn so far this frame: a toast only stacks (11px slot)
+	# under toasts within 24px of ITS anchor. The old global per-frame index
+	# displaced unrelated toasts and made them snap 11px when an earlier one expired.
+	var floattext_anchors: Array[Vector2] = []
 	for fx in _fx:
 		if _GLOW_KINDS.has(fx["kind"]):
 			continue   # drawn by _draw_glow on the additive layer
@@ -4159,7 +4162,12 @@ func _draw_fx() -> void:
 			# A "drop" floater (e.g. LOADOUT LOST) sinks instead of rising — a felt
 			# down-beat. Default is the rise every other callout uses.
 			var fydir: float = 1.0 if fx.get("drop", false) else -1.0
-			var fpivot := pos + Vector2(0.0, fydir * (18.0 + rise * 22.0) - floattext_i * 11.0)
+			var fstack := 0
+			for fa in floattext_anchors:
+				if fa.distance_to(pos) < 24.0:
+					fstack += 1
+			floattext_anchors.append(pos)
+			var fpivot := pos + Vector2(0.0, fydir * (18.0 + rise * 22.0) - float(fstack) * 11.0)
 			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
@@ -4168,7 +4176,6 @@ func _draw_fx() -> void:
 				draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
 			draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-			floattext_i += 1
 		elif fx["kind"] == "smoke":
 			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha.
 			# Hash-seeded horizontal sway (grows with rise) so stacked plumes lean and
