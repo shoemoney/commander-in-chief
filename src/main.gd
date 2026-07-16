@@ -2522,7 +2522,6 @@ func _draw() -> void:
 	_draw_pickups()
 	_draw_tanks()
 	_draw_enemies()
-	_draw_threat_pips()
 	_draw_observer()
 	_draw_gunships()
 	_draw_colossus()
@@ -2542,6 +2541,11 @@ func _draw() -> void:
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	_draw_threat_edges()
+	# Edge-clamped windup arrows live with their sibling edge indicators: drawn in
+	# the world block they rode the shake, sat UNDER the NIGHT OPS dim (whose own
+	# contract says threat markers are your eyes), and got over-painted by
+	# gunships/projectiles/fx — burying the off-screen-lethal-shot warning.
+	_draw_threat_pips()
 	_draw_objective_markers()
 	_draw_progress_rail()
 	var top_msg := _top_center_priority()
@@ -3773,9 +3777,13 @@ func _draw_players() -> void:
 					var edge := Vector2(clampf(dpos.x, 12, 628), clampf(dpos.y, 34, 348))
 					var pcol := Color(0.4, 1.0, 0.4) if q == 0 else Color(1.0, 0.85, 0.3)
 					var bdir := (dpos - edge).normalized()
+					# Shake-immune like every other screen-edge indicator (the
+					# threat edges, the boss bars) — the gunship-bar idiom.
+					draw_set_transform_matrix(get_transform().affine_inverse())
 					draw_circle(edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
 					draw_line(edge, edge + bdir * 9.0, pcol, 2.0)
 					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0)
+					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
 					continue
