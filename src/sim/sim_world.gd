@@ -596,6 +596,10 @@ func _step_players(inputs: Array) -> void:
 		# The punch-out grace (submerged) must elapse first. Tank treads
 		# rescue in _step_tank.
 		for e in enemies:
+			# Same axis pre-reject + truncation proof as the bullet scan (:1007):
+			# |dx| > r means _dist_lte was already false — checksum-neutral.
+			if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+				continue
 			if e["alive"] and e["kind"] == "pilot" and not e.get("submerged", false) \
 					and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 				_rescue_pilot(e)
@@ -604,6 +608,8 @@ func _step_players(inputs: Array) -> void:
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
+				if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+					continue
 				if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
 						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					continue
@@ -640,9 +646,13 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
 			score += cost * 10
+		# Claymore capsule grabbed at the 3-charge cap grants nothing (mini()
+		# eats it) — flag the event so the view can stop paying the celebratory
+		# callout for a no-op. Events are checksum-excluded: golden-safe.
+		var full: bool = pk["kind"] == 8 and p["claymores"] >= CLAYMORE_CAP
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
-			"kind": pk["kind"], "cost": cost})
+			"kind": pk["kind"], "cost": cost, "full": full})
 		pickups.remove_at(k)
 
 
@@ -1001,35 +1011,61 @@ func _detonate_tank(tank: Dictionary) -> void:
 
 # --- Projectiles ---
 
-func _offscreen(x: int, y: int) -> bool:
-	## Shared screen-bounds cull for bullets: past the vertical strike zone or
-	## off either horizontal edge. Callers still add their own TTL check.
-	return y < camera_top - 40 * F_ONE or y > camera_top + 400 * F_ONE \
-		or x < 0 or x > SCREEN_W_FP
-
-
 func _step_bullets() -> void:
+	# Offscreen bounds + per-bullet dict fields hoisted into locals (identical
+	# values, so checksum-neutral): b["x"]/b["y"] never move after integration,
+	# and each String-keyed Dictionary read is a hash lookup the hottest sim
+	# loop was paying 5+ times per bullet per tick.
+	var ylo := camera_top - 40 * F_ONE
+	var yhi := camera_top + 400 * F_ONE
+	# Bunker band prefilter: any bullet reaching the cover scan has by in
+	# [ylo,yhi] (off-band bullets die above), so a bunker whose AABB misses that
+	# band can never contain it — checksum-neutral by construction. Positions
+	# never move; alive is RE-CHECKED per bullet (a barrel cook-off via
+	# _detonate_barrel below can _explode a bunker mid-loop).
+	var near_bks: Array[Dictionary] = []
+	for bk in bunkers:
+		if bk["alive"] and bk["y"] <= yhi and bk["y"] + BUNKER_H >= ylo:
+			near_bks.append(bk)
+	# Boss prefilter: gate boss dicts are never emptied and g["open"] mutates
+	# only in _step_gates, so both gates are stable within this call; the
+	# per-bullet boss["alive"] re-check stays (_damage_boss kills mid-loop).
+	var boss_gates: Array[Dictionary] = []
+	for g in gates:
+		if not g["boss"].is_empty() and not g["open"]:
+			boss_gates.append(g)
 	for i in range(bullets.size() - 1, -1, -1):
 		var b := bullets[i]
-		b["x"] = b["x"] + b["vx"]
-		b["y"] = b["y"] + b["vy"]
-		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
-		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+		var bx: int = b["x"] + b["vx"]
+		var by: int = b["y"] + b["vy"]
+		var ttl: int = b["ttl"] - 1
+		b["x"] = bx
+		b["y"] = by
+		b["ttl"] = ttl
+		var off := by < ylo or by > yhi or bx < 0 or bx > SCREEN_W_FP
+		var dead: bool = ttl <= 0 or off
+		if ttl <= 0 and not off:
 			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
-			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
+			events.append({"t": "bullet_dirt", "x": bx, "y": by})
 		if not dead:
 			# Bullets are stopped by armor: bunkers block, only grenades hurt them.
-			for bk in bunkers:
-				if bk["alive"] and _point_in_aabb(b["x"], b["y"], bk):
-					events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+			for bk in near_bks:
+				if bk["alive"] and _point_in_aabb(bx, by, bk):
+					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
 		if not dead:
 			for e in enemies:
+				# Cheap axis pre-reject for the hottest O(bullets×enemies) scan.
+				# Checksum-neutral by construction: |dx| ≥ r+1 raw units makes
+				# dx² ≥ r² + 2r + 1 with 2r+1 > 1<<16 for any radius ≥ 0.5px, so
+				# Fixed.mul(dx,dx) > Fixed.mul(r,r) even after >>16 truncation —
+				# _dist_lte was already false for every pair skipped here.
+				if absi(bx - e["x"]) > BULLET_HIT_RADIUS:
+					continue
 				# Bullets pass clean over submerged frogmen — grenades only.
 				if e["alive"] and not e.get("submerged", false) \
-						and _dist_lte(b["x"], b["y"], e["x"], e["y"], BULLET_HIT_RADIUS):
+						and _dist_lte(bx, by, e["x"], e["y"], BULLET_HIT_RADIUS):
 					# Shield: a bullet arriving into the front arc (roughly
 					# opposite the shieldman's facing-toward-you) is deflected;
 					# flank it or use a grenade. Front cone ~120°.
@@ -1038,18 +1074,18 @@ func _step_bullets() -> void:
 						# the front-arc block — otherwise the shield eats the round.
 						var rw: int = b.get("owner", -1)
 						if rw < 0 or rw >= players.size() or players[rw]["rend_ticks"] <= 0:
-							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+							events.append({"t": "armor_block", "x": bx, "y": by})
 							dead = true
 							break
 						# Rend beat the block — a distinct shear event so the payoff
 						# reads AT the shield (a silent skip looked like a normal kill).
-						events.append({"t": "rend_pierce", "x": b["x"], "y": b["y"]})
+						events.append({"t": "rend_pierce", "x": bx, "y": by})
 					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
 					# it via _explode). Only a lethal round routes through _kill_enemy.
 					if e["kind"] == "mg_nest" or e["kind"] == "technical":
 						e["hp"] = e["hp"] - 1
 						if e["hp"] > 0:
-							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+							events.append({"t": "armor_block", "x": bx, "y": by})
 							var mgowner: int = b.get("owner", -1)
 							if mgowner >= 0 and mgowner < players.size() and players[mgowner]["pierce_ticks"] > 0:
 								continue
@@ -1067,22 +1103,22 @@ func _step_bullets() -> void:
 			# A player round into a live fuel drum cooks it off (same blast path as a
 			# tank rollover). Barrel kills mint no coin (no_coin) — no bullet farm.
 			for bl in barrels:
-				if bl["armed"] and _dist_lte(b["x"], b["y"], bl["x"], bl["y"], BULLET_HIT_RADIUS):
+				if bl["armed"] and _dist_lte(bx, by, bl["x"], bl["y"], BULLET_HIT_RADIUS):
 					_detonate_barrel(bl, true)
 					dead = true
 					break
 		if not dead:
-			dead = _bullet_hits_boss(b)
+			dead = _bullet_hits_boss(b, boss_gates)
 		# Colossus core window: while the plating is retracted, bullets chip it
 		# too (otherwise grenades-only). A timing/aggression path for the finale.
 		if not dead and not colossus.is_empty() and colossus["alive"] \
 				and colossus.get("core_open", 0) > 0 \
-				and _dist_lte(b["x"], b["y"], colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+				and _dist_lte(bx, by, colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": bx, "y": by})
 			_damage_colossus(COLOSSUS_BULLET_DAMAGE)
 			dead = true
 		if not dead and not observer.is_empty():
-			if _dist_lte(b["x"], b["y"], observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
+			if _dist_lte(bx, by, observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
 				_kill_observer()
 				dead = true
 		if dead:
@@ -1642,9 +1678,17 @@ func _step_mines() -> void:
 				triggered = true
 		# Or an enemy walks onto it — herd rushers into the minefield.
 		if not triggered:
+			# Mine position hoisted out of the inner scan (dict hash per read).
+			var mx: int = m["x"]
+			var my: int = m["y"]
 			for e in enemies:
+				# Axis pre-reject — same truncation-safe proof as _step_bullets.
+				if absi(e["x"] - mx) > MINE_TRIGGER_RADIUS:
+					continue
+				# (Pilot exemption: his fixed walk crossing a random field was a
+				# ransom coin-flip, not counterplay.)
 				if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot" \
-						and _dist_lte(e["x"], e["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
+						and _dist_lte(e["x"], e["y"], mx, my, MINE_TRIGGER_RADIUS):
 					triggered = true
 					break
 		if triggered:
@@ -1663,9 +1707,15 @@ func _step_barrels() -> void:
 		elif bl["armed"]:
 			# Enemy contact detonates it (like a mine) — a two-way hazard that
 			# auto-clears the rows enemies wade through. No coin (enemy-suicide farm).
+			# Barrel position hoisted out of the inner scan (dict hash per read).
+			var blx: int = bl["x"]
+			var bly: int = bl["y"]
 			for e in enemies:
+				# Axis pre-reject — same truncation-safe proof as _step_bullets.
+				if absi(e["x"] - blx) > MINE_TRIGGER_RADIUS:
+					continue
 				if e["alive"] and not e.get("submerged", false) \
-						and _dist_lte(e["x"], e["y"], bl["x"], bl["y"], MINE_TRIGGER_RADIUS):
+						and _dist_lte(e["x"], e["y"], blx, bly, MINE_TRIGGER_RADIUS):
 					_detonate_barrel(bl, true)
 					break
 		if not bl["armed"] or bl["y"] > camera_top + 420 * F_ONE:
@@ -2284,8 +2334,13 @@ func _step_one_boss(boss: Dictionary) -> void:
 				_add_strike(target2["x"], target2["y"])
 
 
-func _bullet_hits_boss(b: Dictionary) -> bool:
-	for g in gates:
+func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
+	# boss_gates: _step_bullets passes its per-call prefilter (gates with a
+	# non-empty boss, still closed) so ~150 live rounds don't re-interrogate
+	# all ~5 gates each tick; direct test callers omit it and scan everything.
+	# The full guard stays — it's what makes both paths identical.
+	var cands: Array = boss_gates if boss_gates != null else gates
+	for g in cands:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
 		var boss: Dictionary = g["boss"]
@@ -2332,27 +2387,40 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 
 
 func _step_enemy_bullets() -> void:
+	# Same locals hoist as _step_bullets: identical values, checksum-neutral.
+	var ylo := camera_top - 40 * F_ONE
+	var yhi := camera_top + 400 * F_ONE
+	# Same bunker band prefilter as _step_bullets (nothing here can kill a
+	# bunker mid-loop, but the per-bullet alive re-check is kept for symmetry).
+	var near_bks: Array[Dictionary] = []
+	for bk in bunkers:
+		if bk["alive"] and bk["y"] <= yhi and bk["y"] + BUNKER_H >= ylo:
+			near_bks.append(bk)
 	for i in range(enemy_bullets.size() - 1, -1, -1):
 		var b := enemy_bullets[i]
-		b["x"] = b["x"] + b["vx"]
-		b["y"] = b["y"] + b["vy"]
-		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
-		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+		var bx: int = b["x"] + b["vx"]
+		var by: int = b["y"] + b["vy"]
+		var ttl: int = b["ttl"] - 1
+		b["x"] = bx
+		b["y"] = by
+		b["ttl"] = ttl
+		var off := by < ylo or by > yhi or bx < 0 or bx > SCREEN_W_FP
+		var dead: bool = ttl <= 0 or off
+		if ttl <= 0 and not off:
 			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
-			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
+			events.append({"t": "bullet_dirt", "x": bx, "y": by})
 		if not dead:
 			# Cover is real both ways now: a bunker between you and a shooter eats
 			# the round, same as it eats yours (player bullets already block here).
-			for bk in bunkers:
-				if bk["alive"] and _point_in_aabb(b["x"], b["y"], bk):
-					events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+			for bk in near_bks:
+				if bk["alive"] and _point_in_aabb(bx, by, bk):
+					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
 		if not dead:
 			for p in players:
 				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
-						and _dist_lte(b["x"], b["y"], p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
+						and _dist_lte(bx, by, p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
 					_hurt_player(p)
 					dead = true
 					break

@@ -31,6 +31,7 @@ var _key_move := 0      # held up/down key direction (hold-repeat, mirrors stick
 var _key_rep := 0.0     # countdown to the next held-key auto-repeat step
 var _lockout := 0.0     # post-disconnect confirm lockout (flailing pad guard)
 var _has_replay := false   # user://last_run.replay existence, sampled in open()
+var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover cue parity with rows
 
 # Row ids that flip on left/right without a confirm press.
 const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist"]
@@ -43,7 +44,15 @@ func _ready() -> void:
 
 
 func _on_joy_changed(_device: int, connected: bool) -> void:
-	if not connected and mode == Mode.HIDDEN and main != null and main.sim != null:
+	if connected:
+		return
+	# A pad yanked while the stick is deflected emits no further motion events,
+	# so the <0.45 re-arm can never fire — clear the latches or _process
+	# auto-repeats _nav every 0.12s forever (endless scroll + sfx loop).
+	_stick_x = 0
+	_stick_y = 0
+	_nav_frame = -1
+	if mode == Mode.HIDDEN and main != null and main.sim != null:
 		open(Mode.PAUSE)
 		# A pad yanked mid-flail can spray phantom presses — ignore
 		# confirm/activate for a beat so nothing destructive can fire.
@@ -104,7 +113,22 @@ func open(m: int, select_id := "") -> void:
 	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
 	_sel_target = -1.0
 	_key_move = 0   # a key held across the transition must not auto-repeat here
+	# Same discipline for the stick: pausing via START with the move-stick
+	# deflected (the normal mid-combat case) used to auto-scroll 0.35s later —
+	# and the first step UP wrapped focus from RESUME straight onto a
+	# destructive row. Mirrors the _on_joy_changed clear.
+	_stick_x = 0
+	_stick_y = 0
+	_nav_frame = -1
+	_tab_hover = -1   # stale hall-tab hover must not survive a menu hop
 	_has_replay = FileAccess.file_exists("user://last_run.replay")   # hoisted: _menu_items ran this disk stat ~180x/s while TITLE was open
+	# Any menu opening freezes the sim mid-hold — cancel open supply wheels, or a
+	# hold+pick released WHILE paused commits a stale buy on the first resumed
+	# frame (the release the player meant as an abort).
+	if main != null:
+		for w in main._wheel:
+			w["open"] = false
+			w["sel"] = -1
 	# Backing out of a submenu re-selects the row that opened it — landing on
 	# CAMPAIGN after OPTIONS broke muscle memory (and risks a misfired start).
 	if select_id != "":
@@ -124,20 +148,22 @@ func _menu_items() -> Array[Dictionary]:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return [{"id": "back", "label": "BACK", "destructive": false}]
 	if mode == Mode.TITLE:
+		# "grp" drives the divider rules in _draw: start-verbs / run-config
+		# toggles / meta screens / quit each read as their own block.
 		var titems: Array[Dictionary] = [
-			{"id": "campaign", "label": "CAMPAIGN", "destructive": false},
-			{"id": "endless", "label": "ENDLESS WAR", "destructive": false},
-			{"id": "daily", "label": "DAILY RUN", "destructive": false},
-			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false},
-			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players},
-			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard},
-			{"id": "hall", "label": "HALL OF FAME", "destructive": false},
-			{"id": "howto", "label": "HOW TO PLAY", "destructive": false},
+			{"id": "campaign", "label": "CAMPAIGN", "destructive": false, "grp": 0},
+			{"id": "endless", "label": "ENDLESS WAR", "destructive": false, "grp": 0},
+			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0},
+			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false, "grp": 0},
+			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players, "grp": 1},
+			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 1},
+			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 2},
+			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 2},
 		]
-		titems.append({"id": "options", "label": "OPTIONS", "destructive": false})
+		titems.append({"id": "options", "label": "OPTIONS", "destructive": false, "grp": 2})
 		if _has_replay:
-			titems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false})
-		titems.append({"id": "quit", "label": "QUIT", "destructive": true})
+			titems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 2})
+		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 3})
 		return titems
 	if mode == Mode.OPTS:
 		# Settings reachable BEFORE a run: reduce-motion/colorblind/assist lived
@@ -146,10 +172,10 @@ func _menu_items() -> Array[Dictionary]:
 		var oitems := _settings_rows()
 		oitems.append({"id": "back", "label": "BACK", "destructive": false})
 		return oitems
-	var pitems: Array[Dictionary] = [{"id": "resume", "label": "RESUME", "destructive": false}]
+	var pitems: Array[Dictionary] = [{"id": "resume", "label": "RESUME", "destructive": false, "grp": 0}]
 	pitems.append_array(_settings_rows())
-	pitems.append({"id": "restart", "label": "RESTART", "destructive": true})
-	pitems.append({"id": "title", "label": "TITLE SCREEN", "destructive": true})
+	pitems.append({"id": "restart", "label": "RESTART", "destructive": true, "grp": 2})
+	pitems.append({"id": "title", "label": "TITLE SCREEN", "destructive": true, "grp": 2})
 	return pitems
 
 
@@ -157,12 +183,15 @@ func _settings_rows() -> Array[Dictionary]:
 	# "on" drives the row's state dot (filled/hollow — position+shape carry it,
 	# not hue alone) so toggle state reads without parsing the label tail.
 	return [
-		{"id": "sfx", "label": "SFX: %s" % ("OFF" if _bus_off("SFX") else "ON"), "destructive": false, "on": not _bus_off("SFX")},
-		{"id": "music", "label": "MUSIC: %s" % ("OFF" if _bus_off("Music") else "ON"), "destructive": false, "on": not _bus_off("Music")},
-		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5},
-		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind},
-		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on},
-		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist},
+		# SFX/MUSIC are stepped 0..10 levels (8-of-9 panel consensus), not mute
+		# toggles: "vol" drives a 10-segment bar where the state dot would sit.
+		# grp 1 = the settings block (RESUME is grp 0, destructive exits grp 2).
+		{"id": "sfx", "label": "SFX: %d" % main._bus_vol("SFX"), "destructive": false, "vol": main._bus_vol("SFX"), "grp": 1},
+		{"id": "music", "label": "MUSIC: %d" % main._bus_vol("Music"), "destructive": false, "vol": main._bus_vol("Music"), "grp": 1},
+		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 1},
+		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 1},
+		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 1},
+		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 1},
 	]
 
 
@@ -282,6 +311,18 @@ func _unhandled_input(ev: InputEvent) -> void:
 	if ev is InputEventMouseMotion:
 		# Only REAL motion selects — a parked mouse must not fight pad/kb nav.
 		if ev.relative.length() > 2.0:
+			# Hall filter tabs get hover feedback too — they were click-only,
+			# the lone interactive surface with zero mouse cue (rows hover-select,
+			# arrows pulse; the file's own parity invariant, line ~317).
+			if mode == Mode.HALL:
+				var ht := -1
+				var tabs := _hall_tab_rects()
+				for ti in tabs.size():
+					if tabs[ti].has_point(ev.position):
+						ht = ti
+				if ht != _tab_hover:
+					_tab_hover = ht
+					queue_redraw()
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
 				sel = hrow
@@ -313,6 +354,22 @@ func _unhandled_input(ev: InputEvent) -> void:
 				sel = crow
 				_press()
 				queue_redraw()
+			elif mode != Mode.HALL and mode != Mode.HOWTO \
+					and _menu_items()[sel]["id"] in _TOGGLES:
+				# The ◄/► cycle affordances draw OUTSIDE the row plate — without
+				# their own hitbox a click on a visible, pulsing arrow was silently
+				# swallowed (the same parity gap the hall tabs got fixed for).
+				var g := _row_geometry()
+				var ry := floorf(float(g["top"]) + float(sel) * float(g["gap"]))
+				var ay := floorf(ry + float(g["bh"]) / 2.0) - 5.0   # same snap as _draw's cy
+				var lx := 320.0 - BTN.x / 2.0
+				var la := Rect2(lx - 23.0, ay, 10.0, 10.0).grow(3.0)
+				var ra := Rect2(lx + BTN.x + 5.0, ay, 10.0, 10.0).grow(3.0)
+				if la.has_point(ev.position) or ra.has_point(ev.position):
+					# Side matters now: volume rows step down/up per arrow
+					# (plain toggles flip either way, exactly as before).
+					_nav(0, -1 if la.has_point(ev.position) else 1)
+					queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
 			if mode == Mode.HALL:
@@ -343,6 +400,18 @@ func _nav(move: int, hmove: int) -> void:
 		main._sfx.play("pickup", -14.0, 1.3)
 		queue_redraw()
 		return
+	# ◄/► on a volume row steps the 0..10 level (Enter still mute-toggles, and
+	# the bus keeps its volume_db through a mute, so unmute restores the level).
+	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
+		var bus: String = "SFX" if _menu_items()[sel]["id"] == "sfx" else "Music"
+		var nv: int = clampi(main._bus_vol(bus) + hmove, 0, 10)
+		if nv != main._bus_vol(bus):
+			main._set_bus_vol(bus, nv)
+			main._save_settings()
+			# The tick doubles as a live level demo — pitch rides the new step.
+			main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
+		queue_redraw()
+		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
 	# (same activation path, so save/sfx behavior stays identical).
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in _TOGGLES:
@@ -351,6 +420,8 @@ func _nav(move: int, hmove: int) -> void:
 		return
 	if move == 0:
 		return
+	if _items().size() < 2:
+		return   # 1-row menu (HOWTO's BACK): sel wraps 0→0 — no phantom nav sfx
 	var prev := sel
 	sel = wrapi(sel + move, 0, _items().size())
 	if absi(sel - prev) > 1:
@@ -465,8 +536,18 @@ func _activate() -> void:
 func _draw() -> void:
 	if mode == Mode.HIDDEN:
 		return
-	draw_rect(Rect2(0, 0, 640, 360),
-		Color(0.02, 0.05, 0.02, (0.55 if mode == Mode.TITLE else 0.6) * _open_t))   # scrim ≥0.55: 8px text over a LIVE firefight; fades in over the open settle
+	# Scrim ≥0.55: 8px text over a LIVE firefight; fades in over the open settle.
+	# REDUCE MOTION near-blacks the TITLE backdrop — the live attract fight
+	# (scroll + tracers + explosions) is the biggest motion source on the exact
+	# screen where the setting is toggled, and it isn't _motion-gated itself.
+	var sa := 0.55 if mode == Mode.TITLE else 0.6
+	# The whole title stack (TITLE/OPTS/HALL/HOWTO) sits over the same live
+	# attract fight, so the near-black applies to all of it — hopping TITLE→OPTS
+	# used to step the backdrop luminance ~8x on the exact screen hosting the
+	# toggle. PAUSE keeps 0.6 so players can still read their frozen run.
+	if mode != Mode.PAUSE and main._motion < 0.5:
+		sa = 0.92
+	draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.05, 0.02, sa * _open_t))
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		# Plate the bare text on the Apocalypse frame, debrief-style (underlay
 		# darkens the well, frame carries the chrome).
@@ -481,16 +562,34 @@ func _draw() -> void:
 		return
 	if mode == Mode.TITLE:
 		_center_text("PROJECT IKARI", 88, 34, Color(1.0, 0.85, 0.3))
-		_center_text("ONE HIT. ONE WAR CHEST. NO MERCY.", 112, 10, Color(0.85, 0.9, 0.8, 0.85))
+		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
+		# seed-hint siblings — small text straight on the live attract firefight
+		# loses to bright terrain no matter the alpha (the codebase's own thrice-
+		# cited lesson; a white explosion drops the gold line under 2:1 contrast).
+		var tagline := "ONE HIT. ONE WAR CHEST. NO MERCY."
+		var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		draw_rect(Rect2(320.0 - tgw / 2.0 - 4.0, 101.0, tgw + 8.0, 14.0),
+			Color(0.03, 0.05, 0.03, 0.55))
+		_center_text(tagline, 112, 10, Color(0.85, 0.9, 0.8, 0.85))
 		# Read order: title → tagline → one BRIGHT record line → menu. CAREER stays
 		# a dim whisper at 145 (clears the 156 first-row top since the c1 layout fix).
 		if main.best_score > 0:
-			_center_text("BEST — SCORE %d · WAVE %d · %dm" % [main.best_score,
-				main.best_wave, main.best_dist], 132, 9, Color(1.0, 0.92, 0.55, 1.0))
+			var best_line := "BEST — SCORE %d · WAVE %d · %dm" % [main.best_score,
+				main.best_wave, main.best_dist]
+			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			draw_rect(Rect2(320.0 - bw / 2.0 - 4.0, 122.0, bw + 8.0, 13.0),
+				Color(0.03, 0.05, 0.03, 0.55))
+			_center_text(best_line, 132, 9, Color(1.0, 0.92, 0.55, 1.0))
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
-			_center_text("CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
-				main._life_kills, wpct], 145, 8, Color(0.6, 0.72, 0.62, 0.7))
+			var career := "CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
+				main._life_kills, wpct]
+			# Plated like the input legend: 8px dim text straight on the live
+			# attract firefight loses to bright terrain no matter the alpha.
+			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			draw_rect(Rect2(320.0 - cpw / 2.0 - 4.0, 136.0, cpw + 8.0, 12.0),
+				Color(0.03, 0.05, 0.03, 0.55))
+			_center_text(career, 145, 8, Color(0.6, 0.72, 0.62, 0.7))
 	elif mode == Mode.OPTS:
 		_center_text("OPTIONS", 88, 22, Color(0.95, 0.95, 0.85))
 	else:
@@ -522,11 +621,15 @@ func _draw() -> void:
 		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
 		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
 		var r := Rect2(Vector2(320 - BTN.x / 2.0, floorf(top + k * gap)), Vector2(BTN.x, floorf(bh)))
-		# Group divider: a faint rule in the gap above the FIRST destructive row splits
-		# the navigation block from the destructive exits (QUIT on TITLE, RESTART on
-		# PAUSE) — hierarchy cue without touching the shared row geometry/hit-test.
-		if k > 0 and k < mitems.size() and mitems[k].get("destructive", false) \
-				and not mitems[k - 1].get("destructive", false):
+		# Whole-pixel row center: bh is odd on PAUSE (21) and 11-row TITLE (11), so
+		# every bh/2-derived y (label baseline, state dot, arrows, confirm glyph)
+		# landed on .5 — the exact sub-pixel shimmer _sel_y snapping guards against.
+		var cy := floorf(r.position.y + bh / 2.0)
+		# Group divider: a faint rule in the gap above each "grp" boundary —
+		# RESUME/settings/destructive on PAUSE, starts/toggles/meta/quit on TITLE —
+		# hierarchy cue without touching the shared row geometry/hit-test.
+		if k > 0 and k < mitems.size() \
+				and mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0):
 			var sy := floorf(top + k * gap) - floorf((gap - bh) / 2.0)
 			draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
 				Color(0.62, 0.66, 0.5, 0.55))
@@ -579,18 +682,28 @@ func _draw() -> void:
 				Color(1.0, 0.62, 0.3, 0.95))
 			var ct := Art.tex(Art.glyph_key("confirm"))
 			var cw := 12.0 * float(ct.get_width()) / float(ct.get_height())
-			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0,
-				r.position.y + (bh - 12.0) / 2.0, cw, 12.0), false)
+			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
 			label_r = r.end.x - cw - 10.0
 		# Fixed icon gutter: iconless rows indent the same, so every label
 		# left-aligns to one column. Overlong labels ellipsize inside the button.
 		var lx := r.position.x + 30.0
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
-			Vector2(lx, r.position.y + bh / 2.0 + 4.0), 11, col)
+			Vector2(lx, cy + 4.0), 11, col)
+		# Volume rows: a 10-step level bar where the toggle dot would sit —
+		# level reads as fill COUNT (shape, not hue alone); 0 = all hollow.
+		if mitems[k].has("vol"):
+			var vv: int = mitems[k]["vol"]
+			var vbx := r.end.x - 8.0 - 49.0   # 10 segments * 5px pitch - 1px, right-aligned with the dot slot
+			for sgi in 10:
+				var sr := Rect2(vbx + float(sgi) * 5.0, cy - 3.0, 4.0, 6.0)
+				if sgi < vv:
+					draw_rect(sr, Art.safe(Color(0.55, 0.95, 0.5, 1.0 if selected else 0.8)))
+				else:
+					draw_rect(sr, Color(0.55, 0.6, 0.5, 0.6), false, 1.0)
 		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
 		# shape+fill carry the state (hue alone fails protan players).
 		if mitems[k].has("on"):
-			var dc := Vector2(r.end.x - 10.0, r.position.y + bh / 2.0)
+			var dc := Vector2(r.end.x - 10.0, cy)
 			if mitems[k]["on"]:
 				draw_circle(dc, 3.0, Art.safe(Color(0.55, 0.95, 0.5)))
 			else:
@@ -601,13 +714,18 @@ func _draw() -> void:
 		if selected and mitems[k]["id"] in _TOGGLES:
 			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
 			var at := Art.tex("mi_arrow")
-			var ay := r.position.y + (bh - 10.0) / 2.0
+			var ay := cy - 5.0
 			draw_texture_rect(at, Rect2(r.position.x - 13.0, ay, -10.0, 10.0), false, fcol)
 			draw_texture_rect(at, Rect2(r.end.x + 5.0, ay, 10.0, 10.0), false, fcol)
 		if mitems[k]["id"] == "paste_seed":
-			# Where the seed comes from — the row name alone didn't say.
-			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0,
-				r.position.y + bh / 2.0 + 3.0), 8, Color(0.84, 0.86, 0.78, 0.75))
+			# Where the seed comes from — the row name alone didn't say. Plated:
+			# it draws OUTSIDE the button over the live attract fight, and 8px
+			# text loses to bright terrain (the input legend's own lesson).
+			var apw := Art.font().get_string_size("(FROM CLIPBOARD)", HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			draw_rect(Rect2(r.end.x + 2.0, cy - 6.0, apw + 8.0, 12.0),
+				Color(0.03, 0.05, 0.03, 0.55))
+			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0, cy + 3.0),
+				8, Color(0.84, 0.86, 0.78, 0.75))
 		if selected:
 			# 1px focus ring on the actual row rect — always crisp and present,
 			# independent of the glow glide, for keyboard/pad a11y.
@@ -672,40 +790,41 @@ func _draw_hall() -> void:
 	_center_text("HALL OF FAME", 38, 22, Color(1.0, 0.85, 0.3))
 	# Persistent filter tab row — the old single "◄ NAME ►" line hid the other
 	# two choices, so nobody knew left/right cycled anything. Selected tab is
-	# underlined and flashes briefly on change (_filter_pulse).
+	# underlined and flashes briefly on change (_filter_pulse). Geometry comes
+	# from _hall_tab_rects — the SAME rects the click/hover tests use — so a
+	# tab rename or padding tweak can't drift the targets off the pixels
+	# (same discipline as _row_geometry).
 	var f := Art.font()
-	var tw: Array[float] = []
-	var total := -22.0
-	for n in names:
-		var w := f.get_string_size(n, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		tw.append(w)
-		total += w + 22.0
-	var x := 320.0 - total / 2.0
+	var tabs := _hall_tab_rects()
 	for i in names.size():
+		var tr := tabs[i]
 		var on := i == _hall_filter
 		var col := Color(1.0, 0.95, 0.65) if on else Color(0.6, 0.66, 0.56, 0.8)
 		if on and _filter_pulse > 0.0:
 			col = col.lightened(_filter_pulse * 0.45)
+		elif not on and i == _tab_hover:
+			col = col.lightened(0.25)   # hover cue — same idiom as _filter_pulse
 		if on:
 			# Filled plate under the live tab — the underline alone read as
 			# decoration, not state, next to two equally-bright neighbors.
-			draw_rect(Rect2(x - 4.0, 54.0, tw[i] + 8.0, 16.0), Color(0.05, 0.08, 0.04, 0.9))
-		Art.text(self, names[i], Vector2(x, 66), 10, col)
+			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), Color(0.05, 0.08, 0.04, 0.9))
+		Art.text(self, names[i], Vector2(tr.position.x + 4.0, 66), 10, col)
 		if on:
-			draw_rect(Rect2(x - 2.0, 70.0, tw[i] + 4.0, 2.0),
+			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, 2.0),
 				Color(1.0, 0.9, 0.4, 0.9 + _filter_pulse * 0.1))
-		x += tw[i] + 22.0
 	# The cycle affordance itself: dpad art on pad, arrow text on keyboard.
+	var left := tabs[0].position.x + 4.0
+	var right := tabs[tabs.size() - 1].end.x - 4.0
 	if Art.use_pad:
 		var t := Art.tex("glyph_dpad_lr")
 		var gw := 13.0 * float(t.get_width()) / float(t.get_height())
-		draw_texture_rect(t, Rect2(320.0 - total / 2.0 - gw - 12.0, 56.0, gw, 13.0), false)
+		draw_texture_rect(t, Rect2(left - gw - 12.0, 56.0, gw, 13.0), false)
 	else:
 		# mi_arrow points RIGHT; negative rect width flips it for the left side.
 		var at := Art.tex("mi_arrow")
 		var acol := Color(0.84, 0.86, 0.78)
-		draw_texture_rect(at, Rect2(320.0 - total / 2.0 - 19.0, 56.0, -11.0, 11.0), false, acol)
-		draw_texture_rect(at, Rect2(320.0 + total / 2.0 + 8.0, 56.0, 11.0, 11.0), false, acol)
+		draw_texture_rect(at, Rect2(left - 19.0, 56.0, -11.0, 11.0), false, acol)
+		draw_texture_rect(at, Rect2(right + 8.0, 56.0, 11.0, 11.0), false, acol)
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows: Array = []
 	for run in main.hall:
@@ -813,19 +932,32 @@ func _draw_howto() -> void:
 		Art.text(self, roster[i][1], Vector2(108, yy + 3), 10, Color(0.9, 0.92, 0.82))
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
 	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 244), 10, Color(1.0, 0.7, 0.4))
+	# Each line fronts its LIVE sprite in its in-game tint (panel round: the top
+	# roster teaches silhouettes, this block taught only names — a first-run
+	# player couldn't match "GHILLIE" to the shape that kills them). Keyed
+	# sprites carry the same modulate _draw_enemies uses; the p2 bakes ride
+	# Art.tint like the roster above.
 	var special := [
-		"GRENADIER — lobs a telegraphed blast on your spot. Keep moving.",
-		"SNIPER — paints a laser line, then fires. Sidestep it.",
-		"GHILLIE — hidden sniper; only its laser gives it away. Close in.",
-		"SAPPER — seeds mines behind it. Don't chase over its trail.",
-		"SHIELD — front blocks bullets. Flank it or grenade it.",
-		"DRONE — flying spotter, calls mortars on your spot. Shoot it down.",
-		"TECHNICAL — revs, then charges a LOCKED line. Step off it."]
+	["m_soldier2", Color(1.3, 1.1, 0.55), "GRENADIER — lobs a telegraphed blast on your spot. Keep moving."],
+		["m_contractor2", Color(1.1, 0.6, 1.2), "SNIPER — paints a laser line, then fires. Sidestep it."],
+		["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
+		["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
+		["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],
+		["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
+		["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
 	for i in special.size():
-		# 10px leading + 252 start: SEVEN lines now (TECHNICAL joined) and the
-		# last must still clear the BACK button plate (~y315).
-		Art.text(self, special[i], Vector2(72, 252 + i * 10), 10, Color(0.88, 0.9, 0.8))
-
+		# 12px pitch (leading 1.2): 10px mixed-case on an 11px pitch had descenders
+		# kissing the next line's ascenders. 254 start keeps the header's 10px
+		# clearance; 6th baseline lands at 314, still clear of the BACK button's
+		# inner plate (y≈319).
+		# 11px pitch from 250: SEVEN rows now (TECHNICAL joined) — 7th baseline
+		# lands at 316, still clear of the BACK button's inner plate (y≈319).
+		var sy := 250.0 + i * 11.0
+		# 26px box on a 12px pitch: the bakes carry wide transparent margins
+		# (~70% padding), so the visible body is ~8px and neighboring boxes
+		# never actually touch — smaller boxes rendered as unreadable specks.
+		draw_texture_rect(Art.tex(special[i][0]), Rect2(46, sy - 17, 26, 26), false, special[i][1])
+		Art.text(self, special[i][2], Vector2(72, sy), 10, Color(0.88, 0.9, 0.8))
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, 320.0, y, size, col)
