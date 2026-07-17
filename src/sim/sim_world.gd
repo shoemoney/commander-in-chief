@@ -586,7 +586,7 @@ func _step_players(inputs: Array) -> void:
 				"x": p["x"], "y": p["y"],
 				"vx": Fixed.mul(p["aim_x"], GRENADE_SPEED),
 				"vy": Fixed.mul(p["aim_y"], GRENADE_SPEED),
-				"z": 0, "zv": GRENADE_ZVEL, "owner": i, "shell": false,
+				"z": 0, "zv": GRENADE_ZVEL, "owner": i, "shell": false, "hold": true,
 			})
 
 		if inp.revive:
@@ -629,6 +629,7 @@ func _step_players(inputs: Array) -> void:
 				if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
 					continue
 				if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
+						or e["kind"] == "broadcast" \
 						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					continue
 				_hurt_player(p)
@@ -786,7 +787,10 @@ func _kill_player(p: Dictionary) -> void:
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
-	tokens = 0               # ...and burns any unspent Commendations (spend them or lose them)
+	tokens = maxi(0, tokens - 1)   # ...and burns ONE Commendation — a full wipe let
+	                               # a partner's stray death zero YOUR earned pair
+	                               # with no agency (re-review); -1 keeps the
+	                               # spend-them-or-lose-them pressure per body.
 	if mode == "endless":
 		deaths_this_wave += 1   # ...and forfeits this wave's Clean Wave bonus
 	# Death strips Triple/Pierce/Spread (see _respawn); flag it on the (checksum-
@@ -887,10 +891,21 @@ func _try_token_drop(p: Dictionary) -> void:
 	## roll). NO coin path in or out: not buyable with the chest, no score
 	## credit back (tokens bridge score->power; crediting score would loop).
 	if tokens <= 0:
-		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
+		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "token"})
 		return
 	tokens -= 1
-	var kind := rng.range_i(0, 3)
+	# Roll only among USEFUL kinds — burning a Commendation on a vest you're
+	# already wearing was a silent no-op against the deny-loudly grammar
+	# (re-review). Airstrike is always live, so the pool is never empty.
+	var cands: Array[int] = []
+	if p["mg_ammo"] < MG_AMMO_MAX:
+		cands.append(0)
+	if p["grenade_ammo"] < GRENADE_AMMO_MAX:
+		cands.append(1)
+	if not p["vest"]:
+		cands.append(2)
+	cands.append(3)
+	var kind: int = cands[rng.range_i(0, cands.size() - 1)]
 	_apply_supply(p, kind)
 	events.append({"t": "token_drop", "x": p["x"], "y": p["y"], "kind": kind})
 
@@ -903,11 +918,13 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	var cost: int = _supply_cost(kind)
 	if kind == 4 and (sandbags.size() >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
 		# Sandbag-specific denials: field cap reached, or buying from a tank
-		# (no hands on the deck to dig in). Deny is loud, same as broke.
-		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
+		# (no hands on the deck to dig in). Deny is loud AND says why —
+		# "NEED COINS" at a full field with 400 in the chest was a HUD lie.
+		events.append({"t": "deny", "x": p["x"], "y": p["y"],
+			"why": "cap" if sandbags.size() >= SANDBAG_FIELD_CAP else "tank"})
 		return
 	if war_chest < cost:
-		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
+		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "coins"})
 		return
 	war_chest -= cost
 	# Spending is not a score cut: credit the same 10x the Last Stand victory
@@ -965,9 +982,19 @@ func _try_salvage_hulk(p: Dictionary) -> bool:
 	for tank in tanks:
 		if not tank["alive"] and tank["burn_ticks"] > 0 \
 				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+			# Event reports what was actually GRANTED (a capped player got +1/+0
+			# while the toast promised +2 — a HUD lie, re-review).
+			var before: int = p["grenade_ammo"]
 			p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 2)
 			tank["burn_ticks"] = 0
-			events.append({"t": "hulk_salvage", "x": tank["x"], "y": tank["y"]})
+			tank["salvage_tick"] = tick_count
+			events.append({"t": "hulk_salvage", "x": tank["x"], "y": tank["y"],
+				"n": p["grenade_ammo"] - before})
+			return true
+		if not tank["alive"] and tank.get("salvage_tick", -1) == tick_count \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+			# 2P same-tick guard: P1 stripped this hulk THIS tick — swallow P2's
+			# tap instead of letting it fall through and arm a claymore underfoot.
 			return true
 	return false
 
@@ -1128,7 +1155,9 @@ func _step_tanks() -> void:
 			# Crew fuel tax: a seated gunner burns +25% (every 4th tick) —
 			# double-crewing is a deliberate commitment, not a free gun deck.
 			# Starting value; staged probe: crewed fuel life ~20s -> ~16s.
-			if tank["fuel"] % 4 == 0 and _tank_gunner(ti) >= 0:
+			# tick_count cadence, NOT fuel%4 — the tax decrement shifted fuel's
+			# residue so the "every 4th" fired every 3rd (+33%, re-review).
+			if tick_count % 4 == 0 and _tank_gunner(ti) >= 0:
 				tank["fuel"] = tank["fuel"] - 1
 			if tank["fuel"] <= 0:
 				_ignite_tank(tank)
@@ -1173,6 +1202,7 @@ func _ignite_tank(tank: Dictionary) -> void:
 func _detonate_tank(tank: Dictionary) -> void:
 	tank["alive"] = false
 	tank["occupant"] = -1
+	tank["burning"] = false   # dead is dead — a hulk carrying burning=true forever was a trap for later readers
 	# Tank Hulk (5-vote panel): the dead hull IS the cover — burn_ticks is
 	# hashed but dead-unused after death, so it becomes the hulk lifetime.
 	# Zero new fields, zero new entities; behavior change -> golden re-record.
@@ -1324,8 +1354,15 @@ func _step_grenades() -> void:
 		# on-demand range control. Rides the hashed grenade_prev + this
 		# grenade's own zv sign-flip: zero new state, no rng draw. Shells are
 		# excluded (the cannon has no fuse hand).
+		# "hold" = button held SINCE the throw (re-review: sampling grenade_prev
+		# only at the apex tick made a mid-cooldown re-press pop the previous
+		# grenade at half range). Any release — or boarding a tank, where the
+		# button means nothing — disarms the fuse hand for good.
+		if g.get("hold", false) and (not players[g["owner"]]["grenade_prev"] \
+				or players[g["owner"]]["in_tank"] >= 0 or not players[g["owner"]]["alive"]):
+			g["hold"] = false
 		if not g["shell"] and g["zv"] < 0 and g["zv"] + GRENADE_GRAV >= 0 \
-				and players[g["owner"]]["alive"] and players[g["owner"]]["grenade_prev"]:
+				and g.get("hold", false):
 			_explode(g["x"], g["y"], false, "airburst")
 			grenades.remove_at(i)
 			continue
@@ -1509,7 +1546,9 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	# campaign never spawns a mast -> golden-inert.
 	if not _broadcasts.is_empty():
 		for be in _broadcasts:
-			if _dist_lte(e["x"], e["y"], be["x"], be["y"], BROADCAST_AURA_RADIUS):
+			# alive re-check: the cache holds refs — a mast killed mid-loop by a
+			# blast must not buff the movers stepped after it this tick.
+			if be["alive"] and _dist_lte(e["x"], e["y"], be["x"], be["y"], BROADCAST_AURA_RADIUS):
 				spd = (spd * 5) / 4
 				break
 	if _in_water(e["x"], e["y"]):
@@ -1524,8 +1563,12 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	if not sandbags.is_empty():
 		for sb in sandbags:
 			if absi(e["x"] - sb["x"]) <= SANDBAG_HALF_W and absi(e["y"] - sb["y"]) <= SANDBAG_HALF_H:
-				e["x"] = pvx
-				e["y"] = pvy
+				# Escape rule: revert only steps ENTERING the bag — a mover the
+				# bag was planted ON walks out instead of freezing bulletproof
+				# forever (re-review: the frozen immortal blocker).
+				if absi(pvx - sb["x"]) > SANDBAG_HALF_W or absi(pvy - sb["y"]) > SANDBAG_HALF_H:
+					e["x"] = pvx
+					e["y"] = pvy
 				break
 
 
@@ -1559,7 +1602,7 @@ func _step_enemies() -> void:
 			_broadcasts.append(be)
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
-		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
+		if not e["alive"] or (e["y"] > camera_top + 420 * F_ONE and e["kind"] != "broadcast"):
 			enemies.remove_at(i)
 			continue
 		if flash_ticks > 0:
@@ -1649,7 +1692,10 @@ func _step_enemies() -> void:
 		if e["kind"] == "rusher":
 			var drop := {}
 			for pk in pickups:
-				if pk.get("drop", false):
+				# Magnet only while the crate is in the live band — a drop the
+				# ratchet left behind must not pull rushers out of the fight.
+				if pk.get("drop", 0) > 0 and pk["y"] >= camera_top \
+						and pk["y"] <= camera_top + 400 * F_ONE:
 					drop = pk
 					break
 			if not drop.is_empty():
@@ -1659,9 +1705,15 @@ func _step_enemies() -> void:
 				if ddlen <= PICKUP_RADIUS:
 					pickups.erase(drop)
 					events.append({"t": "drop_stolen", "x": drop["x"], "y": drop["y"]})
+					continue
 				elif ddlen > F_ONE:
+					var mpx: int = e["x"]
+					var mpy: int = e["y"]
 					_advance_toward(e, ddx, ddy, ddlen, ENEMY_SPEED)
-				continue
+					if e["x"] != mpx or e["y"] != mpy:
+						continue
+					# Blocked (sandbag wall around the crate) — fall through to
+					# the player chase instead of pinning here forever.
 		if dlen > F_ONE:
 			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 
@@ -1669,6 +1721,13 @@ func _step_enemies() -> void:
 func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	## Skirmisher: advance to standoff range, wind up (visible, interruptible
 	## by killing him), fire one aimed shot. Touch still kills.
+	# Route-fork lane leash: gauntlet elites HOLD their lane (no advance, no
+	# fire) until a player crosses the band's south edge — then the leash
+	# clears for good. hold_y is spawn-immutable, unhashed-classified.
+	if e.get("hold_y", 0) != 0:
+		if target["y"] > e["hold_y"]:
+			return
+		e.erase("hold_y")
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0 and dlen > F_ONE:
@@ -1752,6 +1811,15 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 
 
 func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	# The raider SMASHES sandbags it drives over (re-review: the fastest ground
+	# vehicle phased through player cover a walking rusher respected).
+	if not sandbags.is_empty():
+		for si in range(sandbags.size() - 1, -1, -1):
+			var tsb := sandbags[si]
+			if absi(e["x"] - tsb["x"]) <= SANDBAG_HALF_W + 8 * F_ONE \
+					and absi(e["y"] - tsb["y"]) <= SANDBAG_HALF_H + 8 * F_ONE:
+				events.append({"t": "sandbag_break", "x": tsb["x"], "y": tsb["y"]})
+				sandbags.remove_at(si)
 	## Technical raider (endless-only): rev telegraph → LOCK a charge line at
 	## the target's position → barrel down it at TECHNICAL_SPEED. It cannot
 	## steer mid-charge (repositioning off the line is the dodge), water is a
@@ -1929,6 +1997,12 @@ func _step_bunkers() -> void:
 
 
 func _step_mines() -> void:
+	# Sandbag sweep (mirrors the enemy off-screen cull): bags the ratchet left
+	# behind are unreachable in campaign but still counted against the global
+	# cap — a silent permanent buy-lockout (re-review). Torture-inert (empty).
+	for si in range(sandbags.size() - 1, -1, -1):
+		if sandbags[si]["y"] > camera_top + 420 * F_ONE:
+			sandbags.remove_at(si)
 	for i in range(mines.size() - 1, -1, -1):
 		var m := mines[i]
 		if not m["armed"] or m["y"] > camera_top + 420 * F_ONE:
@@ -2292,16 +2366,30 @@ func _step_camera() -> void:
 			# Torture-inert: the 60 s campaign run never streams past gate 1
 			# (probe-verified — camera_top ends ~43 units short of gate 2).
 			if _gate_counter == 2 or _gate_counter == 4:
-				pickups.append({"x": (90 + rng.range_i(0, 120)) * F_ONE,
-					"y": _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE,
-					"kind": 1 + rng.range_i(0, 1), "cost": 0})
+				var fcx: int = (90 + rng.range_i(0, 120)) * F_ONE
+				var fcy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
+				pickups.append({"x": fcx, "y": fcy, "kind": 1 + rng.range_i(0, 1), "cost": 0})
 				for m in 3:
-					mines.append({"x": (70 + rng.range_i(0, 180)) * F_ONE,
-						"y": _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE, "armed": true})
+					var fmx: int = (70 + rng.range_i(0, 180)) * F_ONE
+					var fmy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
+					# A mine sitting ON the free crate priced the "free" cache at
+					# 1 HP (re-review, ~9%/fork) — nudge it clear deterministically.
+					if absi(fmx - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
+						fmx += 48 * F_ONE
+					mines.append({"x": fmx, "y": fmy, "armed": true})
 				for s in 2:
 					_spawn_enemy((360 + rng.range_i(0, 160)) * F_ONE,
 						_next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE, true)
-				enemies[enemies.size() - 1]["marked"] = true
+					# Lane leash (re-review: un-leashed elites walked the corridor
+					# and engaged the CACHE lane before the signposts were even on
+					# screen — the choice has to survive until it's made). They
+					# stand down until a player crosses the band's south edge.
+					var fge: Dictionary = enemies[enemies.size() - 1]
+					if fge["kind"] == "elite":
+						fge["hold_y"] = _next_gate_y + 380 * F_ONE
+				var fmk: Dictionary = enemies[enemies.size() - 1]
+				if fmk["kind"] == "elite":
+					fmk["marked"] = true
 				events.append({"t": "route_fork", "x": SCREEN_CX, "y": _next_gate_y})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > horizon:
@@ -2328,6 +2416,15 @@ func _make_bunker(x: int, y: int) -> Dictionary:
 # --- Endless War (roguelite survival mode) ---
 
 func _step_waves() -> void:
+	# Supply-drop TTL: the contested beat expires instead of pinning rushers
+	# forever. Torture-inert (no drop exists before wave 4).
+	for di in range(pickups.size() - 1, -1, -1):
+		var dpk := pickups[di]
+		if dpk.get("drop", 0) > 0:
+			dpk["drop"] = dpk["drop"] - 1
+			if dpk["drop"] == 0:
+				events.append({"t": "drop_gone", "x": dpk["x"], "y": dpk["y"]})
+				pickups.remove_at(di)
 	if intermission_ticks > 0:
 		intermission_ticks -= 1
 		if intermission_ticks == 0:
@@ -2433,6 +2530,13 @@ func _step_waves() -> void:
 				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
 
 
+func _live_drop() -> bool:
+	for pk in pickups:
+		if pk.get("drop", 0) > 0:
+			return true
+	return false
+
+
 func _wave_hostiles_cleared() -> bool:
 	## The wave is beaten when no HOSTILE remains — a walking downed pilot is
 	## an optional side objective, never a reason to hold the shop hostage.
@@ -2473,7 +2577,7 @@ func _start_wave() -> void:
 		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
 			"x": SCREEN_CX, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
 		events.append({"t": "endless_boss", "x": SCREEN_CX, "y": camera_top + 50 * F_ONE})
-	if wave >= 4 and rng.range_i(0, 2) == 0:
+	if wave >= 4 and not _live_drop() and rng.range_i(0, 2) == 0:
 		# Mid-wave optional objective (5-vote panel, trimmed to the drop beat):
 		# a parachuted free crate lands down-screen and rushers magnet to it —
 		# defend the drop or cede it. The wave >= 4 gate sits BEFORE the rng
@@ -2484,7 +2588,11 @@ func _start_wave() -> void:
 		# unhashed (classified in test_checksum_coverage).
 		var drx := rng.range_i(60, 580) * F_ONE
 		var dry: int = camera_top + 240 * F_ONE
-		pickups.append({"x": drx, "y": dry, "kind": 1 + rng.range_i(0, 1), "cost": 0, "drop": true})
+		# "drop" holds the remaining TTL (600t = 10 s starting value; test: the
+		# beat resolves inside a wave) — an eternal crate was a rusher-despawn
+		# beacon via the ratchet camera, a sandbag-walled kill funnel, and a
+		# strictly-dominant "never collect it" aggro pin (re-review, all three).
+		pickups.append({"x": drx, "y": dry, "kind": 1 + rng.range_i(0, 1), "cost": 0, "drop": 600})
 		events.append({"t": "supply_drop", "x": drx, "y": dry})
 	events.append({"t": "wave_start", "x": SCREEN_CX, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
 
@@ -2744,6 +2852,16 @@ func _step_enemy_bullets() -> void:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
+		if not dead:
+			for p in players:
+				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
+						and _dist_lte(bx, by, p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
+					_hurt_player(p)
+					dead = true
+					break
+		# Cover blocks AFTER the player-hit check (re-review: a player standing
+		# INSIDE his own sandbag/hulk AABB was immune to every enemy bullet —
+		# cover now protects only what stands BEHIND it).
 		if not dead and not sandbags.is_empty():
 			for sb in sandbags:
 				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
@@ -2757,13 +2875,6 @@ func _step_enemy_bullets() -> void:
 				if not hk["alive"] and hk["burn_ticks"] > 0 \
 						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
-					dead = true
-					break
-		if not dead:
-			for p in players:
-				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
-						and _dist_lte(bx, by, p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
-					_hurt_player(p)
 					dead = true
 					break
 		if dead:

@@ -216,6 +216,7 @@ const _EVENT_SOUND := {
 	"gate_open": ["gate_open", -4.0, 1.0],
 	"supply_drop": ["whistle", -8.0, 0.8],   # low falling whistle: friendly cargo inbound, below strike_warn
 	"drop_stolen": ["alarm", -9.0, 0.6],     # low growl: the crate is gone
+	"drop_gone": ["alarm", -12.0, 0.45],     # lower fizzle: the window closed on its own
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
@@ -448,7 +449,13 @@ func _paint_bg(canvas: Node2D) -> void:
 	# and drawn after. Dirt widths are clamped to their tile so the deferred
 	# draws stay pixel-identical to the old order, where the next column's
 	# grass painted over any bleed.
-	var dirt_rects: Array[Rect2] = []
+	# De-checkerboard (7-vote, 6 HATE votes): (a) shade band 0.144 -> 0.06 so
+	# tiles stop reading as a chessboard while turf variation survives, (b)
+	# olive grade (green pulled down, blue crushed) per KIMK, (c) 4 hash-picked
+	# flip orientations of the one grass card kill the repeating-stamp read,
+	# (d) dirt becomes 2-3 hash-ROTATED overlapping cards per cell instead of
+	# one axis-aligned rect. All starting values — judged by screenshot.
+	var dirt_cards: Array = []   # [center, rot, size] triplets
 	var dirt_col := Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7)   # churned dirt, cinders late
 	for ty in 8:
 		for tx in 10:
@@ -456,15 +463,28 @@ func _paint_bg(canvas: Node2D) -> void:
 			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
 			var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 			var h := Art.cell_hash(tx, base_iy + ty)
-			var shade := 0.48 + float(h % 7) * 0.024   # wider turf contrast
-			canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false,
-				Color(shade + march * 0.14, (shade + 0.06) * (1.0 - march * 0.4), shade * 0.82 * (1.0 - march * 0.35)))
+			var shade := 0.50 + float(h % 7) * 0.010
+			var gpos := pos
+			var gsz := Vector2(64, 64)
+			var variant := (h / 7) % 4
+			if variant & 1:
+				gpos.x += 64.0
+				gsz.x = -64.0
+			if variant & 2:
+				gpos.y += 64.0
+				gsz.y = -64.0
+			canvas.draw_texture_rect(Art.tex("grass"), Rect2(gpos, gsz), false,
+				Color(shade + march * 0.14, (shade + 0.03) * (1.0 - march * 0.4), shade * 0.75 * (1.0 - march * 0.35)))
 			if h % 6 == 0:
-				var doff := Vector2(6.0 + float(h % 7), 6.0 + float((h / 7) % 7))
-				dirt_rects.append(Rect2(pos + doff,
-					Vector2(minf(40.0 + float(h % 5) * 6.0, 64.0 - doff.x), 34.0 + float(h % 4) * 6.0)))
-	for r in dirt_rects:
-		canvas.draw_texture_rect(Art.tex("dirt"), r, false, dirt_col)
+				for dc in 2 + (h % 2):
+					var dh := Art.cell_hash(tx * 3 + dc + 1, base_iy + ty)
+					dirt_cards.append([pos + Vector2(16.0 + float(dh % 33), 14.0 + float((dh / 5) % 33)),
+						float(dh % 628) / 100.0,
+						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0)])
+	for card in dirt_cards:
+		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
+		canvas.draw_texture_rect(Art.tex("dirt"), Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _process(_delta: float) -> void:
@@ -1114,8 +1134,10 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})
 			"deny":
+				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK",
+					"token": "NO COMMENDATION"}.get(ev.get("why", "coins"), "NEED COINS")
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.03, "text": "NEED COINS", "col": Color(1.0, 0.45, 0.35)})
+					"rate": 0.03, "text": deny_txt, "col": Color(1.0, 0.45, 0.35)})
 			"shot":
 				_ev_shot(ev)
 			"throw":
@@ -1327,7 +1349,7 @@ func _consume_events() -> void:
 					"rate": 0.014, "text": "SUPPLY CALL — " + BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.9, 0.5)})
 			"hulk_salvage":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.016, "text": "+2 GRENADES — COVER STRIPPED", "col": Color(1.0, 0.8, 0.45)})
+					"rate": 0.016, "text": ("+%d GRENADES — COVER STRIPPED" % ev.get("n", 2)) if ev.get("n", 2) > 0 else "FULL UP — COVER STRIPPED", "col": Color(1.0, 0.8, 0.45)})
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
@@ -1341,6 +1363,9 @@ func _consume_events() -> void:
 					"rate": 0.012, "text": "SUPPLY DROP — HOLD IT", "col": Color(0.6, 0.9, 1.0)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.03,
 					"r": 26.0, "col": Color(0.6, 0.9, 1.0)})
+			"drop_gone":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "DROP LOST", "col": Color(0.8, 0.6, 0.4)})
 			"drop_stolen":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "DROP STOLEN", "col": Color(1.0, 0.45, 0.35)})
@@ -1466,6 +1491,14 @@ func _ev_explosion(ev: Dictionary) -> void:
 	# feel (trauma/rumble) and its shockwave/fireball/smoke/scorch — skip the
 	# duplicates here so a drum doesn't double-fire the whole feel stack.
 	var barrel: bool = ev.get("src", "") == "barrel"
+	if ev.get("src", "") == "airburst":
+		# The pop must read AIRBORNE (re-review: fx spawned at ground y while
+		# the grenade sprite drew height-offset — it teleported down to die).
+		_fx.append({"x": ev["x"], "y": ev["y"] - 9 * Fixed.ONE, "t": 0.0, "kind": "flash",
+			"sz": 15.0, "rate": 0.16})
+		_fx.append({"x": ev["x"], "y": ev["y"] - 9 * Fixed.ONE, "t": 0.0, "kind": "light",
+			"rate": 0.1, "r": 26.0, "col": Color(1.0, 0.9, 0.6)})
+		_sfx.play_at("ping_armor", _to_screen(ev["x"], ev["y"]), -10.0, 1.6)
 	if not barrel:
 		var prox := _blast_prox(ev["x"], ev["y"])
 		_trauma = minf(1.0, _trauma + 0.35 * prox)
@@ -3009,6 +3042,23 @@ func _draw_terrain() -> void:
 			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway,
 				0.28 + float(hf % 3) * 0.03, fern_col)
 
+	# Dirt-patch fern fringing (7-vote de-checkerboard, part e): 1-2 ferns on
+	# the border of each 64px dirt cell (same hash predicate as _paint_bg) so
+	# no 90-degree patch corner survives naked.
+	var doy := -fposmod(cam_y, 64.0)
+	var dbase_iy := int(floor(cam_y / 64.0))
+	for ty in 8:
+		for tx in 10:
+			var hd := Art.cell_hash(tx, dbase_iy + ty)
+			if hd % 6 != 0:
+				continue
+			var dpos := Vector2(tx * 64.0, floor(doy + ty * 64.0))
+			for fr in 1 + (hd % 2):
+				var hfr := Art.cell_hash(tx * 7 + fr + 3, dbase_iy + ty)
+				var edge_ang := float(hfr % 628) / 100.0
+				var fpos := dpos + Vector2(32.0, 32.0) + Vector2.from_angle(edge_ang) * (26.0 + float(hfr % 8))
+				_spr("fern", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, fern_col)
+
 	# Jungle tree lines on the flanks, sparse singles in the field.
 	var toy := -fposmod(cam_y, 48.0)
 	for ty in 9:
@@ -3311,6 +3361,18 @@ func _draw_pickups() -> void:
 		# floating sticker. Capsules (kind >= 4) keep their pulsing glow disc instead.
 		if pk["kind"] <= 3:
 			_ground_shadow(ppos, 6.0)
+		if pk.get("drop", 0) > 0:
+			# Parachute identity (re-review: after the spawn toast faded the
+			# objective crate read as ordinary loot): canopy + cyan TTL arc.
+			var dfrac := clampf(float(pk["drop"]) / 600.0, 0.0, 1.0)
+			var dcol := Art.safe(Color(0.55, 0.9, 1.0))
+			draw_arc(ppos, 13.0, 0, TAU, 20, Color(dcol.r, dcol.g, dcol.b, 0.25), 1.0)
+			draw_arc(ppos, 13.0, -PI / 2, -PI / 2 + TAU * dfrac, 20, dcol, 1.5)
+			var ctop := ppos + Vector2(0, -16.0)
+			draw_colored_polygon(PackedVector2Array([ctop + Vector2(-7, 0), ctop + Vector2(7, 0), ctop + Vector2(0, -6)]),
+				Color(dcol.r, dcol.g, dcol.b, 0.8))
+			draw_line(ctop + Vector2(-7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
+			draw_line(ctop + Vector2(7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
 		_spr(tex_name, ppos, 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
@@ -3783,11 +3845,11 @@ func _draw_enemies() -> void:
 			# Rally mast: the decor radio tower militarized — red-keyed, hp pips
 			# in the nest grammar, and a faint breathing ring that draws the
 			# aura's true 140px reach (truthful telegraph, reduce-motion safe).
-			var bpul := Art.pulse(0.2)
+			var bpul := Art.pulse(0.2) if _motion >= 0.5 else 0.5
 			draw_arc(epos, 140.0, 0, TAU, 48, Color(1.0, 0.4, 0.35, 0.06 + bpul * 0.05), 1.0)
 			_spr("radio_tower", epos, 0.0, 0.9, Color(1.15, 0.62, 0.55))
-			var b_hp: int = e.get("hp", 5)
-			for bpi in 5:
+			var b_hp: int = e.get("hp", SimWorld.BROADCAST_HP)
+			for bpi in SimWorld.BROADCAST_HP:
 				draw_circle(epos + Vector2(-12.0 + bpi * 6.0, 14.0), 2.0,
 					Color(1.0, 0.3, 0.2) if bpi < b_hp else Color(0.25, 0.22, 0.2))
 		elif e["kind"] == "mg_nest":
@@ -4219,7 +4281,16 @@ func _draw_players() -> void:
 	for i in sim.players.size():
 		var p := sim.players[i]
 		if p["in_tank"] >= 0:
-			continue   # rendered as the tank
+			# ...except the GUNNER, who rides the deck: small crew sprite + aim
+			# tick so the second seat is visible on the field (re-review).
+			var g_tank: Dictionary = sim.tanks[p["in_tank"]]
+			if g_tank["occupant"] != i:
+				var gdpos := _to_screen(p["x"], p["y"]) + Vector2(0, -7.0)
+				_spr("player2" if i == 1 else "player1", gdpos, 0.0, 0.3, Color(1.1, 1.1, 1.05))
+				var gaim := Vector2(p["aim_x"], p["aim_y"])
+				if gaim.length() > 0.01:
+					draw_line(gdpos, gdpos + gaim.normalized() * 12.0, Color(0.7, 0.9, 1.0, 0.8), 1.5)
+			continue   # driver renders as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO) + (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO)
 		# Run-cycle bob: a per-step vertical hop while moving, matching the charging
 		# enemies' cadence so the player sprite isn't the one flat-gliding thing on the

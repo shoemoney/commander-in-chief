@@ -649,9 +649,14 @@ func test_commendation_tokens_mint_cap_wipe_and_spend() -> void:
 	sim.step([spend])
 	Runner.T.eq(sim.tokens, 1, "token drop spends exactly one")
 	Runner.T.eq(sim.war_chest, chest0, "token spend never touches the War Chest")
-	# Wipe on death: spend them or lose them.
+	# Death burns ONE token per body (a full wipe let a partner's stray death
+	# zero your earned pair — re-review fix).
+	sim._mint_token(0, 0)   # back to 2
 	sim._kill_player(p)
-	Runner.T.eq(sim.tokens, 0, "death burns unspent Commendations")
+	Runner.T.eq(sim.tokens, 1, "a death burns exactly one Commendation")
+	p["alive"] = true
+	sim._kill_player(p)
+	Runner.T.eq(sim.tokens, 0, "the second death burns the last one")
 
 
 func test_tank_hulk_covers_then_salvage_strips_it() -> void:
@@ -677,7 +682,13 @@ func test_tank_hulk_covers_then_salvage_strips_it() -> void:
 	Runner.T.ok(sim._try_salvage_hulk(p), "interact in reach salvages the hulk")
 	Runner.T.eq(p["grenade_ammo"], 2, "salvage pays +2 grenades")
 	Runner.T.eq(sim.tanks[0]["burn_ticks"], 0, "salvage strips the cover with it")
-	Runner.T.ok(not sim._try_salvage_hulk(p), "a stripped hulk pays nothing twice")
+	# Same-tick second tap is SWALLOWED (returns true so P2's tap can't fall
+	# through to a claymore plant) but grants nothing.
+	var g_after: int = p["grenade_ammo"]
+	Runner.T.ok(sim._try_salvage_hulk(p), "same-tick partner tap is swallowed, not a claymore misfire")
+	Runner.T.eq(p["grenade_ammo"], g_after, "the swallowed tap pays nothing")
+	sim.step([_idle()])
+	Runner.T.ok(not sim._try_salvage_hulk(p), "next tick a stripped hulk is inert")
 	sim.bullets.append({"x": 300 * SimWorld.F_ONE, "y": ty, "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
 	sim._step_bullets()
 	Runner.T.eq(sim.bullets.size(), 1, "stripped hulk no longer blocks")

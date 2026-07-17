@@ -15,7 +15,7 @@ var grenade: bool = false
 var revive: bool = false
 var roll: bool = false
 var interact: bool = false
-var buy: int = 0   # War Chest spend-wheel: 0 = none, 1..4 = supply kind + 1
+var buy: int = 0   # War Chest spend-wheel: 0 = none, 1..5 = wheel kind + 1, 6 = token drop
 
 
 func hash_ints() -> Array[int]:

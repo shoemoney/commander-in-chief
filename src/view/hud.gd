@@ -384,7 +384,7 @@ func _draw() -> void:
 				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
 				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
 					Color.WHITE, i == 1)
-		elif p["in_tank"] >= 0:
+		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
 			var gcol_tank := Color(0.95, 0.96, 0.9)
