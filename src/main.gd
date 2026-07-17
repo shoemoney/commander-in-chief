@@ -139,6 +139,9 @@ var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
+var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
+var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
+var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
 var _nest_ping_frame := -100      # rate-limits the MG-nest crack ping (own clock — sharing
@@ -2165,6 +2168,34 @@ func _update_feel() -> void:
 	# springback that should play over the resuming motion.
 	if _hitstop_frames == 0:
 		_trauma = maxf(0.0, _trauma - 0.03)
+	# SHOP LOCKED callout (7/9 play-panel): in endless, clearing the wave while
+	# the miniboss still flies leaves the shop silently hostage — say it once
+	# per boss. Latch resets when the boss dies or the shop actually opens.
+	if sim.mode == "endless" and not sim.endless_boss.is_empty() \
+			and sim.endless_boss["alive"] and sim.intermission_ticks == 0 \
+			and sim.wave_pending == 0 and sim._wave_hostiles_cleared():
+		if not _shop_lock_told:
+			_shop_lock_told = true
+			_show_banner("SHOP LOCKED — DESTROY THE GUNSHIP", Color(1.0, 0.6, 0.3))
+	else:
+		_shop_lock_told = false
+	# NO TARGET feedback (6/9 play-panel): endless has no tanks, so the interact
+	# key with no claymore carried was dead input — a quiet receipt instead of
+	# silence. View-side edge + 2s cooldown; the sim is untouched.
+	_no_target_cd = maxf(0.0, _no_target_cd - 1.0 / 60.0)
+	if sim.mode == "endless":
+		for i in sim.players.size():
+			var np := sim.players[i]
+			var n_int := (Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(i, JOY_BUTTON_X)) \
+				if i == 0 else Input.is_joy_button_pressed(1, JOY_BUTTON_X)
+			if n_int and not _no_target_prev[i] and _no_target_cd <= 0.0 \
+					and np["alive"] and np["in_tank"] < 0 and np["claymores"] == 0:
+				_no_target_cd = 2.0
+				_fx.append({"x": np["x"], "y": np["y"] - 8 * Fixed.ONE, "t": 0.0,
+					"kind": "floattext", "rate": 0.02, "size": 8,
+					"text": "NO TARGET", "col": Color(0.7, 0.72, 0.66)})
+				_sfx.play("deny", -16.0, 1.4)
+			_no_target_prev[i] = n_int
 	# Impact envelopes decay multiplicatively (fast drop, long tail) so hits snap;
 	# linear release reads flat. Floors avoid a lingering near-zero tail.
 	_flash_alpha = _flash_alpha * 0.7 if _flash_alpha > 0.01 else 0.0
@@ -5303,6 +5334,15 @@ func _top_center_priority() -> String:
 		var bn: Dictionary = _banners[0]
 		if float(bn["t"]) > 0.01 and not String(bn["text"]).is_empty():
 			return "splash"
+	# Lowest priority — HOLD THE ARENA (8/9 play-panel): endless pins the camera
+	# for the whole wave but nothing SAID so; a player pushing against the top
+	# edge read it as the scroll breaking. Cue only while someone is actually
+	# leaning on the invisible wall mid-wave.
+	if sim.mode == "endless" and sim.intermission_ticks == 0 \
+			and not sim.victory and not sim.wiped:
+		for p in sim.players:
+			if p["alive"] and p["y"] - sim.camera_top < 56 * Fixed.ONE:
+				return "hold"
 	return ""
 
 
@@ -5497,6 +5537,12 @@ func _draw_banners(top_msg: String) -> void:
 			_banner_plate(gtxt, gy, 11, 1.0)
 			Art.text_center(self, gtxt, 320, gy, 11, Color(1.0, 0.9, 0.4, gpulse))
 		break
+	# Arena hold: a calm statement, not an alarm — the player at the top edge
+	# needs the RULE ("the camera stays until the wave dies"), not a red strobe.
+	if top_msg == "hold":
+		var htxt := "HOLD THE ARENA — CLEAR THE WAVE"
+		_banner_plate(htxt, 46.0, 10, 0.8)
+		Art.text_center(self, htxt, 320, 46, 10, Color(0.85, 0.88, 0.75, 0.8))
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if top_msg == "mortar":

@@ -137,10 +137,14 @@ func _draw() -> void:
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
 	var y := 6.0
+	# Two economies, two casts (3-vote play-panel: the numerals were identical
+	# and players conflated spendable coin with vanity score): the CHEST reads
+	# warm cream (money-gold family), the SCORE cool steel — both still flash
+	# gold on their pulse.
 	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
+		Color(1.0, 0.93, 0.78).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
 	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
-		Color(0.95, 0.96, 0.9).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
+		Color(0.84, 0.9, 1.0).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:
