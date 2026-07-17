@@ -261,6 +261,9 @@ const TEX := {
 	"mi_home": preload(SY + "ui/menuicons/mi_home.png"),
 	"mi_camera": preload(SY + "ui/menuicons/mi_camera.png"),
 	"mi_back": preload(SY + "ui/menuicons/mi_back.png"),
+	"mi_combat": preload(SY + "ui/menuicons/mi_combat.png"),
+	"mi_timer": preload(SY + "ui/menuicons/mi_timer.png"),
+	"mi_cancel": preload(SY + "ui/menuicons/mi_cancel.png"),
 	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
 	"ui_tooltip": preload(SY + "hud/SPR_HUD_Tooltip.png"),
 	"ui_frame_lrg": preload(SY + "hud/SPR_HUD_Frame_Lrg.png"),
@@ -303,7 +306,7 @@ const SCALE := {
 	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
 	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
 	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
-	"skyline_chimney": 0.4, "skyline_mast": 0.4,
+	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
 	"m_insurgent5": 0.47, "m_pilot": 0.46, "m_soldier2": 0.5,
@@ -331,7 +334,7 @@ const SCALE := {
 	# footprint the 512×0.18 original had (the 0.18 silently shrank them 8×).
 	"fx_bubble1": 1.44, "fx_bubble2": 1.44,
 	"fx_fumes": 4.0,   # 128px import (was 512-effective) → same _spr plume size
-	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles
+	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles — bypassed: draw site (main.gd) uses raw draw_texture_rect with its own rect
 	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
 }
 
@@ -370,6 +373,7 @@ const TINT := {
 	# same class as the sandbag walls, not the receding scenery).
 	"bridge_mid": Color(0.94, 0.9, 0.8), "bridge_ramp": Color(0.94, 0.9, 0.8),
 	# Skyline pieces read as dark horizon silhouettes.
+	# bypassed — skyline draw site (main.gd) passes its own `sky` color to draw_texture_rect
 	"skyline_chimney": Color(0.3, 0.33, 0.38), "skyline_mast": Color(0.3, 0.33, 0.38),
 	"crater": Color(0.6, 0.6, 0.54),   # scorched ground, recedes like the wrecks
 	# mil2 enemies read warm/bright (threats); vehicles olive-drab; pickups bright.
@@ -433,19 +437,9 @@ const OUTLINE := {
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
-## Brand-correct button WORDS for inline hint TEXT (toasts can't embed a sprite,
-## so they name the button). Keyboard uses the keycap letter (_GLYPH_KEY); pad
-## uses the face/name for the button that action binds to, per brand — a
-## DualSense player told to "PLANT WITH [X]" was aimed at the wrong (bottom) face.
-const _PAD_WORD := {
-	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK"},
-	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "CREATE"},
-	"switch": {"interact": "X", "revive": "Y", "wheel": "MINUS"},
-}
-static func prompt_word(action: String) -> String:
-	if use_pad:
-		return _PAD_WORD.get(pad_brand, _PAD_WORD["xbox"]).get(action, "?")
-	return _GLYPH_KEY.get(action, "?")
+# (Hint-toast button WORDS live in _PAD_LABELS / pad_label below — the two
+# parallel loops built the same helper twice; pad_label won: its Switch table
+# is positionally correct where the duplicate transplanted Xbox letters.)
 
 ## Semantic hint → registry key for the device-aware prompt sprites (see
 ## glyph_key below). Pad column mirrors the bindings in main._gather_inputs;
@@ -501,6 +495,20 @@ const _BRAND_MAP := {
 
 static func _brand(key: String) -> String:
 	return _BRAND_MAP.get(pad_brand, {}).get(key, key)
+
+
+## Brand-correct button NAMES for text hints (the glyph twin of _brand):
+## semantic verbs → what's printed on the last-used pad. Unknown brands
+## fall back to Xbox labels, same as the glyph lookups.
+const _PAD_LABELS := {
+	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK"},
+	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "SHARE"},
+	"switch": {"interact": "Y", "revive": "X", "wheel": "MINUS"},
+}
+
+
+static func pad_label(verb: String) -> String:
+	return _PAD_LABELS.get(pad_brand, _PAD_LABELS["xbox"]).get(verb, verb.to_upper())
 ## Deuteran-safe remap: 'affordable/safe/open' greens become cyan-blue when
 ## colorblind mode is on (red↔blue is distinguishable where red↔green isn't).
 ## Reds are left alone. Driven from main.

@@ -789,7 +789,7 @@ func _fire_mission() -> void:
 	events.append({"t": "explosion", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
-			_kill_enemy(e, true)
+			_kill_enemy(e, true, true)
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -1137,8 +1137,10 @@ func _step_grenades() -> void:
 			grenades.remove_at(i)
 
 
-func _explode(x: int, y: int, no_coin := false) -> void:
-	events.append({"t": "explosion", "x": x, "y": y})
+func _explode(x: int, y: int, no_coin := false, src := "") -> void:
+	# src tags the trigger (e.g. "barrel") so the view can dedupe feel against
+	# the co-located barrel_blast event; events are checksum-excluded.
+	events.append({"t": "explosion", "x": x, "y": y, "src": src})
 	var frags := 0
 	for e in enemies:
 		# The pilot is a non-combatant objective PAST his punch-out grace too:
@@ -1199,10 +1201,13 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 		if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
 				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
 			_hurt_player(p)
-	_explode(bl["x"], bl["y"], no_coin)
+	_explode(bl["x"], bl["y"], no_coin, "barrel")
 
 
-func _kill_enemy(e: Dictionary, no_coin := false) -> void:
+func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
+	## no_score: unaimed screen-wipes (airstrike) mint no score and can't feed
+	## the kill-streak either — a 100-coin buy vaulting the streak tiers was
+	## a leaderboard printer. Barrel kills (no_coin only) still score.
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	if e["kind"] == "mg_nest":
@@ -1236,13 +1241,14 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
 	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
-	score += coin * 10 * (2 if last_stand else 1)
+	if not no_score:
+		score += coin * 10 * (2 if last_stand else 1)
 	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
 	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
 	# the streak rewards aggression on the leaderboard, not the economy.
 	# The MG Nest is excluded: it's the lowest-risk target, so it can't feed the
 	# streak (nor drop the elite capsule below) despite carrying elite:true.
-	if e["kind"] != "mg_nest":
+	if e["kind"] != "mg_nest" and not no_score:
 		kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
 		kill_streak_timer = KILL_STREAK_WINDOW_TICKS
 		var streak_bonus_pct := 0
@@ -1743,7 +1749,7 @@ func _step_spawner() -> void:
 	# Sector 2+ (1 gate opened): the endless ranged roster starts bleeding into
 	# the campaign field, so later sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
-	if opened >= 1 and rng.range_i(0, 4) == 0:
+	if opened >= 1 and rng.range_i(0, 3 if hard else 4) == 0:  # NG+: 1-in-4 specials
 		var spick := rng.range_i(0, 3)   # +mg_nest turret
 		if spick == 3:
 			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
@@ -2154,7 +2160,12 @@ func _start_wave() -> void:
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
 	# 5 = NIGHT OPS (vision tightens; view only). 6 = FRENZY (swarm +40% speed).
+	# No back-to-back repeats: wave_mod still holds last wave's mutator here,
+	# so a duplicate roll falls back to plain — twice-in-a-row reads as a bug.
+	var prev_mod := wave_mod
 	wave_mod = 0 if wave <= 2 else rng.range_i(0, 6)
+	if wave_mod != 0 and wave_mod == prev_mod:
+		wave_mod = 0
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -2178,6 +2189,8 @@ func _scaled_boss_hp(base: int) -> int:
 	## Boss/colossus starting HP scales with the living player count at spawn:
 	## +60% per extra player (integer math). Grenade DPS is per-player, so a
 	## flat pool let 2P melt a boss ~2x faster; this keeps the fight length even.
+	if hard:
+		base = base * 3 / 2   # NG+ armor: bosses stop being first-run pushovers
 	var pc := 0
 	for pl in players:
 		if pl["alive"]:
@@ -2285,6 +2298,13 @@ func _damage_colossus(amount: int) -> void:
 		victory = true
 		events.append({"t": "explosion", "x": colossus["x"], "y": colossus["y"]})
 		events.append({"t": "victory", "x": colossus["x"], "y": colossus["y"]})
+		# The finale joins the Flawless economy: a deathless Colossus clear pays
+		# the same checkpoint bonus (capped 3×) instead of ending a streak unpaid.
+		if deaths_since_gate == 0:
+			flawless_streak += 1
+			var fmult: int = mini(flawless_streak, 3)
+			score += 2000 * fmult
+			events.append({"t": "gate_flawless", "x": colossus["x"], "y": colossus["y"], "mult": fmult})
 		# Last Stand payout: the unspent War Chest converts to score.
 		score += war_chest * 10 + 5000
 		war_chest = 0

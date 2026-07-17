@@ -383,6 +383,28 @@ func _synth_all() -> void:
 	# Avenge: short rising two-note sting — a kill by a downed ally.
 	s["avenge"] = _notes([523.0, 784.0], 0.09, 0.0, false)
 
+	# Rev: rising engine growl — the technical's charge counter-tell. Sawtooth
+	# body sweeping ~55→160 Hz (accumulated phase, like the alarm) under a
+	# swelling envelope, plus a thin lowpassed-noise intake layer.
+	var rev := _buf(0.35)
+	var rph := 0.0
+	var lp5 := 0.0
+	for i in rev.size():
+		var t := float(i) / RATE
+		rph += (55.0 + 300.0 * t) / RATE   # 55 Hz idle rising to ~160 Hz at the top
+		lp5 = lp5 * 0.9 + _nz(i) * 0.1
+		rev[i] = ((fmod(rph, 1.0) * 2.0 - 1.0) * 0.4 + lp5 * 1.2) \
+			* (0.25 + 0.75 * t / 0.35) * minf(1.0, (0.35 - t) * 30.0)
+	s["rev"] = rev
+
+	# Flash: flashbang detonation — ~8 ms full-scale noise snap, then a decaying
+	# ~3.2 kHz sine ring whose fade telegraphs the stun window closing.
+	var flash := _buf(0.5)
+	for i in flash.size():
+		var t := float(i) / RATE
+		flash[i] = _nz(i) * exp(-t * 120.0) * 0.9 + sin(TAU * 3200.0 * t) * exp(-t * 7.0) * 0.3
+	s["flash"] = flash
+
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
 

@@ -200,10 +200,10 @@ func _draw() -> void:
 			elif sim.intermission_ticks < 120:
 				shop_col = Color(1.0, 0.6, 0.3)
 			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
-			x = _text("SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y + ICON - 3.0,
-				shop_col) + 10.0
+			x = _stat("hud_gunshop", "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y,
+				shop_col)
 		else:
-			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
+			x = _stat("hud_flag", "WAVE %d" % sim.wave, x, y) - 2.0
 			# Live wave-clear dashboard FIRST: when the row overflows, the
 			# push-or-hold gauge must survive and the vanity chips must drop —
 			# it used to be the other way around, vanishing exactly mid-chaos.
@@ -219,8 +219,8 @@ func _draw() -> void:
 			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
 				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
 			var htxt := "HOSTILES %d" % remaining
-			if _fits(x, _tw(htxt) + 54.0):
-				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
+			if _fits(x, ICON + 3.0 + _tw(htxt) + 54.0):
+				x = _stat("hud_skull", htxt, x, y, Color(1.0, 0.55, 0.4)) - 4.0
 				var cleared := 1.0 - float(remaining) / float(wave_total)
 				_mini_bar(Rect2(x, y + 2, 40, 9), cleared, Art.safe(Color(0.4, 0.85, 0.4)))
 				x += 48.0
@@ -304,14 +304,19 @@ func _draw() -> void:
 		if gate_locked:
 			var gtxt := "CLEAR THE GATE"
 			x = minf(x, RIGHT - _tw(gtxt))
+			# Dark backing (the _pip plate color) over the clamped footprint — the
+			# gauge deliberately overlaps the previous chip's tail, so separate the
+			# two strings instead of overprinting them.
+			draw_rect(Rect2(x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
 			var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
 			_text(gtxt, x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
 			row_r = x + _tw(gtxt)
 		else:
-			var pw := _tw("PRESSURE") + 4.0
+			var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
 			x = minf(x, RIGHT - (pw + 48.0))
 			var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-			_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
+			draw_rect(Rect2(x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+			_stat("hud_lightning", "PRESSURE", x, y, Color(1.0, 0.55, 0.3))
 			_mini_bar(Rect2(x + pw, y + 2, 46, 9), pf,
 				Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
 			row_r = x + pw + 48.0
