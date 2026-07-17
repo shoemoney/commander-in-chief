@@ -692,3 +692,23 @@ func test_tank_hulk_covers_then_salvage_strips_it() -> void:
 	sim.bullets.append({"x": 300 * SimWorld.F_ONE, "y": ty, "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
 	sim._step_bullets()
 	Runner.T.eq(sim.bullets.size(), 1, "stripped hulk no longer blocks")
+
+
+func test_vest_creep_ladder_and_last_stand_wipe_latch() -> void:
+	# Campaign vests creep 60/75/90/105/120 per purchase and never reset on
+	# death; endless keeps its wave-creep pricing untouched.
+	var sim := SimWorld.new(23, 1)
+	sim.war_chest = 2000
+	var p := sim.players[0]
+	var expect := [60, 75, 90, 105, 120, 120]
+	for n in expect.size():
+		Runner.T.eq(sim._supply_cost(2), expect[n], "vest buy %d costs %d" % [n, expect[n]])
+		p["vest"] = false
+		sim._try_buy(p, 2)
+	var esim := SimWorld.new(23, 1, "endless")
+	Runner.T.eq(esim._supply_cost(2), SimWorld.SHOP_VEST_COST, "endless vest keeps wave pricing")
+	# Last Stand + all down latches the terminal wiped freeze.
+	sim.last_stand = true
+	sim._kill_player(p)
+	sim.step([_idle()])
+	Runner.T.ok(sim.wiped, "all-down in Last Stand latches wiped (no soft-hang)")

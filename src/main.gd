@@ -54,6 +54,7 @@ var _forks: Array = []   # route-fork bands (from the stream-time route_fork eve
 var _vo_last: Dictionary = {}     # per-line wall throttle (frames) — radio never spams
 var _vo_plea_at := -1             # frame to fire the pilot's queued plea
 var _last_stand_prev := false     # edge-detect for the Last Stand VO
+var _colossus_ping_frame := 0     # armor-plink throttle
 var _tank_alive_prev := {}            # per-tank-index prev alive flag (edge-detects the death)
 var _cursor_styled := false           # custom OS cursor active (menus/debrief only)
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
@@ -4077,6 +4078,14 @@ func _draw_gunships() -> void:
 
 
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "gunship_body") -> void:
+	if boss["phase_t"] < 0:
+		# Endless fly-in: a distant inbound silhouette growing over the 7s ETA
+		# reads "incoming", not "parked and unhittable".
+		var eta_f := 1.0 + float(boss["phase_t"]) / 420.0   # 0 -> 1 across the approach
+		var apos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET) \
+			- Vector2(0, (1.0 - eta_f) * 90.0)
+		_spr(body_tex, apos, PI, 0.3 + eta_f * 0.5, Color(0.6, 0.6, 0.65, 0.4 + eta_f * 0.6))
+		return
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 	# Idle hover: a slow vertical bob + faint sway so the gunship reads as airborne,
 	# not a parked sprite. Slot-offset so two bosses don't bob in lockstep; scaled
@@ -4086,6 +4095,21 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# Mortar-phase warning: the hull flashes red while volleys are near
 	# (they land at phase_t 200/240/280 of the 360-tick cycle).
 	var pt: int = boss["phase_t"]
+	# Spray telegraph (8v): the chin turret charges over the last 6 ticks of
+	# each 12-tick spray interval, and a faint aim hint restores the danger
+	# gradient at close range (information, so it survives reduce-motion).
+	if pt < SimWorld.BOSS_CYCLE_TICKS / 2:
+		var sk := pt % SimWorld.BOSS_SPRAY_INTERVAL_TICKS
+		var chin := bpos + Vector2(0, 14)
+		if sk >= 6 or _motion < 0.5:
+			var ca := 0.3 if _motion < 0.5 else (float(sk - 6) / 5.0) * 0.6
+			draw_circle(chin, 3.5, Color(1.0, 0.6, 0.3, ca))
+		if sk == 0:
+			draw_circle(chin, 6.0, Color(1, 1, 1, 0.85))
+		var gt := sim._nearest_alive_player(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+		if not gt.is_empty():
+			var gtp := _to_screen(gt["x"], gt["y"])
+			draw_line(chin, chin + (gtp - chin).normalized() * 60.0, Color(1.0, 0.3, 0.2, 0.3), 1.0)
 	var hull_mod := Color.WHITE
 	if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
@@ -4277,6 +4301,14 @@ func _draw_projectiles() -> void:
 			if (b["x"] / 4099 + Engine.get_physics_frames()) % 2 == 0:
 				draw_circle(bpos, 2.4, Color(1.0, 0.85, 0.4, 0.8))
 				draw_circle(bpos, 1.0, Color(1.0, 1.0, 0.9))
+			# Armor plink (9v): heavy plate SOUNDS armored too — deep ping,
+			# throttled, silent while the core window is open (those rounds
+			# matter), plus a one-shot ARMORED teach hint.
+			if sim.colossus.get("core_open", 0) == 0 \
+					and Engine.get_physics_frames() - _colossus_ping_frame >= 10:
+				_colossus_ping_frame = Engine.get_physics_frames()
+				_sfx.play_at("ping_armor", bpos, -14.0, 0.85)
+				_hint("colossus_armor", "ARMORED — WAIT FOR THE CORE")
 			continue
 		# Submerged frogmen are grenades-only too — ping bullets off the ripple
 		# so 'I emptied a mag into the water and nothing died' becomes legible.

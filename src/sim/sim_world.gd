@@ -324,6 +324,8 @@ var kill_streak: int = 0           # consecutive kills (drives the score-bonus t
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
 var deaths_since_gate: int = 0     # for the Flawless Gate bonus (reset on gate open)
 var flawless_streak: int = 0       # consecutive deathless gates (compounds the bonus)
+var vest_buys: int = 0             # campaign vest-price creep (9v: flat 60 read as a
+                                   # subscription); run-scoped, never reset on death.
 var tokens: int = 0                # Commendation Orders (9/9 panel: the score->power bridge) —
                                    # minted by PLAY (streak-20, flawless gates), never coin-buyable,
                                    # cap 2, wiped on death. Spent via the wheel for a free supply call.
@@ -402,6 +404,12 @@ func step(inputs: Array) -> void:
 	_step_grenades()
 	_step_enemies()
 	# Kill-streak lapses if no kill lands within the window.
+	# Last Stand terminal state (9v, campaign + solo endless): all fighters
+	# down with no revives left latches the same `wiped` freeze endless wipes
+	# already use — the debrief/restart plumbing all keys off it downstream.
+	if last_stand and not victory and not wiped and _all_players_down():
+		wiped = true
+		events.append({"t": "wiped", "x": players[0]["x"], "y": players[0]["y"]})
 	if kill_streak_timer > 0:
 		kill_streak_timer -= 1
 		if kill_streak_timer == 0:
@@ -661,6 +669,8 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		if cost > 0 and war_chest < cost:
 			continue
 		war_chest -= cost
+		if pk["kind"] == 2:
+			vest_buys += 1   # priced crates ride the same campaign creep (no loophole)
 		# Same score credit as the spend-wheel buy: a priced ground crate must not
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
@@ -743,7 +753,9 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 				# One 'can't afford it' cue on the first denial (not per-mash) — a
 				# denied revive was as silent as a denied buy is loud. Event only,
 				# checksum-excluded, so golden-safe.
-				events.append({"t": "revive_deny", "x": target["x"], "y": target["y"]})
+			# Deny is NEVER silent (9v): _kill_player pre-arms broke_timer on a
+			# broke death, which muted this exact event in the most common case.
+			events.append({"t": "revive_deny", "x": target["x"], "y": target["y"], "cost": cost})
 
 
 func _respawn(p: Dictionary, at_y: int) -> void:
@@ -872,6 +884,11 @@ func _supply_cost(kind: int) -> int:
 	## Campaign is wave 0 → base price, unchanged.
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return 0
+	if kind == 2 and mode == "campaign":
+		# Per-purchase creep, campaign only (endless already wave-creeps):
+		# 60/75/90/105/120, capped after 4 buys. Starting values (+15, cap
+		# 120 — panel consensus cheap end); tune up if vests still subscribe.
+		return mini(SHOP_VEST_COST + vest_buys * 15, 120)
 	return SUPPLY_COSTS[kind] + (wave / 3) * 10
 
 
@@ -927,6 +944,8 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "coins"})
 		return
 	war_chest -= cost
+	if kind == 2:
+		vest_buys += 1
 	# Spending is not a score cut: credit the same 10x the Last Stand victory
 	# payout gives unspent chest, so a run-saving buy trades power-now for
 	# banked-score rather than costing points outright.
@@ -2563,6 +2582,11 @@ func _start_wave() -> void:
 	wave_mod = 0 if wave <= 2 else rng.range_i(0, 6)
 	if wave_mod != 0 and wave_mod == prev_mod:
 		wave_mod = 0
+	# Ramp smoothing (8v: wave 5 stacked gunship + mutator + shop lockout into
+	# a cliff): miniboss waves refuse the harsh mutators — PAYDAY/NIGHT OPS
+	# stay legal for flavor. Roll-then-clamp preserves the rng stream.
+	if wave % 5 == 0 and wave_mod in [1, 2, 3, 6]:
+		wave_mod = 0
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -2574,9 +2598,11 @@ func _start_wave() -> void:
 	if wave % 5 == 0:
 		# Milestone miniboss: a Bridge Gunship parked over the arena, HP scaling
 		# with depth. Reuses the campaign boss schema + state machine wholesale.
+		# phase_t starts NEGATIVE: a 7s fly-in (8v ramp smoothing — the gunship
+		# no longer lands on top of the wave_start card). Already-hashed field,
+		# zero new state; the arrival emits the endless_boss event instead.
 		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
-			"x": SCREEN_CX, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
-		events.append({"t": "endless_boss", "x": SCREEN_CX, "y": camera_top + 50 * F_ONE})
+			"x": SCREEN_CX, "dir": 1, "phase_t": -420, "gate_y": camera_top + 90 * F_ONE}
 	if wave >= 4 and not _live_drop() and rng.range_i(0, 2) == 0:
 		# Mid-wave optional objective (5-vote panel, trimmed to the drop beat):
 		# a parachuted free crate lands down-screen and rushers magnet to it —
@@ -2742,31 +2768,66 @@ func _step_boss() -> void:
 
 
 func _step_one_boss(boss: Dictionary) -> void:
+	if boss["phase_t"] < 0:
+		# Endless fly-in: unhittable and silent until arrival (campaign bosses
+		# start at 0 and never enter this branch).
+		boss["phase_t"] = boss["phase_t"] + 1
+		if boss["phase_t"] == 0:
+			events.append({"t": "endless_boss", "x": boss["x"], "y": boss["gate_y"] - BOSS_Y_OFFSET})
+		return
 	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 	var t: int = boss["phase_t"]
+	# Endless tier escalation (9v: waves 5/10/15/20 differed only by HP).
+	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
+	var tier: int = wave / 5
+	# The boss drifts through BOTH halves now (8v: parking during the mortar
+	# volley made the whole phase a stand-still pinata).
+	boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
+	if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
+		boss["dir"] = -boss["dir"]
+		boss["x"] = clampi(boss["x"], 60 * F_ONE, 580 * F_ONE)
 	if t < BOSS_CYCLE_TICKS / 2:
-		# Strafe run: sweep the bridge, spraying aimed-with-spread fire.
-		boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
-		if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
-			boss["dir"] = -boss["dir"]
-			boss["x"] = clampi(boss["x"], 60 * F_ONE, 580 * F_ONE)
-		if t % BOSS_SPRAY_INTERVAL_TICKS == 0:
+		# Strafe run: spray tightens with depth (jitter 40px -> 16px by w20,
+		# cadence 12t -> 6t; starting values, staged-tier test asserts both).
+		var spray_iv: int = maxi(6, BOSS_SPRAY_INTERVAL_TICKS - 2 * maxi(0, tier - 1))
+		if t % spray_iv == 0:
+			var jit: int = maxi(16, 40 - 8 * maxi(0, tier - 1))
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target := _nearest_alive_player(boss["x"], by)
 			if not target.is_empty() and target["smoke_ticks"] == 0:
-				var dx: int = target["x"] - boss["x"] + rng.range_i(-40, 40) * F_ONE
+				var dx: int = target["x"] - boss["x"] + rng.range_i(-jit, jit) * F_ONE
 				var dy: int = target["y"] - by
 				var dlen := Fixed.length(dx, dy)
 				if dlen > F_ONE:
 					events.append({"t": "enemy_shot", "x": boss["x"], "y": by})
 					_spawn_enemy_bullet(boss["x"], by, dx, dy, dlen)
+		# Arm the mortar-lead sampler as the strafe half closes.
+		if t == BOSS_CYCLE_TICKS / 2 - 1:
+			var s0 := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
+			if not s0.is_empty():
+				boss["stx"] = s0["x"]
+				boss["sty"] = s0["y"]
+				boss["st_at"] = t
 	else:
-		# Mortar volley: three tracked strikes, reusing the Observer machinery.
-		if t in BOSS_MORTAR_TICKS:
+		# Mortar volley: strikes LEAD the walker now (8v: constant-speed
+		# walking auto-dodged every strike — 28px ring + 45t telegraph can
+		# never catch a walker without aiming ahead). Poor-man's velocity:
+		# delta since the last sample, projected one telegraph forward.
+		# Deeper waves add a 4th (w10+) and 5th (w15+) strike.
+		if t in BOSS_MORTAR_TICKS or (tier >= 2 and t == 320) or (tier >= 3 and t == 340):
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
 			if not target2.is_empty() and target2["smoke_ticks"] == 0:
-				_add_strike(target2["x"], target2["y"])
+				var aim_x: int = target2["x"]
+				var aim_y: int = target2["y"]
+				if boss.has("stx"):
+					var elapsed: int = maxi(1, t - int(boss["st_at"]))
+					aim_x += (target2["x"] - int(boss["stx"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+					aim_y += (target2["y"] - int(boss["sty"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+				_add_strike(clampi(aim_x, WORLD_LEFT, WORLD_RIGHT), aim_y)
+				boss["stx"] = target2["x"]
+				boss["sty"] = target2["y"]
+				boss["st_at"] = t
 
 
 func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
@@ -2783,7 +2844,7 @@ func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
 			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
 			return true
-	if not endless_boss.is_empty() and endless_boss["alive"] \
+	if not endless_boss.is_empty() and endless_boss["alive"] and endless_boss["phase_t"] >= 0 \
 			and _dist_lte(b["x"], b["y"], endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
 		events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 		_damage_boss(endless_boss, 1)
@@ -3034,6 +3095,8 @@ func checksum() -> int:
 		h = feed.call(2166136261, h)   # only perturbs the hash when assist is ON (torture: OFF)
 	if hard:
 		h = feed.call(40503, h)        # only perturbs the hash when HARD is ON (torture: OFF)
+	if vest_buys > 0:
+		h = feed.call(vest_buys, h)   # conditional: 0 buys = untouched stream (torture never buys)
 	if not sandbags.is_empty():
 		# Conditional feed (assist/hard/colossus precedent): an empty array
 		# leaves the hash stream untouched, so goldens hold while unbought —
