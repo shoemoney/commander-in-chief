@@ -209,6 +209,8 @@ const _EVENT_SOUND := {
 	"player_down": ["player_down", 0.0, 1.0],
 	"vest_break": ["vest_break", -2.0, 1.0],
 	"gate_open": ["gate_open", -4.0, 1.0],
+	"supply_drop": ["whistle", -8.0, 0.8],   # low falling whistle: friendly cargo inbound, below strike_warn
+	"drop_stolen": ["alarm", -9.0, 0.6],     # low growl: the crate is gone
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
 	"tank_ignite": ["alarm", -4.0, 1.1],
@@ -1305,6 +1307,14 @@ func _consume_events() -> void:
 				_forks.append({"y": ev["y"]})
 			"gate_open":
 				_ev_gate_open(ev)
+			"supply_drop":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.012, "text": "SUPPLY DROP — HOLD IT", "col": Color(0.6, 0.9, 1.0)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.03,
+					"r": 26.0, "col": Color(0.6, 0.9, 1.0)})
+			"drop_stolen":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "DROP STOLEN", "col": Color(1.0, 0.45, 0.35)})
 			"revive":
 				_ev_revive(ev)
 			"enemy_shot":

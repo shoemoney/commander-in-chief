@@ -1413,6 +1413,25 @@ func _step_enemies() -> void:
 		if e["elite"]:
 			_step_elite(e, target, dx, dy, dlen)
 			continue
+		# A live supply drop MAGNETIZES rushers (mid-wave objective beat): they
+		# break off the player chase to steal the crate — defend it or cede it.
+		# Touch destroys the crate (denial): no coin, no blast, just gone.
+		if e["kind"] == "rusher":
+			var drop := {}
+			for pk in pickups:
+				if pk.get("drop", false):
+					drop = pk
+					break
+			if not drop.is_empty():
+				var ddx: int = drop["x"] - e["x"]
+				var ddy: int = drop["y"] - e["y"]
+				var ddlen := Fixed.length(ddx, ddy)
+				if ddlen <= PICKUP_RADIUS:
+					pickups.erase(drop)
+					events.append({"t": "drop_stolen", "x": drop["x"], "y": drop["y"]})
+				elif ddlen > F_ONE:
+					_advance_toward(e, ddx, ddy, ddlen, ENEMY_SPEED)
+				continue
 		if dlen > F_ONE:
 			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 
@@ -2209,6 +2228,19 @@ func _start_wave() -> void:
 		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
 			"x": SCREEN_CX, "dir": 1, "phase_t": 0, "gate_y": camera_top + 90 * F_ONE}
 		events.append({"t": "endless_boss", "x": SCREEN_CX, "y": camera_top + 50 * F_ONE})
+	if wave >= 4 and rng.range_i(0, 2) == 0:
+		# Mid-wave optional objective (5-vote panel, trimmed to the drop beat):
+		# a parachuted free crate lands down-screen and rushers magnet to it —
+		# defend the drop or cede it. The wave >= 4 gate sits BEFORE the rng
+		# roll, so waves 1-3 draw nothing new and the endless torture (wipes at
+		# wave 2) never perturbs the stream -> ENDLESS_GOLDEN byte-identical.
+		# 1-in-3 roll mirrors the courier's (starting value; force-stage 30
+		# waves -> expect ~10 drops). "drop" is an immutable-at-spawn marker,
+		# unhashed (classified in test_checksum_coverage).
+		var drx := rng.range_i(60, 580) * F_ONE
+		var dry: int = camera_top + 240 * F_ONE
+		pickups.append({"x": drx, "y": dry, "kind": 1 + rng.range_i(0, 1), "cost": 0, "drop": true})
+		events.append({"t": "supply_drop", "x": drx, "y": dry})
 	events.append({"t": "wave_start", "x": SCREEN_CX, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
 
 

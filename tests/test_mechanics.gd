@@ -464,3 +464,46 @@ func _fork_run() -> int:
 	for tick in 400:
 		sim.step([_idle()])
 	return sim.checksum()
+
+
+func test_supply_drop_magnetizes_rushers_and_dies_to_their_touch() -> void:
+	# Force-stage the wave >= 4 drop roll, then prove the objective beat:
+	# rushers retarget the crate, and touching it destroys it (denial).
+	var sim := SimWorld.new(3, 1, "endless")
+	sim.wave = 3
+	var dropped := false
+	for attempt in 12:   # 1-in-3 roll: 12 tries make a miss ~0.8% likely
+		sim._start_wave()
+		for pk in sim.pickups:
+			if pk.get("drop", false):
+				dropped = true
+		if dropped:
+			break
+	Runner.T.ok(dropped, "wave >= 4 rolls a parachute drop within 12 waves")
+	var drop: Dictionary
+	for pk in sim.pickups:
+		if pk.get("drop", false):
+			drop = pk
+	# A rusher spawned away from the drop must walk TOWARD it, not the player.
+	sim.enemies.clear()
+	sim.wave_pending = 0
+	sim._spawn_enemy(drop["x"] + 100 * SimWorld.F_ONE, drop["y"], false)
+	var r := sim.enemies[sim.enemies.size() - 1]
+	var d0: int = drop["x"] - r["x"]
+	sim.step([_idle()])
+	var d1: int = drop["x"] - r["x"]
+	Runner.T.ok(absi(d1) < absi(d0), "rusher closes on the drop, not the player")
+	# Park him on the crate: it dies to the touch.
+	r["x"] = drop["x"]
+	r["y"] = drop["y"]
+	sim.step([_idle()])
+	var still_there := false
+	for pk in sim.pickups:
+		if pk.get("drop", false):
+			still_there = true
+	Runner.T.ok(not still_there, "rusher touch destroys the drop (denial)")
+	var stolen := false
+	for ev in sim.events:
+		if ev["t"] == "drop_stolen":
+			stolen = true
+	Runner.T.ok(stolen, "denial emits drop_stolen for the view")

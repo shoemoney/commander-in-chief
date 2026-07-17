@@ -25,7 +25,7 @@ const KNOWN := {
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
 		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin", "hp"],
 	"bunker": ["x", "y", "alive", "spawn_cd"],
-	"pickup": ["x", "y", "kind", "cost"],
+	"pickup": ["x", "y", "kind", "cost", "drop"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant"],
 	"gate": ["y", "open", "b1", "b2", "boss", "final"],
 	"boss": ["alive", "hp", "x", "dir", "phase_t", "gate_y"],
