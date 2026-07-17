@@ -1137,8 +1137,10 @@ func _step_grenades() -> void:
 			grenades.remove_at(i)
 
 
-func _explode(x: int, y: int, no_coin := false) -> void:
-	events.append({"t": "explosion", "x": x, "y": y})
+func _explode(x: int, y: int, no_coin := false, src := "") -> void:
+	# src tags the trigger (e.g. "barrel") so the view can dedupe feel against
+	# the co-located barrel_blast event; events are checksum-excluded.
+	events.append({"t": "explosion", "x": x, "y": y, "src": src})
 	var frags := 0
 	for e in enemies:
 		# The pilot is a non-combatant objective PAST his punch-out grace too:
@@ -1199,7 +1201,7 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 		if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
 				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
 			_hurt_player(p)
-	_explode(bl["x"], bl["y"], no_coin)
+	_explode(bl["x"], bl["y"], no_coin, "barrel")
 
 
 func _kill_enemy(e: Dictionary, no_coin := false) -> void:
