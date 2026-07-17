@@ -22,6 +22,7 @@ var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
 var _ui_player := AudioStreamPlayer.new()   # jingles/stings: own bus, no combat limiter
 var _music := AudioStreamPlayer.new()
+var _shot_rr := 0   # MG shot round-robin cursor
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
@@ -92,7 +93,12 @@ func _ready() -> void:
 	# sparse kick/low-tom lull — crossfaded by set_music_intensity, so a lull is
 	# a different PATTERN, not just full combat played quieter. Both start
 	# together and always share a pitch_scale, so the bars never drift.
-	_music.stream = _synth_drums(_PATTERN_COMBAT)
+	# 4-bar A+B combat loop (3-vote: the single 2-bar phrase was the HATE) —
+	# same grid/BPM, so the lull loop stays bar-aligned at half length.
+	var _combat_ab: Array[Array] = []
+	_combat_ab.append_array(_PATTERN_COMBAT)
+	_combat_ab.append_array(_PATTERN_COMBAT_B)
+	_music.stream = _synth_drums(_combat_ab)
 	_music.bus = "Music"
 	_music.volume_db = -15.0
 	add_child(_music)
@@ -104,7 +110,17 @@ func _ready() -> void:
 	_music_lull.play()
 
 
+func _rr_shot(sound: String) -> String:
+	## MG round-robin: view-only variety, no determinism stake (randf detune
+	## precedent) — a counter, not a hash.
+	if sound == "shot":
+		_shot_rr = (_shot_rr + 1) % 3
+		return "shot" if _shot_rr == 0 else "shot%d" % _shot_rr
+	return sound
+
+
 func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
+	sound = _rr_shot(sound)
 	if _pb == null or not _sounds.has(sound):
 		return
 	if _MUSICAL.has(sound):
@@ -117,6 +133,7 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 
 
 func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
+	sound = _rr_shot(sound)
 	if _pool.is_empty() or not _sounds.has(sound):
 		return
 	if _MUSICAL.has(sound):
@@ -247,11 +264,19 @@ func _synth_all() -> void:
 	var s := {}
 
 	# MG shot: noise crack + swept thump. Short and punchy — it plays a lot.
-	var shot := _buf(0.09)
-	for i in shot.size():
-		var t := float(i) / RATE
-		shot[i] = _nz(i) * exp(-t * 55.0) * 0.9 + _sweep(t, 240.0, 150.0, 0.09) * exp(-t * 28.0) * 0.5
-	s["shot"] = shot
+	# 3 variants round-robined in play() — the +/-6% detune alone couldn't hide
+	# one buffer firing 8x/sec (4-vote). Same recipe, offset noise seed, crack
+	# decay {55,46,64}, thump mix {0.5,0.62,0.40}; variant 0 IS the old shot.
+	var shot_seed := [0, 1000, 2000]
+	var shot_decay := [55.0, 46.0, 64.0]
+	var shot_thump := [0.5, 0.62, 0.40]
+	for sv in 3:
+		var shot := _buf(0.09)
+		for i in shot.size():
+			var t := float(i) / RATE
+			shot[i] = _nz(i + shot_seed[sv]) * exp(-t * shot_decay[sv]) * 0.9 \
+				+ _sweep(t, 240.0, 150.0, 0.09) * exp(-t * 28.0) * shot_thump[sv]
+		s["shot" if sv == 0 else "shot%d" % sv] = shot
 
 	# Enemy fire: duller, quieter cousin of the MG so it reads as "not yours".
 	var eshot := _buf(0.08)
@@ -288,14 +313,22 @@ func _synth_all() -> void:
 	var kill := _buf(0.15)
 	for i in kill.size():
 		var t := float(i) / RATE
-		kill[i] = _sqbl(t, maxf(60.0, 400.0 - t * 2000.0)) * exp(-t * 18.0) * 0.45
+		# 3-vote: a 2.2 kHz band-limited tick ahead of the falling blip — the
+		# confirmation lands above explosion rumble instead of inside it.
+		kill[i] = _sqbl(t, maxf(60.0, 400.0 - t * 2000.0)) * exp(-t * 18.0) * 0.45 \
+			+ _sqbl(t, 2200.0) * exp(-t * 250.0) * 0.4
 	s["kill"] = kill
 
 	# Player down: dramatic dive + noise — must cut through everything.
 	var down := _buf(0.6)
 	for i in down.size():
 		var t := float(i) / RATE
-		down[i] = _sqbl(t, maxf(50.0, 320.0 - t * 450.0)) * exp(-t * 5.0) * 0.6 + _nz(i) * exp(-t * 9.0) * 0.35
+		# The one sound allowed to own the mix (7-vote): a 60->30 Hz sub layer
+		# under the dive + a 60 ms attack ramp so it swells INTO the duck the
+		# view already applies, instead of clipping on at full scale.
+		var dv := _sqbl(t, maxf(50.0, 320.0 - t * 450.0)) * exp(-t * 5.0) * 0.6 \
+			+ _nz(i) * exp(-t * 9.0) * 0.35 + _sweep(t, 60.0, 30.0, 0.6) * 0.5
+		down[i] = dv * minf(1.0, t / 0.06)
 	s["player_down"] = down
 
 	# Roll: short whoosh (shaped noise).
@@ -331,7 +364,15 @@ func _synth_all() -> void:
 		var t := float(i) / RATE
 		var f := 820.0 if fmod(t, 0.22) < 0.11 else 620.0
 		aph += TAU * f / RATE
-		alarm[i] = (1.0 if sin(aph) >= 0.0 else -1.0) * 0.3 * minf(1.0, (0.44 - t) * 14.0)
+		# Band-limited square on the ACCUMULATED phase (the naive sign-square
+		# aliased its upper harmonics into fatigue grit — 7-vote panel HATE).
+		# Same odd-harmonic recipe as _sqbl, kept inline to ride aph.
+		var av := 0.0
+		var ak := 1.0
+		while ak * f < RATE * 0.45 and ak <= 19.0:
+			av += sin(aph * ak) / ak
+			ak += 2.0
+		alarm[i] = av * (4.0 / PI) * 0.85 * 0.3 * minf(1.0, (0.44 - t) * 14.0)
 	s["alarm"] = alarm
 
 	# Vest break: metallic clang — detuned partials + noise snap.
@@ -371,10 +412,15 @@ func _synth_all() -> void:
 	s["heartbeat"] = heart
 
 	# Whiz: a short descending zip for a round cracking past the ear.
-	var whiz := _buf(0.09)
+	# Whiz v2 (5-vote): the old 2600->900 Hz zip lived inside the shot cracks'
+	# spectrum and vanished under fire. Now a high-passed air CRACK with a thin
+	# 4000->2200 Hz zip for pitch identity — above both shot voices.
+	var whiz := _buf(0.07)
+	var wlp := 0.0
 	for i in whiz.size():
 		var t := float(i) / RATE
-		whiz[i] = _sweep(t, 2600.0, 900.0, 0.09) * sin(PI * t / 0.09) * 0.35
+		wlp = wlp * 0.9 + _nz(i) * 0.1
+		whiz[i] = (_nz(i) - wlp) * exp(-t * 45.0) * 0.5 + _sweep(t, 4000.0, 2200.0, 0.07) * 0.15
 	s["whiz"] = whiz
 
 	# Wiped: descending death-march resolve — the endless run is over.
@@ -400,9 +446,16 @@ func _synth_all() -> void:
 	# Flash: flashbang detonation — ~8 ms full-scale noise snap, then a decaying
 	# ~3.2 kHz sine ring whose fade telegraphs the stun window closing.
 	var flash := _buf(0.5)
+	var fbell_lp := 0.0
 	for i in flash.size():
 		var t := float(i) / RATE
-		flash[i] = _nz(i) * exp(-t * 120.0) * 0.9 + sin(TAU * 3200.0 * t) * exp(-t * 7.0) * 0.3
+		# Soften (3-vote): pure 3.2 kHz sine ring -> dual-sine bell through a
+		# CLOSING one-pole, so the ring darkens as it fades. The exp(-t*7)
+		# envelope is untouched — that decay IS the loved stun-window telegraph.
+		var fbell := sin(TAU * 1800.0 * t) + 0.7 * sin(TAU * 3100.0 * t)
+		var fa := lerpf(0.5, 0.05, minf(1.0, t * 2.0))
+		fbell_lp = fbell_lp * (1.0 - fa) + fbell * fa
+		flash[i] = _nz(i) * exp(-t * 120.0) * 0.9 + fbell_lp * exp(-t * 7.0) * 0.3
 	s["flash"] = flash
 
 	for k in s:
@@ -416,6 +469,12 @@ const _PATTERN_COMBAT: Array[Array] = [
 	[0, 0, 0, 1], [0, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0],
 	[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0],
 	[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1],
+]
+const _PATTERN_COMBAT_B: Array[Array] = [   # answer phrase: same kick anchors,
+	[1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0],   # snare displaced to
+	[0, 0, 0, 0], [0, 0, 0, 1], [0, 1, 0, 0], [0, 0, 0, 0],   # off-beats, tom fill
+	[1, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 1, 0, 0],   # call-and-response
+	[0, 1, 0, 0], [0, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 1],   # closing the 4 bars
 ]
 const _PATTERN_LULL: Array[Array] = [   # kick + low tom only: a wary heartbeat
 	[1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0],
