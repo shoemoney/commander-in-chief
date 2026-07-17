@@ -945,6 +945,9 @@ func _consume_events() -> void:
 				# First-grab teaching: the new capsules are rules, not just stats —
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
+					4: _hint("pierce", "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN")
+					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN")
+					6: _hint("triple", "TRIPLE SHOT — PERMANENT 3-ROUND FAN. STACK SPREAD FOR A 5-WAY FAN")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
 						% (Art.pad_label("interact") if Art.use_pad else "F"))
@@ -3480,6 +3483,10 @@ func _draw_enemies() -> void:
 				# player must sidestep (6-reviewer consensus). Solid line, remaining
 				# travel length (lunge_ticks × 3px), cooling as the charge spends.
 				var t_left := float(t_lunge) / float(SimWorld.TECHNICAL_CHARGE_TICKS)
+				# Dark under-line (the drone-tether under-lay idiom) so the thin
+				# red-orange corridor survives bright grass.
+				draw_line(epos + Vector2(1, 1), epos + t_dir * (t_lunge * 3.0 * PX) + Vector2(1, 1),
+					Color(0, 0, 0, 0.3), 1.5)
 				draw_line(epos, epos + t_dir * (t_lunge * 3.0 * PX),
 					Color(1.0, 0.4, 0.25, 0.2 + t_left * 0.35), 1.5)
 				draw_line(epos - t_dir * 14.0, epos - t_dir * 26.0,
@@ -3498,6 +3505,10 @@ func _draw_enemies() -> void:
 				# The rev line IS the dodge promise — but DASHED while it still
 				# tracks you (the sim locks at rev-end, not rev-start): dashed =
 				# "still aiming", the solid charge corridor = "committed".
+				# Dark under-line beneath the low-alpha rev dash (drone-tether idiom).
+				draw_dashed_line(epos + Vector2(1, 1),
+					epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0) + Vector2(1, 1),
+					Color(0, 0, 0, 0.3), 1.5, 5.0)
 				draw_dashed_line(epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
 					Color(1.0, 0.45, 0.3, 0.25 + t_rf * 0.45), 1.5, 5.0)
 			elif e.get("fire_cd", 0) == 0 and _any_player_smoked():
@@ -5530,10 +5541,13 @@ func _draw_banners(top_msg: String) -> void:
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
 		var hx := 320.0 - hw / 2.0 - 8.0
-		_metal_plate(Rect2(hx, 92, hw + 16, 18), ha)
-		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, 90.0, 22, 22), false,
+		# Duck below active boss bars (same 22px/slot offset the splash banner
+		# uses) — at one slot the splash lands at y=92 right on this plate.
+		var hy := 22.0 * float(_boss_bar_slots)
+		_metal_plate(Rect2(hx, 92 + hy, hw + 16, 18), ha)
+		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, 90.0 + hy, 22, 22), false,
 			Color(1.0, 0.95, 0.75, ha))
-		Art.text_center(self, _hint_text, 320, 105, 11, Color(1.0, 0.95, 0.7, ha))
+		Art.text_center(self, _hint_text, 320, 105 + hy, 11, Color(1.0, 0.95, 0.7, ha))
 
 
 ## Shared victory/debrief result-card scaffold: translucent panel + centered
