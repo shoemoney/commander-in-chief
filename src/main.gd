@@ -2713,7 +2713,7 @@ func _draw() -> void:
 					is_locker = true
 					break
 			if is_locker:
-				var lp := Art.pulse(0.15)
+				var lp: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)   # steady-bright under reduce-motion
 				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
 			_ground_shadow(c, 17.0)
 			# Hash-picked bunker variant: bunker / bunker2 / mirrored bunker (the
@@ -2740,7 +2740,11 @@ func _draw() -> void:
 			# A recon drone loiters above an active strongpoint — a small orbiting
 			# silhouette that reads the bunker as 'watched'. Phase offset per bunker
 			# so multiples don't fly in lockstep. Pure ambient view.
-			var da := float(Engine.get_physics_frames()) * 0.03 + float(bk["x"] / 4096)
+			# Loiter angle freezes at each drone's phase-offset rest under reduce-motion
+			# (the orbit is pure ambient motion — its siblings, the observer orbit dots,
+			# are gated the same way).
+			var da := float(bk["x"] / 4096) if _motion < 0.5 \
+				else float(Engine.get_physics_frames()) * 0.03 + float(bk["x"] / 4096)
 			var dp := c + Vector2(cos(da) * 15.0, sin(da) * 7.0 - 22.0)
 			_spr("m_drone", dp, da + PI / 2, 0.4)
 	_draw_pickups()
@@ -3629,7 +3633,7 @@ func _draw_enemies() -> void:
 			# sprite now); the pulsing gold ring stays — "catch this one" must
 			# still read across a chaotic field. Forward lean = closing momentum.
 			_spr("courier", epos, face, 0.5, Color.WHITE, 1.12)
-			var lb := Art.pulse(0.2)
+			var lb: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)   # steady-bright under reduce-motion
 			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 		elif e["kind"] == "shield":
 			_spr("m_bombsuit", epos, face, 0.55, Color(0.85, 0.9, 1.0))   # armored EOD bulk sells the block
@@ -3648,7 +3652,7 @@ func _draw_enemies() -> void:
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
 			# "he's seeding the ground behind him" is a gameplay telegraph.
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
-			var spp := Art.pulse(0.25)
+			var spp: float = 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady-bright under reduce-motion
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "mg_nest":
 			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
@@ -5162,10 +5166,10 @@ func _draw_wheel() -> void:
 		# (c.y-52) and cue line (c.y+52) must all stay on-screen.
 		c.x = clampf(c.x, 78.0, 562.0)
 		c.y = clampf(c.y, 96.0, 296.0)
-		# Entrance envelope: scale in around the hub (fed at 60Hz in _update_wheel,
-		# same exp-ease family as the menus). Reduce-motion gets it instant.
-		var wes := 1.0 if _motion < 0.5 else 0.85 + 0.15 * float(_wheel[i].get("t", 1.0))
-		draw_set_transform(c * (1.0 - wes), 0.0, Vector2(wes, wes))
+		# (No entrance-scale envelope: the old draw_set_transform pop was clobbered by
+		# the first nested _spr's identity reset, so only the plate ever scaled — the
+		# hub/sockets/labels popped in at full size, which read worse than no pop at
+		# all. Dropped it; the wheel now appears clean, matching the reduce-motion path.)
 		# Baked wheel plate behind the hub (the Apocalypse sheet is a 4x2 socket
 		# atlas — one cell is the round plate) instead of a flat alpha disc.
 		var plate := Art.tex("ui_wheel_plate")
@@ -5268,7 +5272,6 @@ func _draw_wheel() -> void:
 			# Anchored ABOVE this player's hub — the old global y=71 left P2's
 			# pick floating at the top of the screen, nowhere near their wheel.
 			Art.text_center(self, lbl, c.x, c.y - 52.0, 9, Color(1.0, 0.95, 0.7))
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # end entrance-envelope scale
 
 
 func _top_center_priority() -> String:

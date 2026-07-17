@@ -437,6 +437,9 @@ const OUTLINE := {
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+# (Hint-toast button WORDS live in _PAD_LABELS / pad_label below — the two
+# parallel loops built the same helper twice; pad_label won: its Switch table
+# is positionally correct where the duplicate transplanted Xbox letters.)
 
 ## Semantic hint → registry key for the device-aware prompt sprites (see
 ## glyph_key below). Pad column mirrors the bindings in main._gather_inputs;
@@ -552,6 +555,10 @@ static func font() -> Font:
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
+	# Snap to whole pixels: centered strings land on fractional x (cx - w/2 with
+	# odd w), which smears a bitmap pixel font across two source texels under the
+	# canvas's linear-mipmap filter. View-only, so golden-safe.
+	pos = pos.floor()
 	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7))
 	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col)
 

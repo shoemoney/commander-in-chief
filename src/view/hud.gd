@@ -17,6 +17,8 @@ var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jump
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
 var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
+var _fit_right := RIGHT    # RIGHT, minus the corner reserved for CB/RM pips when either is live
+                          # (so row-0 chips stop short instead of drawing under the pips)
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
@@ -128,6 +130,10 @@ func _draw() -> void:
 	if _disp_score < 0.0:
 		_disp_score = float(sim.score)
 
+	# When a CB/RM pip is live it owns the top-right corner — pull the chip
+	# fit-bound in by its width so the rightmost row-0 chip can't draw under it
+	# (the pip is the readout the players who set those toggles rely on).
+	_fit_right = RIGHT - (18.0 if (Art.colorblind or main._motion < 0.5) else 0.0)
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
 	var y := 6.0
@@ -146,12 +152,12 @@ func _draw() -> void:
 			var sc := Vector2(x + 4.0, y + ICON / 2.0)
 			# Dim full-circle track under the drain, so remaining time reads
 			# against a whole instead of a floating partial arc.
-			draw_arc(sc, 4.5, 0, TAU, 8, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
+			draw_arc(sc, 4.5, 0, TAU, 20, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
 			if main._motion < 0.5:
 				# REDUCE MOTION: quarter-snapped instead of a per-frame drain —
 				# the ring steps 4 times per window rather than animating.
 				sfrac = ceilf(sfrac * 4.0) / 4.0
-			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 8, scol, 1.5)
+			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 20, scol, 1.5)
 			x += 13.0
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
 			# ring alone only reads "streak alive", not "how close".
@@ -489,10 +495,24 @@ func _draw() -> void:
 func _accessibility_pips() -> void:
 	var acc_y := 8.0
 	if Art.colorblind:
-		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
+		_pip_plate("CB", acc_y)
+		_text("CB", RIGHT - _tw("CB"), acc_y, Art.safe(Color(0.6, 0.85, 1.0, 0.85)))
 		acc_y += 11.0
 	if main._motion < 0.5:
+		_pip_plate("RM", acc_y)
 		_text("RM", RIGHT - _tw("RM"), acc_y, Art.safe(Color(0.75, 0.95, 0.7, 0.85)))
+
+
+## Dark backing behind a corner pip — the pips draw over the live battlefield with
+## no panel under them (the corner plate is top-LEFT), so they washed out on bright
+## grass/water. A small scrim rect restores contrast without a full plate.
+func _pip_plate(txt: String, py: float) -> void:
+	var w := _tw(txt)
+	# Kept fully left of RIGHT (was overhanging by 1px). 0.8 fill + a faint hairline
+	# so the pip holds contrast over an explosion flash or bright water, not just grass.
+	var r := Rect2(RIGHT - w - 3.0, py - 1.0, w + 3.0, 10.0)
+	draw_rect(r, Color(0.05, 0.07, 0.05, 0.8))
+	draw_rect(r, Color(0.7, 0.75, 0.7, 0.35), false, 1.0)
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
@@ -614,7 +634,7 @@ func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> fl
 
 ## Right-margin fit test for an optional chip of pixel-width `w` starting at `x`.
 func _fits(x: float, w: float) -> bool:
-	return x + w <= RIGHT
+	return x + w <= _fit_right
 
 
 ## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).
