@@ -202,7 +202,7 @@ const _EVENT_SOUND := {
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
 	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
-	"flashbang": ["explosion", -8.0, 2.2],   # sharp crack, not a boom
+	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails

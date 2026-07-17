@@ -397,6 +397,14 @@ func _synth_all() -> void:
 			* (0.25 + 0.75 * t / 0.35) * minf(1.0, (0.35 - t) * 30.0)
 	s["rev"] = rev
 
+	# Flash: flashbang detonation — ~8 ms full-scale noise snap, then a decaying
+	# ~3.2 kHz sine ring whose fade telegraphs the stun window closing.
+	var flash := _buf(0.5)
+	for i in flash.size():
+		var t := float(i) / RATE
+		flash[i] = _nz(i) * exp(-t * 120.0) * 0.9 + sin(TAU * 3200.0 * t) * exp(-t * 7.0) * 0.3
+	s["flash"] = flash
+
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
 
