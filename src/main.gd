@@ -1298,7 +1298,7 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
 			"observer_spawn":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
-				_show_banner("MORTAR OBSERVER SPOTTED", Color(1.0, 0.92, 0.55), "hud_lightning")
+				_show_banner("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON", Color(1.0, 0.92, 0.55), "hud_lightning")
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -3504,12 +3504,13 @@ func _draw_enemies() -> void:
 				# Smoke-deny tell: cooldown is spent but the truck can't line up a
 				# charge into smoke — without this it read as the AI breaking, and
 				# the smoke special never got credit for the block (3 reviewers).
-				Art.text(self, "?", epos + Vector2(-2, -22), 10, Color(0.75, 0.75, 0.7, 0.5 + Art.pulse(0.2) * 0.4))
+				var qp: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)
+				Art.text(self, "?", epos + Vector2(-2, -22), 10, Color(0.75, 0.75, 0.7, 0.5 + qp * 0.4))
 			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
 			# RESCUE label so "touch, don't shoot" reads across a firefight.
-			var pi_pulse := Art.pulse(0.15)
+			var pi_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)
 			var pi_col := Art.safe(Color(0.45, 1.0, 0.65))
 			# Escape imminence: the capture threshold (camera_top - 30) was an
 			# invisible cliff — the ransom vanished to geometry the player could
@@ -3701,7 +3702,8 @@ func _draw_observer() -> void:
 	_spr("m_rocket_truck", op + Vector2(40, 5), PI / 2, 0.5)
 	_spr("m_radar_tank", op, PI / 2, 0.5)   # radar-spotter vehicle: reads as "painting you for artillery"
 	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
-	draw_rect(Rect2(op + Vector2(8, -12), Vector2(7, 5)), Color(0.9, 0.25, 0.2))
+	# Baked flag glyph (last greybox rect on this unit) — same hud_flag the map markers wear.
+	_spr("hud_flag", op + Vector2(11.5, -9.5), 0.0, 0.04, Color(0.9, 0.25, 0.2))
 	# Radar sweep: a rotating scan beam off the antenna sells the spotter's whole job
 	# (actively painting you for artillery) instead of a static flag.
 	var sweep := float(Engine.get_physics_frames()) * 0.09
@@ -5452,7 +5454,7 @@ func _draw_banners(top_msg: String) -> void:
 				"icon_col": vrr.col},
 			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
-			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
+			{"text": "%d¢ WAR CHEST BANKED" % sim.war_chest, "color": Color(1.0, 0.92, 0.55),
 				"icon": "icon_coin", "icon_size": 14.0},
 			{"text": "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10], "color": Color(0.8, 0.84, 0.74)},
 		]
