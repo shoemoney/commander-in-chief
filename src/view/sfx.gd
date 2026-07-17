@@ -26,6 +26,10 @@ var _shot_rr := 0   # MG shot round-robin cursor
 var _amb := AudioStreamPlayer.new()   # wind bed: loud in lulls, under the drums in combat
 var _engines: Dictionary = {}          # tank index -> persistent engine voice
 var _engine_wav: AudioStreamWAV = null
+var _vo := AudioStreamPlayer.new()      # Radio Commander / Spotter (VO bus, radio-filtered)
+var _vo_dry := AudioStreamPlayer.new()  # the pilot's dry close-mic plea
+var _vo_streams: Dictionary = {}
+var _vo_priority := -1                  # priority of the line currently on air
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
@@ -61,6 +65,38 @@ func _ready() -> void:
 	# Master safety limiter AFTER the LPF: the SFX bus limits itself, but the drum
 	# bed sums into Master past it — loud combat + a kick could land ~+2dBFS.
 	AudioServer.add_bus_effect(0, AudioEffectHardLimiter.new())
+	# VO bus (voices panel 9/9: ONE radio-filtered Commander): band-passed +
+	# lightly driven so every line lands as tactical radio, not narration.
+	# Rides Master (the concussion LPF lives there — a stunned soldier hears
+	# muffled radio too, which reads as intent).
+	if AudioServer.get_bus_index("VO") == -1:
+		var vi := AudioServer.get_bus_count()
+		AudioServer.add_bus(vi)
+		AudioServer.set_bus_name(vi, "VO")
+		AudioServer.set_bus_send(vi, "Master")
+		var bp := AudioEffectBandPassFilter.new()
+		bp.cutoff_hz = 1100.0
+		bp.resonance = 0.4
+		AudioServer.add_bus_effect(vi, bp)
+		var dist := AudioEffectDistortion.new()
+		dist.mode = AudioEffectDistortion.MODE_OVERDRIVE
+		dist.drive = 0.18
+		dist.post_gain = 4.0
+		AudioServer.add_bus_effect(vi, dist)
+		AudioServer.add_bus_effect(vi, AudioEffectHardLimiter.new())
+	_vo.bus = "VO"
+	_vo.volume_db = -2.0
+	add_child(_vo)
+	_vo_dry.bus = "UI"   # the pilot's close-mic plea: NO radio filter by design
+	_vo_dry.volume_db = -4.0
+	add_child(_vo_dry)
+	for k in ["vo_chest_empty", "vo_wiped", "vo_last_stand", "vo_observer", "vo_surge",
+			"vo_core", "vo_flawless", "vo_ransom_lost", "vo_victoly", "vo_airstrike",
+			"vo_pilot_down", "vo_shop_locked", "vo_clip_dry", "vo_pilot_plea"]:
+		var res := load("res://assets/vo/%s.mp3" % k)
+		if res != null:
+			_vo_streams[k] = res
+
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -129,6 +165,28 @@ func _ready() -> void:
 	_amb.volume_db = -30.0
 	add_child(_amb)
 	_amb.play()
+
+
+func play_vo(key: String, priority := 1, dry := false) -> void:
+	## One mono channel, priority-laddered (voices panel): defeat/Last Stand (3)
+	## > denials/pilot (2) > warnings (1) > flavor (0). Higher interrupts,
+	## equal-or-lower drops while a line is on air. Rate limiting is the
+	## caller's job (main.gd keys throttles per trigger).
+	if not _vo_streams.has(key):
+		return
+	var ply := _vo_dry if dry else _vo
+	if _vo.playing or _vo_dry.playing:
+		if priority <= _vo_priority:
+			return
+		_vo.stop()
+		_vo_dry.stop()
+	_vo_priority = priority
+	ply.stream = _vo_streams[key]
+	ply.play()
+
+
+func vo_active() -> bool:
+	return _vo.playing or _vo_dry.playing
 
 
 func _rr_shot(sound: String) -> String:

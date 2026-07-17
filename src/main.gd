@@ -51,6 +51,9 @@ var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn un
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
 var _hulks: Array[Dictionary] = []    # dead-tank wrecks, persistent (view-only pool)
 var _forks: Array = []   # route-fork bands (from the stream-time route_fork event)
+var _vo_last: Dictionary = {}     # per-line wall throttle (frames) — radio never spams
+var _vo_plea_at := -1             # frame to fire the pilot's queued plea
+var _last_stand_prev := false     # edge-detect for the Last Stand VO
 var _tank_alive_prev := {}            # per-tank-index prev alive flag (edge-detects the death)
 var _cursor_styled := false           # custom OS cursor active (menus/debrief only)
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
@@ -632,6 +635,9 @@ func _reset() -> void:
 	_corpses.clear()
 	_hulks.clear()
 	_forks.clear()
+	_vo_last.clear()
+	_vo_plea_at = -1
+	_last_stand_prev = false
 	_tank_alive_prev.clear()
 	_tank_hull.clear()
 	_tank_prev.clear()
@@ -1111,6 +1117,7 @@ func _consume_events() -> void:
 				if Engine.get_physics_frames() - _dry_frame >= 14:
 					_dry_frame = Engine.get_physics_frames()
 					_sfx.play("click_dry", -8.0, 1.0)
+					_vo("vo_clip_dry", 0, 720)
 					# Empty-mag tell: a weak grey puff + a red "CLICK" at the muzzle — unmistakable
 					# from the yellow shot flash, so a no-fire reads as "out of ammo", not a lost input.
 					var dp := sim.players[ev["i"]]
@@ -1280,6 +1287,8 @@ func _consume_events() -> void:
 				_burst(ev["x"], ev["y"], "dust", 4, 0.5, 1.2, 0.5, 0.07)
 				_rumble = maxf(_rumble, 0.35)
 			"pilot_down":
+				_vo("vo_pilot_down", 2, 600)
+				_vo_plea_at = int(Engine.get_physics_frames()) + 90
 				_fx.append({"x": ev["x"], "y": ev["y"] - 8, "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "size": 12, "text": "PILOT DOWN — REACH HIM",
 					"col": Art.safe(Color(0.5, 1.0, 0.7))})
@@ -1306,6 +1315,7 @@ func _consume_events() -> void:
 					"sz": 15.0, "grow": 0.4, "fade": 1.2, "rate": 0.05,
 					"rot": Vector2(rp["aim_x"], rp["aim_y"]).angle(), "col": Color(1, 1, 1, 0.5)})
 			"gate_flawless":
+				_vo("vo_flawless", 0, 600)
 				# A disciplined, deathless checkpoint clear — gold payoff + sting,
 				# louder as the clean-gate streak compounds.
 				var fm: int = ev.get("mult", 1)
@@ -1320,6 +1330,7 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": "AVENGED +5¢", "col": Color(0.7, 0.9, 1.0)})
 				_sfx.play("avenge", -5.0)
 			"surge":
+				_vo("vo_surge", 0, 900)
 				# The 20-streak adrenaline rush lands as a body-blow of feedback —
 				# shockwave, warm light, an upward kick, and a rising sting — so the
 				# 1.5x speed you now HOLD announces itself, not just a HUD number.
@@ -1339,6 +1350,8 @@ func _consume_events() -> void:
 				# Fires at STREAM time (~2 screens ahead) — no sound/banner here;
 				# store the band and let _draw_gates signpost it when it scrolls in.
 				_forks.append({"y": ev["y"]})
+			"revive_deny":
+				_vo("vo_chest_empty", 2, 600)
 			"gate_open":
 				_ev_gate_open(ev)
 			"token_mint":
@@ -1400,6 +1413,7 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
 			"observer_spawn":
+				_vo("vo_observer", 1, 600)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
 				_show_banner("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON", Color(1.0, 0.92, 0.55), "hud_lightning")
 			"colossus_engage":
@@ -1408,6 +1422,7 @@ func _consume_events() -> void:
 				_punch = maxf(_punch, 0.08)
 				_music_hold = 48   # held breath before the finale
 			"endless_boss":
+				_vo("vo_shop_locked", 1, 900)
 				_trauma = minf(1.0, _trauma + 0.4)
 				_music_hold = maxi(_music_hold, 48)
 				_show_banner("GUNSHIP INBOUND", Color(1.0, 0.92, 0.55), "hud_skull")
@@ -1416,13 +1431,16 @@ func _consume_events() -> void:
 				_fx.append({"x": 0, "y": 0, "t": 0.0, "kind": "chopper", "rate": 0.02,
 					"tex": "m_heli_attack2", "scl": 0.5, "sy": 52.0})
 			"core_open":
+				_vo("vo_core", 2, 300)
 				_show_banner("CORE EXPOSED — OPEN FIRE", Color(1.0, 0.92, 0.55), "hud_target")
 				_sfx.play("alarm", -6.0, 1.3)
 			"airstrike_called":
+				_vo("vo_airstrike", 1, 300)
 				# Commit beat: the strike is inbound, not instant — announce it.
 				_show_banner("AIRSTRIKE INBOUND")
 				_sfx.play("whistle", -3.0, 0.85)
 			"wiped":
+				_vo("vo_wiped", 3, 600)
 				# Whole squad down with no rescue — the endless run is over.
 				_trauma = minf(1.0, _trauma + 0.6)
 				_flash_alpha = maxf(_flash_alpha, 0.4)
@@ -1431,6 +1449,7 @@ func _consume_events() -> void:
 				_show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
 			"victory":
+				_vo("vo_victoly", 3, 6000)
 				_ev_victory(ev)
 
 
@@ -1480,6 +1499,17 @@ func _blast_prox(x: int, y: int) -> float:
 		return 1.0
 	var dist_px := Vector2(float(x - near["x"]), float(y - near["y"])).length() * PX
 	return remap(clampf(dist_px, 60.0, 340.0), 60.0, 340.0, 1.0, 0.35)
+
+
+func _vo(key: String, priority := 1, throttle_frames := 240, dry := false) -> void:
+	## Radio bark with per-line throttle (voices panel: barks must not wear out
+	## on the hundredth replay — banner-driven lines fire once per lifecycle,
+	## mashable denials get seconds-long gaps).
+	var now := int(Engine.get_physics_frames())
+	if now - int(_vo_last.get(key, -100000)) < throttle_frames:
+		return
+	_vo_last[key] = now
+	_sfx.play_vo(key, priority, dry)
 
 
 func _ev_explosion(ev: Dictionary) -> void:
@@ -1574,6 +1604,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 			"rate": 0.02, "text": "RANSOM LOST", "col": Color(1.0, 0.4, 0.3)})
 		_sfx.play("alarm", -14.0, 0.6)
+		_vo("vo_ransom_lost", 1, 900)
 		return
 	if kkind == "technical":
 		# A gun-truck must die like a vehicle, not pop like infantry (panel
@@ -2475,7 +2506,16 @@ func _drive_audio() -> void:
 		intensity = 0.0
 	if _tension > 0.4:
 		intensity = minf(intensity, 0.15)
-	_sfx.set_music_intensity(intensity, _duck)
+	# Last Stand engage: the flag flips once; the radio marks the moment.
+	if sim.last_stand and not _last_stand_prev:
+		_vo("vo_last_stand", 3, 600)
+	_last_stand_prev = sim.last_stand
+	# The pilot's queued close-mic plea (0.4s behind the Commander's callout).
+	if _vo_plea_at >= 0 and int(Engine.get_physics_frames()) >= _vo_plea_at:
+		_vo_plea_at = -1
+		_vo("vo_pilot_plea", 2, 600, true)
+	# VO owns the mix while speaking: rides the existing duck channel.
+	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0))
 	_sfx.set_concussion(_concussion)
 	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
 	var want := 1.0 if sim.last_stand and not sim.victory else 0.0
