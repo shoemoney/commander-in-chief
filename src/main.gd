@@ -229,19 +229,19 @@ const _EVENT_SOUND := {
 	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
 	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
-	"claymore_plant": ["tank_board", -6.0, 1.6],
-	"sandbag_plant": ["tank_board", -7.0, 1.3],   # dig-in thump between claymore clunk (1.6) and board (1.0)
+	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
+	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
 	"token_mint": ["buy", -4.0, 1.8],       # commendation chime: the buy jingle a fourth up
 	"token_drop": ["buy", -4.0, 1.2],       # spending it sounds like the buy it is
 	"hulk_salvage": ["tank_board", -6.0, 0.8],  # heavy strip-the-wreck clunk   # deliberate arming CLUNK (sapper's ambient clink is -15)
-	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
+	"rend_pierce": ["vest_break", -8.0, 2.0],      # metal shear (KIMK: pitch 2.0 clears the true-break band)
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
 	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
 	"pilot_down": ["avenge", -8.0, 0.8],           # crash-site ransom ping — friendly rising two-note (the alarm voice at 1.1 was byte-identical to tank_ignite's 'bail out now')
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
-	"mine_lay": ["tank_board", -15.0, 1.9],   # sapper plants a mine: a faint metallic clink
+	"mine_lay": ["click_dry", -15.0, 1.2],   # sapper plants a mine: faint dry click
 	"sniper_paint": ["alarm", -12.0, 1.4],
 	"sniper_fire": ["shot", -4.0, 0.6],
 	"bunker_break": ["explosion", -4.0, 0.72],
@@ -1053,7 +1053,7 @@ func _consume_events() -> void:
 							"col": Color(0.85, 0.78, 0.5, 0.9)})
 						if Engine.get_physics_frames() - _nest_ping_frame >= 10:
 							_nest_ping_frame = Engine.get_physics_frames()
-							_sfx.play_at("vest_break", _to_screen(ev["x"], ev["y"]), -12.0,
+							_sfx.play_at("ping_shell", _to_screen(ev["x"], ev["y"]), -12.0,
 								1.0 + float(3 - nh) * 0.3)
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
@@ -1061,7 +1061,7 @@ func _consume_events() -> void:
 					_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
 				if not armor_pinged:
 					armor_pinged = true
-					_sfx.play("vest_break", -16.0, 1.7)
+					_sfx.play("ping_armor", -16.0, 1.0)
 				# Riot-shield deflect: armor_block fires for bunkers AND shields, but a
 				# shieldman eating your frontal rounds looked identical to plinking a
 				# wall. If the block landed on a shieldman, add a bright cyan ricochet
@@ -1076,7 +1076,7 @@ func _consume_events() -> void:
 							"col": Color(0.55, 0.85, 1.0, 0.9)})
 						if Engine.get_physics_frames() - _deflect_frame >= 10:
 							_deflect_frame = Engine.get_physics_frames()
-							_sfx.play_at("tank_board", _to_screen(ev["x"], ev["y"]), -15.0, 2.5)
+							_sfx.play_at("ping_armor", _to_screen(ev["x"], ev["y"]), -15.0, 1.3)
 						break
 			"boss_hit":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
@@ -1086,11 +1086,11 @@ func _consume_events() -> void:
 				_boss_flash = minf(1.0, _boss_flash + 0.35)   # the big body reacts, not just a spark
 				if not boss_pinged:
 					boss_pinged = true
-					_sfx.play("vest_break", -10.0, 1.35)
+					_sfx.play("ping_shell", -10.0, 1.2)
 			"dry_fire":
 				if Engine.get_physics_frames() - _dry_frame >= 14:
 					_dry_frame = Engine.get_physics_frames()
-					_sfx.play("tank_board", -12.0, 2.2)
+					_sfx.play("click_dry", -8.0, 1.0)
 					# Empty-mag tell: a weak grey puff + a red "CLICK" at the muzzle — unmistakable
 					# from the yellow shot flash, so a no-fire reads as "out of ammo", not a lost input.
 					var dp := sim.players[ev["i"]]
@@ -1435,6 +1435,10 @@ func _ev_shot(ev: Dictionary) -> void:
 		"rate": 0.055, "spin": randf() * TAU,
 		"vx": perp.x * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4),
 		"vy": perp.y * randf_range(1.2, 2.4) + randf_range(-0.4, 0.4)})
+	if randf() < 0.3:
+		# Casing tink (8-vote grammar split): a sparse high chime under the MG —
+		# every casing would be sleigh bells; ~1 in 3 reads as brass on dirt.
+		_sfx.play_at("tink", _to_screen(ev["x"], ev["y"]), -22.0, randf_range(0.9, 1.1))
 	# Faint muzzle light on the ground (rate-capped so MG spam can't wash out).
 	if Engine.get_physics_frames() % 2 == 0:
 		_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 11), "y": ev["y"] + int(shooter["aim_y"] * 11),
@@ -2361,6 +2365,11 @@ func _update_feel() -> void:
 			_hulks.append({"x": tk["x"], "y": tk["y"], "t": 0.0,
 				"rot": float(Art.cell_hash(tk["x"], tk["y"]) % 628) / 100.0})
 		_tank_alive_prev[ti] = tk["alive"]
+		# Engine idle (3-vote): persistent positional growl for alive on-screen
+		# tanks; pitch lifts when crewed so boarding audibly changes the engine.
+		var tk_pos := _to_screen(tk["x"], tk["y"])
+		var tk_on: bool = tk["alive"] and tk_pos.y > -40.0 and tk_pos.y < 400.0
+		_sfx.engine_at(ti, tk_pos, tk_on)
 	for h in _hulks:
 		h["t"] = minf(1.0, h["t"] + 0.002)   # ~8s of flame/smolder, then a cold wreck
 	while _hulks.size() > 8:
@@ -2618,7 +2627,7 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 			or Input.is_joy_button_pressed(i, JOY_BUTTON_B)
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
-			_sfx.play("tank_board", -14.0, 2.2)   # soft declined tick (the dry-fire click grammar; "dry_fire" is an event name, not a synth key)
+			_sfx.play("click_dry", -12.0, 1.4)   # soft declined tick — the dedicated dry-click voice
 		# MOVE only becomes the selector after it has been seen neutral once
 		# since the wheel opened — otherwise kiting while holding Q silently
 		# picked a sector and release force-bought it (retreat-south = airstrike).

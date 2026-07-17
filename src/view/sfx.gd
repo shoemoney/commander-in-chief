@@ -15,7 +15,7 @@ const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 # Pitch-laddered grammar sounds: their exact pitch IS the information (alarm's
 # threat-ID steps, the kill blip's +0.06/streak rise), so the ±6% humanize would
 # swamp adjacent steps — play them dead on pitch.
-const _LADDERED := {"alarm": true, "kill": true}
+const _LADDERED := {"alarm": true, "kill": true, "ping_shell": true}
 
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
@@ -23,6 +23,9 @@ var _player := AudioStreamPlayer.new()
 var _ui_player := AudioStreamPlayer.new()   # jingles/stings: own bus, no combat limiter
 var _music := AudioStreamPlayer.new()
 var _shot_rr := 0   # MG shot round-robin cursor
+var _amb := AudioStreamPlayer.new()   # wind bed: loud in lulls, under the drums in combat
+var _engines: Dictionary = {}          # tank index -> persistent engine voice
+var _engine_wav: AudioStreamWAV = null
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
@@ -108,6 +111,24 @@ func _ready() -> void:
 	add_child(_music_lull)
 	_music.play()
 	_music_lull.play()
+	# Ambience bed (6-vote: dead air between fights): one baked 14.3s wind
+	# loop — lowpassed hash noise, 0.07 Hz swell LFO baked in (integer cycle =
+	# seamless). Rides the Music bus so the concussion LPF muffles it for free.
+	var wind := _buf(14.3)
+	var wlp2 := 0.0
+	for i in wind.size():
+		var t := float(i) / RATE
+		var sw := 0.6 + 0.4 * sin(TAU * t / 14.3)
+		wlp2 = wlp2 * 0.97 + _nz(i) * 0.03 * sw
+		wind[i] = wlp2 * 9.0 * 0.3 * sw
+	var wind_wav := _to_wav(wind)
+	wind_wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wind_wav.loop_end = wind.size()
+	_amb.stream = wind_wav
+	_amb.bus = "Music"
+	_amb.volume_db = -30.0
+	add_child(_amb)
+	_amb.play()
 
 
 func _rr_shot(sound: String) -> String:
@@ -174,6 +195,9 @@ func set_music_intensity(level: float, duck := 0.0) -> void:
 	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0)))
 	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0)))
 	_music.volume_db = lerpf(_music.volume_db, combat_db, rate)
+	# Wind is the lull's voice: -24 dB in dead calm, fading UNDER the drum
+	# floor (-36) at full combat; same duck as the drums.
+	_amb.volume_db = lerpf(_amb.volume_db, lerpf(-24.0, -36.0, level) - duck * 16.0, rate)
 	_music_lull.volume_db = lerpf(_music_lull.volume_db, lull_db, rate)
 	var p := lerpf(_music.pitch_scale, lerpf(0.9, 1.08, level), 0.04)
 	_music.pitch_scale = p
@@ -217,6 +241,47 @@ static func _sqbl(t: float, f: float) -> float:
 static func _sweep(t: float, f0: float, f1: float, dur: float) -> float:
 	# Sine with linearly swept frequency (integrated phase).
 	return sin(TAU * (f0 * t + (f1 - f0) * t * t / (2.0 * dur)))
+
+
+func _to_wav_loop(samples: PackedFloat32Array) -> AudioStreamWAV:
+	## Loop variant: NO tail declick (the 5ms fade would tick at every seam) —
+	## the synth recipes above pick integer cycle counts instead.
+	var data := PackedByteArray()
+	data.resize(samples.size() * 2)
+	for i in samples.size():
+		data.encode_s16(i * 2, int(clampf(samples[i], -1.0, 1.0) * 32000.0))
+	var s := AudioStreamWAV.new()
+	s.format = AudioStreamWAV.FORMAT_16_BITS
+	s.mix_rate = RATE
+	s.data = data
+	s.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	s.loop_end = samples.size()
+	return s
+
+
+func engine_at(key: int, screen_pos: Vector2, on: bool) -> void:
+	## Persistent positional engine voices (NOT the steal-pool — the steal
+	## policy would cut a loop mid-growl). Cap 4; campaign fields 2-3 tanks.
+	if on and not _engines.has(key):
+		if _engines.size() >= 4 or _engine_wav == null:
+			return
+		var v := AudioStreamPlayer2D.new()
+		v.stream = _engine_wav
+		v.bus = "SFX"
+		v.max_distance = 700.0
+		v.attenuation = 1.0
+		v.volume_db = -18.0
+		add_child(v)
+		v.play()
+		_engines[key] = v
+	if not _engines.has(key):
+		return
+	var voice: AudioStreamPlayer2D = _engines[key]
+	if on:
+		voice.position = screen_pos
+	else:
+		voice.queue_free()
+		_engines.erase(key)
 
 
 func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
@@ -382,6 +447,52 @@ func _synth_all() -> void:
 		clang[i] = (sin(TAU * 1180.0 * t) + sin(TAU * 1620.0 * t) * 0.7 + sin(TAU * 2140.0 * t) * 0.5) \
 			* exp(-t * 13.0) * 0.35 + _nz(i) * exp(-t * 50.0) * 0.5
 	s["vest_break"] = clang
+
+	# Impact grammar split (8-vote): vest_break/tank_board carried ~12 meanings
+	# on 2 voices. Four dedicated timbres; starting values, tune by ear.
+	# ping_armor: bright detuned ricochet — a round REJECTED by armor.
+	var ping_a := _buf(0.12)
+	for i in ping_a.size():
+		var t := float(i) / RATE
+		ping_a[i] = (sin(TAU * 2600.0 * t) + sin(TAU * 3400.0 * t) * 0.6) * exp(-t * 40.0) * 0.4 \
+			+ _nz(i) * exp(-t * 90.0) * 0.35
+	s["ping_armor"] = ping_a
+	# ping_shell: duller mid-body chip — armor TAKING damage (nest/boss HP ladder).
+	var ping_s := _buf(0.2)
+	for i in ping_s.size():
+		var t := float(i) / RATE
+		ping_s[i] = (sin(TAU * 700.0 * t) + sin(TAU * 1050.0 * t) * 0.7) * exp(-t * 22.0) * 0.4 \
+			+ _nz(i) * exp(-t * 60.0) * 0.3
+	s["ping_shell"] = ping_s
+	# click_dry: ~40ms lowpassed mechanical pop — deliberate arming/empty verbs.
+	var clickd := _buf(0.05)
+	var clp := 0.0
+	for i in clickd.size():
+		var t := float(i) / RATE
+		clp = clp * 0.8 + _nz(i) * 0.2
+		clickd[i] = clp * exp(-t * 110.0) * 0.9
+	s["click_dry"] = clickd
+	# tink: tiny high casing chime.
+	var tink := _buf(0.06)
+	for i in tink.size():
+		var t := float(i) / RATE
+		tink[i] = (sin(TAU * 4200.0 * t) + sin(TAU * 4350.0 * t)) * exp(-t * 70.0) * 0.25
+	s["tink"] = tink
+
+	# Engine idle (3-vote): 1.0s seamless growl — fixed 55 Hz saw (rev's idle
+	# floor, so the technical's rising rev reads as THIS engine spooling) +
+	# intake noise + 5 Hz LFO; integer cycles -> click-free loop point.
+	var eng := _buf(1.0)
+	var eph := 0.0
+	var elp := 0.0
+	for i in eng.size():
+		var t := float(i) / RATE
+		eph += 55.0 / RATE
+		elp = elp * 0.9 + _nz(i) * 0.1
+		eng[i] = ((fmod(eph, 1.0) * 2.0 - 1.0) * 0.35 + elp * 1.0) \
+			* (0.8 + 0.2 * sin(TAU * 5.0 * t)) * 0.5
+	var eng_wav := _to_wav_loop(eng)
+	_engine_wav = eng_wav
 
 	# Tank board: mechanical clunk.
 	var clunk := _buf(0.18)
