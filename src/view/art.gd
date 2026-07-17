@@ -111,6 +111,32 @@ const TEX := {
 	"skyline_chimney": preload(SY + "decor/skyline_chimney.png"),
 	"skyline_mast": preload(SY + "decor/skyline_mast.png"),
 	"crater": preload(SY + "decor/crater.png"),
+	# --- POLYGON War / War_Map / Nature FBX bakes (p4 asset pass, forced-atlas) ---
+	"tank_trap": preload(SY + "decor/tank_trap.png"),
+	"barricade": preload(SY + "decor/barricade.png"),
+	"flak_gun": preload(SY + "decor/flak_gun.png"),
+	"trench": preload(SY + "decor/trench.png"),
+	"flag_marker": preload(SY + "decor/flag_marker.png"),
+	"radio_tower": preload(SY + "decor/radio_tower.png"),
+	"hedge": preload(SY + "decor/hedge.png"),
+	"fern2": preload(SY + "decor/fern2.png"),
+	"wreck_halftrack": preload(SY + "decor/wreck_halftrack.png"),
+	"crater_field": preload(SY + "decor/crater_field.png"),
+	"crater_water": preload(SY + "decor/crater_water.png"),
+	"mg_tripod": preload(SY + "decor/mg_tripod.png"),
+	# BattleRoyale bakes repurposed as battlefield litter (a dropped riot shield
+	# + a fallen soldier body) — the live shield enemy keeps its on-theme bombsuit.
+	"dropped_shield": preload(SY + "decor/dropped_shield.png"),
+	"fallen_merc": preload(SY + "decor/fallen_merc.png"),
+	# Apocalypse-HUD capsule pickup glyphs (clean UI-icon set): each power-up
+	# capsule floats its own icon (mine for claymore, smoke-grenade for smoke, …).
+	"cap_pierce": preload(SY + "icons/cap_pierce.png"),
+	"cap_spread": preload(SY + "icons/cap_spread.png"),
+	"cap_triple": preload(SY + "icons/cap_triple.png"),
+	"cap_rend": preload(SY + "icons/cap_rend.png"),
+	"cap_claymore": preload(SY + "icons/cap_claymore.png"),
+	"cap_smoke": preload(SY + "icons/cap_smoke.png"),
+	"cap_flash": preload(SY + "icons/cap_flash.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
@@ -306,6 +332,15 @@ const SCALE := {
 	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
 	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
 	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
+	# p4 War/War_Map/Nature props — folded to litter footprints (retuned by eye).
+	"tank_trap": 0.14, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
+	"flag_marker": 0.16, "radio_tower": 0.18, "hedge": 0.15, "fern2": 0.14,
+	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
+	"dropped_shield": 0.12, "fallen_merc": 0.2,
+	# capsule glyphs: large Apocalypse UI icons folded to pickup footprint
+	# (weapons 512x256, explosives 1024²) — retuned by eye.
+	"cap_pierce": 0.14, "cap_spread": 0.14, "cap_triple": 0.14, "cap_rend": 0.14,
+	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
@@ -376,6 +411,18 @@ const TINT := {
 	# bypassed — skyline draw site (main.gd) passes its own `sky` color to draw_texture_rect
 	"skyline_chimney": Color(0.3, 0.33, 0.38), "skyline_mast": Color(0.3, 0.33, 0.38),
 	"crater": Color(0.6, 0.6, 0.54),   # scorched ground, recedes like the wrecks
+	# p4 props: mossy/muted recede like the rest of the decor; craters + wreck
+	# darker like the scorch/hulk litter; flag stays a touch brighter (landmark).
+	"tank_trap": Color(0.72, 0.76, 0.62), "barricade": Color(0.74, 0.76, 0.64),
+	"flak_gun": Color(0.66, 0.72, 0.6), "trench": Color(0.72, 0.76, 0.64),
+	"flag_marker": Color(0.85, 0.86, 0.76), "radio_tower": Color(0.68, 0.72, 0.64),
+	"hedge": Color(0.66, 0.78, 0.58), "fern2": Color(0.64, 0.8, 0.56),
+	"wreck_halftrack": Color(0.55, 0.58, 0.52),
+	"crater_field": Color(0.6, 0.6, 0.54), "crater_water": Color(0.62, 0.68, 0.72),
+	"mg_tripod": Color(0.66, 0.7, 0.62),
+	# fallen merc: heavy desert-olive multiply to pull the BR urban-blue kit onto
+	# the battlefield palette; dropped shield muted like the wreck litter.
+	"fallen_merc": Color(0.62, 0.64, 0.44), "dropped_shield": Color(0.6, 0.64, 0.56),
 	# mil2 enemies read warm/bright (threats); vehicles olive-drab; pickups bright.
 	"m_bombsuit": Color(1.7, 1.35, 0.9), "m_contractor2": Color(1.75, 0.85, 0.68),
 	"m_insurgent3": Color(2.1, 1.7, 1.15), "m_insurgent4": Color(2.1, 1.7, 1.15),
@@ -432,6 +479,12 @@ const OUTLINE := {
 	"ghillie": true, "courier": true, "sapper": true,
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
 	"wall_sandbag": true, "wall_sandbag_end": true,
+	"tank_trap": true, "barricade": true, "flak_gun": true, "trench": true,
+	"flag_marker": true, "radio_tower": true, "hedge": true, "fern2": true,
+	"wreck_halftrack": true, "crater_field": true, "crater_water": true, "mg_tripod": true,
+	"dropped_shield": true, "fallen_merc": true,
+	"cap_pierce": true, "cap_spread": true, "cap_triple": true, "cap_rend": true,
+	"cap_claymore": true, "cap_smoke": true, "cap_flash": true,
 }
 
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
