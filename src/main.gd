@@ -122,6 +122,7 @@ var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
 var _hint_queue: Array[String] = []      # pending first-time hints, drained one at a time
 var _run_kills := 0              # this-run tally for the debrief card
+var _run_kind_kills := {}        # enemy kind → this-run kills, feeds the debrief top-prey row
 var _run_rescues := 0            # pilot ransoms this run — the signature mechanic earns a tally line
 var _run_best_streak := 0
 var _down_frames := 0            # sustained all-players-down → debrief
@@ -131,6 +132,8 @@ var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
+var _nest_ping_frame := -100      # rate-limits the MG-nest crack ping (own clock — sharing
+                                  # _deflect_frame let each mute the other within 10 frames)
 var _pilot_alarm_frame := -999    # one-shot for the pilot's ESCAPING warning tone
 var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
@@ -617,6 +620,7 @@ func _reset() -> void:
 	_hint_t = 0.0
 	_hint_queue.clear()
 	_run_kills = 0
+	_run_kind_kills.clear()
 	_run_rescues = 0
 	_downed_by = ""
 	_last_gate_tick = 0
@@ -710,8 +714,14 @@ func _input(event: InputEvent) -> void:
 	# RESTART → confirm). Consumed here so the menu doesn't also open pause.
 	if event is InputEventJoypadButton and event.pressed \
 			and event.button_index == JOY_BUTTON_START \
-			and not _menu.is_active() and (_debrief or sim.victory):
-		_reset()
+			and not _menu.is_active() and (_watching or _debrief or sim.victory):
+		if _watching:
+			# Mirrors the KEY_R replay exit — pad players had no direct way out.
+			_watching = false
+			_banners.clear()
+			_menu.open(GameMenu.Mode.TITLE)
+		else:
+			_reset()
 		get_viewport().set_input_as_handled()
 
 
@@ -1001,12 +1011,15 @@ func _consume_events() -> void:
 							and absi(ne["x"] - ev["x"]) < 14 * Fixed.ONE \
 							and absi(ne["y"] - ev["y"]) < 14 * Fixed.ONE:
 						nest_hit = true
+						# The rising HP ping IS the nest's block sound — without this
+						# flag the generic 1.7 ping below also fired the same tick.
+						armor_pinged = true
 						var nh: int = ne.get("hp", 0)
 						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
 							"tex": "fx_sparkle", "sz": 5.0, "fade": 1.8, "rate": 0.18,
 							"col": Color(0.85, 0.78, 0.5, 0.9)})
-						if Engine.get_physics_frames() - _deflect_frame >= 10:
-							_deflect_frame = Engine.get_physics_frames()
+						if Engine.get_physics_frames() - _nest_ping_frame >= 10:
+							_nest_ping_frame = Engine.get_physics_frames()
 							_sfx.play_at("vest_break", _to_screen(ev["x"], ev["y"]), -12.0,
 								1.0 + float(3 - nh) * 0.3)
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
@@ -1504,6 +1517,7 @@ func _ev_kill(ev: Dictionary) -> void:
 			"spin": randf() * TAU})
 	_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0   # kill confirms on the shooter's reticle
 	_run_kills += 1
+	_run_kind_kills[kkind] = int(_run_kind_kills.get(kkind, 0)) + 1
 	# Kill-streak: rising blip pitch + milestone combo pop.
 	var big: bool = ev.get("coin", 0) >= 25
 	if Engine.get_physics_frames() - _last_kill_frame < 90:
@@ -5492,6 +5506,15 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "SCORE %d   KILLS %d" % [sim.score, _run_kills], "color": Color(0.9, 0.92, 0.85)},
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]
+		# Top-prey row: the kill event carries kind, so the tally can say WHAT
+		# the run was spent fighting, not just how many.
+		if not _run_kind_kills.is_empty():
+			var top_kind := ""
+			for kk in _run_kind_kills:
+				if top_kind == "" or _run_kind_kills[kk] > _run_kind_kills[top_kind]:
+					top_kind = kk
+			rows.append({"text": "TOP PREY  %s x%d" % [String(top_kind).to_upper(), _run_kind_kills[top_kind]],
+				"color": Color(0.9, 0.92, 0.85)})
 		if _run_rescues > 0:
 			rows.append({"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
@@ -5532,7 +5555,8 @@ func _draw_banners(top_msg: String) -> void:
 	# keep saying "this is playback, inputs are frozen" for the whole watch.
 	if _watching:
 		var wpul := 1.0 if _motion < 0.5 else (0.7 + 0.3 * Art.pulse(0.15))
-		Art.text_center(self, "— REPLAY — R TO EXIT —", 320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
+		Art.text_center(self, "— REPLAY — %s TO EXIT —" % ("START" if Art.use_pad else "R"),
+			320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
 	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
 		var ha := minf(1.0, _hint_t * 3.0)
 		var hf := Art.font()
