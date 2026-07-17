@@ -334,7 +334,12 @@ func _draw() -> void:
 	_plate_r = clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0)
 	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
 		Rect2(2, 2, _plate_r, panel_h),
-		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.9))
+		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.65))
+	# Hairline top-light border (4v): separates the plate from bright terrain
+	# without more darkness — contrast by edge, not by mud.
+	RenderingServer.canvas_item_add_polyline(_plate_ci, PackedVector2Array([
+		Vector2(2, 2), Vector2(_plate_r, 2), Vector2(_plate_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
+	]), PackedColorArray([Color(0.5, 0.55, 0.5, 0.35)]), 1.0)
 
 	# Shop preview strip: the 4 buyables at a glance (cost + green/red
 	# affordability), matching the spend-wheel's own price coloring.

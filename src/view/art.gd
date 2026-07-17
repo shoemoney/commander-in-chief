@@ -387,7 +387,7 @@ const TINT := {
 	# grey decor rocks, not as the red enemy orbs. Threats pop, scenery
 	# recedes (see decor tints below).
 	"rusher": Color(2.1, 1.7, 1.15), "elite": Color(1.75, 0.85, 0.68),
-	"frogman": UNIT, "observer": Color(1.6, 1.2, 1.0),
+	"frogman": Color(1.35, 1.6, 1.7), "observer": Color(1.6, 1.2, 1.0),   # frogman: bright cool "wet threat" — dark bake vanished against rocks (3v)
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
 	"gunship_body": OLIVE_VEH, "gunship_barrel": OLIVE_VEH,

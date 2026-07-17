@@ -464,17 +464,17 @@ func _paint_bg(canvas: Node2D) -> void:
 			var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 			var h := Art.cell_hash(tx, base_iy + ty)
 			var shade := 0.50 + float(h % 7) * 0.010
-			var gpos := pos
-			var gsz := Vector2(64, 64)
 			var variant := (h / 7) % 4
-			if variant & 1:
-				gpos.x += 64.0
-				gsz.x = -64.0
-			if variant & 2:
-				gpos.y += 64.0
-				gsz.y = -64.0
-			canvas.draw_texture_rect(Art.tex("grass"), Rect2(gpos, gsz), false,
-				Color(shade + march * 0.14, (shade + 0.03) * (1.0 - march * 0.4), shade * 0.75 * (1.0 - march * 0.35)))
+			var gcol := Color(shade + march * 0.14, (shade + 0.03) * (1.0 - march * 0.4), shade * 0.75 * (1.0 - march * 0.35))
+			if variant == 0:
+				canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false, gcol)
+			else:
+				# Flip via transform — draw_texture_rect silently drops
+				# negative-size rects (learned the gray-void way).
+				canvas.draw_set_transform(pos + Vector2(32, 32), 0.0,
+					Vector2(-1.0 if variant & 1 else 1.0, -1.0 if variant & 2 else 1.0))
+				canvas.draw_texture_rect(Art.tex("grass"), Rect2(Vector2(-32, -32), Vector2(64, 64)), false, gcol)
+				canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			if h % 6 == 0:
 				for dc in 2 + (h % 2):
 					var dh := Art.cell_hash(tx * 3 + dc + 1, base_iy + ty)
@@ -2725,6 +2725,8 @@ const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
 const _TREE_DEAD := ["tree_dead1", "tree_dead2", "tree_dead3"]
 
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
+const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
+	"colossus_body": true, "colossus_barrel": true}
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
@@ -2756,8 +2758,13 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 	var origin := -t.get_size() / 2.0
 	if Art.outlined(tex_name):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
+		# Boss authority (7v): boss-class sprites wear a thicker WARM rim that
+		# lerps white with the shipped hit-flash — the fleet rim stays neutral.
 		var oc := Color(0.05, 0.06, 0.04, tint.a)
 		var d := 1.1 / s
+		if _BOSS_RIM.has(tex_name):
+			oc = Color(0.4, 0.1, 0.06, tint.a).lerp(Color(1, 1, 1, tint.a), clampf(_boss_flash, 0.0, 1.0))
+			d = 2.2 / s
 		for o in _OUTLINE_OFFSETS:
 			draw_texture(t, origin + o * d, oc)
 	draw_texture(t, origin, tint)
@@ -2768,14 +2775,16 @@ func _aim_angle(p: Dictionary) -> float:
 	return atan2(p["aim_y"] * PX, p["aim_x"] * PX)
 
 
-func _ground_shadow(pos: Vector2, r: float) -> void:
+func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 0.0)) -> void:
 	# Soft flattened drop-shadow so units/vehicles sit ON the ground instead of
-	# floating over it — a legacy art soft-dark card (fx_shadow) with baked falloff
-	# replaces the hard-edged squashed circle, so the shadow edge feathers out.
+	# floating over it — a legacy art soft-dark card (fx_shadow) with baked falloff.
+	# Weight-graded (7v): heavy armor passes ~0.42 so a tank visually outweighs
+	# a rifleman (panel's 0.6 was sourceless — starting at 0.42, screenshot-tuned);
+	# wading shadows pass a dimmer, cooler read (light scatters in water).
 	var sh := Art.tex("fx_shadow")
 	var ss := (r * 1.15) / (sh.get_size().x * 0.5)
 	draw_set_transform(pos + Vector2(0, r * 0.32), 0.0, Vector2(ss, ss * 0.45))
-	draw_texture(sh, -sh.get_size() / 2.0, Color(0.0, 0.03, 0.0, 0.32))
+	draw_texture(sh, -sh.get_size() / 2.0, Color(tint.r, tint.g, tint.b, a))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -2839,7 +2848,7 @@ func _draw() -> void:
 			if is_locker:
 				var lp: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)   # steady-bright under reduce-motion
 				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
-			_ground_shadow(c, 17.0)
+			_ground_shadow(c, 17.0, 0.42)
 			# Hash-picked bunker variant: bunker / bunker2 / mirrored bunker (the
 			# mirror is a free third look — angle PI + stretch -1 = h-flip).
 			var bv := Art.cell_hash(bk["x"], bk["y"] * 7) % 3
@@ -3373,7 +3382,14 @@ func _draw_pickups() -> void:
 				Color(dcol.r, dcol.g, dcol.b, 0.8))
 			draw_line(ctop + Vector2(-7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
 			draw_line(ctop + Vector2(7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
-		_spr(tex_name, ppos, 0.0, 0.55, mod)
+		# Lootable salience (4v): common crates get the capsule grammar at lower
+		# intensity — a soft safe-green ring + 2px bob (reduce-motion pins the
+		# bob at its raised pose, matching the capsule pulse-freeze).
+		var cpg := 1.0 if _motion < 0.5 else Art.pulse(0.15)
+		if pk["kind"] <= 3 and not maxed:
+			var crring := Art.safe(Color(0.5, 1.0, 0.5))
+			draw_arc(ppos, 11.0, 0, TAU, 20, Color(crring.r, crring.g, crring.b, 0.14 + cpg * 0.14), 1.0)
+		_spr(tex_name, ppos + (Vector2(0, -2.0 * cpg) if pk["kind"] <= 3 else Vector2.ZERO), 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
 		if pk["kind"] >= 4:
@@ -3447,7 +3463,7 @@ func _draw_tanks() -> void:
 			burn_mod = Color(1.3, 0.6, 0.45) if (t["burn_ticks"] / 6) % 2 == 0 else Color(0.9, 0.5, 0.4)
 		if t["occupant"] >= 0 and not t["burning"] and not sim._in_water(t["x"], t["y"]):
 			_kick_dust(t["occupant"], t["x"], t["y"], _tank_dust_prev, true)
-		_ground_shadow(c, 15.0)
+		_ground_shadow(c, 15.0, 0.42)
 		# Hull turns toward travel (eased with lerp_angle, so it swings like treads,
 		# not a swivel chair) — a sideways-driving tank no longer slides like a
 		# hovercraft with a detached barrel. Parked tanks keep their last heading.
@@ -3723,7 +3739,7 @@ func _draw_enemies() -> void:
 			# read as floating on a man's shadow — the tank uses 15.0). Drawn
 			# BEFORE the rev shake mutates epos: the shadow staying put while the
 			# body vibrates above it is what sells the revving.
-			_ground_shadow(epos, 11.0)
+			_ground_shadow(epos, 11.0, 0.42)
 			if t_lunge > 0:
 				t_face = Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0))).angle()
 				# Hold the smoothed-facing lerp at the locked line — otherwise it
@@ -4037,7 +4053,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# Ground shadow: the heli was the one unit floating untethered (drone and
 	# technical are grounded). Offset down-screen for altitude; bpos carries the
 	# hover bob, so the shadow breathes with it and the airborne read holds.
-	_ground_shadow(bpos + Vector2(0, 26), 16.0)
+	_ground_shadow(bpos + Vector2(0, 26), 16.0, 0.42)
 	_spr(body_tex, bpos, PI, 0.8, hull_mod)
 	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
 	# muzzle points down-screen at the players, same convention as the colossus.
@@ -4114,7 +4130,7 @@ func _draw_colossus() -> void:
 	var stomp := sin(float(Engine.get_physics_frames()) * 0.12) * 0.5 + 0.5
 	var cbody := cpos + Vector2(0, stomp * 2.0)
 	var csquash := 1.0 - stomp * 0.06
-	_ground_shadow(cpos, 30.0)
+	_ground_shadow(cpos, 30.0, 0.42)
 	_spr("colossus_body", cbody, PI, 1.9, mod, csquash)
 	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
@@ -4273,8 +4289,11 @@ func _draw_projectiles() -> void:
 		var egr := 4.4
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
 			false, Color(1.0, 0.3, 0.15, 0.55))
-		draw_circle(bpos, 1.6, Color(0.75, 0.9, 1.0) if fast else Color(1.0, 0.55, 0.35))
-		draw_circle(bpos, 0.9, Color(0.95, 1.0, 1.0) if fast else Color(1.0, 0.9, 0.7))
+		# Universal white-hot core inside a colored rim (4v — the all-red orb
+		# mush was HATE #3): threat hue lives on the rim, the core is ALWAYS
+		# white so every live round pops off the red-tinted chaos.
+		draw_circle(bpos, 2.6, Color(0.75, 0.9, 1.0) if fast else Color(1.0, 0.35, 0.2))
+		draw_circle(bpos, 1.6, Color(1, 1, 1))
 
 
 func _draw_players() -> void:
@@ -4308,7 +4327,10 @@ func _draw_players() -> void:
 			_kick_dust(i, p["x"], p["y"], _dust_prev, false)
 		else:
 			_dust_prev[i] = Vector2i(p["x"], p["y"])
-		_ground_shadow(pos, 7.0)
+		if sim._in_water(p["x"], p["y"]):
+			_ground_shadow(pos, 7.0, 0.18, Color(0.0, 0.04, 0.10))
+		else:
+			_ground_shadow(pos, 7.0)
 		if not p["alive"]:
 			# Downed but not gone: a greyed prone body so a waiting-for-revive
 			# teammate is visibly THERE on the field, not just a floating beacon.
@@ -4871,7 +4893,16 @@ func _draw_glow() -> void:
 			g.draw_set_transform(pos, fx["a"] + PI / 2, Vector2.ONE)
 			g.draw_texture_rect(Art.tex("fx_muzzle_fan"), Rect2(-fl * 0.7, -fl, fl * 1.4, fl), false, mc)
 			g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-			g.draw_circle(pos, sz * 0.45, Color(1.0, 1.0, 0.8, 0.8 * (0.9 - t * 0.8)))
+			g.draw_circle(pos, sz * 0.32, Color(1.0, 1.0, 0.8, 0.8 * (0.9 - t * 0.8)))
+			# First-frame-only: an oversize pure-white pop + 3 radiating slivers —
+			# the crack of the shot, gone before the next frame (4v: fan read soft).
+			if t < fx.get("rate", 0.09):
+				g.draw_circle(pos, sz * 0.9, Color(1, 1, 1, 0.9))
+				for ml in 3:
+					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
+					g.draw_line(pos + Vector2.from_angle(mla) * sz * 0.4,
+						pos + Vector2.from_angle(mla) * sz * (1.7 + float(ml % 2) * 0.5),
+						Color(1, 1, 1, 0.75), 1.2)
 		elif fx["kind"] == "spark":
 			# Ricochet: legacy art sparkle cards flung radially — armor says no.
 			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
