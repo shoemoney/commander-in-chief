@@ -789,7 +789,7 @@ func _fire_mission() -> void:
 	events.append({"t": "explosion", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
-			_kill_enemy(e, true)
+			_kill_enemy(e, true, true)
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -1204,7 +1204,10 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 	_explode(bl["x"], bl["y"], no_coin, "barrel")
 
 
-func _kill_enemy(e: Dictionary, no_coin := false) -> void:
+func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
+	## no_score: unaimed screen-wipes (airstrike) mint no score and can't feed
+	## the kill-streak either — a 100-coin buy vaulting the streak tiers was
+	## a leaderboard printer. Barrel kills (no_coin only) still score.
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	if e["kind"] == "mg_nest":
@@ -1238,13 +1241,14 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
 	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
-	score += coin * 10 * (2 if last_stand else 1)
+	if not no_score:
+		score += coin * 10 * (2 if last_stand else 1)
 	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
 	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
 	# the streak rewards aggression on the leaderboard, not the economy.
 	# The MG Nest is excluded: it's the lowest-risk target, so it can't feed the
 	# streak (nor drop the elite capsule below) despite carrying elite:true.
-	if e["kind"] != "mg_nest":
+	if e["kind"] != "mg_nest" and not no_score:
 		kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
 		kill_streak_timer = KILL_STREAK_WINDOW_TICKS
 		var streak_bonus_pct := 0
@@ -2287,6 +2291,13 @@ func _damage_colossus(amount: int) -> void:
 		victory = true
 		events.append({"t": "explosion", "x": colossus["x"], "y": colossus["y"]})
 		events.append({"t": "victory", "x": colossus["x"], "y": colossus["y"]})
+		# The finale joins the Flawless economy: a deathless Colossus clear pays
+		# the same checkpoint bonus (capped 3×) instead of ending a streak unpaid.
+		if deaths_since_gate == 0:
+			flawless_streak += 1
+			var fmult: int = mini(flawless_streak, 3)
+			score += 2000 * fmult
+			events.append({"t": "gate_flawless", "x": colossus["x"], "y": colossus["y"], "mult": fmult})
 		# Last Stand payout: the unspent War Chest converts to score.
 		score += war_chest * 10 + 5000
 		war_chest = 0
