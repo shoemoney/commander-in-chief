@@ -145,6 +145,9 @@ func _draw() -> void:
 		Color(1.0, 0.93, 0.78).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
 	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
 		Color(0.84, 0.9, 1.0).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
+	if sim.tokens > 0:
+		# Commendation tokens: minted by play, spent on the wheel's NE socket.
+		x = _text("*%d" % sim.tokens, x, y + ICON - 3.0, Color(1.0, 0.85, 0.3)) + 3.0
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
 	if sim.kill_streak >= 2:

@@ -213,6 +213,9 @@ const SHOP_VEST_COST := 60
 const SHOP_AIRSTRIKE_COST := 100
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
+const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
+const HULK_HALF_W := 16 * F_ONE      # dead-hull cover AABB (center-point tanks, unlike corner-origin bunkers)
+const HULK_HALF_H := 12 * F_ONE
 const SANDBAG_FIELD_CAP := 6         # starting value: 6 x 36px = 216px can never wall the ~592px lane
 const SANDBAG_HALF_W := 18 * F_ONE   # segment is 36x10 px — rushers must flank in under ~2s
 const SANDBAG_HALF_H := 5 * F_ONE
@@ -321,6 +324,9 @@ var kill_streak: int = 0           # consecutive kills (drives the score-bonus t
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
 var deaths_since_gate: int = 0     # for the Flawless Gate bonus (reset on gate open)
 var flawless_streak: int = 0       # consecutive deathless gates (compounds the bonus)
+var tokens: int = 0                # Commendation Orders (9/9 panel: the score->power bridge) —
+                                   # minted by PLAY (streak-20, flawless gates), never coin-buyable,
+                                   # cap 2, wiped on death. Spent via the wheel for a free supply call.
 var deaths_this_wave: int = 0      # endless: for the Clean Wave bonus
 var _prev_camera_top: int = 0
 
@@ -476,7 +482,10 @@ func _step_players(inputs: Array) -> void:
 
 		# Spend-wheel purchases work on foot and from the tank (radio op).
 		if buy_edge:
-			_try_buy(p, inp.buy - 1)
+			if inp.buy == 6:
+				_try_token_drop(p)
+			else:
+				_try_buy(p, inp.buy - 1)
 
 		if p["in_tank"] >= 0:
 			_drive_tank(i, p, inp, interact_edge)
@@ -583,8 +592,8 @@ func _step_players(inputs: Array) -> void:
 		if inp.revive:
 			_try_revive(i, p)
 
-		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0 \
-				and not _boardable_tank_near(p):
+		if interact_edge and not _try_board_tank(i, p) and not _try_salvage_hulk(p) \
+				and p["claymores"] > 0 and not _boardable_tank_near(p):
 			# Claymore: no tank in reach, so INTERACT plants a carried charge one
 			# step ALONG the aim — into the enemy lane you're already shooting,
 			# clear of your own kiting path (planting behind the aim dropped it
@@ -777,6 +786,7 @@ func _kill_player(p: Dictionary) -> void:
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
+	tokens = 0               # ...and burns any unspent Commendations (spend them or lose them)
 	if mode == "endless":
 		deaths_this_wave += 1   # ...and forfeits this wave's Clean Wave bonus
 	# Death strips Triple/Pierce/Spread (see _respawn); flag it on the (checksum-
@@ -861,6 +871,30 @@ func _supply_cost(kind: int) -> int:
 	return SUPPLY_COSTS[kind] + (wave / 3) * 10
 
 
+func _mint_token(x: int, y: int) -> void:
+	## Commendation mint: only the two already-telegraphed peaks pay (streak-20
+	## surge, flawless gate) — no new tiers to teach. Cap 2 = starting value
+	## (test: a run crossing 3 milestones holds 2). Airstrike wipes can't feed
+	## kill_streak (no_score) and the MG Nest is streak-excluded, so there is
+	## no low-risk token farm.
+	if tokens < 2:
+		tokens += 1
+		events.append({"t": "token_mint", "x": x, "y": y, "n": tokens})
+
+
+func _try_token_drop(p: Dictionary) -> void:
+	## Spend one Commendation for a free supply call (basic table 0-3, seeded
+	## roll). NO coin path in or out: not buyable with the chest, no score
+	## credit back (tokens bridge score->power; crediting score would loop).
+	if tokens <= 0:
+		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
+		return
+	tokens -= 1
+	var kind := rng.range_i(0, 3)
+	_apply_supply(p, kind)
+	events.append({"t": "token_drop", "x": p["x"], "y": p["y"], "kind": kind})
+
+
 func _try_buy(p: Dictionary, kind: int) -> void:
 	## Spend-wheel purchase: supplies radioed in, paid from the shared
 	## War Chest — the same pool that funds revives. That's the decision.
@@ -923,6 +957,21 @@ func _tank_gunner(t: int) -> int:
 	return -1
 
 
+func _try_salvage_hulk(p: Dictionary) -> bool:
+	## Interact on a smoldering hulk strips it: +2 grenades (the cannon draws
+	## from the grenade pool — same logistics), and the strip ENDS the cover
+	## (burn_ticks = 0). That is the decision: keep the wall or take the ammo.
+	## +2 = starting value; test: salvage at cap clamps, second tap is a no-op.
+	for tank in tanks:
+		if not tank["alive"] and tank["burn_ticks"] > 0 \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+			p["grenade_ammo"] = mini(GRENADE_AMMO_MAX, p["grenade_ammo"] + 2)
+			tank["burn_ticks"] = 0
+			events.append({"t": "hulk_salvage", "x": tank["x"], "y": tank["y"]})
+			return true
+	return false
+
+
 func _boardable_tank_near(p: Dictionary) -> bool:
 	## Near-miss board taps must not arm a claymore at your feet: a boardable
 	## tank just outside TANK_BOARD_RADIUS means INTERACT read as "board".
@@ -930,6 +979,11 @@ func _boardable_tank_near(p: Dictionary) -> bool:
 		var tank := tanks[t]
 		if tank["alive"] and not tank["burning"] \
 				and (tank["occupant"] < 0 or _tank_gunner(t) < 0) \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], 2 * TANK_BOARD_RADIUS):
+			return true
+		# Near-miss salvage taps must not arm a claymore either (same rule as
+		# the near-miss board guard above).
+		if not tank["alive"] and tank["burn_ticks"] > 0 \
 				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], 2 * TANK_BOARD_RADIUS):
 			return true
 	return false
@@ -1064,6 +1118,8 @@ func _step_tanks() -> void:
 	for ti in tanks.size():
 		var tank := tanks[ti]
 		if not tank["alive"]:
+			if tank["burn_ticks"] > 0:
+				tank["burn_ticks"] = tank["burn_ticks"] - 1   # hulk cover cooling off
 			continue
 		tank["fire_cd"] = maxi(0, tank["fire_cd"] - 1)
 
@@ -1117,6 +1173,10 @@ func _ignite_tank(tank: Dictionary) -> void:
 func _detonate_tank(tank: Dictionary) -> void:
 	tank["alive"] = false
 	tank["occupant"] = -1
+	# Tank Hulk (5-vote panel): the dead hull IS the cover — burn_ticks is
+	# hashed but dead-unused after death, so it becomes the hulk lifetime.
+	# Zero new fields, zero new entities; behavior change -> golden re-record.
+	tank["burn_ticks"] = HULK_TICKS
 	_explode(tank["x"], tank["y"])
 
 
@@ -1169,6 +1229,15 @@ func _step_bullets() -> void:
 			# Player-authored cover eats rounds the same way (both directions).
 			for sb in sandbags:
 				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
+					events.append({"t": "armor_block", "x": bx, "y": by})
+					dead = true
+					break
+		if not dead:
+			# Dead tanks are cover while they smolder (burn_ticks > 0): the
+			# bunker two-way rule from an asset the field already produces.
+			for hk in tanks:
+				if not hk["alive"] and hk["burn_ticks"] > 0 \
+						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
@@ -1404,6 +1473,7 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 					pl["boost_ticks"] = maxi(pl["boost_ticks"], BAIL_BOOST_TICKS * 2)
 			# One-shot view cue; events[] is checksum-excluded -> golden-safe.
 			events.append({"t": "surge", "x": e["x"], "y": e["y"]})
+			_mint_token(e["x"], e["y"])
 	if e["elite"] and e["kind"] != "mg_nest" and not no_coin:
 		# ~1-in-6 elites drop a rare capsule; otherwise the usual Ammo/Grenade.
 		# The rare table is WEIGHTED: the three offense mods (pierce/spread/
@@ -2130,6 +2200,7 @@ func _step_gates() -> void:
 				# Compounding: consecutive clean checkpoints pay more (capped 3×),
 				# rewarding sustained discipline across the campaign, not one clean gate.
 				flawless_streak += 1
+				_mint_token(SCREEN_CX, camera_top + 60 * F_ONE)
 				var fmult: int = mini(flawless_streak, 3)
 				war_chest += 50 * fmult
 				score += 2000 * fmult
@@ -2537,6 +2608,7 @@ func _damage_colossus(amount: int) -> void:
 		# the same checkpoint bonus (capped 3×) instead of ending a streak unpaid.
 		if deaths_since_gate == 0:
 			flawless_streak += 1
+			_mint_token(SCREEN_CX, camera_top + 60 * F_ONE)
 			var fmult: int = mini(flawless_streak, 3)
 			score += 2000 * fmult
 			events.append({"t": "gate_flawless", "x": colossus["x"], "y": colossus["y"], "mult": fmult})
@@ -2679,6 +2751,15 @@ func _step_enemy_bullets() -> void:
 					dead = true
 					break
 		if not dead:
+			# Dead tanks are cover while they smolder (burn_ticks > 0): the
+			# bunker two-way rule from an asset the field already produces.
+			for hk in tanks:
+				if not hk["alive"] and hk["burn_ticks"] > 0 \
+						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
+					events.append({"t": "armor_block", "x": bx, "y": by})
+					dead = true
+					break
+		if not dead:
 			for p in players:
 				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
 						and _dist_lte(bx, by, p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
@@ -2816,6 +2897,7 @@ func checksum() -> int:
 		return (a * 0x100000001B3) & 0x7FFFFFFFFFFFFFFF
 	h = feed.call(tick_count, h)
 	h = feed.call(war_chest, h)
+	h = feed.call(tokens, h)
 	h = feed.call(score, h)
 	h = feed.call(camera_top, h)
 	h = feed.call(last_gate_y, h)

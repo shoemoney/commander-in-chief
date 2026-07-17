@@ -628,3 +628,56 @@ func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 	sim._try_buy(p, 4)
 	Runner.T.eq(sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP, "field cap holds at 6")
 	Runner.T.eq(sim.war_chest, chest0, "capped buy denies without charging")
+
+
+func test_commendation_tokens_mint_cap_wipe_and_spend() -> void:
+	var sim := SimWorld.new(17, 1)
+	var p := sim.players[0]
+	# Mint rides the streak-20 surge: stage 19 and land the 20th kill.
+	sim.kill_streak = 19
+	sim.kill_streak_timer = 600
+	sim._spawn_enemy(p["x"], p["y"] - 40 * SimWorld.F_ONE, false)
+	sim._kill_enemy(sim.enemies[sim.enemies.size() - 1])
+	Runner.T.eq(sim.tokens, 1, "streak-20 mints a Commendation")
+	sim._mint_token(0, 0)
+	sim._mint_token(0, 0)
+	Runner.T.eq(sim.tokens, 2, "cap 2 kills hoarding (3rd milestone mints nothing)")
+	# Spend: buy=6 wheel release — a free supply call, chest untouched.
+	var chest0: int = sim.war_chest
+	var spend := SimInput.new()
+	spend.buy = 6
+	sim.step([spend])
+	Runner.T.eq(sim.tokens, 1, "token drop spends exactly one")
+	Runner.T.eq(sim.war_chest, chest0, "token spend never touches the War Chest")
+	# Wipe on death: spend them or lose them.
+	sim._kill_player(p)
+	Runner.T.eq(sim.tokens, 0, "death burns unspent Commendations")
+
+
+func test_tank_hulk_covers_then_salvage_strips_it() -> void:
+	var sim := SimWorld.new(19, 1)
+	var p := sim.players[0]
+	sim.tanks.clear()
+	var ty: int = sim.camera_top + 200 * SimWorld.F_ONE
+	sim.tanks.append({"x": 300 * SimWorld.F_ONE, "y": ty, "alive": true,
+		"burning": true, "fuel": 0, "burn_ticks": 1, "fire_cd": 0, "occupant": -1})
+	sim._detonate_tank(sim.tanks[0])
+	Runner.T.eq(sim.tanks[0]["burn_ticks"], SimWorld.HULK_TICKS, "dead hull arms the hulk timer")
+	# Bullets die on the smoldering hull — both directions.
+	sim.bullets.append({"x": 300 * SimWorld.F_ONE, "y": ty, "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim.enemy_bullets.append({"x": 300 * SimWorld.F_ONE, "y": ty, "vx": 0, "vy": 0, "ttl": 10})
+	sim._step_bullets()
+	sim._step_enemy_bullets()
+	Runner.T.eq(sim.bullets.size(), 0, "player bullet dies on the hulk")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "enemy bullet dies on the hulk")
+	# Salvage: +2 grenades, cover stripped, second tap a no-op.
+	p["x"] = 300 * SimWorld.F_ONE
+	p["y"] = ty
+	p["grenade_ammo"] = 0
+	Runner.T.ok(sim._try_salvage_hulk(p), "interact in reach salvages the hulk")
+	Runner.T.eq(p["grenade_ammo"], 2, "salvage pays +2 grenades")
+	Runner.T.eq(sim.tanks[0]["burn_ticks"], 0, "salvage strips the cover with it")
+	Runner.T.ok(not sim._try_salvage_hulk(p), "a stripped hulk pays nothing twice")
+	sim.bullets.append({"x": 300 * SimWorld.F_ONE, "y": ty, "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.eq(sim.bullets.size(), 1, "stripped hulk no longer blocks")

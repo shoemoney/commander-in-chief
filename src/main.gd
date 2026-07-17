@@ -196,11 +196,12 @@ const WHEEL_ITEMS := [
 	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST"},
 	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE"},
 	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS"},
+	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "SUPPLY CALL"},   # Commendation spend — costs a token, never coins
 ]
 const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
 # 8-way wheel: compass = the classic four, SW diagonal = sandbags, other
 # diagonals empty (-1) so a sloppy flick can never buy something unnamed.
-const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, -1]   # E,SE,S,SW,W,NW,N,NE
+const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, 5]   # E,SE,S,SW,W,NW,N,NE(token)
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
@@ -230,7 +231,10 @@ const _EVENT_SOUND := {
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"claymore_plant": ["tank_board", -6.0, 1.6],
 	"sandbag_plant": ["tank_board", -7.0, 1.3],   # dig-in thump between claymore clunk (1.6) and board (1.0)
-	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone   # deliberate arming CLUNK (sapper's ambient clink is -15)
+	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
+	"token_mint": ["buy", -4.0, 1.8],       # commendation chime: the buy jingle a fourth up
+	"token_drop": ["buy", -4.0, 1.2],       # spending it sounds like the buy it is
+	"hulk_salvage": ["tank_board", -6.0, 0.8],  # heavy strip-the-wreck clunk   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
@@ -1315,6 +1319,15 @@ func _consume_events() -> void:
 				_forks.append({"y": ev["y"]})
 			"gate_open":
 				_ev_gate_open(ev)
+			"token_mint":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext", "size": 12,
+					"rate": 0.012, "text": "COMMENDATION *%d" % ev.get("n", 1), "col": Color(1.0, 0.85, 0.3)})
+			"token_drop":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "SUPPLY CALL — " + BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.9, 0.5)})
+			"hulk_salvage":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.016, "text": "+2 GRENADES — COVER STRIPPED", "col": Color(1.0, 0.8, 0.45)})
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
@@ -3318,6 +3331,18 @@ func _draw_pickups() -> void:
 
 
 func _draw_tanks() -> void:
+	# Smoldering hulk = live cover: a faint pulsing frame around the dead hull
+	# while burn_ticks holds, so the two-way bullet block (and its expiry) is
+	# a truthful telegraph, not invisible physics.
+	for hk in sim.tanks:
+		if not hk["alive"] and hk["burn_ticks"] > 0:
+			var hp2 := _to_screen(hk["x"], hk["y"])
+			if hp2.y > -20.0 and hp2.y < 380.0:
+				var ha := 0.14 + Art.pulse(0.3) * 0.1
+				if hk["burn_ticks"] < 180:
+					ha *= float(hk["burn_ticks"]) / 180.0   # cover fading out
+				draw_rect(Rect2(hp2 - Vector2(16, 12), Vector2(32, 24)),
+					Color(1.0, 0.75, 0.4, ha), false, 1.5)
 	for ti in sim.tanks.size():
 		var t: Dictionary = sim.tanks[ti]
 		if not t["alive"]:
@@ -5299,8 +5324,9 @@ func _draw_wheel() -> void:
 			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
 			var ang := s * TAU / 8.0
 			var ipos := c + Vector2.from_angle(ang) * 31.0
-			var acost: int = sim._supply_cost(item["kind"])   # wave-scaled in endless
-			var afford: bool = sim.war_chest >= acost
+			var is_token: bool = int(item["kind"]) == 5
+			var acost: int = 1 if is_token else sim._supply_cost(item["kind"])   # wave-scaled in endless
+			var afford: bool = (sim.tokens >= 1) if is_token else (sim.war_chest >= acost)
 			var selected: bool = _wheel[i]["sel"] == s
 			# Socket sprite authored nub-down (north slot); +90° per sector
 			# keeps the connector nub pointing at the hub.
@@ -5322,8 +5348,9 @@ func _draw_wheel() -> void:
 			# chaotic pixels on screen, exactly where the shadow matters most.
 			# Width-centered like the stock line below — the fixed -7 anchor let a
 			# 3-digit cost lean right of its socket while "5" floated off-center.
-			var costw := f.get_string_size(str(acost), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			Art.text(self, str(acost), ipos + Vector2(-costw / 2.0, 24), 8,
+			var cost_txt := ("%d*" % acost) if is_token else str(acost)
+			var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			Art.text(self, cost_txt, ipos + Vector2(-costw / 2.0, 24), 8,
 				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
 			# Current stock vs cap under each socket — the buy decision no longer
 			# needs an eye-flick to the corner HUD.
@@ -5333,6 +5360,7 @@ func _draw_wheel() -> void:
 				1: stock = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
 				2: stock = "VEST ON" if p["vest"] else "NO VEST"
 				4: stock = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
+				5: stock = "%d* HELD" % sim.tokens
 			if stock != "":
 				# Stock readout is the buy decision — full-alpha warm white, warm
 				# red the moment the pool it reads is empty.
@@ -5360,7 +5388,8 @@ func _draw_wheel() -> void:
 			# unaffordable pick tints its socket red, so the cue says so too
 			# (release on it fires the deny path, not a buy).
 			var cue_item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[_wheel[i]["sel"]]]
-			var cue_afford: bool = sim.war_chest >= sim._supply_cost(cue_item["kind"])
+			var cue_afford: bool = (sim.tokens >= 1) if int(cue_item["kind"]) == 5 \
+				else sim.war_chest >= sim._supply_cost(cue_item["kind"])
 			var cue_l := "RELEASE TO BUY · " if cue_afford else "CAN'T AFFORD · "
 			var cue_r := " CANCEL"
 			var wl := f.get_string_size(cue_l, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x

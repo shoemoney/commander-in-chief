@@ -122,13 +122,21 @@ const SEED := 0xDEADBEEF
 ## miniboss bounty honors PAYDAY, near-miss board taps no longer arm claymores, and _dist_lte
 ## gains a byte-identical axis early-out. Campaign torture opens gates + dies broke -> all
 ## samples moved in both modes.
+## RE-RECORDED (2026-07-17, mechanics-panel drain — Commendation tokens + Tank Hulk): the
+## 9/9-vote score->power bridge adds hashed `tokens` right after war_chest (structural shift:
+## every sample in BOTH modes moves even at 0), minted at the streak-20 surge the campaign
+## torture reaches; and dead tanks now smolder as two-way bullet cover for HULK_TICKS
+## (burn_ticks reused — no new field, but the torture torches tanks and its bullets/interacts
+## now meet the hulk, so the trajectory itself moves). Same pass, PROVEN golden-inert and NOT
+## part of this re-record: airburst, route fork, supply drop, broadcast tower, tank crew,
+## sandbags (each verified byte-identical before this batch landed).
 const GOLDEN: Array[int] = [
-	443318991112710326,
-	4217651455593738690,
-	894008368557221171,
-	2151557553241639539,
-	5185034305890893509,
-	3832786556833687470,
+	4453733492576508338,
+	4944866089165084746,
+	7125974280262788753,
+	768533872601425451,
+	6921375637888808095,
+	3827163771206595380,
 ]
 
 
@@ -209,12 +217,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## fuse/coin-neutral, Triple+Spread 5-fan via SPREAD2, shop score parity). Both parents had
 ## re-recorded independently; new hashed fields e["hp"] and barrel fuse_ticks -> new stream.
 const ENDLESS_GOLDEN: Array[int] = [
-	1341746022025034088,
-	6926027603724055972,
-	1420275249532216296,
-	3889216549789410096,
-	3438977064764125944,
-	413032571106888000,
+	9130899055408422002,
+	5882840635403858538,
+	8211017752628541534,
+	4397580517075479990,
+	6964630769468080526,
+	8205430538694322022,
 ]
 
 
