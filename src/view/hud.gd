@@ -17,6 +17,8 @@ var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jump
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
 var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
+var _fit_right := RIGHT    # RIGHT, minus the corner reserved for CB/RM pips when either is live
+                          # (so row-0 chips stop short instead of drawing under the pips)
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
@@ -128,6 +130,10 @@ func _draw() -> void:
 	if _disp_score < 0.0:
 		_disp_score = float(sim.score)
 
+	# When a CB/RM pip is live it owns the top-right corner — pull the chip
+	# fit-bound in by its width so the rightmost row-0 chip can't draw under it
+	# (the pip is the readout the players who set those toggles rely on).
+	_fit_right = RIGHT - (18.0 if (Art.colorblind or main._motion < 0.5) else 0.0)
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
 	var y := 6.0
@@ -146,12 +152,12 @@ func _draw() -> void:
 			var sc := Vector2(x + 4.0, y + ICON / 2.0)
 			# Dim full-circle track under the drain, so remaining time reads
 			# against a whole instead of a floating partial arc.
-			draw_arc(sc, 4.5, 0, TAU, 8, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
+			draw_arc(sc, 4.5, 0, TAU, 20, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
 			if main._motion < 0.5:
 				# REDUCE MOTION: quarter-snapped instead of a per-frame drain —
 				# the ring steps 4 times per window rather than animating.
 				sfrac = ceilf(sfrac * 4.0) / 4.0
-			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 8, scol, 1.5)
+			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 20, scol, 1.5)
 			x += 13.0
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
 			# ring alone only reads "streak alive", not "how close".
@@ -194,24 +200,27 @@ func _draw() -> void:
 			elif sim.intermission_ticks < 120:
 				shop_col = Color(1.0, 0.6, 0.3)
 			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
-			x = _text("SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y + ICON - 3.0,
-				shop_col) + 10.0
+			x = _stat("hud_gunshop", "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y,
+				shop_col)
 		else:
-			x = _text("WAVE %d" % sim.wave, x, y + ICON - 3.0) + 8.0
+			x = _stat("hud_flag", "WAVE %d" % sim.wave, x, y) - 2.0
 			# Live wave-clear dashboard FIRST: when the row overflows, the
 			# push-or-hold gauge must survive and the vanity chips must drop —
 			# it used to be the other way around, vanishing exactly mid-chaos.
 			var alive := 0
 			for e in sim.enemies:
-				if e["alive"]:
+				# The pilot is an optional side objective — the sim's own
+				# _wave_hostiles_cleared() skips it, so counting it here made the
+				# HUD hunt one more "hostile" that can't be shot (rescued by touch).
+				if e["alive"] and e["kind"] != "pilot":
 					alive += 1
 			var remaining: int = alive + sim.wave_pending
 			# The wave's starting budget (same formula _start_wave uses).
 			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
 				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
 			var htxt := "HOSTILES %d" % remaining
-			if _fits(x, _tw(htxt) + 54.0):
-				x = _text(htxt, x, y + ICON - 3.0, Color(1.0, 0.55, 0.4)) + 6.0
+			if _fits(x, ICON + 3.0 + _tw(htxt) + 54.0):
+				x = _stat("hud_skull", htxt, x, y, Color(1.0, 0.55, 0.4)) - 4.0
 				var cleared := 1.0 - float(remaining) / float(wave_total)
 				_mini_bar(Rect2(x, y + 2, 40, 9), cleared, Art.safe(Color(0.4, 0.85, 0.4)))
 				x += 48.0
@@ -238,9 +247,20 @@ func _draw() -> void:
 			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
 			if sim.wave_mod > 0:
 				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]
+				# Icon badge per mutator (every other threat callout got one in p3):
+				# lightning=fast spawns, skull=elites, target=spotted, coin=double
+				# bounties, radiation=hazard field (vision dims), fire=frenzy speed.
+				var micons: Array[String] = ["", "hud_lightning", "hud_skull", "hud_target",
+					"icon_coin", "hud_radiation", "hud_fire"]
 				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
-				if mchip != "" and _fits(x, _tw(mchip) + 8.0):
-					x = _text(mchip, x, y + ICON - 3.0, Color(1.0, 0.6, 0.35)) + 8.0
+				if mchip != "" and _fits(x, ICON + 3.0 + _tw(mchip) + 8.0):
+					var mcol := Color(1.0, 0.6, 0.35)
+					# icon_coin is a colored bake — keep it gold; the white map
+					# glyphs take the chip tint.
+					var micon: String = micons[sim.wave_mod]
+					draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
+						Color.WHITE if micon == "icon_coin" else mcol)
+					x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
 	else:
 		# SECTOR n/5: campaign progress toward the Foundry finale.
 		var opened := 0
@@ -266,10 +286,7 @@ func _draw() -> void:
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
 	# can manage — it climbs while the camera isn't advancing, drains on push.
 	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
-		# The punishment telegraph outranks vanity chips: on a full row the
-		# gauge's fixed 94px footprint ran off the 640px viewport — clamp it
-		# back over the tail of whatever optional chip came before.
-		x = minf(x, RIGHT - 94.0)
+
 		# A closed gate/boss/colossus pinning the camera means advancing is
 		# impossible until the fight is won — the "advance!" PRESSURE read would be
 		# lying, so swap it for the real objective and drop the climbing fill.
@@ -279,15 +296,30 @@ func _draw() -> void:
 					and g["y"] >= sim.camera_top:
 				gate_locked = true
 				break
+		# The punishment telegraph outranks vanity chips: clamp back over the
+		# tail of whatever optional chip came before, by MEASURED width — the
+		# old fixed 94px was narrower than both the 'PRESSURE'+bar row (the
+		# bar's dark well overpainted the label's last ~22px) and 'CLEAR THE
+		# GATE' (115px, which ran past the 640px viewport on a full row).
 		if gate_locked:
+			var gtxt := "CLEAR THE GATE"
+			x = minf(x, RIGHT - _tw(gtxt))
+			# Dark backing (the _pip plate color) over the clamped footprint — the
+			# gauge deliberately overlaps the previous chip's tail, so separate the
+			# two strings instead of overprinting them.
+			draw_rect(Rect2(x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
 			var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-			_text("CLEAR THE GATE", x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+			_text(gtxt, x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+			row_r = x + _tw(gtxt)
 		else:
+			var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
+			x = minf(x, RIGHT - (pw + 48.0))
 			var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-			_text("PRESSURE", x, y + ICON - 3.0, Color(1.0, 0.55, 0.3))
-			_mini_bar(Rect2(x + 48, y + 2, 46, 9), pf,
+			draw_rect(Rect2(x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+			_stat("hud_lightning", "PRESSURE", x, y, Color(1.0, 0.55, 0.3))
+			_mini_bar(Rect2(x + pw, y + 2, 46, 9), pf,
 				Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
-		row_r = x + 94.0
+			row_r = x + pw + 48.0
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame.
@@ -307,8 +339,9 @@ func _draw() -> void:
 			var cost: int = sim._supply_cost(kind)
 			var afford: bool = sim.war_chest >= cost
 			var scol := Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4)
-			# "!" suffix: affordability readable without color vision.
-			sx = _stat(icon, str(cost) + ("" if afford else "!"), sx, ry, scol)
+			# "×" suffix: affordability readable without color vision — same mark
+			# the spend wheel (the primary buy surface) draws beside its sockets.
+			sx = _stat(icon, str(cost) + ("" if afford else "×"), sx, ry, scol)
 		ry += 16.0
 
 	# Player rows.
@@ -337,20 +370,48 @@ func _draw() -> void:
 					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
 				else:
 					col = Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3)
-				# "LOW" tag = non-color affordability cue (cyan-vs-red is still
-				# color-only for protan players even with colorblind mode on).
-				var rlabel := ("REVIVE %d" if afford else "REVIVE %d · LOW") % cost
+				# "×" tag = non-color affordability cue (cyan-vs-red is still
+				# color-only for protan players even with colorblind mode on) —
+				# one dialect with the shop strip and the spend wheel's socket mark.
+				var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
 				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
-				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0)
+				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
+					Color.WHITE, i == 1)
 		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
-			var gcol_tank := Color(0.6, 0.85, 1.0) if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX \
-				else Color(0.95, 0.96, 0.9)
+			var gcol_tank := Color(0.95, 0.96, 0.9)
+			if p["grenade_ammo"] == 0:
+				# 0 shells = the cannon is dead — same proactive dry escalation as
+				# MG ammo (the old dry-flash only fired AFTER a wasted attempt).
+				gcol_tank = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+				gcol_tank = Color(0.6, 0.85, 1.0)
+			var tg_x := px
 			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
-			if t["burning"] and _mblink(8):
-				var bx := _text("BAIL OUT!", px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
-				Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0)
+			# Cannon cooldown (45t — longer than bash or grenade): the same draining
+			# ring every other fire cooldown got, so a mid-cooldown shot reads as
+			# "wait a beat", not dropped input. The cannon draws from the grenade
+			# pool, so the ring rides the grenade chip.
+			if t["fire_cd"] > 0:
+				var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
+				draw_arc(Vector2(tg_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
+				draw_arc(Vector2(tg_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+					-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			if t["burning"]:
+				if _mblink(8):
+					# The 3s fuse gets a number, like every other lethal window on
+					# this HUD (RALLYING/fuel/SHOP OPEN) — ceil grammar from the
+					# fuel dial, so it reads 3s → 2s → 1s → boom.
+					var bx := _text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+					Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
+						Color.WHITE, i == 1)
+			else:
+				# The sim decrements pierce/spread/rend/smoke unconditionally while
+				# riding — without the shared chip row a Trench Gun expired invisibly
+				# mid-ride and the 2s red expiry warning could never fire in a tank.
+				px = _buff_chips(p, px, ry, i)
 		else:
 			# Low-ammo escalation: amber under 20, blinking red when dry.
 			var ammo: int = p["mg_ammo"]
@@ -382,7 +443,11 @@ func _draw() -> void:
 			px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
 			# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 			var gcol := Color(0.95, 0.96, 0.9)
-			if p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+			if p["grenade_ammo"] == 0:
+				# Proactive dry state, matching the MG ammo escalation — the dry-flash
+				# below only fires AFTER a wasted throw attempt.
+				gcol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 				gcol = Color(0.6, 0.85, 1.0)
 			if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
 				gcol = Color(1.0, 0.3, 0.25)
@@ -403,40 +468,15 @@ func _draw() -> void:
 			var roll_x := px
 			var roll_ready: bool = p["roll_cd"] == 0
 			Art.draw_glyph(self, "roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
-				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6))
+				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6), i == 1)
 			px = roll_x + ICON + 2.0
 			if p["roll_cd"] > 0:
 				var rfrac := clampf(float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS), 0.0, 1.0)
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
-					-PI / 2, -PI / 2 + TAU * (1.0 - rfrac), 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-			if p["vest"]:
-				draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
-				px += ICON + 2.0
-			# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
-			# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
-			if p["pierce_ticks"] > 0:
-				# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
-				# icon is the non-color channel (pierce+rend both active = twin rifles
-				# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
-				px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)))
-			if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
-				px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)))
-			if p["triple"]:
-				px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
-			if p["rend_ticks"] > 0:
-				# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
-				# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
-				px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)))
-			if p["smoke_ticks"] > 0:
-				px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)))
-			# Carried claymore charges: a count, not a countdown — and the verb
-			# glyph rides along so "how do I plant this" never dead-ends here.
-			if p["claymores"] > 0:
-				px = _stat("wep_claymore", "x%d" % p["claymores"], px, ry, Color(0.75, 0.9, 0.6))
-				Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0)
-				px += 12.0
+					-PI / 2, -PI / 2 + TAU * rfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			px = _buff_chips(p, px, ry, i)
 			# Live status pips: adrenaline speed-boost + wading — state you feel in
 			# the hands, surfaced so it also reads on the HUD.
 			if p["boost_ticks"] > 0:
@@ -455,10 +495,24 @@ func _draw() -> void:
 func _accessibility_pips() -> void:
 	var acc_y := 8.0
 	if Art.colorblind:
-		_text("CB", RIGHT - _tw("CB"), acc_y, Color(0.6, 0.85, 1.0, 0.85))
+		_pip_plate("CB", acc_y)
+		_text("CB", RIGHT - _tw("CB"), acc_y, Art.safe(Color(0.6, 0.85, 1.0, 0.85)))
 		acc_y += 11.0
 	if main._motion < 0.5:
+		_pip_plate("RM", acc_y)
 		_text("RM", RIGHT - _tw("RM"), acc_y, Art.safe(Color(0.75, 0.95, 0.7, 0.85)))
+
+
+## Dark backing behind a corner pip — the pips draw over the live battlefield with
+## no panel under them (the corner plate is top-LEFT), so they washed out on bright
+## grass/water. A small scrim rect restores contrast without a full plate.
+func _pip_plate(txt: String, py: float) -> void:
+	var w := _tw(txt)
+	# Kept fully left of RIGHT (was overhanging by 1px). 0.8 fill + a faint hairline
+	# so the pip holds contrast over an explosion flash or bright water, not just grass.
+	var r := Rect2(RIGHT - w - 3.0, py - 1.0, w + 3.0, 10.0)
+	draw_rect(r, Color(0.05, 0.07, 0.05, 0.8))
+	draw_rect(r, Color(0.7, 0.75, 0.7, 0.35), false, 1.0)
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
@@ -474,6 +528,40 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
 	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
 	return _text("%ds" % maxi(0, (t["fuel"] + 59) / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0   # ceil: "0s" only when actually empty
+
+
+## Vest + timed-buff + claymore chip run, shared by the on-foot AND in-tank player
+## rows — the sim decrements the buff timers unconditionally while riding, so the
+## tank row must show (and expiry-warn) the same chips instead of dropping them.
+func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
+	if p["vest"]:
+		draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
+		px += ICON + 2.0
+	# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
+	# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
+	if p["pierce_ticks"] > 0:
+		# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
+		# icon is the non-color channel (pierce+rend both active = twin rifles
+		# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
+		px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)))
+	if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
+		px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)))
+	if p["triple"]:
+		px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
+	if p["rend_ticks"] > 0:
+		# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
+		# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
+		px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)))
+	if p["smoke_ticks"] > 0:
+		px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)))
+	# Carried claymore charges: a count, not a countdown — and the verb
+	# glyph rides along so "how do I plant this" never dead-ends here.
+	if p["claymores"] > 0:
+		px = _stat("wep_claymore", "x%d" % p["claymores"], px, ry, Color(0.75, 0.9, 0.6))
+		Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
+			Color.WHITE, pi == 1)
+		px += 12.0
+	return px
 
 
 ## Exponential catch-up toward `target`, snapping once close — a big jump
@@ -546,7 +634,7 @@ func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> fl
 
 ## Right-margin fit test for an optional chip of pixel-width `w` starting at `x`.
 func _fits(x: float, w: float) -> bool:
-	return x + w <= RIGHT
+	return x + w <= _fit_right
 
 
 ## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).

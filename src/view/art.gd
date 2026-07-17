@@ -3,8 +3,14 @@ extends RefCounted
 ## Sprite registry for the view. Units/vehicles/props are top-down renders of
 ## legacy 3D pack Military 3D models, baked to sprites by tools/bake_sprites.gd
 ## (see assets/legacy-art/). Ground tiles, projectiles and FX remain Kenney CC0
-## (kenney.nl) — legacy art ships no seamless 2D tilesets. View-layer only; the sim
-## never touches textures.
+## (kenney.nl). POLYGON_Nature DOES ship tiling terrain PNGs (vendor
+## Ground_Textures/: Grass, Mud, Sand + normals) — swapping the ground is
+## parked on an art-direction call: painterly terrain vs the pixel-integer
+## look. View-layer only; the sim never touches textures.
+##
+## VERIFIED non-fits (asset loops: skip): City/Nightclubs/Heist/Gang_Warfare/
+## Spy_Kit/Racer are off-theme (urban/neon) for this jungle war; War_Map is WWI
+## tabletop props; no owned pack ships audio (all SFX/music stay synthesized).
 ##
 ## SCALE folds each legacy art render down to the on-screen footprint of the Kenney
 ## sprite it replaced, so the draw calls in main.gd keep their original scale
@@ -42,7 +48,9 @@ const TEX := {
 	"icon_ammo": preload(SY + "icons/icon_ammo.png"),
 	"icon_grenade": preload(SY + "icons/icon_grenade.png"),
 	"icon_coin": preload(SY + "icons/icon_coin.png"),
-	"icon_fuel": preload(SY + "icons/icon_fuel.png"),
+	# Referenced nowhere (bake tools only write the PNGs) — commented out like
+	# hudfx_glow/hudfx_dmgdir above: ~270KB of boot VRAM for zero drawn pixels.
+	#"icon_fuel": preload(SY + "icons/icon_fuel.png"),
 	"icon_vest": preload(SY + "icons/icon_vest.png"),
 	"icon_skull": preload(SY + "icons/icon_skull.png"),
 	"icon_medal": preload(SY + "icons/icon_medal.png"),
@@ -56,6 +64,8 @@ const TEX := {
 	"hud_gunshop": preload(SY + "hud/ICON_Map_GunShop.png"),
 	"hud_vehicle": preload(SY + "hud/ICON_Map_Vehicle.png"),
 	"hud_lightning": preload(SY + "hud/ICON_Map_Lightning.png"),
+	"hud_fire": preload(SY + "hud/ICON_Map_Fire.png"),
+	"hud_radiation": preload(SY + "hud/ICON_Map_Radiation.png"),
 	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
 	"ui_wheel_socket": preload(SY + "ui/wheel_socket.png"),
 	"ui_bar_frame": preload(SY + "ui/bar_frame.png"),
@@ -69,13 +79,19 @@ const TEX := {
 	"ui_menu_button": preload(SY + "ui/menu_button.png"),
 	"ui_menu_button_sel": preload(SY + "ui/menu_button_sel.png"),
 	"ui_reticle": preload(SY + "ui/reticle.png"),
+	# Weapon-state reticle silhouettes (Apocalypse HUD) — pierce/spread stop being
+	# hue-only signals (protan-safe). Bracket_Sml is byte-identical to ui_reticle,
+	# so the default keeps its file; these two are genuinely different shapes.
+	"ui_ret_spread": preload(SY + "hud/SPR_HUD_Reticle_Bracket_Shotgun.png"),  # 128x256 — draw at half width
+	"ui_ret_pierce": preload(SY + "hud/SPR_HUD_Reticle_Circle_Med.png"),
 	"ui_vignette": preload(SY + "ui/vignette.png"),
 	# Apocalypse HUD screen-space combat-feedback cards.
 	"hudfx_hitlines": preload(SY + "hud/hudfx_hitlines.png"),
 	"hudfx_blood": preload(SY + "hud/hudfx_blood.png"),
 	"hudfx_dmgvig": preload(SY + "hud/hudfx_dmgvig.png"),
-	"hudfx_glow": preload(SY + "hud/hudfx_glow.png"),
-	"hudfx_dmgdir": preload(SY + "hud/hudfx_dmgdir.png"),
+	# hudfx_glow / hudfx_dmgdir: preloaded here for months, referenced nowhere —
+	# ~0.7 MB of VRAM at boot for zero drawn pixels. Files stay for when a
+	# damage-direction or glow pass actually wants them.
 	# --- legacy art Military decor (war-torn battlefield litter) ---
 	"barrel": preload(SY + "decor/barrel.png"),
 	"crate_stack": preload(SY + "decor/crate_stack.png"),
@@ -87,7 +103,7 @@ const TEX := {
 	"barbedwire": preload(SY + "decor/barbedwire.png"),
 	"barrier": preload(SY + "decor/barrier.png"),
 	"ammobox": preload(SY + "decor/ammobox.png"),
-	"landmine": preload(SY + "decor/landmine.png"),
+	#"landmine": preload(SY + "decor/landmine.png"),
 	# Terrain/skyline set (War FBX bakes). Bridges are grey concrete terrain,
 	# skyline pieces are horizon silhouettes (side views, drawn dark, no outline).
 	"bridge_mid": preload(SY + "decor/bridge_mid.png"),
@@ -125,14 +141,17 @@ const TEX := {
 	"grass": preload(KN + "grass.png"),
 	"dirt": preload(KN + "dirt.png"),
 	"sand": preload(KN + "sand.png"),
-	"bullet": preload(KN + "bullet.png"),
-	"enemy_bullet": preload(KN + "enemy_bullet.png"),
-	"grenade": preload(KN + "grenade.png"),
+	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
+	# live draw site moved on long ago: player rounds are procedural tracers +
+	# fx_bullettrail streaks, enemy fire is the red-streak orb, thrown frags wear
+	# the wep_grenade bake (AP shells tank_shell), and every smoke puff draws
+	# fx_smoke. Dead preloads cost VRAM and mislead asset audits; skip in loops.
+	# Explosion frames: VERIFIED vendor non-match (no owned pack ships explosion
+	# art — Particle_FX is crystals/trails/rings). Keep Kenney; skip in asset loops.
 	"explosion0": preload(KN + "explosion0.png"),
 	"explosion1": preload(KN + "explosion1.png"),
 	"explosion2": preload(KN + "explosion2.png"),
 	"explosion3": preload(KN + "explosion3.png"),
-	"smoke": preload(KN + "smoke.png"),
 	# --- legacy 3D pack Particle FX (2D textures, assets/legacy-art/fx/) ---
 	"fx_bullettrail": preload(SY + "fx/fx_bullettrail.png"),
 	"fx_smoke": preload(SY + "fx/fx_smoke_01.png"),
@@ -150,7 +169,7 @@ const TEX := {
 	"fx_impactdark": preload(SY + "fx/fx_impactdark.png"),
 	"fx_wind": preload(SY + "fx/fx_wind.png"),
 	"fx_fumes4": preload(SY + "fx/fx_fumes4.png"),
-	"fx_halfcircle": preload(SY + "fx/fx_halfcircle.png"),
+	#"fx_halfcircle": preload(SY + "fx/fx_halfcircle.png"),  # 175KB, never drawn
 	"fx_swipe2": preload(SY + "fx/fx_swipe2.png"),
 	# Semicircle flash card (512x256, flat edge at BOTTOM — orient flat edge to muzzle).
 	"fx_muzzle_fan": preload(SY + "fx/fx_muzzle_fan.png"),
@@ -162,14 +181,14 @@ const TEX := {
 	"m_insurgent5": preload(SY + "mil2/insurgent5.png"),
 	"m_pilot": preload(SY + "mil2/pilot.png"),
 	"m_soldier2": preload(SY + "mil2/soldier2.png"),
-	"m_apc": preload(SY + "mil2/apc.png"),
+	#"m_apc": preload(SY + "mil2/apc.png"),
 	"m_radar_tank": preload(SY + "mil2/radar_tank.png"),
 	"m_rocket_truck": preload(SY + "mil2/rocket_truck.png"),
 	"m_jet": preload(SY + "mil2/jet.png"),
 	"m_heli_transport": preload(SY + "mil2/heli_transport.png"),
 	"m_heli_attack2": preload(SY + "mil2/heli_attack2.png"),
 	"m_drone": preload(SY + "mil2/drone.png"),
-	"m_light_tank": preload(SY + "mil2/light_tank.png"),
+	#"m_light_tank": preload(SY + "mil2/light_tank.png"),
 	"m_technical": preload(SY + "mil2/technical.png"),
 	# Wreck variants: same vehicle art, but muted/small/outlined for battlefield
 	# litter (see SCALE/TINT below) — dead hulks, not live vehicles.
@@ -177,11 +196,11 @@ const TEX := {
 	"wreck_technical": preload(SY + "mil2/technical.png"),
 	"wreck_light_tank": preload(SY + "mil2/light_tank.png"),
 	"wep_grenade": preload(SY + "mil2/wep_grenade.png"),
-	"wep_rpg": preload(SY + "mil2/wep_rpg.png"),
+	#"wep_rpg": preload(SY + "mil2/wep_rpg.png"),
 	"wep_shotgun": preload(SY + "mil2/wep_shotgun.png"),
 	"wep_rifle": preload(SY + "mil2/wep_rifle.png"),
 	"wep_mg": preload(SY + "mil2/wep_mg.png"),
-	"wep_pistol": preload(SY + "mil2/wep_pistol.png"),
+	#"wep_pistol": preload(SY + "mil2/wep_pistol.png"),
 	"wep_claymore": preload(SY + "mil2/wep_claymore.png"),
 	"wep_smoke": preload(SY + "mil2/wep_smoke.png"),
 	"wep_flashbang": preload(SY + "mil2/wep_flashbang.png"),
@@ -253,7 +272,7 @@ const TEX := {
 	"mi_book": preload(SY + "ui/menuicons/book.png"),
 	"mi_play": preload(SY + "ui/menuicons/play.png"),
 	"mi_controller": preload(SY + "ui/menuicons/controller.png"),
-	"mi_keyboard": preload(SY + "ui/menuicons/keyboard.png"),
+	#"mi_keyboard": preload(SY + "ui/menuicons/keyboard.png"),
 	# Modern Menus batch 2 (256px, white with alpha — modulate for color).
 	# NOTE: mi_controller.png also landed on disk but the "mi_controller" key
 	# above already serves controller.png — kept as-is, duplicate art unregistered.
@@ -268,6 +287,9 @@ const TEX := {
 	"mi_home": preload(SY + "ui/menuicons/mi_home.png"),
 	"mi_camera": preload(SY + "ui/menuicons/mi_camera.png"),
 	"mi_back": preload(SY + "ui/menuicons/mi_back.png"),
+	"mi_combat": preload(SY + "ui/menuicons/mi_combat.png"),
+	"mi_timer": preload(SY + "ui/menuicons/mi_timer.png"),
+	"mi_cancel": preload(SY + "ui/menuicons/mi_cancel.png"),
 	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
 	"ui_tooltip": preload(SY + "hud/SPR_HUD_Tooltip.png"),
 	"ui_frame_lrg": preload(SY + "hud/SPR_HUD_Frame_Lrg.png"),
@@ -319,7 +341,7 @@ const SCALE := {
 	# (weapons 512x256, explosives 1024²) — retuned by eye.
 	"cap_pierce": 0.14, "cap_spread": 0.14, "cap_triple": 0.14, "cap_rend": 0.14,
 	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
-	"skyline_chimney": 0.4, "skyline_mast": 0.4,
+	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
 	"m_insurgent5": 0.47, "m_pilot": 0.46, "m_soldier2": 0.5,
@@ -342,8 +364,12 @@ const SCALE := {
 	"bunker2": 0.17,                 # ~bunker (same 440px canvas)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
-	"fx_bubble1": 0.18, "fx_bubble2": 0.18,   # 512px cards → ~92px FX footprint
-	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles
+	# _spr sizes off the IMPORTED texture, so size_limit changes must land here
+	# too: bubbles import at 64px now (was 512) — 1.44 keeps the same ~92px FX
+	# footprint the 512×0.18 original had (the 0.18 silently shrank them 8×).
+	"fx_bubble1": 1.44, "fx_bubble2": 1.44,
+	"fx_fumes": 4.0,   # 128px import (was 512-effective) → same _spr plume size
+	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles — bypassed: draw site (main.gd) uses raw draw_texture_rect with its own rect
 	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
 }
 
@@ -382,6 +408,7 @@ const TINT := {
 	# same class as the sandbag walls, not the receding scenery).
 	"bridge_mid": Color(0.94, 0.9, 0.8), "bridge_ramp": Color(0.94, 0.9, 0.8),
 	# Skyline pieces read as dark horizon silhouettes.
+	# bypassed — skyline draw site (main.gd) passes its own `sky` color to draw_texture_rect
 	"skyline_chimney": Color(0.3, 0.33, 0.38), "skyline_mast": Color(0.3, 0.33, 0.38),
 	"crater": Color(0.6, 0.6, 0.54),   # scorched ground, recedes like the wrecks
 	# p4 props: mossy/muted recede like the rest of the decor; craters + wreck
@@ -445,6 +472,10 @@ const OUTLINE := {
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
 	"wep_grenade": true, "wep_rpg": true, "wep_shotgun": true,
 	"wep_rifle": true, "wep_mg": true, "item_bullet": true, "item_bullet_shotgun": true,
+	# The rare-capsule set: same ground-pickup class as the rifle/shotgun/mg
+	# capsules above (plus the planted claymore + its ghost — rim alpha follows
+	# tint.a, so the 0.28-alpha preview stays subtle).
+	"icon_rend": true, "wep_claymore": true, "wep_smoke": true, "wep_flashbang": true,
 	"ghillie": true, "courier": true, "sapper": true,
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
 	"wall_sandbag": true, "wall_sandbag_end": true,
@@ -459,6 +490,9 @@ const OUTLINE := {
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+# (Hint-toast button WORDS live in _PAD_LABELS / pad_label below — the two
+# parallel loops built the same helper twice; pad_label won: its Switch table
+# is positionally correct where the duplicate transplanted Xbox letters.)
 
 ## Semantic hint → registry key for the device-aware prompt sprites (see
 ## glyph_key below). Pad column mirrors the bindings in main._gather_inputs;
@@ -514,6 +548,20 @@ const _BRAND_MAP := {
 
 static func _brand(key: String) -> String:
 	return _BRAND_MAP.get(pad_brand, {}).get(key, key)
+
+
+## Brand-correct button NAMES for text hints (the glyph twin of _brand):
+## semantic verbs → what's printed on the last-used pad. Unknown brands
+## fall back to Xbox labels, same as the glyph lookups.
+const _PAD_LABELS := {
+	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK"},
+	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "SHARE"},
+	"switch": {"interact": "Y", "revive": "X", "wheel": "MINUS"},
+}
+
+
+static func pad_label(verb: String) -> String:
+	return _PAD_LABELS.get(pad_brand, _PAD_LABELS["xbox"]).get(verb, verb.to_upper())
 ## Deuteran-safe remap: 'affordable/safe/open' greens become cyan-blue when
 ## colorblind mode is on (red↔blue is distinguishable where red↔green isn't).
 ## Reds are left alone. Driven from main.
@@ -560,6 +608,10 @@ static func font() -> Font:
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
+	# Snap to whole pixels: centered strings land on fractional x (cx - w/2 with
+	# odd w), which smears a bitmap pixel font across two source texels under the
+	# canvas's linear-mipmap filter. View-only, so golden-safe.
+	pos = pos.floor()
 	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7))
 	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col)
 
@@ -572,15 +624,20 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
 
 
-static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE) -> void:
+static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false) -> void:
+	# force_pad: P2 is hardwired to pad 1 (main._gather_inputs), so P2's OWN
+	# prompts must show pad buttons even while P1's mouse aim keeps the global
+	# use_pad false — per-player call sites pass `i == 1`.
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
-	if use_pad:
+	if use_pad or force_pad:
 		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false, mod)
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88) * mod)
 		var letter: String = _GLYPH_KEY[action]
 		var f := font()
-		var fs := int(size * 0.62)
+		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
+		# whole strokes below native scale (a 6px 'E' loses horizontals).
+		var fs := maxi(8, int(size * 0.62))
 		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))

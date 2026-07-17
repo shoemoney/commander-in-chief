@@ -113,9 +113,22 @@ const SEED := 0xDEADBEEF
 ## fuse/coin-neutral, Triple+Spread 5-fan via SPREAD2, shop score parity). Both parents had
 ## re-recorded independently; new hashed fields e["hp"] and barrel fuse_ticks -> new stream.
 ## (Technical/pilot ride these values unchanged — still torture-inert on the union tree.)
+## RE-RECORDED (2026-07-16, all-loops batch — 33-agent audit, 30 verified fixes): campaign ramp
+## formula now actually reaches its advertised ceiling (interval 45-6*opened floors at 24, elite
+## every 7-opened floors at 3, "by gate 4" — gate 5 only opens on Colossus death), dying broke
+## auto-arms broke_timer at death (the endless wipe must not require a button press), self-revive
+## is gated when a partner is alive, Rend drops unlock with the first shield sector (opened>=1),
+## Clean Wave + avenge bounties scale with the same creep curves as their sinks, the endless
+## miniboss bounty honors PAYDAY, near-miss board taps no longer arm claymores, and _dist_lte
+## gains a byte-identical axis early-out. Campaign torture opens gates + dies broke -> all
+## samples moved in both modes.
 const GOLDEN: Array[int] = [
-	9047643037908952255, 1759994758934664153, 7766134935096958484,
-	3329481962086528547, 5504197230152306677, 616294942130258451,
+	443318991112710326,
+	4217651455593738690,
+	894008368557221171,
+	2151557553241639539,
+	5185034305890893509,
+	3832786556833687470,
 ]
 
 
@@ -196,8 +209,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## fuse/coin-neutral, Triple+Spread 5-fan via SPREAD2, shop score parity). Both parents had
 ## re-recorded independently; new hashed fields e["hp"] and barrel fuse_ticks -> new stream.
 const ENDLESS_GOLDEN: Array[int] = [
-	3481005823424918283, 4855886998412571982, 893260034959611459,
-	5903077874106772747, 6661913665578598227, 1621007134709677211,
+	1341746022025034088,
+	6926027603724055972,
+	1420275249532216296,
+	3889216549789410096,
+	3438977064764125944,
+	413032571106888000,
 ]
 
 

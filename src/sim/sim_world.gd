@@ -70,13 +70,21 @@ const DRONE_WINDUP_TICKS := 24
 # round kills it (fragile). Starting values; test: a strafing player at
 # 100px+ must dodge every charge — if charges land on movers, widen REV_TICKS.
 const TECHNICAL_SPEED := 3 * F_ONE            # player is 2.4 px/t — it outruns you on a straight
-const TECHNICAL_REV_TICKS := 30               # rev-up telegraph (same class as MG_NEST_AIM)
+const TECHNICAL_REV_TICKS := 18               # rev tell, cut from 30: a lock landing 80t before
+	# impact let a 2.4px/t strafer clear the point with a 4-tick nudge. Starting
+	# value; test: a late-reacting strafer eats ~2/10 charges — widen toward 24
+	# if first contact feels unreactable (the sighting card teaches the rule).
 const TECHNICAL_CHARGE_TICKS := 50            # one charge = ~150px of travel
 const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge rhythm)
+const TECHNICAL_HP := 3                       # a truck is not a paper target (nest precedent)
 # Downed Pilot ransom: a dead gunship's pilot punches out at the crash site and
 # staggers for the enemy line at the TOP edge. TOUCH him to rescue (+ransom);
 # let him cross the edge and he's captured. Shooting him pays NOTHING.
-const PILOT_SPEED := (F_ONE * 4) / 5          # 0.8 px/t — a generous but real chase window
+# 1.4px/t (0.58x player): at 0.8 the rescue was a ~100% grab — he ejects at the
+# crash site you already stand on (the courier, this file's "real chase"
+# benchmark, runs 0.9x player). Starting value; test: mid-arena catch rate
+# should land 50-70% — at ~100% raise again, below 50% drop toward 1.1.
+const PILOT_SPEED := (F_ONE * 7) / 5
 const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
 # Punch-out grace: the pilot spawns unshootable (and unrescuable) for one
 # reaction window, because he appears ON the boss the player is still firing
@@ -566,7 +574,8 @@ func _step_players(inputs: Array) -> void:
 		if inp.revive:
 			_try_revive(i, p)
 
-		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0:
+		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0 \
+				and not _boardable_tank_near(p):
 			# Claymore: no tank in reach, so INTERACT plants a carried charge one
 			# step ALONG the aim — into the enemy lane you're already shooting,
 			# clear of your own kiting path (planting behind the aim dropped it
@@ -587,6 +596,10 @@ func _step_players(inputs: Array) -> void:
 		# The punch-out grace (submerged) must elapse first. Tank treads
 		# rescue in _step_tank.
 		for e in enemies:
+			# Same axis pre-reject + truncation proof as the bullet scan (:1007):
+			# |dx| > r means _dist_lte was already false — checksum-neutral.
+			if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+				continue
 			if e["alive"] and e["kind"] == "pilot" and not e.get("submerged", false) \
 					and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 				_rescue_pilot(e)
@@ -595,6 +608,8 @@ func _step_players(inputs: Array) -> void:
 		# submerged frogmen must surface before they can strike).
 		if not p["roll_iframe"] and p["in_tank"] < 0:
 			for e in enemies:
+				if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+					continue
 				if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
 						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
 					continue
@@ -631,9 +646,13 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
 			score += cost * 10
+		# Claymore capsule grabbed at the 3-charge cap grants nothing (mini()
+		# eats it) — flag the event so the view can stop paying the celebratory
+		# callout for a no-op. Events are checksum-excluded: golden-safe.
+		var full: bool = pk["kind"] == 8 and p["claymores"] >= CLAYMORE_CAP
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
-			"kind": pk["kind"], "cost": cost})
+			"kind": pk["kind"], "cost": cost, "full": full})
 		pickups.remove_at(k)
 
 
@@ -681,6 +700,13 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 	## no revives past the final gate (the arcade's no-continue finale).
 	if last_stand:
 		return
+	if reviver_index == -1:
+		# Dead self-revive is the solo/all-down fallback ONLY: with a partner
+		# still standing, the rescue is theirs to perform — the co-op decision
+		# (walk to the body, spend together) must not be mashable from the floor.
+		for pl in players:
+			if pl["alive"]:
+				return
 	for j in players.size():
 		var target := players[j]
 		if target["alive"]:
@@ -748,6 +774,10 @@ func _kill_player(p: Dictionary) -> void:
 	# excluded) event so the view can sting a "LOADOUT LOST" beat. Golden-safe.
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"],
 		"triple": p["triple"], "pierce": p["pierce_ticks"] > 0, "spread": p["spread_ticks"] > 0})
+	# Arm the broke fallback on death itself, not only on a revive press: the
+	# wipe (endless's only run-ender) must not require a button press.
+	if war_chest < revive_cost(p):
+		p["broke_timer"] = BROKE_RESPAWN_TICKS
 
 
 func _fire_mission() -> void:
@@ -759,7 +789,7 @@ func _fire_mission() -> void:
 	events.append({"t": "explosion", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
-			_kill_enemy(e, true)
+			_kill_enemy(e, true, true)
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -841,6 +871,16 @@ func _try_board_tank(player_index: int, p: Dictionary) -> bool:
 			tank["occupant"] = player_index
 			p["in_tank"] = t
 			events.append({"t": "tank_board", "x": tank["x"], "y": tank["y"]})
+			return true
+	return false
+
+
+func _boardable_tank_near(p: Dictionary) -> bool:
+	## Near-miss board taps must not arm a claymore at your feet: a boardable
+	## tank just outside TANK_BOARD_RADIUS means INTERACT read as "board".
+	for tank in tanks:
+		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], 2 * TANK_BOARD_RADIUS):
 			return true
 	return false
 
@@ -971,35 +1011,61 @@ func _detonate_tank(tank: Dictionary) -> void:
 
 # --- Projectiles ---
 
-func _offscreen(x: int, y: int) -> bool:
-	## Shared screen-bounds cull for bullets: past the vertical strike zone or
-	## off either horizontal edge. Callers still add their own TTL check.
-	return y < camera_top - 40 * F_ONE or y > camera_top + 400 * F_ONE \
-		or x < 0 or x > SCREEN_W_FP
-
-
 func _step_bullets() -> void:
+	# Offscreen bounds + per-bullet dict fields hoisted into locals (identical
+	# values, so checksum-neutral): b["x"]/b["y"] never move after integration,
+	# and each String-keyed Dictionary read is a hash lookup the hottest sim
+	# loop was paying 5+ times per bullet per tick.
+	var ylo := camera_top - 40 * F_ONE
+	var yhi := camera_top + 400 * F_ONE
+	# Bunker band prefilter: any bullet reaching the cover scan has by in
+	# [ylo,yhi] (off-band bullets die above), so a bunker whose AABB misses that
+	# band can never contain it — checksum-neutral by construction. Positions
+	# never move; alive is RE-CHECKED per bullet (a barrel cook-off via
+	# _detonate_barrel below can _explode a bunker mid-loop).
+	var near_bks: Array[Dictionary] = []
+	for bk in bunkers:
+		if bk["alive"] and bk["y"] <= yhi and bk["y"] + BUNKER_H >= ylo:
+			near_bks.append(bk)
+	# Boss prefilter: gate boss dicts are never emptied and g["open"] mutates
+	# only in _step_gates, so both gates are stable within this call; the
+	# per-bullet boss["alive"] re-check stays (_damage_boss kills mid-loop).
+	var boss_gates: Array[Dictionary] = []
+	for g in gates:
+		if not g["boss"].is_empty() and not g["open"]:
+			boss_gates.append(g)
 	for i in range(bullets.size() - 1, -1, -1):
 		var b := bullets[i]
-		b["x"] = b["x"] + b["vx"]
-		b["y"] = b["y"] + b["vy"]
-		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
-		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+		var bx: int = b["x"] + b["vx"]
+		var by: int = b["y"] + b["vy"]
+		var ttl: int = b["ttl"] - 1
+		b["x"] = bx
+		b["y"] = by
+		b["ttl"] = ttl
+		var off := by < ylo or by > yhi or bx < 0 or bx > SCREEN_W_FP
+		var dead: bool = ttl <= 0 or off
+		if ttl <= 0 and not off:
 			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
-			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
+			events.append({"t": "bullet_dirt", "x": bx, "y": by})
 		if not dead:
 			# Bullets are stopped by armor: bunkers block, only grenades hurt them.
-			for bk in bunkers:
-				if bk["alive"] and _point_in_aabb(b["x"], b["y"], bk):
-					events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+			for bk in near_bks:
+				if bk["alive"] and _point_in_aabb(bx, by, bk):
+					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
 		if not dead:
 			for e in enemies:
+				# Cheap axis pre-reject for the hottest O(bullets×enemies) scan.
+				# Checksum-neutral by construction: |dx| ≥ r+1 raw units makes
+				# dx² ≥ r² + 2r + 1 with 2r+1 > 1<<16 for any radius ≥ 0.5px, so
+				# Fixed.mul(dx,dx) > Fixed.mul(r,r) even after >>16 truncation —
+				# _dist_lte was already false for every pair skipped here.
+				if absi(bx - e["x"]) > BULLET_HIT_RADIUS:
+					continue
 				# Bullets pass clean over submerged frogmen — grenades only.
 				if e["alive"] and not e.get("submerged", false) \
-						and _dist_lte(b["x"], b["y"], e["x"], e["y"], BULLET_HIT_RADIUS):
+						and _dist_lte(bx, by, e["x"], e["y"], BULLET_HIT_RADIUS):
 					# Shield: a bullet arriving into the front arc (roughly
 					# opposite the shieldman's facing-toward-you) is deflected;
 					# flank it or use a grenade. Front cone ~120°.
@@ -1008,18 +1074,18 @@ func _step_bullets() -> void:
 						# the front-arc block — otherwise the shield eats the round.
 						var rw: int = b.get("owner", -1)
 						if rw < 0 or rw >= players.size() or players[rw]["rend_ticks"] <= 0:
-							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+							events.append({"t": "armor_block", "x": bx, "y": by})
 							dead = true
 							break
 						# Rend beat the block — a distinct shear event so the payoff
 						# reads AT the shield (a silent skip looked like a normal kill).
-						events.append({"t": "rend_pierce", "x": b["x"], "y": b["y"]})
+						events.append({"t": "rend_pierce", "x": bx, "y": by})
 					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
 					# it via _explode). Only a lethal round routes through _kill_enemy.
-					if e["kind"] == "mg_nest":
+					if e["kind"] == "mg_nest" or e["kind"] == "technical":
 						e["hp"] = e["hp"] - 1
 						if e["hp"] > 0:
-							events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+							events.append({"t": "armor_block", "x": bx, "y": by})
 							var mgowner: int = b.get("owner", -1)
 							if mgowner >= 0 and mgowner < players.size() and players[mgowner]["pierce_ticks"] > 0:
 								continue
@@ -1037,22 +1103,22 @@ func _step_bullets() -> void:
 			# A player round into a live fuel drum cooks it off (same blast path as a
 			# tank rollover). Barrel kills mint no coin (no_coin) — no bullet farm.
 			for bl in barrels:
-				if bl["armed"] and _dist_lte(b["x"], b["y"], bl["x"], bl["y"], BULLET_HIT_RADIUS):
+				if bl["armed"] and _dist_lte(bx, by, bl["x"], bl["y"], BULLET_HIT_RADIUS):
 					_detonate_barrel(bl, true)
 					dead = true
 					break
 		if not dead:
-			dead = _bullet_hits_boss(b)
+			dead = _bullet_hits_boss(b, boss_gates)
 		# Colossus core window: while the plating is retracted, bullets chip it
 		# too (otherwise grenades-only). A timing/aggression path for the finale.
 		if not dead and not colossus.is_empty() and colossus["alive"] \
 				and colossus.get("core_open", 0) > 0 \
-				and _dist_lte(b["x"], b["y"], colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+				and _dist_lte(bx, by, colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": bx, "y": by})
 			_damage_colossus(COLOSSUS_BULLET_DAMAGE)
 			dead = true
 		if not dead and not observer.is_empty():
-			if _dist_lte(b["x"], b["y"], observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
+			if _dist_lte(bx, by, observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
 				_kill_observer()
 				dead = true
 		if dead:
@@ -1071,11 +1137,17 @@ func _step_grenades() -> void:
 			grenades.remove_at(i)
 
 
-func _explode(x: int, y: int, no_coin := false) -> void:
-	events.append({"t": "explosion", "x": x, "y": y})
+func _explode(x: int, y: int, no_coin := false, src := "") -> void:
+	# src tags the trigger (e.g. "barrel") so the view can dedupe feel against
+	# the co-located barrel_blast event; events are checksum-excluded.
+	events.append({"t": "explosion", "x": x, "y": y, "src": src})
 	var frags := 0
 	for e in enemies:
-		if e["alive"] and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
+		# The pilot is a non-combatant objective PAST his punch-out grace too:
+		# a sapper mine or grenadier lob on his fixed walk was a ransom
+		# coin-flip the player couldn't influence. Bullets still kill him —
+		# "don't shoot the rescue" stays the player's lesson.
+		if e["alive"] and e["kind"] != "pilot" and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
 			_kill_enemy(e, no_coin)
 			frags += 1
 	if frags >= 3:
@@ -1129,10 +1201,13 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 		if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
 				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
 			_hurt_player(p)
-	_explode(bl["x"], bl["y"], no_coin)
+	_explode(bl["x"], bl["y"], no_coin, "barrel")
 
 
-func _kill_enemy(e: Dictionary, no_coin := false) -> void:
+func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
+	## no_score: unaimed screen-wipes (airstrike) mint no score and can't feed
+	## the kill-streak either — a 100-coin buy vaulting the streak tiers was
+	## a leaderboard printer. Barrel kills (no_coin only) still score.
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	if e["kind"] == "mg_nest":
@@ -1159,18 +1234,21 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		# calls it out — standing your ground over a partner's body is rewarded.
 		for pl in players:
 			if not pl["alive"] and _dist_lte(e["x"], e["y"], pl["x"], pl["y"], 60 * F_ONE):
-				war_chest += 5
+				# Scales with the same wave/5 step as revive_cost, or deep-endless
+				# revive inflation turns the avenge beat into pocket change.
+				war_chest += 5 + ((wave / 5) * 5 if mode == "endless" else 0)
 				events.append({"t": "avenge", "x": e["x"], "y": e["y"]})
 				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
 	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
-	score += coin * 10 * (2 if last_stand else 1)
+	if not no_score:
+		score += coin * 10 * (2 if last_stand else 1)
 	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
 	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
 	# the streak rewards aggression on the leaderboard, not the economy.
 	# The MG Nest is excluded: it's the lowest-risk target, so it can't feed the
 	# streak (nor drop the elite capsule below) despite carrying elite:true.
-	if e["kind"] != "mg_nest":
+	if e["kind"] != "mg_nest" and not no_score:
 		kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
 		kill_streak_timer = KILL_STREAK_WINDOW_TICKS
 		var streak_bonus_pct := 0
@@ -1606,9 +1684,17 @@ func _step_mines() -> void:
 				triggered = true
 		# Or an enemy walks onto it — herd rushers into the minefield.
 		if not triggered:
+			# Mine position hoisted out of the inner scan (dict hash per read).
+			var mx: int = m["x"]
+			var my: int = m["y"]
 			for e in enemies:
-				if e["alive"] and not e.get("submerged", false) \
-						and _dist_lte(e["x"], e["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
+				# Axis pre-reject — same truncation-safe proof as _step_bullets.
+				if absi(e["x"] - mx) > MINE_TRIGGER_RADIUS:
+					continue
+				# (Pilot exemption: his fixed walk crossing a random field was a
+				# ransom coin-flip, not counterplay.)
+				if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot" \
+						and _dist_lte(e["x"], e["y"], mx, my, MINE_TRIGGER_RADIUS):
 					triggered = true
 					break
 		if triggered:
@@ -1627,9 +1713,15 @@ func _step_barrels() -> void:
 		elif bl["armed"]:
 			# Enemy contact detonates it (like a mine) — a two-way hazard that
 			# auto-clears the rows enemies wade through. No coin (enemy-suicide farm).
+			# Barrel position hoisted out of the inner scan (dict hash per read).
+			var blx: int = bl["x"]
+			var bly: int = bl["y"]
 			for e in enemies:
+				# Axis pre-reject — same truncation-safe proof as _step_bullets.
+				if absi(e["x"] - blx) > MINE_TRIGGER_RADIUS:
+					continue
 				if e["alive"] and not e.get("submerged", false) \
-						and _dist_lte(e["x"], e["y"], bl["x"], bl["y"], MINE_TRIGGER_RADIUS):
+						and _dist_lte(e["x"], e["y"], blx, bly, MINE_TRIGGER_RADIUS):
 					_detonate_barrel(bl, true)
 					break
 		if not bl["armed"] or bl["y"] > camera_top + 420 * F_ONE:
@@ -1637,35 +1729,36 @@ func _step_barrels() -> void:
 
 
 func _step_spawner() -> void:
-	# Field spawner: pressure from above the screen edge; every 8th is a red
+	# Field spawner: pressure from above the screen edge; every 7th is a red
 	# elite. Each opened gate tightens the interval — the campaign's
-	# difficulty ratchet (45 → 24 ticks by gate 5).
+	# difficulty ratchet (45 → 24 ticks by gate 4; the final gate only opens
+	# on Colossus death, so gate 4 is the last one the ramp can see).
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
 	if _spawn_grace > 0:
 		_spawn_grace -= 1
-	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 4)
+	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE
-	# Sector 4+ (3 gates opened): the endless ranged roster starts bleeding into
-	# the campaign field, so late sectors get a genuinely new threat vocabulary
+	# Sector 2+ (1 gate opened): the endless ranged roster starts bleeding into
+	# the campaign field, so later sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
-	if opened >= 1 and rng.range_i(0, 4) == 0:
+	if opened >= 1 and rng.range_i(0, 3 if hard else 4) == 0:  # NG+: 1-in-4 specials
 		var spick := rng.range_i(0, 3)   # +mg_nest turret
 		if spick == 3:
 			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
 		else:
 			_spawn_special(x, camera_top - 24 * F_ONE, ["grenadier", "sniper", "shield"][spick])
 	else:
-		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
-		# gate 5) so late campaign escalates composition, not just cadence.
-		var elite_every := maxi(3, 8 - opened)
+		# Elite ratio tightens with each opened gate (every 7th → every 3rd by
+		# gate 4) so late campaign escalates composition, not just cadence.
+		var elite_every := maxi(3, 7 - opened)
 		if hard:
 			elite_every = maxi(2, elite_every - 2)   # NG+ fields far more red elites
 		_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
@@ -1710,15 +1803,16 @@ func _windup_for(kind: String) -> int:
 
 
 func _shields_possible() -> bool:
-	## True once the shield archetype can actually spawn (campaign: 3 gates
-	## opened; endless: wave 3+) — gates the Rend drop so it's never inert.
+	## True once the shield archetype can actually spawn (campaign: 1 gate
+	## opened, matching _step_spawner's special roster; endless: wave 3+) —
+	## gates the Rend drop so it's never inert.
 	if mode == "endless":
 		return wave >= 3
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
-	return opened >= 3
+	return opened >= 1
 
 
 func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
@@ -1766,6 +1860,8 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 		# The marquee aerial threat kills like a trophy, not a grunt: marked
 		# rides the existing bounty grammar (3× pay + gold fountain + crown).
 		e["marked"] = true
+	if kind == "technical":
+		e["hp"] = TECHNICAL_HP   # armored like the nest — hp is already hashed
 	enemies.append(e)
 
 
@@ -2005,7 +2101,9 @@ func _step_waves() -> void:
 		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
 		# this wave pays a bonus, so cautious and reckless play stop earning alike.
 		if deaths_this_wave == 0 and wave > 1:
-			war_chest += 40
+			# Bonus rides the same creep curve as _supply_cost, or price inflation
+			# quietly erodes it into a rounding error by deep waves.
+			war_chest += 40 + (wave / 3) * 10
 			score += 1500
 			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
@@ -2062,7 +2160,12 @@ func _start_wave() -> void:
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
 	# 5 = NIGHT OPS (vision tightens; view only). 6 = FRENZY (swarm +40% speed).
+	# No back-to-back repeats: wave_mod still holds last wave's mutator here,
+	# so a duplicate roll falls back to plain — twice-in-a-row reads as a bug.
+	var prev_mod := wave_mod
 	wave_mod = 0 if wave <= 2 else rng.range_i(0, 6)
+	if wave_mod != 0 and wave_mod == prev_mod:
+		wave_mod = 0
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -2086,6 +2189,8 @@ func _scaled_boss_hp(base: int) -> int:
 	## Boss/colossus starting HP scales with the living player count at spawn:
 	## +60% per extra player (integer math). Grenade DPS is per-player, so a
 	## flat pool let 2P melt a boss ~2x faster; this keeps the fight length even.
+	if hard:
+		base = base * 3 / 2   # NG+ armor: bosses stop being first-run pushovers
 	var pc := 0
 	for pl in players:
 		if pl["alive"]:
@@ -2193,6 +2298,13 @@ func _damage_colossus(amount: int) -> void:
 		victory = true
 		events.append({"t": "explosion", "x": colossus["x"], "y": colossus["y"]})
 		events.append({"t": "victory", "x": colossus["x"], "y": colossus["y"]})
+		# The finale joins the Flawless economy: a deathless Colossus clear pays
+		# the same checkpoint bonus (capped 3×) instead of ending a streak unpaid.
+		if deaths_since_gate == 0:
+			flawless_streak += 1
+			var fmult: int = mini(flawless_streak, 3)
+			score += 2000 * fmult
+			events.append({"t": "gate_flawless", "x": colossus["x"], "y": colossus["y"], "mult": fmult})
 		# Last Stand payout: the unspent War Chest converts to score.
 		score += war_chest * 10 + 5000
 		war_chest = 0
@@ -2242,8 +2354,13 @@ func _step_one_boss(boss: Dictionary) -> void:
 				_add_strike(target2["x"], target2["y"])
 
 
-func _bullet_hits_boss(b: Dictionary) -> bool:
-	for g in gates:
+func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
+	# boss_gates: _step_bullets passes its per-call prefilter (gates with a
+	# non-empty boss, still closed) so ~150 live rounds don't re-interrogate
+	# all ~5 gates each tick; direct test callers omit it and scan everything.
+	# The full guard stays — it's what makes both paths identical.
+	var cands: Array = boss_gates if boss_gates != null else gates
+	for g in cands:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
 		var boss: Dictionary = g["boss"]
@@ -2263,41 +2380,67 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 	boss["hp"] = boss["hp"] - amount
 	if boss["hp"] <= 0 and boss["alive"]:
 		boss["alive"] = false
-		war_chest += BOSS_BOUNTY
-		score += BOSS_BOUNTY * 10
+		# Endless minibosses pay with their depth: HP scales +50%/milestone
+		# (x1.6/player) while the flat 200c shrank into a time-tax. Campaign
+		# gunships stay flat (wave = 0). Test: coins/sec on the w5 vs w25
+		# miniboss within ~25%.
+		var bounty: int = BOSS_BOUNTY
+		if mode == "endless" and wave >= 5:
+			bounty += (wave / 5 - 1) * (BOSS_BOUNTY / 2)
+		if wave_mod == 4:
+			bounty *= 2   # PAYDAY wave: every bounty doubles (same rule as _kill_enemy)
+		war_chest += bounty
+		score += bounty * 10
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
-		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY, "kind": "boss"})
+		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": bounty, "kind": "boss"})
 		# The gunship's pilot punches out at the crash site and staggers for the
 		# enemy line — reach him before the top edge for the ransom.
-		if enemies.size() < MAX_ENEMIES:
-			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot",
-				"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
-			events.append({"t": "pilot_down", "x": boss["x"], "y": by})
+		# Unconditional + floor-clamped: the MAX_ENEMIES gate silently voided the
+		# advertised ransom at capped waves (one transient non-combatant just
+		# delays the next gated spawn), and a top-edge gunship kill ejected a
+		# pilot with a ~1s unavoidable fail (120px floor -> 50-70% catch target).
+		var pilot_y: int = maxi(by, camera_top + 120 * F_ONE)
+		enemies.append({"x": boss["x"], "y": pilot_y, "alive": true, "elite": false, "kind": "pilot",
+			"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
+		events.append({"t": "pilot_down", "x": boss["x"], "y": pilot_y})
 
 
 func _step_enemy_bullets() -> void:
+	# Same locals hoist as _step_bullets: identical values, checksum-neutral.
+	var ylo := camera_top - 40 * F_ONE
+	var yhi := camera_top + 400 * F_ONE
+	# Same bunker band prefilter as _step_bullets (nothing here can kill a
+	# bunker mid-loop, but the per-bullet alive re-check is kept for symmetry).
+	var near_bks: Array[Dictionary] = []
+	for bk in bunkers:
+		if bk["alive"] and bk["y"] <= yhi and bk["y"] + BUNKER_H >= ylo:
+			near_bks.append(bk)
 	for i in range(enemy_bullets.size() - 1, -1, -1):
 		var b := enemy_bullets[i]
-		b["x"] = b["x"] + b["vx"]
-		b["y"] = b["y"] + b["vy"]
-		b["ttl"] = b["ttl"] - 1
-		var dead: bool = b["ttl"] <= 0 or _offscreen(b["x"], b["y"])
-		if b["ttl"] <= 0 and not _offscreen(b["x"], b["y"]):
+		var bx: int = b["x"] + b["vx"]
+		var by: int = b["y"] + b["vy"]
+		var ttl: int = b["ttl"] - 1
+		b["x"] = bx
+		b["y"] = by
+		b["ttl"] = ttl
+		var off := by < ylo or by > yhi or bx < 0 or bx > SCREEN_W_FP
+		var dead: bool = ttl <= 0 or off
+		if ttl <= 0 and not off:
 			# Spent round lands in view: dirt-kick cue (events are checksum-excluded).
-			events.append({"t": "bullet_dirt", "x": b["x"], "y": b["y"]})
+			events.append({"t": "bullet_dirt", "x": bx, "y": by})
 		if not dead:
 			# Cover is real both ways now: a bunker between you and a shooter eats
 			# the round, same as it eats yours (player bullets already block here).
-			for bk in bunkers:
-				if bk["alive"] and _point_in_aabb(b["x"], b["y"], bk):
-					events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+			for bk in near_bks:
+				if bk["alive"] and _point_in_aabb(bx, by, bk):
+					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
 		if not dead:
 			for p in players:
 				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
-						and _dist_lte(b["x"], b["y"], p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
+						and _dist_lte(bx, by, p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
 					_hurt_player(p)
 					dead = true
 					break
@@ -2399,6 +2542,10 @@ func _clear_observer_strikes() -> void:
 # --- Geometry helpers ---
 
 func _dist_lte(x1: int, y1: int, x2: int, y2: int, r: int) -> bool:
+	# Axis early-out: |dx| > r implies dx^2 > r^2 — byte-identical result,
+	# skips the fixed-point multiplies on the (common) far-apart case.
+	if absi(x1 - x2) > r or absi(y1 - y2) > r:
+		return false
 	var dx := x1 - x2
 	var dy := y1 - y2
 	return Fixed.mul(dx, dx) + Fixed.mul(dy, dy) <= Fixed.mul(r, r)
