@@ -956,7 +956,8 @@ func _consume_events() -> void:
 			# Up to 5 explosion events fire in one tick (colossus death-ring, bunker
 			# clusters); stacking 5 full booms pumps the HardLimiter to mush. Gate to
 			# one boom per tick — same idiom as the armor/boss pings above.
-			if not explosion_pinged:
+			# Barrel-origin blasts already boom via their barrel_blast event.
+			if not explosion_pinged and ev.get("src", "") != "barrel":
 				explosion_pinged = true
 				# One boom — but the ear still agrees with the camera: volume scales
 				# with proximity and pans to the blast (the cluster's lead event).
@@ -1376,15 +1377,21 @@ func _ev_explosion(ev: Dictionary) -> void:
 	# force; one in the far corner registers without shaking the whole frame.
 	# (Mortar strikes and flank bunker chains used to land identically to a
 	# point-blank grenade.) The boom plays once per tick in _consume_events.
-	var prox := _blast_prox(ev["x"], ev["y"])
-	_trauma = minf(1.0, _trauma + 0.35 * prox)
-	if prox > 0.7:
-		_hitstop_frames = maxi(_hitstop_frames, 4)
-	_rumble = maxf(_rumble, 0.7 * prox)
-	_punch = maxf(_punch, 0.05 * prox)
-	_duck = maxf(_duck, 0.7 * prox)
+	# Barrel-origin explosions: the gated barrel_blast branch owns the barrel's
+	# feel (trauma/rumble) and its shockwave/fireball/smoke/scorch — skip the
+	# duplicates here so a drum doesn't double-fire the whole feel stack.
+	var barrel: bool = ev.get("src", "") == "barrel"
+	if not barrel:
+		var prox := _blast_prox(ev["x"], ev["y"])
+		_trauma = minf(1.0, _trauma + 0.35 * prox)
+		if prox > 0.7:
+			_hitstop_frames = maxi(_hitstop_frames, 4)
+		_rumble = maxf(_rumble, 0.7 * prox)
+		_punch = maxf(_punch, 0.05 * prox)
+		_duck = maxf(_duck, 0.7 * prox)
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
-	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
+	if not barrel:
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
 	# Glow-decay bridge: a dimmer, slower light spanning flash → smoke, so the
@@ -1392,8 +1399,9 @@ func _ev_explosion(ev: Dictionary) -> void:
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.03,
 		"r": 38.0, "col": Color(0.9, 0.45, 0.18, 0.5)})
 	# Textured hot-disc flash (legacy art fx_disc) over the procedural burst.
-	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
-		"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
+	if not barrel:
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
+			"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
 	# Dark crater stamp bridges the instant flash and the slow-building scorch.
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
 		"sz": 20.0, "grow": 0.2, "fade": 0.8, "rate": 0.02, "col": Color(1, 1, 1, 0.6)})
@@ -1401,15 +1409,16 @@ func _ev_explosion(ev: Dictionary) -> void:
 	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
 	_blast_debris(ev["x"], ev["y"], wet)
 	if not wet:
-		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
-		# Lingering smoke drifts up after the flash — a blast site used to clear to
-		# bare scorch in ~0.3s while wave/gate spawns billow. Reuses the proven
-		# long-life fx_smoke card + a gentle rise (move) so it reads as air.
-		for si in 2:
-			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
-				"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
-				"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
-				"col": Color(0.25, 0.22, 0.2, 0.7)})
+		if not barrel:
+			_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
+			# Lingering smoke drifts up after the flash — a blast site used to clear to
+			# bare scorch in ~0.3s while wave/gate spawns billow. Reuses the proven
+			# long-life fx_smoke card + a gentle rise (move) so it reads as air.
+			for si in 2:
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+					"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
+					"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+					"col": Color(0.25, 0.22, 0.2, 0.7)})
 	else:
 		# Wet blast: the aftermath is steam, not soot — pale spray columns rising
 		# fast, plus an expanding foam ring pushed to the water shader (the river
@@ -2807,7 +2816,6 @@ func _draw_terrain() -> void:
 	# The opaque grass/dirt base moved to _paint_bg (renders on _bg_root, below the
 	# water quads). Everything below still draws in _draw() over the water.
 	var cam_y := sim.camera_top * PX
-	var oy := -fposmod(cam_y, 64.0)
 	# Drifting cloud shadows: large soft dark blobs scrolling diagonally at a
 	# slower rate than the camera — instant depth, the jungle feels alive.
 	var ct := float(Engine.get_physics_frames()) * 0.15
@@ -2850,8 +2858,12 @@ func _draw_terrain() -> void:
 				w["ford_x"] - SimWorld.FORD_HALF_W, w["ford_x"] + SimWorld.FORD_HALF_W])
 	# Low fern understory scattered through the field (hash decorrelated from
 	# the tree grid so ferns and trees don't stack on the same cell).
+	# Each decor grid anchors to ITS OWN spacing modulus — the shared 64px grass
+	# modulus made every layer's sampled world rows jump by 64 (a non-multiple of
+	# 40/48/80) whenever cam_y crossed a tile boundary, reshuffling the field.
+	var foy := -fposmod(cam_y, 40.0)
 	for ty in 10:
-		var fy := oy + ty * 40.0
+		var fy := foy + ty * 40.0
 		var fiy := int(floor((cam_y + fy) / 40.0))
 		for tx in 16:
 			var hf := Art.cell_hash(tx * 17 + 5, fiy * 3)
@@ -2866,8 +2878,9 @@ func _draw_terrain() -> void:
 				0.28 + float(hf % 3) * 0.03, fern_col)
 
 	# Jungle tree lines on the flanks, sparse singles in the field.
+	var toy := -fposmod(cam_y, 48.0)
 	for ty in 9:
-		var wy := oy + ty * 48.0
+		var wy := toy + ty * 48.0
 		var iy := int(floor((cam_y + wy) / 48.0))
 		for tx in 14:
 			var h2 := Art.cell_hash(tx * 31, iy)
@@ -2894,8 +2907,9 @@ func _draw_terrain() -> void:
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
 	# Hash grid decorrelated from trees/ferns so nothing stacks on a cell.
+	var loy := -fposmod(cam_y, 80.0)
 	for ty in 6:
-		var ly := oy + ty * 80.0
+		var ly := loy + ty * 80.0
 		var liy := int(floor((cam_y + ly) / 80.0))
 		for tx in 8:
 			var hl := Art.cell_hash(tx * 53 + 11, liy * 7 + 3)
@@ -3313,12 +3327,12 @@ func _draw_enemies() -> void:
 		_enemy_pos_prev[eidx] = e_now
 		if e["kind"] != "frogman":
 			if e.get("windup", 0) == 0 and e_moved:
-				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(e["x"] / 4093))) * -1.4 * _motion
+				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(eidx) * 1.7)) * -1.4 * _motion
 			else:
 				# Winding up / standing: the run-bob stops but a slow breath keeps the
 				# unit alive — nothing on the field should be a frozen statue.
 				# (Stilled under REDUCE MOTION like the parked jeep/boss hover.)
-				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(e["x"] / 4093)) * -0.5 * _motion
+				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(eidx) * 1.7) * -0.5 * _motion
 		var target: Dictionary = {}
 		var best_d2 := 0.0
 		for p in alive_players:
@@ -3339,12 +3353,12 @@ func _draw_enemies() -> void:
 			var st: int = e.get("surface_ticks", 0)
 			if e["submerged"]:
 				# Idle ripple loop so occupied water reads as occupied.
-				var ph := float((Engine.get_physics_frames() + e["x"] / 7919) % 90) / 90.0
+				var ph := float((Engine.get_physics_frames() + eidx * 17) % 90) / 90.0
 				draw_arc(epos, 4.0 + ph * 9.0, 0, TAU, 16, Color(0.6, 0.8, 0.9, 0.4 * (1.0 - ph)), 1.0)
 				draw_arc(epos, 5.0, 0, TAU, 12, Color(0.6, 0.8, 0.9, 0.55), 1.5)
 				# Breath bubbles trickling up from the submerged diver (stateless loop).
-				var bph := float((Engine.get_physics_frames() * 2 + e["x"] / 5077) % 120) / 120.0
-				_spr("fx_bubble1" if (e["x"] / 7919) % 2 == 0 else "fx_bubble2",
+				var bph := float((Engine.get_physics_frames() * 2 + eidx * 31) % 120) / 120.0
+				_spr("fx_bubble1" if eidx % 2 == 0 else "fx_bubble2",
 					epos + Vector2(sin(bph * TAU) * 2.5, -2.0 - bph * 10.0), 0.0,
 					0.05 + bph * 0.04, Color(1, 1, 1, 0.55 * (1.0 - bph)))
 				_spr("frogman", epos, face, 0.4, Color(0.5, 0.8, 0.8, 0.35))
@@ -3413,7 +3427,7 @@ func _draw_enemies() -> void:
 			# sell the altitude; the amber paint-lens swells through the windup
 			# (grenadier grammar — it calls the same tracked strike).
 			var dwu: int = e.get("windup", 0)
-			var hb := sin(float(Engine.get_physics_frames()) * 0.11 + float(e["x"] % 6283) * 0.001) * 1.5
+			var hb := sin(float(Engine.get_physics_frames()) * 0.11 + float(eidx) * 1.7) * 1.5
 			# Shadow breathes opposite the bob — higher drone, smaller/fainter shadow.
 			draw_circle(epos + Vector2(3.0, 8.0), 4.0 - hb * 0.5, Color(0, 0, 0, 0.18 - hb * 0.03))
 			if dwu > 0:
