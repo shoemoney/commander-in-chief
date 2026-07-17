@@ -222,6 +222,9 @@ func _row_icon(id: String) -> String:
 		"rumble": return "mi_controller"
 		"watch": return "mi_camera"
 		"back": return "mi_back"
+		"endless": return "mi_combat"
+		"daily": return "mi_timer"
+		"quit": return "mi_cancel"
 	return ""
 
 

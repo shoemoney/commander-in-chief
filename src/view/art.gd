@@ -261,6 +261,9 @@ const TEX := {
 	"mi_home": preload(SY + "ui/menuicons/mi_home.png"),
 	"mi_camera": preload(SY + "ui/menuicons/mi_camera.png"),
 	"mi_back": preload(SY + "ui/menuicons/mi_back.png"),
+	"mi_combat": preload(SY + "ui/menuicons/mi_combat.png"),
+	"mi_timer": preload(SY + "ui/menuicons/mi_timer.png"),
+	"mi_cancel": preload(SY + "ui/menuicons/mi_cancel.png"),
 	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
 	"ui_tooltip": preload(SY + "hud/SPR_HUD_Tooltip.png"),
 	"ui_frame_lrg": preload(SY + "hud/SPR_HUD_Frame_Lrg.png"),
