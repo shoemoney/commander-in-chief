@@ -82,6 +82,9 @@ var _boss_bar_slots := 0         # top-center bars drawn this frame (banner duck
 var _result_t := 0.0             # debrief/victory card entrance ease (0→1)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
 var _enemy_pos_prev := {}        # per-slot prev sim pos — gates the run-bob to actual movement
+var _enemy_slot_kind := {}       # per-slot kind stamp — the sim compacts with remove_at, so a
+                                 # slot can be inherited by a different enemy; a kind mismatch
+                                 # drops the stale face/prev-pos instead of lerping out of them
 var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame alloc)
 var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
@@ -590,6 +593,8 @@ func _reset() -> void:
 	_tank_turret.clear()
 	_enemy_face.clear()
 	_enemy_pos_prev.clear()
+	_enemy_slot_kind.clear()
+	_tech_lunge_prev.clear()
 	_blast_warp = 0.0
 	_cinematic = 0.0
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
@@ -3309,6 +3314,15 @@ func _draw_enemies() -> void:
 		_esort_order[si] = si
 		_esort_ys[si] = sim.enemies[si]["y"]
 	_esort_order.sort_custom(_esort_cmp)
+	# Prune per-slot view state past the live range — the sim compacts with
+	# remove_at, so an out-of-range key would otherwise leak onto a future
+	# same-kind occupant of that slot.
+	for sk in _enemy_slot_kind.keys():
+		if sk >= ecount:
+			_enemy_slot_kind.erase(sk)
+			_enemy_face.erase(sk)
+			_enemy_pos_prev.erase(sk)
+			_tech_lunge_prev.erase(sk)
 	for eidx in _esort_order:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
@@ -3316,6 +3330,14 @@ func _draw_enemies() -> void:
 		# First-sighting teaching card: name the archetype + its counter the first
 		# time it appears this run (these debut at sector 4 with no introduction).
 		var ekind: String = e["kind"]
+		# Slot inherited by a different kind after a kill's compaction: seed the
+		# face fresh and drop the prev-pos/lunge instead of lerping out of the
+		# dead neighbor's heading for ~10 frames.
+		if _enemy_slot_kind.get(eidx, "") != ekind:
+			_enemy_slot_kind[eidx] = ekind
+			_enemy_face.erase(eidx)
+			_enemy_pos_prev.erase(eidx)
+			_tech_lunge_prev.erase(eidx)
 		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
 			_seen_kinds[ekind] = true
 			_show_banner(_KIND_TEACH[ekind], Color(1.0, 0.55, 0.4))
