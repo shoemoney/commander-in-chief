@@ -488,6 +488,20 @@ const _BRAND_MAP := {
 
 static func _brand(key: String) -> String:
 	return _BRAND_MAP.get(pad_brand, {}).get(key, key)
+
+
+## Brand-correct button NAMES for text hints (the glyph twin of _brand):
+## semantic verbs → what's printed on the last-used pad. Unknown brands
+## fall back to Xbox labels, same as the glyph lookups.
+const _PAD_LABELS := {
+	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK"},
+	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "SHARE"},
+	"switch": {"interact": "Y", "revive": "X", "wheel": "MINUS"},
+}
+
+
+static func pad_label(verb: String) -> String:
+	return _PAD_LABELS.get(pad_brand, _PAD_LABELS["xbox"]).get(verb, verb.to_upper())
 ## Deuteran-safe remap: 'affordable/safe/open' greens become cyan-blue when
 ## colorblind mode is on (red↔blue is distinguishable where red↔green isn't).
 ## Reds are left alone. Driven from main.

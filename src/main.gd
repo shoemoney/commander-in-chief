@@ -945,7 +945,7 @@ func _consume_events() -> void:
 				match int(ev["kind"]):
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
-						% ("X" if Art.use_pad else "F"))
+						% (Art.pad_label("interact") if Art.use_pad else "F"))
 					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
@@ -1158,7 +1158,7 @@ func _consume_events() -> void:
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
-				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % ("Y" if Art.use_pad else "E"), true)
+				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % (Art.pad_label("revive") if Art.use_pad else "E"), true)
 				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
 				# out with a red descending sting so it registers as a setback, not a
 				# silent reset. Flags ride the checksum-excluded event (golden-safe).
@@ -1921,12 +1921,12 @@ func _track_bests() -> void:
 	# Supply-wheel discoverability: the first time the chest can afford the
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
-		_hint("supply", "HOLD [%s] FOR THE SUPPLY WHEEL" % ("BACK" if Art.use_pad else "Q"))
+		_hint("supply", "HOLD [%s] FOR THE SUPPLY WHEEL" % (Art.pad_label("wheel") if Art.use_pad else "Q"))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
 	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
 		_hint("airstrike_wheel", "AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]"
-			% ("BACK" if Art.use_pad else "Q"))
+			% (Art.pad_label("wheel") if Art.use_pad else "Q"))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).
 	if not sim._all_players_down():
