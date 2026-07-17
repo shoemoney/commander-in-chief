@@ -507,3 +507,33 @@ func test_supply_drop_magnetizes_rushers_and_dies_to_their_touch() -> void:
 		if ev["t"] == "drop_stolen":
 			stolen = true
 	Runner.T.ok(stolen, "denial emits drop_stolen for the view")
+
+
+func test_broadcast_tower_debuts_wave_7_and_its_aura_speeds_the_swarm() -> void:
+	var sim := SimWorld.new(5, 1, "endless")
+	# Below wave 7 the roll-8 slot must stay a plain elite (rng stream unchanged).
+	sim.wave = 6
+	sim._spawn_broadcast(300 * SimWorld.F_ONE, sim.camera_top + 100 * SimWorld.F_ONE)
+	var mast := sim.enemies[0]
+	Runner.T.eq(mast["hp"], SimWorld.BROADCAST_HP, "mast spawns armored at BROADCAST_HP")
+	# Aura: a rusher inside 140px outruns a twin outside it.
+	var py: int = sim.camera_top + 300 * SimWorld.F_ONE
+	sim._spawn_enemy(300 * SimWorld.F_ONE, sim.camera_top + 160 * SimWorld.F_ONE, false)  # inside aura
+	sim._spawn_enemy(40 * SimWorld.F_ONE, py, false)                                       # outside aura
+	var near := sim.enemies[1]
+	var far := sim.enemies[2]
+	var ny0: int = near["y"]
+	var fx0: int = far["x"]
+	sim.players[0]["x"] = 300 * SimWorld.F_ONE
+	sim.players[0]["y"] = py + 200 * SimWorld.F_ONE
+	sim.step([_idle()])
+	var near_moved: int = absi(near["y"] - ny0)
+	var far_moved: int = absi(far["x"] - fx0) + absi(far["y"] - py)
+	Runner.T.ok(near_moved > far_moved, "rusher in the rally aura outpaces one outside (%d vs %d)" % [near_moved, far_moved])
+	# The mast is rooted and holds the wave open.
+	Runner.T.eq(mast["x"], 300 * SimWorld.F_ONE, "mast never moves")
+	Runner.T.ok(not sim._wave_hostiles_cleared(), "a live mast holds the wave open (anti-stall pressure)")
+	# 5 bullets crack it: simulate via the armor gate.
+	for hit in 4:
+		mast["hp"] = mast["hp"] - 1
+	Runner.T.eq(mast["hp"], 1, "armor chip grammar reaches 1 hp")

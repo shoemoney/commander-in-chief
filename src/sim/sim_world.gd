@@ -144,6 +144,9 @@ const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
 const MG_NEST_BURST_ROUNDS := 3
 const MG_NEST_BURST_CD_TICKS := 90  # reload between bursts
 const BULLET_HIT_RADIUS := 9 * F_ONE
+const BROADCAST_HP := 5                       # starting value: outlasts a 3-round burst, a grenade still one-shots (nest grammar)
+const BROADCAST_AURA_RADIUS := 140 * F_ONE    # starting value ~half a screen — rusher inside must visibly outpace one outside
+const BROADCAST_PULSE_TICKS := 90             # view metronome only (rides hashed fire_cd)
 const PICKUP_RADIUS := 12 * F_ONE
 const MG_AMMO_MAX := 99
 const GRENADE_AMMO_MAX := 12
@@ -307,6 +310,7 @@ var _next_water_y: int = 0
 var _next_mine_y: int = 0
 var _next_barrel_y: int = 0
 var _gate_counter: int = 0
+var _broadcasts: Array = []        # per-tick cache of live rally masts (derived, rebuilt in _step_enemies, never hashed)
 var _spawn_grace: int = 0          # field-spawner lull after a checkpoint opens
 var kill_streak: int = 0           # consecutive kills (drives the score-bonus tiers)
 var kill_streak_timer: int = 0     # ticks left before the streak lapses
@@ -1082,7 +1086,7 @@ func _step_bullets() -> void:
 						events.append({"t": "rend_pierce", "x": bx, "y": by})
 					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
 					# it via _explode). Only a lethal round routes through _kill_enemy.
-					if e["kind"] == "mg_nest" or e["kind"] == "technical":
+					if e["kind"] == "mg_nest" or e["kind"] == "technical" or e["kind"] == "broadcast":
 						e["hp"] = e["hp"] - 1
 						if e["hp"] > 0:
 							events.append({"t": "armor_block", "x": bx, "y": by})
@@ -1308,6 +1312,15 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	var spd := base_spd
 	if wave_mod == 6:
 		spd = (spd * 7) / 5
+	# Broadcast Tower rally aura: any live mast within 140 px drives ground
+	# troops +25% — deliberately under FRENZY's +40% so aura+FRENZY stacking
+	# reads as escalation, not a doubling. Stateless read of hashed x/y;
+	# campaign never spawns a mast -> golden-inert.
+	if not _broadcasts.is_empty():
+		for be in _broadcasts:
+			if _dist_lte(e["x"], e["y"], be["x"], be["y"], BROADCAST_AURA_RADIUS):
+				spd = (spd * 5) / 4
+				break
 	if _in_water(e["x"], e["y"]):
 		spd = spd / 2
 	e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
@@ -1336,6 +1349,12 @@ func _rescue_pilot(e: Dictionary) -> void:
 
 
 func _step_enemies() -> void:
+	# One O(n) sweep so _advance_toward's aura check never rescans the roster
+	# per mover (that hot path just got 37% cheaper — keep it that way).
+	_broadcasts.clear()
+	for be in enemies:
+		if be["kind"] == "broadcast" and be["alive"]:
+			_broadcasts.append(be)
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
 		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
@@ -1391,6 +1410,15 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "drone":
 			_step_drone(e, target, dx, dy, dlen)
+			continue
+		if e["kind"] == "broadcast":
+			# Rooted rally mast: the AURA is the threat, and holding the wave
+			# open (it counts in _wave_hostiles_cleared) is the anti-stall
+			# pressure. fire_cd doubles as the view-pulse metronome.
+			e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+			if e["fire_cd"] == 0:
+				e["fire_cd"] = BROADCAST_PULSE_TICKS
+				events.append({"t": "broadcast_pulse", "x": e["x"], "y": e["y"]})
 			continue
 		if e["kind"] == "technical":
 			_step_technical(e, target, dx, dy, dlen)
@@ -1902,6 +1930,15 @@ func _spawn_mg_nest(x: int, y: int) -> void:
 		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0})
 
 
+func _spawn_broadcast(x: int, y: int) -> void:
+	## Rooted rally mast (endless wave-7+ debut — panel 4-vote): fires nothing,
+	## moves nothing; every ground mover in its aura runs +25%. Killing the mast
+	## breaks the rally. Reuses hashed hp/fire_cd/windup — zero new fields.
+	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
+		"kind": "broadcast", "hp": BROADCAST_HP, "fire_cd": 0, "windup": 0})
+
+
+
 func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	## Break LOS, flank, or grenade it. windup = inter-round spacing, lunge_ticks =
 	## rounds left, aim_lx/ly = the LOCKED burst vector, fire_cd = reload.
@@ -2138,6 +2175,11 @@ func _step_waves() -> void:
 					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
 				elif roll == 7:
 					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
+				elif roll == 8 and wave >= 7:
+					# Late-debut archetype: deep waves stop being static. Roll 8 fell
+					# to plain-elite before, and still does under wave 7 — the rng
+					# stream is untouched, only the wave-7+ interpretation changes.
+					_spawn_broadcast(x, camera_top - 24 * F_ONE)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			else:

@@ -171,6 +171,7 @@ const _KIND_TEACH := {
 	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
 	"technical": "TECHNICAL — SIDESTEP ITS CHARGE LINE, ONE SHOT DROPS IT",
 	"courier": "SUPPLY COURIER — GUN IT DOWN BEFORE IT ESCAPES (4x BOUNTY)",
+	"broadcast": "BROADCAST TOWER — KILL THE MAST, BREAK THE RALLY",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -211,6 +212,7 @@ const _EVENT_SOUND := {
 	"gate_open": ["gate_open", -4.0, 1.0],
 	"supply_drop": ["whistle", -8.0, 0.8],   # low falling whistle: friendly cargo inbound, below strike_warn
 	"drop_stolen": ["alarm", -9.0, 0.6],     # low growl: the crate is gone
+	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
 	"tank_ignite": ["alarm", -4.0, 1.1],
@@ -1307,6 +1309,11 @@ func _consume_events() -> void:
 				_forks.append({"y": ev["y"]})
 			"gate_open":
 				_ev_gate_open(ev)
+			"broadcast_pulse":
+				# Expanding rally ring: the buff source and its reach, drawn from
+				# the checksum-excluded event — the aura is invisible otherwise.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave",
+					"sz": 8.0, "grow": 3.4, "fade": 0.9, "rate": 0.022, "col": Color(1.0, 0.4, 0.35, 0.5)})
 			"supply_drop":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "text": "SUPPLY DROP — HOLD IT", "col": Color(0.6, 0.9, 1.0)})
@@ -2659,7 +2666,7 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contractor2",
 	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "sapper",
 	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone",
-	"technical": "m_technical", "pilot": "m_pilot"}
+	"technical": "m_technical", "pilot": "m_pilot", "broadcast": "radio_tower"}
 
 # Rare capsule identity (pickup kinds 4..9): sprite/label/colour shared by the
 # ground draw, the collect callout and the off-screen marker. Always index via
@@ -3716,6 +3723,17 @@ func _draw_enemies() -> void:
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
 			var spp: float = 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady-bright under reduce-motion
 			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+		elif e["kind"] == "broadcast":
+			# Rally mast: the decor radio tower militarized — red-keyed, hp pips
+			# in the nest grammar, and a faint breathing ring that draws the
+			# aura's true 140px reach (truthful telegraph, reduce-motion safe).
+			var bpul := Art.pulse(0.2)
+			draw_arc(epos, 140.0, 0, TAU, 48, Color(1.0, 0.4, 0.35, 0.06 + bpul * 0.05), 1.0)
+			_spr("radio_tower", epos, 0.0, 0.9, Color(1.15, 0.62, 0.55))
+			var b_hp: int = e.get("hp", 5)
+			for bpi in 5:
+				draw_circle(epos + Vector2(-12.0 + bpi * 6.0, 14.0), 2.0,
+					Color(1.0, 0.3, 0.2) if bpi < b_hp else Color(0.25, 0.22, 0.2))
 		elif e["kind"] == "mg_nest":
 			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
 			# (6/9 panel reviewers: the old telegraph was one flat 44px stub that
