@@ -122,6 +122,7 @@ var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
 var _hint_queue: Array[String] = []      # pending first-time hints, drained one at a time
 var _run_kills := 0              # this-run tally for the debrief card
+var _run_rescues := 0            # pilot ransoms this run — the signature mechanic earns a tally line
 var _run_best_streak := 0
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
@@ -616,6 +617,7 @@ func _reset() -> void:
 	_hint_t = 0.0
 	_hint_queue.clear()
 	_run_kills = 0
+	_run_rescues = 0
 	_downed_by = ""
 	_last_gate_tick = 0
 	_best_gate_split = 0
@@ -1219,6 +1221,7 @@ func _consume_events() -> void:
 				# round pays nothing — sim rule the green ring alone can't teach).
 				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM" % sim.PILOT_RANSOM, true)
 			"pilot_rescued":
+				_run_rescues += 1
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
 				_sfx.play("buy", -2.0, 1.5)
 			"pilot_lost":
@@ -1842,7 +1845,7 @@ func _record_run() -> void:
 	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
-		"grade": rr.grade, "title": rr.title})
+		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues})
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
 	if hall.size() > 8:
 		hall = hall.slice(0, 8)
@@ -5443,7 +5446,7 @@ func _draw_banners(top_msg: String) -> void:
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		var vrr := _run_rank()
-		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
+		var vrows: Array = [
 			{"text": "RANK  %s — %s" % [vrr.grade, vrr.title], "color": vrr.col, "size": 13,
 				"icon": "mi_medal_%d" % ("DCBAS".find(vrr.grade) + 1), "icon_size": 15.0,
 				"icon_col": vrr.col},
@@ -5452,7 +5455,12 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
 				"icon": "icon_coin", "icon_size": 14.0},
 			{"text": "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10], "color": Color(0.8, 0.84, 0.74)},
-		], Color(1, 1, 1, 0.96))
+		]
+		if _run_rescues > 0:
+			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
+				"color": Art.safe(Color(0.5, 1.0, 0.7))})
+		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
+			Color(1, 1, 1, 0.96))
 		# Trophy overlaps blank panel space only (no row text under it), so it's
 		# safe to draw after the shared panel/title/rows without reordering.
 		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
@@ -5471,6 +5479,9 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "SCORE %d   KILLS %d" % [sim.score, _run_kills], "color": Color(0.9, 0.92, 0.85)},
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]
+		if _run_rescues > 0:
+			rows.append({"text": "PILOTS RESCUED  %d" % _run_rescues,
+				"color": Art.safe(Color(0.5, 1.0, 0.7))})
 		var rr := _run_rank()
 		# Grade medal (D=1 … S=5) rides the panel's existing icon slot.
 		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col,
