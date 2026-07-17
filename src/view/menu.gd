@@ -494,7 +494,10 @@ func _row_at(p: Vector2) -> int:
 ## _draw_back_button both read it, so a tweak to one can't drift the click target
 ## off the pixels (same discipline as _row_geometry / panel_bottom()).
 func _back_rect() -> Rect2:
-	return Rect2(Vector2(320 - BTN.x / 2.0, 316), BTN * Vector2(1, 0.7))
+	# 320 (was 316): buys the HOWTO threat list its 7th row — the selected
+	# plate's grow(3) top sits at 317, clear of the last baseline at 312.
+	# Bottom lands at 345, inside the 360 canvas. Draw + hit-test share this.
+	return Rect2(Vector2(320 - BTN.x / 2.0, 320), BTN * Vector2(1, 0.7))
 
 
 func _toggle_bus(name: String) -> void:
@@ -952,11 +955,15 @@ func _draw_howto() -> void:
 		["elite", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — lurks in water, grenades only"]]
 	for i in roster.size():
-		var yy := 176.0 + i * 26.0
+		# 24px pitch (was 26): buys the ENDLESS header its clearance below —
+		# last box bottom lands at 232, exactly the header's glyph top at y240.
+		var yy := 174.0 + i * 24.0
 		draw_texture_rect(Art.tex(roster[i][0]), Rect2(80, yy - 10, 20, 20), false, Art.tint(roster[i][0]))
 		Art.text(self, roster[i][1], Vector2(108, yy + 3), 10, Color(0.9, 0.92, 0.82))
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
-	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 244), 10, Color(1.0, 0.7, 0.4))
+	# 240 (was 244) + first special baseline 252: 12px header-to-row gap — at
+	# 244 the header's descenders sat in GRENADIER's ascender row.
+	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 240), 10, Color(1.0, 0.7, 0.4))
 	# Each line fronts its LIVE sprite in its in-game tint (panel round: the top
 	# roster teaches silhouettes, this block taught only names — a first-run
 	# player couldn't match "GHILLIE" to the shape that kills them). Keyed
@@ -971,18 +978,18 @@ func _draw_howto() -> void:
 		["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
 		["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
 	for i in special.size():
-		# 12px pitch (leading 1.2): 10px mixed-case on an 11px pitch had descenders
-		# kissing the next line's ascenders. 254 start keeps the header's 10px
-		# clearance; 6th baseline lands at 314, still clear of the BACK button's
-		# inner plate (y≈319).
-		# 11px pitch from 250: SEVEN rows now (TECHNICAL joined) — 7th baseline
-		# lands at 316, still clear of the BACK button's inner plate (y≈319).
-		var sy := 250.0 + i * 11.0
-		# 26px box on a 12px pitch: the bakes carry wide transparent margins
-		# (~70% padding), so the visible body is ~8px and neighboring boxes
-		# never actually touch — smaller boxes rendered as unreadable specks.
-		draw_texture_rect(Art.tex(special[i][0]), Rect2(46, sy - 17, 26, 26), false, special[i][1])
-		Art.text(self, special[i][2], Vector2(72, sy), 10, Color(0.88, 0.9, 0.8))
+		# SEVEN rows must fit between the header (baseline 244) and the BACK
+		# plate: 252 start + 10px pitch puts baselines at 252..312 — 8px under
+		# the header and clear of BACK (moved to y=320 for exactly this). The
+		# two merged batches' layouts (12px pitch/6 rows vs 11px pitch/7 rows)
+		# composed into header-overlap at 250 AND a 316 baseline inside BACK.
+		var sy := 252.0 + i * 10.0
+		# 26px box: the bakes carry wide transparent margins (~70% padding), so
+		# the visible body is ~8px and neighboring boxes never actually touch —
+		# smaller boxes rendered as unreadable specks. x=50 keeps the box off
+		# the ui_frame chrome (46 sat on the border art).
+		draw_texture_rect(Art.tex(special[i][0]), Rect2(50, sy - 17, 26, 26), false, special[i][1])
+		Art.text(self, special[i][2], Vector2(76, sy), 10, Color(0.88, 0.9, 0.8))
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, 320.0, y, size, col)
