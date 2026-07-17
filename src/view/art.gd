@@ -306,7 +306,7 @@ const SCALE := {
 	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
 	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
 	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
-	"skyline_chimney": 0.4, "skyline_mast": 0.4,
+	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
 	"m_insurgent5": 0.47, "m_pilot": 0.46, "m_soldier2": 0.5,
@@ -334,7 +334,7 @@ const SCALE := {
 	# footprint the 512×0.18 original had (the 0.18 silently shrank them 8×).
 	"fx_bubble1": 1.44, "fx_bubble2": 1.44,
 	"fx_fumes": 4.0,   # 128px import (was 512-effective) → same _spr plume size
-	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles
+	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles — bypassed: draw site (main.gd) uses raw draw_texture_rect with its own rect
 	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
 }
 
@@ -373,6 +373,7 @@ const TINT := {
 	# same class as the sandbag walls, not the receding scenery).
 	"bridge_mid": Color(0.94, 0.9, 0.8), "bridge_ramp": Color(0.94, 0.9, 0.8),
 	# Skyline pieces read as dark horizon silhouettes.
+	# bypassed — skyline draw site (main.gd) passes its own `sky` color to draw_texture_rect
 	"skyline_chimney": Color(0.3, 0.33, 0.38), "skyline_mast": Color(0.3, 0.33, 0.38),
 	"crater": Color(0.6, 0.6, 0.54),   # scorched ground, recedes like the wrecks
 	# mil2 enemies read warm/bright (threats); vehicles olive-drab; pickups bright.
