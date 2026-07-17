@@ -537,3 +537,52 @@ func test_broadcast_tower_debuts_wave_7_and_its_aura_speeds_the_swarm() -> void:
 	for hit in 4:
 		mast["hp"] = mast["hp"] - 1
 	Runner.T.eq(mast["hp"], 1, "armor chip grammar reaches 1 hp")
+
+
+func test_tank_crew_gunner_seat() -> void:
+	# P2 boards an OCCUPIED tank as coax gunner: derived identity (in_tank set,
+	# occupant unchanged), independent aim + on-foot-cadence MG, +25% fuel tax,
+	# driver exit promotes the gunner to the sticks.
+	var sim := SimWorld.new(9, 2)
+	# Stage INSIDE the camera view — _clamp_actor snaps players back into
+	# frame during step(), which silently un-boards anyone parked off-screen.
+	var tx: int = 300 * SimWorld.F_ONE
+	var ty: int = sim.camera_top + 200 * SimWorld.F_ONE
+	sim.tanks.clear()
+	sim.tanks.append({"x": tx, "y": ty, "alive": true,
+		"burning": false, "fuel": 100000, "burn_ticks": 0, "fire_cd": 0, "occupant": -1})
+	var p0 := sim.players[0]
+	var p1 := sim.players[1]
+	for p in [p0, p1]:
+		p["x"] = tx
+		p["y"] = ty
+	var board := SimInput.new()
+	board.interact = true
+	sim.step([board, _idle()])
+	Runner.T.eq(sim.tanks[0]["occupant"], 0, "P1 boards as driver")
+	sim.step([_idle(), _idle()])   # release interact edges
+	var board2 := SimInput.new()
+	board2.interact = true
+	sim.step([_idle(), board2])
+	Runner.T.eq(p1["in_tank"], 0, "P2 boards the occupied tank as gunner")
+	Runner.T.eq(sim.tanks[0]["occupant"], 0, "occupant stays driver-only (derived gunner)")
+	# Gunner fires the coax with his own aim while the driver holds fire.
+	var gun := SimInput.new()
+	gun.fire = true
+	gun.aim_x = 256
+	var ammo0: int = p1["mg_ammo"]
+	sim.step([_idle(), gun])
+	Runner.T.eq(p1["mg_ammo"], ammo0 - 1, "coax spends the gunner's own mg_ammo")
+	Runner.T.ok(sim.bullets.size() > 0, "coax rounds join the shared bullets array")
+	# Fuel tax: crewed burn outpaces solo burn over the same window.
+	var fuel0: int = sim.tanks[0]["fuel"]
+	for t in 40:
+		sim.step([_idle(), _idle()])
+	var crewed_burn: int = fuel0 - sim.tanks[0]["fuel"]
+	Runner.T.ok(crewed_burn > 40, "double-crew burns fuel faster than 1/tick (got %d/40)" % crewed_burn)
+	# Driver steps off: the gunner inherits the sticks.
+	var exit := SimInput.new()
+	exit.interact = true
+	sim.step([exit, _idle()])
+	Runner.T.eq(sim.tanks[0]["occupant"], 1, "departing driver promotes the gunner to occupant")
+	Runner.T.eq(p0["in_tank"], -1, "the old driver is on foot")

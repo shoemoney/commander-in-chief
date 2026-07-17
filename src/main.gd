@@ -215,6 +215,7 @@ const _EVENT_SOUND := {
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
+	"tank_crew": ["tank_board", -5.0, 1.5],   # same clunk a fifth up: mounting, but not YOUR controls
 	"tank_ignite": ["alarm", -4.0, 1.1],
 	"observer_spawn": ["alarm", -3.0, 1.0],
 	"strike_warn": ["whistle", -6.0, 1.0],
@@ -1309,6 +1310,9 @@ func _consume_events() -> void:
 				_forks.append({"y": ev["y"]})
 			"gate_open":
 				_ev_gate_open(ev)
+			"tank_crew":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
 			"broadcast_pulse":
 				# Expanding rally ring: the buff source and its reach, drawn from
 				# the checksum-excluded event — the aura is invisible otherwise.

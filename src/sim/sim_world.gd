@@ -870,20 +870,43 @@ func _try_board_tank(player_index: int, p: Dictionary) -> bool:
 	## only when there was nothing to board.
 	for t in tanks.size():
 		var tank := tanks[t]
-		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
-				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+		if not tank["alive"] or tank["burning"] \
+				or not _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+			continue
+		if tank["occupant"] < 0:
 			tank["occupant"] = player_index
 			p["in_tank"] = t
 			events.append({"t": "tank_board", "x": tank["x"], "y": tank["y"]})
 			return true
+		if tank["occupant"] != player_index and _tank_gunner(t) < 0:
+			# Tank Crew (8-vote panel): the second player rides an OCCUPIED tank
+			# as coax gunner. Identity is DERIVED — in_tank set, occupant is
+			# someone else — so the tank dict gains ZERO fields (occupant stays
+			# driver-only) and the goldens never move (torture never boards:
+			# probe-verified). Distinct event: tank_board already carries ~3
+			# meanings and the SFX panel wants fewer, not more.
+			p["in_tank"] = t
+			events.append({"t": "tank_crew", "x": tank["x"], "y": tank["y"], "i": player_index})
+			return true
 	return false
+
+
+func _tank_gunner(t: int) -> int:
+	## Index of the player riding tank t as gunner (in_tank == t but not the
+	## occupant), or -1. Always derived, never stored.
+	for gi in players.size():
+		if players[gi]["in_tank"] == t and tanks[t]["occupant"] != gi:
+			return gi
+	return -1
 
 
 func _boardable_tank_near(p: Dictionary) -> bool:
 	## Near-miss board taps must not arm a claymore at your feet: a boardable
 	## tank just outside TANK_BOARD_RADIUS means INTERACT read as "board".
-	for tank in tanks:
-		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
+	for t in tanks.size():
+		var tank := tanks[t]
+		if tank["alive"] and not tank["burning"] \
+				and (tank["occupant"] < 0 or _tank_gunner(t) < 0) \
 				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], 2 * TANK_BOARD_RADIUS):
 			return true
 	return false
@@ -893,6 +916,10 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 	var tank := tanks[p["in_tank"]]
 	if not tank["alive"]:
 		p["in_tank"] = -1
+		return
+
+	if tank["occupant"] != player_index:
+		_ride_as_gunner(player_index, p, tank, inp, interact_edge)
 		return
 
 	if interact_edge:
@@ -951,9 +978,49 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 			_detonate_barrel(bl, true)
 
 
+func _ride_as_gunner(player_index: int, p: Dictionary, tank: Dictionary, inp: SimInput, interact_edge: bool) -> void:
+	## Coax gunner seat: rides the hull, aims independently, fires the ON-FOOT
+	## gun from the top deck — same 8t cadence, same mg_ammo pool, single
+	## bullet (no capsule fans up there), so crewing up buys position + the
+	## fuel tax, never a DPS printer. Starting values; probe test asserts
+	## coax DPS <= on-foot DPS over a staged 600-tick burst.
+	if interact_edge:
+		p["in_tank"] = -1
+		p["y"] = tank["y"] + 24 * F_ONE
+		if tank["burning"]:
+			# The bail window covers the gunner too — same leap, same mercy.
+			p["boost_ticks"] = BAIL_BOOST_TICKS
+			p["hurt_iframes"] = maxi(p["hurt_iframes"], BAIL_IFRAME_TICKS)
+		_clamp_actor(p)
+		return
+	p["x"] = tank["x"]
+	p["y"] = tank["y"]
+	var ax: int = inp.aim_x * 256
+	var ay: int = inp.aim_y * 256
+	var alen := Fixed.length(ax, ay)
+	if alen > F_ONE / 4:
+		p["aim_x"] = Fixed.div(ax, alen)
+		p["aim_y"] = Fixed.div(ay, alen)
+	if inp.fire and p["fire_cd"] == 0:
+		if p["mg_ammo"] > 0:
+			p["fire_cd"] = FIRE_COOLDOWN_TICKS
+			p["mg_ammo"] = p["mg_ammo"] - 1
+			events.append({"t": "shot", "x": p["x"], "y": p["y"], "i": player_index})
+			_spawn_mg_bullet(p, player_index, p["aim_x"], p["aim_y"])
+		else:
+			events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": player_index})
+
+
 func _dismount(p: Dictionary, tank: Dictionary) -> void:
+	# Crew promotion: a departing driver hands the hull to a seated gunner
+	# instead of orphaning them (one assignment — no driverless zombie tank).
+	var t_idx: int = p["in_tank"]
 	tank["occupant"] = -1
 	p["in_tank"] = -1
+	if t_idx >= 0:
+		var g := _tank_gunner(t_idx)
+		if g >= 0:
+			tank["occupant"] = g
 	p["y"] = tank["y"] + 24 * F_ONE
 	if tank["burning"]:
 		p["boost_ticks"] = BAIL_BOOST_TICKS   # bailing gets the speed boost
@@ -964,13 +1031,19 @@ func _dismount(p: Dictionary, tank: Dictionary) -> void:
 
 
 func _step_tanks() -> void:
-	for tank in tanks:
+	for ti in tanks.size():
+		var tank := tanks[ti]
 		if not tank["alive"]:
 			continue
 		tank["fire_cd"] = maxi(0, tank["fire_cd"] - 1)
 
 		if tank["occupant"] >= 0 and not tank["burning"]:
 			tank["fuel"] = tank["fuel"] - 1
+			# Crew fuel tax: a seated gunner burns +25% (every 4th tick) —
+			# double-crewing is a deliberate commitment, not a free gun deck.
+			# Starting value; staged probe: crewed fuel life ~20s -> ~16s.
+			if tank["fuel"] % 4 == 0 and _tank_gunner(ti) >= 0:
+				tank["fuel"] = tank["fuel"] - 1
 			if tank["fuel"] <= 0:
 				_ignite_tank(tank)
 
@@ -984,19 +1057,23 @@ func _step_tanks() -> void:
 					score += COIN_BUNKER * 20
 					events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
 						"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER * 2})
-					if tank["occupant"] >= 0:
-						var driver := players[tank["occupant"]]
-						_dismount(driver, tank)
+					# The bail window covers the whole crew: driver first (his
+					# dismount promotes the gunner to occupant), then the gunner.
+					for ci in players.size():
+						if players[ci]["in_tank"] == ti:
+							_dismount(players[ci], tank)
 					_detonate_tank(tank)
 					break
 			if not tank["alive"]:
 				continue
 			tank["burn_ticks"] = tank["burn_ticks"] - 1
 			if tank["burn_ticks"] <= 0:
-				# Bail window expired: anyone still inside goes with it.
-				if tank["occupant"] >= 0:
-					_kill_player(players[tank["occupant"]])
-					tank["occupant"] = -1
+				# Bail window expired: anyone still inside goes with it —
+				# driver AND gunner (_kill_player clears each rider's in_tank).
+				for ci in players.size():
+					if players[ci]["in_tank"] == ti:
+						_kill_player(players[ci])
+				tank["occupant"] = -1
 				_detonate_tank(tank)
 
 
