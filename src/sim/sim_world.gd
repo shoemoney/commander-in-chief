@@ -212,7 +212,11 @@ const SHOP_GRENADE_COST := 30
 const SHOP_VEST_COST := 60
 const SHOP_AIRSTRIKE_COST := 100
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
-const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST]
+const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
+const SANDBAG_FIELD_CAP := 6         # starting value: 6 x 36px = 216px can never wall the ~592px lane
+const SANDBAG_HALF_W := 18 * F_ONE   # segment is 36x10 px — rushers must flank in under ~2s
+const SANDBAG_HALF_H := 5 * F_ONE
+const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST, SHOP_SANDBAG_COST]
 # Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
 # it advances DOWN the map at the players. Armor: grenades only. Three
 # phases by HP thirds. Engaging it triggers the Last Stand rule: no more
@@ -274,6 +278,7 @@ var strikes: Array[Dictionary] = []
 var waters: Array[Dictionary] = []
 var enemy_bullets: Array[Dictionary] = []
 var mines: Array[Dictionary] = []
+var sandbags: Array[Dictionary] = []   # player-authored cover (wheel-only; dead bags are erased on the spot)
 var barrels: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
@@ -828,6 +833,17 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 				if fe["alive"] and fe.get("windup", 0) > 0:
 					fe["windup"] = maxi(fe["windup"], _windup_for(fe["kind"]))
 			events.append({"t": "flashbang", "x": p["x"], "y": p["y"]})
+		11:
+			# Deployable sandbags (5-vote panel): the wheel buy plants a cover
+			# segment IMMEDIATELY one step along the aim (claymore grammar) —
+			# no carried inventory, no new player field, which is exactly what
+			# keeps the player hash list untouched while unbought. Blocks
+			# bullets AND rusher pathing both ways; one grenade or tank tread
+			# clears it; mortar rings ignore it (strikes never check cover).
+			var sbx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
+			var sby: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
+			sandbags.append({"x": sbx, "y": sby})
+			events.append({"t": "sandbag_plant", "x": sbx, "y": sby})
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
 			# other lethal AoE (grenadier lob, sniper paint, observer mortar),
@@ -851,6 +867,11 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return
 	var cost: int = _supply_cost(kind)
+	if kind == 4 and (sandbags.size() >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
+		# Sandbag-specific denials: field cap reached, or buying from a tank
+		# (no hands on the deck to dig in). Deny is loud, same as broke.
+		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
+		return
 	if war_chest < cost:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"]})
 		return
@@ -859,7 +880,9 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	# payout gives unspent chest, so a run-saving buy trades power-now for
 	# banked-score rather than costing points outright.
 	score += cost * 10
-	_apply_supply(p, kind)
+	# Wheel slot 4 is the sandbag: supply-kind 11 (pickup kinds 4-10 are the
+	# rare capsules — a priced crate can never carry 11, so no collision).
+	_apply_supply(p, 11 if kind == 4 else kind)
 	events.append({"t": "buy", "x": p["x"], "y": p["y"], "kind": kind})
 
 
@@ -972,6 +995,13 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 					_rescue_pilot(e)
 				continue
 			_kill_enemy(e)
+	# Treads flatten sandbags — armor does not respect your landscaping.
+	for si in range(sandbags.size() - 1, -1, -1):
+		var tsb := sandbags[si]
+		if absi(tank["x"] - tsb["x"]) <= SANDBAG_HALF_W + TANK_CRUSH_RADIUS \
+				and absi(tank["y"] - tsb["y"]) <= SANDBAG_HALF_H + TANK_CRUSH_RADIUS:
+			events.append({"t": "sandbag_break", "x": tsb["x"], "y": tsb["y"]})
+			sandbags.remove_at(si)
 	# ...and roll over fuel barrels to set them off (chains via the fuse in _step_barrels).
 	for bl in barrels:
 		if bl["armed"] and _dist_lte(tank["x"], tank["y"], bl["x"], bl["y"], TANK_CRUSH_RADIUS):
@@ -1135,6 +1165,13 @@ func _step_bullets() -> void:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
+		if not dead and not sandbags.is_empty():
+			# Player-authored cover eats rounds the same way (both directions).
+			for sb in sandbags:
+				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
+					events.append({"t": "armor_block", "x": bx, "y": by})
+					dead = true
+					break
 		if not dead:
 			for e in enemies:
 				# Cheap axis pre-reject for the hottest O(bullets×enemies) scan.
@@ -1245,6 +1282,13 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		# Frag bonus: a single blast that catches a pack rewards reading the field.
 		score += frags * 50
 		events.append({"t": "frag_bonus", "x": x, "y": y, "n": frags})
+	for si in range(sandbags.size() - 1, -1, -1):
+		# One grenade clears a bag — player-authored cover is real but cheap
+		# to answer, for BOTH sides of it (your own grenade included).
+		var sb := sandbags[si]
+		if _dist_lte(x, y, sb["x"], sb["y"], GRENADE_RADIUS):
+			events.append({"t": "sandbag_break", "x": sb["x"], "y": sb["y"]})
+			sandbags.remove_at(si)
 	for bk in bunkers:
 		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, GRENADE_RADIUS):
 			bk["alive"] = false
@@ -1400,8 +1444,19 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 				break
 	if _in_water(e["x"], e["y"]):
 		spd = spd / 2
-	e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-	e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+	var pvx: int = e["x"]
+	var pvy: int = e["y"]
+	e["x"] = pvx + Fixed.mul(Fixed.div(dx, dlen), spd)
+	e["y"] = pvy + Fixed.mul(Fixed.div(dy, dlen), spd)
+	# Sandbag walls stop ground movers both ways (the water-clamp pattern:
+	# move, then revert into-AABB steps) — the swarm flanks cover, never
+	# phases through it. Empty-array fast path keeps the hot loop clean.
+	if not sandbags.is_empty():
+		for sb in sandbags:
+			if absi(e["x"] - sb["x"]) <= SANDBAG_HALF_W and absi(e["y"] - sb["y"]) <= SANDBAG_HALF_H:
+				e["x"] = pvx
+				e["y"] = pvy
+				break
 
 
 func _spawn_enemy_bullet(x: int, y: int, dx: int, dy: int, dlen: int, speed: int = ENEMY_BULLET_SPEED) -> void:
@@ -2617,6 +2672,12 @@ func _step_enemy_bullets() -> void:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
+		if not dead and not sandbags.is_empty():
+			for sb in sandbags:
+				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
+					events.append({"t": "armor_block", "x": bx, "y": by})
+					dead = true
+					break
 		if not dead:
 			for p in players:
 				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
@@ -2780,6 +2841,14 @@ func checksum() -> int:
 		h = feed.call(2166136261, h)   # only perturbs the hash when assist is ON (torture: OFF)
 	if hard:
 		h = feed.call(40503, h)        # only perturbs the hash when HARD is ON (torture: OFF)
+	if not sandbags.is_empty():
+		# Conditional feed (assist/hard/colossus precedent): an empty array
+		# leaves the hash stream untouched, so goldens hold while unbought —
+		# the mines[] unconditional-feed lesson, learned.
+		h = feed.call(sandbags.size(), h)
+		for sb in sandbags:
+			h = feed.call(sb["x"], h)
+			h = feed.call(sb["y"], h)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
 				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:

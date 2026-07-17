@@ -586,3 +586,45 @@ func test_tank_crew_gunner_seat() -> void:
 	sim.step([exit, _idle()])
 	Runner.T.eq(sim.tanks[0]["occupant"], 1, "departing driver promotes the gunner to occupant")
 	Runner.T.eq(p0["in_tank"], -1, "the old driver is on foot")
+
+
+func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
+	var sim := SimWorld.new(13, 1)
+	var p := sim.players[0]
+	p["x"] = 300 * SimWorld.F_ONE
+	p["y"] = sim.camera_top + 200 * SimWorld.F_ONE
+	p["aim_x"] = SimWorld.F_ONE
+	p["aim_y"] = 0
+	sim.war_chest = 500
+	sim._try_buy(p, 4)
+	Runner.T.eq(sim.sandbags.size(), 1, "wheel slot 4 plants a sandbag segment")
+	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_SANDBAG_COST, "bag costs SHOP_SANDBAG_COST")
+	var sb := sim.sandbags[0]
+	Runner.T.ok(sb["x"] > p["x"], "bag plants ALONG the aim, not underfoot")
+	# Bullets die inside the bag AABB — both directions use the same block.
+	sim.bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim.enemy_bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10})
+	sim._step_bullets()
+	sim._step_enemy_bullets()
+	Runner.T.eq(sim.bullets.size(), 0, "player bullet dies in the bag")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "enemy bullet dies in the bag")
+	# A rusher walking the bag line stalls (move-revert), then a grenade clears it.
+	sim._spawn_enemy(sb["x"] + 24 * SimWorld.F_ONE, sb["y"], false)
+	var r := sim.enemies[sim.enemies.size() - 1]
+	p["x"] = sb["x"] - 60 * SimWorld.F_ONE
+	p["y"] = sb["y"]
+	# Walk at REAL enemy speed for 90 steps: the wall must hold the line —
+	# a mover may skim the AABB edge but can never end up on the far side.
+	for step in 90:
+		var dx: int = p["x"] - r["x"]
+		sim._advance_toward(r, dx, 0, Fixed.length(dx, 0), SimWorld.ENEMY_SPEED)
+	Runner.T.ok(r["x"] > sb["x"], "rusher never phases through the bag line (at %d vs bag %d)" % [r["x"], sb["x"]])
+	sim._explode(sb["x"], sb["y"])
+	Runner.T.eq(sim.sandbags.size(), 0, "one grenade clears the bag")
+	# Field cap denies the 7th bag, loudly.
+	for n in SimWorld.SANDBAG_FIELD_CAP:
+		sim.sandbags.append({"x": n * 40 * SimWorld.F_ONE, "y": p["y"]})
+	var chest0: int = sim.war_chest
+	sim._try_buy(p, 4)
+	Runner.T.eq(sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP, "field cap holds at 6")
+	Runner.T.eq(sim.war_chest, chest0, "capped buy denies without charging")

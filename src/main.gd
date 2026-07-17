@@ -195,9 +195,12 @@ const WHEEL_ITEMS := [
 	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES +4"},
 	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST"},
 	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE"},
+	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS"},
 ]
-const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND"]
-const _SECTOR_TO_ITEM: Array[int] = [2, 3, 0, 1]   # right=vest, down=airstrike, left=ammo, up=grenade
+const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
+# 8-way wheel: compass = the classic four, SW diagonal = sandbags, other
+# diagonals empty (-1) so a sloppy flick can never buy something unnamed.
+const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, -1]   # E,SE,S,SW,W,NW,N,NE
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
@@ -225,7 +228,9 @@ const _EVENT_SOUND := {
 	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
 	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
-	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
+	"claymore_plant": ["tank_board", -6.0, 1.6],
+	"sandbag_plant": ["tank_board", -7.0, 1.3],   # dig-in thump between claymore clunk (1.6) and board (1.0)
+	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
 	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
@@ -2609,7 +2614,9 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		var dir := aim if aim.length() > 0.3 \
 			else (move if w.get("move_armed", false) else Vector2.ZERO)
 		if dir.length() > 0.3:
-			var new_sel := int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4
+			var new_sel := int(round(fposmod(dir.angle(), TAU) / (TAU / 8.0))) % 8
+			if _SECTOR_TO_ITEM[new_sel] < 0:
+				new_sel = w["sel"]   # empty diagonal: keep the sticky pick
 			if new_sel != w["sel"]:
 				_sfx.play("pickup", -16.0, 1.5)   # hover tick confirms the flick
 			w["sel"] = new_sel
@@ -2751,6 +2758,7 @@ func _draw() -> void:
 	_draw_water()
 	_draw_scorch()
 	_draw_mines()
+	_draw_sandbags()
 	_draw_barrels()
 	_draw_gates()
 	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
@@ -3043,6 +3051,16 @@ func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
 			return true
 	return false
 
+
+func _draw_sandbags() -> void:
+	# Player-authored cover: the gate-wall bake at field scale, warm-tinted so
+	# YOUR cover reads apart from the neutral gate walls.
+	for sb in sim.sandbags:
+		var pos := _to_screen(sb["x"], sb["y"])
+		if pos.y < -20.0 or pos.y > 380.0:
+			continue
+		_ground_shadow(pos, 10.0)
+		_spr("wall_sandbag", pos, 0.0, 0.62, Color(0.95, 0.88, 0.7))
 
 func _draw_mines() -> void:
 	for m in sim.mines:
@@ -5275,9 +5293,11 @@ func _draw_wheel() -> void:
 		var cx := c.x - (10.0 + cw) / 2.0
 		draw_texture_rect(Art.tex("icon_coin"), Rect2(cx, c.y - 5.0, 9, 9), false)
 		Art.text(self, chest, Vector2(cx + 10.0, c.y + 3.0), 8, Color(1.0, 0.95, 0.65))
-		for s in 4:
+		for s in 8:
+			if _SECTOR_TO_ITEM[s] < 0:
+				continue
 			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
-			var ang := s * TAU / 4.0
+			var ang := s * TAU / 8.0
 			var ipos := c + Vector2.from_angle(ang) * 31.0
 			var acost: int = sim._supply_cost(item["kind"])   # wave-scaled in endless
 			var afford: bool = sim.war_chest >= acost
@@ -5312,6 +5332,7 @@ func _draw_wheel() -> void:
 				0: stock = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
 				1: stock = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
 				2: stock = "VEST ON" if p["vest"] else "NO VEST"
+				4: stock = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
 			if stock != "":
 				# Stock readout is the buy decision — full-alpha warm white, warm
 				# red the moment the pool it reads is empty.
