@@ -121,6 +121,7 @@ var _record_fired := false       # NEW RECORD banner once per run
 var _deep_fired := false         # DEEPEST WAVE banner once per run
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _boss_hpmax := {}            # view-side max HP seen per boss key: the endless gunship spawns above BOSS_HP (sim_world.gd:1581), which pegged its bar at 100% for half the fight
+var _endless_boss_key := ""      # last endless miniboss's dict key, so its hpmax/ghost entries get pruned on death (gate_y is unique per spawn — they'd accrete forever)
 var _seen := {}                  # persisted first-time-hint flags
 var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
@@ -618,6 +619,7 @@ func _reset() -> void:
 	_deep_fired = false
 	_boss_ghost.clear()
 	_boss_hpmax.clear()
+	_endless_boss_key = ""
 	_punch = 0.0
 	_fade = 0.0
 	_duck = 0.0
@@ -3807,6 +3809,12 @@ func _draw_gunships() -> void:
 		# not a reskin of the campaign bridge boss (same PI = nose-down convention).
 		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot, "m_heli_attack2")
 		slot += 1
+		_endless_boss_key = "boss%d" % sim.endless_boss["gate_y"]
+	elif _endless_boss_key != "":
+		# Prune the dead miniboss's view-side bar state — its key is never reused.
+		_boss_hpmax.erase(_endless_boss_key)
+		_boss_ghost.erase(_endless_boss_key)
+		_endless_boss_key = ""
 	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 
