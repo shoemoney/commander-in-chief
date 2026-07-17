@@ -70,13 +70,21 @@ const DRONE_WINDUP_TICKS := 24
 # round kills it (fragile). Starting values; test: a strafing player at
 # 100px+ must dodge every charge — if charges land on movers, widen REV_TICKS.
 const TECHNICAL_SPEED := 3 * F_ONE            # player is 2.4 px/t — it outruns you on a straight
-const TECHNICAL_REV_TICKS := 30               # rev-up telegraph (same class as MG_NEST_AIM)
+const TECHNICAL_REV_TICKS := 18               # rev tell, cut from 30: a lock landing 80t before
+	# impact let a 2.4px/t strafer clear the point with a 4-tick nudge. Starting
+	# value; test: a late-reacting strafer eats ~2/10 charges — widen toward 24
+	# if first contact feels unreactable (the sighting card teaches the rule).
 const TECHNICAL_CHARGE_TICKS := 50            # one charge = ~150px of travel
 const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge rhythm)
+const TECHNICAL_HP := 3                       # a truck is not a paper target (nest precedent)
 # Downed Pilot ransom: a dead gunship's pilot punches out at the crash site and
 # staggers for the enemy line at the TOP edge. TOUCH him to rescue (+ransom);
 # let him cross the edge and he's captured. Shooting him pays NOTHING.
-const PILOT_SPEED := (F_ONE * 4) / 5          # 0.8 px/t — a generous but real chase window
+# 1.4px/t (0.58x player): at 0.8 the rescue was a ~100% grab — he ejects at the
+# crash site you already stand on (the courier, this file's "real chase"
+# benchmark, runs 0.9x player). Starting value; test: mid-arena catch rate
+# should land 50-70% — at ~100% raise again, below 50% drop toward 1.1.
+const PILOT_SPEED := (F_ONE * 7) / 5
 const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
 # Punch-out grace: the pilot spawns unshootable (and unrescuable) for one
 # reaction window, because he appears ON the boss the player is still firing
@@ -566,7 +574,8 @@ func _step_players(inputs: Array) -> void:
 		if inp.revive:
 			_try_revive(i, p)
 
-		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0:
+		if interact_edge and not _try_board_tank(i, p) and p["claymores"] > 0 \
+				and not _boardable_tank_near(p):
 			# Claymore: no tank in reach, so INTERACT plants a carried charge one
 			# step ALONG the aim — into the enemy lane you're already shooting,
 			# clear of your own kiting path (planting behind the aim dropped it
@@ -691,6 +700,13 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 	## no revives past the final gate (the arcade's no-continue finale).
 	if last_stand:
 		return
+	if reviver_index == -1:
+		# Dead self-revive is the solo/all-down fallback ONLY: with a partner
+		# still standing, the rescue is theirs to perform — the co-op decision
+		# (walk to the body, spend together) must not be mashable from the floor.
+		for pl in players:
+			if pl["alive"]:
+				return
 	for j in players.size():
 		var target := players[j]
 		if target["alive"]:
@@ -758,6 +774,10 @@ func _kill_player(p: Dictionary) -> void:
 	# excluded) event so the view can sting a "LOADOUT LOST" beat. Golden-safe.
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"],
 		"triple": p["triple"], "pierce": p["pierce_ticks"] > 0, "spread": p["spread_ticks"] > 0})
+	# Arm the broke fallback on death itself, not only on a revive press: the
+	# wipe (endless's only run-ender) must not require a button press.
+	if war_chest < revive_cost(p):
+		p["broke_timer"] = BROKE_RESPAWN_TICKS
 
 
 func _fire_mission() -> void:
@@ -851,6 +871,16 @@ func _try_board_tank(player_index: int, p: Dictionary) -> bool:
 			tank["occupant"] = player_index
 			p["in_tank"] = t
 			events.append({"t": "tank_board", "x": tank["x"], "y": tank["y"]})
+			return true
+	return false
+
+
+func _boardable_tank_near(p: Dictionary) -> bool:
+	## Near-miss board taps must not arm a claymore at your feet: a boardable
+	## tank just outside TANK_BOARD_RADIUS means INTERACT read as "board".
+	for tank in tanks:
+		if tank["alive"] and tank["occupant"] < 0 and not tank["burning"] \
+				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], 2 * TANK_BOARD_RADIUS):
 			return true
 	return false
 
@@ -1052,7 +1082,7 @@ func _step_bullets() -> void:
 						events.append({"t": "rend_pierce", "x": bx, "y": by})
 					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
 					# it via _explode). Only a lethal round routes through _kill_enemy.
-					if e["kind"] == "mg_nest":
+					if e["kind"] == "mg_nest" or e["kind"] == "technical":
 						e["hp"] = e["hp"] - 1
 						if e["hp"] > 0:
 							events.append({"t": "armor_block", "x": bx, "y": by})
@@ -1111,7 +1141,11 @@ func _explode(x: int, y: int, no_coin := false) -> void:
 	events.append({"t": "explosion", "x": x, "y": y})
 	var frags := 0
 	for e in enemies:
-		if e["alive"] and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
+		# The pilot is a non-combatant objective PAST his punch-out grace too:
+		# a sapper mine or grenadier lob on his fixed walk was a ransom
+		# coin-flip the player couldn't influence. Bullets still kill him —
+		# "don't shoot the rescue" stays the player's lesson.
+		if e["alive"] and e["kind"] != "pilot" and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
 			_kill_enemy(e, no_coin)
 			frags += 1
 	if frags >= 3:
@@ -1195,7 +1229,9 @@ func _kill_enemy(e: Dictionary, no_coin := false) -> void:
 		# calls it out — standing your ground over a partner's body is rewarded.
 		for pl in players:
 			if not pl["alive"] and _dist_lte(e["x"], e["y"], pl["x"], pl["y"], 60 * F_ONE):
-				war_chest += 5
+				# Scales with the same wave/5 step as revive_cost, or deep-endless
+				# revive inflation turns the avenge beat into pocket change.
+				war_chest += 5 + ((wave / 5) * 5 if mode == "endless" else 0)
 				events.append({"t": "avenge", "x": e["x"], "y": e["y"]})
 				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
@@ -1649,7 +1685,9 @@ func _step_mines() -> void:
 				# Axis pre-reject — same truncation-safe proof as _step_bullets.
 				if absi(e["x"] - mx) > MINE_TRIGGER_RADIUS:
 					continue
-				if e["alive"] and not e.get("submerged", false) \
+				# (Pilot exemption: his fixed walk crossing a random field was a
+				# ransom coin-flip, not counterplay.)
+				if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot" \
 						and _dist_lte(e["x"], e["y"], mx, my, MINE_TRIGGER_RADIUS):
 					triggered = true
 					break
@@ -1685,24 +1723,25 @@ func _step_barrels() -> void:
 
 
 func _step_spawner() -> void:
-	# Field spawner: pressure from above the screen edge; every 8th is a red
+	# Field spawner: pressure from above the screen edge; every 7th is a red
 	# elite. Each opened gate tightens the interval — the campaign's
-	# difficulty ratchet (45 → 24 ticks by gate 5).
+	# difficulty ratchet (45 → 24 ticks by gate 4; the final gate only opens
+	# on Colossus death, so gate 4 is the last one the ramp can see).
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
 	if _spawn_grace > 0:
 		_spawn_grace -= 1
-	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 4)
+	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE
-	# Sector 4+ (3 gates opened): the endless ranged roster starts bleeding into
-	# the campaign field, so late sectors get a genuinely new threat vocabulary
+	# Sector 2+ (1 gate opened): the endless ranged roster starts bleeding into
+	# the campaign field, so later sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
 	if opened >= 1 and rng.range_i(0, 4) == 0:
 		var spick := rng.range_i(0, 3)   # +mg_nest turret
@@ -1711,9 +1750,9 @@ func _step_spawner() -> void:
 		else:
 			_spawn_special(x, camera_top - 24 * F_ONE, ["grenadier", "sniper", "shield"][spick])
 	else:
-		# Elite ratio tightens with each opened gate (every 8th → every 3rd by
-		# gate 5) so late campaign escalates composition, not just cadence.
-		var elite_every := maxi(3, 8 - opened)
+		# Elite ratio tightens with each opened gate (every 7th → every 3rd by
+		# gate 4) so late campaign escalates composition, not just cadence.
+		var elite_every := maxi(3, 7 - opened)
 		if hard:
 			elite_every = maxi(2, elite_every - 2)   # NG+ fields far more red elites
 		_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
@@ -1758,15 +1797,16 @@ func _windup_for(kind: String) -> int:
 
 
 func _shields_possible() -> bool:
-	## True once the shield archetype can actually spawn (campaign: 3 gates
-	## opened; endless: wave 3+) — gates the Rend drop so it's never inert.
+	## True once the shield archetype can actually spawn (campaign: 1 gate
+	## opened, matching _step_spawner's special roster; endless: wave 3+) —
+	## gates the Rend drop so it's never inert.
 	if mode == "endless":
 		return wave >= 3
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
-	return opened >= 3
+	return opened >= 1
 
 
 func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
@@ -1814,6 +1854,8 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 		# The marquee aerial threat kills like a trophy, not a grunt: marked
 		# rides the existing bounty grammar (3× pay + gold fountain + crown).
 		e["marked"] = true
+	if kind == "technical":
+		e["hp"] = TECHNICAL_HP   # armored like the nest — hp is already hashed
 	enemies.append(e)
 
 
@@ -2053,7 +2095,9 @@ func _step_waves() -> void:
 		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
 		# this wave pays a bonus, so cautious and reckless play stop earning alike.
 		if deaths_this_wave == 0 and wave > 1:
-			war_chest += 40
+			# Bonus rides the same creep curve as _supply_cost, or price inflation
+			# quietly erodes it into a rounding error by deep waves.
+			war_chest += 40 + (wave / 3) * 10
 			score += 1500
 			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
@@ -2316,17 +2360,30 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 	boss["hp"] = boss["hp"] - amount
 	if boss["hp"] <= 0 and boss["alive"]:
 		boss["alive"] = false
-		war_chest += BOSS_BOUNTY
-		score += BOSS_BOUNTY * 10
+		# Endless minibosses pay with their depth: HP scales +50%/milestone
+		# (x1.6/player) while the flat 200c shrank into a time-tax. Campaign
+		# gunships stay flat (wave = 0). Test: coins/sec on the w5 vs w25
+		# miniboss within ~25%.
+		var bounty: int = BOSS_BOUNTY
+		if mode == "endless" and wave >= 5:
+			bounty += (wave / 5 - 1) * (BOSS_BOUNTY / 2)
+		if wave_mod == 4:
+			bounty *= 2   # PAYDAY wave: every bounty doubles (same rule as _kill_enemy)
+		war_chest += bounty
+		score += bounty * 10
 		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 		events.append({"t": "explosion", "x": boss["x"], "y": by})
-		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": BOSS_BOUNTY, "kind": "boss"})
+		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": bounty, "kind": "boss"})
 		# The gunship's pilot punches out at the crash site and staggers for the
 		# enemy line — reach him before the top edge for the ransom.
-		if enemies.size() < MAX_ENEMIES:
-			enemies.append({"x": boss["x"], "y": by, "alive": true, "elite": false, "kind": "pilot",
-				"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
-			events.append({"t": "pilot_down", "x": boss["x"], "y": by})
+		# Unconditional + floor-clamped: the MAX_ENEMIES gate silently voided the
+		# advertised ransom at capped waves (one transient non-combatant just
+		# delays the next gated spawn), and a top-edge gunship kill ejected a
+		# pilot with a ~1s unavoidable fail (120px floor -> 50-70% catch target).
+		var pilot_y: int = maxi(by, camera_top + 120 * F_ONE)
+		enemies.append({"x": boss["x"], "y": pilot_y, "alive": true, "elite": false, "kind": "pilot",
+			"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
+		events.append({"t": "pilot_down", "x": boss["x"], "y": pilot_y})
 
 
 func _step_enemy_bullets() -> void:
@@ -2465,6 +2522,10 @@ func _clear_observer_strikes() -> void:
 # --- Geometry helpers ---
 
 func _dist_lte(x1: int, y1: int, x2: int, y2: int, r: int) -> bool:
+	# Axis early-out: |dx| > r implies dx^2 > r^2 — byte-identical result,
+	# skips the fixed-point multiplies on the (common) far-apart case.
+	if absi(x1 - x2) > r or absi(y1 - y2) > r:
+		return false
 	var dx := x1 - x2
 	var dy := y1 - y2
 	return Fixed.mul(dx, dx) + Fixed.mul(dy, dy) <= Fixed.mul(r, r)

@@ -137,6 +137,7 @@ var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty thr
 var _fire_swallow := false       # eat SPACE/LMB held over from a menu click / debrief redeploy —
                                  # clicking RESUME must not spend MG ammo on the first resumed ticks
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
+var _tech_lunge_prev := {}              # per-slot technical lunge_ticks — charge-end skid cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 var _seen_kinds := {}             # enemy kind → true once its first-encounter banner fired
 # First-sighting teaching cards for the lethal archetypes that debut deep (sector 4+)
@@ -152,6 +153,7 @@ const _KIND_TEACH := {
 	# The counterplay is counterintuitive (it outruns a straight sprint at
 	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
 	"technical": "TECHNICAL — SIDESTEP ITS CHARGE LINE, ONE SHOT DROPS IT",
+	"courier": "SUPPLY COURIER — GUN IT DOWN BEFORE IT ESCAPES (4x BOUNTY)",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -169,6 +171,7 @@ var _seen_dirty := false          # first-time hints ratchet in memory, flushed 
 var _prev_colossus_phase := 0     # phase-change escalation banners
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
+var _wheel_aim := [Vector2.ZERO, Vector2.ZERO]   # aim latched while the wheel is open (sector flicks must not whip the sim aim)
 const WHEEL_ITEMS := [
 	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST, "label": "AMMO +30"},
 	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES +4"},
@@ -492,6 +495,8 @@ func start_seeded(seed_v: int) -> void:
 	_daily = false
 	_seed_override = seed_v
 	_reset()
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_fade = 1.0
 
 
 func start_seed_from_clipboard() -> void:
@@ -530,6 +535,8 @@ func start_watch() -> void:
 	_two_players = r.player_count >= 2
 	_seed_override = r.seed_value
 	_reset()
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_fade = 1.0
 	_watch_replay = r
 	_watch_frame = 0
 	_watching = true
@@ -561,6 +568,10 @@ func _reset() -> void:
 	_recorder.mode = sim.mode
 	_recorder.player_count = sim.players.size()
 	_replay_saved = false
+	# A restart mid-replay must not keep feeding recorded frames into the new sim.
+	_watching = false
+	_watch_replay = null
+	_watch_frame = 0
 	_trauma = 0.0
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
@@ -685,8 +696,11 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		if event is InputEventJoypadMotion and absf(event.axis_value) < 0.5:
 			return
-		Art.use_pad = true
-		Art.pad_brand = _joy_brand(event.device)
+		# In 2P, pad 1 is P2's device — its motion must not flip P1's glyphs
+		# (P2 stick + P1 mouse would otherwise thrash use_pad every frame).
+		if not (_two_players and event.device == 1):
+			Art.use_pad = true
+			Art.pad_brand = _joy_brand(event.device)
 	elif event is InputEventKey or event is InputEventMouse:
 		Art.use_pad = false
 	# Pad redeploy: START on the debrief/victory card mirrors keyboard R — pad
@@ -933,7 +947,7 @@ func _consume_events() -> void:
 					8: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
 						% Art.prompt_word("interact"))
 					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
-					10: _hint("flashbang", "FLASHBANG — THE WHOLE FIELD IS STUNNED. PUSH!")
+					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
 				# REND sounded identical to grabbing FLASHBANG. kind 7..10 -> 1.2..1.56.
@@ -1431,7 +1445,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
 			"kind": _CORPSE_TEX.get(kkind, "elite"), "spin": randf() * TAU, "wet": kwet})
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-			"rate": 0.02, "text": "RANSOM LOST", "col": Art.safe(Color(1.0, 0.4, 0.3))})
+			"rate": 0.02, "text": "RANSOM LOST", "col": Color(1.0, 0.4, 0.3)})
 		_sfx.play("alarm", -14.0, 0.6)
 		return
 	if kkind == "technical":
@@ -1463,7 +1477,8 @@ func _ev_kill(ev: Dictionary) -> void:
 		for d in 6:
 			var wa := d * TAU / 6.0
 			_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "splash", "rate": 0.08,
-				"vx": cos(wa) * randf_range(0.8, 1.8), "vy": sin(wa) * randf_range(0.8, 1.8)})
+				"vx": cos(wa) * randf_range(0.8, 1.8), "vy": sin(wa) * randf_range(0.8, 1.8),
+				"move": true})
 	else:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 	# Directional gib/spark burst — the kill hits back.
@@ -2418,6 +2433,14 @@ func _gather_inputs() -> Array[SimInput]:
 	p1.buy = _update_wheel(0,
 		Input.is_physical_key_pressed(KEY_Q) or Input.is_joy_button_pressed(0, JOY_BUTTON_BACK),
 		wheel_dir, Vector2(kx, ky))
+	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
+	# not a dodge) and sector flicks steer the wheel, not the gun.
+	if _wheel[0]["open"]:
+		p1.roll = false
+		p1.aim_x = _quantize_axis(_wheel_aim[0].x)
+		p1.aim_y = _quantize_axis(_wheel_aim[0].y)
+	else:
+		_wheel_aim[0] = Vector2(ax, ay)
 	inputs.append(p1)
 
 	if _two_players:
@@ -2438,6 +2461,12 @@ func _gather_inputs() -> Array[SimInput]:
 		p2.revive = Input.is_joy_button_pressed(1, JOY_BUTTON_Y)
 		p2.buy = _update_wheel(1, Input.is_joy_button_pressed(1, JOY_BUTTON_BACK),
 			p2_aim, p2_move)
+		if _wheel[1]["open"]:
+			p2.roll = false
+			p2.aim_x = _quantize_axis(_wheel_aim[1].x)
+			p2.aim_y = _quantize_axis(_wheel_aim[1].y)
+		else:
+			_wheel_aim[1] = p2_aim
 		inputs.append(p2)
 	return inputs
 
@@ -2447,9 +2476,18 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 	## Selection is sticky; releasing with nothing picked cancels. Returns the
 	## SimInput.buy value (kind + 1) for exactly one tick on purchase.
 	var w := _wheel[i]
+	# The sim silently drops a dead player's buy — the wheel must not open (or
+	# stay open) for a corpse. Guard here so both call sites are covered.
+	if not sim.players[i]["alive"]:
+		w["open"] = false
+		w["sel"] = -1
+		return 0
 	if held:
 		if not w["open"]:
 			w["t"] = 0.0   # entrance envelope: the wheel used to teleport on at full size
+			# MOVE only selects after the stick/keys have been seen neutral once —
+			# kiting movement at open-time must not silently pick a sector.
+			w["move_armed"] = false
 		w["open"] = true
 		w["t"] = lerpf(float(w.get("t", 1.0)), 1.0, 0.35)
 		# Changed your mind mid-hold? The roll button (C / pad B) clears the pick —
@@ -2462,7 +2500,13 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("tank_board", -14.0, 2.2)   # soft declined tick (the dry-fire click grammar; "dry_fire" is an event name, not a synth key)
-		var dir := aim if aim.length() > 0.3 else move
+		# MOVE only becomes the selector after it has been seen neutral once
+		# since the wheel opened — otherwise kiting while holding Q silently
+		# picked a sector and release force-bought it (retreat-south = airstrike).
+		if move.length() < 0.3:
+			w["move_armed"] = true
+		var dir := aim if aim.length() > 0.3 \
+			else (move if w.get("move_armed", false) else Vector2.ZERO)
 		if dir.length() > 0.3:
 			var new_sel := int(round(fposmod(dir.angle(), TAU) / (TAU / 4.0))) % 4
 			if new_sel != w["sel"]:
@@ -2720,6 +2764,9 @@ func _draw_skyglow() -> void:
 	var march := _sector_march()
 	if march < 0.15:
 		return
+	# Screen-anchored sky: cancel the shake/zoom transform (the _draw_field_dim
+	# idiom) so the horizon doesn't judder with ground shake.
+	draw_set_transform_matrix(get_transform().affine_inverse())
 	var glow := (march - 0.15) / 0.85
 	var pul := 1.0 if _motion < 0.5 else (0.85 + 0.15 * Art.pulse(0.1))
 	var gcol := Color(1.0, 0.55, 0.25).lerp(Color(1.0, 0.3, 0.15), glow)
@@ -2743,6 +2790,7 @@ func _draw_skyglow() -> void:
 			draw_texture_rect(chim, Rect2(stx[k] - ch * 0.5 + 7.0, sth[k] - ch, ch, ch), false, sky)
 		# Mast needs >=60px drawn height or the lattice aliases away.
 		draw_texture_rect(Art.tex("skyline_mast"), Rect2(270.0, 0.0, 60.0, 60.0), false, sky)
+	draw_set_transform_matrix(Transform2D())
 
 
 func _sector_march() -> float:
@@ -3395,6 +3443,12 @@ func _draw_enemies() -> void:
 			# Charging raider: face the LOCKED line mid-charge (the sprite is the
 			# promise), shake + dust while revving, speed streaks while barreling.
 			var t_lunge: int = e.get("lunge_ticks", 0)
+			# Missed-charge skid: the lethal lunge snapping straight to a quiet
+			# cruise read as a state glitch — a dust plume sells the stop (and
+			# the vulnerability beat).
+			if _tech_lunge_prev.get(eidx, 0) > 0 and t_lunge == 0:
+				_burst(e["x"], e["y"], "dust", 5, 0.6, 1.6, 0.5, 0.08)
+			_tech_lunge_prev[eidx] = t_lunge
 			var t_wu: int = e.get("windup", 0)
 			var t_face := face
 			# Vehicle-width shadow (the generic 6.0 infantry disc made the truck
@@ -3404,6 +3458,9 @@ func _draw_enemies() -> void:
 			_ground_shadow(epos, 11.0)
 			if t_lunge > 0:
 				t_face = Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0))).angle()
+				# Hold the smoothed-facing lerp at the locked line — otherwise it
+				# keeps tracking the player and lunge-end snaps the sprite ~180°.
+				_enemy_face[eidx] = t_face
 				var t_dir := Vector2.from_angle(t_face)
 				# The LOCKED corridor: the rev line promised a lane, but it used to
 				# vanish the moment the charge began — the exact 50-tick window the
@@ -3448,11 +3505,14 @@ func _draw_enemies() -> void:
 			# turns red ESCAPING! and the fail tone pre-fires once, quieter.
 			var pi_esc := float(e["y"] - (sim.camera_top - 30 * Fixed.ONE)) / float(Fixed.ONE)
 			if pi_esc < 60.0 and not e.get("submerged", false):
-				pi_col = Art.safe(Color(1.0, 0.45, 0.35))
+				# DANGER stays red even in colorblind mode — Art.safe remaps greens.
+				pi_col = Color(1.0, 0.45, 0.35)
 				if Engine.get_physics_frames() - _pilot_alarm_frame >= 120:
 					_pilot_alarm_frame = Engine.get_physics_frames()
 					_sfx.play("alarm", -18.0, 0.6)
-				Art.text(self, "ESCAPING!", epos + Vector2(-20, -18), 8, pi_col)
+				# The warning window plays out near the top edge — pin the label
+				# on-screen instead of letting it draw above the viewport.
+				Art.text(self, "ESCAPING!", Vector2(epos.x - 20.0, maxf(epos.y - 18.0, 10.0)), 8, pi_col)
 			else:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
@@ -4093,6 +4153,19 @@ func _draw_players() -> void:
 					draw_arc(pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
+			# HOLD FIRE cue: the reticle warns when the gun is trained on the
+			# rescue target — the RANSOM LOST ceremony teaches the rule only
+			# AFTER the 100¢ is gone; this is the aim-time save.
+			if aim.length_squared() > 0.01:
+				for pe2 in sim.enemies:
+					if not pe2["alive"] or pe2["kind"] != "pilot":
+						continue
+					var pi_rel := _to_screen(pe2["x"], pe2["y"]) - pos
+					var pi_along := pi_rel.dot(aim)
+					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
+						Art.text(self, "HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), 8,
+							Color(1.0, 0.45, 0.35))
+						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
 			# will land if INTERACT fires now — ghost sprite + the 9px trigger
 			# ring, so a plant is a plan, not a surprise.

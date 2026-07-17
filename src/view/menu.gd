@@ -960,24 +960,26 @@ func _draw_howto() -> void:
 	# sprites carry the same modulate _draw_enemies uses; the p2 bakes ride
 	# Art.tint like the roster above.
 	var special := [
-		["m_soldier2", Color(1.3, 1.1, 0.55), "GRENADIER — lobs a telegraphed blast on your spot. Keep moving."],
+	["m_soldier2", Color(1.3, 1.1, 0.55), "GRENADIER — lobs a telegraphed blast on your spot. Keep moving."],
 		["m_contractor2", Color(1.1, 0.6, 1.2), "SNIPER — paints a laser line, then fires. Sidestep it."],
 		["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
 		["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
 		["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],
-		["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."]]
+		["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
+		["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
 	for i in special.size():
 		# 12px pitch (leading 1.2): 10px mixed-case on an 11px pitch had descenders
 		# kissing the next line's ascenders. 254 start keeps the header's 10px
 		# clearance; 6th baseline lands at 314, still clear of the BACK button's
 		# inner plate (y≈319).
-		var sy := 254.0 + i * 12.0
+		# 11px pitch from 250: SEVEN rows now (TECHNICAL joined) — 7th baseline
+		# lands at 316, still clear of the BACK button's inner plate (y≈319).
+		var sy := 250.0 + i * 11.0
 		# 26px box on a 12px pitch: the bakes carry wide transparent margins
 		# (~70% padding), so the visible body is ~8px and neighboring boxes
 		# never actually touch — smaller boxes rendered as unreadable specks.
 		draw_texture_rect(Art.tex(special[i][0]), Rect2(46, sy - 17, 26, 26), false, special[i][1])
 		Art.text(self, special[i][2], Vector2(72, sy), 10, Color(0.88, 0.9, 0.8))
-
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, 320.0, y, size, col)

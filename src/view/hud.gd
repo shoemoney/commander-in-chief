@@ -286,6 +286,7 @@ func _draw() -> void:
 	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
 	# can manage — it climbs while the camera isn't advancing, drains on push.
 	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
+
 		# A closed gate/boss/colossus pinning the camera means advancing is
 		# impossible until the fight is won — the "advance!" PRESSURE read would be
 		# lying, so swap it for the real objective and drop the climbing fill.
