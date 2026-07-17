@@ -3575,7 +3575,10 @@ func _draw_enemies() -> void:
 				# charge into smoke — without this it read as the AI breaking, and
 				# the smoke special never got credit for the block (3 reviewers).
 				var qp: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)
-				Art.text(self, "?", epos + Vector2(-2, -22), 10, Color(0.75, 0.75, 0.7, 0.5 + qp * 0.4))
+				# Threat-family amber on a dark disc (the _pip idiom) — the old 10px
+				# neutral grey washed out on bright sand.
+				draw_circle(epos + Vector2(0, -26), 7.0, Color(0.08, 0.09, 0.07, 0.6))
+				Art.text(self, "?", epos + Vector2(-3, -22), 12, Color(1.0, 0.75, 0.4, 0.5 + qp * 0.4))
 			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
@@ -3821,6 +3824,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
+	# Ground shadow: the heli was the one unit floating untethered (drone and
+	# technical are grounded). Offset down-screen for altitude; bpos carries the
+	# hover bob, so the shadow breathes with it and the airborne read holds.
+	_ground_shadow(bpos + Vector2(0, 26), 16.0)
 	_spr(body_tex, bpos, PI, 0.8, hull_mod)
 	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
 	# muzzle points down-screen at the players, same convention as the colossus.
