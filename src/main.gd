@@ -50,6 +50,7 @@ var _pending_blasts: Array[Dictionary] = []   # scheduled boss-death secondary d
 var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
 var _hulks: Array[Dictionary] = []    # dead-tank wrecks, persistent (view-only pool)
+var _forks: Array = []   # route-fork bands (from the stream-time route_fork event)
 var _tank_alive_prev := {}            # per-tank-index prev alive flag (edge-detects the death)
 var _cursor_styled := false           # custom OS cursor active (menus/debrief only)
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
@@ -596,6 +597,7 @@ func _reset() -> void:
 	_scorch.clear()
 	_corpses.clear()
 	_hulks.clear()
+	_forks.clear()
 	_tank_alive_prev.clear()
 	_tank_hull.clear()
 	_tank_prev.clear()
@@ -1297,6 +1299,10 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "ADRENALINE", "col": Color(1.0, 0.6, 0.25)})
 				_sfx.play("gate_open", -3.0, 1.3)
+			"route_fork":
+				# Fires at STREAM time (~2 screens ahead) — no sound/banner here;
+				# store the band and let _draw_gates signpost it when it scrolls in.
+				_forks.append({"y": ev["y"]})
 			"gate_open":
 				_ev_gate_open(ev)
 			"revive":
@@ -3195,6 +3201,18 @@ func _draw_gates() -> void:
 					draw_circle(Vector2(300 + k * 40, gy), 5.0,
 						Color(1.0, 0.3, 0.2) if lit else Art.safe(Color(0.3, 0.7, 0.3)))
 					draw_arc(Vector2(300 + k * 40, gy), 5.0, 0, TAU, 12, Color(0, 0, 0, 0.6), 1.0)
+
+	# Route-fork lane signposts: the approach band south of gates 2 & 4 reads
+	# CACHE (left, supplies + mines) vs BOUNTY (right, elites + marked pay).
+	# Choice is pure position, so the telegraph must land before the band does.
+	for fk in _forks:
+		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
+		if fy < -20.0 or fy > 380.0:
+			continue
+		draw_string(Art.font(), Vector2(84, fy), "< CACHE", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
+			Art.safe(Color(0.5, 1.0, 0.7, 0.9)))
+		draw_string(Art.font(), Vector2(452, fy), "BOUNTY >", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
+			Color(1.0, 0.75, 0.3, 0.9))
 
 
 func _draw_pickups() -> void:

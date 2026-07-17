@@ -2025,6 +2025,25 @@ func _step_camera() -> void:
 			bunkers.append(b1)
 			bunkers.append(b2)
 			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {}})
+			# Route Fork (panel 8-vote): the approach to bunker-pair gates 2 & 4
+			# splits into two telegraphed lanes — walking a side IS the choice
+			# (pure position: no new input, no stored state, gates[] is unhashed).
+			# LEFT = Cache lane: a free crate ringed by extra mines. RIGHT =
+			# Gauntlet lane: two extra elites, one a guaranteed marked bounty.
+			# Torture-inert: the 60 s campaign run never streams past gate 1
+			# (probe-verified — camera_top ends ~43 units short of gate 2).
+			if _gate_counter == 2 or _gate_counter == 4:
+				pickups.append({"x": (90 + rng.range_i(0, 120)) * F_ONE,
+					"y": _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE,
+					"kind": 1 + rng.range_i(0, 1), "cost": 0})
+				for m in 3:
+					mines.append({"x": (70 + rng.range_i(0, 180)) * F_ONE,
+						"y": _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE, "armed": true})
+				for s in 2:
+					_spawn_enemy((360 + rng.range_i(0, 160)) * F_ONE,
+						_next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE, true)
+				enemies[enemies.size() - 1]["marked"] = true
+				events.append({"t": "route_fork", "x": SCREEN_CX, "y": _next_gate_y})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > horizon:
 		tanks.append({

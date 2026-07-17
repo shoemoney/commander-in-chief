@@ -415,3 +415,52 @@ func test_airburst_hold_pops_at_apex_tap_flies_full_arc() -> void:
 		sim2.step([idle2, idle2])   # button released
 		t2 += 1
 	Runner.T.ok(t2 >= 28, "tapped grenade flies the full arc (~+32, got +%d)" % t2)
+
+
+func test_route_fork_streams_lanes_at_gates_2_and_4() -> void:
+	# Force gate 2 to stream by staging the counter at 1 and pulling the
+	# stream horizon down (the 60s torture never gets here — probe-verified).
+	var sim := SimWorld.new(7, 1)
+	sim._gate_counter = 1
+	var gate_y: int = sim._next_gate_y
+	sim.camera_top = gate_y + 2 * SimWorld.VIEW_H - SimWorld.F_ONE  # horizon just past the gate row
+	sim.step([_idle()])
+	var forked := false
+	for ev in sim.events:
+		if ev["t"] == "route_fork":
+			forked = true
+	Runner.T.ok(forked, "gate 2 stream emits the route_fork telegraph event")
+	# Cache lane: one free crate left of center, ringed by extra mines.
+	var crates_left := 0
+	for pk in sim.pickups:
+		if pk["cost"] == 0 and pk["x"] < SimWorld.SCREEN_CX and pk["y"] > gate_y:
+			crates_left += 1
+	Runner.T.eq(crates_left, 1, "cache lane holds exactly one free crate left of center")
+	var band_mines := 0
+	for m in sim.mines:
+		if m["y"] > gate_y and m["y"] < gate_y + 300 * SimWorld.F_ONE and m["x"] < SimWorld.SCREEN_CX:
+			band_mines += 1
+	Runner.T.ok(band_mines >= 3, "cache lane is ringed by at least the 3 extra mines (got %d)" % band_mines)
+	# Gauntlet lane: two elites right of center, exactly one a marked bounty.
+	var lane_elites := 0
+	var lane_marked := 0
+	for e in sim.enemies:
+		if e["kind"] == "elite" and e["x"] > SimWorld.SCREEN_CX and e["y"] > gate_y:
+			lane_elites += 1
+			if e.get("marked", false):
+				lane_marked += 1
+	Runner.T.eq(lane_elites, 2, "gauntlet lane spawns two extra elites right of center")
+	Runner.T.ok(lane_marked >= 1, "at least one gauntlet elite is a guaranteed marked bounty")
+	# A==B determinism over the forked stream.
+	var a := _fork_run()
+	var b := _fork_run()
+	Runner.T.eq(a, b, "route-fork stream A/B checksum diverged")
+
+
+func _fork_run() -> int:
+	var sim := SimWorld.new(11, 1)
+	sim._gate_counter = 1
+	sim.camera_top = sim._next_gate_y + 2 * SimWorld.VIEW_H - SimWorld.F_ONE
+	for tick in 400:
+		sim.step([_idle()])
+	return sim.checksum()
