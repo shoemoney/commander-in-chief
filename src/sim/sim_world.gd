@@ -1749,7 +1749,7 @@ func _step_spawner() -> void:
 	# Sector 2+ (1 gate opened): the endless ranged roster starts bleeding into
 	# the campaign field, so later sectors get a genuinely new threat vocabulary
 	# (laser-paint sniper, riot shield) — not just faster rushers.
-	if opened >= 1 and rng.range_i(0, 4) == 0:
+	if opened >= 1 and rng.range_i(0, 3 if hard else 4) == 0:  # NG+: 1-in-4 specials
 		var spick := rng.range_i(0, 3)   # +mg_nest turret
 		if spick == 3:
 			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
@@ -2160,7 +2160,12 @@ func _start_wave() -> void:
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
 	# 5 = NIGHT OPS (vision tightens; view only). 6 = FRENZY (swarm +40% speed).
+	# No back-to-back repeats: wave_mod still holds last wave's mutator here,
+	# so a duplicate roll falls back to plain — twice-in-a-row reads as a bug.
+	var prev_mod := wave_mod
 	wave_mod = 0 if wave <= 2 else rng.range_i(0, 6)
+	if wave_mod != 0 and wave_mod == prev_mod:
+		wave_mod = 0
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -2184,6 +2189,8 @@ func _scaled_boss_hp(base: int) -> int:
 	## Boss/colossus starting HP scales with the living player count at spawn:
 	## +60% per extra player (integer math). Grenade DPS is per-player, so a
 	## flat pool let 2P melt a boss ~2x faster; this keeps the fight length even.
+	if hard:
+		base = base * 3 / 2   # NG+ armor: bosses stop being first-run pushovers
 	var pc := 0
 	for pl in players:
 		if pl["alive"]:

@@ -336,6 +336,14 @@ func test_ng_plus_hard_tightens_the_spawn_curve() -> void:
 		"NG+ HARD fields more enemies than the normal campaign curve")
 
 
+func test_ng_plus_hard_armors_bosses() -> void:
+	var sim := SimWorld.new(77, 1, "campaign")
+	var normal_hp: int = sim._scaled_boss_hp(1000)
+	sim.hard = true
+	Runner.T.eq(sim._scaled_boss_hp(1000), normal_hp * 3 / 2,
+		"NG+ HARD bosses spawn with 1.5x HP")
+
+
 func test_barrels_chain_and_frag_the_pack() -> void:
 	# One grenade lights a barrel; the chain now ripples down the line over a
 	# short fuse (_step_barrels), not all in one frame — but still frags the pack.
