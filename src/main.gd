@@ -206,7 +206,7 @@ const _EVENT_SOUND := {
 	"claymore_plant": ["tank_board", -6.0, 1.6],   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 1.6],      # metal shear: the shield audibly fails
 	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
-	"technical_rev": ["tank_board", -8.0, 0.75],   # low engine snarl: a charge is coming (0.75 pitch — well under mine_lay's 1.9 clink)
+	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
 	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
 	"pilot_down": ["avenge", -8.0, 0.8],           # crash-site ransom ping — friendly rising two-note (the alarm voice at 1.1 was byte-identical to tank_ignite's 'bail out now')
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
