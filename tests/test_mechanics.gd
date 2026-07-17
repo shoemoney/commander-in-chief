@@ -379,3 +379,39 @@ func test_pilot_ignores_blasts_and_mines_past_his_grace() -> void:
 	sim.mines.append({"x": pilot["x"], "y": pilot["y"], "armed": true})
 	sim._step_mines()
 	Runner.T.ok(sim.mines[sim.mines.size() - 1]["armed"], "the pilot doesn't trip mines")
+
+
+func test_airburst_hold_pops_at_apex_tap_flies_full_arc() -> void:
+	# Hold the grenade button through the apex: the charge pops mid-air
+	# (~throw+17); a 1-tick tap flies the full ~32-tick arc. Zero new state —
+	# the fuse hand is the already-hashed grenade_prev.
+	var sim := SimWorld.new(1, 2)
+	var hold := SimInput.new()
+	hold.grenade = true
+	hold.aim_x = 256
+	var idle := SimInput.new()
+	var t := 0
+	sim.step([hold, idle])   # throw tick (edge)
+	Runner.T.eq(sim.grenades.size(), 1, "throw leaves one grenade in flight")
+	while sim.grenades.size() > 0 and t < 40:
+		sim.step([hold, idle])   # keep holding
+		t += 1
+	Runner.T.ok(t <= 18, "held grenade airbursts at the apex (~+17), not the full arc (got +%d)" % t)
+	var burst := false
+	for ev in sim.events:
+		if ev["t"] == "explosion" and ev["src"] == "airburst":
+			burst = true
+	Runner.T.ok(burst, "the airburst pop is tagged src=airburst for the view")
+
+	var sim2 := SimWorld.new(1, 2)
+	var tap := SimInput.new()
+	tap.grenade = true
+	tap.aim_x = 256
+	var idle2 := SimInput.new()
+	sim2.step([tap, idle2])
+	Runner.T.eq(sim2.grenades.size(), 1, "tap throw leaves one grenade in flight")
+	var t2 := 0
+	while sim2.grenades.size() > 0 and t2 < 40:
+		sim2.step([idle2, idle2])   # button released
+		t2 += 1
+	Runner.T.ok(t2 >= 28, "tapped grenade flies the full arc (~+32, got +%d)" % t2)

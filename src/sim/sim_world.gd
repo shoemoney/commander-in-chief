@@ -1132,6 +1132,16 @@ func _step_grenades() -> void:
 		g["y"] = g["y"] + g["vy"]
 		g["z"] = g["z"] + g["zv"]
 		g["zv"] = g["zv"] - GRENADE_GRAV
+		# Airburst: still HOLDING the grenade button at the arc's apex pops the
+		# charge mid-air — tap throws the full 32-tick lob (unchanged), hold is
+		# on-demand range control. Rides the hashed grenade_prev + this
+		# grenade's own zv sign-flip: zero new state, no rng draw. Shells are
+		# excluded (the cannon has no fuse hand).
+		if not g["shell"] and g["zv"] < 0 and g["zv"] + GRENADE_GRAV >= 0 \
+				and players[g["owner"]]["alive"] and players[g["owner"]]["grenade_prev"]:
+			_explode(g["x"], g["y"], false, "airburst")
+			grenades.remove_at(i)
+			continue
 		if g["z"] <= 0 and g["zv"] < 0:
 			_explode(g["x"], g["y"])
 			grenades.remove_at(i)
