@@ -5420,6 +5420,10 @@ func _draw_banners(top_msg: String) -> void:
 			var bsize := 16
 			if _motion >= 0.5:
 				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
+			# Shrink-to-fit: long teach strings (TECHNICAL 52ch, COURIER 58ch) at
+			# punch sizes overflow the 640px viewport and shove the badge off-screen.
+			while bsize > 8 and Art.font().get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, bsize).x > 600.0:
+				bsize -= 1
 			# A badge (if any) sits left of the centered text — the plate must
 			# extend to cover it, or the skull/target/lightning floats off the
 			# metal onto bare shaking terrain (the plate exists to prevent exactly
@@ -5441,7 +5445,8 @@ func _draw_banners(top_msg: String) -> void:
 		var vrr := _run_rank()
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), [
 			{"text": "RANK  %s — %s" % [vrr.grade, vrr.title], "color": vrr.col, "size": 13,
-				"icon": "mi_medal_%d" % ("DCBAS".find(vrr.grade) + 1), "icon_size": 15.0},
+				"icon": "mi_medal_%d" % ("DCBAS".find(vrr.grade) + 1), "icon_size": 15.0,
+				"icon_col": vrr.col},
 			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
 			{"text": "WAR CHEST BANKED", "color": Color(1.0, 0.92, 0.55),
@@ -5469,7 +5474,8 @@ func _draw_banners(top_msg: String) -> void:
 		var rr := _run_rank()
 		# Grade medal (D=1 … S=5) rides the panel's existing icon slot.
 		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col,
-			"icon": "mi_medal_%d" % ("DCBAS".find(rr.grade) + 1), "icon_size": 15.0})
+			"icon": "mi_medal_%d" % ("DCBAS".find(rr.grade) + 1), "icon_size": 15.0,
+			"icon_col": rr.col})
 		if _downed_by != "":
 			rows.insert(1, {"text": "DOWNED BY  %s" % _downed_by, "color": Color(1.0, 0.55, 0.5)})
 		if best_score > 0:
@@ -5519,7 +5525,7 @@ func _draw_banners(top_msg: String) -> void:
 
 ## Shared victory/debrief result-card scaffold: translucent panel + centered
 ## title + a stack of centered stat rows (each optionally icon-prefixed).
-## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?}.
+## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?, icon_col?}.
 func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
@@ -5587,7 +5593,10 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		var total_w := text_w + (icon_size + gap if not icon.is_empty() else 0.0)
 		var x := 320.0 - total_w / 2.0
 		if not icon.is_empty():
-			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size), false)
+			# icon_col tints white-with-alpha menu-icon art (mi_medal_* grades);
+			# untinted rows keep drawing as-authored.
+			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size),
+				false, row.get("icon_col", Color.WHITE))
 			x += icon_size + gap
 		Art.text(self, row_text, Vector2(x, y), row_size, col)   # shadowed like every other HUD string
 	# Back to the plain shake-cancel matrix for whatever the caller draws next.
