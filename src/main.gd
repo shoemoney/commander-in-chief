@@ -96,6 +96,8 @@ var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot,
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _bg_cam := -1                    # last (camera_top, march) painted onto _bg_root —
 var _bg_march := -1.0                # its ~90-rect rebuild is a pure function of these
+var _litter_cam_snap := 1 << 60      # camera_top when the march last stepped — litter rows south
+var _litter_march_prev := 0.0        # of it keep the pre-step pool (no on-screen prop identity swap)
 var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
 var _music_hold := 0             # held-breath drum dropout before a big beat
 var _whiz_frame := -100          # near-miss whiz throttle
@@ -595,6 +597,8 @@ func _reset() -> void:
 	_enemy_pos_prev.clear()
 	_enemy_slot_kind.clear()
 	_tech_lunge_prev.clear()
+	_litter_cam_snap = 1 << 60
+	_litter_march_prev = 0.0
 	_blast_warp = 0.0
 	_cinematic = 0.0
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
@@ -2664,6 +2668,12 @@ func _draw() -> void:
 		# commands re-render as-is. _glow_root stays per-frame (animated FX).
 		var march := _sector_march()
 		if sim.camera_top != _bg_cam or march != _bg_march:
+			if march != _bg_march:
+				# Freeze the litter-pool threshold for ground already on screen —
+				# live march made ~20% of visible props swap identity the frame a
+				# gate opened; the wrecked look sweeps in from the top edge instead.
+				_litter_cam_snap = sim.camera_top
+				_litter_march_prev = maxf(_bg_march, 0.0)   # _bg_march starts -1.0
 			_bg_cam = sim.camera_top
 			_bg_march = march
 			_bg_root.queue_redraw()
@@ -2942,12 +2952,20 @@ func _draw_terrain() -> void:
 				continue
 			var lx := tx * 84.0 + float(hl % 40) - 20.0
 			var ly_px := ly + float((hl / 9) % 40)
-			if _in_wbands(wbands, int(lx / PX), sim.camera_top + int(ly_px / PX)):
+			var row_wy := sim.camera_top + int(ly_px / PX)
+			if _in_wbands(wbands, int(lx / PX), row_wy):
 				continue
-			var pool := _LITTER_LATE if (hl % 100) < int(_sector_march() * 100.0) else _LITTER_EARLY
-			_ground_shadow(Vector2(lx, ly_px), 5.0)
-			_spr(pool[(hl / 40) % pool.size()], Vector2(lx, ly_px),
-				float(hl % 628) / 100.0, 1.0)
+			# Rows already on screen when the march last stepped keep their old
+			# pool (see the _litter_cam_snap freeze in _draw) — a gate opening
+			# must not swap standing props' identity mid-frame.
+			var lm := _litter_march_prev if row_wy >= _litter_cam_snap else _sector_march()
+			var pool := _LITTER_LATE if (hl % 100) < int(lm * 100.0) else _LITTER_EARLY
+			var key: String = pool[(hl / 40) % pool.size()]
+			# Recessed/flat props cast no disc: a drop shadow under a crater or a
+			# fallen body reads as floating art.
+			if key != "crater" and key != "corpse_soldier1" and key != "corpse_soldier2":
+				_ground_shadow(Vector2(lx, ly_px), 5.0)
+			_spr(key, Vector2(lx, ly_px), float(hl % 628) / 100.0, 1.0)
 
 
 func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
@@ -3038,6 +3056,11 @@ func _draw_barrels() -> void:
 
 
 func _draw_water() -> void:
+	# Banks and ford bed scorch with the run like the gates' walls (grass, litter
+	# and the shader's wsoot already march) — no postcard-beige strips late-run.
+	var soot := clampf(_sector_march() * 0.7, 0.0, 0.7)
+	var bank_col := Color(0.9, 0.85, 0.7).lerp(Color(0.5, 0.45, 0.4), soot)
+	var ford_col := Color(0.85, 0.8, 0.65).lerp(Color(0.47, 0.43, 0.38), soot)
 	for w in sim.waters:
 		var wy := _to_screen(0, w["y"]).y
 		var wh := SimWorld.WATER_H * PX
@@ -3048,13 +3071,13 @@ func _draw_water() -> void:
 		# Water body, wave ripples and sun glint are the water.gdshader quad synced
 		# under the units by _sync_water(); here we only draw what sits ON the water.
 		# Banks (drawn over the shader's shore edges).
-		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, Color(0.9, 0.85, 0.7))
-		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, Color(0.9, 0.85, 0.7))
+		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, bank_col)
+		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, bank_col)
 		# The dry ford.
 		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
 		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
 		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, ford_w, wh + 4),
-			true, Color(0.85, 0.8, 0.65))
+			true, ford_col)
 		# Baked bridge deck over the dry ford (decor only — the sim's ford/collision
 		# is untouched; the sand bed stays underneath as the shore blend). Mid planks
 		# tile the crossing, ramp caps land on each bank.
