@@ -2206,3 +2206,38 @@ func test_c4_cover_density_by_width() -> void:
 	# multiple narrow rows cluster it mid-lane.
 	Runner.T.ok(wide_rows.size() >= 2, "multiple WIDE rows carry wall cover (%d)" % wide_rows.size())
 	Runner.T.ok(narrow_rows.size() >= 2, "multiple NARROW rows cluster cover mid-lane (%d)" % narrow_rows.size())
+	# The narrow CLUSTERS are materially tighter than the wide SPREADS: group
+	# cover x by row, take each row's span, and compare averages by phase.
+	var rows_x := {}
+	for rk in sim.rocks:
+		var kk: int = rk.get("kind", 0)
+		if kk != 0 and kk != 1:
+			continue
+		if absi(rk["y"]) / SimWorld.GATE_SPACING < SimWorld.COVER_VARIETY_SEG:
+			continue
+		if absi(rk["y"]) % SimWorld.GATE_SPACING >= 780 * SimWorld.F_ONE:
+			continue   # skip the tank-row anti-armor pair (fixed +/-90 span)
+		if not rows_x.has(rk["y"]):
+			rows_x[rk["y"]] = []
+		rows_x[rk["y"]].append(rk["x"])
+	var wide_span_sum := 0
+	var wide_n := 0
+	var narrow_span_sum := 0
+	var narrow_n := 0
+	for ry in rows_x:
+		var xs: Array = rows_x[ry]
+		if xs.size() < 2:
+			continue
+		xs.sort()
+		var span: int = xs[xs.size() - 1] - xs[0]
+		var cbr: Array = sim._choke_bounds(ry)
+		if cbr[0] == SimWorld.WORLD_LEFT and cbr[1] == SimWorld.WORLD_RIGHT:
+			wide_span_sum += span
+			wide_n += 1
+		else:
+			narrow_span_sum += span
+			narrow_n += 1
+	Runner.T.ok(wide_n > 0 and narrow_n > 0, "both phases have multi-piece cover rows (%d/%d)" % [wide_n, narrow_n])
+	var wide_avg: int = wide_span_sum / maxi(1, wide_n)
+	var narrow_avg: int = narrow_span_sum / maxi(1, narrow_n)
+	Runner.T.ok(narrow_avg < wide_avg, "narrow clusters are tighter-spaced than wide spreads (%d < %d)" % [narrow_avg / SimWorld.F_ONE, wide_avg / SimWorld.F_ONE])
