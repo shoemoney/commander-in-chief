@@ -130,13 +130,20 @@ const SEED := 0xDEADBEEF
 ## now meet the hulk, so the trajectory itself moves). Same pass, PROVEN golden-inert and NOT
 ## part of this re-record: airburst, route fork, supply drop, broadcast tower, tank crew,
 ## sandbags (each verified byte-identical before this batch landed).
+## RE-RECORDED (2026-07-17, level-panel cycle 1 — collidable rocks, 9/9 unanimous): natural
+## hard cover now streams through sector 1 (rng-FREE Knuth-hash placement — the stream-rng
+## sequence is untouched; the diff is the rocks themselves): they block boots, treads, enemy
+## steps and bullets both ways inside the torture's first 1200px, so every campaign sample
+## legitimately moves. ENDLESS_GOLDEN untouched (campaign-only stream + conditional feed).
+## Same cycle, PROVEN inert and NOT part of this re-record: arena layout templates (pure
+## _gate_counter lookup, gate 1 byte-identical) and the view-only biome journey.
 const GOLDEN: Array[int] = [
-	4453733492576508338,
-	4944866089165084746,
-	7125974280262788753,
-	768533872601425451,
-	6921375637888808095,
-	3827163771206595380,
+	799999468582491283,
+	1361738005099910004,
+	5372310563039212233,
+	1929779422214900199,
+	957657435707634862,
+	9196786456286436753,
 ]
 
 

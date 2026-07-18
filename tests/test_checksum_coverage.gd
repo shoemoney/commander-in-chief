@@ -34,6 +34,7 @@ const KNOWN := {
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	"mine": ["x", "y", "armed", "friendly"],
 	"sandbag": ["x", "y"],
+	"rock": ["x", "y"],
 	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
@@ -76,6 +77,8 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("pickup", pk)
 		for sb in sim.sandbags:
 			_check("sandbag", sb)
+		for rk in sim.rocks:
+			_check("rock", rk)
 		for t in sim.tanks:
 			_check("tank", t)
 		for eb in sim.enemy_bullets:

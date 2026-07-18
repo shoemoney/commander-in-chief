@@ -18,12 +18,12 @@ const SCREEN_CENTER := Vector2(320, 180)
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 # Litter biases with the run: early sectors are an intact outpost (tents/crates/
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
-const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammobox", "barrier",
+const _LITTER_EARLY := ["barrel", "crate_stack", "tent", "ammobox", "barrier",
 	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
-const _LITTER_MID_A := ["tree_dead1", "tree_dead2", "tree_dead3", "rock1", "rock2",
+const _LITTER_MID_A := ["tree_dead1", "tree_dead2", "tree_dead3",
 	"barrel", "tank_trap", "hedge", "flag_marker"]   # stump-field band: the jungle thins
 const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
-	"rock1", "barricade", "ammobox"]                 # marsh/ruins band: the war shows
+	"barricade", "ammobox"]                 # marsh/ruins band: the war shows
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
 	"corpse_soldier1", "corpse_soldier2", "crater",
 	"trench", "barricade", "radio_tower", "wreck_halftrack", "crater_field", "crater_water",
@@ -2947,6 +2947,7 @@ func _draw() -> void:
 	_draw_water()
 	_draw_scorch()
 	_draw_mines()
+	_draw_rocks()
 	_draw_sandbags()
 	_draw_sector_embers()
 	_draw_barrels()
@@ -3331,6 +3332,19 @@ func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
 		if wy >= b4[0] and wy <= b4[1] and (wx < b4[2] or wx > b4[3]):
 			return true
 	return false
+
+
+func _draw_rocks() -> void:
+	# REAL rocks (9/9: cover-shaped decor lied) — bigger, harder shadow than
+	# any remaining decor so hard cover reads as a distinct class.
+	for rk in sim.rocks:
+		var pos := _to_screen(rk["x"], rk["y"])
+		if pos.y < -20.0 or pos.y > 380.0:
+			continue
+		_ground_shadow(pos, 12.0, 0.42)
+		_spr("rock1" if (rk["x"] / 65536) % 2 == 0 else "rock2", pos,
+			float(Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536) % 628) / 100.0, 2.1,
+			Color(0.78, 0.8, 0.78))
 
 
 func _draw_sandbags() -> void:

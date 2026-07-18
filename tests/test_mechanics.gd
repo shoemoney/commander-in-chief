@@ -729,3 +729,39 @@ func test_arena_templates_vary_by_gate_and_still_open() -> void:
 	g2["b2"]["alive"] = false
 	sim._step_gates()
 	Runner.T.ok(g2["open"], "destroy-both still opens a templated arena")
+
+
+func test_rocks_are_real_cover() -> void:
+	var sim := SimWorld.new(37, 1)
+	var rx: int = 300 * SimWorld.F_ONE
+	var ry: int = sim.camera_top + 200 * SimWorld.F_ONE
+	sim.rocks.append({"x": rx, "y": ry})
+	# Bullets die on it, both directions.
+	sim.bullets.append({"x": rx, "y": ry, "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim.enemy_bullets.append({"x": rx, "y": ry, "vx": 0, "vy": 0, "ttl": 10})
+	sim._step_bullets()
+	sim._step_enemy_bullets()
+	Runner.T.eq(sim.bullets.size(), 0, "player bullet dies on rock")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "enemy bullet dies on rock")
+	# Enemy step reverts at the face.
+	sim._spawn_enemy(rx + 16 * SimWorld.F_ONE, ry, false)
+	var e := sim.enemies[sim.enemies.size() - 1]
+	sim.players[0]["x"] = rx - 60 * SimWorld.F_ONE
+	sim.players[0]["y"] = ry
+	for n in 60:
+		var dx: int = sim.players[0]["x"] - e["x"]
+		sim._advance_toward(e, dx, 0, Fixed.length(dx, 0), SimWorld.ENEMY_SPEED)
+	Runner.T.ok(e["x"] > rx, "enemy never phases through the rock")
+	# Player walk reverts too.
+	var p := sim.players[0]
+	p["x"] = rx - 16 * SimWorld.F_ONE
+	p["y"] = ry
+	var walk := SimInput.new()
+	walk.move_x = 256
+	for n in 30:
+		sim.step([walk])
+	Runner.T.ok(p["x"] < rx, "player never walks through the rock")
+	# Grenade blast leaves it standing.
+	var before: int = sim.rocks.size()   # step() streamed more — count, don't assume
+	sim._explode(rx, ry)
+	Runner.T.eq(sim.rocks.size(), before, "grenades arc over — no rock dies to a blast")

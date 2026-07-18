@@ -232,6 +232,12 @@ const HULK_HALF_H := 12 * F_ONE
 const SANDBAG_FIELD_CAP := 6         # starting value: 6 x 36px = 216px can never wall the ~592px lane
 const SANDBAG_HALF_W := 18 * F_ONE   # segment is 36x10 px — rushers must flank in under ~2s
 const SANDBAG_HALF_H := 5 * F_ONE
+# Collidable rocks (9/9 panel: cover-shaped decor with no collision LIED in a
+# one-hit game). Streamed rng-FREE (Knuth-hash of the spacing index) so the
+# shared stream-rng sequence is untouched; campaign-only.
+const ROCK_SPACING := 260 * F_ONE
+const ROCK_HALF_W := 10 * F_ONE
+const ROCK_HALF_H := 8 * F_ONE
 const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST, SHOP_SANDBAG_COST]
 # Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
 # it advances DOWN the map at the players. Armor: grenades only. Three
@@ -295,6 +301,8 @@ var waters: Array[Dictionary] = []
 var enemy_bullets: Array[Dictionary] = []
 var mines: Array[Dictionary] = []
 var sandbags: Array[Dictionary] = []   # player-authored cover (wheel-only; dead bags are erased on the spot)
+var rocks: Array[Dictionary] = []      # streamed natural hard cover {x,y} — blocks moves+bullets, grenades arc over
+var _next_rock_y: int = 0
 var barrels: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
@@ -357,6 +365,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_water_y = -(1500 * F_ONE)
 	_next_mine_y = -(700 * F_ONE)
 	_next_barrel_y = -(900 * F_ONE)
+	_next_rock_y = -(700 * F_ONE)
 	for i in player_count:
 		players.append({
 			"idx": i,
@@ -539,6 +548,8 @@ func _step_players(inputs: Array) -> void:
 				p["roll_dx"] = p["aim_x"]
 				p["roll_dy"] = p["aim_y"]
 			events.append({"t": "roll", "x": p["x"], "y": p["y"], "i": i})
+		var rpx: int = p["x"]
+		var rpy: int = p["y"]
 		if p["roll_ticks"] > 0:
 			p["roll_ticks"] = p["roll_ticks"] - 1
 			p["roll_iframe"] = true
@@ -552,6 +563,15 @@ func _step_players(inputs: Array) -> void:
 				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
+		# Rocks are a hard wall to boots too (escape rule: a step that STARTED
+		# inside — post-respawn edge case — may walk out).
+		if not rocks.is_empty():
+			for rk in rocks:
+				if absi(p["x"] - rk["x"]) <= ROCK_HALF_W and absi(p["y"] - rk["y"]) <= ROCK_HALF_H:
+					if absi(rpx - rk["x"]) > ROCK_HALF_W or absi(rpy - rk["y"]) > ROCK_HALF_H:
+						p["x"] = rpx
+						p["y"] = rpy
+					break
 		_clamp_actor(p)
 
 		# Aim: decoupled from movement (the loop-lever identity).
@@ -1074,6 +1094,12 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 		if _in_water(tank["x"], tank["y"]):
 			tank["x"] = prev_x
 			tank["y"] = prev_y
+		for rk in rocks:
+			if absi(tank["x"] - rk["x"]) <= ROCK_HALF_W + 6 * F_ONE \
+					and absi(tank["y"] - rk["y"]) <= ROCK_HALF_H + 6 * F_ONE:
+				tank["x"] = prev_x
+				tank["y"] = prev_y
+				break
 	_clamp_actor(tank)
 	p["x"] = tank["x"]
 	p["y"] = tank["y"]
@@ -1300,6 +1326,12 @@ func _step_bullets() -> void:
 			for hk in tanks:
 				if not hk["alive"] and hk["burn_ticks"] > 0 \
 						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
+					events.append({"t": "armor_block", "x": bx, "y": by})
+					dead = true
+					break
+		if not dead and not rocks.is_empty():
+			for rk in rocks:
+				if absi(bx - rk["x"]) <= ROCK_HALF_W and absi(by - rk["y"]) <= ROCK_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
@@ -1592,6 +1624,13 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	# Sandbag walls stop ground movers both ways (the water-clamp pattern:
 	# move, then revert into-AABB steps) — the swarm flanks cover, never
 	# phases through it. Empty-array fast path keeps the hot loop clean.
+	if not rocks.is_empty():
+		for rk in rocks:
+			if absi(e["x"] - rk["x"]) <= ROCK_HALF_W and absi(e["y"] - rk["y"]) <= ROCK_HALF_H:
+				if absi(pvx - rk["x"]) > ROCK_HALF_W or absi(pvy - rk["y"]) > ROCK_HALF_H:
+					e["x"] = pvx
+					e["y"] = pvy
+				break
 	if not sandbags.is_empty():
 		for sb in sandbags:
 			if absi(e["x"] - sb["x"]) <= SANDBAG_HALF_W and absi(e["y"] - sb["y"]) <= SANDBAG_HALF_H:
@@ -2035,6 +2074,9 @@ func _step_mines() -> void:
 	for si in range(sandbags.size() - 1, -1, -1):
 		if sandbags[si]["y"] > camera_top + 420 * F_ONE:
 			sandbags.remove_at(si)
+	for ri in range(rocks.size() - 1, -1, -1):
+		if rocks[ri]["y"] > camera_top + 420 * F_ONE:
+			rocks.remove_at(ri)
 	for i in range(mines.size() - 1, -1, -1):
 		var m := mines[i]
 		if not m["armed"] or m["y"] > camera_top + 420 * F_ONE:
@@ -2130,6 +2172,11 @@ func _step_spawner() -> void:
 
 
 func _spawn_enemy(x: int, y: int, elite: bool) -> void:
+	# Spawn-path nudge (fork-mine precedent): never birth a unit inside a rock.
+	for rk in rocks:
+		if absi(x - rk["x"]) <= ROCK_HALF_W + 4 * F_ONE and absi(y - rk["y"]) <= ROCK_HALF_H + 4 * F_ONE:
+			x += 24 * F_ONE
+			break
 	var e := {"x": x, "y": y, "alive": true, "elite": elite,
 		"kind": "elite" if elite else "rusher"}
 	if elite:
@@ -2371,6 +2418,16 @@ func _step_camera() -> void:
 				barrels.append({"x": bx + c * BARREL_CLUSTER_GAP,
 					"y": _next_barrel_y + rng.range_i(-8, 8) * F_ONE, "armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
+	while _next_rock_y > horizon:
+		var r_idx: int = absi(_next_rock_y / ROCK_SPACING)
+		# Dry-land + open-corridor predicate (pure math, no array reads): skip
+		# the water band cadence (+margin) and the gate arena/fork zone.
+		var r_off: int = posmod(-_next_rock_y / F_ONE, 1000)
+		if r_idx % 3 != 0 and r_off < 700 and (r_off < 400 or r_off > 520):
+			var rx: int = (80 + ((r_idx * 2654435761) & 0x7FFFFFFF) % 460) * F_ONE
+			rocks.append({"x": rx, "y": _next_rock_y})
+			rocks.append({"x": rx + 22 * F_ONE, "y": _next_rock_y + 10 * F_ONE})
+		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
 		if _gate_counter == FINAL_GATE_INDEX:
@@ -2392,6 +2449,10 @@ func _step_camera() -> void:
 			var b2 := _make_bunker(arena["b2"][0] * F_ONE, _next_gate_y + arena["b2"][1] * F_ONE)
 			bunkers.append(b1)
 			bunkers.append(b2)
+			# Hardpoint rock ~140px south of every bunker-pair gate, flank-
+			# alternating: the mortar-observer fallback cover the panel asked for.
+			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,
+				"y": _next_gate_y + 140 * F_ONE})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
 					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
@@ -2960,6 +3021,12 @@ func _step_enemy_bullets() -> void:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
+		if not dead and not rocks.is_empty():
+			for rk in rocks:
+				if absi(bx - rk["x"]) <= ROCK_HALF_W and absi(by - rk["y"]) <= ROCK_HALF_H:
+					events.append({"t": "armor_block", "x": bx, "y": by})
+					dead = true
+					break
 		if dead:
 			enemy_bullets.remove_at(i)
 
@@ -3119,6 +3186,11 @@ func checksum() -> int:
 		h = feed.call(40503, h)        # only perturbs the hash when HARD is ON (torture: OFF)
 	if vest_buys > 0:
 		h = feed.call(vest_buys, h)   # conditional: 0 buys = untouched stream (torture never buys)
+	if not rocks.is_empty():
+		h = feed.call(rocks.size(), h)
+		for rk in rocks:
+			h = feed.call(rk["x"], h)
+			h = feed.call(rk["y"], h)
 	if not sandbags.is_empty():
 		# Conditional feed (assist/hard/colossus precedent): an empty array
 		# leaves the hash stream untouched, so goldens hold while unbought —
