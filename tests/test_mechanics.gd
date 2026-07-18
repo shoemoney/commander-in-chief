@@ -2056,3 +2056,49 @@ func test_c3_trench_golden_inert() -> void:
 	# But a trench IS authored from COVER_VARIETY_SEG (2) on.
 	var cell := _trench_cell(sim, 2)
 	Runner.T.ok(sim._in_trench(cell[0], cell[1]), "a trench is authored from band 2 on")
+
+
+func test_c4_offlane_alcoves() -> void:
+	# c4 5v: seg>=2 bands stamp an off-lane risk/reward pocket — a landmark
+	# hero-wreck ~180px off the center rail sheltering a FREE capsule behind a
+	# guarding mine; 1-in-8 escalate to a Vest vault ringed by mines. All
+	# band>=2 -> past both torture reaches -> goldens byte-identical.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	var caches := 0
+	for pk in sim.pickups:
+		if pk.get("cost", 1) != 0:
+			continue
+		if absi(pk["x"] - SimWorld.SCREEN_CX * SimWorld.F_ONE) <= 150 * SimWorld.F_ONE:
+			continue
+		# A landmark hero-wreck (kind 3) sits ~30px north of the capsule.
+		for rk in sim.rocks:
+			if rk.get("kind", 0) == 3 and absi(rk["x"] - pk["x"]) < 20 * SimWorld.F_ONE \
+					and absi(rk["y"] - (pk["y"] - 30 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE:
+				caches += 1
+				break
+	Runner.T.ok(caches >= 1, "off-lane alcove caches stream past the golden reach (%d)" % caches)
+	# Directly exercise the 1-in-8 VEST VAULT tier (deterministic).
+	var sim2 := SimWorld.new(1, 1)
+	var vy: int = -4000 * SimWorld.F_ONE   # band 4, clear of bunker rings
+	sim2._stamp_alcove(vy, 4, 8)           # h % 8 == 0 -> the Vest vault
+	var vest_ct := 0
+	var ring := 0
+	for pk in sim2.pickups:
+		if pk.get("kind", 0) == 2 and pk.get("cost", 1) == 0:
+			vest_ct += 1
+			for m in sim2.mines:
+				if absi(m["x"] - pk["x"]) <= 50 * SimWorld.F_ONE:
+					ring += 1
+	Runner.T.eq(vest_ct, 1, "the 1-in-8 tier stamps exactly one Vest")
+	Runner.T.ok(ring >= 3, "the Vest vault is ringed by 3 mines (%d)" % ring)
+	# And the standard tier is a single guarding mine + a free ammo/grenade.
+	var sim3 := SimWorld.new(1, 1)
+	sim3._stamp_alcove(-4000 * SimWorld.F_ONE, 4, 3)   # h % 8 != 0 -> standard cache
+	var free_ct := 0
+	for pk in sim3.pickups:
+		if pk.get("cost", 1) == 0 and pk.get("kind", 9) in [0, 1]:
+			free_ct += 1
+	Runner.T.eq(free_ct, 1, "the standard tier drops one free ammo/grenade capsule")
+	Runner.T.eq(sim3.mines.size(), 1, "the standard cache has a single guarding mine")

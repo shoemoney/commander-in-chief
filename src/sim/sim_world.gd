@@ -1038,6 +1038,28 @@ func _in_choke_apron(y: int) -> bool:
 		or (off > 70 * F_ONE and off <= 150 * F_ONE)
 
 
+func _stamp_alcove(y: int, band: int, h: int) -> void:
+	## c4 5v: a landmark HERO-WRECK ~180px off the SCREEN_CX rail (side alternates
+	## by band parity) shelters a FREE supply capsule behind a single guarding
+	## mine — so leaving the main vector pays. 1-in-8 bands escalate to a VEST
+	## vault ringed by 3 mines (the 'hazard room' compressed to a guarded cache).
+	## All reuse hashed rock/pickup/mine fields; band>=2 so both goldens hold.
+	var side_x: int = (140 if band % 2 == 0 else 500) * F_ONE
+	var ax: int = _arena_margin_x(side_x, y)
+	# Fairness pocket (c2 4v): never drop the alcove's mines inside a streamed-
+	# bunker exclusion ring — a breach is never also a minefield.
+	if _near_stream_bunker(ax, y) or _near_stream_bunker(ax, y + 60 * F_ONE):
+		return
+	rocks.append({"x": ax, "y": y, "kind": 3, "burn_ticks": 0})   # hero-wreck landmark
+	if h % 8 == 0:
+		pickups.append({"x": ax, "y": y + 30 * F_ONE, "kind": 2, "cost": 0})   # guaranteed Vest
+		for mo in [-40, 0, 40]:
+			mines.append({"x": ax + mo * F_ONE, "y": y + 60 * F_ONE, "armed": true})
+	else:
+		pickups.append({"x": ax, "y": y + 30 * F_ONE, "kind": h % 2, "cost": 0})   # free ammo/grenade
+		mines.append({"x": ax, "y": y + 60 * F_ONE, "armed": true})
+
+
 func _is_calm_band(y: int) -> bool:
 	## c2 3v: the whole-band breath — pure skip-guard (zero state, zero rng,
 	## never re-phases a neighbor's _mix pick; the _in_choke_apron pattern).
@@ -3237,6 +3259,19 @@ func _step_camera() -> void:
 				var mwy: int = _next_rock_y + (mwh % 24) * F_ONE
 				for mw in 3:
 					rocks.append({"x": mwx + (mw * 72 - 72) * F_ONE, "y": mwy, "kind": 2})
+		# c4 5v OFF-LANE ALCOVE: once per band (seg>=2), the row nearest the band's
+		# designated alcove-y stamps an off-lane risk/reward pocket so leaving the
+		# center rail finally PAYS. Skips the calm band + fork aprons. _mix-derived,
+		# band>=2 -> past both torture reaches -> goldens byte-identical.
+		var ab: int = absi(_next_rock_y) / GATE_SPACING
+		if ab >= COVER_VARIETY_SEG and ab != RUINS_SEG and not _is_calm_band(_next_rock_y) \
+				and not _in_fork_apron(_next_rock_y):
+			var ah: int = _mix(ab * 90 + 13, _world_seed)
+			# South third [500,750]: clear of the gate arena (north, +0..+300, carries
+			# the arena wall slab) and the ruins maze; the alcove owns open corridor.
+			var ay: int = 500 + ah % 250
+			if absi(r_off - ay) < 130:      # this row is the nearest to the alcove
+				_stamp_alcove(_next_rock_y, ab, ah)
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
