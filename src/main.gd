@@ -113,6 +113,8 @@ var _cinematic := 0.0            # letterbox envelope for boss intro / victory b
 var _boss_bar_slots := 0         # top-center bars drawn this frame (banner ducks below them)
 var _result_t := 0.0             # debrief/victory card entrance ease (0→1)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
+var _enemy_hp_prev := {}         # a2-11: per-slot prev hp — edge-detects a non-lethal hit
+var _enemy_flash := {}           # a2-11: per-slot decaying white hit-flash
 var _enemy_pos_prev := {}        # per-slot prev sim pos — gates the run-bob to actual movement
 var _enemy_slot_kind := {}       # per-slot kind stamp — the sim compacts with remove_at, so a
                                  # slot can be inherited by a different enemy; a kind mismatch
@@ -781,6 +783,8 @@ func _reset() -> void:
 	_enemy_face.clear()
 	_enemy_pos_prev.clear()
 	_enemy_slot_kind.clear()
+	_enemy_hp_prev.clear()
+	_enemy_flash.clear()
 	_tech_lunge_prev.clear()
 	_litter_cam_snap = 1 << 60
 	_litter_march_prev = 0.0
@@ -4761,6 +4765,8 @@ func _draw_enemies() -> void:
 			_enemy_face.erase(sk)
 			_enemy_pos_prev.erase(sk)
 			_tech_lunge_prev.erase(sk)
+			_enemy_hp_prev.erase(sk)
+			_enemy_flash.erase(sk)
 	for eidx in _esort_order:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
@@ -4776,10 +4782,27 @@ func _draw_enemies() -> void:
 			_enemy_face.erase(eidx)
 			_enemy_pos_prev.erase(eidx)
 			_tech_lunge_prev.erase(eidx)
+			_enemy_hp_prev.erase(eidx)
 		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
 			_seen_kinds[ekind] = true
 			_show_banner(_KIND_TEACH[ekind], Color(1.0, 0.55, 0.4))
 		var epos := _to_screen(e["x"], e["y"])
+		# a2-11 VFX#1: hit-flash + spark + micro-flinch on a NON-LETHAL hit (hp dropped
+		# but still alive) — mobs only reacted on death; now every hit reads.
+		var ehp: int = e["hp"]
+		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
+			_enemy_flash[eidx] = 1.0
+		_enemy_hp_prev[eidx] = ehp
+		var eflash: float = _enemy_flash.get(eidx, 0.0)
+		if eflash > 0.02:
+			_enemy_flash[eidx] = eflash - 0.2
+			var efr := (0.6 + eflash) * 9.0
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(epos - Vector2(efr, efr), Vector2(efr, efr) * 2.0),
+				false, Color(1, 1, 1, eflash * 0.55 * _motion))
+			if eflash > 0.78:
+				for sp in 4:
+					draw_line(epos, epos + Vector2.from_angle(float(sp) * PI / 2.0 + 0.4) * 7.0, Color(1, 1, 0.85, eflash), 1.2)
+			epos.y -= eflash * 1.2 * _motion
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).
 		# Drone excluded: it draws its own OFFSET altitude shadow — a second
