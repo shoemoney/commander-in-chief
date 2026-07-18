@@ -274,6 +274,10 @@ const _EVENT_SOUND := {
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"cover_burn": ["vest_break", -9.0, 1.3],   # c3: grass burns off in the jet — dry crackle
 	"cover_crack": ["rubble", -7.0, 1.2], # c3/a1-13
+	# a1-13 alarm taxonomy: STRUCTURAL breaches -> alarm_low; AERIAL paints (drone/
+	# sniper/mg-nest) -> alarm_air; all OTHER generic threat cues (elite/grenadier
+	# windups, observer_spawn, tank_ignite, strafe_lane, arena_pressure, vent/mast/
+	# lane warns, colossus_engage, broadcast_pulse) intentionally stay on base "alarm".
 	"rear_warn": ["alarm_low", -12.0, 0.9],   # c4/a1-13: structural sub-klaxon LEAD warn
 	"rear_breach": ["alarm_low", -8.0, 1.0],   # c3/a1-13: structural sub-klaxon
 	"mast_warn": ["alarm", -8.0, 0.9],     # c3: the mast is about to overheat — vacate the orbit

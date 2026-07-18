@@ -124,3 +124,19 @@ func test_a1_every_event_sound_resolves_to_a_synth_voice() -> void:
 		Runner.T.ok(sounds.has(sound_name),
 			"event '%s' -> sound '%s' must be a synthesized voice, not dead air" % [ev_key, sound_name])
 	sfx.free()
+
+
+func test_a1_new_synth_voices_have_energy() -> void:
+	var sfx := Sfx.new()
+	sfx._synth_all()
+	for nm in ["rubble", "alarm_low", "alarm_air"]:
+		var wav: AudioStreamWAV = sfx._sounds[nm]
+		var data: PackedByteArray = wav.data
+		Runner.T.ok(data.size() > 4000, "%s renders a substantial buffer (%d bytes)" % [nm, data.size()])
+		var mn := 255
+		var mx := 0
+		for bi in range(0, mini(data.size(), 8000)):
+			mn = mini(mn, data[bi])
+			mx = maxi(mx, data[bi])
+		Runner.T.ok(mx - mn > 8, "%s carries real signal energy (not flat silence)" % nm)
+	sfx.free()
