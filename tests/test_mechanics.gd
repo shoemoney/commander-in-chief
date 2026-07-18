@@ -1416,3 +1416,59 @@ func test_c2_camera_lookahead_anchor() -> void:
 	# against the bottom).
 	Runner.T.ok(344 * SimWorld.F_ONE - SimWorld.CAMERA_LEAD >= 80 * SimWorld.F_ONE,
 		"at least 80px of retreat room remains below the anchor")
+
+
+func test_c2_flank_telegraph_and_stagger() -> void:
+	# c2 2v: the breach TELEGRAPHS (45t warn) then STAGGERS (30t between walls)
+	# — no simultaneous double-wall crossfire coin flip. Near wall answers first.
+	var F := SimWorld.F_ONE
+	var sim := SimWorld.new(31, 1)
+	var b1 := {"x": 180 * F, "y": -900 * F, "alive": false, "spawn_cd": 60}   # LEFT bunker DOWN
+	var b2 := {"x": 460 * F, "y": -900 * F, "alive": true, "spawn_cd": 60}
+	sim.bunkers.append(b1)
+	sim.bunkers.append(b2)
+	sim.gates.append({"y": -1000 * F, "open": false, "b1": b1, "b2": b2, "boss": {}, "fork_x": 0})
+	sim.enemies.clear()
+	sim.events.clear()
+	# Trigger tick: warn events fire, ZERO squads yet.
+	sim._step_gates()
+	Runner.T.ok(sim.gates[0].get("flanked", false), "the fallen bunker triggers the breach")
+	var warns := 0
+	for ev in sim.events:
+		if ev["t"] == "flank_warn":
+			warns += 1
+	Runner.T.eq(warns, 2, "both walls telegraph on the trigger tick")
+	Runner.T.eq(sim.enemies.size(), 0, "no squad spawns on the trigger tick")
+	# Through the 45t warn: still nothing.
+	for i in SimWorld.FLANK_WARN_TICKS - 1:
+		sim._step_gates()
+	Runner.T.eq(sim.enemies.size(), 0, "no squad through the full 45t warn window")
+	# The NEAR wall (left — the fallen bunker is at x=180 < center) breaches.
+	sim._step_gates()
+	Runner.T.eq(sim.enemies.size(), SimWorld.FLANK_SQUAD, "the near wall breaches first (3)")
+	for e in sim.enemies:
+		Runner.T.eq(e["x"], SimWorld.WORLD_LEFT, "first squad is the LEFT wall, nearest the kill")
+	# Far wall held during the stagger, then breaches at cd==0.
+	for i in SimWorld.FLANK_STAGGER_TICKS - 1:
+		sim._step_gates()
+	Runner.T.eq(sim.enemies.size(), SimWorld.FLANK_SQUAD, "far wall still held mid-stagger")
+	sim._step_gates()
+	Runner.T.eq(sim.enemies.size(), 2 * SimWorld.FLANK_SQUAD, "both walls breached after the 30t stagger")
+
+
+func test_c2_flank_fires_once() -> void:
+	# Killing the SECOND bunker mid-countdown must not re-trigger a second breach.
+	var F := SimWorld.F_ONE
+	var sim := SimWorld.new(31, 1)
+	var b1 := {"x": 180 * F, "y": -900 * F, "alive": false, "spawn_cd": 60}
+	var b2 := {"x": 460 * F, "y": -900 * F, "alive": true, "spawn_cd": 60}
+	sim.bunkers.append(b1)
+	sim.bunkers.append(b2)
+	sim.gates.append({"y": -1000 * F, "open": false, "b1": b1, "b2": b2, "boss": {}, "fork_x": 0})
+	sim.enemies.clear()
+	sim._step_gates()   # trigger
+	b2["alive"] = false   # second bunker falls mid-countdown
+	for i in SimWorld.FLANK_WARN_TICKS + SimWorld.FLANK_STAGGER_TICKS + 5:
+		sim._step_gates()
+	# Both walls breached exactly once = 2 squads, not 4.
+	Runner.T.eq(sim.enemies.size(), 2 * SimWorld.FLANK_SQUAD, "the breach fires once — no double squad")

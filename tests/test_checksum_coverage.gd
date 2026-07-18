@@ -27,7 +27,11 @@ const KNOWN := {
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost", "drop"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant", "salvage_tick"],
-	"gate": ["y", "open", "b1", "b2", "boss", "final", "fork_x", "flanked"],
+	# breach_cd is the c2 staggered-flank countdown (conditionally hashed when
+	# live); breach_first_left is derived from which bunker fell (excluded — its
+	# effect lands in the hashed enemy spawn positions).
+	"gate": ["y", "open", "b1", "b2", "boss", "final", "fork_x", "flanked",
+		"breach_cd", "breach_first_left"],
 	"boss": ["alive", "hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at"],
 	"strike": ["x", "y", "ticks", "obs"],
 	"water": ["y", "ford_x"],

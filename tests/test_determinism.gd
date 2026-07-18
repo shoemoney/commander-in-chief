@@ -165,13 +165,19 @@ const SEED := 0xDEADBEEF
 ## CAMPAIGN sample moves — a deliberate sim behavior change, not drift. ENDLESS is
 ## UNCHANGED: it never advances the camera (CAMERA_LEAD never engages) and the
 ## courier spawn move (camera_top+240->+300) is wave-3+, past the wave-2 wipe.
+## RE-RECORDED (2026-07-18, cycle 2 c2-13 flank telegraph+stagger): the gate-1
+## flank breach now warns 45t early and staggers the two walls 30t apart (was a
+## same-tick double-spawn) — 6 spawn timings shift + a conditional breach_cd feed
+## enters the hash. Only samples 4-5 moved (the breach fires late in the torture,
+## after gate 1's first bunker falls); 0-3 identical to the c2-12 lookahead record.
+## ENDLESS unaffected — flank breaches are a campaign gate-streaming mechanic.
 const GOLDEN: Array[int] = [
 	3960584721031551345,
 	996321938414542430,
 	5287757350757329119,
 	969675874419806883,
-	7532000327903681596,
-	6773872348174204297,
+	2065829588026051076,
+	5804671699702284095,
 ]
 
 

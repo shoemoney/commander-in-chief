@@ -315,6 +315,8 @@ const HULL_MARGIN := 12 * F_ONE      # pinned > 0: clearance is never zero-threa
 const HULL_CLEARANCE := HULL_W + HULL_MARGIN
 const FLANK_SQUAD := 3               # 2v flank doors: squad size per side (starting value)
 const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
+const FLANK_WARN_TICKS := 45         # c2 2v: 0.75s dust-fall tell BEFORE any breach (> the 24t reaction floor)
+const FLANK_STAGGER_TICKS := 30      # c2 2v: 0.5s between the two walls (no simultaneous double-pinch)
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
 const CHOKE_START_SEG := 2
 const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
@@ -2691,26 +2693,35 @@ func _step_gates() -> void:
 		# Flank doors (2v): the moment the FIRST bunker of a pair falls, the
 		# arena answers — a 3-rusher squad breaches from each wall (right-side
 		# leader is an elite). Fixed positions, zero rng; once per gate.
+		# Staggered breach countdown (c2 2v): warn -> near wall -> far wall.
+		# Runs BEFORE the trigger below so it skips on the trigger tick itself —
+		# a clean FLANK_WARN_TICKS gap from warn to the first squad. Parity
+		# (KIMK r2) is UNCHANGED, only the timing moved: odd gates keep the 140
+		# row + right elite (gate 1 = torture, layout intact); even gates drop
+		# the door to 180 and the elite leads from the LEFT.
+		if g.get("flanked", false) and g.get("breach_cd", 0) > 0:
+			g["breach_cd"] -= 1
+			var fdy: int = FLANK_DOOR_Y if absi(g["y"] / GATE_SPACING) % 2 == 1 else FLANK_DOOR_Y + 40 * F_ONE
+			var f_left_elite: bool = absi(g["y"] / GATE_SPACING) % 2 == 0
+			if g["breach_cd"] == FLANK_STAGGER_TICKS:
+				_breach_wall(g, g["breach_first_left"], fdy, f_left_elite)
+			elif g["breach_cd"] == 0:
+				_breach_wall(g, not g["breach_first_left"], fdy, f_left_elite)
 		if not g["open"] and g["boss"].is_empty() and not g.get("final", false) \
 				and not g.get("b1", {}).is_empty() \
 				and not g.get("flanked", false) and g["b1"]["alive"] != g["b2"]["alive"]:
 			g["flanked"] = true
-			# Parity variation (KIMK r2). A/B IS the designed ceiling (round-3
-			# declaration): two layouts is deliberate — flanks must stay
-			# READABLE surprise, not a lottery. The delta is budgeted neutral:
-			# even gates trade +40px reaction distance (easier) for the elite
-			# leading from the off-side (harder) — pinned equal squads, rows
-			# within [140,180].
-			# odd gates keep the classic 140 row + right elite (gate 1 =
-			# torture = unchanged); even gates drop the door to 180 and the
-			# elite leads from the LEFT. Blocked spawns ride the rock-nudge.
-			var fdy: int = FLANK_DOOR_Y if absi(g["y"] / GATE_SPACING) % 2 == 1 else FLANK_DOOR_Y + 40 * F_ONE
-			var f_left_elite: bool = absi(g["y"] / GATE_SPACING) % 2 == 0
-			for fi in FLANK_SQUAD:
-				_spawn_enemy(WORLD_LEFT, g["y"] + fdy + fi * 22 * F_ONE, f_left_elite and fi == 0)
-				_spawn_enemy(WORLD_RIGHT, g["y"] + fdy + fi * 22 * F_ONE, not f_left_elite and fi == 0)
-			events.append({"t": "flank_breach", "x": WORLD_LEFT, "y": g["y"] + FLANK_DOOR_Y})
-			events.append({"t": "flank_breach", "x": WORLD_RIGHT, "y": g["y"] + FLANK_DOOR_Y})
+			# c2 2v: the breach now TELEGRAPHS then STAGGERS instead of a
+			# same-tick double-wall crossfire coin flip. The wall nearest the
+			# FALLEN bunker answers FIRST (causal read), FLANK_WARN_TICKS after a
+			# dust-fall warn; the far wall follows FLANK_STAGGER_TICKS later.
+			# b1/b2 aren't fixed L/R (ARENAS vary), so read the dead bunker's x.
+			var dead_bunker: Dictionary = g["b1"] if not g["b1"]["alive"] else g["b2"]
+			g["breach_first_left"] = dead_bunker["x"] < SCREEN_CX
+			g["breach_cd"] = FLANK_WARN_TICKS + FLANK_STAGGER_TICKS
+			var wdy: int = FLANK_DOOR_Y if absi(g["y"] / GATE_SPACING) % 2 == 1 else FLANK_DOOR_Y + 40 * F_ONE
+			events.append({"t": "flank_warn", "x": WORLD_LEFT, "y": g["y"] + wdy})
+			events.append({"t": "flank_warn", "x": WORLD_RIGHT, "y": g["y"] + wdy})
 		if g["open"] or g.get("final", false):
 			continue   # the final gate is opened by the Colossus's death alone
 		var cleared: bool
@@ -2754,6 +2765,18 @@ func _step_gates() -> void:
 				sandbags.append({"x": SCREEN_CX + 50 * F_ONE, "y": g["y"] - 80 * F_ONE, "world": 1})
 				sandbags.append({"x": SCREEN_CX, "y": g["y"] - 44 * F_ONE, "world": 1})
 			events.append({"t": "gate_open", "x": SCREEN_CX, "y": g["y"]})
+
+
+func _breach_wall(g: Dictionary, left_side: bool, fdy: int, f_left_elite: bool) -> void:
+	## One wall of a staggered flank breach (c2 2v): a 3-rusher squad from the
+	## given wall, its "flank_breach" klaxon now landing at the staggered moment
+	## for free. Elite parity matches the shipped layout (right on odd gates,
+	## left on even). Blocked spawns ride the existing rock-nudge.
+	var wx: int = WORLD_LEFT if left_side else WORLD_RIGHT
+	var is_elite_wall: bool = (f_left_elite and left_side) or (not f_left_elite and not left_side)
+	for fi in FLANK_SQUAD:
+		_spawn_enemy(wx, g["y"] + fdy + fi * 22 * F_ONE, is_elite_wall and fi == 0)
+	events.append({"t": "flank_breach", "x": wx, "y": g["y"] + fdy})
 
 
 func _in_fork_wire(x: int, y: int) -> bool:
@@ -3974,6 +3997,11 @@ func checksum() -> int:
 	for g in gates:
 		h = feed.call(g["y"], h)
 		h = feed.call(int(g["open"]), h)
+		if g.get("breach_cd", 0) > 0:
+			# c2 2v: conditional feed — a live staggered breach countdown enters
+			# the hash; 0 (the default, and every non-flanked gate) leaves the
+			# stream untouched (sandbags precedent).
+			h = feed.call(g["breach_cd"], h)
 		if not g["boss"].is_empty():
 			for v in [g["boss"]["hp"], g["boss"]["x"], int(g["boss"]["alive"]), g["boss"]["phase_t"], g["boss"]["dir"]]:
 				h = feed.call(v, h)
