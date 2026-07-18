@@ -1903,6 +1903,14 @@ func _any_player_smoked() -> bool:
 	return false
 
 
+const _METAL_KINDS := {"drone": true, "technical": true, "broadcast": true, "mg_nest": true}
+
+static func _gib_col(kkind: String) -> Color:
+	# a2-12 VFX#4: machines/vehicles/emplacements throw warm METAL SPARKS on death;
+	# infantry throws BLOOD — a destroyed vehicle no longer bleeds red.
+	return Color(1.0, 0.85, 0.5) if _METAL_KINDS.has(kkind) else Color(0.5, 0.1, 0.08)
+
+
 func _ev_kill(ev: Dictionary) -> void:
 	# No screen flash here: at kill-spam rates it strobes
 	# (photosensitivity); smoke + gib burst + blip + coin carry it.
@@ -1961,7 +1969,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		var ga := randf() * TAU
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
 			"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
-			"spin": randf() * TAU})
+			"spin": randf() * TAU, "col": _gib_col(kkind)})
 	_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0   # kill confirms on the shooter's reticle
 	_run_kills += 1
 	_run_kind_kills[kkind] = int(_run_kind_kills.get(kkind, 0)) + 1

@@ -407,3 +407,14 @@ func test_a2_tree_instance_variety() -> void:
 	Runner.T.ok(absf(mn - 0.85) < 0.01, "min tree scale is 0.85")
 	Runner.T.ok(mx > 1.12 and mx < 1.15, "max tree scale ~1.14 (0.85..1.138)")
 	Runner.T.ok(deads > 8 and deads < 45, "a minority (1-in-11) of trees are dead (%d/220)" % deads)
+
+
+# --- a2-12: kind-specific gib (metal sparks vs blood) ---
+
+func test_a2_gib_metal_vs_blood() -> void:
+	var ms = load("res://src/main.gd")
+	var drone: Color = ms._gib_col("drone")
+	var rusher: Color = ms._gib_col("rusher")
+	Runner.T.ok(drone.g > 0.6 and drone.b > 0.3, "machine death throws warm metal SPARKS, not blood")
+	Runner.T.ok(rusher.r > rusher.g and rusher.g < 0.3, "infantry death throws BLOOD red")
+	Runner.T.ok(ms._gib_col("technical").is_equal_approx(drone), "vehicles/emplacements share the metal-spark gib")
