@@ -1974,7 +1974,12 @@ func _ev_kill(ev: Dictionary) -> void:
 		var streak_bonus := 25 if _kill_streak == 5 else 50 if _kill_streak == 10 else 100
 		_fx.append({"x": ev["x"], "y": ev["y"] - 12, "t": -0.14, "kind": "floattext",
 			"rate": 0.016, "size": 13, "text": "+%d%%!" % streak_bonus, "col": Color(1.0, 0.92, 0.4)})
-		_flash_alpha = maxf(_flash_alpha, 0.14 + _kill_streak * 0.006)
+		# a1-12 VFX#8: a LOCALIZED gold bloom at the kill instead of a whole-screen
+		# white flash — the milestone pops without strobing the whole frame mid-fight.
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.05,
+			"r": 32.0 + float(_kill_streak) * 1.4, "col": Color(1.0, 0.82, 0.35)})
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_circle",
+			"sz": 16.0, "grow": 1.1, "fade": 1.2, "rate": 0.05, "col": Color(1.0, 0.85, 0.4, 0.6)})
 		_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
@@ -6928,7 +6933,7 @@ func _draw_banners(top_msg: String) -> void:
 	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
 	# (static, so it stays even under reduce-motion).
 	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
-		Color(0.0, 0.0, 0.0, 0.16))
+		Color(0.0, 0.0, 0.0, 0.12))   # a1-12 VFX#5: eased 0.16->0.12 so corners keep dark-enemy contrast
 	# Damage vignette: pulses on hits, sustains through the mercy window.
 	var vig := _damage_vignette
 	for p in sim.players:
