@@ -765,3 +765,54 @@ func test_rocks_are_real_cover() -> void:
 	var before: int = sim.rocks.size()   # step() streamed more — count, don't assume
 	sim._explode(rx, ry)
 	Runner.T.eq(sim.rocks.size(), before, "grenades arc over — no rock dies to a blast")
+
+
+func test_arena_templates_are_clearable_and_barrel_safe() -> void:
+	# KIMK round-2: prove the arenas PLAY, not just that coordinates match.
+	var sim := SimWorld.new(41, 1)
+	sim.camera_top = sim._next_gate_y - 4 * SimWorld.GATE_SPACING
+	sim._step_camera()
+	for gi in [0, 1, 3]:
+		var g: Dictionary = sim.gates[gi]
+		# Clearability: a player standing in the open lane south of each bunker
+		# kills it with a straight grenade lob (the real opener verb).
+		for bk in [g["b1"], g["b2"]]:
+			Runner.T.ok(bk["x"] >= 40 * SimWorld.F_ONE and bk["x"] <= 560 * SimWorld.F_ONE,
+				"gate %d bunker sits inside the playable lane" % (gi + 1))
+			sim._explode(bk["x"] + SimWorld.BUNKER_W / 2, bk["y"] + SimWorld.BUNKER_H / 2)
+			Runner.T.ok(not bk["alive"], "gate %d bunker dies to a reachable grenade" % (gi + 1))
+		sim._step_gates()
+		Runner.T.ok(g["open"], "gate %d opens after both bunkers fall" % (gi + 1))
+	# Barrel-chain safety (gate 4): detonating the center cluster must NOT
+	# double-kill the bunkers — the shortcut is a tool, not a sleepwalk.
+	var sim2 := SimWorld.new(41, 1)
+	sim2.camera_top = sim2._next_gate_y - 4 * SimWorld.GATE_SPACING
+	sim2._step_camera()
+	var g4: Dictionary = sim2.gates[3]
+	var chained := 0
+	for bl in sim2.barrels:
+		if bl["y"] > g4["y"] and bl["y"] < g4["y"] + 120 * SimWorld.F_ONE:
+			sim2._detonate_barrel(bl, true)
+			chained += 1
+	Runner.T.ok(chained >= 3, "gate 4 fields its barrel cluster (got %d)" % chained)
+	for t in 20:
+		sim2._step_barrels()
+	Runner.T.ok(g4["b1"]["alive"] and g4["b2"]["alive"],
+		"the barrel chain scars the arena but never one-shots the lock")
+
+
+func test_biome_view_goldens() -> void:
+	# KIMK round-2: pin the LOOK — one assertion set per sector band.
+	var MainS := load("res://src/main.gd")
+	var m = MainS.new()
+	var stops := [Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
+		Color(0.44, 0.42, 0.40, 0.7), Color(0.40, 0.34, 0.28, 0.7)]
+	for band in 5:
+		var march := float(band) / 5.0
+		Runner.T.eq(m._biome_ramp(march, stops), stops[band],
+			"sector %d wears exactly its own dirt stop (flat, no mud)" % band)
+	Runner.T.eq(m._biome_ramp(1.0, stops), stops[4], "the foundry holds the final stop")
+	Runner.T.ok("crater_field" in m._LITTER_FOUNDRY and "wreck_halftrack" in m._LITTER_FOUNDRY,
+		"the foundry band owns its slagged litter pool")
+	Runner.T.ok(m._LITTER_FOUNDRY != m._LITTER_LATE, "foundry pool is distinct from the late pool")
+	m.free()

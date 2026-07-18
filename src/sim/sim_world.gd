@@ -200,6 +200,11 @@ const OBSERVER_Y_OFFSET := 14 * F_ONE
 const GATE_SPACING := 1000 * F_ONE
 const GATE_BLOCK_PAD := 14 * F_ONE
 # Arena templates (9/9 panel: every bunker-pair gate was the identical room).
+# Intended difficulty ramp: gate 1 (baseline, teaches the rules) < gate 2
+# (staggered depth: angled fight, mines punish the straight line) < gate 4
+# (crossfire pinch: tighter seam + live ordnance mid-arena). The barrel
+# cluster is a tool AND a hazard — its chain must never trivially kill the
+# bunkers (test-pinned below at >GRENADE_RADIUS from both).
 # Pure _gate_counter lookup — ZERO rng draws (any draw here would shift the
 # shared stream-rng for every mine/barrel after it). Gate 1 = the exact
 # classic literals (torture-safe, byte-identical); positions are plain ints,
@@ -209,8 +214,8 @@ const ARENAS := {
 	2: {"b1": [300, 150], "b2": [160, 40], "props": [   # staggered depth: a front
 		["mine", 240, 100], ["mine", 350, 60]]},        # sentinel screens the rear
 	4: {"b1": [240, 50], "b2": [368, 50], "props": [    # crossfire-close: barrels
-		["barrel", 290, 90], ["barrel", 306, 90], ["barrel", 322, 90],   # block the center seam
-		["mine", 120, 70], ["mine", 500, 70]]},
+		["barrel", 290, 120], ["barrel", 306, 120], ["barrel", 322, 120],   # center seam, held
+		["mine", 120, 70], ["mine", 500, 70]]},   # >blast+AABB reach of both locks (test-pinned)
 }
 const GATE_CAMERA_PAD := 60 * F_ONE
 # Flak Vest: absorbs exactly one hit, then a mercy window.

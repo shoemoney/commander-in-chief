@@ -24,6 +24,8 @@ const _LITTER_MID_A := ["tree_dead1", "tree_dead2", "tree_dead3",
 	"barrel", "tank_trap", "hedge", "flag_marker"]   # stump-field band: the jungle thins
 const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
 	"barricade", "ammobox"]                 # marsh/ruins band: the war shows
+const _LITTER_FOUNDRY := ["crater_field", "crater_water", "wreck_halftrack", "wreck_apc",
+	"crater", "barbedwire", "corpse_soldier2", "wreck_light_tank"]   # foundry band: slagged, cratered, dead
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
 	"corpse_soldier1", "corpse_soldier2", "crater",
 	"trench", "barricade", "radio_tower", "wreck_halftrack", "crater_field", "crater_water",
@@ -3100,11 +3102,11 @@ func _draw_skyglow() -> void:
 
 
 func _biome_ramp(march: float, stops: Array) -> Color:
-	## Sample a 5-stop color journey by the 0..1 sector march — each leg lerps
-	## between adjacent stops, so bands feel like arriving somewhere new.
-	var f := clampf(march, 0.0, 0.999) * float(stops.size() - 1)
-	var s0 := int(f)
-	return stops[s0].lerp(stops[s0 + 1], f - float(s0))
+	## QUANTIZED biome journey (KIMK round-2: a lerp is muddiest exactly at the
+	## gates, the one moment the journey should punctuate): each sector wears
+	## ONE stop, flat — crossing the gate IS the identity shift, and the
+	## litter-freeze machinery already stages that swap off-screen.
+	return stops[clampi(int(march * 5.0 + 0.0001), 0, stops.size() - 1)]
 
 
 func _sector_march() -> float:
@@ -3314,8 +3316,8 @@ func _draw_terrain() -> void:
 			# Band-picked pools (5v biome journey): early jungle scatter, stump
 			# fields, crater/wreck marsh, then the late war-torn pool — instead
 			# of a two-pool percentage blend that mushed the middle sectors.
-			var lband := int(clampf(lm, 0.0, 0.999) * 4.0)
-			var pool: Array = [_LITTER_EARLY, _LITTER_MID_A, _LITTER_MID_B, _LITTER_LATE][mini(lband, 3)] \
+			var lband := clampi(int(lm * 5.0 + 0.0001), 0, 4)
+			var pool: Array = [_LITTER_EARLY, _LITTER_MID_A, _LITTER_MID_B, _LITTER_LATE, _LITTER_FOUNDRY][lband] \
 				if (hl % 100) < 55 + int(lm * 45.0) else _LITTER_EARLY
 			var key: String = pool[(hl / 40) % pool.size()]
 			# Recessed/flat props cast no disc: a drop shadow under a crater or a
