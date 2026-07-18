@@ -162,6 +162,7 @@ func test_a1_boss_music_heavier_and_ambience_marches() -> void:
 	for i in 200: b.set_music_intensity(1.0, 0.0, true)
 	var boss_pitch: float = b._music.pitch_scale
 	Runner.T.ok(boss_pitch < normal_pitch, "boss music sits at a heavier (lower) pitch floor than normal combat")
+	Runner.T.ok(b._music.volume_db > a._music.volume_db, "boss music also sits LOUDER than normal combat at equal intensity")
 	var c := Sfx.new()
 	for i in 300: c.set_ambience_march(1.0)
 	var foundry_air: float = c._amb.pitch_scale
@@ -193,3 +194,18 @@ func test_a1_sfx_bus_ducks_under_vo() -> void:
 	sfx.free()
 	if created:
 		AudioServer.remove_bus(idx)
+
+
+func test_a1_boss_music_engages_on_a_live_boss() -> void:
+	var sim := SimWorld.new(1, 1)
+	# no colossus + fresh gates => no engaged boss
+	var on_none: bool = (not sim.colossus.is_empty() and sim.colossus.get("alive", false))
+	if not on_none:
+		for g in sim.gates:
+			if not g["boss"].is_empty() and g["boss"].get("alive", false):
+				on_none = true
+	Runner.T.ok(not on_none, "a fresh run with no engaged boss => boss music OFF")
+	# colossus alive => engaged
+	sim.colossus = {"alive": true, "x": 0, "y": 0}
+	Runner.T.ok(not sim.colossus.is_empty() and sim.colossus.get("alive", false),
+		"a live colossus (finale) => boss music ON")
