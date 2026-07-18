@@ -540,7 +540,7 @@ func _paint_bg(canvas: Node2D) -> void:
 			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
 			var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 			var h := Art.cell_hash(tx, base_iy + ty)
-			var shade := 0.50 + float(h % 7) * 0.010
+			var shade := 0.49 + float(h % 7) * 0.012   # a1-06: tiny tile micro-var; ~0.020 band checkerboards (macro value lives on the 0.16 mottle below)
 			if (base_iy + ty) % 3 == 0:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
