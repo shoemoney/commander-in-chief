@@ -420,3 +420,12 @@ func test_a2_gib_metal_vs_blood() -> void:
 	Runner.T.ok(ms._gib_col("technical").is_equal_approx(drone), "vehicles/emplacements share the metal-spark gib")
 	Runner.T.ok(ms._gib_col("shield").is_equal_approx(rusher), "an armored HUMAN (bombsuit) still bleeds — not metal")
 	Runner.T.ok(ms._gib_col("mg_nest").is_equal_approx(drone), "the mg-nest emplacement throws metal")
+
+
+# --- a2-13: campaign scorch ages to a capped ghost (never age-removed) ---
+
+func test_a2_scorch_ages_to_a_capped_ghost() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms._scorch_age(0.0) > 0.0, "scorch ages from fresh")
+	Runner.T.ok(ms._scorch_age(0.9) <= 0.821, "scorch t caps at the 0.82 ghost floor")
+	Runner.T.ok(ms._scorch_age(0.82) < 1.0, "campaign scorch never reaches t=1 -> never age-removed (a faint permanent scar)")

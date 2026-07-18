@@ -2763,12 +2763,13 @@ func _update_feel() -> void:
 		# hulk intent). Endless scars stay full (no aging), as before.
 		for i in range(_scorch.size() - 1, -1, -1):
 			if sim.mode != "endless":
-				_scorch[i]["t"] = minf(_scorch[i]["t"] + 0.003, 0.82)
+				_scorch[i]["t"] = _scorch_age(_scorch[i]["t"])
 	# Count-cap BOTH modes so the persistent scars stay bounded (was endless-only).
 	while _scorch.size() > (24 if sim.mode == "endless" else 40):
 		_scorch.remove_at(0)
+	if sim.mode == "endless":
 		for i in range(_corpses.size() - 1, -1, -1):
-			_corpses[i]["t"] += 0.004   # linger ~4s
+			_corpses[i]["t"] += 0.004   # linger ~4s (endless ages corpses; campaign persists — unchanged)
 			if _corpses[i]["t"] >= 1.0:
 				_corpses.remove_at(i)
 	while _corpses.size() > 40:     # cap stays live even mid-freeze
@@ -6414,6 +6415,12 @@ func _draw_flame(g: CanvasItem, fp: Vector2, strength: float, flick: float) -> v
 	g.draw_texture(ftex, -ftex.get_size() / 2.0,
 		Color(1.0, 0.6, 0.25, (0.4 + 0.35 * flick) * strength))
 	g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+static func _scorch_age(tt: float) -> float:
+	# a2-13: campaign scorch ages SLOW toward a capped GHOST (0.82) — it never reaches
+	# 1.0, so it is never removed by age; it settles into a faint permanent scar.
+	return minf(tt + 0.003, 0.82)
 
 
 func _draw_scorch() -> void:
