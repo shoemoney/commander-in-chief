@@ -1364,6 +1364,9 @@ func _consume_events() -> void:
 			"hulk_salvage":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.016, "text": ("+%d GRENADES — COVER STRIPPED" % ev.get("n", 2)) if ev.get("n", 2) > 0 else "FULL UP — COVER STRIPPED", "col": Color(1.0, 0.8, 0.45)})
+			"sandbag_plant":
+				# One-beat dig-in puff: planted cover kicks real dust (9/9 panel).
+				_burst(ev["x"], ev["y"], "dust", 5, 0.8, 1.8, 0.35)
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
@@ -2767,7 +2770,7 @@ const _TREE_DEAD := ["tree_dead1", "tree_dead2", "tree_dead3"]
 
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
 const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
-	"colossus_body": true, "colossus_barrel": true}
+	"colossus_body": true, "colossus_barrel": true, "m_heli_attack2": true}
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
@@ -3181,8 +3184,20 @@ func _draw_sandbags() -> void:
 		var pos := _to_screen(sb["x"], sb["y"])
 		if pos.y < -20.0 or pos.y > 380.0:
 			continue
-		_ground_shadow(pos, 10.0)
-		_spr("wall_sandbag", pos, 0.0, 0.62, Color(0.95, 0.88, 0.7))
+		# 9/9 panel: cover must sit as heavy as a barrel (0.42 armor-grade
+		# shadow) and live in the khaki band — the old warm tan collided with
+		# the warm hulk/threat grammar. Value lifted ~0.1 over the dirt cards.
+		_ground_shadow(pos, 10.0, 0.42)
+		_spr("wall_sandbag", pos, 0.0, 0.62, Color(1.02, 0.98, 0.74))
+		# Field weathering (DS round-2 feedback): a soft dirt gradient at the
+		# base + sparse hash-placed scuff speckles — planted cover reads
+		# dug-in, not factory-fresh. All translucent overdraw, no new assets.
+		draw_rect(Rect2(pos + Vector2(-14.0, 3.0), Vector2(28.0, 2.2)), Color(0.25, 0.18, 0.10, 0.10))
+		draw_rect(Rect2(pos + Vector2(-12.0, 4.4), Vector2(24.0, 1.4)), Color(0.25, 0.18, 0.10, 0.06))
+		for spk in 4:
+			var sh2 := Art.cell_hash(sb["x"] / 65536 + spk * 7, sb["y"] / 65536 + spk * 13)
+			draw_circle(pos + Vector2(-11.0 + float(sh2 % 23), -2.5 + float((sh2 / 23) % 6)), 0.7,
+				Color(0.30, 0.24, 0.14, 0.08 + float(sh2 % 3) * 0.02))
 
 func _draw_mines() -> void:
 	for m in sim.mines:
@@ -4079,12 +4094,23 @@ func _draw_gunships() -> void:
 
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "gunship_body") -> void:
 	if boss["phase_t"] < 0:
-		# Endless fly-in: a distant inbound silhouette growing over the 7s ETA
-		# reads "incoming", not "parked and unhittable".
+		# Endless fly-in presence kit (6v panel): the approach used to be a flat
+		# grey smudge. Now: a shadow that grows/darkens toward the engaged
+		# 16/0.42 values as it lands, the REAL bake under a clearing high-alt
+		# haze (cool, translucent -> full), the warm boss rim (via _BOSS_RIM),
+		# and a scaled rotor blur so it reads "helicopter", not "texture bug".
 		var eta_f := 1.0 + float(boss["phase_t"]) / 420.0   # 0 -> 1 across the approach
-		var apos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET) \
-			- Vector2(0, (1.0 - eta_f) * 90.0)
-		_spr(body_tex, apos, PI, 0.3 + eta_f * 0.5, Color(0.6, 0.6, 0.65, 0.4 + eta_f * 0.6))
+		var ground := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+		_ground_shadow(ground + Vector2(0, 26), 6.0 + eta_f * 10.0, 0.12 + eta_f * 0.30)
+		var apos := ground - Vector2(0, (1.0 - eta_f) * 90.0)
+		var asc := 0.3 + eta_f * 0.5
+		_spr(body_tex, apos, PI, asc, Color(0.92, 0.94, 1.05, 0.35 + eta_f * 0.65))
+		var frr := float(Engine.get_physics_frames()) * 0.9 * maxf(_motion, 0.3)
+		var rlen := 26.0 * (asc / 0.8)
+		for fri in 2:
+			var fra := frr + fri * PI / 2
+			draw_line(apos - Vector2.from_angle(fra) * rlen, apos + Vector2.from_angle(fra) * rlen,
+				Color(0.85, 0.9, 0.95, 0.20 + eta_f * 0.15), 1.5)
 		return
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 	# Idle hover: a slow vertical bob + faint sway so the gunship reads as airborne,
