@@ -1402,7 +1402,7 @@ func _consume_events() -> void:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "fragpop",
 						"rate": 0.03, "move": true, "spin": fa,
 						"vx": cos(fa) * 2.2, "vy": sin(fa) * 2.2 - 0.8})
-				_sfx.play("buy", -6.0, 1.2)
+				_sfx.play("buy_grab", -6.0, 1.2)   # a2-16: frag-pop multi-kill reward (grab)
 			"bunker_break":
 				_ev_bunker_break(ev)
 			"rock_crater":
@@ -1581,7 +1581,7 @@ func _consume_events() -> void:
 			"pilot_rescued":
 				_run_rescues += 1
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
-				_sfx.play("buy", -2.0, 1.5)
+				_sfx.play("buy_fanfare", -2.0, 1.2)   # a2-16: RANSOM milestone
 			"pilot_lost":
 				_fx.append({"x": ev["x"], "y": ev["y"] + 20, "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": "PILOT CAPTURED", "col": Color(0.7, 0.65, 0.6)})
@@ -1602,7 +1602,7 @@ func _consume_events() -> void:
 					ftxt = "FLAWLESS x%d  +%d¢  +%d" % [fm, 50 * fm, 2000 * fm]
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.016, "text": ftxt, "col": Color(1.0, 0.92, 0.45)})
-				_sfx.play("buy", -3.0, 1.4 + fm * 0.08)
+				_sfx.play("buy_fanfare", -3.0, 1.0 + fm * 0.06)   # a2-16: flawless-streak milestone
 			"avenge":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "AVENGED +5¢", "col": Color(0.7, 0.9, 1.0)})
@@ -1725,7 +1725,7 @@ func _consume_events() -> void:
 			"wave_flawless":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Art.safe(Color(0.5, 1.0, 0.7))})
-				_sfx.play("buy", -3.0, 1.5)
+				_sfx.play("buy_fanfare", -3.0, 1.1)   # a2-16: CLEAN WAVE milestone
 			"courier_escape":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
@@ -2004,7 +2004,7 @@ func _ev_kill(ev: Dictionary) -> void:
 			"r": 32.0 + float(_kill_streak) * 1.4, "col": Color(1.0, 0.82, 0.35)})
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_circle",
 			"sz": 16.0, "grow": 1.1, "fade": 1.2, "rate": 0.05, "col": Color(1.0, 0.85, 0.4, 0.6)})
-		_sfx.play("buy", -8.0, 1.0 + _kill_streak * 0.02)
+		_sfx.play("buy_fanfare", -8.0, 0.9 + _kill_streak * 0.015)   # a2-16: kill-streak milestone
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
 		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, Color(1.0, 0.9, 0.45), 0.025)
@@ -2514,7 +2514,7 @@ func _check_near_miss() -> void:
 					_dodge_frame = Engine.get_physics_frames()
 					_show_banner("PERFECT DODGE!", Color(0.5, 0.95, 1.0))
 					_hitstop_frames = maxi(_hitstop_frames, 3)
-					_sfx.play("buy", -4.0, 1.8)
+					_sfx.play("buy_grab", -4.0, 1.6)   # a2-16: PERFECT DODGE skill reward (warm grab)
 					_fx.append({"x": p["x"], "y": p["y"], "t": 0.0, "kind": "tex",
 						"tex": "fx_circle", "sz": 16.0, "grow": 3.0, "fade": 1.8, "rate": 0.04,
 						"col": Color(0.5, 0.95, 1.0, 0.7)})
