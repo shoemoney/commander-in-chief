@@ -5308,6 +5308,8 @@ func _draw_gunships() -> void:
 	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 
+const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.55)   # a2-17: shared boss-label plate fill
+
 static func _label_plate_rect(origin_x: float, top_y: float, w: float) -> Rect2:
 	# a2-17: a label-anchored dark plate — starts 3px LEFT of the label origin, 6px wider,
 	# so it always sits UNDER the (left-anchored) boss phase label in 1P and 2P.
@@ -5418,7 +5420,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# so the highest-stakes read has the plate language the rest of the top band has.
 	var gplabel := "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
 	var gpw := Art.font().get_string_size(gplabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_rect(_label_plate_rect(bar_x, bar_y - 2.0, gpw), Color(0.04, 0.05, 0.03, 0.55))
+	draw_rect(_label_plate_rect(bar_x, bar_y - 2.0, gpw), LABEL_PLATE_FILL)
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.5, 0.4))
 	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
@@ -5502,7 +5504,7 @@ func _draw_colossus() -> void:
 	# banners (phase 2 = mortar volleys, phase 3 = sappers out).
 	var clabel := "FOUNDRY COLOSSUS — %s" % COLOSSUS_PHASE_NAMES[clampi(phase - 1, 0, 2)]
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_rect(_label_plate_rect(172.0, 324.0, clw), Color(0.04, 0.05, 0.03, 0.55))   # a2-17: anchor the plate to the label ORIGIN
+	draw_rect(_label_plate_rect(172.0, 324.0, clw), LABEL_PLATE_FILL)
 	Art.text(self, clabel, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)

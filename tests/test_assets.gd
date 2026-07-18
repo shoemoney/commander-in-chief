@@ -506,7 +506,10 @@ func test_a2_boss_phase_names() -> void:
 	var co: Array = c["COLOSSUS_PHASE_NAMES"]
 	Runner.T.eq(g.size(), 2, "the gunship has 2 named phases (strafe/mortar half-cycle)")
 	Runner.T.eq(co.size(), 3, "the colossus has 3 named phases")
-	Runner.T.ok(not String(g[0]).contains("PHASE") and not String(co[0]).contains("PHASE"), "phases are NAMED, not abstract 'PHASE n'")
+	Runner.T.eq(g, ["STRAFING RUN", "MORTAR VOLLEY"], "the full gunship phase-name list")
+	Runner.T.eq(co, ["ADVANCE", "MORTAR VOLLEYS", "SAPPERS OUT"], "the full colossus phase-name list")
+	for nm in (g + co):
+		Runner.T.ok(not String(nm).contains("PHASE"), "'%s' is NAMED, not abstract PHASE n" % nm)
 
 
 func test_a2_label_plate_rect() -> void:
