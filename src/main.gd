@@ -3211,7 +3211,8 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
 const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a fern clump anchor (under the sprite)
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
-const BOSS_WOUND := {"scar_start": 0.18, "spark": 0.6}   # a3-11: wound frac (1-hp) at which scorch scars begin / hull sparks near death
+const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
+const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
@@ -5346,6 +5347,13 @@ func _draw_enemies() -> void:
 					draw_circle(lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
 				_spr("ghillie", epos, face, 0.5)   # real ghillie bake (was a green-keyed frogman)
 		elif e["elite"]:
+			# a3-12 (UNIT#2): a persistent warm aura marks EVERY elite as an elevated
+			# threat — not just the ~1-in-7 bounty crown. The warm body tint alone was easy
+			# to lose in a busy frame. Soft red halo UNDER the body, gently pulsing; a static
+			# floor (base alpha) holds under REDUCE MOTION so the threat read never vanishes.
+			var eaura := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.06 + float(eidx))
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(epos - Vector2(14.0, 14.0), Vector2(28.0, 28.0)),
+				false, Color(ELITE_AURA.r, ELITE_AURA.g, ELITE_AURA.b, 0.12 + eaura * 0.07 * _motion))
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)
 			if wu > 0:
@@ -5531,7 +5539,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# exact for any scaling without duplicating the sim's spawn formula.
 	_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
 	var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
-	_boss_wounds(bpos, 1.0 - bfrac, 34.0)   # a3-11: hp-keyed hull damage on the gunship
+	_boss_wounds(bpos, 1.0 - bfrac, 34.0)   # a3-11: hp-keyed hull damage — the gunship hull/barrel/rotor/core were all drawn above; this overlays on top
 	# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
 	# bar, ~1618): the boss's screen pos can sit above the held camera or
 	# off-screen, and a world-anchored bar would go with it. Stacked by
@@ -5578,6 +5586,18 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
+static func _boss_wound_scars(wound: float) -> int:
+	# a3-11: how many scorch scars (0..4) a boss shows at this wound (1 - hp fraction) —
+	# scars accumulate from BOSS_WOUND.scar_start, one per scar_step. Pure so it's testable.
+	if wound < BOSS_WOUND["scar_start"]:
+		return 0
+	var n := 0
+	for i in 4:
+		if wound >= BOSS_WOUND["scar_start"] + float(i) * BOSS_WOUND["scar_step"]:
+			n += 1
+	return n
+
+
 func _boss_wounds(center: Vector2, wound: float, r: float) -> void:
 	# a3-11 (UNIT#1): hp-keyed battle damage — as a boss loses hp it accumulates scorch
 	# scars, trails smoke, and (near death) sputters sparks, so you can READ how close the
@@ -5588,10 +5608,9 @@ func _boss_wounds(center: Vector2, wound: float, r: float) -> void:
 	if wound < BOSS_WOUND["scar_start"]:
 		return
 	var t := float(Engine.get_physics_frames())
-	# Scorch scars appear progressively at fixed hull offsets as the wound deepens.
-	for i in 4:
-		if wound < 0.22 + float(i) * 0.17:
-			continue
+	# Scorch scars accumulate at fixed hull offsets as the wound deepens (count driven by
+	# _boss_wound_scars off BOSS_WOUND — no parallel magic numbers).
+	for i in _boss_wound_scars(wound):
 		var sp := center + Vector2.from_angle(float(i) * 1.7 + 0.5) * r * 0.5
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(6.0, 6.0), Vector2(12.0, 12.0)),
 			false, Color(0.05, 0.04, 0.03, 0.5 * wound))

@@ -744,3 +744,19 @@ func test_a3_boss_wound_thresholds() -> void:
 	Runner.T.ok((1.0 - 1.0) < bw["scar_start"], "a full-hp boss shows NO wound damage")
 	# 30% hp -> wound 0.7 -> past the spark threshold (a near-dead boss sputters sparks).
 	Runner.T.ok((1.0 - 0.3) > bw["spark"], "a near-dead boss (30% hp) is in the spark stage")
+	# Stage predicate: scars accumulate 0 -> 4 as the wound deepens (driven by the const).
+	var ms = load("res://src/main.gd")
+	Runner.T.eq(ms._boss_wound_scars(0.1), 0, "a barely-scratched boss shows NO scorch scars")
+	Runner.T.eq(ms._boss_wound_scars(0.18), 1, "the first scar appears exactly at scar_start")
+	Runner.T.ok(ms._boss_wound_scars(0.5) >= 2 and ms._boss_wound_scars(0.5) <= 3, "a half-wrecked boss shows a few scars")
+	Runner.T.eq(ms._boss_wound_scars(0.95), 4, "a near-dead boss shows the full 4 scars")
+
+
+# --- a3-12: every elite carries a persistent WARM aura (threat tell) so it reads as an
+# elevated threat vs a plain rusher, not just via the subtle body tint. ---
+
+func test_a3_elite_aura_is_warm() -> void:
+	var c := _consts()
+	var ea: Color = c["ELITE_AURA"]
+	Runner.T.ok(ea.r > ea.g and ea.r > ea.b, "the elite aura is WARM-RED (r dominates) — a danger tell")
+	Runner.T.ok(ea.r - ea.g > 0.4, "the aura is saturated warm, not a muddy neutral")
