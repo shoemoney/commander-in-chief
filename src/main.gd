@@ -5404,7 +5404,12 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 	# colossus bar labels its phase.
 	var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
-	Art.text(self, "%s — PHASE %d/2" % [label, gphase], Vector2(bar_x, bar_y), 10, Color(1.0, 0.5, 0.4))
+	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
+	# so the highest-stakes read has the plate language the rest of the top band has.
+	var gplabel := "%s — %s" % [label, ["STRAFING RUN", "MORTAR VOLLEY"][gphase - 1]]
+	var gpw := Art.font().get_string_size(gplabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	draw_rect(Rect2(bar_x - 3.0, bar_y - 2.0, gpw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))
+	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.5, 0.4))
 	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 	# Next-volley countdown: a tick that sweeps left->right across the HP
@@ -5482,7 +5487,11 @@ func _draw_colossus() -> void:
 	# fixed HUD slot, cancel the node transform for the bar block.
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
-	Art.text(self, "FOUNDRY COLOSSUS — PHASE %d/3" % phase, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
+	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
+	var clabel := "FOUNDRY COLOSSUS — PHASE %d/3" % phase
+	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	draw_rect(Rect2(320.0 - clw / 2.0 - 3.0, 324.0, clw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))
+	Art.text(self, clabel, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar
