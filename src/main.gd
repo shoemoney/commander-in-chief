@@ -2994,6 +2994,7 @@ func _draw() -> void:
 	# body itself is a shader quad on _bg_root (z=-2), so it stays below anyway.
 	_draw_water()
 	_draw_scorch()
+	_draw_foundry_arena()
 	_draw_vents()
 	_draw_mines()
 	_draw_rocks()
@@ -3262,6 +3263,12 @@ func _draw_terrain() -> void:
 	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
 	var fern_col := Color(0.82, 0.92, 0.72).lerp(Color(0.6, 0.52, 0.42), ash)
 	var tree_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
+	# Per-band undergrowth SPECIES (c2 3v: same fern table everywhere, only
+	# tinted): marsh leans reeds, ruins leans scrub, the foundry chars to
+	# stumps outright (see the anchor branch below).
+	var ug_band := clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)
+	var ug_species: Array = [["fern", "fern2", "hedge"], ["fern", "fern2", "hedge"],
+		["fern2", "fern2", "fern"], ["hedge", "fern", "hedge"], ["hedge", "hedge", "hedge"]][ug_band]
 	# Water-band snapshot: sim.waters is append-only (never swept), so the ~50
 	# sim._in_water calls below were each scanning EVERY band ever streamed.
 	# Only the <=2 bands overlapping the view can matter for on-screen decor —
@@ -3332,12 +3339,16 @@ func _draw_terrain() -> void:
 			if reg_density == 0 and (hf >> 13) % 3 == 0:
 				continue
 			var reg_dom := (reg / 7) % 3
-			var f_tex: String = ["fern", "fern2", "hedge"][reg_dom] if (hf >> 3) % 5 < 3 \
-				else ["fern", "fern2", "hedge"][(hf >> 3) % 3]
+			var f_tex: String = ug_species[reg_dom] if (hf >> 3) % 5 < 3 \
+				else ug_species[(hf >> 3) % 3]
 			var f_scl := 0.30 * (0.6 + 0.2 * float((hf >> 5) % 4))
 			var f_jit := float((hf >> 7) % 5) / 4.0
 			var f_col := fern_col.lerp(Color(0.72, 0.78, 0.5), f_jit * 0.5)
-			if hf % 23 == 0:
+			if ug_band == 4:
+				# Foundry (c2 3v): no green survives the ash — charred struts only.
+				_spr(_TREE_DEAD[hf % 3], Vector2(fx, fy_px), 0.0,
+					0.16 + 0.04 * float(hf % 3), Color(0.2, 0.17, 0.15))
+			elif hf % 23 == 0:
 				_spr(_TREE_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, f_col)
 			else:
 				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
@@ -3352,7 +3363,7 @@ func _draw_terrain() -> void:
 						# out on a hash angle — never stacked on the anchor.
 						var c_ang := float(ch % 628) / 100.0
 						var c_dist := 6.0 + float((ch >> 4) % 10)
-						var c_tex: String = ["fern", "fern2", "hedge"][(ch >> 2) % 3]
+						var c_tex: String = ug_species[(ch >> 2) % 3]
 						_spr(c_tex, Vector2(fx, fy_px) + Vector2.from_angle(c_ang) * c_dist,
 							c_ang * 2.0, 0.30 * (0.6 + 0.2 * float((ch >> 5) % 4)) * 0.8,
 							fern_col.lerp(Color(0.72, 0.78, 0.5), float((ch >> 7) % 5) / 8.0))
@@ -3402,6 +3413,9 @@ func _draw_terrain() -> void:
 						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34, tree_col)
 
 	# War-torn battlefield litter: sparse, deterministic scatter of the
+	# Per-band SIGNATURE silhouettes under the litter (c2 3v): each sector owns
+	# one prop family the others never show.
+	_draw_band_signatures(cam_y, wbands)
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
 	# Hash grid decorrelated from trees/ferns so nothing stacks on a cell.
 	var loy := -fposmod(cam_y, 80.0)
@@ -3451,6 +3465,91 @@ func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
 		if wy >= b4[0] and wy <= b4[1] and (wx < b4[2] or wx > b4[3]):
 			return true
 	return false
+
+
+func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
+	# Per-band SIGNATURE silhouettes (c2 3v: sectors were palette swaps): band
+	# 1 scorched = cracked ember vents, band 2 marsh = field reed screens,
+	# band 3 ruins = freestanding half-walls, band 4 foundry = slag ridges
+	# with glowing pits. Hash grid (decorrelated salt), march-frozen like
+	# litter, water-band aware. Jungle (band 0) stays clean — its identity IS
+	# the lushness. All draw-only; densities are the tuning knobs.
+	var soy := -fposmod(cam_y, 80.0)
+	for ty in 6:
+		var sy := soy + ty * 80.0
+		var siy := int(floor((cam_y + sy) / 80.0))
+		for tx in 8:
+			var hs := Art.cell_hash(tx * 71 + 29, siy * 13 + 5)
+			var sx := tx * 84.0 + float(hs % 48) - 24.0
+			var sy_px := sy + float((hs / 11) % 48)
+			var row_wy := sim.camera_top + int(sy_px / PX)
+			if _in_wbands(wbands, int(sx / PX), row_wy):
+				continue
+			var sm := _litter_march_prev if row_wy >= _litter_cam_snap else _sector_march()
+			match clampi(int(sm * 5.0 + 0.0001), 0, 4):
+				1:
+					if hs % 14 == 0:
+						# Cracked ground vent: dark crater mouth + breathing ember pit.
+						_spr("crater", Vector2(sx, sy_px), float(hs % 628) / 100.0, 0.9,
+							Color(0.3, 0.25, 0.22))
+						var e_a := (0.5 - absf(fposmod(float(Engine.get_physics_frames() + hs),
+							120.0) / 120.0 - 0.5)) * 0.8
+						draw_circle(Vector2(sx, sy_px), 1.6, Color(1.0, 0.45, 0.15, e_a))
+				2:
+					if hs % 10 == 0:
+						# Reed screen: a short row of field reeds away from the river.
+						for rj in 4 + hs % 3:
+							var rh := Art.cell_hash(hs + rj * 41, rj)
+							_spr("fern2", Vector2(sx + float(rj * 7) - 12.0 + float(rh % 5),
+								sy_px + float((rh / 7) % 7) - 3.0), float(rh % 628) / 100.0,
+								0.26 + 0.06 * float(rh % 3), Color(0.62, 0.72, 0.5))
+				3:
+					if hs % 16 == 0:
+						# Half-wall: dark base slab + a broken barrier pair.
+						draw_rect(Rect2(Vector2(sx - 14.0, sy_px - 4.0), Vector2(28.0, 8.0)),
+							Color(0.16, 0.15, 0.13, 0.8))
+						_spr("barrier", Vector2(sx - 7.0, sy_px - 2.0), 0.0, 0.5, Color(0.62, 0.6, 0.55))
+						_spr("barrier", Vector2(sx + 7.0, sy_px - 3.0), 0.0, 0.45, Color(0.55, 0.53, 0.5))
+				4:
+					if hs % 12 == 0:
+						# Slag ridge: overlapping dark cards + glowing vent pits.
+						for sc in 2 + hs % 2:
+							var sh2 := Art.cell_hash(hs + sc * 17, sc)
+							draw_set_transform(Vector2(sx + float(sh2 % 25) - 12.0,
+								sy_px + float((sh2 / 5) % 13) - 6.0),
+								float(sh2 % 628) / 100.0, Vector2.ONE)
+							draw_rect(Rect2(Vector2(-16.0, -5.0), Vector2(32.0, 10.0)),
+								Color(0.14, 0.12, 0.11, 0.85))
+						draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+						var g_a := (0.5 - absf(fposmod(float(Engine.get_physics_frames() + hs),
+							90.0) / 90.0 - 0.5)) * 0.9
+						draw_circle(Vector2(sx + 4.0, sy_px), 1.4, Color(1.0, 0.5, 0.18, g_a))
+						draw_circle(Vector2(sx - 8.0, sy_px + 3.0), 1.1, Color(1.0, 0.4, 0.12, g_a * 0.7))
+
+
+func _draw_foundry_arena() -> void:
+	# Foundry ARENA dressing (c2 3v: the finale was "a big enemy in a field").
+	# Molten pools ring the three KIMK barrel clusters (drawn UNDER them —
+	# each phase-shift cook now torches a molten stage mark), grounded
+	# smokestacks flank the rim. View-only, anchored to the read-only final
+	# gate; the band-4 species table already chars the undergrowth here.
+	for g in sim.gates:
+		if not g.get("final", false):
+			continue
+		var pt := Art.pulse(0.06)
+		for fbx in [98, 304, 510]:
+			var pp := _to_screen(fbx * Fixed.ONE, g["y"] + 144 * Fixed.ONE)
+			if pp.y > -60.0 and pp.y < 420.0:
+				draw_circle(pp, 24.0, Color(0.12, 0.08, 0.07, 0.85))
+				draw_circle(pp, 19.0, Color(0.8, 0.25, 0.08, 0.5 + pt * 0.2))
+				draw_circle(pp, 12.0, Color(1.0, 0.5, 0.15, 0.55 + pt * 0.25))
+				draw_circle(pp, 6.0, Color(1.0, 0.8, 0.4, 0.8))
+		for ck in [[70, 40], [560, 70], [120, 320]]:
+			var cp := _to_screen(ck[0] * Fixed.ONE, g["y"] + ck[1] * Fixed.ONE)
+			if cp.y > -80.0 and cp.y < 440.0:
+				_ground_shadow(cp + Vector2(0, 14), 11.0, 0.45)
+				_spr("skyline_chimney", cp, 0.0, 0.5, Color(0.36, 0.3, 0.28))
+		return
 
 
 func _draw_rocks() -> void:

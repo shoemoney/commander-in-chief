@@ -229,6 +229,11 @@ func _shot_gunship() -> SimWorld:
 func _shot_colossus() -> SimWorld:
 	var sim := SimWorld.new(7, 1)
 	var gy := _cam(sim, 30)
+	# Four opened gates behind us: _sector_march() = 0.8 -> band-4 foundry
+	# ground/litter/dressing (c2: the finale must LOOK like the foundry, not
+	# "a big enemy in a green field" — which this pose used to stage).
+	for og in 4:
+		sim.gates.append({"y": gy + (og + 1) * 1000 * F, "open": true, "b1": {}, "b2": {}, "boss": {}})
 	sim.gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "boss": {}, "final": true})
 	sim.colossus = {"alive": true, "hp": 14, "x": 320 * F, "y": _cam(sim, 110),
 		"spray_cd": 10, "volley_cd": 40, "spawn_cd": 20}
@@ -301,6 +306,12 @@ func _dress_shop(m: Node2D) -> void:
 func _dress_colossus(m: Node2D) -> void:
 	# Vest just broke: damage vignette mid-pulse.
 	m._damage_vignette = 0.55
+	# Pre-align the bg march so the first-frame step doesn't freeze on-screen
+	# litter at march 0 (staged sims are BORN deep — there was no journey),
+	# and poke the camera sentinel so the retained ground canvas REPAINTS at
+	# the staged march instead of keeping main._ready's jungle paint.
+	m._bg_march = m._sector_march()
+	m._bg_cam = 1 << 60
 
 
 func _dress_title(m: Node2D) -> void:
