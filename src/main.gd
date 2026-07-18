@@ -534,10 +534,9 @@ func _paint_bg(canvas: Node2D) -> void:
 	# freeze), so ground behind the player never teleports palette; the seam
 	# rides the breach line where the gate rubble + dust already live. The
 	# quantized stops stay flat (KIMK pin) — no lerp, just a moving seam.
-	var dirt_stops := [Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7),
-		Color(0.42, 0.38, 0.24, 0.7), Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)]
-	var grass_stops := [Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62),
-		Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(0.52, 0.30, 0.24)]
+	var stops := _ground_stops(sim.mode)
+	var grass_stops: Array = stops[0]
+	var dirt_stops: Array = stops[1]
 	for ty in 8:
 		# Per-row march: rows south of the last march-step snap keep the old
 		# stop (same comparison the litter freeze uses at row_wy >= snap).
@@ -555,8 +554,6 @@ func _paint_bg(canvas: Node2D) -> void:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
 			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
-			if sim.mode == "endless":
-				gcol = Color(gcol.r + 0.04, gcol.g - 0.04, gcol.b)   # rust-tan: its own ground
 			if variant == 0:
 				canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false, gcol)
 			else:
@@ -3268,6 +3265,30 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 
 func _aim_angle(p: Dictionary) -> float:
 	return atan2(p["aim_y"] * PX, p["aim_x"] * PX)
+
+
+static func _ground_stops(mode: String) -> Array:
+	# [grass_stops, dirt_stops] — the 5-stop biome ramps the ground marches through.
+	# a3-03: ENDLESS gets its OWN base palette (a warm rust/ochre floor that scorches to
+	# ash as the wave march climbs) instead of the campaign jungle-green nudged +0.04, so
+	# the arena reads as its own PLACE, not the campaign lawn with the a2-10 dressing
+	# rearranged on it. Campaign keeps its jungle→marsh→foundry ramp unchanged.
+	if mode == "endless":
+		# The grass TEXTURE is green, so the modulate must SUPPRESS green/blue (not just
+		# out-red them) or the floor reads olive — the campaign foundry stop reads red-
+		# brown precisely because its green is low. Low G/B here → a genuine rust/ochre.
+		return [
+			[Color(0.92, 0.46, 0.24), Color(0.84, 0.44, 0.26), Color(0.74, 0.42, 0.28),
+				Color(0.62, 0.38, 0.30), Color(0.50, 0.32, 0.28)],
+			[Color(0.56, 0.38, 0.24, 0.72), Color(0.52, 0.36, 0.24, 0.74), Color(0.48, 0.34, 0.25, 0.78),
+				Color(0.44, 0.32, 0.27, 0.8), Color(0.38, 0.28, 0.25, 0.82)],
+		]
+	return [
+		[Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62), Color(0.94, 0.90, 0.55),
+			Color(0.92, 0.88, 0.78), Color(0.52, 0.30, 0.24)],
+		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
+			Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)],
+	]
 
 
 static func _boss_rim_base(march: float) -> Color:
