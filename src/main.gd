@@ -257,6 +257,8 @@ const _EVENT_SOUND := {
 	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
 	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
+	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
+	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
@@ -2980,6 +2982,7 @@ func _draw() -> void:
 	# body itself is a shader quad on _bg_root (z=-2), so it stays below anyway.
 	_draw_water()
 	_draw_scorch()
+	_draw_vents()
 	_draw_mines()
 	_draw_rocks()
 	_draw_sandbags()
@@ -3504,6 +3507,35 @@ func _draw_mines() -> void:
 		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
 		_spr("wep_claymore", mp, 0.0, 1.05)
 		draw_circle(mp, 2.0, Color(mc.r, mc.g, mc.b, 0.65 + mb * 0.35))
+
+
+func _draw_vents() -> void:
+	# Foundry heat vents (c2): the view re-derives the sim's tick phase — no
+	# state, perfectly synced. Idle grate → 30t rising warn shimmer → 60t jet.
+	for v in sim.vents:
+		var vp := _to_screen(v["x"], v["y"])
+		if vp.y < -40.0 or vp.y > 400.0:
+			continue
+		var ph := posmod(sim.tick_count + 7 * (v["x"] / Fixed.ONE), SimWorld.VENT_CYCLE_TICKS)
+		var jet_at := SimWorld.VENT_CYCLE_TICKS - SimWorld.VENT_JET_TICKS
+		# Grate: dark slotted disc, always visible — the hazard has a silhouette
+		# even mid-idle (hazard-vs-litter rule: lethal objects never camouflage).
+		_ground_shadow(vp, 9.0, 0.4)
+		draw_circle(vp, 8.0, Color(0.16, 0.13, 0.12))
+		draw_arc(vp, 8.0, 0, TAU, 16, Color(0.42, 0.2, 0.1, 0.9), 1.4)
+		for s in 3:
+			var sy := vp + Vector2(0, -3.0 + s * 3.0)
+			draw_line(sy - Vector2(4.5, 0), sy + Vector2(4.5, 0), Color(0.55, 0.3, 0.15, 0.8), 1.2)
+		if ph >= jet_at:
+			# JET: white-hot core + orange column, flicker off the global clock.
+			var jf := 0.75 + 0.25 * Art.pulse(0.035)
+			draw_circle(vp, 24.0, Color(1.0, 0.42, 0.1, 0.16 * jf))
+			draw_circle(vp, 14.0, Color(1.0, 0.62, 0.2, 0.45 * jf))
+			draw_circle(vp, 6.5, Color(1.0, 0.93, 0.7, 0.9))
+		elif ph >= jet_at - SimWorld.VENT_WARN_TICKS:
+			# WARN: ring tightens over the 30t telegraph — read it, step off.
+			var wt := float(ph - (jet_at - SimWorld.VENT_WARN_TICKS)) / float(SimWorld.VENT_WARN_TICKS)
+			draw_arc(vp, 24.0 - 14.0 * wt, 0, TAU, 20, Color(1.0, 0.5, 0.15, 0.35 + 0.45 * wt), 1.6)
 
 
 func _draw_barrels() -> void:

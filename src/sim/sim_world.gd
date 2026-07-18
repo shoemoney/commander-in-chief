@@ -267,6 +267,27 @@ const BARREL_CHUNKS := [
 	[[-80, 0], [80, 0]],                              # split pair — thread the middle
 	[[0, 0], [40, 24], [80, 48], [120, 72]],          # diagonal drip
 ]
+# Biome-exclusive verbs (c2 5v: sectors were palette swaps that all play
+# identically). Two campaign-only mechanics, both past the golden window:
+# seg-2 marsh water drifts airborne grenades; seg-4+ foundry rows grow heat
+# vents on an authored-chunk cadence (MINE_CHUNKS pattern, _mix-picked, zero
+# rng draws). Vent chunk pitch is >= 100px so every lane between 24px hurt
+# discs clears HULL_CLEARANCE (100 - 2*24 = 52 >= 44, pinned by test).
+const MARSH_SEG := 2
+const MARSH_DRIFT := F_ONE           # 1px/tick sideways while airborne over marsh water
+const VENT_START_SEG := 4
+const VENT_SPACING := 460 * F_ONE
+const VENT_CYCLE_TICKS := 180        # full cycle; jet holds the final 60
+const VENT_JET_TICKS := 60
+const VENT_WARN_TICKS := 30          # >= the 24t reaction floor (KIMK r4 precedent)
+const VENT_HURT_RADIUS := 24 * F_ONE
+const VENT_CHUNKS := [
+	[], [],
+	[[0, 0]],
+	[[-100, 0], [100, 0]],
+	[[-100, -60], [0, 0], [100, 60]],   # diagonal sweep
+	[[-150, 0], [0, 40], [150, 0]],     # wide tripod
+]
 # KIMK round-4 provenance: HULL_CLEARANCE is ANCHORED, not free — it derives
 # from the hull it names plus a pinned positive margin, and a central test
 # asserts the equation. COMPARATOR CONTRACT (stated once, here): consumers
@@ -352,6 +373,8 @@ var rocks: Array[Dictionary] = []      # streamed natural hard cover {x,y} — b
 var _next_rock_y: int = 0
 var _world_seed: int = 0   # stored run seed for the authored-chunk mixes (derived, unhashed)
 var barrels: Array[Dictionary] = []
+var vents: Array[Dictionary] = []      # foundry heat vents {x,y} — seg 4+ only, phase derived from tick_count
+var _next_vent_y: int = 0
 var observer: Dictionary = {}
 var war_chest: int = 0
 var score: int = 0
@@ -1571,6 +1594,14 @@ func _step_grenades() -> void:
 			_explode(g["x"], g["y"], false, "airburst")
 			grenades.remove_at(i)
 			continue
+		# Marsh current (c2 5v): the seg-2 EXCLUSIVE biome verb — airborne
+		# grenades drift sideways over open marsh water, direction hashed per
+		# run band (learnable within one river). Shells exempt: heavy ordnance
+		# flies true. Pure read past the golden window — no state, no rng draw.
+		if not g["shell"]:
+			var g_band: int = absi(g["y"]) / GATE_SPACING
+			if g_band == MARSH_SEG and _in_water(g["x"], g["y"]):
+				g["x"] = g["x"] + (MARSH_DRIFT if _mix(g_band, _world_seed) & 1 else -MARSH_DRIFT)
 		if g["z"] <= 0 and g["zv"] < 0:
 			_explode(g["x"], g["y"])
 			grenades.remove_at(i)
@@ -2260,6 +2291,27 @@ func _step_mines() -> void:
 		if triggered:
 			m["armed"] = false
 			_explode(m["x"], m["y"])
+	# Foundry vents: phase is DERIVED from the global tick (no per-vent timer,
+	# no new state) — the 7*x term staggers neighbors so a chunk never jets in
+	# unison. Warn event fires VENT_WARN_TICKS before the jet; the jet holds
+	# VENT_JET_TICKS and funnels hits through _hurt_player, whose 90t iframe
+	# window > the 60t jet — "once per jet cycle" holds by construction.
+	# Events are checksum-excluded; the array itself is a conditional feed.
+	for vi in range(vents.size() - 1, -1, -1):
+		var v := vents[vi]
+		if v["y"] > camera_top + 420 * F_ONE:
+			vents.remove_at(vi)
+			continue
+		var v_phase: int = posmod(tick_count + 7 * (v["x"] / F_ONE), VENT_CYCLE_TICKS)
+		if v_phase == VENT_CYCLE_TICKS - VENT_JET_TICKS - VENT_WARN_TICKS:
+			events.append({"t": "vent_warn", "x": v["x"], "y": v["y"]})
+		elif v_phase >= VENT_CYCLE_TICKS - VENT_JET_TICKS:
+			if v_phase == VENT_CYCLE_TICKS - VENT_JET_TICKS:
+				events.append({"t": "vent_jet", "x": v["x"], "y": v["y"]})
+			for p in players:
+				if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+						and _dist_lte(p["x"], p["y"], v["x"], v["y"], VENT_HURT_RADIUS):
+					_hurt_player(p)
 
 
 func _step_barrels() -> void:
@@ -2682,6 +2734,24 @@ func _step_camera() -> void:
 				barrels.append({"x": b_ax + od[0] * F_ONE, "y": _next_barrel_y + od[1] * F_ONE,
 					"armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
+	# Foundry heat vents (c2 5v): seg-4+ EXCLUSIVE — authored chunks on their
+	# own slot cadence, _mix-picked with a prime salt (decorrelated from mine/
+	# barrel picks). Rows dodge gate rows, choke aprons (hazard-free by the
+	# cycle-1 contract), and the water-band cadence incl. mud lips (bands sit
+	# at offset 500, WATER_H 80, MUD_BANK_H 40 → keep-out 460-620) — widened
+	# ±60 on both guards because chunk dy offsets reach ±60 from the row.
+	while _next_vent_y > horizon:
+		var v_seg: int = absi(_next_vent_y) / GATE_SPACING
+		var v_off: int = absi(_next_vent_y) % GATE_SPACING
+		if v_seg >= VENT_START_SEG and not _in_choke_apron(_next_vent_y) \
+				and v_off >= 140 * F_ONE and (v_off < 400 * F_ONE or v_off > 680 * F_ONE):
+			var v_slot: int = absi(_next_vent_y / VENT_SPACING)
+			var vh := _mix(v_slot + 104729, _world_seed)
+			var v_chunk: Array = VENT_CHUNKS[vh % VENT_CHUNKS.size()]
+			var v_ax: int = (230 + (vh >> 8) % 180) * F_ONE
+			for od in v_chunk:
+				vents.append({"x": v_ax + od[0] * F_ONE, "y": _next_vent_y + od[1] * F_ONE})
+		_next_vent_y -= VENT_SPACING
 	while _next_rock_y > horizon:
 		var r_idx: int = absi(_next_rock_y / ROCK_SPACING)
 		# Dry-land + open-corridor predicate (pure math, no array reads): skip
@@ -3575,6 +3645,13 @@ func checksum() -> int:
 		for sb in sandbags:
 			h = feed.call(sb["x"], h)
 			h = feed.call(sb["y"], h)
+	if not vents.is_empty():
+		# Conditional feed (sandbags precedent): vents exist only past seg 4 —
+		# neither torture window ever streams one, so goldens hold.
+		h = feed.call(vents.size(), h)
+		for vt in vents:
+			h = feed.call(vt["x"], h)
+			h = feed.call(vt["y"], h)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
 				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:
