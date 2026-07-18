@@ -3211,6 +3211,7 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
 const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a fern clump anchor (under the sprite)
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
+const BOSS_WOUND := {"scar_start": 0.18, "spark": 0.6}   # a3-11: wound frac (1-hp) at which scorch scars begin / hull sparks near death
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
@@ -5530,6 +5531,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# exact for any scaling without duplicating the sim's spawn formula.
 	_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
 	var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
+	_boss_wounds(bpos, 1.0 - bfrac, 34.0)   # a3-11: hp-keyed hull damage on the gunship
 	# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
 	# bar, ~1618): the boss's screen pos can sit above the held camera or
 	# off-screen, and a world-anchored bar would go with it. Stacked by
@@ -5576,6 +5578,38 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
+func _boss_wounds(center: Vector2, wound: float, r: float) -> void:
+	# a3-11 (UNIT#1): hp-keyed battle damage — as a boss loses hp it accumulates scorch
+	# scars, trails smoke, and (near death) sputters sparks, so you can READ how close the
+	# kill is off the hull, not just the bar. Pure per-frame draw (NO fx spawn — that would
+	# be frame-rate-dependent, per the codebase rule); deterministic phases off physics_frames
+	# so smoke/sparks animate without RNG. Scars sit ON the hull; smoke rises ABOVE it; the
+	# a3-01 separator rim (drawn per-sprite) stays intact so the silhouette still reads.
+	if wound < BOSS_WOUND["scar_start"]:
+		return
+	var t := float(Engine.get_physics_frames())
+	# Scorch scars appear progressively at fixed hull offsets as the wound deepens.
+	for i in 4:
+		if wound < 0.22 + float(i) * 0.17:
+			continue
+		var sp := center + Vector2.from_angle(float(i) * 1.7 + 0.5) * r * 0.5
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(6.0, 6.0), Vector2(12.0, 12.0)),
+			false, Color(0.05, 0.04, 0.03, 0.5 * wound))
+	# Smoke wisps rising off the hull, denser with the wound (gated by REDUCE MOTION).
+	for i in int(wound * 3.0) + 1:
+		var ph := fposmod(t * 0.02 + float(i) * 0.37, 1.0)
+		var sx := center.x + sin(float(i) * 2.1 + t * 0.03) * r * 0.4
+		var sy := center.y - ph * (r + 12.0)
+		draw_circle(Vector2(sx, sy), 4.0 + ph * 6.0,
+			Color(0.15, 0.14, 0.13, (1.0 - ph) * 0.3 * wound * _motion))
+	# Near death: sparks sputter off the hull.
+	if wound > BOSS_WOUND["spark"]:
+		for i in 3:
+			var spp := center + Vector2.from_angle(t * 0.2 + float(i) * 2.0) \
+				* r * (0.4 + fposmod(t * 0.05 + float(i), 1.0) * 0.5)
+			draw_circle(spp, 1.3, Color(1.0, 0.7, 0.3, (0.6 + 0.4 * sin(t * 0.4 + float(i))) * _motion))
+
+
 func _draw_colossus() -> void:
 	if sim.colossus.is_empty() or not sim.colossus["alive"]:
 		return
@@ -5601,6 +5635,9 @@ func _draw_colossus() -> void:
 	_spr("colossus_body", cbody, PI, 1.9, mod, csquash)
 	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
+	# a3-11: hp-keyed hull damage — drawn HERE in world space, before the HUD bar's
+	# transform-cancel below flips to screen space (the same fraction the bar uses).
+	_boss_wounds(cbody, 1.0 - float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP), 40.0)
 	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
 	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
 	for bx in [-24.0, 24.0]:

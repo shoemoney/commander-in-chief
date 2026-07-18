@@ -729,3 +729,18 @@ func test_a3_marsh_wetness_pool_and_sheen() -> void:
 	Runner.T.ok(sv > pv, "the sheen is LIGHTER than the dark pool (a glint off the water)")
 	# The wetness is marsh-only: band 2 of the 5-stop march (int(march*5) == 2).
 	Runner.T.eq(clampi(int(0.45 * 5.0), 0, 4), 2, "march 0.45 lands in the MARSH band (2) where the wetness draws")
+
+
+# --- a3-11: bosses show hp-keyed battle damage — a full-hp boss is pristine, damage
+# (scorch/smoke) accumulates as hp drops, and sparks only sputter near death. ---
+
+func test_a3_boss_wound_thresholds() -> void:
+	var c := _consts()
+	var bw: Dictionary = c["BOSS_WOUND"]
+	# wound = 1 - hp_fraction. A pristine boss shows nothing; sparks are a near-death tell.
+	Runner.T.ok(bw["scar_start"] > 0.0 and bw["scar_start"] < bw["spark"],
+		"scars begin before the near-death spark stage (ordered thresholds)")
+	# Full hp -> wound 0 -> below the scar start (no damage drawn on a pristine boss).
+	Runner.T.ok((1.0 - 1.0) < bw["scar_start"], "a full-hp boss shows NO wound damage")
+	# 30% hp -> wound 0.7 -> past the spark threshold (a near-dead boss sputters sparks).
+	Runner.T.ok((1.0 - 0.3) > bw["spark"], "a near-dead boss (30% hp) is in the spark stage")
