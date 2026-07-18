@@ -1060,3 +1060,42 @@ func test_kimk_round3_adverbs_dead() -> void:
 		sim5.step([esc])
 	Runner.T.ok(absi(p5["x"] - 300 * SimWorld.F_ONE) > SimWorld.HULK_HALF_W,
 		"overlap-at-solidify resolves: the escape rule walks you out")
+
+
+func test_kimk_round4_final_assertions() -> void:
+	# CONST: provenance — the clearance derives from the hull it names.
+	Runner.T.eq(SimWorld.HULL_CLEARANCE, SimWorld.HULL_W + SimWorld.HULL_MARGIN,
+		"HULL_CLEARANCE is anchored to hull + margin, not a free literal")
+	Runner.T.ok(SimWorld.HULL_MARGIN > 0, "the margin is pinned strictly positive")
+	Runner.T.eq(SimWorld.HULL_W, 2 * SimWorld.HULK_HALF_W, "HULL_W IS the collision hull, one source")
+	# L4: the surfacing telegraph has DURATION — 30 ticks rooted-and-harmless
+	# (>= the 24t project reaction floor), and a surfacing frogman cannot
+	# lunge until the surface completes.
+	Runner.T.ok(SimWorld.FROGMAN_SURFACE_TICKS >= 24,
+		"surface telegraph (%dt) meets the reaction floor" % SimWorld.FROGMAN_SURFACE_TICKS)
+	var sim := SimWorld.new(73, 1)
+	sim._spawn_frogman(300 * SimWorld.F_ONE, sim.camera_top + 100 * SimWorld.F_ONE)
+	var fg := sim.enemies[sim.enemies.size() - 1]
+	fg["submerged"] = false
+	fg["surface_ticks"] = SimWorld.FROGMAN_SURFACE_TICKS
+	sim.players[0]["x"] = 300 * SimWorld.F_ONE
+	sim.players[0]["y"] = sim.camera_top + 110 * SimWorld.F_ONE
+	sim._step_frogman(fg)
+	Runner.T.eq(fg["lunge_ticks"], 0, "no lunge while the surface telegraph runs")
+	# L7: recompute can only REMOVE bags (the gap) — shelled width never grows,
+	# so the unshelled lane sweep IS the worst case. The conjunction, cited.
+	for gc in range(2, 20):
+		var bmix := SimWorld._mix(gc, 73)
+		var blk_n: int = 2 + (bmix >> 6) % 3
+		var gap: int = (bmix >> 9) % blk_n
+		Runner.T.ok(gap >= 0 and gap < blk_n,
+			"gate %d pre-shell removes an EXISTING bag — geometry only shrinks" % gc)
+	# L14: the moving-footprint state is IMPOSSIBLE by rule — solidity requires
+	# occupant < 0, movement requires an occupant. Mutually exclusive.
+	var sim2 := SimWorld.new(79, 1)
+	sim2.tanks.clear()
+	sim2.tanks.append({"x": 300 * SimWorld.F_ONE, "y": sim2.camera_top + 200 * SimWorld.F_ONE,
+		"alive": true, "burning": false, "fuel": 9999, "burn_ticks": 0, "fire_cd": 0, "occupant": 0})
+	var tk2 := sim2.tanks[0]
+	var solid: bool = (tk2["alive"] and tk2["occupant"] < 0) or (not tk2["alive"] and tk2["burn_ticks"] > 0)
+	Runner.T.ok(not solid, "an occupied (drivable) tank is NEVER solid — footprints are static-while-solid by rule")

@@ -267,9 +267,14 @@ const BARREL_CHUNKS := [
 	[[-80, 0], [80, 0]],                              # split pair — thread the middle
 	[[0, 0], [40, 24], [80, 48], [120, 72]],          # diagonal drip
 ]
-const HULL_CLEARANCE := 44 * F_ONE   # KIMK round-3: THE shared passage constant — any
-                                     # authored gap/lane/ford a tank must fit rides this
-                                     # one number (hull half 16 + tread margin 6, both sides).
+# KIMK round-4 provenance: HULL_CLEARANCE is ANCHORED, not free — it derives
+# from the hull it names plus a pinned positive margin, and a central test
+# asserts the equation. COMPARATOR CONTRACT (stated once, here): consumers
+# test passage >= HULL_CLEARANCE; the margin absorbs the boundary, so exactly
+# 44 clears with 12px to spare — no off-by-one drift at the seam.
+const HULL_W := 2 * HULK_HALF_W      # the hull footprint the constant serves (32px)
+const HULL_MARGIN := 12 * F_ONE      # pinned > 0: clearance is never zero-thread
+const HULL_CLEARANCE := HULL_W + HULL_MARGIN
 const FLANK_SQUAD := 3               # 2v flank doors: squad size per side (starting value)
 const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
