@@ -572,10 +572,16 @@ func _paint_bg(canvas: Node2D) -> void:
 	for card in dirt_cards:
 		var dirt_col: Color = card[3]   # this card's per-row stop (c2 3v)
 		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
-		# Soft halo first: kills the hard leopard-spot rim (4v macro-variation).
+		# a3-05: TWO feather rings grade the bare-earth patch into the turf so the hard
+		# rotated `dirt` rect stops reading as a pasted rectangular/diamond decal — the
+		# single 0.28-effective halo left the card's own edge showing (4v: figure-ground).
+		# Wide faint outer ring, then a stronger inner halo, both under the hard fill.
+		var halo_out: Vector2 = card[2] * 2.4
+		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo_out / 2.0, halo_out), false,
+			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * 0.16))
 		var halo: Vector2 = card[2] * 1.6
 		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo / 2.0, halo), false,
-			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * 0.4))
+			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * 0.52))
 		canvas.draw_texture_rect(Art.tex("dirt"), Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
@@ -3295,6 +3301,12 @@ static func _ground_stops(mode: String) -> Array:
 	]
 
 
+static func _has_canopy_dapple(ash: float) -> bool:
+	# a3-04: a living tree casts a soft canopy dapple; past the ash midpoint (0.33 — the
+	# same threshold that swaps to the dead-canopy set) the dead/charred canopy casts none.
+	return ash < 0.33
+
+
 static func _boss_rim_base(march: float) -> Color:
 	# a3-01: the boss separator rim, keyed to the biome march. Warm-dark over the
 	# green bridge (low march, where the gunship was tuned) -> cool steel-BLUE on the
@@ -3846,7 +3858,7 @@ func _draw_terrain() -> void:
 				# the committed DARK the open jungle lacked (the grid mottle is uniform and
 				# light, so wide fields read flat). Anchored per-tree and offset DOWN-screen so
 				# the shade implies a top light direction (nods to ENV#9). Dead canopy casts none.
-				if ash < 0.33:
+				if _has_canopy_dapple(ash):
 					_ground_shadow(Vector2(px + float(h2 % 9) - 4.0, wy_px + 9.0),
 						28.0 if big else 20.0, 0.16, Color(0.0, 0.035, 0.02))
 				_ground_shadow(Vector2(px, wy_px), 6.0 if big else 4.0)

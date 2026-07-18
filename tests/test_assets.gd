@@ -629,3 +629,14 @@ func test_a3_endless_has_its_own_ground_palette() -> void:
 	Runner.T.ok((e_last.r - e_last.g) < (e0.r - e0.g) - 0.2, "late stop DESATURATES toward grey ash")
 	Runner.T.ok((e_last.r - e_last.g) < (c_last.r - c_last.g), "endless ash stays greyer than the campaign foundry RED")
 	Runner.T.ok(e_last != c_last, "endless late stop is distinct from the campaign foundry late stop")
+
+
+# --- a3-04: the canopy dapple pools only under a LIVING tree; past the ash midpoint
+# (0.33) the dead/charred canopy casts none (matches the dead-tree swap threshold). ---
+
+func test_a3_canopy_dapple_only_under_living_trees() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms._has_canopy_dapple(0.0), "the living jungle canopy casts a dapple")
+	Runner.T.ok(ms._has_canopy_dapple(0.32), "the dapple persists right up to the ash midpoint")
+	Runner.T.ok(not ms._has_canopy_dapple(0.33), "at the ash midpoint the dead canopy casts NO dapple")
+	Runner.T.ok(not ms._has_canopy_dapple(1.0), "the charred foundry canopy casts no dapple")
