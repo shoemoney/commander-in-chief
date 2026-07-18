@@ -163,6 +163,12 @@ func _dress_firefight(m: Node2D) -> void:
 	# a1-09: an enemy red muzzle fan (directional) so incoming-fire feel is captured.
 	m._fx.append({"x": (270 * F), "y": (p["y"] - 130 * F), "t": 0.0, "kind": "muzzle", "rate": 0.14,
 		"a": PI / 2.0, "szj": 0.6, "col": Color(1.0, 0.42, 0.28)})
+	# a1-12: pose the LOCALIZED streak-milestone gold bloom (replaces the old
+	# whole-screen _flash_alpha) so VFX#8 is captured as a local pop, not a frame flash.
+	m._fx.append({"x": (200 * F), "y": (p["y"] - 150 * F), "t": 0.06, "kind": "light",
+		"rate": 0.05, "r": 42.0, "col": Color(1.0, 0.82, 0.35)})
+	m._fx.append({"x": (200 * F), "y": (p["y"] - 150 * F), "t": 0.12, "kind": "tex",
+		"tex": "fx_circle", "sz": 18.0, "grow": 1.1, "fade": 1.2, "rate": 0.05, "col": Color(1.0, 0.85, 0.4, 0.6)})
 	for i in 3:
 		m._fx.append({"x": p["x"] + (6 + i * 5) * F, "y": p["y"] + (2 + i) * F,
 			"t": 0.15 + i * 0.22, "kind": "casing", "rate": 0.055,
