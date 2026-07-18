@@ -1417,8 +1417,14 @@ func _consume_events() -> void:
 			"broadcast_pulse":
 				# Expanding rally ring: the buff source and its reach, drawn from
 				# the checksum-excluded event — the aura is invisible otherwise.
+				# grow_px 132: the pulse expands 8 -> 140px, sweeping the aura's
+				# TRUE reach every 90 ticks (the old ring showed nothing real).
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave",
-					"sz": 8.0, "grow": 3.4, "fade": 0.9, "rate": 0.022, "col": Color(1.0, 0.4, 0.35, 0.5)})
+					"sz": 8.0, "grow_px": 132.0, "rate": 0.022, "col": Color(1.0, 0.4, 0.35, 0.5)})
+				# One-beat origin flash (GLM round-2): the sweep starts as a
+				# deliberate EVENT at the mast, not a fade-in from nowhere.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+					"rate": 0.25, "r": 16.0, "col": Color(1.0, 0.5, 0.4)})
 			"supply_drop":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "text": "SUPPLY DROP — HOLD IT", "col": Color(0.6, 0.9, 1.0)})
@@ -2869,7 +2875,10 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 			oc = Color(0.4, 0.1, 0.06, tint.a).lerp(Color(1, 1, 1, tint.a), clampf(_boss_flash, 0.0, 1.0))
 			d = 2.2 / s
 		elif _UNIT_RIM.has(tex_name):
-			d = 1.6 / s
+			# A/B'd 1.6 vs 1.7 at 640x360 (Grok round-2): 1.7 holds the pop in
+			# dense foliage. The two camo units that LIVE in foliage get 1.9 —
+			# their whole failure mode is soft-merging into the greens.
+			d = (1.9 if tex_name == "ghillie" or tex_name == "courier" else 1.7) / s
 		for o in _OUTLINE_OFFSETS:
 			draw_texture(t, origin + o * d, oc)
 	draw_texture(t, origin, tint)
@@ -3153,8 +3162,43 @@ func _draw_terrain() -> void:
 			if _in_wbands(wbands, int(fx / PX), sim.camera_top + int(fy_px / PX)):
 				continue
 			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07 * _motion
-			_spr("fern", Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway,
-				0.28 + float(hf % 3) * 0.03, fern_col)
+			# 4v variety pass: hash-picked stamp (fern/fern2/hedge shrub), a
+			# 0.6/0.8/1.0/1.2 scale ladder, olive->deep-green tint drift, rare
+			# dead stump, and CLUMPS — 1-in-5 anchors grow 1-3 satellite tufts
+			# so undergrowth reads as drifts, not evenly-spaced speckle.
+			# Edge-aware taper (GPT round-3): where the 64px terrain sample
+			# changes across a neighbor (a dirt/grass transition), thin ~40% of
+			# placements — density GRADES across boundaries instead of snapping.
+			var cell_x := int(fx / 64.0)
+			var cell_y := int((cam_y + fy_px) / 64.0)
+			var here_dirt := Art.cell_hash(cell_x, cell_y) % 6 == 0
+			if (here_dirt != (Art.cell_hash(cell_x + 1, cell_y) % 6 == 0) \
+					or here_dirt != (Art.cell_hash(cell_x, cell_y + 1) % 6 == 0)) \
+					and (hf >> 11) % 5 < 2:
+				continue
+			var f_tex: String = ["fern", "fern", "fern2", "fern2", "hedge"][(hf >> 3) % 5]
+			var f_scl := 0.30 * (0.6 + 0.2 * float((hf >> 5) % 4))
+			var f_jit := float((hf >> 7) % 5) / 4.0
+			var f_col := fern_col.lerp(Color(0.72, 0.78, 0.5), f_jit * 0.5)
+			if hf % 23 == 0:
+				_spr(_TREE_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, f_col)
+			else:
+				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
+				# Context bias (GPT round-2): vegetation drifts hug dirt-patch
+				# cells (same 64px hash predicate as the ground painter) — the
+				# world's features shape the clustering, not just hash frequency.
+				var near_dirt := Art.cell_hash(int(fx / 64.0), int((cam_y + fy_px) / 64.0)) % 6 == 0
+				if hf % 5 == 0 or (near_dirt and hf % 3 == 0):
+					for clt in 1 + ((hf >> 9) % 3):
+						var ch := Art.cell_hash(hf + clt * 37, clt)
+						# Min-distance ring (GPT round-2): satellites sit 6-15px
+						# out on a hash angle — never stacked on the anchor.
+						var c_ang := float(ch % 628) / 100.0
+						var c_dist := 6.0 + float((ch >> 4) % 10)
+						var c_tex: String = ["fern", "fern2", "hedge"][(ch >> 2) % 3]
+						_spr(c_tex, Vector2(fx, fy_px) + Vector2.from_angle(c_ang) * c_dist,
+							c_ang * 2.0, 0.30 * (0.6 + 0.2 * float((ch >> 5) % 4)) * 0.8,
+							fern_col.lerp(Color(0.72, 0.78, 0.5), float((ch >> 7) % 5) / 8.0))
 
 	# Dirt-patch fern fringing (7-vote de-checkerboard, part e): 1-2 ferns on
 	# the border of each 64px dirt cell (same hash predicate as _paint_bg) so
@@ -3511,10 +3555,16 @@ func _draw_gates() -> void:
 		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
 		if fy < -20.0 or fy > 380.0:
 			continue
-		draw_string(Art.font(), Vector2(84, fy), "< CACHE", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
-			Art.safe(Color(0.5, 1.0, 0.7, 0.9)))
-		draw_string(Art.font(), Vector2(452, fy), "BOUNTY >", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
-			Color(1.0, 0.75, 0.3, 0.9))
+		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
+		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
+		var cache_txt := "< CACHE"
+		var bounty_txt := "BOUNTY >"
+		var cw2 := Art.font().get_string_size(cache_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+		var bw2 := Art.font().get_string_size(bounty_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+		draw_rect(Rect2(80.0, fy - 22.0, cw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
+		draw_rect(Rect2(556.0 - bw2 - 4.0, fy - 22.0, bw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
+		Art.text(self, cache_txt, Vector2(84, fy), 24, Art.safe(Color(0.5, 1.0, 0.7)))
+		Art.text(self, bounty_txt, Vector2(556.0 - bw2, fy), 24, Color(1.0, 0.75, 0.3))
 
 
 func _draw_pickups() -> void:
@@ -4031,8 +4081,13 @@ func _draw_enemies() -> void:
 			# Rally mast: the decor radio tower militarized — red-keyed, hp pips
 			# in the nest grammar, and a faint breathing ring that draws the
 			# aura's true 140px reach (truthful telegraph, reduce-motion safe).
+			# 4v rework: the faint full-reach 140px arc dominated the playfield
+			# while communicating nothing (too faint to read, too big to ignore).
+			# Now a TIGHT dark-backed base ring owns the structure identity, and
+			# the 90-tick pulse (below) truthfully sweeps the real aura reach.
 			var bpul := Art.pulse(0.2) if _motion >= 0.5 else 0.5
-			draw_arc(epos, 140.0, 0, TAU, 48, Color(1.0, 0.4, 0.35, 0.06 + bpul * 0.05), 1.0)
+			draw_arc(epos, 48.0, 0, TAU, 32, Color(0.1, 0.05, 0.05, 0.5), 3.5)
+			draw_arc(epos, 48.0, 0, TAU, 32, Color(1.0, 0.4, 0.35, 0.25 + bpul * 0.35), 2.0)
 			_spr("radio_tower", epos, 0.0, 0.9, Color(1.15, 0.62, 0.55))
 			var b_hp: int = e.get("hp", SimWorld.BROADCAST_HP)
 			for bpi in SimWorld.BROADCAST_HP:
@@ -5158,9 +5213,10 @@ func _draw_glow() -> void:
 		elif fx["kind"] == "shockwave":
 			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
 			# snaps out — reads as a pressure wave, not a flat UI stroke.
-			var swr := 4.0 + t * 34.0
+			var swr: float = fx.get("sz", 4.0) + t * fx.get("grow_px", 34.0)
+			var swc: Color = fx.get("col", Color(1.0, 0.95, 0.8, 0.7))
 			g.draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * swr, Vector2.ONE * swr * 2.0),
-				false, Color(1.0, 0.95, 0.8, 0.7 * (1.0 - t)))
+				false, Color(swc.r, swc.g, swc.b, swc.a * (1.0 - t)))
 		elif fx["kind"] == "light":
 			# The gun/blast throws light onto the world — a soft radial card
 			# (fx_softspot) instead of two hand-nested flat discs. One draw
