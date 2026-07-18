@@ -3443,6 +3443,12 @@ static func _has_canopy_dapple(ash: float) -> bool:
 	return ash < 0.33
 
 
+static func _hero_shows_apex(down_residual: float) -> bool:
+	# a4-03: the hero value-apex crown catch-light shows only while UP — a downed / reviving
+	# body (down_residual > 0) must NOT read as the brightest point on the field.
+	return down_residual <= 0.01
+
+
 static func _grade_breather_target(mode: String, intermission_ticks: int) -> float:
 	# a4-01/a4-15: the master-grade shop "breather" is ON only during the ENDLESS intermission
 	# (shop open) — a calm tonal beat that reads "safe to buy", then eases off for the next wave.
@@ -6157,7 +6163,7 @@ func _draw_players() -> void:
 			# coolest point in every frame, so the eye snaps to HIM first, not the reticle or a
 			# tan dirt splat — especially in the busy foundry. Screen-fixed (not aim-rotated) so
 			# the key stays overhead; suppressed while downed (a downed body isn't the apex).
-			if da_res <= 0.01:
+			if _hero_shows_apex(da_res):
 				var hcrown := pos - Vector2(0.0, walk_bob + 4.0)
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(hcrown - Vector2(5.0, 4.0), Vector2(10.0, 8.0)),
 					false, Color(HERO_APEX.r, HERO_APEX.g, HERO_APEX.b, 0.32))

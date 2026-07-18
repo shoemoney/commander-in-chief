@@ -601,9 +601,14 @@ func test_a4_top_prey_shared_by_both_cards() -> void:
 func test_a4_hero_apex_is_cool_and_bright() -> void:
 	# a4-03: the hero crown catch-light makes the soldier the brightest + coolest point.
 	var c := _consts()
+	var ms = load("res://src/main.gd")
 	var h: Color = c["HERO_APEX"]
 	Runner.T.ok(h.b > h.r, "the hero crown catch-light is COOL (b > r) — separates from warm ground")
 	Runner.T.ok(h.r > 0.8 and h.g > 0.85 and h.b > 0.9, "it is BRIGHT — the hero is the value apex")
+	# The apex light is suppressed while downed/reviving — a downed body isn't the apex.
+	Runner.T.ok(ms._hero_shows_apex(0.0), "an upright hero shows the value-apex crown light")
+	Runner.T.ok(not ms._hero_shows_apex(0.5), "a downed/reviving hero does NOT (must not read as the apex)")
+	Runner.T.ok(not ms._hero_shows_apex(1.0), "a fully-downed hero shows no apex light")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
