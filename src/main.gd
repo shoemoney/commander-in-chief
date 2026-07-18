@@ -5667,6 +5667,10 @@ func _draw_players() -> void:
 				var de_res := 1.0 - pow(1.0 - da_res, 3.0)
 				angle = lerp_angle(angle, PI / 2, de_res)
 				mod = mod.lerp(Color(0.35, 0.35, 0.35, 0.6), de_res)
+			# a2-03: a subtle IDENTITY lean on the LIVE body (green P1 / gold P2 via the
+			# colorblind-safe ident color) so co-op heroes read apart at a glance — the
+			# ring was the only differentiator; the pale-white bodies were identical.
+			mod = mod * Color.WHITE.lerp(_player_ident_color(i), 0.18)
 			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
