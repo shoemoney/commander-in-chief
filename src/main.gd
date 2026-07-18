@@ -3594,6 +3594,7 @@ func _draw_terrain() -> void:
 	# one prop family the others never show.
 	_draw_band_signatures(cam_y, wbands)
 	_draw_ruins_rubble()
+	_draw_trenches()
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
 	# Hash grid decorrelated from trees/ferns so nothing stacks on a cell.
 	var loy := -fposmod(cam_y, 80.0)
@@ -3670,6 +3671,37 @@ func _draw_ruins_rubble() -> void:
 				var dh := Art.cell_hash(rh + db * 29, db)
 				draw_rect(Rect2(pc + Vector2(float(dh % 72) - 36.0, float((dh / 5) % 36) - 18.0),
 					Vector2(4.0 + float(dh % 5), 3.0 + float(dh % 4))), Color(0.22, 0.19, 0.16, 0.85))
+
+
+func _draw_trenches() -> void:
+	# c3 2v: the sunken TRENCH verb (85% slow + conceal) drawn at the sim's exact
+	# _in_trench positions (art==collision) — a recessed ditch with a lit top lip
+	# and a shadowed floor so the depth reads before you drop in. Re-derives the
+	# same _mix; view-only, band >= COVER_VARIETY_SEG like the sim.
+	var seg_h: int = SimWorld.GATE_SPACING
+	var top_wy: int = sim.camera_top
+	var bot_wy: int = sim.camera_top + 420 * Fixed.ONE
+	for band in range(absi(top_wy) / seg_h, absi(bot_wy) / seg_h + 1):
+		if band < SimWorld.COVER_VARIETY_SEG:
+			continue
+		var th: int = SimWorld._mix(band * 70 + 7, sim._world_seed)
+		var ty_off: int = (200 + th % 500) * Fixed.ONE
+		var tx: int = (120 + (th >> 8) % 380) * Fixed.ONE
+		var wy: int = -(band * seg_h) - ty_off
+		var pc := _to_screen(tx, wy)
+		if pc.y < -60.0 or pc.y > 420.0:
+			continue
+		# 120x48 AABB (matches _in_trench). Dark recessed floor, a lit top lip and
+		# a darker bottom shadow to sell depth on a flat top-down view.
+		var w := 120.0
+		var h := 48.0
+		draw_rect(Rect2(pc + Vector2(-w / 2.0, -h / 2.0), Vector2(w, h)), Color(0.14, 0.15, 0.13, 0.55))
+		draw_rect(Rect2(pc + Vector2(-w / 2.0, -h / 2.0), Vector2(w, 4.0)), Color(0.34, 0.35, 0.3, 0.6))
+		draw_rect(Rect2(pc + Vector2(-w / 2.0, h / 2.0 - 4.0), Vector2(w, 4.0)), Color(0.05, 0.05, 0.05, 0.5))
+		for st in 3:
+			var sh := Art.cell_hash(th + st * 17, st)
+			var sxx := float(sh % 112) - 56.0
+			draw_rect(Rect2(pc + Vector2(sxx, -h / 2.0 + 6.0), Vector2(2.0, h - 12.0)), Color(0.1, 0.1, 0.09, 0.4))
 
 
 func _draw_band_signatures(cam_y: float, wbands: Array) -> void:

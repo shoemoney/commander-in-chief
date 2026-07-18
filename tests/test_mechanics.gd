@@ -1970,3 +1970,89 @@ func test_c3_deep_river_hosts_mud_lurker() -> void:
 		Runner.T.ok(found, "the band-%d river posts a mud-reachable submerged lurker" % band)
 		checked += 1
 	Runner.T.ok(checked > 0, "the deep stream produced at least one band>=2 river")
+
+
+func _trench_cell(sim: SimWorld, band: int) -> Array:
+	# Re-derive a trench cell's (x, world_y) for a band, mirroring _in_trench.
+	var th: int = SimWorld._mix(band * 70 + 7, sim._world_seed)
+	var ty: int = (200 + th % 500) * SimWorld.F_ONE
+	var tx: int = (120 + (th >> 8) % 380) * SimWorld.F_ONE
+	var wy: int = -(band * SimWorld.GATE_SPACING + ty)
+	return [tx, wy]
+
+
+func test_c3_trench_slows_85pct() -> void:
+	# c3 2v: a sunken trench drags the boots to 85% (distinct from the /2 zones).
+	var sim := SimWorld.new(43, 1)
+	var cell := _trench_cell(sim, 2)
+	var tx: int = cell[0]
+	var wy: int = cell[1]
+	Runner.T.ok(sim._in_trench(tx, wy), "the derived band-2 trench cell registers")
+	sim.camera_top = wy - 100 * SimWorld.F_ONE
+	sim.players[0]["x"] = tx
+	sim.players[0]["y"] = wy
+	var y0: int = sim.players[0]["y"]
+	var inp := SimInput.new()
+	inp.move_y = -256
+	sim._step_players([inp])
+	var moved: int = y0 - sim.players[0]["y"]
+	Runner.T.eq(moved, (SimWorld.PLAYER_SPEED * 17) / 20, "the trench drags boots to 85% speed (not /2, not full)")
+
+
+func test_c3_trench_conceals() -> void:
+	# c3 2v: a player in the trench is concealed from fire-acquisition (like grass).
+	var sim := SimWorld.new(43, 1)
+	var cell := _trench_cell(sim, 2)
+	var tx: int = cell[0]
+	var wy: int = cell[1]
+	var p: Dictionary = sim.players[0]
+	p["smoke_ticks"] = 0
+	p["x"] = tx
+	p["y"] = wy
+	Runner.T.ok(sim._concealed(p), "a player in the trench is concealed")
+	var e := {"x": tx + 80 * SimWorld.F_ONE, "y": wy, "alive": true, "elite": true,
+		"kind": "elite", "hp": 2, "fire_cd": 0, "windup": 0, "lunge_ticks": 0,
+		"aim_lx": 0, "aim_ly": 0}
+	var dx: int = p["x"] - e["x"]
+	var dy: int = p["y"] - e["y"]
+	var dlen: int = Fixed.length(dx, dy)   # 80px < ELITE_STANDOFF(120): fires, not advances
+	sim._step_elite(e, p, dx, dy, dlen)
+	Runner.T.eq(e["windup"], 0, "an elite does NOT wind up onto a trench-concealed target")
+	# Step out of the trench: the same elite acquires normally.
+	p["x"] = tx + 140 * SimWorld.F_ONE
+	Runner.T.ok(not sim._concealed(p), "the player is exposed once out of the ditch")
+	e["fire_cd"] = 0
+	var dx2: int = p["x"] - e["x"]
+	sim._step_elite(e, p, dx2, dy, Fixed.length(dx2, dy))
+	Runner.T.eq(e["windup"], SimWorld.ELITE_WINDUP_TICKS, "an elite winds up on the exposed target")
+
+
+func test_c3_trench_no_stack() -> void:
+	# c3 2v: a trench overlapping a mud strip applies the SINGLE strongest slow
+	# (mud's /2), never a compounded 0.85*0.5.
+	var sim := SimWorld.new(43, 1)
+	var cell := _trench_cell(sim, 2)
+	var tx: int = cell[0]
+	var wy: int = cell[1]
+	# Water placed so wy sits in the NORTH mud strip (not in the water itself).
+	sim.waters.append({"y": wy + 20 * SimWorld.F_ONE, "ford_x": 320 * SimWorld.F_ONE})
+	Runner.T.ok(sim._in_trench(tx, wy) and sim._in_mud(tx, wy), "the cell is both trench and mud")
+	sim.camera_top = wy - 100 * SimWorld.F_ONE
+	sim.players[0]["x"] = tx
+	sim.players[0]["y"] = wy
+	var y0: int = sim.players[0]["y"]
+	var inp := SimInput.new()
+	inp.move_y = -256
+	sim._step_players([inp])
+	var moved: int = y0 - sim.players[0]["y"]
+	Runner.T.eq(moved, SimWorld.PLAYER_SPEED / 2, "overlap applies one /2 slow, never compounded")
+
+
+func test_c3_trench_golden_inert() -> void:
+	# c3 2v: no trench exists in the torture window (bands 0-1) — goldens untouched.
+	var sim := SimWorld.new(43, 1)
+	Runner.T.ok(not sim._in_trench(320 * SimWorld.F_ONE, -500 * SimWorld.F_ONE), "band 0 hosts no trench")
+	Runner.T.ok(not sim._in_trench(320 * SimWorld.F_ONE, -1500 * SimWorld.F_ONE), "band 1 hosts no trench")
+	# But a trench IS authored from COVER_VARIETY_SEG (2) on.
+	var cell := _trench_cell(sim, 2)
+	Runner.T.ok(sim._in_trench(cell[0], cell[1]), "a trench is authored from band 2 on")

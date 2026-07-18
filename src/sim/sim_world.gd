@@ -747,6 +747,10 @@ func _step_players(inputs: Array) -> void:
 			if wading or _in_fork_wire(p["x"], p["y"]) or _in_mud(p["x"], p["y"]) \
 					or _in_rubble(p["x"], p["y"]):
 				spd = spd / 2
+			elif _in_trench(p["x"], p["y"]):
+				# c3 2v: a sunken trench drags the boots to 85% — the single strongest
+				# slow wins (this elif only fires when no /2 zone does), never compounds.
+				spd = (spd * 17) / 20
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
 		# c3 2v FORD CURRENT: a deep-river crossing shoves you sideways each tick
@@ -971,7 +975,7 @@ func _in_grass(t: Dictionary) -> bool:
 func _concealed(t: Dictionary) -> bool:
 	## The unified fire-acquisition gate: smoke OR tall grass. Segs 0-1 stream
 	## no grass, so in the torture window this is exactly the old smoke gate.
-	return t["smoke_ticks"] > 0 or _in_grass(t)
+	return t["smoke_ticks"] > 0 or _in_grass(t) or _in_trench(t["x"], t["y"])
 
 
 func _choke_bounds(y: int) -> Array:
@@ -3012,6 +3016,23 @@ func _in_rubble(x: int, y: int) -> bool:
 		if off >= ry - 20 * F_ONE and off <= ry + 20 * F_ONE and absi(x - rx) <= 40 * F_ONE:
 			return true
 	return false
+
+
+func _in_trench(x: int, y: int) -> bool:
+	## c3 2v: pseudo-elevation, trimmed to a flat SUNKEN TRENCH — a conceal zone
+	## that also DRAGS the boots (85% speed: gentler than the /2 slow zones, and
+	## NON-STACKING with them). One hash-placed lateral ditch per band from
+	## COVER_VARIETY_SEG on; pure, rng-free, zero state. seg >= 2 is past the
+	## campaign torture reach, and endless y stays in band 0-1, so both goldens
+	## stay byte-identical (kept out of the checksum feed, like grass "kind").
+	var band: int = absi(y) / GATE_SPACING
+	if band < COVER_VARIETY_SEG:
+		return false
+	var off: int = absi(y) % GATE_SPACING
+	var th: int = _mix(band * 70 + 7, _world_seed)
+	var ty: int = (200 + th % 500) * F_ONE
+	var tx: int = (120 + (th >> 8) % 380) * F_ONE
+	return off >= ty - 24 * F_ONE and off <= ty + 24 * F_ONE and absi(x - tx) <= 60 * F_ONE
 
 
 func _in_mud(_x: int, y: int) -> bool:
