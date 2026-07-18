@@ -468,6 +468,8 @@ func _paint_bg(canvas: Node2D) -> void:
 			var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 			var h := Art.cell_hash(tx, base_iy + ty)
 			var shade := 0.50 + float(h % 7) * 0.010
+			if (base_iy + ty) % 3 == 0:
+				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
 			var gcol := Color(shade + march * 0.14, (shade + 0.03) * (1.0 - march * 0.4), shade * 0.75 * (1.0 - march * 0.35))
 			if variant == 0:
@@ -487,7 +489,49 @@ func _paint_bg(canvas: Node2D) -> void:
 						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0)])
 	for card in dirt_cards:
 		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
+		# Soft halo first: kills the hard leopard-spot rim (4v macro-variation).
+		var halo: Vector2 = card[2] * 1.6
+		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo / 2.0, halo), false,
+			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * 0.4))
 		canvas.draw_texture_rect(Art.tex("dirt"), Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
+	# per screen on a coarse 256px grid — trampled-earth patches, and the
+	# occasional wheel-track pair along a hash heading. ~4-6 extra draws.
+	var m_base := int(floor(cam_y / 256.0))
+	var moy := -fposmod(cam_y, 256.0)
+	for my in 3:
+		for mx in 3:
+			var mh := Art.cell_hash(mx * 13, m_base + my)
+			if mh % 3 != 0:
+				continue
+			var mpos := Vector2(float(mx) * 256.0 + float(mh % 128), floor(moy + float(my) * 256.0 + float((mh / 7) % 128)))
+			var mrot := float(mh % 628) / 100.0
+			var msz := 192.0 + float(mh % 97)
+			if mh % 8 == 0:
+				# Wheel tracks: a thin stretched pair along the hash heading.
+				canvas.draw_set_transform(mpos, mrot, Vector2(0.25, 2.5))
+				for tk2 in 2:
+					canvas.draw_texture_rect(Art.tex("fx_softspot"),
+						Rect2(Vector2(-msz / 8.0 + float(tk2) * 12.0 - 6.0, -msz / 2.0), Vector2(msz / 4.0, msz)),
+						false, Color(0.02, 0.05, 0.0, 0.10))
+			else:
+				# GPT round-2: not just dark — 1-in-3 mottle cells go BRIGHT
+				# (sun-worn grass) and every cell carries a faint temperature
+				# lean (warm khaki vs cool blue-green) so the variation stops
+				# reading as one algorithmic dark stamp.
+				var m_bright := (mh / 11) % 3 == 0
+				var m_warm := (mh / 5) % 2 == 0
+				var mcol := Color(0.55, 0.5, 0.28, 0.10) if m_bright else \
+					(Color(0.10, 0.07, 0.0, 0.10) if m_warm else Color(0.0, 0.05, 0.06, 0.11))
+				canvas.draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + float(mh % 5) * 0.16))
+				canvas.draw_texture_rect(Art.tex("fx_softspot"),
+					Rect2(-Vector2.ONE * msz / 2.0, Vector2.ONE * msz), false, mcol)
+				if (mh / 13) % 4 == 0:
+					# Overlapping second gradient, offset + larger, for depth.
+					canvas.draw_texture_rect(Art.tex("fx_softspot"),
+						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
+						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -2780,6 +2824,12 @@ const _TREE_DEAD := ["tree_dead1", "tree_dead2", "tree_dead3"]
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
 const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
 	"colossus_body": true, "colossus_barrel": true, "m_heli_attack2": true}
+# Living things wear a heavier rim than scenery (4v: units sank into the prop
+# soup): 1.6px vs the fleet's 1.1px; bosses keep their warm 2.2px above both.
+const _UNIT_RIM := {"player1": true, "player2": true, "rusher": true, "elite": true,
+	"frogman": true, "observer": true, "m_insurgent3": true, "m_insurgent4": true,
+	"m_insurgent5": true, "m_soldier2": true, "m_contractor2": true, "m_bombsuit": true,
+	"m_pilot": true, "ghillie": true, "courier": true, "sapper": true}
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
@@ -2818,6 +2868,8 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 		if _BOSS_RIM.has(tex_name):
 			oc = Color(0.4, 0.1, 0.06, tint.a).lerp(Color(1, 1, 1, tint.a), clampf(_boss_flash, 0.0, 1.0))
 			d = 2.2 / s
+		elif _UNIT_RIM.has(tex_name):
+			d = 1.6 / s
 		for o in _OUTLINE_OFFSETS:
 			draw_texture(t, origin + o * d, oc)
 	draw_texture(t, origin, tint)
@@ -3304,6 +3356,41 @@ func _draw_water() -> void:
 		# Banks (drawn over the shader's shore edges).
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, bank_col)
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, bank_col)
+		# Broken banks (5v: the ruler-straight sand edge was the tell): ~14
+		# hash-notches per bank bite into the strip, skipping the ford span.
+		var nseed := Art.cell_hash(int(w["y"] / 4096) * 29, 3)
+		var nford_l: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX - 12.0
+		var nford_r: float = (w["ford_x"] + SimWorld.FORD_HALF_W) * PX + 12.0
+		var notch_col := bank_col.darkened(0.25)
+		# Wet-sand line: a thin damp band hugging the waterline on both banks
+		# (Grok round-2: the dry sand met the water with no transition).
+		var damp := bank_col.darkened(0.38)
+		draw_rect(Rect2(0, wy + 1.0, 640.0, 1.5), Color(damp.r, damp.g, damp.b, 0.5))
+		draw_rect(Rect2(0, wy + wh - 1.5, 640.0, 1.5), Color(damp.r, damp.g, damp.b, 0.5))
+		# Foam flecks along the damp line (Grok round-3): irregular low-alpha
+		# off-white ticks where water worries the sand.
+		var fseed := Art.cell_hash(int(w["y"] / 4096) * 41, 11)
+		for fk in 8:
+			var fh := Art.cell_hash(fseed + fk * 23, fk)
+			var ffx := float(fh % 630)
+			var ffw := 2.0 + float(fh % 3)
+			draw_rect(Rect2(ffx, wy + 1.0 + float(fh % 2), ffw, 1.0), Color(0.9, 0.94, 0.9, 0.22))
+			draw_rect(Rect2(float((fh * 5) % 630), wy + wh - 2.0 - float(fh % 2), ffw, 1.0), Color(0.9, 0.94, 0.9, 0.22))
+		for nk in 14:
+			var nh := Art.cell_hash(nseed + nk * 17, nk)
+			var nx := float(nh % 640)
+			if nx > nford_l and nx < nford_r:
+				continue
+			var nw2 := 6.0 + float(nh % 5)
+			var njit := float((nh / 7) % 5) - 2.0
+			draw_rect(Rect2(nx, wy - 1.0 + njit, nw2, 2.0 + float(nh % 2)), notch_col)
+			draw_rect(Rect2(float((nh * 7) % 640), wy + wh + 1.0 + njit, nw2, 2.0 + float((nh / 3) % 2)), notch_col)
+			# Second irregularity scale (Grok round-2): wide shallow bites layered
+			# under the small notches so the profile stops reading as dashed.
+			if nk % 3 == 0:
+				var bw := 14.0 + float(nh % 7)
+				draw_rect(Rect2(float((nh * 3) % 620), wy - 2.0, bw, 1.4), Color(notch_col.r, notch_col.g, notch_col.b, 0.6))
+				draw_rect(Rect2(float((nh * 11) % 620), wy + wh + 2.5, bw, 1.4), Color(notch_col.r, notch_col.g, notch_col.b, 0.6))
 		# The dry ford.
 		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
 		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
@@ -3316,6 +3403,24 @@ func _draw_water() -> void:
 		var bsc := clampf(ford_w / bspan, 0.5, 1.2)         # fit the deck to the ford width
 		var bx := ford_left + ford_w / 2.0
 		var bseg := maxi(1, int(ceil(wh / (bspan * bsc))))
+		# Bridge shadow on the water + support beams at the segment joints —
+		# the deck used to float weightless over the current (5v).
+		var deck_w := bspan * bsc * 0.9
+		draw_rect(Rect2(bx - deck_w / 2.0 + 4.0, wy + 4.0, deck_w, wh), Color(0.0, 0.02, 0.05, 0.28))
+		for bj in bseg + 1:
+			var bjy := wy + float(bj) * wh / float(bseg)
+			draw_line(Vector2(bx - deck_w / 2.0 + 3.0, bjy), Vector2(bx - deck_w / 2.0 + 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
+			draw_line(Vector2(bx + deck_w / 2.0 - 3.0, bjy), Vector2(bx + deck_w / 2.0 - 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
+			for bside in [-1.0, 1.0]:
+				var bfx: float = bx + bside * (deck_w / 2.0 - 3.0)
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(bfx - 5.0, minf(bjy + 4.0, wy + wh - 3.0), 10.0, 6.0),
+					false, Color(0.0, 0.05, 0.08, 0.30))
+		# Caustic glints under the deck (Grok round-3): faint elongated light
+		# play between the support beams.
+		for cg in 2:
+			var cgy := wy + wh * (0.3 + 0.4 * float(cg))
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(bx - deck_w * 0.3, cgy - 2.0, deck_w * 0.6, 4.0),
+				false, Color(0.55, 0.75, 0.75, 0.14))
 		for bi in bseg:
 			_spr("bridge_mid", Vector2(bx, wy + (float(bi) + 0.5) * wh / float(bseg)), 0.0, bsc)
 		_spr("bridge_ramp", Vector2(bx, wy - 2.0), 0.0, bsc)
@@ -3329,6 +3434,18 @@ func _draw_water() -> void:
 			var ry := wy + wh * (0.3 + 0.4 * float((wseed / (r + 5)) % 90) / 90.0)
 			_spr("rock1" if (wseed + r) % 2 == 0 else "rock2", Vector2(rx, ry),
 				float((wseed / (r + 1)) % 628) / 100.0, 1.4, Color(0.5, 0.58, 0.6))
+		# Reed scatter at the waterline (5v): fern2 silhouettes soften where
+		# grass meets water; never inside the ford approach.
+		for rk in 9:
+			var rh := Art.cell_hash(nseed + rk * 31, rk + 9)
+			var rrx := float(rh % 620) + 10.0
+			if rrx > nford_l and rrx < nford_r:
+				continue
+			var reed_y := (wy - 4.0) if rk % 2 == 0 else (wy + wh + 2.0)
+			# Multi-scale clumps (Grok round-2): big anchor reeds + small tufts.
+			_spr("fern2", Vector2(rrx, reed_y), float(rh % 628) / 100.0,
+				0.4 + float(rh % 5) * 0.1,
+				Color(0.8, 0.9, 0.7).lerp(Color(0.5, 0.45, 0.4), soot))
 		# Armor-barrier telegraph: a tank can't ford deep water (it just stops
 		# dead at the bank, reading as a broken control). When an occupied tank
 		# is near this band, hatch the deep-water banks red and flag the ford.
@@ -4460,9 +4577,11 @@ func _draw_players() -> void:
 					Rect2(-sm_r * 1.4, -sm_r * 1.4, sm_r * 2.8, sm_r * 2.8),
 					false, Color(0.75, 0.78, 0.8, sm_a))
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		# Co-op identity ring under each soldier so you never lose your guy in
-		# the chaos (P1 green / P2 gold, matching the HUD rows). 1P: skip it.
-		if _two_players and p["alive"]:
+		# Identity ring under each soldier so you never lose your guy in the
+		# chaos (P1 green / P2 gold, matching the HUD rows). Now ALSO in 1P
+		# (4v: the tiny infantry sprite vanished into ground clutter — the
+		# ring is the parked-tank board-ring grammar applied to yourself).
+		if p["alive"]:
 			var idc := Color(0.4, 1.0, 0.4, 0.6) if i == 0 else Color(1.0, 0.85, 0.3, 0.6)
 			draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
 			# Revive-from-here affordance: revive has NO range check (the buddy

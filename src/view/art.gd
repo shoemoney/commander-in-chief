@@ -313,7 +313,7 @@ const SCALE := {
 	# or is that a bullet?" — straight from playtest.
 	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
 	# elites largest infantry (they shoot), sprites ≥3× bullet size.
-	"player1": 0.50, "player2": 0.42, "rusher": 0.47, "elite": 0.52,
+	"player1": 0.56, "player2": 0.47, "rusher": 0.53, "elite": 0.58,
 	"frogman": 1.05, "observer": 0.24, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
@@ -343,8 +343,8 @@ const SCALE := {
 	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
-	"m_bombsuit": 0.5, "m_contractor2": 0.5, "m_insurgent3": 0.47, "m_insurgent4": 0.47,
-	"m_insurgent5": 0.47, "m_pilot": 0.46, "m_soldier2": 0.5,
+	"m_bombsuit": 0.56, "m_contractor2": 0.56, "m_insurgent3": 0.53, "m_insurgent4": 0.53,
+	"m_insurgent5": 0.53, "m_pilot": 0.52, "m_soldier2": 0.56,
 	"m_apc": 0.7, "m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34, "m_light_tank": 0.6,
 	"m_technical": 0.6,
@@ -355,7 +355,7 @@ const SCALE := {
 	"mg_stand": 0.3,   # 160px canvas → ~48px emplacement
 	# p2: specialists match cast2 unit footprints (64px canvas vs cast2's 300px,
 	# so raw multipliers run larger); litter/hulks fold to their swap targets.
-	"ghillie": 2.2, "courier": 2.2, "sapper": 2.2,
+	"ghillie": 2.45, "courier": 2.45, "sapper": 2.45,
 	"tank_shell": 0.8,               # ~grenade footprint (26px)
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
 	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)

@@ -74,6 +74,10 @@ void fragment() {
 	// water even in a still frame (units draw strictly on top, so this is free).
 	float crest = smoothstep(0.52, 0.78, ripple);
 	col += vec3(0.10, 0.17, 0.19) * crest * 1.3;
+	// Downstream current (5v river-dressing): elongated noise cells drifting +x
+	// read as flow direction even in a still frame.
+	float streak = smoothstep(0.78, 0.95, vnoise(vec2(p.x * 0.35 - t * 2.5, p.y * 7.0)));
+	col += vec3(0.18, 0.22, 0.22) * streak * 0.5;
 
 	// Animated sun-glint: a broad specular band drifting across, broken by ripple.
 	float glintband = 0.5 + 0.5 * sin(uv.x * 3.2 + uv.y * 6.0 - (TIME + phase) * 1.4);
