@@ -543,7 +543,9 @@ func test_a2_11_hitflash_read_tolerates_hpless_enemies() -> void:
 
 # --- a3-01: the boss separator rim cools on the hot foundry floor so the apex
 # silhouette stops reading red-on-red, while the gunship keeps its warm rim over
-# the green bridge (ramp confined to the hot end). ---
+# the green bridge (ramp confined to the hot end). Visual anchor: the foundry frame
+# is signature screenshot 05 (05-foundry-colossus-last-stand.png) — re-render it and
+# confirm the colossus carries a cool dark separator edge, not a bright white one. ---
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
@@ -554,6 +556,35 @@ func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	Runner.T.ok(warm.r > warm.b, "over green the boss rim stays WARM (r > b)")
 	Runner.T.ok(is_equal_approx(mid.r, warm.r) and is_equal_approx(mid.b, warm.b),
 		"the cool ramp does not start until march > 0.6 (gunship keeps its warm rim)")
-	# High march: cool steel-cyan (blue dominates red) — the separation on red ground.
+	# High march: cool steel-blue (blue dominates red) — the separation on red ground.
 	Runner.T.ok(hot.b > hot.r, "on the foundry floor the boss rim goes COOL (b > r)")
 	Runner.T.ok(hot.b > warm.b, "the foundry rim is bluer than the bridge rim (monotonic cool)")
+	# ...but the cool rim stays a DARK separator (value near the warm rim), not a bright
+	# edge — outline language stays consistent across biomes (judge r2 TO_TEN).
+	var warm_v: float = maxf(warm.r, maxf(warm.g, warm.b))
+	var hot_v: float = maxf(hot.r, maxf(hot.g, hot.b))
+	Runner.T.ok(hot_v < 0.6 and absf(hot_v - warm_v) < 0.25,
+		"the cool foundry rim stays DARK (value near the warm rim), not a bright white edge")
+
+
+# --- a3-02: HALL/HOWTO seal near-opaque so the live attract firefight stops bleeding
+# through the content frame; PAUSE recedes its frozen field but stays legible; TITLE
+# keeps the attract fight visible behind it. ---
+
+func test_a3_meta_screen_scrim_seals_content_screens() -> void:
+	var mn = load("res://src/view/menu.gd")
+	# Mode enum values (order in menu.gd): HIDDEN, TITLE, PAUSE, OPTS, HALL, HOWTO.
+	var TITLE: int = mn.Mode.TITLE
+	var PAUSE: int = mn.Mode.PAUSE
+	var HALL: int = mn.Mode.HALL
+	var HOWTO: int = mn.Mode.HOWTO
+	var full := 1.0   # full motion (not reduce-motion)
+	# Content screens seal near-opaque even at full motion (was 0.6 -> firefight bled).
+	Runner.T.ok(mn._scrim_alpha(HALL, full) >= 0.9, "HALL seals near-opaque (>=0.9)")
+	Runner.T.ok(mn._scrim_alpha(HOWTO, full) >= 0.9, "HOWTO seals near-opaque (>=0.9)")
+	# PAUSE recedes harder than the old 0.6 but stays LIGHTER than the content screens
+	# (you can still study your frozen run behind it).
+	var pa: float = mn._scrim_alpha(PAUSE, full)
+	Runner.T.ok(pa >= 0.74 and pa < 0.9, "PAUSE recedes (>=0.74) yet stays legible (< content seal)")
+	# TITLE deliberately keeps the attract firefight visible behind it.
+	Runner.T.ok(mn._scrim_alpha(TITLE, full) < 0.7, "TITLE keeps the attract fight visible (< 0.7)")

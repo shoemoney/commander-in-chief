@@ -558,6 +558,26 @@ func _activate() -> void:
 				open(Mode.TITLE)
 
 
+static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
+	# The backdrop scrim for each menu screen (before the _open_t settle envelope).
+	# TITLE keeps the attract fight mostly visible; the title stack near-blacks under
+	# REDUCE MOTION (the live scroll/tracers are the biggest motion source on the exact
+	# screen hosting that toggle). PAUSE keeps its frozen run readable.
+	var sa := 0.55 if scrim_mode == Mode.TITLE else 0.6
+	if scrim_mode != Mode.PAUSE and motion < 0.5:
+		sa = 0.92
+	# a3-02: HALL/HOWTO are dedicated content screens, not the attract stage — at the
+	# default 0.6 scrim the live firefight (enemies/tracers/bunker) bled through the
+	# frame behind the score table & instructions. Seal them near-opaque regardless of
+	# motion. PAUSE recedes its frozen field harder (0.6->0.74) so it reads as its own
+	# space, but stays legible enough to still study your run behind the menu.
+	if scrim_mode == Mode.HALL or scrim_mode == Mode.HOWTO:
+		sa = maxf(sa, 0.9)
+	elif scrim_mode == Mode.PAUSE:
+		sa = maxf(sa, 0.74)
+	return sa
+
+
 func _draw() -> void:
 	if mode == Mode.HIDDEN:
 		return
@@ -565,18 +585,16 @@ func _draw() -> void:
 	# REDUCE MOTION near-blacks the TITLE backdrop — the live attract fight
 	# (scroll + tracers + explosions) is the biggest motion source on the exact
 	# screen where the setting is toggled, and it isn't _motion-gated itself.
-	var sa := 0.55 if mode == Mode.TITLE else 0.6
-	# The whole title stack (TITLE/OPTS/HALL/HOWTO) sits over the same live
-	# attract fight, so the near-black applies to all of it — hopping TITLE→OPTS
-	# used to step the backdrop luminance ~8x on the exact screen hosting the
-	# toggle. PAUSE keeps 0.6 so players can still read their frozen run.
-	if mode != Mode.PAUSE and main._motion < 0.5:
-		sa = 0.92
+	var sa := _scrim_alpha(mode, main._motion)
 	draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.05, 0.02, sa * _open_t))
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		# Plate the bare text on the Apocalypse frame, debrief-style (underlay
 		# darkens the well, frame carries the chrome).
 		var fr := Rect2(20, 8, 600, 344)
+		# a3-02: a SOLID desaturating dark well seals the frame INTERIOR before the
+		# chrome — the _under frame texture has transparent regions the firefight showed
+		# through even at a high scrim. Cool-dark near-opaque fill; the frame draws on top.
+		draw_rect(Rect2(30, 17, 580, 326), Color(0.035, 0.055, 0.05, 0.92 * _open_t))
 		draw_texture_rect(Art.tex("ui_frame_lrg_under"), fr, false, Color(1, 1, 1, 0.9 * _open_t))
 		draw_texture_rect(Art.tex("ui_frame_lrg"), fr, false, Color(0.85, 0.9, 0.75, _open_t))
 		if mode == Mode.HALL:

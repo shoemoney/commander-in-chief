@@ -365,16 +365,21 @@ func _dress_colossus(m: Node2D) -> void:
 
 func _dress_title(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.TITLE)
-	m._hud_icons.visible = false
+	m._menu._open_t = 1.0   # FAITHFULNESS: open() seeds _open_t=0 and ramps it in _process
+	m._hud_icons.visible = false   # (which never runs in a posed frame) — force the SETTLED
+	                               # backdrop/scrim so shots show the real menu, not a
+	                               # near-transparent just-opened frame.
 
 
 func _dress_pause(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.PAUSE)
+	m._menu._open_t = 1.0
 	m._menu.sel = 4   # RESTART highlighted
 
 
 func _dress_howto(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.HOWTO)
+	m._menu._open_t = 1.0
 	m._hud_icons.visible = false
 
 
@@ -387,4 +392,5 @@ func _dress_hall(m: Node2D) -> void:
 		{"score": 41200, "mode": "campaign", "wave": 0, "sector": 3, "dist": 210, "streak": 6, "won": false},
 	])
 	m._menu.open(GameMenu.Mode.HALL)
+	m._menu._open_t = 1.0
 	m._hud_icons.visible = false
