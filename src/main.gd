@@ -5103,7 +5103,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		# and a scaled rotor blur so it reads "helicopter", not "texture bug".
 		var eta_f := 1.0 + float(boss["phase_t"]) / 420.0   # 0 -> 1 across the approach
 		var ground := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
-		_ground_shadow(ground + Vector2(0, 26), 8.0 + eta_f * 18.0, 0.12 + eta_f * 0.30)
+		_ground_shadow(ground + Vector2(0, 30), 8.0 + eta_f * 18.0, 0.12 + eta_f * 0.30)
 		# Diagonal slide-in from the top-right: a straight vertical drop hid the
 		# whole approach behind the HUD strip (arrival hovers at screen y~50).
 		var apos := ground + Vector2((1.0 - eta_f) * 150.0, -(1.0 - eta_f) * 55.0)
@@ -5155,9 +5155,6 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_arc(bpos + Vector2(0, 30), 12.0 + dw * 40.0, 0, TAU, 26,
 		Color(0.80, 0.78, 0.60, (1.0 - dw) * 0.22 * _motion), 2.0)
 	_spr(body_tex, bpos, PI, 1.3, hull_mod)
-	# a1-01 hit BLOOM: a heavier white flash bloom sells the boss taking a hit.
-	if _boss_flash > 0.01:
-		draw_circle(bpos, 34.0 + _boss_flash * 12.0, Color(1, 1, 1, _boss_flash * 0.28))
 	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
 	# muzzle points down-screen at the players, same convention as the colossus.
 	_spr("gunship_barrel", bpos + Vector2(0, 18), PI, 1.3, hull_mod)
@@ -5168,6 +5165,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		draw_line(bpos - Vector2.from_angle(a) * 42.0, bpos + Vector2.from_angle(a) * 42.0,
 			Color(0.85, 0.85, 0.85, 0.5), 3.0)
 	draw_circle(bpos, 5.0, Color(0.3, 0.3, 0.35))
+	# a1-01 hit BLOOM: a heavier white flash bloom on _boss_flash — drawn last so
+	# it sits on the full silhouette (hull + chin + rotor), not under the blades.
+	if _boss_flash > 0.01:
+		draw_circle(bpos, 34.0 + _boss_flash * 12.0, Color(1, 1, 1, _boss_flash * 0.28))
 	var bkey := "boss%d" % boss["gate_y"]
 	# Divide by the most HP this boss has ever shown, not the campaign constant —
 	# exact for any scaling without duplicating the sim's spawn formula.
