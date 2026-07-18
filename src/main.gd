@@ -3956,8 +3956,10 @@ func _draw_foundry_arena() -> void:
 				draw_circle(pp + woff * 1.3, 6.0 + sin(pph * 1.5) * 1.2, Color(1.0, 0.85, 0.45, 0.75 + sin(pph * 2.0) * 0.2))
 				for bi in 3:
 					var bt := fposmod(pph * 0.5 + float(bi) * 0.33, 1.0)
-					draw_circle(Vector2(pp.x + sin(pph + float(bi) * 2.1) * 8.0, pp.y - bt * 14.0),
-						(1.0 - bt) * 2.2, Color(1.0, 0.7, 0.3, (1.0 - bt) * 0.8))
+					# a1-10 r2: embers kept INSIDE the 24px crucible rim (rise 11 + horiz 6 +
+					# radius) and fade toward the top so none crawl past the pool edge.
+					draw_circle(Vector2(pp.x + sin(pph + float(bi) * 2.1) * 6.0, pp.y - bt * 11.0),
+						(1.0 - bt) * 2.0, Color(1.0, 0.7, 0.3, (1.0 - bt) * (1.0 - bt) * 0.85))
 		# Scrap heaps + pipe run (judge r2): wrecked-industry mass around the
 		# boss path, riding loaded litter textures — no new assets.
 		var pipe_a := _to_screen(40 * Fixed.ONE, g["y"] + 250 * Fixed.ONE)
