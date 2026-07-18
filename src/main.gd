@@ -3127,7 +3127,27 @@ func _sector_march() -> float:
 
 
 func _draw_terrain() -> void:
-# Endless landmark kit (9/9 arena identity): a neutral comms mast at center
+# Choke walls (7v corridor modulation): the biting flank renders as rubble
+	# over a dark base with a hatched read — the lane narrowing is authored
+	# geography, not an invisible wall.
+	if sim.mode == "campaign":
+		for scan in 5:
+			var wy3: int = sim.camera_top + scan * 90 * Fixed.ONE
+			var cb: Array = sim._choke_bounds(wy3)
+			if cb[0] == SimWorld.WORLD_LEFT and cb[1] == SimWorld.WORLD_RIGHT:
+				continue
+			var left_bite: bool = cb[0] != SimWorld.WORLD_LEFT
+			var seg_off: int = absi(wy3) % SimWorld.GATE_SPACING
+			var band_top := _to_screen(0, wy3 + (seg_off - SimWorld.CHOKE_OFF_LO)).y
+			var wall_x := 0.0 if left_bite else 400.0
+			draw_rect(Rect2(wall_x, band_top - 240.0 * PX * 0.0, 240.0, 240.0), Color(0.12, 0.11, 0.09, 0.85))
+			for rb in 12:
+				var rh4 := Art.cell_hash(int(wall_x) + rb * 31, absi(wy3) / SimWorld.GATE_SPACING + rb)
+				_spr("rock1" if rh4 % 2 == 0 else "rock2",
+					Vector2(wall_x + 20.0 + float(rh4 % 200), band_top + 10.0 + float((rh4 / 7) % 220)),
+					float(rh4 % 628) / 100.0, 2.0, Color(0.5, 0.5, 0.48))
+			break
+	# Endless landmark kit (9/9 arena identity): a neutral comms mast at center
 	# with a scorched base + two fixed rocks per quadrant — the arena is now a
 	# PLACE you learn, not a screenshot of campaign grass.
 	if sim.mode == "endless":
@@ -3649,6 +3669,18 @@ func _draw_gates() -> void:
 		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
 		if fy < -20.0 or fy > 380.0:
 			continue
+		# Physical fork island (7v): three stacked wrecks divide the lanes at
+		# x=260 — CACHE reads narrow/fortified, BOUNTY reads open killbox.
+		for wi in 3:
+			var wh2 := Art.cell_hash(fk["y"] / 65536 + wi * 13, wi)
+			var wy2 := _to_screen(0, fk["y"] + (70 + wi * 90) * Fixed.ONE).y
+			_ground_shadow(Vector2(260, wy2), 12.0, 0.42)
+			_spr(["wreck_apc", "tank_hulk", "wreck_halftrack"][wh2 % 3], Vector2(260, wy2),
+				float(wh2 % 628) / 100.0 * 0.2 + (PI if wi % 2 == 0 else 0.0), 0.9, Color(0.6, 0.58, 0.55))
+		for ci in 2:
+			var cy2 := _to_screen(0, fk["y"] + (100 + ci * 120) * Fixed.ONE).y
+			_spr("barbedwire", Vector2(70 + ci * 180, cy2), 0.0, 0.8, Color(0.55, 0.5, 0.45))
+			_spr("wall_sandbag_end", Vector2(400 + ci * 110, cy2 + 30.0), PI * 0.12, 0.8, Color(0.75, 0.7, 0.6))
 		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
 		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
 		var cache_txt := "< CACHE"

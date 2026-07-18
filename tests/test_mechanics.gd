@@ -816,3 +816,21 @@ func test_biome_view_goldens() -> void:
 		"the foundry band owns its slagged litter pool")
 	Runner.T.ok(m._LITTER_FOUNDRY != m._LITTER_LATE, "foundry pool is distinct from the late pool")
 	m.free()
+
+
+func test_choke_bounds_and_fork_island() -> void:
+	var sim := SimWorld.new(43, 1)
+	# Segments 0-1: full lane (torture window untouched — the inert proof).
+	Runner.T.eq(sim._choke_bounds(-500 * SimWorld.F_ONE)[0], SimWorld.WORLD_LEFT, "segment 0 stays open")
+	# Segment 2, in-band: one flank bitten to a 368px lane.
+	var cb: Array = sim._choke_bounds(-(2000 + 200) * SimWorld.F_ONE)
+	Runner.T.ok(cb[1] - cb[0] == 608 * SimWorld.F_ONE - SimWorld.CHOKE_BITE, "choke bites the lane to 368px")
+	# Fork island: a player inside the divider snaps to an edge.
+	sim.gates.append({"y": -3000 * SimWorld.F_ONE, "open": true, "b1": {}, "b2": {}, "boss": {}, "fork": true})
+	var p := sim.players[0]
+	p["x"] = 260 * SimWorld.F_ONE
+	p["y"] = -3000 * SimWorld.F_ONE + 100 * SimWorld.F_ONE
+	sim.camera_top = p["y"] - 100 * SimWorld.F_ONE
+	sim._clamp_actor(p)
+	Runner.T.ok(p["x"] == 216 * SimWorld.F_ONE or p["x"] == 304 * SimWorld.F_ONE,
+		"the wreck island is solid — the lane choice is physical")

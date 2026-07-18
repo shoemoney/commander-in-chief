@@ -27,7 +27,7 @@ const KNOWN := {
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost", "drop"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant", "salvage_tick"],
-	"gate": ["y", "open", "b1", "b2", "boss", "final"],
+	"gate": ["y", "open", "b1", "b2", "boss", "final", "fork"],
 	"boss": ["alive", "hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at"],
 	"strike": ["x", "y", "ticks", "obs"],
 	"water": ["y", "ford_x"],

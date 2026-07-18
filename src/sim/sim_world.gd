@@ -240,6 +240,14 @@ const SANDBAG_HALF_H := 5 * F_ONE
 # Collidable rocks (9/9 panel: cover-shaped decor with no collision LIED in a
 # one-hit game). Streamed rng-FREE (Knuth-hash of the spacing index) so the
 # shared stream-rng sequence is untouched; campaign-only.
+# Corridor chokes (7v: the lane is a constant 608px tube): from segment 2 on,
+# each between-gate stretch bites one flank down to a 368px lane. Pure
+# function of y — no state, no rng, nothing hashed; segments 0-1 stay open
+# (the calm opening act + the torture window = inert by construction).
+const CHOKE_START_SEG := 2
+const CHOKE_OFF_LO := 150 * F_ONE
+const CHOKE_OFF_HI := 390 * F_ONE
+const CHOKE_BITE := 240 * F_ONE
 const ROCK_SPACING := 260 * F_ONE
 const ROCK_HALF_W := 10 * F_ONE
 const ROCK_HALF_H := 8 * F_ONE
@@ -699,13 +707,33 @@ func _step_players(inputs: Array) -> void:
 			_collect_pickups(p, i)
 
 
+func _choke_bounds(y: int) -> Array:
+	## Lane bounds at world y. Segments >= 2 carry one flank-alternating choke
+	## band per stretch; everywhere else the full 608px lane.
+	var seg: int = absi(y) / GATE_SPACING
+	if seg >= CHOKE_START_SEG:
+		var off: int = absi(y) % GATE_SPACING
+		if off >= CHOKE_OFF_LO and off <= CHOKE_OFF_HI:
+			if seg % 2 == 0:
+				return [WORLD_LEFT + CHOKE_BITE, WORLD_RIGHT]
+			return [WORLD_LEFT, WORLD_RIGHT - CHOKE_BITE]
+	return [WORLD_LEFT, WORLD_RIGHT]
+
+
 func _clamp_actor(p: Dictionary) -> void:
-	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
+	var cb := _choke_bounds(p["y"])
+	p["x"] = clampi(p["x"], cb[0], cb[1])
 	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	# Closed gates are a hard wall to the north.
 	for g in gates:
 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
 			p["y"] = g["y"] + GATE_BLOCK_PAD
+		# Fork wreck-island (7v: the lanes were paint, not places): a physical
+		# divider makes the CACHE/BOUNTY choice spatially real. Snap to the
+		# nearer edge; inert — forks only exist at gates 2/4, past the torture.
+		if g.get("fork", false) and p["y"] >= g["y"] + 40 * F_ONE and p["y"] <= g["y"] + 320 * F_ONE \
+				and absi(p["x"] - 260 * F_ONE) < 44 * F_ONE:
+			p["x"] = (216 if p["x"] < 260 * F_ONE else 304) * F_ONE
 
 
 func _collect_pickups(p: Dictionary, i: int) -> void:
@@ -2476,7 +2504,8 @@ func _step_camera() -> void:
 				else:
 					barrels.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE,
 						"armed": true, "fuse_ticks": 0})
-			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {}})
+			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {},
+				"fork": _gate_counter == 2 or _gate_counter == 4})
 			# Route Fork (panel 8-vote): the approach to bunker-pair gates 2 & 4
 			# splits into two telegraphed lanes — walking a side IS the choice
 			# (pure position: no new input, no stored state, gates[] is unhashed).
