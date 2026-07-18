@@ -2106,3 +2106,36 @@ func test_c4_fork_vest_vault() -> void:
 				and pk["y"] >= gate_y + 600 * SimWorld.F_ONE and pk["y"] <= gate_y + 640 * SimWorld.F_ONE:
 			off = true
 	Runner.T.ok(off, "a non-vault gate-4 fork keeps the offense capsule")
+
+
+func test_c4_ruins_dual_lane() -> void:
+	# c4 3v: the ruins split into two PARALLEL lanes — a central PERMEABLE divider
+	# (world-bags with ~58px gaps) at SCREEN_CX, a covered RIGHT lane (maze wall),
+	# an exposed LEFT lane. Both lanes clear HULL_CLEARANCE. Band 3 = torture-inert.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	var divider := 0
+	for sb in sim.sandbags:
+		if absi(sb["y"]) / SimWorld.GATE_SPACING == SimWorld.RUINS_SEG \
+				and sb["x"] == SimWorld.SCREEN_CX:
+			divider += 1
+	Runner.T.ok(divider >= 3, "a central permeable divider runs the ruins (%d bags)" % divider)
+	# The maze cover sits on the RIGHT (covered) lane.
+	var right_walls := 0
+	var left_walls := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and absi(rk["y"]) / SimWorld.GATE_SPACING == SimWorld.RUINS_SEG:
+			if rk["x"] > SimWorld.SCREEN_CX:
+				right_walls += 1
+			else:
+				left_walls += 1
+	Runner.T.ok(right_walls > left_walls, "the maze cover holds the right/covered lane (%d vs %d)" % [right_walls, left_walls])
+	# Both lanes clear the hull around the central divider.
+	var left_lane: int = (SimWorld.SCREEN_CX - SimWorld.SANDBAG_HALF_W) - SimWorld.WORLD_LEFT
+	var right_lane: int = SimWorld.WORLD_RIGHT - (SimWorld.SCREEN_CX + SimWorld.SANDBAG_HALF_W)
+	Runner.T.ok(left_lane >= SimWorld.HULL_CLEARANCE, "the exposed left lane clears the hull")
+	Runner.T.ok(right_lane >= SimWorld.HULL_CLEARANCE, "the covered right lane clears the hull")
+	# The divider is PERMEABLE: the vertical gap between bags threads a crossfire lane.
+	Runner.T.ok(68 - 2 * (SimWorld.SANDBAG_HALF_H / SimWorld.F_ONE) >= SimWorld.HULL_CLEARANCE / SimWorld.F_ONE,
+		"the divider gaps thread a hull-wide cross-lane firing lane")

@@ -3233,10 +3233,22 @@ func _step_camera() -> void:
 			var mr_off: int = posmod(-_next_rock_y / F_ONE, 1000)
 			if mr_off >= 60 and mr_off <= 350:
 				var mwh := _mix(absi(_next_rock_y / ROCK_SPACING) + 6151, _world_seed)
-				var mwx: int = (462 if mwh % 2 == 0 else 120) * F_ONE
+				# c4 3v RUINS DUAL-LANE: the maze cover is forced to the RIGHT flank so
+				# the ruins read as two PARALLEL lanes — a covered/blind RIGHT (maze wall)
+				# and an exposed LEFT (open, long sightline) — split by a central PERMEABLE
+				# low-wall (world-bags with ~58px vertical gaps; lateral fire threads them
+				# for cross-lane crossfire). Both lanes clear HULL_CLEARANCE; band 3 is
+				# torture-inert so both goldens hold. (Flat split — the elevation ridge
+				# was rejected; this reuses the shipped maze + sandbag grammar.)
+				var mwx: int = 462 * F_ONE   # covered lane = right
 				var mwy: int = _next_rock_y + (mwh % 24) * F_ONE
 				for mw in 3:
 					rocks.append({"x": mwx + (mw * 72 - 72) * F_ONE, "y": mwy, "kind": 2})
+				# Central permeable divider: 4 world-bags at SCREEN_CX, 68px apart, so a
+				# ~58px gap sits between each (bullets thread it). Left lane WORLD_LEFT..302
+				# and right lane 338..WORLD_RIGHT both >> HULL_CLEARANCE.
+				for dv in 4:
+					sandbags.append({"x": SCREEN_CX, "y": _next_rock_y + (dv * 68) * F_ONE, "world": 1})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
