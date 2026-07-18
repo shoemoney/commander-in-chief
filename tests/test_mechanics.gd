@@ -2444,3 +2444,35 @@ func test_c4_sector_landmarks() -> void:
 	Runner.T.ok(crane >= 2, "the foundry sector (gate 4) stamps a kind-3 crane pair (%d)" % crane)
 	# The pipeline's 80px kind-2 pitch threads a hull-clear lane at the dropped slot.
 	Runner.T.ok(80 * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE, "the pipeline threads a hull-clear lane")
+
+
+func test_c4_lane_block_reroute() -> void:
+	# c4 2v: a temporary lane-block seals a flank span on a tick cycle — SOLID
+	# while sealed (reroute), the opposite flank a hull-clear bypass, OPEN the
+	# rest of the cycle. Campaign seg>=2 only -> torture/endless never see it ->
+	# goldens byte-identical.
+	var sim := SimWorld.new(43, 1)
+	var band := 2
+	var lh: int = SimWorld._mix(band, 733)
+	var span_off: int = 250 + lh % 400
+	var span_y: int = -(band * SimWorld.GATE_SPACING + (span_off + 60) * SimWorld.F_ONE)
+	var blk_left: bool = lh & 1 == 0
+	var blk_x: int = (SimWorld.WORLD_LEFT + 100 * SimWorld.F_ONE) if blk_left else (SimWorld.WORLD_RIGHT - 100 * SimWorld.F_ONE)
+	var bypass_x: int = (SimWorld.WORLD_RIGHT - 100 * SimWorld.F_ONE) if blk_left else (SimWorld.WORLD_LEFT + 100 * SimWorld.F_ONE)
+	# SEALED phase (phase 0).
+	sim.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300
+	Runner.T.ok(sim._lane_blocked(blk_x, span_y), "the sealed span is solid")
+	Runner.T.ok(not sim._lane_blocked(bypass_x, span_y), "the opposite flank is the open bypass")
+	# OPEN phase.
+	sim.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300 + SimWorld.LANE_BLOCK_SEALED
+	Runner.T.ok(not sim._lane_blocked(blk_x, span_y), "the span reopens in the OPEN phase")
+	# The guaranteed bypass clears the hull (~408px).
+	Runner.T.ok(SimWorld.WORLD_RIGHT - (SimWorld.WORLD_LEFT + 200 * SimWorld.F_ONE) >= SimWorld.HULL_CLEARANCE,
+		"the reroute bypass clears the hull")
+	# Golden inertness: seg 0-1 and endless are never lane-blocked.
+	sim.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300
+	Runner.T.ok(not sim._lane_blocked(blk_x, -500 * SimWorld.F_ONE), "band 0 is never lane-blocked (goldens inert)")
+	Runner.T.ok(not sim._lane_blocked(blk_x, -1500 * SimWorld.F_ONE), "band 1 (torture) is never lane-blocked")
+	var en := SimWorld.new(43, 1, "endless")
+	en.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300
+	Runner.T.ok(not en._lane_blocked(blk_x, span_y), "endless is never lane-blocked")

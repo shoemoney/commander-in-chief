@@ -371,6 +371,9 @@ const FLANK_WARN_TICKS := 45         # c2 2v: 0.75s dust-fall tell BEFORE any br
 const FLANK_STAGGER_TICKS := 30      # c2 2v: 0.5s between the two walls (no simultaneous double-pinch)
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
 const CHOKE_START_SEG := 2
+const LANE_BLOCK_CYCLE := 1200               # c4 2v: full temporary-lane-seal cycle (20s)
+const LANE_BLOCK_SEALED := 720               # sealed portion of the cycle (12s)
+const LANE_BLOCK_WARN := 45                  # 0.75s dust tell before a seal
 const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
 const FORK_GATES := [2, 4]             # the route-fork gates: their approach band is a cover-free decision apron
 # c2 3v BREATHING CURVE: one whole-band calm beat — the pre-Foundry exhale.
@@ -818,6 +821,12 @@ func _step_players(inputs: Array) -> void:
 						p["x"] = rpx
 						p["y"] = rpy
 					break
+		# c4 2v: a SEALED lane-block is solid to boots — revert a step that ENTERS
+		# it (escape-rule: a step started inside can still walk out). The open
+		# opposite flank is the guaranteed bypass, so you reroute, never softlock.
+		if _lane_blocked(p["x"], p["y"]) and not _lane_blocked(rpx, rpy):
+			p["x"] = rpx
+			p["y"] = rpy
 		_clamp_actor(p)
 		# c3 2v: stepping into deep-river MUD (band>=2) proactively SURFACES any
 		# lurking frogman within MUD_SURFACE_RADIUS — reusing the frogman surface
@@ -996,6 +1005,31 @@ func _concealed(t: Dictionary) -> bool:
 	## The unified fire-acquisition gate: smoke OR tall grass. Segs 0-1 stream
 	## no grass, so in the torture window this is exactly the old smoke gate.
 	return t["smoke_ticks"] > 0 or _in_grass(t) or _in_trench(t["x"], t["y"])
+
+
+func _lane_blocked(x: int, y: int) -> bool:
+	## c4 2v TEMPORARY LANE SEAL: a ~200x120 span on a hash-picked flank seals for
+	## LANE_BLOCK_SEALED ticks each LANE_BLOCK_CYCLE (a >= HULL_CLEARANCE bypass
+	## always sits on the opposite ~400px), reverting anyone who tries to cross it
+	## — so the static corridor gains a reroute beat. Pure tick_count-derived phase
+	## (no entity, no hashed field); campaign seg>=2 only, so torture (seg 0-1) and
+	## endless (band 0-1) never see it -> both goldens byte-identical.
+	if mode != "campaign":
+		return false
+	var band: int = absi(y) / GATE_SPACING
+	if band < CHOKE_START_SEG:
+		return false
+	var lh := _mix(band, 733)
+	var span_off: int = 250 + lh % 400
+	var off: int = absi(y) % GATE_SPACING
+	if off < span_off * F_ONE or off > (span_off + 120) * F_ONE:
+		return false
+	var phase: int = posmod(tick_count + band * 300, LANE_BLOCK_CYCLE)
+	if phase >= LANE_BLOCK_SEALED:
+		return false   # OPEN phase — free passage
+	if lh & 1 == 0:
+		return x <= WORLD_LEFT + 200 * F_ONE
+	return x >= WORLD_RIGHT - 200 * F_ONE
 
 
 func _choke_bounds(y: int) -> Array:
@@ -2115,6 +2149,10 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 					e["x"] = pvx
 					e["y"] = pvy
 				break
+	# c4 2v: enemies reroute around a SEALED lane-block too (same escape rule).
+	if _lane_blocked(e["x"], e["y"]) and not _lane_blocked(pvx, pvy):
+		e["x"] = pvx
+		e["y"] = pvy
 	if not sandbags.is_empty():
 		for sb in sandbags:
 			if absi(e["x"] - sb["x"]) <= SANDBAG_HALF_W and absi(e["y"] - sb["y"]) <= SANDBAG_HALF_H:
@@ -3139,6 +3177,21 @@ func _in_water(x: int, y: int) -> bool:
 # --- Camera & world streaming ---
 
 func _step_camera() -> void:
+	# c4 2v: lane-block TELEGRAPH — emit warn/seal/clear cues for the band in view
+	# so a seal reads before it commits. Checksum-excluded events; pure phase read.
+	if mode == "campaign":
+		var lb_band: int = absi(camera_top) / GATE_SPACING
+		if lb_band >= CHOKE_START_SEG:
+			var lbh := _mix(lb_band, 733)
+			var lbphase: int = posmod(tick_count + lb_band * 300, LANE_BLOCK_CYCLE)
+			var lbx: int = (WORLD_LEFT + 100 * F_ONE) if lbh & 1 == 0 else (WORLD_RIGHT - 100 * F_ONE)
+			var lby: int = -(lb_band * GATE_SPACING + (250 + lbh % 400 + 60) * F_ONE)
+			if lbphase == LANE_BLOCK_CYCLE - LANE_BLOCK_WARN:
+				events.append({"t": "lane_warn", "x": lbx, "y": lby})
+			elif lbphase == 0:
+				events.append({"t": "lane_seal", "x": lbx, "y": lby})
+			elif lbphase == LANE_BLOCK_SEALED:
+				events.append({"t": "lane_clear", "x": lbx, "y": lby})
 	# Ratchet: follows the highest (most advanced) alive player, never scrolls back.
 	var focus := 0
 	var found := false
