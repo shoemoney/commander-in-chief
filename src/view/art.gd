@@ -384,7 +384,8 @@ const FOLIAGE := Color(0.82, 1.0, 0.66)
 # re-greened. tint() now ramps the FOLIAGE keys toward ash by foliage_march (set
 # each frame from _sector_march), compounding with fern_col so the foundry chars.
 const FOLIAGE_ASH := Color(0.66, 0.60, 0.50)
-const _FOLIAGE_KEYS := {"tree_large": true, "tree_small": true, "fern": true}
+const _FOLIAGE_KEYS := {"tree_large": true, "tree_small": true, "fern": true,
+	"fern2": true, "hedge": true}   # a1-05 r2: the foundry undergrowth is ALL hedges — char them too
 static var foliage_march := 0.0
 const TINT := {
 	# Heroes render bright, not olive-washed — the tan Leader model in the

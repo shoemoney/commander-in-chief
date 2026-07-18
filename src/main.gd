@@ -725,6 +725,7 @@ func start_watch() -> void:
 
 
 func _reset() -> void:
+	Art.foliage_march = 0.0   # a1-05 r2: neutral until a gameplay frame feeds the march (no stale leak)
 	_flush_bests()   # a run torn down without a debrief still banks its records
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
