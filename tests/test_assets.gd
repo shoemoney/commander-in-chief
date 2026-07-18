@@ -279,3 +279,17 @@ func test_a1_legacy-art_bakes_are_lossless() -> void:
 	Runner.T.ok(checked > 100, "scanned the legacy art bake .import files (%d)" % checked)
 	Runner.T.ok(offenders.is_empty(),
 		"no legacy art bake is BC-compressed (compress/mode=2 mushes the OUTLINE silhouette): %s" % str(offenders.slice(0, 5)))
+
+
+func test_a1_player_ident_and_ring_shape() -> void:
+	var ms = load("res://src/main.gd")
+	Art.colorblind = false
+	var p1: Color = ms._player_ident_color(0)
+	var p2: Color = ms._player_ident_color(1)
+	Runner.T.ok(p1.g > p1.r and p1.g > p1.b, "P1 identity is green")
+	Runner.T.ok(p2.r > p2.b and p2.g > p2.b, "P2 identity is gold")
+	Art.colorblind = true
+	Runner.T.ok(ms._player_ident_color(0).b > ms._player_ident_color(0).g, "P1 identity converts blue-dominant under colorblind")
+	Art.colorblind = false
+	Runner.T.ok(not ms._player_ring_dashed(0), "P1 ring is SOLID")
+	Runner.T.ok(ms._player_ring_dashed(1), "P2 ring is DASHED (shape-distinct)")

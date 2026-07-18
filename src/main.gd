@@ -5505,6 +5505,19 @@ func _draw_projectiles() -> void:
 		draw_circle(bpos, 1.6, Color(1, 1, 1))
 
 
+static func _player_ident_color(slot: int, a := 1.0) -> Color:
+	# a1-18: the co-op identity color — P1 friendly-green routed through Art.safe
+	# (colorblind -> blue, never danger-red), P2 gold. Shared by the ring, the
+	# off-screen partner chevron, and the downed body so identity reads consistently.
+	var base := Art.safe(Color(0.4, 1.0, 0.4)) if slot == 0 else Color(1.0, 0.85, 0.3)
+	return Color(base.r, base.g, base.b, a)
+
+
+static func _player_ring_dashed(slot: int) -> bool:
+	# a1-18 LEG#3: P1 ring is SOLID, P2 ring is DASHED — hue-independent identity.
+	return slot != 0
+
+
 func _draw_players() -> void:
 	for i in sim.players.size():
 		var p := sim.players[i]
@@ -5548,7 +5561,7 @@ func _draw_players() -> void:
 			# teammate is visibly THERE on the field, not just a floating beacon.
 			# a1-18 UNIT#5: the downed body keeps its player COLOR (dim) so co-op can tell
 			# WHICH teammate is down — P1 safe-green, P2 gold (was an identity-blind grey).
-			var down_col := Art.safe(Color(0.5, 0.82, 0.5, 0.72)) if i == 0 else Color(0.85, 0.72, 0.4, 0.72)
+			var down_col := _player_ident_color(i, 0.72)
 			_spr(tex_name, pos, PI / 2, 0.46, down_col)
 		# Smoke concealment: a drifting grey shroud — drawn UNDER the soldier and
 		# the co-op identity ring (drawn over, it buried both for ~4 of its 5
@@ -5583,13 +5596,13 @@ func _draw_players() -> void:
 			# a1-18 LEG#2/LEG#3: P1 ring routes through Art.safe (green->blue in colorblind
 			# so it never reads as danger-red), and P1/P2 are SHAPE-distinct — P1 a SOLID
 			# ring, P2 a DASHED ring — so identity survives without the green-vs-gold hue.
-			var idc := Art.safe(Color(0.4, 1.0, 0.4, 0.6)) if i == 0 else Color(1.0, 0.85, 0.3, 0.6)
-			if i == 0:
-				draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
-			else:
+			var idc := _player_ident_color(i, 0.6)
+			if _player_ring_dashed(i):
 				for ds in 8:
 					var da := ds * TAU / 8.0
 					draw_arc(pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
+			else:
+				draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
 			# Revive-from-here affordance: revive has NO range check (the buddy
 			# teleports to you), but the beacon on the body implies you must run
 			# to it. Tell the reviver they can pay from where they stand.
@@ -5603,7 +5616,7 @@ func _draw_players() -> void:
 				# far-south downed buddy even before the chest covers the revive.
 				if dpos.x < 8 or dpos.x > 632 or dpos.y < 30 or dpos.y > 352:
 					var edge := Vector2(clampf(dpos.x, 12, 628), clampf(dpos.y, 34, 348))
-					var pcol := Art.safe(Color(0.4, 1.0, 0.4)) if q == 0 else Color(1.0, 0.85, 0.3)   # a1-18 LEG#2
+					var pcol := _player_ident_color(q)   # a1-18 LEG#2
 					var bdir := (dpos - edge).normalized()
 					# Shake-immune like every other screen-edge indicator (the
 					# threat edges, the boss bars) — the gunship-bar idiom.
