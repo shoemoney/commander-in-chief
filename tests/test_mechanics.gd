@@ -2270,3 +2270,35 @@ func test_c4_rear_warn_precedes_spawn() -> void:
 		if ev.get("t", "") == "rear_breach":
 			breached = true
 	Runner.T.ok(breached, "rear_breach fires at the spawn moment, not before")
+
+
+func test_c4_jungle_rooms() -> void:
+	# c4 3v: 1-in-3 seg>=2 stream rows stamp a 4-part ROOM (mouth -> interior ->
+	# rear gate) instead of a flat pocket. Validate every template's clearances
+	# directly, then confirm rooms actually stream past the golden reach.
+	Runner.T.ok(SimWorld.COVER_ROOMS.size() >= 4, "4 room templates authored")
+	for room in SimWorld.COVER_ROOMS:
+		var south_posts := []
+		var has_interior := false
+		var has_rear := false
+		for rp in room:
+			if rp[2] == 0 and rp[1] > 30:
+				south_posts.append(rp[0])
+			if rp[1] <= 30 and rp[1] >= -30:
+				has_interior = true
+			if rp[1] < -30:
+				has_rear = true
+		Runner.T.ok(south_posts.size() >= 2, "the room has a 2-post MOUTH")
+		south_posts.sort()
+		var mgap: int = (south_posts[south_posts.size() - 1] - south_posts[0]) - 2 * 16
+		Runner.T.ok(mgap * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE, "the mouth lane clears the hull (%dpx)" % mgap)
+		Runner.T.ok(has_interior and has_rear, "the room has an INTERIOR island and a REAR gate")
+	# And rooms actually stream (grass rear-gates appear) past the golden reach.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -6000 * SimWorld.F_ONE
+	sim._step_camera()
+	var grass := 0
+	for g in sim.rocks:
+		if g.get("kind", 0) == 1 and absi(g["y"]) / SimWorld.GATE_SPACING >= SimWorld.COVER_VARIETY_SEG:
+			grass += 1
+	Runner.T.ok(grass >= 1, "room grass-gates stream past the golden reach (%d)" % grass)

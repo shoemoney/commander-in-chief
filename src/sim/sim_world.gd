@@ -336,6 +336,17 @@ const COVER_POCKETS := [
 	[[0, -44], [-46, 10], [46, 10]],   # back wall + two wings
 	[[-44, -10], [44, -10], [0, 30]],  # V-mouth facing south
 ]
+# c4 3v: 4-part ROOM grammar (richer than the 3-piece pocket) for 1-in-3 seg>=2
+# stream rows — a MOUTH (2 kind-0 solids facing SOUTH, 48px gap) -> an INTERIOR
+# island (kind-0 rock or kind-3 hero) -> a REAR gate (kind-1 grass conceal strip
+# or kind-0 corner posts, 48px gap). Every intra-room lane clears HULL_CLEARANCE.
+# [dx, dy, kind] px from the row anchor; +dy is SOUTH (the mouth the player enters).
+const COVER_ROOMS := [
+	[[-40, 55, 0], [40, 55, 0], [0, 5, 3], [0, -48, 1]],                 # mouth -> hero island -> grass rear
+	[[-40, 55, 0], [40, 55, 0], [0, 0, 0], [0, -48, 1]],                 # mouth -> rock island -> grass rear
+	[[-44, 55, 0], [44, 55, 0], [0, 0, 1], [-40, -46, 0], [40, -46, 0]], # mouth -> grass core -> rear posts
+	[[-40, 58, 0], [40, 58, 0], [0, 8, 3], [0, -46, 1]],                 # wide mouth -> hero island -> grass rear
+]
 const VENT_CHUNKS := [
 	# No empty chunks (unlike MINE_CHUNKS): seg 4 keeps only ~2 rows after the
 	# keep-outs, so an empty roll on both would erase the mechanic for that
@@ -3219,28 +3230,30 @@ func _step_camera() -> void:
 				# maze stub below); every pocket lane clears HULL_CLEARANCE by
 				# the baked-in >=80px flank spacing. _mix pick, rng-free.
 				var pmix := _mix(r_idx, _world_seed)
-				var pocket: Array = COVER_POCKETS[pmix % COVER_POCKETS.size()]
-				var p_kind: int = 1 if pmix % 3 == 0 else 0   # 1/3 grass concealment, else classic
-				# c4 3v: correlate cover DENSITY with the shipped choke phase. On a WIDE
-				# (full-width, long-sightline) row the pocket hugs a WALL (edge cover only,
-				# center open for the long shot); on a NARROW (bitten/CQB) row it clusters
-				# mid-lane to break the short sightline (_in_trench already supplies the
-				# ditch). Reads _choke_bounds (pure), no new kind/field, seg>=2 inert.
 				var cb := _choke_bounds(_next_rock_y)
 				var wide: bool = cb[0] == WORLD_LEFT and cb[1] == WORLD_RIGHT
-				# WIDE: pocket spread along a WALL (edge cover, sparse). NARROW: pocket
-				# TIGHTENED to 60% spacing = a dense CQB slab cluster mid-lane. The
-				# spacing itself carries the density-by-width read (rng-free).
-				var spc: int = 5
+				# c4-05: WIDE rows hug a WALL (edge cover, open center for the long shot);
+				# NARROW rows cluster mid-lane (CQB). Rooms + pockets share this anchor.
 				if wide:
-					rx = (110 if r_idx % 2 == 0 else 530) * F_ONE   # WIDE -> edge cover at a wall
+					rx = (110 if r_idx % 2 == 0 else 530) * F_ONE
 				else:
-					rx = (cb[0] + cb[1]) / 2                         # NARROW -> mid-lane cluster
-					spc = 3                                          # tighter = denser cluster
-				for po in pocket:
-					var ppx: int = rx + (po[0] * spc / 5) * F_ONE
-					var ppy: int = _next_rock_y + (po[1] * spc / 5) * F_ONE
-					rocks.append({"x": _arena_margin_x(ppx, ppy), "y": ppy, "kind": p_kind})
+					rx = (cb[0] + cb[1]) / 2
+				if pmix % 3 == 0:
+					# c4 3v ROOM: a 4-part mouth->interior->rear-gate grammar (per-piece
+					# kind, fixed HULL_CLEARANCE lanes) — the richer half of the pocket set.
+					var room: Array = COVER_ROOMS[(pmix >> 4) % COVER_ROOMS.size()]
+					for rp in room:
+						var rpx: int = rx + rp[0] * F_ONE
+						var rpy: int = _next_rock_y + rp[1] * F_ONE
+						rocks.append({"x": _arena_margin_x(rpx, rpy), "y": rpy, "kind": rp[2]})
+				else:
+					# c4-05 density pocket: WIDE spreads (spc 5/5), NARROW tightens (3/5).
+					var pocket: Array = COVER_POCKETS[pmix % COVER_POCKETS.size()]
+					var spc: int = 5 if wide else 3
+					for po in pocket:
+						var ppx: int = rx + (po[0] * spc / 5) * F_ONE
+						var ppy: int = _next_rock_y + (po[1] * spc / 5) * F_ONE
+						rocks.append({"x": _arena_margin_x(ppx, ppy), "y": ppy, "kind": 0})
 			else:
 				# Segs 0-1 (the torture window) keep the shipped classic 2-rock
 				# pair verbatim — golden-inert.
