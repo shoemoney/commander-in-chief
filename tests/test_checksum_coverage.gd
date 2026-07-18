@@ -28,8 +28,10 @@ const KNOWN := {
 	"pickup": ["x", "y", "kind", "cost", "drop"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant", "salvage_tick"],
 	# breach_cd is the c2 staggered-flank countdown (conditionally hashed when
-	# live); breach_first_left is derived from which bunker fell (excluded — its
-	# effect lands in the hashed enemy spawn positions).
+	# live); breach_first_left is EFFECT-HASHED-ONLY (judge r1): it is derived
+	# from which bunker fell, and its entire effect is the wall each squad
+	# spawns from (WORLD_LEFT vs WORLD_RIGHT), which the enemy positions already
+	# feed — so it needs no direct feed to be desync-detectable.
 	"gate": ["y", "open", "b1", "b2", "boss", "final", "fork_x", "flanked",
 		"breach_cd", "breach_first_left"],
 	"boss": ["alive", "hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at"],

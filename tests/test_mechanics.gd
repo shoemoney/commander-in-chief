@@ -1456,6 +1456,45 @@ func test_c2_flank_telegraph_and_stagger() -> void:
 	Runner.T.eq(sim.enemies.size(), 2 * SimWorld.FLANK_SQUAD, "both walls breached after the 30t stagger")
 
 
+func test_c2_flank_mirror_right_first() -> void:
+	# Mirror (judge r1): when the RIGHT bunker falls, the RIGHT wall answers
+	# first at +45 and the LEFT at +75 — the causal read holds both ways. Also
+	# pins the flank_breach event x + timing per wall.
+	var F := SimWorld.F_ONE
+	var sim := SimWorld.new(31, 1)
+	var b1 := {"x": 180 * F, "y": -900 * F, "alive": true, "spawn_cd": 60}
+	var b2 := {"x": 460 * F, "y": -900 * F, "alive": false, "spawn_cd": 60}   # RIGHT bunker DOWN
+	sim.bunkers.append(b1)
+	sim.bunkers.append(b2)
+	sim.gates.append({"y": -1000 * F, "open": false, "b1": b1, "b2": b2, "boss": {}, "fork_x": 0})
+	sim.enemies.clear()
+	sim._step_gates()   # trigger
+	# Advance to +45: the RIGHT wall breaches first, with a flank_breach at WORLD_RIGHT.
+	for i in SimWorld.FLANK_WARN_TICKS - 1:
+		sim._step_gates()
+	sim.events.clear()
+	sim._step_gates()   # +45
+	Runner.T.eq(sim.enemies.size(), SimWorld.FLANK_SQUAD, "right wall breaches first")
+	for e in sim.enemies:
+		Runner.T.eq(e["x"], SimWorld.WORLD_RIGHT, "first squad is the RIGHT wall (nearest the kill)")
+	var first_breach_x := -999999
+	for ev in sim.events:
+		if ev["t"] == "flank_breach":
+			first_breach_x = ev["x"]
+	Runner.T.eq(first_breach_x, SimWorld.WORLD_RIGHT, "the +45 flank_breach event fires on the RIGHT wall")
+	# Advance to +75: the LEFT wall follows.
+	for i in SimWorld.FLANK_STAGGER_TICKS - 1:
+		sim._step_gates()
+	sim.events.clear()
+	sim._step_gates()   # +75
+	Runner.T.eq(sim.enemies.size(), 2 * SimWorld.FLANK_SQUAD, "left wall follows after the stagger")
+	var second_breach_x := -999999
+	for ev in sim.events:
+		if ev["t"] == "flank_breach":
+			second_breach_x = ev["x"]
+	Runner.T.eq(second_breach_x, SimWorld.WORLD_LEFT, "the +75 flank_breach event fires on the LEFT wall")
+
+
 func test_c2_flank_fires_once() -> void:
 	# Killing the SECOND bunker mid-countdown must not re-trigger a second breach.
 	var F := SimWorld.F_ONE
