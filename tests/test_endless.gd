@@ -471,3 +471,47 @@ func test_c4_supply_pod_renews_cover() -> void:
 		Runner.T.ok(center_open, "the rim's center is a legal open hull pocket")
 		# The open center clears the hull (48px pitch -> ~64px pocket).
 		Runner.T.ok(2 * 48 - 2 * 16 >= SimWorld.HULL_CLEARANCE / SimWorld.F_ONE, "the fort interior is standable")
+
+
+func test_c4_shop_barricades() -> void:
+	# c4 2v: from wave 2 on, clearing a wave walls the shop wheel with 4
+	# destructible world:1 sandbag L's (a regroup pocket); they crumble at
+	# intermission end. Gated wave>=2 -> the wave-1 clear places NONE so
+	# ENDLESS_GOLDEN stays byte-identical.
+	var sim := SimWorld.new(21, 1, "endless")
+	sim.wave = 2
+	sim.wave_pending = 0
+	sim.enemies.clear()
+	sim.step([_idle()])
+	Runner.T.ok(sim.intermission_ticks > 0, "the wave-2 clear opened the shop")
+	var bar := 0
+	for sb in sim.sandbags:
+		if sb.get("world", 0) == 1:
+			bar += 1
+	Runner.T.ok(bar >= 10, "the shop is walled with barricades (%d world bags)" % bar)
+	# Ride out the intermission: the barricades crumble.
+	var crumbled := false
+	for t in SimWorld.WAVE_INTERMISSION_TICKS + 4:
+		sim.step([_idle()])
+		for ev in sim.events:
+			if ev.get("t", "") == "sandbag_break":
+				crumbled = true
+		if sim.wave == 3:
+			break
+	Runner.T.ok(crumbled, "the barricades crumble (sandbag_break) as the intermission ends")
+	var left := 0
+	for sb in sim.sandbags:
+		if sb.get("world", 0) == 1:
+			left += 1
+	Runner.T.eq(left, 0, "no barricades survive into the next wave")
+	# The wave-1 clear places NO barricades (the gate holds -> goldens inert).
+	var s1 := SimWorld.new(21, 1, "endless")
+	s1.wave = 1
+	s1.wave_pending = 0
+	s1.enemies.clear()
+	s1.step([_idle()])
+	var b1 := 0
+	for sb in s1.sandbags:
+		if sb.get("world", 0) == 1:
+			b1 += 1
+	Runner.T.eq(b1, 0, "the wave-1 clear places no barricades (gate holds)")

@@ -3771,6 +3771,12 @@ func _step_waves() -> void:
 			for k in range(pickups.size() - 1, -1, -1):
 				if pickups[k].get("cost", 0) > 0:
 					pickups.remove_at(k)
+			# c4 2v: the shop barricades CRUMBLE as the intermission ends (world:1
+			# is the barricade tag; endless sets it nowhere else).
+			for sk in range(sandbags.size() - 1, -1, -1):
+				if sandbags[sk].get("world", 0) == 1:
+					events.append({"t": "sandbag_break", "x": sandbags[sk]["x"], "y": sandbags[sk]["y"]})
+					sandbags.remove_at(sk)
 			_start_wave()
 		return
 	if wave == 0:
@@ -3872,6 +3878,19 @@ func _step_waves() -> void:
 		for ci in 3:
 			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
 				"cost": _supply_cost(kinds[ci])})
+		# c4 2v SHOP BARRICADES: from wave 2 on, wall the shop wheel with 4
+		# destructible L-shaped world-bag clusters at the shop cluster's corners
+		# so the tactical reset is a regroup pocket, not a wide-open dead-end.
+		# Tagged world:1 (nothing else sets world in endless) -> trivial cleanup;
+		# they crumble at intermission end. Gated wave>=2 (wave 2 never CLEARS in
+		# torture -> ENDLESS_GOLDEN inert).
+		if wave >= 2:
+			for bcx in [150, 530]:
+				var barm: int = 24 if bcx < 320 else -24
+				for bcy in [shop_y - 30 * F_ONE, shop_y + 40 * F_ONE]:
+					for bo in [[0, 0], [0, -24], [barm, 0]]:
+						sandbags.append({"x": bcx * F_ONE + bo[0] * F_ONE,
+							"y": bcy + bo[1] * F_ONE, "world": 1})
 	else:
 		# Anti-stall: a passed-by ghillie re-cloaks (bullet-immune) yet stays
 		# alive, holding the wave open until the player backtracks into its
