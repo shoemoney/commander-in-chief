@@ -3191,9 +3191,12 @@ func _step_camera() -> void:
 			# Trench parapets (2v elevation, trimmed of the z-axis): two dug-in
 			# world-bag columns guard the Foundry approach — pure arithmetic,
 			# exempt from the player buy cap via the "world" flag.
+			# parapet = the column x, a non-hashed tag so the colossus phase-rise
+			# hook can COLLAPSE the nearest column (c3 2v) without touching any
+			# player-authored or other world bag. sandbags feed only x,y -> inert.
 			for tcx in [220, 420]:
 				for ti2 in 5:
-					sandbags.append({"x": tcx * F_ONE, "y": _next_gate_y + (280 + ti2 * 14) * F_ONE, "world": 1})
+					sandbags.append({"x": tcx * F_ONE, "y": _next_gate_y + (280 + ti2 * 14) * F_ONE, "world": 1, "parapet": tcx})
 			# Foundry phase terrain (5v): three live barrel clusters seed the
 			# finale floor — each colossus phase-shift COOKS the nearest one
 			# (the arena itself escalates). Fixed coords, no rng; the torture
@@ -3847,6 +3850,32 @@ func _step_colossus() -> void:
 						best_d = d
 			if best >= 0:
 				barrels[best]["fuse_ticks"] = 8
+			# c3 2v: the FLOOR also recedes — collapse the trench-parapet column
+			# nearest the boss (one per rise; 2 rises + 2 columns => both fall over
+			# the fight, so the arena the player learned in phase 1 is gone by the
+			# finish). Removal (not a hashed flag) drives it; colossus is torture-
+			# unreachable so goldens are untouched. Reuse barrel_blast for the juice.
+			var pcol: int = 0
+			var pfound := false
+			var pbest_d := 0
+			for sb in sandbags:
+				if sb.has("parapet"):
+					var pd := absi(sb["x"] - colossus["x"])
+					if not pfound or pd < pbest_d:
+						pcol = sb["parapet"]
+						pbest_d = pd
+						pfound = true
+			if pfound:
+				var px: int = 0
+				var py: int = 0
+				var pi := sandbags.size() - 1
+				while pi >= 0:
+					if sandbags[pi].get("parapet", -1) == pcol:
+						px = sandbags[pi]["x"]
+						py = sandbags[pi]["y"]
+						sandbags.remove_at(pi)
+					pi -= 1
+				events.append({"t": "barrel_blast", "x": px, "y": py})
 		colossus["pv"] = cph
 	# Engage when the final gate scrolls into view.
 	if colossus.is_empty():

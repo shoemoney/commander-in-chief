@@ -136,3 +136,44 @@ func test_c3_lane_sweep_punishes_parking() -> void:
 	for i in 200:
 		sim2._step_colossus()
 	Runner.T.eq(sim2.strikes.size(), s2_0, "center-lane play draws no sweep (the retreat stays fair)")
+
+
+func test_c3_colossus_collapses_parapets() -> void:
+	# c3 2v: the Foundry floor MUTATES mid-fight — each colossus phase rise
+	# collapses the trench-parapet column nearest the boss (2 rises + 2 columns),
+	# so the arena the player learned in phase 1 is gone by the finish. Only
+	# parapet-tagged bags collapse; other world cover is untouched.
+	var sim := SimWorld.new(61, 1)
+	var col := _engage(sim)
+	# Stamp the two tagged trench-parapet columns (as the Foundry stream does).
+	for tcx in [220, 420]:
+		for ti in 5:
+			sim.sandbags.append({"x": tcx * Fixed.ONE,
+				"y": col["y"] + (280 + ti * 14) * Fixed.ONE, "world": 1, "parapet": tcx})
+	# A decoy non-parapet world bag must SURVIVE both collapses.
+	sim.sandbags.append({"x": SimWorld.SCREEN_CX * Fixed.ONE, "y": col["y"] + 40 * Fixed.ONE, "world": 1})
+	var cols := {}
+	for sb in sim.sandbags:
+		if sb.has("parapet"):
+			cols[sb["parapet"]] = true
+	Runner.T.eq(cols.size(), 2, "two trench-parapet columns guard the Foundry")
+	# Phase 1 -> 2: the nearest column collapses.
+	col["hp"] = SimWorld.COLOSSUS_HP / 2
+	sim.step([_idle()])
+	var cols2 := {}
+	for sb in sim.sandbags:
+		if sb.has("parapet"):
+			cols2[sb["parapet"]] = true
+	Runner.T.eq(cols2.size(), 1, "the phase-2 rise collapses one parapet column")
+	# Phase 2 -> 3: the last column collapses.
+	col["hp"] = SimWorld.COLOSSUS_HP / 4
+	sim.step([_idle()])
+	var parapets_left := 0
+	var decoy_alive := false
+	for sb in sim.sandbags:
+		if sb.has("parapet"):
+			parapets_left += 1
+		elif sb["x"] == SimWorld.SCREEN_CX * Fixed.ONE:
+			decoy_alive = true
+	Runner.T.eq(parapets_left, 0, "the phase-3 rise collapses the last parapet column")
+	Runner.T.ok(decoy_alive, "non-parapet cover is left untouched by the collapse")
