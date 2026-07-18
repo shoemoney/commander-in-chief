@@ -210,3 +210,13 @@ func test_a1_boss_music_on_predicate() -> void:
 	sim.gates.clear()
 	sim.gates.append({"y": sim.camera_top - 5000 * Fixed.ONE, "boss": {"alive": true}})
 	Runner.T.ok(not ms._boss_music_on(sim), "a gate boss alive but OUTSIDE the camera band -> OFF")
+
+
+# --- a1-16: spend-wheel socket display gating ---
+
+func test_a1_wheel_socket_display_gating() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.eq(ms._wheel_socket_display(true, true), "full", "SELECTED socket shows full cost+stock")
+	Runner.T.eq(ms._wheel_socket_display(true, false), "full", "selected shows full even when unaffordable")
+	Runner.T.eq(ms._wheel_socket_display(false, true), "dot", "unselected AFFORDABLE shows the compact can-buy dot")
+	Runner.T.eq(ms._wheel_socket_display(false, false), "none", "unselected unaffordable shows neither (the × cue handles it)")

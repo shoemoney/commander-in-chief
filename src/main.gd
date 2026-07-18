@@ -6676,6 +6676,17 @@ func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
 	draw_polyline(pts, Color(0, 0, 0, 0.55), 1.0)
 
 
+static func _wheel_socket_display(selected: bool, afford: bool) -> String:
+	# a1-16: what a spend-wheel socket shows — the SELECTED socket shows full
+	# cost+stock; an unselected AFFORDABLE socket shows a compact can-buy dot;
+	# otherwise (unselected + unaffordable) neither (the × cue handles that).
+	if selected:
+		return "full"
+	if afford:
+		return "dot"
+	return "none"
+
+
 func _draw_wheel() -> void:
 	for i in sim.players.size():
 		if i >= _wheel.size() or not _wheel[i]["open"]:
@@ -6742,7 +6753,8 @@ func _draw_wheel() -> void:
 			# socket — the other seven stop crowding every ring with numbers. Unselected
 			# AFFORDABLE sockets get a compact green "can-buy" dot; the × already carries
 			# the not-afford read (colorblind-safe). Declutters 1P AND relieves 2P stacking.
-			if selected:
+			var wdisp := _wheel_socket_display(selected, afford)
+			if wdisp == "full":
 				var cost_txt := ("%d*" % acost) if is_token else str(acost)
 				var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 				Art.text(self, cost_txt, ipos + Vector2(-costw / 2.0, 24), 8,
@@ -6759,7 +6771,7 @@ func _draw_wheel() -> void:
 					var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 					Art.text(self, stock, ipos + Vector2(-sw2 / 2.0, 33), 8,
 						Color(1.0, 0.55, 0.45) if empty else Color(1.0, 0.97, 0.9))
-			elif afford:
+			elif wdisp == "dot":
 				# compact "can-buy" dot: affordability reads at a glance, no numbers
 				draw_circle(ipos + Vector2(0.0, 14.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
 		# Device-aware verb cue under the hub: the wheel states its own controls,
