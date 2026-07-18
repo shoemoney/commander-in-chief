@@ -2085,10 +2085,17 @@ func test_c4_fork_vest_vault() -> void:
 			vest = true
 	Runner.T.ok(vest, "the vault fork drops a guaranteed Vest deep in the gauntlet")
 	var ring := 0
+	var walls := 0
 	for m in sim.mines:
 		if absi(m["y"] - (gate_y + 660 * SimWorld.F_ONE)) < 20 * SimWorld.F_ONE:
 			ring += 1
-	Runner.T.ok(ring >= 1, "the Vest vault is ringed by guarding mines (%d)" % ring)
+	# The gate-4 gauntlet is the LEFT lane (bounty_x0=60); the reward + frame sit ~x120.
+	for sb in sim.sandbags:
+		if absi(sb["y"] - (gate_y + 600 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE \
+				and absi(sb["x"] - 120 * SimWorld.F_ONE) < 70 * SimWorld.F_ONE:
+			walls += 1
+	Runner.T.ok(ring >= 2, "the Vest vault is ringed by a mine field (%d)" % ring)
+	Runner.T.ok(walls >= 2, "the vault is framed by sandbag walls (%d)" % walls)
 	# OFFENSE seed: the classic offense capsule (kind 4-6), no vault vest there.
 	var sim2 := SimWorld.new(offense_seed, 1)
 	sim2.camera_top = -(4600 * SimWorld.F_ONE)

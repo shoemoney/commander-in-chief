@@ -3460,11 +3460,16 @@ func _step_camera() -> void:
 				if _gate_counter >= 4 and (fmix >> 12) % 3 == 0:
 					pickups.append({"x": (bounty_x0 + 60) * F_ONE, "y": _next_gate_y + 620 * F_ONE,
 						"kind": 2, "cost": 0})   # guaranteed Flak Vest
-					for vmo in [-40, 40]:
+					# A 3-mine ring + two framing sandbag walls read the pocket as a VAULT
+					# (a walled hazard room), not a loose drop.
+					for vmo in [-40, 0, 40]:
 						var vmx: int = (bounty_x0 + 60) * F_ONE + vmo * F_ONE
 						var vmy: int = _next_gate_y + 660 * F_ONE
 						if not _near_stream_bunker(vmx, vmy):
 							mines.append({"x": vmx, "y": vmy, "armed": true})
+					for vbo in [-56, 56]:
+						sandbags.append({"x": (bounty_x0 + 60) * F_ONE + vbo * F_ONE,
+							"y": _next_gate_y + 600 * F_ONE})
 				else:
 					pickups.append({"x": (bounty_x0 + 60) * F_ONE, "y": _next_gate_y + 620 * F_ONE,
 						"kind": 4 + fmix % 3, "cost": 0})   # offense capsule (Pierce/Spread/Triple)
