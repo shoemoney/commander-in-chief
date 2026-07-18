@@ -3204,6 +3204,11 @@ const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CL
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
 	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
 const GRENADE_PREVIEW_COL := Color(0.5, 0.85, 1.0)   # a2-15 LEG#5: FRIENDLY grenade preview is COOL (b>r), distinct from the warm/red enemy strike telegraph
+const STRIKE_UNDERLAY_SCALE := 2.1   # a3-07: the dark seat-underlay spans ~2.1x the kill radius (soft edge past the amber ring)
+# a3-06: muzzle heat caps. The ignition pop is warmed OFF white-hot (pop_lerp toward white
+# < 0.4) and every additive term is capped <= 0.66 so MG-spam sums lower and explosions keep
+# the white-hot bright-point monopoly. Pinned so the hierarchy can't regress silently.
+const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
 	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
 
@@ -6443,7 +6448,7 @@ func _draw_glow() -> void:
 			var mbase: Color = fx.get("col", Color(1.0, 0.95, 0.55))   # a1-09: enemy muzzles pass RED — see WHO fired
 			# a3-06 (AD#7/LEG#7): trim the additive fan/core so MG-spam stacks sum LOWER
 			# and explosions keep the bright-point hierarchy (was 0.8, out-blooming blasts).
-			var mc := Color(mbase.r, mbase.g, mbase.b, 0.66 * (0.95 - t * 0.85))
+			var mc := Color(mbase.r, mbase.g, mbase.b, MUZZLE_HEAT["fan_a"] * (0.95 - t * 0.85))
 			# Baked semicircle fan (flat edge at image bottom): rotate image-up onto
 			# the aim angle so the flat edge sits on the muzzle, fan blooming forward.
 			# Same lifetime/fade, still on the additive glow layer; hot core stays.
@@ -6452,15 +6457,15 @@ func _draw_glow() -> void:
 			g.draw_texture_rect(Art.tex("fx_muzzle_fan"), Rect2(-fl * 0.7, -fl, fl * 1.4, fl), false, mc)
 			g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			var mcore := mbase.lerp(Color(1.0, 1.0, 0.9), 0.6)
-			g.draw_circle(pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, 0.66 * (0.9 - t * 0.8)))
+			g.draw_circle(pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, MUZZLE_HEAT["core_a"] * (0.9 - t * 0.8)))
 			# First-frame-only: an oversize pop + 3 radiating slivers — the crack of the
 			# shot, gone before the next frame (4v: fan read soft). a3-06: the pop was
 			# pure-white (lerp 0.55 @ 0.9a) — the SAME white-hot read as an explosion core,
 			# so gunfire competed with blasts for the eye. Warm it OFF white-hot (lerp 0.32)
 			# and lower the alpha so the muzzle flare stays warm and explosions own white.
 			if t < fx.get("rate", 0.09):
-				var mpop := mbase.lerp(Color.WHITE, 0.32)
-				g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, 0.66))
+				var mpop := mbase.lerp(Color.WHITE, MUZZLE_HEAT["pop_lerp"])
+				g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
 				for ml in 3:
 					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
 					g.draw_line(pos + Vector2.from_angle(mla) * sz * 0.4,
@@ -6603,6 +6608,13 @@ func _draw_telegraphs() -> void:
 		var sp := _to_screen(s["x"], s["y"])
 		var frac: float = 1.0 - float(s["ticks"]) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
 		var r := SimWorld.GRENADE_RADIUS * PX
+		# a3-07 (VFX#1/LEG#1): a soft DARK underlay seats the lethal footprint on busy or
+		# bright ground — the amber ring + amber timer disc were amber-on-amber with nothing
+		# grounding them (they washed out on the foundry floor, over water, in tracer clutter).
+		# Drawn FIRST, under the whole kill radius, so the incoming-strike zone reads on any terrain.
+		var uw := r * STRIKE_UNDERLAY_SCALE
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(uw, uw) / 2.0, Vector2(uw, uw)),
+			false, Color(0.0, 0.0, 0.0, 0.30))
 		var col := Color(1.0, 0.9 - frac * 0.6, 0.2, 0.9)
 		if s["ticks"] <= 10 and (s["ticks"] / 3) % 2 == 0:
 			col = Color(1.0, 1.0, 1.0, 0.95)

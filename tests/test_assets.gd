@@ -653,3 +653,26 @@ func test_a3_dirt_feather_rings() -> void:
 	# The inner halo is meaningfully stronger than the old single 0.4 multiplier it replaced.
 	Runner.T.ok(df["in_a"] >= 0.5, "the inner halo is stronger than the old 0.4 (kills the hard rim)")
 	Runner.T.ok(df["out_scale"] >= 2.0, "the outer ring reaches well past the card edge")
+
+
+# --- a3-07: the incoming mortar/airstrike telegraph gets a dark underlay so the lethal
+# footprint seats on busy/bright ground (was amber-on-amber with nothing grounding it). ---
+
+func test_a3_strike_underlay_spans_the_kill_radius() -> void:
+	var c := _consts()
+	var scale: float = c["STRIKE_UNDERLAY_SCALE"]
+	# The soft dark seat must reach PAST the kill ring (the softspot fades, so it needs a
+	# little over 2x the radius to darken the full footprint out to the amber ring edge).
+	Runner.T.ok(scale > 2.0, "the strike dark-underlay spans past the kill radius (seats the footprint)")
+
+
+# --- a3-06: the muzzle flare is capped BELOW the explosion's white-hot read — the
+# ignition pop is warmed off pure white and every additive term is capped, so MG-spam
+# can't sum into an explosion-tier bright field. ---
+
+func test_a3_muzzle_heat_capped_below_explosions() -> void:
+	var c := _consts()
+	var mh: Dictionary = c["MUZZLE_HEAT"]
+	Runner.T.ok(mh["pop_lerp"] < 0.4, "the ignition pop is warmed OFF white-hot (lerp to white < 0.4)")
+	Runner.T.ok(mh["pop_a"] <= 0.66, "the pop alpha is capped (<= 0.66)")
+	Runner.T.ok(mh["fan_a"] <= 0.66 and mh["core_a"] <= 0.66, "fan + core additive alphas capped so MG-spam sums low")
