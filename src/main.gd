@@ -3200,6 +3200,7 @@ const _CAPSULE_TEX: Array[String] = ["cap_pierce", "cap_spread", "cap_triple", "
 const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH"]
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
 	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
+const GRENADE_PREVIEW_COL := Color(0.5, 0.85, 1.0)   # a2-15 LEG#5: FRIENDLY grenade preview is COOL (b>r), distinct from the warm/red enemy strike telegraph
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
 	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
 
@@ -5531,8 +5532,8 @@ func _draw_projectiles() -> void:
 		# true kill circle at the landing point — will this throw catch it?
 		var blast := SimWorld.GRENADE_RADIUS * PX
 		draw_texture_rect(Art.tex("fx_ring"), Rect2(land - Vector2.ONE * blast, Vector2.ONE * blast * 2.0),
-			false, Color(0.5, 0.85, 1.0, 0.18))   # a2-15 LEG#5: friendly preview cool (not the enemy-strike red)
-		draw_arc(land, blast, 0, TAU, 28, Color(0.5, 0.85, 1.0, 0.35), 1.0)
+			false, Color(GRENADE_PREVIEW_COL.r, GRENADE_PREVIEW_COL.g, GRENADE_PREVIEW_COL.b, 0.18))   # a2-15 LEG#5
+		draw_arc(land, blast, 0, TAU, 28, Color(GRENADE_PREVIEW_COL.r, GRENADE_PREVIEW_COL.g, GRENADE_PREVIEW_COL.b, 0.35), 1.0)
 		draw_arc(land, lr, 0, TAU, 16, lc, 1.0)
 		draw_line(land + Vector2(-2.5, 0), land + Vector2(2.5, 0), lc, 1.0)
 		draw_line(land + Vector2(0, -2.5), land + Vector2(0, 2.5), lc, 1.0)

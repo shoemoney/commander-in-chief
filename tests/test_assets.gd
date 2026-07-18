@@ -441,6 +441,8 @@ func test_a2_rend_capsule_out_of_danger_hue() -> void:
 	var triple: Color = caps[2]
 	Runner.T.ok(rend.b > rend.r, "REND is now blue-dominant (violet), out of the danger-red family")
 	Runner.T.ok(not rend.is_equal_approx(triple), "REND is clear of the TRIPLE pink")
+	var prev: Color = _consts()["GRENADE_PREVIEW_COL"]
+	Runner.T.ok(prev.b > prev.r, "the friendly grenade preview is COOL cyan (b>r), not the warm/red enemy-strike hue")
 
 
 # --- a2-14: marker icon per class ---
