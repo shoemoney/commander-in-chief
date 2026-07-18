@@ -246,7 +246,7 @@ const ARENA_L_SLOTS := [
 	[250, -60], [390, -288], [200, -180], [440, -180], [320, -48], [320, -312],
 ]
 const ARENA_LAYOUTS := [
-	[[0, 0], [0, -24], [22, 0]],                    # 0 corner L (the classic stub)
+	[[0, 0], [0, -24], [24, 0]],                    # 0 corner L (the exact classic stub)
 	[[-33, 0], [-11, 0], [11, 0], [33, 0]],         # 1 barricade belt (horizontal line)
 	[[0, 0], [0, -26], [0, -52], [0, -78]],         # 2 wreck line (vertical column)
 ]

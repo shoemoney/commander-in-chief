@@ -411,9 +411,10 @@ func test_c4_arena_layout_swap() -> void:
 	Runner.T.ok(SimWorld.ARENA_LAYOUTS.size() >= 3, "at least 3 authored layouts")
 	# The layout pick varies across the arena-shift waves.
 	var picks := {}
-	for w in [3, 6, 9, 12, 15]:
-		picks[(SimWorld._mix(w, 11) >> 12) % SimWorld.ARENA_LAYOUTS.size()] = true
-	Runner.T.ok(picks.size() >= 2, "the layout swaps across waves (%d distinct)" % picks.size())
+	for sd in [11, 3, 43, 97, 7]:
+		for w in [3, 6, 9, 12, 15]:
+			picks[(SimWorld._mix(w, sd) >> 12) % SimWorld.ARENA_LAYOUTS.size()] = true
+	Runner.T.eq(picks.size(), SimWorld.ARENA_LAYOUTS.size(), "every layout is reachable across waves/seeds")
 	# End to end: run to wave 3 and assert the drop is anchored to a real slot.
 	var sim := SimWorld.new(11, 1, "endless")
 	while sim.wave < 2:
