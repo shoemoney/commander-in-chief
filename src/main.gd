@@ -6738,30 +6738,30 @@ func _draw_wheel() -> void:
 			if not afford:
 				# Non-color "can't buy" cue beside the socket (colorblind-safe).
 				Art.text(self, "×", ipos + Vector2(12.0, -8.0), 9, Color(1.0, 0.5, 0.4))
-			# Shadowed like every other HUD string — the wheel opens over the most
-			# chaotic pixels on screen, exactly where the shadow matters most.
-			# Width-centered like the stock line below — the fixed -7 anchor let a
-			# 3-digit cost lean right of its socket while "5" floated off-center.
-			var cost_txt := ("%d*" % acost) if is_token else str(acost)
-			var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			Art.text(self, cost_txt, ipos + Vector2(-costw / 2.0, 24), 8,
-				Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
-			# Current stock vs cap under each socket — the buy decision no longer
-			# needs an eye-flick to the corner HUD.
-			var stock := ""
-			match int(item["kind"]):
-				0: stock = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
-				1: stock = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
-				2: stock = "VEST ON" if p["vest"] else "NO VEST"
-				4: stock = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
-				5: stock = "%d* HELD" % sim.tokens
-			if stock != "":
-				# Stock readout is the buy decision — full-alpha warm white, warm
-				# red the moment the pool it reads is empty.
-				var empty := stock.begins_with("0/") or stock == "NO VEST"
-				var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-				Art.text(self, stock, ipos + Vector2(-sw2 / 2.0, 33), 8,
-					Color(1.0, 0.55, 0.45) if empty else Color(1.0, 0.97, 0.9))
+			# a1-16 HUD#1/LEG#6: the full cost + stock text draws ONLY on the SELECTED
+			# socket — the other seven stop crowding every ring with numbers. Unselected
+			# AFFORDABLE sockets get a compact green "can-buy" dot; the × already carries
+			# the not-afford read (colorblind-safe). Declutters 1P AND relieves 2P stacking.
+			if selected:
+				var cost_txt := ("%d*" % acost) if is_token else str(acost)
+				var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+				Art.text(self, cost_txt, ipos + Vector2(-costw / 2.0, 24), 8,
+					Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
+				var stock := ""
+				match int(item["kind"]):
+					0: stock = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
+					1: stock = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
+					2: stock = "VEST ON" if p["vest"] else "NO VEST"
+					4: stock = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
+					5: stock = "%d* HELD" % sim.tokens
+				if stock != "":
+					var empty := stock.begins_with("0/") or stock == "NO VEST"
+					var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+					Art.text(self, stock, ipos + Vector2(-sw2 / 2.0, 33), 8,
+						Color(1.0, 0.55, 0.45) if empty else Color(1.0, 0.97, 0.9))
+			elif afford:
+				# compact "can-buy" dot: affordability reads at a glance, no numbers
+				draw_circle(ipos + Vector2(0.0, 14.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
 		# Device-aware verb cue under the hub: the wheel states its own controls,
 		# and the cancel button is the real glyph (pad B / keycap C), not a letter.
 		# Revive-guard (5-vote panel item): with a teammate down, a buy that
