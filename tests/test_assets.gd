@@ -588,3 +588,33 @@ func test_a3_meta_screen_scrim_seals_content_screens() -> void:
 	Runner.T.ok(pa >= 0.74 and pa < 0.9, "PAUSE recedes (>=0.74) yet stays legible (< content seal)")
 	# TITLE deliberately keeps the attract firefight visible behind it.
 	Runner.T.ok(mn._scrim_alpha(TITLE, full) < 0.7, "TITLE keeps the attract fight visible (< 0.7)")
+	# The bordered CONTENT screens (HALL/HOWTO) emit a solid interior WELL under the
+	# chrome; PAUSE seals by scrim ALONE (no well) so the frozen run stays faintly read.
+	Runner.T.ok(mn._content_well(HALL) and mn._content_well(HOWTO),
+		"HALL/HOWTO draw the interior well behind the frame")
+	Runner.T.ok(not mn._content_well(PAUSE) and not mn._content_well(TITLE),
+		"PAUSE/TITLE are scrim-only (no content well)")
+	# The well must sit INSIDE the Rect2(20,8,600,344) chrome frame (frame draws over it).
+	var well: Rect2 = mn._content_well_rect()
+	var frame := Rect2(20, 8, 600, 344)
+	Runner.T.ok(frame.encloses(well), "the well rect is fully inside the chrome frame")
+
+
+# --- a3-03: endless gets its OWN base ground palette (warm rust/ochre) instead of
+# campaign jungle-green nudged +0.04, so the arena reads as its own place. ---
+
+func test_a3_endless_has_its_own_ground_palette() -> void:
+	var ms = load("res://src/main.gd")
+	var endless: Array = ms._ground_stops("endless")
+	var campaign: Array = ms._ground_stops("campaign")
+	var eg: Array = endless[0]   # endless grass stops
+	var cg: Array = campaign[0]  # campaign grass stops
+	Runner.T.eq(eg.size(), 5, "endless grass ramp has 5 stops (matches the ramp)")
+	Runner.T.eq(campaign[1].size(), 5, "campaign dirt ramp has 5 stops")
+	# The base (wave-1 / sector-1) floor must read distinctly NON-jungle: campaign starts
+	# bright yellow-green (g >= r), endless starts warm rust-ochre (r clearly > g).
+	var e0: Color = eg[0]
+	var c0: Color = cg[0]
+	Runner.T.ok(c0.g >= c0.r, "campaign start is green-forward (g >= r)")
+	Runner.T.ok(e0.r > e0.g + 0.15, "endless start is warm rust-ochre (r well above g)")
+	Runner.T.ok(e0 != c0, "endless base is a genuinely different color, not a nudge")

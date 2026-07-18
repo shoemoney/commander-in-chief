@@ -558,6 +558,20 @@ func _activate() -> void:
 				open(Mode.TITLE)
 
 
+static func _content_well(scrim_mode: int) -> bool:
+	# a3-02: HALL/HOWTO are bordered CONTENT screens — they get a solid dark interior
+	# well behind the chrome frame so the attract firefight can't bleed through the
+	# frame texture's transparent regions. PAUSE recedes via scrim ALONE (no well), so
+	# the frozen run stays faintly readable behind the settings list.
+	return scrim_mode == Mode.HALL or scrim_mode == Mode.HOWTO
+
+
+static func _content_well_rect() -> Rect2:
+	# The interior fill, inset inside the Rect2(20,8,600,344) chrome frame so the frame's
+	# decorative border still draws over its own edge (chrome is drawn AFTER the well).
+	return Rect2(30, 17, 580, 326)
+
+
 static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
 	# The backdrop scrim for each menu screen (before the _open_t settle envelope).
 	# TITLE keeps the attract fight mostly visible; the title stack near-blacks under
@@ -587,14 +601,14 @@ func _draw() -> void:
 	# screen where the setting is toggled, and it isn't _motion-gated itself.
 	var sa := _scrim_alpha(mode, main._motion)
 	draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.05, 0.02, sa * _open_t))
-	if mode == Mode.HALL or mode == Mode.HOWTO:
+	if _content_well(mode):
 		# Plate the bare text on the Apocalypse frame, debrief-style (underlay
 		# darkens the well, frame carries the chrome).
 		var fr := Rect2(20, 8, 600, 344)
 		# a3-02: a SOLID desaturating dark well seals the frame INTERIOR before the
 		# chrome — the _under frame texture has transparent regions the firefight showed
 		# through even at a high scrim. Cool-dark near-opaque fill; the frame draws on top.
-		draw_rect(Rect2(30, 17, 580, 326), Color(0.035, 0.055, 0.05, 0.92 * _open_t))
+		draw_rect(_content_well_rect(), Color(0.035, 0.055, 0.05, 0.92 * _open_t))
 		draw_texture_rect(Art.tex("ui_frame_lrg_under"), fr, false, Color(1, 1, 1, 0.9 * _open_t))
 		draw_texture_rect(Art.tex("ui_frame_lrg"), fr, false, Color(0.85, 0.9, 0.75, _open_t))
 		if mode == Mode.HALL:
