@@ -457,6 +457,10 @@ const BOSS_HIT_RADIUS := 20 * F_ONE
 const BOSS_SPEED := 2 * F_ONE
 const BOSS_Y_OFFSET := 40 * F_ONE
 const BOSS_CYCLE_TICKS := 360
+# The four gunship-arena cover bags as [x, y_off_from_gate] pairs — the ONE
+# source of truth shared by the arena authoring AND the rotating-denial
+# invalidator, so a denied spot can never drift off a real bag.
+const GUNSHIP_COVER_BAGS := [[164, 120], [200, 120], [432, 200], [468, 200]]
 const BOSS_SPRAY_INTERVAL_TICKS := 12
 const BOSS_BOUNTY := COIN_BUNKER * 4
 # Mortar volley: the three strike ticks within the second half of the phase cycle.
@@ -3477,9 +3481,9 @@ func _step_camera() -> void:
 			# c3 2v BREAKS THE MIRROR: the right pair shifts +40px so the inner
 			# gap no longer centers on 296 — the straight-up center lane is gone
 			# and the gunship arena gets its own asymmetric identity.
-			for bsx in [164, 200, 432, 468]:
-				sandbags.append({"x": bsx * F_ONE,
-					"y": _next_gate_y + (120 if bsx < 300 else 200) * F_ONE})
+			for bag in GUNSHIP_COVER_BAGS:
+				sandbags.append({"x": bag[0] * F_ONE,
+					"y": _next_gate_y + bag[1] * F_ONE})
 			# c3 2v PARTIAL BRIDGE-SPAN WRECK: a 2-slab kind-2 wall straddling
 			# center (256/336) denies the center run — commit to a flank. Flank
 			# lanes [16,216]/[376,624] >> HULL_CLEARANCE.
@@ -4489,9 +4493,9 @@ func _step_one_boss(boss: Dictionary) -> void:
 	# (gate 3) only — endless minibosses have no such bags (no-op) — so gate 3 is
 	# torture-inert and ENDLESS_GOLDEN is untouched.
 	if mode == "campaign" and t == BOSS_CYCLE_TICKS / 2:
-		var spot_i: int = posmod(tick_count / BOSS_CYCLE_TICKS, 4)
-		var spot_x: int = [164, 200, 432, 468][spot_i] * F_ONE
-		_add_strike(spot_x, boss["gate_y"] + 120 * F_ONE)
+		var spot_i: int = posmod(tick_count / BOSS_CYCLE_TICKS, GUNSHIP_COVER_BAGS.size())
+		var bag: Array = GUNSHIP_COVER_BAGS[spot_i]
+		_add_strike(bag[0] * F_ONE, boss["gate_y"] + bag[1] * F_ONE)
 	# Endless tier escalation (9v: waves 5/10/15/20 differed only by HP).
 	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
 	var tier: int = wave / 5
