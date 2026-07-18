@@ -471,3 +471,9 @@ func test_a2_buy_subclasses() -> void:
 	Runner.T.ok(sfx._sounds["buy_grab"].data.size() != sfx._sounds["buy"].data.size(), "buy_grab is a distinct voice from buy")
 	Runner.T.ok(sfx._sounds["buy_fanfare"].data.size() != sfx._sounds["buy"].data.size(), "buy_fanfare is a distinct voice from buy")
 	sfx.free()
+
+
+func test_a2_buy_subclass_callsites() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('play("buy_grab"'), "the rare-capsule grab call-site plays buy_grab")
+	Runner.T.ok(src.contains('play("buy_fanfare"'), "a milestone reward call-site plays buy_fanfare")
