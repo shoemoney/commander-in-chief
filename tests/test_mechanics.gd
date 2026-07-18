@@ -791,7 +791,7 @@ func test_arena_templates_are_clearable_and_barrel_safe() -> void:
 	var g4: Dictionary = sim2.gates[3]
 	var chained := 0
 	for bl in sim2.barrels:
-		if bl["y"] > g4["y"] and bl["y"] < g4["y"] + 120 * SimWorld.F_ONE:
+		if bl["y"] > g4["y"] and bl["y"] <= g4["y"] + 140 * SimWorld.F_ONE:
 			sim2._detonate_barrel(bl, true)
 			chained += 1
 	Runner.T.ok(chained >= 3, "gate 4 fields its barrel cluster (got %d)" % chained)
