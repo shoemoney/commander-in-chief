@@ -220,3 +220,12 @@ func test_a1_wheel_socket_display_gating() -> void:
 	Runner.T.eq(ms._wheel_socket_display(true, false), "full", "selected shows full even when unaffordable")
 	Runner.T.eq(ms._wheel_socket_display(false, true), "dot", "unselected AFFORDABLE shows the compact can-buy dot")
 	Runner.T.eq(ms._wheel_socket_display(false, false), "none", "unselected unaffordable shows neither (the × cue handles it)")
+
+
+# --- a1-17: banner plate alpha floor ---
+
+func test_a1_banner_plate_alpha_floor() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(1.0), 1.0), "full text -> full plate")
+	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.3), 0.7), "fading text -> plate HELD at the 0.7 floor (no wash-out)")
+	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.02), 0.0), "text gone -> plate gone")

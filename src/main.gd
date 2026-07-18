@@ -7205,14 +7205,22 @@ func _draw_banners(top_msg: String) -> void:
 ## Shared victory/debrief result-card scaffold: translucent panel + centered
 ## title + a stack of centered stat rows (each optionally icon-prefixed).
 ## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?, icon_col?}.
+static func _banner_plate_alpha(text_a: float) -> float:
+	# a1-17 HUD#5/LEG#7: the banner plate holds a floor (0.7) while the text is at
+	# all visible, so the dark backing LEADS the words in and never washes out at the
+	# fade edges over bright terrain (was 0.5*text-alpha, fading WITH the words).
+	return (maxf(text_a, 0.7) if text_a > 0.05 else 0.0)
+
+
 func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
 	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	# pad_left extends the plate leftward under a fronting badge; the text stays
 	# centered on 320, so only the left edge grows (right stays symmetric to text).
+	var plate_a := _banner_plate_alpha(a)
 	_metal_plate(Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0,
-		w + 10.0 + pad_left, size + 7.0), a)
+		w + 10.0 + pad_left, size + 7.0), plate_a)
 
 
 func _metal_plate(r: Rect2, a: float) -> void:

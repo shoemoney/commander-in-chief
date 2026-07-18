@@ -189,14 +189,21 @@ func _draw() -> void:
 	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
 	# the chip gold and pulse it the instant the live score passes it.
 	if main.best_score > 0:
-		var beating: bool = sim.score > main.best_score
-		var btxt := ("RECORD! %d" % sim.score) if beating else ("BEST %d" % main.best_score)
-		if _fits(x, _tw(btxt) + 8.0):
-			var bcol := Color(0.75, 0.7, 0.5)
-			if beating:
+		if sim.score > main.best_score:
+			# a1-17 HUD#2/HUD#3: 'record beaten' is ONE reserved BADGE (medal + "RECORD"),
+			# not a SECOND copy of the score competing with the medal chip beside it.
+			# Pulses to mark the moment; plain gold stays reserved for streak/flawless.
+			if _fits(x, _tw("RECORD") + ICON + 6.0):
 				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-				bcol = Color(0.75, 0.7, 0.5).lerp(Color(1.0, 0.85, 0.25), 0.5 + 0.5 * rp)
-			x = _text(btxt, x, y + ICON - 3.0, bcol) + 8.0
+				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
+				draw_texture_rect(Art.tex("icon_medal"), Rect2(x, y, ICON, ICON), false, rcol)
+				x = _text("RECORD", x + ICON + 1.0, y + ICON - 3.0, rcol) + 8.0
+		else:
+			# Live BEST target: the record to chase — a DIM reference chip, sunk below
+			# the live chest/score/ammo tier so vanity no longer competes with stats.
+			var btxt := "BEST %d" % main.best_score
+			if _fits(x, _tw(btxt) + 8.0):
+				x = _text(btxt, x, y + ICON - 3.0, Color(0.7, 0.66, 0.5)) + 8.0
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
 			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
