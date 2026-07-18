@@ -589,7 +589,7 @@ func _draw() -> void:
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
 		var ttw := Art.font().get_string_size("PROJECT IKARI", HORIZONTAL_ALIGNMENT_LEFT, -1, 34).x
-		draw_rect(Rect2(320.0 - ttw / 2.0 - 10.0, 60.0, ttw + 20.0, 40.0), Color(0.03, 0.05, 0.03, 0.6))
+		draw_rect(Rect2(320.0 - ttw / 2.0 - 10.0, 60.0, ttw + 20.0, 40.0), Color(0.03, 0.05, 0.03, 0.55))   # a2-04 r2: match sibling plate alpha
 		_center_text("PROJECT IKARI", 88, 34, Color(1.0, 0.85, 0.3))
 		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
 		# seed-hint siblings — small text straight on the live attract firefight
