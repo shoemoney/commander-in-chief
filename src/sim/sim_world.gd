@@ -2223,6 +2223,21 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 		if target["y"] > e["hold_y"]:
 			return
 		e.erase("hold_y")
+	# c3 2v flanker crossing: once the leash clears, the sack flanker CROSSES
+	# the lane toward the nest-side pocket (steering to flank_x while tracking
+	# the player's row) before it resumes the standoff — an authored crossfire,
+	# not ambient drift. Cleared the moment it passes the centerline onto the
+	# nest side. flank_x is unhashed / gate-3 torture-inert (goldens untouched).
+	if e.has("flank_x"):
+		if (e["x"] - SCREEN_CX) * (e["flank_x"] - SCREEN_CX) > 0:
+			e.erase("flank_x")
+		else:
+			var wx: int = e["flank_x"] - e["x"]
+			var wy: int = target["y"] - e["y"]
+			var wlen := Fixed.length(wx, wy)
+			if wlen > F_ONE:
+				_advance_toward(e, wx, wy, wlen, ELITE_SPEED)
+			return
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0 and dlen > F_ONE:
@@ -3493,11 +3508,16 @@ func _stamp_stretch_setpieces() -> void:
 			# (leash trips ~20px north of the nest), then flanks — converting the
 			# frontal peek-and-delete gallery into a pincer. No new field (rides
 			# the shipped hold_y leash); mirror x = the sack's opposite side.
-			var flank_x: int = (170 if _gate_counter % 2 == 1 else 470) * F_ONE
-			enemies.append({"x": flank_x, "y": _next_gate_y + 300 * F_ONE, "alive": true,
+			# It spawns on the wall OPPOSITE the nest, then (once the leash trips)
+			# CROSSES the lane toward the nest-side pocket — an authored crossfire
+			# path, not ambient drift. flank_x is the nest-side x it steers to; the
+			# leash is set ~10px north of the nest so it trips as the player commits
+			# to the peek. flank_x is spawn-immutable, unhashed (gate-3 torture-inert).
+			var flank_spawn_x: int = (170 if _gate_counter % 2 == 1 else 470) * F_ONE
+			enemies.append({"x": flank_spawn_x, "y": _next_gate_y + 300 * F_ONE, "alive": true,
 				"elite": true, "kind": "elite", "hp": 2, "fire_cd": ELITE_FIRE_CD_TICKS / 2,
 				"windup": 0, "lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0,
-				"hold_y": _next_gate_y + 280 * F_ONE})
+				"hold_y": _next_gate_y + 290 * F_ONE, "flank_x": sack_x})
 			return
 		# Authored blockade setpiece (5v): a 2-4 bag line mid-stretch the
 		# player must grenade, flank, or crush — rides the ENTIRE sandbag

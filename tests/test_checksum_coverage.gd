@@ -22,8 +22,12 @@ const KNOWN := {
 		"rend_ticks", "smoke_ticks", "claymores", "flush_cd"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell", "hold"],
+	# flank_x (c3 2v) is the sack flanker's nest-side crossing target — spawn-
+	# immutable, unhashed (removed once it crosses center); the sack is gate-3+,
+	# torture-unreachable, so it never enters either golden window.
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
-		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin", "hp", "hold_y"],
+		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin", "hp",
+		"hold_y", "flank_x"],
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost", "drop"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant", "salvage_tick"],

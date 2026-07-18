@@ -1869,3 +1869,21 @@ func test_c3_fire_sack_flanker() -> void:
 		"the flanker is on the OPPOSITE wall from the nest (a pincer)")
 	# It holds until the player crosses the leash (hold_y).
 	Runner.T.ok(flankers[0]["hold_y"] != 0, "the flanker is leashed until the player engages")
+	# c3-13 r2 (judge TO_TEN): its crossing target is on the NEST side — an
+	# authored crossfire path, not ambient drift.
+	var ftarget: int = flankers[0].get("flank_x", 0)
+	Runner.T.ok(ftarget != 0 and (ftarget - SimWorld.SCREEN_CX) * (nest_x - SimWorld.SCREEN_CX) > 0,
+		"the flanker steers to the nest-side pocket (an authored crossfire)")
+	# Trip the leash (player committed to the nest peek) and step the flanker —
+	# it must CROSS the lane toward the nest side, not idle on its spawn wall.
+	var fl: Dictionary = flankers[0]
+	var start_x: int = fl["x"]
+	var fake_target := {"x": nest_x, "y": gy + 280 * SimWorld.F_ONE, "alive": true}
+	for _i in 24:
+		var ddx: int = fake_target["x"] - fl["x"]
+		var ddy: int = fake_target["y"] - fl["y"]
+		var ddl := Fixed.length(ddx, ddy)
+		sim._step_elite(fl, fake_target, ddx, ddy, ddl)
+	Runner.T.ok(not fl.has("hold_y"), "the leash releases once the player commits to the peek")
+	Runner.T.ok(absi(fl["x"] - nest_x) < absi(start_x - nest_x),
+		"the flanker crosses the lane, closing the lateral gap to the nest side")
