@@ -779,6 +779,28 @@ func test_a3_kill_tier_scales_death_weight() -> void:
 	var light_gibs: int = 5 + ms._kill_tier("rusher") * 3
 	var heavy_gibs: int = 5 + ms._kill_tier("technical") * 3
 	Runner.T.ok(heavy_gibs > light_gibs, "a vehicle throws more gib than a light trooper (11 vs 5)")
+	# The death-pop is a LOCAL additive light (not a frame flash), radius 9 + tier*6.
+	var pop: Dictionary = ms._death_pop_fx(0, 0, "technical")
+	Runner.T.eq(pop["kind"], "light", "the death-pop is a LOCAL additive light fx, not a screen flash")
+	Runner.T.ok(is_equal_approx(pop["r"], 21.0), "a vehicle pop radius = 9 + tier(2)*6 = 21")
+	Runner.T.ok(pop["r"] > float(ms._death_pop_fx(0, 0, "rusher")["r"]), "a heavy pops bigger than a light trooper")
+
+
+# --- a3-14: the VICTORY card reaches K.I.A. parity — a NEW BEST! flag (shared predicate)
+# + a REDEPLOY prompt with the start glyph. ---
+
+func test_a3_victory_card_kia_parity() -> void:
+	var ms = load("res://src/main.gd")
+	# The shared BEST / NEW BEST! predicate (used by BOTH cards).
+	Runner.T.eq(ms._victory_best_text(100, 0), "", "no prior best -> no BEST row")
+	Runner.T.ok(String(ms._victory_best_text(300, 200)).contains("NEW BEST!"), "beating the best flags NEW BEST!")
+	Runner.T.ok(not String(ms._victory_best_text(100, 200)).contains("NEW BEST!"), "score below best -> no NEW BEST")
+	# The victory extra-rows: BEST (when a best exists) + an always-present REDEPLOY prompt.
+	var er: Array = ms._victory_extra_rows(300, 200, 1.0)
+	Runner.T.eq(er.size(), 2, "victory appends BEST + REDEPLOY when a best exists")
+	Runner.T.eq(er[er.size() - 1]["text"], "REDEPLOY", "the victory card gets a REDEPLOY prompt (K.I.A. parity)")
+	Runner.T.ok(er[er.size() - 1].has("icon"), "the REDEPLOY row carries the start-glyph icon")
+	Runner.T.eq(ms._victory_extra_rows(100, 0, 1.0).size(), 1, "no best -> just the REDEPLOY row")
 
 
 # --- a3-15: three place-defining ambience beds (river / foundry / shop), synthesized,

@@ -1928,6 +1928,33 @@ static func _kill_tier(kkind: String) -> int:
 	return 0
 
 
+static func _death_pop_fx(x: int, y: int, kkind: String) -> Dictionary:
+	# a3-13: the bright LOCAL death-pop every kill spawns — an additive "light" fx (NOT a
+	# frame flash), radius 9 + tier*6 so a heavy pops bigger than a trooper.
+	return {"x": x, "y": y, "t": 0.0, "kind": "light", "rate": 0.055,
+		"r": 9.0 + float(_kill_tier(kkind)) * 6.0, "col": Color(1.0, 0.9, 0.62)}
+
+
+static func _victory_best_text(score: int, best: int) -> String:
+	# a3-14: the shared BEST / NEW BEST! line — one predicate for BOTH the K.I.A. debrief
+	# and the VICTORY card (parity). "" when there is no prior best to show.
+	if best <= 0:
+		return ""
+	return "BEST %d" % best + ("   NEW BEST!" if score >= best else "")
+
+
+static func _victory_extra_rows(score: int, best: int, pulse: float) -> Array:
+	# a3-14: the K.I.A.-parity rows the VICTORY card appends — a NEW BEST! flag (shared
+	# predicate) + a REDEPLOY prompt with the START glyph (redeploy input works on victory).
+	var rows: Array = []
+	var bt := _victory_best_text(score, best)
+	if bt != "":
+		rows.append({"text": bt, "color": Color(0.9, 0.92, 0.85)})
+	rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, pulse),
+		"icon": Art.glyph_key("start"), "icon_size": 14.0})
+	return rows
+
+
 func _ev_kill(ev: Dictionary) -> void:
 	# No screen flash here: at kill-spam rates it strobes
 	# (photosensitivity); smoke + gib burst + blip + coin carry it.
@@ -1987,8 +2014,7 @@ func _ev_kill(ev: Dictionary) -> void:
 	# spike; a localized glow doesn't strobe the frame). Radius + gib volume scale by the unit
 	# tier so a heavy dies visibly bigger than a lone trooper (a2-12 already keyed gib COLOR).
 	var ktier := _kill_tier(kkind)
-	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.055,
-		"r": 9.0 + float(ktier) * 6.0, "col": Color(1.0, 0.9, 0.62)})
+	_fx.append(_death_pop_fx(ev["x"], ev["y"], kkind))
 	# Directional gib/spark burst — the kill hits back (5/8/11 gibs by tier, faster with tier).
 	for g in 5 + ktier * 3:
 		var ga := randf() * TAU
@@ -7577,16 +7603,13 @@ func _draw_banners(top_msg: String) -> void:
 		if _run_rescues > 0:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
-		# a3-14 (HUD#4/#8/#10): bring the VICTORY card to K.I.A. parity — the win screen
-		# was thinner than the death screen. A NEW BEST! celebration flag (same predicate
-		# as the K.I.A. debrief) + a REDEPLOY prompt (redeploy input works on victory too,
+		# a3-14 (HUD#4/#8/#10): bring the VICTORY card to K.I.A. parity — the win screen was
+		# thinner than the death screen. _victory_extra_rows appends a NEW BEST! flag (shared
+		# predicate with the debrief) + a REDEPLOY prompt (redeploy input works on victory too,
 		# but the card never told you so — the death card does).
-		if best_score > 0:
-			vrows.append({"text": "BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""),
-				"color": Color(0.9, 0.92, 0.85)})
 		var vrp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
-		vrows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, vrp),
-			"icon": Art.glyph_key("start"), "icon_size": 14.0})
+		for vr in _victory_extra_rows(sim.score, best_score, vrp):
+			vrows.append(vr)
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
 			Color(1, 1, 1, 0.96), true)   # a1-11: gold shine sweep
 		# Trophy overlaps blank panel space only (no row text under it), so it's
