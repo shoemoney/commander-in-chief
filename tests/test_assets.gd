@@ -72,3 +72,11 @@ func test_a1_foliage_tint_ramps_to_ash() -> void:
 	# the ramp is foliage-ONLY: unit/decor tints are untouched
 	Runner.T.ok(Art.tint("rusher").is_equal_approx(Color(2.1, 1.7, 1.15)), "unit tints ignore foliage_march")
 	Art.foliage_march = 0.0   # restore the static for other suites
+
+
+# --- a1-07: crater depression pit is scorched-only ---
+
+func test_a1_crater_pit_keys() -> void:
+	var ck: Dictionary = _consts()["_CRATER_KEYS"]
+	Runner.T.ok(ck.has("crater") and ck.has("crater_field"), "scorched craters get the depression pit")
+	Runner.T.ok(not ck.has("crater_water"), "water-filled craters are excluded from the dark pit")
