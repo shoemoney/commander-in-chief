@@ -3101,6 +3101,13 @@ const _UNIT_RIM := {"player1": true, "player2": true, "rusher": true, "elite": t
 	"frogman": true, "observer": true, "m_insurgent3": true, "m_insurgent4": true,
 	"m_insurgent5": true, "m_soldier2": true, "m_contractor2": true, "m_bombsuit": true,
 	"m_pilot": true, "ghillie": true, "courier": true, "sapper": true}
+# a1-02 figure-ground: small dark-clad HOSTILES wore the near-black rim and
+# merged into dark litter/craters. These get a warm-LIGHT separator rim in _spr
+# instead (heroes/frogman/observer/bombsuit keep the neutral rim — they read fine).
+const _LIGHT_RIM := {"rusher": true, "elite": true, "m_insurgent3": true,
+	"m_insurgent4": true, "m_insurgent5": true, "m_soldier2": true,
+	"m_contractor2": true, "sapper": true, "courier": true, "ghillie": true,
+	"m_pilot": true}
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
@@ -3144,6 +3151,13 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 			# dense foliage. The two camo units that LIVE in foliage get 1.9 —
 			# their whole failure mode is soft-merging into the greens.
 			d = (1.9 if tex_name == "ghillie" or tex_name == "courier" else 1.7) / s
+		if _LIGHT_RIM.has(tex_name):
+			# a1-02: a warm-LIGHT separator rim lifts the dark hostile off BOTH bright
+			# ground and dark scenery (the near-black rim vanished into the litter).
+			# Widened to 2.2px (the 4 diagonal offsets are thin) + brightened so the
+			# small hostile actually reads as a threat, not a dark speck.
+			oc = Color(1.0, 0.9, 0.62, tint.a)
+			d = 2.2 / s
 		for o in _OUTLINE_OFFSETS:
 			draw_texture(t, origin + o * d, oc)
 	draw_texture(t, origin, tint)
@@ -4630,7 +4644,9 @@ func _draw_enemies() -> void:
 		# Technical excluded: it gets a vehicle-width shadow in its own branch.
 		if e["kind"] != "frogman" and e["kind"] != "drone" and e["kind"] != "technical" \
 				and not (e["kind"] == "ghillie" and e.get("submerged", false)):
-			_ground_shadow(epos, 6.0)
+			# a1-02: warm-dark footprint so a hostile separates from the cool/neutral
+			# decor shadows even before its fill resolves (the eye reads "threat here").
+			_ground_shadow(epos, 6.0, 0.34, Color(0.12, 0.03, 0.0))
 		if e.get("marked", false):
 			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff
 			# reads across a chaotic field before you commit to chasing it.
