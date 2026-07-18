@@ -620,8 +620,13 @@ func test_a4_spine_is_a_worn_lane_route() -> void:
 	var col: Color = c["SPINE_COL"]
 	var lane: Vector2 = c["SPINE_LANE"]
 	# Warm packed earth, darker than the turf, and faint — a worn tint, not a painted road.
+	var tread: Color = c["SPINE_TREAD"]
 	Runner.T.ok(col.r > col.b, "the spine is WARM packed earth (r > b), reading as trampled ground")
 	Runner.T.ok(col.a < 0.2, "the spine is a FAINT worn tint, not an opaque painted road")
+	# r2 readability FLOOR: after the grass-mottle spot-check the spine sits in a narrow band —
+	# strong enough to read as a continuous anchor over turf, still under the painted-road ceiling.
+	Runner.T.ok(col.a >= 0.15, "the spine holds its r2 readability floor over grass mottle (a >= 0.15)")
+	Runner.T.ok(tread.a >= 0.13 and tread.a < 0.2, "the tread pair holds its r2 floor and stays faint (0.13 <= a < 0.2)")
 	# The centerline is CONTINUOUS, stays in the play corridor, and actually meanders — sweep
 	# a long stretch of absolute world-y (scrolling never moves it out of the lane or jumps it).
 	var prev: float = ms._spine_center_x(0.0)
