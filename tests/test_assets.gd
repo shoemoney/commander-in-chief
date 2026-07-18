@@ -358,3 +358,12 @@ func test_a2_body_ident_lean() -> void:
 	Art.colorblind = true
 	Runner.T.ok(ms._body_ident_lean(0).b > ms._body_ident_lean(0).r, "P1 body lean converts blue-dominant under colorblind")
 	Art.colorblind = false
+
+
+# --- a2-04: title BEST line drops zero fields ---
+
+func test_a2_title_best_line_drops_zeros() -> void:
+	var menu = load("res://src/view/menu.gd")
+	Runner.T.eq(menu._best_line(4500, 0, 138), "BEST — SCORE 4500 · 138m", "score-only best drops WAVE 0")
+	Runner.T.eq(menu._best_line(4500, 0, 0), "BEST — SCORE 4500", "a pure campaign best shows just the score")
+	Runner.T.ok(menu._best_line(4500, 3, 138).contains("WAVE 3"), "a real wave record is shown")

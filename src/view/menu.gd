@@ -586,6 +586,10 @@ func _draw() -> void:
 		_draw_back_button()
 		return
 	if mode == Mode.TITLE:
+		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
+		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
+		var ttw := Art.font().get_string_size("PROJECT IKARI", HORIZONTAL_ALIGNMENT_LEFT, -1, 34).x
+		draw_rect(Rect2(320.0 - ttw / 2.0 - 10.0, 60.0, ttw + 20.0, 40.0), Color(0.03, 0.05, 0.03, 0.6))
 		_center_text("PROJECT IKARI", 88, 34, Color(1.0, 0.85, 0.3))
 		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
 		# seed-hint siblings — small text straight on the live attract firefight
@@ -599,8 +603,9 @@ func _draw() -> void:
 		# Read order: title → tagline → one BRIGHT record line → menu. CAREER stays
 		# a dim whisper at 145 (clears the 156 first-row top since the c1 layout fix).
 		if main.best_score > 0:
-			var best_line := "BEST — SCORE %d · WAVE %d · %dm" % [main.best_score,
-				main.best_wave, main.best_dist]
+			# a2-04 HUD#8: only show the record fields that are non-zero (via a testable
+			# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
+			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist)
 			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
 			draw_rect(Rect2(320.0 - bw / 2.0 - 4.0, 122.0, bw + 8.0, 13.0),
 				Color(0.03, 0.05, 0.03, 0.55))
@@ -990,6 +995,17 @@ func _draw_howto() -> void:
 		# the ui_frame chrome (46 sat on the border art).
 		draw_texture_rect(Art.tex(special[i][0]), Rect2(50, sy - 17, 26, 26), false, special[i][1])
 		Art.text(self, special[i][2], Vector2(76, sy), 10, Color(0.88, 0.9, 0.8))
+
+static func _best_line(score: int, wave: int, dist: int) -> String:
+	# a2-04 HUD#8: the title BEST line drops zero fields so it never advertises
+	# "WAVE 0 · 0m" (a debug-dump read) on a fresh score-only best.
+	var s := "BEST — SCORE %d" % score
+	if wave > 0:
+		s += " · WAVE %d" % wave
+	if dist > 0:
+		s += " · %dm" % dist
+	return s
+
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, 320.0, y, size, col)
