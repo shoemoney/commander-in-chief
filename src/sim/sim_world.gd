@@ -343,7 +343,7 @@ const COVER_POCKETS := [
 # [dx, dy, kind] px from the row anchor; +dy is SOUTH (the mouth the player enters).
 const COVER_ROOMS := [
 	[[-40, 55, 0], [40, 55, 0], [0, 5, 3], [0, -48, 1]],                 # mouth -> hero island -> grass rear
-	[[-40, 55, 0], [40, 55, 0], [0, 0, 0], [0, -48, 1]],                 # mouth -> rock island -> grass rear
+	[[-40, 55, 0], [40, 55, 0], [0, 0, 0], [-64, -48, 2], [64, -48, 2]],  # mouth -> rock island -> kind-2 SIDE-DOOR rear (48px gap)
 	[[-44, 55, 0], [44, 55, 0], [0, 0, 1], [-40, -46, 0], [40, -46, 0]], # mouth -> grass core -> rear posts
 	[[-40, 58, 0], [40, 58, 0], [0, 8, 3], [0, -46, 1]],                 # wide mouth -> hero island -> grass rear
 ]

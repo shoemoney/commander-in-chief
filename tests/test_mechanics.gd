@@ -2293,12 +2293,36 @@ func test_c4_jungle_rooms() -> void:
 		var mgap: int = (south_posts[south_posts.size() - 1] - south_posts[0]) - 2 * 16
 		Runner.T.ok(mgap * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE, "the mouth lane clears the hull (%dpx)" % mgap)
 		Runner.T.ok(has_interior and has_rear, "the room has an INTERIOR island and a REAR gate")
-	# And rooms actually stream (grass rear-gates appear) past the golden reach.
-	var sim := SimWorld.new(43, 1)
-	sim.camera_top = -6000 * SimWorld.F_ONE
-	sim._step_camera()
-	var grass := 0
-	for g in sim.rocks:
-		if g.get("kind", 0) == 1 and absi(g["y"]) / SimWorld.GATE_SPACING >= SimWorld.COVER_VARIETY_SEG:
-			grass += 1
-	Runner.T.ok(grass >= 1, "room grass-gates stream past the golden reach (%d)" % grass)
+	# At least one room offers an explicit kind-2 SIDE-DOOR rear variant.
+	var has_door := false
+	for room in SimWorld.COVER_ROOMS:
+		for rp in room:
+			if rp[2] == 2 and rp[1] < -30:
+				has_door = true
+	Runner.T.ok(has_door, "a room offers a kind-2 side-slab door rear variant")
+	# Live stream: a FULL room geometry (a hull-clear MOUTH pair + a REAR gate
+	# ~103px north) streams past the golden reach.
+	var found_room := false
+	for sd in range(40, 60):
+		var sim := SimWorld.new(sd, 1)
+		sim.camera_top = -9000 * SimWorld.F_ONE
+		sim._step_camera()
+		for a in sim.rocks:
+			if a.get("kind", 0) != 0 or absi(a["y"]) / SimWorld.GATE_SPACING < SimWorld.COVER_VARIETY_SEG:
+				continue
+			for b in sim.rocks:
+				if b.get("kind", 0) != 0 or b["y"] != a["y"] or b["x"] <= a["x"]:
+					continue
+				var gap: int = b["x"] - a["x"]
+				if gap < 76 * SimWorld.F_ONE or gap > 92 * SimWorld.F_ONE:
+					continue
+				if gap - 2 * 16 * SimWorld.F_ONE < SimWorld.HULL_CLEARANCE:
+					continue
+				var mid: int = (a["x"] + b["x"]) / 2
+				for c in sim.rocks:
+					var ck: int = c.get("kind", 0)
+					var dy: int = c["y"] - a["y"]
+					if (ck == 1 or ck == 2) and absi(c["x"] - mid) <= 80 * SimWorld.F_ONE \
+							and dy <= -80 * SimWorld.F_ONE and dy >= -140 * SimWorld.F_ONE:
+						found_room = true
+	Runner.T.ok(found_room, "a full room (hull-clear mouth + rear gate) streams past the golden reach")
