@@ -3523,6 +3523,23 @@ func _step_camera() -> void:
 				"armed": true, "fuse_ticks": 0})
 			barrels.append({"x": SCREEN_CX - 28 * F_ONE, "y": _next_tank_y + 8 * F_ONE,
 				"armed": true, "fuse_ticks": 0})
+		# c4 3v ANTI-ARMOR GEOMETRY: seg>=2 tank bands get two flanking kind-2 slabs
+		# so the fight stops being an open-field circle-strafe — the slabs break the
+		# tank/technical long-axis shot and give the player hard cover, threading a
+		# hull-clear lane between them. Solid-to-all (no per-entity collision class
+		# needed) + a hedgehog barrel pair. seg>=2 tanks (-2750+) are torture-inert
+		# so both goldens hold. (The plow-path/rut AI was cut as YAGNI.)
+		if absi(_next_tank_y) / GATE_SPACING >= COVER_VARIETY_SEG and not _is_calm_band(_next_tank_y):
+			for asx in [SCREEN_CX - 90 * F_ONE, SCREEN_CX + 90 * F_ONE]:
+				var asy: int = _next_tank_y + 40 * F_ONE
+				# kind-0 solid stone (not a kind-2 wall) so the anti-armor cover never
+				# contests the maze/hero opposite-flank invariant; still blocks the
+				# tank/technical long shot and gives the player hard cover.
+				rocks.append({"x": _arena_margin_x(asx, asy), "y": asy, "kind": 0})
+			for hbx in [SCREEN_CX + 46 * F_ONE, SCREEN_CX + 64 * F_ONE]:
+				if not _near_stream_bunker(_arena_margin_x(hbx, _next_tank_y + 8 * F_ONE), _next_tank_y + 8 * F_ONE):
+					barrels.append({"x": _arena_margin_x(hbx, _next_tank_y + 8 * F_ONE),
+						"y": _next_tank_y + 8 * F_ONE, "armed": true, "fuse_ticks": 0})
 		_next_tank_y -= GATE_SPACING
 	while _next_water_y > horizon:
 		var water := {"y": _next_water_y, "ford_x": rng.range_i(80, 560) * F_ONE}

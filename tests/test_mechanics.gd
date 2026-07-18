@@ -2139,3 +2139,30 @@ func test_c4_ruins_dual_lane() -> void:
 	# The divider is PERMEABLE: the vertical gap between bags threads a crossfire lane.
 	Runner.T.ok(68 - 2 * (SimWorld.SANDBAG_HALF_H / SimWorld.F_ONE) >= SimWorld.HULL_CLEARANCE / SimWorld.F_ONE,
 		"the divider gaps thread a hull-wide cross-lane firing lane")
+
+
+func test_c4_tank_anti_armor() -> void:
+	# c4 3v: seg>=2 tank bands get flanking anti-armor cover (kind-0 solid slabs
+	# at SCREEN_CX +/- 90) so the fight isn't an open-field circle-strafe; the
+	# player threads a hull-clear lane between them. Tanks at -2750+ are inert.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -6000 * SimWorld.F_ONE
+	sim._step_camera()
+	var tank_y := 0
+	for t in sim.tanks:
+		var b: int = absi(t["y"]) / SimWorld.GATE_SPACING
+		if b >= SimWorld.COVER_VARIETY_SEG and b != SimWorld.CALM_BAND_SEG:
+			tank_y = t["y"]
+			break
+	Runner.T.ok(tank_y != 0, "a seg>=2 tank streamed")
+	var has_left := false
+	var has_right := false
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 0 and absi(rk["y"] - (tank_y + 40 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE:
+			if rk["x"] <= SimWorld.SCREEN_CX - 60 * SimWorld.F_ONE:
+				has_left = true
+			elif rk["x"] >= SimWorld.SCREEN_CX + 60 * SimWorld.F_ONE:
+				has_right = true
+	Runner.T.ok(has_left and has_right, "anti-armor cover flanks the tank on both sides")
+	Runner.T.ok(2 * 90 - 2 * 16 >= SimWorld.HULL_CLEARANCE / SimWorld.F_ONE,
+		"the lane between the anti-armor slabs clears the hull")
