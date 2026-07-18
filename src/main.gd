@@ -540,7 +540,7 @@ func _paint_bg(canvas: Node2D) -> void:
 			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
 			var pos := Vector2(tx * 64.0, floor(oy + ty * 64.0))
 			var h := Art.cell_hash(tx, base_iy + ty)
-			var shade := 0.47 + float(h % 7) * 0.020   # a1-06: wider value jitter breaks the flat-lawn read
+			var shade := 0.50 + float(h % 7) * 0.010
 			if (base_iy + ty) % 3 == 0:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
@@ -604,8 +604,8 @@ func _paint_bg(canvas: Node2D) -> void:
 				# reading as one algorithmic dark stamp.
 				var m_bright := (mh / 11) % 3 == 0
 				var m_warm := (mh / 5) % 10 < (3 + int(march * 6.0))   # a1-06: warm lean climbs jungle(3/10)->foundry(9/10)
-				var mcol := Color(0.55, 0.5, 0.28, 0.10) if m_bright else \
-					(Color(0.10, 0.07, 0.0, 0.10) if m_warm else Color(0.0, 0.05, 0.06, 0.11))
+				var mcol := Color(0.55, 0.5, 0.28, 0.16) if m_bright else \
+					(Color(0.10, 0.07, 0.0, 0.16) if m_warm else Color(0.0, 0.05, 0.06, 0.16))   # a1-06 r2: stronger SOFT mottle (was 0.10) for value variation without the tile grid
 				canvas.draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + float(mh % 5) * 0.16))
 				canvas.draw_texture_rect(Art.tex("fx_softspot"),
 					Rect2(-Vector2.ONE * msz / 2.0, Vector2.ONE * msz), false, mcol)
