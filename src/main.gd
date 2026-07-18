@@ -6769,24 +6769,24 @@ func _draw_objective_markers() -> void:
 			# The rescue is an OBJECTIVE, not a threat — green mark, top priority,
 			# so a pilot drifting off-screen is findable before the edge takes him.
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
-				"icon": "hud_star", "col": Art.safe(Color(0.45, 1.0, 0.65)), "pr": 1})   # a2-14 LEG#3: rescue beacon, not the kill reticle
+				"icon": _marker_icon("rescue"), "col": Art.safe(Color(0.45, 1.0, 0.65)), "pr": 1})   # a2-14 LEG#3
 		elif e.get("marked", false):
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
-				"icon": "hud_target", "col": Color(1.0, 0.82, 0.3), "pr": 1})
+				"icon": _marker_icon("bounty"), "col": Color(1.0, 0.82, 0.3), "pr": 1})
 	for pk in sim.pickups:
 		if pk.get("cost", 0) > 0:
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
-				"icon": "icon_coin", "col": Color(0.6, 0.9, 1.0), "pr": 2})   # a2-14 LEG#4: priced = coin
+				"icon": _marker_icon("priced"), "col": Color(0.6, 0.9, 1.0), "pr": 2})   # a2-14 LEG#4
 		elif pk["kind"] >= 4:
 			# Rare power-up capsule — the game makes a fuss on pickup but never
 			# pointed you to it; colour-keyed to match the ground glow.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
-				"icon": "hud_lightning", "pr": 2,   # a2-14 LEG#4: rare capsule = power-up glyph
+				"icon": _marker_icon("capsule"), "pr": 2,   # a2-14 LEG#4
 				"col": _CAPSULE_COL[clampi(pk["kind"] - 4, 0, _CAPSULE_COL.size() - 1)]})
 		else:
 			# Free crate (guaranteed gate cache) — supplies worth pathing to.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
-				"icon": "hud_gunshop", "col": Art.safe(Color(0.7, 0.85, 0.6)), "pr": 2})
+				"icon": _marker_icon("free"), "col": Art.safe(Color(0.7, 0.85, 0.6)), "pr": 2})
 	# Weight-sort BEFORE the edge cap of 6, so the cap always spends its slots on
 	# the highest-priority marks. On-screen icons are uncapped (anchored).
 	marks.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["pr"] < b["pr"])
@@ -6831,6 +6831,18 @@ func _draw_objective_markers() -> void:
 			var pr: float = 6.5 if int(m["pr"]) == 0 else 4.5
 			_marker_diamond(ep, pr, m["col"])
 			draw_texture_rect(Art.tex(m["icon"]), Rect2(ep - Vector2(4, 4), Vector2(8, 8)), false, m["col"])
+
+
+static func _marker_icon(cls: String) -> String:
+	# a2-14: one icon per objective/loot class so rescue-vs-kill and the three loot
+	# classes read apart — rescue BEACON, bounty KILL reticle, priced=coin, rare=
+	# lightning power-up, free supply cache.
+	match cls:
+		"rescue": return "hud_star"
+		"bounty": return "hud_target"
+		"priced": return "icon_coin"
+		"capsule": return "hud_lightning"
+		_: return "hud_gunshop"
 
 
 func _marker_edge(pos: Vector2) -> Vector2:
