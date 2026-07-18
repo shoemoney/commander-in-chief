@@ -689,6 +689,77 @@ func test_a3_foliage_lifts_off_grass_hue() -> void:
 	var g0: Color = ms._ground_stops("campaign")[0][0]   # bright jungle grass stop
 	Runner.T.ok(fol.r < g0.r, "foliage is DEEPER than the bright grass (lower r)")
 	Runner.T.ok((fol.g - fol.r) > (g0.g - g0.r) + 0.1, "foliage is COOLER / more green-forward than the yellow-green grass")
+	# The fern contact dab that grounds each clump anchor: small radius, soft alpha.
+	var fd: Dictionary = _consts()["FERN_DAB"]
+	Runner.T.ok(fd["r"] > 0.0 and fd["r"] <= 5.0, "the fern dab is a small contact shadow (<= 5px)")
+	Runner.T.ok(fd["a"] > 0.0 and fd["a"] <= 0.35, "the fern dab is soft (grounds without a hard blob)")
+
+
+# --- a3-09: field boulders get a lit top-edge highlight (warm, bright) so they read as
+# RAISED cover — the inverse of a1-07's recessed crater pit. ---
+
+func test_a3_rock_top_light_is_warm_and_bright() -> void:
+	var c := _consts()
+	var rl: Color = c["ROCK_TOP_LIGHT"]
+	Runner.T.ok(rl.r > rl.b, "the rock top-light is WARM (sunlit, r > b)")
+	Runner.T.ok(rl.r > 0.9 and rl.g > 0.9, "the rock top-light is BRIGHT (a lit rim, not a shadow)")
+	# Only the DOMED boulders get the raised-rim highlight; the flat log does not.
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms._rock_has_top_light("rock1") and ms._rock_has_top_light("rock2"),
+		"domed boulders (rock1/rock2) get the raised-rim top-light")
+	Runner.T.ok(not ms._rock_has_top_light("tree_dead2"), "the flat log gets NO top-light (no raised dome)")
+
+
+# --- a3-10: the marsh floor reads wet — dark silt pools with a cooler specular sheen so
+# the mid-game sector is a wetland, not generic green. The sheen must be lighter than the
+# pool (a glint) and both soft enough to not black out the ground. ---
+
+func test_a3_marsh_wetness_pool_and_sheen() -> void:
+	var c := _consts()
+	var mw: Dictionary = c["MARSH_WET"]
+	Runner.T.ok(mw["pool_a"] > mw["sheen_a"], "the dark silt pool is stronger than its specular sheen glint")
+	Runner.T.ok(mw["pool_a"] <= 0.4 and mw["sheen_a"] > 0.0, "both are soft (a wet sheen, not a black hole)")
+	# Chroma: a COOL-dark silt pool with a LIGHTER cool specular glint reads as wet.
+	var pool: Color = mw["pool_col"]
+	var sheen: Color = mw["sheen_col"]
+	Runner.T.ok(pool.g > pool.r and pool.b > pool.r, "the silt pool is COOL (g,b > r)")
+	Runner.T.ok(sheen.g > sheen.r and sheen.b > sheen.r, "the sheen glint is COOL (g,b > r)")
+	var pv: float = maxf(pool.r, maxf(pool.g, pool.b))
+	var sv: float = maxf(sheen.r, maxf(sheen.g, sheen.b))
+	Runner.T.ok(sv > pv, "the sheen is LIGHTER than the dark pool (a glint off the water)")
+	# The wetness is marsh-only: band 2 of the 5-stop march (int(march*5) == 2).
+	Runner.T.eq(clampi(int(0.45 * 5.0), 0, 4), 2, "march 0.45 lands in the MARSH band (2) where the wetness draws")
+
+
+# --- a3-11: bosses show hp-keyed battle damage — a full-hp boss is pristine, damage
+# (scorch/smoke) accumulates as hp drops, and sparks only sputter near death. ---
+
+func test_a3_boss_wound_thresholds() -> void:
+	var c := _consts()
+	var bw: Dictionary = c["BOSS_WOUND"]
+	# wound = 1 - hp_fraction. A pristine boss shows nothing; sparks are a near-death tell.
+	Runner.T.ok(bw["scar_start"] > 0.0 and bw["scar_start"] < bw["spark"],
+		"scars begin before the near-death spark stage (ordered thresholds)")
+	# Full hp -> wound 0 -> below the scar start (no damage drawn on a pristine boss).
+	Runner.T.ok((1.0 - 1.0) < bw["scar_start"], "a full-hp boss shows NO wound damage")
+	# 30% hp -> wound 0.7 -> past the spark threshold (a near-dead boss sputters sparks).
+	Runner.T.ok((1.0 - 0.3) > bw["spark"], "a near-dead boss (30% hp) is in the spark stage")
+	# Stage predicate: scars accumulate 0 -> 4 as the wound deepens (driven by the const).
+	var ms = load("res://src/main.gd")
+	Runner.T.eq(ms._boss_wound_scars(0.1), 0, "a barely-scratched boss shows NO scorch scars")
+	Runner.T.eq(ms._boss_wound_scars(0.18), 1, "the first scar appears exactly at scar_start")
+	Runner.T.ok(ms._boss_wound_scars(0.5) >= 2 and ms._boss_wound_scars(0.5) <= 3, "a half-wrecked boss shows a few scars")
+	Runner.T.eq(ms._boss_wound_scars(0.95), 4, "a near-dead boss shows the full 4 scars")
+
+
+# --- a3-12: every elite carries a persistent WARM aura (threat tell) so it reads as an
+# elevated threat vs a plain rusher, not just via the subtle body tint. ---
+
+func test_a3_elite_aura_is_warm() -> void:
+	var c := _consts()
+	var ea: Color = c["ELITE_AURA"]
+	Runner.T.ok(ea.r > ea.g and ea.r > ea.b, "the elite aura is WARM-RED (r dominates) — a danger tell")
+	Runner.T.ok(ea.r - ea.g > 0.4, "the aura is saturated warm, not a muddy neutral")
 
 
 # --- a3-15: three place-defining ambience beds (river / foundry / shop), synthesized,

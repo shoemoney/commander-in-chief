@@ -983,7 +983,7 @@ func _copy_share_text() -> void:
 	# is deterministic, so a friend can replay the exact layout via CHALLENGE SEED.
 	var rr := _run_rank()
 	var where := ("WAVE %d" % sim.wave) if sim.mode == "endless" else ("%dm PUSHED" % (-Fixed.to_int(sim.camera_top) / 10))
-	var txt := "IKARI — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
+	var txt := "SHOEMONEY SOLDIER — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
 	DisplayServer.clipboard_set(txt)
 	_show_banner("COPIED TO CLIPBOARD")
 
@@ -3225,6 +3225,12 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 # < 0.4) and every additive term is capped <= 0.66 so MG-spam sums lower and explosions keep
 # the white-hot bright-point monopoly. Pinned so the hierarchy can't regress silently.
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
+const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a fern clump anchor (under the sprite)
+const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
+const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
+const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
+const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
+	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
 	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
 
@@ -3325,6 +3331,12 @@ static func _ground_stops(mode: String) -> Array:
 # a3-05: the two feather rings that grade a bare-earth patch into the turf. Outer wide
 # faint ring + a stronger inner halo, both scaled off the card size and dirt alpha.
 const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a": 0.52}
+
+
+static func _rock_has_top_light(rtex: String) -> bool:
+	# a3-09: only the DOMED boulders (rock1/rock2) get the lit top-edge rim that reads as
+	# raised cover; the flat log (tree_dead2) has no raised dome, so no top-light.
+	return rtex != "tree_dead2"
 
 
 static func _has_canopy_dapple(ash: float) -> bool:
@@ -3827,7 +3839,7 @@ func _draw_terrain() -> void:
 				# a3-08: a tiny dark contact dab grounds the fern CLUMP anchor — ferns got
 				# no _ground_shadow (only trees/litter did), so they floated on the lawn.
 				# One dab per anchor (satellites cluster on it), not per tuft.
-				_ground_shadow(Vector2(fx, fy_px + 2.0), 3.5, 0.22, Color(0.0, 0.04, 0.0))
+				_ground_shadow(Vector2(fx, fy_px + 2.0), FERN_DAB["r"], FERN_DAB["a"], Color(0.0, 0.04, 0.0))
 				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
 				# Context bias (GPT round-2): vegetation drifts hug dirt-patch
 				# cells (same 64px hash predicate as the ground painter) — the
@@ -3913,6 +3925,11 @@ func _draw_terrain() -> void:
 						_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
 							float(h2 % 628) / 100.0 + tsway, tsc, tval)
 
+	# a3-10 (AD#9/ENV#5): the MARSH floor gets wet — reflective silt patches with a cool
+	# sheen so the mid-game sector reads as a WETLAND, not generic green (the water shader
+	# wets only water bodies, never the DRY marsh ground). Under the props/signatures.
+	if ug_band == 2:
+		_draw_marsh_wetness(cam_y)
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# Per-band SIGNATURE silhouettes under the litter (c2 3v): each sector owns
 	# one prop family the others never show.
@@ -4201,6 +4218,31 @@ func _draw_foundry_arena() -> void:
 		return
 
 
+func _draw_marsh_wetness(cam_y: float) -> void:
+	# a3-10: scattered wet-silt pools with a cool sheen glint — the marsh reads as a
+	# waterlogged wetland. Deterministic hash scatter (no rng); pools are dark cool silt,
+	# each with a small offset specular highlight so it reads WET, not just dark.
+	var woy := -fposmod(cam_y, 96.0)
+	var wbase := int(floor(cam_y / 96.0))
+	for ty in 5:
+		for tx in 7:
+			var h := Art.cell_hash(tx * 23 + 7, (wbase + ty) * 5 + 1)
+			if h % 3 != 0:
+				continue
+			var wp := Vector2(tx * 96.0 + float(h % 44), woy + ty * 96.0 + float((h / 7) % 44))
+			var ws := 20.0 + float(h % 18)
+			# Dark cool silt pool.
+			var pc: Color = MARSH_WET["pool_col"]
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(wp - Vector2(ws, ws) / 2.0, Vector2(ws, ws)),
+				false, Color(pc.r, pc.g, pc.b, MARSH_WET["pool_a"]))
+			# Cool specular sheen, offset up-left so the pool reads WET (a glint off water).
+			var sh := ws * 0.42
+			var sc: Color = MARSH_WET["sheen_col"]
+			draw_texture_rect(Art.tex("fx_softspot"),
+				Rect2(wp + Vector2(-sh * 0.35, -sh * 0.55), Vector2(sh, sh * 0.6)),
+				false, Color(sc.r, sc.g, sc.b, MARSH_WET["sheen_a"]))
+
+
 func _draw_rocks() -> void:
 	# Cover TIERS (c2 3v: one-size rocks made every LOS puzzle "is there a rock
 	# between us"). Kind picks the silhouette class — classic rock, pass-through
@@ -4242,9 +4284,16 @@ func _draw_rocks() -> void:
 				_ground_shadow(pos, 12.0, 0.42 * fade)
 				var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
 				var rcol := Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5)
-				_spr(rtex, pos, float(rh3 % 628) / 100.0,
-					{"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex],
-					Color(rcol.r, rcol.g, rcol.b, fade))
+				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex]
+				_spr(rtex, pos, float(rh3 % 628) / 100.0, rsc, Color(rcol.r, rcol.g, rcol.b, fade))
+				# a3-09 (AD#6): a lit top-edge highlight — a thin warm crescent on the
+				# boulder's upper rim implies overhead light, so a rock reads as RAISED
+				# cover (the inverse of a1-07's crater inner-pit), not a threat or a hole.
+				# Only the domed boulders; the flat log (tree_dead2) has no raised rim.
+				if _rock_has_top_light(rtex):
+					var rr := 9.0 * rsc + 2.0
+					draw_arc(pos + Vector2(0.0, 0.5), rr, PI + 0.55, TAU - 0.2, 12,
+						Color(ROCK_TOP_LIGHT.r, ROCK_TOP_LIGHT.g, ROCK_TOP_LIGHT.b, 0.5 * fade), 1.8)
 
 
 func _draw_sandbags() -> void:
@@ -5314,6 +5363,13 @@ func _draw_enemies() -> void:
 					draw_circle(lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
 				_spr("ghillie", epos, face, 0.5)   # real ghillie bake (was a green-keyed frogman)
 		elif e["elite"]:
+			# a3-12 (UNIT#2): a persistent warm aura marks EVERY elite as an elevated
+			# threat — not just the ~1-in-7 bounty crown. The warm body tint alone was easy
+			# to lose in a busy frame. Soft red halo UNDER the body, gently pulsing; a static
+			# floor (base alpha) holds under REDUCE MOTION so the threat read never vanishes.
+			var eaura := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.06 + float(eidx))
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(epos - Vector2(14.0, 14.0), Vector2(28.0, 28.0)),
+				false, Color(ELITE_AURA.r, ELITE_AURA.g, ELITE_AURA.b, 0.12 + eaura * 0.07 * _motion))
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)
 			if wu > 0:
@@ -5499,6 +5555,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# exact for any scaling without duplicating the sim's spawn formula.
 	_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
 	var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
+	_boss_wounds(bpos, 1.0 - bfrac, 34.0)   # a3-11: hp-keyed hull damage — the gunship hull/barrel/rotor/core were all drawn above; this overlays on top
 	# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
 	# bar, ~1618): the boss's screen pos can sit above the held camera or
 	# off-screen, and a world-anchored bar would go with it. Stacked by
@@ -5545,6 +5602,49 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
+static func _boss_wound_scars(wound: float) -> int:
+	# a3-11: how many scorch scars (0..4) a boss shows at this wound (1 - hp fraction) —
+	# scars accumulate from BOSS_WOUND.scar_start, one per scar_step. Pure so it's testable.
+	if wound < BOSS_WOUND["scar_start"]:
+		return 0
+	var n := 0
+	for i in 4:
+		if wound >= BOSS_WOUND["scar_start"] + float(i) * BOSS_WOUND["scar_step"]:
+			n += 1
+	return n
+
+
+func _boss_wounds(center: Vector2, wound: float, r: float) -> void:
+	# a3-11 (UNIT#1): hp-keyed battle damage — as a boss loses hp it accumulates scorch
+	# scars, trails smoke, and (near death) sputters sparks, so you can READ how close the
+	# kill is off the hull, not just the bar. Pure per-frame draw (NO fx spawn — that would
+	# be frame-rate-dependent, per the codebase rule); deterministic phases off physics_frames
+	# so smoke/sparks animate without RNG. Scars sit ON the hull; smoke rises ABOVE it; the
+	# a3-01 separator rim (drawn per-sprite) stays intact so the silhouette still reads.
+	if wound < BOSS_WOUND["scar_start"]:
+		return
+	var t := float(Engine.get_physics_frames())
+	# Scorch scars accumulate at fixed hull offsets as the wound deepens (count driven by
+	# _boss_wound_scars off BOSS_WOUND — no parallel magic numbers).
+	for i in _boss_wound_scars(wound):
+		var sp := center + Vector2.from_angle(float(i) * 1.7 + 0.5) * r * 0.5
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(6.0, 6.0), Vector2(12.0, 12.0)),
+			false, Color(0.05, 0.04, 0.03, 0.5 * wound))
+	# Smoke wisps rising off the hull, denser with the wound (gated by REDUCE MOTION).
+	for i in int(wound * 3.0) + 1:
+		var ph := fposmod(t * 0.02 + float(i) * 0.37, 1.0)
+		var sx := center.x + sin(float(i) * 2.1 + t * 0.03) * r * 0.4
+		var sy := center.y - ph * (r + 12.0)
+		draw_circle(Vector2(sx, sy), 4.0 + ph * 6.0,
+			Color(0.15, 0.14, 0.13, (1.0 - ph) * 0.3 * wound * _motion))
+	# Near death: sparks sputter off the hull.
+	if wound > BOSS_WOUND["spark"]:
+		for i in 3:
+			var spp := center + Vector2.from_angle(t * 0.2 + float(i) * 2.0) \
+				* r * (0.4 + fposmod(t * 0.05 + float(i), 1.0) * 0.5)
+			draw_circle(spp, 1.3, Color(1.0, 0.7, 0.3, (0.6 + 0.4 * sin(t * 0.4 + float(i))) * _motion))
+
+
 func _draw_colossus() -> void:
 	if sim.colossus.is_empty() or not sim.colossus["alive"]:
 		return
@@ -5570,6 +5670,9 @@ func _draw_colossus() -> void:
 	_spr("colossus_body", cbody, PI, 1.9, mod, csquash)
 	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
+	# a3-11: hp-keyed hull damage — drawn HERE in world space, before the HUD bar's
+	# transform-cancel below flips to screen space (the same fraction the bar uses).
+	_boss_wounds(cbody, 1.0 - float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP), 40.0)
 	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
 	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
 	for bx in [-24.0, 24.0]:
