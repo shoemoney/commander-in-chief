@@ -140,6 +140,8 @@ var _tank_hull := {}             # per-tank-index eased hull heading (view-only;
 var _tank_prev := {}             # per-tank-index prev world pos, feeds the hull heading
 var _tank_turret := {}           # per-tank-index eased turret heading (kills the 8-way 45° snap)
 var _water_prev: Array[bool] = [false, false]   # per-player prev in-water state (edge-triggers entry droplets)
+var _mud_prev: Array[bool] = [false, false]     # per-player prev in-mud state (edge-triggers the mud splash)
+var _mud_told := false                          # once-per-run MUD teach banner latch
 var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
                                                  # death mid-array can misalign one slot for a frame — cosmetic only)
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
@@ -742,6 +744,8 @@ func _reset() -> void:
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
 	_banners.clear()
+	_mud_told = false
+	_mud_prev = [false, false]
 	_seen_bosses = {}
 	_seen_kinds = {}
 	_prev_colossus_phase = 0
@@ -3777,9 +3781,24 @@ func _draw_water() -> void:
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, bank_col)
 		# Mud banks (2v second terrain): brown half-speed strips flanking the
 		# band — drawn under the sand lips so the slow zone reads as terrain.
-		var mud_c := Color(0.42, 0.32, 0.2, 0.75).lerp(Color(0.3, 0.25, 0.2, 0.75), soot)
+		# Alpha 0.75 -> 0.92 (c2 3v: half-speed ground must not read as a
+		# translucent decal you can ignore).
+		var mud_c := Color(0.42, 0.32, 0.2, 0.92).lerp(Color(0.3, 0.25, 0.2, 0.92), soot)
 		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy - 6 - 40, 640, 40), true, mud_c)
 		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy + wh + 2, 640, 40), true, mud_c)
+		# Mud OUTER edge (c2 3v): a 2px dark lip + hash notches on the dry
+		# side of both strips — the exact line where half-speed begins reads
+		# before you step in. Same deterministic notch idiom as the banks.
+		var mud_lip := Color(mud_c.r, mud_c.g, mud_c.b, 1.0).darkened(0.35)
+		var mseed := Art.cell_hash(int(w["y"] / 4096) * 53, 19)
+		draw_rect(Rect2(0, wy - 47.0, 640.0, 2.0), mud_lip)
+		draw_rect(Rect2(0, wy + wh + 41.0, 640.0, 2.0), mud_lip)
+		for mk in 12:
+			var mnh := Art.cell_hash(mseed + mk * 31, mk)
+			draw_rect(Rect2(float(mnh % 630), wy - 47.0 - float(mnh % 3),
+				5.0 + float(mnh % 6), 2.5), mud_lip)
+			draw_rect(Rect2(float((mnh * 13) % 630), wy + wh + 41.0 + float((mnh >> 3) % 3),
+				5.0 + float((mnh >> 5) % 6), 2.5), mud_lip)
 		# Broken banks (5v: the ruler-straight sand edge was the tell): ~14
 		# hash-notches per bank bite into the strip, skipping the ford span.
 		var nseed := Art.cell_hash(int(w["y"] / 4096) * 29, 3)
@@ -3815,11 +3834,38 @@ func _draw_water() -> void:
 				var bw := 14.0 + float(nh % 7)
 				draw_rect(Rect2(float((nh * 3) % 620), wy - 2.0, bw, 1.4), Color(notch_col.r, notch_col.g, notch_col.b, 0.6))
 				draw_rect(Rect2(float((nh * 11) % 620), wy + wh + 2.5, bw, 1.4), Color(notch_col.r, notch_col.g, notch_col.b, 0.6))
-		# The dry ford.
-		var ford_left: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX
-		var ford_w := SimWorld.FORD_HALF_W * 2.0 * PX
+		# The dry ford — at the SIM's compressed per-band width (c2 3v BUG: the
+		# view drew full FORD_HALF_W on every band while the sim tightens
+		# -4px/band; on deep bands walkable ground rendered as water and drawn
+		# sand was lethal water. Formulas copied from sim_world.gd _in_water
+		# (band_idx/fw, ford2, island) — keep in sync with those lines.
+		var band_idx: int = absi(w["y"] / SimWorld.GATE_SPACING)
+		var fw_fx: int = maxi(SimWorld.FORD_HALF_W / 2, SimWorld.FORD_HALF_W - (band_idx - 1) * 4 * Fixed.ONE)
+		var ford_left: float = (w["ford_x"] - fw_fx) * PX
+		var ford_w := fw_fx * 2.0 * PX
 		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, ford_w, wh + 4),
 			true, ford_col)
+		var wh2m: int = SimWorld._mix(band_idx, w["ford_x"] / Fixed.ONE)
+		if band_idx % 3 == 2:
+			# Second ford (sim: every 3rd band) — it existed, it was walkable,
+			# and the view never drew it. Now it's sand like the first.
+			var ford2_x: int = 80 * Fixed.ONE + ((w["ford_x"] - 80 * Fixed.ONE) + (180 + wh2m % 121) * Fixed.ONE) % (480 * Fixed.ONE)
+			draw_texture_rect(Art.tex("sand"), Rect2((ford2_x - fw_fx) * PX, wy - 2, ford_w, wh + 4),
+				true, ford_col)
+		if band_idx >= 4 and band_idx % 4 == 0:
+			# Dry mid-river island (sim: every 4th band, deep) with wet lips.
+			var isl_x2: int
+			if band_idx % 12 == 8:
+				var f2i: int = 80 * Fixed.ONE + ((w["ford_x"] - 80 * Fixed.ONE) + (180 + wh2m % 121) * Fixed.ONE) % (480 * Fixed.ONE)
+				isl_x2 = 80 * Fixed.ONE + (((w["ford_x"] + f2i) / 2 - 80 * Fixed.ONE) + 240 * Fixed.ONE) % (480 * Fixed.ONE)
+			else:
+				isl_x2 = 80 * Fixed.ONE + ((w["ford_x"] - 80 * Fixed.ONE) + 120 * Fixed.ONE) % (480 * Fixed.ONE)
+			var ilx := (isl_x2 - 60 * Fixed.ONE) * PX
+			var ily := wy + 20.0
+			draw_texture_rect(Art.tex("sand"), Rect2(ilx, ily, 120.0, 40.0), true, ford_col)
+			var idamp := ford_col.darkened(0.38)
+			draw_rect(Rect2(ilx, ily - 1.5, 120.0, 1.5), Color(idamp.r, idamp.g, idamp.b, 0.6))
+			draw_rect(Rect2(ilx, ily + 40.0, 120.0, 1.5), Color(idamp.r, idamp.g, idamp.b, 0.6))
 		# Baked bridge deck over the dry ford (decor only — the sim's ford/collision
 		# is untouched; the sand bed stays underneath as the shore blend). Mid planks
 		# tile the crossing, ramp caps land on each bank.
@@ -5374,6 +5420,17 @@ func _check_water_entry() -> void:
 			if wet and not _water_prev[i]:
 				_burst(p["x"], p["y"], "splash", 5, 1.0, 2.4, 0.5, 0.1, 1.4, true)
 			_water_prev[i] = wet
+		# Mud edge-trigger (c2 3v): a brown kick-up on entry, and a once-per-
+		# run teach banner — the text matches sim truth (water bans the roll,
+		# mud does not; the speed halving is sim_world.gd's _in_mud).
+		var muddy: bool = p["alive"] and not wet and sim._in_mud(p["x"], p["y"])
+		if i < _mud_prev.size():
+			if muddy and not _mud_prev[i]:
+				_burst(p["x"], p["y"], "dust", 6, 1.2, 2.5, 0.3)
+				if not _mud_told:
+					_mud_told = true
+					_show_banner("MUD — HALF SPEED, ROLLS LEGAL", Color(0.75, 0.6, 0.4))
+			_mud_prev[i] = muddy
 	_enemy_water_prev.resize(sim.enemies.size())
 	for i in sim.enemies.size():
 		var e := sim.enemies[i]
