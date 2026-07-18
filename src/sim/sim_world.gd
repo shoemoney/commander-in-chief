@@ -3413,19 +3413,30 @@ func _step_camera() -> void:
 				var lm_sector: int = absi(_next_gate_y) / GATE_SPACING
 				var wall_side: int = 460 if _gate_counter % 2 == 1 else 60   # opposite the hero
 				var lm_y: int = _next_gate_y + 220 * F_ONE
-				if lm_sector == 4:
-					# Foundry CRANE: a kind-3 hero focal PAIR (a tall recognizable mass).
-					rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 3})
-					rocks.append({"x": (wall_side + (40 if wall_side < 320 else -40)) * F_ONE,
-						"y": lm_y - 44 * F_ONE, "kind": 3})
-				else:
-					# Marsh PIPELINE (sector 2) / default: a 3-slab kind-2 horizontal run
-					# with a hash-dropped lane slot (80px pitch -> the slot >= HULL_CLEARANCE).
-					var lm_gap: int = _mix(_gate_counter, 907) % 3
-					for wslab in 3:
-						if wslab == lm_gap:
-							continue
-						rocks.append({"x": (wall_side + (wslab - 1) * 80) * F_ONE, "y": lm_y, "kind": 2})
+				var inward: int = 40 if wall_side < 320 else -40
+				match lm_sector:
+					2:
+						# MARSH pipeline: a 3-slab kind-2 HORIZONTAL run (80px pitch, one
+						# hash-dropped lane slot >= HULL_CLEARANCE).
+						var pg: int = _mix(_gate_counter, 907) % 3
+						for ws in 3:
+							if ws != pg:
+								rocks.append({"x": (wall_side + (ws - 1) * 80) * F_ONE, "y": lm_y, "kind": 2})
+					3:
+						# RUINS crashed-train: a 4-slab kind-2 LINE that dovetails the maze,
+						# 76px pitch with a hash-dropped car (the gap threads a hull lane).
+						var tg: int = _mix(_gate_counter, 907) % 4
+						for ws in 4:
+							if ws != tg:
+								rocks.append({"x": (wall_side + (ws - 1) * 76) * F_ONE, "y": lm_y, "kind": 2})
+					4:
+						# FOUNDRY crane: a kind-3 hero focal PAIR (a tall recognizable mass).
+						rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 3})
+						rocks.append({"x": (wall_side + inward) * F_ONE, "y": lm_y - 44 * F_ONE, "kind": 3})
+					_:
+						# default OFFSET STACK: two kind-2 slabs stepped diagonally.
+						rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 2})
+						rocks.append({"x": (wall_side + inward + inward) * F_ONE, "y": lm_y - 40 * F_ONE, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
 					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
