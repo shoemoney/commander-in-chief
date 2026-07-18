@@ -1707,3 +1707,50 @@ func test_c3_fork_bluff_and_reward() -> void:
 			Runner.T.ok(gauntlet_elites >= 3, "seed %d TRAP: the gauntlet is extra-defended (%d)" % [sd, gauntlet_elites])
 	Runner.T.ok(bluff_seen, "a bluff fork exists (~1-in-4)")
 	Runner.T.ok(trap_seen, "a trap fork exists (~1-in-4)")
+
+
+func test_c3_rear_trickle_on_advance() -> void:
+	# c3 3v: advancing deep into the corridor births rear rushers (behind the
+	# player, at a wall) ~1 per 700px — the safe rear hemisphere gets threat.
+	var sim := SimWorld.new(43, 1)
+	# March the camera from the start down to seg 4 (past the trickle start).
+	var births := 0
+	var last_rear := sim._next_rear_y
+	# Force camera advance directly and step the streamer.
+	for step in 40:
+		sim.camera_top -= 120 * SimWorld.F_ONE   # ~2px/tick * 60 -> simulate advance
+		sim._step_camera()
+		for ev in sim.events:
+			pass
+	# Count rear rushers spawned at a wall x behind mid-corridor.
+	var rear_rushers := 0
+	for e in sim.enemies:
+		if e["kind"] == "rusher" and (e["x"] == SimWorld.WORLD_LEFT or e["x"] == SimWorld.WORLD_RIGHT):
+			rear_rushers += 1
+	Runner.T.ok(rear_rushers >= 2, "advancing ~4800px births rear rushers (~1/700px, got %d)" % rear_rushers)
+	# None of them are in seg 0-1 (the torture window stays clean).
+	for e in sim.enemies:
+		if e["kind"] == "rusher" and (e["x"] == SimWorld.WORLD_LEFT or e["x"] == SimWorld.WORLD_RIGHT):
+			Runner.T.ok(absi(e["y"]) >= 2 * SimWorld.GATE_SPACING, "rear rushers only spawn seg 2+")
+
+
+func test_c3_choke_camp_breach() -> void:
+	# c3 3v: camping a seg-2+ choke for REAR_CAMP_TICKS spawns a rear rusher,
+	# once; advancing re-arms it.
+	var sim := SimWorld.new(43, 1)
+	# Put the lead player in a seg-2 choke and stall the camera there.
+	var choke_y: int = -(2000 + 250) * SimWorld.F_ONE   # inside the seg-2 choke band
+	sim.players[0]["y"] = choke_y
+	sim.camera_top = choke_y - 260 * SimWorld.F_ONE
+	sim._prev_camera_top = sim.camera_top
+	# Confirm the lead player is actually in a narrowed choke.
+	var cb: Array = sim._choke_bounds(choke_y)
+	Runner.T.ok(cb[0] != SimWorld.WORLD_LEFT or cb[1] != SimWorld.WORLD_RIGHT, "the camp spot is a real choke")
+	sim.stall_ticks = SimWorld.REAR_CAMP_TICKS - 1
+	var e0: int = sim.enemies.size()
+	sim._step_observer()   # stall_ticks -> REAR_CAMP_TICKS this call
+	Runner.T.ok(sim.enemies.size() > e0, "camping the choke 300t breaches a rear rusher")
+	# One-shot: the next stall tick does not double-spawn.
+	var e1: int = sim.enemies.size()
+	sim._step_observer()
+	Runner.T.eq(sim.enemies.size(), e1, "the breach fires once per camp (equality trigger)")

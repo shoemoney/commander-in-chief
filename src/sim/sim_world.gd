@@ -194,6 +194,14 @@ const BAIL_IFRAME_TICKS := 20   # a forced dismount can't insta-die on landing
 # Mortar Observer: spawns after an 8 s stall; strike every 1.5 s with a
 # 0.75 s telegraph; despawns once the players push 150 px past his arrival.
 const OBSERVER_STALL_TICKS := 480
+# c3 3v: the 72%-down camera makes the rear hemisphere fully safe, rewarding a
+# mindless hold-up advance. A low-density REAR TRICKLE (1 rusher chasing north
+# per 700px of advance, seg 2+ only) and a stall-keyed CHOKE-CAMP breach put
+# threat behind you. Both campaign-only + gated deep enough that the ~1260px
+# torture never triggers them → goldens byte-identical.
+const REAR_TRICKLE_SPACING := 700 * F_ONE
+const REAR_TRICKLE_START := -(2400 * F_ONE)   # first trickle once the camera passes seg-2+400 (torture stops at ~-1520)
+const REAR_CAMP_TICKS := 300                  # 5s camping a choke before the rear answers (earlier/softer than the 480t Observer)
 const OBSERVER_STRIKE_CD_TICKS := 90
 const STRIKE_TELEGRAPH_TICKS := 45
 const OBSERVER_DESPAWN_ADVANCE := 150 * F_ONE
@@ -434,6 +442,7 @@ var mines: Array[Dictionary] = []
 var sandbags: Array[Dictionary] = []   # player-authored cover (wheel-only; dead bags are erased on the spot)
 var rocks: Array[Dictionary] = []      # streamed natural hard cover {x,y} — blocks moves+bullets, grenades arc over
 var _next_rock_y: int = 0
+var _next_rear_y: int = 0   # c3 3v: next camera-advance mark that births a rear-trickle rusher
 var _world_seed: int = 0   # stored run seed for the authored-chunk mixes (derived, unhashed)
 var barrels: Array[Dictionary] = []
 var vents: Array[Dictionary] = []      # foundry heat vents {x,y} — seg 4+ only, phase derived from tick_count
@@ -516,6 +525,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_tank_y = -(750 * F_ONE)
 	_next_water_y = -(1500 * F_ONE)
 	_next_mine_y = -(700 * F_ONE)
+	_next_rear_y = REAR_TRICKLE_START
 	_next_barrel_y = -(900 * F_ONE)
 	_next_rock_y = -(700 * F_ONE)
 	_world_seed = seed_value
@@ -3340,6 +3350,20 @@ func _step_camera() -> void:
 			rocks.append({"x": _arena_margin_x(mrx, mry1), "y": mry1})
 			rocks.append({"x": _arena_margin_x(mrx + 22 * F_ONE, mry2), "y": mry2})
 		_next_water_y -= GATE_SPACING
+	# c3 3v REAR TRICKLE (once per camera step, NOT per streamed band): every
+	# 700px of camera advance past seg-2+400, birth ONE rusher off the REAR edge
+	# (camera_top+380, walks up = symmetric with the top spawns) at an
+	# alternating wall — genuine behind-you pressure while advancing, so a
+	# mindless hold-up push is no longer free. rng-FREE (wall picked by _mix).
+	# Gated so the camera never triggers it inside the ~1260px torture (which
+	# stops at ~-1520 > REAR_TRICKLE_START) → both goldens byte-identical.
+	while camera_top < _next_rear_y:
+		var rslot: int = absi(_next_rear_y / REAR_TRICKLE_SPACING)
+		var rear_x: int = WORLD_LEFT if _mix(rslot, _world_seed) & 1 else WORLD_RIGHT
+		var rear_y: int = camera_top + 380 * F_ONE
+		_spawn_enemy(rear_x, rear_y, false)
+		events.append({"t": "rear_breach", "x": rear_x, "y": rear_y})
+		_next_rear_y -= REAR_TRICKLE_SPACING
 
 
 func _stamp_stretch_setpieces() -> void:
@@ -4026,6 +4050,26 @@ func _step_observer() -> void:
 		stall_ticks = 0
 	elif any_alive:
 		stall_ticks += 1
+
+	# c3 3v CHOKE-CAMP breach: camping a seg-2+ choke for REAR_CAMP_TICKS (the
+	# earlier, softer, rear-only nudge before the 480t front Observer) spawns a
+	# rusher from the rear wall behind the lead player. Single-shot by equality
+	# (advancing resets stall_ticks -> re-arms); stall_ticks is already hashed,
+	# so no new field. seg>=2 keeps the torture (which never stalls 300t) inert.
+	if stall_ticks == REAR_CAMP_TICKS:
+		var lead_y := 0
+		var found_lead := false
+		for p in players:
+			if p["alive"] and (not found_lead or p["y"] < lead_y):
+				lead_y = p["y"]
+				found_lead = true
+		if found_lead and absi(lead_y) >= 2 * GATE_SPACING:
+			var cb := _choke_bounds(lead_y)
+			if cb[0] != WORLD_LEFT or cb[1] != WORLD_RIGHT:   # the lead player is in a choke
+				var camp_x: int = WORLD_LEFT if _mix(absi(camera_top / F_ONE), _world_seed) & 1 else WORLD_RIGHT
+				var camp_y: int = camera_top + 380 * F_ONE
+				_spawn_enemy(camp_x, camp_y, false)
+				events.append({"t": "rear_breach", "x": camp_x, "y": camp_y})
 
 	if observer.is_empty():
 		if stall_ticks >= OBSERVER_STALL_TICKS:
