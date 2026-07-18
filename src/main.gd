@@ -5542,7 +5542,10 @@ func _draw_players() -> void:
 		if not p["alive"]:
 			# Downed but not gone: a greyed prone body so a waiting-for-revive
 			# teammate is visibly THERE on the field, not just a floating beacon.
-			_spr(tex_name, pos, PI / 2, 0.46, Color(0.55, 0.55, 0.6, 0.7))
+			# a1-18 UNIT#5: the downed body keeps its player COLOR (dim) so co-op can tell
+			# WHICH teammate is down — P1 safe-green, P2 gold (was an identity-blind grey).
+			var down_col := Art.safe(Color(0.5, 0.82, 0.5, 0.72)) if i == 0 else Color(0.85, 0.72, 0.4, 0.72)
+			_spr(tex_name, pos, PI / 2, 0.46, down_col)
 		# Smoke concealment: a drifting grey shroud — drawn UNDER the soldier and
 		# the co-op identity ring (drawn over, it buried both for ~4 of its 5
 		# seconds, exactly when co-op players need their avatar). Thins over the
@@ -5573,8 +5576,16 @@ func _draw_players() -> void:
 		# (4v: the tiny infantry sprite vanished into ground clutter — the
 		# ring is the parked-tank board-ring grammar applied to yourself).
 		if p["alive"]:
-			var idc := Color(0.4, 1.0, 0.4, 0.6) if i == 0 else Color(1.0, 0.85, 0.3, 0.6)
-			draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+			# a1-18 LEG#2/LEG#3: P1 ring routes through Art.safe (green->blue in colorblind
+			# so it never reads as danger-red), and P1/P2 are SHAPE-distinct — P1 a SOLID
+			# ring, P2 a DASHED ring — so identity survives without the green-vs-gold hue.
+			var idc := Art.safe(Color(0.4, 1.0, 0.4, 0.6)) if i == 0 else Color(1.0, 0.85, 0.3, 0.6)
+			if i == 0:
+				draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+			else:
+				for ds in 8:
+					var da := ds * TAU / 8.0
+					draw_arc(pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
 			# Revive-from-here affordance: revive has NO range check (the buddy
 			# teleports to you), but the beacon on the body implies you must run
 			# to it. Tell the reviver they can pay from where they stand.
@@ -5588,7 +5599,7 @@ func _draw_players() -> void:
 				# far-south downed buddy even before the chest covers the revive.
 				if dpos.x < 8 or dpos.x > 632 or dpos.y < 30 or dpos.y > 352:
 					var edge := Vector2(clampf(dpos.x, 12, 628), clampf(dpos.y, 34, 348))
-					var pcol := Color(0.4, 1.0, 0.4) if q == 0 else Color(1.0, 0.85, 0.3)
+					var pcol := Art.safe(Color(0.4, 1.0, 0.4)) if q == 0 else Color(1.0, 0.85, 0.3)   # a1-18 LEG#2
 					var bdir := (dpos - edge).normalized()
 					# Shake-immune like every other screen-edge indicator (the
 					# threat edges, the boss bars) — the gunship-bar idiom.

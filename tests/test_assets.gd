@@ -229,3 +229,15 @@ func test_a1_banner_plate_alpha_floor() -> void:
 	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(1.0), 1.0), "full text -> full plate")
 	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.3), 0.7), "fading text -> plate HELD at the 0.7 floor (no wash-out)")
 	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.02), 0.0), "text gone -> plate gone")
+
+
+# --- a1-18: friendly greens are colorblind-safe ---
+
+func test_a1_friendly_greens_are_colorblind_safe() -> void:
+	Art.colorblind = false
+	var green := Color(0.4, 1.0, 0.4)
+	Runner.T.ok(Art.safe(green).is_equal_approx(green), "colorblind OFF: the friendly green passes through unchanged")
+	Art.colorblind = true
+	var conv := Art.safe(green)
+	Runner.T.ok(conv.b > conv.g, "colorblind ON: the friendly green converts to a blue-dominant safe color (won't read as danger-red)")
+	Art.colorblind = false   # restore the static for other suites
