@@ -1643,3 +1643,19 @@ func test_c3_ruins_rubble_half_speeds() -> void:
 	# Same x/offset one segment up (seg 2) is NOT rubble — the verb is seg-3 only.
 	var y2: int = -(2 * SimWorld.GATE_SPACING) - ry
 	Runner.T.ok(not sim._in_rubble(rx, y2), "rubble is seg-3 exclusive")
+	# Judge r1: prove the actual HALF-SPEED. One clean step in the rubble patch
+	# covers exactly PLAYER_SPEED/2 (deeper streaming would spawn hazards that
+	# kill the isolated deep-positioned player, so measure the first step only).
+	var wet := SimWorld.new(43, 1)
+	wet.rocks.clear()
+	wet.waters.clear()
+	wet.players[0]["x"] = rx
+	wet.players[0]["y"] = y3
+	wet.camera_top = y3 - 200 * SimWorld.F_ONE
+	Runner.T.ok(wet._in_rubble(wet.players[0]["x"], wet.players[0]["y"]), "wet player starts in rubble")
+	var push := SimInput.new()
+	push.move_x = 256   # pure +x, so the x-delta IS the applied speed
+	var x_before: int = wet.players[0]["x"]
+	wet.step([push])
+	Runner.T.eq(wet.players[0]["x"] - x_before, SimWorld.PLAYER_SPEED / 2,
+		"one step in rubble moves exactly PLAYER_SPEED/2 (the _in_mud half-speed)")
