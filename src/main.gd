@@ -289,7 +289,7 @@ const _EVENT_SOUND := {
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
-	"token_mint": ["buy", -4.0, 1.8],       # commendation chime: the buy jingle a fourth up
+	"token_mint": ["buy_fanfare", -4.0, 1.0],   # a2-16: a proper milestone FANFARE, not the buy jingle pitched up
 	"token_drop": ["buy", -4.0, 1.2],       # spending it sounds like the buy it is
 	"hulk_salvage": ["tank_board", -6.0, 0.8],  # heavy strip-the-wreck clunk   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 2.0],      # metal shear (KIMK: pitch 2.0 clears the true-break band)
@@ -1204,7 +1204,7 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
 				# REND sounded identical to grabbing FLASHBANG. kind 7..10 -> 1.2..1.56.
-				_sfx.play("buy", -2.0, 1.2 + float(int(ev["kind"]) - 7) * 0.12)
+				_sfx.play("buy_grab", -2.0, 1.2 + float(int(ev["kind"]) - 7) * 0.12)   # a2-16: rare capsule GRAB (warm), not the transaction chime
 		elif kind == "explosion":
 			# Up to 5 explosion events fire in one tick (colossus death-ring, bunker
 			# clusters); stacking 5 full booms pumps the HardLimiter to mush. Gate to

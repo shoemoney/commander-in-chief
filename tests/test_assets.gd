@@ -457,3 +457,14 @@ func test_a2_marker_icons_per_class() -> void:
 	Runner.T.eq(ms._marker_icon("capsule"), "hud_lightning", "rare capsule = power-up glyph")
 	Runner.T.eq(ms._marker_icon("free"), "hud_gunshop", "free cache = supply icon")
 	Runner.T.ok(ms._marker_icon("rescue") != ms._marker_icon("bounty"), "rescue reads apart from the kill reticle")
+
+
+# --- a2-16: the overloaded buy jingle is sub-classed ---
+
+func test_a2_buy_subclasses() -> void:
+	var sfx := Sfx.new()
+	sfx._synth_all()
+	Runner.T.ok(sfx._sounds.has("buy_grab") and sfx._sounds.has("buy_fanfare"), "the buy sub-classes are synthesized voices")
+	var evmap: Dictionary = _consts()["_EVENT_SOUND"]
+	Runner.T.eq(evmap["token_mint"][0], "buy_fanfare", "the commendation milestone plays the FANFARE, not the buy chime")
+	sfx.free()

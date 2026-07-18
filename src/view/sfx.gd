@@ -581,6 +581,11 @@ func _synth_all() -> void:
 	# Jingles and blips.
 	s["pickup"] = _notes([660.0, 990.0], 0.07)
 	s["buy"] = _notes([523.0, 659.0, 784.0], 0.07)
+	# a2-16 AUD#2: sub-class the overloaded buy jingle. buy_grab = a warm rounded
+	# reward GRAB (sine, lower); buy_fanfare = a brighter milestone FANFARE (a
+	# longer ascending arpeggio). "buy" stays the crisp transaction chime.
+	s["buy_grab"] = _notes([440.0, 587.0], 0.09, 0.0, false)
+	s["buy_fanfare"] = _notes([523.0, 659.0, 784.0, 1047.0], 0.08)
 	s["deny"] = _notes([220.0, 196.0], 0.09)
 	s["revive"] = _notes([392.0, 523.0, 659.0], 0.08, 0.0, false)
 	s["gate_open"] = _notes([392.0, 494.0, 587.0, 784.0], 0.1)
