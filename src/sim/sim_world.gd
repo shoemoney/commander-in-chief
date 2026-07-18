@@ -474,7 +474,7 @@ var wave: int = 0
 var wave_start_tick: int = 0       # c3 3v: tick the current wave began (derived; not hashed) — the mast hazard's phase is wave-LOCAL so its warn always precedes the first jet
 var wave_pending: int = 0
 var wave_spawn_cd: int = 0
-var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter)
+var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter, 4 payday, 5 night, 6 frenzy, 7 marksmen, 8 bombardment)
 var pressure_side: int = -1        # c3 7v: endless spawn pressure quadrant (0 left/1 center/2 right, -1 none); rotates every 3rd wave so the camp SPOT migrates
 var intermission_ticks: int = 0
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
@@ -3672,6 +3672,12 @@ func _step_waves() -> void:
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
 			if wave >= 3 and is_elite and wave_mod != 1:
 				var roll := rng.range_i(0, 9)
+				# c3 2v per-wave COMPOSITION THEMES: remap the SAME draw (no extra rng)
+				# onto a themed subset so a marksmen/bombardment wave reads as a unit.
+				if wave_mod == 7:
+					roll = [1, 4, 5][roll % 3]   # MARKSMEN: sniper / ghillie / drone (ranged paint)
+				elif wave_mod == 8:
+					roll = [0, 3][roll % 2]      # BOMBARDMENT: grenadier / sapper (area denial)
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -3820,16 +3826,18 @@ func _start_wave() -> void:
 	# pick). None on the first two waves; then roll one. Endless-only.
 	# 4 = PAYDAY (double coin, no extra threat) — a go-big economy beat.
 	# 5 = NIGHT OPS (vision tightens; view only). 6 = FRENZY (swarm +40% speed).
+	# 7 = MARKSMEN (elite picks bias to sniper/ghillie/drone — ranged paint).
+	# 8 = BOMBARDMENT (elite picks bias to grenadier/sapper — area denial).
 	# No back-to-back repeats: wave_mod still holds last wave's mutator here,
 	# so a duplicate roll falls back to plain — twice-in-a-row reads as a bug.
 	var prev_mod := wave_mod
-	wave_mod = 0 if wave <= 2 else rng.range_i(0, 6)
+	wave_mod = 0 if wave <= 2 else rng.range_i(0, 8)
 	if wave_mod != 0 and wave_mod == prev_mod:
 		wave_mod = 0
 	# Ramp smoothing (8v: wave 5 stacked gunship + mutator + shop lockout into
 	# a cliff): miniboss waves refuse the harsh mutators — PAYDAY/NIGHT OPS
 	# stay legal for flavor. Roll-then-clamp preserves the rng stream.
-	if wave % 5 == 0 and wave_mod in [1, 2, 3, 6]:
+	if wave % 5 == 0 and wave_mod in [1, 2, 3, 6, 7, 8]:
 		wave_mod = 0
 	if wave_mod == 3:
 		# Spotter wave: a Mortar Observer joins the fray.

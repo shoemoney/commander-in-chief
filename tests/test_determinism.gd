@@ -376,3 +376,39 @@ func test_checksum_is_idempotent() -> void:
 	var c1 := sim.checksum()
 	var c2 := sim.checksum()
 	Runner.T.eq(c1, c2, "checksum must not mutate sim state")
+
+
+func test_c3_wave_themes_determinism_and_bias() -> void:
+	# c3 2v: the two new composition THEMES (7 MARKSMEN, 8 BOMBARDMENT) step
+	# deterministically (A==B) and actually BIAS the elite roster to their subset.
+	# Endless-only, wave >= 3 -> past the wave-2 wipe, so goldens are untouched.
+	for mod in [7, 8]:
+		var a := _themed_wave_run(mod)
+		var b := _themed_wave_run(mod)
+		Runner.T.eq(a["cs"], b["cs"], "themed wave mod %d A/B checksum diverged" % mod)
+		var k: Dictionary = a["kinds"]
+		if mod == 7:
+			var marksmen: int = k.get("sniper", 0) + k.get("ghillie", 0) + k.get("drone", 0)
+			Runner.T.ok(marksmen > 0, "MARKSMEN wave fields ranged-paint specials")
+			Runner.T.eq(k.get("grenadier", 0), 0, "MARKSMEN wave excludes off-theme grenadiers")
+			Runner.T.eq(k.get("shield", 0), 0, "MARKSMEN wave excludes off-theme shields")
+			Runner.T.eq(k.get("technical", 0), 0, "MARKSMEN wave excludes off-theme technicals")
+		else:
+			var bombard: int = k.get("grenadier", 0) + k.get("sapper", 0)
+			Runner.T.ok(bombard > 0, "BOMBARDMENT wave fields area-denial specials")
+			Runner.T.eq(k.get("sniper", 0), 0, "BOMBARDMENT wave excludes off-theme snipers")
+			Runner.T.eq(k.get("shield", 0), 0, "BOMBARDMENT wave excludes off-theme shields")
+
+
+func _themed_wave_run(mod: int) -> Dictionary:
+	var sim := SimWorld.new(SEED, 1, "endless")
+	sim.wave = 3
+	sim._start_wave()
+	var kinds := {}
+	for tick in 300:
+		sim.wave_mod = mod   # hold the theme across the window (both runs alike)
+		sim.step([SimInput.new()])
+		for e in sim.enemies:
+			var kd: String = e.get("kind", "")
+			kinds[kd] = kinds.get(kd, 0) + 1
+	return {"cs": sim.checksum(), "kinds": kinds}

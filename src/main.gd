@@ -1627,7 +1627,7 @@ func _consume_events() -> void:
 			"vest_break":
 				_ev_vest_break(ev)
 			"wave_start":
-				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS", "  — FRENZY"][ev.get("mod", 0)]
+				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS", "  — FRENZY", "  — MARKSMEN", "  — BOMBARDMENT"][ev.get("mod", 0)]
 				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 				# Horde dust-bank: a wide low roll of dust at the top edge before the
