@@ -641,6 +641,25 @@ func _paint_bg(canvas: Node2D) -> void:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
 						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
+	# a4-04: a COHERENT worn spine down the play lane — the mid-ground anchor + forward
+	# wayfinding the stochastic mottle/scuffs above never gave (they read as random, not a
+	# route). Overlapping soft packed-earth cards follow _spine_center_x (a PURE fn of
+	# absolute world-y, so the trail scrolls seamlessly and never teleports laterally),
+	# fusing into one connected trail; a faint tread pair rides its center. The old
+	# center-biased wheel scuffs now land ON this spine and reinforce it. Drawn last so it
+	# reads as the most-trampled ground; under the water layer so a ford still crosses it.
+	var spine_top: float = floor(moy) - 96.0
+	for si in 16:
+		var sy: float = spine_top + float(si) * 56.0
+		var cx: float = _spine_center_x(cam_y + sy)
+		canvas.draw_set_transform(Vector2(cx, sy), 0.0, Vector2.ONE)
+		canvas.draw_texture_rect(Art.tex("fx_softspot"),
+			Rect2(Vector2(-48.0, -68.0), Vector2(96.0, 136.0)), false, SPINE_COL)
+		if si % 2 == 0:
+			for tk in 2:
+				canvas.draw_texture_rect(Art.tex("fx_softspot"),
+					Rect2(Vector2(-11.0 + float(tk) * 22.0 - 3.0, -58.0), Vector2(6.0, 116.0)),
+					false, SPINE_TREAD)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -3431,6 +3450,14 @@ static func _ground_stops(mode: String) -> Array:
 const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a": 0.52}
 
 
+# a4-04: the worn spine down the play lane. Warm packed earth (darker than turf) + a faint
+# tread pair snapped onto it; SPINE_LANE is the x-band its meandering centerline stays in
+# (the play corridor), so the trail is always a route through open ground, never a wall.
+const SPINE_COL := Color(0.10, 0.075, 0.03, 0.13)
+const SPINE_TREAD := Color(0.02, 0.04, 0.0, 0.11)
+const SPINE_LANE := Vector2(232.0, 408.0)
+
+
 static func _rock_has_top_light(rtex: String) -> bool:
 	# a3-09: only the DOMED boulders (rock1/rock2) get the lit top-edge rim that reads as
 	# raised cover; the flat log (tree_dead2) has no raised dome, so no top-light.
@@ -3447,6 +3474,15 @@ static func _hero_shows_apex(down_residual: float) -> bool:
 	# a4-03: the hero value-apex crown catch-light shows only while UP — a downed / reviving
 	# body (down_residual > 0) must NOT read as the brightest point on the field.
 	return down_residual <= 0.01
+
+
+static func _spine_center_x(world_y: float) -> float:
+	# a4-04: the worn-spine centerline — a slow low-frequency wander around the 320 center
+	# lane, a PURE function of absolute world-y so the trail scrolls seamlessly and never
+	# teleports laterally as the camera moves. The two sine terms keep it inside SPINE_LANE
+	# (|dev| <= 72) and give it an organic, non-repeating meander rather than a road-straight
+	# stripe. Continuous by construction: max lateral slope ~0.26 px/px.
+	return 320.0 + sin(world_y * 0.0022) * 52.0 + sin(world_y * 0.0071 + 1.3) * 20.0
 
 
 static func _grade_breather_target(mode: String, intermission_ticks: int) -> float:

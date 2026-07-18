@@ -611,6 +611,33 @@ func test_a4_hero_apex_is_cool_and_bright() -> void:
 	Runner.T.ok(not ms._hero_shows_apex(1.0), "a fully-downed hero shows no apex light")
 
 
+func test_a4_spine_is_a_worn_lane_route() -> void:
+	# a4-04: the play-lane spine is a COHERENT worn trail (a mid-ground anchor + forward
+	# wayfinding), not the old stochastic scuffs. Assert the tint reads as trampled earth and
+	# the centerline is a connected route that stays inside the play corridor for a long sweep.
+	var c := _consts()
+	var ms = load("res://src/main.gd")
+	var col: Color = c["SPINE_COL"]
+	var lane: Vector2 = c["SPINE_LANE"]
+	# Warm packed earth, darker than the turf, and faint — a worn tint, not a painted road.
+	Runner.T.ok(col.r > col.b, "the spine is WARM packed earth (r > b), reading as trampled ground")
+	Runner.T.ok(col.a < 0.2, "the spine is a FAINT worn tint, not an opaque painted road")
+	# The centerline is CONTINUOUS, stays in the play corridor, and actually meanders — sweep
+	# a long stretch of absolute world-y (scrolling never moves it out of the lane or jumps it).
+	var prev: float = ms._spine_center_x(0.0)
+	var moved := false
+	var y := 0.0
+	while y <= 6144.0:
+		var cx: float = ms._spine_center_x(y)
+		Runner.T.ok(cx >= lane.x and cx <= lane.y, "the spine centerline stays in the play lane at y=%d" % int(y))
+		Runner.T.ok(absf(cx - prev) < 24.0, "the spine is CONTINUOUS (no lateral jump) at y=%d" % int(y))
+		if absf(cx - 320.0) > 20.0:
+			moved = true
+		prev = cx
+		y += 64.0
+	Runner.T.ok(moved, "the spine MEANDERS like a marched route, not a dead-straight painted stripe")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
