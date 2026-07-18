@@ -890,6 +890,16 @@ static func _rk_solid(rk: Dictionary) -> bool:
 	return ROCK_KIND_EXT[rk.get("kind", 0)][2] == 1
 
 
+static func _off_center_px(px: int) -> int:
+	## c3 3v: pull an objective DROP out of the SCREEN_CX ±64px dead-band
+	## ([256,384]) to the nearer lateral edge, so drops break the center rail
+	## instead of reinforcing it. Same single draw folded IN PLACE — no new rng,
+	## no sequence shift; only the drawn value moves.
+	if px > 256 and px < 384:
+		return 256 if px < 320 else 384
+	return px
+
+
 static func _rk_burnable(rk: Dictionary) -> bool:
 	## c3 5v: soft cover a vent jet can destroy — grass (kind 1, burns off) and
 	## wall slabs (kind 2, crack apart). Stone (0) and hero wrecks (3) are immune
@@ -3628,7 +3638,7 @@ func _start_wave() -> void:
 		# 1-in-3 roll mirrors the courier's (starting value; force-stage 30
 		# waves -> expect ~10 drops). "drop" is an immutable-at-spawn marker,
 		# unhashed (classified in test_checksum_coverage).
-		var drx := rng.range_i(60, 580) * F_ONE
+		var drx := _off_center_px(rng.range_i(60, 580)) * F_ONE   # c3 3v: off the center rail
 		var dry: int = camera_top + 240 * F_ONE
 		# "drop" holds the remaining TTL (600t = 10 s starting value; test: the
 		# beat resolves inside a wave) — an eternal crate was a rusher-despawn
@@ -3759,7 +3769,7 @@ func _step_colossus() -> void:
 	_supply_cd -= 1
 	if _supply_cd <= 0:
 		_supply_cd = SUPPLY_DROP_INTERVAL_TICKS
-		pickups.append({"x": rng.range_i(60, 580) * F_ONE, "y": camera_top + rng.range_i(200, 320) * F_ONE, "kind": 1})
+		pickups.append({"x": _off_center_px(rng.range_i(60, 580)) * F_ONE, "y": camera_top + rng.range_i(200, 320) * F_ONE, "kind": 1})   # c3 3v: siege drop pulls to a flank
 
 
 func _damage_colossus(amount: int) -> void:

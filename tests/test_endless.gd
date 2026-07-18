@@ -324,3 +324,28 @@ func test_c3_mast_hazard_spares_the_flank_and_off_cadence() -> void:
 	sim.events.clear()
 	sim._step_mast_hazard()
 	Runner.T.ok(sim.events.is_empty() and p["vest"], "wave 6 (off-cadence) fires no mast hazard")
+
+
+func test_c3_drops_pull_off_center() -> void:
+	# c3 3v: objective drops fold out of the SCREEN_CX +/-64px dead-band to a
+	# lateral edge (breaking the center rail). Pure fold — no extra rng draw.
+	# The helper itself, exhaustively over the draw range.
+	for px in range(60, 581):
+		var f: int = SimWorld._off_center_px(px)
+		Runner.T.ok(f <= 256 or f >= 384, "px %d folds clear of the center dead-band (got %d)" % [px, f])
+		Runner.T.ok(f == px or (px > 256 and px < 384), "only center-band values move")
+	# Live endless mid-wave drop lands off-center across seeds.
+	for sd in [3, 11, 29]:
+		var sim := SimWorld.new(sd, 1, "endless")
+		sim.wave = 4
+		var drops := 0
+		var idle := SimInput.new()
+		for i in 400:
+			sim.step([idle])
+			for ev in sim.events:
+				if ev["t"] == "supply_drop":
+					Runner.T.ok(absi(ev["x"] - SimWorld.SCREEN_CX) >= 64 * SimWorld.F_ONE,
+						"seed %d: supply drop pulls off the center rail" % sd)
+					drops += 1
+			if drops >= 1:
+				break
