@@ -3120,6 +3120,9 @@ const _LIGHT_RIM := {"rusher": true, "elite": true, "m_insurgent3": true,
 	"m_insurgent4": true, "m_insurgent5": true, "m_soldier2": true,
 	"m_contractor2": true, "sapper": true, "courier": true, "ghillie": true,
 	"m_pilot": true}
+# a1-07: craters read as blasted DEPRESSIONS via a soft dark pit under the decal
+# (they are holes, so they get no drop-shadow — this is a centered inner-shadow).
+const _CRATER_KEYS := {"crater": true, "crater_field": true}
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
@@ -3146,6 +3149,12 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 		stretch := 1.0) -> void:
 	var t: Texture2D = Art.tex(tex_name)
 	var s := spr_scale * Art.draw_scale(tex_name)
+	if _CRATER_KEYS.has(tex_name):
+		# a1-07: soft dark pit UNDER the crater decal (centered, no offset) so it seats
+		# as a depression blasted into the ground instead of a sticker floating on it.
+		var cr := t.get_size().x * s * 0.6
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2(cr, cr), Vector2(cr, cr) * 2.0),
+			false, Color(0.03, 0.02, 0.02, 0.5))
 	var tint := mod * Art.tint(tex_name)
 	draw_set_transform(pos, angle, Vector2(s, s * stretch))
 	var origin := -t.get_size() / 2.0
