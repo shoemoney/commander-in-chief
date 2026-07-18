@@ -1918,6 +1918,16 @@ static func _gib_col(kkind: String) -> Color:
 	return Color(1.0, 0.85, 0.5) if _METAL_KINDS.has(kkind) else Color(0.5, 0.1, 0.08)
 
 
+static func _kill_tier(kkind: String) -> int:
+	# a3-13: death weight class — 0 light infantry, 1 elite/specialist, 2 vehicle/emplacement.
+	# Scales the death-pop radius + gib volume so a heavy dies bigger than a lone trooper.
+	if kkind in ["technical", "drone", "mg_nest", "broadcast", "colossus"]:
+		return 2
+	if kkind in ["elite", "grenadier", "sniper", "ghillie"]:
+		return 1
+	return 0
+
+
 func _ev_kill(ev: Dictionary) -> void:
 	# No screen flash here: at kill-spam rates it strobes
 	# (photosensitivity); smoke + gib burst + blip + coin carry it.
@@ -1971,11 +1981,20 @@ func _ev_kill(ev: Dictionary) -> void:
 				"move": true})
 	else:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
-	# Directional gib/spark burst — the kill hits back.
-	for g in 5:
+	# a3-13 (VFX#3/VFX#2): a bright LOCAL death-pop on EVERY kill (was only technical) so a
+	# kill lands with a punch. A small ADDITIVE light at the kill point — NOT a screen flash
+	# (the strobe the header comment forbids for photosensitivity is a WHOLE-frame luminance
+	# spike; a localized glow doesn't strobe the frame). Radius + gib volume scale by the unit
+	# tier so a heavy dies visibly bigger than a lone trooper (a2-12 already keyed gib COLOR).
+	var ktier := _kill_tier(kkind)
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.055,
+		"r": 9.0 + float(ktier) * 6.0, "col": Color(1.0, 0.9, 0.62)})
+	# Directional gib/spark burst — the kill hits back (5/8/11 gibs by tier, faster with tier).
+	for g in 5 + ktier * 3:
 		var ga := randf() * TAU
-		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07,
-			"vx": cos(ga) * randf_range(1.0, 2.6), "vy": sin(ga) * randf_range(1.0, 2.6),
+		var gspd := randf_range(1.0, 2.6) + float(ktier) * 0.6
+		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.07 + float(ktier) * 0.02,
+			"vx": cos(ga) * gspd, "vy": sin(ga) * gspd,
 			"spin": randf() * TAU, "col": _gib_col(kkind)})
 	_hitmarker[_hit_owner(ev["x"], ev["y"])] = 1.0   # kill confirms on the shooter's reticle
 	_run_kills += 1
@@ -3229,6 +3248,7 @@ const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that gro
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
 const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
 const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
+const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds under REDUCE MOTION; pulse is motion-gated
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
@@ -5369,7 +5389,8 @@ func _draw_enemies() -> void:
 			# floor (base alpha) holds under REDUCE MOTION so the threat read never vanishes.
 			var eaura := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.06 + float(eidx))
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(epos - Vector2(14.0, 14.0), Vector2(28.0, 28.0)),
-				false, Color(ELITE_AURA.r, ELITE_AURA.g, ELITE_AURA.b, 0.12 + eaura * 0.07 * _motion))
+				false, Color(ELITE_AURA.r, ELITE_AURA.g, ELITE_AURA.b,
+					ELITE_AURA_ALPHA["base"] + eaura * ELITE_AURA_ALPHA["pulse"] * _motion))
 			# Wind-up telegraph: muzzle ember swells red before the shot.
 			var wu: int = e.get("windup", 0)
 			if wu > 0:
@@ -7556,6 +7577,16 @@ func _draw_banners(top_msg: String) -> void:
 		if _run_rescues > 0:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
+		# a3-14 (HUD#4/#8/#10): bring the VICTORY card to K.I.A. parity — the win screen
+		# was thinner than the death screen. A NEW BEST! celebration flag (same predicate
+		# as the K.I.A. debrief) + a REDEPLOY prompt (redeploy input works on victory too,
+		# but the card never told you so — the death card does).
+		if best_score > 0:
+			vrows.append({"text": "BEST %d" % best_score + ("   NEW BEST!" if sim.score >= best_score else ""),
+				"color": Color(0.9, 0.92, 0.85)})
+		var vrp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
+		vrows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, vrp),
+			"icon": Art.glyph_key("start"), "icon_size": 14.0})
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
 			Color(1, 1, 1, 0.96), true)   # a1-11: gold shine sweep
 		# Trophy overlaps blank panel space only (no row text under it), so it's

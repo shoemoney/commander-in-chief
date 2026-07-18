@@ -760,6 +760,25 @@ func test_a3_elite_aura_is_warm() -> void:
 	var ea: Color = c["ELITE_AURA"]
 	Runner.T.ok(ea.r > ea.g and ea.r > ea.b, "the elite aura is WARM-RED (r dominates) — a danger tell")
 	Runner.T.ok(ea.r - ea.g > 0.4, "the aura is saturated warm, not a muddy neutral")
+	# The base alpha holds under REDUCE MOTION (_motion=0 -> only the base term survives),
+	# so the threat tell never vanishes; the pulse is the motion-gated extra.
+	var eaa: Dictionary = c["ELITE_AURA_ALPHA"]
+	Runner.T.ok(eaa["base"] >= 0.12, "the aura keeps a visible base under REDUCE MOTION")
+	Runner.T.ok(eaa["pulse"] > 0.0, "the aura pulse adds on top when motion is on")
+
+
+# --- a3-13: every kill gets a bright LOCAL death-pop, and the death weight (pop radius +
+# gib volume) scales by unit tier so a heavy dies bigger than a lone trooper. ---
+
+func test_a3_kill_tier_scales_death_weight() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.eq(ms._kill_tier("rusher"), 0, "a rusher is a light-infantry death (tier 0)")
+	Runner.T.eq(ms._kill_tier("elite"), 1, "an elite is a specialist death (tier 1)")
+	Runner.T.eq(ms._kill_tier("technical"), 2, "a technical is a vehicle death (tier 2)")
+	# Gib volume = 5 + tier*3 -> a heavy throws strictly more debris than a trooper.
+	var light_gibs: int = 5 + ms._kill_tier("rusher") * 3
+	var heavy_gibs: int = 5 + ms._kill_tier("technical") * 3
+	Runner.T.ok(heavy_gibs > light_gibs, "a vehicle throws more gib than a light trooper (11 vs 5)")
 
 
 # --- a3-15: three place-defining ambience beds (river / foundry / shop), synthesized,
