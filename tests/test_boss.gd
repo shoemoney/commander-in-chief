@@ -181,3 +181,21 @@ func test_c3_gunship_approach_ramp() -> void:
 	Runner.T.ok(thresh >= 2, "a threshold checkpoint bag row marks the doorway")
 	# The center staging gap between the +340 threshold bags clears the hull.
 	Runner.T.ok(2 * 130 - 2 * 12 >= SimWorld.HULL_CLEARANCE / Fixed.ONE, "the threshold doorway clears the hull")
+	# c3-12 r2 CALM STAGING BEAT: an authored hazard-free pocket immediately south
+	# of the threshold — cover marks it, and NO nests/barrels sit between +420..+500.
+	var staging := 0
+	var hazards_in_calm := 0
+	for sb in sim.sandbags:
+		if absi(sb["y"] - (bgy + 460 * Fixed.ONE)) < 10 * Fixed.ONE:
+			staging += 1
+	for e in sim.enemies:
+		if e.get("kind", "") == "mg_nest":
+			var rel: int = (e["y"] - bgy) / Fixed.ONE
+			if rel >= 420 and rel <= 500:
+				hazards_in_calm += 1
+	for b in sim.barrels:
+		var brel: int = (b["y"] - bgy) / Fixed.ONE
+		if brel >= 420 and brel <= 500:
+			hazards_in_calm += 1
+	Runner.T.ok(staging >= 2, "the calm staging pocket is authored with side cover")
+	Runner.T.eq(hazards_in_calm, 0, "the calm band (+420..+500) is hazard-free — its own beat")

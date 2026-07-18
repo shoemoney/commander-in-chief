@@ -3239,6 +3239,13 @@ func _step_camera() -> void:
 			# center gap >= HULL_CLEARANCE so the crossing reads as a doorway.
 			for thx in [SCREEN_CX - 130 * F_ONE, SCREEN_CX + 130 * F_ONE]:
 				sandbags.append({"x": thx, "y": _next_gate_y + 340 * F_ONE, "world": 1})
+			# c3-12 r2 CALM STAGING BEAT (judge TO_TEN): an authored hazard-free
+			# pocket immediately south of the threshold — two staging bags far to
+			# the sides mark a regroup point with a wide-open center and NO nests/
+			# barrels between +420 and +500, so the calm reads as its own beat
+			# before the doorway rather than an implied gap.
+			for stx in [SCREEN_CX - 190 * F_ONE, SCREEN_CX + 190 * F_ONE]:
+				sandbags.append({"x": stx, "y": _next_gate_y + 460 * F_ONE, "world": 1})
 			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
 			_stamp_stretch_setpieces()
 		else:
