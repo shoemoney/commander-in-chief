@@ -2305,6 +2305,9 @@ func _bus_vol(name: String) -> int:
 	return clampi(int(round(db_to_linear(AudioServer.get_bus_volume_db(b)) * 10.0)), 1, 10)
 
 
+const _SFX_SLAVED_BUSES: Array[String] = ["UI", "VO"]   # a3-16: jingle UI + radio VO both ride the one SFX knob
+
+
 func _set_bus_vol(name: String, v: int) -> void:
 	v = clampi(v, 0, 10)
 	var b := AudioServer.get_bus_index(name)
@@ -2312,11 +2315,16 @@ func _set_bus_vol(name: String, v: int) -> void:
 	if v > 0:
 		AudioServer.set_bus_volume_db(b, linear_to_db(v / 10.0))
 	if name == "SFX":
-		# The jingle "UI" bus slaves to the SFX control — one user-facing knob.
-		var u := AudioServer.get_bus_index("UI")
-		AudioServer.set_bus_mute(u, v == 0)
-		if v > 0:
-			AudioServer.set_bus_volume_db(u, linear_to_db(v / 10.0))
+		# a3-16: the jingle "UI" bus AND the radio "VO" bus both slave to the SFX
+		# control — one user-facing knob for every non-music voice/cue. The radio VO
+		# sent straight to Master before, so muting SFX still left the Commander blaring.
+		for slaved in _SFX_SLAVED_BUSES:
+			var s := AudioServer.get_bus_index(slaved)
+			if s == -1:
+				continue
+			AudioServer.set_bus_mute(s, v == 0)
+			if v > 0:
+				AudioServer.set_bus_volume_db(s, linear_to_db(v / 10.0))
 
 
 func _record_run() -> void:

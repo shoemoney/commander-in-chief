@@ -716,3 +716,13 @@ func test_a3_ambience_beds_are_synthesized_and_distinct() -> void:
 	Runner.T.ok((beds["foundry"] as AudioStreamWAV).data != (beds["shop"] as AudioStreamWAV).data,
 		"foundry and shop are distinct beds")
 	sfx.free()
+
+
+# --- a3-16: the radio VO bus is governed by the SFX knob. It sent straight to Master
+# at a fixed level before, so muting SFX still left the Commander blaring — a real mix
+# gap. _set_bus_vol slaves every bus in _SFX_SLAVED_BUSES to the SFX control. ---
+
+func test_a3_vo_bus_slaved_to_sfx_control() -> void:
+	var slaved: Array = _consts()["_SFX_SLAVED_BUSES"]
+	Runner.T.ok("VO" in slaved, "the radio VO bus now rides the SFX volume knob (was ungoverned)")
+	Runner.T.ok("UI" in slaved, "the jingle UI bus still rides the SFX knob (a1 behavior preserved)")
