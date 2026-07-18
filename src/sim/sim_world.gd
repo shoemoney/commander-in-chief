@@ -3230,31 +3230,20 @@ func _step_camera() -> void:
 		# north of the gate-3 boss row): a 3-slab kind-2 wall on one flank, x kept
 		# inside [78,534] (clears the breach x>60 pin). seg 3 = past the torture.
 		if absi(_next_rock_y) / GATE_SPACING == RUINS_SEG:
-			var mr_off: int = posmod(-_next_rock_y / F_ONE, 1000)
-			if mr_off >= 60 and mr_off <= 350:
-				var mwh := _mix(absi(_next_rock_y / ROCK_SPACING) + 6151, _world_seed)
-				# c4 3v RUINS DUAL-LANE: the maze cover is forced to the RIGHT flank so
-				# the ruins read as two PARALLEL lanes — a covered/blind RIGHT (maze wall)
-				# and an exposed LEFT (open, long sightline) — split by a central PERMEABLE
-				# low-wall (world-bags with ~58px vertical gaps; lateral fire threads them
-				# for cross-lane crossfire). Both lanes clear HULL_CLEARANCE; band 3 is
-				# torture-inert so both goldens hold. (Flat split — the elevation ridge
-				# was rejected; this reuses the shipped maze + sandbag grammar.)
-				var mwx: int = 462 * F_ONE   # covered lane = right
-				var mwy: int = _next_rock_y + (mwh % 24) * F_ONE
-				for mw in 3:
-					rocks.append({"x": mwx + (mw * 72 - 72) * F_ONE, "y": mwy, "kind": 2})
-			# c4 3v r2: a CONTINUOUS central divider spanning the ruins clean stretch
-			# (off 40..312, ~0.9 screen; the fork-4 island caps it north), fired ONCE
-			# per band-3 (containment on off=200) and independent of the maze rows so
-			# the split is a guaranteed continuous run, not intermittent. 5 world-bags
-			# 68px apart -> ~58px gaps thread cross-lane fire. Left lane WORLD_LEFT..302
-			# and right lane 338..WORLD_RIGHT both >> HULL_CLEARANCE.
+			# c4 3v RUINS DUAL-LANE (r2): the whole split is ONE continuous fixed-coord
+			# stretch, fired once per band-3 via ROCK_SPACING containment (off=200): a
+			# covered RIGHT wall column (kind-2) + a central PERMEABLE divider (world-
+			# bags at SCREEN_CX) + an exposed LEFT lane, all co-placed over off 40..312
+			# (~272px; the shipped fork-4 island caps the span north). Left WORLD_LEFT..
+			# 302 and right 338..WORLD_RIGHT both clear HULL_CLEARANCE (the wall at 470
+			# leaves 92px/114px sub-lanes). Band 3 = torture-inert -> goldens hold.
 			var ruins_div_y: int = -(RUINS_SEG * GATE_SPACING + 200 * F_ONE)
 			if _next_rock_y <= ruins_div_y and _next_rock_y + ROCK_SPACING > ruins_div_y:
 				var rd_top: int = -(RUINS_SEG * GATE_SPACING + 40 * F_ONE)
 				for dv in 5:
-					sandbags.append({"x": SCREEN_CX, "y": rd_top - (dv * 68) * F_ONE, "world": 1})
+					var ry5: int = rd_top - (dv * 68) * F_ONE
+					sandbags.append({"x": SCREEN_CX, "y": ry5, "world": 1})   # permeable central divider
+					rocks.append({"x": 470 * F_ONE, "y": ry5, "kind": 2})     # covered right-lane wall
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1

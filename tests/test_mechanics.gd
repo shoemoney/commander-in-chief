@@ -2120,21 +2120,20 @@ func test_c4_ruins_dual_lane() -> void:
 		if absi(sb["y"]) / SimWorld.GATE_SPACING == SimWorld.RUINS_SEG \
 				and sb["x"] == SimWorld.SCREEN_CX:
 			div_ys.append(sb["y"])
-	Runner.T.ok(div_ys.size() >= 4, "the central divider is a continuous run (%d bags)" % div_ys.size())
+	Runner.T.eq(div_ys.size(), 5, "the central divider is a continuous 5-bag run")
 	div_ys.sort()
-	if div_ys.size() >= 2:
-		var span: int = (div_ys[div_ys.size() - 1] - div_ys[0]) / SimWorld.F_ONE
-		Runner.T.ok(span >= 200, "the divider spans a continuous >=200px stretch (got %d)" % span)
-	# The maze cover sits on the RIGHT (covered) lane.
-	var right_walls := 0
-	var left_walls := 0
+	var span: int = (div_ys[div_ys.size() - 1] - div_ys[0]) / SimWorld.F_ONE
+	Runner.T.eq(span, 4 * 68, "the divider spans a continuous 272px stretch")
+	# Fork-4 cap: the divider stays north of off ~350 (never into the fork-4 island).
+	for dy in div_ys:
+		Runner.T.ok(absi(dy) % SimWorld.GATE_SPACING <= 350 * SimWorld.F_ONE, "divider bag clears the fork-4 island")
+	# The covered RIGHT lane carries a matching continuous 5-slab wall column at x=470.
+	var right_col := 0
 	for rk in sim.rocks:
-		if rk.get("kind", 0) == 2 and absi(rk["y"]) / SimWorld.GATE_SPACING == SimWorld.RUINS_SEG:
-			if rk["x"] > SimWorld.SCREEN_CX:
-				right_walls += 1
-			else:
-				left_walls += 1
-	Runner.T.ok(right_walls > left_walls, "the maze cover holds the right/covered lane (%d vs %d)" % [right_walls, left_walls])
+		if rk.get("kind", 0) == 2 and absi(rk["y"]) / SimWorld.GATE_SPACING == SimWorld.RUINS_SEG \
+				and rk["x"] == 470 * SimWorld.F_ONE:
+			right_col += 1
+	Runner.T.eq(right_col, 5, "the covered right lane runs a matching 5-slab wall column")
 	# Both lanes clear the hull around the central divider.
 	var left_lane: int = (SimWorld.SCREEN_CX - SimWorld.SANDBAG_HALF_W) - SimWorld.WORLD_LEFT
 	var right_lane: int = SimWorld.WORLD_RIGHT - (SimWorld.SCREEN_CX + SimWorld.SANDBAG_HALF_W)
