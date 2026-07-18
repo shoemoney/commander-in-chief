@@ -6762,19 +6762,19 @@ func _draw_objective_markers() -> void:
 			# The rescue is an OBJECTIVE, not a threat — green mark, top priority,
 			# so a pilot drifting off-screen is findable before the edge takes him.
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
-				"icon": "hud_target", "col": Art.safe(Color(0.45, 1.0, 0.65)), "pr": 1})
+				"icon": "hud_star", "col": Art.safe(Color(0.45, 1.0, 0.65)), "pr": 1})   # a2-14 LEG#3: rescue beacon, not the kill reticle
 		elif e.get("marked", false):
 			marks.append({"sx": e["x"] * PX, "sy": (e["y"] - sim.camera_top) * PX,
 				"icon": "hud_target", "col": Color(1.0, 0.82, 0.3), "pr": 1})
 	for pk in sim.pickups:
 		if pk.get("cost", 0) > 0:
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
-				"icon": "hud_gunshop", "col": Color(0.6, 0.9, 1.0), "pr": 2})
+				"icon": "icon_coin", "col": Color(0.6, 0.9, 1.0), "pr": 2})   # a2-14 LEG#4: priced = coin
 		elif pk["kind"] >= 4:
 			# Rare power-up capsule — the game makes a fuss on pickup but never
 			# pointed you to it; colour-keyed to match the ground glow.
 			marks.append({"sx": pk["x"] * PX, "sy": (pk["y"] - sim.camera_top) * PX,
-				"icon": "hud_gunshop", "pr": 2,
+				"icon": "hud_lightning", "pr": 2,   # a2-14 LEG#4: rare capsule = power-up glyph
 				"col": _CAPSULE_COL[clampi(pk["kind"] - 4, 0, _CAPSULE_COL.size() - 1)]})
 		else:
 			# Free crate (guaranteed gate cache) — supplies worth pathing to.
