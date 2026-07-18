@@ -2465,10 +2465,24 @@ func _in_fork_wire(x: int, y: int) -> bool:
 
 
 func _in_water(x: int, y: int) -> bool:
+	## Water/ford variation (8v): deeper bands earn a SECOND ford (every 3rd
+	## band) and a dry mid-river ISLAND with wet lips (every 4th) — all pure
+	## derivations from the band's existing y/ford_x, zero new rng or fields.
+	## Band 1 (the torture band) hits neither branch: byte-identical behavior.
 	for w in waters:
 		if y >= w["y"] and y <= w["y"] + WATER_H:
-			if x < w["ford_x"] - FORD_HALF_W or x > w["ford_x"] + FORD_HALF_W:
-				return true
+			if x >= w["ford_x"] - FORD_HALF_W and x <= w["ford_x"] + FORD_HALF_W:
+				return false
+			var band_idx: int = absi(w["y"] / GATE_SPACING)
+			if band_idx % 3 == 2:
+				var ford2_x: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + 240 * F_ONE) % (480 * F_ONE)
+				if x >= ford2_x - FORD_HALF_W and x <= ford2_x + FORD_HALF_W:
+					return false
+			if band_idx >= 4 and band_idx % 4 == 0:   # deep bands only (first at -4000, past torture)
+				var isl_x2: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + 120 * F_ONE) % (480 * F_ONE)
+				if absi(x - isl_x2) <= 60 * F_ONE and y >= w["y"] + 20 * F_ONE and y <= w["y"] + 60 * F_ONE:
+					return false   # dry island; the 20px wet lips are the micro-decision
+			return true
 	return false
 
 
@@ -2562,6 +2576,15 @@ func _step_camera() -> void:
 			var b2 := _make_bunker(arena["b2"][0] * F_ONE, _next_gate_y + arena["b2"][1] * F_ONE)
 			bunkers.append(b1)
 			bunkers.append(b2)
+			# Authored blockade setpiece (5v, gates 2+ = past the torture): a
+			# 3-bag line mid-stretch the player must grenade, flank, or crush —
+			# rides the ENTIRE sandbag grammar for free (cover, destructible,
+			# enemy-avoid, tread-kill, conditional hash).
+			if _gate_counter >= 2:
+				var blk_x: int = (140 + ((_gate_counter * 2654435761) & 0x7FFFFFFF) % 320) * F_ONE
+				for bseg2 in 3:
+					sandbags.append({"x": blk_x + (bseg2 - 1) * 24 * F_ONE,
+						"y": _next_gate_y + 460 * F_ONE})
 			# Hardpoint rock ~140px south of every bunker-pair gate, flank-
 			# alternating: the mortar-observer fallback cover the panel asked for.
 			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,

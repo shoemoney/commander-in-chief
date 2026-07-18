@@ -129,3 +129,22 @@ func test_frogman_surfaces_and_is_shootable() -> void:
 		if not frog["alive"]:
 			break
 	Runner.T.ok(not frog["alive"], "surfaced frogman is bullet-vulnerable")
+
+func test_deep_bands_earn_second_fords_and_islands() -> void:
+	# LVL-4 (8v): every 3rd band gets a second ford (240px-wrapped), every 4th
+	# deep band a dry mid-river island with 20px wet lips. Band 1 (torture)
+	# hits neither — byte-identical by construction.
+	var sim := SimWorld.new(31, 1)
+	var w2 := {"y": -2500 * Fixed.ONE, "ford_x": 200 * Fixed.ONE}   # idx 2 -> second ford
+	sim.waters.append(w2)
+	var ford2_x: int = 80 * Fixed.ONE + ((w2["ford_x"] - 80 * Fixed.ONE) + 240 * Fixed.ONE) % (480 * Fixed.ONE)
+	Runner.T.ok(not sim._in_water(ford2_x, w2["y"] + 40 * Fixed.ONE), "second ford center is dry")
+	Runner.T.ok(sim._in_water(ford2_x + 40 * Fixed.ONE, w2["y"] + 40 * Fixed.ONE), "33px past the second ford is wet")
+	var w4 := {"y": -4000 * Fixed.ONE, "ford_x": 200 * Fixed.ONE}   # idx 4 -> island
+	sim.waters.append(w4)
+	var isl_x: int = 80 * Fixed.ONE + ((w4["ford_x"] - 80 * Fixed.ONE) + 120 * Fixed.ONE) % (480 * Fixed.ONE)
+	Runner.T.ok(not sim._in_water(isl_x, w4["y"] + 40 * Fixed.ONE), "island core is dry")
+	Runner.T.ok(sim._in_water(isl_x, w4["y"] + 10 * Fixed.ONE), "the wet lip above the island still wades")
+	var w1 := {"y": -1500 * Fixed.ONE, "ford_x": 200 * Fixed.ONE}   # torture band: untouched
+	sim.waters.append(w1)
+	Runner.T.ok(sim._in_water(500 * Fixed.ONE, w1["y"] + 40 * Fixed.ONE), "band 1 behavior unchanged")

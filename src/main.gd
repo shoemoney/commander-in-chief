@@ -24,6 +24,16 @@ const _LITTER_MID_A := [   # tree_dead* removed: log-shaped things are only ever
 	"barrel", "tank_trap", "hedge", "flag_marker"]   # stump-field band: the jungle thins
 const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
 	"barricade", "ammobox"]                 # marsh/ruins band: the war shows
+# Authored setpiece stamps (5v: the corridor between gates is uniform noise —
+# these are nameable PLACES): picked ~1-in-2 per 400px band by hash; plain
+# scatter is suppressed inside a stamp's radius so stamps read as places,
+# not denser noise. [tex, dx, dy, scale] per part.
+const _SETPIECES := [
+	[["wreck_apc", -30, 0, 1.0], ["wreck_technical", 25, 18, 0.9], ["crater", 5, -20, 1.0]],   # dead convoy
+	[["tent", -28, -10, 1.0], ["tent", 24, 6, 0.9], ["ammobox", -2, 20, 1.0], ["barrier", 30, -22, 0.9]],   # abandoned camp
+	[["crater", 0, -26, 1.0], ["crater", -26, 8, 0.9], ["crater", 26, 8, 0.9], ["crater_field", 0, 30, 1.0]],   # shelled diamond
+	[["wreck_halftrack", 0, 0, 1.0], ["barbedwire", -30, 22, 0.9], ["barrel", 28, -16, 1.0]],   # downed halftrack
+]
 const _LITTER_FOUNDRY := ["crater_field", "crater_water", "wreck_halftrack", "wreck_apc",
 	"crater", "barbedwire", "corpse_soldier2", "wreck_light_tank"]   # foundry band: slagged, cratered, dead
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
@@ -3153,6 +3163,25 @@ func _draw_terrain() -> void:
 					Vector2(wall_x + 20.0 + float(rh4 % 200), band_top + 10.0 + float((rh4 / 7) % 220)),
 					float(rh4 % 628) / 100.0, 2.0, Color(0.5, 0.5, 0.48))
 			break
+	# Authored setpiece stamps: nameable places every ~800px of corridor.
+	if sim.mode == "campaign":
+		var spb0 := absi(sim.camera_top) / (400 * Fixed.ONE)
+		for spb in range(spb0 - 1, spb0 + 2):
+			if spb < 0:
+				continue
+			var sph := Art.cell_hash(spb * 7, 13)
+			if sph % 2 != 0:
+				continue
+			var stamp: Array = _SETPIECES[(sph / 3) % _SETPIECES.size()]
+			var spx := 100.0 + float(sph % 440)
+			var spy := _to_screen(0, -(spb * 400 + 200) * Fixed.ONE).y
+			if spy < -60.0 or spy > 420.0:
+				continue
+			for part in stamp:
+				var ppos2 := Vector2(spx + part[1], spy + part[2])
+				if part[0] != "crater" and part[0] != "crater_field":
+					_ground_shadow(ppos2, 7.0)
+				_spr(part[0], ppos2, float(Art.cell_hash(int(spx) + part[1], part[2]) % 628) / 100.0, part[3])
 	# Endless landmark kit (9/9 arena identity): a neutral comms mast at center
 	# with a scorched base + two fixed rocks per quadrant — the arena is now a
 	# PLACE you learn, not a screenshot of campaign grass.
@@ -3349,6 +3378,15 @@ func _draw_terrain() -> void:
 			var row_wy := sim.camera_top + int(ly_px / PX)
 			if _in_wbands(wbands, int(lx / PX), row_wy):
 				continue
+			# Setpiece suppression: no plain scatter within 120px of a stamp —
+			# stamps must read as PLACES, not locally denser noise.
+			var sp_band := absi(row_wy) / (400 * Fixed.ONE)
+			var sp_hash := Art.cell_hash(sp_band * 7, 13)
+			if sp_hash % 2 == 0:
+				var sp_x := 100.0 + float(sp_hash % 440)
+				var sp_wy: int = -(sp_band * 400 + 200) * Fixed.ONE
+				if absi(row_wy - sp_wy) < 120 * Fixed.ONE and absf(lx - sp_x) < 120.0:
+					continue
 			# Rows already on screen when the march last stepped keep their old
 			# pool (see the _litter_cam_snap freeze in _draw) — a gate opening
 			# must not swap standing props' identity mid-frame.
