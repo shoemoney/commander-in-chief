@@ -89,3 +89,22 @@ func test_a1_explosion_white_core_consts() -> void:
 	var wt: float = c["EXPLO_WHITE_T"]
 	Runner.T.ok(wt > 0.0 and wt < 0.35, "white-hot lead is a brief opening fraction of the blast life")
 	Runner.T.ok(c["EXPLO_WHITE_R_OUT"] > c["EXPLO_WHITE_R_IN"], "the outer white ring is larger than the inner core")
+
+
+# --- a1-09: enemy muzzle fan aims at the nearest ALIVE player ---
+
+func test_a1_enemy_muzzle_targets_nearest_alive_player() -> void:
+	var sim := SimWorld.new(0xA1, 2)
+	sim.players[0]["x"] = 100 * Fixed.ONE
+	sim.players[0]["y"] = 100 * Fixed.ONE
+	sim.players[0]["alive"] = true
+	sim.players[1]["x"] = 500 * Fixed.ONE
+	sim.players[1]["y"] = 100 * Fixed.ONE
+	sim.players[1]["alive"] = true
+	# a shot from x=120 is nearer p1 (x=100) than p2 (x=500) -> fan aims at p1
+	var np := sim._nearest_alive_player(120 * Fixed.ONE, 100 * Fixed.ONE)
+	Runner.T.eq(np["x"], 100 * Fixed.ONE, "enemy muzzle aims at the NEARER player")
+	# a dead nearer player is skipped -> the fan tracks the live one
+	sim.players[0]["alive"] = false
+	var np2 := sim._nearest_alive_player(120 * Fixed.ONE, 100 * Fixed.ONE)
+	Runner.T.eq(np2["x"], 500 * Fixed.ONE, "a dead nearer player is skipped; aims at the live one")
