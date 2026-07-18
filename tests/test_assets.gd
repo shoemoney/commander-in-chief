@@ -80,3 +80,12 @@ func test_a1_crater_pit_keys() -> void:
 	var ck: Dictionary = _consts()["_CRATER_KEYS"]
 	Runner.T.ok(ck.has("crater") and ck.has("crater_field"), "scorched craters get the depression pit")
 	Runner.T.ok(not ck.has("crater_water"), "water-filled craters are excluded from the dark pit")
+
+
+# --- a1-08: white-hot explosion core constants ---
+
+func test_a1_explosion_white_core_consts() -> void:
+	var c := _consts()
+	var wt: float = c["EXPLO_WHITE_T"]
+	Runner.T.ok(wt > 0.0 and wt < 0.35, "white-hot lead is a brief opening fraction of the blast life")
+	Runner.T.ok(c["EXPLO_WHITE_R_OUT"] > c["EXPLO_WHITE_R_IN"], "the outer white ring is larger than the inner core")
