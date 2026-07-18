@@ -1593,3 +1593,53 @@ func test_c2_bait_ambush_holds_until_crossed() -> void:
 		if e.get("hold_y", 0) != 0:
 			held += 1
 	Runner.T.ok(held >= 2, "the bait ambush elites are leashed until the player crosses (got %d)" % held)
+
+
+func test_c3_ruins_dogleg_maze() -> void:
+	# c3 5v: seg 3 (ruins) is a DOG-LEG maze — two alternating-flank bites in
+	# one band, each leaving >= HULL_CLEARANCE. seg 3 is past the torture reach.
+	var sim := SimWorld.new(43, 1)
+	var gy3: int = -3000 * SimWorld.F_ONE
+	var lo: int = SimWorld.CHOKE_OFF_LO
+	# First leg bites the LEFT flank; the dog-leg second leg bites the RIGHT.
+	var leg1: Array = sim._choke_bounds(-(3000) * SimWorld.F_ONE - (lo + 40 * SimWorld.F_ONE))
+	var leg2: Array = sim._choke_bounds(-(3000) * SimWorld.F_ONE - (lo + 200 * SimWorld.F_ONE))
+	Runner.T.ok(leg1[0] > SimWorld.WORLD_LEFT, "first leg bites the left flank")
+	Runner.T.ok(leg2[1] < SimWorld.WORLD_RIGHT, "the dog-leg second leg bites the right flank")
+	# Each leg leaves a hull-clear lane.
+	Runner.T.ok(leg1[1] - leg1[0] >= SimWorld.HULL_CLEARANCE, "first leg lane clears the hull")
+	Runner.T.ok(leg2[1] - leg2[0] >= SimWorld.HULL_CLEARANCE, "second leg lane clears the hull")
+
+
+func test_c3_ruins_wall_heavy_cover() -> void:
+	# Seg 3 streams wall-mass cover (kind 2) at higher density than seg 1.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	var seg3_walls := 0
+	var seg2_walls := 0
+	for rk in sim.rocks:
+		var band: int = absi(rk["y"]) / SimWorld.GATE_SPACING
+		if rk.get("kind", 0) == 2:
+			if band == SimWorld.RUINS_SEG:
+				seg3_walls += 1
+			elif band == 2:
+				seg2_walls += 1
+	# The ruins carry an authored solid wall-run (>=3 kind-2 slabs) plus wall-
+	# biased ambient — well above a non-ruins band's occasional single wall.
+	Runner.T.ok(seg3_walls >= 3, "the ruins carry authored maze-wall mass (got %d)" % seg3_walls)
+	Runner.T.ok(seg3_walls > seg2_walls, "ruins are wall-denser than the marsh sector (%d vs %d)" % [seg3_walls, seg2_walls])
+
+
+func test_c3_ruins_rubble_half_speeds() -> void:
+	# The seg-3 rubble verb half-speeds boots (the _in_mud primitive), seg-3 only.
+	var sim := SimWorld.new(43, 1)
+	# Find a rubble cell by re-deriving the sim's placement.
+	var rh: int = SimWorld._mix(SimWorld.RUINS_SEG * 100 + 0, sim._world_seed)
+	var ry: int = (250 + 0 + rh % 120) * SimWorld.F_ONE
+	var rx: int = (100 + (rh >> 8) % 420) * SimWorld.F_ONE
+	var y3: int = -(SimWorld.RUINS_SEG * SimWorld.GATE_SPACING) - ry
+	Runner.T.ok(sim._in_rubble(rx, y3), "the derived rubble patch registers in seg 3")
+	# Same x/offset one segment up (seg 2) is NOT rubble — the verb is seg-3 only.
+	var y2: int = -(2 * SimWorld.GATE_SPACING) - ry
+	Runner.T.ok(not sim._in_rubble(rx, y2), "rubble is seg-3 exclusive")

@@ -327,6 +327,7 @@ const FORK_GATES := [2, 4]             # the route-fork gates: their approach ba
 # — the breath has heat, not ambush; a self-telegraphing biome verb IS the
 # "you've arrived somewhere" story. seg >= 2 by value, so golden-inert.
 const CALM_BAND_SEG := 4
+const RUINS_SEG := 3               # c3 5v: the ruins sector — dog-leg maze chokes, wall-heavy cover, half-speed rubble
 const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
 const CHOKE_BITE := 240 * F_ONE
@@ -700,7 +701,8 @@ func _step_players(inputs: Array) -> void:
 			# Modifier composition rule (KIMK r2, pinned): slow zones do NOT
 			# stack — wading OR wire OR mud is one halving, and boost applies
 			# before it (a boosted wader runs 3/4 speed, not 3/8).
-			if wading or _in_fork_wire(p["x"], p["y"]) or _in_mud(p["x"], p["y"]):
+			if wading or _in_fork_wire(p["x"], p["y"]) or _in_mud(p["x"], p["y"]) \
+					or _in_rubble(p["x"], p["y"]):
 				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
@@ -900,6 +902,21 @@ func _choke_bounds(y: int) -> Array:
 	var seg: int = absi(y) / GATE_SPACING
 	if seg == CALM_BAND_SEG:
 		# c2 3v: the calm band never chokes — the corridor opens for the exhale.
+		return [WORLD_LEFT, WORLD_RIGHT]
+	if seg == RUINS_SEG:
+		# c3 5v: the ruins are a MAZE — a DOG-LEG, two alternating-flank bites
+		# in one band so the lane snakes (left, then right) instead of a single
+		# straight squeeze. Each leg leaves >= HULL_CLEARANCE (bite <= 280 → lane
+		# >= 328px), pinned like every choke. seg 3 = past the torture reach.
+		var sh3: int = (seg * 2654435761) & 0x7FFFFFFF
+		var off3: int = absi(y) % GATE_SPACING
+		var bite3: int = (200 + (sh3 >> 8) % 80) * F_ONE
+		var lo3: int = CHOKE_OFF_LO
+		var leg: int = 140 * F_ONE
+		if off3 >= lo3 and off3 < lo3 + leg:
+			return [WORLD_LEFT + bite3, WORLD_RIGHT]        # first leg: bite the LEFT flank
+		if off3 >= lo3 + leg and off3 <= lo3 + 2 * leg:
+			return [WORLD_LEFT, WORLD_RIGHT - bite3]        # dog-leg: bite the RIGHT flank
 		return [WORLD_LEFT, WORLD_RIGHT]
 	if seg >= CHOKE_START_SEG:
 		var sh: int = (seg * 2654435761) & 0x7FFFFFFF
@@ -1933,7 +1950,8 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 			if be["alive"] and _dist_lte(e["x"], e["y"], be["x"], be["y"], BROADCAST_AURA_RADIUS):
 				spd = (spd * 5) / 4
 				break
-	if _in_water(e["x"], e["y"]) or _in_fork_wire(e["x"], e["y"]) or _in_mud(e["x"], e["y"]):
+	if _in_water(e["x"], e["y"]) or _in_fork_wire(e["x"], e["y"]) or _in_mud(e["x"], e["y"]) \
+			or _in_rubble(e["x"], e["y"]):
 		spd = spd / 2
 	var pvx: int = e["x"]
 	var pvy: int = e["y"]
@@ -2803,6 +2821,23 @@ func _in_fork_wire(x: int, y: int) -> bool:
 	return false
 
 
+func _in_rubble(x: int, y: int) -> bool:
+	## c3 5v: the ruins (seg 3) signature VERB — collapsed-pillar rubble that
+	## HALF-SPEEDS boots (the _in_mud primitive, seg-3 exclusive). Two hash-
+	## placed 80px-wide × 40px-tall patches per band; pure function, zero rng,
+	## zero state. seg 3 is past the torture reach, so golden-inert.
+	if absi(y) / GATE_SPACING != RUINS_SEG:
+		return false
+	var off: int = absi(y) % GATE_SPACING
+	for k in 2:
+		var rh: int = _mix(RUINS_SEG * 100 + k, _world_seed)
+		var ry: int = (250 + k * 380 + rh % 120) * F_ONE
+		var rx: int = (100 + (rh >> 8) % 420) * F_ONE
+		if off >= ry - 20 * F_ONE and off <= ry + 20 * F_ONE and absi(x - rx) <= 40 * F_ONE:
+			return true
+	return false
+
+
 func _in_mud(_x: int, y: int) -> bool:
 	## Mud banks flank every river (2v): full-width MUD_BANK_H strips above
 	## and below each band — ford approaches included (honest risk beat).
@@ -2959,11 +2994,30 @@ func _step_camera() -> void:
 			var r_kind := 0
 			if absi(_next_rock_y) / GATE_SPACING >= COVER_VARIETY_SEG:
 				var rkw: int = _mix(r_idx, _world_seed) % 6
-				r_kind = 0 if rkw < 3 else (1 if rkw < 5 else 2)
+				if absi(_next_rock_y) / GATE_SPACING == RUINS_SEG:
+					# c3 5v: the ruins read as a WALL-MASS maze — flip the weight
+					# to 3 wall : 2 classic : 1 grass (vs the usual classic-heavy).
+					r_kind = 2 if rkw < 3 else (0 if rkw < 5 else 1)
+				else:
+					r_kind = 0 if rkw < 3 else (1 if rkw < 5 else 2)
 			# Colossus escape margin (c2 3v): keep approach debris off the walls.
 			rocks.append({"x": _arena_margin_x(rx, _next_rock_y), "y": _next_rock_y, "kind": r_kind})
 			rocks.append({"x": _arena_margin_x(rx + 22 * F_ONE, _next_rock_y + 10 * F_ONE),
 				"y": _next_rock_y + 10 * F_ONE, "kind": r_kind})
+		# c3 5v: the seg-3 ruins get an authored MAZE-WALL run so the labyrinth
+		# reads even though band 3 is squeezed between gate-3's boss arena and
+		# gate-4's fork island. Confined to the band's CLEAN southern third
+		# (off 60-350 = y -3060..-3350: south of the fork island at -3380..-3960,
+		# north of the gate-3 boss row): a 3-slab kind-2 wall on one flank, x kept
+		# inside [78,534] (clears the breach x>60 pin). seg 3 = past the torture.
+		if absi(_next_rock_y) / GATE_SPACING == RUINS_SEG:
+			var mr_off: int = posmod(-_next_rock_y / F_ONE, 1000)
+			if mr_off >= 60 and mr_off <= 350:
+				var mwh := _mix(absi(_next_rock_y / ROCK_SPACING) + 6151, _world_seed)
+				var mwx: int = (462 if mwh % 2 == 0 else 120) * F_ONE
+				var mwy: int = _next_rock_y + (mwh % 24) * F_ONE
+				for mw in 3:
+					rocks.append({"x": mwx + (mw * 72 - 72) * F_ONE, "y": mwy, "kind": 2})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
