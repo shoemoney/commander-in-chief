@@ -3213,6 +3213,16 @@ func _step_camera() -> void:
 				var pmix := _mix(r_idx, _world_seed)
 				var pocket: Array = COVER_POCKETS[pmix % COVER_POCKETS.size()]
 				var p_kind: int = 1 if pmix % 3 == 0 else 0   # 1/3 grass concealment, else classic
+				# c4 3v: correlate cover DENSITY with the shipped choke phase. On a WIDE
+				# (full-width, long-sightline) row the pocket hugs a WALL (edge cover only,
+				# center open for the long shot); on a NARROW (bitten/CQB) row it clusters
+				# mid-lane to break the short sightline (_in_trench already supplies the
+				# ditch). Reads _choke_bounds (pure), no new kind/field, seg>=2 inert.
+				var cb := _choke_bounds(_next_rock_y)
+				if cb[0] == WORLD_LEFT and cb[1] == WORLD_RIGHT:
+					rx = (110 if r_idx % 2 == 0 else 530) * F_ONE   # WIDE -> edge cover at a wall
+				else:
+					rx = (cb[0] + cb[1]) / 2                         # NARROW -> mid-lane cluster
 				for po in pocket:
 					var ppx: int = rx + po[0] * F_ONE
 					var ppy: int = _next_rock_y + po[1] * F_ONE

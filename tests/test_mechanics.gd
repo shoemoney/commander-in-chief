@@ -2176,3 +2176,29 @@ func test_c4_tank_anti_armor() -> void:
 				and absi(bl["x"] - SimWorld.SCREEN_CX) < 100 * SimWorld.F_ONE:
 			barrels_near += 1
 	Runner.T.ok(barrels_near >= 2, "a hedgehog barrel pair sits by the tank (%d)" % barrels_near)
+
+
+func test_c4_cover_density_by_width() -> void:
+	# c4 3v: cover DENSITY correlates with the choke phase — WIDE (full-width,
+	# long-sightline) rows push cover to a WALL (edge-only, open center), NARROW
+	# (bitten/CQB) rows cluster it mid-lane. seg>=2 = torture-inert.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -6000 * SimWorld.F_ONE
+	sim._step_camera()
+	var wide_edge := false
+	var narrow_center := false
+	for rk in sim.rocks:
+		var k: int = rk.get("kind", 0)
+		if k != 0 and k != 1:
+			continue
+		if absi(rk["y"]) / SimWorld.GATE_SPACING < SimWorld.COVER_VARIETY_SEG:
+			continue
+		var cb: Array = sim._choke_bounds(rk["y"])
+		var wide: bool = cb[0] == SimWorld.WORLD_LEFT and cb[1] == SimWorld.WORLD_RIGHT
+		var off_center: int = absi(rk["x"] - SimWorld.SCREEN_CX)
+		if wide and off_center > 150 * SimWorld.F_ONE:
+			wide_edge = true
+		if not wide and off_center < 130 * SimWorld.F_ONE and rk["x"] >= cb[0] and rk["x"] <= cb[1]:
+			narrow_center = true
+	Runner.T.ok(wide_edge, "wide rows carry edge cover at a wall (long-sightline preserved)")
+	Runner.T.ok(narrow_center, "narrow rows cluster cover inside the bitten lane (CQB)")
