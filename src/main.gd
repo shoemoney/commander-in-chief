@@ -5705,12 +5705,18 @@ func _draw_players() -> void:
 				if i < _dust_prev.size() and Vector2i(p["x"], p["y"]) != _dust_prev[i]:
 					var wdir := Vector2(float(p["x"] - _dust_prev[i].x), float(p["y"] - _dust_prev[i].y)).normalized()
 					var wperp := Vector2(-wdir.y, wdir.x)
+					# bow-wave arc + foot-splash dot AHEAD, on the move frame
 					draw_arc(pos + wdir * 5.0, 4.5, wdir.angle() - 1.1, wdir.angle() + 1.1, 8,
 						Color(0.86, 0.93, 1.0, 0.45 * _motion), 1.3)
-					for wv in 2:
-						var tail := pos - wdir * (5.0 + float(wv) * 6.0)
-						draw_line(pos, tail + wperp * (4.0 + float(wv) * 3.0), Color(0.8, 0.9, 0.98, (0.32 - float(wv) * 0.1) * _motion), 1.2)
-						draw_line(pos, tail - wperp * (4.0 + float(wv) * 3.0), Color(0.8, 0.9, 0.98, (0.32 - float(wv) * 0.1) * _motion), 1.2)
+					draw_circle(pos + wdir * 3.0, 1.5, Color(0.92, 0.96, 1.0, 0.4 * _motion))
+					# segmented trailing V-wake: edge pairs spread back from just behind the
+					# feet (proper displaced-water wake, not rays from center)
+					var apex := pos - wdir * 3.0
+					for sgn in [1.0, -1.0]:
+						var e1 := apex - wdir * 6.0 + wperp * (5.0 * sgn)
+						var e2 := apex - wdir * 13.0 + wperp * (9.0 * sgn)
+						draw_line(apex, e1, Color(0.82, 0.91, 0.98, 0.34 * _motion), 1.3)
+						draw_line(e1, e2, Color(0.82, 0.91, 0.98, 0.20 * _motion), 1.1)
 			# Get-up: blend the residual knockdown topple back out while the decaying
 			# _down_anim drains, so a revive rises instead of snapping upright.
 			var da_res: float = _down_anim[i] if i < _down_anim.size() else 0.0
