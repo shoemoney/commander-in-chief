@@ -588,10 +588,24 @@ func _step_players(inputs: Array) -> void:
 			var spd := PLAYER_SPEED
 			if p["boost_ticks"] > 0:
 				spd = (PLAYER_SPEED * 3) / 2
-			if wading:
+			if wading or _in_fork_wire(p["x"], p["y"]):
 				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
+		# Fork wreck-island: full AABB move-revert (KIMK round-2: the old
+		# nearest-edge snap POPPED on north entry; a revert lets you slide
+		# along the face by strafing — geography, resolved like geography).
+		for g2 in gates:
+			var fx2: int = g2.get("fork_x", 0)
+			if fx2 == 0:
+				continue
+			if p["y"] >= g2["y"] + 40 * F_ONE and p["y"] <= g2["y"] + 320 * F_ONE \
+					and absi(p["x"] - fx2 * F_ONE) < 44 * F_ONE:
+				if not (rpy >= g2["y"] + 40 * F_ONE and rpy <= g2["y"] + 320 * F_ONE \
+						and absi(rpx - fx2 * F_ONE) < 44 * F_ONE):
+					p["x"] = rpx
+					p["y"] = rpy
+				break
 		# Rocks are a hard wall to boots too (escape rule: a step that STARTED
 		# inside — post-respawn edge case — may walk out).
 		if not rocks.is_empty():
@@ -712,16 +726,41 @@ func _step_players(inputs: Array) -> void:
 
 
 func _choke_bounds(y: int) -> Array:
-	## Lane bounds at world y. Segments >= 2 carry one flank-alternating choke
-	## band per stretch; everywhere else the full 608px lane.
+	## Lane bounds at world y — KIMK round-2: bands PARAMETERIZE by a pure
+	## hash of the segment index (length 200-280, bite 200-280, and from
+	## segment 4 an occasional DOUBLE band with a mid gap), so modulation
+	## never reads as a metronome. Still zero state, zero rng, nothing hashed.
 	var seg: int = absi(y) / GATE_SPACING
 	if seg >= CHOKE_START_SEG:
+		var sh: int = (seg * 2654435761) & 0x7FFFFFFF
 		var off: int = absi(y) % GATE_SPACING
-		if off >= CHOKE_OFF_LO and off <= CHOKE_OFF_HI:
+		var b_len: int = (200 + sh % 80) * F_ONE
+		var bite: int = (200 + (sh >> 8) % 80) * F_ONE
+		var lo: int = CHOKE_OFF_LO
+		var in_band := off >= lo and off <= lo + b_len
+		if not in_band and seg >= 4 and sh % 3 == 0:
+			# Double band: a second squeeze after an 80px gap, opposite flank.
+			var lo2: int = lo + b_len + 80 * F_ONE
+			if off >= lo2 and off <= lo2 + b_len / 2:
+				if seg % 2 == 0:
+					return [WORLD_LEFT, WORLD_RIGHT - bite]
+				return [WORLD_LEFT + bite, WORLD_RIGHT]
+		if in_band:
 			if seg % 2 == 0:
-				return [WORLD_LEFT + CHOKE_BITE, WORLD_RIGHT]
-			return [WORLD_LEFT, WORLD_RIGHT - CHOKE_BITE]
+				return [WORLD_LEFT + bite, WORLD_RIGHT]
+			return [WORLD_LEFT, WORLD_RIGHT - bite]
 	return [WORLD_LEFT, WORLD_RIGHT]
+
+
+func _in_choke_apron(y: int) -> bool:
+	## The BREATHER (KIMK round-2): a guaranteed hazard-free full-width apron
+	## right after every choke — width modulates in both directions because
+	## the squeeze is followed by authored open ground, not more minefield.
+	var seg: int = absi(y) / GATE_SPACING
+	if seg < CHOKE_START_SEG:
+		return false
+	var off: int = absi(y) % GATE_SPACING
+	return off > 520 * F_ONE and off <= 640 * F_ONE
 
 
 func _clamp_actor(p: Dictionary) -> void:
@@ -732,12 +771,6 @@ func _clamp_actor(p: Dictionary) -> void:
 	for g in gates:
 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
 			p["y"] = g["y"] + GATE_BLOCK_PAD
-		# Fork wreck-island (7v: the lanes were paint, not places): a physical
-		# divider makes the CACHE/BOUNTY choice spatially real. Snap to the
-		# nearer edge; inert — forks only exist at gates 2/4, past the torture.
-		if g.get("fork", false) and p["y"] >= g["y"] + 40 * F_ONE and p["y"] <= g["y"] + 320 * F_ONE \
-				and absi(p["x"] - 260 * F_ONE) < 44 * F_ONE:
-			p["x"] = (216 if p["x"] < 260 * F_ONE else 304) * F_ONE
 
 
 func _collect_pickups(p: Dictionary, i: int) -> void:
@@ -1664,7 +1697,7 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 			if be["alive"] and _dist_lte(e["x"], e["y"], be["x"], be["y"], BROADCAST_AURA_RADIUS):
 				spd = (spd * 5) / 4
 				break
-	if _in_water(e["x"], e["y"]):
+	if _in_water(e["x"], e["y"]) or _in_fork_wire(e["x"], e["y"]):
 		spd = spd / 2
 	var pvx: int = e["x"]
 	var pvy: int = e["y"]
@@ -2416,6 +2449,21 @@ func _step_gates() -> void:
 			events.append({"t": "gate_open", "x": SCREEN_CX, "y": g["y"]})
 
 
+func _in_fork_wire(x: int, y: int) -> bool:
+	## CACHE-lane wire strips: two fixed bands per fork that HALVE ground
+	## speed (players and enemies alike) — fortified means slower, truly.
+	for g in gates:
+		var fx3: int = g.get("fork_x", 0)
+		if fx3 == 0:
+			continue
+		if y >= g["y"] + 90 * F_ONE and y <= g["y"] + 110 * F_ONE \
+				or (y >= g["y"] + 210 * F_ONE and y <= g["y"] + 230 * F_ONE):
+			if (fx3 == 260 and x < fx3 * F_ONE - 44 * F_ONE) \
+					or (fx3 == 380 and x > fx3 * F_ONE + 44 * F_ONE):
+				return true
+	return false
+
+
 func _in_water(x: int, y: int) -> bool:
 	for w in waters:
 		if y >= w["y"] and y <= w["y"] + WATER_H:
@@ -2455,13 +2503,13 @@ func _step_camera() -> void:
 		_next_bunker_y -= 500 * F_ONE
 	# Stream landmines between the arenas — deterministic x, off the gate rows.
 	while _next_mine_y > horizon:
-		if absi(_next_mine_y / MINE_SPACING) % 2 == 0:
+		if absi(_next_mine_y / MINE_SPACING) % 2 == 0 and not _in_choke_apron(_next_mine_y):
 			mines.append({"x": rng.range_i(70, 570) * F_ONE, "y": _next_mine_y, "armed": true})
 		_next_mine_y -= MINE_SPACING
 	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
 	# grenade chains through (and that catches you if you stand too close).
 	while _next_barrel_y > camera_top - 2 * VIEW_H:
-		if absi(_next_barrel_y / BARREL_SPACING) % 2 == 1:
+		if absi(_next_barrel_y / BARREL_SPACING) % 2 == 1 and not _in_choke_apron(_next_barrel_y):
 			var bx := rng.range_i(60, 520) * F_ONE
 			for c in rng.range_i(2, 3):
 				barrels.append({"x": bx + c * BARREL_CLUSTER_GAP,
@@ -2524,8 +2572,11 @@ func _step_camera() -> void:
 				else:
 					barrels.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE,
 						"armed": true, "fuse_ticks": 0})
+			# fork_x: 0 = no fork. Gate 2 islands at 260 (CACHE narrow-left,
+			# fortified); gate 4 MIRRORS to 380 (the killbox becomes the
+			# corridor — the second fork teaches a new read, KIMK round-2).
 			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {},
-				"fork": _gate_counter == 2 or _gate_counter == 4})
+				"fork_x": (260 if _gate_counter == 2 else 380) if (_gate_counter == 2 or _gate_counter == 4) else 0})
 			# Route Fork (panel 8-vote): the approach to bunker-pair gates 2 & 4
 			# splits into two telegraphed lanes — walking a side IS the choice
 			# (pure position: no new input, no stored state, gates[] is unhashed).
@@ -2558,7 +2609,16 @@ func _step_camera() -> void:
 				var fmk: Dictionary = enemies[enemies.size() - 1]
 				if fmk["kind"] == "elite":
 					fmk["marked"] = true
-				events.append({"t": "route_fork", "x": SCREEN_CX, "y": _next_gate_y})
+				# Mechanical lane truth (KIMK round-2: dressing must not be
+				# paint one level down): BOUNTY's sandbag arcs are REAL bags
+				# (full cover grammar, destructible), CACHE's wire is a real
+				# slow zone via _in_fork_wire.
+				var bounty_x0: int = 380 if _gate_counter == 2 else 60
+				for fbg in 4:
+					sandbags.append({"x": (bounty_x0 + 40 + fbg * 45) * F_ONE,
+						"y": _next_gate_y + (110 + (fbg % 2) * 120) * F_ONE})
+				events.append({"t": "route_fork", "x": (260 if _gate_counter == 2 else 380) * F_ONE,
+					"y": _next_gate_y})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > horizon:
 		tanks.append({

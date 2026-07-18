@@ -1410,7 +1410,7 @@ func _consume_events() -> void:
 			"route_fork":
 				# Fires at STREAM time (~2 screens ahead) — no sound/banner here;
 				# store the band and let _draw_gates signpost it when it scrolls in.
-				_forks.append({"y": ev["y"]})
+				_forks.append({"y": ev["y"], "x": ev["x"]})
 			"revive_deny":
 				_vo("vo_chest_empty", 2, 600)
 			"gate_open":
@@ -3674,16 +3674,19 @@ func _draw_gates() -> void:
 			continue
 		# Physical fork island (7v): three stacked wrecks divide the lanes at
 		# x=260 — CACHE reads narrow/fortified, BOUNTY reads open killbox.
+		var isl_x := float(fk.get("x", 260 * Fixed.ONE)) * PX
 		for wi in 3:
 			var wh2 := Art.cell_hash(fk["y"] / 65536 + wi * 13, wi)
 			var wy2 := _to_screen(0, fk["y"] + (70 + wi * 90) * Fixed.ONE).y
-			_ground_shadow(Vector2(260, wy2), 12.0, 0.42)
-			_spr(["wreck_apc", "tank_hulk", "wreck_halftrack"][wh2 % 3], Vector2(260, wy2),
+			_ground_shadow(Vector2(isl_x, wy2), 12.0, 0.42)
+			_spr(["wreck_apc", "tank_hulk", "wreck_halftrack"][wh2 % 3], Vector2(isl_x, wy2),
 				float(wh2 % 628) / 100.0 * 0.2 + (PI if wi % 2 == 0 else 0.0), 0.9, Color(0.6, 0.58, 0.55))
+		# CACHE wire strips draw where they actually SLOW (mechanical truth):
+		var wire_x0 := 30.0 if isl_x < 320.0 else isl_x + 50.0
 		for ci in 2:
-			var cy2 := _to_screen(0, fk["y"] + (100 + ci * 120) * Fixed.ONE).y
-			_spr("barbedwire", Vector2(70 + ci * 180, cy2), 0.0, 0.8, Color(0.55, 0.5, 0.45))
-			_spr("wall_sandbag_end", Vector2(400 + ci * 110, cy2 + 30.0), PI * 0.12, 0.8, Color(0.75, 0.7, 0.6))
+			var cy2 := _to_screen(0, fk["y"] + (100 + ci * 110) * Fixed.ONE).y
+			for wseg2 in 3:
+				_spr("barbedwire", Vector2(wire_x0 + 30.0 + wseg2 * 55.0, cy2), 0.0, 0.8, Color(0.55, 0.5, 0.45))
 		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
 		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
 		var cache_txt := "< CACHE"

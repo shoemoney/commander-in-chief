@@ -822,18 +822,31 @@ func test_choke_bounds_and_fork_island() -> void:
 	var sim := SimWorld.new(43, 1)
 	# Segments 0-1: full lane (torture window untouched — the inert proof).
 	Runner.T.eq(sim._choke_bounds(-500 * SimWorld.F_ONE)[0], SimWorld.WORLD_LEFT, "segment 0 stays open")
-	# Segment 2, in-band: one flank bitten to a 368px lane.
+	# Segment 2, in-band: the hash-parameterized bite leaves a 328-408px lane.
 	var cb: Array = sim._choke_bounds(-(2000 + 200) * SimWorld.F_ONE)
-	Runner.T.ok(cb[1] - cb[0] == 608 * SimWorld.F_ONE - SimWorld.CHOKE_BITE, "choke bites the lane to 368px")
-	# Fork island: a player inside the divider snaps to an edge.
-	sim.gates.append({"y": -3000 * SimWorld.F_ONE, "open": true, "b1": {}, "b2": {}, "boss": {}, "fork": true})
+	var lane: int = cb[1] - cb[0]
+	Runner.T.ok(lane >= 328 * SimWorld.F_ONE and lane <= 408 * SimWorld.F_ONE,
+		"choke lane lands in the parameterized 328-408px range (got %dpx)" % (lane / SimWorld.F_ONE))
+	# Breather apron: hazard-free full width right after the squeeze.
+	Runner.T.eq(sim._choke_bounds(-(2000 + 560) * SimWorld.F_ONE)[0], SimWorld.WORLD_LEFT,
+		"the post-choke apron opens back to full width")
+	Runner.T.ok(sim._in_choke_apron(-(2000 + 560) * SimWorld.F_ONE), "apron predicate holds where mines skip")
+	# Fork island: WALK north into the face — the AABB revert stops the entry
+	# (slide resolution: geography, not a snap).
+	sim.gates.append({"y": -3000 * SimWorld.F_ONE, "open": true, "b1": {}, "b2": {}, "boss": {}, "fork_x": 260})
 	var p := sim.players[0]
 	p["x"] = 260 * SimWorld.F_ONE
-	p["y"] = -3000 * SimWorld.F_ONE + 100 * SimWorld.F_ONE
-	sim.camera_top = p["y"] - 100 * SimWorld.F_ONE
-	sim._clamp_actor(p)
-	Runner.T.ok(p["x"] == 216 * SimWorld.F_ONE or p["x"] == 304 * SimWorld.F_ONE,
-		"the wreck island is solid — the lane choice is physical")
+	p["y"] = -3000 * SimWorld.F_ONE + 360 * SimWorld.F_ONE
+	sim.camera_top = -3000 * SimWorld.F_ONE + 20 * SimWorld.F_ONE
+	var north := SimInput.new()
+	north.move_y = -256
+	for n in 60:
+		sim.step([north])
+	Runner.T.ok(p["y"] > -3000 * SimWorld.F_ONE + 315 * SimWorld.F_ONE,
+		"walking north into the island face STOPS at the wall (no phase, no pop)")
+	# Wire strips are mechanically true: half speed inside.
+	Runner.T.ok(sim._in_fork_wire(100 * SimWorld.F_ONE, -3000 * SimWorld.F_ONE + 100 * SimWorld.F_ONE),
+		"CACHE wire is a real slow zone, not paint")
 
 
 func test_cover_sprites_fit_their_collision() -> void:
