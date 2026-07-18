@@ -860,3 +860,30 @@ func test_a3_ui_bakes_are_size_limited() -> void:
 	# The 512x256 muzzle-fan card draws at ~fl*1.4 (<=~56px) via a raw draw_texture_rect.
 	var mf := FileAccess.get_file_as_string("res://assets/legacy-art/fx/fx_muzzle_fan.png.import")
 	Runner.T.ok(mf.contains("size_limit=128"), "the muzzle-fan card imports size-limited")
+	# NEGATIVE check (a3-17 r2): SCALE-coupled in-world bakes (footprint = imported_px * SCALE,
+	# drawn via _spr) are DELIBERATELY left full-res — capping them would shift on-screen size
+	# and need a per-texture SCALE recompute. Guard that they were NOT swept.
+	for scaled in ["res://assets/legacy-art/decor/rock1.png.import", "res://assets/legacy-art/units/rusher.png.import"]:
+		if FileAccess.file_exists(scaled):
+			Runner.T.ok(FileAccess.get_file_as_string(scaled).contains("size_limit=0"),
+				"SCALE-coupled bake %s stays full-res (not swept)" % scaled.get_file())
+
+
+# --- a3-15 r2: set_ambience_march drives the three place-bed volumes — river up near water,
+# foundry up deep in the march, shop pad in the intermission (and it HUSHES the field beds). ---
+
+func test_a3_ambience_march_drives_bed_volumes() -> void:
+	var sfx := Sfx.new()
+	# Near water, low march, not shop: the river bed rides UP; foundry stays hushed.
+	for i in 300: sfx.set_ambience_march(0.1, true, false)
+	Runner.T.ok(sfx._river.volume_db > -30.0, "river bed is audibly UP near water")
+	Runner.T.ok(sfx._river.volume_db > sfx._foundry.volume_db + 10.0, "river dominates the hushed foundry near water")
+	# In the shop: the pad owns it and BOTH field beds are hushed (you stepped out of the fight).
+	for i in 300: sfx.set_ambience_march(1.0, true, true)
+	Runner.T.ok(sfx._shop.volume_db > -25.0, "the shop pad is UP in the intermission")
+	Runner.T.ok(sfx._river.volume_db < -40.0 and sfx._foundry.volume_db < -40.0,
+		"the shop hushes BOTH field beds (river + foundry)")
+	# Deep in the march (in the plant), not shop: the foundry hum swells up.
+	for i in 300: sfx.set_ambience_march(1.0, false, false)
+	Runner.T.ok(sfx._foundry.volume_db > -35.0, "the foundry machinery bed swells past the mid-march")
+	sfx.free()
