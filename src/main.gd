@@ -983,7 +983,7 @@ func _copy_share_text() -> void:
 	# is deterministic, so a friend can replay the exact layout via CHALLENGE SEED.
 	var rr := _run_rank()
 	var where := ("WAVE %d" % sim.wave) if sim.mode == "endless" else ("%dm PUSHED" % (-Fixed.to_int(sim.camera_top) / 10))
-	var txt := "IKARI — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
+	var txt := "SHOEMONEY SOLDIER — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
 	DisplayServer.clipboard_set(txt)
 	_show_banner("COPIED TO CLIPBOARD")
 

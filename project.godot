@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="Project Ikari"
-config/description="Modern remake of the classic vertical-scrolling run-and-gun. P0 greybox prototype."
+config/name="ShoeMoney Soldier"
+config/description="ShoeMoney Soldier — a deterministic twin-stick vertical run-and-gun. By ShoeMoney Game Studios."
 run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7")
 
