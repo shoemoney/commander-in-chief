@@ -272,6 +272,7 @@ const _EVENT_SOUND := {
 	"mast_warn": ["alarm", -8.0, 0.9],     # c3: the mast is about to overheat — vacate the orbit
 	"mast_pulse": ["explosion", -3.0, 0.7], # c3: the mast core vents — a wide radial one-shot zone
 	"parapet_collapse": ["bunker_break", -4.0, 0.7], # c3: a Foundry trench-parapet column drops mid-fight
+	"arena_crack": ["bunker_break", -3.0, 0.85], # c4: a gunship cannon volley cracks a bridge-span slab
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone

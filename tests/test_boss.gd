@@ -199,3 +199,45 @@ func test_c3_gunship_approach_ramp() -> void:
 			hazards_in_calm += 1
 	Runner.T.ok(staging >= 2, "the calm staging pocket is authored with side cover")
 	Runner.T.eq(hazards_in_calm, 0, "the calm band (+420..+500) is hazard-free — its own beat")
+
+
+func test_c4_gunship_arena_crack() -> void:
+	# c4 5v: the gunship arena MUTATES mid-fight — each HP-third crossing cracks a
+	# bridge-span slab (removes a kind-2 slab, drops a wreck one row south), so the
+	# learned floor is gone by the finish. Gate-3 (torture-unreachable) -> goldens
+	# byte-identical; the endless miniboss (no span slab) no-ops.
+	var sim := SimWorld.new(41, 1)
+	sim.camera_top = -(3200 * Fixed.ONE)
+	sim.step([_idle()])
+	var boss: Dictionary = {}
+	for g in sim.gates:
+		if not g["boss"].is_empty():
+			boss = g["boss"]
+			break
+	Runner.T.ok(not boss.is_empty(), "the gunship boss streamed at gate 3")
+	var span_y: int = boss["gate_y"] + 160 * Fixed.ONE
+	var slabs0 := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and absi(rk["y"] - span_y) <= 24 * Fixed.ONE:
+			slabs0 += 1
+	Runner.T.ok(slabs0 >= 2, "the bridge span starts with its slabs intact (%d)" % slabs0)
+	var maxhp: int = boss["hp"]
+	# Cross the 2/3 HP threshold: one slab cracks, one wreck drops.
+	sim._damage_boss(boss, maxhp - (maxhp * 2 / 3) + 1)
+	var slabs1 := 0
+	var wrecks1 := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and absi(rk["y"] - span_y) <= 24 * Fixed.ONE:
+			slabs1 += 1
+		if rk.get("kind", 0) == 0 and absi(rk["y"] - (span_y + 40 * Fixed.ONE)) <= 4 * Fixed.ONE:
+			wrecks1 += 1
+	Runner.T.eq(slabs1, slabs0 - 1, "the first HP-third crossing cracks one span slab")
+	Runner.T.eq(wrecks1, 1, "the crack drops one wreck-cover piece")
+	# Cross the 1/3 threshold: the other slab cracks.
+	sim._damage_boss(boss, maxhp / 3)
+	var slabs2 := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and absi(rk["y"] - span_y) <= 24 * Fixed.ONE:
+			slabs2 += 1
+	Runner.T.eq(slabs2, slabs0 - 2, "the second crossing cracks the other slab")
+	Runner.T.ok(boss["alive"], "the boss survives both cracks (they're geometry, not damage)")

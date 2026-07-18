@@ -4172,8 +4172,44 @@ func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
 	return false
 
 
+func _crack_bridge_span(boss: Dictionary) -> void:
+	## Remove the nearest live kind-2 bridge-span slab at the boss's span row and
+	## drop a wreck-cover piece one row south — the crack opens a fresh center gap
+	## but leaves new cover (net geometry SHIFTS, not just opens). No-op if the
+	## arena has no span slab (endless miniboss) -> goldens untouched.
+	var span_y: int = boss["gate_y"] + 160 * F_ONE
+	var best := -1
+	var best_d := 0
+	for ri in rocks.size():
+		if rocks[ri].get("kind", 0) == 2 and absi(rocks[ri]["y"] - span_y) <= 24 * F_ONE:
+			var d := absi(rocks[ri]["x"] - boss["x"])
+			if best < 0 or d < best_d:
+				best = ri
+				best_d = d
+	if best < 0:
+		return
+	var rx: int = rocks[best]["x"]
+	events.append({"t": "arena_crack", "x": rx, "y": span_y})
+	rocks.remove_at(best)
+	# Wreckage drops a row south (kind-0 hard cover) at the cracked slab's x — a
+	# different x than the surviving slab, so nothing overlaps and every flank
+	# lane stays > HULL_CLEARANCE.
+	rocks.append({"x": rx, "y": span_y + 40 * F_ONE, "kind": 0})
+
+
 func _damage_boss(boss: Dictionary, amount: int) -> void:
+	var old_hp: int = boss["hp"]
 	boss["hp"] = boss["hp"] - amount
+	# c4 5v GUNSHIP ARENA CRACK: unlike the colossus, the gunship never mutated
+	# its arena mid-fight. On each HP-third CROSSING a cannon volley cracks a
+	# bridge-span slab — the learned floor is gone by the finish. Stateless (HP
+	# edge, no new boss field), reuses hashed rocks[]; only the campaign gunship
+	# has span slabs to crack (endless minibosses no-op), and gate 3 is torture-
+	# unreachable, so both goldens stay byte-identical.
+	var maxhp := _scaled_boss_hp(BOSS_HP)
+	for thr in [maxhp * 2 / 3, maxhp / 3]:
+		if old_hp > thr and boss["hp"] <= thr:
+			_crack_bridge_span(boss)
 	if boss["hp"] <= 0 and boss["alive"]:
 		boss["alive"] = false
 		# Endless minibosses pay with their depth: HP scales +50%/milestone
