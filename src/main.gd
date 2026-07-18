@@ -3770,8 +3770,16 @@ func _draw_terrain() -> void:
 						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34,
 						Color(0.24, 0.20, 0.18) if ug_band == 4 else Color.WHITE)
 				else:
-					_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
-						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34, tree_col)
+					# a2-08 AD#9/ENV#8: per-instance scale + tint-value jitter (and a rare dead
+					# tree) so the tree layer stops reading as one card stamped repeatedly.
+					var tvar := 0.85 + float(h2 % 7) * 0.045
+					var tval := tree_col.lerp(tree_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
+					if h2 % 11 == 0:
+						_spr(_TREE_DEAD[h2 % 3], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
+							(0.42 if big else 0.34) * tvar, tval.lerp(Color(0.42, 0.36, 0.3), 0.5))
+					else:
+						_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
+							float(h2 % 628) / 100.0 + tsway, (0.42 if big else 0.34) * tvar, tval)
 
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# Per-band SIGNATURE silhouettes under the litter (c2 3v): each sector owns
