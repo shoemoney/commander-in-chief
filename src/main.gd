@@ -2440,6 +2440,15 @@ func _update_feel() -> void:
 		_sfx.engine_at(ti, tk_pos, tk_on)
 	for h in _hulks:
 		h["t"] = minf(1.0, h["t"] + 0.002)   # ~8s of flame/smolder, then a cold wreck
+	# Smoke wisps drift off any hull still holding cover (burn_ticks > 0).
+	for hk in sim.tanks:
+		if not hk["alive"] and hk["burn_ticks"] > 0 and randf() < 0.05:
+			var wp := _to_screen(hk["x"], hk["y"])
+			if wp.y > -20.0 and wp.y < 380.0:
+				_fx.append({"x": hk["x"] + int(randf_range(-10, 10)) * Fixed.ONE,
+					"y": hk["y"] + int(randf_range(-6, 6)) * Fixed.ONE, "t": 0.0, "kind": "tex",
+					"tex": "fx_smoke", "sz": 8.0 + randf() * 6.0, "grow": 0.9, "fade": 1.6,
+					"rate": 0.012, "col": Color(0.35, 0.33, 0.3, 0.35)})
 	while _hulks.size() > 8:
 		_hulks.remove_at(0)
 	for i in _recoil.size():
@@ -3474,18 +3483,6 @@ func _draw_pickups() -> void:
 
 
 func _draw_tanks() -> void:
-	# Smoldering hulk = live cover: a faint pulsing frame around the dead hull
-	# while burn_ticks holds, so the two-way bullet block (and its expiry) is
-	# a truthful telegraph, not invisible physics.
-	for hk in sim.tanks:
-		if not hk["alive"] and hk["burn_ticks"] > 0:
-			var hp2 := _to_screen(hk["x"], hk["y"])
-			if hp2.y > -20.0 and hp2.y < 380.0:
-				var ha := 0.14 + Art.pulse(0.3) * 0.1
-				if hk["burn_ticks"] < 180:
-					ha *= float(hk["burn_ticks"]) / 180.0   # cover fading out
-				draw_rect(Rect2(hp2 - Vector2(16, 12), Vector2(32, 24)),
-					Color(1.0, 0.75, 0.4, ha), false, 1.5)
 	for ti in sim.tanks.size():
 		var t: Dictionary = sim.tanks[ti]
 		if not t["alive"]:
@@ -4102,7 +4099,9 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		var eta_f := 1.0 + float(boss["phase_t"]) / 420.0   # 0 -> 1 across the approach
 		var ground := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 		_ground_shadow(ground + Vector2(0, 26), 6.0 + eta_f * 10.0, 0.12 + eta_f * 0.30)
-		var apos := ground - Vector2(0, (1.0 - eta_f) * 90.0)
+		# Diagonal slide-in from the top-right: a straight vertical drop hid the
+		# whole approach behind the HUD strip (arrival hovers at screen y~50).
+		var apos := ground + Vector2((1.0 - eta_f) * 150.0, -(1.0 - eta_f) * 55.0)
 		var asc := 0.3 + eta_f * 0.5
 		_spr(body_tex, apos, PI, asc, Color(0.92, 0.94, 1.05, 0.35 + eta_f * 0.65))
 		var frr := float(Engine.get_physics_frames()) * 0.9 * maxf(_motion, 0.3)
@@ -4962,6 +4961,26 @@ func _draw_glow() -> void:
 	# Vehicle fires: a flickering flame card over burning tanks and fresh wrecks —
 	# additive, so the fire lights the field. Stateless (frame-clock flicker).
 	var flick := 0.82 + 0.18 * sin(float(Engine.get_physics_frames()) * 0.55)
+	# Hulk smolder (6v panel: the pulsing rect frame read as a debug gizmo):
+	# live cover now smolders DIEGETICALLY — a warm additive bed + hash-
+	# flickering embers along the hull, all fading out over the last 3s so
+	# the cover expiry stays a truthful telegraph, just an in-world one.
+	for hk in sim.tanks:
+		if hk["alive"] or hk["burn_ticks"] <= 0:
+			continue
+		var hpos := _to_screen(hk["x"], hk["y"])
+		if hpos.y < -20.0 or hpos.y > 380.0:
+			continue
+		var hfade := minf(1.0, float(hk["burn_ticks"]) / 180.0)
+		var hfl := 0.8 + 0.2 * sin(float(Engine.get_physics_frames()) * 0.31 + hpos.x)
+		var hsz := 22.0
+		g.draw_texture_rect(Art.tex("fx_softspot"), Rect2(hpos - Vector2.ONE * hsz, Vector2.ONE * hsz * 2.0),
+			false, Color(1.0, 0.45, 0.15, 0.20 * hfade * hfl))
+		for em in 4:
+			var eh := Art.cell_hash(int(hpos.x) + em * 11, int(hk["burn_ticks"] / 40) + em)
+			var epos := hpos + Vector2(-12.0 + float(eh % 25), -8.0 + float((eh / 25) % 17))
+			g.draw_circle(epos, 1.1, Color(1.0, 0.6 + float(eh % 3) * 0.1, 0.2, (0.5 + float(eh % 4) * 0.1) * hfade))
+
 	for t in sim.tanks:
 		if t["alive"] and t["burning"]:
 			_draw_flame(g, _to_screen(t["x"], t["y"]), 1.0, flick)
