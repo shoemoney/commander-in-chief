@@ -490,7 +490,9 @@ func test_a2_registry_has_no_dead_rows() -> void:
 			Runner.T.ok(tex.has(k), "%s row '%s' mirrors a live TEX entry (no dead config)" % [setname, k])
 
 func test_a2_pipeline_vram_reclaimed() -> void:
-	var cap := FileAccess.get_file_as_string("res://assets/legacy-art/icons/cap_pierce.png.import")
-	Runner.T.ok(cap.contains("size_limit=128"), "the capsule pickup glyph imports size-limited (VRAM reclaimed)")
-	var grass := FileAccess.get_file_as_string("res://assets/kenney/grass.png.import")
-	Runner.T.ok(grass.contains("mipmaps/generate=false"), "the 1:1 Kenney grass tile has mipmaps OFF")
+	for cap in ["cap_pierce", "cap_spread", "cap_triple", "cap_rend", "cap_claymore", "cap_smoke", "cap_flash"]:
+		var c := FileAccess.get_file_as_string("res://assets/legacy-art/icons/%s.png.import" % cap)
+		Runner.T.ok(c.contains("size_limit=128"), "capsule glyph %s imports size-limited" % cap)
+	for tile in ["grass", "dirt", "sand"]:
+		var ti := FileAccess.get_file_as_string("res://assets/kenney/%s.png.import" % tile)
+		Runner.T.ok(ti.contains("mipmaps/generate=false"), "the 1:1 Kenney %s tile has mipmaps OFF" % tile)
