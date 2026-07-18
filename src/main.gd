@@ -265,6 +265,8 @@ const _EVENT_SOUND := {
 	"arena_pressure": ["alarm", -9.0, 1.3],   # c3: rising pressure-shift klaxon — the hot quadrant just moved
 	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
+	"cover_burn": ["vest_break", -9.0, 1.3],   # c3: grass burns off in the jet — dry crackle
+	"cover_crack": ["bunker_break", -8.0, 1.1], # c3: a wall slab cracks apart under the heat
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
@@ -1322,6 +1324,16 @@ func _consume_events() -> void:
 				# c2 arena drop: alert ring on the fresh L so the new geometry
 				# announces itself during the wave-start breath.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
+			"cover_burn":
+				# c3 5v: grass burns off under a vent jet — a puff of ash + a scorch.
+				_burst(ev["x"], ev["y"], "ember", 6, 0.8, 2.0, 0.5, 0.05, 1.0, false,
+					Color(0.9, 0.55, 0.2))
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 16.0)})
+			"cover_crack":
+				# c3 5v: a wall slab cracks apart under the heat — dark debris + dust.
+				_blast_debris(ev["x"], ev["y"])
+				_burst(ev["x"], ev["y"], "dust", 6, 1.0, 2.4, 0.3, 0.06, 0.0, false,
+					Color(0.4, 0.36, 0.32))
 			"arena_pressure":
 				# c3 7v: the spawn pressure quadrant is rotating — banner + a
 				# DIRECTIONAL arrow-march of pulses sweeping from center TOWARD the

@@ -147,3 +147,58 @@ func test_vents_perturb_checksum_only_when_present() -> void:
 	Runner.T.eq(a.checksum(), b.checksum(), "twin sims agree with no vents")
 	b.vents.append({"x": 300 * Fixed.ONE, "y": -4200 * Fixed.ONE})
 	Runner.T.ok(a.checksum() != b.checksum(), "a live vent enters the hash (conditional feed)")
+
+
+func test_c3_vent_burns_grass_and_cracks_wall() -> void:
+	# c3 5v: a foundry vent jet burns off grass (kind 1) and cracks walls (kind
+	# 2) after VENT_COVER_BURN_TICKS; stone (0) and hero wrecks (3) are immune.
+	var sim := SimWorld.new(31, 1)
+	var vy: int = -(SimWorld.VENT_START_SEG * SimWorld.GATE_SPACING) - 200 * Fixed.ONE
+	var vx: int = 300 * Fixed.ONE
+	sim.vents.append({"x": vx, "y": vy})
+	var grass := {"x": vx, "y": vy, "kind": 1}
+	var wall := {"x": vx + 8 * Fixed.ONE, "y": vy, "kind": 2}
+	var stone := {"x": vx - 8 * Fixed.ONE, "y": vy, "kind": 0}
+	var hero := {"x": vx, "y": vy + 8 * Fixed.ONE, "kind": 3}
+	sim.rocks.append_array([grass, wall, stone, hero])
+	# Drive enough jetting ticks (each cycle jets VENT_JET_TICKS) to exceed the burn.
+	var jetted := 0
+	var base: int = 10 * SimWorld.VENT_CYCLE_TICKS
+	var jet_at: int = SimWorld.VENT_CYCLE_TICKS - SimWorld.VENT_JET_TICKS
+	var vx_px: int = vx / Fixed.ONE
+	while jetted < SimWorld.VENT_COVER_BURN_TICKS + 2:
+		# Align tick_count to a jetting phase for this vent.
+		sim.tick_count = base + (jetted % SimWorld.VENT_JET_TICKS) - 7 * vx_px + jet_at
+		sim._step_mines()
+		jetted += 1
+	Runner.T.ok(not sim.rocks.has(grass), "grass burned off under the jet")
+	Runner.T.ok(not sim.rocks.has(wall), "wall cracked apart under the jet")
+	Runner.T.ok(sim.rocks.has(stone), "stone is immune (doesn't burn)")
+	Runner.T.ok(sim.rocks.has(hero), "the hero wreck is immune")
+
+
+func test_c3_grenade_breakwater() -> void:
+	# c3 5v: a solid rock immediately downstream of a marsh-drifting grenade
+	# stops the drift (leeward safe shadow); remove it and the drift resumes.
+	var sim := SimWorld.new(31, 1)
+	sim.waters.append({"y": -2540 * Fixed.ONE, "ford_x": 600 * Fixed.ONE})
+	var dir: int = 1 if SimWorld._mix(SimWorld.MARSH_SEG, sim._world_seed) & 1 else -1
+	var g := {"x": 300 * Fixed.ONE, "y": -2500 * Fixed.ONE, "vx": 0, "vy": 0,
+		"z": 50 * Fixed.ONE, "zv": 0, "owner": 0, "shell": false, "hold": false}
+	# Solid rock immediately downstream (in the drift direction).
+	var breakwater := {"x": 300 * Fixed.ONE + dir * 14 * Fixed.ONE, "y": -2500 * Fixed.ONE, "kind": 0}
+	sim.rocks.append(breakwater)
+	sim.grenades.append(g)
+	var x0: int = g["x"]
+	for i in 6:
+		sim._step_grenades()
+	Runner.T.eq(g["x"], x0, "the breakwater rock stops the marsh drift (safe shadow)")
+	# Remove the rock — drift resumes on an identical throw.
+	var sim2 := SimWorld.new(31, 1)
+	sim2.waters.append({"y": -2540 * Fixed.ONE, "ford_x": 600 * Fixed.ONE})
+	var g2 := {"x": 300 * Fixed.ONE, "y": -2500 * Fixed.ONE, "vx": 0, "vy": 0,
+		"z": 50 * Fixed.ONE, "zv": 0, "owner": 0, "shell": false, "hold": false}
+	sim2.grenades.append(g2)
+	for i in 6:
+		sim2._step_grenades()
+	Runner.T.ok(g2["x"] != x0, "with no breakwater the drift applies as before")

@@ -44,7 +44,10 @@ const KNOWN := {
 	# fed to the checksum (position already is); variety is gated past the
 	# torture window so it can't perturb goldens. Classified excluded, hashed
 	# implicitly via x/y like it always was.
-	"rock": ["x", "y", "kind"],
+	# burn_ticks (c3 5v) accrues only under a seg-4+ foundry vent jet; like kind
+	# it is NOT fed to the checksum (removal, not a hashed flag, drives the
+	# grass/wall burn-off) and never appears in either torture window.
+	"rock": ["x", "y", "kind", "burn_ticks"],
 	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",

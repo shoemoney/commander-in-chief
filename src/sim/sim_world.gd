@@ -296,6 +296,7 @@ const VENT_CYCLE_TICKS := 180        # full cycle; jet holds the final 60
 const VENT_JET_TICKS := 60
 const VENT_WARN_TICKS := 30          # >= the 24t reaction floor (KIMK r4 precedent)
 const VENT_HURT_RADIUS := 24 * F_ONE
+const VENT_COVER_BURN_TICKS := 120   # c3 5v: ~2s of a vent jet burns off grass / cracks a wall slab
 const VENT_CHUNKS := [
 	# No empty chunks (unlike MINE_CHUNKS): seg 4 keeps only ~2 rows after the
 	# keep-outs, so an empty roll on both would erase the mechanic for that
@@ -1764,7 +1765,19 @@ func _step_grenades() -> void:
 		if not g["shell"]:
 			var g_band: int = absi(g["y"]) / GATE_SPACING
 			if g_band == MARSH_SEG and _in_water(g["x"], g["y"]):
-				g["x"] = g["x"] + (MARSH_DRIFT if _mix(g_band, _world_seed) & 1 else -MARSH_DRIFT)
+				var drift: int = MARSH_DRIFT if _mix(g_band, _world_seed) & 1 else -MARSH_DRIFT
+				# c3 5v BREAKWATER: a solid rock immediately downstream stops the
+				# drift — its LEEWARD cell is a safe shadow where the current can't
+				# bank the grenade into you. Cover choice now informs the hazard.
+				var blocked := false
+				for wk in rocks:
+					if _rk_solid(wk) and absi(g["y"] - wk["y"]) <= _rk_hh(wk) \
+							and (g["x"] - wk["x"]) * drift < 0 \
+							and absi(g["x"] - wk["x"]) <= _rk_hw(wk) + 6 * F_ONE:
+						blocked = true
+						break
+				if not blocked:
+					g["x"] = g["x"] + drift
 		if g["z"] <= 0 and g["zv"] < 0:
 			_explode(g["x"], g["y"])
 			grenades.remove_at(i)
@@ -2480,6 +2493,24 @@ func _step_mines() -> void:
 				if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
 						and _dist_lte(p["x"], p["y"], v["x"], v["y"], VENT_HURT_RADIUS):
 					_hurt_player(p)
+			# c3 5v: the jet also BURNS soft cover — grass (kind 1) burns off,
+			# wall slabs (kind 2) crack; stone (0) and hero wrecks (3) are immune
+			# ("stone doesn't burn" = the cluster's immune-to-one/vulnerable-to-
+			# another for free). Removal auto-kills concealment/blocking — no flag
+			# plumbing, _in_grass/_rk_solid just stop matching. burn_ticks is NOT
+			# fed to checksum; seg-4+ vents = torture-inert.
+			for ri in range(rocks.size() - 1, -1, -1):
+				var brk := rocks[ri]
+				var bkind: int = brk.get("kind", 0)
+				if bkind != 1 and bkind != 2:
+					continue
+				if absi(brk["x"] - v["x"]) <= VENT_HURT_RADIUS + _rk_hw(brk) \
+						and absi(brk["y"] - v["y"]) <= VENT_HURT_RADIUS + _rk_hh(brk):
+					brk["burn_ticks"] = brk.get("burn_ticks", 0) + 1
+					if brk["burn_ticks"] >= VENT_COVER_BURN_TICKS:
+						events.append({"t": "cover_burn" if bkind == 1 else "cover_crack",
+							"x": brk["x"], "y": brk["y"]})
+						rocks.remove_at(ri)
 
 
 func _step_barrels() -> void:
