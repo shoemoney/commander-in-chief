@@ -703,6 +703,11 @@ func test_a3_rock_top_light_is_warm_and_bright() -> void:
 	var rl: Color = c["ROCK_TOP_LIGHT"]
 	Runner.T.ok(rl.r > rl.b, "the rock top-light is WARM (sunlit, r > b)")
 	Runner.T.ok(rl.r > 0.9 and rl.g > 0.9, "the rock top-light is BRIGHT (a lit rim, not a shadow)")
+	# Only the DOMED boulders get the raised-rim highlight; the flat log does not.
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms._rock_has_top_light("rock1") and ms._rock_has_top_light("rock2"),
+		"domed boulders (rock1/rock2) get the raised-rim top-light")
+	Runner.T.ok(not ms._rock_has_top_light("tree_dead2"), "the flat log gets NO top-light (no raised dome)")
 
 
 # --- a3-10: the marsh floor reads wet — dark silt pools with a cooler specular sheen so
@@ -714,5 +719,13 @@ func test_a3_marsh_wetness_pool_and_sheen() -> void:
 	var mw: Dictionary = c["MARSH_WET"]
 	Runner.T.ok(mw["pool_a"] > mw["sheen_a"], "the dark silt pool is stronger than its specular sheen glint")
 	Runner.T.ok(mw["pool_a"] <= 0.4 and mw["sheen_a"] > 0.0, "both are soft (a wet sheen, not a black hole)")
+	# Chroma: a COOL-dark silt pool with a LIGHTER cool specular glint reads as wet.
+	var pool: Color = mw["pool_col"]
+	var sheen: Color = mw["sheen_col"]
+	Runner.T.ok(pool.g > pool.r and pool.b > pool.r, "the silt pool is COOL (g,b > r)")
+	Runner.T.ok(sheen.g > sheen.r and sheen.b > sheen.r, "the sheen glint is COOL (g,b > r)")
+	var pv: float = maxf(pool.r, maxf(pool.g, pool.b))
+	var sv: float = maxf(sheen.r, maxf(sheen.g, sheen.b))
+	Runner.T.ok(sv > pv, "the sheen is LIGHTER than the dark pool (a glint off the water)")
 	# The wetness is marsh-only: band 2 of the 5-stop march (int(march*5) == 2).
 	Runner.T.eq(clampi(int(0.45 * 5.0), 0, 4), 2, "march 0.45 lands in the MARSH band (2) where the wetness draws")

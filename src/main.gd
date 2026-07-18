@@ -3211,7 +3211,8 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
 const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a fern clump anchor (under the sprite)
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
-const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17}   # a3-10: wet-silt pool alpha + its cool specular sheen alpha
+const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
+	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
 	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
 
@@ -3312,6 +3313,12 @@ static func _ground_stops(mode: String) -> Array:
 # a3-05: the two feather rings that grade a bare-earth patch into the turf. Outer wide
 # faint ring + a stronger inner halo, both scaled off the card size and dirt alpha.
 const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a": 0.52}
+
+
+static func _rock_has_top_light(rtex: String) -> bool:
+	# a3-09: only the DOMED boulders (rock1/rock2) get the lit top-edge rim that reads as
+	# raised cover; the flat log (tree_dead2) has no raised dome, so no top-light.
+	return rtex != "tree_dead2"
 
 
 static func _has_canopy_dapple(ash: float) -> bool:
@@ -4207,13 +4214,15 @@ func _draw_marsh_wetness(cam_y: float) -> void:
 			var wp := Vector2(tx * 96.0 + float(h % 44), woy + ty * 96.0 + float((h / 7) % 44))
 			var ws := 20.0 + float(h % 18)
 			# Dark cool silt pool.
+			var pc: Color = MARSH_WET["pool_col"]
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(wp - Vector2(ws, ws) / 2.0, Vector2(ws, ws)),
-				false, Color(0.05, 0.11, 0.10, MARSH_WET["pool_a"]))
+				false, Color(pc.r, pc.g, pc.b, MARSH_WET["pool_a"]))
 			# Cool specular sheen, offset up-left so the pool reads WET (a glint off water).
 			var sh := ws * 0.42
+			var sc: Color = MARSH_WET["sheen_col"]
 			draw_texture_rect(Art.tex("fx_softspot"),
 				Rect2(wp + Vector2(-sh * 0.35, -sh * 0.55), Vector2(sh, sh * 0.6)),
-				false, Color(0.55, 0.70, 0.72, MARSH_WET["sheen_a"]))
+				false, Color(sc.r, sc.g, sc.b, MARSH_WET["sheen_a"]))
 
 
 func _draw_rocks() -> void:
@@ -4263,7 +4272,7 @@ func _draw_rocks() -> void:
 				# boulder's upper rim implies overhead light, so a rock reads as RAISED
 				# cover (the inverse of a1-07's crater inner-pit), not a threat or a hole.
 				# Only the domed boulders; the flat log (tree_dead2) has no raised rim.
-				if rtex != "tree_dead2":
+				if _rock_has_top_light(rtex):
 					var rr := 9.0 * rsc + 2.0
 					draw_arc(pos + Vector2(0.0, 0.5), rr, PI + 0.55, TAU - 0.2, 12,
 						Color(ROCK_TOP_LIGHT.r, ROCK_TOP_LIGHT.g, ROCK_TOP_LIGHT.b, 0.5 * fade), 1.8)
