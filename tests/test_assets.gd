@@ -367,3 +367,12 @@ func test_a2_title_best_line_drops_zeros() -> void:
 	Runner.T.eq(menu._best_line(4500, 0, 138), "BEST — SCORE 4500 · 138m", "score-only best drops WAVE 0")
 	Runner.T.eq(menu._best_line(4500, 0, 0), "BEST — SCORE 4500", "a pure campaign best shows just the score")
 	Runner.T.ok(menu._best_line(4500, 3, 138).contains("WAVE 3"), "a real wave record is shown")
+
+
+# --- a2-05: tiny decor drops the black-speckle rim ---
+
+func test_a2_tiny_decor_drops_rim() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms._tiny_decor_no_rim("ammobox", 8.0), "tiny decor (ammobox @8px) skips the black-speckle rim")
+	Runner.T.ok(not ms._tiny_decor_no_rim("rock1", 40.0), "a large rock keeps its rim")
+	Runner.T.ok(not ms._tiny_decor_no_rim("rusher", 8.0), "a small THREAT keeps its rim (it is not decor)")

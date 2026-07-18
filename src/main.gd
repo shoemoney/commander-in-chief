@@ -3184,6 +3184,13 @@ const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45),
 	Color(1.0, 0.55, 0.4), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]
 
 
+static func _tiny_decor_no_rim(tex_name: String, screen_w: float) -> bool:
+	# a2-05: sub-14px NON-UNIT sprites (litter/decor: ammobox, landmine, barrier,
+	# watchtower, mg_tripod, small rocks...) drop the rim so they read as small objects,
+	# not black dead-pixel specks. Units/threats/bosses keep their rim regardless of size.
+	return screen_w < 14.0 and not _UNIT_RIM.has(tex_name) and not _BOSS_RIM.has(tex_name)
+
+
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
 		stretch := 1.0) -> void:
 	var t: Texture2D = Art.tex(tex_name)
@@ -3220,8 +3227,13 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 			# revealed the separator IS the read; the cloak alpha (tint.a) still hides it.
 			oc = Color(1.0, 0.9, 0.62, tint.a)
 			d = 2.2 / s
-		for o in _OUTLINE_OFFSETS:
-			draw_texture(t, origin + o * d, oc)
+		# a2-05: tiny DECOR (sub-14px on screen) drops the rim — a 1px dark rim on a
+		# sub-16px prop swamps it into a black dead-pixel speck that reads as noise, not
+		# an object; without it the litter reads as a small object AND recedes into the
+		# ground (threats/units keep their rim regardless of size).
+		if not _tiny_decor_no_rim(tex_name, t.get_size().x * s):
+			for o in _OUTLINE_OFFSETS:
+				draw_texture(t, origin + o * d, oc)
 	draw_texture(t, origin, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
