@@ -3325,6 +3325,7 @@ const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that gro
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
 const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
 const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
+const HERO_APEX := Color(0.86, 0.93, 1.0)   # a4-03: cool crown catch-light — the hero is the brightest+coolest point
 const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds under REDUCE MOTION; pulse is motion-gated
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
@@ -6151,6 +6152,15 @@ func _draw_players() -> void:
 			# ring was the only differentiator; the pale-white bodies were identical.
 			mod = mod * _body_ident_lean(i)
 			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
+			# a4-03 (AD#4): the hero is the VALUE APEX — a small constant COOL catch-light on
+			# the helmet crown (an implied overhead key) makes the soldier the brightest AND
+			# coolest point in every frame, so the eye snaps to HIM first, not the reticle or a
+			# tan dirt splat — especially in the busy foundry. Screen-fixed (not aim-rotated) so
+			# the key stays overhead; suppressed while downed (a downed body isn't the apex).
+			if da_res <= 0.01:
+				var hcrown := pos - Vector2(0.0, walk_bob + 4.0)
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(hcrown - Vector2(5.0, 4.0), Vector2(10.0, 8.0)),
+					false, Color(HERO_APEX.r, HERO_APEX.g, HERO_APEX.b, 0.32))
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
 			# (draining arc while the bash swing is on cooldown, steady dry

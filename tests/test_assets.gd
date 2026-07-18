@@ -598,6 +598,14 @@ func test_a4_top_prey_shared_by_both_cards() -> void:
 	Runner.T.eq(ms._victory_story_rows(0, 0, {}).size(), 1, "no kills -> just the KILLS/STREAK line (no prey)")
 
 
+func test_a4_hero_apex_is_cool_and_bright() -> void:
+	# a4-03: the hero crown catch-light makes the soldier the brightest + coolest point.
+	var c := _consts()
+	var h: Color = c["HERO_APEX"]
+	Runner.T.ok(h.b > h.r, "the hero crown catch-light is COOL (b > r) — separates from warm ground")
+	Runner.T.ok(h.r > 0.8 and h.g > 0.85 and h.b > 0.9, "it is BRIGHT — the hero is the value apex")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
