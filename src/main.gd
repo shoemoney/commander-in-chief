@@ -4821,7 +4821,11 @@ func _draw_enemies() -> void:
 		# but still alive) — mobs only reacted on death; now every hit reads. The white
 		# pop + sparks spawn as ADDITIVE glow fx so they draw on TOP of the body (via
 		# _draw_glow); the flinch below is the body offset.
-		var ehp: int = e["hp"]
+		# Most kinds are one-shot and carry NO "hp" field (only mg_nest/technical/
+		# broadcast track it — see _step; frogman/rusher/elite/courier have none).
+		# Default to a constant so the edge-detect is a no-op for them (prev==cur ->
+		# never flashes; they die in one hit anyway) instead of crashing the draw.
+		var ehp: int = e.get("hp", 1)
 		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
 			_enemy_flash[eidx] = 1.0
 			if _motion >= 0.5:   # a2-11 r3: REDUCE MOTION suppresses the pop + sparks (not just the flinch)

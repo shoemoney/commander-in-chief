@@ -518,3 +518,24 @@ func test_a2_label_plate_rect() -> void:
 	Runner.T.ok(is_equal_approx(r.position.x, 97.0), "plate starts 3px LEFT of the label origin (under the text)")
 	Runner.T.ok(is_equal_approx(r.size.x, 46.0), "plate is 6px wider than the label")
 	Runner.T.ok(is_equal_approx(r.position.y, 50.0), "plate top matches the passed y")
+
+
+# --- a2-11 regression: the hit-flash read must NOT assume every enemy carries
+# "hp". Only mg_nest/technical/broadcast track hp; frogman/rusher/elite are
+# one-shot and have NO hp field, so the view reads e.get("hp", 1) — a hard
+# e["hp"] crashed _draw_enemies on every ford frogman and every rusher wave. ---
+
+func test_a2_11_hitflash_read_tolerates_hpless_enemies() -> void:
+	var sim := SimWorld.new(0xF0, 1)
+	sim._spawn_frogman(200 * Fixed.ONE, 200 * Fixed.ONE)
+	sim._spawn_enemy(300 * Fixed.ONE, 200 * Fixed.ONE, false)   # rusher
+	var frog: Dictionary = sim.enemies[0]
+	var rusher: Dictionary = sim.enemies[1]
+	# The contract the guard depends on: these common kinds carry no hp field.
+	Runner.T.ok(not frog.has("hp"), "a frogman spawns with NO hp field (one-shot)")
+	Runner.T.ok(not rusher.has("hp"), "a rusher spawns with NO hp field (one-shot)")
+	# The guarded read yields the sentinel -> prev==cur -> the edge-detect never
+	# fires a flash for a one-shot kind (and never crashes on the missing key).
+	var ehp: int = frog.get("hp", 1)
+	Runner.T.eq(ehp, 1, "the guarded hp read defaults to 1 for an hp-less enemy")
+	Runner.T.ok(not (ehp < int(frog.get("hp", ehp))), "no non-lethal-hit flash edge for a one-shot kind")
