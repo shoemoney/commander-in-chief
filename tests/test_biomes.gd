@@ -68,6 +68,14 @@ func test_vents_stream_only_past_seg4() -> void:
 	sim.camera_top = -4500 * Fixed.ONE
 	sim._step_camera()
 	Runner.T.ok(not sim.vents.is_empty(), "foundry depth streams vents")
+	# The campaign-reachable foundry stretch (seg 4) must KEEP vents after the
+	# apron/water/gate keep-outs eat their rows — at the old 460px cadence the
+	# guards killed every row and the mechanic never existed in a real run.
+	var seg4_rows := {}
+	for v in sim.vents:
+		if absi(v["y"]) / SimWorld.GATE_SPACING == 4:
+			seg4_rows[v["y"]] = true
+	Runner.T.ok(seg4_rows.size() >= 2, "seg 4 keeps >= 2 vent rows (got %d)" % seg4_rows.size())
 	for v in sim.vents:
 		Runner.T.ok(absi(v["y"]) / SimWorld.GATE_SPACING >= SimWorld.VENT_START_SEG,
 			"every vent sits at seg >= %d" % SimWorld.VENT_START_SEG)

@@ -276,13 +276,15 @@ const BARREL_CHUNKS := [
 const MARSH_SEG := 2
 const MARSH_DRIFT := F_ONE           # 1px/tick sideways while airborne over marsh water
 const VENT_START_SEG := 4
-const VENT_SPACING := 460 * F_ONE
+const VENT_SPACING := 300 * F_ONE   # 300 (not 460): after the apron/water/gate keep-outs eat their rows, seg 4 must still KEEP >= 2 vent rows (-4200/-4800; test-pinned) — at 460 the campaign foundry surfaced zero
 const VENT_CYCLE_TICKS := 180        # full cycle; jet holds the final 60
 const VENT_JET_TICKS := 60
 const VENT_WARN_TICKS := 30          # >= the 24t reaction floor (KIMK r4 precedent)
 const VENT_HURT_RADIUS := 24 * F_ONE
 const VENT_CHUNKS := [
-	[], [],
+	# No empty chunks (unlike MINE_CHUNKS): seg 4 keeps only ~2 rows after the
+	# keep-outs, so an empty roll on both would erase the mechanic for that
+	# seed. Mines have ~15 rows to absorb empties; the foundry doesn't.
 	[[0, 0]],
 	[[-100, 0], [100, 0]],
 	[[-100, -60], [0, 0], [100, 60]],   # diagonal sweep
@@ -300,6 +302,7 @@ const FLANK_SQUAD := 3               # 2v flank doors: squad size per side (star
 const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
 const CHOKE_START_SEG := 2
+const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
 const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
 const CHOKE_BITE := 240 * F_ONE
@@ -834,11 +837,45 @@ func _in_choke_apron(y: int) -> bool:
 	## The BREATHER (KIMK round-2): a guaranteed hazard-free full-width apron
 	## right after every choke — width modulates in both directions because
 	## the squeeze is followed by authored open ground, not more minefield.
+	## c2 4v PANIC POCKET: the 80px BEFORE the band (off 70-150) is hazard-free
+	## too — both sides of every squeeze, inherited by every hazard stream that
+	## already consumes this predicate (mines, barrels, vents).
 	var seg: int = absi(y) / GATE_SPACING
 	if seg < CHOKE_START_SEG:
 		return false
 	var off: int = absi(y) % GATE_SPACING
-	return off > 520 * F_ONE and off <= 640 * F_ONE
+	return (off > 520 * F_ONE and off <= 640 * F_ONE) \
+		or (off > 70 * F_ONE and off <= 150 * F_ONE)
+
+
+func _in_fork_apron(y: int) -> bool:
+	## c2 4v DECISION APRON: the gate+300..460 approach band before fork gates
+	## 2/4 is COVER-free (not just hazard-free) — the route choice gets read
+	## from open ground, not mid-firefight. Blockade/camp skip their whole
+	## stamp; the ambient rock stream consults this per row.
+	var a: int = absi(y)
+	var k: int = a / GATE_SPACING + 1     # the gate this approach band feeds
+	if k != 2 and k != 4:
+		return false
+	var off: int = a % GATE_SPACING
+	return off >= 540 * F_ONE and off <= 700 * F_ONE
+
+
+func _near_stream_bunker(x: int, y: int) -> bool:
+	## Fairness pocket (c2 4v): streamed hazards keep BUNKER_EXCLUSION clear of
+	## streamed bunkers, so a breach is never also a minefield. Bunker placement
+	## is a pure function of its cadence (idx odd, x 120/460 by flank parity,
+	## y = -idx*500) — pure math per offset, no array scan.
+	var row: int = absi(y) / (500 * F_ONE)
+	for idx in [row - 1, row, row + 1]:
+		if idx < 1 or idx % 2 == 0:
+			continue
+		var bx: int = (120 if (idx / 2) % 2 == 0 else 460) * F_ONE
+		var by: int = -idx * 500 * F_ONE
+		if x >= bx - BUNKER_EXCLUSION and x <= bx + BUNKER_W + BUNKER_EXCLUSION \
+				and y >= by - BUNKER_EXCLUSION and y <= by + BUNKER_H + BUNKER_EXCLUSION:
+			return true
+	return false
 
 
 func _clamp_actor(p: Dictionary) -> void:
@@ -2720,19 +2757,30 @@ func _step_camera() -> void:
 			var m_chunk: Array = MINE_CHUNKS[m_pick]
 			var m_ax: int = (150 + (mh2 >> 8) % 340) * F_ONE
 			for od in m_chunk:
-				mines.append({"x": m_ax + od[0] * F_ONE, "y": _next_mine_y + od[1] * F_ONE, "armed": true})
+				# Bunker exclusion (c2 4v): per-offset, so a chunk CAN straddle
+				# the ring — only the offending mines vanish, not the pattern.
+				var m_px: int = m_ax + od[0] * F_ONE
+				var m_py: int = _next_mine_y + od[1] * F_ONE
+				if not _near_stream_bunker(m_px, m_py):
+					mines.append({"x": m_px, "y": m_py, "armed": true})
 		_next_mine_y -= MINE_SPACING
 	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
 	# grenade chains through (and that catches you if you stand too close).
 	while _next_barrel_y > camera_top - 2 * VIEW_H:
 		var b_slot: int = absi(_next_barrel_y / BARREL_SPACING)
-		if b_slot % 2 == 1 and not _in_choke_apron(_next_barrel_y):
+		var b_gate_off: int = absi(_next_barrel_y) % GATE_SPACING
+		# Barrels inherit the mines' gate-row strip guard (c2 4v: the torture
+		# barrel row sits at offset 320, so the goldens never see this branch).
+		if b_slot % 2 == 1 and not _in_choke_apron(_next_barrel_y) and b_gate_off >= 80 * F_ONE:
 			var bh2 := _mix(b_slot + 7919, _world_seed)
 			var b_chunk: Array = BARREL_CHUNKS[bh2 % BARREL_CHUNKS.size()]
 			var b_ax: int = (120 + (bh2 >> 8) % 400) * F_ONE
 			for od in b_chunk:
-				barrels.append({"x": b_ax + od[0] * F_ONE, "y": _next_barrel_y + od[1] * F_ONE,
-					"armed": true, "fuse_ticks": 0})
+				# Same per-offset bunker exclusion as the mine stream.
+				var b_px: int = b_ax + od[0] * F_ONE
+				var b_py: int = _next_barrel_y + od[1] * F_ONE
+				if not _near_stream_bunker(b_px, b_py):
+					barrels.append({"x": b_px, "y": b_py, "armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
 	# Foundry heat vents (c2 5v): seg-4+ EXCLUSIVE — authored chunks on their
 	# own slot cadence, _mix-picked with a prime salt (decorrelated from mine/
@@ -2757,7 +2805,8 @@ func _step_camera() -> void:
 		# Dry-land + open-corridor predicate (pure math, no array reads): skip
 		# the water band cadence (+margin) and the gate arena/fork zone.
 		var r_off: int = posmod(-_next_rock_y / F_ONE, 1000)
-		if r_idx % 3 != 0 and r_off < 700 and (r_off < 400 or r_off > 520):
+		if r_idx % 3 != 0 and r_off < 700 and (r_off < 400 or r_off > 520) \
+				and not _in_fork_apron(_next_rock_y):
 			var rx: int = (80 + ((r_idx * 2654435761) & 0x7FFFFFFF) % 460) * F_ONE
 			rocks.append({"x": rx, "y": _next_rock_y})
 			rocks.append({"x": rx + 22 * F_ONE, "y": _next_rock_y + 10 * F_ONE})
@@ -2809,7 +2858,11 @@ func _step_camera() -> void:
 			# 3-bag line mid-stretch the player must grenade, flank, or crush —
 			# rides the ENTIRE sandbag grammar for free (cover, destructible,
 			# enemy-avoid, tread-kill, conditional hash).
-			if _gate_counter >= 2 and _mix(_gate_counter, 31) % 3 != 0:
+			# Fork gates 2/4 skip the blockade AND camp stamp (c2 4v DECISION
+			# APRON): the approach band gate+300..460 stays cover-free so the
+			# route choice is read standing still, not mid-firefight.
+			if _gate_counter >= 2 and _gate_counter != 2 and _gate_counter != 4 \
+					and _mix(_gate_counter, 31) % 3 != 0:
 				# Hash-gated 2-in-3 + VARIED (KIMK r2: an every-stretch constant
 				# blockade recreates the complaint one level up): 2-4 bags,
 				# derived gap position, occasionally pre-shelled (a gap bag).
@@ -2933,6 +2986,15 @@ func _step_camera() -> void:
 			# the full surfacing telegraph before it can strike (test-pinned);
 			# it can never spawn-camp a mid-crossing player with an instant hit.
 			_spawn_frogman(water["ford_x"], _next_water_y + 40 * F_ONE)
+		# Mud-bank rock (c2 4v FAIRNESS POCKET): one hard-cover pair mid the
+		# 40px north mud strip on bands >= 2 — a bullet-blocker for the slowed
+		# approach, so mud + band-6+ crossfire isn't a naked walk. _mix-derived
+		# x (stream loops stay rng-FREE); band 1 = the golden window, skipped.
+		var w_band: int = absi(_next_water_y / GATE_SPACING)
+		if w_band >= 2:
+			var mrx: int = (80 + _mix(w_band, water["ford_x"] / F_ONE) % 460) * F_ONE
+			rocks.append({"x": mrx, "y": _next_water_y - 20 * F_ONE})
+			rocks.append({"x": mrx + 22 * F_ONE, "y": _next_water_y - 10 * F_ONE})
 		_next_water_y -= GATE_SPACING
 
 

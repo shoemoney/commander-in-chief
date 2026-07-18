@@ -1099,3 +1099,76 @@ func test_kimk_round4_final_assertions() -> void:
 	var tk2 := sim2.tanks[0]
 	var solid: bool = (tk2["alive"] and tk2["occupant"] < 0) or (not tk2["alive"] and tk2["burn_ticks"] > 0)
 	Runner.T.ok(not solid, "an occupied (drivable) tank is NEVER solid — footprints are static-while-solid by rule")
+
+
+func test_c2_bunker_exclusion_rings() -> void:
+	# Fairness pocket (c2 4v): deep-stream 5 seeds, then assert NO streamed
+	# mine/barrel sits inside any streamed-bunker AABB inflated by 48px — a
+	# breach fight is never also a minefield.
+	for sd in [3, 11, 29, 61, 97]:
+		var sim := SimWorld.new(sd, 1)
+		sim.camera_top = -10000 * SimWorld.F_ONE
+		sim._step_camera()
+		Runner.T.ok(sim.mines.size() > 0 and sim.barrels.size() > 0, "seed %d streamed a real field" % sd)
+		var clean := true
+		for m in sim.mines:
+			if sim._near_stream_bunker(m["x"], m["y"]):
+				clean = false
+		for b in sim.barrels:
+			if sim._near_stream_bunker(b["x"], b["y"]):
+				clean = false
+		Runner.T.ok(clean, "seed %d: zero hazards inside a bunker exclusion ring" % sd)
+
+
+func test_c2_decision_apron_is_cover_free() -> void:
+	# Fork gates 2/4 (c2 4v): the gate+300..460 approach band carries no
+	# blockade bags, camp stamps, priced pickups, or ambient rocks.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	for gk in [2, 4]:
+		var gy: int = -gk * 1000 * SimWorld.F_ONE
+		var lo: int = gy + 300 * SimWorld.F_ONE
+		var hi: int = gy + 460 * SimWorld.F_ONE
+		var clear := true
+		for arr: Array in [sim.sandbags, sim.rocks]:
+			for d: Dictionary in arr:
+				if d["y"] >= lo and d["y"] <= hi:
+					clear = false
+		for pk in sim.pickups:
+			if pk.get("cost", 0) > 0 and pk["y"] >= lo and pk["y"] <= hi:
+				clear = false
+		Runner.T.ok(clear, "fork gate %d decision apron is cover-free" % gk)
+	# Non-fork gates still roll blockades: the setpiece survives elsewhere.
+	Runner.T.ok(sim.sandbags.size() > 0, "non-fork gates keep their blockade setpieces")
+
+
+func test_c2_panic_pocket_flanks_chokes() -> void:
+	# The 80px BEFORE every choke band (off 70-150) is hazard-free, same as
+	# the post-choke apron — both sides of the squeeze breathe.
+	var sim := SimWorld.new(43, 1)
+	Runner.T.ok(sim._in_choke_apron(-(2000 + 100) * SimWorld.F_ONE), "pre-band pocket is apron")
+	Runner.T.ok(sim._in_choke_apron(-(2000 + 560) * SimWorld.F_ONE), "post-band apron still holds")
+	Runner.T.ok(not sim._in_choke_apron(-(2000 + 300) * SimWorld.F_ONE), "the squeeze itself is not apron")
+	Runner.T.ok(not sim._in_choke_apron(-(1000 + 100) * SimWorld.F_ONE), "segs 0-1 stay apron-free (golden window untouched)")
+
+
+func test_c2_mud_bank_rock() -> void:
+	# Every water band >= 2 carries a hard-cover rock pair inside its 40px
+	# north mud strip; band 1 (the golden window) stays bare.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	var bands_checked := 0
+	for w in sim.waters:
+		var band: int = absi(w["y"] / SimWorld.GATE_SPACING)
+		var found := false
+		for rk in sim.rocks:
+			if rk["y"] >= w["y"] - 40 * SimWorld.F_ONE and rk["y"] < w["y"]:
+				found = true
+		if band >= 2:
+			bands_checked += 1
+			Runner.T.ok(found, "water band %d has its mud-bank rock" % band)
+		elif band == 1:
+			Runner.T.ok(not found, "band 1 mud stays bare — the torture window is untouched")
+	Runner.T.ok(bands_checked >= 2, "the deep stream actually produced bands to check")
