@@ -2996,9 +2996,28 @@ func _stamp_stretch_setpieces() -> void:
 			or _is_calm_band(_next_gate_y + 460 * F_ONE):
 		return
 	if _mix(_gate_counter, 31) % 3 != 0:
+		# Composition gate holds at exactly 2-in-3 (judge r1): of the stretches
+		# that compose, 1-in-3 field the FIRE SACK and the rest the blockade —
+		# a replacement slice, not an additive roll, so stretch density never
+		# creeps.
+		if _mix(_gate_counter, 47) % 3 == 0:
+			# FIRE SACK (c2 3v): a COMPOSED encounter — an MG nest dug in
+			# behind two world-bags, cover FAVORING the nest against the
+			# southern approach. Break LOS, flank the open side (the full
+			# remaining corridor, >= HULL_CLEARANCE by construction — test-
+			# pinned), or grenade the bags; camping is already punished by
+			# the nest's tracking rake. Flank alternates OPPOSITE the
+			# hardpoint rock's parity (rock: 150 odd / 490 even). Rows sit at
+			# +300/+340 — both clear _in_choke_apron (offsets 700/660 vs the
+			# 520-640 + 70-150 apron bands, test-pinned).
+			var sack_x: int = (470 if _gate_counter % 2 == 1 else 170) * F_ONE
+			_spawn_mg_nest(sack_x, _next_gate_y + 300 * F_ONE)
+			sandbags.append({"x": sack_x - 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
+			sandbags.append({"x": sack_x + 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
+			return
 		# Authored blockade setpiece (5v): a 2-4 bag line mid-stretch the
 		# player must grenade, flank, or crush — rides the ENTIRE sandbag
-		# grammar for free. Hash-gated 2-in-3 + VARIED (KIMK r2), derived gap,
+		# grammar for free. Hash-gated + VARIED (KIMK r2), derived gap,
 		# occasionally pre-shelled (1-in-3, never back-to-back, KIMK r3).
 		var bmix := _mix(_gate_counter, _world_seed)
 		var blk_x: int = (140 + bmix % 320) * F_ONE
@@ -3026,21 +3045,6 @@ func _stamp_stretch_setpieces() -> void:
 				# "Priced" pinned: 10 + 5/segment past 2, capped 30.
 				pickups.append({"x": spx2, "y": sp_y, "kind": 0,
 					"cost": mini(30, 10 + (absi(_next_gate_y / GATE_SPACING) - 2) * 5)})
-	elif _mix(_gate_counter, 47) % 3 == 0:
-		# FIRE SACK (c2 3v): when the blockade roll passes, a COMPOSED
-		# encounter takes its stretch 1-in-3 — an MG nest dug in behind two
-		# world-bags, cover FAVORING the nest against the southern approach.
-		# Break LOS, flank the open side (the full remaining corridor, >=
-		# HULL_CLEARANCE by construction — test-pinned), or grenade the bags;
-		# camping is already punished by the nest's tracking rake. Mutual
-		# exclusion with the blockade keeps stretch density flat. Flank
-		# alternates OPPOSITE the hardpoint rock's parity (rock: 150 odd /
-		# 490 even). Rows sit at +300/+340 — both clear _in_choke_apron
-		# (offsets 700/660 vs the 520-640 + 70-150 apron bands, test-pinned).
-		var sack_x: int = (470 if _gate_counter % 2 == 1 else 170) * F_ONE
-		_spawn_mg_nest(sack_x, _next_gate_y + 300 * F_ONE)
-		sandbags.append({"x": sack_x - 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
-		sandbags.append({"x": sack_x + 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
 
 
 func _make_bunker(x: int, y: int) -> Dictionary:
