@@ -265,6 +265,7 @@ const _EVENT_SOUND := {
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"rock_crater": ["explosion", -8.0, 0.6],  # low crumble: the arena just lost a rock
 	"arena_shift": ["alarm", -10.0, 0.9],     # geometry klaxon: fresh cover dropped in
+	"supply_pod": ["explosion", -5.0, 0.7],   # c4: a supply pod slams in a fresh cover fort
 	"arena_pressure": ["alarm", -9.0, 1.3],   # c3: rising pressure-shift klaxon — the hot quadrant just moved
 	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
@@ -1374,6 +1375,14 @@ func _consume_events() -> void:
 				# c2 arena drop: alert ring on the fresh L so the new geometry
 				# announces itself during the wave-start breath.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
+			"supply_pod":
+				# c4 2v: a supply pod SLAMS in a fresh 3x3 cover fort — an impact
+				# shockwave + dust ring + shake so the renewed cover reads loud.
+				_trauma = minf(1.0, _trauma + 0.35)
+				_rumble = maxf(_rumble, 0.5)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.05})
+				_burst(ev["x"], ev["y"], "dust", 8, 1.2, 2.4, 0.35)
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(18.0, 24.0)})
 			"cover_burn":
 				# c3 5v: grass burns off under a vent jet — a puff of ash + a scorch.
 				_burst(ev["x"], ev["y"], "ember", 6, 0.8, 2.0, 0.5, 0.05, 1.0, false,

@@ -3963,6 +3963,37 @@ func _start_wave() -> void:
 			if planted > 0:
 				events.append({"t": "arena_shift", "x": l_ax, "y": l_ay})
 				break
+	# c4 2v RENEWABLE COVER: a supply pod impacts every 5th wave and carves a 3x3
+	# RIM of fresh solid rock (8 outer cells; center left open = an instant micro-
+	# fort), so the c2-04 scar rule can no longer strip the arena bare by ~wave 15.
+	# _mix-picked slot (zero new rng), same dedupe walk as the L-drop. Endless
+	# wave>=5 -> past the wave-2 ENDLESS_GOLDEN wipe -> byte-identical. (The
+	# DRIFTING moving-solid cover was cut: it is the L14 solid-vs-occupant
+	# impossibility + a new hashed velocity field for a 2-vote item.)
+	if mode == "endless" and wave >= 5 and wave % 5 == 0:
+		var pmix := _mix(wave * 3 + 1, _world_seed)
+		var pslot: Array = ARENA_L_SLOTS[(pmix >> 4) % ARENA_L_SLOTS.size()]
+		var pcx: int = pslot[0] * F_ONE
+		var pcy: int = pslot[1] * F_ONE
+		var planted_pod := 0
+		for oy in [-28, 0, 28]:
+			for ox in [-28, 0, 28]:
+				if ox == 0 and oy == 0:
+					continue   # center open = the fort interior
+				var pbx: int = pcx + ox * F_ONE
+				var pby: int = pcy + oy * F_ONE
+				var pclear := true
+				for sb in sandbags:
+					if absi(sb["x"] - pbx) < 20 * F_ONE and absi(sb["y"] - pby) < 20 * F_ONE:
+						pclear = false
+				for rk in rocks:
+					if absi(rk["x"] - pbx) < 20 * F_ONE and absi(rk["y"] - pby) < 20 * F_ONE:
+						pclear = false
+				if pclear:
+					rocks.append({"x": pbx, "y": pby, "kind": 0})
+					planted_pod += 1
+		if planted_pod > 0:
+			events.append({"t": "supply_pod", "x": pcx, "y": pcy})
 	if wave >= 3 and rng.range_i(0, 2) == 0:
 		_spawn_courier()   # ~1-in-3 waves field a fleeing bounty runner
 	# Wave mutators give each wave an identity (and make the shop a counter-

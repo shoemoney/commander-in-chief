@@ -197,9 +197,20 @@ func test_c2_arena_mutation_cadence() -> void:
 			if sb["x"] == want_x and sb["y"] == want_y:
 				found = true
 		Runner.T.ok(found, "wave-3 layout bag %s sits at the exact derivation" % str(bo))
+	var craters := 0
+	var pods := 0
 	while sim.wave < 7:
 		sim._start_wave()
-	Runner.T.eq(sim.rocks.size(), rocks0 - 2, "waves 3 and 6 each cratered exactly one rock")
+		for pev in sim.events:
+			if pev.get("t", "") == "rock_crater":
+				craters += 1
+			if pev.get("t", "") == "supply_pod":
+				pods += 1
+	# Waves 3 and 6 crater (this run started at wave 3, so 1 more here), wave 5
+	# renews a supply pod, and the net rock count GROWS — the c4 renewal beats
+	# the c2-04 scar so the arena is never stripped bare.
+	Runner.T.ok(craters >= 1 and pods >= 1, "waves crater on cadence and the wave-5 pod renews cover")
+	Runner.T.ok(sim.rocks.size() > rocks0, "the arena's rock cover NET-GROWS across the pod cycle")
 	# Decorrelation: the wave-3 slot pick varies across seeds.
 	var picks := {}
 	for sd in [1, 2, 3, 4, 5]:
@@ -428,3 +439,33 @@ func test_c4_arena_layout_swap() -> void:
 				if ev["x"] == slot[0] * SimWorld.F_ONE and ev["y"] == slot[1] * SimWorld.F_ONE:
 					anchored = true
 	Runner.T.ok(anchored, "the layout drop is anchored to a fixed arena slot (footprint-stable)")
+
+
+func test_c4_supply_pod_renews_cover() -> void:
+	# c4 2v: every 5th endless wave a supply pod carves a 3x3 RIM of fresh solid
+	# rock (center OPEN = a micro-fort) at an arena slot, renewing cover so the
+	# scar rule can't strip the arena bare. Endless wave>=5 -> past the wave-2
+	# ENDLESS_GOLDEN wipe -> byte-identical.
+	var sim := SimWorld.new(11, 1, "endless")
+	while sim.wave < 4:
+		sim._start_wave()
+	var rocks0: int = sim.rocks.size()
+	sim.events.clear()
+	sim._start_wave()   # wave 5: the pod
+	var pod := {}
+	for ev in sim.events:
+		if ev.get("t", "") == "supply_pod":
+			pod = ev
+	Runner.T.ok(not pod.is_empty(), "the wave-5 supply pod fires")
+	Runner.T.ok(sim.rocks.size() > rocks0, "the pod adds fresh solid rock cover")
+	if not pod.is_empty():
+		var rim := 0
+		var center_open := true
+		for rk in sim.rocks:
+			if rk.get("kind", 0) == 0 and absi(rk["x"] - pod["x"]) <= 30 * SimWorld.F_ONE \
+					and absi(rk["y"] - pod["y"]) <= 30 * SimWorld.F_ONE:
+				rim += 1
+				if rk["x"] == pod["x"] and rk["y"] == pod["y"]:
+					center_open = false
+		Runner.T.ok(rim >= 6, "the pod carves a rock rim (%d cells)" % rim)
+		Runner.T.ok(center_open, "the rim's center is open (a micro-fort interior)")
