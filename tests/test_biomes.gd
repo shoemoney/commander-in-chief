@@ -36,6 +36,20 @@ func test_marsh_current_exempts_shells() -> void:
 	Runner.T.eq(g["x"], x0, "tank shells fly true over marsh water (heavy-ordnance rule)")
 
 
+func test_marsh_current_needs_open_water() -> void:
+	# Seg-2 but DRY under the arc (over the ford): no drift — the current is a
+	# property of the water, not the sector (judge r1 negative case).
+	var sim := SimWorld.new(31, 1)
+	sim.waters.append({"y": -2540 * Fixed.ONE, "ford_x": 300 * Fixed.ONE})
+	var g := {"x": 300 * Fixed.ONE, "y": -2500 * Fixed.ONE, "vx": 0, "vy": 0,
+		"z": 50 * Fixed.ONE, "zv": 0, "owner": 0, "shell": false, "hold": false}
+	sim.grenades.append(g)
+	var x0: int = g["x"]
+	for i in 10:
+		sim._step_grenades()
+	Runner.T.eq(g["x"], x0, "the ford is dry — a grenade arcing over it flies straight")
+
+
 func test_marsh_current_is_seg2_exclusive() -> void:
 	var sim := SimWorld.new(31, 1)
 	# Same water geometry one segment up (band 1, the torture band): no drift.
@@ -67,12 +81,16 @@ func test_vent_lanes_clear_hull() -> void:
 	# pass HULL_CLEARANCE (consumers test >= — the comparator contract).
 	Runner.T.ok(100 * Fixed.ONE - 2 * SimWorld.VENT_HURT_RADIUS >= SimWorld.HULL_CLEARANCE,
 		"the minimum 100px chunk pitch leaves a >= HULL_CLEARANCE lane between discs")
+	# Full 2D clearance (judge r1): center distance minus both 24px discs must
+	# clear the hull — squared-integer form, no sqrt: dx²+dy² >= (2r+HC)².
+	var min_c: int = (2 * SimWorld.VENT_HURT_RADIUS + SimWorld.HULL_CLEARANCE) / Fixed.ONE
 	for chunk in SimWorld.VENT_CHUNKS:
 		for i in chunk.size():
 			for j in range(i + 1, chunk.size()):
-				var dx: int = absi(chunk[i][0] - chunk[j][0]) * Fixed.ONE
-				Runner.T.ok(dx - 2 * SimWorld.VENT_HURT_RADIUS >= SimWorld.HULL_CLEARANCE,
-					"chunk pair (%d,%d) leaves a hull lane" % [i, j])
+				var dx: int = chunk[i][0] - chunk[j][0]
+				var dy: int = chunk[i][1] - chunk[j][1]
+				Runner.T.ok(dx * dx + dy * dy >= min_c * min_c,
+					"chunk pair (%d,%d) leaves a hull lane in FULL 2D distance" % [i, j])
 
 
 func test_vent_warn_beats_reaction_floor() -> void:
