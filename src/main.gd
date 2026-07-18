@@ -3204,7 +3204,7 @@ const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CL
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
 	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
 const GRENADE_PREVIEW_COL := Color(0.5, 0.85, 1.0)   # a2-15 LEG#5: FRIENDLY grenade preview is COOL (b>r), distinct from the warm/red enemy strike telegraph
-const STRIKE_UNDERLAY_SCALE := 2.1   # a3-07: the dark seat-underlay spans ~2.1x the kill radius (soft edge past the amber ring)
+const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-underlay — spans ~2.1x the kill radius (soft edge past the amber ring), 0.30a black
 # a3-06: muzzle heat caps. The ignition pop is warmed OFF white-hot (pop_lerp toward white
 # < 0.4) and every additive term is capped <= 0.66 so MG-spam sums lower and explosions keep
 # the white-hot bright-point monopoly. Pinned so the hierarchy can't regress silently.
@@ -3808,6 +3808,10 @@ func _draw_terrain() -> void:
 			elif hf % 23 == 0:
 				_spr(_TREE_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, f_col)
 			else:
+				# a3-08: a tiny dark contact dab grounds the fern CLUMP anchor — ferns got
+				# no _ground_shadow (only trees/litter did), so they floated on the lawn.
+				# One dab per anchor (satellites cluster on it), not per tuft.
+				_ground_shadow(Vector2(fx, fy_px + 2.0), 3.5, 0.22, Color(0.0, 0.04, 0.0))
 				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
 				# Context bias (GPT round-2): vegetation drifts hug dirt-patch
 				# cells (same 64px hash predicate as the ground painter) — the
@@ -6612,9 +6616,9 @@ func _draw_telegraphs() -> void:
 		# bright ground — the amber ring + amber timer disc were amber-on-amber with nothing
 		# grounding them (they washed out on the foundry floor, over water, in tracer clutter).
 		# Drawn FIRST, under the whole kill radius, so the incoming-strike zone reads on any terrain.
-		var uw := r * STRIKE_UNDERLAY_SCALE
+		var uw := r * STRIKE_UNDERLAY["scale"]
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(uw, uw) / 2.0, Vector2(uw, uw)),
-			false, Color(0.0, 0.0, 0.0, 0.30))
+			false, Color(0.0, 0.0, 0.0, STRIKE_UNDERLAY["alpha"]))
 		var col := Color(1.0, 0.9 - frac * 0.6, 0.2, 0.9)
 		if s["ticks"] <= 10 and (s["ticks"] / 3) % 2 == 0:
 			col = Color(1.0, 1.0, 1.0, 0.95)

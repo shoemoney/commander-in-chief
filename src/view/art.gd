@@ -383,7 +383,7 @@ const OLIVE_VEH := Color(0.76, 0.85, 0.52)
 const BOSS_VEH := Color(0.60, 0.63, 0.66)
 # a2-02 r2: one warm-hostile tint for every enemy vehicle (technical + spotters).
 const HOSTILE_VEH := Color(1.22, 0.87, 0.61)
-const FOLIAGE := Color(0.82, 1.0, 0.66)
+const FOLIAGE := Color(0.66, 0.92, 0.62)   # a3-08 AD#5/ENV#1: DEEPER + COOLER than the yellow-green grass (was 0.82,1.0,0.66) so ferns/trees separate as distinct masses, not lawn texture
 # a1-05: charred late-run foliage. The flat FOLIAGE green used to multiply back
 # into every fern/tree even after main.gd browned them (fern_col), so the foundry
 # re-greened. tint() now ramps the FOLIAGE keys toward ash by foliage_march (set

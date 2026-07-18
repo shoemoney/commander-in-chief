@@ -660,10 +660,12 @@ func test_a3_dirt_feather_rings() -> void:
 
 func test_a3_strike_underlay_spans_the_kill_radius() -> void:
 	var c := _consts()
-	var scale: float = c["STRIKE_UNDERLAY_SCALE"]
+	var su: Dictionary = c["STRIKE_UNDERLAY"]
 	# The soft dark seat must reach PAST the kill ring (the softspot fades, so it needs a
-	# little over 2x the radius to darken the full footprint out to the amber ring edge).
-	Runner.T.ok(scale > 2.0, "the strike dark-underlay spans past the kill radius (seats the footprint)")
+	# little over 2x the radius to darken the full footprint out to the amber ring edge)...
+	Runner.T.ok(su["scale"] > 2.0, "the strike dark-underlay spans past the kill radius (seats the footprint)")
+	# ...and be dark enough to seat on busy ground without blacking out the units in the zone.
+	Runner.T.ok(su["alpha"] >= 0.25 and su["alpha"] <= 0.35, "the underlay is dark-but-legible (0.25-0.35a)")
 
 
 # --- a3-06: the muzzle flare is capped BELOW the explosion's white-hot read — the
@@ -676,3 +678,14 @@ func test_a3_muzzle_heat_capped_below_explosions() -> void:
 	Runner.T.ok(mh["pop_lerp"] < 0.4, "the ignition pop is warmed OFF white-hot (lerp to white < 0.4)")
 	Runner.T.ok(mh["pop_a"] <= 0.66, "the pop alpha is capped (<= 0.66)")
 	Runner.T.ok(mh["fan_a"] <= 0.66 and mh["core_a"] <= 0.66, "fan + core additive alphas capped so MG-spam sums low")
+
+
+# --- a3-08: the undergrowth tint lifts OFF the grass hue (deeper + cooler) so ferns/trees
+# read as distinct masses, not lawn texture painted on the grass. ---
+
+func test_a3_foliage_lifts_off_grass_hue() -> void:
+	var ms = load("res://src/main.gd")
+	var fol: Color = Art.FOLIAGE
+	var g0: Color = ms._ground_stops("campaign")[0][0]   # bright jungle grass stop
+	Runner.T.ok(fol.r < g0.r, "foliage is DEEPER than the bright grass (lower r)")
+	Runner.T.ok((fol.g - fol.r) > (g0.g - g0.r) + 0.1, "foliage is COOLER / more green-forward than the yellow-green grass")
