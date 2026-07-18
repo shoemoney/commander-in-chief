@@ -56,7 +56,10 @@ const KNOWN := {
 	# kind-2 walls only stream past both torture windows, so it never perturbs a
 	# golden. EXCLUDED.
 	"rock": ["x", "y", "kind", "burn_ticks", "crack"],
-	"barrel": ["x", "y", "armed", "fuse_ticks"],
+	# strut (c4 2v) tags a barrel that DROPS a kind-2 wall when it blows (the drop
+	# x); derived-from-authored-position, EXCLUDED, and struts are authored seg>=2
+	# so they never enter a torture window.
+	"barrel": ["x", "y", "armed", "fuse_ticks", "strut"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
 		"core_cd", "core_open", "pv", "sweep_cd"],

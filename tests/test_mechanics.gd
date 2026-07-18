@@ -2557,3 +2557,57 @@ func test_c4_one_way_commitment() -> void:
 	s1.waters.append({"y": -1500 * SimWorld.F_ONE, "ford_x": 300 * SimWorld.F_ONE})
 	s1.tick_count = 0
 	Runner.T.ok(not s1._in_water(300 * SimWorld.F_ONE, -1460 * SimWorld.F_ONE), "the band-1 torture ford never collapses (goldens inert)")
+	# Integration: a live southbound (retreat) step is reverted at the ledge.
+	var simp := SimWorld.new(43, 1)
+	simp.camera_top = ly - 60 * SimWorld.F_ONE
+	var pl: Dictionary = simp.players[0]
+	pl["x"] = lx
+	pl["y"] = ly - 6 * SimWorld.F_ONE   # just NORTH of the ledge (already committed)
+	var south := SimInput.new()
+	south.move_y = 256   # push SOUTH (retreat)
+	for i in 24:
+		simp._step_players([south])
+	Runner.T.ok(pl["y"] <= ly, "a live southbound step is reverted at the ledge (no retreat past it)")
+	# Northbound (advance) still moves freely.
+	var north := SimInput.new()
+	north.move_y = -256
+	var ny0: int = pl["y"]
+	simp._step_players([north])
+	Runner.T.ok(pl["y"] < ny0, "a northbound step advances freely across the ledge line")
+
+
+func _count_kind2(sim: SimWorld) -> int:
+	var n := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2:
+			n += 1
+	return n
+
+
+func test_c4_player_triggered_geometry() -> void:
+	# c4 2v: (1) a STRUT barrel DROPS a 3-slab kind-2 wall onto the lane when it
+	# blows (enemies reroute via the shipped rock revert); (2) a CRACKED WALL slab
+	# is opened by an explosion (the c4-10 breach). Authored in the ruins band 3 ->
+	# torture-inert -> goldens byte-identical.
+	var sim := SimWorld.new(43, 1)
+	var k0: int = _count_kind2(sim)
+	sim.barrels.append({"x": 300 * SimWorld.F_ONE, "y": sim.camera_top + 100 * SimWorld.F_ONE,
+		"armed": true, "fuse_ticks": 0, "strut": 300 * SimWorld.F_ONE})
+	sim._detonate_barrel(sim.barrels[sim.barrels.size() - 1])
+	Runner.T.eq(_count_kind2(sim) - k0, 3, "the strut drops a 3-slab kind-2 wall onto the lane")
+	# CRACKED WALL: an explosion opens a kind-2 slab.
+	var sim2 := SimWorld.new(43, 1)
+	var cy: int = sim2.camera_top + 100 * SimWorld.F_ONE
+	sim2.rocks.append({"x": 300 * SimWorld.F_ONE, "y": cy, "kind": 2})
+	var k2: int = _count_kind2(sim2)
+	sim2._explode(300 * SimWorld.F_ONE, cy)
+	Runner.T.eq(_count_kind2(sim2), k2 - 1, "a barrel blast opens the cracked wall (a fresh flank)")
+	# Authored struts stream in the ruins band.
+	var sim3 := SimWorld.new(43, 1)
+	sim3.camera_top = -10000 * SimWorld.F_ONE
+	sim3._step_camera()
+	var struts := 0
+	for bl in sim3.barrels:
+		if bl.get("strut", 0) != 0:
+			struts += 1
+	Runner.T.ok(struts >= 1, "authored struts stream past the golden reach (%d)" % struts)

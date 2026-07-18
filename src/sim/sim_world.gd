@@ -2025,6 +2025,17 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 	## then blasts. Barrel kills mint NO coin — a self-detonating farm was free money.
 	bl["armed"] = false
 	events.append({"t": "barrel_blast", "x": bl["x"], "y": bl["y"]})
+	# c4 2v PLAYER-TRIGGERED GEOMETRY: a STRUT barrel DROPS a slag-pour/log wall
+	# (a 3-slab kind-2 line) onto the adjacent lane when it blows, which enemies
+	# then reroute around via the shipped rock move-revert — the player reshapes
+	# the battlefield, not only clears cover. strut stores the drop x (0 = a plain
+	# barrel); struts are authored seg>=2 so goldens stay byte-identical.
+	if bl.get("strut", 0) != 0:
+		var sdx: int = bl["strut"]
+		var sdy: int = bl["y"] - 30 * F_ONE
+		for sds in 3:
+			rocks.append({"x": sdx + (sds - 1) * 80 * F_ONE, "y": sdy, "kind": 2})
+		events.append({"t": "cover_crack", "x": sdx, "y": sdy})
 	for p in players:
 		if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
 				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
@@ -3379,6 +3390,18 @@ func _step_camera() -> void:
 					var ry5: int = rd_top - (dv * 68) * F_ONE
 					sandbags.append({"x": SCREEN_CX, "y": ry5, "world": 1})   # permeable central divider
 					rocks.append({"x": 470 * F_ONE, "y": ry5, "kind": 2})     # covered right-lane wall
+				# c4 2v PLAYER-TRIGGERED GEOMETRY: a CRACKED WALL (kind-2 slab + an armed
+				# barrel — shoot the barrel and the c4-10 _explode wall-breach opens the
+				# LEFT/exposed lane) and a STRUT (a barrel that DROPS a slag-pour wall
+				# onto the exposed lane when shot, which enemies reroute around). Ruins
+				# band 3 = torture-inert -> goldens byte-identical.
+				var pg_y: int = rd_top - 34 * F_ONE
+				rocks.append({"x": 130 * F_ONE, "y": pg_y, "kind": 2})
+				if not _near_stream_bunker(130 * F_ONE, pg_y + 18 * F_ONE):
+					barrels.append({"x": 130 * F_ONE, "y": pg_y + 18 * F_ONE, "armed": true, "fuse_ticks": 0})
+				if not _near_stream_bunker(210 * F_ONE, pg_y + 140 * F_ONE):
+					barrels.append({"x": 210 * F_ONE, "y": pg_y + 140 * F_ONE,
+						"armed": true, "fuse_ticks": 0, "strut": 210 * F_ONE})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
