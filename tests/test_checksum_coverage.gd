@@ -33,7 +33,7 @@ const KNOWN := {
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	"mine": ["x", "y", "armed", "friendly"],
-	"sandbag": ["x", "y"],
+	"sandbag": ["x", "y", "world"],
 	"rock": ["x", "y"],
 	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],

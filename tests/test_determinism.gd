@@ -143,13 +143,20 @@ const SEED := 0xDEADBEEF
 ## half); torture rocks got bigger hitboxes -> campaign moves. ENDLESS moves too: the six
 ## endless quadrant rocks were PROMOTED from view dressing to real sim blockers (KIMK:
 ## art that reads as cover must BE cover).
+## RE-RECORDED (2026-07-17, cycle 1 batch 2 — authored hazard chunks + mud banks): the mine
+## and barrel stream loops now place AUTHORED chunk tables via a pure integer mix of
+## (slot, run seed) — the loops' rng draws are GONE (removing draws shifts the shared
+## sequence for water/frogmen after them), the torture minefield is a different (authored)
+## field, and mud banks flanking the torture river halve enemy approach speed there.
+## ENDLESS untouched (no camera streaming). Same batch, inert: trench parapets + foundry
+## content (gate 5, unreached), water variation (band 1 hits neither branch).
 const GOLDEN: Array[int] = [
-	8056145353370070057,
-	3404120838886721138,
-	5853600409026789734,
-	2403764188167499848,
-	1322780113437086051,
-	3121864703940889290,
+	1009666002274062129,
+	4382870054108880642,
+	2443963026911858617,
+	5566398431406631986,
+	3844288921057376203,
+	1880544706798593943,
 ]
 
 

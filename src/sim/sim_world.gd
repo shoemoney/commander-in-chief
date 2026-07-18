@@ -244,6 +244,27 @@ const SANDBAG_HALF_H := 5 * F_ONE
 # each between-gate stretch bites one flank down to a 368px lane. Pure
 # function of y — no state, no rng, nothing hashed; segments 0-1 stay open
 # (the calm opening act + the torture window = inert by construction).
+# Authored hazard chunks (4v: flat global spacings made every minefield the
+# same). Chunk pitch keeps the old constants; the BODY is an authored table,
+# picked by a pure integer mix of (slot, run seed) — ZERO rng draws, so
+# per-seed variety survives and the shared stream sequence has NO draws left
+# to shift. [dx, dy] px offsets from the chunk anchor.
+const MINE_CHUNKS := [
+	[], [],
+	[[0, 0]],
+	[[-120, 40], [-60, 20], [0, 0], [60, 20], [120, 40]],
+	[[-135, 0], [-90, 20], [-45, 40], [45, 40], [90, 20], [135, 0]],
+	[[-90, 0], [-30, 0], [30, 0], [90, 0], [-60, 60], [0, 60], [60, 60], [120, 60]],
+	[[0, 0], [0, 40], [40, 40], [80, 40], [80, 0], [80, -40]],
+	[[-50, 0], [10, 30], [70, -10]],
+]
+const BARREL_CHUNKS := [
+	[],
+	[[0, 0], [18, 0]],
+	[[0, 0], [18, 0], [90, 0], [108, 0], [180, 0], [198, 0]],
+	[[-60, 0], [-20, 0], [20, 0], [60, 0]],
+]
+const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
 const CHOKE_START_SEG := 2
 const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
@@ -316,6 +337,7 @@ var mines: Array[Dictionary] = []
 var sandbags: Array[Dictionary] = []   # player-authored cover (wheel-only; dead bags are erased on the spot)
 var rocks: Array[Dictionary] = []      # streamed natural hard cover {x,y} — blocks moves+bullets, grenades arc over
 var _next_rock_y: int = 0
+var _world_seed: int = 0   # stored run seed for the authored-chunk mixes (derived, unhashed)
 var barrels: Array[Dictionary] = []
 var observer: Dictionary = {}
 var war_chest: int = 0
@@ -395,6 +417,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_mine_y = -(700 * F_ONE)
 	_next_barrel_y = -(900 * F_ONE)
 	_next_rock_y = -(700 * F_ONE)
+	_world_seed = seed_value
 	for i in player_count:
 		players.append({
 			"idx": i,
@@ -588,7 +611,7 @@ func _step_players(inputs: Array) -> void:
 			var spd := PLAYER_SPEED
 			if p["boost_ticks"] > 0:
 				spd = (PLAYER_SPEED * 3) / 2
-			if wading or _in_fork_wire(p["x"], p["y"]):
+			if wading or _in_fork_wire(p["x"], p["y"]) or _in_mud(p["x"], p["y"]):
 				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
@@ -723,6 +746,14 @@ func _step_players(inputs: Array) -> void:
 		# an unaffordable crate stays on the ground.
 		if p["alive"]:
 			_collect_pickups(p, i)
+
+
+static func _mix(a: int, b: int) -> int:
+	## Integer hash mix for authored-chunk picks — stream-loop randomness with
+	## ZERO rng draws (the shared sequence stays untouched by construction).
+	var v: int = (a * 2654435761) ^ (b * 40503)
+	v = (v ^ (v >> 13)) * 1274126177
+	return (v ^ (v >> 16)) & 0x7FFFFFFF
 
 
 func _choke_bounds(y: int) -> Array:
@@ -1048,12 +1079,16 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return
 	var cost: int = _supply_cost(kind)
-	if kind == 4 and (sandbags.size() >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
+	var player_bags := 0
+	for pb in sandbags:
+		if not pb.has("world"):
+			player_bags += 1
+	if kind == 4 and (player_bags >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
 		# Sandbag-specific denials: field cap reached, or buying from a tank
 		# (no hands on the deck to dig in). Deny is loud AND says why —
 		# "NEED COINS" at a full field with 400 in the chest was a HUD lie.
 		events.append({"t": "deny", "x": p["x"], "y": p["y"],
-			"why": "cap" if sandbags.size() >= SANDBAG_FIELD_CAP else "tank"})
+			"why": "cap" if player_bags >= SANDBAG_FIELD_CAP else "tank"})
 		return
 	if war_chest < cost:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "coins"})
@@ -1697,7 +1732,7 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 			if be["alive"] and _dist_lte(e["x"], e["y"], be["x"], be["y"], BROADCAST_AURA_RADIUS):
 				spd = (spd * 5) / 4
 				break
-	if _in_water(e["x"], e["y"]) or _in_fork_wire(e["x"], e["y"]):
+	if _in_water(e["x"], e["y"]) or _in_fork_wire(e["x"], e["y"]) or _in_mud(e["x"], e["y"]):
 		spd = spd / 2
 	var pvx: int = e["x"]
 	var pvy: int = e["y"]
@@ -2464,6 +2499,17 @@ func _in_fork_wire(x: int, y: int) -> bool:
 	return false
 
 
+func _in_mud(_x: int, y: int) -> bool:
+	## Mud banks flank every river (2v): full-width MUD_BANK_H strips above
+	## and below each band — ford approaches included (honest risk beat).
+	## Half speed for boots; rolls stay legal; armor doesn't care.
+	for w in waters:
+		if (y >= w["y"] - MUD_BANK_H and y < w["y"]) \
+				or (y > w["y"] + WATER_H and y <= w["y"] + WATER_H + MUD_BANK_H):
+			return true
+	return false
+
+
 func _in_water(x: int, y: int) -> bool:
 	## Water/ford variation (8v): deeper bands earn a SECOND ford (every 3rd
 	## band) and a dry mid-river ISLAND with wet lips (every 4th) — all pure
@@ -2517,17 +2563,25 @@ func _step_camera() -> void:
 		_next_bunker_y -= 500 * F_ONE
 	# Stream landmines between the arenas — deterministic x, off the gate rows.
 	while _next_mine_y > horizon:
-		if absi(_next_mine_y / MINE_SPACING) % 2 == 0 and not _in_choke_apron(_next_mine_y):
-			mines.append({"x": rng.range_i(70, 570) * F_ONE, "y": _next_mine_y, "armed": true})
+		var m_slot: int = absi(_next_mine_y / MINE_SPACING)
+		if m_slot % 2 == 0 and not _in_choke_apron(_next_mine_y):
+			var mh2 := _mix(m_slot, _world_seed)
+			var m_chunk: Array = MINE_CHUNKS[mh2 % MINE_CHUNKS.size()]
+			var m_ax: int = (150 + (mh2 >> 8) % 340) * F_ONE
+			for od in m_chunk:
+				mines.append({"x": m_ax + od[0] * F_ONE, "y": _next_mine_y + od[1] * F_ONE, "armed": true})
 		_next_mine_y -= MINE_SPACING
 	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
 	# grenade chains through (and that catches you if you stand too close).
 	while _next_barrel_y > camera_top - 2 * VIEW_H:
-		if absi(_next_barrel_y / BARREL_SPACING) % 2 == 1 and not _in_choke_apron(_next_barrel_y):
-			var bx := rng.range_i(60, 520) * F_ONE
-			for c in rng.range_i(2, 3):
-				barrels.append({"x": bx + c * BARREL_CLUSTER_GAP,
-					"y": _next_barrel_y + rng.range_i(-8, 8) * F_ONE, "armed": true, "fuse_ticks": 0})
+		var b_slot: int = absi(_next_barrel_y / BARREL_SPACING)
+		if b_slot % 2 == 1 and not _in_choke_apron(_next_barrel_y):
+			var bh2 := _mix(b_slot + 7919, _world_seed)
+			var b_chunk: Array = BARREL_CHUNKS[bh2 % BARREL_CHUNKS.size()]
+			var b_ax: int = (120 + (bh2 >> 8) % 400) * F_ONE
+			for od in b_chunk:
+				barrels.append({"x": b_ax + od[0] * F_ONE, "y": _next_barrel_y + od[1] * F_ONE,
+					"armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
 	while _next_rock_y > horizon:
 		var r_idx: int = absi(_next_rock_y / ROCK_SPACING)
@@ -2545,6 +2599,12 @@ func _step_camera() -> void:
 			# The end of the road: the Foundry. Nothing streams past it.
 			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
 				"boss": {}, "final": true})
+			# Trench parapets (2v elevation, trimmed of the z-axis): two dug-in
+			# world-bag columns guard the Foundry approach — pure arithmetic,
+			# exempt from the player buy cap via the "world" flag.
+			for tcx in [220, 420]:
+				for ti2 in 5:
+					sandbags.append({"x": tcx * F_ONE, "y": _next_gate_y + (280 + ti2 * 14) * F_ONE, "world": 1})
 			# Foundry phase terrain (5v): three live barrel clusters seed the
 			# finale floor — each colossus phase-shift COOKS the nearest one
 			# (the arena itself escalates). Fixed coords, no rng; the torture

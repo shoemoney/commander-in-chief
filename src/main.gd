@@ -3163,6 +3163,19 @@ func _draw_terrain() -> void:
 					Vector2(wall_x + 20.0 + float(rh4 % 200), band_top + 10.0 + float((rh4 / 7) % 220)),
 					float(rh4 % 628) / 100.0, 2.0, Color(0.5, 0.5, 0.48))
 			break
+	# Ridge mounds (2v elevation, view-only): 2-tone dirt swells break the
+	# tabletop-flat read — light crest, dark south edge.
+	if sim.mode == "campaign":
+		var rg_base := int(absi(sim.camera_top) / (64 * Fixed.ONE))
+		for rgy in 7:
+			for rgx in 10:
+				if Art.cell_hash(rgx * 23, rg_base + rgy) % 19 != 0:
+					continue
+				var rpos := Vector2(rgx * 64.0 + 32.0, float(rgy) * 64.0 - fposmod(float(sim.camera_top) * PX, 64.0))
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(rpos - Vector2(24, 10), Vector2(48, 20)),
+					false, Color(0.62, 0.58, 0.42, 0.35))
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(rpos - Vector2(20, 2), Vector2(40, 12)),
+					false, Color(0.18, 0.14, 0.08, 0.30))
 	# Authored setpiece stamps: nameable places every ~800px of corridor.
 	if sim.mode == "campaign":
 		var spb0 := absi(sim.camera_top) / (400 * Fixed.ONE)
@@ -3547,6 +3560,11 @@ func _draw_water() -> void:
 		# Banks (drawn over the shader's shore edges).
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, bank_col)
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, bank_col)
+		# Mud banks (2v second terrain): brown half-speed strips flanking the
+		# band — drawn under the sand lips so the slow zone reads as terrain.
+		var mud_c := Color(0.42, 0.32, 0.2, 0.75).lerp(Color(0.3, 0.25, 0.2, 0.75), soot)
+		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy - 6 - 40, 640, 40), true, mud_c)
+		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy + wh + 2, 640, 40), true, mud_c)
 		# Broken banks (5v: the ruler-straight sand edge was the tell): ~14
 		# hash-notches per bank bite into the strip, skipping the ford span.
 		var nseed := Art.cell_hash(int(w["y"] / 4096) * 29, 3)
