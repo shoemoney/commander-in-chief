@@ -2592,7 +2592,7 @@ func test_c4_player_triggered_geometry() -> void:
 	var sim := SimWorld.new(43, 1)
 	var k0: int = _count_kind2(sim)
 	sim.barrels.append({"x": 300 * SimWorld.F_ONE, "y": sim.camera_top + 100 * SimWorld.F_ONE,
-		"armed": true, "fuse_ticks": 0, "strut": 300 * SimWorld.F_ONE})
+		"armed": true, "fuse_ticks": 0, "strut": true})
 	sim._detonate_barrel(sim.barrels[sim.barrels.size() - 1])
 	Runner.T.eq(_count_kind2(sim) - k0, 3, "the strut drops a 3-slab kind-2 wall onto the lane")
 	# CRACKED WALL: an explosion opens a kind-2 slab.
@@ -2608,6 +2608,40 @@ func test_c4_player_triggered_geometry() -> void:
 	sim3._step_camera()
 	var struts := 0
 	for bl in sim3.barrels:
-		if bl.get("strut", 0) != 0:
+		if bl.get("strut", false):
 			struts += 1
 	Runner.T.ok(struts >= 1, "authored struts stream past the golden reach (%d)" % struts)
+
+
+func test_c4_encounter_midpoint_transform() -> void:
+	# c4 2v: (1) NON-BOSS — a keyed barricade is SOLID until the advance pushes past
+	# the encounter MIDPOINT depth, then OPENS (geometry transforms mid-encounter).
+	# (2) BOSS — each colossus phase rise SWEEPS 3 telegraphed mid-arena strikes,
+	# herding to the ARENA_MARGIN alcoves. Campaign seg>=2 / colossus unreachable
+	# -> goldens byte-identical.
+	var sim := SimWorld.new(43, 1)
+	var band := 2
+	var bh: int = SimWorld._mix(band, 929)
+	var blk_x: int = (SimWorld.WORLD_LEFT + 100 * SimWorld.F_ONE) if (bh & 1 == 0) else (SimWorld.WORLD_RIGHT - 100 * SimWorld.F_ONE)
+	var bypass_x: int = (SimWorld.WORLD_RIGHT - 100 * SimWorld.F_ONE) if (bh & 1 == 0) else (SimWorld.WORLD_LEFT + 100 * SimWorld.F_ONE)
+	var bar_y: int = -(band * SimWorld.GATE_SPACING + 430 * SimWorld.F_ONE)
+	sim.camera_top = -(band * SimWorld.GATE_SPACING + 100 * SimWorld.F_ONE)   # before the midpoint
+	Runner.T.ok(sim._barricade_solid(blk_x, bar_y), "the barricade is solid before the encounter midpoint")
+	Runner.T.ok(not sim._barricade_solid(bypass_x, bar_y), "the opposite flank is the open bypass")
+	sim.camera_top = -(band * SimWorld.GATE_SPACING + 300 * SimWorld.F_ONE)   # past the midpoint
+	Runner.T.ok(not sim._barricade_solid(blk_x, bar_y), "the barricade OPENS once you push past the midpoint")
+	Runner.T.ok(not sim._barricade_solid(blk_x, -430 * SimWorld.F_ONE), "band 0 has no barricade (goldens inert)")
+	var en := SimWorld.new(43, 1, "endless")
+	Runner.T.ok(not en._barricade_solid(blk_x, bar_y), "endless has no barricade")
+	# BOSS: a colossus phase rise sweeps 3 mid-arena strikes.
+	var simc := SimWorld.new(7, 1)
+	var gy: int = simc.camera_top - 3 * SimWorld.GATE_SPACING
+	simc.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP / 2, "x": SimWorld.SCREEN_CX, "y": gy,
+		"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999, "core_cd": 999, "core_open": 0, "pv": 1, "sweep_cd": 999}
+	simc.last_stand = true
+	simc._step_colossus()   # phase 1 -> 2 rise fires the sweep
+	var mid_strikes := 0
+	for stk in simc.strikes:
+		if stk["x"] >= SimWorld.ARENA_MARGIN and stk["x"] <= SimWorld.SCREEN_W_FP - SimWorld.ARENA_MARGIN:
+			mid_strikes += 1
+	Runner.T.ok(mid_strikes >= 3, "a colossus phase rise sweeps the mid-arena (%d strikes)" % mid_strikes)

@@ -109,9 +109,9 @@ func test_c3_lane_sweep_punishes_parking() -> void:
 	# telegraphed lane-sweep mortar; camping center (the honest fight) does not.
 	var sim := SimWorld.new(7, 1)
 	var gy := sim.camera_top - 3 * SimWorld.GATE_SPACING
-	sim.colossus = {"alive": true, "hp": 40, "x": SimWorld.SCREEN_CX, "y": gy,
+	sim.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP, "x": SimWorld.SCREEN_CX, "y": gy,
 		"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999,
-		"core_cd": 999, "core_open": 0, "pv": 1, "sweep_cd": 1}
+		"core_cd": 999, "core_open": 0, "pv": 1, "sweep_cd": 1}   # full HP -> phase 1 -> no c4 rise sweep
 	sim.last_stand = true
 	var p: Dictionary = sim.players[0]
 	p["x"] = 16 * SimWorld.F_ONE   # parked at the LEFT wall (inside the margin lane)
@@ -126,7 +126,7 @@ func test_c3_lane_sweep_punishes_parking() -> void:
 			"the sweep only hits the side lanes")
 	# Center camping draws NO sweep strike (the honest fight; retreat stays fair).
 	var sim2 := SimWorld.new(7, 1)
-	sim2.colossus = {"alive": true, "hp": 40, "x": SimWorld.SCREEN_CX, "y": gy,
+	sim2.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP, "x": SimWorld.SCREEN_CX, "y": gy,
 		"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999,
 		"core_cd": 999, "core_open": 0, "pv": 1, "sweep_cd": 1}
 	sim2.last_stand = true

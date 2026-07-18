@@ -830,6 +830,10 @@ func _step_players(inputs: Array) -> void:
 		# c4 2v: the one-way ledge blocks a RETREAT step (southbound over the line).
 		if _crosses_ledge_south(p["x"], p["y"], rpy):
 			p["y"] = rpy
+		# c4 2v: a keyed-encounter barricade is solid until you push past its midpoint.
+		if _barricade_solid(p["x"], p["y"]) and not _barricade_solid(rpx, rpy):
+			p["x"] = rpx
+			p["y"] = rpy
 		_clamp_actor(p)
 		# c3 2v: stepping into deep-river MUD (band>=2) proactively SURFACES any
 		# lurking frogman within MUD_SURFACE_RADIUS — reusing the frogman surface
@@ -1033,6 +1037,31 @@ func _lane_blocked(x: int, y: int) -> bool:
 	if lh & 1 == 0:
 		return x <= WORLD_LEFT + 200 * F_ONE
 	return x >= WORLD_RIGHT - 200 * F_ONE
+
+
+func _barricade_solid(x: int, y: int) -> bool:
+	## c4 2v ENCOUNTER MIDPOINT TRANSFORM (non-boss): a keyed-encounter barricade
+	## (a ~200px flank span at band off 400..460) is SOLID until the advance pushes
+	## past the encounter midpoint (camera_top past off 250), then OPENS — the
+	## geometry transforms mid-encounter. The opposite flank is the guaranteed
+	## bypass (no softlock). Pure function of camera_top + position, ZERO state;
+	## campaign seg>=2 only -> torture/endless never see it -> goldens inert.
+	if mode != "campaign":
+		return false
+	var band: int = absi(y) / GATE_SPACING
+	if band < CHOKE_START_SEG:
+		return false
+	var off: int = absi(y) % GATE_SPACING
+	if off < 400 * F_ONE or off > 460 * F_ONE:
+		return false
+	var bh := _mix(band, 929)
+	if bh & 1 == 0:
+		if x > WORLD_LEFT + 240 * F_ONE:
+			return false   # bypass flank (right) is open
+	else:
+		if x < WORLD_RIGHT - 240 * F_ONE:
+			return false   # bypass flank (left) is open
+	return absi(camera_top) < band * GATE_SPACING + 250 * F_ONE   # solid until past the midpoint
 
 
 func _crosses_ledge_south(nx: int, ny: int, oy: int) -> bool:
@@ -2030,8 +2059,8 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 	# then reroute around via the shipped rock move-revert — the player reshapes
 	# the battlefield, not only clears cover. strut stores the drop x (0 = a plain
 	# barrel); struts are authored seg>=2 so goldens stay byte-identical.
-	if bl.get("strut", 0) != 0:
-		var sdx: int = bl["strut"]
+	if bl.get("strut", false):
+		var sdx: int = bl["x"]   # drop the wall at the strut's own x (no stored value)
 		var sdy: int = bl["y"] - 30 * F_ONE
 		for sds in 3:
 			rocks.append({"x": sdx + (sds - 1) * 80 * F_ONE, "y": sdy, "kind": 2})
@@ -3401,7 +3430,7 @@ func _step_camera() -> void:
 					barrels.append({"x": 130 * F_ONE, "y": pg_y + 18 * F_ONE, "armed": true, "fuse_ticks": 0})
 				if not _near_stream_bunker(210 * F_ONE, pg_y + 140 * F_ONE):
 					barrels.append({"x": 210 * F_ONE, "y": pg_y + 140 * F_ONE,
-						"armed": true, "fuse_ticks": 0, "strut": 210 * F_ONE})
+						"armed": true, "fuse_ticks": 0, "strut": true})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
@@ -4271,6 +4300,12 @@ func _step_colossus() -> void:
 				# Dedicated collapse juice (not the barrel boom): a structural column
 				# drops — the view answers with dust + debris + a heavier shake.
 				events.append({"t": "parapet_collapse", "x": px, "y": py})
+			# c4 2v: each phase rise also SWEEPS the mid-arena — 3 telegraphed strikes
+			# across the center herd the player toward the two ARENA_MARGIN wall lanes
+			# (the ready-made safe alcoves). Reuses _add_strike (45t warn). Colossus is
+			# torture-unreachable -> free.
+			for swi in 3:
+				_add_strike(SCREEN_CX + (swi - 1) * 140 * F_ONE, colossus["y"] + 60 * F_ONE)
 		colossus["pv"] = cph
 	# Engage when the final gate scrolls into view.
 	if colossus.is_empty():
