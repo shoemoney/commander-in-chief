@@ -3557,7 +3557,7 @@ func _draw_foundry_arena() -> void:
 		# Molten CHANNELS (judge r2): glowing feed-lines link the three pools —
 		# the floor reads as an active pour circuit, not scattered puddles.
 		var pool_pts: Array[Vector2] = []
-		for fbx in [98, 304, 510]:
+		for fbx in [100, 296, 500]:   # ring the sim's phase-barrel clusters (c2-10 margin-safe coords)
 			pool_pts.append(_to_screen(fbx * Fixed.ONE, g["y"] + 144 * Fixed.ONE))
 		for ci in pool_pts.size() - 1:
 			var a2 := pool_pts[ci]
@@ -3643,9 +3643,11 @@ func _draw_rocks() -> void:
 					draw_rect(Rect2(pos + Vector2(-40.0 + float(bk2) * 26.0, -10.0), Vector2(2.0, 20.0)),
 						Color(0.18, 0.16, 0.15))
 			3:
-				# Hero wreck: the focal 2x silhouette anchoring each hardpoint.
-				_ground_shadow(pos + Vector2(0, 6), 22.0, 0.5)
-				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.2, Color(0.62, 0.56, 0.5))
+				# Hero wreck: the focal ~2x silhouette anchoring each hardpoint.
+				# Scale 1.7 reads clearly 1.5-2x a classic rock (judge r1) while
+				# still matching the 32x24 collision (art==collision pin).
+				_ground_shadow(pos + Vector2(0, 8), 26.0, 0.5)
+				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5))
 			_:
 				_ground_shadow(pos, 12.0, 0.42)
 				var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too

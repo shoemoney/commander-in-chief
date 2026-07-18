@@ -1348,3 +1348,52 @@ func test_c2_wall_cluster_threads_a_lane() -> void:
 					continue
 				Runner.T.ok(absi(hr["x"] - rk["x"]) > 100 * SimWorld.F_ONE,
 					"seed %d: wall slab and hero wreck sit on opposite flanks" % sd)
+
+
+func test_c2_grass_gates_fire_acquisition() -> void:
+	# Integration (c2 3v, judge r1): an elite at standoff with fire_cd==0 does
+	# NOT wind up when the target stands in tall grass — grass gates acquisition
+	# exactly like smoke, end to end through the real stepper.
+	var sim := SimWorld.new(43, 1)
+	var p: Dictionary = sim.players[0]
+	p["smoke_ticks"] = 0
+	var e := {"x": p["x"] + 80 * SimWorld.F_ONE, "y": p["y"], "alive": true,
+		"elite": true, "kind": "elite", "hp": 2, "fire_cd": 0, "windup": 0,
+		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0}
+	var dx: int = p["x"] - e["x"]
+	var dy: int = p["y"] - e["y"]
+	var dlen: int = Fixed.length(dx, dy)   # 80px < ELITE_STANDOFF(120): fires, not advances
+	# In grass: no wind-up.
+	sim.rocks.append({"x": p["x"], "y": p["y"], "kind": 1})
+	sim._step_elite(e, p, dx, dy, dlen)
+	Runner.T.eq(e["windup"], 0, "elite does NOT wind up onto a grass-concealed target")
+	# Clear the grass: the same elite acquires normally.
+	sim.rocks.clear()
+	e["fire_cd"] = 0
+	sim._step_elite(e, p, dx, dy, dlen)
+	Runner.T.eq(e["windup"], SimWorld.ELITE_WINDUP_TICKS, "elite winds up on an exposed target")
+
+
+func test_c2_colossus_escape_margin() -> void:
+	# Foundry escape corridor (c2 3v): every streamed hazard in the colossus
+	# approach (seg 4+) sits ARENA_MARGIN off both walls — no wall-hug debris to
+	# corner a player against the crush-crawler. 5-seed sweep to _world_ended.
+	var lo: int = SimWorld.ARENA_MARGIN
+	var hi: int = SimWorld.SCREEN_W_FP - SimWorld.ARENA_MARGIN
+	for sd in [3, 11, 29, 43, 97]:
+		var sim := SimWorld.new(sd, 1)
+		sim.camera_top = -10000 * SimWorld.F_ONE
+		sim._step_camera()
+		Runner.T.ok(sim._world_ended, "seed %d streamed to the Foundry" % sd)
+		var checked := 0
+		for arr: Array in [sim.mines, sim.barrels, sim.rocks]:
+			for d: Dictionary in arr:
+				if absi(d["y"]) / SimWorld.GATE_SPACING >= SimWorld.COLOSSUS_ARENA_SEG:
+					checked += 1
+					Runner.T.ok(d["x"] >= lo and d["x"] <= hi,
+						"seed %d: approach hazard at x=%d clears the escape margin" % [sd, d["x"] / SimWorld.F_ONE])
+		Runner.T.ok(checked > 0, "seed %d: the approach actually streamed hazards to check" % sd)
+	# Margin derivation: 96 >= the asked 80 AND > 2*HULL_CLEARANCE so a hull
+	# always slips the corridor.
+	Runner.T.ok(SimWorld.ARENA_MARGIN >= 80 * SimWorld.F_ONE, "margin meets the asked 80px")
+	Runner.T.ok(SimWorld.ARENA_MARGIN > 2 * SimWorld.HULL_CLEARANCE, "margin passes a hull with slack")

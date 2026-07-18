@@ -340,6 +340,14 @@ const ROCK_HALF_H := 12 * F_ONE
 #   3 hero wreck    32x24  blocks all, drawn 2x  (a focal silhouette)
 const ROCK_KIND_EXT := [[16, 12, 1], [28, 20, 0], [40, 10, 1], [32, 24, 1]]
 const COVER_VARIETY_SEG := 2
+# Foundry escape corridor (c2 3v): the crush-radius-26 colossus corners a
+# player against wall-hugging debris. Guarantee a debris-free margin at BOTH
+# walls of the final approach (seg >= COLOSSUS_ARENA_SEG). 96 >= the asked 80
+# and > 2*HULL_CLEARANCE (88), so a hull always slips the margin (comparator
+# contract). Pure x-clamp on streamed hazards; seg 4+ is far past the torture
+# reach, so both goldens are inert.
+const ARENA_MARGIN := 96 * F_ONE
+const COLOSSUS_ARENA_SEG := 4
 const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST, SHOP_SANDBAG_COST]
 # Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
 # it advances DOWN the map at the players. Armor: grenades only. Three
@@ -934,6 +942,16 @@ func _in_fork_apron(y: int) -> bool:
 		return false
 	var off: int = a % GATE_SPACING
 	return off >= 540 * F_ONE and off <= 700 * F_ONE
+
+
+func _arena_margin_x(x: int, y: int) -> int:
+	## Foundry escape corridor (c2 3v): in the colossus approach (seg >=
+	## COLOSSUS_ARENA_SEG) keep streamed hazards ARENA_MARGIN off both walls so
+	## the crush-crawler can never corner a player against wall-hugging debris.
+	## Golden-inert (seg 4+ is far past the torture reach); identity elsewhere.
+	if absi(y) / GATE_SPACING >= COLOSSUS_ARENA_SEG:
+		return clampi(x, ARENA_MARGIN, SCREEN_W_FP - ARENA_MARGIN)
+	return x
 
 
 func _near_stream_bunker(x: int, y: int) -> bool:
@@ -2845,8 +2863,8 @@ func _step_camera() -> void:
 			for od in m_chunk:
 				# Bunker exclusion (c2 4v): per-offset, so a chunk CAN straddle
 				# the ring — only the offending mines vanish, not the pattern.
-				var m_px: int = m_ax + od[0] * F_ONE
 				var m_py: int = _next_mine_y + od[1] * F_ONE
+				var m_px: int = _arena_margin_x(m_ax + od[0] * F_ONE, m_py)
 				if not _near_stream_bunker(m_px, m_py):
 					mines.append({"x": m_px, "y": m_py, "armed": true})
 		_next_mine_y -= MINE_SPACING
@@ -2864,8 +2882,8 @@ func _step_camera() -> void:
 			var b_ax: int = (120 + (bh2 >> 8) % 400) * F_ONE
 			for od in b_chunk:
 				# Same per-offset bunker exclusion as the mine stream.
-				var b_px: int = b_ax + od[0] * F_ONE
 				var b_py: int = _next_barrel_y + od[1] * F_ONE
+				var b_px: int = _arena_margin_x(b_ax + od[0] * F_ONE, b_py)
 				if not _near_stream_bunker(b_px, b_py):
 					barrels.append({"x": b_px, "y": b_py, "armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
@@ -2903,8 +2921,10 @@ func _step_camera() -> void:
 			if absi(_next_rock_y) / GATE_SPACING >= COVER_VARIETY_SEG:
 				var rkw: int = _mix(r_idx, _world_seed) % 6
 				r_kind = 0 if rkw < 3 else (1 if rkw < 5 else 2)
-			rocks.append({"x": rx, "y": _next_rock_y, "kind": r_kind})
-			rocks.append({"x": rx + 22 * F_ONE, "y": _next_rock_y + 10 * F_ONE, "kind": r_kind})
+			# Colossus escape margin (c2 3v): keep approach debris off the walls.
+			rocks.append({"x": _arena_margin_x(rx, _next_rock_y), "y": _next_rock_y, "kind": r_kind})
+			rocks.append({"x": _arena_margin_x(rx + 22 * F_ONE, _next_rock_y + 10 * F_ONE),
+				"y": _next_rock_y + 10 * F_ONE, "kind": r_kind})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
@@ -2922,10 +2942,14 @@ func _step_camera() -> void:
 			# finale floor — each colossus phase-shift COOKS the nearest one
 			# (the arena itself escalates). Fixed coords, no rng; the torture
 			# never reaches gate 5 -> inert.
-			for fbx in [90, 296, 502]:
-				barrels.append({"x": fbx * F_ONE, "y": _next_gate_y + 140 * F_ONE,
+			# Left cluster 100 (not 90) clears the c2 ARENA_MARGIN; the paired
+			# barrel offsets INWARD (-16) so both authored barrels stay 96..544.
+			for fbx in [100, 296, 500]:
+				var fby1: int = _next_gate_y + 140 * F_ONE
+				var fby2: int = _next_gate_y + 148 * F_ONE
+				barrels.append({"x": _arena_margin_x(fbx * F_ONE, fby1), "y": fby1,
 					"armed": true, "fuse_ticks": 0})
-				barrels.append({"x": (fbx + 16) * F_ONE, "y": _next_gate_y + 148 * F_ONE,
+				barrels.append({"x": _arena_margin_x((fbx - 16) * F_ONE, fby2), "y": fby2,
 					"armed": true, "fuse_ticks": 0})
 			_world_ended = true
 			break
@@ -3066,8 +3090,10 @@ func _step_camera() -> void:
 		var w_band: int = absi(_next_water_y / GATE_SPACING)
 		if w_band >= 2:
 			var mrx: int = (80 + _mix(w_band, water["ford_x"] / F_ONE) % 460) * F_ONE
-			rocks.append({"x": mrx, "y": _next_water_y - 20 * F_ONE})
-			rocks.append({"x": mrx + 22 * F_ONE, "y": _next_water_y - 10 * F_ONE})
+			var mry1: int = _next_water_y - 20 * F_ONE
+			var mry2: int = _next_water_y - 10 * F_ONE
+			rocks.append({"x": _arena_margin_x(mrx, mry1), "y": mry1})
+			rocks.append({"x": _arena_margin_x(mrx + 22 * F_ONE, mry2), "y": mry2})
 		_next_water_y -= GATE_SPACING
 
 
