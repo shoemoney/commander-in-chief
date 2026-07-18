@@ -3789,15 +3789,17 @@ func _draw_water() -> void:
 		# Mud OUTER edge (c2 3v): a 2px dark lip + hash notches on the dry
 		# side of both strips — the exact line where half-speed begins reads
 		# before you step in. Same deterministic notch idiom as the banks.
-		var mud_lip := Color(mud_c.r, mud_c.g, mud_c.b, 1.0).darkened(0.35)
+		# Lips sit fully OUTSIDE the strips (judge r1: the bottom lip was 1px
+		# inside), 2.5px and darker so the grass->mud boundary pops.
+		var mud_lip := Color(mud_c.r, mud_c.g, mud_c.b, 1.0).darkened(0.45)
 		var mseed := Art.cell_hash(int(w["y"] / 4096) * 53, 19)
-		draw_rect(Rect2(0, wy - 47.0, 640.0, 2.0), mud_lip)
-		draw_rect(Rect2(0, wy + wh + 41.0, 640.0, 2.0), mud_lip)
+		draw_rect(Rect2(0, wy - 48.5, 640.0, 2.5), mud_lip)
+		draw_rect(Rect2(0, wy + wh + 42.0, 640.0, 2.5), mud_lip)
 		for mk in 12:
 			var mnh := Art.cell_hash(mseed + mk * 31, mk)
-			draw_rect(Rect2(float(mnh % 630), wy - 47.0 - float(mnh % 3),
+			draw_rect(Rect2(float(mnh % 630), wy - 48.5 - float(mnh % 3),
 				5.0 + float(mnh % 6), 2.5), mud_lip)
-			draw_rect(Rect2(float((mnh * 13) % 630), wy + wh + 41.0 + float((mnh >> 3) % 3),
+			draw_rect(Rect2(float((mnh * 13) % 630), wy + wh + 42.0 + float((mnh >> 3) % 3),
 				5.0 + float((mnh >> 5) % 6), 2.5), mud_lip)
 		# Broken banks (5v: the ruler-straight sand edge was the tell): ~14
 		# hash-notches per bank bite into the strip, skipping the ford span.
@@ -5426,7 +5428,8 @@ func _check_water_entry() -> void:
 		var muddy: bool = p["alive"] and not wet and sim._in_mud(p["x"], p["y"])
 		if i < _mud_prev.size():
 			if muddy and not _mud_prev[i]:
-				_burst(p["x"], p["y"], "dust", 6, 1.2, 2.5, 0.3)
+				_burst(p["x"], p["y"], "dust", 6, 1.2, 2.5, 0.3, 0.06, 0.0, false,
+					Color(0.38, 0.28, 0.16))   # mud-brown, not generic dust (judge r1)
 				if not _mud_told:
 					_mud_told = true
 					_show_banner("MUD — HALF SPEED, ROLLS LEGAL", Color(0.75, 0.6, 0.4))
@@ -5441,10 +5444,11 @@ func _check_water_entry() -> void:
 		_enemy_water_prev[i] = wet
 
 
-func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, jitter: float, rate: float = 0.06, vy_bias: float = 0.0, move: bool = false) -> void:
+func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, jitter: float, rate: float = 0.06, vy_bias: float = 0.0, move: bool = false, col := Color(0, 0, 0, 0)) -> void:
 	# Clean radial dust/debris ring — evenly spaced directions with a little jitter.
 	# vy_bias skews the burst upward (negative Y); move opts these particles into
 	# the position-integration pass below without touching other "kind" call sites.
+	# col (alpha > 0) overrides the kind's default particle tint.
 	if _fx.size() > 260:   # ponytail: soft cap — boss-finale kill spam can't stack unbounded draws
 		return
 	for d in n:
@@ -5453,6 +5457,8 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 			"vx": cos(a) * randf_range(spd_lo, spd_hi), "vy": sin(a) * randf_range(spd_lo, spd_hi) - vy_bias}
 		if move:
 			entry["move"] = true
+		if col.a > 0.0:
+			entry["col"] = col
 		_fx.append(entry)
 
 
