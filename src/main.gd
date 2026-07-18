@@ -4044,6 +4044,9 @@ func _draw_foundry_arena() -> void:
 					draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(pp.x - hr + sin(pph + float(hz)) * 4.0, pp.y - 6.0 - ht * 28.0, hr * 2.0, hr * 1.5),
 						false, Color(1.0, 0.55, 0.25, (1.0 - ht) * 0.14 * _motion))
+				# a2-09 r3: a soft STATIC haze cap so the radiate reads in a still frame too.
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(pp.x - 26.0, pp.y - 34.0, 52.0, 40.0),
+					false, Color(1.0, 0.5, 0.22, 0.03 + 0.05 * _motion))
 				# a2-09 r2 ENV#6: a couple SLAG chunks beside the pool — dark cooled metal
 				# with a hot seam — so the floor reads as industrial slag, not bare ground.
 				for sg in 2:
