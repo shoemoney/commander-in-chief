@@ -689,3 +689,30 @@ func test_a3_foliage_lifts_off_grass_hue() -> void:
 	var g0: Color = ms._ground_stops("campaign")[0][0]   # bright jungle grass stop
 	Runner.T.ok(fol.r < g0.r, "foliage is DEEPER than the bright grass (lower r)")
 	Runner.T.ok((fol.g - fol.r) > (g0.g - g0.r) + 0.1, "foliage is COOLER / more green-forward than the yellow-green grass")
+
+
+# --- a3-15: three place-defining ambience beds (river / foundry / shop), synthesized,
+# seamless-looping, and distinct — so every sector sounds like somewhere. ---
+
+func test_a3_ambience_beds_are_synthesized_and_distinct() -> void:
+	var sfx := Sfx.new()
+	sfx._synth_all()   # also builds the three ambience beds (_synth_beds)
+	var beds: Dictionary = sfx._beds
+	for k in ["river", "foundry", "shop"]:
+		Runner.T.ok(beds.has(k), "the %s ambience bed is synthesized" % k)
+		var wav: AudioStreamWAV = beds[k]
+		Runner.T.eq(wav.loop_mode, AudioStreamWAV.LOOP_FORWARD, "%s bed loops (no dead-air seam)" % k)
+		var d: PackedByteArray = wav.data
+		Runner.T.ok(d.size() > 100000, "%s renders a substantial loop buffer (%d bytes)" % [k, d.size()])
+		var mn := 255
+		var mx := 0
+		for bi in range(0, mini(d.size(), 8000)):
+			mn = mini(mn, d[bi])
+			mx = maxi(mx, d[bi])
+		Runner.T.ok(mx - mn > 8, "%s bed carries real signal energy (not flat silence)" % k)
+	# Genuinely three different timbres, not one buffer reused under three names.
+	Runner.T.ok((beds["river"] as AudioStreamWAV).data != (beds["foundry"] as AudioStreamWAV).data,
+		"river and foundry are distinct beds")
+	Runner.T.ok((beds["foundry"] as AudioStreamWAV).data != (beds["shop"] as AudioStreamWAV).data,
+		"foundry and shop are distinct beds")
+	sfx.free()

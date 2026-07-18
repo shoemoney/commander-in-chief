@@ -2883,7 +2883,15 @@ func _drive_audio() -> void:
 	# VO owns the mix while speaking: rides the existing duck channel.
 	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on(sim))
 	_sfx.duck_sfx_under_vo(_sfx.vo_active())   # a1-14 AUD#6: the combat bus dips under the radio too
-	_sfx.set_ambience_march(_sector_march())   # a1-15 AUD#4: biome-shifted wind bed
+	# a3-15: place-sense for the ambience beds — is a river band on screen, and are we in the
+	# endless intermission shop? (near-water reuses the terrain draw window; early-out scan.)
+	var near_water := false
+	for w in sim.waters:
+		if w["y"] <= sim.camera_top + 460 * Fixed.ONE and w["y"] + SimWorld.WATER_H >= sim.camera_top - 64 * Fixed.ONE:
+			near_water = true
+			break
+	var in_shop: bool = sim.mode == "endless" and sim.intermission_ticks > 0
+	_sfx.set_ambience_march(_sector_march(), near_water, in_shop)   # a1-15 + a3-15: biome wind + place beds
 	_sfx.set_concussion(_concussion)
 	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
 	var want := 1.0 if sim.last_stand and not sim.victory else 0.0

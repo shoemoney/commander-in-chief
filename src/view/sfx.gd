@@ -31,6 +31,10 @@ var _vo_dry := AudioStreamPlayer.new()  # the pilot's dry close-mic plea
 var _vo_streams: Dictionary = {}
 var _vo_priority := -1                  # priority of the line currently on air
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
+var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
+var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
+var _shop := AudioStreamPlayer.new()         # a3-15: calm pad, up in the intermission shop
+var _beds: Dictionary = {}                   # a3-15: the three ambience-bed loop WAVs (built in _synth_beds)
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
@@ -165,6 +169,17 @@ func _ready() -> void:
 	_amb.volume_db = -30.0
 	add_child(_amb)
 	_amb.play()
+	# a3-15 (AUD#7/8/10): three place-defining ambience beds crossfade over the wind so each
+	# sector sounds like SOMEWHERE — a river burble near water, a foundry-machinery hum deep
+	# in the march, a calm pad in the intermission shop. All start silent and ride the Music
+	# bus (the concussion LPF muffles them for free, exactly like the wind).
+	for bed in [[_river, "river"], [_foundry, "foundry"], [_shop, "shop"]]:
+		var pl: AudioStreamPlayer = bed[0]
+		pl.stream = _beds[bed[1]]
+		pl.bus = "Music"
+		pl.volume_db = -60.0
+		add_child(pl)
+		pl.play()
 
 
 func play_vo(key: String, priority := 1, dry := false) -> void:
@@ -274,11 +289,21 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	_music_lull.pitch_scale = p   # identical playback speed = zero drift
 
 
-func set_ambience_march(march: float) -> void:
+func set_ambience_march(march: float, near_water := false, in_shop := false) -> void:
 	# a1-15 AUD#4: the wind bed shifts character by biome — airy/high in the jungle,
 	# dropping to a low industrial hum toward the foundry — via pitch, so each place
 	# has its own air (was one static baked loop).
 	_amb.pitch_scale = lerpf(_amb.pitch_scale, lerpf(1.06, 0.72, clampf(march, 0.0, 1.0)), 0.02)
+	# a3-15 AUD#7/8/10: crossfade the three place beds IN over the wind. River rides up near
+	# water; the foundry hum swells past the mid-march into the plant; the shop pad owns the
+	# intermission and hushes the field beds — you've stepped out of the fight.
+	var m := clampf(march, 0.0, 1.0)
+	var river_t := -22.0 if (near_water and not in_shop) else -60.0
+	var foundry_t := lerpf(-60.0, -25.0, smoothstep(0.62, 1.0, m)) if not in_shop else -60.0
+	var shop_t := -17.0 if in_shop else -60.0
+	_river.volume_db = lerpf(_river.volume_db, river_t, 0.05)
+	_foundry.volume_db = lerpf(_foundry.volume_db, foundry_t, 0.03)
+	_shop.volume_db = lerpf(_shop.volume_db, shop_t, 0.06)
 
 
 func set_concussion(amount: float) -> void:
@@ -693,6 +718,54 @@ func _synth_all() -> void:
 	s["alarm_air"] = alarm_air
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
+	_synth_beds()
+
+
+func _synth_beds() -> void:
+	# a3-15: three looping ambience beds, synthesized like everything else (deterministic,
+	# load-time). Each tonal element completes an integer number of cycles over the 8 s loop
+	# so the seam is click-free; the river is high-passed noise (no low-freq step to tick).
+	# Built with _to_wav_loop (NOT _to_wav / _sounds) — a loop must skip the 5 ms tail declick
+	# that would tick every pass. ponytail: single-sample filter-state mismatch at the river
+	# seam is inaudible under broadband ambience — no crossfade needed for a hiss bed.
+	var dur := 8.0
+	var n := int(dur * RATE)
+
+	# River burble: bright band-limited babble (a mild lowpass minus a slower one = a band,
+	# so no rumble), gently amplitude-shimmered so it breathes like moving water.
+	var river := _buf(dur)
+	var rlp := 0.0
+	var rslow := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		rlp = rlp * 0.72 + _nz(i) * 0.28
+		rslow = rslow * 0.86 + rlp * 0.14
+		var shimmer := 0.7 + 0.3 * sin(TAU * 0.5 * t)     # 0.5 Hz -> 4 cycles / 8 s
+		var burble := 0.85 + 0.15 * sin(TAU * 3.0 * t)    # 3 Hz -> 24 cycles / 8 s
+		river[i] = (rlp - rslow) * 0.5 * shimmer * burble
+	_beds["river"] = _to_wav_loop(river)
+
+	# Foundry machinery: a low detuned drone (55 + 55.25 Hz = a slow 0.25 Hz beat) with an
+	# octave, a 0.5 Hz piston throb, and a whisper of steam hiss. Reads as a working plant.
+	var foundry := _buf(dur)
+	var flp := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var drone := 0.5 * sin(TAU * 55.0 * t) + 0.3 * sin(TAU * 55.25 * t) + 0.2 * sin(TAU * 110.0 * t)
+		var throb := 0.6 + 0.4 * absf(sin(TAU * 0.5 * t))   # abs -> 1 Hz period -> 8 cycles / 8 s
+		flp = flp * 0.6 + _nz(i + 9000) * 0.4
+		foundry[i] = drone * 0.4 * throb + flp * 0.06
+	_beds["foundry"] = _to_wav_loop(foundry)
+
+	# Shop pad: a warm root+fifth+octave sine chord (A2/E3/A3), slow-breathing. Safe and calm
+	# — the one place in the run that isn't trying to kill you.
+	var shop := _buf(dur)
+	for i in n:
+		var t := float(i) / RATE
+		var pad := 0.5 * sin(TAU * 110.0 * t) + 0.34 * sin(TAU * 165.0 * t) + 0.24 * sin(TAU * 220.0 * t)
+		var breath := 0.75 + 0.25 * sin(TAU * 0.25 * t)   # 0.25 Hz -> 2 cycles / 8 s
+		shop[i] = pad * 0.3 * breath
+	_beds["shop"] = _to_wav_loop(shop)
 
 
 # Per 8th step: [kick, tom_hi, tom_lo, snare]. Same 16-step grid, same BPM —
