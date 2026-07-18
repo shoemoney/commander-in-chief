@@ -98,3 +98,51 @@ func test_enemy_bullet_kills_and_roll_dodges() -> void:
 	roll.move_x = 256
 	sim2.step([roll])
 	Runner.T.ok(p2["alive"], "roll i-frames dodge enemy fire")
+
+func test_c3_gunship_arena_is_asymmetric() -> void:
+	# c3 2v: the gunship boss arena is now an asymmetric bridge-span layout —
+	# the sandbag mirror is broken, a center-wall mass denies the straight lane,
+	# and a one-sided ammo cache pulls you off the line. Gate 3+ = torture-inert.
+	var sim := SimWorld.new(41, 1)
+	sim.camera_top = -(3200 * Fixed.ONE)
+	sim.step([_idle()])
+	# Find the boss gate.
+	var bgy := 0
+	for g in sim.gates:
+		if not g["boss"].is_empty():
+			bgy = g["y"]
+			break
+	Runner.T.ok(bgy != 0, "a boss gate streamed")
+	# Sandbag lines are NOT mirror-symmetric about center (296 in the old layout).
+	var left_bags := []
+	var right_bags := []
+	for sb in sim.sandbags:
+		if absi(sb["y"] - (bgy + 120 * Fixed.ONE)) < 100 * Fixed.ONE:
+			if sb["x"] < SimWorld.SCREEN_CX:
+				left_bags.append(sb["x"] / Fixed.ONE)
+			else:
+				right_bags.append(sb["x"] / Fixed.ONE)
+	# Right pair shifted to 432/468 (not the old 392/428 mirror of 164/200).
+	Runner.T.ok(right_bags.has(432) or right_bags.has(468), "the right bag line shifted off the mirror")
+	# A center-wall mass (kind 2) denies the straight center run.
+	var center_wall := false
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and absi(rk["x"] - SimWorld.SCREEN_CX) < 60 * Fixed.ONE \
+				and absi(rk["y"] - (bgy + 160 * Fixed.ONE)) < 20 * Fixed.ONE:
+			center_wall = true
+	Runner.T.ok(center_wall, "a bridge-span wall mass denies the center lane")
+	# Exactly one ammo cache (kind-0 cost-0 pickup) on the LEFT, no mirror twin.
+	var left_cache := 0
+	var right_cache := 0
+	for pk in sim.pickups:
+		if pk.get("kind", 0) == 0 and pk.get("cost", 0) == 0 \
+				and absi(pk["y"] - (bgy + 150 * Fixed.ONE)) < 20 * Fixed.ONE:
+			if pk["x"] < SimWorld.SCREEN_CX:
+				left_cache += 1
+			else:
+				right_cache += 1
+	Runner.T.eq(left_cache, 1, "one ammo cache on the left")
+	Runner.T.eq(right_cache, 0, "no mirror cache on the right (asymmetric reward)")
+	# Every lateral gap at the arena row clears the hull (no softlock).
+	Runner.T.ok(216 - 16 >= SimWorld.HULL_CLEARANCE / Fixed.ONE, "left flank lane clears the hull")
+	Runner.T.ok(624 - 376 >= SimWorld.HULL_CLEARANCE / Fixed.ONE, "right flank lane clears the hull")

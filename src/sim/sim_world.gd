@@ -3203,9 +3203,26 @@ func _step_camera() -> void:
 			# strafe half into a COVER fight (mortars ignore cover, so the
 			# volley half stays a movement fight). Reuses the whole sandbag
 			# grammar; torture never streams gate 3 -> inert.
-			for bsx in [164, 200, 392, 428]:
+			# c3 2v BREAKS THE MIRROR: the right pair shifts +40px so the inner
+			# gap no longer centers on 296 — the straight-up center lane is gone
+			# and the gunship arena gets its own asymmetric identity.
+			for bsx in [164, 200, 432, 468]:
 				sandbags.append({"x": bsx * F_ONE,
 					"y": _next_gate_y + (120 if bsx < 300 else 200) * F_ONE})
+			# c3 2v PARTIAL BRIDGE-SPAN WRECK: a 2-slab kind-2 wall straddling
+			# center (256/336) denies the center run — commit to a flank. Flank
+			# lanes [16,216]/[376,624] >> HULL_CLEARANCE.
+			for bwx in [256, 336]:
+				rocks.append({"x": bwx * F_ONE, "y": _next_gate_y + 160 * F_ONE, "kind": 2})
+			# c3 2v SHORE-BATTERY STUBS: hard cover at both outer walls (kind-0).
+			rocks.append({"x": 60 * F_ONE, "y": _next_gate_y + 90 * F_ONE, "kind": 0})
+			rocks.append({"x": 532 * F_ONE, "y": _next_gate_y + 90 * F_ONE, "kind": 0})
+			# c3 2v ONE-SIDED destructible AMMO CACHE (LEFT only): 2 barrels as a
+			# crate + a free ammo pickup behind — an asymmetric reward pulling you
+			# off the line to the left (grenade the barrels to reach it).
+			barrels.append({"x": 110 * F_ONE, "y": _next_gate_y + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
+			barrels.append({"x": 128 * F_ONE, "y": _next_gate_y + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
+			pickups.append({"x": 120 * F_ONE, "y": _next_gate_y + 150 * F_ONE, "kind": 0, "cost": 0})
 			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
 			_stamp_stretch_setpieces()
 		else:
