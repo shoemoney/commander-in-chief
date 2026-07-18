@@ -303,3 +303,16 @@ func test_a1_player_ident_and_ring_shape() -> void:
 	Art.colorblind = false
 	Runner.T.ok(not ms._player_ring_dashed(0), "P1 ring is SOLID")
 	Runner.T.ok(ms._player_ring_dashed(1), "P2 ring is DASHED (shape-distinct)")
+
+
+# --- a2-01: decor/prop layer chars with the biome march ---
+
+func test_a2_decor_chars_with_march() -> void:
+	Art.foliage_march = 0.0
+	var jungle_rock := Art.tint("rock1")
+	Art.foliage_march = 1.0
+	var foundry_rock := Art.tint("rock1")
+	Runner.T.ok(foundry_rock.g < jungle_rock.g, "a foundry rock loses green (chars) vs the jungle rock")
+	Runner.T.ok(foundry_rock.r >= foundry_rock.g, "charred decor leans warm (r >= g)")
+	Runner.T.ok(Art.tint("rusher").is_equal_approx(Color(2.1, 1.7, 1.15)), "unit/threat tints ignore the decor char")
+	Art.foliage_march = 0.0

@@ -386,6 +386,16 @@ const FOLIAGE := Color(0.82, 1.0, 0.66)
 const FOLIAGE_ASH := Color(0.66, 0.60, 0.50)
 const _FOLIAGE_KEYS := {"tree_large": true, "tree_small": true, "fern": true,
 	"fern2": true, "hedge": true}   # a1-05 r2: the foundry undergrowth is ALL hedges — char them too
+# a2-01: the prop/rock/wreck/hulk/corpse layer chars WITH the ground toward the
+# foundry (A1 only ramped ground+foliage, so cool-green jungle rocks sat strewn on
+# the molten floor). Each prop lerps from its own muted tint toward this warm charred
+# debris color by foliage_march (capped 0.7 so jungle keeps prop variety).
+const DECOR_ASH := Color(0.44, 0.36, 0.30)
+const _DECOR_KEYS := {"rock1": true, "rock2": true, "wreck": true, "wreck_apc": true,
+	"wreck_halftrack": true, "wreck_technical": true, "wreck_light_tank": true, "tank_hulk": true,
+	"corpse_soldier1": true, "corpse_soldier2": true, "barrel": true, "crate_stack": true,
+	"tank_trap": true, "barricade": true, "radio_tower": true, "flak_gun": true, "trench": true,
+	"barbedwire": true, "watchtower": true, "tent": true}
 static var foliage_march := 0.0
 const TINT := {
 	# Heroes render bright, not olive-washed — the tan Leader model in the
@@ -525,6 +535,8 @@ static func draw_scale(name: String) -> float:
 static func tint(name: String) -> Color:
 	if _FOLIAGE_KEYS.has(name):
 		return FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
+	if _DECOR_KEYS.has(name):
+		return TINT[name].lerp(DECOR_ASH, foliage_march * 0.7)
 	return TINT.get(name, Color.WHITE)
 
 
