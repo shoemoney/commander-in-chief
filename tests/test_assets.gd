@@ -250,3 +250,32 @@ func test_a1_record_hud_mode() -> void:
 	Runner.T.eq(hud._record_hud_mode(200, 100), "badge", "live score beat best -> reserved RECORD badge")
 	Runner.T.eq(hud._record_hud_mode(50, 100), "best", "score below best -> dim BEST target chip")
 	Runner.T.eq(hud._record_hud_mode(200, 0), "none", "no best yet -> no record chip")
+
+
+# --- a1-19: legacy art bakes stay lossless (no BC edge-mush on the silhouettes) ---
+
+func test_a1_legacy-art_bakes_are_lossless() -> void:
+	var stack: Array[String] = ["res://assets/legacy-art"]
+	var checked := 0
+	var offenders: Array[String] = []
+	while not stack.is_empty():
+		var d: String = stack.pop_back()
+		var da := DirAccess.open(d)
+		if da == null:
+			continue
+		da.list_dir_begin()
+		var f := da.get_next()
+		while f != "":
+			var full := d + "/" + f
+			if da.current_is_dir():
+				stack.append(full)
+			elif f.ends_with(".png.import"):
+				checked += 1
+				var txt := FileAccess.get_file_as_string(full)
+				if txt.contains("compress/mode=2"):
+					offenders.append(f)
+			f = da.get_next()
+		da.list_dir_end()
+	Runner.T.ok(checked > 100, "scanned the legacy art bake .import files (%d)" % checked)
+	Runner.T.ok(offenders.is_empty(),
+		"no legacy art bake is BC-compressed (compress/mode=2 mushes the OUTLINE silhouette): %s" % str(offenders.slice(0, 5)))

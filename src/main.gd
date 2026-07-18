@@ -411,6 +411,10 @@ func _setup_water() -> void:
 	_bg_root = Node2D.new()
 	_bg_root.z_index = -2
 	_bg_root.z_as_relative = false
+	# a1-19 PIPE#2: the 1:1 pixel ground (Kenney grass/dirt/sand) draws NEAREST so it
+	# stays crisp — the project default_texture_filter is LINEAR_MIPMAP (right for the
+	# legacy art bakes) but bilinear-smears the pixel tiles at integer scale.
+	_bg_root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_bg_root.draw.connect(_paint_bg.bind(_bg_root))
 	add_child(_bg_root)
 	for _i in 4:
