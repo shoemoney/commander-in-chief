@@ -4370,6 +4370,12 @@ func _draw_water() -> void:
 			if rx > ford_left - 12.0 and rx < ford_left + ford_w + 12.0:
 				continue
 			var ry := wy + wh * (0.3 + 0.4 * float((wseed / (r + 5)) % 90) / 90.0)
+			# a2-06 ENV#1: a foam collar where the rock breaks the current + a short
+			# upstream wake, so it reads as sitting IN the water, not floating on it.
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(rx - 13.0, ry - 7.0, 26.0, 14.0),
+				false, Color(0.82, 0.86, 0.82, 0.22))
+			draw_line(Vector2(rx - 6.0, ry - 7.0), Vector2(rx - 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
+			draw_line(Vector2(rx + 6.0, ry - 7.0), Vector2(rx + 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
 			_spr("rock1" if (wseed + r) % 2 == 0 else "rock2", Vector2(rx, ry),
 				float((wseed / (r + 1)) % 628) / 100.0, 1.4, Color(0.5, 0.58, 0.6))
 		# Reed scatter at the waterline (5v): fern2 silhouettes soften where
