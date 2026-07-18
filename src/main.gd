@@ -6332,8 +6332,11 @@ func _draw_wheel() -> void:
 		# atlas — one cell is the round plate) instead of a flat alpha disc.
 		var plate := Art.tex("ui_wheel_plate")
 		var pcell := Vector2(plate.get_size().x / 4.0, plate.get_size().y / 2.0)
+		# c2 2v: plate alpha 0.92 -> 0.55 (the ~40% cut) so the mast, scars,
+		# drops and hazards read THROUGH it during the buy — the sockets/icons
+		# and shadowed text stay full-alpha, so clarity rides the text shadows.
 		draw_texture_rect_region(plate, Rect2(c - Vector2(51, 51), Vector2(102, 102)),
-			Rect2(Vector2.ZERO, pcell), Color(0.72, 0.78, 0.7, 0.92))
+			Rect2(Vector2.ZERO, pcell), Color(0.72, 0.78, 0.7, 0.55))
 		# Center hub: the fuel-cap ring framing the War Chest itself — this
 		# wheel drains the same pool that funds revives.
 		# Scale off the imported size, not the 600px source — dial_fuel imports
@@ -6437,6 +6440,12 @@ func _draw_wheel() -> void:
 			# Anchored ABOVE this player's hub — the old global y=71 left P2's
 			# pick floating at the top of the screen, nowhere near their wheel.
 			Art.text_center(self, lbl, c.x, c.y - 52.0, 9, Color(1.0, 0.95, 0.7))
+		# Next-wave clock (c2 2v): the intermission buy should take 2 seconds,
+		# not 10 — give it a countdown right under the cue line so the decision
+		# has its clock. Reads the already-checksummed intermission_ticks.
+		if sim.mode == "endless" and sim.intermission_ticks > 0:
+			Art.text_center(self, "NEXT WAVE IN %d" % ceili(sim.intermission_ticks / 60.0),
+				c.x, c.y + 63.0, 8, Color(1.0, 0.95, 0.65))
 
 
 func _top_center_priority() -> String:
