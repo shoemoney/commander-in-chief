@@ -103,3 +103,36 @@ func test_death_pays_out_and_wins() -> void:
 		if g.get("final", false) and g["open"]:
 			final_open = true
 	Runner.T.ok(final_open, "the Foundry gate fell")
+
+func test_c3_lane_sweep_punishes_parking() -> void:
+	# c3 3v: parking in a Foundry side lane during the colossus fight draws a
+	# telegraphed lane-sweep mortar; camping center (the honest fight) does not.
+	var sim := SimWorld.new(7, 1)
+	var gy := sim.camera_top - 3 * SimWorld.GATE_SPACING
+	sim.colossus = {"alive": true, "hp": 40, "x": SimWorld.SCREEN_CX, "y": gy,
+		"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999,
+		"core_cd": 999, "core_open": 0, "pv": 1, "sweep_cd": 1}
+	sim.last_stand = true
+	var p: Dictionary = sim.players[0]
+	p["x"] = 16 * SimWorld.F_ONE   # parked at the LEFT wall (inside the margin lane)
+	p["y"] = sim.camera_top + 200 * SimWorld.F_ONE
+	var strikes0: int = sim.strikes.size()
+	for i in 200:
+		sim._step_colossus()
+	Runner.T.ok(sim.strikes.size() > strikes0, "camping the side lane draws a lane-sweep mortar")
+	# Every sweep strike lands in a margin lane (the retreat corridor), not center.
+	for s in sim.strikes:
+		Runner.T.ok(s["x"] < SimWorld.ARENA_MARGIN or s["x"] > SimWorld.SCREEN_W_FP - SimWorld.ARENA_MARGIN,
+			"the sweep only hits the side lanes")
+	# Center camping draws NO sweep strike (the honest fight; retreat stays fair).
+	var sim2 := SimWorld.new(7, 1)
+	sim2.colossus = {"alive": true, "hp": 40, "x": SimWorld.SCREEN_CX, "y": gy,
+		"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999,
+		"core_cd": 999, "core_open": 0, "pv": 1, "sweep_cd": 1}
+	sim2.last_stand = true
+	sim2.players[0]["x"] = SimWorld.SCREEN_CX
+	sim2.players[0]["y"] = sim2.camera_top + 200 * SimWorld.F_ONE
+	var s2_0: int = sim2.strikes.size()
+	for i in 200:
+		sim2._step_colossus()
+	Runner.T.eq(sim2.strikes.size(), s2_0, "center-lane play draws no sweep (the retreat stays fair)")

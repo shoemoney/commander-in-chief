@@ -1,5 +1,10 @@
 ; Engine configuration file.
-; Project Ikari — deterministic twin-stick vertical run-and-gun (P0 greybox).
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
@@ -10,30 +15,35 @@ config/description="Modern remake of the classic vertical-scrolling run-and-gun.
 run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7")
 
+[autoload]
+
+MCPGameBridge="res://addons/godot_mcp/game_bridge/mcp_game_bridge.gd"
+
 [display]
 
 window/size/viewport_width=640
 window/size/viewport_height=360
-window/stretch/mode="viewport"
-window/stretch/aspect="keep"
 window/size/window_width_override=1280
 window/size/window_height_override=720
+window/stretch/mode="viewport"
 window/stretch/scale_mode="integer"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
+
+[godot_mcp]
+
+bind_mode=0
+custom_bind_ip=""
+port_override_enabled=false
+port_override=6550
 
 [importer_defaults]
 
-; New textures default to VRAM-compressed (mode 2) — three separate art drops
-; (legacy-art bakes, asset-loop p2, brand glyphs) each landed Lossless and re-grew
-; the VRAM debt the opt-loop keeps collecting. CPU-read art (custom cursors,
-; anything .get_image()d without decompress) must OPT OUT with an explicit
-; compress/mode=0 in its .import.
 texture={
 "compress/mode": 2
 }
-
-[physics]
-
-common/physics_ticks_per_second=60
 
 [rendering]
 

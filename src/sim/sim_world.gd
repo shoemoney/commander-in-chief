@@ -391,6 +391,7 @@ const COLOSSUS_CRUSH_RADIUS := 26 * F_ONE
 const COLOSSUS_SPRAY_CD_TICKS := 30
 const COLOSSUS_VOLLEY_CD_TICKS := 120
 const COLOSSUS_SPAWN_CD_TICKS := 90
+const COLOSSUS_SWEEP_CD_TICKS := 150   # c3 3v: 2.5s between lane-sweep mortars when the player PARKS in a Foundry side lane (the retreat stays fair; camping it costs you)
 # Core window: every cycle the plating retracts for a beat during which
 # BULLETS also chip the Colossus — a timing/aggression path for a dry pool.
 const COLOSSUS_CORE_CYCLE_TICKS := 240
@@ -3357,7 +3358,7 @@ func _step_camera() -> void:
 	# mindless hold-up push is no longer free. rng-FREE (wall picked by _mix).
 	# Gated so the camera never triggers it inside the ~1260px torture (which
 	# stops at ~-1520 > REAR_TRICKLE_START) → both goldens byte-identical.
-	while camera_top < _next_rear_y:
+	while mode == "campaign" and camera_top < _next_rear_y:
 		var rslot: int = absi(_next_rear_y / REAR_TRICKLE_SPACING)
 		var rear_x: int = WORLD_LEFT if _mix(rslot, _world_seed) & 1 else WORLD_RIGHT
 		var rear_y: int = camera_top + 380 * F_ONE
@@ -3737,6 +3738,7 @@ func _step_colossus() -> void:
 					"volley_cd": COLOSSUS_VOLLEY_CD_TICKS,
 					"spawn_cd": COLOSSUS_SPAWN_CD_TICKS,
 					"core_cd": COLOSSUS_CORE_CYCLE_TICKS, "core_open": 0,
+					"sweep_cd": COLOSSUS_SWEEP_CD_TICKS,   # c3 3v: side-lane camp punisher
 				}
 				last_stand = true
 				events.append({"t": "colossus_engage", "x": colossus["x"], "y": colossus["y"]})
@@ -3788,6 +3790,17 @@ func _step_colossus() -> void:
 		if colossus["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
 			colossus["spawn_cd"] = COLOSSUS_SPAWN_CD_TICKS
 			_spawn_enemy(colossus["x"], colossus["y"] + 30 * F_ONE, false)
+
+	# c3 3v: the 96px escape corridor (c2-10) is a fair RETREAT, but PARKING in a
+	# side lane to cheese the boss was risk-free. A telegraphed lane-sweep mortar
+	# (reuses _add_strike: 45t warn > the 24t floor) drops on a player camping
+	# either margin lane — dodge IN is still fine, holding is not. sweep_cd
+	# rate-limits it (runs every phase, not just phase 3) so it never carpets.
+	colossus["sweep_cd"] = colossus.get("sweep_cd", COLOSSUS_SWEEP_CD_TICKS) - 1
+	if colossus["sweep_cd"] <= 0 \
+			and (target["x"] < ARENA_MARGIN or target["x"] > SCREEN_W_FP - ARENA_MARGIN):
+		colossus["sweep_cd"] = COLOSSUS_SWEEP_CD_TICKS
+		_add_strike(target["x"], target["y"])
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
@@ -4056,7 +4069,7 @@ func _step_observer() -> void:
 	# rusher from the rear wall behind the lead player. Single-shot by equality
 	# (advancing resets stall_ticks -> re-arms); stall_ticks is already hashed,
 	# so no new field. seg>=2 keeps the torture (which never stalls 300t) inert.
-	if stall_ticks == REAR_CAMP_TICKS:
+	if mode == "campaign" and stall_ticks == REAR_CAMP_TICKS:
 		var lead_y := 0
 		var found_lead := false
 		for p in players:

@@ -51,7 +51,7 @@ const KNOWN := {
 	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
-		"core_cd", "core_open", "pv"],
+		"core_cd", "core_open", "pv", "sweep_cd"],
 }
 
 
