@@ -68,6 +68,8 @@ var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 var _trench_prev: Array[bool] = []   # c3: per-player last-tick in-trench, for the drop-in cue (view-only)
+var _rear_wedge_t := 0.0              # c4: rear-warn bottom-edge wedge timer (seconds)
+var _rear_wedge_x := 320.0            # c4: screen-x of the pending rear spawn
 var _pending_blasts: Array[Dictionary] = []   # scheduled boss-death secondary detonations
 var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
@@ -1389,6 +1391,8 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_softspot",
 					"sz": 90.0, "grow": -0.15, "fade": 2.5, "rate": 0.012, "col": Color(0.9, 0.5, 0.2, 0.28)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.012})
+				_rear_wedge_t = 1.5
+				_rear_wedge_x = _to_screen(ev["x"], ev["y"]).x
 			"rear_breach":
 				# c3 3v: a threat is entering from behind — a dust puff + rising
 				# alert at the rear edge so the player reads the pressure vector.
@@ -2525,6 +2529,7 @@ func _update_feel() -> void:
 	# springback that should play over the resuming motion.
 	if _hitstop_frames == 0:
 		_trauma = maxf(0.0, _trauma - 0.03)
+	_rear_wedge_t = maxf(0.0, _rear_wedge_t - 1.0 / 60.0)   # c4: rear-warn wedge decay
 	# SHOP LOCKED callout (7/9 play-panel): in endless, clearing the wave while
 	# the miniboss still flies leaves the shop silently hostage — say it once
 	# per boss. Latch resets when the boss dies or the shop actually opens.
@@ -3260,6 +3265,16 @@ func _draw() -> void:
 		var ch := 16.0 * clampf(_cinematic * 4.0, 0.0, 1.0)
 		draw_rect(Rect2(0, 0, SCREEN_W, ch), Color(0, 0, 0, 0.9))
 		draw_rect(Rect2(0, SCREEN_H - ch, SCREEN_W, ch), Color(0, 0, 0, 0.9))
+	# c4 2v: rear-warn bottom-edge wedge — a pulsing strip + an up-pointing wedge
+	# at the pending rear spawn x, readable in the forward-locked camera.
+	if _rear_wedge_t > 0.0:
+		var rpulse := 0.35 + 0.35 * sin(_rear_wedge_t * 12.0)
+		var ra := clampf(_rear_wedge_t / 1.5, 0.0, 1.0) * rpulse
+		draw_rect(Rect2(0, SCREEN_H - 20.0, SCREEN_W, 20.0), Color(0.8, 0.35, 0.12, ra * 0.4))
+		var rwx := clampf(_rear_wedge_x, 20.0, SCREEN_W - 20.0)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(rwx - 16.0, SCREEN_H), Vector2(rwx + 16.0, SCREEN_H), Vector2(rwx, SCREEN_H - 22.0)]),
+			Color(1.0, 0.45, 0.15, ra))
 
 
 func _draw_field_dim() -> void:
