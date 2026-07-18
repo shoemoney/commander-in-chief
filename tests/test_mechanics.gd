@@ -1397,3 +1397,22 @@ func test_c2_colossus_escape_margin() -> void:
 	# always slips the corridor.
 	Runner.T.ok(SimWorld.ARENA_MARGIN >= 80 * SimWorld.F_ONE, "margin meets the asked 80px")
 	Runner.T.ok(SimWorld.ARENA_MARGIN > 2 * SimWorld.HULL_CLEARANCE, "margin passes a hull with slack")
+
+
+func test_c2_camera_lookahead_anchor() -> void:
+	# Ratchet lookahead (c2 2v, both reviewers' #1): after sustained forward
+	# input the player anchors at exactly CAMERA_LEAD below the camera top —
+	# 260px = 72% down a 360px view (was 160/44%), the readable-drop fix.
+	var sim := SimWorld.new(31, 1)
+	var up := SimInput.new()
+	up.move_y = -256
+	for i in 200:
+		sim.step([up])
+	var focus: int = sim.players[0]["y"]
+	Runner.T.eq(focus - sim.camera_top, SimWorld.CAMERA_LEAD,
+		"the alive player anchors exactly CAMERA_LEAD below the camera top")
+	Runner.T.eq(SimWorld.CAMERA_LEAD, 260 * SimWorld.F_ONE, "lookahead is the tuned 260px")
+	# Retreat room to the +344 clamp stays positive (the anchor isn't jammed
+	# against the bottom).
+	Runner.T.ok(344 * SimWorld.F_ONE - SimWorld.CAMERA_LEAD >= 80 * SimWorld.F_ONE,
+		"at least 80px of retreat room remains below the anchor")

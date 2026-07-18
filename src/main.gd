@@ -2884,6 +2884,35 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 	return Vector2(fx * PX, (fy - sim.camera_top) * PX)
 
 
+func _bottom_fade(screen_y: float) -> float:
+	# c2 2v: cover in the very bottom of the ratchet view FADES (never culls —
+	# the collision AABB stays real) so a hazard or enemy behind it isn't hidden
+	# in the instant before it scrolls off the player's back. Smooth over the
+	# bottom ~36px so there's no hard alpha seam.
+	if screen_y <= 324.0:
+		return 1.0
+	return lerpf(1.0, 0.45, clampf((screen_y - 324.0) / 36.0, 0.0, 1.0))
+
+
+func _draw_hazard_telegraphs() -> void:
+	# Telegraph aprons (c2 2v, both reviewers' #1): a hazard about to scroll in
+	# from the top edge gets a trampled-ground scuff + warning chevron 80px
+	# SOUTH of it, so the safe lane reads BEFORE the ratchet commits the player
+	# to the row. Hazards already stream 2*VIEW_H ahead — zero sim data needed.
+	var top_wy: int = sim.camera_top
+	var pulse := 0.5 + 0.5 * Art.pulse(0.08)
+	for arr: Array in [sim.mines, sim.barrels]:
+		for hz: Dictionary in arr:
+			if not hz.get("armed", false):
+				continue
+			if hz["y"] >= top_wy - 80 * Fixed.ONE and hz["y"] < top_wy + 20 * Fixed.ONE:
+				var ap := _to_screen(hz["x"], hz["y"] + 80 * Fixed.ONE)
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(ap - Vector2(12.0, 7.0), Vector2(24.0, 14.0)),
+					false, Color(0.14, 0.11, 0.07, 0.45 * pulse))
+				draw_line(ap + Vector2(-6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
+				draw_line(ap + Vector2(6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
+
+
 # 4 diagonal offsets cover both axes at once — visually ≈ the old 8-neighbor rim
 # at half the draw calls (~60 of 90 textures are outlined; this is the hot loop).
 const _SKYLINE_X: Array[float] = [80.0, 118.0, 150.0, 468.0, 520.0, 560.0]
@@ -3010,6 +3039,7 @@ func _draw() -> void:
 	_draw_scorch()
 	_draw_foundry_arena()
 	_draw_vents()
+	_draw_hazard_telegraphs()
 	_draw_mines()
 	_draw_rocks()
 	_draw_sandbags()
@@ -3630,6 +3660,7 @@ func _draw_rocks() -> void:
 		if pos.y < -30.0 or pos.y > 390.0:
 			continue
 		var rh3 := Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536)
+		var fade := _bottom_fade(pos.y)   # c2 2v: fade cover off the player's back
 		match rk.get("kind", 0):
 			1:
 				# Tall grass: soft green clump, NO hard shadow — concealment,
@@ -3639,28 +3670,29 @@ func _draw_rocks() -> void:
 				for gt in 3:
 					var gh := Art.cell_hash(rh3 + gt * 13, gt)
 					_spr("hedge", pos + Vector2(float(gh % 44) - 22.0, float((gh / 5) % 30) - 15.0),
-						g_sway + float(gh % 628) / 100.0, 0.5, Color(0.5, 0.72, 0.42, 0.82))
+						g_sway + float(gh % 628) / 100.0, 0.5, Color(0.5, 0.72, 0.42, 0.82 * fade))
 			2:
 				# Ruined wall slab: wide, low, hard — the corridor narrows to
 				# lanes between slabs (40x10 extent → 80x20 footprint).
-				_ground_shadow(pos, 20.0, 0.45)
-				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 20.0)), Color(0.30, 0.28, 0.26))
-				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 5.0)), Color(0.42, 0.40, 0.37))
+				_ground_shadow(pos, 20.0, 0.45 * fade)
+				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 20.0)), Color(0.30, 0.28, 0.26, fade))
+				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 5.0)), Color(0.42, 0.40, 0.37, fade))
 				for bk2 in 3:
 					draw_rect(Rect2(pos + Vector2(-40.0 + float(bk2) * 26.0, -10.0), Vector2(2.0, 20.0)),
-						Color(0.18, 0.16, 0.15))
+						Color(0.18, 0.16, 0.15, fade))
 			3:
 				# Hero wreck: the focal ~2x silhouette anchoring each hardpoint.
 				# Scale 1.7 reads clearly 1.5-2x a classic rock (judge r1) while
 				# still matching the 32x24 collision (art==collision pin).
-				_ground_shadow(pos + Vector2(0, 8), 26.0, 0.5)
-				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5))
+				_ground_shadow(pos + Vector2(0, 8), 26.0, 0.5 * fade)
+				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5, fade))
 			_:
-				_ground_shadow(pos, 12.0, 0.42)
+				_ground_shadow(pos, 12.0, 0.42 * fade)
 				var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
+				var rcol := Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5)
 				_spr(rtex, pos, float(rh3 % 628) / 100.0,
 					{"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex],
-					Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5))
+					Color(rcol.r, rcol.g, rcol.b, fade))
 
 
 func _draw_sandbags() -> void:
@@ -3673,8 +3705,9 @@ func _draw_sandbags() -> void:
 		# 9/9 panel: cover must sit as heavy as a barrel (0.42 armor-grade
 		# shadow) and live in the khaki band — the old warm tan collided with
 		# the warm hulk/threat grammar. Value lifted ~0.1 over the dirt cards.
-		_ground_shadow(pos, 10.0, 0.42)
-		_spr("wall_sandbag", pos, 0.0, 0.62, Color(1.02, 0.98, 0.74))
+		var sb_fade := _bottom_fade(pos.y)   # c2 2v: fade off the player's back
+		_ground_shadow(pos, 10.0, 0.42 * sb_fade)
+		_spr("wall_sandbag", pos, 0.0, 0.62, Color(1.02, 0.98, 0.74, sb_fade))
 		# Field weathering (DS round-2 feedback): a soft dirt gradient at the
 		# base + sparse hash-placed scuff speckles — planted cover reads
 		# dug-in, not factory-fresh. All translucent overdraw, no new assets.

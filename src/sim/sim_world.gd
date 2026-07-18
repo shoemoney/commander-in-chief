@@ -165,7 +165,12 @@ const KILL_STREAK_WINDOW_TICKS := 90
 # Post-checkpoint spawn lull: the field spawner holds fire this long after a gate
 # opens so the "GATE SECURED" beat isn't stepped on by a fresh rusher.
 const GATE_SPAWN_GRACE_TICKS := 90
-const CAMERA_LEAD := 160 * F_ONE
+# c2 2v (both reviewers' #1 pick): the ratchet camera anchored the player at
+# 44% down-screen (160/360), so top-of-screen hazard drops gave no reaction
+# time. 260 anchors the player at 72% down (lookahead +62%), turning blind
+# top-edge deaths into readable ones. Retreat room to the +344 clamp is 84px;
+# 288 (literal bottom-20%) would leave only 56px, so 260 is the tuned floor.
+const CAMERA_LEAD := 260 * F_ONE
 const BUNKER_W := 48 * F_ONE
 const BUNKER_H := 32 * F_ONE
 # Dodge roll: 0.3 s i-frames, 1.2 s cooldown, 2× speed in the move direction.
@@ -2599,8 +2604,10 @@ func _spawn_mg_bullet(p: Dictionary, i: int, ax: int, ay: int) -> void:
 
 func _spawn_courier() -> void:
 	# A fleeing supply runner, dropped into the lower-middle so it has to cross
-	# the arena on its way to the top edge — a window to catch it.
-	enemies.append({"x": rng.range_i(80, 560) * F_ONE, "y": camera_top + 240 * F_ONE,
+	# the arena on its way to the top edge — a window to catch it. +300 (was
+	# +240): with the c2 camera lead at 260, +240 would pop it IN FRONT of the
+	# anchored player; +300 keeps it a chase from behind.
+	enemies.append({"x": rng.range_i(80, 560) * F_ONE, "y": camera_top + 300 * F_ONE,
 		"alive": true, "elite": false, "kind": "courier"})
 
 

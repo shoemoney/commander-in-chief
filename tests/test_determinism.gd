@@ -159,13 +159,19 @@ const SEED := 0xDEADBEEF
 ## RE-RECORDED (2026-07-17, cycle 1 KIMK round-2): the no-immediate-repeat window re-picks
 ## torture-window mine chunks and the barrel table grew 4->7 (different authored field).
 ## Fork/blockade/ford/parity changes all land past gate 1 and rode along inert.
+## RE-RECORDED (2026-07-18, cycle 2 c2-12 camera lookahead): CAMERA_LEAD 160->260
+## anchors the player at 72% down-screen (the ratchet blind-death fix, both
+## reviewers' #1 pick). camera_top derives from CAMERA_LEAD from tick ~1, so every
+## CAMPAIGN sample moves — a deliberate sim behavior change, not drift. ENDLESS is
+## UNCHANGED: it never advances the camera (CAMERA_LEAD never engages) and the
+## courier spawn move (camera_top+240->+300) is wave-3+, past the wave-2 wipe.
 const GOLDEN: Array[int] = [
-	6774622128853222166,
-	6178606846797565368,
-	7508029381399586560,
-	5302306772277264522,
-	4436281569612362539,
-	5729959905033908587,
+	3960584721031551345,
+	996321938414542430,
+	5287757350757329119,
+	969675874419806883,
+	7532000327903681596,
+	6773872348174204297,
 ]
 
 
@@ -249,6 +255,8 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## authored sandbag emplacements (quadrant L-stubs + a central diamond) now seed at endless
 ## _init — constant coords, no rng, riding the existing sandbag cover/checksum grammar — so
 ## the endless stream legitimately moves from tick 0. Campaign GOLDEN untouched (endless-gated).
+## c2-12 (2026-07-18): VERIFIED UNCHANGED — endless never advances the camera so
+## CAMERA_LEAD is inert here, and the courier-spawn move is past the wave-2 wipe.
 const ENDLESS_GOLDEN: Array[int] = [
 	5810251919466455340,
 	6810029477436195130,
