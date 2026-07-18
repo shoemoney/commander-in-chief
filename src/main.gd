@@ -485,6 +485,8 @@ func _paint_bg(canvas: Node2D) -> void:
 			var gt := _biome_ramp(march, [Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62),
 				Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(1.05, 0.70, 0.52)])
 			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
+			if sim.mode == "endless":
+				gcol = Color(gcol.r + 0.04, gcol.g - 0.04, gcol.b)   # rust-tan: its own ground
 			if variant == 0:
 				canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false, gcol)
 			else:
@@ -2478,9 +2480,12 @@ func _update_feel() -> void:
 		# Decal clocks freeze with the particles: a crater fading or a corpse
 		# aging under a "frozen" explosion breaks the freeze-frame read.
 		for i in range(_scorch.size() - 1, -1, -1):
-			_scorch[i]["t"] += 0.012
+			_scorch[i]["t"] += 0.012 if sim.mode != "endless" else 0.0
 			if _scorch[i]["t"] >= 1.0:
 				_scorch.remove_at(i)
+	if sim.mode == "endless":
+		while _scorch.size() > 24:   # scars persist; oldest-out past 24
+			_scorch.remove_at(0)
 		for i in range(_corpses.size() - 1, -1, -1):
 			_corpses[i]["t"] += 0.004   # linger ~4s
 			if _corpses[i]["t"] >= 1.0:
@@ -3122,7 +3127,20 @@ func _sector_march() -> float:
 
 
 func _draw_terrain() -> void:
-	# World-anchored grass tiling, darkened toward jungle; deterministic dirt
+# Endless landmark kit (9/9 arena identity): a neutral comms mast at center
+	# with a scorched base + two fixed rocks per quadrant — the arena is now a
+	# PLACE you learn, not a screenshot of campaign grass.
+	if sim.mode == "endless":
+		var lm_pos := _to_screen(320 * Fixed.ONE, -180 * Fixed.ONE)
+		draw_texture_rect(Art.tex("fx_shadow"), Rect2(lm_pos - Vector2(20, 8), Vector2(40, 20)),
+			false, Color(0.1, 0.08, 0.05, 0.5))
+		_spr("radio_tower", lm_pos, 0.0, 1.1, Color(0.85, 0.88, 0.85))
+		for qp in [[80, -300], [560, -300], [80, -60], [560, -60], [210, -320], [430, -50]]:
+			var qh := Art.cell_hash(qp[0], qp[1])
+			var qpos := _to_screen(qp[0] * Fixed.ONE, qp[1] * Fixed.ONE)
+			_ground_shadow(qpos, 9.0, 0.38)
+			_spr("rock1" if qh % 2 == 0 else "rock2", qpos, float(qh % 628) / 100.0, 1.7, Color(0.72, 0.75, 0.72))
+		# World-anchored grass tiling, darkened toward jungle; deterministic dirt
 	# patches and tree lines from a cell hash (decor only, not sim state).
 	# The opaque grass/dirt base moved to _paint_bg (renders on _bg_root, below the
 	# water quads). Everything below still draws in _draw() over the water.
@@ -3694,6 +3712,12 @@ func _draw_pickups() -> void:
 		# intensity — a soft safe-green ring + 2px bob (reduce-motion pins the
 		# bob at its raised pose, matching the capsule pulse-freeze).
 		var cpg := 1.0 if _motion < 0.5 else Art.pulse(0.15)
+		if pk.get("cost", 0) > 0 and sim.mode == "endless":
+			# Shop pad: priced crates sit on a hazard-striped supply plate —
+			# commerce has a PLACE in the arena now.
+			draw_rect(Rect2(ppos + Vector2(-36, -14), Vector2(72, 28)), Color(0.08, 0.07, 0.06, 0.55))
+			for hz in 6:
+				draw_rect(Rect2(ppos.x - 36 + hz * 12, ppos.y + 11, 6, 3), Color(0.8, 0.7, 0.2, 0.5))
 		if pk["kind"] <= 3 and not maxed:
 			var crring := Art.safe(Color(0.5, 1.0, 0.5))
 			draw_arc(ppos, 11.0, 0, TAU, 20, Color(crring.r, crring.g, crring.b, 0.14 + cpg * 0.14), 1.0)
@@ -4334,6 +4358,10 @@ func _draw_gunships() -> void:
 		_boss_hpmax.erase(_endless_boss_key)
 		_boss_ghost.erase(_endless_boss_key)
 		_endless_boss_key = ""
+		# Arena scarring (9/9 identity): the fallen gunship leaves a wreck —
+		# by wave 20 the field TELLS the run's story.
+		_hulks.append({"x": 320 * Fixed.ONE, "y": -140 * Fixed.ONE + (len(_hulks) % 3) * 30 * Fixed.ONE,
+			"t": 0.0, "rot": float(Art.cell_hash(len(_hulks), 7) % 628) / 100.0})
 	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 

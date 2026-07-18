@@ -364,6 +364,18 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	rng = SimRng.new(seed_value)
 	camera_top = -VIEW_H
 	_prev_camera_top = camera_top
+	if game_mode == "endless":
+		# Endless-arena identity (9/9 panel: the arena had ZERO spatial
+		# character vs campaign). Sixteen authored sandbag emplacements — four
+		# 3-bag L-stubs anchoring the quadrants + a 4-bag diamond ringing the
+		# central landmark. Constant coords, no rng; destructible like player
+		# bags (rebuild via the 40-coin shop bag IS the intended loop).
+		for eb in [[140, -250], [500, -250], [140, -110], [500, -110]]:
+			sandbags.append({"x": eb[0] * F_ONE, "y": eb[1] * F_ONE})
+			sandbags.append({"x": eb[0] * F_ONE, "y": (eb[1] - 24) * F_ONE})
+			sandbags.append({"x": (eb[0] + (24 if eb[0] < 320 else -24)) * F_ONE, "y": eb[1] * F_ONE})
+		for db in [[320, -212], [320, -148], [288, -180], [352, -180]]:
+			sandbags.append({"x": db[0] * F_ONE, "y": db[1] * F_ONE})
 	_next_bunker_y = -(500 * F_ONE)
 	_next_gate_y = -GATE_SPACING
 	_next_tank_y = -(750 * F_ONE)

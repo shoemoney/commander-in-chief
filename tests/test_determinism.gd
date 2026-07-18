@@ -223,13 +223,17 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## coin retier + aim re-acquire + streak/drop exclusion, barrels react to bullets/enemy-contact/
 ## fuse/coin-neutral, Triple+Spread 5-fan via SPREAD2, shop score parity). Both parents had
 ## re-recorded independently; new hashed fields e["hp"] and barrel fuse_ticks -> new stream.
+## ENDLESS RE-RECORDED (2026-07-17, level-panel cycle 1 — endless-arena identity, 9/9): sixteen
+## authored sandbag emplacements (quadrant L-stubs + a central diamond) now seed at endless
+## _init — constant coords, no rng, riding the existing sandbag cover/checksum grammar — so
+## the endless stream legitimately moves from tick 0. Campaign GOLDEN untouched (endless-gated).
 const ENDLESS_GOLDEN: Array[int] = [
-	9130899055408422002,
-	5882840635403858538,
-	8211017752628541534,
-	4397580517075479990,
-	6964630769468080526,
-	8205430538694322022,
+	3274861091408869328,
+	5594893952212554321,
+	8845749610860477777,
+	7601761169781313001,
+	2530659351129388321,
+	2284813234581916729,
 ]
 
 
