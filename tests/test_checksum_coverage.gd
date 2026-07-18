@@ -51,7 +51,11 @@ const KNOWN := {
 	# burn_ticks (c3 5v) accrues only under a seg-4+ foundry vent jet; like kind
 	# it is NOT fed to the checksum (removal, not a hashed flag, drives the
 	# grass/wall burn-off) and never appears in either torture window.
-	"rock": ["x", "y", "kind", "burn_ticks"],
+	# crack (c4 2v) accrues on a kind-2 wall slab under bullet fire and drives its
+	# removal at WALL_CRACK_HITS (like burn_ticks — removal, not a hashed flag);
+	# kind-2 walls only stream past both torture windows, so it never perturbs a
+	# golden. EXCLUDED.
+	"rock": ["x", "y", "kind", "burn_ticks", "crack"],
 	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",

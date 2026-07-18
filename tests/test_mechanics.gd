@@ -2360,6 +2360,12 @@ func test_c4_ford_teeth_staging() -> void:
 			continue
 		Runner.T.ok(teeth >= 2, "the ford has a near-shore teeth podium (%d rocks)" % teeth)
 		Runner.T.ok(apron_clear, "a hull-clear commit apron sits at the ford lane")
+		# The podium also plants 2 world-sandbag scraps just behind the teeth.
+		var scraps := 0
+		for sb in sim.sandbags:
+			if absi(sb["y"] - (teeth_y - 10 * SimWorld.F_ONE)) < 6 * SimWorld.F_ONE and sb.get("world", 0) == 1:
+				scraps += 1
+		Runner.T.ok(scraps >= 2, "the podium plants 2 world-sandbag scraps (%d)" % scraps)
 		checked += 1
 	Runner.T.ok(checked >= 1, "at least one band>=2 ford grew a staging podium")
 	# The band-1 torture ford has NO teeth (goldens inert).
@@ -2374,3 +2380,43 @@ func test_c4_ford_teeth_staging() -> void:
 			if absi(rk["y"] - (w["y"] - 60 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE:
 				t1 += 1
 		Runner.T.eq(t1, 0, "the band-1 torture ford has no staging teeth (goldens inert)")
+
+
+func test_c4_destructible_walls() -> void:
+	# c4 2v: kind-2 ruined-wall slabs CHIP under fire — WALL_CRACK_HITS bullets
+	# breach one; an explosion breaches instantly. crack is EXCLUDED -> goldens inert.
+	var sim := SimWorld.new(43, 1)
+	var wx: int = 300 * SimWorld.F_ONE
+	var wy: int = sim.camera_top + 100 * SimWorld.F_ONE
+	sim.rocks.append({"x": wx, "y": wy, "kind": 2})
+	for i in SimWorld.WALL_CRACK_HITS - 1:
+		sim.bullets.append({"x": wx, "y": wy, "vx": 0, "vy": 0, "ttl": 60, "owner": 0})
+		sim._step_bullets()
+	var still := false
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and rk["x"] == wx:
+			still = true
+	Runner.T.ok(still, "the wall still stands (and blocks) after %d hits" % (SimWorld.WALL_CRACK_HITS - 1))
+	sim.events.clear()
+	sim.bullets.append({"x": wx, "y": wy, "vx": 0, "vy": 0, "ttl": 60, "owner": 0})
+	sim._step_bullets()
+	var gone := true
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and rk["x"] == wx:
+			gone = false
+	Runner.T.ok(gone, "the %dth hit breaches the wall" % SimWorld.WALL_CRACK_HITS)
+	var cracked := false
+	for ev in sim.events:
+		if ev.get("t", "") == "cover_crack":
+			cracked = true
+	Runner.T.ok(cracked, "breaching emits a cover_crack event")
+	# A grenade one-shots a fresh wall.
+	var sim2 := SimWorld.new(43, 1)
+	var w2y: int = sim2.camera_top + 100 * SimWorld.F_ONE
+	sim2.rocks.append({"x": 300 * SimWorld.F_ONE, "y": w2y, "kind": 2})
+	sim2._explode(300 * SimWorld.F_ONE, w2y)
+	var gone2 := true
+	for rk in sim2.rocks:
+		if rk.get("kind", 0) == 2:
+			gone2 = false
+	Runner.T.ok(gone2, "an explosion breaches a wall in one shot")

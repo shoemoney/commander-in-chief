@@ -96,6 +96,7 @@ const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
 const GRENADE_RADIUS := 28 * F_ONE
+const WALL_CRACK_HITS := 6                   # c4 2v: bullets to breach a kind-2 ruined-wall slab (1 explosion breaches instantly)
 const GRENADE_COOLDOWN_TICKS := 30
 const ENEMY_SPEED := (F_ONE * 8) / 5          # 1.6 px/tick
 # Supply courier: the roster's only enemy that FLEES. Runs for the top edge at
@@ -1758,12 +1759,22 @@ func _step_bullets() -> void:
 					dead = true
 					break
 		if not dead and not rocks.is_empty():
-			for rk in rocks:
+			for ri in rocks.size():
+				var rk: Dictionary = rocks[ri]
 				if not _rk_solid(rk):
 					continue   # bullets pass through grass — it hides, doesn't save
 				if absi(bx - rk["x"]) <= _rk_hw(rk) and absi(by - rk["y"]) <= _rk_hh(rk):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
+					# c4 2v: kind-2 ruined-wall slabs CHIP under fire — WALL_CRACK_HITS
+					# rounds breach one and open a lane through it (kills turtling). crack
+					# is an EXCLUDED accrual (drives removal, not a hashed flag); kind-2
+					# only streams past both torture windows -> goldens byte-identical.
+					if rk.get("kind", 0) == 2:
+						rk["crack"] = rk.get("crack", 0) + 1
+						if rk["crack"] >= WALL_CRACK_HITS:
+							events.append({"t": "cover_crack", "x": rk["x"], "y": rk["y"]})
+							rocks.remove_at(ri)
 					break
 		if not dead:
 			for e in enemies:
@@ -1909,6 +1920,12 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		if _dist_lte(x, y, sb["x"], sb["y"], GRENADE_RADIUS):
 			events.append({"t": "sandbag_break", "x": sb["x"], "y": sb["y"]})
 			sandbags.remove_at(si)
+	# c4 2v: an explosion instantly BREACHES a kind-2 ruined-wall slab in radius —
+	# a grenade/barrel opens a lane through a wall in one shot (no chip count).
+	for ki in range(rocks.size() - 1, -1, -1):
+		if rocks[ki].get("kind", 0) == 2 and _dist_lte(x, y, rocks[ki]["x"], rocks[ki]["y"], GRENADE_RADIUS):
+			events.append({"t": "cover_crack", "x": rocks[ki]["x"], "y": rocks[ki]["y"]})
+			rocks.remove_at(ki)
 	for bk in bunkers:
 		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, GRENADE_RADIUS):
 			bk["alive"] = false
