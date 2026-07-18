@@ -1462,6 +1462,11 @@ func _consume_events() -> void:
 				# Fires at STREAM time (~2 screens ahead) — no sound/banner here;
 				# store the band and let _draw_gates signpost it when it scrolls in.
 				_forks.append({"y": ev["y"], "x": ev["x"]})
+			"route_bait":
+				# c2 2v: a bait fork's trap lane. Deliberately NO honest signpost
+				# or sound (reading the bait IS the skill) — the marker is stored
+				# so the deeper wreck/sandbag dressing can render the richer cover.
+				_forks.append({"y": ev["y"], "x": ev["x"], "bait": true})
 			"revive_deny":
 				_vo("vo_chest_empty", 2, 600)
 			"gate_open":
@@ -4113,21 +4118,38 @@ func _draw_gates() -> void:
 		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
 		if fy < -20.0 or fy > 380.0:
 			continue
-		# Physical fork island (7v): three stacked wrecks divide the lanes at
-		# x=260 — CACHE reads narrow/fortified, BOUNTY reads open killbox.
+		# Physical fork island (7v): stacked wrecks divide the lanes at x=260 —
+		# CACHE reads narrow/fortified, BOUNTY reads open killbox. c2 2v: SIX
+		# segments now span the deepened +40..+620 commitment (was three).
 		var isl_x := float(fk.get("x", 260 * Fixed.ONE)) * PX
-		for wi in 3:
+		for wi in 6:
 			var wh2 := Art.cell_hash(fk["y"] / 65536 + wi * 13, wi)
 			var wy2 := _to_screen(0, fk["y"] + (70 + wi * 90) * Fixed.ONE).y
+			if wy2 < -20.0 or wy2 > 380.0:
+				continue
 			_ground_shadow(Vector2(isl_x, wy2), 12.0, 0.42)
 			_spr(["wreck_apc", "tank_hulk", "wreck_halftrack"][wh2 % 3], Vector2(isl_x, wy2),
 				float(wh2 % 628) / 100.0 * 0.2 + (PI if wi % 2 == 0 else 0.0), 0.9, Color(0.6, 0.58, 0.55))
-		# CACHE wire strips draw where they actually SLOW (mechanical truth):
+		# CACHE wire strips draw where they actually SLOW (mechanical truth) —
+		# four strips now, matching the deepened _in_fork_wire bands.
 		var wire_x0 := 30.0 if isl_x < 320.0 else isl_x + 50.0
-		for ci in 2:
+		for ci in 4:
 			var cy2 := _to_screen(0, fk["y"] + (100 + ci * 110) * Fixed.ONE).y
+			if cy2 < -20.0 or cy2 > 380.0:
+				continue
 			for wseg2 in 3:
 				_spr("barbedwire", Vector2(wire_x0 + 30.0 + wseg2 * 55.0, cy2), 0.0, 0.8, Color(0.55, 0.5, 0.45))
+		# Bait dressing (c2 2v): the trap lane gets EXTRA sandbag cover so it
+		# reads as the better-defended reward lane — deliberately NO warning
+		# glyph (reading the bait is the skill). Matches the sim's +490/+530 bags.
+		if fk.get("bait", false):
+			var bait_x := (isl_x + 120.0) if isl_x < 320.0 else (isl_x - 120.0)
+			for bd in 2:
+				var bdy := _to_screen(0, fk["y"] + (490 + bd * 40) * Fixed.ONE).y
+				if bdy < -20.0 or bdy > 380.0:
+					continue
+				_ground_shadow(Vector2(bait_x, bdy), 10.0, 0.42)
+				_spr("wall_sandbag", Vector2(bait_x + bd * 20.0, bdy), 0.0, 0.62, Color(1.02, 0.98, 0.74))
 		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
 		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
 		var cache_txt := "< CACHE"
@@ -6444,7 +6466,7 @@ func _draw_wheel() -> void:
 		# not 10 — give it a countdown right under the cue line so the decision
 		# has its clock. Reads the already-checksummed intermission_ticks.
 		if sim.mode == "endless" and sim.intermission_ticks > 0:
-			Art.text_center(self, "NEXT WAVE IN %d" % ceili(sim.intermission_ticks / 60.0),
+			Art.text_center(self, "NEXT WAVE IN %ds" % ceili(sim.intermission_ticks / 60.0),
 				c.x, c.y + 63.0, 8, Color(1.0, 0.95, 0.65))
 
 

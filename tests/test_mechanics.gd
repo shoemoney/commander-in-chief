@@ -441,7 +441,8 @@ func test_route_fork_streams_lanes_at_gates_2_and_4() -> void:
 		if m["y"] > gate_y and m["y"] < gate_y + 300 * SimWorld.F_ONE and m["x"] < SimWorld.SCREEN_CX:
 			band_mines += 1
 	Runner.T.ok(band_mines >= 3, "cache lane is ringed by at least the 3 extra mines (got %d)" % band_mines)
-	# Gauntlet lane: two elites right of center, exactly one a marked bounty.
+	# Gauntlet lane: the base 2 elites + the c2-16 deeper-commitment elite
+	# (and 2 more if this seed's fork is a bait), exactly one a marked bounty.
 	var lane_elites := 0
 	var lane_marked := 0
 	for e in sim.enemies:
@@ -449,7 +450,7 @@ func test_route_fork_streams_lanes_at_gates_2_and_4() -> void:
 			lane_elites += 1
 			if e.get("marked", false):
 				lane_marked += 1
-	Runner.T.eq(lane_elites, 2, "gauntlet lane spawns two extra elites right of center")
+	Runner.T.ok(lane_elites >= 3, "gauntlet lane spawns the base 2 + deeper-commitment elites (got %d)" % lane_elites)
 	Runner.T.ok(lane_marked >= 1, "at least one gauntlet elite is a guaranteed marked bounty")
 	# A==B determinism over the forked stream.
 	var a := _fork_run()
@@ -1511,3 +1512,84 @@ func test_c2_flank_fires_once() -> void:
 		sim._step_gates()
 	# Both walls breached exactly once = 2 squads, not 4.
 	Runner.T.eq(sim.enemies.size(), 2 * SimWorld.FLANK_SQUAD, "the breach fires once — no double squad")
+
+
+func _stream_fork(seed: int) -> SimWorld:
+	# Force gate 2 to stream (the 60s torture never reaches it — probe-verified).
+	var sim := SimWorld.new(seed, 1)
+	sim._gate_counter = 1
+	sim.camera_top = sim._next_gate_y + 2 * SimWorld.VIEW_H - SimWorld.F_ONE
+	sim.step([_idle()])
+	return sim
+
+
+func test_c2_fork_commitment_depth() -> void:
+	# c2 2v: the fork island now spans a real ~1.7-screen COMMITMENT (+40..+620),
+	# so you can't sidestep the lane you picked — only ride it north.
+	var sim := _stream_fork(7)
+	var gate_y := 0
+	var fx := 0
+	for g in sim.gates:
+		if g.get("fork_x", 0) != 0:
+			gate_y = g["y"]
+			fx = g["fork_x"] * SimWorld.F_ONE
+			break
+	Runner.T.ok(fx != 0, "a fork gate streamed")
+	# A player mid-commitment (500px deep, past the old +320 island end) can't
+	# cross the divider laterally. Camera anchors the deep row into view.
+	sim.camera_top = gate_y + 300 * SimWorld.F_ONE
+	var p: Dictionary = sim.players[0]
+	p["x"] = fx - 60 * SimWorld.F_ONE
+	p["y"] = gate_y + 500 * SimWorld.F_ONE
+	var into := SimInput.new()
+	into.move_x = 256   # push east, into the island
+	for i in 30:
+		sim.step([into])
+	Runner.T.ok(absi(sim.players[0]["x"] - fx) >= 44 * SimWorld.F_ONE,
+		"the divider blocks a lateral crossing 500px deep (old island ended at 320)")
+	# The deeper wire strip is a real slow zone past the old extent.
+	Runner.T.ok(sim._in_fork_wire(fx - 60 * SimWorld.F_ONE, gate_y + 340 * SimWorld.F_ONE),
+		"the +330 wire strip extends the CACHE-lane slow cost down the commitment")
+
+
+func test_c2_bait_fork_exists_and_stays_fair() -> void:
+	# Find a seed whose gate-2 fork is a BAIT, then a non-bait one; verify the
+	# bait emits its marker and the sparse (cache) lane keeps a hull passage.
+	var found_bait := false
+	var found_plain := false
+	for sd in range(1, 40):
+		var is_bait: bool = SimWorld._mix(2, sd) % 4 == 0
+		var sim := _stream_fork(sd)
+		var bait_ev := false
+		for ev in sim.events:
+			if ev["t"] == "route_bait":
+				bait_ev = true
+		Runner.T.eq(bait_ev, is_bait, "seed %d: route_bait event matches the _mix derivation" % sd)
+		if is_bait and not found_bait:
+			found_bait = true
+			# The CACHE lane (left of the 260 island for gate 2) keeps a passage
+			# wider than a hull end-to-end — the bait never blocks the safe route.
+			var lane_w := (260 - 44) - 16   # WORLD_LEFT..island-left face
+			Runner.T.ok(lane_w * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE,
+				"the sparse cache lane clears a hull (%dpx)" % lane_w)
+		elif not is_bait and not found_plain:
+			found_plain = true
+	Runner.T.ok(found_bait, "a bait fork exists within 40 seeds (~1-in-4)")
+	Runner.T.ok(found_plain, "non-bait forks also exist")
+
+
+func test_c2_bait_ambush_holds_until_crossed() -> void:
+	# The bait's ambush elites stay leashed (hold_y) until a player crosses the
+	# band's south edge — the trap doesn't pre-engage before you commit.
+	var bait_seed := -1
+	for sd in range(1, 40):
+		if SimWorld._mix(2, sd) % 4 == 0:
+			bait_seed = sd
+			break
+	Runner.T.ok(bait_seed > 0, "found a bait seed")
+	var sim := _stream_fork(bait_seed)
+	var held := 0
+	for e in sim.enemies:
+		if e.get("hold_y", 0) != 0:
+			held += 1
+	Runner.T.ok(held >= 2, "the bait ambush elites are leashed until the player crosses (got %d)" % held)

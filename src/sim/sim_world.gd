@@ -710,9 +710,13 @@ func _step_players(inputs: Array) -> void:
 			var fx2: int = g2.get("fork_x", 0)
 			if fx2 == 0:
 				continue
-			if p["y"] >= g2["y"] + 40 * F_ONE and p["y"] <= g2["y"] + 320 * F_ONE \
+			# c2 2v: the divider now spans +40..+620 (~1.7 screens) so the lane
+			# choice is a real COMMITMENT — you can't switch mid-fork, only ride
+			# your pick north to the gate (progress is always possible; only
+			# lateral crossing is blocked, so no softlock under the ratchet).
+			if p["y"] >= g2["y"] + 40 * F_ONE and p["y"] <= g2["y"] + 620 * F_ONE \
 					and absi(p["x"] - fx2 * F_ONE) < 44 * F_ONE:
-				if not (rpy >= g2["y"] + 40 * F_ONE and rpy <= g2["y"] + 320 * F_ONE \
+				if not (rpy >= g2["y"] + 40 * F_ONE and rpy <= g2["y"] + 620 * F_ONE \
 						and absi(rpx - fx2 * F_ONE) < 44 * F_ONE):
 					p["x"] = rpx
 					p["y"] = rpy
@@ -2786,8 +2790,12 @@ func _in_fork_wire(x: int, y: int) -> bool:
 		var fx3: int = g.get("fork_x", 0)
 		if fx3 == 0:
 			continue
+		# c2 2v: two more strips at +330/+450 extend the CACHE-lane slow cost
+		# down the full ~1.7-screen commitment (was only +90/+210).
 		if y >= g["y"] + 90 * F_ONE and y <= g["y"] + 110 * F_ONE \
-				or (y >= g["y"] + 210 * F_ONE and y <= g["y"] + 230 * F_ONE):
+				or (y >= g["y"] + 210 * F_ONE and y <= g["y"] + 230 * F_ONE) \
+				or (y >= g["y"] + 330 * F_ONE and y <= g["y"] + 350 * F_ONE) \
+				or (y >= g["y"] + 450 * F_ONE and y <= g["y"] + 470 * F_ONE):
 			if (fx3 == 260 and x < fx3 * F_ONE - 44 * F_ONE) \
 					or (fx3 == 380 and x > fx3 * F_ONE + 44 * F_ONE):
 				return true
@@ -3083,6 +3091,49 @@ func _step_camera() -> void:
 						"y": _next_gate_y + (110 + (fbg % 2) * 120) * F_ONE})
 				events.append({"t": "route_fork", "x": (260 if _gate_counter == 2 else 380) * F_ONE,
 					"y": _next_gate_y})
+				# c2 2v: DEEPEN the fork into a ~1.7-screen commitment + a 1-in-4
+				# BAIT variant. All _mix-derived (the shared rng sequence stays
+				# clean), gate 2/4 only (torture never streams here), no new gate
+				# field. bounty_x0 is the GAUNTLET (fortified-looking) side.
+				var fmix := _mix(_gate_counter, _world_seed)
+				# Deeper content beats: CACHE +2 mines, GAUNTLET +1 leashed elite.
+				var cache_x0: int = 70 if _gate_counter == 2 else 400
+				# Beats live SOUTH of the c2-03 decision apron (+300..460 stays
+				# clean so the choice reads) and route through the same bunker
+				# exclusion as the main streams.
+				for dm in 2:
+					var cmx: int = (cache_x0 + (fmix >> (dm * 4)) % 150) * F_ONE
+					var cmy: int = _next_gate_y + (500 + dm * 80) * F_ONE
+					if not _near_stream_bunker(cmx, cmy):
+						mines.append({"x": cmx, "y": cmy, "armed": true})
+				_spawn_enemy((bounty_x0 + 40 + (fmix >> 8) % 120) * F_ONE,
+					_next_gate_y + 560 * F_ONE, true)
+				var deep_e: Dictionary = enemies[enemies.size() - 1]
+				if deep_e["kind"] == "elite":
+					deep_e["hold_y"] = _next_gate_y + 680 * F_ONE
+				# BAIT (1-in-4): the fortified-LOOKING gauntlet lane is a kill-box
+				# — extra sandbags read as the reward lane, but 2 ambush elites +
+				# a mine cluster punish the autopilot pick; the cache lane is
+				# comparatively safe. NO hard dead-end cap: the ratchet camera
+				# can't backtrack far enough to escape a true wall without a
+				# softlock, so the cost is the FIGHT, not an unwinnable trap. No
+				# honest signpost — reading the bait IS the skill.
+				if fmix % 4 == 0:
+					for bg2 in 2:
+						sandbags.append({"x": (bounty_x0 + 40 + bg2 * 45) * F_ONE,
+							"y": _next_gate_y + (490 + bg2 * 40) * F_ONE})
+					for amb in 2:
+						_spawn_enemy((bounty_x0 + 30 + amb * 60) * F_ONE,
+							_next_gate_y + 560 * F_ONE, true)
+						var ae: Dictionary = enemies[enemies.size() - 1]
+						if ae["kind"] == "elite":
+							ae["hold_y"] = _next_gate_y + 560 * F_ONE
+					for bm in 3:
+						var bmx: int = (bounty_x0 + 20 + bm * 40) * F_ONE
+						var bmy: int = _next_gate_y + (500 + bm * 30) * F_ONE
+						if not _near_stream_bunker(bmx, bmy):
+							mines.append({"x": bmx, "y": bmy, "armed": true})
+					events.append({"t": "route_bait", "x": (bounty_x0 + 80) * F_ONE, "y": _next_gate_y})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > horizon:
 		tanks.append({
