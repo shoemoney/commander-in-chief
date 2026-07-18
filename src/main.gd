@@ -6418,6 +6418,11 @@ func _draw_flame(g: CanvasItem, fp: Vector2, strength: float, flick: float) -> v
 	g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+static func _scorch_cap(mode: String) -> int:
+	# a2-13: campaign keeps more persistent scars (40) than the churning endless arena (24).
+	return 24 if mode == "endless" else 40
+
+
 static func _scorch_age(tt: float) -> float:
 	# a2-13: campaign scorch ages SLOW toward a capped GHOST (0.82) — it never reaches
 	# 1.0, so it is never removed by age; it settles into a faint permanent scar.

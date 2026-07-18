@@ -431,6 +431,8 @@ func test_a2_scorch_ages_to_a_capped_ghost() -> void:
 	Runner.T.ok(ms._scorch_age(0.82) < 1.0, "campaign scorch never reaches t=1 -> never age-removed (a faint permanent scar)")
 	var floor_a: float = 0.4 * (1.0 - ms._scorch_age(5.0))
 	Runner.T.ok(floor_a > 0.02 and floor_a < 0.12, "_draw_scorch ghost floor alpha (0.4*(1-0.82)) is faint but visible (%.3f)" % floor_a)
+	Runner.T.eq(ms._scorch_cap("endless"), 24, "endless arena caps at 24 scars")
+	Runner.T.eq(ms._scorch_cap("campaign"), 40, "campaign keeps more persistent scars (40)")
 
 
 # --- a2-15: REND capsule out of the danger-red family ---
