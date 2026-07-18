@@ -1694,10 +1694,12 @@ func test_c3_fork_bluff_and_reward() -> void:
 			if sb["x"] > SimWorld.SCREEN_CX and sb["y"] > gate_y:
 				gauntlet_bags += 1
 		Runner.T.ok(gauntlet_bags > 0, "seed %d: the fortified LOOK (sandbags) streams in every read" % sd)
-		# High-tier reward (kind 4-6) deep in the gauntlet, every fork.
+		# High-tier reward deep in the gauntlet, every fork — an offense capsule
+		# (kind 4-6) OR the c4 1-in-3 defensive VEST VAULT (kind 2).
 		var deep_reward := false
 		for pk in sim.pickups:
-			if pk.get("kind", 0) >= 4 and pk.get("kind", 0) <= 6 \
+			var pkk: int = pk.get("kind", 0)
+			if (pkk == 2 or (pkk >= 4 and pkk <= 6)) \
 					and pk["y"] >= gate_y + 560 * SimWorld.F_ONE and pk["x"] > SimWorld.SCREEN_CX:
 				deep_reward = true
 		Runner.T.ok(deep_reward, "seed %d: a high-tier reward sits deep in the gauntlet" % sd)
@@ -2058,47 +2060,42 @@ func test_c3_trench_golden_inert() -> void:
 	Runner.T.ok(sim._in_trench(cell[0], cell[1]), "a trench is authored from band 2 on")
 
 
-func test_c4_offlane_alcoves() -> void:
-	# c4 5v: seg>=2 bands stamp an off-lane risk/reward pocket — a landmark
-	# hero-wreck ~180px off the center rail sheltering a FREE capsule behind a
-	# guarding mine; 1-in-8 escalate to a Vest vault ringed by mines. All
-	# band>=2 -> past both torture reaches -> goldens byte-identical.
-	var sim := SimWorld.new(43, 1)
-	sim.camera_top = -10000 * SimWorld.F_ONE
+func test_c4_fork_vest_vault() -> void:
+	# c4 5v: 1-in-3 gate-4 forks swap the offense capsule for a defensive VEST
+	# VAULT (guaranteed Flak Vest ringed by 2 mines) so the off-lane gauntlet
+	# reward TYPE varies. Gate 4 (-4000) is past the campaign torture reach.
+	var vault_seed := -1
+	var offense_seed := -1
+	for sd in range(1, 120):
+		var fm: int = SimWorld._mix(4, sd)
+		if (fm >> 12) % 3 == 0 and vault_seed < 0:
+			vault_seed = sd
+		elif (fm >> 12) % 3 != 0 and offense_seed < 0:
+			offense_seed = sd
+	Runner.T.ok(vault_seed > 0 and offense_seed > 0, "found a gate-4 vault seed and an offense seed")
+	var gate_y := -4000 * SimWorld.F_ONE
+	# VAULT seed: a guaranteed Vest deep in the gauntlet, ringed by a mine.
+	var sim := SimWorld.new(vault_seed, 1)
+	sim.camera_top = -(4600 * SimWorld.F_ONE)
 	sim._step_camera()
-	var caches := 0
+	var vest := false
 	for pk in sim.pickups:
-		if pk.get("cost", 1) != 0:
-			continue
-		if absi(pk["x"] - SimWorld.SCREEN_CX * SimWorld.F_ONE) <= 150 * SimWorld.F_ONE:
-			continue
-		# A landmark hero-wreck (kind 3) sits ~30px north of the capsule.
-		for rk in sim.rocks:
-			if rk.get("kind", 0) == 3 and absi(rk["x"] - pk["x"]) < 20 * SimWorld.F_ONE \
-					and absi(rk["y"] - (pk["y"] - 30 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE:
-				caches += 1
-				break
-	Runner.T.ok(caches >= 1, "off-lane alcove caches stream past the golden reach (%d)" % caches)
-	# Directly exercise the 1-in-8 VEST VAULT tier (deterministic).
-	var sim2 := SimWorld.new(1, 1)
-	var vy: int = -4000 * SimWorld.F_ONE   # band 4, clear of bunker rings
-	sim2._stamp_alcove(vy, 4, 8)           # h % 8 == 0 -> the Vest vault
-	var vest_ct := 0
+		if pk.get("kind", 0) == 2 and pk.get("cost", 1) == 0 \
+				and pk["y"] >= gate_y + 600 * SimWorld.F_ONE and pk["y"] <= gate_y + 640 * SimWorld.F_ONE:
+			vest = true
+	Runner.T.ok(vest, "the vault fork drops a guaranteed Vest deep in the gauntlet")
 	var ring := 0
+	for m in sim.mines:
+		if absi(m["y"] - (gate_y + 660 * SimWorld.F_ONE)) < 20 * SimWorld.F_ONE:
+			ring += 1
+	Runner.T.ok(ring >= 1, "the Vest vault is ringed by guarding mines (%d)" % ring)
+	# OFFENSE seed: the classic offense capsule (kind 4-6), no vault vest there.
+	var sim2 := SimWorld.new(offense_seed, 1)
+	sim2.camera_top = -(4600 * SimWorld.F_ONE)
+	sim2._step_camera()
+	var off := false
 	for pk in sim2.pickups:
-		if pk.get("kind", 0) == 2 and pk.get("cost", 1) == 0:
-			vest_ct += 1
-			for m in sim2.mines:
-				if absi(m["x"] - pk["x"]) <= 50 * SimWorld.F_ONE:
-					ring += 1
-	Runner.T.eq(vest_ct, 1, "the 1-in-8 tier stamps exactly one Vest")
-	Runner.T.ok(ring >= 3, "the Vest vault is ringed by 3 mines (%d)" % ring)
-	# And the standard tier is a single guarding mine + a free ammo/grenade.
-	var sim3 := SimWorld.new(1, 1)
-	sim3._stamp_alcove(-4000 * SimWorld.F_ONE, 4, 3)   # h % 8 != 0 -> standard cache
-	var free_ct := 0
-	for pk in sim3.pickups:
-		if pk.get("cost", 1) == 0 and pk.get("kind", 9) in [0, 1]:
-			free_ct += 1
-	Runner.T.eq(free_ct, 1, "the standard tier drops one free ammo/grenade capsule")
-	Runner.T.eq(sim3.mines.size(), 1, "the standard cache has a single guarding mine")
+		if pk.get("kind", 0) >= 4 and pk.get("kind", 0) <= 6 \
+				and pk["y"] >= gate_y + 600 * SimWorld.F_ONE and pk["y"] <= gate_y + 640 * SimWorld.F_ONE:
+			off = true
+	Runner.T.ok(off, "a non-vault gate-4 fork keeps the offense capsule")
