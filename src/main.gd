@@ -4025,12 +4025,18 @@ func _draw_foundry_arena() -> void:
 				# a2-09 ENV#3: rising HEAT-HAZE — the crucible radiates hot air into the
 				# frame (translucent warm blobs rising + fading above the pool), so it reads
 				# as a working foundry, not a painted disc.
-				for hz in 2:
-					var ht := fposmod(pph * 0.25 + float(hz) * 0.5, 1.0)
-					var hr := 12.0 + ht * 16.0
+				for hz in 3:
+					var ht := fposmod(pph * 0.22 + float(hz) * 0.34, 1.0)
+					var hr := 13.0 + ht * 18.0
 					draw_texture_rect(Art.tex("fx_softspot"),
-						Rect2(pp.x - hr + sin(pph + float(hz)) * 4.0, pp.y - 6.0 - ht * 26.0, hr * 2.0, hr * 1.4),
-						false, Color(1.0, 0.55, 0.25, (1.0 - ht) * 0.10 * _motion))
+						Rect2(pp.x - hr + sin(pph + float(hz)) * 4.0, pp.y - 6.0 - ht * 28.0, hr * 2.0, hr * 1.5),
+						false, Color(1.0, 0.55, 0.25, (1.0 - ht) * 0.14 * _motion))
+				# a2-09 r2 ENV#6: a couple SLAG chunks beside the pool — dark cooled metal
+				# with a hot seam — so the floor reads as industrial slag, not bare ground.
+				for sg in 2:
+					var sgp := pp + Vector2(19.0 - 38.0 * float(sg), 15.0)
+					draw_circle(sgp, 4.0, Color(0.10, 0.08, 0.07, 0.9))
+					draw_circle(sgp + Vector2(0, -1), 1.6, Color(1.0, 0.45, 0.15, 0.5 + pt * 0.2))
 		# Scrap heaps + pipe run (judge r2): wrecked-industry mass around the
 		# boss path, riding loaded litter textures — no new assets.
 		var pipe_a := _to_screen(40 * Fixed.ONE, g["y"] + 250 * Fixed.ONE)
