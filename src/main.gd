@@ -5691,6 +5691,18 @@ func _draw_players() -> void:
 				draw_arc(pos + Vector2(0, 4), 4.0 + wt * 8.0, 0, TAU, 16,
 					Color(0.75, 0.9, 1.0, 0.5 * (1.0 - wt)), 1.2)
 				draw_arc(pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
+				# a2-07 ENV#7/VFX#2: a directional BOW-WAVE ahead + trailing V-WAKE when the
+				# wader is MOVING — water displaced in the travel direction, so a crossing
+				# reads as pushing through the current, not standing in it.
+				if i < _dust_prev.size() and Vector2i(p["x"], p["y"]) != _dust_prev[i]:
+					var wdir := Vector2(float(p["x"] - _dust_prev[i].x), float(p["y"] - _dust_prev[i].y)).normalized()
+					var wperp := Vector2(-wdir.y, wdir.x)
+					draw_arc(pos + wdir * 5.0, 4.5, wdir.angle() - 1.1, wdir.angle() + 1.1, 8,
+						Color(0.86, 0.93, 1.0, 0.45 * _motion), 1.3)
+					for wv in 2:
+						var tail := pos - wdir * (5.0 + float(wv) * 6.0)
+						draw_line(pos, tail + wperp * (4.0 + float(wv) * 3.0), Color(0.8, 0.9, 0.98, (0.32 - float(wv) * 0.1) * _motion), 1.2)
+						draw_line(pos, tail - wperp * (4.0 + float(wv) * 3.0), Color(0.8, 0.9, 0.98, (0.32 - float(wv) * 0.1) * _motion), 1.2)
 			# Get-up: blend the residual knockdown topple back out while the decaying
 			# _down_anim drains, so a revive rises instead of snapping upright.
 			var da_res: float = _down_anim[i] if i < _down_anim.size() else 0.0

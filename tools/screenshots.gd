@@ -105,6 +105,15 @@ func _dress_victoly(m: Node2D) -> void:
 			"col": Color(1.0, 0.82, 0.35), "vx": cos(a) * 2.0, "vy": sin(a) * 2.0})
 
 
+func _dress_river(m: Node2D) -> void:
+	# a2-07: offset the prev-pos so the wading players read as MOVING (the wake needs
+	# frame-to-frame movement; the harness never steps, so pose it).
+	var q: Dictionary = m.sim.players[0]
+	m._dust_prev[0] = Vector2i(q["x"] - 3 * F, q["y"] - 5 * F)
+	var q2: Dictionary = m.sim.players[1]
+	m._dust_prev[1] = Vector2i(q2["x"] + 4 * F, q2["y"] - 4 * F)
+
+
 func _cam(sim: SimWorld, offset_px: int) -> int:
 	return sim.camera_top + offset_px * F
 
@@ -115,7 +124,7 @@ func _build_shots() -> void:
 	shots = [
 		{"name": "jungle-firefight", "build": _shot_firefight, "dress": _dress_firefight},
 		{"name": "tank-assault", "build": _shot_tank},
-		{"name": "river-crossing", "build": _shot_river},
+		{"name": "river-crossing", "build": _shot_river, "dress": _dress_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
 		{"name": "victoly", "build": _shot_victoly, "dress": _dress_victoly},
