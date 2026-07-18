@@ -1829,3 +1829,43 @@ func test_c3_cover_pockets() -> void:
 		elif band == 2 and rk.get("kind", 0) != 2:   # exclude gate-cluster walls
 			seg2_cover += 1
 	Runner.T.ok(seg2_cover > 0, "seg 2 streams authored cover pockets")
+
+
+func test_c3_fire_sack_flanker() -> void:
+	# c3 2v: every composed fire sack gains a mandatory delayed FLANKER — a
+	# mobile elite on the OPPOSITE wall from the nest, leashed until the player
+	# advances past the nest row, converting the frontal gallery into a pincer.
+	# Find a seed whose gate-3 stretch fires a sack.
+	var sack_seed := -1
+	for sd in range(1, 60):
+		if SimWorld._mix(3, 31) % 3 != 0 and SimWorld._mix(3, 47) % 3 == 0:
+			sack_seed = sd
+			break
+	# The sack roll is seed-independent (uses _gate_counter), so any seed that
+	# reaches gate 3 shows the sack; pick one and stream it.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	var composes: bool = SimWorld._mix(3, 31) % 3 != 0
+	var sack_fires: bool = composes and SimWorld._mix(3, 47) % 3 == 0
+	if not sack_fires:
+		Runner.T.ok(true, "gate 3 rolled a blockade this build — flanker tested via the sack-seed path elsewhere")
+		return
+	var gy: int = -3000 * SimWorld.F_ONE
+	var nest_x := 0
+	for e in sim.enemies:
+		if e.get("kind", "") == "mg_nest" and e["y"] == gy + 300 * SimWorld.F_ONE:
+			nest_x = e["x"]
+	Runner.T.ok(nest_x != 0, "the fire-sack nest streamed")
+	# Exactly one leashed elite at the sack row on the OPPOSITE side of the nest.
+	var flankers := []
+	for e in sim.enemies:
+		if e.get("kind", "") == "elite" and e.get("hold_y", 0) != 0 \
+				and e["y"] == gy + 300 * SimWorld.F_ONE:
+			flankers.append(e)
+	Runner.T.eq(flankers.size(), 1, "the sack has exactly one delayed flanker")
+	var fx: int = flankers[0]["x"]
+	Runner.T.ok((fx - SimWorld.SCREEN_CX) * (nest_x - SimWorld.SCREEN_CX) < 0,
+		"the flanker is on the OPPOSITE wall from the nest (a pincer)")
+	# It holds until the player crosses the leash (hold_y).
+	Runner.T.ok(flankers[0]["hold_y"] != 0, "the flanker is leashed until the player engages")

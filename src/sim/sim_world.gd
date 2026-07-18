@@ -3481,6 +3481,16 @@ func _stamp_stretch_setpieces() -> void:
 			_spawn_mg_nest(sack_x, _next_gate_y + 300 * F_ONE)
 			sandbags.append({"x": sack_x - 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
 			sandbags.append({"x": sack_x + 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
+			# c3 2v DELAYED FLANKER: a mandatory mobile elite on the OPPOSITE wall
+			# holds at far cover until the player advances past the nest row
+			# (leash trips ~20px north of the nest), then flanks — converting the
+			# frontal peek-and-delete gallery into a pincer. No new field (rides
+			# the shipped hold_y leash); mirror x = the sack's opposite side.
+			var flank_x: int = (170 if _gate_counter % 2 == 1 else 470) * F_ONE
+			enemies.append({"x": flank_x, "y": _next_gate_y + 300 * F_ONE, "alive": true,
+				"elite": true, "kind": "elite", "hp": 2, "fire_cd": ELITE_FIRE_CD_TICKS / 2,
+				"windup": 0, "lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0,
+				"hold_y": _next_gate_y + 280 * F_ONE})
 			return
 		# Authored blockade setpiece (5v): a 2-4 bag line mid-stretch the
 		# player must grenade, flank, or crush — rides the ENTIRE sandbag
