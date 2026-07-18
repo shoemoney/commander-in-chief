@@ -390,7 +390,7 @@ const _FOLIAGE_KEYS := {"tree_large": true, "tree_small": true, "fern": true,
 # foundry (A1 only ramped ground+foliage, so cool-green jungle rocks sat strewn on
 # the molten floor). Each prop lerps from its own muted tint toward this warm charred
 # debris color by foliage_march (capped 0.7 so jungle keeps prop variety).
-const DECOR_ASH := Color(0.44, 0.36, 0.30)
+const DECOR_ASH := Color(0.48, 0.40, 0.32)   # a2-01 r2: nudged toward the FOLIAGE_ASH ground family for palette lock
 const _DECOR_KEYS := {"rock1": true, "rock2": true, "wreck": true, "wreck_apc": true,
 	"wreck_halftrack": true, "wreck_technical": true, "wreck_light_tank": true, "tank_hulk": true,
 	"corpse_soldier1": true, "corpse_soldier2": true, "barrel": true, "crate_stack": true,
@@ -536,7 +536,7 @@ static func tint(name: String) -> Color:
 	if _FOLIAGE_KEYS.has(name):
 		return FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
 	if _DECOR_KEYS.has(name):
-		return TINT[name].lerp(DECOR_ASH, foliage_march * 0.7)
+		return TINT.get(name, Color(0.7, 0.76, 0.62)).lerp(DECOR_ASH, foliage_march * 0.7)
 	return TINT.get(name, Color.WHITE)
 
 

@@ -316,3 +316,13 @@ func test_a2_decor_chars_with_march() -> void:
 	Runner.T.ok(foundry_rock.r >= foundry_rock.g, "charred decor leans warm (r >= g)")
 	Runner.T.ok(Art.tint("rusher").is_equal_approx(Color(2.1, 1.7, 1.15)), "unit/threat tints ignore the decor char")
 	Art.foliage_march = 0.0
+
+
+func test_a2_decor_keys_all_in_tint() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var c: Dictionary = art.get_script_constant_map()
+	var decor: Dictionary = c["_DECOR_KEYS"]
+	var tint: Dictionary = c["TINT"]
+	Runner.T.ok(decor.size() >= 15, "the decor char set is populated (%d)" % decor.size())
+	for k in decor:
+		Runner.T.ok(tint.has(k), "decor key '%s' has a base TINT entry to char from" % k)
