@@ -435,6 +435,7 @@ var wave: int = 0
 var wave_pending: int = 0
 var wave_spawn_cd: int = 0
 var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter)
+var pressure_side: int = -1        # c3 7v: endless spawn pressure quadrant (0 left/1 center/2 right, -1 none); rotates every 3rd wave so the camp SPOT migrates
 var intermission_ticks: int = 0
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
 var flash_ticks: int = 0           # flashbang stun: field enemies skip their step while > 0
@@ -3281,7 +3282,15 @@ func _step_waves() -> void:
 				interval = maxi(4, interval / 2)
 			wave_spawn_cd = interval
 			wave_pending -= 1
-			var x := rng.range_i(24, 616) * F_ONE
+			# c3 7v: fold the spawn x toward the rotating pressure side — the
+			# full [24,616] range compresses into a ±120 band around the side's
+			# center {160,320,480}, so ~200px of clean flank always sits opposite
+			# and the safe corner migrates every 3 waves. One draw, folded in
+			# place (no new/removed rng), so the wave-1/2 torture is untouched.
+			var xpx := rng.range_i(24, 616)
+			if pressure_side >= 0:
+				xpx = clampi([160, 320, 480][pressure_side] + (xpx - 320) * 120 / 296, 24, 616)
+			var x := xpx * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = wave_mod == 2 or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
@@ -3392,6 +3401,14 @@ func _start_wave() -> void:
 	# holds; rocks/sandbags are already conditional checksum feeds.
 	if mode == "endless" and wave >= 3 and wave % ARENA_SHIFT_CADENCE == 0:
 		var amix := _mix(wave, _world_seed)
+		# c3 7v: rotate the spawn PRESSURE SIDE so the player's camp SPOT dies
+		# (the shipped scar/drop rotates COVER, but the spatial kite loop never
+		# moved). Reuse amix — zero new rng draws — and never repeat back-to-back.
+		var side: int = (amix >> 16) % 3
+		if side == pressure_side:
+			side = (side + 1) % 3
+		pressure_side = side
+		events.append({"t": "arena_pressure", "x": [160, 320, 480][side] * F_ONE, "y": camera_top})
 		if rocks.size() > ARENA_ROCK_FLOOR:
 			var scar_i: int = amix % rocks.size()
 			events.append({"t": "rock_crater", "x": rocks[scar_i]["x"], "y": rocks[scar_i]["y"]})

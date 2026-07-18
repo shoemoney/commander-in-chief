@@ -262,6 +262,7 @@ const _EVENT_SOUND := {
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"rock_crater": ["explosion", -8.0, 0.6],  # low crumble: the arena just lost a rock
 	"arena_shift": ["alarm", -10.0, 0.9],     # geometry klaxon: fresh cover dropped in
+	"arena_pressure": ["alarm", -9.0, 1.3],   # c3: rising pressure-shift klaxon — the hot quadrant just moved
 	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
@@ -1321,6 +1322,16 @@ func _consume_events() -> void:
 				# c2 arena drop: alert ring on the fresh L so the new geometry
 				# announces itself during the wave-start breath.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
+			"arena_pressure":
+				# c3 7v: the spawn pressure quadrant is rotating — a wide banner
+				# tick + a directional pulse toward the new hot side so the player
+				# reads WHERE the heat is moving and relocates the camp.
+				_fx.append({"x": ev["x"], "y": ev["y"] + 60 * Fixed.ONE, "t": 0.0,
+					"kind": "floattext", "rate": 0.012, "size": 11, "text": "PRESSURE SHIFTS",
+					"col": Color(1.0, 0.55, 0.3)})
+				for pr2 in 3:
+					_fx.append({"x": ev["x"], "y": ev["y"] + (80 + pr2 * 30) * Fixed.ONE,
+						"t": 0.0, "kind": "alert", "rate": 0.05})
 			"sniper_fire":
 				# Crack + red flash so the kill-shot leaving the barrel is visible —
 				# the paint-line telegraph vanishes the instant it fires.

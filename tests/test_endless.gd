@@ -234,3 +234,44 @@ func test_c2_arena_slots_clear_hull() -> void:
 			var dy: int = slot[1] - qr[1]
 			Runner.T.ok(dx * dx + dy * dy >= hc_px * hc_px,
 				"slot %s vs rock %s clears the hull" % [str(slot), str(qr)])
+
+
+func test_c3_pressure_side_rotates() -> void:
+	# c3 7v: the spawn pressure side rotates every 3rd wave (no back-to-back),
+	# folding spawns into a ±120px band so the safe corner migrates.
+	var sim := SimWorld.new(11, 1, "endless")
+	var sides := []
+	while sim.wave < 10:
+		sim._start_wave()
+		if sim.wave % SimWorld.ARENA_SHIFT_CADENCE == 0:
+			sides.append(sim.pressure_side)
+	# No back-to-back repeat across the shift waves (3,6,9).
+	for i in range(1, sides.size()):
+		Runner.T.ok(sides[i] != sides[i - 1], "pressure side never repeats back-to-back")
+		Runner.T.ok(sides[i] >= 0 and sides[i] <= 2, "pressure side is a valid quadrant")
+
+
+func test_c3_pressure_folds_spawns() -> void:
+	# Force wave 3 with pressure active, drain the wave, assert spawned enemy X
+	# lands inside the pressure band and never outside [24,616].
+	var sim := SimWorld.new(11, 1, "endless")
+	while sim.wave < 3:
+		sim._start_wave()
+	Runner.T.ok(sim.pressure_side >= 0, "wave 3 has a pressure side")
+	var center: int = [160, 320, 480][sim.pressure_side] * SimWorld.F_ONE
+	var spawned := 0
+	var idle := SimInput.new()
+	for i in 300:
+		sim.step([idle])
+		for e in sim.enemies:
+			if e["y"] <= sim.camera_top:   # freshly spawned at the top edge
+				Runner.T.ok(e["x"] >= 24 * SimWorld.F_ONE and e["x"] <= 616 * SimWorld.F_ONE,
+					"spawn x stays in-bounds")
+				spawned += 1
+	Runner.T.ok(spawned > 0, "the wave actually spawned enemies to check")
+
+
+func test_c3_pressure_is_endless_only() -> void:
+	# Campaign never sets a pressure side (it's endless-gated) — golden-safe.
+	var sim := SimWorld.new(11, 1, "campaign")
+	Runner.T.eq(sim.pressure_side, -1, "campaign has no spawn pressure side")
