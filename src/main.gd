@@ -3772,14 +3772,15 @@ func _draw_terrain() -> void:
 				else:
 					# a2-08 AD#9/ENV#8: per-instance scale + tint-value jitter (and a rare dead
 					# tree) so the tree layer stops reading as one card stamped repeatedly.
-					var tvar := 0.85 + float(h2 % 7) * 0.045
+					var ti := _tree_instance(h2)
+					var tsc: float = (0.42 if big else 0.34) * float(ti["scale_mul"])
 					var tval := tree_col.lerp(tree_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
-					if h2 % 11 == 0:
+					if ti["dead"]:
 						_spr(_TREE_DEAD[h2 % 3], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
-							(0.42 if big else 0.34) * tvar, tval.lerp(Color(0.42, 0.36, 0.3), 0.5))
+							tsc, tval.lerp(Color(0.42, 0.36, 0.3), 0.5))
 					else:
 						_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
-							float(h2 % 628) / 100.0 + tsway, (0.42 if big else 0.34) * tvar, tval)
+							float(h2 % 628) / 100.0 + tsway, tsc, tval)
 
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# Per-band SIGNATURE silhouettes under the litter (c2 3v): each sector owns
@@ -5555,6 +5556,12 @@ static func _body_ident_lean(slot: int) -> Color:
 static func _player_ring_dashed(slot: int) -> bool:
 	# a1-18 LEG#3: P1 ring is SOLID, P2 ring is DASHED — hue-independent identity.
 	return slot != 0
+
+
+static func _tree_instance(h2: int) -> Dictionary:
+	# a2-08: per-instance tree variety from the cell hash — scale x0.85..1.138 and a
+	# 1-in-11 dead-tree swap — so the canopy stops reading as a repeated stamp.
+	return {"scale_mul": 0.85 + float(h2 % 7) * 0.048, "dead": h2 % 11 == 0}
 
 
 func _draw_players() -> void:

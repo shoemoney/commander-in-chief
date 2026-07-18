@@ -389,3 +389,21 @@ func test_a2_jungle_water_decerulaned() -> void:
 	var deep: Array = c["_WATER_DEEP_STOPS"]
 	Runner.T.ok(shallow[0].g >= shallow[0].b, "jungle shallow water leans olive/tea (green >= blue), not saturated cerulean")
 	Runner.T.ok(deep[0].b < 0.30, "jungle deep water pulled off the saturated blue")
+
+
+# --- a2-08: tree instance variety ---
+
+func test_a2_tree_instance_variety() -> void:
+	var ms = load("res://src/main.gd")
+	var mn := 99.0
+	var mx := 0.0
+	var deads := 0
+	for h in range(0, 220):
+		var ti: Dictionary = ms._tree_instance(h)
+		mn = minf(mn, ti["scale_mul"])
+		mx = maxf(mx, ti["scale_mul"])
+		if ti["dead"]:
+			deads += 1
+	Runner.T.ok(absf(mn - 0.85) < 0.01, "min tree scale is 0.85")
+	Runner.T.ok(mx > 1.12 and mx < 1.15, "max tree scale ~1.14 (0.85..1.138)")
+	Runner.T.ok(deads > 8 and deads < 45, "a minority (1-in-11) of trees are dead (%d/220)" % deads)
