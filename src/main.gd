@@ -3272,10 +3272,13 @@ func _aim_angle(p: Dictionary) -> float:
 
 static func _boss_rim_base(march: float) -> Color:
 	# a3-01: the boss separator rim, keyed to the biome march. Warm-dark over the
-	# green bridge (low march, where the gunship was tuned) -> cool steel-cyan on the
+	# green bridge (low march, where the gunship was tuned) -> cool steel-BLUE on the
 	# hot foundry floor (high march, where the colossus fought red-on-red). Ramped on
 	# the hot end only (smoothstep 0.6..1.0) so the gunship never gets a muddy teal rim.
-	return Color(0.4, 0.1, 0.06).lerp(Color(0.55, 0.82, 1.0), smoothstep(0.6, 1.0, march))
+	# r2 (judge TO_TEN): the cool endpoint stays DARK (value ~0.48, near the warm rim's
+	# ~0.4) so the silhouette language remains "dark separator, hue-shifted" — the red
+	# floor is out-contrasted by HUE (blue vs red), not by flipping to a bright white edge.
+	return Color(0.4, 0.1, 0.06).lerp(Color(0.16, 0.32, 0.48), smoothstep(0.6, 1.0, march))
 
 
 func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 0.0)) -> void:
