@@ -3172,11 +3172,32 @@ func _draw_terrain() -> void:
 			var cell_x := int(fx / 64.0)
 			var cell_y := int((cam_y + fy_px) / 64.0)
 			var here_dirt := Art.cell_hash(cell_x, cell_y) % 6 == 0
-			if (here_dirt != (Art.cell_hash(cell_x + 1, cell_y) % 6 == 0) \
-					or here_dirt != (Art.cell_hash(cell_x, cell_y + 1) % 6 == 0)) \
-					and (hf >> 11) % 5 < 2:
+			# Graded edge strength (GPT round-4): suppression scales with the
+			# FRACTION of disagreeing neighbors (all four), so density falls
+			# off smoothly with boundary intensity — 15% per disagreeing side
+			# up to 60% at a full crossing, not one fixed rate.
+			# Full 8-neighborhood gradient (GPT round-5): cardinals weigh 2,
+			# diagonals weigh 1 (max 12) — diagonal and sub-cell boundary
+			# shapes now bend the density field too, not just axis edges.
+			# Suppression = score * 5% (0..60%), continuous with geometry.
+			var edge_s := 0
+			for nb in [[1, 0, 2], [-1, 0, 2], [0, 1, 2], [0, -1, 2],
+					[1, 1, 1], [1, -1, 1], [-1, 1, 1], [-1, -1, 1]]:
+				if here_dirt != (Art.cell_hash(cell_x + nb[0], cell_y + nb[1]) % 6 == 0):
+					edge_s += nb[2]
+			if edge_s > 0 and (hf >> 11) % 100 < edge_s * 5:
 				continue
-			var f_tex: String = ["fern", "fern", "fern2", "fern2", "hedge"][(hf >> 3) % 5]
+			# Regional ecology (GPT observation round: open fields still read as
+			# "placed instances on a uniform field"): a 512px super-grid gives
+			# every region a density lean (sparse/normal/lush) and a DOMINANT
+			# SPECIES — wide views now read as ecological zones.
+			var reg := Art.cell_hash(int(fx / 512.0) + 3, int((cam_y + fy_px) / 512.0))
+			var reg_density := reg % 4   # 0 = sparse, 3 = lush
+			if reg_density == 0 and (hf >> 13) % 3 == 0:
+				continue
+			var reg_dom := (reg / 7) % 3
+			var f_tex: String = ["fern", "fern2", "hedge"][reg_dom] if (hf >> 3) % 5 < 3 \
+				else ["fern", "fern2", "hedge"][(hf >> 3) % 3]
 			var f_scl := 0.30 * (0.6 + 0.2 * float((hf >> 5) % 4))
 			var f_jit := float((hf >> 7) % 5) / 4.0
 			var f_col := fern_col.lerp(Color(0.72, 0.78, 0.5), f_jit * 0.5)
@@ -3188,7 +3209,7 @@ func _draw_terrain() -> void:
 				# cells (same 64px hash predicate as the ground painter) — the
 				# world's features shape the clustering, not just hash frequency.
 				var near_dirt := Art.cell_hash(int(fx / 64.0), int((cam_y + fy_px) / 64.0)) % 6 == 0
-				if hf % 5 == 0 or (near_dirt and hf % 3 == 0):
+				if hf % (4 if reg_density == 3 else 5) == 0 or (near_dirt and hf % 3 == 0):
 					for clt in 1 + ((hf >> 9) % 3):
 						var ch := Art.cell_hash(hf + clt * 37, clt)
 						# Min-distance ring (GPT round-2): satellites sit 6-15px
