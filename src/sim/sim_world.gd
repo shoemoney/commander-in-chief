@@ -199,6 +199,19 @@ const OBSERVER_Y_OFFSET := 14 * F_ONE
 # wall and are fought from below.)
 const GATE_SPACING := 1000 * F_ONE
 const GATE_BLOCK_PAD := 14 * F_ONE
+# Arena templates (9/9 panel: every bunker-pair gate was the identical room).
+# Pure _gate_counter lookup — ZERO rng draws (any draw here would shift the
+# shared stream-rng for every mine/barrel after it). Gate 1 = the exact
+# classic literals (torture-safe, byte-identical); positions are plain ints,
+# *F_ONE at the use site. props: [kind, x, y_off] with kind "mine"/"barrel".
+const ARENAS := {
+	1: {"b1": [180, 50], "b2": [412, 50], "props": []},
+	2: {"b1": [300, 150], "b2": [160, 40], "props": [   # staggered depth: a front
+		["mine", 240, 100], ["mine", 350, 60]]},        # sentinel screens the rear
+	4: {"b1": [240, 50], "b2": [368, 50], "props": [    # crossfire-close: barrels
+		["barrel", 290, 90], ["barrel", 306, 90], ["barrel", 322, 90],   # block the center seam
+		["mine", 120, 70], ["mine", 500, 70]]},
+}
 const GATE_CAMERA_PAD := 60 * F_ONE
 # Flak Vest: absorbs exactly one hit, then a mercy window.
 const VEST_IFRAME_TICKS := 90
@@ -2372,10 +2385,19 @@ func _step_camera() -> void:
 				"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP), "x": SCREEN_CX,
 					"dir": 1, "phase_t": 0, "gate_y": _next_gate_y}})
 		else:
-			var b1 := _make_bunker(180 * F_ONE, _next_gate_y + 50 * F_ONE)
-			var b2 := _make_bunker(412 * F_ONE, _next_gate_y + 50 * F_ONE)
+			# Arena template lookup (unlisted indexes fall back to classic —
+			# future-proof if FINAL_GATE_INDEX ever grows).
+			var arena: Dictionary = ARENAS.get(_gate_counter, ARENAS[1])
+			var b1 := _make_bunker(arena["b1"][0] * F_ONE, _next_gate_y + arena["b1"][1] * F_ONE)
+			var b2 := _make_bunker(arena["b2"][0] * F_ONE, _next_gate_y + arena["b2"][1] * F_ONE)
 			bunkers.append(b1)
 			bunkers.append(b2)
+			for pr in arena["props"]:
+				if pr[0] == "mine":
+					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
+				else:
+					barrels.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE,
+						"armed": true, "fuse_ticks": 0})
 			gates.append({"y": _next_gate_y, "open": false, "b1": b1, "b2": b2, "boss": {}})
 			# Route Fork (panel 8-vote): the approach to bunker-pair gates 2 & 4
 			# splits into two telegraphed lanes — walking a side IS the choice

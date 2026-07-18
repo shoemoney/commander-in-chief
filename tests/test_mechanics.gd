@@ -712,3 +712,20 @@ func test_vest_creep_ladder_and_last_stand_wipe_latch() -> void:
 	sim._kill_player(p)
 	sim.step([_idle()])
 	Runner.T.ok(sim.wiped, "all-down in Last Stand latches wiped (no soft-hang)")
+
+
+func test_arena_templates_vary_by_gate_and_still_open() -> void:
+	# Gates 1/2/4 stream their authored layouts; destroy-both still opens.
+	var sim := SimWorld.new(31, 1)
+	sim.camera_top = sim._next_gate_y - 4 * SimWorld.GATE_SPACING
+	sim._step_camera()
+	Runner.T.ok(sim.gates.size() >= 4, "streamed through gate 4")
+	Runner.T.eq(sim.gates[0]["b1"]["x"], 180 * SimWorld.F_ONE, "gate 1 keeps the classic left sentinel")
+	Runner.T.eq(sim.gates[1]["b1"]["x"], 300 * SimWorld.F_ONE, "gate 2 goes staggered-front")
+	Runner.T.eq(sim.gates[1]["b2"]["y"] - sim.gates[1]["y"], 40 * SimWorld.F_ONE, "gate 2 rear bunker tucks at +40")
+	Runner.T.eq(sim.gates[3]["b1"]["x"], 240 * SimWorld.F_ONE, "gate 4 goes crossfire-close")
+	var g2: Dictionary = sim.gates[1]
+	g2["b1"]["alive"] = false
+	g2["b2"]["alive"] = false
+	sim._step_gates()
+	Runner.T.ok(g2["open"], "destroy-both still opens a templated arena")
