@@ -170,18 +170,34 @@ func test_c2_arena_mutation_cadence() -> void:
 	# and drop a _mix-derived 3-bag L — the kiting loop goes stale on cadence.
 	var sim := SimWorld.new(11, 1, "endless")
 	var rocks0: int = sim.rocks.size()
+	# Advance to the brink of the first mutation, then watch it happen.
+	while sim.wave < 2:
+		sim._start_wave()
+	var amix3 := SimWorld._mix(3, 11)
+	var scar_xy: Array = [sim.rocks[amix3 % sim.rocks.size()]["x"],
+		sim.rocks[amix3 % sim.rocks.size()]["y"]]
+	sim.events.clear()
+	sim._start_wave()   # wave 3: the first SCAR + DROP
+	var crater_ok := false
+	for ev in sim.events:
+		if ev["t"] == "rock_crater" and ev["x"] == scar_xy[0] and ev["y"] == scar_xy[1]:
+			crater_ok = true
+	Runner.T.ok(crater_ok, "rock_crater event carries the removed rock's exact coords")
+	# The FULL 3-bag L lands (first drop, slots clear by construction): anchor,
+	# north bag, center-facing arm — all three at the exact derivation.
+	var slot3: Array = SimWorld.ARENA_L_SLOTS[(amix3 >> 8) % SimWorld.ARENA_L_SLOTS.size()]
+	var arm_dx: int = 24 if slot3[0] < 320 else -24
+	for bo in [[0, 0], [0, -24], [arm_dx, 0]]:
+		var want_x: int = (slot3[0] + bo[0]) * SimWorld.F_ONE
+		var want_y: int = (slot3[1] + bo[1]) * SimWorld.F_ONE
+		var found := false
+		for sb in sim.sandbags:
+			if sb["x"] == want_x and sb["y"] == want_y:
+				found = true
+		Runner.T.ok(found, "wave-3 L bag %s sits at the exact derivation" % str(bo))
 	while sim.wave < 7:
 		sim._start_wave()
 	Runner.T.eq(sim.rocks.size(), rocks0 - 2, "waves 3 and 6 each cratered exactly one rock")
-	# The wave-3 L (first mutation, slots clear by construction) lands its
-	# anchor bag at the exact derivation — evidence, not adverbs.
-	var amix3 := SimWorld._mix(3, 11)
-	var slot3: Array = SimWorld.ARENA_L_SLOTS[(amix3 >> 8) % SimWorld.ARENA_L_SLOTS.size()]
-	var found := false
-	for sb in sim.sandbags:
-		if sb["x"] == slot3[0] * SimWorld.F_ONE and sb["y"] == slot3[1] * SimWorld.F_ONE:
-			found = true
-	Runner.T.ok(found, "the wave-3 anchor bag sits exactly at the _mix-derived slot")
 	# Decorrelation: the wave-3 slot pick varies across seeds.
 	var picks := {}
 	for sd in [1, 2, 3, 4, 5]:

@@ -3184,23 +3184,31 @@ func _start_wave() -> void:
 			var scar_i: int = amix % rocks.size()
 			events.append({"t": "rock_crater", "x": rocks[scar_i]["x"], "y": rocks[scar_i]["y"]})
 			rocks.remove_at(scar_i)
-		var slot: Array = ARENA_L_SLOTS[(amix >> 8) % ARENA_L_SLOTS.size()]
-		var l_ax: int = slot[0] * F_ONE
-		var l_ay: int = slot[1] * F_ONE
-		# The L mirrors the _init stub pattern: anchor, north bag, center-facing arm.
-		for bo in [[0, 0], [0, -24], [24 if slot[0] < 320 else -24, 0]]:
-			var l_bx: int = l_ax + bo[0] * F_ONE
-			var l_by: int = l_ay + bo[1] * F_ONE
-			var l_clear := true
-			for sb in sandbags:
-				if absi(sb["x"] - l_bx) < 20 * F_ONE and absi(sb["y"] - l_by) < 20 * F_ONE:
-					l_clear = false
-			for rk in rocks:
-				if absi(rk["x"] - l_bx) < 20 * F_ONE and absi(rk["y"] - l_by) < 20 * F_ONE:
-					l_clear = false
-			if l_clear:
-				sandbags.append({"x": l_bx, "y": l_by})
-		events.append({"t": "arena_shift", "x": l_ax, "y": l_ay})
+		# Slot fallthrough (judge r1): if every bag of the picked L dedupes
+		# away, walk the table — a DROP beat is never a no-op under congestion.
+		var slot_base: int = (amix >> 8) % ARENA_L_SLOTS.size()
+		for attempt in ARENA_L_SLOTS.size():
+			var slot: Array = ARENA_L_SLOTS[(slot_base + attempt) % ARENA_L_SLOTS.size()]
+			var l_ax: int = slot[0] * F_ONE
+			var l_ay: int = slot[1] * F_ONE
+			var planted := 0
+			# The L mirrors the _init stub pattern: anchor, north bag, center-facing arm.
+			for bo in [[0, 0], [0, -24], [24 if slot[0] < 320 else -24, 0]]:
+				var l_bx: int = l_ax + bo[0] * F_ONE
+				var l_by: int = l_ay + bo[1] * F_ONE
+				var l_clear := true
+				for sb in sandbags:
+					if absi(sb["x"] - l_bx) < 20 * F_ONE and absi(sb["y"] - l_by) < 20 * F_ONE:
+						l_clear = false
+				for rk in rocks:
+					if absi(rk["x"] - l_bx) < 20 * F_ONE and absi(rk["y"] - l_by) < 20 * F_ONE:
+						l_clear = false
+				if l_clear:
+					sandbags.append({"x": l_bx, "y": l_by})
+					planted += 1
+			if planted > 0:
+				events.append({"t": "arena_shift", "x": l_ax, "y": l_ay})
+				break
 	if wave >= 3 and rng.range_i(0, 2) == 0:
 		_spawn_courier()   # ~1-in-3 waves field a fleeing bounty runner
 	# Wave mutators give each wave an identity (and make the shop a counter-
