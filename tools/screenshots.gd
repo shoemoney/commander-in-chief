@@ -93,6 +93,18 @@ func _advance() -> void:
 	wait = 6
 
 
+func _dress_victoly(m: Node2D) -> void:
+	# a1-11: pose gold confetti casings mid-arc so the GOLD col path is captured
+	# (the real confetti is event-spawned by _ev_victory, absent in a static pose).
+	var cx := 320 * F
+	var cy: int = m.sim.camera_top + 150 * F
+	for i in 14:
+		var a := float(i) / 14.0 * TAU
+		m._fx.append({"x": cx + int(cos(a) * 60.0) * F, "y": cy + int(sin(a) * 40.0) * F,
+			"t": 0.15 + float(i) * 0.02, "kind": "casing", "rate": 0.018, "spin": a,
+			"col": Color(1.0, 0.82, 0.35), "vx": cos(a) * 2.0, "vy": sin(a) * 2.0})
+
+
 func _cam(sim: SimWorld, offset_px: int) -> int:
 	return sim.camera_top + offset_px * F
 
@@ -106,7 +118,7 @@ func _build_shots() -> void:
 		{"name": "river-crossing", "build": _shot_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
-		{"name": "victoly", "build": _shot_victoly},
+		{"name": "victoly", "build": _shot_victoly, "dress": _dress_victoly},
 		{"name": "endless-war-shop", "build": _shot_shop, "dress": _dress_shop},
 		{"name": "title-screen", "build": _shot_firefight, "dress": _dress_title},
 		{"name": "pause-menu", "build": _shot_firefight, "dress": _dress_pause},
