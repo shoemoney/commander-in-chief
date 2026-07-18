@@ -4008,6 +4008,15 @@ func _draw_foundry_arena() -> void:
 					# radius) and fade toward the top so none crawl past the pool edge.
 					draw_circle(Vector2(pp.x + sin(pph + float(bi) * 2.1) * 6.0, pp.y - bt * 11.0),
 						(1.0 - bt) * 2.0, Color(1.0, 0.7, 0.3, (1.0 - bt) * (1.0 - bt) * 0.85))
+				# a2-09 ENV#3: rising HEAT-HAZE — the crucible radiates hot air into the
+				# frame (translucent warm blobs rising + fading above the pool), so it reads
+				# as a working foundry, not a painted disc.
+				for hz in 2:
+					var ht := fposmod(pph * 0.25 + float(hz) * 0.5, 1.0)
+					var hr := 12.0 + ht * 16.0
+					draw_texture_rect(Art.tex("fx_softspot"),
+						Rect2(pp.x - hr + sin(pph + float(hz)) * 4.0, pp.y - 6.0 - ht * 26.0, hr * 2.0, hr * 1.4),
+						false, Color(1.0, 0.55, 0.25, (1.0 - ht) * 0.10 * _motion))
 		# Scrap heaps + pipe run (judge r2): wrecked-industry mass around the
 		# boss path, riding loaded litter textures — no new assets.
 		var pipe_a := _to_screen(40 * Fixed.ONE, g["y"] + 250 * Fixed.ONE)
