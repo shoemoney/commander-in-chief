@@ -3605,6 +3605,27 @@ func _step_camera() -> void:
 			var mry2: int = _next_water_y - 10 * F_ONE
 			rocks.append({"x": _arena_margin_x(mrx, mry1), "y": mry1})
 			rocks.append({"x": _arena_margin_x(mrx + 22 * F_ONE, mry2), "y": mry2})
+			# c4 2v NEAR-SHORE TEETH: a hold-and-clear podium ~60px north of the water
+			# — 4 low wreck rocks + 2 world-bag scraps placed OFF the ford_x lane so a
+			# clean >= HULL_CLEARANCE COMMIT APRON sits aligned to the ford before you
+			# step into the current. _mix-jittered, band>=2 -> torture-inert. This is
+			# the missing podium; the dual-ford + island + defender already yield the
+			# A/B/C route-class reads.
+			var teeth_y: int = _next_water_y - 60 * F_ONE
+			# Skip the fork decision apron (must stay cover-free) and the calm band.
+			if not _in_fork_apron(teeth_y) and not _is_calm_band(teeth_y):
+				var tfx: int = water["ford_x"]
+				var th: int = _mix(w_band * 40 + 9, water["ford_x"] / F_ONE)
+				for ti in 4:
+					var tside: int = -1 if ti % 2 == 0 else 1
+					var toff: int = 60 + (ti / 2) * 30 + (th >> (ti * 2)) % 16   # 60..105px, off the apron
+					var ttx: int = _arena_margin_x(tfx + tside * toff * F_ONE, teeth_y)
+					# Never let a clamped tooth encroach the commit apron at ford_x.
+					if absi(ttx - tfx) >= HULL_CLEARANCE:
+						rocks.append({"x": ttx, "y": teeth_y})
+				for tsi in [-78, 78]:
+					var tsy: int = teeth_y - 10 * F_ONE
+					sandbags.append({"x": _arena_margin_x(tfx + tsi * F_ONE, tsy), "y": tsy, "world": 1})
 		_next_water_y -= GATE_SPACING
 	# c3 3v REAR TRICKLE (once per camera step, NOT per streamed band): every
 	# 700px of camera advance past seg-2+400, birth ONE rusher off the REAR edge

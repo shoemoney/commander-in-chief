@@ -2319,10 +2319,58 @@ func test_c4_jungle_rooms() -> void:
 				if gap - 2 * 16 * SimWorld.F_ONE < SimWorld.HULL_CLEARANCE:
 					continue
 				var mid: int = (a["x"] + b["x"]) / 2
+				var rr := false
+				var ii := false
 				for c in sim.rocks:
+					if absi(c["x"] - mid) > 80 * SimWorld.F_ONE:
+						continue
 					var ck: int = c.get("kind", 0)
 					var dy: int = c["y"] - a["y"]
-					if (ck == 1 or ck == 2) and absi(c["x"] - mid) <= 80 * SimWorld.F_ONE \
-							and dy <= -80 * SimWorld.F_ONE and dy >= -140 * SimWorld.F_ONE:
-						found_room = true
+					if (ck == 1 or ck == 2) and dy <= -80 * SimWorld.F_ONE and dy >= -140 * SimWorld.F_ONE:
+						rr = true                       # REAR gate (grass or side-door)
+					if (ck == 0 or ck == 1 or ck == 3) and dy <= -20 * SimWorld.F_ONE and dy >= -70 * SimWorld.F_ONE:
+						ii = true                       # INTERIOR island between mouth and rear
+				if rr and ii:
+					found_room = true
 	Runner.T.ok(found_room, "a full room (hull-clear mouth + rear gate) streams past the golden reach")
+
+
+func test_c4_ford_teeth_staging() -> void:
+	# c4 2v: each band>=2 ford gets a near-shore TEETH staging podium ~60px north
+	# of the water with a hull-clear COMMIT APRON aligned to ford_x. The band-1
+	# torture ford (-1500) is untouched so goldens don't move.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -9000 * SimWorld.F_ONE
+	sim._step_camera()
+	var checked := 0
+	for w in sim.waters:
+		if absi(w["y"]) / SimWorld.GATE_SPACING < 2:
+			continue
+		var teeth_y: int = w["y"] - 60 * SimWorld.F_ONE
+		if sim._in_fork_apron(teeth_y) or sim._is_calm_band(teeth_y):
+			continue   # teeth deliberately skipped in the fork apron / calm band
+		var teeth := 0
+		var apron_clear := true
+		for rk in sim.rocks:
+			if absi(rk["y"] - teeth_y) < 8 * SimWorld.F_ONE:
+				teeth += 1
+				if absi(rk["x"] - w["ford_x"]) < SimWorld.HULL_CLEARANCE:
+					apron_clear = false
+		if teeth == 0:
+			continue
+		Runner.T.ok(teeth >= 2, "the ford has a near-shore teeth podium (%d rocks)" % teeth)
+		Runner.T.ok(apron_clear, "a hull-clear commit apron sits at the ford lane")
+		checked += 1
+	Runner.T.ok(checked >= 1, "at least one band>=2 ford grew a staging podium")
+	# The band-1 torture ford has NO teeth (goldens inert).
+	var b1 := SimWorld.new(43, 1)
+	b1.camera_top = -1800 * SimWorld.F_ONE
+	b1._step_camera()
+	for w in b1.waters:
+		if absi(w["y"]) / SimWorld.GATE_SPACING != 1:
+			continue
+		var t1 := 0
+		for rk in b1.rocks:
+			if absi(rk["y"] - (w["y"] - 60 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE:
+				t1 += 1
+		Runner.T.eq(t1, 0, "the band-1 torture ford has no staging teeth (goldens inert)")
