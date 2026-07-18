@@ -726,3 +726,25 @@ func test_a3_vo_bus_slaved_to_sfx_control() -> void:
 	var slaved: Array = _consts()["_SFX_SLAVED_BUSES"]
 	Runner.T.ok("VO" in slaved, "the radio VO bus now rides the SFX volume knob (was ungoverned)")
 	Runner.T.ok("UI" in slaved, "the jingle UI bus still rides the SFX knob (a1 behavior preserved)")
+
+
+# --- a3-17: size_limit sweep on small-drawn UI/FX bakes (PIPE#1/2/3/6). Input glyphs,
+# minimap icons and the muzzle-fan card imported at 256/512px but never draw above ~84px,
+# so they wasted boot VRAM. Cap them at 128 (the a2-18 convention; 128 >= any draw size,
+# so the explicit-rect draws never blur). The SCALE-COUPLED in-world sprite bakes
+# (rocks/props/units drawn via _spr, where footprint = imported_px * SCALE) are DELIBERATELY
+# left untouched — capping them shifts on-screen size and needs a per-texture SCALE recompute
+# (a separate, riskier pass). This test guards the swept set against regressing to full-res. ---
+
+func test_a3_ui_bakes_are_size_limited() -> void:
+	# Input glyphs — draw_glyph uses an explicit 12..84px rect, so a 128 cap never blurs.
+	for g in ["pad_a", "ps_a", "sw_a", "key_enter", "mouse_l", "stick_l", "dpad_lr", "pad_start"]:
+		var c := FileAccess.get_file_as_string("res://assets/legacy-art/ui/glyphs/%s.png.import" % g)
+		Runner.T.ok(c.contains("size_limit=128"), "input glyph %s imports size-limited (was full-res)" % g)
+	# Minimap icons — drawn ~16-24px on the rail.
+	for ic in ["ICON_Map_Fire", "ICON_Map_Skull", "ICON_Map_Vehicle", "ICON_Map_Target"]:
+		var c := FileAccess.get_file_as_string("res://assets/legacy-art/hud/%s.png.import" % ic)
+		Runner.T.ok(c.contains("size_limit=128"), "minimap icon %s imports size-limited" % ic)
+	# The 512x256 muzzle-fan card draws at ~fl*1.4 (<=~56px) via a raw draw_texture_rect.
+	var mf := FileAccess.get_file_as_string("res://assets/legacy-art/fx/fx_muzzle_fan.png.import")
+	Runner.T.ok(mf.contains("size_limit=128"), "the muzzle-fan card imports size-limited")
