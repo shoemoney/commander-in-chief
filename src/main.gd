@@ -4401,11 +4401,14 @@ func _draw_players() -> void:
 			# tick so the second seat is visible on the field (re-review).
 			var g_tank: Dictionary = sim.tanks[p["in_tank"]]
 			if g_tank["occupant"] != i:
+				# 5v panel: 0.3 scale read as a decal; 0.42 reads as a crewman.
+				# Aim line lengthened + brightened so the second gun's threat
+				# lane is legible at a glance.
 				var gdpos := _to_screen(p["x"], p["y"]) + Vector2(0, -7.0)
-				_spr("player2" if i == 1 else "player1", gdpos, 0.0, 0.3, Color(1.1, 1.1, 1.05))
+				_spr("player2" if i == 1 else "player1", gdpos, 0.0, 0.42, Color(1.1, 1.1, 1.05))
 				var gaim := Vector2(p["aim_x"], p["aim_y"])
 				if gaim.length() > 0.01:
-					draw_line(gdpos, gdpos + gaim.normalized() * 12.0, Color(0.7, 0.9, 1.0, 0.8), 1.5)
+					draw_line(gdpos, gdpos + gaim.normalized() * 16.0, Color(0.9, 0.97, 1.0, 0.9), 1.0)
 			continue   # driver renders as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO) + (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO)
 		# Run-cycle bob: a per-step vertical hop while moving, matching the charging
