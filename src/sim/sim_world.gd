@@ -3475,6 +3475,13 @@ func _step_camera() -> void:
 		# Frogmen lurk in every river.
 		for f in 3:
 			_spawn_frogman(rng.range_i(40, 600) * F_ONE, _next_water_y + rng.range_i(10, 70) * F_ONE)
+		# c3 2v MUD LURKER: deeper rivers (band >= 2) post a submerged frogman at
+		# the ford MOUTH, near the north bank — so a player stepping into the
+		# approach mud reliably has a lurker to pop (the mud-surface verb is felt
+		# in play, not just in tests). No rng draw (derived from ford_x), and
+		# band >= 2 is past both torture windows -> goldens byte-identical.
+		if absi(_next_water_y / GATE_SPACING) >= 2:
+			_spawn_frogman(water["ford_x"], _next_water_y + 12 * F_ONE)
 		# Late-depth escalation (KIMK r2): band 6+ posts a DEFENDER at the ford
 		# mouth — the guaranteed crossing stops being guaranteed-safe. Derived
 		# position, no extra rng draw; past-torture by construction.

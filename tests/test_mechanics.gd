@@ -1947,3 +1947,26 @@ func test_c3_mud_surfaces_frogmen() -> void:
 	Runner.T.eq(near["lunge_ticks"], 0, "no instant lunge — the fairness window holds")
 	Runner.T.ok(far["submerged"], "a frogman beyond the mud radius stays submerged")
 
+
+
+func test_c3_deep_river_hosts_mud_lurker() -> void:
+	# c3-15 r2 (judge TO_TEN): every band >= 2 river posts a submerged frogman at
+	# the ford mouth, reachable from the north mud — so the mud-surface verb has
+	# a guaranteed target in real procgen, not only in unit tests.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -6000 * SimWorld.F_ONE
+	sim._step_camera()
+	var checked := 0
+	for w in sim.waters:
+		var band: int = absi(w["y"] / SimWorld.GATE_SPACING)
+		if band < 2:
+			continue
+		var mud_y: int = w["y"] - SimWorld.MUD_BANK_H / 2
+		var found := false
+		for e in sim.enemies:
+			if e.get("kind", "") == "frogman" and e.get("submerged", false) \
+					and absi(e["x"] - w["ford_x"]) + absi(e["y"] - mud_y) <= SimWorld.MUD_SURFACE_RADIUS:
+				found = true
+		Runner.T.ok(found, "the band-%d river posts a mud-reachable submerged lurker" % band)
+		checked += 1
+	Runner.T.ok(checked > 0, "the deep stream produced at least one band>=2 river")
