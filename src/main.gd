@@ -1963,9 +1963,27 @@ static func _top_prey_text(kind_kills: Dictionary) -> String:
 		return ""
 	var top := ""
 	for kk in kind_kills:
-		if top == "" or int(kind_kills[kk]) > int(kind_kills[top]):
+		if top == "":
+			top = kk
+			continue
+		var c := int(kind_kills[kk])
+		var tc := int(kind_kills[top])
+		# Higher count wins; on a TIE, the alphabetically-first kind wins — a stable result
+		# independent of dictionary insertion order (a4-16 r2).
+		if c > tc or (c == tc and String(kk) < String(top)):
 			top = kk
 	return "TOP PREY  %s x%d" % [String(top).to_upper(), int(kind_kills[top])]
+
+
+static func _victory_story_rows(kills: int, streak: int, kind_kills: Dictionary) -> Array:
+	# a4-16: the run-STORY rows the victory card shares with the K.I.A. debrief — a
+	# KILLS + LONGEST STREAK line, plus a TOP PREY line when anything died.
+	var rows: Array = [{"text": "%d KILLS  ·  LONGEST STREAK  x%d" % [kills, streak],
+		"color": Color(0.9, 0.92, 0.85)}]
+	var prey := _top_prey_text(kind_kills)
+	if prey != "":
+		rows.append({"text": prey, "color": Color(0.9, 0.92, 0.85)})
+	return rows
 
 
 static func _victory_best_text(score: int, best: int) -> String:
@@ -7645,11 +7663,8 @@ func _draw_banners(top_msg: String) -> void:
 		# a4-16 (HUD#1): the win screen tells the run's STORY too — KILLS + LONGEST STREAK +
 		# TOP PREY, the rows the K.I.A. debrief always had. A win is now a full debrief, not a
 		# thinner card than a loss. (a3-14 added the NEW BEST/REDEPLOY parity below.)
-		vrows.append({"text": "%d KILLS  ·  LONGEST STREAK  x%d" % [_run_kills, _run_best_streak],
-			"color": Color(0.9, 0.92, 0.85)})
-		var vprey := _top_prey_text(_run_kind_kills)
-		if vprey != "":
-			vrows.append({"text": vprey, "color": Color(0.9, 0.92, 0.85)})
+		for sr in _victory_story_rows(_run_kills, _run_best_streak, _run_kind_kills):
+			vrows.append(sr)
 		# a3-14 (HUD#4/#8/#10): bring the VICTORY card to K.I.A. parity — the win screen was
 		# thinner than the death screen. _victory_extra_rows appends a NEW BEST! flag (shared
 		# predicate with the debrief) + a REDEPLOY prompt (redeploy input works on victory too,

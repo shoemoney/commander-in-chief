@@ -588,6 +588,14 @@ func test_a4_top_prey_shared_by_both_cards() -> void:
 	Runner.T.eq(ms._top_prey_text({}), "", "no kills -> no TOP PREY row")
 	Runner.T.eq(ms._top_prey_text({"rusher": 37, "elite": 4}), "TOP PREY  RUSHER x37", "the most-killed kind + count, upper-cased")
 	Runner.T.eq(ms._top_prey_text({"elite": 9}), "TOP PREY  ELITE x9", "a single kind")
+	# Stable tie-break: equal counts -> alphabetically first, regardless of insertion order.
+	Runner.T.eq(ms._top_prey_text({"rusher": 5, "elite": 5}), "TOP PREY  ELITE x5", "a tie breaks alphabetically (stable)")
+	Runner.T.eq(ms._top_prey_text({"elite": 5, "rusher": 5}), "TOP PREY  ELITE x5", "same tie result under reversed insertion order")
+	# The victory story rows: KILLS/STREAK always, + TOP PREY when anything died.
+	var vr: Array = ms._victory_story_rows(40, 12, {"rusher": 40})
+	Runner.T.eq(vr.size(), 2, "kills>0 with prey -> KILLS/STREAK row + TOP PREY row")
+	Runner.T.ok(String(vr[0]["text"]).contains("KILLS") and String(vr[0]["text"]).contains("STREAK"), "the story line carries kills + streak")
+	Runner.T.eq(ms._victory_story_rows(0, 0, {}).size(), 1, "no kills -> just the KILLS/STREAK line (no prey)")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
