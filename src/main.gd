@@ -488,14 +488,25 @@ func _paint_bg(canvas: Node2D) -> void:
 	# flip orientations of the one grass card kill the repeating-stamp read,
 	# (d) dirt becomes 2-3 hash-ROTATED overlapping cards per cell instead of
 	# one axis-aligned rect. All starting values — judged by screenshot.
-	var dirt_cards: Array = []   # [center, rot, size] triplets
+	var dirt_cards: Array = []   # [center, rot, size, dirt_col] tuples
 	# 5-stop biome ramp (5v: one biome with a linear scorch felt like a dimmer
 	# switch, not a JOURNEY): jungle -> scorched -> marsh -> ruins -> foundry
-	# ash, sampled by the same march driver. Dirt follows the band too.
-	var dirt_col := _biome_ramp(march,
-		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
-		Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)])
+	# ash. c2 3v: sample PER TILE ROW, not per frame — the new sector's flat
+	# palette sweeps in from the top edge with the scroll (mirroring the litter
+	# freeze), so ground behind the player never teleports palette; the seam
+	# rides the breach line where the gate rubble + dust already live. The
+	# quantized stops stay flat (KIMK pin) — no lerp, just a moving seam.
+	var dirt_stops := [Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7),
+		Color(0.42, 0.38, 0.24, 0.7), Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)]
+	var grass_stops := [Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62),
+		Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(0.52, 0.30, 0.24)]
 	for ty in 8:
+		# Per-row march: rows south of the last march-step snap keep the old
+		# stop (same comparison the litter freeze uses at row_wy >= snap).
+		var row_wy_fp := int(float(base_iy + ty) * 64.0 * Fixed.ONE)
+		var row_march := _litter_march_prev if row_wy_fp >= _litter_cam_snap else march
+		var dirt_col := _biome_ramp(row_march, dirt_stops)
+		var gt := _biome_ramp(row_march, grass_stops)
 		for tx in 10:
 			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
 			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
@@ -505,11 +516,6 @@ func _paint_bg(canvas: Node2D) -> void:
 			if (base_iy + ty) % 3 == 0:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
-			# Foundry stop (c2 judge r1: "the field remains overwhelmingly
-			# green"): the modulate must CRUSH the grass card's green channel,
-			# not just warm it — scorched-earth brown, no turf survives.
-			var gt := _biome_ramp(march, [Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62),
-				Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(0.52, 0.30, 0.24)])
 			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
 			if sim.mode == "endless":
 				gcol = Color(gcol.r + 0.04, gcol.g - 0.04, gcol.b)   # rust-tan: its own ground
@@ -527,8 +533,9 @@ func _paint_bg(canvas: Node2D) -> void:
 					var dh := Art.cell_hash(tx * 3 + dc + 1, base_iy + ty)
 					dirt_cards.append([pos + Vector2(16.0 + float(dh % 33), 14.0 + float((dh / 5) % 33)),
 						float(dh % 628) / 100.0,
-						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0)])
+						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0), dirt_col])
 	for card in dirt_cards:
+		var dirt_col: Color = card[3]   # this card's per-row stop (c2 3v)
 		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
 		# Soft halo first: kills the hard leopard-spot rim (4v macro-variation).
 		var halo: Vector2 = card[2] * 1.6
