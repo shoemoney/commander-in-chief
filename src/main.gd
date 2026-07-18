@@ -5490,7 +5490,7 @@ func _draw_colossus() -> void:
 	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
 	var clabel := "FOUNDRY COLOSSUS — PHASE %d/3" % phase
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_rect(Rect2(320.0 - clw / 2.0 - 3.0, 324.0, clw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))
+	draw_rect(Rect2(172.0 - 3.0, 324.0, clw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))   # a2-17 r2: anchor the plate to the label ORIGIN (172), not the bar center
 	Art.text(self, clabel, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
