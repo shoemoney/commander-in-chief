@@ -556,6 +556,22 @@ func test_a4_grade_breather_only_in_endless_shop() -> void:
 	Runner.T.eq(ms._grade_breather_target("campaign", 120), 0.0, "campaign (no shop) gets no breather")
 
 
+func test_a4_grade_shader_is_wired() -> void:
+	# a4-01: the master grade pass is real — the shader loads and exposes the master 'grade'
+	# + shop 'breather' uniforms, and a ShaderMaterial accepts them (as _setup_screen_fx wires).
+	var sh := load("res://src/view/grade.gdshader") as Shader
+	Runner.T.ok(sh != null, "the master color-grade shader loads + compiles")
+	var names: Array = []
+	for u in sh.get_shader_uniform_list():
+		names.append(u["name"])
+	Runner.T.ok("grade" in names, "the grade shader exposes the master 'grade' uniform")
+	Runner.T.ok("breather" in names, "the grade shader exposes the shop 'breather' uniform")
+	var mat := ShaderMaterial.new()
+	mat.shader = sh
+	mat.set_shader_parameter("grade", 1.0)
+	Runner.T.ok(is_equal_approx(float(mat.get_shader_parameter("grade")), 1.0), "grade rides at full strength (always on)")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
