@@ -163,3 +163,58 @@ func test_courier_is_harmless_and_pays_a_fat_bounty() -> void:
 	var chest0 := sim.war_chest
 	sim._kill_enemy(c)
 	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_ELITE * 4, "a caught courier drops a 4× elite bounty")
+
+
+func test_c2_arena_mutation_cadence() -> void:
+	# Dynamic arena geometry (c2 4v): waves 3/6 each crater one rock forever
+	# and drop a _mix-derived 3-bag L — the kiting loop goes stale on cadence.
+	var sim := SimWorld.new(11, 1, "endless")
+	var rocks0: int = sim.rocks.size()
+	while sim.wave < 7:
+		sim._start_wave()
+	Runner.T.eq(sim.rocks.size(), rocks0 - 2, "waves 3 and 6 each cratered exactly one rock")
+	# The wave-3 L (first mutation, slots clear by construction) lands its
+	# anchor bag at the exact derivation — evidence, not adverbs.
+	var amix3 := SimWorld._mix(3, 11)
+	var slot3: Array = SimWorld.ARENA_L_SLOTS[(amix3 >> 8) % SimWorld.ARENA_L_SLOTS.size()]
+	var found := false
+	for sb in sim.sandbags:
+		if sb["x"] == slot3[0] * SimWorld.F_ONE and sb["y"] == slot3[1] * SimWorld.F_ONE:
+			found = true
+	Runner.T.ok(found, "the wave-3 anchor bag sits exactly at the _mix-derived slot")
+	# Decorrelation: the wave-3 slot pick varies across seeds.
+	var picks := {}
+	for sd in [1, 2, 3, 4, 5]:
+		picks[(SimWorld._mix(3, sd) >> 8) % SimWorld.ARENA_L_SLOTS.size()] = true
+	Runner.T.ok(picks.size() >= 2, "wave-3 slot picks vary across seeds (got %d distinct)" % picks.size())
+	# Twin same-seed sims agree after 7 mutated waves.
+	var a := SimWorld.new(23, 1, "endless")
+	var b := SimWorld.new(23, 1, "endless")
+	for i in 7:
+		a._start_wave()
+		b._start_wave()
+	Runner.T.eq(a.checksum(), b.checksum(), "twin sims checksum-match after 7 mutated waves")
+
+
+func test_c2_arena_rock_floor() -> void:
+	# The scar never strips the arena naked: ARENA_ROCK_FLOOR holds under a
+	# long run (25 waves = 8 mutation beats > the 4 excess rocks).
+	var sim := SimWorld.new(7, 1, "endless")
+	while sim.wave < 25:
+		sim._start_wave()
+	Runner.T.ok(sim.rocks.size() >= SimWorld.ARENA_ROCK_FLOOR,
+		"25 waves later the rock floor holds (%d >= %d)" % [sim.rocks.size(), SimWorld.ARENA_ROCK_FLOOR])
+
+
+func test_c2_arena_slots_clear_hull() -> void:
+	# Static pin: every authored L slot keeps >= HULL_CLEARANCE from the arena
+	# walls and every static quadrant-rock coord (squared ints, no floats).
+	var hc_px: int = SimWorld.HULL_CLEARANCE / SimWorld.F_ONE
+	for slot in SimWorld.ARENA_L_SLOTS:
+		Runner.T.ok(slot[0] >= 16 + hc_px and slot[0] <= 624 - hc_px, "slot x %d clears the side walls" % slot[0])
+		Runner.T.ok(slot[1] <= -hc_px and slot[1] >= -360 + hc_px, "slot y %d clears top/bottom" % slot[1])
+		for qr in [[80, -300], [560, -300], [80, -60], [560, -60], [210, -320], [430, -50]]:
+			var dx: int = slot[0] - qr[0]
+			var dy: int = slot[1] - qr[1]
+			Runner.T.ok(dx * dx + dy * dy >= hc_px * hc_px,
+				"slot %s vs rock %s clears the hull" % [str(slot), str(qr)])

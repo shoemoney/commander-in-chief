@@ -257,6 +257,8 @@ const _EVENT_SOUND := {
 	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
 	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
+	"rock_crater": ["explosion", -8.0, 0.6],  # low crumble: the arena just lost a rock
+	"arena_shift": ["alarm", -10.0, 0.9],     # geometry klaxon: fresh cover dropped in
 	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
@@ -1288,6 +1290,16 @@ func _consume_events() -> void:
 				_sfx.play("buy", -6.0, 1.2)
 			"bunker_break":
 				_ev_bunker_break(ev)
+			"rock_crater":
+				# c2 arena scar: the rock's exit is a real blast beat + a
+				# permanent crater decal where cover used to be.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
+				_burst(ev["x"], ev["y"], "dust", 6, 1.0, 2.2, 0.3)
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 18.0)})
+			"arena_shift":
+				# c2 arena drop: alert ring on the fresh L so the new geometry
+				# announces itself during the wave-start breath.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"sniper_fire":
 				# Crack + red flash so the kill-shot leaving the barrel is visible —
 				# the paint-line telegraph vanishes the instant it fires.

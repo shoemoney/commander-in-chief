@@ -222,6 +222,16 @@ const GATE_CAMERA_PAD := 60 * F_ONE
 const VEST_IFRAME_TICKS := 90
 # Endless War: escalating waves with a between-wave War Chest shop.
 const WAVE_BASE_ENEMIES := 4
+# Dynamic arena geometry (c2 4v): every ARENA_SHIFT_CADENCE-th wave SCARS one
+# rock out (floor ARENA_ROCK_FLOOR) and DROPS a fresh 3-bag L from this
+# authored slot table. Anchors are play-placed: every slot keeps >= 44px
+# (HULL_CLEARANCE) from arena walls and >= 44px center-distance from every
+# static quadrant-rock coord (statically asserted in test_endless).
+const ARENA_SHIFT_CADENCE := 3
+const ARENA_ROCK_FLOOR := 2
+const ARENA_L_SLOTS := [
+	[250, -60], [390, -288], [200, -180], [440, -180], [320, -48], [320, -312],
+]
 const WAVE_ENEMIES_PER_WAVE := 2
 const WAVE_SPAWN_INTERVAL_TICKS := 20
 const WAVE_INTERMISSION_TICKS := 300
@@ -303,6 +313,7 @@ const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
 const CHOKE_START_SEG := 2
 const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
+const FORK_GATES := [2, 4]             # the route-fork gates: their approach band is a cover-free decision apron
 const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
 const CHOKE_BITE := 240 * F_ONE
@@ -855,7 +866,7 @@ func _in_fork_apron(y: int) -> bool:
 	## stamp; the ambient rock stream consults this per row.
 	var a: int = absi(y)
 	var k: int = a / GATE_SPACING + 1     # the gate this approach band feeds
-	if k != 2 and k != 4:
+	if k not in FORK_GATES:
 		return false
 	var off: int = a % GATE_SPACING
 	return off >= 540 * F_ONE and off <= 700 * F_ONE
@@ -2858,10 +2869,12 @@ func _step_camera() -> void:
 			# 3-bag line mid-stretch the player must grenade, flank, or crush —
 			# rides the ENTIRE sandbag grammar for free (cover, destructible,
 			# enemy-avoid, tread-kill, conditional hash).
-			# Fork gates 2/4 skip the blockade AND camp stamp (c2 4v DECISION
+			# FORK_GATES skip the blockade AND camp stamp (c2 4v DECISION
 			# APRON): the approach band gate+300..460 stays cover-free so the
-			# route choice is read standing still, not mid-firefight.
-			if _gate_counter >= 2 and _gate_counter != 2 and _gate_counter != 4 \
+			# route choice is read standing still, not mid-firefight. Same
+			# contract _in_fork_apron enforces on the ambient rock stream —
+			# the named list keeps both guards on one definition.
+			if _gate_counter >= 2 and _gate_counter not in FORK_GATES \
 					and _mix(_gate_counter, 31) % 3 != 0:
 				# Hash-gated 2-in-3 + VARIED (KIMK r2: an every-stretch constant
 				# blockade recreates the complaint one level up): 2-4 bags,
@@ -3140,6 +3153,36 @@ func _start_wave() -> void:
 	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
 	wave_spawn_cd = 1
 	deaths_this_wave = 0
+	# Dynamic arena geometry (c2 4v): the learned kiting loop goes stale on a
+	# cadence — every 3rd wave one rock craters out FOREVER (scarring emerges
+	# free: removed rocks never respawn) and an authored 3-bag L drops in.
+	# _mix-derived BEFORE the rng rolls below, drawing nothing: the courier/
+	# mutator/miniboss/drop streams stay byte-identical. Wave 3 never starts
+	# inside the endless torture (it wipes during wave 2) -> ENDLESS_GOLDEN
+	# holds; rocks/sandbags are already conditional checksum feeds.
+	if mode == "endless" and wave >= 3 and wave % ARENA_SHIFT_CADENCE == 0:
+		var amix := _mix(wave, _world_seed)
+		if rocks.size() > ARENA_ROCK_FLOOR:
+			var scar_i: int = amix % rocks.size()
+			events.append({"t": "rock_crater", "x": rocks[scar_i]["x"], "y": rocks[scar_i]["y"]})
+			rocks.remove_at(scar_i)
+		var slot: Array = ARENA_L_SLOTS[(amix >> 8) % ARENA_L_SLOTS.size()]
+		var l_ax: int = slot[0] * F_ONE
+		var l_ay: int = slot[1] * F_ONE
+		# The L mirrors the _init stub pattern: anchor, north bag, center-facing arm.
+		for bo in [[0, 0], [0, -24], [24 if slot[0] < 320 else -24, 0]]:
+			var l_bx: int = l_ax + bo[0] * F_ONE
+			var l_by: int = l_ay + bo[1] * F_ONE
+			var l_clear := true
+			for sb in sandbags:
+				if absi(sb["x"] - l_bx) < 20 * F_ONE and absi(sb["y"] - l_by) < 20 * F_ONE:
+					l_clear = false
+			for rk in rocks:
+				if absi(rk["x"] - l_bx) < 20 * F_ONE and absi(rk["y"] - l_by) < 20 * F_ONE:
+					l_clear = false
+			if l_clear:
+				sandbags.append({"x": l_bx, "y": l_by})
+		events.append({"t": "arena_shift", "x": l_ax, "y": l_ay})
 	if wave >= 3 and rng.range_i(0, 2) == 0:
 		_spawn_courier()   # ~1-in-3 waves field a fleeing bounty runner
 	# Wave mutators give each wave an identity (and make the shop a counter-
