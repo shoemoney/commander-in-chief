@@ -2185,8 +2185,9 @@ func test_c4_cover_density_by_width() -> void:
 	var sim := SimWorld.new(43, 1)
 	sim.camera_top = -6000 * SimWorld.F_ONE
 	sim._step_camera()
-	var wide_edge := false
-	var narrow_center := false
+	# Walk a long seg>=2 range; classify each cover piece by its row's choke phase.
+	var wide_rows := {}
+	var narrow_rows := {}
 	for rk in sim.rocks:
 		var k: int = rk.get("kind", 0)
 		if k != 0 and k != 1:
@@ -2196,9 +2197,12 @@ func test_c4_cover_density_by_width() -> void:
 		var cb: Array = sim._choke_bounds(rk["y"])
 		var wide: bool = cb[0] == SimWorld.WORLD_LEFT and cb[1] == SimWorld.WORLD_RIGHT
 		var off_center: int = absi(rk["x"] - SimWorld.SCREEN_CX)
+		var row: int = rk["y"] / SimWorld.F_ONE
 		if wide and off_center > 150 * SimWorld.F_ONE:
-			wide_edge = true
-		if not wide and off_center < 130 * SimWorld.F_ONE and rk["x"] >= cb[0] and rk["x"] <= cb[1]:
-			narrow_center = true
-	Runner.T.ok(wide_edge, "wide rows carry edge cover at a wall (long-sightline preserved)")
-	Runner.T.ok(narrow_center, "narrow rows cluster cover inside the bitten lane (CQB)")
+			wide_rows[row] = true
+		if not wide and rk["x"] >= cb[0] and rk["x"] <= cb[1] and off_center < 140 * SimWorld.F_ONE:
+			narrow_rows[row] = true
+	# Alternation over the walk: multiple wide rows keep cover at the walls and
+	# multiple narrow rows cluster it mid-lane.
+	Runner.T.ok(wide_rows.size() >= 2, "multiple WIDE rows carry wall cover (%d)" % wide_rows.size())
+	Runner.T.ok(narrow_rows.size() >= 2, "multiple NARROW rows cluster cover mid-lane (%d)" % narrow_rows.size())

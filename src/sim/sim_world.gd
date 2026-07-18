@@ -3219,13 +3219,19 @@ func _step_camera() -> void:
 				# mid-lane to break the short sightline (_in_trench already supplies the
 				# ditch). Reads _choke_bounds (pure), no new kind/field, seg>=2 inert.
 				var cb := _choke_bounds(_next_rock_y)
-				if cb[0] == WORLD_LEFT and cb[1] == WORLD_RIGHT:
+				var wide: bool = cb[0] == WORLD_LEFT and cb[1] == WORLD_RIGHT
+				# WIDE: pocket spread along a WALL (edge cover, sparse). NARROW: pocket
+				# TIGHTENED to 60% spacing = a dense CQB slab cluster mid-lane. The
+				# spacing itself carries the density-by-width read (rng-free).
+				var spc: int = 5
+				if wide:
 					rx = (110 if r_idx % 2 == 0 else 530) * F_ONE   # WIDE -> edge cover at a wall
 				else:
 					rx = (cb[0] + cb[1]) / 2                         # NARROW -> mid-lane cluster
+					spc = 3                                          # tighter = denser cluster
 				for po in pocket:
-					var ppx: int = rx + po[0] * F_ONE
-					var ppy: int = _next_rock_y + po[1] * F_ONE
+					var ppx: int = rx + (po[0] * spc / 5) * F_ONE
+					var ppy: int = _next_rock_y + (po[1] * spc / 5) * F_ONE
 					rocks.append({"x": _arena_margin_x(ppx, ppy), "y": ppy, "kind": p_kind})
 			else:
 				# Segs 0-1 (the torture window) keep the shipped classic 2-rock
