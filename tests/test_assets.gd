@@ -496,3 +496,14 @@ func test_a2_pipeline_vram_reclaimed() -> void:
 	for tile in ["grass", "dirt", "sand"]:
 		var ti := FileAccess.get_file_as_string("res://assets/kenney/%s.png.import" % tile)
 		Runner.T.ok(ti.contains("mipmaps/generate=false"), "the 1:1 Kenney %s tile has mipmaps OFF" % tile)
+
+
+# --- a2-17: boss phase labels are named (not "PHASE n") ---
+
+func test_a2_boss_phase_names() -> void:
+	var c := _consts()
+	var g: Array = c["GUNSHIP_PHASE_NAMES"]
+	var co: Array = c["COLOSSUS_PHASE_NAMES"]
+	Runner.T.eq(g.size(), 2, "the gunship has 2 named phases (strafe/mortar half-cycle)")
+	Runner.T.eq(co.size(), 3, "the colossus has 3 named phases")
+	Runner.T.ok(not String(g[0]).contains("PHASE") and not String(co[0]).contains("PHASE"), "phases are NAMED, not abstract 'PHASE n'")

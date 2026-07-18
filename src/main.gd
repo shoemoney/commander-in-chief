@@ -5308,6 +5308,10 @@ func _draw_gunships() -> void:
 	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 
+const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
+const COLOSSUS_PHASE_NAMES := ["ADVANCE", "MORTAR VOLLEYS", "SAPPERS OUT"]
+
+
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "gunship_body") -> void:
 	if boss["phase_t"] < 0:
 		# Endless fly-in presence kit (6v panel): the approach used to be a flat
@@ -5406,7 +5410,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
-	var gplabel := "%s — %s" % [label, ["STRAFING RUN", "MORTAR VOLLEY"][gphase - 1]]
+	var gplabel := "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
 	var gpw := Art.font().get_string_size(gplabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	draw_rect(Rect2(bar_x - 3.0, bar_y - 2.0, gpw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.5, 0.4))
@@ -5490,7 +5494,7 @@ func _draw_colossus() -> void:
 	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
 	# a2-17 r2 HUD#6: name the colossus phases (actionable), matching the escalation
 	# banners (phase 2 = mortar volleys, phase 3 = sappers out).
-	var clabel := "FOUNDRY COLOSSUS — %s" % ["ADVANCE", "MORTAR VOLLEYS", "SAPPERS OUT"][clampi(phase - 1, 0, 2)]
+	var clabel := "FOUNDRY COLOSSUS — %s" % COLOSSUS_PHASE_NAMES[clampi(phase - 1, 0, 2)]
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	draw_rect(Rect2(172.0 - 3.0, 324.0, clw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))   # a2-17 r2: anchor the plate to the label ORIGIN (172), not the bar center
 	Art.text(self, clabel, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
