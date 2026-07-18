@@ -3277,11 +3277,15 @@ static func _ground_stops(mode: String) -> Array:
 		# The grass TEXTURE is green, so the modulate must SUPPRESS green/blue (not just
 		# out-red them) or the floor reads olive — the campaign foundry stop reads red-
 		# brown precisely because its green is low. Low G/B here → a genuine rust/ochre.
+		# Ramp: bright warm OCHRE (early waves) -> grey warm ASH (late) as the wave march
+		# climbs. Late stops desaturate toward grey ash — deliberately NOT the campaign
+		# foundry's saturated RED [4]=(0.52,0.30,0.24), so endless stays its own place even
+		# scorched (endless late r-g gap ~0.09 grey vs campaign ~0.22 red).
 		return [
-			[Color(0.92, 0.46, 0.24), Color(0.84, 0.44, 0.26), Color(0.74, 0.42, 0.28),
-				Color(0.62, 0.38, 0.30), Color(0.50, 0.32, 0.28)],
-			[Color(0.56, 0.38, 0.24, 0.72), Color(0.52, 0.36, 0.24, 0.74), Color(0.48, 0.34, 0.25, 0.78),
-				Color(0.44, 0.32, 0.27, 0.8), Color(0.38, 0.28, 0.25, 0.82)],
+			[Color(0.92, 0.46, 0.24), Color(0.84, 0.44, 0.26), Color(0.72, 0.44, 0.30),
+				Color(0.60, 0.42, 0.34), Color(0.47, 0.39, 0.36)],
+			[Color(0.56, 0.38, 0.24, 0.72), Color(0.52, 0.37, 0.26, 0.74), Color(0.48, 0.36, 0.28, 0.78),
+				Color(0.44, 0.35, 0.30, 0.8), Color(0.40, 0.34, 0.32, 0.82)],
 		]
 	return [
 		[Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62), Color(0.94, 0.90, 0.55),
@@ -3838,6 +3842,13 @@ func _draw_terrain() -> void:
 					continue
 				var big := h2 % 5 == 0
 				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04 * _motion
+				# a3-04 AD#4/ENV#2: a large soft canopy dapple pooled under each LIVING tree —
+				# the committed DARK the open jungle lacked (the grid mottle is uniform and
+				# light, so wide fields read flat). Anchored per-tree and offset DOWN-screen so
+				# the shade implies a top light direction (nods to ENV#9). Dead canopy casts none.
+				if ash < 0.33:
+					_ground_shadow(Vector2(px + float(h2 % 9) - 4.0, wy_px + 9.0),
+						28.0 if big else 20.0, 0.16, Color(0.0, 0.035, 0.02))
 				_ground_shadow(Vector2(px, wy_px), 6.0 if big else 4.0)
 				if ash > 0.33:
 					# Past the ash midpoint the canopy dies for real: swap to the baked

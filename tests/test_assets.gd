@@ -618,3 +618,14 @@ func test_a3_endless_has_its_own_ground_palette() -> void:
 	Runner.T.ok(c0.g >= c0.r, "campaign start is green-forward (g >= r)")
 	Runner.T.ok(e0.r > e0.g + 0.15, "endless start is warm rust-ochre (r well above g)")
 	Runner.T.ok(e0 != c0, "endless base is a genuinely different color, not a nudge")
+	# The ramp marches ochre -> grey ASH: the late stop is DARKER and DESATURATED (r-g gap
+	# shrinks), and it stays distinct from the campaign foundry's saturated RED late stop
+	# so endless reads as its own place even scorched (judge r2 TO_TEN).
+	var e_last: Color = eg[4]
+	var c_last: Color = cg[4]
+	var e0_val: float = maxf(e0.r, maxf(e0.g, e0.b))
+	var el_val: float = maxf(e_last.r, maxf(e_last.g, e_last.b))
+	Runner.T.ok(el_val < e0_val, "endless late stop is DARKER than the ochre start (marches to ash)")
+	Runner.T.ok((e_last.r - e_last.g) < (e0.r - e0.g) - 0.2, "late stop DESATURATES toward grey ash")
+	Runner.T.ok((e_last.r - e_last.g) < (c_last.r - c_last.g), "endless ash stays greyer than the campaign foundry RED")
+	Runner.T.ok(e_last != c_last, "endless late stop is distinct from the campaign foundry late stop")
