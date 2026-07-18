@@ -1795,3 +1795,35 @@ func test_c3_grass_flush_negatives() -> void:
 	for i in SimWorld.FLUSH_CD_TICKS + 2:
 		sim2._step_grass_flush()
 	Runner.T.eq(sim2.strikes.size(), s2, "SMOKE stays immune — only tall grass gets the flush downside")
+
+
+func test_c3_cover_pockets() -> void:
+	# c3 2v: past seg 2 the ambient stream places authored concave 3-piece
+	# POCKETS (not scatter pairs); every pocket's flank lane clears the hull;
+	# segs 0-1 keep the shipped classic 2-rock pair (golden-inert).
+	# Pocket-shape lane geometry: the two widest-apart classic pieces leave a lane.
+	var hc: int = SimWorld.HULL_CLEARANCE / SimWorld.F_ONE
+	var r: int = 16   # classic rock half-width px
+	for pocket in SimWorld.COVER_POCKETS:
+		Runner.T.eq(pocket.size(), 3, "every pocket is a 3-piece cluster")
+		# Find the two pieces with the widest x separation and assert a lane.
+		var xs := []
+		for po in pocket:
+			xs.append(po[0])
+		xs.sort()
+		var widest: int = xs[xs.size() - 1] - xs[0]
+		Runner.T.ok(widest - 2 * r >= hc, "pocket flank lane clears the hull (%dpx gap)" % (widest - 2 * r))
+	# Segs 0-1 stay a classic pair; seg 2+ streams pockets (>= 3 pieces per row).
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	# Count cover rows in seg 2 vs seg 1 — a pocket row has 3 pieces, a pair has 2.
+	var seg1_rows := {}
+	var seg2_cover := 0
+	for rk in sim.rocks:
+		var band: int = absi(rk["y"]) / SimWorld.GATE_SPACING
+		if band == 1:
+			seg1_rows[rk["y"]] = seg1_rows.get(rk["y"], 0) + 1
+		elif band == 2 and rk.get("kind", 0) != 2:   # exclude gate-cluster walls
+			seg2_cover += 1
+	Runner.T.ok(seg2_cover > 0, "seg 2 streams authored cover pockets")

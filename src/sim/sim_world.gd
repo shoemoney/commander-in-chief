@@ -317,6 +317,17 @@ const MAST_HAZARD_RADIUS := 120 * F_ONE   # > the ~64px sandbag diamond, so hugg
 const MAST_CYCLE_TICKS := 180
 const MAST_JET_TICKS := 60
 const MAST_WARN_TICKS := 90                # 1.5s tell — a fat 120px one-shot zone earns a longer warn than the vent's 30t
+# c3 2v: connective cover reads as scatter between setpieces. Authored concave
+# 3-piece POCKETS (mouth opening SOUTH, toward the player) turn the ambient
+# stream into committed fight-geometry. Pieces are classic (16px half) or grass
+# (non-solid), so every intra-pocket lane clears HULL_CLEARANCE by geometry
+# (flanks >= 80px apart → 48px lane > 44). [dx, dy] px from the row anchor.
+const COVER_POCKETS := [
+	[[-40, 0], [40, 0], [0, -40]],     # C-pocket: two flanks + a back stone
+	[[-46, 0], [38, -24], [0, 40]],    # staggered wedge
+	[[0, -44], [-46, 10], [46, 10]],   # back wall + two wings
+	[[-44, -10], [44, -10], [0, 30]],  # V-mouth facing south
+]
 const VENT_CHUNKS := [
 	# No empty chunks (unlike MINE_CHUNKS): seg 4 keeps only ~2 rows after the
 	# keep-outs, so an empty roll on both would erase the mechanic for that
@@ -3121,19 +3132,26 @@ func _step_camera() -> void:
 			# Forced classic in segs 0-1 (COVER_VARIETY_SEG) so both torture
 			# windows are byte-identical — the tier's extents/solidity only
 			# ever differ past the golden reach.
-			var r_kind := 0
 			if absi(_next_rock_y) / GATE_SPACING >= COVER_VARIETY_SEG:
-				var rkw: int = _mix(r_idx, _world_seed) % 6
-				if absi(_next_rock_y) / GATE_SPACING == RUINS_SEG:
-					# c3 5v: the ruins read as a WALL-MASS maze — flip the weight
-					# to 3 wall : 2 classic : 1 grass (vs the usual classic-heavy).
-					r_kind = 2 if rkw < 3 else (0 if rkw < 5 else 1)
-				else:
-					r_kind = 0 if rkw < 3 else (1 if rkw < 5 else 2)
-			# Colossus escape margin (c2 3v): keep approach debris off the walls.
-			rocks.append({"x": _arena_margin_x(rx, _next_rock_y), "y": _next_rock_y, "kind": r_kind})
-			rocks.append({"x": _arena_margin_x(rx + 22 * F_ONE, _next_rock_y + 10 * F_ONE),
-				"y": _next_rock_y + 10 * F_ONE, "kind": r_kind})
+				# c3 2v: past the golden reach, the ambient stream places an
+				# authored concave POCKET (not a scatter pair) so connective
+				# cover reads as committed fight-geometry, not wallpaper. Pieces
+				# are classic or grass (the ruins get their wall-mass from the
+				# maze stub below); every pocket lane clears HULL_CLEARANCE by
+				# the baked-in >=80px flank spacing. _mix pick, rng-free.
+				var pmix := _mix(r_idx, _world_seed)
+				var pocket: Array = COVER_POCKETS[pmix % COVER_POCKETS.size()]
+				var p_kind: int = 1 if pmix % 3 == 0 else 0   # 1/3 grass concealment, else classic
+				for po in pocket:
+					var ppx: int = rx + po[0] * F_ONE
+					var ppy: int = _next_rock_y + po[1] * F_ONE
+					rocks.append({"x": _arena_margin_x(ppx, ppy), "y": ppy, "kind": p_kind})
+			else:
+				# Segs 0-1 (the torture window) keep the shipped classic 2-rock
+				# pair verbatim — golden-inert.
+				rocks.append({"x": _arena_margin_x(rx, _next_rock_y), "y": _next_rock_y, "kind": 0})
+				rocks.append({"x": _arena_margin_x(rx + 22 * F_ONE, _next_rock_y + 10 * F_ONE),
+					"y": _next_rock_y + 10 * F_ONE, "kind": 0})
 		# c3 5v: the seg-3 ruins get an authored MAZE-WALL run so the labyrinth
 		# reads even though band 3 is squeezed between gate-3's boss arena and
 		# gate-4's fork island. Confined to the band's CLEAN southern third
