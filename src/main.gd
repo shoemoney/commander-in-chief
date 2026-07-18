@@ -3191,7 +3191,12 @@ func _draw_terrain() -> void:
 			# "placed instances on a uniform field"): a 512px super-grid gives
 			# every region a density lean (sparse/normal/lush) and a DOMINANT
 			# SPECIES — wide views now read as ecological zones.
-			var reg := Art.cell_hash(int(fx / 512.0) + 3, int((cam_y + fy_px) / 512.0))
+			# Feathered borders (GPT observation round 3): each anchor samples
+			# the ecology grid through a personal +/-96px displacement, so
+			# regional boundaries interleave irregularly across a ~192px band
+			# instead of reading as smooth 512px gradients.
+			var reg := Art.cell_hash(int((fx + float((hf >> 6) % 192) - 96.0) / 512.0) + 3,
+				int((cam_y + fy_px + float((hf >> 8) % 192) - 96.0) / 512.0))
 			var reg_density := reg % 4   # 0 = sparse, 3 = lush
 			if reg_density == 0 and (hf >> 13) % 3 == 0:
 				continue
