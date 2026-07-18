@@ -1392,7 +1392,7 @@ func _consume_events() -> void:
 			"bounty_kill":
 				# Marked target down — a gold coin fountain + a distinct sting.
 				_coin_pop(ev["x"], ev["y"], "BOUNTY +%d¢" % ev["coin"], 5, Color(1.0, 0.85, 0.3), 0.02)
-				_sfx.play("buy", -3.0, 1.6)
+				_sfx.play("buy_fanfare", -3.0, 1.3)   # a2-16: marked-target-down = a distinct milestone sting, not the buy chime
 			"frag_bonus":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": "FRAG x%d" % ev["n"], "col": Color(1.0, 0.7, 0.35)})

@@ -467,4 +467,7 @@ func test_a2_buy_subclasses() -> void:
 	Runner.T.ok(sfx._sounds.has("buy_grab") and sfx._sounds.has("buy_fanfare"), "the buy sub-classes are synthesized voices")
 	var evmap: Dictionary = _consts()["_EVENT_SOUND"]
 	Runner.T.eq(evmap["token_mint"][0], "buy_fanfare", "the commendation milestone plays the FANFARE, not the buy chime")
+	# the sub-classes are genuinely different voices (different note recipes -> buffer lengths)
+	Runner.T.ok(sfx._sounds["buy_grab"].data.size() != sfx._sounds["buy"].data.size(), "buy_grab is a distinct voice from buy")
+	Runner.T.ok(sfx._sounds["buy_fanfare"].data.size() != sfx._sounds["buy"].data.size(), "buy_fanfare is a distinct voice from buy")
 	sfx.free()
