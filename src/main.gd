@@ -4819,11 +4819,12 @@ func _draw_enemies() -> void:
 		var ehp: int = e["hp"]
 		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
 			_enemy_flash[eidx] = 1.0
-			_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
-			for sp in 4:
-				var sa := float(sp) * PI / 2.0 + 0.4
-				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
-					"vx": cos(sa) * 2.2, "vy": sin(sa) * 2.2})
+			if _motion >= 0.5:   # a2-11 r3: REDUCE MOTION suppresses the pop + sparks (not just the flinch)
+				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
+				for sp in 4:
+					var sa := float(sp) * PI / 2.0 + 0.4
+					_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
+						"vx": cos(sa) * 2.2, "vy": sin(sa) * 2.2})
 		_enemy_hp_prev[eidx] = ehp
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
