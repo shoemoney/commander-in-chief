@@ -3598,10 +3598,11 @@ func _draw_terrain() -> void:
 		# a2-10 ENV#4: a worn CENTER-PAD scuff + a faint PERIMETER-scar ring so the
 		# endless arena reads as a fought-over PLACE with its own floor (the ring you
 		# circle), not anonymous ground.
+		# a2-10 r3: wider/softer pad FIRST, then the tighter hot-center scuff on top -> proper falloff
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(lm_pos - Vector2(96, 70), Vector2(192, 140)),
+			false, Color(0.30, 0.26, 0.20, 0.08))
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(lm_pos - Vector2(72, 52), Vector2(144, 104)),
 			false, Color(0.30, 0.25, 0.18, 0.16))
-		draw_texture_rect(Art.tex("fx_softspot"), Rect2(lm_pos - Vector2(96, 70), Vector2(192, 140)),
-			false, Color(0.30, 0.26, 0.20, 0.08))   # a2-10 r2: wider soft pad, reads under particle spam
 		draw_arc(lm_pos, 152.0, 0, TAU, 56, Color(0.32, 0.27, 0.20, 0.22), 2.0)
 		draw_arc(lm_pos, 168.0, 0, TAU, 60, Color(0.30, 0.26, 0.20, 0.12), 1.5)   # a2-10 r2: softer wider outer scar (lm_pos IS the arena center = the mast)
 		# a2-10 AD#7: a warm dust-haze band along the top edge (wave-keyed), so the
