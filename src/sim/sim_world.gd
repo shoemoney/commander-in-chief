@@ -827,6 +827,9 @@ func _step_players(inputs: Array) -> void:
 		if _lane_blocked(p["x"], p["y"]) and not _lane_blocked(rpx, rpy):
 			p["x"] = rpx
 			p["y"] = rpy
+		# c4 2v: the one-way ledge blocks a RETREAT step (southbound over the line).
+		if _crosses_ledge_south(p["x"], p["y"], rpy):
+			p["y"] = rpy
 		_clamp_actor(p)
 		# c3 2v: stepping into deep-river MUD (band>=2) proactively SURFACES any
 		# lurking frogman within MUD_SURFACE_RADIUS — reusing the frogman surface
@@ -1030,6 +1033,25 @@ func _lane_blocked(x: int, y: int) -> bool:
 	if lh & 1 == 0:
 		return x <= WORLD_LEFT + 200 * F_ONE
 	return x >= WORLD_RIGHT - 200 * F_ONE
+
+
+func _crosses_ledge_south(nx: int, ny: int, oy: int) -> bool:
+	## c4 2v ONE-WAY LEDGE: a collapsed embankment you can drop DOWN (northward,
+	## the advance) but never climb back UP — a step that moves SOUTH (y increases,
+	## retreat) across the band ledge line within a ~160px x-span is reverted, so
+	## the route is an irreversible commitment. Northbound is free. Pure position
+	## predicate, zero state; campaign seg>=2 only -> torture/endless never see it
+	## -> both goldens byte-identical.
+	if mode != "campaign" or ny <= oy:
+		return false
+	var band: int = absi(oy) / GATE_SPACING
+	if band < CHOKE_START_SEG:
+		return false
+	var ly: int = -(band * GATE_SPACING + (300 + _mix(band, 617) % 380) * F_ONE)
+	var lx: int = (100 + _mix(band, 811) % 440) * F_ONE
+	if absi(nx - lx) > 160 * F_ONE:
+		return false
+	return oy <= ly and ny > ly   # crossed the ledge going south (retreat)
 
 
 func _choke_bounds(y: int) -> Array:
@@ -3148,7 +3170,13 @@ func _in_water(x: int, y: int) -> bool:
 			# per band, floored at half. Band 1 keeps FORD_HALF_W exactly.
 			var fw: int = maxi(FORD_HALF_W / 2, FORD_HALF_W - (band_idx - 1) * 4 * F_ONE)
 			if x >= w["ford_x"] - fw and x <= w["ford_x"] + fw:
-				return false
+				# c4 2v COLLAPSING BRIDGE (band>=2): the main ford is dry-foot only in
+				# the OPEN phase; during the CLOSED phase it washes out (you wade / edge-
+				# revert). Phase-cycled from tick_count (no contact timer, no new field);
+				# band 1 (the torture ford) is unaffected -> goldens byte-identical.
+				if band_idx >= 2 and posmod(tick_count + band_idx * 150, 600) >= 180:
+					return true   # CLOSED — the bridge is washed out (wade)
+				return false     # dry ford (OPEN)
 			# Hash stream: the SAME decorrelation-tested _mix as L10's chunks
 			# (KIMK round-3: no unaudited randomness sources).
 			var wh2 := _mix(band_idx, w["ford_x"] / F_ONE)

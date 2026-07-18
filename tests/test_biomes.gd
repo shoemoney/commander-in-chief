@@ -38,8 +38,11 @@ func test_marsh_current_exempts_shells() -> void:
 
 func test_marsh_current_needs_open_water() -> void:
 	# Seg-2 but DRY under the arc (over the ford): no drift — the current is a
-	# property of the water, not the sector (judge r1 negative case).
+	# property of the water, not the sector (judge r1 negative case). Pin the
+	# c4 collapsing-bridge phase OPEN (tick 400 -> band-2 phase 100 < 180) so the
+	# ford is dry-foot for this negative case.
 	var sim := SimWorld.new(31, 1)
+	sim.tick_count = 400
 	sim.waters.append({"y": -2540 * Fixed.ONE, "ford_x": 300 * Fixed.ONE})
 	var g := {"x": 300 * Fixed.ONE, "y": -2500 * Fixed.ONE, "vx": 0, "vy": 0,
 		"z": 50 * Fixed.ONE, "zv": 0, "owner": 0, "shell": false, "hold": false}

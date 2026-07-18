@@ -2524,3 +2524,36 @@ func test_c4_lane_block_reroute() -> void:
 		if ev.get("t", "") == "lane_clear":
 			cleared = true
 	Runner.T.ok(cleared, "a lane_clear fires when the lane reopens")
+
+
+func test_c4_one_way_commitment() -> void:
+	# c4 2v: (1) ONE-WAY LEDGE — a northbound (advance) step crosses the ledge
+	# freely; a southbound (retreat) step across it reverts. (2) COLLAPSING BRIDGE
+	# — a band>=2 ford is dry in the OPEN phase, washes out in the CLOSED phase.
+	# Campaign seg>=2 / band>=2 -> goldens byte-identical.
+	var sim := SimWorld.new(43, 1)
+	var band := 2
+	var ly: int = -(band * SimWorld.GATE_SPACING + (300 + SimWorld._mix(band, 617) % 380) * SimWorld.F_ONE)
+	var lx: int = (100 + SimWorld._mix(band, 811) % 440) * SimWorld.F_ONE
+	Runner.T.ok(sim._crosses_ledge_south(lx, ly + 4 * SimWorld.F_ONE, ly - 4 * SimWorld.F_ONE),
+		"a retreat (southbound) step across the ledge is blocked")
+	Runner.T.ok(not sim._crosses_ledge_south(lx, ly - 4 * SimWorld.F_ONE, ly + 4 * SimWorld.F_ONE),
+		"a northbound (advance) step across the ledge is free")
+	Runner.T.ok(not sim._crosses_ledge_south(lx + 220 * SimWorld.F_ONE, ly + 4 * SimWorld.F_ONE, ly - 4 * SimWorld.F_ONE),
+		"the ledge only spans ~160px (off-span is free)")
+	Runner.T.ok(not sim._crosses_ledge_south(lx, -500 * SimWorld.F_ONE, -510 * SimWorld.F_ONE),
+		"band 0 has no ledge (goldens inert)")
+	var en := SimWorld.new(43, 1, "endless")
+	Runner.T.ok(not en._crosses_ledge_south(lx, ly + 4 * SimWorld.F_ONE, ly - 4 * SimWorld.F_ONE),
+		"endless has no ledge")
+	# COLLAPSING BRIDGE
+	var sim2 := SimWorld.new(43, 1)
+	sim2.waters.append({"y": -2540 * SimWorld.F_ONE, "ford_x": 300 * SimWorld.F_ONE})
+	sim2.tick_count = 400   # band-2 phase 100 -> OPEN
+	Runner.T.ok(not sim2._in_water(300 * SimWorld.F_ONE, -2500 * SimWorld.F_ONE), "the ford is dry-foot in the OPEN phase")
+	sim2.tick_count = 0     # band-2 phase 300 -> CLOSED
+	Runner.T.ok(sim2._in_water(300 * SimWorld.F_ONE, -2500 * SimWorld.F_ONE), "the ford washes out (water) in the CLOSED phase")
+	var s1 := SimWorld.new(43, 1)
+	s1.waters.append({"y": -1500 * SimWorld.F_ONE, "ford_x": 300 * SimWorld.F_ONE})
+	s1.tick_count = 0
+	Runner.T.ok(not s1._in_water(300 * SimWorld.F_ONE, -1460 * SimWorld.F_ONE), "the band-1 torture ford never collapses (goldens inert)")
