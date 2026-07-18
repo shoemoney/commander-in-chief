@@ -67,6 +67,7 @@ var _trauma := 0.0
 var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+var _trench_prev: Array[bool] = []   # c3: per-player last-tick in-trench, for the drop-in cue (view-only)
 var _pending_blasts: Array[Dictionary] = []   # scheduled boss-death secondary detonations
 var _scorch: Array[Dictionary] = []   # lingering ground scorch decals (drawn under units)
 var _corpses: Array[Dictionary] = []  # fallen enemies, fading (drawn under units)
@@ -1078,12 +1079,36 @@ func _physics_process(_delta: float) -> void:
 		_recorder.record_tick(inputs)   # same inputs the sim gets → bit-exact replay
 		sim.step(inputs)
 		_consume_events()
+		_check_trench_edges()
 		_check_smoke_edges()
 		_check_boss_intro()
 		_track_bests()
 	_update_feel()
 	queue_redraw()
 	_update_hud()
+
+
+func _check_trench_edges() -> void:
+	# c3 2v view-only: a one-tick DROP-IN / climb-out cue so the sunken trench
+	# reads as a VERB, not just a silent slow field. Compares this tick's
+	# _in_trench to last tick's per player; pure feel, zero sim/checksum impact.
+	if _trench_prev.size() != sim.players.size():
+		_trench_prev.resize(sim.players.size())
+	for i in sim.players.size():
+		var p: Dictionary = sim.players[i]
+		var now: bool = p["alive"] and sim._in_trench(p["x"], p["y"])
+		if now and not _trench_prev[i]:
+			# Dropped in: a low scuff + a puff of kicked-up dust at the lip.
+			var sp := _to_screen(p["x"], p["y"])
+			_sfx.play_at("click_dry", sp, -8.0, 0.7)
+			for d in 4:
+				_fx.append({"x": p["x"], "y": p["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+					"sz": 8.0 + d * 3.0, "grow": 0.6, "fade": 1.6, "rate": 0.02, "move": true,
+					"vx": randf_range(-0.5, 0.5), "vy": -0.3 - d * 0.1, "col": Color(0.3, 0.3, 0.26, 0.5)})
+		elif not now and _trench_prev[i]:
+			# Climbed out: a lighter scuff, no dust.
+			_sfx.play_at("click_dry", _to_screen(p["x"], p["y"]), -12.0, 1.1)
+		_trench_prev[i] = now
 
 
 func _consume_events() -> void:
