@@ -314,6 +314,12 @@ const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll 
 const CHOKE_START_SEG := 2
 const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
 const FORK_GATES := [2, 4]             # the route-fork gates: their approach band is a cover-free decision apron
+# c2 3v BREATHING CURVE: one whole-band calm beat — the pre-Foundry exhale.
+# Band 4 (between gate 4 and the Foundry) stands down its ambush litter:
+# no mines, no barrels, no choke, no blockade. The seg-4+ foundry VENTS stay
+# — the breath has heat, not ambush; a self-telegraphing biome verb IS the
+# "you've arrived somewhere" story. seg >= 2 by value, so golden-inert.
+const CALM_BAND_SEG := 4
 const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
 const CHOKE_BITE := 240 * F_ONE
@@ -823,6 +829,9 @@ func _choke_bounds(y: int) -> Array:
 	## segment 4 an occasional DOUBLE band with a mid gap), so modulation
 	## never reads as a metronome. Still zero state, zero rng, nothing hashed.
 	var seg: int = absi(y) / GATE_SPACING
+	if seg == CALM_BAND_SEG:
+		# c2 3v: the calm band never chokes — the corridor opens for the exhale.
+		return [WORLD_LEFT, WORLD_RIGHT]
 	if seg >= CHOKE_START_SEG:
 		var sh: int = (seg * 2654435761) & 0x7FFFFFFF
 		var off: int = absi(y) % GATE_SPACING
@@ -857,6 +866,12 @@ func _in_choke_apron(y: int) -> bool:
 	var off: int = absi(y) % GATE_SPACING
 	return (off > 520 * F_ONE and off <= 640 * F_ONE) \
 		or (off > 70 * F_ONE and off <= 150 * F_ONE)
+
+
+func _is_calm_band(y: int) -> bool:
+	## c2 3v: the whole-band breath — pure skip-guard (zero state, zero rng,
+	## never re-phases a neighbor's _mix pick; the _in_choke_apron pattern).
+	return absi(y) / GATE_SPACING == CALM_BAND_SEG
 
 
 func _in_fork_apron(y: int) -> bool:
@@ -2755,7 +2770,8 @@ func _step_camera() -> void:
 	while _next_mine_y > horizon:
 		var m_slot: int = absi(_next_mine_y / MINE_SPACING)
 		var m_gate_off: int = absi(_next_mine_y) % GATE_SPACING
-		if m_slot % 2 == 0 and not _in_choke_apron(_next_mine_y) and m_gate_off >= 80 * F_ONE:
+		if m_slot % 2 == 0 and not _in_choke_apron(_next_mine_y) and m_gate_off >= 80 * F_ONE \
+				and not _is_calm_band(_next_mine_y):
 			var mh2 := _mix(m_slot, _world_seed)
 			var m_pick: int = mh2 % MINE_CHUNKS.size()
 			# No-immediate-repeat window (KIMK r2): a slot never repeats its
@@ -2782,7 +2798,8 @@ func _step_camera() -> void:
 		var b_gate_off: int = absi(_next_barrel_y) % GATE_SPACING
 		# Barrels inherit the mines' gate-row strip guard (c2 4v: the torture
 		# barrel row sits at offset 320, so the goldens never see this branch).
-		if b_slot % 2 == 1 and not _in_choke_apron(_next_barrel_y) and b_gate_off >= 80 * F_ONE:
+		if b_slot % 2 == 1 and not _in_choke_apron(_next_barrel_y) and b_gate_off >= 80 * F_ONE \
+				and not _is_calm_band(_next_barrel_y):
 			var bh2 := _mix(b_slot + 7919, _world_seed)
 			var b_chunk: Array = BARREL_CHUNKS[bh2 % BARREL_CHUNKS.size()]
 			var b_ax: int = (120 + (bh2 >> 8) % 400) * F_ONE
@@ -2875,6 +2892,7 @@ func _step_camera() -> void:
 			# contract _in_fork_apron enforces on the ambient rock stream —
 			# the named list keeps both guards on one definition.
 			if _gate_counter >= 2 and _gate_counter not in FORK_GATES \
+					and not _is_calm_band(_next_gate_y + 460 * F_ONE) \
 					and _mix(_gate_counter, 31) % 3 != 0:
 				# Hash-gated 2-in-3 + VARIED (KIMK r2: an every-stretch constant
 				# blockade recreates the complaint one level up): 2-4 bags,
