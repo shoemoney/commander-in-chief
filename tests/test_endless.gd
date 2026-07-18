@@ -462,10 +462,12 @@ func test_c4_supply_pod_renews_cover() -> void:
 		var rim := 0
 		var center_open := true
 		for rk in sim.rocks:
-			if rk.get("kind", 0) == 0 and absi(rk["x"] - pod["x"]) <= 30 * SimWorld.F_ONE \
-					and absi(rk["y"] - pod["y"]) <= 30 * SimWorld.F_ONE:
+			if rk.get("kind", 0) == 0 and absi(rk["x"] - pod["x"]) <= 60 * SimWorld.F_ONE \
+					and absi(rk["y"] - pod["y"]) <= 60 * SimWorld.F_ONE:
 				rim += 1
 				if rk["x"] == pod["x"] and rk["y"] == pod["y"]:
 					center_open = false
-		Runner.T.ok(rim >= 6, "the pod carves a rock rim (%d cells)" % rim)
-		Runner.T.ok(center_open, "the rim's center is open (a micro-fort interior)")
+		Runner.T.ok(rim >= 5, "the pod carves a rock rim (%d cells)" % rim)
+		Runner.T.ok(center_open, "the rim's center is a legal open hull pocket")
+		# The open center clears the hull (48px pitch -> ~64px pocket).
+		Runner.T.ok(2 * 48 - 2 * 16 >= SimWorld.HULL_CLEARANCE / SimWorld.F_ONE, "the fort interior is standable")

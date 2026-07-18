@@ -3976,10 +3976,12 @@ func _start_wave() -> void:
 		var pcx: int = pslot[0] * F_ONE
 		var pcy: int = pslot[1] * F_ONE
 		var planted_pod := 0
-		for oy in [-28, 0, 28]:
-			for ox in [-28, 0, 28]:
+		for oy in [-48, 0, 48]:
+			for ox in [-48, 0, 48]:
 				if ox == 0 and oy == 0:
-					continue   # center open = the fort interior
+					continue   # center open = a LEGAL hull pocket (64px, standable)
+				if ox == 0 and oy == 48:
+					continue   # south DOORWAY so the player can actually enter the fort
 				var pbx: int = pcx + ox * F_ONE
 				var pby: int = pcy + oy * F_ONE
 				var pclear := true
