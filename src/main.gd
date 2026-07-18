@@ -3443,6 +3443,12 @@ func _biome_ramp(march: float, stops: Array) -> Color:
 func _sector_march() -> float:
 	# Sector march: the ground shifts jungle-olive → ashen/scorched as the run
 	# pushes toward the Foundry finale (campaign: opened gates; endless: wave).
+	# a1-04: the colossus ONLY fights at the Foundry finale — force the full
+	# scorched palette while it is alive so the floor/foliage/water/sky all read
+	# foundry-hot and agree with the red vignette, regardless of how many gates the
+	# run opened (the finale used to show GREEN ground under the red frame).
+	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+		return 1.0
 	if sim.mode == "campaign":
 		var mopened := 0
 		for g in sim.gates:

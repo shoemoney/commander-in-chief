@@ -79,6 +79,16 @@ func _advance() -> void:
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
 	main._update_hud()
+	# Force the retained grass/dirt base to repaint for THIS pose with the FULL
+	# posed-sector palette. _paint_bg skips the rebuild when (camera_top, march) is
+	# unchanged, AND freezes a per-row palette south of _litter_cam_snap (so a live
+	# march sweeps in gradually during play). Under instant posing that seam leaves
+	# the visible field on the PRIOR shot's palette. Pre-sync _bg_march so _draw's
+	# transition-reset is skipped, invalidate _bg_cam to force the repaint, and clear
+	# the freeze snap so every visible row uses the posed sector march.
+	main._bg_march = main._sector_march()
+	main._bg_cam = -2147483647
+	main._litter_cam_snap = 9223372036854775807
 	main.queue_redraw()
 	wait = 6
 
