@@ -4194,7 +4194,7 @@ func _crack_bridge_span(boss: Dictionary) -> void:
 	# Wreckage drops a row south (kind-0 hard cover) at the cracked slab's x — a
 	# different x than the surviving slab, so nothing overlaps and every flank
 	# lane stays > HULL_CLEARANCE.
-	rocks.append({"x": rx, "y": span_y + 40 * F_ONE, "kind": 0})
+	rocks.append({"x": rx, "y": span_y + 40 * F_ONE, "kind": 0, "burn_ticks": 0})
 
 
 func _damage_boss(boss: Dictionary, amount: int) -> void:

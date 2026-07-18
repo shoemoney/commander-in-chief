@@ -241,3 +241,28 @@ func test_c4_gunship_arena_crack() -> void:
 			slabs2 += 1
 	Runner.T.eq(slabs2, slabs0 - 2, "the second crossing cracks the other slab")
 	Runner.T.ok(boss["alive"], "the boss survives both cracks (they're geometry, not damage)")
+	# The crack emits an arena_crack event for the view juice.
+	var cracked := false
+	for ev in sim.events:
+		if ev.get("t", "") == "arena_crack":
+			cracked = true
+	Runner.T.ok(cracked, "the crack emits an arena_crack event for the view")
+
+
+func test_c4_endless_miniboss_no_crack() -> void:
+	# c4 5v: the arena crack is gunship-arena specific — an endless miniboss (no
+	# bridge-span slab) crosses the same HP thirds with ZERO geometry change, so
+	# ENDLESS_GOLDEN stays byte-identical.
+	var sim := SimWorld.new(41, 1)
+	var gate := _inject_boss_gate(sim)   # injected gate has no span slabs
+	var boss: Dictionary = gate["boss"]
+	var rocks0: int = sim.rocks.size()
+	# Cross both thirds (the crack path runs, finds no slab, no-ops).
+	sim._damage_boss(boss, boss["hp"] - (SimWorld.BOSS_HP * 2 / 3) + 1)
+	sim._damage_boss(boss, SimWorld.BOSS_HP / 3)
+	Runner.T.eq(sim.rocks.size(), rocks0, "no span slab -> the crack is a clean no-op")
+	var any_crack := false
+	for ev in sim.events:
+		if ev.get("t", "") == "arena_crack":
+			any_crack = true
+	Runner.T.ok(not any_crack, "no arena_crack event fires without a span to crack")
