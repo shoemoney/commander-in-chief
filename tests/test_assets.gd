@@ -539,3 +539,21 @@ func test_a2_11_hitflash_read_tolerates_hpless_enemies() -> void:
 	var ehp: int = frog.get("hp", 1)
 	Runner.T.eq(ehp, 1, "the guarded hp read defaults to 1 for an hp-less enemy")
 	Runner.T.ok(not (ehp < int(frog.get("hp", ehp))), "no non-lethal-hit flash edge for a one-shot kind")
+
+
+# --- a3-01: the boss separator rim cools on the hot foundry floor so the apex
+# silhouette stops reading red-on-red, while the gunship keeps its warm rim over
+# the green bridge (ramp confined to the hot end). ---
+
+func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
+	var ms = load("res://src/main.gd")
+	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
+	var mid: Color = ms._boss_rim_base(0.6)       # ramp has not started yet
+	var hot: Color = ms._boss_rim_base(1.0)       # foundry finale
+	# Low march: the tuned warm-dark red rim (red dominates blue).
+	Runner.T.ok(warm.r > warm.b, "over green the boss rim stays WARM (r > b)")
+	Runner.T.ok(is_equal_approx(mid.r, warm.r) and is_equal_approx(mid.b, warm.b),
+		"the cool ramp does not start until march > 0.6 (gunship keeps its warm rim)")
+	# High march: cool steel-cyan (blue dominates red) — the separation on red ground.
+	Runner.T.ok(hot.b > hot.r, "on the foundry floor the boss rim goes COOL (b > r)")
+	Runner.T.ok(hot.b > warm.b, "the foundry rim is bluer than the bridge rim (monotonic cool)")

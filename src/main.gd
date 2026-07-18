@@ -3232,7 +3232,14 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 		var oc := Color(0.05, 0.06, 0.04, tint.a)
 		var d := 1.1 / s
 		if _BOSS_RIM.has(tex_name):
-			oc = Color(0.4, 0.1, 0.06, tint.a).lerp(Color(1, 1, 1, tint.a), clampf(_boss_flash, 0.0, 1.0))
+			# a3-01: the warm-dark boss rim was tuned for the gunship over GREEN; on the
+			# red-brown foundry floor (+ the red last-stand vignette) the colossus went
+			# red-on-red-on-red. _boss_rim_base ramps ONLY the hot end toward a cool
+			# steel-cyan so the apex silhouette separates in the finale while the gunship
+			# keeps its warm rim over the bridge. Hit-flash still whitens on top.
+			var rim_base := _boss_rim_base(_sector_march())
+			rim_base.a = tint.a
+			oc = rim_base.lerp(Color(1, 1, 1, tint.a), clampf(_boss_flash, 0.0, 1.0))
 			d = 2.2 / s
 		elif _UNIT_RIM.has(tex_name):
 			# A/B'd 1.6 vs 1.7 at 640x360 (Grok round-2): 1.7 holds the pop in
@@ -3261,6 +3268,14 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 
 func _aim_angle(p: Dictionary) -> float:
 	return atan2(p["aim_y"] * PX, p["aim_x"] * PX)
+
+
+static func _boss_rim_base(march: float) -> Color:
+	# a3-01: the boss separator rim, keyed to the biome march. Warm-dark over the
+	# green bridge (low march, where the gunship was tuned) -> cool steel-cyan on the
+	# hot foundry floor (high march, where the colossus fought red-on-red). Ramped on
+	# the hot end only (smoothstep 0.6..1.0) so the gunship never gets a muddy teal rim.
+	return Color(0.4, 0.1, 0.06).lerp(Color(0.55, 0.82, 1.0), smoothstep(0.6, 1.0, march))
 
 
 func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 0.0)) -> void:
@@ -5377,7 +5392,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# Ground shadow: the heli was the one unit floating untethered (drone and
 	# technical are grounded). Offset down-screen for altitude; bpos carries the
 	# hover bob, so the shadow breathes with it and the airborne read holds.
-	_ground_shadow(bpos + Vector2(0, 30), 26.0, 0.42)
+	# a3-01: march-gate the tint — green-black over the bridge, cooling to blue-black
+	# only if the gunship is ever fought at the hot end (matches the colossus rule).
+	_ground_shadow(bpos + Vector2(0, 30), 26.0, 0.42,
+		Color(0.0, 0.03, 0.0).lerp(Color(0.02, 0.02, 0.05), smoothstep(0.6, 1.0, _sector_march())))
 	# a1-01 rotor DOWNWASH: a dust ring pulses outward under the hull, selling
 	# rotor wash + altitude/mass the small hull alone never conveyed.
 	var _dwt := float(Engine.get_physics_frames()) * 0.9
@@ -5469,7 +5487,9 @@ func _draw_colossus() -> void:
 	var stomp := sin(float(Engine.get_physics_frames()) * 0.12) * 0.5 + 0.5
 	var cbody := cpos + Vector2(0, stomp * 2.0)
 	var csquash := 1.0 - stomp * 0.06
-	_ground_shadow(cpos, 30.0, 0.42)
+	# a3-01: cool the contact shadow to a blue-black — the colossus ONLY fights on the
+	# hot foundry floor, where the default green-black shadow reads as a wrong-hue smear.
+	_ground_shadow(cpos, 30.0, 0.42, Color(0.02, 0.02, 0.05))
 	_spr("colossus_body", cbody, PI, 1.9, mod, csquash)
 	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
