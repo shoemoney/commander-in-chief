@@ -576,12 +576,12 @@ func _paint_bg(canvas: Node2D) -> void:
 		# rotated `dirt` rect stops reading as a pasted rectangular/diamond decal — the
 		# single 0.28-effective halo left the card's own edge showing (4v: figure-ground).
 		# Wide faint outer ring, then a stronger inner halo, both under the hard fill.
-		var halo_out: Vector2 = card[2] * 2.4
+		var halo_out: Vector2 = card[2] * DIRT_FEATHER["out_scale"]
 		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo_out / 2.0, halo_out), false,
-			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * 0.16))
-		var halo: Vector2 = card[2] * 1.6
+			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * DIRT_FEATHER["out_a"]))
+		var halo: Vector2 = card[2] * DIRT_FEATHER["in_scale"]
 		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo / 2.0, halo), false,
-			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * 0.52))
+			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * DIRT_FEATHER["in_a"]))
 		canvas.draw_texture_rect(Art.tex("dirt"), Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
@@ -3299,6 +3299,11 @@ static func _ground_stops(mode: String) -> Array:
 		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
 			Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)],
 	]
+
+
+# a3-05: the two feather rings that grade a bare-earth patch into the turf. Outer wide
+# faint ring + a stronger inner halo, both scaled off the card size and dirt alpha.
+const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a": 0.52}
 
 
 static func _has_canopy_dapple(ash: float) -> bool:
@@ -6436,7 +6441,9 @@ func _draw_glow() -> void:
 			# stays tasteful, MG-spam stacks still sum white-hot without washing out.
 			var sz := (14.0 if fx.get("big", false) else 10.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
 			var mbase: Color = fx.get("col", Color(1.0, 0.95, 0.55))   # a1-09: enemy muzzles pass RED — see WHO fired
-			var mc := Color(mbase.r, mbase.g, mbase.b, 0.8 * (0.95 - t * 0.85))
+			# a3-06 (AD#7/LEG#7): trim the additive fan/core so MG-spam stacks sum LOWER
+			# and explosions keep the bright-point hierarchy (was 0.8, out-blooming blasts).
+			var mc := Color(mbase.r, mbase.g, mbase.b, 0.66 * (0.95 - t * 0.85))
 			# Baked semicircle fan (flat edge at image bottom): rotate image-up onto
 			# the aim angle so the flat edge sits on the muzzle, fan blooming forward.
 			# Same lifetime/fade, still on the additive glow layer; hot core stays.
@@ -6445,12 +6452,15 @@ func _draw_glow() -> void:
 			g.draw_texture_rect(Art.tex("fx_muzzle_fan"), Rect2(-fl * 0.7, -fl, fl * 1.4, fl), false, mc)
 			g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			var mcore := mbase.lerp(Color(1.0, 1.0, 0.9), 0.6)
-			g.draw_circle(pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, 0.8 * (0.9 - t * 0.8)))
-			# First-frame-only: an oversize pure-white pop + 3 radiating slivers —
-			# the crack of the shot, gone before the next frame (4v: fan read soft).
+			g.draw_circle(pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, 0.66 * (0.9 - t * 0.8)))
+			# First-frame-only: an oversize pop + 3 radiating slivers — the crack of the
+			# shot, gone before the next frame (4v: fan read soft). a3-06: the pop was
+			# pure-white (lerp 0.55 @ 0.9a) — the SAME white-hot read as an explosion core,
+			# so gunfire competed with blasts for the eye. Warm it OFF white-hot (lerp 0.32)
+			# and lower the alpha so the muzzle flare stays warm and explosions own white.
 			if t < fx.get("rate", 0.09):
-				var mpop := mbase.lerp(Color.WHITE, 0.55)
-				g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, 0.9))
+				var mpop := mbase.lerp(Color.WHITE, 0.32)
+				g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, 0.66))
 				for ml in 3:
 					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
 					g.draw_line(pos + Vector2.from_angle(mla) * sz * 0.4,

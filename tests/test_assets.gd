@@ -640,3 +640,16 @@ func test_a3_canopy_dapple_only_under_living_trees() -> void:
 	Runner.T.ok(ms._has_canopy_dapple(0.32), "the dapple persists right up to the ash midpoint")
 	Runner.T.ok(not ms._has_canopy_dapple(0.33), "at the ash midpoint the dead canopy casts NO dapple")
 	Runner.T.ok(not ms._has_canopy_dapple(1.0), "the charred foundry canopy casts no dapple")
+
+
+# --- a3-05: the dirt-patch feather rings — a wide faint outer ring + a stronger inner
+# halo grade the bare-earth card into the turf (outer must be wider AND fainter). ---
+
+func test_a3_dirt_feather_rings() -> void:
+	var ms = load("res://src/main.gd")
+	var df: Dictionary = ms.DIRT_FEATHER
+	Runner.T.ok(df["out_scale"] > df["in_scale"], "the outer feather ring is WIDER than the inner halo")
+	Runner.T.ok(df["out_a"] < df["in_a"], "the outer ring is FAINTER than the inner halo (grades out)")
+	# The inner halo is meaningfully stronger than the old single 0.4 multiplier it replaced.
+	Runner.T.ok(df["in_a"] >= 0.5, "the inner halo is stronger than the old 0.4 (kills the hard rim)")
+	Runner.T.ok(df["out_scale"] >= 2.0, "the outer ring reaches well past the card edge")
