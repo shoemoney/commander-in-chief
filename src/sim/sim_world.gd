@@ -263,6 +263,9 @@ const BARREL_CHUNKS := [
 	[[0, 0], [18, 0]],
 	[[0, 0], [18, 0], [90, 0], [108, 0], [180, 0], [198, 0]],
 	[[-60, 0], [-20, 0], [20, 0], [60, 0]],
+	[[0, 0], [18, 0], [9, 30]],                       # tripod stack
+	[[-80, 0], [80, 0]],                              # split pair — thread the middle
+	[[0, 0], [40, 24], [80, 48], [120, 72]],          # diagonal drip
 ]
 const FLANK_SQUAD := 3               # 2v flank doors: squad size per side (starting value)
 const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
@@ -613,6 +616,9 @@ func _step_players(inputs: Array) -> void:
 			var spd := PLAYER_SPEED
 			if p["boost_ticks"] > 0:
 				spd = (PLAYER_SPEED * 3) / 2
+			# Modifier composition rule (KIMK r2, pinned): slow zones do NOT
+			# stack — wading OR wire OR mud is one halving, and boost applies
+			# before it (a boosted wader runs 3/4 speed, not 3/8).
 			if wading or _in_fork_wire(p["x"], p["y"]) or _in_mud(p["x"], p["y"]):
 				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
@@ -1751,6 +1757,11 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	# Sandbag walls stop ground movers both ways (the water-clamp pattern:
 	# move, then revert into-AABB steps) — the swarm flanks cover, never
 	# phases through it. Empty-array fast path keeps the hot loop clean.
+	# Occupancy-toggle semantics (KIMK r2, pinned): solidity flips the TICK
+	# the occupant changes — bullets already in flight test against the new
+	# state next step (chaos accepted as feature: boarding under fire pulls
+	# the cover out from behind you). The swarm cannot crew tanks (board is
+	# a player-input verb only), so enemy-side cover never flickers.
 	for hk3 in tanks:
 		if (hk3["alive"] and hk3["occupant"] < 0) or (not hk3["alive"] and hk3["burn_ticks"] > 0):
 			if absi(e["x"] - hk3["x"]) <= HULK_HALF_W and absi(e["y"] - hk3["y"]) <= HULK_HALF_H:
@@ -2477,9 +2488,15 @@ func _step_gates() -> void:
 				and not g.get("b1", {}).is_empty() \
 				and not g.get("flanked", false) and g["b1"]["alive"] != g["b2"]["alive"]:
 			g["flanked"] = true
+			# Parity variation (KIMK r2: one constant row = solved forever):
+			# odd gates keep the classic 140 row + right elite (gate 1 =
+			# torture = unchanged); even gates drop the door to 180 and the
+			# elite leads from the LEFT. Blocked spawns ride the rock-nudge.
+			var fdy: int = FLANK_DOOR_Y if absi(g["y"] / GATE_SPACING) % 2 == 1 else FLANK_DOOR_Y + 40 * F_ONE
+			var f_left_elite: bool = absi(g["y"] / GATE_SPACING) % 2 == 0
 			for fi in FLANK_SQUAD:
-				_spawn_enemy(WORLD_LEFT, g["y"] + FLANK_DOOR_Y + fi * 22 * F_ONE, false)
-				_spawn_enemy(WORLD_RIGHT, g["y"] + FLANK_DOOR_Y + fi * 22 * F_ONE, fi == 0)
+				_spawn_enemy(WORLD_LEFT, g["y"] + fdy + fi * 22 * F_ONE, f_left_elite and fi == 0)
+				_spawn_enemy(WORLD_RIGHT, g["y"] + fdy + fi * 22 * F_ONE, not f_left_elite and fi == 0)
 			events.append({"t": "flank_breach", "x": WORLD_LEFT, "y": g["y"] + FLANK_DOOR_Y})
 			events.append({"t": "flank_breach", "x": WORLD_RIGHT, "y": g["y"] + FLANK_DOOR_Y})
 		if g["open"] or g.get("final", false):
@@ -2514,8 +2531,16 @@ func _step_gates() -> void:
 			# once — covered by this batch's re-record).
 			pickups.append({"x": SCREEN_CX, "y": g["y"] - 60 * F_ONE,
 				"kind": 1 + rng.range_i(0, 1), "cost": 0})
-			sandbags.append({"x": SCREEN_CX - 70 * F_ONE, "y": g["y"] - 60 * F_ONE, "world": 1})
-			sandbags.append({"x": SCREEN_CX + 70 * F_ONE, "y": g["y"] - 60 * F_ONE, "world": 1})
+			# Pocket shape varies by gate parity (KIMK r2: ritual, not
+			# wallpaper): odd gates = flat flank pair; even gates = a forward
+			# chevron. All north of the wall — clear of every south-band system.
+			if absi(g["y"] / GATE_SPACING) % 2 == 1:
+				sandbags.append({"x": SCREEN_CX - 70 * F_ONE, "y": g["y"] - 60 * F_ONE, "world": 1})
+				sandbags.append({"x": SCREEN_CX + 70 * F_ONE, "y": g["y"] - 60 * F_ONE, "world": 1})
+			else:
+				sandbags.append({"x": SCREEN_CX - 50 * F_ONE, "y": g["y"] - 80 * F_ONE, "world": 1})
+				sandbags.append({"x": SCREEN_CX + 50 * F_ONE, "y": g["y"] - 80 * F_ONE, "world": 1})
+				sandbags.append({"x": SCREEN_CX, "y": g["y"] - 44 * F_ONE, "world": 1})
 			events.append({"t": "gate_open", "x": SCREEN_CX, "y": g["y"]})
 
 
@@ -2552,17 +2577,32 @@ func _in_water(x: int, y: int) -> bool:
 	## Band 1 (the torture band) hits neither branch: byte-identical behavior.
 	for w in waters:
 		if y >= w["y"] and y <= w["y"] + WATER_H:
-			if x >= w["ford_x"] - FORD_HALF_W and x <= w["ford_x"] + FORD_HALF_W:
-				return false
 			var band_idx: int = absi(w["y"] / GATE_SPACING)
+			# Depth-tightening (KIMK r2: rivers must EVOLVE, not just vary):
+			# ford width compresses as the run deepens — full at band 1, -4px
+			# per band, floored at half. Band 1 keeps FORD_HALF_W exactly.
+			var fw: int = maxi(FORD_HALF_W / 2, FORD_HALF_W - (band_idx - 1) * 4 * F_ONE)
+			if x >= w["ford_x"] - fw and x <= w["ford_x"] + fw:
+				return false
+			var wh2 := _mix(band_idx, w["ford_x"] / F_ONE)
 			if band_idx % 3 == 2:
-				var ford2_x: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + 240 * F_ONE) % (480 * F_ONE)
-				if x >= ford2_x - FORD_HALF_W and x <= ford2_x + FORD_HALF_W:
+				# Second ford: hash-derived 180-300px offset (was const 240 —
+				# a learnable rotation, KIMK r2), same depth-tightened width.
+				var ford2_x: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + (180 + wh2 % 121) * F_ONE) % (480 * F_ONE)
+				if x >= ford2_x - fw and x <= ford2_x + fw:
 					return false
-			if band_idx >= 4 and band_idx % 4 == 0:   # deep bands only (first at -4000, past torture)
-				var isl_x2: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + 120 * F_ONE) % (480 * F_ONE)
+			if band_idx >= 4 and band_idx % 4 == 0:
+				# Island placed relative to BOTH fords on overlap bands (idx%12
+				# == 8): midway between them, never across either (designed +
+				# pinned, KIMK r2). Otherwise offset from the main ford.
+				var isl_x2: int
+				if band_idx % 12 == 8:
+					var f2: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + (180 + wh2 % 121) * F_ONE) % (480 * F_ONE)
+					isl_x2 = 80 * F_ONE + (((w["ford_x"] + f2) / 2 - 80 * F_ONE) + 240 * F_ONE) % (480 * F_ONE)
+				else:
+					isl_x2 = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + 120 * F_ONE) % (480 * F_ONE)
 				if absi(x - isl_x2) <= 60 * F_ONE and y >= w["y"] + 20 * F_ONE and y <= w["y"] + 60 * F_ONE:
-					return false   # dry island; the 20px wet lips are the micro-decision
+					return false
 			return true
 	return false
 
@@ -2602,7 +2642,12 @@ func _step_camera() -> void:
 		var m_gate_off: int = absi(_next_mine_y) % GATE_SPACING
 		if m_slot % 2 == 0 and not _in_choke_apron(_next_mine_y) and m_gate_off >= 80 * F_ONE:
 			var mh2 := _mix(m_slot, _world_seed)
-			var m_chunk: Array = MINE_CHUNKS[mh2 % MINE_CHUNKS.size()]
+			var m_pick: int = mh2 % MINE_CHUNKS.size()
+			# No-immediate-repeat window (KIMK r2): a slot never repeats its
+			# neighbor's chunk — recompute the neighbor's pick the same way.
+			if m_pick == _mix(m_slot - 2, _world_seed) % MINE_CHUNKS.size():
+				m_pick = (m_pick + 1 + (mh2 >> 16) % (MINE_CHUNKS.size() - 1)) % MINE_CHUNKS.size()
+			var m_chunk: Array = MINE_CHUNKS[m_pick]
 			var m_ax: int = (150 + (mh2 >> 8) % 340) * F_ONE
 			for od in m_chunk:
 				mines.append({"x": m_ax + od[0] * F_ONE, "y": _next_mine_y + od[1] * F_ONE, "armed": true})
@@ -2676,11 +2721,32 @@ func _step_camera() -> void:
 			# 3-bag line mid-stretch the player must grenade, flank, or crush —
 			# rides the ENTIRE sandbag grammar for free (cover, destructible,
 			# enemy-avoid, tread-kill, conditional hash).
-			if _gate_counter >= 2:
-				var blk_x: int = (140 + ((_gate_counter * 2654435761) & 0x7FFFFFFF) % 320) * F_ONE
-				for bseg2 in 3:
-					sandbags.append({"x": blk_x + (bseg2 - 1) * 24 * F_ONE,
-						"y": _next_gate_y + 460 * F_ONE})
+			if _gate_counter >= 2 and _mix(_gate_counter, 31) % 3 != 0:
+				# Hash-gated 2-in-3 + VARIED (KIMK r2: an every-stretch constant
+				# blockade recreates the complaint one level up): 2-4 bags,
+				# derived gap position, occasionally pre-shelled (a gap bag).
+				var bmix := _mix(_gate_counter, _world_seed)
+				var blk_x: int = (140 + bmix % 320) * F_ONE
+				var blk_n: int = 2 + (bmix >> 6) % 3
+				var blk_gap: int = (bmix >> 9) % blk_n if (bmix >> 12) % 3 == 0 else -1
+				for bseg2 in blk_n:
+					if bseg2 == blk_gap:
+						continue   # pre-shelled: the war got here first
+					sandbags.append({"x": blk_x + (bseg2 - (blk_n >> 1)) * 24 * F_ONE,
+						"y": _next_gate_y + 460 * F_ONE, "world": 1})
+				# Stamp sim identity (KIMK r2): the corridor's halftrack wreck
+				# setpieces are REAL cover (rock entity at the stamp anchor)
+				# and camps CARRY a pickup — places are used, not just seen.
+				var sp_slot: int = absi(_next_gate_y / (400 * F_ONE))
+				var sph2 := _mix(sp_slot * 7, 13)
+				if sph2 % 2 == 0:
+					var spx2: int = (100 + sph2 % 440) * F_ONE
+					var sp_y: int = _next_gate_y + 300 * F_ONE
+					var sp_kind: int = (sph2 / 3) % 4
+					if sp_kind == 3:
+						rocks.append({"x": spx2, "y": sp_y})
+					elif sp_kind == 1:
+						pickups.append({"x": spx2, "y": sp_y, "kind": 0, "cost": 10})
 			# Hardpoint rock ~140px south of every bunker-pair gate, flank-
 			# alternating: the mortar-observer fallback cover the panel asked for.
 			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,
@@ -2760,6 +2826,11 @@ func _step_camera() -> void:
 		# Frogmen lurk in every river.
 		for f in 3:
 			_spawn_frogman(rng.range_i(40, 600) * F_ONE, _next_water_y + rng.range_i(10, 70) * F_ONE)
+		# Late-depth escalation (KIMK r2): band 6+ posts a DEFENDER at the ford
+		# mouth — the guaranteed crossing stops being guaranteed-safe. Derived
+		# position, no extra rng draw; past-torture by construction.
+		if absi(_next_water_y / GATE_SPACING) >= 6:
+			_spawn_frogman(water["ford_x"], _next_water_y + 40 * F_ONE)
 		_next_water_y -= GATE_SPACING
 
 

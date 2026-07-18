@@ -156,13 +156,16 @@ const SEED := 0xDEADBEEF
 ## and bullets, and the gate-open cache moved to a composed center strip (its x rng draw
 ## DELETED, kind draw kept — the sequence past gate-open shifts once). Sample 0 unchanged
 ## (all three land later in the run). ENDLESS untouched (no gates/tanks/strips there).
+## RE-RECORDED (2026-07-17, cycle 1 KIMK round-2): the no-immediate-repeat window re-picks
+## torture-window mine chunks and the barrel table grew 4->7 (different authored field).
+## Fork/blockade/ford/parity changes all land past gate 1 and rode along inert.
 const GOLDEN: Array[int] = [
-	1009666002274062129,
-	7503031489387237277,
-	8626724527638425281,
-	3638081353962212051,
-	6675643951161425085,
-	6075740880367953095,
+	6774622128853222166,
+	6178606846797565368,
+	7508029381399586560,
+	5302306772277264522,
+	4436281569612362539,
+	5729959905033908587,
 ]
 
 
