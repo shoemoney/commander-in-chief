@@ -2139,7 +2139,7 @@ func _ev_victory(ev: Dictionary) -> void:
 	for d in 22:
 		var vca := randf() * TAU
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "casing",
-			"rate": 0.018, "spin": randf() * TAU,
+			"rate": 0.018, "spin": randf() * TAU, "col": Color(1.0, 0.82, 0.35),
 			"vx": cos(vca) * randf_range(1.2, 3.6),
 			"vy": sin(vca) * randf_range(1.2, 3.6) - 1.6})
 	# The colossus is the campaign's last boss — give its wreck the full finale.
@@ -5975,7 +5975,8 @@ func _draw_fx() -> void:
 				false, Color(1.0, 0.6, 0.2, 0.7 - t * 0.6))
 		elif fx["kind"] == "casing":
 			draw_set_transform(pos, fx["spin"] + t * 6.0, Vector2.ONE)
-			draw_texture_rect(Art.tex("fx_shell"), Rect2(-3.0, -1.5, 6.0, 3.0), false, Color(1, 1, 1, 1.0 - t))
+			var ccol: Color = fx.get("col", Color(1, 1, 1))   # a1-11: victory casings pass GOLD
+			draw_texture_rect(Art.tex("fx_shell"), Rect2(-3.0, -1.5, 6.0, 3.0), false, Color(ccol.r, ccol.g, ccol.b, 1.0 - t))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "chopper":
 			# Cinematic flyover (victory extraction / endless-boss escort): sweeps
@@ -7079,7 +7080,7 @@ func _draw_banners(top_msg: String) -> void:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
-			Color(1, 1, 1, 0.96))
+			Color(1, 1, 1, 0.96), true)   # a1-11: gold shine sweep
 		# Trophy overlaps blank panel space only (no row text under it), so it's
 		# safe to draw after the shared panel/title/rows without reordering.
 		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
@@ -7194,7 +7195,7 @@ func _metal_plate(r: Rect2, a: float) -> void:
 		Rect2(r.position + Vector2(r.size.x - cap, 0.0), Vector2(cap, r.size.y)), false, mcol)
 
 
-func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color) -> void:
+func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false) -> void:
 	var rf := Art.font()
 	var panel_top := 112.0
 	var title_y := 150.0
@@ -7223,6 +7224,15 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 				Vector2(320.0, panel_top + panel_h / 2.0) * (1.0 - rscale)))
 	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
 	Art.text_center(self, title, 320, title_y, 24, title_col)
+	if shine:
+		# a1-11 VFX#10: a soft warm glint sweeps across the title on a slow loop (with
+		# a pause) so the run's payoff title catches the light like polished metal.
+		var sw := fposmod(float(Engine.get_physics_frames()) * 0.012, 1.5) - 0.2
+		if sw >= 0.0 and sw <= 1.0:
+			draw_set_transform(Vector2(panel_x + 20.0 + sw * (panel_w - 40.0), title_y), -0.35, Vector2.ONE)
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(-13.0, -22.0, 26.0, 44.0),
+				false, Color(1.0, 0.95, 0.7, 0.5 * sin(sw * PI)))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	for i in rows.size():
 		var row: Dictionary = rows[i]
 		var row_text: String = row["text"]
