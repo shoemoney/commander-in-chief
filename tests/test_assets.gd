@@ -429,3 +429,13 @@ func test_a2_scorch_ages_to_a_capped_ghost() -> void:
 	Runner.T.ok(ms._scorch_age(0.0) > 0.0, "scorch ages from fresh")
 	Runner.T.ok(ms._scorch_age(0.9) <= 0.821, "scorch t caps at the 0.82 ghost floor")
 	Runner.T.ok(ms._scorch_age(0.82) < 1.0, "campaign scorch never reaches t=1 -> never age-removed (a faint permanent scar)")
+
+
+# --- a2-15: REND capsule out of the danger-red family ---
+
+func test_a2_rend_capsule_out_of_danger_hue() -> void:
+	var caps: Array = _consts()["_CAPSULE_COL"]
+	var rend: Color = caps[3]
+	var triple: Color = caps[2]
+	Runner.T.ok(rend.b > rend.r, "REND is now blue-dominant (violet), out of the danger-red family")
+	Runner.T.ok(not rend.is_equal_approx(triple), "REND is clear of the TRIPLE pink")
