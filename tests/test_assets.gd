@@ -50,3 +50,10 @@ func test_a1_water_stops_are_five_and_biome_distinct() -> void:
 	# (the old capped soot-lerp left it muddy-blue). Warm/red foundry vs cool jungle.
 	Runner.T.ok(deep[4].r > deep[0].r + 0.1, "foundry deep water is warmer (redder) than jungle")
 	Runner.T.ok(deep[4].b < deep[0].b - 0.1, "foundry deep water is far less blue than jungle")
+	# mid-stops carry their biome, not just the endpoints (judge a1-03 r2):
+	Runner.T.ok(shallow[2].g > shallow[2].b and shallow[2].g > shallow[2].r,
+		"marsh (sector 2) shallow leans GREEN — murk, not blue")
+	Runner.T.ok(deep[3].b < deep[0].b - 0.08 and absf(deep[3].r - deep[3].g) < 0.06,
+		"ruins (sector 3) deep is a de-blued neutral SLATE, not the jungle blue")
+	# Rendered evidence (jungle river stays teal, no regression):
+	# scratchpad/shots_a1_v5/03-river-crossing.png
