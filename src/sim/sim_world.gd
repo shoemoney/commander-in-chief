@@ -4412,10 +4412,11 @@ func _step_colossus() -> void:
 	# telegraphed strike, forcing them to kite further out as the boss escalates.
 	# Tick-phased (no new field); colossus is torture-unreachable so it is free.
 	if posmod(tick_count, 90) == 0:
-		var inner_r: int = _colossus_ring_radii()[0]
 		for rp in players:
-			if rp["alive"] and _dist_lte(colossus["x"], colossus["y"], rp["x"], rp["y"], inner_r * F_ONE):
-				_add_strike(rp["x"], rp["y"])
+			if rp["alive"]:
+				var rd := Fixed.length(colossus["x"] - rp["x"], colossus["y"] - rp["y"])
+				if _colossus_ring(rd) == 0:   # camping the (growing) inner ring is punished
+					_add_strike(rp["x"], rp["y"])
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
@@ -4482,6 +4483,15 @@ func _step_one_boss(boss: Dictionary) -> void:
 		# Strafe-half opener: the view paints the sweep lane (checksum-excluded).
 		events.append({"t": "strafe_lane", "x": boss["x"], "y": boss["gate_y"] - BOSS_Y_OFFSET,
 			"dir": boss["dir"]})
+	# c4 2v ROTATING POSITIONAL ZONES (gunship): each boss CYCLE, one of the four
+	# arena cover spots is INVALIDATED by a telegraphed radial strike (which spot
+	# rotates per cycle), so no single firing spot stays safe. Campaign gunship
+	# (gate 3) only — endless minibosses have no such bags (no-op) — so gate 3 is
+	# torture-inert and ENDLESS_GOLDEN is untouched.
+	if mode == "campaign" and t == BOSS_CYCLE_TICKS / 2:
+		var spot_i: int = posmod(tick_count / BOSS_CYCLE_TICKS, 4)
+		var spot_x: int = [164, 200, 432, 468][spot_i] * F_ONE
+		_add_strike(spot_x, boss["gate_y"] + 120 * F_ONE)
 	# Endless tier escalation (9v: waves 5/10/15/20 differed only by HP).
 	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
 	var tier: int = wave / 5
