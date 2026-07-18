@@ -378,6 +378,9 @@ const SCALE := {
 ## outline below); foliage deepens green. Absent = white.
 const UNIT := Color(0.85, 0.81, 0.58)
 const OLIVE_VEH := Color(0.76, 0.85, 0.52)
+# a2-02: bosses break out of the disposable-tank olive into a heavy desaturated
+# GUNMETAL so the gunship + colossus read as an apex tier, not up-scaled jeeps.
+const BOSS_VEH := Color(0.60, 0.63, 0.66)
 const FOLIAGE := Color(0.82, 1.0, 0.66)
 # a1-05: charred late-run foliage. The flat FOLIAGE green used to multiply back
 # into every fern/tree even after main.gd browned them (fern_col), so the foundry
@@ -408,8 +411,8 @@ const TINT := {
 	"frogman": Color(1.35, 1.6, 1.7), "observer": Color(1.6, 1.2, 1.0),   # frogman: bright cool "wet threat" — dark bake vanished against rocks (3v)
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
-	"gunship_body": OLIVE_VEH, "gunship_barrel": OLIVE_VEH,
-	"colossus_body": OLIVE_VEH, "colossus_barrel": OLIVE_VEH,
+	"gunship_body": BOSS_VEH, "gunship_barrel": BOSS_VEH,
+	"colossus_body": BOSS_VEH, "colossus_barrel": BOSS_VEH,
 	"sandbag_beige": Color(0.88, 0.92, 0.66),
 	"crate_ammo": Color(0.82, 0.88, 0.62), "crate_grenade": Color(0.82, 0.88, 0.62),
 	"crate_airstrike": Color(0.82, 0.88, 0.62),

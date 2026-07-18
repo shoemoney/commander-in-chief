@@ -326,3 +326,13 @@ func test_a2_decor_keys_all_in_tint() -> void:
 	Runner.T.ok(decor.size() >= 15, "the decor char set is populated (%d)" % decor.size())
 	for k in decor:
 		Runner.T.ok(tint.has(k), "decor key '%s' has a base TINT entry to char from" % k)
+
+
+# --- a2-02: boss tier tint breaks out of the disposable-tank olive ---
+
+func test_a2_boss_tier_tint_distinct() -> void:
+	var boss := Art.tint("gunship_body")
+	var tank := Art.tint("tank_body")
+	Runner.T.ok(not boss.is_equal_approx(tank), "the gunship boss no longer shares the disposable-tank tint")
+	Runner.T.ok(Art.tint("colossus_body").is_equal_approx(boss), "both bosses share the heavy BOSS_VEH tint")
+	Runner.T.ok(boss.b > tank.b, "boss gunmetal is cooler (more blue) than the olive tank")

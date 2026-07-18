@@ -4934,7 +4934,7 @@ func _draw_enemies() -> void:
 				# neutral grey washed out on bright sand.
 				draw_circle(epos + Vector2(0, -26), 7.0, Color(0.08, 0.09, 0.07, 0.6))
 				Art.text(self, "?", epos + Vector2(-3, -22), 12, Color(1.0, 0.75, 0.4, 0.5 + qp * 0.4))
-			_spr("m_technical", epos, t_face, 0.55, Color.WHITE, 1.1 if t_lunge > 0 else 1.0)
+			_spr("m_technical", epos, t_face, 0.55, Color(1.25, 0.88, 0.62), 1.1 if t_lunge > 0 else 1.0)   # a2-02: warm-hostile vehicle tint
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
 			# RESCUE label so "touch, don't shoot" reads across a firefight.
@@ -5143,8 +5143,8 @@ func _draw_observer() -> void:
 	op.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8   # engine-idle breath — not a statue
 	# The rocket battery the spotter paints for sits alongside — the pair reads
 	# as one artillery unit, not a lone jeep with magic mortars.
-	_spr("m_rocket_truck", op + Vector2(40, 5), PI / 2, 0.5)
-	_spr("m_radar_tank", op, PI / 2, 0.5)   # radar-spotter vehicle: reads as "painting you for artillery"
+	_spr("m_rocket_truck", op + Vector2(40, 5), PI / 2, 0.5, Color(1.2, 0.86, 0.6))   # a2-02: warm-hostile
+	_spr("m_radar_tank", op, PI / 2, 0.5, Color(1.2, 0.86, 0.6))   # a2-02: warm-hostile spotter vehicle
 	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
 	# Baked flag glyph (last greybox rect on this unit) — same hud_flag the map markers wear.
 	_spr("hud_flag", op + Vector2(11.5, -9.5), 0.0, 0.04, Color(0.9, 0.25, 0.2))
