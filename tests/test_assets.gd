@@ -258,6 +258,8 @@ func test_a1_legacy-art_bakes_are_lossless() -> void:
 	var stack: Array[String] = ["res://assets/legacy-art"]
 	var checked := 0
 	var offenders: Array[String] = []
+	var detect3d: Array[String] = []
+	var vram: Array[String] = []
 	while not stack.is_empty():
 		var d: String = stack.pop_back()
 		var da := DirAccess.open(d)
@@ -274,11 +276,19 @@ func test_a1_legacy-art_bakes_are_lossless() -> void:
 				var txt := FileAccess.get_file_as_string(full)
 				if txt.contains("compress/mode=2"):
 					offenders.append(f)
+				if txt.contains("detect_3d/compress_to=1"):
+					detect3d.append(f)
+				if txt.contains("vram_texture=true"):
+					vram.append(f)
 			f = da.get_next()
 		da.list_dir_end()
 	Runner.T.ok(checked > 100, "scanned the legacy art bake .import files (%d)" % checked)
 	Runner.T.ok(offenders.is_empty(),
 		"no legacy art bake is BC-compressed (compress/mode=2 mushes the OUTLINE silhouette): %s" % str(offenders.slice(0, 5)))
+	Runner.T.ok(detect3d.is_empty(),
+		"detect_3d is OFF so a future --import cannot re-BC the bakes: %s" % str(detect3d.slice(0, 5)))
+	Runner.T.ok(vram.is_empty(),
+		"no bake re-imported as a VRAM texture (lossless .ctex, not s3tc): %s" % str(vram.slice(0, 5)))
 
 
 func test_a1_player_ident_and_ring_shape() -> void:
