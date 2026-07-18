@@ -140,3 +140,13 @@ func test_a1_new_synth_voices_have_energy() -> void:
 			mx = maxi(mx, data[bi])
 		Runner.T.ok(mx - mn > 8, "%s carries real signal energy (not flat silence)" % nm)
 	sfx.free()
+
+
+# --- a1-14: friendly supply cue split off the hostile whistle ---
+
+func test_a1_supply_cue_split_from_hostile_whistle() -> void:
+	var evmap: Dictionary = _consts()["_EVENT_SOUND"]
+	Runner.T.ok(evmap["supply_drop"][0] != evmap["strike_warn"][0],
+		"friendly supply cue no longer shares the hostile strike whistle")
+	Runner.T.eq(evmap["supply_drop"][0], "supply_chime", "supply_drop plays the friendly chime")
+	Runner.T.eq(evmap["strike_warn"][0], "whistle", "strike_warn keeps the hostile whistle")

@@ -244,7 +244,7 @@ const _EVENT_SOUND := {
 	"player_down": ["player_down", 0.0, 1.0],
 	"vest_break": ["vest_break", -2.0, 1.0],
 	"gate_open": ["gate_open", -4.0, 1.0],
-	"supply_drop": ["whistle", -8.0, 0.8],   # low falling whistle: friendly cargo inbound, below strike_warn
+	"supply_drop": ["supply_chime", -6.0, 1.0],   # a1-14: a warm friendly cargo CHIME (whistle is the hostile strike cue)
 	"drop_stolen": ["alarm", -9.0, 0.6],     # low growl: the crate is gone
 	"drop_gone": ["alarm", -12.0, 0.45],     # lower fizzle: the window closed on its own
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
@@ -2843,6 +2843,7 @@ func _drive_audio() -> void:
 		_vo("vo_pilot_plea", 2, 600, true)
 	# VO owns the mix while speaking: rides the existing duck channel.
 	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0))
+	_sfx.duck_sfx_under_vo(_sfx.vo_active())   # a1-14 AUD#6: the combat bus dips under the radio too
 	_sfx.set_concussion(_concussion)
 	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
 	var want := 1.0 if sim.last_stand and not sim.victory else 0.0

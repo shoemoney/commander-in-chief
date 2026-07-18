@@ -185,6 +185,16 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	ply.play()
 
 
+func duck_sfx_under_vo(active: bool) -> void:
+	# a1-14 AUD#6: dip the whole SFX (combat) bus while a radio line is on air so the
+	# VO lands over gunfire — music/amb already duck under VO, the SFX bus did not.
+	var idx := AudioServer.get_bus_index("SFX")
+	if idx == -1:
+		return
+	var target := -6.0 if active else 0.0
+	AudioServer.set_bus_volume_db(idx, lerpf(AudioServer.get_bus_volume_db(idx), target, 0.15))
+
+
 func vo_active() -> bool:
 	return _vo.playing or _vo_dry.playing
 
@@ -565,6 +575,7 @@ func _synth_all() -> void:
 	s["deny"] = _notes([220.0, 196.0], 0.09)
 	s["revive"] = _notes([392.0, 523.0, 659.0], 0.08, 0.0, false)
 	s["gate_open"] = _notes([392.0, 494.0, 587.0, 784.0], 0.1)
+	s["supply_chime"] = _notes([392.0, 587.0, 784.0], 0.1, 0.0, false)   # a1-14: warm friendly cargo cue (was the hostile whistle)
 	s["wave_start"] = _notes([262.0, 330.0], 0.14)
 	s["wave_clear"] = _notes([523.0, 659.0, 784.0], 0.1)
 	s["victory"] = _notes([523.0, 587.0, 659.0, 784.0, 1047.0], 0.16)
