@@ -3155,7 +3155,9 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 			# a1-02: a warm-LIGHT separator rim lifts the dark hostile off BOTH bright
 			# ground and dark scenery (the near-black rim vanished into the litter).
 			# Widened to 2.2px (the 4 diagonal offsets are thin) + brightened so the
-			# small hostile actually reads as a threat, not a dark speck.
+			# small hostile actually reads as a threat, not a dark speck. This 2.2px
+			# INTENTIONALLY supersedes the ghillie/courier 1.9 above — when they are
+			# revealed the separator IS the read; the cloak alpha (tint.a) still hides it.
 			oc = Color(1.0, 0.9, 0.62, tint.a)
 			d = 2.2 / s
 		for o in _OUTLINE_OFFSETS:

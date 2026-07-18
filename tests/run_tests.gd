@@ -28,6 +28,7 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_event_coverage.gd",
 	"res://tests/test_replay.gd",
 	"res://tests/test_robustness.gd",
+	"res://tests/test_assets.gd",
 ]
 
 
