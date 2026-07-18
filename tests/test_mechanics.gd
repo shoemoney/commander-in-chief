@@ -2507,3 +2507,20 @@ func test_c4_lane_block_reroute() -> void:
 		if ev.get("t", "") == "lane_seal":
 			sealed = true
 	Runner.T.ok(sealed, "a lane_seal telegraph event fires at the seal transition")
+	# ...and lane_warn (0.75s before) and lane_clear (reopen) across the cycle edges.
+	sim4.events.clear()
+	sim4.tick_count = SimWorld.LANE_BLOCK_CYCLE - SimWorld.LANE_BLOCK_WARN - band * 300
+	sim4._step_camera()
+	var warned := false
+	for ev in sim4.events:
+		if ev.get("t", "") == "lane_warn":
+			warned = true
+	Runner.T.ok(warned, "a lane_warn fires 0.75s before the seal")
+	sim4.events.clear()
+	sim4.tick_count = SimWorld.LANE_BLOCK_SEALED - band * 300
+	sim4._step_camera()
+	var cleared := false
+	for ev in sim4.events:
+		if ev.get("t", "") == "lane_clear":
+			cleared = true
+	Runner.T.ok(cleared, "a lane_clear fires when the lane reopens")
