@@ -188,17 +188,16 @@ func _draw() -> void:
 	# Live BEST target: the record to beat, right next to the current score.
 	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
 	# the chip gold and pulse it the instant the live score passes it.
-	if main.best_score > 0:
-		if sim.score > main.best_score:
+	match _record_hud_mode(sim.score, main.best_score):
+		"badge":
 			# a1-17 HUD#2/HUD#3: 'record beaten' is ONE reserved BADGE (medal + "RECORD"),
 			# not a SECOND copy of the score competing with the medal chip beside it.
-			# Pulses to mark the moment; plain gold stays reserved for streak/flawless.
 			if _fits(x, _tw("RECORD") + ICON + 6.0):
 				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
 				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
 				draw_texture_rect(Art.tex("icon_medal"), Rect2(x, y, ICON, ICON), false, rcol)
 				x = _text("RECORD", x + ICON + 1.0, y + ICON - 3.0, rcol) + 8.0
-		else:
+		"best":
 			# Live BEST target: the record to chase — a DIM reference chip, sunk below
 			# the live chest/score/ammo tier so vanity no longer competes with stats.
 			var btxt := "BEST %d" % main.best_score
@@ -604,6 +603,14 @@ func _mini_bar(rect: Rect2, frac: float, fill: Color) -> void:
 	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
 	draw_rect(Rect2(well.position, Vector2(well.size.x * clampf(frac, 0.0, 1.0), well.size.y)), fill)
 	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
+
+
+static func _record_hud_mode(score: int, best: int) -> String:
+	# a1-17: what the top-bar record chip shows — a reserved "badge" once the live
+	# score BEATS the best; a dim "best" target while it has not; nothing if no best.
+	if best <= 0:
+		return "none"
+	return "badge" if score > best else "best"
 
 
 func _stat(icon: String, txt: String, x: float, y: float,

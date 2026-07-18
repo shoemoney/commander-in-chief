@@ -241,3 +241,12 @@ func test_a1_friendly_greens_are_colorblind_safe() -> void:
 	var conv := Art.safe(green)
 	Runner.T.ok(conv.b > conv.g, "colorblind ON: the friendly green converts to a blue-dominant safe color (won't read as danger-red)")
 	Art.colorblind = false   # restore the static for other suites
+
+
+# --- a1-17 r2: top-bar record chip mode ---
+
+func test_a1_record_hud_mode() -> void:
+	var hud = load("res://src/view/hud.gd")
+	Runner.T.eq(hud._record_hud_mode(200, 100), "badge", "live score beat best -> reserved RECORD badge")
+	Runner.T.eq(hud._record_hud_mode(50, 100), "best", "score below best -> dim BEST target chip")
+	Runner.T.eq(hud._record_hud_mode(200, 0), "none", "no best yet -> no record chip")
