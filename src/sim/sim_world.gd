@@ -326,6 +326,20 @@ const CHOKE_BITE := 240 * F_ONE
 const ROCK_SPACING := 260 * F_ONE
 const ROCK_HALF_W := 16 * F_ONE   # sized to the DRAWN rock (KIMK pin: art == collision)
 const ROCK_HALF_H := 12 * F_ONE
+# Cover TIERS (c2 3v: one-size rocks made every LOS puzzle "is there a rock
+# between us"). Each streamed cover carries a "kind"; extents + solidity read
+# from this table (art == collision holds — the view scales each sprite to
+# match). Kind is DERIVED from the row hash at spawn and stored, but NOT fed to
+# the checksum (the feed stays x,y). Grass changes bullet lifetimes and the
+# other tiers change extents, so variety is gated to COVER_VARIETY_SEG (the
+# blockade "gates 2+ = past torture" precedent) — segs 0-1 stay all-classic,
+# so both goldens are inert by construction.
+#   0 classic rock  16x12  blocks all           (the shipped tier)
+#   1 tall grass    28x20  blocks NOTHING        (conceals — smoke's gates)
+#   2 ruined wall   40x10  blocks all            (wide mass, narrow lanes)
+#   3 hero wreck    32x24  blocks all, drawn 2x  (a focal silhouette)
+const ROCK_KIND_EXT := [[16, 12, 1], [28, 20, 0], [40, 10, 1], [32, 24, 1]]
+const COVER_VARIETY_SEG := 2
 const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST, SHOP_SANDBAG_COST]
 # Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
 # it advances DOWN the map at the players. Armor: grenades only. Three
@@ -700,8 +714,12 @@ func _step_players(inputs: Array) -> void:
 		# inside — post-respawn edge case — may walk out).
 		if not rocks.is_empty():
 			for rk in rocks:
-				if absi(p["x"] - rk["x"]) <= ROCK_HALF_W and absi(p["y"] - rk["y"]) <= ROCK_HALF_H:
-					if absi(rpx - rk["x"]) > ROCK_HALF_W or absi(rpy - rk["y"]) > ROCK_HALF_H:
+				if not _rk_solid(rk):
+					continue   # grass conceals, never blocks the boot
+				var rhw := _rk_hw(rk)
+				var rhh := _rk_hh(rk)
+				if absi(p["x"] - rk["x"]) <= rhw and absi(p["y"] - rk["y"]) <= rhh:
+					if absi(rpx - rk["x"]) > rhw or absi(rpy - rk["y"]) > rhh:
 						p["x"] = rpx
 						p["y"] = rpy
 					break
@@ -821,6 +839,37 @@ static func _mix(a: int, b: int) -> int:
 	var v: int = (a * 2654435761) ^ (b * 40503)
 	v = (v ^ (v >> 13)) * 1274126177
 	return (v ^ (v >> 16)) & 0x7FFFFFFF
+
+
+static func _rk_hw(rk: Dictionary) -> int:
+	return ROCK_KIND_EXT[rk.get("kind", 0)][0] * F_ONE
+
+
+static func _rk_hh(rk: Dictionary) -> int:
+	return ROCK_KIND_EXT[rk.get("kind", 0)][1] * F_ONE
+
+
+static func _rk_solid(rk: Dictionary) -> bool:
+	## Kind 1 (grass) blocks nothing physically — it only conceals.
+	return ROCK_KIND_EXT[rk.get("kind", 0)][2] == 1
+
+
+func _in_grass(t: Dictionary) -> bool:
+	## Tall-grass concealment (c2 3v): standing in a grass patch hides you from
+	## enemy fire-acquisition exactly as smoke does. Bullets and boots pass
+	## through (grass hides, it does not save) — the non-solid conceal tier.
+	for rk in rocks:
+		if rk.get("kind", 0) == 1 \
+				and absi(t["x"] - rk["x"]) <= ROCK_KIND_EXT[1][0] * F_ONE \
+				and absi(t["y"] - rk["y"]) <= ROCK_KIND_EXT[1][1] * F_ONE:
+			return true
+	return false
+
+
+func _concealed(t: Dictionary) -> bool:
+	## The unified fire-acquisition gate: smoke OR tall grass. Segs 0-1 stream
+	## no grass, so in the torture window this is exactly the old smoke gate.
+	return t["smoke_ticks"] > 0 or _in_grass(t)
 
 
 func _choke_bounds(y: int) -> Array:
@@ -1322,8 +1371,10 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 			tank["x"] = prev_x
 			tank["y"] = prev_y
 		for rk in rocks:
-			if absi(tank["x"] - rk["x"]) <= ROCK_HALF_W + 6 * F_ONE \
-					and absi(tank["y"] - rk["y"]) <= ROCK_HALF_H + 6 * F_ONE:
+			if not _rk_solid(rk):
+				continue   # a tank crushes through grass
+			if absi(tank["x"] - rk["x"]) <= _rk_hw(rk) + 6 * F_ONE \
+					and absi(tank["y"] - rk["y"]) <= _rk_hh(rk) + 6 * F_ONE:
 				tank["x"] = prev_x
 				tank["y"] = prev_y
 				break
@@ -1558,7 +1609,9 @@ func _step_bullets() -> void:
 					break
 		if not dead and not rocks.is_empty():
 			for rk in rocks:
-				if absi(bx - rk["x"]) <= ROCK_HALF_W and absi(by - rk["y"]) <= ROCK_HALF_H:
+				if not _rk_solid(rk):
+					continue   # bullets pass through grass — it hides, doesn't save
+				if absi(bx - rk["x"]) <= _rk_hw(rk) and absi(by - rk["y"]) <= _rk_hh(rk):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
@@ -1873,8 +1926,12 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 				break
 	if not rocks.is_empty():
 		for rk in rocks:
-			if absi(e["x"] - rk["x"]) <= ROCK_HALF_W and absi(e["y"] - rk["y"]) <= ROCK_HALF_H:
-				if absi(pvx - rk["x"]) > ROCK_HALF_W or absi(pvy - rk["y"]) > ROCK_HALF_H:
+			if not _rk_solid(rk):
+				continue   # enemies walk through grass too
+			var rhw := _rk_hw(rk)
+			var rhh := _rk_hh(rk)
+			if absi(e["x"] - rk["x"]) <= rhw and absi(e["y"] - rk["y"]) <= rhh:
+				if absi(pvx - rk["x"]) > rhw or absi(pvy - rk["y"]) > rhh:
 					e["x"] = pvx
 					e["y"] = pvy
 				break
@@ -2055,7 +2112,7 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > ELITE_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ELITE_SPEED)
-	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't aim into smoke
+	elif e["fire_cd"] == 0 and not _concealed(target):   # can't aim into smoke
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS
 		e["windup"] = ELITE_WINDUP_TICKS
 		events.append({"t": "elite_windup", "x": e["x"], "y": e["y"]})
@@ -2073,7 +2130,7 @@ func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > GRENADIER_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
-	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
+	elif e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
 		e["fire_cd"] = GRENADIER_FIRE_CD_TICKS
 		e["windup"] = GRENADIER_WINDUP_TICKS
 		events.append({"t": "grenadier_windup", "x": e["x"], "y": e["y"]})
@@ -2099,7 +2156,7 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 	# Keeps to the back — only closes if the target runs far away.
 	if dlen > SNIPER_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
-	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
+	elif e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
 		e["aim_lx"] = dx   # lock the shot vector at paint start (see fire branch)
@@ -2122,7 +2179,7 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	if dlen > DRONE_STANDOFF:
 		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), DRONE_SPEED)
 		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), DRONE_SPEED)
-	elif e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
+	elif e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
 		e["fire_cd"] = DRONE_FIRE_CD_TICKS
 		e["windup"] = DRONE_WINDUP_TICKS
 		events.append({"t": "drone_windup", "x": e["x"], "y": e["y"]})
@@ -2187,7 +2244,7 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 			e["x"] = cpx
 			e["y"] = cpy
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
-	if e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't line up a charge into smoke
+	if e["fire_cd"] == 0 and not _concealed(target):   # can't line up a charge into smoke
 		e["fire_cd"] = TECHNICAL_LOCK_CD_TICKS
 		e["windup"] = TECHNICAL_REV_TICKS
 		events.append({"t": "technical_rev", "x": e["x"], "y": e["y"]})
@@ -2277,7 +2334,7 @@ func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: in
 	if dlen > GHILLIE_NOTICE_RADIUS:
 		e["submerged"] = true   # you slipped out of range — re-cloak and wait
 		return
-	if e["fire_cd"] == 0 and target["smoke_ticks"] == 0:   # can't paint into smoke
+	if e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
 		e["aim_lx"] = dx   # lock the shot vector at paint start (view draws the line)
@@ -2442,7 +2499,9 @@ func _step_spawner() -> void:
 func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 	# Spawn-path nudge (fork-mine precedent): never birth a unit inside a rock.
 	for rk in rocks:
-		if absi(x - rk["x"]) <= ROCK_HALF_W + 4 * F_ONE and absi(y - rk["y"]) <= ROCK_HALF_H + 4 * F_ONE:
+		if not _rk_solid(rk):
+			continue   # birthing in grass is fine — it doesn't block
+		if absi(x - rk["x"]) <= _rk_hw(rk) + 4 * F_ONE and absi(y - rk["y"]) <= _rk_hh(rk) + 4 * F_ONE:
 			x += 24 * F_ONE
 			break
 	var e := {"x": x, "y": y, "alive": true, "elite": elite,
@@ -2836,8 +2895,16 @@ func _step_camera() -> void:
 		if r_idx % 3 != 0 and r_off < 700 and (r_off < 400 or r_off > 520) \
 				and not _in_fork_apron(_next_rock_y):
 			var rx: int = (80 + ((r_idx * 2654435761) & 0x7FFFFFFF) % 460) * F_ONE
-			rocks.append({"x": rx, "y": _next_rock_y})
-			rocks.append({"x": rx + 22 * F_ONE, "y": _next_rock_y + 10 * F_ONE})
+			# Cover TIER by hash (c2 3v), weighted 3 classic : 2 grass : 1 wall.
+			# Forced classic in segs 0-1 (COVER_VARIETY_SEG) so both torture
+			# windows are byte-identical — the tier's extents/solidity only
+			# ever differ past the golden reach.
+			var r_kind := 0
+			if absi(_next_rock_y) / GATE_SPACING >= COVER_VARIETY_SEG:
+				var rkw: int = _mix(r_idx, _world_seed) % 6
+				r_kind = 0 if rkw < 3 else (1 if rkw < 5 else 2)
+			rocks.append({"x": rx, "y": _next_rock_y, "kind": r_kind})
+			rocks.append({"x": rx + 22 * F_ONE, "y": _next_rock_y + 10 * F_ONE, "kind": r_kind})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
@@ -2885,10 +2952,30 @@ func _step_camera() -> void:
 			bunkers.append(b1)
 			bunkers.append(b2)
 			_stamp_stretch_setpieces()
-			# Hardpoint rock ~140px south of every bunker-pair gate, flank-
-			# alternating: the mortar-observer fallback cover the panel asked for.
+			# Hardpoint HERO wreck ~140px south of every bunker-pair gate,
+			# flank-alternating: the mortar-observer fallback cover the panel
+			# asked for. Kind-3 focal silhouette (32x24, drawn 2x — the "one
+			# 1.5-2x hero landmark per hardpoint", c2 3v) ONLY past the torture
+			# window; gate 1 keeps the shipped classic-extent rock so goldens
+			# hold (the bigger extent inside the window would re-record).
+			var hero_kind: int = 3 if absi(_next_gate_y) / GATE_SPACING >= COVER_VARIETY_SEG else 0
 			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,
-				"y": _next_gate_y + 140 * F_ONE})
+				"y": _next_gate_y + 140 * F_ONE, "kind": hero_kind})
+			# Oversized RUINED-WALL mass (c2 3v: no LOS focal points): gates 2+,
+			# 1-in-2 by hash, a 3-slab kind-2 wall spanning ~240px (~38% of the
+			# corridor) with a hash-placed gap >= HULL_CLEARANCE so a lane always
+			# threads it. Opposite flank to the hero wreck. Inert past gate 1.
+			if absi(_next_gate_y) / GATE_SPACING >= COVER_VARIETY_SEG \
+					and _mix(_gate_counter, 811) % 2 == 0:
+				var wall_side: int = 460 if _gate_counter % 2 == 1 else 60   # opposite the hero
+				var wall_gap: int = _mix(_gate_counter, 907) % 3   # which slab is dropped for the lane
+				# Slabs at 80px pitch (kind-2 half-width 40 → edge-to-edge): the
+				# dropped slot is an 80px lane >= HULL_CLEARANCE (44) by pitch.
+				for wslab in 3:
+					if wslab == wall_gap:
+						continue
+					rocks.append({"x": (wall_side + (wslab - 1) * 80) * F_ONE,
+						"y": _next_gate_y + 220 * F_ONE, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
 					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
@@ -3370,7 +3457,7 @@ func _step_colossus() -> void:
 
 	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: sapper drops.
 	colossus["spray_cd"] = colossus["spray_cd"] - 1
-	if colossus["spray_cd"] <= 0 and target["smoke_ticks"] == 0:   # can't aim into smoke (descent continues)
+	if colossus["spray_cd"] <= 0 and not _concealed(target):   # can't aim into smoke (descent continues)
 		colossus["spray_cd"] = COLOSSUS_SPRAY_CD_TICKS
 		events.append({"t": "enemy_shot", "x": colossus["x"], "y": colossus["y"]})
 		for spread in [-64, 0, 64]:
@@ -3381,7 +3468,7 @@ func _step_colossus() -> void:
 				_spawn_enemy_bullet(colossus["x"], colossus["y"], bx, by, blen)
 	if phase >= 2:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
-		if colossus["volley_cd"] <= 0 and target["smoke_ticks"] == 0:
+		if colossus["volley_cd"] <= 0 and not _concealed(target):
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
 			_add_strike(target["x"], target["y"])
 	if phase == 3:
@@ -3472,7 +3559,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 			var jit: int = maxi(16, 40 - 8 * maxi(0, tier - 1))
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target := _nearest_alive_player(boss["x"], by)
-			if not target.is_empty() and target["smoke_ticks"] == 0:
+			if not target.is_empty() and not _concealed(target):
 				var dx: int = target["x"] - boss["x"] + rng.range_i(-jit, jit) * F_ONE
 				var dy: int = target["y"] - by
 				var dlen := Fixed.length(dx, dy)
@@ -3495,7 +3582,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 		if t in BOSS_MORTAR_TICKS or (tier >= 2 and t == 320) or (tier >= 3 and t == 340):
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
-			if not target2.is_empty() and target2["smoke_ticks"] == 0:
+			if not target2.is_empty() and not _concealed(target2):
 				var aim_x: int = target2["x"]
 				var aim_y: int = target2["y"]
 				if boss.has("stx"):
@@ -3618,7 +3705,9 @@ func _step_enemy_bullets() -> void:
 					break
 		if not dead and not rocks.is_empty():
 			for rk in rocks:
-				if absi(bx - rk["x"]) <= ROCK_HALF_W and absi(by - rk["y"]) <= ROCK_HALF_H:
+				if not _rk_solid(rk):
+					continue   # grass stops no bullet
+				if absi(bx - rk["x"]) <= _rk_hw(rk) and absi(by - rk["y"]) <= _rk_hh(rk):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
@@ -3670,7 +3759,7 @@ func _step_observer() -> void:
 			if observer["strike_cd"] <= 0:
 				observer["strike_cd"] = OBSERVER_STRIKE_CD_TICKS
 				var target := _nearest_alive_player(observer["x"], camera_top + OBSERVER_Y_OFFSET)
-				if not target.is_empty() and target["smoke_ticks"] == 0:   # can't paint into smoke
+				if not target.is_empty() and not _concealed(target):   # can't paint into smoke
 					_add_strike(target["x"], target["y"], true)
 	# NOTE: strike resolution is NOT here — step() calls _resolve_strikes()
 	# once per tick for both modes. (Calling it here too double-decremented

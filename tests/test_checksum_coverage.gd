@@ -34,7 +34,11 @@ const KNOWN := {
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	"mine": ["x", "y", "armed", "friendly"],
 	"sandbag": ["x", "y", "world"],
-	"rock": ["x", "y"],
+	# "kind" is the cover TIER (c2 3v) — DERIVED from position at spawn, never
+	# fed to the checksum (position already is); variety is gated past the
+	# torture window so it can't perturb goldens. Classified excluded, hashed
+	# implicitly via x/y like it always was.
+	"rock": ["x", "y", "kind"],
 	"barrel": ["x", "y", "armed", "fuse_ticks"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
 	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",

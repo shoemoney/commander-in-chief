@@ -3613,18 +3613,45 @@ func _draw_foundry_arena() -> void:
 
 
 func _draw_rocks() -> void:
-	# REAL rocks (9/9: cover-shaped decor lied) — bigger, harder shadow than
-	# any remaining decor so hard cover reads as a distinct class.
+	# Cover TIERS (c2 3v: one-size rocks made every LOS puzzle "is there a rock
+	# between us"). Kind picks the silhouette class — classic rock, pass-through
+	# grass (no hard shadow, you see ground through it), wide ruined-wall slab,
+	# and the 2x hero wreck at each hardpoint. Draw size tracks each kind's
+	# collision extent (KIMK art==collision pin).
 	for rk in sim.rocks:
 		var pos := _to_screen(rk["x"], rk["y"])
-		if pos.y < -20.0 or pos.y > 380.0:
+		if pos.y < -30.0 or pos.y > 390.0:
 			continue
-		_ground_shadow(pos, 12.0, 0.42)
 		var rh3 := Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536)
-		var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
-		_spr(rtex, pos, float(rh3 % 628) / 100.0,
-			{"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex],
-			Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5))
+		match rk.get("kind", 0):
+			1:
+				# Tall grass: soft green clump, NO hard shadow — concealment,
+				# not a wall. The lighter translucent read telegraphs "you can
+				# stand in this but bullets pass through."
+				var g_sway := sin(float(Engine.get_physics_frames()) * 0.04 + float(rh3)) * 0.06 * _motion
+				for gt in 3:
+					var gh := Art.cell_hash(rh3 + gt * 13, gt)
+					_spr("hedge", pos + Vector2(float(gh % 44) - 22.0, float((gh / 5) % 30) - 15.0),
+						g_sway + float(gh % 628) / 100.0, 0.5, Color(0.5, 0.72, 0.42, 0.82))
+			2:
+				# Ruined wall slab: wide, low, hard — the corridor narrows to
+				# lanes between slabs (40x10 extent → 80x20 footprint).
+				_ground_shadow(pos, 20.0, 0.45)
+				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 20.0)), Color(0.30, 0.28, 0.26))
+				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 5.0)), Color(0.42, 0.40, 0.37))
+				for bk2 in 3:
+					draw_rect(Rect2(pos + Vector2(-40.0 + float(bk2) * 26.0, -10.0), Vector2(2.0, 20.0)),
+						Color(0.18, 0.16, 0.15))
+			3:
+				# Hero wreck: the focal 2x silhouette anchoring each hardpoint.
+				_ground_shadow(pos + Vector2(0, 6), 22.0, 0.5)
+				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.2, Color(0.62, 0.56, 0.5))
+			_:
+				_ground_shadow(pos, 12.0, 0.42)
+				var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
+				_spr(rtex, pos, float(rh3 % 628) / 100.0,
+					{"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex],
+					Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5))
 
 
 func _draw_sandbags() -> void:

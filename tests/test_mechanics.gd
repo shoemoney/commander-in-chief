@@ -1287,3 +1287,64 @@ func test_c2_stretch_setpieces_restored() -> void:
 			Runner.T.eq(flanks, 2, "seed %d: two world-bags at nest_y+40, nest_x±12" % sd)
 		else:
 			Runner.T.ok(bags_460 == 0 and nests.is_empty(), "seed %d: gate 3 rolled empty by hash — legal" % sd)
+
+
+func test_c2_cover_tiers() -> void:
+	# Cover hierarchy (c2 3v): grass conceals but never blocks; wall/hero
+	# block with their own extents; segs 0-1 stay all-classic (golden-inert).
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -10000 * SimWorld.F_ONE
+	sim._step_camera()
+	var seen := {}
+	for rk in sim.rocks:
+		seen[rk.get("kind", 0)] = true
+		# The near field (within the ~1260px campaign torture reach) must be
+		# all-classic — the golden-inertness proof. -1500 is a safe margin past
+		# the reach; test_determinism is the authoritative check.
+		if rk["y"] > -1500 * SimWorld.F_ONE:
+			Runner.T.eq(rk.get("kind", 0), 0, "the torture-reach near field stays classic")
+	Runner.T.ok(seen.has(1), "grass tier streams past the near field")
+	Runner.T.ok(seen.has(3), "hero wreck streams at hardpoints")
+	# Grass blocks NOTHING: a bullet and a boot both pass through its AABB.
+	var grass := {"x": 300 * SimWorld.F_ONE, "y": 300 * SimWorld.F_ONE, "kind": 1}
+	Runner.T.ok(not SimWorld._rk_solid(grass), "grass is non-solid")
+	Runner.T.ok(SimWorld._rk_solid({"x": 0, "y": 0, "kind": 0}), "classic rock is solid")
+	Runner.T.ok(SimWorld._rk_solid({"x": 0, "y": 0, "kind": 2}), "wall is solid")
+	# Extents differ by kind (the point of the item).
+	Runner.T.ok(SimWorld._rk_hw({"kind": 2}) > SimWorld._rk_hw({"kind": 0}),
+		"the wall slab is wider than a classic rock")
+	Runner.T.ok(SimWorld._rk_hh({"kind": 3}) > SimWorld._rk_hh({"kind": 0}),
+		"the hero wreck is taller than a classic rock")
+
+
+func test_c2_grass_conceals_like_smoke() -> void:
+	# Standing in grass gates enemy fire-acquisition exactly as smoke does.
+	var sim := SimWorld.new(43, 1)
+	var p: Dictionary = sim.players[0]
+	p["smoke_ticks"] = 0
+	Runner.T.ok(not sim._concealed(p), "clear ground: not concealed")
+	sim.rocks.append({"x": p["x"], "y": p["y"], "kind": 1})
+	Runner.T.ok(sim._concealed(p), "standing in grass conceals like smoke")
+	# But grass is not smoke — a classic rock at the same spot does NOT conceal.
+	sim.rocks[0]["kind"] = 0
+	Runner.T.ok(not sim._concealed(p), "a solid rock does not conceal (only grass/smoke do)")
+
+
+func test_c2_wall_cluster_threads_a_lane() -> void:
+	# Every oversized wall cluster leaves an 80px lane >= HULL_CLEARANCE.
+	var slot_px := 80
+	Runner.T.ok(slot_px * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE,
+		"a dropped 80px slab slot clears the hull (%d >= %d)" % [slot_px * SimWorld.F_ONE, SimWorld.HULL_CLEARANCE])
+	# And a wall cluster's slabs never overlap the hero wreck (opposite flanks).
+	for sd in [3, 43, 97]:
+		var sim := SimWorld.new(sd, 1)
+		sim.camera_top = -10000 * SimWorld.F_ONE
+		sim._step_camera()
+		for rk in sim.rocks:
+			if rk.get("kind", 0) != 2:
+				continue
+			for hr in sim.rocks:
+				if hr.get("kind", 0) != 3 or absi(hr["y"] - rk["y"]) > 200 * SimWorld.F_ONE:
+					continue
+				Runner.T.ok(absi(hr["x"] - rk["x"]) > 100 * SimWorld.F_ONE,
+					"seed %d: wall slab and hero wreck sit on opposite flanks" % sd)
