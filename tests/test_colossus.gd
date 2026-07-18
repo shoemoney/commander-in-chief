@@ -190,3 +190,33 @@ func test_c3_colossus_collapses_parapets() -> void:
 			decoy_alive = true
 	Runner.T.eq(parapets_left, 0, "the phase-3 rise collapses the last parapet column")
 	Runner.T.ok(decoy_alive, "non-parapet cover is left untouched by the collapse")
+
+
+func test_c4_colossus_rotating_rings() -> void:
+	# c4 2v: the colossus arena's safe ANNULUS migrates OUTWARD each phase rise —
+	# both ring radii grow, so a fixed camp spot flips from safe to inner-ring
+	# danger and a player parked in the grown inner ring eats a telegraphed strike.
+	# Colossus torture-unreachable -> goldens byte-identical.
+	var sim := SimWorld.new(7, 1)
+	var gy := sim.camera_top - 3 * SimWorld.GATE_SPACING
+	sim.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP, "x": SimWorld.SCREEN_CX, "y": gy,
+		"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999, "core_cd": 999, "core_open": 0, "pv": 3, "sweep_cd": 999}
+	var r1: Array = sim._colossus_ring_radii()
+	sim.colossus["hp"] = SimWorld.COLOSSUS_HP / 2
+	var r2: Array = sim._colossus_ring_radii()
+	sim.colossus["hp"] = SimWorld.COLOSSUS_HP / 4
+	var r3: Array = sim._colossus_ring_radii()
+	Runner.T.ok(r2[0] > r1[0] and r3[0] > r2[0], "the inner-ring radius grows across phases 1->2->3")
+	Runner.T.ok(r2[1] > r1[1] and r3[1] > r2[1], "the safe annulus migrates outward each phase")
+	# _colossus_ring classifies distance into 0/1/2.
+	Runner.T.eq(sim._colossus_ring(10 * SimWorld.F_ONE), 0, "close to the boss = inner (melee-risk) ring")
+	Runner.T.eq(sim._colossus_ring(300 * SimWorld.F_ONE), 2, "far = the outer kite rim")
+	# A player parked in the grown (phase-3) inner ring eats a telegraphed strike.
+	sim.last_stand = true
+	var p: Dictionary = sim.players[0]
+	p["x"] = SimWorld.SCREEN_CX + 40 * SimWorld.F_ONE
+	p["y"] = gy
+	sim.tick_count = 0
+	var s0: int = sim.strikes.size()
+	sim._step_colossus()
+	Runner.T.ok(sim.strikes.size() > s0, "camping the grown inner ring draws a telegraphed strike")

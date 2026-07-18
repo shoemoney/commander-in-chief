@@ -3854,6 +3854,18 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 
 
 func _draw_foundry_arena() -> void:
+	# c4 2v: three tinted concentric RINGS around the boss so the rotating safe
+	# annulus reads — an inner melee-risk ring (red) and the outer boundary of the
+	# safe belt (green); both radii GROW with the phase (HP thirds), so the safe
+	# band visibly migrates outward as the boss escalates. View-only.
+	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
+		var ph: int = sim.colossus_phase()
+		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
+		var mr := float(SimWorld.COLOSSUS_RING_OUTER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
+		var ra := 0.12 + 0.06 * Art.pulse(0.05)
+		draw_arc(cpos, ir, 0.0, TAU, 48, Color(1.0, 0.3, 0.15, ra), 2.0)   # inner danger ring
+		draw_arc(cpos, mr, 0.0, TAU, 48, Color(0.35, 0.8, 0.45, ra), 2.0)  # safe-belt outer edge
 	# Foundry ARENA dressing (c2 3v: the finale was "a big enemy in a field").
 	# Molten pools ring the three KIMK barrel clusters (drawn UNDER them —
 	# each phase-shift cook now torches a molten stage mark), grounded

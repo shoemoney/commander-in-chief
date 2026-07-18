@@ -422,6 +422,9 @@ const COLOSSUS_GRENADE_DAMAGE := 4
 const COLOSSUS_SPEED := F_ONE / 2
 const COLOSSUS_HIT_RADIUS := 34 * F_ONE
 const COLOSSUS_CRUSH_RADIUS := 26 * F_ONE
+const COLOSSUS_RING_INNER := 60              # c4 2v: inner melee-risk ring radius (>= crush 26)
+const COLOSSUS_RING_OUTER := 160             # inner/outer boundary at phase 1
+const COLOSSUS_RING_STEP := 40               # each phase rise pushes the safe annulus +40px outward
 const COLOSSUS_SPRAY_CD_TICKS := 30
 const COLOSSUS_VOLLEY_CD_TICKS := 120
 const COLOSSUS_SPAWN_CD_TICKS := 90
@@ -4255,6 +4258,28 @@ func colossus_phase() -> int:
 	return 3
 
 
+func _colossus_ring_radii() -> Array:
+	## c4 2v: the safe ANNULUS (the mid ring) migrates OUTWARD each phase rise —
+	## both radii grow by COLOSSUS_RING_STEP per phase, so a fixed camp spot that
+	## was safe becomes inner-ring danger and the player must kite further out.
+	var ph: int = colossus_phase()
+	if ph < 1:
+		ph = 1
+	return [COLOSSUS_RING_INNER + (ph - 1) * COLOSSUS_RING_STEP,
+		COLOSSUS_RING_OUTER + (ph - 1) * COLOSSUS_RING_STEP]
+
+
+func _colossus_ring(dist: int) -> int:
+	## 0 inner (melee-crush risk) / 1 mid (the safe collapsible-wreck belt) / 2
+	## outer (kite rim, side-lane sweep). dist is raw fixed-point from the boss.
+	var r := _colossus_ring_radii()
+	if dist <= r[0] * F_ONE:
+		return 0
+	if dist <= r[1] * F_ONE:
+		return 1
+	return 2
+
+
 func _step_colossus() -> void:
 	# Phase terrain: when the phase rises, fuse the nearest live foundry
 	# cluster — the floor answers the boss. pv = last seen phase (derived,
@@ -4381,6 +4406,16 @@ func _step_colossus() -> void:
 			and (target["x"] < ARENA_MARGIN or target["x"] > SCREEN_W_FP - ARENA_MARGIN):
 		colossus["sweep_cd"] = COLOSSUS_SWEEP_CD_TICKS
 		_add_strike(target["x"], target["y"])
+
+	# c4 2v ROTATING RINGS: the inner DANGER ring GROWS each phase rise (the safe
+	# annulus migrates OUTWARD). A player camping inside the inner ring eats a
+	# telegraphed strike, forcing them to kite further out as the boss escalates.
+	# Tick-phased (no new field); colossus is torture-unreachable so it is free.
+	if posmod(tick_count, 90) == 0:
+		var inner_r: int = _colossus_ring_radii()[0]
+		for rp in players:
+			if rp["alive"] and _dist_lte(colossus["x"], colossus["y"], rp["x"], rp["y"], inner_r * F_ONE):
+				_add_strike(rp["x"], rp["y"])
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
