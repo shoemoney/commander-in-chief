@@ -1207,3 +1207,71 @@ func test_c2_calm_band_breathes() -> void:
 		if v["y"] >= lo and v["y"] <= hi:
 			vent_in_band += 1
 	Runner.T.ok(vent_in_band > 0, "the foundry vents keep breathing through the calm band")
+
+
+func test_c2_room_rules() -> void:
+	# Formal room rules over the authored hazard tables (c2 3v) — pure
+	# geometry, no sim stepping. Every chunk leaves a flank lane >=
+	# HULL_CLEARANCE at BOTH worst-case anchors (lanes are monotonic in the
+	# anchor, so the two extremes bound every possible stream placement).
+	var hc: int = SimWorld.HULL_CLEARANCE / SimWorld.F_ONE
+	var r: int = SimWorld.MINE_TRIGGER_RADIUS / SimWorld.F_ONE
+	for chunk in SimWorld.MINE_CHUNKS:
+		if chunk.is_empty():
+			continue
+		var lo := 99999
+		var hi := -99999
+		for od in chunk:
+			lo = mini(lo, od[0])
+			hi = maxi(hi, od[0])
+		# mine anchors: (150 + h%340) -> 150..489; corridor 16..624
+		Runner.T.ok(624 - (150 + hi + r) >= hc, "mine chunk right lane clears at min anchor")
+		Runner.T.ok((489 + lo - r) - 16 >= hc, "mine chunk left lane clears at max anchor")
+	for chunk in SimWorld.BARREL_CHUNKS:
+		if chunk.is_empty():
+			continue
+		var lo2 := 99999
+		var hi2 := -99999
+		for od in chunk:
+			lo2 = mini(lo2, od[0])
+			hi2 = maxi(hi2, od[0])
+		# barrel anchors: (120 + h%400) -> 120..519
+		Runner.T.ok(624 - (120 + hi2 + r) >= hc, "barrel chunk right lane clears at min anchor")
+		Runner.T.ok((519 + lo2 - r) - 16 >= hc, "barrel chunk left lane clears at max anchor")
+	# Fire-sack pocket: the off-side lane >= HULL_CLEARANCE at both parities,
+	# and both sack rows clear the choke-apron contract.
+	var sim := SimWorld.new(43, 1)
+	for sack_px in [170, 470]:
+		var off_lane: int = (624 - (sack_px + 24)) if sack_px < 320 else (sack_px - 24 - 16)
+		Runner.T.ok(off_lane >= hc, "fire-sack off-side lane (%dpx) clears the hull" % off_lane)
+	Runner.T.ok(not sim._in_choke_apron((-3000 + 300) * SimWorld.F_ONE), "sack nest row clears the apron")
+	Runner.T.ok(not sim._in_choke_apron((-3000 + 340) * SimWorld.F_ONE), "sack bag row clears the apron")
+
+
+func test_c2_stretch_setpieces_restored() -> void:
+	# Regression pin (c2 review catch): fork-apron skipping had made gates
+	# 2/4 the ONLY blockade-eligible gates — deleting every campaign blockade
+	# and camp. Boss stretches compose now: gate 3 carries blockade XOR fire
+	# sack per its seed-independent hash gates.
+	var blockade_fires: bool = SimWorld._mix(3, 31) % 3 != 0
+	var sack_fires: bool = not blockade_fires and SimWorld._mix(3, 47) % 3 == 0
+	Runner.T.ok(blockade_fires or SimWorld._mix(3, 47) % 3 != 0 or sack_fires,
+		"gate-3 hash gates are consistent")
+	for sd in [3, 43, 97]:
+		var sim := SimWorld.new(sd, 1)
+		sim.camera_top = -10000 * SimWorld.F_ONE
+		sim._step_camera()
+		var bags_460 := 0
+		for sb in sim.sandbags:
+			if sb["y"] == (-3000 + 460) * SimWorld.F_ONE:
+				bags_460 += 1
+		var nests := 0
+		for e in sim.enemies:
+			if e.get("kind", "") == "mg_nest":
+				nests += 1
+		if blockade_fires:
+			Runner.T.ok(bags_460 >= 1, "seed %d: gate-3 stretch carries its blockade again" % sd)
+		elif sack_fires:
+			Runner.T.ok(nests >= 1, "seed %d: gate-3 stretch carries a composed fire sack" % sd)
+		else:
+			Runner.T.ok(bags_460 == 0 and nests == 0, "seed %d: gate 3 rolled empty by hash — legal" % sd)

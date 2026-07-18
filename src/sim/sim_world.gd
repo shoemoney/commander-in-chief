@@ -2874,6 +2874,8 @@ func _step_camera() -> void:
 			for bsx in [164, 200, 392, 428]:
 				sandbags.append({"x": bsx * F_ONE,
 					"y": _next_gate_y + (120 if bsx < 300 else 200) * F_ONE})
+			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
+			_stamp_stretch_setpieces()
 		else:
 			# Arena template lookup (unlisted indexes fall back to classic —
 			# future-proof if FINAL_GATE_INDEX ever grows).
@@ -2882,54 +2884,7 @@ func _step_camera() -> void:
 			var b2 := _make_bunker(arena["b2"][0] * F_ONE, _next_gate_y + arena["b2"][1] * F_ONE)
 			bunkers.append(b1)
 			bunkers.append(b2)
-			# Authored blockade setpiece (5v, gates 2+ = past the torture): a
-			# 3-bag line mid-stretch the player must grenade, flank, or crush —
-			# rides the ENTIRE sandbag grammar for free (cover, destructible,
-			# enemy-avoid, tread-kill, conditional hash).
-			# FORK_GATES skip the blockade AND camp stamp (c2 4v DECISION
-			# APRON): the approach band gate+300..460 stays cover-free so the
-			# route choice is read standing still, not mid-firefight. Same
-			# contract _in_fork_apron enforces on the ambient rock stream —
-			# the named list keeps both guards on one definition.
-			if _gate_counter >= 2 and _gate_counter not in FORK_GATES \
-					and not _is_calm_band(_next_gate_y + 460 * F_ONE) \
-					and _mix(_gate_counter, 31) % 3 != 0:
-				# Hash-gated 2-in-3 + VARIED (KIMK r2: an every-stretch constant
-				# blockade recreates the complaint one level up): 2-4 bags,
-				# derived gap position, occasionally pre-shelled (a gap bag).
-				var bmix := _mix(_gate_counter, _world_seed)
-				var blk_x: int = (140 + bmix % 320) * F_ONE
-				var blk_n: int = 2 + (bmix >> 6) % 3
-				# "Occasionally" pinned (KIMK round-3): 1-in-3 by hash, and never
-				# back-to-back — a pre-shelled roll checks its neighbor gate.
-				var shelled: bool = (bmix >> 12) % 3 == 0 \
-					and (_mix(_gate_counter - 1, _world_seed) >> 12) % 3 != 0
-				var blk_gap: int = (bmix >> 9) % blk_n if shelled else -1
-				for bseg2 in blk_n:
-					if bseg2 == blk_gap:
-						continue   # pre-shelled: the war got here first
-					sandbags.append({"x": blk_x + (bseg2 - (blk_n >> 1)) * 24 * F_ONE,
-						"y": _next_gate_y + 460 * F_ONE, "world": 1})
-				# Stamp sim identity (KIMK r2): the corridor's halftrack wreck
-				# setpieces are REAL cover (rock entity at the stamp anchor)
-				# and camps CARRY a pickup — places are used, not just seen.
-				var sp_slot: int = absi(_next_gate_y / (400 * F_ONE))
-				var sph2 := _mix(sp_slot * 7, 13)
-				if sph2 % 2 == 0:
-					var spx2: int = (100 + sph2 % 440) * F_ONE
-					var sp_y: int = _next_gate_y + 300 * F_ONE
-					var sp_kind: int = (sph2 / 3) % 4
-					if sp_kind == 3:
-						# Halftrack anchors are INERT-STATIC cover (rock grammar):
-						# they never enter L14's occupancy system — stated, not
-						# silent (KIMK round-3).
-						rocks.append({"x": spx2, "y": sp_y})
-					elif sp_kind == 1:
-						# "Priced" pinned: cost scales with depth — 10 + 5/segment
-						# past 2, capped 30 (the endless _supply_cost creep curve's
-						# campaign cousin; test-pinned).
-						pickups.append({"x": spx2, "y": sp_y, "kind": 0,
-							"cost": mini(30, 10 + (absi(_next_gate_y / GATE_SPACING) - 2) * 5)})
+			_stamp_stretch_setpieces()
 			# Hardpoint rock ~140px south of every bunker-pair gate, flank-
 			# alternating: the mortar-observer fallback cover the panel asked for.
 			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,
@@ -3027,6 +2982,65 @@ func _step_camera() -> void:
 			rocks.append({"x": mrx, "y": _next_water_y - 20 * F_ONE})
 			rocks.append({"x": mrx + 22 * F_ONE, "y": _next_water_y - 10 * F_ONE})
 		_next_water_y -= GATE_SPACING
+
+
+func _stamp_stretch_setpieces() -> void:
+	## Mid-stretch compositions for the gate being streamed: blockade (2-in-3
+	## hash) XOR fire sack (1-in-3 of the remainder) + camp stamp. FORK_GATES
+	## skip everything (c2 4v decision apron — the _in_fork_apron contract);
+	## the calm band stands down (c2 3v). Called from BOTH the bunker-arena
+	## and boss-gate branches: c2 review caught that arena-only placement made
+	## fork gates 2/4 the ONLY eligible gates, silently deleting every
+	## campaign blockade and camp the day the apron shipped.
+	if _gate_counter < 2 or _gate_counter in FORK_GATES \
+			or _is_calm_band(_next_gate_y + 460 * F_ONE):
+		return
+	if _mix(_gate_counter, 31) % 3 != 0:
+		# Authored blockade setpiece (5v): a 2-4 bag line mid-stretch the
+		# player must grenade, flank, or crush — rides the ENTIRE sandbag
+		# grammar for free. Hash-gated 2-in-3 + VARIED (KIMK r2), derived gap,
+		# occasionally pre-shelled (1-in-3, never back-to-back, KIMK r3).
+		var bmix := _mix(_gate_counter, _world_seed)
+		var blk_x: int = (140 + bmix % 320) * F_ONE
+		var blk_n: int = 2 + (bmix >> 6) % 3
+		var shelled: bool = (bmix >> 12) % 3 == 0 \
+			and (_mix(_gate_counter - 1, _world_seed) >> 12) % 3 != 0
+		var blk_gap: int = (bmix >> 9) % blk_n if shelled else -1
+		for bseg2 in blk_n:
+			if bseg2 == blk_gap:
+				continue   # pre-shelled: the war got here first
+			sandbags.append({"x": blk_x + (bseg2 - (blk_n >> 1)) * 24 * F_ONE,
+				"y": _next_gate_y + 460 * F_ONE, "world": 1})
+		# Stamp sim identity (KIMK r2): halftrack wrecks are REAL cover and
+		# camps CARRY a pickup — places are used, not just seen.
+		var sp_slot: int = absi(_next_gate_y / (400 * F_ONE))
+		var sph2 := _mix(sp_slot * 7, 13)
+		if sph2 % 2 == 0:
+			var spx2: int = (100 + sph2 % 440) * F_ONE
+			var sp_y: int = _next_gate_y + 300 * F_ONE
+			var sp_kind: int = (sph2 / 3) % 4
+			if sp_kind == 3:
+				# Halftrack anchors are INERT-STATIC cover (rock grammar).
+				rocks.append({"x": spx2, "y": sp_y})
+			elif sp_kind == 1:
+				# "Priced" pinned: 10 + 5/segment past 2, capped 30.
+				pickups.append({"x": spx2, "y": sp_y, "kind": 0,
+					"cost": mini(30, 10 + (absi(_next_gate_y / GATE_SPACING) - 2) * 5)})
+	elif _mix(_gate_counter, 47) % 3 == 0:
+		# FIRE SACK (c2 3v): when the blockade roll passes, a COMPOSED
+		# encounter takes its stretch 1-in-3 — an MG nest dug in behind two
+		# world-bags, cover FAVORING the nest against the southern approach.
+		# Break LOS, flank the open side (the full remaining corridor, >=
+		# HULL_CLEARANCE by construction — test-pinned), or grenade the bags;
+		# camping is already punished by the nest's tracking rake. Mutual
+		# exclusion with the blockade keeps stretch density flat. Flank
+		# alternates OPPOSITE the hardpoint rock's parity (rock: 150 odd /
+		# 490 even). Rows sit at +300/+340 — both clear _in_choke_apron
+		# (offsets 700/660 vs the 520-640 + 70-150 apron bands, test-pinned).
+		var sack_x: int = (470 if _gate_counter % 2 == 1 else 170) * F_ONE
+		_spawn_mg_nest(sack_x, _next_gate_y + 300 * F_ONE)
+		sandbags.append({"x": sack_x - 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
+		sandbags.append({"x": sack_x + 12 * F_ONE, "y": _next_gate_y + 340 * F_ONE, "world": 1})
 
 
 func _make_bunker(x: int, y: int) -> Dictionary:
