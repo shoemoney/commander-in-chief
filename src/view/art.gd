@@ -528,6 +528,20 @@ const _HINT_KB := {"confirm": "glyph_key_enter", "back": "ui_key_blank",
 	"move": "glyph_key_wide", "aim": "glyph_key_wide", "nav_lr": "glyph_key_wide"}
 
 
+static func group_digits(n: int) -> String:
+	# a4-17: thousands separators so the big roguelite numbers scan at a glance
+	# (264500 -> "264,500"). View-only display formatting.
+	var s := str(absi(n))
+	var out := ""
+	var c := 0
+	for i in range(s.length() - 1, -1, -1):
+		out = s[i] + out
+		c += 1
+		if c % 3 == 0 and i > 0:
+			out = "," + out
+	return ("-" if n < 0 else "") + out
+
+
 static func tex(name: String) -> Texture2D:
 	return TEX[name]
 

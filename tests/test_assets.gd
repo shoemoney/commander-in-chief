@@ -364,8 +364,8 @@ func test_a2_body_ident_lean() -> void:
 
 func test_a2_title_best_line_drops_zeros() -> void:
 	var menu = load("res://src/view/menu.gd")
-	Runner.T.eq(menu._best_line(4500, 0, 138), "BEST — SCORE 4500 · 138m", "score-only best drops WAVE 0")
-	Runner.T.eq(menu._best_line(4500, 0, 0), "BEST — SCORE 4500", "a pure campaign best shows just the score")
+	Runner.T.eq(menu._best_line(4500, 0, 138), "BEST — SCORE 4,500 · 138m", "score-only best drops WAVE 0 (a4-17 grouped)")
+	Runner.T.eq(menu._best_line(4500, 0, 0), "BEST — SCORE 4,500", "a pure campaign best shows just the grouped score")
 	Runner.T.ok(menu._best_line(4500, 3, 138).contains("WAVE 3"), "a real wave record is shown")
 
 
@@ -570,6 +570,24 @@ func test_a4_grade_shader_is_wired() -> void:
 	mat.shader = sh
 	mat.set_shader_parameter("grade", 1.0)
 	Runner.T.ok(is_equal_approx(float(mat.get_shader_parameter("grade")), 1.0), "grade rides at full strength (always on)")
+
+
+func test_a4_group_digits() -> void:
+	# a4-17: thousands separators so big scores scan (264500 -> "264,500").
+	Runner.T.eq(Art.group_digits(0), "0", "zero")
+	Runner.T.eq(Art.group_digits(999), "999", "sub-thousand is unchanged")
+	Runner.T.eq(Art.group_digits(1000), "1,000", "thousands separator lands")
+	Runner.T.eq(Art.group_digits(264500), "264,500", "the roguelite carrot reads at a glance")
+	Runner.T.eq(Art.group_digits(1234567), "1,234,567", "millions grouped every 3 digits")
+	Runner.T.eq(Art.group_digits(-1500), "-1,500", "negative sign preserved outside the grouping")
+
+
+func test_a4_top_prey_shared_by_both_cards() -> void:
+	# a4-16: the run-story TOP PREY row — shared by the victory + K.I.A. cards (parity + DRY).
+	var ms = load("res://src/main.gd")
+	Runner.T.eq(ms._top_prey_text({}), "", "no kills -> no TOP PREY row")
+	Runner.T.eq(ms._top_prey_text({"rusher": 37, "elite": 4}), "TOP PREY  RUSHER x37", "the most-killed kind + count, upper-cased")
+	Runner.T.eq(ms._top_prey_text({"elite": 9}), "TOP PREY  ELITE x9", "a single kind")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:

@@ -1956,6 +1956,18 @@ static func _death_pop_fx(x: int, y: int, kkind: String) -> Dictionary:
 		"r": 9.0 + float(_kill_tier(kkind)) * 6.0, "col": Color(1.0, 0.9, 0.62)}
 
 
+static func _top_prey_text(kind_kills: Dictionary) -> String:
+	# a4-16: the run's most-fought foe — "TOP PREY  RUSHER x37", or "" if nothing died.
+	# Shared by the K.I.A. debrief AND the VICTORY card (run-story parity).
+	if kind_kills.is_empty():
+		return ""
+	var top := ""
+	for kk in kind_kills:
+		if top == "" or int(kind_kills[kk]) > int(kind_kills[top]):
+			top = kk
+	return "TOP PREY  %s x%d" % [String(top).to_upper(), int(kind_kills[top])]
+
+
 static func _victory_best_text(score: int, best: int) -> String:
 	# a3-14: the shared BEST / NEW BEST! line — one predicate for BOTH the K.I.A. debrief
 	# and the VICTORY card (parity). "" when there is no prior best to show.
@@ -7621,7 +7633,7 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "RANK  %s — %s" % [vrr.grade, vrr.title], "color": vrr.col, "size": 13,
 				"icon": "mi_medal_%d" % ("DCBAS".find(vrr.grade) + 1), "icon_size": 15.0,
 				"icon_col": vrr.col},
-			{"text": "SCORE  %d" % sim.score, "color": Color(0.95, 0.96, 0.9), "size": 13,
+			{"text": "SCORE  %s" % Art.group_digits(sim.score), "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
 			{"text": "%d¢ WAR CHEST BANKED" % sim.war_chest, "color": Color(1.0, 0.92, 0.55),
 				"icon": "icon_coin", "icon_size": 14.0},
@@ -7630,6 +7642,14 @@ func _draw_banners(top_msg: String) -> void:
 		if _run_rescues > 0:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
+		# a4-16 (HUD#1): the win screen tells the run's STORY too — KILLS + LONGEST STREAK +
+		# TOP PREY, the rows the K.I.A. debrief always had. A win is now a full debrief, not a
+		# thinner card than a loss. (a3-14 added the NEW BEST/REDEPLOY parity below.)
+		vrows.append({"text": "%d KILLS  ·  LONGEST STREAK  x%d" % [_run_kills, _run_best_streak],
+			"color": Color(0.9, 0.92, 0.85)})
+		var vprey := _top_prey_text(_run_kind_kills)
+		if vprey != "":
+			vrows.append({"text": vprey, "color": Color(0.9, 0.92, 0.85)})
 		# a3-14 (HUD#4/#8/#10): bring the VICTORY card to K.I.A. parity — the win screen was
 		# thinner than the death screen. _victory_extra_rows appends a NEW BEST! flag (shared
 		# predicate with the debrief) + a REDEPLOY prompt (redeploy input works on victory too,
@@ -7654,18 +7674,14 @@ func _draw_banners(top_msg: String) -> void:
 		var dist := -Fixed.to_int(sim.camera_top) / 10
 		var rows := [
 			{"text": "SECTOR %d/5   %dm PUSHED" % [mini(opened + 1, 5), dist], "color": Color(0.9, 0.92, 0.85)},
-			{"text": "SCORE %d   KILLS %d" % [sim.score, _run_kills], "color": Color(0.9, 0.92, 0.85)},
+			{"text": "SCORE %s   KILLS %d" % [Art.group_digits(sim.score), _run_kills], "color": Color(0.9, 0.92, 0.85)},
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]
-		# Top-prey row: the kill event carries kind, so the tally can say WHAT
-		# the run was spent fighting, not just how many.
-		if not _run_kind_kills.is_empty():
-			var top_kind := ""
-			for kk in _run_kind_kills:
-				if top_kind == "" or _run_kind_kills[kk] > _run_kind_kills[top_kind]:
-					top_kind = kk
-			rows.append({"text": "TOP PREY  %s x%d" % [String(top_kind).to_upper(), _run_kind_kills[top_kind]],
-				"color": Color(0.9, 0.92, 0.85)})
+		# Top-prey row: the kill event carries kind, so the tally can say WHAT the run was
+		# spent fighting, not just how many (a4-16: shared _top_prey_text with the victory card).
+		var kprey := _top_prey_text(_run_kind_kills)
+		if kprey != "":
+			rows.append({"text": kprey, "color": Color(0.9, 0.92, 0.85)})
 		if _run_rescues > 0:
 			rows.append({"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})

@@ -948,7 +948,7 @@ func _draw_hall() -> void:
 				tag += "  *A"
 			streak_s = "x%d%s" % [run.get("streak", 0), tag]
 		var y := 112 + i * 24
-		var cells := [str(i + 1), str(run.get("score", 0)), mode_s, reached, streak_s]
+		var cells := [str(i + 1), Art.group_digits(int(run.get("score", 0))), mode_s, reached, streak_s]
 		for c in cells.size():
 			if c == 1:
 				# Right-aligned numerals: a 6-digit endless score can't crowd MODE.
@@ -1037,7 +1037,7 @@ func _draw_howto() -> void:
 static func _best_line(score: int, wave: int, dist: int) -> String:
 	# a2-04 HUD#8: the title BEST line drops zero fields so it never advertises
 	# "WAVE 0 · 0m" (a debug-dump read) on a fresh score-only best.
-	var s := "BEST — SCORE %d" % score
+	var s := "BEST — SCORE %s" % Art.group_digits(score)   # a4-17: thousands separators
 	if wave > 0:
 		s += " · WAVE %d" % wave
 	if dist > 0:

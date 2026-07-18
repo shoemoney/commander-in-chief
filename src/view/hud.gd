@@ -141,9 +141,9 @@ func _draw() -> void:
 	# and players conflated spendable coin with vanity score): the CHEST reads
 	# warm cream (money-gold family), the SCORE cool steel — both still flash
 	# gold on their pulse.
-	x = _stat("icon_coin", str(int(round(_disp_chest))), x, y,
+	x = _stat("icon_coin", Art.group_digits(int(round(_disp_chest))), x, y,
 		Color(1.0, 0.93, 0.78).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
-	x = _stat("icon_medal", str(int(round(_disp_score))), x, y,
+	x = _stat("icon_medal", Art.group_digits(int(round(_disp_score))), x, y,
 		Color(0.84, 0.9, 1.0).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
 	if sim.tokens > 0:
 		# Commendation tokens: minted by play, spent on the wheel's NE socket.
