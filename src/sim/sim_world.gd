@@ -895,7 +895,8 @@ static func _off_center_px(px: int) -> int:
 	## c3 3v: pull an objective DROP out of the SCREEN_CX ±64px dead-band
 	## ([256,384]) to the nearer lateral edge, so drops break the center rail
 	## instead of reinforcing it. Same single draw folded IN PLACE — no new rng,
-	## no sequence shift; only the drawn value moves.
+	## no sequence shift; only the drawn value moves. A dead-center 320 ties to
+	## the right edge (384) by the `< 320` split.
 	if px > 256 and px < 384:
 		return 256 if px < 320 else 384
 	return px
