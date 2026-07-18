@@ -124,6 +124,8 @@ var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
 var _screen_fx_rect: ColorRect       # hidden unless concussed → normal play untouched
 var _scan_mat: ShaderMaterial        # CRT scanline quad material; strength pulses on hitstop
+var _grade_mat: ShaderMaterial       # a4-01 master color grade (always on; breather in shop)
+var _grade_breather := 0.0           # a4-01/a4-15: eased shop-intermission calm grade (0..1)
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
 var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot, splash_t] last sent to the shader
@@ -370,6 +372,18 @@ func _setup_screen_fx() -> void:
 	var fx_layer := CanvasLayer.new()
 	fx_layer.layer = 100
 	add_child(fx_layer)
+	# a4-01: the always-on MASTER COLOR GRADE — added FIRST so it's the bottom of the fx
+	# layer: its hint_screen_texture read captures the finished world + HUD (lower layers)
+	# and grades them, then the scanlines + concussion draw on TOP of the graded frame. One
+	# unifying film across all biomes (the game had no tonemap/LUT at all). SCREEN_UV-based,
+	# so — unlike the FRAGCOORD scanlines — it is safe under the canvas_items HD-capture path.
+	var grade_rect := ColorRect.new()
+	grade_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	grade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_grade_mat = ShaderMaterial.new()
+	_grade_mat.shader = load("res://src/view/grade.gdshader")
+	grade_rect.material = _grade_mat
+	fx_layer.add_child(grade_rect)
 	# Always-on subtle scanlines: the frame is explicitly framed as an arcade
 	# cabinet — sell it. Cheap fixed-math shader, no screen reads, both backends.
 	# Skipped whenever the effective stretch is canvas_items (the HD override.cfg
@@ -652,6 +666,13 @@ func _process(_delta: float) -> void:
 	if _scan_mat != null:
 		var hs := clampf(float(_hitstop_frames) / 10.0, 0.0, 1.0) * _motion
 		_scan_mat.set_shader_parameter("strength", 0.08 + hs * 0.12)
+	# a4-01/a4-15: the master grade eases into a calm "breather" during the endless shop
+	# intermission (safe to buy → a tonal breath), then eases back for the next wave. A slow
+	# gentle tonal shift, not a strobe — reduce-motion-safe, so it isn't _motion-gated.
+	if _grade_mat != null:
+		var want := 0.0 if sim == null else _grade_breather_target(sim.mode, sim.intermission_ticks)
+		_grade_breather = lerpf(_grade_breather, want, 0.06)
+		_grade_mat.set_shader_parameter("breather", _grade_breather)
 
 
 func start_game(endless: bool) -> void:
@@ -3389,6 +3410,12 @@ static func _has_canopy_dapple(ash: float) -> bool:
 	# a3-04: a living tree casts a soft canopy dapple; past the ash midpoint (0.33 — the
 	# same threshold that swaps to the dead-canopy set) the dead/charred canopy casts none.
 	return ash < 0.33
+
+
+static func _grade_breather_target(mode: String, intermission_ticks: int) -> float:
+	# a4-01/a4-15: the master-grade shop "breather" is ON only during the ENDLESS intermission
+	# (shop open) — a calm tonal beat that reads "safe to buy", then eases off for the next wave.
+	return 1.0 if (mode == "endless" and intermission_ticks > 0) else 0.0
 
 
 static func _boss_rim_base(march: float) -> Color:

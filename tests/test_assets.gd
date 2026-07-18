@@ -547,6 +547,15 @@ func test_a2_11_hitflash_read_tolerates_hpless_enemies() -> void:
 # is signature screenshot 05 (05-foundry-colossus-last-stand.png) — re-render it and
 # confirm the colossus carries a cool dark separator edge, not a bright white one. ---
 
+func test_a4_grade_breather_only_in_endless_shop() -> void:
+	# a4-01: the master color grade is always on; its calm "breather" variant fires ONLY in
+	# the endless shop intermission (visual half of the folded-in a4-15).
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms._grade_breather_target("endless", 120) > 0.5, "the grade breather is ON during the endless shop intermission")
+	Runner.T.eq(ms._grade_breather_target("endless", 0), 0.0, "no breather once the wave is live (no intermission)")
+	Runner.T.eq(ms._grade_breather_target("campaign", 120), 0.0, "campaign (no shop) gets no breather")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
