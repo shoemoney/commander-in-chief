@@ -20,7 +20,7 @@ const SCREEN_CENTER := Vector2(320, 180)
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
 const _LITTER_EARLY := ["barrel", "crate_stack", "tent", "ammobox", "barrier",
 	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
-const _LITTER_MID_A := ["tree_dead1", "tree_dead2", "tree_dead3",
+const _LITTER_MID_A := [   # tree_dead* removed: log-shaped things are only ever REAL cover now
 	"barrel", "tank_trap", "hedge", "flag_marker"]   # stump-field band: the jungle thins
 const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
 	"barricade", "ammobox"]                 # marsh/ruins band: the war shows
@@ -3344,9 +3344,10 @@ func _draw_rocks() -> void:
 		if pos.y < -20.0 or pos.y > 380.0:
 			continue
 		_ground_shadow(pos, 12.0, 0.42)
-		_spr("rock1" if (rk["x"] / 65536) % 2 == 0 else "rock2", pos,
-			float(Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536) % 628) / 100.0, 2.1,
-			Color(0.78, 0.8, 0.78))
+		var rh3 := Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536)
+		var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
+		_spr(rtex, pos, float(rh3 % 628) / 100.0, 2.1 if rtex != "tree_dead2" else 0.5,
+			Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5))
 
 
 func _draw_sandbags() -> void:
