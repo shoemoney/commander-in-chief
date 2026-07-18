@@ -2757,13 +2757,16 @@ func _update_feel() -> void:
 				_pending_blasts.remove_at(i)
 		# Decal clocks freeze with the particles: a crater fading or a corpse
 		# aging under a "frozen" explosion breaks the freeze-frame read.
+		# a2-13 VFX#3: campaign scorch now LINGERS — it fades SLOW toward a faint
+		# permanent GHOST (t capped at 0.82, never scrubbed) instead of the old fast
+		# 0.012 clean-up, so a cleared field reads as fought-over (matching the corpse/
+		# hulk intent). Endless scars stay full (no aging), as before.
 		for i in range(_scorch.size() - 1, -1, -1):
-			_scorch[i]["t"] += 0.012 if sim.mode != "endless" else 0.0
-			if _scorch[i]["t"] >= 1.0:
-				_scorch.remove_at(i)
-	if sim.mode == "endless":
-		while _scorch.size() > 24:   # scars persist; oldest-out past 24
-			_scorch.remove_at(0)
+			if sim.mode != "endless":
+				_scorch[i]["t"] = minf(_scorch[i]["t"] + 0.003, 0.82)
+	# Count-cap BOTH modes so the persistent scars stay bounded (was endless-only).
+	while _scorch.size() > (24 if sim.mode == "endless" else 40):
+		_scorch.remove_at(0)
 		for i in range(_corpses.size() - 1, -1, -1):
 			_corpses[i]["t"] += 0.004   # linger ~4s
 			if _corpses[i]["t"] >= 1.0:
