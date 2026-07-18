@@ -196,16 +196,17 @@ func test_a1_sfx_bus_ducks_under_vo() -> void:
 		AudioServer.remove_bus(idx)
 
 
-func test_a1_boss_music_engages_on_a_live_boss() -> void:
+func test_a1_boss_music_on_predicate() -> void:
+	var ms = load("res://src/main.gd")
 	var sim := SimWorld.new(1, 1)
-	# no colossus + fresh gates => no engaged boss
-	var on_none: bool = (not sim.colossus.is_empty() and sim.colossus.get("alive", false))
-	if not on_none:
-		for g in sim.gates:
-			if not g["boss"].is_empty() and g["boss"].get("alive", false):
-				on_none = true
-	Runner.T.ok(not on_none, "a fresh run with no engaged boss => boss music OFF")
-	# colossus alive => engaged
+	sim.colossus = {}
+	sim.gates.clear()
+	Runner.T.ok(not ms._boss_music_on(sim), "no colossus + no gate boss -> boss music OFF")
 	sim.colossus = {"alive": true, "x": 0, "y": 0}
-	Runner.T.ok(not sim.colossus.is_empty() and sim.colossus.get("alive", false),
-		"a live colossus (finale) => boss music ON")
+	Runner.T.ok(ms._boss_music_on(sim), "a live colossus finale -> boss music ON")
+	sim.colossus = {}
+	sim.gates.append({"y": sim.camera_top + 30 * Fixed.ONE, "boss": {"alive": true}})
+	Runner.T.ok(ms._boss_music_on(sim), "a gate boss alive IN the camera band -> ON")
+	sim.gates.clear()
+	sim.gates.append({"y": sim.camera_top - 5000 * Fixed.ONE, "boss": {"alive": true}})
+	Runner.T.ok(not ms._boss_music_on(sim), "a gate boss alive but OUTSIDE the camera band -> OFF")

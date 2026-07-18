@@ -2588,14 +2588,14 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 			_hit_flinch[pidx] -= _hit_dir * 3.0   # shove the body AWAY from the source
 
 
-func _boss_music_on() -> bool:
+static func _boss_music_on(sw: SimWorld) -> bool:
 	# a1-15 AUD#7: a boss is ENGAGED — the colossus finale, or a gate boss alive and
-	# in view. Drives the heavier boss music signature.
-	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+	# in view. Static + sim-param so it is directly testable. Drives the boss music.
+	if not sw.colossus.is_empty() and sw.colossus.get("alive", false):
 		return true
-	for g in sim.gates:
+	for g in sw.gates:
 		if not g["boss"].is_empty() and g["boss"].get("alive", false) \
-				and g["y"] >= sim.camera_top - 100 * Fixed.ONE and g["y"] <= sim.camera_top + SimWorld.VIEW_H:
+				and g["y"] >= sw.camera_top - 100 * Fixed.ONE and g["y"] <= sw.camera_top + SimWorld.VIEW_H:
 			return true
 	return false
 
@@ -2854,7 +2854,7 @@ func _drive_audio() -> void:
 		_vo_plea_at = -1
 		_vo("vo_pilot_plea", 2, 600, true)
 	# VO owns the mix while speaking: rides the existing duck channel.
-	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on())
+	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on(sim))
 	_sfx.duck_sfx_under_vo(_sfx.vo_active())   # a1-14 AUD#6: the combat bus dips under the radio too
 	_sfx.set_ambience_march(_sector_march())   # a1-15 AUD#4: biome-shifted wind bed
 	_sfx.set_concussion(_concussion)
