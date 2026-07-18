@@ -441,8 +441,10 @@ func test_route_fork_streams_lanes_at_gates_2_and_4() -> void:
 		if m["y"] > gate_y and m["y"] < gate_y + 300 * SimWorld.F_ONE and m["x"] < SimWorld.SCREEN_CX:
 			band_mines += 1
 	Runner.T.ok(band_mines >= 3, "cache lane is ringed by at least the 3 extra mines (got %d)" % band_mines)
-	# Gauntlet lane: the base 2 elites + the c2-16 deeper-commitment elite
-	# (and 2 more if this seed's fork is a bait), exactly one a marked bounty.
+	# Gauntlet lane defenders depend on this seed's c3-04 read: a BLUFF
+	# (_mix(2,seed)%4==2) leaves the lane empty; otherwise the base 2 + the
+	# deeper-commitment elite (+2 on a trap), one a marked bounty. Seed 7 here
+	# happens to be a bluff, so branch on the read.
 	var lane_elites := 0
 	var lane_marked := 0
 	for e in sim.enemies:
@@ -450,8 +452,11 @@ func test_route_fork_streams_lanes_at_gates_2_and_4() -> void:
 			lane_elites += 1
 			if e.get("marked", false):
 				lane_marked += 1
-	Runner.T.ok(lane_elites >= 3, "gauntlet lane spawns the base 2 + deeper-commitment elites (got %d)" % lane_elites)
-	Runner.T.ok(lane_marked >= 1, "at least one gauntlet elite is a guaranteed marked bounty")
+	if SimWorld._mix(2, 7) % 4 == 2:
+		Runner.T.eq(lane_elites, 0, "BLUFF seed: the gauntlet lane is empty of defenders")
+	else:
+		Runner.T.ok(lane_elites >= 3, "gauntlet lane spawns the base 2 + deeper-commitment elites (got %d)" % lane_elites)
+		Runner.T.ok(lane_marked >= 1, "at least one gauntlet elite is a guaranteed marked bounty")
 	# A==B determinism over the forked stream.
 	var a := _fork_run()
 	var b := _fork_run()
@@ -1659,3 +1664,46 @@ func test_c3_ruins_rubble_half_speeds() -> void:
 	wet.step([push])
 	Runner.T.eq(wet.players[0]["x"] - x_before, SimWorld.PLAYER_SPEED / 2,
 		"one step in rubble moves exactly PLAYER_SPEED/2 (the _in_mud half-speed)")
+
+
+func test_c3_fork_bluff_and_reward() -> void:
+	# c3 4v: the fork's mod-4 read — one residue is a TRAP (extra ambush), one a
+	# BLUFF (sandbag look, zero defenders), the rest honest. Sandbag arcs stream
+	# in ALL cases (the look never lies); a high-tier reward sits deep in the
+	# gauntlet every time.
+	var bluff_seen := false
+	var trap_seen := false
+	for sd in range(1, 60):
+		var m4: int = SimWorld._mix(2, sd) % 4
+		var sim := _stream_fork(sd)
+		var gate_y: int = 0
+		for g in sim.gates:
+			if g.get("fork_x", 0) != 0:
+				gate_y = g["y"]
+				break
+		# Count gauntlet-side (bounty_x0 = 380 for gate 2) leashed/ambush elites.
+		var gauntlet_elites := 0
+		for e in sim.enemies:
+			if e["kind"] == "elite" and e["x"] > SimWorld.SCREEN_CX and e["y"] > gate_y:
+				gauntlet_elites += 1
+		# Sandbag arcs on the gauntlet side stream regardless of the read.
+		var gauntlet_bags := 0
+		for sb in sim.sandbags:
+			if sb["x"] > SimWorld.SCREEN_CX and sb["y"] > gate_y:
+				gauntlet_bags += 1
+		Runner.T.ok(gauntlet_bags > 0, "seed %d: the fortified LOOK (sandbags) streams in every read" % sd)
+		# High-tier reward (kind 4-6) deep in the gauntlet, every fork.
+		var deep_reward := false
+		for pk in sim.pickups:
+			if pk.get("kind", 0) >= 4 and pk.get("kind", 0) <= 6 \
+					and pk["y"] >= gate_y + 560 * SimWorld.F_ONE and pk["x"] > SimWorld.SCREEN_CX:
+				deep_reward = true
+		Runner.T.ok(deep_reward, "seed %d: a high-tier reward sits deep in the gauntlet" % sd)
+		if m4 == 2:
+			bluff_seen = true
+			Runner.T.eq(gauntlet_elites, 0, "seed %d BLUFF: the fortified lane is empty of defenders" % sd)
+		elif m4 == 0:
+			trap_seen = true
+			Runner.T.ok(gauntlet_elites >= 3, "seed %d TRAP: the gauntlet is extra-defended (%d)" % [sd, gauntlet_elites])
+	Runner.T.ok(bluff_seen, "a bluff fork exists (~1-in-4)")
+	Runner.T.ok(trap_seen, "a trap fork exists (~1-in-4)")

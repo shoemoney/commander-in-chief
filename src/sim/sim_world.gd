@@ -3143,6 +3143,13 @@ func _step_camera() -> void:
 			# Torture-inert: the 60 s campaign run never streams past gate 1
 			# (probe-verified — camera_top ends ~43 units short of gate 2).
 			if _gate_counter == 2 or _gate_counter == 4:
+				# c3 4v: the gauntlet stops being always-a-killbox. mod-4 of the
+				# per-seed _mix gives three READS you must learn to tell apart:
+				# ==0 TRAP (extra ambush), ==2 BLUFF (looks fortified but the
+				# defenders are gone — free high-tier loot for reading the empty
+				# threat), else HONEST killbox. The sandbag LOOK never changes;
+				# only the defenders do — reading past the dressing is the skill.
+				var is_bluff: bool = _mix(_gate_counter, _world_seed) % 4 == 2
 				var fcx: int = (90 + rng.range_i(0, 120)) * F_ONE
 				var fcy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 				pickups.append({"x": fcx, "y": fcy, "kind": 1 + rng.range_i(0, 1), "cost": 0})
@@ -3154,9 +3161,16 @@ func _step_camera() -> void:
 					if absi(fmx - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
 						fmx += 48 * F_ONE
 					mines.append({"x": fmx, "y": fmy, "armed": true})
+				# c3 4v: on a BLUFF seed the gauntlet's defenders never spawn — the
+				# lane LOOKS the same (sandbags below still stream) but is empty.
+				# The rng draws stay unconditional so the (torture-inert) fork
+				# stream is byte-identical seed-to-seed; only the spawns are gated.
 				for s in 2:
-					_spawn_enemy((360 + rng.range_i(0, 160)) * F_ONE,
-						_next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE, true)
+					var fex: int = (360 + rng.range_i(0, 160)) * F_ONE
+					var fey: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
+					if is_bluff:
+						continue
+					_spawn_enemy(fex, fey, true)
 					# Lane leash (re-review: un-leashed elites walked the corridor
 					# and engaged the CACHE lane before the signposts were even on
 					# screen — the choice has to survive until it's made). They
@@ -3164,9 +3178,10 @@ func _step_camera() -> void:
 					var fge: Dictionary = enemies[enemies.size() - 1]
 					if fge["kind"] == "elite":
 						fge["hold_y"] = _next_gate_y + 380 * F_ONE
-				var fmk: Dictionary = enemies[enemies.size() - 1]
-				if fmk["kind"] == "elite":
-					fmk["marked"] = true
+				if not is_bluff and not enemies.is_empty():
+					var fmk: Dictionary = enemies[enemies.size() - 1]
+					if fmk["kind"] == "elite":
+						fmk["marked"] = true
 				# Mechanical lane truth (KIMK round-2: dressing must not be
 				# paint one level down): BOUNTY's sandbag arcs are REAL bags
 				# (full cover grammar, destructible), CACHE's wire is a real
@@ -3192,11 +3207,19 @@ func _step_camera() -> void:
 					var cmy: int = _next_gate_y + (500 + dm * 80) * F_ONE
 					if not _near_stream_bunker(cmx, cmy):
 						mines.append({"x": cmx, "y": cmy, "armed": true})
-				_spawn_enemy((bounty_x0 + 40 + (fmix >> 8) % 120) * F_ONE,
-					_next_gate_y + 560 * F_ONE, true)
-				var deep_e: Dictionary = enemies[enemies.size() - 1]
-				if deep_e["kind"] == "elite":
-					deep_e["hold_y"] = _next_gate_y + 680 * F_ONE
+				# The deep gauntlet elite also stands down on a bluff seed.
+				if not is_bluff:
+					_spawn_enemy((bounty_x0 + 40 + (fmix >> 8) % 120) * F_ONE,
+						_next_gate_y + 560 * F_ONE, true)
+					var deep_e: Dictionary = enemies[enemies.size() - 1]
+					if deep_e["kind"] == "elite":
+						deep_e["hold_y"] = _next_gate_y + 680 * F_ONE
+				# c3 4v REWARD: a guaranteed high-tier OFFENSE capsule (Pierce/
+				# Spread/Triple — strictly above the cache lane's grenade/vest) sits
+				# at the DEEP end of the gauntlet, past the leash lines, so clearing
+				# the killbox pays and the bluff pays for reading it. kind 4/5/6.
+				pickups.append({"x": (bounty_x0 + 60) * F_ONE, "y": _next_gate_y + 620 * F_ONE,
+					"kind": 4 + fmix % 3, "cost": 0})
 				# BAIT (1-in-4): the fortified-LOOKING gauntlet lane is a kill-box
 				# — extra sandbags read as the reward lane, but 2 ambush elites +
 				# a mine cluster punish the autopilot pick; the cache lane is
