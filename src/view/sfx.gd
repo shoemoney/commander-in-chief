@@ -627,6 +627,45 @@ func _synth_all() -> void:
 		flash[i] = _nz(i) * exp(-t * 120.0) * 0.9 + fbell_lp * exp(-t * 7.0) * 0.3
 	s["flash"] = flash
 
+	# a1-13 AUD#5: a real RUBBLE timbre for structural collapse — a dark low-passed
+	# noise avalanche + low resonant thumps, NO fireball crack. The four collapse
+	# events were mapped to the NONEXISTENT "bunker_break" sound (dead air).
+	var rubble := _buf(0.5)
+	var rlp := 0.0
+	for i in rubble.size():
+		var rt := float(i) / RATE
+		rlp += (_nz(i) - rlp) * 0.05   # heavy one-pole low-pass -> dark rumble
+		var thump := 0.0
+		for ts in [0.0, 0.13, 0.28]:
+			var td: float = rt - ts
+			if td >= 0.0 and td < 0.16:
+				thump += sin(TAU * 68.0 * td) * exp(-td * 20.0)
+		var renv := minf(1.0, rt * 26.0) * clampf((0.5 - rt) * 4.0, 0.0, 1.0)
+		rubble[i] = (rlp * 0.85 + thump * 0.5) * renv * 0.55
+	s["rubble"] = rubble
+	# a1-13 AUD#3: sub-class the overloaded alarm so ~20 threat events stop speaking
+	# through one voice. alarm_low = structural SUB-KLAXON (rear/flank breach);
+	# alarm_air = high aerial PAINT-WHINE (drone/sniper/mg-nest). Same band-limited
+	# square recipe as alarm, pitch-shifted, so the pitch grammar still reads.
+	var alarm_low := _buf(0.5)
+	var alph := 0.0
+	for i in alarm_low.size():
+		var t := float(i) / RATE
+		var f := 300.0 if fmod(t, 0.26) < 0.13 else 220.0
+		alph += TAU * f / RATE
+		var av := 0.0
+		var ak := 1.0
+		while ak * f < RATE * 0.45 and ak <= 15.0:
+			av += sin(alph * ak) / ak
+			ak += 2.0
+		alarm_low[i] = av * (4.0 / PI) * 0.85 * 0.3 * minf(1.0, (0.5 - t) * 12.0)
+	s["alarm_low"] = alarm_low
+	var alarm_air := _buf(0.4)
+	for i in alarm_air.size():
+		var t := float(i) / RATE
+		var f := 1350.0 + sin(TAU * 7.0 * t) * 45.0   # vibrato whine
+		alarm_air[i] = sin(TAU * f * t) * 0.2 * minf(1.0, t * 40.0) * clampf((0.4 - t) * 10.0, 0.0, 1.0)
+	s["alarm_air"] = alarm_air
 	for k in s:
 		_sounds[k] = _to_wav(s[k])
 

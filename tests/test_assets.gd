@@ -108,3 +108,19 @@ func test_a1_enemy_muzzle_targets_nearest_alive_player() -> void:
 	sim.players[0]["alive"] = false
 	var np2 := sim._nearest_alive_player(120 * Fixed.ONE, 100 * Fixed.ONE)
 	Runner.T.eq(np2["x"], 500 * Fixed.ONE, "a dead nearer player is skipped; aims at the live one")
+
+
+# --- a1-13: no SFX event maps to a nonexistent (silent) synth voice ---
+
+func test_a1_every_event_sound_resolves_to_a_synth_voice() -> void:
+	var sfx := Sfx.new()
+	sfx._synth_all()
+	var sounds: Dictionary = sfx._sounds
+	Runner.T.ok(sounds.has("rubble"), "the new rubble collapse timbre is synthesized")
+	Runner.T.ok(sounds.has("alarm_low") and sounds.has("alarm_air"), "the alarm sub-classes are synthesized")
+	var evmap: Dictionary = _consts()["_EVENT_SOUND"]
+	for ev_key in evmap:
+		var sound_name: String = evmap[ev_key][0]
+		Runner.T.ok(sounds.has(sound_name),
+			"event '%s' -> sound '%s' must be a synthesized voice, not dead air" % [ev_key, sound_name])
+	sfx.free()

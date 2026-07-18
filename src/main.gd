@@ -249,8 +249,8 @@ const _EVENT_SOUND := {
 	"drop_gone": ["alarm", -12.0, 0.45],     # lower fizzle: the window closed on its own
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
 	"strafe_lane": ["alarm", -13.0, 1.6],     # high tick: the sweep lane lights up
-	"flank_warn": ["alarm", -12.0, 0.55],    # c2: sub-rumble pre-tell — the wall's ABOUT to blow (quieter/lower than the breach)
-	"flank_breach": ["alarm", -7.0, 0.8],    # low klaxon: the walls answer
+	"flank_warn": ["alarm_low", -11.0, 0.85],    # c2/a1-13: structural sub-klaxon pre-tell
+	"flank_breach": ["alarm_low", -6.0, 1.1],    # a1-13: structural sub-klaxon: the walls answer
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
 	"tank_crew": ["tank_board", -5.0, 1.5],   # same clunk a fifth up: mounting, but not YOUR controls
@@ -260,26 +260,26 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
-	"drone_windup": ["alarm", -12.0, 1.9],   # high paint-whine: same threat grammar, airborne voice
+	"drone_windup": ["alarm_air", -12.0, 1.0],   # a1-13: dedicated aerial paint-whine timbre
 	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
 	"rock_crater": ["explosion", -8.0, 0.6],  # low crumble: the arena just lost a rock
 	"arena_shift": ["alarm", -10.0, 0.9],     # geometry klaxon: fresh cover dropped in
 	"supply_pod": ["explosion", -5.0, 0.7],   # c4: a supply pod slams in a fresh cover fort
 	"lane_warn": ["alarm", -11.0, 1.1],       # c4: a lane is about to seal — 0.75s dust tell
-	"lane_seal": ["bunker_break", -6.0, 0.7], # c4: the lane slams shut — reroute now
+	"lane_seal": ["rubble", -5.0, 0.95], # c4/a1-13: real rubble (was silent)
 	"lane_clear": ["click_dry", -8.0, 0.9],   # c4: the lane reopens
 	"arena_pressure": ["alarm", -9.0, 1.3],   # c3: rising pressure-shift klaxon — the hot quadrant just moved
 	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"cover_burn": ["vest_break", -9.0, 1.3],   # c3: grass burns off in the jet — dry crackle
-	"cover_crack": ["bunker_break", -8.0, 1.1], # c3: a wall slab cracks apart under the heat
-	"rear_warn": ["alarm", -13.0, 0.55],   # c4: the earlier/softer LEAD warn before the rear breach
-	"rear_breach": ["alarm", -9.0, 0.6],   # c3: something's coming up behind you — low rear klaxon
+	"cover_crack": ["rubble", -7.0, 1.2], # c3/a1-13
+	"rear_warn": ["alarm_low", -12.0, 0.9],   # c4/a1-13: structural sub-klaxon LEAD warn
+	"rear_breach": ["alarm_low", -8.0, 1.0],   # c3/a1-13: structural sub-klaxon
 	"mast_warn": ["alarm", -8.0, 0.9],     # c3: the mast is about to overheat — vacate the orbit
 	"mast_pulse": ["explosion", -3.0, 0.7], # c3: the mast core vents — a wide radial one-shot zone
-	"parapet_collapse": ["bunker_break", -4.0, 0.7], # c3: a Foundry trench-parapet column drops mid-fight
-	"arena_crack": ["bunker_break", -3.0, 0.85], # c4: a gunship cannon volley cracks a bridge-span slab
+	"parapet_collapse": ["rubble", -3.0, 0.85], # c3/a1-13
+	"arena_crack": ["rubble", -3.0, 1.0], # c4/a1-13
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
@@ -287,15 +287,15 @@ const _EVENT_SOUND := {
 	"token_drop": ["buy", -4.0, 1.2],       # spending it sounds like the buy it is
 	"hulk_salvage": ["tank_board", -6.0, 0.8],  # heavy strip-the-wreck clunk   # deliberate arming CLUNK (sapper's ambient clink is -15)
 	"rend_pierce": ["vest_break", -8.0, 2.0],      # metal shear (KIMK: pitch 2.0 clears the true-break band)
-	"mg_nest_aim": ["alarm", -12.0, 1.2],   # lethal emplacement drawing a bead (was tank_board — sounded like planting a mine); pitch below sniper_paint's 1.4 to tell the two threats apart
+	"mg_nest_aim": ["alarm_air", -12.0, 0.85],   # a1-13: aerial paint-whine, pitched below sniper_paint
 	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
 	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
 	"pilot_down": ["avenge", -8.0, 0.8],           # crash-site ransom ping — friendly rising two-note (the alarm voice at 1.1 was byte-identical to tank_ignite's 'bail out now')
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
 	"mine_lay": ["click_dry", -15.0, 1.2],   # sapper plants a mine: faint dry click
-	"sniper_paint": ["alarm", -12.0, 1.4],
+	"sniper_paint": ["alarm_air", -12.0, 0.92],   # a1-13: aerial paint-whine
 	"sniper_fire": ["shot", -4.0, 0.6],
-	"bunker_break": ["explosion", -4.0, 0.72],
+	"bunker_break": ["rubble", -3.0, 0.8],   # a1-13: a bunker collapsing IS rubble, not a fireball
 	"bash": ["vest_break", -3.0, 0.8],
 	"frogman_surface": ["splash", -4.0, 1.0],
 	"wave_start": ["wave_start", -5.0, 1.0],
