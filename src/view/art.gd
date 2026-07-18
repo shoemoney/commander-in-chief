@@ -327,7 +327,7 @@ const SCALE := {
 	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
 	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
 	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
-	"barrier": 0.13, "ammobox": 0.1, "landmine": 0.07,
+	"barrier": 0.13, "ammobox": 0.1,
 	# Terrain set is baked big (160-220px) but drawn at 1.0 like the litter;
 	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
 	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
@@ -345,12 +345,12 @@ const SCALE := {
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.56, "m_contractor2": 0.56, "m_insurgent3": 0.53, "m_insurgent4": 0.53,
 	"m_insurgent5": 0.53, "m_pilot": 0.52, "m_soldier2": 0.56,
-	"m_apc": 0.7, "m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
-	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34, "m_light_tank": 0.6,
+	"m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
+	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34,
 	"m_technical": 0.6,
 	"wreck_apc": 0.3, "wreck_technical": 0.28, "wreck_light_tank": 0.28,
-	"wep_grenade": 0.34, "wep_rpg": 0.4, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
-	"wep_pistol": 0.32, "wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
+	"wep_grenade": 0.34, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
+	"wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
 	"item_bullet": 0.32, "item_bullet_shotgun": 0.32, "item_binoculars": 0.34,
 	"mg_stand": 0.3,   # 160px canvas → ~48px emplacement
 	# p2: specialists match cast2 unit footprints (64px canvas vs cast2's 300px,
@@ -426,7 +426,6 @@ const TINT := {
 	"wreck": Color(0.62, 0.66, 0.58), "tent": Color(0.72, 0.82, 0.6),
 	"watchtower": Color(0.72, 0.78, 0.62), "barbedwire": Color(0.7, 0.74, 0.68),
 	"barrier": Color(0.76, 0.76, 0.62), "ammobox": Color(0.72, 0.8, 0.58),
-	"landmine": Color(0.7, 0.72, 0.62),
 	# Bridges are TERRAIN, not litter — warm neutral concrete (no mossy wash,
 	# same class as the sandbag walls, not the receding scenery).
 	"bridge_mid": Color(0.94, 0.9, 0.8), "bridge_ramp": Color(0.94, 0.9, 0.8),
@@ -451,14 +450,14 @@ const TINT := {
 	"m_insurgent3": Color(2.1, 1.7, 1.15), "m_insurgent4": Color(2.1, 1.7, 1.15),
 	"m_insurgent5": Color(2.1, 1.7, 1.15), "m_pilot": Color(1.5, 1.2, 1.0),
 	"m_soldier2": Color(1.1, 1.12, 0.95),
-	"m_apc": OLIVE_VEH, "m_radar_tank": OLIVE_VEH, "m_rocket_truck": OLIVE_VEH,
+	"m_radar_tank": OLIVE_VEH, "m_rocket_truck": OLIVE_VEH,
 	"m_jet": OLIVE_VEH, "m_heli_transport": OLIVE_VEH, "m_heli_attack2": OLIVE_VEH,
-	"m_drone": Color(1.2, 1.3, 1.4), "m_light_tank": OLIVE_VEH, "m_technical": OLIVE_VEH,
+	"m_drone": Color(1.2, 1.3, 1.4), "m_technical": OLIVE_VEH,
 	"wreck_apc": Color(0.55, 0.58, 0.52), "wreck_technical": Color(0.55, 0.58, 0.52),
 	"wreck_light_tank": Color(0.55, 0.58, 0.52),
-	"wep_grenade": Color(1.1, 1.15, 0.95), "wep_rpg": Color(1.15, 1.05, 0.9),
+	"wep_grenade": Color(1.1, 1.15, 0.95),
 	"wep_shotgun": Color(1.1, 1.1, 1.0), "wep_rifle": Color(1.1, 1.1, 1.0),
-	"wep_mg": Color(1.1, 1.1, 1.0), "wep_pistol": Color(1.1, 1.1, 1.0),
+	"wep_mg": Color(1.1, 1.1, 1.0),
 	"wep_claymore": Color(1.1, 1.1, 0.95), "wep_smoke": Color(1.05, 1.1, 1.1),
 	"wep_flashbang": Color(1.1, 1.1, 1.0),
 	"item_bullet": Color(1.3, 1.2, 0.9), "item_bullet_shotgun": Color(1.3, 1.2, 0.9),
@@ -490,10 +489,10 @@ const OUTLINE := {
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
 	"m_bombsuit": true, "m_contractor2": true, "m_insurgent3": true, "m_insurgent4": true,
 	"m_insurgent5": true, "m_pilot": true, "m_soldier2": true,
-	"m_apc": true, "m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
-	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true, "m_light_tank": true,
+	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
+	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
-	"wep_grenade": true, "wep_rpg": true, "wep_shotgun": true,
+	"wep_grenade": true, "wep_shotgun": true,
 	"wep_rifle": true, "wep_mg": true, "item_bullet": true, "item_bullet_shotgun": true,
 	# The rare-capsule set: same ground-pickup class as the rifle/shotgun/mg
 	# capsules above (plus the planted claymore + its ghost — rim alpha follows

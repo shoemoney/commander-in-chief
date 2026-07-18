@@ -477,3 +477,20 @@ func test_a2_buy_subclass_callsites() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
 	Runner.T.ok(src.contains('play("buy_grab"'), "the rare-capsule grab call-site plays buy_grab")
 	Runner.T.ok(src.contains('play("buy_fanfare"'), "a milestone reward call-site plays buy_fanfare")
+
+
+# --- a2-18: pipeline VRAM + registry cleanup ---
+
+func test_a2_registry_has_no_dead_rows() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var c: Dictionary = art.get_script_constant_map()
+	var tex: Dictionary = c["TEX"]
+	for setname in ["SCALE", "TINT", "OUTLINE"]:
+		for k in c[setname]:
+			Runner.T.ok(tex.has(k), "%s row '%s' mirrors a live TEX entry (no dead config)" % [setname, k])
+
+func test_a2_pipeline_vram_reclaimed() -> void:
+	var cap := FileAccess.get_file_as_string("res://assets/legacy-art/icons/cap_pierce.png.import")
+	Runner.T.ok(cap.contains("size_limit=128"), "the capsule pickup glyph imports size-limited (VRAM reclaimed)")
+	var grass := FileAccess.get_file_as_string("res://assets/kenney/grass.png.import")
+	Runner.T.ok(grass.contains("mipmaps/generate=false"), "the 1:1 Kenney grass tile has mipmaps OFF")
