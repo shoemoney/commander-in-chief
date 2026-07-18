@@ -2765,7 +2765,7 @@ func _update_feel() -> void:
 			if sim.mode != "endless":
 				_scorch[i]["t"] = _scorch_age(_scorch[i]["t"])
 	# Count-cap BOTH modes so the persistent scars stay bounded (was endless-only).
-	while _scorch.size() > (24 if sim.mode == "endless" else 40):
+	while _scorch.size() > _scorch_cap(sim.mode):
 		_scorch.remove_at(0)
 	if sim.mode == "endless":
 		for i in range(_corpses.size() - 1, -1, -1):
