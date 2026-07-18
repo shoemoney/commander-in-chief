@@ -5488,7 +5488,9 @@ func _draw_colossus() -> void:
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
 	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
-	var clabel := "FOUNDRY COLOSSUS — PHASE %d/3" % phase
+	# a2-17 r2 HUD#6: name the colossus phases (actionable), matching the escalation
+	# banners (phase 2 = mortar volleys, phase 3 = sappers out).
+	var clabel := "FOUNDRY COLOSSUS — %s" % ["ADVANCE", "MORTAR VOLLEYS", "SAPPERS OUT"][clampi(phase - 1, 0, 2)]
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	draw_rect(Rect2(172.0 - 3.0, 324.0, clw + 6.0, 13.0), Color(0.04, 0.05, 0.03, 0.55))   # a2-17 r2: anchor the plate to the label ORIGIN (172), not the bar center
 	Art.text(self, clabel, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
