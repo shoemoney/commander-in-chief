@@ -3589,6 +3589,7 @@ func _draw_terrain() -> void:
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(lm_pos - Vector2(72, 52), Vector2(144, 104)),
 			false, Color(0.30, 0.25, 0.18, 0.16))
 		draw_arc(lm_pos, 152.0, 0, TAU, 56, Color(0.32, 0.27, 0.20, 0.22), 2.0)
+		draw_arc(lm_pos, 168.0, 0, TAU, 60, Color(0.30, 0.26, 0.20, 0.12), 1.5)   # a2-10 r2: softer wider outer scar (lm_pos IS the arena center = the mast)
 		# a2-10 AD#7: a warm dust-haze band along the top edge (wave-keyed), so the
 		# arena has a world-edge/sky, not a top-down cutout. Screen-anchored (shake-
 		# cancel) like the campaign skyglow.
