@@ -1887,3 +1887,63 @@ func test_c3_fire_sack_flanker() -> void:
 	Runner.T.ok(not fl.has("hold_y"), "the leash releases once the player commits to the peek")
 	Runner.T.ok(absi(fl["x"] - nest_x) < absi(start_x - nest_x),
 		"the flanker crosses the lane, closing the lateral gap to the nest side")
+
+
+func test_c3_ford_current_deep_bands() -> void:
+	# c3 2v: deep-river crossings (band >= 2) carry a lateral CURRENT that shoves
+	# the wader FORD_CURRENT/tick in a per-band hashed, learnable direction. The
+	# band-1 torture river carries ZERO current so both goldens stay byte-identical.
+	var sim := SimWorld.new(43, 1)
+	var wy2: int = -2 * SimWorld.GATE_SPACING
+	sim.waters.clear()
+	sim.waters.append({"y": wy2, "ford_x": 320 * SimWorld.F_ONE})
+	var mid2: int = wy2 + SimWorld.WATER_H / 2
+	var c2: int = sim._ford_current(mid2)
+	Runner.T.ok(absi(c2) == SimWorld.FORD_CURRENT, "a band-2 ford carries a FORD_CURRENT shove")
+	Runner.T.eq(sim._ford_current(mid2), c2, "the current direction is stable all run (learnable)")
+	# Band 1 (the torture band): zero current — goldens untouched.
+	var wy1: int = -1 * SimWorld.GATE_SPACING
+	sim.waters.clear()
+	sim.waters.append({"y": wy1, "ford_x": 320 * SimWorld.F_ONE})
+	Runner.T.eq(sim._ford_current(wy1 + SimWorld.WATER_H / 2), 0, "the band-1 torture ford carries no current")
+	# Dry ground (no band) carries no current.
+	Runner.T.eq(sim._ford_current(-500 * SimWorld.F_ONE), 0, "dry ground carries no current")
+
+
+func test_c3_mud_surfaces_frogmen() -> void:
+	# c3 2v: stepping into deep-river MUD (band >= 2) proactively SURFACES lurking
+	# frogmen within MUD_SURFACE_RADIUS — the active answer to passive wading. The
+	# reused surface path keeps the 30t harmless telegraph (no instant lunge). A
+	# frogman beyond the radius (and the 60px notice radius) stays submerged.
+	var sim := SimWorld.new(43, 1)
+	var wy: int = -2 * SimWorld.GATE_SPACING
+	sim.waters.clear()
+	sim.waters.append({"y": wy, "ford_x": 320 * SimWorld.F_ONE})
+	sim.camera_top = wy - 100 * SimWorld.F_ONE   # keep the player in the northern mud, in view
+	var py: int = wy - SimWorld.MUD_BANK_H / 2   # in the mud strip just north of the water
+	sim.players[0]["x"] = 320 * SimWorld.F_ONE
+	sim.players[0]["y"] = py
+	Runner.T.ok(sim._in_mud(sim.players[0]["x"], py), "the player stands in the band-2 mud")
+	# NEAR: 80px away — inside the 90px mud radius but OUTSIDE the 60px notice
+	# radius, so ONLY the mud contact can surface it.
+	sim._spawn_frogman(400 * SimWorld.F_ONE, py)
+	# FAR: 150px away — outside both radii, must stay down.
+	sim._spawn_frogman(320 * SimWorld.F_ONE, py - 150 * SimWorld.F_ONE)
+	var near: Dictionary = {}
+	var far: Dictionary = {}
+	for e in sim.enemies:
+		if e.get("kind", "") == "frogman":
+			e["submerged"] = true
+			e["surface_ticks"] = 0
+			e["lunge_ticks"] = 0
+			if e["x"] == 400 * SimWorld.F_ONE:
+				near = e
+			else:
+				far = e
+	Runner.T.ok(not near.is_empty() and not far.is_empty(), "both test frogmen staged submerged")
+	sim.step([_idle()])
+	Runner.T.ok(not near["submerged"], "the mud contact surfaces the near frogman")
+	Runner.T.ok(near["surface_ticks"] > 0, "it surfaces into the harmless telegraph window")
+	Runner.T.eq(near["lunge_ticks"], 0, "no instant lunge — the fairness window holds")
+	Runner.T.ok(far["submerged"], "a frogman beyond the mud radius stays submerged")
+

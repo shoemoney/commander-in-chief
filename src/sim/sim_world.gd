@@ -298,6 +298,8 @@ const BARREL_CHUNKS := [
 # discs clears HULL_CLEARANCE (100 - 2*24 = 52 >= 44, pinned by test).
 const MARSH_SEG := 2
 const MARSH_DRIFT := F_ONE           # 1px/tick sideways while airborne over marsh water
+const FORD_CURRENT := F_ONE / 2      # c3 2v: 0.5px/tick sideways shove on a deep-river (band>=2) crossing
+const MUD_SURFACE_RADIUS := 90 * F_ONE  # c3 2v: stepping into deep-river mud pops lurking frogmen within 90px
 const VENT_START_SEG := 4
 const VENT_SPACING := 300 * F_ONE   # 300 (not 460): after the apron/water/gate keep-outs eat their rows, seg 4 must still KEEP >= 2 vent rows (-4200/-4800; test-pinned) — at 460 the campaign foundry surfaced zero
 const VENT_CYCLE_TICKS := 180        # full cycle; jet holds the final 60
@@ -747,6 +749,12 @@ func _step_players(inputs: Array) -> void:
 				spd = spd / 2
 			p["x"] = p["x"] + Fixed.mul(Fixed.div(mx, mlen), spd)
 			p["y"] = p["y"] + Fixed.mul(Fixed.div(my, mlen), spd)
+		# c3 2v FORD CURRENT: a deep-river crossing shoves you sideways each tick
+		# (drifts the firing origin, not the aim). Applies standing or moving; the
+		# reverts below clamp it out of cover, so no softlock. Band 1 -> 0 -> golden.
+		var fcur := _ford_current(p["y"])
+		if fcur != 0:
+			p["x"] = p["x"] + fcur
 		# Fork wreck-island: full AABB move-revert (KIMK round-2: the old
 		# nearest-edge snap POPPED on north entry; a revert lets you slide
 		# along the face by strafing — geography, resolved like geography).
@@ -787,6 +795,18 @@ func _step_players(inputs: Array) -> void:
 						p["y"] = rpy
 					break
 		_clamp_actor(p)
+		# c3 2v: stepping into deep-river MUD (band>=2) proactively SURFACES any
+		# lurking frogman within MUD_SURFACE_RADIUS — reusing the frogman surface
+		# path so the 30t harmless-telegraph fairness window holds by construction
+		# (no instant lunge). The active answer to passive wading: step in to pop
+		# the ambush and shoot it. Band 1 has no submerged frogmen in-window -> inert.
+		if _in_mud(p["x"], p["y"]) and absi(p["y"] / GATE_SPACING) >= 2:
+			for fr in enemies:
+				if fr.get("kind", "") == "frogman" and fr.get("submerged", false) \
+						and absi(fr["x"] - p["x"]) + absi(fr["y"] - p["y"]) <= MUD_SURFACE_RADIUS:
+					fr["submerged"] = false
+					fr["surface_ticks"] = FROGMAN_SURFACE_TICKS
+					events.append({"t": "frogman_surface", "x": fr["x"], "y": fr["y"]})
 
 		# Aim: decoupled from movement (the loop-lever identity).
 		var ax: int = inp.aim_x * 256
@@ -3003,6 +3023,21 @@ func _in_mud(_x: int, y: int) -> bool:
 				or (y > w["y"] + WATER_H and y <= w["y"] + WATER_H + MUD_BANK_H):
 			return true
 	return false
+
+
+func _ford_current(y: int) -> int:
+	## c3 2v: deeper river bands (idx>=2) push a wader/forder sideways
+	## FORD_CURRENT/tick in a per-band hashed, LEARNABLE direction (same _mix
+	## grammar as MARSH_DRIFT) — the crossing becomes an active beat, drifting
+	## the firing ORIGIN (never the aim vector). Band 1 (the torture band)
+	## returns 0, so both goldens stay byte-identical.
+	for w in waters:
+		if y >= w["y"] and y <= w["y"] + WATER_H:
+			var band_idx: int = absi(w["y"] / GATE_SPACING)
+			if band_idx < 2:
+				return 0
+			return FORD_CURRENT if _mix(band_idx, _world_seed) & 1 else -FORD_CURRENT
+	return 0
 
 
 func _in_water(x: int, y: int) -> bool:
