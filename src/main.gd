@@ -4782,6 +4782,8 @@ func _draw_enemies() -> void:
 	for eidx in _esort_order:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
+			_enemy_flash.erase(eidx)
+			_enemy_hp_prev.erase(eidx)
 			continue
 		# First-sighting teaching card: name the archetype + its counter the first
 		# time it appears this run (these debut at sector 4 with no introduction).
@@ -4795,25 +4797,27 @@ func _draw_enemies() -> void:
 			_enemy_pos_prev.erase(eidx)
 			_tech_lunge_prev.erase(eidx)
 			_enemy_hp_prev.erase(eidx)
+			_enemy_flash.erase(eidx)
 		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
 			_seen_kinds[ekind] = true
 			_show_banner(_KIND_TEACH[ekind], Color(1.0, 0.55, 0.4))
 		var epos := _to_screen(e["x"], e["y"])
 		# a2-11 VFX#1: hit-flash + spark + micro-flinch on a NON-LETHAL hit (hp dropped
-		# but still alive) — mobs only reacted on death; now every hit reads.
+		# but still alive) — mobs only reacted on death; now every hit reads. The white
+		# pop + sparks spawn as ADDITIVE glow fx so they draw on TOP of the body (via
+		# _draw_glow); the flinch below is the body offset.
 		var ehp: int = e["hp"]
 		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
 			_enemy_flash[eidx] = 1.0
+			_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
+			for sp in 4:
+				var sa := float(sp) * PI / 2.0 + 0.4
+				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
+					"vx": cos(sa) * 2.2, "vy": sin(sa) * 2.2})
 		_enemy_hp_prev[eidx] = ehp
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
 			_enemy_flash[eidx] = eflash - 0.2
-			var efr := (0.6 + eflash) * 9.0
-			draw_texture_rect(Art.tex("fx_softspot"), Rect2(epos - Vector2(efr, efr), Vector2(efr, efr) * 2.0),
-				false, Color(1, 1, 1, eflash * 0.55 * _motion))
-			if eflash > 0.78:
-				for sp in 4:
-					draw_line(epos, epos + Vector2.from_angle(float(sp) * PI / 2.0 + 0.4) * 7.0, Color(1, 1, 0.85, eflash), 1.2)
 			epos.y -= eflash * 1.2 * _motion
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).

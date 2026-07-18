@@ -167,8 +167,13 @@ func _dress_firefight(m: Node2D) -> void:
 	m._fx.append({"x": p["x"], "y": p["y"] - 13 * F, "t": 0.05, "kind": "muzzle",
 		"rate": 0.34, "a": -PI / 2})
 	m._recoil[0] = Vector2(0, 2.2)
-	# a2-11: pose a non-lethal enemy hit-flash so the feedback is captured.
+	# a2-11: pose the on-top hit-flash (additive light + sparks) at an enemy so it captures.
 	m._enemy_flash[2] = 1.0
+	var he: Dictionary = m.sim.enemies[2]
+	m._fx.append({"x": he["x"], "y": he["y"], "t": 0.05, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
+	for sp in 4:
+		var sa := float(sp) * PI / 2.0 + 0.4
+		m._fx.append({"x": he["x"], "y": he["y"], "t": 0.1, "kind": "ember", "rate": 0.1, "vx": cos(sa) * 2.2, "vy": sin(sa) * 2.2})
 	# A fresh blast at t=0 so explosion-feel work (white-hot lead, etc.) is captured.
 	m._fx.append({"x": (p["x"] + 40 * F), "y": (p["y"] - 70 * F), "t": 0.0, "kind": "explosion"})
 	# a1-09: an enemy red muzzle fan (directional) so incoming-fire feel is captured.
