@@ -3674,10 +3674,10 @@ func _step_waves() -> void:
 				var roll := rng.range_i(0, 9)
 				# c3 2v per-wave COMPOSITION THEMES: remap the SAME draw (no extra rng)
 				# onto a themed subset so a marksmen/bombardment wave reads as a unit.
-				if wave_mod == 7:
-					roll = [1, 4, 5][roll % 3]   # MARKSMEN: sniper / ghillie / drone (ranged paint)
-				elif wave_mod == 8:
-					roll = [0, 3][roll % 2]      # BOMBARDMENT: grenadier / sapper (area denial)
+				if wave_mod == 7:   # MARKSMEN: balanced sniper(1)/ghillie(4)/drone(5)
+					roll = [1, 4, 5, 1, 4, 5, 1, 4, 5, 4][roll]   # ranged paint, even weights
+				elif wave_mod == 8:   # BOMBARDMENT: balanced grenadier(0)/sapper(3)
+					roll = [0, 3, 0, 3, 0, 3, 0, 3, 0, 3][roll]   # area denial, 50/50
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 				elif roll == 1:
@@ -3704,6 +3704,13 @@ func _step_waves() -> void:
 					_spawn_broadcast(x, camera_top - 24 * F_ONE)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
+			elif wave_mod == 7 and wave_pending % 3 == 0:
+				# c3-17 r2: ~1/3 of the NON-elite bulk also reads thematic on a themed
+				# wave (deterministic from wave_pending, NO rng draw) so the WHOLE wave
+				# reads as the theme, not only its elites. Endless wave>=3 -> golden-inert.
+				_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
+			elif wave_mod == 8 and wave_pending % 3 == 0:
+				_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
 	elif _wave_hostiles_cleared() and (endless_boss.is_empty() or not endless_boss["alive"]):
