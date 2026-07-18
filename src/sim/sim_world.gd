@@ -202,6 +202,7 @@ const OBSERVER_STALL_TICKS := 480
 const REAR_TRICKLE_SPACING := 700 * F_ONE
 const REAR_TRICKLE_START := -(2400 * F_ONE)   # first trickle once the camera passes seg-2+400 (torture stops at ~-1520)
 const REAR_CAMP_TICKS := 300                  # 5s camping a choke before the rear answers (earlier/softer than the 480t Observer)
+const REAR_WARN_TICKS := 90                    # c4 2v: 1.5s lead warn before a rear-trickle spawn (>= the 24t reaction floor)
 const OBSERVER_STRIKE_CD_TICKS := 90
 const STRIKE_TELEGRAPH_TICKS := 45
 const OBSERVER_DESPAWN_ADVANCE := 150 * F_ONE
@@ -464,6 +465,8 @@ var sandbags: Array[Dictionary] = []   # player-authored cover (wheel-only; dead
 var rocks: Array[Dictionary] = []      # streamed natural hard cover {x,y} — blocks moves+bullets, grenades arc over
 var _next_rock_y: int = 0
 var _next_rear_y: int = 0   # c3 3v: next camera-advance mark that births a rear-trickle rusher
+var _rear_warn_ticks: int = 0   # c4 2v: rear-spawn lead-warn countdown (camera-derived, unhashed; 0 in both torture windows)
+var _rear_warn_x: int = 0       # c4 2v: the wall the pending rear rusher spawns from
 var _world_seed: int = 0   # stored run seed for the authored-chunk mixes (derived, unhashed)
 var barrels: Array[Dictionary] = []
 var vents: Array[Dictionary] = []      # foundry heat vents {x,y} — seg 4+ only, phase derived from tick_count
@@ -3597,12 +3600,22 @@ func _step_camera() -> void:
 	# mindless hold-up push is no longer free. rng-FREE (wall picked by _mix).
 	# Gated so the camera never triggers it inside the ~1260px torture (which
 	# stops at ~-1520 > REAR_TRICKLE_START) → both goldens byte-identical.
-	while mode == "campaign" and camera_top < _next_rear_y:
+	# c4 2v: a rear spawn is deferred behind a 1.5s WARN so a behind-you rusher
+	# is READABLE in a one-hit game (the view pulses a bottom-edge wedge + scree).
+	# The warn timer is CAMERA-DERIVED and unhashed; it stays 0 for the whole
+	# torture window (REAR_TRICKLE_START=-2400 > the ~-1520 reach) so goldens hold.
+	if mode == "campaign" and _rear_warn_ticks > 0:
+		_rear_warn_ticks -= 1
+		if _rear_warn_ticks == 0:
+			var sy: int = camera_top + 380 * F_ONE
+			_spawn_enemy(_rear_warn_x, sy, false)
+			events.append({"t": "rear_breach", "x": _rear_warn_x, "y": sy})
+	while mode == "campaign" and camera_top < _next_rear_y and _rear_warn_ticks == 0:
 		var rslot: int = absi(_next_rear_y / REAR_TRICKLE_SPACING)
 		var rear_x: int = WORLD_LEFT if _mix(rslot, _world_seed) & 1 else WORLD_RIGHT
-		var rear_y: int = camera_top + 380 * F_ONE
-		_spawn_enemy(rear_x, rear_y, false)
-		events.append({"t": "rear_breach", "x": rear_x, "y": rear_y})
+		_rear_warn_x = rear_x
+		_rear_warn_ticks = REAR_WARN_TICKS
+		events.append({"t": "rear_warn", "x": rear_x, "y": camera_top + 380 * F_ONE})
 		_next_rear_y -= REAR_TRICKLE_SPACING
 
 

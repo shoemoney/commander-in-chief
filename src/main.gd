@@ -268,6 +268,7 @@ const _EVENT_SOUND := {
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"cover_burn": ["vest_break", -9.0, 1.3],   # c3: grass burns off in the jet — dry crackle
 	"cover_crack": ["bunker_break", -8.0, 1.1], # c3: a wall slab cracks apart under the heat
+	"rear_warn": ["alarm", -13.0, 0.55],   # c4: the earlier/softer LEAD warn before the rear breach
 	"rear_breach": ["alarm", -9.0, 0.6],   # c3: something's coming up behind you — low rear klaxon
 	"mast_warn": ["alarm", -8.0, 0.9],     # c3: the mast is about to overheat — vacate the orbit
 	"mast_pulse": ["explosion", -3.0, 0.7], # c3: the mast core vents — a wide radial one-shot zone
@@ -1381,6 +1382,13 @@ func _consume_events() -> void:
 				_blast_debris(ev["x"], ev["y"])
 				_burst(ev["x"], ev["y"], "dust", 6, 1.0, 2.4, 0.3, 0.06, 0.0, false,
 					Color(0.4, 0.36, 0.32))
+			"rear_warn":
+				# c4 2v: the 1.5s LEAD warn before a rear spawn — a pulsing wedge at
+				# the rear edge (below the 72%-down player) so a behind-you rusher is
+				# READABLE before it lands. Softer than the rear_breach alert.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_softspot",
+					"sz": 90.0, "grow": -0.15, "fade": 2.5, "rate": 0.012, "col": Color(0.9, 0.5, 0.2, 0.28)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.012})
 			"rear_breach":
 				# c3 3v: a threat is entering from behind — a dust puff + rising
 				# alert at the rear edge so the player reads the pressure vector.

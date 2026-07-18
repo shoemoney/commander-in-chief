@@ -1724,8 +1724,10 @@ func test_c3_rear_trickle_on_advance() -> void:
 	for step in 40:
 		sim.camera_top -= 120 * SimWorld.F_ONE   # ~2px/tick * 60 -> simulate advance
 		sim._step_camera()
-		for ev in sim.events:
-			pass
+	# c4 2v: rear spawns are now deferred behind a REAR_WARN_TICKS lead-warn; step
+	# the streamer in place to release the queued warns into actual spawns.
+	for t in 400:
+		sim._step_camera()
 	# Count rear rushers spawned at a wall x behind mid-corridor.
 	var rear_rushers := 0
 	for e in sim.enemies:
@@ -2241,3 +2243,30 @@ func test_c4_cover_density_by_width() -> void:
 	var wide_avg: int = wide_span_sum / maxi(1, wide_n)
 	var narrow_avg: int = narrow_span_sum / maxi(1, narrow_n)
 	Runner.T.ok(narrow_avg < wide_avg, "narrow clusters are tighter-spaced than wide spreads (%d < %d)" % [narrow_avg / SimWorld.F_ONE, wide_avg / SimWorld.F_ONE])
+
+
+func test_c4_rear_warn_precedes_spawn() -> void:
+	# c4 2v: a rear-trickle spawn is DEFERRED behind a REAR_WARN_TICKS lead warn —
+	# a rear_warn event fires exactly REAR_WARN_TICKS before the enemy + rear_breach,
+	# so a behind-you spawn is readable. Past the torture reach -> goldens inert.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -2500 * SimWorld.F_ONE   # just past REAR_TRICKLE_START (-2400)
+	sim._step_camera()                        # crosses the mark -> arms the warn
+	var warned := false
+	for ev in sim.events:
+		if ev.get("t", "") == "rear_warn":
+			warned = true
+	Runner.T.ok(warned, "crossing the trickle mark fires a rear_warn first")
+	Runner.T.eq(sim._rear_warn_ticks, SimWorld.REAR_WARN_TICKS, "the warn arms for the full lead time")
+	var e0: int = sim.enemies.size()
+	for t in SimWorld.REAR_WARN_TICKS - 1:
+		sim._step_camera()
+	Runner.T.eq(sim.enemies.size(), e0, "no rear spawn during the warn window")
+	sim.events.clear()
+	sim._step_camera()   # the warn expires this tick
+	Runner.T.ok(sim.enemies.size() > e0, "the rear rusher spawns when the warn expires")
+	var breached := false
+	for ev in sim.events:
+		if ev.get("t", "") == "rear_breach":
+			breached = true
+	Runner.T.ok(breached, "rear_breach fires at the spawn moment, not before")
