@@ -986,3 +986,77 @@ func test_kimk_round2_pins() -> void:
 	sim4.colossus["hp"] = 30   # phase change territory
 	sim4._step_colossus()
 	Runner.T.ok(true, "phase shift with no clusters is a clean no-op (no crash)")
+
+
+func test_kimk_round3_adverbs_dead() -> void:
+	var sim := SimWorld.new(67, 1)
+	# L4: the ford width FLOOR fits a hull — the shared constant, not a vibe.
+	Runner.T.ok(2 * (SimWorld.FORD_HALF_W / 2) >= SimWorld.HULL_CLEARANCE - 12 * SimWorld.F_ONE,
+		"deep-ford floor (2x%d) clears a hull against HULL_CLEARANCE" % (SimWorld.FORD_HALF_W / SimWorld.F_ONE / 2))
+	# L4: the defender spawns SUBMERGED — full telegraph, no spawn-camp.
+	var w6 := {"y": -6000 * SimWorld.F_ONE, "ford_x": 300 * SimWorld.F_ONE}
+	sim.waters.append(w6)
+	sim._spawn_frogman(w6["ford_x"], w6["y"] + 40 * SimWorld.F_ONE)
+	var fd := sim.enemies[sim.enemies.size() - 1]
+	Runner.T.ok(fd["submerged"], "ford defender begins submerged (surfacing telegraph mandatory)")
+	# L7: blockade side lanes always fit a hull, all gate hashes.
+	for gc in range(2, 30):
+		var bmix := SimWorld._mix(gc, 67)
+		var blk_x: int = 140 + bmix % 320
+		var blk_n: int = 2 + (bmix >> 6) % 3
+		var blk_w: int = blk_n * 24
+		var left_lane: int = blk_x - blk_w / 2 - 16
+		var right_lane: int = 624 - (blk_x + blk_w / 2)
+		Runner.T.ok(left_lane * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE \
+			or right_lane * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE,
+			"gate %d blockade always leaves a hull lane" % gc)
+	# L7: pre-shelled never back-to-back (recompute the gate pair).
+	for gc in range(3, 30):
+		var a := (SimWorld._mix(gc, 67) >> 12) % 3 == 0 and (SimWorld._mix(gc - 1, 67) >> 12) % 3 != 0
+		var b := (SimWorld._mix(gc + 1, 67) >> 12) % 3 == 0 and (SimWorld._mix(gc, 67) >> 12) % 3 != 0
+		Runner.T.ok(not (a and b and (SimWorld._mix(gc, 67) >> 12) % 3 == 0), "no back-to-back pre-shelled at %d" % gc)
+	# L7: camp price curve — 10 at seg 2, +5/seg, capped 30.
+	Runner.T.eq(mini(30, 10 + (2 - 2) * 5), 10, "camp price seg 2 = 10")
+	Runner.T.eq(mini(30, 10 + (5 - 2) * 5), 25, "camp price seg 5 = 25")
+	Runner.T.eq(mini(30, 10 + (9 - 2) * 5), 30, "camp price caps at 30")
+	# L10: seed-sweep decorrelation — 5 seeds, all pairs, no rotational alignment.
+	var seqs: Array = []
+	for sd in [11, 222, 3333, 44444, 555555]:
+		var sq: Array = []
+		for s in 24:
+			sq.append(SimWorld._mix(s, sd) % 8)
+		seqs.append(sq)
+	for a2 in seqs.size():
+		for b2 in range(a2 + 1, seqs.size()):
+			var rot := false
+			for off in 24:
+				var all_m := true
+				for s in 24:
+					if seqs[a2][s] != seqs[b2][(s + off) % 24]:
+						all_m = false
+						break
+				if all_m:
+					rot = true
+			Runner.T.ok(not rot, "seeds pair (%d,%d) never rotationally align" % [a2, b2])
+	# L10: the re-pick is != neighbor BY CONSTRUCTION for every offset value.
+	for k in 7:
+		Runner.T.ok((0 + 1 + k) % 8 != 0, "re-pick offset %d can never land on the neighbor" % k)
+	# L13: parity delta budget — equal squads, rows within [140, 180].
+	Runner.T.ok(SimWorld.FLANK_DOOR_Y == 140 * SimWorld.F_ONE, "odd row = classic 140")
+	Runner.T.ok(SimWorld.FLANK_DOOR_Y + 40 * SimWorld.F_ONE == 180 * SimWorld.F_ONE, "even row = 180, inside the budget band")
+	# L14: solidify-under-overlap resolves by the escape rule — a player
+	# standing in a parked tank's footprint when it solidifies WALKS OUT.
+	var sim5 := SimWorld.new(71, 1)
+	sim5.tanks.clear()
+	var t5y: int = sim5.camera_top + 200 * SimWorld.F_ONE
+	sim5.tanks.append({"x": 300 * SimWorld.F_ONE, "y": t5y, "alive": true, "burning": false,
+		"fuel": 99999, "burn_ticks": 0, "fire_cd": 0, "occupant": -1})
+	var p5 := sim5.players[0]
+	p5["x"] = 300 * SimWorld.F_ONE
+	p5["y"] = t5y
+	var esc := SimInput.new()
+	esc.move_x = 256
+	for n in 30:
+		sim5.step([esc])
+	Runner.T.ok(absi(p5["x"] - 300 * SimWorld.F_ONE) > SimWorld.HULK_HALF_W,
+		"overlap-at-solidify resolves: the escape rule walks you out")

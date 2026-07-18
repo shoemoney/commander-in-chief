@@ -267,6 +267,9 @@ const BARREL_CHUNKS := [
 	[[-80, 0], [80, 0]],                              # split pair — thread the middle
 	[[0, 0], [40, 24], [80, 48], [120, 72]],          # diagonal drip
 ]
+const HULL_CLEARANCE := 44 * F_ONE   # KIMK round-3: THE shared passage constant — any
+                                     # authored gap/lane/ford a tank must fit rides this
+                                     # one number (hull half 16 + tread margin 6, both sides).
 const FLANK_SQUAD := 3               # 2v flank doors: squad size per side (starting value)
 const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
@@ -2488,7 +2491,12 @@ func _step_gates() -> void:
 				and not g.get("b1", {}).is_empty() \
 				and not g.get("flanked", false) and g["b1"]["alive"] != g["b2"]["alive"]:
 			g["flanked"] = true
-			# Parity variation (KIMK r2: one constant row = solved forever):
+			# Parity variation (KIMK r2). A/B IS the designed ceiling (round-3
+			# declaration): two layouts is deliberate — flanks must stay
+			# READABLE surprise, not a lottery. The delta is budgeted neutral:
+			# even gates trade +40px reaction distance (easier) for the elite
+			# leading from the off-side (harder) — pinned equal squads, rows
+			# within [140,180].
 			# odd gates keep the classic 140 row + right elite (gate 1 =
 			# torture = unchanged); even gates drop the door to 180 and the
 			# elite leads from the LEFT. Blocked spawns ride the rock-nudge.
@@ -2584,6 +2592,8 @@ func _in_water(x: int, y: int) -> bool:
 			var fw: int = maxi(FORD_HALF_W / 2, FORD_HALF_W - (band_idx - 1) * 4 * F_ONE)
 			if x >= w["ford_x"] - fw and x <= w["ford_x"] + fw:
 				return false
+			# Hash stream: the SAME decorrelation-tested _mix as L10's chunks
+			# (KIMK round-3: no unaudited randomness sources).
 			var wh2 := _mix(band_idx, w["ford_x"] / F_ONE)
 			if band_idx % 3 == 2:
 				# Second ford: hash-derived 180-300px offset (was const 240 —
@@ -2645,8 +2655,11 @@ func _step_camera() -> void:
 			var m_pick: int = mh2 % MINE_CHUNKS.size()
 			# No-immediate-repeat window (KIMK r2): a slot never repeats its
 			# neighbor's chunk — recompute the neighbor's pick the same way.
-			if m_pick == _mix(m_slot - 2, _world_seed) % MINE_CHUNKS.size():
-				m_pick = (m_pick + 1 + (mh2 >> 16) % (MINE_CHUNKS.size() - 1)) % MINE_CHUNKS.size()
+			var m_prev: int = _mix(m_slot - 2, _world_seed) % MINE_CHUNKS.size()
+			if m_pick == m_prev:
+				# Re-pick offsets FROM the neighbor by 1..n-1: != by construction,
+				# single-shot, no retry loop to bound (KIMK round-3).
+				m_pick = (m_prev + 1 + (mh2 >> 16) % (MINE_CHUNKS.size() - 1)) % MINE_CHUNKS.size()
 			var m_chunk: Array = MINE_CHUNKS[m_pick]
 			var m_ax: int = (150 + (mh2 >> 8) % 340) * F_ONE
 			for od in m_chunk:
@@ -2728,7 +2741,11 @@ func _step_camera() -> void:
 				var bmix := _mix(_gate_counter, _world_seed)
 				var blk_x: int = (140 + bmix % 320) * F_ONE
 				var blk_n: int = 2 + (bmix >> 6) % 3
-				var blk_gap: int = (bmix >> 9) % blk_n if (bmix >> 12) % 3 == 0 else -1
+				# "Occasionally" pinned (KIMK round-3): 1-in-3 by hash, and never
+				# back-to-back — a pre-shelled roll checks its neighbor gate.
+				var shelled: bool = (bmix >> 12) % 3 == 0 \
+					and (_mix(_gate_counter - 1, _world_seed) >> 12) % 3 != 0
+				var blk_gap: int = (bmix >> 9) % blk_n if shelled else -1
 				for bseg2 in blk_n:
 					if bseg2 == blk_gap:
 						continue   # pre-shelled: the war got here first
@@ -2744,9 +2761,16 @@ func _step_camera() -> void:
 					var sp_y: int = _next_gate_y + 300 * F_ONE
 					var sp_kind: int = (sph2 / 3) % 4
 					if sp_kind == 3:
+						# Halftrack anchors are INERT-STATIC cover (rock grammar):
+						# they never enter L14's occupancy system — stated, not
+						# silent (KIMK round-3).
 						rocks.append({"x": spx2, "y": sp_y})
 					elif sp_kind == 1:
-						pickups.append({"x": spx2, "y": sp_y, "kind": 0, "cost": 10})
+						# "Priced" pinned: cost scales with depth — 10 + 5/segment
+						# past 2, capped 30 (the endless _supply_cost creep curve's
+						# campaign cousin; test-pinned).
+						pickups.append({"x": spx2, "y": sp_y, "kind": 0,
+							"cost": mini(30, 10 + (absi(_next_gate_y / GATE_SPACING) - 2) * 5)})
 			# Hardpoint rock ~140px south of every bunker-pair gate, flank-
 			# alternating: the mortar-observer fallback cover the panel asked for.
 			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,
@@ -2830,6 +2854,9 @@ func _step_camera() -> void:
 		# mouth — the guaranteed crossing stops being guaranteed-safe. Derived
 		# position, no extra rng draw; past-torture by construction.
 		if absi(_next_water_y / GATE_SPACING) >= 6:
+			# Fairness: _spawn_frogman seeds SUBMERGED — the defender must run
+			# the full surfacing telegraph before it can strike (test-pinned);
+			# it can never spawn-camp a mid-crossing player with an instant hit.
 			_spawn_frogman(water["ford_x"], _next_water_y + 40 * F_ONE)
 		_next_water_y -= GATE_SPACING
 

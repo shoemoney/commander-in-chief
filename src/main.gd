@@ -28,6 +28,11 @@ const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse
 # these are nameable PLACES): picked ~1-in-2 per 400px band by hash; plain
 # scatter is suppressed inside a stamp's radius so stamps read as places,
 # not denser noise. [tex, dx, dy, scale] per part.
+# Ridge visibility bounds (KIMK round-3: a one-sided alpha pin fails the
+# other way — invisible terrain is its own misread). Floor AND ceiling,
+# consumed by the draw and asserted in test.
+const RIDGE_A_LO := 0.22
+const RIDGE_A_HI := 0.35
 const _SETPIECES := [
 	[["wreck_apc", -30, 0, 1.0], ["wreck_technical", 25, 18, 0.9], ["crater", 5, -20, 1.0]],   # dead convoy
 	[["tent", -28, -10, 1.0], ["tent", 24, 6, 0.9], ["ammobox", -2, 20, 1.0], ["barrier", 30, -22, 0.9]],   # abandoned camp
@@ -3179,9 +3184,9 @@ func _draw_terrain() -> void:
 					continue
 				var rpos := Vector2(rgx * 64.0 + 32.0, float(rgy) * 64.0 - fposmod(float(sim.camera_top) * PX, 64.0))
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(rpos - Vector2(24, 10), Vector2(48, 20)),
-					false, Color(0.62, 0.58, 0.42, 0.35))
+					false, Color(0.62, 0.58, 0.42, RIDGE_A_HI))
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(rpos - Vector2(20, 2), Vector2(40, 12)),
-					false, Color(0.18, 0.14, 0.08, 0.30))
+					false, Color(0.18, 0.14, 0.08, RIDGE_A_LO + 0.08))
 	# Authored setpiece stamps: nameable places every ~800px of corridor.
 	if sim.mode == "campaign":
 		var spb0 := absi(sim.camera_top) / (400 * Fixed.ONE)
