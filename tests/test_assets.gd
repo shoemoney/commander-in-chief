@@ -345,3 +345,16 @@ func test_a2_hostile_vehicle_tint_is_warm() -> void:
 	var olive: Color = c["OLIVE_VEH"]
 	Runner.T.ok(hostile.r > hostile.b, "the hostile vehicle tint is WARM (r > b)")
 	Runner.T.ok(hostile.r > olive.r, "hostile vehicles read hotter than the friendly olive tank")
+
+
+func test_a2_body_ident_lean() -> void:
+	var ms = load("res://src/main.gd")
+	Art.colorblind = false
+	var p1: Color = ms._body_ident_lean(0)
+	var p2: Color = ms._body_ident_lean(1)
+	Runner.T.ok(not p1.is_equal_approx(p2), "P1 and P2 live-body leans differ")
+	Runner.T.ok(p1.g >= p1.r and p1.g >= p1.b, "P1 body leans green")
+	Runner.T.ok(p2.r >= p2.b, "P2 body leans warm/gold")
+	Art.colorblind = true
+	Runner.T.ok(ms._body_ident_lean(0).b > ms._body_ident_lean(0).r, "P1 body lean converts blue-dominant under colorblind")
+	Art.colorblind = false

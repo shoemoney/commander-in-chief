@@ -5513,6 +5513,13 @@ static func _player_ident_color(slot: int, a := 1.0) -> Color:
 	return Color(base.r, base.g, base.b, a)
 
 
+static func _body_ident_lean(slot: int) -> Color:
+	# a2-03: the subtle identity MULTIPLY folded onto the live hero body — green P1 /
+	# gold P2 via the colorblind-safe ident color, kept bright (0.18 lean) so co-op
+	# bodies read apart without recoloring the hero.
+	return Color.WHITE.lerp(_player_ident_color(slot), 0.18)
+
+
 static func _player_ring_dashed(slot: int) -> bool:
 	# a1-18 LEG#3: P1 ring is SOLID, P2 ring is DASHED — hue-independent identity.
 	return slot != 0
@@ -5670,7 +5677,7 @@ func _draw_players() -> void:
 			# a2-03: a subtle IDENTITY lean on the LIVE body (green P1 / gold P2 via the
 			# colorblind-safe ident color) so co-op heroes read apart at a glance — the
 			# ring was the only differentiator; the pale-white bodies were identical.
-			mod = mod * Color.WHITE.lerp(_player_ident_color(i), 0.18)
+			mod = mod * _body_ident_lean(i)
 			_spr(tex_name, pos - Vector2(0, walk_bob), angle, 0.52, mod)
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD
