@@ -3386,7 +3386,8 @@ func _draw_rocks() -> void:
 		_ground_shadow(pos, 12.0, 0.42)
 		var rh3 := Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536)
 		var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
-		_spr(rtex, pos, float(rh3 % 628) / 100.0, 1.3 if rtex != "tree_dead2" else 0.35,
+		_spr(rtex, pos, float(rh3 % 628) / 100.0,
+			{"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex],
 			Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5))
 
 
