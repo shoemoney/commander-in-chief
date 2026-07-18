@@ -379,6 +379,13 @@ const SCALE := {
 const UNIT := Color(0.85, 0.81, 0.58)
 const OLIVE_VEH := Color(0.76, 0.85, 0.52)
 const FOLIAGE := Color(0.82, 1.0, 0.66)
+# a1-05: charred late-run foliage. The flat FOLIAGE green used to multiply back
+# into every fern/tree even after main.gd browned them (fern_col), so the foundry
+# re-greened. tint() now ramps the FOLIAGE keys toward ash by foliage_march (set
+# each frame from _sector_march), compounding with fern_col so the foundry chars.
+const FOLIAGE_ASH := Color(0.66, 0.60, 0.50)
+const _FOLIAGE_KEYS := {"tree_large": true, "tree_small": true, "fern": true}
+static var foliage_march := 0.0
 const TINT := {
 	# Heroes render bright, not olive-washed — the tan Leader model in the
 	# old jungle tint was literal camouflage (invisible on grass).
@@ -515,6 +522,8 @@ static func draw_scale(name: String) -> float:
 
 
 static func tint(name: String) -> Color:
+	if _FOLIAGE_KEYS.has(name):
+		return FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
 	return TINT.get(name, Color.WHITE)
 
 

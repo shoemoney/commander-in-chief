@@ -57,3 +57,18 @@ func test_a1_water_stops_are_five_and_biome_distinct() -> void:
 		"ruins (sector 3) deep is a de-blued neutral SLATE, not the jungle blue")
 	# Rendered evidence (jungle river stays teal, no regression):
 	# scratchpad/shots_a1_v5/03-river-crossing.png
+
+
+# --- a1-05: foliage tint ramps to ash (no green re-bias at the foundry) ---
+
+func test_a1_foliage_tint_ramps_to_ash() -> void:
+	Art.foliage_march = 0.0
+	Runner.T.ok(Art.tint("fern").is_equal_approx(Art.FOLIAGE), "jungle (march 0) keeps the lush FOLIAGE tint")
+	Art.foliage_march = 1.0
+	var f := Art.tint("fern")
+	Runner.T.ok(f.is_equal_approx(Art.FOLIAGE_ASH), "foundry (march 1) foliage chars to FOLIAGE_ASH")
+	Runner.T.ok(f.g < Art.FOLIAGE.g - 0.2, "charred foliage loses green — no re-green multiply at the foundry")
+	Runner.T.ok(Art.tint("tree_large").is_equal_approx(Art.FOLIAGE_ASH), "trees ramp with ferns")
+	# the ramp is foliage-ONLY: unit/decor tints are untouched
+	Runner.T.ok(Art.tint("rusher").is_equal_approx(Color(2.1, 1.7, 1.15)), "unit tints ignore foliage_march")
+	Art.foliage_march = 0.0   # restore the static for other suites

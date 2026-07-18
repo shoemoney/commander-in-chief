@@ -3551,6 +3551,7 @@ func _draw_terrain() -> void:
 	# The foliage joins the grass/skyglow in shifting jungle -> scorched toward the
 	# Foundry finale (grass already recolors via march; the green ferns/trees used
 	# to stay lush, breaking the progression). Lerp their tint ashen by march.
+	Art.foliage_march = _sector_march()   # a1-05: ramp the flat FOLIAGE tint so ferns/trees char with the run
 	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
 	var fern_col := Color(0.82, 0.92, 0.72).lerp(Color(0.6, 0.52, 0.42), ash)
 	var tree_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
