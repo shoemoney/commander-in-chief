@@ -3579,6 +3579,20 @@ func _draw_terrain() -> void:
 	# PLACE you learn, not a screenshot of campaign grass.
 	if sim.mode == "endless":
 		var lm_pos := _to_screen(320 * Fixed.ONE, -180 * Fixed.ONE)
+		# a2-10 ENV#4: a worn CENTER-PAD scuff + a faint PERIMETER-scar ring so the
+		# endless arena reads as a fought-over PLACE with its own floor (the ring you
+		# circle), not anonymous ground.
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(lm_pos - Vector2(72, 52), Vector2(144, 104)),
+			false, Color(0.30, 0.25, 0.18, 0.16))
+		draw_arc(lm_pos, 152.0, 0, TAU, 56, Color(0.32, 0.27, 0.20, 0.22), 2.0)
+		# a2-10 AD#7: a warm dust-haze band along the top edge (wave-keyed), so the
+		# arena has a world-edge/sky, not a top-down cutout. Screen-anchored (shake-
+		# cancel) like the campaign skyglow.
+		draw_set_transform_matrix(get_transform().affine_inverse())
+		var haze_a := clampf(0.06 + float(sim.wave) * 0.008, 0.06, 0.18)
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-40.0, -24.0, SCREEN_W + 80.0, 82.0),
+			false, Color(0.52, 0.40, 0.28, haze_a))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_texture_rect(Art.tex("fx_shadow"), Rect2(lm_pos - Vector2(20, 8), Vector2(40, 20)),
 			false, Color(0.1, 0.08, 0.05, 0.5))
 		_spr("radio_tower", lm_pos, 0.0, 1.1, Color(0.85, 0.88, 0.85))
