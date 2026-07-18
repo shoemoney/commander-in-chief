@@ -376,6 +376,9 @@ func test_a2_tiny_decor_drops_rim() -> void:
 	Runner.T.ok(ms._tiny_decor_no_rim("ammobox", 8.0), "tiny decor (ammobox @8px) skips the black-speckle rim")
 	Runner.T.ok(not ms._tiny_decor_no_rim("rock1", 40.0), "a large rock keeps its rim")
 	Runner.T.ok(not ms._tiny_decor_no_rim("rusher", 8.0), "a small THREAT keeps its rim (it is not decor)")
+	for k in ["landmine", "barrier", "mg_tripod", "ammobox", "watchtower"]:
+		Runner.T.ok(ms._tiny_decor_no_rim(k, 10.0), "tiny litter '%s' @10px skips the speckle rim" % k)
+	Runner.T.ok(not ms._tiny_decor_no_rim("gunship_body", 8.0), "a small boss sprite keeps its rim")
 
 
 # --- a2-06: jungle water de-cerulaned toward olive/tea ---

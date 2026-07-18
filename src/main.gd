@@ -3231,7 +3231,7 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 		# sub-16px prop swamps it into a black dead-pixel speck that reads as noise, not
 		# an object; without it the litter reads as a small object AND recedes into the
 		# ground (threats/units keep their rim regardless of size).
-		if not _tiny_decor_no_rim(tex_name, t.get_size().x * s):
+		if not _tiny_decor_no_rim(tex_name, maxf(t.get_size().x, t.get_size().y) * s):
 			for o in _OUTLINE_OFFSETS:
 				draw_texture(t, origin + o * d, oc)
 	draw_texture(t, origin, tint)
