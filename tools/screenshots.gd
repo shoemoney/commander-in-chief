@@ -148,6 +148,9 @@ func _dress_firefight(m: Node2D) -> void:
 	m._recoil[0] = Vector2(0, 2.2)
 	# A fresh blast at t=0 so explosion-feel work (white-hot lead, etc.) is captured.
 	m._fx.append({"x": (p["x"] + 40 * F), "y": (p["y"] - 70 * F), "t": 0.0, "kind": "explosion"})
+	# a1-09: an enemy red muzzle fan (directional) so incoming-fire feel is captured.
+	m._fx.append({"x": (270 * F), "y": (p["y"] - 130 * F), "t": 0.0, "kind": "muzzle", "rate": 0.14,
+		"a": PI / 2.0, "szj": 0.6, "col": Color(1.0, 0.42, 0.28)})
 	for i in 3:
 		m._fx.append({"x": p["x"] + (6 + i * 5) * F, "y": p["y"] + (2 + i) * F,
 			"t": 0.15 + i * 0.22, "kind": "casing", "rate": 0.055,

@@ -1683,10 +1683,17 @@ func _consume_events() -> void:
 			"revive":
 				_ev_revive(ev)
 			"enemy_shot":
-				# Incoming fire was audio-only — a brief red muzzle glow so you can
-				# SEE where a shot left from in the chaos.
+				# a1-09: incoming fire gets a DIRECTIONAL red muzzle FAN aimed at the nearest
+				# player (view-only — the sim sends only x,y) so you see WHO fired in a wall
+				# of small silhouettes; the faint glow stays underneath.
+				var esm_p := sim._nearest_alive_player(ev["x"], ev["y"])
+				var esm_a := 0.0
+				if not esm_p.is_empty():
+					esm_a = atan2(float(esm_p["y"] - ev["y"]) * PX, float(esm_p["x"] - ev["x"]) * PX)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "muzzle", "rate": 0.14,
+					"a": esm_a, "szj": 0.6, "col": Color(1.0, 0.42, 0.28)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.2,
-					"r": 12.0, "col": Color(1.0, 0.4, 0.3)})
+					"r": 10.0, "col": Color(1.0, 0.4, 0.3)})
 			"vest_break":
 				_ev_vest_break(ev)
 			"wave_start":
@@ -6119,8 +6126,9 @@ func _draw_glow() -> void:
 		if fx["kind"] == "muzzle":
 			# Alphas trimmed ~0.8x vs the old mix-blend draws: a single additive glow
 			# stays tasteful, MG-spam stacks still sum white-hot without washing out.
-			var sz := (13.0 if fx.get("big", false) else 9.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
-			var mc := Color(1.0, 0.95, 0.55, 0.8 * (0.95 - t * 0.85))
+			var sz := (14.0 if fx.get("big", false) else 10.0) * float(fx.get("szj", 1.0)) * (1.0 - t * 0.6)
+			var mbase: Color = fx.get("col", Color(1.0, 0.95, 0.55))   # a1-09: enemy muzzles pass RED — see WHO fired
+			var mc := Color(mbase.r, mbase.g, mbase.b, 0.8 * (0.95 - t * 0.85))
 			# Baked semicircle fan (flat edge at image bottom): rotate image-up onto
 			# the aim angle so the flat edge sits on the muzzle, fan blooming forward.
 			# Same lifetime/fade, still on the additive glow layer; hot core stays.
@@ -6128,11 +6136,13 @@ func _draw_glow() -> void:
 			g.draw_set_transform(pos, fx["a"] + PI / 2, Vector2.ONE)
 			g.draw_texture_rect(Art.tex("fx_muzzle_fan"), Rect2(-fl * 0.7, -fl, fl * 1.4, fl), false, mc)
 			g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-			g.draw_circle(pos, sz * 0.32, Color(1.0, 1.0, 0.8, 0.8 * (0.9 - t * 0.8)))
+			var mcore := mbase.lerp(Color(1.0, 1.0, 0.9), 0.6)
+			g.draw_circle(pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, 0.8 * (0.9 - t * 0.8)))
 			# First-frame-only: an oversize pure-white pop + 3 radiating slivers —
 			# the crack of the shot, gone before the next frame (4v: fan read soft).
 			if t < fx.get("rate", 0.09):
-				g.draw_circle(pos, sz * 0.9, Color(1, 1, 1, 0.9))
+				var mpop := mbase.lerp(Color.WHITE, 0.55)
+				g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, 0.9))
 				for ml in 3:
 					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
 					g.draw_line(pos + Vector2.from_angle(mla) * sz * 0.4,
