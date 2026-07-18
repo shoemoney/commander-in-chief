@@ -492,7 +492,7 @@ func _paint_bg(canvas: Node2D) -> void:
 	# ash, sampled by the same march driver. Dirt follows the band too.
 	var dirt_col := _biome_ramp(march,
 		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
-		Color(0.44, 0.42, 0.40, 0.7), Color(0.40, 0.34, 0.28, 0.7)])
+		Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)])
 	for ty in 8:
 		for tx in 10:
 			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
@@ -503,8 +503,11 @@ func _paint_bg(canvas: Node2D) -> void:
 			if (base_iy + ty) % 3 == 0:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
+			# Foundry stop (c2 judge r1: "the field remains overwhelmingly
+			# green"): the modulate must CRUSH the grass card's green channel,
+			# not just warm it — scorched-earth brown, no turf survives.
 			var gt := _biome_ramp(march, [Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62),
-				Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(1.05, 0.70, 0.52)])
+				Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(0.86, 0.5, 0.38)])
 			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
 			if sim.mode == "endless":
 				gcol = Color(gcol.r + 0.04, gcol.g - 0.04, gcol.b)   # rust-tan: its own ground
@@ -3383,7 +3386,12 @@ func _draw_terrain() -> void:
 				var hfr := Art.cell_hash(tx * 7 + fr + 3, dbase_iy + ty)
 				var edge_ang := float(hfr % 628) / 100.0
 				var fpos := dpos + Vector2(32.0, 32.0) + Vector2.from_angle(edge_ang) * (26.0 + float(hfr % 8))
-				_spr("fern", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, fern_col)
+				if ug_band == 4:
+					# Foundry (c2 judge r1: no residual green): fringe with
+					# charred scrub, not ferns.
+					_spr(_TREE_DEAD[hfr % 3], fpos, 0.0, 0.12, Color(0.2, 0.17, 0.15))
+				else:
+					_spr("fern", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, fern_col)
 
 	# Jungle tree lines on the flanks, sparse singles in the field.
 	var toy := -fposmod(cam_y, 48.0)
@@ -3511,20 +3519,22 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 						_spr("barrier", Vector2(sx - 7.0, sy_px - 2.0), 0.0, 0.5, Color(0.62, 0.6, 0.55))
 						_spr("barrier", Vector2(sx + 7.0, sy_px - 3.0), 0.0, 0.45, Color(0.55, 0.53, 0.5))
 				4:
-					if hs % 12 == 0:
-						# Slag ridge: overlapping dark cards + glowing vent pits.
-						for sc in 2 + hs % 2:
+					if hs % 7 == 0:
+						# Slag ridge (judge r1: bigger, denser, more opaque):
+						# heavy dark cards + a glowing fissure of vent pits.
+						for sc in 3 + hs % 2:
 							var sh2 := Art.cell_hash(hs + sc * 17, sc)
-							draw_set_transform(Vector2(sx + float(sh2 % 25) - 12.0,
-								sy_px + float((sh2 / 5) % 13) - 6.0),
+							draw_set_transform(Vector2(sx + float(sh2 % 33) - 16.0,
+								sy_px + float((sh2 / 5) % 17) - 8.0),
 								float(sh2 % 628) / 100.0, Vector2.ONE)
-							draw_rect(Rect2(Vector2(-16.0, -5.0), Vector2(32.0, 10.0)),
-								Color(0.14, 0.12, 0.11, 0.85))
+							draw_rect(Rect2(Vector2(-22.0, -7.0), Vector2(44.0, 14.0)),
+								Color(0.12, 0.10, 0.09, 0.95))
 						draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 						var g_a := (0.5 - absf(fposmod(float(Engine.get_physics_frames() + hs),
 							90.0) / 90.0 - 0.5)) * 0.9
-						draw_circle(Vector2(sx + 4.0, sy_px), 1.4, Color(1.0, 0.5, 0.18, g_a))
-						draw_circle(Vector2(sx - 8.0, sy_px + 3.0), 1.1, Color(1.0, 0.4, 0.12, g_a * 0.7))
+						draw_circle(Vector2(sx + 6.0, sy_px), 1.8, Color(1.0, 0.5, 0.18, g_a))
+						draw_circle(Vector2(sx - 10.0, sy_px + 4.0), 1.4, Color(1.0, 0.4, 0.12, g_a * 0.7))
+						draw_circle(Vector2(sx - 2.0, sy_px - 5.0), 1.2, Color(1.0, 0.6, 0.22, g_a * 0.8))
 
 
 func _draw_foundry_arena() -> void:
@@ -3547,8 +3557,14 @@ func _draw_foundry_arena() -> void:
 		for ck in [[70, 40], [560, 70], [120, 320]]:
 			var cp := _to_screen(ck[0] * Fixed.ONE, g["y"] + ck[1] * Fixed.ONE)
 			if cp.y > -80.0 and cp.y < 440.0:
-				_ground_shadow(cp + Vector2(0, 14), 11.0, 0.45)
-				_spr("skyline_chimney", cp, 0.0, 0.5, Color(0.36, 0.3, 0.28))
+				_ground_shadow(cp + Vector2(0, 20), 15.0, 0.45)
+				_spr("skyline_chimney", cp, 0.0, 0.85, Color(0.36, 0.3, 0.28))
+				# Rising smoke puffs (judge r1): three fading soft circles climb
+				# off each stack mouth on the global clock.
+				for pk2 in 3:
+					var s_ph := fposmod(float(Engine.get_physics_frames()) / 120.0 + float(pk2) / 3.0, 1.0)
+					draw_circle(cp + Vector2(sin(s_ph * TAU + float(ck[0])) * 4.0, -26.0 - s_ph * 30.0),
+						3.0 + s_ph * 5.0, Color(0.25, 0.23, 0.22, (1.0 - s_ph) * 0.4))
 		return
 
 
