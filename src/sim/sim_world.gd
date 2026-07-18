@@ -298,6 +298,17 @@ const VENT_WARN_TICKS := 30          # >= the 24t reaction floor (KIMK r4 preced
 const VENT_HURT_RADIUS := 24 * F_ONE
 const VENT_COVER_BURN_TICKS := 120   # c3 5v: ~2s of a vent jet burns off grass / cracks a wall slab
 const BREAKWATER_SLACK := 6 * F_ONE  # c3 5v: the grenade must be within a cover half-extent + this touch margin of the rock face for it to shadow the drift
+# c3 3v: the endless central mast (a 360-degree cover pivot at SCREEN_CX,-180)
+# periodically BURNS its own orbit — a phase-timed radial pulse (the vent
+# telegraph pattern) that hurts any player hugging it, denying the infinite
+# kite. Pure function of tick_count: no new state, no rng, endless-only + wave
+# 5/10/15 = past the wave-2 endless wipe, so ENDLESS_GOLDEN is byte-identical.
+const MAST_X := SCREEN_CX
+const MAST_Y := -180 * F_ONE
+const MAST_HAZARD_RADIUS := 120 * F_ONE   # > the ~64px sandbag diamond, so hugging cover doesn't save you
+const MAST_CYCLE_TICKS := 180
+const MAST_JET_TICKS := 60
+const MAST_WARN_TICKS := 90                # 1.5s tell — a fat 120px one-shot zone earns a longer warn than the vent's 30t
 const VENT_CHUNKS := [
 	# No empty chunks (unlike MINE_CHUNKS): seg 4 keeps only ~2 rows after the
 	# keep-outs, so an empty roll on both would erase the mechanic for that
@@ -595,6 +606,7 @@ func step(inputs: Array) -> void:
 	_step_bunkers()
 	if mode == "endless":
 		_step_waves()
+		_step_mast_hazard()   # c3 3v: the central mast periodically denies its own orbit
 		# Sappers are ENDLESS-ONLY, but _step_mines() (the only code that detonates or
 		# culls a laid mine) ran only in the campaign branch — so every mine a Sapper
 		# armed here just sat forever, inert. Step them here too.
@@ -2858,6 +2870,26 @@ func _in_fork_wire(x: int, y: int) -> bool:
 					or (fx3 == 380 and x > fx3 * F_ONE + 44 * F_ONE):
 				return true
 	return false
+
+
+func _step_mast_hazard() -> void:
+	## c3 3v: on waves 5/10/15… the endless mast denies its own orbit with a
+	## phase-timed radial pulse (the foundry-vent telegraph, cloned): 90t warn,
+	## then a 60t jet that hurts any on-foot player within MAST_HAZARD_RADIUS.
+	## Pure read of tick_count/wave — zero new state, zero rng, endless-inert
+	## before wave 3 so the wave-2 torture never sees it.
+	if wave < 5 or wave % 5 != 0:
+		return
+	var phase: int = posmod(tick_count, MAST_CYCLE_TICKS)
+	if phase == MAST_CYCLE_TICKS - MAST_JET_TICKS - MAST_WARN_TICKS:
+		events.append({"t": "mast_warn", "x": MAST_X, "y": MAST_Y})
+	elif phase >= MAST_CYCLE_TICKS - MAST_JET_TICKS:
+		if phase == MAST_CYCLE_TICKS - MAST_JET_TICKS:
+			events.append({"t": "mast_pulse", "x": MAST_X, "y": MAST_Y})
+		for p in players:
+			if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+					and _dist_lte(p["x"], p["y"], MAST_X, MAST_Y, MAST_HAZARD_RADIUS):
+				_hurt_player(p)
 
 
 func _in_rubble(x: int, y: int) -> bool:

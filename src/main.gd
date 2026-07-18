@@ -267,6 +267,8 @@ const _EVENT_SOUND := {
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
 	"cover_burn": ["vest_break", -9.0, 1.3],   # c3: grass burns off in the jet — dry crackle
 	"cover_crack": ["bunker_break", -8.0, 1.1], # c3: a wall slab cracks apart under the heat
+	"mast_warn": ["alarm", -8.0, 0.9],     # c3: the mast is about to overheat — vacate the orbit
+	"mast_pulse": ["explosion", -3.0, 0.7], # c3: the mast core vents — a wide radial one-shot zone
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
@@ -1334,6 +1336,18 @@ func _consume_events() -> void:
 				_blast_debris(ev["x"], ev["y"])
 				_burst(ev["x"], ev["y"], "dust", 6, 1.0, 2.4, 0.3, 0.06, 0.0, false,
 					Color(0.4, 0.36, 0.32))
+			"mast_warn":
+				# c3 3v: the mast is about to overheat — a tightening warning ring
+				# over the 120px hazard radius so the player reads it and vacates.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_softspot",
+					"sz": 240.0, "grow": -0.3, "fade": 1.5, "rate": 0.02, "col": Color(1.0, 0.5, 0.15, 0.3)})
+			"mast_pulse":
+				# c3 3v: the core vents — a wide radial shockwave + shake denies the orbit.
+				_trauma = minf(1.0, _trauma + 0.35)
+				_rumble = maxf(_rumble, 0.6)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.045})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
+					"r": 130.0, "col": Color(1.0, 0.55, 0.2)})
 			"arena_pressure":
 				# c3 7v: the spawn pressure quadrant is rotating — banner + a
 				# DIRECTIONAL arrow-march of pulses sweeping from center TOWARD the

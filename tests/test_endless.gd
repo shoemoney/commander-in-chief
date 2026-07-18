@@ -275,3 +275,52 @@ func test_c3_pressure_is_endless_only() -> void:
 	# Campaign never sets a pressure side (it's endless-gated) — golden-safe.
 	var sim := SimWorld.new(11, 1, "campaign")
 	Runner.T.eq(sim.pressure_side, -1, "campaign has no spawn pressure side")
+
+
+func test_c3_mast_hazard_denies_the_orbit() -> void:
+	# c3 3v: on waves 5/10/15 the mast pulses — a player hugging it is hurt
+	# during the jet window (not the warn/idle), a player outside the radius is
+	# safe, and the warn precedes the pulse. Endless-only, wave-5+ = past the wipe.
+	var sim := SimWorld.new(9, 1, "endless")
+	sim.wave = 5
+	var p: Dictionary = sim.players[0]
+	p["x"] = SimWorld.MAST_X
+	p["y"] = SimWorld.MAST_Y
+	p["vest"] = true
+	p["hurt_iframes"] = 0
+	# Align to the warn tick: no hurt yet.
+	var warn_at: int = SimWorld.MAST_CYCLE_TICKS - SimWorld.MAST_JET_TICKS - SimWorld.MAST_WARN_TICKS
+	sim.tick_count = 10 * SimWorld.MAST_CYCLE_TICKS + warn_at
+	sim.events.clear()
+	sim._step_mast_hazard()
+	var warned := false
+	for ev in sim.events:
+		if ev["t"] == "mast_warn":
+			warned = true
+	Runner.T.ok(warned, "the mast warns before it pulses")
+	Runner.T.ok(p["vest"], "no hurt during the warn window")
+	# Now the jet window: the hugging player is hurt.
+	sim.tick_count = 10 * SimWorld.MAST_CYCLE_TICKS + (SimWorld.MAST_CYCLE_TICKS - SimWorld.MAST_JET_TICKS)
+	sim._step_mast_hazard()
+	Runner.T.ok(not p["vest"], "the mast pulse hurts a player hugging the orbit")
+
+
+func test_c3_mast_hazard_spares_the_flank_and_off_cadence() -> void:
+	# A player OUTSIDE the radius is never hurt; and off-cadence waves are inert.
+	var sim := SimWorld.new(9, 1, "endless")
+	sim.wave = 5
+	var p: Dictionary = sim.players[0]
+	p["x"] = SimWorld.MAST_X + SimWorld.MAST_HAZARD_RADIUS + 20 * Fixed.ONE
+	p["y"] = SimWorld.MAST_Y
+	p["vest"] = true
+	p["hurt_iframes"] = 0
+	sim.tick_count = 10 * SimWorld.MAST_CYCLE_TICKS + (SimWorld.MAST_CYCLE_TICKS - SimWorld.MAST_JET_TICKS)
+	sim._step_mast_hazard()
+	Runner.T.ok(p["vest"], "a player outside the radius is spared")
+	# Off-cadence wave 6: no events, no hurt even at mast center.
+	sim.wave = 6
+	p["x"] = SimWorld.MAST_X
+	p["y"] = SimWorld.MAST_Y
+	sim.events.clear()
+	sim._step_mast_hazard()
+	Runner.T.ok(sim.events.is_empty() and p["vest"], "wave 6 (off-cadence) fires no mast hazard")
