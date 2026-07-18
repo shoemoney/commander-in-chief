@@ -557,8 +557,14 @@ func _paint_bg(canvas: Node2D) -> void:
 			var mpos := Vector2(float(mx) * 256.0 + float(mh % 128), floor(moy + float(my) * 256.0 + float((mh / 7) % 128)))
 			var mrot := float(mh % 628) / 100.0
 			var msz := 192.0 + float(mh % 97)
-			if mh % 8 == 0:
-				# Wheel tracks: a thin stretched pair along the hash heading.
+			if mh % 6 == 0:
+				# Wheel tracks (c2 2v wayfinding): the route reads as a TRAFFICKED
+				# LINE, not random scuffs — 2-of-3 tracks snap near-vertical (the
+				# corridor's travel axis) and hug the center lane; 1-in-3 stays
+				# wild so it doesn't read as painted-on. Odds bumped 1/8->1/6.
+				if mh / 17 % 3 != 0:
+					mrot = PI / 2.0 + (float(mh % 60) / 100.0 - 0.3)   # within ±0.3rad of vertical
+					mpos.x = 320.0 + (float((mh / 5) % 240) - 120.0)   # biased to the 200-440 lane
 				canvas.draw_set_transform(mpos, mrot, Vector2(0.25, 2.5))
 				for tk2 in 2:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
@@ -3040,6 +3046,7 @@ func _draw() -> void:
 		_glow_root.queue_redraw()
 	_draw_terrain()
 	_draw_skyglow()
+	_draw_landmark_previews()
 	# Water (banks/ford/bridge deck) BEFORE scorch: the deck sprites fully tile
 	# the ford choke point, and decals drawn first were overpainted the same
 	# frame — every corpse/crater/hulk at a river crossing vanished. The water
@@ -3164,6 +3171,43 @@ func _draw_field_dim() -> void:
 		var lt := Engine.get_physics_frames() % 431
 		if lt < 3:
 			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
+
+
+func _draw_landmark_previews() -> void:
+	# Wayfinding (c2 2v): distant landmark silhouettes fade in at the frame top
+	# 2-3 bands BEFORE a major event, so traversal has anticipation and the
+	# jungle stops reading as undifferentiated cover soup. Pure cadence math on
+	# the read-only gate/water spacing — no sim access beyond camera_top, no
+	# new state. Suppressed once the foundry skyline takes over (march >= 0.6)
+	# and in endless (no gate/water streaming there).
+	if sim.mode != "campaign" or _sector_march() >= 0.6:
+		return
+	draw_set_transform_matrix(get_transform().affine_inverse())
+	var cam: int = sim.camera_top
+	var span: int = 2 * SimWorld.GATE_SPACING   # 2000px preview window
+	# Nearest upcoming GATE arena (cadence: gate k at -k*GATE_SPACING, k in 1..5).
+	var gate_k: int = int(-cam / SimWorld.GATE_SPACING) + 1
+	if gate_k <= SimWorld.FINAL_GATE_INDEX:
+		var gate_y: int = -gate_k * SimWorld.GATE_SPACING
+		var gd: int = cam - gate_y   # px ahead (positive)
+		if gd >= 0 and gd < span:
+			var ga := clampf(1.0 - float(gd) / float(span), 0.0, 1.0) * 0.55
+			var gtex: String = "watchtower" if gate_k % 2 == 1 else "radio_tower"
+			var gx := 92.0 if gate_k % 2 == 1 else 548.0
+			var gt := Art.tex(gtex)
+			draw_texture_rect(gt, Rect2(gx - 27.0, 4.0, 54.0, 54.0), false, Color(0.06, 0.05, 0.06, ga))
+	# Nearest upcoming WATER crossing (cadence: -(1500 + m*GATE_SPACING)).
+	var wat_off: int = -cam - 1500 * Fixed.ONE
+	if wat_off > -SimWorld.GATE_SPACING:
+		var wat_m: int = maxi(0, int(wat_off / SimWorld.GATE_SPACING) + (1 if wat_off > 0 else 0))
+		var wat_y: int = -(1500 * Fixed.ONE + wat_m * SimWorld.GATE_SPACING)
+		var wd: int = cam - wat_y
+		if wd >= 0 and wd < span:
+			var wa := clampf(1.0 - float(wd) / float(span), 0.0, 1.0) * 0.5
+			var wx := 470.0 if wat_m % 2 == 1 else 128.0
+			draw_texture_rect(Art.tex("bridge_mid"), Rect2(wx - 30.0, 20.0, 60.0, 34.0),
+				false, Color(0.09, 0.08, 0.07, wa))
+	draw_set_transform_matrix(Transform2D())
 
 
 func _draw_skyglow() -> void:
