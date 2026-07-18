@@ -3487,9 +3487,11 @@ func _step_camera() -> void:
 						rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 3})
 						rocks.append({"x": (wall_side + inward) * F_ONE, "y": lm_y - 44 * F_ONE, "kind": 3})
 					_:
-						# default OFFSET STACK: two kind-2 slabs stepped diagonally.
+						# default OFFSET STACK: three kind-2 slabs stepped diagonally so its
+						# mass reads as strongly as the pipeline/train lines.
 						rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 2})
-						rocks.append({"x": (wall_side + inward + inward) * F_ONE, "y": lm_y - 40 * F_ONE, "kind": 2})
+						rocks.append({"x": (wall_side + inward) * F_ONE, "y": lm_y - 24 * F_ONE, "kind": 2})
+						rocks.append({"x": (wall_side + inward + inward) * F_ONE, "y": lm_y - 48 * F_ONE, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
 					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})

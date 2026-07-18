@@ -2444,6 +2444,9 @@ func test_c4_sector_landmarks() -> void:
 	Runner.T.ok(crane >= 2, "the foundry sector (gate 4) stamps a kind-3 crane pair (%d)" % crane)
 	# The pipeline's 80px kind-2 pitch threads a hull-clear lane at the dropped slot.
 	Runner.T.ok(80 * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE, "the pipeline threads a hull-clear lane")
+	# Gates 2 (band 2) and 4 (band 4) are the only STREAMABLE seg>=2 arena gates
+	# (gate 3 is the boss), and both landed a DISTINCT arm above (pipeline/crane).
+	Runner.T.ok(pipe >= 2 and crane >= 2, "every streamable seg>=2 sector lands a distinct landmark")
 
 
 func test_c4_lane_block_reroute() -> void:
