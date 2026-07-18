@@ -3244,11 +3244,17 @@ func _step_camera() -> void:
 				var mwy: int = _next_rock_y + (mwh % 24) * F_ONE
 				for mw in 3:
 					rocks.append({"x": mwx + (mw * 72 - 72) * F_ONE, "y": mwy, "kind": 2})
-				# Central permeable divider: 4 world-bags at SCREEN_CX, 68px apart, so a
-				# ~58px gap sits between each (bullets thread it). Left lane WORLD_LEFT..302
-				# and right lane 338..WORLD_RIGHT both >> HULL_CLEARANCE.
-				for dv in 4:
-					sandbags.append({"x": SCREEN_CX, "y": _next_rock_y + (dv * 68) * F_ONE, "world": 1})
+			# c4 3v r2: a CONTINUOUS central divider spanning the ruins clean stretch
+			# (off 40..312, ~0.9 screen; the fork-4 island caps it north), fired ONCE
+			# per band-3 (containment on off=200) and independent of the maze rows so
+			# the split is a guaranteed continuous run, not intermittent. 5 world-bags
+			# 68px apart -> ~58px gaps thread cross-lane fire. Left lane WORLD_LEFT..302
+			# and right lane 338..WORLD_RIGHT both >> HULL_CLEARANCE.
+			var ruins_div_y: int = -(RUINS_SEG * GATE_SPACING + 200 * F_ONE)
+			if _next_rock_y <= ruins_div_y and _next_rock_y + ROCK_SPACING > ruins_div_y:
+				var rd_top: int = -(RUINS_SEG * GATE_SPACING + 40 * F_ONE)
+				for dv in 5:
+					sandbags.append({"x": SCREEN_CX, "y": rd_top - (dv * 68) * F_ONE, "world": 1})
 		_next_rock_y -= ROCK_SPACING
 	while _next_gate_y > horizon and not _world_ended:
 		_gate_counter += 1
@@ -3523,7 +3529,7 @@ func _step_camera() -> void:
 				"armed": true, "fuse_ticks": 0})
 			barrels.append({"x": SCREEN_CX - 28 * F_ONE, "y": _next_tank_y + 8 * F_ONE,
 				"armed": true, "fuse_ticks": 0})
-		# c4 3v ANTI-ARMOR GEOMETRY: seg>=2 tank bands get two flanking kind-2 slabs
+		# c4 3v ANTI-ARMOR GEOMETRY: seg>=2 tank bands get two flanking solid slabs
 		# so the fight stops being an open-field circle-strafe — the slabs break the
 		# tank/technical long-axis shot and give the player hard cover, threading a
 		# hull-clear lane between them. Solid-to-all (no per-entity collision class

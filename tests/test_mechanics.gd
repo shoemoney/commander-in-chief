@@ -2115,12 +2115,16 @@ func test_c4_ruins_dual_lane() -> void:
 	var sim := SimWorld.new(43, 1)
 	sim.camera_top = -10000 * SimWorld.F_ONE
 	sim._step_camera()
-	var divider := 0
+	var div_ys := []
 	for sb in sim.sandbags:
 		if absi(sb["y"]) / SimWorld.GATE_SPACING == SimWorld.RUINS_SEG \
 				and sb["x"] == SimWorld.SCREEN_CX:
-			divider += 1
-	Runner.T.ok(divider >= 3, "a central permeable divider runs the ruins (%d bags)" % divider)
+			div_ys.append(sb["y"])
+	Runner.T.ok(div_ys.size() >= 4, "the central divider is a continuous run (%d bags)" % div_ys.size())
+	div_ys.sort()
+	if div_ys.size() >= 2:
+		var span: int = (div_ys[div_ys.size() - 1] - div_ys[0]) / SimWorld.F_ONE
+		Runner.T.ok(span >= 200, "the divider spans a continuous >=200px stretch (got %d)" % span)
 	# The maze cover sits on the RIGHT (covered) lane.
 	var right_walls := 0
 	var left_walls := 0
@@ -2166,3 +2170,10 @@ func test_c4_tank_anti_armor() -> void:
 	Runner.T.ok(has_left and has_right, "anti-armor cover flanks the tank on both sides")
 	Runner.T.ok(2 * 90 - 2 * 16 >= SimWorld.HULL_CLEARANCE / SimWorld.F_ONE,
 		"the lane between the anti-armor slabs clears the hull")
+	# A hedgehog barrel pair (live-ordnance cover) sits by the tank.
+	var barrels_near := 0
+	for bl in sim.barrels:
+		if absi(bl["y"] - (tank_y + 8 * SimWorld.F_ONE)) < 8 * SimWorld.F_ONE \
+				and absi(bl["x"] - SimWorld.SCREEN_CX) < 100 * SimWorld.F_ONE:
+			barrels_near += 1
+	Runner.T.ok(barrels_near >= 2, "a hedgehog barrel pair sits by the tank (%d)" % barrels_near)
