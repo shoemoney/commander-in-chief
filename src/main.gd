@@ -4038,9 +4038,12 @@ func _draw_foundry_arena() -> void:
 				# a2-09 r2 ENV#6: a couple SLAG chunks beside the pool — dark cooled metal
 				# with a hot seam — so the floor reads as industrial slag, not bare ground.
 				for sg in 2:
-					var sgp := pp + Vector2(19.0 - 38.0 * float(sg), 15.0)
-					draw_circle(sgp, 4.0, Color(0.10, 0.08, 0.07, 0.9))
-					draw_circle(sgp + Vector2(0, -1), 1.6, Color(1.0, 0.45, 0.15, 0.5 + pt * 0.2))
+					var sgh := int(pp.x) + sg * 37
+					var sgp := pp + Vector2(19.0 - 38.0 * float(sg) + float(sgh % 5) - 2.0, 13.0 + float((sgh / 5) % 6))
+					var sgr := 3.0 + float(sgh % 3)
+					draw_circle(sgp, sgr, Color(0.10, 0.08, 0.07, 0.9))
+					draw_circle(sgp + Vector2(0, -1), 1.4, Color(1.0, 0.45, 0.15, 0.5 + pt * 0.2))
+					draw_line(sgp + Vector2(-sgr, 1.0), sgp + Vector2(sgr, 1.0), Color(0.05, 0.04, 0.03, 0.7), 1.0)
 		# Scrap heaps + pipe run (judge r2): wrecked-industry mass around the
 		# boss path, riding loaded litter textures — no new assets.
 		var pipe_a := _to_screen(40 * Fixed.ONE, g["y"] + 250 * Fixed.ONE)
