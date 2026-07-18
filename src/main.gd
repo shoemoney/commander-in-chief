@@ -429,6 +429,17 @@ func _setup_water() -> void:
 	_water_rects[0].visible = true
 
 
+# a1-03: the water body follows the SAME 5-stop biome ramp as grass/dirt. It was
+# a single soot-lerp toward generic brown (capped 0.7), so marsh water still read
+# blue and foundry water read muddy-blue — the one terrain layer off the journey.
+# Quantized per sector like the ground (the gate IS the shift): jungle teal ->
+# scorched algae -> marsh murk-green -> ruins slate -> foundry molten-rust.
+const _WATER_SHALLOW_STOPS := [Color(0.21, 0.44, 0.47), Color(0.31, 0.40, 0.30),
+	Color(0.25, 0.40, 0.24), Color(0.30, 0.34, 0.36), Color(0.46, 0.28, 0.18)]
+const _WATER_DEEP_STOPS := [Color(0.08, 0.19, 0.31), Color(0.13, 0.20, 0.16),
+	Color(0.09, 0.20, 0.11), Color(0.12, 0.15, 0.19), Color(0.25, 0.10, 0.06)]
+
+
 func _sync_water() -> void:
 	# Place a shader quad over every on-screen water band, faithful to _draw_water's
 	# geometry (full width, WATER_H tall, at the band's screen-y). View-only: reads
@@ -438,9 +449,9 @@ func _sync_water() -> void:
 		return
 	# The river was the last terrain layer still postcard-blue at the Foundry's
 	# doorstep — murk it toward rust/ash with the run like everything else.
-	var wsoot := clampf(_sector_march() * 0.7, 0.0, 0.7)
-	var w_shallow := Color(0.21, 0.44, 0.47).lerp(Color(0.34, 0.3, 0.2), wsoot)
-	var w_deep := Color(0.08, 0.19, 0.31).lerp(Color(0.16, 0.11, 0.1), wsoot)
+	var wsec := clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)
+	var w_shallow: Color = _WATER_SHALLOW_STOPS[wsec]
+	var w_deep: Color = _WATER_DEEP_STOPS[wsec]
 	var vis := 0
 	for w in sim.waters:
 		if vis >= _water_rects.size():
@@ -457,9 +468,9 @@ func _sync_water() -> void:
 		# All five uniforms are constant per band + soot level, and each
 		# set_shader_parameter dirties the material. Re-push only when this pool
 		# rect is re-assigned to a different band or the sector soot moves.
-		if pushed[0] != w["y"] or absf(pushed[1] - wsoot) > 0.004:
+		if pushed[0] != w["y"] or pushed[1] != wsec:
 			pushed[0] = w["y"]
-			pushed[1] = wsoot
+			pushed[1] = wsec
 			var mat: ShaderMaterial = rect.material
 			mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
 			mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)

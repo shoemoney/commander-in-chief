@@ -34,3 +34,19 @@ func test_a1_light_rim_excludes_friendlies_and_readable_units() -> void:
 	var light: Dictionary = _consts()["_LIGHT_RIM"]
 	for k in ["player1", "player2", "frogman", "observer", "m_bombsuit"]:
 		Runner.T.ok(not light.has(k), "'%s' must keep the neutral rim, not the hostile separator" % k)
+
+
+# --- a1-03: water body follows the 5-stop biome ramp ---
+
+func test_a1_water_stops_are_five_and_biome_distinct() -> void:
+	var c := _consts()
+	var shallow: Array = c["_WATER_SHALLOW_STOPS"]
+	var deep: Array = c["_WATER_DEEP_STOPS"]
+	Runner.T.eq(shallow.size(), 5, "water shallow ramp has one stop per sector")
+	Runner.T.eq(deep.size(), 5, "water deep ramp has one stop per sector")
+	# jungle stop unchanged (the river opener must stay teal, not go muddy early)
+	Runner.T.ok(shallow[0].is_equal_approx(Color(0.21, 0.44, 0.47)), "jungle shallow stays teal")
+	# the journey actually MOVES: the foundry water must be far from the jungle water
+	# (the old capped soot-lerp left it muddy-blue). Warm/red foundry vs cool jungle.
+	Runner.T.ok(deep[4].r > deep[0].r + 0.1, "foundry deep water is warmer (redder) than jungle")
+	Runner.T.ok(deep[4].b < deep[0].b - 0.1, "foundry deep water is far less blue than jungle")
