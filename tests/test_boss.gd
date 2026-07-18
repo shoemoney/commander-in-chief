@@ -146,3 +146,38 @@ func test_c3_gunship_arena_is_asymmetric() -> void:
 	# Every lateral gap at the arena row clears the hull (no softlock).
 	Runner.T.ok(216 - 16 >= SimWorld.HULL_CLEARANCE / Fixed.ONE, "left flank lane clears the hull")
 	Runner.T.ok(624 - 376 >= SimWorld.HULL_CLEARANCE / Fixed.ONE, "right flank lane clears the hull")
+
+
+func test_c3_gunship_approach_ramp() -> void:
+	# c3 2v: the gate-3 Bridge Gunship gets an escalating APPROACH ramp so the
+	# boss room doesn't appear with no warning — MG-nest density rises toward the
+	# gate, a threshold bag row marks the doorway. Boss-exclusive, gate-3+ inert.
+	var sim := SimWorld.new(41, 1)
+	sim.camera_top = -(3200 * Fixed.ONE)
+	sim.step([_idle()])
+	var bgy := 0
+	for g in sim.gates:
+		if not g["boss"].is_empty():
+			bgy = g["y"]
+			break
+	Runner.T.ok(bgy != 0, "a boss gate streamed")
+	# MG nests escalate: 1 far out (~+780), 2 closer (~+360).
+	var far := 0
+	var near := 0
+	for e in sim.enemies:
+		if e.get("kind", "") == "mg_nest":
+			var rel: int = (e["y"] - bgy) / Fixed.ONE
+			if rel >= 700 and rel <= 820:
+				far += 1
+			elif rel >= 320 and rel <= 400:
+				near += 1
+	Runner.T.ok(far >= 1, "a lone MG nest sits far out on the approach")
+	Runner.T.ok(near > far, "nest density escalates toward the gate (%d near > %d far)" % [near, far])
+	# The threshold checkpoint bag row sits ~1 screen south (+340) with a center gap.
+	var thresh := 0
+	for sb in sim.sandbags:
+		if absi(sb["y"] - (bgy + 340 * Fixed.ONE)) < 10 * Fixed.ONE:
+			thresh += 1
+	Runner.T.ok(thresh >= 2, "a threshold checkpoint bag row marks the doorway")
+	# The center staging gap between the +340 threshold bags clears the hull.
+	Runner.T.ok(2 * 130 - 2 * 12 >= SimWorld.HULL_CLEARANCE / Fixed.ONE, "the threshold doorway clears the hull")

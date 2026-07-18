@@ -1271,9 +1271,11 @@ func test_c2_stretch_setpieces_restored() -> void:
 		for sb in sim.sandbags:
 			if sb["y"] == (-3000 + 460) * SimWorld.F_ONE:
 				bags_460 += 1
+		# Only the FIRE-SACK nest sits at gate_y+300; the c3-12 approach-ramp
+		# nests (+360/+780) are a separate boss-gate system, excluded here.
 		var nests: Array = []
 		for e in sim.enemies:
-			if e.get("kind", "") == "mg_nest":
+			if e.get("kind", "") == "mg_nest" and e["y"] == (-3000 + 300) * SimWorld.F_ONE:
 				nests.append(e)
 		if blockade_fires:
 			Runner.T.ok(bags_460 >= 1, "seed %d: gate-3 stretch carries its blockade again" % sd)

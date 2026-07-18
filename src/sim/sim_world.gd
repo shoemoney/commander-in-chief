@@ -3223,6 +3223,22 @@ func _step_camera() -> void:
 			barrels.append({"x": 110 * F_ONE, "y": _next_gate_y + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
 			barrels.append({"x": 128 * F_ONE, "y": _next_gate_y + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
 			pickups.append({"x": 120 * F_ONE, "y": _next_gate_y + 150 * F_ONE, "kind": 0, "cost": 0})
+			# c3 2v APPROACH RAMP (gate 3 / Bridge Gunship only — gate 5 already
+			# ships the calm band + parapets + vents). Density ESCALATES toward the
+			# gate so the boss room does not appear with no warning: 1 lone MG nest
+			# far out (+780, ~-2220 seg 2, south of the ~-1957 torture horizon),
+			# then 2 flanking nests closer (+360), each dug in behind a world-bag.
+			# A low checkpoint threshold bag row at +340 is the visible marker
+			# backing the shipped BRIDGE GUNSHIP banner. Gate-relative, no rng.
+			_spawn_mg_nest(SCREEN_CX, _next_gate_y + 780 * F_ONE)
+			sandbags.append({"x": SCREEN_CX, "y": _next_gate_y + 800 * F_ONE, "world": 1})
+			for nsx in [SCREEN_CX - 90 * F_ONE, SCREEN_CX + 90 * F_ONE]:
+				_spawn_mg_nest(nsx, _next_gate_y + 360 * F_ONE)
+				sandbags.append({"x": nsx, "y": _next_gate_y + 380 * F_ONE, "world": 1})
+			# Threshold checkpoint row (~1 screen south): a low bag line with a
+			# center gap >= HULL_CLEARANCE so the crossing reads as a doorway.
+			for thx in [SCREEN_CX - 130 * F_ONE, SCREEN_CX + 130 * F_ONE]:
+				sandbags.append({"x": thx, "y": _next_gate_y + 340 * F_ONE, "world": 1})
 			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
 			_stamp_stretch_setpieces()
 		else:
