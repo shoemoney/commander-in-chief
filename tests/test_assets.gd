@@ -170,3 +170,26 @@ func test_a1_boss_music_heavier_and_ambience_marches() -> void:
 	var jungle_air: float = d._amb.pitch_scale
 	Runner.T.ok(foundry_air < jungle_air, "foundry ambience is a lower hum than the jungle's airy bed")
 	a.free(); b.free(); c.free(); d.free()
+
+
+# --- a1-14 r2: the SFX bus ducks under a live VO line and recovers ---
+
+func test_a1_sfx_bus_ducks_under_vo() -> void:
+	var idx := AudioServer.get_bus_index("SFX")
+	var created := false
+	if idx == -1:
+		AudioServer.add_bus()
+		idx = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(idx, "SFX")
+		created = true
+	AudioServer.set_bus_volume_db(idx, 0.0)
+	var sfx := Sfx.new()
+	for i in 40: sfx.duck_sfx_under_vo(true)
+	var ducked := AudioServer.get_bus_volume_db(idx)
+	Runner.T.ok(ducked < -1.0, "SFX bus dips under a live VO line (%.1f dB)" % ducked)
+	for i in 80: sfx.duck_sfx_under_vo(false)
+	var recovered := AudioServer.get_bus_volume_db(idx)
+	Runner.T.ok(recovered > ducked + 1.0, "SFX bus recovers toward 0 when VO ends (%.1f dB)" % recovered)
+	sfx.free()
+	if created:
+		AudioServer.remove_bus(idx)
