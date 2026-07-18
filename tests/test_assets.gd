@@ -507,3 +507,11 @@ func test_a2_boss_phase_names() -> void:
 	Runner.T.eq(g.size(), 2, "the gunship has 2 named phases (strafe/mortar half-cycle)")
 	Runner.T.eq(co.size(), 3, "the colossus has 3 named phases")
 	Runner.T.ok(not String(g[0]).contains("PHASE") and not String(co[0]).contains("PHASE"), "phases are NAMED, not abstract 'PHASE n'")
+
+
+func test_a2_label_plate_rect() -> void:
+	var ms = load("res://src/main.gd")
+	var r: Rect2 = ms._label_plate_rect(100.0, 50.0, 40.0)
+	Runner.T.ok(is_equal_approx(r.position.x, 97.0), "plate starts 3px LEFT of the label origin (under the text)")
+	Runner.T.ok(is_equal_approx(r.size.x, 46.0), "plate is 6px wider than the label")
+	Runner.T.ok(is_equal_approx(r.position.y, 50.0), "plate top matches the passed y")
