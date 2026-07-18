@@ -3505,6 +3505,11 @@ func _draw_mines() -> void:
 			draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
 		# Real claymore silhouette (was the plain 'landmine' decor pip). Scale 1.05
 		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
+		# Ground shadow + dark backing disc (c2 4v): the lethal silhouette gets
+		# the same grounding grammar as every collidable, and the dark rim keeps
+		# it readable on busy late-run litter.
+		_ground_shadow(mp, 5.0, 0.42)
+		draw_circle(mp, 4.2, Color(0.05, 0.04, 0.03, 0.85))
 		_spr("wep_claymore", mp, 0.0, 1.05)
 		draw_circle(mp, 2.0, Color(mc.r, mc.g, mc.b, 0.65 + mb * 0.35))
 
@@ -5166,7 +5171,9 @@ func _spawn_ambient_motes() -> void:
 	if march < 0.5:
 		col = col.lerp(Color(0.58, 0.56, 0.52), march * 2.0)   # → grey ash
 	else:
-		col = Color(0.58, 0.56, 0.52).lerp(Color(1.0, 0.55, 0.18), (march - 0.5) * 2.0)   # → ember
+		# Late-run motes end WARM PALE ASH, not ember-orange (c2 4v hazard-vs-
+		# litter rule): the red-orange band belongs to mines/barrels exclusively.
+		col = Color(0.58, 0.56, 0.52).lerp(Color(0.82, 0.72, 0.6), (march - 0.5) * 2.0)   # → pale ash
 	var wx := int(randf_range(0.0, 640.0) * Fixed.ONE)
 	var wy := sim.camera_top + int(randf_range(-40.0, 400.0) * Fixed.ONE)
 	_fx.append({"x": wx, "y": wy, "t": 0.0, "kind": "mote",
@@ -5240,8 +5247,10 @@ func _draw_sector_embers() -> void:
 		var ephase := float((fr + eh) % 120) / 120.0
 		var ex := float(eh % 640)
 		var ey := 360.0 - ephase * 380.0 * maxf(_motion, 0.3)
+		# Low-sat ash flecks, NOT ember-orange (c2 4v): drifting motes in the
+		# mine/barrel hue band camouflaged real hazards in the foundry sector.
 		draw_circle(Vector2(ex + sin(ephase * TAU) * 6.0, ey), 1.2,
-			Color(1.0, 0.55, 0.25, (0.5 - absf(ephase - 0.5)) * 0.8))
+			Color(0.85, 0.78, 0.7, (0.5 - absf(ephase - 0.5)) * 0.8))
 
 
 func _draw_fx() -> void:
