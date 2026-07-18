@@ -3453,8 +3453,8 @@ const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a":
 # a4-04: the worn spine down the play lane. Warm packed earth (darker than turf) + a faint
 # tread pair snapped onto it; SPINE_LANE is the x-band its meandering centerline stays in
 # (the play corridor), so the trail is always a route through open ground, never a wall.
-const SPINE_COL := Color(0.10, 0.075, 0.03, 0.13)
-const SPINE_TREAD := Color(0.02, 0.04, 0.0, 0.11)
+const SPINE_COL := Color(0.10, 0.075, 0.03, 0.16)   # a4-04 r2: +a so the continuous spine reads over grass mottle, not just the ford (still faint, <0.2)
+const SPINE_TREAD := Color(0.02, 0.04, 0.0, 0.14)
 const SPINE_LANE := Vector2(232.0, 408.0)
 
 
