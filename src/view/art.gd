@@ -381,6 +381,8 @@ const OLIVE_VEH := Color(0.76, 0.85, 0.52)
 # a2-02: bosses break out of the disposable-tank olive into a heavy desaturated
 # GUNMETAL so the gunship + colossus read as an apex tier, not up-scaled jeeps.
 const BOSS_VEH := Color(0.60, 0.63, 0.66)
+# a2-02 r2: one warm-hostile tint for every enemy vehicle (technical + spotters).
+const HOSTILE_VEH := Color(1.22, 0.87, 0.61)
 const FOLIAGE := Color(0.82, 1.0, 0.66)
 # a1-05: charred late-run foliage. The flat FOLIAGE green used to multiply back
 # into every fern/tree even after main.gd browned them (fern_col), so the foundry

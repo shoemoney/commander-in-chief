@@ -336,3 +336,12 @@ func test_a2_boss_tier_tint_distinct() -> void:
 	Runner.T.ok(not boss.is_equal_approx(tank), "the gunship boss no longer shares the disposable-tank tint")
 	Runner.T.ok(Art.tint("colossus_body").is_equal_approx(boss), "both bosses share the heavy BOSS_VEH tint")
 	Runner.T.ok(boss.b > tank.b, "boss gunmetal is cooler (more blue) than the olive tank")
+
+
+func test_a2_hostile_vehicle_tint_is_warm() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var c: Dictionary = art.get_script_constant_map()
+	var hostile: Color = c["HOSTILE_VEH"]
+	var olive: Color = c["OLIVE_VEH"]
+	Runner.T.ok(hostile.r > hostile.b, "the hostile vehicle tint is WARM (r > b)")
+	Runner.T.ok(hostile.r > olive.r, "hostile vehicles read hotter than the friendly olive tank")
