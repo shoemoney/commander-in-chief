@@ -183,18 +183,20 @@ func test_c2_arena_mutation_cadence() -> void:
 		if ev["t"] == "rock_crater" and ev["x"] == scar_xy[0] and ev["y"] == scar_xy[1]:
 			crater_ok = true
 	Runner.T.ok(crater_ok, "rock_crater event carries the removed rock's exact coords")
-	# The FULL 3-bag L lands (first drop, slots clear by construction): anchor,
-	# north bag, center-facing arm — all three at the exact derivation.
+	# The picked LAYOUT (c4: barricade belt / corner L / wreck line, _mix-chosen)
+	# lands in full at the anchored slot (first drop, slots clear by construction),
+	# each bag at its exact derivation, mirrored toward center by slot side.
 	var slot3: Array = SimWorld.ARENA_L_SLOTS[(amix3 >> 8) % SimWorld.ARENA_L_SLOTS.size()]
-	var arm_dx: int = 24 if slot3[0] < 320 else -24
-	for bo in [[0, 0], [0, -24], [arm_dx, 0]]:
-		var want_x: int = (slot3[0] + bo[0]) * SimWorld.F_ONE
+	var layout3: Array = SimWorld.ARENA_LAYOUTS[(amix3 >> 12) % SimWorld.ARENA_LAYOUTS.size()]
+	var mir3: int = -1 if slot3[0] >= 320 else 1
+	for bo in layout3:
+		var want_x: int = (slot3[0] + bo[0] * mir3) * SimWorld.F_ONE
 		var want_y: int = (slot3[1] + bo[1]) * SimWorld.F_ONE
 		var found := false
 		for sb in sim.sandbags:
 			if sb["x"] == want_x and sb["y"] == want_y:
 				found = true
-		Runner.T.ok(found, "wave-3 L bag %s sits at the exact derivation" % str(bo))
+		Runner.T.ok(found, "wave-3 layout bag %s sits at the exact derivation" % str(bo))
 	while sim.wave < 7:
 		sim._start_wave()
 	Runner.T.eq(sim.rocks.size(), rocks0 - 2, "waves 3 and 6 each cratered exactly one rock")
@@ -400,3 +402,28 @@ func test_c3_siege_drop_off_center() -> void:
 			if pk.get("cost", 0) == 0 and pk.get("kind", 0) == 1:
 				Runner.T.ok(absi(pk["x"] - SimWorld.SCREEN_CX) >= 64 * SimWorld.F_ONE,
 					"seed %d: the siege drop pulls off the center rail" % sd)
+
+
+func test_c4_arena_layout_swap() -> void:
+	# c4 3v: the every-3rd-wave endless drop now swaps a whole LAYOUT (barricade
+	# belt / corner L / wreck line) anchored to the SAME slot — footprint-stable,
+	# arrangement varies, so old muscle memory dies. Endless wave>=3 -> golden-inert.
+	Runner.T.ok(SimWorld.ARENA_LAYOUTS.size() >= 3, "at least 3 authored layouts")
+	# The layout pick varies across the arena-shift waves.
+	var picks := {}
+	for w in [3, 6, 9, 12, 15]:
+		picks[(SimWorld._mix(w, 11) >> 12) % SimWorld.ARENA_LAYOUTS.size()] = true
+	Runner.T.ok(picks.size() >= 2, "the layout swaps across waves (%d distinct)" % picks.size())
+	# End to end: run to wave 3 and assert the drop is anchored to a real slot.
+	var sim := SimWorld.new(11, 1, "endless")
+	while sim.wave < 2:
+		sim._start_wave()
+	sim.events.clear()
+	sim._start_wave()   # wave 3: crater + layout drop
+	var anchored := false
+	for ev in sim.events:
+		if ev.get("t", "") == "arena_shift":
+			for slot in SimWorld.ARENA_L_SLOTS:
+				if ev["x"] == slot[0] * SimWorld.F_ONE and ev["y"] == slot[1] * SimWorld.F_ONE:
+					anchored = true
+	Runner.T.ok(anchored, "the layout drop is anchored to a fixed arena slot (footprint-stable)")

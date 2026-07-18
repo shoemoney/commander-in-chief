@@ -245,6 +245,11 @@ const ARENA_ROCK_FLOOR := 2
 const ARENA_L_SLOTS := [
 	[250, -60], [390, -288], [200, -180], [440, -180], [320, -48], [320, -312],
 ]
+const ARENA_LAYOUTS := [
+	[[0, 0], [0, -24], [22, 0]],                    # 0 corner L (the classic stub)
+	[[-33, 0], [-11, 0], [11, 0], [33, 0]],         # 1 barricade belt (horizontal line)
+	[[0, 0], [0, -26], [0, -52], [0, -78]],         # 2 wreck line (vertical column)
+]
 const WAVE_ENEMIES_PER_WAVE := 2
 const WAVE_SPAWN_INTERVAL_TICKS := 20
 const WAVE_INTERMISSION_TICKS := 300
@@ -3867,14 +3872,19 @@ func _start_wave() -> void:
 		# Slot fallthrough (judge r1): if every bag of the picked L dedupes
 		# away, walk the table — a DROP beat is never a no-op under congestion.
 		var slot_base: int = (amix >> 8) % ARENA_L_SLOTS.size()
+		# c4 3v: the every-3rd-wave drop now stamps a whole LAYOUT (barricade belt /
+		# corner L / wreck line, _mix-picked) anchored to the SAME slot — footprint
+		# stays put but the ARRANGEMENT swaps, so old muscle memory dies with the
+		# co-cratered rock. Endless wave>=3 -> past the wave-2 wipe -> golden-inert.
+		var layout: Array = ARENA_LAYOUTS[(amix >> 12) % ARENA_LAYOUTS.size()]
 		for attempt in ARENA_L_SLOTS.size():
 			var slot: Array = ARENA_L_SLOTS[(slot_base + attempt) % ARENA_L_SLOTS.size()]
 			var l_ax: int = slot[0] * F_ONE
 			var l_ay: int = slot[1] * F_ONE
 			var planted := 0
-			# The L mirrors the _init stub pattern: anchor, north bag, center-facing arm.
-			for bo in [[0, 0], [0, -24], [24 if slot[0] < 320 else -24, 0]]:
-				var l_bx: int = l_ax + bo[0] * F_ONE
+			var mir: int = -1 if slot[0] >= 320 else 1   # arrange toward arena center
+			for bo in layout:
+				var l_bx: int = l_ax + (bo[0] * mir) * F_ONE
 				var l_by: int = l_ay + bo[1] * F_ONE
 				var l_clear := true
 				for sb in sandbags:
