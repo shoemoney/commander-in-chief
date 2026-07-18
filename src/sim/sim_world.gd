@@ -297,6 +297,7 @@ const VENT_JET_TICKS := 60
 const VENT_WARN_TICKS := 30          # >= the 24t reaction floor (KIMK r4 precedent)
 const VENT_HURT_RADIUS := 24 * F_ONE
 const VENT_COVER_BURN_TICKS := 120   # c3 5v: ~2s of a vent jet burns off grass / cracks a wall slab
+const BREAKWATER_SLACK := 6 * F_ONE  # c3 5v: the grenade must be within a cover half-extent + this touch margin of the rock face for it to shadow the drift
 const VENT_CHUNKS := [
 	# No empty chunks (unlike MINE_CHUNKS): seg 4 keeps only ~2 rows after the
 	# keep-outs, so an empty roll on both would erase the mechanic for that
@@ -875,6 +876,14 @@ static func _rk_hh(rk: Dictionary) -> int:
 static func _rk_solid(rk: Dictionary) -> bool:
 	## Kind 1 (grass) blocks nothing physically — it only conceals.
 	return ROCK_KIND_EXT[rk.get("kind", 0)][2] == 1
+
+
+static func _rk_burnable(rk: Dictionary) -> bool:
+	## c3 5v: soft cover a vent jet can destroy — grass (kind 1, burns off) and
+	## wall slabs (kind 2, crack apart). Stone (0) and hero wrecks (3) are immune
+	## ("stone doesn't burn"). One place for the kind filter + immunity read.
+	var k: int = rk.get("kind", 0)
+	return k == 1 or k == 2
 
 
 func _in_grass(t: Dictionary) -> bool:
@@ -1773,7 +1782,7 @@ func _step_grenades() -> void:
 				for wk in rocks:
 					if _rk_solid(wk) and absi(g["y"] - wk["y"]) <= _rk_hh(wk) \
 							and (g["x"] - wk["x"]) * drift < 0 \
-							and absi(g["x"] - wk["x"]) <= _rk_hw(wk) + 6 * F_ONE:
+							and absi(g["x"] - wk["x"]) <= _rk_hw(wk) + BREAKWATER_SLACK:
 						blocked = true
 						break
 				if not blocked:
@@ -2501,14 +2510,13 @@ func _step_mines() -> void:
 			# fed to checksum; seg-4+ vents = torture-inert.
 			for ri in range(rocks.size() - 1, -1, -1):
 				var brk := rocks[ri]
-				var bkind: int = brk.get("kind", 0)
-				if bkind != 1 and bkind != 2:
+				if not _rk_burnable(brk):
 					continue
 				if absi(brk["x"] - v["x"]) <= VENT_HURT_RADIUS + _rk_hw(brk) \
 						and absi(brk["y"] - v["y"]) <= VENT_HURT_RADIUS + _rk_hh(brk):
 					brk["burn_ticks"] = brk.get("burn_ticks", 0) + 1
 					if brk["burn_ticks"] >= VENT_COVER_BURN_TICKS:
-						events.append({"t": "cover_burn" if bkind == 1 else "cover_crack",
+						events.append({"t": "cover_burn" if brk.get("kind", 0) == 1 else "cover_crack",
 							"x": brk["x"], "y": brk["y"]})
 						rocks.remove_at(ri)
 
