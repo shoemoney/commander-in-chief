@@ -228,6 +228,7 @@ const _EVENT_SOUND := {
 	"drop_stolen": ["alarm", -9.0, 0.6],     # low growl: the crate is gone
 	"drop_gone": ["alarm", -12.0, 0.45],     # lower fizzle: the window closed on its own
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
+	"strafe_lane": ["alarm", -13.0, 1.6],     # high tick: the sweep lane lights up
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
 	"tank_crew": ["tank_board", -5.0, 1.5],   # same clunk a fifth up: mounting, but not YOUR controls
@@ -1429,6 +1430,11 @@ func _consume_events() -> void:
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
+			"strafe_lane":
+				# The gunship's sweep column, painted for ~0.4s at the strafe start.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_bullettrail",
+					"sz": 300.0, "grow": 0.0, "fade": 0.4, "rate": 0.04, "rot90": true,
+					"col": Color(1.0, 0.35, 0.25, 0.22)})
 			"broadcast_pulse":
 				# Expanding rally ring: the buff source and its reach, drawn from
 				# the checksum-excluded event — the aura is invisible otherwise.
@@ -3155,11 +3161,7 @@ func _draw_terrain() -> void:
 		draw_texture_rect(Art.tex("fx_shadow"), Rect2(lm_pos - Vector2(20, 8), Vector2(40, 20)),
 			false, Color(0.1, 0.08, 0.05, 0.5))
 		_spr("radio_tower", lm_pos, 0.0, 1.1, Color(0.85, 0.88, 0.85))
-		for qp in [[80, -300], [560, -300], [80, -60], [560, -60], [210, -320], [430, -50]]:
-			var qh := Art.cell_hash(qp[0], qp[1])
-			var qpos := _to_screen(qp[0] * Fixed.ONE, qp[1] * Fixed.ONE)
-			_ground_shadow(qpos, 9.0, 0.38)
-			_spr("rock1" if qh % 2 == 0 else "rock2", qpos, float(qh % 628) / 100.0, 1.7, Color(0.72, 0.75, 0.72))
+		# (Quadrant rocks now live in sim.rocks — real cover draws itself.)
 		# World-anchored grass tiling, darkened toward jungle; deterministic dirt
 	# patches and tree lines from a cell hash (decor only, not sim state).
 	# The opaque grass/dirt base moved to _paint_bg (renders on _bg_root, below the
@@ -3384,7 +3386,7 @@ func _draw_rocks() -> void:
 		_ground_shadow(pos, 12.0, 0.42)
 		var rh3 := Art.cell_hash(rk["x"] / 65536, rk["y"] / 65536)
 		var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
-		_spr(rtex, pos, float(rh3 % 628) / 100.0, 2.1 if rtex != "tree_dead2" else 0.5,
+		_spr(rtex, pos, float(rh3 % 628) / 100.0, 1.3 if rtex != "tree_dead2" else 0.35,
 			Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5))
 
 

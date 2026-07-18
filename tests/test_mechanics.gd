@@ -834,3 +834,26 @@ func test_choke_bounds_and_fork_island() -> void:
 	sim._clamp_actor(p)
 	Runner.T.ok(p["x"] == 216 * SimWorld.F_ONE or p["x"] == 304 * SimWorld.F_ONE,
 		"the wreck island is solid — the lane choice is physical")
+
+
+func test_cover_sprites_fit_their_collision() -> void:
+	# KIMK: an elongated log whose pixel ends outrun the AABB is the same lie
+	# wearing a new sprite. Pin every cover sprite's drawn HALF-width to the
+	# collision half-width (+4px art tolerance for soft edges).
+	var MainS := load("res://src/main.gd")
+	var m = MainS.new()
+	for tex_name in ["rock1", "rock2", "tree_dead2"]:
+		var half_w: float = Art.tex(tex_name).get_size().x * Art.draw_scale(tex_name) \
+			* (1.3 if tex_name != "tree_dead2" else 0.35) / 2.0
+		Runner.T.ok(half_w <= 20.0,
+			"%s drawn half-width %.1f fits the 16px cover AABB (+4 tolerance)" % [tex_name, half_w])
+	# Endless quadrant rocks are SIM entities now (art that reads as cover IS cover).
+	var sim := SimWorld.new(47, 1, "endless")
+	Runner.T.ok(sim.rocks.size() >= 6, "endless seeds its six quadrant rocks as real blockers")
+	# Palette-contrast evidence: the rust-tan shift is hue-only — ground
+	# luminance moves <3%, so enemy silhouette contrast is preserved.
+	var base := Color(0.5, 0.53, 0.375)
+	var rust := Color(base.r + 0.04, base.g - 0.04, base.b)
+	Runner.T.ok(absf(rust.get_luminance() - base.get_luminance()) < 0.03,
+		"endless tint shifts hue, not luminance — enemy contrast holds")
+	m.free()

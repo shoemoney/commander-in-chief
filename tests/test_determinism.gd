@@ -137,13 +137,19 @@ const SEED := 0xDEADBEEF
 ## legitimately moves. ENDLESS_GOLDEN untouched (campaign-only stream + conditional feed).
 ## Same cycle, PROVEN inert and NOT part of this re-record: arena layout templates (pure
 ## _gate_counter lookup, gate 1 byte-identical) and the view-only biome journey.
+## RE-RECORDED (2026-07-17, cycle 1 round-3 — KIMK's art==collision pin): the pin test CAUGHT
+## cover sprites drawing 26-38px half-wide over a 10px collision half (the same lie, new
+## sprite). Rock AABB honestly grown to 16x12 and the draw shrunk to fit (test-pinned <=20px
+## half); torture rocks got bigger hitboxes -> campaign moves. ENDLESS moves too: the six
+## endless quadrant rocks were PROMOTED from view dressing to real sim blockers (KIMK:
+## art that reads as cover must BE cover).
 const GOLDEN: Array[int] = [
-	799999468582491283,
-	1361738005099910004,
-	5372310563039212233,
-	1929779422214900199,
-	957657435707634862,
-	9196786456286436753,
+	8056145353370070057,
+	3404120838886721138,
+	5853600409026789734,
+	2403764188167499848,
+	1322780113437086051,
+	3121864703940889290,
 ]
 
 
@@ -228,12 +234,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## _init — constant coords, no rng, riding the existing sandbag cover/checksum grammar — so
 ## the endless stream legitimately moves from tick 0. Campaign GOLDEN untouched (endless-gated).
 const ENDLESS_GOLDEN: Array[int] = [
-	3274861091408869328,
-	5594893952212554321,
-	8845749610860477777,
-	7601761169781313001,
-	2530659351129388321,
-	2284813234581916729,
+	5810251919466455340,
+	6810029477436195130,
+	1487056069058360237,
+	5646829933815705845,
+	8850168734188490941,
+	5842112675654817413,
 ]
 
 

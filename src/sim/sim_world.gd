@@ -249,8 +249,8 @@ const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
 const CHOKE_BITE := 240 * F_ONE
 const ROCK_SPACING := 260 * F_ONE
-const ROCK_HALF_W := 10 * F_ONE
-const ROCK_HALF_H := 8 * F_ONE
+const ROCK_HALF_W := 16 * F_ONE   # sized to the DRAWN rock (KIMK pin: art == collision)
+const ROCK_HALF_H := 12 * F_ONE
 const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST, SHOP_AIRSTRIKE_COST, SHOP_SANDBAG_COST]
 # Foundry Colossus: the finale. A fortress-crawler that inverts the scroll —
 # it advances DOWN the map at the players. Armor: grenades only. Three
@@ -384,6 +384,10 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			sandbags.append({"x": (eb[0] + (24 if eb[0] < 320 else -24)) * F_ONE, "y": eb[1] * F_ONE})
 		for db in [[320, -212], [320, -148], [288, -180], [352, -180]]:
 			sandbags.append({"x": db[0] * F_ONE, "y": db[1] * F_ONE})
+		# Quadrant rocks are REAL cover (KIMK: art that reads as cover must
+		# BE cover) — they ride the full rock grammar: bullets, boots, treads.
+		for qr in [[80, -300], [560, -300], [80, -60], [560, -60], [210, -320], [430, -50]]:
+			rocks.append({"x": qr[0] * F_ONE, "y": qr[1] * F_ONE})
 	_next_bunker_y = -(500 * F_ONE)
 	_next_gate_y = -GATE_SPACING
 	_next_tank_y = -(750 * F_ONE)
@@ -2479,6 +2483,15 @@ func _step_camera() -> void:
 			# The end of the road: the Foundry. Nothing streams past it.
 			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
 				"boss": {}, "final": true})
+			# Foundry phase terrain (5v): three live barrel clusters seed the
+			# finale floor — each colossus phase-shift COOKS the nearest one
+			# (the arena itself escalates). Fixed coords, no rng; the torture
+			# never reaches gate 5 -> inert.
+			for fbx in [90, 296, 502]:
+				barrels.append({"x": fbx * F_ONE, "y": _next_gate_y + 140 * F_ONE,
+					"armed": true, "fuse_ticks": 0})
+				barrels.append({"x": (fbx + 16) * F_ONE, "y": _next_gate_y + 148 * F_ONE,
+					"armed": true, "fuse_ticks": 0})
 			_world_ended = true
 			break
 		if _gate_counter % BOSS_GATE_EVERY == 0:
@@ -2486,6 +2499,13 @@ func _step_camera() -> void:
 			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
 				"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP), "x": SCREEN_CX,
 					"dir": 1, "phase_t": 0, "gate_y": _next_gate_y}})
+			# Boss-arena cover (5v): four bags in two mirrored lines turn the
+			# strafe half into a COVER fight (mortars ignore cover, so the
+			# volley half stays a movement fight). Reuses the whole sandbag
+			# grammar; torture never streams gate 3 -> inert.
+			for bsx in [164, 200, 392, 428]:
+				sandbags.append({"x": bsx * F_ONE,
+					"y": _next_gate_y + (120 if bsx < 300 else 200) * F_ONE})
 		else:
 			# Arena template lookup (unlisted indexes fall back to classic —
 			# future-proof if FINAL_GATE_INDEX ever grows).
@@ -2782,6 +2802,23 @@ func colossus_phase() -> int:
 
 
 func _step_colossus() -> void:
+	# Phase terrain: when the phase rises, fuse the nearest live foundry
+	# cluster — the floor answers the boss. pv = last seen phase (derived,
+	# unhashed-classified; colossus fights are torture-unreachable).
+	if not colossus.is_empty() and colossus["alive"]:
+		var cph := colossus_phase()
+		if cph > colossus.get("pv", 1):
+			var best := -1
+			var best_d := 0
+			for bi in barrels.size():
+				if barrels[bi]["armed"]:
+					var d := absi(barrels[bi]["x"] - colossus["x"]) + absi(barrels[bi]["y"] - colossus["y"])
+					if best < 0 or d < best_d:
+						best = bi
+						best_d = d
+			if best >= 0:
+				barrels[best]["fuse_ticks"] = 8
+		colossus["pv"] = cph
 	# Engage when the final gate scrolls into view.
 	if colossus.is_empty():
 		for g in gates:
@@ -2906,6 +2943,10 @@ func _step_one_boss(boss: Dictionary) -> void:
 		return
 	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 	var t: int = boss["phase_t"]
+	if t == 0:
+		# Strafe-half opener: the view paints the sweep lane (checksum-excluded).
+		events.append({"t": "strafe_lane", "x": boss["x"], "y": boss["gate_y"] - BOSS_Y_OFFSET,
+			"dir": boss["dir"]})
 	# Endless tier escalation (9v: waves 5/10/15/20 differed only by HP).
 	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
 	var tier: int = wave / 5
