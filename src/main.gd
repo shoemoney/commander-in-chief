@@ -5928,6 +5928,13 @@ func _draw_fx() -> void:
 			# Ease to zero alpha before removal — 1.0-t*0.7 left the last frame at
 			# ~0.3 alpha and it blinked out instead of fading (gib already fades to 0).
 			_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, pow(1.0 - t, 1.5)))
+			if t < 0.16:
+				# a1-08 WHITE-HOT lead: the blast flashes a bright near-white core for the
+				# first ~0.16 of its life, then cools to the orange fireball — a concussive
+				# flashbulb instead of blooming red-first/muddy.
+				var wf := 1.0 - t / 0.16
+				draw_circle(pos, 12.0 + t * 46.0, Color(1.0, 0.98, 0.9, 0.88 * wf))
+				draw_circle(pos, 6.0 + t * 22.0, Color(1.0, 1.0, 0.98, 0.9 * wf))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
 			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))

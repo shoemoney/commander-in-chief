@@ -146,6 +146,8 @@ func _dress_firefight(m: Node2D) -> void:
 	m._fx.append({"x": p["x"], "y": p["y"] - 13 * F, "t": 0.05, "kind": "muzzle",
 		"rate": 0.34, "a": -PI / 2})
 	m._recoil[0] = Vector2(0, 2.2)
+	# A fresh blast at t=0 so explosion-feel work (white-hot lead, etc.) is captured.
+	m._fx.append({"x": (p["x"] + 40 * F), "y": (p["y"] - 70 * F), "t": 0.0, "kind": "explosion"})
 	for i in 3:
 		m._fx.append({"x": p["x"] + (6 + i * 5) * F, "y": p["y"] + (2 + i) * F,
 			"t": 0.15 + i * 0.22, "kind": "casing", "rate": 0.055,
