@@ -1754,3 +1754,44 @@ func test_c3_choke_camp_breach() -> void:
 	var e1: int = sim.enemies.size()
 	sim._step_observer()
 	Runner.T.eq(sim.enemies.size(), e1, "the breach fires once per camp (equality trigger)")
+
+
+func test_c3_grass_flush_grenade() -> void:
+	# c3 2v: camping tall grass near an enemy draws a telegraphed FLUSH grenade
+	# onto your ground — grass conceals but no longer strictly dominates. The
+	# flush deliberately PIERCES the conceal gate (keyed on _in_grass).
+	var sim := SimWorld.new(43, 1)
+	var p: Dictionary = sim.players[0]
+	p["smoke_ticks"] = 0
+	# Grass patch on the player + an enemy within FLUSH_RADIUS.
+	sim.rocks.append({"x": p["x"], "y": p["y"], "kind": 1})
+	sim._spawn_enemy(p["x"] + 60 * SimWorld.F_ONE, p["y"], false)
+	Runner.T.ok(sim._in_grass(p), "player is in grass")
+	Runner.T.ok(sim._concealed(p), "grass conceals the player from fire-acquisition")
+	var s0: int = sim.strikes.size()
+	for i in SimWorld.FLUSH_CD_TICKS + 2:
+		sim._step_grass_flush()
+	Runner.T.ok(sim.strikes.size() > s0, "camping grass near a threat draws a flush grenade")
+	# The flush pierced the conceal gate — the player was still concealed.
+	Runner.T.ok(sim._concealed(p), "the flush lands despite concealment (grass is not immune)")
+
+
+func test_c3_grass_flush_negatives() -> void:
+	# No enemy nearby -> no flush; and SMOKE (not grass) stays fully immune.
+	var sim := SimWorld.new(43, 1)
+	var p: Dictionary = sim.players[0]
+	sim.rocks.append({"x": p["x"], "y": p["y"], "kind": 1})   # grass, but no enemy near
+	var s0: int = sim.strikes.size()
+	for i in SimWorld.FLUSH_CD_TICKS + 2:
+		sim._step_grass_flush()
+	Runner.T.eq(sim.strikes.size(), s0, "grass alone (no threat) draws no flush")
+	# Smoke concealment (no grass) is never flushed.
+	var sim2 := SimWorld.new(43, 1)
+	var p2: Dictionary = sim2.players[0]
+	p2["smoke_ticks"] = 999
+	sim2._spawn_enemy(p2["x"] + 60 * SimWorld.F_ONE, p2["y"], false)
+	Runner.T.ok(sim2._concealed(p2) and not sim2._in_grass(p2), "smoke conceals but is not grass")
+	var s2: int = sim2.strikes.size()
+	for i in SimWorld.FLUSH_CD_TICKS + 2:
+		sim2._step_grass_flush()
+	Runner.T.eq(sim2.strikes.size(), s2, "SMOKE stays immune — only tall grass gets the flush downside")

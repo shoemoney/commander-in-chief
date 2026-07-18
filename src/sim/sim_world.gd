@@ -392,6 +392,8 @@ const COLOSSUS_SPRAY_CD_TICKS := 30
 const COLOSSUS_VOLLEY_CD_TICKS := 120
 const COLOSSUS_SPAWN_CD_TICKS := 90
 const COLOSSUS_SWEEP_CD_TICKS := 150   # c3 3v: 2.5s between lane-sweep mortars when the player PARKS in a Foundry side lane (the retreat stays fair; camping it costs you)
+const FLUSH_RADIUS := 100 * F_ONE      # c3 2v: an enemy this close to a grass-camper lobs a flush grenade
+const FLUSH_CD_TICKS := 600            # 10s between flushes — grass conceals, but sitting in it near a threat costs you
 # Core window: every cycle the plating retracts for a beat during which
 # BULLETS also chip the Colossus — a timing/aggression path for a dry pool.
 const COLOSSUS_CORE_CYCLE_TICKS := 240
@@ -558,6 +560,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"smoke_ticks": 0,
 			"claymores": 0,
 			"triple": false,
+			"flush_cd": 0,   # c3 2v: tall-grass flush-grenade cooldown (0 = clear; runs only while camping grass near enemies)
 		})
 
 
@@ -640,6 +643,7 @@ func step(inputs: Array) -> void:
 		_step_gates()
 		_step_camera()
 		_step_observer()
+		_step_grass_flush()   # c3 2v: tall-grass camping draws a flush grenade
 		_resolve_strikes()   # was the tail of _step_observer; same order
 
 
@@ -2895,6 +2899,35 @@ func _in_fork_wire(x: int, y: int) -> bool:
 	return false
 
 
+func _step_grass_flush() -> void:
+	## c3 2v: tall grass conceals (via _in_grass -> _concealed), which made it
+	## strictly dominant over solid cover. The DOWNSIDE: while a player camps
+	## grass with an enemy within FLUSH_RADIUS, a cooldown runs; on expiry an
+	## enemy lobs a TELEGRAPHED flush grenade onto the player's ground —
+	## reusing _add_strike, but DELIBERATELY without the _concealed guard (that
+	## omission IS the feature). Keyed on _in_grass, not _concealed, so smoke
+	## keeps full ranged-immunity. Grass streams seg>=2 only -> torture-inert.
+	for p in players:
+		if not p["alive"] or p["in_tank"] >= 0 or not _in_grass(p):
+			p["flush_cd"] = 0
+			continue
+		var threat := false
+		for e in enemies:
+			if e["alive"] and e["kind"] != "pilot" \
+					and _dist_lte(e["x"], e["y"], p["x"], p["y"], FLUSH_RADIUS):
+				threat = true
+				break
+		if not threat:
+			p["flush_cd"] = 0
+			continue
+		if p["flush_cd"] <= 0:
+			p["flush_cd"] = FLUSH_CD_TICKS
+		p["flush_cd"] = p["flush_cd"] - 1
+		if p["flush_cd"] <= 0:
+			_add_strike(p["x"], p["y"])   # NO _concealed guard — grass gets flushed
+			p["flush_cd"] = FLUSH_CD_TICKS
+
+
 func _step_mast_hazard() -> void:
 	## c3 3v: on waves 5/10/15… the endless mast denies its own orbit with a
 	## phase-timed radial pulse (the foundry-vent telegraph, cloned): 90t warn,
@@ -4215,6 +4248,9 @@ func checksum() -> int:
 		h = feed.call(40503, h)        # only perturbs the hash when HARD is ON (torture: OFF)
 	if vest_buys > 0:
 		h = feed.call(vest_buys, h)   # conditional: 0 buys = untouched stream (torture never buys)
+	for p in players:
+		if p["flush_cd"] > 0:
+			h = feed.call(p["flush_cd"], h)   # c3 2v: conditional — flush_cd is 0 unless camping grass near a threat (never in either torture window)
 	if not rocks.is_empty():
 		h = feed.call(rocks.size(), h)
 		for rk in rocks:

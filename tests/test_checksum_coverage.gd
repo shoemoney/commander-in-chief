@@ -19,7 +19,7 @@ const KNOWN := {
 		"fire_cd", "grenade_cd", "broke_timer", "roll_ticks", "roll_cd", "roll_buf",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
 		"grenade_prev", "vest", "hurt_iframes", "pierce_ticks", "spread_ticks", "triple",
-		"rend_ticks", "smoke_ticks", "claymores"],
+		"rend_ticks", "smoke_ticks", "claymores", "flush_cd"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell", "hold"],
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
