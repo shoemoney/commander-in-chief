@@ -264,6 +264,8 @@ const BARREL_CHUNKS := [
 	[[0, 0], [18, 0], [90, 0], [108, 0], [180, 0], [198, 0]],
 	[[-60, 0], [-20, 0], [20, 0], [60, 0]],
 ]
+const FLANK_SQUAD := 3               # 2v flank doors: squad size per side (starting value)
+const FLANK_DOOR_Y := 140 * F_ONE    # door row south of the gate
 const MUD_BANK_H := 40 * F_ONE   # 2v: muddy approaches flank every river (roll legal, tanks unaffected)
 const CHOKE_START_SEG := 2
 const CHOKE_OFF_LO := 150 * F_ONE
@@ -629,6 +631,14 @@ func _step_players(inputs: Array) -> void:
 					p["x"] = rpx
 					p["y"] = rpy
 				break
+		# Parked/dead armor is solid to boots (2v hulk-cover; escape rule):
+		for hk2 in tanks:
+			if (hk2["alive"] and hk2["occupant"] < 0) or (not hk2["alive"] and hk2["burn_ticks"] > 0):
+				if absi(p["x"] - hk2["x"]) <= HULK_HALF_W and absi(p["y"] - hk2["y"]) <= HULK_HALF_H:
+					if absi(rpx - hk2["x"]) > HULK_HALF_W or absi(rpy - hk2["y"]) > HULK_HALF_H:
+						p["x"] = rpx
+						p["y"] = rpy
+					break
 		# Rocks are a hard wall to boots too (escape rule: a step that STARTED
 		# inside — post-respawn edge case — may walk out).
 		if not rocks.is_empty():
@@ -1441,7 +1451,7 @@ func _step_bullets() -> void:
 			# Dead tanks are cover while they smolder (burn_ticks > 0): the
 			# bunker two-way rule from an asset the field already produces.
 			for hk in tanks:
-				if not hk["alive"] and hk["burn_ticks"] > 0 \
+				if ((hk["alive"] and hk["occupant"] < 0) or (not hk["alive"] and hk["burn_ticks"] > 0)) \
 						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
@@ -1741,6 +1751,13 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	# Sandbag walls stop ground movers both ways (the water-clamp pattern:
 	# move, then revert into-AABB steps) — the swarm flanks cover, never
 	# phases through it. Empty-array fast path keeps the hot loop clean.
+	for hk3 in tanks:
+		if (hk3["alive"] and hk3["occupant"] < 0) or (not hk3["alive"] and hk3["burn_ticks"] > 0):
+			if absi(e["x"] - hk3["x"]) <= HULK_HALF_W and absi(e["y"] - hk3["y"]) <= HULK_HALF_H:
+				if absi(pvx - hk3["x"]) > HULK_HALF_W or absi(pvy - hk3["y"]) > HULK_HALF_H:
+					e["x"] = pvx
+					e["y"] = pvy
+				break
 	if not rocks.is_empty():
 		for rk in rocks:
 			if absi(e["x"] - rk["x"]) <= ROCK_HALF_W and absi(e["y"] - rk["y"]) <= ROCK_HALF_H:
@@ -2453,6 +2470,18 @@ func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: i
 
 func _step_gates() -> void:
 	for g in gates:
+		# Flank doors (2v): the moment the FIRST bunker of a pair falls, the
+		# arena answers — a 3-rusher squad breaches from each wall (right-side
+		# leader is an elite). Fixed positions, zero rng; once per gate.
+		if not g["open"] and g["boss"].is_empty() and not g.get("final", false) \
+				and not g.get("b1", {}).is_empty() \
+				and not g.get("flanked", false) and g["b1"]["alive"] != g["b2"]["alive"]:
+			g["flanked"] = true
+			for fi in FLANK_SQUAD:
+				_spawn_enemy(WORLD_LEFT, g["y"] + FLANK_DOOR_Y + fi * 22 * F_ONE, false)
+				_spawn_enemy(WORLD_RIGHT, g["y"] + FLANK_DOOR_Y + fi * 22 * F_ONE, fi == 0)
+			events.append({"t": "flank_breach", "x": WORLD_LEFT, "y": g["y"] + FLANK_DOOR_Y})
+			events.append({"t": "flank_breach", "x": WORLD_RIGHT, "y": g["y"] + FLANK_DOOR_Y})
 		if g["open"] or g.get("final", false):
 			continue   # the final gate is opened by the Colossus's death alone
 		var cleared: bool
@@ -2479,8 +2508,14 @@ func _step_gates() -> void:
 			# Guaranteed cache past every checkpoint — the gate-open beat had a big
 			# audiovisual payoff but no mechanical reward; a free grenade/vest crate
 			# closes that loop.
-			pickups.append({"x": (200 + rng.range_i(0, 240)) * F_ONE, "y": g["y"] - 40 * F_ONE,
+			# Victory strip (2v): the checkpoint reward is a composed PLACE —
+			# crate dead-center, flanked by two fresh bags (the x rng draw is
+			# deleted; the kind draw stays, so the sequence past here shifts
+			# once — covered by this batch's re-record).
+			pickups.append({"x": SCREEN_CX, "y": g["y"] - 60 * F_ONE,
 				"kind": 1 + rng.range_i(0, 1), "cost": 0})
+			sandbags.append({"x": SCREEN_CX - 70 * F_ONE, "y": g["y"] - 60 * F_ONE, "world": 1})
+			sandbags.append({"x": SCREEN_CX + 70 * F_ONE, "y": g["y"] - 60 * F_ONE, "world": 1})
 			events.append({"t": "gate_open", "x": SCREEN_CX, "y": g["y"]})
 
 
@@ -2564,7 +2599,8 @@ func _step_camera() -> void:
 	# Stream landmines between the arenas — deterministic x, off the gate rows.
 	while _next_mine_y > horizon:
 		var m_slot: int = absi(_next_mine_y / MINE_SPACING)
-		if m_slot % 2 == 0 and not _in_choke_apron(_next_mine_y):
+		var m_gate_off: int = absi(_next_mine_y) % GATE_SPACING
+		if m_slot % 2 == 0 and not _in_choke_apron(_next_mine_y) and m_gate_off >= 80 * F_ONE:
 			var mh2 := _mix(m_slot, _world_seed)
 			var m_chunk: Array = MINE_CHUNKS[mh2 % MINE_CHUNKS.size()]
 			var m_ax: int = (150 + (mh2 >> 8) % 340) * F_ONE
@@ -2710,6 +2746,13 @@ func _step_camera() -> void:
 			"fuel": TANK_FUEL_TICKS, "burn_ticks": 0,
 			"fire_cd": 0, "occupant": -1,
 		})
+		if absi(_next_tank_y / GATE_SPACING) % 2 == 1:
+			# Cover pocket (2v): a barrel pair tucked beside every other parked
+			# tank — hard cover with a live-ordnance tradeoff.
+			barrels.append({"x": SCREEN_CX - 46 * F_ONE, "y": _next_tank_y + 8 * F_ONE,
+				"armed": true, "fuse_ticks": 0})
+			barrels.append({"x": SCREEN_CX - 28 * F_ONE, "y": _next_tank_y + 8 * F_ONE,
+				"armed": true, "fuse_ticks": 0})
 		_next_tank_y -= GATE_SPACING
 	while _next_water_y > horizon:
 		var water := {"y": _next_water_y, "ford_x": rng.range_i(80, 560) * F_ONE}
@@ -3246,7 +3289,7 @@ func _step_enemy_bullets() -> void:
 			# Dead tanks are cover while they smolder (burn_ticks > 0): the
 			# bunker two-way rule from an asset the field already produces.
 			for hk in tanks:
-				if not hk["alive"] and hk["burn_ticks"] > 0 \
+				if ((hk["alive"] and hk["occupant"] < 0) or (not hk["alive"] and hk["burn_ticks"] > 0)) \
 						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true

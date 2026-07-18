@@ -239,6 +239,7 @@ const _EVENT_SOUND := {
 	"drop_gone": ["alarm", -12.0, 0.45],     # lower fizzle: the window closed on its own
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
 	"strafe_lane": ["alarm", -13.0, 1.6],     # high tick: the sweep lane lights up
+	"flank_breach": ["alarm", -7.0, 0.8],    # low klaxon: the walls answer
 	"revive": ["revive", -5.0, 1.0],
 	"tank_board": ["tank_board", -5.0, 1.0],
 	"tank_crew": ["tank_board", -5.0, 1.5],   # same clunk a fifth up: mounting, but not YOUR controls
@@ -1440,6 +1441,11 @@ func _consume_events() -> void:
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
+			"flank_breach":
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "FLANKS!", "col": Color(1.0, 0.5, 0.3)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+					"sz": 20.0, "grow": 1.0, "fade": 1.4, "rate": 0.02, "col": Color(0.5, 0.42, 0.35, 0.5)})
 			"strafe_lane":
 				# The gunship's sweep column, painted for ~0.4s at the strafe start.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_bullettrail",

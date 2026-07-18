@@ -150,13 +150,19 @@ const SEED := 0xDEADBEEF
 ## field, and mud banks flanking the torture river halve enemy approach speed there.
 ## ENDLESS untouched (no camera streaming). Same batch, inert: trench parapets + foundry
 ## content (gate 5, unreached), water variation (band 1 hits neither branch).
+## RE-RECORDED (2026-07-17, cycle 1 batch 3 — flank doors + hulk cover + victory strip):
+## first-bunker-down now breaches 3-rusher flank squads from each wall (the torture's gate-1
+## fight passes through the one-dead state), parked unoccupied tanks became solid to boots
+## and bullets, and the gate-open cache moved to a composed center strip (its x rng draw
+## DELETED, kind draw kept — the sequence past gate-open shifts once). Sample 0 unchanged
+## (all three land later in the run). ENDLESS untouched (no gates/tanks/strips there).
 const GOLDEN: Array[int] = [
 	1009666002274062129,
-	4382870054108880642,
-	2443963026911858617,
-	5566398431406631986,
-	3844288921057376203,
-	1880544706798593943,
+	7503031489387237277,
+	8626724527638425281,
+	3638081353962212051,
+	6675643951161425085,
+	6075740880367953095,
 ]
 
 
