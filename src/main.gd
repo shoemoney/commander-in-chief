@@ -2588,6 +2588,18 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 			_hit_flinch[pidx] -= _hit_dir * 3.0   # shove the body AWAY from the source
 
 
+func _boss_music_on() -> bool:
+	# a1-15 AUD#7: a boss is ENGAGED — the colossus finale, or a gate boss alive and
+	# in view. Drives the heavier boss music signature.
+	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
+		return true
+	for g in sim.gates:
+		if not g["boss"].is_empty() and g["boss"].get("alive", false) \
+				and g["y"] >= sim.camera_top - 100 * Fixed.ONE and g["y"] <= sim.camera_top + SimWorld.VIEW_H:
+			return true
+	return false
+
+
 func _update_feel() -> void:
 	# Impact envelopes (_trauma/_punch/_kick) HOLD at peak through the hitstop
 	# freeze — otherwise the biggest hits (which set the longest freeze) bleed
@@ -2842,8 +2854,9 @@ func _drive_audio() -> void:
 		_vo_plea_at = -1
 		_vo("vo_pilot_plea", 2, 600, true)
 	# VO owns the mix while speaking: rides the existing duck channel.
-	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0))
+	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on())
 	_sfx.duck_sfx_under_vo(_sfx.vo_active())   # a1-14 AUD#6: the combat bus dips under the radio too
+	_sfx.set_ambience_march(_sector_march())   # a1-15 AUD#4: biome-shifted wind bed
 	_sfx.set_concussion(_concussion)
 	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
 	var want := 1.0 if sim.last_stand and not sim.victory else 0.0

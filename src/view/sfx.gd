@@ -252,7 +252,7 @@ func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) ->
 	p.play()
 
 
-func set_music_intensity(level: float, duck := 0.0) -> void:
+func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	## Ease the drum bed toward a target intensity (0 = sparse lull pattern,
 	## 1 = full-tilt combat phrase), minus a fast-attack duck under heavy hits.
 	## Equal-power crossfade between the two phase-locked loops; mix by volume
@@ -260,16 +260,25 @@ func set_music_intensity(level: float, duck := 0.0) -> void:
 	level = clampf(level, 0.0, 1.0)
 	var rate := 0.15 if duck > 0.3 else 0.04
 	var base_db := lerpf(-24.0, -9.0, level) - duck * 16.0
-	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0)))
+	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0)   # a1-15 AUD#7: boss music sits a touch louder
 	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0)))
 	_music.volume_db = lerpf(_music.volume_db, combat_db, rate)
 	# Wind is the lull's voice: -24 dB in dead calm, fading UNDER the drum
 	# floor (-36) at full combat; same duck as the drums.
 	_amb.volume_db = lerpf(_amb.volume_db, lerpf(-24.0, -36.0, level) - duck * 16.0, rate)
 	_music_lull.volume_db = lerpf(_music_lull.volume_db, lull_db, rate)
-	var p := lerpf(_music.pitch_scale, lerpf(0.9, 1.08, level), 0.04)
+	# a1-15 AUD#7: a boss fight drops the pitch FLOOR (heavier kick/low-tom) so it
+	# reads as its own theme, not just louder wave-1.
+	var p := lerpf(_music.pitch_scale, lerpf(0.82, 0.98, level) if boss else lerpf(0.9, 1.08, level), 0.04)
 	_music.pitch_scale = p
 	_music_lull.pitch_scale = p   # identical playback speed = zero drift
+
+
+func set_ambience_march(march: float) -> void:
+	# a1-15 AUD#4: the wind bed shifts character by biome — airy/high in the jungle,
+	# dropping to a low industrial hum toward the foundry — via pitch, so each place
+	# has its own air (was one static baked loop).
+	_amb.pitch_scale = lerpf(_amb.pitch_scale, lerpf(1.06, 0.72, clampf(march, 0.0, 1.0)), 0.02)
 
 
 func set_concussion(amount: float) -> void:

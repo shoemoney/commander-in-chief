@@ -150,3 +150,23 @@ func test_a1_supply_cue_split_from_hostile_whistle() -> void:
 		"friendly supply cue no longer shares the hostile strike whistle")
 	Runner.T.eq(evmap["supply_drop"][0], "supply_chime", "supply_drop plays the friendly chime")
 	Runner.T.eq(evmap["strike_warn"][0], "whistle", "strike_warn keeps the hostile whistle")
+
+
+# --- a1-15: boss music signature + per-biome ambience ---
+
+func test_a1_boss_music_heavier_and_ambience_marches() -> void:
+	var a := Sfx.new()
+	for i in 200: a.set_music_intensity(1.0, 0.0, false)
+	var normal_pitch: float = a._music.pitch_scale
+	var b := Sfx.new()
+	for i in 200: b.set_music_intensity(1.0, 0.0, true)
+	var boss_pitch: float = b._music.pitch_scale
+	Runner.T.ok(boss_pitch < normal_pitch, "boss music sits at a heavier (lower) pitch floor than normal combat")
+	var c := Sfx.new()
+	for i in 300: c.set_ambience_march(1.0)
+	var foundry_air: float = c._amb.pitch_scale
+	var d := Sfx.new()
+	for i in 300: d.set_ambience_march(0.0)
+	var jungle_air: float = d._amb.pitch_scale
+	Runner.T.ok(foundry_air < jungle_air, "foundry ambience is a lower hum than the jungle's airy bed")
+	a.free(); b.free(); c.free(); d.free()
