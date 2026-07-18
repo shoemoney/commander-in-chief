@@ -3875,7 +3875,9 @@ func _step_colossus() -> void:
 						py = sandbags[pi]["y"]
 						sandbags.remove_at(pi)
 					pi -= 1
-				events.append({"t": "barrel_blast", "x": px, "y": py})
+				# Dedicated collapse juice (not the barrel boom): a structural column
+				# drops — the view answers with dust + debris + a heavier shake.
+				events.append({"t": "parapet_collapse", "x": px, "y": py})
 		colossus["pv"] = cph
 	# Engage when the final gate scrolls into view.
 	if colossus.is_empty():

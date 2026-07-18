@@ -157,7 +157,8 @@ func test_c3_colossus_collapses_parapets() -> void:
 		if sb.has("parapet"):
 			cols[sb["parapet"]] = true
 	Runner.T.eq(cols.size(), 2, "two trench-parapet columns guard the Foundry")
-	# Phase 1 -> 2: the nearest column collapses.
+	# Phase 1 -> 2: the nearest column collapses — a lane the player learned
+	# opens up, and a dedicated parapet_collapse event fires for the view juice.
 	col["hp"] = SimWorld.COLOSSUS_HP / 2
 	sim.step([_idle()])
 	var cols2 := {}
@@ -165,6 +166,18 @@ func test_c3_colossus_collapses_parapets() -> void:
 		if sb.has("parapet"):
 			cols2[sb["parapet"]] = true
 	Runner.T.eq(cols2.size(), 1, "the phase-2 rise collapses one parapet column")
+	# The collapsed column's lane is now clear (an occupancy change, not just a count).
+	var gone_col: int = 220 if not cols2.has(220) else 420
+	var bags_at_gone := 0
+	for sb in sim.sandbags:
+		if sb["x"] == gone_col * Fixed.ONE:
+			bags_at_gone += 1
+	Runner.T.eq(bags_at_gone, 0, "the collapsed column's lane is fully cleared")
+	var collapse_fired := false
+	for ev in sim.events:
+		if ev.get("t", "") == "parapet_collapse":
+			collapse_fired = true
+	Runner.T.ok(collapse_fired, "a dedicated parapet_collapse event fires for the view")
 	# Phase 2 -> 3: the last column collapses.
 	col["hp"] = SimWorld.COLOSSUS_HP / 4
 	sim.step([_idle()])

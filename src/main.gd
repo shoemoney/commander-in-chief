@@ -270,6 +270,7 @@ const _EVENT_SOUND := {
 	"rear_breach": ["alarm", -9.0, 0.6],   # c3: something's coming up behind you — low rear klaxon
 	"mast_warn": ["alarm", -8.0, 0.9],     # c3: the mast is about to overheat — vacate the orbit
 	"mast_pulse": ["explosion", -3.0, 0.7], # c3: the mast core vents — a wide radial one-shot zone
+	"parapet_collapse": ["bunker_break", -4.0, 0.7], # c3: a Foundry trench-parapet column drops mid-fight
 	"claymore_plant": ["click_dry", -4.0, 0.8],   # deliberate arming click, no longer the mount clunk
 	"sandbag_plant": ["click_dry", -5.0, 0.6],    # low dig-in thud on the dedicated plant voice
 	"sandbag_break": ["vest_break", -10.0, 0.7],  # low burst-of-burlap: cover gone
@@ -1299,6 +1300,23 @@ func _consume_events() -> void:
 						"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
 						"col": Color(0.25, 0.22, 0.2, 0.7)})
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
+			"parapet_collapse":
+				# A Foundry trench-parapet column drops as the boss escalates —
+				# structural, not incendiary: a dust plume + tumbling debris + a
+				# heavier ground shake (distinct grammar from the barrel fireball).
+				_trauma = minf(1.0, _trauma + 0.4)
+				_rumble = maxf(_rumble, 0.6)
+				for di in 3:
+					_fx.append({"x": ev["x"], "y": ev["y"] - di * 8.0, "t": 0.0, "kind": "tex",
+						"tex": "fx_smoke", "sz": 18.0 + di * 6.0, "grow": 1.0, "fade": 2.4,
+						"rate": 0.007, "move": true, "vx": randf_range(-0.5, 0.5),
+						"vy": -0.35 - di * 0.15, "col": Color(0.34, 0.31, 0.28, 0.75)})
+				for _ci in 5:
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
+						"sz": randf_range(4.0, 8.0), "grow": -0.2, "fade": 1.4, "rate": 0.05,
+						"move": true, "vx": randf_range(-1.4, 1.4), "vy": randf_range(-1.6, 0.2),
+						"col": Color(0.5, 0.46, 0.4, 0.9)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(16.0, 22.0)})
 			"kill":
 				_ev_kill(ev)
 			"bounty_kill":
