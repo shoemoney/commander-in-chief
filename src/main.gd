@@ -5713,8 +5713,8 @@ func _draw_players() -> void:
 					# feet (proper displaced-water wake, not rays from center)
 					var apex := pos - wdir * 3.0
 					for sgn in [1.0, -1.0]:
-						var e1 := apex - wdir * 6.0 + wperp * (5.0 * sgn)
-						var e2 := apex - wdir * 13.0 + wperp * (9.0 * sgn)
+						var e1: Vector2 = apex - wdir * 6.0 + wperp * (5.0 * float(sgn))
+						var e2: Vector2 = apex - wdir * 13.0 + wperp * (9.0 * float(sgn))
 						draw_line(apex, e1, Color(0.82, 0.91, 0.98, 0.34 * _motion), 1.3)
 						draw_line(e1, e2, Color(0.82, 0.91, 0.98, 0.20 * _motion), 1.1)
 			# Get-up: blend the residual knockdown topple back out while the decaying
