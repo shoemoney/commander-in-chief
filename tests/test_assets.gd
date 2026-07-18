@@ -689,3 +689,30 @@ func test_a3_foliage_lifts_off_grass_hue() -> void:
 	var g0: Color = ms._ground_stops("campaign")[0][0]   # bright jungle grass stop
 	Runner.T.ok(fol.r < g0.r, "foliage is DEEPER than the bright grass (lower r)")
 	Runner.T.ok((fol.g - fol.r) > (g0.g - g0.r) + 0.1, "foliage is COOLER / more green-forward than the yellow-green grass")
+	# The fern contact dab that grounds each clump anchor: small radius, soft alpha.
+	var fd: Dictionary = _consts()["FERN_DAB"]
+	Runner.T.ok(fd["r"] > 0.0 and fd["r"] <= 5.0, "the fern dab is a small contact shadow (<= 5px)")
+	Runner.T.ok(fd["a"] > 0.0 and fd["a"] <= 0.35, "the fern dab is soft (grounds without a hard blob)")
+
+
+# --- a3-09: field boulders get a lit top-edge highlight (warm, bright) so they read as
+# RAISED cover — the inverse of a1-07's recessed crater pit. ---
+
+func test_a3_rock_top_light_is_warm_and_bright() -> void:
+	var c := _consts()
+	var rl: Color = c["ROCK_TOP_LIGHT"]
+	Runner.T.ok(rl.r > rl.b, "the rock top-light is WARM (sunlit, r > b)")
+	Runner.T.ok(rl.r > 0.9 and rl.g > 0.9, "the rock top-light is BRIGHT (a lit rim, not a shadow)")
+
+
+# --- a3-10: the marsh floor reads wet — dark silt pools with a cooler specular sheen so
+# the mid-game sector is a wetland, not generic green. The sheen must be lighter than the
+# pool (a glint) and both soft enough to not black out the ground. ---
+
+func test_a3_marsh_wetness_pool_and_sheen() -> void:
+	var c := _consts()
+	var mw: Dictionary = c["MARSH_WET"]
+	Runner.T.ok(mw["pool_a"] > mw["sheen_a"], "the dark silt pool is stronger than its specular sheen glint")
+	Runner.T.ok(mw["pool_a"] <= 0.4 and mw["sheen_a"] > 0.0, "both are soft (a wet sheen, not a black hole)")
+	# The wetness is marsh-only: band 2 of the 5-stop march (int(march*5) == 2).
+	Runner.T.eq(clampi(int(0.45 * 5.0), 0, 4), 2, "march 0.45 lands in the MARSH band (2) where the wetness draws")

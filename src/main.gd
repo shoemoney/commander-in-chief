@@ -3209,6 +3209,9 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 # < 0.4) and every additive term is capped <= 0.66 so MG-spam sums lower and explosions keep
 # the white-hot bright-point monopoly. Pinned so the hierarchy can't regress silently.
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
+const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a fern clump anchor (under the sprite)
+const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
+const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17}   # a3-10: wet-silt pool alpha + its cool specular sheen alpha
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
 	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
 
@@ -3811,7 +3814,7 @@ func _draw_terrain() -> void:
 				# a3-08: a tiny dark contact dab grounds the fern CLUMP anchor — ferns got
 				# no _ground_shadow (only trees/litter did), so they floated on the lawn.
 				# One dab per anchor (satellites cluster on it), not per tuft.
-				_ground_shadow(Vector2(fx, fy_px + 2.0), 3.5, 0.22, Color(0.0, 0.04, 0.0))
+				_ground_shadow(Vector2(fx, fy_px + 2.0), FERN_DAB["r"], FERN_DAB["a"], Color(0.0, 0.04, 0.0))
 				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
 				# Context bias (GPT round-2): vegetation drifts hug dirt-patch
 				# cells (same 64px hash predicate as the ground painter) — the
@@ -3897,6 +3900,11 @@ func _draw_terrain() -> void:
 						_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
 							float(h2 % 628) / 100.0 + tsway, tsc, tval)
 
+	# a3-10 (AD#9/ENV#5): the MARSH floor gets wet — reflective silt patches with a cool
+	# sheen so the mid-game sector reads as a WETLAND, not generic green (the water shader
+	# wets only water bodies, never the DRY marsh ground). Under the props/signatures.
+	if ug_band == 2:
+		_draw_marsh_wetness(cam_y)
 	# War-torn battlefield litter: sparse, deterministic scatter of the
 	# Per-band SIGNATURE silhouettes under the litter (c2 3v): each sector owns
 	# one prop family the others never show.
@@ -4185,6 +4193,29 @@ func _draw_foundry_arena() -> void:
 		return
 
 
+func _draw_marsh_wetness(cam_y: float) -> void:
+	# a3-10: scattered wet-silt pools with a cool sheen glint — the marsh reads as a
+	# waterlogged wetland. Deterministic hash scatter (no rng); pools are dark cool silt,
+	# each with a small offset specular highlight so it reads WET, not just dark.
+	var woy := -fposmod(cam_y, 96.0)
+	var wbase := int(floor(cam_y / 96.0))
+	for ty in 5:
+		for tx in 7:
+			var h := Art.cell_hash(tx * 23 + 7, (wbase + ty) * 5 + 1)
+			if h % 3 != 0:
+				continue
+			var wp := Vector2(tx * 96.0 + float(h % 44), woy + ty * 96.0 + float((h / 7) % 44))
+			var ws := 20.0 + float(h % 18)
+			# Dark cool silt pool.
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(wp - Vector2(ws, ws) / 2.0, Vector2(ws, ws)),
+				false, Color(0.05, 0.11, 0.10, MARSH_WET["pool_a"]))
+			# Cool specular sheen, offset up-left so the pool reads WET (a glint off water).
+			var sh := ws * 0.42
+			draw_texture_rect(Art.tex("fx_softspot"),
+				Rect2(wp + Vector2(-sh * 0.35, -sh * 0.55), Vector2(sh, sh * 0.6)),
+				false, Color(0.55, 0.70, 0.72, MARSH_WET["sheen_a"]))
+
+
 func _draw_rocks() -> void:
 	# Cover TIERS (c2 3v: one-size rocks made every LOS puzzle "is there a rock
 	# between us"). Kind picks the silhouette class — classic rock, pass-through
@@ -4226,9 +4257,16 @@ func _draw_rocks() -> void:
 				_ground_shadow(pos, 12.0, 0.42 * fade)
 				var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
 				var rcol := Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5)
-				_spr(rtex, pos, float(rh3 % 628) / 100.0,
-					{"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex],
-					Color(rcol.r, rcol.g, rcol.b, fade))
+				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex]
+				_spr(rtex, pos, float(rh3 % 628) / 100.0, rsc, Color(rcol.r, rcol.g, rcol.b, fade))
+				# a3-09 (AD#6): a lit top-edge highlight — a thin warm crescent on the
+				# boulder's upper rim implies overhead light, so a rock reads as RAISED
+				# cover (the inverse of a1-07's crater inner-pit), not a threat or a hole.
+				# Only the domed boulders; the flat log (tree_dead2) has no raised rim.
+				if rtex != "tree_dead2":
+					var rr := 9.0 * rsc + 2.0
+					draw_arc(pos + Vector2(0.0, 0.5), rr, PI + 0.55, TAU - 0.2, 12,
+						Color(ROCK_TOP_LIGHT.r, ROCK_TOP_LIGHT.g, ROCK_TOP_LIGHT.b, 0.5 * fade), 1.8)
 
 
 func _draw_sandbags() -> void:
