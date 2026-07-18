@@ -16,7 +16,7 @@ Godot lives at `/Applications/Godot.app/Contents/MacOS/Godot` (universal binary,
 # class_name script (Godot's global class cache must re-scan). CI does this.
 godot --headless --path . --import
 
-# Full test suite (~seconds; count grows constantly — 147 methods / 1698 assertions as of P3 pass 3)
+# Full test suite (~seconds; count grows constantly — 159 methods / 1771 assertions as of the 2026-07-17 corpus drain)
 godot --headless --path . -s res://tests/run_tests.gd
 
 # Single suite: filter by substring of the script filename

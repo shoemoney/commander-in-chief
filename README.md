@@ -14,7 +14,7 @@
 
 ![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-147%20methods%20%2F%201698%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-159%20methods%20%2F%201771%20asserts-brightgreen)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20greybox-orange)
 ![License](https://img.shields.io/badge/assets-legacy art%20licensed%20%C2%B7%20not%20public--ready-red)
@@ -39,7 +39,8 @@ a shared coin economy where every kill mints and every revive spends.
 |---|---|---|
 | [🏗️ Architecture](#%EF%B8%8F-architecture--the-simview-split) | [🎮 Controls](#-controls) | [🕹️ Modes](#%EF%B8%8F-modes) |
 | [👹 The Roster](#-the-roster) | [🎁 Drops & the Wheel](#-drops--the-supply-wheel) | [🧪 Testing](#-headless-test-suite) |
-| [🌐 Netcode](#-netcode-deterministic-lockstep) | [🚀 Quick Start](#-quick-start-macos--apple-silicon) | [🎨 Art](#-art) |
+| [📻 The Radio](#-the-radio) | [🌐 Netcode](#-netcode-deterministic-lockstep) | [🚀 Quick Start](#-quick-start-macos--apple-silicon) |
+| [🎨 Art](#-art) | | |
 
 ---
 
@@ -93,9 +94,9 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 | Move | WASD | Left stick |
 | Aim (decoupled) | Mouse or arrow keys | Right stick |
 | Fire / tank cannon 🔫 | Space / LMB | RT / R1 |
-| Grenade 💣 | Shift / RMB | L1 |
+| Grenade 💣 — **hold through the apex = AIRBURST** 🎈 | Shift / RMB | L1 |
 | Dodge roll (i-frames) 🤸 | C | B |
-| Interact (board/exit tank) 🚜 | F | X |
+| Interact 🚜 (board/exit tank · **gunner seat** on an occupied hull · **salvage hulks** · plant claymores) | F | X |
 | Revive (spend War Chest) 💸 | E | Y |
 | **Supply wheel** (hold, flick, release) 🎡 | Q | BACK |
 | Toggle local 2P 👥 | F2 | — |
@@ -108,8 +109,8 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 
 | Mode | What it is |
 |---|---|
-| 🏔️ **Campaign** | 5 gated sectors → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**) |
-| ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, minibosses holding the shop hostage |
+| 🏔️ **Campaign** | 5 gated sectors → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**). Gates 2 & 4 **fork**: `< CACHE` (free crate ringed by mines) vs `BOUNTY >` (two elites, one marked) — walking a side IS the choice 🛣️ |
+| ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, minibosses that **fly in** over 7s and **escalate by tier** (tighter spray, extra mortars by w15), contested **parachute supply drops** rushers try to steal 🪂, and the wave-7+ **Broadcast Tower** debut |
 | 👥 **Local 2P co-op** | Shared War Chest, revive tether, per-device input glyphs |
 | 📅 **Daily Run** | Seed-of-the-day challenge run (Hall entries wear a `*DAILY` tag) |
 | 🎞️ **Watch Last Run** | Every run records inputs → `user://last_run.replay`, replayable from the menu |
@@ -136,10 +137,11 @@ Every threat telegraphs before it resolves — that's the **readable chaos** pil
 | 🐸 Frogman | Submerged in rivers, grenades-only until it surfaces to lunge | Kill it on the surface |
 | 🛸 Drone | Hovering strafer, spawns **marked** (3× trophy bounty + crown) | Watch the tether, claim the crown |
 | 🔩 MG Nest | 3-hit armor, alarm lock-on, teaching card | Break its line or flank — it cracks under fire |
+| 📡 **Broadcast Tower** | Rooted rally mast (endless w7+): every ground trooper in its 140px aura runs **+25%**, and it holds the wave open | Kill the mast, break the rally — 5 hits or one grenade |
 | 🚙 **Technical** | *The fastest thing on the field.* Cruises, revs 30t (dashed line = still aiming), then **locks a charge lane** (solid line = committed) — 3 px/t, can't steer | Sidestep the lane; one shot drops it; smoke denies the lock; water kills the charge 🌊 |
 | 🛢️ Explosive barrels | Bullets & enemy contact detonate; 8-tick chain fuse goes white-hot | Feed the chain — or flee it |
 | 🗼 Mortar Observer | Shells you for stalling | Kill him or push forward |
-| 🚁 Bridge Gunship | Gate boss every 3rd gate — bullets chip, grenades chunk | When it dies, see below 👇 |
+| 🚁 Bridge Gunship | Gate boss every 3rd gate — bullets chip, grenades chunk. Chin-turret **charge glow** telegraphs each spray; mortars **lead your walk** while the hull keeps drifting | When it dies, see below 👇 |
 | 🪂 **Downed Pilot** | Ejects from any dead gunship, staggers for the enemy line. **TOUCH to rescue (+100¢). Shooting him pays NOTHING.** Tank treads *grab* him, the airstrike spares him, roll-touch works | Reach him before the top edge — the label turns red **ESCAPING!** at the cliff |
 | 🏭 Foundry Colossus | The world ends here: 3 phases, pure armor, inverts the scroll | Grenades only. Last Stand. 🫡 |
 
@@ -151,14 +153,52 @@ Every threat telegraphs before it resolves — that's the **readable chaos** pil
 (permanent 3-fan — stacks with Spread into a 5-fan!) · 🔴 REND (shears riot shields) ·
 🟢 CLAYMORE · ⚪ SMOKE (breaks locks) · 🟡 FLASHBANG (field-wide stun, fair re-arm).
 
-**The wheel** 🎡 (hold Q / BACK, flick, release — prices from the shared War Chest):
+**The wheel** 🎡 went **8-way** (hold Q / BACK, flick, release — coin prices from the shared War Chest):
 
 | Direction | Buy | Effect |
 |---|---|---|
 | ⬅️ | AMMO +30 | MG belt top-up |
 | ⬆️ | GRENADES +4 | The armor-opener |
-| ➡️ | FLAK VEST | Absorbs exactly one hit 🦺 |
+| ➡️ | FLAK VEST | Absorbs exactly one hit 🦺 — **campaign price creeps** 60→75→90→105→120¢ per buy |
 | ⬇️ | AIRSTRIKE | **Called in**, telegraphed, spares the submerged *and the pilot* ✈️ |
+| ↙️ | SANDBAGS 40¢ | Plants a **36×10 cover segment** along your aim 🧱 — blocks bullets & rusher pathing both ways, dies to one grenade or tank treads, field cap 6 |
+| ↗️ | SUPPLY CALL ★1 | Spends a **Commendation** (never coins) for a free useful supply 🎖️ |
+
+### 🎖️ Commendations & field-craft
+
+- **Commendation tokens** ★ — minted by *play*, never bought: the 20-kill surge and every
+  flawless gate pay one (cap 2). A death burns one. Spend on the wheel's ↗️ socket —
+  the score→power bridge the panel voted 9/9 for.
+- **Tank Crew** 👥🚜 — P2 can INTERACT an *occupied* tank: independent twin-stick **coax
+  gunner** seat on his own ammo, +25% fuel tax, driver exit promotes the gunner, the bail
+  window covers the whole crew.
+- **Tank Hulks** 🛢️ — dead hulls smolder as **two-way bullet cover** for ~17s; INTERACT
+  salvages **+2 grenades** and strips the cover. Keep the wall or take the ammo.
+- **Airburst** 💣🎈 — keep holding the grenade button *since the throw* and the charge pops
+  at the arc's apex: tap for range, hold for the pop.
+
+---
+
+## 📻 The Radio
+
+A single radio-filtered **Commander** (with a Spotter on the second channel and one
+panicked Pilot) barks the big beats — 14 lines, ≤8 words each, priority-laddered so the
+radio never talks over itself and never wears out on the hundredth replay:
+
+```mermaid
+flowchart LR
+    D["💀 defeat / Last Stand<br/>(interrupts everything)"] --> N["🚫 denials & pilot calls"]
+    N --> W["⚠️ tactical warnings"]
+    W --> F["🎖️ praise & flavor"]
+```
+
+| Voice | Owns | Filter |
+|---|---|---|
+| 🎖️ **Radio Commander** | *"War Chest empty. You're on your own."* · *"Overlord out."* · Last Stand · **VICTOLY!** | 1.1 kHz bandpass + overdrive — tactical radio |
+| 🎯 **Spotter** | Pilot down · shop locked · *"Clip dry! Bash 'em!"* | Lighter, crisp |
+| 🪂 **Downed Pilot** | *"Don't shoot! I'm worth a hundred coins!"* (0.4s behind the callout) | Dry close-mic — he's HERE |
+
+Concussion muffles the radio too — by intent. A stunned soldier hears underwater radio. 🌊
 
 ---
 
@@ -170,7 +210,7 @@ godot --headless --path . -s res://tests/run_tests.gd   # full suite
 SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter by suite name 🎯
 ```
 
-**147 test methods / 1698 assertions** — fixed-point math, seeded RNG streams, the 1986
+**159 test methods / 1771 assertions** — fixed-point math, seeded RNG streams, the 1986
 mechanic grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus,
 every archetype's behavior contract (nest armor, technical charge lock, pilot
 rescue/grace/forfeit), Endless War waves & shop, lockstep loopback, replay integrity,
@@ -249,7 +289,9 @@ FX stay **Kenney CC0** (`assets/kenney/`).
 > ⚠️ The legacy art-derived sprites are proprietary (purchased license), **not** CC0 —
 > clear them before making this repo public. Final art per the master plan is a
 > commissioned pixel-art pass; these are the readability layer until then.
-> **No generative-AI assets ship.** 🚫🤖
+> **No generative-AI *art* ships.** 🚫🤖 The 14 VO radio barks (`assets/vo/`) are the
+> one sanctioned exception: speech synthesis-generated per the 9/9 voices-panel consensus,
+> owner-approved 2026-07-17.
 
 Accessibility baked into the view 🧏: colorblind-safe palette routing (`Art.safe`),
 reduce-motion mode (steady lights instead of strobes/pulses), photosensitivity
