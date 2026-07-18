@@ -349,3 +349,35 @@ func test_c3_drops_pull_off_center() -> void:
 					drops += 1
 			if drops >= 1:
 				break
+
+
+func test_c3_mast_warn_precedes_jet_on_wave_entry() -> void:
+	# Judge r1: the wave-LOCAL phase guarantees a warn before the first jet no
+	# matter what global tick a hazard wave begins on. Start wave 5 from a tick
+	# whose GLOBAL phase would be mid-jet, and assert no unwarned hit lands
+	# before a mast_warn has fired.
+	var sim := SimWorld.new(9, 1, "endless")
+	sim.wave = 4
+	# A global tick deep in the jet window: posmod(tick,180) in [120,180].
+	sim.tick_count = 10 * SimWorld.MAST_CYCLE_TICKS + 150
+	sim._start_wave()   # -> wave 5; wave_start_tick captured here
+	Runner.T.eq(sim.wave, 5, "advanced into a hazard wave")
+	var p: Dictionary = sim.players[0]
+	p["x"] = SimWorld.MAST_X
+	p["y"] = SimWorld.MAST_Y
+	p["vest"] = true
+	p["hurt_iframes"] = 0
+	var warned_first := false
+	var hit_before_warn := false
+	for i in SimWorld.MAST_CYCLE_TICKS:
+		sim.tick_count += 1
+		sim.events.clear()
+		var vest_before: bool = p["vest"]
+		sim._step_mast_hazard()
+		for ev in sim.events:
+			if ev["t"] == "mast_warn":
+				warned_first = true
+		if vest_before and not p["vest"] and not warned_first:
+			hit_before_warn = true
+	Runner.T.ok(warned_first, "a mast_warn fires within the first wave-local cycle")
+	Runner.T.ok(not hit_before_warn, "no unwarned jet lands on hazard-wave entry (wave-local phase)")

@@ -446,6 +446,7 @@ var last_gate_y: int = 0          # 0 = no checkpoint yet (sentinel)
 var stall_ticks: int = 0
 var mode: String = "campaign"     # "campaign" | "endless"
 var wave: int = 0
+var wave_start_tick: int = 0       # c3 3v: tick the current wave began (derived; not hashed) — the mast hazard's phase is wave-LOCAL so its warn always precedes the first jet
 var wave_pending: int = 0
 var wave_spawn_cd: int = 0
 var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter)
@@ -2890,7 +2891,10 @@ func _step_mast_hazard() -> void:
 	## before wave 3 so the wave-2 torture never sees it.
 	if wave < 5 or wave % 5 != 0:
 		return
-	var phase: int = posmod(tick_count, MAST_CYCLE_TICKS)
+	# Wave-LOCAL phase (judge r1): counting from the wave's start guarantees the
+	# 90t warn always precedes the first jet — a global-tick phase could drop a
+	# jet on wave entry with no tell. wave_start_tick is derived, never hashed.
+	var phase: int = posmod(tick_count - wave_start_tick, MAST_CYCLE_TICKS)
 	if phase == MAST_CYCLE_TICKS - MAST_JET_TICKS - MAST_WARN_TICKS:
 		events.append({"t": "mast_warn", "x": MAST_X, "y": MAST_Y})
 	elif phase >= MAST_CYCLE_TICKS - MAST_JET_TICKS:
@@ -3547,6 +3551,7 @@ func _wave_hostiles_cleared() -> bool:
 
 func _start_wave() -> void:
 	wave += 1
+	wave_start_tick = tick_count
 	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
 	wave_spawn_cd = 1
 	deaths_this_wave = 0
