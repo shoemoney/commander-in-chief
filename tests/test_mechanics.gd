@@ -2420,3 +2420,27 @@ func test_c4_destructible_walls() -> void:
 		if rk.get("kind", 0) == 2:
 			gone2 = false
 	Runner.T.ok(gone2, "an explosion breaches a wall in one shot")
+
+
+func test_c4_sector_landmarks() -> void:
+	# c4 2v: each seg>=2 arena gate stamps a UNIQUE sector-keyed landmark — sector
+	# 2 (marsh) a kind-2 PIPELINE run, sector 4 (foundry) a kind-3 CRANE pair — so
+	# a large mass reads which sector you're in. Seg>=2 (past the -1957 torture
+	# horizon) -> goldens byte-identical.
+	var sim := SimWorld.new(43, 1)
+	sim.camera_top = -6000 * SimWorld.F_ONE
+	sim._step_camera()
+	var g2y: int = -2000 * SimWorld.F_ONE + 220 * SimWorld.F_ONE
+	var pipe := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and absi(rk["y"] - g2y) < 8 * SimWorld.F_ONE:
+			pipe += 1
+	Runner.T.ok(pipe >= 2, "the marsh sector (gate 2) stamps a kind-2 pipeline (%d slabs)" % pipe)
+	var crane := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 3 and rk["y"] <= -4000 * SimWorld.F_ONE + 224 * SimWorld.F_ONE \
+				and rk["y"] >= -4000 * SimWorld.F_ONE + 172 * SimWorld.F_ONE:
+			crane += 1
+	Runner.T.ok(crane >= 2, "the foundry sector (gate 4) stamps a kind-3 crane pair (%d)" % crane)
+	# The pipeline's 80px kind-2 pitch threads a hull-clear lane at the dropped slot.
+	Runner.T.ok(80 * SimWorld.F_ONE >= SimWorld.HULL_CLEARANCE, "the pipeline threads a hull-clear lane")

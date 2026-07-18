@@ -3401,21 +3401,31 @@ func _step_camera() -> void:
 			var hero_kind: int = 3 if absi(_next_gate_y) / GATE_SPACING >= COVER_VARIETY_SEG else 0
 			rocks.append({"x": (150 if _gate_counter % 2 == 1 else 490) * F_ONE,
 				"y": _next_gate_y + 140 * F_ONE, "kind": hero_kind})
-			# Oversized RUINED-WALL mass (c2 3v: no LOS focal points): gates 2+,
-			# 1-in-2 by hash, a 3-slab kind-2 wall spanning ~240px (~38% of the
-			# corridor) with a hash-placed gap >= HULL_CLEARANCE so a lane always
-			# threads it. Opposite flank to the hero wreck. Inert past gate 1.
-			if absi(_next_gate_y) / GATE_SPACING >= COVER_VARIETY_SEG \
-					and _mix(_gate_counter, 811) % 2 == 0:
+			# c4 2v PER-SECTOR LANDMARK (was a 1-in-2 random ruined wall): a UNIQUE
+			# authored solid mass keyed by SECTOR so a large landmark tells you which
+			# sector you are in (a routing anchor, not a random wall) — sector 2 marsh
+			# = a PIPELINE run (kind-2), sector 4 foundry = a CRANE hero pair (kind-3);
+			# other sectors keep the classic wall. Seg>=2 only (the ~-1957 stream
+			# horizon leaves gate 2+ unstreamed in torture -> goldens byte-identical);
+			# every lane clears HULL_CLEARANCE by the 80px kind-2 pitch; solidity is
+			# free via the rock move-revert. Opposite flank to the hero wreck.
+			if absi(_next_gate_y) / GATE_SPACING >= COVER_VARIETY_SEG:
+				var lm_sector: int = absi(_next_gate_y) / GATE_SPACING
 				var wall_side: int = 460 if _gate_counter % 2 == 1 else 60   # opposite the hero
-				var wall_gap: int = _mix(_gate_counter, 907) % 3   # which slab is dropped for the lane
-				# Slabs at 80px pitch (kind-2 half-width 40 → edge-to-edge): the
-				# dropped slot is an 80px lane >= HULL_CLEARANCE (44) by pitch.
-				for wslab in 3:
-					if wslab == wall_gap:
-						continue
-					rocks.append({"x": (wall_side + (wslab - 1) * 80) * F_ONE,
-						"y": _next_gate_y + 220 * F_ONE, "kind": 2})
+				var lm_y: int = _next_gate_y + 220 * F_ONE
+				if lm_sector == 4:
+					# Foundry CRANE: a kind-3 hero focal PAIR (a tall recognizable mass).
+					rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 3})
+					rocks.append({"x": (wall_side + (40 if wall_side < 320 else -40)) * F_ONE,
+						"y": lm_y - 44 * F_ONE, "kind": 3})
+				else:
+					# Marsh PIPELINE (sector 2) / default: a 3-slab kind-2 horizontal run
+					# with a hash-dropped lane slot (80px pitch -> the slot >= HULL_CLEARANCE).
+					var lm_gap: int = _mix(_gate_counter, 907) % 3
+					for wslab in 3:
+						if wslab == lm_gap:
+							continue
+						rocks.append({"x": (wall_side + (wslab - 1) * 80) * F_ONE, "y": lm_y, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
 					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})

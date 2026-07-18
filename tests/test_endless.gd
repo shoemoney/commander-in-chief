@@ -488,7 +488,7 @@ func test_c4_shop_barricades() -> void:
 	for sb in sim.sandbags:
 		if sb.get("world", 0) == 1:
 			bar += 1
-	Runner.T.ok(bar >= 10, "the shop is walled with barricades (%d world bags)" % bar)
+	Runner.T.eq(bar, 12, "the shop is walled with exactly 4 L-clusters (12 world bags)")
 	# Ride out the intermission: the barricades crumble.
 	var crumbled := false
 	for t in SimWorld.WAVE_INTERMISSION_TICKS + 4:
