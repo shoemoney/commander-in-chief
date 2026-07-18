@@ -45,7 +45,7 @@ func test_a1_water_stops_are_five_and_biome_distinct() -> void:
 	Runner.T.eq(shallow.size(), 5, "water shallow ramp has one stop per sector")
 	Runner.T.eq(deep.size(), 5, "water deep ramp has one stop per sector")
 	# jungle stop unchanged (the river opener must stay teal, not go muddy early)
-	Runner.T.ok(shallow[0].is_equal_approx(Color(0.21, 0.44, 0.47)), "jungle shallow stays teal")
+	Runner.T.ok(shallow[0].is_equal_approx(Color(0.24, 0.43, 0.40)), "jungle shallow is a de-cerulaned olive-teal (a2-06)")
 	# the journey actually MOVES: the foundry water must be far from the jungle water
 	# (the old capped soot-lerp left it muddy-blue). Warm/red foundry vs cool jungle.
 	Runner.T.ok(deep[4].r > deep[0].r + 0.1, "foundry deep water is warmer (redder) than jungle")
@@ -53,7 +53,7 @@ func test_a1_water_stops_are_five_and_biome_distinct() -> void:
 	# mid-stops carry their biome, not just the endpoints (judge a1-03 r2):
 	Runner.T.ok(shallow[2].g > shallow[2].b and shallow[2].g > shallow[2].r,
 		"marsh (sector 2) shallow leans GREEN — murk, not blue")
-	Runner.T.ok(deep[3].b < deep[0].b - 0.08 and absf(deep[3].r - deep[3].g) < 0.06,
+	Runner.T.ok(deep[3].b < deep[0].b - 0.04 and absf(deep[3].r - deep[3].g) < 0.06,
 		"ruins (sector 3) deep is a de-blued neutral SLATE, not the jungle blue")
 	# Rendered evidence (jungle river stays teal, no regression):
 	# scratchpad/shots_a1_v5/03-river-crossing.png
@@ -376,3 +376,13 @@ func test_a2_tiny_decor_drops_rim() -> void:
 	Runner.T.ok(ms._tiny_decor_no_rim("ammobox", 8.0), "tiny decor (ammobox @8px) skips the black-speckle rim")
 	Runner.T.ok(not ms._tiny_decor_no_rim("rock1", 40.0), "a large rock keeps its rim")
 	Runner.T.ok(not ms._tiny_decor_no_rim("rusher", 8.0), "a small THREAT keeps its rim (it is not decor)")
+
+
+# --- a2-06: jungle water de-cerulaned toward olive/tea ---
+
+func test_a2_jungle_water_decerulaned() -> void:
+	var c := _consts()
+	var shallow: Array = c["_WATER_SHALLOW_STOPS"]
+	var deep: Array = c["_WATER_DEEP_STOPS"]
+	Runner.T.ok(shallow[0].g >= shallow[0].b, "jungle shallow water leans olive/tea (green >= blue), not saturated cerulean")
+	Runner.T.ok(deep[0].b < 0.30, "jungle deep water pulled off the saturated blue")

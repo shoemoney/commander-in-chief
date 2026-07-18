@@ -442,9 +442,9 @@ func _setup_water() -> void:
 # blue and foundry water read muddy-blue — the one terrain layer off the journey.
 # Quantized per sector like the ground (the gate IS the shift): jungle teal ->
 # scorched algae -> marsh murk-green -> ruins slate -> foundry molten-rust.
-const _WATER_SHALLOW_STOPS := [Color(0.21, 0.44, 0.47), Color(0.31, 0.40, 0.30),
+const _WATER_SHALLOW_STOPS := [Color(0.24, 0.43, 0.40), Color(0.31, 0.40, 0.30),   # a2-06: jungle stop de-cerulaned toward olive/tea
 	Color(0.25, 0.40, 0.24), Color(0.30, 0.34, 0.36), Color(0.46, 0.28, 0.18)]
-const _WATER_DEEP_STOPS := [Color(0.08, 0.19, 0.31), Color(0.13, 0.20, 0.16),
+const _WATER_DEEP_STOPS := [Color(0.10, 0.20, 0.26), Color(0.13, 0.20, 0.16),   # a2-06: jungle deep less blue
 	Color(0.09, 0.20, 0.11), Color(0.12, 0.15, 0.19), Color(0.25, 0.10, 0.06)]
 
 
@@ -4239,6 +4239,12 @@ func _draw_water() -> void:
 		# Banks (drawn over the shader's shore edges).
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, bank_col)
 		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, bank_col)
+		# a2-06 AD#8: a lighter/warmer SHALLOWS band hugging each bank so the river reads
+		# with DEPTH (shallow at the edges -> deep mid-channel) instead of a flat slab.
+		var wsec2 := clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)
+		var shallows: Color = _WATER_SHALLOW_STOPS[wsec2].lerp(Color(0.72, 0.74, 0.62), 0.45)
+		draw_rect(Rect2(0, wy + 1.0, 640.0, 5.0), Color(shallows.r, shallows.g, shallows.b, 0.4))
+		draw_rect(Rect2(0, wy + wh - 6.0, 640.0, 5.0), Color(shallows.r, shallows.g, shallows.b, 0.4))
 		# Mud banks (2v second terrain): brown half-speed strips flanking the
 		# band — drawn under the sand lips so the slow zone reads as terrain.
 		# Alpha 0.75 -> 0.92 (c2 3v: half-speed ground must not read as a
