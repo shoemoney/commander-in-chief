@@ -2479,3 +2479,31 @@ func test_c4_lane_block_reroute() -> void:
 	var en := SimWorld.new(43, 1, "endless")
 	en.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300
 	Runner.T.ok(not en._lane_blocked(blk_x, span_y), "endless is never lane-blocked")
+	# The reroute bypass stays hull-clear against the CHOKE bite at the span y.
+	var cb: Array = sim._choke_bounds(span_y)
+	var pass_lo: int = maxi(cb[0], SimWorld.WORLD_LEFT + 200 * SimWorld.F_ONE) if blk_left else cb[0]
+	var pass_hi: int = cb[1] if blk_left else mini(cb[1], SimWorld.WORLD_RIGHT - 200 * SimWorld.F_ONE)
+	Runner.T.ok(pass_hi - pass_lo >= SimWorld.HULL_CLEARANCE, "the block+choke still leave a hull-clear bypass")
+	# Move-revert: pushing a player into the sealed span keeps it OUT (reroute).
+	var sim3 := SimWorld.new(43, 1)
+	sim3.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300
+	sim3.camera_top = span_y - 100 * SimWorld.F_ONE
+	var pp: Dictionary = sim3.players[0]
+	var edge_x: int = (SimWorld.WORLD_LEFT + 200 * SimWorld.F_ONE) if blk_left else (SimWorld.WORLD_RIGHT - 200 * SimWorld.F_ONE)
+	pp["x"] = edge_x + (8 if blk_left else -8) * SimWorld.F_ONE
+	pp["y"] = span_y
+	var push := SimInput.new()
+	push.move_x = -256 if blk_left else 256
+	for i in 20:
+		sim3._step_players([push])
+	Runner.T.ok(not sim3._lane_blocked(pp["x"], pp["y"]), "the player is kept OUT of the sealed span (reroute, no softlock)")
+	# The telegraph emits a lane_seal on the seal transition.
+	var sim4 := SimWorld.new(43, 1)
+	sim4.camera_top = -(band * SimWorld.GATE_SPACING + 100 * SimWorld.F_ONE)
+	sim4.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300
+	sim4._step_camera()
+	var sealed := false
+	for ev in sim4.events:
+		if ev.get("t", "") == "lane_seal":
+			sealed = true
+	Runner.T.ok(sealed, "a lane_seal telegraph event fires at the seal transition")

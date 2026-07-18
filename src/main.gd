@@ -1119,6 +1119,19 @@ func _check_trench_edges() -> void:
 		_trench_prev[i] = now
 
 
+func _lane_sector_dust(wy: float) -> Color:
+	# c4 2v: recolor lane-block dust by sector so the tell reads as the place.
+	match int(absf(wy) / float(SimWorld.GATE_SPACING)):
+		2:
+			return Color(0.42, 0.5, 0.34)   # marsh: mossy silt
+		3:
+			return Color(0.46, 0.44, 0.42)  # ruins: grey rubble
+		4:
+			return Color(0.6, 0.4, 0.26)    # foundry: rust ash
+		_:
+			return Color(0.5, 0.42, 0.34)
+
+
 func _consume_events() -> void:
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
@@ -1387,13 +1400,14 @@ func _consume_events() -> void:
 				_burst(ev["x"], ev["y"], "dust", 8, 1.2, 2.4, 0.35)
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(18.0, 24.0)})
 			"lane_warn":
-				# c4 2v: a lane is about to SEAL — a rising dust tell + alert at the span.
-				_burst(ev["x"], ev["y"], "dust", 6, 0.8, 2.0, 0.4, 0.0, -0.3, false, Color(0.55, 0.45, 0.35))
+				# c4 2v: a lane is about to SEAL — a rising dust tell + alert at the span,
+				# the dust recolored by the sector (marsh / ruins / foundry).
+				_burst(ev["x"], ev["y"], "dust", 6, 0.8, 2.0, 0.4, 0.0, -0.3, false, _lane_sector_dust(ev["y"]))
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.02})
 			"lane_seal":
-				# c4 2v: the lane SLAMS shut — a debris burst + a jolt so the reroute reads.
+				# c4 2v: the lane SLAMS shut — a sector-tinted debris burst + a jolt.
 				_trauma = minf(1.0, _trauma + 0.3)
-				_burst(ev["x"], ev["y"], "dust", 9, 1.2, 2.4, 0.35, 0.0, -0.2, false, Color(0.5, 0.42, 0.34))
+				_burst(ev["x"], ev["y"], "dust", 9, 1.2, 2.4, 0.35, 0.0, -0.2, false, _lane_sector_dust(ev["y"]))
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"lane_clear":
 				# c4 2v: the lane reopens — a light settling puff.
