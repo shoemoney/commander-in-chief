@@ -1903,6 +1903,10 @@ func _any_player_smoked() -> bool:
 	return false
 
 
+# a2-12: the non-flesh KILL kinds (machines/emplacements) — throw metal sparks.
+# shield=m_bombsuit is an armored HUMAN (flesh, keeps blood); sniper/grenadier/sapper/
+# courier/ghillie/pilot/rusher/elite are all infantry; the spotter vehicles aren't
+# direct kill-kinds. So this set is exhaustive for machine deaths.
 const _METAL_KINDS := {"drone": true, "technical": true, "broadcast": true, "mg_nest": true}
 
 static func _gib_col(kkind: String) -> Color:
