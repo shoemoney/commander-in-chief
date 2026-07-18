@@ -20,6 +20,10 @@ const SCREEN_CENTER := Vector2(320, 180)
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
 const _LITTER_EARLY := ["barrel", "crate_stack", "rock1", "rock2", "tent", "ammobox", "barrier",
 	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
+const _LITTER_MID_A := ["tree_dead1", "tree_dead2", "tree_dead3", "rock1", "rock2",
+	"barrel", "tank_trap", "hedge", "flag_marker"]   # stump-field band: the jungle thins
+const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
+	"rock1", "barricade", "ammobox"]                 # marsh/ruins band: the war shows
 const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_technical", "wreck_light_tank",
 	"corpse_soldier1", "corpse_soldier2", "crater",
 	"trench", "barricade", "radio_tower", "wreck_halftrack", "crater_field", "crater_water",
@@ -460,7 +464,12 @@ func _paint_bg(canvas: Node2D) -> void:
 	# (d) dirt becomes 2-3 hash-ROTATED overlapping cards per cell instead of
 	# one axis-aligned rect. All starting values — judged by screenshot.
 	var dirt_cards: Array = []   # [center, rot, size] triplets
-	var dirt_col := Color(0.58 - march * 0.18, 0.5 - march * 0.16, 0.38 - march * 0.1, 0.7)   # churned dirt, cinders late
+	# 5-stop biome ramp (5v: one biome with a linear scorch felt like a dimmer
+	# switch, not a JOURNEY): jungle -> scorched -> marsh -> ruins -> foundry
+	# ash, sampled by the same march driver. Dirt follows the band too.
+	var dirt_col := _biome_ramp(march,
+		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
+		Color(0.44, 0.42, 0.40, 0.7), Color(0.40, 0.34, 0.28, 0.7)])
 	for ty in 8:
 		for tx in 10:
 			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
@@ -471,7 +480,9 @@ func _paint_bg(canvas: Node2D) -> void:
 			if (base_iy + ty) % 3 == 0:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
-			var gcol := Color(shade + march * 0.14, (shade + 0.03) * (1.0 - march * 0.4), shade * 0.75 * (1.0 - march * 0.35))
+			var gt := _biome_ramp(march, [Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62),
+				Color(0.94, 0.90, 0.55), Color(0.92, 0.88, 0.78), Color(1.05, 0.70, 0.52)])
+			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
 			if variant == 0:
 				canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false, gcol)
 			else:
@@ -2937,6 +2948,7 @@ func _draw() -> void:
 	_draw_scorch()
 	_draw_mines()
 	_draw_sandbags()
+	_draw_sector_embers()
 	_draw_barrels()
 	_draw_gates()
 	# Gate-locking bunkers are marked so the player knows WHICH to grenade —
@@ -3084,6 +3096,14 @@ func _draw_skyglow() -> void:
 		# Mast needs >=60px drawn height or the lattice aliases away.
 		draw_texture_rect(Art.tex("skyline_mast"), Rect2(270.0, 0.0, 60.0, 60.0), false, sky)
 	draw_set_transform_matrix(Transform2D())
+
+
+func _biome_ramp(march: float, stops: Array) -> Color:
+	## Sample a 5-stop color journey by the 0..1 sector march — each leg lerps
+	## between adjacent stops, so bands feel like arriving somewhere new.
+	var f := clampf(march, 0.0, 0.999) * float(stops.size() - 1)
+	var s0 := int(f)
+	return stops[s0].lerp(stops[s0 + 1], f - float(s0))
 
 
 func _sector_march() -> float:
@@ -3279,7 +3299,7 @@ func _draw_terrain() -> void:
 		var liy := int(floor((cam_y + ly) / 80.0))
 		for tx in 8:
 			var hl := Art.cell_hash(tx * 53 + 11, liy * 7 + 3)
-			if hl % 9 != 0:   # ~1 in 9 cells gets a prop
+			if hl % (9 - int(_sector_march() * 3.0)) != 0:   # density ramps with the war (decor only)
 				continue
 			var lx := tx * 84.0 + float(hl % 40) - 20.0
 			var ly_px := ly + float((hl / 9) % 40)
@@ -3290,7 +3310,12 @@ func _draw_terrain() -> void:
 			# pool (see the _litter_cam_snap freeze in _draw) — a gate opening
 			# must not swap standing props' identity mid-frame.
 			var lm := _litter_march_prev if row_wy >= _litter_cam_snap else _sector_march()
-			var pool := _LITTER_LATE if (hl % 100) < int(lm * 100.0) else _LITTER_EARLY
+			# Band-picked pools (5v biome journey): early jungle scatter, stump
+			# fields, crater/wreck marsh, then the late war-torn pool — instead
+			# of a two-pool percentage blend that mushed the middle sectors.
+			var lband := int(clampf(lm, 0.0, 0.999) * 4.0)
+			var pool: Array = [_LITTER_EARLY, _LITTER_MID_A, _LITTER_MID_B, _LITTER_LATE][mini(lband, 3)] \
+				if (hl % 100) < 55 + int(lm * 45.0) else _LITTER_EARLY
 			var key: String = pool[(hl / 40) % pool.size()]
 			# Recessed/flat props cast no disc: a drop shadow under a crater or a
 			# fallen body reads as floating art.
@@ -3553,6 +3578,14 @@ func _draw_gates() -> void:
 		if gy < -40.0 or gy > 400.0:
 			continue
 		var gh := Art.cell_hash(g["y"], 3)
+		# Sector numeral (5v biome journey): the wall names its gate — the
+		# corridor reads as a JOURNEY with mile-markers, not a treadmill.
+		var g_idx := 1
+		for og in sim.gates:
+			if og["y"] > g["y"]:
+				g_idx += 1
+		var gnum_col := Color(0.30, 0.27, 0.22, 0.85) if not g["open"] else Color(0.5, 0.46, 0.4, 0.6)
+		Art.text(self, str(g_idx), Vector2(320.0 - 4.0, gy - 8.0), 24, gnum_col)
 		if g["open"]:
 			# Blown-open remnants: a lone end cap survives at each flank.
 			_spr("wall_sandbag_end", Vector2(24, gy), 0.0, 1.0, open_wall)
@@ -5008,6 +5041,25 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 		if move:
 			entry["move"] = true
 		_fx.append(entry)
+
+
+func _draw_sector_embers() -> void:
+	# Foundry-ash band (march > 0.8): sparse embers drift up-screen — the air
+	# itself says you are close to the end. Hash-driven placement (no shared
+	# rng), ridden on the additive ember kind, damped by reduce-motion.
+	var march := _sector_march()
+	if march <= 0.8:
+		return
+	var fr := int(Engine.get_physics_frames())
+	for k in 3:
+		var eh := Art.cell_hash(fr / 40 + k * 17, k)
+		if eh % 3 != 0:
+			continue
+		var ephase := float((fr + eh) % 120) / 120.0
+		var ex := float(eh % 640)
+		var ey := 360.0 - ephase * 380.0 * maxf(_motion, 0.3)
+		draw_circle(Vector2(ex + sin(ephase * TAU) * 6.0, ey), 1.2,
+			Color(1.0, 0.55, 0.25, (0.5 - absf(ephase - 0.5)) * 0.8))
 
 
 func _draw_fx() -> void:
