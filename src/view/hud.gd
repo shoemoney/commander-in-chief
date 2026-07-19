@@ -219,10 +219,7 @@ func _draw() -> void:
 		Color(1.0, 0.93, 0.78).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
 	x = _stat("icon_medal", _fmt_stat(int(round(_disp_score))), x, y,
 		Color(0.84, 0.9, 1.0).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
-	if sim.tokens > 0:
-		# Commendation tokens: minted by play, spent on the wheel's NE socket. Same width
-		# bound as chest/score — a runaway token count compacts so the head stays bounded.
-		x = _text("*" + _fmt_stat(sim.tokens), x, y + ICON - 3.0, Color(1.0, 0.85, 0.3)) + 3.0
+	x = _token_chip(sim, x, y)
 	var opt_start := x
 
 	# c1-06: TWO-PASS PRIORITY layout for row 0. Pass 1 (inside _plan_row0, _measure on)
@@ -326,7 +323,7 @@ func _draw() -> void:
 				# one dialect with the shop strip and the spend wheel's socket mark.
 				var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
 				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
-				Art.draw_glyph(self, "revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
+				_emit_act_glyph("revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
 					Color.WHITE, i == 1)
 		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
@@ -356,7 +353,7 @@ func _draw() -> void:
 					# this HUD (RALLYING/fuel/SHOP OPEN) — ceil grammar from the
 					# fuel dial, so it reads 3s → 2s → 1s → boom.
 					var bx := _text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
-					Art.draw_glyph(self, "interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
+					_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
 						Color.WHITE, i == 1)
 			else:
 				# The sim decrements pierce/spread/rend/smoke unconditionally while
@@ -418,7 +415,7 @@ func _draw() -> void:
 			# recharging (same grammar as the grenade/bash rings above).
 			var roll_x := px
 			var roll_ready: bool = p["roll_cd"] == 0
-			Art.draw_glyph(self, "roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
+			_emit_act_glyph("roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
 				Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6), i == 1)
 			px = roll_x + ICON + 2.0
 			if p["roll_cd"] > 0:
@@ -427,13 +424,7 @@ func _draw() -> void:
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 				draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * rfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-			px = _buff_chips(p, px, ry, i)
-			# Live status pips: adrenaline speed-boost + wading — state you feel in
-			# the hands, surfaced so it also reads on the HUD.
-			if p["boost_ticks"] > 0:
-				px = _pip(px, ry, Color(0.4, 0.95, 1.0), ">")
-			if sim._in_water(p["x"], p["y"]):
-				px = _pip(px, ry, Color(0.5, 0.8, 1.0), "~")
+			px = _status_chips(p, px, ry, i, sim)
 		prow = maxf(prow, px)
 		ry += 16.0
 	_prow_r = prow
@@ -809,7 +800,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# strip drops for height, the wheel cue is the buy affordance again.
 	if not shop_row and _fits2("supplies", 20, _tw("SUPPLIES") + 25.0):
 		if not _measure:
-			Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
+			_emit_act_glyph("wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0, Color.WHITE, false)
 		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
 	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
 	# zero HUD read — the countdown says how long the free-fire window lasts.
@@ -995,7 +986,7 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 		else:
 			px = _stat(c["icon"], c["txt"], px, ry, c["col"])
 			if c.has("glyph"):
-				Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
+				_emit_act_glyph("interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
 					Color.WHITE, pi == 1)
 				px += 12.0
 	var hidden: int = plan["hidden"]
@@ -1061,6 +1052,54 @@ static func _fmt_stat(v: int) -> String:
 	return "%.1f%s" % [f, units[i]]
 
 
+## c1-10: the commendation-token head chip's FULL, self-explanatory text — "" (chip suppressed)
+## when the player holds none, the singular "COMMENDATION TOKEN 1" at exactly one, else the plural
+## "COMMENDATION TOKENS N" with the count width-bounded by _fmt_stat. Names the currency in full so
+## it's never confused with the coin/medal economies beside it. _token_chip falls back to the
+## compact form below only when this won't fit. Pure so a test pins the branches.
+static func _token_label(tokens: int) -> String:
+	if tokens <= 0:
+		return ""
+	return ("COMMENDATION TOKEN " if tokens == 1 else "COMMENDATION TOKENS ") + _fmt_stat(tokens)
+
+
+## c1-10: the narrow-row fallback for the token chip — "COMMENDATION(S) N": the full label above
+## with only the "TOKEN(S)" noun dropped, still a FULLY-SPELLED word (never the cryptic "COMM."
+## abbreviation, a bare "*N", or a generic "TOKENS" that could be confused with another economy).
+## Shorter than the full two-word form yet still self-explanatory, so it reads at a glance on a
+## crowded head.
+static func _token_label_compact(tokens: int) -> String:
+	if tokens <= 0:
+		return ""
+	return ("COMMENDATION " if tokens == 1 else "COMMENDATIONS ") + _fmt_stat(tokens)
+
+
+## c1-10: the third headline currency's head chip — a star icon + a self-describing token label,
+## or NOTHING (cursor unchanged) when the player holds none. ADAPTIVE, same clarity-first pattern
+## as the status pips: it draws the FULL "COMMENDATION TOKEN(S) N" whenever it fits, and falls back
+## to the shorter but still fully-spelled "COMMENDATION(S) N" only when the full form (plus a
+## reserved worst-case +N slot, so the head can NEVER grow into the right-anchored overflow chip)
+## would pass the row's usable edge. Every rung is a full word chip, never the old cryptic bare
+## "*N" or an abbreviated "COMM.". If a viewport narrower than the 640 design leaves room for
+## neither, the chip is DROPPED (cursor unchanged) rather than drawn past the usable edge — it
+## genuinely respects _fit_full, the same rule every other chip on this HUD follows. The exact call
+## _draw makes, extracted so a test drives the real zero/nonzero/adaptive/underfit callsite.
+func _token_chip(sim: SimWorld, x: float, y: float) -> float:
+	if sim.tokens <= 0:
+		return x
+	# Degradation ladder, EVERY rung fully self-labeled (the commendation noun is never abbreviated
+	# to "COMM." nor dropped to a bare number): the FULL "COMMENDATION TOKEN(S) N", then the shorter
+	# fully-spelled "COMMENDATION(S) N". _stat's advance is ICON + 13 + text width; each rung must
+	# also clear a reserved worst-case +N slot so the chosen label leaves room for the right-anchored
+	# overflow chip (no head/+N overlap). The first rung that fits wins. If neither fits — only
+	# possible below the supported design width — the chip is dropped, never drawn past _fit_full.
+	var reserve := _tw("+99") + OVF_PAD
+	for lbl in [_token_label(sim.tokens), _token_label_compact(sim.tokens)]:
+		if x + ICON + 13.0 + _tw(lbl) + reserve <= _fit_full + 0.01:
+			return _stat("hud_star", lbl, x, y, Color(1.0, 0.85, 0.3))
+	return x
+
+
 static func _record_hud_mode(score: int, best: int) -> String:
 	# a1-17: what the top-bar record chip shows — a reserved "badge" once the live
 	# score BEATS the best; a dim "best" target while it has not; nothing if no best.
@@ -1103,13 +1142,96 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	return x + segs * 3.6 + 4.0
 
 
-## A small labeled status pip (speed-boost, wading, …) — state you feel in the
-## hands, surfaced as a legible chip on the player row.
-func _pip(x: float, y: float, col: Color, sym: String) -> float:
-	draw_rect(Rect2(x, y + 2.0, 10.0, 9.0), Color(0.1, 0.11, 0.09, 0.85))
-	draw_string(Art.font(), Vector2(x + 2.5, y + ICON - 3.0), sym,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE - 1, col)
-	return x + 12.0
+## c1-10: the on-foot player's live status row — the timed buff chips THEN the SPEED/WADING
+## state pips — laid out as ONE group against the row's REAL usable edge (`_fit_full`, the
+## CB/RM-reserved boundary; never global RIGHT, which could draw over reserved corner content).
+## The pips' COMPACT total is reserved off the buff-row edge, so a chip-heavy row sheds a buff
+## into its OWN +N overflow before it would crowd a combat-status pip (priority reserved, never
+## dropped). The pip labels are an ALL-FULL-or-ALL-COMPACT group decision — so the second pip
+## can never be forced to draw backward over the first — and the cursor advances strictly
+## monotonically, always ending within `_fit_full`. Extracted so a test drives this exact path.
+func _status_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> float:
+	var pips: Array = []   # {full, short, col}, in draw order
+	if p["boost_ticks"] > 0:
+		# "SPEED BOOST" names the temporary adrenaline pickup unambiguously; the narrow-row
+		# fallback "SPEED" is still a plain word (never the cryptic "SPD" abbreviation).
+		pips.append({"full": "SPEED BOOST", "short": "SPEED", "col": Color(0.4, 0.95, 1.0)})
+	if sim._in_water(p["x"], p["y"]):
+		# "WADING" names the slowed-in-water state; its fallback "WATER" is also a plain word
+		# (never the cryptic "WADE") — both forms read at a glance without a legend.
+		pips.append({"full": "WADING", "short": "WATER", "col": Color(0.5, 0.8, 1.0)})
+	if pips.is_empty():
+		return _buff_chips(p, px, ry, i)
+	var edge := _fit_full   # the row's real usable edge (CB/RM-reserved), NOT global RIGHT
+	var full_total := 0.0
+	var short_total := 0.0
+	for pp in pips:
+		full_total += _tw(pp["full"]) + 7.0    # _pip advance == _tw + 5 (chip) + 2 (gap)
+		short_total += _tw(pp["short"]) + 7.0
+	# Decide the group's form from the FIXED entry cursor (before buffs), then reserve exactly that
+	# group's width off the buff edge so the buffs overflow into their OWN +N until the chosen
+	# status group fits. Reserving the FULL width when it can fit keeps clarity winning over buff
+	# density; falling back to the COMPACT reserve when it can't guarantees the group STILL fits
+	# (even while a buff +N is also emitted). maxf(px, …) never pushes the buff edge left of the
+	# row start.
+	var want_full: bool = edge - px >= full_total - 0.01
+	var saved := _fit_full
+	_fit_full = maxf(px, edge - (full_total if want_full else short_total))
+	px = _buff_chips(p, px, ry, i)
+	_fit_full = saved
+	# Lay the statuses out as ONE GROUP — all full words ("SPEED BOOST"/"WADING"), or (only when
+	# the full group won't fit) all their compact WORD forms ("SPEED"/"WATER"). The pair therefore
+	# never disagrees (no mixed full/compact pair) and both stay self-labeled word chips — never a
+	# cryptic abbreviation, never a generic shared "+N" that hides WHICH state is active. The cursor
+	# advances monotonically.
+	#
+	# Minimum-width guarantee: the game renders at a fixed 640-wide design; the narrowest the row
+	# ever gets is the CB/RM-reserved edge (~614). The reserve above means that at every SUPPORTED
+	# width the fixed row head + the chosen group fits within `edge` — full words when they fit,
+	# otherwise the compact group.
+	if px + full_total <= edge + 0.01:
+		for pp in pips:
+			px = _pip(px, ry, pp["col"], pp["full"])
+		return px
+	if px + short_total <= edge + 0.01:
+		for pp in pips:
+			px = _pip(px, ry, pp["col"], pp["short"])
+		return px
+	# EXPLICIT under-fit degradation: at a viewport narrower than the supported design even the
+	# compact group can't fit. Route through the SAME non-overlapping planner the buff row uses
+	# (plan_chips reserves the +N slot, keeps a strict left-to-right prefix, stops at the first
+	# miss) so the retained compact pips and a "+N" for the rest place STRICTLY MONOTONICALLY —
+	# the +N is drawn AFTER the last kept pip, never clamped backward over it. Unreachable at every
+	# supported width thanks to the reserve above; here purely so an impossible width degrades
+	# cleanly instead of overflowing.
+	var widths: Array[float] = []
+	for pp in pips:
+		widths.append(_tw(pp["short"]) + 7.0)
+	var ovf_w := _tw("+%d" % pips.size()) + OVF_PAD
+	var plan := plan_chips(widths, px, edge, ovf_w)
+	var shown: int = plan["shown"]
+	for j in shown:
+		px = _pip(px, ry, pips[j]["col"], pips[j]["short"])
+	var hidden: int = plan["hidden"]
+	if hidden > 0:
+		# shown>0: the reserve guarantees px + ow <= edge, so the +N sits flush after the last kept
+		# pip (monotonic, no overlap). shown==0: nothing was drawn, so clamping the lone +N to the
+		# edge can't overlap anything.
+		var ow := _tw("+%d" % hidden) + OVF_PAD
+		px = _ovf_chip(px if shown > 0 else minf(px, edge - ow), ry, hidden)
+	return px
+
+
+## A small labeled status pip (speed-boost, wading, …) — state you feel in the hands, surfaced
+## as a legible WORD chip on the player row. c1-10: the plate sizes to the WORD so the label
+## reads plainly, not a cryptic 1-char mark. The full/compact choice is made by the _status_chips
+## GROUP (so both pips agree and the cursor stays monotonic); this just paints the decided text
+## and advances. All draws route through the emit seams so a headless test can inspect them.
+func _pip(x: float, y: float, col: Color, txt: String) -> float:
+	var w := _tw(txt) + 5.0
+	_emit_bg_rect(Rect2(x, y + 2.0, w, 9.0), Color(0.1, 0.11, 0.09, 0.85))
+	_emit_hud_text(txt, Vector2(x + 2.5, y + ICON - 3.0), col)
+	return x + w + 2.0
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
@@ -1131,6 +1253,11 @@ func _emit_ovf(ox: float, y: float, w: float, txt: String) -> void:
 	draw_rect(Rect2(ox, y + 1.0, w, 12.0), Color(0.1, 0.11, 0.09, 0.85))
 	draw_rect(Rect2(ox, y + 1.0, w, 12.0), Color(1.0, 0.8, 0.4, 0.4), false, 1.0)
 	_emit_hud_text(txt, Vector2(ox + 4.0, y + ICON - 3.0), Color(1.0, 0.85, 0.45))
+# c1-10: seam for the inline gameplay-verb glyphs the chip rows plant (roll / revive / interact /
+# supply-wheel) — like every other HUD draw seam, a one-line indirection so a headless capture
+# subclass can record them and the full _draw frame is exercisable without a live draw context.
+func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt: bool) -> void:
+	Art.draw_glyph(self, act, center, size, col, alt)
 
 
 ## c1-06: the ONE "+N more here" overflow chip, shared by row 0 AND the player buff rows so
