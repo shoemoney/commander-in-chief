@@ -220,6 +220,8 @@ var _life_runs := 0              # career totals (title screen), separate from t
 var _life_kills := 0
 var _life_wins := 0
 var hall: Array[Dictionary] = []   # top-N run history for the Hall of Fame
+var hall_latest: Dictionary = {}   # the run just banked this session — the Hall highlights it (session-only ref)
+var _hall_seq := 0                  # monotonic run id ("hid") so the Hall identifies the EXACT banked run — value-equal twins (same score/sector) are common and must not be confused
 var _best_dirty := false
 var _seen_dirty := false          # first-time hints ratchet in memory, flushed with bests
 var _prev_colossus_phase := 0     # phase-change escalation banners
@@ -2376,6 +2378,10 @@ func _load_bests() -> void:
 		best_dist = cf.get_value("best", "dist", 0)
 		_seen = cf.get_value("seen", "hints", {})
 		hall.assign(cf.get_value("hall", "runs", []))
+		# Resume the id counter past the highest hid on disk so a fresh run can never
+		# collide with a reloaded entry's id (old saves lack hid -> starts at 0).
+		for r in hall:
+			_hall_seq = maxi(_hall_seq, int(r.get("hid", -1)) + 1)
 		_life_runs = cf.get_value("life", "runs", 0)
 		_life_kills = cf.get_value("life", "kills", 0)
 		_life_wins = cf.get_value("life", "wins", 0)
@@ -2513,13 +2519,22 @@ func _record_run() -> void:
 		if g["open"]:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
-	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
+	var entry := {"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
-		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues})
+		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
+		"hid": _hall_seq}
+	_hall_seq += 1
+	hall.append(entry)
+	hall_latest = entry   # keep the ref so the Hall can highlight this run wherever it ranks
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
-	if hall.size() > 8:
-		hall = hall.slice(0, 8)
+	# Keep a deep board (many pages) — the Hall now pages instead of hard-capping
+	# at one screen, so a mid-tier run you just finished still has a place to land.
+	# The just-banked run is PINNED even when it ranks past the cap (see _hall_capped):
+	# the board is why you opened the Hall, so it must always be reachable. The cap is
+	# single-sourced from GameMenu.HALL_KEEP so the retention limit the Hall STATES on
+	# screen and the limit it ENFORCES here can never drift apart.
+	hall.assign(_hall_capped(hall, hall_latest, GameMenu.HALL_KEEP))
 	_life_runs += 1
 	_life_kills += _run_kills
 	if sim.victory:
@@ -2539,6 +2554,31 @@ func _record_run() -> void:
 	_best_dirty = false
 	_seen_dirty = false
 	_save_cfg(cf)
+
+
+static func _hall_capped(sorted_runs: Array, latest: Dictionary, cap: int) -> Array:
+	# Trim a score-sorted board to `cap`, but NEVER drop the just-banked `latest` run
+	# — it is the reason the player opened the Hall. Identity is by unique "hid", not
+	# value: two runs with the same score/sector are common and Array.has() (deep ==)
+	# would wrongly treat a value-twin as the latest and discard the real one.
+	# A pinned over-cap run is tagged "over_cap" so the view flags its rank as 41+
+	# (uncertain) instead of claiming an exact slot that discarded runs may outrank.
+	# Clear any stale over_cap first, then set it on the ONE pinned run below — a flag
+	# is a fact about THIS trim, not a permanent brand. Without this, a run once pinned
+	# past the cap would keep flashing "OUTSIDE TOP N" (its "--" dash) even after it
+	# legitimately climbs back inside the retained set on a later bank.
+	for r in sorted_runs:
+		r.erase("over_cap")
+	if sorted_runs.size() <= cap:
+		return sorted_runs
+	var kept := sorted_runs.slice(0, cap)
+	var lid: int = latest.get("hid", -1)
+	for r in kept:
+		if int(r.get("hid", -2)) == lid:
+			return kept   # latest earned its place inside the cap on merit
+	latest["over_cap"] = true
+	kept.append(latest)
+	return kept
 
 
 func _check_smoke_edges() -> void:
