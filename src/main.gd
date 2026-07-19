@@ -47,7 +47,9 @@ const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_
 	"dropped_shield", "fallen_merc"]
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
-const _RUSHER_SKINS := ["rusher", "m_insurgent3", "m_insurgent4", "m_insurgent5"]
+# sol-08: the base-rusher rotation is now the RED-team pack sprites (all cel — single authorship, no
+# cel/legacy art strobe, per the SIMSAFE mixed-list warning). Authored friend/foe color + per-skin weapon variety.
+const _RUSHER_SKINS := ["enemy_smg", "enemy_assault", "enemy_shotgun", "enemy_lmg"]
 # Dead hulks that slump beside a parked tank (convoy-graveyard set-dressing).
 const _TANK_HULKS := ["wreck_apc", "wreck_technical", "wreck_light_tank"]
 
@@ -3320,7 +3322,9 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
 
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
-const _CORPSE_TEX := {"rusher": "rusher", "elite": "elite", "sniper": "m_contractor2",
+# sol-08: rusher/elite/sniper corpses follow their new live RED-team sprites (a fallen body must match
+# the trooper that just died — a legacy art corpse under a cel-shaded live body popped authorship on death).
+const _CORPSE_TEX := {"rusher": "enemy_smg", "elite": "enemy_assault", "sniper": "enemy_sniper",
 	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "sapper",
 	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone",
 	"technical": "m_technical", "pilot": "m_pilot", "broadcast": "radio_tower"}
@@ -5245,7 +5249,7 @@ func _draw_enemies() -> void:
 				draw_line(epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
 				draw_circle(lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
 			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
-			_spr("m_contractor2", epos, face, 0.5 * ssw, Color(1.1, 0.6, 1.2))   # spec-ops marksman, violet-keyed
+			_spr("enemy_sniper", epos, face, 0.5 * ssw)   # sol-08: authored red marksman (scoped-rifle silhouette); the laser + ghillie behaviour identify it, TINT carries the vermilion
 		elif e["kind"] == "grenadier":
 			var gwu: int = e.get("windup", 0)
 			if gwu > 0:
@@ -5542,7 +5546,7 @@ func _draw_enemies() -> void:
 				draw_dashed_line(epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
 					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac, 3.0)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
-			_spr("elite", epos, face, 0.5 * esw, Color(1.35, 0.75, 0.7))
+			_spr("enemy_assault", epos, face, 0.62 * esw)   # sol-08: elite = the authored red assault trooper, drawn larger than fodder (TINT carries the vermilion; the red aura + size keep it distinct)
 		else:
 			_spr(_RUSHER_SKINS[e.get("skin", 0)], epos, face, 0.5)
 		# Flashbang stun state ON the body: the wash decays in ~0.2s but the

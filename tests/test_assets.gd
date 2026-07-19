@@ -785,6 +785,36 @@ func test_sol_hero_pivot_and_apex() -> void:
 		"hero mass-centroid ~centered (%.0f,%.0f vs %d,%d) — center-rotation turns about the body, no pivot anchor (sol-07)" % [cx, cy, int(w / 2), int(h / 2)])
 
 
+func test_sol_enemy_red_team() -> void:
+	# sol-08..11: the shooting infantry (rusher rotation / elite / sniper) swap to the authored RED-team
+	# pack sprites — baked team-color friend/foe read, warm-vermilion tint OFF the pure-red danger family,
+	# single-authorship rotation (no cel/legacy art strobe), no double outline, corpses matching live bodies.
+	var art: Script = load("res://src/view/art.gd")
+	var c: Dictionary = art.get_script_constant_map()
+	var tex: Dictionary = c["TEX"]
+	var scale: Dictionary = c["SCALE"]
+	var tint: Dictionary = c["TINT"]
+	var outline: Dictionary = c["OUTLINE"]
+	var ms: Dictionary = load("res://src/main.gd").get_script_constant_map()
+	var skins: Array = ms["_RUSHER_SKINS"]
+	var corpse: Dictionary = ms["_CORPSE_TEX"]
+	var keys := ["enemy_assault", "enemy_smg", "enemy_shotgun", "enemy_lmg", "enemy_sniper"]
+	for k in keys:
+		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains("soldiers/enemy/"),
+			"%s is a pack red-team sprite (sol-08)" % k)
+		Runner.T.ok(scale.has(k), "%s has a SCALE row — no dead config (sol-08)" % k)
+		var t: Color = tint[k]
+		Runner.T.ok(t.r > t.g and t.g > t.b, "%s tint is warm vermilion (r>g>b), hostile not friendly (sol-09)" % k)
+		Runner.T.ok(t.r > 1.0 and t.g > 0.6,
+			"%s tint is value-lifted, NOT a saturated pure-red (stays off the tracer/orb danger family, sol-09)" % k)
+		Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sol-11)" % k)
+	Runner.T.eq(skins.size(), 4, "rusher rotation covers all 4 sim skins (skin = (x+y)&3, sol-08)")
+	for s in skins:
+		Runner.T.ok(keys.has(s), "rusher skin '%s' is a pack red sprite — single authorship, no strobe (sol-08)" % s)
+	for k in ["rusher", "elite", "sniper"]:
+		Runner.T.ok(keys.has(corpse[k]), "%s corpse matches its live red-team sprite, not a legacy art ghost (sol-08)" % k)
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
