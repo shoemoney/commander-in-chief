@@ -3346,6 +3346,8 @@ const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3
 const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
 const HERO_APEX := Color(0.86, 0.93, 1.0)   # a4-03: cool crown catch-light — the hero is the brightest+coolest point
 const HERO_APEX_A := 0.44   # sol-07: crown alpha bumped from 0.32 so the cool catch-light reads on the infantry set DARK helmet dome
+const HERO_APEX_DY := 3.0   # sol-07: crown sits this many px above pos (the helmet dome is just north of the sprite center)
+const HERO_APEX_SZ := Vector2(11.0, 9.0)   # sol-07: crown spot size. DY < SZ.y/2 → the spot always covers the sprite center, so it stays on the dome at EVERY aim angle (screen-fixed, dome at the rotation center)
 
 # a4-05 (AD#10, LEG#4): the reticle's dark backing rings the aim point on ALL 8 sides — a
 # CENTERED halo, not the old single down-right drop-shadow, so no edge camouflages into an
@@ -6210,8 +6212,8 @@ func _draw_players() -> void:
 			# tan dirt splat — especially in the busy foundry. Screen-fixed (not aim-rotated) so
 			# the key stays overhead; suppressed while downed (a downed body isn't the apex).
 			if _hero_shows_apex(da_res):
-				var hcrown := pos - Vector2(0.0, walk_bob + 3.0)   # sol-07: drop 1px onto the new dark helmet dome
-				draw_texture_rect(Art.tex("fx_softspot"), Rect2(hcrown - Vector2(5.5, 4.5), Vector2(11.0, 9.0)),
+				var hcrown := pos - Vector2(0.0, walk_bob + HERO_APEX_DY)   # sol-07: drop onto the new dark helmet dome
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(hcrown - HERO_APEX_SZ / 2.0, HERO_APEX_SZ),
 					false, Color(HERO_APEX.r, HERO_APEX.g, HERO_APEX.b, HERO_APEX_A))
 			# Empty-clip body cue: the corner ammo icon already blinks, but the
 			# eye is on the soldier mid-fight. Same bash-ring idiom as the HUD

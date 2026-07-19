@@ -757,6 +757,13 @@ func test_sol_hero_pivot_and_apex() -> void:
 	Runner.T.ok(apex_a > 0.32 and apex_a <= 0.55,
 		"crown alpha bumped so it reads on the dark helmet, still a highlight not a blob (sol-07): %.2f" % apex_a)
 	Runner.T.ok(ms._hero_shows_apex(0.0) and not ms._hero_shows_apex(0.5), "apex still upright-only after the retune")
+	# Crown-on-dome at EVERY aim angle: the crown is screen-fixed at HERO_APEX_DY above pos, and the helmet
+	# dome sits at the sprite's rotation center (pos). If the crown SPOT covers pos itself (DY < half its
+	# height), it overlaps the dome regardless of how the sprite is rotated — no per-angle screenshot needed.
+	var apex_dy: float = c["HERO_APEX_DY"]
+	var apex_sz: Vector2 = c["HERO_APEX_SZ"]
+	Runner.T.ok(apex_dy < apex_sz.y / 2.0,
+		"crown spot covers the sprite center → seated on the dome at ALL aim angles (sol-07): dy=%.1f < %.1f" % [apex_dy, apex_sz.y / 2.0])
 	var img: Image = (load("res://assets/soldiers/soldier_assault_rifle.png") as Texture2D).get_image()
 	if img.is_compressed():
 		img.decompress()
