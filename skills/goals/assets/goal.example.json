@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0.0",
+  "id": "billing-api-migration",
+  "title": "Migrate the billing module to the new API",
+  "objective": "The billing module uses the new Billing API at every intended call site, verified by source inspection plus passing focused billing tests and the build/typecheck command.",
+  "status": "active",
+  "created_at": "2026-07-18T09:12:00Z",
+  "updated_at": "2026-07-18T10:03:00Z",
+  "activated_at": "2026-07-18T09:15:00Z",
+  "completed_at": null,
+  "context": [
+    "Repo root: /Users/shoemoney/Projects/billing-service",
+    "Read first: docs/billing-api-v2.md (migration guide)",
+    "Call sites at draft time: rg \"legacyBill\\(\" --type ts -> 14 hits"
+  ],
+  "assumptions": [
+    "Sandbox stays workspace-write; deployment is not part of this goal."
+  ],
+  "constraints": [
+    "Preserve public billing behavior and existing data contracts.",
+    "Do not touch unrelated modules; smallest change that meets the objective.",
+    "Checks must not pass by deleting or weakening existing tests."
+  ],
+  "definition_of_done": [
+    {
+      "id": "dod-1",
+      "check": "rg \"legacyBill\\(\" --type ts returns 0 hits",
+      "evidence_kind": "command",
+      "status": "unmet",
+      "evidence": [
+        "iteration 1: 6 hits remain in src/billing/refunds.ts, src/billing/reports.ts"
+      ]
+    },
+    {
+      "id": "dod-2",
+      "check": "npm test -- billing exits 0",
+      "evidence_kind": "test",
+      "status": "met",
+      "evidence": [
+        "iteration 1: exit 0, 41 passed"
+      ]
+    },
+    {
+      "id": "dod-3",
+      "check": "npm run typecheck exits 0",
+      "evidence_kind": "command",
+      "status": "pending",
+      "evidence": []
+    }
+  ],
+  "evidence_requirements": {
+    "proof_surface": "commands",
+    "required": [
+      "Exact command outputs with exit codes for every definition_of_done item",
+      "Changed-file list from git status"
+    ],
+    "substitutions_allowed": false
+  },
+  "stop_policy": {
+    "max_iterations": 25,
+    "max_turns": 100,
+    "deadline": null,
+    "token_budget": null,
+    "on_bound_reached": "failed"
+  },
+  "evaluator": {
+    "kind": "reviewer-subagent",
+    "instructions": "Judge evidence only: confirm the rg count, the focused test run, and the typecheck run are current, real, and cover every call site named in the objective."
+  },
+  "iteration": {
+    "count": 1,
+    "turns_used": 3,
+    "tokens_used": 0
+  },
+  "history": [
+    {
+      "iteration": 1,
+      "ts": "2026-07-18T10:03:00Z",
+      "actions": [
+        "Read docs/billing-api-v2.md",
+        "Migrated src/billing/charges.ts and src/billing/invoices.ts",
+        "Ran npm test -- billing"
+      ],
+      "evidence": [
+        "npm test -- billing: exit 0, 41 passed",
+        "rg \"legacyBill\\(\" --type ts: 6 hits remain"
+      ],
+      "evaluation": {
+        "verdict": "continue",
+        "unmet": ["dod-1", "dod-3"],
+        "notes": "Refunds and reports modules still on the legacy client; typecheck not yet run."
+      }
+    }
+  ],
+  "blockers": [],
+  "completion": null
+}

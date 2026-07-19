@@ -15,6 +15,9 @@ const PX := 1.0 / Fixed.ONE
 const SCREEN_W := 640.0
 const SCREEN_H := 360.0
 const SCREEN_CENTER := Vector2(320, 180)
+# c1-15: the top-center boss/mini HP-bar dock line lives in HudIcons (HudIcons.BOSS_BAR_TOP) as the
+# ONE shared HUD-layout boundary — main imports it directly (below, in the bar renderers) so the
+# corner panel's shop-strip safe height and the bar y can never desync. No local copy here.
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 # Litter biases with the run: early sectors are an intact outpost (tents/crates/
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
@@ -94,7 +97,23 @@ var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _rumble_on := true            # accessibility: gamepad vibration on/off
+var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad option — swap the MOVE (left) and AIM (right) analog sticks. [0]=P1, [1]=P2, independent like the per-player pad button layouts, so a left-handed P2 swaps without touching P1. The sticks aren't per-button rebindable, so this is the accessible way to reassign them for left-handed / adaptive-controller players. Applied view-side in _gather_inputs.
 var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
+var _win_scale := 2               # c1-19: the player's PREFERRED windowed integer scale (Nx of the 640x360 canvas), persisted in [settings]. This is the PREFERENCE, sane-capped to [1, WIN_SCALE_MAX] but NEVER clamped down to a monitor — so moving to a smaller display and back restores it. The window is sized to _effective_scale() (this preference clamped to what the CURRENT display fits); only an explicit user pick or RESET changes this value.
+const WIN_SCALE_MAX := 8          # c1-19: sanity ceiling on the STORED preference (8x = 5120x2880, past any real monitor) so a garbage save can't persist an absurd scale; the live per-monitor fit clamps below this for actual sizing.
+var _deco_reserve := Vector2i(0, 40)   # c1-19: window chrome (title bar + borders) kept OFF-canvas when computing the largest scale that fits. The AUTHORITATIVE value is the live windowed decoration delta (window_get_size_with_decorations - window_get_size), written ONLY from _settle_window (deferred, a frame after a mode change) so the transient zero the OS reports right after leaving fullscreen can't clobber it; a settled borderless window's stable zero is valid. The initial 40 is a conservative fallback until the first windowed measurement (e.g. booting straight into fullscreen) — it only shrinks the temporary EFFECTIVE fit, never the stored preference, and is re-evaluated once measured.
+var _last_screen := -1                 # c1-19: monitor index the window is on, polled so a drag to another display (which fires no resize signal) still re-fits/recenters the window to what the new screen holds.
+var _last_usable := Rect2i()           # c1-19: last work-area seen, polled alongside _last_screen so a SAME-monitor resolution or taskbar change (no screen-index change) also re-fits the window.
+var _settle_last_deco := Vector2i(-1, -1)  # c1-19: the live decoration delta _settle_window saw on the PREVIOUS deferred frame — the settle finishes only once it reads the SAME value twice running (stable), so a slow window manager's one-frame transient can't end the settle on a bad chrome reserve.
+var _settle_tries := 0                  # c1-19: retry counter for _settle_window — the decorated size can take more than one deferred frame to settle under a slow window manager (X11 / Wayland especially), so re-run a bounded few frames until the client size matches the target instead of assuming one frame is enough.
+var _settle_zero_streak := 0            # c1-19: how many CONSECUTIVE deferred settle frames have read a ZERO decoration delta. A zero reserve is only ACCEPTED once this reaches SETTLE_ZERO_FRAMES — so the multi-frame zero the OS reports while the title bar re-attaches after leaving fullscreen can't clobber a known-good reserve before real chrome reappears; the last nonzero reserve is retained until the transition is definitively complete.
+const SETTLE_ZERO_FRAMES := 6           # c1-19: a decoration delta must read ZERO this many consecutive settle frames before it's trusted as a genuine borderless / client-side-decorated window. Above any realistic post-fullscreen title-bar re-attach latency (1-3 frames), so a transient zero streak can never reach it and drop a valid chrome reserve.
+var _prog_resize := false               # c1-19: EXPLICIT programmatic-transition guard. True while WE are changing the window mode/size (fullscreen toggle, scale apply, monitor re-fit) and until that settle completes. While set, _on_window_resized ignores the size-change notifications the OS emits during the transition — so a compositor-generated intermediate client size that happens to fit within/equal the usable area can NOT be mistaken for a user drag and overwrite the saved scale. Cleared only when the settle chain finishes (transition definitively done). A genuine user drag arrives with this false and is honored.
+var _resize_save_t := 0.0               # c1-19: debounce timer for persisting a free-resize scale change. A drag can cross several integer-scale boundaries in quick succession; rather than rewrite the settings file on every crossing, _on_window_resized updates the live scale immediately (so the label tracks) but only ARMS this countdown — the actual _save_settings fires once it elapses after the last size change (coalescing a whole drag into one write). Flushed early on window-close so a drag-then-quit can't lose the choice.
+const RESIZE_SAVE_DELAY := 0.35         # c1-19: seconds of size quiescence before a free-resize scale change is persisted — long enough to coalesce a continuous drag into a single write, short enough to land before a normal close.
+var _settle_active := false            # c1-19: is a settle chain running? Driven from _process (ONE sample per RENDERED frame — guaranteed distinct frames), NOT recursive call_deferred (whose re-queued calls can flush several times in a SINGLE idle, collapsing the multi-frame stability gate). While true, _process advances one _settle_window sample each frame until the mode/client/decorated sizes stabilize; a generation bump cancels the current chain.
+var _settle_gen := 0                    # c1-19: monotonic generation tag for the settle chain. Each new windowed mode/scale change bumps it and stamps its deferred _settle_window calls; a callback whose stamp != the current gen is STALE (a newer choice superseded it) and drops out — so rapid mode/scale toggling can't have an old settle chain share counters with, or recenter/resize after, the newest choice.
+const SETTLE_MAX_TRIES := 16            # c1-19: hard ceiling on settle retries — high enough that the SETTLE_ZERO_FRAMES streak (and a slow compositor's late title-bar attach) has room to complete, low enough that a genuinely stuck window manager can't loop the deferred settle forever (~0.27s at 60Hz worst case, only on a mode change).
 var no_autopause := false         # set by dev harnesses whose window never holds focus
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyboard 8-way aim snapped in 45° pops (enemies already lerp via _enemy_face)
@@ -103,6 +122,9 @@ var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
+var _binds: Dictionary = {}      # c1-18: keyboard rebinds (action -> physical keycode, 0 == UNBOUND); filled from BIND_DEFAULTS + [binds] in _load_bests
+var _pad_binds: Array[Dictionary] = [{}, {}]  # c1-18: PER-PLAYER gamepad button rebinds (action -> JOY_BUTTON_*, -1 == UNBOUND). [0]=P1 (device 0, [padbinds]), [1]=P2 (device 1, [padbinds2]) — two INDEPENDENT layouts so a left-handed P2 can remap without disturbing P1
+var _menu_binds: Dictionary = {} # c1-18: rebindable MENU-navigation keys (action -> physical keycode); filled from MENU_BIND_DEFAULTS + [menubinds]. Read ADDITIVELY over the immutable W/S/arrows/Enter/Esc fallback the menu always honors
 var _hard := false               # New Game+ HARD: tighter campaign spawn curve
 var _last_gate_tick := 0         # view-side gate-split timer (speedrun read)
 var _best_gate_split := 0        # fastest gate split this run
@@ -220,6 +242,8 @@ var _life_runs := 0              # career totals (title screen), separate from t
 var _life_kills := 0
 var _life_wins := 0
 var hall: Array[Dictionary] = []   # top-N run history for the Hall of Fame
+var hall_latest: Dictionary = {}   # the run just banked this session — the Hall highlights it (session-only ref)
+var _hall_seq := 0                  # monotonic run id ("hid") so the Hall identifies the EXACT banked run — value-equal twins (same score/sector) are common and must not be confused
 var _best_dirty := false
 var _seen_dirty := false          # first-time hints ratchet in memory, flushed with bests
 var _prev_colossus_phase := 0     # phase-change escalation banners
@@ -330,6 +354,14 @@ func _ready() -> void:
 	# real Godot settings (silent no-op) — Window.min_size is the actual API, so
 	# the integer-scaled 640x360 canvas can't be shrunk into a cropped degenerate.
 	get_window().min_size = Vector2i(640, 360)
+	# c1-19: the window IS freely resizable (standard desktop behavior on Windows/macOS/X11/Wayland,
+	# where forcing a fixed window is hostile — users expect to grab an edge). The 640x360 canvas is
+	# drawn with viewport + integer stretch (see project.godot / test_display_integer_stretch_configured),
+	# so ANY window size renders at the largest whole-pixel scale that fits and letterboxes the rest —
+	# a free drag can never produce blurry fractional pixels. _on_window_resized then SNAPS the shown
+	# WINDOW SCALE label to that fitted integer, so the OPTIONS control and the real window stay in
+	# sync. min_size keeps the floor at a clean 1x. The OPTIONS WINDOW SCALE row remains the way to
+	# jump to an exact centered multiple; dragging is just the other, equally valid, path.
 	add_child(_sfx)
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
@@ -666,6 +698,19 @@ func _paint_bg(canvas: Node2D) -> void:
 
 
 func _process(_delta: float) -> void:
+	_watch_display()   # c1-19: catch a window dragged to another monitor (fires no resize signal)
+	# c1-19: advance a running window-settle ONE sample per rendered frame — the frame loop (not
+	# recursive call_deferred) guarantees each decoration sample lands on a DISTINCT frame, so the
+	# multi-frame zero-stability gate can't be satisfied by several samples in a single idle flush.
+	if _settle_active:
+		_settle_window(_settle_gen)
+	# c1-19: flush a debounced free-resize scale save once the window has been quiet long enough —
+	# coalesces a continuous drag (many crossed scale boundaries) into ONE settings write.
+	if _resize_save_t > 0.0:
+		_resize_save_t -= _delta
+		if _resize_save_t <= 0.0:
+			_resize_save_t = 0.0
+			_save_settings()
 	# Sync the concussion overlay every rendered frame (covers gameplay, attract,
 	# and pause — where _concussion is force-zeroed). Hidden at zero = pure no-op.
 	if _screen_fx_rect == null:
@@ -735,21 +780,81 @@ func start_seeded(seed_v: int) -> void:
 	_fade = 1.0
 
 
+func _clipboard_text() -> String:
+	# The one clipboard read — split out so the menu can cache the raw string and
+	# only re-parse when it actually changes (preview kept off the draw path).
+	return DisplayServer.clipboard_get()
+
+
+func _clipboard_seed() -> int:
+	return _parse_seed_text(_clipboard_text())
+
+
+const SHARE_PREFIX := "SHOEMONEY SOLDIER"   # c1-14: share-card title — the single source _copy_share_text prints and the parser recognizes
+static var _seed_re: RegEx   # c1-14: cached trailing "seed N" field matcher (whole-word, digits to end)
+
+
+static func _parse_seed_text(txt: String) -> int:
+	# c1-14: parse a challenge seed from ONLY the two documented formats — a bare
+	# non-negative integer, or the "... seed N" field of a RECOGNIZED share card (one
+	# that starts with SHARE_PREFIX, or a bare "seed N" string). Arbitrary prose that
+	# merely contains digits or the word "seed" ("not a seed 123", "oilseed 42",
+	# "seed 42junk"), negatives and int64 overflow are all rejected (-1) so the menu
+	# previews exactly what will load and never grabs a stray number.
+	var s := txt.strip_edges()
+	if s.is_empty():
+		return -1
+	# Format 1: the whole clipboard is one bare integer.
+	var whole := _seed_from_digits(s)
+	if whole >= 0:
+		return whole
+	# Format 2: only a recognized share card or a bare "seed N" string may carry a
+	# seed field — never stray prose. The field itself is matched whole-word with the
+	# digits running to end-of-string, so "seed 42junk" / "oilseed 42" don't slip in.
+	var low := s.to_lower()
+	var bare_field := low.begins_with("seed") and s.length() > 4 and (s[4] == " " or s[4] == "\t")
+	if not (s.begins_with(SHARE_PREFIX) or bare_field):
+		return -1
+	if _seed_re == null:
+		_seed_re = RegEx.new()
+		_seed_re.compile("(?i)(?:^|\\s)seed\\s+([0-9]+)\\s*$")
+	var m := _seed_re.search(s)
+	if m == null:
+		return -1
+	return _seed_from_digits(m.get_string(1))
+
+
+const _MAX_I64_STR := "9223372036854775807"   # int64 max, for overflow rejection by digit compare
+
+
+static func _seed_from_digits(s: String) -> int:
+	# A pure digit string -> non-negative seed, or -1 if it isn't all digits or would
+	# overflow int64. Leading zeros are fine ("007" -> 7); "0" is a valid seed. Overflow
+	# is rejected BEFORE to_int() (a digit-length/lexicographic compare) — to_int() errors
+	# hard on out-of-range input, so we never hand it a string it can't represent.
+	if s.is_empty():
+		return -1
+	for c in s:
+		if c < "0" or c > "9":
+			return -1
+	var canon := s.lstrip("0")
+	if canon.is_empty():
+		return 0   # "0" / "000" -> a valid zero seed
+	if canon.length() > _MAX_I64_STR.length():
+		return -1
+	if canon.length() == _MAX_I64_STR.length() and canon > _MAX_I64_STR:
+		return -1
+	return canon.to_int()
+
+
 func start_seed_from_clipboard() -> void:
-	# CHALLENGE SEED: pull the seed out of the clipboard — accepts a bare integer or
-	# a full share-card line ("... seed 12345"), grabbing the LAST digit run.
-	var clip := DisplayServer.clipboard_get()
-	var seed_str := ""
-	for i in range(clip.length() - 1, -1, -1):
-		var c := clip[i]
-		if c >= "0" and c <= "9":
-			seed_str = c + seed_str
-		elif not seed_str.is_empty():
-			break
-	if seed_str.is_empty():
+	# CHALLENGE SEED: load the clipboard's seed. The menu previews + gates this now,
+	# so an empty clipboard never reaches here; the banner stays as a belt-and-braces.
+	var sd := _clipboard_seed()
+	if sd < 0:
 		_show_banner("CLIPBOARD HAS NO SEED")
 		return
-	start_seeded(seed_str.to_int())
+	start_seeded(sd)
 
 
 func start_watch() -> void:
@@ -936,11 +1041,7 @@ func _input(event: InputEvent) -> void:
 	# Handled in _input so it works with menus open; persisted with settings.
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
-			_fullscreen = not _fullscreen
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
-				if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
-			call_deferred("_bake_cursor")   # cursor scale follows the new window size
-			_save_settings()
+			_toggle_fullscreen()
 			get_viewport().set_input_as_handled()
 			return
 	# Track the LAST-USED device so glyphs/legends teach the right buttons —
@@ -1025,7 +1126,7 @@ func _copy_share_text() -> void:
 	# is deterministic, so a friend can replay the exact layout via CHALLENGE SEED.
 	var rr := _run_rank()
 	var where := ("WAVE %d" % sim.wave) if sim.mode == "endless" else ("%dm PUSHED" % (-Fixed.to_int(sim.camera_top) / 10))
-	var txt := "SHOEMONEY SOLDIER — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
+	var txt := "%s — SCORE %d · %s · RANK %s (%s) · seed %d" % [SHARE_PREFIX, sim.score, where, rr.grade, rr.title, _current_seed]
 	DisplayServer.clipboard_set(txt)
 	_show_banner("COPIED TO CLIPBOARD")
 
@@ -1056,6 +1157,13 @@ func _notification(what: int) -> void:
 	# player a death that reads as a bug, not a loss. Auto-open pause the instant the
 	# window loses focus during live play. sim.step() is already gated behind
 	# _menu.is_active(), so this is a pure view gate with zero sim contact — golden-safe.
+	# c1-19: flush a debounced free-resize scale save before the window closes, so a drag-then-quit
+	# (or losing focus) can't drop the choice while its debounce timer was still counting down.
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_FOCUS_OUT \
+			or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		if _resize_save_t > 0.0:
+			_resize_save_t = 0.0
+			_save_settings()
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
 		# no_autopause: the screenshot harness runs unfocused by design — without
 		# this every staged gameplay shot captures the pause overlay instead.
@@ -1076,11 +1184,83 @@ func _update_cursor() -> void:
 
 
 func _on_window_resized() -> void:
-	# A free resize that crosses an integer-scale boundary re-bakes the cursors
-	# (guarded so the decompress+resize doesn't run on every drag frame).
+	# c1-19: a windowed size change (user drag OR our own scale/mode change) SNAPS the shown WINDOW
+	# SCALE to the largest whole-pixel scale that fits the new client — the viewport+integer stretch
+	# already letterboxes, so this only syncs the label/cursor to reality. Guards:
+	#  * fullscreen has no windowed scale to sync;
+	#  * snap == 0 means the client OVERFLOWS the work area — the fullscreen-sized client the
+	#    fullscreen->windowed transition briefly reports; ignore it (no legit windowed drag exceeds
+	#    the work area), so that transient can't clobber a preserved over-ceiling preference;
+	#  * snap == _win_scale_norm() means the window already sits at the effective target — that's what
+	#    OUR OWN resizes (_apply_windowed_scale) produce, so skip: a monitor-clamped effective size
+	#    must NOT collapse a larger stored preference. Only a genuine user drag to a DIFFERENT integer
+	#    scale rewrites the stored preference (an explicit resize IS a new choice).
+	if _fullscreen:
+		return
+	if _prog_resize:
+		return   # OUR OWN mode/scale transition is in flight — ignore its intermediate resize events (explicit guard, not a size heuristic), so a fitting transient client size can't overwrite the saved scale
 	var win := DisplayServer.window_get_size()
-	if maxi(1, mini(win.x / 640, win.y / 360)) != _cursor_s:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	var snap := snap_scale(win, usable.size, _max_win_scale())
+	if snap == 0:
+		return   # oversized transient (belt-and-suspenders alongside _prog_resize) — never touch the preference
+	if snap != _win_scale_norm() and snap != _win_scale:
+		_win_scale = snap             # update the live scale now so the OPTIONS label tracks the drag
+		_resize_save_t = RESIZE_SAVE_DELAY   # debounce the WRITE — persisted once the drag goes quiet
+	if snap != _cursor_s:
 		call_deferred("_bake_cursor")
+
+
+# c1-19: the largest whole-pixel scale a client size can show, given the work-area size and the
+# monitor ceiling — pure + static so the client/decorated/taskbar sizing math is headless-assertable.
+# Returns 0 to signal "IGNORE this size": a client that OVERFLOWS the work area is the fullscreen-
+# sized client reported mid fullscreen->windowed transition (no legitimate windowed resize exceeds
+# the usable area), so callers skip it rather than snapping to a bogus huge scale. usable == 0
+# (no display metrics) disables the overflow guard but still clamps the fitted scale.
+static func snap_scale(client: Vector2i, usable: Vector2i, ceiling: int) -> int:
+	if usable.x > 0 and usable.y > 0 and (client.x > usable.x or client.y > usable.y):
+		return 0
+	return clampi(mini(client.x / 640, client.y / 360), 1, ceiling)
+
+
+# c1-19: a window dragged onto a DIFFERENT monitor fires no resize signal (its pixel size is
+# unchanged), and a same-monitor resolution / taskbar change moves the work area without changing
+# the screen index — so poll BOTH the screen index and the usable rect every frame. On any change,
+# re-measure the chrome and re-FIT the window to what the new work area holds (a 3x window moved
+# onto a 1080p screen shrinks to fit; moving back grows it again). The stored PREFERENCE is never
+# touched, so this is a transient fit, not a saved downgrade — hence no _save_settings here.
+func _watch_display() -> void:
+	var scr := DisplayServer.window_get_current_screen()
+	var usable := DisplayServer.screen_get_usable_rect(scr)
+	if scr == _last_screen and usable == _last_usable:
+		return
+	_last_screen = scr
+	_last_usable = usable
+	if _fullscreen:
+		return
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return                           # no display metrics (headless) — nothing to fit
+	# c1-19: re-fit when the actual client size no longer matches the EFFECTIVE target for the new
+	# work area — this catches BOTH a shrink (moved to a smaller monitor: the ceiling drops, target
+	# shrinks) AND a regrow (moved back to a bigger monitor: the ceiling rises, target grows again),
+	# so _win_scale_norm() and the real window can never disagree. When the size already matches,
+	# never a forced recenter (that yanks a window the player deliberately positioned) — only nudge
+	# it back on-screen if the new work area leaves it hanging off an edge.
+	# _measure_decorations is intentionally NOT called here: the reserve is written ONLY from the
+	# deferred settle pass (reached via _apply_windowed_scale), so a transient post-fullscreen zero
+	# decoration read can't clobber the cached value — honoring the stated cache invariant.
+	if needs_refit(DisplayServer.window_get_size(), _win_scale_norm()):
+		_apply_windowed_scale()          # size drifted from the new monitor's target: re-fit (this recenters)
+		call_deferred("_bake_cursor")
+	else:
+		_clamp_window_on_screen()        # already the right size — keep placement, only nudge on-screen if it hangs off
+
+
+# c1-19: does the actual client size disagree with the effective windowed target (640Nx360N)? Pure
+# + static so the shrink/regrow monitor-change decision is headless-assertable — the client size
+# and the reported scale can never silently diverge across a display move.
+static func needs_refit(actual: Vector2i, scale: int) -> bool:
+	return actual != Vector2i(640 * scale, 360 * scale)
 
 
 func _physics_process(_delta: float) -> void:
@@ -2372,30 +2552,283 @@ func _persist(sections: Dictionary) -> void:
 
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
+	# c1-18: binds always start at their ship defaults; the load branch overlays any
+	# persisted [binds]/[padbinds] on top, so a fresh install (or a save predating
+	# rebinds) still has a complete, valid map before the first _gather_inputs read.
+	_binds = BIND_DEFAULTS.duplicate()
+	_pad_binds = [PAD_DEFAULTS.duplicate(), PAD_DEFAULTS.duplicate()]   # P1 + P2 both start at ship defaults
+	_menu_binds = MENU_BIND_DEFAULTS.duplicate()
 	# Fall back to the .bak snapshot if the primary is missing/corrupt, before
 	# giving up to zeros (a silent wipe).
 	if cf.load(SAVE_PATH) == OK or cf.load(SAVE_BAK) == OK:
+		# c1-18: overlay saved binds action-by-action (never wholesale-replace the map)
+		# so a verb added in a later build keeps its default when an older save lacks it,
+		# and a legacy save with NO [binds]/[padbinds]/[menubinds] stays fully at defaults.
+		var saved_kb := {}
+		var saved_pad := {}
+		var saved_pad2 := {}
+		var saved_menu := {}
+		for a in BIND_DEFAULTS:
+			saved_kb[a] = cf.get_value("binds", a, null)
+		for a in PAD_DEFAULTS:
+			saved_pad[a] = cf.get_value("padbinds", a, null)
+			saved_pad2[a] = cf.get_value("padbinds2", a, null)   # P2's independent layout
+		for a in MENU_BIND_DEFAULTS:
+			saved_menu[a] = cf.get_value("menubinds", a, null)
+		# Keyboard/menu keycodes are nonnegative (lo=0); pad buttons run -1(UNBOUND)..
+		# JOY_BUTTON_MAX-1 (JOY_BUTTON_MAX itself is the enum COUNT sentinel, not a real button).
+		_binds = overlay_binds(BIND_DEFAULTS, saved_kb, 0)
+		# c1-18: each pad reloads its OWN [padbinds]/[padbinds2] section — a save predating
+		# per-player layouts has no [padbinds2], so P2 overlays all-null and lands at defaults.
+		_pad_binds = [overlay_binds(PAD_DEFAULTS, saved_pad, -1, JOY_BUTTON_MAX - 1),
+			overlay_binds(PAD_DEFAULTS, saved_pad2, -1, JOY_BUTTON_MAX - 1)]
+		_menu_binds = overlay_binds(MENU_BIND_DEFAULTS, saved_menu, 0)
 		best_score = cf.get_value("best", "score", 0)
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
 		_seen = cf.get_value("seen", "hints", {})
 		hall.assign(cf.get_value("hall", "runs", []))
+		# Resume the id counter past the highest hid on disk so a fresh run can never
+		# collide with a reloaded entry's id (old saves lack hid -> starts at 0).
+		for r in hall:
+			_hall_seq = maxi(_hall_seq, int(r.get("hid", -1)) + 1)
 		_life_runs = cf.get_value("life", "runs", 0)
 		_life_kills = cf.get_value("life", "kills", 0)
 		_life_wins = cf.get_value("life", "wins", 0)
-		colorblind = cf.get_value("settings", "colorblind", false)
-		_assist = cf.get_value("settings", "assist", false)
-		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
-		_rumble_on = cf.get_value("settings", "rumble", true)
-		# Volume steps 0..10 (legacy saves only carried the mute bools — map
-		# them). _set_bus_vol also slaves the UI jingle bus to the SFX level.
-		_set_bus_vol("SFX", cf.get_value("settings", "sfx_vol",
-			0 if cf.get_value("settings", "sfx_muted", false) else 10))
-		_set_bus_vol("Music", cf.get_value("settings", "music_vol",
-			0 if cf.get_value("settings", "music_muted", false) else 10))
-		_fullscreen = cf.get_value("settings", "fullscreen", false)
-		if _fullscreen:
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
+		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
+		# push it through the SAME _apply_settings path fresh-install and RESET use —
+		# no field-by-field mapping to drift, and fullscreen=false explicitly restores
+		# windowed mode (the old branch only handled the true case).
+		_apply_settings({
+			"colorblind": cf.get_value("settings", "colorblind", SETTINGS_DEFAULTS["colorblind"]),
+			"assist": cf.get_value("settings", "assist", SETTINGS_DEFAULTS["assist"]),
+			"reduce_motion": cf.get_value("settings", "reduce_motion", SETTINGS_DEFAULTS["reduce_motion"]),
+			"rumble": cf.get_value("settings", "rumble", SETTINGS_DEFAULTS["rumble"]),
+			"swap_sticks": cf.get_value("settings", "swap_sticks", SETTINGS_DEFAULTS["swap_sticks"]),
+			"swap_sticks_p2": cf.get_value("settings", "swap_sticks_p2", SETTINGS_DEFAULTS["swap_sticks_p2"]),
+			"sfx_vol": cf.get_value("settings", "sfx_vol",
+				0 if cf.get_value("settings", "sfx_muted", false) else SETTINGS_DEFAULTS["sfx_vol"]),
+			"music_vol": cf.get_value("settings", "music_vol",
+				0 if cf.get_value("settings", "music_muted", false) else SETTINGS_DEFAULTS["music_vol"]),
+			"fullscreen": cf.get_value("settings", "fullscreen", SETTINGS_DEFAULTS["fullscreen"]),
+			# c1-19: read the saved windowed scale back (missing this dropped it on every load,
+			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
+			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
+		})
+	else:
+		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
+		# rather than leaning on the field initializers, so every settings value comes
+		# from one source whether the game is booting clean, loading, or resetting.
+		_apply_settings(SETTINGS_DEFAULTS)
+
+
+# c1-09: THE authoritative ship-default for every persisted [settings] key — one
+# table so _load_settings' fallbacks and _reset_settings' revert can't drift, and
+# a newly-added setting is reset the moment it's given a default here. reduce_motion
+# is the persisted bool; the live field is _motion (1.0 normal / 0.0 reduced).
+const SETTINGS_DEFAULTS := {
+	"colorblind": false,
+	"assist": false,
+	"reduce_motion": false,
+	"rumble": true,
+	"swap_sticks": false,      # P1 stick-swap
+	"swap_sticks_p2": false,   # P2 stick-swap (independent)
+	"sfx_vol": 10,
+	"music_vol": 10,
+	"fullscreen": false,
+	"window_scale": 2,
+}
+
+
+# c1-18: ship-default player-1 keyboard binds (action -> PHYSICAL keycode) — the ONE
+# authoritative table load and RESET both read, mirroring SETTINGS_DEFAULTS. Physical
+# keycodes (not logical) so a bind survives AZERTY/QWERTZ the same way the hardcoded
+# reads did. The ORDER here is also the order the rebind screen lists the actions in.
+# Menu nav and aim stay on their own always-available fallbacks (arrows navigate menus;
+# mouse/right-stick aims), so a rebind can never strand a player with no way to steer.
+const BIND_DEFAULTS := {
+	"move_up": KEY_W,
+	"move_down": KEY_S,
+	"move_left": KEY_A,
+	"move_right": KEY_D,
+	"aim_up": KEY_UP,
+	"aim_down": KEY_DOWN,
+	"aim_left": KEY_LEFT,
+	"aim_right": KEY_RIGHT,
+	"fire": KEY_SPACE,
+	"grenade": KEY_SHIFT,
+	"roll": KEY_C,
+	"interact": KEY_F,
+	"revive": KEY_E,
+	"buy": KEY_Q,
+}
+
+# c1-18: ship-default gamepad button binds (action -> JOY_BUTTON_*) for the discrete
+# action verbs. Movement/aim on a pad are the analog STICKS (JOY_AXIS_LEFT/RIGHT) and the
+# fire TRIGGER is JOY_AXIS_TRIGGER_RIGHT — those analog inputs are fixed, standard, and
+# always live (documented on the rebind screen), so the rebindable pad set is the buttons.
+# -1 == UNBOUND. Both pads (P1 dev 0, P2 dev 1) share this one layout.
+const PAD_DEFAULTS := {
+	"fire": JOY_BUTTON_RIGHT_SHOULDER,
+	"grenade": JOY_BUTTON_LEFT_SHOULDER,
+	"roll": JOY_BUTTON_B,
+	"interact": JOY_BUTTON_X,
+	"revive": JOY_BUTTON_Y,
+	"buy": JOY_BUTTON_BACK,
+}
+
+# c1-18: rebindable MENU-navigation keys. These are read ADDITIVELY by the menu ON TOP of
+# the immutable W/S/arrows/Enter/Esc it always honors — so a player CAN remap menu nav, but
+# can never lock themselves out of the menus (the hardcoded emergency keys keep working).
+# Kept in their OWN map so a menu-key never swaps against a gameplay verb sharing that key.
+const MENU_BIND_DEFAULTS := {
+	"menu_up": KEY_UP,
+	"menu_down": KEY_DOWN,
+	"menu_left": KEY_LEFT,
+	"menu_right": KEY_RIGHT,
+	"menu_confirm": KEY_ENTER,
+	"menu_cancel": KEY_ESCAPE,
+}
+
+
+# c1-18: PURE overlay — start from `defaults`, replace only the actions whose `saved`
+# value is a real int (null / missing / wrong-type keeps the default). This is the whole
+# legacy-save story: a save with no [binds] section (older build) passes all-null and
+# comes back exactly at defaults; a save from a newer build with extra keys is ignored
+# for actions this build doesn't know. Static so a headless test can pin it directly.
+# c1-18: Godot Key enum ceiling for a stored PHYSICAL keycode. Special keys (arrows, Enter,
+# F-keys, nav) carry the KEY_SPECIAL bit (0x400000+), so a naive small cap would WRONGLY
+# reject a rebound arrow on reload. This covers every real key (well past the special block)
+# yet still rejects absurd tampered ints (e.g. 999999999).
+const KEYCODE_CEIL := 0x00FFFFFF
+
+
+static func overlay_binds(defaults: Dictionary, saved: Dictionary, lo := -1, hi := KEYCODE_CEIL) -> Dictionary:
+	var out := defaults.duplicate()
+	for a in defaults:
+		var v: Variant = saved.get(a, null)
+		# Validate PER BINDING TYPE: keyboard/menu pass lo=0 (nonnegative keycodes, incl. the
+		# 0x400000+ special block), gamepad passes lo=-1/hi=JOY_BUTTON_MAX-1 (valid buttons,
+		# -1 == UNBOUND). Anything else (null, wrong type, a corrupt/out-of-range int from a
+		# tampered save) keeps the ship default, so a bad value can't produce a broken binding.
+		if typeof(v) == TYPE_INT and int(v) >= lo and int(v) <= hi:
+			out[a] = int(v)
+	return out
+
+
+# c1-18: PURE swap-resolve — bind `action` to `code` in a COPY of `binds` and return
+# {"binds": new_map, "swapped": other_or_empty}. A non-clear code already held by another
+# verb SWAPS: that verb inherits the key `action` gave up, so no two verbs ever collide
+# (a silent duplicate leaves one verb un-pressable or double-fires two). A clear (kb 0 /
+# pad -1) never swaps — any number of verbs may sit UNBOUND. Static + testable.
+static func apply_bind(binds: Dictionary, action: String, code: int, unbound: int) -> Dictionary:
+	var out := binds.duplicate()
+	var swapped := ""
+	if code != unbound:
+		var old := int(out.get(action, unbound))
+		for other in out:
+			if other != action and int(out[other]) == code:
+				out[other] = old
+				swapped = other
+	out[action] = code
+	return {"binds": out, "swapped": swapped}
+
+
+# c1-18: the live physical keycode a gameplay verb is bound to (0 == UNBOUND). Falls back
+# to the ship default for an unknown action (or an empty map before _load_bests), so the
+# _gather_inputs reads can never index a missing key. is_physical_key_pressed(0) is always
+# false, so an UNBOUND verb simply reads as never-pressed on the keyboard.
+func bind(action: String) -> int:
+	return int(_binds.get(action, BIND_DEFAULTS.get(action, 0)))
+
+
+# c1-18: the pad button a verb is bound to on `device` (0 == P1, 1 == P2; -1 == UNBOUND) —
+# the display read the rebind screen shows for the GAMEPAD tab. Mirrors bind() for keyboard.
+func pad_bind(action: String, device := 0) -> int:
+	return int(_pad_binds[device].get(action, PAD_DEFAULTS.get(action, -1)))
+
+
+# c1-18: the physical keycode a rebindable MENU-navigation action is bound to (the menu
+# reads this ADDITIVELY over its immutable hardcoded keys). 0 == UNBOUND.
+func menu_bind(action: String) -> int:
+	return int(_menu_binds.get(action, MENU_BIND_DEFAULTS.get(action, 0)))
+
+
+# c1-18: rebind one MENU-navigation action (0 to clear) and persist. Same swap rule, but
+# within the menu-key map only (never collides with a gameplay verb sharing the key).
+# c1-18: the IMMUTABLE menu-nav role a physical key always serves (or "" for none) — the
+# hardcoded emergency fallback keys. A menu action bound to a key whose fixed role differs
+# would fire two menu commands on one press. Shared by the capture-time reject and the
+# post-swap sanitize below (single source, so the two agree).
+static func immutable_menu_role(pk: int) -> String:
+	match pk:
+		KEY_W, KEY_UP: return "menu_up"
+		KEY_S, KEY_DOWN: return "menu_down"
+		KEY_A, KEY_LEFT: return "menu_left"
+		KEY_D, KEY_RIGHT: return "menu_right"
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE: return "menu_confirm"
+		KEY_ESCAPE: return "menu_cancel"
+	return ""
+
+
+func rebind_menu_nav(action: String, keycode: int) -> String:
+	if not MENU_BIND_DEFAULTS.has(action):
+		return ""
+	var res := apply_bind(_menu_binds, action, keycode, 0)
+	_menu_binds = res["binds"]
+	# A SWAP can hand the displaced action the key `action` gave up. If that key is an
+	# immutable menu key for a DIFFERENT role, the displaced action would trigger two menu
+	# commands on one press — so UNBIND it instead (its immutable fallback still navigates).
+	var swapped: String = res["swapped"]
+	if swapped != "":
+		var role := immutable_menu_role(int(_menu_binds[swapped]))
+		if role != "" and role != swapped:
+			_menu_binds[swapped] = 0
+	_persist({"menubinds": _menu_binds})
+	return swapped
+
+
+# c1-18: is the pad button bound to `action` currently held on `device`? -1 (UNBOUND)
+# reads as never-pressed. Each player reads its own per-device layout (P1 _pad_binds[0] / P2 [1]).
+func pad_pressed(device: int, action: String) -> bool:
+	# Each player reads its OWN layout, so P1 and P2 can hold different buttons for the verb.
+	var b := int(_pad_binds[device].get(action, PAD_DEFAULTS.get(action, -1)))
+	return b >= 0 and Input.is_joy_button_pressed(device, b)
+
+
+# c1-18: rebind one KEYBOARD verb to a physical keycode (0 to clear) and persist immediately
+# (same write-through the settings toggles use). Ignores unknown actions. Returns the verb
+# it SWAPPED with (or "") so the UI can surface the swap. See apply_bind for the swap rule.
+func rebind(action: String, keycode: int) -> String:
+	if not BIND_DEFAULTS.has(action):
+		return ""
+	var res := apply_bind(_binds, action, keycode, 0)
+	_binds = res["binds"]
+	_persist({"binds": _binds})
+	return res["swapped"]
+
+
+# c1-18: rebind one GAMEPAD verb on `device` (0 == P1, 1 == P2) to a button (-1 to clear) and
+# persist THAT player's section only ([padbinds] / [padbinds2]) — swaps stay within the one
+# player's layout, so remapping P2 never disturbs P1. Same swap rule.
+func rebind_pad(action: String, button: int, device := 0) -> String:
+	if not PAD_DEFAULTS.has(action):
+		return ""
+	var res := apply_bind(_pad_binds[device], action, button, -1)
+	_pad_binds[device] = res["binds"]
+	_persist({("padbinds" if device == 0 else "padbinds2"): _pad_binds[device]})
+	return res["swapped"]
+
+
+# c1-18: RESET CONTROLS — revert every verb (keyboard AND BOTH gamepads AND menu keys) to its
+# ship default and persist every section. Also the target of the F10 global recovery gesture,
+# so a player who rebinds themselves into a corner is one keypress from a clean slate.
+func reset_binds() -> void:
+	_binds = BIND_DEFAULTS.duplicate()
+	_pad_binds = [PAD_DEFAULTS.duplicate(), PAD_DEFAULTS.duplicate()]
+	_menu_binds = MENU_BIND_DEFAULTS.duplicate()
+	_persist({"binds": _binds, "padbinds": _pad_binds[0], "padbinds2": _pad_binds[1], "menubinds": _menu_binds})
 
 
 func _save_settings() -> void:
@@ -2406,10 +2839,310 @@ func _save_settings() -> void:
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
 		"rumble": _rumble_on,
+		"swap_sticks": _swap_sticks[0],
+		"swap_sticks_p2": _swap_sticks[1],
 		"sfx_vol": _bus_vol("SFX"),
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
+		"window_scale": _win_scale,
 	}})
+
+
+# c1-09: apply a [settings] dict onto the live fields — the SINGLE place values
+# flow into the game, shared by _reset_settings and the fresh-install path in
+# _load_bests, so SETTINGS_DEFAULTS is authoritative everywhere and no field
+# initializer can drift from it. Does not persist (callers decide).
+func _apply_settings(d: Dictionary) -> void:
+	colorblind = d["colorblind"]
+	_assist = d["assist"]
+	_motion = 0.0 if d["reduce_motion"] else 1.0
+	_rumble_on = d["rumble"]
+	# .get: a save predating the option (or its per-player split) lands each pad at OFF.
+	# Assigned per-index (not a fresh literal) so the typed Array[bool] property is preserved.
+	_swap_sticks[0] = bool(d.get("swap_sticks", false))
+	_swap_sticks[1] = bool(d.get("swap_sticks_p2", false))
+	_set_bus_vol("SFX", d["sfx_vol"])
+	_set_bus_vol("Music", d["music_vol"])
+	_fullscreen = d["fullscreen"]
+	# .get: saves predating c1-19 land at the 2x ship default. Store the PREFERENCE sane-capped
+	# (NOT clamped to the current monitor) so a scale saved on a bigger display survives a load on
+	# a smaller one; _apply_windowed_scale sizes the window to the live per-monitor fit.
+	_win_scale = clampi(int(d.get("window_scale", 2)), 1, WIN_SCALE_MAX)
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
+		else DisplayServer.WINDOW_MODE_WINDOWED)
+	if not _fullscreen:
+		_apply_windowed_scale()
+	# c1-09: rebake the cursor to the new window size here too — RESET DEFAULTS switches
+	# display mode through this path, and without this it left the cursor scaled for the
+	# old size (the F11/Alt+Enter shortcut always rebaked; reset used to skip it).
+	call_deferred("_bake_cursor")
+
+
+# c1-09: the SINGLE fullscreen flip — shared by the F11/Alt+Enter shortcut and the
+# OPTIONS DISPLAY row, so the on-screen toggle and the hotkey stay one behavior
+# (persist + cursor rebake included). Lets DISPLAY be reviewed AND changed on the
+# dedicated settings screen, not only via the hidden shortcut.
+func _toggle_fullscreen() -> void:
+	_prog_resize = true   # a programmatic mode change — ignore the transition's resize events until settled
+	_fullscreen = not _fullscreen
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
+		if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
+	if not _fullscreen:
+		# Returning to windowed restores the chosen integer scale — RE-CLAMPED to the current
+		# monitor first, so a scale carried in from a larger display (save or F11 round-trip)
+		# can never restore an oversized window that overflows the smaller screen. This arms a
+		# windowed settle chain that clears _prog_resize once the transition completes.
+		_apply_windowed_scale()
+	else:
+		# Entering fullscreen applies NO windowed fit, so arm a generation-tagged settle chain anyway:
+		# its fullscreen branch (reached from _process next frame) resets the counters AND clears
+		# _prog_resize, so the guard can never stay stuck true after a bare F11-in.
+		_settle_gen += 1
+		_settle_active = true
+	call_deferred("_bake_cursor")   # cursor scale follows the new window size
+	_save_settings()
+
+
+# c1-19: largest integer window scale the current display can actually hold (min 1),
+# so the OPTIONS control never offers a window that won't fit. Sized against the WORK
+# area (screen_get_usable_rect excludes the taskbar / macOS menu bar) MINUS the window
+# chrome (title bar + borders) — a raw-screen divide advertised e.g. 2x on a 720p display
+# that the decorated 1280x720 window then overflowed. The live decoration delta is only
+# trustworthy while WINDOWED (it reads 0 in fullscreen); it's cached into _deco_reserve
+# there and reused when queried in fullscreen, so the ceiling computed mid-fullscreen still
+# leaves room for the chrome that returns on the way out.
+func _max_win_scale() -> int:
+	return max_scale_for(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()).size, _deco_reserve)
+
+
+# c1-19: the ceiling math, pure + static so it's headless-assertable with SYNTHETIC work-area +
+# chrome-reserve pairs — e.g. a 1920x1080 work area caps at 2x with a 40px fallback reserve but at 3x
+# once a borderless window's real zero reserve is measured. usable == 0 (no display metrics) returns
+# the full 3x ladder. Capped at WIN_SCALE_MAX so even an 8K display can't offer past the declared cap.
+static func max_scale_for(usable: Vector2i, reserve: Vector2i) -> int:
+	if usable.x <= 0 or usable.y <= 0:
+		return 3
+	return clampi(mini((usable.x - reserve.x) / 640, (usable.y - reserve.y) / 360), 1, WIN_SCALE_MAX)
+
+
+# c1-19: cache the real window chrome from the live delta. The cache is only ever written from
+# _settle_window (a DEFERRED step that runs a frame after a windowed mode change), never inline
+# in _max_win_scale — so the transient zero the OS reports in the frame right after leaving
+# fullscreen (decorated size == client size until the title bar is re-attached) can't clobber a
+# good value. Once settled, a genuinely borderless / client-side-decoration window reads a stable
+# zero, which is valid and stored as-is.
+func _measure_decorations(accept_zero := false) -> void:
+	if _fullscreen:
+		return
+	var raw := DisplayServer.window_get_size_with_decorations() - DisplayServer.window_get_size()
+	var live := Vector2i(maxi(0, raw.x), maxi(0, raw.y))
+	# c1-19: NEVER clobber a known-good nonzero reserve with a TRANSIENT zero. Right after leaving
+	# fullscreen the OS reports decorated size == client size for a frame or two (the title bar has
+	# not re-attached yet); committing that 0 would drop the chrome reserve and later let
+	# _max_win_scale offer / restore an OVERSIZED scale. A zero is therefore committed only when it
+	# is TRUSTED: either there is no prior reserve, or `accept_zero` says a stability gate has
+	# already seen this same zero across consecutive frames (a genuinely borderless / client-side-
+	# decorated window). That way a real borderless window still drops the 40px fallback — a
+	# transient zero can't clobber, and a stable zero isn't rejected forever. Only _settle_window,
+	# which owns the multi-frame stability check, ever passes accept_zero.
+	if live == Vector2i.ZERO and _deco_reserve != Vector2i.ZERO and not accept_zero:
+		return
+	_deco_reserve = live
+
+
+# c1-19: run one frame AFTER a windowed mode change, once the OS has settled the decorated
+# dimensions — re-measure the chrome, then RE-FIT + RECENTER: the boot/seed decoration estimate
+# may have mis-sized the window, so resize to the effective scale recomputed from the real chrome
+# and center on that FINAL decorated footprint (the inline pass ran before the title bar
+# re-attached, so its size/offset could be a few px off).
+# c1-19: ONE settle sample — run once per frame by _process while _settle_active, never self-requeued
+# via call_deferred (which can fire multiple times in a single idle flush and collapse the per-frame
+# stability gate). Each invocation takes exactly one decoration reading on a distinct rendered frame.
+func _settle_window(gen := 0) -> void:
+	# Drop a STALE sample: if a newer change bumped _settle_gen, this belongs to a superseded chain —
+	# bail so it can't resize/recenter over the newer choice or corrupt the live chain's counters.
+	# (gen 0 default = a direct/legacy call adopts the current chain.)
+	if gen != 0 and gen != _settle_gen:
+		return
+	if _fullscreen:
+		_settle_tries = 0
+		_settle_last_deco = Vector2i(-1, -1)
+		_settle_zero_streak = 0
+		_prog_resize = false   # entered fullscreen; resize events are already guarded by _fullscreen
+		_settle_active = false
+		return
+	# c1-19: robust to window-manager latency — the decorated size may not settle in a SINGLE
+	# deferred frame (a slow X11 / Wayland compositor re-attaches the title bar a frame or two later,
+	# re-measuring the chrome and thus the fit). SAMPLE the live decoration each deferred frame and
+	# treat a NONZERO reading as trusted immediately (real chrome). A ZERO is only trusted once it has
+	# HELD for SETTLE_ZERO_FRAMES consecutive frames: the fullscreen->windowed transition can report a
+	# decorated==client (zero) size for SEVERAL frames while the title bar re-attaches, so a mere
+	# "same value twice" gate could freeze that transient zero and drop a valid chrome reserve. By
+	# demanding a long zero streak, the real chrome always reappears first (resetting the streak), and
+	# the last known-good NONZERO reserve is retained until the transition is definitively complete.
+	# A genuinely borderless window reads zero every frame and so still settles (streak reaches the
+	# bar). _measure_decorations then commits, itself guarded so a transient zero can't clobber a good
+	# reserve unless this streak-based accept_zero vouches for it.
+	var raw := DisplayServer.window_get_size_with_decorations() - DisplayServer.window_get_size()
+	var live := Vector2i(maxi(0, raw.x), maxi(0, raw.y))
+	if live == Vector2i.ZERO:
+		_settle_zero_streak += 1
+	else:
+		_settle_zero_streak = 0
+	var deco_stable := live == _settle_last_deco
+	_settle_last_deco = live
+	# at_target is judged against the target implied by the CURRENT reserve (before this sample's
+	# measurement) — that's the size the previous iteration aimed the window at.
+	var pre_px := Vector2i(640 * _win_scale_norm(), 360 * _win_scale_norm())
+	var at_target := DisplayServer.window_get_size() == pre_px
+	# A ZERO reserve is trusted ONLY when it has held SETTLE_ZERO_FRAMES consecutive frames AND the
+	# window is already AT its final target size — i.e. the resize/transition is definitively over.
+	# Requiring at_target too means a long-but-transient zero seen WHILE the window is still resizing
+	# (mid fullscreen->windowed, before the client reaches the target) can't be committed and offer an
+	# oversized window; only a genuinely borderless window, settled at its size, drops the reserve.
+	var accept_zero := _settle_zero_streak >= SETTLE_ZERO_FRAMES and at_target
+	var prev_reserve := _deco_reserve
+	_measure_decorations(accept_zero)
+	var reserve_changed := _deco_reserve != prev_reserve
+	# Recompute the target AFTER measuring: committing the reserve (e.g. accepting a borderless zero,
+	# dropping the 40px fallback) can RAISE the effective scale, so the pre-measurement `want` is now
+	# stale. Aim at the POST-measurement target and, whenever the reserve just changed, force one more
+	# iteration so the new effective scale is actually applied and verified — never finish at the old
+	# (smaller) scale the reserve implied before it was updated.
+	var want := _win_scale_norm()
+	var px := Vector2i(640 * want, 360 * want)
+	var now_at_target := DisplayServer.window_get_size() == px
+	# The chrome is "done" only when a nonzero reserve was committed OR a settled zero was trusted —
+	# keep retrying (re-fitting to the freshly measured chrome) until that AND the client size matches
+	# the POST-measurement target AND the reserve has stopped changing, bounded by SETTLE_MAX_TRIES.
+	var chrome_done := live != Vector2i.ZERO or accept_zero
+	if (not (deco_stable and chrome_done and now_at_target) or reserve_changed) and _settle_tries < SETTLE_MAX_TRIES:
+		if not now_at_target:
+			DisplayServer.window_set_size(px)   # re-fit to the scale recomputed from the freshly measured chrome
+		_settle_tries += 1
+		return   # NOT done — _process runs the next sample on the next distinct frame (no self-requeue)
+	# Settled (stable chrome, at the post-measurement target, reserve steady) or hit the retry cap.
+	_settle_tries = 0
+	_settle_last_deco = Vector2i(-1, -1)
+	_settle_zero_streak = 0
+	_settle_active = false
+	_prog_resize = false   # transition definitively complete — a genuine user drag from here IS honored
+	_center_window()
+
+
+# c1-19: slide the window fully back onto the current work area WITHOUT resizing or recentering —
+# used when a monitor / work-area change leaves a correctly-sized window hanging off the edge, so
+# the player's placement is preserved as much as possible (only the overflow is corrected).
+func _clamp_window_on_screen() -> void:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return
+	var deco := DisplayServer.window_get_size_with_decorations()
+	var pos := DisplayServer.window_get_position()
+	var np := clamp_pos(pos, usable.position, usable.size, deco)
+	if np != pos:
+		DisplayServer.window_set_position(np)
+
+
+# c1-19: slide a decorated window fully onto the work area, preserving placement where it already
+# fits (only the overflow is corrected). Pure + static so the off-edge / taskbar-inset / multi-
+# monitor-offset math is headless-assertable without a real display.
+static func clamp_pos(pos: Vector2i, usable_pos: Vector2i, usable_size: Vector2i, deco: Vector2i) -> Vector2i:
+	return Vector2i(
+		clampi(pos.x, usable_pos.x, maxi(usable_pos.x, usable_pos.x + usable_size.x - deco.x)),
+		clampi(pos.y, usable_pos.y, maxi(usable_pos.y, usable_pos.y + usable_size.y - deco.y)))
+
+
+# c1-19: top-left position that centers a DECORATED footprint (client + title bar/borders) inside a
+# work area — so the whole window, chrome included, lands on-screen and clear of the taskbar/menu
+# bar. Pure + static so centering is headless-assertable against synthetic taskbar/monitor rects.
+static func center_pos(usable_pos: Vector2i, usable_size: Vector2i, deco: Vector2i) -> Vector2i:
+	return usable_pos + (usable_size - deco) / 2
+
+
+# c1-19: the ONE place the windowed size is applied — sizes the window to the EFFECTIVE scale
+# (the stored preference clamped to what the CURRENT monitor fits) WITHOUT mutating the stored
+# preference, so every path back to windowed (load, RESET, F11 out, a scale step, a monitor hop)
+# fits the live display while a scale chosen on a bigger monitor survives to be restored later.
+func _apply_windowed_scale() -> void:
+	_prog_resize = true   # our own resize — suppress the size-change notifications it emits until the settle completes
+	var eff := _win_scale_norm()
+	DisplayServer.window_set_size(Vector2i(640 * eff, 360 * eff))
+	_center_window()
+	# Start a FRESH settle chain: bump the generation (cancelling any in-flight chain from a previous
+	# change) and reset its counters, then arm it. _process advances it one sample per rendered frame
+	# until the chrome + client size stabilize (re-measure chrome, re-fit, recenter), then clears the
+	# programmatic-resize guard.
+	_settle_gen += 1
+	_settle_tries = 0
+	_settle_last_deco = Vector2i(-1, -1)
+	_settle_zero_streak = 0
+	_settle_active = true
+
+
+# c1-19: the EFFECTIVE windowed scale actually applied to the window — the stored PREFERENCE
+# clamped to the CURRENT monitor's ceiling. The window is always sized to this; the preference
+# (_win_scale) is left untouched so a smaller monitor shrinks the view without destroying the
+# choice. The OPTIONS row label and the ladder step both read through here, so the on-screen
+# control always sits on the real ceiling (a stale over-max preference can't wedge ►).
+func _win_scale_norm() -> int:
+	return clampi(_win_scale, 1, _max_win_scale())
+
+
+# c1-19: apply an absolute windowed integer scale — the ONE place window size changes,
+# shared by the OPTIONS WINDOW SCALE row (◄/► and Enter). Clamped to the display's fit.
+# Picking a scale implies WINDOWED: fullscreen has no visible window to size, so a step
+# drops out of it into the chosen clean multiple. Returns true if the value moved.
+func _set_win_scale(s: int) -> bool:
+	var ns := clampi(s, 1, _max_win_scale())
+	if ns == _win_scale and not _fullscreen:
+		return false
+	_win_scale = ns
+	_fullscreen = false
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	_apply_windowed_scale()
+	call_deferred("_bake_cursor")   # cursor scale follows the new window size
+	_save_settings()
+	return true
+
+
+# c1-19: change the STORED windowed-scale PREFERENCE without leaving fullscreen or resizing anything
+# — so the DISPLAY WINDOW SCALE row stays a LIVE control while fullscreen instead of a dead, ignored
+# row. The chosen value is what applies the moment you drop back to windowed (via the FULLSCREEN
+# toggle or F11). Clamped to the current effective ceiling and persisted; returns true if it moved.
+func _set_win_scale_pref(s: int) -> bool:
+	var ns := clampi(s, 1, _max_win_scale())
+	if ns == _win_scale:
+		return false
+	_win_scale = ns
+	_save_settings()
+	return true
+
+
+func _center_window() -> void:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return   # no display metrics (headless) — leave the position as-is
+	# Center the DECORATED footprint (client + title bar/borders) inside the WORK area, so the
+	# whole window — chrome included — lands on-screen and clear of the taskbar/menu bar. Godot's
+	# window_get_position / window_set_position are decorated-origin on our desktop targets, so
+	# centering the decorated footprint is correct there; the final clamp_pos is a safety net so
+	# that even where the position is treated as a client origin (leaving the title bar off the top)
+	# the whole decorated box is still slid fully onto the work area rather than trusting the split.
+	var deco := DisplayServer.window_get_size_with_decorations()
+	var centered := center_pos(usable.position, usable.size, deco)
+	DisplayServer.window_set_position(clamp_pos(centered, usable.position, usable.size, deco))
+
+
+func _reset_settings() -> void:
+	# c1-09: RESET DEFAULTS reverts EVERY persisted setting to its SETTINGS_DEFAULTS
+	# ship value — the ONE authoritative table load and fresh-install also read, so it
+	# can never miss one — and DISPLAY mode (fullscreen) is included, not exempted, so
+	# "DEFAULTS RESTORED" is literally true. The OPTIONS header shows the DISPLAY state
+	# (via a11y_summary), so restoring it to WINDOWED is a VISIBLE change on the same
+	# screen, not a silent flip — which is why resetting it is honest rather than jarring.
+	_apply_settings(SETTINGS_DEFAULTS)
+	_save_settings()
 
 
 func _bus_vol(name: String) -> int:
@@ -2451,13 +3184,22 @@ func _record_run() -> void:
 		if g["open"]:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
-	hall.append({"score": sim.score, "mode": sim.mode, "wave": sim.wave,
+	var entry := {"score": sim.score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
-		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues})
+		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
+		"hid": _hall_seq}
+	_hall_seq += 1
+	hall.append(entry)
+	hall_latest = entry   # keep the ref so the Hall can highlight this run wherever it ranks
 	hall.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"])
-	if hall.size() > 8:
-		hall = hall.slice(0, 8)
+	# Keep a deep board (many pages) — the Hall now pages instead of hard-capping
+	# at one screen, so a mid-tier run you just finished still has a place to land.
+	# The just-banked run is PINNED even when it ranks past the cap (see _hall_capped):
+	# the board is why you opened the Hall, so it must always be reachable. The cap is
+	# single-sourced from GameMenu.HALL_KEEP so the retention limit the Hall STATES on
+	# screen and the limit it ENFORCES here can never drift apart.
+	hall.assign(_hall_capped(hall, hall_latest, GameMenu.HALL_KEEP))
 	_life_runs += 1
 	_life_kills += _run_kills
 	if sim.victory:
@@ -2477,6 +3219,31 @@ func _record_run() -> void:
 	_best_dirty = false
 	_seen_dirty = false
 	_save_cfg(cf)
+
+
+static func _hall_capped(sorted_runs: Array, latest: Dictionary, cap: int) -> Array:
+	# Trim a score-sorted board to `cap`, but NEVER drop the just-banked `latest` run
+	# — it is the reason the player opened the Hall. Identity is by unique "hid", not
+	# value: two runs with the same score/sector are common and Array.has() (deep ==)
+	# would wrongly treat a value-twin as the latest and discard the real one.
+	# A pinned over-cap run is tagged "over_cap" so the view flags its rank as 41+
+	# (uncertain) instead of claiming an exact slot that discarded runs may outrank.
+	# Clear any stale over_cap first, then set it on the ONE pinned run below — a flag
+	# is a fact about THIS trim, not a permanent brand. Without this, a run once pinned
+	# past the cap would keep flashing "OUTSIDE TOP N" (its "--" dash) even after it
+	# legitimately climbs back inside the retained set on a later bank.
+	for r in sorted_runs:
+		r.erase("over_cap")
+	if sorted_runs.size() <= cap:
+		return sorted_runs
+	var kept := sorted_runs.slice(0, cap)
+	var lid: int = latest.get("hid", -1)
+	for r in kept:
+		if int(r.get("hid", -2)) == lid:
+			return kept   # latest earned its place inside the cap on merit
+	latest["over_cap"] = true
+	kept.append(latest)
+	return kept
 
 
 func _check_smoke_edges() -> void:
@@ -2774,8 +3541,8 @@ func _update_feel() -> void:
 	if sim.mode == "endless":
 		for i in sim.players.size():
 			var np := sim.players[i]
-			var n_int := (Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(i, JOY_BUTTON_X)) \
-				if i == 0 else Input.is_joy_button_pressed(1, JOY_BUTTON_X)
+			var n_int := (Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact")) \
+				if i == 0 else pad_pressed(1, "interact")
 			if n_int and not _no_target_prev[i] and _no_target_cd <= 0.0 \
 					and np["alive"] and np["in_tank"] < 0 and np["claymores"] == 0:
 				_no_target_cd = 2.0
@@ -3083,10 +3850,14 @@ func _gather_inputs() -> Array[SimInput]:
 		return [demo_input(sim.tick_count, sim)]
 	var inputs: Array[SimInput] = []
 	var p1 := SimInput.new()
-	var kx := (1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
-	var ky := (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0)
-	var ax := (1.0 if Input.is_physical_key_pressed(KEY_RIGHT) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_LEFT) else 0.0)
-	var ay := (1.0 if Input.is_physical_key_pressed(KEY_DOWN) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_UP) else 0.0)
+	# c1-18: movement + aim + verbs all read their REBOUND physical keycodes (bind()), so
+	# ESDF / arrow / left-handed / non-QWERTY players can fully remap. Aim keys are their
+	# own binds (default arrows), so moving movement onto the arrows no longer collides with
+	# a hardcoded aim; the mouse aim fallback below still fills in when no aim key is held.
+	var kx := (1.0 if Input.is_physical_key_pressed(bind("move_right")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("move_left")) else 0.0)
+	var ky := (1.0 if Input.is_physical_key_pressed(bind("move_down")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("move_up")) else 0.0)
+	var ax := (1.0 if Input.is_physical_key_pressed(bind("aim_right")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("aim_left")) else 0.0)
+	var ay := (1.0 if Input.is_physical_key_pressed(bind("aim_down")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("aim_up")) else 0.0)
 	# Explicit aim only (arrow keys / pad stick, NOT the mouse fallback) — the
 	# spend-wheel selects from this so tapping Q with the mouse off-center
 	# can't auto-buy on release.
@@ -3094,6 +3865,8 @@ func _gather_inputs() -> Array[SimInput]:
 	var pad_move := Vector2(
 		Input.get_joy_axis(0, JOY_AXIS_LEFT_X), Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
 	var pad_aim := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	if _swap_sticks[0]:   # c1-18: P1 left-handed pad option — move on the right stick, aim on the left
+		var tmp := pad_move; pad_move = pad_aim; pad_aim = tmp
 	if pad_aim.length() > 0.25:
 		wheel_dir = pad_aim
 	if pad_move.length() > 0.2:
@@ -3119,21 +3892,23 @@ func _gather_inputs() -> Array[SimInput]:
 	# debrief-redeploy — without this, clicking RESUME fired live rounds at the
 	# crosshair on the first resumed ticks. Re-arms once both keys read released.
 	# View-only (the input never reaches the sim), golden-safe.
-	if _fire_swallow and not Input.is_physical_key_pressed(KEY_SPACE) \
+	if _fire_swallow and not Input.is_physical_key_pressed(bind("fire")) \
 			and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_fire_swallow = false
-	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(KEY_SPACE)
+	# c1-18: the fire TRIGGER (analog, always live) stays fixed; the rebindable pad
+	# button reads through pad_pressed. Keyboard reads its rebound physical key.
+	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(bind("fire"))
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))) \
 		or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-		or Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
-	p1.grenade = Input.is_physical_key_pressed(KEY_SHIFT) \
+		or pad_pressed(0, "fire")
+	p1.grenade = Input.is_physical_key_pressed(bind("grenade")) \
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-		or Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
-	p1.roll = Input.is_physical_key_pressed(KEY_C) or Input.is_joy_button_pressed(0, JOY_BUTTON_B)
-	p1.interact = Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(0, JOY_BUTTON_X)
-	p1.revive = Input.is_physical_key_pressed(KEY_E) or Input.is_joy_button_pressed(0, JOY_BUTTON_Y)
+		or pad_pressed(0, "grenade")
+	p1.roll = Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll")
+	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact")
+	p1.revive = Input.is_physical_key_pressed(bind("revive")) or pad_pressed(0, "revive")
 	p1.buy = _update_wheel(0,
-		Input.is_physical_key_pressed(KEY_Q) or Input.is_joy_button_pressed(0, JOY_BUTTON_BACK),
+		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy"),
 		wheel_dir, Vector2(kx, ky))
 	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
 	# not a dodge) and sector flicks steer the wheel, not the gun.
@@ -3151,17 +3926,19 @@ func _gather_inputs() -> Array[SimInput]:
 			Input.get_joy_axis(1, JOY_AXIS_LEFT_X), Input.get_joy_axis(1, JOY_AXIS_LEFT_Y)), 0.2)
 		var p2_aim := _pad_deadzone(Vector2(
 			Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)), 0.25)
+		if _swap_sticks[1]:   # c1-18: P2's OWN independent left-handed swap
+			var t2 := p2_move; p2_move = p2_aim; p2_aim = t2
 		p2.move_x = _quantize_axis(p2_move.x)
 		p2.move_y = _quantize_axis(p2_move.y)
 		p2.aim_x = _quantize_axis(p2_aim.x)
 		p2.aim_y = _quantize_axis(p2_aim.y)
 		p2.fire = Input.get_joy_axis(1, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-			or Input.is_joy_button_pressed(1, JOY_BUTTON_RIGHT_SHOULDER)
-		p2.grenade = Input.is_joy_button_pressed(1, JOY_BUTTON_LEFT_SHOULDER)
-		p2.roll = Input.is_joy_button_pressed(1, JOY_BUTTON_B)
-		p2.interact = Input.is_joy_button_pressed(1, JOY_BUTTON_X)
-		p2.revive = Input.is_joy_button_pressed(1, JOY_BUTTON_Y)
-		p2.buy = _update_wheel(1, Input.is_joy_button_pressed(1, JOY_BUTTON_BACK),
+			or pad_pressed(1, "fire")
+		p2.grenade = pad_pressed(1, "grenade")
+		p2.roll = pad_pressed(1, "roll")
+		p2.interact = pad_pressed(1, "interact")
+		p2.revive = pad_pressed(1, "revive")
+		p2.buy = _update_wheel(1, pad_pressed(1, "buy"),
 			p2_aim, p2_move)
 		if _wheel[1]["open"]:
 			p2.roll = false
@@ -3196,9 +3973,9 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		# selection used to be a one-way trap: any flick force-bought on release.
 		# Per-device (matches the wheel's own open/aim split): P1 = keyboard C +
 		# pad 0, P2 = pad 1 only — so one player's roll can't cancel the OTHER's
-		# pick. Physical KEY_C matches the roll bind (AZERTY-safe).
-		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(KEY_C)) \
-			or Input.is_joy_button_pressed(i, JOY_BUTTON_B)
+		# pick. The rebound roll key matches the roll verb (AZERTY-safe physical read).
+		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(bind("roll"))) \
+			or pad_pressed(i, "roll")
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("click_dry", -12.0, 1.4)   # soft declined tick — the dedicated dry-click voice
@@ -5735,7 +6512,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
-	var bar_y := 64.0 + float(slot) * 22.0
+	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * 22.0
 	# Same strafe/mortar half-cycle the sim uses to pick behavior in
 	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 	# colossus bar labels its phase.
@@ -5867,8 +6644,10 @@ func _draw_colossus() -> void:
 		draw_arc(cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
 	else:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
-	# Bottom-center so the fill never hides under the HUD panel. Shake-immune:
-	# fixed HUD slot, cancel the node transform for the bar block.
+	# Bottom-center (y=330) so the fill never hides under the top-left HUD panel — this boss bar
+	# deliberately docks OPPOSITE the top-center gunship/mini bars (HudIcons.BOSS_BAR_TOP), so it
+	# does NOT use that boundary; the two never share the band. Shake-immune: fixed HUD slot,
+	# cancel the node transform for the bar block.
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
 	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
@@ -7713,10 +8492,11 @@ func _draw_banners(top_msg: String) -> void:
 				and not _debrief and not sim.victory:   # never overprint the result card
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			# Duck below any active boss bars (they own y64+slot*22) instead of
-			# overprinting the PHASE label; pop-in scale punch on the first ~10%
+			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
+			# the same shared boundary hud.gd sizes its corner panel against) instead
+			# of overprinting the PHASE label; pop-in scale punch on the first ~10%
 			# of life, stilled under reduce-motion.
-			var by := 70.0 + 22.0 * float(_boss_bar_slots)
+			var by := HudIcons.BOSS_BAR_TOP + 6.0 + 22.0 * float(_boss_bar_slots)
 			var bsize := 16
 			if _motion >= 0.5:
 				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
