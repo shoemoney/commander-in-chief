@@ -713,6 +713,34 @@ func test_sol_import_discipline_and_watermark_scrub() -> void:
 			Runner.T.ok(false, "%s.import is readable" % path)
 
 
+func test_sol_hero_swap_scale_tint_outline() -> void:
+	# sol-03..06: the pale legacy art blob is swapped for the authored infantry set hero (one canonical
+	# class), folded to the ~18px footprint, tinted to POP off green grass (never olive), and stripped
+	# of the _spr rim so the pack's baked keyline isn't doubled.
+	var art: Script = load("res://src/view/art.gd")
+	var c: Dictionary = art.get_script_constant_map()
+	var tex: Dictionary = c["TEX"]
+	var scale: Dictionary = c["SCALE"]
+	var tint: Dictionary = c["TINT"]
+	var outline: Dictionary = c["OUTLINE"]
+	for k in ["player1", "player2"]:
+		Runner.T.ok(tex[k].resource_path.contains("soldiers/soldier_assault_rifle"),
+			"%s is the infantry set authored hero (sol-03)" % k)
+		Runner.T.ok(scale[k] >= 0.12 and scale[k] <= 0.30,
+			"%s SCALE folds the 256px canvas to the ~18px footprint (sol-04)" % k)
+	var t1: Color = tint["player1"]
+	var t2: Color = tint["player2"]
+	# sol-05: value-lifted (anti-camo), and pulled OFF green — P1 cool (b>=g so it can't camo on grass),
+	# P2 warm/gold; P2 stays warmer than P1 so co-op identity survives one shared sprite.
+	Runner.T.ok(t1.r > 1.0 and t1.g > 1.0 and t1.b > 1.0, "P1 hero tint is value-lifted (anti-camo, sol-05)")
+	Runner.T.ok(t1.b >= t1.g, "P1 hero tint is COOL, not green-dominant (can't camouflage on grass, sol-05)")
+	Runner.T.ok(t2.r > t2.b, "P2 hero tint is WARM/gold (sol-05)")
+	Runner.T.ok(t2.r > t1.r and t2.b < t1.b, "P2 hero reads warmer than P1 — co-op identity on one sprite (sol-05)")
+	# sol-06: the pack hero carries its own baked keyline — keep it OUT of OUTLINE (no double rim).
+	Runner.T.ok(not outline.has("player1") and not outline.has("player2"),
+		"the pack hero is out of OUTLINE — baked keyline, no fat-sticker double rim (sol-06)")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge

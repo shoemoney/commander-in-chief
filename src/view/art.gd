@@ -18,13 +18,17 @@ extends RefCounted
 
 const SY := "res://assets/legacy-art/"
 const KN := "res://assets/kenney/"
+const SOL := "res://assets/soldiers/"   # infantry set pack (authored top-down infantry, size-limited + cleaned)
 
 const TEX := {
 	# --- legacy 3D pack Military (top-down bakes) ---
 	# Cast v2: heroes are regular army (Leader + Soldier_Female), hostiles
 	# are the Insurgent faction — different silhouettes, different wardrobe.
-	"player1": preload(SY + "cast2/hero1.png"),
-	"player2": preload(SY + "cast2/hero2.png"),
+	# sol-03: the pale legacy art hero read as a blob at gameplay zoom — swapped for the authored
+	# infantry set top-down infantry. No sim weapon field exists, so ONE canonical class (assault)
+	# for both slots; P1/P2 stay distinct via the ident ring + _body_ident_lean + the TINT split below.
+	"player1": preload(SOL + "soldier_assault_rifle.png"),
+	"player2": preload(SOL + "soldier_assault_rifle.png"),
 	"rusher": preload(SY + "cast2/insurgent1.png"),
 	"elite": preload(SY + "cast2/insurgent2.png"),
 	"frogman": preload(SY + "frogman.png"),
@@ -313,7 +317,7 @@ const SCALE := {
 	# or is that a bullet?" — straight from playtest.
 	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
 	# elites largest infantry (they shoot), sprites ≥3× bullet size.
-	"player1": 0.56, "player2": 0.47, "rusher": 0.53, "elite": 0.58,
+	"player1": 0.25, "player2": 0.25, "rusher": 0.53, "elite": 0.58,   # sol-04: hero folds the 256px pack canvas to the ~18px on-screen footprint (was 0.56/0.47 for the 300px legacy art bake)
 	"frogman": 1.05, "observer": 0.24, "bunker": 0.17,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
@@ -405,7 +409,10 @@ static var foliage_march := 0.0
 const TINT := {
 	# Heroes render bright, not olive-washed — the tan Leader model in the
 	# old jungle tint was literal camouflage (invisible on grass).
-	"player1": Color(1.1, 1.12, 0.95), "player2": Color(1.18, 1.05, 0.85),
+	# sol-05: the pack hero is OLIVE camo — on green jungle that is literal camouflage (the exact tan-Leader
+	# trap this comment warns about). Lift value >1 and pull slightly COOL/off-green so he reads on grass;
+	# keep P2 visibly WARMER/gold (r>g>b) so co-op identity survives without a per-player sprite.
+	"player1": Color(1.16, 1.18, 1.24), "player2": Color(1.34, 1.14, 0.92),
 	# Insurgents run BRIGHT and WARM so they read as threats — not as the
 	# grey decor rocks, not as the red enemy orbs. Threats pop, scenery
 	# recedes (see decor tints below).
@@ -479,7 +486,10 @@ const TINT := {
 
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
 const OUTLINE := {
-	"player1": true, "player2": true, "rusher": true, "elite": true,
+	# sol-06: player1/player2 are OMITTED — the infantry set hero bakes its own thick black keyline,
+	# so the _spr 1.7px rim on top read as a fat sticker and swallowed the 18px silhouette. The baked
+	# contour carries the separation now (pin: test asserts the hero keys are NOT in OUTLINE).
+	"rusher": true, "elite": true,
 	"frogman": true, "observer": true, "bunker": true,
 	"tank_body": true, "tank_barrel": true, "gunship_body": true,
 	"gunship_barrel": true, "colossus_body": true, "colossus_barrel": true,
