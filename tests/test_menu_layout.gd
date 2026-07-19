@@ -25,7 +25,9 @@ func _icon_size(bh: float) -> float:
 # the REAL generated row counts instead of hard-coding them (so a future added
 # row is caught by the plate-height guards, not silently under-counted).
 class _StubSfx extends RefCounted:
-	func play(_a: String, _b: float = 0.0, _c: float = 1.0) -> void: pass
+	var plays: Array = []   # records every play(sound, vol, pitch) so tests can assert cues
+	func play(a: String, b: float = 0.0, c: float = 1.0) -> void:
+		plays.append([a, b, c])
 
 
 # A real Sfx subclass whose play() is a guaranteed no-op — injected into a live
@@ -719,6 +721,123 @@ func test_externally_muted_bus_shows_muted_and_step_unmutes_to_one() -> void:
 	m.free()
 	mn.free()
 	_restore_buses(saved)   # SFX/UI/VO/Music all back to entry state
+
+
+# c1-07: a PAUSE Menu ready to receive raw mouse events through the REAL
+# _unhandled_input. Not tree-parented (accept_event/get_viewport are guarded to
+# no-op off-tree, so the hover/click LOGIC runs unchanged). Caller frees it.
+func _pause_menu_headless(stub: _StubMain) -> Control:
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.PAUSE
+	return m
+
+
+func _motion_ev(pos: Vector2, rel: Vector2) -> InputEventMouseMotion:
+	var e := InputEventMouseMotion.new()
+	e.position = pos
+	e.relative = rel
+	return e
+
+
+# The screen-space center of button row k, from the SAME geometry the hit-test
+# reads — a mouse placed here must resolve to row k in _row_at.
+func _row_cy(m: Control, k: int) -> float:
+	var g: Dictionary = m._row_geometry()
+	return floorf(float(g["top"]) + float(k) * float(g["gap"])) + float(g["bh"]) / 2.0
+
+
+# c1-07: mouse hover full feedback parity. A parked pointer (zero-delta motion)
+# must do NOTHING — not fight pad/kb nav, not steal selection, not emit a cue.
+func test_hover_zero_delta_motion_is_inert() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	m.sel = 0
+	stub._sfx.plays.clear()
+	# A parked pointer sitting squarely over a DIFFERENT row, but with no movement.
+	m._unhandled_input(_motion_ev(Vector2(320.0, _row_cy(m, 3)), Vector2.ZERO))
+	Runner.T.eq(m.sel, 0, "zero-delta motion does not move the selection")
+	Runner.T.eq(stub._sfx.plays.size(), 0, "zero-delta motion plays no cue")
+	m.free()
+	stub.free()
+
+
+# c1-07: the old `relative.length() > 2` gate swallowed a slow, deliberate 1px
+# drag, locking a mouse-only player out of selecting one row at a time. A single
+# pixel of real motion over a new row must move the selection there.
+func test_hover_one_pixel_motion_changes_row() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	m.sel = 0
+	var target := 2
+	Runner.T.eq(m._row_at(Vector2(320.0, _row_cy(m, target))), target, "row %d center hits row %d" % [target, target])
+	m._unhandled_input(_motion_ev(Vector2(320.0, _row_cy(m, target)), Vector2(0.0, 1.0)))
+	Runner.T.eq(m.sel, target, "1px motion over row %d selects it (slow-drag gate)" % target)
+	m.free()
+	stub.free()
+
+
+# c1-07: hover navigation must play the SAME nav cue as pad/kb/wheel — the old
+# inline `sel = hrow` yanked selection silently. It funnels through _nav now, so
+# the pickup tick fires exactly as it does for every other device.
+func test_hover_plays_nav_sfx_like_other_devices() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	m.sel = 0
+	stub._sfx.plays.clear()
+	m._unhandled_input(_motion_ev(Vector2(320.0, _row_cy(m, 3)), Vector2(0.0, 4.0)))
+	Runner.T.eq(m.sel, 3, "hover moved selection to row 3")
+	Runner.T.eq(stub._sfx.plays.size(), 1, "hover nav plays exactly one cue")
+	Runner.T.eq(stub._sfx.plays[0][0], "pickup", "hover nav plays the shared 'pickup' nav sfx")
+	m.free()
+	stub.free()
+
+
+# c1-07: the whole point of the item. An armed destructive row (RESTART) must be
+# AUDIBLY + VISIBLY disarmed when a bumped mouse hovers another row — the old
+# inline sel-set wiped _confirm with no sound and no cue, silently defusing a
+# QUIT/RESTART. Funneling through _nav clears _confirm AND plays the nav tick.
+func test_hover_disarms_armed_destructive_row_audibly() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	var restart_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	Runner.T.ok(restart_i >= 0 and rows[restart_i]["destructive"], "PAUSE exposes a destructive RESTART row")
+	m.sel = restart_i
+	m._press()   # first press ARMS the confirm (mis-press guard)
+	Runner.T.eq(m._confirm, restart_i, "first press arms RESTART's confirm")
+	stub._sfx.plays.clear()
+	# A bumped mouse drifts onto RESUME (row 0).
+	m._unhandled_input(_motion_ev(Vector2(320.0, _row_cy(m, 0)), Vector2(0.0, -3.0)))
+	Runner.T.eq(m.sel, 0, "hover moved off the armed row")
+	Runner.T.eq(m._confirm, -1, "hovering away VISIBLY disarms the armed RESTART")
+	Runner.T.ok(stub._sfx.plays.size() == 1 and stub._sfx.plays[0][0] == "pickup",
+		"the disarm is AUDIBLE — the nav cue fires, no silent defuse")
+	m.free()
+	stub.free()
+
+
+# c1-07: _nav(hrow - sel, 0) must land on the EXACT hovered row for every
+# start/target pair, including the wrap-distance jumps (row 0 -> last, last -> 0).
+# Every PAUSE row is selectable, so the delta always resolves to hrow precisely.
+func test_hover_nav_lands_on_exact_row_across_wrap() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var n: int = m._menu_items().size()
+	for start in n:
+		for target in n:
+			if target == start:
+				continue
+			m.sel = start
+			m._confirm = -1
+			# _nav(hrow - sel, 0) is exactly what the hover path invokes.
+			m._nav(target - start, 0)
+			Runner.T.eq(m.sel, target, "hover from row %d lands on row %d (delta %d)" % [start, target, target - start])
+	m.free()
+	stub.free()
 
 
 # END-TO-END via the ACTIVATION path: Enter (_activate) on an externally-muted

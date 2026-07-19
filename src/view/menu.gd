@@ -418,7 +418,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 	# shouldn't have to switch devices to press RESUME. Same geometry as _draw.
 	if ev is InputEventMouseMotion:
 		# Only REAL motion selects — a parked mouse must not fight pad/kb nav.
-		if ev.relative.length() > 2.0:
+		# Gate on any nonzero delta, not length > 2: a parked pointer emits
+		# zero-delta events (still ignored), but a slow deliberate drag moves
+		# ~1px/event and used to be swallowed, locking a mouse-only player out of
+		# selecting one row at a time.
+		if ev.relative != Vector2.ZERO:
 			# Hall filter tabs get hover feedback too — they were click-only,
 			# the lone interactive surface with zero mouse cue (rows hover-select,
 			# arrows pulse; the file's own parity invariant, line ~317).
@@ -433,9 +437,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 					queue_redraw()
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
-				sel = hrow
-				_confirm = -1
-				queue_redraw()
+				# Full feedback parity: funnel the hover through _nav so it plays
+				# the nav sfx, clears the rail pulse, and disarms an armed _confirm
+				# audibly, exactly like pad/kb/wheel. The old inline sel = hrow
+				# silently yanked selection and killed a QUIT/RESTART arm on a
+				# bumped mouse, with no sound and no cue.
+				_nav(hrow - sel, 0)
 		return
 	if ev is InputEventMouseButton:
 		# Menus swallow EVERY click, hit or miss, press or release — a stray
