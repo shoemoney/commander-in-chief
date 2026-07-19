@@ -664,6 +664,44 @@ func test_a4_reticle_halo_is_centered() -> void:
 	Runner.T.ok(alpha > 0.2 and alpha < 0.6, "each halo pass is a dark backing (0.2 < a < 0.6), stacking into a keyline not a black box")
 
 
+func test_sol_import_discipline_and_watermark_scrub() -> void:
+	# sol-01: every shipped infantry set PNG is size-limited (<=256) so the 1024² pack can't VRAM-bomb
+	# boot, and imported lossless (no VRAM-compress cel-edge bleed). sol-02: the burned-in "AI生成"
+	# watermark is scrubbed — the extreme bottom-left corner samples as fully transparent.
+	var files := {
+		"res://assets/soldiers/soldier_assault_rifle.png": 256,
+		"res://assets/soldiers/walk/assault_walk1.png": 256,
+		"res://assets/soldiers/walk/assault_walk2.png": 256,
+		"res://assets/soldiers/walk/assault_walk3.png": 256,
+		"res://assets/soldiers/enemy/enemy_assault_rifle.png": 128,
+		"res://assets/soldiers/enemy/enemy_smg.png": 128,
+		"res://assets/soldiers/enemy/enemy_sniper.png": 128,
+		"res://assets/soldiers/enemy/enemy_shotgun.png": 128,
+		"res://assets/soldiers/enemy/enemy_lmg.png": 128,
+		"res://assets/soldiers/frogman_rifle.png": 128,
+		"res://assets/soldiers/frogman_speargun.png": 128,
+		"res://assets/soldiers/fx/muzzleflash_small.png": 128,
+		"res://assets/soldiers/fx/muzzleflash_medium.png": 128,
+	}
+	for path in files:
+		var lim: int = files[path]
+		var t: Texture2D = load(path)
+		Runner.T.ok(t != null, "%s imports" % path)
+		if t == null:
+			continue
+		Runner.T.ok(t.get_size().x <= lim and t.get_size().y <= lim,
+			"%s size-limited to <= %d (VRAM guard, sol-01)" % [path, lim])
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var s := img.get_size()
+		var maxa := 0.0
+		for sx in [2, 7, 12]:
+			for sy in [int(s.y) - 3, int(s.y) - 8]:
+				maxa = maxf(maxa, img.get_pixel(sx, sy).a)
+		Runner.T.ok(maxa < 0.05, "%s bottom-left watermark corner scrubbed transparent (sol-02)" % path)
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
