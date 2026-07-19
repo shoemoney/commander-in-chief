@@ -41,6 +41,24 @@ var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover 
 # Row ids that flip on left/right without a confirm press.
 const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist"]
 
+# c1-08 destructive-row palette — the SINGLE source shared by _draw and the contrast
+# test, so the two can't drift. Plates are DARK warm so the LIGHT warm labels over
+# them clear AA-normal (4.5:1) contrast; a mid warm plate washed the label out. The
+# armed flood is a deep red the near-white armed label reads on. (Alpha on the
+# unselected plate rides the button texture; contrast is checked on rgb — the
+# in-situ composite over the dark base only raises the ratio.)
+const DESTR_PLATE_SEL := Color(0.64, 0.32, 0.22)          # pre-armed, selected
+const DESTR_PLATE_UNSEL := Color(0.5, 0.26, 0.2, 0.9)     # pre-armed, unselected
+const DESTR_TEXT_SEL := Color(1.0, 0.95, 0.9)
+const DESTR_TEXT_UNSEL := Color(0.95, 0.85, 0.8)
+const DESTR_ARMED_FLOOD := Color(0.8, 0.18, 0.09)         # red flood base (alpha applied at draw)
+const DESTR_ARMED_TEXT := Color(1.0, 0.95, 0.88)
+# The armed underplate sits BENEATH the near-opaque flood, so it is kept DARK red:
+# a bright underplate would lighten the flood composite at the pulse trough and drop
+# the label contrast below AA-normal. Dark under dark keeps the composite ~= flood.
+const DESTR_ARMED_PLATE_SEL := Color(0.55, 0.14, 0.07)
+const DESTR_ARMED_PLATE_UNSEL := Color(0.45, 0.12, 0.06)
+
 # c1-04: y (top) of the SELECT/BACK input-legend footer strip drawn on EVERY
 # non-TITLE screen (PAUSE / OPTS / SETUP / HALL / HOWTO). One shared position so
 # _footer_legend, _row_geometry's drop-in cap, and the layout test all agree the
@@ -292,6 +310,50 @@ func _items() -> Array[String]:
 # Pause-menu indices that discard the run and need a confirm press.
 func _is_destructive(i: int) -> bool:
 	return _menu_items()[i]["destructive"]
+
+
+# c1-08: the on-plate wording for a destructive (run-ending) row, chosen against
+# the ACTUAL drawable width `avail` (px) so the cue can never ellipsize away on the
+# ~190px plate. Pure + static so a layout test can pin the fit for every row.
+#   pre-armed: "<NAME>  PRESS TWICE" — states the two-press contract up front and
+#              keeps the action name (was a lone "!" that read like plain emphasis).
+#   armed:     "<VERB>  PRESS AGAIN" where it fits — the verb keeps WHICH action is
+#              one press from firing — degrading (single space -> "<VERB>: AGAIN" ->
+#              bare "PRESS AGAIN") only as far as the plate forces.
+# Each candidate is tried widest-first; the first that fits `avail` wins.
+static func destructive_label(name: String, verb: String, armed: bool, font: Font, avail: float) -> String:
+	# Candidates run widest -> narrowest; the first that FITS `avail` wins. Both the
+	# action identity (name/verb, always LEADING) and the explicit two-press cue
+	# ("PRESS TWICE" pre-armed / "PRESS AGAIN" armed) ride every tier until the plate
+	# is too tight for both — and the CUE is the last thing dropped, so it is never
+	# ellipsized to nonsense. The abbreviated tiers keep the tail genuinely fitting on
+	# a narrow plate instead of returning an overflowing string. On the real ~190px
+	# plate a name/verb + full-cue tier always wins (RESTART/TITLE/QUIT verified in
+	# the layout test) — "PRESS TWICE" states the contract outright, unlike the old
+	# lone "!" that read like emphasis and made the row look single-press.
+	var short_name := name.split(" ")[0]   # "TITLE SCREEN" -> "TITLE" before dropping identity
+	var forms: Array[String]
+	if armed:
+		# The verb rides with the cue as long as it fits ("<VERB>: AGAIN" is terse but
+		# unambiguous WITH the verb present). The floor is the full "PRESS AGAIN"
+		# instruction — never a bare "AGAIN", which alone reads ambiguously.
+		forms = ["%s  PRESS AGAIN" % verb, "%s PRESS AGAIN" % verb, "%s: AGAIN" % verb, "PRESS AGAIN"]
+	else:
+		forms = ["%s  PRESS TWICE" % name, "%s PRESS TWICE" % name]
+		if short_name != name:
+			forms.append("%s PRESS TWICE" % short_name)
+		forms.append("PRESS TWICE")
+	if font == null:
+		return forms[0]
+	for f in forms:
+		if font.get_string_size(f, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail:
+			return f
+	# MINIMUM SUPPORTED WIDTH: the narrowest form is the bare cue ("PRESS TWICE" ~102px
+	# / "PRESS AGAIN" ~99px at 11px). The only caller draws on the fixed BTN.x=222 plate
+	# (avail 184 pre / 170 armed), so a fitting identity+cue tier ALWAYS wins there and
+	# this floor is never reached in production. Below ~102px avail the cue is returned
+	# as-is and _ellipsize would trim its tail — an unsupported, sub-word plate.
+	return forms[forms.size() - 1]
 
 
 # Row id → Modern Menus icon key. Only clean matches — no icon beats a
@@ -934,9 +996,43 @@ func _draw() -> void:
 			draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
 				Color(0.62, 0.66, 0.5, 0.55))
 		var selected := k == sel
+		var destr: bool = k < mitems.size() and mitems[k].get("destructive", false)
+		# armed REQUIRES destr: a stale/desynced _confirm landing on a non-destructive
+		# row must never enter the armed render path (which reserves the confirm glyph
+		# and floods red) — that would draw a null glyph. destr guarantees armed_glyph.
+		var armed := destr and _confirm == k
 		draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
-		draw_texture_rect(Art.tex("ui_menu_button"), r, false,
-			Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8))
+		# Destructive rows (RESTART / TITLE / QUIT) tint the WHOLE plate warm, not
+		# just the label — so they never read as a plain single-press action beside
+		# CAMPAIGN / RESUME. The tint is DARK warm on purpose: light warm label text
+		# over it clears an AA-normal (4.5:1) contrast target (a mid warm plate washed the
+		# warm label out — see test_destructive_text_contrast). Arming floods red.
+		var plate := Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8)
+		if destr:
+			if selected:
+				plate = DESTR_ARMED_PLATE_SEL if armed else DESTR_PLATE_SEL
+			else:
+				plate = DESTR_ARMED_PLATE_UNSEL if armed else DESTR_PLATE_UNSEL
+		draw_texture_rect(Art.tex("ui_menu_button"), r, false, plate)
+		if armed:
+			# Armed red flood drawn FIRST — before the bracket, icon and selection
+			# glow — so those cues layer ON TOP of the wash instead of being washed
+			# out by it. A strong (near-opaque) fill: the old 0.4 wash over the whole
+			# thing barely shifted the plate. Slow pulse pulls the eye; reduce-motion
+			# snaps it steady. The countdown bar + confirm glyph land later, on top.
+			# Alpha stays high across the pulse (0.82..0.98) so the near-white armed
+			# label keeps its measured contrast over the flood at BOTH pulse extremes,
+			# not just the trough — the underplate barely reads through either way.
+			var apulse := 0.0 if main._motion < 0.5 else Art.pulse(0.25)
+			var flood := DESTR_ARMED_FLOOD
+			flood.a = 0.82 + 0.16 * apulse
+			draw_rect(r.grow(-3), flood)
+		if destr:
+			# A warm bracket outlines destructive rows even BEFORE arming — a shape
+			# cue (not hue alone) that this row discards the run, unlike its
+			# neighbors. It thickens and brightens once armed.
+			draw_rect(r.grow(-2), Color(1.0, 0.55, 0.35, 0.95 if armed else 0.55),
+				false, 2.0 if armed else 1.0)
 		# Modern Menus ortho icon where a row has a clean match (toggles swap
 		# by live state) — rows without one just stay text.
 		var icon := _row_icon(mitems[k]["id"])
@@ -961,32 +1057,43 @@ func _draw() -> void:
 			# Fade the glow while it's still catching up to the row — a lagging box
 			# at full alpha reads as misplaced; dimming it makes the glide read as motion.
 			var lag := clampf(absf(_sel_y - _sel_target) / 40.0, 0.0, 1.0)
-			draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
-				Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
+			# Skip the AMBER glow while armed: the red flood + bright bracket already
+			# mark the armed row hard, and the amber wash on top would fight (and dull)
+			# the red danger treatment. Selection still tracked above for the glide.
+			if not armed:
+				draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
+					Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
-		# Destructive rows carry a warm tint BEFORE the first press — the warning
-		# used to appear only after you'd already pressed once.
-		if k < mitems.size() and mitems[k].get("destructive", false):
-			col = Color(1.0, 0.78, 0.65) if selected else Color(0.9, 0.7, 0.6)
 		var label: String = items[k]
-		if k < mitems.size() and mitems[k].get("destructive", false):
-			label += "  !"   # non-color destructive cue (hue alone fails protan players)
 		var label_r := r.end.x - 8.0   # label right bound (shrinks for the confirm glyph)
-		if _confirm == k:
-			# "TO CONFIRM" is now said by the glyph + countdown bar — the full
-			# string measured 197px and never actually fit the 190px button.
-			label = "PRESS AGAIN"
-			col = Color(1.0, 0.5, 0.4)
-			# Armed state reads without the text: warm plate tint, a countdown
-			# bar draining along the bottom edge, and the device confirm glyph.
-			draw_rect(r.grow(-3), Color(0.75, 0.28, 0.12, 0.4))
+		var armed_glyph: Texture2D = null
+		var cw := 0.0
+		if destr:
+			# LIGHT warm label so it stays legible on the dark warm plate (a warm-dim
+			# label on a warm plate failed the contrast target). The dark plate + warm
+			# label together read "danger" while staying readable.
+			col = DESTR_TEXT_SEL if selected else DESTR_TEXT_UNSEL
+			if armed:
+				col = DESTR_ARMED_TEXT   # near-white reads over the red flood below
+				# Reserve the right-edge confirm-glyph slot BEFORE choosing wording so
+				# the label is fit to the real drawable width, not an optimistic one.
+				armed_glyph = Art.tex(Art.glyph_key("confirm"))
+				cw = 12.0 * float(armed_glyph.get_width()) / float(armed_glyph.get_height())
+				label_r = r.end.x - cw - 10.0
+			# Pick the widest wording that actually fits the plate (measured), so the
+			# cue never ellipsizes to nonsense: "<NAME>  PRESS TWICE" states the two-press
+			# contract pre-armed; armed keeps the VERB alongside "PRESS AGAIN" where it
+			# fits, degrading only as far as needed. See destructive_label.
+			label = destructive_label(items[k], String(mitems[k]["id"]).to_upper(),
+				armed, Art.font(), label_r - (r.position.x + 30.0))
+		if armed:
+			# The armed affordances that ride ON TOP of the red flood (drawn above):
+			# a countdown bar draining along the bottom edge showing the disarm
+			# window, and the device confirm glyph in its reserved right slot.
 			draw_rect(Rect2(r.position.x + 3.0, r.end.y - 5.0,
 				(r.size.x - 6.0) * clampf(_confirm_t / 2.5, 0.0, 1.0), 2.0),
 				Color(1.0, 0.62, 0.3, 0.95))
-			var ct := Art.tex(Art.glyph_key("confirm"))
-			var cw := 12.0 * float(ct.get_width()) / float(ct.get_height())
-			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
-			label_r = r.end.x - cw - 10.0
+			draw_texture_rect(armed_glyph, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
 		# Rows that open a screen reserve a right-edge slot for the > chevron so a
 		# long label ellipsizes clear of it instead of colliding.
 		if mitems[k].get("submenu", false):

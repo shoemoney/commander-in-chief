@@ -51,6 +51,10 @@ class _StubMain extends Node2D:
 	var _set_calls: Array = []       # records every _set_bus_vol(name, v) the menu makes
 	var _levels := {"SFX": 8, "Music": 8}   # STATEFUL: a step reads back what the last one wrote
 	var _sfx := _StubSfx.new()
+	var _reset_calls := 0             # counts _reset() — proves a destructive row actually FIRED
+	var _endless := true              # TITLE activation flips this false (attract shows campaign)
+	var _wheel: Array = []            # open() iterates this; empty stub keeps it a no-op
+	func _reset() -> void: _reset_calls += 1
 	func _bus_vol(n: String) -> int: return _levels.get(n, 8)
 	func _set_bus_vol(name: String, v: int) -> void:
 		_levels[name] = v
@@ -838,6 +842,317 @@ func test_hover_nav_lands_on_exact_row_across_wrap() -> void:
 			Runner.T.eq(m.sel, target, "hover from row %d lands on row %d (delta %d)" % [start, target, target - start])
 	m.free()
 	stub.free()
+
+
+# c1-08: the destructive-confirm contract. EVERY run-ending row (RESTART / TITLE /
+# QUIT) must ARM on the first press — no side effect — and only FIRE on a second
+# distinct press. Proven end-to-end on RESTART, the one destructive _activate with
+# no scene-tree side effects (TITLE/QUIT call open()/get_tree() the headless stub
+# can't host); the shared arm state is asserted for all three.
+func test_destructive_requires_two_distinct_presses() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	# 1) First press ARMS every destructive row (never fires it).
+	for i in rows.size():
+		if not rows[i].get("destructive", false):
+			continue
+		m.sel = i
+		m._confirm = -1
+		stub._reset_calls = 0
+		m._press()
+		Runner.T.eq(m._confirm, i, "first press ARMS destructive row %d" % i)
+		Runner.T.eq(stub._reset_calls, 0, "first press on row %d has no run-ending effect" % i)
+	# 2) A SECOND distinct press on the armed RESTART fires it exactly once.
+	var restart_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	Runner.T.ok(restart_i >= 0, "PAUSE exposes a destructive RESTART row")
+	m.sel = restart_i
+	m._confirm = -1
+	stub._reset_calls = 0
+	m._press()   # arm
+	Runner.T.eq(m._confirm, restart_i, "RESTART armed after one press")
+	m._press()   # confirm
+	Runner.T.eq(stub._reset_calls, 1, "second press FIRES RESTART exactly once")
+	Runner.T.eq(m.mode, Menu.Mode.HIDDEN, "firing RESTART dismisses the menu")
+	m.free()
+	stub.free()
+
+
+# c1-08: an armed confirm must DISARM on its 2.5s timeout and can NEVER fire from
+# navigation (a held/repeat step routes through _nav too) — only a deliberate
+# second press. Both paths must leave the run untouched (_reset never called).
+func test_destructive_disarms_on_timeout_and_never_fires_from_nav() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	var restart_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	# TIMEOUT: an armed row auto-disarms after its window with no activation.
+	m.sel = restart_i
+	m._confirm = -1
+	stub._reset_calls = 0
+	m._press()
+	Runner.T.eq(m._confirm, restart_i, "RESTART armed")
+	m._process(3.0)   # past the 2.5s auto-disarm window
+	Runner.T.eq(m._confirm, -1, "a stale confirm auto-disarms after its window")
+	Runner.T.eq(stub._reset_calls, 0, "a timed-out confirm never fires the action")
+	Runner.T.eq(m.mode, Menu.Mode.PAUSE, "the run is untouched by the timeout")
+	# NAVIGATION: arming then stepping away clears the arm without firing. _nav is
+	# the SAME path the held-key/stick auto-repeat drives, so repeat can't fire it.
+	m.sel = restart_i
+	m._confirm = -1
+	stub._reset_calls = 0
+	m._press()
+	Runner.T.eq(m._confirm, restart_i, "RESTART armed again")
+	m._nav(1, 0)   # step one row down — also the held-repeat path
+	Runner.T.eq(m._confirm, -1, "navigating off an armed row disarms it")
+	Runner.T.eq(stub._reset_calls, 0, "navigation never activates a destructive row")
+	m.free()
+	stub.free()
+
+
+# c1-08: the confirm needs TWO DISTINCT press edges — a HELD key must not fire it.
+# Enter routed through the REAL input path: the first keydown arms, an ECHO (held
+# key auto-repeat) between the two edges is ignored, and only a second genuine
+# keydown fires. Proves activation can't come from a held/repeated key.
+func test_destructive_confirm_needs_two_distinct_key_edges() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	var restart_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	m.sel = restart_i
+	m._confirm = -1
+	stub._reset_calls = 0
+	m._unhandled_input(_key_ev(KEY_ENTER, true))   # first real press edge -> ARM
+	Runner.T.eq(m._confirm, restart_i, "first Enter keydown arms the confirm")
+	Runner.T.eq(stub._reset_calls, 0, "arming does not fire the action")
+	var echo := InputEventKey.new()                # held Enter: an auto-REPEAT echo
+	echo.keycode = KEY_ENTER
+	echo.pressed = true
+	echo.echo = true
+	m._unhandled_input(echo)
+	Runner.T.eq(m._confirm, restart_i, "an echo (held key) is ignored — still armed")
+	Runner.T.eq(stub._reset_calls, 0, "a held key cannot fire the armed action")
+	m._unhandled_input(_key_ev(KEY_ENTER, true))   # second DISTINCT press edge -> FIRE
+	Runner.T.eq(stub._reset_calls, 1, "a second distinct keydown fires RESTART once")
+	Runner.T.eq(m.mode, Menu.Mode.HIDDEN, "firing RESTART dismisses the menu")
+	m.free()
+	stub.free()
+
+
+# c1-08: GAMEPAD parity, end to end. Two distinct A-button press edges (arm, then
+# confirm) fire RESTART via the REAL joypad input path — the same two-press
+# contract keyboard gets, proving the confirm is not keyboard-only.
+func test_destructive_confirm_via_gamepad_two_a_presses() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	var restart_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	m.sel = restart_i
+	m._confirm = -1
+	stub._reset_calls = 0
+	var a_btn := func() -> InputEventJoypadButton:
+		var e := InputEventJoypadButton.new()
+		e.button_index = JOY_BUTTON_A
+		e.pressed = true
+		return e
+	m._unhandled_input(a_btn.call())   # A #1 -> arm
+	Runner.T.eq(m._confirm, restart_i, "first A press arms RESTART on the pad")
+	Runner.T.eq(stub._reset_calls, 0, "arming on the pad does not fire")
+	m._unhandled_input(a_btn.call())   # A #2 -> fire
+	Runner.T.eq(stub._reset_calls, 1, "second A press fires RESTART once (pad parity)")
+	Runner.T.eq(m.mode, Menu.Mode.HIDDEN, "firing RESTART on the pad dismisses the menu")
+	m.free()
+	stub.free()
+
+
+# c1-08: MOUSE parity, end to end. A click routes through the SAME arm-then-confirm
+# contract as key/pad — the click handler selects the row and calls _press(), so the
+# first click arms and only a second click on the armed row fires. A single click can
+# never discard the run.
+func test_destructive_confirm_via_mouse_two_clicks() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	var restart_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	m.sel = 0
+	m._confirm = -1
+	stub._reset_calls = 0
+	var pos := Vector2(320.0, _row_cy(m, restart_i))
+	Runner.T.eq(m._row_at(pos), restart_i, "click position resolves to the RESTART row")
+	m._unhandled_input(_click_ev(pos))   # click 1 -> select + ARM
+	Runner.T.eq(m.sel, restart_i, "first click selects RESTART")
+	Runner.T.eq(m._confirm, restart_i, "first click arms the confirm (no fire)")
+	Runner.T.eq(stub._reset_calls, 0, "a single click never discards the run")
+	m._unhandled_input(_click_ev(pos))   # click 2 -> CONFIRM
+	Runner.T.eq(stub._reset_calls, 1, "second click on the armed row fires RESTART once")
+	Runner.T.eq(m.mode, Menu.Mode.HIDDEN, "firing via mouse dismisses the menu")
+	m.free()
+	stub.free()
+
+
+# c1-08: observable ACTIVATION of the other destructive rows, not just their arm
+# state. TITLE's _activate has observable, tree-free effects (_endless=false,
+# _reset, returns to the TITLE screen); QUIT calls get_tree().quit() so it can't be
+# driven to completion headlessly — we assert its single-press SAFETY (arms, never
+# quits) instead.
+func test_title_row_fires_only_on_second_press_and_returns_to_title() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array[Dictionary] = m._menu_items()
+	var title_i := -1
+	var quit_i := -1
+	for i in rows.size():
+		if rows[i]["id"] == "title":
+			title_i = i
+		elif rows[i]["id"] == "quit":
+			quit_i = i
+	# TITLE: first press arms with no effect; second returns to the title screen.
+	m.sel = title_i
+	m._confirm = -1
+	stub._reset_calls = 0
+	stub._endless = true
+	m._press()
+	Runner.T.eq(m._confirm, title_i, "first press arms TITLE, no side effect")
+	Runner.T.eq(stub._reset_calls, 0, "arming TITLE does not reset the run")
+	m._press()
+	Runner.T.eq(stub._reset_calls, 1, "second press activates TITLE (resets once)")
+	Runner.T.eq(m.mode, Menu.Mode.TITLE, "activating TITLE returns to the title screen")
+	Runner.T.ok(not stub._endless, "TITLE activation clears endless (attract shows campaign)")
+	# QUIT (if present at this row set): a lone press must ARM, never quit.
+	if quit_i >= 0:
+		m.mode = Menu.Mode.PAUSE
+		m.sel = quit_i
+		m._confirm = -1
+		m._press()
+		Runner.T.eq(m._confirm, quit_i, "first press arms QUIT — it never single-presses to quit")
+	m.free()
+	stub.free()
+
+
+# c1-08: the destructive wording is chosen to FIT the plate, measured against the
+# real font — pre-armed always states "CONFIRM", armed always keeps the action
+# VERB, and neither ever overflows its drawable width (so _ellipsize can't chew
+# the cue off). Pins the fit for the widest destructive names (TITLE SCREEN).
+func test_destructive_label_fits_plate_and_keeps_context() -> void:
+	var font: Font = Art.font()
+	# Real drawable widths on the 222px PAUSE plate (x 209..431): label starts at
+	# +30 from the left edge and ends 8px before the right (431-8-239 = 184);
+	# armed reserves a 12px confirm glyph + 10px gap (431-12-10-239 = 170).
+	var pre_avail := 184.0
+	var armed_avail := 170.0
+	for row in [["RESTART", "RESTART"], ["TITLE SCREEN", "TITLE"], ["QUIT", "QUIT"]]:
+		var name: String = row[0]
+		var verb: String = row[1]
+		var idword: String = name.split(" ")[0]   # the identity token that always leads
+		var pre := Menu.destructive_label(name, verb, false, font, pre_avail)
+		var arm := Menu.destructive_label(name, verb, true, font, armed_avail)
+		Runner.T.ok(pre.find("PRESS TWICE") >= 0, "%s pre-armed states the two-press contract (got '%s')" % [name, pre])
+		Runner.T.eq(pre.find(idword), 0, "%s pre-armed LEADS with its identity word" % name)
+		Runner.T.ok(font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= pre_avail,
+			"%s pre-armed label fits the plate (no ellipsis): '%s'" % [name, pre])
+		Runner.T.eq(arm.find(verb), 0, "%s armed LEADS with the verb for context (got '%s')" % [name, arm])
+		Runner.T.ok(arm.find("AGAIN") >= 0, "%s armed says AGAIN (press again to confirm)" % name)
+		Runner.T.ok(font.get_string_size(arm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= armed_avail,
+			"%s armed label fits the tighter glyph-reserved slot: '%s'" % [name, arm])
+	# MID-NARROW plate (too tight for the full name, room for its leading word): the
+	# name ABBREVIATES to keep identity rather than dropping the two-press cue, and the
+	# abbreviated form GENUINELY fits (not an overflowing string).
+	var mid := Menu.destructive_label("TITLE SCREEN", "TITLE", false, font, 160.0)
+	Runner.T.eq(mid.find("TITLE"), 0, "mid-narrow keeps the leading identity word")
+	Runner.T.ok(mid.find("PRESS TWICE") >= 0, "mid-narrow keeps the two-press cue")
+	Runner.T.ok(font.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 160.0,
+		"mid-narrow abbreviated form genuinely fits its plate: '%s'" % mid)
+	# PATHOLOGICALLY narrow plate (narrower than the identity itself): the two-press
+	# CUE is the last token standing — never an overflowing, ellipsized-to-nonsense
+	# string. Each cue floor is checked at a width its own shortest form fits.
+	var tiny_pre := Menu.destructive_label("TITLE SCREEN", "TITLE", false, font, 110.0)
+	var tiny_arm := Menu.destructive_label("TITLE SCREEN", "TITLE", true, font, 100.0)
+	Runner.T.eq(tiny_pre, "PRESS TWICE", "narrowest fallback preserves the two-press cue intact")
+	Runner.T.eq(tiny_arm, "PRESS AGAIN", "narrowest armed fallback is the explicit PRESS AGAIN, never a bare AGAIN")
+	Runner.T.ok(font.get_string_size(tiny_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 110.0,
+		"the pre-armed cue floor genuinely fits a narrow plate")
+	Runner.T.ok(font.get_string_size(tiny_arm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 100.0,
+		"the armed cue floor genuinely fits a narrow plate")
+
+
+# c1-08: EVERY destructive-row text/plate pairing must clear AA-NORMAL contrast
+# (4.5:1), not just look warm/red. The palette is read straight from menu.gd's
+# centralized DESTR_* constants so this test can NEVER drift from _draw(). The label
+# sits on the button texture modulated by these colors over an already-dark base,
+# which only RAISES the ratio, so checking text vs the flat color is the conservative
+# floor. The armed flood is additionally checked COMPOSITED over its dark underplate
+# at BOTH pulse-alpha extremes (0.82 trough .. 0.98 peak) — the pulse can't dim it
+# below target. (The button texture is >90% occluded at those alphas.)
+func test_destructive_text_contrast() -> void:
+	# [label_col, bg_col, name] — pre-armed pairs read text vs the flat plate color.
+	var pairs := [
+		[Menu.DESTR_TEXT_UNSEL, Menu.DESTR_PLATE_UNSEL, "unselected pre-armed"],
+		[Menu.DESTR_TEXT_SEL, Menu.DESTR_PLATE_SEL, "selected pre-armed"],
+	]
+	for p in pairs:
+		var ratio := _wcag_contrast(p[0], _opaque(p[1]))
+		Runner.T.ok(ratio >= 4.5, "%s label contrast %.2f clears AA-normal (>=4.5)" % [p[2], ratio])
+	# Armed: the flood is drawn at alpha 0.82 + 0.16*pulse over the dark underplate.
+	# Verify the near-white armed label clears 4.5 against the actual composited bg at
+	# both pulse extremes AND on both selected/unselected underplates.
+	for under in [Menu.DESTR_ARMED_PLATE_SEL, Menu.DESTR_ARMED_PLATE_UNSEL]:
+		for pulse in [0.0, 1.0]:
+			var a: float = 0.82 + 0.16 * pulse
+			var bg := _blend(_opaque(Menu.DESTR_ARMED_FLOOD), _opaque(under), a)
+			var ratio := _wcag_contrast(Menu.DESTR_ARMED_TEXT, bg)
+			Runner.T.ok(ratio >= 4.5,
+				"armed label contrast %.2f over composited flood (a=%.2f) clears AA-normal" % [ratio, a])
+
+
+# src over dst at alpha a -> opaque composite color (per-channel).
+func _blend(src: Color, dst: Color, a: float) -> Color:
+	return Color(src.r * a + dst.r * (1.0 - a), src.g * a + dst.g * (1.0 - a), src.b * a + dst.b * (1.0 - a))
+
+
+func _opaque(c: Color) -> Color:
+	return Color(c.r, c.g, c.b)   # drop the modulate alpha; contrast is an rgb property
+
+
+func _wcag_contrast(a: Color, b: Color) -> float:
+	var la := _rel_lum(a)
+	var lb := _rel_lum(b)
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
+
+
+func _rel_lum(c: Color) -> float:
+	return 0.2126 * _lin(c.r) + 0.7152 * _lin(c.g) + 0.0722 * _lin(c.b)
+
+
+func _lin(ch: float) -> float:
+	return ch / 12.92 if ch <= 0.03928 else pow((ch + 0.055) / 1.055, 2.4)
+
+
+# c1-08: the armed confirm GLYPH (the second-press affordance) must resolve to a
+# real drawable texture on BOTH input devices — a keyboard/gamepad parity check for
+# the armed treatment's device prompt (the render path draws exactly this glyph).
+func test_confirm_glyph_resolves_on_both_devices() -> void:
+	var was_pad: bool = Art.use_pad
+	for pad in [false, true]:
+		Art.use_pad = pad
+		var t := Art.tex(Art.glyph_key("confirm"))
+		Runner.T.ok(t != null and t.get_width() > 0,
+			"confirm glyph resolves to a texture on %s" % ("pad" if pad else "kb"))
+	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
 # END-TO-END via the ACTIVATION path: Enter (_activate) on an externally-muted
