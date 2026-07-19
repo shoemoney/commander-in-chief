@@ -27,8 +27,13 @@ var _stick_rep := 0.0   # countdown to the next held-stick auto-repeat step
 var _nav_frame := -1    # frame stamp: one stick nav per frame (diagonal guard)
 var _confirm_t := 0.0   # armed destructive row disarms when this runs out
 var _filter_pulse := 0.0   # hall filter tab flash on change
+var _rail_pulse := 0.0     # volume row bounced off a rail (0/MUTED or 10) — brief end-segment flash
+var _rail_dir := 0         # which rail the bounce hit: -1 = muted floor, +1 = max ceiling
+var _rail_row := -1        # sel index that bounced — the flash only lights its own row
 var _key_move := 0      # held up/down key direction (hold-repeat, mirrors stick)
 var _key_rep := 0.0     # countdown to the next held-key auto-repeat step
+var _key_hmove := 0     # held ◄/► key direction — auto-repeats the volume step (volume rows only)
+var _key_hrep := 0.0    # countdown to the next held-◄/► auto-repeat step
 var _lockout := 0.0     # post-disconnect confirm lockout (flailing pad guard)
 var _has_replay := false   # user://last_run.replay existence, sampled in open()
 var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover cue parity with rows
@@ -70,6 +75,7 @@ func _process(delta: float) -> void:
 		_lockout = maxf(0.0, _lockout - delta)
 		# Tab flash is pure animation — reduce-motion snaps it off entirely.
 		_filter_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _filter_pulse - delta * 3.0)
+		_rail_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _rail_pulse - delta * 3.5)
 		# Held-stick auto-repeat: first step fired in _unhandled_input, then
 		# after 0.35 s held it steps every 0.12 s (framerate-independent).
 		if _stick_x != 0 or _stick_y != 0:
@@ -87,6 +93,17 @@ func _process(delta: float) -> void:
 			if _key_rep <= 0.0:
 				_key_rep = 0.12
 				_nav(_key_move, 0)
+		# Held ◄/► KEYS auto-repeat the volume step (parity with the held stick),
+		# but ONLY on a volume row — repeating on a toggle would machine-gun it,
+		# the same reason the held stick never auto-repeats horizontally off HALL.
+		if _key_hmove != 0:
+			_key_hrep -= delta
+			if _key_hrep <= 0.0:
+				_key_hrep = 0.12
+				if mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
+					_nav(0, _key_hmove)
+				else:
+					_key_hmove = 0   # not a volume row: drop the latch, no auto-repeat
 		# Exp-decay easing: framerate-independent (per-frame lerpf ran ~2.4x
 		# faster on a 144Hz display). Reduce-motion snaps both instantly.
 		if main._motion < 0.5:
@@ -114,9 +131,12 @@ func open(m: int, select_id := "") -> void:
 	mode = m
 	sel = 0
 	_confirm = -1
+	_rail_pulse = 0.0   # a fresh screen starts with no lingering rail-bounce flash
+	_rail_row = -1
 	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
 	_sel_target = -1.0
 	_key_move = 0   # a key held across the transition must not auto-repeat here
+	_key_hmove = 0  # nor a held ◄/► volume key
 	# Same discipline for the stick: pausing via START with the move-stick
 	# deflected (the normal mid-combat case) used to auto-scroll 0.35s later —
 	# and the first step UP wrapped focus from RESUME straight onto a
@@ -145,7 +165,11 @@ func open(m: int, select_id := "") -> void:
 
 
 func _bus_off(name: String) -> bool:
-	return AudioServer.is_bus_mute(AudioServer.get_bus_index(name))
+	# The single source of truth for "is this bus muted" — the row label, the
+	# segment bar, and the volume stepper all read mute through here. Guards a
+	# missing bus (index -1) instead of feeding it to is_bus_mute.
+	var i := AudioServer.get_bus_index(name)
+	return i >= 0 and AudioServer.is_bus_mute(i)
 
 
 func _menu_items() -> Array[Dictionary]:
@@ -209,15 +233,42 @@ func _menu_items() -> Array[Dictionary]:
 	return pitems
 
 
+# Pure, view-free helpers for the SFX/MUSIC volume model — one place the label,
+# the segment bar, and both input paths agree on. A muted bus is level 0 no
+# matter its stored volume_db; steps are clamped to 0..10 (0 == MUTED), so no
+# input can ever wrap a nudge into an accidental mute. Extracted so the headless
+# test can pin the mute-aware + boundary behavior without an AudioServer.
+static func effective_vol(muted: bool, level: int) -> int:
+	return 0 if muted else clampi(level, 0, 10)
+
+
+static func vol_label(muted: bool, level: int) -> String:
+	# 0 == MUTED is the whole contract, so a level of 0 reads MUTED even if the
+	# mute flag hasn't been stamped yet (belt-and-suspenders with effective_vol).
+	return "MUTED" if muted or level <= 0 else str(clampi(level, 0, 10))
+
+
+static func step_level(cur: int, delta: int) -> int:
+	return clampi(cur + delta, 0, 10)
+
+
 func _settings_rows() -> Array[Dictionary]:
 	# "on" drives the row's state dot (filled/hollow — position+shape carry it,
 	# not hue alone) so toggle state reads without parsing the label tail.
+	# SFX/MUSIC are stepped 0..10 levels (8-of-9 panel consensus), not mute
+	# toggles: "vol" drives a 10-segment bar where the state dot would sit.
+	# The row is mute-AWARE at the source of truth (AudioServer.is_bus_mute), not
+	# inferred from the number: a muted bus reads "MUTED" with an EMPTY bar (vol 0)
+	# even if its volume_db is still nonzero, so the surface can never show a full
+	# green bar while the game is silent. Enter and ◄/► both move this one value.
+	var sfx_muted: bool = _bus_off("SFX")
+	var mus_muted: bool = _bus_off("Music")
+	var sv: int = effective_vol(sfx_muted, main._bus_vol("SFX"))
+	var mv: int = effective_vol(mus_muted, main._bus_vol("Music"))
 	return [
-		# SFX/MUSIC are stepped 0..10 levels (8-of-9 panel consensus), not mute
-		# toggles: "vol" drives a 10-segment bar where the state dot would sit.
 		# grp 1 = the settings block (RESUME is grp 0, destructive exits grp 2).
-		{"id": "sfx", "label": "SFX: %d" % main._bus_vol("SFX"), "destructive": false, "vol": main._bus_vol("SFX"), "grp": 1},
-		{"id": "music", "label": "MUSIC: %d" % main._bus_vol("Music"), "destructive": false, "vol": main._bus_vol("Music"), "grp": 1},
+		{"id": "sfx", "label": "SFX: %s" % vol_label(sfx_muted, sv), "destructive": false, "vol": sv, "grp": 1},
+		{"id": "music", "label": "MUSIC: %s" % vol_label(mus_muted, mv), "destructive": false, "vol": mv, "grp": 1},
 		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 1},
 		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 1},
 		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 1},
@@ -275,8 +326,16 @@ func _unhandled_input(ev: InputEvent) -> void:
 				move = 1
 				_key_move = 1
 				_key_rep = 0.35
-			KEY_A, KEY_LEFT: hmove = -1
-			KEY_D, KEY_RIGHT: hmove = 1
+			# ◄/► (A/D or arrows) feed hmove -> _nav, which on a SFX/MUSIC row steps
+			# the volume down/up: keyboard now moves the level, not just the cursor.
+			KEY_A, KEY_LEFT:
+				hmove = -1
+				_key_hmove = -1
+				_key_hrep = 0.35   # held left auto-repeats the step (volume rows only)
+			KEY_D, KEY_RIGHT:
+				hmove = 1
+				_key_hmove = 1
+				_key_hrep = 0.35
 			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE: act = true   # numpad Enter redeploys from the debrief; menus must match
 			KEY_ESCAPE: back = true
 	elif ev is InputEventKey and not ev.pressed:
@@ -288,6 +347,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_S, KEY_DOWN:
 				if _key_move == 1:
 					_key_move = 0
+			KEY_A, KEY_LEFT:
+				if _key_hmove == -1:
+					_key_hmove = 0
+			KEY_D, KEY_RIGHT:
+				if _key_hmove == 1:
+					_key_hmove = 0
 	elif ev is InputEventJoypadButton and ev.pressed:
 		match ev.button_index:
 			JOY_BUTTON_DPAD_UP: move = -1
@@ -401,7 +466,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 				var la := Rect2(lx - 23.0, ay, 10.0, 10.0).grow(3.0)
 				var ra := Rect2(lx + BTN.x + 5.0, ay, 10.0, 10.0).grow(3.0)
 				if la.has_point(ev.position) or ra.has_point(ev.position):
-					# Side matters now: volume rows step down/up per arrow
+					# Side matters now: volume rows step down/up per arrow, so a
+					# mouse-only player has BOTH directions (the ◄ arrow lowers and
+					# mutes at 0) — clicking the plate only nudges up.
 					# (plain toggles flip either way, exactly as before).
 					_nav(0, -1 if la.has_point(ev.position) else 1)
 					queue_redraw()
@@ -436,16 +503,10 @@ func _nav(move: int, hmove: int) -> void:
 		main._sfx.play("pickup", -14.0, 1.3)
 		queue_redraw()
 		return
-	# ◄/► on a volume row steps the 0..10 level (Enter still mute-toggles, and
-	# the bus keeps its volume_db through a mute, so unmute restores the level).
+	# ◄/► on a volume row nudges the 0..10 level, clamped — the SAME shared stepper
+	# Enter/click drives. 0 == MUTED, so mute is just the bottom of the one model.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
-		var bus: String = "SFX" if _menu_items()[sel]["id"] == "sfx" else "Music"
-		var nv: int = clampi(main._bus_vol(bus) + hmove, 0, 10)
-		if nv != main._bus_vol(bus):
-			main._set_bus_vol(bus, nv)
-			main._save_settings()
-			# The tick doubles as a live level demo — pitch rides the new step.
-			main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
+		_step_vol("SFX" if _menu_items()[sel]["id"] == "sfx" else "Music", hmove)
 		queue_redraw()
 		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
@@ -460,6 +521,9 @@ func _nav(move: int, hmove: int) -> void:
 		return   # 1-row menu (HOWTO's BACK): sel wraps 0→0 — no phantom nav sfx
 	var prev := sel
 	sel = wrapi(sel + move, 0, _items().size())
+	if sel != prev:
+		_rail_pulse = 0.0   # left the row that bounced — don't flash a rail we moved off
+		_rail_row = -1
 	if absi(sel - prev) > 1:
 		_sel_y = -1.0   # wrap: snap to the far end instead of gliding the whole list
 	_confirm = -1
@@ -592,12 +656,33 @@ func _back_rect() -> Rect2:
 	return Rect2(Vector2(320 - BTN.x / 2.0, 320), BTN * Vector2(1, 0.7))
 
 
-func _toggle_bus(name: String) -> void:
-	var b := AudioServer.get_bus_index(name)
-	AudioServer.set_bus_mute(b, not AudioServer.is_bus_mute(b))
-	if name == "SFX":
-		# The jingle "UI" bus slaves to the SFX mute — one user-facing toggle.
-		AudioServer.set_bus_mute(AudioServer.get_bus_index("UI"), AudioServer.is_bus_mute(b))
+func _step_vol(bus: String, delta: int) -> void:
+	# Single source for EVERY volume change: ◄/► AND Enter/click both flow through
+	# here, so SFX/MUSIC share ONE model — a clamped 0..10 level where 0 == MUTED.
+	# A muted bus counts as level 0 regardless of its stored volume_db (effective_
+	# vol), so a step always lifts it off mute instead of sticking at a hidden 10.
+	# _set_bus_vol maps 0 -> mute and keeps the UI+VO buses in lockstep (the old
+	# direct mute-toggle only muted UI, leaving the radio VO blaring).
+	var cur: int = effective_vol(_bus_off(bus), main._bus_vol(bus))
+	var nv: int = step_level(cur, delta)
+	if nv == cur:
+		# Already at a rail (0/MUTED or 10). Not a silent no-op: flash the pinned
+		# end segment so the press reads as "held at the limit," not "ignored." The
+		# floor's own "deny" tick would be swallowed (SFX is muted there), so the
+		# visual bounce is the reliable feedback — the top rail keeps its audible cue.
+		_rail_dir = -1 if delta < 0 else 1
+		_rail_row = sel
+		_rail_pulse = 0.0 if main._motion < 0.5 else 1.0
+		if delta > 0:
+			main._sfx.play("deny", -16.0)   # top rail: SFX is audible, so a soft tick lands
+		queue_redraw()
+		return
+	_rail_pulse = 0.0   # a real step lands — clear any stale bounce flash
+	_rail_row = -1
+	main._set_bus_vol(bus, nv)
+	main._save_settings()
+	# The tick doubles as a live level demo — pitch rides the new step.
+	main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
 
 
 func _activate() -> void:
@@ -630,11 +715,12 @@ func _activate() -> void:
 			"hard": main._hard = not main._hard
 			"howto": open(Mode.HOWTO)   # help screen under OPTIONS; back returns here
 			"sfx":
-				_toggle_bus("SFX")
-				main._save_settings()
+				# Enter/click nudges the SAME clamped 0..10 level as ◄/► (+1, stops at
+				# 10) — one model, and it can never surprise-mute a player who meant to
+				# nudge. Deliberate mute is stepping ◄ down to 0 (which reads MUTED).
+				_step_vol("SFX", 1)
 			"music":
-				_toggle_bus("Music")
-				main._save_settings()
+				_step_vol("Music", 1)
 			"motion":
 				main._motion = 0.0 if main._motion >= 0.5 else 1.0
 				main._save_settings()
@@ -890,6 +976,22 @@ func _draw() -> void:
 					draw_rect(sr, Art.safe(Color(0.55, 0.95, 0.5, 1.0 if selected else 0.8)))
 				else:
 					draw_rect(sr, Color(0.55, 0.6, 0.5, 0.6), false, 1.0)
+			# Rail bounce: a nudge past the limit (mute floor or max ceiling) flashes
+			# the pinned end segment amber+wider so the press reads as "held at the
+			# rail," not dropped. Decays in _process; reduce-motion snaps it off.
+			if selected and k == _rail_row and _rail_pulse > 0.0:
+				var rseg := 9 if _rail_dir > 0 else 0   # ceiling = last cell, floor = first
+				var rr := Rect2(vbx + float(rseg) * 5.0, cy - 3.0, 4.0, 6.0).grow(_rail_pulse * 1.5)
+				draw_rect(rr, Color(1.0, 0.72, 0.3, 0.85 * _rail_pulse), false, 1.0)
+			# STATIC rail cap: whenever the selected row SITS at a limit (MUTED or 10),
+			# bracket the pinned end segment. Non-animated, so it reads even with
+			# Reduce Motion on — where the bounce above is snapped off, a further
+			# press at the rail would otherwise be an invisible (and, at the muted
+			# floor, silent) no-op. This makes "you're at the limit" always legible.
+			if selected and (vv == 0 or vv == 10):
+				var cseg := 9 if vv == 10 else 0
+				draw_rect(Rect2(vbx + float(cseg) * 5.0, cy - 4.0, 4.0, 8.0),
+					Color(1.0, 0.72, 0.3, 0.7), false, 1.0)
 		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
 		# shape+fill carry the state (hue alone fails protan players).
 		if mitems[k].has("on"):
