@@ -63,6 +63,8 @@ var _filter_pulse := 0.0   # hall filter tab flash on change
 var _rail_pulse := 0.0     # volume row bounced off a rail (0/MUTED or 10) — brief end-segment flash
 var _rail_dir := 0         # which rail the bounce hit: -1 = muted floor, +1 = max ceiling
 var _rail_row := -1        # sel index that bounced — the flash only lights its own row
+var _set_pulse := 0.0      # c1-17: settings-change confirm halo — a real volume step or a toggle flip pulses its row so an APPLIED change reads visually, not just as a chime (players were unsure a toggle/volume step took effect without exiting the menu)
+var _set_pulse_row := -1   # c1-17: sel index the confirm pulse lights — pinned to the row that changed, so the halo stays put even if focus moves before it fades
 var _key_move := 0      # held up/down key direction (hold-repeat, mirrors stick)
 var _key_rep := 0.0     # countdown to the next held-key auto-repeat step
 var _key_hmove := 0     # held ◄/► key direction — auto-repeats the volume step (volume rows only)
@@ -77,6 +79,11 @@ var _last_ptr := Vector2(-1.0, -1.0)  # last mouse position seen — lets a page
 
 # Row ids that flip on left/right without a confirm press.
 const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist", "display"]
+# c1-17: the exact persisted rows Reset Defaults reverts (main._reset_settings ->
+# SETTINGS_DEFAULTS) -- the a11y + audio rows, NOT the coop/hard run-setup toggles,
+# which reset never touches. The bulk confirm halo (_set_pulse_row == -2) lights ONLY
+# these, so a reset never haloes a row it did not actually change.
+const _RESET_ROWS := ["sfx", "music", "motion", "colorblind", "rumble", "assist", "display"]
 
 # c1-08 destructive-row palette — the SINGLE source shared by _draw and the contrast
 # test, so the two can't drift. Plates are DARK warm so the LIGHT warm labels over
@@ -152,6 +159,14 @@ func _process(delta: float) -> void:
 		if _page_press <= 0.0:
 			_page_press_side = -1
 		_rail_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _rail_pulse - delta * 3.5)
+		# c1-17: the settings-change confirm pulse decays even under Reduce Motion — it's
+		# FEEDBACK, not decoration, so it can't snap off like the rail/tab flashes above;
+		# reduce-motion just renders it as a static border (no grow) in _draw.
+		# Slow decay (*2.0 ~= 0.5s visible) so the confirm holds long enough to catch,
+		# not a ~0.29s blink a glancing player misses.
+		_set_pulse = maxf(0.0, _set_pulse - delta * 2.0)
+		if _set_pulse <= 0.0:
+			_set_pulse_row = -1
 		# Held-stick auto-repeat: first step fired in _unhandled_input, then
 		# after 0.35 s held it steps every 0.12 s (framerate-independent).
 		if _stick_x != 0 or _stick_y != 0:
@@ -209,6 +224,8 @@ func open(m: int, select_id := "") -> void:
 	_confirm = -1
 	_rail_pulse = 0.0   # a fresh screen starts with no lingering rail-bounce flash
 	_rail_row = -1
+	_set_pulse = 0.0    # c1-17: nor a lingering settings-change confirm halo
+	_set_pulse_row = -1
 	_sel_y = -1.0   # highlight starts on the new menu's first row, no cross-menu glide
 	_sel_target = -1.0
 	_key_move = 0   # a key held across the transition must not auto-repeat here
@@ -1003,8 +1020,26 @@ func _step_vol(bus: String, delta: int) -> void:
 	_rail_row = -1
 	main._set_bus_vol(bus, nv)
 	main._save_settings()
+	_flash_setting()   # c1-17: a real step applied — pulse the row so the change reads visually
 	# The tick doubles as a live level demo — pitch rides the new step.
 	main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
+
+
+func _flash_setting() -> void:
+	# c1-17: raise the settings-change confirm halo on the current row. Fired by a real
+	# volume step and by every plain toggle flip, so an APPLIED setting change reads as a
+	# distinct visual pulse — not only a chime. Persists (and draws static) under Reduce
+	# Motion, since the whole point is confirming the change to a player still in the menu.
+	_set_pulse = 1.0
+	_set_pulse_row = sel
+
+
+func _flash_all_settings() -> void:
+	# c1-17: Reset Defaults rewrites every a11y/audio row at once, so pin the confirm to
+	# the sentinel row -2 -- _draw haloes ALL visible setting rows -- giving a bulk reset
+	# the same per-row APPLIED cue a single toggle gets, alongside the DEFAULTS RESTORED banner.
+	_set_pulse = 1.0
+	_set_pulse_row = -2
 
 
 func _activate() -> void:
@@ -1047,8 +1082,12 @@ func _activate() -> void:
 				open(d["mode"], d["sel"])
 			"hall": open(Mode.HALL)   # INFO screen link
 			"watch": main.start_watch()   # WATCH LAST RUN lives on the INFO screen now
-			"coop": main._two_players = not main._two_players   # run-setup toggle (SETUP); left/right + Enter share this path
-			"hard": main._hard = not main._hard
+			"coop":
+				main._two_players = not main._two_players   # run-setup toggle (SETUP); left/right + Enter share this path
+				_flash_setting()   # c1-17: fired at the mutation itself, not a post-activation id allowlist
+			"hard":
+				main._hard = not main._hard
+				_flash_setting()
 			"howto": open(Mode.HOWTO)   # help screen under INFO; back returns here
 			"sfx":
 				# Enter/click nudges the SAME clamped 0..10 level as ◄/► (+1, stops at
@@ -1060,19 +1099,24 @@ func _activate() -> void:
 			"motion":
 				main._motion = 0.0 if main._motion >= 0.5 else 1.0
 				main._save_settings()
+				_flash_setting()
 			"colorblind":
 				main.colorblind = not main.colorblind
 				main._save_settings()
+				_flash_setting()
 			"rumble":
 				main._rumble_on = not main._rumble_on
 				main._save_settings()
+				_flash_setting()
 			"assist":
 				main._assist = not main._assist
 				main._save_settings()
+				_flash_setting()
 			"display":
 				# c1-09: the DISPLAY row flips fullscreen through the SAME path as the
 				# F11/Alt+Enter shortcut (persist + cursor rebake), so the two agree.
 				main._toggle_fullscreen()
+				_flash_setting()   # display flip applied through the shared fullscreen path
 			"reset_defaults":
 				# c1-09: the two-press confirm already fired (destructive row → _press
 				# arms, a second press lands here) — revert the shown settings to their
@@ -1083,6 +1127,7 @@ func _activate() -> void:
 				_reset_flash_anim = main._motion >= 0.5
 				main._reset_settings()
 				_reset_flash = 1.6
+				_flash_all_settings()   # c1-17: halo every reset row, not just the banner
 			"restart":
 				main._reset()
 				mode = Mode.HIDDEN
@@ -1546,6 +1591,27 @@ func _draw() -> void:
 			draw_texture_rect(at, arows[1], false, fcol)
 		if mitems[k]["id"] == "paste_seed":
 			_draw_seed_hint(r, cy, selected)
+		# c1-17: settings-change confirm halo — a green ring that briefly haloes the row
+		# whose toggle just flipped or whose volume just stepped, so the applied change
+		# reads visually (green == "applied", distinct from the amber selection glow and
+		# rail bounce). Grows+fades under normal motion; Reduce Motion draws it as a
+		# static (but still fading) border. Art.safe keeps it distinct under colorblind.
+		# Sentinel _set_pulse_row == -2 haloes every reset-affected row at once — the
+		# bulk feedback for Reset Defaults, so a mass mutation confirms like a single one.
+		var pulse_here: bool = _set_pulse > 0.0 and (k == _set_pulse_row \
+			or (_set_pulse_row == -2 and mitems[k]["id"] in _RESET_ROWS))
+		if pulse_here:
+			var still: bool = main._motion < 0.5
+			# Alpha fades with the pulse in BOTH modes -- the confirm reads as a
+			# fading halo, never a hard snap-off. A 2px base grow seats the ring
+			# OUTSIDE the 1px focus ring drawn below, so on the selected row the halo
+			# is never overdrawn (Reduce Motion, which holds grow static, would
+			# otherwise be fully hidden by that focus ring). Under normal motion it
+			# ALSO expands outward as it fades: grow rides elapsed progress (1 - pulse),
+			# swelling 2 -> 5px; Reduce Motion holds it static at the 2px seat.
+			var pa: float = _set_pulse
+			var pgrow: float = 2.0 if still else 2.0 + (1.0 - _set_pulse) * 3.0
+			draw_rect(r.grow(pgrow), Art.safe(Color(0.55, 1.0, 0.6, pa)), false, 2.0)
 		if selected:
 			# 1px focus ring on the actual row rect — always crisp and present,
 			# independent of the glow glide, for keyboard/pad a11y.
