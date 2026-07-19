@@ -728,6 +728,11 @@ func test_sol_hero_swap_scale_tint_outline() -> void:
 			"%s is the infantry set authored hero (sol-03)" % k)
 		Runner.T.ok(scale[k] >= 0.12 and scale[k] <= 0.30,
 			"%s SCALE folds the 256px canvas to the ~18px footprint (sol-04)" % k)
+		# Live footprint check: the hero draws at call-scale 0.52 (main.gd _draw_players) × SCALE on the
+		# imported 256px canvas → the on-screen canvas lands ~33px (a ~18-21px figure inside its margin).
+		var footprint: float = tex[k].get_size().x * 0.52 * float(scale[k])
+		Runner.T.ok(footprint >= 26.0 and footprint <= 44.0,
+			"%s draws at the intended footprint (~33px canvas, sol-04): %.1f" % [k, footprint])
 	var t1: Color = tint["player1"]
 	var t2: Color = tint["player2"]
 	# sol-05: value-lifted (anti-camo), and pulled OFF green — P1 cool (b>=g so it can't camo on grass),
