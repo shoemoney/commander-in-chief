@@ -7,6 +7,9 @@ extends Control
 const ICON := 13.0
 const FONT_SIZE := 10
 const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
+const OVF_PAD := 8.0   # c1-06: horizontal padding inside the "+N" overflow chip; the slot
+                       # reserved for it is the MEASURED text width plus this, never a fixed
+                       # guess that could under- or over-reserve.
 # c1-04: glyph-center y of the transient bottom-center verb reminder. The stat
 # panel and player rows live in the top ~90px, so this low band can't collide with
 # them; a layout test pins it clear of both the top HUD and the 360px viewport.
@@ -21,8 +24,22 @@ var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jump
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
 var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
-var _fit_right := RIGHT    # RIGHT, minus the corner reserved for CB/RM pips when either is live
-                          # (so row-0 chips stop short instead of drawing under the pips)
+var _fit_full := RIGHT     # c1-06: RIGHT minus only the CB/RM corner — the ONE true usable
+                          # right edge for the whole top bar. Both row 0 and each player row
+                          # fit against THIS and reserve the +N slot themselves (once, and
+                          # ONLY when overflow is confirmed), so nothing double-counts.
+var _ovf := 0             # c1-06: optional row-0 chips suppressed by the CURRENT fit pass —
+                          # counted in one place (_fits2) so a full row surfaces a "+N"
+                          # affordance instead of dropping readouts silently.
+var _measure := false     # c1-06: row-0 layout measure pass — draw funnels advance x but paint
+                          # nothing, and _fits2 ENUMERATES every optional chip (id/priority/width)
+                          # instead of drawing, so the whole row is planned BEFORE any pixel lands.
+var _opt_cands: Array = [] # c1-06: this frame's optional row-0 chip candidates gathered by the
+                          # measure pass — {id, prio, w}. The planner picks the highest-PRIORITY
+                          # set that fits (combat readouts outrank vanity, regardless of draw
+                          # position) and counts the rest into the +N chip.
+var _opt_keep := {}       # c1-06: id -> true for the optional chips the planner retained; the
+                          # real pass draws a chip only if its id is kept.
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
@@ -175,17 +192,18 @@ func _draw() -> void:
 	if _disp_score < 0.0:
 		_disp_score = float(sim.score)
 
-	# When a CB/RM pip is live it owns the top-right corner — pull the chip
-	# fit-bound in by its width so the rightmost row-0 chip can't draw under it
-	# (the pip is the readout the players who set those toggles rely on).
-	_fit_right = RIGHT - (18.0 if (Art.colorblind or main._motion < 0.5) else 0.0)
+	# c1-06: the ONE true usable right edge. When a CB/RM pip is live it owns the
+	# top-right corner, so pull the edge in by its width — chips must not draw under the
+	# pip readout the players who set those toggles rely on.
+	_fit_full = RIGHT - _corner_reserve(Art.colorblind, main._motion)
+	_ovf = 0
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
 	var y := 6.0
 	# Two economies, two casts (3-vote play-panel: the numerals were identical
 	# and players conflated spendable coin with vanity score): the CHEST reads
 	# warm cream (money-gold family), the SCORE cool steel — both still flash
-	# gold on their pulse.
+	# gold on their pulse. Chest / score / tokens are MANDATORY (never dropped).
 	x = _stat("icon_coin", Art.group_digits(int(round(_disp_chest))), x, y,
 		Color(1.0, 0.93, 0.78).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
 	x = _stat("icon_medal", Art.group_digits(int(round(_disp_score))), x, y,
@@ -193,191 +211,87 @@ func _draw() -> void:
 	if sim.tokens > 0:
 		# Commendation tokens: minted by play, spent on the wheel's NE socket.
 		x = _text("*%d" % sim.tokens, x, y + ICON - 3.0, Color(1.0, 0.85, 0.3)) + 3.0
-	# Live kill-streak: the count + a draining timer ring, so the score-bonus
-	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
-	if sim.kill_streak >= 2:
-		var stxt := "x%d" % sim.kill_streak
-		if _fits(x, _tw(stxt) + 16.0):
-			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
-			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
-			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
-			var sc := Vector2(x + 4.0, y + ICON / 2.0)
-			# Dim full-circle track under the drain, so remaining time reads
-			# against a whole instead of a floating partial arc.
-			draw_arc(sc, 4.5, 0, TAU, 20, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
-			if main._motion < 0.5:
-				# REDUCE MOTION: quarter-snapped instead of a per-frame drain —
-				# the ring steps 4 times per window rather than animating.
-				sfrac = ceilf(sfrac * 4.0) / 4.0
-			draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 20, scol, 1.5)
-			x += 13.0
-			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
-			# ring alone only reads "streak alive", not "how close".
-			var snext := 0
-			if sim.kill_streak < 5:
-				snext = 5
-			elif sim.kill_streak < 10:
-				snext = 10
-			elif sim.kill_streak < 20:
-				snext = 20
-			if snext > 0:
-				var shint := ">x%d" % snext
-				if _fits(x, _tw(shint) + 6.0):
-					x = _text(shint, x, y + ICON - 3.0, Color(0.85, 0.85, 0.8, 0.65)) + 6.0
-	# Flawless Gate streak: the compounding clean-checkpoint multiplier, shown as
-	# a gold star chip so the discipline reward is visible before the payoff.
-	if sim.mode == "campaign" and sim.flawless_streak >= 1:
-		draw_texture_rect(Art.tex("hud_star"), Rect2(x, y, ICON, ICON), false, Color(1.0, 0.9, 0.4))
-		x = _text("x%d" % sim.flawless_streak, x + ICON + 1.0, y + ICON - 3.0,
-			Color(1.0, 0.9, 0.45)) + 8.0
-	# Live BEST target: the record to beat, right next to the current score.
-	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
-	# the chip gold and pulse it the instant the live score passes it.
-	match _record_hud_mode(sim.score, main.best_score):
-		"badge":
-			# a1-17 HUD#2/HUD#3: 'record beaten' is ONE reserved BADGE (medal + "RECORD"),
-			# not a SECOND copy of the score competing with the medal chip beside it.
-			if _fits(x, _tw("RECORD") + ICON + 6.0):
-				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
-				draw_texture_rect(Art.tex("icon_medal"), Rect2(x, y, ICON, ICON), false, rcol)
-				x = _text("RECORD", x + ICON + 1.0, y + ICON - 3.0, rcol) + 8.0
-		"best":
-			# Live BEST target: the record to chase — a DIM reference chip, sunk below
-			# the live chest/score/ammo tier so vanity no longer competes with stats.
-			var btxt := "BEST %d" % main.best_score
-			if _fits(x, _tw(btxt) + 8.0):
-				x = _text(btxt, x, y + ICON - 3.0, Color(0.7, 0.66, 0.5)) + 8.0
-	if sim.mode == "endless":
-		if sim.intermission_ticks > 0:
-			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
-			# blinking red under 1s so the shop window doesn't lapse unnoticed.
-			var shop_col := Color(1.0, 0.9, 0.5)
-			if sim.intermission_ticks < 60:
-				shop_col = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.7, 0.2, 0.18)
-			elif sim.intermission_ticks < 120:
-				shop_col = Color(1.0, 0.6, 0.3)
-			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
-			x = _stat("hud_gunshop", "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y,
-				shop_col)
-		else:
-			x = _stat("hud_flag", "WAVE %d" % sim.wave, x, y) - 2.0
-			# Live wave-clear dashboard FIRST: when the row overflows, the
-			# push-or-hold gauge must survive and the vanity chips must drop —
-			# it used to be the other way around, vanishing exactly mid-chaos.
-			var alive := 0
-			for e in sim.enemies:
-				# The pilot is an optional side objective — the sim's own
-				# _wave_hostiles_cleared() skips it, so counting it here made the
-				# HUD hunt one more "hostile" that can't be shot (rescued by touch).
-				if e["alive"] and e["kind"] != "pilot":
-					alive += 1
-			var remaining: int = alive + sim.wave_pending
-			# The wave's starting budget (same formula _start_wave uses).
-			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
-				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
-			var htxt := "HOSTILES %d" % remaining
-			if _fits(x, ICON + 3.0 + _tw(htxt) + 54.0):
-				x = _stat("hud_skull", htxt, x, y, Color(1.0, 0.55, 0.4)) - 4.0
-				var cleared := 1.0 - float(remaining) / float(wave_total)
-				_mini_bar(Rect2(x, y + 2, 40, 9), cleared, Art.safe(Color(0.4, 0.85, 0.4)))
-				x += 48.0
-			# Live WAVE record chip — endless is the mode players grind, but the wave
-			# count (the number they chase) only got record feedback in the K.I.A.
-			# debrief. Same idiom as the score BEST chip: grey while chasing a prior
-			# best, gold the instant this run ties/beats it.
-			if main.best_wave > 0:
-				var wbeat: bool = sim.wave >= main.best_wave
-				var wtxt := "WAVE RECORD!" if wbeat else ("BEST W%d" % main.best_wave)
-				if _fits(x, _tw(wtxt) + 8.0):
-					var wcol := Color(0.75, 0.7, 0.5)
-					if wbeat:
-						var wp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-						wcol = Color(0.75, 0.7, 0.5).lerp(Color(1.0, 0.85, 0.25), 0.5 + 0.5 * wp)
-					x = _text(wtxt, x, y + ICON - 3.0, wcol) + 8.0
-			# Clean-wave (deathless) live badge — endless's answer to the campaign
-			# flawless star: lit while this wave's Clean Wave bonus is alive, drops the
-			# instant a player goes down. Reads the hashed sim field, no view state.
-			if sim.wave > 1 and sim.deaths_this_wave == 0 and _fits(x, _tw("DEATHLESS") + 8.0):
-				var dpul: float = 1.0 if main._motion < 0.5 else Art.pulse(0.25)
-				var dcol := Art.safe(Color(0.55, 0.9, 0.5)).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
-				x = _text("DEATHLESS", x, y + ICON - 3.0, dcol) + 8.0
-			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
-			if sim.wave_mod > 0:
-				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]
-				# Icon badge per mutator (every other threat callout got one in p3):
-				# lightning=fast spawns, skull=elites, target=spotted, coin=double
-				# bounties, radiation=hazard field (vision dims), fire=frenzy speed.
-				var micons: Array[String] = ["", "hud_lightning", "hud_skull", "hud_target",
-					"icon_coin", "hud_radiation", "hud_fire"]
-				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
-				if mchip != "" and _fits(x, ICON + 3.0 + _tw(mchip) + 8.0):
-					var mcol := Color(1.0, 0.6, 0.35)
-					# icon_coin is a colored bake — keep it gold; the white map
-					# glyphs take the chip tint.
-					var micon: String = micons[sim.wave_mod]
-					draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
-						Color.WHITE if micon == "icon_coin" else mcol)
-					x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
-	else:
-		# SECTOR n/5: campaign progress toward the Foundry finale.
-		var opened := 0
-		for g in sim.gates:
-			if g["open"]:
-				opened += 1
-		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
-			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
-	# Discoverability: the supply wheel exists (hold to open).
-	# Suppressed while the endless shop strip is SHOWN — two buy affordances at
-	# once (wheel cue + priced strip) read as conflicting instructions. When the
-	# strip drops for height, the wheel cue is the buy affordance again.
-	if not shop_row and _fits(x, _tw("SUPPLIES") + 25.0):
-		Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
-		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
-	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
-	# zero HUD read — the countdown says how long the free-fire window lasts.
-	if sim.flash_ticks > 0 and _fits(x, 42.0):
-		x = _stat("wep_flashbang", "%ds" % ((sim.flash_ticks + 59) / 60), x, y,
-			Color(1.0, 0.95, 0.7)) + 4.0
+	var opt_start := x
+
+	# c1-06: TWO-PASS PRIORITY layout for row 0. Pass 1 (_measure) draws nothing but
+	# ENUMERATES every optional chip (id, explicit priority, width) AND advances x through
+	# the mandatory chest/flawless/WAVE/SHOP/SECTOR footprints, so the whole row's geometry
+	# is known before a pixel lands. The mandatory right-side telegraph (PRESSURE / CLEAR
+	# THE GATE) is measured up front and reserved at the right, so optional chips co-layout
+	# AROUND it instead of it clamping backward over already-drawn chips. The planner then
+	# keeps the highest-PRIORITY optional set that fits the remaining budget (combat readouts
+	# like HOSTILES outrank vanity records regardless of draw position) and counts the rest
+	# into +N. The +N slot is reserved ONLY when overflow is real, and its width is recomputed
+	# from the FINAL hidden count so a digit-width change can never exceed its slot. Pass 2
+	# draws for real, showing a chip only if the planner kept its id.
+	var tele := _telegraph_spec(sim)
+	var tele_w: float = tele["w"]
+	var tele_slot: float = (tele_w + 3.0) if tele_w > 0.0 else 0.0
+	# Pass 1: enumerate candidates + measure the mandatory footprint (final x).
+	_measure = true
+	_opt_cands = []
+	_opt_keep = {}
+	var opt_end := _row0_opt(sim, opt_start, y, shop_row)
+	var all_opt_sum := 0.0
+	for c in _opt_cands:
+		all_opt_sum += float(c["w"])
+	var mandatory_sum: float = opt_end - opt_start - all_opt_sum   # exact (widths == advances)
+	# Budget the optional chips get, left of the telegraph slot, with NO +N reserve yet.
+	var budget_full: float = _fit_full - opt_start - mandatory_sum - tele_slot
+	var sel := _select_priority(_opt_cands, budget_full)
+	var hidden: int = sel["hidden"]
+	# Reserve the +N slot ONLY on real overflow, iterating so the reserve matches the FINAL
+	# hidden count (dropping chips for the reserve can grow N, and a wider "+NN" needs more
+	# room — the fixpoint settles that in a couple of steps).
+	if hidden > 0:
+		for _i in 4:
+			var reserve: float = _tw("+%d" % hidden) + OVF_PAD
+			sel = _select_priority(_opt_cands, budget_full - reserve)
+			if int(sel["hidden"]) == hidden:
+				break
+			hidden = int(sel["hidden"])
+	var ovf_reserve: float = (_tw("+%d" % hidden) + OVF_PAD) if hidden > 0 else 0.0
+	var tele_right: float = _fit_full - ovf_reserve
+	var tele_left: float = tele_right - tele_w
+	# Pass 2 (real): draw only the kept ids.
+	_measure = false
+	_opt_keep = sel["keep"]
+	_ovf = hidden
+	x = _row0_opt(sim, opt_start, y, shop_row)
 	var row_r := x
 
-	# PRESSURE gauge: the hidden stall→observer timer, made a dial the player
-	# can manage — it climbs while the camera isn't advancing, drains on push.
-	if sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30:
-
-		# A closed gate/boss/colossus pinning the camera means advancing is
-		# impossible until the fight is won — the "advance!" PRESSURE read would be
-		# lying, so swap it for the real objective and drop the climbing fill.
-		var gate_locked := false
-		for g in sim.gates:
-			if not g["open"] and sim.camera_top >= g["y"] - SimWorld.GATE_CAMERA_PAD \
-					and g["y"] >= sim.camera_top:
-				gate_locked = true
-				break
-		# The punishment telegraph outranks vanity chips: clamp back over the
-		# tail of whatever optional chip came before, by MEASURED width — the
-		# old fixed 94px was narrower than both the 'PRESSURE'+bar row (the
-		# bar's dark well overpainted the label's last ~22px) and 'CLEAR THE
-		# GATE' (115px, which ran past the 640px viewport on a full row).
-		if gate_locked:
+	# Mandatory PRESSURE / CLEAR THE GATE telegraph — drawn right-anchored in its
+	# reserved slot. Optional chips already stopped short of it, so it no longer
+	# overpaints (and silently swallows) chips the +N count didn't know about.
+	if tele["kind"] != "":
+		var inner_x := tele_left + 2.0
+		if tele["kind"] == "gate":
 			var gtxt := "CLEAR THE GATE"
-			x = minf(x, RIGHT - _tw(gtxt))
-			# Dark backing (the _pip plate color) over the clamped footprint — the
-			# gauge deliberately overlaps the previous chip's tail, so separate the
-			# two strings instead of overprinting them.
-			draw_rect(Rect2(x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+			draw_rect(Rect2(inner_x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
 			var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-			_text(gtxt, x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
-			row_r = x + _tw(gtxt)
+			_text(gtxt, inner_x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+			row_r = maxf(row_r, inner_x + _tw(gtxt))
 		else:
 			var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
-			x = minf(x, RIGHT - (pw + 48.0))
 			var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-			draw_rect(Rect2(x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
-			_stat("hud_lightning", "PRESSURE", x, y, Color(1.0, 0.55, 0.3))
-			_mini_bar(Rect2(x + pw, y + 2, 46, 9), pf,
+			draw_rect(Rect2(inner_x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+			_stat("hud_lightning", "PRESSURE", inner_x, y, Color(1.0, 0.55, 0.3))
+			_mini_bar(Rect2(inner_x + pw, y + 2, 46, 9), pf,
 				Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
-			row_r = x + pw + 48.0
+			row_r = maxf(row_r, inner_x + pw + 48.0)
+
+	# c1-06: +N overflow affordance — when the fit pass suppressed one or more optional
+	# readouts (RECORD/BEST/DEATHLESS/mutator/SUPPLIES/streak…), a "+N" chip right-anchored
+	# in the reserved far-right slot says "N more here" instead of dropping them silently.
+	# Its border/text stay fully within _fit_full.
+	if _ovf > 0:
+		var ovf_txt := "+%d" % _ovf
+		var ovf_w := _tw(ovf_txt) + OVF_PAD
+		var ovf_left := _fit_full - ovf_w   # +N spans [ovf_left, _fit_full] exactly
+		draw_rect(Rect2(ovf_left, y + 1.0, ovf_w, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+		draw_rect(Rect2(ovf_left, y + 1.0, ovf_w, 12.0), Color(1.0, 0.8, 0.4, 0.4), false, 1.0)
+		_text(ovf_txt, ovf_left + 4.0, y + ICON - 3.0, Color(1.0, 0.85, 0.45))
+		row_r = maxf(row_r, _fit_full)
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame.
@@ -554,6 +468,225 @@ func _draw() -> void:
 	_verb_legend()
 
 
+## c1-06: CB/RM corner reservation — a live colorblind / reduce-motion pip owns the
+## top-right corner, so the usable right edge pulls in by its width. Pure so a headless
+## test can pin the reservation without a draw context.
+static func _corner_reserve(colorblind: bool, motion: float) -> float:
+	return 18.0 if (colorblind or motion < 0.5) else 0.0
+
+
+## c1-06: pure two-pass overflow planner shared by the player rows (and mirrored by
+## row 0). Given priority-ordered chip widths and a start x, decide how many LEADING
+## chips fit and how many overflow. Reserve the +N slot ONLY when overflow is real (so
+## a row that just fits keeps every pixel to the edge — no phantom overflow), and STOP
+## at the first chip that misses (a dropped higher-priority chip never lets a narrower
+## lower-priority one through). Returns {shown, hidden, reserved}.
+static func plan_chips(widths: Array, start_x: float, usable: float, ovf_w: float) -> Dictionary:
+	var shown := _place_prefix(widths, start_x, usable)
+	if shown == widths.size():
+		return {"shown": shown, "hidden": 0, "reserved": false}
+	shown = _place_prefix(widths, start_x, usable - ovf_w)
+	return {"shown": shown, "hidden": widths.size() - shown, "reserved": true}
+
+
+static func _place_prefix(widths: Array, start_x: float, bound: float) -> int:
+	var x := start_x
+	var n := 0
+	for w in widths:
+		if x + float(w) > bound:
+			break
+		x += float(w)
+		n += 1
+	return n
+
+
+## c1-06: does the mandatory campaign telegraph show, and how wide is its footprint?
+## Returns {kind: ""|"gate"|"pressure", w}. Measured up front so optional chips reserve
+## room for it (co-layout) instead of it clamping backward over already-placed chips.
+func _telegraph_spec(sim: SimWorld) -> Dictionary:
+	if not (sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30):
+		return {"kind": "", "w": 0.0}
+	# A closed gate pinning the camera means advancing is impossible until it's cleared —
+	# the "advance!" PRESSURE read would be lying, so it becomes CLEAR THE GATE.
+	for g in sim.gates:
+		if not g["open"] and sim.camera_top >= g["y"] - SimWorld.GATE_CAMERA_PAD \
+				and g["y"] >= sim.camera_top:
+			return {"kind": "gate", "w": _tw("CLEAR THE GATE") + 4.0}
+	var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
+	return {"kind": "pressure", "w": pw + 50.0}
+
+
+## c1-06: the row-0 OPTIONAL chip run (everything past the mandatory chest/score/tokens
+## head), drawn left-to-right in draw order. Runs TWICE per frame: once in _measure mode
+## (draw funnels advance x but paint nothing, and each optional chip routes through _fits2
+## which ENUMERATES it as a candidate — id, explicit priority, exact width — rather than
+## drawing) and once for real, where _fits2 returns whether the planner kept that id. The
+## planner (_select_priority) keeps the highest-PRIORITY set that fits, so combat readouts
+## outrank vanity regardless of draw position. Mandatory chips (flawless star / SHOP timer /
+## WAVE flag / SECTOR) draw unconditionally via _stat/_text (which the measure flag mutes),
+## and their footprint is folded into the budget as mandatory_sum.
+func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
+	# Live kill-streak: the count + a draining timer ring, so the score-bonus
+	# tiers (5/10/20) are readable in the moment, not just at milestone pops.
+	if sim.kill_streak >= 2:
+		var stxt := "x%d" % sim.kill_streak
+		if _fits2("streak", 50, _tw(stxt) + 16.0):
+			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
+			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
+			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
+			var sc := Vector2(x + 4.0, y + ICON / 2.0)
+			if main._motion < 0.5:
+				# REDUCE MOTION: quarter-snapped instead of a per-frame drain.
+				sfrac = ceilf(sfrac * 4.0) / 4.0
+			if not _measure:
+				# Dim full-circle track under the drain, so remaining time reads
+				# against a whole instead of a floating partial arc.
+				draw_arc(sc, 4.5, 0, TAU, 20, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
+				draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 20, scol, 1.5)
+			x += 13.0
+			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
+			# ring alone only reads "streak alive", not "how close".
+			var snext := 0
+			if sim.kill_streak < 5:
+				snext = 5
+			elif sim.kill_streak < 10:
+				snext = 10
+			elif sim.kill_streak < 20:
+				snext = 20
+			if snext > 0:
+				var shint := ">x%d" % snext
+				# Lower priority than the streak itself, so it can only be KEPT when the
+				# streak is (guaranteeing this nested chip is never planned-in yet unreached).
+				if _fits2("streak_hint", 45, _tw(shint) + 6.0):
+					x = _text(shint, x, y + ICON - 3.0, Color(0.85, 0.85, 0.8, 0.65)) + 6.0
+	# Flawless Gate streak: the compounding clean-checkpoint multiplier, shown as
+	# a gold star chip so the discipline reward is visible before the payoff.
+	if sim.mode == "campaign" and sim.flawless_streak >= 1:
+		if not _measure:
+			draw_texture_rect(Art.tex("hud_star"), Rect2(x, y, ICON, ICON), false, Color(1.0, 0.9, 0.4))
+		x = _text("x%d" % sim.flawless_streak, x + ICON + 1.0, y + ICON - 3.0,
+			Color(1.0, 0.9, 0.45)) + 8.0
+	# Live BEST target: the record to beat, right next to the current score.
+	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
+	# the chip gold and pulse it the instant the live score passes it.
+	match _record_hud_mode(sim.score, main.best_score):
+		"badge":
+			# a1-17 HUD#2/HUD#3: 'record beaten' is ONE reserved BADGE (medal + "RECORD"),
+			# not a SECOND copy of the score competing with the medal chip beside it.
+			# Width == the true advance (medal ICON + 1 gap + text + 8 trailing gap).
+			if _fits2("record", 35, _tw("RECORD") + ICON + 9.0):
+				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
+				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
+				if not _measure:
+					draw_texture_rect(Art.tex("icon_medal"), Rect2(x, y, ICON, ICON), false, rcol)
+				x = _text("RECORD", x + ICON + 1.0, y + ICON - 3.0, rcol) + 8.0
+		"best":
+			# Live BEST target: the record to chase — a DIM reference chip, sunk below
+			# the live chest/score/ammo tier so vanity no longer competes with stats.
+			var btxt := "BEST %d" % main.best_score
+			if _fits2("best", 35, _tw(btxt) + 8.0):
+				x = _text(btxt, x, y + ICON - 3.0, Color(0.7, 0.66, 0.5)) + 8.0
+	if sim.mode == "endless":
+		if sim.intermission_ticks > 0:
+			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
+			# blinking red under 1s so the shop window doesn't lapse unnoticed.
+			var shop_col := Color(1.0, 0.9, 0.5)
+			if sim.intermission_ticks < 60:
+				shop_col = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.7, 0.2, 0.18)
+			elif sim.intermission_ticks < 120:
+				shop_col = Color(1.0, 0.6, 0.3)
+			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
+			x = _stat("hud_gunshop", "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60], x, y,
+				shop_col)
+		else:
+			x = _stat("hud_flag", "WAVE %d" % sim.wave, x, y) - 2.0
+			# Live wave-clear dashboard FIRST: when the row overflows, the
+			# push-or-hold gauge must survive and the vanity chips must drop —
+			# it used to be the other way around, vanishing exactly mid-chaos.
+			var alive := 0
+			for e in sim.enemies:
+				# The pilot is an optional side objective — the sim's own
+				# _wave_hostiles_cleared() skips it, so counting it here made the
+				# HUD hunt one more "hostile" that can't be shot (rescued by touch).
+				if e["alive"] and e["kind"] != "pilot":
+					alive += 1
+			var remaining: int = alive + sim.wave_pending
+			# The wave's starting budget (same formula _start_wave uses).
+			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
+				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
+			var htxt := "HOSTILES %d" % remaining
+			# Highest optional priority: the push-or-hold combat dashboard survives a crowded
+			# row while vanity records/streak drop — the stated failure was the reverse.
+			if _fits2("hostiles", 90, ICON + 3.0 + _tw(htxt) + 54.0):
+				x = _stat("hud_skull", htxt, x, y, Color(1.0, 0.55, 0.4)) - 4.0
+				var cleared := 1.0 - float(remaining) / float(wave_total)
+				if not _measure:
+					_mini_bar(Rect2(x, y + 2, 40, 9), cleared, Art.safe(Color(0.4, 0.85, 0.4)))
+				x += 48.0
+			# Live WAVE record chip — endless is the mode players grind, but the wave
+			# count (the number they chase) only got record feedback in the K.I.A.
+			# debrief. Same idiom as the score BEST chip: grey while chasing a prior
+			# best, gold the instant this run ties/beats it.
+			if main.best_wave > 0:
+				var wbeat: bool = sim.wave >= main.best_wave
+				var wtxt := "WAVE RECORD!" if wbeat else ("BEST W%d" % main.best_wave)
+				if _fits2("wave_record", 30, _tw(wtxt) + 8.0):
+					var wcol := Color(0.75, 0.7, 0.5)
+					if wbeat:
+						var wp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
+						wcol = Color(0.75, 0.7, 0.5).lerp(Color(1.0, 0.85, 0.25), 0.5 + 0.5 * wp)
+					x = _text(wtxt, x, y + ICON - 3.0, wcol) + 8.0
+			# Clean-wave (deathless) live badge — endless's answer to the campaign
+			# flawless star: lit while this wave's Clean Wave bonus is alive, drops the
+			# instant a player goes down. Reads the hashed sim field, no view state.
+			if sim.wave > 1 and sim.deaths_this_wave == 0 and _fits2("deathless", 55, _tw("DEATHLESS") + 8.0):
+				var dpul: float = 1.0 if main._motion < 0.5 else Art.pulse(0.25)
+				var dcol := Art.safe(Color(0.55, 0.9, 0.5)).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
+				x = _text("DEATHLESS", x, y + ICON - 3.0, dcol) + 8.0
+			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
+			if sim.wave_mod > 0:
+				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]
+				# Icon badge per mutator (every other threat callout got one in p3):
+				# lightning=fast spawns, skull=elites, target=spotted, coin=double
+				# bounties, radiation=hazard field (vision dims), fire=frenzy speed.
+				var micons: Array[String] = ["", "hud_lightning", "hud_skull", "hud_target",
+					"icon_coin", "hud_radiation", "hud_fire"]
+				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
+				if mchip != "" and _fits2("mutator", 70, ICON + 3.0 + _tw(mchip) + 8.0):
+					var mcol := Color(1.0, 0.6, 0.35)
+					# icon_coin is a colored bake — keep it gold; the white map
+					# glyphs take the chip tint.
+					var micon: String = micons[sim.wave_mod]
+					if not _measure:
+						draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
+							Color.WHITE if micon == "icon_coin" else mcol)
+					x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
+	else:
+		# SECTOR n/5: campaign progress toward the Foundry finale.
+		var opened := 0
+		for g in sim.gates:
+			if g["open"]:
+				opened += 1
+		x = _text("SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
+			-Fixed.to_int(sim.camera_top) / 10], x, y + ICON - 3.0) + 10.0
+	# Discoverability: the supply wheel exists (hold to open).
+	# Suppressed while the endless shop strip is SHOWN — two buy affordances at
+	# once (wheel cue + priced strip) read as conflicting instructions. When the
+	# strip drops for height, the wheel cue is the buy affordance again.
+	if not shop_row and _fits2("supplies", 20, _tw("SUPPLIES") + 25.0):
+		if not _measure:
+			Art.draw_glyph(self, "wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0)
+		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
+	# zero HUD read — the countdown says how long the free-fire window lasts.
+	if sim.flash_ticks > 0:
+		var fs := "%ds" % ((sim.flash_ticks + 59) / 60)
+		# Width == the true _stat advance (icon + 3 + text + 10) plus the 4 trailing gap.
+		if _fits2("flashbang", 80, ICON + 17.0 + _tw(fs)):
+			x = _stat("wep_flashbang", fs, x, y, Color(1.0, 0.95, 0.7)) + 4.0
+	return x
+
+
 const VERB_SEGS := [["roll", "ROLL"], ["wheel", "SUPPLY WHEEL"], ["revive", "REVIVE"]]
 const VERB_GH := 11.0   # verb glyph height (square device prompt)
 
@@ -680,34 +813,80 @@ func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
 ## rows — the sim decrements the buff timers unconditionally while riding, so the
 ## tank row must show (and expiry-warn) the same chips instead of dropping them.
 func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
+	# c1-06: build the chip run highest-priority-first, then draw with a right-edge
+	# fit test — so a crowded row can't spill buff chips off the 640 edge / under the
+	# CB/RM pips. Tail chips that don't fit are counted and surfaced as a "+N" pip
+	# rather than drawn invisibly. Vest is icon-only; claymore trails an interact glyph.
+	var chips: Array = []
 	if p["vest"]:
-		draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
-		px += ICON + 2.0
+		chips.append({"vest": true})
 	# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
 	# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
 	if p["pierce_ticks"] > 0:
 		# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
 		# icon is the non-color channel (pierce+rend both active = twin rifles
 		# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
-		px = _stat("item_bullet", "%ds" % (p["pierce_ticks"] / 60 + 1), px, ry, _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)))
+		chips.append({"icon": "item_bullet", "txt": "%ds" % (p["pierce_ticks"] / 60 + 1), "col": _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0))})
 	if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
-		px = _stat("wep_shotgun", "%ds" % (p["spread_ticks"] / 60 + 1), px, ry, _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)))
+		chips.append({"icon": "wep_shotgun", "txt": "%ds" % (p["spread_ticks"] / 60 + 1), "col": _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5))})
 	if p["triple"]:
-		px = _stat("wep_mg", "x3", px, ry, Color(1.0, 0.6, 0.9))
+		chips.append({"icon": "wep_mg", "txt": "x3", "col": Color(1.0, 0.6, 0.9)})
 	if p["rend_ticks"] > 0:
 		# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
 		# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
-		px = _stat("icon_rend", "%ds" % (p["rend_ticks"] / 60 + 1), px, ry, _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)))
+		chips.append({"icon": "icon_rend", "txt": "%ds" % (p["rend_ticks"] / 60 + 1), "col": _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4))})
 	if p["smoke_ticks"] > 0:
-		px = _stat("wep_smoke", "%ds" % (p["smoke_ticks"] / 60 + 1), px, ry, _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)))
+		chips.append({"icon": "wep_smoke", "txt": "%ds" % (p["smoke_ticks"] / 60 + 1), "col": _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9))})
 	# Carried claymore charges: a count, not a countdown — and the verb
 	# glyph rides along so "how do I plant this" never dead-ends here.
 	if p["claymores"] > 0:
-		px = _stat("wep_claymore", "x%d" % p["claymores"], px, ry, Color(0.75, 0.9, 0.6))
-		Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
-			Color.WHITE, pi == 1)
-		px += 12.0
+		chips.append({"icon": "wep_claymore", "txt": "x%d" % p["claymores"], "col": Color(0.75, 0.9, 0.6), "glyph": true})
+	# Pre-measure each chip via _chip_w (the EXACT x-advance its drawing produces, so the
+	# fit measure can never disagree with what lands), then run the shared two-pass planner:
+	# reserve the +N slot ONLY on real overflow, and STOP at the first miss so a wide
+	# higher-priority chip never lets a narrower lower-priority one draw ahead of it.
+	var widths: Array[float] = []
+	for c in chips:
+		widths.append(_chip_w(c))
+	# Reserve the MEASURED worst-case +N width (every chip could be the ones hidden), so
+	# the affordance always fits its slot without a fixed over/under guess.
+	var ovf_w := _tw("+%d" % chips.size()) + OVF_PAD
+	var plan := plan_chips(widths, px, _fit_full, ovf_w)
+	var shown: int = plan["shown"]
+	for i in shown:
+		var c: Dictionary = chips[i]
+		if c.has("vest"):
+			draw_texture_rect(Art.tex("icon_vest"), Rect2(px, ry, ICON, ICON), false)
+			px += ICON + 2.0
+		else:
+			px = _stat(c["icon"], c["txt"], px, ry, c["col"])
+			if c.has("glyph"):
+				Art.draw_glyph(self, "interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
+					Color.WHITE, pi == 1)
+				px += 12.0
+	var hidden: int = plan["hidden"]
+	if hidden > 0:
+		# Same styled "+N" chip as row 0: a buff is active but couldn't fit the row.
+		# Clamped so its border stays fully within the usable edge (the reserve guarantees
+		# room, but clamp defends P1 and P2 identically at the far right).
+		var otxt := "+%d" % hidden
+		var ow := _tw(otxt) + OVF_PAD
+		var ox := minf(px, _fit_full - ow)
+		draw_rect(Rect2(ox, ry + 1.0, ow, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+		draw_rect(Rect2(ox, ry + 1.0, ow, 12.0), Color(1.0, 0.8, 0.4, 0.4), false, 1.0)
+		_text(otxt, ox + 4.0, ry + ICON - 3.0, Color(1.0, 0.85, 0.45))
+		px = ox + ow   # return the chip's real right edge (was 1px past the rendered border)
 	return px
+
+
+## c1-06: the EXACT x-advance a buff chip's drawing produces — vest is icon+2, a timed
+## chip mirrors _stat's advance (icon + 3 + text + 10 == icon + 13 + text), a claymore
+## adds its trailing interact glyph. Shared by the fit measure so a width can never
+## disagree with the drawn footprint.
+func _chip_w(c: Dictionary) -> float:
+	if c.has("vest"):
+		return ICON + 2.0
+	return ICON + 13.0 + _tw(c["txt"]) + (12.0 if c.has("glyph") else 0.0)
 
 
 ## Exponential catch-up toward `target`, snapping once close — a big jump
@@ -745,14 +924,17 @@ func _stat(icon: String, txt: String, x: float, y: float,
 		col := Color(0.95, 0.96, 0.9), pulse := 0.0) -> float:
 	# pulse > 0 scale-thumps the icon around its center — a payout visibly hits
 	# the badge instead of only tinting the numeral.
-	var r := Rect2(x, y, ICON, ICON)
-	if pulse > 0.01:
-		var gc := r.get_center()
-		draw_set_transform(gc, 0.0, Vector2.ONE * (1.0 + pulse * 0.25))
-		draw_texture_rect(Art.tex(icon), Rect2(r.position - gc, r.size), false)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	else:
-		draw_texture_rect(Art.tex(icon), r, false)
+	# c1-06: in the row-0 MEASURE pass paint nothing (only advance x), so the two-pass
+	# layout is decided before any pixel lands.
+	if not _measure:
+		var r := Rect2(x, y, ICON, ICON)
+		if pulse > 0.01:
+			var gc := r.get_center()
+			draw_set_transform(gc, 0.0, Vector2.ONE * (1.0 + pulse * 0.25))
+			draw_texture_rect(Art.tex(icon), Rect2(r.position - gc, r.size), false)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		else:
+			draw_texture_rect(Art.tex(icon), r, false)
 	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col) + 10.0
 
 
@@ -782,13 +964,48 @@ func _pip(x: float, y: float, col: Color, sym: String) -> float:
 
 
 func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
-	Art.text(self, txt, Vector2(x, y), FONT_SIZE, col)
+	# c1-06: the row-0 MEASURE pass advances x without painting (see _row0_opt).
+	if not _measure:
+		Art.text(self, txt, Vector2(x, y), FONT_SIZE, col)
 	return x + _tw(txt)
 
 
-## Right-margin fit test for an optional chip of pixel-width `w` starting at `x`.
-func _fits(x: float, w: float) -> bool:
-	return x + w <= _fit_right
+## c1-06: the ONE gate every optional row-0 chip routes through. In the MEASURE pass it
+## records the chip as a candidate (id, explicit priority, pixel width) and returns true so
+## the row's full geometry is enumerated; in the real pass it returns whether the planner
+## kept this id. `w` MUST equal the chip's true x-advance so the planner's budget math is
+## exact. Priority — not draw position — decides what survives a crowded row, so a combat
+## readout is never dropped in favor of a vanity chip that happens to sit earlier.
+func _fits2(id: String, prio: int, w: float) -> bool:
+	if _measure:
+		_opt_cands.append({"id": id, "prio": prio, "w": w})
+		return true
+	return _opt_keep.get(id, false)
+
+
+## c1-06: pure priority selection. Keep the highest-priority chips whose combined width fits
+## `budget`, drawing order preserved by the caller. Ties break toward the earlier draw-order
+## chip; once a chip in priority order does not fit, nothing lower-priority is kept either
+## (so shown chips are always strictly the top priorities). Returns {keep:{id:true}, hidden}.
+static func _select_priority(cands: Array, budget: float) -> Dictionary:
+	var idx := {}
+	for i in cands.size():
+		idx[cands[i]["id"]] = i
+	var order := cands.duplicate()
+	order.sort_custom(func(a, b):
+		if a["prio"] != b["prio"]:
+			return a["prio"] > b["prio"]
+		return idx[a["id"]] < idx[b["id"]])
+	var keep := {}
+	var used := 0.0
+	var stopped := false
+	for c in order:
+		if not stopped and used + float(c["w"]) <= budget:
+			keep[c["id"]] = true
+			used += float(c["w"])
+		else:
+			stopped = true
+	return {"keep": keep, "hidden": cands.size() - keep.size()}
 
 
 ## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).
