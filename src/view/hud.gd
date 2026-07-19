@@ -7,6 +7,14 @@ extends Control
 const ICON := 13.0
 const FONT_SIZE := 10
 const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
+const ROW_H := 16.0   # one HUD row — a player row AND the shop-preview strip are this tall
+const HEAD_H := 26.0  # row-0 header block (coin/score/tokens + gap) above the player rows
+const BOSS_BAR_TOP := 64.0  # c1-15: THE shared HUD-layout boundary — the y the top-center boss/mini
+                       # HP bars dock at. main.gd imports it directly (HudIcons.BOSS_BAR_TOP) for its
+                       # bar renderers, so the corner panel and the bars share one source, no mirror.
+const SHOP_STRIP_CLEARANCE := 4.0  # c1-15: breathing gap the corner panel keeps below the bar line.
+const SHOP_SAFE_H := BOSS_BAR_TOP - SHOP_STRIP_CLEARANCE  # c1-15: corner-panel content-height cap,
+                       # derived at parse time. Header + rows + strip must fit or the strip drops (2P).
 const PIP_MIN_X := 4.0  # left safety floor (inset) for the accessibility corner pips — a narrow/
                        # letterboxed viewport can't push the CB/RM scrim plate off the left edge
 const PIP_PAD_L := 3.0  # the scrim plate overhangs the glyph this far to the LEFT; folded into the
@@ -48,6 +56,12 @@ var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jump
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
 var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
+var _shop_anim := 0.0     # c1-15: eased 0..1 open-ness of the endless shop strip's CONTENT. The
+                          # strip's ROW is always reserved when eligible, so this only cross-fades the
+                          # buy list in/out — never panel height or row positions. Snaps under reduce
+                          # motion. Driven in _process, read by _draw.
+var _shop_sim_id := 0     # c1-15: SimWorld the fade tracks — a fresh run snaps _shop_anim to target
+                          # so restart-time content can't linger-fade over the new game's first frames.
 var _fit_full := RIGHT     # c1-06: RIGHT minus only the CB/RM corner — the ONE true usable
                           # right edge for the whole top bar. Both row 0 and each player row
                           # fit against THIS and reserve the +N slot themselves (once, and
@@ -126,6 +140,18 @@ func _process(delta: float) -> void:
 	else:
 		_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
 		_disp_score = _rollup(_disp_score, float(sim.score), delta)
+	# c1-15: ease the shop strip's CONTENT open/closed (the row stays reserved, so nothing shifts).
+	# Reduce motion snaps; a fresh run snaps too so restart-time content can't linger-fade. exp()
+	# ease matches the odometer.
+	var shop_target := 1.0 if _shop_open(sim) else 0.0
+	var sid := sim.get_instance_id()
+	if main._motion < 0.5 or sid != _shop_sim_id:
+		_shop_anim = shop_target
+	elif absf(shop_target - _shop_anim) < 0.01:
+		_shop_anim = shop_target
+	else:
+		_shop_anim += (shop_target - _shop_anim) * (1.0 - exp(-13.0 * delta))
+	_shop_sim_id = sid
 	# c1-04: drive the BRIGHT phase of the verb reminder. It freezes while paused
 	# (the sim doesn't tick either). A brand-new SimWorld — every start_game/_reset
 	# builds one — rearms the full window, so it reliably re-shows on EVERY run
@@ -179,15 +205,80 @@ func plate_right() -> float:
 	return _plate_r
 
 
+# c1-15: can this HUD EVER show the shop-preview strip? A per-RUN constant (endless, and header +
+# rows + strip fit the boss-bar safe height — so it drops in 2P). Because it's run-constant, the
+# strip's ROW is reserved for the whole run: panel height, row positions, and overlay avoidance never
+# move when the intermission toggles. Replaces the old `26 + (n+1)*16 > 60` gate duplicated between
+# panel_bottom() and _draw() that popped a full row every wave.
+func _shop_eligible(sim: SimWorld) -> bool:
+	return sim.mode == "endless" and HEAD_H + (sim.players.size() + 1) * ROW_H <= SHOP_SAFE_H
+
+
+# c1-15: is the buy list live? Eligible AND inside the intermission window. Drives the content fade
+# and the row-0 SHOP-timer / SUPPLIES logic — never the reserved height.
+func _shop_open(sim: SimWorld) -> bool:
+	return _shop_eligible(sim) and sim.intermission_ticks > 0
+
+
+# c1-15: is the priced strip visibly present this frame — open OR still fading out? The row-0 SUPPLIES
+# wheel cue is suppressed while true, so it never pops in over prices that are still fading. 2P is
+# always false (strip dropped), so the wheel cue is the buy affordance there.
+func _shop_strip_visible(sim: SimWorld) -> bool:
+	return _shop_eligible(sim) and (sim.intermission_ticks > 0 or _shop_anim > 0.01)
+
+
+const SHOP_ICON_DIM := 0.22  # c1-15: closed-state alpha of the 4 supply icons. They stay as a dim,
+                            # non-text structural preview of the shop stock so the reserved band is
+                            # self-explanatory (not empty, not unreadably-faint text) yet can't be
+                            # misread as buyable — no price, no green/red affordability color shows
+                            # until the window opens. Chip x positions are fixed across the fade, so
+                            # nothing reflows as the prices come in.
+
+
+# c1-15: paint the reserved strip band as ONE continuous cross-fade (no threshold swap): the buy icons
+# brighten from a dim structural floor to full as the window opens, and each cost label + affordability
+# color fades in with them. Closed = dim icons only (a preview, never mistaken for a live purchase);
+# open = full priced chips. Icon x is fixed for the whole fade, so the two states share the same slots
+# and can never overlap.
+func _draw_shop_strip(sim: SimWorld) -> void:
+	var a := _shop_anim
+	var icon_a := SHOP_ICON_DIM + (1.0 - SHOP_ICON_DIM) * a
+	var ty := STRIP_TOP + ICON - 3.0
+	var sx := 8.0
+	for kind in 4:
+		var icon: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][kind]
+		_emit_icon(icon, Rect2(sx, STRIP_TOP, ICON, ICON), Color(1, 1, 1, icon_a))
+		var cost: int = sim._supply_cost(kind)
+		var afford: bool = sim.war_chest >= cost
+		# "×" suffix: affordability readable without color vision — same mark the spend wheel (the
+		# primary buy surface) draws beside its sockets. Price + color fade in with the window (a=0
+		# when closed), while the icon slot stays put.
+		var scol := (Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4))
+		scol.a = a
+		sx = _text(str(cost) + ("" if afford else "×"), sx + ICON + 3.0, ty, scol) + 10.0
+
+
+const STRIP_TOP := 23.0   # c1-15: y of the shop-strip row (row-0 origin 6 + 17). The buy chips
+                          # draw here; the player rows begin one ROW_H lower when the strip is
+                          # reserved. Shared by _draw and player_rows_top so they can't drift.
+
+
+# c1-15: y of the FIRST player row. The reserved shop strip (when eligible) pushes every player
+# row down by exactly one ROW_H, and eligibility is a per-RUN constant (mode + player count) — NOT
+# a function of intermission_ticks. So this is INVARIANT while the shop window opens/closes: the
+# player rows never shift when the intermission toggles. _draw begins its player loop here; the
+# c1-15 test pins the invariant against this exact function.
+func player_rows_top(sim: SimWorld) -> float:
+	return STRIP_TOP + (ROW_H if _shop_eligible(sim) else 0.0)
+
+
 func panel_bottom() -> float:
-	# Bottom edge of the corner panel — THE source of the layout rule (incl.
-	# the 2P shop-strip height drop). main.gd's overlay-avoidance used to carry
-	# its own copy of this formula minus the drop rule and desynced by 16px.
+	# Bottom edge of the corner panel — THE source of the layout rule (incl. the 2P
+	# shop-strip drop). main.gd's overlay-avoidance used to carry its own copy of this
+	# formula minus the drop rule and desynced by 16px. The strip's row is reserved for the
+	# whole run when eligible (constant height — no per-wave jump); its content fades in place.
 	var sim: SimWorld = main.sim
-	var shop_row: bool = sim.mode == "endless" and sim.intermission_ticks > 0
-	if shop_row and 26 + (sim.players.size() + 1) * 16 > 60:
-		shop_row = false
-	return 2.0 + 26.0 + sim.players.size() * 16.0 + (16.0 if shop_row else 0.0)
+	return 2.0 + HEAD_H + sim.players.size() * ROW_H + (ROW_H if _shop_eligible(sim) else 0.0)
 
 
 func _draw() -> void:
@@ -201,16 +292,16 @@ func _draw() -> void:
 	# pulse (scale-thump + gold color lerp) holds at 0 — no animated flash.
 	var chest_pulse: float = 0.0 if main._motion < 0.5 else _chest_pulse
 	var score_pulse: float = 0.0 if main._motion < 0.5 else _score_pulse
-	# Shop preview strip adds one row while the SHOP OPEN window is live, so
-	# the buy list is readable without holding the spend-wheel open.
-	var shop_row := sim.mode == "endless" and sim.intermission_ticks > 0
-	# Safe-height clamp: boss HP bars dock at y=64 (main sizes them to a ~60px
-	# panel max), so when player rows + strip would cross that line the strip
-	# drops first — lowest-priority row, same outrank rule as HOSTILES-vs-vanity
-	# on the width axis. Its timer chip in row 0 survives.
-	if shop_row and 26 + (sim.players.size() + 1) * 16 > 60:
-		shop_row = false
-	var panel_h := int(panel_bottom()) - 2
+	# c1-15: first-draw fade sync — a _draw can beat the frame's first _process, so snap an unseen
+	# sim here too (correct content on frame one, no fade-in-from-zero, no stale prior-run content).
+	var sid := sim.get_instance_id()
+	if sid != _shop_sim_id:
+		_shop_anim = 1.0 if _shop_open(sim) else 0.0
+		_shop_sim_id = sid
+	# `shop_row` is the strip's VISIBLE presence (open or still fading out) — it gates the row-0
+	# SUPPLIES suppression so the wheel cue never pops in over prices that are mid-fade.
+	var shop_row := _shop_strip_visible(sim)
+	var panel_h := panel_bottom() - 2.0
 	if _disp_chest < 0.0:
 		_disp_chest = float(sim.war_chest)   # first draw can beat first _process
 	if _disp_score < 0.0:
@@ -290,22 +381,14 @@ func _draw() -> void:
 		Vector2(2, 2), Vector2(_plate_r, 2), Vector2(_plate_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
 	]), PackedColorArray([Color(0.5, 0.55, 0.5, 0.35)]), 1.0)
 
-	# Shop preview strip: the 4 buyables at a glance (cost + green/red
-	# affordability), matching the spend-wheel's own price coloring.
-	var ry := y + 17.0
-	if shop_row:
-		var sx := 8.0
-		for kind in 4:
-			var icon: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][kind]
-			var cost: int = sim._supply_cost(kind)
-			var afford: bool = sim.war_chest >= cost
-			var scol := Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4)
-			# "×" suffix: affordability readable without color vision — same mark
-			# the spend wheel (the primary buy surface) draws beside its sockets.
-			sx = _stat(icon, str(cost) + ("" if afford else "×"), sx, ry, scol)
-		ry += 16.0
+	# Shop strip: the 4 buyables at a glance. c1-15: when eligible its ROW is reserved for the whole
+	# run (rows start at player_rows_top regardless of the intermission); the band cross-fades from a
+	# dim icon preview when closed to priced chips when open (see _draw_shop_strip) — never empty.
+	if _shop_eligible(sim):
+		_draw_shop_strip(sim)
 
 	# Player rows.
+	var ry := player_rows_top(sim)
 	var prow := 0.0
 	for i in sim.players.size():
 		var p := sim.players[i]
@@ -1351,8 +1434,8 @@ func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> fl
 # pass issues — in bounds, non-overlapping — without a live GL draw context. Defaults draw.
 func _emit_hud_text(txt: String, pos: Vector2, col: Color) -> void:
 	Art.text(self, txt, pos, FONT_SIZE, col)
-func _emit_icon(icon: String, r: Rect2) -> void:
-	draw_texture_rect(Art.tex(icon), r, false)
+func _emit_icon(icon: String, r: Rect2, mod := Color.WHITE) -> void:
+	draw_texture_rect(Art.tex(icon), r, false, mod)
 func _emit_ovf(ox: float, y: float, w: float, txt: String) -> void:
 	draw_rect(Rect2(ox, y + 1.0, w, 12.0), Color(0.1, 0.11, 0.09, 0.85))
 	draw_rect(Rect2(ox, y + 1.0, w, 12.0), Color(1.0, 0.8, 0.4, 0.4), false, 1.0)

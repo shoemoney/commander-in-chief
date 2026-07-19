@@ -1166,9 +1166,9 @@ class _ChipCaptureHud extends HudIcons:
 	func _emit_hud_text(txt: String, pos: Vector2, _c: Color) -> void:
 		var f := Art.font()
 		var s := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE)
-		boxes.append({"k": "text", "id": txt, "box": Rect2(pos - Vector2(0.0, f.get_ascent(HudIcons.FONT_SIZE)), s)})
-	func _emit_icon(icon: String, r: Rect2) -> void:
-		boxes.append({"k": "icon", "id": icon, "box": r})
+		boxes.append({"k": "text", "id": txt, "box": Rect2(pos - Vector2(0.0, f.get_ascent(HudIcons.FONT_SIZE)), s), "alpha": _c.a})
+	func _emit_icon(icon: String, r: Rect2, mod := Color.WHITE) -> void:
+		boxes.append({"k": "icon", "id": icon, "box": r, "alpha": mod.a})
 	func _emit_ovf(ox: float, y: float, w: float, txt: String) -> void:
 		boxes.append({"k": "ovf", "id": txt, "box": Rect2(ox, y + 1.0, w, 12.0)})
 	func _emit_bg_rect(r: Rect2, _c: Color) -> void:
@@ -1699,6 +1699,7 @@ func test_full_draw_frame_at_narrowest_viewport() -> void:
 	# chips that share an x at a different y. The corner CB/RM pips stack VERTICALLY in the reserved
 	# zone right of the usable edge, so they are bounds-checked only, never x-overlap-checked.
 	var row0: Array = []
+	var strip: Array = []
 	var player: Array = []
 	var corner: Array = []
 	for b in h.boxes:
@@ -1706,9 +1707,12 @@ func test_full_draw_frame_at_narrowest_viewport() -> void:
 			corner.append(b)
 		elif b["box"].position.y < 21.0:
 			row0.append(b)
+		elif b["box"].position.y < 37.0:
+			strip.append(b)   # c1-15: the always-present reserved shop-strip band (ghost preview here)
 		else:
 			player.append(b)
 	_assert_render_bounds_nonoverlap(row0, edge, "frame-row0")
+	_assert_render_bounds_nonoverlap(strip, edge, "frame-strip")
 	_assert_render_bounds_nonoverlap(player, edge, "frame-player")
 	# Corner pips legitimately occupy the reserved zone at the far right, up to the design edge.
 	for b in corner:
@@ -1775,3 +1779,314 @@ class _FrameCaptureHud extends _ChipCaptureHud:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate", "box": r})
 		return HudIcons._pip_x(b.y, _tw(txt), b.x)
+
+
+# c1-15: the endless shop preview strip must STABILIZE the HUD layout. Its ROW is reserved for the
+# whole eligible run (a per-run constant of mode + player count), so the panel height, the player-row
+# Y positions, and the overlay-avoidance boundary (panel_bottom — the single source main.gd's toasts
+# duck under) never shift when intermission_ticks toggles; only the buy CONTENT fades. These tests
+# pin that invariant across 1P/2P, reduce motion, and fresh-run resets, verify the boss-bar boundary
+# is genuinely SHARED (derived from main.BOSS_BAR_TOP, not a mirrored 60/64 literal), and confirm the
+# row-0 SHOP timer / SUPPLIES cue stay intentional in 2P.
+
+class _ShopMain extends Node2D:
+	var sim: SimWorld = null
+	var _motion := 1.0
+	var best_score := 0
+	var best_wave := 0
+	var _menu = null
+
+
+# The reserved strip row, the panel height, and the first player-row Y are all INVARIANT when
+# intermission_ticks toggles — for BOTH 1P (strip reserved) and 2P (strip dropped for height).
+func test_c1_15_layout_invariant_across_intermission() -> void:
+	for pc in [1, 2]:
+		var m := _ShopMain.new()
+		var h := HudIcons.new()
+		h.main = m
+		var sim := SimWorld.new(0, pc, "endless")
+		m.sim = sim
+		sim.intermission_ticks = 0                  # shop window CLOSED
+		var pb_closed := h.panel_bottom()
+		var top_closed := h.player_rows_top(sim)
+		var elig_closed := h._shop_eligible(sim)
+		sim.intermission_ticks = 600                # shop window OPEN
+		Runner.T.eq(h.panel_bottom(), pb_closed, "%dP: panel_bottom invariant across intermission" % pc)
+		Runner.T.eq(h.player_rows_top(sim), top_closed, "%dP: player-row top invariant across intermission" % pc)
+		Runner.T.eq(h._shop_eligible(sim), elig_closed, "%dP: eligibility is independent of intermission" % pc)
+		m.free()
+		h.free()
+	# 1P reserves the strip row (rows pushed down one ROW_H); 2P drops it (rows stay at the base).
+	var m1 := _ShopMain.new()
+	var h1 := HudIcons.new()
+	h1.main = m1
+	var s1 := SimWorld.new(0, 1, "endless")
+	m1.sim = s1
+	var m2 := _ShopMain.new()
+	var h2 := HudIcons.new()
+	h2.main = m2
+	var s2 := SimWorld.new(0, 2, "endless")
+	m2.sim = s2
+	Runner.T.ok(h1._shop_eligible(s1), "1P endless is shop-strip eligible")
+	Runner.T.ok(not h2._shop_eligible(s2), "2P endless drops the strip (over the boss-bar safe height)")
+	Runner.T.eq(h1.player_rows_top(s1) - h2.player_rows_top(s2), HudIcons.ROW_H,
+		"the reserved 1P strip pushes the player rows exactly one ROW_H below the 2P layout")
+	m1.free()
+	h1.free()
+	m2.free()
+	h2.free()
+
+
+# The shop safe height derives from the shared boss-bar boundary at parse time, and the reserved HUD
+# panel + lowest player row provably never cross the boss-bar dock line — so the strip and rows can
+# never overlap a boss/mini bar for any supported player count.
+func test_c1_15_panel_stays_clear_of_boss_bar() -> void:
+	Runner.T.eq(HudIcons.SHOP_SAFE_H, HudIcons.BOSS_BAR_TOP - HudIcons.SHOP_STRIP_CLEARANCE,
+		"the shop safe height derives from the shared HudIcons.BOSS_BAR_TOP")
+	for pc in [1, 2]:
+		var m := _ShopMain.new()
+		var h := HudIcons.new()
+		h.main = m
+		var sim := SimWorld.new(0, pc, "endless")
+		m.sim = sim
+		sim.intermission_ticks = 300
+		Runner.T.ok(h.panel_bottom() <= HudIcons.BOSS_BAR_TOP + 0.01,
+			"%dP: the reserved HUD panel stays above the boss-bar dock line" % pc)
+		var last_row_bottom := h.player_rows_top(sim) + sim.players.size() * HudIcons.ROW_H
+		Runner.T.ok(last_row_bottom <= HudIcons.BOSS_BAR_TOP + 0.01,
+			"%dP: the player rows clear the boss-bar dock line" % pc)
+		m.free()
+		h.free()
+
+
+# The buy CONTENT fade snaps under reduce motion and on a fresh run, while the LAYOUT (panel height +
+# player-row Y) never moves. Drives the real _process fade driver, not a synthetic value.
+func test_c1_15_content_fade_snaps_while_layout_holds() -> void:
+	var m := _ShopMain.new()
+	var h := HudIcons.new()
+	h.main = m
+	var sim := SimWorld.new(0, 1, "endless")
+	m.sim = sim
+	sim.intermission_ticks = 600                    # shop OPEN
+	m._motion = 0.0                                 # REDUCE MOTION
+	var top0 := h.player_rows_top(sim)
+	var pb0 := h.panel_bottom()
+	h._process(DT)
+	Runner.T.eq(h._shop_anim, 1.0, "reduce motion snaps the buy-content fade straight to full")
+	Runner.T.eq(h.player_rows_top(sim), top0, "reduce motion: the fade never moves the player rows")
+	Runner.T.eq(h.panel_bottom(), pb0, "reduce motion: the fade never changes the panel height")
+	sim.intermission_ticks = 0                      # shop CLOSED
+	h._process(DT)
+	Runner.T.eq(h._shop_anim, 0.0, "reduce motion snaps the content fade to zero on close")
+	Runner.T.eq(h.player_rows_top(sim), top0, "closing the shop leaves the player rows put")
+	Runner.T.eq(h.panel_bottom(), pb0, "closing the shop leaves the panel height put")
+	# Fresh run: a NEW SimWorld snaps the fade to target so stale content can't linger-fade over the
+	# opening frames — even with motion ON (the identity change beats the ease).
+	var sim2 := SimWorld.new(0, 1, "endless")
+	sim2.intermission_ticks = 600
+	m.sim = sim2
+	m._motion = 1.0
+	h._process(DT)
+	Runner.T.eq(h._shop_anim, 1.0, "a fresh run snaps the fade to target (no linger from the prior run)")
+	Runner.T.eq(h.player_rows_top(sim2), top0, "the fresh run keeps the same stable 1P layout")
+	# Same run, motion ON: the fade now EASES toward the target rather than snapping (the animation exists).
+	sim2.intermission_ticks = 0
+	var before := h._shop_anim
+	h._process(DT)
+	Runner.T.ok(h._shop_anim < before and h._shop_anim > 0.0, "motion on + steady run: the fade eases toward the target")
+	m.free()
+	h.free()
+
+
+# Row-0 measure pass: gather the enumerated optional-chip ids for `pc` players at `inter` intermission
+# ticks, driving the same shop_row wiring _draw uses.
+func _c1_15_row0_ids(pc: int, inter: int) -> Array:
+	var m := _ShopMain.new()
+	var h := HudIcons.new()
+	h.main = m
+	var sim := SimWorld.new(0, pc, "endless")
+	m.sim = sim
+	sim.intermission_ticks = inter
+	var shop_row := h._shop_strip_visible(sim)   # the exact gate _draw feeds the SUPPLIES suppression
+	h._fit_full = HudIcons.RIGHT
+	h._measure = true
+	h._opt_cands = []
+	h._opt_keep = {}
+	h._row0_opt(sim, 8.0, 6.0, shop_row)
+	var ids: Array = []
+	for c in h._opt_cands:
+		ids.append(c["id"])
+	m.free()
+	h.free()
+	return ids
+
+
+# The row-0 SHOP timer and SUPPLIES cue stay intentional now that _shop_open() folds eligibility into
+# logic beyond the preview strip: in 1P the priced strip suppresses the wheel cue, and in 2P (strip
+# dropped) the SHOP timer still shows AND the wheel cue returns as the buy affordance.
+func test_c1_15_row0_shop_timer_and_supplies_2p() -> void:
+	var ids_1p := _c1_15_row0_ids(1, 90)
+	Runner.T.ok("shop" in ids_1p, "1P: the SHOP OPEN timer chip shows during the intermission")
+	Runner.T.ok(not ("supplies" in ids_1p), "1P: SUPPLIES cue is suppressed while the priced strip is shown")
+	var ids_2p := _c1_15_row0_ids(2, 90)
+	Runner.T.ok("shop" in ids_2p, "2P: the SHOP OPEN timer survives even though the preview strip is dropped")
+	Runner.T.ok("supplies" in ids_2p, "2P: the SUPPLIES wheel cue returns as the buy affordance")
+
+
+# c1-15 DRAW-LEVEL regression: run the REAL _draw() mid-fade and inspect the emitted boxes — the buy
+# icons render at the reserved STRIP_TOP row and brighten from the dim floor with _shop_anim, the cost
+# labels fade in on their own (lower) alpha, the player rows sit exactly one ROW_H below, and the panel
+# bounds never move as the content fades. (Headless has no GL surface; capturing the emitted seam
+# commands is the strongest render check available.)
+func test_c1_15_strip_renders_at_reserved_y_with_faded_content() -> void:
+	var was_cb: bool = Art.colorblind
+	Art.colorblind = false                          # no corner pips (motion on, cb off) -> clean rows
+	var sim := _FrameSim.new()                      # endless 1P -> shop-strip eligible
+	sim.intermission_ticks = 300                    # shop OPEN
+	sim.war_chest = 40                              # a mix of affordable / unaffordable buyables
+	sim.wave = 2
+	var main := _FrameMain.new()
+	main.sim = sim
+	main._motion = 1.0
+	main.best_score = 0
+	main.best_wave = 0
+	main._grenade_dry = [0]
+	var h := _FrameCaptureHud.new()
+	h.main = main
+	h._verb_show = 0.0
+	h._ready()
+	# Panel bounds must be identical whether the content is fully faded out, mid-fade, or full in.
+	h._shop_anim = 0.0
+	var pb_closed := h.panel_bottom()
+	h._shop_anim = 1.0
+	var pb_open := h.panel_bottom()
+	Runner.T.eq(pb_open, pb_closed, "the fading content never changes the panel bounds")
+	# Mark this sim already-seen so _draw's first-draw snap leaves our fade value in place.
+	h._shop_sim_id = sim.get_instance_id()
+	var anim := 0.75
+	h._shop_anim = anim
+	h._draw()
+	var icon_a := HudIcons.SHOP_ICON_DIM + (1.0 - HudIcons.SHOP_ICON_DIM) * anim
+	var strip_icons := 0
+	var strip_texts := 0
+	for b in h.boxes:
+		if b["k"] != "icon" and b["k"] != "text":
+			continue
+		var cy: float = b["box"].position.y + b["box"].size.y * 0.5
+		if cy >= HudIcons.STRIP_TOP - 1.0 and cy <= HudIcons.STRIP_TOP + HudIcons.ICON + 1.0:
+			if b["k"] == "icon":
+				strip_icons += 1
+				Runner.T.ok(absf(float(b["alpha"]) - icon_a) < 0.01,
+					"strip icon '%s' brightens from the dim floor with the fade" % b["id"])
+			else:
+				strip_texts += 1
+				Runner.T.ok(absf(float(b["alpha"]) - anim) < 0.01,
+					"strip price '%s' fades in on its own alpha" % b["id"])
+	Runner.T.eq(strip_icons, 4, "all four buy icons render at the reserved STRIP_TOP row")
+	Runner.T.ok(strip_texts >= 4, "each buy chip's cost label renders and fades alongside its icon")
+	# The player rows render exactly one ROW_H below the reserved strip (the strip pushed them down).
+	Runner.T.eq(h.player_rows_top(sim), HudIcons.STRIP_TOP + HudIcons.ROW_H,
+		"1P player rows sit one ROW_H below the reserved strip")
+	var has_player_icon := false
+	for b in h.boxes:
+		if b["k"] == "icon" and absf(b["box"].position.y - h.player_rows_top(sim)) < 0.5:
+			has_player_icon = true
+			Runner.T.ok(absf(float(b["alpha"]) - 1.0) < 0.01, "player-row icon '%s' stays opaque (not faded)" % b["id"])
+	Runner.T.ok(has_player_icon, "player-row icons render at player_rows_top, below the strip")
+	h.free()
+	main.free()
+	Art.colorblind = was_cb
+
+
+# c1-15: the row-0 SUPPLIES wheel cue stays synchronized with the strip FADE, not the raw logical
+# state — so the cue never pops back in while the strip's prices are still fading out.
+func test_c1_15_supplies_cue_syncs_with_strip_fade() -> void:
+	var m := _ShopMain.new()
+	var h := HudIcons.new()
+	h.main = m
+	var sim := SimWorld.new(0, 1, "endless")
+	m.sim = sim
+	# Shop open, strip fully in: the strip is visible -> SUPPLIES suppressed.
+	sim.intermission_ticks = 90
+	h._shop_anim = 1.0
+	Runner.T.ok(h._shop_strip_visible(sim), "1P: the strip is visible while the shop window is open")
+	# Window JUST closed but the strip is still fading out: still counts as visible (suppress the cue),
+	# so the wheel cue can't briefly coexist with the fading prices.
+	sim.intermission_ticks = 0
+	h._shop_anim = 0.5
+	Runner.T.ok(h._shop_strip_visible(sim), "the strip stays visible while its prices are still fading out")
+	# Fully faded out: the wheel cue returns as the buy affordance.
+	h._shop_anim = 0.0
+	Runner.T.ok(not h._shop_strip_visible(sim), "once the strip has faded out the SUPPLIES cue returns")
+	# 2P is ineligible, so the strip is never visible regardless of the fade -> cue always available.
+	var m2 := _ShopMain.new()
+	var h2 := HudIcons.new()
+	h2.main = m2
+	var s2 := SimWorld.new(0, 2, "endless")
+	m2.sim = s2
+	s2.intermission_ticks = 90
+	h2._shop_anim = 1.0
+	Runner.T.ok(not h2._shop_strip_visible(s2), "2P: the dropped strip is never 'visible' (wheel cue stays available)")
+	m.free()
+	h.free()
+	m2.free()
+	h2.free()
+
+
+# c1-15: sweep the whole fade range and confirm the cross-fade is smooth and safe — the buy icons are
+# a continuous structural preview (dim floor when closed, brightening monotonically with _shop_anim,
+# never an unexplained empty band), the prices are invisible when closed (nothing to misread as
+# buyable) and fade in monotonically, and the strip chips never overlap in x at any fade value.
+func test_c1_15_strip_crossfade_is_smooth_and_never_overlaps() -> void:
+	var was_cb: bool = Art.colorblind
+	Art.colorblind = false
+	var prev_icon_a := -1.0
+	var prev_price_a := -1.0
+	for anim in [0.0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0]:
+		var sim := _FrameSim.new()                  # endless 1P -> eligible
+		sim.intermission_ticks = 300
+		sim.war_chest = 40
+		sim.wave = 2
+		var main := _FrameMain.new()
+		main.sim = sim
+		main._motion = 1.0
+		main._grenade_dry = [0]
+		var h := _FrameCaptureHud.new()
+		h.main = main
+		h._verb_show = 0.0
+		h._ready()
+		h._shop_sim_id = sim.get_instance_id()      # hold our fade value past the first-draw snap
+		h._shop_anim = anim
+		h._draw()
+		var tag := "anim=%.2f" % anim
+		var icon_a := -1.0
+		var price_a := 0.0
+		var band: Array = []
+		for b in h.boxes:
+			var cy: float = b["box"].position.y + b["box"].size.y * 0.5
+			if cy < HudIcons.STRIP_TOP - 1.0 or cy > HudIcons.STRIP_TOP + HudIcons.ICON + 1.0:
+				continue
+			band.append(b)
+			if b["k"] == "icon":
+				icon_a = float(b["alpha"])          # all 4 icons share one alpha
+			elif b["k"] == "text":
+				price_a = maxf(price_a, float(b["alpha"]))
+		# Icons are always present (never an empty band) and brighten monotonically from the dim floor.
+		Runner.T.ok(icon_a >= HudIcons.SHOP_ICON_DIM - 0.01, "%s: buy icons never fall below the dim floor" % tag)
+		Runner.T.ok(icon_a >= prev_icon_a - 0.01, "%s: icon alpha rises monotonically with the fade" % tag)
+		# Prices are invisible closed (not misreadable as buyable) and fade in monotonically.
+		if anim <= 0.001:
+			Runner.T.ok(price_a <= 0.01, "%s: closed strip shows no visible price (nothing to misread as buyable)" % tag)
+		Runner.T.ok(price_a >= prev_price_a - 0.01, "%s: price alpha rises monotonically with the fade" % tag)
+		prev_icon_a = icon_a
+		prev_price_a = price_a
+		# Strip chips never overlap in x (sorted left-to-right, each starts at/after the previous end).
+		band.sort_custom(func(a, b): return a["box"].position.x < b["box"].position.x)
+		for i in range(1, band.size()):
+			var prev_box: Rect2 = band[i - 1]["box"]
+			var cur: Rect2 = band[i]["box"]
+			Runner.T.ok(cur.position.x >= prev_box.end.x - 0.01,
+				"%s: strip box '%s' does not overlap the previous" % [tag, band[i]["id"]])
+		h.free()
+		main.free()
+	Art.colorblind = was_cb

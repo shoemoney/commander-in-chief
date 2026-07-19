@@ -15,6 +15,9 @@ const PX := 1.0 / Fixed.ONE
 const SCREEN_W := 640.0
 const SCREEN_H := 360.0
 const SCREEN_CENTER := Vector2(320, 180)
+# c1-15: the top-center boss/mini HP-bar dock line lives in HudIcons (HudIcons.BOSS_BAR_TOP) as the
+# ONE shared HUD-layout boundary — main imports it directly (below, in the bar renderers) so the
+# corner panel's shop-strip safe height and the bar y can never desync. No local copy here.
 # Battlefield-litter prop pool, scattered deterministically in _draw_terrain().
 # Litter biases with the run: early sectors are an intact outpost (tents/crates/
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
@@ -5897,7 +5900,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
-	var bar_y := 64.0 + float(slot) * 22.0
+	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * 22.0
 	# Same strafe/mortar half-cycle the sim uses to pick behavior in
 	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 	# colossus bar labels its phase.
@@ -6029,8 +6032,10 @@ func _draw_colossus() -> void:
 		draw_arc(cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
 	else:
 		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
-	# Bottom-center so the fill never hides under the HUD panel. Shake-immune:
-	# fixed HUD slot, cancel the node transform for the bar block.
+	# Bottom-center (y=330) so the fill never hides under the top-left HUD panel — this boss bar
+	# deliberately docks OPPOSITE the top-center gunship/mini bars (HudIcons.BOSS_BAR_TOP), so it
+	# does NOT use that boundary; the two never share the band. Shake-immune: fixed HUD slot,
+	# cancel the node transform for the bar block.
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
 	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
@@ -7875,10 +7880,11 @@ func _draw_banners(top_msg: String) -> void:
 				and not _debrief and not sim.victory:   # never overprint the result card
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			# Duck below any active boss bars (they own y64+slot*22) instead of
-			# overprinting the PHASE label; pop-in scale punch on the first ~10%
+			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
+			# the same shared boundary hud.gd sizes its corner panel against) instead
+			# of overprinting the PHASE label; pop-in scale punch on the first ~10%
 			# of life, stilled under reduce-motion.
-			var by := 70.0 + 22.0 * float(_boss_bar_slots)
+			var by := HudIcons.BOSS_BAR_TOP + 6.0 + 22.0 * float(_boss_bar_slots)
 			var bsize := 16
 			if _motion >= 0.5:
 				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
