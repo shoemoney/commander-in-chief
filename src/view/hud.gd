@@ -46,6 +46,16 @@ const COMPACT_BAR := 20.0  # c1-06 (attempt-4 judge polish): width of the tiny s
 # panel and player rows live in the top ~90px, so this low band can't collide with
 # them; a layout test pins it clear of both the top HUD and the 360px viewport.
 const VERB_LEGEND_Y := 344.0
+# c1-16: kill-streak timer ring geometry. The old ring was a 4.5px radius / 1.5px hairline —
+# near-illegible at the 640-wide design size. A 5.5px radius / 2px stroke is drawn CENTERED in a
+# 14px slot that sits after a 3px gap off the count text, so radius + stroke provably stay inside
+# the slot (2*R + W = 13 <= 14) and the reserved chip width matches what's drawn. Bounds test pins it.
+const STREAK_GAP := 3.0        # gap between the "xN" count and the ring
+const STREAK_RING_R := 5.5     # ring radius (was 4.5 — 22% larger, and paired with the thicker stroke)
+const STREAK_RING_W := 2.0     # ring stroke width (was 1.5)
+const STREAK_RING_SLOT := 14.0 # horizontal slot the centered ring lives in (advance after the gap).
+                               # 2*R + W = 13 <= slot AND == ICON, so the ring fits the glyph box
+                               # both horizontally (in its slot) and vertically (centered in ICON).
 
 var main: Node2D
 var _prev_chest := 0
@@ -561,11 +571,21 @@ static func _place_prefix(widths: Array, start_x: float, bound: float) -> int:
 	return n
 
 
+# c1-16: the two stall milestones the telegraph reads against. PRESSURE_WARN_TICKS (~0.2s of
+# stall, past incidental micro-pauses so it doesn't flicker every time you stop to shoot) is
+# when the SUBDUED pre-warning appears; PRESSURE_ARM_TICKS (0.5s, the old bare `30` literal) is
+# when it ARMS into the full-strength gauge. The mechanic now announces itself BEFORE it engages
+# instead of hard-popping at the arm point — the "sudden punishment" the players flagged.
+const PRESSURE_WARN_TICKS := 12
+const PRESSURE_ARM_TICKS := 30
+
 ## c1-06: does the mandatory campaign telegraph show, and how wide is its footprint?
 ## Returns {kind: ""|"gate"|"pressure", w}. Measured up front so optional chips reserve
 ## room for it (co-layout) instead of it clamping backward over already-placed chips.
+## c1-16: shows from PRESSURE_WARN_TICKS (subdued pre-warning) onward, not only past the arm
+## point — the reserved WIDTH is identical in both phases, so nothing reflows when it arms.
 func _telegraph_spec(sim: SimWorld) -> Dictionary:
-	if not (sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > 30):
+	if not (sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > PRESSURE_WARN_TICKS):
 		return {"kind": "", "w": 0.0}
 	# A closed gate pinning the camera means advancing is impossible until it's cleared —
 	# the "advance!" PRESSURE read would be lying, so it becomes CLEAR THE GATE.
@@ -589,6 +609,12 @@ func _emit_bg_rect(r: Rect2, col: Color) -> void:
 	draw_rect(r, col)
 
 
+# c1-16: seam for the pressure gauge's arm-point marker (same capture pattern) so the marker's
+# rect is testable headless.
+func _emit_marker(r: Rect2, col: Color) -> void:
+	draw_rect(r, col)
+
+
 ## c1-06: draw the right-anchored PRESSURE / CLEAR THE GATE telegraph starting at `tele_left`
 ## (its reserved slot from _plan_row0). Extracted from _draw so a headless _CaptureHud can
 ## record the ACTUAL backing rect + label the telegraph paints and assert it stays in its slot.
@@ -596,34 +622,81 @@ func _emit_bg_rect(r: Rect2, col: Color) -> void:
 func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float) -> float:
 	var inner_x := tele_left + 2.0
 	var compact: bool = tele.get("compact", false)
+	# c1-16: TWO PHASES, same reserved footprint so nothing reflows across the boundary. The chip
+	# appears PAST PRESSURE_WARN_TICKS (first visible tick = WARN+1) and ARMS past PRESSURE_ARM_TICKS
+	# (first armed tick = ARM+1); the exact boundaries are pinned by a draw-level test.
+	#  - PRE-WARN (WARN < stall <= ARM): a DIM gauge labelled "STALL", whose left PRE-ARM zone (up
+	#    to the arm-point marker) fills toward the arm line — the mechanic announces itself BEFORE
+	#    it engages instead of hard-popping into existence.
+	#  - ARMED (stall > ARM): the FULL-strength gauge labelled "PRESSURE", red past 70%, the fill
+	#    now advancing PAST the marker toward the forced advance.
+	# The fill is monotonic across the boundary: pre-warn fills [0, arm_frac] reaching the marker
+	# exactly as it arms (arm_frac == stall/480 at the arm tick), then armed continues from there —
+	# it never jumps backward (which would misread as "pressure decreasing"). Dimming is applied
+	# ONCE, via _mini_bar's alpha (barcol stays full).
+	var armed := sim.stall_ticks > PRESSURE_ARM_TICKS
+	var body_a := 1.0 if armed else 0.5   # steady in both phases — no strobe, reduce-motion safe
+	var arm_frac := float(PRESSURE_ARM_TICKS) / float(SimWorld.OBSERVER_STALL_TICKS)
+	# Fill: honest total progress once armed; during pre-warn, the pre-arm zone [0, arm_frac] fills
+	# with progress through the WARN..ARM window (== total progress at the arm tick, so continuous).
+	var pf: float
+	if armed:
+		pf = clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
+	else:
+		var warn_prog := clampf(float(sim.stall_ticks - PRESSURE_WARN_TICKS) \
+			/ float(PRESSURE_ARM_TICKS - PRESSURE_WARN_TICKS), 0.0, 1.0)
+		pf = arm_frac * warn_prog
+	# Armed goes red past 70%; pre-warn never reaches that (pf <= arm_frac there) so it stays amber.
+	var barcol := Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25)
 	if tele["kind"] == "gate":
-		# Compact form abbreviates the label ("GATE!") so a starved row degrades it instead
-		# of dropping this advance-blocking readout.
+		# Defensive draw-time width clamp: choose the widest gate label whose rendered right edge
+		# (inner_x + tw + 2) stays inside the usable edge, downgrading CLEAR THE GATE -> GATE! ->
+		# nothing. The planner already right-anchors the correct label, but this GUARANTEES no
+		# frame escape even if a sub-design-width viewport hands a slot narrower than "GATE!".
 		var gtxt := "GATE!" if compact else "CLEAR THE GATE"
-		_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
+		if inner_x + _tw(gtxt) + 2.0 > _fit_full + 0.01:
+			gtxt = "GATE!"
+		if inner_x + _tw(gtxt) + 2.0 > _fit_full + 0.01:
+			return inner_x   # even the compact label can't fit — draw nothing rather than overflow
+		_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
 		var gp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
-		_text(gtxt, inner_x, y + ICON - 3.0, Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp))
+		var gcol := Color(1.0, 0.6, 0.3).lerp(Color(1.0, 0.85, 0.4), 0.5 * gp)
+		gcol.a *= body_a
+		_text(gtxt, inner_x, y + ICON - 3.0, gcol)
 		# Return the BACKING RECT's true right edge (inner_x - 2 + tw + 4), not the text's, so
 		# the dynamic plate encloses the whole chip instead of underhanging its scrim by 2px.
 		return inner_x + _tw(gtxt) + 2.0
 	if compact:
-		# Compact pressure: lightning icon + a tiny stall-progress bar (drops the "PRESSURE" word
-		# and the wide 50px gauge, KEEPS the progress read + red-past-70% urgency color) — the most
-		# perishable campaign readout keeps its "how close to forced" indicator in a starved slot
-		# instead of degrading to an awkward wordless "!" and losing the progress entirely.
+		# Compact pressure: lightning icon + a tiny stall-progress bar (drops the word and the
+		# wide 50px gauge, KEEPS the progress read + urgency color) — the most perishable campaign
+		# readout keeps its "how close" indicator in a starved slot instead of an awkward wordless
+		# "!". Same pre-warn/armed dimming + continuous fill target as the full form.
 		var cw := ICON + 3.0 + COMPACT_BAR + 4.0
-		var pfc := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-		_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, cw, 12.0), Color(0.1, 0.11, 0.09, 0.85))
-		_emit_icon("hud_lightning", Rect2(inner_x, y, ICON, ICON))
-		_mini_bar(Rect2(inner_x + ICON + 3.0, y + 2, COMPACT_BAR, 9), pfc,
-			Color(1.0, 0.3, 0.2) if pfc > 0.7 else Color(1.0, 0.7, 0.25))
+		_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, cw, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
+		_emit_icon("hud_lightning", Rect2(inner_x, y, ICON, ICON), Color(1, 1, 1, body_a))
+		_mini_bar(Rect2(inner_x + ICON + 3.0, y + 2, COMPACT_BAR, 9), pf, barcol, body_a)
 		return inner_x - 2.0 + cw
+	# "STALL" (pre-warn) is narrower than "PRESSURE", so it fits inside the PRESSURE-reserved slot;
+	# the bar stays at the fixed inner_x + pw position across the phase swap (pw is PRESSURE-based).
+	var plabel := "PRESSURE" if armed else "STALL"
 	var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
-	var pf := clampf(float(sim.stall_ticks) / float(SimWorld.OBSERVER_STALL_TICKS), 0.0, 1.0)
-	_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85))
-	_stat("hud_lightning", "PRESSURE", inner_x, y, Color(1.0, 0.55, 0.3))
-	_mini_bar(Rect2(inner_x + pw, y + 2, 46, 9), pf,
-		Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25))
+	_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
+	# Inlined _stat so the icon + label share the phase alpha (the shared _stat draws its icon at
+	# full white, which would stay bright while the rest dims during the pre-warning phase).
+	_emit_icon("hud_lightning", Rect2(inner_x, y, ICON, ICON), Color(1, 1, 1, body_a))
+	_text(plabel, inner_x + ICON + 3.0, y + ICON - 3.0, Color(1.0, 0.55, 0.3, body_a))
+	var bar := Rect2(inner_x + pw, y + 2, 46, 9)
+	_mini_bar(bar, pf, barcol, body_a)
+	# Arm-point marker: a fixed bright tick where the gauge ARMS, so the pre-arm fill has a visible
+	# reference it climbs toward (and, once armed, shows the fill has crossed the arming line). It
+	# is placed on the SAME inset well the fill uses (MINI_BAR_INSET_X/Y), so the marker aligns
+	# exactly with where the fill reaches arm_frac — not the outer rect's edge. Brighter than the
+	# fill so it stays legible against it, and drawn slightly TALLER than the well so it reads as a
+	# tick, not part of the fill.
+	var wx := bar.position.x + bar.size.x * MINI_BAR_INSET_X
+	var ww := bar.size.x * (1.0 - 2.0 * MINI_BAR_INSET_X)
+	_emit_marker(Rect2(wx + ww * arm_frac, bar.position.y, 1.5, bar.size.y),
+		Color(1.0, 0.95, 0.7, 0.95 * body_a))
 	return inner_x + pw + 48.0
 
 
@@ -746,21 +819,32 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 		elif sim.kill_streak < 20:
 			snext = 20
 		var shint := (">x%d" % snext) if snext > 0 else ""
-		var streak_w := _tw(stxt) + 16.0 + ((_tw(shint) + 6.0) if shint != "" else 0.0)
+		# c1-16: reserve = text + gap-to-ring + ring slot (+ hint). Slot/radius are named
+		# so the ring's drawn extent is provably inside its reserved box (see the bounds test).
+		var streak_w := _tw(stxt) + STREAK_GAP + STREAK_RING_SLOT + ((_tw(shint) + 6.0) if shint != "" else 0.0)
 		if _fits2("streak", 50, streak_w):
 			var scol := Color(1.0, 0.82, 0.32) if sim.kill_streak < 10 else Color(1.0, 0.5, 0.2)
-			x = _text(stxt, x, y + ICON - 3.0, scol) + 3.0
+			x = _text(stxt, x, y + ICON - 3.0, scol) + STREAK_GAP
 			var sfrac := clampf(float(sim.kill_streak_timer) / float(SimWorld.KILL_STREAK_WINDOW_TICKS), 0.0, 1.0)
-			var sc := Vector2(x + 4.0, y + ICON / 2.0)
+			# c1-16: bigger, centered ring (was a near-illegible 4.5px/1.5px hairline at 640-wide).
+			# Centered in a named slot so radius+stroke stay inside the reserved width.
+			var sc := Vector2(x + STREAK_RING_SLOT / 2.0, y + ICON / 2.0)
 			if main._motion < 0.5:
 				# REDUCE MOTION: quarter-snapped instead of a per-frame drain.
 				sfrac = ceilf(sfrac * 4.0) / 4.0
+			# c1-16: expiry-timing cue — the drain arc goes urgent red in the final third
+			# of the window so "about to lose the streak" is unambiguous (the count/ring
+			# alone read "alive", not "expiring"). Steady red under reduce motion (_mblink
+			# returns true there), so it never strobes.
+			var rcol := scol
+			if sfrac <= 0.34:
+				rcol = Color(1.0, 0.3, 0.25) if _mblink(10) else scol
 			if not _measure:
 				# Dim full-circle track under the drain, so remaining time reads
 				# against a whole instead of a floating partial arc.
-				draw_arc(sc, 4.5, 0, TAU, 20, Color(scol.r, scol.g, scol.b, 0.25), 1.5)
-				draw_arc(sc, 4.5, -PI / 2, -PI / 2 + TAU * sfrac, 20, scol, 1.5)
-			x += 13.0
+				draw_arc(sc, STREAK_RING_R, 0, TAU, 24, Color(scol.r, scol.g, scol.b, 0.25), STREAK_RING_W)
+				draw_arc(sc, STREAK_RING_R, -PI / 2, -PI / 2 + TAU * sfrac, 24, rcol, STREAK_RING_W)
+			x += STREAK_RING_SLOT
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
 			# ring alone only reads "streak alive", not "how close".
 			if shint != "":
@@ -1211,12 +1295,20 @@ func _rollup(disp: float, target: float, delta: float) -> float:
 ## colored fill, ui_bar_frame on top) so the HOSTILES/PRESSURE minis share the
 ## boss/vest bars' chrome instead of floating as naked rects. Local copy —
 ## main's helper draws on main's canvas item; no ghost/ticks at this size.
-func _mini_bar(rect: Rect2, frac: float, fill: Color) -> void:
-	var inset := Vector2(rect.size.x * 0.06, rect.size.y * 0.22)
+const MINI_BAR_INSET_X := 0.06   # c1-16: well inset as a fraction of the bar rect — shared by
+const MINI_BAR_INSET_Y := 0.22   # _mini_bar's fill AND the arm-point marker so they align exactly.
+
+
+func _mini_bar(rect: Rect2, frac: float, fill: Color, alpha := 1.0) -> void:
+	# c1-16: `alpha` fades the WHOLE widget (well + fill + frame) uniformly so a
+	# fading-in telegraph doesn't pop its bar frame at full while its text eases in.
+	var inset := Vector2(rect.size.x * MINI_BAR_INSET_X, rect.size.y * MINI_BAR_INSET_Y)
 	var well := Rect2(rect.position + inset, rect.size - inset * 2.0)
-	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
-	draw_rect(Rect2(well.position, Vector2(well.size.x * clampf(frac, 0.0, 1.0), well.size.y)), fill)
-	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
+	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9 * alpha))
+	var fc := fill
+	fc.a *= alpha
+	draw_rect(Rect2(well.position, Vector2(well.size.x * clampf(frac, 0.0, 1.0), well.size.y)), fc)
+	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false, Color(1, 1, 1, alpha))
 
 
 ## c1-06: format a headline economy counter (chest / score) for the FIXED row-0 head. The

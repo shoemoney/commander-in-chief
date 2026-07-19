@@ -186,8 +186,8 @@ func test_streak_and_hint_are_one_atomic_candidate() -> void:
 		if c["id"] == "streak_hint":
 			hint_seen = true
 	Runner.T.ok(not hint_seen, "no separate streak_hint candidate exists (atomic)")
-	# Width includes both the "x5" count (tw + 16) and the ">x10" hint (tw + 6).
-	var expect: float = h._tw("x5") + 16.0 + h._tw(">x10") + 6.0
+	# Width includes both the "x5" count (tw + gap + ring slot) and the ">x10" hint (tw + 6).
+	var expect: float = h._tw("x5") + HudIcons.STREAK_GAP + HudIcons.STREAK_RING_SLOT + h._tw(">x10") + 6.0
 	Runner.T.eq(streak_w, expect, "the streak candidate width folds in its tier hint")
 	h.main.free()
 	h.free()
@@ -628,6 +628,202 @@ func test_telegraph_reserves_right_footprint() -> void:
 	h.free()
 
 
+# c1-16: the PRESSURE telegraph now announces itself BEFORE it engages — a subdued pre-warning
+# from PRESSURE_WARN_TICKS, arming at PRESSURE_ARM_TICKS — and reserves the SAME footprint in
+# both phases so nothing reflows when it arms. (WARN=12, ARM=30 -> midpoint 21 is an exact int.)
+func test_c1_16_pressure_prewarning_before_arm() -> void:
+	var h := HudIcons.new()
+	var sim := SimWorld.new(0, 1, "campaign")
+	# Below the pre-warn threshold: nothing (incidental micro-pauses don't flicker the chip).
+	sim.stall_ticks = HudIcons.PRESSURE_WARN_TICKS - 1
+	Runner.T.eq(h._telegraph_spec(sim)["kind"], "", "no telegraph below the pre-warn threshold")
+	# Between pre-warn and arm: the subdued pre-warning is already showing (genuine warning).
+	var mid: int = 21   # (12 + 30) / 2, an exact integer for the typed stall_ticks field
+	sim.stall_ticks = mid
+	var warn := h._telegraph_spec(sim)
+	Runner.T.ok(warn["kind"] == "pressure" or warn["kind"] == "gate", "pre-warning shows before the arm point")
+	# Armed: same kind, and the reserved width is IDENTICAL to the pre-warn phase (no reflow on arming).
+	sim.stall_ticks = HudIcons.PRESSURE_ARM_TICKS + 50
+	var armed := h._telegraph_spec(sim)
+	Runner.T.eq(armed["kind"], warn["kind"], "kind is unchanged across the arm boundary")
+	Runner.T.eq(float(armed["w"]), float(warn["w"]), "footprint is identical pre-warn vs armed (no reflow)")
+	h.free()
+
+
+# c1-16 draw-level: the pre-warn and armed phases differ by BRIGHTNESS + LABEL, while the fill
+# is monotonic across the exact arm boundary (never jumps backward). Also pins the arm-point
+# marker and the exact WARN/ARM tick boundaries.
+func test_c1_16_telegraph_phase_draw() -> void:
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	var sim := SimWorld.new(0, 1, "campaign")
+	var tele := {"kind": "pressure", "w": 0.0}
+	# Helper: render at a given stall tick and return the captured boxes.
+	# Exact boundary just below/at/above the arm point.
+	sim.stall_ticks = HudIcons.PRESSURE_ARM_TICKS        # 30 — still pre-warn (armed is stall > ARM)
+	h.boxes = []
+	h._draw_telegraph(sim, tele, 400.0, 6.0)
+	var warn_icon_a := _first_alpha(h.boxes, "icon", "hud_lightning")
+	var warn_label := _has_text(h.boxes, "STALL")
+	var warn_bar := _first_bar(h.boxes)
+	var warn_marker := _has_kind(h.boxes, "marker")
+	sim.stall_ticks = HudIcons.PRESSURE_ARM_TICKS + 1    # 31 — first armed tick
+	h.boxes = []
+	h._draw_telegraph(sim, tele, 400.0, 6.0)
+	var armed_icon_a := _first_alpha(h.boxes, "icon", "hud_lightning")
+	var armed_label := _has_text(h.boxes, "PRESSURE")
+	var armed_bar := _first_bar(h.boxes)
+	var armed_marker := _has_kind(h.boxes, "marker")
+	Runner.T.ok(warn_label, "pre-warn labels the chip STALL")
+	Runner.T.ok(armed_label, "the first armed tick labels the chip PRESSURE")
+	Runner.T.ok(warn_icon_a < armed_icon_a - 0.01, "pre-warn draws dimmer than armed")
+	Runner.T.ok(is_equal_approx(warn_icon_a, 0.5), "pre-warn icon alpha is the single 0.5 dim")
+	Runner.T.ok(is_equal_approx(armed_icon_a, 1.0), "armed icon alpha is full")
+	# Continuous, monotonic fill across the arm tick — no backward reset (would read as decreasing).
+	Runner.T.ok(float(armed_bar["frac"]) >= float(warn_bar["frac"]) - 0.001,
+		"the bar fill never jumps backward from pre-warn to armed")
+	# Dimming is applied ONCE (via the bar alpha), so the pre-warn fill isn't double-dimmed to ~0.25.
+	Runner.T.ok(is_equal_approx(float(warn_bar["alpha"]), 0.5), "pre-warn bar alpha is a single 0.5 dim")
+	Runner.T.ok(is_equal_approx(float(armed_bar["alpha"]), 1.0), "armed bar alpha is full")
+	# Arm-point marker drawn in both phases, inside the gauge bar's horizontal extent.
+	Runner.T.ok(warn_marker and armed_marker, "the arm-point marker is drawn in both phases")
+	var mk := _first_kind(h.boxes, "marker")
+	Runner.T.ok(mk["box"].position.x >= warn_bar["box"].position.x - 0.01
+		and mk["box"].end.x <= warn_bar["box"].end.x + 0.01, "the marker sits inside the gauge bar")
+	h.main.free()
+	h.free()
+
+
+# c1-16: exact appearance boundary — the chip is hidden at PRESSURE_WARN_TICKS and first appears
+# one tick later (documented "past WARN" contract).
+func test_c1_16_warn_boundary_exact() -> void:
+	var h := HudIcons.new()
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.stall_ticks = HudIcons.PRESSURE_WARN_TICKS       # 12 — hidden
+	Runner.T.eq(h._telegraph_spec(sim)["kind"], "", "hidden AT the warn tick (contract is > WARN)")
+	sim.stall_ticks = HudIcons.PRESSURE_WARN_TICKS + 1   # 13 — first visible
+	Runner.T.ok(h._telegraph_spec(sim)["kind"] != "", "visible one tick past the warn threshold")
+	h.free()
+
+
+# c1-16 reduced-motion: the streak-expiry urgency cue is STEADY red (never strobes) when the
+# window is nearly out and motion is reduced — _mblink returns true under reduced motion.
+func test_c1_16_reduced_motion_streak_urgency_steady() -> void:
+	var h := HudIcons.new()
+	h.main = _RowMain.new()
+	h.main._motion = 0.0   # reduced motion
+	# _mblink must hold steady (true every call) rather than toggling with the blink clock.
+	Runner.T.ok(h._mblink(10), "reduced motion holds the urgency cue steady-on (no strobe)")
+	Runner.T.ok(h._mblink(10), "still steady on a second sample (deterministically non-blinking)")
+	h.main.free()
+	h.free()
+
+
+# c1-16: the enlarged streak-timer ring must stay inside its reserved slot horizontally AND
+# inside the ICON glyph box vertically (centered), so it never pokes into adjacent rows/chips.
+func test_c1_16_streak_ring_within_slot() -> void:
+	# Diameter + full stroke width fits the horizontal slot.
+	Runner.T.ok(2.0 * HudIcons.STREAK_RING_R + HudIcons.STREAK_RING_W <= HudIcons.STREAK_RING_SLOT + 0.01,
+		"ring diameter + stroke fits inside the reserved slot")
+	var outer := HudIcons.STREAK_RING_R + HudIcons.STREAK_RING_W / 2.0
+	# Horizontal: centered at slot/2, the outer stroke edge stays within [0, slot].
+	var hc := HudIcons.STREAK_RING_SLOT / 2.0
+	Runner.T.ok(hc - outer >= -0.01, "ring's left stroke edge stays within the slot")
+	Runner.T.ok(hc + outer <= HudIcons.STREAK_RING_SLOT + 0.01, "ring's right stroke edge stays within the slot")
+	# Vertical: centered at ICON/2 within the ICON glyph box [0, ICON].
+	var vc := HudIcons.ICON / 2.0
+	Runner.T.ok(vc - outer >= -0.01, "ring's top stroke edge stays within the ICON box")
+	Runner.T.ok(vc + outer <= HudIcons.ICON + 0.01, "ring's bottom stroke edge stays within the ICON box")
+
+
+# c1-16 / c1-06: the CLEAR THE GATE label is width-constrained against the real frame — on a
+# narrow row the planner compacts it to "GATE!" and the rendered label stays within the edge,
+# rather than the fixed ~115px label overflowing.
+func test_c1_16_gate_label_within_frame() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.stall_ticks = 100
+	sim.camera_top = 0
+	sim.gates.clear()
+	sim.gates.append({"open": false, "y": 0})   # a closed gate pinning the camera -> CLEAR THE GATE
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h._fit_full = HudIcons.RIGHT
+	Runner.T.eq(h._telegraph_spec(sim)["kind"], "gate", "a closed gate ahead shows CLEAR THE GATE")
+	# opt_start wide enough that the FULL label overflows -> the planner must compact it to GATE!.
+	var plan: Dictionary = h._plan_row0(sim, 540.0, 6.0, false)
+	Runner.T.eq(plan["tele"]["kind"], "gate", "the gate telegraph is preserved, not dropped")
+	Runner.T.ok(plan["tele"].get("compact", false), "the gate label compacts on a narrow frame")
+	h._measure = false
+	h._opt_keep = plan["keep"]
+	h._ovf = int(plan["hidden"])
+	h.boxes = []
+	var right_edge: float = h._draw_telegraph(sim, plan["tele"], plan["tele_left"], 6.0)
+	Runner.T.ok(right_edge <= HudIcons.RIGHT + 0.01, "the compacted gate label's right edge is within the frame")
+	Runner.T.ok(_has_text(h.boxes, "GATE!"), "the rendered gate label is the compact GATE!")
+	for b in h.boxes:
+		Runner.T.ok(b["box"].end.x <= HudIcons.RIGHT + 0.01, "gate telegraph '%s' within the frame" % b["id"])
+	h.main.free()
+	h.free()
+
+
+func _first_alpha(boxes: Array, kind: String, id: String) -> float:
+	for b in boxes:
+		if b["k"] == kind and b["id"] == id:
+			return float(b["alpha"])
+	return -1.0
+
+func _has_text(boxes: Array, id: String) -> bool:
+	for b in boxes:
+		if b["k"] == "text" and b["id"] == id:
+			return true
+	return false
+
+func _has_kind(boxes: Array, kind: String) -> bool:
+	for b in boxes:
+		if b["k"] == kind:
+			return true
+	return false
+
+func _first_kind(boxes: Array, kind: String) -> Dictionary:
+	for b in boxes:
+		if b["k"] == kind:
+			return b
+	return {"box": Rect2()}
+
+func _first_bar(boxes: Array) -> Dictionary:
+	for b in boxes:
+		if b["k"] == "bar":
+			return b
+	return {"box": Rect2(), "frac": -1.0, "alpha": -1.0}
+
+
+# c1-16: the gate telegraph's draw-time width clamp GUARANTEES no frame escape even below the
+# compact "GATE!" width — a sub-design-width viewport where even GATE! overflows draws nothing
+# rather than spilling past the usable edge.
+func test_c1_16_gate_clamp_below_compact_width() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.stall_ticks = 100
+	sim.camera_top = 0
+	sim.gates.clear()
+	sim.gates.append({"open": false, "y": 0})
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	var edge := 200.0
+	h._fit_full = edge
+	# Hand the gate telegraph a tele_left whose inner_x leaves LESS room than even "GATE!" needs.
+	var gate_w: float = h._tw("GATE!") + 4.0
+	var tele := {"kind": "gate", "w": gate_w, "compact": true}
+	h.boxes = []
+	# tele_left placed so inner_x is ~1px short of even the compact label fitting to the edge.
+	var tele_left := edge - gate_w + 3.0
+	var right_edge: float = h._draw_telegraph(sim, tele, tele_left, 6.0)
+	Runner.T.ok(right_edge <= edge + 0.01, "clamped gate telegraph never returns past the usable edge")
+	for b in h.boxes:
+		Runner.T.ok(b["box"].end.x <= edge + 0.01, "no gate telegraph box '%s' escapes the frame" % b["id"])
+	h.main.free()
+	h.free()
+
+
 # c1-06 end-to-end row-0 layout harness: configure a live HudIcons + SimWorld, set the
 # frame's usable edge, run the REAL planner (_plan_row0 — the exact path _draw uses), then
 # assert the fully-planned footprints (kept chips, the right-anchored telegraph, the +N chip)
@@ -870,13 +1066,14 @@ func test_buff_chips_real_render_p1_p2_bounds_and_overlap() -> void:
 
 
 # Assert a captured set of rendered boxes all sit within the usable edge and — ignoring the
-# dark backing scrims (bg), which intentionally underlay their own label — never overlap.
+# dark backing scrims (bg) and the arm-point marker (both intentionally overlay their own
+# gauge/label) — never overlap.
 func _assert_render_bounds_nonoverlap(boxes: Array, fit_full: float, tag: String) -> void:
 	var fg: Array = []
 	for b in boxes:
 		Runner.T.ok(b["box"].position.x >= -0.01, "%s '%s' on-screen (left edge)" % [tag, b["id"]])
 		Runner.T.ok(b["box"].end.x <= fit_full + 0.01, "%s '%s' within the usable edge" % [tag, b["id"]])
-		if b["k"] != "bg":
+		if b["k"] != "bg" and b["k"] != "marker":
 			fg.append(b)
 	fg.sort_custom(func(a, c): return a["box"].position.x < c["box"].position.x)
 	var prev := -1.0
@@ -1173,10 +1370,12 @@ class _ChipCaptureHud extends HudIcons:
 		boxes.append({"k": "ovf", "id": txt, "box": Rect2(ox, y + 1.0, w, 12.0)})
 	func _emit_bg_rect(r: Rect2, _c: Color) -> void:
 		boxes.append({"k": "bg", "id": "bg", "box": r})
+	func _emit_marker(r: Rect2, _c: Color) -> void:
+		boxes.append({"k": "marker", "id": "arm", "box": r})
 	# The PRESSURE telegraph's mini-bar draws directly (draw_rect/draw_texture_rect); record
 	# it so the real _draw_telegraph runs headless without a live draw context.
-	func _mini_bar(rect: Rect2, _frac: float, _fill: Color) -> void:
-		boxes.append({"k": "bar", "id": "mini", "box": rect})
+	func _mini_bar(rect: Rect2, _frac: float, _fill: Color, _alpha := 1.0) -> void:
+		boxes.append({"k": "bar", "id": "mini", "box": rect, "frac": _frac, "alpha": _alpha})
 
 
 # A HudIcons whose draw SEAMS record instead of paint — so calling the REAL
