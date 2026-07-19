@@ -30,6 +30,8 @@ var _vo := AudioStreamPlayer.new()      # Radio Commander / Spotter (VO bus, rad
 var _vo_dry := AudioStreamPlayer.new()  # the pilot's dry close-mic plea
 var _vo_streams: Dictionary = {}
 var _vo_priority := -1                  # priority of the line currently on air
+var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
+var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
 var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
@@ -100,6 +102,8 @@ func _ready() -> void:
 		var res := load("res://assets/vo/%s.mp3" % k)
 		if res != null:
 			_vo_streams[k] = res
+	_load_death_yells()
+	_load_spawn_shouts()
 
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
@@ -212,6 +216,61 @@ func duck_sfx_under_vo(active: bool) -> void:
 
 func vo_active() -> bool:
 	return _vo.playing or _vo_dry.playing
+
+
+func _load_mp3_bank(dir_path: String, into: Array) -> void:
+	into.clear()
+	for fname in ResourceLoader.list_directory(dir_path):
+		if not fname.ends_with(".mp3"):
+			continue
+		var res = load("%s/%s" % [dir_path, fname])
+		if res != null:
+			into.append(res)
+
+
+func _load_death_yells() -> void:
+	## Infantry death agony bank — male Arabic "Ya Zahra"/"Ya Hossein" takes
+	## (speech synthesis via model gateway). Loaded as MP3 streams; play_death_yell picks one.
+	_load_mp3_bank("res://assets/audio/enemy_death", _death_yells)
+
+
+func _load_spawn_shouts() -> void:
+	## Infantry first-sight taunts — "Marg bar Amrika/Esrail" + "Allahu Akbar".
+	_load_mp3_bank("res://assets/audio/enemy_spawn", _spawn_shouts)
+
+
+func _play_bank_at(bank: Array, screen_pos: Vector2, vol_db: float) -> void:
+	## Steal a 2D pool voice and fire a random clip from `bank` at screen_pos.
+	if bank.is_empty() or _pool.is_empty():
+		return
+	var p: AudioStreamPlayer2D = _pool[0]
+	var best_done := -1.0
+	for c in _pool:
+		if not c.playing:
+			p = c
+			break
+		var slen := 0.05
+		if c.stream != null:
+			slen = maxf(0.05, c.stream.get_length())
+		var done := c.get_playback_position() / slen
+		if done > best_done:
+			best_done = done
+			p = c
+	p.position = screen_pos
+	p.volume_db = vol_db
+	p.pitch_scale = randf_range(0.93, 1.07)
+	p.stream = bank[randi() % bank.size()]
+	p.play()
+
+
+func play_death_yell(screen_pos: Vector2, vol_db := -5.0) -> void:
+	## Positional agony yell on an infantry kill.
+	_play_bank_at(_death_yells, screen_pos, vol_db)
+
+
+func play_spawn_shout(screen_pos: Vector2, vol_db := -8.0) -> void:
+	## Positional battle cry when an infantry first enters the viewport.
+	_play_bank_at(_spawn_shouts, screen_pos, vol_db)
 
 
 func _rr_shot(sound: String) -> String:

@@ -143,6 +143,8 @@ var _enemy_pos_prev := {}        # per-slot prev sim pos — gates the run-bob t
 var _enemy_slot_kind := {}       # per-slot kind stamp — the sim compacts with remove_at, so a
                                  # slot can be inherited by a different enemy; a kind mismatch
                                  # drops the stale face/prev-pos instead of lerping out of them
+var _spawn_yelled := {}          # per-slot kind stamp of last spawn shout ("" = not yet)
+var _spawn_yell_cd := 0          # ticks before another first-sight shout can fire
 var _esort_order: Array[int] = []   # reused y-sort buffers (zero per-frame alloc)
 var _esort_ys: Array[int] = []
 var _screen_fx_mat: ShaderMaterial   # full-screen concussion warp (view-only)
@@ -935,6 +937,8 @@ func _reset() -> void:
 	_enemy_slot_kind.clear()
 	_enemy_hp_prev.clear()
 	_enemy_flash.clear()
+	_spawn_yelled.clear()
+	_spawn_yell_cd = 0
 	_tech_lunge_prev.clear()
 	_litter_cam_snap = 1 << 60
 	_litter_march_prev = 0.0
@@ -1340,6 +1344,7 @@ func _physics_process(_delta: float) -> void:
 		_check_smoke_edges()
 		_check_boss_intro()
 		_track_bests()
+		_tick_spawn_yells()
 	_update_feel()
 	queue_redraw()
 	_update_hud()
@@ -2285,6 +2290,10 @@ func _ev_kill(ev: Dictionary) -> void:
 		_kill_streak = 1
 	_last_kill_frame = Engine.get_physics_frames()
 	_sfx.play("kill", -7.0, 1.0 + minf(0.9, _kill_streak * 0.06))
+	# Infantry agony yell (Ya Zahra / Ya Hossein bank) — flesh only. Machines
+	# already boom via their own branch; pilots skip the reward path entirely.
+	if not _METAL_KINDS.has(kkind) and kkind != "colossus" and kkind != "broadcast":
+		_sfx.play_death_yell(_to_screen(ev["x"], ev["y"]), -6.0)
 	if big:
 		_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
 		_rumble = maxf(_rumble, 0.35)
@@ -2311,6 +2320,45 @@ func _ev_kill(ev: Dictionary) -> void:
 	# A downed gunship is a finale, not a kill blip — ripple it apart.
 	if kkind == "boss":
 		_boss_death_finale(ev["x"], ev["y"])
+
+
+func _tick_spawn_yells() -> void:
+	## First time an infantry unit enters the viewport this life, chance a
+	## battle-cry (Marg bar Amrika / Esrail / Allahu Akbar). View-only — no sim
+	## event, nothing in the checksum. Cooldown + chance keep a rusher wave from
+	## becoming a wall of overlapping shouts.
+	if _spawn_yell_cd > 0:
+		_spawn_yell_cd -= 1
+	var ecount := sim.enemies.size()
+	for sk in _spawn_yelled.keys():
+		if sk >= ecount:
+			_spawn_yelled.erase(sk)
+	for eidx in ecount:
+		var e: Dictionary = sim.enemies[eidx]
+		if not e["alive"]:
+			_spawn_yelled.erase(eidx)
+			continue
+		var skind: String = e.get("kind", "rusher")
+		# Machines/vehicles don't chant; wait for submerged ambushers to surface.
+		if _METAL_KINDS.has(skind) or skind == "colossus" or skind == "pilot":
+			continue
+		if e.get("submerged", false):
+			continue
+		# Slot inherited by a new kind after remove_at compaction → fresh shout chance.
+		if _spawn_yelled.get(eidx, "") == skind:
+			continue
+		var sp := _to_screen(e["x"], e["y"])
+		# Off the playfield → not "appeared" yet (top-edge spawn cradles are above -24).
+		if sp.y < -20.0 or sp.y > 375.0 or sp.x < -40.0 or sp.x > 680.0:
+			continue
+		# Mark as seen for this occupant even if we skip the audio (cooldown choke).
+		_spawn_yelled[eidx] = skind
+		if _spawn_yell_cd > 0:
+			continue
+		if randf() > 0.55:
+			continue
+		_sfx.play_spawn_shout(sp, -8.0)
+		_spawn_yell_cd = 22   # ~0.37s at 60 Hz — one shout per dense cluster beat
 
 
 func _ev_bunker_break(ev: Dictionary) -> void:
