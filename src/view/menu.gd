@@ -973,41 +973,52 @@ func _draw_hall() -> void:
 
 func _draw_howto() -> void:
 	_center_text("HOW TO PLAY", 34, 22, Color(1.0, 0.85, 0.3))
+	# The whole screen runs off ONE downward y cursor instead of ~20 hand-tuned
+	# baselines, so editing a row can't silently overlap its neighbour. The one
+	# hard constraint — the ranged-threat block must clear the BACK plate — is
+	# DERIVED from _back_rect() below (pitch + box size fall out of it) rather
+	# than pinned to a magic number, so it survives roster edits.
+	var y := 60.0
 	var hold_pre := "pays to REVIVE you or BUY supplies (hold"
-	var lines := [
+	var intro := [
 		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
 		[hold_pre, Color(0.85, 0.9, 0.8)],
 	]
-	for i in lines.size():
-		Art.text(self, lines[i][0], Vector2(60, 70 + i * 18), 11, lines[i][1])
-	# Verb lines carry the actual input glyph inline (device-aware), like the
-	# wheel line below — text-only verbs made players hunt the legend.
-	# Re-wrapped for the wider pixel font: >64 chars clips at x=640.
-	_verb_line(["@grenade", "GRENADES crack armor — bunkers, bosses, the Colossus."],
-		124.0, Color(0.9, 0.92, 0.8))
-	_verb_line(["Bullets don't. ", "@roll", "ROLL to dodge. ", "@interact",
-		"BOARD tanks for crush + shells."], 142.0, Color(0.9, 0.92, 0.8))
-	_verb_line(["@interact", "with no tank near PLANTS a carried claymore — it hurts BOTH sides."],
-		158.0, Color(0.9, 0.92, 0.8))
-	# The supply-wheel hold prompt is the DEVICE GLYPH, not a key-name string.
+	for row in intro:
+		Art.text(self, row[0], Vector2(60, y), 11, row[1])
+		y += 15.0
+	# The supply-wheel hold prompt is the DEVICE GLYPH, not a key-name string —
+	# it sits at the end of the second intro line (baseline y - 15).
+	var wy := y - 15.0
 	var px := 60.0 + Art.font().get_string_size(hold_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 9.0
-	Art.draw_glyph(self, "wheel", Vector2(px, 84.0), 12.0)
-	Art.text(self, "). That's the choice.", Vector2(px + 8.0, 88.0), 11, Color(0.85, 0.9, 0.8))
+	Art.draw_glyph(self, "wheel", Vector2(px, wy - 4.0), 12.0)
+	Art.text(self, "). That's the choice.", Vector2(px + 8.0, wy), 11, Color(0.85, 0.9, 0.8))
+	y += 10.0
+	# Verb lines carry the actual input glyph inline (device-aware) — text-only
+	# verbs made players hunt the legend. Re-wrapped for the wider pixel font:
+	# >64 chars clips at x=640.
+	_verb_line(["@grenade", "GRENADES crack armor — bunkers, bosses, the Colossus."],
+		y, Color(0.9, 0.92, 0.8))
+	y += 15.0
+	_verb_line(["Bullets don't. ", "@roll", "ROLL to dodge. ", "@interact",
+		"BOARD tanks for crush + shells."], y, Color(0.9, 0.92, 0.8))
+	y += 15.0
+	_verb_line(["@interact", "with no tank near PLANTS a carried claymore — it hurts BOTH sides."],
+		y, Color(0.9, 0.92, 0.8))
+	y += 16.0
 	# The enemy roster with live sprites.
 	# sol-08: front the LIVE red-team sprites the player now sees (rusher/elite draw the pack enemy_* cel bakes).
 	var roster := [["enemy_smg", "RUSHER — charges, touch kills"],
 		["enemy_assault", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — lurks in water, grenades only"]]
-	for i in roster.size():
-		# 24px pitch (was 26): buys the ENDLESS header its clearance below —
-		# last box bottom lands at 232, exactly the header's glyph top at y240.
-		var yy := 174.0 + i * 24.0
-		draw_texture_rect(Art.tex(roster[i][0]), Rect2(80, yy - 10, 20, 20), false, Art.tint(roster[i][0]))
-		Art.text(self, roster[i][1], Vector2(108, yy + 3), 10, Color(0.9, 0.92, 0.82))
+	for r in roster:
+		_draw_sprite_fit(r[0], Rect2(80, y - 15, 20, 18), Art.tint(r[0]))
+		Art.text(self, r[1], Vector2(108, y), 10, Color(0.9, 0.92, 0.82), 612.0 - 108.0)
+		y += 18.0
+	y += 4.0
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
-	# 240 (was 244) + first special baseline 252: 12px header-to-row gap — at
-	# 244 the header's descenders sat in GRENADIER's ascender row.
-	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, 240), 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
+	y += 13.0
 	# Each line fronts its LIVE sprite in its in-game tint (panel round: the top
 	# roster teaches silhouettes, this block taught only names — a first-run
 	# player couldn't match "GHILLIE" to the shape that kills them). Keyed
@@ -1021,19 +1032,73 @@ func _draw_howto() -> void:
 		["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],
 		["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
 		["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
+	# Threat rows are the tight spot, so their pitch is DERIVED, not typed: fit
+	# every row's text baseline between here (`y`) and the last baseline the BACK
+	# plate allows (its grow(3) top, less the box's +3 overhang and a 1px margin).
+	# Pitch is the fit value capped at 18 and NEVER clamped upward, so the last
+	# baseline lands at-or-below the limit for ANY roster size — a grown roster
+	# just tightens the pitch, it can never push a row into BACK. floorf keeps it
+	# on whole pixels (a fractional pitch smears pixel-art rows). The box is sized
+	# `pitch - 1`, so consecutive boxes always keep a >=1px gap — the collision
+	# the old fixed 26px box at 10px pitch baked in cannot recur. Sprites draw
+	# cropped to their opaque bounds (see _draw_sprite_fit), so even a tight box
+	# shows a full body instead of the old ~7px speck the padded bakes gave.
+	var last_max := _back_rect().position.y - 7.0
+	var readable := 13.0   # 10px text needs ~3px leading to stay legible
+	var pitch := 18.0
+	if special.size() > 1:
+		pitch = floorf(minf(18.0, (last_max - y) / float(special.size() - 1)))
+	# Two invariants, checked for BOTH the seven authored rows and any grown
+	# roster: the block never collides with BACK (pure fit, no upward clamp), and
+	# it never teaches below a legible pitch. If a future roster overflows, the
+	# readable assert trips in debug — the signal to paginate rather than to
+	# silently shrink rows to specks. Release strips asserts; the pure-fit pitch
+	# still can't collide, it just tightens.
+	assert(y + float(special.size() - 1) * pitch <= last_max)
+	assert(pitch >= readable)
+	var box: float = maxf(1.0, pitch - 1.0)
+	# Descriptions are width-clamped to the frame interior so a long tip clips
+	# with an ellipsis instead of bleeding through the chrome at x=640.
+	var text_w := 612.0 - 76.0
 	for i in special.size():
-		# SEVEN rows must fit between the header (baseline 244) and the BACK
-		# plate: 252 start + 10px pitch puts baselines at 252..312 — 8px under
-		# the header and clear of BACK (moved to y=320 for exactly this). The
-		# two merged batches' layouts (12px pitch/6 rows vs 11px pitch/7 rows)
-		# composed into header-overlap at 250 AND a 316 baseline inside BACK.
-		var sy := 252.0 + i * 10.0
-		# 26px box: the bakes carry wide transparent margins (~70% padding), so
-		# the visible body is ~8px and neighboring boxes never actually touch —
-		# smaller boxes rendered as unreadable specks. x=50 keeps the box off
-		# the ui_frame chrome (46 sat on the border art).
-		draw_texture_rect(Art.tex(special[i][0]), Rect2(50, sy - 17, 26, 26), false, special[i][1])
-		Art.text(self, special[i][2], Vector2(76, sy), 10, Color(0.88, 0.9, 0.8))
+		var sy := y + i * pitch
+		_draw_sprite_fit(special[i][0], Rect2(50, sy - box + 3.0, box, box), special[i][1])
+		Art.text(self, special[i][2], Vector2(76, sy), 10, Color(0.88, 0.9, 0.8), text_w)
+
+
+# The bakes carry huge transparent margins (a 64px sprite whose body is ~18px),
+# so draw_texture_rect stretches mostly-empty texture into a box and the visible
+# body collapses to a speck. Cache each sprite's opaque bounds once and draw
+# ONLY that region, aspect-preserved and centered — a small box then shows a
+# full body. Cache is keyed by sprite name (bakes are immutable at runtime).
+static var _trim_cache := {}
+
+
+func _visible_region(key: String) -> Rect2:
+	if not _trim_cache.has(key):
+		var t := Art.tex(key)
+		var img := t.get_image() if t != null else null
+		var full := Rect2(Vector2.ZERO, t.get_size()) if t != null else Rect2()
+		if img != null:
+			var used := img.get_used_rect()
+			_trim_cache[key] = Rect2(used) if used.size.x > 0 and used.size.y > 0 else full
+		else:
+			_trim_cache[key] = full
+	return _trim_cache[key]
+
+
+# Draw a sprite's opaque region cropped and centered inside `box`, aspect kept.
+func _draw_sprite_fit(key: String, box: Rect2, mod: Color) -> void:
+	var t := Art.tex(key)
+	if t == null:
+		return
+	var reg := _visible_region(key)
+	var s := minf(box.size.x / reg.size.x, box.size.y / reg.size.y)
+	# Snap size and position to whole pixels — fractional dst rects blur pixel art.
+	var dst := (Vector2(reg.size.x, reg.size.y) * s).round()
+	var pos := (box.position + (box.size - dst) / 2.0).round()
+	draw_texture_rect_region(t, Rect2(pos, dst), reg, mod)
+
 
 static func _best_line(score: int, wave: int, dist: int) -> String:
 	# a2-04 HUD#8: the title BEST line drops zero fields so it never advertises
