@@ -41,6 +41,12 @@ var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover 
 # Row ids that flip on left/right without a confirm press.
 const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist"]
 
+# c1-04: y (top) of the SELECT/BACK input-legend footer strip drawn on EVERY
+# non-TITLE screen (PAUSE / OPTS / SETUP / HALL / HOWTO). One shared position so
+# _footer_legend, _row_geometry's drop-in cap, and the layout test all agree the
+# selected-row glow can never reach into it.
+const FOOTER_Y := 341.0
+
 
 func _ready() -> void:
 	# Pad yanked mid-run = pause. The sim only steps while no menu is visible,
@@ -619,9 +625,11 @@ func _row_geometry() -> Dictionary:
 	var head := title_head_bottom(main.best_score > 0, main._life_runs > 0)
 	var g := compute_geometry(mode, _items().size(), head)
 	# Drop-in offset lives HERE (after the pure gap math it must not perturb) so a
-	# click during the settle hits the same rows _draw renders. Only TITLE draws
-	# the y322 legend; elsewhere the last plate may ride to the 360 canvas floor.
-	var floor_y := 321.0 if mode == Mode.TITLE else 358.0
+	# click during the settle hits the same rows _draw renders. TITLE clears its
+	# y322 legend; every other screen now carries the FOOTER_Y nav legend, so cap
+	# the drop 5px above it — the selected-row glow (grow ~4.5) stays clear of the
+	# footer even at the low point of the open animation, not just at rest.
+	var floor_y := 321.0 if mode == Mode.TITLE else FOOTER_Y - 5.0
 	g["top"] = float(g["top"]) + settle_offset(g, _open_t, main._motion, floor_y)
 	return g
 
@@ -638,6 +646,13 @@ static func hit_row(g: Dictionary, y: float) -> int:
 	return -1
 
 
+# c1-04: lowest pixel a selected row's breathing glow can touch — its last-row
+# rect bottom plus the max grow (3.0 + Art.pulse*1.5, pulse<=1). Pure so the
+# layout test can prove it never reaches FOOTER_Y on the fullest PAUSE/OPTS list.
+static func max_glow_bottom(g: Dictionary) -> float:
+	return float(g["top"]) + float(int(g["n"]) - 1) * float(g["gap"]) + float(g["bh"]) + 4.5
+
+
 func _row_at(p: Vector2) -> int:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return 0 if _back_rect().has_point(p) else -1
@@ -650,10 +665,11 @@ func _row_at(p: Vector2) -> int:
 ## _draw_back_button both read it, so a tweak to one can't drift the click target
 ## off the pixels (same discipline as _row_geometry / panel_bottom()).
 func _back_rect() -> Rect2:
-	# 320 (was 316): buys the HOWTO threat list its 7th row — the selected
-	# plate's grow(3) top sits at 317, clear of the last baseline at 312.
-	# Bottom lands at 345, inside the 360 canvas. Draw + hit-test share this.
-	return Rect2(Vector2(320 - BTN.x / 2.0, 320), BTN * Vector2(1, 0.7))
+	# 310 (was 320): pulled up so a real SELECT/BACK footer legend fits BELOW the
+	# button (its glow bottom ~338, footer glyphs ~343). The HOWTO threat list's
+	# pitch is DERIVED from this y (see _draw_howto), so it just tightens to ~14px
+	# — still above its readable floor. Bottom lands at 335. Draw + hit-test share.
+	return Rect2(Vector2(320 - BTN.x / 2.0, 310), BTN * Vector2(1, 0.7))
 
 
 func _step_vol(bus: String, delta: int) -> void:
@@ -800,6 +816,7 @@ func _draw() -> void:
 		else:
 			_draw_howto()
 		_draw_back_button()
+		_footer_legend()
 		return
 	if mode == Mode.TITLE:
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
@@ -1048,6 +1065,10 @@ func _draw() -> void:
 			{"tex": Art.glyph_key("confirm"), "label": "SELECT"}]
 		_legend_row(row1, 330.0, 1.0)
 		_legend_row(row2, 346.0, 0.9)
+	else:
+		# c1-04: PAUSE/OPTS/SETUP get the same SELECT/BACK footer (HALL/HOWTO are
+		# handled in the content-well branch, which returns before this point).
+		_footer_legend()
 
 
 func _draw_back_button() -> void:
@@ -1377,7 +1398,8 @@ const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)
 
 # Legend glyph width for a segment: "tex" = registry sprite, "stamp" = letters
 # on the wide keycap, "act" = Art.draw_glyph's square prompt, none = text-only.
-func _glyph_w(seg: Dictionary) -> float:
+# Static so the layout test can measure the ACTUAL device-dependent glyph widths.
+static func _glyph_w(seg: Dictionary) -> float:
 	if seg.has("act"):
 		return _LEG_H
 	var key: String = seg.get("tex", "glyph_key_wide" if seg.has("stamp") else "")
@@ -1387,30 +1409,127 @@ func _glyph_w(seg: Dictionary) -> float:
 	return _LEG_H * float(t.get_width()) / float(t.get_height())
 
 
-# One centered legend line of [glyph + verb] segments; y is the glyph center.
-func _legend_row(segs: Array, y: float, a: float) -> void:
+# c1-04: pure geometry of a centered legend row — [left_x, total_width]. The SAME
+# measure _legend_row's draw loop uses (single source), so a headless test can pin
+# the ACTUAL on-screen footer/verb bounds — which depend on the last-used device,
+# since pad button glyphs and keyboard keycaps differ in width — instead of a
+# re-derived approximation.
+static func legend_extent(segs: Array) -> Array:
 	var f := Art.font()
 	var total := -14.0   # segments separated by 14px; first one has no gap
 	for seg in segs:
 		var gw := _glyph_w(seg)
 		total += gw + (3.0 if gw > 0.0 else 0.0) \
 			+ f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 14.0
-	var x := 320.0 - total / 2.0
+	return [320.0 - total / 2.0, total]
+
+
+# c1-04: the EXACT drawn boxes of a legend row — one entry per segment carrying its
+# glyph rect (empty for text-only), its label text rect, and the source seg. This
+# is the single list _legend_row iterates to draw, so it IS the actual render result
+# (glyph AND rendered label/font footprints), not a re-derivation — a headless test
+# reads these boxes to prove nothing clips 640x360 or overlaps, in either device
+# mode. `y` is the glyph center; label baseline sits at y+3 (8px font, ~8px ascent).
+static func legend_primitives(segs: Array, y: float) -> Array:
+	var f := Art.font()
+	var ext := legend_extent(segs)
+	var x: float = ext[0]
+	var out: Array = []
 	for seg in segs:
 		var gw := _glyph_w(seg)
+		var grect := Rect2()
 		if gw > 0.0:
+			grect = Rect2(x, y - _LEG_H / 2.0, gw, _LEG_H)
+			x += gw + 3.0
+		var lsz := f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
+		# Real font metrics (measured width + ascent/height), not a hard-coded 8/9px
+		# box: Art.text places the baseline at y+3, so the ink spans up by the ascent.
+		var lrect := Rect2(x, y + 3.0 - f.get_ascent(8), lsz.x, lsz.y)
+		out.append({"seg": seg, "glyph": grect, "label": lrect})
+		x += lsz.x + 14.0
+	return out
+
+
+# c1-04: draw seams — every native draw the footer/legend emits routes through one of
+# these one-line indirections, so a headless test subclass can OVERRIDE them to CAPTURE
+# the exact draw commands _footer_legend/_legend_row actually issue (proving they run,
+# and with what geometry) without a live draw context. Default impls do the real draw.
+func _emit_rect(r: Rect2, c: Color) -> void:
+	draw_rect(r, c)
+func _emit_tex(key: String, r: Rect2, c: Color) -> void:
+	draw_texture_rect(Art.tex(key), r, false, c)
+func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
+	Art.draw_glyph(self, act, center, size, c)
+func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
+	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
+func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
+	Art.text(self, txt, pos, 8, c)
+
+
+# One centered legend line of [glyph + verb] segments; y is the glyph center. Emits
+# straight off legend_primitives (through the seams above) so the pixels land exactly
+# where the test measures — and the capture test sees the real commands.
+func _legend_row(segs: Array, y: float, a: float) -> void:
+	var f := Art.font()
+	for p in legend_primitives(segs, y):
+		var seg: Dictionary = p["seg"]
+		var grect: Rect2 = p["glyph"]
+		if grect.size.x > 0.0:
 			if seg.has("act"):
-				Art.draw_glyph(self, seg["act"], Vector2(x + gw / 2.0, y), _LEG_H)
+				# Pass the row alpha so action glyphs fade with the texture glyphs and
+				# labels (they used to draw at full opacity, off from the rest of the row).
+				_emit_glyph(seg["act"], grect.get_center(), _LEG_H, Color(1, 1, 1, a))
 			else:
-				var key: String = seg.get("tex", "glyph_key_wide")
-				draw_texture_rect(Art.tex(key), Rect2(x, y - _LEG_H / 2.0, gw, _LEG_H),
-					false, Color(1, 1, 1, a))
+				_emit_tex(seg.get("tex", "glyph_key_wide"), grect, Color(1, 1, 1, a))
 				if seg.has("stamp"):
 					var st: String = seg["stamp"]
 					var sw := f.get_string_size(st, HORIZONTAL_ALIGNMENT_LEFT, -1, 6).x
-					draw_string(f, Vector2(x + (gw - sw) / 2.0, y + 2.0), st,
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color(0.15, 0.16, 0.12, a))
-			x += gw + 3.0
-		var label: String = seg.get("label", "")
-		Art.text(self, label, Vector2(x, y + 3.0), 8, Color(0.82, 0.87, 0.77, a))
-		x += f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 14.0
+					_emit_stamp(st, Vector2(grect.position.x + (grect.size.x - sw) / 2.0, y + 2.0),
+						Color(0.15, 0.16, 0.12, a))
+		_emit_label(seg.get("label", ""), Vector2(p["label"].position.x, y + 3.0),
+			Color(0.82, 0.87, 0.77, a))
+
+
+# c1-04: input legend BEYOND the TITLE screen. One SELECT/BACK footer on EVERY
+# non-TITLE screen (PAUSE / OPTS / SETUP / HALL / HOWTO), drawn with the real
+# device-aware prompt art (Enter/A, Esc/B) — so keyboard/pad players don't lose
+# nav discovery after first launch. One shared strip position (FOOTER_Y), pinned
+# clear of the selected-row glow (see _row_geometry's drop cap + the layout test).
+# PAUSE additionally carries the PERMANENT ROLL/WHEEL/REVIVE reference (footer_segs),
+# so the in-run HUD reminder can stay purely transient without those bindings
+# becoming unrecoverable mid-run.
+func _footer_legend() -> void:
+	_emit_rect(Rect2(0, FOOTER_Y, 640, 17), Color(0.03, 0.05, 0.03, 0.55))
+	_legend_row(footer_segs(mode), FOOTER_Y + 8.0, 0.9)
+
+
+# c1-04: the SELECT / BACK footer segments, device-aware via Art.glyph_key (the
+# same registry the TITLE SELECT glyph uses): Enter / Esc keycaps on keyboard
+# (BACK stamped ESC, like the WASD/MOVE cap), A / B buttons on a pad. Pulled out
+# so a headless test can prove the kb<->pad glyph swap without a Control or draw.
+static func footer_nav_segs() -> Array:
+	var nav: Array = [{"tex": Art.glyph_key("confirm"), "label": "SELECT"},
+		{"tex": Art.glyph_key("back"), "label": "BACK"}]
+	if not Art.use_pad:
+		nav[1]["stamp"] = "ESC"   # kb back is a bare keycap; stamp it like WASD/MOVE
+	return nav
+
+
+# c1-04: the PERMANENT ROLL / WHEEL / REVIVE reference. The in-run HUD reminder is
+# TRANSIENT now (it fades out so it never continuously overlays the playfield), so
+# PAUSE — the one menu reachable mid-run — carries these bindings permanently: a
+# player who forgot them pauses and re-reads them. "act" keys resolve device-aware
+# through Art.draw_glyph, same as the TITLE legend's verb row.
+static func footer_verb_segs() -> Array:
+	return [{"act": "roll", "label": "ROLL"},
+		{"act": "wheel", "label": "SUPPLY WHEEL"},
+		{"act": "revive", "label": "REVIVE"}]
+
+
+# c1-04: the full footer legend a screen draws — SELECT/BACK nav on every non-TITLE
+# screen, with the gameplay-verb reference prepended on PAUSE (the mid-run recovery
+# screen). Pure so the render test can pin the exact drawn segments and their bounds.
+static func footer_segs(mode_id: int) -> Array:
+	if mode_id == Mode.PAUSE:
+		return footer_verb_segs() + footer_nav_segs()
+	return footer_nav_segs()
