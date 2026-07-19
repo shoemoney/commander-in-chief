@@ -902,9 +902,15 @@ func test_sol_guards() -> void:
 		if path.contains("/soldiers/"):
 			soldier_keys += 1
 			Runner.T.ok(ResourceLoader.exists(path), "soldier key '%s' resolves to a live asset (sol-18)" % k)
-	# sol-18: the ship-set is the intended small subset (hero + 5 enemy + 2 frogman + mz_pop = 9), not 88.
-	Runner.T.ok(soldier_keys >= 8 and soldier_keys <= 12,
-		"the shipped soldier subset stayed lean (%d keys, not the whole 88-sprite pack) (sol-18)" % soldier_keys)
+	# sol-18: the ship-set is EXACTLY the intended subset — player1+player2 (2) + 5 enemy + 2 frogman +
+	# mz_pop = 10 keys, not the 88-sprite pack. An exact pin catches both over- and under-integration.
+	Runner.T.eq(soldier_keys, 10,
+		"the shipped soldier subset is exactly 10 keys (2 hero + 5 enemy + 2 frogman + mz_pop), not the 88-sprite pack (sol-18)")
+	# sol-14: the downed body reuses the LIVE hero sprite (greyed prone, main.gd:6063-6069) — so with no
+	# death_* pose registered, a downed teammate is the authored soldier dimmed, never a watermarked back-sprawl.
+	Runner.T.ok(tex["player1"].resource_path.contains("soldier_assault_rifle")
+			and tex["player2"].resource_path.contains("soldier_assault_rifle"),
+		"the downed-body reuse keys (player1/player2) are the live authored hero, so downed = greyed hero (sol-14)")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
