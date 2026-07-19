@@ -936,11 +936,7 @@ func _input(event: InputEvent) -> void:
 	# Handled in _input so it works with menus open; persisted with settings.
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
-			_fullscreen = not _fullscreen
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
-				if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
-			call_deferred("_bake_cursor")   # cursor scale follows the new window size
-			_save_settings()
+			_toggle_fullscreen()
 			get_viewport().set_input_as_handled()
 			return
 	# Track the LAST-USED device so glyphs/legends teach the right buttons —
@@ -2383,19 +2379,42 @@ func _load_bests() -> void:
 		_life_runs = cf.get_value("life", "runs", 0)
 		_life_kills = cf.get_value("life", "kills", 0)
 		_life_wins = cf.get_value("life", "wins", 0)
-		colorblind = cf.get_value("settings", "colorblind", false)
-		_assist = cf.get_value("settings", "assist", false)
-		_motion = 0.0 if cf.get_value("settings", "reduce_motion", false) else 1.0
-		_rumble_on = cf.get_value("settings", "rumble", true)
-		# Volume steps 0..10 (legacy saves only carried the mute bools — map
-		# them). _set_bus_vol also slaves the UI jingle bus to the SFX level.
-		_set_bus_vol("SFX", cf.get_value("settings", "sfx_vol",
-			0 if cf.get_value("settings", "sfx_muted", false) else 10))
-		_set_bus_vol("Music", cf.get_value("settings", "music_vol",
-			0 if cf.get_value("settings", "music_muted", false) else 10))
-		_fullscreen = cf.get_value("settings", "fullscreen", false)
-		if _fullscreen:
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
+		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
+		# push it through the SAME _apply_settings path fresh-install and RESET use —
+		# no field-by-field mapping to drift, and fullscreen=false explicitly restores
+		# windowed mode (the old branch only handled the true case).
+		_apply_settings({
+			"colorblind": cf.get_value("settings", "colorblind", SETTINGS_DEFAULTS["colorblind"]),
+			"assist": cf.get_value("settings", "assist", SETTINGS_DEFAULTS["assist"]),
+			"reduce_motion": cf.get_value("settings", "reduce_motion", SETTINGS_DEFAULTS["reduce_motion"]),
+			"rumble": cf.get_value("settings", "rumble", SETTINGS_DEFAULTS["rumble"]),
+			"sfx_vol": cf.get_value("settings", "sfx_vol",
+				0 if cf.get_value("settings", "sfx_muted", false) else SETTINGS_DEFAULTS["sfx_vol"]),
+			"music_vol": cf.get_value("settings", "music_vol",
+				0 if cf.get_value("settings", "music_muted", false) else SETTINGS_DEFAULTS["music_vol"]),
+			"fullscreen": cf.get_value("settings", "fullscreen", SETTINGS_DEFAULTS["fullscreen"]),
+		})
+	else:
+		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
+		# rather than leaning on the field initializers, so every settings value comes
+		# from one source whether the game is booting clean, loading, or resetting.
+		_apply_settings(SETTINGS_DEFAULTS)
+
+
+# c1-09: THE authoritative ship-default for every persisted [settings] key — one
+# table so _load_settings' fallbacks and _reset_settings' revert can't drift, and
+# a newly-added setting is reset the moment it's given a default here. reduce_motion
+# is the persisted bool; the live field is _motion (1.0 normal / 0.0 reduced).
+const SETTINGS_DEFAULTS := {
+	"colorblind": false,
+	"assist": false,
+	"reduce_motion": false,
+	"rumble": true,
+	"sfx_vol": 10,
+	"music_vol": 10,
+	"fullscreen": false,
+}
 
 
 func _save_settings() -> void:
@@ -2410,6 +2429,49 @@ func _save_settings() -> void:
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
 	}})
+
+
+# c1-09: apply a [settings] dict onto the live fields — the SINGLE place values
+# flow into the game, shared by _reset_settings and the fresh-install path in
+# _load_bests, so SETTINGS_DEFAULTS is authoritative everywhere and no field
+# initializer can drift from it. Does not persist (callers decide).
+func _apply_settings(d: Dictionary) -> void:
+	colorblind = d["colorblind"]
+	_assist = d["assist"]
+	_motion = 0.0 if d["reduce_motion"] else 1.0
+	_rumble_on = d["rumble"]
+	_set_bus_vol("SFX", d["sfx_vol"])
+	_set_bus_vol("Music", d["music_vol"])
+	_fullscreen = d["fullscreen"]
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
+		else DisplayServer.WINDOW_MODE_WINDOWED)
+	# c1-09: rebake the cursor to the new window size here too — RESET DEFAULTS switches
+	# display mode through this path, and without this it left the cursor scaled for the
+	# old size (the F11/Alt+Enter shortcut always rebaked; reset used to skip it).
+	call_deferred("_bake_cursor")
+
+
+# c1-09: the SINGLE fullscreen flip — shared by the F11/Alt+Enter shortcut and the
+# OPTIONS DISPLAY row, so the on-screen toggle and the hotkey stay one behavior
+# (persist + cursor rebake included). Lets DISPLAY be reviewed AND changed on the
+# dedicated settings screen, not only via the hidden shortcut.
+func _toggle_fullscreen() -> void:
+	_fullscreen = not _fullscreen
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
+		if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
+	call_deferred("_bake_cursor")   # cursor scale follows the new window size
+	_save_settings()
+
+
+func _reset_settings() -> void:
+	# c1-09: RESET DEFAULTS reverts EVERY persisted setting to its SETTINGS_DEFAULTS
+	# ship value — the ONE authoritative table load and fresh-install also read, so it
+	# can never miss one — and DISPLAY mode (fullscreen) is included, not exempted, so
+	# "DEFAULTS RESTORED" is literally true. The OPTIONS header shows the DISPLAY state
+	# (via a11y_summary), so restoring it to WINDOWED is a VISIBLE change on the same
+	# screen, not a silent flip — which is why resetting it is honest rather than jarring.
+	_apply_settings(SETTINGS_DEFAULTS)
+	_save_settings()
 
 
 func _bus_vol(name: String) -> int:

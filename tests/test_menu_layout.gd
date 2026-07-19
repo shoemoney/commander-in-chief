@@ -47,6 +47,7 @@ class _StubMain extends Node2D:
 	var colorblind := false
 	var _rumble_on := true
 	var _assist := false
+	var _fullscreen := false
 	var _saved := 0
 	var _set_calls: Array = []       # records every _set_bus_vol(name, v) the menu makes
 	var _levels := {"SFX": 8, "Music": 8}   # STATEFUL: a step reads back what the last one wrote
@@ -148,7 +149,7 @@ func test_hit_test_maps_centers_and_leaves_no_dead_gap() -> void:
 
 # Non-TITLE screens (OPTIONS at its fullest, RUN SETUP) also stay >=20px plates.
 func test_setup_and_options_rows_stay_legible() -> void:
-	# OPTIONS & INFO fronts HALL + HOW TO PLAY + the settings rows + BACK.
+	# OPTIONS is settings-only: the settings rows + RESET DEFAULTS + BACK.
 	var on := _row_count(Menu.Mode.OPTS, false)
 	var opts: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, on, -1.0)
 	Runner.T.ok(float(opts["bh"]) >= MIN_PLATE, "OPTIONS %d-row plate %d >= 20" % [on, int(opts["bh"])])
@@ -229,6 +230,9 @@ func _act_glyph_resolves(act: String) -> bool:
 # drops a verb/nav glyph — none of which a geometry-helper test can catch.
 class _CaptureMenu extends GameMenu:
 	var ops: Array = []
+	var centered: Array = []   # c1-09: {txt, y} from _center_text (header lines)
+	func _center_text(txt: String, y: float, _size: int, _col: Color) -> void:
+		centered.append({"txt": txt, "y": y})
 	func _emit_rect(r: Rect2, _c: Color) -> void:
 		ops.append({"k": "rect", "id": "", "box": r})
 	func _emit_tex(key: String, r: Rect2, _c: Color) -> void:
@@ -307,14 +311,15 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
-# BACK / Esc must climb exactly one level: SETUP + OPTIONS -> TITLE (their
-# parent), HALL + HOW TO PLAY -> OPTIONS (where they were relocated), and the
-# roots (TITLE/PAUSE/HIDDEN) have no back target.
+# BACK / Esc must climb exactly one level: SETUP + OPTIONS + INFO -> TITLE (their
+# parent), HALL + HOW TO PLAY -> INFO (where they were relocated), and the roots
+# (TITLE/PAUSE/HIDDEN) have no back target.
 func test_back_navigation_targets() -> void:
 	Runner.T.eq(Menu.back_dest(Menu.Mode.SETUP), {"mode": Menu.Mode.TITLE, "sel": "run_setup"}, "SETUP back -> TITLE/run_setup")
 	Runner.T.eq(Menu.back_dest(Menu.Mode.OPTS), {"mode": Menu.Mode.TITLE, "sel": "options"}, "OPTIONS back -> TITLE/options")
-	Runner.T.eq(Menu.back_dest(Menu.Mode.HALL), {"mode": Menu.Mode.OPTS, "sel": "hall"}, "HALL back -> OPTIONS/hall")
-	Runner.T.eq(Menu.back_dest(Menu.Mode.HOWTO), {"mode": Menu.Mode.OPTS, "sel": "howto"}, "HOWTO back -> OPTIONS/howto")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.INFO), {"mode": Menu.Mode.TITLE, "sel": "info"}, "INFO back -> TITLE/info")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.HALL), {"mode": Menu.Mode.INFO, "sel": "hall"}, "HALL back -> INFO/hall")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.HOWTO), {"mode": Menu.Mode.INFO, "sel": "howto"}, "HOWTO back -> INFO/howto")
 	Runner.T.ok(Menu.back_dest(Menu.Mode.TITLE).is_empty(), "TITLE is a root: no back target")
 	Runner.T.ok(Menu.back_dest(Menu.Mode.PAUSE).is_empty(), "PAUSE handles its own back (HIDDEN)")
 	Runner.T.ok(Menu.back_dest(Menu.Mode.HIDDEN).is_empty(), "HIDDEN is a root: no back target")
@@ -1184,3 +1189,463 @@ func test_enter_on_externally_muted_row_unmutes_via_activate() -> void:
 	m.free()
 	mn.free()
 	_restore_buses(saved)
+
+
+# c1-09: the OPTIONS summary line ALWAYS leads with DISPLAY mode (fullscreen has no
+# on-screen toggle, so this is the only place its state reads — and the only reason
+# RESET DEFAULTS restoring it to WINDOWED is a visible change, not a silent flip),
+# then names every ACTIVE accessibility aid (default reads "ALL DEFAULT"), so the
+# single readout can't silently drop a turned-on aid OR hide the display state.
+func test_a11y_summary_lists_active_aids() -> void:
+	# c1-09: EVERY aid reports its explicit ON/OFF state (not only the active ones), so
+	# the readout is the complete accessibility configuration at a glance.
+	Runner.T.eq(Menu.a11y_summary(false, false, false, true, false),
+		"DISPLAY: WINDOWED   REDUCE MOTION OFF  COLORBLIND OFF  ASSIST OFF  RUMBLE ON",
+		"ship-default reads WINDOWED + every aid explicitly OFF (rumble ON)")
+	Runner.T.eq(Menu.a11y_summary(true, true, true, false, true),
+		"DISPLAY: FULLSCREEN   REDUCE MOTION ON  COLORBLIND ON  ASSIST ON  RUMBLE OFF",
+		"every setting active reports display + each aid's explicit state")
+	Runner.T.ok("DISPLAY: FULLSCREEN" in Menu.a11y_summary(false, false, false, true, true),
+		"fullscreen state is exposed on the OPTIONS screen")
+	# A lone active aid still reports the OTHERS as OFF — no aid can be silently dropped.
+	Runner.T.eq(Menu.a11y_summary(false, true, false, true, false),
+		"DISPLAY: WINDOWED   REDUCE MOTION OFF  COLORBLIND ON  ASSIST OFF  RUMBLE ON",
+		"a lone active aid is named ON while the rest read OFF/ON explicitly")
+
+
+# c1-09: PAUSE no longer duplicates the settings rows — it exposes ONE OPTIONS
+# submenu row that opens the dedicated screen. The a11y/audio toggles must NOT
+# appear on the pause list anymore (dedup), and OPTIONS must be present + flagged
+# as a submenu so it reads as "opens a screen," not an in-place action.
+func test_pause_dedups_settings_behind_one_options_row() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var ids: Array = []
+	for row in m._menu_items():
+		ids.append(row["id"])
+	for dup in ["sfx", "music", "motion", "colorblind", "rumble", "assist"]:
+		Runner.T.ok(not (dup in ids), "PAUSE no longer duplicates the '%s' settings row" % dup)
+	Runner.T.ok("options" in ids, "PAUSE fronts settings through a single OPTIONS row")
+	var opt_i := ids.find("options")
+	Runner.T.ok(m._menu_items()[opt_i].get("submenu", false), "the PAUSE OPTIONS row is a submenu (opens the screen)")
+	Runner.T.eq(ids, ["resume", "options", "restart", "title"], "PAUSE is RESUME / OPTIONS / RESTART / TITLE only")
+	m.free()
+	stub.free()
+
+
+# c1-09: OPTIONS exposes RESET DEFAULTS as a focusable, destructive-styled row —
+# NOT an R/Y shortcut. The first press only ARMS (mis-press guard); a second
+# distinct press fires _activate, which reverts every persisted setting through
+# main._reset_settings and raises the success banner (_reset_flash).
+func test_options_reset_defaults_row_is_two_press_and_restores() -> void:
+	_ensure_audio_buses()
+	var saved := _snapshot_buses()
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn.colorblind = true
+	mn._assist = true
+	mn._motion = 0.0
+	mn._rumble_on = false
+	mn._set_bus_vol("SFX", 2)
+	mn._set_bus_vol("Music", 3)
+
+	var m: Control = Menu.new()
+	m.main = mn
+	m.mode = Menu.Mode.OPTS
+	var rows: Array[Dictionary] = m._menu_items()
+	var ri := -1
+	for i in rows.size():
+		if rows[i]["id"] == "reset_defaults":
+			ri = i
+	Runner.T.ok(ri >= 0, "OPTIONS exposes a RESET DEFAULTS row")
+	Runner.T.ok(rows[ri].get("destructive", false), "RESET DEFAULTS is a destructive-confirm row")
+	Runner.T.ok(m._is_destructive(ri), "the shared two-press guard covers RESET DEFAULTS")
+
+	m.sel = ri
+	m._confirm = -1
+	m._press()   # first press ARMS — nothing reverts yet
+	Runner.T.eq(m._confirm, ri, "first press arms RESET DEFAULTS (no revert)")
+	Runner.T.ok(mn.colorblind and mn._assist, "one press does not wipe settings")
+
+	m._press()   # second distinct press fires the revert
+	Runner.T.ok(not mn.colorblind, "second press restores COLORBLIND default (off)")
+	Runner.T.ok(not mn._assist, "second press restores ASSIST default (off)")
+	Runner.T.eq(mn._motion, 1.0, "second press restores full motion")
+	Runner.T.ok(mn._rumble_on, "second press restores RUMBLE default (on)")
+	Runner.T.eq(mn._bus_vol("SFX"), 10, "second press restores SFX to full")
+	Runner.T.eq(mn._bus_vol("Music"), 10, "second press restores MUSIC to full")
+	Runner.T.ok(m._reset_flash > 0.0, "a successful reset raises the DEFAULTS RESTORED banner")
+	# Reduce-motion was ON pre-reset, so the banner is SNAPPED (not faded) even though
+	# the reset itself turned motion back on — the policy reads the pre-reset state.
+	Runner.T.ok(not m._reset_flash_anim, "banner animation uses the pre-reset reduce-motion state")
+	Runner.T.eq(m.mode, Menu.Mode.OPTS, "reset stays on the OPTIONS screen")
+	Runner.T.eq(m.sel, ri, "focus stays on RESET DEFAULTS after it fires (no cursor jump)")
+
+	m.free()
+	mn.free()
+	_restore_buses(saved)
+
+
+# c1-09: SETTINGS_DEFAULTS is the ONE authoritative ship-default table that load,
+# fresh-install, and reset all read — so every persisted [settings] key must have an
+# entry (a new key added to _save_settings without one here would load undefined).
+func test_settings_defaults_cover_every_persisted_key() -> void:
+	for key in ["colorblind", "assist", "reduce_motion", "rumble", "sfx_vol", "music_vol", "fullscreen"]:
+		Runner.T.ok(MainScript.SETTINGS_DEFAULTS.has(key),
+			"SETTINGS_DEFAULTS is the authoritative source for '%s'" % key)
+
+
+# c1-09: OPTIONS climbs BACK to whichever screen opened it — TITLE by default, but
+# PAUSE when opened mid-run — so backing out of settings returns to the paused run
+# instead of dumping the player to the title (which would look like abandoning it).
+func test_options_back_returns_to_its_opener() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m._opts_parent = Menu.Mode.PAUSE
+	Runner.T.eq(m._parent(Menu.Mode.OPTS), {"mode": Menu.Mode.PAUSE, "sel": "options"},
+		"OPTIONS opened from PAUSE backs to PAUSE")
+	m._opts_parent = Menu.Mode.TITLE
+	Runner.T.eq(m._parent(Menu.Mode.OPTS), {"mode": Menu.Mode.TITLE, "sel": "options"},
+		"OPTIONS opened from TITLE backs to TITLE")
+	m.free()
+	stub.free()
+
+
+# c1-09: the three settings groups carry the AUDIO / CONTROLS / ACCESSIBILITY
+# captions, and REDUCE MOTION / COLORBLIND state shows in the row label itself
+# (not only the HUD pips), so their live state reads directly in the list.
+func test_settings_groups_and_inline_accessibility_state() -> void:
+	Runner.T.eq(Menu.group_header(1), "AUDIO", "grp 1 is the AUDIO block")
+	Runner.T.eq(Menu.group_header(2), "HAPTICS", "grp 2 is the HAPTICS block")
+	Runner.T.eq(Menu.group_header(3), "ACCESSIBILITY", "grp 3 is the ACCESSIBILITY block")
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	stub._motion = 0.0        # REDUCE MOTION on
+	stub.colorblind = true    # COLORBLIND on
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+	var by_id := {}
+	for row in m._settings_rows():
+		by_id[row["id"]] = row
+	Runner.T.eq(by_id["motion"]["label"], "REDUCE MOTION: ON", "REDUCE MOTION state reads in its row label")
+	Runner.T.ok(by_id["motion"]["on"], "REDUCE MOTION carries a state dot")
+	Runner.T.eq(by_id["colorblind"]["label"], "COLORBLIND: ON", "COLORBLIND state reads in its row label")
+	Runner.T.eq(by_id["motion"]["grp"], 3, "REDUCE MOTION sits in the ACCESSIBILITY group")
+	Runner.T.eq(by_id["rumble"]["grp"], 2, "RUMBLE sits in the HAPTICS group")
+	Runner.T.eq(by_id["sfx"]["grp"], 1, "SFX sits in the AUDIO group")
+	m.free()
+	stub.free()
+
+
+# c1-09: RESET DEFAULTS must PERSIST and survive a reload — reset, save to disk, then
+# reload into a fresh main and assert EVERY persisted setting came back at its ship
+# default, DISPLAY mode (fullscreen) INCLUDED — so "DEFAULTS RESTORED" is literally
+# true and nothing is silently exempt. The header a11y_summary shows the DISPLAY state,
+# so this reset is a visible change, not a surprise. Round-trips the real ConfigFile;
+# the user's save is backed up + restored, no clobber.
+func test_reset_persists_every_key_and_survives_reload() -> void:
+	_ensure_audio_buses()
+	var saved := _snapshot_buses()
+	var path: String = MainScript.SAVE_PATH
+	var backup: PackedByteArray = FileAccess.get_file_as_bytes(path) if FileAccess.file_exists(path) else PackedByteArray()
+	var had_backup := not backup.is_empty()
+
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn.colorblind = true
+	mn._assist = true
+	mn._motion = 0.0
+	mn._rumble_on = false
+	mn._fullscreen = true
+	mn._set_bus_vol("SFX", 2)
+	mn._set_bus_vol("Music", 3)
+	mn._reset_settings()   # applies SETTINGS_DEFAULTS to live fields AND persists them
+
+	# Reload from disk into a SECOND fresh main — proves the write round-trips.
+	var mn2: Node2D = MainScript.new()
+	mn2._sfx = _NullSfx.new()
+	mn2._load_bests()
+	Runner.T.eq(mn2.colorblind, MainScript.SETTINGS_DEFAULTS["colorblind"], "colorblind reloads at default")
+	Runner.T.eq(mn2._assist, MainScript.SETTINGS_DEFAULTS["assist"], "assist reloads at default")
+	Runner.T.eq(mn2._motion < 0.5, MainScript.SETTINGS_DEFAULTS["reduce_motion"], "reduce_motion reloads at default")
+	Runner.T.eq(mn2._rumble_on, MainScript.SETTINGS_DEFAULTS["rumble"], "rumble reloads at default")
+	Runner.T.eq(mn2._bus_vol("SFX"), MainScript.SETTINGS_DEFAULTS["sfx_vol"], "sfx_vol reloads at default")
+	Runner.T.eq(mn2._bus_vol("Music"), MainScript.SETTINGS_DEFAULTS["music_vol"], "music_vol reloads at default")
+	# The DISPLAY mode is reset too (set true above) — it round-trips at the WINDOWED
+	# ship default rather than being silently exempted while the banner claims all reset.
+	Runner.T.eq(mn2._fullscreen, MainScript.SETTINGS_DEFAULTS["fullscreen"], "reset restores DISPLAY mode to default")
+
+	mn.free()
+	mn2.free()
+	# Restore the user's original save (or remove the one this test created).
+	if had_backup:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_buffer(backup)
+		f.close()
+	else:
+		DirAccess.remove_absolute(path)
+	_restore_buses(saved)
+
+
+# c1-09: the dedicated OPTIONS screen is settings-ONLY now (HALL OF FAME / HOW TO
+# PLAY moved to INFO) — 7 settings (AUDIO x2, RUMBLE, REDUCE MOTION, COLORBLIND,
+# ASSIST, DISPLAY) + RESET DEFAULTS + BACK = 9 rows. Pin that count and prove the
+# screen clears a >=20px plate and keeps its selected-row glow off the footer.
+func test_options_settings_only_nine_row_screen_stays_legible() -> void:
+	var n := _row_count(Menu.Mode.OPTS, false)
+	Runner.T.eq(n, 9, "OPTIONS is the settings-only 9-row screen (no HALL/HOWTO)")
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, n, -1.0)
+	Runner.T.ok(float(g["bh"]) >= MIN_PLATE, "OPTIONS plate %d stays >= 20" % int(g["bh"]))
+	Runner.T.ok(float(g["gap"]) >= float(g["bh"]), "OPTIONS plates do not overlap")
+	Runner.T.ok(Menu.max_glow_bottom(g) < Menu.FOOTER_Y, "OPTIONS last-row glow clears the footer")
+
+
+# c1-09: the RESET DEFAULTS armed/pre-armed CONFIRMATION labels must FIT the OPTIONS
+# plate (222px, 30 gutter, 8 pad = ~184 avail; armed reserves the confirm glyph) and
+# carry the two-press cue — and the confirm glyph must resolve on BOTH input devices.
+func test_reset_defaults_confirm_labels_fit_both_devices() -> void:
+	var f := Art.font()
+	var avail := 184.0
+	var pre := Menu.destructive_label("RESET DEFAULTS", "RESET DEFAULTS", false, f, avail)
+	Runner.T.ok(f.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail, "pre-armed RESET label fits the plate")
+	Runner.T.ok("TWICE" in pre, "pre-armed RESET label states the two-press contract")
+	var armed := Menu.destructive_label("RESET DEFAULTS", "RESET DEFAULTS", true, f, avail - 14.0)
+	Runner.T.ok(f.get_string_size(armed, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail - 14.0, "armed RESET label fits beside the confirm glyph")
+	Runner.T.ok("AGAIN" in armed, "armed RESET label says PRESS AGAIN")
+	var was_pad: bool = Art.use_pad
+	for pad in [false, true]:
+		Art.use_pad = pad
+		var t := Art.tex(Art.glyph_key("confirm"))
+		Runner.T.ok(t != null and t.get_width() > 0, "armed-row confirm glyph resolves (pad=%s)" % pad)
+	Art.use_pad = was_pad
+
+
+# c1-09: the OPTIONS header text must never clip — the FULLEST settings summary
+# (fullscreen + every aid) fits the screen, and every section caption fits its
+# left-margin runway.
+func test_options_header_text_fits_screen() -> void:
+	var f := Art.font()
+	var full := Menu.a11y_summary(true, true, true, false, true)   # display + every aid = longest line
+	Runner.T.ok(f.get_string_size(full, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= 600.0,
+		"fullest settings summary fits the screen at 8px")
+	for grp in [1, 2, 3]:
+		var cap := Menu.group_header(grp)
+		Runner.T.ok(f.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= 184.0,
+			"section caption '%s' fits the left-margin runway" % cap)
+
+
+# c1-09: a RENDERED-layout regression on the settings-only 8-row OPTIONS screen — instead of
+# checking element sizes in isolation, this reconstructs the ACTUAL on-screen positions
+# _draw() emits for the four crowded elements (header summary, section captions, the
+# selected-row focus arrow, the footer legend) from the shared geometry and asserts
+# none collide. The tools/screenshots.gd "options-screen" shot is the eyeball companion.
+func test_options_dense_layout_elements_dont_collide() -> void:
+	# TRUE draw-command capture (the codebase's headless render check — no GL surface for
+	# pixel readback, so the emitted commands ARE the render): a Menu whose _center_text /
+	# _emit_label seams RECORD instead of paint, so the REAL _draw_opts_header() and
+	# _emit_group_caption() run and are inspected box-by-box. This closes the drift gap a
+	# geometry helper leaves — if the header y or caption x in _draw changes, this catches it.
+	var stub := _StubMain.new()
+	stub._motion = 0.0
+	stub.colorblind = true
+	stub._fullscreen = true
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+
+	# HEADER: run the real header draw and inspect what it emitted (via the _center_text seam).
+	m._draw_opts_header()
+	var titles: Array = m.centered.map(func(c): return c["txt"])
+	Runner.T.ok("OPTIONS" in titles, "header emits the OPTIONS title")
+	var summary := {}
+	for c in m.centered:
+		if String(c["txt"]).begins_with("DISPLAY:"):
+			summary = c
+	Runner.T.ok(not summary.is_empty(), "header emits the DISPLAY/ACCESSIBILITY summary line")
+	Runner.T.ok("FULLSCREEN" in String(summary["txt"]) and "REDUCE MOTION" in String(summary["txt"]),
+		"summary reflects the live fullscreen + reduce-motion state")
+
+	# The list geometry the same _draw() uses to seat the rows the header must clear.
+	var n := _row_count(Menu.Mode.OPTS, false)
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, n, -1.0)
+	var top: float = g["top"]
+	var gap: float = g["gap"]
+	var bh: float = g["bh"]
+	Runner.T.ok(float(summary["y"]) + 4.0 < top, "captured header summary (y%d) clears the first row top %d" % [int(summary["y"]), int(top)])
+
+	# SECTION CAPTIONS: replay the real per-row caption emission at the actual row centers,
+	# then assert every captured box (via the _emit_label seam -> ops) sits clear of the
+	# selected-row cycle arrow (plate_left-13) and starts on-screen. Arrow-clearance from
+	# the real draw code, not a re-derived constant.
+	var mitems: Array[Dictionary] = m._menu_items()
+	var plate_left := 320.0 - Menu.BTN.x / 2.0
+	var arrow_x := plate_left - 13.0
+	m.ops.clear()
+	for k in mitems.size():
+		if k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0):
+			var cy := floorf(floorf(top + k * gap) + bh / 2.0)
+			m._emit_group_caption(mitems, k, cy)
+	var caption_ids: Array = m.ops.map(func(l): return l["id"])
+	for cap in ["AUDIO", "HAPTICS", "ACCESSIBILITY"]:
+		Runner.T.ok(cap in caption_ids, "the %s section caption is drawn" % cap)
+	for l in m.ops:
+		var box: Rect2 = l["box"]
+		Runner.T.ok(box.end.x <= arrow_x, "caption '%s' right edge %d clears the row arrow x%d" % [l["id"], int(box.end.x), int(arrow_x)])
+		Runner.T.ok(box.position.x >= 0.0, "caption '%s' starts on-screen (x=%d)" % [l["id"], int(box.position.x)])
+
+	# FOOTER: the last-row selected glow must clear the footer legend strip.
+	Runner.T.ok(Menu.max_glow_bottom(g) < Menu.FOOTER_Y, "dense OPTIONS last-row glow clears the footer")
+	# The dividers between the 5 groups must not fuse plates: gap keeps a real dead band.
+	Runner.T.ok(gap - bh >= 1.0, "dense OPTIONS keeps a dead band between plates for dividers")
+	m.free()
+	stub.free()
+
+
+func _row_index(m: Control, id: String) -> int:
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == id:
+			return i
+	return -1
+
+
+# c1-09: end-to-end navigation — PAUSE -> OPTIONS (settings only) -> BACK -> PAUSE —
+# proving OPTIONS opened mid-run climbs back to the PAUSED run (not the title) and that
+# BACK restores focus to the OPTIONS row that opened it. Backs are driven through the
+# REAL Esc key path in _unhandled_input.
+func test_pause_options_nested_back_roundtrip_preserves_focus() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+
+	var opt_i := _row_index(m, "options")
+	Runner.T.ok(opt_i >= 0, "PAUSE exposes the OPTIONS row")
+	m.sel = opt_i
+	m._activate()                       # PAUSE OPTIONS -> the dedicated screen
+	Runner.T.eq(m.mode, Menu.Mode.OPTS, "OPTIONS opens from PAUSE")
+	Runner.T.eq(m._opts_parent, Menu.Mode.PAUSE, "OPTIONS remembers it was opened from PAUSE")
+	# Settings-only: HALL OF FAME no longer lives on the OPTIONS list (it moved to INFO).
+	Runner.T.eq(_row_index(m, "hall"), -1, "OPTIONS carries no HALL row (settings only)")
+
+	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: OPTIONS -> PAUSE (its opener)
+	Runner.T.eq(m.mode, Menu.Mode.PAUSE, "BACK from OPTIONS returns to the PAUSED run, not TITLE")
+	Runner.T.eq(m.sel, _row_index(m, "options"), "focus restored to the PAUSE OPTIONS row")
+
+	m.free()
+	stub.free()
+
+
+# c1-09: the INFO screen gathers the look-back links off TITLE — TITLE -> INFO ->
+# nested HALL OF FAME -> BACK -> INFO -> BACK -> TITLE — proving HALL/HOWTO now climb
+# to INFO (not OPTIONS) and each BACK restores focus to the row that opened the child.
+func test_title_info_nested_back_roundtrip_preserves_focus() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+
+	var info_i := _row_index(m, "info")
+	Runner.T.ok(info_i >= 0, "TITLE exposes the INFO row")
+	m.sel = info_i
+	m._activate()                       # TITLE INFO -> the look-back screen
+	Runner.T.eq(m.mode, Menu.Mode.INFO, "INFO opens from TITLE")
+
+	m.sel = _row_index(m, "hall")
+	Runner.T.ok(m.sel >= 0, "INFO exposes the HALL OF FAME row")
+	m._activate()                       # INFO -> nested HALL OF FAME
+	Runner.T.eq(m.mode, Menu.Mode.HALL, "HALL OF FAME opens from INFO")
+
+	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: HALL -> INFO
+	Runner.T.eq(m.mode, Menu.Mode.INFO, "BACK from HALL returns to INFO")
+	Runner.T.eq(m.sel, _row_index(m, "hall"), "focus restored to HALL row on return")
+
+	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: INFO -> TITLE
+	Runner.T.eq(m.mode, Menu.Mode.TITLE, "BACK from INFO returns to TITLE")
+	Runner.T.eq(m.sel, _row_index(m, "info"), "focus restored to the TITLE INFO row")
+
+	m.free()
+	stub.free()
+
+
+# c1-09: DISPLAY is a real on-screen toggle now (not F11-only) — it sits in its own
+# labelled DISPLAY group (grp 4), reads the live fullscreen state in its row label +
+# state dot, and flips main._fullscreen through the SAME _toggle_fullscreen path the
+# F11/Alt+Enter shortcut uses, so on-screen and hotkey stay one behavior. Proves every
+# persisted setting is reviewable AND changeable from the dedicated settings screen.
+func test_options_display_row_toggles_fullscreen() -> void:
+	Runner.T.eq(Menu.group_header(4), "DISPLAY", "grp 4 is the DISPLAY block")
+	Runner.T.ok("display" in Menu._TOGGLES, "DISPLAY is an arrow-flippable toggle row")
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn._fullscreen = false
+	var m: Control = Menu.new()
+	m.main = mn
+	m.mode = Menu.Mode.OPTS
+
+	var by_id := {}
+	for row in m._settings_rows():
+		by_id[row["id"]] = row
+	Runner.T.ok(by_id.has("display"), "OPTIONS carries a DISPLAY row")
+	Runner.T.eq(by_id["display"]["label"], "FULLSCREEN: OFF", "DISPLAY row reads the live windowed state")
+	Runner.T.eq(by_id["display"]["grp"], 4, "DISPLAY sits in its own labelled group")
+	Runner.T.ok(not by_id["display"]["on"], "DISPLAY state dot reads OFF while windowed")
+
+	var di := -1
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "display":
+			di = i
+	Runner.T.ok(di >= 0, "DISPLAY row is present on the OPTIONS list")
+	m.sel = di
+	m._activate()   # flips fullscreen ON through main._toggle_fullscreen
+	Runner.T.ok(mn._fullscreen, "activating DISPLAY flips fullscreen ON")
+	var relabel := {}
+	for row in m._settings_rows():
+		relabel[row["id"]] = row["label"]
+	Runner.T.eq(relabel["display"], "FULLSCREEN: ON", "DISPLAY row reflects the flipped state at once")
+	m._activate()   # flips back OFF (sel unchanged — _activate never moves focus)
+	Runner.T.ok(not mn._fullscreen, "activating DISPLAY again flips fullscreen back OFF")
+
+	m.free()
+	mn.free()
+
+
+# c1-09: when focus is on RESET DEFAULTS, the header summary line is REPLACED with an
+# explicit scope statement naming every settings group the two-press confirm will wipe
+# (audio / haptics / accessibility / display) — so the blast radius is stated before the
+# second press, not left to the generic destructive-row treatment. Captured via the real
+# _draw_opts_header() through the _center_text seam.
+func test_reset_defaults_header_states_full_scope_when_focused() -> void:
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+
+	# Focus the RESET DEFAULTS row.
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "reset_defaults":
+			m.sel = i
+	m._draw_opts_header()
+	var scope := ""
+	for c in m.centered:
+		if String(c["txt"]).begins_with("RESET RESTORES"):
+			scope = String(c["txt"])
+	Runner.T.ok(scope != "", "focusing RESET DEFAULTS shows the scope line, not the a11y summary")
+	for grp in ["AUDIO", "HAPTICS", "ACCESSIBILITY", "DISPLAY"]:
+		Runner.T.ok(grp in scope, "reset scope names the %s group" % grp)
+	Runner.T.ok(Art.font().get_string_size(scope, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= 600.0,
+		"reset scope line fits the screen at 8px")
+
+	# On a settings row (not reset), the header is the normal a11y summary again.
+	m.centered.clear()
+	m.sel = 0
+	m._draw_opts_header()
+	var has_summary := false
+	for c in m.centered:
+		if String(c["txt"]).begins_with("DISPLAY:"):
+			has_summary = true
+	Runner.T.ok(has_summary, "a non-reset row shows the accessibility summary")
+
+	m.free()
+	stub.free()

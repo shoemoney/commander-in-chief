@@ -5,7 +5,7 @@ extends Control
 ## knows nothing about menus. Keyboard (W/S + Enter, Esc) and pad
 ## (dpad + A, Start) navigation.
 
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP }
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -26,6 +26,9 @@ var _stick_y := 0
 var _stick_rep := 0.0   # countdown to the next held-stick auto-repeat step
 var _nav_frame := -1    # frame stamp: one stick nav per frame (diagonal guard)
 var _confirm_t := 0.0   # armed destructive row disarms when this runs out
+var _reset_flash := 0.0 # c1-09: "DEFAULTS RESTORED" success banner countdown after RESET DEFAULTS fires
+var _reset_flash_anim := true   # c1-09: whether that banner fades — captured from the PRE-reset reduce-motion state (reset itself re-enables motion, so reading it live would never snap)
+var _opts_parent := Mode.TITLE   # c1-09: which screen OPTIONS was opened from (TITLE or PAUSE) — drives BACK
 var _filter_pulse := 0.0   # hall filter tab flash on change
 var _rail_pulse := 0.0     # volume row bounced off a rail (0/MUTED or 10) — brief end-segment flash
 var _rail_dir := 0         # which rail the bounce hit: -1 = muted floor, +1 = max ceiling
@@ -39,7 +42,7 @@ var _has_replay := false   # user://last_run.replay existence, sampled in open()
 var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover cue parity with rows
 
 # Row ids that flip on left/right without a confirm press.
-const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist"]
+const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist", "display"]
 
 # c1-08 destructive-row palette — the SINGLE source shared by _draw and the contrast
 # test, so the two can't drift. Plates are DARK warm so the LIGHT warm labels over
@@ -96,6 +99,8 @@ func _process(delta: float) -> void:
 			_confirm_t -= delta
 			if _confirm_t <= 0.0:
 				_confirm = -1
+		# c1-09: the "DEFAULTS RESTORED" success banner fades after RESET DEFAULTS fires.
+		_reset_flash = maxf(0.0, _reset_flash - delta)
 		_lockout = maxf(0.0, _lockout - delta)
 		# Tab flash is pure animation — reduce-motion snaps it off entirely.
 		_filter_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _filter_pulse - delta * 3.0)
@@ -206,8 +211,8 @@ func _menu_items() -> Array[Dictionary]:
 		# HARD) sits right beside the start verbs it configures — a pre-run choice
 		# stays one press from CAMPAIGN, not buried in settings. To hold TITLE at its
 		# comfortable 8-row cap (>=20px plates, 16px icons), the meta screens moved
-		# down a level: HALL OF FAME and HOW TO PLAY now live under OPTIONS. The old
-		# list wedged config between the start verbs and the meta screens, driving bh
+		# down a level: HALL OF FAME and HOW TO PLAY now live under the INFO screen. The
+		# old list wedged config between the start verbs and the meta screens, driving bh
 		# to ~11px with 8px speck icons and seating NG+/CO-OP right where a mis-nav
 		# off CAMPAIGN landed.
 		var titems: Array[Dictionary] = [
@@ -222,9 +227,14 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "run_setup", "label": "RUN SETUP: %s  %s" % ["2P" if main._two_players else "1P",
 				"HARD" if main._hard else "NORMAL"], "destructive": false, "grp": 1, "submenu": true},
 		]
-		titems.append({"id": "options", "label": "OPTIONS & INFO", "destructive": false, "grp": 2, "submenu": true})
-		if _has_replay:
-			titems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 2})
+		# c1-09: the meta block is two focused rows — OPTIONS (settings ONLY, no info
+		# links) and INFO (HALL OF FAME / HOW TO PLAY / WATCH LAST RUN). Splitting them
+		# lets OPTIONS be a genuinely dedicated settings screen while INFO gathers the
+		# look-back screens. WATCH LAST RUN moved off TITLE onto INFO (it belongs with
+		# the records), so the meta block is a CONSTANT two rows and TITLE holds at its
+		# 8-row cap whether or not a replay exists.
+		titems.append({"id": "options", "label": "OPTIONS", "destructive": false, "grp": 2, "submenu": true})
+		titems.append({"id": "info", "label": "INFO", "destructive": false, "grp": 2, "submenu": true})
 		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 3})
 		return titems
 	if mode == Mode.SETUP:
@@ -236,22 +246,39 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 0},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 2},
 		]
-	if mode == Mode.OPTS:
-		# Settings reachable BEFORE a run: reduce-motion/colorblind/assist lived
-		# only in PAUSE while the title played a live, flashing attract fight —
-		# exactly the players who need them couldn't reach them.
-		# c1-02: the two meta screens lead (HALL OF FAME + HOW TO PLAY, grp 0), then
-		# the settings block (grp 1), then BACK — 9 rows max at a comfortable >=20px
-		# pitch. Relocating them here off TITLE is what holds the title at 8 rows.
-		var oitems: Array[Dictionary] = [
+	if mode == Mode.INFO:
+		# c1-09: the look-back screens, split off OPTIONS so settings stand alone. HALL
+		# OF FAME + HOW TO PLAY + (when a replay exists) WATCH LAST RUN, then BACK. All
+		# reached from TITLE's INFO row; each climbs back here.
+		var iitems: Array[Dictionary] = [
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 0, "submenu": true},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 0, "submenu": true},
 		]
-		oitems.append_array(_settings_rows())
-		oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
+		if _has_replay:
+			iitems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 0})
+		iitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
+		return iitems
+	if mode == Mode.OPTS:
+		# c1-09: the ONE dedicated SETTINGS screen — nothing but settings now (HALL OF
+		# FAME / HOW TO PLAY moved to the INFO screen). Reached from TITLE and from
+		# PAUSE's single OPTIONS row. The settings sit in four labelled blocks — AUDIO
+		# (grp 1) / HAPTICS (grp 2) / ACCESSIBILITY (grp 3) / DISPLAY (grp 4) — then
+		# RESET DEFAULTS (grp 5, a two-press confirm that recovers a bad choice), then
+		# BACK (grp 6). group_header() names each settings block.
+		var oitems: Array[Dictionary] = _settings_rows()
+		# RESET DEFAULTS is a focusable, destructive-styled row: Enter/A arms it, a
+		# second press reverts every persisted setting — the recover path the screen
+		# lacked (immediate writes with no rollback). Two-press guards a stray press.
+		oitems.append({"id": "reset_defaults", "label": "RESET DEFAULTS", "destructive": true, "grp": 5})
+		oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 6})
 		return oitems
-	var pitems: Array[Dictionary] = [{"id": "resume", "label": "RESUME", "destructive": false, "grp": 0}]
-	pitems.append_array(_settings_rows())
+	# c1-09: PAUSE no longer duplicates the settings rows — it fronts them through ONE
+	# OPTIONS row that opens the dedicated screen (which then BACKs to PAUSE). RESUME /
+	# OPTIONS / RESTART / TITLE, each its own group so the dividers separate them.
+	var pitems: Array[Dictionary] = [
+		{"id": "resume", "label": "RESUME", "destructive": false, "grp": 0},
+		{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
+	]
 	pitems.append({"id": "restart", "label": "RESTART", "destructive": true, "grp": 2})
 	pitems.append({"id": "title", "label": "TITLE SCREEN", "destructive": true, "grp": 2})
 	return pitems
@@ -289,14 +316,20 @@ func _settings_rows() -> Array[Dictionary]:
 	var mus_muted: bool = _bus_off("Music")
 	var sv: int = effective_vol(sfx_muted, main._bus_vol("SFX"))
 	var mv: int = effective_vol(mus_muted, main._bus_vol("Music"))
+	# c1-09: four labelled groups — AUDIO (grp 1), HAPTICS (grp 2), ACCESSIBILITY
+	# (grp 3), DISPLAY (grp 4) — so the divider rules + group_header captions read as
+	# sections. REDUCE MOTION and COLORBLIND carry their ON/OFF in the row label AND the
+	# state dot, and are echoed in the header a11y summary, so their live state reads in
+	# both places. DISPLAY is a real toggle row now (not F11-only): every persisted
+	# setting can be reviewed AND changed from the dedicated screen.
 	return [
-		# grp 1 = the settings block (RESUME is grp 0, destructive exits grp 2).
 		{"id": "sfx", "label": "SFX: %s" % vol_label(sfx_muted, sv), "destructive": false, "vol": sv, "grp": 1},
 		{"id": "music", "label": "MUSIC: %s" % vol_label(mus_muted, mv), "destructive": false, "vol": mv, "grp": 1},
-		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 1},
-		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 1},
-		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 1},
-		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 1},
+		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 2},
+		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 3},
+		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 3},
+		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 3},
+		{"id": "display", "label": "FULLSCREEN: %s" % ("ON" if main._fullscreen else "OFF"), "destructive": false, "on": main._fullscreen, "grp": 4},
 	]
 
 
@@ -368,7 +401,9 @@ func _row_icon(id: String) -> String:
 		"sfx": return "mi_snd_off" if _bus_off("SFX") else "mi_snd_on"
 		"music": return "mi_mus_off" if _bus_off("Music") else "mi_mus_on"
 		"options": return "mi_settings"
-		"restart": return "mi_reload"
+		"info": return "mi_book"
+		"display": return "mi_camera"
+		"restart", "reset_defaults": return "mi_reload"
 		"title": return "mi_home"
 		"rumble": return "mi_controller"
 		"watch": return "mi_camera"
@@ -565,8 +600,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 		_press()
 	elif back and mode == Mode.PAUSE:
 		mode = Mode.HIDDEN
-	elif back and not back_dest(mode).is_empty():
-		var d := back_dest(mode)   # one level up; HALL/HOWTO/SETUP all climb here
+	elif back and not _parent(mode).is_empty():
+		var d := _parent(mode)   # one level up; OPTIONS climbs to its opener (TITLE or PAUSE)
 		open(d["mode"], d["sel"])
 	if (move != 0 or hmove != 0 or act or back) and is_inside_tree():
 		accept_event()   # is_inside_tree guard: a not-in-tree menu (headless tests) skips it
@@ -632,6 +667,47 @@ func _press() -> void:
 		_activate()
 
 
+# c1-09: OPTIONS climbs BACK to whichever screen opened it — TITLE normally, but
+# PAUSE when reached mid-run (so backing out of settings returns to the paused run,
+# not the title). back_dest stays the single source for the fixed parents (HALL/
+# HOWTO/SETUP); only OPTIONS has two possible openers, tracked in _opts_parent.
+func _parent(m: int) -> Dictionary:
+	if m == Mode.OPTS and _opts_parent == Mode.PAUSE:
+		return {"mode": Mode.PAUSE, "sel": "options"}
+	return back_dest(m)
+
+
+# c1-09: group caption for the OPTIONS settings block — the settings rows carry
+# grp ids 1/2/3 (audio / haptics / accessibility) and the first row of each group
+# draws this label in the left margin, so the screen reads as three labelled
+# sections, not one flat list. Non-settings groups (meta/reset/back) have none.
+static func group_header(grp: int) -> String:
+	match grp:
+		1: return "AUDIO"
+		2: return "HAPTICS"
+		3: return "ACCESSIBILITY"
+		4: return "DISPLAY"
+	return ""
+
+
+# c1-09: the single settings-state readout for the OPTIONS screen — DISPLAY mode
+# first, then EVERY accessibility aid with its EXPLICIT ON/OFF state (not just the
+# active ones) so a player reviews the COMPLETE configuration in one place at a
+# glance — "MOTION OFF  COLORBLIND ON  ASSIST OFF  RUMBLE ON" — instead of inferring
+# what's off from an omission. DISPLAY is ALWAYS shown (fullscreen has no on-screen
+# toggle — it's F11 — so this is the only place its state reads), which is also what
+# makes RESET DEFAULTS honest: it restores DISPLAY to WINDOWED as a VISIBLE change
+# here, not a silent flip. Pure + static so a headless test can pin the wording alone.
+static func a11y_summary(reduce_motion: bool, colorblind: bool, assist: bool, rumble: bool, fullscreen: bool) -> String:
+	return "DISPLAY: %s   REDUCE MOTION %s  COLORBLIND %s  ASSIST %s  RUMBLE %s" % [
+		"FULLSCREEN" if fullscreen else "WINDOWED",
+		"ON" if reduce_motion else "OFF",
+		"ON" if colorblind else "OFF",
+		"ON" if assist else "OFF",
+		"ON" if rumble else "OFF",
+	]
+
+
 # Pure, view-free layout math for the button column — extracted so a headless
 # regression test can pin the decompressed TITLE geometry (>=20px plates, 16px
 # icons, header/legend clearance) without standing up a Control, Art, or `main`.
@@ -642,8 +718,12 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 	# OPTS/SETUP get their own top: the 156 floor exists to clear TITLE's record
 	# block, but they carry only a lone header at ~y88 — 120 seats rows right
 	# under it at the full gap.
+	# c1-09: OPTS is settings-only now (7 settings + RESET DEFAULTS + BACK = 9 rows),
+	# under a compact 2-line header — top 102 keeps that count at a >=20px plate.
+	# SETUP and INFO carry only a few rows, so 120 seats them right under a lone header.
 	var top := 118.0 if mode_id == Mode.PAUSE \
-		else (120.0 if (mode_id == Mode.OPTS or mode_id == Mode.SETUP) else (150.0 if not many else 156.0))
+		else (102.0 if mode_id == Mode.OPTS \
+		else (120.0 if (mode_id == Mode.SETUP or mode_id == Mode.INFO) else (150.0 if not many else 156.0)))
 	var gap: float
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
@@ -676,13 +756,14 @@ static func title_head_bottom(has_best: bool, has_career: bool) -> float:
 
 
 # Where BACK / Esc goes from each screen — one level up. HALL and HOW TO PLAY
-# were relocated under OPTIONS, so they climb to OPTS; RUN SETUP and OPTIONS hang
-# off TITLE. Pure + single-sourced so _unhandled_input and _activate can't drift
-# their back-nav targets apart. Screens with no parent (TITLE/PAUSE/HIDDEN) => {}.
+# live under the INFO screen, so they climb to INFO; INFO, RUN SETUP and OPTIONS
+# hang off TITLE. Pure + single-sourced so _unhandled_input and _activate can't
+# drift their back-nav targets apart. Screens with no parent (TITLE/PAUSE/HIDDEN) => {}.
 static func back_dest(mode_id: int) -> Dictionary:
 	match mode_id:
-		Mode.HOWTO: return {"mode": Mode.OPTS, "sel": "howto"}
-		Mode.HALL: return {"mode": Mode.OPTS, "sel": "hall"}
+		Mode.HOWTO: return {"mode": Mode.INFO, "sel": "howto"}
+		Mode.HALL: return {"mode": Mode.INFO, "sel": "hall"}
+		Mode.INFO: return {"mode": Mode.TITLE, "sel": "info"}
 		Mode.SETUP: return {"mode": Mode.TITLE, "sel": "run_setup"}
 		Mode.OPTS: return {"mode": Mode.TITLE, "sel": "options"}
 		_: return {}
@@ -786,8 +867,8 @@ func _step_vol(bus: String, delta: int) -> void:
 func _activate() -> void:
 	main._sfx.play("buy", -8.0)
 	if mode == Mode.HALL or mode == Mode.HOWTO:
-		# The lone BACK plate on the HALL/HOWTO content screens climbs to OPTIONS.
-		var d := back_dest(mode)
+		# The lone BACK plate on the HALL/HOWTO content screens climbs to INFO.
+		var d := _parent(mode)
 		open(d["mode"], d["sel"])
 		return
 	var id: String = _menu_items()[sel]["id"]
@@ -799,19 +880,28 @@ func _activate() -> void:
 			"watch": main.start_watch()
 			"paste_seed": main.start_seed_from_clipboard()
 			"run_setup": open(Mode.SETUP)   # run-config submenu, beside the start verbs
-			"options": open(Mode.OPTS)
+			"options":
+				_opts_parent = Mode.TITLE   # BACK returns to TITLE
+				open(Mode.OPTS)
+			"info": open(Mode.INFO)   # the look-back screens (HALL / HOW TO / WATCH)
 			"quit": get_tree().quit()
 	else:
 		match id:
 			"resume": mode = Mode.HIDDEN
+			"options":
+				# c1-09: PAUSE fronts settings through ONE dedicated OPTIONS screen (the
+				# six a11y/audio rows no longer live on the pause list). BACK returns here.
+				_opts_parent = Mode.PAUSE
+				open(Mode.OPTS)
 			"back":
-				# BACK climbs one level: SETUP/OPTS both return to TITLE (their parent).
-				var d := back_dest(mode)
+				# BACK climbs one level: OPTIONS returns to its opener, SETUP to TITLE.
+				var d := _parent(mode)
 				open(d["mode"], d["sel"])
-			"hall": open(Mode.HALL)   # OPTIONS meta screen
+			"hall": open(Mode.HALL)   # INFO screen link
+			"watch": main.start_watch()   # WATCH LAST RUN lives on the INFO screen now
 			"coop": main._two_players = not main._two_players   # run-setup toggle (SETUP); left/right + Enter share this path
 			"hard": main._hard = not main._hard
-			"howto": open(Mode.HOWTO)   # help screen under OPTIONS; back returns here
+			"howto": open(Mode.HOWTO)   # help screen under INFO; back returns here
 			"sfx":
 				# Enter/click nudges the SAME clamped 0..10 level as ◄/► (+1, stops at
 				# 10) — one model, and it can never surprise-mute a player who meant to
@@ -831,6 +921,20 @@ func _activate() -> void:
 			"assist":
 				main._assist = not main._assist
 				main._save_settings()
+			"display":
+				# c1-09: the DISPLAY row flips fullscreen through the SAME path as the
+				# F11/Alt+Enter shortcut (persist + cursor rebake), so the two agree.
+				main._toggle_fullscreen()
+			"reset_defaults":
+				# c1-09: the two-press confirm already fired (destructive row → _press
+				# arms, a second press lands here) — revert the shown settings to their
+				# ship defaults and raise the "DEFAULTS RESTORED" banner as success feedback.
+				# The rows below regenerate from state, so they show the restored values at once.
+				# Snapshot reduce-motion BEFORE the reset (which re-enables motion): a
+				# motion-sensitive player still gets a snapped, non-animated banner.
+				_reset_flash_anim = main._motion >= 0.5
+				main._reset_settings()
+				_reset_flash = 1.6
 			"restart":
 				main._reset()
 				mode = Mode.HIDDEN
@@ -947,8 +1051,11 @@ func _draw() -> void:
 				Color(0.03, 0.05, 0.03, 0.55))
 			_center_text(career, 136, 8, Color(0.6, 0.72, 0.62, 0.7))
 	elif mode == Mode.OPTS:
-		# "& INFO": the screen also fronts HALL OF FAME + HOW TO PLAY, not just settings.
-		_center_text("OPTIONS & INFO", 88, 20, Color(0.95, 0.95, 0.85))
+		_draw_opts_header()
+	elif mode == Mode.INFO:
+		_center_text("INFO", 84, 22, Color(0.95, 0.95, 0.85))
+		# The look-back screens: records, the field manual, and your last run.
+		_center_text("RECORDS · HOW TO PLAY · REPLAY", 104, 8, Color(0.8, 0.85, 0.72))
 	elif mode == Mode.SETUP:
 		_center_text("RUN SETUP", 84, 22, Color(0.95, 0.95, 0.85))
 		# Say what the screen is for — the two toggles below decide the run you deploy.
@@ -995,6 +1102,8 @@ func _draw() -> void:
 			var sy := floorf(top + k * gap) - floorf((gap - bh) / 2.0)
 			draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
 				Color(0.62, 0.66, 0.5, 0.55))
+		if mode == Mode.OPTS and (k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0)):
+			_emit_group_caption(mitems, k, cy)
 		var selected := k == sel
 		var destr: bool = k < mitems.size() and mitems[k].get("destructive", false)
 		# armed REQUIRES destr: a stale/desynced _confirm landing on a non-destructive
@@ -1084,7 +1193,7 @@ func _draw() -> void:
 			# cue never ellipsizes to nonsense: "<NAME>  PRESS TWICE" states the two-press
 			# contract pre-armed; armed keeps the VERB alongside "PRESS AGAIN" where it
 			# fits, degrading only as far as needed. See destructive_label.
-			label = destructive_label(items[k], String(mitems[k]["id"]).to_upper(),
+			label = destructive_label(items[k], String(mitems[k]["id"]).to_upper().replace("_", " "),
 				armed, Art.font(), label_r - (r.position.x + 30.0))
 		if armed:
 			# The armed affordances that ride ON TOP of the red flood (drawn above):
@@ -1104,7 +1213,7 @@ func _draw() -> void:
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
 			Vector2(lx, cy + 4.0), 11, col)
 		# Submenu affordance: a right-pointing chevron marks rows that OPEN a screen
-		# (RUN SETUP / OPTIONS & INFO / HALL / HOW TO PLAY) so they don't read as a
+		# (RUN SETUP / OPTIONS / INFO / HALL / HOW TO PLAY) so they don't read as a
 		# direct action or an in-place toggle. mi_arrow already points right.
 		if mitems[k].get("submenu", false):
 			draw_texture_rect(Art.tex("mi_arrow"), Rect2(r.end.x - 17.0, cy - 5.0, 10.0, 10.0),
@@ -1512,6 +1621,34 @@ func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, 320.0, y, size, col)
 
 
+# c1-09: the OPTIONS screen header — a compact 2-line block (title y80 / summary y94)
+# so the 8-row settings list seats at top=102 and still clears a >=20px plate. Extracted
+# so a headless capture test can invoke the REAL header draw (through _center_text, which
+# a test subclass records) and prove it renders, at what y, and with what text — not just
+# that some string fits some width. Settings ONLY now: HALL OF FAME / HOW TO PLAY moved
+# to the INFO screen, so this header is a plain "OPTIONS".
+func _draw_opts_header() -> void:
+	_center_text("OPTIONS", 80, 18, Color(0.95, 0.95, 0.85))
+	# After RESET DEFAULTS fires, the summary line briefly becomes a success banner;
+	# otherwise it's the single place to review live settings state — the DISPLAY mode
+	# (no on-screen toggle) and EVERY accessibility aid's explicit ON/OFF state.
+	if _reset_flash > 0.0:
+		# A player who HAD reduce-motion on when they reset gets the banner at steady
+		# full alpha (no fade ramp) — captured pre-reset, since the reset itself turns
+		# motion back on. It still clears on its timer; only the animation is snapped.
+		var ba := clampf(_reset_flash / 0.6, 0.0, 1.0) if _reset_flash_anim else 1.0
+		_center_text("DEFAULTS RESTORED", 94, 9, Color(0.55, 0.95, 0.5, ba))
+	elif _menu_items()[sel]["id"] == "reset_defaults":
+		# When focus is on RESET DEFAULTS, the summary line names EXACTLY what the
+		# two-press confirm will wipe — every settings group at once — so the player
+		# knows the blast radius BEFORE the second press, not just "this is destructive".
+		_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / DISPLAY TO DEFAULTS",
+			94, 8, Color(0.95, 0.72, 0.42))
+	else:
+		_center_text(a11y_summary(main._motion < 0.5, main.colorblind, main._assist,
+			main._rumble_on, main._fullscreen), 94, 8, Color(0.8, 0.85, 0.72))
+
+
 # Trim a label to max_w with a trailing ellipsis (raw clipping ate whole glyphs
 # mid-character; dynamic labels like the seed row can outgrow the button).
 func _ellipsize(txt: String, size: int, max_w: float) -> String:
@@ -1619,6 +1756,19 @@ func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
 	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 	Art.text(self, txt, pos, 8, c)
+
+
+# c1-09: OPTIONS settings groups get a named caption (AUDIO / HAPTICS / ACCESSIBILITY)
+# at the first row of each group, right-aligned in the left margin — its right edge at
+# plate_left-25, clear of the selected-row cycle arrow (drawn at plate_left-13) — so the
+# screen reads as three labelled sections, not one flat list. Routed through _emit_label
+# so a headless capture test can invoke this REAL caption draw and inspect the exact box.
+func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
+	var ghdr := group_header(mitems[k].get("grp", 0))
+	if ghdr == "":
+		return
+	var gw := Art.font().get_string_size(ghdr, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+	_emit_label(ghdr, Vector2((320 - BTN.x / 2.0) - 25.0 - gw, cy + 3.0), Color(0.66, 0.72, 0.56, 0.85))
 
 
 # One centered legend line of [glyph + verb] segments; y is the glyph center. Emits
