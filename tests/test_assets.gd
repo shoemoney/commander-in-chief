@@ -643,6 +643,23 @@ func test_a4_spine_is_a_worn_lane_route() -> void:
 	Runner.T.ok(moved, "the spine MEANDERS like a marched route, not a dead-straight painted stripe")
 
 
+func test_a4_reticle_halo_is_centered() -> void:
+	# a4-05: the reticle's dark backing rings the aim point on ALL sides (a centered halo), not the
+	# old one-sided down-right drop-shadow — so no edge camouflages into orange glow / red foundry floor.
+	var c := _consts()
+	var halo: Array = c["RETICLE_HALO"]
+	var alpha: float = c["RETICLE_HALO_A"]
+	Runner.T.ok(halo.size() >= 8, "the halo rings all 8 neighbours, not just one corner")
+	# CENTERED = symmetric: for every offset its negation is also present (a lopsided set would
+	# re-introduce the camouflage-on-the-bright-side bug the drop-shadow had).
+	var sum := Vector2.ZERO
+	for off in halo:
+		sum += off
+		Runner.T.ok(halo.has(-off), "offset %s has its mirror -%s (the halo is centered)" % [off, off])
+	Runner.T.ok(sum == Vector2.ZERO, "the 8 offsets cancel to zero — the dark keyline is centered on the aim point")
+	Runner.T.ok(alpha > 0.2 and alpha < 0.6, "each halo pass is a dark backing (0.2 < a < 0.6), stacking into a keyline not a black box")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge

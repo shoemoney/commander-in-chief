@@ -3345,6 +3345,14 @@ const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on 
 const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
 const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
 const HERO_APEX := Color(0.86, 0.93, 1.0)   # a4-03: cool crown catch-light — the hero is the brightest+coolest point
+
+# a4-05 (AD#10, LEG#4): the reticle's dark backing rings the aim point on ALL 8 sides — a
+# CENTERED halo, not the old single down-right drop-shadow, so no edge camouflages into an
+# orange turret glow / the red foundry floor. Symmetric offsets (each has its negation) = the
+# dark keyline is centered on the aim point, never lopsided.
+const RETICLE_HALO := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1),
+	Vector2(1, 1), Vector2(1, -1), Vector2(-1, 1), Vector2(-1, -1)]
+const RETICLE_HALO_A := 0.42
 const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds under REDUCE MOTION; pulse is motion-gated
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
@@ -6331,9 +6339,12 @@ func _draw_players() -> void:
 				var rpunch := 1.0 + (_hitmarker[i] if i < _hitmarker.size() else 0.0) * 0.3
 				var rcen := rrect.get_center()
 				draw_set_transform(rcen, 0.0, Vector2.ONE * rpunch)
-				for rd in rects:
-					draw_texture_rect(rtex, Rect2(rd.position + Vector2(1, 1), rd.size),
-						false, Color(0, 0, 0, 0.55))
+				# a4-05: centered dark halo (all 8 sides) instead of a one-sided drop-shadow —
+				# the aim point keeps a full dark keyline against any hot terrain, never just two edges.
+				for off in RETICLE_HALO:
+					for rd in rects:
+						draw_texture_rect(rtex, Rect2(rd.position + off, rd.size),
+							false, Color(0, 0, 0, RETICLE_HALO_A))
 				for rd in rects:
 					draw_texture_rect(rtex, rd, false, rcol)
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
