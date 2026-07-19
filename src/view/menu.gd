@@ -10,6 +10,11 @@ enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO }
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
 const BTN := Vector2(222, 36)
+# c1-12: ◄/► cycle-arrow layout — shared by _draw and the mouse hit-test via
+# toggle_arrow_rects so the glyph and its click target can never drift apart.
+const ARROW_SZ := 10.0        # arrow glyph box edge (px)
+const ARROW_L_OFF := 23.0     # left arrow's far (outer) edge, left of the plate
+const ARROW_R_GAP := 5.0      # right arrow's near edge, right of the plate
 
 var mode: int = Mode.TITLE
 var sel := 0
@@ -575,11 +580,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 				# their own hitbox a click on a visible, pulsing arrow was silently
 				# swallowed (the same parity gap the hall tabs got fixed for).
 				var g := _row_geometry()
-				var ry := floorf(float(g["top"]) + float(sel) * float(g["gap"]))
-				var ay := floorf(ry + float(g["bh"]) / 2.0) - 5.0   # same snap as _draw's cy
-				var lx := 320.0 - BTN.x / 2.0
-				var la := Rect2(lx - 23.0, ay, 10.0, 10.0).grow(3.0)
-				var ra := Rect2(lx + BTN.x + 5.0, ay, 10.0, 10.0).grow(3.0)
+				var arows := toggle_arrow_rects(g, sel)   # same source _draw renders from
+				var la := arows[0].grow(3.0)
+				var ra := arows[1].grow(3.0)
 				if la.has_point(ev.position) or ra.has_point(ev.position):
 					# Side matters now: volume rows step down/up per arrow, so a
 					# mouse-only player has BOTH directions (the ◄ arrow lowers and
@@ -803,7 +806,7 @@ func _row_geometry() -> Dictionary:
 static func hit_row(g: Dictionary, y: float) -> int:
 	var pad := maxf(0.0, (float(g["gap"]) - float(g["bh"])) / 2.0)
 	for k in int(g["n"]):
-		var ry := floorf(float(g["top"]) + float(k) * float(g["gap"]))   # same snap as _draw
+		var ry := row_rect(g, k).position.y   # same source _draw / the arrow hit-test build from
 		if y >= ry - pad and y < ry + float(g["bh"]) + pad:
 			return k
 	return -1
@@ -814,6 +817,33 @@ static func hit_row(g: Dictionary, y: float) -> int:
 # layout test can prove it never reaches FOOTER_Y on the fullest PAUSE/OPTS list.
 static func max_glow_bottom(g: Dictionary) -> float:
 	return float(g["top"]) + float(int(g["n"]) - 1) * float(g["gap"]) + float(g["bh"]) + 4.5
+
+
+# c1-12: single source of truth for a row's plate rect — _draw and the mouse
+# hit-test both build the toggle-arrow boxes off this, so the x/width/height a
+# horizontal-layout change touches lives in ONE place, not re-hardcoded per call
+# site. Same floorf snapping _draw has always used (crisp pixel-font seams).
+static func row_rect(g: Dictionary, k: int) -> Rect2:
+	return Rect2(Vector2(320.0 - BTN.x / 2.0, floorf(float(g["top"]) + float(k) * float(g["gap"]))),
+		Vector2(BTN.x, floorf(float(g["bh"]))))
+
+
+# c1-12: single source of truth for the ◄/► cycle-arrow boxes on a toggle/volume
+# row — _draw and the mouse hit-test both read this, so a layout tweak can't drift
+# the visible arrow off its click target (same discipline as _row_geometry /
+# _back_rect). Returns [left, right] as normalized visual rects (the left arrow is
+# drawn flipped via a negative width, but its bounds are these). Takes the geometry
+# dict + row index and derives EVERYTHING from it — the row rect via row_rect and
+# the raw (unfloored) box height for the y-snap — so no caller can pass a bh that
+# has drifted from the rect it belongs to.
+static func toggle_arrow_rects(g: Dictionary, k: int) -> Array[Rect2]:
+	var r := row_rect(g, k)
+	var ay := floorf(r.position.y + float(g["bh"]) / 2.0) - ARROW_SZ / 2.0   # centered on cy, raw-bh snap == _draw
+	var out: Array[Rect2] = [
+		Rect2(r.position.x - ARROW_L_OFF, ay, ARROW_SZ, ARROW_SZ),
+		Rect2(r.end.x + ARROW_R_GAP, ay, ARROW_SZ, ARROW_SZ),
+	]
+	return out
 
 
 func _row_at(p: Vector2) -> int:
@@ -1089,7 +1119,7 @@ func _draw() -> void:
 	for k in items.size():
 		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
 		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
-		var r := Rect2(Vector2(320 - BTN.x / 2.0, floorf(top + k * gap)), Vector2(BTN.x, floorf(bh)))
+		var r := row_rect(g, k)
 		# Whole-pixel row center: bh is odd on PAUSE (21) and 11-row TITLE (11), so
 		# every bh/2-derived y (label baseline, state dot, arrows, confirm glyph)
 		# landed on .5 — the exact sub-pixel shimmer _sel_y snapping guards against.
@@ -1259,9 +1289,11 @@ func _draw() -> void:
 		if selected and mitems[k]["id"] in _TOGGLES:
 			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
 			var at := Art.tex("mi_arrow")
-			var ay := cy - 5.0
-			draw_texture_rect(at, Rect2(r.position.x - 13.0, ay, -10.0, 10.0), false, fcol)
-			draw_texture_rect(at, Rect2(r.end.x + 5.0, ay, 10.0, 10.0), false, fcol)
+			var arows := toggle_arrow_rects(g, k)   # shared with the mouse hit-test
+			var lft := arows[0]
+			# left arrow drawn flipped: start at its right edge, negative width
+			draw_texture_rect(at, Rect2(lft.position.x + lft.size.x, lft.position.y, -lft.size.x, lft.size.y), false, fcol)
+			draw_texture_rect(at, arows[1], false, fcol)
 		if mitems[k]["id"] == "paste_seed":
 			# Where the seed comes from — the row name alone didn't say. Plated:
 			# it draws OUTSIDE the button over the live attract fight, and 8px
