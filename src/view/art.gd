@@ -39,7 +39,10 @@ const TEX := {
 	"enemy_shotgun": preload(SOL + "enemy/enemy_shotgun.png"),
 	"enemy_lmg": preload(SOL + "enemy/enemy_lmg.png"),
 	"enemy_sniper": preload(SOL + "enemy/enemy_sniper.png"),
-	"frogman": preload(SY + "frogman.png"),
+	# sol-12: authored pack diver replaces the legacy art frogman bake. "frogman" is the SURFACED (rifle) pose
+	# — the canonical key so corpse/bestiary/markers follow for free; the submerged variant is its own key.
+	"frogman": preload(SOL + "frogman_rifle.png"),
+	"frogman_speargun": preload(SOL + "frogman_speargun.png"),
 	"observer": preload(SY + "cast2/observer2.png"),
 	"bunker": preload(SY + "cast2/bunker.png"),
 	"trophy": preload(SY + "cast2/trophy.png"),
@@ -326,7 +329,7 @@ const SCALE := {
 	"player1": 0.25, "player2": 0.25, "rusher": 0.53, "elite": 0.58,   # sol-04: hero folds the 256px pack canvas to the ~18px on-screen footprint (was 0.56/0.47 for the 300px legacy art bake)
 	# sol-08: enemy pack sprites fold the 128px canvas to the ~18-20px infantry footprint (call-scale 0.5 × 0.5 × 128 ≈ 32px canvas).
 	"enemy_assault": 0.5, "enemy_smg": 0.5, "enemy_shotgun": 0.5, "enemy_lmg": 0.5, "enemy_sniper": 0.5,
-	"frogman": 1.05, "observer": 0.24, "bunker": 0.17,
+	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24, "bunker": 0.17,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the legacy art bake)
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
 	# Real barrel bakes replacing the 4x4 blanks: sized so the minigun sits
@@ -430,7 +433,7 @@ const TINT := {
 	"enemy_assault": Color(1.35, 0.92, 0.74), "enemy_smg": Color(1.4, 0.95, 0.76),
 	"enemy_shotgun": Color(1.32, 0.9, 0.72), "enemy_lmg": Color(1.3, 0.88, 0.72),
 	"enemy_sniper": Color(1.36, 0.9, 0.78),
-	"frogman": Color(1.35, 1.6, 1.7), "observer": Color(1.6, 1.2, 1.0),   # frogman: bright cool "wet threat" — dark bake vanished against rocks (3v)
+	"frogman": Color(1.35, 1.6, 1.7), "frogman_speargun": Color(1.35, 1.6, 1.7), "observer": Color(1.6, 1.2, 1.0),   # frogman/sol-12: bright cool "wet threat"
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,
 	"gunship_body": BOSS_VEH, "gunship_barrel": BOSS_VEH,
@@ -501,7 +504,7 @@ const OUTLINE := {
 	# so the _spr 1.7px rim on top read as a fat sticker and swallowed the 18px silhouette. The baked
 	# contour carries the separation now (pin: test asserts the hero keys are NOT in OUTLINE).
 	"rusher": true, "elite": true,
-	"frogman": true, "observer": true, "bunker": true,
+	"observer": true, "bunker": true,   # sol-12: frogman dropped — the pack diver bakes its own keyline (no double rim), matching hero/enemy
 	"tank_body": true, "tank_barrel": true, "gunship_body": true,
 	"gunship_barrel": true, "colossus_body": true, "colossus_barrel": true,
 	"sandbag_beige": true, "mg_stand": true, "riot_shield": true,

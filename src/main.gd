@@ -3484,6 +3484,13 @@ static func _has_canopy_dapple(ash: float) -> bool:
 	return ash < 0.33
 
 
+static func _frogman_tex(submerged: bool) -> String:
+	# sol-12: the diver shows a SPEARGUN while submerged (the underwater weapon), a rifle once he
+	# surfaces — a pure read of the existing e["submerged"] sim state, so the silhouette telegraphs
+	# the dive state with no new field. "frogman" is the surfaced (rifle) key.
+	return "frogman_speargun" if submerged else "frogman"
+
+
 static func _hero_shows_apex(down_residual: float) -> bool:
 	# a4-03: the hero value-apex crown catch-light shows only while UP — a downed / reviving
 	# body (down_residual > 0) must NOT read as the brightest point on the field.
@@ -5203,7 +5210,7 @@ func _draw_enemies() -> void:
 				_spr("fx_bubble1" if eidx % 2 == 0 else "fx_bubble2",
 					epos + Vector2(sin(bph * TAU) * 2.5, -2.0 - bph * 10.0), 0.0,
 					0.05 + bph * 0.04, Color(1, 1, 1, 0.55 * (1.0 - bph)))
-				_spr("frogman", epos, face, 0.4, Color(0.5, 0.8, 0.8, 0.35))
+				_spr(_frogman_tex(e["submerged"]), epos, face, 0.4, Color(0.5, 0.8, 0.8, 0.35))
 			elif st > 0:
 				# Surfacing telegraph: bold ripple burst + the body rising up.
 				var sfrac := 1.0 - float(st) / float(SimWorld.FROGMAN_SURFACE_TICKS)
@@ -5214,7 +5221,7 @@ func _draw_enemies() -> void:
 					_spr("fx_bubble1" if k == 0 else "fx_bubble2",
 						epos + Vector2(k * 7.0 - 3.5, -3.0 - sfrac * (7.0 + k * 5.0)), 0.0,
 						0.06 + sfrac * 0.05, Color(1, 1, 1, 0.8 * (1.0 - sfrac)))
-				_spr("frogman", epos, face, 0.4 + sfrac * 0.1,
+				_spr(_frogman_tex(e["submerged"]), epos, face, 0.4 + sfrac * 0.1,
 					Color(0.7, 0.9, 0.95, 0.4 + sfrac * 0.6))
 			else:
 				var flunge: int = e.get("lunge_ticks", 0)
@@ -5225,9 +5232,9 @@ func _draw_enemies() -> void:
 					# just closed isn't followed by a silent death.
 					var fdir := Vector2.from_angle(face)
 					draw_line(epos - fdir * 10.0, epos + fdir * 2.0, Color(1.0, 0.3, 0.2, 0.5), 3.0)
-					_spr("frogman", epos, face, 0.52, Color(1.5, 0.5, 0.4))
+					_spr(_frogman_tex(e["submerged"]), epos, face, 0.52, Color(1.5, 0.5, 0.4))
 				else:
-					_spr("frogman", epos, face, 0.5)
+					_spr(_frogman_tex(e["submerged"]), epos, face, 0.5)
 		elif e["kind"] == "sniper":
 			# Paints a laser line on its target during the long windup — the
 			# 'get off this line NOW' telegraph. Break LOS or sidestep.

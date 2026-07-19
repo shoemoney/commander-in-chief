@@ -819,6 +819,23 @@ func test_sol_enemy_red_team() -> void:
 		Runner.T.ok(not tex.has(dead), "retired legacy art enemy bake '%s' dropped from TEX — no dead preload (sol-08)" % dead)
 
 
+func test_sol_frogman_variant() -> void:
+	# sol-12: the legacy art frogman is swapped for the authored pack diver, with a two-pose variant keyed
+	# purely off the existing e["submerged"] sim state — speargun down, rifle up — no new field.
+	var art: Dictionary = load("res://src/view/art.gd").get_script_constant_map()
+	var tex: Dictionary = art["TEX"]
+	var outline: Dictionary = art["OUTLINE"]
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(tex["frogman"].resource_path.contains("soldiers/frogman_rifle"),
+		"frogman surfaced pose = pack rifle diver (sol-12)")
+	Runner.T.ok(tex.has("frogman_speargun") and tex["frogman_speargun"].resource_path.contains("soldiers/frogman_speargun"),
+		"frogman submerged pose = pack speargun diver (sol-12)")
+	Runner.T.ok(not outline.has("frogman") and not outline.has("frogman_speargun"),
+		"the diver keeps its baked keyline — out of OUTLINE, no double rim (sol-12)")
+	Runner.T.eq(ms._frogman_tex(true), "frogman_speargun", "submerged diver shows the SPEARGUN (sol-12)")
+	Runner.T.eq(ms._frogman_tex(false), "frogman", "surfaced diver shows the RIFLE (sol-12)")
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
