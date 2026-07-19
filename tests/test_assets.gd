@@ -882,6 +882,31 @@ func test_sol_muzzle_pop() -> void:
 		"an enemy muzzle carries no pop flag → procedural pop, no red-faction muzzleflash (sol-16)")
 
 
+func test_sol_guards() -> void:
+	# sol-14 / sol-17 / sol-18 (cross-cutting guards): a future edit that wires a watermarked death pose,
+	# an off-theme baddie, or a broken soldier path should fail HERE, not in a screenshot.
+	var art: Dictionary = load("res://src/view/art.gd").get_script_constant_map()
+	var tex: Dictionary = art["TEX"]
+	var soldier_keys := 0
+	for k in tex:
+		var path: String = tex[k].resource_path
+		# sol-14: no watermarked death_* pose ships — the downed body reuses the live hero sprite (greyed prone).
+		Runner.T.ok(not String(k).begins_with("death_") and not path.contains("/death/"),
+			"no death_* pose registered — downed body reuses the greyed hero, not a watermarked pose (sol-14): %s" % k)
+		# sol-17: the off-theme baddies/ roster (zombies/aliens/mechs/cultists...) maps to no sim kind — never wired.
+		Runner.T.ok(not path.contains("/baddies/"),
+			"no baddies/ sprite wired — off-theme, no sim kind (sol-17): %s" % k)
+		# sol-15/16 reject: the watermarked/hollow large muzzle flash is never registered.
+		Runner.T.ok(not path.contains("muzzleflash_large"), "the rejected muzzleflash_large is unregistered (sol-15)")
+		# sol-18: every registered infantry set key resolves to a live, imported asset (no dead SOL row).
+		if path.contains("/soldiers/"):
+			soldier_keys += 1
+			Runner.T.ok(ResourceLoader.exists(path), "soldier key '%s' resolves to a live asset (sol-18)" % k)
+	# sol-18: the ship-set is the intended small subset (hero + 5 enemy + 2 frogman + mz_pop = 9), not 88.
+	Runner.T.ok(soldier_keys >= 8 and soldier_keys <= 12,
+		"the shipped soldier subset stayed lean (%d keys, not the whole 88-sprite pack) (sol-18)" % soldier_keys)
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
