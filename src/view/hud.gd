@@ -7,6 +7,19 @@ extends Control
 const ICON := 13.0
 const FONT_SIZE := 10
 const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
+const PIP_MIN_X := 4.0  # left safety floor (inset) for the accessibility corner pips — a narrow/
+                       # letterboxed viewport can't push the CB/RM scrim plate off the left edge
+const PIP_PAD_L := 3.0  # the scrim plate overhangs the glyph this far to the LEFT; folded into the
+                       # clamp so the WHOLE plate (not just the glyph) is guarded, never just the anchor
+const PIP_H := 10.0     # scrim-plate height (glyph row is ~9px tall + 1px breathing)
+const PIP_SCRIM := Color(0.04, 0.05, 0.04, 0.92)   # near-opaque backing: even over white snow /
+                       # desert / an explosion flash it composites to a near-black plate so the pip
+                       # never washes out. Extracted as a const so the contrast test measures the
+                       # EXACT color the plate draws with (can't drift from what lands on-screen).
+const PIP_HAIRLINE := Color(0.75, 0.8, 0.75, 0.45)  # light edge stroke framing the scrim off a
+                       # bright background so the plate edge stays legible, not just the glyph.
+const PIP_SUPPRESS := Vector2(RIGHT, RIGHT)  # zero-width fail-closed band: _pip_fits rejects every
+                       # label, so a degenerate viewport/transform HIDES the pips instead of guessing
 const OVF_PAD := 8.0   # c1-06: horizontal padding inside the "+N" overflow chip; the slot
                        # reserved for it is the MEASURED text width plus this, never a fixed
                        # guess that could under- or over-reserve.
@@ -898,25 +911,116 @@ static func verb_legend_primitives(y: float) -> Array:
 ## both toggles reshape the whole HUD but had no on-screen state readout.
 func _accessibility_pips() -> void:
 	var acc_y := 8.0
-	if Art.colorblind:
-		_pip_plate("CB", acc_y)
-		_text("CB", RIGHT - _tw("CB"), acc_y, Art.safe(Color(0.6, 0.85, 1.0, 0.85)))
+	var band := _pip_bounds()   # (left, right) usable band in HUD-local space; pulls in when cropped
+	# full-alpha glyphs sit on the opaque scrim for max contrast; a pip whose label can't fit the
+	# band at all is SUPPRESSED (below the supported minimum) rather than drawn spilling off-edge.
+	if Art.colorblind and _pip_fits("CB", band):
+		_text("CB", _pip_plate("CB", acc_y, band), acc_y, Art.safe(Color(0.6, 0.85, 1.0)))
 		acc_y += 11.0
-	if main._motion < 0.5:
-		_pip_plate("RM", acc_y)
-		_text("RM", RIGHT - _tw("RM"), acc_y, Art.safe(Color(0.75, 0.95, 0.7, 0.85)))
+	if main._motion < 0.5 and _pip_fits("RM", band):
+		_text("RM", _pip_plate("RM", acc_y, band), acc_y, Art.safe(Color(0.75, 0.95, 0.7)))
+
+
+## Whether a pip's label fits the usable band — the supported minimum below which the pip is
+## suppressed rather than drawn past the visible edge (only reachable at absurd sub-24px widths).
+## The gate requires room for the glyph PLUS the plate's PIP_PAD_L left overhang, so a pip is only
+## shown when its full scrim padding is preserved (never a collapsed-padding plate at the edge).
+## Explicitly rejects a degenerate band (band.y <= band.x, e.g. the PIP_SUPPRESS fail-closed sentinel)
+## and a nonpositive measured width, so suppression is guaranteed and never depends on float slop.
+func _pip_fits(txt: String, band: Vector2) -> bool:
+	var w := _tw(txt)
+	return w > 0.0 and band.y > band.x and w + PIP_PAD_L <= band.y - band.x
+
+
+## Usable band (left, right) for the corner pips, resolved in the HUD's OWN local draw space.
+## The HUD is a Control on a CanvasLayer, so the bounds it can safely draw between depend on the
+## CanvasLayer transform AND the active stretch/letterbox scale AND the OS safe area — none in the
+## same coordinate space. We gather those live values and hand them to the pure _resolve_pip_bounds
+## (unit-testable without a live viewport). No 640 assumption: a genuinely narrow, cropped, or
+## notch-inset bound pulls the pips in on BOTH sides. Not-in-tree falls back to the full band.
+func _pip_bounds() -> Vector2:
+	if not is_inside_tree():
+		return Vector2(PIP_MIN_X, RIGHT)
+	var vp := get_viewport()
+	return _resolve_pip_bounds(vp.get_visible_rect(), Rect2(DisplayServer.get_display_safe_area()),
+		vp.get_screen_transform().affine_inverse(), get_global_transform_with_canvas().affine_inverse())
+
+
+## Pure viewport->HUD-local band resolver (the body of _pip_bounds, factored out so it is unit-
+## testable). `vis` = viewport visible rect; `safe` = OS safe area in SCREEN px (size 0 = none);
+## `screen_inv` = viewport-from-screen transform; `canvas_inv` = HUD-local-from-viewport transform.
+## The safe area is mapped into viewport space (never mixed raw) before intersecting the visible
+## rect on BOTH sides ONLY where it overlaps the view; each edge is then mapped into HUD-local space
+## and the shared 8px HUD inset applied inward, capping the right at RIGHT. A safe area that maps
+## entirely outside the viewport (a windowed / non-primary-display DisplayServer quirk) is IGNORED,
+## not clamped to -- so a mis-reported safe area can never fail closed and silently hide the pips.
+## FAIL CLOSED only on a genuinely unknown geometry: a HUD-local band that resolves inverted
+## (flipped/degenerate transform) returns a zero-width band, which _pip_fits then SUPPRESSES -- pips
+## are hidden rather than drawn into an unknown region. (The genuine no-live-viewport path in
+## _pip_bounds keeps the full design band so headless/offline still shows the pips.)
+static func _resolve_pip_bounds(vis: Rect2, safe: Rect2, screen_inv: Transform2D, canvas_inv: Transform2D) -> Vector2:
+	var vl := vis.position.x
+	var vr := vis.end.x
+	if safe.size.x > 0.0:
+		var sl := (screen_inv * safe.position).x
+		var sr := (screen_inv * safe.end).x
+		# Only inset when the mapped safe area actually OVERLAPS our visible row. In a windowed /
+		# non-primary-display config DisplayServer reports the safe area in desktop-screen space, which
+		# maps entirely outside the viewport once run through screen_inv -- clamping to it would leave an
+		# empty band and FAIL CLOSED, silently hiding the accessibility pips. A safe area that doesn't
+		# touch our view is not our notch: ignore it and keep the full band (fail OPEN). Genuine notch
+		# insets, which do overlap, still pull the edge in.
+		if sr > vl and sl < vr:
+			vl = maxf(vl, sl)
+			vr = minf(vr, sr)
+	if vr <= vl:
+		return PIP_SUPPRESS
+	# An axis-aligned stretch/letterbox/CanvasLayer transform (all this game ever applies) maps the
+	# visible row's endpoints straight into HUD-local x; a band that resolves inverted (degenerate
+	# transform) fails closed below.
+	var ll := (canvas_inv * Vector2(vl, vis.position.y)).x
+	var lr := (canvas_inv * Vector2(vr, vis.position.y)).x
+	var band := Vector2(ll + PIP_MIN_X, minf(RIGHT, lr - (640.0 - RIGHT)))
+	return band if band.y > band.x else PIP_SUPPRESS
+
+
+## Glyph x for a corner pip, right-anchored so its RIGHT edge always sits exactly on `right_edge` —
+## so the pip can NEVER spill past the visible/right bound (off-canvas), which is the whole point of
+## this readability fix. When the label fits (guaranteed by the caller's _pip_fits gate) this also
+## honors the left inset, since a right-aligned x lands at right_edge - w >= left_edge. Below the
+## supported minimum the label is wider than the band and SOMETHING must overflow: we keep the right
+## edge pinned and let the unavoidable overflow spill LEFT into the HUD interior (harmless; the live
+## caller suppresses such a pip entirely) rather than off the right edge. `_left_edge` is retained
+## for signature parity with the plate callers; the right-edge guarantee never depends on it.
+## Static + pure so tests drive any band.
+static func _pip_x(right_edge: float, w: float, _left_edge := PIP_MIN_X) -> float:
+	return right_edge - w
+
+
+## Scrim-plate rect for a corner pip whose glyph is `w` wide, built AROUND the _pip_x anchor (so
+## plate and glyph can never drift): it overhangs the glyph by PIP_PAD_L on the left and ends at
+## the glyph's right edge, both sides clamped into [left_edge, right_edge] so the whole plate
+## stays inside the visible band. Static + pure.
+static func _pip_plate_rect(right_edge: float, w: float, py: float, left_edge := PIP_MIN_X) -> Rect2:
+	var gx := _pip_x(right_edge, w, left_edge)
+	var left := maxf(left_edge, gx - PIP_PAD_L)
+	var right := minf(right_edge, gx + w)
+	return Rect2(left, py - 1.0, maxf(1.0, right - left), PIP_H)
 
 
 ## Dark backing behind a corner pip — the pips draw over the live battlefield with
 ## no panel under them (the corner plate is top-LEFT), so they washed out on bright
-## grass/water. A small scrim rect restores contrast without a full plate.
-func _pip_plate(txt: String, py: float) -> void:
+## snow/desert. An opaque scrim + hairline restores contrast without a full plate;
+## returns the glyph x (the shared _pip_x anchor the plate is built around).
+func _pip_plate(txt: String, py: float, band: Vector2) -> float:
 	var w := _tw(txt)
-	# Kept fully left of RIGHT (was overhanging by 1px). 0.8 fill + a faint hairline
-	# so the pip holds contrast over an explosion flash or bright water, not just grass.
-	var r := Rect2(RIGHT - w - 3.0, py - 1.0, w + 3.0, 10.0)
-	draw_rect(r, Color(0.05, 0.07, 0.05, 0.8))
-	draw_rect(r, Color(0.7, 0.75, 0.7, 0.35), false, 1.0)
+	var r := _pip_plate_rect(band.y, w, py, band.x)
+	# Near-opaque so the pip holds over bright snow/desert or an explosion flash, not just grass.
+	draw_rect(r, PIP_SCRIM)
+	# The 1px hairline is stroked CENTERED on its rect edge, so drawing it on `r` would push half a
+	# pixel past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
+	draw_rect(r.grow(-0.5), PIP_HAIRLINE, false, 1.0)
+	return _pip_x(band.y, w, band.x)
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
