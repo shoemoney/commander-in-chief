@@ -865,6 +865,21 @@ func test_sol_muzzle_pop() -> void:
 	var mh: Dictionary = load("res://src/main.gd").get_script_constant_map()["MUZZLE_HEAT"]
 	Runner.T.ok(mh["pop_a"] <= 0.7 and mh["pop_lerp"] < 0.5,
 		"the pop is alpha-capped + warmed off white-hot so it never out-blooms an explosion (sol-15/16)")
+	# Wiring: the PLAYER fire handler _ev_shot tags its muzzle pop:true (→ the authored card draws); an
+	# enemy muzzle fx carries no pop flag (→ the procedural pop; no red-faction muzzleflash). Run the real
+	# _ev_shot to prove the player side, and check the enemy fx shape for the absent flag.
+	var m = load("res://src/main.gd").new()
+	m.sim = SimWorld.new(7, 1)
+	m._ev_shot({"i": 0, "x": 0, "y": 0})
+	var player_pop := false
+	for f in m._fx:
+		if f.get("kind") == "muzzle":
+			player_pop = f.get("pop", false)
+	Runner.T.ok(player_pop, "player _ev_shot tags its muzzle pop:true → the authored card draws (sol-15/16)")
+	m.free()
+	var enemy_fx := {"kind": "muzzle", "a": 0.0, "szj": 0.6, "col": Color(1.0, 0.42, 0.28)}
+	Runner.T.ok(not enemy_fx.get("pop", false),
+		"an enemy muzzle carries no pop flag → procedural pop, no red-faction muzzleflash (sol-16)")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
