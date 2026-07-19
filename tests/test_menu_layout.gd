@@ -392,6 +392,202 @@ func test_activate_and_nav_reach_step_vol() -> void:
 	stub.free()
 
 
+# c1-05 helpers: build the raw device events the item routes through _unhandled_input.
+func _key_ev(kc: int, pressed: bool) -> InputEventKey:
+	var e := InputEventKey.new()
+	e.keycode = kc
+	e.pressed = pressed
+	e.echo = false   # only real press edges cycle; held-key REPEAT runs in _process
+	return e
+
+
+func _click_ev(pos: Vector2) -> InputEventMouseButton:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = true
+	e.position = pos
+	return e
+
+
+# A HALL-mode Menu ready to receive raw events through the REAL _unhandled_input.
+# Not tree-parented (the RefCounted runner has no usable SceneTree — Engine.get_
+# main_loop() is null mid _init), which is fine: _unhandled_input's accept_event()
+# and get_viewport() calls are both guarded to no-op off-tree, so the cycling/click
+# LOGIC runs unchanged. Caller frees it.
+func _hall_menu_headless(stub: _StubMain) -> Control:
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HALL
+	return m
+
+
+# c1-05: the item's CORE claim — keyboard A/D and ◄/► arrows cycle the HALL filter
+# with FULL pad parity. Driven end-to-end through the REAL _unhandled_input (raw
+# InputEventKey press/release), NOT by poking _nav — so it proves the keycode routing
+# the item adds, not just the shared funnel. Covers immediate cycling on the press
+# edge, held-key auto-repeat via _process, release clearing the latch (repeat stops),
+# both directions, and A/D == arrows.
+func test_hall_keyboard_cycles_via_unhandled_input() -> void:
+	var stub := _StubMain.new()
+	var m := _hall_menu_headless(stub)
+	m._hall_filter = 0
+	# KEY_D press cycles forward IMMEDIATELY (ALL -> CAMPAIGN) and arms the hold latch.
+	m._unhandled_input(_key_ev(KEY_D, true))
+	Runner.T.eq(m._hall_filter, 1, "KEY_D press cycles ALL -> CAMPAIGN immediately")
+	Runner.T.eq(m._key_hmove, 1, "held-D latch armed for auto-repeat")
+	# OS key-echo must NOT cycle: the `not ev.echo` gate in _unhandled_input drops
+	# native repeats so ONLY the framerate-independent _process repeat advances the
+	# filter — an echo storm can't double the cycle rate on top of it.
+	var echo := _key_ev(KEY_D, true)
+	echo.echo = true
+	m._unhandled_input(echo)
+	Runner.T.eq(m._hall_filter, 1, "a native key-echo event is ignored (no doubled cycle)")
+	# Held D auto-repeats through _process (parity with the held stick).
+	m._key_hrep = 0.05
+	m._process(0.1)
+	Runner.T.eq(m._hall_filter, 2, "held KEY_D auto-repeats CAMPAIGN -> ENDLESS")
+	# Release clears the latch, and a further _process no longer repeats.
+	m._unhandled_input(_key_ev(KEY_D, false))
+	Runner.T.eq(m._key_hmove, 0, "KEY_D release clears the auto-repeat latch")
+	m._key_hrep = 0.05
+	m._process(0.1)
+	Runner.T.eq(m._hall_filter, 2, "no cycle after the key is released")
+	# KEY_A press cycles BACKWARD (ENDLESS -> CAMPAIGN), full ◄ parity.
+	m._unhandled_input(_key_ev(KEY_A, true))
+	Runner.T.eq(m._hall_filter, 1, "KEY_A press cycles ENDLESS -> CAMPAIGN")
+	m._unhandled_input(_key_ev(KEY_A, false))
+	# Arrow keys are identical to A/D — KEY_LEFT wraps CAMPAIGN -> ... -> ALL side.
+	m._unhandled_input(_key_ev(KEY_LEFT, true))
+	Runner.T.eq(m._hall_filter, 0, "KEY_LEFT cycles CAMPAIGN -> ALL (arrow == A/D parity)")
+	m._unhandled_input(_key_ev(KEY_LEFT, false))
+	# KEY_RIGHT from ALL wraps forward, matching D.
+	m._unhandled_input(_key_ev(KEY_RIGHT, true))
+	Runner.T.eq(m._hall_filter, 1, "KEY_RIGHT cycles ALL -> CAMPAIGN (arrow == A/D parity)")
+	m._unhandled_input(_key_ev(KEY_RIGHT, false))
+	# Forward WRAP at the top boundary: press D from ENDLESS -> ALL.
+	m._hall_filter = 2
+	m._unhandled_input(_key_ev(KEY_D, true))
+	Runner.T.eq(m._hall_filter, 0, "KEY_D from ENDLESS wraps forward to ALL")
+	m._unhandled_input(_key_ev(KEY_D, false))
+	# Backward WRAP at the bottom boundary: press A from ALL -> ENDLESS.
+	m._hall_filter = 0
+	m._unhandled_input(_key_ev(KEY_A, true))
+	Runner.T.eq(m._hall_filter, 2, "KEY_A from ALL wraps backward to ENDLESS")
+	# Held-key REPEAT also wraps at the boundary: parked on ENDLESS, the repeat
+	# tick (still latched from the A press) steps ENDLESS -> CAMPAIGN, never sticks.
+	m._key_hrep = 0.05
+	m._process(0.1)
+	Runner.T.eq(m._hall_filter, 1, "held-A repeat steps across the boundary (ENDLESS -> CAMPAIGN)")
+	m._unhandled_input(_key_ev(KEY_A, false))
+	m.free()
+	stub.free()
+
+
+# c1-05 (judge follow-up): cycling by keyboard OR mouse wheel must NOT wipe a hover
+# cue while the pointer physically rests on a tab — _tab_hover is pointer-owned, only
+# mouse motion moves it. Proves the previously-stale unconditional `_tab_hover = -1`
+# in _nav is gone: after both a wheel step and a KEY_D step the hover index survives.
+func test_hall_hover_survives_kb_and_wheel_cycle() -> void:
+	var stub := _StubMain.new()
+	var m := _hall_menu_headless(stub)
+	m._hall_filter = 0
+	# Pointer rests on CAMPAIGN (tab 1) — real motion sets the hover.
+	var tabs: Array[Rect2] = m._hall_tab_rects()
+	var mm := InputEventMouseMotion.new()
+	mm.position = tabs[1].get_center()
+	mm.relative = Vector2(6.0, 0.0)
+	m._unhandled_input(mm)
+	Runner.T.eq(m._tab_hover, 1, "pointer over CAMPAIGN sets the hover")
+	# Mouse WHEEL cycles the filter while the pointer has NOT moved — hover persists.
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
+	wheel.pressed = true
+	wheel.position = tabs[1].get_center()
+	m._unhandled_input(wheel)
+	Runner.T.eq(m._hall_filter, 1, "wheel-down cycles ALL -> CAMPAIGN")
+	Runner.T.eq(m._tab_hover, 1, "wheel cycling keeps the pointer's hover (not wiped)")
+	# KEY_D cycles again, pointer still parked — hover STILL reflects the cursor.
+	m._unhandled_input(_key_ev(KEY_D, true))
+	Runner.T.eq(m._hall_filter, 2, "KEY_D cycles CAMPAIGN -> ENDLESS")
+	Runner.T.eq(m._tab_hover, 1, "keyboard cycling keeps the pointer's hover (not wiped)")
+	m._unhandled_input(_key_ev(KEY_D, false))
+	# And once that hover tab becomes the SELECTED tab, _draw_hall's `not on` gate
+	# suppresses the hover cue so there's no double treatment (still pointer-owned).
+	m._hall_filter = 1   # CAMPAIGN now selected, pointer still on CAMPAIGN
+	Runner.T.eq(Menu.hall_tab_style(true, false, 0.0)["underline_h"], 2.0,
+		"selected tab wins; a coincident hover adds no second cue")
+	m.free()
+	stub.free()
+
+
+# c1-05: mouse-click selection stays correct for EVERY tab rect (the pre-existing
+# path the fix must not regress), driven through the real _unhandled_input button
+# branch. Clicking each tab's center selects that filter; a click clear of every
+# tab leaves the filter unchanged.
+func test_hall_tab_click_selects_each_rect() -> void:
+	var stub := _StubMain.new()
+	var m := _hall_menu_headless(stub)
+	var tabs: Array[Rect2] = m._hall_tab_rects()
+	for ti in tabs.size():
+		m._hall_filter = (ti + 1) % tabs.size()   # start OFF this tab so the click must move it
+		m._unhandled_input(_click_ev(tabs[ti].get_center()))
+		Runner.T.eq(m._hall_filter, ti, "clicking tab %d selects filter %d" % [ti, ti])
+	# A click clear of every tab rect (and the BACK plate at y310) changes nothing.
+	m._hall_filter = 1
+	m._unhandled_input(_click_ev(Vector2(2.0, 2.0)))
+	Runner.T.eq(m._hall_filter, 1, "a click off every tab rect leaves the filter unchanged")
+	m.free()
+	stub.free()
+
+
+# c1-05: hover feedback fed END-TO-END through _unhandled_input's mouse-motion path.
+# Real motion over a non-selected tab sets _tab_hover; motion clear of the tab row
+# drops it so no stale highlight lingers.
+func test_hall_tab_hover_via_mouse_motion() -> void:
+	var stub := _StubMain.new()
+	var m := _hall_menu_headless(stub)
+	m._hall_filter = 0   # ALL selected -> tab 0 is live; hover a NON-selected tab
+	var tabs: Array[Rect2] = m._hall_tab_rects()
+	var mm := InputEventMouseMotion.new()
+	mm.position = tabs[1].get_center()   # CAMPAIGN
+	mm.relative = Vector2(6.0, 0.0)      # > the 2px real-move gate
+	m._unhandled_input(mm)
+	Runner.T.eq(m._tab_hover, 1, "hovering the CAMPAIGN tab sets _tab_hover")
+	var off := InputEventMouseMotion.new()
+	off.position = Vector2(4.0, 340.0)   # far below the tab row
+	off.relative = Vector2(6.0, 0.0)
+	m._unhandled_input(off)
+	Runner.T.eq(m._tab_hover, -1, "moving off the tab row clears the hover")
+	m.free()
+	stub.free()
+
+
+# c1-05: the DRAW cue for the hover state — the plate + underline that a text-only
+# tint was missing. hall_tab_style is the pure single source _draw_hall renders from,
+# so asserting it IS the render assertion (headless has no GL surface for pixel
+# readback; same pattern as the compute_geometry/settle_offset draw-math tests).
+func test_hall_tab_hover_draw_cue() -> void:
+	# Selected tab: opaque plate + full 2px live underline.
+	var sel := Menu.hall_tab_style(true, false, 0.0)
+	Runner.T.ok(sel["plate"].a > 0.0, "selected tab draws a filled plate")
+	Runner.T.eq(sel["underline_h"], 2.0, "selected tab draws the 2px live underline")
+	# Hovered non-selected tab: a real plate + underline PREVIEW (not just tinted text).
+	var hov := Menu.hall_tab_style(false, true, 0.0)
+	Runner.T.ok(hov["plate"].a > 0.0, "hovered tab draws a hover plate, not text-only")
+	Runner.T.ok(hov["underline_h"] > 0.0, "hovered tab draws an underline preview")
+	Runner.T.ok(hov["plate"].a < sel["plate"].a, "hover plate is a dimmer echo of the live plate")
+	# Idle tab: no plate, no underline — the affordance is reserved for hover/selected.
+	var idle := Menu.hall_tab_style(false, false, 0.0)
+	Runner.T.eq(idle["plate"].a, 0.0, "idle tab draws no plate")
+	Runner.T.eq(idle["underline_h"], 0.0, "idle tab draws no underline")
+	# Hover brightens the text above the idle tint (the faint pre-fix cue, now backed).
+	Runner.T.ok(hov["text"].get_luminance() > idle["text"].get_luminance(),
+		"hover lifts text brightness above the idle tint")
+	# The `on` state wins even if a stale hover index coincides (no double treatment).
+	var both := Menu.hall_tab_style(true, true, 0.0)
+	Runner.T.eq(both["underline_h"], 2.0, "selected wins over a coincident hover (single treatment)")
+
+
 # Enter/click clamps at 10 and never wraps into a mute — a stateful stub proves
 # consecutive steps ride the written level and the top rail stops writing.
 func test_enter_clamps_at_max_and_never_wraps_to_mute() -> void:

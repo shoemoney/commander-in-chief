@@ -99,17 +99,17 @@ func _process(delta: float) -> void:
 			if _key_rep <= 0.0:
 				_key_rep = 0.12
 				_nav(_key_move, 0)
-		# Held ◄/► KEYS auto-repeat the volume step (parity with the held stick),
-		# but ONLY on a volume row — repeating on a toggle would machine-gun it,
-		# the same reason the held stick never auto-repeats horizontally off HALL.
+		# Held ◄/► KEYS auto-repeat, matching the held stick: in HALL it cycles the
+		# filter (stick does the same at line ~95), on a volume row it steps the
+		# level. Toggles get NO repeat — a held key would machine-gun the flip.
 		if _key_hmove != 0:
 			_key_hrep -= delta
 			if _key_hrep <= 0.0:
 				_key_hrep = 0.12
-				if mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
+				if mode == Mode.HALL or _menu_items()[sel]["id"] in ["sfx", "music"]:
 					_nav(0, _key_hmove)
 				else:
-					_key_hmove = 0   # not a volume row: drop the latch, no auto-repeat
+					_key_hmove = 0   # not a HALL/volume context: drop the latch, no auto-repeat
 		# Exp-decay easing: framerate-independent (per-frame lerpf ran ~2.4x
 		# faster on a 144Hz display). Reduce-motion snaps both instantly.
 		if main._motion < 0.5:
@@ -332,8 +332,10 @@ func _unhandled_input(ev: InputEvent) -> void:
 				move = 1
 				_key_move = 1
 				_key_rep = 0.35
-			# ◄/► (A/D or arrows) feed hmove -> _nav, which on a SFX/MUSIC row steps
-			# the volume down/up: keyboard now moves the level, not just the cursor.
+			# ◄/► (A/D or arrows) feed hmove -> _nav: on a SFX/MUSIC row it steps
+			# the volume down/up, and in HALL it cycles the ALL/CAMPAIGN/ENDLESS
+			# filter — full parity with the pad d-pad (keyboard moves the level and
+			# the Hall filter, not just the cursor).
 			KEY_A, KEY_LEFT:
 				hmove = -1
 				_key_hmove = -1
@@ -437,8 +439,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 		return
 	if ev is InputEventMouseButton:
 		# Menus swallow EVERY click, hit or miss, press or release — a stray
-		# click through an open menu must never bleed into gameplay.
-		get_viewport().set_input_as_handled()
+		# click through an open menu must never bleed into gameplay. (Guarded so a
+		# not-in-tree menu — the headless input tests — is a no-op here, not a crash.)
+		var vp := get_viewport()
+		if vp != null:
+			vp.set_input_as_handled()
 		if not ev.pressed:
 			return
 		if ev.button_index == MOUSE_BUTTON_LEFT:
@@ -494,8 +499,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 	elif back and not back_dest(mode).is_empty():
 		var d := back_dest(mode)   # one level up; HALL/HOWTO/SETUP all climb here
 		open(d["mode"], d["sel"])
-	if move != 0 or hmove != 0 or act or back:
-		accept_event()
+	if (move != 0 or hmove != 0 or act or back) and is_inside_tree():
+		accept_event()   # is_inside_tree guard: a not-in-tree menu (headless tests) skips it
 	queue_redraw()
 
 
@@ -503,8 +508,16 @@ func _unhandled_input(ev: InputEvent) -> void:
 # and the mouse wheel, so every device gets identical wrap/snap/sfx behavior.
 func _nav(move: int, hmove: int) -> void:
 	# Hall of Fame: left/right cycles the mode filter (ALL / CAMPAIGN / ENDLESS).
+	# Every device funnels here — keyboard A/D + arrows (via _unhandled_input hmove
+	# and the held-key repeat above), pad d-pad, analog stick, and mouse wheel — so
+	# no input class is locked out of the filters the way the pad once wasn't.
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
+		# _tab_hover is pointer-owned — leave it. It tracks where the cursor
+		# physically rests (only mouse motion moves it), so cycling by kb/pad/wheel
+		# must not wipe a hover cue while the pointer is still over a tab. If the
+		# cursor sits on the tab we just selected, _draw_hall's `not on` gate hides
+		# the hover automatically, so no double-treatment slips through either.
 		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 		main._sfx.play("pickup", -14.0, 1.3)
 		queue_redraw()
@@ -1079,6 +1092,29 @@ func _draw_back_button() -> void:
 	_center_text("BACK", r.position.y + 16.0, 11, Color(1.0, 0.95, 0.75))
 
 
+# Pure per-tab visual treatment for the HALL filter row — text color plus whether
+# a plate and an underline are drawn, and their colors/height. Selected = full cue
+# (dark plate + 2px live underline), hover = dimmer plate + 1px preview underline +
+# brightened text, idle = neither (transparent plate, 0 height). Single-sourced so
+# _draw_hall and the render test can't drift; static + view-free so it runs headless.
+static func hall_tab_style(on: bool, hov: bool, filter_pulse: float) -> Dictionary:
+	var col := Color(1.0, 0.95, 0.65) if on else Color(0.6, 0.66, 0.56, 0.8)
+	if on and filter_pulse > 0.0:
+		col = col.lightened(filter_pulse * 0.45)
+	elif hov and not on:
+		col = Color(0.95, 0.98, 0.82)   # hover lifts text to near-selected brightness
+	var out := {"text": col, "plate": Color(0, 0, 0, 0), "underline": Color(0, 0, 0, 0), "underline_h": 0.0}
+	if on:
+		out["plate"] = Color(0.05, 0.08, 0.04, 0.9)
+		out["underline"] = Color(1.0, 0.9, 0.4, 0.9 + filter_pulse * 0.1)
+		out["underline_h"] = 2.0
+	elif hov:
+		out["plate"] = Color(0.14, 0.19, 0.12, 0.7)   # dimmer echo of the selected plate
+		out["underline"] = Color(0.9, 0.85, 0.5, 0.55)
+		out["underline_h"] = 1.0
+	return out
+
+
 func _hall_tab_rects() -> Array[Rect2]:
 	# The same measured tab layout _draw_hall renders, as clickable rects —
 	# keep the width math in lockstep with the loop below.
@@ -1112,19 +1148,24 @@ func _draw_hall() -> void:
 	for i in names.size():
 		var tr := tabs[i]
 		var on := i == _hall_filter
-		var col := Color(1.0, 0.95, 0.65) if on else Color(0.6, 0.66, 0.56, 0.8)
-		if on and _filter_pulse > 0.0:
-			col = col.lightened(_filter_pulse * 0.45)
-		elif not on and i == _tab_hover:
-			col = col.lightened(0.25)   # hover cue — same idiom as _filter_pulse
-		if on:
-			# Filled plate under the live tab — the underline alone read as
-			# decoration, not state, next to two equally-bright neighbors.
-			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), Color(0.05, 0.08, 0.04, 0.9))
-		Art.text(self, names[i], Vector2(tr.position.x + 4.0, 66), 10, col)
-		if on:
-			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, 2.0),
-				Color(1.0, 0.9, 0.4, 0.9 + _filter_pulse * 0.1))
+		var hov := not on and i == _tab_hover
+		# Text color + plate/underline treatment come from ONE pure helper so the
+		# selected/hover/idle cues are single-sourced and a headless test can pin
+		# the hover plate+underline without a GL surface (same idiom as the pure
+		# geometry statics above).
+		var st := hall_tab_style(on, hov, _filter_pulse)
+		var plate: Color = st["plate"]
+		if plate.a > 0.0:
+			# Filled plate under the live tab (the underline alone read as decoration,
+			# not state) — a dimmer echo for the hover preview so the pointer's target
+			# reads as a real button, not just tinted text.
+			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), plate)
+		Art.text(self, names[i], Vector2(tr.position.x + 4.0, 66), 10, st["text"])
+		var uh: float = st["underline_h"]
+		if uh > 0.0:
+			# Underline: 2px live rule for the selected tab, a fainter 1px preview on
+			# hover so it clearly reads as "click to make this the live filter".
+			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
 	# The cycle affordance itself: dpad art on pad, arrow text on keyboard.
 	var left := tabs[0].position.x + 4.0
 	var right := tabs[tabs.size() - 1].end.x - 4.0
