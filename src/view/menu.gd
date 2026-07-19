@@ -5,7 +5,7 @@ extends Control
 ## knows nothing about menus. Keyboard (W/S + Enter, Esc) and pad
 ## (dpad + A, Start) navigation.
 
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS }
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -154,27 +154,53 @@ func _menu_items() -> Array[Dictionary]:
 	if mode == Mode.TITLE:
 		# "grp" drives the divider rules in _draw: start-verbs / run-config
 		# toggles / meta screens / quit each read as their own block.
+		# c1-02: the 11-row crush is gone. RUN SETUP (a submenu holding CO-OP / NG+
+		# HARD) sits right beside the start verbs it configures — a pre-run choice
+		# stays one press from CAMPAIGN, not buried in settings. To hold TITLE at its
+		# comfortable 8-row cap (>=20px plates, 16px icons), the meta screens moved
+		# down a level: HALL OF FAME and HOW TO PLAY now live under OPTIONS. The old
+		# list wedged config between the start verbs and the meta screens, driving bh
+		# to ~11px with 8px speck icons and seating NG+/CO-OP right where a mis-nav
+		# off CAMPAIGN landed.
 		var titems: Array[Dictionary] = [
 			{"id": "campaign", "label": "CAMPAIGN", "destructive": false, "grp": 0},
 			{"id": "endless", "label": "ENDLESS WAR", "destructive": false, "grp": 0},
 			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0},
 			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false, "grp": 0},
-			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players, "grp": 1},
-			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 1},
-			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 2},
-			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 2},
+			# grp 1: run-config gets its own block (a divider splits it from the start
+			# verbs above and the meta screens below). The row carries its own live
+			# config tail — players and an EXPLICIT NORMAL/HARD difficulty — so a stale
+			# CO-OP or NG+ choice can't ride hidden into the next deploy.
+			{"id": "run_setup", "label": "RUN SETUP: %s  %s" % ["2P" if main._two_players else "1P",
+				"HARD" if main._hard else "NORMAL"], "destructive": false, "grp": 1, "submenu": true},
 		]
-		titems.append({"id": "options", "label": "OPTIONS", "destructive": false, "grp": 2})
+		titems.append({"id": "options", "label": "OPTIONS & INFO", "destructive": false, "grp": 2, "submenu": true})
 		if _has_replay:
 			titems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 2})
 		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 3})
 		return titems
+	if mode == Mode.SETUP:
+		# c1-02: CO-OP / NG+ HARD live on their own labeled RUN SETUP screen (reached
+		# from TITLE, beside the start verbs) so pre-run choices read as a distinct
+		# step and never crowd the settings toggles. Two rows + BACK => big plates.
+		return [
+			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players, "grp": 0},
+			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 0},
+			{"id": "back", "label": "BACK", "destructive": false, "grp": 2},
+		]
 	if mode == Mode.OPTS:
 		# Settings reachable BEFORE a run: reduce-motion/colorblind/assist lived
 		# only in PAUSE while the title played a live, flashing attract fight —
 		# exactly the players who need them couldn't reach them.
-		var oitems := _settings_rows()
-		oitems.append({"id": "back", "label": "BACK", "destructive": false})
+		# c1-02: the two meta screens lead (HALL OF FAME + HOW TO PLAY, grp 0), then
+		# the settings block (grp 1), then BACK — 9 rows max at a comfortable >=20px
+		# pitch. Relocating them here off TITLE is what holds the title at 8 rows.
+		var oitems: Array[Dictionary] = [
+			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 0, "submenu": true},
+			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 0, "submenu": true},
+		]
+		oitems.append_array(_settings_rows())
+		oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
 		return oitems
 	var pitems: Array[Dictionary] = [{"id": "resume", "label": "RESUME", "destructive": false, "grp": 0}]
 	pitems.append_array(_settings_rows())
@@ -218,6 +244,8 @@ func _row_icon(id: String) -> String:
 		"resume", "campaign": return "mi_play"
 		"hall": return "mi_trophy"
 		"howto": return "mi_book"
+		"run_setup", "hard": return "mi_combat"
+		"coop": return "mi_controller"
 		"sfx": return "mi_snd_off" if _bus_off("SFX") else "mi_snd_on"
 		"music": return "mi_mus_off" if _bus_off("Music") else "mi_mus_on"
 		"options": return "mi_settings"
@@ -390,8 +418,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 		_press()
 	elif back and mode == Mode.PAUSE:
 		mode = Mode.HIDDEN
-	elif back and (mode == Mode.HALL or mode == Mode.HOWTO or mode == Mode.OPTS):
-		open(Mode.TITLE, {Mode.HALL: "hall", Mode.HOWTO: "howto", Mode.OPTS: "options"}[mode])
+	elif back and not back_dest(mode).is_empty():
+		var d := back_dest(mode)   # one level up; HALL/HOWTO/SETUP all climb here
+		open(d["mode"], d["sel"])
 	if move != 0 or hmove != 0 or act or back:
 		accept_event()
 	queue_redraw()
@@ -451,26 +480,98 @@ func _press() -> void:
 		_activate()
 
 
+# Pure, view-free layout math for the button column — extracted so a headless
+# regression test can pin the decompressed TITLE geometry (>=20px plates, 16px
+# icons, header/legend clearance) without standing up a Control, Art, or `main`.
+# `head_bottom` is the y of the lowest header plate the caller actually drew
+# (TITLE varies it by which BEST/CAREER lines are present); other modes pass -1.
+static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictionary:
+	var many := n > 4
+	# OPTS/SETUP get their own top: the 156 floor exists to clear TITLE's record
+	# block, but they carry only a lone header at ~y88 — 120 seats rows right
+	# under it at the full gap.
+	var top := 118.0 if mode_id == Mode.PAUSE \
+		else (120.0 if (mode_id == Mode.OPTS or mode_id == Mode.SETUP) else (150.0 if not many else 156.0))
+	var gap: float
+	if mode_id == Mode.TITLE:
+		# top tracks whichever header lines are actually present (head_bottom) — a
+		# fresh install (no BEST/CAREER) starts ~24px higher, so the list decompresses
+		# into real height instead of a fixed 156 that crushed bh to ~11px + 8px specks.
+		top = head_bottom + 2.0
+		# Spread across the WHOLE band down to the y322 input legend. Dividing by
+		# n (not n-1) reserves the final row's own height, so QUIT self-clears the
+		# legend without the old hardcoded 296 bottom bound that left dead air.
+		gap = minf(46.0, (318.0 - top) / maxf(1.0, float(n)))
+	else:
+		# PAUSE/OPTS: bottom clears the y~322 legend strip — at 310 the QUIT row
+		# sat flush against it (6/8 panel reviewers, unanimous top item).
+		gap = minf(30.0 if many else 46.0, (310.0 - top) / maxf(1.0, float(n - 1)))
+	# TITLE plates take a 2px inter-row inset (vs 3px elsewhere) so the reclaimed
+	# band converts to taller clickable plates, not just wider dead gaps.
+	var inset := 2.0 if mode_id == Mode.TITLE else 3.0
+	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - inset)), "n": n}   # floored HERE so _draw and the mouse hit-test agree
+
+
+# The lowest header-plate baseline TITLE draws, given which record lines show —
+# single source shared by compute_geometry and _draw so the column top can't
+# drift off the header block. Non-TITLE modes have no record header (returns -1).
+static func title_head_bottom(has_best: bool, has_career: bool) -> float:
+	if has_career:
+		return 139.0   # CAREER whisper plate bottom (implies the whole stack)
+	if has_best:
+		return 127.0   # BEST line plate bottom
+	return 115.0       # tagline plate bottom (always drawn)
+
+
+# Where BACK / Esc goes from each screen — one level up. HALL and HOW TO PLAY
+# were relocated under OPTIONS, so they climb to OPTS; RUN SETUP and OPTIONS hang
+# off TITLE. Pure + single-sourced so _unhandled_input and _activate can't drift
+# their back-nav targets apart. Screens with no parent (TITLE/PAUSE/HIDDEN) => {}.
+static func back_dest(mode_id: int) -> Dictionary:
+	match mode_id:
+		Mode.HOWTO: return {"mode": Mode.OPTS, "sel": "howto"}
+		Mode.HALL: return {"mode": Mode.OPTS, "sel": "hall"}
+		Mode.SETUP: return {"mode": Mode.TITLE, "sel": "run_setup"}
+		Mode.OPTS: return {"mode": Mode.TITLE, "sel": "options"}
+		_: return {}
+
+
+# Open-settle drop-in: the whole column starts up to 12px LOW and rises to rest.
+# CAP the push so that even mid-open (open_t -> 0) the last plate never dips past
+# `max_bottom` — on TITLE that is the y322 input legend (the only screen that
+# draws it), which the fullest state settles just ~5px clear of, so an uncapped
+# +12 briefly overlapped it. Other screens have no legend, so `max_bottom` is the
+# canvas floor and the full drop-in survives. Pure + testable.
+static func settle_offset(g: Dictionary, open_t: float, motion: float, max_bottom: float) -> float:
+	if motion < 0.5:
+		return 0.0
+	var last_bottom := floorf(float(g["top"]) + float(int(g["n"]) - 1) * float(g["gap"])) + float(g["bh"])
+	return minf((1.0 - open_t) * 12.0, maxf(0.0, max_bottom - last_bottom))
+
+
 func _row_geometry() -> Dictionary:
 	# Single source of truth for the button column layout — _draw and the mouse
 	# hit-test must agree or hover selects the wrong row.
-	var n := _items().size()
-	var many := n > 4
-	# OPTS gets its own top: the 156 floor exists to clear TITLE's tagline/BEST/
-	# CAREER block, but OPTIONS has only a lone header at y88 — at 156 it left a
-	# ~46px void, then squeezed its 7 rows to a 25px pitch. 120 seats them right
-	# under the header at the full gap.
-	var top := 118.0 if mode == Mode.PAUSE \
-		else (120.0 if mode == Mode.OPTS else (150.0 if not many else 156.0))
-	# TITLE's bottom bound clears the y~322 input legend strip — at 310 the QUIT
-	# row sat flush against it (6/8 panel reviewers, unanimous top item).
-	var bottom := 296.0 if mode == Mode.TITLE else 310.0
-	var gap := minf(30.0 if many else 46.0, (bottom - top) / maxf(1.0, float(n - 1)))
-	# Open-settle drop-in offset lives HERE (after the gap math it must not
-	# perturb) so a click during the settle hits the same rows _draw renders.
-	if main._motion >= 0.5:
-		top += (1.0 - _open_t) * 12.0
-	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - 3.0)), "n": n}   # floored HERE so _draw and the mouse hit-test share one height
+	var head := title_head_bottom(main.best_score > 0, main._life_runs > 0)
+	var g := compute_geometry(mode, _items().size(), head)
+	# Drop-in offset lives HERE (after the pure gap math it must not perturb) so a
+	# click during the settle hits the same rows _draw renders. Only TITLE draws
+	# the y322 legend; elsewhere the last plate may ride to the 360 canvas floor.
+	var floor_y := 321.0 if mode == Mode.TITLE else 358.0
+	g["top"] = float(g["top"]) + settle_offset(g, _open_t, main._motion, floor_y)
+	return g
+
+
+# Which row a point falls in, given a geometry dict — pure so the hit-test is
+# unit-checkable. Extends each box by half the dead band so adjacent plates meet
+# exactly (a gap point used to fall through to -1 and blink the highlight out).
+static func hit_row(g: Dictionary, y: float) -> int:
+	var pad := maxf(0.0, (float(g["gap"]) - float(g["bh"])) / 2.0)
+	for k in int(g["n"]):
+		var ry := floorf(float(g["top"]) + float(k) * float(g["gap"]))   # same snap as _draw
+		if y >= ry - pad and y < ry + float(g["bh"]) + pad:
+			return k
+	return -1
 
 
 func _row_at(p: Vector2) -> int:
@@ -478,16 +579,7 @@ func _row_at(p: Vector2) -> int:
 		return 0 if _back_rect().has_point(p) else -1
 	if absf(p.x - 320.0) > BTN.x / 2.0:
 		return -1
-	var g := _row_geometry()
-	# Extend each row's hit-box by half the row-to-row dead band so adjacent boxes
-	# meet exactly — hovering the gap between plates used to fall through to -1 and
-	# the highlight blinked out mid-move.
-	var pad := maxf(0.0, (float(g["gap"]) - float(g["bh"])) / 2.0)
-	for k in int(g["n"]):
-		var ry := floorf(float(g["top"]) + float(k) * float(g["gap"]))   # same snap as _draw
-		if p.y >= ry - pad and p.y < ry + float(g["bh"]) + pad:
-			return k
-	return -1
+	return hit_row(_row_geometry(), p.y)
 
 
 ## Single source of truth for the HALL/HOWTO back button geometry — _row_at and
@@ -511,7 +603,9 @@ func _toggle_bus(name: String) -> void:
 func _activate() -> void:
 	main._sfx.play("buy", -8.0)
 	if mode == Mode.HALL or mode == Mode.HOWTO:
-		open(Mode.TITLE, "hall" if mode == Mode.HALL else "howto")
+		# The lone BACK plate on the HALL/HOWTO content screens climbs to OPTIONS.
+		var d := back_dest(mode)
+		open(d["mode"], d["sel"])
 		return
 	var id: String = _menu_items()[sel]["id"]
 	if mode == Mode.TITLE:
@@ -521,16 +615,20 @@ func _activate() -> void:
 			"daily": main.start_daily()
 			"watch": main.start_watch()
 			"paste_seed": main.start_seed_from_clipboard()
-			"coop": main._two_players = not main._two_players
-			"hard": main._hard = not main._hard
-			"hall": open(Mode.HALL)
-			"howto": open(Mode.HOWTO)
+			"run_setup": open(Mode.SETUP)   # run-config submenu, beside the start verbs
 			"options": open(Mode.OPTS)
 			"quit": get_tree().quit()
 	else:
 		match id:
 			"resume": mode = Mode.HIDDEN
-			"back": open(Mode.TITLE, "options")   # OPTS returns to the title, cursor on OPTIONS
+			"back":
+				# BACK climbs one level: SETUP/OPTS both return to TITLE (their parent).
+				var d := back_dest(mode)
+				open(d["mode"], d["sel"])
+			"hall": open(Mode.HALL)   # OPTIONS meta screen
+			"coop": main._two_players = not main._two_players   # run-setup toggle (SETUP); left/right + Enter share this path
+			"hard": main._hard = not main._hard
+			"howto": open(Mode.HOWTO)   # help screen under OPTIONS; back returns here
 			"sfx":
 				_toggle_bus("SFX")
 				main._save_settings()
@@ -635,19 +733,24 @@ func _draw() -> void:
 		# cited lesson; a white explosion drops the gold line under 2:1 contrast).
 		var tagline := "ONE HIT. ONE WAR CHEST. NO MERCY."
 		var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		draw_rect(Rect2(320.0 - tgw / 2.0 - 4.0, 101.0, tgw + 8.0, 14.0),
+		# Height 13 (was 14): its 101..114 span now abuts the BEST plate's 114 top
+		# instead of overlapping it by 1px — a double-darkened seam under the record.
+		draw_rect(Rect2(320.0 - tgw / 2.0 - 4.0, 101.0, tgw + 8.0, 13.0),
 			Color(0.03, 0.05, 0.03, 0.55))
 		_center_text(tagline, 112, 10, Color(0.85, 0.9, 0.8, 0.85))
-		# Read order: title → tagline → one BRIGHT record line → menu. CAREER stays
-		# a dim whisper at 145 (clears the 156 first-row top since the c1 layout fix).
+		# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
+		# c1-02: the record block was pulled UP into a tight two-line stack (BEST
+		# baseline 124, CAREER 136) from the old 132/145 spread — freeing ~14px so
+		# the button column starts higher and every TITLE state clears a >=20px plate
+		# instead of the old crush. _row_geometry's TITLE top tracks these baselines.
 		if main.best_score > 0:
 			# a2-04 HUD#8: only show the record fields that are non-zero (via a testable
 			# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
 			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist)
 			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			draw_rect(Rect2(320.0 - bw / 2.0 - 4.0, 122.0, bw + 8.0, 13.0),
+			draw_rect(Rect2(320.0 - bw / 2.0 - 4.0, 114.0, bw + 8.0, 13.0),
 				Color(0.03, 0.05, 0.03, 0.55))
-			_center_text(best_line, 132, 9, Color(1.0, 0.92, 0.55, 1.0))
+			_center_text(best_line, 124, 9, Color(1.0, 0.92, 0.55, 1.0))
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
 			var career := "CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
@@ -655,11 +758,17 @@ func _draw() -> void:
 			# Plated like the input legend: 8px dim text straight on the live
 			# attract firefight loses to bright terrain no matter the alpha.
 			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			draw_rect(Rect2(320.0 - cpw / 2.0 - 4.0, 136.0, cpw + 8.0, 12.0),
+			draw_rect(Rect2(320.0 - cpw / 2.0 - 4.0, 127.0, cpw + 8.0, 12.0),
 				Color(0.03, 0.05, 0.03, 0.55))
-			_center_text(career, 145, 8, Color(0.6, 0.72, 0.62, 0.7))
+			_center_text(career, 136, 8, Color(0.6, 0.72, 0.62, 0.7))
 	elif mode == Mode.OPTS:
-		_center_text("OPTIONS", 88, 22, Color(0.95, 0.95, 0.85))
+		# "& INFO": the screen also fronts HALL OF FAME + HOW TO PLAY, not just settings.
+		_center_text("OPTIONS & INFO", 88, 20, Color(0.95, 0.95, 0.85))
+	elif mode == Mode.SETUP:
+		_center_text("RUN SETUP", 84, 22, Color(0.95, 0.95, 0.85))
+		# Say what the screen is for — the two toggles below decide the run you deploy.
+		_center_text("PLAYERS & DIFFICULTY FOR YOUR NEXT DEPLOY", 104, 8,
+			Color(0.8, 0.85, 0.72))
 	else:
 		_center_text("PAUSED", 78, 22, Color(0.95, 0.95, 0.85))
 		# Pause doubles as a status check — the run so far.
@@ -709,10 +818,10 @@ func _draw() -> void:
 		# by live state) — rows without one just stay text.
 		var icon := _row_icon(mitems[k]["id"])
 		if icon != "":
-			# Floor at 8px: with WATCH LAST RUN present the TITLE list is 11 rows,
-			# which drove bh-6 down to a ~5px illegible speck. 8px still centers
-			# cleanly in an 11px row.
-			var isz := clampf(bh - 6.0, 8.0, 16.0)
+			# Track the row: a taller decompressed row earns a bigger icon instead
+			# of pinning to an 8px speck. bh-3 keeps a 1px breath each side; 9px
+			# floor still centers cleanly in the worst-case 11px crush row.
+			var isz := clampf(bh - 3.0, 9.0, 16.0)
 			draw_texture_rect(Art.tex(icon), Rect2(Vector2(r.position.x + 9.0,
 				r.position.y + (bh - isz) / 2.0), Vector2(isz, isz)), false,
 				Color(1, 1, 1, 1.0 if selected else 0.7))
@@ -755,11 +864,21 @@ func _draw() -> void:
 			var cw := 12.0 * float(ct.get_width()) / float(ct.get_height())
 			draw_texture_rect(ct, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
 			label_r = r.end.x - cw - 10.0
+		# Rows that open a screen reserve a right-edge slot for the > chevron so a
+		# long label ellipsizes clear of it instead of colliding.
+		if mitems[k].get("submenu", false):
+			label_r = minf(label_r, r.end.x - 20.0)
 		# Fixed icon gutter: iconless rows indent the same, so every label
 		# left-aligns to one column. Overlong labels ellipsize inside the button.
 		var lx := r.position.x + 30.0
 		Art.text(self, _ellipsize(label, 11, label_r - lx),
 			Vector2(lx, cy + 4.0), 11, col)
+		# Submenu affordance: a right-pointing chevron marks rows that OPEN a screen
+		# (RUN SETUP / OPTIONS & INFO / HALL / HOW TO PLAY) so they don't read as a
+		# direct action or an in-place toggle. mi_arrow already points right.
+		if mitems[k].get("submenu", false):
+			draw_texture_rect(Art.tex("mi_arrow"), Rect2(r.end.x - 17.0, cy - 5.0, 10.0, 10.0),
+				false, Color(1.0, 0.92, 0.55) if selected else Color(0.72, 0.77, 0.62, 0.85))
 		# Volume rows: a 10-step level bar where the toggle dot would sit —
 		# level reads as fill COUNT (shape, not hue alone); 0 = all hollow.
 		if mitems[k].has("vol"):
