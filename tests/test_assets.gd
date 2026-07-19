@@ -746,6 +746,38 @@ func test_sol_hero_swap_scale_tint_outline() -> void:
 		"the pack hero is out of OUTLINE — baked keyline, no fat-sticker double rim (sol-06)")
 
 
+func test_sol_hero_pivot_and_apex() -> void:
+	# sol-07: (1) the a4-03 crown alpha is bumped so the cool catch-light reads on the new DARK helmet
+	# dome (0.32 half-vanished into the dark shading); (2) NO aim-pivot anchor is needed — the sprite's
+	# alpha-mass centroid sits within a couple px of texture-center, so _spr's center-rotation already
+	# turns the hero about his body (the reviewer's "orbit" fear was for the bbox, not the mass).
+	var ms = load("res://src/main.gd")
+	var c := _consts()
+	var apex_a: float = c["HERO_APEX_A"]
+	Runner.T.ok(apex_a > 0.32 and apex_a <= 0.55,
+		"crown alpha bumped so it reads on the dark helmet, still a highlight not a blob (sol-07): %.2f" % apex_a)
+	Runner.T.ok(ms._hero_shows_apex(0.0) and not ms._hero_shows_apex(0.5), "apex still upright-only after the retune")
+	var img: Image = (load("res://assets/soldiers/soldier_assault_rifle.png") as Texture2D).get_image()
+	if img.is_compressed():
+		img.decompress()
+	var w := img.get_width()
+	var h := img.get_height()
+	var sx := 0.0
+	var sy := 0.0
+	var sa := 0.0
+	for y in range(0, h, 2):
+		for x in range(0, w, 2):
+			var a := img.get_pixel(x, y).a
+			if a > 0.12:
+				sx += x * a
+				sy += y * a
+				sa += a
+	var cx := sx / sa
+	var cy := sy / sa
+	Runner.T.ok(absf(cx - w / 2.0) < w * 0.05 and absf(cy - h / 2.0) < h * 0.06,
+		"hero mass-centroid ~centered (%.0f,%.0f vs %d,%d) — center-rotation turns about the body, no pivot anchor (sol-07)" % [cx, cy, int(w / 2), int(h / 2)])
+
+
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
 	var ms = load("res://src/main.gd")
 	var warm: Color = ms._boss_rim_base(0.0)      # jungle / bridge
