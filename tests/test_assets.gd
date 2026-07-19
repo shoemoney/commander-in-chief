@@ -670,9 +670,6 @@ func test_sol_import_discipline_and_watermark_scrub() -> void:
 	# watermark is scrubbed — the extreme bottom-left corner samples as fully transparent.
 	var files := {
 		"res://assets/soldiers/soldier_assault_rifle.png": 256,
-		"res://assets/soldiers/walk/assault_walk1.png": 256,
-		"res://assets/soldiers/walk/assault_walk2.png": 256,
-		"res://assets/soldiers/walk/assault_walk3.png": 256,
 		"res://assets/soldiers/enemy/enemy_assault_rifle.png": 128,
 		"res://assets/soldiers/enemy/enemy_smg.png": 128,
 		"res://assets/soldiers/enemy/enemy_sniper.png": 128,
@@ -839,6 +836,21 @@ func test_sol_frogman_variant() -> void:
 		"neither diver pose takes the hostile light-rim separator (sol-12)")
 	Runner.T.eq(ms._frogman_tex(true), "frogman_speargun", "submerged diver shows the SPEARGUN (sol-12)")
 	Runner.T.eq(ms._frogman_tex(false), "frogman", "surfaced diver shows the RIFLE (sol-12)")
+
+
+func test_sol_walk_frames_not_wired() -> void:
+	# sol-13 (resolved by ground-truth): the pack's walk/*.png frames are a 3/4 running pose (888-922px
+	# tall, 41px inter-frame centroid jitter) vs the top-down IDLE hero (684px). Wiring them would pop the
+	# hero to a different projection than the top-down enemies/frogman AND jitter frame-to-frame — worse
+	# than the smooth, golden-safe walk_bob. Per the consensus "stay inside ONE set" caution + PLAYER's
+	# dissent, the bob is kept and the frames were removed. Guard against a future accidental re-wire.
+	var tex: Dictionary = load("res://src/view/art.gd").get_script_constant_map()["TEX"]
+	for k in tex:
+		Runner.T.ok(not String(k).contains("walk"),
+			"no walk-frame key '%s' is registered — the golden-safe walk_bob animates the hero (sol-13)" % k)
+	# The frames aren't even in the project anymore (no dead import for pixels nothing draws).
+	Runner.T.ok(not ResourceLoader.exists("res://assets/soldiers/walk/assault_walk1.png"),
+		"the inconsistent 3/4 walk frames were removed from the project (sol-13)")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:

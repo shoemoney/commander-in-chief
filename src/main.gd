@@ -6064,6 +6064,8 @@ func _draw_players() -> void:
 		# Run-cycle bob: a per-step vertical hop while moving, matching the charging
 		# enemies' cadence so the player sprite isn't the one flat-gliding thing on the
 		# field. _dust_prev still holds LAST frame's pos here (updated by _kick_dust below).
+		# sol-13: the infantry set walk/ frames are a 3/4 running pose (taller, centroid-jittery) that
+		# clashes with this top-down hero — this golden-safe bob stays the hero's locomotion, not those frames.
 		var walk_bob := 0.0
 		if p["alive"] and p["roll_ticks"] == 0 and i < _dust_prev.size() and Vector2i(p["x"], p["y"]) != _dust_prev[i]:
 			walk_bob = absf(sin(Engine.get_physics_frames() * 0.35 + i * PI)) * 1.2 * _motion
