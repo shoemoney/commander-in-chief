@@ -3300,16 +3300,14 @@ const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
 # Living things wear a heavier rim than scenery (4v: units sank into the prop
 # soup): 1.6px vs the fleet's 1.1px; bosses keep their warm 2.2px above both.
 const _UNIT_RIM := {"player1": true, "player2": true, "rusher": true, "elite": true,
-	"frogman": true, "observer": true, "m_insurgent3": true, "m_insurgent4": true,
-	"m_insurgent5": true, "m_soldier2": true, "m_contractor2": true, "m_bombsuit": true,
+	"frogman": true, "observer": true, "m_soldier2": true, "m_bombsuit": true,
 	"m_pilot": true, "ghillie": true, "courier": true, "sapper": true}
 # a1-02 figure-ground: small dark-clad HOSTILES wore the near-black rim and
 # merged into dark litter/craters. These get a warm-LIGHT separator rim in _spr
 # instead (heroes/frogman/observer/bombsuit keep the neutral rim — they read fine).
-const _LIGHT_RIM := {"rusher": true, "elite": true, "m_insurgent3": true,
-	"m_insurgent4": true, "m_insurgent5": true, "m_soldier2": true,
-	"m_contractor2": true, "sapper": true, "courier": true, "ghillie": true,
-	"m_pilot": true}
+const _LIGHT_RIM := {"rusher": true, "elite": true, "m_soldier2": true,
+	"sapper": true, "courier": true, "ghillie": true,
+	"m_pilot": true}   # sol-08: dropped m_insurgent3-5/m_contractor2 (retired with the enemy_* swap)
 # a1-07: craters read as blasted DEPRESSIONS via a soft dark pit under the decal
 # (they are holes, so they get no drop-shadow — this is a centered inner-shadow).
 const _CRATER_KEYS := {"crater": true, "crater_field": true}

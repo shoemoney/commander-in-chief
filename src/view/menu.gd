@@ -994,8 +994,9 @@ func _draw_howto() -> void:
 	Art.draw_glyph(self, "wheel", Vector2(px, 84.0), 12.0)
 	Art.text(self, "). That's the choice.", Vector2(px + 8.0, 88.0), 11, Color(0.85, 0.9, 0.8))
 	# The enemy roster with live sprites.
-	var roster := [["rusher", "RUSHER — charges, touch kills"],
-		["elite", "ELITE — keeps range, telegraphs one shot"],
+	# sol-08: front the LIVE red-team sprites the player now sees (rusher/elite draw the pack enemy_* cel bakes).
+	var roster := [["enemy_smg", "RUSHER — charges, touch kills"],
+		["enemy_assault", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — lurks in water, grenades only"]]
 	for i in roster.size():
 		# 24px pitch (was 26): buys the ENDLESS header its clearance below —
@@ -1014,7 +1015,7 @@ func _draw_howto() -> void:
 	# Art.tint like the roster above.
 	var special := [
 	["m_soldier2", Color(1.3, 1.1, 0.55), "GRENADIER — lobs a telegraphed blast on your spot. Keep moving."],
-		["m_contractor2", Color(1.1, 0.6, 1.2), "SNIPER — paints a laser line, then fires. Sidestep it."],
+		["enemy_sniper", Art.tint("enemy_sniper"), "SNIPER — paints a laser line, then fires. Sidestep it."],   # sol-08: live red marksman
 		["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
 		["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
 		["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],

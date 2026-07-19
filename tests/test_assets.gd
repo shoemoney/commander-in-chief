@@ -23,7 +23,7 @@ func test_a1_light_rim_is_a_subset_of_unit_rims() -> void:
 	var c := _consts()
 	var light: Dictionary = c["_LIGHT_RIM"]
 	var unit: Dictionary = c["_UNIT_RIM"]
-	Runner.T.ok(light.size() >= 8, "the small-hostile separator set is populated (%d)" % light.size())
+	Runner.T.ok(light.size() >= 6, "the small-hostile separator set is populated (%d)" % light.size())   # sol-08: 7 after retiring m_insurgent3-5/m_contractor2 with the enemy_* swap
 	for k in light:
 		Runner.T.ok(unit.has(k), "light-rim hostile '%s' must also be a unit rim" % k)
 
@@ -813,6 +813,10 @@ func test_sol_enemy_red_team() -> void:
 		Runner.T.ok(keys.has(s), "rusher skin '%s' is a pack red sprite — single authorship, no strobe (sol-08)" % s)
 	for k in ["rusher", "elite", "sniper"]:
 		Runner.T.ok(keys.has(corpse[k]), "%s corpse matches its live red-team sprite, not a legacy art ghost (sol-08)" % k)
+	# sol-08 cleanup: the legacy art bakes the swap retired (m_insurgent3-5 rusher skins, m_contractor2 sniper)
+	# are fully gone from TEX — no dead boot VRAM for sprites nothing draws.
+	for dead in ["m_insurgent3", "m_insurgent4", "m_insurgent5", "m_contractor2"]:
+		Runner.T.ok(not tex.has(dead), "retired legacy art enemy bake '%s' dropped from TEX — no dead preload (sol-08)" % dead)
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:

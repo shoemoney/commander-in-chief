@@ -187,10 +187,8 @@ const TEX := {
 	"fx_muzzle_fan": preload(SY + "fx/fx_muzzle_fan.png"),
 	# --- POLYGON Military mil2 bake (enemies, vehicles, weapon pickups, items) ---
 	"m_bombsuit": preload(SY + "mil2/bombsuit.png"),
-	"m_contractor2": preload(SY + "mil2/contractor2.png"),
-	"m_insurgent3": preload(SY + "mil2/insurgent3.png"),
-	"m_insurgent4": preload(SY + "mil2/insurgent4.png"),
-	"m_insurgent5": preload(SY + "mil2/insurgent5.png"),
+	# sol-08: m_contractor2 (sniper) + m_insurgent3/4/5 (rusher skins) retired — the RED enemy_* pack
+	# sprites replaced them live + as corpses, so these 300px legacy art bakes were dead boot VRAM. Deleted.
 	"m_pilot": preload(SY + "mil2/pilot.png"),
 	"m_soldier2": preload(SY + "mil2/soldier2.png"),
 	#"m_apc": preload(SY + "mil2/apc.png"),
@@ -357,8 +355,7 @@ const SCALE := {
 	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
-	"m_bombsuit": 0.56, "m_contractor2": 0.56, "m_insurgent3": 0.53, "m_insurgent4": 0.53,
-	"m_insurgent5": 0.53, "m_pilot": 0.52, "m_soldier2": 0.56,
+	"m_bombsuit": 0.56, "m_pilot": 0.52, "m_soldier2": 0.56,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
 	"m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34,
 	"m_technical": 0.6,
@@ -469,9 +466,7 @@ const TINT := {
 	# the battlefield palette; dropped shield muted like the wreck litter.
 	"fallen_merc": Color(0.62, 0.64, 0.44), "dropped_shield": Color(0.6, 0.64, 0.56),
 	# mil2 enemies read warm/bright (threats); vehicles olive-drab; pickups bright.
-	"m_bombsuit": Color(1.7, 1.35, 0.9), "m_contractor2": Color(1.75, 0.85, 0.68),
-	"m_insurgent3": Color(2.1, 1.7, 1.15), "m_insurgent4": Color(2.1, 1.7, 1.15),
-	"m_insurgent5": Color(2.1, 1.7, 1.15), "m_pilot": Color(1.5, 1.2, 1.0),
+	"m_bombsuit": Color(1.7, 1.35, 0.9), "m_pilot": Color(1.5, 1.2, 1.0),   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
 	"m_soldier2": Color(1.1, 1.12, 0.95),
 	"m_radar_tank": OLIVE_VEH, "m_rocket_truck": OLIVE_VEH,
 	"m_jet": OLIVE_VEH, "m_heli_transport": OLIVE_VEH, "m_heli_attack2": OLIVE_VEH,
@@ -513,8 +508,7 @@ const OUTLINE := {
 	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
 	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
-	"m_bombsuit": true, "m_contractor2": true, "m_insurgent3": true, "m_insurgent4": true,
-	"m_insurgent5": true, "m_pilot": true, "m_soldier2": true,
+	"m_bombsuit": true, "m_pilot": true, "m_soldier2": true,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
 	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
