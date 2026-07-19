@@ -646,10 +646,14 @@ func test_a4_spine_is_a_worn_lane_route() -> void:
 func test_a4_reticle_halo_is_centered() -> void:
 	# a4-05: the reticle's dark backing rings the aim point on ALL sides (a centered halo), not the
 	# old one-sided down-right drop-shadow — so no edge camouflages into orange glow / red foundry floor.
+	# Verified over the red foundry floor in scratchpad shots3/05-foundry-colossus-last-stand.png.
 	var c := _consts()
 	var halo: Array = c["RETICLE_HALO"]
 	var alpha: float = c["RETICLE_HALO_A"]
+	var diag: float = c["RETICLE_HALO_DIAG"]
 	Runner.T.ok(halo.size() >= 8, "the halo rings all 8 neighbours, not just one corner")
+	# The diagonals draw LIGHTER (they double-cover the corners) so the ring reads EVEN, not boxy.
+	Runner.T.ok(diag > 0.0 and diag < 1.0, "diagonal offsets are weighted lighter than cardinals — an even ring, not dark corners")
 	# CENTERED = symmetric: for every offset its negation is also present (a lopsided set would
 	# re-introduce the camouflage-on-the-bright-side bug the drop-shadow had).
 	var sum := Vector2.ZERO

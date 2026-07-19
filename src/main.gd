@@ -3353,6 +3353,7 @@ const HERO_APEX := Color(0.86, 0.93, 1.0)   # a4-03: cool crown catch-light — 
 const RETICLE_HALO := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1),
 	Vector2(1, 1), Vector2(1, -1), Vector2(-1, 1), Vector2(-1, -1)]
 const RETICLE_HALO_A := 0.42
+const RETICLE_HALO_DIAG := 0.6   # diagonal offsets draw at 0.6x so the corner overlap doesn't out-darken the cardinals — an even ring
 const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds under REDUCE MOTION; pulse is motion-gated
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
@@ -6341,10 +6342,13 @@ func _draw_players() -> void:
 				draw_set_transform(rcen, 0.0, Vector2.ONE * rpunch)
 				# a4-05: centered dark halo (all 8 sides) instead of a one-sided drop-shadow —
 				# the aim point keeps a full dark keyline against any hot terrain, never just two edges.
+				# Diagonals draw LIGHTER (RETICLE_HALO_DIAG) so the corner double-coverage doesn't
+				# stack darker than the cardinals — the ring reads as an EVEN halo, not a boxy corner.
 				for off in RETICLE_HALO:
+					var ha: float = RETICLE_HALO_A if absf(off.x) + absf(off.y) < 1.5 else RETICLE_HALO_A * RETICLE_HALO_DIAG
 					for rd in rects:
 						draw_texture_rect(rtex, Rect2(rd.position + off, rd.size),
-							false, Color(0, 0, 0, RETICLE_HALO_A))
+							false, Color(0, 0, 0, ha))
 				for rd in rects:
 					draw_texture_rect(rtex, rd, false, rcol)
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
