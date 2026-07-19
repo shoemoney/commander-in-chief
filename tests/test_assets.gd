@@ -832,6 +832,11 @@ func test_sol_frogman_variant() -> void:
 		"frogman submerged pose = pack speargun diver (sol-12)")
 	Runner.T.ok(not outline.has("frogman") and not outline.has("frogman_speargun"),
 		"the diver keeps its baked keyline — out of OUTLINE, no double rim (sol-12)")
+	# Neither diver pose takes the warm-light HOSTILE separator (it would misread the frogman as land infantry;
+	# the cool wet-threat tint + ripples are its read). "frogman" is already excluded — pin the new pose too.
+	var light: Dictionary = load("res://src/main.gd").get_script_constant_map()["_LIGHT_RIM"]
+	Runner.T.ok(not light.has("frogman") and not light.has("frogman_speargun"),
+		"neither diver pose takes the hostile light-rim separator (sol-12)")
 	Runner.T.eq(ms._frogman_tex(true), "frogman_speargun", "submerged diver shows the SPEARGUN (sol-12)")
 	Runner.T.eq(ms._frogman_tex(false), "frogman", "surfaced diver shows the RIFLE (sol-12)")
 
