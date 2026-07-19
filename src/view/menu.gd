@@ -5,7 +5,7 @@ extends Control
 ## knows nothing about menus. Keyboard (W/S + Enter, Esc) and pad
 ## (dpad + A, Start) navigation.
 
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND }
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND, DISP }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -83,7 +83,11 @@ var _page_press_side := -1  # which page button flashed (0 = prev, 1 = next); cl
 var _last_ptr := Vector2(-1.0, -1.0)  # last mouse position seen — lets a page/filter change re-evaluate the hover under a STILL cursor
 
 # Row ids that flip on left/right without a confirm press.
-const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist", "display"]
+# c1-19: DISPLAY is no longer a single overloaded ladder here — the OPTS "display" row
+# OPENS a dedicated DISPLAY sub-screen (like CONTROLS opens REBIND). On that screen
+# FULLSCREEN is a plain ON/OFF toggle (in this list) and WINDOW SCALE is a 1x..Nx stepper
+# (handled separately, like the volume rows), so the two are never overloaded onto one control.
+const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "rumble", "assist", "fullscreen"]
 # c1-17: the exact persisted rows Reset Defaults reverts (main._reset_settings ->
 # SETTINGS_DEFAULTS) -- the a11y + audio rows, NOT the coop/hard run-setup toggles,
 # which reset never touches. The bulk confirm halo (_set_pulse_row == -2) lights ONLY
@@ -370,6 +374,21 @@ func _menu_items() -> Array[Dictionary]:
 			iitems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 0})
 		iitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
 		return iitems
+	if mode == Mode.DISP:
+		# c1-19: the dedicated DISPLAY sub-screen (reached from the OPTS DISPLAY row, climbs back
+		# to it). TWO explicit controls, never overloaded onto one: FULLSCREEN is a plain ON/OFF
+		# toggle (a SINGLE press reaches fullscreen, no ladder to climb), and WINDOW SCALE is an
+		# independent 1x..Nx integer stepper. WINDOW SCALE stays a LIVE control in BOTH modes — no
+		# dead, silently-ignored row: while windowed ◄/►/Enter resize the window live; while
+		# fullscreen they edit the PREFERRED scale that applies the moment you drop back to windowed
+		# (the label gains a "(WINDOWED)" tag and the subtitle spells out the deferral). While
+		# fullscreen the row shows the raw stored preference (what will apply), not the monitor-
+		# clamped effective; while windowed it shows the effective, live-applied scale.
+		return [
+			{"id": "fullscreen", "label": fullscreen_label(main._fullscreen), "destructive": false, "on": main._fullscreen, "grp": 0},
+			{"id": "winscale", "label": winscale_label(main._win_scale if main._fullscreen else main._win_scale_norm()), "destructive": false, "grp": 0},
+			{"id": "back", "label": "BACK", "destructive": false, "grp": 1},
+		]
 	if mode == Mode.OPTS:
 		# c1-09: the ONE dedicated SETTINGS screen — nothing but settings now (HALL OF
 		# FAME / HOW TO PLAY moved to the INFO screen). Reached from TITLE and from
@@ -575,8 +594,46 @@ func _settings_rows() -> Array[Dictionary]:
 		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 3},
 		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 3},
 		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 3},
-		{"id": "display", "label": "FULLSCREEN: %s" % ("ON" if main._fullscreen else "OFF"), "destructive": false, "on": main._fullscreen, "grp": 4},
+		# c1-19: DISPLAY is a submenu OPENER (chevron), not an inline control — the OPTS screen is
+		# at its 10-row legibility cap, so the two explicit DISPLAY controls (FULLSCREEN toggle +
+		# WINDOW SCALE stepper) live on their own roomy sub-screen. The row still shows the LIVE
+		# mode at a glance ("FULLSCREEN" / "WINDOWED 2x"), so nothing is hidden behind the opener.
+		{"id": "display", "label": display_label(main._fullscreen, main._win_scale_norm()), "destructive": false, "grp": 4, "submenu": true},
 	]
+
+
+# c1-19: the OPTS DISPLAY-row summary — the LIVE mode shown on the opener row (and reused by the
+# a11y readout wording): "FULLSCREEN" or "WINDOWED Nx". Pure + static so a label test can pin it.
+static func display_label(fullscreen: bool, win_scale: int) -> String:
+	return "FULLSCREEN" if fullscreen else "WINDOWED %dx" % win_scale
+
+
+# c1-19: the two EXPLICIT DISPLAY controls, split apart so neither is overloaded — FULLSCREEN is a
+# plain ON/OFF toggle (one press reaches fullscreen) and WINDOW SCALE is an independent 1x..Nx
+# stepper. Pure + static so the sub-screen wording is single-sourced and headless-assertable.
+static func fullscreen_label(on: bool) -> String:
+	return "FULLSCREEN: %s" % ("ON" if on else "OFF")
+
+
+static func winscale_label(scale: int) -> String:
+	# Just the scale — short, never ellipsizes on the 640x360 plate (well under the widest toggle
+	# "ASSIST (2-HIT): OFF" budget). Windowed it's the live effective scale; fullscreen it's the
+	# stored preference. When that preference can't fit the current display, the honesty lives in the
+	# DISPLAY subtitle ("LIMITED TO Nx ON THIS DISPLAY"), which has the full screen width for words.
+	return "WINDOW SCALE: %dx" % scale
+
+
+# c1-19: the DISPLAY sub-screen subtitle — the words that keep the short WINDOW SCALE label honest.
+# Windowed: names both controls. Fullscreen: if the stored preference can't fit the current display
+# (effective < pref) it states the limit in plain language ("LIMITED TO 3x ON THIS DISPLAY"), else it
+# notes the scale applies on return to windowed. Full screen width for text, so it can be verbose
+# where the plate label can't. Pure + static so every wording is headless-pinnable.
+static func disp_subtitle(fullscreen: bool, pref := -1, effective := -1) -> String:
+	if not fullscreen:
+		return "FULLSCREEN & WINDOW SCALE"
+	if pref >= 0 and effective >= 0 and effective != pref:
+		return "LIMITED TO %dx ON THIS DISPLAY" % effective
+	return "WINDOW SCALE APPLIES IN WINDOWED MODE"
 
 
 func _items() -> Array[String]:
@@ -650,7 +707,7 @@ func _row_icon(id: String) -> String:
 		"controls": return "mi_controller"
 		"reset_controls": return "mi_reload"
 		"info": return "mi_book"
-		"display": return "mi_camera"
+		"display", "fullscreen", "winscale": return "mi_camera"
 		"restart", "reset_defaults": return "mi_reload"
 		"title": return "mi_home"
 		"rumble": return "mi_controller"
@@ -1092,26 +1149,27 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_nav(1, 0)
 					return
 			var crow := _row_at(ev.position)
-			if crow >= 0:
-				sel = crow
-				_press()
-				queue_redraw()
-			elif mode != Mode.HALL and mode != Mode.HOWTO \
-					and _menu_items()[sel]["id"] in _TOGGLES:
-				# The ◄/► cycle affordances draw OUTSIDE the row plate — without
-				# their own hitbox a click on a visible, pulsing arrow was silently
-				# swallowed (the same parity gap the hall tabs got fixed for).
+			# c1-19: a click on the SELECTED row's ◄/► cycle affordance must step by SIDE (left =
+			# down, right = up) — checked BEFORE the row-plate _press() so a directional row (WINDOW
+			# SCALE, volume) can never fall through to _press()'s upward-only Enter step even if the
+			# arrow hitbox overlaps the plate. The arrows draw OUTSIDE the plate, so without this a
+			# mouse-only player would lose the ◄ (down) direction entirely.
+			if mode != Mode.HALL and mode != Mode.HOWTO \
+					and _row_cycles(_menu_items()[sel]["id"]):
 				var g := _row_geometry()
 				var arows := toggle_arrow_rects(g, sel)   # same source _draw renders from
 				var la := arows[0].grow(3.0)
 				var ra := arows[1].grow(3.0)
 				if la.has_point(ev.position) or ra.has_point(ev.position):
-					# Side matters now: volume rows step down/up per arrow, so a
-					# mouse-only player has BOTH directions (the ◄ arrow lowers and
-					# mutes at 0) — clicking the plate only nudges up.
-					# (plain toggles flip either way, exactly as before).
+					# Side matters: volume + WINDOW SCALE step down/up per arrow, so a mouse-only
+					# player has BOTH directions (the ◄ arrow lowers). Plain toggles flip either way.
 					_nav(0, -1 if la.has_point(ev.position) else 1)
 					queue_redraw()
+					return
+			if crow >= 0:
+				sel = crow
+				_press()
+				queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
 			if mode == Mode.HALL:
@@ -1168,6 +1226,14 @@ func _nav(move: int, hmove: int) -> void:
 	# Enter/click drives. 0 == MUTED, so mute is just the bottom of the one model.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
 		_step_vol("SFX" if _menu_items()[sel]["id"] == "sfx" else "Music", hmove)
+		queue_redraw()
+		return
+	# c1-19: ◄/► on WINDOW SCALE (the DISPLAY sub-screen) steps the integer scale one clean rung,
+	# clamped (no wrap) — ◄ shrinks, ► grows, railing at the 1x floor and the Nx ceiling. It NEVER
+	# flips fullscreen (that's the separate FULLSCREEN toggle row). Live in BOTH modes: windowed it
+	# resizes now, fullscreen it moves the preference applied on return to windowed.
+	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] == "winscale":
+		_step_scale(hmove)
 		queue_redraw()
 		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
@@ -1265,7 +1331,7 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 	var top := 118.0 if mode_id == Mode.PAUSE \
 		else (102.0 if mode_id == Mode.OPTS \
 		else (102.0 if mode_id == Mode.REBIND \
-		else (120.0 if (mode_id == Mode.SETUP or mode_id == Mode.INFO) else (150.0 if not many else 156.0))))
+		else (120.0 if (mode_id == Mode.SETUP or mode_id == Mode.INFO or mode_id == Mode.DISP) else (150.0 if not many else 156.0))))
 	var gap: float
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
@@ -1309,6 +1375,7 @@ static func back_dest(mode_id: int) -> Dictionary:
 		Mode.SETUP: return {"mode": Mode.TITLE, "sel": "run_setup"}
 		Mode.OPTS: return {"mode": Mode.TITLE, "sel": "options"}
 		Mode.REBIND: return {"mode": Mode.OPTS, "sel": "controls"}   # c1-18: rebind screen hangs off the OPTIONS CONTROLS row — BACK restores focus to that real row
+		Mode.DISP: return {"mode": Mode.OPTS, "sel": "display"}   # c1-19: DISPLAY sub-screen hangs off the OPTIONS DISPLAY row — BACK restores focus to it
 		_: return {}
 
 
@@ -1435,6 +1502,56 @@ func _step_vol(bus: String, delta: int) -> void:
 	main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
 
 
+# c1-19: which rows show the ◄/► cycle affordances AND route sideways input to a step — the plain
+# toggles plus WINDOW SCALE. WINDOW SCALE cycles in BOTH modes now (never a dead row): windowed it
+# resizes live, fullscreen it edits the deferred preference — so the arrows always mean something.
+func _row_cycles(id: String) -> bool:
+	return id in _TOGGLES or id == "winscale"
+
+
+# c1-19: step the integer window scale one clean rung — ◄/► and Enter share this, so arrows and
+# activation have IDENTICAL boundary behavior (no separate wrap model). A pure 1x..Nx stepper that
+# NEVER touches the window MODE: FULLSCREEN is its own explicit ON/OFF toggle, so scale and mode are
+# never overloaded onto one control (the old ladder's flaw). N is the largest integer scale the
+# CURRENT monitor fits (main._max_win_scale, re-read every step so a display change can't wedge it).
+# Windowed: route through main._set_win_scale (sizes + centers the window, persists) — the same path
+# F11's windowed restore uses. Fullscreen: the row stays LIVE but only the PREFERENCE moves
+# (main._set_win_scale_pref) — applied on return to windowed — so it's never a silently-ignored row.
+func _step_scale(dir: int) -> void:
+	var mx: int = main._max_win_scale()
+	var cur: int = main._win_scale if main._fullscreen else main._win_scale_norm()
+	var nxt: int
+	if cur > mx:
+		# An OVER-CEILING preference (carried from a bigger display, only visible while fullscreen
+		# where the row shows the raw preference): ◄ must not rail — it JUMPS DOWN to the current
+		# ceiling (a real move the user asked for), while ► rails (already past the fit). Without this
+		# both directions railed at e.g. 7x on a 3x monitor, wedging the row. The preference is only
+		# lowered here because the user explicitly pressed ◄ — never silently.
+		if dir < 0:
+			nxt = mx
+		else:
+			_display_rail(dir)
+			return
+	else:
+		nxt = cur + dir
+		if nxt < 1 or nxt > mx:
+			_display_rail(dir)                         # at a rail (1x floor / Nx ceiling): bounce, no wrap
+			return
+	var moved: bool = main._set_win_scale_pref(nxt) if main._fullscreen else main._set_win_scale(nxt)
+	if moved:
+		_flash_setting()
+		main._sfx.play("pickup", -14.0, 1.0)
+
+
+# c1-19: a DISPLAY step that hit a rail (1x floor / fullscreen ceiling) — bounce the row like the
+# volume rails and deny-chime, instead of a silent no-op.
+func _display_rail(rail_dir: int) -> void:
+	_rail_dir = rail_dir
+	_rail_row = sel
+	_rail_pulse = 0.0 if main._motion < 0.5 else 1.0
+	main._sfx.play("deny", -16.0)
+
+
 func _flash_setting() -> void:
 	# c1-17: raise the settings-change confirm halo on the current row. Fired by a real
 	# volume step and by every plain toggle flip, so an APPLIED setting change reads as a
@@ -1552,10 +1669,23 @@ func _activate() -> void:
 				main._save_settings()
 				_flash_setting()
 			"display":
-				# c1-09: the DISPLAY row flips fullscreen through the SAME path as the
-				# F11/Alt+Enter shortcut (persist + cursor rebake), so the two agree.
+				# c1-19: DISPLAY opens its dedicated sub-screen (FULLSCREEN toggle + WINDOW SCALE
+				# stepper) — BACK climbs back to this row.
+				open(Mode.DISP)
+			"fullscreen":
+				# c1-19: a plain ON/OFF toggle — ONE press reaches fullscreen (and one press back).
+				# ◄/► on this row route here too (it's in _TOGGLES), so arrows and Enter agree. Shares
+				# the SAME main._toggle_fullscreen path as the F11/Alt+Enter hotkey (persist + cursor
+				# rebake + windowed-scale restore included), so the on-screen toggle and the shortcut
+				# can never diverge. The stored WINDOW SCALE is untouched by the mode flip.
 				main._toggle_fullscreen()
-				_flash_setting()   # display flip applied through the shared fullscreen path
+				_flash_setting()
+			"winscale":
+				# c1-19: Enter steps the scale UP one rung — the SAME call ► uses, so activation and
+				# the arrows behave identically (rails at the Nx ceiling, never wraps and never flips
+				# fullscreen). Live in both modes: windowed it resizes now, fullscreen it moves the
+				# preference applied on return to windowed.
+				_step_scale(1)
 			"reset_defaults":
 				# c1-09: the two-press confirm already fired (destructive row → _press
 				# arms, a second press lands here) — revert the shown settings to their
@@ -1822,6 +1952,13 @@ func _draw() -> void:
 		_center_text("INFO", 84, 22, Color(0.95, 0.95, 0.85))
 		# The look-back screens: records, the field manual, and your last run.
 		_center_text("RECORDS · HOW TO PLAY · REPLAY", 104, 8, Color(0.8, 0.85, 0.72))
+	elif mode == Mode.DISP:
+		_center_text("DISPLAY", 84, 22, Color(0.95, 0.95, 0.85))
+		# c1-19: the subtitle NAMES the two controls while windowed, and while FULLSCREEN it EXPLAINS
+		# that WINDOW SCALE applies on return to windowed — so the row's deferred behavior is spelled
+		# out in words, matching the inline "(WINDOWED)" tag on the value label. The row itself stays
+		# fully adjustable in both modes; nothing here is a dead, silently-ignored control.
+		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), 104, 8, Color(0.8, 0.85, 0.72))
 	elif mode == Mode.SETUP:
 		_center_text("RUN SETUP", 84, 22, Color(0.95, 0.95, 0.85))
 		# Say what the screen is for — the two toggles below decide the run you deploy.
@@ -2022,7 +2159,7 @@ func _draw() -> void:
 		# Left/right cycle affordance on the selected toggle row — toggles flipped
 		# silently and read identical to action rows. mi_arrow points RIGHT;
 		# a negative rect width flips it for the left side.
-		if selected and mitems[k]["id"] in _TOGGLES:
+		if selected and _row_cycles(mitems[k]["id"]):
 			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
 			var at := Art.tex("mi_arrow")
 			var arows := toggle_arrow_rects(g, k)   # shared with the mouse hit-test

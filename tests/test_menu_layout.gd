@@ -49,6 +49,7 @@ class _StubMain extends Node2D:
 	var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad toggle the SWAP STICKS row reads
 	var _assist := false
 	var _fullscreen := false
+	var _win_scale := 2   # c1-19: windowed integer scale the WINDOW SCALE row reads/steps
 	var _saved := 0
 	var _set_calls: Array = []       # records every _set_bus_vol(name, v) the menu makes
 	var _levels := {"SFX": 8, "Music": 8}   # STATEFUL: a step reads back what the last one wrote
@@ -72,6 +73,28 @@ class _StubMain extends Node2D:
 		_levels[name] = v
 		_set_calls.append([name, v])
 	func _save_settings() -> void: _saved += 1
+	# c1-19: WINDOW SCALE stub — headless has no display, so cap the ladder at 3x and
+	# apply the clamped absolute scale the menu's ◄/►/Enter drive (records a save).
+	func _max_win_scale() -> int: return 3
+	func _win_scale_norm() -> int: return clampi(_win_scale, 1, _max_win_scale())
+	func _toggle_fullscreen() -> void:
+		_fullscreen = not _fullscreen
+		_saved += 1
+	func _set_win_scale(s: int) -> bool:
+		var ns := clampi(s, 1, _max_win_scale())
+		if ns == _win_scale and not _fullscreen: return false
+		_win_scale = ns
+		_fullscreen = false
+		_saved += 1
+		return true
+	# c1-19: change the preference WITHOUT leaving fullscreen — the WINDOW SCALE row stays live
+	# while fullscreen (edits the value applied on return to windowed), never a dead/ignored row.
+	func _set_win_scale_pref(s: int) -> bool:
+		var ns := clampi(s, 1, _max_win_scale())
+		if ns == _win_scale: return false
+		_win_scale = ns
+		_saved += 1
+		return true
 	# c1-18: rebind screen reads these off `main`. Real maps so _menu_items(REBIND) and the
 	# capture/back tests exercise the true row set + swap/clear/reset behaviour headless.
 	var BIND_DEFAULTS := MainScript.BIND_DEFAULTS
@@ -2093,47 +2116,601 @@ func test_title_info_nested_back_roundtrip_preserves_focus() -> void:
 	stub.free()
 
 
-# c1-09: DISPLAY is a real on-screen toggle now (not F11-only) — it sits in its own
-# labelled DISPLAY group (grp 4), reads the live fullscreen state in its row label +
-# state dot, and flips main._fullscreen through the SAME _toggle_fullscreen path the
-# F11/Alt+Enter shortcut uses, so on-screen and hotkey stay one behavior. Proves every
-# persisted setting is reviewable AND changeable from the dedicated settings screen.
+# c1-19: DISPLAY is now a submenu OPENER on OPTS (the screen is at its row cap) that leads to a
+# dedicated DISPLAY sub-screen holding TWO explicit, un-overloaded controls: FULLSCREEN is a plain
+# ON/OFF toggle (ONE press reaches fullscreen — no ladder to climb, and arrows/Enter share the SAME
+# boundary behavior) and WINDOW SCALE is an independent 1x..Nx integer stepper that never touches
+# the window mode. WINDOW SCALE stays a LIVE control in BOTH modes — never a dead, ignored row:
+# windowed it resizes now (main._set_win_scale), fullscreen it edits the deferred preference
+# (main._set_win_scale_pref) applied on return to windowed; the label stays a short "WINDOW SCALE: Nx"
+# and, when the preference can't fit the display, the DISPLAY subtitle states the limit in words.
 func test_options_display_row_toggles_fullscreen() -> void:
 	Runner.T.eq(Menu.group_header(4), "DISPLAY", "grp 4 is the DISPLAY block")
-	Runner.T.ok("display" in Menu._TOGGLES, "DISPLAY is an arrow-flippable toggle row")
+	Runner.T.ok("fullscreen" in Menu._TOGGLES, "FULLSCREEN is a plain arrow-flip toggle")
+	Runner.T.ok(not ("winscale" in Menu._TOGGLES), "WINDOW SCALE steps (it is not a plain flip toggle)")
+	Runner.T.eq(Menu.fullscreen_label(false), "FULLSCREEN: OFF", "fullscreen toggle reads OFF while windowed")
+	Runner.T.eq(Menu.fullscreen_label(true), "FULLSCREEN: ON", "fullscreen toggle reads ON")
+	Runner.T.eq(Menu.winscale_label(2), "WINDOW SCALE: 2x", "window scale row reads its integer scale")
+	# The label is SHORT so it never ellipsizes on the 640x360 plate (well under the widest toggle
+	# "ASSIST (2-HIT): OFF" budget) — the honesty about an unfittable preference lives in the subtitle.
+	Runner.T.ok(Menu.winscale_label(8).length() < "ASSIST (2-HIT): OFF".length(), "the WINDOW SCALE label fits within the widest toggle label's budget (no ellipsis at 640x360)")
+	# The subtitle carries the words: windowed names both controls; fullscreen either notes the
+	# windowed-only application or, when the preference can't fit, states the limit in plain language.
+	Runner.T.eq(Menu.disp_subtitle(false), "FULLSCREEN & WINDOW SCALE", "windowed subtitle names both controls")
+	Runner.T.eq(Menu.disp_subtitle(true, 2, 2), "WINDOW SCALE APPLIES IN WINDOWED MODE", "fullscreen subtitle notes the windowed-only application when the preference fits")
+	Runner.T.eq(Menu.disp_subtitle(true, 7, 3), "LIMITED TO 3x ON THIS DISPLAY", "fullscreen subtitle states the limit in words when the preference can't fit this display")
 	var mn: Node2D = MainScript.new()
 	mn._sfx = _NullSfx.new()
 	mn._fullscreen = false
+	mn._win_scale = 2
 	var m: Control = Menu.new()
 	m.main = mn
+
+	# The OPTS DISPLAY row is a submenu OPENER showing the LIVE mode at a glance (net-zero rows,
+	# so the OPTS legibility cap is unchanged) — Enter opens the dedicated screen.
 	m.mode = Menu.Mode.OPTS
-
-	var by_id := {}
+	var opts_by := {}
 	for row in m._settings_rows():
-		by_id[row["id"]] = row
-	Runner.T.ok(by_id.has("display"), "OPTIONS carries a DISPLAY row")
-	Runner.T.eq(by_id["display"]["label"], "FULLSCREEN: OFF", "DISPLAY row reads the live windowed state")
-	Runner.T.eq(by_id["display"]["grp"], 4, "DISPLAY sits in its own labelled group")
-	Runner.T.ok(not by_id["display"]["on"], "DISPLAY state dot reads OFF while windowed")
+		opts_by[row["id"]] = row
+	Runner.T.ok(opts_by.has("display"), "OPTIONS carries a DISPLAY opener row")
+	Runner.T.eq(opts_by["display"]["label"], "WINDOWED 2x", "the OPTS DISPLAY row shows the live mode at a glance")
+	Runner.T.ok(opts_by["display"].get("submenu", false), "the DISPLAY row is a submenu opener (chevron), not an inline control")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.DISP), {"mode": Menu.Mode.OPTS, "sel": "display"}, "the DISPLAY sub-screen backs to the OPTS DISPLAY row")
 
-	var di := -1
+	# On the DISPLAY sub-screen: two separate rows.
+	m.mode = Menu.Mode.DISP
+	var by_id := {}
+	for row in m._menu_items():
+		by_id[row["id"]] = row
+	Runner.T.ok(by_id.has("fullscreen") and by_id.has("winscale"), "the DISPLAY screen holds SEPARATE FULLSCREEN + WINDOW SCALE rows")
+	Runner.T.eq(by_id["fullscreen"]["label"], "FULLSCREEN: OFF", "fullscreen row reads the live mode")
+	Runner.T.eq(by_id["winscale"]["label"], "WINDOW SCALE: 2x", "window scale row reads the live windowed scale")
+	Runner.T.ok(not by_id["fullscreen"]["on"], "fullscreen state dot reads OFF while windowed")
+	# The row carries no "inactive" flag in either mode — it is a live control throughout (no dead row).
+	Runner.T.ok(not by_id["winscale"].get("inactive", false), "WINDOW SCALE is never marked inactive (always a live control)")
+	Runner.T.ok(m._row_cycles("winscale"), "WINDOW SCALE shows the cycle arrows while windowed")
+	# The 3-row DISPLAY screen decompresses to a legible plate (roomy, unlike a crammed OPTS row).
+	Runner.T.ok(float(Menu.compute_geometry(Menu.Mode.DISP, 3, -1.0)["bh"]) >= MIN_PLATE, "DISPLAY screen plates clear the >=20px legible floor")
+
+	var wi := -1
+	var fi := -1
 	var rows: Array[Dictionary] = m._menu_items()
 	for i in rows.size():
-		if rows[i]["id"] == "display":
-			di = i
-	Runner.T.ok(di >= 0, "DISPLAY row is present on the OPTIONS list")
-	m.sel = di
-	m._activate()   # flips fullscreen ON through main._toggle_fullscreen
-	Runner.T.ok(mn._fullscreen, "activating DISPLAY flips fullscreen ON")
-	var relabel := {}
-	for row in m._settings_rows():
-		relabel[row["id"]] = row["label"]
-	Runner.T.eq(relabel["display"], "FULLSCREEN: ON", "DISPLAY row reflects the flipped state at once")
-	m._activate()   # flips back OFF (sel unchanged — _activate never moves focus)
-	Runner.T.ok(not mn._fullscreen, "activating DISPLAY again flips fullscreen back OFF")
+		if rows[i]["id"] == "winscale": wi = i
+		if rows[i]["id"] == "fullscreen": fi = i
+	Runner.T.ok(wi >= 0 and fi >= 0, "both DISPLAY controls are present on the sub-screen")
+
+	# WINDOW SCALE: ► steps up one clean integer scale, still windowed, NEVER flipping fullscreen.
+	m.sel = wi
+	m._step_scale(1)
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 3, "WINDOW SCALE > grows the window a clean integer step")
+	# ► at the Nx ceiling RAILS (no wrap) and does NOT flip fullscreen — that's a separate control.
+	m._step_scale(1)
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 3, "WINDOW SCALE > at the Nx ceiling rails, never touching fullscreen")
+	# ◄ steps back down to the 1x floor, then rails.
+	m._step_scale(-1)
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < shrinks a clean step")
+	m._step_scale(-1)
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < reaches the 1x floor")
+	m._step_scale(-1)
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < at the 1x floor rails (no wrap)")
+
+	# FULLSCREEN: a plain ON/OFF toggle — a SINGLE activation reaches fullscreen (no ladder), and
+	# the stored windowed scale is untouched by the mode flip.
+	m.sel = fi
+	m._activate()
+	Runner.T.ok(mn._fullscreen, "activating FULLSCREEN turns it ON in a single press")
+	Runner.T.eq(mn._win_scale, 1, "toggling fullscreen preserves the stored windowed scale")
+
+	# WINDOW SCALE stays a LIVE control while fullscreen — a fitting preference shows the bare honest
+	# scale (it will apply at that value), and it still shows the cycle arrows (no dead row).
+	var by2 := {}
+	for row in m._menu_items():
+		by2[row["id"]] = row
+	Runner.T.eq(by2["fullscreen"]["label"], "FULLSCREEN: ON", "fullscreen row reflects ON at once")
+	Runner.T.ok(not by2["winscale"].get("inactive", false), "WINDOW SCALE is NOT inactive under fullscreen (still a live control)")
+	Runner.T.ok(m._row_cycles("winscale"), "WINDOW SCALE still shows the cycle arrows under fullscreen")
+	Runner.T.eq(by2["winscale"]["label"], "WINDOW SCALE: 1x", "under fullscreen a fitting preference shows the bare honest scale (subtitle carries the windowed-only note)")
+	# Enter/◄/► under fullscreen EDIT the preference (applied on return to windowed) and stay fullscreen.
+	m.sel = wi
+	m._press()   # Enter -> _step_scale(1) -> _set_win_scale_pref
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 2, "Enter on WINDOW SCALE under fullscreen edits the deferred preference, staying fullscreen")
+	m._step_scale(1)
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 3, "the WINDOW SCALE stepper under fullscreen keeps editing the preference (never a silent no-op)")
+	m._step_scale(1)   # at the 3x ceiling: rails, preference held, still fullscreen
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 3, "WINDOW SCALE under fullscreen rails at the ceiling, still fullscreen")
+
+	# Toggling FULLSCREEN back OFF restores windowed at the preference edited while fullscreen.
+	m.sel = fi
+	m._activate()
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 3, "toggling fullscreen off restores windowed at the scale chosen while fullscreen")
 
 	m.free()
 	mn.free()
+
+
+# c1-19: a stale windowed scale ABOVE the current monitor's ceiling (window dragged to a smaller
+# display) reads NORMALIZED in the WINDOW SCALE row, and a forward step from the clamped ceiling
+# RAILS (no wrap) while PRESERVING the over-max preference — it never silently collapses the stored
+# choice to the fit, and never flips fullscreen (that's a separate control).
+func test_options_display_stale_over_max_scale_reads_clamped() -> void:
+	var mn := _StubMain.new()   # stub caps _max_win_scale at 3 (headless has no display metrics)
+	mn._fullscreen = false
+	mn._win_scale = 9           # stale value from a bigger monitor, now above the 3x ceiling
+	Runner.T.eq(mn._win_scale_norm(), 3, "stale over-max scale reads NORMALIZED to the ceiling")
+	var m: Control = Menu.new()
+	m.main = mn
+	m.mode = Menu.Mode.DISP
+	m.add_to_group("__t")
+	var wi := -1
+	var items: Array[Dictionary] = m._menu_items()
+	for i in items.size():
+		if items[i]["id"] == "winscale":
+			wi = i
+	m.sel = wi
+	# The WINDOW SCALE row LABEL already reflects the clamped scale, not the stale 9x.
+	var by_id := {}
+	for row in m._menu_items():
+		by_id[row["id"]] = row
+	Runner.T.eq(by_id["winscale"]["label"], "WINDOW SCALE: 3x", "WINDOW SCALE shows the clamped scale, not the stale 9x")
+	# ► from the clamped top rung RAILS, keeping the over-max preference (no wrap, no fullscreen flip).
+	m._step_scale(1)
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 9, "WINDOW SCALE > at the clamped ceiling rails, preserving the over-max preference")
+	m.free()
+	mn.free()
+
+
+# c1-19: while FULLSCREEN the WINDOW SCALE row shows the RAW preference (7x on a 3x monitor). Both
+# directions must not rail (that wedged the row): ► rails at the fit, but ◄ JUMPS DOWN to the current
+# ceiling so the user can always step down to a usable value. The drop only happens because the user
+# pressed ◄ — it is never a silent collapse (the FULLSCREEN toggle round-trip preserves it, tested
+# separately). Stays fullscreen throughout (WINDOW SCALE never flips the mode).
+func test_options_display_fullscreen_over_ceiling_stepper_can_step_down() -> void:
+	var mn := _StubMain.new()   # stub ceiling = 3x
+	mn._fullscreen = true
+	mn._win_scale = 7           # over-ceiling preference, only visible while fullscreen (shows raw)
+	var m: Control = Menu.new()
+	m.main = mn
+	m.mode = Menu.Mode.DISP
+	m.add_to_group("__t")
+	var wi := -1
+	var items: Array[Dictionary] = m._menu_items()
+	for i in items.size():
+		if items[i]["id"] == "winscale":
+			wi = i
+	m.sel = wi
+	var by_id := {}
+	for row in m._menu_items():
+		by_id[row["id"]] = row
+	Runner.T.eq(by_id["winscale"]["label"], "WINDOW SCALE: 7x", "over-ceiling fullscreen label shows the stored preference (7x), short and un-ellipsized")
+	Runner.T.eq(Menu.disp_subtitle(true, mn._win_scale, mn._win_scale_norm()), "LIMITED TO 3x ON THIS DISPLAY", "the subtitle states the effective limit (3x) so the 7x label is never a lone lying number")
+	# ► at/above the ceiling rails — can't grow past the fit — preference untouched, still fullscreen.
+	m._step_scale(1)
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 7, "WINDOW SCALE > over the ceiling rails, preference preserved, still fullscreen")
+	# ◄ JUMPS DOWN to the current 3x ceiling (a real user-driven step), still fullscreen.
+	m._step_scale(-1)
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 3, "WINDOW SCALE < from an over-ceiling preference jumps down to the current ceiling (never wedged)")
+	# From there ◄ keeps stepping cleanly down to the 1x floor, then rails.
+	m._step_scale(-1)
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < continues a clean step down under fullscreen")
+	m._step_scale(-1)
+	m._step_scale(-1)
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < reaches the 1x floor under fullscreen")
+	m._step_scale(-1)
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < at the 1x floor rails under fullscreen (no wrap)")
+	m.free()
+	mn.free()
+
+
+# c1-19: POINTER/touch parity — the two ◄/► arrows on WINDOW SCALE are SEPARATE hitboxes that step
+# by SIDE: clicking ► steps UP, clicking ◄ steps DOWN (not the upward-only Enter/plate behavior). The
+# arrow hit-test runs BEFORE the row-plate _press(), so ◄ never falls through to an upward step.
+# Driven through the REAL _unhandled_input mouse path at the exact arrow rects _draw renders from.
+func test_display_winscale_arrow_clicks_step_by_side() -> void:
+	var stub := _StubMain.new()
+	stub._fullscreen = false
+	stub._win_scale = 2
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.DISP
+	var wi := -1
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "winscale":
+			wi = i
+	m.sel = wi
+	var g: Dictionary = m._row_geometry()
+	var arows: Array[Rect2] = Menu.toggle_arrow_rects(g, wi)
+	# The two hitboxes are genuinely distinct (left strictly left of right) — a real per-side target.
+	Runner.T.ok(arows[0].position.x < arows[1].position.x, "the LEFT and RIGHT arrow hitboxes are separate (left strictly left of right)")
+	# Click the RIGHT (►) arrow: steps UP one clean integer scale (2 -> 3, the stub's 3x ceiling).
+	m._unhandled_input(_click_ev(arows[1].get_center()))
+	Runner.T.eq(stub._win_scale, 3, "clicking the RIGHT arrow steps WINDOW SCALE UP")
+	# Click the LEFT (◄) arrow: steps DOWN (3 -> 2) — proves ◄ does NOT trigger the upward Enter step.
+	m._unhandled_input(_click_ev(arows[0].get_center()))
+	Runner.T.eq(stub._win_scale, 2, "clicking the LEFT arrow steps WINDOW SCALE DOWN (not up)")
+	m.free()
+	stub.free()
+
+
+# c1-19: the EXPLICIT programmatic-transition guard — while _prog_resize is set (our own mode/scale
+# change is mid-transition), _on_window_resized ignores the OS's intermediate size-change events even
+# if the transient client size FITS within the usable area, so it can't be mistaken for a user drag
+# and overwrite the saved scale. A genuine drag arrives with the flag clear and is honored.
+func test_display_programmatic_resize_guard_ignores_transition_events() -> void:
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn._fullscreen = false
+	mn._win_scale = MainScript.WIN_SCALE_MAX
+	# Simulate a transition in flight: the guard is set. A resize event now (whatever headless size it
+	# reports, fitting or not) must NOT rewrite the preference.
+	mn._prog_resize = true
+	mn._on_window_resized()
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "a resize event during a guarded programmatic transition never rewrites the stored scale")
+	# Entering fullscreen sets the guard; leaving it (the toggle applies the windowed fit) preserves
+	# the over-ceiling preference and re-arms the guard + a settle chain for the transition it drives.
+	mn._fullscreen = true
+	mn._toggle_fullscreen()
+	Runner.T.ok(not mn._fullscreen, "toggle leaves fullscreen")
+	Runner.T.ok(mn._prog_resize and mn._settle_active, "leaving fullscreen arms the programmatic-resize guard and a settle chain")
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "the over-ceiling preference survives the guarded transition")
+	# The settle is advanced by _process ONE sample per frame (distinct frames, not a same-idle burst);
+	# pump frames and it terminates (at latest at the retry cap), clearing the guard so a genuine drag
+	# from then on is honored. Bounded so a stuck compositor can never loop the settle forever.
+	for _f in 40:
+		if not mn._settle_active:
+			break
+		mn._process(0.016)
+	Runner.T.ok(not mn._settle_active, "the per-frame settle chain terminates within a bounded number of frames")
+	Runner.T.ok(not mn._prog_resize, "the programmatic-resize guard is cleared once the settle completes (never stuck true)")
+	# F11 INTO fullscreen also arms a settle whose fullscreen branch clears the guard on the next
+	# frame — so the flag can never stay stuck true after a bare fullscreen-in (no windowed settle).
+	mn._toggle_fullscreen()
+	Runner.T.ok(mn._fullscreen and mn._settle_active, "entering fullscreen arms a settle chain")
+	for _g in 5:
+		if not mn._settle_active:
+			break
+		mn._process(0.016)
+	Runner.T.ok(not mn._settle_active and not mn._prog_resize, "the fullscreen settle clears the guard next frame (no stuck flag after F11-in)")
+	mn.free()
+
+
+# c1-19: leaving FULLSCREEN through the DISPLAY toggle must PRESERVE an over-monitor scale
+# preference (carried from a bigger display), exactly like the F11 hotkey — the toggle only flips
+# the mode via main._toggle_fullscreen and never rewrites the stored scale, so a 7x preference on a
+# 3x monitor survives the round-trip untouched.
+func test_options_display_fullscreen_toggle_preserves_over_ceiling_preference() -> void:
+	var mn := _StubMain.new()   # stub ceiling = 3x
+	mn._fullscreen = true
+	mn._win_scale = 7           # a preference from a bigger display, above this monitor's 3x fit
+	var m: Control = Menu.new()
+	m.main = mn
+	m.mode = Menu.Mode.DISP
+	m.add_to_group("__t")
+	var fi := -1
+	var items: Array[Dictionary] = m._menu_items()
+	for i in items.size():
+		if items[i]["id"] == "fullscreen":
+			fi = i
+	m.sel = fi
+	m._activate()   # Enter on the FULLSCREEN toggle -> main._toggle_fullscreen
+	Runner.T.ok(not mn._fullscreen, "activating the FULLSCREEN toggle turns it off")
+	Runner.T.eq(mn._win_scale, 7, "the over-ceiling scale PREFERENCE survives the fullscreen toggle (mode never rewrites scale)")
+	m.free()
+	mn.free()
+
+
+# c1-19: the REAL main.gd DISPLAY plumbing, exercised headless: persistence-load MIGRATION
+# (a save missing window_scale, or carrying an over-ceiling value), and RESET DEFAULTS
+# reverting the scale. Runs the actual _apply_settings/_reset_settings/DisplayServer path
+# (window_set_size is a headless no-op but must not crash), not the stub.
+func test_display_scale_persistence_migration_and_reset() -> void:
+	_ensure_audio_buses()
+	var snap := _snapshot_buses()
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	var mx: int = mn._max_win_scale()   # headless -> full 3x ladder
+
+	# Legacy save predating c1-19 (no window_scale key) migrates to the ship 2x default.
+	var legacy: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	legacy.erase("window_scale")
+	mn._apply_settings(legacy)
+	Runner.T.eq(mn._win_scale, 2, "a save missing window_scale migrates to the 2x default")
+
+	# An explicit saved scale within the ceiling is honoured verbatim.
+	var saved: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	saved["window_scale"] = mini(3, mx)
+	saved["fullscreen"] = false
+	mn._apply_settings(saved)
+	Runner.T.eq(mn._win_scale, mini(3, mx), "an in-range saved window_scale loads verbatim")
+
+	# A save carrying a scale above what THIS display fits keeps the PREFERENCE (sane-capped only),
+	# NOT clamped down to the monitor — the window is sized to the effective fit, but the choice
+	# survives so a later move to a bigger display restores it. A garbage-huge value is sane-capped.
+	var toobig: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	toobig["window_scale"] = 99
+	mn._apply_settings(toobig)
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "an absurd saved window_scale is sane-capped (preference kept, not monitor-clamped)")
+	Runner.T.eq(mn._win_scale_norm(), mx, "the EFFECTIVE applied scale fits the current monitor")
+
+	# A scale saved on a BIGGER display (within the sane cap) is preserved verbatim as the
+	# preference even though this monitor can only fit less right now.
+	var bigger: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	bigger["window_scale"] = MainScript.WIN_SCALE_MAX
+	mn._apply_settings(bigger)
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "a within-cap saved scale is preserved as the preference")
+
+	# RESET DEFAULTS reverts the scale to its SETTINGS_DEFAULTS ship value along with the rest.
+	mn._reset_settings()
+	Runner.T.eq(mn._win_scale, MainScript.SETTINGS_DEFAULTS["window_scale"], "RESET DEFAULTS reverts window_scale to the ship default")
+
+	mn.free()
+	_restore_buses(snap)
+
+
+# c1-19: F11 (Alt+Enter) into fullscreen and back must RESTORE the player's selected windowed
+# scale, not whatever size the OS left — proving the toggle and the on-screen ladder agree on
+# the same stored scale. Also proves _set_win_scale drops fullscreen and clamps, driving the
+# real DisplayServer.window_set_size path headless (no-op but must not error).
+func test_display_f11_restores_selected_scale() -> void:
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	var mx: int = mn._max_win_scale()
+	var pick: int = mini(3, mx)
+
+	# Pick a windowed scale through the SAME entry point the OPTIONS row uses.
+	Runner.T.ok(mn._set_win_scale(pick), "_set_win_scale applies the chosen integer scale")
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == pick, "_set_win_scale lands windowed at the pick")
+
+	# F11 into fullscreen, then F11 back: the selected scale is restored, not lost.
+	mn._toggle_fullscreen()
+	Runner.T.ok(mn._fullscreen, "F11 enters fullscreen")
+	mn._toggle_fullscreen()
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == pick, "F11 back restores the selected windowed scale")
+
+	# Stepping a scale while fullscreen drops back OUT of fullscreen to that clean multiple.
+	mn._fullscreen = true
+	Runner.T.ok(mn._set_win_scale(1), "_set_win_scale from fullscreen applies (returns moved)")
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 1, "picking a scale drops fullscreen into that windowed multiple")
+
+	# _max_win_scale must stay valid (>=1) even when queried WHILE fullscreen (live decoration
+	# delta reads 0 there — the cached/seed reserve keeps the ceiling sane, not zero-divide junk).
+	mn._fullscreen = true
+	Runner.T.ok(mn._max_win_scale() >= 1, "_max_win_scale stays >=1 when queried in fullscreen")
+
+	# A preference ABOVE the current monitor's ceiling (carried in from a bigger display) is FIT
+	# to what the screen holds on the way OUT of fullscreen — the WINDOW never oversizes — while
+	# the PREFERENCE itself is preserved for a later move back to the bigger display.
+	mn._win_scale = MainScript.WIN_SCALE_MAX
+	mn._fullscreen = true
+	mn._toggle_fullscreen()
+	Runner.T.ok(not mn._fullscreen, "F11 out of fullscreen returns to windowed")
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "the over-ceiling PREFERENCE is preserved across the F11 round-trip")
+	Runner.T.eq(mn._win_scale_norm(), mn._max_win_scale(), "the window is FIT to the current monitor (effective <= ceiling)")
+
+	# The declared ceiling is enforced in ONE place (_max_win_scale) and flows to the setter, so
+	# no 9x+ can be offered or persisted even on an 8K-class display.
+	Runner.T.ok(mn._max_win_scale() <= MainScript.WIN_SCALE_MAX, "_max_win_scale never exceeds the declared WIN_SCALE_MAX ceiling")
+	mn._set_win_scale(999)
+	Runner.T.ok(mn._win_scale <= MainScript.WIN_SCALE_MAX, "_set_win_scale clamps an out-of-range pick to the declared ceiling")
+
+	mn.free()
+
+
+# c1-19: the monitor-change re-fit decision, headless-pinned via the pure MainScript.needs_refit
+# helper (real DisplayServer metrics don't exist headless). A window carried to a SMALLER monitor
+# is shrunk to the new fit; carried BACK to a BIGGER one it must REGROW — the actual client size
+# must match Vector2i(640,360)*_win_scale_norm() at every step, never lagging behind while the menu
+# reports the restored larger scale. needs_refit is exactly the size-vs-target compare _watch_display runs.
+func test_display_monitor_shrink_then_regrow_refits_to_match_scale() -> void:
+	# On the big monitor at 5x the window is 3200x1800.
+	var big := Vector2i(640 * 5, 360 * 5)
+	Runner.T.ok(not MainScript.needs_refit(big, 5), "already-correct 5x window needs no re-fit on the big monitor")
+	# Move to a smaller monitor whose ceiling is 3x: the effective target shrinks to 1920x1080, so
+	# the still-3200x1800 window is OUT of date and must re-fit down.
+	Runner.T.ok(MainScript.needs_refit(big, 3), "carrying a 5x window to a 3x-ceiling monitor triggers a shrink re-fit")
+	var small := Vector2i(640 * 3, 360 * 3)
+	Runner.T.ok(not MainScript.needs_refit(small, 3), "after the shrink the client size matches the 3x target")
+	# Move BACK to the big monitor: the preference (5x) is restored as the effective target, but the
+	# window is still at the shrunk 1920x1080 — it must REGROW so the shown scale matches reality.
+	Runner.T.ok(MainScript.needs_refit(small, 5), "returning to the big monitor regrows the shrunk window to the restored 5x target")
+
+
+# c1-19: the window is freely RESIZABLE (a fixed desktop window is hostile; viewport+integer stretch
+# letterboxes any size). A windowed drag snaps the shown WINDOW SCALE to the largest whole-pixel
+# scale that fits — the pure MainScript.snap_scale decides it, headless-assertable against real
+# client / work-area (taskbar-inset) / ceiling numbers. The fullscreen->windowed transition briefly
+# reports a fullscreen-SIZED client (it overflows the work area); snap_scale returns 0 for that so
+# _on_window_resized ignores it and a preserved over-ceiling preference is never clobbered. Also pins
+# the DISPLAY subtitle wording for both modes.
+func test_display_fullscreen_transition_preserves_scale_across_resize_events() -> void:
+	# A legit windowed drag (client fits the work area) snaps to the largest fitting integer scale,
+	# clamped to the monitor ceiling — the label/cursor sync path _on_window_resized runs.
+	var work := Vector2i(1920, 1040)   # 1080p minus a ~40px taskbar
+	Runner.T.eq(MainScript.snap_scale(Vector2i(1280, 720), work, 8), 2, "a 1280x720 client snaps to 2x")
+	Runner.T.eq(MainScript.snap_scale(Vector2i(1000, 700), work, 8), 1, "an odd in-between client snaps DOWN to the largest whole scale that fits (letterboxed)")
+	Runner.T.eq(MainScript.snap_scale(Vector2i(1900, 1040), work, 2), 2, "the fitted scale is clamped to the monitor ceiling")
+	Runner.T.eq(MainScript.snap_scale(Vector2i(200, 200), work, 8), 1, "a sub-1x client floors at 1x (min_size also enforces this)")
+	# The fullscreen-SIZED client reported mid fullscreen->windowed transition OVERFLOWS the work
+	# area — snap_scale returns 0 (ignore), so _on_window_resized never rewrites the preference.
+	Runner.T.eq(MainScript.snap_scale(Vector2i(1920, 1080), work, 8), 0, "a fullscreen-sized client overflowing the work area is ignored (0), never snapped")
+	Runner.T.eq(MainScript.snap_scale(Vector2i(3840, 2160), work, 8), 0, "an even larger overflowing client is ignored too")
+	# With no display metrics (headless work-area == 0) the overflow guard is disabled but the fit
+	# still clamps — a size is never rejected outright when we can't know the work area.
+	Runner.T.eq(MainScript.snap_scale(Vector2i(1280, 720), Vector2i.ZERO, 3), 2, "no work-area metrics: still fit + clamp, overflow guard disabled")
+	# MAXIMIZE / high-DPI monitor: maximizing to fill a 4K work area (client == work, not > work) snaps
+	# to the largest whole scale that fits, clamped to the ceiling — mixed-DPI is consistent because
+	# both the client size and the work area are in the same (physical) pixels the fit divides.
+	var work4k := Vector2i(3840, 2120)   # 4K minus a taskbar
+	Runner.T.eq(MainScript.snap_scale(work4k, work4k, 8), 5, "maximizing to fill a 4K work area snaps to the largest fitting whole scale (5x)")
+	Runner.T.eq(MainScript.snap_scale(work4k, work4k, 4), 4, "the maximized fit is still clamped to the monitor ceiling")
+
+	# End to end through the real MainScript: leaving fullscreen with an over-ceiling preference
+	# applies the monitor-fit window but preserves the stored preference (F11 round-trip parity).
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn._win_scale = MainScript.WIN_SCALE_MAX   # an over-ceiling preference that must survive the transition
+	mn._fullscreen = true
+	mn._toggle_fullscreen()                    # leave fullscreen — applies the windowed fit, _fullscreen := false
+	Runner.T.ok(not mn._fullscreen, "toggle exits fullscreen")
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "the over-ceiling preference survives the fullscreen->windowed transition")
+
+	# The DISPLAY subtitle names both controls while windowed and, while fullscreen, states that
+	# WINDOW SCALE applies on return to windowed (the row stays adjustable; it isn't a dead control).
+	Runner.T.eq(Menu.disp_subtitle(false), "FULLSCREEN & WINDOW SCALE", "windowed subtitle names both controls")
+	Runner.T.ok("WINDOWED" in Menu.disp_subtitle(true), "fullscreen subtitle explains WINDOW SCALE applies in windowed mode")
+	mn.free()
+
+
+# c1-19: the decoration-reserve + monitor-change plumbing. Chrome is measured from the LIVE
+# windowed delta (zero is a valid borderless / client-side-decoration value, not an error),
+# and a window dragged onto a smaller monitor (which fires no resize signal) is caught by the
+# per-frame screen poll and re-clamped/resized to fit.
+func test_display_decoration_reserve_and_monitor_change() -> void:
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+
+	# Zero-decoration (borderless / headless) is VALID: _measure_decorations stores a
+	# non-negative reserve and _max_win_scale stays >=1 (no under-1 / divide-by-nothing).
+	mn._fullscreen = false
+	mn._measure_decorations()
+	Runner.T.ok(mn._deco_reserve.x >= 0 and mn._deco_reserve.y >= 0, "zero/borderless decoration is a valid (non-negative) reserve")
+	Runner.T.ok(mn._max_win_scale() >= 1, "_max_win_scale stays >=1 with a zero decoration reserve")
+
+	# c1-19: a known-good NONZERO chrome reserve must NOT be clobbered by a transient ZERO reading
+	# (the OS reports decorated == client for a frame or two right after leaving fullscreen). The
+	# headless live delta is zero, so this exercises exactly that transient case: the reserve holds.
+	mn._deco_reserve = Vector2i(8, 31)   # a real windowed chrome measurement
+	mn._measure_decorations()            # headless live delta reads zero (the transient-zero analog)
+	Runner.T.eq(mn._deco_reserve, Vector2i(8, 31), "a transient zero decoration reading never clobbers a known-good nonzero reserve (no oversize offer)")
+	# But a STABLE zero (accept_zero — the multi-frame stability gate in _settle_window has vouched
+	# for it: a genuinely borderless / client-side-decorated window) IS accepted, so the 40px
+	# fallback can't cap a borderless window forever.
+	mn._measure_decorations(true)
+	Runner.T.eq(mn._deco_reserve, Vector2i.ZERO, "a STABLE zero decoration (accept_zero) replaces the fallback — a real borderless window is not capped forever")
+	# The settle only vouches accept_zero after a LONG zero streak (SETTLE_ZERO_FRAMES) — above any
+	# realistic post-fullscreen title-bar re-attach latency (1-3 frames) so a transient multi-frame
+	# zero can't reach it and drop a valid reserve; and the retry ceiling leaves room for that streak.
+	Runner.T.ok(MainScript.SETTLE_ZERO_FRAMES > 3, "a zero reserve is only trusted after more frames than any realistic post-fullscreen transient lasts")
+	Runner.T.ok(MainScript.SETTLE_MAX_TRIES > MainScript.SETTLE_ZERO_FRAMES, "the settle retry ceiling leaves room for the zero streak (and slow-compositor chrome) to complete")
+	# c1-19 regression: on a 1920x1080 work area the 40px decoration FALLBACK caps the fit at 2x
+	# (1080-40 = 1040 -> 1040/360 = 2), but once a genuinely BORDERLESS window's real ZERO reserve is
+	# measured the valid scale rises to 3x (1080/360 = 3). The settle must therefore recompute the
+	# target AFTER committing the reserve, not finish at the stale 2x — proven here via the pure
+	# ceiling math the settle and _max_win_scale both route through.
+	Runner.T.eq(MainScript.max_scale_for(Vector2i(1920, 1080), Vector2i(0, 40)), 2, "the 40px fallback reserve caps a 1920x1080 display at 2x")
+	Runner.T.eq(MainScript.max_scale_for(Vector2i(1920, 1080), Vector2i.ZERO), 3, "a measured borderless ZERO reserve unlocks the true 3x on the same 1920x1080 display")
+	Runner.T.eq(MainScript.max_scale_for(Vector2i.ZERO, Vector2i(0, 40)), 3, "no display metrics falls back to the full 3x ladder")
+	# With NO prior reserve, a zero reading (a genuinely borderless window) is accepted as valid.
+	mn._deco_reserve = Vector2i.ZERO
+	mn._measure_decorations()
+	Runner.T.eq(mn._deco_reserve, Vector2i.ZERO, "with no prior reserve, a zero reading (borderless) is accepted")
+
+	# Dragging onto a DIFFERENT monitor whose ceiling is smaller: the screen poll notices the
+	# move and FITS the window to what now fits WITHOUT destroying the stored preference (moving
+	# back to the bigger display restores it). It also records the current screen + work area so
+	# it fires only on a real change.
+	mn._fullscreen = false
+	mn._win_scale = MainScript.WIN_SCALE_MAX   # a big preference, as if carried from a bigger display
+	mn._last_screen = 12345                    # a stale index so _watch_display sees a "move"
+	mn._last_usable = Rect2i(1, 1, 1, 1)       # stale work area too
+	mn._watch_display()
+	Runner.T.eq(mn._win_scale, MainScript.WIN_SCALE_MAX, "a monitor change PRESERVES the stored preference (transient fit, not a saved downgrade)")
+	Runner.T.eq(mn._win_scale_norm(), mn._max_win_scale(), "the window is fit to the new monitor's ceiling")
+	Runner.T.eq(mn._last_screen, DisplayServer.window_get_current_screen(), "the poll records the current screen so it fires only on a real change")
+
+	mn.free()
+
+
+# c1-19: a free desktop resize (drag) can cross several integer-scale boundaries fast; the WRITE is
+# DEBOUNCED so the settings file is rewritten once the drag goes quiet, not on every boundary. The
+# live scale still updates immediately (label tracks); only the persist is coalesced. A window-close
+# flushes an in-flight debounce so a drag-then-quit can't drop the choice.
+func test_display_free_resize_save_is_debounced() -> void:
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	# Arm the debounce as _on_window_resized would after a boundary crossing.
+	mn._resize_save_t = MainScript.RESIZE_SAVE_DELAY
+	mn._process(0.1)
+	Runner.T.ok(mn._resize_save_t > 0.0, "a just-armed resize save stays pending across a short frame (not written every frame)")
+	# Re-arming (another crossed boundary mid-drag) keeps coalescing — still one eventual write.
+	mn._resize_save_t = MainScript.RESIZE_SAVE_DELAY
+	mn._process(0.2)
+	Runner.T.ok(mn._resize_save_t > 0.0, "a boundary crossed mid-drag re-arms the debounce (still coalescing to one write)")
+	mn._process(0.2)
+	Runner.T.eq(mn._resize_save_t, 0.0, "once the window is quiet for the debounce window the pending save flushes exactly once")
+	# A window-close flushes an in-flight debounce (drag-then-quit must not lose the chosen scale).
+	mn._resize_save_t = MainScript.RESIZE_SAVE_DELAY
+	mn._notification(Node.NOTIFICATION_WM_CLOSE_REQUEST)
+	Runner.T.eq(mn._resize_save_t, 0.0, "a window-close flushes a pending debounced resize save (no lost choice on drag-then-quit)")
+	mn.free()
+
+
+# c1-19: rapid mode/scale changes must not let a stale deferred settle job share counters with, or
+# recenter/resize over, the newest choice. Each windowed apply bumps a generation tag and stamps its
+# deferred settle calls; a callback whose stamp is older than the live generation drops out. Driven
+# through the real MainScript (window ops are headless no-ops but the generation bookkeeping is real).
+func test_display_settle_generation_drops_stale_jobs() -> void:
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn._fullscreen = false
+	mn._apply_windowed_scale()
+	var g1: int = mn._settle_gen
+	mn._apply_windowed_scale()
+	Runner.T.ok(mn._settle_gen == g1 + 1, "each windowed apply bumps the settle generation")
+	# Dirty the live chain's counters as if a settle were mid-flight.
+	mn._settle_tries = 5
+	mn._settle_zero_streak = 4
+	mn._settle_last_deco = Vector2i(9, 9)
+	# A STALE settle callback (an older generation, still nonzero) bails WITHOUT touching the live
+	# counters — so it can't corrupt the newest chain or resize/recenter over the newer choice.
+	mn._settle_window(g1)
+	Runner.T.ok(mn._settle_tries == 5 and mn._settle_zero_streak == 4, "a stale-generation settle callback drops out, leaving the live chain's counters untouched")
+	# A fresh windowed apply supersedes: bumps the generation again and RESETS the chain counters, so
+	# the new settle job starts clean rather than inheriting the previous chain's mid-flight state.
+	mn._apply_windowed_scale()
+	Runner.T.ok(mn._settle_tries == 0 and mn._settle_zero_streak == 0, "starting a fresh settle chain resets its counters (no shared state with a superseded job)")
+	mn.free()
+
+
+# c1-19: window PLACEMENT math — centering a DECORATED footprint and clamping an off-edge window
+# back onto the work area — is the part a headless DisplayServer can't exercise (no real monitor,
+# taskbar, or window position). Pin the pure MainScript.center_pos / clamp_pos against SYNTHETIC
+# multi-monitor + taskbar rects so the client/decorated sizing, centering, taskbar avoidance, and
+# monitor-offset cases are covered without a display.
+func test_display_center_and_clamp_placement_math() -> void:
+	# Center a 1280x720 client whose decorated footprint is 1288x759 (8px borders + 39px title bar)
+	# inside a 1080p work area with a 40px taskbar at the bottom (usable = 0,0..1920x1040): the
+	# DECORATED box (not the client) is centered, so the title bar is on-screen and clear of the bar.
+	var usable_pos := Vector2i(0, 0)
+	var usable_size := Vector2i(1920, 1040)   # 1080p minus a 40px bottom taskbar
+	var deco := Vector2i(1288, 759)
+	Runner.T.eq(MainScript.center_pos(usable_pos, usable_size, deco), Vector2i((1920 - 1288) / 2, (1040 - 759) / 2), "the DECORATED footprint is centered inside the work area (chrome + title bar on-screen, clear of the taskbar)")
+
+	# A SECOND monitor to the right (work area offset by +1920) centers relative to ITS origin.
+	var mon2_pos := Vector2i(1920, 0)
+	Runner.T.eq(MainScript.center_pos(mon2_pos, usable_size, deco), mon2_pos + Vector2i((1920 - 1288) / 2, (1040 - 759) / 2), "centering respects a monitor's origin offset (second display to the right)")
+
+	# clamp_pos: a window hanging off the RIGHT/BOTTOM edges is slid back so its decorated box fully
+	# fits; the max clamp uses (usable end - deco), never below the usable origin.
+	Runner.T.eq(MainScript.clamp_pos(Vector2i(1800, 900), usable_pos, usable_size, deco), Vector2i(1920 - 1288, 1040 - 759), "a window off the right/bottom edges is pulled fully back onto the work area")
+	# A window off the TOP/LEFT (negative position, e.g. after a resolution shrink) is pushed to the origin.
+	Runner.T.eq(MainScript.clamp_pos(Vector2i(-50, -30), usable_pos, usable_size, deco), Vector2i(0, 0), "a window off the top/left is pushed back to the work-area origin")
+	# A window already fully inside is left EXACTLY where the player put it (placement preserved).
+	Runner.T.eq(MainScript.clamp_pos(Vector2i(100, 80), usable_pos, usable_size, deco), Vector2i(100, 80), "a window already on-screen keeps its exact placement (no forced recenter)")
+	# Degenerate: a decorated box LARGER than the work area clamps to the origin (never past it).
+	Runner.T.eq(MainScript.clamp_pos(Vector2i(500, 500), usable_pos, Vector2i(800, 600), Vector2i(1288, 759)), Vector2i(0, 0), "a window larger than the work area pins to the origin, never negative")
+
+
+# c1-19: the DISPLAY control's whole premise — every windowed integer scale AND fullscreen show
+# the 640x360 canvas with clean integer scaling + letterboxing — rests on the project's viewport
+# stretch config. Assert it so a stray settings change can't silently switch to fractional scaling
+# (blurry pixels) or a non-letterboxed stretch, which no amount of _win_scale math would catch.
+func test_display_integer_stretch_configured() -> void:
+	Runner.T.eq(int(ProjectSettings.get_setting("display/window/size/viewport_width")), 640, "base canvas width is 640")
+	Runner.T.eq(int(ProjectSettings.get_setting("display/window/size/viewport_height")), 360, "base canvas height is 360")
+	Runner.T.eq(str(ProjectSettings.get_setting("display/window/stretch/mode")), "viewport", "stretch mode is viewport (renders at 640x360, scales up)")
+	Runner.T.eq(str(ProjectSettings.get_setting("display/window/stretch/scale_mode")), "integer", "stretch scale_mode is integer (clean pixels + letterbox in fullscreen, no fractional scaling)")
 
 
 # c1-09: when focus is on RESET DEFAULTS, the header summary line is REPLACED with an

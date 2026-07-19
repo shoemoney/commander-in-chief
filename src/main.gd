@@ -99,6 +99,21 @@ var _rumble := 0.0                # pending gamepad vibration this frame
 var _rumble_on := true            # accessibility: gamepad vibration on/off
 var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad option — swap the MOVE (left) and AIM (right) analog sticks. [0]=P1, [1]=P2, independent like the per-player pad button layouts, so a left-handed P2 swaps without touching P1. The sticks aren't per-button rebindable, so this is the accessible way to reassign them for left-handed / adaptive-controller players. Applied view-side in _gather_inputs.
 var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
+var _win_scale := 2               # c1-19: the player's PREFERRED windowed integer scale (Nx of the 640x360 canvas), persisted in [settings]. This is the PREFERENCE, sane-capped to [1, WIN_SCALE_MAX] but NEVER clamped down to a monitor — so moving to a smaller display and back restores it. The window is sized to _effective_scale() (this preference clamped to what the CURRENT display fits); only an explicit user pick or RESET changes this value.
+const WIN_SCALE_MAX := 8          # c1-19: sanity ceiling on the STORED preference (8x = 5120x2880, past any real monitor) so a garbage save can't persist an absurd scale; the live per-monitor fit clamps below this for actual sizing.
+var _deco_reserve := Vector2i(0, 40)   # c1-19: window chrome (title bar + borders) kept OFF-canvas when computing the largest scale that fits. The AUTHORITATIVE value is the live windowed decoration delta (window_get_size_with_decorations - window_get_size), written ONLY from _settle_window (deferred, a frame after a mode change) so the transient zero the OS reports right after leaving fullscreen can't clobber it; a settled borderless window's stable zero is valid. The initial 40 is a conservative fallback until the first windowed measurement (e.g. booting straight into fullscreen) — it only shrinks the temporary EFFECTIVE fit, never the stored preference, and is re-evaluated once measured.
+var _last_screen := -1                 # c1-19: monitor index the window is on, polled so a drag to another display (which fires no resize signal) still re-fits/recenters the window to what the new screen holds.
+var _last_usable := Rect2i()           # c1-19: last work-area seen, polled alongside _last_screen so a SAME-monitor resolution or taskbar change (no screen-index change) also re-fits the window.
+var _settle_last_deco := Vector2i(-1, -1)  # c1-19: the live decoration delta _settle_window saw on the PREVIOUS deferred frame — the settle finishes only once it reads the SAME value twice running (stable), so a slow window manager's one-frame transient can't end the settle on a bad chrome reserve.
+var _settle_tries := 0                  # c1-19: retry counter for _settle_window — the decorated size can take more than one deferred frame to settle under a slow window manager (X11 / Wayland especially), so re-run a bounded few frames until the client size matches the target instead of assuming one frame is enough.
+var _settle_zero_streak := 0            # c1-19: how many CONSECUTIVE deferred settle frames have read a ZERO decoration delta. A zero reserve is only ACCEPTED once this reaches SETTLE_ZERO_FRAMES — so the multi-frame zero the OS reports while the title bar re-attaches after leaving fullscreen can't clobber a known-good reserve before real chrome reappears; the last nonzero reserve is retained until the transition is definitively complete.
+const SETTLE_ZERO_FRAMES := 6           # c1-19: a decoration delta must read ZERO this many consecutive settle frames before it's trusted as a genuine borderless / client-side-decorated window. Above any realistic post-fullscreen title-bar re-attach latency (1-3 frames), so a transient zero streak can never reach it and drop a valid chrome reserve.
+var _prog_resize := false               # c1-19: EXPLICIT programmatic-transition guard. True while WE are changing the window mode/size (fullscreen toggle, scale apply, monitor re-fit) and until that settle completes. While set, _on_window_resized ignores the size-change notifications the OS emits during the transition — so a compositor-generated intermediate client size that happens to fit within/equal the usable area can NOT be mistaken for a user drag and overwrite the saved scale. Cleared only when the settle chain finishes (transition definitively done). A genuine user drag arrives with this false and is honored.
+var _resize_save_t := 0.0               # c1-19: debounce timer for persisting a free-resize scale change. A drag can cross several integer-scale boundaries in quick succession; rather than rewrite the settings file on every crossing, _on_window_resized updates the live scale immediately (so the label tracks) but only ARMS this countdown — the actual _save_settings fires once it elapses after the last size change (coalescing a whole drag into one write). Flushed early on window-close so a drag-then-quit can't lose the choice.
+const RESIZE_SAVE_DELAY := 0.35         # c1-19: seconds of size quiescence before a free-resize scale change is persisted — long enough to coalesce a continuous drag into a single write, short enough to land before a normal close.
+var _settle_active := false            # c1-19: is a settle chain running? Driven from _process (ONE sample per RENDERED frame — guaranteed distinct frames), NOT recursive call_deferred (whose re-queued calls can flush several times in a SINGLE idle, collapsing the multi-frame stability gate). While true, _process advances one _settle_window sample each frame until the mode/client/decorated sizes stabilize; a generation bump cancels the current chain.
+var _settle_gen := 0                    # c1-19: monotonic generation tag for the settle chain. Each new windowed mode/scale change bumps it and stamps its deferred _settle_window calls; a callback whose stamp != the current gen is STALE (a newer choice superseded it) and drops out — so rapid mode/scale toggling can't have an old settle chain share counters with, or recenter/resize after, the newest choice.
+const SETTLE_MAX_TRIES := 16            # c1-19: hard ceiling on settle retries — high enough that the SETTLE_ZERO_FRAMES streak (and a slow compositor's late title-bar attach) has room to complete, low enough that a genuinely stuck window manager can't loop the deferred settle forever (~0.27s at 60Hz worst case, only on a mode change).
 var no_autopause := false         # set by dev harnesses whose window never holds focus
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyboard 8-way aim snapped in 45° pops (enemies already lerp via _enemy_face)
@@ -339,6 +354,14 @@ func _ready() -> void:
 	# real Godot settings (silent no-op) — Window.min_size is the actual API, so
 	# the integer-scaled 640x360 canvas can't be shrunk into a cropped degenerate.
 	get_window().min_size = Vector2i(640, 360)
+	# c1-19: the window IS freely resizable (standard desktop behavior on Windows/macOS/X11/Wayland,
+	# where forcing a fixed window is hostile — users expect to grab an edge). The 640x360 canvas is
+	# drawn with viewport + integer stretch (see project.godot / test_display_integer_stretch_configured),
+	# so ANY window size renders at the largest whole-pixel scale that fits and letterboxes the rest —
+	# a free drag can never produce blurry fractional pixels. _on_window_resized then SNAPS the shown
+	# WINDOW SCALE label to that fitted integer, so the OPTIONS control and the real window stay in
+	# sync. min_size keeps the floor at a clean 1x. The OPTIONS WINDOW SCALE row remains the way to
+	# jump to an exact centered multiple; dragging is just the other, equally valid, path.
 	add_child(_sfx)
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
@@ -675,6 +698,19 @@ func _paint_bg(canvas: Node2D) -> void:
 
 
 func _process(_delta: float) -> void:
+	_watch_display()   # c1-19: catch a window dragged to another monitor (fires no resize signal)
+	# c1-19: advance a running window-settle ONE sample per rendered frame — the frame loop (not
+	# recursive call_deferred) guarantees each decoration sample lands on a DISTINCT frame, so the
+	# multi-frame zero-stability gate can't be satisfied by several samples in a single idle flush.
+	if _settle_active:
+		_settle_window(_settle_gen)
+	# c1-19: flush a debounced free-resize scale save once the window has been quiet long enough —
+	# coalesces a continuous drag (many crossed scale boundaries) into ONE settings write.
+	if _resize_save_t > 0.0:
+		_resize_save_t -= _delta
+		if _resize_save_t <= 0.0:
+			_resize_save_t = 0.0
+			_save_settings()
 	# Sync the concussion overlay every rendered frame (covers gameplay, attract,
 	# and pause — where _concussion is force-zeroed). Hidden at zero = pure no-op.
 	if _screen_fx_rect == null:
@@ -1121,6 +1157,13 @@ func _notification(what: int) -> void:
 	# player a death that reads as a bug, not a loss. Auto-open pause the instant the
 	# window loses focus during live play. sim.step() is already gated behind
 	# _menu.is_active(), so this is a pure view gate with zero sim contact — golden-safe.
+	# c1-19: flush a debounced free-resize scale save before the window closes, so a drag-then-quit
+	# (or losing focus) can't drop the choice while its debounce timer was still counting down.
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_FOCUS_OUT \
+			or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		if _resize_save_t > 0.0:
+			_resize_save_t = 0.0
+			_save_settings()
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
 		# no_autopause: the screenshot harness runs unfocused by design — without
 		# this every staged gameplay shot captures the pause overlay instead.
@@ -1141,11 +1184,83 @@ func _update_cursor() -> void:
 
 
 func _on_window_resized() -> void:
-	# A free resize that crosses an integer-scale boundary re-bakes the cursors
-	# (guarded so the decompress+resize doesn't run on every drag frame).
+	# c1-19: a windowed size change (user drag OR our own scale/mode change) SNAPS the shown WINDOW
+	# SCALE to the largest whole-pixel scale that fits the new client — the viewport+integer stretch
+	# already letterboxes, so this only syncs the label/cursor to reality. Guards:
+	#  * fullscreen has no windowed scale to sync;
+	#  * snap == 0 means the client OVERFLOWS the work area — the fullscreen-sized client the
+	#    fullscreen->windowed transition briefly reports; ignore it (no legit windowed drag exceeds
+	#    the work area), so that transient can't clobber a preserved over-ceiling preference;
+	#  * snap == _win_scale_norm() means the window already sits at the effective target — that's what
+	#    OUR OWN resizes (_apply_windowed_scale) produce, so skip: a monitor-clamped effective size
+	#    must NOT collapse a larger stored preference. Only a genuine user drag to a DIFFERENT integer
+	#    scale rewrites the stored preference (an explicit resize IS a new choice).
+	if _fullscreen:
+		return
+	if _prog_resize:
+		return   # OUR OWN mode/scale transition is in flight — ignore its intermediate resize events (explicit guard, not a size heuristic), so a fitting transient client size can't overwrite the saved scale
 	var win := DisplayServer.window_get_size()
-	if maxi(1, mini(win.x / 640, win.y / 360)) != _cursor_s:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	var snap := snap_scale(win, usable.size, _max_win_scale())
+	if snap == 0:
+		return   # oversized transient (belt-and-suspenders alongside _prog_resize) — never touch the preference
+	if snap != _win_scale_norm() and snap != _win_scale:
+		_win_scale = snap             # update the live scale now so the OPTIONS label tracks the drag
+		_resize_save_t = RESIZE_SAVE_DELAY   # debounce the WRITE — persisted once the drag goes quiet
+	if snap != _cursor_s:
 		call_deferred("_bake_cursor")
+
+
+# c1-19: the largest whole-pixel scale a client size can show, given the work-area size and the
+# monitor ceiling — pure + static so the client/decorated/taskbar sizing math is headless-assertable.
+# Returns 0 to signal "IGNORE this size": a client that OVERFLOWS the work area is the fullscreen-
+# sized client reported mid fullscreen->windowed transition (no legitimate windowed resize exceeds
+# the usable area), so callers skip it rather than snapping to a bogus huge scale. usable == 0
+# (no display metrics) disables the overflow guard but still clamps the fitted scale.
+static func snap_scale(client: Vector2i, usable: Vector2i, ceiling: int) -> int:
+	if usable.x > 0 and usable.y > 0 and (client.x > usable.x or client.y > usable.y):
+		return 0
+	return clampi(mini(client.x / 640, client.y / 360), 1, ceiling)
+
+
+# c1-19: a window dragged onto a DIFFERENT monitor fires no resize signal (its pixel size is
+# unchanged), and a same-monitor resolution / taskbar change moves the work area without changing
+# the screen index — so poll BOTH the screen index and the usable rect every frame. On any change,
+# re-measure the chrome and re-FIT the window to what the new work area holds (a 3x window moved
+# onto a 1080p screen shrinks to fit; moving back grows it again). The stored PREFERENCE is never
+# touched, so this is a transient fit, not a saved downgrade — hence no _save_settings here.
+func _watch_display() -> void:
+	var scr := DisplayServer.window_get_current_screen()
+	var usable := DisplayServer.screen_get_usable_rect(scr)
+	if scr == _last_screen and usable == _last_usable:
+		return
+	_last_screen = scr
+	_last_usable = usable
+	if _fullscreen:
+		return
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return                           # no display metrics (headless) — nothing to fit
+	# c1-19: re-fit when the actual client size no longer matches the EFFECTIVE target for the new
+	# work area — this catches BOTH a shrink (moved to a smaller monitor: the ceiling drops, target
+	# shrinks) AND a regrow (moved back to a bigger monitor: the ceiling rises, target grows again),
+	# so _win_scale_norm() and the real window can never disagree. When the size already matches,
+	# never a forced recenter (that yanks a window the player deliberately positioned) — only nudge
+	# it back on-screen if the new work area leaves it hanging off an edge.
+	# _measure_decorations is intentionally NOT called here: the reserve is written ONLY from the
+	# deferred settle pass (reached via _apply_windowed_scale), so a transient post-fullscreen zero
+	# decoration read can't clobber the cached value — honoring the stated cache invariant.
+	if needs_refit(DisplayServer.window_get_size(), _win_scale_norm()):
+		_apply_windowed_scale()          # size drifted from the new monitor's target: re-fit (this recenters)
+		call_deferred("_bake_cursor")
+	else:
+		_clamp_window_on_screen()        # already the right size — keep placement, only nudge on-screen if it hangs off
+
+
+# c1-19: does the actual client size disagree with the effective windowed target (640Nx360N)? Pure
+# + static so the shrink/regrow monitor-change decision is headless-assertable — the client size
+# and the reported scale can never silently diverge across a display move.
+static func needs_refit(actual: Vector2i, scale: int) -> bool:
+	return actual != Vector2i(640 * scale, 360 * scale)
 
 
 func _physics_process(_delta: float) -> void:
@@ -2497,6 +2612,9 @@ func _load_bests() -> void:
 			"music_vol": cf.get_value("settings", "music_vol",
 				0 if cf.get_value("settings", "music_muted", false) else SETTINGS_DEFAULTS["music_vol"]),
 			"fullscreen": cf.get_value("settings", "fullscreen", SETTINGS_DEFAULTS["fullscreen"]),
+			# c1-19: read the saved windowed scale back (missing this dropped it on every load,
+			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
+			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
 		})
 	else:
 		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
@@ -2519,6 +2637,7 @@ const SETTINGS_DEFAULTS := {
 	"sfx_vol": 10,
 	"music_vol": 10,
 	"fullscreen": false,
+	"window_scale": 2,
 }
 
 
@@ -2725,6 +2844,7 @@ func _save_settings() -> void:
 		"sfx_vol": _bus_vol("SFX"),
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
+		"window_scale": _win_scale,
 	}})
 
 
@@ -2744,8 +2864,14 @@ func _apply_settings(d: Dictionary) -> void:
 	_set_bus_vol("SFX", d["sfx_vol"])
 	_set_bus_vol("Music", d["music_vol"])
 	_fullscreen = d["fullscreen"]
+	# .get: saves predating c1-19 land at the 2x ship default. Store the PREFERENCE sane-capped
+	# (NOT clamped to the current monitor) so a scale saved on a bigger display survives a load on
+	# a smaller one; _apply_windowed_scale sizes the window to the live per-monitor fit.
+	_win_scale = clampi(int(d.get("window_scale", 2)), 1, WIN_SCALE_MAX)
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
 		else DisplayServer.WINDOW_MODE_WINDOWED)
+	if not _fullscreen:
+		_apply_windowed_scale()
 	# c1-09: rebake the cursor to the new window size here too — RESET DEFAULTS switches
 	# display mode through this path, and without this it left the cursor scaled for the
 	# old size (the F11/Alt+Enter shortcut always rebaked; reset used to skip it).
@@ -2757,11 +2883,255 @@ func _apply_settings(d: Dictionary) -> void:
 # (persist + cursor rebake included). Lets DISPLAY be reviewed AND changed on the
 # dedicated settings screen, not only via the hidden shortcut.
 func _toggle_fullscreen() -> void:
+	_prog_resize = true   # a programmatic mode change — ignore the transition's resize events until settled
 	_fullscreen = not _fullscreen
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
 		if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
+	if not _fullscreen:
+		# Returning to windowed restores the chosen integer scale — RE-CLAMPED to the current
+		# monitor first, so a scale carried in from a larger display (save or F11 round-trip)
+		# can never restore an oversized window that overflows the smaller screen. This arms a
+		# windowed settle chain that clears _prog_resize once the transition completes.
+		_apply_windowed_scale()
+	else:
+		# Entering fullscreen applies NO windowed fit, so arm a generation-tagged settle chain anyway:
+		# its fullscreen branch (reached from _process next frame) resets the counters AND clears
+		# _prog_resize, so the guard can never stay stuck true after a bare F11-in.
+		_settle_gen += 1
+		_settle_active = true
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
 	_save_settings()
+
+
+# c1-19: largest integer window scale the current display can actually hold (min 1),
+# so the OPTIONS control never offers a window that won't fit. Sized against the WORK
+# area (screen_get_usable_rect excludes the taskbar / macOS menu bar) MINUS the window
+# chrome (title bar + borders) — a raw-screen divide advertised e.g. 2x on a 720p display
+# that the decorated 1280x720 window then overflowed. The live decoration delta is only
+# trustworthy while WINDOWED (it reads 0 in fullscreen); it's cached into _deco_reserve
+# there and reused when queried in fullscreen, so the ceiling computed mid-fullscreen still
+# leaves room for the chrome that returns on the way out.
+func _max_win_scale() -> int:
+	return max_scale_for(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()).size, _deco_reserve)
+
+
+# c1-19: the ceiling math, pure + static so it's headless-assertable with SYNTHETIC work-area +
+# chrome-reserve pairs — e.g. a 1920x1080 work area caps at 2x with a 40px fallback reserve but at 3x
+# once a borderless window's real zero reserve is measured. usable == 0 (no display metrics) returns
+# the full 3x ladder. Capped at WIN_SCALE_MAX so even an 8K display can't offer past the declared cap.
+static func max_scale_for(usable: Vector2i, reserve: Vector2i) -> int:
+	if usable.x <= 0 or usable.y <= 0:
+		return 3
+	return clampi(mini((usable.x - reserve.x) / 640, (usable.y - reserve.y) / 360), 1, WIN_SCALE_MAX)
+
+
+# c1-19: cache the real window chrome from the live delta. The cache is only ever written from
+# _settle_window (a DEFERRED step that runs a frame after a windowed mode change), never inline
+# in _max_win_scale — so the transient zero the OS reports in the frame right after leaving
+# fullscreen (decorated size == client size until the title bar is re-attached) can't clobber a
+# good value. Once settled, a genuinely borderless / client-side-decoration window reads a stable
+# zero, which is valid and stored as-is.
+func _measure_decorations(accept_zero := false) -> void:
+	if _fullscreen:
+		return
+	var raw := DisplayServer.window_get_size_with_decorations() - DisplayServer.window_get_size()
+	var live := Vector2i(maxi(0, raw.x), maxi(0, raw.y))
+	# c1-19: NEVER clobber a known-good nonzero reserve with a TRANSIENT zero. Right after leaving
+	# fullscreen the OS reports decorated size == client size for a frame or two (the title bar has
+	# not re-attached yet); committing that 0 would drop the chrome reserve and later let
+	# _max_win_scale offer / restore an OVERSIZED scale. A zero is therefore committed only when it
+	# is TRUSTED: either there is no prior reserve, or `accept_zero` says a stability gate has
+	# already seen this same zero across consecutive frames (a genuinely borderless / client-side-
+	# decorated window). That way a real borderless window still drops the 40px fallback — a
+	# transient zero can't clobber, and a stable zero isn't rejected forever. Only _settle_window,
+	# which owns the multi-frame stability check, ever passes accept_zero.
+	if live == Vector2i.ZERO and _deco_reserve != Vector2i.ZERO and not accept_zero:
+		return
+	_deco_reserve = live
+
+
+# c1-19: run one frame AFTER a windowed mode change, once the OS has settled the decorated
+# dimensions — re-measure the chrome, then RE-FIT + RECENTER: the boot/seed decoration estimate
+# may have mis-sized the window, so resize to the effective scale recomputed from the real chrome
+# and center on that FINAL decorated footprint (the inline pass ran before the title bar
+# re-attached, so its size/offset could be a few px off).
+# c1-19: ONE settle sample — run once per frame by _process while _settle_active, never self-requeued
+# via call_deferred (which can fire multiple times in a single idle flush and collapse the per-frame
+# stability gate). Each invocation takes exactly one decoration reading on a distinct rendered frame.
+func _settle_window(gen := 0) -> void:
+	# Drop a STALE sample: if a newer change bumped _settle_gen, this belongs to a superseded chain —
+	# bail so it can't resize/recenter over the newer choice or corrupt the live chain's counters.
+	# (gen 0 default = a direct/legacy call adopts the current chain.)
+	if gen != 0 and gen != _settle_gen:
+		return
+	if _fullscreen:
+		_settle_tries = 0
+		_settle_last_deco = Vector2i(-1, -1)
+		_settle_zero_streak = 0
+		_prog_resize = false   # entered fullscreen; resize events are already guarded by _fullscreen
+		_settle_active = false
+		return
+	# c1-19: robust to window-manager latency — the decorated size may not settle in a SINGLE
+	# deferred frame (a slow X11 / Wayland compositor re-attaches the title bar a frame or two later,
+	# re-measuring the chrome and thus the fit). SAMPLE the live decoration each deferred frame and
+	# treat a NONZERO reading as trusted immediately (real chrome). A ZERO is only trusted once it has
+	# HELD for SETTLE_ZERO_FRAMES consecutive frames: the fullscreen->windowed transition can report a
+	# decorated==client (zero) size for SEVERAL frames while the title bar re-attaches, so a mere
+	# "same value twice" gate could freeze that transient zero and drop a valid chrome reserve. By
+	# demanding a long zero streak, the real chrome always reappears first (resetting the streak), and
+	# the last known-good NONZERO reserve is retained until the transition is definitively complete.
+	# A genuinely borderless window reads zero every frame and so still settles (streak reaches the
+	# bar). _measure_decorations then commits, itself guarded so a transient zero can't clobber a good
+	# reserve unless this streak-based accept_zero vouches for it.
+	var raw := DisplayServer.window_get_size_with_decorations() - DisplayServer.window_get_size()
+	var live := Vector2i(maxi(0, raw.x), maxi(0, raw.y))
+	if live == Vector2i.ZERO:
+		_settle_zero_streak += 1
+	else:
+		_settle_zero_streak = 0
+	var deco_stable := live == _settle_last_deco
+	_settle_last_deco = live
+	# at_target is judged against the target implied by the CURRENT reserve (before this sample's
+	# measurement) — that's the size the previous iteration aimed the window at.
+	var pre_px := Vector2i(640 * _win_scale_norm(), 360 * _win_scale_norm())
+	var at_target := DisplayServer.window_get_size() == pre_px
+	# A ZERO reserve is trusted ONLY when it has held SETTLE_ZERO_FRAMES consecutive frames AND the
+	# window is already AT its final target size — i.e. the resize/transition is definitively over.
+	# Requiring at_target too means a long-but-transient zero seen WHILE the window is still resizing
+	# (mid fullscreen->windowed, before the client reaches the target) can't be committed and offer an
+	# oversized window; only a genuinely borderless window, settled at its size, drops the reserve.
+	var accept_zero := _settle_zero_streak >= SETTLE_ZERO_FRAMES and at_target
+	var prev_reserve := _deco_reserve
+	_measure_decorations(accept_zero)
+	var reserve_changed := _deco_reserve != prev_reserve
+	# Recompute the target AFTER measuring: committing the reserve (e.g. accepting a borderless zero,
+	# dropping the 40px fallback) can RAISE the effective scale, so the pre-measurement `want` is now
+	# stale. Aim at the POST-measurement target and, whenever the reserve just changed, force one more
+	# iteration so the new effective scale is actually applied and verified — never finish at the old
+	# (smaller) scale the reserve implied before it was updated.
+	var want := _win_scale_norm()
+	var px := Vector2i(640 * want, 360 * want)
+	var now_at_target := DisplayServer.window_get_size() == px
+	# The chrome is "done" only when a nonzero reserve was committed OR a settled zero was trusted —
+	# keep retrying (re-fitting to the freshly measured chrome) until that AND the client size matches
+	# the POST-measurement target AND the reserve has stopped changing, bounded by SETTLE_MAX_TRIES.
+	var chrome_done := live != Vector2i.ZERO or accept_zero
+	if (not (deco_stable and chrome_done and now_at_target) or reserve_changed) and _settle_tries < SETTLE_MAX_TRIES:
+		if not now_at_target:
+			DisplayServer.window_set_size(px)   # re-fit to the scale recomputed from the freshly measured chrome
+		_settle_tries += 1
+		return   # NOT done — _process runs the next sample on the next distinct frame (no self-requeue)
+	# Settled (stable chrome, at the post-measurement target, reserve steady) or hit the retry cap.
+	_settle_tries = 0
+	_settle_last_deco = Vector2i(-1, -1)
+	_settle_zero_streak = 0
+	_settle_active = false
+	_prog_resize = false   # transition definitively complete — a genuine user drag from here IS honored
+	_center_window()
+
+
+# c1-19: slide the window fully back onto the current work area WITHOUT resizing or recentering —
+# used when a monitor / work-area change leaves a correctly-sized window hanging off the edge, so
+# the player's placement is preserved as much as possible (only the overflow is corrected).
+func _clamp_window_on_screen() -> void:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return
+	var deco := DisplayServer.window_get_size_with_decorations()
+	var pos := DisplayServer.window_get_position()
+	var np := clamp_pos(pos, usable.position, usable.size, deco)
+	if np != pos:
+		DisplayServer.window_set_position(np)
+
+
+# c1-19: slide a decorated window fully onto the work area, preserving placement where it already
+# fits (only the overflow is corrected). Pure + static so the off-edge / taskbar-inset / multi-
+# monitor-offset math is headless-assertable without a real display.
+static func clamp_pos(pos: Vector2i, usable_pos: Vector2i, usable_size: Vector2i, deco: Vector2i) -> Vector2i:
+	return Vector2i(
+		clampi(pos.x, usable_pos.x, maxi(usable_pos.x, usable_pos.x + usable_size.x - deco.x)),
+		clampi(pos.y, usable_pos.y, maxi(usable_pos.y, usable_pos.y + usable_size.y - deco.y)))
+
+
+# c1-19: top-left position that centers a DECORATED footprint (client + title bar/borders) inside a
+# work area — so the whole window, chrome included, lands on-screen and clear of the taskbar/menu
+# bar. Pure + static so centering is headless-assertable against synthetic taskbar/monitor rects.
+static func center_pos(usable_pos: Vector2i, usable_size: Vector2i, deco: Vector2i) -> Vector2i:
+	return usable_pos + (usable_size - deco) / 2
+
+
+# c1-19: the ONE place the windowed size is applied — sizes the window to the EFFECTIVE scale
+# (the stored preference clamped to what the CURRENT monitor fits) WITHOUT mutating the stored
+# preference, so every path back to windowed (load, RESET, F11 out, a scale step, a monitor hop)
+# fits the live display while a scale chosen on a bigger monitor survives to be restored later.
+func _apply_windowed_scale() -> void:
+	_prog_resize = true   # our own resize — suppress the size-change notifications it emits until the settle completes
+	var eff := _win_scale_norm()
+	DisplayServer.window_set_size(Vector2i(640 * eff, 360 * eff))
+	_center_window()
+	# Start a FRESH settle chain: bump the generation (cancelling any in-flight chain from a previous
+	# change) and reset its counters, then arm it. _process advances it one sample per rendered frame
+	# until the chrome + client size stabilize (re-measure chrome, re-fit, recenter), then clears the
+	# programmatic-resize guard.
+	_settle_gen += 1
+	_settle_tries = 0
+	_settle_last_deco = Vector2i(-1, -1)
+	_settle_zero_streak = 0
+	_settle_active = true
+
+
+# c1-19: the EFFECTIVE windowed scale actually applied to the window — the stored PREFERENCE
+# clamped to the CURRENT monitor's ceiling. The window is always sized to this; the preference
+# (_win_scale) is left untouched so a smaller monitor shrinks the view without destroying the
+# choice. The OPTIONS row label and the ladder step both read through here, so the on-screen
+# control always sits on the real ceiling (a stale over-max preference can't wedge ►).
+func _win_scale_norm() -> int:
+	return clampi(_win_scale, 1, _max_win_scale())
+
+
+# c1-19: apply an absolute windowed integer scale — the ONE place window size changes,
+# shared by the OPTIONS WINDOW SCALE row (◄/► and Enter). Clamped to the display's fit.
+# Picking a scale implies WINDOWED: fullscreen has no visible window to size, so a step
+# drops out of it into the chosen clean multiple. Returns true if the value moved.
+func _set_win_scale(s: int) -> bool:
+	var ns := clampi(s, 1, _max_win_scale())
+	if ns == _win_scale and not _fullscreen:
+		return false
+	_win_scale = ns
+	_fullscreen = false
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	_apply_windowed_scale()
+	call_deferred("_bake_cursor")   # cursor scale follows the new window size
+	_save_settings()
+	return true
+
+
+# c1-19: change the STORED windowed-scale PREFERENCE without leaving fullscreen or resizing anything
+# — so the DISPLAY WINDOW SCALE row stays a LIVE control while fullscreen instead of a dead, ignored
+# row. The chosen value is what applies the moment you drop back to windowed (via the FULLSCREEN
+# toggle or F11). Clamped to the current effective ceiling and persisted; returns true if it moved.
+func _set_win_scale_pref(s: int) -> bool:
+	var ns := clampi(s, 1, _max_win_scale())
+	if ns == _win_scale:
+		return false
+	_win_scale = ns
+	_save_settings()
+	return true
+
+
+func _center_window() -> void:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return   # no display metrics (headless) — leave the position as-is
+	# Center the DECORATED footprint (client + title bar/borders) inside the WORK area, so the
+	# whole window — chrome included — lands on-screen and clear of the taskbar/menu bar. Godot's
+	# window_get_position / window_set_position are decorated-origin on our desktop targets, so
+	# centering the decorated footprint is correct there; the final clamp_pos is a safety net so
+	# that even where the position is treated as a client origin (leaving the title bar off the top)
+	# the whole decorated box is still slid fully onto the work area rather than trusting the split.
+	var deco := DisplayServer.window_get_size_with_decorations()
+	var centered := center_pos(usable.position, usable.size, deco)
+	DisplayServer.window_set_position(clamp_pos(centered, usable.position, usable.size, deco))
 
 
 func _reset_settings() -> void:
