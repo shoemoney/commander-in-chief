@@ -97,6 +97,7 @@ var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
 var _rumble := 0.0                # pending gamepad vibration this frame
 var _rumble_on := true            # accessibility: gamepad vibration on/off
+var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad option — swap the MOVE (left) and AIM (right) analog sticks. [0]=P1, [1]=P2, independent like the per-player pad button layouts, so a left-handed P2 swaps without touching P1. The sticks aren't per-button rebindable, so this is the accessible way to reassign them for left-handed / adaptive-controller players. Applied view-side in _gather_inputs.
 var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
 var no_autopause := false         # set by dev harnesses whose window never holds focus
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
@@ -106,6 +107,9 @@ var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
+var _binds: Dictionary = {}      # c1-18: keyboard rebinds (action -> physical keycode, 0 == UNBOUND); filled from BIND_DEFAULTS + [binds] in _load_bests
+var _pad_binds: Array[Dictionary] = [{}, {}]  # c1-18: PER-PLAYER gamepad button rebinds (action -> JOY_BUTTON_*, -1 == UNBOUND). [0]=P1 (device 0, [padbinds]), [1]=P2 (device 1, [padbinds2]) — two INDEPENDENT layouts so a left-handed P2 can remap without disturbing P1
+var _menu_binds: Dictionary = {} # c1-18: rebindable MENU-navigation keys (action -> physical keycode); filled from MENU_BIND_DEFAULTS + [menubinds]. Read ADDITIVELY over the immutable W/S/arrows/Enter/Esc fallback the menu always honors
 var _hard := false               # New Game+ HARD: tighter campaign spawn curve
 var _last_gate_tick := 0         # view-side gate-split timer (speedrun read)
 var _best_gate_split := 0        # fastest gate split this run
@@ -2433,9 +2437,37 @@ func _persist(sections: Dictionary) -> void:
 
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
+	# c1-18: binds always start at their ship defaults; the load branch overlays any
+	# persisted [binds]/[padbinds] on top, so a fresh install (or a save predating
+	# rebinds) still has a complete, valid map before the first _gather_inputs read.
+	_binds = BIND_DEFAULTS.duplicate()
+	_pad_binds = [PAD_DEFAULTS.duplicate(), PAD_DEFAULTS.duplicate()]   # P1 + P2 both start at ship defaults
+	_menu_binds = MENU_BIND_DEFAULTS.duplicate()
 	# Fall back to the .bak snapshot if the primary is missing/corrupt, before
 	# giving up to zeros (a silent wipe).
 	if cf.load(SAVE_PATH) == OK or cf.load(SAVE_BAK) == OK:
+		# c1-18: overlay saved binds action-by-action (never wholesale-replace the map)
+		# so a verb added in a later build keeps its default when an older save lacks it,
+		# and a legacy save with NO [binds]/[padbinds]/[menubinds] stays fully at defaults.
+		var saved_kb := {}
+		var saved_pad := {}
+		var saved_pad2 := {}
+		var saved_menu := {}
+		for a in BIND_DEFAULTS:
+			saved_kb[a] = cf.get_value("binds", a, null)
+		for a in PAD_DEFAULTS:
+			saved_pad[a] = cf.get_value("padbinds", a, null)
+			saved_pad2[a] = cf.get_value("padbinds2", a, null)   # P2's independent layout
+		for a in MENU_BIND_DEFAULTS:
+			saved_menu[a] = cf.get_value("menubinds", a, null)
+		# Keyboard/menu keycodes are nonnegative (lo=0); pad buttons run -1(UNBOUND)..
+		# JOY_BUTTON_MAX-1 (JOY_BUTTON_MAX itself is the enum COUNT sentinel, not a real button).
+		_binds = overlay_binds(BIND_DEFAULTS, saved_kb, 0)
+		# c1-18: each pad reloads its OWN [padbinds]/[padbinds2] section — a save predating
+		# per-player layouts has no [padbinds2], so P2 overlays all-null and lands at defaults.
+		_pad_binds = [overlay_binds(PAD_DEFAULTS, saved_pad, -1, JOY_BUTTON_MAX - 1),
+			overlay_binds(PAD_DEFAULTS, saved_pad2, -1, JOY_BUTTON_MAX - 1)]
+		_menu_binds = overlay_binds(MENU_BIND_DEFAULTS, saved_menu, 0)
 		best_score = cf.get_value("best", "score", 0)
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
@@ -2458,6 +2490,8 @@ func _load_bests() -> void:
 			"assist": cf.get_value("settings", "assist", SETTINGS_DEFAULTS["assist"]),
 			"reduce_motion": cf.get_value("settings", "reduce_motion", SETTINGS_DEFAULTS["reduce_motion"]),
 			"rumble": cf.get_value("settings", "rumble", SETTINGS_DEFAULTS["rumble"]),
+			"swap_sticks": cf.get_value("settings", "swap_sticks", SETTINGS_DEFAULTS["swap_sticks"]),
+			"swap_sticks_p2": cf.get_value("settings", "swap_sticks_p2", SETTINGS_DEFAULTS["swap_sticks_p2"]),
 			"sfx_vol": cf.get_value("settings", "sfx_vol",
 				0 if cf.get_value("settings", "sfx_muted", false) else SETTINGS_DEFAULTS["sfx_vol"]),
 			"music_vol": cf.get_value("settings", "music_vol",
@@ -2480,10 +2514,202 @@ const SETTINGS_DEFAULTS := {
 	"assist": false,
 	"reduce_motion": false,
 	"rumble": true,
+	"swap_sticks": false,      # P1 stick-swap
+	"swap_sticks_p2": false,   # P2 stick-swap (independent)
 	"sfx_vol": 10,
 	"music_vol": 10,
 	"fullscreen": false,
 }
+
+
+# c1-18: ship-default player-1 keyboard binds (action -> PHYSICAL keycode) — the ONE
+# authoritative table load and RESET both read, mirroring SETTINGS_DEFAULTS. Physical
+# keycodes (not logical) so a bind survives AZERTY/QWERTZ the same way the hardcoded
+# reads did. The ORDER here is also the order the rebind screen lists the actions in.
+# Menu nav and aim stay on their own always-available fallbacks (arrows navigate menus;
+# mouse/right-stick aims), so a rebind can never strand a player with no way to steer.
+const BIND_DEFAULTS := {
+	"move_up": KEY_W,
+	"move_down": KEY_S,
+	"move_left": KEY_A,
+	"move_right": KEY_D,
+	"aim_up": KEY_UP,
+	"aim_down": KEY_DOWN,
+	"aim_left": KEY_LEFT,
+	"aim_right": KEY_RIGHT,
+	"fire": KEY_SPACE,
+	"grenade": KEY_SHIFT,
+	"roll": KEY_C,
+	"interact": KEY_F,
+	"revive": KEY_E,
+	"buy": KEY_Q,
+}
+
+# c1-18: ship-default gamepad button binds (action -> JOY_BUTTON_*) for the discrete
+# action verbs. Movement/aim on a pad are the analog STICKS (JOY_AXIS_LEFT/RIGHT) and the
+# fire TRIGGER is JOY_AXIS_TRIGGER_RIGHT — those analog inputs are fixed, standard, and
+# always live (documented on the rebind screen), so the rebindable pad set is the buttons.
+# -1 == UNBOUND. Both pads (P1 dev 0, P2 dev 1) share this one layout.
+const PAD_DEFAULTS := {
+	"fire": JOY_BUTTON_RIGHT_SHOULDER,
+	"grenade": JOY_BUTTON_LEFT_SHOULDER,
+	"roll": JOY_BUTTON_B,
+	"interact": JOY_BUTTON_X,
+	"revive": JOY_BUTTON_Y,
+	"buy": JOY_BUTTON_BACK,
+}
+
+# c1-18: rebindable MENU-navigation keys. These are read ADDITIVELY by the menu ON TOP of
+# the immutable W/S/arrows/Enter/Esc it always honors — so a player CAN remap menu nav, but
+# can never lock themselves out of the menus (the hardcoded emergency keys keep working).
+# Kept in their OWN map so a menu-key never swaps against a gameplay verb sharing that key.
+const MENU_BIND_DEFAULTS := {
+	"menu_up": KEY_UP,
+	"menu_down": KEY_DOWN,
+	"menu_left": KEY_LEFT,
+	"menu_right": KEY_RIGHT,
+	"menu_confirm": KEY_ENTER,
+	"menu_cancel": KEY_ESCAPE,
+}
+
+
+# c1-18: PURE overlay — start from `defaults`, replace only the actions whose `saved`
+# value is a real int (null / missing / wrong-type keeps the default). This is the whole
+# legacy-save story: a save with no [binds] section (older build) passes all-null and
+# comes back exactly at defaults; a save from a newer build with extra keys is ignored
+# for actions this build doesn't know. Static so a headless test can pin it directly.
+# c1-18: Godot Key enum ceiling for a stored PHYSICAL keycode. Special keys (arrows, Enter,
+# F-keys, nav) carry the KEY_SPECIAL bit (0x400000+), so a naive small cap would WRONGLY
+# reject a rebound arrow on reload. This covers every real key (well past the special block)
+# yet still rejects absurd tampered ints (e.g. 999999999).
+const KEYCODE_CEIL := 0x00FFFFFF
+
+
+static func overlay_binds(defaults: Dictionary, saved: Dictionary, lo := -1, hi := KEYCODE_CEIL) -> Dictionary:
+	var out := defaults.duplicate()
+	for a in defaults:
+		var v: Variant = saved.get(a, null)
+		# Validate PER BINDING TYPE: keyboard/menu pass lo=0 (nonnegative keycodes, incl. the
+		# 0x400000+ special block), gamepad passes lo=-1/hi=JOY_BUTTON_MAX-1 (valid buttons,
+		# -1 == UNBOUND). Anything else (null, wrong type, a corrupt/out-of-range int from a
+		# tampered save) keeps the ship default, so a bad value can't produce a broken binding.
+		if typeof(v) == TYPE_INT and int(v) >= lo and int(v) <= hi:
+			out[a] = int(v)
+	return out
+
+
+# c1-18: PURE swap-resolve — bind `action` to `code` in a COPY of `binds` and return
+# {"binds": new_map, "swapped": other_or_empty}. A non-clear code already held by another
+# verb SWAPS: that verb inherits the key `action` gave up, so no two verbs ever collide
+# (a silent duplicate leaves one verb un-pressable or double-fires two). A clear (kb 0 /
+# pad -1) never swaps — any number of verbs may sit UNBOUND. Static + testable.
+static func apply_bind(binds: Dictionary, action: String, code: int, unbound: int) -> Dictionary:
+	var out := binds.duplicate()
+	var swapped := ""
+	if code != unbound:
+		var old := int(out.get(action, unbound))
+		for other in out:
+			if other != action and int(out[other]) == code:
+				out[other] = old
+				swapped = other
+	out[action] = code
+	return {"binds": out, "swapped": swapped}
+
+
+# c1-18: the live physical keycode a gameplay verb is bound to (0 == UNBOUND). Falls back
+# to the ship default for an unknown action (or an empty map before _load_bests), so the
+# _gather_inputs reads can never index a missing key. is_physical_key_pressed(0) is always
+# false, so an UNBOUND verb simply reads as never-pressed on the keyboard.
+func bind(action: String) -> int:
+	return int(_binds.get(action, BIND_DEFAULTS.get(action, 0)))
+
+
+# c1-18: the pad button a verb is bound to on `device` (0 == P1, 1 == P2; -1 == UNBOUND) —
+# the display read the rebind screen shows for the GAMEPAD tab. Mirrors bind() for keyboard.
+func pad_bind(action: String, device := 0) -> int:
+	return int(_pad_binds[device].get(action, PAD_DEFAULTS.get(action, -1)))
+
+
+# c1-18: the physical keycode a rebindable MENU-navigation action is bound to (the menu
+# reads this ADDITIVELY over its immutable hardcoded keys). 0 == UNBOUND.
+func menu_bind(action: String) -> int:
+	return int(_menu_binds.get(action, MENU_BIND_DEFAULTS.get(action, 0)))
+
+
+# c1-18: rebind one MENU-navigation action (0 to clear) and persist. Same swap rule, but
+# within the menu-key map only (never collides with a gameplay verb sharing the key).
+# c1-18: the IMMUTABLE menu-nav role a physical key always serves (or "" for none) — the
+# hardcoded emergency fallback keys. A menu action bound to a key whose fixed role differs
+# would fire two menu commands on one press. Shared by the capture-time reject and the
+# post-swap sanitize below (single source, so the two agree).
+static func immutable_menu_role(pk: int) -> String:
+	match pk:
+		KEY_W, KEY_UP: return "menu_up"
+		KEY_S, KEY_DOWN: return "menu_down"
+		KEY_A, KEY_LEFT: return "menu_left"
+		KEY_D, KEY_RIGHT: return "menu_right"
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE: return "menu_confirm"
+		KEY_ESCAPE: return "menu_cancel"
+	return ""
+
+
+func rebind_menu_nav(action: String, keycode: int) -> String:
+	if not MENU_BIND_DEFAULTS.has(action):
+		return ""
+	var res := apply_bind(_menu_binds, action, keycode, 0)
+	_menu_binds = res["binds"]
+	# A SWAP can hand the displaced action the key `action` gave up. If that key is an
+	# immutable menu key for a DIFFERENT role, the displaced action would trigger two menu
+	# commands on one press — so UNBIND it instead (its immutable fallback still navigates).
+	var swapped: String = res["swapped"]
+	if swapped != "":
+		var role := immutable_menu_role(int(_menu_binds[swapped]))
+		if role != "" and role != swapped:
+			_menu_binds[swapped] = 0
+	_persist({"menubinds": _menu_binds})
+	return swapped
+
+
+# c1-18: is the pad button bound to `action` currently held on `device`? -1 (UNBOUND)
+# reads as never-pressed. Each player reads its own per-device layout (P1 _pad_binds[0] / P2 [1]).
+func pad_pressed(device: int, action: String) -> bool:
+	# Each player reads its OWN layout, so P1 and P2 can hold different buttons for the verb.
+	var b := int(_pad_binds[device].get(action, PAD_DEFAULTS.get(action, -1)))
+	return b >= 0 and Input.is_joy_button_pressed(device, b)
+
+
+# c1-18: rebind one KEYBOARD verb to a physical keycode (0 to clear) and persist immediately
+# (same write-through the settings toggles use). Ignores unknown actions. Returns the verb
+# it SWAPPED with (or "") so the UI can surface the swap. See apply_bind for the swap rule.
+func rebind(action: String, keycode: int) -> String:
+	if not BIND_DEFAULTS.has(action):
+		return ""
+	var res := apply_bind(_binds, action, keycode, 0)
+	_binds = res["binds"]
+	_persist({"binds": _binds})
+	return res["swapped"]
+
+
+# c1-18: rebind one GAMEPAD verb on `device` (0 == P1, 1 == P2) to a button (-1 to clear) and
+# persist THAT player's section only ([padbinds] / [padbinds2]) — swaps stay within the one
+# player's layout, so remapping P2 never disturbs P1. Same swap rule.
+func rebind_pad(action: String, button: int, device := 0) -> String:
+	if not PAD_DEFAULTS.has(action):
+		return ""
+	var res := apply_bind(_pad_binds[device], action, button, -1)
+	_pad_binds[device] = res["binds"]
+	_persist({("padbinds" if device == 0 else "padbinds2"): _pad_binds[device]})
+	return res["swapped"]
+
+
+# c1-18: RESET CONTROLS — revert every verb (keyboard AND BOTH gamepads AND menu keys) to its
+# ship default and persist every section. Also the target of the F10 global recovery gesture,
+# so a player who rebinds themselves into a corner is one keypress from a clean slate.
+func reset_binds() -> void:
+	_binds = BIND_DEFAULTS.duplicate()
+	_pad_binds = [PAD_DEFAULTS.duplicate(), PAD_DEFAULTS.duplicate()]
+	_menu_binds = MENU_BIND_DEFAULTS.duplicate()
+	_persist({"binds": _binds, "padbinds": _pad_binds[0], "padbinds2": _pad_binds[1], "menubinds": _menu_binds})
 
 
 func _save_settings() -> void:
@@ -2494,6 +2720,8 @@ func _save_settings() -> void:
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
 		"rumble": _rumble_on,
+		"swap_sticks": _swap_sticks[0],
+		"swap_sticks_p2": _swap_sticks[1],
 		"sfx_vol": _bus_vol("SFX"),
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
@@ -2509,6 +2737,10 @@ func _apply_settings(d: Dictionary) -> void:
 	_assist = d["assist"]
 	_motion = 0.0 if d["reduce_motion"] else 1.0
 	_rumble_on = d["rumble"]
+	# .get: a save predating the option (or its per-player split) lands each pad at OFF.
+	# Assigned per-index (not a fresh literal) so the typed Array[bool] property is preserved.
+	_swap_sticks[0] = bool(d.get("swap_sticks", false))
+	_swap_sticks[1] = bool(d.get("swap_sticks_p2", false))
 	_set_bus_vol("SFX", d["sfx_vol"])
 	_set_bus_vol("Music", d["music_vol"])
 	_fullscreen = d["fullscreen"]
@@ -2939,8 +3171,8 @@ func _update_feel() -> void:
 	if sim.mode == "endless":
 		for i in sim.players.size():
 			var np := sim.players[i]
-			var n_int := (Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(i, JOY_BUTTON_X)) \
-				if i == 0 else Input.is_joy_button_pressed(1, JOY_BUTTON_X)
+			var n_int := (Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact")) \
+				if i == 0 else pad_pressed(1, "interact")
 			if n_int and not _no_target_prev[i] and _no_target_cd <= 0.0 \
 					and np["alive"] and np["in_tank"] < 0 and np["claymores"] == 0:
 				_no_target_cd = 2.0
@@ -3248,10 +3480,14 @@ func _gather_inputs() -> Array[SimInput]:
 		return [demo_input(sim.tick_count, sim)]
 	var inputs: Array[SimInput] = []
 	var p1 := SimInput.new()
-	var kx := (1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
-	var ky := (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0)
-	var ax := (1.0 if Input.is_physical_key_pressed(KEY_RIGHT) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_LEFT) else 0.0)
-	var ay := (1.0 if Input.is_physical_key_pressed(KEY_DOWN) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_UP) else 0.0)
+	# c1-18: movement + aim + verbs all read their REBOUND physical keycodes (bind()), so
+	# ESDF / arrow / left-handed / non-QWERTY players can fully remap. Aim keys are their
+	# own binds (default arrows), so moving movement onto the arrows no longer collides with
+	# a hardcoded aim; the mouse aim fallback below still fills in when no aim key is held.
+	var kx := (1.0 if Input.is_physical_key_pressed(bind("move_right")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("move_left")) else 0.0)
+	var ky := (1.0 if Input.is_physical_key_pressed(bind("move_down")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("move_up")) else 0.0)
+	var ax := (1.0 if Input.is_physical_key_pressed(bind("aim_right")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("aim_left")) else 0.0)
+	var ay := (1.0 if Input.is_physical_key_pressed(bind("aim_down")) else 0.0) - (1.0 if Input.is_physical_key_pressed(bind("aim_up")) else 0.0)
 	# Explicit aim only (arrow keys / pad stick, NOT the mouse fallback) — the
 	# spend-wheel selects from this so tapping Q with the mouse off-center
 	# can't auto-buy on release.
@@ -3259,6 +3495,8 @@ func _gather_inputs() -> Array[SimInput]:
 	var pad_move := Vector2(
 		Input.get_joy_axis(0, JOY_AXIS_LEFT_X), Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
 	var pad_aim := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	if _swap_sticks[0]:   # c1-18: P1 left-handed pad option — move on the right stick, aim on the left
+		var tmp := pad_move; pad_move = pad_aim; pad_aim = tmp
 	if pad_aim.length() > 0.25:
 		wheel_dir = pad_aim
 	if pad_move.length() > 0.2:
@@ -3284,21 +3522,23 @@ func _gather_inputs() -> Array[SimInput]:
 	# debrief-redeploy — without this, clicking RESUME fired live rounds at the
 	# crosshair on the first resumed ticks. Re-arms once both keys read released.
 	# View-only (the input never reaches the sim), golden-safe.
-	if _fire_swallow and not Input.is_physical_key_pressed(KEY_SPACE) \
+	if _fire_swallow and not Input.is_physical_key_pressed(bind("fire")) \
 			and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_fire_swallow = false
-	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(KEY_SPACE)
+	# c1-18: the fire TRIGGER (analog, always live) stays fixed; the rebindable pad
+	# button reads through pad_pressed. Keyboard reads its rebound physical key.
+	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(bind("fire"))
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))) \
 		or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-		or Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
-	p1.grenade = Input.is_physical_key_pressed(KEY_SHIFT) \
+		or pad_pressed(0, "fire")
+	p1.grenade = Input.is_physical_key_pressed(bind("grenade")) \
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-		or Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
-	p1.roll = Input.is_physical_key_pressed(KEY_C) or Input.is_joy_button_pressed(0, JOY_BUTTON_B)
-	p1.interact = Input.is_physical_key_pressed(KEY_F) or Input.is_joy_button_pressed(0, JOY_BUTTON_X)
-	p1.revive = Input.is_physical_key_pressed(KEY_E) or Input.is_joy_button_pressed(0, JOY_BUTTON_Y)
+		or pad_pressed(0, "grenade")
+	p1.roll = Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll")
+	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact")
+	p1.revive = Input.is_physical_key_pressed(bind("revive")) or pad_pressed(0, "revive")
 	p1.buy = _update_wheel(0,
-		Input.is_physical_key_pressed(KEY_Q) or Input.is_joy_button_pressed(0, JOY_BUTTON_BACK),
+		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy"),
 		wheel_dir, Vector2(kx, ky))
 	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
 	# not a dodge) and sector flicks steer the wheel, not the gun.
@@ -3316,17 +3556,19 @@ func _gather_inputs() -> Array[SimInput]:
 			Input.get_joy_axis(1, JOY_AXIS_LEFT_X), Input.get_joy_axis(1, JOY_AXIS_LEFT_Y)), 0.2)
 		var p2_aim := _pad_deadzone(Vector2(
 			Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)), 0.25)
+		if _swap_sticks[1]:   # c1-18: P2's OWN independent left-handed swap
+			var t2 := p2_move; p2_move = p2_aim; p2_aim = t2
 		p2.move_x = _quantize_axis(p2_move.x)
 		p2.move_y = _quantize_axis(p2_move.y)
 		p2.aim_x = _quantize_axis(p2_aim.x)
 		p2.aim_y = _quantize_axis(p2_aim.y)
 		p2.fire = Input.get_joy_axis(1, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-			or Input.is_joy_button_pressed(1, JOY_BUTTON_RIGHT_SHOULDER)
-		p2.grenade = Input.is_joy_button_pressed(1, JOY_BUTTON_LEFT_SHOULDER)
-		p2.roll = Input.is_joy_button_pressed(1, JOY_BUTTON_B)
-		p2.interact = Input.is_joy_button_pressed(1, JOY_BUTTON_X)
-		p2.revive = Input.is_joy_button_pressed(1, JOY_BUTTON_Y)
-		p2.buy = _update_wheel(1, Input.is_joy_button_pressed(1, JOY_BUTTON_BACK),
+			or pad_pressed(1, "fire")
+		p2.grenade = pad_pressed(1, "grenade")
+		p2.roll = pad_pressed(1, "roll")
+		p2.interact = pad_pressed(1, "interact")
+		p2.revive = pad_pressed(1, "revive")
+		p2.buy = _update_wheel(1, pad_pressed(1, "buy"),
 			p2_aim, p2_move)
 		if _wheel[1]["open"]:
 			p2.roll = false
@@ -3361,9 +3603,9 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		# selection used to be a one-way trap: any flick force-bought on release.
 		# Per-device (matches the wheel's own open/aim split): P1 = keyboard C +
 		# pad 0, P2 = pad 1 only — so one player's roll can't cancel the OTHER's
-		# pick. Physical KEY_C matches the roll bind (AZERTY-safe).
-		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(KEY_C)) \
-			or Input.is_joy_button_pressed(i, JOY_BUTTON_B)
+		# pick. The rebound roll key matches the roll verb (AZERTY-safe physical read).
+		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(bind("roll"))) \
+			or pad_pressed(i, "roll")
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("click_dry", -12.0, 1.4)   # soft declined tick — the dedicated dry-click voice

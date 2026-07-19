@@ -5,7 +5,7 @@ extends Control
 ## knows nothing about menus. Keyboard (W/S + Enter, Esc) and pad
 ## (dpad + A, Start) navigation.
 
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO }
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -59,6 +59,11 @@ var _seed_armed_t := 0.0 # c1-14: arm auto-disarm window (mirrors _confirm_t) �
 var _seed_poll_t := 0.0  # c1-14: throttle countdown — the focused row samples the clipboard ~5x/s, not every frame (activation still forces an immediate read)
 var _reset_flash_anim := true   # c1-09: whether that banner fades — captured from the PRE-reset reduce-motion state (reset itself re-enables motion, so reading it live would never snap)
 var _opts_parent := Mode.TITLE   # c1-09: which screen OPTIONS was opened from (TITLE or PAUSE) — drives BACK
+var _rebind_action := ""   # c1-18: REBIND screen is capturing the next key/button for THIS verb ("" = idle, listing binds)
+var _rebind_tab := 0       # c1-18: which REBIND category tab is shown (0 MOVE/AIM kb, 1 ACTIONS kb, 2 GAMEPAD, 3 MENUS) — keeps each page <=10 rows so plates stay >=20px
+var _rebind_pad_dev := 0   # c1-18: which PLAYER's pad layout the GAMEPAD tab edits (0 = P1, 1 = P2) — the two are independent; ◄/► (or the P1|P2 header sub-tabs) switch it
+var _rebind_msg := ""      # c1-18: transient swap/clear/reserved-key notice shown under the header
+var _rebind_msg_t := 0.0   # c1-18: countdown that fades _rebind_msg (mirrors the settings-confirm timers)
 var _filter_pulse := 0.0   # hall filter tab flash on change
 var _rail_pulse := 0.0     # volume row bounced off a rail (0/MUTED or 10) — brief end-segment flash
 var _rail_dir := 0         # which rail the bounce hit: -1 = muted floor, +1 = max ceiling
@@ -143,6 +148,13 @@ func _process(delta: float) -> void:
 		# c1-09: the "DEFAULTS RESTORED" success banner fades after RESET DEFAULTS fires.
 		_reset_flash = maxf(0.0, _reset_flash - delta)
 		_seed_flash = maxf(0.0, _seed_flash - delta * 2.0)
+		# c1-18: the REBIND swap/clear/reserved notice fades on its OWN timer, wholly
+		# independent of _set_pulse — every frame the menu is open, so a "CANCELLED" or
+		# "FIXED MENU KEY" notice always clears after ~2.5s (it can never persist forever).
+		if _rebind_msg_t > 0.0:
+			_rebind_msg_t = maxf(0.0, _rebind_msg_t - delta)
+			if _rebind_msg_t <= 0.0:
+				_rebind_msg = ""
 		if _seed_armed:
 			_seed_armed_t -= delta   # c1-14: a stale "PRESS AGAIN" arm auto-disarms (mirrors _confirm_t)
 			if _seed_armed_t <= 0.0:
@@ -249,6 +261,11 @@ func open(m: int, select_id := "") -> void:
 	_seed_armed_t = 0.0
 	_seed_poll_t = 0.0
 	_seed_flash = 0.0
+	_rebind_action = ""   # c1-18: a fresh screen is never mid-capture (a stale listen would eat the first key)
+	_rebind_tab = 0       # c1-18: reopen always lands on the first (MOVE/AIM) tab
+	_rebind_pad_dev = 0   # c1-18: and on P1's pad layout
+	_rebind_msg = ""      # c1-18: no stale swap/clear notice carries into a fresh screen
+	_rebind_msg_t = 0.0
 	if m == Mode.HALL:
 		# Auto-jump to the run you just finished — but ONLY the first time the board
 		# is opened after it was banked. Once surfaced (hid recorded), reopening HALL
@@ -364,9 +381,44 @@ func _menu_items() -> Array[Dictionary]:
 		# RESET DEFAULTS is a focusable, destructive-styled row: Enter/A arms it, a
 		# second press reverts every persisted setting — the recover path the screen
 		# lacked (immediate writes with no rollback). Two-press guards a stray press.
-		oitems.append({"id": "reset_defaults", "label": "RESET DEFAULTS", "destructive": true, "grp": 5})
-		oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 6})
+		# c1-18: CONTROLS is a normal focusable row (grp 5, above RESET DEFAULTS) that opens
+		# the dedicated key/button rebinding screen — a first-class OPTIONS entry, not a
+		# hidden corner shortcut, so keyboard/pad reach it by simply focusing it and pressing.
+		oitems.append({"id": "controls", "label": "CONTROLS (REBIND)", "destructive": false, "grp": 5})
+		oitems.append({"id": "reset_defaults", "label": "RESET DEFAULTS", "destructive": true, "grp": 6})
+		oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 7})
 		return oitems
+	if mode == Mode.REBIND:
+		# c1-18: one row per rebindable verb on the ACTIVE CATEGORY tab. The 14 keyboard
+		# verbs are split MOVE/AIM (tab 0) + ACTIONS (tab 1) and the pad buttons are tab 2,
+		# so no page ever exceeds 10 rows — every plate stays >=20px legible (vs the old flat
+		# 16-row screen). Each row shows its current key/button (or "---" when UNBOUND); then
+		# RESET CONTROLS + BACK. The focused-and-listening row shows a live "PRESS ..." prompt.
+		var ritems: Array[Dictionary] = []
+		var kb := _rebind_is_kb()
+		for action in _rebind_tab_actions():
+			var val: String
+			if _rebind_action == action:
+				val = "PRESS A KEY" if kb else "PRESS A BUTTON"
+			elif kb:
+				val = key_label(_kb_code(action))   # localized keycap for the player's layout
+			else:
+				var pb: int = main.pad_bind(action, _rebind_pad_dev)   # the row shows the ACTIVE player's bind
+				val = pad_button_name(pb) if pb >= 0 else "UNBOUND"
+			ritems.append({"id": action, "label": "%s: %s" % [rebind_label(action), val],
+				"destructive": false, "grp": 0})
+		# c1-18: the sticks aren't per-button rebindable, so the GAMEPAD tab carries SWAP STICKS
+		# as an inline TOGGLE (not a capture row) — the accessible way a left-handed / adaptive-pad
+		# player reassigns MOVE <-> AIM. It sits right where the "sticks are fixed" note is, so the
+		# fixed-stick statement is no longer a dead end.
+		if _rebind_tab == 2:
+			var sw: bool = main._swap_sticks[_rebind_pad_dev]   # the ACTIVE player's own swap state
+			ritems.append({"id": "swap_sticks",
+				"label": "SWAP STICKS: %s" % ("ON" if sw else "OFF"),
+				"destructive": false, "on": sw, "grp": 1})
+		ritems.append({"id": "reset_controls", "label": "RESET CONTROLS", "destructive": true, "grp": 1})
+		ritems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
+		return ritems
 	# c1-09: PAUSE no longer duplicates the settings rows — it fronts them through ONE
 	# OPTIONS row that opens the dedicated screen (which then BACKs to PAUSE). RESUME /
 	# OPTIONS / RESTART / TITLE, each its own group so the dividers separate them.
@@ -396,6 +448,105 @@ static func vol_label(muted: bool, level: int) -> String:
 
 static func step_level(cur: int, delta: int) -> int:
 	return clampi(cur + delta, 0, 10)
+
+
+# c1-18: the REBIND category tabs — labels + the verbs each shows. Tabs 0/1/3 are keyboard
+# pages (kept <=8 rows so a plate stays >=20px); tab 2 is the gamepad buttons. Tab 3 (MENUS)
+# rebinds the menu-navigation keys (additive over the immutable arrows/Enter/Esc fallback).
+const REBIND_TABS := ["MOVE / AIM", "ACTIONS", "GAMEPAD", "MENUS"]
+const REBIND_MOVE_AIM := ["move_up", "move_down", "move_left", "move_right",
+	"aim_up", "aim_down", "aim_left", "aim_right"]
+const REBIND_ACTIONS := ["fire", "grenade", "roll", "interact", "revive", "buy"]
+const REBIND_MENUNAV := ["menu_up", "menu_down", "menu_left", "menu_right", "menu_confirm", "menu_cancel"]
+
+
+# c1-18: is the active tab a KEYBOARD page (true) or the GAMEPAD page (false)?
+func _rebind_is_kb() -> bool:
+	return _rebind_tab != 2
+
+
+# c1-18: the ordered verbs shown on the active REBIND tab.
+func _rebind_tab_actions() -> Array:
+	match _rebind_tab:
+		0: return REBIND_MOVE_AIM
+		1: return REBIND_ACTIONS
+		3: return REBIND_MENUNAV
+	return main.PAD_DEFAULTS.keys()
+
+
+# c1-18: the physical keycode a KEYBOARD-tab action currently holds — menu-nav actions read
+# the menu-key map, gameplay verbs the gameplay map.
+func _kb_code(action: String) -> int:
+	return main.menu_bind(action) if action in REBIND_MENUNAV else main.bind(action)
+
+
+# c1-18: apply a KEYBOARD-tab (re)bind to the right map and return the swapped verb (if any).
+func _apply_kb_bind(action: String, code: int) -> String:
+	if action in REBIND_MENUNAV:
+		return main.rebind_menu_nav(action, code)
+	return main.rebind(action, code)
+
+
+# c1-18: the display label for a physical keycode — the keycap the player's CURRENT layout
+# puts at that physical position (AZERTY 'A' reads "Q", etc.), so non-QWERTY users see their
+# real key, not a QWERTY positional name. Falls back to the physical name when the display
+# server can't map it (e.g. headless), and to "---" for UNBOUND.
+static func key_label(physical: int) -> String:
+	if physical == 0:
+		return "UNBOUND"
+	var logical := DisplayServer.keyboard_get_keycode_from_physical(physical)
+	if logical != 0:
+		return OS.get_keycode_string(logical)
+	return OS.get_keycode_string(physical)
+
+
+# c1-18: human-readable name for a rebindable verb — the REBIND row label prefix.
+# Pure + static so the screen wording is single-sourced (and headless-assertable).
+static func rebind_label(action: String) -> String:
+	match action:
+		"move_up": return "MOVE UP"
+		"move_down": return "MOVE DOWN"
+		"move_left": return "MOVE LEFT"
+		"move_right": return "MOVE RIGHT"
+		"aim_up": return "AIM UP"
+		"aim_down": return "AIM DOWN"
+		"aim_left": return "AIM LEFT"
+		"aim_right": return "AIM RIGHT"
+		"fire": return "FIRE"
+		"grenade": return "GRENADE"
+		"roll": return "ROLL"
+		"interact": return "INTERACT"
+		"revive": return "REVIVE"
+		"buy": return "SUPPLY WHEEL"
+		"menu_up": return "MENU UP"
+		"menu_down": return "MENU DOWN"
+		"menu_left": return "MENU LEFT"
+		"menu_right": return "MENU RIGHT"
+		"menu_confirm": return "MENU CONFIRM"
+		"menu_cancel": return "MENU BACK"
+	return action.to_upper()
+
+
+# c1-18: readable name for a JOY_BUTTON_* index — the GAMEPAD-tab row value. Pure + static
+# so the screen wording is single-sourced (and headless-assertable). Uses generic
+# face-button letters (portable across pads); the rebind screen's header names the layout.
+static func pad_button_name(button: int) -> String:
+	match button:
+		JOY_BUTTON_A: return "A / CROSS"
+		JOY_BUTTON_B: return "B / CIRCLE"
+		JOY_BUTTON_X: return "X / SQUARE"
+		JOY_BUTTON_Y: return "Y / TRIANGLE"
+		JOY_BUTTON_LEFT_SHOULDER: return "LB / L1"
+		JOY_BUTTON_RIGHT_SHOULDER: return "RB / R1"
+		JOY_BUTTON_BACK: return "BACK / SELECT"
+		JOY_BUTTON_START: return "START"
+		JOY_BUTTON_LEFT_STICK: return "L-STICK"
+		JOY_BUTTON_RIGHT_STICK: return "R-STICK"
+		JOY_BUTTON_DPAD_UP: return "DPAD UP"
+		JOY_BUTTON_DPAD_DOWN: return "DPAD DOWN"
+		JOY_BUTTON_DPAD_LEFT: return "DPAD LEFT"
+		JOY_BUTTON_DPAD_RIGHT: return "DPAD RIGHT"
+	return "BUTTON %d" % button
 
 
 func _settings_rows() -> Array[Dictionary]:
@@ -496,6 +647,8 @@ func _row_icon(id: String) -> String:
 		"sfx": return "mi_snd_off" if _bus_off("SFX") else "mi_snd_on"
 		"music": return "mi_mus_off" if _bus_off("Music") else "mi_mus_on"
 		"options": return "mi_settings"
+		"controls": return "mi_controller"
+		"reset_controls": return "mi_reload"
 		"info": return "mi_book"
 		"display": return "mi_camera"
 		"restart", "reset_defaults": return "mi_reload"
@@ -509,13 +662,227 @@ func _row_icon(id: String) -> String:
 	return ""
 
 
+# c1-18: handle ONE input while capturing a bind for _rebind_action. Returns true if it
+# consumed the event. While capturing it swallows EVERY press so nothing leaks to nav, and
+# acts only on the ACTIVE tab's device: a key on a KEYBOARD tab, a pad button on the GAMEPAD
+# tab. ESC / pad START cancels (keeps the old bind). CLEAR to UNBOUND has a path on BOTH
+# devices: keyboard DELETE/BACKSPACE, or (gamepad-only) pressing the button the verb is
+# ALREADY bound to. A collision with another verb SWAPS (see main.apply_bind) and reports it.
+func _rebind_capture(ev: InputEvent) -> bool:
+	var kb := _rebind_is_kb()
+	var handled := false
+	# c1-18: only the pad WHOSE sub-tab is open may edit it — every pad event is filtered by
+	# ev.device against _rebind_pad_dev, so a P2 controller press can't rewrite P1's layout (or
+	# vice versa) while P1's GAMEPAD sub-tab is showing. Keyboard events carry no meaningful
+	# device, so they still edit whichever KEYBOARD tab is up.
+	var pad_ev: bool = not kb and ev is InputEventJoypadButton and ev.pressed and ev.device == _rebind_pad_dev
+	# CANCEL keeps the old bind. Keyboard ESC is the universal one; on the pad it is START — ONE
+	# reserved button that reliably aborts a listen. (The old LB+RB chord was unusable: pressing
+	# the first shoulder committed it as the bind before the second shoulder could arrive, so the
+	# chord never formed. START never has that race.) START is therefore the only pad button NOT
+	# bindable; the d-pad and every face/shoulder button are still free to bind.
+	var pad_cancel: bool = pad_ev and ev.button_index == JOY_BUTTON_START
+	if (ev is InputEventKey and ev.pressed and not ev.echo and ev.keycode == KEY_ESCAPE) \
+			or pad_cancel:
+		_end_capture()
+		main._sfx.play("deny", -8.0)
+		_notice("CANCELLED")
+		handled = true
+	elif ev is InputEventKey and ev.pressed and not ev.echo \
+			and (ev.keycode == KEY_DELETE or ev.keycode == KEY_BACKSPACE):
+		var lbl := rebind_label(_rebind_action)
+		if kb:
+			_apply_kb_bind(_rebind_action, 0)
+		else:
+			main.rebind_pad(_rebind_action, -1, _rebind_pad_dev)
+		_end_capture()
+		main._sfx.play("buy", -8.0)
+		_flash_setting()
+		_notice("%s CLEARED" % lbl)
+		handled = true
+	elif kb and ev is InputEventKey and ev.pressed and not ev.echo:
+		# Store the PHYSICAL keycode (fallback to logical) so gameplay's physical reads
+		# honor it regardless of layout — the same basis _gather_inputs uses. Menu-nav
+		# actions route to the menu-key map; everything else to the gameplay map.
+		var pk: int = ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode
+		var role := _immutable_menu_role(pk)
+		if _rebind_action in REBIND_MENUNAV and role != "" and role != _rebind_action:
+			# REJECT: this key is an IMMUTABLE menu key for a DIFFERENT action, so binding it
+			# here would fire two menu commands on one press (the fixed role AND this one).
+			# Keep the old bind and tell the player why.
+			_end_capture()
+			main._sfx.play("deny", -8.0)
+			_notice("%s IS A FIXED MENU KEY - PICK ANOTHER" % key_label(pk))
+		else:
+			var swapped: String = _apply_kb_bind(_rebind_action, pk)
+			# A menu-nav rebind never needs the "also a menu key" heads-up (that IS the point).
+			var note := "" if _rebind_action in REBIND_MENUNAV else _reserved_key_note(pk)
+			_commit_capture(swapped, note)
+		handled = true
+	elif pad_ev:
+		# Gamepad (re)bind on the ACTIVE player's layout (device already matched above). CLEAR is
+		# an explicit gesture that frees the d-pad for binding: pressing the button the verb
+		# ALREADY holds toggles it UNBOUND (keyboard DEL clears too). START never reaches here
+		# (it is the cancel above). Any OTHER button (re)binds, swapping on collision within this
+		# player's map only.
+		if ev.button_index == main.pad_bind(_rebind_action, _rebind_pad_dev):
+			var plbl := rebind_label(_rebind_action)
+			main.rebind_pad(_rebind_action, -1, _rebind_pad_dev)
+			_end_capture()
+			main._sfx.play("buy", -8.0)
+			_flash_setting()
+			_notice("%s CLEARED" % plbl)
+		else:
+			var swapped_pad: String = main.rebind_pad(_rebind_action, ev.button_index, _rebind_pad_dev)
+			_commit_capture(swapped_pad, "")
+		handled = true
+	# Swallow every press-type event while capturing — keys, pad buttons, AND mouse clicks —
+	# so a stray press can never fall through to row/tab navigation mid-capture.
+	if handled or (ev is InputEventKey and ev.pressed) \
+			or (ev is InputEventJoypadButton and ev.pressed) \
+			or (ev is InputEventMouseButton and ev.pressed):
+		var vp := get_viewport()
+		if vp != null:
+			vp.set_input_as_handled()
+		return true
+	return false
+
+
+func _end_capture() -> void:
+	_rebind_action = ""
+	queue_redraw()
+
+
+func _commit_capture(swapped: String, reserved: String) -> void:
+	var verb := rebind_label(_rebind_action)
+	_end_capture()
+	main._sfx.play("buy", -8.0)
+	_flash_setting()
+	if swapped != "":
+		_notice("SWAPPED WITH %s" % rebind_label(swapped))
+	elif reserved != "":
+		_notice(reserved)
+	else:
+		_notice("%s SET" % verb)
+
+
+func _notice(msg: String) -> void:
+	_rebind_msg = msg
+	_rebind_msg_t = 2.5
+
+
+# c1-18: keys the menus themselves use (confirm / nav) get a non-blocking heads-up when
+# bound to a verb — the bind still applies (menu context and gameplay context never read
+# at the same time), but the player is told there's an overlap. ESC can't reach here (it
+# cancels capture), so it can never be stolen from the universal menu-cancel gesture.
+func _reserved_key_note(pk: int) -> String:
+	if pk in [KEY_ENTER, KEY_KP_ENTER, KEY_TAB, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_W, KEY_S]:
+		return "SET - NOTE: ALSO A MENU KEY"
+	return ""
+
+
+# c1-18: the IMMUTABLE menu-nav role a physical key always serves (or "" for none). A menu
+# action may only be (re)bound to a key whose fixed role is empty or ITS OWN — otherwise one
+# press would fire two menu commands (e.g. MENU CONFIRM on Down would navigate AND activate).
+# Delegates to main's shared static so the capture reject and the post-swap sanitize agree.
+func _immutable_menu_role(pk: int) -> String:
+	return main.immutable_menu_role(pk)
+
+
 func _unhandled_input(ev: InputEvent) -> void:
+	# c1-18: F10 is the GLOBAL recovery gesture — from ANY menu screen (even mid-capture) it
+	# reverts EVERY control (keyboard, both pads, menu keys) to ship defaults. This is the
+	# documented escape hatch that makes the rest of the rebinding safe: no remap of the menu
+	# keys, a swapped verb, or a pad bound into a corner can ever strand a player, because this
+	# one hardcoded key is always waiting to hand them a clean slate. It is intentionally NOT
+	# rebindable and NOT a gameplay key, so it can never be captured or shadowed.
+	if mode != Mode.HIDDEN and ev is InputEventKey and ev.pressed and not ev.echo \
+			and ev.keycode == KEY_F10:
+		main.reset_binds()
+		_end_capture()   # abort any listen in progress
+		if mode == Mode.REBIND:
+			_flash_all_settings()
+		_notice("ALL CONTROLS RESET TO DEFAULT (F10)")
+		main._sfx.play("buy", -6.0)
+		var vpf := get_viewport()
+		if vpf != null:
+			vpf.set_input_as_handled()
+		return
+	# c1-18: while the REBIND screen is listening, the NEXT key/button IS the new bind —
+	# it must not also navigate the menu. Consumed here, before nav. On the KEYBOARD tab a
+	# key rebinds; on the GAMEPAD tab a pad button rebinds. ESC (or pad START) cancels
+	# and keeps the old bind; DELETE (or pressing the button the verb already holds) clears it to
+	# UNBOUND. Menu nav (arrows/WASD/Enter/Esc) is NEVER remapped and F10 always resets, so
+	# capture can't strand a player without a way out.
+	if mode == Mode.REBIND and _rebind_action != "":
+		if _rebind_capture(ev):
+			return
+	# c1-18: on the GAMEPAD tab, ◄/► (keyboard A/D/arrows or pad d-pad L/R) switches which
+	# PLAYER's layout is being edited (P1 <-> P2). The two pad maps are independent, so a
+	# left-handed or differently-abled P2 remaps without touching P1. Handled before nav so the
+	# horizontal press only swaps the player, never scrolls a row.
+	if mode == Mode.REBIND and _rebind_action == "" and _rebind_tab == 2:
+		var dev_step := 0
+		var to_dev := -1
+		if ev is InputEventKey and ev.pressed and not ev.echo:
+			match (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode):
+				KEY_A, KEY_LEFT: dev_step = -1
+				KEY_D, KEY_RIGHT: dev_step = 1
+		elif ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_DPAD_LEFT:
+			dev_step = -1
+		elif ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_DPAD_RIGHT:
+			dev_step = 1
+		elif ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			for pd in 2:
+				if _rebind_pad_dev_rect(pd).has_point(ev.position):
+					to_dev = pd
+		if dev_step != 0 or (to_dev >= 0 and to_dev != _rebind_pad_dev):
+			var vpd := get_viewport()
+			if vpd != null:
+				vpd.set_input_as_handled()
+			_rebind_pad_dev = to_dev if to_dev >= 0 else wrapi(_rebind_pad_dev + dev_step, 0, 2)
+			_rebind_msg = ""
+			_rebind_msg_t = 0.0
+			main._sfx.play("pickup", -14.0, 1.3)
+			queue_redraw()
+			return
+	# c1-18: TAB (kb) or a shoulder (pad) cycles the MOVE/AIM -> ACTIONS -> GAMEPAD category
+	# tabs while idle. Shoulders step both directions; Tab cycles forward. Handled before nav
+	# so the toggle can't also move the cursor.
+	if mode == Mode.REBIND and _rebind_action == "":
+		var step := 0
+		var to_tab := -1
+		if ev is InputEventKey and ev.pressed and not ev.echo and ev.keycode == KEY_TAB:
+			step = 1
+		elif ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			step = 1
+		elif ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_LEFT_SHOULDER:
+			step = -1
+		elif ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			for d in REBIND_TABS.size():
+				if _rebind_tab_rect(d).has_point(ev.position):
+					to_tab = d
+		if step != 0 or (to_tab >= 0 and to_tab != _rebind_tab):
+			var vpt := get_viewport()
+			if vpt != null:
+				vpt.set_input_as_handled()
+			_rebind_tab = to_tab if to_tab >= 0 else wrapi(_rebind_tab + step, 0, REBIND_TABS.size())
+			sel = 0   # different row set per tab — land on the first verb
+			_rebind_msg = ""
+			_rebind_msg_t = 0.0
+			main._sfx.play("pickup", -14.0, 1.3)
+			queue_redraw()
+			return
 	var move := 0
 	var hmove := 0
 	var act := false
 	var back := false
 	if ev is InputEventKey and ev.pressed and not ev.echo:
-		match ev.keycode:
+		# c1-18: match the PHYSICAL keycode (WASD position), not the logical one, so menu nav
+		# lands on the same physical keys as gameplay and the stored menu binds — consistent
+		# on AZERTY/QWERTZ. For arrows/Enter/Space/Esc physical == logical, so only the WASD
+		# positions change (correctly) on non-QWERTY layouts.
+		match (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode):
 			KEY_W, KEY_UP:
 				move = -1
 				_key_move = -1
@@ -538,9 +905,35 @@ func _unhandled_input(ev: InputEvent) -> void:
 				_key_hrep = 0.35
 			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE: act = true   # numpad Enter redeploys from the debrief; menus must match
 			KEY_ESCAPE: back = true
+		# c1-18: ADDITIVE rebindable menu-nav — a player's remapped menu keys work ON TOP of
+		# the immutable defaults above (which always work, so the menus can never be locked
+		# out). Physical-key compared, matching how the binds are stored.
+		if main != null:
+			var pkm: int = ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode
+			if move == 0 and pkm == main.menu_bind("menu_up"):
+				move = -1
+				_key_move = -1
+				_key_rep = 0.35
+			elif move == 0 and pkm == main.menu_bind("menu_down"):
+				move = 1
+				_key_move = 1
+				_key_rep = 0.35
+			if hmove == 0 and pkm == main.menu_bind("menu_left"):
+				hmove = -1
+				_key_hmove = -1
+				_key_hrep = 0.35
+			elif hmove == 0 and pkm == main.menu_bind("menu_right"):
+				hmove = 1
+				_key_hmove = 1
+				_key_hrep = 0.35
+			if not act and pkm == main.menu_bind("menu_confirm"):
+				act = true
+			if not back and pkm == main.menu_bind("menu_cancel"):
+				back = true
 	elif ev is InputEventKey and not ev.pressed:
-		# Release clears the hold-repeat latch (repeat itself runs in _process).
-		match ev.keycode:
+		# Release clears the hold-repeat latch (repeat itself runs in _process). Physical-
+		# matched to mirror the press branch above.
+		match (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode):
 			KEY_W, KEY_UP:
 				if _key_move == -1:
 					_key_move = 0
@@ -553,6 +946,18 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_D, KEY_RIGHT:
 				if _key_hmove == 1:
 					_key_hmove = 0
+		# c1-18: a REBOUND menu-nav key must clear its own latch too, or one press of a
+		# custom key auto-repeats forever (the press set the latch above). Physical-matched.
+		if main != null:
+			var pkr: int = ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode
+			if _key_move == -1 and pkr == main.menu_bind("menu_up"):
+				_key_move = 0
+			elif _key_move == 1 and pkr == main.menu_bind("menu_down"):
+				_key_move = 0
+			if _key_hmove == -1 and pkr == main.menu_bind("menu_left"):
+				_key_hmove = 0
+			elif _key_hmove == 1 and pkr == main.menu_bind("menu_right"):
+				_key_hmove = 0
 	elif ev is InputEventJoypadButton and ev.pressed:
 		match ev.button_index:
 			JOY_BUTTON_DPAD_UP: move = -1
@@ -854,9 +1259,13 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 	# c1-09: OPTS is settings-only now (7 settings + RESET DEFAULTS + BACK = 9 rows),
 	# under a compact 2-line header — top 102 keeps that count at a >=20px plate.
 	# SETUP and INFO carry only a few rows, so 120 seats them right under a lone header.
+	# c1-18: REBIND is paginated into category tabs of <=10 rows (8 verbs + RESET + BACK),
+	# so it seats at 102 like OPTS and every plate clears the >=20px readable floor — a tab
+	# header strip sits above at y42-57 and the title/subline at y66-78.
 	var top := 118.0 if mode_id == Mode.PAUSE \
 		else (102.0 if mode_id == Mode.OPTS \
-		else (120.0 if (mode_id == Mode.SETUP or mode_id == Mode.INFO) else (150.0 if not many else 156.0)))
+		else (102.0 if mode_id == Mode.REBIND \
+		else (120.0 if (mode_id == Mode.SETUP or mode_id == Mode.INFO) else (150.0 if not many else 156.0))))
 	var gap: float
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
@@ -899,6 +1308,7 @@ static func back_dest(mode_id: int) -> Dictionary:
 		Mode.INFO: return {"mode": Mode.TITLE, "sel": "info"}
 		Mode.SETUP: return {"mode": Mode.TITLE, "sel": "run_setup"}
 		Mode.OPTS: return {"mode": Mode.TITLE, "sel": "options"}
+		Mode.REBIND: return {"mode": Mode.OPTS, "sel": "controls"}   # c1-18: rebind screen hangs off the OPTIONS CONTROLS row — BACK restores focus to that real row
 		_: return {}
 
 
@@ -1055,6 +1465,34 @@ func _activate() -> void:
 		open(d["mode"], d["sel"])
 		return
 	var id: String = _menu_items()[sel]["id"]
+	if mode == Mode.REBIND:
+		# c1-18: BACK climbs to OPTIONS; RESET CONTROLS (two-press destructive) reverts
+		# every verb to its ship key; any other row is a verb — arm the key-capture listen
+		# so the NEXT key press (handled at the top of _unhandled_input) becomes its bind.
+		# Each path returns immediately — open() switches `mode`, so falling through would
+		# re-process the same id under the NEW screen.
+		if id == "back":
+			var d := _parent(mode)
+			open(d["mode"], d["sel"])
+			return
+		if id == "reset_controls":
+			# Reached only on the SECOND press — reset_controls is a destructive row, so the
+			# first press just arms the confirm (see _press / _is_destructive), matching the
+			# RESET DEFAULTS two-step. Revert every verb, halo the rows, and post an explicit
+			# success notice so the bulk change is confirmed, not silent.
+			main.reset_binds()
+			_flash_all_settings()   # halo every rebind row — the bulk revert reads like a single change
+			_notice("CONTROLS RESET TO DEFAULT")
+			return
+		if id == "swap_sticks":
+			# c1-18: inline pad TOGGLE (not a key/button capture) — flip MOVE<->AIM sticks for
+			# the ACTIVE player only (P1/P2 swap independently, like their button layouts).
+			main._swap_sticks[_rebind_pad_dev] = not main._swap_sticks[_rebind_pad_dev]
+			main._save_settings()
+			_flash_setting()
+			return
+		_rebind_action = id
+		return
 	if mode == Mode.TITLE:
 		match id:
 			"campaign": main.start_game(false)
@@ -1076,6 +1514,7 @@ func _activate() -> void:
 				# six a11y/audio rows no longer live on the pause list). BACK returns here.
 				_opts_parent = Mode.PAUSE
 				open(Mode.OPTS)
+			"controls": open(Mode.REBIND)   # c1-18: CONTROLS row opens the rebind screen
 			"back":
 				# BACK climbs one level: OPTIONS returns to its opener, SETUP to TITLE.
 				var d := _parent(mode)
@@ -1377,6 +1816,8 @@ func _draw() -> void:
 			_center_text(career, 136, 8, Color(0.6, 0.72, 0.62, 0.7))
 	elif mode == Mode.OPTS:
 		_draw_opts_header()
+	elif mode == Mode.REBIND:
+		_draw_rebind_header()
 	elif mode == Mode.INFO:
 		_center_text("INFO", 84, 22, Color(0.95, 0.95, 0.85))
 		# The look-back screens: records, the field manual, and your last run.
@@ -1599,7 +2040,8 @@ func _draw() -> void:
 		# Sentinel _set_pulse_row == -2 haloes every reset-affected row at once — the
 		# bulk feedback for Reset Defaults, so a mass mutation confirms like a single one.
 		var pulse_here: bool = _set_pulse > 0.0 and (k == _set_pulse_row \
-			or (_set_pulse_row == -2 and mitems[k]["id"] in _RESET_ROWS))
+			or (_set_pulse_row == -2 and mitems[k]["id"] in _RESET_ROWS) \
+			or (_set_pulse_row == -2 and mode == Mode.REBIND and mitems[k].get("grp", 0) == 0))
 		if pulse_here:
 			var still: bool = main._motion < 0.5
 			# Alpha fades with the pulse in BOTH modes -- the confirm reads as a
@@ -1646,6 +2088,85 @@ func _draw() -> void:
 		# c1-04: PAUSE/OPTS/SETUP get the same SELECT/BACK footer (HALL/HOWTO are
 		# handled in the content-well branch, which returns before this point).
 		_footer_legend()
+
+
+# c1-18: the REBIND screen header — a MOVE/AIM | ACTIONS | GAMEPAD category-tab strip (each
+# page <=10 rows so plates stay >=20px), the CONTROLS title, one context subline, and — on
+# the GAMEPAD tab — a fixed-input note so the DISPLAYED controls match actual gameplay (the
+# analog stick/trigger inputs that are never rebindable). The subline is the live capture
+# prompt while listening (device-specific), the transient swap/clear notice when one is up,
+# else the how-to (which DOCUMENTS the immutable arrows/Enter/Esc menu-nav fallback).
+# c1-18: rect for REBIND category tab `d` — shared by the header draw and the mouse hit-test.
+func _rebind_tab_rect(d: int) -> Rect2:
+	var tw := 96.0
+	var gap := 6.0
+	var n := REBIND_TABS.size()
+	var x0 := 320.0 - (float(n) * tw + float(n - 1) * gap) / 2.0
+	return Rect2(x0 + float(d) * (tw + gap), 42.0, tw, 15.0)
+
+
+# c1-18: rect for the P1|P2 player sub-selector shown on the GAMEPAD tab (d = 0 P1, 1 P2).
+# Shared by the header draw and the mouse hit-test so the plate and its click target agree.
+func _rebind_pad_dev_rect(d: int) -> Rect2:
+	var w := 52.0
+	var gap := 6.0
+	var x0 := 320.0 - (2.0 * w + gap) / 2.0
+	return Rect2(x0 + float(d) * (w + gap), 88.0, w, 12.0)
+
+
+func _draw_rebind_header() -> void:
+	var pad := not _rebind_is_kb()
+	# Category tabs: the active one is a lit plate, the others dim — TAB/shoulders cycle them,
+	# a mouse can click them. Draw + hit-test share _rebind_tab_rect so they can't drift.
+	for d in REBIND_TABS.size():
+		var r := _rebind_tab_rect(d)
+		var on := d == _rebind_tab
+		draw_rect(r, Color(0.14, 0.3, 0.16, 0.95) if on else Color(0.07, 0.1, 0.06, 0.7))
+		draw_rect(r, Color(0.9, 0.95, 0.6, 0.9) if on else Color(0.4, 0.45, 0.36, 0.6), false, 1.0)
+		var col := Color(1.0, 1.0, 0.85) if on else Color(0.6, 0.65, 0.55)
+		draw_string(Art.font(), Vector2(r.position.x + 6.0, r.position.y + 11.0),
+			REBIND_TABS[d], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 12.0, 8, col)
+	_center_text("CONTROLS", 66, 13, Color(0.95, 0.95, 0.85))
+	var sub: String
+	var scol: Color
+	if _rebind_action != "":
+		if pad:
+			sub = "PRESS A BUTTON FOR %s (%s)   -   START CANCELS   -   PRESS IT AGAIN TO CLEAR" \
+				% [rebind_label(_rebind_action), "P1" if _rebind_pad_dev == 0 else "P2"]
+		else:
+			sub = "PRESS A KEY FOR %s   -   ESC CANCEL   -   DEL CLEAR" % rebind_label(_rebind_action)
+		scol = Color(1.0, 0.92, 0.55)
+	elif _rebind_msg != "":
+		sub = _rebind_msg
+		scol = Color(1.0, 0.85, 0.5)
+	elif pad:
+		sub = "A/ENTER: REBIND   D-PAD L/R: PICK PLAYER   LB/RB: TAB   -   STICKS: USE SWAP STICKS"
+		scol = Color(0.8, 0.85, 0.72)
+	elif _rebind_tab == 3:
+		sub = "REBIND MENU KEYS - ARROWS/ENTER/ESC ALWAYS WORK TOO (EMERGENCY FALLBACK)"
+		scol = Color(0.8, 0.85, 0.72)
+	else:
+		sub = "ENTER: REBIND   TAB: SWITCH TAB   -   MENUS ALWAYS USE ARROWS/ENTER/ESC"
+		scol = Color(0.8, 0.85, 0.72)
+	_center_text(sub, 78, 8, scol)
+	# c1-18: on the GAMEPAD tab, the P1|P2 sub-selector — each player has an INDEPENDENT pad
+	# layout, and this names+switches which one the rows below are editing. ◄/► or a click flips
+	# it. Drawn only on the pad tab (the keyboard/menu maps aren't per-player).
+	if pad:
+		for pd in 2:
+			var pr := _rebind_pad_dev_rect(pd)
+			var pon := pd == _rebind_pad_dev
+			draw_rect(pr, Color(0.14, 0.26, 0.3, 0.95) if pon else Color(0.07, 0.09, 0.1, 0.7))
+			draw_rect(pr, Color(0.6, 0.9, 0.95, 0.9) if pon else Color(0.36, 0.42, 0.45, 0.6), false, 1.0)
+			draw_string(Art.font(), Vector2(pr.position.x + 4.0, pr.position.y + 9.0),
+				"PLAYER %d" % (pd + 1), HORIZONTAL_ALIGNMENT_CENTER, pr.size.x - 8.0, 7,
+				Color(0.95, 1.0, 1.0) if pon else Color(0.55, 0.62, 0.65))
+	# c1-18: a fixed-input footnote just above the SELECT/BACK legend — clarifies that the
+	# always-on mouse (kb) / stick+trigger (pad) inputs are NOT rebindable here, so an
+	# UNBOUND row means "no key/button on this device", NOT that the action is switched off.
+	var note := "STICKS MOVE/AIM + RT FIRES (ALWAYS ON) - LEFT-HANDED? USE THE SWAP STICKS ROW BELOW" if pad \
+		else "MOUSE ALSO AIMS + FIRES (ALWAYS ON) - 'UNBOUND' DROPS ONLY THAT KEY, NOT THE ACTION"
+	_center_text(note, 324, 7, Color(0.62, 0.68, 0.55, 0.9))
 
 
 func _draw_back_button() -> void:

@@ -46,6 +46,7 @@ class _StubMain extends Node2D:
 	var _motion := 1.0
 	var colorblind := false
 	var _rumble_on := true
+	var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad toggle the SWAP STICKS row reads
 	var _assist := false
 	var _fullscreen := false
 	var _saved := 0
@@ -71,6 +72,45 @@ class _StubMain extends Node2D:
 		_levels[name] = v
 		_set_calls.append([name, v])
 	func _save_settings() -> void: _saved += 1
+	# c1-18: rebind screen reads these off `main`. Real maps so _menu_items(REBIND) and the
+	# capture/back tests exercise the true row set + swap/clear/reset behaviour headless.
+	var BIND_DEFAULTS := MainScript.BIND_DEFAULTS
+	var PAD_DEFAULTS := MainScript.PAD_DEFAULTS
+	var _binds: Dictionary = MainScript.BIND_DEFAULTS.duplicate()
+	# c1-18: per-player pad layouts — [0] = P1 ([padbinds]), [1] = P2 ([padbinds2]).
+	var _pad_binds: Array = [MainScript.PAD_DEFAULTS.duplicate(), MainScript.PAD_DEFAULTS.duplicate()]
+	var _menu_binds: Dictionary = MainScript.MENU_BIND_DEFAULTS.duplicate()
+	var _persisted: Array = []   # records every _persist(sections) so persistence can be asserted
+	func bind(a: String) -> int: return int(_binds.get(a, 0))
+	func pad_bind(a: String, device := 0) -> int: return int(_pad_binds[device].get(a, -1))
+	func menu_bind(a: String) -> int: return int(_menu_binds.get(a, 0))
+	func immutable_menu_role(pk: int) -> String: return MainScript.immutable_menu_role(pk)
+	func rebind_menu_nav(a: String, code: int) -> String:
+		var res := MainScript.apply_bind(_menu_binds, a, code, 0)
+		_menu_binds = res["binds"]
+		var swapped: String = res["swapped"]
+		if swapped != "":
+			var role := MainScript.immutable_menu_role(int(_menu_binds[swapped]))
+			if role != "" and role != swapped:
+				_menu_binds[swapped] = 0
+		_persisted.append({"menubinds": _menu_binds.duplicate()})
+		return swapped
+	func rebind(a: String, code: int) -> String:
+		var res := MainScript.apply_bind(_binds, a, code, 0)
+		_binds = res["binds"]
+		_persisted.append({"binds": _binds.duplicate()})
+		return res["swapped"]
+	func rebind_pad(a: String, code: int, device := 0) -> String:
+		var res := MainScript.apply_bind(_pad_binds[device], a, code, -1)
+		_pad_binds[device] = res["binds"]
+		_persisted.append({("padbinds" if device == 0 else "padbinds2"): _pad_binds[device].duplicate()})
+		return res["swapped"]
+	func reset_binds() -> void:
+		_binds = MainScript.BIND_DEFAULTS.duplicate()
+		_pad_binds = [MainScript.PAD_DEFAULTS.duplicate(), MainScript.PAD_DEFAULTS.duplicate()]
+		_menu_binds = MainScript.MENU_BIND_DEFAULTS.duplicate()
+		_persisted.append({"binds": _binds.duplicate(), "padbinds": _pad_binds[0].duplicate(),
+			"padbinds2": _pad_binds[1].duplicate(), "menubinds": _menu_binds.duplicate()})
 
 
 # Real generated row count for a mode, via a throwaway Menu bound to a stub main.
@@ -1770,7 +1810,8 @@ func test_options_reset_defaults_row_is_two_press_and_restores() -> void:
 # fresh-install, and reset all read — so every persisted [settings] key must have an
 # entry (a new key added to _save_settings without one here would load undefined).
 func test_settings_defaults_cover_every_persisted_key() -> void:
-	for key in ["colorblind", "assist", "reduce_motion", "rumble", "sfx_vol", "music_vol", "fullscreen"]:
+	for key in ["colorblind", "assist", "reduce_motion", "rumble", "sfx_vol", "music_vol", "fullscreen",
+			"swap_sticks", "swap_sticks_p2"]:
 		Runner.T.ok(MainScript.SETTINGS_DEFAULTS.has(key),
 			"SETTINGS_DEFAULTS is the authoritative source for '%s'" % key)
 
@@ -1838,6 +1879,8 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 	mn._motion = 0.0
 	mn._rumble_on = false
 	mn._fullscreen = true
+	mn._swap_sticks[0] = true   # c1-18: per-player stick-swap must round-trip too
+	mn._swap_sticks[1] = true
 	mn._set_bus_vol("SFX", 2)
 	mn._set_bus_vol("Music", 3)
 	mn._reset_settings()   # applies SETTINGS_DEFAULTS to live fields AND persists them
@@ -1855,6 +1898,9 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 	# The DISPLAY mode is reset too (set true above) — it round-trips at the WINDOWED
 	# ship default rather than being silently exempted while the banner claims all reset.
 	Runner.T.eq(mn2._fullscreen, MainScript.SETTINGS_DEFAULTS["fullscreen"], "reset restores DISPLAY mode to default")
+	# c1-18: both players' stick-swap round-trip through disk and reset to the ship default.
+	Runner.T.eq(mn2._swap_sticks[0], MainScript.SETTINGS_DEFAULTS["swap_sticks"], "P1 swap_sticks reloads at default")
+	Runner.T.eq(mn2._swap_sticks[1], MainScript.SETTINGS_DEFAULTS["swap_sticks_p2"], "P2 swap_sticks reloads at default")
 
 	mn.free()
 	mn2.free()
@@ -1868,13 +1914,13 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 	_restore_buses(saved)
 
 
-# c1-09: the dedicated OPTIONS screen is settings-ONLY now (HALL OF FAME / HOW TO
-# PLAY moved to INFO) — 7 settings (AUDIO x2, RUMBLE, REDUCE MOTION, COLORBLIND,
-# ASSIST, DISPLAY) + RESET DEFAULTS + BACK = 9 rows. Pin that count and prove the
-# screen clears a >=20px plate and keeps its selected-row glow off the footer.
+# c1-09/c1-18: the dedicated OPTIONS screen is settings + CONTROLS now — 7 settings
+# (AUDIO x2, RUMBLE, REDUCE MOTION, COLORBLIND, ASSIST, DISPLAY) + CONTROLS (opens the
+# rebind screen) + RESET DEFAULTS + BACK = 10 rows. Pin that count and prove the screen
+# still clears a >=20px plate and keeps its selected-row glow off the footer.
 func test_options_settings_only_nine_row_screen_stays_legible() -> void:
 	var n := _row_count(Menu.Mode.OPTS, false)
-	Runner.T.eq(n, 9, "OPTIONS is the settings-only 9-row screen (no HALL/HOWTO)")
+	Runner.T.eq(n, 10, "OPTIONS is the settings + CONTROLS 10-row screen (no HALL/HOWTO)")
 	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, n, -1.0)
 	Runner.T.ok(float(g["bh"]) >= MIN_PLATE, "OPTIONS plate %d stays >= 20" % int(g["bh"]))
 	Runner.T.ok(float(g["gap"]) >= float(g["bh"]), "OPTIONS plates do not overlap")
@@ -2639,3 +2685,721 @@ func test_seed_hint_draw_capture_all_states() -> void:
 					"line '%s' fits inside the plate for '%s'" % [op["id"], tag])
 		cap.free()
 		stub.free()
+
+
+# ============================================================================
+# c1-18: INPUT REBINDING SCREEN — pure bind logic, capture, swaps, clears,
+# device tabs, reset confirmation, focus, and screen legibility. All headless.
+# ============================================================================
+
+func _rebind_menu(tab := 0) -> Array:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.REBIND
+	m._rebind_tab = tab   # 0 MOVE/AIM (kb), 1 ACTIONS (kb), 2 GAMEPAD
+	m.sel = 0
+	return [m, stub]
+
+
+func _keyev(code: int, physical := 0) -> InputEventKey:
+	var e := InputEventKey.new()
+	e.pressed = true
+	e.keycode = code
+	e.physical_keycode = physical if physical != 0 else code
+	return e
+
+
+func _keyup(code: int, physical := 0) -> InputEventKey:
+	var e := InputEventKey.new()
+	e.pressed = false
+	e.keycode = code
+	e.physical_keycode = physical if physical != 0 else code
+	return e
+
+
+func _padev(button: int, device := 0) -> InputEventJoypadButton:
+	var e := InputEventJoypadButton.new()
+	e.pressed = true
+	e.button_index = button
+	e.device = device   # c1-18: capture is filtered by ev.device against the active pad tab
+	return e
+
+
+# overlay_binds is the WHOLE persistence + legacy-save story: a save with no [binds]
+# section (older build) comes back exactly at defaults; a partial save overlays only its
+# real ints; a wrong-typed / unknown value is ignored (never corrupts a bind).
+func test_overlay_binds_legacy_partial_and_bad_values() -> void:
+	var defs := MainScript.BIND_DEFAULTS
+	# Legacy save: every action reads back null -> full defaults.
+	var legacy := {}
+	for a in defs:
+		legacy[a] = null
+	Runner.T.eq(MainScript.overlay_binds(defs, legacy), defs, "legacy save (all-null) restores full defaults")
+	# Partial + wrong-type: only the real int overlays; the string is ignored.
+	var saved := {"fire": KEY_J, "roll": "not-an-int"}
+	var out := MainScript.overlay_binds(defs, saved)
+	Runner.T.eq(int(out["fire"]), KEY_J, "a persisted int overlays its verb")
+	Runner.T.eq(int(out["roll"]), int(defs["roll"]), "a wrong-typed saved value keeps the default")
+	Runner.T.eq(int(out["move_up"]), int(defs["move_up"]), "an unmentioned verb keeps its default")
+	# The overlay never mutates the defaults table it reads from.
+	Runner.T.eq(MainScript.BIND_DEFAULTS, defs, "overlay_binds leaves BIND_DEFAULTS untouched")
+
+
+# apply_bind SWAPS on collision (no two verbs share a key) and NEVER swaps on a clear
+# (any number of verbs may sit UNBOUND). Pure — the heart of rebind()/rebind_pad().
+func test_apply_bind_swap_and_clear() -> void:
+	var binds := {"a": 10, "b": 20, "c": 0}
+	var swap := MainScript.apply_bind(binds, "b", 10, 0)   # b takes a's key
+	Runner.T.eq(swap["swapped"], "a", "collision reports the swapped verb")
+	Runner.T.eq(int(swap["binds"]["b"]), 10, "target verb gets the requested key")
+	Runner.T.eq(int(swap["binds"]["a"]), 20, "the displaced verb inherits the key given up")
+	# Clear to UNBOUND never swaps, even if another verb is already unbound.
+	var clr := MainScript.apply_bind(binds, "a", 0, 0)
+	Runner.T.eq(clr["swapped"], "", "clearing never reports a swap")
+	Runner.T.eq(int(clr["binds"]["a"]), 0, "cleared verb reads UNBOUND")
+	Runner.T.eq(int(clr["binds"]["c"]), 0, "a pre-existing UNBOUND verb is left alone")
+
+
+# Capturing a key on the KEYBOARD tab binds the verb to its PHYSICAL keycode (layout-
+# independent, matching the physical reads in _gather_inputs) and persists it.
+func test_capture_keyboard_stores_physical_and_persists() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m._rebind_action = "fire"
+	# A QWERTY 'J' key physically, even if the OS reported a different logical keycode.
+	var consumed: bool = m._rebind_capture(_keyev(KEY_A, KEY_J))
+	Runner.T.ok(consumed, "the capture event is consumed (never leaks to nav)")
+	Runner.T.eq(stub.bind("fire"), KEY_J, "the PHYSICAL keycode is stored, not the logical one")
+	Runner.T.eq(m._rebind_action, "", "capture ends after one key")
+	Runner.T.ok(stub._persisted.size() >= 1 and stub._persisted[-1].has("binds"), "the rebind persisted [binds]")
+	m.free()
+	stub.free()
+
+
+# ESC during capture CANCELS: the old bind survives and capture ends. This is why menu-
+# cancel can never be stolen — ESC never reaches the bind path.
+func test_capture_cancel_keeps_old_bind() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	var before: int = stub.bind("fire")
+	m._rebind_action = "fire"
+	m._rebind_capture(_keyev(KEY_ESCAPE))
+	Runner.T.eq(stub.bind("fire"), before, "ESC leaves the existing bind unchanged")
+	Runner.T.eq(m._rebind_action, "", "ESC ends the capture")
+	m.free()
+	stub.free()
+
+
+# DELETE clears a verb to UNBOUND (row then reads '---'); an unbound key reads as never-
+# pressed in gameplay, so a player can retire a verb entirely.
+func test_capture_delete_clears_binding() -> void:
+	var mm := _rebind_menu(1)   # ACTIONS tab holds GRENADE
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m._rebind_action = "grenade"
+	m._rebind_capture(_keyev(KEY_DELETE))
+	Runner.T.eq(stub.bind("grenade"), 0, "DELETE unbinds the verb")
+	# The generated row shows the UNBOUND marker.
+	var seen := false
+	for row in m._menu_items():
+		if row["id"] == "grenade":
+			seen = true
+			Runner.T.ok("UNBOUND" in String(row["label"]), "a cleared verb row reads UNBOUND")
+	Runner.T.ok(seen, "the GRENADE row is present on the ACTIONS tab")
+	m.free()
+	stub.free()
+
+
+# Binding a key another verb holds SWAPS them and surfaces a notice, so the player is told
+# the collision was resolved (not silently duplicated).
+func test_capture_swap_reports_notice() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	var up_key: int = stub.bind("move_up")     # default KEY_W
+	m._rebind_action = "move_down"
+	m._rebind_capture(_keyev(up_key))
+	Runner.T.eq(stub.bind("move_down"), up_key, "move_down takes the requested key")
+	Runner.T.ok(stub.bind("move_up") != up_key, "move_up no longer holds the shared key (swapped away)")
+	Runner.T.ok("SWAPPED" in m._rebind_msg, "a swap raises a SWAPPED notice")
+	m.free()
+	stub.free()
+
+
+# GAMEPAD tab (2) captures a pad BUTTON (capture accepts InputEventJoypadButton, not just
+# keys) and lists the discrete-button verbs (movement/aim are the fixed sticks).
+func test_gamepad_tab_captures_button_and_lists_pad_verbs() -> void:
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	# Pad tab lists the discrete-button verbs + the SWAP STICKS toggle + RESET + BACK.
+	var pad_rows: int = m._menu_items().size()
+	Runner.T.eq(pad_rows, MainScript.PAD_DEFAULTS.size() + 3, "GAMEPAD tab lists pad-button verbs + SWAP STICKS + RESET + BACK")
+	m._rebind_action = "fire"
+	var consumed: bool = m._rebind_capture(_padev(JOY_BUTTON_Y))
+	Runner.T.ok(consumed, "a pad button is consumed during pad capture")
+	Runner.T.eq(stub.pad_bind("fire"), JOY_BUTTON_Y, "the pad button is bound to the verb")
+	Runner.T.ok(stub._persisted[-1].has("padbinds"), "the pad rebind persisted [padbinds]")
+	m.free()
+	stub.free()
+
+
+# c1-18: the D-PAD is BINDABLE; START is the RELIABLE pad CANCEL (the old LB+RB chord was
+# unusable — the first shoulder committed as the bind before the second could arrive). CLEAR
+# is pressing the button the verb already holds. START is the ONE non-bindable pad button.
+func test_gamepad_dpad_binds_and_start_cancels_and_press_clears() -> void:
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	# The D-pad BINDS (it used to be the clear gesture).
+	m._rebind_action = "roll"
+	m._rebind_capture(_padev(JOY_BUTTON_DPAD_LEFT))
+	Runner.T.eq(stub.pad_bind("roll"), JOY_BUTTON_DPAD_LEFT, "the d-pad is a bindable button")
+	# START CANCELS the listen and keeps the verb's existing bind (reliable single-button cancel).
+	m._rebind_action = "grenade"
+	var grenade_before: int = stub.pad_bind("grenade")
+	m._rebind_capture(_padev(JOY_BUTTON_START))
+	Runner.T.eq(stub.pad_bind("grenade"), grenade_before, "START cancels, keeping the old bind")
+	Runner.T.eq(m._rebind_action, "", "START ends the listen (capture no longer active)")
+	# CLEAR = press the button the verb ALREADY holds -> UNBOUND (frees the d-pad to bind).
+	m._rebind_action = "roll"
+	m._rebind_capture(_padev(JOY_BUTTON_DPAD_LEFT))   # roll currently holds DPAD_LEFT
+	Runner.T.eq(stub.pad_bind("roll"), -1, "pressing the verb's current button clears it")
+	# A DIFFERENT button just (re)binds (not treated as clear).
+	m._rebind_action = "roll"
+	m._rebind_capture(_padev(JOY_BUTTON_A))
+	Runner.T.eq(stub.pad_bind("roll"), JOY_BUTTON_A, "a different button (re)binds the verb")
+	m.free()
+	stub.free()
+
+
+# c1-18: P1 and P2 keep SEPARATE, independent pad layouts — remapping one never disturbs the
+# other, and each persists to its own [padbinds] / [padbinds2] section.
+func test_p1_p2_pad_layouts_are_independent() -> void:
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	# Edit P1 (the GAMEPAD tab opens on P1).
+	m._rebind_pad_dev = 0
+	m._rebind_action = "fire"
+	m._rebind_capture(_padev(JOY_BUTTON_A))
+	Runner.T.eq(stub.pad_bind("fire", 0), JOY_BUTTON_A, "P1 fire rebound")
+	Runner.T.eq(stub.pad_bind("fire", 1), int(MainScript.PAD_DEFAULTS["fire"]), "P2 fire UNTOUCHED by a P1 edit")
+	Runner.T.ok(stub._persisted[-1].has("padbinds"), "a P1 edit writes [padbinds]")
+	# Switch to P2 and edit the SAME verb to a different button (its OWN device-1 event).
+	m._rebind_pad_dev = 1
+	m._rebind_action = "fire"
+	m._rebind_capture(_padev(JOY_BUTTON_Y, 1))
+	Runner.T.eq(stub.pad_bind("fire", 1), JOY_BUTTON_Y, "P2 fire rebound independently")
+	Runner.T.eq(stub.pad_bind("fire", 0), JOY_BUTTON_A, "P1 fire STILL its own value")
+	Runner.T.ok(stub._persisted[-1].has("padbinds2"), "a P2 edit writes the SEPARATE [padbinds2]")
+	# The GAMEPAD tab row shows whichever player's bind is active.
+	Runner.T.ok("Y" in m._menu_items()[0]["label"] or "TRIANGLE" in m._menu_items()[0]["label"],
+		"the GAMEPAD row reflects the ACTIVE player's (P2) bind")
+	m.free()
+	stub.free()
+
+
+# c1-18: pad capture is filtered by ev.device — a controller that is NOT the one whose sub-tab
+# is open cannot rewrite that layout. Editing P1 (dev 0), a device-1 press is ignored; the
+# matching device-0 press binds. This is what keeps two players from clobbering each other.
+func test_gamepad_capture_is_device_filtered() -> void:
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m._rebind_pad_dev = 0     # P1's sub-tab is open
+	m._rebind_action = "fire"
+	# A press from the OTHER controller (device 1) must NOT bind P1's verb. (It is still
+	# swallowed so it can't leak to menu nav, but it does not touch the bind and the listen
+	# stays armed for P1's own controller.)
+	m._rebind_capture(_padev(JOY_BUTTON_Y, 1))
+	Runner.T.eq(stub.pad_bind("fire", 0), int(MainScript.PAD_DEFAULTS["fire"]),
+		"P1 fire is UNCHANGED by a device-1 press while editing P1")
+	Runner.T.eq(m._rebind_action, "fire", "the listen stays armed (the foreign press did not bind)")
+	# The matching controller (device 0) binds normally.
+	m._rebind_capture(_padev(JOY_BUTTON_Y, 0))
+	Runner.T.eq(stub.pad_bind("fire", 0), JOY_BUTTON_Y, "the ACTIVE device's press binds the verb")
+	m.free()
+	stub.free()
+
+
+# c1-18: SWAP STICKS is an inline PER-PLAYER TOGGLE on the GAMEPAD tab (the sticks aren't
+# per-button rebindable) — activating it flips ONLY the active player's main._swap_sticks entry
+# and write-throughs via _save_settings, so a left-handed / adaptive-pad player's stick
+# assignment survives a reload and P1's swap never disturbs P2's.
+func test_swap_sticks_toggle_on_gamepad_tab_persists() -> void:
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m._rebind_pad_dev = 0
+	var sel_swap := func() -> void:
+		for k in m._menu_items().size():
+			if m._menu_items()[k]["id"] == "swap_sticks":
+				m.sel = k
+	sel_swap.call()
+	Runner.T.ok(m._menu_items()[m.sel]["id"] == "swap_sticks", "SWAP STICKS is a real row on the GAMEPAD tab")
+	Runner.T.ok(not stub._swap_sticks[0] and not stub._swap_sticks[1], "both players start OFF")
+	var saves_before: int = stub._saved
+	m._activate()
+	Runner.T.ok(stub._swap_sticks[0], "activating SWAP STICKS turns P1 ON")
+	Runner.T.ok(not stub._swap_sticks[1], "P1's swap left P2 UNTOUCHED")
+	Runner.T.eq(stub._saved, saves_before + 1, "the toggle write-through persisted the setting")
+	Runner.T.ok(not ("PRESS A BUTTON" in m._menu_items()[m.sel]["label"]),
+		"the toggle row never enters key/button capture")
+	# Switch to P2 and toggle its OWN entry — P1 stays ON, P2 flips independently.
+	m._rebind_pad_dev = 1
+	sel_swap.call()
+	m._activate()
+	Runner.T.ok(stub._swap_sticks[1], "P2's swap toggles independently ON")
+	Runner.T.ok(stub._swap_sticks[0], "P1's swap is STILL its own value")
+	m.free()
+	stub.free()
+
+
+# c1-18: F10 is the global recovery gesture. From the rebind screen (or any menu) it reverts
+# EVERY control map to ship defaults, so no self-inflicted remap can strand a player. Driven
+# end-to-end through the REAL _unhandled_input so the escape hatch is proven, not just wired.
+func test_f10_resets_every_control_map() -> void:
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	stub.rebind("fire", KEY_J)
+	stub.rebind_pad("fire", JOY_BUTTON_A, 0)
+	stub.rebind_pad("fire", JOY_BUTTON_A, 1)
+	stub.rebind_menu_nav("menu_confirm", KEY_X)
+	m._rebind_action = "roll"   # even mid-capture, F10 must rescue
+	m._unhandled_input(_keyev(KEY_F10))
+	Runner.T.eq(m._rebind_action, "", "F10 aborts any in-progress capture")
+	Runner.T.eq(stub.bind("fire"), int(MainScript.BIND_DEFAULTS["fire"]), "F10 restored the keyboard default")
+	Runner.T.eq(stub.pad_bind("fire", 0), int(MainScript.PAD_DEFAULTS["fire"]), "F10 restored P1's pad default")
+	Runner.T.eq(stub.pad_bind("fire", 1), int(MainScript.PAD_DEFAULTS["fire"]), "F10 restored P2's pad default")
+	Runner.T.eq(stub.menu_bind("menu_confirm"), int(MainScript.MENU_BIND_DEFAULTS["menu_confirm"]), "F10 restored the menu key")
+	m.free()
+	stub.free()
+
+
+# Mouse clicks are swallowed while capturing — they must not leak into tab/row navigation.
+func test_capture_swallows_mouse_clicks() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m._rebind_action = "move_up"
+	var click := InputEventMouseButton.new()
+	click.pressed = true
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.position = m._rebind_tab_rect(2).get_center()   # over the GAMEPAD tab
+	var consumed: bool = m._rebind_capture(click)
+	Runner.T.ok(consumed, "a mouse click is consumed during capture")
+	Runner.T.eq(m._rebind_tab, 0, "the click did NOT switch tabs mid-capture")
+	Runner.T.eq(m._rebind_action, "move_up", "and did not end the capture")
+	m.free()
+	stub.free()
+
+
+# The three category tabs partition the verbs so no page exceeds 10 rows: MOVE/AIM (8) and
+# ACTIONS (6) on keyboard, GAMEPAD (pad buttons) — each + RESET + BACK.
+func test_category_tabs_partition_the_verbs() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	Runner.T.eq(m._menu_items().size(), Menu.REBIND_MOVE_AIM.size() + 2, "MOVE/AIM tab = 8 verbs + RESET + BACK")
+	m._rebind_tab = 1
+	Runner.T.eq(m._menu_items().size(), Menu.REBIND_ACTIONS.size() + 2, "ACTIONS tab = 6 verbs + RESET + BACK")
+	m._rebind_tab = 2
+	Runner.T.eq(m._menu_items().size(), MainScript.PAD_DEFAULTS.size() + 3, "GAMEPAD tab = pad verbs + SWAP STICKS + RESET + BACK")
+	# Every keyboard verb appears on exactly one of the two keyboard tabs (nothing dropped).
+	var covered := Menu.REBIND_MOVE_AIM + Menu.REBIND_ACTIONS
+	for a in MainScript.BIND_DEFAULTS:
+		Runner.T.ok(a in covered, "keyboard verb '%s' is reachable on a category tab" % a)
+	Runner.T.eq(covered.size(), MainScript.BIND_DEFAULTS.size(), "the two keyboard tabs cover every verb, no dupes")
+	m.free()
+	stub.free()
+
+
+# RESET CONTROLS is a two-press destructive row: the FIRST press only arms the confirm,
+# the SECOND actually reverts every verb (keyboard AND pad) to its ship default.
+func test_reset_controls_needs_two_presses() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	stub.rebind("fire", KEY_J)
+	stub.rebind_pad("fire", JOY_BUTTON_A)
+	# Focus the RESET CONTROLS row.
+	var items: Array = m._menu_items()
+	for k in items.size():
+		if items[k]["id"] == "reset_controls":
+			m.sel = k
+	Runner.T.ok(m._is_destructive(m.sel), "RESET CONTROLS is a destructive (confirmed) row")
+	m._press()   # first press: only arms
+	Runner.T.eq(m._confirm, m.sel, "first press arms the confirm, does not reset")
+	Runner.T.eq(stub.bind("fire"), KEY_J, "binds are untouched after only one press")
+	m._press()   # second press: reverts
+	Runner.T.eq(stub.bind("fire"), int(MainScript.BIND_DEFAULTS["fire"]), "second press restores the keyboard default")
+	Runner.T.eq(stub.pad_bind("fire"), int(MainScript.PAD_DEFAULTS["fire"]), "second press restores the pad default too")
+	m.free()
+	stub.free()
+
+
+# BACK from the rebind screen restores focus to a REAL OPTIONS row (the CONTROLS row that
+# opened it) — not a nonexistent id — and CONTROLS is a focusable OPTIONS row.
+func test_rebind_back_targets_the_real_controls_row() -> void:
+	var dest := Menu.back_dest(Menu.Mode.REBIND)
+	Runner.T.eq(dest["mode"], Menu.Mode.OPTS, "BACK climbs to OPTIONS")
+	Runner.T.eq(dest["sel"], "controls", "BACK restores focus to the CONTROLS row")
+	# The target id actually exists among the OPTIONS rows.
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+	var ids: Array = []
+	for row in m._menu_items():
+		ids.append(row["id"])
+	Runner.T.ok("controls" in ids, "CONTROLS is a real, focusable OPTIONS row")
+	m.free()
+	stub.free()
+
+
+# Menu navigation on the rebind screen is the FIXED W/S+arrows path (never remapped), so a
+# player who has rebound every gameplay verb can still move the cursor and back out.
+func test_menu_nav_still_works_on_rebind_screen() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m.sel = 0
+	m._unhandled_input(_keyev(KEY_S))   # DOWN via the immutable nav key
+	Runner.T.eq(m.sel, 1, "S moves the cursor down on the rebind screen (immutable nav)")
+	m._unhandled_input(_keyev(KEY_DOWN))
+	Runner.T.eq(m.sel, 2, "the arrow key navigates too")
+	m.free()
+	stub.free()
+
+
+# Every rebind category tab must clear the same >=20px readable floor OPTIONS uses (the
+# fix for the old flat 16-row/10px screen): positive, non-overlapping plates whose last-row
+# glow clears the footer. The menu draws to a FIXED 640x360 canvas that stretch-scales to
+# every resolution, so this one check demonstrably covers all supported resolutions.
+func test_rebind_screen_rows_stay_legible_every_tab() -> void:
+	for n in [Menu.REBIND_MOVE_AIM.size() + 2, Menu.REBIND_ACTIONS.size() + 2,
+			MainScript.PAD_DEFAULTS.size() + 2, Menu.REBIND_MENUNAV.size() + 2]:
+		var g: Dictionary = Menu.compute_geometry(Menu.Mode.REBIND, n, -1.0)
+		Runner.T.ok(float(g["bh"]) >= MIN_PLATE, "REBIND %d-row plate %d stays >= 20px" % [n, int(g["bh"])])
+		Runner.T.ok(float(g["gap"]) >= float(g["bh"]), "REBIND %d-row plates do not overlap" % n)
+		Runner.T.ok(Menu.max_glow_bottom(g) < Menu.FOOTER_Y, "REBIND %d-row glow clears the footer" % n)
+
+
+# A key that also drives the menus (Enter/Tab/arrows/W/S) still binds, but raises a non-
+# blocking heads-up so the player knows about the overlap. ESC is never bindable.
+func test_reserved_key_note_flags_menu_keys() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	Runner.T.ok(m._reserved_key_note(KEY_ENTER) != "", "binding a menu key raises a heads-up")
+	Runner.T.eq(m._reserved_key_note(KEY_J), "", "an ordinary key raises no heads-up")
+	m.free()
+	stub.free()
+
+
+# INTEGRATION: menu navigation itself is now rebindable, but the immutable arrows/Enter/Esc
+# still drive the menu even after the nav keys are remapped — so a player can customise menu
+# nav yet can never lock themselves out. Drives the REAL _unhandled_input path.
+func test_menu_nav_is_rebindable_but_defaults_stay_immutable() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	# Rebind MENU DOWN to the physical 'J' key.
+	stub.rebind_menu_nav("menu_down", KEY_J)
+	m.mode = Menu.Mode.HALL   # a simple list screen; sel just needs to move
+	m.mode = Menu.Mode.REBIND
+	m.sel = 0
+	m._unhandled_input(_keyev(KEY_J))        # the REBOUND menu-down key
+	Runner.T.eq(m.sel, 1, "a rebound menu-nav key drives the cursor")
+	# The immutable default still works even though menu_down was remapped away from S/DOWN.
+	m.sel = 0
+	m._unhandled_input(_keyev(KEY_DOWN))     # the immutable emergency fallback
+	Runner.T.eq(m.sel, 1, "the hardcoded arrow still navigates (emergency fallback intact)")
+	m.free()
+	stub.free()
+
+
+# A menu-nav action must NOT be bindable to a key reserved for a DIFFERENT immutable menu
+# role — that would fire two commands on one press (MENU CONFIRM on Down = navigate+activate).
+# The bind is rejected, the old bind kept, and a notice raised.
+func test_menu_nav_rejects_cross_role_immutable_key() -> void:
+	var mm := _rebind_menu(3)   # MENUS tab
+	var m: Control = mm[0]
+	var stub = mm[1]
+	var before: int = stub.menu_bind("menu_confirm")
+	m._rebind_action = "menu_confirm"
+	m._rebind_capture(_keyev(KEY_DOWN))   # Down is the immutable menu_down key
+	Runner.T.eq(stub.menu_bind("menu_confirm"), before, "binding MENU CONFIRM to Down is rejected")
+	Runner.T.ok("FIXED MENU KEY" in m._rebind_msg, "the rejection explains why")
+	# But a non-reserved key is accepted.
+	m._rebind_action = "menu_confirm"
+	m._rebind_capture(_keyev(KEY_X))
+	Runner.T.eq(stub.menu_bind("menu_confirm"), KEY_X, "a free key binds fine")
+	# And rebinding a menu action to ITS OWN immutable key is allowed (same role, no conflict).
+	m._rebind_action = "menu_up"
+	m._rebind_capture(_keyev(KEY_UP))
+	Runner.T.eq(stub.menu_bind("menu_up"), KEY_UP, "binding MENU UP to Up (its own role) is allowed")
+	m.free()
+	stub.free()
+
+
+# A menu-nav SWAP must never hand the displaced action an immutable key of a DIFFERENT role
+# (which would make one press fire two menu commands). The displaced action is UNBOUND
+# instead — its own immutable fallback still navigates.
+func test_menu_swap_never_leaves_a_cross_role_immutable_binding() -> void:
+	var mm := _rebind_menu(3)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	# Set up: menu_left holds a free key J; menu_up is on its default UP (immutable up role).
+	stub.rebind_menu_nav("menu_left", KEY_J)
+	# Rebind menu_up to J -> swaps: menu_left would inherit UP (an immutable menu_up key).
+	stub.rebind_menu_nav("menu_up", KEY_J)
+	Runner.T.eq(stub.menu_bind("menu_up"), KEY_J, "menu_up takes the requested key")
+	Runner.T.eq(stub.menu_bind("menu_left"), 0, "the displaced menu_left is UNBOUND, not left on the UP key")
+	m.free()
+	stub.free()
+
+
+# A corrupt / out-of-range persisted code must not survive load — overlay_binds validates
+# PER TYPE (keyboard nonnegative keycodes; gamepad -1..JOY_BUTTON_MAX) and drops anything
+# else, so a tampered save can't produce an unusable binding.
+func test_overlay_binds_rejects_corrupt_values_per_type() -> void:
+	# Keyboard: lo=0. Huge and negative are rejected; a valid key overlays.
+	var defs := MainScript.BIND_DEFAULTS
+	var bad := {"fire": 999999999, "roll": -42, "move_up": KEY_J}
+	var out := MainScript.overlay_binds(defs, bad, 0)
+	Runner.T.eq(int(out["fire"]), int(defs["fire"]), "an absurd huge keycode is rejected, default kept")
+	Runner.T.eq(int(out["roll"]), int(defs["roll"]), "a negative keycode is rejected under lo=0")
+	Runner.T.eq(int(out["move_up"]), KEY_J, "a valid saved key still overlays")
+	# Gamepad: lo=-1, hi=JOY_BUTTON_MAX. -1 (UNBOUND) is kept; an out-of-range button rejected.
+	var pdefs := MainScript.PAD_DEFAULTS
+	var pbad := {"fire": -1, "roll": 9999, "buy": JOY_BUTTON_A, "grenade": JOY_BUTTON_MAX}
+	var pout := MainScript.overlay_binds(pdefs, pbad, -1, JOY_BUTTON_MAX - 1)
+	Runner.T.eq(int(pout["fire"]), -1, "a persisted UNBOUND (-1) pad value survives")
+	Runner.T.eq(int(pout["roll"]), int(pdefs["roll"]), "an out-of-range pad button is rejected, default kept")
+	Runner.T.eq(int(pout["buy"]), JOY_BUTTON_A, "a valid saved pad button overlays")
+	Runner.T.eq(int(pout["grenade"]), int(pdefs["grenade"]), "JOY_BUTTON_MAX (the count sentinel) is rejected, not a real button")
+
+
+# A rebound menu-nav key must clear its own auto-repeat latch on release — otherwise one
+# press repeats forever. Press sets the latch; the key-UP event must reset it.
+func test_rebound_menu_key_release_clears_repeat_latch() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	stub.rebind_menu_nav("menu_down", KEY_J)
+	m.sel = 0
+	m._unhandled_input(_keyev(KEY_J))
+	Runner.T.eq(m._key_move, 1, "pressing the rebound menu-down key arms the repeat latch")
+	m._unhandled_input(_keyup(KEY_J))
+	Runner.T.eq(m._key_move, 0, "releasing the rebound key clears the latch (no runaway repeat)")
+
+
+# Horizontal menu nav is rebindable too: a custom menu_right key arms the ◄/► latch and its
+# release clears it (parity with vertical nav).
+func test_rebindable_horizontal_menu_nav_press_release() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	stub.rebind_menu_nav("menu_right", KEY_L)
+	m._unhandled_input(_keyev(KEY_L))
+	Runner.T.eq(m._key_hmove, 1, "the rebound menu-right key arms the horizontal latch")
+	m._unhandled_input(_keyup(KEY_L))
+	Runner.T.eq(m._key_hmove, 0, "releasing it clears the horizontal latch")
+
+
+# End-to-end: activating the CONTROLS row on the OPTIONS screen opens the rebind screen.
+func test_activating_controls_row_opens_rebind_screen() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+	# Focus the CONTROLS row.
+	var items: Array = m._menu_items()
+	for k in items.size():
+		if items[k]["id"] == "controls":
+			m.sel = k
+	m._activate()
+	Runner.T.eq(m.mode, Menu.Mode.REBIND, "activating CONTROLS opens the rebind screen")
+	m.free()
+	stub.free()
+
+
+# The MENUS tab lists the rebindable menu-navigation actions (separate from gameplay verbs,
+# so a menu key never swaps against a gameplay bind sharing the same key).
+func test_menus_tab_lists_menu_nav_actions() -> void:
+	var mm := _rebind_menu(3)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	Runner.T.eq(m._menu_items().size(), Menu.REBIND_MENUNAV.size() + 2, "MENUS tab = menu-nav actions + RESET + BACK")
+	var ids: Array = []
+	for row in m._menu_items():
+		ids.append(row["id"])
+	for a in Menu.REBIND_MENUNAV:
+		Runner.T.ok(a in ids, "menu-nav action '%s' is on the MENUS tab" % a)
+	# Capturing on the MENUS tab writes the menu-key map, not the gameplay map.
+	m._rebind_action = "menu_confirm"
+	m._rebind_capture(_keyev(KEY_X))
+	Runner.T.eq(stub.menu_bind("menu_confirm"), KEY_X, "a MENUS-tab capture rebinds the menu key")
+	Runner.T.ok(stub._persisted[-1].has("menubinds"), "the menu-nav rebind persisted [menubinds]")
+	m.free()
+	stub.free()
+
+
+# Every DECLARED binding — gameplay keys, pad buttons, AND menu-nav keys — must be reachable
+# (editable) somewhere in the rebind UI: nothing exists in a defaults map without a row.
+func test_every_declared_binding_is_reachable_in_ui() -> void:
+	var kb_tabs := Menu.REBIND_MOVE_AIM + Menu.REBIND_ACTIONS
+	for a in MainScript.BIND_DEFAULTS:
+		Runner.T.ok(a in kb_tabs, "gameplay key '%s' has a UI row" % a)
+	for a in MainScript.MENU_BIND_DEFAULTS:
+		Runner.T.ok(a in Menu.REBIND_MENUNAV, "menu-nav binding '%s' has a UI row on the MENUS tab" % a)
+	# The GAMEPAD tab is generated straight from PAD_DEFAULTS, so it always covers it.
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	var ids: Array = []
+	for row in m._menu_items():
+		ids.append(row["id"])
+	for a in MainScript.PAD_DEFAULTS:
+		Runner.T.ok(a in ids, "pad button '%s' has a UI row" % a)
+	m.free()
+	stub.free()
+
+
+# End-to-end: activating the BACK row on the rebind screen returns to OPTIONS focused on the
+# CONTROLS row (and does NOT then re-process that id and back out of OPTIONS too).
+func test_activating_rebind_back_returns_to_options() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	m._opts_parent = Menu.Mode.TITLE
+	var items: Array = m._menu_items()
+	for k in items.size():
+		if items[k]["id"] == "back":
+			m.sel = k
+	m._activate()
+	Runner.T.eq(m.mode, Menu.Mode.OPTS, "BACK returns to OPTIONS (no fallthrough past it)")
+	Runner.T.eq(String(m._menu_items()[m.sel]["id"]), "controls", "focus lands on the real CONTROLS row")
+	m.free()
+	stub.free()
+
+
+# A mouse click on a category tab switches to it (clickable tabs for mouse users).
+func test_clicking_a_category_tab_switches_to_it() -> void:
+	var mm := _rebind_menu(0)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	var r: Rect2 = m._rebind_tab_rect(2)   # GAMEPAD tab
+	var click := InputEventMouseButton.new()
+	click.pressed = true
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.position = r.get_center()
+	m._unhandled_input(click)
+	Runner.T.eq(m._rebind_tab, 2, "clicking the GAMEPAD tab plate selects it")
+	m.free()
+	stub.free()
+
+
+# AUDIT: every input verb the game actually consumes is DISCLOSED as a rebindable binding —
+# nothing reads an undisclosed hardcoded key/button. The gameplay SimInput verbs must each
+# have a keyboard bind; the pad action verbs a pad bind; and every immutable menu-nav role
+# must map to a disclosed MENUS-tab action (so the fixed fallback is documented, not hidden).
+func test_no_undisclosed_hardcoded_input_verbs() -> void:
+	# The verbs _gather_inputs feeds into SimInput (movement/aim collapse to the 8 direction
+	# keys; the discrete verbs are fire/grenade/roll/interact/revive/buy).
+	var gameplay := ["move_up", "move_down", "move_left", "move_right",
+		"aim_up", "aim_down", "aim_left", "aim_right",
+		"fire", "grenade", "roll", "interact", "revive", "buy"]
+	for v in gameplay:
+		Runner.T.ok(MainScript.BIND_DEFAULTS.has(v), "gameplay verb '%s' is a disclosed keyboard binding" % v)
+	for v in ["fire", "grenade", "roll", "interact", "revive", "buy"]:
+		Runner.T.ok(MainScript.PAD_DEFAULTS.has(v), "pad verb '%s' is a disclosed gamepad binding" % v)
+	# Every immutable menu role the input handler honors is a disclosed, editable MENUS action.
+	for role in ["menu_up", "menu_down", "menu_left", "menu_right", "menu_confirm", "menu_cancel"]:
+		Runner.T.ok(MainScript.MENU_BIND_DEFAULTS.has(role), "menu role '%s' is a disclosed binding" % role)
+		Runner.T.ok(role in Menu.REBIND_MENUNAV, "menu role '%s' is reachable on the MENUS tab" % role)
+
+
+# INTEGRATION: a REAL ConfigFile round-trip through disk. Persist rebinds to [binds]/
+# [padbinds], reload from a fresh ConfigFile, and prove overlay_binds reconstructs the exact
+# maps — the actual save/load path _persist + _load_bests use. A legacy save with NO section
+# reloads at full defaults (no wipe).
+func test_binds_configfile_roundtrip_and_legacy_reload() -> void:
+	var path := "user://test_binds_%d.cfg" % (Time.get_ticks_usec())
+	var cf := ConfigFile.new()
+	cf.set_value("binds", "fire", KEY_J)
+	cf.set_value("binds", "move_up", KEY_I)
+	cf.set_value("binds", "move_left", KEY_LEFT)   # a SPECIAL key (0x400000+) — regression guard
+	cf.set_value("padbinds", "roll", JOY_BUTTON_A)
+	cf.set_value("padbinds2", "roll", JOY_BUTTON_X)   # P2's INDEPENDENT layout, its own section
+	Runner.T.eq(cf.save(path), OK, "the rebinds save to disk")
+	# Fresh loader, exactly as _load_bests does it (keyboard passes lo=0, default keycode ceil).
+	var rd := ConfigFile.new()
+	Runner.T.eq(rd.load(path), OK, "the saved file reloads")
+	var saved_kb := {}
+	for a in MainScript.BIND_DEFAULTS:
+		saved_kb[a] = rd.get_value("binds", a, null)
+	var kb := MainScript.overlay_binds(MainScript.BIND_DEFAULTS, saved_kb, 0)
+	Runner.T.eq(int(kb["fire"]), KEY_J, "FIRE reloads from disk")
+	Runner.T.eq(int(kb["move_up"]), KEY_I, "MOVE UP reloads from disk")
+	Runner.T.ok(KEY_LEFT > 0x10FFFF, "sanity: arrow keys ARE above the old naive cap")
+	Runner.T.eq(int(kb["move_left"]), KEY_LEFT, "a SPECIAL key (arrow) survives reload, not reverted")
+	Runner.T.eq(int(kb["roll"]), int(MainScript.BIND_DEFAULTS["roll"]), "an unsaved verb reloads at its default")
+	var saved_pad := {}
+	for a in MainScript.PAD_DEFAULTS:
+		saved_pad[a] = rd.get_value("padbinds", a, null)
+	var pad := MainScript.overlay_binds(MainScript.PAD_DEFAULTS, saved_pad)
+	Runner.T.eq(int(pad["roll"]), JOY_BUTTON_A, "the pad ROLL button reloads from disk")
+	# c1-18: P2 reloads from its OWN [padbinds2] section, independent of P1's [padbinds].
+	var saved_pad2 := {}
+	for a in MainScript.PAD_DEFAULTS:
+		saved_pad2[a] = rd.get_value("padbinds2", a, null)
+	var pad2 := MainScript.overlay_binds(MainScript.PAD_DEFAULTS, saved_pad2)
+	Runner.T.eq(int(pad2["roll"]), JOY_BUTTON_X, "P2's ROLL button reloads from its own section")
+	Runner.T.eq(int(pad["roll"]), JOY_BUTTON_A, "P1's ROLL is unchanged by P2's section (independent maps)")
+	# Legacy: a file with no [binds]/[padbinds] section reloads at full defaults.
+	var legacy := ConfigFile.new()
+	legacy.set_value("best", "score", 5)   # only unrelated sections present
+	var lpath := "user://test_legacy_%d.cfg" % (Time.get_ticks_usec())
+	legacy.save(lpath)
+	var lrd := ConfigFile.new()
+	lrd.load(lpath)
+	var lkb := {}
+	for a in MainScript.BIND_DEFAULTS:
+		lkb[a] = lrd.get_value("binds", a, null)
+	Runner.T.eq(MainScript.overlay_binds(MainScript.BIND_DEFAULTS, lkb), MainScript.BIND_DEFAULTS,
+		"a legacy save with no [binds] reloads at full ship defaults (no wipe)")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(lpath))
+
+
+# The bind indirection must reproduce the ORIGINAL hardcoded gameplay mapping bit-for-bit:
+# _gather_inputs used to read KEY_W/S/A/D + arrows + Space/Shift/C/F/E/Q and the pad's
+# shoulders/face buttons. Pinning the defaults proves the rebind layer changed WHO can be
+# remapped, not the out-of-box controls the sim consumes.
+func test_default_binds_match_the_original_hardcoded_gameplay_keys() -> void:
+	var d := MainScript.BIND_DEFAULTS
+	Runner.T.eq(int(d["move_up"]), KEY_W, "MOVE UP default is still W")
+	Runner.T.eq(int(d["move_down"]), KEY_S, "MOVE DOWN default is still S")
+	Runner.T.eq(int(d["move_left"]), KEY_A, "MOVE LEFT default is still A")
+	Runner.T.eq(int(d["move_right"]), KEY_D, "MOVE RIGHT default is still D")
+	Runner.T.eq(int(d["aim_up"]), KEY_UP, "AIM UP default is still the up arrow")
+	Runner.T.eq(int(d["fire"]), KEY_SPACE, "FIRE default is still Space")
+	Runner.T.eq(int(d["grenade"]), KEY_SHIFT, "GRENADE default is still Shift")
+	Runner.T.eq(int(d["roll"]), KEY_C, "ROLL default is still C")
+	Runner.T.eq(int(d["interact"]), KEY_F, "INTERACT default is still F")
+	Runner.T.eq(int(d["revive"]), KEY_E, "REVIVE default is still E")
+	Runner.T.eq(int(d["buy"]), KEY_Q, "SUPPLY WHEEL default is still Q")
+	var p := MainScript.PAD_DEFAULTS
+	Runner.T.eq(int(p["fire"]), JOY_BUTTON_RIGHT_SHOULDER, "pad FIRE default is still the right shoulder")
+	Runner.T.eq(int(p["grenade"]), JOY_BUTTON_LEFT_SHOULDER, "pad GRENADE default is still the left shoulder")
+	Runner.T.eq(int(p["roll"]), JOY_BUTTON_B, "pad ROLL default is still B")
+	Runner.T.eq(int(p["interact"]), JOY_BUTTON_X, "pad INTERACT default is still X")
+	Runner.T.eq(int(p["revive"]), JOY_BUTTON_Y, "pad REVIVE default is still Y")
+	Runner.T.eq(int(p["buy"]), JOY_BUTTON_BACK, "pad SUPPLY WHEEL default is still BACK")
