@@ -700,6 +700,17 @@ func test_sol_import_discipline_and_watermark_scrub() -> void:
 			for sy in [int(s.y) - 3, int(s.y) - 8]:
 				maxa = maxf(maxa, img.get_pixel(sx, sy).a)
 		Runner.T.ok(maxa < 0.05, "%s bottom-left watermark corner scrubbed transparent (sol-02)" % path)
+		# Pin the lossless policy from the .import side directly (not just via runtime size): VRAM-compress
+		# (mode 2) would bleed the hard cel edges these sprites depend on.
+		var cf := ConfigFile.new()
+		if cf.load(path + ".import") == OK:
+			Runner.T.eq(int(cf.get_value("params", "compress/mode", -1)), 0,
+				"%s imports lossless (compress/mode=0, no VRAM cel bleed, sol-01)" % path)
+			var meta: Dictionary = cf.get_value("remap", "metadata", {})
+			Runner.T.ok(not meta.get("vram_texture", false),
+				"%s is not a vram_texture (lossless canvas sprite, sol-01)" % path)
+		else:
+			Runner.T.ok(false, "%s.import is readable" % path)
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:
