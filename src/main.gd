@@ -737,21 +737,81 @@ func start_seeded(seed_v: int) -> void:
 	_fade = 1.0
 
 
+func _clipboard_text() -> String:
+	# The one clipboard read — split out so the menu can cache the raw string and
+	# only re-parse when it actually changes (preview kept off the draw path).
+	return DisplayServer.clipboard_get()
+
+
+func _clipboard_seed() -> int:
+	return _parse_seed_text(_clipboard_text())
+
+
+const SHARE_PREFIX := "SHOEMONEY SOLDIER"   # c1-14: share-card title — the single source _copy_share_text prints and the parser recognizes
+static var _seed_re: RegEx   # c1-14: cached trailing "seed N" field matcher (whole-word, digits to end)
+
+
+static func _parse_seed_text(txt: String) -> int:
+	# c1-14: parse a challenge seed from ONLY the two documented formats — a bare
+	# non-negative integer, or the "... seed N" field of a RECOGNIZED share card (one
+	# that starts with SHARE_PREFIX, or a bare "seed N" string). Arbitrary prose that
+	# merely contains digits or the word "seed" ("not a seed 123", "oilseed 42",
+	# "seed 42junk"), negatives and int64 overflow are all rejected (-1) so the menu
+	# previews exactly what will load and never grabs a stray number.
+	var s := txt.strip_edges()
+	if s.is_empty():
+		return -1
+	# Format 1: the whole clipboard is one bare integer.
+	var whole := _seed_from_digits(s)
+	if whole >= 0:
+		return whole
+	# Format 2: only a recognized share card or a bare "seed N" string may carry a
+	# seed field — never stray prose. The field itself is matched whole-word with the
+	# digits running to end-of-string, so "seed 42junk" / "oilseed 42" don't slip in.
+	var low := s.to_lower()
+	var bare_field := low.begins_with("seed") and s.length() > 4 and (s[4] == " " or s[4] == "\t")
+	if not (s.begins_with(SHARE_PREFIX) or bare_field):
+		return -1
+	if _seed_re == null:
+		_seed_re = RegEx.new()
+		_seed_re.compile("(?i)(?:^|\\s)seed\\s+([0-9]+)\\s*$")
+	var m := _seed_re.search(s)
+	if m == null:
+		return -1
+	return _seed_from_digits(m.get_string(1))
+
+
+const _MAX_I64_STR := "9223372036854775807"   # int64 max, for overflow rejection by digit compare
+
+
+static func _seed_from_digits(s: String) -> int:
+	# A pure digit string -> non-negative seed, or -1 if it isn't all digits or would
+	# overflow int64. Leading zeros are fine ("007" -> 7); "0" is a valid seed. Overflow
+	# is rejected BEFORE to_int() (a digit-length/lexicographic compare) — to_int() errors
+	# hard on out-of-range input, so we never hand it a string it can't represent.
+	if s.is_empty():
+		return -1
+	for c in s:
+		if c < "0" or c > "9":
+			return -1
+	var canon := s.lstrip("0")
+	if canon.is_empty():
+		return 0   # "0" / "000" -> a valid zero seed
+	if canon.length() > _MAX_I64_STR.length():
+		return -1
+	if canon.length() == _MAX_I64_STR.length() and canon > _MAX_I64_STR:
+		return -1
+	return canon.to_int()
+
+
 func start_seed_from_clipboard() -> void:
-	# CHALLENGE SEED: pull the seed out of the clipboard — accepts a bare integer or
-	# a full share-card line ("... seed 12345"), grabbing the LAST digit run.
-	var clip := DisplayServer.clipboard_get()
-	var seed_str := ""
-	for i in range(clip.length() - 1, -1, -1):
-		var c := clip[i]
-		if c >= "0" and c <= "9":
-			seed_str = c + seed_str
-		elif not seed_str.is_empty():
-			break
-	if seed_str.is_empty():
+	# CHALLENGE SEED: load the clipboard's seed. The menu previews + gates this now,
+	# so an empty clipboard never reaches here; the banner stays as a belt-and-braces.
+	var sd := _clipboard_seed()
+	if sd < 0:
 		_show_banner("CLIPBOARD HAS NO SEED")
 		return
-	start_seeded(seed_str.to_int())
+	start_seeded(sd)
 
 
 func start_watch() -> void:
@@ -1023,7 +1083,7 @@ func _copy_share_text() -> void:
 	# is deterministic, so a friend can replay the exact layout via CHALLENGE SEED.
 	var rr := _run_rank()
 	var where := ("WAVE %d" % sim.wave) if sim.mode == "endless" else ("%dm PUSHED" % (-Fixed.to_int(sim.camera_top) / 10))
-	var txt := "SHOEMONEY SOLDIER — SCORE %d · %s · RANK %s (%s) · seed %d" % [sim.score, where, rr.grade, rr.title, _current_seed]
+	var txt := "%s — SCORE %d · %s · RANK %s (%s) · seed %d" % [SHARE_PREFIX, sim.score, where, rr.grade, rr.title, _current_seed]
 	DisplayServer.clipboard_set(txt)
 	_show_banner("COPIED TO CLIPBOARD")
 

@@ -50,6 +50,13 @@ var _stick_rep := 0.0   # countdown to the next held-stick auto-repeat step
 var _nav_frame := -1    # frame stamp: one stick nav per frame (diagonal guard)
 var _confirm_t := 0.0   # armed destructive row disarms when this runs out
 var _reset_flash := 0.0 # c1-09: "DEFAULTS RESTORED" success banner countdown after RESET DEFAULTS fires
+var _seed_flash := 0.0  # c1-14: red-flash the CHALLENGE SEED hint after an empty-clipboard press (deny feedback)
+var _seed_preview := -1 # c1-14: parsed seed the FOCUSED CHALLENGE SEED row is previewing (-1 = none valid / row not focused); activation commits THIS, not a re-read
+var _seed_clip_raw := "" # c1-14: raw clipboard text the preview was parsed from — re-parse only when it changes, so the poll is refresh-on-change not per-frame
+var _seed_armed := false # c1-14: the CHALLENGE SEED row has been pressed once (seed shown for verification) and awaits a confirming 2nd press to load
+var _seed_armed_val := -1 # c1-14: the exact seed the arm is holding — a confirm loads THIS; a clipboard change to a different seed re-arms instead of launching blind
+var _seed_armed_t := 0.0 # c1-14: arm auto-disarm window (mirrors _confirm_t) — a stale "press again" can't load a run minutes later
+var _seed_poll_t := 0.0  # c1-14: throttle countdown — the focused row samples the clipboard ~5x/s, not every frame (activation still forces an immediate read)
 var _reset_flash_anim := true   # c1-09: whether that banner fades — captured from the PRE-reset reduce-motion state (reset itself re-enables motion, so reading it live would never snap)
 var _opts_parent := Mode.TITLE   # c1-09: which screen OPTIONS was opened from (TITLE or PAUSE) — drives BACK
 var _filter_pulse := 0.0   # hall filter tab flash on change
@@ -128,6 +135,15 @@ func _process(delta: float) -> void:
 				_confirm = -1
 		# c1-09: the "DEFAULTS RESTORED" success banner fades after RESET DEFAULTS fires.
 		_reset_flash = maxf(0.0, _reset_flash - delta)
+		_seed_flash = maxf(0.0, _seed_flash - delta * 2.0)
+		if _seed_armed:
+			_seed_armed_t -= delta   # c1-14: a stale "PRESS AGAIN" arm auto-disarms (mirrors _confirm_t)
+			if _seed_armed_t <= 0.0:
+				_seed_armed = false
+				queue_redraw()   # the armed hint reverts to the plain preview — repaint it
+		# c1-14: keep the CHALLENGE SEED preview fresh OFF the draw path, but THROTTLE
+		# the clipboard sample to ~5x/s instead of once per frame (60x/s).
+		_update_seed_preview(delta)
 		_lockout = maxf(0.0, _lockout - delta)
 		# Tab flash is pure animation — reduce-motion snaps it off entirely.
 		_filter_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _filter_pulse - delta * 3.0)
@@ -206,6 +222,16 @@ func open(m: int, select_id := "") -> void:
 	_nav_frame = -1
 	_tab_hover = -1   # stale hall-tab hover must not survive a menu hop
 	_page_hover = -1  # ditto the PREV/NEXT hover — a menu hop must not leave a button lit
+	# c1-14: a fresh screen starts with ALL CHALLENGE SEED interaction state cleared —
+	# reopening TITLE must never preserve an armed seed (which a single press could then
+	# launch) or a stale preview/flash. Focus re-reads the clipboard from scratch.
+	_seed_preview = -1
+	_seed_clip_raw = ""
+	_seed_armed = false
+	_seed_armed_val = -1
+	_seed_armed_t = 0.0
+	_seed_poll_t = 0.0
+	_seed_flash = 0.0
 	if m == Mode.HALL:
 		# Auto-jump to the run you just finished — but ONLY the first time the board
 		# is opened after it was banked. Once surfaced (hid recorded), reopening HALL
@@ -982,6 +1008,11 @@ func _step_vol(bus: String, delta: int) -> void:
 
 
 func _activate() -> void:
+	# CHALLENGE SEED gates on the clipboard BEFORE the generic confirm chime so an
+	# empty/invalid paste plays a deny (not a buy) and never falls silently through.
+	if _is_seed_row():
+		_activate_seed()
+		return
 	main._sfx.play("buy", -8.0)
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		# The lone BACK plate on the HALL/HOWTO content screens climbs to INFO.
@@ -995,7 +1026,7 @@ func _activate() -> void:
 			"endless": main.start_game(true)
 			"daily": main.start_daily()
 			"watch": main.start_watch()
-			"paste_seed": main.start_seed_from_clipboard()
+			"paste_seed": _activate_seed()   # gated above; here only defensively
 			"run_setup": open(Mode.SETUP)   # run-config submenu, beside the start verbs
 			"options":
 				_opts_parent = Mode.TITLE   # BACK returns to TITLE
@@ -1059,6 +1090,138 @@ func _activate() -> void:
 				main._endless = false   # attract showcases the campaign
 				main._reset()
 				open(Mode.TITLE)
+
+
+static func seed_hint_lines(selected: bool, preview: int, armed: bool, clip_empty: bool) -> PackedStringArray:
+	# c1-14: the exact text line(s) the CHALLENGE SEED hint renders, single-sourced so a
+	# test asserting these IS the render assertion. A VALID preview always wins — a
+	# lingering empty-press deny flash (colour only) can never hide the shown seed.
+	# Unselected names the source; an EMPTY clipboard reads "NO SEED - COPY ONE" while a
+	# clipboard that holds text but no usable seed (malformed / overflow) reads "BAD SEED
+	# - CHECK COPY" so the two failures are told apart; a valid seed shows "SEED N"; once
+	# armed it adds a SECOND line "PRESS AGAIN" so the confirm stays fully textual.
+	if not selected:
+		return PackedStringArray(["(FROM CLIPBOARD)"])
+	if preview < 0:
+		return PackedStringArray(["NO SEED - COPY ONE"] if clip_empty else ["BAD SEED - CHECK COPY"])
+	if armed:
+		return PackedStringArray(["SEED %d" % preview, "PRESS AGAIN"])
+	return PackedStringArray(["SEED %d" % preview])
+
+
+func _is_seed_row() -> bool:
+	# c1-14: safe "is the CHALLENGE SEED row focused?" — bounds-checks sel BEFORE indexing
+	# _menu_items() so a transient/invalid selection can never throw out of range.
+	if mode != Mode.TITLE:
+		return false
+	var items := _menu_items()
+	return sel >= 0 and sel < items.size() and items[sel]["id"] == "paste_seed"
+
+
+func _draw_seed_hint(r: Rect2, cy: float, selected: bool) -> void:
+	# c1-14: draw the CHALLENGE SEED hint in the right margin THROUGH the _emit_rect /
+	# _emit_label seams, so a draw-capture test can inspect the exact plate + text lines.
+	# Unselected names the source; selected shows the seed (green) or the deny copy (red,
+	# empty vs malformed told apart); armed adds a two-line "PRESS AGAIN" confirm (amber).
+	var f := Art.font()
+	var armed_here := selected and _seed_preview >= 0 and _seed_armed and _seed_preview == _seed_armed_val
+	# The deny flash only colours the hint while selected AND there is no valid seed to
+	# show — a lingering flash can never hide a now-valid preview.
+	var flash_here := _seed_flash > 0.0 and selected and _seed_preview < 0
+	var clip_empty := _seed_clip_raw.strip_edges().is_empty()
+	var lines := seed_hint_lines(selected, _seed_preview, armed_here, clip_empty)
+	var deny_col := Color(1.0, 0.55, 0.4)   # resting invalid colour
+	var hcol := Color(0.84, 0.86, 0.78, 0.75)   # unselected: names the source
+	if flash_here:
+		# a brief BRIGHTEN that settles cleanly back INTO the resting deny colour, so there
+		# is no brightness pop when the flash ends. Reduce Motion snaps to resting (no pulse).
+		var flash_amt := 0.0 if main._motion < 0.5 else _seed_flash
+		hcol = deny_col.lerp(Color(1.0, 0.78, 0.6), flash_amt)
+	elif selected and _seed_preview >= 0:
+		hcol = Art.safe(Color(1.0, 0.88, 0.4)) if armed_here else Art.safe(Color(0.55, 0.95, 0.5))
+	elif selected:
+		hcol = deny_col   # red = nothing usable to paste
+	# Plate sized from the WIDEST line; a right-margin plate clamped inside the 20..620
+	# chrome frame so no line runs off-screen or back over the button. A 2-line armed hint
+	# stacks upward so its baseline row stays aligned with cy.
+	var hw := 0.0
+	for ln in lines:
+		hw = maxf(hw, f.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x)
+	var hx := seed_hint_x(r.end.x, hw)
+	var line_h := f.get_ascent(8) + f.get_descent(8) + 2.0
+	var n := lines.size()
+	var hby := cy + 3.0 - float(n - 1) * line_h   # first baseline; extra lines drop below it
+	var ptop := hby - f.get_ascent(8) - 1.0
+	var ph := float(n) * line_h + 3.0
+	_emit_rect(Rect2(hx - 4.0, ptop, hw + 8.0, ph), Color(0.03, 0.05, 0.03, 0.72))
+	for li in n:
+		_emit_label(lines[li], Vector2(hx, hby + float(li) * line_h), hcol)
+
+
+static func seed_hint_x(row_end_x: float, hw: float) -> float:
+	# c1-14: left x of the CHALLENGE SEED hint text. Sits just past the row's right
+	# edge, but clamps so the plate (drawn hx-4 .. hx+hw+4) can't run off the 616px
+	# chrome-frame right edge — even the longest valid int64 seed stays fully framed.
+	return minf(row_end_x + 6.0, 616.0 - hw)
+
+
+func _update_seed_preview(delta := 0.0, force := false) -> void:
+	# c1-14: parse the clipboard OFF the draw path — sampled here while the CHALLENGE
+	# SEED row is focused, THROTTLED to ~5x/s (a stale clipboard read every frame is
+	# wasteful), re-parsed only when the raw text actually changes, and cleared the
+	# instant focus leaves the row so activation can never commit a seed the player
+	# didn't see. `force` (activation) takes an immediate read. _draw only reads.
+	if _is_seed_row():
+		_seed_poll_t -= delta
+		if not force and _seed_poll_t > 0.0:
+			return   # inside the throttle window — keep the last sampled preview
+		_seed_poll_t = 0.2
+		var raw: String = main._clipboard_text()
+		if raw != _seed_clip_raw:
+			_seed_clip_raw = raw
+			_seed_preview = main._parse_seed_text(raw)
+			if _seed_preview >= 0:
+				_seed_flash = 0.0   # a valid seed is now shown — kill any stale deny flash so it can't hide it
+			if _seed_preview != _seed_armed_val:
+				_seed_armed = false   # the shown seed changed — a prior arm no longer applies
+			queue_redraw()   # the sampled preview changed — repaint even if the caller doesn't
+	elif _seed_preview != -1 or not _seed_clip_raw.is_empty() or _seed_armed or _seed_poll_t != 0.0:
+		_seed_preview = -1
+		_seed_clip_raw = ""
+		_seed_armed = false   # focus left the row — cancel the arm (no stale confirm)
+		_seed_poll_t = 0.0    # re-arm the throttle so the next focus samples immediately
+
+
+func _activate_seed() -> void:
+	# c1-14: refresh SYNCHRONOUSLY first — a mouse/touch click can select AND activate
+	# this row in one input event, before the next _process poll runs, so re-read the
+	# clipboard here (this also disarms if the clipboard changed since arming). _process
+	# keeps the preview fresh for the keyboard/pad path.
+	_update_seed_preview(0.0, true)   # force an immediate read past the throttle
+	# _seed_preview < 0 is an unambiguous "nothing valid was on show," so we deny (buzz
+	# + red hint flash) instead of silently doing nothing — the old path looked
+	# identical to a still-pending read.
+	if _seed_preview < 0:
+		main._sfx.play("deny", -8.0)
+		_seed_flash = 1.0
+		_seed_armed = false
+		queue_redraw()
+		return
+	# Two-press verify: a run loads ONLY on a second press that confirms the SAME seed
+	# the arm is already displaying ("SEED N  PRESS AGAIN"). This gives a genuine chance
+	# to read the seed before it commits, and a clipboard that changed between the arm
+	# and the confirm re-arms on the new value (shown first) instead of launching blind.
+	if _seed_armed and _seed_preview == _seed_armed_val:
+		main._sfx.play("buy", -8.0)   # confirm: the plate showed this exact seed
+		main.start_seeded(_seed_armed_val)
+		_seed_armed = false
+		return
+	_seed_armed = true
+	_seed_armed_val = _seed_preview
+	_seed_armed_t = 2.5   # auto-disarm window (decremented in _process)
+	_seed_flash = 0.0     # arming shows the seed — a stale deny flash must not colour over it
+	main._sfx.play("pickup", -10.0, 1.2)   # soft arm tick: the seed is now shown to confirm
+	queue_redraw()
 
 
 static func _content_well(scrim_mode: int) -> bool:
@@ -1382,14 +1545,7 @@ func _draw() -> void:
 			draw_texture_rect(at, Rect2(lft.position.x + lft.size.x, lft.position.y, -lft.size.x, lft.size.y), false, fcol)
 			draw_texture_rect(at, arows[1], false, fcol)
 		if mitems[k]["id"] == "paste_seed":
-			# Where the seed comes from — the row name alone didn't say. Plated:
-			# it draws OUTSIDE the button over the live attract fight, and 8px
-			# text loses to bright terrain (the input legend's own lesson).
-			var apw := Art.font().get_string_size("(FROM CLIPBOARD)", HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			draw_rect(Rect2(r.end.x + 2.0, cy - 6.0, apw + 8.0, 12.0),
-				Color(0.03, 0.05, 0.03, 0.55))
-			Art.text(self, "(FROM CLIPBOARD)", Vector2(r.end.x + 6.0, cy + 3.0),
-				8, Color(0.84, 0.86, 0.78, 0.75))
+			_draw_seed_hint(r, cy, selected)
 		if selected:
 			# 1px focus ring on the actual row rect — always crisp and present,
 			# independent of the glow glide, for keyboard/pad a11y.
