@@ -678,7 +678,6 @@ func test_sol_import_discipline_and_watermark_scrub() -> void:
 		"res://assets/soldiers/frogman_rifle.png": 128,
 		"res://assets/soldiers/frogman_speargun.png": 128,
 		"res://assets/soldiers/fx/muzzleflash_small.png": 128,
-		"res://assets/soldiers/fx/muzzleflash_medium.png": 128,
 	}
 	for path in files:
 		var lim: int = files[path]
@@ -851,6 +850,21 @@ func test_sol_walk_frames_not_wired() -> void:
 	# The frames aren't even in the project anymore (no dead import for pixels nothing draws).
 	Runner.T.ok(not ResourceLoader.exists("res://assets/soldiers/walk/assault_walk1.png"),
 		"the inconsistent 3/4 walk frames were removed from the project (sol-13)")
+
+
+func test_sol_muzzle_pop() -> void:
+	# sol-15/16: the PLAYER shot gets an authored crack-pop card OVERLAY (mz_pop), while fx_muzzle_fan stays
+	# the DIRECTIONAL primary; the watermarked/hollow-core muzzleflash_large is rejected, and the pop is
+	# alpha-capped so it never out-blooms an explosion. Enemy small-arms keep the procedural pop.
+	var tex: Dictionary = load("res://src/view/art.gd").get_script_constant_map()["TEX"]
+	Runner.T.ok(tex.has("mz_pop") and tex["mz_pop"].resource_path.contains("soldiers/fx/muzzleflash_small"),
+		"mz_pop = the pack's small crack-pop card (sol-15)")
+	Runner.T.ok(tex.has("fx_muzzle_fan"), "fx_muzzle_fan stays the DIRECTIONAL primary muzzle (sol-16)")
+	Runner.T.ok(not ResourceLoader.exists("res://assets/soldiers/fx/muzzleflash_large.png"),
+		"the watermarked/hollow-core muzzleflash_large is NOT shipped (sol-15/16 reject)")
+	var mh: Dictionary = load("res://src/main.gd").get_script_constant_map()["MUZZLE_HEAT"]
+	Runner.T.ok(mh["pop_a"] <= 0.7 and mh["pop_lerp"] < 0.5,
+		"the pop is alpha-capped + warmed off white-hot so it never out-blooms an explosion (sol-15/16)")
 
 
 func test_a3_boss_rim_cools_on_the_foundry_floor() -> void:

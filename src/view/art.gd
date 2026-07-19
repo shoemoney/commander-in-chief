@@ -188,6 +188,7 @@ const TEX := {
 	"fx_swipe2": preload(SY + "fx/fx_swipe2.png"),
 	# Semicircle flash card (512x256, flat edge at BOTTOM — orient flat edge to muzzle).
 	"fx_muzzle_fan": preload(SY + "fx/fx_muzzle_fan.png"),
+	"mz_pop": preload(SOL + "fx/muzzleflash_small.png"),   # sol-15: authored 8-point crack-pop overlay for the PLAYER shot (transparent core → the hot core shows through)
 	# --- POLYGON Military mil2 bake (enemies, vehicles, weapon pickups, items) ---
 	"m_bombsuit": preload(SY + "mil2/bombsuit.png"),
 	# sol-08: m_contractor2 (sniper) + m_insurgent3/4/5 (rusher skins) retired — the RED enemy_* pack
@@ -384,6 +385,7 @@ const SCALE := {
 	"fx_bubble1": 1.44, "fx_bubble2": 1.44,
 	"fx_fumes": 4.0,   # 128px import (was 512-effective) → same _spr plume size
 	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles — bypassed: draw site (main.gd) uses raw draw_texture_rect with its own rect
+	"mz_pop": 0.5,   # sol-15: draw site uses its own rect off `sz`; SCALE row present so the registry has no dead config
 	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
 }
 

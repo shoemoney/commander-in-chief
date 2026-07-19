@@ -165,7 +165,7 @@ func _dress_firefight(m: Node2D) -> void:
 	var sim: SimWorld = m.sim
 	var p := sim.players[0]
 	m._fx.append({"x": p["x"], "y": p["y"] - 13 * F, "t": 0.05, "kind": "muzzle",
-		"rate": 0.34, "a": -PI / 2})
+		"rate": 0.34, "a": -PI / 2, "pop": true})   # sol-15: pose the authored player crack-pop card
 	m._recoil[0] = Vector2(0, 2.2)
 	# a2-11: pose the on-top hit-flash (additive light + sparks) at an enemy so it captures.
 	m._enemy_flash[2] = 1.0

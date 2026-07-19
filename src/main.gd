@@ -1830,7 +1830,7 @@ func _ev_shot(ev: Dictionary) -> void:
 	# Size/angle jitter per shot — MG spam reads as live gunfire, not a repeated decal.
 	_fx.append({"x": ev["x"] + int(shooter["aim_x"] * 13),
 		"y": ev["y"] + int(shooter["aim_y"] * 13),
-		"t": 0.0, "kind": "muzzle", "rate": 0.34,
+		"t": 0.0, "kind": "muzzle", "rate": 0.34, "pop": true,   # sol-15/16: player muzzles get the authored crack-pop card (enemy small-arms do NOT)
 		"a": aim.angle() + randf_range(-0.09, 0.09), "szj": randf_range(0.82, 1.18)})
 	# (Dropped: the textured soft-spot bloom that sat directly under the additive
 	# muzzle glow — same flash drawn twice; one fewer translucent quad per shot.)
@@ -6775,7 +6775,20 @@ func _draw_glow() -> void:
 			# and lower the alpha so the muzzle flare stays warm and explosions own white.
 			if t < fx.get("rate", 0.09):
 				var mpop := mbase.lerp(Color.WHITE, MUZZLE_HEAT["pop_lerp"])
-				g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
+				if fx.get("pop", false):
+					# sol-15/16: the PLAYER shot's crack-pop is the authored card, drawn OVER the fan
+					# (which stays the directional primary). Additive, warmed off white-hot + alpha-capped
+					# so it never out-blooms an explosion, spun per-shot (view-hashed off pos, no sim RNG)
+					# so MG-spam isn't a repeated decal; its transparent core lets the hot core show through.
+					# Enemy small-arms have no "pop" flag → the procedural pop — no muzzleflash on the red faction.
+					var mspin: float = fx["a"] + float((int(pos.x) * 7 + int(pos.y) * 13) & 255) / 255.0 * TAU
+					var mpr := sz * 1.25
+					g.draw_set_transform(pos, mspin, Vector2.ONE)
+					g.draw_texture_rect(Art.tex("mz_pop"), Rect2(-mpr, -mpr, mpr * 2.0, mpr * 2.0),
+						false, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
+					g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				else:
+					g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
 				for ml in 3:
 					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
 					g.draw_line(pos + Vector2.from_angle(mla) * sz * 0.4,
