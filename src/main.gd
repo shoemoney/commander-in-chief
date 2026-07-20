@@ -66,6 +66,7 @@ var _replay_task := -1            # WorkerThreadPool id of the async replay writ
 var _two_players := false
 var _endless := false
 var _daily := false              # seed-of-the-day challenge run
+var _daily_done_seed := -1       # c2-13: seed of the most recently COMPLETED daily; == today's => the DAILY RUN row locks as done for the day
 var _seed_override := -1         # CHALLENGE SEED: one-shot forced seed (-1 = none)
 # Feel stack (view-only; the sim never sees any of this).
 var _trauma := 0.0
@@ -768,6 +769,22 @@ func start_daily() -> void:
 func _daily_seed() -> int:
 	var d := Time.get_date_dict_from_system()
 	return ((d["year"] * 10000 + d["month"] * 100 + d["day"]) * 2654435761) & 0x7FFFFFFF
+
+
+func daily_done() -> bool:
+	# c2-13: has TODAY's seed-of-the-day already been played? One attempt per day —
+	# any recorded daily run (win OR wipe) locks the DAILY RUN menu row until the
+	# date rolls over and _daily_seed() changes.
+	return _daily_locked(_daily_done_seed, _daily_seed())
+
+
+static func _daily_locked(done_seed: int, today_seed: int) -> bool:
+	# c2-13: the lock rule, pure + static so it is unit-testable without a live sim.
+	# The row locks ONLY when the seed ACTUALLY COMPLETED (banked at the run's debrief
+	# from _current_seed) equals TODAY's seed. The midnight case falls out for free: a
+	# run started yesterday banks yesterday's seed, so today's daily stays UNLOCKED.
+	# done_seed defaults to -1 (never played); today_seed is always >= 0, so no match.
+	return done_seed == today_seed
 
 
 func start_seeded(seed_v: int) -> void:
@@ -2643,6 +2660,7 @@ func _load_bests() -> void:
 		_life_runs = cf.get_value("life", "runs", 0)
 		_life_kills = cf.get_value("life", "kills", 0)
 		_life_wins = cf.get_value("life", "wins", 0)
+		_daily_done_seed = cf.get_value("daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
 		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
 		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
 		# push it through the SAME _apply_settings path fresh-install and RESET use —
@@ -3260,6 +3278,13 @@ func _record_run() -> void:
 	var cf := ConfigFile.new()
 	cf.load(SAVE_PATH)
 	cf.set_value("hall", "runs", hall)
+	if _daily:
+		# c2-13: this run WAS a seed-of-the-day — bank the seed ACTUALLY PLAYED
+		# (_current_seed, captured at run start), not _daily_seed() recomputed now: a run
+		# that spans midnight must lock the date it played, not the date it ended on. The
+		# DAILY RUN row locks while _daily_done_seed == today's _daily_seed().
+		_daily_done_seed = _current_seed
+		cf.set_value("daily", "done_seed", _daily_done_seed)
 	cf.set_value("life", "runs", _life_runs)
 	cf.set_value("life", "kills", _life_kills)
 	cf.set_value("life", "wins", _life_wins)

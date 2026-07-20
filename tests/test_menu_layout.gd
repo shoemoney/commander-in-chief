@@ -62,6 +62,8 @@ class _StubMain extends Node2D:
 	var _clip := ""   # c1-14: test-settable clipboard text the menu reads via _clipboard_text
 	var _clip_reads := 0   # c1-14: counts clipboard samples so the throttle can be asserted
 	var _started: Array = []   # c1-14: records start_seeded(seed) so activation can be asserted
+	var _daily_done := false   # c2-13: TITLE's DAILY RUN row locks (dim + deny) when this is true
+	func daily_done() -> bool: return _daily_done
 	func _reset() -> void: _reset_calls += 1
 	func _clipboard_text() -> String:
 		_clip_reads += 1
@@ -173,6 +175,115 @@ func test_title_states_all_clear_20px_plate_and_16px_icon() -> void:
 				Runner.T.ok(last_bottom < LEGEND_Y, "%s: last plate bottom %d must clear legend %d" % [tag, int(last_bottom), int(LEGEND_Y)])
 				# Plates must not overlap (gap >= bh) so hit boxes stay distinct.
 				Runner.T.ok(gap >= bh, "%s: gap %d must be >= plate %d" % [tag, int(gap), int(bh)])
+
+
+# c2-13: once today's seed-of-the-day is completed, the DAILY RUN row must LOCK —
+# the disabled flag set, a COMPLETED label, and a press that BUZZES (deny) instead of
+# silently re-running the same finished seed. A fresh (undone) day keeps it live.
+func test_c2_13_completed_daily_row_locks_and_denies() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+	# Undone day: the row is a plain, actionable start verb with no badge.
+	stub._daily_done = false
+	var live: Dictionary = m._menu_items()[_row_index(m, "daily")]
+	Runner.T.ok(not live.get("disabled", false), "an unplayed daily is not disabled")
+	Runner.T.eq(live["label"], "DAILY RUN", "an unplayed daily reads plainly")
+	Runner.T.eq(String(live.get("badge", "")), "", "an unplayed daily carries no status badge")
+	# Completed day: flagged disabled + a right-aligned COMPLETED badge (label stays plain).
+	stub._daily_done = true
+	var done: Dictionary = m._menu_items()[_row_index(m, "daily")]
+	Runner.T.ok(done.get("disabled", false), "a completed daily is flagged disabled")
+	Runner.T.eq(done["label"], "DAILY RUN", "the label stays plain (status is a separate badge, not appended)")
+	Runner.T.eq(String(done.get("badge", "")), "COMPLETED", "a completed daily shows the COMPLETED badge")
+	# Pressing the locked row buzzes once and never starts a run.
+	m.sel = _row_index(m, "daily")
+	stub._sfx.plays.clear()
+	stub._reset_calls = 0
+	m._press()
+	Runner.T.eq(stub._reset_calls, 0, "pressing a locked daily starts no run")
+	Runner.T.eq(stub._sfx.plays.size(), 1, "pressing a locked daily plays exactly one cue")
+	Runner.T.eq(String(stub._sfx.plays[0][0]), "deny", "...and that cue is the deny buzz")
+	m.free()
+	stub.free()
+
+
+# c2-13: the lock RULE — _record_run banks the seed ACTUALLY completed (_current_seed,
+# captured at run start), and daily_done() locks only when that equals TODAY's seed. The
+# pure static helper lets us prove the midnight case (a run banked under yesterday's seed
+# must NOT lock today) without spinning up a live sim.
+func test_c2_13_daily_lock_rule_is_seed_exact() -> void:
+	var today := 20260720
+	Runner.T.ok(MainScript._daily_locked(today, today), "a daily completed under TODAY's seed locks the row")
+	Runner.T.ok(not MainScript._daily_locked(-1, today), "a fresh day (nothing banked) leaves the row live")
+	Runner.T.ok(not MainScript._daily_locked(today - 1, today),
+		"a run banked under yesterday's seed does NOT lock today (midnight-span guard)")
+
+
+# c2-13 INTEGRATION: drive the REAL daily start -> _record_run -> disk -> _load_bests path
+# on a live main.gd, then let the REAL Menu read the reloaded state and lock the DAILY RUN
+# row. Proves three things end to end that the pure-static tests can only imply: the daily
+# start path sets _current_seed to the EXACT daily seed (so midnight banking is well-defined),
+# _record_run persists that seed under daily/done_seed, and a fresh _load_bests reload makes
+# the TITLE menu flag the row disabled + COMPLETED for the rest of today.
+func test_c2_13_daily_done_persists_and_locks_row() -> void:
+	# Stash the real save aside (recover a crashed prior stash first) so the test board is
+	# pristine and the dev's progress is never touched — mirrors the Hall integration test.
+	var path: String = MainScript.SAVE_PATH
+	var bak: String = MainScript.SAVE_BAK
+	var stash := path + ".d13"
+	var stashb := bak + ".d13"
+	if FileAccess.file_exists(stash) and not FileAccess.file_exists(path):
+		DirAccess.rename_absolute(stash, path)
+	if FileAccess.file_exists(stashb) and not FileAccess.file_exists(bak):
+		DirAccess.rename_absolute(stashb, bak)
+	if FileAccess.file_exists(path):
+		DirAccess.rename_absolute(path, stash)
+	if FileAccess.file_exists(bak):
+		DirAccess.rename_absolute(bak, stashb)
+
+	var main: Node2D = MainScript.new()   # not tree-parented: _ready never fires, no audio/sim boot
+	main._sfx = _NullSfx.new()
+	# The daily start path: _reset() with _daily set assigns _current_seed = _daily_seed().
+	main._daily = true
+	main._reset()
+	Runner.T.eq(main._current_seed, main._daily_seed(),
+		"the daily start path sets _current_seed to the EXACT daily seed (guarantees midnight banking)")
+	# Debrief: _record_run banks _current_seed under daily/done_seed and writes it to disk.
+	main._record_run()
+	Runner.T.eq(main._daily_done_seed, main._current_seed,
+		"_record_run banks the seed ACTUALLY played into _daily_done_seed")
+
+	# Fresh instance reloads straight off disk, exactly as a relaunch does.
+	var main2: Node2D = MainScript.new()
+	main2._sfx = _NullSfx.new()
+	main2._load_bests()
+	Runner.T.eq(main2._daily_done_seed, main._current_seed,
+		"_load_bests restores daily/done_seed from disk across a relaunch")
+	Runner.T.ok(main2.daily_done(),
+		"today's completed daily reads as done after the reload")
+
+	# The REAL Menu, reading the reloaded main2, must lock the DAILY RUN row.
+	var m: Control = Menu.new()
+	m.main = main2
+	m.mode = Menu.Mode.TITLE
+	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
+	Runner.T.ok(row.get("disabled", false), "the reloaded completed daily locks the TITLE row")
+	Runner.T.eq(String(row.get("badge", "")), "COMPLETED", "...and shows the COMPLETED badge")
+	m.free()
+	main.free()
+	main2.free()
+
+	# Restore the dev's real save.
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+	if FileAccess.file_exists(bak):
+		DirAccess.remove_absolute(bak)
+	if FileAccess.file_exists(stash):
+		DirAccess.rename_absolute(stash, path)
+	if FileAccess.file_exists(stashb):
+		DirAccess.rename_absolute(stashb, bak)
 
 
 # The 2px inter-row inset must leave a real gap between plates at the fullest

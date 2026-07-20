@@ -175,6 +175,8 @@ const PLATE_PAD_SM := 4.0
 const PLATE_BG := Color(0.03, 0.05, 0.03, 0.55)
 const PLATE_SEL := Color(1.0, 0.92, 0.55)
 const PLATE_UNSEL := Color(0.55, 0.62, 0.45, 0.8)
+const DISABLED_PLATE := Color(0.3, 0.34, 0.3, 0.7)   # c2-13: locked/unavailable row plate (dim, desaturated)
+const DISABLED_TEXT := Color(0.55, 0.58, 0.52)       # c2-13: muted label on a locked row
 const ARROW_UNSEL := Color(0.72, 0.77, 0.62, 0.85)   # resting submenu-chevron tint
 const CAPTION_COL := Color(0.84, 0.9, 0.68, 0.95)    # c2-11: brighter so the section headers read as labels, not faint asides
 const NOTICE_COL := Color(1.0, 0.85, 0.5)            # rebind swap/clear notice
@@ -471,7 +473,13 @@ func _menu_items() -> Array[Dictionary]:
 		var titems: Array[Dictionary] = [
 			{"id": "campaign", "label": "CAMPAIGN", "destructive": false, "grp": 0},
 			{"id": "endless", "label": "ENDLESS WAR", "destructive": false, "grp": 0},
-			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0},
+			# c2-13: once today's seed-of-the-day has been played the row locks — dim, a
+			# right-aligned COMPLETED badge, and a deny buzz on press — instead of staying
+			# fully active in appearance while silently re-running the same finished attempt.
+			# The status is a separate right-aligned "badge" (not appended to the label) so
+			# it never clips the label and stays scannable, mirroring the toggle-dot slot.
+			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0,
+				"disabled": main.daily_done(), "badge": "COMPLETED" if main.daily_done() else ""},
 			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false, "grp": 0},
 			# grp 1: run-config gets its own block (a divider splits it from the start
 			# verbs above and the meta screens below). The row carries its own live
@@ -1452,6 +1460,13 @@ func _nav(move: int, hmove: int) -> void:
 func _press() -> void:
 	if _lockout > 0.0:
 		return   # disconnect just auto-paused — swallow phantom confirms
+	# c2-13: a disabled/locked row (e.g. DAILY RUN already completed today) is drawn
+	# dim and never acts — a deny buzz answers the press so it reads as intentionally
+	# unavailable, not a dead button. Covers keyboard, pad, and mouse (all route here).
+	if _menu_items()[sel].get("disabled", false):
+		main._sfx.play("deny", -8.0)
+		_dirty = true
+		return
 	# Destructive items need a second press (mis-press guard on a run).
 	if _is_destructive(sel) and _confirm != sel:
 		_confirm = sel
@@ -2268,6 +2283,7 @@ func _draw() -> void:
 			_emit_group_caption(mitems, k, cy)
 		var selected := k == sel
 		var destr: bool = k < mitems.size() and mitems[k].get("destructive", false)
+		var disabled: bool = k < mitems.size() and mitems[k].get("disabled", false)
 		# armed REQUIRES destr: a stale/desynced _confirm landing on a non-destructive
 		# row must never enter the armed render path (which reserves the confirm glyph
 		# and floods red) — that would draw a null glyph. destr guarantees armed_glyph.
@@ -2284,7 +2300,13 @@ func _draw() -> void:
 				plate = DESTR_ARMED_PLATE_SEL if armed else DESTR_PLATE_SEL
 			else:
 				plate = DESTR_ARMED_PLATE_UNSEL if armed else DESTR_PLATE_UNSEL
+		elif disabled:
+			plate = DISABLED_PLATE   # c2-13: dim, so a locked row can't read as actionable even while focused
 		draw_texture_rect(Art.tex("ui_menu_button"), r, false, plate)
+		if disabled:
+			# c2-13: extra scrim over the plate interior so the icon + label read muted too —
+			# the row is clearly "unavailable", not just a differently-tinted button.
+			draw_rect(r.grow(-3), Color(0.02, 0.04, 0.02, 0.45))
 		if armed:
 			# Armed red flood drawn FIRST — before the bracket, icon and selection
 			# glow — so those cues layer ON TOP of the wash instead of being washed
@@ -2314,7 +2336,7 @@ func _draw() -> void:
 			var isz := clampf(bh - 3.0, 9.0, 16.0)
 			draw_texture_rect(Art.tex(icon), Rect2(Vector2(r.position.x + 9.0,
 				r.position.y + (bh - isz) / 2.0), Vector2(isz, isz)), false,
-				Color(1, 1, 1, 1.0 if selected else 0.7))
+				Color(1, 1, 1, 0.35 if disabled else (1.0 if selected else 0.7)))
 		if selected:
 			# Breathing selection glow that GLIDES between rows instead of teleporting
 			# (the ease itself runs framerate-independent in _process). Stilled under
@@ -2331,12 +2353,24 @@ func _draw() -> void:
 			# Skip the AMBER glow while armed: the red flood + bright bracket already
 			# mark the armed row hard, and the amber wash on top would fight (and dull)
 			# the red danger treatment. Selection still tracked above for the glide.
-			if not armed:
+			# c2-13: no amber "actionable" glow on a locked row — the crisp focus ring
+			# (drawn below) still shows WHERE focus is without implying the row will act.
+			if not armed and not disabled:
 				draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
 					Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
+		if disabled:
+			col = DISABLED_TEXT   # c2-13: muted label completes the dim/locked read
 		var label: String = items[k]
 		var label_r := r.end.x - 8.0   # label right bound (shrinks for the confirm glyph)
+		# c2-13: reserve the right-edge status-badge slot BEFORE the label is fit, so the
+		# label ellipsizes clear of the badge and the two can never overlap (same discipline
+		# as the submenu-chevron reservation below).
+		var badge: String = String(mitems[k].get("badge", ""))
+		var badge_w := 0.0
+		if badge != "":
+			badge_w = Art.font().get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			label_r = minf(label_r, r.end.x - badge_w - 12.0)
 		var armed_glyph: Texture2D = null
 		var cw := 0.0
 		if destr:
@@ -2415,6 +2449,14 @@ func _draw() -> void:
 				draw_circle(dc, 3.0, Art.safe(Color(0.55, 0.95, 0.5)))
 			else:
 				draw_arc(dc, 3.0, 0, TAU, 10, Color(0.55, 0.6, 0.5, 0.8), 1.2)
+		# c2-13: right-aligned status badge (e.g. COMPLETED on a locked DAILY RUN row).
+		# A separate scannable slot rather than text appended to the label, drawn in its
+		# reserved width (badge_w, computed above) so it can never clip the label. Tinted
+		# with the disabled palette so the status reads as a MUTED lock state, not a bright
+		# actionable highlight.
+		if badge != "":
+			Art.text(self, badge, Vector2(r.end.x - 8.0 - badge_w, cy + 3.0), 9,
+				DISABLED_TEXT if disabled else Color(1.0, 0.85, 0.5, 0.85))
 		# Left/right cycle affordance on the selected toggle row — toggles flipped
 		# silently and read identical to action rows. mi_arrow points RIGHT;
 		# a negative rect width flips it for the left side.
@@ -2452,8 +2494,10 @@ func _draw() -> void:
 			draw_rect(r.grow(pgrow), Art.safe(Color(0.55, 1.0, 0.6, pa)), false, 2.0)
 		if selected:
 			# 1px focus ring on the actual row rect — always crisp and present,
-			# independent of the glow glide, for keyboard/pad a11y.
-			draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)
+			# independent of the glow glide, for keyboard/pad a11y. c2-13: a disabled
+			# row keeps the ring (so focus is still locatable) but dims it so the cue
+			# reads "focused, unavailable" rather than "press me".
+			draw_rect(r, DISABLED_TEXT if disabled else Color(1.0, 0.97, 0.88), false, 1.0)
 	if mode == Mode.TITLE:
 		# Legend adapts to the last-used device and draws the REAL prompt art
 		# (stick/trigger/mouse glyphs from the registry) beside each verb —
@@ -2476,8 +2520,12 @@ func _draw() -> void:
 				{"act": "roll", "label": "ROLL"}]
 		var row2: Array = [{"act": "interact", "label": "INTERACT"},
 			{"act": "revive", "label": "REVIVE"},
-			{"act": "wheel", "label": "SUPPLY WHEEL"},
-			{"tex": Art.glyph_key("confirm"), "label": "SELECT"}]
+			{"act": "wheel", "label": "SUPPLY WHEEL"}]
+		# c2-13: only advertise SELECT when the focused row can actually be activated.
+		# A locked row (e.g. DAILY RUN completed) draws NO confirm cue, so the legend
+		# never contradicts the dim/COMPLETED state by promising a press that only buzzes.
+		if not (sel < mitems.size() and mitems[sel].get("disabled", false)):
+			row2.append({"tex": Art.glyph_key("confirm"), "label": "SELECT"})
 		_legend_row(row1, 330.0, 1.0)
 		_legend_row(row2, 346.0, 0.9)
 	else:
