@@ -545,6 +545,7 @@ func _draw() -> void:
 					Color.WHITE, i == 1)
 		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
+			var fuel_c := Vector2(px + ICON / 2.0, ry + ICON / 2.0)   # cannon cooldown ring anchors on the fuel dial (tank status), not the grenade chip
 			px = _fuel_dial(t, px, ry)
 			var gcol_tank := Color(0.95, 0.96, 0.9)
 			var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
@@ -554,17 +555,17 @@ func _draw() -> void:
 				gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
 			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 				gcol_tank = Color(0.6, 0.85, 1.0)
-			var tg_x := px
 			px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank) if twarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
 			# Cannon cooldown (45t — longer than bash or grenade): the same draining
 			# ring every other fire cooldown got, so a mid-cooldown shot reads as
-			# "wait a beat", not dropped input. The cannon draws from the grenade
-			# pool, so the ring rides the grenade chip.
+			# "wait a beat", not dropped input. The cannon is a tank system, so the
+			# ring frames the fuel dial (tank status) rather than the player grenade
+			# chip — the shells only ride the grenade pool as ammo, not as a cooldown.
 			if t["fire_cd"] > 0:
 				var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
-				draw_arc(Vector2(tg_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+				draw_arc(fuel_c, ICON * 0.55,
 					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-				draw_arc(Vector2(tg_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+				draw_arc(fuel_c, ICON * 0.55,
 					-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if t["burning"]:
 				if _mblink(8):
