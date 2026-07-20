@@ -123,6 +123,78 @@ const DESTR_ARMED_PLATE_UNSEL := Color(0.45, 0.12, 0.06)
 # selected-row glow can never reach into it.
 const FOOTER_Y := 341.0
 
+# c2-08: Layout / Theme block — the single source for the geometry and plate colors
+# that were previously scattered as bare 320s, per-mode `top` literals, and inline
+# Color() plates. Centralizing them keeps submenu alignment and plate hues from
+# drifting when PAUSE/OPTS/TITLE/SETUP layouts are edited. Organized as two sections:
+# LAYOUT (geometry) then THEME (colors) — add to whichever section a value belongs to,
+# never re-inline a bare literal into a draw path.
+
+# ===== LAYOUT (geometry) =====
+const CANVAS_WIDTH := 640.0     # design-space canvas size (the view scales this up)
+const CANVAS_HEIGHT := 360.0
+const CENTER_X := CANVAS_WIDTH / 2.0   # horizontal centre (button column + centred text)
+# Per-mode y of the FIRST row plate (compute_geometry). PAUSE sits under a lone
+# "PAUSED" header; OPTS/REBIND under their compact 2-line headers; the SETUP/INFO/
+# DISP hubs under a lone header; TITLE lists clear the record block (many rows use
+# the taller floor).
+const TOP_PAUSE := 118.0
+const TOP_OPTS := 102.0        # OPTS + REBIND (paginated <=10-row tabs)
+const TOP_SUBHUB := 120.0      # SETUP / INFO / DISP hubs
+const TOP_GENERIC_SHORT := 150.0   # <=4-row fallback list (no per-mode top)
+const TOP_GENERIC_MANY := 156.0    # >4-row fallback list (clears the record block)
+const TITLE_HEAD_MARGIN := 2.0     # TITLE seats its column this far below the drawn header block
+const BOTTOM_BOUND := 310.0        # y the last row / BACK plate clears (leaves the footer legend room)
+const LEGEND_Y := 322.0            # TITLE input-legend plate top (the column band ends 4px above it)
+const LEGEND_H := 34.0             # ...and its height
+const ROW_INSET_TITLE := 2.0       # TITLE inter-row inset (reclaimed band => taller plates)
+const ROW_INSET_DEFAULT := 3.0     # inter-row inset on every other screen
+const GAP_MAX := 46.0              # row-pitch ceiling (short lists don't stretch past this)
+const GAP_MAX_MANY := 30.0         # tighter ceiling once a list exceeds 4 rows
+const LEGEND_MARGIN := 4.0         # clearance the TITLE column keeps above LEGEND_Y
+const FOOTER_H := 17.0             # height of the shared SELECT/BACK footer-legend plate
+const BACK_H_RATIO := 0.7          # BACK plate is BTN scaled to this fraction of full row height
+const REBIND_TAB_W := 96.0         # REBIND category-tab plate width
+const REBIND_DEV_W := 52.0         # REBIND P1|P2 device sub-selector plate width
+const REBIND_TAB_GAP := 6.0        # gap between REBIND tab / device plates
+# Header text baselines shared across screens (kept here so a header-rhythm nudge
+# lands in one place instead of per-screen literals in _draw). The INFO/DISP/SETUP
+# hubs share one title+subtitle rhythm; HALL/HOWTO share one content-title baseline.
+const HUB_HEADER_Y := 84.0         # INFO / DISP / SETUP header title baseline
+const HUB_SUBTITLE_Y := 104.0      # ...and their subtitle line
+const CONTENT_TITLE_Y := 38.0      # HALL / HOWTO content-screen title baseline
+# Horizontal half-padding of the small dark plates behind TITLE's byline / tagline /
+# BEST / CAREER lines (a plate spans measured_text_w + 2x this).
+const PLATE_PAD_SM := 4.0
+
+# ===== THEME (colors) =====
+# Shared plate colors. PLATE_BG is the dark warm backdrop behind header/footer
+# captions; PLATE_SEL / PLATE_UNSEL are the focused / resting button-plate hues.
+const PLATE_BG := Color(0.03, 0.05, 0.03, 0.55)
+const PLATE_SEL := Color(1.0, 0.92, 0.55)
+const PLATE_UNSEL := Color(0.55, 0.62, 0.45, 0.8)
+const ARROW_UNSEL := Color(0.72, 0.77, 0.62, 0.85)   # resting submenu-chevron tint
+const CAPTION_COL := Color(0.66, 0.72, 0.56, 0.85)   # group-caption label
+const NOTICE_COL := Color(1.0, 0.85, 0.5)            # rebind swap/clear notice
+const SCRIM_BASE := Color(0.02, 0.05, 0.02)          # full-screen dim scrim (alpha applied at draw)
+const WELL_BASE := Color(0.035, 0.055, 0.05)         # content-well fill (alpha applied at draw)
+# Group-separator rules drawn between labelled blocks (bright = primary split, dim = minor).
+const DIVIDER_BRIGHT := Color(0.86, 0.82, 0.52, 0.8)
+const DIVIDER_DIM := Color(0.62, 0.66, 0.5, 0.55)
+# Header/subtitle text hues shared across screens.
+const SUBTITLE_COL := Color(0.8, 0.85, 0.72)         # subline under a screen header (INFO/DISP/SETUP/OPTS/PAUSE)
+const HEADER_ACCENT := Color(1.0, 0.85, 0.3)         # warm title color for TITLE/HALL/HOWTO record headers
+const BYLINE_COL := Color(0.85, 0.78, 0.55, 0.92)    # TITLE byline text
+const CAREER_COL := Color(0.6, 0.72, 0.62, 0.7)      # TITLE career/record footnote text
+# Large content-frame chrome tints (multiplied by _open_t at draw).
+const FRAME_UNDER_TINT := Color(1, 1, 1, 0.9)        # ui_frame_lrg_under backing
+const FRAME_TINT := Color(0.85, 0.9, 0.75)           # ui_frame_lrg overlay
+const HEADER_COL := Color(0.95, 0.95, 0.85)          # lone screen-header title (INFO/DISP/SETUP/PAUSED/CONTROLS/OPTIONS)
+const TAGLINE_COL := Color(0.85, 0.9, 0.8, 0.85)     # TITLE tagline line
+const BEST_LINE_COL := Color(1.0, 0.92, 0.55, 1.0)   # TITLE best-run line
+const RUN_FOOTNOTE_COL := Color(0.6, 0.66, 0.56, 0.75)  # PAUSE run-id footnote
+const WARN_COL := Color(0.95, 0.72, 0.42)            # OPTS warning subline
+
 
 func _ready() -> void:
 	# Pad yanked mid-run = pause. The sim only steps while no menu is visible,
@@ -1384,30 +1456,30 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 	# c1-18: REBIND is paginated into category tabs of <=10 rows (8 verbs + RESET + BACK),
 	# so it seats at 102 like OPTS and every plate clears the >=20px readable floor — a tab
 	# header strip sits above at y42-57 and the title/subline at y66-78.
-	var top := 118.0 if mode_id == Mode.PAUSE \
-		else (102.0 if mode_id == Mode.OPTS \
-		else (102.0 if mode_id == Mode.REBIND \
-		else (120.0 if (mode_id == Mode.SETUP or mode_id == Mode.INFO or mode_id == Mode.DISP) else (150.0 if not many else 156.0))))
+	var top := TOP_PAUSE if mode_id == Mode.PAUSE \
+		else (TOP_OPTS if mode_id == Mode.OPTS \
+		else (TOP_OPTS if mode_id == Mode.REBIND \
+		else (TOP_SUBHUB if (mode_id == Mode.SETUP or mode_id == Mode.INFO or mode_id == Mode.DISP) else (TOP_GENERIC_SHORT if not many else TOP_GENERIC_MANY))))
 	var gap: float
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
 		# fresh install (no BEST/CAREER) starts ~24px higher, so the list decompresses
 		# into real height instead of a fixed 156 that crushed bh to ~11px + 8px specks.
-		top = head_bottom + 2.0
+		top = head_bottom + TITLE_HEAD_MARGIN
 		# Spread across the WHOLE band down to the y322 input legend. Dividing by
 		# n (not n-1) reserves the final row's own height, so QUIT self-clears the
 		# legend without the old hardcoded 296 bottom bound that left dead air.
 		# c2-04: with TITLE trimmed to 6 rows (4 start verbs + SETUP + QUIT), this same
 		# math seats ~30px full-height plates (bh caps at BTN.y=36) with 16px icons even
 		# with the CAREER header line present — no per-count special case needed.
-		gap = minf(46.0, (318.0 - top) / maxf(1.0, float(n)))
+		gap = minf(GAP_MAX, (LEGEND_Y - LEGEND_MARGIN - top) / maxf(1.0, float(n)))
 	else:
 		# PAUSE/OPTS: bottom clears the y~322 legend strip — at 310 the QUIT row
 		# sat flush against it (6/8 panel reviewers, unanimous top item).
-		gap = minf(30.0 if many else 46.0, (310.0 - top) / maxf(1.0, float(n - 1)))
+		gap = minf(GAP_MAX_MANY if many else GAP_MAX, (BOTTOM_BOUND - top) / maxf(1.0, float(n - 1)))
 	# TITLE plates take a 2px inter-row inset (vs 3px elsewhere) so the reclaimed
 	# band converts to taller clickable plates, not just wider dead gaps.
-	var inset := 2.0 if mode_id == Mode.TITLE else 3.0
+	var inset := ROW_INSET_TITLE if mode_id == Mode.TITLE else ROW_INSET_DEFAULT
 	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - inset)), "n": n}   # floored HERE so _draw and the mouse hit-test agree
 
 
@@ -1497,7 +1569,7 @@ static func max_glow_bottom(g: Dictionary) -> float:
 # horizontal-layout change touches lives in ONE place, not re-hardcoded per call
 # site. Same floorf snapping _draw has always used (crisp pixel-font seams).
 static func row_rect(g: Dictionary, k: int) -> Rect2:
-	return Rect2(Vector2(320.0 - BTN.x / 2.0, floorf(float(g["top"]) + float(k) * float(g["gap"]))),
+	return Rect2(Vector2(CENTER_X - BTN.x / 2.0, floorf(float(g["top"]) + float(k) * float(g["gap"]))),
 		Vector2(BTN.x, floorf(float(g["bh"]))))
 
 
@@ -1522,7 +1594,7 @@ static func toggle_arrow_rects(g: Dictionary, k: int) -> Array[Rect2]:
 func _row_at(p: Vector2) -> int:
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return 0 if _back_rect().has_point(p) else -1
-	if absf(p.x - 320.0) > BTN.x / 2.0:
+	if absf(p.x - CENTER_X) > BTN.x / 2.0:
 		return -1
 	return hit_row(_row_geometry(), p.y)
 
@@ -1536,7 +1608,7 @@ func _back_rect() -> Rect2:
 	# threat-row pitch is DERIVED from this y (see _howto_page_endless); paging gives
 	# it a full screen so it sits at a roomy 18px, well clear of BACK. The BACK plate
 	# is shared by all three HOWTO pages. Bottom lands at 335. Draw + hit-test share.
-	return Rect2(Vector2(320 - BTN.x / 2.0, 310), BTN * Vector2(1, 0.7))
+	return Rect2(Vector2(CENTER_X - BTN.x / 2.0, BOTTOM_BOUND), BTN * Vector2(1, BACK_H_RATIO))
 
 
 func _step_vol(bus: String, delta: int) -> void:
@@ -1945,7 +2017,7 @@ func _draw() -> void:
 	# (scroll + tracers + explosions) is the biggest motion source on the exact
 	# screen where the setting is toggled, and it isn't _motion-gated itself.
 	var sa := _scrim_alpha(mode, main._motion)
-	draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.05, 0.02, sa * _open_t))
+	draw_rect(Rect2(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT), Color(SCRIM_BASE, sa * _open_t))
 	if _content_well(mode):
 		# Plate the bare text on the Apocalypse frame, debrief-style (underlay
 		# darkens the well, frame carries the chrome).
@@ -1953,9 +2025,9 @@ func _draw() -> void:
 		# a3-02: a SOLID desaturating dark well seals the frame INTERIOR before the
 		# chrome — the _under frame texture has transparent regions the firefight showed
 		# through even at a high scrim. Cool-dark near-opaque fill; the frame draws on top.
-		draw_rect(_content_well_rect(), Color(0.035, 0.055, 0.05, 0.92 * _open_t))
-		draw_texture_rect(Art.tex("ui_frame_lrg_under"), fr, false, Color(1, 1, 1, 0.9 * _open_t))
-		draw_texture_rect(Art.tex("ui_frame_lrg"), fr, false, Color(0.85, 0.9, 0.75, _open_t))
+		draw_rect(_content_well_rect(), Color(WELL_BASE, 0.92 * _open_t))
+		draw_texture_rect(Art.tex("ui_frame_lrg_under"), fr, false, Color(FRAME_UNDER_TINT, FRAME_UNDER_TINT.a * _open_t))
+		draw_texture_rect(Art.tex("ui_frame_lrg"), fr, false, Color(FRAME_TINT, _open_t))
 		if mode == Mode.HALL:
 			_draw_hall()
 		else:
@@ -1967,14 +2039,14 @@ func _draw() -> void:
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
 		var ttw := Art.font().get_string_size("SHOEMONEY SOLDIER", HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
-		draw_rect(Rect2(320.0 - ttw / 2.0 - 10.0, 60.0, ttw + 20.0, 32.0), Color(0.03, 0.05, 0.03, 0.55))   # a2-04 r2: match sibling plate alpha
-		_center_text("SHOEMONEY SOLDIER", 86, 30, Color(1.0, 0.85, 0.3))
+		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, 60.0, ttw + 20.0, 32.0), PLATE_BG)   # a2-04 r2: match sibling plate alpha
+		_center_text("SHOEMONEY SOLDIER", 86, 30, HEADER_ACCENT)
 		# Studio byline, plated like the tagline below it (small text loses to the live
 		# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
 		var byl := "by SHOEMONEY GAME STUDIOS"
 		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-		draw_rect(Rect2(320.0 - bylw / 2.0 - 4.0, 93.0, bylw + 8.0, 9.0), Color(0.03, 0.05, 0.03, 0.55))
-		_center_text(byl, 100, 8, Color(0.85, 0.78, 0.55, 0.92))
+		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, 93.0, bylw + PLATE_PAD_SM * 2.0, 9.0), PLATE_BG)
+		_center_text(byl, 100, 8, BYLINE_COL)
 		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
 		# seed-hint siblings — small text straight on the live attract firefight
 		# loses to bright terrain no matter the alpha (the codebase's own thrice-
@@ -1983,9 +2055,9 @@ func _draw() -> void:
 		var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 		# Height 13 (was 14): its 101..114 span now abuts the BEST plate's 114 top
 		# instead of overlapping it by 1px — a double-darkened seam under the record.
-		draw_rect(Rect2(320.0 - tgw / 2.0 - 4.0, 101.0, tgw + 8.0, 13.0),
-			Color(0.03, 0.05, 0.03, 0.55))
-		_center_text(tagline, 112, 10, Color(0.85, 0.9, 0.8, 0.85))
+		draw_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, 101.0, tgw + PLATE_PAD_SM * 2.0, 13.0),
+			PLATE_BG)
+		_center_text(tagline, 112, 10, TAGLINE_COL)
 		# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
 		# c1-02: the record block was pulled UP into a tight two-line stack (BEST
 		# baseline 124, CAREER 136) from the old 132/145 spread — freeing ~14px so
@@ -1996,9 +2068,9 @@ func _draw() -> void:
 			# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
 			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist)
 			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			draw_rect(Rect2(320.0 - bw / 2.0 - 4.0, 114.0, bw + 8.0, 13.0),
-				Color(0.03, 0.05, 0.03, 0.55))
-			_center_text(best_line, 124, 9, Color(1.0, 0.92, 0.55, 1.0))
+			draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, 114.0, bw + PLATE_PAD_SM * 2.0, 13.0),
+				PLATE_BG)
+			_center_text(best_line, 124, 9, BEST_LINE_COL)
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
 			var career := "CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
@@ -2006,32 +2078,32 @@ func _draw() -> void:
 			# Plated like the input legend: 8px dim text straight on the live
 			# attract firefight loses to bright terrain no matter the alpha.
 			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			draw_rect(Rect2(320.0 - cpw / 2.0 - 4.0, 127.0, cpw + 8.0, 12.0),
-				Color(0.03, 0.05, 0.03, 0.55))
-			_center_text(career, 136, 8, Color(0.6, 0.72, 0.62, 0.7))
+			draw_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, 127.0, cpw + PLATE_PAD_SM * 2.0, 12.0),
+				PLATE_BG)
+			_center_text(career, 136, 8, CAREER_COL)
 	elif mode == Mode.OPTS:
 		_draw_opts_header()
 	elif mode == Mode.REBIND:
 		_draw_rebind_header()
 	elif mode == Mode.INFO:
-		_center_text("INFO", 84, 22, Color(0.95, 0.95, 0.85))
+		_center_text("INFO", HUB_HEADER_Y, 22, HEADER_COL)
 		# The look-back screens: records, the field manual, and your last run.
-		_center_text("RECORDS · HOW TO PLAY · REPLAY", 104, 8, Color(0.8, 0.85, 0.72))
+		_center_text("RECORDS · HOW TO PLAY · REPLAY", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	elif mode == Mode.DISP:
-		_center_text("DISPLAY", 84, 22, Color(0.95, 0.95, 0.85))
+		_center_text("DISPLAY", HUB_HEADER_Y, 22, HEADER_COL)
 		# c1-19: the subtitle NAMES the two controls while windowed, and while FULLSCREEN it EXPLAINS
 		# that WINDOW SCALE applies on return to windowed — so the row's deferred behavior is spelled
 		# out in words, matching the inline "(WINDOWED)" tag on the value label. The row itself stays
 		# fully adjustable in both modes; nothing here is a dead, silently-ignored control.
-		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), 104, 8, Color(0.8, 0.85, 0.72))
+		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	elif mode == Mode.SETUP:
-		_center_text("SETUP", 84, 22, Color(0.95, 0.95, 0.85))
+		_center_text("SETUP", HUB_HEADER_Y, 22, HEADER_COL)
 		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
 		# the OPTIONS and INFO screens.
-		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO", 104, 8,
-			Color(0.8, 0.85, 0.72))
+		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO", HUB_SUBTITLE_Y, 8,
+			SUBTITLE_COL)
 	else:
-		_center_text("PAUSED", 78, 22, Color(0.95, 0.95, 0.85))
+		_center_text("PAUSED", 78, 22, HEADER_COL)
 		# Pause doubles as a status check — the run so far.
 		if main.sim != null:
 			var s: SimWorld = main.sim
@@ -2042,9 +2114,9 @@ func _draw() -> void:
 			var line := "WAVE %d" % s.wave if s.mode == "endless" \
 				else "SECTOR %d/5  ·  %dm" % [mini(opened + 1, 5), -Fixed.to_int(s.camera_top) / 10]
 			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
-				100, 10, Color(0.8, 0.85, 0.72))
+				100, 10, SUBTITLE_COL)
 			if main._current_seed > 0:
-				_center_text("RUN #%d" % main._current_seed, 114, 8, Color(0.6, 0.66, 0.56, 0.75))
+				_center_text("RUN #%d" % main._current_seed, 114, 8, RUN_FOOTNOTE_COL)
 	var mitems := _menu_items()   # dicts: label + destructive flag for pre-press tinting
 	var items := _items()
 	# Fit-to-height layout via the shared helper (the mouse hit-test reads the
@@ -2079,11 +2151,11 @@ func _draw() -> void:
 			if (mode == Mode.TITLE or mode == Mode.SETUP) \
 					and int(mitems[k - 1].get("grp", 0)) == 0 \
 					and int(mitems[k].get("grp", 0)) == 1:
-				draw_rect(Rect2(320 - BTN.x / 2.0 + 6.0, sy, BTN.x - 12.0, 1.0),
-					Color(0.86, 0.82, 0.52, 0.8))
+				draw_rect(Rect2(CENTER_X - BTN.x / 2.0 + 6.0, sy, BTN.x - 12.0, 1.0),
+					DIVIDER_BRIGHT)
 			else:
-				draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
-					Color(0.62, 0.66, 0.5, 0.55))
+				draw_rect(Rect2(CENTER_X - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
+					DIVIDER_DIM)
 		if mode == Mode.OPTS and (k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0)):
 			_emit_group_caption(mitems, k, cy)
 		var selected := k == sel
@@ -2098,7 +2170,7 @@ func _draw() -> void:
 		# CAMPAIGN / RESUME. The tint is DARK warm on purpose: light warm label text
 		# over it clears an AA-normal (4.5:1) contrast target (a mid warm plate washed the
 		# warm label out — see test_destructive_text_contrast). Arming floods red.
-		var plate := Color(1.0, 0.92, 0.55) if selected else Color(0.55, 0.62, 0.45, 0.8)
+		var plate := PLATE_SEL if selected else PLATE_UNSEL
 		if destr:
 			if selected:
 				plate = DESTR_ARMED_PLATE_SEL if armed else DESTR_PLATE_SEL
@@ -2143,7 +2215,7 @@ func _draw() -> void:
 			_sel_target = ty
 			if _sel_y < 0.0 or main._motion < 0.5:
 				_sel_y = ty
-			var gr := Rect2(Vector2(320 - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
+			var gr := Rect2(Vector2(CENTER_X - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
 			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
 			# Fade the glow while it's still catching up to the row — a lagging box
 			# at full alpha reads as misplaced; dimming it makes the glide read as motion.
@@ -2199,7 +2271,7 @@ func _draw() -> void:
 		# direct action or an in-place toggle. mi_arrow already points right.
 		if mitems[k].get("submenu", false):
 			draw_texture_rect(Art.tex("mi_arrow"), Rect2(r.end.x - 17.0, cy - 5.0, 10.0, 10.0),
-				false, Color(1.0, 0.92, 0.55) if selected else Color(0.72, 0.77, 0.62, 0.85))
+				false, PLATE_SEL if selected else ARROW_UNSEL)
 		# Volume rows: a 10-step level bar where the toggle dot would sit —
 		# level reads as fill COUNT (shape, not hue alone); 0 = all hollow.
 		if mitems[k].has("vol"):
@@ -2280,7 +2352,7 @@ func _draw() -> void:
 		# "RT"/"LMB" as text made every new player parse an acronym first.
 		# Near-opaque dark plate: 8px text straight on the live attract
 		# firefight loses to bright terrain and particles no matter the alpha.
-		draw_rect(Rect2(0, 322, 640, 34), Color(0.03, 0.05, 0.03, 0.55))
+		draw_rect(Rect2(0, LEGEND_Y, CANVAS_WIDTH, LEGEND_H), PLATE_BG)
 		var row1: Array
 		if Art.use_pad:
 			row1 = [{"tex": "glyph_stick_l", "label": "MOVE"},
@@ -2314,19 +2386,19 @@ func _draw() -> void:
 # else the how-to (which DOCUMENTS the immutable arrows/Enter/Esc menu-nav fallback).
 # c1-18: rect for REBIND category tab `d` — shared by the header draw and the mouse hit-test.
 func _rebind_tab_rect(d: int) -> Rect2:
-	var tw := 96.0
-	var gap := 6.0
+	var tw := REBIND_TAB_W
+	var gap := REBIND_TAB_GAP
 	var n := REBIND_TABS.size()
-	var x0 := 320.0 - (float(n) * tw + float(n - 1) * gap) / 2.0
+	var x0 := CENTER_X - (float(n) * tw + float(n - 1) * gap) / 2.0
 	return Rect2(x0 + float(d) * (tw + gap), 42.0, tw, 15.0)
 
 
 # c1-18: rect for the P1|P2 player sub-selector shown on the GAMEPAD tab (d = 0 P1, 1 P2).
 # Shared by the header draw and the mouse hit-test so the plate and its click target agree.
 func _rebind_pad_dev_rect(d: int) -> Rect2:
-	var w := 52.0
-	var gap := 6.0
-	var x0 := 320.0 - (2.0 * w + gap) / 2.0
+	var w := REBIND_DEV_W
+	var gap := REBIND_TAB_GAP
+	var x0 := CENTER_X - (2.0 * w + gap) / 2.0
 	return Rect2(x0 + float(d) * (w + gap), 88.0, w, 12.0)
 
 
@@ -2342,7 +2414,7 @@ func _draw_rebind_header() -> void:
 		var col := Color(1.0, 1.0, 0.85) if on else Color(0.6, 0.65, 0.55)
 		draw_string(Art.font(), Vector2(r.position.x + 6.0, r.position.y + 11.0),
 			REBIND_TABS[d], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 12.0, 8, col)
-	_center_text("CONTROLS", 66, 13, Color(0.95, 0.95, 0.85))
+	_center_text("CONTROLS", 66, 13, HEADER_COL)
 	var sub: String
 	var scol: Color
 	if _rebind_action != "":
@@ -2351,19 +2423,19 @@ func _draw_rebind_header() -> void:
 				% [rebind_label(_rebind_action), "P1" if _rebind_pad_dev == 0 else "P2"]
 		else:
 			sub = "PRESS A KEY FOR %s   -   ESC CANCEL   -   DEL CLEAR" % rebind_label(_rebind_action)
-		scol = Color(1.0, 0.92, 0.55)
+		scol = PLATE_SEL
 	elif _rebind_msg != "":
 		sub = _rebind_msg
-		scol = Color(1.0, 0.85, 0.5)
+		scol = NOTICE_COL
 	elif pad:
 		sub = "A/ENTER: REBIND   D-PAD L/R: PICK PLAYER   LB/RB: TAB   -   STICKS: USE SWAP STICKS"
-		scol = Color(0.8, 0.85, 0.72)
+		scol = SUBTITLE_COL
 	elif _rebind_tab == 3:
 		sub = "REBIND MENU KEYS - ARROWS/ENTER/ESC ALWAYS WORK TOO (EMERGENCY FALLBACK)"
-		scol = Color(0.8, 0.85, 0.72)
+		scol = SUBTITLE_COL
 	else:
 		sub = "ENTER: REBIND   TAB: SWITCH TAB   -   MENUS ALWAYS USE ARROWS/ENTER/ESC"
-		scol = Color(0.8, 0.85, 0.72)
+		scol = SUBTITLE_COL
 	_center_text(sub, 78, 8, scol)
 	# c1-18: on the GAMEPAD tab, the P1|P2 sub-selector — each player has an INDEPENDENT pad
 	# layout, and this names+switches which one the rows below are editing. ◄/► or a click flips
@@ -2535,7 +2607,7 @@ func _tab_rects_for(names: Array) -> Array[Rect2]:
 		var w := f.get_string_size(n, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 		tw.append(w)
 		total += w + 22.0
-	var x := 320.0 - total / 2.0
+	var x := CENTER_X - total / 2.0
 	var out: Array[Rect2] = []
 	for i in names.size():
 		out.append(Rect2(x - 4.0, 52.0, tw[i] + 8.0, 20.0))
@@ -2545,7 +2617,7 @@ func _tab_rects_for(names: Array) -> Array[Rect2]:
 
 func _draw_hall() -> void:
 	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
-	_center_text("HALL OF FAME", 38, 22, Color(1.0, 0.85, 0.3))
+	_center_text("HALL OF FAME", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
 	# Persistent filter tab row — the old single "◄ NAME ►" line hid the other
 	# two choices, so nobody knew left/right cycled anything. Selected tab is
 	# underlined and flashes briefly on change (_filter_pulse). Geometry comes
@@ -2834,7 +2906,7 @@ func _draw_howto() -> void:
 	# Title baseline y38 (size 22, ~4px descent -> bottom ~42) matched to HALL so both
 	# content screens share one header rhythm; the tab plate top sits at y54, a clear
 	# ~12px below, so the two never overlap regardless of font metrics.
-	_center_text("HOW TO PLAY", 38, 22, Color(1.0, 0.85, 0.3))
+	_center_text("HOW TO PLAY", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
 	# c2-02: the wall of ~17 lines is split into three PAGES — BASIC / ENEMIES /
 	# ENDLESS — each drawn on its own screen with a fresh top-of-screen y cursor.
 	# Nothing stacks a section onto the next, so no row can land on the BACK plate
@@ -3014,7 +3086,7 @@ static func _best_line(score: int, wave: int, dist: int) -> String:
 
 
 func _center_text(txt: String, y: float, size: int, col: Color) -> void:
-	Art.text_center(self, txt, 320.0, y, size, col)
+	Art.text_center(self, txt, CENTER_X, y, size, col)
 
 
 # c1-09: the OPTIONS screen header — a compact 2-line block (title y80 / summary y94)
@@ -3024,7 +3096,7 @@ func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 # that some string fits some width. Settings ONLY now: HALL OF FAME / HOW TO PLAY moved
 # to the INFO screen, so this header is a plain "OPTIONS".
 func _draw_opts_header() -> void:
-	_center_text("OPTIONS", 80, 18, Color(0.95, 0.95, 0.85))
+	_center_text("OPTIONS", 80, 18, HEADER_COL)
 	# After RESET DEFAULTS fires, the summary line briefly becomes a success banner;
 	# otherwise it's the single place to review live settings state — the DISPLAY mode
 	# (no on-screen toggle) and EVERY accessibility aid's explicit ON/OFF state.
@@ -3039,10 +3111,10 @@ func _draw_opts_header() -> void:
 		# two-press confirm will wipe — every settings group at once — so the player
 		# knows the blast radius BEFORE the second press, not just "this is destructive".
 		_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / DISPLAY TO DEFAULTS",
-			94, 8, Color(0.95, 0.72, 0.42))
+			94, 8, WARN_COL)
 	else:
 		_center_text(a11y_summary(main._motion < 0.5, main.colorblind, main._assist,
-			main._rumble_on, main._fullscreen), 94, 8, Color(0.8, 0.85, 0.72))
+			main._rumble_on, main._fullscreen), 94, 8, SUBTITLE_COL)
 
 
 # Trim a label to max_w with a trailing ellipsis (raw clipping ate whole glyphs
@@ -3112,7 +3184,7 @@ static func legend_extent(segs: Array) -> Array:
 		var gw := _glyph_w(seg)
 		total += gw + (3.0 if gw > 0.0 else 0.0) \
 			+ f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 14.0
-	return [320.0 - total / 2.0, total]
+	return [CENTER_X - total / 2.0, total]
 
 
 # c1-04: the EXACT drawn boxes of a legend row — one entry per segment carrying its
@@ -3167,7 +3239,7 @@ func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
 	if ghdr == "":
 		return
 	var gw := Art.font().get_string_size(ghdr, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-	_emit_label(ghdr, Vector2((320 - BTN.x / 2.0) - 25.0 - gw, cy + 3.0), Color(0.66, 0.72, 0.56, 0.85))
+	_emit_label(ghdr, Vector2((CENTER_X - BTN.x / 2.0) - 25.0 - gw, cy + 3.0), CAPTION_COL)
 
 
 # One centered legend line of [glyph + verb] segments; y is the glyph center. Emits
@@ -3203,7 +3275,7 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 # so the in-run HUD reminder can stay purely transient without those bindings
 # becoming unrecoverable mid-run.
 func _footer_legend() -> void:
-	_emit_rect(Rect2(0, FOOTER_Y, 640, 17), Color(0.03, 0.05, 0.03, 0.55))
+	_emit_rect(Rect2(0, FOOTER_Y, CANVAS_WIDTH, FOOTER_H), PLATE_BG)
 	var segs := footer_segs(mode)
 	# c1-13: when the Hall spills past one page, the footer strip carries an EXPLICIT
 	# UP/DOWN = PAGE key hint. The PREV/NEXT plates flank the counter left/right, but the
