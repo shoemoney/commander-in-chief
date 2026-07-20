@@ -932,10 +932,21 @@ static func destructive_label(name: String, verb: String, armed: bool, font: Fon
 	var short_name := name.split(" ")[0]   # "TITLE SCREEN" -> "TITLE" before dropping identity
 	var forms: Array[String]
 	if armed:
-		# The verb rides with the cue as long as it fits ("<VERB>: AGAIN" is terse but
-		# unambiguous WITH the verb present). The floor is the full "PRESS AGAIN"
-		# instruction — never a bare "AGAIN", which alone reads ambiguously.
-		forms = ["%s  PRESS AGAIN" % verb, "%s PRESS AGAIN" % verb, "%s: AGAIN" % verb, "PRESS AGAIN"]
+		# c3-08: the verb rides with the cue as long as it fits ("<VERB>: AGAIN" is terse
+		# but unambiguous WITH the verb present) so the armed row never loses WHICH action
+		# is one press from firing. If a multi-word verb won't fit, keep at least its leading
+		# word before falling through - the identity (or its leading word) is dropped LAST,
+		# only when the plate has no room, to the full "PRESS AGAIN" (never a bare "AGAIN",
+		# which reads ambiguously). On the real 170px armed plate TITLE/QUIT keep the full
+		# "<VERB>  PRESS AGAIN"; RESTART tightens to "RESTART: AGAIN"; the long RESET rows
+		# fall to their leading word "RESET: AGAIN" - always a verb, never a bare cue. These
+		# exact tiers are pinned per row in test_c3_08_* so a font/plate edit can't silently
+		# strip the identity.
+		var short_verb := verb.split(" ")[0]
+		forms = ["%s  PRESS AGAIN" % verb, "%s PRESS AGAIN" % verb, "%s: AGAIN" % verb]
+		if short_verb != verb:
+			forms.append("%s: AGAIN" % short_verb)
+		forms.append("PRESS AGAIN")
 	else:
 		forms = ["%s  PRESS TWICE" % name, "%s PRESS TWICE" % name]
 		if short_name != name:
@@ -952,6 +963,15 @@ static func destructive_label(name: String, verb: String, armed: bool, font: Fon
 	# this floor is never reached in production. Below ~102px avail the cue is returned
 	# as-is and _ellipsize would trim its tail — an unsupported, sub-word plate.
 	return forms[forms.size() - 1]
+
+
+# c3-08: the armed-row verb is derived from the row id, NOT a hand-authored "verb"
+# field — every destructive row's id already uppercases to exactly the verb we want
+# ("restart"->RESTART, "title"->TITLE, "quit"->QUIT, "reset_defaults"->RESET DEFAULTS,
+# "reset_controls"->RESET CONTROLS), so a parallel field would only be a second source
+# of truth to drift. One convention, one helper, shared by _draw and the layout test.
+static func armed_verb(item: Dictionary) -> String:
+	return String(item.get("id", "")).to_upper().replace("_", " ")
 
 
 # Row id → Modern Menus icon key. Only clean matches — no icon beats a
@@ -2588,17 +2608,32 @@ func _draw() -> void:
 			col = DESTR_TEXT_SEL if selected else DESTR_TEXT_UNSEL
 			if armed:
 				col = DESTR_ARMED_TEXT   # near-white reads over the red flood below
-				# Reserve the right-edge confirm-glyph slot BEFORE choosing wording so
-				# the label is fit to the real drawable width, not an optimistic one.
+				# c3-08: DEVICE-CORRECT confirm glyph - Art.glyph_key("confirm") resolves to
+				# Enter for the keyboard/mouse player and the pad's A/cross for a gamepad,
+				# keyed off the LAST-USED device (Art.use_pad), so a keyboard player is never
+				# prompted with a pad button they don't have. Reserve its right-edge slot
+				# BEFORE choosing wording so the label is fit to the real drawable width.
+				# minf so this composes with any earlier badge reservation instead of
+				# clobbering it (destructive rows carry neither badge nor submenu chevron
+				# today, so the glyph slot is the only right-edge claim in practice).
 				armed_glyph = Art.tex(Art.glyph_key("confirm"))
-				cw = 12.0 * float(armed_glyph.get_width()) / float(armed_glyph.get_height())
-				label_r = r.end.x - cw - 10.0
-			# Pick the widest wording that actually fits the plate (measured), so the
-			# cue never ellipsizes to nonsense: "<NAME>  PRESS TWICE" states the two-press
-			# contract pre-armed; armed keeps the VERB alongside "PRESS AGAIN" where it
-			# fits, degrading only as far as needed. See destructive_label.
-			label = destructive_label(items[k], String(mitems[k]["id"]).to_upper().replace("_", " "),
-				armed, Art.font(), label_r - (r.position.x + 30.0))
+				# Only reserve the glyph slot if the texture actually resolved; a missing
+				# key leaves cw = 0 so the label keeps the FULL width and the row degrades to
+				# a text-only "<VERB>  PRESS AGAIN" prompt instead of crashing on get_width().
+				if armed_glyph:
+					cw = 12.0 * float(armed_glyph.get_width()) / float(armed_glyph.get_height())
+					label_r = minf(label_r, r.end.x - cw - 10.0)
+			# c3-08: KEEP THE ACTION NAME on the armed row - never a bare, ambiguous
+			# "PRESS AGAIN". The armed verb is derived from the row id via armed_verb()
+			# (RESTART / TITLE / QUIT / RESET DEFAULTS / RESET CONTROLS) - one naming
+			# convention shared with the layout test, not a parallel "verb" field that could
+			# drift. destructive_label keeps this verb (or its leading word) as the plate
+			# narrows, so the player always sees WHICH action is one press from firing. Pick
+			# the widest wording that fits the plate (measured) so the cue never ellipsizes to
+			# nonsense: "<NAME>  PRESS TWICE" pre-armed, "<VERB> PRESS AGAIN" armed, degrading
+			# only as far as needed. See destructive_label.
+			label = destructive_label(items[k], armed_verb(mitems[k]), armed, Art.font(),
+				label_r - (r.position.x + 30.0))
 		if armed:
 			# The armed affordances that ride ON TOP of the red flood (drawn above):
 			# a countdown bar draining along the bottom edge showing the disarm
@@ -2619,7 +2654,20 @@ func _draw() -> void:
 			# countdown bar, so it dominates as the alert. Only the device confirm glyph
 			# rides above it (below), landing crisp in its reserved inner slot.
 			draw_rect(r.grow(-2), DESTR_ARMED_FRAME, false, DESTR_ARMED_FRAME_W)
-			draw_texture_rect(armed_glyph, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
+			# c3-08: throb the DEVICE-CORRECT confirm glyph (Enter for keyboard/mouse, A for
+			# pad - see Art.glyph_key above) so a hesitating player's eye lands on the exact
+			# button that fires the armed verb (RESTART / TITLE / QUIT, kept in the label).
+			# The pulse rides amber->white to read as "act now". Honors the REDUCE MOTION
+			# accessibility setting (main._motion < 0.5) by holding the glyph steady + bright.
+			# The confirm glyph is an ENHANCEMENT, not the only cue: the label already spells
+			# out "PRESS AGAIN" in words, so a missing/unsupported glyph key degrades to a
+			# fully textual prompt rather than a blank. Guard against a null texture anyway
+			# (a desynced armed-on-non-destr row, or a glyph key with no registry entry).
+			if armed_glyph:
+				var reduce_motion: bool = main._motion < 0.5
+				var gp := 1.0 if reduce_motion else Art.pulse(0.35)
+				draw_texture_rect(armed_glyph, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false,
+					Color(1.0, 0.85 + 0.15 * gp, 0.5 + 0.5 * gp, 0.7 + 0.3 * gp))
 		# Rows that open a screen reserve a right-edge slot for the > chevron so a
 		# long label ellipsizes clear of it instead of colliding.
 		if mitems[k].get("submenu", false):

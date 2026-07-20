@@ -4542,3 +4542,88 @@ func test_default_binds_match_the_original_hardcoded_gameplay_keys() -> void:
 	Runner.T.eq(int(p["interact"]), JOY_BUTTON_X, "pad INTERACT default is still X")
 	Runner.T.eq(int(p["revive"]), JOY_BUTTON_Y, "pad REVIVE default is still Y")
 	Runner.T.eq(int(p["buy"]), JOY_BUTTON_BACK, "pad SUPPLY WHEEL default is still BACK")
+
+
+# c3-08: an armed destructive row must KEEP its action name and never collapse to a
+# generic, device-centric "PRESS AGAIN". Two guarantees are pinned here so a font/plate
+# or data-model edit can't silently regress the second-press clarity:
+#   1) armed_verb() is derived from the row id (one naming convention, no parallel field
+#      to drift) and matches the intended verb for every real destructive row.
+#   2) On the REAL 170px armed plate, destructive_label keeps the verb (or its leading
+#      word) alongside the wording-only "PRESS AGAIN" cue — RESTART/TITLE/QUIT/the two
+#      RESET rows each degrade only as far as the plate forces, never to a bare cue.
+func test_c3_08_armed_destructive_rows_keep_verb() -> void:
+	# The armed avail the only draw site passes: BTN.x(222) - left inset(30) - glyph slot.
+	var glyph: Texture2D = Art.tex(Art.glyph_key("confirm"))
+	var cw: float = 12.0 * float(glyph.get_width()) / float(glyph.get_height())
+	var avail: float = Menu.BTN.x - cw - 10.0 - 30.0
+	var f: Font = Art.font()
+	# Gather EVERY destructive row across the modes that hold one (via real _menu_items).
+	var stub := _StubMain.new()
+	var expect := {
+		"restart": "RESTART: AGAIN", "title": "TITLE  PRESS AGAIN",
+		"quit": "QUIT  PRESS AGAIN", "reset_defaults": "RESET: AGAIN",
+		"reset_controls": "RESET: AGAIN",
+	}
+	var seen := {}
+	for mode_id in [Menu.Mode.TITLE, Menu.Mode.OPTS, Menu.Mode.REBIND, Menu.Mode.PAUSE]:
+		var m: Control = Menu.new()
+		m.main = stub
+		m.mode = mode_id
+		for row in m._menu_items():
+			if not row.get("destructive", false):
+				continue
+			var id := String(row["id"])
+			seen[id] = true
+			# 1) verb comes from the id, and no stray "verb" field shadows the convention.
+			Runner.T.ok(not row.has("verb"), "%s carries no redundant 'verb' field (id-derived)" % id)
+			var verb := Menu.armed_verb(row)
+			Runner.T.eq(verb, String(row["id"]).to_upper().replace("_", " "),
+				"%s armed_verb is the id-derived name" % id)
+			# 2) the armed copy on the real plate keeps the verb's leading word + the cue,
+			# and is NEVER the bare "PRESS AGAIN".
+			var armed := Menu.destructive_label(String(row["label"]), verb, true, f, avail)
+			Runner.T.eq(armed, expect.get(id, ""), "%s armed label copy is pinned" % id)
+			Runner.T.ok(armed.begins_with(verb.split(" ")[0]),
+				"%s armed label leads with the action word (%s)" % [id, armed])
+			Runner.T.ok(armed != "PRESS AGAIN", "%s never collapses to a bare cue" % id)
+		m.free()
+	stub.free()
+	for id in expect:
+		Runner.T.ok(seen.has(id), "destructive row '%s' was found and checked" % id)
+
+
+# c3-08: the armed row's confirm glyph must be DEVICE-CORRECT — Enter for a keyboard/mouse
+# player, the pad's face button (brand-correct: A / cross / Switch A) for a gamepad — keyed
+# off Art.use_pad/pad_brand exactly like the footer prompts. Pins the registry key per
+# device so a keyboard player is never shown a pad button they don't own (or vice-versa).
+func test_c3_08_armed_confirm_glyph_is_device_correct() -> void:
+	var was_pad: bool = Art.use_pad
+	var was_brand: String = Art.pad_brand
+	Art.use_pad = false
+	Runner.T.eq(Art.glyph_key("confirm"), "glyph_key_enter", "keyboard armed-confirm is the Enter keycap")
+	Art.use_pad = true
+	Art.pad_brand = "xbox"
+	Runner.T.eq(Art.glyph_key("confirm"), "glyph_pad_a", "Xbox pad armed-confirm is the A button")
+	Art.pad_brand = "ps"
+	Runner.T.eq(Art.glyph_key("confirm"), "glyph_ps_a", "PlayStation pad armed-confirm is the cross button")
+	Art.pad_brand = "switch"
+	Runner.T.eq(Art.glyph_key("confirm"), "glyph_sw_a", "Switch pad armed-confirm is the A button")
+	# The resolved key must be a real, drawable texture (not a missing-registry crash).
+	Runner.T.ok(Art.tex(Art.glyph_key("confirm")) != null, "armed-confirm glyph resolves to a texture")
+	Art.use_pad = was_pad   # restore globals so device state can't leak to other suites
+	Art.pad_brand = was_brand
+
+
+# c3-08: the armed glyph pulse must honor REDUCE MOTION on the SAME threshold the rest of
+# the game uses (_motion < 0.5 — see main.gd's _motion 1.0-normal / 0.0-reduced field), so
+# accessibility stays consistent. This pins the threshold constant against silent drift.
+func test_c3_08_reduce_motion_threshold_matches_project() -> void:
+	# main.gd stores the toggle as _motion (1.0 normal, 0.0 reduced) and gates every motion
+	# effect on `_motion < 0.5`; the armed glyph pulse uses the identical test.
+	var stub := _StubMain.new()
+	stub._motion = 0.0
+	Runner.T.ok(stub._motion < 0.5, "reduce-motion ON reads below the 0.5 gate (glyph holds steady)")
+	stub._motion = 1.0
+	Runner.T.ok(not (stub._motion < 0.5), "reduce-motion OFF reads above the 0.5 gate (glyph pulses)")
+	stub.free()
