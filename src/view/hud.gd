@@ -242,7 +242,7 @@ func _buff_col(ticks: int, base: Color) -> Color:
 	# Expiry warning (8/9 panel consensus): the last 2s a timed buff's chip goes
 	# urgent red — smoke warned before dropping, the others snapped off mid-fight.
 	# _mblink holds the red STEADY under reduce-motion (blink only when allowed).
-	return (Color(1.0, 0.3, 0.25) if _mblink(10) else base) if ticks < 120 else base
+	return (Art.warn(Color(1.0, 0.3, 0.25)) if _mblink(10) else base) if ticks < 120 else base
 
 
 func plate_right() -> float:
@@ -299,7 +299,10 @@ func _draw_shop_strip(sim: SimWorld) -> void:
 		# "×" suffix: affordability readable without color vision — same mark the spend wheel (the
 		# primary buy surface) draws beside its sockets. Price + color fade in with the window (a=0
 		# when closed), while the icon slot stays put.
-		var scol := (Art.safe(Color(0.55, 0.9, 0.5)) if afford else Color(1.0, 0.45, 0.4))
+		# c2-07: the unaffordable price routes through the colorblind palette (Art.warn -> magenta
+		# shift) and already draws ON the strip's own dark preview backing, so it needs no extra
+		# per-glyph scrim (which would collide with the strip's tight non-overlap layout anyway).
+		var scol := (Art.safe(Color(0.55, 0.9, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.4)))
 		scol.a = a
 		sx = _text(str(cost) + ("" if afford else "×"), sx + ICON + 3.0, ty, scol) + 10.0
 
@@ -444,7 +447,7 @@ func _draw() -> void:
 		if not p["alive"]:
 			px = _stat("icon_skull", "x%d" % p["deaths"], px, ry)
 			if sim.last_stand:
-				_text("K.I.A.", px, ry + ICON - 3.0, Color(0.9, 0.35, 0.3))
+				_warn_text("K.I.A.", px, ry + ICON - 3.0, Color(0.9, 0.35, 0.3))
 			elif p["broke_timer"] > 0:
 				# A free rescue is already ticking — say so, or it reads as death.
 				_text("RALLYING %ds" % (p["broke_timer"] / 60 + 1), px, ry + ICON - 3.0,
@@ -459,26 +462,29 @@ func _draw() -> void:
 				if afford:
 					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
 				else:
-					col = Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3)
+					col = Art.warn(Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3))
 				# "×" tag = non-color affordability cue (cyan-vs-red is still
 				# color-only for protan players even with colorblind mode on) —
 				# one dialect with the shop strip and the spend wheel's socket mark.
 				var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
-				var tx := _text(rlabel, px, ry + ICON - 3.0, col)
+				# c2-07: the unaffordable (warning-red) label gets the contrast drop-shadow so it
+				# reads over a bright field; the affordable (safe) label needs none.
+				var tx := _text(rlabel, px, ry + ICON - 3.0, col, not afford)
 				_emit_act_glyph("revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
 					Color.WHITE, i == 1)
 		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			px = _fuel_dial(t, px, ry)
 			var gcol_tank := Color(0.95, 0.96, 0.9)
+			var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
 			if p["grenade_ammo"] == 0:
 				# 0 shells = the cannon is dead — same proactive dry escalation as
 				# MG ammo (the old dry-flash only fired AFTER a wasted attempt).
-				gcol_tank = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+				gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
 			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 				gcol_tank = Color(0.6, 0.85, 1.0)
 			var tg_x := px
-			px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
+			px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank) if twarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
 			# Cannon cooldown (45t — longer than bash or grenade): the same draining
 			# ring every other fire cooldown got, so a mid-cooldown shot reads as
 			# "wait a beat", not dropped input. The cannon draws from the grenade
@@ -494,7 +500,7 @@ func _draw() -> void:
 					# The 3s fuse gets a number, like every other lethal window on
 					# this HUD (RALLYING/fuel/SHOP OPEN) — ceil grammar from the
 					# fuel dial, so it reads 3s → 2s → 1s → boom.
-					var bx := _text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+					var bx := _warn_text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 					_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
 						Color.WHITE, i == 1)
 			else:
@@ -620,7 +626,9 @@ func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float
 			/ float(PRESSURE_ARM_TICKS - PRESSURE_WARN_TICKS), 0.0, 1.0)
 		pf = arm_frac * warn_prog
 	# Armed goes red past 70%; pre-warn never reaches that (pf <= arm_frac there) so it stays amber.
-	var barcol := Color(1.0, 0.3, 0.2) if pf > 0.7 else Color(1.0, 0.7, 0.25)
+	# c2-07: through the palette so the CRITICAL-red end shifts toward magenta under colorblind mode;
+	# the CAUTION amber end names its tier so it passes through unchanged (no green-channel guess).
+	var barcol := Art.warn(Color(1.0, 0.3, 0.2)) if pf > 0.7 else Art.warn(Color(1.0, 0.7, 0.25), Art.WARN_CAUTION)
 	if tele["kind"] == "gate":
 		# Defensive draw-time width clamp: choose the widest gate label whose rendered right edge
 		# (inner_x + tw + 2) stays inside the usable edge, downgrading CLEAR THE GATE -> GATE! ->
@@ -811,7 +819,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			# returns true there), so it never strobes.
 			var rcol := scol
 			if sfrac <= 0.34:
-				rcol = Color(1.0, 0.3, 0.25) if _mblink(10) else scol
+				rcol = Art.warn(Color(1.0, 0.3, 0.25)) if _mblink(10) else scol
 			if not _measure:
 				# Dim full-circle track under the drain, so remaining time reads
 				# against a whole instead of a floating partial arc.
@@ -857,17 +865,24 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 		if sim.intermission_ticks > 0:
 			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
 			# blinking red under 1s so the shop window doesn't lapse unnoticed.
+			# c2-07: same colorblind palette (Art.warn) as the low-ammo idiom it mirrors — the
+			# red-critical under-1s tint shifts toward magenta, the ambers pass through unchanged.
 			var shop_col := Color(1.0, 0.9, 0.5)
+			# c2-07: closing-soon is a warning tier -> the flag is set in the SAME branch as the warn
+			# tint (not a separate < 120 test), so palette and backing can never fall out of step.
+			var shop_warn := false
 			if sim.intermission_ticks < 60:
-				shop_col = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.7, 0.2, 0.18)
+				shop_col = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.7, 0.2, 0.18))
+				shop_warn = true
 			elif sim.intermission_ticks < 120:
-				shop_col = Color(1.0, 0.6, 0.3)
+				shop_col = Art.warn(Color(1.0, 0.6, 0.3), Art.WARN_CAUTION)
+				shop_warn = true
 			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
 			# Highest priority (95): the timed buy window is the most perishable readout on
 			# the row, so it demotes into +N only if literally nothing else fits.
 			var shoptxt := "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60]
 			if _fits2("shop", ICON + 13.0 + _tw(shoptxt)):
-				x = _stat("hud_gunshop", shoptxt, x, y, shop_col)
+				x = _warn_stat("hud_gunshop", shoptxt, x, y, shop_col) if shop_warn else _stat("hud_gunshop", shoptxt, x, y, shop_col)
 		else:
 			# WAVE identity chip (prio 85): demotable, but sits above vanity so it
 			# survives a crowded row. _stat advance minus the 2px tuck == its footprint.
@@ -1054,6 +1069,12 @@ func _accessibility_pips() -> void:
 	var band := _pip_bounds()   # (left, right) usable band in HUD-local space; pulls in when cropped
 	# full-alpha glyphs sit on the opaque scrim for max contrast; a pip whose label can't fit the
 	# band at all is SUPPRESSED (below the supported minimum) rather than drawn spilling off-edge.
+	# c2-07: each pip's contrast backing is the opaque _pip_plate scrim below (PIP_SCRIM, the SAME
+	# dark tray the low-ammo _mag_bar warning now draws) plus its framing hairline, drawn BEFORE the
+	# glyph so the light-on-dark CB/RM label holds over bright snow/desert/explosion flash instead of
+	# washing out. _pip_plate raw-draws its rect (not the _emit_bg_rect seam) precisely because these
+	# pips live in the reserved corner PAST _fit_full. The label color routes through Art.safe so its
+	# hue stays colorblind-safe.
 	if Art.colorblind and _pip_fits("CB", band):
 		_text("CB", _pip_plate("CB", acc_y, band), acc_y, Art.safe(Color(0.6, 0.85, 1.0)))
 		acc_y += 11.0
@@ -1155,7 +1176,11 @@ static func _pip_plate_rect(right_edge: float, w: float, py: float, left_edge :=
 func _pip_plate(txt: String, py: float, band: Vector2) -> float:
 	var w := _tw(txt)
 	var r := _pip_plate_rect(band.y, w, py, band.x)
-	# Near-opaque so the pip holds over bright snow/desert or an explosion flash, not just grass.
+	# c2-07: THE pip contrast backing. Near-opaque PIP_SCRIM (the SAME constant the low-ammo mag
+	# bar and the warning-numeral shadow now use) so the CB/RM glyph holds over bright snow/desert
+	# or an explosion flash, not just grass. Raw draw_rect (not the _emit_bg_rect seam) because the
+	# pips live in the reserved corner PAST _fit_full, where the seam's within-edge capture check
+	# would reject them; the plate is verified instead by _PipCaptureHud's own _pip_plate override.
 	draw_rect(r, PIP_SCRIM)
 	# The 1px hairline is stroked CENTERED on its rect edge, so drawing it on `r` would push half a
 	# pixel past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
@@ -1384,7 +1409,11 @@ static func _record_hud_mode(score: int, best: int) -> String:
 
 
 func _stat(icon: String, txt: String, x: float, y: float,
-		col := Color(0.95, 0.96, 0.9), pulse := 0.0) -> float:
+		col := Color(0.95, 0.96, 0.9), pulse := 0.0, shadow := false) -> float:
+	# Params after `col` are DISTINCT axes and must be passed positionally in this order (GDScript
+	# has no keyword args): `pulse` (6th, float) is the payout thump; `shadow` (7th, bool) is the
+	# c2-07 warning contrast backing. Callers never set `shadow` directly — the _warn_stat wrapper is
+	# the ONE site that passes `..., 0.0, true`, so a warning's palette and backing can't be split.
 	# pulse > 0 scale-thumps the icon around its center — a payout visibly hits
 	# the badge instead of only tinting the numeral.
 	# c1-06: in the row-0 MEASURE pass paint nothing (only advance x), so the two-pass
@@ -1398,7 +1427,7 @@ func _stat(icon: String, txt: String, x: float, y: float,
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			_emit_icon(icon, r)
-	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col) + 10.0
+	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col, shadow) + 10.0
 
 
 ## Segmented magazine bar: reads the clip fill at a glance (peripheral vision)
@@ -1409,9 +1438,17 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	var filled := int(ceil(frac * segs))
 	var lit := Art.safe(Color(0.5, 0.85, 0.45))
 	if frac <= 0.2:
-		lit = Color(1.0, 0.25, 0.2)
+		lit = Art.warn(Color(1.0, 0.25, 0.2))
 	elif frac <= 0.45:
-		lit = Color(1.0, 0.72, 0.32)
+		lit = Art.warn(Color(1.0, 0.72, 0.32), Art.WARN_CAUTION)
+	# c2-07: the on-foot row draws over the live battlefield with no panel under it, so a
+	# low-ammo WARNING bar washed out on bright snow/desert. Only the amber/red warning tiers
+	# (frac <= 0.45) get the near-opaque backing tray (the same PIP_SCRIM the corner pips use) so
+	# a healthy green bar keeps its clean look while a critical one holds contrast over any
+	# background. Routed through the _emit_bg_rect seam so a headless capture subclass records it
+	# (like the pip/telegraph scrims) rather than raw-drawing.
+	if frac <= 0.45:
+		_emit_bg_rect(Rect2(x - 1.0, y - 1.0, segs * 3.6 + 1.0, 7.0), PIP_SCRIM)
 	for s in segs:
 		draw_rect(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else Color(0.22, 0.2, 0.18))
 	return x + segs * 3.6 + 4.0
@@ -1432,10 +1469,16 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# Low-ammo escalation: amber under 20, blinking red when dry.
 	var ammo: int = p["mg_ammo"]
 	var acol := Color(0.95, 0.96, 0.9)
+	# c2-07: the warning-tint flag is set in the SAME branch that assigns the warn color (never from
+	# a separate `ammo <= 20` test that could drift out of step with the color tiers), so the numeral
+	# routes through the coupled _warn_stat backing exactly when its tint is a warning.
+	var awarn := false
 	if ammo == 0:
-		acol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+		acol = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
+		awarn = true
 	elif ammo <= 20:
-		acol = Color(1.0, 0.75, 0.35)
+		acol = Art.warn(Color(1.0, 0.75, 0.35), Art.WARN_CAUTION)
+		awarn = true
 	elif ammo == SimWorld.MG_AMMO_MAX:
 		acol = Color(0.6, 0.85, 1.0)
 	# The ammo glyph reflects what's actually chambered: shotgun shells during the Trench Gun
@@ -1447,14 +1490,18 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		acon = "item_bullet"
 	# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 	var gcol := Color(0.95, 0.96, 0.9)
+	# c2-07: warning tint flag for the grenade numeral's contrast drop-shadow.
+	var gwarn := false
 	if p["grenade_ammo"] == 0:
 		# Proactive dry state, matching the MG ammo escalation — the dry-flash below only fires
 		# AFTER a wasted throw attempt.
-		gcol = Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18)
+		gcol = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
+		gwarn = true
 	elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 		gcol = Color(0.6, 0.85, 1.0)
 	if i < main._grenade_dry.size() and main._grenade_dry[i] > 0 and _mblink(4):
-		gcol = Color(1.0, 0.3, 0.25)
+		gcol = Art.warn(Color(1.0, 0.3, 0.25))
+		gwarn = true
 	var roll_ready: bool = p["roll_cd"] == 0
 	# c2-01: prefix-fit the three fixed equipment units (ammo+mag, grenade, roll) against the usable
 	# edge, reserving the worst-case +N slot ONLY on real overflow — the SAME plan_chips planner the
@@ -1467,7 +1514,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	var eq_shown: int = eq_plan["shown"]
 	if eq_shown >= 1:
 		var ammo_x := px
-		px = _stat(acon, "%02d" % ammo, px, ry, acol)
+		px = _warn_stat(acon, "%02d" % ammo, px, ry, acol) if awarn else _stat(acon, "%02d" % ammo, px, ry, acol)
 		# Empty-clip bash on cooldown: a draining ring on the dry ammo icon so "melee not ready"
 		# reads distinctly from "input ignored".
 		if ammo == 0 and p["fire_cd"] > 0:
@@ -1480,7 +1527,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
 	if eq_shown >= 2:
 		var gren_x := px
-		px = _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
+		px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol) if gwarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 		# Throw on cooldown: a draining ring on the grenade pip so a throw-while-recharging reads
 		# as "wait a beat", not a dropped input (matches the bash ring).
 		if p["grenade_cd"] > 0:
@@ -1604,9 +1651,49 @@ func _pip(x: float, y: float, col: Color, txt: String) -> float:
 	return x + w + 2.0
 
 
-func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9)) -> float:
+## c2-07: paint an ALWAYS-warning label — pairs the colorblind palette (Art.warn) with the contrast
+## backing in ONE call so an unconditional warning read can't be routed without either. State-
+## dependent warnings (ammo/grenade/shop that are only red in some states) instead pass the shared
+## `shadow` bool, which gates the SAME-state color and backing together — see _text/_stat.
+func _warn_text(txt: String, x: float, y: float, red: Color) -> float:
+	return _text(txt, x, y, Art.warn(red), true)
+
+
+## c2-07: sibling of _warn_text for an ICON+numeral stat. A state-dependent readout (ammo /
+## grenade / SHOP OPEN) whose tint is only a warning in some states routes its WARNING branch
+## here and its normal branch through plain _stat — the warning branch ALWAYS gets the contrast
+## backing and the normal branch NEVER does, so the two states can't be crossed (a warning tint
+## drawn without its backing, or backing without a warning tint). `warned` is the already-remapped
+## Art.warn color, computed in the same in-branch step that flips the flag selecting this wrapper.
+func _warn_stat(icon: String, txt: String, x: float, y: float, warned: Color) -> float:
+	return _stat(icon, txt, x, y, warned, 0.0, true)
+
+
+func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9), shadow := false) -> float:
 	# c1-06: the row-0 MEASURE pass advances x without painting (see _row0_opt).
 	if not _measure:
+		# c2-07: a dark contrast backing behind a WARNING label (low ammo / dry grenade / K.I.A. /
+		# BAIL OUT / unaffordable price / closing shop) so a red/amber read holds over a bright
+		# battlefield -- the SAME scrim idea the corner pips and the low-ammo mag bar use. Sized to
+		# the glyph box (matching the capture's text rect) so it stays within the usable edge exactly
+		# when the label does, and faded on the label's own alpha so a closed/fading chip shows none.
+		if shadow and col.a > 0.01:
+			# The scrim is measured from Art.font() at FONT_SIZE -- the SAME single font+size the label
+			# is rendered with by _emit_hud_text -> Art.text (the project ships exactly one HUD face,
+			# PixelOperator8; there is no per-font drift to reconcile). get_string_size gives the glyph
+			# box and get_ascent the baseline->top offset, so the rect encloses the actual glyph bounds
+			# by construction -- pinned by test_warn_shadow_encloses_glyph.
+			var f := Art.font()
+			var s := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE)
+			# Same PIP_SCRIM tray the corner pips and low-ammo mag bar use, faded on the label's own
+			# alpha so a closed/fading chip shows none -- one HUD warning-backing color, not a one-off.
+			# Origin matches _emit_hud_text's baseline->top-left (y - ascent). Grow 1px VERTICALLY only
+			# (never horizontally): that covers Art.text's +1px drop-shadow row (which extends DOWN) and
+			# any descender/ascender, while the x-extent stays exactly the glyph advance -- the row's
+			# within-edge capture check forbids spilling past _fit_full, so the shadow's lone +1px right
+			# column is deliberately left unbacked rather than risk an over-edge scrim.
+			_emit_bg_rect(Rect2(Vector2(x, y - f.get_ascent(FONT_SIZE) - 1.0), Vector2(s.x, s.y + 2.0)),
+				Color(PIP_SCRIM.r, PIP_SCRIM.g, PIP_SCRIM.b, PIP_SCRIM.a * col.a))
 		_emit_hud_text(txt, Vector2(x, y), col)
 	return x + _tw(txt)
 

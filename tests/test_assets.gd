@@ -243,6 +243,30 @@ func test_a1_friendly_greens_are_colorblind_safe() -> void:
 	Art.colorblind = false   # restore the static for other suites
 
 
+# --- c2-07: warn() tier is EXPLICIT, not a green-channel guess ---
+# Verified color map: the tier the CALLER declares decides the remap, so a future palette tweak
+# (e.g. bumping a critical red's green above the old 0.5 threshold) can't silently reclassify it.
+func test_c2_warn_tier_color_map() -> void:
+	var was_cb: bool = Art.colorblind
+	# The actual HUD warning tints, each with the tier its call site declares.
+	var crit := Color(1.0, 0.25, 0.2)          # low-ammo / dry-grenade / closing-shop CRITICAL red
+	var caution := Color(1.0, 0.72, 0.32)       # low-ammo / pre-close CAUTION amber
+	# A red-critical tint whose green sits ABOVE the retired 0.5 heuristic — the old code would have
+	# misread it as caution and skipped the lift; the explicit tier keeps it critical.
+	var high_g_crit := Color(1.0, 0.6, 0.2)
+	Art.colorblind = false
+	Runner.T.ok(Art.warn(crit).is_equal_approx(crit), "colorblind OFF: critical tint passes through")
+	Runner.T.ok(Art.warn(caution, Art.WARN_CAUTION).is_equal_approx(caution), "colorblind OFF: caution tint passes through")
+	Art.colorblind = true
+	var c := Art.warn(crit)
+	Runner.T.ok(c.b > crit.b and c.b > c.g, "colorblind ON: CRITICAL lifts blue past its green (separates from amber on the blue axis)")
+	Runner.T.ok(Art.warn(caution, Art.WARN_CAUTION).is_equal_approx(caution), "colorblind ON: CAUTION tier passes through unchanged")
+	var hc := Art.warn(high_g_crit)   # default tier == CRITICAL
+	Runner.T.ok(hc.b > high_g_crit.b, "colorblind ON: a high-green tint declared CRITICAL still gets the blue lift (no green-channel misclassification)")
+	Runner.T.ok(Art.warn(crit, Art.WARN_CRITICAL).is_equal_approx(Art.warn(crit)), "default tier is CRITICAL")
+	Art.colorblind = was_cb   # restore before any later suite reads it
+
+
 # --- a1-17 r2: top-bar record chip mode ---
 
 func test_a1_record_hud_mode() -> void:

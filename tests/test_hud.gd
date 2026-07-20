@@ -1436,6 +1436,36 @@ func test_plate_right_reports_dynamic_edge() -> void:
 	h.free()
 
 
+# c2-07: the warning contrast backing (_text with shadow=true) must ENCLOSE the glyph box it
+# protects. Capture the REAL _text draw and assert the emitted bg scrim contains the emitted glyph
+# box — both measured from the single project font (Art.font), so the backing can't drift from what
+# Art.text actually renders. Guards the point-3 fix (scrim tracks glyph bounds/ascent).
+func test_warn_shadow_encloses_glyph() -> void:
+	var cap := _ChipCaptureHud.new()
+	cap._text("00", 40.0, 30.0, Color(1.0, 0.25, 0.2), true)   # a warning label -> backing on
+	var glyph := Rect2()
+	var scrim := Rect2()
+	var had_scrim := false
+	for b in cap.boxes:
+		if b["k"] == "text":
+			glyph = b["box"]
+		elif b["k"] == "bg":
+			scrim = b["box"]
+			had_scrim = true
+	Runner.T.ok(had_scrim, "a warning label emits a contrast backing scrim")
+	Runner.T.ok(scrim.encloses(glyph), "the scrim %s encloses the glyph box %s" % [str(scrim), str(glyph)])
+	# And a NON-warning label (shadow off) emits no scrim, so a healthy readout stays clean.
+	var cap2 := _ChipCaptureHud.new()
+	cap2._text("00", 40.0, 30.0, Color(0.95, 0.96, 0.9), false)
+	var any_bg := false
+	for b in cap2.boxes:
+		if b["k"] == "bg":
+			any_bg = true
+	Runner.T.ok(not any_bg, "a non-warning label draws no backing")
+	cap.free()
+	cap2.free()
+
+
 # A HudIcons whose chip DRAW SEAMS record instead of paint — so the REAL _buff_chips /
 # _ovf_chip / _draw_telegraph can run headless and be inspected box-by-box. Records the same
 # {k, id, box} shape the verb-legend capture uses.

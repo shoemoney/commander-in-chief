@@ -639,6 +639,33 @@ static func safe(green: Color) -> Color:
 	return Color(0.35, 0.75, 1.0, green.a)
 
 
+## Warning tier, passed EXPLICITLY by every caller. The tier is a semantic property of the
+## readout — "is this the critical or the caution state?" — that the caller already knows, NOT
+## something to re-derive from the tint's green channel. The old green >= 0.5 heuristic meant a
+## future palette tweak (nudging a red-critical tint's green up, or an amber's down) could
+## SILENTLY flip its tier and skip/apply the remap wrongly; naming the tier at the call site
+## removes that whole failure class. CRITICAL is the default so an unclassified warning fails
+## SAFE (gets the separating blue lift) rather than washing out.
+enum { WARN_CRITICAL, WARN_CAUTION }
+
+
+## Colorblind-safe warning remap — sibling of safe(); together they ARE the one colorblind
+## palette (greens route through safe(), reds/ambers through warn()), so no HUD warning tint is a
+## one-off hue shift. The red↔green axis collapses under deuteran/protan vision, so a red-critical
+## tier that leaned on hue alone read the same as an amber caution. For the CRITICAL tier we raise
+## the blue channel to WARN_CRIT_BLUE (== 0.55 of its red level), pushing it PART-WAY toward
+## magenta — far enough that the blue axis (which survives red-green colorblindness) separates
+## critical from the blue-poor amber tier, but not a full 1:1 red=blue that would wash the tint
+## pink and lose its own hue. maxf() only ever LIFTS blue, so a tint already bluer than that keeps
+## its value and its luminance, and the blink on/off pulse still reads. The CAUTION tier and
+## non-colorblind pass through unchanged. Driven from main via `colorblind`.
+const WARN_CRIT_BLUE := 0.55   # fraction of the red channel the critical tier's blue is lifted to
+static func warn(red: Color, tier := WARN_CRITICAL) -> Color:
+	if not colorblind or tier == WARN_CAUTION:
+		return red
+	return Color(red.r, red.g, maxf(red.b, red.r * WARN_CRIT_BLUE), red.a)
+
+
 ## Shared view-clock helpers — one source for the sine-pulse and square-blink
 ## expressions that were retyped ~10× across main.gd/hud.gd.
 static func pulse(rate: float) -> float:
