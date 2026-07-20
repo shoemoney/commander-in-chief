@@ -42,8 +42,8 @@ var _confirm := -1   # index of a destructive item awaiting a 2nd press
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
 var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown (up/down pages)
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
-var _howto_page := 0    # c2-02: which HOW-TO-PLAY page (0 BASIC / 1 ENEMIES / 2 ENDLESS); left/right/wheel or tab-click pages it
-const HOWTO_TABS := ["BASIC", "ENEMIES", "ENDLESS"]  # c2-02: the three HOW-TO-PLAY pages, split so no page crams rows onto the BACK plate
+var _howto_page := 0    # c3-05: which HOW-TO-PLAY page (0 CONTROLS / 1 WAR CHEST / 2 ENEMIES / 3 ENDLESS); left/right/wheel or tab-click pages it
+const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "ENEMIES", "ENDLESS"]  # c3-05: four HOW-TO-PLAY pages — the old BASIC page crammed the verbs AND the War Chest economy together, so each now owns a page and reads at a roomy pitch
 const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; existence gates the INFO menu row
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
 var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
@@ -211,6 +211,9 @@ const REBIND_TAB_GAP := 6.0        # gap between REBIND tab / device plates
 const HUB_HEADER_Y := 84.0         # INFO / DISP / SETUP header title baseline
 const HUB_SUBTITLE_Y := 104.0      # ...and their subtitle line
 const CONTENT_TITLE_Y := 38.0      # HALL / HOWTO content-screen title baseline
+const TAB_BASELINE_Y := 66.0       # HALL filter / HOWTO page tab-label text baseline (plate top y54)
+const FRAME_INNER_R := 612.0       # right edge of the chrome frame's interior (CANVAS_WIDTH 640 less the 28px border) — content clamps/right-aligns here
+const TEXT_MID_10 := 4.0           # visual mid of a 10px cap-height glyph below its baseline (cap sits ~y-8..y); centers a sprite box on the text row
 const PAUSE_HEADER_Y := 78.0       # PAUSED title baseline
 const PAUSE_SUBTITLE_Y := 100.0    # PAUSE run-status subline
 const PAUSE_FOOTNOTE_Y := 114.0    # PAUSE RUN# footnote — the lowest header line TOP_PAUSE clears
@@ -499,7 +502,7 @@ func open(m: int, select_id := "") -> void:
 			# clamping the page in case a filter change shrank the list underneath it.
 			_hall_page = clampi(_hall_page, 0, _hall_pages(_hall_rows().size()) - 1)
 	elif m == Mode.HOWTO:
-		_howto_page = 0   # c2-02: always open the help on the BASIC page
+		_howto_page = 0   # c3-05: always open the help on the CONTROLS page
 		_tab_hover = -1   # c2-02: HOWTO shares _tab_hover with HALL — clear it so a hover index left on the OTHER screen's tab row can't light a HOWTO tab (open() clears it above too; explicit here for the shared-state contract)
 	elif m == Mode.INFO:
 		# Cache the replay-file existence once per INFO open so _menu_items() reads
@@ -1497,7 +1500,7 @@ func _nav(move: int, hmove: int) -> void:
 		_dirty = true
 		return
 	# c2-02: HOW TO PLAY is paged on the HORIZONTAL axis — left/right (and the wheel,
-	# routed in as hmove) turns the BASIC / ENEMIES / ENDLESS page, clamped (never
+	# routed in as hmove) turns the CONTROLS / WAR CHEST / ENEMIES / ENDLESS page, clamped (never
 	# wraps), so each section owns a full screen instead of stacking rows onto the
 	# next. Matches the footer's "L/R PAGE" hint exactly. Up/down is deliberately
 	# NOT consumed here — it falls through to the 1-row list below and simply keeps
@@ -3326,20 +3329,24 @@ func _draw_howto() -> void:
 	# content screens share one header rhythm; the tab plate top sits at y54, a clear
 	# ~12px below, so the two never overlap regardless of font metrics.
 	_center_text("HOW TO PLAY", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
-	# c2-02: the wall of ~17 lines is split into three PAGES — BASIC / ENEMIES /
-	# ENDLESS — each drawn on its own screen with a fresh top-of-screen y cursor.
-	# Nothing stacks a section onto the next, so no row can land on the BACK plate
-	# and the ranged-threat block gets a comfortable pitch instead of tightening to
-	# its readable floor. Left/right (or wheel, or a tab click) turns the page.
+	# c2-02/c3-05: the wall of ~17 lines is split into four PAGES — CONTROLS / WAR
+	# CHEST / ENEMIES / ENDLESS — each drawn on its own screen with a fresh top-of-
+	# screen y cursor. Nothing stacks a section onto the next, so no row can land on
+	# the BACK plate, and the two dense blocks the old BASIC page jammed together (the
+	# input verbs and the War Chest economy) each get a page and a roomy pitch instead
+	# of sharing one crammed screen. Left/right (or wheel, or a tab click) turns it.
 	_draw_howto_tabs()
 	match _howto_page:
-		0: _howto_page_basic()
-		1: _howto_page_enemies()
+		0: _howto_page_controls()
+		1: _howto_page_warchest()
+		2: _howto_page_enemies()
 		_: _howto_page_endless()
 
 
-# c2-02: the BASIC/ENEMIES/ENDLESS tab row — same centered grammar and pure style
-# helper the HALL filter tabs use, so both content screens read as one system.
+# c3-05: the CONTROLS/WAR CHEST/ENEMIES/ENDLESS tab row — same centered grammar and
+# pure style helper the HALL filter tabs use, so both content screens read as one
+# system. Everything iterates HOWTO_TABS so the four-tab row draws (and its click
+# targets in _howto_tab_rects) stay in lockstep with the page count.
 func _draw_howto_tabs() -> void:
 	var tabs := _howto_tab_rects()
 	for i in HOWTO_TABS.size():
@@ -3350,46 +3357,67 @@ func _draw_howto_tabs() -> void:
 		var plate: Color = st["plate"]
 		if plate.a > 0.0:
 			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), plate)
-		Art.text(self, HOWTO_TABS[i], Vector2(tr.position.x + 4.0, 66), 10, st["text"])
+		Art.text(self, HOWTO_TABS[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), 10, st["text"])
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
 			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
+	# c3-05: a "N / 4" counter, right-aligned at the frame edge on the tab baseline, so
+	# a first-time player can see at a glance there are more pages than the one on
+	# screen — the tabs alone read as a static header, and nobody paged through them.
+	# The centered tab row (see _tab_rects_for) never reaches the frame edge, so the
+	# counter can't collide with the rightmost (ENDLESS) tab.
+	var pg := "%d / %d" % [_howto_page + 1, HOWTO_TABS.size()]
+	var pw := Art.font().get_string_size(pg, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	Art.text(self, pg, Vector2(FRAME_INNER_R - pw, TAB_BASELINE_Y), 10, Color(0.7, 0.75, 0.7, 0.85))
 
 
-# c2-02 page 1 — the survival basics: one-hit rule, the War Chest, and the verb
-# lines (grenades / roll / board / plant) that used to crowd the top of the wall.
-func _howto_page_basic() -> void:
-	var y := 96.0
-	var hold_pre := "pays to REVIVE you or BUY supplies (hold"
-	var intro := [
-		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
-		[hold_pre, Color(0.85, 0.9, 0.8)],
-	]
-	for row in intro:
-		Art.text(self, row[0], Vector2(60, y), 11, row[1])
-		y += 17.0
-	# The supply-wheel hold prompt is the DEVICE GLYPH, not a key-name string —
-	# it sits at the end of the second intro line (baseline y - 17).
-	var wy := y - 17.0
-	var px := 60.0 + Art.font().get_string_size(hold_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 9.0
-	Art.draw_glyph(self, "wheel", Vector2(px, wy - 4.0), 12.0)
-	Art.text(self, "). That's the choice.", Vector2(px + 8.0, wy), 11, Color(0.85, 0.9, 0.8))
-	y += 24.0
-	# Verb lines carry the actual input glyph inline (device-aware) — text-only
-	# verbs made players hunt the legend. Re-wrapped for the wider pixel font:
-	# >64 chars clips at x=640.
-	_verb_line(["@grenade", "GRENADES crack armor — bunkers, bosses, the Colossus."],
-		y, Color(0.9, 0.92, 0.8))
+# c3-05 page 1 — CONTROLS. The input verbs (grenade / roll / board / plant), one
+# per line so each glyph reads against its own complete sentence instead of the old
+# run-on "Bullets don't. ROLL... BOARD tanks..." line that packed two verbs into one
+# row. Each carries its device-aware glyph inline (text-only verbs made players hunt
+# the legend); every line is re-wrapped under ~64 chars so it can't clip at x=640.
+func _howto_page_controls() -> void:
+	var col := Color(0.9, 0.92, 0.8)
+	var y := 100.0
+	# Three buttons, four verbs: BOARD and PLANT are the SAME @interact button (context
+	# picks which), shown by the repeated glyph below — so the header can't claim one
+	# button per verb.
+	Art.text(self, "THREE BUTTONS, FOUR VERBS:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
+	y += 30.0
+	# Each text token after a glyph leads with a space so the word never glues to the
+	# device art. Board and plant share the SAME button, so the two lines are parallel
+	# imperatives (BOARD… / PLANT…) that read as complete commands, not fragments.
+	_verb_line(["@grenade", " GRENADES crack armor — bunkers, bosses, the Colossus."], y, col)
+	y += 30.0
+	_verb_line(["@roll", " ROLL dodges bullets — armor never stops them."], y, col)
+	y += 30.0
+	_verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col)
+	y += 30.0
+	_verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col)
+
+
+# c3-05 page 2 — WAR CHEST. The one-hit rule and the shared-coin economy, given their
+# own page and complete sentences. The supply-wheel prompt is the DEVICE GLYPH drawn
+# inline via _verb_line (was a lowercase fragment with the glyph spliced by hand into
+# the middle of a wrapped line), so it reads as one plain sentence.
+func _howto_page_warchest() -> void:
+	var y := 100.0
+	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(60, y), 13, Color(1.0, 0.9, 0.6))
 	y += 26.0
-	_verb_line(["Bullets don't. ", "@roll", "ROLL to dodge. ", "@interact",
-		"BOARD tanks for crush + shells."], y, Color(0.9, 0.92, 0.8))
+	Art.text(self, "No health bar, no second chance — use cover and keep moving.",
+		Vector2(60, y), 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - 60.0)
+	y += 40.0
+	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(60, y), 11, Color(1.0, 0.9, 0.6))
 	y += 26.0
-	_verb_line(["@interact", "with no tank near PLANTS a carried claymore — it hurts BOTH sides."],
-		y, Color(0.9, 0.92, 0.8))
+	Art.text(self, "Spend it to REVIVE a fallen partner or BUY supplies.",
+		Vector2(60, y), 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - 60.0)
+	y += 30.0
+	_verb_line(["Hold ", "@wheel", " to open the supply wheel. That's the choice."],
+		y, Color(0.85, 0.9, 0.8))
 
 
-# c2-02 page 2 — the standard red-team roster with live sprites, now at a roomy
-# pitch instead of 18px crammed under the ranged block.
+# c3-05 page 3 — the standard red-team roster with live sprites, at a roomy pitch
+# instead of the 18px it once crammed under the ranged block.
 func _howto_page_enemies() -> void:
 	var y := 100.0
 	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
@@ -3400,11 +3428,11 @@ func _howto_page_enemies() -> void:
 		["frogman", "FROGMAN — lurks in water, grenades only"]]
 	for r in roster:
 		_draw_sprite_fit(r[0], Rect2(74, y - 22, 28, 26), Art.tint(r[0]))
-		Art.text(self, r[1], Vector2(110, y - 6), 11, Color(0.9, 0.92, 0.82), 612.0 - 110.0)
+		Art.text(self, r[1], Vector2(110, y - 6), 11, Color(0.9, 0.92, 0.82), FRAME_INNER_R - 110.0)
 		y += 34.0
 
 
-# c2-02 page 3 — the Endless War ranged specialists.
+# c3-05 page 4 — the Endless War ranged specialists.
 func _howto_page_endless() -> void:
 	var y := 100.0
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
@@ -3436,9 +3464,21 @@ func _howto_page_endless() -> void:
 	# shows a full body instead of the old ~7px speck the padded bakes gave.
 	var last_max := _back_rect().position.y - 7.0
 	var readable := 13.0   # 10px text needs ~3px leading to stay legible
-	var pitch := 18.0
+	# c3-05: with ENDLESS on its own tab the seven rows own a full screen, so the
+	# pitch cap lifts 18 -> 24 — the block breathes instead of hugging its readable
+	# floor, and the sprite boxes grow with it (box == pitch - 1) so the silhouettes
+	# read as bodies, not specks. The derived-fit-then-cap discipline is unchanged: a
+	# grown roster still tightens the pitch rather than colliding with BACK.
+	var pitch := 24.0
 	if special.size() > 1:
-		pitch = floorf(minf(18.0, (last_max - y) / float(special.size() - 1)))
+		pitch = floorf(minf(24.0, (last_max - y) / float(special.size() - 1)))
+	# c3-05: release-safe floor at the READABLE minimum (not a bare 1px). If a grown
+	# roster's pure fit falls below the legible pitch, the debug assert below trips first
+	# (the signal to paginate); but with asserts stripped in a release build we hold the
+	# readable pitch rather than silently collapsing rows into 1px specks. Readability
+	# wins over the BACK-clearance invariant in that pathological case — a legible row
+	# grazing BACK beats an illegible one that clears it.
+	pitch = maxf(readable, pitch)
 	# Two invariants, checked for BOTH the seven authored rows and any grown
 	# roster: the block never collides with BACK (pure fit, no upward clamp), and
 	# it never teaches below a legible pitch. If a future roster overflows, the
@@ -3447,15 +3487,22 @@ func _howto_page_endless() -> void:
 	# still can't collide, it just tightens.
 	assert(y + float(special.size() - 1) * pitch <= last_max)
 	assert(pitch >= readable)
-	var box: float = maxf(1.0, pitch - 1.0)
+	# Box tracks the DERIVED pitch (never a fixed size): pitch - 1 guarantees a >=1px
+	# gap between adjacent sprites at any roster size, so they grow with the roomier
+	# pitch yet can never overlap — the collision the old fixed 26px box baked in.
+	var box := maxf(1.0, pitch - 1.0)
 	# c2-02: each ENDLESS threat description is width-clamped to the frame interior
-	# (text starts at x76, right edge 612) so a long or LOCALIZED tip clips with an
-	# ellipsis instead of bleeding through the chrome past x=640 — the same overflow
+	# (text starts at x76, right edge FRAME_INNER_R) so a long or LOCALIZED tip clips with
+	# an ellipsis instead of bleeding through the chrome past x=640 — the same overflow
 	# guard the ENEMIES roster and the BASIC verb lines carry.
-	var text_w := maxf(0.0, 612.0 - 76.0)
+	var text_w := maxf(0.0, FRAME_INNER_R - 76.0)
 	for i in special.size():
 		var sy := y + i * pitch
-		_draw_sprite_fit(special[i][0], Rect2(50, sy - box + 3.0, box, box), special[i][1])
+		# c3-05: center the sprite box on the text's visual mid (10px cap-height sits
+		# ~sy-8..sy, mid ~sy-4) instead of hanging it off the baseline, so the body and
+		# its tip line up on one row — the old sy-box+3 anchor drifted the two apart as
+		# the box grew.
+		_draw_sprite_fit(special[i][0], Rect2(50, sy - TEXT_MID_10 - box / 2.0, box, box), special[i][1])
 		Art.text(self, special[i][2], Vector2(76, sy), 10, Color(0.88, 0.9, 0.8), text_w)
 
 
