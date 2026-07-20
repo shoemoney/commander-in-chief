@@ -118,6 +118,16 @@ const DESTR_ARMED_TEXT := Color(1.0, 0.95, 0.88)
 # the label contrast below AA-normal. Dark under dark keeps the composite ~= flood.
 const DESTR_ARMED_PLATE_SEL := Color(0.55, 0.14, 0.07)
 const DESTR_ARMED_PLATE_UNSEL := Color(0.45, 0.12, 0.06)
+# c2-15: armed-confirm affordance geometry/colors — a 2px bar was too subtle on the
+# 360px canvas, so the arm now reads as a distinct ALERT: a thick amber frame, a bright
+# top keyline, and a 4px countdown gauge over a dark track. Hoisted so _draw and any
+# layout test share one source.
+const DESTR_ARMED_FRAME := Color(1.0, 0.6, 0.2, 1.0)   # thick amber border ringing the armed row
+const DESTR_ARMED_KEYLINE := Color(1.0, 0.82, 0.4)     # bright warning band across the plate top (alpha applied at draw)
+const DESTR_ARMED_BAR_FILL := Color(1.0, 0.92, 0.55, 1.0)   # draining countdown gauge fill — a pale gold, hue-separated from the amber frame so the gauge reads as its own element
+const DESTR_ARMED_BAR_TRACK := Color(0.15, 0.03, 0.02, 0.85)   # dark track the fill drains against
+const DESTR_ARMED_BAR_H := 4.0   # countdown gauge height (was 2)
+const DESTR_ARMED_FRAME_W := 4.0   # armed border thickness (was 2)
 
 # c1-04: y (top) of the SELECT/BACK input-legend footer strip drawn on EVERY
 # non-TITLE screen (PAUSE / OPTS / SETUP / HALL / HOWTO). One shared position so
@@ -2342,12 +2352,24 @@ func _draw() -> void:
 			var flood := DESTR_ARMED_FLOOD
 			flood.a = 0.82 + 0.16 * apulse
 			draw_rect(r.grow(-3), flood)
+			# c2-15: a bright warning keyline banding the top edge of the flood — a
+			# high-contrast plate cue so the armed row reads as an ALERT the instant it
+			# arms, not merely a redder tint of its pre-armed self. Pulses with the flood.
+			var kline := DESTR_ARMED_KEYLINE
+			kline.a = 0.85 + 0.15 * apulse
+			# Inset to the frame's inner edge (and snapped to whole pixels) so the amber
+			# border rings it cleanly and the 2px band stays crisp on the 360px canvas.
+			draw_rect(Rect2(roundf(r.position.x + DESTR_ARMED_FRAME_W), roundf(r.position.y + DESTR_ARMED_FRAME_W),
+				roundf(r.size.x - 2.0 * DESTR_ARMED_FRAME_W), 2.0), kline)
 		if destr:
 			# A warm bracket outlines destructive rows even BEFORE arming — a shape
 			# cue (not hue alone) that this row discards the run, unlike its
 			# neighbors. It thickens and brightens once armed.
-			draw_rect(r.grow(-2), Color(1.0, 0.55, 0.35, 0.95 if armed else 0.55),
-				false, 2.0 if armed else 1.0)
+			# Pre-armed warm hairline bracket. The armed row instead gets a THICK amber
+			# frame drawn in the armed-affordances block below, so it rings the row ON TOP
+			# of the flood / keyline / countdown bar and dominates as the alert.
+			if not armed:
+				draw_rect(r.grow(-2), Color(1.0, 0.55, 0.35, 0.55), false, 1.0)
 		# Modern Menus ortho icon where a row has a clean match (toggles swap
 		# by live state) — rows without one just stay text.
 		var icon := _row_icon(mitems[k]["id"])
@@ -2417,9 +2439,22 @@ func _draw() -> void:
 			# The armed affordances that ride ON TOP of the red flood (drawn above):
 			# a countdown bar draining along the bottom edge showing the disarm
 			# window, and the device confirm glyph in its reserved right slot.
-			draw_rect(Rect2(r.position.x + 3.0, r.end.y - 5.0,
-				(r.size.x - 6.0) * clampf(_confirm_t / 2.5, 0.0, 1.0), 2.0),
-				Color(1.0, 0.62, 0.3, 0.95))
+			# c2-15: a full-width DARK track under a THICK (4px) bright fill — 2px on a
+			# 360px canvas was too easy to miss. The track makes the drained portion
+			# read as a gauge (not a stray sliver), the height makes the arm unmissable.
+			# Bar/track inset to the frame's inner edge (whole-pixel snapped) so the amber
+			# border rings them cleanly instead of the fill painting over the bottom border.
+			var bar_x := roundf(r.position.x + DESTR_ARMED_FRAME_W)
+			var bar_w := roundf(r.size.x - 2.0 * DESTR_ARMED_FRAME_W)
+			var bar_y := roundf(r.end.y - DESTR_ARMED_FRAME_W - DESTR_ARMED_BAR_H)
+			draw_rect(Rect2(bar_x, bar_y, bar_w, DESTR_ARMED_BAR_H), DESTR_ARMED_BAR_TRACK)
+			draw_rect(Rect2(bar_x, bar_y,
+				roundf(bar_w * clampf(_confirm_t / 2.5, 0.0, 1.0)), DESTR_ARMED_BAR_H),
+				DESTR_ARMED_BAR_FILL)
+			# c2-15: the thick amber frame rings the row ON TOP of the flood / keyline /
+			# countdown bar, so it dominates as the alert. Only the device confirm glyph
+			# rides above it (below), landing crisp in its reserved inner slot.
+			draw_rect(r.grow(-2), DESTR_ARMED_FRAME, false, DESTR_ARMED_FRAME_W)
 			draw_texture_rect(armed_glyph, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false)
 		# Rows that open a screen reserve a right-edge slot for the > chevron so a
 		# long label ellipsizes clear of it instead of colliding.
