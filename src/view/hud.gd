@@ -549,13 +549,13 @@ func _draw() -> void:
 		var p := sim.players[i]
 		var px := 8.0
 		var pcol := Color(0.75, 0.95, 0.7) if i == 0 else Color(0.95, 0.85, 0.6)
-		px = _text("P%d" % (i + 1), px, ry + ICON - 3.0, pcol) + 7.0
+		px = _text("P%d" % (i + 1), px, ry + ROW_TEXT_BASELINE, pcol) + ROW_LABEL_GAP
 		if not p["alive"]:
 			px = _dead_chips(p, px, ry, i, sim)
 		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			var fuel_c := Vector2(px + ICON / 2.0, ry + ICON / 2.0)   # cannon cooldown ring anchors on the fuel dial (tank status), not the grenade chip
-			px = _fuel_dial(t, px, ry)
+			px = _fuel_gauge(t, px, ry)
 			var gcol_tank := Color(0.95, 0.96, 0.9)
 			var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
 			if p["grenade_ammo"] == 0:
@@ -576,7 +576,7 @@ func _draw() -> void:
 				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
 					px = _row_ovf(px, ry)
 				elif _mblink(8):
-					var bx := _warn_text(bailtxt, px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+					var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, Color(1.0, 0.3, 0.2))
 					_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
 						Color.WHITE, i == 1)
 			# c3-01: the cannon-shell count is a direct-draw tank chip — fit-guard it against the
@@ -1416,19 +1416,36 @@ func _draw_plate_rect_outline(rect: Rect2, col: Color) -> void:
 	]), PackedColorArray([col]), 1.0)
 
 
-func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
-	# Fuel-cap gauge: ring frames an arc that drains green → red.
+func _fuel_gauge(t: Dictionary, x: float, y: float) -> float:
+	# c3-12: ONE fuel gauge — an E→F LEVEL bar, not a seconds countdown. The old "%ds" readout
+	# mixed a clock metaphor into a gauge AND truncated — integer ((fuel+59)/60) flashed "0s" a
+	# tick before the tank was actually dry. A bracketed E[####]F bar answers the one question a
+	# bail-out call needs ("how much is left?") and can never show a premature empty: the fill
+	# just drains toward E. The neutral FUEL_ICON jerry can stays purely as the static fuel identity
+	# ICON (no fill of its own — the old radial arc is gone, and the round dial FACE it replaces is
+	# gone too), so the bar is the sole LEVEL gauge, not a second competing one; the can also remains
+	# the anchor the cannon-cooldown ring frames.
 	var frac := clampf(float(t["fuel"]) / float(SimWorld.TANK_FUEL_TICKS), 0.0, 1.0)
-	var c := Vector2(x + ICON / 2.0, y + ICON / 2.0)
-	draw_circle(c, ICON * 0.34, Color(0.08, 0.07, 0.06))
+	draw_texture_rect(FUEL_ICON, Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
+	# Endpoints run red at E/empty → green at F/full; red → blue under colorblind (green is the
+	# indistinguishable end), so the drain stays legible either way. The fill is a single lerp
+	# across those two ends, and the E/F endpoint letters take the very same end colors, so one
+	# palette definition drives the whole gauge — no hardcoded red/green to vanish under colorblind.
+	var e_col := Color(0.9, 0.15, 0.12)  # empty end (red in both palettes)
+	var f_col := Color(0.2, 0.15, 0.87) if Art.colorblind else Color(0.2, 0.8, 0.12)  # full end
+	var fuel_col := e_col.lerp(f_col, frac)
+	var lx := _text("E", x + ICON + FUEL_BAR_GAP, y + ROW_TEXT_BASELINE, e_col) + FUEL_BAR_GAP
+	# Same well + fill + ui_bar_frame construction as _mini_bar (shared insets/colors so the fuel
+	# level matches every other HUD bar), but the fill draw is guarded: a dry tank skips the
+	# zero-width fill rect entirely and the empty well alone reads "at E".
+	var bar := Rect2(lx, y + (ICON - FUEL_BAR_H) / 2.0, FUEL_BAR_W, FUEL_BAR_H)
+	var inset := Vector2(bar.size.x * MINI_BAR_INSET_X, bar.size.y * MINI_BAR_INSET_Y)
+	var well := Rect2(bar.position + inset, bar.size - inset * 2.0)
+	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
 	if frac > 0.0:
-		# Full→empty reads red↔green normally; red↔blue under colorblind (green is
-		# the indistinguishable end), so the drain stays legible either way.
-		var fuel_col := Color(0.9 - frac * 0.7, 0.15, 0.12 + frac * 0.75) if Art.colorblind \
-			else Color(0.9 - frac * 0.7, 0.15 + frac * 0.65, 0.12)
-		draw_arc(c, ICON * 0.27, -PI / 2, -PI / 2 + TAU * frac, 20, fuel_col, 2.5)
-	draw_texture_rect(Art.tex("ui_dial_fuel"), Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
-	return _text("%ds" % maxi(0, (t["fuel"] + 59) / 60), x + ICON + 3.0, y + ICON - 3.0) + 10.0   # ceil: "0s" only when actually empty
+		draw_rect(Rect2(well.position, Vector2(well.size.x * frac, well.size.y)), fuel_col)
+	draw_texture_rect(Art.tex("ui_bar_frame"), bar, false)
+	return _text("F", lx + bar.size.x + FUEL_BAR_GAP, y + ROW_TEXT_BASELINE, f_col) + FUEL_END_PAD
 
 
 ## Vest + timed-buff + claymore chip run, shared by the on-foot AND in-tank player
@@ -1548,6 +1565,25 @@ func _rollup(disp: float, target: float, delta: float) -> float:
 ## main's helper draws on main's canvas item; no ghost/ticks at this size.
 const MINI_BAR_INSET_X := 0.06   # c1-16: well inset as a fraction of the bar rect — shared by
 const MINI_BAR_INSET_Y := 0.22   # _mini_bar's fill AND the arm-point marker so they align exactly.
+const FUEL_BAR_W := 12.0   # c3-12: E→F fuel level-bar well width
+const FUEL_BAR_H := 6.0    # c3-12: E→F fuel level-bar well height (vertically centered in the ICON row)
+const FUEL_BAR_GAP := 2.0  # c3-12: gap after the E letter and before the F letter
+const FUEL_END_PAD := 8.0  # c3-12: trailing gap after the F label before the next chip
+# c3-12: the neutral fuel identity ICON. The registered `ui_dial_fuel` sprite is a round GAUGE
+# DIAL face — pairing it with the new E→F level bar re-leaks the very clock/dial metaphor this
+# item removed. `icon_fuel` is a plain jerry-can silhouette (same legacy art icon bake, siblings the
+# grenade/ammo chips), so the fuel row now reads "fuel + how much is left", no second dial.
+# Preloaded here rather than via Art.tex because the jerry-can bake is unregistered in art.gd.
+const FUEL_ICON := preload("res://assets/legacy-art/icons/icon_fuel.png")
+# --- Player-row layout system (shared with ROW_TEXT_BASELINE below) ---
+const ROW_LABEL_GAP := 7.0   # c3-12: gap after the "P1"/"P2" row label before the first chip
+const STAT_ICON_GAP := 3.0   # c3-12: gap between a chip's icon and its text (the canonical
+                             # `ICON + 3` every chip draw mirrors — see _stat/_pip advance notes)
+const STAT_TRAIL_GAP := 10.0 # c3-12: trailing gap a chip's advance adds after its text
+const ROW_TEXT_BASELINE := ICON - 3.0  # c3-12: shared chip-row text baseline (row-top → glyph
+                                       # baseline) — the SAME `ICON - 3.0` offset every player-row
+                                       # label sits on, named so the E/F letters line up with the
+                                       # grenade count and every neighboring chip on the row.
 
 
 func _mini_bar(rect: Rect2, frac: float, fill: Color, alpha := 1.0) -> void:
@@ -1657,7 +1693,7 @@ func _stat(icon: String, txt: String, x: float, y: float,
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			_emit_icon(icon, r)
-	return _text(txt, x + ICON + 3.0, y + ICON - 3.0, col, shadow) + 10.0
+	return _text(txt, x + ICON + STAT_ICON_GAP, y + ROW_TEXT_BASELINE, col, shadow) + STAT_TRAIL_GAP
 
 
 ## Segmented magazine bar: reads the clip fill at a glance (peripheral vision)
