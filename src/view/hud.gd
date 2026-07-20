@@ -83,6 +83,11 @@ const COMPACT_BAR := 20.0  # c1-06 (attempt-4 judge polish): width of the tiny s
                        # in a starved slot, so the most perishable campaign readout never loses
                        # its urgency/progress the moment the row is most crowded. No text = no
                        # awkward "PRESS!" abbreviation and nothing to localize.
+const REVIVE_GLYPH_ADV := 15.0  # c3-01: x-reserve for the trailing revive / BAIL-OUT prompt glyph
+                       # on the direct-draw player rows (drawn at label_end + 9 with radius ~5.5, so
+                       # its right edge sits ~14.5px past the label). Folded into the row fit guard
+                       # so the glyph can't be the one thing that spills past RIGHT once the label
+                       # itself fit.
 # c1-04: glyph-center y of the transient bottom-center verb reminder. The stat
 # panel and player rows live in the top ~90px, so this low band can't collide with
 # them; a layout test pins it clear of both the top HUD and the 360px viewport.
@@ -514,33 +519,7 @@ func _draw() -> void:
 		var pcol := Color(0.75, 0.95, 0.7) if i == 0 else Color(0.95, 0.85, 0.6)
 		px = _text("P%d" % (i + 1), px, ry + ICON - 3.0, pcol) + 7.0
 		if not p["alive"]:
-			px = _stat("icon_skull", "x%d" % p["deaths"], px, ry)
-			if sim.last_stand:
-				_warn_text("K.I.A.", px, ry + ICON - 3.0, Color(0.9, 0.35, 0.3))
-			elif p["broke_timer"] > 0:
-				# A free rescue is already ticking — say so, or it reads as death.
-				_text("RALLYING %ds" % (p["broke_timer"] / 60 + 1), px, ry + ICON - 3.0,
-					Color(0.6, 0.85, 1.0))
-			else:
-				# Affordability at a glance: green if the chest covers it, red
-				# if not — the revive-or-hoard decision made legible.
-				var cost := sim.revive_cost(p)
-				var afford: bool = sim.war_chest >= cost
-				var blink := _mblink(20)
-				var col: Color
-				if afford:
-					col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
-				else:
-					col = Art.warn(Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3))
-				# "×" tag = non-color affordability cue (cyan-vs-red is still
-				# color-only for protan players even with colorblind mode on) —
-				# one dialect with the shop strip and the spend wheel's socket mark.
-				var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
-				# c2-07: the unaffordable (warning-red) label gets the contrast drop-shadow so it
-				# reads over a bright field; the affordable (safe) label needs none.
-				var tx := _text(rlabel, px, ry + ICON - 3.0, col, not afford)
-				_emit_act_glyph("revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0,
-					Color.WHITE, i == 1)
+			px = _dead_chips(p, px, ry, i, sim)
 		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
 			var fuel_c := Vector2(px + ICON / 2.0, ry + ICON / 2.0)   # cannon cooldown ring anchors on the fuel dial (tank status), not the grenade chip
@@ -553,27 +532,40 @@ func _draw() -> void:
 				gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
 			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 				gcol_tank = Color(0.6, 0.85, 1.0)
-			px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank) if twarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
-			# Cannon cooldown (45t — longer than bash or grenade): the same draining
-			# ring every other fire cooldown got, so a mid-cooldown shot reads as
-			# "wait a beat", not dropped input. The cannon is a tank system, so the
-			# ring frames the fuel dial (tank status) rather than the player grenade
-			# chip — the shells only ride the grenade pool as ammo, not as a cooldown.
-			if t["fire_cd"] > 0:
-				var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
-				draw_arc(fuel_c, ICON * 0.55,
-					0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-				draw_arc(fuel_c, ICON * 0.55,
-					-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			if t["burning"]:
-				if _mblink(8):
-					# The 3s fuse gets a number, like every other lethal window on
-					# this HUD (RALLYING/fuel/SHOP OPEN) — ceil grammar from the
-					# fuel dial, so it reads 3s → 2s → 1s → boom.
-					var bx := _warn_text("BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60), px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
+				# c3-01: SURVIVAL PROMPT FIRST. A cooking-off tank is a lethal window, so the BAIL
+				# OUT prompt is the ONE readout the player must act on — draw it directly after the
+				# fuel dial, never behind (and never dropped by) the optional shell-count clip. Its
+				# own fit guard surfaces a "+N" only when even the bare prompt won't fit; the dead
+				# cannon's shell count is suppressed while burning (moot — you're leaving the tank).
+				# The 3s fuse gets a number, like every other lethal window on this HUD
+				# (RALLYING/fuel/SHOP OPEN) — ceil grammar from the fuel dial (3s → 2s → 1s → boom).
+				var bailtxt := "BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60)
+				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
+					px = _row_ovf(px, ry)
+				elif _mblink(8):
+					var bx := _warn_text(bailtxt, px, ry + ICON - 3.0, Color(1.0, 0.3, 0.2))
 					_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
 						Color.WHITE, i == 1)
+			# c3-01: the cannon-shell count is a direct-draw tank chip — fit-guard it against the
+			# usable edge like every other player-row readout so a starved viewport surfaces a "+N"
+			# clip rather than clipping the shell count past RIGHT. A no-op at every supported width
+			# (the fuel dial + two-digit shell count start near x=8).
+			elif not _row_fits(px, ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])):
+				px = _row_ovf(px, ry)
 			else:
+				px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank) if twarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
+				# Cannon cooldown (45t — longer than bash or grenade): the same draining
+				# ring every other fire cooldown got, so a mid-cooldown shot reads as
+				# "wait a beat", not dropped input. The cannon is a tank system, so the
+				# ring frames the fuel dial (tank status) rather than the player grenade
+				# chip — the shells only ride the grenade pool as ammo, not as a cooldown.
+				if t["fire_cd"] > 0:
+					var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
+					draw_arc(fuel_c, ICON * 0.55,
+						0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
+					draw_arc(fuel_c, ICON * 0.55,
+						-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 				# The sim decrements pierce/spread/rend/smoke unconditionally while
 				# riding — without the shared chip row a Trench Gun expired invisibly
 				# mid-ride and the 2s red expiry warning could never fire in a tank.
@@ -931,15 +923,28 @@ func _select_with_reserve(opt_start: float, mandatory_sum: float, tele_slot: flo
 	# +N still draws flush at _fit_full - chip_width (bounds invariant unchanged). No gap when no
 	# telegraph is shown — nothing to separate from, and existing width-tuned rows stay put.
 	var gap: float = TELE_OVF_GAP if tele_slot > 0.0 else 0.0
-	var sel := _select_priority(_opt_cands, budget)
-	# The streak tier-hint is a subordinate decoration of the streak chip, so a hidden hint
-	# is not tallied as its own "more here" (see _display_hidden).
-	var hidden: int = _display_hidden(_opt_cands, sel["keep"]) + extra_hidden
+	return _ovf_fit(_opt_cands, budget, gap, extra_hidden)
+
+
+## c3-01: the ONE priority-tier overflow fit both chip rows share. Keep the highest-priority chips
+## that fit `budget`, reserve the +N clip slot ONLY on real overflow, and FIXPOINT-iterate that
+## reserve so its width matches the FINAL hidden count (dropping a chip to make room for a wider +N
+## can only hold or shrink the count, so it settles in a couple of steps). `gap` is a breathing
+## band folded into the reserve (row 0 uses it to separate the telegraph backing from the +N;
+## the buff row passes 0). `extra_hidden` folds NON-candidate suppressed readouts (e.g. a dropped
+## telegraph) into the displayed count. The streak tier-hint is a subordinate decoration, so
+## _display_hidden never tallies it as its own "more here"; for the buff row (integer ids) that
+## is just chips - kept. Extracted from _select_with_reserve so the buff tail gets the SAME EXACT
+## reserve instead of the crude worst-case "+all" it used to reserve (which could demote a
+## higher-priority buff that actually fits under the real, narrower clip).
+func _ovf_fit(cands: Array, budget: float, gap: float, extra_hidden: int) -> Dictionary:
+	var sel := _select_priority(cands, budget)
+	var hidden: int = _display_hidden(cands, sel["keep"]) + extra_hidden
 	if hidden > 0:
 		for _i in 4:
 			var reserve: float = _tw("+%d" % hidden) + OVF_PAD + gap
-			sel = _select_priority(_opt_cands, budget - reserve)
-			var nd: int = _display_hidden(_opt_cands, sel["keep"]) + extra_hidden
+			sel = _select_priority(cands, budget - reserve)
+			var nd: int = _display_hidden(cands, sel["keep"]) + extra_hidden
 			if nd == hidden:
 				break
 			hidden = nd
@@ -1436,13 +1441,15 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	for i in chips.size():
 		cands.append({"id": i, "prio": chips[i]["prio"], "w": _chip_w(chips[i])})
 	var budget := _fit_full - px
-	var sel := _select_priority(cands, budget)
-	var hidden: int = chips.size() - sel["keep"].size()
-	if hidden > 0:
-		# Reserve the MEASURED worst-case +N width (every chip could be a hidden one) and
-		# re-select, so kept chips can never run under the clip chip's slot.
-		sel = _select_priority(cands, budget - (_tw("+%d" % chips.size()) + OVF_PAD))
-		hidden = chips.size() - sel["keep"].size()
+	# c3-01: the buff tail now reserves the EXACT +N slot via the SHARED _ovf_fit fixpoint (the same
+	# one row-0's _select_with_reserve uses), not the crude worst-case "+chips.size()" it used to.
+	# The old reserve always sized for "every chip hidden" (e.g. "+5"), which on a row where only one
+	# buff overflows subtracts far more width than the real "+1" clip needs — and that extra
+	# reservation could DROP a higher-priority (nearly-expiring) buff chip that would otherwise fit,
+	# silently clipping the very readout the tier is meant to pin. Pinned by
+	# test_c3_01_buff_tail_reserves_exact_plus_n_not_worst_case.
+	var sel := _ovf_fit(cands, budget, 0.0, 0)
+	var hidden: int = sel["hidden"]
 	var keep: Dictionary = sel["keep"]
 	for i in chips.size():
 		if not keep.has(i):
@@ -1630,6 +1637,85 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	for s in segs:
 		draw_rect(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else Color(0.22, 0.2, 0.18))
 	return x + segs * 3.6 + 4.0
+
+
+## c3-01: does a `w`-wide readout drawn at `px` stay within the usable edge (`_fit_full`, the
+## CB/RM-reserved boundary)? The shared fit test the DIRECT-draw player-row branches (downed/revive
+## and in-tank) use so their guard matches the on-foot / buff / status planners — the last chips
+## that bypassed a fit check now honor the SAME edge. Epsilon mirrors the row planners.
+func _row_fits(px: float, w: float) -> bool:
+	return px + w <= _fit_full + 0.01
+
+
+## c3-01: a direct-draw player-row readout that misses the usable edge surfaces as the shared
+## styled "+1" clip (same _ovf_chip as row 0 / the equipment / buff rows) instead of clipping past
+## RIGHT — nothing critical vanishes uncounted. Right-anchored at `_fit_full - width` (like row-0's
+## +N) so the chip border stays within the usable edge and aligns with the other +N clips instead of
+## floating mid-row after a narrow head. Only reachable below the supported design width.
+##
+## The count is a HARD "+1", not a computed tally, because each direct-draw branch that calls this
+## has exactly ONE trailing readout left to place when it reaches here: the downed row's death-state
+## line (K.I.A. / RALLYING / REVIVE), or the in-tank BAIL-OUT prompt, or the in-tank shell count —
+## a single semantic readout per call site, so "one more here" is exact. (Row 0 and the buff/status
+## rows, which place a VARIABLE-length chip run, compute their real hidden count via _ovf_fit; these
+## fixed single-readout branches have nothing to count.)
+func _row_ovf(_px: float, ry: float) -> float:
+	var ow := _tw("+1") + OVF_PAD
+	# c3-01: right-flush the clip to the usable edge (like row-0's right-anchored +N) so the
+	# "more here" indicator aligns with the other +N chips instead of floating mid-row after a
+	# narrow head. Only reachable below the supported design width; `_px` (the overflowing cursor)
+	# is unused now that placement is edge-anchored, kept in the signature so call sites read uniformly.
+	return _ovf_chip(_fit_full - ow, ry, 1)
+
+
+## c3-01: the DOWNED player row — the skull death count THEN the death-state readout (K.I.A. /
+## RALLYING countdown / REVIVE cost + prompt glyph). This branch drew straight to the edge with no
+## fit check, so under width pressure the revive prompt — the readout the downed player MUST act on
+## — could clip past RIGHT uncounted. Now every readout is guarded against the usable edge with the
+## SAME shared "+N" clip the on-foot / buff / status rows use, making the fit guard UNIVERSAL across
+## every player-row branch. The skull count sits near x=8 (always fits); only the trailing readout
+## can overflow, and only on a sub-design-width viewport (a no-op at every supported width, so
+## normal play is byte-identical — the normal path returns the SAME post-skull cursor the inline
+## code did, leaving plate sizing unchanged). Extracted from _draw so a capture test can drive the
+## exact path with a tight `_fit_full`, mirroring _onfoot_chips. Pinned by
+## test_dead_row_revive_clips_when_starved.
+func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> float:
+	px = _stat("icon_skull", "x%d" % p["deaths"], px, ry)
+	var ty := ry + ICON - 3.0
+	if sim.last_stand:
+		if not _row_fits(px, _tw("K.I.A.")):
+			return _row_ovf(px, ry)
+		_warn_text("K.I.A.", px, ty, Color(0.9, 0.35, 0.3))
+		return px
+	if p["broke_timer"] > 0:
+		# A free rescue is already ticking — say so, or it reads as death.
+		var rtxt := "RALLYING %ds" % (p["broke_timer"] / 60 + 1)
+		if not _row_fits(px, _tw(rtxt)):
+			return _row_ovf(px, ry)
+		_text(rtxt, px, ty, Color(0.6, 0.85, 1.0))
+		return px
+	# Affordability at a glance: green if the chest covers it, red if not — the
+	# revive-or-hoard decision made legible.
+	var cost := sim.revive_cost(p)
+	var afford: bool = sim.war_chest >= cost
+	var blink := _mblink(20)
+	var col: Color
+	if afford:
+		col = Art.safe(Color(0.5, 1.0, 0.5) if blink else Color(0.4, 0.8, 0.4))
+	else:
+		col = Art.warn(Color(1.0, 0.4, 0.35) if blink else Color(0.8, 0.35, 0.3))
+	# "×" tag = non-color affordability cue (cyan-vs-red is still color-only for protan
+	# players even with colorblind mode on) — one dialect with the shop strip and the spend
+	# wheel's socket mark.
+	var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
+	# The prompt is the label plus a trailing revive glyph (drawn at tx+9, radius ~5.5).
+	if not _row_fits(px, _tw(rlabel) + REVIVE_GLYPH_ADV):
+		return _row_ovf(px, ry)
+	# c2-07: the unaffordable (warning-red) label gets the contrast drop-shadow so it reads over
+	# a bright field; the affordable (safe) label needs none.
+	var tx := _text(rlabel, px, ty, col, not afford)
+	_emit_act_glyph("revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0, Color.WHITE, i == 1)
+	return px
 
 
 ## c2-01: the on-foot player row — the FIXED equipment (ammo+magazine, grenade, roll) THEN the
@@ -1964,11 +2050,14 @@ static func _select_priority(cands: Array, budget: float) -> Dictionary:
 
 ## c1-06: count HIDDEN semantic readouts for the +N chip. The streak tier-hint (">x5") is a
 ## subordinate decoration of the streak chip, not a readout in its own right, so a hidden
-## hint is never tallied as a separate "one more here".
+## hint is never tallied as a separate "one more here". c3-01: the id-type guard keeps this
+## usable by the buff tail too, whose candidate ids are INTEGERS — a bare `id == "streak_hint"`
+## throws "Invalid operands 'int' and 'String'" at runtime and silently aborts the count (the
+## row-0 ids are Strings, so this is a no-op there).
 static func _display_hidden(cands: Array, keep: Dictionary) -> int:
 	var n := 0
 	for c in cands:
-		if keep.has(c["id"]) or c["id"] == "streak_hint":
+		if keep.has(c["id"]) or (c["id"] is String and c["id"] == "streak_hint"):
 			continue
 		n += 1
 	return n

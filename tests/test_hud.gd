@@ -130,6 +130,32 @@ func test_select_priority_all_fit() -> void:
 	Runner.T.ok(sel["keep"].has("a") and sel["keep"].has("b"), "both retained")
 
 
+# c3-01: the shared tier-overflow fit (_ovf_fit) that BOTH row-0 (_select_with_reserve) and the
+# buff tail (_buff_chips) route through. Exercised directly on the selection function, not via a
+# render capture. A high-priority chip + a wide low-priority chip on a budget that holds the high
+# chip plus a real "+1" clip but NOT both chips: exactly one sheds, and the FIXPOINT-sized reserve
+# (matching the true hidden count) leaves the high-priority chip kept — the crude worst-case "+2"
+# reserve would have been wide enough to also drop the high chip.
+func test_c3_01_ovf_fit_reserves_exact_and_pins_high_priority() -> void:
+	var h := HudIcons.new()
+	var cands: Array = [
+		{"id": 0, "prio": 2, "w": 40.0},   # high-priority survival-tier chip
+		{"id": 1, "prio": 1, "w": 60.0},   # wide low-priority chip -> the one that sheds
+	]
+	var ovf1: float = h._tw("+1") + HudIcons.OVF_PAD
+	# Budget = high chip + the exact "+1" clip + a hair, but far short of both 100px of chips.
+	var budget: float = 40.0 + ovf1 + 2.0
+	var res := h._ovf_fit(cands, budget, 0.0, 0)
+	Runner.T.eq(int(res["hidden"]), 1, "exactly one chip sheds (the exact reserve keeps the high-priority chip)")
+	Runner.T.ok(res["keep"].has(0), "the high-priority survival chip is pinned")
+	Runner.T.ok(not res["keep"].has(1), "the wide low-priority chip overflows into +N")
+	# The reserved slot is the EXACT "+1" width, not a worst-case "+2".
+	Runner.T.ok(absf(float(res["ovf_reserve"]) - ovf1) < 0.01, "the reserve width matches the real +1 clip")
+	# Integer ids must not trip the int-vs-String guard in _display_hidden (would abort the count).
+	Runner.T.ok(int(res["hidden"]) == 1, "integer-id candidates count cleanly (no runtime abort)")
+	h.free()
+
+
 # c1-06 REAL row-0 layout: run the actual measure pass over a live endless SimWorld, then
 # plan — proving the enumerated candidates include the combat dashboard at top priority and
 # that a tight budget drops the vanity chips first (not an arithmetic-only planner test).
@@ -1156,6 +1182,105 @@ func test_buff_chips_real_render_p1_p2_bounds_and_overlap() -> void:
 		Runner.T.ok(absf(float(geoms[0][i]) - float(geoms[1][i])) < 0.01, "P1/P2 buff primitive %d shares an x position" % i)
 
 
+# c3-01: the buff tail reserves the EXACT "+N" clip width, not the crude worst-case "+chips.size()".
+# On a row where only ONE buff overflows, the old worst-case reserve (sized for "every chip hidden")
+# subtracted more width than the real "+1" clip needs, which could drop a SECOND buff that actually
+# fits — silently clipping a readout the tier is meant to pin. Here a low-priority WIDE claymore chip
+# is the one that must shed; the edge is shaved just below the natural full run so exactly that one
+# chip overflows. With the exact "+1" reserve the higher-priority pierce buff is kept and the clip
+# reads "+1"; the old worst-case reserve was wide enough to also drop pierce, reading "+2".
+func test_c3_01_buff_tail_reserves_exact_plus_n_not_worst_case() -> void:
+	# Two buffs: a high-priority timed pierce chip + a low-priority persistent Triple chip (icon +
+	# "x3", no trailing glyph). Triple is persistent (lowest priority), so it sheds first.
+	var buffs := {
+		"vest": false, "pierce_ticks": 300, "spread_ticks": 0, "triple": true,
+		"rend_ticks": 0, "smoke_ticks": 0, "claymores": 0,
+	}
+	# Measure the natural full-run right edge against a roomy edge.
+	var probe := _ChipCaptureHud.new()
+	probe.main = _RowMain.new()
+	probe._fit_full = 1000.0
+	probe._measure = false
+	var full_end: float = probe._buff_chips(buffs.duplicate(), 8.0, 20.0, 0)
+	# Shave 2px so the last-placed (widest, lowest-priority) chip can no longer fit: exactly one
+	# sheds. The freed claymore width far exceeds the "+1" clip, so the exact reserve keeps pierce.
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h._measure = false
+	h._fit_full = full_end - 2.0
+	h.boxes = []
+	var end_px: float = h._buff_chips(buffs.duplicate(), 8.0, 20.0, 0)
+	var ovf_txt := ""
+	var kept_pierce := false
+	var ordered := h.boxes.duplicate()
+	ordered.sort_custom(func(a, b): return a["box"].position.x < b["box"].position.x)
+	var prev := -1.0
+	for b in ordered:
+		Runner.T.ok(b["box"].end.x <= h._fit_full + 0.01, "buff '%s' within the usable edge" % b["id"])
+		Runner.T.ok(b["box"].position.x >= prev - 0.5, "buff '%s' does not overlap the previous" % b["id"])
+		prev = maxf(prev, b["box"].end.x)
+		if b["k"] == "ovf":
+			ovf_txt = String(b["id"])
+		if b["k"] == "icon" and String(b["id"]) == "item_bullet":
+			kept_pierce = true
+	Runner.T.eq(ovf_txt, "+1", "the exact reserve sheds exactly ONE buff (worst-case reserve would also drop pierce, reading +2)")
+	Runner.T.ok(kept_pierce, "the higher-priority pierce buff is kept (the exact reserve leaves room for it)")
+	Runner.T.ok(end_px <= h._fit_full + 0.01, "the exact-reserve buff row ends within the usable edge")
+	h.main.free()
+	h.free()
+	probe.main.free()
+	probe.free()
+
+
+# c3-01: the FULL on-foot row (fixed equipment THEN the timed-buff / status-pip tail) on the REAL
+# render path under starved width. The equipment fits; the trailing buff/status tail is what the
+# width squeezes. The item's guarantee: the tail can NEVER silently clip past RIGHT — the buffs shed
+# into their OWN +N while the critical SPEED-BOOST status word is preserved (the status group is
+# reserved off the buff edge), and every rendered primitive stays within the usable edge and
+# non-overlapping. This is the captured-render pin for the on-foot buff/status overflow path.
+func test_c3_01_onfoot_buff_status_tail_clips_into_ovf_when_starved() -> void:
+	var sim := SimWorld.new(0, 1, "endless")
+	var p: Dictionary = sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX     # full clip (no low-ammo warn ring)
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	p["fire_cd"] = 0
+	p["grenade_cd"] = 0
+	p["roll_cd"] = 0
+	p["boost_ticks"] = 300                  # SPEED BOOST status pip (the critical status readout)
+	p["vest"] = true                        # + a stack of timed buffs that must shed under pressure
+	p["pierce_ticks"] = 300
+	p["spread_ticks"] = 300
+	p["rend_ticks"] = 300
+	p["smoke_ticks"] = 300
+	var h := _FrameCaptureHud.new()
+	h.main = _FrameMain.new()
+	h.main.sim = sim
+	h._measure = false
+	# Wide enough for the equipment run + the reserved status group, but not the whole buff stack —
+	# so the equipment stays, SPEED BOOST is pinned, and the surplus buffs overflow into a +N.
+	h._fit_full = 240.0
+	h.boxes = []
+	var end_px: float = h._onfoot_chips(p, 8.0, 20.0, 0, sim)
+	# Bounds + non-overlap on the real primitives (bg backings/markers are allowed to underlie text).
+	_assert_render_bounds_nonoverlap(h.boxes, h._fit_full, "c3-01-onfoot")
+	var has_grenade := false
+	var has_ovf := false
+	var has_speed := false
+	for b in h.boxes:
+		if b["k"] == "icon" and b["id"] == "icon_grenade":
+			has_grenade = true
+		if b["k"] == "ovf":
+			has_ovf = true
+		if b["k"] == "text" and String(b["id"]).begins_with("SPEED"):
+			has_speed = true
+	Runner.T.ok(has_grenade, "the fixed equipment (grenade chip) still draws")
+	Runner.T.ok(has_ovf, "the surplus buff tail sheds into a +N instead of clipping past RIGHT")
+	Runner.T.ok(has_speed, "the critical SPEED-BOOST status word is preserved (reserved off the buff edge)")
+	Runner.T.ok(end_px <= h._fit_full + 0.01, "the on-foot row cursor ends within the usable edge")
+	h.main.free()
+	h.free()
+
+
 # c2-01: the FIXED player-row equipment (ammo+magazine, grenade, roll) routes through the SAME
 # prefix-fit + shared +N clip the buff/status tail uses. At a roomy edge every equipment chip draws
 # and no clip appears; at a starved sub-design edge the equipment that misses surfaces in a right-
@@ -1198,6 +1323,62 @@ func test_onfoot_equipment_clips_when_starved() -> void:
 			starved_ovf = true
 	Runner.T.ok(starved_ovf, "starved row surfaces a +N clip instead of pushing ammo off-panel")
 	Runner.T.ok(end2 <= h2._fit_full + 0.01, "starved row cursor ends within the usable edge")
+	h2.main.free()
+	h2.free()
+
+
+# c3-01: the DOWNED player row (skull + REVIVE cost + prompt glyph) was a direct-draw branch with
+# NO fit check — under width pressure the revive prompt could clip past RIGHT uncounted. It now
+# routes through the SAME shared "+N" clip as every other player-row branch: at a roomy edge the
+# REVIVE label draws and nothing clips; at a starved sub-design edge the readout that misses
+# surfaces as a bounded +N (in-bounds) instead of spilling off-panel. Pins the universal guard on
+# the real render path.
+func test_dead_row_revive_clips_when_starved() -> void:
+	var sim := SimWorld.new(0, 1, "endless")
+	var p: Dictionary = sim.players[0]
+	p["deaths"] = 1            # forces a real REVIVE cost, past the free-rescue / K.I.A. paths
+	p["broke_timer"] = 0
+	sim.last_stand = false
+	sim.war_chest = 0          # unaffordable -> "REVIVE N ×" (the widest revive label)
+	# Roomy edge: the REVIVE label + prompt glyph fit, nothing clips.
+	var h := _FrameCaptureHud.new()
+	h.main = _FrameMain.new()
+	h.main.sim = sim
+	h._fit_full = HudIcons.RIGHT
+	h._measure = false
+	var end_px: float = h._dead_chips(p, 8.0, 20.0, 0, sim)
+	var roomy_ovf := false
+	var has_revive := false
+	for b in h.boxes:
+		Runner.T.ok(b["box"].end.x <= h._fit_full + 0.01, "roomy dead-row '%s' within the usable edge" % b["id"])
+		if b["k"] == "ovf":
+			roomy_ovf = true
+		if b["k"] == "text" and String(b["id"]).begins_with("REVIVE"):
+			has_revive = true
+	Runner.T.ok(has_revive, "roomy dead row draws the REVIVE prompt")
+	Runner.T.ok(not roomy_ovf, "roomy dead row surfaces no +N clip (the prompt fits)")
+	Runner.T.ok(end_px <= h._fit_full + 0.01, "roomy dead row cursor ends within the usable edge")
+	h.main.free()
+	h.free()
+	# Starved edge: too narrow for the REVIVE prompt -> the miss surfaces as a bounded +N and the
+	# prompt is NOT drawn off-panel.
+	var h2 := _FrameCaptureHud.new()
+	h2.main = _FrameMain.new()
+	h2.main.sim = sim
+	h2._fit_full = 55.0
+	h2._measure = false
+	var end2: float = h2._dead_chips(p, 8.0, 20.0, 0, sim)
+	var starved_ovf := false
+	var starved_revive := false
+	for b in h2.boxes:
+		Runner.T.ok(b["box"].end.x <= h2._fit_full + 0.01, "starved dead-row '%s' within the usable edge" % b["id"])
+		if b["k"] == "ovf":
+			starved_ovf = true
+		if b["k"] == "text" and String(b["id"]).begins_with("REVIVE"):
+			starved_revive = true
+	Runner.T.ok(starved_ovf, "starved dead row surfaces a +N clip instead of spilling the prompt past RIGHT")
+	Runner.T.ok(not starved_revive, "starved dead row does not draw the REVIVE prompt off-panel")
+	Runner.T.ok(end2 <= h2._fit_full + 0.01, "starved dead row cursor ends within the usable edge")
 	h2.main.free()
 	h2.free()
 
@@ -1255,6 +1436,87 @@ func test_row0_normal_crowded_shop_captured_render() -> void:
 	Runner.T.ok(kinds.has("ovf"), "the +N chip rendered")
 	h.main.free()
 	h.free()
+
+
+# c3-01: the item's core guarantee, captured on the REAL render path. Under starved row-0 width the
+# SURVIVAL/economy-tier readouts are PINNED and the vanity chips (streak / BEST / mutator) overflow
+# through the shared "+N" clip — never the reverse (the stated failure: vital tactical info dropping
+# while vanity expands). Asserted for BOTH tier heads:
+#  * endless -> the live HOSTILES combat dashboard (prio 90) survives; streak/BEST-wave/mutator go +N.
+#  * campaign -> the PRESSURE telegraph (the perishable "advance or be forced" readout) is preserved
+#    (compacted, never dropped) while the SUPPLIES cue overflows.
+# Both rows render every real box in bounds and non-overlapping. This is the regression that fails
+# the suite if a future edit lets a vanity chip outrank a survival readout under width pressure.
+func test_c3_01_row0_pins_survival_over_vanity_under_starved_width() -> void:
+	# --- endless: HOSTILES pinned, vanity overflows ---
+	var sim := SimWorld.new(0, 1, "endless")
+	sim.wave = 6                  # HOSTILES dashboard (prio 90) + WAVE RECORD vanity
+	sim.kill_streak = 12          # streak (vanity, prio 50, draws an arc — must NOT render)
+	sim.kill_streak_timer = 30
+	sim.wave_mod = 4              # PAYDAY mutator (vanity-ish, prio 70)
+	sim.score = 50
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h.main.best_score = 100       # BEST score chip (prio 35)
+	h.main.best_wave = 100        # BEST W-record chip (prio 30)
+	var opt_start := 8.0
+	var cw := _measure_cand_w(h, sim, opt_start, false)
+	# Size the usable edge to keep ONLY the top-priority HOSTILES readout; everything below demotes.
+	h._fit_full = opt_start + float(cw["hostiles"]) + 26.0
+	var plan: Dictionary = h._plan_row0(sim, opt_start, 6.0, false)
+	Runner.T.ok(plan["keep"].has("hostiles"), "the live HOSTILES dashboard is pinned under width pressure")
+	Runner.T.ok(not plan["keep"].has("streak"), "the vanity streak chip demotes (never draws its ring)")
+	Runner.T.ok(not plan["keep"].has("mutator"), "the mutator chip demotes below the survival readout")
+	Runner.T.ok(not plan["keep"].has("wave_record"), "the BEST-wave vanity chip demotes")
+	Runner.T.ok(int(plan["hidden"]) > 0, "the demoted vanity readouts surface in +N (nothing dropped silently)")
+	# Render the real body + the shared +N clip through the capture seams.
+	h._measure = false
+	h._opt_keep = plan["keep"]
+	h._ovf = int(plan["hidden"])
+	h.boxes = []
+	var _end := h._row0_opt(sim, opt_start, 6.0, false)
+	var ovf_w: float = h._tw("+%d" % int(plan["hidden"])) + HudIcons.OVF_PAD
+	h._ovf_chip(h._fit_full - ovf_w, 6.0, int(plan["hidden"]))
+	_assert_render_bounds_nonoverlap(h.boxes, h._fit_full, "c3-01-endless")
+	var e_has_hostiles := false
+	var e_has_ovf := false
+	for b in h.boxes:
+		if b["k"] == "text" and String(b["id"]).begins_with("HOSTILES"):
+			e_has_hostiles = true
+		if b["k"] == "ovf":
+			e_has_ovf = true
+		# No demoted vanity readout may reach the paint stage.
+		Runner.T.ok(not String(b["id"]).begins_with("PAYDAY"), "the demoted mutator never paints")
+		Runner.T.ok(not String(b["id"]).begins_with("BEST"), "the demoted BEST record never paints")
+	Runner.T.ok(e_has_hostiles, "the HOSTILES readout actually renders on the starved endless row")
+	Runner.T.ok(e_has_ovf, "the +N clip renders for the demoted vanity chips")
+	h.main.free()
+	h.free()
+	# --- campaign: PRESSURE preserved, vanity overflows ---
+	var sim2 := SimWorld.new(0, 1, "campaign")
+	sim2.stall_ticks = 100        # arms the PRESSURE telegraph (the perishable survival readout)
+	sim2.score = 50               # BEST chip candidate
+	var h2 := _ChipCaptureHud.new()
+	h2.main = _RowMain.new()
+	h2.main.best_score = 100
+	h2._fit_full = HudIcons.RIGHT
+	var full_w: float = float(h2._telegraph_spec(sim2)["w"])
+	# A head wide enough that the FULL telegraph label won't fit forces the COMPACT fallback — the
+	# critical readout is abbreviated, never tallied into +N.
+	var plan2: Dictionary = h2._plan_row0(sim2, 520.0, 6.0, false)
+	Runner.T.eq(plan2["tele"]["kind"], "pressure", "the PRESSURE telegraph is preserved, not dropped")
+	Runner.T.ok(plan2["tele"].get("compact", false), "the telegraph compacts before it would ever drop")
+	Runner.T.ok(float(plan2["tele_w"]) < full_w, "the compact telegraph slot is narrower than the full label")
+	h2._measure = false
+	h2._opt_keep = plan2["keep"]
+	h2._ovf = int(plan2["hidden"])
+	h2.boxes = []
+	var right_edge: float = h2._draw_telegraph(sim2, plan2["tele"], plan2["tele_left"], 6.0)
+	Runner.T.ok(right_edge <= HudIcons.RIGHT + 0.01, "the preserved PRESSURE telegraph stays within the usable edge")
+	for b in h2.boxes:
+		Runner.T.ok(b["box"].end.x <= HudIcons.RIGHT + 0.01, "c3-01-campaign '%s' within the usable edge" % b["id"])
+	h2.main.free()
+	h2.free()
 
 
 # c1-06 END-TO-END captured render of a NORMAL crowded CAMPAIGN row WITH the live PRESSURE
