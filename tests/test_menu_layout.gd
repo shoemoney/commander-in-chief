@@ -2179,6 +2179,40 @@ func test_pause_dedups_settings_behind_one_options_row() -> void:
 	stub.free()
 
 
+# c3-14: PAUSE exits straight to the title through an explicit "QUIT TO TITLE" verb row
+# (no RESTART-then-TITLE two-step). The id stays "title" so _activate keeps routing, and
+# RESTART / QUIT TO TITLE sit in DISTINCT groups so a divider splits "restart this run"
+# from "abandon it". On the real plate both confirm cues resolve to the "TITLE" identity
+# (never a bare "QUIT" that reads like quit-to-desktop).
+func test_c3_14_pause_quit_to_title_row() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var rows: Array = m._menu_items()
+	var ti := -1
+	var ri := -1
+	for i in rows.size():
+		if rows[i]["id"] == "title":
+			ti = i
+		elif rows[i]["id"] == "restart":
+			ri = i
+	Runner.T.ok(ti >= 0 and ri >= 0, "PAUSE has both a restart and a title row")
+	Runner.T.eq(String(rows[ti]["label"]), "QUIT TO TITLE", "the exit row reads QUIT TO TITLE")
+	Runner.T.ok(rows[ti].get("destructive", false), "QUIT TO TITLE is a destructive two-press row")
+	Runner.T.ok(int(rows[ti]["grp"]) != int(rows[ri]["grp"]),
+		"RESTART and QUIT TO TITLE are in distinct groups (a divider splits them)")
+	# Both cues degrade to the id-derived TITLE identity on the real 184/170px plate,
+	# never the misleading leading word "QUIT".
+	var f: Font = Art.font()
+	var verb := Menu.armed_verb(rows[ti])
+	Runner.T.eq(verb, "TITLE", "the title row's armed_verb stays the id-derived TITLE")
+	var pre := Menu.destructive_label(String(rows[ti]["label"]), verb, false, f, 184.0)
+	var arm := Menu.destructive_label(String(rows[ti]["label"]), verb, true, f, 170.0)
+	Runner.T.eq(pre, "TITLE PRESS TWICE", "unarmed cue degrades to TITLE (not QUIT): '%s'" % pre)
+	Runner.T.eq(arm, "TITLE  PRESS AGAIN", "armed cue keeps the TITLE verb: '%s'" % arm)
+	m.free()
+	stub.free()
+
+
 # c1-09: OPTIONS exposes RESET DEFAULTS as a focusable, destructive-styled row —
 # NOT an R/Y shortcut. The first press only ARMS (mis-press guard); a second
 # distinct press fires _activate, which reverts every persisted setting through

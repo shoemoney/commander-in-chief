@@ -738,13 +738,23 @@ func _menu_items() -> Array[Dictionary]:
 		return ritems
 	# c1-09: PAUSE no longer duplicates the settings rows — it fronts them through ONE
 	# OPTIONS row that opens the dedicated screen (which then BACKs to PAUSE). RESUME /
-	# OPTIONS / RESTART / TITLE, each its own group so the dividers separate them.
+	# OPTIONS / RESTART / QUIT TO TITLE, each its own group so the dividers separate them.
+	# c3-14: the exit row reads "QUIT TO TITLE" — an explicit one-step exit VERB, so
+	# leaving a run never means RESTART-then-TITLE or backing out. id stays "title" (the
+	# _activate branch is keyed on it), only the label changes. Both cues resolve to the
+	# id-derived "TITLE" identity when the plate is too tight for the full words: unarmed
+	# degrades "QUIT TO TITLE  PRESS TWICE" to "TITLE PRESS TWICE" (never the misleading
+	# "QUIT ..."); armed rides armed_verb "TITLE" (pinned by test_c3_08) to "TITLE  PRESS
+	# AGAIN". So the confirm copy names the real destination in both states, never a bare
+	# "QUIT" that reads like quit-to-desktop.
+	# The two destructive actions get DISTINCT groups (2 / 3) so a divider actually splits
+	# "restart this run" from "abandon it to the title" — they must never fuse into one slab.
 	var pitems: Array[Dictionary] = [
 		{"id": "resume", "label": "RESUME", "destructive": false, "grp": 0},
 		{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
 	]
 	pitems.append({"id": "restart", "label": "RESTART", "destructive": true, "grp": 2})
-	pitems.append({"id": "title", "label": "TITLE SCREEN", "destructive": true, "grp": 2})
+	pitems.append({"id": "title", "label": "QUIT TO TITLE", "destructive": true, "grp": 3})
 	return pitems
 
 
@@ -972,7 +982,12 @@ static func destructive_label(name: String, verb: String, armed: bool, font: Fon
 	# plate a name/verb + full-cue tier always wins (RESTART/TITLE/QUIT verified in
 	# the layout test) — "PRESS TWICE" states the contract outright, unlike the old
 	# lone "!" that read like emphasis and made the row look single-press.
-	var short_name := name.split(" ")[0]   # "TITLE SCREEN" -> "TITLE" before dropping identity
+	# The abbreviated pre-armed tier drops to the id-derived VERB identity, not the
+	# label's leading word: for "QUIT TO TITLE" the label's first word ("QUIT") reads
+	# like quit-to-desktop, while the verb ("TITLE") names the real destination and
+	# matches the armed cue. For every other destructive row the verb's leading word
+	# equals the label's (RESTART/QUIT/RESET), so this only sharpens QUIT TO TITLE.
+	var short_name := verb.split(" ")[0]
 	var forms: Array[String]
 	if armed:
 		# c3-08: the verb rides with the cue as long as it fits ("<VERB>: AGAIN" is terse
