@@ -304,6 +304,8 @@ func _on_joy_changed(_device: int, connected: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	if main == null:
+		return   # c3-07: menu can outlive main during teardown; every branch below reads main._motion
 	if mode != Mode.HIDDEN:
 		# Armed RESTART/TITLE/QUIT rows disarm after 2.5 s — a stale confirm
 		# must not end a run on a press that lands minutes later.
@@ -538,6 +540,11 @@ func _bus_off(name: String) -> bool:
 
 
 func _menu_items() -> Array[Dictionary]:
+	if main == null:
+		# c3-07: most rows read live main state (main._two_players, main.daily_done, …).
+		# Explicitly-typed empty so the Array[Dictionary] contract holds for every caller.
+		var none: Array[Dictionary] = []
+		return none
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		return [{"id": "back", "label": "BACK", "destructive": false}]
 	if mode == Mode.TITLE:
@@ -2291,8 +2298,8 @@ static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
 
 
 func _draw() -> void:
-	if mode == Mode.HIDDEN:
-		return
+	if mode == Mode.HIDDEN or main == null:
+		return   # c3-07: nothing to draw without main (reads main._motion / _menu_items below)
 	_dirty = false   # c2-09: this paint reflects the latest state; _process re-marks on change
 	# Scrim ≥0.55: 8px text over a LIVE firefight; fades in over the open settle.
 	# REDUCE MOTION near-blacks the TITLE backdrop — the live attract fight

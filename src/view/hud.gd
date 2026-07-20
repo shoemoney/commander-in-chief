@@ -113,6 +113,9 @@ var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
 var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
+var _disp_sim_id := 0     # c3-07: SimWorld the odometer tracks — a fresh run (new instance) snaps
+                          # _disp_chest/_disp_score to the new (0) values so the rollup can't animate
+                          # the prior run's stale totals downward when the reset diff is under 1000.
 var _prow_r := 0.0        # widest player buff-row right edge (1-frame lag) so the plate covers it
 var _plate_r := 262.0     # plate right edge (dynamic up to RIGHT) — markers avoid it, not the 262 floor
 var _shop_anim := 0.0     # c1-15: eased 0..1 open-ness of the endless shop strip's CONTENT. The
@@ -201,6 +204,26 @@ func _process(delta: float) -> void:
 	if _score_pulse > 0.0:
 		_score_pulse = maxf(0.0, _score_pulse - decay)
 		_dirty = true
+	# c3-07: a fresh run resets war_chest/score to 0; snap the odometer to the new values so it
+	# doesn't roll the prior run's stale totals DOWNWARD (the >1000 threshold snap in _rollup only
+	# catches huge diffs, so a sub-1000 reset would visibly animate down). PRIMARY signal is a NEW
+	# SimWorld instance id (mirroring _shop_sim_id/_verb_sim_id) — a Godot 4 ObjectID is unique for
+	# the process lifetime, so a new run always reads a fresh id. The `score < _disp_score` term is a
+	# defensive safety belt: score is monotonic within a run, so a decrease can only mean a reset —
+	# it catches a run change even if some future path reused the same SimWorld object in place.
+	# (main and main.sim are already null-guarded at the top of this func.) War-chest purchases don't
+	# move score, so a mid-run spend still rolls the chest down normally.
+	var sid := sim.get_instance_id()   # ONE source of truth for "which run" (reused by the shop fade below)
+	if sid != _disp_sim_id or float(sim.score) < _disp_score:
+		_disp_chest = float(sim.war_chest)
+		_disp_score = float(sim.score)
+		_disp_sim_id = sid
+		# Clear any half-finished gold flash from the prior run so it can't bleed onto the new
+		# run's first frames. (_prev_chest/_prev_score are already re-synced to sim above, so the
+		# new run's first real gain is what re-arms the pulse.)
+		_chest_pulse = 0.0
+		_score_pulse = 0.0
+		_dirty = true
 	if _disp_chest < 0.0:
 		_disp_chest = float(sim.war_chest)
 	if _disp_score < 0.0:
@@ -220,7 +243,6 @@ func _process(delta: float) -> void:
 	# c1-15: ease the shop strip's CONTENT open/closed (row stays reserved, so nothing shifts).
 	# Reduce motion / a fresh run snap; any change in the eased alpha is a visible change.
 	var shop_target := 1.0 if _shop_open(sim) else 0.0
-	var sid := sim.get_instance_id()
 	var shop_prev := _shop_anim
 	if main._motion < 0.5 or sid != _shop_sim_id:
 		_shop_anim = shop_target
