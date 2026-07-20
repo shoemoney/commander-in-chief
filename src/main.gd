@@ -3195,8 +3195,11 @@ func _reset_settings() -> void:
 
 func _bus_vol(name: String) -> int:
 	# SFX/MUSIC level in 0..10 steps. The AudioServer IS the state: mute carries
-	# the 0, volume_db carries the level — so the row's Enter mute-toggle
-	# naturally remembers (and restores) the pre-mute level.
+	# the 0, volume_db carries the 1..10 level. One model: Enter and Left/Right all
+	# move this single 0..10 value (0 == MUTED), never a mute toggle — stepping down
+	# to 0 mutes, stepping back up resumes at 1 (a normal +1 step off the floor, not
+	# a restore of the pre-mute level; the retained volume_db only survives a mute
+	# that is un-set OUTSIDE the stepper, e.g. a settings reload).
 	var b := AudioServer.get_bus_index(name)
 	if AudioServer.is_bus_mute(b):
 		return 0
