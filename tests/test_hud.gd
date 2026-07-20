@@ -164,6 +164,41 @@ func test_row0_measure_prioritizes_combat_readouts() -> void:
 	h.free()
 
 
+# c2-01 static guard: replay a maximally-crowded row-0 measure pass and assert EVERY optional
+# chip id the row would draw is present in CHIP_PRIO. This is the compile-time-style drift guard:
+# add a `_fits2("foo", ...)` callsite without banding "foo" and this suite goes red, instead of the
+# unbanded chip silently falling back and mis-sorting on a crowded row. Also pins the fallback
+# sentinel below every real band so an unbanded chip drops FIRST, never gets promoted.
+func test_every_row0_chip_is_banded() -> void:
+	var h := HudIcons.new()
+	h.main = _RowMain.new()
+	h.main.best_wave = 1
+	var sim := SimWorld.new(0, 1, "endless")
+	sim.kill_streak = 12         # streak + tier hint
+	sim.kill_streak_timer = 30
+	sim.wave = 4                 # HOSTILES + wave chips
+	sim.deaths_this_wave = 0     # DEATHLESS eligible
+	sim.wave_mod = 4             # mutator chip
+	sim.flash_ticks = 120        # flashbang chip
+	# Non-shop row so SUPPLIES + the widest set of optional chips all enumerate.
+	h._measure = true
+	h._opt_cands = []
+	h._opt_keep = {}
+	h._row0_opt(sim, 8.0, 6.0, false)
+	Runner.T.ok(h._opt_cands.size() > 0, "the crowded row enumerates optional chips to check")
+	for c in h._opt_cands:
+		var id: String = c["id"]
+		# streak_hint is folded into the atomic streak candidate and never reaches _fits2/CHIP_PRIO.
+		if id == "streak_hint":
+			continue
+		Runner.T.ok(HudIcons.CHIP_PRIO.has(id), "row-0 chip '%s' is banded in CHIP_PRIO" % id)
+	# The unbanded fallback must sort below the lowest real band (supplies=20) so a missing band
+	# drops the chip FIRST rather than promoting it into the vanity tier.
+	Runner.T.ok(HudIcons.CHIP_UNBANDED < 20, "unbanded fallback is below the lowest real band")
+	h.main.free()
+	h.free()
+
+
 # c1-06: the streak tier-hint is ATOMIC with the streak chip — the real measure pass emits
 # ONE 'streak' candidate whose width already includes the ">xN" hint, so the hint can never
 # be dropped on its own (no silent partial chip, no separate +N tally).
@@ -1063,6 +1098,52 @@ func test_buff_chips_real_render_p1_p2_bounds_and_overlap() -> void:
 	Runner.T.eq(geoms[0].size(), geoms[1].size(), "P1 and P2 emit the same number of buff primitives")
 	for i in geoms[0].size():
 		Runner.T.ok(absf(float(geoms[0][i]) - float(geoms[1][i])) < 0.01, "P1/P2 buff primitive %d shares an x position" % i)
+
+
+# c2-01: the FIXED player-row equipment (ammo+magazine, grenade, roll) routes through the SAME
+# prefix-fit + shared +N clip the buff/status tail uses. At a roomy edge every equipment chip draws
+# and no clip appears; at a starved sub-design edge the equipment that misses surfaces in a right-
+# edge +N (in-bounds) instead of being pushed off-panel uncounted — the judge's "ammo cannot be
+# pushed off-panel" guarantee, on the true render path.
+func test_onfoot_equipment_clips_when_starved() -> void:
+	var sim := SimWorld.new(0, 1, "endless")   # a fresh player: all cooldowns 0 (no ring draw_arc)
+	var p: Dictionary = sim.players[0]
+	# Roomy edge: all three equipment chips fit, nothing clips.
+	var h := _FrameCaptureHud.new()
+	h.main = _FrameMain.new()
+	h.main.sim = sim
+	h._fit_full = HudIcons.RIGHT
+	h._measure = false
+	var end_px: float = h._onfoot_chips(p, 8.0, 20.0, 0, sim)
+	var roomy_ovf := false
+	var has_ammo := false
+	for b in h.boxes:
+		Runner.T.ok(b["box"].end.x <= h._fit_full + 0.01, "roomy equipment '%s' within the usable edge" % b["id"])
+		if b["k"] == "ovf":
+			roomy_ovf = true
+		if b["k"] == "icon" and b["id"] == "icon_ammo":
+			has_ammo = true
+	Runner.T.ok(has_ammo, "roomy row draws the ammo chip")
+	Runner.T.ok(not roomy_ovf, "roomy row surfaces no +N clip (everything fits)")
+	Runner.T.ok(end_px <= h._fit_full + 0.01, "roomy row cursor ends within the usable edge")
+	h.main.free()
+	h.free()
+	# Starved edge: too narrow for the equipment run -> the miss surfaces as a bounded +N.
+	var h2 := _FrameCaptureHud.new()
+	h2.main = _FrameMain.new()
+	h2.main.sim = sim
+	h2._fit_full = 60.0
+	h2._measure = false
+	var end2: float = h2._onfoot_chips(p, 8.0, 20.0, 0, sim)
+	var starved_ovf := false
+	for b in h2.boxes:
+		Runner.T.ok(b["box"].end.x <= h2._fit_full + 0.01, "starved equipment '%s' within the usable edge" % b["id"])
+		if b["k"] == "ovf":
+			starved_ovf = true
+	Runner.T.ok(starved_ovf, "starved row surfaces a +N clip instead of pushing ammo off-panel")
+	Runner.T.ok(end2 <= h2._fit_full + 0.01, "starved row cursor ends within the usable edge")
+	h2.main.free()
+	h2.free()
 
 
 # Assert a captured set of rendered boxes all sit within the usable edge and — ignoring the
