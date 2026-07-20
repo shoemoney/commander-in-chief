@@ -2041,6 +2041,91 @@ func test_destructive_label_fits_plate_and_keeps_context() -> void:
 		"the armed cue floor genuinely fits a narrow plate")
 
 
+# c3-17: robust truncation must NEVER clip a destructive row's warning cue. Covers the
+# single-sourced cue-tail extraction (incl. the ": AGAIN" tier + bare-cue empties), the
+# tight-plate path that keeps the full spelled-out cue while truncating the NAME, and the
+# floor-plate degrade to the minimal "!" marker (for a long/localized identity AND a bare cue).
+func test_c3_17_truncation_preserves_destructive_cue() -> void:
+	var font: Font = Art.font()
+	# destructive_cue_tail single-sources the warning suffix from destructive_label's cue and
+	# returns it WITH its leading separator so a trimmed name reads "RES… PRESS AGAIN".
+	Runner.T.eq(Menu.destructive_cue_tail("RESTART  PRESS AGAIN", true), " PRESS AGAIN",
+		"armed cue tail carries its leading separator")
+	Runner.T.eq(Menu.destructive_cue_tail("RESTART  PRESS TWICE", false), " PRESS TWICE",
+		"pre-armed cue tail is preserved with its separator")
+	Runner.T.eq(Menu.destructive_cue_tail("RESTART: AGAIN", true), ": AGAIN",
+		"the tightened ': AGAIN' armed tier is a recognized cue tail")
+	Runner.T.eq(Menu.destructive_cue_tail("PRESS AGAIN", true), "",
+		"a bare armed cue has no separable head — nothing to reserve")
+	Runner.T.eq(Menu.destructive_cue_tail("PRESS TWICE", false), "",
+		"a bare pre-armed cue returns empty")
+	Runner.T.eq(Menu.destructive_cue_tail("NEUSTARTEN DES LAUFS  PRESS AGAIN", true), " PRESS AGAIN",
+		"a long/localized identity still exposes the cue as the load-bearing tail")
+
+	var m: Control = Menu.new()
+	var label := "RESTART  PRESS AGAIN"
+	var cue := " PRESS AGAIN"
+	var full_w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	var cue_w := font.get_string_size("… PRESS AGAIN", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	# Plate fits the "…<cue>" but not the whole label: the NAME truncates, the warning survives
+	# WHOLE — never "RESTART PRESS…".
+	var mid := (full_w + cue_w) / 2.0
+	var shown_mid: String = m._ellipsize(label, 11, mid, cue, true)
+	Runner.T.ok(shown_mid.ends_with("PRESS AGAIN"), "a tight plate keeps the full warning cue (got '%s')" % shown_mid)
+	Runner.T.ok(not shown_mid.begins_with(label), "the NAME is what truncated, not the cue")
+	Runner.T.ok(font.get_string_size(shown_mid, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= mid,
+		"the preserved-cue result genuinely fits the plate")
+	# Floor plate too narrow for the spelled-out cue: DEGRADE to the minimal "!" marker rather
+	# than clipping the danger signal off entirely.
+	var mark_w := font.get_string_size("…" + Menu.DESTR_CUE_MARK, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	var floor_w := (cue_w + mark_w) / 2.0
+	var shown_floor: String = m._ellipsize(label, 11, floor_w, cue, true)
+	Runner.T.ok(shown_floor.ends_with(Menu.DESTR_CUE_MARK),
+		"floor-width destructive label keeps a '!' warning marker (got '%s')" % shown_floor)
+	Runner.T.ok(font.get_string_size(shown_floor, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= floor_w,
+		"the '!'-degraded result fits the floor plate")
+	# A BARE cue (keep_tail empty) that overflows STILL degrades to "!" via the warn flag. Width is
+	# a font-relative midpoint between the bare cue and the "!" mark (never a magic pixel offset), so
+	# the cue is guaranteed too wide while "…!" still fits regardless of the active font metrics.
+	var bare_cue_w := font.get_string_size("PRESS AGAIN", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	var bare_floor := (bare_cue_w + mark_w) / 2.0
+	var bare_shown: String = m._ellipsize("PRESS AGAIN", 11, bare_floor, "", true)
+	Runner.T.ok(bare_shown.ends_with(Menu.DESTR_CUE_MARK),
+		"a bare cue that overflows still shows a '!' marker (got '%s')" % bare_shown)
+	# A NON-destructive (warn=false) overflow never sprouts a "!" — the marker is destructive-only.
+	var plain: String = m._ellipsize("SOME VERY LONG PLAIN LABEL", 11, mark_w * 2.0, "", false)
+	Runner.T.ok(not plain.ends_with(Menu.DESTR_CUE_MARK), "a non-destructive row never gets a '!' marker")
+	# End-to-end through _row_fit (the real _draw entry): a destructive row on a tight column with a
+	# chip reserve keeps its warning through the memoized fit decision.
+	var r_avail := (full_w + cue_w) / 2.0
+	var fit: Dictionary = m._row_fit(label, 11, r_avail, 6.0, cue, true)
+	Runner.T.ok(bool(fit["overflow"]), "_row_fit flags the over-width destructive row")
+	var rshown := String(fit["shown"])
+	Runner.T.ok(rshown.ends_with("PRESS AGAIN") or rshown.ends_with(Menu.DESTR_CUE_MARK),
+		"_row_fit's shown string keeps the warning cue or its '!' floor (got '%s')" % rshown)
+	# reserve is part of the cache key: the SAME label+avail with a chip reserve wider than the
+	# column must not return a stale (chip-on) fit — it drops the chip.
+	var no_chip: Dictionary = m._row_fit(label, 11, r_avail, r_avail + 10.0, cue, true)
+	Runner.T.ok(not bool(no_chip["show_chip"]), "a reserve wider than the column drops the chip (reserve keyed, no stale fit)")
+	# The EXACT item scenario: a long/localized RESTART or QUIT label routed through the real path
+	# (destructive_label -> destructive_cue_tail -> _row_fit) at a plate too tight for the whole
+	# label must NEVER truncate away its warning — the cue or its "!" floor always survives.
+	for verb in ["RESTART", "QUIT"]:
+		for is_armed in [false, true]:
+			var long_name := "%s THE ENTIRE CURRENT MISSION RUN" % verb   # a pathologically long identity
+			var dlabel := Menu.destructive_label(long_name, verb, is_armed, font, 184.0)
+			var ktail := Menu.destructive_cue_tail(dlabel, is_armed)
+			var tight := font.get_string_size(dlabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x * 0.5
+			var rf: Dictionary = m._row_fit(dlabel, 11, tight, 6.0, ktail, true)
+			var out := String(rf["shown"])
+			var kept_warning := out.ends_with("AGAIN") or out.ends_with("TWICE") or out.ends_with(Menu.DESTR_CUE_MARK)
+			Runner.T.ok(kept_warning,
+				"%s %s: a long label truncated to half width keeps its warning (got '%s')" % [verb, "armed" if is_armed else "pre", out])
+			Runner.T.ok(font.get_string_size(out, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= tight,
+				"%s %s: the truncated result genuinely fits the tight plate" % [verb, "armed" if is_armed else "pre"])
+	m.free()
+
+
 # c1-08: EVERY destructive-row text/plate pairing must clear AA-NORMAL contrast
 # (4.5:1), not just look warm/red. The palette is read straight from menu.gd's
 # centralized DESTR_* constants so this test can NEVER drift from _draw(). The label

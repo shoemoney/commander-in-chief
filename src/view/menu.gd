@@ -1054,6 +1054,36 @@ func _is_destructive(i: int) -> bool:
 #              one press from firing — degrading (single space -> "<VERB>: AGAIN" ->
 #              bare "PRESS AGAIN") only as far as the plate forces.
 # Each candidate is tried widest-first; the first that fits `avail` wins.
+# c3-17: the canonical destructive warning cue — ONE source of truth shared by
+# destructive_label (which appends it) and destructive_cue_tail (which preserves it under
+# truncation), so the two can never drift and a wording/localization edit lands in one place.
+const DESTR_CUE_ARMED := "PRESS AGAIN"
+const DESTR_CUE_PREARMED := "PRESS TWICE"
+const DESTR_CUE_ARMED_TIGHT := ": AGAIN"   # narrow-plate armed tier: "<VERB>: AGAIN"
+const DESTR_CUE_MARK := "!"                 # minimal floor cue when no spelled-out cue fits
+
+
+# c3-17: the load-bearing warning suffix of a destructive_label string — the part truncation
+# must NEVER eat. Matches ONLY the cue phrases destructive_label itself appends, single-sourced
+# in the DESTR_CUE_* constants (never a guessed trailing token), so a localized build whose cues
+# live in those same constants keeps working with zero heuristics. Returns the cue WITH its
+# leading separator (a space, or none before ": AGAIN") so a trimmed NAME reads "RES… PRESS AGAIN"
+# (the ellipsis never butts the cue). Returns "" for a bare cue (label IS the cue — no separable
+# head) or any unrecognized tail; the warn "!" floor in _ellipsize is the safety net that still
+# marks those rows destructive.
+static func destructive_cue_tail(label: String, armed: bool) -> String:
+	# Pre-armed labels only ever end with "PRESS TWICE"; armed labels end with "PRESS AGAIN" or the
+	# tightened ": AGAIN" tier — so only the armed set includes DESTR_CUE_ARMED_TIGHT.
+	var cues: Array[String] = [DESTR_CUE_PREARMED]
+	if armed:
+		cues = [DESTR_CUE_ARMED, DESTR_CUE_ARMED_TIGHT]
+	for cue in cues:
+		if label.ends_with(cue) and label.length() > cue.length():
+			var i := label.length() - cue.length()
+			return label.substr(i - 1) if label[i - 1] == " " else label.substr(i)
+	return ""
+
+
 static func destructive_label(name: String, verb: String, armed: bool, font: Font, avail: float) -> String:
 	# Candidates run widest -> narrowest; the first that FITS `avail` wins. Both the
 	# action identity (name/verb, always LEADING) and the explicit two-press cue
@@ -1083,15 +1113,15 @@ static func destructive_label(name: String, verb: String, armed: bool, font: Fon
 		# exact tiers are pinned per row in test_c3_08_* so a font/plate edit can't silently
 		# strip the identity.
 		var short_verb := verb.split(" ")[0]
-		forms = ["%s  PRESS AGAIN" % verb, "%s PRESS AGAIN" % verb, "%s: AGAIN" % verb]
+		forms = ["%s  %s" % [verb, DESTR_CUE_ARMED], "%s %s" % [verb, DESTR_CUE_ARMED], "%s%s" % [verb, DESTR_CUE_ARMED_TIGHT]]
 		if short_verb != verb:
-			forms.append("%s: AGAIN" % short_verb)
-		forms.append("PRESS AGAIN")
+			forms.append("%s%s" % [short_verb, DESTR_CUE_ARMED_TIGHT])
+		forms.append(DESTR_CUE_ARMED)
 	else:
-		forms = ["%s  PRESS TWICE" % name, "%s PRESS TWICE" % name]
+		forms = ["%s  %s" % [name, DESTR_CUE_PREARMED], "%s %s" % [name, DESTR_CUE_PREARMED]]
 		if short_name != name:
-			forms.append("%s PRESS TWICE" % short_name)
-		forms.append("PRESS TWICE")
+			forms.append("%s %s" % [short_name, DESTR_CUE_PREARMED])
+		forms.append(DESTR_CUE_PREARMED)
 	if font == null:
 		return forms[0]
 	for f in forms:
@@ -2992,7 +3022,12 @@ func _draw() -> void:
 		# It also clamps: the chip only shows when it actually FITS (reserve < avail), so a
 		# column narrower than the chip degrades to a bare ellipsized label with no negative
 		# max_w and no chip overdrawing the text.
-		var fit := _row_fit(label, 11, avail, reserve)
+		# c3-17: for a destructive row, mark its warning cue as a load-bearing suffix so a
+		# long/localized identity ellipsizes the NAME, never clipping the "PRESS TWICE/AGAIN"
+		# warning off the tail. destructive_label already fits the plate; this is the safety net
+		# for the floor/localized case where the label still overflows _row_fit's column.
+		var keep_tail := destructive_cue_tail(label, armed) if destr else ""
+		var fit := _row_fit(label, 11, avail, reserve, keep_tail, destr)
 		var show_chip: bool = fit["show_chip"]
 		# max_w hard-clips as a backstop for the degenerate case (even one glyph +
 		# ellipsis wider than the column) so a floor label can never overdraw the slot.
@@ -3970,11 +4005,33 @@ func _draw_opts_header() -> void:
 
 # Trim a label to max_w with a trailing ellipsis (raw clipping ate whole glyphs
 # mid-character; dynamic labels like the seed row can outgrow the button).
-func _ellipsize(txt: String, size: int, max_w: float) -> String:
+func _ellipsize(txt: String, size: int, max_w: float, keep_tail := "", warn := false) -> String:
 	var f := Art.font()
 	if f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
 		return txt
 	var ell := "…" if f.has_char(0x2026) else "..."
+	# c3-17: a destructive row's warning cue (" PRESS TWICE" / " PRESS AGAIN" — the thing
+	# telling the player this row is one/two presses from wiping a run) must NEVER be the tail
+	# that truncation eats. When the caller marks a suffix as load-bearing (keep_tail) and the
+	# label ends with it, ellipsize only the NAME ahead of the cue and keep the cue INTACT —
+	# "RESTART PRESS AGAIN" -> "RES… PRESS AGAIN", never "RESTART PRESS…". Only take this when
+	# the "…<cue>" itself fits.
+	var head := txt.substr(0, txt.length() - keep_tail.length()) if keep_tail != "" and txt.ends_with(keep_tail) else txt
+	if keep_tail != "" and txt.ends_with(keep_tail) \
+			and f.get_string_size(ell + keep_tail, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+		return _fit_prefix(f, head, ell + keep_tail, size, max_w) + ell + keep_tail
+	# Plate too tight for the spelled-out cue (or a bare-cue label with no separable head):
+	# for ANY destructive row (warn) DEGRADE to the minimal "!" marker rather than clipping the
+	# danger signal away — "RES…!" still reads as destructive where a plain "RESTA…" would not.
+	# Spacing is intentionally "…!" (no space before "!", unlike a resting " !" suffix): on a
+	# floor-width plate every px is scarce and the ellipsis already separates name from mark.
+	# If even "…!" is wider than the column (a plate narrower than two glyphs) fall through to
+	# the plain trim below — the caller's Art.text max_w hard-clips that last-resort string, so
+	# nothing overdraws the slot; there is simply no room left for any cue at that width.
+	if warn:
+		var mark := ell + DESTR_CUE_MARK
+		if f.get_string_size(mark, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+			return _fit_prefix(f, head, mark, size, max_w) + mark
 	# c2-14: toggle/value rows read "NAME: STATE" (e.g. "ASSIST (2-HIT): OFF"). The
 	# STATE tail IS the point of the row, so ellipsize the NAME and KEEP the tail
 	# ("NAM…: OFF") rather than silently trimming the ON/OFF off the end. Only take
@@ -4006,14 +4063,14 @@ const _ROW_FIT_CACHE_MAX := 128
 # stale entries FIFO-evict). `reserve` is the chip's footprint: the chip only shows when
 # it actually fits (reserve < avail), otherwise the row degrades to a bare ellipsized
 # label — never a negative ellipsize width or a chip drawn over the text.
-func _row_fit(label: String, size: int, avail: float, reserve: float) -> Dictionary:
+func _row_fit(label: String, size: int, avail: float, reserve: float, keep_tail := "", warn := false) -> Dictionary:
 	var f := Art.font()
-	var key := "%d|%d|%.2f|%s" % [f.get_instance_id(), size, avail, label]
+	var key := "%d|%d|%.2f|%.2f|%d|%s|%s" % [f.get_instance_id(), size, avail, reserve, int(warn), keep_tail, label]
 	if _row_fit_cache.has(key):
 		return _row_fit_cache[key]
 	var overflow := f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > avail
 	var show_chip := overflow and reserve < avail
-	var shown := _ellipsize(label, size, avail - reserve if show_chip else avail)
+	var shown := _ellipsize(label, size, avail - reserve if show_chip else avail, keep_tail, warn)
 	var res := {"overflow": overflow, "show_chip": show_chip, "shown": shown}
 	if _row_fit_cache.size() >= _ROW_FIT_CACHE_MAX:
 		_row_fit_cache.erase(_row_fit_cache.keys()[0])
@@ -4056,6 +4113,8 @@ func _glyph_cuts(f: Font, s: String, size: int) -> PackedInt32Array:
 # overflows (a column too narrow for the ellipsis/tail alone) it returns "", so
 # "" + suffix STILL exceeds max_w — the degenerate case the caller's Art.text max_w
 # hard-clip backstops. Width is monotonic in prefix length, so binary-search the cuts.
+# Shared by _ellipsize's three tail-preserving paths (the ": STATE" toggle tail, the c3-17
+# destructive cue, and its "!" floor marker): each trims the NAME while the suffix rides whole.
 func _fit_prefix(f: Font, s: String, suffix: String, size: int, max_w: float) -> String:
 	var cuts := _glyph_cuts(f, s, size)
 	var lo := 0
@@ -4272,6 +4331,9 @@ func _draw_footer_help(row_help: String, strip_top: float) -> float:
 	# baseline strip_top+17 seats the legend's label (drawn at +3 inside _legend_row) at glyphs
 	# y350..358 — flush with the strip bottom, no descender spill. The 1px rule sits at strip_top+12
 	# (y349), cleanly in the gap between the two lines.
+	# c3-17: the ONLY other _ellipsize caller — footer help text, which carries no destructive
+	# cue (no keep_tail/warn needed). Every destructive-row label routes through _row_fit above,
+	# so the cue-preserving path covers all destructive truncation.
 	_center_text(_ellipsize(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 10.0, 8, FOOTER_HELP_COL)
 	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + 12.0, BTN.x, 1.0), DIVIDER_DIM)
 	return strip_top + 17.0
