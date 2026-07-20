@@ -1067,6 +1067,7 @@ func _input(event: InputEvent) -> void:
 			return
 	# Track the LAST-USED device so glyphs/legends teach the right buttons —
 	# a merely-connected idle pad shouldn't override an active keyboard.
+	var was_pad := Art.use_pad
 	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		if event is InputEventJoypadMotion and absf(event.axis_value) < 0.5:
 			return
@@ -1077,6 +1078,12 @@ func _input(event: InputEvent) -> void:
 			Art.pad_brand = _joy_brand(event.device)
 	elif event is InputEventKey or event is InputEventMouse:
 		Art.use_pad = false
+	# c3-10: the menu footer/legend teaches device-specific glyphs (keycaps vs pad buttons).
+	# A settled menu under Reduce Motion idles without repainting, so a keyboard<->pad switch
+	# would strand stale prompts on screen. Repaint the instant the device flips so the footer's
+	# SELECT/BACK/PAUSE glyphs swap to match the hands actually holding the controls.
+	if Art.use_pad != was_pad and _menu != null and _menu.is_active():
+		_menu.queue_redraw()
 	# Pad redeploy: START on the debrief/victory card mirrors keyboard R — pad
 	# players otherwise had to reach for a keyboard (or tunnel through pause →
 	# RESTART → confirm). Consumed here so the menu doesn't also open pause.
@@ -2755,6 +2762,16 @@ const MENU_BIND_DEFAULTS := {
 	"menu_right": KEY_RIGHT,
 	"menu_confirm": KEY_ENTER,
 	"menu_cancel": KEY_ESCAPE,
+	# c3-10: the HOW TO PLAY shortcut — a real menu binding (persisted via [menubinds], remappable
+	# through the save overlay) so the footer/legend "F1 HELP" hint is DERIVED from the live bind
+	# and stays truthful if it's re-pointed, rather than a hardcoded stamp. Not in REBIND_MENUNAV,
+	# so it's an overridable default without adding a rebind-screen row.
+	"menu_help": KEY_F1,
+	# c3-10: the category-tab / section switch on the tabbed menus (REBIND MOVE-AIM / ACTIONS /
+	# GAMEPAD / MENUS). A real menu binding (persisted, remappable on the MENUS tab) so the REBIND
+	# footer "SECTION" hint is DERIVED from the live bind and stays truthful if it's re-pointed,
+	# instead of a hardcoded TAB stamp. Pad still switches sections on the shoulder buttons.
+	"menu_next_tab": KEY_TAB,
 }
 
 

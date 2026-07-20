@@ -45,6 +45,12 @@ var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jump
 var _howto_page := 0    # c3-05: which HOW-TO-PLAY page (0 CONTROLS / 1 WAR CHEST / 2 ENEMIES / 3 ENDLESS); left/right/wheel or tab-click pages it
 const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "ENEMIES", "ENDLESS"]  # c3-05: four HOW-TO-PLAY pages — the old BASIC page crammed the verbs AND the War Chest economy together, so each now owns a page and reads at a roomy pitch
 const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; existence gates the INFO menu row
+# c3-10: the HOW TO PLAY shortcut's DEFAULT keycode — the live value is the "menu_help" menu
+# binding (main.menu_bind, remappable via the save overlay); this const is only the fallback for
+# the headless capture menu (main == null) and mirrors MENU_BIND_DEFAULTS["menu_help"]. Both the
+# _unhandled_input handler and every footer/legend stamp read _help_code()/_help_keycap() off the
+# SAME live binding, so re-pointing the shortcut updates the handler and the hints together.
+const HELP_KEY := KEY_F1
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
 var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
 var _open_t := 0.0      # menu-open settle envelope (backdrop fade + row drop-in)
@@ -746,7 +752,7 @@ const REBIND_TABS := ["MOVE / AIM", "ACTIONS", "GAMEPAD", "MENUS"]
 const REBIND_MOVE_AIM := ["move_up", "move_down", "move_left", "move_right",
 	"aim_up", "aim_down", "aim_left", "aim_right"]
 const REBIND_ACTIONS := ["fire", "grenade", "roll", "interact", "revive", "buy"]
-const REBIND_MENUNAV := ["menu_up", "menu_down", "menu_left", "menu_right", "menu_confirm", "menu_cancel"]
+const REBIND_MENUNAV := ["menu_up", "menu_down", "menu_left", "menu_right", "menu_confirm", "menu_cancel", "menu_help", "menu_next_tab"]
 
 
 # c1-18: is the active tab a KEYBOARD page (true) or the GAMEPAD page (false)?
@@ -813,6 +819,8 @@ static func rebind_label(action: String) -> String:
 		"menu_right": return "MENU RIGHT"
 		"menu_confirm": return "MENU CONFIRM"
 		"menu_cancel": return "MENU BACK"
+		"menu_help": return "HOW TO PLAY"
+		"menu_next_tab": return "SWITCH SECTION"
 	return action.to_upper()
 
 
@@ -1170,6 +1178,18 @@ func _unhandled_input(ev: InputEvent) -> void:
 	if mode == Mode.REBIND and _rebind_action != "":
 		if _rebind_capture(ev):
 			return
+	# c3-10: F1 is the direct HOW TO PLAY shortcut — from any menu screen it jumps straight to
+	# the help pages (the footer/legend advertises "F1 HOW TO"). Placed AFTER rebind capture so a
+	# listen can still bind F1 and it never fires mid-capture; skipped if help is already open.
+	if mode != Mode.HIDDEN and mode != Mode.HOWTO and ev is InputEventKey \
+			and ev.pressed and not ev.echo \
+			and (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode) == _help_code():
+		open(Mode.HOWTO)
+		main._sfx.play("pickup", -12.0)
+		var vpf1 := get_viewport()
+		if vpf1 != null:
+			vpf1.set_input_as_handled()
+		return
 	# c1-18: on the GAMEPAD tab, ◄/► (keyboard A/D/arrows or pad d-pad L/R) switches which
 	# PLAYER's layout is being edited (P1 <-> P2). The two pad maps are independent, so a
 	# left-handed or differently-abled P2 remaps without touching P1. Handled before nav so the
@@ -1199,13 +1219,15 @@ func _unhandled_input(ev: InputEvent) -> void:
 			main._sfx.play("pickup", -14.0, 1.3)
 			_dirty = true
 			return
-	# c1-18: TAB (kb) or a shoulder (pad) cycles the MOVE/AIM -> ACTIONS -> GAMEPAD category
-	# tabs while idle. Shoulders step both directions; Tab cycles forward. Handled before nav
-	# so the toggle can't also move the cursor.
+	# c1-18: the menu_next_tab key (kb, default TAB) or a shoulder (pad) cycles the MOVE/AIM ->
+	# ACTIONS -> GAMEPAD category tabs while idle. Shoulders step both directions; the key cycles
+	# forward. Handled before nav so the toggle can't also move the cursor. c3-10: matches the LIVE
+	# menu_next_tab bind (physical), so a rebound section key drives the switch AND the footer stamp.
 	if mode == Mode.REBIND and _rebind_action == "":
 		var step := 0
 		var to_tab := -1
-		if ev is InputEventKey and ev.pressed and not ev.echo and ev.keycode == KEY_TAB:
+		if ev is InputEventKey and ev.pressed and not ev.echo and main != null \
+				and (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode) == main.menu_bind("menu_next_tab"):
 			step = 1
 		elif ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			step = 1
@@ -2888,6 +2910,18 @@ func _draw() -> void:
 		var row2: Array = [{"act": "interact", "label": "INTERACT"},
 			{"act": "revive", "label": "REVIVE"},
 			{"act": "wheel", "label": "SUPPLY WHEEL"}]
+		# c3-10: teach the two meta controls the gameplay legend never named — PAUSE and the
+		# HOW TO PLAY shortcut. Keyboard-only players had no on-screen cue the run is pausable
+		# at all, nor a direct key to the help. Device-aware: on a pad, START opens PAUSE (help
+		# is reached through the menus); on keyboard, the PAUSE keycap is DERIVED from the live
+		# menu_cancel binding (never a hardcoded "ESC" literal — a rebound cancel key teaches
+		# THEIR key via _back_keycap), and F1 jumps straight to HOW TO PLAY. Both stamped keycaps
+		# ride the wide blank (via _glyph_w's stamp default), same grammar as the SELECT/BACK footer.
+		if Art.use_pad:
+			row2.append({"tex": Art.glyph_key("start"), "label": "PAUSE"})
+		else:
+			row2.append(_keycap_seg(_back_keycap(), "PAUSE"))
+			row2.append(_keycap_seg(_help_keycap(), "HOW TO"))
 		# c2-13: only advertise SELECT when the focused row can actually be activated.
 		# A locked row (e.g. DAILY RUN completed) draws NO confirm cue, so the legend
 		# never contradicts the dim/COMPLETED state by promising a press that only buzzes.
@@ -3985,7 +4019,7 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 # device-aware prompt art (Enter/A, Esc/B) — so keyboard/pad players don't lose
 # nav discovery after first launch. One shared strip position (FOOTER_Y), pinned
 # clear of the selected-row glow (see _row_geometry's drop cap + the layout test).
-# PAUSE additionally carries the PERMANENT ROLL/WHEEL/REVIVE reference (footer_segs),
+# PAUSE additionally carries the PERMANENT ROLL/WHEEL/REVIVE reference (_footer_segs),
 # so the in-run HUD reminder can stay purely transient without those bindings
 # becoming unrecoverable mid-run.
 
@@ -4032,7 +4066,7 @@ func _footer_legend() -> void:
 	var legend_y := FOOTER_Y + 8.0
 	if two_line:
 		legend_y = _draw_footer_help(row_help, strip_top)
-	var segs := footer_segs(mode)
+	var segs := _footer_segs()
 	# c1-13: when the Hall spills past one page, the footer strip carries an EXPLICIT
 	# UP/DOWN = PAGE key hint. The PREV/NEXT plates flank the counter left/right, but the
 	# input axis is vertical (left/right cycles the FILTER), so the control strip states
@@ -4052,6 +4086,12 @@ func _footer_legend() -> void:
 		# c2-02: HOW TO PLAY pages on left/right — state the axis in the one strip
 		# players read for bindings, same as HALL's UP/DN page hint.
 		segs = footer_howto_page_segs() + segs
+	elif mode == Mode.REBIND:
+		# c3-10: the REBIND screen switches its MOVE-AIM / ACTIONS / GAMEPAD category tabs on
+		# TAB (keyboard) or the shoulder buttons (pad) — a bind the strip never advertised, so
+		# players couldn't find the ACTIONS/GAMEPAD sections. Device-aware, prepended ahead of
+		# the SELECT/BACK nav like every other axis hint.
+		segs = _footer_rebind_tab_segs() + segs
 	elif not focused.is_empty():
 		# c2-03: on the settings screens the focused row's ◄/► arrows adjust it in place
 		# (toggle flip, volume/scale step). Surface that bind in the footer strip whenever
@@ -4085,13 +4125,66 @@ static func footer_verb_segs() -> Array:
 		{"act": "revive", "label": "REVIVE"}]
 
 
-# c1-04: the full footer legend a screen draws — SELECT/BACK nav on every non-TITLE
-# screen, with the gameplay-verb reference prepended on PAUSE (the mid-run recovery
-# screen). Pure so the render test can pin the exact drawn segments and their bounds.
-static func footer_segs(mode_id: int) -> Array:
-	if mode_id == Mode.PAUSE:
-		return footer_verb_segs() + footer_nav_segs()
-	return footer_nav_segs()
+# c3-10: the keycap the footer/legend stamps for BACK & PAUSE, DERIVED from the LIVE
+# menu_cancel binding (the one key that backs out of a menu AND opens PAUSE mid-run)
+# instead of a hardcoded "ESC" literal — so a player who rebinds cancel is taught THEIR
+# key. Uppercased to sit in the keycap; falls back to "ESC" when unbound or when the
+# display server can't resolve a label (headless), matching footer_nav_segs's static default.
+func _back_keycap() -> String:
+	if main == null:
+		return "ESC"
+	var cap := key_label(main.menu_bind("menu_cancel")).to_upper()
+	return cap if cap != "" and cap != "UNBOUND" else "ESC"
+
+
+# c3-10: the LIVE HOW TO PLAY shortcut keycode — the "menu_help" menu binding (remappable),
+# falling back to HELP_KEY only for the headless capture menu with no main. The input handler
+# matches this and _help_keycap stamps it, so hint and handler can never disagree.
+func _help_code() -> int:
+	return main.menu_bind("menu_help") if main != null else HELP_KEY
+
+
+# c3-10: the HOW TO PLAY shortcut's keycap, DERIVED from the live _help_code via key_label — so
+# the stamp is never a stray 'F1' literal that could drift from the real bind. Uppercased.
+func _help_keycap() -> String:
+	return key_label(_help_code()).to_upper()
+
+
+# c3-10: ONE builder for a stamped keycap segment, so the small-vs-wide blank choice is made in a
+# SINGLE place and stays consistent across the gameplay legend row AND the menu footer. A label of
+# 4+ chars (e.g. "ESCAPE") rides the wide keycap so the stamp never clips; up to 3 ("ESC"/"F1")
+# sits on the compact blank.
+func _keycap_seg(cap: String, label: String) -> Dictionary:
+	return {"tex": "glyph_key_wide" if cap.length() > 3 else "ui_key_blank", "stamp": cap, "label": label}
+
+
+# c3-10: instance wrapper over the static footer_nav_segs — on keyboard BOTH nav keycaps are
+# swapped for their LIVE bindings so the drawn strip reflects a rebound cancel/confirm key: BACK
+# takes the menu_cancel keycap (_back_keycap, never a hardcoded "ESC"), and SELECT keeps the
+# dedicated Enter-key art for an Enter-family confirm but stamps its own keycap once confirm is
+# rebound elsewhere. A label wider than the small blank keycap (e.g. "ESCAPE") rides the WIDE
+# blank so the stamp never clips. Pad prompts are untouched (the static A/B buttons).
+func _footer_nav_segs() -> Array:
+	var nav := footer_nav_segs()
+	if not Art.use_pad:
+		nav[1] = _keycap_seg(_back_keycap(), "BACK")   # live menu_cancel keycap, never "ESC"
+		if main != null:
+			var ccode: int = main.menu_bind("menu_confirm")
+			if ccode != KEY_ENTER and ccode != KEY_KP_ENTER and ccode != KEY_SPACE and ccode != 0:
+				nav[0] = _keycap_seg(key_label(ccode).to_upper(), "SELECT")
+	return nav
+
+
+# c3-10: the full footer legend a screen draws — SELECT/BACK nav on every non-TITLE screen
+# (with the LIVE keycaps), the gameplay-verb reference prepended on PAUSE (the mid-run recovery
+# hub). On keyboard EVERY menu footer also advertises the F1 = HELP (HOW TO PLAY) shortcut so
+# help is one keypress away and discoverable everywhere — except HOWTO itself, where it's
+# already open. Pad reaches HOW TO through the menus (no F1), so the hint is keyboard-only.
+func _footer_segs() -> Array:
+	var segs: Array = footer_verb_segs() + _footer_nav_segs() if mode == Mode.PAUSE else _footer_nav_segs()
+	if not Art.use_pad and mode != Mode.HOWTO:
+		segs.append(_keycap_seg(_help_keycap(), "HELP"))
+	return segs
 
 
 # c1-13: the explicit paging key hint for the Hall footer — a wide keycap stamped with
@@ -4105,6 +4198,27 @@ static func footer_page_segs() -> Array:
 # wide keycap is stamped L/R. Static so a headless test can pin it.
 static func footer_howto_page_segs() -> Array:
 	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": "PAGE"}]
+
+
+# c3-10: the REBIND category-tab hint — the MOVE-AIM / ACTIONS / GAMEPAD sections switch on the
+# menu_next_tab key (keyboard) or a shoulder button (pad). Device-aware via Art.use_pad: the
+# left-shoulder glyph on a pad; on keyboard the keycap is DERIVED from the LIVE menu_next_tab bind
+# (via _tab_keycap) so a rebound section key is taught truthfully, never a stray "TAB" literal.
+func _footer_rebind_tab_segs() -> Array:
+	if Art.use_pad:
+		return [{"tex": "glyph_lb", "label": "SECTION"}]
+	return [_keycap_seg(_tab_keycap(), "SECTION")]
+
+
+# c3-10: the keycap the REBIND footer stamps for the section switch, DERIVED from the live
+# menu_next_tab bind via key_label — so it follows a rebind and can't drift from the handler.
+# Falls back to "TAB" when unbound or when the display server can't resolve a label (headless),
+# matching the ship default (KEY_TAB).
+func _tab_keycap() -> String:
+	if main == null:
+		return "TAB"
+	var cap := key_label(main.menu_bind("menu_next_tab")).to_upper()
+	return cap if cap != "" and cap != "UNBOUND" else "TAB"
 
 
 # c2-03: the HALL filter hint — the ALL/CAMPAIGN/ENDLESS tabs cycle on the horizontal
