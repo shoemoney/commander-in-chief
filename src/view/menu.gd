@@ -274,6 +274,28 @@ const OVERFLOW_CHIP_COL := Color(0.0, 0.0, 0.0, 0.72)     # c2-14 truncation-fla
 const OVERFLOW_CHIP_BORDER := Color(WARN_COL, 0.55)      # c2-14 chip border (contrast on any row)
 const OVERFLOW_DOT_COL := WARN_COL                       # c2-14 the three amber "clipped" dots
 const OVERFLOW_CHIP_PAD := 3.0                           # c2-14 breathing room between text and the chip
+# c3-13: CHALLENGE SEED sub-label palette. The at-rest "(FROM CLIPBOARD)" source tag rides
+# INSIDE the plate as helper text (SEED_TAG_COL); a focused row with nothing usable on the
+# clipboard gets a LEFT-EDGE red status stripe (a shape marker, deliberately UNLIKE the
+# destructive armed FULL flood so an invalid paste never reads as an armed RESTART/QUIT) over a
+# very faint veil, both brightening/widening on a denied press (via the decaying _seed_flash).
+const ROW_LABEL_SIZE := 11                                # c3-13: the main row-label font size — one source shared by the label draw AND the seed sub-label's clearance/alignment math
+const ROW_LABEL_BASELINE_DY := 4.0                        # c3-13: main row-label baseline offset below the row center (cy) — shared with the seed sub-label so the two never drift apart
+const SEED_ROW_LABEL := "CHALLENGE SEED"                  # the CHALLENGE SEED row's base label — single-sourced so a rename/relocalize can't desync the sub-label's name-column measurement
+const SEED_SOURCE_COPY := "(FROM CLIPBOARD)"              # the at-rest source sub-label copy — one source, used by both seed_hint_lines() and the in-plate tag draw (no coupling to hint-line param order)
+const SEED_TAG_COL := Color(0.74, 0.8, 0.7, 0.62)        # in-plate source sub-label (helper text)
+const SEED_TAG_SIZE := 7                                  # px; the ONE size seed sub-lines are measured AND drawn at
+const SEED_DENY_RED := Color(0.62, 0.13, 0.08)           # red for the invalid-seed status stripe + faint veil
+const SEED_DENY_VEIL_A := 0.09                            # faint full-plate tint (far below the destructive flood's ~0.82, so the two never read alike)
+const SEED_DENY_BAR_W := 3.0                             # left-edge status-stripe width at rest (a denied press widens it)
+const SEED_DENY_BAR_A := 0.75                            # status-stripe opacity (thin, so it marks without flooding)
+const SEED_DENY_FLASH_BRIGHT := Color(1.0, 0.5, 0.3)     # a denied press lerps BOTH the left-edge stripe AND the in-plate error text toward this brighter red, so the pulse reads as one event
+# c3-13: seed sub-label placement pads, derived from the row's own chrome so the tag stays inside
+# the plate: SEED_SUB_PAD mirrors the main label's r.end.x-8 right bound; SEED_SUB_GAP is the gap
+# kept after the name on the short-plate same-line path; SEED_SUB_MARGIN is the bottom breath.
+const SEED_SUB_PAD := 8.0
+const SEED_SUB_GAP := 6.0
+const SEED_SUB_MARGIN := 2.0   # bottom breath so a stacked line's descenders never sit on the plate edge
 # c3-03: DEPLOY backing-panel chrome (the raised cluster behind the start verbs) — hoisted
 # out of _draw so the fill/border hues live with the rest of the THEME block, not as bare
 # inline Color() literals. Alpha is scaled by _open_t at draw so the panel fades in with the column.
@@ -583,7 +605,7 @@ func _menu_items() -> Array[Dictionary]:
 			# it never clips the label and stays scannable, mirroring the toggle-dot slot.
 			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0,
 				"disabled": main.daily_done(), "badge": "COMPLETED" if main.daily_done() else ""},
-			{"id": "paste_seed", "label": "CHALLENGE SEED", "destructive": false, "grp": 0},
+			{"id": "paste_seed", "label": SEED_ROW_LABEL, "destructive": false, "grp": 0},
 			# grp 1: run-config gets its own block (a divider splits it from the start
 			# verbs above and the meta screens below). The row carries its own live
 			# config tail — players and an EXPLICIT NORMAL/HARD difficulty — so a stale
@@ -2190,7 +2212,7 @@ static func seed_hint_lines(selected: bool, preview: int, armed: bool, clip_empt
 	# - CHECK COPY" so the two failures are told apart; a valid seed shows "SEED N"; once
 	# armed it adds a SECOND line "PRESS AGAIN" so the confirm stays fully textual.
 	if not selected:
-		return PackedStringArray(["(FROM CLIPBOARD)"])
+		return PackedStringArray([SEED_SOURCE_COPY])
 	if preview < 0:
 		return PackedStringArray(["NO SEED - COPY ONE"] if clip_empty else ["BAD SEED - CHECK COPY"])
 	if armed:
@@ -2239,28 +2261,114 @@ func _is_seed_row() -> bool:
 	return sel >= 0 and sel < items.size() and items[sel]["id"] == "paste_seed"
 
 
-func _draw_seed_hint(r: Rect2, cy: float, selected: bool) -> void:
-	# c1-14: draw the CHALLENGE SEED hint in the right margin THROUGH the _emit_rect /
-	# _emit_label seams, so a draw-capture test can inspect the exact plate + text lines.
-	# Unselected names the source; selected shows the seed (green) or the deny copy (red,
-	# empty vs malformed told apart); armed adds a two-line "PRESS AGAIN" confirm (amber).
+enum { SEED_SUB_NONE, SEED_SUB_STACKED, SEED_SUB_SAME_LINE }
+
+func _seed_tag_stacks(r: Rect2, cy: float) -> bool:
+	# c3-13: does the plate have vertical room to stack the seed sub-label as a true SECOND
+	# line BELOW the row name? Single-sourced so the main label pass (which reserves a same-line
+	# tag slot when it does NOT stack) and _draw_seed_subline (which places the tag) can never
+	# disagree about which layout is in play. Uses the same ROW_LABEL_* geometry the name draws at.
 	var f := Art.font()
-	var armed_here := selected and _seed_preview >= 0 and _seed_armed and _seed_preview == _seed_armed_val
-	# The deny flash only colours the hint while selected AND there is no valid seed to
-	# show — a lingering flash can never hide a now-valid preview.
-	var flash_here := _seed_flash > 0.0 and selected and _seed_preview < 0
+	var label_bottom := cy + ROW_LABEL_BASELINE_DY + f.get_descent(ROW_LABEL_SIZE)
+	return label_bottom + f.get_ascent(SEED_TAG_SIZE) + f.get_descent(SEED_TAG_SIZE) + SEED_SUB_MARGIN <= r.end.y
+
+
+func _seed_flash_amt() -> float:
+	# c3-13: denied-press flash intensity, shared by the plate stripe/veil AND the status hint.
+	# Normal motion returns the smooth decaying _seed_flash. Under Reduce Motion it returns a
+	# STEADY full-strength step (a single non-animated pulse) while the flash timer is live, so a
+	# denied press still lands a distinct high-contrast error cue instead of vanishing when
+	# animation is disabled — the persistent invalid marker alone gave the PRESS no feedback.
+	if main._motion >= 0.5:
+		return _seed_flash
+	return 1.0 if _seed_flash > 0.0 else 0.0
+
+
+func _draw_seed_subline(r: Rect2, cy: float, text: String, col: Color, allow_same_line: bool) -> int:
+	# c3-13: place a short seed sub-label INSIDE the plate. Real TITLE seed-row plates run
+	# ~24..36px; a full SEED_TAG_SIZE line only fits BELOW the name on the taller plates. It
+	# derives the name's geometry from the SAME constants the main label draw uses (ROW_LABEL_SIZE
+	# / ROW_LABEL_BASELINE_DY), so the two can't drift. Returns an explicit placement enum instead
+	# of an ambiguous bool: SEED_SUB_STACKED = a true SECOND line under the name; SEED_SUB_SAME_LINE
+	# = seated on the name's line (short plate, allow_same_line only — the resting tag, whose name
+	# is the FIXED SEED_ROW_LABEL, right-aligned and clamped clear of it); SEED_SUB_NONE = nothing
+	# drawn (short plate, same-line disallowed for focused rows whose label is the clipboard echo a
+	# same-line tag could collide with — the caller then falls back to the right-margin hint).
+	var f := Art.font()
+	var lx := r.position.x + 30.0   # SAME left column the main label is drawn at
+	var right := r.end.x - SEED_SUB_PAD   # inner right bound, mirrors the main label's r.end.x-8
+	var name_baseline := cy + ROW_LABEL_BASELINE_DY
+	# Route through the _emit_label seam (not raw Art.text) at SEED_TAG_SIZE with a max_w clamp,
+	# so a draw-capture test can inspect these lines and they can never overdraw the plate border.
+	_label_size = SEED_TAG_SIZE
+	if _seed_tag_stacks(r, cy):
+		_label_max_w = right - lx
+		_emit_label(text, Vector2(lx, r.end.y - f.get_descent(SEED_TAG_SIZE) - SEED_SUB_MARGIN), col)
+		_label_size = 8
+		_label_max_w = 0.0
+		return SEED_SUB_STACKED
+	if allow_same_line:
+		# c3-13: SHORT plate — no vertical room to stack. Ride the tag on the NAME's baseline,
+		# RIGHT-ALIGNED in the slot the main label pass reserves for it (it narrows the name's
+		# avail so the name ellipsizes clear). Right-aligning means we never measure the name
+		# here, so the tag can't drift against the actual drawn (possibly ellipsized) label, AND
+		# the helper is ALWAYS drawn — the name is clipped to make room for it, never the tag
+		# omitted. maxf keeps the tag inside the icon gutter on a pathologically narrow plate.
+		var tw := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, SEED_TAG_SIZE).x
+		var tx := maxf(right - tw, lx)
+		_label_max_w = right - tx
+		_emit_label(text, Vector2(tx, name_baseline), col)
+		_label_size = 8
+		_label_max_w = 0.0
+		return SEED_SUB_SAME_LINE
+	_label_size = 8
+	_label_max_w = 0.0
+	return SEED_SUB_NONE
+
+
+func _draw_seed_hint(r: Rect2, cy: float, selected: bool) -> void:
+	# c1-14 / c3-13: the CHALLENGE SEED status hint. AT REST it is an in-plate sub-label
+	# (c3-13, via _draw_seed_subline) rather than floating in the right margin. When FOCUSED it
+	# shows live status: the invalid/empty error also rides in-plate; valid/armed use the
+	# right-margin lines (drawn through the _emit_* seams so a draw-capture test can inspect them).
+	var f := Art.font()
+	if not selected:
+		_draw_seed_subline(r, cy, SEED_SOURCE_COPY, SEED_TAG_COL, true)
+		return
+	# FOCUSED: live status in the right margin.
+	var armed_here := _seed_preview >= 0 and _seed_armed and _seed_preview == _seed_armed_val
+	# The deny flash only colours the hint while there is no valid seed to show — a lingering
+	# flash can never hide a now-valid preview.
+	var flash_here := _seed_flash > 0.0 and _seed_preview < 0
 	var clip_empty := _seed_clip_raw.strip_edges().is_empty()
-	var lines := seed_hint_lines(selected, _seed_preview, armed_here, clip_empty)
+	var lines := seed_hint_lines(true, _seed_preview, armed_here, clip_empty)
 	var deny_col := Color(1.0, 0.55, 0.4)   # resting invalid colour
-	var hcol := Color(0.84, 0.86, 0.78, 0.75)   # unselected: names the source
+	if _seed_preview < 0:
+		# c3-13: co-locate the SPECIFIC error ("NO SEED - COPY ONE" / "BAD SEED - CHECK COPY")
+		# IN the plate as the second line, next to the row's red status stripe — so the message
+		# rides the BUTTON, not only the right margin. A denied flash brightens it. When the plate
+		# is too short to stack the line, fall through to the right-margin hint below (no fallback
+		# on the name's line here: the focused row's label is the clipboard ECHO, not the fixed
+		# name, so a same-line tag could collide with it). The preview<0 branch of seed_hint_lines
+		# is single-line by construction (the two-line case is armed+valid, never invalid), so
+		# lines[0] IS the whole error copy — no dropped tail.
+		var ecol := deny_col
+		if flash_here:
+			# SAME brighten target as the stripe. Under Reduce Motion _seed_flash_amt() steps
+			# to a steady full-strength bright while the flash is live (no per-frame decay), so
+			# the denied press still lands a high-contrast cue on the in-plate error copy too.
+			ecol = deny_col.lerp(SEED_DENY_FLASH_BRIGHT, _seed_flash_amt())
+		if _draw_seed_subline(r, cy, lines[0], ecol, false) == SEED_SUB_STACKED:
+			return   # error copy now rides in-plate; skip the redundant right-margin hint
+	var hcol := Color(0.84, 0.86, 0.78, 0.75)
 	if flash_here:
 		# a brief BRIGHTEN that settles cleanly back INTO the resting deny colour, so there
-		# is no brightness pop when the flash ends. Reduce Motion snaps to resting (no pulse).
-		var flash_amt := 0.0 if main._motion < 0.5 else _seed_flash
-		hcol = deny_col.lerp(Color(1.0, 0.78, 0.6), flash_amt)
-	elif selected and _seed_preview >= 0:
+		# is no brightness pop when the flash ends. Reduce Motion holds a steady bright step
+		# (via _seed_flash_amt) so the denied press still reads instead of snapping to resting.
+		hcol = deny_col.lerp(Color(1.0, 0.78, 0.6), _seed_flash_amt())
+	elif _seed_preview >= 0:
 		hcol = Art.safe(Color(1.0, 0.88, 0.4)) if armed_here else Art.safe(Color(0.55, 0.95, 0.5))
-	elif selected:
+	else:
 		hcol = deny_col   # red = nothing usable to paste
 	# Plate sized from the WIDEST line; a right-margin plate clamped inside the 20..620
 	# chrome frame so no line runs off-screen or back over the button. A 2-line armed hint
@@ -2324,7 +2432,8 @@ func _activate_seed() -> void:
 	# identical to a still-pending read.
 	if _seed_preview < 0:
 		main._sfx.play("deny", -8.0)
-		_seed_flash = 1.0
+		_seed_flash = 1.0   # c3-13: drives the RED PLATE-WASH BRIGHTEN in _draw (on top of the
+		                    # persistent invalid tint) so the denied press recoils the whole button
 		_seed_armed = false
 		_dirty = true
 		# c2-12: the deny needs no center toast — the FOCUSED row already carries full inline
@@ -2587,6 +2696,22 @@ func _draw() -> void:
 			# c2-13: extra scrim over the plate interior so the icon + label read muted too —
 			# the row is clearly "unavailable", not just a differently-tinted button.
 			draw_rect(r.grow(-3), Color(0.02, 0.04, 0.02, 0.45))
+		# c3-13: focused seed row with nothing usable on the clipboard gets a PERSISTENT red
+		# validation marker — a thin left-edge stripe over a faint veil, deliberately UNLIKE the
+		# destructive armed FULL flood so it can't be mistaken for an armed RESTART/QUIT. A denied
+		# press widens/brightens it (via _seed_flash); Reduce Motion holds it steady. Drawn before
+		# the icon/label so the light text stays on top, and the veil is far below the flood's
+		# alpha so contrast holds. The specific NO SEED / BAD SEED copy rides in-plate via
+		# _draw_seed_hint (right-margin hint is the short-plate fallback).
+		if selected and mitems[k]["id"] == "paste_seed" and _seed_preview < 0:
+			var dw := _seed_flash_amt()   # Reduce Motion: a steady bright/wide step, not a suppressed no-op
+			var veil := SEED_DENY_RED
+			veil.a = SEED_DENY_VEIL_A + 0.08 * dw
+			draw_rect(r.grow(-3), veil)
+			var bar := SEED_DENY_RED.lerp(SEED_DENY_FLASH_BRIGHT, dw)   # a denied press BRIGHTENS the stripe
+			bar.a = SEED_DENY_BAR_A
+			draw_rect(Rect2(r.position.x + 3.0, r.position.y + 3.0,
+				SEED_DENY_BAR_W + 2.0 * dw, r.size.y - 6.0), bar)   # ...and WIDENS it
 		if armed:
 			# Armed red flood drawn FIRST — before the bracket, icon and selection
 			# glow — so those cues layer ON TOP of the wash instead of being washed
@@ -2738,6 +2863,15 @@ func _draw() -> void:
 		# long label ellipsizes clear of it instead of colliding.
 		if mitems[k].get("submenu", false):
 			label_r = minf(label_r, r.end.x - 20.0)
+		# c3-13: at-rest seed row on a SHORT plate rides its "(FROM CLIPBOARD)" tag on the
+		# name's line (see _draw_seed_subline). Reserve that right-aligned slot HERE — same
+		# discipline as the badge/chevron reservations — so the name ellipsizes clear of the
+		# tag instead of the tag being omitted when the name is too long. Only when NOT stacking
+		# (tall plates keep the full name width and stack the tag below) and NOT focused (the
+		# focused row shows live status via _draw_seed_hint, not the resting tag).
+		if mitems[k]["id"] == "paste_seed" and not selected and not _seed_tag_stacks(r, cy):
+			var seed_tag_w := Art.font().get_string_size(SEED_SOURCE_COPY, HORIZONTAL_ALIGNMENT_LEFT, -1, SEED_TAG_SIZE).x
+			label_r = minf(label_r, r.end.x - SEED_SUB_PAD - seed_tag_w - SEED_SUB_GAP)
 		# Fixed icon gutter: iconless rows indent the same, so every label
 		# left-aligns to one column. Overlong labels ellipsize inside the button.
 		var lx := r.position.x + 30.0
@@ -2766,7 +2900,7 @@ func _draw() -> void:
 		# max_w hard-clips as a backstop for the degenerate case (even one glyph +
 		# ellipsis wider than the column) so a floor label can never overdraw the slot.
 		# Art.text's 6th param is max_w (default 0.0 = no clip) — see src/view/art.gd.
-		Art.text(self, String(fit["shown"]), Vector2(lx, cy + 4.0), 11, col, avail)
+		Art.text(self, String(fit["shown"]), Vector2(lx, cy + ROW_LABEL_BASELINE_DY), ROW_LABEL_SIZE, col, avail)
 		if show_chip:
 			draw_rect(chip, OVERFLOW_CHIP_COL)
 			draw_rect(chip, OVERFLOW_CHIP_BORDER, false, 1.0)
@@ -2858,6 +2992,8 @@ func _draw() -> void:
 			draw_texture_rect(at, Rect2(lft.position.x + lft.size.x, lft.position.y, -lft.size.x, lft.size.y), false, fcol)
 			draw_texture_rect(at, arows[1], false, fcol)
 		if mitems[k]["id"] == "paste_seed":
+			# c3-13: runs for the seed row EVERY frame, selected or not — so the at-rest in-plate
+			# "(FROM CLIPBOARD)" sub-label is live, not focus-only.
 			_draw_seed_hint(r, cy, selected)
 		# c1-17: settings-change confirm halo — a green ring that briefly haloes the row
 		# whose toggle just flipped or whose volume just stepped, so the applied change
@@ -3941,6 +4077,10 @@ static func legend_primitives(segs: Array, y: float) -> Array:
 # with the fixed 3-arg shape — its recorded box stays size-independent since the caption is
 # right-aligned, so its clearance asserts hold regardless of the rendered size).
 var _label_size := 8
+# c3-13: optional width clamp the next _emit_label draw passes to Art.text (0 = no clip). Sits
+# alongside _label_size as a transient stamp so the _emit_label SEAM keeps its fixed 3-arg shape
+# (the capture-test subclass overrides it), while callers that need a max_w set this first.
+var _label_max_w := 0.0
 func _emit_rect(r: Rect2, c: Color) -> void:
 	draw_rect(r, c)
 func _emit_tex(key: String, r: Rect2, c: Color) -> void:
@@ -3950,7 +4090,7 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
 	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
-	Art.text(self, txt, pos, _label_size, c)
+	Art.text(self, txt, pos, _label_size, c, _label_max_w)
 
 
 # c1-09: OPTIONS settings groups get a named caption (AUDIO / HAPTICS / ACCESSIBILITY)
