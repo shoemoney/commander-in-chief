@@ -31,6 +31,9 @@ const HALL_RECENCY_Y := 82.0
 # screen, so the retention limit the Hall enforces and the one it advertises can't drift.
 # (The just-banked run is pinned even past it, so paging always reaches it.)
 const HALL_KEEP := 40
+# c2-06: the "1-8 OF N" total-count footer's color — one const so the empty ("0 OF 0"),
+# single-page, and multi-page counters all read in the SAME warm gold and can't drift apart.
+const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
 
 var mode: int = Mode.TITLE
 var sel := 0
@@ -1149,7 +1152,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 					if tabs[ti].has_point(ev.position):
 						if ti != _hall_filter:
 							_hall_filter = ti
-							_hall_page = 0   # fresh filtered list starts on its top page
+							_hall_page = 0   # fresh filtered list ALWAYS lands on page 1 (the counter's "OF N" total then matches this tab)
 							_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 							_refresh_page_hover()   # page reset to 0 disables PREV under a still cursor
 							main._sfx.play("pickup", -14.0, 1.3)
@@ -1245,7 +1248,7 @@ func _nav(move: int, hmove: int) -> void:
 		return   # HALL vertical nav OWNS paging — always consume it, even at a boundary, so it never falls through to the 1-row list nav below
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
-		_hall_page = 0   # a new filter is a fresh list — start at its top page
+		_hall_page = 0   # a new filter is a fresh list — always start on page 1 (keeps the "OF N" counter honest)
 		_refresh_page_hover()   # page reset to 0 disables PREV — drop a stale hover on it
 		# _tab_hover is pointer-owned — leave it. It tracks where the cursor
 		# physically rests (only mouse motion moves it), so cycling by kb/pad/wheel
@@ -2448,15 +2451,16 @@ static func hall_page_window(page: int, total: int) -> Vector2i:
 
 
 static func hall_page_rects() -> Array[Rect2]:
-	# Clickable PREV/NEXT page targets flanking the centered "- PAGE x / y -" footer
-	# at baseline y306. Static + view-free (fixed pixel geometry) so _draw_hall, the
+	# Clickable PREV/NEXT page targets flanking the centered "1-8 OF N" counter at
+	# baseline y306. Static + view-free (fixed pixel geometry) so _draw_hall, the
 	# click hit-test, and the render test all read ONE source and can't drift.
-	# [prev, next], centers 213/427 — mirror-symmetric about the 320 counter axis so
-	# the pair frames the page count evenly. 50x16 (was a cramped 30x16 that only
-	# covered the word); the bottom edge (y306) clears the HALL BACK button's DRAWN
-	# plate (its texture is _back_rect.grow(3), top y307), so the two clickable controls
-	# never overlap. Both clear the ~95px centered counter (edges 238/402).
-	return [Rect2(188.0, 290.0, 50.0, 16.0), Rect2(402.0, 290.0, 50.0, 16.0)]
+	# [prev, next], centers 225/415 — mirror-symmetric about the 320 counter axis so
+	# the pair frames the count evenly. 74x16 targets whose INNER edges (262/378) sit
+	# just OUTSIDE the widest counter span: "33-40 OF 240" is 106px centered on 320
+	# (edges 267..373), so the label can never clip either hit rect (5px clearance each
+	# side). The bottom edge (y306) clears the HALL BACK button's DRAWN plate (its
+	# texture is _back_rect.grow(3), top y307), so the two clickable controls never overlap.
+	return [Rect2(188.0, 290.0, 74.0, 16.0), Rect2(378.0, 290.0, 74.0, 16.0)]
 
 
 static func hall_page_style(enabled: bool, hov: bool, press: float) -> Dictionary:
@@ -2586,10 +2590,6 @@ func _draw_hall() -> void:
 		draw_texture_rect(at, Rect2(right + 8.0, 56.0, 11.0, 11.0), false, acol)
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows := _hall_rows()
-	if rows.is_empty():
-		_center_text("NO %s RUNS YET — GO EARN YOUR PLACE" % names[_hall_filter], 170, 11,
-			Color(0.8, 0.84, 0.74))
-		return
 	# Measured column layout — Art.font() is proportional, so each column draws
 	# at its own x. MODE/REACHED/STREAK x-starts come from the widest possible
 	# header/cell at draw size + 14px gutters, after the right-aligned SCORE
@@ -2613,8 +2613,10 @@ func _draw_hall() -> void:
 	# RANK header sits in the gap between the # and the right-aligned SCORE — drawn
 	# outside the parallel header/col_x arrays so it doesn't reshuffle the columns.
 	Art.text(self, "RANK", Vector2(130.0, 96), 10, Color(1.0, 0.82, 0.4))
-	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. The
-	# clamp catches a page stranded past the end after the filter shrank the list.
+	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. Switching
+	# the filter tab resets _hall_page to 0 (see the nav + click handlers); this clamp is
+	# the belt-and-braces catch for a page stranded past the end after a filter shrank the
+	# list, so the visible window and the "OF N" count below can never point off the board.
 	var pages := _hall_pages(rows.size())
 	_hall_page = clampi(_hall_page, 0, pages - 1)
 	var win := hall_page_window(_hall_page, rows.size())
@@ -2647,110 +2649,138 @@ func _draw_hall() -> void:
 		# still sees the cutoff (paging resolves hidden entries; it doesn't hide the cap).
 		_center_text("BOARD KEEPS YOUR TOP %d RUNS" % HALL_KEEP, HALL_RECENCY_Y, 9,
 			Color(0.82, 0.86, 0.72))
-	for i in range(start, stop):
-		var run: Dictionary = rows[i]
-		var row := i - start   # 0..HALL_PAGE_ROWS-1 within this page (drives the y baseline)
-		var is_latest := i == latest_idx
-		var mode_s: String = "ENDLESS" if run.get("mode", "campaign") == "endless" else "CAMPAIGN"
-		var reached: String = "WAVE %d" % run.get("wave", 0) if run.get("mode", "campaign") == "endless" \
-			else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run.get("sector", 0))
-		var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
-		if is_latest:
-			col = Color(1.0, 0.86, 0.5)   # the run you just finished — warm recency tint
-		var tag: String = "  *DAILY" if run.get("daily", false) else ""
-		if run.get("assist", false):
-			tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
-		var streak_s := "x%d%s" % [run.get("streak", 0), tag]
-		if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > 628.0:
-			# Cell would run off the frame — abbreviate the tags for this row.
-			tag = ("  *D" if run.get("daily", false) else "")
+	# The header row and the retention status band above always draw, so an empty
+	# filter reads as a laid-out board that simply has no entries yet rather than a
+	# blank panel. Only the row list and its footer counter depend on there being runs.
+	if rows.is_empty():
+		# ALL is not an adjective ("NO ALL RUNS YET" reads wrong) — drop the qualifier for
+		# it, keep the mode word for the CAMPAIGN/ENDLESS filters. Sits in the empty row
+		# area; the window/count math below is skipped so it never renders a bare "1-0 OF 0".
+		var empty_noun: String = "" if _hall_filter == 0 else str(names[_hall_filter]) + " "
+		_center_text("NO %sRUNS YET \u2014 GO EARN YOUR PLACE" % empty_noun, 190, 11,
+			Color(0.8, 0.84, 0.74))
+		# The count indicator survives the empty state too \u2014 same y306 footer slot the
+		# populated board uses, so switching to a filter with no runs still states the
+		# total ("0 OF 0") rather than dropping the counter entirely. Same warm gold as
+		# the populated counters (HALL_COUNT_COL) so the total reads identically in every state.
+		_center_text("0 OF 0", 306, 11, HALL_COUNT_COL)
+	else:
+		for i in range(start, stop):
+			var run: Dictionary = rows[i]
+			var row := i - start   # 0..HALL_PAGE_ROWS-1 within this page (drives the y baseline)
+			var is_latest := i == latest_idx
+			var mode_s: String = "ENDLESS" if run.get("mode", "campaign") == "endless" else "CAMPAIGN"
+			var reached: String = "WAVE %d" % run.get("wave", 0) if run.get("mode", "campaign") == "endless" \
+				else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run.get("sector", 0))
+			var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
+			if is_latest:
+				col = Color(1.0, 0.86, 0.5)   # the run you just finished — warm recency tint
+			var tag: String = "  *DAILY" if run.get("daily", false) else ""
 			if run.get("assist", false):
-				tag += "  *A"
-			streak_s = "x%d%s" % [run.get("streak", 0), tag]
-		var y := 112 + row * 24   # rows stay at 112 (header @96 already clears row0's box top 102 by 4px); pushing them down crowds the 8th row's glow into the page buttons
-		if is_latest:
-			# Glow band + a warm ribbon down the left edge so the run you opened the
-			# board for reads instantly, wherever it ranks. Drawn under the cells.
-			draw_rect(Rect2(100.0, y - 12.0, 528.0, 20.0), Color(1.0, 0.7, 0.2, 0.15))
-			draw_rect(Rect2(100.0, y - 12.0, 3.0, 20.0), Color(1.0, 0.75, 0.25, 0.95))
-			# A right-pointing caret in the left gutter (x104..110, the gap before the #
-			# column @112) — a SHAPE marker so the highlighted row is identifiable without
-			# relying on the warm tint alone (the top-band "= YOUR LATEST RUN" legend reads
-			# this same "=" idea), keeping the cue legible to color-blind players.
-			draw_colored_polygon(PackedVector2Array([Vector2(104.0, y - 6.0),
-				Vector2(110.0, y - 2.0), Vector2(104.0, y + 2.0)]),
-				Color(1.0, 0.8, 0.35, 0.95))
-		var rank_s := hall_rank_text(run.get("over_cap", false), i)
-		var cells := [rank_s, Art.group_digits(int(run.get("score", 0))), mode_s, reached, streak_s]
-		for c in cells.size():
-			if c == 1:
-				# Right-aligned numerals: a 6-digit endless score can't crowd MODE.
-				var sw := Art.font().get_string_size(cells[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-				Art.text(self, cells[c], Vector2(214.0 - sw, y), 11, col)
-			else:
-				Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
-		# Earned run grade (S/A/B/C/D), colored by tier. Old saves predate the key —
-		# guard with .get and only draw when present so the board never crashes.
-		var gr: String = run.get("grade", "")
-		if gr != "":
-			var gcol: Color = {"S": Color(1.0, 0.85, 0.3), "A": Color(0.55, 0.9, 1.0),
-				"B": Color(0.6, 0.9, 0.5), "C": Color(0.85, 0.85, 0.8)}.get(gr, Color(0.7, 0.7, 0.7))
-			Art.text(self, gr, Vector2(132.0, y), 11, gcol)
-			# Tier medal beside the letter (D=1 … S=5) — sprite is white-with-alpha,
-			# tinted to the tier color so medal and letter read as one badge.
-			var med: int = {"D": 1, "C": 2, "B": 3, "A": 4, "S": 5}.get(gr, 0)
-			if med > 0:
-				draw_texture_rect(Art.tex("mi_medal_%d" % med),
-					Rect2(142.0, y - 10.0, 12.0, 12.0), false, gcol)
-	# Footer: a single compact page-counter row framed by the PREV/NEXT buttons, only
-	# when the board spills past one page (a single-page board needs no paging chrome).
-	# The whole paging line sits on ONE row at y306 — clear of the BACK plate (top y310)
-	# below it. The old second "UP/DOWN TO TURN THE PAGE" hint line lived at y322, INSIDE
-	# the BACK plate band; the labeled PREV/NEXT buttons + the counter now carry the
-	# affordance without a hint line that collided with the primary exit control.
-	if pages > 1:
-		# Compact page counter (the retention cap is stated in the top status band — it
-		# won't fit here without colliding with the flanking PREV/NEXT buttons).
-		_center_text("- PAGE %d / %d -" % [_hall_page + 1, pages], 306, 11, Color(1.0, 0.85, 0.4))
-		# Mouse-clickable page buttons flanking the counter — the mouse had no way to page
-		# (wheel cycles the filter here). Each carries a VERTICAL arrow glyph, not just a
-		# word: paging is bound to UP/DOWN (left/right is the filter), so a horizontal cue
-		# would read as the wrong axis. UP = earlier page (0), DOWN = later page (1) — the
-		# same mapping the keyboard/pad up/down nav uses. Symmetric plates frame the
-		# counter; each carries a resting fill, brightens on hover, and flashes on press —
-		# a boundary button stays dim and plate-less so it reads as "can't go further".
-		var pr := _hall_page_rects()
-		var pen := [_hall_page > 0, _hall_page < pages - 1]
-		var plbl := ["PREV", "NEXT"]
-		for pi in 2:
-			var pst := hall_page_style(pen[pi], _page_hover == pi,
-				_page_press if _page_press_side == pi else 0.0)
-			var pcol: Color = pst["text"]
-			var pplate: Color = pst["plate"]
-			if pplate.a > 0.0:
-				draw_rect(pr[pi], pplate)
-			# Vertical arrow glyph + label, centered as a unit in the rect. The triangle
-			# (up for PREV, down for NEXT) is the primary axis cue; the word confirms it.
-			var lw := f.get_string_size(plbl[pi], HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			var gw := 7.0
-			var bx := pr[pi].position.x + (pr[pi].size.x - lw - gw - 2.0) / 2.0
-			var ay := 302.0
-			var pts := PackedVector2Array()
-			if pi == 0:   # up-triangle: apex at top
-				pts = PackedVector2Array([Vector2(bx + gw / 2.0, ay - 6.0),
-					Vector2(bx, ay - 1.0), Vector2(bx + gw, ay - 1.0)])
-			else:         # down-triangle: apex at bottom
-				pts = PackedVector2Array([Vector2(bx, ay - 6.0),
-					Vector2(bx + gw, ay - 6.0), Vector2(bx + gw / 2.0, ay - 1.0)])
-			draw_colored_polygon(pts, pcol)
-			Art.text(self, plbl[pi], Vector2(bx + gw + 2.0, ay), 9, pcol)
-			# Paged AWAY from your latest run: a warm dot on the button that leads back to
-			# it (the top-band "ON PAGE n" cue names the page) so the run you opened the
-			# board for is never simply gone — the recency payoff survives a full board.
-			var ldir := hall_latest_dir(latest_idx, _hall_page, HALL_PAGE_ROWS)
-			if ldir != 0 and pi == (0 if ldir < 0 else 1):
-				draw_rect(Rect2(pr[pi].get_center().x - 2.0, pr[pi].position.y - 3.0, 4.0, 4.0),
-					Color(1.0, 0.75, 0.25, 0.95))
+				tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
+			var streak_s := "x%d%s" % [run.get("streak", 0), tag]
+			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > 628.0:
+				# Cell would run off the frame — abbreviate the tags for this row.
+				tag = ("  *D" if run.get("daily", false) else "")
+				if run.get("assist", false):
+					tag += "  *A"
+				streak_s = "x%d%s" % [run.get("streak", 0), tag]
+			var y := 112 + row * 24   # rows stay at 112 (header @96 already clears row0's box top 102 by 4px); pushing them down crowds the 8th row's glow into the page buttons
+			if is_latest:
+				# Glow band + a warm ribbon down the left edge so the run you opened the
+				# board for reads instantly, wherever it ranks. Drawn under the cells.
+				draw_rect(Rect2(100.0, y - 12.0, 528.0, 20.0), Color(1.0, 0.7, 0.2, 0.15))
+				draw_rect(Rect2(100.0, y - 12.0, 3.0, 20.0), Color(1.0, 0.75, 0.25, 0.95))
+				# A right-pointing caret in the left gutter (x104..110, the gap before the #
+				# column @112) — a SHAPE marker so the highlighted row is identifiable without
+				# relying on the warm tint alone (the top-band "= YOUR LATEST RUN" legend reads
+				# this same "=" idea), keeping the cue legible to color-blind players.
+				draw_colored_polygon(PackedVector2Array([Vector2(104.0, y - 6.0),
+					Vector2(110.0, y - 2.0), Vector2(104.0, y + 2.0)]),
+					Color(1.0, 0.8, 0.35, 0.95))
+			var rank_s := hall_rank_text(run.get("over_cap", false), i)
+			var cells := [rank_s, Art.group_digits(int(run.get("score", 0))), mode_s, reached, streak_s]
+			for c in cells.size():
+				if c == 1:
+					# Right-aligned numerals: a 6-digit endless score can't crowd MODE.
+					var sw := Art.font().get_string_size(cells[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+					Art.text(self, cells[c], Vector2(214.0 - sw, y), 11, col)
+				else:
+					Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
+			# Earned run grade (S/A/B/C/D), colored by tier. Old saves predate the key —
+			# guard with .get and only draw when present so the board never crashes.
+			var gr: String = run.get("grade", "")
+			if gr != "":
+				var gcol: Color = {"S": Color(1.0, 0.85, 0.3), "A": Color(0.55, 0.9, 1.0),
+					"B": Color(0.6, 0.9, 0.5), "C": Color(0.85, 0.85, 0.8)}.get(gr, Color(0.7, 0.7, 0.7))
+				Art.text(self, gr, Vector2(132.0, y), 11, gcol)
+				# Tier medal beside the letter (D=1 … S=5) — sprite is white-with-alpha,
+				# tinted to the tier color so medal and letter read as one badge.
+				var med: int = {"D": 1, "C": 2, "B": 3, "A": 4, "S": 5}.get(gr, 0)
+				if med > 0:
+					draw_texture_rect(Art.tex("mi_medal_%d" % med),
+						Rect2(142.0, y - 10.0, 12.0, 12.0), false, gcol)
+		# Footer: a single compact counter row framed by the PREV/NEXT buttons when the
+		# board spills past one page. The whole line sits on ONE row at y306 — clear of the
+		# BACK plate (top y310) below it. The old second "UP/DOWN TO TURN THE PAGE" hint line
+		# lived at y322, INSIDE the BACK plate band; the labeled PREV/NEXT buttons + the
+		# counter now carry the affordance without a hint line that collided with the exit.
+		# The counter states the visible WINDOW and the TOTAL ("1-8 OF N") rather than a bare
+		# page number, so a player on page 1 can see more scores exist. rows.size() is the
+		# filtered count (recomputed every draw), so the total tracks the active tab. Even a
+		# single-page board states its count outright — the board's size is never hidden.
+		if pages > 1:
+			# Visible row window + filtered total, in the spec's compact "1-8 OF N" form (the
+			# retention cap is stated in the top status band — it won't fit here without colliding
+			# with the flanking PREV/NEXT buttons). Widest variant "33-40 OF 240" measures 106px in
+			# Art.font() at 11px, centered on x320 (edges 267..373) — inside the PREV/NEXT gap
+			# (prev right edge 238, next left edge 402) with ~29px of clearance on each side.
+			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], 306, 11, HALL_COUNT_COL)
+			# Mouse-clickable page buttons flanking the counter — the mouse had no way to page
+			# (wheel cycles the filter here). Each carries a VERTICAL arrow glyph, not just a
+			# word: paging is bound to UP/DOWN (left/right is the filter), so a horizontal cue
+			# would read as the wrong axis. UP = earlier page (0), DOWN = later page (1) — the
+			# same mapping the keyboard/pad up/down nav uses. Symmetric plates frame the
+			# counter; each carries a resting fill, brightens on hover, and flashes on press —
+			# a boundary button stays dim and plate-less so it reads as "can't go further".
+			var pr := _hall_page_rects()
+			var pen := [_hall_page > 0, _hall_page < pages - 1]
+			var plbl := ["PREV", "NEXT"]
+			for pi in 2:
+				var pst := hall_page_style(pen[pi], _page_hover == pi,
+					_page_press if _page_press_side == pi else 0.0)
+				var pcol: Color = pst["text"]
+				var pplate: Color = pst["plate"]
+				if pplate.a > 0.0:
+					draw_rect(pr[pi], pplate)
+				# Vertical arrow glyph + label, centered as a unit in the rect. The triangle
+				# (up for PREV, down for NEXT) is the primary axis cue; the word confirms it.
+				var lw := f.get_string_size(plbl[pi], HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+				var gw := 7.0
+				var bx := pr[pi].position.x + (pr[pi].size.x - lw - gw - 2.0) / 2.0
+				var ay := 302.0
+				var pts := PackedVector2Array()
+				if pi == 0:   # up-triangle: apex at top
+					pts = PackedVector2Array([Vector2(bx + gw / 2.0, ay - 6.0),
+						Vector2(bx, ay - 1.0), Vector2(bx + gw, ay - 1.0)])
+				else:         # down-triangle: apex at bottom
+					pts = PackedVector2Array([Vector2(bx, ay - 6.0),
+						Vector2(bx + gw, ay - 6.0), Vector2(bx + gw / 2.0, ay - 1.0)])
+				draw_colored_polygon(pts, pcol)
+				Art.text(self, plbl[pi], Vector2(bx + gw + 2.0, ay), 9, pcol)
+				# Paged AWAY from your latest run: a warm dot on the button that leads back to
+				# it (the top-band "ON PAGE n" cue names the page) so the run you opened the
+				# board for is never simply gone — the recency payoff survives a full board.
+				var ldir := hall_latest_dir(latest_idx, _hall_page, HALL_PAGE_ROWS)
+				if ldir != 0 and pi == (0 if ldir < 0 else 1):
+					draw_rect(Rect2(pr[pi].get_center().x - 2.0, pr[pi].position.y - 3.0, 4.0, 4.0),
+						Color(1.0, 0.75, 0.25, 0.95))
+		else:
+			# One page: no paging chrome, but state the count in the SAME "1-N OF N" window
+			# format AND the same warm gold (HALL_COUNT_COL) the paged footer uses, so the
+			# indicator reads identically across every filter state (here start=0,
+			# stop=rows.size(), so it renders "1-N OF N").
+			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], 306, 11, HALL_COUNT_COL)
 
 
 func _hall_rows() -> Array:
