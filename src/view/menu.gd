@@ -176,7 +176,7 @@ const PLATE_BG := Color(0.03, 0.05, 0.03, 0.55)
 const PLATE_SEL := Color(1.0, 0.92, 0.55)
 const PLATE_UNSEL := Color(0.55, 0.62, 0.45, 0.8)
 const ARROW_UNSEL := Color(0.72, 0.77, 0.62, 0.85)   # resting submenu-chevron tint
-const CAPTION_COL := Color(0.66, 0.72, 0.56, 0.85)   # group-caption label
+const CAPTION_COL := Color(0.84, 0.9, 0.68, 0.95)    # c2-11: brighter so the section headers read as labels, not faint asides
 const NOTICE_COL := Color(1.0, 0.85, 0.5)            # rebind swap/clear notice
 const SCRIM_BASE := Color(0.02, 0.05, 0.02)          # full-screen dim scrim (alpha applied at draw)
 const WELL_BASE := Color(0.035, 0.055, 0.05)         # content-well fill (alpha applied at draw)
@@ -3157,6 +3157,23 @@ func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 # that some string fits some width. Settings ONLY now: HALL OF FAME / HOW TO PLAY moved
 # to the INFO screen, so this header is a plain "OPTIONS".
 func _draw_opts_header() -> void:
+	# c2-11: a gear icon crowns the title so OPTIONS gets a header cue like the other
+	# screens instead of a lone word. It sits just left of the centered title, vertically
+	# centered on the title's cap height. Routed through _emit_tex so the header capture
+	# test stays headless-safe (and the draw is inspectable).
+	var f := Art.font()
+	var titlew := f.get_string_size("OPTIONS", HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	var isz := 16.0
+	# c2-11: seat the gear on the title's CAP BOX, not the ascent-to-descent line. "OPTIONS"
+	# is all-caps sitting on the y80 baseline; for PixelOperator8 the caps rise the full
+	# cap height (measured 16px @18 — caps span y64..y79, ending 1px above the baseline).
+	# Centering the icon on that box (top y64, bottom the baseline) aligns it pixel-perfect
+	# with the caps instead of floating a hair high off the whole-line ascent metric.
+	var cap_h := 16.0
+	var cap_top := 80.0 - cap_h
+	var iy := cap_top + (cap_h - isz) / 2.0
+	var ix := (CENTER_X - titlew / 2.0) - 6.0 - isz
+	_emit_tex("mi_settings", Rect2(ix, iy, isz, isz), Color(1, 1, 1, 0.9))
 	_center_text("OPTIONS", 80, 18, HEADER_COL)
 	# After RESET DEFAULTS fires, the summary line briefly becomes a success banner;
 	# otherwise it's the single place to review live settings state — the DISPLAY mode
@@ -3278,6 +3295,12 @@ static func legend_primitives(segs: Array, y: float) -> Array:
 # these one-line indirections, so a headless test subclass can OVERRIDE them to CAPTURE
 # the exact draw commands _footer_legend/_legend_row actually issue (proving they run,
 # and with what geometry) without a live draw context. Default impls do the real draw.
+# c2-11: font size the next _emit_label draw uses. Defaults to the 8px body size and is
+# bumped transiently by _emit_group_caption so the section HEADERS render larger without
+# changing the _emit_label signature (a headless capture-test subclass overrides that seam
+# with the fixed 3-arg shape — its recorded box stays size-independent since the caption is
+# right-aligned, so its clearance asserts hold regardless of the rendered size).
+var _label_size := 8
 func _emit_rect(r: Rect2, c: Color) -> void:
 	draw_rect(r, c)
 func _emit_tex(key: String, r: Rect2, c: Color) -> void:
@@ -3287,7 +3310,7 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
 	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
-	Art.text(self, txt, pos, 8, c)
+	Art.text(self, txt, pos, _label_size, c)
 
 
 # c1-09: OPTIONS settings groups get a named caption (AUDIO / HAPTICS / ACCESSIBILITY)
@@ -3299,8 +3322,28 @@ func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
 	var ghdr := group_header(mitems[k].get("grp", 0))
 	if ghdr == "":
 		return
-	var gw := Art.font().get_string_size(ghdr, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-	_emit_label(ghdr, Vector2((CENTER_X - BTN.x / 2.0) - 25.0 - gw, cy + 3.0), CAPTION_COL)
+	# c2-11: the section HEADERS (AUDIO / ASSIST / ACCESSIBILITY) read at size 10 — not the
+	# 8px body size — so they scan as headers, not faint asides. Each sits on a subtle pill
+	# capped by a warm accent rule spanning the pill's full width, so the settings blocks are
+	# unmistakably delimited even at rest. Right-aligned in the left gutter, right edge at
+	# plate_left-25, clear of the selected-row cycle arrow (drawn at plate_left-13). Routed
+	# through _emit_label/_emit_rect so a headless capture test can inspect the exact boxes.
+	var f := Art.font()
+	var hsz := 10
+	var gw := f.get_string_size(ghdr, HORIZONTAL_ALIGNMENT_LEFT, -1, hsz).x
+	var gx := (CENTER_X - BTN.x / 2.0) - 25.0 - gw
+	var by := cy + 3.0   # text baseline (kept level with the group's first row label)
+	var padx := 4.0
+	var pady := 2.0
+	var ptop := by - f.get_ascent(hsz) - pady
+	var ph := f.get_ascent(hsz) + f.get_descent(hsz) + pady * 2.0
+	# The pill boxes the header so the block boundary is obvious without relying on the 1px
+	# group rule alone; its full width also anchors the accent rule (no more short stub).
+	_emit_rect(Rect2(gx - padx, ptop, gw + padx * 2.0, ph), Color(0.12, 0.16, 0.09, 0.6))
+	_label_size = hsz
+	_emit_label(ghdr, Vector2(gx, by), CAPTION_COL)
+	_label_size = 8
+	_emit_rect(Rect2(gx - padx, ptop + ph - 1.0, gw + padx * 2.0, 1.0), CAPTION_COL)
 
 
 # One centered legend line of [glyph + verb] segments; y is the glyph center. Emits
