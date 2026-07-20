@@ -3439,6 +3439,93 @@ func test_seed_row_label_states_and_format() -> void:
 	m.free()
 
 
+# c2-14: glyph-aware ellipsize — never split a multi-codepoint glyph, keep the toggle
+# STATE tail, and stay within the column even when a single glyph won't fit.
+func test_ellipsize_is_glyph_aware() -> void:
+	var f := Art.font()
+	var m: Control = Menu.new()
+	# MULTI-CODEPOINT: a base char plus a combining acute is ONE grapheme. _fit_prefix
+	# must only ever cut at a shaper glyph boundary, so its returned prefix length is
+	# always a member of the cut set — never mid-cluster (base kept, mark orphaned).
+	var combo := "éabcdefghijklmnop"   # é + a long tail to force truncation
+	var cuts: PackedInt32Array = m._glyph_cuts(f, combo, 11)
+	var pref: String = m._fit_prefix(f, combo, "…", 11, 26.0)
+	Runner.T.ok(cuts.has(pref.length()),
+		"_fit_prefix cuts only at glyph boundaries (length %d in cut set)" % pref.length())
+	Runner.T.ok(pref.length() != 1,
+		"a cut never orphans the combining mark by keeping only its base char")
+	# TOGGLE ROW: "NAME: OFF" — the STATE tail is the point of the row. A wide name
+	# ellipsizes but the ": OFF" survives (so the toggle state is never hidden).
+	var toggle := "ASSIST 2-HIT SHIELD REGEN VESTS: OFF"
+	var tf: String = m._ellipsize(toggle, 11, 130.0)
+	Runner.T.ok(tf.ends_with(": OFF"), "a wide toggle row keeps its ': OFF' state tail")
+	Runner.T.ok(tf != toggle, "the wide toggle row actually truncated (name portion)")
+	# The kept-tail path returns prefix + ellipsis + tail where prefix+suffix is proven
+	# to fit, so the whole result fits max_w EXACTLY — no fudge margin.
+	Runner.T.ok(f.get_string_size(tf, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 130.0,
+		"the truncated toggle row fits its column exactly (tail + ellipsis)")
+	# TAIL-DOESN'T-FIT FALLBACK: a column so narrow that even "…: OFF" overflows must
+	# NOT take the keep-tail path; it falls through to the plain glyph-aware trim, which
+	# still flags the overflow with a trailing ellipsis (state hidden, but the row is
+	# clearly marked over-width rather than masquerading as a real label).
+	var ell := "…" if f.has_char(0x2026) else "..."
+	var narrow: String = m._ellipsize(toggle, 11, 22.0)
+	Runner.T.ok(not narrow.ends_with(": OFF"),
+		"when the ': OFF' tail can't fit, the keep-tail path is skipped")
+	Runner.T.ok(narrow.ends_with(ell),
+		"the fallback trim leaves a trailing ellipsis to flag the overflow")
+	# DEGENERATE: a column too narrow for even one glyph + ellipsis. _fit_prefix returns
+	# "" and _ellipsize hands back just the ellipsis/tail — the Art.text max_w backstop
+	# then hard-clips it, so a floor label can never overdraw its neighbour's slot.
+	Runner.T.eq(m._fit_prefix(f, "WIDE", "…", 11, 1.0), "",
+		"no glyph fits at a 1px column, so _fit_prefix returns the empty prefix")
+	var tiny: String = m._ellipsize("WIDELABEL", 11, 3.0)
+	Runner.T.ok(tiny.length() <= 3,
+		"a sub-glyph column collapses to just the ellipsis, not a mid-glyph slice")
+	# CACHE INVALIDATION: a theme / translation / re-parent notification drops the memoized
+	# cuts so a font swap can't return stale shaped data (recycled instance ids).
+	m._glyph_cuts(f, "PRIME THE CACHE", 11)
+	Runner.T.ok(m._cut_cache.size() > 0, "cache populates on a glyph-cut lookup")
+	m._notification(m.NOTIFICATION_THEME_CHANGED)
+	Runner.T.eq(m._cut_cache.size(), 0, "a theme change clears the glyph-cut cache")
+	m._glyph_cuts(f, "PRIME AGAIN", 11)
+	m._notification(m.NOTIFICATION_TRANSLATION_CHANGED)
+	Runner.T.eq(m._cut_cache.size(), 0, "a translation change clears the glyph-cut cache")
+	# OVERFLOW CHIP GEOMETRY: the flag chip must stay strictly inside the label column
+	# (right edge <= label_r) across row widths, so it never bleeds into the right-edge
+	# dot/chevron slots. It also has positive area so the flag is actually visible.
+	for lr in [80.0, 150.0, 240.0]:
+		var chip: Rect2 = m._overflow_chip_rect(lr, 40.0)
+		Runner.T.ok(chip.end.x <= lr, "chip right edge stays inside the label column at label_r=%d" % int(lr))
+		Runner.T.ok(chip.position.x < lr and chip.size.x > 0.0 and chip.size.y > 0.0,
+			"chip has positive area and sits left of label_r at label_r=%d" % int(lr))
+	# DRAW-PATH DECISION: mirror _draw's overflow branch — a label wider than its column
+	# is flagged AND the gap-reserved ellipsized text ends LEFT of the chip, so the flag
+	# never covers the truncated text. (A fitting label is not flagged.)
+	var lx := 30.0
+	var label_r := 150.0
+	var col_avail := label_r - lx
+	var wide := "OPTIONS AND EXTRAS AND MORE AND MORE"
+	Runner.T.ok(f.get_string_size(wide, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > col_avail,
+		"the sample label really overflows its column (overflow branch taken)")
+	var chip2: Rect2 = m._overflow_chip_rect(label_r, 40.0)
+	var reserve := (label_r - chip2.position.x) + Menu.OVERFLOW_CHIP_PAD
+	var drawn: String = m._ellipsize(wide, 11, col_avail - reserve)
+	var text_right := lx + f.get_string_size(drawn, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	Runner.T.ok(text_right <= chip2.position.x,
+		"the gap-reserved text ends left of the overflow chip, so the flag never covers it")
+	Runner.T.ok(f.get_string_size("NEW GAME", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= col_avail,
+		"a normal-width label fits the column and is NOT flagged as overflow")
+	# SUBMENU CLEARANCE: a submenu row caps label_r at r.end.x - 20 to reserve the
+	# chevron slot (drawn at r.end.x - 17). The chip must stay left of that chevron.
+	var r_end := 300.0
+	var sub_label_r := r_end - 20.0
+	var sub_chip: Rect2 = m._overflow_chip_rect(sub_label_r, 40.0)
+	Runner.T.ok(sub_chip.end.x <= r_end - 17.0,
+		"the overflow chip stays clear of the submenu chevron slot")
+	m.free()
+
+
 # c1-14: the focused row THROTTLES its clipboard sampling — it must NOT call
 # clipboard_get() every frame. Over several frames within one throttle window the
 # clipboard is read only once; a change is picked up on the next window, not instantly.

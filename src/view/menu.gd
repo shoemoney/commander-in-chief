@@ -198,12 +198,34 @@ const TAGLINE_COL := Color(0.85, 0.9, 0.8, 0.85)     # TITLE tagline line
 const BEST_LINE_COL := Color(1.0, 0.92, 0.55, 1.0)   # TITLE best-run line
 const RUN_FOOTNOTE_COL := Color(0.6, 0.66, 0.56, 0.75)  # PAUSE run-id footnote
 const WARN_COL := Color(0.95, 0.72, 0.42)            # OPTS warning subline
+const OVERFLOW_CHIP_COL := Color(0.0, 0.0, 0.0, 0.72)     # c2-14 truncation-flag backing chip
+# c2-14: an overflow flag IS an "attention" cue, so its amber tracks the menu's shared
+# WARN_COL palette (the OPTS warning subline) instead of a fresh hardcoded amber — a
+# palette retint carries the chip with it rather than leaving one orphaned magic color.
+const OVERFLOW_CHIP_BORDER := Color(WARN_COL, 0.55)      # c2-14 chip border (contrast on any row)
+const OVERFLOW_DOT_COL := WARN_COL                       # c2-14 the three amber "clipped" dots
+const OVERFLOW_CHIP_PAD := 3.0                           # c2-14 breathing room between text and the chip
 
 
 func _ready() -> void:
 	# Pad yanked mid-run = pause. The sim only steps while no menu is visible,
 	# so opening PAUSE from here is the whole fix — no main.gd surgery.
 	Input.joy_connection_changed.connect(_on_joy_changed)
+
+
+func _notification(what: int) -> void:
+	# c2-14: a theme or translation swap can change the active font (a re-themed
+	# face, a localized glyph set). _cut_cache keys on the font INSTANCE id, and
+	# Godot recycles freed instance ids — a new font reusing an old id would read
+	# STALE shaped cuts; _row_fit_cache keys the same way and would return stale
+	# overflow/ellipsis results. Drop both so they re-measure against the current font.
+	# (No super call: Control._notification is a built-in virtual, not a script method,
+	# and the engine still dispatches base handling for every notification regardless.)
+	# Only the events that can actually change the active FONT invalidate the caches — a
+	# plain reparent keeps the same font, so we don't flush a valid cache on every move.
+	if what == NOTIFICATION_THEME_CHANGED or what == NOTIFICATION_TRANSLATION_CHANGED:
+		_cut_cache.clear()
+		_row_fit_cache.clear()
 
 
 func _on_joy_changed(_device: int, connected: bool) -> void:
@@ -2406,8 +2428,40 @@ func _draw() -> void:
 		# Fixed icon gutter: iconless rows indent the same, so every label
 		# left-aligns to one column. Overlong labels ellipsize inside the button.
 		var lx := r.position.x + 30.0
-		Art.text(self, _ellipsize(label, 11, label_r - lx),
-			Vector2(lx, cy + 4.0), 11, col)
+		var avail := label_r - lx
+		# c2-14: overflow flag — when a label doesn't fit its column, mark it with a
+		# clipped-tail badge at the right edge: a bordered dark chip carrying three bright
+		# amber dots (an ellipsis mark) so an over-width row is spottable at a glance (QA +
+		# players) on ANY background — the selected plate, the red armed flood — where a
+		# thin amber underline would wash out. Three dots are deliberately NOT an arrow, so
+		# the flag can't be misread as the submenu chevron (that outline arrow lives in its
+		# own far-right slot). The truncation must never read as the real label. Measure
+		# once to decide overflow, then ellipsize ONCE into the width that reserves the
+		# chip's footprint (a clear gap before the chip) so the text is never covered.
+		# Reserve the chip's footprint (its width from label_r, plus OVERFLOW_CHIP_PAD of
+		# breathing room) DERIVED from the chip rect itself, so the reserved gap can't
+		# drift out of sync with the chip geometry.
+		var chip := _overflow_chip_rect(label_r, cy)
+		var reserve := (label_r - chip.position.x) + OVERFLOW_CHIP_PAD
+		# _row_fit memoizes the (overflow, shown, chip?) decision keyed on label+size+avail,
+		# so a persistently-visible row is measured/ellipsized ONCE, not every _draw frame.
+		# It also clamps: the chip only shows when it actually FITS (reserve < avail), so a
+		# column narrower than the chip degrades to a bare ellipsized label with no negative
+		# max_w and no chip overdrawing the text.
+		var fit := _row_fit(label, 11, avail, reserve)
+		var show_chip: bool = fit["show_chip"]
+		# max_w hard-clips as a backstop for the degenerate case (even one glyph +
+		# ellipsis wider than the column) so a floor label can never overdraw the slot.
+		# Art.text's 6th param is max_w (default 0.0 = no clip) — see src/view/art.gd.
+		Art.text(self, String(fit["shown"]), Vector2(lx, cy + 4.0), 11, col, avail)
+		if show_chip:
+			draw_rect(chip, OVERFLOW_CHIP_COL)
+			draw_rect(chip, OVERFLOW_CHIP_BORDER, false, 1.0)
+			# Dots inset 2px from the left border and end 2px before the right border,
+			# so the 1px chip outline never touches a dot. Vertically centred.
+			var dy := chip.position.y + chip.size.y / 2.0 - 1.0
+			for di in 3:
+				draw_rect(Rect2(chip.position.x + 2.0 + float(di) * 3.0, dy, 2.0, 2.0), OVERFLOW_DOT_COL)
 		# Submenu affordance: a right-pointing chevron marks rows that OPEN a screen
 		# (RUN SETUP / OPTIONS / INFO / HALL / HOW TO PLAY) so they don't read as a
 		# direct action or an in-place toggle. mi_arrow already points right.
@@ -3297,9 +3351,109 @@ func _ellipsize(txt: String, size: int, max_w: float) -> String:
 	if f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
 		return txt
 	var ell := "…" if f.has_char(0x2026) else "..."
-	while txt.length() > 1 and f.get_string_size(txt + ell, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
-		txt = txt.substr(0, txt.length() - 1)
-	return txt + ell
+	# c2-14: toggle/value rows read "NAME: STATE" (e.g. "ASSIST (2-HIT): OFF"). The
+	# STATE tail IS the point of the row, so ellipsize the NAME and KEEP the tail
+	# ("NAM…: OFF") rather than silently trimming the ON/OFF off the end. Only take
+	# this path when the "…: STATE" tail itself fits; otherwise fall through to the
+	# plain trim, which still flags the overflow with a trailing ellipsis. Trimming is
+	# glyph-aware (whole-cluster cut points) so a wide label never splits a glyph.
+	# Split on the FIRST ": " — that is the NAME/VALUE separator; any colon inside the
+	# value (a time, a ratio) stays with the preserved tail.
+	var sep := txt.find(": ")
+	if sep > 0:
+		var tail := txt.substr(sep)   # ": STATE"
+		if f.get_string_size(ell + tail, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+			return _fit_prefix(f, txt.substr(0, sep), ell + tail, size, max_w) + ell + tail
+	return _fit_prefix(f, txt, ell, size, max_w) + ell
+
+
+var _cut_cache := {}   # c2-14: memoized glyph cuts, keyed font+text+size; FIFO-capped
+const _CUT_CACHE_MAX := 128
+
+var _row_fit_cache := {}   # c2-14: memoized per-row overflow/ellipsis, keyed font+size+avail+label
+const _ROW_FIT_CACHE_MAX := 128
+
+
+# c2-14: decide, once per (label, size, column width), whether a menu row overflows its
+# column and what to draw for it. Returns {overflow, show_chip, shown}. The _draw runs
+# every frame, so without this a persistently-visible over-width row re-measures and
+# re-binary-searches the same string 60x/s — this memoizes the result until label, size,
+# or the column width (avail) changes (each is in the key, so a change is a fresh entry;
+# stale entries FIFO-evict). `reserve` is the chip's footprint: the chip only shows when
+# it actually fits (reserve < avail), otherwise the row degrades to a bare ellipsized
+# label — never a negative ellipsize width or a chip drawn over the text.
+func _row_fit(label: String, size: int, avail: float, reserve: float) -> Dictionary:
+	var f := Art.font()
+	var key := "%d|%d|%.2f|%s" % [f.get_instance_id(), size, avail, label]
+	if _row_fit_cache.has(key):
+		return _row_fit_cache[key]
+	var overflow := f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > avail
+	var show_chip := overflow and reserve < avail
+	var shown := _ellipsize(label, size, avail - reserve if show_chip else avail)
+	var res := {"overflow": overflow, "show_chip": show_chip, "shown": shown}
+	if _row_fit_cache.size() >= _ROW_FIT_CACHE_MAX:
+		_row_fit_cache.erase(_row_fit_cache.keys()[0])
+	_row_fit_cache[key] = res
+	return res
+
+
+# c2-14: string offsets where a whole glyph/grapheme begins, from the TextServer
+# shaper. Cutting a label at these (instead of at raw code points via substr) never
+# splits a combining mark or multi-codepoint cluster mid-glyph. Ends with the full
+# length so the untrimmed prefix is a candidate too. Memoized — a persistently
+# over-width row otherwise reshapes the same string every frame; the key includes the
+# font instance so a re-themed/localized font can't return stale cuts. Godot 4's
+# Dictionary GUARANTEES insertion order, so keys()[0] is deterministically the oldest
+# entry — eviction is true oldest-first FIFO, and a full menu never re-shapes all.
+func _glyph_cuts(f: Font, s: String, size: int) -> PackedInt32Array:
+	var key := "%d|%d|%s" % [f.get_instance_id(), size, s]
+	if _cut_cache.has(key):
+		return _cut_cache[key]
+	var ts := TextServerManager.get_primary_interface()
+	var sh := ts.create_shaped_text()
+	ts.shaped_text_add_string(sh, s, f.get_rids(), size)
+	var cuts: PackedInt32Array = [0]
+	for gl in ts.shaped_text_get_glyphs(sh):
+		var st: int = gl["start"]
+		if st > cuts[cuts.size() - 1]:
+			cuts.append(st)
+	ts.free_rid(sh)
+	if cuts[cuts.size() - 1] < s.length():
+		cuts.append(s.length())
+	if _cut_cache.size() >= _CUT_CACHE_MAX:
+		_cut_cache.erase(_cut_cache.keys()[0])
+	_cut_cache[key] = cuts
+	return cuts
+
+
+# Returns ONLY the prefix: the largest leading run of WHOLE glyphs of `s` such that
+# (prefix + suffix) fits max_w. Glyph-aware (see _glyph_cuts) — the returned length is
+# always a glyph boundary, never mid-cluster. When even the empty prefix + suffix
+# overflows (a column too narrow for the ellipsis/tail alone) it returns "", so
+# "" + suffix STILL exceeds max_w — the degenerate case the caller's Art.text max_w
+# hard-clip backstops. Width is monotonic in prefix length, so binary-search the cuts.
+func _fit_prefix(f: Font, s: String, suffix: String, size: int, max_w: float) -> String:
+	var cuts := _glyph_cuts(f, s, size)
+	var lo := 0
+	var hi := cuts.size() - 1
+	var best := ""
+	while lo <= hi:
+		var mid := (lo + hi) / 2
+		var prefix := s.substr(0, cuts[mid])
+		if f.get_string_size(prefix + suffix, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+			best = prefix
+			lo = mid + 1
+		else:
+			hi = mid - 1
+	return best
+
+
+# c2-14: the overflow-flag chip for an ellipsized row, spanning [label_r - 12, label_r]
+# vertically centred on the row. Its right edge is exactly label_r, so it stays STRICTLY
+# inside the label column and can never bleed into the right-edge dot/chevron slots.
+# Extracted so the "chip clears the column" invariant is unit-testable without a _draw.
+func _overflow_chip_rect(label_r: float, cy: float) -> Rect2:
+	return Rect2(label_r - 12.0, cy - 5.0, 12.0, 14.0)
 
 
 # One howto line at x=60: "@action" segments draw the device glyph inline,
