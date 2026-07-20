@@ -149,12 +149,12 @@ func _row_count(mode_id: int, has_replay: bool) -> int:
 	return n
 
 
-# Every TITLE row count (real generated: base verbs+config+options+quit, plus
-# WATCH LAST RUN when a replay exists) crossed with every record-header state
-# must decompress to legible plates.
+# c2-04: TITLE is a fixed 6 rows now (4 start verbs + SETUP hub + QUIT) — CO-OP /
+# NG+ HARD / OPTIONS / INFO / WATCH all live one level down, so a replay no longer
+# grows the list. Every record-header state must decompress to legible plates.
 func test_title_states_all_clear_20px_plate_and_16px_icon() -> void:
 	var counts := [_row_count(Menu.Mode.TITLE, false), _row_count(Menu.Mode.TITLE, true)]
-	Runner.T.ok(counts.max() >= 8, "fullest TITLE reaches its 8-row cap (got %d)" % counts.max())
+	Runner.T.eq(counts.max(), 6, "TITLE holds a fixed 6-row cap (got %d)" % counts.max())
 	for n in counts:                       # real list sizes, not hard-coded
 		for has_best in [false, true]:
 			for has_career in [false, true]:
@@ -176,10 +176,10 @@ func test_title_states_all_clear_20px_plate_and_16px_icon() -> void:
 
 
 # The 2px inter-row inset must leave a real gap between plates at the fullest
-# 8-row state so group dividers stay legible (not fused into one slab).
+# 6-row state so group dividers stay legible (not fused into one slab).
 func test_title_fullest_state_keeps_a_visible_inter_row_gap() -> void:
 	var head: float = Menu.title_head_bottom(true, true)   # worst case: record block pushes rows down
-	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 8, head)
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 6, head)
 	var dead: float = float(g["gap"]) - float(g["bh"])
 	Runner.T.ok(dead >= 2.0, "fullest TITLE keeps a >=2px dead band for dividers (got %d)" % int(dead))
 
@@ -188,11 +188,11 @@ func test_title_fullest_state_keeps_a_visible_inter_row_gap() -> void:
 # push the last TITLE plate into the y322 input legend, at ANY point of the
 # animation (_open_t 0 -> 1). TITLE is the only screen that draws the legend.
 func test_open_settle_never_overlaps_title_legend() -> void:
-	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 8, Menu.title_head_bottom(true, true))
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 6, Menu.title_head_bottom(true, true))
 	for step in 11:
 		var open_t := float(step) / 10.0            # 0.0 (fully dropped) .. 1.0 (settled)
 		var off: float = Menu.settle_offset(g, open_t, 1.0, 321.0)   # motion ON, TITLE legend floor
-		var last_bottom := floorf(float(g["top"]) + off + 7.0 * float(g["gap"])) + float(g["bh"])
+		var last_bottom := floorf(float(g["top"]) + off + 5.0 * float(g["gap"])) + float(g["bh"])
 		Runner.T.ok(last_bottom < LEGEND_Y, "TITLE @open_t=%.1f: last plate bottom %d must clear legend" % [open_t, int(last_bottom)])
 	# Reduce-motion (motion < 0.5) disables the drop-in entirely.
 	Runner.T.eq(Menu.settle_offset(g, 0.0, 0.0, 321.0), 0.0, "reduce-motion yields no drop-in offset")
@@ -205,19 +205,50 @@ func test_open_settle_never_overlaps_title_legend() -> void:
 # adjacent plates must meet (a point between them can't fall through to -1).
 func test_hit_test_maps_centers_and_leaves_no_dead_gap() -> void:
 	var head: float = Menu.title_head_bottom(true, true)
-	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 8, head)
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 6, head)
 	var top: float = g["top"]
 	var gap: float = g["gap"]
 	var bh: float = g["bh"]
-	for k in 8:
+	for k in 6:
 		var cy := floorf(top + float(k) * gap) + bh / 2.0
 		Runner.T.eq(Menu.hit_row(g, cy), k, "center of row %d hits row %d" % [k, k])
-		if k < 7:
+		if k < 5:
 			# The seam midway to the next plate must belong to k or k+1, never -1.
 			var seam := floorf(top + float(k) * gap) + bh + (gap - bh) / 2.0
 			Runner.T.ok(Menu.hit_row(g, seam) != -1, "seam below row %d does not fall through" % k)
 	# A point up in the header region is above the column entirely.
 	Runner.T.eq(Menu.hit_row(g, head - 4.0), -1, "point in the header region hits no row")
+
+
+# c2-04: the contiguous-hit-box guarantee is GLOBAL (hit_row is shared by every screen),
+# so prove it on the real SETUP (5-row) and PAUSE (4-row) layouts too — not just TITLE.
+# Sweep EVERY integer y across the whole column: no interior point may fall through to -1,
+# and each row's center must resolve to that row. This pins the shared hit_row against the
+# floorf-rounding dead strip the c2-04 row-count change first exposed.
+func test_hit_test_contiguous_on_setup_and_pause() -> void:
+	var cases := [
+		[Menu.Mode.SETUP, _row_count(Menu.Mode.SETUP, false)],
+		[Menu.Mode.PAUSE, _row_count(Menu.Mode.PAUSE, false)],
+		[Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false)],
+	]
+	for c in cases:
+		var mode_id: int = c[0]
+		var n: int = c[1]
+		var g: Dictionary = Menu.compute_geometry(mode_id, n, -1.0)
+		var top: float = g["top"]
+		var gap: float = g["gap"]
+		var bh: float = g["bh"]
+		# Row centers resolve to their own row.
+		for k in n:
+			var cy := floorf(top + float(k) * gap) + bh / 2.0
+			Runner.T.eq(Menu.hit_row(g, cy), k, "mode %d: center of row %d hits it" % [mode_id, k])
+		# No interior point between the first plate top and the last plate bottom is dead.
+		var y0 := int(floorf(top))
+		var y1 := int(floorf(top + float(n - 1) * gap) + bh) - 1
+		var yy := y0
+		while yy <= y1:
+			Runner.T.ok(Menu.hit_row(g, float(yy)) != -1, "mode %d: y=%d does not fall through" % [mode_id, yy])
+			yy += 1
 
 
 # Non-TITLE screens (OPTIONS at its fullest, RUN SETUP) also stay >=20px plates.
@@ -495,13 +526,13 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
-# BACK / Esc must climb exactly one level: SETUP + OPTIONS + INFO -> TITLE (their
-# parent), HALL + HOW TO PLAY -> INFO (where they were relocated), and the roots
+# BACK / Esc must climb exactly one level: c2-04 SETUP -> TITLE, OPTIONS + INFO ->
+# SETUP (the hub they were demoted into), HALL + HOW TO PLAY -> INFO, and the roots
 # (TITLE/PAUSE/HIDDEN) have no back target.
 func test_back_navigation_targets() -> void:
-	Runner.T.eq(Menu.back_dest(Menu.Mode.SETUP), {"mode": Menu.Mode.TITLE, "sel": "run_setup"}, "SETUP back -> TITLE/run_setup")
-	Runner.T.eq(Menu.back_dest(Menu.Mode.OPTS), {"mode": Menu.Mode.TITLE, "sel": "options"}, "OPTIONS back -> TITLE/options")
-	Runner.T.eq(Menu.back_dest(Menu.Mode.INFO), {"mode": Menu.Mode.TITLE, "sel": "info"}, "INFO back -> TITLE/info")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.SETUP), {"mode": Menu.Mode.TITLE, "sel": "setup"}, "SETUP back -> TITLE/setup")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.OPTS), {"mode": Menu.Mode.SETUP, "sel": "options"}, "OPTIONS back -> SETUP/options (fallback opener)")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.INFO), {"mode": Menu.Mode.SETUP, "sel": "info"}, "INFO back -> SETUP/info")
 	Runner.T.eq(Menu.back_dest(Menu.Mode.HALL), {"mode": Menu.Mode.INFO, "sel": "hall"}, "HALL back -> INFO/hall")
 	Runner.T.eq(Menu.back_dest(Menu.Mode.HOWTO), {"mode": Menu.Mode.INFO, "sel": "howto"}, "HOWTO back -> INFO/howto")
 	Runner.T.ok(Menu.back_dest(Menu.Mode.TITLE).is_empty(), "TITLE is a root: no back target")
@@ -1950,9 +1981,9 @@ func test_settings_defaults_cover_every_persisted_key() -> void:
 			"SETTINGS_DEFAULTS is the authoritative source for '%s'" % key)
 
 
-# c1-09: OPTIONS climbs BACK to whichever screen opened it — TITLE by default, but
-# PAUSE when opened mid-run — so backing out of settings returns to the paused run
-# instead of dumping the player to the title (which would look like abandoning it).
+# c2-04: OPTIONS climbs BACK to whichever screen opened it — the SETUP hub from the
+# title flow, or PAUSE when opened mid-run — so backing out of settings returns to the
+# paused run instead of dumping the player to the title (which would look like abandoning it).
 func test_options_back_returns_to_its_opener() -> void:
 	var stub := _StubMain.new()
 	var m: Control = Menu.new()
@@ -1960,9 +1991,9 @@ func test_options_back_returns_to_its_opener() -> void:
 	m._opts_parent = Menu.Mode.PAUSE
 	Runner.T.eq(m._parent(Menu.Mode.OPTS), {"mode": Menu.Mode.PAUSE, "sel": "options"},
 		"OPTIONS opened from PAUSE backs to PAUSE")
-	m._opts_parent = Menu.Mode.TITLE
-	Runner.T.eq(m._parent(Menu.Mode.OPTS), {"mode": Menu.Mode.TITLE, "sel": "options"},
-		"OPTIONS opened from TITLE backs to TITLE")
+	m._opts_parent = Menu.Mode.SETUP
+	Runner.T.eq(m._parent(Menu.Mode.OPTS), {"mode": Menu.Mode.SETUP, "sel": "options"},
+		"OPTIONS opened from SETUP backs to SETUP")
 	m.free()
 	stub.free()
 
@@ -2195,20 +2226,26 @@ func test_pause_options_nested_back_roundtrip_preserves_focus() -> void:
 	stub.free()
 
 
-# c1-09: the INFO screen gathers the look-back links off TITLE — TITLE -> INFO ->
-# nested HALL OF FAME -> BACK -> INFO -> BACK -> TITLE — proving HALL/HOWTO now climb
-# to INFO (not OPTIONS) and each BACK restores focus to the row that opened the child.
+# c2-04: INFO now hangs off the SETUP hub, not TITLE. Full chain: TITLE -> SETUP ->
+# INFO -> nested HALL OF FAME, then BACK all the way out, proving each BACK climbs one
+# level and restores focus to the row that opened the child.
 func test_title_info_nested_back_roundtrip_preserves_focus() -> void:
 	var stub := _StubMain.new()
 	var m: Control = Menu.new()
 	m.main = stub
 	m.mode = Menu.Mode.TITLE
 
+	var setup_i := _row_index(m, "setup")
+	Runner.T.ok(setup_i >= 0, "TITLE exposes the SETUP row")
+	m.sel = setup_i
+	m._activate()                       # TITLE SETUP -> the hub
+	Runner.T.eq(m.mode, Menu.Mode.SETUP, "SETUP opens from TITLE")
+
 	var info_i := _row_index(m, "info")
-	Runner.T.ok(info_i >= 0, "TITLE exposes the INFO row")
+	Runner.T.ok(info_i >= 0, "SETUP exposes the INFO row")
 	m.sel = info_i
-	m._activate()                       # TITLE INFO -> the look-back screen
-	Runner.T.eq(m.mode, Menu.Mode.INFO, "INFO opens from TITLE")
+	m._activate()                       # SETUP INFO -> the look-back screen
+	Runner.T.eq(m.mode, Menu.Mode.INFO, "INFO opens from SETUP")
 
 	m.sel = _row_index(m, "hall")
 	Runner.T.ok(m.sel >= 0, "INFO exposes the HALL OF FAME row")
@@ -2219,9 +2256,13 @@ func test_title_info_nested_back_roundtrip_preserves_focus() -> void:
 	Runner.T.eq(m.mode, Menu.Mode.INFO, "BACK from HALL returns to INFO")
 	Runner.T.eq(m.sel, _row_index(m, "hall"), "focus restored to HALL row on return")
 
-	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: INFO -> TITLE
-	Runner.T.eq(m.mode, Menu.Mode.TITLE, "BACK from INFO returns to TITLE")
-	Runner.T.eq(m.sel, _row_index(m, "info"), "focus restored to the TITLE INFO row")
+	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: INFO -> SETUP
+	Runner.T.eq(m.mode, Menu.Mode.SETUP, "BACK from INFO returns to SETUP")
+	Runner.T.eq(m.sel, _row_index(m, "info"), "focus restored to the SETUP INFO row")
+
+	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: SETUP -> TITLE
+	Runner.T.eq(m.mode, Menu.Mode.TITLE, "BACK from SETUP returns to TITLE")
+	Runner.T.eq(m.sel, _row_index(m, "setup"), "focus restored to the TITLE SETUP row")
 
 	m.free()
 	stub.free()
@@ -3966,7 +4007,7 @@ func test_activating_rebind_back_returns_to_options() -> void:
 	var mm := _rebind_menu(0)
 	var m: Control = mm[0]
 	var stub = mm[1]
-	m._opts_parent = Menu.Mode.TITLE
+	m._opts_parent = Menu.Mode.SETUP
 	var items: Array = m._menu_items()
 	for k in items.size():
 		if items[k]["id"] == "back":

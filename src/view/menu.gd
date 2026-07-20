@@ -60,7 +60,7 @@ var _seed_armed_val := -1 # c1-14: the exact seed the arm is holding — a confi
 var _seed_armed_t := 0.0 # c1-14: arm auto-disarm window (mirrors _confirm_t) — a stale "press again" can't load a run minutes later
 var _seed_poll_t := 0.0  # c1-14: throttle countdown — the focused row samples the clipboard ~5x/s, not every frame (activation still forces an immediate read)
 var _reset_flash_anim := true   # c1-09: whether that banner fades — captured from the PRE-reset reduce-motion state (reset itself re-enables motion, so reading it live would never snap)
-var _opts_parent := Mode.TITLE   # c1-09: which screen OPTIONS was opened from (TITLE or PAUSE) — drives BACK
+var _opts_parent := Mode.SETUP   # c2-04: which screen OPTIONS was opened from (the SETUP hub or PAUSE) — drives BACK
 var _rebind_action := ""   # c1-18: REBIND screen is capturing the next key/button for THIS verb ("" = idle, listing binds)
 var _rebind_tab := 0       # c1-18: which REBIND category tab is shown (0 MOVE/AIM kb, 1 ACTIONS kb, 2 GAMEPAD, 3 MENUS) — keeps each page <=10 rows so plates stay >=20px
 var _rebind_pad_dev := 0   # c1-18: which PLAYER's pad layout the GAMEPAD tab edits (0 = P1, 1 = P2) — the two are independent; ◄/► (or the P1|P2 header sub-tabs) switch it
@@ -345,7 +345,7 @@ func _menu_items() -> Array[Dictionary]:
 			# verbs above and the meta screens below). The row carries its own live
 			# config tail — players and an EXPLICIT NORMAL/HARD difficulty — so a stale
 			# CO-OP or NG+ choice can't ride hidden into the next deploy.
-			{"id": "run_setup", "label": "RUN SETUP: %s  %s" % ["2P" if main._two_players else "1P",
+			{"id": "setup", "label": "SETUP: %s  %s" % ["2P" if main._two_players else "1P",
 				"HARD" if main._hard else "NORMAL"], "destructive": false, "grp": 1, "submenu": true},
 		]
 		# c1-09: the meta block is two focused rows — OPTIONS (settings ONLY, no info
@@ -354,17 +354,24 @@ func _menu_items() -> Array[Dictionary]:
 		# look-back screens. WATCH LAST RUN moved off TITLE onto INFO (it belongs with
 		# the records), so the meta block is a CONSTANT two rows and TITLE holds at its
 		# 8-row cap whether or not a replay exists.
-		titems.append({"id": "options", "label": "OPTIONS", "destructive": false, "grp": 2, "submenu": true})
-		titems.append({"id": "info", "label": "INFO", "destructive": false, "grp": 2, "submenu": true})
-		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 3})
+		# c2-04: OPTIONS and INFO moved DOWN a level into the SETUP hub (below), so TITLE's
+		# tail is a single SETUP row + QUIT. That holds TITLE at 6 full-height rows instead
+		# of 8, keeping the four start verbs the visually dominant block.
+		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 2})
 		return titems
 	if mode == Mode.SETUP:
 		# c1-02: CO-OP / NG+ HARD live on their own labeled RUN SETUP screen (reached
 		# from TITLE, beside the start verbs) so pre-run choices read as a distinct
 		# step and never crowd the settings toggles. Two rows + BACK => big plates.
+		# c2-04: SETUP is the hub for everything that used to crowd TITLE's tail. grp 0 is the
+		# run config (CO-OP / NG+ HARD); grp 1 is the two secondary screens (OPTIONS / INFO)
+		# demoted off TITLE. The grp 0->grp 1 divider (brightened in _draw) reads as the
+		# "this run" vs "everything else" split.
 		return [
 			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players, "grp": 0},
 			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 0},
+			{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
+			{"id": "info", "label": "INFO", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 2},
 		]
 	if mode == Mode.INFO:
@@ -704,7 +711,8 @@ func _row_icon(id: String) -> String:
 		"resume", "campaign": return "mi_play"
 		"hall": return "mi_trophy"
 		"howto": return "mi_book"
-		"run_setup", "hard": return "mi_combat"
+		"setup": return "mi_settings"   # c2-04: gear cue signals the hub also holds OPTIONS/INFO, not just run config
+		"hard": return "mi_combat"
 		"coop": return "mi_controller"
 		"sfx": return "mi_snd_off" if _bus_off("SFX") else "mi_snd_on"
 		"music": return "mi_mus_off" if _bus_off("Music") else "mi_mus_on"
@@ -1316,8 +1324,13 @@ func _press() -> void:
 # not the title). back_dest stays the single source for the fixed parents (HALL/
 # HOWTO/SETUP); only OPTIONS has two possible openers, tracked in _opts_parent.
 func _parent(m: int) -> Dictionary:
-	if m == Mode.OPTS and _opts_parent == Mode.PAUSE:
-		return {"mode": Mode.PAUSE, "sel": "options"}
+	# c2-04: OPTIONS has two possible openers (the SETUP hub or PAUSE), tracked in
+	# _opts_parent, so BACK always returns to the row the player came through. Guard a
+	# stale/unset value (only PAUSE or SETUP host an OPTIONS row) so BACK can never strand
+	# the player on a screen with no matching row — default to the SETUP hub.
+	if m == Mode.OPTS:
+		var opener := _opts_parent if _opts_parent in [Mode.PAUSE, Mode.SETUP] else Mode.SETUP
+		return {"mode": opener, "sel": "options"}
 	return back_dest(m)
 
 
@@ -1381,6 +1394,9 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 		# Spread across the WHOLE band down to the y322 input legend. Dividing by
 		# n (not n-1) reserves the final row's own height, so QUIT self-clears the
 		# legend without the old hardcoded 296 bottom bound that left dead air.
+		# c2-04: with TITLE trimmed to 6 rows (4 start verbs + SETUP + QUIT), this same
+		# math seats ~30px full-height plates (bh caps at BTN.y=36) with 16px icons even
+		# with the CAREER header line present — no per-count special case needed.
 		gap = minf(46.0, (318.0 - top) / maxf(1.0, float(n)))
 	else:
 		# PAUSE/OPTS: bottom clears the y~322 legend strip — at 310 the QUIT row
@@ -1411,9 +1427,9 @@ static func back_dest(mode_id: int) -> Dictionary:
 	match mode_id:
 		Mode.HOWTO: return {"mode": Mode.INFO, "sel": "howto"}
 		Mode.HALL: return {"mode": Mode.INFO, "sel": "hall"}
-		Mode.INFO: return {"mode": Mode.TITLE, "sel": "info"}
-		Mode.SETUP: return {"mode": Mode.TITLE, "sel": "run_setup"}
-		Mode.OPTS: return {"mode": Mode.TITLE, "sel": "options"}
+		Mode.INFO: return {"mode": Mode.SETUP, "sel": "info"}   # c2-04: INFO now hangs off the SETUP hub
+		Mode.SETUP: return {"mode": Mode.TITLE, "sel": "setup"}   # c2-04: SETUP hangs off TITLE's SETUP row
+		Mode.OPTS: return {"mode": Mode.SETUP, "sel": "options"}   # c2-04: fallback opener; _parent overrides via _opts_parent
 		Mode.REBIND: return {"mode": Mode.OPTS, "sel": "controls"}   # c1-18: rebind screen hangs off the OPTIONS CONTROLS row — BACK restores focus to that real row
 		Mode.DISP: return {"mode": Mode.OPTS, "sel": "display"}   # c1-19: DISPLAY sub-screen hangs off the OPTIONS DISPLAY row — BACK restores focus to it
 		_: return {}
@@ -1448,13 +1464,20 @@ func _row_geometry() -> Dictionary:
 
 
 # Which row a point falls in, given a geometry dict — pure so the hit-test is
-# unit-checkable. Extends each box by half the dead band so adjacent plates meet
-# exactly (a gap point used to fall through to -1 and blink the highlight out).
+# unit-checkable. Each interior row's box runs from half-a-dead-band above its own
+# plate down to half-a-dead-band above the NEXT plate, so the boxes are exactly
+# CONTIGUOUS — a point can never fall into a between-plate gap and blink the
+# highlight out. (The old symmetric +/-pad box left a sub-pixel dead strip whenever
+# floorf rounding pushed two plate tops more than bh+2*pad apart — e.g. the c2-04
+# 6-row TITLE.) The last row keeps the symmetric bottom pad (no plate follows it).
 static func hit_row(g: Dictionary, y: float) -> int:
-	var pad := maxf(0.0, (float(g["gap"]) - float(g["bh"])) / 2.0)
-	for k in int(g["n"]):
+	var n := int(g["n"])
+	var bh := float(g["bh"])
+	var pad := maxf(0.0, (float(g["gap"]) - bh) / 2.0)
+	for k in n:
 		var ry := row_rect(g, k).position.y   # same source _draw / the arrow hit-test build from
-		if y >= ry - pad and y < ry + float(g["bh"]) + pad:
+		var bottom := (row_rect(g, k + 1).position.y - pad) if k < n - 1 else (ry + bh + pad)
+		if y >= ry - pad and y < bottom:
 			return k
 	return -1
 
@@ -1658,20 +1681,18 @@ func _activate() -> void:
 			"daily": main.start_daily()
 			"watch": main.start_watch()
 			"paste_seed": _activate_seed()   # gated above; here only defensively
-			"run_setup": open(Mode.SETUP)   # run-config submenu, beside the start verbs
-			"options":
-				_opts_parent = Mode.TITLE   # BACK returns to TITLE
-				open(Mode.OPTS)
-			"info": open(Mode.INFO)   # the look-back screens (HALL / HOW TO / WATCH)
+			"setup": open(Mode.SETUP)   # c2-04: SETUP hub (run config + OPTIONS + INFO)
 			"quit": get_tree().quit()
 	else:
 		match id:
 			"resume": mode = Mode.HIDDEN
 			"options":
 				# c1-09: PAUSE fronts settings through ONE dedicated OPTIONS screen (the
-				# six a11y/audio rows no longer live on the pause list). BACK returns here.
-				_opts_parent = Mode.PAUSE
+				# six a11y/audio rows no longer live on the pause list). c2-04: SETUP now
+				# also opens it. Either way BACK returns to the opener via _opts_parent.
+				_opts_parent = mode
 				open(Mode.OPTS)
+			"info": open(Mode.INFO)   # c2-04: reached from the SETUP hub; BACK returns there
 			"controls": open(Mode.REBIND)   # c1-18: CONTROLS row opens the rebind screen
 			"back":
 				# BACK climbs one level: OPTIONS returns to its opener, SETUP to TITLE.
@@ -2001,9 +2022,10 @@ func _draw() -> void:
 		# fully adjustable in both modes; nothing here is a dead, silently-ignored control.
 		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), 104, 8, Color(0.8, 0.85, 0.72))
 	elif mode == Mode.SETUP:
-		_center_text("RUN SETUP", 84, 22, Color(0.95, 0.95, 0.85))
-		# Say what the screen is for — the two toggles below decide the run you deploy.
-		_center_text("PLAYERS & DIFFICULTY FOR YOUR NEXT DEPLOY", 104, 8,
+		_center_text("SETUP", 84, 22, Color(0.95, 0.95, 0.85))
+		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
+		# the OPTIONS and INFO screens.
+		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO", 104, 8,
 			Color(0.8, 0.85, 0.72))
 	else:
 		_center_text("PAUSED", 78, 22, Color(0.95, 0.95, 0.85))
@@ -2044,8 +2066,21 @@ func _draw() -> void:
 		if k > 0 and k < mitems.size() \
 				and mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0):
 			var sy := floorf(top + k * gap) - floorf((gap - bh) / 2.0)
-			draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
-				Color(0.62, 0.66, 0.5, 0.55))
+			# c2-04: the "primary vs secondary" split gets a brighter, full-width rule so
+			# it reads as the dominant boundary. On TITLE that is start-verbs (grp 0) ->
+			# the SETUP hub (grp 1): the four start rows (CAMPAIGN / ENDLESS / DAILY /
+			# SEED) stand apart as one block from SETUP / QUIT. On the SETUP screen the
+			# same brightened rule marks run-config (grp 0) -> the OPTIONS/INFO screens
+			# (grp 1). Every other boundary keeps the faint hierarchy rule. Geometry and
+			# hit-test are untouched — this is a pure paint cue in the existing gap.
+			if (mode == Mode.TITLE or mode == Mode.SETUP) \
+					and int(mitems[k - 1].get("grp", 0)) == 0 \
+					and int(mitems[k].get("grp", 0)) == 1:
+				draw_rect(Rect2(320 - BTN.x / 2.0 + 6.0, sy, BTN.x - 12.0, 1.0),
+					Color(0.86, 0.82, 0.52, 0.8))
+			else:
+				draw_rect(Rect2(320 - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
+					Color(0.62, 0.66, 0.5, 0.55))
 		if mode == Mode.OPTS and (k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0)):
 			_emit_group_caption(mitems, k, cy)
 		var selected := k == sel
