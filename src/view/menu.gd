@@ -490,6 +490,17 @@ func _menu_items() -> Array[Dictionary]:
 		# tail is a single SETUP row + QUIT. That holds TITLE at 6 full-height rows instead
 		# of 8, keeping the four start verbs the visually dominant block.
 		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 2})
+		# c2-12: while the CHALLENGE SEED row is FOCUSED, rebuild its label here — in the
+		# standard menu-item refresh flow every draw reads — to echo the raw clipboard text
+		# the poll keeps fresh (_seed_clip_raw). This means the visible label tracks a
+		# clipboard change LIVE (no refocus needed) and the player sees exactly what a press
+		# will use; the right-margin hint (seed_hint_lines) says whether it parses.
+		for i in titems.size():
+			if titems[i]["id"] == "paste_seed":
+				if sel == i:
+					titems[i]["label"] = seed_row_label(titems[i]["label"], true,
+						_seed_clip_raw, _seed_preview >= 0)
+				break
 		return titems
 	if mode == Mode.SETUP:
 		# c1-02: CO-OP / NG+ HARD live on their own labeled RUN SETUP screen (reached
@@ -1920,6 +1931,38 @@ static func seed_hint_lines(selected: bool, preview: int, armed: bool, clip_empt
 	return PackedStringArray(["SEED %d" % preview])
 
 
+static func seed_row_label(base: String, selected: bool, clip_raw: String, valid: bool) -> String:
+	# c2-12: while the CHALLENGE SEED row is focused, echo the RAW clipboard text INTO the
+	# row label itself (ellipsized downstream in _draw) so the player can SEE exactly what a
+	# press will use — valid, malformed, or empty — before it commits, and carry an EXPLICIT
+	# status tag in the label so the state is stated in the standard row flow, not only in
+	# the right-margin hint. Unfocused keeps the bare "CHALLENGE SEED" label.
+	# STANDARDIZED FORMAT (all selected states share one shape): "<base> (<TAG>)" plus, when
+	# there is raw text to echo, ": <raw>". Single space before the tag, one colon+space
+	# before the echo, parenthesised tag every time — so EMPTY / OK / INVALID read as one
+	# consistent family, not three ad-hoc strings.
+	#   empty  -> "CHALLENGE SEED (EMPTY)"
+	#   valid  -> "CHALLENGE SEED (OK): 12345"
+	#   bad    -> "CHALLENGE SEED (INVALID): garbage 1 2 3"
+	# Newlines/tabs collapse to spaces so a multi-line clipboard (e.g. a share card) stays
+	# one clean line before _ellipsize fits it to the button.
+	# The status tag sits in the label PREFIX (before the raw echo) on purpose: the raw text
+	# is what _ellipsize trims when it overflows the button, so a suffix marker would be the
+	# first thing clipped off a long paste. Prefixing it keeps "(OK)"/"(INVALID)"/"(EMPTY)"
+	# always visible; only the (redundant-with-the-hint) raw tail truncates.
+	if not selected:
+		return base
+	var raw := clip_raw.strip_edges()
+	if raw.is_empty():
+		return "%s (EMPTY)" % base   # explicit EMPTY state in the row, not only the hint
+	# Collapse every run of whitespace (spaces, CR/LF, tabs) to a single space so a pasted
+	# share card or a CRLF clipboard stays one clean, evenly spaced line.
+	raw = " ".join(raw.replace("\r", " ").replace("\n", " ").replace("\t", " ").split(" ", false))
+	if valid:
+		return "%s (OK): %s" % [base, raw]
+	return "%s (INVALID): %s" % [base, raw]
+
+
 func _is_seed_row() -> bool:
 	# c1-14: safe "is the CHALLENGE SEED row focused?" — bounds-checks sel BEFORE indexing
 	# _menu_items() so a transient/invalid selection can never throw out of range.
@@ -2017,6 +2060,10 @@ func _activate_seed() -> void:
 		_seed_flash = 1.0
 		_seed_armed = false
 		_dirty = true
+		# c2-12: the deny needs no center toast — the FOCUSED row already carries full inline
+		# feedback: the label echoes the raw clipboard text (see seed_row_label) so the player
+		# sees WHAT was read, and the right-margin hint says WHY it was rejected ("NO SEED -
+		# COPY ONE" vs "BAD SEED - CHECK COPY"), alongside the red flash + deny buzz.
 		return
 	# Two-press verify: a run loads ONLY on a second press that confirms the SAME seed
 	# the arm is already displaying ("SEED N  PRESS AGAIN"). This gives a genuine chance

@@ -3266,6 +3266,68 @@ func test_seed_hint_lines_and_plate_layout() -> void:
 	Runner.T.ok(plate_right <= 620.0, "plate right %d stays inside the 620px chrome frame" % int(plate_right))
 
 
+# c2-12: the focused CHALLENGE SEED row echoes the RAW clipboard text into its label with a
+# STANDARDIZED, single-family format — bare base when unfocused; "(EMPTY)" / "(OK): raw" /
+# "(INVALID): raw" when focused. Covers the judge's cases: empty, whitespace-only, multi-line,
+# malformed, and valid. seed_row_label is the pure source the row draws, so asserting it IS
+# the label render check.
+func test_seed_row_label_states_and_format() -> void:
+	var base := "CHALLENGE SEED"
+	# UNFOCUSED: bare label regardless of clipboard contents (valid flag is moot).
+	Runner.T.eq(Menu.seed_row_label(base, false, "12345", true), base,
+		"an unfocused row shows the plain label, never the clipboard echo")
+	Runner.T.eq(Menu.seed_row_label(base, false, "", false), base,
+		"an unfocused row with an empty clipboard is still the plain label")
+	# EMPTY / WHITESPACE-ONLY: both strip to nothing -> the same explicit (EMPTY) tag, no echo.
+	Runner.T.eq(Menu.seed_row_label(base, true, "", false), "%s (EMPTY)" % base,
+		"a focused row with an empty clipboard states (EMPTY) in the label")
+	Runner.T.eq(Menu.seed_row_label(base, true, "   \t  ", false), "%s (EMPTY)" % base,
+		"a whitespace-only clipboard reads the same (EMPTY) as truly empty")
+	Runner.T.eq(Menu.seed_row_label(base, true, "\n\n", false), "%s (EMPTY)" % base,
+		"a newline-only clipboard is (EMPTY), never a blank echo")
+	# VALID: (OK) tag then the echoed seed.
+	Runner.T.eq(Menu.seed_row_label(base, true, "12345", true), "%s (OK): 12345" % base,
+		"a valid seed echoes after an (OK) tag")
+	Runner.T.eq(Menu.seed_row_label(base, true, "  12345  ", true), "%s (OK): 12345" % base,
+		"surrounding whitespace is trimmed before the echo")
+	# MALFORMED: (INVALID) tag then the echoed raw text so the player sees what failed.
+	Runner.T.eq(Menu.seed_row_label(base, true, "garbage 1 2 3", false), "%s (INVALID): garbage 1 2 3" % base,
+		"malformed text echoes after an (INVALID) tag")
+	# MULTI-LINE: CR/LF/TAB all collapse to single spaces so the label stays one clean line.
+	Runner.T.eq(Menu.seed_row_label(base, true, "12345\nSHARE CARD", false), "%s (INVALID): 12345 SHARE CARD" % base,
+		"a multi-line clipboard collapses newlines to spaces on one line")
+	Runner.T.eq(Menu.seed_row_label(base, true, "a\r\nb\tc", false), "%s (INVALID): a b c" % base,
+		"CR, LF and TAB all collapse to single spaces")
+	# FORMAT CONSISTENCY: every selected state is "<base> (<TAG>)" and echoing states add ": ".
+	for c in [
+		{"raw": "", "valid": false, "tag": "(EMPTY)", "echo": false},
+		{"raw": "777", "valid": true, "tag": "(OK)", "echo": true},
+		{"raw": "junk", "valid": false, "tag": "(INVALID)", "echo": true},
+	]:
+		var lab: String = Menu.seed_row_label(base, true, c["raw"], c["valid"])
+		Runner.T.ok(lab.begins_with("%s %s" % [base, c["tag"]]),
+			"'%s' opens with the base and its parenthesised tag" % lab)
+		if c["echo"]:
+			Runner.T.ok(lab.contains("%s: " % c["tag"]), "'%s' separates the echo with a colon+space" % lab)
+	# MAX-LENGTH SAFETY: a very long raw paste keeps the status tag readable at the HEAD (so it
+	# survives _ellipsize's tail-trim) and — because the label is the BUTTON text, a separate
+	# region from the right-margin hint — the raw echo can never push or overlap the hint. The
+	# hint's own worst-case (longest int64 seed) fit is proven in the plate-layout test above.
+	var huge := "9".repeat(400)
+	var long_lab := Menu.seed_row_label(base, true, huge, true)
+	Runner.T.ok(long_lab.begins_with("%s (OK): " % base),
+		"even a 400-char paste keeps the (OK) tag at the head where _ellipsize won't clip it")
+	var f := Art.font()
+	var btn_avail := Menu.BTN.x - 24.0   # button text region (generous margin)
+	var m: Control = Menu.new()
+	var fitted: String = m._ellipsize(long_lab, 11, btn_avail)
+	Runner.T.ok(f.get_string_size(fitted, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= btn_avail,
+		"the ellipsized label fits within the button, so it stays clear of the right-margin hint")
+	Runner.T.ok(fitted.begins_with("%s (OK)" % base),
+		"the ellipsized label still leads with the status tag (only the raw tail is trimmed)")
+	m.free()
+
+
 # c1-14: the focused row THROTTLES its clipboard sampling — it must NOT call
 # clipboard_get() every frame. Over several frames within one throttle window the
 # clipboard is read only once; a change is picked up on the next window, not instantly.
