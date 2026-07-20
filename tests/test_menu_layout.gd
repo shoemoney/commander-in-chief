@@ -177,6 +177,80 @@ func test_title_states_all_clear_20px_plate_and_16px_icon() -> void:
 				Runner.T.ok(gap >= bh, "%s: gap %d must be >= plate %d" % [tag, int(gap), int(bh)])
 
 
+# c3-03: the primary/secondary IA split. With the DEPLOY->MORE gap RESERVED out of the
+# band, across EVERY record-header state the TITLE column must (a) hold every plate at the
+# 22px readable floor, (b) insert the 9px DEPLOY/MORE block gap (one interior seam PLUS
+# TITLE_BLOCK_GAP, within 1px of floorf rounding), and (c) keep the DEPLOY backing panel
+# AND the DEPLOY/MORE captions clear of the record header and of each other. Uses the REAL
+# split_at (first grp>0 row) + the shared geometry/panel/caption statics, so a header nudge
+# or a wider split can't silently crush a plate or collide a caption into the header.
+func test_c3_03_title_split_floor_gap_and_no_header_overlap() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+	var mi: Array = m._menu_items()
+	var n := mi.size()
+	var split_at := -1
+	for k in n:
+		if int(mi[k].get("grp", 0)) > 0:
+			split_at = k
+			break
+	Runner.T.ok(split_at >= 1 and split_at < n, "TITLE has a DEPLOY(grp0)->MORE(grp1) split at %d of %d" % [split_at, n])
+	for has_best in [false, true]:
+		for has_career in [false, true]:
+			var head: float = Menu.title_head_bottom(has_best, has_career)
+			var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, n, head, split_at, Menu.TITLE_BLOCK_GAP)
+			var bh: float = g["bh"]
+			var tag := "TITLE best=%s career=%s" % [has_best, has_career]
+			# (a) the 22px plate floor holds WITH the split gap reserved out of the band, and
+			# the icon stays at its 16px art size — the exact thing the crushed 8px layout lost.
+			Runner.T.ok(bh >= Menu.TITLE_MIN_PLATE,
+				"%s: plate %dpx >= %d floor (split reserved)" % [tag, int(bh), int(Menu.TITLE_MIN_PLATE)])
+			Runner.T.ok(_icon_size(bh) >= 16.0,
+				"%s: icon %dpx >= 16 (no 8px speck) with split reserved" % [tag, int(_icon_size(bh))])
+			# (b) the 9px block gap: the DEPLOY->MORE seam is one interior seam PLUS TITLE_BLOCK_GAP.
+			var deploy_bottom := Menu.row_rect(g, split_at - 1).end.y
+			var more_top := Menu.row_rect(g, split_at).position.y
+			var interior_seam := Menu.row_rect(g, 1).position.y - Menu.row_rect(g, 0).end.y
+			var block_extra := (more_top - deploy_bottom) - interior_seam
+			Runner.T.ok(absf(block_extra - Menu.TITLE_BLOCK_GAP) <= 1.0,
+				"%s: DEPLOY->MORE seam adds %dpx over an interior seam (want %d +-1)" % [tag, int(block_extra), int(Menu.TITLE_BLOCK_GAP)])
+			# (c1) the DEPLOY backing panel clears the record header and never reaches the MORE block.
+			var panel: Rect2 = Menu.title_deploy_panel(g, split_at - 1, head)
+			Runner.T.ok(panel.position.y > head, "%s: DEPLOY panel top %d clears header %d" % [tag, int(panel.position.y), int(head)])
+			Runner.T.ok(panel.end.y <= more_top, "%s: DEPLOY panel bottom %d stays above the MORE block %d" % [tag, int(panel.end.y), int(more_top)])
+			# (c2) the REAL DEPLOY / MORE caption boxes (pill+rule via _emit_group_caption) clear
+			# the record header and each other. Each caption is captured alone so its full
+			# footprint is the union of its emitted primitives.
+			var dbox := _title_caption_box(stub, mi, g, 0, bh)
+			var mbox := _title_caption_box(stub, mi, g, split_at, bh)
+			Runner.T.ok(dbox.size.y > 0.0 and mbox.size.y > 0.0, "%s: both DEPLOY and MORE captions drew" % tag)
+			Runner.T.ok(dbox.position.y > head, "%s: DEPLOY caption top %d clears header %d" % [tag, int(dbox.position.y), int(head)])
+			Runner.T.ok(dbox.end.y <= mbox.position.y, "%s: DEPLOY caption bottom %d clears the MORE caption top %d" % [tag, int(dbox.end.y), int(mbox.position.y)])
+	m.free()
+	stub.free()
+
+
+# c3-03: the union footprint of the REAL _emit_group_caption(mitems, k, cy) draw for the
+# group starting at row k — captured through the _CaptureMenu draw seams (so it is the true
+# pill+label+rule geometry, not a formula copy). cy mirrors _draw's whole-pixel row center.
+func _title_caption_box(stub: _StubMain, mitems: Array, g: Dictionary, k: int, bh: float) -> Rect2:
+	var cap := _CaptureMenu.new()
+	cap.main = stub
+	cap.mode = Menu.Mode.TITLE
+	var cy := floorf(Menu.row_rect(g, k).position.y + bh / 2.0)
+	cap._emit_group_caption(mitems, k, cy)
+	var box := Rect2()
+	var first := true
+	for op in cap.ops:
+		var b: Rect2 = op["box"]
+		box = b if first else box.merge(b)
+		first = false
+	cap.free()
+	return box
+
+
 # c2-13: once today's seed-of-the-day is completed, the DAILY RUN row must LOCK —
 # the disabled flag set, a COMPLETED label, and a press that BUZZES (deny) instead of
 # silently re-running the same finished seed. A fresh (undone) day keeps it live.

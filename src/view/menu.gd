@@ -179,6 +179,20 @@ const ROW_INSET_DEFAULT := 3.0     # inter-row inset on every other screen
 # boundary (the crushed-plate / dead-void discontinuity this item kills).
 const ROW_BREATHING := 10.0        # dead band a full-height plate keeps above the next row
 const GAP_CEIL := BTN.y + ROW_BREATHING   # 46 — the single row-pitch ceiling
+# c3-03: extra vertical air TITLE inserts between the primary DEPLOY block (start verbs)
+# and the secondary MORE block (SETUP / QUIT) — a real spatial gap, not just a 1px rule,
+# so the two IA blocks read as distinct zones. Carried in the geometry dict (split_at /
+# split_gap) and applied by row_rect, so every derived box (hit-test, arrows, glow) tracks
+# it. Reserved out of the row band BEFORE the fit divide, so the DEPLOY plates never crush
+# below the >=20px floor to pay for it (verified by test_title_states_all_clear...).
+const TITLE_BLOCK_GAP := 9.0
+# c3-03: the readable plate floor TITLE's row pitch is HARD-clamped to in compute_geometry.
+# The 6-row cap plus the split gap must never crush a DEPLOY/MORE plate below this — an
+# explicit runtime guard, not merely the row cap plus a test reference, so a future header
+# nudge or a wider split gap holds the plate here instead of silently shrinking to an 8px
+# speck (the exact regression this item exists to kill). 22px leaves margin over the 20px
+# legibility minimum test_title_states_all_clear... pins.
+const TITLE_MIN_PLATE := 22.0
 # c3-02: the y a non-TITLE column's LAST plate BOTTOM aims for. Derived from the footer
 # strip (not a bare 310) so the selected-row glow (+4.5) always clears FOOTER_Y with
 # GLOW_CLEAR slack, and the gap math can divide the band by n — reserving that final
@@ -242,6 +256,11 @@ const OVERFLOW_CHIP_COL := Color(0.0, 0.0, 0.0, 0.72)     # c2-14 truncation-fla
 const OVERFLOW_CHIP_BORDER := Color(WARN_COL, 0.55)      # c2-14 chip border (contrast on any row)
 const OVERFLOW_DOT_COL := WARN_COL                       # c2-14 the three amber "clipped" dots
 const OVERFLOW_CHIP_PAD := 3.0                           # c2-14 breathing room between text and the chip
+# c3-03: DEPLOY backing-panel chrome (the raised cluster behind the start verbs) — hoisted
+# out of _draw so the fill/border hues live with the rest of the THEME block, not as bare
+# inline Color() literals. Alpha is scaled by _open_t at draw so the panel fades in with the column.
+const PANEL_FILL := Color(0.10, 0.14, 0.09, 0.5)        # DEPLOY panel fill
+const PANEL_BORDER := Color(HEADER_ACCENT, 0.3)         # DEPLOY panel accent keyline
 
 
 func _ready() -> void:
@@ -556,7 +575,13 @@ func _menu_items() -> Array[Dictionary]:
 		# c2-04: OPTIONS and INFO moved DOWN a level into the SETUP hub (below), so TITLE's
 		# tail is a single SETUP row + QUIT. That holds TITLE at 6 full-height rows instead
 		# of 8, keeping the four start verbs the visually dominant block.
-		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 2})
+		# c3-03: QUIT joins SETUP in grp 1 — the secondary "MORE" block. TITLE is now TWO
+		# named IA blocks, not a flat column: grp 0 (CAMPAIGN / ENDLESS / DAILY / CHALLENGE
+		# SEED) is the DEPLOY block; grp 1 (SETUP + QUIT) is everything that isn't starting a
+		# run. One brightened divider (grp 0 -> grp 1) plus a DEPLOY/MORE caption pair mark the
+		# split, and the DEPLOY block gets a backing panel in _draw so the start verbs read as
+		# one dominant cluster, not the top of an undifferentiated phone list.
+		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 1})
 		# c2-12: while the CHALLENGE SEED row is FOCUSED, rebuild its label here — in the
 		# standard menu-item refresh flow every draw reads — to echo the raw clipboard text
 		# the poll keeps fresh (_seed_clip_raw). This means the visible label tracks a
@@ -1567,6 +1592,36 @@ static func group_header(grp: int) -> String:
 	return ""
 
 
+# c3-03: TITLE's section captions — the primary/secondary IA split spelled out as
+# NAMED blocks, not just a divider rule. grp 0 (CAMPAIGN / ENDLESS / DAILY /
+# CHALLENGE SEED) is the DEPLOY block — the four ways to start a run, the screen's
+# dominant verbs; grp 1+ (SETUP hub, QUIT) is the MORE block — everything that
+# isn't starting a run. Reusing group_header's pill+rule machinery (via
+# _emit_group_caption) means the start verbs stop reading as one undifferentiated
+# phone list once SETUP/QUIT sit under them. Kept separate from group_header so the
+# TITLE grp ids (which collide with OPTS's AUDIO/HAPTICS grp ids) can't cross-wire.
+static func title_group_header(grp: int) -> String:
+	match grp:
+		0: return "DEPLOY"
+		1: return "MORE"
+	return ""
+
+
+# c3-03: the DEPLOY backing-panel rect (start-verb cluster) — single source shared by
+# _draw and the layout test. `plast` is the last grp-0 row; `head_b` is the record
+# header's bottom baseline (title_head_bottom). The panel top is CLAMPED to head_b+1 so
+# it can never ride up into the record-header block whatever record lines are present, and
+# its box is bounded by the SHARED row_rect geometry so it tracks the split + drop-in.
+const TITLE_PANEL_PAD := 5.0
+static func title_deploy_panel(g: Dictionary, plast: int, head_b: float) -> Rect2:
+	var ptop_r := row_rect(g, 0)
+	var pbot_r := row_rect(g, plast)
+	var pytop := maxf(ptop_r.position.y - TITLE_PANEL_PAD, head_b + 1.0)
+	return Rect2(ptop_r.position.x - TITLE_PANEL_PAD, pytop,
+		ptop_r.size.x + TITLE_PANEL_PAD * 2.0,
+		(pbot_r.position.y + pbot_r.size.y + TITLE_PANEL_PAD) - pytop)
+
+
 # c1-09: the single settings-state readout for the OPTIONS screen — DISPLAY mode
 # first, then EVERY accessibility aid with its EXPLICIT ON/OFF state (not just the
 # active ones) so a player reviews the COMPLETE configuration in one place at a
@@ -1590,7 +1645,7 @@ static func a11y_summary(reduce_motion: bool, colorblind: bool, assist: bool, ru
 # icons, header/legend clearance) without standing up a Control, Art, or `main`.
 # `head_bottom` is the y of the lowest header plate the caller actually drew
 # (TITLE varies it by which BEST/CAREER lines are present); other modes pass -1.
-static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictionary:
+static func compute_geometry(mode_id: int, n: int, head_bottom: float, split_at := -1, split_gap := 0.0) -> Dictionary:
 	# c3-02: each column mode keys its first-row y off a header baseline (the derived
 	# TOP_* consts): PAUSE clears its PAUSED+status+RUN# stack, OPTS/REBIND clear their
 	# compact 2-line header (REBIND's <=10-row pages are why that clearance is tighter —
@@ -1616,7 +1671,16 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 		# c3-02: GAP_CEIL never BINDS TITLE — its fit term (band/6 ~= 29px) is always the
 		# smaller of the two, so raising GAP_CEIL (e.g. a BTN resize) can't crush TITLE; the
 		# 6-row cap is what protects the >=20px plate, and test_menu_layout pins that floor.
-		gap = minf(GAP_CEIL, (LEGEND_Y - LEGEND_MARGIN - top) / maxf(1.0, float(n)))
+		# c3-03: reserve the inter-block gap out of the band BEFORE the fit divide, so the
+		# DEPLOY plates keep their full share and never crush below 20px to fund the split.
+		gap = minf(GAP_CEIL, (LEGEND_Y - LEGEND_MARGIN - top - split_gap) / maxf(1.0, float(n)))
+		# c3-03: HARD floor on the pitch — the split gap + 6-row cap can never crush the
+		# plate below TITLE_MIN_PLATE. bh = gap - ROW_INSET_TITLE, so flooring the pitch at
+		# MIN_PLATE + inset guarantees bh >= MIN_PLATE. In every real header/record state the
+		# fit term already clears this (the clamp is inert), so it neither steals the fit's
+		# breathing room nor pushes the last plate past the legend — it's the runtime backstop
+		# that makes the >=20px promise structural, not just cap-plus-comment.
+		gap = maxf(gap, TITLE_MIN_PLATE + ROW_INSET_TITLE)
 	else:
 		# c3-02: every non-TITLE column now shares TITLE's math — spread the band down to
 		# COLUMN_BOTTOM, dividing by n (not n-1) so the last plate's own height is reserved
@@ -1629,7 +1693,10 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 	var inset := ROW_INSET_TITLE if mode_id == Mode.TITLE else ROW_INSET_DEFAULT
 	# bh is minf-capped at BTN.y so a taller GAP_CEIL (after a BTN resize) never grows a
 	# plate past the button art — the pitch breathes, the plate stops at full height.
-	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - inset)), "n": n}   # floored HERE so _draw and the mouse hit-test agree
+	# split_at/split_gap ride along so row_rect (the single geometry source) shifts the
+	# secondary block down by the reserved gap; -1 disables it (every non-TITLE screen).
+	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - inset)), "n": n,
+		"split_at": split_at, "split_gap": split_gap}   # floored HERE so _draw and the mouse hit-test agree
 
 
 # The lowest header-plate baseline TITLE draws, given which record lines show —
@@ -1668,7 +1735,9 @@ static func back_dest(mode_id: int) -> Dictionary:
 static func settle_offset(g: Dictionary, open_t: float, motion: float, max_bottom: float) -> float:
 	if motion < 0.5:
 		return 0.0
-	var last_bottom := floorf(float(g["top"]) + float(int(g["n"]) - 1) * float(g["gap"])) + float(g["bh"])
+	# c3-03: off row_rect so a split secondary block's lower last-row bottom is respected.
+	var last := row_rect(g, int(g["n"]) - 1)
+	var last_bottom := last.position.y + last.size.y
 	return minf((1.0 - open_t) * 12.0, maxf(0.0, max_bottom - last_bottom))
 
 
@@ -1676,7 +1745,18 @@ func _row_geometry() -> Dictionary:
 	# Single source of truth for the button column layout — _draw and the mouse
 	# hit-test must agree or hover selects the wrong row.
 	var head := title_head_bottom(main.best_score > 0, main._life_runs > 0)
-	var g := compute_geometry(mode, _items().size(), head)
+	# c3-03: TITLE reserves a spatial gap between the primary DEPLOY block (grp 0) and the
+	# secondary MORE block — split_at is the first non-primary row. Only TITLE splits; every
+	# other screen passes split_at = -1 (no offset).
+	var split_at := -1
+	if mode == Mode.TITLE:
+		var mi := _menu_items()
+		for k in mi.size():
+			if int(mi[k].get("grp", 0)) > 0:
+				split_at = k
+				break
+	var g := compute_geometry(mode, _items().size(), head, split_at,
+		TITLE_BLOCK_GAP if split_at >= 0 else 0.0)
 	# Drop-in offset lives HERE (after the pure gap math it must not perturb) so a
 	# click during the settle hits the same rows _draw renders. TITLE clears its
 	# y322 legend; every other screen now carries the FOOTER_Y nav legend, so cap
@@ -1710,7 +1790,9 @@ static func hit_row(g: Dictionary, y: float) -> int:
 # rect bottom plus the max grow (3.0 + Art.pulse*1.5, pulse<=1). Pure so the
 # layout test can prove it never reaches FOOTER_Y on the fullest PAUSE/OPTS list.
 static func max_glow_bottom(g: Dictionary) -> float:
-	return float(g["top"]) + float(int(g["n"]) - 1) * float(g["gap"]) + float(g["bh"]) + 4.5
+	# c3-03: off row_rect so the last row's split offset (if any) is included.
+	var last := row_rect(g, int(g["n"]) - 1)
+	return last.position.y + last.size.y + 4.5
 
 
 # c1-12: single source of truth for a row's plate rect — _draw and the mouse
@@ -1718,7 +1800,11 @@ static func max_glow_bottom(g: Dictionary) -> float:
 # horizontal-layout change touches lives in ONE place, not re-hardcoded per call
 # site. Same floorf snapping _draw has always used (crisp pixel-font seams).
 static func row_rect(g: Dictionary, k: int) -> Rect2:
-	return Rect2(Vector2(CENTER_X - BTN.x / 2.0, floorf(float(g["top"]) + float(k) * float(g["gap"]))),
+	# c3-03: rows at/after split_at sit split_gap lower — the DEPLOY/MORE block separation.
+	# Every hit-test/arrow/glow box derives from here, so the gap can't drift off the pixels.
+	var extra := float(g.get("split_gap", 0.0)) if int(g.get("split_at", -1)) >= 0 \
+		and k >= int(g.get("split_at", -1)) else 0.0
+	return Rect2(Vector2(CENTER_X - BTN.x / 2.0, floorf(float(g["top"]) + float(k) * float(g["gap"]) + extra)),
 		Vector2(BTN.x, floorf(float(g["bh"]))))
 
 
@@ -2310,9 +2396,26 @@ func _draw() -> void:
 	var g := _row_geometry()
 	var gap: float = g["gap"]
 	var bh: float = g["bh"]
-	# Open settle: rows drop the last 12px into place as the scrim fades in
-	# (offset applied inside _row_geometry so the mouse hit-test tracks it).
-	var top: float = g["top"]
+	# Open settle: rows drop the last 12px into place as the scrim fades in (offset applied
+	# inside _row_geometry so the mouse hit-test tracks it). Row y's come from row_rect(g, k)
+	# now — the single geometry source — so the c3-03 split offset can't drift a plate off
+	# its hit box.
+	# c3-03: back the primary DEPLOY block (grp 0 start verbs) with a raised panel so the
+	# four ways to start a run read as ONE dominant cluster — the screen's clear focus — not
+	# the top of a flat column that bleeds into the secondary SETUP/QUIT rows. Pure paint
+	# bounded by the SHARED row geometry (row_rect), so it tracks the drop-in settle and never
+	# perturbs the hit-test. Drawn BEFORE the plates so they layer on top of the backing.
+	if mode == Mode.TITLE:
+		var plast := 0
+		for k in mitems.size():
+			if int(mitems[k].get("grp", 0)) == 0:
+				plast = k
+		# c3-03: panel rect via the shared pure helper so _draw and the layout test read
+		# ONE geometry — the test can prove the panel never rides into the record header.
+		var head_b := title_head_bottom(main.best_score > 0, main._life_runs > 0)
+		var panel := title_deploy_panel(g, plast, head_b)
+		draw_rect(panel, Color(PANEL_FILL, PANEL_FILL.a * _open_t))
+		draw_rect(panel, Color(PANEL_BORDER, PANEL_BORDER.a * _open_t), false, 1.0)
 	for k in items.size():
 		# floorf: fractional row pitch (gap 19.25/17.11) put every plate and its
 		# pixel-font label on half-pixels — soft seams on an otherwise crisp UI.
@@ -2326,7 +2429,14 @@ func _draw() -> void:
 		# hierarchy cue without touching the shared row geometry/hit-test.
 		if k > 0 and k < mitems.size() \
 				and mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0):
-			var sy := floorf(top + k * gap) - floorf((gap - bh) / 2.0)
+			# c3-03: CENTER the rule in the ACTUAL gap above this row — derived from the two
+			# plate edges (prev bottom -> this top) via row_rect, the single geometry source.
+			# At the DEPLOY->MORE split that gap is enlarged by split_gap, so measuring the real
+			# edges centers the rule in the WHOLE enlarged band; assuming the plain (gap - bh)
+			# pitch left it riding split_gap/2 too low, hugging the secondary block.
+			var this_top := row_rect(g, k).position.y
+			var prev_bottom := row_rect(g, k - 1).position.y + bh
+			var sy := this_top - floorf((this_top - prev_bottom) / 2.0)
 			# c2-04: the "primary vs secondary" split gets a brighter, full-width rule so
 			# it reads as the dominant boundary. On TITLE that is start-verbs (grp 0) ->
 			# the SETUP hub (grp 1): the four start rows (CAMPAIGN / ENDLESS / DAILY /
@@ -2342,7 +2452,11 @@ func _draw() -> void:
 			else:
 				draw_rect(Rect2(CENTER_X - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
 					DIVIDER_DIM)
-		if mode == Mode.OPTS and (k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0)):
+		# c3-03: OPTS labels its settings sections; TITLE labels its DEPLOY / MORE
+		# IA blocks — both through the shared caption emitter, drawn at each group's
+		# first row so the primary start verbs read as their own named block.
+		if (mode == Mode.OPTS or mode == Mode.TITLE) \
+				and (k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0)):
 			_emit_group_caption(mitems, k, cy)
 		var selected := k == sel
 		var destr: bool = k < mitems.size() and mitems[k].get("destructive", false)
@@ -2416,7 +2530,9 @@ func _draw() -> void:
 			# Breathing selection glow that GLIDES between rows instead of teleporting
 			# (the ease itself runs framerate-independent in _process). Stilled under
 			# REDUCE MOTION — the pause menu is where a motion-sensitive player lives.
-			var ty := top + k * gap
+			# c3-03: off row_rect so the glide target tracks a split row's shifted y (an
+			# un-split top+k*gap would leave the glow behind on the secondary block).
+			var ty := row_rect(g, k).position.y
 			_sel_target = ty
 			if _sel_y < 0.0 or main._motion < 0.5:
 				_sel_y = ty
@@ -3634,7 +3750,11 @@ func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 # screen reads as three labelled sections, not one flat list. Routed through _emit_label
 # so a headless capture test can invoke this REAL caption draw and inspect the exact box.
 func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
-	var ghdr := group_header(mitems[k].get("grp", 0))
+	# c3-03: TITLE names its two IA blocks (DEPLOY / MORE) through the same pill+rule
+	# machinery OPTS uses for its settings sections; every other screen keeps the
+	# settings-block headers. One shared draw path, two caption vocabularies.
+	var ghdr := title_group_header(mitems[k].get("grp", 0)) if mode == Mode.TITLE \
+		else group_header(mitems[k].get("grp", 0))
 	if ghdr == "":
 		return
 	# c2-11: the section HEADERS (AUDIO / ASSIST / ACCESSIBILITY) read at size 10 — not the
