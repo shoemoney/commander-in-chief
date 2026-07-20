@@ -31,7 +31,7 @@ const HALL_RECENCY_Y := 82.0
 # screen, so the retention limit the Hall enforces and the one it advertises can't drift.
 # (The just-banked run is pinned even past it, so paging always reaches it.)
 const HALL_KEEP := 40
-# c2-06: the "1-8 OF N" total-count footer's color — one const so the empty ("0 OF 0"),
+# c2-06: the "1-8 OF N" total-count footer's color — one const so the empty ("0-0 OF 0"),
 # single-page, and multi-page counters all read in the SAME warm gold and can't drift apart.
 const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
 
@@ -1449,8 +1449,10 @@ func _unhandled_input(ev: InputEvent) -> void:
 				_dirty = true
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
-			if mode == Mode.HALL or mode == Mode.HOWTO:
-				_nav(0, wdir)   # HALL cycles the filter, HOWTO turns the page — both live on the horizontal axis, not a 1-row list
+			if mode == Mode.HALL:
+				_nav(wdir, 0)   # c3-06: HALL wheel SCROLLS the board — up/down turns the page so runs past row 8 are reachable by wheel, matching the PREV/NEXT buttons (filters still cycle on left/right)
+			elif mode == Mode.HOWTO:
+				_nav(0, wdir)   # HOWTO turns the page — its sections live on the horizontal axis, not a 1-row list
 			else:
 				_nav(wdir, 0)
 		return
@@ -1471,12 +1473,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 # One nav step — shared by key/dpad/stick presses, the held-stick auto-repeat,
 # and the mouse wheel, so every device gets identical wrap/snap/sfx behavior.
 func _nav(move: int, hmove: int) -> void:
-	# Hall of Fame: left/right cycles the mode filter (ALL / CAMPAIGN / ENDLESS).
-	# Every device funnels here — keyboard A/D + arrows (via _unhandled_input hmove
-	# and the held-key repeat above), pad d-pad, analog stick, and mouse wheel — so
-	# no input class is locked out of the filters the way the pad once wasn't.
-	# Up/down turns the HALL page (the board is deeper than one screen). HALL has
-	# no row list to scroll, so vertical nav owns paging — clamped, never wraps.
+	# Hall of Fame: left/right (keyboard A/D + arrows, pad d-pad/stick) cycles the mode
+	# filter (ALL / CAMPAIGN / ENDLESS); up/down AND the mouse wheel (routed in as move,
+	# c3-06) SCROLL the board a page at a time, so runs past row 8 are reachable on every
+	# device. Every input funnels here so no class is locked out of either axis. Paging is
+	# clamped and never wraps; _hall_pages floors at 1, so even an empty board clamps to
+	# page 0 (pages - 1 == 0), never a negative page.
 	if mode == Mode.HALL and move != 0:
 		var pages := _hall_pages(_hall_rows().size())
 		var np := clampi(_hall_page + move, 0, pages - 1)
@@ -3154,10 +3156,10 @@ func _draw_hall() -> void:
 		_center_text("NO %sRUNS YET \u2014 GO EARN YOUR PLACE" % empty_noun, 190, 11,
 			Color(0.8, 0.84, 0.74))
 		# The count indicator survives the empty state too \u2014 same y306 footer slot the
-		# populated board uses, so switching to a filter with no runs still states the
-		# total ("0 OF 0") rather than dropping the counter entirely. Same warm gold as
-		# the populated counters (HALL_COUNT_COL) so the total reads identically in every state.
-		_center_text("0 OF 0", 306, 11, HALL_COUNT_COL)
+		# populated board uses, and the SAME "start-stop OF total" shape ("0-0 OF 0"), so the
+		# counter never changes form when a filter has no runs. Same warm gold as the
+		# populated counters (HALL_COUNT_COL) so the total reads identically in every state.
+		_center_text("0-0 OF 0", 306, 11, HALL_COUNT_COL)
 	else:
 		for i in range(start, stop):
 			var run: Dictionary = rows[i]
@@ -3230,8 +3232,8 @@ func _draw_hall() -> void:
 			# Art.font() at 11px, centered on x320 (edges 267..373) — inside the PREV/NEXT gap
 			# (prev right edge 238, next left edge 402) with ~29px of clearance on each side.
 			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], 306, 11, HALL_COUNT_COL)
-			# Mouse-clickable page buttons flanking the counter — the mouse had no way to page
-			# (wheel cycles the filter here). Each carries a VERTICAL arrow glyph, not just a
+			# Mouse-clickable page buttons flanking the counter — a second way to page for the
+			# mouse (c3-06: the wheel now scrolls the board too). Each carries a VERTICAL arrow glyph, not just a
 			# word: paging is bound to UP/DOWN (left/right is the filter), so a horizontal cue
 			# would read as the wrong axis. UP = earlier page (0), DOWN = later page (1) — the
 			# same mapping the keyboard/pad up/down nav uses. Symmetric plates frame the

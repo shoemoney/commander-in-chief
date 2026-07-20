@@ -909,17 +909,19 @@ func test_hall_hover_survives_kb_and_wheel_cycle() -> void:
 	mm.relative = Vector2(6.0, 0.0)
 	m._unhandled_input(mm)
 	Runner.T.eq(m._tab_hover, 1, "pointer over CAMPAIGN sets the hover")
-	# Mouse WHEEL cycles the filter while the pointer has NOT moved — hover persists.
+	# c3-06: Mouse WHEEL now SCROLLS the board (turns the page), it no longer cycles the
+	# filter — so on a single-page board it leaves the filter untouched and, with the
+	# pointer parked, must NOT wipe the pointer-owned hover.
 	var wheel := InputEventMouseButton.new()
 	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
 	wheel.pressed = true
 	wheel.position = tabs[1].get_center()
 	m._unhandled_input(wheel)
-	Runner.T.eq(m._hall_filter, 1, "wheel-down cycles ALL -> CAMPAIGN")
-	Runner.T.eq(m._tab_hover, 1, "wheel cycling keeps the pointer's hover (not wiped)")
-	# KEY_D cycles again, pointer still parked — hover STILL reflects the cursor.
+	Runner.T.eq(m._hall_filter, 0, "wheel scrolls the page, does NOT cycle the filter")
+	Runner.T.eq(m._tab_hover, 1, "wheel scrolling keeps the pointer's hover (not wiped)")
+	# KEY_D cycles the filter, pointer still parked — hover STILL reflects the cursor.
 	m._unhandled_input(_key_ev(KEY_D, true))
-	Runner.T.eq(m._hall_filter, 2, "KEY_D cycles CAMPAIGN -> ENDLESS")
+	Runner.T.eq(m._hall_filter, 1, "KEY_D cycles ALL -> CAMPAIGN")
 	Runner.T.eq(m._tab_hover, 1, "keyboard cycling keeps the pointer's hover (not wiped)")
 	m._unhandled_input(_key_ev(KEY_D, false))
 	# And once that hover tab becomes the SELECTED tab, _draw_hall's `not on` gate
@@ -929,6 +931,80 @@ func test_hall_hover_survives_kb_and_wheel_cycle() -> void:
 		"selected tab wins; a coincident hover adds no second cue")
 	m.free()
 	stub.free()
+
+
+# c3-06: the mouse wheel SCROLLS the Hall board (turns the page) so runs past row 8 are
+# reachable by wheel — the item's core claim. Injects 20 runs (3 pages of HALL_PAGE_ROWS),
+# drives the REAL _unhandled_input wheel branch, and asserts each wheel-down advances the
+# page (never cycles the filter), the sliced visible window tracks the page, and the
+# "%d-%d OF %d" footer the counter draws reads correctly for each page — proving rows
+# 9..20 become visible via the wheel alone. Clamps at the last page (never wraps).
+func test_hall_wheel_scrolls_pages_to_reach_rows_past_eight() -> void:
+	var stub := _StubMain.new()
+	for i in 20:
+		stub.hall.append({"mode": "campaign", "streak": i, "sector": i, "won": false})
+	var m := _hall_menu_headless(stub)
+	m._hall_filter = 0
+	m._hall_page = 0
+	var rows: Array = m._hall_rows()
+	Runner.T.eq(rows.size(), 20, "all 20 injected runs are visible under the ALL filter")
+	Runner.T.eq(m._hall_pages(rows.size()), 3, "20 runs paginate into 3 pages of 8")
+	# Page 0: first 8 rows, footer "1-8 OF 20".
+	var w0 := Menu.hall_page_window(0, 20)
+	Runner.T.eq(w0, Vector2i(0, 8), "page 0 slices rows [0,8)")
+	# Wheel DOWN advances to page 1 (rows past 8) — it must NOT touch the filter.
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
+	wheel.pressed = true
+	m._unhandled_input(wheel)
+	Runner.T.eq(m._hall_page, 1, "wheel-down scrolls to page 1 (reaches rows past row 8)")
+	Runner.T.eq(m._hall_filter, 0, "wheel scrolls the page, it does NOT cycle the filter")
+	var w1 := Menu.hall_page_window(1, 20)
+	Runner.T.eq(w1, Vector2i(8, 16), "page 1 slices a DIFFERENT window, rows [8,16)")
+	Runner.T.eq("%d-%d OF %d" % [w1.x + 1, w1.y, 20], "9-16 OF 20", "page 1 footer reads 9-16 OF 20")
+	# The window slices REAL row content: page 1 shows rows the loop never drew on page 0
+	# (each injected run carries a unique "streak", so the first visible run differs).
+	Runner.T.eq(rows[w0.x]["streak"], 0, "page 0's first visible run is run #0")
+	Runner.T.eq(rows[w1.x]["streak"], 8, "page 1's first visible run is run #8 — the row content moved")
+	Runner.T.ok(rows[w1.x]["streak"] != rows[w0.x]["streak"], "the sliced rows differ page-to-page")
+	# Wheel DOWN again -> page 2 (the tail), footer "17-20 OF 20".
+	m._unhandled_input(wheel)
+	Runner.T.eq(m._hall_page, 2, "wheel-down again scrolls to the final page 2")
+	var w2 := Menu.hall_page_window(2, 20)
+	Runner.T.eq(w2, Vector2i(16, 20), "final page slices the short tail [16,20)")
+	Runner.T.eq("%d-%d OF %d" % [w2.x + 1, w2.y, 20], "17-20 OF 20", "final page footer reads 17-20 OF 20")
+	# At the last page the wheel clamps — it never wraps back to page 0.
+	m._unhandled_input(wheel)
+	Runner.T.eq(m._hall_page, 2, "wheel-down at the last page clamps (never wraps)")
+	# Wheel UP walks back toward page 0, still leaving the filter alone.
+	var wup := InputEventMouseButton.new()
+	wup.button_index = MOUSE_BUTTON_WHEEL_UP
+	wup.pressed = true
+	m._unhandled_input(wup)
+	Runner.T.eq(m._hall_page, 1, "wheel-up scrolls back up a page")
+	Runner.T.eq(m._hall_filter, 0, "wheel-up still does not cycle the filter")
+	# Keyboard/pad parity: up/down turns the SAME page the wheel does (KEY_S down, KEY_W up),
+	# clamped, and left/right stays the filter axis — so no device is locked out of scrolling.
+	m._hall_page = 0
+	m._unhandled_input(_key_ev(KEY_S, true))
+	Runner.T.eq(m._hall_page, 1, "KEY_S (down) turns to the next page, like the wheel")
+	Runner.T.eq(m._hall_filter, 0, "vertical paging leaves the filter alone")
+	m._unhandled_input(_key_ev(KEY_S, false))
+	m._unhandled_input(_key_ev(KEY_W, true))
+	Runner.T.eq(m._hall_page, 0, "KEY_W (up) turns back to the previous page")
+	m._unhandled_input(_key_ev(KEY_W, false))
+	m.free()
+	stub.free()
+	# Empty board: _hall_pages floors at 1, so a wheel scroll can never clamp the page
+	# negative (pages - 1 == 0). Guards the paging math against a hall with zero runs.
+	var estub := _StubMain.new()
+	var em := _hall_menu_headless(estub)
+	em._hall_page = 0
+	Runner.T.eq(em._hall_pages(em._hall_rows().size()), 1, "an empty hall is still 1 page")
+	em._unhandled_input(wheel)
+	Runner.T.eq(em._hall_page, 0, "wheel-down on an empty board stays on page 0, never negative")
+	em.free()
+	estub.free()
 
 
 # c1-05: mouse-click selection stays correct for EVERY tab rect (the pre-existing
