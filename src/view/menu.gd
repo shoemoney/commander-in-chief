@@ -146,23 +146,45 @@ const FOOTER_Y := 341.0
 const CANVAS_WIDTH := 640.0     # design-space canvas size (the view scales this up)
 const CANVAS_HEIGHT := 360.0
 const CENTER_X := CANVAS_WIDTH / 2.0   # horizontal centre (button column + centred text)
-# Per-mode y of the FIRST row plate (compute_geometry). PAUSE sits under a lone
-# "PAUSED" header; OPTS/REBIND under their compact 2-line headers; the SETUP/INFO/
-# DISP hubs under a lone header; TITLE lists clear the record block (many rows use
-# the taller floor).
-const TOP_PAUSE := 118.0
-const TOP_OPTS := 102.0        # OPTS + REBIND (paginated <=10-row tabs)
-const TOP_SUBHUB := 120.0      # SETUP / INFO / DISP hubs
-const TOP_GENERIC_SHORT := 150.0   # <=4-row fallback list (no per-mode top)
-const TOP_GENERIC_MANY := 156.0    # >4-row fallback list (clears the record block)
+# Per-mode y of the FIRST row plate (compute_geometry). c3-02: every top is now
+# DERIVED as (the baseline of the lowest header line that mode draws) + a clearance,
+# mirroring TOP_SUBHUB — no mode carries a bare top literal any more. The header
+# baselines (PAUSE_FOOTNOTE_Y, OPTS_SUBLINE_Y, HUB_SUBTITLE_Y) are declared below;
+# GDScript folds the forward const reference. Nudging a header baseline now reflows
+# that screen's row column with it instead of drifting off a hand-tuned number.
+# Two clearances: the roomy HEADER_CLEAR for the sparse hubs/PAUSE, and the tighter
+# HEADER_CLEAR_COMPACT for the DENSE paginated OPTS/REBIND pages — a full HEADER_CLEAR
+# there would push their 10th plate below the >=20px readable floor (bounded by the
+# plate floor, not taste).
+const HEADER_CLEAR := 16.0         # gap a sparse column keeps below the header block it seats under
+const HEADER_CLEAR_COMPACT := 8.0  # tighter clear for the dense <=10-row OPTS/REBIND pages
+const TOP_PAUSE := PAUSE_FOOTNOTE_Y + HEADER_CLEAR      # 130 — under PAUSED + status + RUN# footnote
+const TOP_OPTS := OPTS_SUBLINE_Y + HEADER_CLEAR_COMPACT # 102 — OPTS + REBIND under their compact 2-line header
+const TOP_SUBHUB := HUB_SUBTITLE_Y + HEADER_CLEAR       # 120 — SETUP / INFO / DISP hubs
+# HALL/HOWTO/HIDDEN never draw the shared row column (they return early with a lone
+# BACK button), so the generic fallback is a defensive default only — ONE derived top
+# (no <=4 / >4 row-count branch) clearing a generic header at the hub rhythm.
+const TOP_GENERIC := TOP_SUBHUB
 const TITLE_HEAD_MARGIN := 2.0     # TITLE seats its column this far below the drawn header block
 const BOTTOM_BOUND := 310.0        # y the last row / BACK plate clears (leaves the footer legend room)
 const LEGEND_Y := 322.0            # TITLE input-legend plate top (the column band ends 4px above it)
 const LEGEND_H := 34.0             # ...and its height
 const ROW_INSET_TITLE := 2.0       # TITLE inter-row inset (reclaimed band => taller plates)
 const ROW_INSET_DEFAULT := 3.0     # inter-row inset on every other screen
-const GAP_MAX := 46.0              # row-pitch ceiling (short lists don't stretch past this)
-const GAP_MAX_MANY := 30.0         # tighter ceiling once a list exceeds 4 rows
+# c3-02: ONE row-pitch ceiling, derived from the plate height BTN.y so a button resize
+# reflows the rhythm instead of drifting from a hand-tuned literal. A full-height plate
+# plus ROW_BREATHING is the widest pitch worth drawing — past it a taller pitch only
+# punches dead air between rows, so short lists clamp here rather than ballooning to the
+# old 46, and dense lists no longer snap to a separate tighter ceiling at the 4->5 row
+# boundary (the crushed-plate / dead-void discontinuity this item kills).
+const ROW_BREATHING := 10.0        # dead band a full-height plate keeps above the next row
+const GAP_CEIL := BTN.y + ROW_BREATHING   # 46 — the single row-pitch ceiling
+# c3-02: the y a non-TITLE column's LAST plate BOTTOM aims for. Derived from the footer
+# strip (not a bare 310) so the selected-row glow (+4.5) always clears FOOTER_Y with
+# GLOW_CLEAR slack, and the gap math can divide the band by n — reserving that final
+# plate's own height, exactly as TITLE already does against its legend.
+const GLOW_CLEAR := 8.0            # slack the last plate's glow keeps above the footer strip
+const COLUMN_BOTTOM := FOOTER_Y - GLOW_CLEAR   # 333 — last non-TITLE plate bottom aims here
 const LEGEND_MARGIN := 4.0         # clearance the TITLE column keeps above LEGEND_Y
 const FOOTER_H := 17.0             # height of the shared SELECT/BACK footer-legend plate
 const BACK_H_RATIO := 0.7          # BACK plate is BTN scaled to this fraction of full row height
@@ -175,6 +197,11 @@ const REBIND_TAB_GAP := 6.0        # gap between REBIND tab / device plates
 const HUB_HEADER_Y := 84.0         # INFO / DISP / SETUP header title baseline
 const HUB_SUBTITLE_Y := 104.0      # ...and their subtitle line
 const CONTENT_TITLE_Y := 38.0      # HALL / HOWTO content-screen title baseline
+const PAUSE_HEADER_Y := 78.0       # PAUSED title baseline
+const PAUSE_SUBTITLE_Y := 100.0    # PAUSE run-status subline
+const PAUSE_FOOTNOTE_Y := 114.0    # PAUSE RUN# footnote — the lowest header line TOP_PAUSE clears
+const OPTS_TITLE_Y := 80.0         # OPTIONS title baseline
+const OPTS_SUBLINE_Y := 94.0       # OPTIONS a11y-summary subline — the lowest header line TOP_OPTS clears
 # Horizontal half-padding of the small dark plates behind TITLE's byline / tagline /
 # BEST / CAREER lines (a plate spans measured_text_w + 2x this).
 const PLATE_PAD_SM := 4.0
@@ -1564,20 +1591,16 @@ static func a11y_summary(reduce_motion: bool, colorblind: bool, assist: bool, ru
 # `head_bottom` is the y of the lowest header plate the caller actually drew
 # (TITLE varies it by which BEST/CAREER lines are present); other modes pass -1.
 static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictionary:
-	var many := n > 4
-	# OPTS/SETUP get their own top: the 156 floor exists to clear TITLE's record
-	# block, but they carry only a lone header at ~y88 — 120 seats rows right
-	# under it at the full gap.
-	# c1-09: OPTS is settings-only now (7 settings + RESET DEFAULTS + BACK = 9 rows),
-	# under a compact 2-line header — top 102 keeps that count at a >=20px plate.
-	# SETUP and INFO carry only a few rows, so 120 seats them right under a lone header.
-	# c1-18: REBIND is paginated into category tabs of <=10 rows (8 verbs + RESET + BACK),
-	# so it seats at 102 like OPTS and every plate clears the >=20px readable floor — a tab
-	# header strip sits above at y42-57 and the title/subline at y66-78.
+	# c3-02: each column mode keys its first-row y off a header baseline (the derived
+	# TOP_* consts): PAUSE clears its PAUSED+status+RUN# stack, OPTS/REBIND clear their
+	# compact 2-line header (REBIND's <=10-row pages are why that clearance is tighter —
+	# a full HEADER_CLEAR would crush the 10th plate under 20px), the SETUP/INFO/DISP
+	# hubs clear their lone subtitle. The old >4-row `many` tier is retired: the only
+	# modes that fall through to TOP_GENERIC (HIDDEN/HALL/HOWTO) return early without ever
+	# drawing this column, so a row-count branch there was dead weight.
 	var top := TOP_PAUSE if mode_id == Mode.PAUSE \
-		else (TOP_OPTS if mode_id == Mode.OPTS \
-		else (TOP_OPTS if mode_id == Mode.REBIND \
-		else (TOP_SUBHUB if (mode_id == Mode.SETUP or mode_id == Mode.INFO or mode_id == Mode.DISP) else (TOP_GENERIC_SHORT if not many else TOP_GENERIC_MANY))))
+		else (TOP_OPTS if (mode_id == Mode.OPTS or mode_id == Mode.REBIND) \
+		else (TOP_SUBHUB if (mode_id == Mode.SETUP or mode_id == Mode.INFO or mode_id == Mode.DISP) else TOP_GENERIC))
 	var gap: float
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
@@ -1590,14 +1613,22 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float) -> Dictio
 		# c2-04: with TITLE trimmed to 6 rows (4 start verbs + SETUP + QUIT), this same
 		# math seats ~30px full-height plates (bh caps at BTN.y=36) with 16px icons even
 		# with the CAREER header line present — no per-count special case needed.
-		gap = minf(GAP_MAX, (LEGEND_Y - LEGEND_MARGIN - top) / maxf(1.0, float(n)))
+		# c3-02: GAP_CEIL never BINDS TITLE — its fit term (band/6 ~= 29px) is always the
+		# smaller of the two, so raising GAP_CEIL (e.g. a BTN resize) can't crush TITLE; the
+		# 6-row cap is what protects the >=20px plate, and test_menu_layout pins that floor.
+		gap = minf(GAP_CEIL, (LEGEND_Y - LEGEND_MARGIN - top) / maxf(1.0, float(n)))
 	else:
-		# PAUSE/OPTS: bottom clears the y~322 legend strip — at 310 the QUIT row
-		# sat flush against it (6/8 panel reviewers, unanimous top item).
-		gap = minf(GAP_MAX_MANY if many else GAP_MAX, (BOTTOM_BOUND - top) / maxf(1.0, float(n - 1)))
+		# c3-02: every non-TITLE column now shares TITLE's math — spread the band down to
+		# COLUMN_BOTTOM, dividing by n (not n-1) so the last plate's own height is reserved
+		# and its glow clears the footer. One GAP_CEIL for all counts: dense lists shrink
+		# via the fit term (they never reach the ceiling), sparse lists clamp AT it, so the
+		# plate height no longer jumps between the old 30 / 46 tiers at the 4->5 boundary.
+		gap = minf(GAP_CEIL, (COLUMN_BOTTOM - top) / maxf(1.0, float(n)))
 	# TITLE plates take a 2px inter-row inset (vs 3px elsewhere) so the reclaimed
 	# band converts to taller clickable plates, not just wider dead gaps.
 	var inset := ROW_INSET_TITLE if mode_id == Mode.TITLE else ROW_INSET_DEFAULT
+	# bh is minf-capped at BTN.y so a taller GAP_CEIL (after a BTN resize) never grows a
+	# plate past the button art — the pitch breathes, the plate stops at full height.
 	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - inset)), "n": n}   # floored HERE so _draw and the mouse hit-test agree
 
 
@@ -2258,7 +2289,7 @@ func _draw() -> void:
 		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO", HUB_SUBTITLE_Y, 8,
 			SUBTITLE_COL)
 	else:
-		_center_text("PAUSED", 78, 22, HEADER_COL)
+		_center_text("PAUSED", PAUSE_HEADER_Y, 22, HEADER_COL)
 		# Pause doubles as a status check — the run so far.
 		if main.sim != null:
 			var s: SimWorld = main.sim
@@ -2269,9 +2300,9 @@ func _draw() -> void:
 			var line := "WAVE %d" % s.wave if s.mode == "endless" \
 				else "SECTOR %d/5  ·  %dm" % [mini(opened + 1, 5), -Fixed.to_int(s.camera_top) / 10]
 			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
-				100, 10, SUBTITLE_COL)
+				PAUSE_SUBTITLE_Y, 10, SUBTITLE_COL)
 			if main._current_seed > 0:
-				_center_text("RUN #%d" % main._current_seed, 114, 8, RUN_FOOTNOTE_COL)
+				_center_text("RUN #%d" % main._current_seed, PAUSE_FOOTNOTE_Y, 8, RUN_FOOTNOTE_COL)
 	var mitems := _menu_items()   # dicts: label + destructive flag for pre-press tinting
 	var items := _items()
 	# Fit-to-height layout via the shared helper (the mouse hit-test reads the
@@ -3354,11 +3385,11 @@ func _draw_opts_header() -> void:
 	# Centering the icon on that box (top y64, bottom the baseline) aligns it pixel-perfect
 	# with the caps instead of floating a hair high off the whole-line ascent metric.
 	var cap_h := 16.0
-	var cap_top := 80.0 - cap_h
+	var cap_top := OPTS_TITLE_Y - cap_h
 	var iy := cap_top + (cap_h - isz) / 2.0
 	var ix := (CENTER_X - titlew / 2.0) - 6.0 - isz
 	_emit_tex("mi_settings", Rect2(ix, iy, isz, isz), Color(1, 1, 1, 0.9))
-	_center_text("OPTIONS", 80, 18, HEADER_COL)
+	_center_text("OPTIONS", OPTS_TITLE_Y, 18, HEADER_COL)
 	# After RESET DEFAULTS fires, the summary line briefly becomes a success banner;
 	# otherwise it's the single place to review live settings state — the DISPLAY mode
 	# (no on-screen toggle) and EVERY accessibility aid's explicit ON/OFF state.
@@ -3367,16 +3398,16 @@ func _draw_opts_header() -> void:
 		# full alpha (no fade ramp) — captured pre-reset, since the reset itself turns
 		# motion back on. It still clears on its timer; only the animation is snapped.
 		var ba := clampf(_reset_flash / 0.6, 0.0, 1.0) if _reset_flash_anim else 1.0
-		_center_text("DEFAULTS RESTORED", 94, 9, Color(0.55, 0.95, 0.5, ba))
+		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 9, Color(0.55, 0.95, 0.5, ba))
 	elif _menu_items()[sel]["id"] == "reset_defaults":
 		# When focus is on RESET DEFAULTS, the summary line names EXACTLY what the
 		# two-press confirm will wipe — every settings group at once — so the player
 		# knows the blast radius BEFORE the second press, not just "this is destructive".
 		_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / DISPLAY TO DEFAULTS",
-			94, 8, WARN_COL)
+			OPTS_SUBLINE_Y, 8, WARN_COL)
 	else:
 		_center_text(a11y_summary(main._motion < 0.5, main.colorblind, main._assist,
-			main._rumble_on, main._fullscreen), 94, 8, SUBTITLE_COL)
+			main._rumble_on, main._fullscreen), OPTS_SUBLINE_Y, 8, SUBTITLE_COL)
 
 
 # Trim a label to max_w with a trailing ellipsis (raw clipping ate whole glyphs
