@@ -532,6 +532,16 @@ func _draw() -> void:
 	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, 262.0, RIGHT - 2.0)
 	_draw_plate(panel_h)
 
+	# c3-11: the CB/RM accessibility pips are part of the ONE cohesive HUD panel, not a floating
+	# afterthought. Draw them here -- right after the plate is (re)built onto _plate_ci and BEFORE the
+	# overlappable player rows. Two DISTINCT guards keep them readable, NOT z-order alone:
+	#   * the scrim backing appends onto the persistent plate cluster (z:-1), so it is unconditionally
+	#     behind every row -- an ammo/grenade chip can never overpaint it.
+	#   * the glyph paints on `self`, the SAME layer as the rows and just before them, so it survives
+	#     only because _corner_reserve reserves the pip corner out of every row (_fit_full) -- no chip
+	#     is ever laid into that corner to occlude it.
+	_accessibility_pips()
+
 	# Player rows.
 	var ry := player_rows_top(sim)
 	var prow := 0.0
@@ -598,7 +608,6 @@ func _draw() -> void:
 		ry += 16.0
 	_prow_r = prow
 
-	_accessibility_pips()
 	_verb_legend()
 
 
@@ -1260,10 +1269,11 @@ func _accessibility_pips() -> void:
 	# full-alpha glyphs sit on the opaque scrim for max contrast; a pip whose label can't fit the
 	# band at all is SUPPRESSED (below the supported minimum) rather than drawn spilling off-edge.
 	# c2-07: each pip's contrast backing is the opaque _pip_plate scrim below (PIP_SCRIM, the SAME
-	# dark tray the low-ammo _mag_bar warning now draws) drawn BEFORE the glyph so the light-on-dark
-	# CB/RM label holds over bright snow/desert/explosion flash instead of washing out. _pip_plate
-	# raw-draws its rect (not the _emit_bg_rect seam) precisely because these pips live in the reserved
-	# corner PAST _fit_full. c2-18: the render set + colors come from _shown_pips, the SAME source
+	# dark tray the low-ammo _mag_bar warning now draws), which holds the light-on-dark CB/RM label
+	# over bright snow/desert/explosion flash instead of washing out. c3-11: that scrim now emits onto
+	# the z:-1 _plate_ci cluster, so the z-order ALONE keeps it behind every player row. The glyph,
+	# drawn on `self` just before the rows, stays legible by a SEPARATE guard -- _corner_reserve keeps
+	# the rows out of the pip corner (see _draw) -- not by z-order. c2-18: the render set + colors come from _shown_pips, the SAME source
 	# _draw_plate sizes the docking header off, so plate coverage can't drift from what's painted.
 	var pips := _shown_pips(band)
 	# c2-18: docking is a whole-frame property computed HERE and PASSED to _pip_plate (not stashed in
@@ -1382,15 +1392,28 @@ func _pip_plate(txt: String, py: float, band: Vector2, docked := true) -> float:
 	var r := _pip_plate_rect(band.y, w, py, band.x)
 	# c2-07: THE pip contrast backing. Near-opaque PIP_SCRIM (the SAME constant the low-ammo mag
 	# bar and the warning-numeral shadow now use) so the CB/RM glyph holds over bright snow/desert
-	# or an explosion flash, not just grass. Raw draw_rect (not the _emit_bg_rect seam) because the
-	# pips live in the reserved corner PAST _fit_full, where the seam's within-edge capture check
-	# would reject them; the plate is verified instead by _PipCaptureHud's own _pip_plate override.
-	draw_rect(r, PIP_SCRIM)
+	# or an explosion flash, not just grass. c3-11: emitted onto the z:-1 _plate_ci cluster (NOT a
+	# loose draw_rect on `self`, and NOT the _emit_bg_rect seam whose within-edge capture check would
+	# reject a corner PAST _fit_full) so the backing is part of the ONE persistent HUD panel and sits
+	# strictly BEHIND the player rows -- a chip can never overpaint it. Geometry is verified by
+	# _PipCaptureHud's own _pip_plate override.
+	RenderingServer.canvas_item_add_rect(_plate_ci, r, PIP_SCRIM)
 	if _pip_hairline_shown(docked):
-		# The 1px hairline is stroked CENTERED on its rect edge, so drawing it on `r` would push half a
-		# pixel past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
-		draw_rect(r.grow(-0.5), PIP_HAIRLINE, false, 1.0)
+		# The 1px hairline is stroked CENTERED on its rect edge, so tracing `r` would push half a pixel
+		# past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
+		_draw_plate_rect_outline(r.grow(-0.5), PIP_HAIRLINE)
 	return _pip_x(band.y, w, band.x)
+
+
+## c3-11: stroke a 1px rectangle outline onto the z:-1 _plate_ci cluster (a closed 5-point polyline).
+## Factored out of _pip_plate's hairline so the rect-outline-on-_plate_ci pattern is reusable and the
+## _pip_plate body stays focused. The stroke is CENTERED on each edge, so a caller needing the whole
+## stroke to stay inside a band must inset `rect` before calling (the pip hairline grows -0.5).
+func _draw_plate_rect_outline(rect: Rect2, col: Color) -> void:
+	RenderingServer.canvas_item_add_polyline(_plate_ci, PackedVector2Array([
+		rect.position, Vector2(rect.end.x, rect.position.y), rect.end,
+		Vector2(rect.position.x, rect.end.y), rect.position,
+	]), PackedColorArray([col]), 1.0)
 
 
 func _fuel_dial(t: Dictionary, x: float, y: float) -> float:
