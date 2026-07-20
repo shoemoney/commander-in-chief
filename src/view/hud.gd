@@ -529,20 +529,19 @@ func _draw() -> void:
 	var strip_r := 0.0
 	if _shop_eligible(sim):
 		strip_r = _draw_shop_strip(sim)
-	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, 262.0, RIGHT - 2.0)
-	_draw_plate(panel_h)
 
-	# c3-11: the CB/RM accessibility pips are part of the ONE cohesive HUD panel, not a floating
-	# afterthought. Draw them here -- right after the plate is (re)built onto _plate_ci and BEFORE the
-	# overlappable player rows. Two DISTINCT guards keep them readable, NOT z-order alone:
-	#   * the scrim backing appends onto the persistent plate cluster (z:-1), so it is unconditionally
-	#     behind every row -- an ammo/grenade chip can never overpaint it.
-	#   * the glyph paints on `self`, the SAME layer as the rows and just before them, so it survives
-	#     only because _corner_reserve reserves the pip corner out of every row (_fit_full) -- no chip
-	#     is ever laid into that corner to occlude it.
-	_accessibility_pips()
+	# c3-11 / c3-15: the CB/RM pip GLYPHS paint on `self` HERE -- just BEFORE the player rows, exactly
+	# as c3-11 requires (the glyph is guarded by _corner_reserve keeping every row out of the pip
+	# corner, NOT by z-order). Their dark scrims are emitted separately by _pip_scrims BELOW, once the
+	# plate is sized from THIS frame's rows -- so the glyph keeps its pre-rows position while the plate
+	# no longer lags the content by a frame.
+	_pip_glyphs()
 
-	# Player rows.
+	# Player rows. c3-15: drawn BEFORE the plate is sized and emitted, so _plate_r is measured from
+	# THIS frame's widest player row (_prow_r) rather than the previous frame's. A newly appearing
+	# buff/revive/tank chip no longer overhangs the scavenged-metal backing for one frame. Rows paint
+	# on `self`; the plate is the z:-1 canvas item, so it still composites behind them regardless of
+	# this draw order.
 	var ry := player_rows_top(sim)
 	var prow := 0.0
 	for i in sim.players.size():
@@ -607,6 +606,19 @@ func _draw() -> void:
 		prow = maxf(prow, px)
 		ry += 16.0
 	_prow_r = prow
+
+	# Scavenged-metal panel — sized now that THIS frame's row0 (row_r), shop strip (strip_r) and
+	# player rows (_prow_r) widths are all known, so the backing never lags the content by a frame.
+	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, 262.0, RIGHT - 2.0)
+	_draw_plate(panel_h)
+
+	# c3-11 / c3-15: the pips' dark contrast SCRIMS dock onto the persistent plate cluster (z:-1) HERE,
+	# now that _draw_plate has (re)built the panel -- so each scrim sits ATOP the panel texture and
+	# unconditionally BEHIND every player row. The glyphs themselves were already painted on `self`
+	# just before the rows (see _pip_glyphs above), so the c3-11 order is intact; the scrim and glyph
+	# live on different canvas items (z:-1 plate vs `self`), so the plate always composites behind the
+	# glyph regardless of which pass emitted first.
+	_pip_scrims()
 
 	_verb_legend()
 
@@ -1263,27 +1275,46 @@ static func verb_legend_primitives(y: float) -> Array:
 
 ## Tiny top-right corner pips confirming REDUCE MOTION / COLORBLIND are live —
 ## both toggles reshape the whole HUD but had no on-screen state readout.
+## c3-15: the two pip passes are emitted at DIFFERENT points of _draw (glyphs on `self` just before
+## the player rows; scrims onto the z:-1 plate after it is sized from this frame's rows), so the plate
+## no longer lags the row content by a frame while the c3-11 glyph-before-rows order is preserved. This
+## whole-method entry composes both passes in the original order so the c1-11 capture test still drives
+## the full glyph+scrim emission through one call. Both passes derive from the SAME _pip_bounds/
+## _shown_pips set and the SAME pure _pip_x anchor, so a glyph and its scrim can never drift apart.
 func _accessibility_pips() -> void:
+	_pip_glyphs()
+	_pip_scrims()
+
+
+## c3-15: the light-on-dark CB/RM glyphs on `self`, drawn just before the player rows (the c3-11
+## position). full-alpha glyphs sit on the opaque scrim _pip_scrims emits for max contrast; a pip whose
+## label can't fit the band at all is SUPPRESSED (below the supported minimum) rather than drawn
+## spilling off-edge. The glyph is right-anchored on the SAME pure _pip_x the scrim is built around
+## (see _pip_plate), so text and backing stay locked without threading the scrim emit through here.
+func _pip_glyphs() -> void:
 	var acc_y := PIP_TOP        # c2-18: shared with _draw_plate's header sizing so the plate covers the stack
 	var band := _pip_bounds()   # (left, right) usable band in HUD-local space; pulls in when cropped
-	# full-alpha glyphs sit on the opaque scrim for max contrast; a pip whose label can't fit the
-	# band at all is SUPPRESSED (below the supported minimum) rather than drawn spilling off-edge.
-	# c2-07: each pip's contrast backing is the opaque _pip_plate scrim below (PIP_SCRIM, the SAME
-	# dark tray the low-ammo _mag_bar warning now draws), which holds the light-on-dark CB/RM label
-	# over bright snow/desert/explosion flash instead of washing out. c3-11: that scrim now emits onto
-	# the z:-1 _plate_ci cluster, so the z-order ALONE keeps it behind every player row. The glyph,
-	# drawn on `self` just before the rows, stays legible by a SEPARATE guard -- _corner_reserve keeps
-	# the rows out of the pip corner (see _draw) -- not by z-order. c2-18: the render set + colors come from _shown_pips, the SAME source
-	# _draw_plate sizes the docking header off, so plate coverage can't drift from what's painted.
+	for pip in _shown_pips(band):
+		var label: String = pip[0]
+		_text(label, _pip_x(band.y, _tw(label), band.x), acc_y, pip[1])
+		acc_y += PIP_STEP
+
+
+## c2-07 / c3-11: each pip's contrast backing is the opaque _pip_plate scrim (PIP_SCRIM, the SAME dark
+## tray the low-ammo _mag_bar warning draws), which holds the CB/RM label over bright snow/desert/
+## explosion flash instead of washing out. c3-11: the scrim emits onto the z:-1 _plate_ci cluster, so
+## z-order ALONE keeps it behind every player row; c3-15 emits it AFTER _draw_plate so it sits atop the
+## panel texture. c2-18: the render set + colors come from _shown_pips, the SAME source _draw_plate
+## sizes the docking header off, so plate coverage can't drift from what's painted; docking is a whole-
+## frame property computed here and PASSED to _pip_plate (docked pips drop the framing hairline, blended
+## into the plate; an undocked pip over bare terrain keeps it).
+func _pip_scrims() -> void:
+	var acc_y := PIP_TOP
+	var band := _pip_bounds()
 	var pips := _shown_pips(band)
-	# c2-18: docking is a whole-frame property computed HERE and PASSED to _pip_plate (not stashed in
-	# order-dependent member state) — _draw_plate extends the header EXACTLY when pips render, so any
-	# pip we draw is on the plate. Docked pips drop the framing hairline (the scrim, blended into the
-	# plate, still backs the glyph); an undocked pip over bare terrain would keep it.
 	var docked := not pips.is_empty()
 	for pip in pips:
-		var label: String = pip[0]
-		_text(label, _pip_plate(label, acc_y, band, docked), acc_y, pip[1])
+		_pip_plate(pip[0], acc_y, band, docked)
 		acc_y += PIP_STEP
 
 
