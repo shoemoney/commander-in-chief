@@ -44,6 +44,7 @@ var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
 var _howto_page := 0    # c2-02: which HOW-TO-PLAY page (0 BASIC / 1 ENEMIES / 2 ENDLESS); left/right/wheel or tab-click pages it
 const HOWTO_TABS := ["BASIC", "ENEMIES", "ENDLESS"]  # c2-02: the three HOW-TO-PLAY pages, split so no page crams rows onto the BACK plate
+const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; existence gates the INFO menu row
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
 var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
 var _open_t := 0.0      # menu-open settle envelope (backdrop fade + row drop-in)
@@ -80,7 +81,7 @@ var _key_rep := 0.0     # countdown to the next held-key auto-repeat step
 var _key_hmove := 0     # held ◄/► key direction — auto-repeats the volume step (volume rows only)
 var _key_hrep := 0.0    # countdown to the next held-◄/► auto-repeat step
 var _lockout := 0.0     # post-disconnect confirm lockout (flailing pad guard)
-var _has_replay := false   # user://last_run.replay existence, sampled in open()
+var _has_replay := false   # cache: does user://last_run.replay exist — sampled on INFO open
 var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover cue parity with rows
 var _page_hover := -1   # hall PREV/NEXT button under the mouse (0 = prev, 1 = next, -1 = none) — pointer-owned
 var _page_press := 0.0  # hall page-button press flash (decays in _process) — click feedback beyond dimming
@@ -420,7 +421,10 @@ func open(m: int, select_id := "") -> void:
 	elif m == Mode.HOWTO:
 		_howto_page = 0   # c2-02: always open the help on the BASIC page
 		_tab_hover = -1   # c2-02: HOWTO shares _tab_hover with HALL — clear it so a hover index left on the OTHER screen's tab row can't light a HOWTO tab (open() clears it above too; explicit here for the shared-state contract)
-	_has_replay = FileAccess.file_exists("user://last_run.replay")   # hoisted: _menu_items ran this disk stat ~180x/s while TITLE was open
+	elif m == Mode.INFO:
+		# Cache the replay-file existence once per INFO open so _menu_items() reads
+		# a flag instead of running this disk stat every frame the screen is drawn.
+		_has_replay = FileAccess.file_exists(REPLAY_PATH)
 	# Any menu opening freezes the sim mid-hold — cancel open supply wheels, or a
 	# hold+pick released WHILE paused commits a stale buy on the first resumed
 	# frame (the release the player meant as an abort).
