@@ -86,6 +86,7 @@ var _page_hover := -1   # hall PREV/NEXT button under the mouse (0 = prev, 1 = n
 var _page_press := 0.0  # hall page-button press flash (decays in _process) — click feedback beyond dimming
 var _page_press_side := -1  # which page button flashed (0 = prev, 1 = next); cleared when the flash fades
 var _last_ptr := Vector2(-1.0, -1.0)  # last mouse position seen — lets a page/filter change re-evaluate the hover under a STILL cursor
+var _dirty := true  # c2-09: a visible field changed since the last _draw — set at every mutation site (input handlers + the _process animators) and cleared in _draw; the _process gate turns it into the one queue_redraw(). Starts true so the first frame paints.
 
 # Row ids that flip on left/right without a confirm press.
 # c1-19: DISPLAY is no longer a single overloaded ladder here — the OPTS "display" row
@@ -224,27 +225,35 @@ func _process(delta: float) -> void:
 		# must not end a run on a press that lands minutes later.
 		if _confirm >= 0:
 			_confirm_t -= delta
+			_dirty = true   # the draining confirm-countdown bar
 			if _confirm_t <= 0.0:
-				_confirm = -1
+				_disarm_confirm()   # c2-09: clears index + countdown together
 		# c1-09: the "DEFAULTS RESTORED" success banner fades after RESET DEFAULTS fires.
-		_reset_flash = maxf(0.0, _reset_flash - delta)
-		_seed_flash = maxf(0.0, _seed_flash - delta * 2.0)
+		if _reset_flash > 0.0:
+			_reset_flash = maxf(0.0, _reset_flash - delta)
+			_dirty = true
+		if _seed_flash > 0.0:
+			_seed_flash = maxf(0.0, _seed_flash - delta * 2.0)
+			_dirty = true
 		# c1-18: the REBIND swap/clear/reserved notice fades on its OWN timer, wholly
 		# independent of _set_pulse — every frame the menu is open, so a "CANCELLED" or
 		# "FIXED MENU KEY" notice always clears after ~2.5s (it can never persist forever).
 		if _rebind_msg_t > 0.0:
 			_rebind_msg_t = maxf(0.0, _rebind_msg_t - delta)
+			_dirty = true
 			if _rebind_msg_t <= 0.0:
 				_rebind_msg = ""
 		if _seed_armed:
 			_seed_armed_t -= delta   # c1-14: a stale "PRESS AGAIN" arm auto-disarms (mirrors _confirm_t)
 			if _seed_armed_t <= 0.0:
 				_seed_armed = false
-				queue_redraw()   # the armed hint reverts to the plain preview — repaint it
+				_dirty = true   # the armed hint reverts to the plain preview — repaint it
 		# c1-14: keep the CHALLENGE SEED preview fresh OFF the draw path, but THROTTLE
 		# the clipboard sample to ~5x/s instead of once per frame (60x/s).
 		_update_seed_preview(delta)
-		_lockout = maxf(0.0, _lockout - delta)
+		if _lockout > 0.0:
+			_lockout = maxf(0.0, _lockout - delta)
+			_dirty = true
 		# Tab flash is pure animation — reduce-motion snaps it off entirely.
 		_filter_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _filter_pulse - delta * 3.0)
 		# Page-button press flash decays like the tab pulse; reduce-motion snaps it off.
@@ -257,7 +266,9 @@ func _process(delta: float) -> void:
 		# reduce-motion just renders it as a static border (no grow) in _draw.
 		# Slow decay (*2.0 ~= 0.5s visible) so the confirm holds long enough to catch,
 		# not a ~0.29s blink a glancing player misses.
-		_set_pulse = maxf(0.0, _set_pulse - delta * 2.0)
+		if _set_pulse > 0.0:
+			_set_pulse = maxf(0.0, _set_pulse - delta * 2.0)
+			_dirty = true
 		if _set_pulse <= 0.0:
 			_set_pulse_row = -1
 		# Held-stick auto-repeat: first step fired in _unhandled_input, then
@@ -291,16 +302,55 @@ func _process(delta: float) -> void:
 		# Exp-decay easing: framerate-independent (per-frame lerpf ran ~2.4x
 		# faster on a 144Hz display). Reduce-motion snaps both instantly.
 		if main._motion < 0.5:
-			_open_t = 1.0
-			if _sel_target >= 0.0:
+			# Reduce motion snaps both in one frame; mark dirty so that settling frame paints.
+			if _open_t != 1.0:
+				_open_t = 1.0
+				_dirty = true
+			if _sel_target >= 0.0 and _sel_y != _sel_target:
 				_sel_y = _sel_target
+				_dirty = true
 		else:
+			# Motion on: _menu_is_animating() is always true, so the gate paints every frame —
+			# these eased values need no explicit marking.
 			_open_t = lerpf(_open_t, 1.0, 1.0 - exp(-20.0 * delta))
 			if _sel_target >= 0.0:
 				_sel_y = lerpf(_sel_y, _sel_target, 1.0 - exp(-22.0 * delta))
 				if absf(_sel_y - _sel_target) < 1.0:
 					_sel_y = _sel_target   # snap: sub-pixel drift shimmers the pixel font
-		queue_redraw()   # pulse + glide + open-settle animate every frame while open
+		# c2-09: the SOLE redraw request. _dirty was set above (and by every input handler) at
+		# each mutation site whose pixels changed — covering the settling frame under reduce
+		# motion; _menu_is_animating() adds the continuous case (the selection glow breathes
+		# every frame while motion is on). A settled, reduce-motion menu marks neither and idles.
+		if _dirty or _menu_is_animating():
+			queue_redraw()
+
+
+## c2-09: is CONTINUOUS animation live this frame? The _process gate ORs this with _dirty.
+## With motion ON the selection glow (and an armed row's red flood) breathes every frame via
+## Art.pulse, so a per-frame repaint is always needed. Under REDUCE MOTION nothing breathes and
+## the glide/open envelope snap instantly, so this reports true only while a value is genuinely
+## moving — the open/glide not yet settled, or a confirm countdown / flash / halo still draining.
+## The rail/tab/page flashes are already 0 under reduce motion; listed anyway so the live-set is
+## one auditable enumeration. _dirty (not this predicate) covers the discrete settling frame.
+func _menu_is_animating() -> bool:
+	if not is_active():
+		return false   # c2-09: a hidden menu never animates — self-contained even if a caller forgets
+	if main._motion >= 0.5:
+		return true
+	# 0.5px epsilon on the glide (not a bare !=): the snap path keeps _sel_y exact today, but a
+	# sub-pixel residual would be visually settled anyway, so it must not keep requesting redraws.
+	return _open_t < 1.0 or (_sel_target >= 0.0 and absf(_sel_y - _sel_target) > 0.5) \
+			or _confirm_t > 0.0 or _reset_flash > 0.0 or _seed_flash > 0.0 \
+			or _rebind_msg_t > 0.0 or _lockout > 0.0 or _set_pulse > 0.0 \
+			or _rail_pulse > 0.0 or _filter_pulse > 0.0 or _page_press > 0.0
+
+
+## c2-09: the ONE way a destructive-row confirm is disarmed — clears the index AND its
+## countdown together, so `_confirm_t > 0` stays a reliable "countdown live" flag for the
+## redraw gate no matter which path disarms (timeout / nav-away / activation / screen change).
+func _disarm_confirm() -> void:
+	_confirm = -1
+	_confirm_t = 0.0
 
 
 func is_active() -> bool:
@@ -314,7 +364,7 @@ func open(m: int, select_id := "") -> void:
 	_open_t = 0.0 if mode == Mode.HIDDEN else 0.6
 	mode = m
 	sel = 0
-	_confirm = -1
+	_disarm_confirm()   # c2-09: no armed row (nor its live countdown) carries into a fresh screen
 	_rail_pulse = 0.0   # a fresh screen starts with no lingering rail-bounce flash
 	_rail_row = -1
 	_set_pulse = 0.0    # c1-17: nor a lingering settings-change confirm halo
@@ -386,7 +436,10 @@ func open(m: int, select_id := "") -> void:
 			if mi[k]["id"] == select_id:
 				sel = k
 				break
-	queue_redraw()
+	# c2-09: mark dirty so _process paints the freshly-opened screen's first frame. Under
+	# REDUCE MOTION _menu_is_animating() goes false as soon as the open/glide envelope snaps,
+	# so the gate alone would not paint — the dirty flag is what guarantees the initial frame.
+	_dirty = true
 
 
 func _bus_off(name: String) -> bool:
@@ -895,7 +948,7 @@ func _rebind_capture(ev: InputEvent) -> bool:
 
 func _end_capture() -> void:
 	_rebind_action = ""
-	queue_redraw()
+	_dirty = true
 
 
 func _commit_capture(swapped: String, reserved: String) -> void:
@@ -989,7 +1042,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			_rebind_msg = ""
 			_rebind_msg_t = 0.0
 			main._sfx.play("pickup", -14.0, 1.3)
-			queue_redraw()
+			_dirty = true
 			return
 	# c1-18: TAB (kb) or a shoulder (pad) cycles the MOVE/AIM -> ACTIONS -> GAMEPAD category
 	# tabs while idle. Shoulders step both directions; Tab cycles forward. Handled before nav
@@ -1016,7 +1069,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			_rebind_msg = ""
 			_rebind_msg_t = 0.0
 			main._sfx.play("pickup", -14.0, 1.3)
-			queue_redraw()
+			_dirty = true
 			return
 	var move := 0
 	var hmove := 0
@@ -1176,14 +1229,14 @@ func _unhandled_input(ev: InputEvent) -> void:
 						ht = ti
 				if ht != _tab_hover:
 					_tab_hover = ht
-					queue_redraw()
+					_dirty = true
 				# PREV/NEXT hover parity with the tabs (shared with _refresh_page_hover so a
 				# page/filter change re-evaluates a still cursor the same way a move does).
 				_last_ptr = ev.position
 				var ph := _page_hover_at(ev.position)
 				if ph != _page_hover:
 					_page_hover = ph
-					queue_redraw()
+					_dirty = true
 			if mode == Mode.HOWTO:
 				# c2-02: HOW-TO page tabs get the same hover cue as HALL's filter tabs
 				# (they share _tab_hover — only one screen is live at a time).
@@ -1194,7 +1247,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 						ht = ti
 				if ht != _tab_hover:
 					_tab_hover = ht
-					queue_redraw()
+					_dirty = true
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
 				# Full feedback parity: funnel the hover through _nav so it plays
@@ -1228,7 +1281,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 							_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 							_refresh_page_hover()   # page reset to 0 disables PREV under a still cursor
 							main._sfx.play("pickup", -14.0, 1.3)
-						queue_redraw()
+						_dirty = true
 						return
 			if mode == Mode.HOWTO:
 				# c2-02: click a page tab to jump to it — mouse parity with left/right.
@@ -1238,7 +1291,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 						if ti != _howto_page:
 							_howto_page = ti
 							main._sfx.play("pickup", -14.0, 1.3)
-						queue_redraw()
+						_dirty = true
 						return
 			if mode == Mode.HALL and _hall_pages(_hall_rows().size()) > 1:
 				# Prev/next page buttons: route through _nav so paging, sfx, and the
@@ -1273,12 +1326,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 					# Side matters: volume + WINDOW SCALE step down/up per arrow, so a mouse-only
 					# player has BOTH directions (the ◄ arrow lowers). Plain toggles flip either way.
 					_nav(0, -1 if la.has_point(ev.position) else 1)
-					queue_redraw()
+					_dirty = true
 					return
 			if crow >= 0:
 				sel = crow
 				_press()
-				queue_redraw()
+				_dirty = true
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
 			if mode == Mode.HALL or mode == Mode.HOWTO:
@@ -1297,7 +1350,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 		open(d["mode"], d["sel"])
 	if (move != 0 or hmove != 0 or act or back) and is_inside_tree():
 		accept_event()   # is_inside_tree guard: a not-in-tree menu (headless tests) skips it
-	queue_redraw()
+	_dirty = true
 
 
 # One nav step — shared by key/dpad/stick presses, the held-stick auto-repeat,
@@ -1316,7 +1369,7 @@ func _nav(move: int, hmove: int) -> void:
 			_hall_page = np
 			_refresh_page_hover()   # the new page may flip a boundary — re-light/dim under a still cursor
 			main._sfx.play("pickup", -14.0, 1.3)
-			queue_redraw()
+			_dirty = true
 		return   # HALL vertical nav OWNS paging — always consume it, even at a boundary, so it never falls through to the 1-row list nav below
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
@@ -1329,7 +1382,7 @@ func _nav(move: int, hmove: int) -> void:
 		# the hover automatically, so no double-treatment slips through either.
 		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 		main._sfx.play("pickup", -14.0, 1.3)
-		queue_redraw()
+		_dirty = true
 		return
 	# c2-02: HOW TO PLAY is paged on the HORIZONTAL axis — left/right (and the wheel,
 	# routed in as hmove) turns the BASIC / ENEMIES / ENDLESS page, clamped (never
@@ -1343,13 +1396,13 @@ func _nav(move: int, hmove: int) -> void:
 		if np != _howto_page:
 			_howto_page = np
 			main._sfx.play("pickup", -14.0, 1.3)
-			queue_redraw()
+			_dirty = true
 		return
 	# ◄/► on a volume row nudges the 0..10 level, clamped — the SAME shared stepper
 	# Enter/click drives. 0 == MUTED, so mute is just the bottom of the one model.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
 		_step_vol("SFX" if _menu_items()[sel]["id"] == "sfx" else "Music", hmove)
-		queue_redraw()
+		_dirty = true
 		return
 	# c1-19: ◄/► on WINDOW SCALE (the DISPLAY sub-screen) steps the integer scale one clean rung,
 	# clamped (no wrap) — ◄ shrinks, ► grows, railing at the 1x floor and the Nx ceiling. It NEVER
@@ -1357,13 +1410,13 @@ func _nav(move: int, hmove: int) -> void:
 	# resizes now, fullscreen it moves the preference applied on return to windowed.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] == "winscale":
 		_step_scale(hmove)
-		queue_redraw()
+		_dirty = true
 		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
 	# (same activation path, so save/sfx behavior stays identical).
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in _TOGGLES:
 		_activate()
-		queue_redraw()
+		_dirty = true
 		return
 	if move == 0:
 		return
@@ -1376,9 +1429,9 @@ func _nav(move: int, hmove: int) -> void:
 		_rail_row = -1
 	if absi(sel - prev) > 1:
 		_sel_y = -1.0   # wrap: snap to the far end instead of gliding the whole list
-	_confirm = -1
+	_disarm_confirm()   # c2-09: moving off the armed row cancels the confirm (and its countdown)
 	main._sfx.play("pickup", -14.0, 1.3)
-	queue_redraw()
+	_dirty = true
 
 
 func _press() -> void:
@@ -1390,8 +1443,11 @@ func _press() -> void:
 		_confirm_t = 2.5   # auto-disarm window (decremented in _process)
 		main._sfx.play("deny", -8.0)
 	else:
-		_confirm = -1
+		_disarm_confirm()   # c2-09: clears index + countdown together
 		_activate()
+	# c2-09: mark dirty for the press result (row arming / toggle flip / value step). Input is
+	# handled before _process in the same frame, so the gate flushes it to the screen this frame.
+	_dirty = true
 
 
 # c1-09: OPTIONS climbs BACK to whichever screen opened it — TITLE normally, but
@@ -1630,7 +1686,7 @@ func _step_vol(bus: String, delta: int) -> void:
 		_rail_pulse = 0.0 if main._motion < 0.5 else 1.0
 		if delta > 0:
 			main._sfx.play("deny", -16.0)   # top rail: SFX is audible, so a soft tick lands
-		queue_redraw()
+		_dirty = true
 		return
 	_rail_pulse = 0.0   # a real step lands — clear any stale bounce flash
 	_rail_row = -1
@@ -1935,7 +1991,7 @@ func _update_seed_preview(delta := 0.0, force := false) -> void:
 				_seed_flash = 0.0   # a valid seed is now shown — kill any stale deny flash so it can't hide it
 			if _seed_preview != _seed_armed_val:
 				_seed_armed = false   # the shown seed changed — a prior arm no longer applies
-			queue_redraw()   # the sampled preview changed — repaint even if the caller doesn't
+			_dirty = true   # the sampled preview changed — repaint even if the caller doesn't
 	elif _seed_preview != -1 or not _seed_clip_raw.is_empty() or _seed_armed or _seed_poll_t != 0.0:
 		_seed_preview = -1
 		_seed_clip_raw = ""
@@ -1956,7 +2012,7 @@ func _activate_seed() -> void:
 		main._sfx.play("deny", -8.0)
 		_seed_flash = 1.0
 		_seed_armed = false
-		queue_redraw()
+		_dirty = true
 		return
 	# Two-press verify: a run loads ONLY on a second press that confirms the SAME seed
 	# the arm is already displaying ("SEED N  PRESS AGAIN"). This gives a genuine chance
@@ -1972,7 +2028,7 @@ func _activate_seed() -> void:
 	_seed_armed_t = 2.5   # auto-disarm window (decremented in _process)
 	_seed_flash = 0.0     # arming shows the seed — a stale deny flash must not colour over it
 	main._sfx.play("pickup", -10.0, 1.2)   # soft arm tick: the seed is now shown to confirm
-	queue_redraw()
+	_dirty = true
 
 
 static func _content_well(scrim_mode: int) -> bool:
@@ -2012,6 +2068,7 @@ static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
 func _draw() -> void:
 	if mode == Mode.HIDDEN:
 		return
+	_dirty = false   # c2-09: this paint reflects the latest state; _process re-marks on change
 	# Scrim ≥0.55: 8px text over a LIVE firefight; fades in over the open settle.
 	# REDUCE MOTION near-blacks the TITLE backdrop — the live attract fight
 	# (scroll + tracers + explosions) is the biggest motion source on the exact
@@ -2582,7 +2639,7 @@ func _refresh_page_hover() -> void:
 	var ph := _page_hover_at(_last_ptr)
 	if ph != _page_hover:
 		_page_hover = ph
-		queue_redraw()
+		_dirty = true
 
 
 func _hall_tab_rects() -> Array[Rect2]:

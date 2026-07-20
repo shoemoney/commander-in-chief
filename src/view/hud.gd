@@ -92,6 +92,9 @@ const STREAK_RING_W := 2.0     # ring stroke width (was 1.5)
 const STREAK_RING_SLOT := 14.0 # horizontal slot the centered ring lives in (advance after the gap).
                                # 2*R + W = 13 <= slot AND == ICON, so the ring fits the glyph box
                                # both horizontally (in its slot) and vertically (centered in ICON).
+const SHOP_ANIM_EPS := 0.01    # c2-09: the shop cross-fade is "settled" within this of its target —
+                               # ONE const shared by the _process snap-to-target and the redraw-live
+                               # gate so the fade stops easing and stops requesting redraws together.
 
 var main: Node2D
 var _prev_chest := 0
@@ -136,6 +139,12 @@ var _verb_show := 360.0   # c1-04: ticks-worth of the BRIGHT gameplay-verb remin
 var _verb_sim_id := 0     # instance id of the SimWorld the window was armed for — a new
                           # SimWorld (every start_game/_reset) rearms, independent of ticks
 var _verb_was_paused := false
+var _dirty := true        # c2-09: a VIEW field changed since the last _draw — the sole trigger
+                          # for the self-invalidating repaint in _process, cleared in _draw. Set
+                          # at each mutation site below, and only when the DRAWN pixels actually
+                          # change (rounded odometer, verb-chip alpha), so a settled HUD idles.
+                          # Sim-driven rings are repainted by main._update_hud on every step, so
+                          # this only tracks the fields _process animates while main isn't stepping.
 
 
 func _ready() -> void:
@@ -160,56 +169,86 @@ func _notification(what: int) -> void:
 			RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
 
 
-## Pulse decay + rollup catch-up step here, delta-scaled — they used to tick
-## per-_draw (-0.05/frame), which ran 2x fast on a 120 Hz display. Rates match
-## the old 60 Hz feel; exp() keeps the ease framerate-independent (menu.gd idiom).
+## Pulse decay + rollup catch-up step here, delta-scaled — exp() keeps the ease
+## framerate-independent. Each mutation that changes VISIBLE pixels sets _dirty (the sole
+## redraw request at the end), so a fully-settled HUD marks nothing and idles.
 func _process(delta: float) -> void:
 	if main == null or main.sim == null:
 		return
 	var sim: SimWorld = main.sim
 	if sim.war_chest > _prev_chest:
 		_chest_pulse = 1.0
+		_dirty = true
 	_prev_chest = sim.war_chest
 	if sim.score > _prev_score:
 		_score_pulse = 1.0
+		_dirty = true
 	_prev_score = sim.score
 	var decay := 3.0 * delta   # == the old -0.05/frame at 60 Hz
-	_chest_pulse = maxf(0.0, _chest_pulse - decay)
-	_score_pulse = maxf(0.0, _score_pulse - decay)
+	if _chest_pulse > 0.0:
+		_chest_pulse = maxf(0.0, _chest_pulse - decay)
+		_dirty = true   # includes the frame it reaches 0, so the settled color paints once
+	if _score_pulse > 0.0:
+		_score_pulse = maxf(0.0, _score_pulse - decay)
+		_dirty = true
 	if _disp_chest < 0.0:
 		_disp_chest = float(sim.war_chest)
 	if _disp_score < 0.0:
 		_disp_score = float(sim.score)
+	# Odometer rollup: only a change in the DRAWN integer is visible (a sub-integer float
+	# move paints identically), so compare int(round()) across the step, not the raw float.
+	var chest_i := int(round(_disp_chest))
+	var score_i := int(round(_disp_score))
 	if main._motion < 0.5:
 		_disp_chest = float(sim.war_chest)   # REDUCE MOTION: snap, no odometer spin-up
 		_disp_score = float(sim.score)
 	else:
 		_disp_chest = _rollup(_disp_chest, float(sim.war_chest), delta)
 		_disp_score = _rollup(_disp_score, float(sim.score), delta)
-	# c1-15: ease the shop strip's CONTENT open/closed (the row stays reserved, so nothing shifts).
-	# Reduce motion snaps; a fresh run snaps too so restart-time content can't linger-fade. exp()
-	# ease matches the odometer.
+	if int(round(_disp_chest)) != chest_i or int(round(_disp_score)) != score_i:
+		_dirty = true
+	# c1-15: ease the shop strip's CONTENT open/closed (row stays reserved, so nothing shifts).
+	# Reduce motion / a fresh run snap; any change in the eased alpha is a visible change.
 	var shop_target := 1.0 if _shop_open(sim) else 0.0
 	var sid := sim.get_instance_id()
+	var shop_prev := _shop_anim
 	if main._motion < 0.5 or sid != _shop_sim_id:
 		_shop_anim = shop_target
-	elif absf(shop_target - _shop_anim) < 0.01:
+	elif absf(shop_target - _shop_anim) < SHOP_ANIM_EPS:
 		_shop_anim = shop_target
 	else:
 		_shop_anim += (shop_target - _shop_anim) * (1.0 - exp(-13.0 * delta))
 	_shop_sim_id = sid
-	# c1-04: drive the BRIGHT phase of the verb reminder. It freezes while paused
-	# (the sim doesn't tick either). A brand-new SimWorld — every start_game/_reset
-	# builds one — rearms the full window, so it reliably re-shows on EVERY run
-	# start and restart (identity, not a tick_count that a reused object could keep
-	# high). Unpausing re-bumps it a few seconds. Once it runs out _verb_legend fades
-	# the chip fully out — the recoverable reference lives on the PAUSE footer.
+	if _shop_anim != shop_prev:
+		_dirty = true
+	# c1-04: drive the BRIGHT phase of the verb reminder (frozen while paused / rearmed on a
+	# fresh SimWorld). Its chip holds a STATIC full alpha for most of the window and only fades
+	# over the final ~1.5s, so mark dirty on a change in the DRAWN alpha — not the raw countdown,
+	# which would needlessly repaint the whole static bright phase.
 	var paused: bool = main._menu != null and main._menu.is_active()
+	var verb_a := _verb_alpha(_verb_show, main._motion)
 	var res := verb_step(_verb_show, _verb_sim_id, sim.get_instance_id(),
 		paused, _verb_was_paused, delta)
 	_verb_show = res[0]
 	_verb_sim_id = int(res[1])
 	_verb_was_paused = paused
+	if _verb_alpha(_verb_show, main._motion) != verb_a:
+		_dirty = true
+	if _dirty:
+		queue_redraw()
+
+
+## c2-09: the drawn alpha of the bottom verb-reminder chip for a given countdown + motion —
+## 0 when the window is spent (chip absent), a linear fade over the final 90 ticks under motion,
+## else full. The ONE source _verb_legend and the _process dirty check both read, so a repaint
+## is requested ONLY when the chip's appearance actually changes (its edges + the fade), never
+## through the static bright phase.
+static func _verb_alpha(show: float, motion: float) -> float:
+	if show <= 0.0:
+		return 0.0
+	if motion >= 0.5 and show < 90.0:
+		return show / 90.0   # ease out over the last ~1.5s
+	return 1.0
 
 
 ## c1-04: pure state step for the BRIGHT verb-reminder window — returns
@@ -331,6 +370,7 @@ func panel_bottom() -> float:
 
 
 func _draw() -> void:
+	_dirty = false   # c2-09: this paint reflects the latest state; _process re-marks on change
 	if main == null or main.sim == null:
 		# No sim to size the plate against — clear it so no stale panel lingers.
 		if _plate_ci.is_valid():
@@ -418,7 +458,9 @@ func _draw() -> void:
 		row_r = maxf(row_r, _ovf_chip(_fit_full - ovf_w, y, _ovf))
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
-	# rollover digits never overhang the backing for a frame.
+	# rollover digits never overhang the backing for a frame. c2-09: the plate is
+	# immediate-mode (re-cleared + re-emitted every _draw), NOT a self-drawing child,
+	# so the Control's own queue_redraw fully repaints it — no separate invalidation.
 	RenderingServer.canvas_item_clear(_plate_ci)
 	_plate_r = clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0)
 	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
@@ -999,9 +1041,7 @@ func _verb_legend() -> void:
 		return
 	if _verb_show <= 0.0:
 		return   # bright window elapsed — fully gone, no persistent playfield overlay
-	var a := 1.0
-	if main._motion >= 0.5 and _verb_show < 90.0:
-		a = _verb_show / 90.0   # ease out over the last ~1.5s (reduce-motion snaps at 0)
+	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
 	var ext := verb_legend_extent()
 	var x: float = float(ext[0])
 	var total: float = float(ext[1])
