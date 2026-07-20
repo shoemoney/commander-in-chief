@@ -3145,12 +3145,28 @@ func _footer_legend() -> void:
 	# input axis is vertical (left/right cycles the FILTER), so the control strip states
 	# the real key here — the one place players read for bindings. Only in HALL and only
 	# when it actually pages; guarded on main so the headless capture menu (no board) skips.
-	if mode == Mode.HALL and main != null and _hall_pages(_hall_rows().size()) > 1:
-		segs = footer_page_segs() + segs
+	if mode == Mode.HALL:
+		# c2-03: HALL's filter tabs cycle on left/right — the device glyph legend that
+		# used to live only on TITLE never told keyboard/pad players this. Prepend a
+		# permanent L/R = FILTER hint (the tabs exist on every page), then the UP/DN =
+		# PAGE hint ONLY when the board actually spills past one page (guarded on main so
+		# the headless capture menu, which has no board, skips it).
+		var head: Array = footer_hall_filter_segs()
+		if main != null and _hall_pages(_hall_rows().size()) > 1:
+			head += footer_page_segs()
+		segs = head + segs
 	elif mode == Mode.HOWTO:
 		# c2-02: HOW TO PLAY pages on left/right — state the axis in the one strip
 		# players read for bindings, same as HALL's UP/DN page hint.
 		segs = footer_howto_page_segs() + segs
+	elif main != null:
+		# c2-03: on the settings screens the focused row's ◄/► arrows adjust it in place
+		# (toggle flip, volume/scale step). Surface that bind in the footer strip whenever
+		# the focused row is an adjustable one — so PAUSE/OPTS/DISP/SETUP keep a Toggle
+		# prompt, not just Select/Back. Guarded on main (the capture menu has no items).
+		var mi := _menu_items()
+		if sel >= 0 and sel < mi.size() and _row_cycles(mi[sel]["id"]):
+			segs = footer_cycle_segs(mi[sel]) + segs
 	_legend_row(segs, FOOTER_Y + 8.0, 0.9)
 
 
@@ -3197,3 +3213,26 @@ static func footer_page_segs() -> Array:
 # wide keycap is stamped L/R. Static so a headless test can pin it.
 static func footer_howto_page_segs() -> Array:
 	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": "PAGE"}]
+
+
+# c2-03: the HALL filter hint — the ALL/CAMPAIGN/ENDLESS tabs cycle on the horizontal
+# axis (A/D + arrows on keyboard, dpad/stick on pad), so one L/R-stamped wide keycap
+# reads on either device, same grammar as the HOW-TO page hint. Static so a headless
+# test can pin it without a Control or draw context.
+static func footer_hall_filter_segs() -> Array:
+	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": "FILTER"}]
+
+
+# c2-03: the settings-row ◄/► hint for the footer strip — a wide keycap stamped L/R.
+# The label names what the arrows do on the focused row, derived from the row's OWN
+# shape so it can't drift from how the row behaves. Only ever called for rows
+# _row_cycles() accepts, whose two families are: STEPPED value controls — a "vol" bar
+# or the WINDOW SCALE stepper (id "winscale") — which read ADJUST, and boolean toggles
+# (everything else _row_cycles takes, which flip in place) which read TOGGLE. Keying
+# ADJUST off the explicit stepped shape (not "not has on") means a newly-added toggle
+# that forgets an "on" field still reads TOGGLE — the safe default for a flip row —
+# rather than mislabeling as ADJUST.
+static func footer_cycle_segs(item: Dictionary) -> Array:
+	var stepped: bool = item.has("vol") or item.get("id", "") == "winscale"
+	var lbl := "ADJUST" if stepped else "TOGGLE"
+	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": lbl}]

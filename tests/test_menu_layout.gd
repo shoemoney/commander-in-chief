@@ -282,6 +282,117 @@ func test_footer_prompts_are_device_aware() -> void:
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
+# c2-03: the submenu footer bind-strip hints — HALL's L/R = FILTER prompt and the
+# settings-row L/R adjust prompt. Pins the exact stamp/label the strip prepends so a
+# keyboard/pad player is always told left/right cycles the filter tabs / adjusts the
+# focused setting, not just Select/Back.
+func test_footer_submenu_cycle_and_filter_hints() -> void:
+	var flt: Array = Menu.footer_hall_filter_segs()
+	Runner.T.eq(flt[0]["stamp"], "L/R", "HALL filter hint stamped L/R")
+	Runner.T.eq(flt[0]["label"], "FILTER", "HALL filter hint labeled FILTER")
+	# The ADJUST/TOGGLE label is derived from the row's OWN metadata (an "on" bool flips
+	# → TOGGLE; a stepped "vol"/scale row carries no "on" → ADJUST), so it tracks the real
+	# row shape instead of a hand-maintained id list.
+	Runner.T.eq(Menu.footer_cycle_segs({"id": "motion", "on": false})[0]["label"], "TOGGLE", "an 'on' toggle row hint reads TOGGLE")
+	Runner.T.eq(Menu.footer_cycle_segs({"id": "sfx", "vol": 5})[0]["label"], "ADJUST", "a 'vol' row hint reads ADJUST")
+	Runner.T.eq(Menu.footer_cycle_segs({"id": "winscale"})[0]["label"], "ADJUST", "the stepped WINDOW SCALE row hint reads ADJUST")
+	Runner.T.eq(Menu.footer_cycle_segs({"id": "motion", "on": true})[0]["stamp"], "L/R", "cycle hint stamped L/R")
+
+
+# c2-03 integration: drive the REAL _footer_legend() through the capture seams with a
+# live stub main, so it exercises the actual _menu_items()/_row_cycles() prepend path —
+# not just the pure helpers. Proves the FILTER hint lands on HALL and the correct
+# ADJUST/TOGGLE hint is prepended for the FOCUSED settings row (and only for cycling
+# rows), and that both read BEFORE the SELECT nav prompt.
+func test_footer_prepends_hints_through_real_draw() -> void:
+	# HALL: the L/R = FILTER hint is unconditional (tabs exist on every page) and sits
+	# ahead of SELECT/BACK.
+	var hcap := _CaptureMenu.new()
+	hcap.mode = Menu.Mode.HALL
+	hcap._footer_legend()
+	var hlabels := _labels_of(hcap.ops)
+	Runner.T.ok("FILTER" in hlabels, "HALL footer draws the L/R = FILTER hint")
+	Runner.T.ok(hlabels.find("FILTER") < hlabels.find("SELECT"), "FILTER reads before SELECT")
+	hcap.free()
+	# OPTS: a focused toggle row shows TOGGLE, a focused volume row shows ADJUST, and a
+	# focused non-cycling row (BACK) shows neither.
+	var stub := _StubMain.new()
+	var ocap := _CaptureMenu.new()
+	ocap.main = stub
+	ocap.mode = Menu.Mode.OPTS
+	var mi := _row_index(ocap, "motion")
+	var vi := _row_index(ocap, "sfx")
+	var bi := _row_index(ocap, "back")
+	ocap.sel = mi
+	ocap._footer_legend()
+	var tl := _labels_of(ocap.ops)
+	Runner.T.ok("TOGGLE" in tl and tl.find("TOGGLE") < tl.find("SELECT"), "focused toggle row prepends TOGGLE before SELECT")
+	ocap.ops.clear()
+	ocap.sel = vi
+	ocap._footer_legend()
+	var vl := _labels_of(ocap.ops)
+	Runner.T.ok("ADJUST" in vl and not ("TOGGLE" in vl), "focused volume row prepends ADJUST (not TOGGLE)")
+	ocap.ops.clear()
+	ocap.sel = bi
+	ocap._footer_legend()
+	var bl := _labels_of(ocap.ops)
+	Runner.T.ok(not ("ADJUST" in bl) and not ("TOGGLE" in bl), "focused non-cycling row (BACK) shows no cycle hint")
+	ocap.free()
+	# SETUP: the CO-OP / NG+ HARD rows are boolean flips -> TOGGLE.
+	var scap := _CaptureMenu.new()
+	scap.main = stub
+	scap.mode = Menu.Mode.SETUP
+	scap.sel = _row_index(scap, "coop")
+	scap._footer_legend()
+	var sl := _labels_of(scap.ops)
+	Runner.T.ok("TOGGLE" in sl and sl.find("TOGGLE") < sl.find("SELECT"), "SETUP focused CO-OP row prepends TOGGLE before SELECT")
+	scap.free()
+	# DISP: FULLSCREEN is a boolean flip (TOGGLE), WINDOW SCALE is a stepper (ADJUST).
+	var dcap := _CaptureMenu.new()
+	dcap.main = stub
+	dcap.mode = Menu.Mode.DISP
+	dcap.sel = _row_index(dcap, "fullscreen")
+	dcap._footer_legend()
+	var dfl := _labels_of(dcap.ops)
+	Runner.T.ok("TOGGLE" in dfl and not ("ADJUST" in dfl), "DISP focused FULLSCREEN row prepends TOGGLE (not ADJUST)")
+	dcap.ops.clear()
+	dcap.sel = _row_index(dcap, "winscale")
+	dcap._footer_legend()
+	var dwl := _labels_of(dcap.ops)
+	Runner.T.ok("ADJUST" in dwl and not ("TOGGLE" in dwl), "DISP focused WINDOW SCALE row prepends ADJUST (not TOGGLE)")
+	dcap.free()
+	stub.free()
+
+
+# c2-03: when the Hall spills past one page BOTH the L/R = FILTER and the UP/DN = PAGE
+# hints ride the footer, and they read in axis order (FILTER, then PAGE, then the
+# SELECT nav) — so a paged board never drops the filter prompt and never mis-orders the
+# two axes. Drives the REAL _footer_legend() with a >1-page stub board.
+func test_footer_paged_hall_carries_filter_and_page_hints() -> void:
+	var stub := _StubMain.new()
+	stub.hall = _hall_board(Menu.HALL_PAGE_ROWS * 2 + 1)   # forces >1 page
+	var hcap := _CaptureMenu.new()
+	hcap.main = stub
+	hcap.mode = Menu.Mode.HALL
+	Runner.T.ok(hcap._hall_pages(hcap._hall_rows().size()) > 1, "stub board spans more than one page")
+	hcap._footer_legend()
+	var labels := _labels_of(hcap.ops)
+	Runner.T.ok("FILTER" in labels, "paged HALL footer keeps the L/R = FILTER hint")
+	Runner.T.ok("PAGE" in labels, "paged HALL footer adds the UP/DN = PAGE hint")
+	Runner.T.ok(labels.find("FILTER") < labels.find("PAGE"), "FILTER (horizontal axis) reads before PAGE (vertical axis)")
+	Runner.T.ok(labels.find("PAGE") < labels.find("SELECT"), "PAGE reads before the SELECT nav prompt")
+	hcap.free()
+	stub.free()
+
+
+func _labels_of(ops: Array) -> Array:
+	var out: Array = []
+	for op in ops:
+		if op["k"] == "label":
+			out.append(op["id"])
+	return out
+
+
 # Whether an 'act' legend glyph actually resolves to a drawable texture on the
 # CURRENT device — mirrors Art.draw_glyph's own lookup (pad: brand-mapped button
 # sprite; keyboard: the blank keycap that carries the stamped letter). This is the
@@ -335,7 +446,7 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 	for pad in [false, true]:
 		Art.use_pad = pad
 		var dev := "pad" if pad else "kb"
-		for mode_id in [Menu.Mode.PAUSE, Menu.Mode.OPTS, Menu.Mode.SETUP, Menu.Mode.HALL, Menu.Mode.HOWTO]:
+		for mode_id in [Menu.Mode.PAUSE, Menu.Mode.OPTS, Menu.Mode.SETUP, Menu.Mode.DISP, Menu.Mode.HALL, Menu.Mode.HOWTO]:
 			var cap := _CaptureMenu.new()
 			cap.mode = mode_id
 			cap._footer_legend()   # the REAL draw method — records into ops via the seams
