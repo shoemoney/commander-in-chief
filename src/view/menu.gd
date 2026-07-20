@@ -39,6 +39,8 @@ var _confirm := -1   # index of a destructive item awaiting a 2nd press
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
 var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown (up/down pages)
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
+var _howto_page := 0    # c2-02: which HOW-TO-PLAY page (0 BASIC / 1 ENEMIES / 2 ENDLESS); left/right/wheel or tab-click pages it
+const HOWTO_TABS := ["BASIC", "ENEMIES", "ENDLESS"]  # c2-02: the three HOW-TO-PLAY pages, split so no page crams rows onto the BACK plate
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
 var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
 var _open_t := 0.0      # menu-open settle envelope (backdrop fade + row drop-in)
@@ -290,6 +292,9 @@ func open(m: int, select_id := "") -> void:
 			# Already surfaced (or no fresh run): keep the player's place, only
 			# clamping the page in case a filter change shrank the list underneath it.
 			_hall_page = clampi(_hall_page, 0, _hall_pages(_hall_rows().size()) - 1)
+	elif m == Mode.HOWTO:
+		_howto_page = 0   # c2-02: always open the help on the BASIC page
+		_tab_hover = -1   # c2-02: HOWTO shares _tab_hover with HALL — clear it so a hover index left on the OTHER screen's tab row can't light a HOWTO tab (open() clears it above too; explicit here for the shared-state contract)
 	_has_replay = FileAccess.file_exists("user://last_run.replay")   # hoisted: _menu_items ran this disk stat ~180x/s while TITLE was open
 	# Any menu opening freezes the sim mid-hold — cancel open supply wheels, or a
 	# hold+pick released WHILE paused commits a stale buy on the first resumed
@@ -1096,6 +1101,17 @@ func _unhandled_input(ev: InputEvent) -> void:
 				if ph != _page_hover:
 					_page_hover = ph
 					queue_redraw()
+			if mode == Mode.HOWTO:
+				# c2-02: HOW-TO page tabs get the same hover cue as HALL's filter tabs
+				# (they share _tab_hover — only one screen is live at a time).
+				var ht := -1
+				var htabs := _howto_tab_rects()
+				for ti in htabs.size():
+					if htabs[ti].has_point(ev.position):
+						ht = ti
+				if ht != _tab_hover:
+					_tab_hover = ht
+					queue_redraw()
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
 				# Full feedback parity: funnel the hover through _nav so it plays
@@ -1128,6 +1144,16 @@ func _unhandled_input(ev: InputEvent) -> void:
 							_hall_page = 0   # fresh filtered list starts on its top page
 							_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 							_refresh_page_hover()   # page reset to 0 disables PREV under a still cursor
+							main._sfx.play("pickup", -14.0, 1.3)
+						queue_redraw()
+						return
+			if mode == Mode.HOWTO:
+				# c2-02: click a page tab to jump to it — mouse parity with left/right.
+				var htabs := _howto_tab_rects()
+				for ti in htabs.size():
+					if htabs[ti].has_point(ev.position):
+						if ti != _howto_page:
+							_howto_page = ti
 							main._sfx.play("pickup", -14.0, 1.3)
 						queue_redraw()
 						return
@@ -1172,8 +1198,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 				queue_redraw()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
-			if mode == Mode.HALL:
-				_nav(0, wdir)   # HALL's only control is the filter — wheel cycles it instead of wrapping a 1-row list
+			if mode == Mode.HALL or mode == Mode.HOWTO:
+				_nav(0, wdir)   # HALL cycles the filter, HOWTO turns the page — both live on the horizontal axis, not a 1-row list
 			else:
 				_nav(wdir, 0)
 		return
@@ -1221,6 +1247,20 @@ func _nav(move: int, hmove: int) -> void:
 		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 		main._sfx.play("pickup", -14.0, 1.3)
 		queue_redraw()
+		return
+	# c2-02: HOW TO PLAY is paged on the HORIZONTAL axis — left/right (and the wheel,
+	# routed in as hmove) turns the BASIC / ENEMIES / ENDLESS page, clamped (never
+	# wraps), so each section owns a full screen instead of stacking rows onto the
+	# next. Matches the footer's "L/R PAGE" hint exactly. Up/down is deliberately
+	# NOT consumed here — it falls through to the 1-row list below and simply keeps
+	# focus on the always-selected BACK row (footer already binds SELECT/BACK), so
+	# the paging axis and the nav axis never fight over the same press.
+	if mode == Mode.HOWTO and hmove != 0:
+		var np := clampi(_howto_page + hmove, 0, HOWTO_TABS.size() - 1)
+		if np != _howto_page:
+			_howto_page = np
+			main._sfx.play("pickup", -14.0, 1.3)
+			queue_redraw()
 		return
 	# ◄/► on a volume row nudges the 0..10 level, clamped — the SAME shared stepper
 	# Enter/click drives. 0 == MUTED, so mute is just the bottom of the one model.
@@ -1466,9 +1506,10 @@ func _row_at(p: Vector2) -> int:
 ## off the pixels (same discipline as _row_geometry / panel_bottom()).
 func _back_rect() -> Rect2:
 	# 310 (was 320): pulled up so a real SELECT/BACK footer legend fits BELOW the
-	# button (its glow bottom ~338, footer glyphs ~343). The HOWTO threat list's
-	# pitch is DERIVED from this y (see _draw_howto), so it just tightens to ~14px
-	# — still above its readable floor. Bottom lands at 335. Draw + hit-test share.
+	# button (its glow bottom ~338, footer glyphs ~343). The HOWTO ENDLESS page's
+	# threat-row pitch is DERIVED from this y (see _howto_page_endless); paging gives
+	# it a full screen so it sits at a roomy 18px, well clear of BACK. The BACK plate
+	# is shared by all three HOWTO pages. Bottom lands at 335. Draw + hit-test share.
 	return Rect2(Vector2(320 - BTN.x / 2.0, 310), BTN * Vector2(1, 0.7))
 
 
@@ -2436,7 +2477,18 @@ func _refresh_page_hover() -> void:
 func _hall_tab_rects() -> Array[Rect2]:
 	# The same measured tab layout _draw_hall renders, as clickable rects —
 	# keep the width math in lockstep with the loop below.
-	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
+	return _tab_rects_for(["ALL", "CAMPAIGN", "ENDLESS"])
+
+
+func _howto_tab_rects() -> Array[Rect2]:
+	# c2-02: clickable rects for the HOW-TO page tabs, same centered layout the
+	# HALL filter tabs use so both content screens read with one grammar.
+	return _tab_rects_for(HOWTO_TABS)
+
+
+func _tab_rects_for(names: Array) -> Array[Rect2]:
+	# Shared centered tab-row geometry (10px labels, 22px gutters, plate at y52) —
+	# HALL filters and HOW-TO pages both measure through here so draw + click agree.
 	var f := Art.font()
 	var tw: Array[float] = []
 	var total := -22.0
@@ -2714,13 +2766,44 @@ func _hall_latest_index(rows: Array) -> int:
 
 
 func _draw_howto() -> void:
-	_center_text("HOW TO PLAY", 34, 22, Color(1.0, 0.85, 0.3))
-	# The whole screen runs off ONE downward y cursor instead of ~20 hand-tuned
-	# baselines, so editing a row can't silently overlap its neighbour. The one
-	# hard constraint — the ranged-threat block must clear the BACK plate — is
-	# DERIVED from _back_rect() below (pitch + box size fall out of it) rather
-	# than pinned to a magic number, so it survives roster edits.
-	var y := 60.0
+	# Title baseline y38 (size 22, ~4px descent -> bottom ~42) matched to HALL so both
+	# content screens share one header rhythm; the tab plate top sits at y54, a clear
+	# ~12px below, so the two never overlap regardless of font metrics.
+	_center_text("HOW TO PLAY", 38, 22, Color(1.0, 0.85, 0.3))
+	# c2-02: the wall of ~17 lines is split into three PAGES — BASIC / ENEMIES /
+	# ENDLESS — each drawn on its own screen with a fresh top-of-screen y cursor.
+	# Nothing stacks a section onto the next, so no row can land on the BACK plate
+	# and the ranged-threat block gets a comfortable pitch instead of tightening to
+	# its readable floor. Left/right (or wheel, or a tab click) turns the page.
+	_draw_howto_tabs()
+	match _howto_page:
+		0: _howto_page_basic()
+		1: _howto_page_enemies()
+		_: _howto_page_endless()
+
+
+# c2-02: the BASIC/ENEMIES/ENDLESS tab row — same centered grammar and pure style
+# helper the HALL filter tabs use, so both content screens read as one system.
+func _draw_howto_tabs() -> void:
+	var tabs := _howto_tab_rects()
+	for i in HOWTO_TABS.size():
+		var tr := tabs[i]
+		var on := i == _howto_page
+		var hov := not on and i == _tab_hover
+		var st := hall_tab_style(on, hov, 0.0)
+		var plate: Color = st["plate"]
+		if plate.a > 0.0:
+			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), plate)
+		Art.text(self, HOWTO_TABS[i], Vector2(tr.position.x + 4.0, 66), 10, st["text"])
+		var uh: float = st["underline_h"]
+		if uh > 0.0:
+			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
+
+
+# c2-02 page 1 — the survival basics: one-hit rule, the War Chest, and the verb
+# lines (grenades / roll / board / plant) that used to crowd the top of the wall.
+func _howto_page_basic() -> void:
+	var y := 96.0
 	var hold_pre := "pays to REVIVE you or BUY supplies (hold"
 	var intro := [
 		["ONE HIT AND YOU DROP. The War Chest — shared coin from kills —", Color(1.0, 0.9, 0.6)],
@@ -2728,39 +2811,49 @@ func _draw_howto() -> void:
 	]
 	for row in intro:
 		Art.text(self, row[0], Vector2(60, y), 11, row[1])
-		y += 15.0
+		y += 17.0
 	# The supply-wheel hold prompt is the DEVICE GLYPH, not a key-name string —
-	# it sits at the end of the second intro line (baseline y - 15).
-	var wy := y - 15.0
+	# it sits at the end of the second intro line (baseline y - 17).
+	var wy := y - 17.0
 	var px := 60.0 + Art.font().get_string_size(hold_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 9.0
 	Art.draw_glyph(self, "wheel", Vector2(px, wy - 4.0), 12.0)
 	Art.text(self, "). That's the choice.", Vector2(px + 8.0, wy), 11, Color(0.85, 0.9, 0.8))
-	y += 10.0
+	y += 24.0
 	# Verb lines carry the actual input glyph inline (device-aware) — text-only
 	# verbs made players hunt the legend. Re-wrapped for the wider pixel font:
 	# >64 chars clips at x=640.
 	_verb_line(["@grenade", "GRENADES crack armor — bunkers, bosses, the Colossus."],
 		y, Color(0.9, 0.92, 0.8))
-	y += 15.0
+	y += 26.0
 	_verb_line(["Bullets don't. ", "@roll", "ROLL to dodge. ", "@interact",
 		"BOARD tanks for crush + shells."], y, Color(0.9, 0.92, 0.8))
-	y += 15.0
+	y += 26.0
 	_verb_line(["@interact", "with no tank near PLANTS a carried claymore — it hurts BOTH sides."],
 		y, Color(0.9, 0.92, 0.8))
-	y += 16.0
-	# The enemy roster with live sprites.
+
+
+# c2-02 page 2 — the standard red-team roster with live sprites, now at a roomy
+# pitch instead of 18px crammed under the ranged block.
+func _howto_page_enemies() -> void:
+	var y := 100.0
+	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
+	y += 22.0
 	# sol-08: front the LIVE red-team sprites the player now sees (rusher/elite draw the pack enemy_* cel bakes).
 	var roster := [["enemy_smg", "RUSHER — charges, touch kills"],
 		["enemy_assault", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — lurks in water, grenades only"]]
 	for r in roster:
-		_draw_sprite_fit(r[0], Rect2(80, y - 15, 20, 18), Art.tint(r[0]))
-		Art.text(self, r[1], Vector2(108, y), 10, Color(0.9, 0.92, 0.82), 612.0 - 108.0)
-		y += 18.0
-	y += 4.0
+		_draw_sprite_fit(r[0], Rect2(74, y - 22, 28, 26), Art.tint(r[0]))
+		Art.text(self, r[1], Vector2(110, y - 6), 11, Color(0.9, 0.92, 0.82), 612.0 - 110.0)
+		y += 34.0
+
+
+# c2-02 page 3 — the Endless War ranged specialists.
+func _howto_page_endless() -> void:
+	var y := 100.0
 	# Endless War fields ranged specialists (wave 3+) — teach their counters.
 	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
-	y += 13.0
+	y += 20.0
 	# Each line fronts its LIVE sprite in its in-game tint (panel round: the top
 	# roster teaches silhouettes, this block taught only names — a first-run
 	# player couldn't match "GHILLIE" to the shape that kills them). Keyed
@@ -2799,9 +2892,11 @@ func _draw_howto() -> void:
 	assert(y + float(special.size() - 1) * pitch <= last_max)
 	assert(pitch >= readable)
 	var box: float = maxf(1.0, pitch - 1.0)
-	# Descriptions are width-clamped to the frame interior so a long tip clips
-	# with an ellipsis instead of bleeding through the chrome at x=640.
-	var text_w := 612.0 - 76.0
+	# c2-02: each ENDLESS threat description is width-clamped to the frame interior
+	# (text starts at x76, right edge 612) so a long or LOCALIZED tip clips with an
+	# ellipsis instead of bleeding through the chrome past x=640 — the same overflow
+	# guard the ENEMIES roster and the BASIC verb lines carry.
+	var text_w := maxf(0.0, 612.0 - 76.0)
 	for i in special.size():
 		var sy := y + i * pitch
 		_draw_sprite_fit(special[i][0], Rect2(50, sy - box + 3.0, box, box), special[i][1])
@@ -2917,7 +3012,10 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 				Art.draw_glyph(self, action, Vector2(x + 6.0, base_y - 4.0), 12.0)
 				x += 16.0
 		else:
-			Art.text(self, seg, Vector2(x, base_y), 11, col)
+			# c2-02: clamp each text segment to the frame interior (right edge 612) so
+			# a long or localized verb line clips instead of bleeding past x=640 into
+			# the chrome — same width guard the ENEMIES / ENDLESS pages use.
+			Art.text(self, seg, Vector2(x, base_y), 11, col, maxf(0.0, 612.0 - x))
 			x += f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 
 
@@ -3049,6 +3147,10 @@ func _footer_legend() -> void:
 	# when it actually pages; guarded on main so the headless capture menu (no board) skips.
 	if mode == Mode.HALL and main != null and _hall_pages(_hall_rows().size()) > 1:
 		segs = footer_page_segs() + segs
+	elif mode == Mode.HOWTO:
+		# c2-02: HOW TO PLAY pages on left/right — state the axis in the one strip
+		# players read for bindings, same as HALL's UP/DN page hint.
+		segs = footer_howto_page_segs() + segs
 	_legend_row(segs, FOOTER_Y + 8.0, 0.9)
 
 
@@ -3089,3 +3191,9 @@ static func footer_segs(mode_id: int) -> Array:
 # so one axis-stamped cap reads on either device. Static so a headless test can pin it.
 static func footer_page_segs() -> Array:
 	return [{"tex": "glyph_key_wide", "stamp": "UP/DN", "label": "PAGE"}]
+
+
+# c2-02: the HOW-TO paging hint — the pages turn on the horizontal axis, so the
+# wide keycap is stamped L/R. Static so a headless test can pin it.
+static func footer_howto_page_segs() -> Array:
+	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": "PAGE"}]
