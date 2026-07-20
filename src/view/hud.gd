@@ -20,6 +20,11 @@ const PIP_MIN_X := 4.0  # left safety floor (inset) for the accessibility corner
 const PIP_PAD_L := 3.0  # the scrim plate overhangs the glyph this far to the LEFT; folded into the
                        # clamp so the WHOLE plate (not just the glyph) is guarded, never just the anchor
 const PIP_H := 10.0     # scrim-plate height (glyph row is ~9px tall + 1px breathing)
+const PIP_TOP := 8.0    # c2-18: HUD-local y of the first (top) corner pip. Shared by _accessibility_pips
+                       # AND _draw_plate so the extended header is sized to actually cover the pip stack.
+const PIP_STEP := 11.0  # c2-18: vertical stride between stacked corner pips (also shared with _draw_plate)
+const PLATE_EPS := 0.01      # c2-18: sub-pixel guard — suppress a zero/negative-height plate body region
+const PLATE_SEAM_MIN := 0.5  # c2-18: min header overhang (px) before the seam shadow is worth drawing
 const PIP_SCRIM := Color(0.04, 0.05, 0.04, 0.92)   # near-opaque backing: even over white snow /
                        # desert / an explosion flash it composites to a near-black plate so the pip
                        # never washes out. Extracted as a const so the contrast test measures the
@@ -498,14 +503,7 @@ func _draw() -> void:
 	if _shop_eligible(sim):
 		strip_r = _draw_shop_strip(sim)
 	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, 262.0, RIGHT - 2.0)
-	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
-		Rect2(2, 2, _plate_r, panel_h),
-		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.65))
-	# Hairline top-light border (4v): separates the plate from bright terrain
-	# without more darkness — contrast by edge, not by mud.
-	RenderingServer.canvas_item_add_polyline(_plate_ci, PackedVector2Array([
-		Vector2(2, 2), Vector2(_plate_r, 2), Vector2(_plate_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
-	]), PackedColorArray([Color(0.5, 0.55, 0.5, 0.35)]), 1.0)
+	_draw_plate(panel_h)
 
 	# Player rows.
 	var ry := player_rows_top(sim)
@@ -595,6 +593,100 @@ func _draw() -> void:
 ## test can pin the reservation without a draw context.
 static func _corner_reserve(colorblind: bool, motion: float) -> float:
 	return 18.0 if (colorblind or motion < 0.5) else 0.0
+
+
+## c2-18: THE single source of which corner pips render this frame, in stack order — one entry per
+## toggle that is ON *and* whose label fits the usable band (_pip_fits suppression folded in). Each
+## entry is [label, glyph_color]. Both _accessibility_pips (which DRAWS them) and _draw_plate (which
+## sizes the extended header off the count) read this, so the plate can never grow for a pip that
+## won't draw, nor drift from what the pip pass actually paints. Colors route through Art.safe so the
+## hue stays colorblind-safe.
+func _shown_pips(band: Vector2) -> Array[Array]:
+	var out: Array[Array] = []
+	if Art.colorblind and _pip_fits("CB", band):
+		out.append(["CB", Art.safe(Color(0.6, 0.85, 1.0))])
+	if main._motion < 0.5 and _pip_fits("RM", band):
+		out.append(["RM", Art.safe(Color(0.75, 0.95, 0.7))])
+	return out
+
+
+## c2-18: y the extended header drops to for `pip_n` live pips — the LOWER of the row-0/strip seam
+## (STRIP_TOP) and the bottom of the pip stack (+1px breathing), clamped to the plate bottom. Static +
+## pure so test_extended_header_covers_pip_stack can prove the header always covers the WHOLE CB/RM
+## stack (both pips docked) with no live draw context. Sized off the SAME PIP_TOP/PIP_STEP/PIP_H the
+## pips lay out with, so header coverage and pip layout can't drift apart.
+static func _header_bottom(pip_n: int, panel_h: float) -> float:
+	var pip_bottom := (PIP_TOP - 1.0) + float(pip_n - 1) * PIP_STEP + PIP_H   # last pip plate's bottom
+	return minf(maxf(STRIP_TOP, pip_bottom + 1.0), panel_h)
+
+
+## c2-18: paints the scavenged-metal plate behind the corner readout onto the z:-1 plate item.
+## Baseline: a single dynamic-width rect + hairline border. When an accessibility pip is live the
+## header band extends FULL-WIDTH to the design edge (so it fully backs the right-anchored CB/RM pips,
+## whose band right edge is RIGHT) and DOWN far enough to cover the whole live pip stack, so both
+## stacked pips dock onto the persistent dark plate instead of floating over the battlefield. The body
+## keeps its dynamic width, forming a full-width-header / narrow-body HUD. One virtual full-panel
+## stretch feeds BOTH the header and body rects via texture_rect_region, so the panel texture is
+## continuous across the header/body seam (no texture-scale mismatch). Extracted from _draw for clarity.
+func _draw_plate(panel_h: float) -> void:
+	var ptex_tex := Art.tex("ui_panel")
+	var ptex := ptex_tex.get_rid()
+	var plate_col := Color(1, 1, 1, 0.65)
+	# Hairline top-light border (4v): separates the plate from bright terrain without more darkness —
+	# contrast by edge, not by mud.
+	var pborder := PackedColorArray([Color(0.5, 0.55, 0.5, 0.35)])
+	# Baseline plate whenever no pip actually renders — a toggle can be ON yet its pip suppressed on a
+	# degenerate/cropped band (_shown_pips empty), in which case there is nothing to dock and the header
+	# must NOT grow. So gate on the real render set, not just the corner reservation.
+	var tsz := ptex_tex.get_size()
+	var pip_n := _shown_pips(_pip_bounds()).size()
+	if pip_n == 0:
+		# Baseline: single dynamic-width rect (full texture) + hairline border.
+		_emit_plate_rect("body", Rect2(2, 2, _plate_r, panel_h), ptex, Rect2(0, 0, tsz.x, tsz.y), plate_col)
+		_emit_plate_border(PackedVector2Array([
+			Vector2(2, 2), Vector2(_plate_r, 2), Vector2(_plate_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
+		]), pborder)
+		return
+	var head_r := RIGHT                          # full-width header reaches the design edge so it fully
+	                                             # backs the right-anchored pips (their band right == RIGHT)
+	# Header drops far enough to cover the whole live pip stack (see _header_bottom), so BOTH stacked
+	# pips sit on the dark plate. Clamped to the plate bottom so a short panel just becomes a full header.
+	var hb := _header_bottom(pip_n, panel_h) - 2.0   # header/body seam, measured from the plate top (y=2)
+	# Body's TRUE right edge = its texture edge (2 + _plate_r), clamped so it never pokes PAST the
+	# header — a maxed body collapses body_r onto head_r and the outline becomes one clean rectangle
+	# (no 2px overhang, no interior notch). The border below traces exactly these edges.
+	var body_r := minf(2.0 + _plate_r, head_r)
+	# One virtual full-panel stretch spans the whole header+body bounding box; each rect samples the
+	# slice of the texture that maps to its own sub-region (texture_rect_region), so the panel texture
+	# is CONTINUOUS across the L-shape and the header/body seam shows no texture-scale mismatch.
+	var box_w := head_r - 2.0                    # bounding-box width the full texture width maps across
+	var box_h := panel_h - 2.0                   # bounding-box height the full texture height maps across
+	var seam_v := tsz.y * hb / box_h             # texture-space y of the header/body seam
+	_emit_plate_rect("header", Rect2(2, 2, box_w, hb), ptex, Rect2(0, 0, tsz.x, seam_v), plate_col)
+	if panel_h > 2.0 + hb + PLATE_EPS:
+		_emit_plate_rect("body", Rect2(2, 2.0 + hb, body_r - 2.0, panel_h - 2.0 - hb), ptex,
+			Rect2(0, seam_v, tsz.x * (body_r - 2.0) / box_w, tsz.y - seam_v), plate_col)
+	# Outline traces the TRUE header+body union boundary — header to head_r, body to body_r.
+	_emit_plate_border(PackedVector2Array([
+		Vector2(2, 2), Vector2(head_r, 2), Vector2(head_r, 2.0 + hb),
+		Vector2(body_r, 2.0 + hb), Vector2(body_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
+	]), pborder)
+	# Subtle seam shadow under the header's exposed overhang — the full-width header reads as a
+	# deliberate raised shelf casting onto the field below, not a clipped panel. Only where the header
+	# actually overhangs the narrower body.
+	if head_r > body_r + PLATE_SEAM_MIN:
+		RenderingServer.canvas_item_add_line(_plate_ci,
+			Vector2(body_r, 2.0 + hb), Vector2(head_r, 2.0 + hb), Color(0, 0, 0, 0.28), 1.0)
+
+
+## c2-18: overridable emit seams for the plate texture rect and border polyline, so a headless capture
+## hud can record the ACTUAL plate geometry _draw_plate lays out (header reaches the design edge, body
+## width, coverage of the docked pip stack) without a live GL context. `id` tags the rect ("header"/
+## "body") for the capture. Production routes straight to the z:-1 plate canvas item.
+func _emit_plate_rect(_id: String, dest: Rect2, tex: RID, src: Rect2, col: Color) -> void:
+	RenderingServer.canvas_item_add_texture_rect_region(_plate_ci, dest, tex, src, col)
+func _emit_plate_border(points: PackedVector2Array, col: PackedColorArray) -> void:
+	RenderingServer.canvas_item_add_polyline(_plate_ci, points, col, 1.0)
 
 
 ## c1-06: pure two-pass overflow planner shared by the player rows (and mirrored by
@@ -1136,21 +1228,26 @@ static func verb_legend_primitives(y: float) -> Array:
 ## Tiny top-right corner pips confirming REDUCE MOTION / COLORBLIND are live —
 ## both toggles reshape the whole HUD but had no on-screen state readout.
 func _accessibility_pips() -> void:
-	var acc_y := 8.0
+	var acc_y := PIP_TOP        # c2-18: shared with _draw_plate's header sizing so the plate covers the stack
 	var band := _pip_bounds()   # (left, right) usable band in HUD-local space; pulls in when cropped
 	# full-alpha glyphs sit on the opaque scrim for max contrast; a pip whose label can't fit the
 	# band at all is SUPPRESSED (below the supported minimum) rather than drawn spilling off-edge.
 	# c2-07: each pip's contrast backing is the opaque _pip_plate scrim below (PIP_SCRIM, the SAME
-	# dark tray the low-ammo _mag_bar warning now draws) plus its framing hairline, drawn BEFORE the
-	# glyph so the light-on-dark CB/RM label holds over bright snow/desert/explosion flash instead of
-	# washing out. _pip_plate raw-draws its rect (not the _emit_bg_rect seam) precisely because these
-	# pips live in the reserved corner PAST _fit_full. The label color routes through Art.safe so its
-	# hue stays colorblind-safe.
-	if Art.colorblind and _pip_fits("CB", band):
-		_text("CB", _pip_plate("CB", acc_y, band), acc_y, Art.safe(Color(0.6, 0.85, 1.0)))
-		acc_y += 11.0
-	if main._motion < 0.5 and _pip_fits("RM", band):
-		_text("RM", _pip_plate("RM", acc_y, band), acc_y, Art.safe(Color(0.75, 0.95, 0.7)))
+	# dark tray the low-ammo _mag_bar warning now draws) drawn BEFORE the glyph so the light-on-dark
+	# CB/RM label holds over bright snow/desert/explosion flash instead of washing out. _pip_plate
+	# raw-draws its rect (not the _emit_bg_rect seam) precisely because these pips live in the reserved
+	# corner PAST _fit_full. c2-18: the render set + colors come from _shown_pips, the SAME source
+	# _draw_plate sizes the docking header off, so plate coverage can't drift from what's painted.
+	var pips := _shown_pips(band)
+	# c2-18: docking is a whole-frame property computed HERE and PASSED to _pip_plate (not stashed in
+	# order-dependent member state) — _draw_plate extends the header EXACTLY when pips render, so any
+	# pip we draw is on the plate. Docked pips drop the framing hairline (the scrim, blended into the
+	# plate, still backs the glyph); an undocked pip over bare terrain would keep it.
+	var docked := not pips.is_empty()
+	for pip in pips:
+		var label: String = pip[0]
+		_text(label, _pip_plate(label, acc_y, band, docked), acc_y, pip[1])
+		acc_y += PIP_STEP
 
 
 ## Whether a pip's label fits the usable band — the supported minimum below which the pip is
@@ -1240,11 +1337,20 @@ static func _pip_plate_rect(right_edge: float, w: float, py: float, left_edge :=
 	return Rect2(left, py - 1.0, maxf(1.0, right - left), PIP_H)
 
 
-## Dark backing behind a corner pip — the pips draw over the live battlefield with
-## no panel under them (the corner plate is top-LEFT), so they washed out on bright
-## snow/desert. An opaque scrim + hairline restores contrast without a full plate;
-## returns the glyph x (the shared _pip_x anchor the plate is built around).
-func _pip_plate(txt: String, py: float, band: Vector2) -> float:
+## c2-18: whether a corner pip draws its framing hairline — ONLY when it is NOT docked on the plate.
+## A docked pip's scrim (same near-black as the panel) blends into the plate, so the hairline would
+## read as a separate floating sticker; undocked over bare terrain it frames the scrim off bright snow.
+## Pure so the docked/undocked hairline decision is unit-testable without a GL draw context.
+static func _pip_hairline_shown(docked: bool) -> bool:
+	return not docked
+
+
+## Dark backing behind a corner pip. c2-18: pips now dock on the extended HUD-plate header (docked ==
+## true), so the scrim blends into the plate and the framing hairline is dropped — the glyph sits
+## directly on the main plate. Undocked (over the live battlefield) it keeps the hairline. The near-
+## opaque scrim STAYS either way, so contrast holds even where the 0.65-alpha panel lets terrain show
+## through. Returns the glyph x (the shared _pip_x anchor the plate is built around).
+func _pip_plate(txt: String, py: float, band: Vector2, docked := true) -> float:
 	var w := _tw(txt)
 	var r := _pip_plate_rect(band.y, w, py, band.x)
 	# c2-07: THE pip contrast backing. Near-opaque PIP_SCRIM (the SAME constant the low-ammo mag
@@ -1253,9 +1359,10 @@ func _pip_plate(txt: String, py: float, band: Vector2) -> float:
 	# pips live in the reserved corner PAST _fit_full, where the seam's within-edge capture check
 	# would reject them; the plate is verified instead by _PipCaptureHud's own _pip_plate override.
 	draw_rect(r, PIP_SCRIM)
-	# The 1px hairline is stroked CENTERED on its rect edge, so drawing it on `r` would push half a
-	# pixel past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
-	draw_rect(r.grow(-0.5), PIP_HAIRLINE, false, 1.0)
+	if _pip_hairline_shown(docked):
+		# The 1px hairline is stroked CENTERED on its rect edge, so drawing it on `r` would push half a
+		# pixel past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
+		draw_rect(r.grow(-0.5), PIP_HAIRLINE, false, 1.0)
 	return _pip_x(band.y, w, band.x)
 
 

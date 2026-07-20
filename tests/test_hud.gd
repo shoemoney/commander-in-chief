@@ -358,6 +358,62 @@ func test_corner_reserve_for_cb_rm_pips() -> void:
 	Runner.T.eq(HudIcons._corner_reserve(false, 0.0), 18.0, "reduce-motion pip reserves the corner")
 
 
+# c2-18: the extended HUD-plate header must drop far enough to fully cover the live CB/RM pip stack —
+# otherwise a docked pip (esp. the SECOND, lower one when both toggles are on) would spill below the
+# dark header and float back over the battlefield, the exact disconnection this item removes. Assert
+# _header_bottom (the pure seam-y the plate is sized from) reaches at or below the last pip plate's
+# bottom for both the 1-pip and 2-pip stacks, using the SAME PIP_TOP/PIP_STEP/PIP_H the pips lay out
+# with. Also assert it never grows shorter than the original row-0/strip seam, and is capped at the
+# plate bottom so a short panel can't overrun it.
+func test_extended_header_covers_pip_stack() -> void:
+	for n in [1, 2]:
+		var pip_stack_bottom: float = (HudIcons.PIP_TOP - 1.0) + float(n - 1) * HudIcons.PIP_STEP + HudIcons.PIP_H
+		var hb: float = HudIcons._header_bottom(n, 200.0)
+		Runner.T.ok(hb >= pip_stack_bottom - 0.01, "n=%d: header seam covers the whole pip stack" % n)
+		Runner.T.ok(hb >= HudIcons.STRIP_TOP - 0.01, "n=%d: header never shorter than the row-0/strip seam" % n)
+	# A pathologically short plate caps the header at the plate bottom (no overrun past the panel).
+	Runner.T.ok(HudIcons._header_bottom(2, 12.0) <= 12.0 + 0.01, "header seam is capped at the plate bottom")
+	# c2-18: a docked pip (on the extended header) drops its framing hairline so the glyph sits on the
+	# main plate; an undocked pip (over bare terrain) keeps it to frame the scrim off bright snow.
+	Runner.T.ok(not HudIcons._pip_hairline_shown(true), "docked pip drops the framing hairline")
+	Runner.T.ok(HudIcons._pip_hairline_shown(false), "undocked pip keeps the framing hairline")
+
+
+# c2-18: drive the REAL _draw_plate through its overridable emit seams and inspect the ACTUAL plate
+# geometry it lays out with both CB + RM pips live (the two-pip stack). Proves the extended header
+# rect reaches the design edge (so it fully backs the right-anchored pips), drops far enough to cover
+# the lower docked pip, and that the narrow body never pokes past the full-width header — an
+# integration check on the live layout, not just the pure _header_bottom seam.
+class _PlateCaptureHud extends HudIcons:
+	var band := Vector2(HudIcons.PIP_MIN_X, HudIcons.RIGHT)
+	var plate_rects := {}
+	func _pip_bounds() -> Vector2:
+		return band
+	func _emit_plate_rect(id: String, dest: Rect2, _tex: RID, _src: Rect2, _col: Color) -> void:
+		plate_rects[id] = dest
+	func _emit_plate_border(_points: PackedVector2Array, _col: PackedColorArray) -> void:
+		pass
+
+func test_extended_plate_header_backs_pips() -> void:
+	var was_cb: bool = Art.colorblind
+	Art.colorblind = true                       # CB pip live
+	var h := _PlateCaptureHud.new()
+	h.main = _RowMain.new()
+	h.main._motion = 0.0                        # RM pip live too -> the taller two-pip stack
+	h._ready()                                  # create the z:-1 plate item the seam-shadow line draws onto
+	h._draw_plate(200.0)                        # roomy panel
+	Runner.T.ok(h.plate_rects.has("header"), "extended plate emits a full-width header rect")
+	var header: Rect2 = h.plate_rects["header"]
+	Runner.T.ok(absf(header.end.x - HudIcons.RIGHT) < 0.01, "header right edge reaches the design edge (RIGHT)")
+	var pip_bottom: float = (HudIcons.PIP_TOP - 1.0) + HudIcons.PIP_STEP + HudIcons.PIP_H  # 2nd (lower) pip's plate bottom
+	Runner.T.ok(header.end.y >= pip_bottom - 0.01, "header drops far enough to cover the bottom docked pip")
+	if h.plate_rects.has("body"):
+		Runner.T.ok(h.plate_rects["body"].end.x <= header.end.x + 0.01, "narrow body never pokes past the full-width header")
+	h.main.free()
+	h.free()
+	Art.colorblind = was_cb
+
+
 # c1-11: the accessibility corner pips stay right-anchored but never spill off either edge.
 # _pip_plate_rect is the single clamped source for BOTH the scrim plate and (via _pip_x) the
 # glyph anchor, so proving it here proves the whole pip — plate overhang included — is guarded,
@@ -544,7 +600,7 @@ class _PipCaptureHud extends _ChipCaptureHud:
 	var band := Vector2(HudIcons.PIP_MIN_X, HudIcons.RIGHT)
 	func _pip_bounds() -> Vector2:
 		return band   # inject the band a stretch/letterbox viewport-to-HUD conversion would yield
-	func _pip_plate(txt: String, py: float, b: Vector2) -> float:
+	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate:" + txt, "box": r})
 		return HudIcons._pip_x(b.y, _tw(txt), b.x)
@@ -2085,7 +2141,7 @@ class _FrameCaptureHud extends _ChipCaptureHud:
 	func _mag_bar(x: float, y: float, _ammo: int, _maxa: int) -> float:
 		boxes.append({"k": "bg", "id": "mag", "box": Rect2(x, y, 8 * 3.6, 5.0)})
 		return x + 8 * 3.6 + 4.0   # mirrors HudIcons._mag_bar's advance
-	func _pip_plate(txt: String, py: float, b: Vector2) -> float:
+	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate", "box": r})
 		return HudIcons._pip_x(b.y, _tw(txt), b.x)
