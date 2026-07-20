@@ -320,30 +320,52 @@ const SHOP_ICON_DIM := 0.22  # c1-15: closed-state alpha of the 4 supply icons. 
                             # nothing reflows as the prices come in.
 
 
+# c2-16: short names for the four buyables so the endless strip isn't an icon-only rebus. They draw
+# CENTERED BENEATH each icon (see _draw_shop_strip), dimmed with the icon so the CLOSED preview reads
+# as named stock, not a rebus. Order matches the icon/cost `kind`: ammo, grenade, vest, airstrike.
+const SHOP_NAMES := ["AMMO", "GREN", "VEST", "AIR"]
+const SHOP_ICON := 9.0        # c2-16: strip icon size (< ICON=13) so a name line fits BELOW it inside
+                              # the one reserved ROW_H -- a 13px icon + a label won't stack in 16px.
+const SHOP_NAME_SIZE := 7     # c2-16: name font -- smaller than the FONT_SIZE(10) price, per the spec.
+const SHOP_NAME_Y := 38.0     # c2-16: name baseline -- tucked between the shrunk icon (ends STRIP_TOP+
+                              # SHOP_ICON) and the first player row (player_rows_top=STRIP_TOP+ROW_H).
+
+
 # c1-15: paint the reserved strip band as ONE continuous cross-fade (no threshold swap): the buy icons
-# brighten from a dim structural floor to full as the window opens, and each cost label + affordability
-# color fades in with them. Closed = dim icons only (a preview, never mistaken for a live purchase);
-# open = full priced chips. Icon x is fixed for the whole fade, so the two states share the same slots
-# and can never overlap.
-func _draw_shop_strip(sim: SimWorld) -> void:
+# brighten from a dim structural floor to full as the window opens; each price + affordability color
+# fades in with them. Closed = dim icons + dim NAMES (a named preview, never mistaken for a live
+# purchase -- no price shows); open = full named, priced chips. Icon x is fixed for the whole fade, so
+# the two states share the same slots and can never overlap. c2-16: returns the icon+price strip's
+# right edge so _draw folds THAT (not the centered-below names) into the plate width.
+func _draw_shop_strip(sim: SimWorld) -> float:
 	var a := _shop_anim
 	var icon_a := SHOP_ICON_DIM + (1.0 - SHOP_ICON_DIM) * a
 	var ty := STRIP_TOP + ICON - 3.0
 	var sx := 8.0
 	for kind in 4:
 		var icon: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][kind]
-		_emit_icon(icon, Rect2(sx, STRIP_TOP, ICON, ICON), Color(1, 1, 1, icon_a))
+		_emit_icon(icon, Rect2(sx, STRIP_TOP, SHOP_ICON, SHOP_ICON), Color(1, 1, 1, icon_a))
 		var cost: int = sim._supply_cost(kind)
 		var afford: bool = sim.war_chest >= cost
-		# "×" suffix: affordability readable without color vision — same mark the spend wheel (the
-		# primary buy surface) draws beside its sockets. Price + color fade in with the window (a=0
-		# when closed), while the icon slot stays put.
-		# c2-07: the unaffordable price routes through the colorblind palette (Art.warn -> magenta
-		# shift) and already draws ON the strip's own dark preview backing, so it needs no extra
-		# per-glyph scrim (which would collide with the strip's tight non-overlap layout anyway).
+		# c2-16: the NAME is dimmed WITH the icon (icon_a floor, NOT the price window alpha), so the
+		# CLOSED strip is named stock -- not the icon-only rebus the spec calls out. Centered beneath its
+		# icon at a smaller font and drawn straight through Art.text_center (a distinct centered primitive,
+		# not the left-aligned _emit_hud_text price seam), so it neither widens the priced strip nor reads
+		# as a fading price. The row-0 SUPPLIES wheel cue is suppressed for the whole eligible run (see
+		# _draw), so the strip and the cue are never both shown.
+		Art.text_center(self, SHOP_NAMES[kind], sx + SHOP_ICON / 2.0, SHOP_NAME_Y,
+			SHOP_NAME_SIZE, Color(0.86, 0.88, 0.82, icon_a))
+		# Price immediately to the RIGHT of the icon (strip width unchanged from the old icon+price form),
+		# fading in with the window (a=0 when closed) while the icon slot stays put.
+		# "×" suffix: affordability readable without color vision -- same mark the spend wheel (the primary
+		# buy surface) draws beside its sockets.
+		# c2-07: the unaffordable price routes through the colorblind palette (Art.warn -> magenta shift)
+		# and already draws ON the strip's own dark preview backing, so it needs no extra per-glyph scrim
+		# (which would collide with the strip's tight non-overlap layout anyway).
 		var scol := (Art.safe(Color(0.55, 0.9, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.4)))
 		scol.a = a
-		sx = _text(str(cost) + ("" if afford else "×"), sx + ICON + 3.0, ty, scol) + 10.0
+		sx = _text(str(cost) + ("" if afford else "×"), sx + SHOP_ICON + 3.0, ty, scol) + 10.0
+	return sx - 10.0
 
 
 const STRIP_TOP := 23.0   # c1-15: y of the shop-strip row (row-0 origin 6 + 17). The buy chips
@@ -387,9 +409,12 @@ func _draw() -> void:
 	if sid != _shop_sim_id:
 		_shop_anim = 1.0 if _shop_open(sim) else 0.0
 		_shop_sim_id = sid
-	# `shop_row` is the strip's VISIBLE presence (open or still fading out) — it gates the row-0
-	# SUPPLIES suppression so the wheel cue never pops in over prices that are mid-fade.
-	var shop_row := _shop_strip_visible(sim)
+	# `shop_row` gates the row-0 SUPPLIES suppression. c2-16: it keys on strip ELIGIBILITY, not just the
+	# open/fading window — whenever the strip band is reserved (endless, fits the height) the wheel cue
+	# is suppressed for the WHOLE run, so the cue and the strip are strictly one-or-the-other: never a
+	# frame with both, not even over the closed dim icon peek. Only when the strip is dropped for height
+	# (2P) does `shop_row` go false and the wheel cue become the buy affordance.
+	var shop_row := _shop_eligible(sim)
 	var panel_h := panel_bottom() - 2.0
 	if _disp_chest < 0.0:
 		_disp_chest = float(sim.war_chest)   # first draw can beat first _process
@@ -462,7 +487,17 @@ func _draw() -> void:
 	# immediate-mode (re-cleared + re-emitted every _draw), NOT a self-drawing child,
 	# so the Control's own queue_redraw fully repaints it — no separate invalidation.
 	RenderingServer.canvas_item_clear(_plate_ci)
-	_plate_r = clampf(maxf(row_r, _prow_r) + 4.0, 262.0, RIGHT - 2.0)
+	# Shop strip: the 4 buyables at a glance. c1-15: when eligible its ROW is reserved for the whole
+	# run (rows start at player_rows_top regardless of the intermission); the band cross-fades from a
+	# dim named icon preview when closed to full named, priced chips when open (see _draw_shop_strip).
+	# c2-16: drawn BEFORE the plate so the icon+price strip's right edge folds into the plate width --
+	# the scavenged-metal backing always reaches under the last buy chip. The names sit centered BELOW
+	# their icons (narrower than the priced strip), so they never push the fold wider than icon+price.
+	# The strip paints on `self`; the plate is the z:-1 canvas item, so it still composites behind.
+	var strip_r := 0.0
+	if _shop_eligible(sim):
+		strip_r = _draw_shop_strip(sim)
+	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, 262.0, RIGHT - 2.0)
 	RenderingServer.canvas_item_add_texture_rect(_plate_ci,
 		Rect2(2, 2, _plate_r, panel_h),
 		Art.tex("ui_panel").get_rid(), false, Color(1, 1, 1, 0.65))
@@ -471,12 +506,6 @@ func _draw() -> void:
 	RenderingServer.canvas_item_add_polyline(_plate_ci, PackedVector2Array([
 		Vector2(2, 2), Vector2(_plate_r, 2), Vector2(_plate_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
 	]), PackedColorArray([Color(0.5, 0.55, 0.5, 0.35)]), 1.0)
-
-	# Shop strip: the 4 buyables at a glance. c1-15: when eligible its ROW is reserved for the whole
-	# run (rows start at player_rows_top regardless of the intermission); the band cross-fades from a
-	# dim icon preview when closed to priced chips when open (see _draw_shop_strip) — never empty.
-	if _shop_eligible(sim):
-		_draw_shop_strip(sim)
 
 	# Player rows.
 	var ry := player_rows_top(sim)
@@ -1005,9 +1034,10 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 		if _fits2("sector", _tw(sectxt) + 10.0):
 			x = _text(sectxt, x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
-	# Suppressed while the endless shop strip is SHOWN — two buy affordances at
-	# once (wheel cue + priced strip) read as conflicting instructions. When the
-	# strip drops for height, the wheel cue is the buy affordance again.
+	# c2-16: suppressed for the WHOLE run whenever the endless shop strip is eligible (shop_row) — the
+	# strip and the wheel cue are two views of the same buy surface, so showing both (even the cue over
+	# the closed dim icon peek) reads as conflicting instructions. Strictly one-or-the-other: the strip
+	# owns endless, and when it drops for height (2P) the wheel cue is the buy affordance instead.
 	if not shop_row and _fits2("supplies", _tw("SUPPLIES") + 25.0):
 		if not _measure:
 			_emit_act_glyph("wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0, Color.WHITE, false)
