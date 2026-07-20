@@ -511,7 +511,7 @@ func test_footer_submenu_cycle_and_filter_hints() -> void:
 	# row shape instead of a hand-maintained id list.
 	Runner.T.eq(Menu.footer_cycle_segs({"id": "motion", "on": false})[0]["label"], "TOGGLE", "an 'on' toggle row hint reads TOGGLE")
 	Runner.T.eq(Menu.footer_cycle_segs({"id": "sfx", "vol": 5})[0]["label"], "ADJUST", "a 'vol' row hint reads ADJUST")
-	Runner.T.eq(Menu.footer_cycle_segs({"id": "winscale"})[0]["label"], "ADJUST", "the stepped WINDOW SCALE row hint reads ADJUST")
+	Runner.T.eq(Menu.footer_cycle_segs({"id": "winscale", "step": true})[0]["label"], "ADJUST", "a 'step' stepper row hint reads ADJUST")
 	Runner.T.eq(Menu.footer_cycle_segs({"id": "motion", "on": true})[0]["stamp"], "L/R", "cycle hint stamped L/R")
 
 
@@ -2387,6 +2387,28 @@ func test_options_header_text_fits_screen() -> void:
 			"section caption '%s' fits the left-margin runway" % cap)
 
 
+# c3-09: every focused-row help line is the top line of the footer, so each must clear the real
+# footer ellipsize budget (_draw_footer_help uses CANVAS_WIDTH - 24) — a string that would actually
+# get clipped fails here rather than passing a looser check. Also pins that run-config rows never
+# claim a save and that value-less openers/actions carry no description at all.
+func test_settings_help_lines_fit_footer() -> void:
+	var f := Art.font()
+	var help_budget := Menu.CANVAS_WIDTH - 24.0
+	for id in ["sfx", "music", "rumble", "motion", "colorblind", "assist",
+			"fullscreen", "winscale", "coop", "hard"]:
+		var h := Menu.setting_help(id)
+		Runner.T.ok(h != "", "settings row '%s' has a help description" % id)
+		Runner.T.ok(f.get_string_size(h, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= help_budget,
+			"help line for '%s' fits the footer width (no ellipsis)" % id)
+	# CO-OP / NG+ HARD are run-config, not persisted, so they must NOT claim a save.
+	for id in ["coop", "hard"]:
+		Runner.T.ok("NEXT RUN" in Menu.setting_help(id) and not ("SAVED" in Menu.setting_help(id)),
+			"run-config row '%s' states it applies next run, not that it is saved" % id)
+	# Navigation openers (DISPLAY/OPTIONS/INFO/CONTROLS) and actions change no value, so no help.
+	for id in ["display", "options", "info", "controls", "reset_defaults", "back", "resume"]:
+		Runner.T.eq(Menu.setting_help(id), "", "value-less row '%s' has no help description" % id)
+
+
 # c1-09: a RENDERED-layout regression on the settings-only 8-row OPTIONS screen — instead of
 # checking element sizes in isolation, this reconstructs the ACTUAL on-screen positions
 # _draw() emits for the four crowded elements (header summary, section captions, the
@@ -2450,6 +2472,171 @@ func test_options_dense_layout_elements_dont_collide() -> void:
 	Runner.T.ok(Menu.max_glow_bottom(g) < Menu.FOOTER_Y, "dense OPTIONS last-row glow clears the footer")
 	# The dividers between the 5 groups must not fuse plates: gap keeps a real dead band.
 	Runner.T.ok(gap - bh >= 1.0, "dense OPTIONS keeps a dead band between plates for dividers")
+	m.free()
+	stub.free()
+
+
+# c3-09: the OPTS footer grows a second line DESCRIBING the focused settings row (effect +
+# persistence) BELOW the list, while the header keeps its live a11y summary. Runs the real
+# _footer_legend() through the capture seams, so a wording/geometry/dispatch change is caught,
+# not just the pure helper. Proves: (1) a settings row emits the help line above the SELECT/BACK
+# legend and clear of the last-row glow; (2) a value-less meta row collapses to one legend line;
+# (3) the header a11y summary is unchanged either way (footer is additive, not a replacement).
+func test_opts_footer_describes_focused_setting() -> void:
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+
+	# The footer must sit wholly below the list — its top clears the last-row glow with real margin
+	# (>= 3px, not a fragile hairline), and the whole two-line strip stays inside the 360px canvas.
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false), -1.0)
+	var strip_top := Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
+	Runner.T.ok(strip_top - Menu.max_glow_bottom(g) >= 3.0, "the two-line footer top clears the last-row glow by >=3px")
+	Runner.T.ok(Menu.FOOTER_Y + Menu.FOOTER_H <= 360.0, "the footer strip stays inside the canvas")
+
+	# ASSIST focus: the footer draws the description line AND still draws SELECT/BACK below it.
+	m.sel = _row_index(m, "assist")
+	m._footer_legend()
+	var help := {}
+	for c in m.centered:
+		if String(c["txt"]).begins_with("ASSIST:"):
+			help = c
+	Runner.T.ok(not help.is_empty(), "ASSIST focus draws its description in the footer")
+	Runner.T.ok("TWO HITS" in String(help["txt"]) and "SAVED" in String(help["txt"]),
+		"the ASSIST footer states the effect and that it persists")
+	Runner.T.ok(float(help["y"]) < Menu.FOOTER_Y + 8.0, "the description sits ABOVE the legend line")
+	var labels: Array = m.ops.filter(func(o): return o["k"] == "label").map(func(o): return o["id"])
+	Runner.T.ok("SELECT" in labels and "BACK" in labels, "the SELECT/BACK legend still draws below the description")
+
+	# The whole TWO-LINE strip fits the canvas: the description's ascenders clear the strip top and
+	# the legend labels' descenders (real captured boxes at 8px) stay inside the strip bottom (358)
+	# and the 360px canvas — so rising for the extra line never pushes text off-screen or out of plate.
+	var strip_bottom := strip_top + Menu.FOOTER_H + Menu.FOOTER_HELP_RISE
+	Runner.T.ok(strip_bottom <= 360.0, "the two-line strip bottom (%d) stays inside the canvas" % int(strip_bottom))
+	var desc_top := float(help["y"]) - Art.font().get_ascent(8)
+	Runner.T.ok(desc_top >= strip_top - 0.5, "the description text top stays within the strip")
+	var legend_bottom := 0.0
+	for op in m.ops:
+		if op["k"] == "label":
+			legend_bottom = maxf(legend_bottom, (op["box"] as Rect2).end.y)
+	Runner.T.ok(legend_bottom <= strip_bottom, "the legend labels' descenders stay inside the strip bottom")
+
+	# BACK (a value-less meta row): footer collapses to a single legend line, no description.
+	m.centered.clear()
+	m.sel = _row_index(m, "back")
+	m._footer_legend()
+	Runner.T.eq(m.centered.size(), 0, "a value-less meta row draws no footer description")
+
+	# The header a11y summary is untouched on a settings row (footer is additive, not a swap).
+	m.centered.clear()
+	m.sel = _row_index(m, "assist")
+	m._draw_opts_header()
+	var has_summary := false
+	for c in m.centered:
+		if String(c["txt"]).begins_with("DISPLAY:"):
+			has_summary = true
+	Runner.T.ok(has_summary, "the header keeps its live a11y summary while the footer describes the row")
+
+	m.free()
+	stub.free()
+
+
+# c3-09: the help footer is shared by every settings-bearing screen, not just OPTS. Prove the
+# same two-line footer fires on RUN SETUP (CO-OP) and the DISPLAY sub-screen (FULLSCREEN), that
+# its description line clears the last-row glow and stays in-canvas on those layouts too, and that
+# PAUSE — which holds no value rows — correctly collapses to the single SELECT/BACK legend line.
+func test_help_footer_shared_across_settings_screens() -> void:
+	# [mode, value-row id, expected description prefix]
+	var cases := [
+		[Menu.Mode.SETUP, "coop", "CO-OP:"],
+		[Menu.Mode.DISP, "fullscreen", "FULLSCREEN:"],
+	]
+	for c in cases:
+		var stub := _StubMain.new()
+		var m := _CaptureMenu.new()
+		m.main = stub
+		m.mode = c[0]
+		# The footer top must clear the last-row glow on THIS screen's own geometry.
+		var g: Dictionary = Menu.compute_geometry(c[0], _row_count(c[0], false), -1.0)
+		Runner.T.ok((Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE) - Menu.max_glow_bottom(g) >= 3.0,
+			"mode %d two-line footer clears the last-row glow by >=3px" % c[0])
+		m.sel = _row_index(m, c[1])
+		m._footer_legend()
+		var desc := {}
+		for cc in m.centered:
+			if String(cc["txt"]).begins_with(c[2]):
+				desc = cc
+		Runner.T.ok(not desc.is_empty(), "mode %d draws the %s description in the footer" % [c[0], c[1]])
+		var labels: Array = m.ops.filter(func(o): return o["k"] == "label").map(func(o): return o["id"])
+		Runner.T.ok("SELECT" in labels and "BACK" in labels, "mode %d keeps SELECT/BACK below the description" % c[0])
+		m.free()
+		stub.free()
+
+	# PAUSE holds only actions (RESUME/OPTIONS/RESTART/TITLE) — no value row — so no help line.
+	var pstub := _StubMain.new()
+	var pm := _CaptureMenu.new()
+	pm.main = pstub
+	pm.mode = Menu.Mode.PAUSE
+	pm.sel = 0   # RESUME
+	pm._footer_legend()
+	Runner.T.eq(pm.centered.size(), 0, "PAUSE draws no help footer (no value-holding rows)")
+	var plabels: Array = pm.ops.filter(func(o): return o["k"] == "label").map(func(o): return o["id"])
+	Runner.T.ok("SELECT" in plabels and "BACK" in plabels, "PAUSE still draws its SELECT/BACK legend")
+	pm.free()
+	pstub.free()
+
+
+# c3-09: pin the footer's row->help mapping AND its persistence clause against the REAL row lists,
+# so a row rename or a persistence change can't silently make the footer drop a line or lie. A row
+# HOLDS A VALUE iff its dict carries a value marker — "on" (toggle), "vol" (volume bar), or "step"
+# (integer stepper). That schema flag, not the id, decides whether the row earns a description, so
+# there are no id special-cases: a value row MUST have help, a value-less opener/action MUST NOT.
+# The persistence clause must match the source of truth — persisted settings (whose key is in
+# main.gd's SETTINGS_DEFAULTS) say "SAVED"; run-config rows (CO-OP / NG+ HARD, absent from
+# DEFAULTS) say "NEXT RUN" and never "SAVED".
+func test_setting_help_mapping_and_persistence_contract() -> void:
+	var main_script: GDScript = load("res://src/main.gd")
+	var defaults: Dictionary = main_script.get_script_constant_map()["SETTINGS_DEFAULTS"]
+	# Menu row id -> the SETTINGS_DEFAULTS key it persists (for the "SAVED" contract).
+	var persisted := {"sfx": "sfx_vol", "music": "music_vol", "rumble": "rumble",
+		"motion": "reduce_motion", "colorblind": "colorblind", "assist": "assist",
+		"fullscreen": "fullscreen", "winscale": "window_scale"}
+	for key in persisted.values():
+		Runner.T.ok(defaults.has(key), "SETTINGS_DEFAULTS still carries the persisted key '%s'" % key)
+	var run_config := ["coop", "hard"]
+
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	for mode_id in [Menu.Mode.OPTS, Menu.Mode.DISP, Menu.Mode.SETUP]:
+		m.mode = mode_id
+		for row in m._menu_items():
+			var id: String = row["id"]
+			var help := Menu.setting_help(id)
+			var value_row: bool = row.has("on") or row.has("vol") or row.has("step")
+			if value_row:
+				Runner.T.ok(help != "", "value row '%s' (mode %d) has a footer description" % [id, mode_id])
+			else:
+				Runner.T.eq(help, "", "value-less row '%s' (mode %d) has no description" % [id, mode_id])
+			if help == "":
+				continue
+			if id in run_config:
+				Runner.T.ok("NEXT RUN" in help and not ("SAVED" in help),
+					"run-config row '%s' states it applies next run, not saved" % id)
+			elif persisted.has(id):
+				Runner.T.ok("SAVED" in help, "persisted row '%s' states it is saved" % id)
+	# The "step" schema flag is metadata for the help mapping only — cycling behavior is unchanged:
+	# WINDOW SCALE still cycles and its footer hint still reads ADJUST — both now keyed by the "step"
+	# schema flag, not an id special-case, so _row_cycles takes the ROW dict.
+	m.mode = Menu.Mode.DISP
+	var ws := {}
+	for row in m._menu_items():
+		if row["id"] == "winscale":
+			ws = row
+	Runner.T.ok(ws.get("step", false), "the WINDOW SCALE row carries the step value-marker")
+	Runner.T.ok(m._row_cycles(ws), "WINDOW SCALE cycles because its step flag drives _row_cycles")
+	Runner.T.eq(Menu.footer_cycle_segs(ws)[0]["label"], "ADJUST", "the WINDOW SCALE footer hint still reads ADJUST")
 	m.free()
 	stub.free()
 
@@ -2581,7 +2768,7 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	Runner.T.ok(not by_id["fullscreen"]["on"], "fullscreen state dot reads OFF while windowed")
 	# The row carries no "inactive" flag in either mode — it is a live control throughout (no dead row).
 	Runner.T.ok(not by_id["winscale"].get("inactive", false), "WINDOW SCALE is never marked inactive (always a live control)")
-	Runner.T.ok(m._row_cycles("winscale"), "WINDOW SCALE shows the cycle arrows while windowed")
+	Runner.T.ok(m._row_cycles(by_id["winscale"]), "WINDOW SCALE shows the cycle arrows while windowed")
 	# The 3-row DISPLAY screen decompresses to a legible plate (roomy, unlike a crammed OPTS row).
 	Runner.T.ok(float(Menu.compute_geometry(Menu.Mode.DISP, 3, -1.0)["bh"]) >= MIN_PLATE, "DISPLAY screen plates clear the >=20px legible floor")
 
@@ -2622,7 +2809,7 @@ func test_options_display_row_toggles_fullscreen() -> void:
 		by2[row["id"]] = row
 	Runner.T.eq(by2["fullscreen"]["label"], "FULLSCREEN: ON", "fullscreen row reflects ON at once")
 	Runner.T.ok(not by2["winscale"].get("inactive", false), "WINDOW SCALE is NOT inactive under fullscreen (still a live control)")
-	Runner.T.ok(m._row_cycles("winscale"), "WINDOW SCALE still shows the cycle arrows under fullscreen")
+	Runner.T.ok(m._row_cycles(by2["winscale"]), "WINDOW SCALE still shows the cycle arrows under fullscreen")
 	Runner.T.eq(by2["winscale"]["label"], "WINDOW SCALE: 1x", "under fullscreen a fitting preference shows the bare honest scale (subtitle carries the windowed-only note)")
 	# Enter/◄/► under fullscreen EDIT the preference (applied on return to windowed) and stay fullscreen.
 	m.sel = wi

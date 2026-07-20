@@ -201,6 +201,10 @@ const GLOW_CLEAR := 8.0            # slack the last plate's glow keeps above the
 const COLUMN_BOTTOM := FOOTER_Y - GLOW_CLEAR   # 333 — last non-TITLE plate bottom aims here
 const LEGEND_MARGIN := 4.0         # clearance the TITLE column keeps above LEGEND_Y
 const FOOTER_H := 17.0             # height of the shared SELECT/BACK footer-legend plate
+# c3-09: the two-line footer rises its top by this much for the extra description line; the bottom
+# stays at FOOTER_Y + FOOTER_H. On the fullest OPTS list the last-row glow ends at y333.5, so the
+# strip top (337) clears it by 3.5px. test_opts_footer_describes_focused_setting pins the clearance.
+const FOOTER_HELP_RISE := 4.0
 const BACK_H_RATIO := 0.7          # BACK plate is BTN scaled to this fraction of full row height
 const REBIND_TAB_W := 96.0         # REBIND category-tab plate width
 const REBIND_DEV_W := 52.0         # REBIND P1|P2 device sub-selector plate width
@@ -241,6 +245,11 @@ const DIVIDER_BRIGHT := Color(0.86, 0.82, 0.52, 0.8)
 const DIVIDER_DIM := Color(0.62, 0.66, 0.5, 0.55)
 # Header/subtitle text hues shared across screens.
 const SUBTITLE_COL := Color(0.8, 0.85, 0.72)         # subline under a screen header (INFO/DISP/SETUP/OPTS/PAUSE)
+# c3-09: the footer's row-description line reads as helper text, but NOT dim — dimming accessibility
+# copy fights its own purpose, so it stays high-contrast (full alpha, near the SELECT/BACK legend's
+# Color(0.82,0.87,0.77) luminance). The hairline rule under it, not a low-contrast hue, is what keeps
+# it from reading as another actionable prompt.
+const FOOTER_HELP_COL := Color(0.85, 0.88, 0.8, 1.0)
 const HEADER_ACCENT := Color(1.0, 0.85, 0.3)         # warm title color for TITLE/HALL/HOWTO record headers
 const BYLINE_COL := Color(0.85, 0.78, 0.55, 0.92)    # TITLE byline text
 const CAREER_COL := Color(0.6, 0.72, 0.62, 0.7)      # TITLE career/record footnote text
@@ -643,7 +652,11 @@ func _menu_items() -> Array[Dictionary]:
 		# clamped effective; while windowed it shows the effective, live-applied scale.
 		return [
 			{"id": "fullscreen", "label": fullscreen_label(main._fullscreen), "destructive": false, "on": main._fullscreen, "grp": 0},
-			{"id": "winscale", "label": winscale_label(main._win_scale if main._fullscreen else main._win_scale_norm()), "destructive": false, "grp": 0},
+			# c3-09: "step" tags this as an integer-stepper value row (alongside "on" toggles / "vol"
+			# bars). It's the single source that drives the help-footer's value-row test, _row_cycles
+			# (this row shows ◄/► arrows) AND footer_cycle_segs (its hint reads ADJUST) — no id
+			# special-case anywhere; a future stepper just sets "step": true.
+			{"id": "winscale", "label": winscale_label(main._win_scale if main._fullscreen else main._win_scale_norm()), "destructive": false, "grp": 0, "step": true},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 1},
 		]
 	if mode == Mode.OPTS:
@@ -1459,7 +1472,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			# arrow hitbox overlaps the plate. The arrows draw OUTSIDE the plate, so without this a
 			# mouse-only player would lose the ◄ (down) direction entirely.
 			if mode != Mode.HALL and mode != Mode.HOWTO \
-					and _row_cycles(_menu_items()[sel]["id"]):
+					and _row_cycles(_menu_items()[sel]):
 				var g := _row_geometry()
 				var arows := toggle_arrow_rects(g, sel)   # same source _draw renders from
 				var la := arows[0].grow(3.0)
@@ -1675,6 +1688,34 @@ static func a11y_summary(reduce_motion: bool, colorblind: bool, assist: bool, ru
 		"ON" if assist else "OFF",
 		"ON" if rumble else "OFF",
 	]
+
+
+# c3-09: one-line EFFECT + PERSISTENCE description per value-holding settings row, drawn as the top
+# line of the two-line footer (see _footer_legend); openers/actions have no entry (no footer line).
+# The persistence clause tracks the source of truth — rows in main.gd SETTINGS_DEFAULTS say "SAVED
+# AUTOMATICALLY", run-config CO-OP / NG+ HARD say "APPLIES TO YOUR NEXT RUN". ASSIST names the exact
+# board tag it earns ("*ASSIST", the same marker _draw_hall stamps on those runs) so the effect is
+# concrete, not a vague "flagged". These English strings double as translation KEYS: setting_help()
+# runs the lookup through TranslationServer.translate(), so a .po/.csv keyed on the English text
+# localizes the footer with no code change. The mapping + persistence honesty are pinned by
+# test_setting_help_mapping_and_persistence_contract.
+const SETTING_HELP := {
+	"sfx": "SFX: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS. SAVED AUTOMATICALLY.",
+	"music": "MUSIC: LOUDNESS OF THE BACKGROUND SOUNDTRACK. SAVED AUTOMATICALLY.",
+	"rumble": "RUMBLE: CONTROLLER VIBRATION ON HITS AND EXPLOSIONS. SAVED AUTOMATICALLY.",
+	"motion": "REDUCE MOTION: HOLDS THE SCREEN STEADY - NO SHAKE, FLASH, OR SCROLL FX. SAVED AUTOMATICALLY.",
+	"colorblind": "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVED AUTOMATICALLY.",
+	"assist": "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVED AUTOMATICALLY.",
+	"fullscreen": "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVED AUTOMATICALLY.",
+	"winscale": "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY.",
+	"coop": "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN.",
+	"hard": "NG+ HARD: A TOUGHER CAMPAIGN SPAWN CURVE. APPLIES TO YOUR NEXT RUN.",
+}
+static func setting_help(id: String) -> String:
+	var src: String = SETTING_HELP.get(id, "")
+	# Localize via the English source string as the translation key (static-safe, unlike tr()).
+	# With no translation loaded translate() returns the source unchanged, so English is the default.
+	return TranslationServer.translate(src) if src != "" else ""
 
 
 # Pure, view-free layout math for the button column — extracted so a headless
@@ -1916,8 +1957,11 @@ func _step_vol(bus: String, delta: int) -> void:
 # c1-19: which rows show the ◄/► cycle affordances AND route sideways input to a step — the plain
 # toggles plus WINDOW SCALE. WINDOW SCALE cycles in BOTH modes now (never a dead row): windowed it
 # resizes live, fullscreen it edits the deferred preference — so the arrows always mean something.
-func _row_cycles(id: String) -> bool:
-	return id in _TOGGLES or id == "winscale"
+# c3-09: takes the ROW, not a bare id, so the WINDOW SCALE stepper is recognized by its "step"
+# schema flag (set in _settings_rows) rather than an id string special-case — the same flag the
+# footer legend and the missing-copy dev guard key off. A future stepper just sets "step": true.
+func _row_cycles(item: Dictionary) -> bool:
+	return item.get("id", "") in _TOGGLES or item.has("step")
 
 
 # c1-19: step the integer window scale one clean rung — ◄/► and Enter share this, so arrows and
@@ -2783,7 +2827,7 @@ func _draw() -> void:
 		# Left/right cycle affordance on the selected toggle row — toggles flipped
 		# silently and read identical to action rows. mi_arrow points RIGHT;
 		# a negative rect width flips it for the left side.
-		if selected and _row_cycles(mitems[k]["id"]):
+		if selected and _row_cycles(mitems[k]):
 			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
 			var at := Art.tex("mi_arrow")
 			var arows := toggle_arrow_rects(g, k)   # shared with the mouse hit-test
@@ -3944,8 +3988,50 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 # PAUSE additionally carries the PERMANENT ROLL/WHEEL/REVIVE reference (footer_segs),
 # so the in-run HUD reminder can stay purely transient without those bindings
 # becoming unrecoverable mid-run.
+
+
+# c3-09: the TOP line of the two-line settings footer — the focused row's description in high-contrast
+# helper text (FOOTER_HELP_COL), with a hairline rule under it so the description never reads as
+# another actionable prompt. Ellipsized to the same CANVAS_WIDTH - 24 budget the wording tests assert,
+# a safety net so an edited/localized string can never overrun the canvas. Returns the y the
+# SELECT/BACK legend sits at, one line below.
+func _draw_footer_help(row_help: String, strip_top: float) -> float:
+	# Description baseline strip_top+10 (glyphs y340..348 at 8px) — nudged 2px down from the strip top
+	# so its ascenders clear the last-row glow by ~6.5px instead of crowding it. The returned legend
+	# baseline strip_top+17 seats the legend's label (drawn at +3 inside _legend_row) at glyphs
+	# y350..358 — flush with the strip bottom, no descender spill. The 1px rule sits at strip_top+12
+	# (y349), cleanly in the gap between the two lines.
+	_center_text(_ellipsize(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 10.0, 8, FOOTER_HELP_COL)
+	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + 12.0, BTN.x, 1.0), DIVIDER_DIM)
+	return strip_top + 17.0
+
+
+# c3-09: dedupes the missing-copy dev warning so it fires once per id, not every frame.
+static var _help_warned := {}
+
+
 func _footer_legend() -> void:
-	_emit_rect(Rect2(0, FOOTER_Y, CANVAS_WIDTH, FOOTER_H), PLATE_BG)
+	# c3-09: on a value-holding settings row the footer grows a SECOND line — the row's effect +
+	# persistence description on top, the SELECT/BACK legend below (see _draw_footer_help). Shared by
+	# OPTIONS / DISPLAY / RUN SETUP; other screens hold no such rows, so it stays one line. It sits
+	# wholly below the list (glow clears FOOTER_Y), so the header keeps its a11y summary untouched.
+	var items: Array[Dictionary] = _menu_items() if main != null else ([] as Array[Dictionary])
+	var focused := items[sel] if sel >= 0 and sel < items.size() else {}
+	var row_help: String = setting_help(focused.get("id", ""))
+	# Dev guard: a row that HOLDS a value (on/vol/step) but has no description is missing copy — warn
+	# once so it surfaces in-game, not only in the mapping test.
+	if row_help == "" and (focused.has("on") or focused.has("vol") or focused.has("step")):
+		var mid: String = focused.get("id", "")
+		if not _help_warned.has(mid):
+			_help_warned[mid] = true
+			push_warning("setting_help missing for value row '%s'" % mid)
+	var two_line := row_help != ""
+	var strip_top := FOOTER_Y - FOOTER_HELP_RISE if two_line else FOOTER_Y
+	var strip_h := FOOTER_H + FOOTER_HELP_RISE if two_line else FOOTER_H
+	_emit_rect(Rect2(0, strip_top, CANVAS_WIDTH, strip_h), PLATE_BG)
+	var legend_y := FOOTER_Y + 8.0
+	if two_line:
+		legend_y = _draw_footer_help(row_help, strip_top)
 	var segs := footer_segs(mode)
 	# c1-13: when the Hall spills past one page, the footer strip carries an EXPLICIT
 	# UP/DOWN = PAGE key hint. The PREV/NEXT plates flank the counter left/right, but the
@@ -3966,15 +4052,14 @@ func _footer_legend() -> void:
 		# c2-02: HOW TO PLAY pages on left/right — state the axis in the one strip
 		# players read for bindings, same as HALL's UP/DN page hint.
 		segs = footer_howto_page_segs() + segs
-	elif main != null:
+	elif not focused.is_empty():
 		# c2-03: on the settings screens the focused row's ◄/► arrows adjust it in place
 		# (toggle flip, volume/scale step). Surface that bind in the footer strip whenever
 		# the focused row is an adjustable one — so PAUSE/OPTS/DISP/SETUP keep a Toggle
-		# prompt, not just Select/Back. Guarded on main (the capture menu has no items).
-		var mi := _menu_items()
-		if sel >= 0 and sel < mi.size() and _row_cycles(mi[sel]["id"]):
-			segs = footer_cycle_segs(mi[sel]) + segs
-	_legend_row(segs, FOOTER_Y + 8.0, 0.9)
+		# prompt, not just Select/Back. Reuses the row dict cached above (no second _menu_items).
+		if _row_cycles(focused):
+			segs = footer_cycle_segs(focused) + segs
+	_legend_row(segs, legend_y, 0.9)
 
 
 # c1-04: the SELECT / BACK footer segments, device-aware via Art.glyph_key (the
@@ -4034,12 +4119,12 @@ static func footer_hall_filter_segs() -> Array:
 # The label names what the arrows do on the focused row, derived from the row's OWN
 # shape so it can't drift from how the row behaves. Only ever called for rows
 # _row_cycles() accepts, whose two families are: STEPPED value controls — a "vol" bar
-# or the WINDOW SCALE stepper (id "winscale") — which read ADJUST, and boolean toggles
+# or a "step" stepper (e.g. WINDOW SCALE) — which read ADJUST, and boolean toggles
 # (everything else _row_cycles takes, which flip in place) which read TOGGLE. Keying
-# ADJUST off the explicit stepped shape (not "not has on") means a newly-added toggle
-# that forgets an "on" field still reads TOGGLE — the safe default for a flip row —
-# rather than mislabeling as ADJUST.
+# ADJUST off the explicit stepped shape (the "vol"/"step" schema flags, not "not has on")
+# means a newly-added toggle that forgets an "on" field still reads TOGGLE — the safe
+# default for a flip row — rather than mislabeling as ADJUST.
 static func footer_cycle_segs(item: Dictionary) -> Array:
-	var stepped: bool = item.has("vol") or item.get("id", "") == "winscale"
+	var stepped: bool = item.has("vol") or item.has("step")
 	var lbl := "ADJUST" if stepped else "TOGGLE"
 	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": lbl}]
