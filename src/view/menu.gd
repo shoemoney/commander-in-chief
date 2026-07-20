@@ -93,7 +93,30 @@ var _page_hover := -1   # hall PREV/NEXT button under the mouse (0 = prev, 1 = n
 var _page_press := 0.0  # hall page-button press flash (decays in _process) — click feedback beyond dimming
 var _page_press_side := -1  # which page button flashed (0 = prev, 1 = next); cleared when the flash fades
 var _last_ptr := Vector2(-1.0, -1.0)  # last mouse position seen — lets a page/filter change re-evaluate the hover under a STILL cursor
-var _dirty := true  # c2-09: a visible field changed since the last _draw — set at every mutation site (input handlers + the _process animators) and cleared in _draw; the _process gate turns it into the one queue_redraw(). Starts true so the first frame paints.
+# c2-09: a visible field changed since the last _draw — set at every mutation site (input handlers
+# + the _process animators) and cleared in _draw; the _process gate turns it into the one
+# queue_redraw(). Starts true so the first frame paints.
+# c3-16: _dirty is a PLAIN redraw flag — a request to repaint, nothing more. It no longer
+# side-effects the _menu_items cache: an animation frame that only needs a repaint (a draining
+# confirm bar, a decaying flash, a breathing glow) sets _dirty = true WITHOUT throwing away rows that
+# never changed. Cache invalidation is now an EXPLICIT call — _mark_dirty() — made only at the sites
+# that actually change what the rows SAY (mode/sel, a settings toggle or volume step, the seed
+# preview, the replay gate). Decoupling the two means a repaint no longer implies a rebuild: the old
+# property setter dropped the memo on EVERY _dirty = true (including the per-frame animator writes),
+# forcing a redundant intra-frame rebuild each time. (See _mark_dirty and _menu_items.)
+var _dirty := true
+# c3-16: once-per-frame memo for _menu_items(). It is read many times per frame — every _draw layout
+# pass, the mouse hit-test, nav, and press — and each raw rebuild allocates fresh dicts/arrays; this
+# holds one snapshot and reuses it until _mark_dirty() drops it. Engaged ONLY while in the scene tree
+# (the live game): the headless layout tests poke mode/sel/main directly WITHOUT the _dirty signal and
+# rely on _menu_items() staying a live query, so out of tree it always rebuilds (see _menu_items).
+# _items_frame bounds the memo to the CURRENT frame as a belt-and-suspenders: even if some future
+# mutation site forgot to _mark_dirty(), a stale snapshot can survive at most one frame (the frame
+# stamp mismatches next frame and forces a rebuild) — never a persistent desync. So the cache leans on
+# the _mark_dirty() contract for intra-frame freshness and on the frame stamp as the hard staleness ceiling.
+var _items_cache: Array[Dictionary] = []
+var _items_valid := false
+var _items_frame := -1
 
 # Row ids that flip on left/right without a confirm press.
 # c1-19: DISPLAY is no longer a single overloaded ladder here — the OPTS "display" row
@@ -322,6 +345,14 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED or what == NOTIFICATION_TRANSLATION_CHANGED:
 		_cut_cache.clear()
 		_row_fit_cache.clear()
+		_items_valid = false   # c3-16: a translation swap can change row LABEL text, so drop the
+		                       # cached rows too — the next read rebuilds them in the new language
+	# c3-16: the once-per-frame _menu_items snapshot is only trusted while in-tree. Drop it on
+	# EXIT_TREE so a menu that is removed and later re-added can never serve a snapshot built before
+	# it left (state read from `main` may have moved while detached) — the re-add rebuilds from live.
+	if what == NOTIFICATION_EXIT_TREE:
+		_items_valid = false
+		_items_cache = ([] as Array[Dictionary])
 
 
 func _on_joy_changed(_device: int, connected: bool) -> void:
@@ -487,6 +518,18 @@ func open(m: int, select_id := "") -> void:
 	_open_t = 0.0 if mode == Mode.HIDDEN else 0.6
 	mode = m
 	sel = 0
+	# c3-16: the mode/sel just changed — drop the row memo NOW, before the select_id re-read below (or
+	# any other same-frame caller) can serve a snapshot built for the OLD screen. _has_replay is set
+	# just below, so the rebuild that follows already sees the fresh replay gate too.
+	_items_valid = false
+	# c3-16: sample the replay file's existence ONCE here, on the menu open — and ONLY for the screens
+	# whose row list can surface WATCH LAST RUN (INFO builds that row; TITLE is its entry point). Every
+	# such screen then reads the cached _has_replay bool, so no per-frame draw / hit-test / nav ever
+	# calls FileAccess.file_exists and the disk micro-stutter is gone. Modes that never show the row
+	# (PAUSE / OPTS / SETUP / HALL / HOWTO / DISP / REBIND) skip the stat entirely. Refreshed on each
+	# such open, so a replay banked during the run is picked up next time (recomputed only on reopen).
+	if m == Mode.TITLE or m == Mode.INFO:
+		_has_replay = FileAccess.file_exists(REPLAY_PATH)
 	_disarm_confirm()   # c2-09: no armed row (nor its live countdown) carries into a fresh screen
 	_rail_pulse = 0.0   # a fresh screen starts with no lingering rail-bounce flash
 	_rail_row = -1
@@ -544,9 +587,9 @@ func open(m: int, select_id := "") -> void:
 		_howto_page = 0   # c3-05: always open the help on the CONTROLS page
 		_tab_hover = -1   # c2-02: HOWTO shares _tab_hover with HALL — clear it so a hover index left on the OTHER screen's tab row can't light a HOWTO tab (open() clears it above too; explicit here for the shared-state contract)
 	elif m == Mode.INFO:
-		# Cache the replay-file existence once per INFO open so _menu_items() reads
-		# a flag instead of running this disk stat every frame the screen is drawn.
-		_has_replay = FileAccess.file_exists(REPLAY_PATH)
+		# c3-16: _has_replay (the WATCH LAST RUN gate) was already sampled at the top of open() —
+		# the ONE disk touch, shared by every screen — so nothing is re-stat'd here.
+		pass
 	# Any menu opening freezes the sim mid-hold — cancel open supply wheels, or a
 	# hold+pick released WHILE paused commits a stale buy on the first resumed
 	# frame (the release the player meant as an abort).
@@ -565,7 +608,7 @@ func open(m: int, select_id := "") -> void:
 	# c2-09: mark dirty so _process paints the freshly-opened screen's first frame. Under
 	# REDUCE MOTION _menu_is_animating() goes false as soon as the open/glide envelope snaps,
 	# so the gate alone would not paint — the dirty flag is what guarantees the initial frame.
-	_dirty = true
+	_mark_dirty()
 
 
 func _bus_off(name: String) -> bool:
@@ -576,7 +619,43 @@ func _bus_off(name: String) -> bool:
 	return i >= 0 and AudioServer.is_bus_mute(i)
 
 
+# c3-16: the ONE explicit "the rows changed" call — flag a repaint AND drop the once-per-frame
+# _menu_items memo so the next read rebuilds. Call THIS (never a bare _dirty = true) at every site that
+# changes what the rows SAY: mode/sel, a settings toggle or volume step, the seed preview, the replay
+# gate. A pure animation repaint (a flash / countdown decay / breathing glow) stays a bare _dirty =
+# true — it must NOT invalidate rows that did not change. Keeping the two separate is the whole point.
+func _mark_dirty() -> void:
+	_dirty = true
+	_items_valid = false
+
+
+# c3-16: the caching front door. In the live game the menu is always in the scene tree, so caching is
+# on for every real read — it serves the memoized snapshot until _mark_dirty() drops it (or the frame
+# turns), collapsing the ~10 rebuilds a frame down to one. The is_inside_tree() gate is a DELIBERATE
+# contract, not an oversight: the memo's freshness rests on "every row-changing mutation calls
+# _mark_dirty()", and the headless layout tests bypass that contract on purpose — they poke
+# mode/sel/main directly to assert _menu_items() against arbitrary states, so for those out-of-tree
+# callers the method stays a pure live query. Thus caching is uniform across all REAL (in-tree)
+# callers, and the only path it steps aside for is the test harness that explicitly opts out.
+# CONTRACT for in-tree callers: a caller that MUTATES row-affecting state (mode/sel/settings/seed/
+# replay) and then re-reads _menu_items() in the SAME frame must _mark_dirty() BETWEEN the two, or the
+# second read serves the pre-mutation snapshot. (open() does this: it _items_valid = false's the moment
+# it flips mode, before its own select_id re-read below.) The frame stamp caps any slip at one frame.
+# Callers treat the result read-only (the only per-call mutation, the TITLE seed label, lives INSIDE
+# _rebuild and re-runs when sel changes).
 func _menu_items() -> Array[Dictionary]:
+	var frame := Engine.get_process_frames()
+	if is_inside_tree() and _items_valid and _items_frame == frame:
+		return _items_cache
+	var built := _rebuild_menu_items()
+	if is_inside_tree():
+		_items_cache = built
+		_items_valid = true
+		_items_frame = frame
+	return built
+
+
+func _rebuild_menu_items() -> Array[Dictionary]:
 	if main == null:
 		# c3-07: most rows read live main state (main._two_players, main.daily_done, …).
 		# Explicitly-typed empty so the Array[Dictionary] contract holds for every caller.
@@ -664,6 +743,9 @@ func _menu_items() -> Array[Dictionary]:
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 0, "submenu": true},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 0, "submenu": true},
 		]
+		# c3-16: gate WATCH LAST RUN on the CACHED bool sampled once in open() — never a fresh
+		# FileAccess.file_exists here, so rebuilding this list (even the pre-cache per-frame case)
+		# is pure in-memory work and never touches the disk.
 		if _has_replay:
 			iitems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 0})
 		iitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
@@ -1148,7 +1230,7 @@ func _rebind_capture(ev: InputEvent) -> bool:
 
 func _end_capture() -> void:
 	_rebind_action = ""
-	_dirty = true
+	_mark_dirty()
 
 
 func _commit_capture(swapped: String, reserved: String) -> void:
@@ -1254,7 +1336,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			_rebind_msg = ""
 			_rebind_msg_t = 0.0
 			main._sfx.play("pickup", -14.0, 1.3)
-			_dirty = true
+			_mark_dirty()
 			return
 	# c1-18: the menu_next_tab key (kb, default TAB) or a shoulder (pad) cycles the MOVE/AIM ->
 	# ACTIONS -> GAMEPAD category tabs while idle. Shoulders step both directions; the key cycles
@@ -1283,7 +1365,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			_rebind_msg = ""
 			_rebind_msg_t = 0.0
 			main._sfx.play("pickup", -14.0, 1.3)
-			_dirty = true
+			_mark_dirty()
 			return
 	var move := 0
 	var hmove := 0
@@ -1443,14 +1525,14 @@ func _unhandled_input(ev: InputEvent) -> void:
 						ht = ti
 				if ht != _tab_hover:
 					_tab_hover = ht
-					_dirty = true
+					_mark_dirty()
 				# PREV/NEXT hover parity with the tabs (shared with _refresh_page_hover so a
 				# page/filter change re-evaluates a still cursor the same way a move does).
 				_last_ptr = ev.position
 				var ph := _page_hover_at(ev.position)
 				if ph != _page_hover:
 					_page_hover = ph
-					_dirty = true
+					_mark_dirty()
 			if mode == Mode.HOWTO:
 				# c2-02: HOW-TO page tabs get the same hover cue as HALL's filter tabs
 				# (they share _tab_hover — only one screen is live at a time).
@@ -1461,7 +1543,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 						ht = ti
 				if ht != _tab_hover:
 					_tab_hover = ht
-					_dirty = true
+					_mark_dirty()
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
 				# Full feedback parity: funnel the hover through _nav so it plays
@@ -1495,7 +1577,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 							_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 							_refresh_page_hover()   # page reset to 0 disables PREV under a still cursor
 							main._sfx.play("pickup", -14.0, 1.3)
-						_dirty = true
+						_mark_dirty()
 						return
 			if mode == Mode.HOWTO:
 				# c2-02: click a page tab to jump to it — mouse parity with left/right.
@@ -1505,7 +1587,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 						if ti != _howto_page:
 							_howto_page = ti
 							main._sfx.play("pickup", -14.0, 1.3)
-						_dirty = true
+						_mark_dirty()
 						return
 			if mode == Mode.HALL and _hall_pages(_hall_rows().size()) > 1:
 				# Prev/next page buttons: route through _nav so paging, sfx, and the
@@ -1540,12 +1622,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 					# Side matters: volume + WINDOW SCALE step down/up per arrow, so a mouse-only
 					# player has BOTH directions (the ◄ arrow lowers). Plain toggles flip either way.
 					_nav(0, -1 if la.has_point(ev.position) else 1)
-					_dirty = true
+					_mark_dirty()
 					return
 			if crow >= 0:
 				sel = crow
 				_press()
-				_dirty = true
+				_mark_dirty()
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
 			if mode == Mode.HALL:
@@ -1566,7 +1648,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 		open(d["mode"], d["sel"])
 	if (move != 0 or hmove != 0 or act or back) and is_inside_tree():
 		accept_event()   # is_inside_tree guard: a not-in-tree menu (headless tests) skips it
-	_dirty = true
+	_mark_dirty()
 
 
 # One nav step — shared by key/dpad/stick presses, the held-stick auto-repeat,
@@ -1585,7 +1667,7 @@ func _nav(move: int, hmove: int) -> void:
 			_hall_page = np
 			_refresh_page_hover()   # the new page may flip a boundary — re-light/dim under a still cursor
 			main._sfx.play("pickup", -14.0, 1.3)
-			_dirty = true
+			_mark_dirty()
 		return   # HALL vertical nav OWNS paging — always consume it, even at a boundary, so it never falls through to the 1-row list nav below
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
@@ -1598,7 +1680,7 @@ func _nav(move: int, hmove: int) -> void:
 		# the hover automatically, so no double-treatment slips through either.
 		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 		main._sfx.play("pickup", -14.0, 1.3)
-		_dirty = true
+		_mark_dirty()
 		return
 	# c2-02: HOW TO PLAY is paged on the HORIZONTAL axis — left/right (and the wheel,
 	# routed in as hmove) turns the CONTROLS / WAR CHEST / ENEMIES / ENDLESS page, clamped (never
@@ -1612,13 +1694,13 @@ func _nav(move: int, hmove: int) -> void:
 		if np != _howto_page:
 			_howto_page = np
 			main._sfx.play("pickup", -14.0, 1.3)
-			_dirty = true
+			_mark_dirty()
 		return
 	# ◄/► on a volume row nudges the 0..10 level, clamped — the SAME shared stepper
 	# Enter/click drives. 0 == MUTED, so mute is just the bottom of the one model.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
 		_step_vol("SFX" if _menu_items()[sel]["id"] == "sfx" else "Music", hmove)
-		_dirty = true
+		_mark_dirty()
 		return
 	# c1-19: ◄/► on WINDOW SCALE (the DISPLAY sub-screen) steps the integer scale one clean rung,
 	# clamped (no wrap) — ◄ shrinks, ► grows, railing at the 1x floor and the Nx ceiling. It NEVER
@@ -1626,13 +1708,13 @@ func _nav(move: int, hmove: int) -> void:
 	# resizes now, fullscreen it moves the preference applied on return to windowed.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] == "winscale":
 		_step_scale(hmove)
-		_dirty = true
+		_mark_dirty()
 		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
 	# (same activation path, so save/sfx behavior stays identical).
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in _TOGGLES:
 		_activate()
-		_dirty = true
+		_mark_dirty()
 		return
 	if move == 0:
 		return
@@ -1647,7 +1729,7 @@ func _nav(move: int, hmove: int) -> void:
 		_sel_y = -1.0   # wrap: snap to the far end instead of gliding the whole list
 	_disarm_confirm()   # c2-09: moving off the armed row cancels the confirm (and its countdown)
 	main._sfx.play("pickup", -14.0, 1.3)
-	_dirty = true
+	_mark_dirty()
 
 
 func _press() -> void:
@@ -1658,7 +1740,7 @@ func _press() -> void:
 	# unavailable, not a dead button. Covers keyboard, pad, and mouse (all route here).
 	if _menu_items()[sel].get("disabled", false):
 		main._sfx.play("deny", -8.0)
-		_dirty = true
+		_mark_dirty()
 		return
 	# Destructive items need a second press (mis-press guard on a run).
 	if _is_destructive(sel) and _confirm != sel:
@@ -1670,7 +1752,7 @@ func _press() -> void:
 		_activate()
 	# c2-09: mark dirty for the press result (row arming / toggle flip / value step). Input is
 	# handled before _process in the same frame, so the gate flushes it to the screen this frame.
-	_dirty = true
+	_mark_dirty()
 
 
 # c1-09: OPTIONS climbs BACK to whichever screen opened it — TITLE normally, but
@@ -2002,7 +2084,7 @@ func _step_vol(bus: String, delta: int) -> void:
 		_rail_pulse = 0.0 if main._motion < 0.5 else 1.0
 		if delta > 0:
 			main._sfx.play("deny", -16.0)   # top rail: SFX is audible, so a soft tick lands
-		_dirty = true
+		_mark_dirty()
 		return
 	_rail_pulse = 0.0   # a real step lands — clear any stale bounce flash
 	_rail_row = -1
@@ -2428,7 +2510,7 @@ func _update_seed_preview(delta := 0.0, force := false) -> void:
 				_seed_flash = 0.0   # a valid seed is now shown — kill any stale deny flash so it can't hide it
 			if _seed_preview != _seed_armed_val:
 				_seed_armed = false   # the shown seed changed — a prior arm no longer applies
-			_dirty = true   # the sampled preview changed — repaint even if the caller doesn't
+			_mark_dirty()   # the sampled preview changed — repaint even if the caller doesn't
 	elif _seed_preview != -1 or not _seed_clip_raw.is_empty() or _seed_armed or _seed_poll_t != 0.0:
 		_seed_preview = -1
 		_seed_clip_raw = ""
@@ -2450,7 +2532,7 @@ func _activate_seed() -> void:
 		_seed_flash = 1.0   # c3-13: drives the RED PLATE-WASH BRIGHTEN in _draw (on top of the
 		                    # persistent invalid tint) so the denied press recoils the whole button
 		_seed_armed = false
-		_dirty = true
+		_mark_dirty()
 		# c2-12: the deny needs no center toast — the FOCUSED row already carries full inline
 		# feedback: the label echoes the raw clipboard text (see seed_row_label) so the player
 		# sees WHAT was read, and the right-margin hint says WHY it was rejected ("NO SEED -
@@ -2470,7 +2552,7 @@ func _activate_seed() -> void:
 	_seed_armed_t = 2.5   # auto-disarm window (decremented in _process)
 	_seed_flash = 0.0     # arming shows the seed — a stale deny flash must not colour over it
 	main._sfx.play("pickup", -10.0, 1.2)   # soft arm tick: the seed is now shown to confirm
-	_dirty = true
+	_mark_dirty()
 
 
 static func _content_well(scrim_mode: int) -> bool:
@@ -3290,7 +3372,7 @@ func _refresh_page_hover() -> void:
 	var ph := _page_hover_at(_last_ptr)
 	if ph != _page_hover:
 		_page_hover = ph
-		_dirty = true
+		_mark_dirty()
 
 
 func _hall_tab_rects() -> Array[Rect2]:

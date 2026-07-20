@@ -158,6 +158,13 @@ var _dirty := true        # c2-09: a VIEW field changed since the last _draw —
                           # change (rounded odometer, verb-chip alpha), so a settled HUD idles.
                           # Sim-driven rings are repainted by main._update_hud on every step, so
                           # this only tracks the fields _process animates while main isn't stepping.
+# c3-16: measured-width memo for _tw(). The HUD font + FONT_SIZE are both fixed, so a string's pixel
+# width never changes within a run — yet _draw re-measures the same static labels (HOSTILES, SHOP
+# OPEN, RALLYING, chip captions) through get_string_size EVERY frame. Cache txt -> width so each
+# distinct label is shaped once, not 60x/s. Flushed on a theme/translation swap (see _notification),
+# the only events that can change the active font under it.
+var _tw_cache: Dictionary[String, float] = {}
+const TW_CACHE_CAP := 512   # c3-16: upper bound on distinct measured strings before the memo resets
 
 
 func _ready() -> void:
@@ -168,6 +175,11 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
+	# c3-16: a re-theme or translation swap can change the active font, so the txt->width memo must
+	# re-measure against the new face (mirrors GameMenu._notification dropping its shaped-text caches).
+	# Handled BEFORE the _plate_ci guard so the flush runs regardless of the plate item's state.
+	if what == NOTIFICATION_THEME_CHANGED or what == NOTIFICATION_TRANSLATION_CHANGED:
+		_tw_cache.clear()
 	if not _plate_ci.is_valid():
 		return
 	match what:
@@ -2175,6 +2187,22 @@ static func _display_hidden(cands: Array, keep: Dictionary) -> int:
 	return n
 
 
-## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit).
+## Measured pixel width of `txt` in the HUD font (for pre-flighting chip fit). c3-16: memoized on the
+## RAW txt as the key. Width is a pure function of (string, font, point size); the font is fixed within
+## a run (a swap flushes the memo in _notification) and every call measures at the SAME compile-time
+## FONT_SIZE constant, so the size is invariant across all keys and folding it in would only burn a
+## string concat + str() on every lookup — including cache HITS, the hot path 60x/s. Keying on txt
+## alone shapes a static label (HOSTILES, SHOP OPEN, RALLYING) once instead of every frame. If a caller
+## ever needs a second point size, reintroduce a size-suffixed key THEN (and only then).
 func _tw(txt: String) -> float:
-	return Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+	if _tw_cache.has(txt):
+		return _tw_cache[txt]
+	var w: float = Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+	# c3-16: bound the memo. HUD strings are a small finite set (static labels + short numerics like
+	# "%02d" ammo / "+%d" clips / "%ds" timers), so this cap is generous headroom that in practice
+	# never trips; it only fail-safes against a caller ever measuring unbounded dynamic text. A plain
+	# clear-on-overflow (no LRU bookkeeping) is enough — the next frame re-warms the live label set.
+	if _tw_cache.size() >= TW_CACHE_CAP:
+		_tw_cache.clear()
+	_tw_cache[txt] = w
+	return w
