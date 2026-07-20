@@ -835,8 +835,13 @@ func _settings_rows() -> Array[Dictionary]:
 	# both places. DISPLAY is a real toggle row now (not F11-only): every persisted
 	# setting can be reviewed AND changed from the dedicated screen.
 	return [
-		{"id": "sfx", "label": "SFX: %s" % vol_label(sfx_muted, sv), "destructive": false, "vol": sv, "grp": 1},
-		{"id": "music", "label": "MUSIC: %s" % vol_label(mus_muted, mv), "destructive": false, "vol": mv, "grp": 1},
+		# c3-04: "muted" is carried EXPLICITLY (not inferred from vol == 0 downstream) so
+		# the readout and the slashed-bar off marker key off the real bus-mute state, and
+		# the label reads "SFX: MUTED" (never "SFX: 8") the instant the bus is off — the
+		# numeric level can never contradict the off marker. Confirm/L/R only STEP this
+		# level (see _step_vol); muting is stepping down to 0, never a surprise confirm-toggle.
+		{"id": "sfx", "label": "SFX: %s" % vol_label(sfx_muted, sv), "destructive": false, "vol": sv, "muted": sfx_muted, "grp": 1},
+		{"id": "music", "label": "MUSIC: %s" % vol_label(mus_muted, mv), "destructive": false, "vol": mv, "muted": mus_muted, "grp": 1},
 		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 2},
 		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 3},
 		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 3},
@@ -2017,13 +2022,13 @@ func _activate() -> void:
 				main._hard = not main._hard
 				_flash_setting()
 			"howto": open(Mode.HOWTO)   # help screen under INFO; back returns here
-			"sfx":
-				# Enter/click nudges the SAME clamped 0..10 level as ◄/► (+1, stops at
-				# 10) — one model, and it can never surprise-mute a player who meant to
-				# nudge. Deliberate mute is stepping ◄ down to 0 (which reads MUTED).
-				_step_vol("SFX", 1)
-			"music":
-				_step_vol("Music", 1)
+			"sfx", "music":
+				# c3-04: primary confirm STEPS the level up one (+1, rails at 10) -- the SAME
+				# clamped 0..10 model ◄/► use, NOT a mute toggle. So Enter/click can never
+				# surprise-mute a player who meant to nudge; deliberate mute is stepping ◄ down
+				# to 0 (reads MUTED). _step_vol -> main._set_bus_vol maps 0<->bus-mute and
+				# un-mutes on any raise, so the label, the bar and the actual audio never diverge.
+				_step_vol("SFX" if id == "sfx" else "Music", 1)
 			"motion":
 				main._motion = 0.0 if main._motion >= 0.5 else 1.0
 				main._save_settings()
@@ -2654,19 +2659,41 @@ func _draw() -> void:
 		# level reads as fill COUNT (shape, not hue alone); 0 = all hollow.
 		if mitems[k].has("vol"):
 			var vv: int = mitems[k]["vol"]
-			var vbx := r.end.x - 8.0 - 49.0   # 10 segments * 5px pitch - 1px, right-aligned with the dot slot
-			for sgi in 10:
-				var sr := Rect2(vbx + float(sgi) * 5.0, cy - 3.0, 4.0, 6.0)
-				if sgi < vv:
+			var row_muted: bool = mitems[k].get("muted", false)
+			# c3-04: ONE source of truth for the bar geometry (seg count/pitch/width) so the
+			# fill loop, mute slash, rail bounce and static rail cap all derive from the same
+			# numbers -- no drifting 49 / 9*5+4 magic constants. Level 0..10 maps to SEG_N
+			# cells; last-cell left edge = vlast, its right edge = vlast + SEG_W.
+			var SEG_N := 10
+			var SEG_PITCH := 5.0
+			var SEG_W := 4.0
+			var vbx := r.end.x - 8.0 - (float(SEG_N) * SEG_PITCH - 1.0)   # right-aligned with the dot slot
+			var vlast := vbx + float(SEG_N - 1) * SEG_PITCH               # left edge of the final cell
+			for sgi in SEG_N:
+				var sr := Rect2(vbx + float(sgi) * SEG_PITCH, cy - 3.0, SEG_W, 6.0)
+				if sgi < vv and not row_muted:   # c3-04: a muted row is ALL-hollow, no lit cell under the slash
 					draw_rect(sr, Art.safe(Color(0.55, 0.95, 0.5, 1.0 if selected else 0.8)))
 				else:
 					draw_rect(sr, Color(0.55, 0.6, 0.5, 0.6), false, 1.0)
+			# c3-04: a MUTED bus is drawn as an all-hollow bar struck through with a
+			# diagonal slash — an explicit OFF marker so the empty bar can't read as
+			# merely "turned all the way down." Keyed off the row's explicit "muted" flag
+			# (the real AudioServer.is_bus_mute state), not the level number, so the marker
+			# stays truthful. Drawn UNconditionally (not selection-gated, unlike the amber
+			# rail cap) so a muted SFX/MUSIC row reads as off at a glance anywhere in the
+			# list, matching the "MUTED" label and the silent buses.
+			if row_muted:
+				# Endpoints derived from the SAME geometry the bar loop uses: first seg left =
+				# vbx, last seg right = vlast + SEG_W, span top/bottom = cy-3 / cy+3 -- so the
+				# strike always spans the full bar even if SEG_N/PITCH/WIDTH change.
+				draw_line(Vector2(vbx, cy + 3.0), Vector2(vlast + SEG_W, cy - 3.0),
+					Color(1.0, 0.72, 0.3, 0.85 if selected else 0.7), 1.5)
 			# Rail bounce: a nudge past the limit (mute floor or max ceiling) flashes
 			# the pinned end segment amber+wider so the press reads as "held at the
 			# rail," not dropped. Decays in _process; reduce-motion snaps it off.
 			if selected and k == _rail_row and _rail_pulse > 0.0:
-				var rseg := 9 if _rail_dir > 0 else 0   # ceiling = last cell, floor = first
-				var rr := Rect2(vbx + float(rseg) * 5.0, cy - 3.0, 4.0, 6.0).grow(_rail_pulse * 1.5)
+				var rx := vlast if _rail_dir > 0 else vbx   # ceiling = last cell, floor = first
+				var rr := Rect2(rx, cy - 3.0, SEG_W, 6.0).grow(_rail_pulse * 1.5)
 				draw_rect(rr, Color(1.0, 0.72, 0.3, 0.85 * _rail_pulse), false, 1.0)
 			# STATIC rail cap: whenever the selected row SITS at a limit (MUTED or 10),
 			# bracket the pinned end segment. Non-animated, so it reads even with
@@ -2674,8 +2701,8 @@ func _draw() -> void:
 			# press at the rail would otherwise be an invisible (and, at the muted
 			# floor, silent) no-op. This makes "you're at the limit" always legible.
 			if selected and (vv == 0 or vv == 10):
-				var cseg := 9 if vv == 10 else 0
-				draw_rect(Rect2(vbx + float(cseg) * 5.0, cy - 4.0, 4.0, 8.0),
+				var cx := vlast if vv == 10 else vbx
+				draw_rect(Rect2(cx, cy - 4.0, SEG_W, 8.0),
 					Color(1.0, 0.72, 0.3, 0.7), false, 1.0)
 		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
 		# shape+fill carry the state (hue alone fails protan players).

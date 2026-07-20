@@ -3219,7 +3219,9 @@ func _bus_vol(name: String) -> int:
 	# a restore of the pre-mute level; the retained volume_db only survives a mute
 	# that is un-set OUTSIDE the stepper, e.g. a settings reload).
 	var b := AudioServer.get_bus_index(name)
-	if AudioServer.is_bus_mute(b):
+	# c3-04: guard a missing bus (index -1) like _bus_off does, instead of feeding -1
+	# to is_bus_mute -- a missing bus reads as level 0 (MUTED), the safe default.
+	if b == -1 or AudioServer.is_bus_mute(b):
 		return 0
 	return clampi(int(round(db_to_linear(AudioServer.get_bus_volume_db(b)) * 10.0)), 1, 10)
 
@@ -3230,6 +3232,12 @@ const _SFX_SLAVED_BUSES: Array[String] = ["UI", "VO"]   # a3-16: jingle UI + rad
 func _set_bus_vol(name: String, v: int) -> void:
 	v = clampi(v, 0, 10)
 	var b := AudioServer.get_bus_index(name)
+	if b == -1:
+		return
+	# c3-04: THE 0<->mute mapping the SFX/MUSIC rows rely on -- level 0 mutes the bus,
+	# any level >= 1 un-mutes AND sets volume_db. This is why a confirm/step that raises
+	# the level off 0 always un-mutes, so the row label, the segment bar and the actual
+	# audio can never diverge (menu._step_vol routes every change through here).
 	AudioServer.set_bus_mute(b, v == 0)
 	if v > 0:
 		AudioServer.set_bus_volume_db(b, linear_to_db(v / 10.0))
