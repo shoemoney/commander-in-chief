@@ -201,6 +201,7 @@ var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
+const BANNER_LIFETIME_FRAMES := 125           # c4-07: a lone banner's on-screen life in physics-frames (~2s at 60Hz); show_banner starts t=1.0 and _update_feel drains 1.0/this each frame. The seed-paste status lines lean on this read time; a FIFO backlog drains proportionally faster (see _update_feel).
 var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
 var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
 var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
@@ -753,7 +754,7 @@ func start_game(endless: bool) -> void:
 	# Co-op with no pad for P2 reads as a broken game (P2 gets zero input and no
 	# on-screen reason). Say so — it's a setup step, not a bug.
 	if _two_players and Input.get_connected_joypads().size() < 2:
-		_show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
+		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
 
 
 func start_daily() -> void:
@@ -871,7 +872,7 @@ func start_seed_from_clipboard() -> void:
 	# so an empty clipboard never reaches here; the banner stays as a belt-and-braces.
 	var sd := _clipboard_seed()
 	if sd < 0:
-		_show_banner("CLIPBOARD HAS NO SEED")
+		show_banner("CLIPBOARD HAS NO SEED")
 		return
 	start_seeded(sd)
 
@@ -889,7 +890,7 @@ func start_watch() -> void:
 		_replay_task = -1
 	var r := Replay.load_from("user://last_run.replay")
 	if r == null or r.frames.is_empty():
-		_show_banner("NO REPLAY SAVED YET")
+		show_banner("NO REPLAY SAVED YET")
 		return
 	_endless = r.mode == "endless"
 	_two_players = r.player_count >= 2
@@ -900,7 +901,7 @@ func start_watch() -> void:
 	_watch_replay = r
 	_watch_frame = 0
 	_watching = true
-	_show_banner("REPLAY — PRESS R TO EXIT", Color(0.55, 0.9, 1.0))
+	show_banner("REPLAY — PRESS R TO EXIT", Color(0.55, 0.9, 1.0))
 
 
 func _reset() -> void:
@@ -1163,7 +1164,7 @@ func _copy_share_text() -> void:
 	var where := ("WAVE %d" % sim.wave) if sim.mode == "endless" else ("%dm PUSHED" % (-Fixed.to_int(sim.camera_top) / 10))
 	var txt := "%s — SCORE %d · %s · RANK %s (%s) · seed %d" % [SHARE_PREFIX, sim.score, where, rr.grade, rr.title, _current_seed]
 	DisplayServer.clipboard_set(txt)
-	_show_banner("COPIED TO CLIPBOARD")
+	show_banner("COPIED TO CLIPBOARD")
 
 
 func _flush_bests() -> void:
@@ -1971,7 +1972,7 @@ func _consume_events() -> void:
 				_ev_vest_break(ev)
 			"wave_start":
 				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS", "  — FRENZY", "  — MARKSMEN", "  — BOMBARDMENT"][ev.get("mod", 0)]
-				_show_banner("WAVE %d%s" % [sim.wave, mod_name])
+				show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 				# Horde dust-bank: a wide low roll of dust at the top edge before the
 				# spawns arrive — see the horde coming, tinted by the wave's mutator.
@@ -1982,7 +1983,7 @@ func _consume_events() -> void:
 					_fx.append({"x": dbx, "y": sim.camera_top + 18 * Fixed.ONE, "t": 0.0, "kind": "tex",
 						"tex": "fx_smoke", "sz": 42.0, "grow": 0.6, "fade": 2.4, "rate": 0.007, "col": dbcol})
 			"wave_clear":
-				_show_banner("WAVE CLEARED — SHOP OPEN")
+				show_banner("WAVE CLEARED — SHOP OPEN")
 			"wave_flawless":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Art.safe(Color(0.5, 1.0, 0.7))})
@@ -1993,7 +1994,7 @@ func _consume_events() -> void:
 			"observer_spawn":
 				_vo("vo_observer", 1, 600)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
-				_show_banner("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON", Color(1.0, 0.92, 0.55), "hud_lightning")
+				show_banner("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON", GameMenu.BANNER_COL_DEFAULT, "hud_lightning")
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -2003,19 +2004,19 @@ func _consume_events() -> void:
 				_vo("vo_shop_locked", 1, 900)
 				_trauma = minf(1.0, _trauma + 0.4)
 				_music_hold = maxi(_music_hold, 48)
-				_show_banner("GUNSHIP INBOUND", Color(1.0, 0.92, 0.55), "hud_skull")
+				show_banner("GUNSHIP INBOUND", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
 				_sfx.play("alarm", -4.0, 0.9)
 				# A fast attack-heli escort streaks the top band ahead of the boss.
 				_fx.append({"x": 0, "y": 0, "t": 0.0, "kind": "chopper", "rate": 0.02,
 					"tex": "m_heli_attack2", "scl": 0.5, "sy": 52.0})
 			"core_open":
 				_vo("vo_core", 2, 300)
-				_show_banner("CORE EXPOSED — OPEN FIRE", Color(1.0, 0.92, 0.55), "hud_target")
+				show_banner("CORE EXPOSED — OPEN FIRE", GameMenu.BANNER_COL_DEFAULT, "hud_target")
 				_sfx.play("alarm", -6.0, 1.3)
 			"airstrike_called":
 				_vo("vo_airstrike", 1, 300)
 				# Commit beat: the strike is inbound, not instant — announce it.
-				_show_banner("AIRSTRIKE INBOUND")
+				show_banner("AIRSTRIKE INBOUND")
 				_sfx.play("whistle", -3.0, 0.85)
 			"wiped":
 				_vo("vo_wiped", 3, 600)
@@ -2024,7 +2025,7 @@ func _consume_events() -> void:
 				_flash_alpha = maxf(_flash_alpha, 0.4)
 				_hitstop_frames = maxi(_hitstop_frames, 8)
 				_rumble = maxf(_rumble, 1.0)
-				_show_banner("OVERRUN — RUN OVER")
+				show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
 			"victory":
 				_vo("vo_victoly", 3, 6000)
@@ -2504,7 +2505,7 @@ func _ev_gate_open(ev: Dictionary) -> void:
 		tag = "  ⚡FAST"
 	if _best_gate_split == 0 or split < _best_gate_split:
 		_best_gate_split = split
-	_show_banner("GATE SECURED — %.1fs%s" % [split / 60.0, tag])
+	show_banner("GATE SECURED — %.1fs%s" % [split / 60.0, tag])
 
 
 func _ev_revive(ev: Dictionary) -> void:
@@ -2569,7 +2570,7 @@ func _check_boss_intro() -> void:
 		if _seen_bosses.has(g["y"]):
 			continue
 		_seen_bosses[g["y"]] = true
-		_show_banner("BRIDGE GUNSHIP", Color(1.0, 0.92, 0.55), "hud_skull")
+		show_banner("BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
 		_sfx.play("alarm", -2.0, 0.85)
 		_trauma = minf(1.0, _trauma + 0.3)
 		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
@@ -2578,8 +2579,8 @@ func _check_boss_intro() -> void:
 	# Colossus escalation announcements.
 	var phase := sim.colossus_phase()
 	if phase > _prev_colossus_phase and phase >= 2:
-		_show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
-			else "COLOSSUS CRITICAL — SAPPERS OUT", Color(1.0, 0.92, 0.55), "hud_skull")
+		show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
+			else "COLOSSUS CRITICAL — SAPPERS OUT", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
 		# 0.65, NOT 0.7: the alarm ladder's exact pitch IS the threat identity
 		# (sfx.gd _LADDERED) and 0.7 is elite_windup's recurring incoming-attack
 		# cue — same class of collision pilot_down already fixed. 0.65 is an
@@ -3456,7 +3457,7 @@ func _track_bests() -> void:
 	# NEW RECORD moment: the instant this run's score passes the standing best.
 	if not _record_fired and best_score > 0 and sim.score > best_score:
 		_record_fired = true
-		_show_banner("NEW RECORD!")
+		show_banner("NEW RECORD!")
 		_sfx.play("wave_clear", -3.0, 1.15)
 	# Ratchet the records; write at most once a second when something moved.
 	if sim.score > best_score:
@@ -3468,7 +3469,7 @@ func _track_bests() -> void:
 		# the every-wave noise on a first-ever endless run (mirrors the score guard).
 		if not _deep_fired and best_wave > 0:
 			_deep_fired = true
-			_show_banner("DEEPEST WAVE %d" % sim.wave)
+			show_banner("DEEPEST WAVE %d" % sim.wave)
 			_sfx.play("wave_clear", -4.0, 1.25)
 		best_wave = sim.wave
 		_best_dirty = true
@@ -3482,12 +3483,17 @@ func _track_bests() -> void:
 	# _record_run() at the debrief and _flush_bests() on reset/exit.
 
 
-func _show_banner(text: String, col := Color(1.0, 0.92, 0.55), icon := "") -> void:
+func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, icon := "") -> void:
+	# Public: the ONE center-status channel. GameMenu.seed-paste feedback calls it too, so it stays
+	# public (not underscore-private) and its default tint is the shared GameMenu.BANNER_COL_DEFAULT.
 	# No dupe-stacking: PERFECT DODGE! can re-fire every 24 frames and used to
 	# queue itself several deep. Icon: threat callouts only — every banner
 	# wearing a badge would dilute the alarm grammar.
 	if not _banners.is_empty() and _banners.back()["text"] == text:
 		return
+	# t starts at 1.0 and drains toward 0 over BANNER_LIFETIME_FRAMES physics-frames (~2s), the
+	# intentional read time the c4-07 seed-paste status lines rely on to stay legible long enough to
+	# catch — the same envelope as every wave/checkpoint splash (a FIFO backlog drains faster).
 	_banners.append({"text": text, "t": 1.0, "col": col, "icon": icon})
 
 
@@ -3528,7 +3534,7 @@ func _check_near_miss() -> void:
 					continue
 				if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], 11 * Fixed.ONE):
 					_dodge_frame = Engine.get_physics_frames()
-					_show_banner("PERFECT DODGE!", Color(0.5, 0.95, 1.0))
+					show_banner("PERFECT DODGE!", Color(0.5, 0.95, 1.0))
 					_hitstop_frames = maxi(_hitstop_frames, 3)
 					_sfx.play("buy_grab", -4.0, 1.6)   # a2-16: PERFECT DODGE skill reward (warm grab)
 					_fx.append({"x": p["x"], "y": p["y"], "t": 0.0, "kind": "tex",
@@ -3652,7 +3658,7 @@ func _update_feel() -> void:
 			and sim.wave_pending == 0 and sim._wave_hostiles_cleared():
 		if not _shop_lock_told:
 			_shop_lock_told = true
-			_show_banner("SHOP LOCKED — DESTROY THE GUNSHIP", Color(1.0, 0.6, 0.3))
+			show_banner("SHOP LOCKED — DESTROY THE GUNSHIP", Color(1.0, 0.6, 0.3))
 	else:
 		_shop_lock_told = false
 	# NO TARGET feedback (6/9 play-panel): endless has no tanks, so the interact
@@ -3680,7 +3686,7 @@ func _update_feel() -> void:
 		# Depth-scaled drain: a lone banner keeps its full ~2s, but a backlog
 		# fast-forwards — GUNSHIP INBOUND used to surface 6s stale behind
 		# PERFECT DODGE! vanity news (4 of 7 lenses flagged the FIFO).
-		_banners[0]["t"] -= 0.008 * (1.0 + 0.75 * float(_banners.size() - 1))
+		_banners[0]["t"] -= (1.0 / float(BANNER_LIFETIME_FRAMES)) * (1.0 + 0.75 * float(_banners.size() - 1))
 		if _banners[0]["t"] <= 0.0:
 			_banners.pop_front()
 	for _hi in _hitmarker.size():
@@ -6021,7 +6027,7 @@ func _draw_enemies() -> void:
 			_enemy_flash.erase(eidx)
 		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
 			_seen_kinds[ekind] = true
-			_show_banner(_KIND_TEACH[ekind], Color(1.0, 0.55, 0.4))
+			show_banner(_KIND_TEACH[ekind], GameMenu.BANNER_COL_FAIL)
 		var epos := _to_screen(e["x"], e["y"])
 		# a2-11 VFX#1: hit-flash + spark + micro-flinch on a NON-LETHAL hit (hp dropped
 		# but still alive) — mobs only reacted on death; now every hit reads. The white
@@ -7401,7 +7407,7 @@ func _check_water_entry() -> void:
 					Color(0.38, 0.28, 0.16))   # mud-brown, not generic dust (judge r1)
 				if not _mud_told:
 					_mud_told = true
-					_show_banner("MUD — HALF SPEED, ROLLS LEGAL", Color(0.75, 0.6, 0.4))
+					show_banner("MUD — HALF SPEED, ROLLS LEGAL", Color(0.75, 0.6, 0.4))
 			_mud_prev[i] = muddy
 	_enemy_water_prev.resize(sim.enemies.size())
 	for i in sim.enemies.size():

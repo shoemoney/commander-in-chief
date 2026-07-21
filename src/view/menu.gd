@@ -50,6 +50,14 @@ const HALL_KEEP := 40
 # single-page, and multi-page counters all read in the SAME warm gold and can't drift apart.
 const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
 
+# c4-07: the two shared center-banner status tints. Single-sourced HERE (the class main already
+# depends on) so Main's show_banner, this menu's seed-paste feedback, AND the test stub all read the
+# SAME colours and can never drift. BANNER_COL_DEFAULT is show_banner's neutral warm-gold default;
+# BANNER_COL_FAIL is the orange-red deny/error tint carried by the failed-paste banner and the
+# right-margin resting invalid hint alike (one error colour across the whole seed flow).
+const BANNER_COL_DEFAULT := Color(1.0, 0.92, 0.55)
+const BANNER_COL_FAIL := Color(1.0, 0.55, 0.4)
+
 var mode: int = Mode.TITLE
 var sel := 0
 var main: Node2D
@@ -2704,7 +2712,7 @@ func _draw_seed_hint(r: Rect2, cy: float, selected: bool) -> void:
 	var flash_here := _seed_flash > 0.0 and _seed_preview < 0
 	var clip_empty := _seed_clip_raw.strip_edges().is_empty()
 	var lines := seed_hint_lines(true, _seed_preview, armed_here, clip_empty)
-	var deny_col := Color(1.0, 0.55, 0.4)   # resting invalid colour
+	var deny_col := BANNER_COL_FAIL   # c4-07: resting invalid colour — the SAME shared tint the deny banner carries
 	if _seed_preview < 0:
 		# c3-13: co-locate the SPECIFIC error ("NO SEED - COPY ONE" / "BAD SEED - CHECK COPY")
 		# IN the plate as the second line, next to the row's red status stripe — so the message
@@ -2797,11 +2805,20 @@ func _activate_seed() -> void:
 		_seed_flash = 1.0   # c3-13: drives the RED PLATE-WASH BRIGHTEN in _draw (on top of the
 		                    # persistent invalid tint) so the denied press recoils the whole button
 		_seed_armed = false
+		# c4-07: a transient status line names the OUTCOME of the press. The focused row already
+		# carries persistent inline feedback (label echo + right-margin hint + red flash), but a
+		# denied press otherwise produced no distinct MOMENT the player could catch if their eye
+		# was on the row label — so surface a short banner that says exactly why nothing loaded.
+		# show_banner de-dupes identical text, so mashing the row can't stack it (no repeat-click
+		# confusion); empty vs malformed clipboard read differently so the two failures stay apart.
+		# main.show_banner (Main's public status channel) IS the canonical status line here (not a menu
+		# _draw toast): TITLE's button column runs down to the y322 input legend with no free band for
+		# one, and the LOADED case hides the menu the same frame it fires — so a shared over-run banner
+		# is the ONE channel all three outcomes can use, riding the same ~2s life + de-dupe as every splash.
+		var clip_empty := _seed_clip_raw.strip_edges().is_empty()
+		main.show_banner("CLIPBOARD EMPTY - COPY A SEED" if clip_empty else "INVALID SEED - CHECK COPY",
+			BANNER_COL_FAIL)
 		_mark_dirty()
-		# c2-12: the deny needs no center toast — the FOCUSED row already carries full inline
-		# feedback: the label echoes the raw clipboard text (see seed_row_label) so the player
-		# sees WHAT was read, and the right-margin hint says WHY it was rejected ("NO SEED -
-		# COPY ONE" vs "BAD SEED - CHECK COPY"), alongside the red flash + deny buzz.
 		return
 	# Two-press verify: a run loads ONLY on a second press that confirms the SAME seed
 	# the arm is already displaying ("SEED N  PRESS AGAIN"). This gives a genuine chance
@@ -2809,6 +2826,11 @@ func _activate_seed() -> void:
 	# and the confirm re-arms on the new value (shown first) instead of launching blind.
 	if _seed_armed and _seed_preview == _seed_armed_val:
 		main._sfx.play("buy", -8.0)   # confirm: the plate showed this exact seed
+		# c4-07: name the loaded seed as the run launches — the menu hides on start_seeded, so this
+		# transient banner (drawn over the run) is the confirmation that the paste actually took.
+		# Fired HERE, gated to the genuine two-press seed confirm, not inside start_seeded (which
+		# would banner every seeded launch). The paired deny above covers the empty/invalid cases.
+		main.show_banner("SEED %d LOADED" % _seed_armed_val)   # default BANNER_COL_DEFAULT tint
 		main.start_seeded(_seed_armed_val)
 		_seed_armed = false
 		return

@@ -70,6 +70,13 @@ class _StubMain extends Node2D:
 		return _clip
 	func _parse_seed_text(txt: String) -> int: return MainScript._parse_seed_text(txt)
 	func start_seeded(seed_v: int) -> void: _started.append(seed_v)
+	var _banners: Array = []       # c4-07: records show_banner(text) so the seed-paste status line can be asserted
+	var _banner_cols: Array = []   # c4-07: parallel colour record so the failure/loaded tint is testable
+	func show_banner(text: String, col := Menu.BANNER_COL_DEFAULT, _icon := "") -> void:   # signature + default mirror real Main's public show_banner
+		if not _banners.is_empty() and _banners[-1] == text:
+			return   # mirror the real main's same-text de-dupe so the no-stack contract is testable
+		_banners.append(text)
+		_banner_cols.append(col)
 	func _bus_vol(n: String) -> int: return _levels.get(n, 8)
 	func _set_bus_vol(name: String, v: int) -> void:
 		_levels[name] = v
@@ -4036,6 +4043,47 @@ func test_seed_first_press_arms_second_press_launches() -> void:
 	Runner.T.eq(stub._started, [777], "the confirming second press loads the displayed seed")
 	Runner.T.eq(stub._sfx.plays[-1][0], "buy", "the launch plays the confirm chime")
 	Runner.T.ok(not m._seed_armed, "the arm clears once the run has committed")
+	m.free()
+	stub.free()
+
+
+# c4-07: every seed-paste activation posts a TRANSIENT status banner naming the outcome, so a
+# press is never silent — empty and malformed clipboards read differently, the confirm names the
+# loaded seed, and show_banner's own same-text de-dupe means mashing the row can't stack it.
+func test_seed_paste_posts_transient_status_banner() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+	m.sel = _seed_row_index(m)
+	var fail_col := Menu.BANNER_COL_FAIL       # the shared orange-red both deny banners carry
+	var load_col := Menu.BANNER_COL_DEFAULT    # the shared default warm-gold the LOADED banner inherits
+	# Empty clipboard -> the EMPTY status, in the failure colour.
+	stub._clip = ""
+	m._activate_seed()
+	Runner.T.ok(stub._started.is_empty(), "empty paste launches nothing")
+	Runner.T.eq(stub._banners[-1], "CLIPBOARD EMPTY - COPY A SEED", "empty clipboard names the EMPTY status")
+	Runner.T.ok(stub._banner_cols[-1].is_equal_approx(fail_col), "the EMPTY banner uses the orange-red failure tint")
+	# Malformed clipboard (text present, no usable seed) -> the INVALID status, distinct from EMPTY.
+	stub._clip = "not a seed"
+	m._activate_seed()
+	Runner.T.ok(stub._started.is_empty(), "malformed paste launches nothing")
+	Runner.T.eq(stub._banners[-1], "INVALID SEED - CHECK COPY", "malformed clipboard names the INVALID status")
+	Runner.T.ok(stub._banner_cols[-1].is_equal_approx(fail_col), "the INVALID banner also uses the failure tint")
+	# Repeat malformed press does NOT stack a second identical banner (no repeat-click confusion).
+	var before := stub._banners.size()
+	m._activate_seed()
+	Runner.T.eq(stub._banners.size(), before, "an identical repeat press de-dupes, it does not stack")
+	# Valid clipboard, two-press confirm -> the LOADED status names the seed as the run launches.
+	stub._clip = "4242"
+	var banners_before_arm := stub._banners.size()
+	m._activate_seed()   # arm ONLY — no launch, and crucially no "SEED ... LOADED" banner yet
+	Runner.T.ok(m._seed_armed and stub._started.is_empty(), "the first valid press arms without launching")
+	Runner.T.eq(stub._banners.size(), banners_before_arm, "the arming press posts NO banner — only the confirm does")
+	m._activate_seed()   # confirm
+	Runner.T.eq(stub._started, [4242], "the confirmed seed launches")
+	Runner.T.eq(stub._banners[-1], "SEED 4242 LOADED", "the confirm names the loaded seed")
+	Runner.T.ok(stub._banner_cols[-1].is_equal_approx(load_col), "the LOADED banner rides the default warm-gold tint, not the failure red")
 	m.free()
 	stub.free()
 
