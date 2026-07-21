@@ -6125,6 +6125,15 @@ func _draw_enemies() -> void:
 					epos + Vector2(sin(bph * TAU) * 2.5, -2.0 - bph * 10.0), 0.0,
 					0.05 + bph * 0.04, Color(1, 1, 1, 0.55 * (1.0 - bph)))
 				_spr(_frogman_tex(e["submerged"]), epos, face, 0.4, Color(0.5, 0.8, 0.8, 0.35))
+				# c4-09: a small grenade glyph gently bobbing over the submerged diver — an
+				# in-world "GRENADES ONLY" cue attached to the entity itself, so the immunity
+				# reads at the target even when the HUD's droppable hostiles_immune chip is
+				# squeezed off a crowded row. Guarded like every other art lookup. The How-To
+				# ENEMIES page and that HUD chip teach the same rule.
+				if Art.TEX.has("icon_grenade"):
+					var gbob := sin(float(Engine.get_physics_frames() + eidx * 23) * 0.06) * 1.5
+					_spr("icon_grenade", epos + Vector2(0.0, -13.0 + gbob), 0.0, 0.09,
+						Color(0.7, 0.9, 1.0, 0.7))
 			elif st > 0:
 				# Surfacing telegraph: bold ripple burst + the body rising up.
 				var sfrac := 1.0 - float(st) / float(SimWorld.FROGMAN_SURFACE_TICKS)

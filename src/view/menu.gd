@@ -66,11 +66,14 @@ var _confirm := -1   # index of a destructive item awaiting a 2nd press
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
 var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown (up/down pages)
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
-var _howto_page := 0    # c3-05/c4-06: which HOW-TO-PLAY tab (0 CONTROLS / 1 WAR CHEST / 2 ENEMIES / 3 ENDLESS); left/right/wheel or tab-click pages it
+var _howto_page := 0    # c3-05/c4-06/c4-09: which HOW-TO-PLAY tab (0 CONTROLS / 1 WAR CHEST / 2 MODES / 3 ENEMIES / 4 ENDLESS); left/right/wheel or tab-click pages it
 var _howto_endless_page := 0   # c4-06: sub-page WITHIN the single ENDLESS tab (0-based); the in-page chevrons / left-right step it — one clear roster pager instead of two ENDLESS tabs
 var _howto_nav_hover := -1   # c4-06: which ENDLESS chevron the pointer is over (-1 none / 0 PREV / 1 NEXT) — lights its plate
-const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "ENEMIES", "ENDLESS"]  # c3-05/c4-06: HOW-TO-PLAY tabs — the old BASIC page crammed the verbs AND the War Chest economy together, so each owns a tab; c4-06 gives the seven ENDLESS threats ONE tab paged by in-page chevrons (was two ENDLESS I/II tabs + chevrons — a redundant, confusing double control) so each roster row still gets a big sprite/pitch
-const HOWTO_ENDLESS_TAB := 3   # index of the ENDLESS tab in HOWTO_TABS (the only paged tab)
+# c4-09: a MODES tab joins the roster — CAMPAIGN / ENDLESS / DAILY / ASSIST used to appear in RUN
+# SETUP and the pause menu with ZERO in-game explanation, so a new player couldn't tell what DAILY
+# RUN commits to or what the ASSIST (2-HIT) toggle actually changes.
+const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "MODES", "ENEMIES", "ENDLESS"]  # c3-05/c4-06/c4-09: HOW-TO-PLAY tabs — the old BASIC page crammed the verbs AND the War Chest economy together, so each owns a tab; c4-06 gives the seven ENDLESS threats ONE tab paged by in-page chevrons (was two ENDLESS I/II tabs + chevrons — a redundant, confusing double control) so each roster row still gets a big sprite/pitch; c4-09 adds MODES
+const HOWTO_ENDLESS_TAB := 4   # index of the ENDLESS tab in HOWTO_TABS (the only paged tab)
 const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; existence gates the INFO menu row
 # c3-10: the HOW TO PLAY shortcut's DEFAULT keycode — the live value is the "menu_help" menu
 # binding (main.menu_bind, remappable via the save overlay); this const is only the fallback for
@@ -1833,7 +1836,7 @@ func _nav(move: int, hmove: int) -> void:
 		_mark_dirty()
 		return
 	# c2-02: HOW TO PLAY is paged on the HORIZONTAL axis — left/right (and the wheel,
-	# routed in as hmove) turns the CONTROLS / WAR CHEST / ENEMIES / ENDLESS page, clamped (never
+	# routed in as hmove) turns the CONTROLS / WAR CHEST / MODES / ENEMIES / ENDLESS page, clamped (never
 	# wraps), so each section owns a full screen instead of stacking rows onto the
 	# next. Matches the footer's "L/R PAGE" hint exactly. Up/down is deliberately
 	# NOT consumed here — it falls through to the 1-row list below and simply keeps
@@ -4031,15 +4034,23 @@ func _draw_howto() -> void:
 	match _howto_page:
 		0: _howto_page_controls()
 		1: _howto_page_warchest()
-		2: _howto_page_enemies()
-		3: _howto_page_endless(_endless_page())   # ENDLESS — one tab, paged by chevrons/left-right
-		_: _howto_page_endless(_endless_page())   # safety fallback (tab is clamped 0..3)
+		2: _howto_page_modes()
+		3: _howto_page_enemies()
+		4: _howto_page_endless(_endless_page())   # ENDLESS — one tab, paged by chevrons/left-right
+		_: _howto_page_endless(_endless_page())   # safety fallback (tab is clamped 0..4)
 
 
-# c3-05/c4-06: the CONTROLS/WAR CHEST/ENEMIES/ENDLESS tab row — same centered
+# c3-05/c4-06/c4-09: the CONTROLS/WAR CHEST/MODES/ENEMIES/ENDLESS tab row — same centered
 # grammar and pure style helper the HALL filter tabs use, so both content screens read as
-# one system. Everything iterates HOWTO_TABS so the four-tab row draws (and its click
+# one system. Everything iterates HOWTO_TABS so the tab row draws (and its click
 # targets in _howto_tab_rects) stay in lockstep with the page count.
+# c4-09 fit check: the five-tab row measures 404px at the 10px font, centered 118..522 on the
+# 640-wide virtual canvas — 90px of clearance inside the 28..612 frame interior, and 90px clear
+# of the right-edge "N / 5" counter. Because ALL menu draw happens on this fixed 640 canvas that
+# scales/letterboxes uniformly to the window, the row can't clip at any supported resolution:
+# lower resolutions just render the same 640-unit layout at a smaller uniform scale. No two-row
+# strip or padding cut is needed; if a future 6th tab pushed the 404px span past 584, _tab_rects_for
+# is the single place a smaller gutter/font would go (draw + click targets both read from it).
 func _draw_howto_tabs() -> void:
 	var tabs := _howto_tab_rects()
 	for i in HOWTO_TABS.size():
@@ -4054,12 +4065,15 @@ func _draw_howto_tabs() -> void:
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
 			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
-	# c3-05/c4-06: a "N / 4" counter, right-aligned at the frame edge on the tab baseline, so
+	# c3-05/c4-06/c4-09: a "N / 5" counter, right-aligned at the frame edge on the tab baseline, so
 	# a first-time player can see at a glance there are more pages than the one on
 	# screen — the tabs alone read as a static header, and nobody paged through them.
 	# The centered tab row (see _tab_rects_for) never reaches the frame edge, so the
 	# counter can't collide with the rightmost (ENDLESS) tab.
-	var pg := "%d / %d" % [_howto_page + 1, HOWTO_TABS.size()]
+	# c4-09: the denominator is HOWTO_TABS.size() (now 5), NEVER a hardcoded page count —
+	# adding the MODES tab moved it 4->5 automatically, so the counter can't lie to the player.
+	var tab_total := HOWTO_TABS.size()
+	var pg := "%d / %d" % [_howto_page + 1, tab_total]
 	var pw := Art.font().get_string_size(pg, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	Art.text(self, pg, Vector2(FRAME_INNER_R - pw, TAB_BASELINE_Y), 10, Color(0.7, 0.75, 0.7, 0.85))
 
@@ -4109,23 +4123,70 @@ func _howto_page_warchest() -> void:
 		y, Color(0.85, 0.9, 0.8))
 
 
-# c3-05 page 3 — the standard red-team roster with live sprites, at a roomy pitch
+# c4-09 MODES tab. CAMPAIGN / ENDLESS / DAILY / ASSIST surface in RUN SETUP and the pause
+# menu with no in-game copy, so a first-run player can't tell what DAILY RUN commits to or what the
+# ASSIST (2-HIT) toggle actually does. Each mode gets a plain sentence, amber NAME + muted tip on
+# one width-clamped line (same grammar as the ENDLESS roster) so the page scans by name.
+func _howto_page_modes() -> void:
+	var y := 100.0
+	Art.text(self, "MODES + ASSIST:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
+	y += 22.0
+	var name_col := Color(1.0, 0.85, 0.45)
+	var body_col := Color(0.9, 0.92, 0.82)
+	# [icon, NAME, tip] — each mode leads with a glyph so the page shares the sprite-led row
+	# grammar of the ENEMIES / ENDLESS rosters instead of reading as a bare text column: flag =
+	# the campaign advance, skull = the endless swarm, timer = the once-a-day run, vest = the
+	# extra hit of armor ASSIST grants. NAMES mirror the RUN SETUP menu rows verbatim
+	# ("CAMPAIGN" / "ENDLESS WAR" / "DAILY RUN") — that is the label the player actually clicks, so
+	# the page teaches the exact word on the button, not the shorter "ENDLESS" the roster TAB uses.
+	var modes := [
+		["hud_flag", "CAMPAIGN", "Fight up five sectors to the Foundry finale. The main run."],
+		["hud_skull", "ENDLESS WAR", "Hold out against escalating waves for score. Ranged threats join wave 3+."],
+		["mi_timer", "DAILY RUN", "One shared seed a day, one attempt. Everyone races the same board."],
+		["icon_vest", "ASSIST (2-HIT)", "Each life takes TWO hits, not one. Runs are tagged *ASSIST."]]
+	var f := Art.font()
+	for m in modes:
+		# c4-09: guard the glyph key BEFORE Art.tint()/_draw_sprite_fit so a renamed or
+		# missing icon never reaches Art.tex()'s hard TEX[key] index — the row falls back
+		# to its amber NAME + tip (the load-bearing copy) instead of crashing the screen.
+		if Art.TEX.has(m[0]):
+			_draw_sprite_fit(m[0], Rect2(74, y - 22, 28, 26), Art.tint(m[0]))
+		var nm: String = m[1]
+		var nw := f.get_string_size(nm + "  ", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		Art.text(self, nm, Vector2(110, y - 6), 11, name_col)
+		Art.text(self, m[2], Vector2(110.0 + nw, y - 6), 11, body_col, maxf(0.0, FRAME_INNER_R - (110.0 + nw)))
+		y += 34.0
+
+
+# c3-05 ENEMIES tab — the standard red-team roster with live sprites, at a roomy pitch
 # instead of the 18px it once crammed under the ranged block.
 func _howto_page_enemies() -> void:
 	var y := 100.0
 	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
 	y += 22.0
 	# sol-08: front the LIVE red-team sprites the player now sees (rusher/elite draw the pack enemy_* cel bakes).
+	# c4-09: the FROGMAN line now names its bullet-IMMUNITY outright — while submerged, bullets pass
+	# clean over it (grenades only), so "GRENADES ONLY" reads as a rule, not a preference, and ammo
+	# isn't emptied into a bullet-proof target. The HUD posts the same immunity beside the counter.
 	var roster := [["enemy_smg", "RUSHER — charges, touch kills"],
 		["enemy_assault", "ELITE — keeps range, telegraphs one shot"],
-		["frogman", "FROGMAN — lurks in water, grenades only"]]
+		["frogman", "FROGMAN — submerged: bullets pass over, GRENADES ONLY"]]
 	for r in roster:
 		_draw_sprite_fit(r[0], Rect2(74, y - 22, 28, 26), Art.tint(r[0]))
 		Art.text(self, r[1], Vector2(110, y - 6), 11, Color(0.9, 0.92, 0.82), FRAME_INNER_R - 110.0)
 		y += 34.0
+	# c4-09: the DOWNED PILOT is the reason the HOSTILES tally can read fewer than the bodies on
+	# screen — he is a rescue objective, not a kill (the sim's wave-clear check and the HUD counter
+	# both skip him), and shooting him does nothing. Called out as a note UNDER the red-team roster
+	# (he isn't "shooting back", so he stays out of it) exactly where a player hunting the mismatch looks.
+	y += 6.0
+	if Art.TEX.has("m_pilot"):   # c4-09: same guard — the pilot NOTE survives a missing sprite
+		_draw_sprite_fit("m_pilot", Rect2(74, y - 22, 28, 26), Art.tint("m_pilot"))
+	Art.text(self, "DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him.",
+		Vector2(110, y - 6), 11, Color(0.85, 0.95, 0.85), FRAME_INNER_R - 110.0)
 
 
-# c3-05 page 4 — the Endless War ranged specialists.
+# c3-05 ENDLESS tab — the Endless War ranged specialists.
 # c4-06: the seven ENDLESS ranged threats used to crowd ONE screen — even on their
 # own c3-05 tab the pitch stayed capped at 24 to squeeze all seven in, so the sprites
 # read small. They now span TWO sub-pages of the single ENDLESS tab (4 rows + 3 rows),
@@ -4315,6 +4376,13 @@ func _visible_region(key: String) -> Rect2:
 
 # Draw a sprite's opaque region cropped and centered inside `box`, aspect kept.
 func _draw_sprite_fit(key: String, box: Rect2, mod: Color) -> void:
+	# c4-09: guard on the manifest, not just null — Art.tex() indexes TEX[key] and
+	# hard-crashes on a MISSING key (the `t == null` check below only ever caught a
+	# key whose stored value was null, never an absent one). Skipping absent keys
+	# lets every sprite-led row (the MODES glyphs, the pilot note) degrade to its
+	# text label instead of taking down the whole HOW-TO screen if art is renamed.
+	if not Art.TEX.has(key):
+		return
 	var t := Art.tex(key)
 	if t == null:
 		return

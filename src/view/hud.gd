@@ -55,7 +55,15 @@ const CHIP_PRIO := {
 	"chest": 999, "score": 998, "tokens": 997,
 	# objective — live "what do I do now" readouts. shop (95) tops hostiles: the buy window is the
 	# more perishable (it closes on a timer), so on a too-tight row the shop timer survives.
-	"shop": 95, "hostiles": 90, "wave": 85, "sector": 82,
+	"shop": 95, "hostiles": 90,
+	# c4-09: the "GRENADES ONLY" cue for a bullet-immune submerged diver docks DIRECTLY under
+	# HOSTILES (89) — it exists to explain that very counter (a lurking diver inflates the tally
+	# with nothing shootable on screen), so it must survive on the same crowded rows the counter
+	# does, never dropping before the wave stat or a mutator/flashbang timer the way a 68 would.
+	# It still yields to HOSTILES itself, and the submerged diver ALSO carries an in-world grenade
+	# glyph (see main.gd) so the immunity reads even if this one chip is ever squeezed out.
+	"hostiles_immune": 89,
+	"wave": 85, "sector": 82,
 	# lethal timers — active field effects / threat modifiers on a clock
 	"flashbang": 80, "mutator": 70,
 	# vanity — records / streaks the player enjoys but never has to ACT on
@@ -1173,12 +1181,18 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			# push-or-hold gauge must survive and the vanity chips must drop —
 			# it used to be the other way around, vanishing exactly mid-chaos.
 			var alive := 0
+			var immune_lurker := false
 			for e in sim.enemies:
 				# The pilot is an optional side objective — the sim's own
 				# _wave_hostiles_cleared() skips it, so counting it here made the
 				# HUD hunt one more "hostile" that can't be shot (rescued by touch).
 				if e["alive"] and e["kind"] != "pilot":
 					alive += 1
+				# c4-09: a submerged diver is BULLET-IMMUNE (grenades only) yet its faint
+				# silhouette + ripples still draw fire -- flag it so the HOSTILES readout can
+				# post a "GRENADES ONLY" chip beside the counter where the mismatch is felt.
+				if e["alive"] and e["kind"] == "frogman" and e.get("submerged", false):
+					immune_lurker = true
 			var remaining: int = alive + sim.wave_pending
 			# The wave's starting budget (same formula _start_wave uses).
 			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
@@ -1192,6 +1206,23 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				if not _measure:
 					_mini_bar(Rect2(x, y + 2, 40, 9), cleared, Art.safe(Color(0.4, 0.85, 0.4)))
 				x += 48.0
+			# c4-09: a submerged diver is BULLET-IMMUNE (grenades only). Its faint ripples
+			# still invite fire AND its lurking body sits in the HOSTILES tally, so the count
+			# reads high with nothing shootable on screen. A "GRENADES ONLY" chip beside the
+			# counter names the immunity right where the mismatch is felt, and the ENEMIES how-to
+			# page carries the same rule. Demotable -- drops before the live stats on a crowded row.
+			if immune_lurker:
+				var itxt := "GRENADES ONLY"
+				var icol := Color(0.7, 0.9, 1.0)
+				# c4-09: the glyph is optional decoration; guard the manifest so a renamed/
+				# missing icon_grenade drops the sprite (and its reserved width) rather than
+				# crashing Art.tex() -- the "GRENADES ONLY" words carry the cue on their own.
+				var has_icon := Art.TEX.has("icon_grenade")
+				var icon_w: float = (ICON + 3.0) if has_icon else 0.0
+				if _fits2("hostiles_immune", icon_w + _tw(itxt) + 6.0):
+					if not _measure and has_icon:
+						draw_texture_rect(Art.tex("icon_grenade"), Rect2(x, y, ICON, ICON), false, icol)
+					x = _text(itxt, x + icon_w, y + ICON - 3.0, icol) + 6.0
 			# Live WAVE record chip — endless is the mode players grind, but the wave
 			# count (the number they chase) only got record feedback in the K.I.A.
 			# debrief. Same idiom as the score BEST chip: grey while chasing a prior
