@@ -75,27 +75,48 @@ class _StubMain extends Node2D:
 		_levels[name] = v
 		_set_calls.append([name, v])
 	func _save_settings() -> void: _saved += 1
+	# c3-18: OPTIONS dirty-state hooks — the menu snapshots the baseline (no persist) and, on
+	# DISCARD, re-applies it to the live fields. Neither bumps _saved, so a stage+discard stays
+	# a zero-write round-trip. Shapes mirror the real main so a snapshot round-trips.
+	func _settings_snapshot() -> Dictionary:
+		return {"colorblind": colorblind, "assist": _assist, "reduce_motion": _motion < 0.5,
+			"rumble": _rumble_on, "swap_sticks": _swap_sticks[0], "swap_sticks_p2": _swap_sticks[1],
+			"sfx_vol": _bus_vol("SFX"), "music_vol": _bus_vol("Music"),
+			"fullscreen": _fullscreen, "window_scale": _win_scale}
+	func _apply_settings(d: Dictionary) -> void:
+		colorblind = d["colorblind"]
+		_assist = d["assist"]
+		_motion = 0.0 if d["reduce_motion"] else 1.0
+		_rumble_on = d["rumble"]
+		_swap_sticks[0] = bool(d.get("swap_sticks", false))
+		_swap_sticks[1] = bool(d.get("swap_sticks_p2", false))
+		_set_bus_vol("SFX", d["sfx_vol"])
+		_set_bus_vol("Music", d["music_vol"])
+		_fullscreen = d["fullscreen"]
+		_win_scale = int(d.get("window_scale", 2))
 	# c1-19: WINDOW SCALE stub — headless has no display, so cap the ladder at 3x and
 	# apply the clamped absolute scale the menu's ◄/►/Enter drive (records a save).
 	func _max_win_scale() -> int: return 3
 	func _win_scale_norm() -> int: return clampi(_win_scale, 1, _max_win_scale())
-	func _toggle_fullscreen() -> void:
+	# c3-18: `persist` mirrors the real main — the OPTIONS dirty-state flips these LIVE but defers
+	# the write, so a deferred call must NOT bump _saved (the disk touch waits for SAVE).
+	func _toggle_fullscreen(persist := true) -> void:
 		_fullscreen = not _fullscreen
-		_saved += 1
-	func _set_win_scale(s: int) -> bool:
+		if persist: _saved += 1
+	func _set_win_scale(s: int, persist := true) -> bool:
 		var ns := clampi(s, 1, _max_win_scale())
 		if ns == _win_scale and not _fullscreen: return false
 		_win_scale = ns
 		_fullscreen = false
-		_saved += 1
+		if persist: _saved += 1
 		return true
 	# c1-19: change the preference WITHOUT leaving fullscreen — the WINDOW SCALE row stays live
 	# while fullscreen (edits the value applied on return to windowed), never a dead/ignored row.
-	func _set_win_scale_pref(s: int) -> bool:
+	func _set_win_scale_pref(s: int, persist := true) -> bool:
 		var ns := clampi(s, 1, _max_win_scale())
 		if ns == _win_scale: return false
 		_win_scale = ns
-		_saved += 1
+		if persist: _saved += 1
 		return true
 	# c1-18: rebind screen reads these off `main`. Real maps so _menu_items(REBIND) and the
 	# capture/back tests exercise the true row set + swap/clear/reset behaviour headless.
@@ -766,17 +787,153 @@ func test_settings_rows_integration_reflects_level() -> void:
 	stub.free()
 
 
-# Integration: _step_vol() (the one path ◄/► AND Enter/click share) routes every
-# change through _set_bus_vol and persists it — up clamps, down reaches 0 (mute).
+# Integration: _step_vol() (the one path ◄/► AND Enter/click share) routes every change through
+# _set_bus_vol and applies it LIVE — up clamps, down reaches 0 (mute). c3-18: but browsing the
+# OPTIONS screen must NOT persist per step; a real step STAGES the change (marks the screen dirty,
+# snapshots the baseline) and the disk write is deferred to the SAVE exit, which commits ONCE.
 func test_step_vol_routes_through_shared_setter() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
 	m.mode = Menu.Mode.OPTS
-	m._step_vol("SFX", 1)      # stub level 8, unmuted -> 9
-	m._step_vol("Music", -1)   # 8 -> 7
-	Runner.T.eq(stub._set_calls, [["SFX", 9], ["Music", 7]], "both buses move via _set_bus_vol")
-	Runner.T.eq(stub._saved, 2, "each step persists settings once")
+	m._step_vol("SFX", 1)      # stub level 8, unmuted -> 9 (applied live)
+	m._step_vol("Music", -1)   # 8 -> 7 (applied live)
+	Runner.T.eq(stub._set_calls, [["SFX", 9], ["Music", 7]], "both buses move LIVE via _set_bus_vol")
+	Runner.T.eq(stub._saved, 0, "browsing STAGES — no per-step disk write")
+	Runner.T.ok(m._opts_dirty, "a real step marks OPTIONS dirty (unsaved)")
+	m._exit_opts(true)         # SAVE commits the staged changes
+	Runner.T.eq(stub._saved, 1, "SAVE persists the staged settings exactly once")
+	Runner.T.ok(not m._opts_dirty, "SAVE clears the dirty flag")
+	m.free()
+	stub.free()
+
+
+# c3-18: DISCARD (and the equivalent Esc/cancel) must revert EVERY field staged while browsing
+# OPTIONS back to the pristine on-disk baseline captured on entry — and write nothing. Opening the
+# screen via the real open() exercises the baseline capture; two a11y toggles apply LIVE, then the
+# discard exit rolls them all back with zero persistence.
+func test_options_discard_reverts_staged_changes_without_persisting() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	stub._assist = false
+	stub.colorblind = false
+	m.open(Menu.Mode.OPTS)                 # captures the pristine baseline (assist OFF, colorblind OFF)
+	Runner.T.ok(not m._opts_dirty, "a freshly opened OPTIONS screen is clean")
+	m.sel = _row_index(m, "assist")
+	m._activate()                          # flip ASSIST ON, LIVE
+	m.sel = _row_index(m, "colorblind")
+	m._activate()                          # flip COLORBLIND ON, LIVE
+	Runner.T.ok(stub._assist and stub.colorblind, "toggles apply LIVE so the preview works")
+	Runner.T.ok(m._opts_dirty, "staged changes mark the screen dirty")
+	Runner.T.eq(stub._saved, 0, "staged toggles are NOT written to disk")
+	m._exit_opts(false)                    # DISCARD / Esc
+	Runner.T.ok(not stub._assist and not stub.colorblind, "DISCARD reverts every field to the baseline")
+	Runner.T.eq(stub._saved, 0, "DISCARD writes nothing")
+	Runner.T.ok(not m._opts_dirty, "DISCARD clears the dirty flag")
+	Runner.T.eq(m.mode, Menu.Mode.SETUP, "DISCARD climbs to the OPTIONS opener")
+	m.free()
+	stub.free()
+
+
+# c3-18: the DISPLAY sub-screen (reached from the OPTS DISPLAY opener) joins the SAME dirty session —
+# FULLSCREEN and WINDOW SCALE flip the window LIVE for preview but defer the disk write, and DISCARD
+# restores the baseline display mode + scale with zero persistence.
+func test_options_display_changes_stage_and_discard_reverts() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	stub._fullscreen = false
+	stub._win_scale = 2
+	m.open(Menu.Mode.OPTS)             # baseline captured: windowed 2x
+	var saves0: int = stub._saved
+	m.mode = Menu.Mode.DISP            # DISPLAY shares the OPTS dirty session
+	m.sel = _row_index(m, "winscale")
+	m._step_scale(1)                   # 2x -> 3x, applied LIVE
+	Runner.T.eq(stub._win_scale, 3, "WINDOW SCALE steps LIVE for preview")
+	m.sel = _row_index(m, "fullscreen")
+	m._activate()                      # FULLSCREEN ON, applied LIVE
+	Runner.T.ok(stub._fullscreen, "FULLSCREEN flips LIVE for preview")
+	Runner.T.ok(m._opts_dirty, "DISPLAY changes mark the shared OPTIONS session dirty")
+	Runner.T.eq(stub._saved, saves0, "DISPLAY changes STAGE — no write per flip")
+	m.mode = Menu.Mode.OPTS            # BACK from DISP returns to OPTS (session still dirty)
+	m._exit_opts(false)                # DISCARD
+	Runner.T.ok(not stub._fullscreen and stub._win_scale == 2, "DISCARD restores the baseline mode + scale")
+	Runner.T.eq(stub._saved, saves0, "DISCARD writes nothing")
+	m.free()
+	stub.free()
+
+
+# c3-18: staged (unsaved) changes must be VISIBLE before the player reaches the exit rows — the
+# OPTIONS header title gains a trailing '*' dirty-doc cue. Inspected through the real _draw_opts_header
+# via the _center_text capture seam (the codebase's headless render check).
+func test_options_dirty_title_flags_unsaved_changes() -> void:
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.OPTS
+	m._draw_opts_header()
+	var clean_titles: Array = m.centered.map(func(c): return c["txt"])
+	Runner.T.ok("OPTIONS" in clean_titles and not ("OPTIONS *" in clean_titles),
+		"a clean OPTIONS screen shows the plain title")
+	m._opts_dirty = true
+	m.centered.clear()
+	m._draw_opts_header()
+	var dirty_titles: Array = m.centered.map(func(c): return c["txt"])
+	Runner.T.ok("OPTIONS *" in dirty_titles, "staged changes flag the OPTIONS title with an unsaved '*' cue")
+	m.free()
+	stub.free()
+
+
+# c3-18: the dirty-state must hold for OPTIONS opened mid-run from PAUSE (the spec covers BOTH the
+# title and the pause opener). Staged toggles defer the write, and SAVE / DISCARD both climb back to
+# the PAUSED run via _opts_parent — never dumping the player to the title.
+func test_pause_options_dirty_exit_climbs_to_pause_opener() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m._opts_parent = Menu.Mode.PAUSE       # OPTIONS opened mid-run from PAUSE
+	stub._rumble_on = true
+	# DISCARD path
+	m.open(Menu.Mode.OPTS)                  # baseline captured (rumble ON)
+	m.sel = _row_index(m, "rumble")
+	m._activate()                          # rumble ON -> OFF, staged LIVE
+	Runner.T.ok(m._opts_dirty and not stub._rumble_on, "PAUSE OPTIONS stages the toggle LIVE")
+	Runner.T.eq(stub._saved, 0, "no per-toggle write on the PAUSE opener path")
+	m.sel = _row_index(m, "opts_discard")
+	m._activate()
+	Runner.T.ok(stub._rumble_on, "DISCARD restores rumble to the baseline")
+	Runner.T.eq(m.mode, Menu.Mode.PAUSE, "DISCARD climbs to the PAUSE opener, not the title")
+	Runner.T.eq(stub._saved, 0, "DISCARD writes nothing")
+	# SAVE path
+	m.open(Menu.Mode.OPTS)                  # fresh baseline (rumble ON again)
+	m.sel = _row_index(m, "rumble")
+	m._activate()                          # rumble ON -> OFF, staged
+	m.sel = _row_index(m, "opts_save")
+	m._activate()
+	Runner.T.eq(stub._saved, 1, "SAVE from PAUSE OPTIONS persists exactly once")
+	Runner.T.eq(m.mode, Menu.Mode.PAUSE, "SAVE climbs to the PAUSE opener")
+	m.free()
+	stub.free()
+
+
+# c3-18: toggling a value and then flipping it back to its original CLEARS the dirty state — the
+# structural compare against the entry baseline drops the forced SAVE/DISCARD decision, so a pure
+# look-and-restore leaves the screen clean with a single BACK row.
+func test_options_toggle_roundtrip_clears_dirty() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	stub._assist = false
+	m.open(Menu.Mode.OPTS)                  # baseline: assist OFF
+	m.sel = _row_index(m, "assist")
+	m._activate()                          # assist -> ON, dirty
+	Runner.T.ok(m._opts_dirty and stub._assist, "flipping a value marks dirty")
+	Runner.T.ok(_row_index(m, "opts_save") >= 0, "dirty surfaces the SAVE row")
+	m._activate()                          # assist -> OFF again (back to baseline)
+	Runner.T.ok(not m._opts_dirty and not stub._assist, "flipping it back to baseline clears dirty")
+	Runner.T.eq(_row_index(m, "opts_save"), -1, "a clean screen drops back to a single BACK (no SAVE row)")
+	Runner.T.ok(_row_index(m, "back") >= 0, "the plain BACK row returns once nothing is staged")
 	m.free()
 	stub.free()
 

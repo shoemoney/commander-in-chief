@@ -71,6 +71,14 @@ var _seed_armed_t := 0.0 # c1-14: arm auto-disarm window (mirrors _confirm_t) �
 var _seed_poll_t := 0.0  # c1-14: throttle countdown — the focused row samples the clipboard ~5x/s, not every frame (activation still forces an immediate read)
 var _reset_flash_anim := true   # c1-09: whether that banner fades — captured from the PRE-reset reduce-motion state (reset itself re-enables motion, so reading it live would never snap)
 var _opts_parent := Mode.SETUP   # c2-04: which screen OPTIONS was opened from (the SETUP hub or PAUSE) — drives BACK
+# c3-18: OPTIONS dirty-state. Every audio/haptics/a11y toggle used to write the settings file
+# the instant it flipped, so merely BROWSING options (nudging a volume, peeking a toggle)
+# persisted the change. Now those toggles apply LIVE (so the preview still works) but only STAGE
+# the write: the first staged change snapshots the on-disk baseline into _opts_snapshot and raises
+# _opts_dirty. Leaving via SAVE commits (_save_settings); leaving via BACK/DISCARD/Esc reverts the
+# live fields to the snapshot and writes nothing. RESET DEFAULTS stays an explicit immediate commit.
+var _opts_dirty := false
+var _opts_snapshot: Dictionary = {}
 var _rebind_action := ""   # c1-18: REBIND screen is capturing the next key/button for THIS verb ("" = idle, listing binds)
 var _rebind_tab := 0       # c1-18: which REBIND category tab is shown (0 MOVE/AIM kb, 1 ACTIONS kb, 2 GAMEPAD, 3 MENUS) — keeps each page <=10 rows so plates stay >=20px
 var _rebind_pad_dev := 0   # c1-18: which PLAYER's pad layout the GAMEPAD tab edits (0 = P1, 1 = P2) — the two are independent; ◄/► (or the P1|P2 header sub-tabs) switch it
@@ -530,6 +538,12 @@ func open(m: int, select_id := "") -> void:
 	# such open, so a replay banked during the run is picked up next time (recomputed only on reopen).
 	if m == Mode.TITLE or m == Mode.INFO:
 		_has_replay = FileAccess.file_exists(REPLAY_PATH)
+	# c3-18: entering OPTIONS CLEAN captures the pristine on-disk baseline BEFORE any row is
+	# tweaked, so DISCARD/Esc revert to the real original values. Guarded on `not _opts_dirty` so a
+	# round-trip out to the DISPLAY sub-screen and back (which re-opens OPTS while still dirty)
+	# preserves the original baseline instead of re-snapshotting the mid-edit state.
+	if m == Mode.OPTS and not _opts_dirty and main != null:
+		_opts_snapshot = main._settings_snapshot()
 	_disarm_confirm()   # c2-09: no armed row (nor its live countdown) carries into a fresh screen
 	_rail_pulse = 0.0   # a fresh screen starts with no lingering rail-bounce flash
 	_rail_row = -1
@@ -785,7 +799,14 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# hidden corner shortcut, so keyboard/pad reach it by simply focusing it and pressing.
 		oitems.append({"id": "controls", "label": "CONTROLS (REBIND)", "destructive": false, "grp": 5})
 		oitems.append({"id": "reset_defaults", "label": "RESET DEFAULTS", "destructive": true, "grp": 6})
-		oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 7})
+		# c3-18: dirty-state exit. With unsaved staged changes the lone BACK splits into an explicit
+		# SAVE (commit) and DISCARD (revert) pair, so the deferred write is a visible, deliberate
+		# choice; a clean screen keeps the single BACK (nothing staged, so nothing to decide).
+		if _opts_dirty:
+			oitems.append({"id": "opts_save", "label": "SAVE", "destructive": false, "grp": 7})
+			oitems.append({"id": "opts_discard", "label": "DISCARD", "destructive": false, "grp": 7})
+		else:
+			oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 7})
 		return oitems
 	if mode == Mode.REBIND:
 		# c1-18: one row per rebindable verb on the ACTIVE CATEGORY tab. The 14 keyboard
@@ -1673,6 +1694,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 		_press()
 	elif back and mode == Mode.PAUSE:
 		mode = Mode.HIDDEN
+	elif back and mode == Mode.OPTS:
+		_exit_opts(false)   # c3-18: Esc/cancel out of OPTIONS DISCARDS any staged changes (no persist)
 	elif back and not _parent(mode).is_empty():
 		var d := _parent(mode)   # one level up; OPTIONS climbs to its opener (TITLE or PAUSE)
 		open(d["mode"], d["sel"])
@@ -2119,7 +2142,7 @@ func _step_vol(bus: String, delta: int) -> void:
 	_rail_pulse = 0.0   # a real step lands — clear any stale bounce flash
 	_rail_row = -1
 	main._set_bus_vol(bus, nv)
-	main._save_settings()
+	_stage_opts()   # c3-18: the new level is live (you HEAR it), but the disk write waits for SAVE
 	_flash_setting()   # c1-17: a real step applied — pulse the row so the change reads visually
 	# The tick doubles as a live level demo — pitch rides the new step.
 	main._sfx.play("pickup", -14.0, 0.8 + 0.05 * float(nv))
@@ -2163,8 +2186,11 @@ func _step_scale(dir: int) -> void:
 		if nxt < 1 or nxt > mx:
 			_display_rail(dir)                         # at a rail (1x floor / Nx ceiling): bounce, no wrap
 			return
-	var moved: bool = main._set_win_scale_pref(nxt) if main._fullscreen else main._set_win_scale(nxt)
+	# c3-18: resize LIVE but defer the write — the DISPLAY screen shares the OPTIONS dirty session
+	# (reached via its opener), so SAVE commits and DISCARD restores the baseline scale.
+	var moved: bool = main._set_win_scale_pref(nxt, false) if main._fullscreen else main._set_win_scale(nxt, false)
 	if moved:
+		_stage_opts()
 		_flash_setting()
 		main._sfx.play("pickup", -14.0, 1.0)
 
@@ -2193,6 +2219,52 @@ func _flash_all_settings() -> void:
 	# the same per-row APPLIED cue a single toggle gets, alongside the DEFAULTS RESTORED banner.
 	_set_pulse = 1.0
 	_set_pulse_row = -2
+
+
+
+# c3-18: mark the OPTIONS screen dirty after a row applied its value LIVE (the preview still works);
+# this only defers the disk write. The revert BASELINE is NOT captured here — the live field was
+# already mutated by the time we reach this, so snapshotting now would record the tweaked value.
+# The pristine on-disk baseline is captured on OPTS ENTRY (see open()), so DISCARD reverts to the
+# real original. Raising dirty swaps the exit row into the SAVE / DISCARD pair.
+# c3-18: flat field-by-field settings compare — version-agnostic (doesn't lean on Dictionary ==
+# semantics) and the snapshot is a flat dict of primitives, so this is exact and cheap.
+static func _settings_match(a: Dictionary, b: Dictionary) -> bool:
+	if a.size() != b.size():
+		return false
+	for k in a:
+		if not b.has(k) or b[k] != a[k]:
+			return false
+	return true
+
+
+func _stage_opts() -> void:
+	# Recompute dirty STRUCTURALLY against the entry baseline: flipping a value and then flipping it
+	# back to its original clears the dirty state (and drops the forced SAVE/DISCARD decision) instead
+	# of latching a one-way boolean. The row was already applied LIVE; this only tracks the pending
+	# write. Rebuild the item list only when dirty actually flips, so the exit row swaps BACK <->
+	# SAVE/DISCARD the instant it changes.
+	var was := _opts_dirty
+	_opts_dirty = not _settings_match(_opts_snapshot, main._settings_snapshot())
+	if _opts_dirty != was:
+		_items_valid = false
+
+
+# c3-18: leave the OPTIONS screen, committing or reverting the staged changes first. SAVE writes
+# the (already-live) settings to disk once; anything else (BACK / DISCARD / Esc) re-applies the
+# snapshot to undo the live preview and writes nothing. Either way the dirty flag clears and the
+# screen climbs to whichever opener _parent resolves (TITLE/SETUP or PAUSE).
+func _exit_opts(save: bool) -> void:
+	if save:
+		main._save_settings()
+	elif _opts_dirty:
+		# main._apply_settings re-applies the REAL state, not just the fields: it re-mutes/levels the
+		# audio buses and calls DisplayServer.window_set_mode (+ windowed-scale fit + cursor rebake),
+		# so a discarded fullscreen/scale preview physically returns the window to its baseline.
+		main._apply_settings(_opts_snapshot)
+	_opts_dirty = false
+	var d := _parent(Mode.OPTS)
+	open(d["mode"], d["sel"])
 
 
 func _activate() -> void:
@@ -2257,9 +2329,21 @@ func _activate() -> void:
 			"info": open(Mode.INFO)   # c2-04: reached from the SETUP hub; BACK returns there
 			"controls": open(Mode.REBIND)   # c1-18: CONTROLS row opens the rebind screen
 			"back":
+				if mode == Mode.OPTS and _opts_dirty:
+					# c3-18: safety net — with staged changes the exit is normally SAVE/DISCARD, but a
+					# stale cached BACK row must never silently leave live edits uncommitted; treat it as
+					# a discard (same as Esc/cancel out of OPTIONS).
+					_exit_opts(false)
+					return   # _exit_opts already switched screens — never fall through onto the new one
 				# BACK climbs one level: OPTIONS returns to its opener, SETUP to TITLE.
 				var d := _parent(mode)
 				open(d["mode"], d["sel"])
+			"opts_save":
+				_exit_opts(true)    # c3-18: commit the staged OPTIONS changes, then climb to the opener
+				return              # _exit_opts switched screens — stop before any post-activation logic
+			"opts_discard":
+				_exit_opts(false)   # c3-18: revert the staged changes to the on-disk baseline, then climb
+				return
 			"hall": open(Mode.HALL)   # INFO screen link
 			"watch": main.start_watch()   # WATCH LAST RUN lives on the INFO screen now
 			"coop":
@@ -2278,19 +2362,19 @@ func _activate() -> void:
 				_step_vol("SFX" if id == "sfx" else "Music", 1)
 			"motion":
 				main._motion = 0.0 if main._motion >= 0.5 else 1.0
-				main._save_settings()
+				_stage_opts()	# c3-18: apply live, defer the disk write to SAVE
 				_flash_setting()
 			"colorblind":
 				main.colorblind = not main.colorblind
-				main._save_settings()
+				_stage_opts()
 				_flash_setting()
 			"rumble":
 				main._rumble_on = not main._rumble_on
-				main._save_settings()
+				_stage_opts()
 				_flash_setting()
 			"assist":
 				main._assist = not main._assist
-				main._save_settings()
+				_stage_opts()
 				_flash_setting()
 			"display":
 				# c1-19: DISPLAY opens its dedicated sub-screen (FULLSCREEN toggle + WINDOW SCALE
@@ -2302,7 +2386,11 @@ func _activate() -> void:
 				# the SAME main._toggle_fullscreen path as the F11/Alt+Enter hotkey (persist + cursor
 				# rebake + windowed-scale restore included), so the on-screen toggle and the shortcut
 				# can never diverge. The stored WINDOW SCALE is untouched by the mode flip.
-				main._toggle_fullscreen()
+				# c3-18: the mode flips LIVE (you see it) but the write is DEFERRED to SAVE — reached
+				# via the OPTS DISPLAY opener, so it shares the same dirty session; DISCARD restores the
+				# baseline (window mode included). The F11/Alt+Enter hotkey keeps its own immediate persist.
+				main._toggle_fullscreen(false)
+				_stage_opts()
 				_flash_setting()
 			"winscale":
 				# c1-19: Enter steps the scale UP one rung — the SAME call ► uses, so activation and
@@ -2318,7 +2406,15 @@ func _activate() -> void:
 				# Snapshot reduce-motion BEFORE the reset (which re-enables motion): a
 				# motion-sensitive player still gets a snapped, non-animated banner.
 				_reset_flash_anim = main._motion >= 0.5
-				main._reset_settings()
+				main._reset_settings()   # applies SETTINGS_DEFAULTS AND persists (it calls _save_settings)
+				# c3-18: RESET DEFAULTS is a deliberate two-press COMMIT — main._reset_settings already
+				# wrote the defaults to disk, so they ARE the new baseline. Re-capture that baseline and
+				# clear staged-dirty: a following tweak-and-DISCARD now reverts to the just-written
+				# defaults, never a stale pre-reset snapshot (which would leave live state disagreeing
+				# with disk).
+				_opts_snapshot = main._settings_snapshot()
+				_opts_dirty = false
+				_items_valid = false   # dirty cleared -> the exit row reverts SAVE/DISCARD back to a single BACK now
 				_reset_flash = 1.6
 				_flash_all_settings()   # c1-17: halo every reset row, not just the banner
 			"restart":
@@ -3970,7 +4066,12 @@ func _draw_opts_header() -> void:
 	# centered on the title's cap height. Routed through _emit_tex so the header capture
 	# test stays headless-safe (and the draw is inspectable).
 	var f := Art.font()
-	var titlew := f.get_string_size("OPTIONS", HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	# c3-18: a trailing "*" flags UNSAVED staged changes at a glance (the conventional dirty-doc cue),
+	# alongside the SAVE / DISCARD exit rows the dirty state also surfaces — so pending edits read
+	# before the player reaches the bottom of the list. Measured/drawn from the live title so the gear
+	# stays seated on the actual (possibly wider) title box.
+	var title := "OPTIONS *" if _opts_dirty else "OPTIONS"
+	var titlew := f.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 	var isz := 16.0
 	# c2-11: seat the gear on the title's CAP BOX, not the ascent-to-descent line. "OPTIONS"
 	# is all-caps sitting on the y80 baseline; for PixelOperator8 the caps rise the full
@@ -3982,7 +4083,7 @@ func _draw_opts_header() -> void:
 	var iy := cap_top + (cap_h - isz) / 2.0
 	var ix := (CENTER_X - titlew / 2.0) - 6.0 - isz
 	_emit_tex("mi_settings", Rect2(ix, iy, isz, isz), Color(1, 1, 1, 0.9))
-	_center_text("OPTIONS", OPTS_TITLE_Y, 18, HEADER_COL)
+	_center_text(title, OPTS_TITLE_Y, 18, HEADER_COL)
 	# After RESET DEFAULTS fires, the summary line briefly becomes a success banner;
 	# otherwise it's the single place to review live settings state — the DISPLAY mode
 	# (no on-screen toggle) and EVERY accessibility aid's explicit ON/OFF state.

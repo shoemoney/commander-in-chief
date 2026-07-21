@@ -2914,10 +2914,11 @@ func reset_binds() -> void:
 	_persist({"binds": _binds, "padbinds": _pad_binds[0], "padbinds2": _pad_binds[1], "menubinds": _menu_binds})
 
 
-func _save_settings() -> void:
-	# Persist only the [settings] keys; load-then-set so we never clobber
-	# [best]/[hall]/[seen]. Called from the pause-menu a11y/audio toggles.
-	_persist({"settings": {
+# c3-18: the [settings] dict as it would be written RIGHT NOW — one source shared by _save_settings
+# (which persists it) and the OPTIONS dirty-state (which snapshots it as the revert baseline before
+# staging a change). Shape matches _apply_settings' expected keys so a snapshot round-trips cleanly.
+func _settings_snapshot() -> Dictionary:
+	return {
 		"colorblind": colorblind,
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
@@ -2928,7 +2929,13 @@ func _save_settings() -> void:
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
 		"window_scale": _win_scale,
-	}})
+	}
+
+
+func _save_settings() -> void:
+	# Persist only the [settings] keys; load-then-set so we never clobber
+	# [best]/[hall]/[seen]. Called from the OPTIONS SAVE commit and the rebind toggles.
+	_persist({"settings": _settings_snapshot()})
 
 
 # c1-09: apply a [settings] dict onto the live fields — the SINGLE place values
@@ -2965,7 +2972,10 @@ func _apply_settings(d: Dictionary) -> void:
 # OPTIONS DISPLAY row, so the on-screen toggle and the hotkey stay one behavior
 # (persist + cursor rebake included). Lets DISPLAY be reviewed AND changed on the
 # dedicated settings screen, not only via the hidden shortcut.
-func _toggle_fullscreen() -> void:
+# c3-18: `persist` lets the OPTIONS dirty-state drive this LIVE (window flips now, for preview) while
+# deferring the disk write to the SAVE exit. The F11/Alt+Enter hotkey and every other caller keep the
+# default true, so only the deferred OPTIONS/DISPLAY path skips the immediate persist.
+func _toggle_fullscreen(persist := true) -> void:
 	_prog_resize = true   # a programmatic mode change — ignore the transition's resize events until settled
 	_fullscreen = not _fullscreen
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
@@ -2983,7 +2993,8 @@ func _toggle_fullscreen() -> void:
 		_settle_gen += 1
 		_settle_active = true
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
-	_save_settings()
+	if persist:
+		_save_settings()
 
 
 # c1-19: largest integer window scale the current display can actually hold (min 1),
@@ -3176,7 +3187,7 @@ func _win_scale_norm() -> int:
 # shared by the OPTIONS WINDOW SCALE row (◄/► and Enter). Clamped to the display's fit.
 # Picking a scale implies WINDOWED: fullscreen has no visible window to size, so a step
 # drops out of it into the chosen clean multiple. Returns true if the value moved.
-func _set_win_scale(s: int) -> bool:
+func _set_win_scale(s: int, persist := true) -> bool:
 	var ns := clampi(s, 1, _max_win_scale())
 	if ns == _win_scale and not _fullscreen:
 		return false
@@ -3185,7 +3196,8 @@ func _set_win_scale(s: int) -> bool:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	_apply_windowed_scale()
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
-	_save_settings()
+	if persist:   # c3-18: the OPTIONS dirty-state defers the write to SAVE
+		_save_settings()
 	return true
 
 
@@ -3193,12 +3205,13 @@ func _set_win_scale(s: int) -> bool:
 # — so the DISPLAY WINDOW SCALE row stays a LIVE control while fullscreen instead of a dead, ignored
 # row. The chosen value is what applies the moment you drop back to windowed (via the FULLSCREEN
 # toggle or F11). Clamped to the current effective ceiling and persisted; returns true if it moved.
-func _set_win_scale_pref(s: int) -> bool:
+func _set_win_scale_pref(s: int, persist := true) -> bool:
 	var ns := clampi(s, 1, _max_win_scale())
 	if ns == _win_scale:
 		return false
 	_win_scale = ns
-	_save_settings()
+	if persist:   # c3-18: the OPTIONS dirty-state defers the write to SAVE
+		_save_settings()
 	return true
 
 
