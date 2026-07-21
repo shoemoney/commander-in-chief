@@ -1006,6 +1006,9 @@ func _settings_rows() -> Array[Dictionary]:
 		# the label reads "SFX: MUTED" (never "SFX: 8") the instant the bus is off — the
 		# numeric level can never contradict the off marker. Confirm/L/R only STEP this
 		# level (see _step_vol); muting is stepping down to 0, never a surprise confirm-toggle.
+		# c4-01: vol_label resolves the two-mental-models bug AT THE ROW ITSELF — a muted bus
+		# reads the WORD "MUTED" in place of a level, so the old "SFX: 7 with a silent bus"
+		# contradiction can't occur. This word is the primary cue; the icon/bar/footer reinforce it.
 		{"id": "sfx", "label": "SFX: %s" % vol_label(sfx_muted, sv), "destructive": false, "vol": sv, "muted": sfx_muted, "grp": 1},
 		{"id": "music", "label": "MUSIC: %s" % vol_label(mus_muted, mv), "destructive": false, "vol": mv, "muted": mus_muted, "grp": 1},
 		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 2},
@@ -1175,6 +1178,9 @@ func _row_icon(id: String) -> String:
 		"setup": return "mi_settings"   # c2-04: gear cue signals the hub also holds OPTIONS/INFO, not just run config
 		"hard": return "mi_combat"
 		"coop": return "mi_controller"
+		# c4-01: the row icon flips to the MUTED (slashed-speaker) variant off the SAME
+		# AudioServer.is_bus_mute state the label + bar read, so the silent bus reinforces
+		# across three channels at once — no icon can show "sound on" while the bus is muted.
 		"sfx": return "mi_snd_off" if _bus_off("SFX") else "mi_snd_on"
 		"music": return "mi_mus_off" if _bus_off("Music") else "mi_mus_on"
 		"options": return "mi_settings"
@@ -1751,6 +1757,11 @@ func _nav(move: int, hmove: int) -> void:
 		return
 	# ◄/► on a volume row nudges the 0..10 level, clamped — the SAME shared stepper
 	# Enter/click drives. 0 == MUTED, so mute is just the bottom of the one model.
+	# c4-01: this is the ONLY mute path for SFX/Music — there is no _toggle_bus branch. ► off 0
+	# raises the level, which _step_vol -> main._set_bus_vol turns into set_bus_mute(false), so the
+	# right arrow / "UNMUTE" hint literally performs the unmute the strip advertises. ◄ down to 0
+	# is the deliberate mute. Enter/click (_activate) funnels through the SAME _step_vol, so no input
+	# can desync the level from the real bus-mute state.
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in ["sfx", "music"]:
 		_step_vol("SFX" if _menu_items()[sel]["id"] == "sfx" else "Music", hmove)
 		_mark_dirty()
@@ -2359,6 +2370,10 @@ func _activate() -> void:
 				# surprise-mute a player who meant to nudge; deliberate mute is stepping ◄ down
 				# to 0 (reads MUTED). _step_vol -> main._set_bus_vol maps 0<->bus-mute and
 				# un-mutes on any raise, so the label, the bar and the actual audio never diverge.
+				# c4-01: this is the SINGLE interaction model -- there is no separate Enter/_toggle_bus
+				# mute path anymore; ◄/► (_nav) and Enter/click (here) both route through _step_vol, so a
+				# muted row can only be un-muted by raising the level, never by an independent toggle that
+				# would resurrect the old "SFX: 7 but silent" split. Stepping right off 0 always un-mutes.
 				_step_vol("SFX" if id == "sfx" else "Music", 1)
 			"motion":
 				main._motion = 0.0 if main._motion >= 0.5 else 1.0
@@ -3162,7 +3177,10 @@ func _draw() -> void:
 				if sgi < vv and not row_muted:   # c3-04: a muted row is ALL-hollow, no lit cell under the slash
 					draw_rect(sr, Art.safe(Color(0.55, 0.95, 0.5, 1.0 if selected else 0.8)))
 				else:
-					draw_rect(sr, Color(0.55, 0.6, 0.5, 0.6), false, 1.0)
+					# c4-01: a muted row's empty cells draw DIMMER than a merely-turned-down
+					# bar, so the whole track reads as faded/off (under the amber slash) rather
+					# than "low but live" — the dim + strike + MUTED label all say the same thing.
+					draw_rect(sr, Color(0.55, 0.6, 0.5, 0.28 if row_muted else 0.6), false, 1.0)
 			# c3-04: a MUTED bus is drawn as an all-hollow bar struck through with a
 			# diagonal slash — an explicit OFF marker so the empty bar can't read as
 			# merely "turned all the way down." Keyed off the row's explicit "muted" flag
@@ -3192,6 +3210,22 @@ func _draw() -> void:
 				var cx := vlast if vv == 10 else vbx
 				draw_rect(Rect2(cx, cy - 4.0, SEG_W, 8.0),
 					Color(1.0, 0.72, 0.3, 0.7), false, 1.0)
+			# c4-01: draw crisp CHEVRON slider arrows flanking the bar on the focused row, so the
+			# left/right step affordance lives ON THE ROW (the spec's slider arrows), not only in the
+			# footer glyph. Vector chevrons (not a bitmap-font "<"/">"), so they stay pixel-aligned and
+			# match the bar's line weight. Each arrow DIMS when the value is pinned against its rail: the
+			# left dims at the mute floor (0), the right at the ceiling (10). A lit arrow always points
+			# the way the level can still move -- so a MUTED row shows a lit right chevron that reads
+			# "step right to bring the bus back," matching the UNMUTE hint and the helper prose.
+			if selected:
+				var arw_lit := Color(1.0, 0.72, 0.3, 0.95)
+				var arw_dim := Color(0.55, 0.6, 0.5, 0.35)
+				var lx0 := vbx - 4.0
+				draw_polyline([Vector2(lx0, cy - 3.0), Vector2(lx0 - 3.0, cy), Vector2(lx0, cy + 3.0)],
+					arw_dim if vv <= 0 else arw_lit, 1.5, true)
+				var rx0 := vlast + SEG_W + 4.0
+				draw_polyline([Vector2(rx0, cy - 3.0), Vector2(rx0 + 3.0, cy), Vector2(rx0, cy + 3.0)],
+					arw_dim if vv >= 10 else arw_lit, 1.5, true)
 		# Toggle state dot at the row's right edge: filled = ON, hollow = OFF —
 		# shape+fill carry the state (hue alone fails protan players).
 		if mitems[k].has("on"):
@@ -4452,6 +4486,12 @@ func _footer_legend() -> void:
 	var items: Array[Dictionary] = _menu_items() if main != null else ([] as Array[Dictionary])
 	var focused := items[sel] if sel >= 0 and sel < items.size() else {}
 	var row_help: String = setting_help(focused.get("id", ""))
+	# c4-01: when the focused volume row is MUTED, front-load the RECOVERY ACTION as prose (not a
+	# second copy of the word "MUTED" — that already reads on the row label, the muted-speaker icon
+	# and the slashed bar). The helper text is the only channel that spells out HOW to bring the bus
+	# back, so it names the slider move that un-mutes; the L/R glyph hint below reads "UNMUTE" to match.
+	if row_help != "" and focused.get("muted", false):
+		row_help = "STEP THE SLIDER RIGHT TO UNMUTE. %s" % row_help
 	# Dev guard: a row that HOLDS a value (on/vol/step) but has no description is missing copy — warn
 	# once so it surfaces in-game, not only in the mapping test.
 	if row_help == "" and (focused.has("on") or focused.has("vol") or focused.has("step")):
@@ -4499,6 +4539,17 @@ func _footer_legend() -> void:
 		# prompt, not just Select/Back. Reuses the row dict cached above (no second _menu_items).
 		if _row_cycles(focused):
 			segs = footer_cycle_segs(focused) + segs
+	# c4-01: Enter/click on a volume row STEPS the level up (never a mute toggle), so the confirm
+	# verb names that real action instead of the generic "SELECT": "UNMUTE" while the bus is silent
+	# (a press lifts it off 0), "MAX" once it is pinned at the ceiling (a further press only rail-
+	# bounces, so don't promise a raise that can't happen), and "VOL +" in between. The whole strip
+	# now tells the SAME story -- ◄/► adjusts, Enter raises, a muted row spells out how to restore it.
+	if focused.get("id", "") in ["sfx", "music"]:
+		var verb := "UNMUTE" if focused.get("muted", false) else ("MAX" if int(focused.get("vol", 0)) >= 10 else "VOL +")
+		for s in segs:
+			if s is Dictionary and s.get("label", "") == "SELECT":
+				s["label"] = verb
+				break
 	_legend_row(segs, legend_y, 0.9)
 
 
@@ -4641,4 +4692,9 @@ static func footer_hall_filter_segs() -> Array:
 static func footer_cycle_segs(item: Dictionary) -> Array:
 	var stepped: bool = item.has("vol") or item.has("step")
 	var lbl := "ADJUST" if stepped else "TOGGLE"
+	# c4-01: a MUTED volume row names the mute affordance in the L/R hint — any raise
+	# lifts it off mute, so the arrows read "UNMUTE" (not the generic ADJUST) while it is
+	# silent, telling the player exactly how to bring the bus back without exiting the menu.
+	if stepped and item.get("muted", false):
+		lbl = "UNMUTE"
 	return [{"tex": "glyph_key_wide", "stamp": "L/R", "label": lbl}]
