@@ -299,6 +299,22 @@ const TITLE_BLOCK_GAP := 9.0
 # speck (the exact regression this item exists to kill). 22px leaves margin over the 20px
 # legibility minimum test_title_states_all_clear... pins.
 const TITLE_MIN_PLATE := 22.0
+# c4-14: horizontal gutter between TITLE columns once the list overflows one column's
+# capacity at the readable floor. compute_geometry wraps the rows into balanced columns
+# WITHIN the same BTN-wide band (col width = (BTN.x - gutters)/cols), so the block keeps
+# the single-column footprint (no canvas overflow, hit-test x-bound unchanged) and every
+# plate holds TITLE_MIN_PLATE instead of a floor clamp shoving the last plate into y322.
+const TITLE_COL_GUTTER := 10.0
+# c4-14: the readable minimum WIDTH a wrapped column plate may shrink to. The max column
+# count is DERIVED from it so the wrap can never collapse into needle-thin, unclickable
+# columns — col_w = (BTN.x - (cols-1)*gutter)/cols is guaranteed >= this by construction.
+const TITLE_MIN_COL_W := 100.0
+# Largest column count that keeps every wrapped plate >= TITLE_MIN_COL_W wide. For the 222px
+# band that is 2 columns (~106px each); a 3rd would fall to ~67px, below the floor. Two columns
+# seat up to 2*col_cap (~14-16) rows — far past anything TITLE can reach (its real cap is 6).
+# ponytail: beyond 2*col_cap the geometry logs a hard error and clamps (see compute_geometry);
+# a genuine page pager is the upgrade path if a future TITLE ever needs 15+ rows.
+const TITLE_MAX_COLS := int((BTN.x + TITLE_COL_GUTTER) / (TITLE_MIN_COL_W + TITLE_COL_GUTTER))
 # c3-02: the y a non-TITLE column's LAST plate BOTTOM aims for. Derived from the footer
 # strip (not a bare 310) so the selected-row glow (+4.5) always clears FOOTER_Y with
 # GLOW_CLEAR slack, and the gap math can divide the band by n — reserving that final
@@ -2153,6 +2169,11 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float, split_at 
 	# overrides `top` below off its header stack.
 	var top := first_row_top(mode_id)
 	var gap: float
+	# c4-14: column-wrap state. Non-TITLE columns never wrap (cols == 1, one row per k);
+	# the TITLE branch overwrites these when the list overflows one column at the floor.
+	var cols := 1
+	var rows_per_col := n
+	var col_cap := n
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
 		# fresh install (no BEST/CAREER) starts ~24px higher, so the list decompresses
@@ -2172,14 +2193,49 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float, split_at 
 		# 6-row cap is what protects the >=20px plate, and test_menu_layout pins that floor.
 		# c3-03: reserve the inter-block gap out of the band BEFORE the fit divide, so the
 		# DEPLOY plates keep their full share and never crush below 20px to fund the split.
-		gap = minf(GAP_CEIL, (LEGEND_Y - LEGEND_MARGIN - top - split_gap) / maxf(1.0, float(n)))
-		# c3-03: HARD floor on the pitch — the split gap + 6-row cap can never crush the
-		# plate below TITLE_MIN_PLATE. bh = gap - ROW_INSET_TITLE, so flooring the pitch at
-		# MIN_PLATE + inset guarantees bh >= MIN_PLATE. In every real header/record state the
-		# fit term already clears this (the clamp is inert), so it neither steals the fit's
-		# breathing room nor pushes the last plate past the legend — it's the runtime backstop
-		# that makes the >=20px promise structural, not just cap-plus-comment.
-		gap = maxf(gap, TITLE_MIN_PLATE + ROW_INSET_TITLE)
+		# c4-14: DE-CRAMP the information architecture. A single column can seat at most
+		# `col_cap` rows before a plate would have to shrink below the readable floor —
+		# so instead of flooring the pitch and letting the last plate slide into the y322
+		# legend (what attempt 1's clamp did when n was too large), WRAP the overflow into
+		# balanced columns. rows_per_col is then always <= col_cap, which makes gap >=
+		# floor_pitch a THEOREM (band/rows_per_col >= band/col_cap >= floor_pitch), so no
+		# plate can be crushed AND the last plate's bottom stays above the legend. The real
+		# 6-row TITLE sits well under col_cap => cols == 1, so this path is inert there
+		# (byte-identical geometry, every existing layout test still pins it); it only
+		# engages when the list genuinely overflows one column at the floor.
+		var band := LEGEND_Y - LEGEND_MARGIN - top
+		var floor_pitch := TITLE_MIN_PLATE + ROW_INSET_TITLE
+		col_cap = maxi(1, int(band / floor_pitch))
+		cols = clampi(int(ceilf(float(n) / float(col_cap))), 1, TITLE_MAX_COLS)
+		# RELEASE-SAFE legend guarantee (no debug-only assert): CLAMP the per-column row count to
+		# col_cap so the drawn column height ((rows_per_col-1)*gap + bh) can NEVER exceed the band
+		# in ANY build — no plate crosses the y322 legend even in a release export where asserts are
+		# stripped. Past TITLE_MAX_COLS*col_cap (~21-24) rows the surplus would need a 4th column, so
+		# log a real error (visible in every build) and let row_rect stack the overflow in the last
+		# column rather than silently sliding a plate into the legend. Unreachable in the shipping
+		# 6-row menu (its real cap is far under col_cap) — this is the page-pager upgrade seam.
+		rows_per_col = int(ceilf(float(n) / float(maxi(1, cols))))
+		if rows_per_col > col_cap:
+			push_error("TITLE has %d rows; column wrap seats at most %d at the readable floor — add a page pager" % [n, TITLE_MAX_COLS * col_cap])
+			rows_per_col = col_cap
+		if cols > 1:
+			# The DEPLOY/MORE block gap is a single-column nicety. Once the list wraps it isn't
+			# silently dropped — the COLUMN SEPARATION itself becomes the IA split (the DEPLOY
+			# block sits in the first column, MORE in the next), a stronger boundary than the 9px
+			# intra-column seam, so the vertical reservation is reset in favor of it.
+			split_at = -1
+			split_gap = 0.0
+		elif split_at >= 0:
+			# c3-03/c4-14: the DEPLOY/MORE gap YIELDS to the readable floor — reserve it only
+			# out of the band that survives once every row already owns its floor pitch, so it
+			# can never fund the split by crushing a plate. In every real header state the full
+			# 9px clears (inert clamp; test_c3_03 still measures the 9px DEPLOY->MORE seam).
+			split_gap = clampf(split_gap, 0.0, maxf(0.0, band - floor_pitch * float(rows_per_col)))
+		gap = minf(GAP_CEIL, (band - split_gap) / maxf(1.0, float(rows_per_col)))
+		# HARD floor backstop: with rows_per_col <= col_cap the divide already clears
+		# floor_pitch, so this maxf is inert in every reachable state — it stays as the
+		# structural guarantee that bh (= gap - inset) never drops below TITLE_MIN_PLATE.
+		gap = maxf(gap, floor_pitch)
 	else:
 		# c3-02: every non-TITLE column now shares TITLE's math — spread the band down to
 		# COLUMN_BOTTOM, dividing by n (not n-1) so the last plate's own height is reserved
@@ -2194,8 +2250,15 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float, split_at 
 	# plate past the button art — the pitch breathes, the plate stops at full height.
 	# split_at/split_gap ride along so row_rect (the single geometry source) shifts the
 	# secondary block down by the reserved gap; -1 disables it (every non-TITLE screen).
+	# c4-14: col_w is the per-column plate width — BTN.x when unwrapped (cols == 1, so every
+	# existing rect is byte-identical), narrower when the list wraps so all `cols` columns plus
+	# their gutters still fit the SAME BTN-wide band centered on CENTER_X. floorf'd to whole
+	# pixels (like bh/y) so a fractional band never lands a plate edge / hit-test rect on a
+	# half-pixel; cols == 1 gives BTN.x exactly, so single-column geometry is unchanged.
+	var col_w := floorf((BTN.x - float(cols - 1) * TITLE_COL_GUTTER) / float(cols))
 	return {"top": top, "gap": gap, "bh": floorf(minf(BTN.y, gap - inset)), "n": n,
-		"split_at": split_at, "split_gap": split_gap}   # floored HERE so _draw and the mouse hit-test agree
+		"split_at": split_at, "split_gap": split_gap,   # floored HERE so _draw and the mouse hit-test agree
+		"cols": cols, "rows_per_col": rows_per_col, "col_w": col_w}
 
 
 # The lowest header-plate baseline TITLE draws, given which record lines show —
@@ -2305,8 +2368,21 @@ static func row_rect(g: Dictionary, k: int) -> Rect2:
 	# Every hit-test/arrow/glow box derives from here, so the gap can't drift off the pixels.
 	var extra := float(g.get("split_gap", 0.0)) if int(g.get("split_at", -1)) >= 0 \
 		and k >= int(g.get("split_at", -1)) else 0.0
-	return Rect2(Vector2(CENTER_X - BTN.x / 2.0, floorf(float(g["top"]) + float(k) * float(g["gap"]) + extra)),
-		Vector2(BTN.x, floorf(float(g["bh"]))))
+	# c4-14: column wrap. cols == 1 (every non-TITLE screen, and the real 6-row TITLE) keeps
+	# col == 0 / row_in_col == k / col_w == BTN.x, so this rect is byte-identical to before.
+	# When TITLE overflows one column, rows fill column-major (rows_per_col per column) and each
+	# column steps right by col_w + gutter, the whole block staying inside the BTN-wide band.
+	var rpc := maxi(1, int(g.get("rows_per_col", int(g["n"]))))
+	var cols := maxi(1, int(g.get("cols", 1)))
+	var col_w := float(g.get("col_w", BTN.x))
+	# c4-14: clamp the column so a surplus row past the (release-safe) cols*rpc capacity stacks
+	# in the last column instead of drawing off-canvas to the right — belt-and-braces with the
+	# rows_per_col clamp in compute_geometry. Unreachable for the real TITLE (one column).
+	var col := mini(k / rpc, cols - 1)
+	var row_in_col := k % rpc   # stays 0..rpc-1 so no plate ever drops below the band's floor
+	var x := floorf(CENTER_X - BTN.x / 2.0 + float(col) * (col_w + TITLE_COL_GUTTER))   # whole-pixel column left
+	return Rect2(Vector2(x, floorf(float(g["top"]) + float(row_in_col) * float(g["gap"]) + extra)),
+		Vector2(col_w, floorf(float(g["bh"]))))
 
 
 # c1-12: single source of truth for the ◄/► cycle-arrow boxes on a toggle/volume
@@ -3135,17 +3211,17 @@ func _draw() -> void:
 			if (mode == Mode.TITLE or mode == Mode.SETUP) \
 					and int(mitems[k - 1].get("grp", 0)) == 0 \
 					and int(mitems[k].get("grp", 0)) == 1:
-				draw_rect(Rect2(CENTER_X - BTN.x / 2.0 + 6.0, sy, BTN.x - 12.0, 1.0),
+				draw_rect(Rect2(r.position.x + 6.0, sy, r.size.x - 12.0, 1.0),
 					DIVIDER_BRIGHT)
 			else:
-				draw_rect(Rect2(CENTER_X - BTN.x / 2.0 + 12.0, sy, BTN.x - 24.0, 1.0),
+				draw_rect(Rect2(r.position.x + 12.0, sy, r.size.x - 24.0, 1.0),
 					DIVIDER_DIM)
 		# c3-03: OPTS labels its settings sections; TITLE labels its DEPLOY / MORE
 		# IA blocks — both through the shared caption emitter, drawn at each group's
 		# first row so the primary start verbs read as their own named block.
 		if (mode == Mode.OPTS or mode == Mode.TITLE) \
 				and (k == 0 or mitems[k].get("grp", 0) != mitems[k - 1].get("grp", 0)):
-			_emit_group_caption(mitems, k, cy)
+			_emit_group_caption(mitems, k, cy, r.position.x)   # c4-14: r.x tracks the row's column
 		var selected := k == sel
 		var destr: bool = k < mitems.size() and mitems[k].get("destructive", false)
 		var disabled: bool = k < mitems.size() and mitems[k].get("disabled", false)
@@ -3223,9 +3299,12 @@ func _draw() -> void:
 		# by live state) — rows without one just stay text.
 		var icon := _row_icon(mitems[k]["id"])
 		if icon != "":
-			# Track the row: a taller decompressed row earns a bigger icon instead
-			# of pinning to an 8px speck. bh-3 keeps a 1px breath each side; 9px
-			# floor still centers cleanly in the worst-case 11px crush row.
+			# Icon SCALES WITH THE PLATE FLOOR: bh-3 keeps a 1px breath each side, clamped
+			# to [9,16]. c4-14: since compute_geometry now column-WRAPS an overflowing TITLE
+			# instead of crushing the pitch, bh never drops below TITLE_MIN_PLATE (22), so the
+			# icon lands at its full 16px art in every reachable state — the old 8px speck the
+			# 11-row crush produced is structurally gone (the 9px clamp floor is now just a
+			# backstop for any future sub-floor caller, not a state the real menu can hit).
 			var isz := clampf(bh - 3.0, 9.0, 16.0)
 			draw_texture_rect(Art.tex(icon), Rect2(Vector2(r.position.x + 9.0,
 				r.position.y + (bh - isz) / 2.0), Vector2(isz, isz)), false,
@@ -3240,7 +3319,7 @@ func _draw() -> void:
 			_sel_target = ty
 			if _sel_y < 0.0 or main._motion < 0.5:
 				_sel_y = ty
-			var gr := Rect2(Vector2(CENTER_X - BTN.x / 2.0, _sel_y), Vector2(BTN.x, bh))
+			var gr := Rect2(Vector2(r.position.x, _sel_y), Vector2(r.size.x, bh))
 			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
 			# Fade the glow while it's still catching up to the row — a lagging box
 			# at full alpha reads as misplaced; dimming it makes the glide read as motion.
@@ -4892,7 +4971,7 @@ func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 # plate_left-25, clear of the selected-row cycle arrow (drawn at plate_left-13) — so the
 # screen reads as three labelled sections, not one flat list. Routed through _emit_label
 # so a headless capture test can invoke this REAL caption draw and inspect the exact box.
-func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
+func _emit_group_caption(mitems: Array, k: int, cy: float, plate_left := CENTER_X - BTN.x / 2.0) -> void:
 	# c3-03: TITLE names its two IA blocks (DEPLOY / MORE) through the same pill+rule
 	# machinery OPTS uses for its settings sections; every other screen keeps the
 	# settings-block headers. One shared draw path, two caption vocabularies.
@@ -4909,7 +4988,10 @@ func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
 	var f := Art.font()
 	var hsz := 10
 	var gw := f.get_string_size(ghdr, HORIZONTAL_ALIGNMENT_LEFT, -1, hsz).x
-	var gx := (CENTER_X - BTN.x / 2.0) - 25.0 - gw
+	# c4-14: anchor the caption gutter to the group-start row's OWN column left edge (passed by
+	# _draw as row_rect(g,k).x) so a wrapped block's header rides its column, not the far-left
+	# margin. Single-column callers pass the default CENTER_X-BTN.x/2, so nothing moves there.
+	var gx := plate_left - 25.0 - gw
 	var by := cy + 3.0   # text baseline (kept level with the group's first row label)
 	var padx := 4.0
 	var pady := 2.0

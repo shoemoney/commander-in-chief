@@ -274,6 +274,154 @@ func test_c3_03_title_split_floor_gap_and_no_header_overlap() -> void:
 	stub.free()
 
 
+# c4-14: DE-CRAMP the TITLE information architecture. When the list overflows what a single
+# column can seat at the readable floor, compute_geometry must WRAP the rows into balanced
+# columns rather than crush the pitch below TITLE_MIN_PLATE or slide the last plate into the
+# y322 legend (attempt 1 only floored the pitch, so 11 rows still overflowed). Across every
+# record-header state and a sweep of overflowing counts, assert: (a) the list actually splits
+# into >=2 columns, (b) rows_per_col never exceeds the single-column capacity, (c) EVERY plate
+# holds the >=22px readable floor with its icon at full 16px art (no 8px specks), (d) EVERY
+# plate's bottom clears the legend, and (e) the whole wrapped block stays inside the BTN-wide
+# band centered on CENTER_X (no canvas overflow, hit-test x-bound unchanged).
+func test_c4_14_title_overflow_wraps_into_readable_columns() -> void:
+	var half := Menu.BTN.x / 2.0
+	var floor_pitch := Menu.TITLE_MIN_PLATE + Menu.ROW_INSET_TITLE
+	for has_best in [false, true]:
+		for has_career in [false, true]:
+			var head: float = Menu.title_head_bottom(has_best, has_career)
+			# Derive THIS header state's single-column capacity from the same band/floor math
+			# compute_geometry uses (no magic count) — then test counts that provably exceed it,
+			# so the assertions can't be fooled by a taller/shorter header changing col_cap.
+			var top0: float = Menu.compute_geometry(Menu.Mode.TITLE, 1, head)["top"]
+			var band := LEGEND_Y - 4.0 - top0   # LEGEND_MARGIN == 4
+			var col_cap := int(band / floor_pitch)
+			# Counts that overflow one column but stay within the TITLE_MAX_COLS*col_cap capacity
+			# (so the readable-column guarantee holds without tripping the impossible-overflow log).
+			for n in [col_cap + 1, col_cap + 3, Menu.TITLE_MAX_COLS * col_cap]:
+				var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, n, head)
+				var bh: float = g["bh"]
+				var cols := int(g["cols"])
+				var rpc := int(g["rows_per_col"])
+				var tag := "TITLE n=%d(cap %d) best=%s career=%s" % [n, col_cap, has_best, has_career]
+				# (a) it split, (b) each column stays within the one-column floor capacity, and
+				# never exceeds the needle-thin ceiling; (b') all rows are seated.
+				Runner.T.ok(cols >= 2 and cols <= Menu.TITLE_MAX_COLS, "%s: wraps into 2..%d columns (got %d)" % [tag, Menu.TITLE_MAX_COLS, cols])
+				Runner.T.ok(rpc <= col_cap, "%s: %d rows/col within one-column cap %d" % [tag, rpc, col_cap])
+				Runner.T.ok(cols * rpc >= n, "%s: %dx%d columns seat all %d rows" % [tag, cols, rpc, n])
+				# (c) readable plate + full-size icon on every row; (d) no legend collision;
+				# (e) inside the BTN-wide band. icon size = the INLINED draw clamp clampf(bh-3,9,16)
+				# (self-contained, no helper) — full 16px art proves the 8px-speck crush is gone.
+				Runner.T.ok(bh >= Menu.TITLE_MIN_PLATE, "%s: plate %dpx >= %d floor" % [tag, int(bh), int(Menu.TITLE_MIN_PLATE)])
+				Runner.T.ok(clampf(bh - 3.0, 9.0, 16.0) >= 16.0, "%s: icon %dpx == full art (no speck)" % [tag, int(clampf(bh - 3.0, 9.0, 16.0))])
+				# The wrapped plates are the NARROWER col_w (< BTN.x); every box the draw path
+				# derives from row_rect — glow, divider rule, arrows, hit-test — reads this same
+				# width, so proving row_rect reports col_w proves they all track the narrower plate.
+				var col_w: float = g["col_w"]
+				Runner.T.ok(col_w < Menu.BTN.x and col_w >= Menu.TITLE_MIN_COL_W,
+					"%s: wrapped plate width %d is narrower than BTN.x %d yet stays >= the %d readable floor" % [tag, int(col_w), int(Menu.BTN.x), int(Menu.TITLE_MIN_COL_W)])
+				for k in n:
+					var r: Rect2 = Menu.row_rect(g, k)
+					Runner.T.ok(absf(r.size.x - col_w) < 0.01, "%s: row %d plate is the col_w width" % [tag, k])
+					Runner.T.ok(r.end.y < LEGEND_Y, "%s: row %d bottom %d clears legend %d" % [tag, k, int(r.end.y), int(LEGEND_Y)])
+					Runner.T.ok(r.size.x > 0.0 and r.position.x >= Menu.CENTER_X - half - 0.001
+						and r.end.x <= Menu.CENTER_X + half + 0.001,
+						"%s: row %d stays inside the BTN-wide band" % [tag, k])
+
+
+# c4-14: the real 6-row TITLE must be INERT to the column-wrap — it fits one column at the
+# floor, so it stays single-column with the byte-identical BTN-wide geometry AND keeps the
+# c3-03 9px DEPLOY->MORE block gap. This guards the "column path only engages on overflow"
+# promise: a regression that wrapped the real menu (or dropped the split gap) fails here.
+func test_c4_14_real_title_stays_single_column_with_deploy_gap() -> void:
+	for has_best in [false, true]:
+		for has_career in [false, true]:
+			var head: float = Menu.title_head_bottom(has_best, has_career)
+			var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 6, head, 4, Menu.TITLE_BLOCK_GAP)
+			var tag := "TITLE 6-row best=%s career=%s" % [has_best, has_career]
+			Runner.T.eq(int(g["cols"]), 1, "%s: real TITLE stays a single column" % tag)
+			Runner.T.eq(int(g["rows_per_col"]), 6, "%s: all 6 rows in the one column" % tag)
+			# Every plate is BTN.x wide at CENTER_X (no wrap-induced narrowing).
+			for k in 6:
+				var r: Rect2 = Menu.row_rect(g, k)
+				Runner.T.eq(r.position.x, Menu.CENTER_X - Menu.BTN.x / 2.0, "%s: row %d plate left is BTN-derived" % [tag, k])
+				Runner.T.eq(r.size.x, Menu.BTN.x, "%s: row %d plate width is BTN.x" % [tag, k])
+			# The DEPLOY(row 3)->MORE(row 4) seam carries the 9px block gap over an interior seam.
+			var interior_seam := Menu.row_rect(g, 1).position.y - Menu.row_rect(g, 0).end.y
+			var block_seam := Menu.row_rect(g, 4).position.y - Menu.row_rect(g, 3).end.y
+			Runner.T.ok(absf((block_seam - interior_seam) - Menu.TITLE_BLOCK_GAP) <= 1.0,
+				"%s: DEPLOY->MORE seam preserves the %dpx block gap" % [tag, int(Menu.TITLE_BLOCK_GAP)])
+
+
+# c4-14: the EXACT 11-row case the spec calls out ("Up to 11 title rows squeeze to ~11px
+# plates / 8px icons and collide with the legend at y322"). With the fullest record header,
+# all 11 rows must land as readable, well-targeted plates that clear the legend — the precise
+# failure this item exists to kill, pinned as an explicit regression (not just a sweep).
+func test_c4_14_eleven_row_title_is_readable() -> void:
+	var head: float = Menu.title_head_bottom(true, true)   # fullest header = tightest band
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 11, head)
+	var bh: float = g["bh"]
+	Runner.T.ok(int(g["cols"]) >= 2, "11 rows split into >=2 columns (got %d)" % int(g["cols"]))
+	Runner.T.ok(bh >= Menu.TITLE_MIN_PLATE, "11-row plate %dpx >= %d floor (was ~11px)" % [int(bh), int(Menu.TITLE_MIN_PLATE)])
+	Runner.T.ok(clampf(bh - 3.0, 9.0, 16.0) >= 16.0, "11-row icon %dpx is full art (was 8px speck)" % int(clampf(bh - 3.0, 9.0, 16.0)))
+	for k in 11:
+		Runner.T.ok(Menu.row_rect(g, k).end.y < LEGEND_Y, "11-row: row %d clears the y322 legend" % k)
+	# c4-14: column WRAP is pure row_rect geometry — it must not reorder _menu_items(). The real
+	# TITLE list stays grouped (grp non-decreasing: DEPLOY block, then MORE block) exactly as the
+	# DEPLOY/MORE captions read it, so wrapping can't scramble the row order or the caption seam.
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+	var mi: Array = m._menu_items()
+	var prev_grp := -1
+	for row in mi:
+		var grp := int(row.get("grp", 0))
+		Runner.T.ok(grp >= prev_grp, "TITLE rows stay grouped in order (grp %d after %d)" % [grp, prev_grp])
+		prev_grp = grp
+	m.free()
+	stub.free()
+
+
+# c4-14: the DEPLOY/MORE group-caption draw path must stay visually correct when a block wraps
+# into a second column — the caption gutter has to ride ITS column's left edge, not the far-left
+# single-column margin (a detached header floating off in space). Captures the REAL
+# _emit_group_caption geometry through the _CaptureMenu seams for a wrapped grp-1 start row and
+# proves it (a) tracked its column, (b) stayed fully on-screen, (c) sits in that column's gutter.
+func test_c4_14_group_caption_tracks_wrapped_column() -> void:
+	var head: float = Menu.title_head_bottom(true, true)
+	var g: Dictionary = Menu.compute_geometry(Menu.Mode.TITLE, 12, head)   # 6 DEPLOY + 6 MORE, wraps to 2 cols
+	Runner.T.ok(int(g["cols"]) >= 2, "12-row synthetic TITLE wrapped into >=2 columns")
+	var mitems: Array = []
+	for i in 12:
+		mitems.append({"id": "r%d" % i, "grp": 0 if i < 6 else 1})
+	var k := 6   # first MORE (grp 1) row — landed in the right column
+	var r: Rect2 = Menu.row_rect(g, k)
+	Runner.T.ok(r.position.x > Menu.CENTER_X - Menu.BTN.x / 2.0 + 1.0, "the MORE block's first row wrapped into a right column")
+	var cy := floorf(r.position.y + float(g["bh"]) / 2.0)
+	var col_box := _caption_box_plate(mitems, k, cy, r.position.x)                       # anchored to its column
+	var def_box := _caption_box_plate(mitems, k, cy, Menu.CENTER_X - Menu.BTN.x / 2.0)   # old single-column anchor
+	Runner.T.ok(col_box.size.y > 0.0, "the wrapped MORE caption drew")
+	Runner.T.ok(col_box.position.x > def_box.position.x + 1.0, "caption rides its column, not the far-left margin")
+	Runner.T.ok(col_box.position.x >= 0.0, "wrapped caption stays fully on-screen")
+	Runner.T.ok(col_box.end.x <= r.position.x, "wrapped caption sits in its column's left gutter, clear of the plate")
+
+
+# Union footprint of the REAL _emit_group_caption(mitems, k, cy, plate_left) draw, captured
+# through the _CaptureMenu seams — the plate_left variant so a wrapped column can be measured.
+func _caption_box_plate(mitems: Array, k: int, cy: float, plate_left: float) -> Rect2:
+	var cap := _CaptureMenu.new()
+	cap.mode = Menu.Mode.TITLE
+	cap._emit_group_caption(mitems, k, cy, plate_left)
+	var box := Rect2()
+	var first := true
+	for op in cap.ops:
+		var b: Rect2 = op["box"]
+		box = b if first else box.merge(b)
+		first = false
+	cap.free()
+	return box
+
+
 # c3-03: the union footprint of the REAL _emit_group_caption(mitems, k, cy) draw for the
 # group starting at row k — captured through the _CaptureMenu draw seams (so it is the true
 # pill+label+rule geometry, not a formula copy). cy mirrors _draw's whole-pixel row center.
@@ -4015,7 +4163,10 @@ func test_toggle_arrow_rects_track_row_geometry_across_modes() -> void:
 		[Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false)],
 		[Menu.Mode.PAUSE, _row_count(Menu.Mode.PAUSE, false)],
 		[Menu.Mode.SETUP, _row_count(Menu.Mode.SETUP, false)],
-		[Menu.Mode.TITLE, 8],
+		# c4-14: 6 = the real single-column TITLE cap. (An 8-row TITLE now wraps into two
+		# columns, where the arrow glyphs — which TITLE has no rows for anyway — can't share a
+		# y-only hit-test; the multi-column layout is pinned by test_c4_14_* instead.)
+		[Menu.Mode.TITLE, 6],
 	]
 	var seen_geoms := {}
 	for case in cases:
