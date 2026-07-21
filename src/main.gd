@@ -247,6 +247,8 @@ var _life_kills := 0
 var _life_wins := 0
 var hall: Array[Dictionary] = []   # top-N run history for the Hall of Fame
 var hall_latest: Dictionary = {}   # the run just banked this session — the Hall highlights it (session-only ref)
+var last_run_score := -1          # c4-18: score of the run whose recording is user://last_run.replay — persisted so the TITLE BEST chip can offer a watch-replay shortcut across sessions (not just when the last run happened THIS session, which hall_latest alone would gate)
+var replay_watched_score := -999  # c4-18: last_run_score of the replay the player has already WATCHED (persisted) — the menu's NEW badge / availability pulse fire only while this differs from last_run_score, so a watched replay stays quiet even after a relaunch
 var _hall_seq := 0                  # monotonic run id ("hid") so the Hall identifies the EXACT banked run — value-equal twins (same score/sector) are common and must not be confused
 var _best_dirty := false
 var _seen_dirty := false          # first-time hints ratchet in memory, flushed with bests
@@ -892,6 +894,11 @@ func start_watch() -> void:
 	if r == null or r.frames.is_empty():
 		show_banner("NO REPLAY SAVED YET")
 		return
+	# c4-18: mark THIS replay watched so the menu's NEW badge / availability pulse go quiet (and stay
+	# quiet across relaunch); a later run overwriting the file re-raises it via a new last_run_score.
+	if replay_watched_score != last_run_score:
+		replay_watched_score = last_run_score
+		_persist({"replay": {"watched_score": replay_watched_score}})
 	_endless = r.mode == "endless"
 	_two_players = r.player_count >= 2
 	_seed_override = r.seed_value
@@ -2667,6 +2674,8 @@ func _load_bests() -> void:
 		best_score = cf.get_value("best", "score", 0)
 		best_wave = cf.get_value("best", "wave", 0)
 		best_dist = cf.get_value("best", "dist", 0)
+		last_run_score = cf.get_value("replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
+		replay_watched_score = cf.get_value("replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
 		_seen = cf.get_value("seen", "hints", {})
 		hall.assign(cf.get_value("hall", "runs", []))
 		# Resume the id counter past the highest hid on disk so a fresh run can never
@@ -3475,6 +3484,10 @@ func _track_bests() -> void:
 				_replay_task = WorkerThreadPool.add_task(
 					Replay.save_dict.bind(snap, "user://last_run.replay"))
 				_replay_saved = true
+				# c4-18: bank THIS run's score alongside its replay so the TITLE BEST chip can tell,
+				# even after a relaunch, whether the on-disk replay IS the best run (chip -> shortcut).
+				last_run_score = sim.score
+				_persist({"replay": {"last_score": last_run_score}})
 		_debrief = true
 	# NEW RECORD moment: the instant this run's score passes the standing best.
 	if not _record_fired and best_score > 0 and sim.score > best_score:

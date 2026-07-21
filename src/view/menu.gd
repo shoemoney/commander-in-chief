@@ -87,6 +87,10 @@ const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; exi
 # _unhandled_input handler and every footer/legend stamp read _help_code()/_help_keycap() off the
 # SAME live binding, so re-pointing the shortcut updates the handler and the hints together.
 const HELP_KEY := KEY_F1
+# c4-18: the TITLE BEST-chip watch-replay shortcut's non-mouse key (keyboard R / pad Y), so the
+# click-to-replay affordance the chip advertises isn't mouse-only. Fixed (not rebindable) and only
+# live while _best_is_replayable(); _best_chip_suffix() stamps its keycap so the binding is labelled.
+const WATCH_HOTKEY := KEY_R
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
 var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
 var _open_t := 0.0      # menu-open settle envelope (backdrop fade + row drop-in)
@@ -132,6 +136,7 @@ var _key_hmove := 0     # held ◄/► key direction — auto-repeats the volume
 var _key_hrep := 0.0    # countdown to the next held-◄/► auto-repeat step
 var _lockout := 0.0     # post-disconnect confirm lockout (flailing pad guard)
 var _has_replay := false   # cache: does user://last_run.replay exist — sampled on INFO open
+var _best_hover := false   # c4-18: mouse is over the TITLE BEST chip while it's a live watch-replay shortcut — brightens the chip so the click affordance is discoverable, not mouse-blind
 var _tab_hover := -1    # hall filter tab under the mouse (-1 = none) — hover cue parity with rows
 var _page_hover := -1   # hall PREV/NEXT button under the mouse (0 = prev, 1 = next, -1 = none) — pointer-owned
 var _page_press := 0.0  # hall page-button press flash (decays in _process) — click feedback beyond dimming
@@ -655,6 +660,7 @@ func open(m: int, select_id := "") -> void:
 	_stick_y = 0
 	_nav_frame = -1
 	_tab_hover = -1   # stale hall-tab hover must not survive a menu hop
+	_best_hover = false   # c4-18: nor a stale TITLE BEST-chip hover
 	_page_hover = -1  # ditto the PREV/NEXT hover — a menu hop must not leave a button lit
 	# c1-14: a fresh screen starts with ALL CHALLENGE SEED interaction state cleared —
 	# reopening TITLE must never preserve an armed seed (which a single press could then
@@ -857,7 +863,15 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# FileAccess.file_exists here, so rebuilding this list (even the pre-cache per-frame case)
 		# is pure in-memory work and never touches the disk.
 		if _has_replay:
-			iitems.append({"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 0})
+			# c4-18: a freshly-unlocked replay carries a right-aligned NEW badge (the row also
+			# pulses in _draw) until the player watches it — inert once _replay_unwatched() is false. The
+			# "badge" key is rendered by the SHARED status-badge slot every row already runs through
+			# in _draw (the same reserved right-edge path COMPLETED/AT DEFAULTS use), so no new
+			# rendering is needed — the label is fit clear of badge_w and the two never overlap.
+			var wrow := {"id": "watch", "label": "WATCH LAST RUN", "destructive": false, "grp": 0}
+			if _replay_unwatched():
+				wrow["badge"] = "NEW"
+			iitems.append(wrow)
 		iitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 2})
 		return iitems
 	if mode == Mode.DISP:
@@ -1492,6 +1506,24 @@ func _unhandled_input(ev: InputEvent) -> void:
 		if vpf1 != null:
 			vpf1.set_input_as_handled()
 		return
+	# c4-18: dedicated NON-MOUSE activation for the TITLE BEST-chip watch-replay shortcut, so the
+	# click-to-replay affordance isn't mouse-only. Gated on the SAME _best_is_replayable() the chip
+	# draw / hit-test use, so the key only acts while the chip is actually offering a replay, and the
+	# chip's own "> WATCH [R]/[Y]" prompt keeps the binding labelled (no unadvertised key). R on
+	# keyboard, Y/Triangle on pad — routes through the shared _watch_last_run() the row + click use.
+	if mode == Mode.TITLE and _best_is_replayable():
+		var watch := false
+		if ev is InputEventKey and ev.pressed and not ev.echo \
+				and (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode) == WATCH_HOTKEY:
+			watch = true
+		elif ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_Y:
+			watch = true
+		if watch:
+			_watch_last_run()
+			var vpw := get_viewport()
+			if vpw != null:
+				vpw.set_input_as_handled()
+			return
 	# c4-13: HALL fast-travel paging — Home/End leap to the FIRST/LAST page, so a deep board (a
 	# full TOP-HALL_KEEP list runs many pages) is reachable without holding DOWN through every one.
 	# ONLY Home/End: single-step paging is already up/down + wheel + PREV/NEXT, so PageUp/PageDown
@@ -1765,6 +1797,13 @@ func _unhandled_input(ev: InputEvent) -> void:
 				if nh != _howto_nav_hover:
 					_howto_nav_hover = nh
 					_mark_dirty()
+			if mode == Mode.TITLE:
+				# c4-18: hover feedback for the BEST-chip watch shortcut — the ONE control on TITLE
+				# outside the button column, so it gets the same hover cue every other surface has.
+				var bo := _best_chip_rect().has_point(ev.position)
+				if bo != _best_hover:
+					_best_hover = bo
+					_mark_dirty()
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
 				# Full feedback parity: funnel the hover through _nav so it plays
@@ -1847,6 +1886,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 						_page_press_side = 1
 					_nav(1, 0)
 					return
+			# c4-18: the TITLE BEST chip is a live click target when it doubles as a watch-replay
+			# shortcut — checked before the row hit-test since it sits above the button column.
+			if mode == Mode.TITLE and _best_chip_rect().has_point(ev.position):
+				_watch_last_run()
+				return
 			var crow := _row_at(ev.position)
 			# c1-19/c4-15: a click on a cycle row's left/right affordance must step by SIDE (left =
 			# down, right = up). This runs BEFORE the row-plate _press() branch below — that ORDERING
@@ -2646,7 +2690,7 @@ func _activate() -> void:
 			"campaign": main.start_game(false)
 			"endless": main.start_game(true)
 			"daily": main.start_daily()
-			"watch": main.start_watch()
+			"watch": _watch_last_run()
 			"paste_seed": _activate_seed()   # gated above; here only defensively
 			"setup": open(Mode.SETUP)   # c2-04: SETUP hub (run config + OPTIONS + INFO)
 			"quit": get_tree().quit()
@@ -2678,7 +2722,7 @@ func _activate() -> void:
 				_exit_opts(false)   # c3-18: revert the staged changes to the on-disk baseline, then climb
 				return
 			"hall": open(Mode.HALL)   # INFO screen link
-			"watch": main.start_watch()   # WATCH LAST RUN lives on the INFO screen now
+			"watch": _watch_last_run()   # WATCH LAST RUN lives on the INFO screen now
 			"coop":
 				main._two_players = not main._two_players   # run-setup toggle (SETUP); left/right + Enter share this path
 				_flash_setting()   # c1-17: fired at the mutation itself, not a post-activation id allowlist
@@ -3154,10 +3198,21 @@ func _draw() -> void:
 		if main.best_score > 0:
 			# a2-04 HUD#8: only show the record fields that are non-zero (via a testable
 			# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
-			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist)
+			# c4-18: when the best IS this session's last run, the chip gains a "> WATCH" tail and
+			# turns into a click-to-replay shortcut (mouse hit-test shares _best_chip_rect). A cyan
+			# keyline pulses under the plate to flag it interactive; the record text stays gold.
+			var replayable := _best_is_replayable()
+			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist) + _best_chip_suffix()
 			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BEST_FONT).x
 			draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP, bw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
 				tplate)
+			if replayable:
+				var cp := 0.0 if main._motion < 0.5 else Art.pulse(0.4)
+				# Hover firms the keyline (brighter + 2px) so the mouse cue reads as "clickable now".
+				var kh := 2.0 if _best_hover else 1.0
+				var ka := (0.85 if _best_hover else 0.55) + 0.35 * cp
+				draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP + TITLE_RECORD_PLATE_H - kh,
+					bw + PLATE_PAD_SM * 2.0, kh), Art.safe(Color(0.5, 0.9, 1.0, ka)))
 			_center_text(best_line, title_baseline(TITLE_BEST_TOP, TITLE_RECORD_PLATE_H, TITLE_BEST_FONT), TITLE_BEST_FONT, BEST_LINE_COL)
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
@@ -3667,6 +3722,14 @@ func _draw() -> void:
 			var pa: float = _set_pulse
 			var pgrow: float = 2.0 if still else 2.0 + (1.0 - _set_pulse) * 3.0
 			draw_rect(r.grow(pgrow), Art.safe(Color(0.55, 1.0, 0.6, pa)), false, 2.0)
+		# c4-18: availability pulse — a freshly-unlocked WATCH LAST RUN row breathes a cyan
+		# ring (distinct from the amber selection glow and green confirm halo) to advertise the
+		# new replay. Only on the UNSELECTED row: once focus lands the crisp focus ring + NEW
+		# badge carry it, and the eye-drawing pulse would just fight them. Static-but-present
+		# under Reduce Motion so the cue still reads without breathing.
+		if not selected and mitems[k]["id"] == "watch" and _replay_unwatched():
+			var wp := 0.0 if main._motion < 0.5 else Art.pulse(0.4)
+			draw_rect(r.grow(2.0 + wp * 2.0), Art.safe(Color(0.5, 0.9, 1.0, 0.4 + 0.35 * wp)), false, 1.5)
 		if selected:
 			# 1px focus ring on the actual row rect — always crisp and present,
 			# independent of the glow glide, for keyboard/pad a11y. c2-13: a disabled
@@ -4654,6 +4717,60 @@ func _draw_sprite_fit(key: String, box: Rect2, mod: Color) -> void:
 	var dst := (Vector2(reg.size.x, reg.size.y) * s).round()
 	var pos := (box.position + (box.size - dst) / 2.0).round()
 	draw_texture_rect_region(t, Rect2(pos, dst), reg, mod)
+
+
+func _replay_unwatched() -> bool:
+	# c4-18: is the on-disk replay one the player hasn't watched yet? Drives the WATCH row's NEW
+	# badge + availability pulse. A pure read of PERSISTED main state (no menu-side latch), keyed on
+	# main.last_run_score (score banked WITH the replay) vs main.replay_watched_score (score last
+	# watched, also persisted): so a SECOND run overwriting the file re-raises the cue — while a
+	# replay already watched stays quiet even after a relaunch. Score-as-identity ceiling: two
+	# same-score runs won't re-flag, acceptable for a discoverability cue.
+	return _has_replay and main != null and main.last_run_score != main.replay_watched_score
+
+
+func _watch_last_run() -> void:
+	# c4-18: the single activation path for WATCH LAST RUN (INFO row, TITLE BEST-chip shortcut).
+	# main.start_watch banks the watched replay's identity (replay_watched_score) so the NEW badge /
+	# pulse — a pure read of that via _replay_unwatched — goes quiet once seen, then guards the
+	# missing/mid-write file and switches to replay playback.
+	main.start_watch()
+
+
+func _best_is_replayable() -> bool:
+	# c4-18: the TITLE BEST line doubles as a WATCH LAST RUN shortcut ONLY when the standing best
+	# WAS this session's last run — i.e. the replay on disk is the very run the chip celebrates.
+	# Any other time (best set a prior session, or a later run overwrote the replay without beating
+	# the best) the chip stays inert, so it never promises to play back a run it can't.
+	if main == null or not _has_replay or main.best_score <= 0:
+		return false
+	# main.last_run_score (main.gd) is the score of the run whose recording is user://last_run.replay,
+	# PERSISTED beside the replay and reloaded at boot — so this holds across sessions, not just when
+	# the last run happened this session. When it equals the standing best the on-disk replay IS the
+	# best run, so watching it from the BEST chip is meaningful; otherwise the chip stays inert.
+	return main.last_run_score >= 0 and main.last_run_score == main.best_score
+
+
+func _best_chip_suffix() -> String:
+	# c4-18: the click-to-watch affordance appended to the BEST line when it's replayable. ASCII
+	# ">" reads as a play cue; the leading spaces keep it off the record fields. A device-aware
+	# keycap ([R] on keyboard, [Y] on pad — the WATCH_HOTKEY / JOY_BUTTON_Y the handler binds)
+	# advertises the non-mouse shortcut, so the chip is a labelled control on every device, not a
+	# mouse-only one.
+	if not _best_is_replayable():
+		return ""
+	var cap := "Y" if Art.use_pad else "R"   # keyboard cap tracks WATCH_HOTKEY (KEY_R)
+	return "   > WATCH [%s]" % cap
+
+
+func _best_chip_rect() -> Rect2:
+	# c4-18: the mouse hit-box for the BEST-chip watch shortcut — the SAME plate _draw renders, so
+	# the visible chip and its click target can never drift. Empty (unhittable) when not replayable.
+	if not _best_is_replayable():
+		return Rect2()
+	var line := _best_line(main.best_score, main.best_wave, main.best_dist) + _best_chip_suffix()
+	var w := Art.font().get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BEST_FONT).x
+	return Rect2(CENTER_X - w / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP, w + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H)
 
 
 static func _best_line(score: int, wave: int, dist: int) -> String:
