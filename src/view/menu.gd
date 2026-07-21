@@ -355,6 +355,12 @@ const PLATE_PAD_SM := 4.0
 # Shared plate colors. PLATE_BG is the dark warm backdrop behind header/footer
 # captions; PLATE_SEL / PLATE_UNSEL are the focused / resting button-plate hues.
 const PLATE_BG := Color(0.03, 0.05, 0.03, 0.55)
+# c4-17: motion-aware plate tuning. The TITLE stack (wordmark/byline/tagline/BEST/
+# CAREER) floors at TITLE_PLATE_ALPHA_FLOOR; the input legend rides the brightest
+# bottom terrain/particles so it seals to its own darker RGB at a higher floor.
+const TITLE_PLATE_ALPHA_FLOOR := 0.72
+const LEGEND_PLATE_ALPHA_FLOOR := 0.85
+const LEGEND_PLATE_RGB := Color(0.02, 0.03, 0.02)   # near-black backing under the 8px legend glyphs
 const PLATE_SEL := Color(1.0, 0.92, 0.55)
 const PLATE_UNSEL := Color(0.55, 0.62, 0.45, 0.8)
 const DISABLED_PLATE := Color(0.3, 0.34, 0.3, 0.7)   # c2-13: locked/unavailable row plate (dim, desaturated)
@@ -3066,6 +3072,26 @@ static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
 	return sa
 
 
+# c4-17: the dark plates behind the TITLE stack (wordmark/byline/tagline/BEST/CAREER)
+# used a flat hardcoded 0.55 that ignored REDUCE MOTION and let bright attract
+# explosions wash the copy out. Track the scrim instead — at LEAST as opaque as the
+# backdrop, floored darker than the old 0.55, and rising with the scrim under reduce
+# motion so the whole stack stays consistent instead of mismatched per line.
+# NOTE: `scrim_mode` is the Menu.Mode enum (there is no separate ScrimMode) — the same
+# value _draw() feeds _scrim_alpha() for the backdrop, so plate and backdrop stay locked.
+static func _title_plate_col(scrim_mode: int, motion: float) -> Color:
+	var a := maxf(TITLE_PLATE_ALPHA_FLOOR, _scrim_alpha(scrim_mode, motion))
+	return Color(PLATE_BG.r, PLATE_BG.g, PLATE_BG.b, a)
+
+
+# c4-17: the input legend rides the brightest terrain/particles at the screen bottom
+# and its glyphs/labels are only 8px — seal it darker and more opaque than the title
+# plates, still motion-aware via the shared scrim.
+static func _legend_plate_col(scrim_mode: int, motion: float) -> Color:
+	var a := maxf(LEGEND_PLATE_ALPHA_FLOOR, _scrim_alpha(scrim_mode, motion))
+	return Color(LEGEND_PLATE_RGB.r, LEGEND_PLATE_RGB.g, LEGEND_PLATE_RGB.b, a)
+
+
 func _draw() -> void:
 	if mode == Mode.HIDDEN or main == null:
 		return   # c3-07: nothing to draw without main (reads main._motion / _menu_items below)
@@ -3094,16 +3120,20 @@ func _draw() -> void:
 		_footer_legend()   # c4-05: HALL / HOWTO carry the same device-aware bindings strip
 		return
 	if mode == Mode.TITLE:
+		# c4-17: ONE motion-aware plate hue shared by the whole title stack so the lines
+		# can't drift to mismatched hardcoded alphas — darker than the old 0.55 over the
+		# bright attract fight, rising with the scrim under REDUCE MOTION.
+		var tplate := _title_plate_col(mode, main._motion)
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
 		var ttw := Art.font().get_string_size("SHOEMONEY SOLDIER", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
-		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, TITLE_WORDMARK_TOP, ttw + 20.0, TITLE_WORDMARK_H), PLATE_BG)   # a2-04 r2: match sibling plate alpha
+		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, TITLE_WORDMARK_TOP, ttw + 20.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
 		_center_text("SHOEMONEY SOLDIER", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
 		# Studio byline, plated like the tagline below it (small text loses to the live
 		# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
 		var byl := "by SHOEMONEY GAME STUDIOS"
 		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BYLINE_FONT).x
-		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), PLATE_BG)
+		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), tplate)
 		_center_text(byl, title_baseline(TITLE_BYLINE_TOP, TITLE_BYLINE_H, TITLE_BYLINE_FONT), TITLE_BYLINE_FONT, BYLINE_COL)
 		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
 		# seed-hint siblings — small text straight on the live attract firefight
@@ -3114,7 +3144,7 @@ func _draw() -> void:
 		# The tagline plate abuts the BEST plate below it (BEST top == tagline bottom),
 		# derived from the shared TITLE_RECORD_PLATE_H so the seam can't double-darken.
 		draw_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, TITLE_TAGLINE_TOP, tgw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
-			PLATE_BG)
+			tplate)
 		_center_text(tagline, title_baseline(TITLE_TAGLINE_TOP, TITLE_RECORD_PLATE_H, TITLE_TAGLINE_FONT), TITLE_TAGLINE_FONT, TAGLINE_COL)
 		# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
 		# c1-02: the record block is a tight two-line stack (BEST then CAREER) abutting the
@@ -3127,7 +3157,7 @@ func _draw() -> void:
 			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist)
 			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BEST_FONT).x
 			draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP, bw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
-				PLATE_BG)
+				tplate)
 			_center_text(best_line, title_baseline(TITLE_BEST_TOP, TITLE_RECORD_PLATE_H, TITLE_BEST_FONT), TITLE_BEST_FONT, BEST_LINE_COL)
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
@@ -3137,7 +3167,7 @@ func _draw() -> void:
 			# attract firefight loses to bright terrain no matter the alpha.
 			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_CAREER_FONT).x
 			draw_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, TITLE_CAREER_TOP, cpw + PLATE_PAD_SM * 2.0, TITLE_CAREER_PLATE_H),
-				PLATE_BG)
+				tplate)
 			_center_text(career, title_baseline(TITLE_CAREER_TOP, TITLE_CAREER_PLATE_H, TITLE_CAREER_FONT), TITLE_CAREER_FONT, CAREER_COL)
 	elif mode == Mode.OPTS:
 		_draw_opts_header()
@@ -3647,9 +3677,10 @@ func _draw() -> void:
 		# Legend adapts to the last-used device and draws the REAL prompt art
 		# (stick/trigger/mouse glyphs from the registry) beside each verb —
 		# "RT"/"LMB" as text made every new player parse an acronym first.
-		# Near-opaque dark plate: 8px text straight on the live attract
-		# firefight loses to bright terrain and particles no matter the alpha.
-		draw_rect(Rect2(0, LEGEND_Y, CANVAS_WIDTH, LEGEND_H), PLATE_BG)
+		# c4-17: near-opaque dark plate — 8px text/glyphs straight on the live attract
+		# firefight lose to bright terrain and particles at the old 0.55; seal it darker
+		# and more opaque than the title plates, still motion-aware via the shared scrim.
+		draw_rect(Rect2(0, LEGEND_Y, CANVAS_WIDTH, LEGEND_H), _legend_plate_col(mode, main._motion))
 		var row1: Array
 		if Art.use_pad:
 			row1 = [{"tex": "glyph_stick_l", "label": "MOVE"},
@@ -5174,7 +5205,14 @@ func _footer_legend() -> void:
 	var two_line := row_help != ""
 	var strip_top := FOOTER_Y - FOOTER_HELP_RISE if two_line else FOOTER_Y
 	var strip_h := FOOTER_H + FOOTER_HELP_RISE if two_line else FOOTER_H
-	_emit_rect(Rect2(0, strip_top, CANVAS_WIDTH, strip_h), PLATE_BG)
+	# c4-17: the same motion-aware, darker legend plate the TITLE legend uses — HALL/HOWTO/PAUSE/
+	# OPTS/SETUP/DISP/INFO/REBIND all route their 8px bindings strip through here, so the footer
+	# can't drift to the old flat PLATE_BG 0.55 that washed out over bright terrain/particles.
+	# `mode` is the Menu.Mode enum _legend_plate_col()/_scrim_alpha() key on. The main==null branch
+	# is NOT redundant with _draw()'s early return: the HALL capture test drives _footer_legend()
+	# directly with no main (test_menu_layout.gd:718), matching the main != null guard on line 5189.
+	_emit_rect(Rect2(0, strip_top, CANVAS_WIDTH, strip_h),
+		_legend_plate_col(mode, main._motion if main != null else 1.0))
 	var legend_y := FOOTER_Y + 8.0
 	if two_line:
 		legend_y = _draw_footer_help(row_help, strip_top)
