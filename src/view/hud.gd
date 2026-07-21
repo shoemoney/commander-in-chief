@@ -23,6 +23,14 @@ const PIP_H := 10.0     # scrim-plate height (glyph row is ~9px tall + 1px breat
 const PIP_TOP := 8.0    # c2-18: HUD-local y of the first (top) corner pip. Shared by _accessibility_pips
                        # AND _draw_plate so the extended header is sized to actually cover the pip stack.
 const PIP_STEP := 11.0  # c2-18: vertical stride between stacked corner pips (also shared with _draw_plate)
+const PLATE_ORIGIN := 2.0     # c4-16: x/y inset the plate body is drawn at (Rect2(2, 2, ...) in _draw_plate)
+const PLATE_MIN_W := 262.0    # c4-16: floor for the dynamic plate body width (_plate_r)
+const PLATE_MIN_RIGHT := PLATE_ORIGIN + PLATE_MIN_W  # c4-16: min plate body right edge; the floor
+                       # _fit_full clamps to so a pip reserve can never collapse row 0 below the plate
+const PIP_W_UNMEASURED := -1.0  # c4-16: _corner_reserve sentinel — no draw context to measure a pip
+                       # glyph, so fall back to the historical fixed reserve (pure test/headless call)
+const CORNER_RESERVE_FALLBACK := 18.0  # c4-16: the fixed reserve used only for the unmeasured
+                       # (headless/test) path; the live path measures the real pip footprint instead
 const PLATE_EPS := 0.01      # c2-18: sub-pixel guard — suppress a zero/negative-height plate body region
 const PLATE_SEAM_MIN := 0.5  # c2-18: min header overhang (px) before the seam shadow is worth drawing
 const PIP_SCRIM := Color(0.04, 0.05, 0.04, 0.92)   # near-opaque backing: even over white snow /
@@ -138,6 +146,11 @@ var _fit_full := RIGHT     # c1-06: RIGHT minus only the CB/RM corner — the ON
                           # right edge for the whole top bar. Both row 0 and each player row
                           # fit against THIS and reserve the +N slot themselves (once, and
                           # ONLY when overflow is confirmed), so nothing double-counts.
+var _pip_band := Vector2(PIP_MIN_X, RIGHT)  # c4-16: once-per-paint pip band (see _refresh_pip_cache)
+var _pips: Array[Array] = []                # c4-16: once-per-paint _shown_pips result, shared by all
+                          # consumers (the _fit_full reserve, _draw_plate header, both pip passes)
+var _pip_cache_fresh := false               # c4-16: _refresh_pip_cache has run for THIS paint — lets
+                          # _draw_plate reuse _draw's refresh yet self-provision when driven standalone
 var _ovf := 0             # c1-06: optional row-0 chips suppressed by the CURRENT fit pass —
                           # counted in one place (_fits2) so a full row surfaces a "+N"
                           # affordance instead of dropping readouts silently.
@@ -551,8 +564,16 @@ func _draw() -> void:
 
 	# c1-06: the ONE true usable right edge. When a CB/RM pip is live it owns the
 	# top-right corner, so pull the edge in by its width — chips must not draw under the
-	# pip readout the players who set those toggles rely on.
-	_fit_full = RIGHT - _corner_reserve(Art.colorblind, main._motion)
+	# pip readout the players who set those toggles rely on. c4-16: size the pull-in to the widest
+	# pip ACTUALLY drawn this frame, measured from _shown_pips (the SAME source that paints the
+	# glyphs/scrims) — real _tw width, one-or-both — instead of a fixed 18px guess. Then clamp so a
+	# fat reserve can never shrink the usable edge below the minimum plate body right edge (collapsing
+	# row 0). _corner_reserve keeps the toggle gate the headless tests pin.
+	_refresh_pip_cache()
+	var pip_w := 0.0
+	for pip in _pips:
+		pip_w = maxf(pip_w, _tw(pip[0]))
+	_fit_full = maxf(RIGHT - _corner_reserve(Art.colorblind, main._motion, pip_w), PLATE_MIN_RIGHT)
 	_ovf = 0
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
@@ -701,7 +722,7 @@ func _draw() -> void:
 
 	# Scavenged-metal panel — sized now that THIS frame's row0 (row_r), shop strip (strip_r) and
 	# player rows (_prow_r) widths are all known, so the backing never lags the content by a frame.
-	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, 262.0, RIGHT - 2.0)
+	_plate_r = clampf(maxf(maxf(row_r, _prow_r), strip_r) + 4.0, PLATE_MIN_W, RIGHT - PLATE_ORIGIN)
 	_draw_plate(panel_h)
 
 	# c3-11 / c3-15: the pips' dark contrast SCRIMS dock onto the persistent plate cluster (z:-1) HERE,
@@ -715,11 +736,25 @@ func _draw() -> void:
 	_verb_legend()
 
 
-## c1-06: CB/RM corner reservation — a live colorblind / reduce-motion pip owns the
-## top-right corner, so the usable right edge pulls in by its width. Pure so a headless
-## test can pin the reservation without a draw context.
-static func _corner_reserve(colorblind: bool, motion: float) -> float:
-	return 18.0 if (colorblind or motion < 0.5) else 0.0
+## c1-06: CB/RM corner reservation — a live accessibility pip owns the top-right corner, so the
+## usable right edge pulls in by its width. c4-16: the reserve is now sized to the widest LIVE pip's
+## actual scrim-plate footprint instead of a fixed 18px guess that could under-reserve (chips sliding
+## under the pip) or over-reserve. That footprint is EXACTLY glyph-width + PIP_PAD_L: _pip_plate_rect
+## overhangs the glyph by PIP_PAD_L on the LEFT and ends flush on the glyph's right edge (no right
+## padding), so `pip_w + PIP_PAD_L` matches the plate span to the pixel. `colorblind`/`motion` are the
+## live accessibility toggles: the toggle gate reserves iff colorblind OR reduce-motion is on. `pip_w`
+## is the max measured glyph
+## width across the pips that draw; the reserve is exactly that width plus PIP_PAD_L (the scrim plate's
+## only overhang is on the LEFT — _pip_plate_rect ends flush on the glyph's right edge, no right pad).
+## A negative pip_w is the PIP_W_UNMEASURED sentinel for the pure two-arg test/headless call (no draw
+## context to measure a font): it falls back to CORNER_RESERVE_FALLBACK. Zero when no pip is live.
+## Pure so a headless test can pin the reservation.
+static func _corner_reserve(colorblind: bool, motion: float, pip_w := PIP_W_UNMEASURED) -> float:
+	if not (colorblind or motion < 0.5):
+		return 0.0
+	if pip_w < 0.0:
+		return CORNER_RESERVE_FALLBACK
+	return pip_w + PIP_PAD_L
 
 
 ## c2-18: THE single source of which corner pips render this frame, in stack order — one entry per
@@ -756,6 +791,8 @@ static func _header_bottom(pip_n: int, panel_h: float) -> float:
 ## stretch feeds BOTH the header and body rects via texture_rect_region, so the panel texture is
 ## continuous across the header/body seam (no texture-scale mismatch). Extracted from _draw for clarity.
 func _draw_plate(panel_h: float) -> void:
+	if not _pip_cache_fresh:
+		_refresh_pip_cache()   # c4-16: standalone entry (unit test) — _draw already refreshed for its paint
 	var ptex_tex := Art.tex("ui_panel")
 	var ptex := ptex_tex.get_rid()
 	var plate_col := Color(1, 1, 1, 0.65)
@@ -766,7 +803,7 @@ func _draw_plate(panel_h: float) -> void:
 	# degenerate/cropped band (_shown_pips empty), in which case there is nothing to dock and the header
 	# must NOT grow. So gate on the real render set, not just the corner reservation.
 	var tsz := ptex_tex.get_size()
-	var pip_n := _shown_pips(_pip_bounds()).size()
+	var pip_n := _pips.size()   # c4-16: once-per-paint cache (refreshed at the top of _draw)
 	if pip_n == 0:
 		# Baseline: single dynamic-width rect (full texture) + hairline border.
 		_emit_plate_rect("body", Rect2(2, 2, _plate_r, panel_h), ptex, Rect2(0, 0, tsz.x, tsz.y), plate_col)
@@ -1381,8 +1418,21 @@ static func verb_legend_primitives(y: float) -> Array:
 ## the full glyph+scrim emission through one call. Both passes derive from the SAME _pip_bounds/
 ## _shown_pips set and the SAME pure _pip_x anchor, so a glyph and its scrim can never drift apart.
 func _accessibility_pips() -> void:
+	_refresh_pip_cache()   # c4-16: the capture-test entry drives both passes without a prior _draw,
+	                       # so populate the shared pip cache here too (production _draw does its own).
 	_pip_glyphs()
 	_pip_scrims()
+
+
+## c4-16: refresh the once-per-paint pip cache. _pip_bounds() (DisplayServer + live transforms) and
+## _shown_pips() (a _tw per live toggle) would otherwise be recomputed by every consumer — the
+## _fit_full reserve, _draw_plate's header sizing, and both pip passes — up to 4x per paint. Compute
+## once and let all consumers read _pip_band / _pips. Called at the top of _draw and of the
+## _accessibility_pips capture-test entry so both draw paths see a populated, consistent cache.
+func _refresh_pip_cache() -> void:
+	_pip_band = _pip_bounds()
+	_pips = _shown_pips(_pip_band)
+	_pip_cache_fresh = true
 
 
 ## c3-15: the light-on-dark CB/RM glyphs on `self`, drawn just before the player rows (the c3-11
@@ -1392,10 +1442,9 @@ func _accessibility_pips() -> void:
 ## (see _pip_plate), so text and backing stay locked without threading the scrim emit through here.
 func _pip_glyphs() -> void:
 	var acc_y := PIP_TOP        # c2-18: shared with _draw_plate's header sizing so the plate covers the stack
-	var band := _pip_bounds()   # (left, right) usable band in HUD-local space; pulls in when cropped
-	for pip in _shown_pips(band):
+	for pip in _pips:           # c4-16: once-per-paint cache; _pip_band is the same frame's usable band
 		var label: String = pip[0]
-		_text(label, _pip_x(band.y, _tw(label), band.x), acc_y, pip[1])
+		_text(label, _pip_x(_pip_band.y, _tw(label), _pip_band.x), acc_y, pip[1])
 		acc_y += PIP_STEP
 
 
@@ -1409,11 +1458,9 @@ func _pip_glyphs() -> void:
 ## into the plate; an undocked pip over bare terrain keeps it).
 func _pip_scrims() -> void:
 	var acc_y := PIP_TOP
-	var band := _pip_bounds()
-	var pips := _shown_pips(band)
-	var docked := not pips.is_empty()
-	for pip in pips:
-		_pip_plate(pip[0], acc_y, band, docked)
+	var docked := not _pips.is_empty()   # c4-16: once-per-paint cache (band + render set)
+	for pip in _pips:
+		_pip_plate(pip[0], acc_y, _pip_band, docked)
 		acc_y += PIP_STEP
 
 
