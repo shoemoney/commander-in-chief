@@ -11,7 +11,7 @@ const RATE := 44100   # square-wave synth aliased at 22050 (Nyquist ~11kHz); buf
 # for noise/percussive SFX only (a pitch-wandering "buy" arpeggio reads as a bug).
 const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 	"gate_open": true, "wave_start": true, "wave_clear": true, "victory": true,
-	"wiped": true, "avenge": true}
+	"wiped": true, "avenge": true, "arm": true, "disarm": true}
 # Pitch-laddered grammar sounds: their exact pitch IS the information (alarm's
 # threat-ID steps, the kill blip's +0.06/streak rise), so the ±6% humanize would
 # swamp adjacent steps — play them dead on pitch.
@@ -671,6 +671,16 @@ func _synth_all() -> void:
 	s["buy_grab"] = _notes([440.0, 587.0], 0.09, 0.0, false)
 	s["buy_fanfare"] = _notes([523.0, 659.0, 784.0, 1047.0], 0.08)
 	s["deny"] = _notes([220.0, 196.0], 0.09)
+	# c4-10: a UNIQUE armed-confirm ping — a tense RISING tritone (C#4->G4) on the
+	# buzzy band-limited square, deliberately unlike deny's soft falling pair, so a
+	# destructive row arming reads as "primed, one press from firing", not "denied".
+	s["arm"] = _notes([277.0, 392.0], 0.07)
+	# c4-10: the stand-down / clear cue — a soft descending pair (G4->C4) that plays when a
+	# live arm is cancelled (moved off, or auto-disarmed at 2.5s), so the armed state clearing
+	# has its own distinct voice instead of dropping silently. The `false` arg picks _notes'
+	# SINE path (not the band-limited square the arm/deny cues use), so it reads mellow/relaxed
+	# against the tense square arm ping — the two states never sound alike.
+	s["disarm"] = _notes([392.0, 262.0], 0.06, 0.0, false)
 	s["revive"] = _notes([392.0, 523.0, 659.0], 0.08, 0.0, false)
 	s["gate_open"] = _notes([392.0, 494.0, 587.0, 784.0], 0.1)
 	s["supply_chime"] = _notes([392.0, 587.0, 784.0], 0.1, 0.0, false)   # a1-14: warm friendly cargo cue (was the hostile whistle)

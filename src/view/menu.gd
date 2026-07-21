@@ -195,6 +195,12 @@ const DESTR_ARMED_BAR_FILL := Color(1.0, 0.92, 0.55, 1.0)   # draining countdown
 const DESTR_ARMED_BAR_TRACK := Color(0.15, 0.03, 0.02, 0.85)   # dark track the fill drains against
 const DESTR_ARMED_BAR_H := 4.0   # countdown gauge height (was 2)
 const DESTR_ARMED_FRAME_W := 4.0   # armed border thickness (was 2)
+# c4-10: the DIM, steady pre-press confirm-glyph tint on a FOCUSED (un-armed) destructive
+# row. Its alpha (0.42) is held WELL below the armed throb's minimum (0.7 + 0.3*pulse), so
+# the "here's the button" hint and the "act now" throb never read alike. One source shared
+# by _draw and the layout test.
+const DESTR_GLYPH_PREPRESS := Color(1.0, 0.72, 0.45, 0.42)
+const DESTR_GLYPH_ARMED_MIN_A := 0.7   # the armed throb's floor alpha — the pre-press hint stays under it
 
 # c1-04: y (top) of the SELECT/BACK input-legend footer strip drawn on EVERY
 # non-TITLE screen (PAUSE / OPTS / SETUP / HALL / HOWTO). One shared position so
@@ -448,6 +454,7 @@ func _process(delta: float) -> void:
 			_confirm_t -= delta
 			_dirty = true   # the draining confirm-countdown bar
 			if _confirm_t <= 0.0:
+				main._sfx.play("disarm", -10.0)   # c4-10: the 2.5s auto-disarm gets the same distinct stand-down cue as a nav-away clear
 				_disarm_confirm()   # c2-09: clears index + countdown together
 		# c1-09: the "DEFAULTS RESTORED" success banner fades after RESET DEFAULTS fires.
 		if _reset_flash > 0.0:
@@ -1229,6 +1236,20 @@ static func armed_verb(item: Dictionary) -> String:
 	return String(item.get("id", "")).to_upper().replace("_", " ")
 
 
+# c4-10: the right-edge confirm-glyph slot a FOCUSED destructive row reserves — one source
+# shared by _draw (the pre-press hint AND the armed throb) and the layout test, so both
+# confirm states reserve the SAME slot and the fitted label never reflows between them.
+# x = the 12px-tall glyph box width (0 when the confirm key has no texture, so the row keeps
+# full width and degrades to a text-only "PRESS AGAIN"); y = the label's reduced right bound.
+# Mirrors the badge/chevron reservation discipline: start from row_end - 8, then pull in for
+# the glyph plus a 10px gap so the label ellipsizes clear of it.
+static func destr_glyph_slot(row_end_x: float, glyph: Texture2D) -> Vector2:
+	if glyph == null or glyph.get_height() <= 0:
+		return Vector2(0.0, row_end_x - 8.0)
+	var cw := 12.0 * float(glyph.get_width()) / float(glyph.get_height())
+	return Vector2(cw, minf(row_end_x - 8.0, row_end_x - cw - 10.0))
+
+
 # Row id → Modern Menus icon key. Only clean matches — no icon beats a
 # stretched metaphor. Sound toggles reflect their live bus state.
 func _row_icon(id: String) -> String:
@@ -1899,6 +1920,12 @@ func _nav(move: int, hmove: int) -> void:
 		_rail_row = -1
 	if absi(sel - prev) > 1:
 		_sel_y = -1.0   # wrap: snap to the far end instead of gliding the whole list
+	# c4-10: moving off a LIVE arm gets the distinct stand-down cue UNDER the nav tick, so
+	# "clears on any _nav" reads as a deliberate defuse (not just the ordinary row tick). Fired
+	# before _disarm_confirm zeroes _confirm; only the DELIBERATE second press (which fires the
+	# action, in _press) stays silent so the cue never overlaps the destructive activation.
+	if _confirm >= 0:
+		main._sfx.play("disarm", -10.0)
 	_disarm_confirm()   # c2-09: moving off the armed row cancels the confirm (and its countdown)
 	main._sfx.play("pickup", -14.0, 1.3)
 	_mark_dirty()
@@ -1918,7 +1945,9 @@ func _press() -> void:
 	if _is_destructive(sel) and _confirm != sel:
 		_confirm = sel
 		_confirm_t = 2.5   # auto-disarm window (decremented in _process)
-		main._sfx.play("deny", -8.0)
+		# c4-10: a UNIQUE armed ping (rising tense tritone), not the deny buzz — arming a
+		# destructive row is a distinct state ("primed"), so it earns its own voice.
+		main._sfx.play("arm", -6.0)
 	else:
 		_disarm_confirm()   # c2-09: clears index + countdown together
 		_activate()
@@ -3189,21 +3218,26 @@ func _draw() -> void:
 			col = DESTR_TEXT_SEL if selected else DESTR_TEXT_UNSEL
 			if armed:
 				col = DESTR_ARMED_TEXT   # near-white reads over the red flood below
-				# c3-08: DEVICE-CORRECT confirm glyph - Art.glyph_key("confirm") resolves to
-				# Enter for the keyboard/mouse player and the pad's A/cross for a gamepad,
-				# keyed off the LAST-USED device (Art.use_pad), so a keyboard player is never
-				# prompted with a pad button they don't have. Reserve its right-edge slot
-				# BEFORE choosing wording so the label is fit to the real drawable width.
-				# minf so this composes with any earlier badge reservation instead of
-				# clobbering it (destructive rows carry neither badge nor submenu chevron
-				# today, so the glyph slot is the only right-edge claim in practice).
+			# c3-08/c4-10: DEVICE-CORRECT confirm glyph - Art.glyph_key("confirm") resolves to
+			# Enter for the keyboard/mouse player and the pad's A/cross for a gamepad, keyed off
+			# the LAST-USED device (Art.use_pad), so a keyboard player is never prompted with a
+			# pad button they don't have. Reserved for the FOCUSED destructive row whether or not
+			# it's armed: pre-press it rides DIM as a "here's the button that fires this" hint
+			# (drawn below), armed it throbs amber->white. Reserve the right-edge slot BEFORE
+			# choosing wording so the label is fit to the real drawable width. minf so this
+			# composes with any earlier badge reservation instead of clobbering it (destructive
+			# rows carry neither badge nor submenu chevron today, so the glyph slot is the only
+			# right-edge claim in practice).
+			if destr and selected:
 				armed_glyph = Art.tex(Art.glyph_key("confirm"))
 				# Only reserve the glyph slot if the texture actually resolved; a missing
 				# key leaves cw = 0 so the label keeps the FULL width and the row degrades to
 				# a text-only "<VERB>  PRESS AGAIN" prompt instead of crashing on get_width().
 				if armed_glyph:
-					cw = 12.0 * float(armed_glyph.get_width()) / float(armed_glyph.get_height())
-					label_r = minf(label_r, r.end.x - cw - 10.0)
+					# destr_glyph_slot is the ONE source for this geometry (shared with the test).
+					var slot := destr_glyph_slot(r.end.x, armed_glyph)
+					cw = slot.x
+					label_r = minf(label_r, slot.y)
 			# c3-08: KEEP THE ACTION NAME on the armed row - never a bare, ambiguous
 			# "PRESS AGAIN". The armed verb is derived from the row id via armed_verb()
 			# (RESTART / TITLE / QUIT / RESET DEFAULTS / RESET CONTROLS) - one naming
@@ -3249,6 +3283,13 @@ func _draw() -> void:
 				var gp := 1.0 if reduce_motion else Art.pulse(0.35)
 				draw_texture_rect(armed_glyph, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false,
 					Color(1.0, 0.85 + 0.15 * gp, 0.5 + 0.5 * gp, 0.7 + 0.3 * gp))
+		elif destr and selected and armed_glyph:
+			# c4-10: PRE-PRESS confirm glyph on the focused (un-armed) destructive row - a
+			# DIM, steady hint of the exact device button that arms/fires it, so the danger
+			# read carries "and here's what triggers it" before the first press. Held well
+			# below the armed throb's brightness/alpha so the two states never read alike.
+			draw_texture_rect(armed_glyph, Rect2(r.end.x - cw - 6.0, cy - 6.0, cw, 12.0), false,
+				DESTR_GLYPH_PREPRESS)
 		# Rows that open a screen reserve a right-edge slot for the > chevron so a
 		# long label ellipsizes clear of it instead of colliding.
 		if mitems[k].get("submenu", false):

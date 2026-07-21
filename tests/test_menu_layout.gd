@@ -2057,8 +2057,12 @@ func test_hover_disarms_armed_destructive_row_audibly() -> void:
 	m._unhandled_input(_motion_ev(Vector2(320.0, _row_cy(m, 0)), Vector2(0.0, -3.0)))
 	Runner.T.eq(m.sel, 0, "hover moved off the armed row")
 	Runner.T.eq(m._confirm, -1, "hovering away VISIBLY disarms the armed RESTART")
-	Runner.T.ok(stub._sfx.plays.size() == 1 and stub._sfx.plays[0][0] == "pickup",
-		"the disarm is AUDIBLE — the nav cue fires, no silent defuse")
+	# c4-10: the defuse is AUDIBLE with its OWN distinct voice — the 'disarm' stand-down cue
+	# fires UNDER the ordinary nav tick, so cancelling an armed RESTART sounds unlike a plain
+	# row move (and unlike the 'arm' ping that primed it). No silent defuse.
+	Runner.T.eq(stub._sfx.plays.size(), 2, "disarming an armed row plays two cues (defuse + nav tick)")
+	Runner.T.eq(String(stub._sfx.plays[0][0]), "disarm", "the distinct stand-down cue fires first")
+	Runner.T.eq(String(stub._sfx.plays[1][0]), "pickup", "the ordinary nav tick still rides under it")
 	m.free()
 	stub.free()
 
@@ -2153,6 +2157,100 @@ func test_destructive_disarms_on_timeout_and_never_fires_from_nav() -> void:
 	Runner.T.eq(stub._reset_calls, 0, "navigation never activates a destructive row")
 	m.free()
 	stub.free()
+
+
+# c4-10: arming a destructive row plays the UNIQUE 'arm' ping (a tense rising cue), NOT the
+# 'deny' buzz — the primed state has its own voice so it can't be mistaken for a rejected press.
+func test_destructive_first_press_plays_arm_cue() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var restart_i := -1
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	m.sel = restart_i
+	m._confirm = -1
+	stub._sfx.plays.clear()
+	m._press()   # first press ARMS
+	Runner.T.eq(m._confirm, restart_i, "first press arms RESTART")
+	Runner.T.eq(stub._sfx.plays.size(), 1, "arming plays exactly one cue")
+	Runner.T.eq(String(stub._sfx.plays[0][0]), "arm", "the armed cue is the unique 'arm' ping, not 'deny'")
+	m.free()
+	stub.free()
+
+
+# c4-10: letting the 2.5s window expire plays the distinct 'disarm' stand-down cue — the
+# previously-SILENT auto-disarm now announces itself so a lapsed arm isn't a quiet nothing.
+func test_destructive_timeout_plays_disarm_cue() -> void:
+	var stub := _StubMain.new()
+	var m := _pause_menu_headless(stub)
+	var restart_i := -1
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "restart":
+			restart_i = i
+	m.sel = restart_i
+	m._confirm = -1
+	m._press()   # ARM
+	Runner.T.eq(m._confirm, restart_i, "RESTART armed")
+	stub._sfx.plays.clear()
+	m._process(3.0)   # past the 2.5s auto-disarm window
+	Runner.T.eq(m._confirm, -1, "the window lapsed and the confirm auto-disarmed")
+	var heard_disarm := false
+	for p in stub._sfx.plays:
+		if String(p[0]) == "disarm":
+			heard_disarm = true
+	Runner.T.ok(heard_disarm, "the auto-disarm plays the distinct 'disarm' cue (was silent)")
+	m.free()
+	stub.free()
+
+
+# c4-10: the FOCUSED-but-UNARMED destructive row reserves the SAME right-edge slot the armed
+# row uses and rides the DIM pre-press confirm glyph in it, with its label fit to the REDUCED
+# drawable width. Drives the shared geometry helper (destr_glyph_slot) that the real _draw
+# calls, on the ACTUAL device glyph Art.glyph_key resolves, in BOTH device modes — so the
+# pre-press hint can't silently lose its slot, overlap the label, or start reading like the
+# armed throb. (The audio side of the item is pinned by the arm/disarm cue tests above.)
+func test_c4_10_prepress_glyph_reserves_slot_and_fits_label() -> void:
+	var was_pad: bool = Art.use_pad
+	# The pre-press hint is DIM: its alpha sits UNDER the armed throb's floor, so the "here's
+	# the button" hint and the "act now" throb can never read alike (a single-source contract
+	# — both states draw the glyph, only these two constants tell them apart).
+	Runner.T.ok(Menu.DESTR_GLYPH_PREPRESS.a > 0.0, "pre-press glyph is visible")
+	Runner.T.ok(Menu.DESTR_GLYPH_PREPRESS.a < Menu.DESTR_GLYPH_ARMED_MIN_A,
+		"pre-press glyph (a=%.2f) is dimmer than the armed throb floor (a=%.2f)" % [Menu.DESTR_GLYPH_PREPRESS.a, Menu.DESTR_GLYPH_ARMED_MIN_A])
+	# Mirror the real plate: BTN.x=222 right edge, label right bound at row_end-8, left inset 30.
+	var row_end := 222.0
+	var full_r := row_end - 8.0     # label right bound with NO glyph reserved
+	var left := 30.0
+	for pad in [false, true]:
+		Art.use_pad = pad
+		var dev := "pad" if pad else "kb"
+		# The device-correct confirm glyph must resolve, else the pre-press hint can't draw.
+		var g := Art.tex(Art.glyph_key("confirm"))
+		Runner.T.ok(g != null and g.get_width() > 0, "%s confirm glyph resolves to a texture" % dev)
+		var slot: Vector2 = Menu.destr_glyph_slot(row_end, g)
+		# (1) The right-edge glyph slot is genuinely RESERVED — a non-zero box width.
+		Runner.T.ok(slot.x > 0.0, "%s focused destructive row reserves a glyph slot (cw=%.1f)" % [dev, slot.x])
+		# (2) The label's drawable width is REDUCED: its right bound pulls in by the glyph box
+		# plus the 10px gap, so the fitted label can never spill into the reserved slot.
+		Runner.T.ok(slot.y < full_r, "%s reserving the slot pulls the label right bound in (%.1f < %.1f)" % [dev, slot.y, full_r])
+		Runner.T.ok(absf(slot.y - (row_end - slot.x - 10.0)) < 0.01, "%s reserved bound = row_end - cw - 10" % dev)
+		# (3) The label is FIT to that REDUCED width via the same fitter _draw feeds
+		# (destructive_label) — the returned string measures inside the reduced avail.
+		var reduced_avail := slot.y - left
+		var lbl := Menu.destructive_label("RESET DEFAULTS", "RESET DEFAULTS", false, Art.font(), reduced_avail)
+		var w := Art.font().get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, Menu.ROW_LABEL_SIZE).x
+		Runner.T.ok(w <= reduced_avail + 0.5, "%s pre-press label fits the reduced drawable width (%.1f <= %.1f)" % [dev, w, reduced_avail])
+		# The drawn glyph box (row_end - cw - 6 .. row_end - 6) sits entirely RIGHT of the
+		# fitted label's bound — reservation and draw agree, no overlap.
+		Runner.T.ok(row_end - slot.x - 6.0 >= slot.y, "%s glyph box sits right of the fitted label bound" % dev)
+	# A MISSING glyph degrades safely: no slot, label keeps the FULL width (text-only prompt).
+	var none: Vector2 = Menu.destr_glyph_slot(row_end, null)
+	Runner.T.eq(none.x, 0.0, "no confirm texture reserves no slot")
+	Runner.T.eq(none.y, full_r, "no glyph -> label keeps the full drawable width")
+	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
 # c1-08: the confirm needs TWO DISTINCT press edges — a HELD key must not fire it.
