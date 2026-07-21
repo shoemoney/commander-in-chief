@@ -1526,12 +1526,13 @@ func _fuel_gauge(t: Dictionary, x: float, y: float) -> float:
 	# the anchor the cannon-cooldown ring frames.
 	var frac := clampf(float(t["fuel"]) / float(SimWorld.TANK_FUEL_TICKS), 0.0, 1.0)
 	draw_texture_rect(FUEL_ICON, Rect2(x - 1, y - 1, ICON + 2, ICON + 2), false)
-	# Endpoints run red at E/empty → green at F/full; red → blue under colorblind (green is the
-	# indistinguishable end), so the drain stays legible either way. The fill is a single lerp
-	# across those two ends, and the E/F endpoint letters take the very same end colors, so one
-	# palette definition drives the whole gauge — no hardcoded red/green to vanish under colorblind.
+	# Endpoints run red at E/empty → green at F/full; the full end routes through Art.safe so it
+	# becomes the shared CB cyan (green is the indistinguishable end) — the SAME palette function the
+	# rest of the HUD's greens use, not a one-off deep-blue that drifted from Art.safe's cyan. The
+	# fill is a single lerp across those two ends, and the E/F endpoint letters take the very same end
+	# colors, so one palette definition drives the whole gauge — no hardcoded red/green to vanish.
 	var e_col := Color(0.9, 0.15, 0.12)  # empty end (red in both palettes)
-	var f_col := Color(0.2, 0.15, 0.87) if Art.colorblind else Color(0.2, 0.8, 0.12)  # full end
+	var f_col := Art.safe(Color(0.2, 0.8, 0.12))  # full end (green -> CB cyan via the shared palette)
 	var fuel_col := e_col.lerp(f_col, frac)
 	var lx := _text("E", x + ICON + FUEL_BAR_GAP, y + ROW_TEXT_BASELINE, e_col) + FUEL_BAR_GAP
 	# Same well + fill + ui_bar_frame construction as _mini_bar (shared insets/colors so the fuel

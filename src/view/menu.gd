@@ -49,6 +49,7 @@ const HALL_KEEP := 40
 # c2-06: the "1-8 OF N" total-count footer's color — one const so the empty ("0-0 OF 0"),
 # single-page, and multi-page counters all read in the SAME warm gold and can't drift apart.
 const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
+const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint under colorblind mode so the white-alpha sprite keeps body
 
 # c4-07: the two shared center-banner status tints. Single-sourced HERE (the class main already
 # depends on) so Main's show_banner, this menu's seed-paste feedback, AND the test stub all read the
@@ -2512,6 +2513,8 @@ func _activate() -> void:
 				_stage_opts()	# c3-18: apply live, defer the disk write to SAVE
 				_flash_setting()
 			"colorblind":
+				# c4-08: the setter (_set_colorblind) mirrors this onto Art on the SAME frame, so the
+				# toggle label, a11y summary, CB pip and fuel gauge all flip together -- no manual sync.
 				main.colorblind = not main.colorblind
 				_stage_opts()
 				_flash_setting()
@@ -3891,10 +3894,16 @@ func _draw_hall() -> void:
 				Art.text(self, gr, Vector2(132.0, y), 11, gcol)
 				# Tier medal beside the letter (D=1 … S=5) — sprite is white-with-alpha,
 				# tinted to the tier color so medal and letter read as one badge.
+				# c4-08: under colorblind mode the tier hues flatten onto one axis, so a white-with-alpha
+				# medal tinted with a light tier color (C is nearly white) washes out. When the CB palette
+				# is active the medal takes a darkened tint -- luminance is the channel CB vision keeps -- so
+				# it stays a legible filled badge (tier also survives via its distinct sprite), while the
+				# bright letter carries the exact hue. Normal-mode medals are left untouched.
 				var med: int = {"D": 1, "C": 2, "B": 3, "A": 4, "S": 5}.get(gr, 0)
 				if med > 0:
+					var mcol := gcol.darkened(MEDAL_CB_DARKEN) if Art.colorblind else gcol
 					draw_texture_rect(Art.tex("mi_medal_%d" % med),
-						Rect2(142.0, y - 10.0, 12.0, 12.0), false, gcol)
+						Rect2(142.0, y - 10.0, 12.0, 12.0), false, mcol)
 		# Footer: a single compact counter row framed by the PREV/NEXT buttons when the
 		# board spills past one page. The whole line sits on ONE row at y306 — clear of the
 		# BACK plate (top y310) below it. The old second "UP/DOWN TO TURN THE PAGE" hint line

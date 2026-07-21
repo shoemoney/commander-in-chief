@@ -121,7 +121,7 @@ var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyb
 var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
-var colorblind := false          # deuteran-safe: remap 'affordable/safe' green → cyan
+var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
 var _binds: Dictionary = {}      # c1-18: keyboard rebinds (action -> physical keycode, 0 == UNBOUND); filled from BIND_DEFAULTS + [binds] in _load_bests
 var _pad_binds: Array[Dictionary] = [{}, {}]  # c1-18: PER-PLAYER gamepad button rebinds (action -> JOY_BUTTON_*, -1 == UNBOUND). [0]=P1 (device 0, [padbinds]), [1]=P2 (device 1, [padbinds2]) — two INDEPENDENT layouts so a left-handed P2 can remap without disturbing P1
@@ -1300,7 +1300,8 @@ static func needs_refit(actual: Vector2i, scale: int) -> bool:
 
 
 func _physics_process(_delta: float) -> void:
-	Art.colorblind = colorblind   # apply on menu/attract frames too, not just gameplay
+	# c4-08: Art.colorblind is now kept in lockstep by the `colorblind` setter (_set_colorblind) at
+	# every assignment site, so the old per-frame re-sync here is gone -- the palette can't drift.
 	_update_cursor()
 	if _menu.is_active():
 		# Arm the fire-swallow every menu frame: the SPACE/LMB press that closes
@@ -2950,6 +2951,15 @@ func _save_settings() -> void:
 # flow into the game, shared by _reset_settings and the fresh-install path in
 # _load_bests, so SETTINGS_DEFAULTS is authoritative everywhere and no field
 # initializer can drift from it. Does not persist (callers decide).
+# c4-08: THE single funnel for colorblind state. Every assignment to `colorblind` (menu toggle,
+# _apply_settings load/reset, save round-trip) routes here and mirrors the value onto Art -- the
+# static the whole HUD/menu palette reads through Art.safe/Art.warn -- so the two can never drift a
+# frame apart. Assigning the backing property inside its own setter does NOT re-invoke the setter.
+func _set_colorblind(v: bool) -> void:
+	colorblind = v
+	Art.colorblind = v
+
+
 func _apply_settings(d: Dictionary) -> void:
 	colorblind = d["colorblind"]
 	_assist = d["assist"]
