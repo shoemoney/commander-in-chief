@@ -366,8 +366,18 @@ func _drawn_pulse(pulse: float) -> float:
 ##     window; spread's chip is suppressed once Triple is owned, so mirror that.
 ## Caller gates on motion (_mblink is a steady phase under reduce motion, so nothing blinks there).
 func _blink_chip_present(sim: SimWorld) -> bool:
-	for p in sim.players:
-		if p["mg_ammo"] == 0 or p["grenade_ammo"] == 0:
+	# c4-fix: test PRESENCE under the SAME gates _draw uses to show each chip, or the HUD holds
+	# the every-frame repaint open forever for a chip that isn't on screen. A downed player draws
+	# no chips; and in a tank the on-foot dry-MG/dry-grenade chips aren't drawn — only the cannon
+	# dry-flash (grenade pool == shells) and the burning BAIL OUT prompt blink there.
+	for pi in sim.players.size():
+		var p: Dictionary = sim.players[pi]
+		if not p["alive"]:
+			continue
+		if p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == pi:
+			if sim.tanks[p["in_tank"]]["burning"] or p["grenade_ammo"] == 0:
+				return true
+		elif p["mg_ammo"] == 0 or p["grenade_ammo"] == 0:
 			return true
 		if (p["pierce_ticks"] > 0 and p["pierce_ticks"] < 120) \
 				or (p["spread_ticks"] > 0 and p["spread_ticks"] < 120 and not p["triple"]) \
@@ -710,10 +720,12 @@ func _draw() -> void:
 						0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 					draw_arc(fuel_c, ICON * 0.55,
 						-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-				# The sim decrements pierce/spread/rend/smoke unconditionally while
-				# riding — without the shared chip row a Trench Gun expired invisibly
-				# mid-ride and the 2s red expiry warning could never fire in a tank.
-				px = _buff_chips(p, px, ry, i)
+			# c4-fix: buff chips draw in ALL tank sub-states (burning / shell-overflow / normal), not
+			# just this normal else. The sim decrements pierce/spread/rend/smoke unconditionally while
+			# riding, so a Trench Gun could expire invisibly during the ~3s cook-off (burning) window —
+			# the very moment its 2s red expiry warning matters. BAIL OUT still draws first above
+			# (survival prompt); this only guarantees the buff timers stay visible in a tank.
+			px = _buff_chips(p, px, ry, i)
 		else:
 			px = _onfoot_chips(p, px, ry, i, sim)
 		prow = maxf(prow, px)
