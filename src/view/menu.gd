@@ -57,8 +57,11 @@ var _confirm := -1   # index of a destructive item awaiting a 2nd press
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
 var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown (up/down pages)
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
-var _howto_page := 0    # c3-05: which HOW-TO-PLAY page (0 CONTROLS / 1 WAR CHEST / 2 ENEMIES / 3 ENDLESS); left/right/wheel or tab-click pages it
-const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "ENEMIES", "ENDLESS"]  # c3-05: four HOW-TO-PLAY pages — the old BASIC page crammed the verbs AND the War Chest economy together, so each now owns a page and reads at a roomy pitch
+var _howto_page := 0    # c3-05/c4-06: which HOW-TO-PLAY tab (0 CONTROLS / 1 WAR CHEST / 2 ENEMIES / 3 ENDLESS); left/right/wheel or tab-click pages it
+var _howto_endless_page := 0   # c4-06: sub-page WITHIN the single ENDLESS tab (0-based); the in-page chevrons / left-right step it — one clear roster pager instead of two ENDLESS tabs
+var _howto_nav_hover := -1   # c4-06: which ENDLESS chevron the pointer is over (-1 none / 0 PREV / 1 NEXT) — lights its plate
+const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "ENEMIES", "ENDLESS"]  # c3-05/c4-06: HOW-TO-PLAY tabs — the old BASIC page crammed the verbs AND the War Chest economy together, so each owns a tab; c4-06 gives the seven ENDLESS threats ONE tab paged by in-page chevrons (was two ENDLESS I/II tabs + chevrons — a redundant, confusing double control) so each roster row still gets a big sprite/pitch
+const HOWTO_ENDLESS_TAB := 3   # index of the ENDLESS tab in HOWTO_TABS (the only paged tab)
 const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; existence gates the INFO menu row
 # c3-10: the HOW TO PLAY shortcut's DEFAULT keycode — the live value is the "menu_help" menu
 # binding (main.menu_bind, remappable via the save overlay); this const is only the fallback for
@@ -643,6 +646,8 @@ func open(m: int, select_id := "") -> void:
 			_hall_page = clampi(_hall_page, 0, _hall_pages(_hall_rows().size()) - 1)
 	elif m == Mode.HOWTO:
 		_howto_page = 0   # c3-05: always open the help on the CONTROLS page
+		_howto_endless_page = 0   # c4-06: reset the ENDLESS roster to its first sub-page too
+		_howto_nav_hover = -1   # c4-06: clear any stale chevron-hover so re-entry can't light a plate before the next motion event
 		_tab_hover = -1   # c2-02: HOWTO shares _tab_hover with HALL — clear it so a hover index left on the OTHER screen's tab row can't light a HOWTO tab (open() clears it above too; explicit here for the shared-state contract)
 	elif m == Mode.INFO:
 		# c3-16: _has_replay (the WATCH LAST RUN gate) was already sampled at the top of open() —
@@ -1645,6 +1650,19 @@ func _unhandled_input(ev: InputEvent) -> void:
 				if ht != _tab_hover:
 					_tab_hover = ht
 					_mark_dirty()
+				# c4-06: hover cue for the ENDLESS PREV/NEXT chevrons — only a LIVE side
+				# lights (a boundary chevron can't page, so it never previews as clickable).
+				var nh := -1
+				if _howto_page == HOWTO_ENDLESS_TAB and _endless_pages() > 1:
+					var nvr := _howto_endless_nav_rects()
+					var ep := _endless_page()
+					for side in range(2):
+						var live_side := ep > 0 if side == 0 else ep < _endless_pages() - 1
+						if live_side and nvr[side].has_point(ev.position):
+							nh = side
+				if nh != _howto_nav_hover:
+					_howto_nav_hover = nh
+					_mark_dirty()
 			var hrow := _row_at(ev.position)
 			if hrow >= 0 and hrow != sel:
 				# Full feedback parity: funnel the hover through _nav so it plays
@@ -1687,9 +1705,29 @@ func _unhandled_input(ev: InputEvent) -> void:
 					if htabs[ti].has_point(ev.position):
 						if ti != _howto_page:
 							_howto_page = ti
+							_howto_endless_page = 0   # c4-06: clicking the ENDLESS tab always lands on its first roster page
+							_howto_nav_hover = -1   # leaving/entering a tab drops any stale chevron hover
 							main._sfx.play("pickup", -14.0, 1.3)
 						_mark_dirty()
 						return
+				# c4-06: the in-page PREV/NEXT chevrons page the ENDLESS roster — the ONE
+				# control for its two halves now that ENDLESS is a single tab (was a
+				# confusing overlap of two ENDLESS tabs AND these chevrons). Live only on
+				# the ENDLESS tab; mouse parity with left/right.
+				if _howto_page == HOWTO_ENDLESS_TAB and _endless_pages() > 1:
+					var nav := _howto_endless_nav_rects()
+					for side in range(2):
+						if nav[side].has_point(ev.position):
+							var step := 1 if side == 1 else -1
+							var np := clampi(_endless_page() + step, 0, _endless_pages() - 1)
+							# Only a LIVE chevron (one that actually pages) consumes the
+							# click; a disabled boundary chevron falls through so it can't
+							# swallow input meant for whatever sits under it.
+							if np != _howto_endless_page:
+								_howto_endless_page = np
+								main._sfx.play("pickup", -14.0, 1.3)
+								_mark_dirty()
+								return
 			if mode == Mode.HALL and _hall_pages(_hall_rows().size()) > 1:
 				# Prev/next page buttons: route through _nav so paging, sfx, and the
 				# boundary clamp match the d-pad exactly. A click on a boundary-
@@ -1793,9 +1831,23 @@ func _nav(move: int, hmove: int) -> void:
 	# focus on the always-selected BACK row (footer already binds SELECT/BACK), so
 	# the paging axis and the nav axis never fight over the same press.
 	if mode == Mode.HOWTO and hmove != 0:
+		# c4-06: on the ENDLESS tab, left/right first pages the roster's sub-pages (mouse
+		# parity with the chevrons) — only a sub-page boundary spills over to the next tab,
+		# so left/right walks the whole help linearly (CONTROLS..ENEMIES..ENDLESS 1/2..2/2)
+		# without a redundant second ENDLESS tab.
+		if _howto_page == HOWTO_ENDLESS_TAB:
+			var ep := _howto_endless_page + hmove
+			if ep >= 0 and ep < _endless_pages():
+				_howto_endless_page = ep
+				main._sfx.play("pickup", -14.0, 1.3)
+				_mark_dirty()
+				return
 		var np := clampi(_howto_page + hmove, 0, HOWTO_TABS.size() - 1)
 		if np != _howto_page:
 			_howto_page = np
+			if np == HOWTO_ENDLESS_TAB:
+				_howto_endless_page = 0   # entering ENDLESS from ENEMIES lands on its first roster page
+			_howto_nav_hover = -1   # left the ENDLESS tab (or arrived) — drop any stale chevron hover
 			main._sfx.play("pickup", -14.0, 1.3)
 			_mark_dirty()
 		return
@@ -3936,23 +3988,26 @@ func _draw_howto() -> void:
 	# content screens share one header rhythm; the tab plate top sits at y54, a clear
 	# ~12px below, so the two never overlap regardless of font metrics.
 	_center_text("HOW TO PLAY", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
-	# c2-02/c3-05: the wall of ~17 lines is split into four PAGES — CONTROLS / WAR
-	# CHEST / ENEMIES / ENDLESS — each drawn on its own screen with a fresh top-of-
-	# screen y cursor. Nothing stacks a section onto the next, so no row can land on
-	# the BACK plate, and the two dense blocks the old BASIC page jammed together (the
-	# input verbs and the War Chest economy) each get a page and a roomy pitch instead
-	# of sharing one crammed screen. Left/right (or wheel, or a tab click) turns it.
+	# c2-02/c3-05/c4-06: the wall of ~17 lines is split into four TABS — CONTROLS / WAR
+	# CHEST / ENEMIES / ENDLESS — each drawn on its own screen with a fresh top-of-screen y
+	# cursor. Nothing stacks a section onto the next, so no row can land on the BACK plate,
+	# and the two dense blocks the old BASIC page jammed together (the input verbs and the
+	# War Chest economy) each get a tab and a roomy pitch. The seven ENDLESS threats live on
+	# ONE tab paged by its in-page chevrons (2 sub-pages of 4 + 3) — a single roster pager,
+	# not the old confusing ENDLESS I/II tabs layered on top of the same chevrons. Left/right
+	# (or wheel) turns tabs, and pages the ENDLESS roster before spilling to the next tab.
 	_draw_howto_tabs()
 	match _howto_page:
 		0: _howto_page_controls()
 		1: _howto_page_warchest()
 		2: _howto_page_enemies()
-		_: _howto_page_endless()
+		3: _howto_page_endless(_endless_page())   # ENDLESS — one tab, paged by chevrons/left-right
+		_: _howto_page_endless(_endless_page())   # safety fallback (tab is clamped 0..3)
 
 
-# c3-05: the CONTROLS/WAR CHEST/ENEMIES/ENDLESS tab row — same centered grammar and
-# pure style helper the HALL filter tabs use, so both content screens read as one
-# system. Everything iterates HOWTO_TABS so the four-tab row draws (and its click
+# c3-05/c4-06: the CONTROLS/WAR CHEST/ENEMIES/ENDLESS tab row — same centered
+# grammar and pure style helper the HALL filter tabs use, so both content screens read as
+# one system. Everything iterates HOWTO_TABS so the four-tab row draws (and its click
 # targets in _howto_tab_rects) stay in lockstep with the page count.
 func _draw_howto_tabs() -> void:
 	var tabs := _howto_tab_rects()
@@ -3968,7 +4023,7 @@ func _draw_howto_tabs() -> void:
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
 			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
-	# c3-05: a "N / 4" counter, right-aligned at the frame edge on the tab baseline, so
+	# c3-05/c4-06: a "N / 4" counter, right-aligned at the frame edge on the tab baseline, so
 	# a first-time player can see at a glance there are more pages than the one on
 	# screen — the tabs alone read as a static header, and nobody paged through them.
 	# The centered tab row (see _tab_rects_for) never reaches the frame edge, so the
@@ -4040,77 +4095,170 @@ func _howto_page_enemies() -> void:
 
 
 # c3-05 page 4 — the Endless War ranged specialists.
-func _howto_page_endless() -> void:
+# c4-06: the seven ENDLESS ranged threats used to crowd ONE screen — even on their
+# own c3-05 tab the pitch stayed capped at 24 to squeeze all seven in, so the sprites
+# read small. They now span TWO sub-pages of the single ENDLESS tab (4 rows + 3 rows),
+# turned by the in-page chevrons (or left/right/wheel). Fewer rows per
+# page lets the derived pitch reach a roomier cap (30), so each threat silhouette draws
+# bigger and the roster reads at a glance. `page` selects the half.
+const ENDLESS_PER_PAGE := 4
+
+
+# c4-06: baseline of the ENDLESS in-page PREV/NEXT chevron row — DERIVED from the BACK
+# plate (its top less an 18px margin) rather than a hardcoded y, so the controls always
+# clear BACK no matter the roster size / plate geometry (same discipline as the roster's
+# derived pitch above).
+func _howto_nav_y() -> float:
+	return _back_rect().position.y - 18.0
+
+
+# c4-06: the seven ENDLESS ranged specialists [sprite_key, tint, tip], single-sourced so
+# the page draw and the page-count / chevron geometry can't drift. Each row fronts its LIVE
+# sprite in its in-game tint (the top roster teaches silhouettes; this block used to teach
+# only names, so a first-run player couldn't match "GHILLIE" to the shape that kills them).
+# Built once and cached — the draw + input path queries the roster / page-count several
+# times a frame, so rebuilding these dicts (and re-running Art.tint) every call is waste;
+# the bakes and their tints are immutable at runtime (same idiom as _trim_cache).
+static var _endless_cache: Array[Array] = []
+func _endless_threats() -> Array[Array]:
+	if _endless_cache.is_empty():
+		_endless_cache = [
+		["m_soldier2", Color(1.3, 1.1, 0.55), "GRENADIER — lobs a telegraphed blast on your spot. Keep moving."],
+			["enemy_sniper", Art.tint("enemy_sniper"), "SNIPER — paints a laser line, then fires. Sidestep it."],   # sol-08: live red marksman
+			["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
+			["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
+			["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],
+			["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
+			["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
+	return _endless_cache
+
+
+# How many ENDLESS roster pages there are (7 threats / 4-per-page = 2).
+func _endless_pages() -> int:
+	return maxi(1, int(ceilf(_endless_threats().size() / float(ENDLESS_PER_PAGE))))
+
+
+# Which ENDLESS roster sub-page is showing, clamped to the live page count (so a
+# stale index can't point past a shrunk roster).
+func _endless_page() -> int:
+	return clampi(_howto_endless_page, 0, _endless_pages() - 1)
+
+
+func _howto_page_endless(page: int = 0) -> void:
 	var y := 100.0
-	# Endless War fields ranged specialists (wave 3+) — teach their counters.
-	Art.text(self, "ENDLESS WAR — RANGED THREATS:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
+	var special := _endless_threats()
+	var pages := _endless_pages()
+	page = clampi(page, 0, pages - 1)
+	var rows := special.slice(page * ENDLESS_PER_PAGE, page * ENDLESS_PER_PAGE + ENDLESS_PER_PAGE)
+	# Endless War fields ranged specialists (wave 3+) — teach their counters. The
+	# "(1/2)" marker tells a paging player this roster continues on the next tab.
+	Art.text(self, "ENDLESS WAR — RANGED THREATS (%d/%d):" % [page + 1, pages], Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
 	y += 20.0
-	# Each line fronts its LIVE sprite in its in-game tint (panel round: the top
-	# roster teaches silhouettes, this block taught only names — a first-run
-	# player couldn't match "GHILLIE" to the shape that kills them). Keyed
-	# sprites carry the same modulate _draw_enemies uses; the p2 bakes ride
-	# Art.tint like the roster above.
-	var special := [
-	["m_soldier2", Color(1.3, 1.1, 0.55), "GRENADIER — lobs a telegraphed blast on your spot. Keep moving."],
-		["enemy_sniper", Art.tint("enemy_sniper"), "SNIPER — paints a laser line, then fires. Sidestep it."],   # sol-08: live red marksman
-		["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
-		["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
-		["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],
-		["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
-		["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
 	# Threat rows are the tight spot, so their pitch is DERIVED, not typed: fit
 	# every row's text baseline between here (`y`) and the last baseline the BACK
-	# plate allows (its grow(3) top, less the box's +3 overhang and a 1px margin).
-	# Pitch is the fit value capped at 18 and NEVER clamped upward, so the last
-	# baseline lands at-or-below the limit for ANY roster size — a grown roster
+	# plate allows. Pitch is the fit value capped and NEVER clamped upward, so the
+	# last baseline lands at-or-below the limit for ANY page size — a grown roster
 	# just tightens the pitch, it can never push a row into BACK. floorf keeps it
 	# on whole pixels (a fractional pitch smears pixel-art rows). The box is sized
-	# `pitch - 1`, so consecutive boxes always keep a >=1px gap — the collision
-	# the old fixed 26px box at 10px pitch baked in cannot recur. Sprites draw
-	# cropped to their opaque bounds (see _draw_sprite_fit), so even a tight box
-	# shows a full body instead of the old ~7px speck the padded bakes gave.
+	# `pitch - 1`, so consecutive boxes always keep a >=1px gap. Sprites draw
+	# cropped to their opaque bounds (see _draw_sprite_fit), so a tight box still
+	# shows a full body instead of a speck.
 	var last_max := _back_rect().position.y - 7.0
 	var readable := 13.0   # 10px text needs ~3px leading to stay legible
-	# c3-05: with ENDLESS on its own tab the seven rows own a full screen, so the
-	# pitch cap lifts 18 -> 24 — the block breathes instead of hugging its readable
-	# floor, and the sprite boxes grow with it (box == pitch - 1) so the silhouettes
-	# read as bodies, not specks. The derived-fit-then-cap discipline is unchanged: a
-	# grown roster still tightens the pitch rather than colliding with BACK.
-	var pitch := 24.0
-	if special.size() > 1:
-		pitch = floorf(minf(24.0, (last_max - y) / float(special.size() - 1)))
-	# c3-05: release-safe floor at the READABLE minimum (not a bare 1px). If a grown
-	# roster's pure fit falls below the legible pitch, the debug assert below trips first
-	# (the signal to paginate); but with asserts stripped in a release build we hold the
-	# readable pitch rather than silently collapsing rows into 1px specks. Readability
-	# wins over the BACK-clearance invariant in that pathological case — a legible row
-	# grazing BACK beats an illegible one that clears it.
+	# c4-06: with the roster paginated at four-per-page, the pitch cap lifts 24 -> 30 —
+	# each page holds fewer rows so the derived fit reaches the cap and the sprite boxes
+	# (box == pitch - 1) grow past their ~26px source, so the silhouettes read as bodies.
+	var pitch := 30.0
+	if rows.size() > 1:
+		pitch = floorf(minf(30.0, (last_max - y) / float(rows.size() - 1)))
+	# c3-05: release-safe floor at the READABLE minimum (not a bare 1px). Readability
+	# wins over the BACK-clearance invariant in the pathological overflow case — a legible
+	# row grazing BACK beats an illegible one that clears it.
 	pitch = maxf(readable, pitch)
-	# Two invariants, checked for BOTH the seven authored rows and any grown
-	# roster: the block never collides with BACK (pure fit, no upward clamp), and
-	# it never teaches below a legible pitch. If a future roster overflows, the
-	# readable assert trips in debug — the signal to paginate rather than to
-	# silently shrink rows to specks. Release strips asserts; the pure-fit pitch
-	# still can't collide, it just tightens.
-	assert(y + float(special.size() - 1) * pitch <= last_max)
+	# Two invariants: the block never collides with BACK (pure fit, no upward clamp),
+	# and it never teaches below a legible pitch.
+	assert(y + float(rows.size() - 1) * pitch <= last_max)
 	assert(pitch >= readable)
 	# Box tracks the DERIVED pitch (never a fixed size): pitch - 1 guarantees a >=1px
-	# gap between adjacent sprites at any roster size, so they grow with the roomier
-	# pitch yet can never overlap — the collision the old fixed 26px box baked in.
+	# gap between adjacent sprites at any page size, so they grow with the roomier
+	# pitch yet can never overlap.
 	var box := maxf(1.0, pitch - 1.0)
 	# c2-02: each ENDLESS threat description is width-clamped to the frame interior
 	# (text starts at x76, right edge FRAME_INNER_R) so a long or LOCALIZED tip clips with
 	# an ellipsis instead of bleeding through the chrome past x=640 — the same overflow
 	# guard the ENEMIES roster and the BASIC verb lines carry.
 	var text_w := maxf(0.0, FRAME_INNER_R - 76.0)
-	for i in special.size():
+	# c4-06: draw the threat NAME (always the first token) in the amber header accent
+	# and trail the tip in the muted body color, so the rows scan by name at a glance
+	# instead of reading as one grey block. The tip clamps to the width the name leaves
+	# it (>=0), so the frame-interior overflow guard still ellipses a long/localized tip.
+	var name_col := Color(1.0, 0.85, 0.45)
+	var body_col := Color(0.88, 0.9, 0.8)
+	var f := Art.font()
+	for i in rows.size():
 		var sy := y + i * pitch
 		# c3-05: center the sprite box on the text's visual mid (10px cap-height sits
 		# ~sy-8..sy, mid ~sy-4) instead of hanging it off the baseline, so the body and
-		# its tip line up on one row — the old sy-box+3 anchor drifted the two apart as
-		# the box grew.
-		_draw_sprite_fit(special[i][0], Rect2(50, sy - TEXT_MID_10 - box / 2.0, box, box), special[i][1])
-		Art.text(self, special[i][2], Vector2(76, sy), 10, Color(0.88, 0.9, 0.8), text_w)
+		# its tip line up on one row.
+		_draw_sprite_fit(rows[i][0], Rect2(50, sy - TEXT_MID_10 - box / 2.0, box, box), rows[i][1])
+		var parts: PackedStringArray = String(rows[i][2]).split(" ", true, 1)
+		var name := parts[0]
+		var name_w := f.get_string_size(name + " ", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		Art.text(self, name, Vector2(76, sy), 10, name_col, text_w)
+		if parts.size() > 1:
+			Art.text(self, parts[1], Vector2(76.0 + name_w, sy), 10, body_col, maxf(0.0, text_w - name_w))
+	_draw_howto_endless_nav(page, pages)
+
+
+# c4-06: explicit PREV/NEXT chevrons flanking a "1 / 2" counter, drawn on the ENDLESS
+# roster pages themselves so the two-page split advertises its own navigation instead of
+# leaning only on the tab row. Boundary chevrons dim (like HALL's page arrows); a live one
+# reads as a real button. Geometry is single-sourced through _howto_endless_nav_rects so
+# the draw and the click targets always agree.
+func _draw_howto_endless_nav(page: int, pages: int) -> void:
+	if pages <= 1:
+		return
+	var rects := _howto_endless_nav_rects()
+	var ny := _howto_nav_y()
+	var live := Color(0.9, 0.92, 0.82)
+	var dim := Color(0.5, 0.53, 0.5)
+	# A filled plate behind each live chevron so it reads as a real button, not decoration
+	# (the tabs and HALL page arrows carry the same plate cue); a boundary chevron gets no
+	# plate and dim text so it reads as disabled.
+	var enabled := [page > 0, page < pages - 1]
+	for side in range(2):
+		if enabled[side]:
+			# Brighter fill + border when the pointer hovers this chevron, so it reads
+			# as a focusable button (parity with the tab/hover plates).
+			var hot := side == _howto_nav_hover
+			draw_rect(rects[side], Color(1, 1, 1, 0.22 if hot else 0.10))
+			draw_rect(rects[side], Color(0.85, 0.9, 0.72, 0.6 if hot else 0.35), false)
+	Art.text_center(self, "<", rects[0].get_center().x, ny, 12, live if enabled[0] else dim)
+	Art.text_center(self, ">", rects[1].get_center().x, ny, 12, live if enabled[1] else dim)
+	# Draw the SAME padded string the geometry measures (see _howto_endless_counter), so the
+	# < / > sit exactly against the counter's footprint instead of drifting off a width the
+	# counter never actually occupied. text_center centers it, so the pad stays symmetric.
+	Art.text_center(self, _howto_endless_counter(), CENTER_X, ny, 12, Color(0.8, 0.82, 0.75))
+
+
+# Shared geometry for the ENDLESS PREV/NEXT chevrons — a "<" rect left of the counter and
+# a ">" rect right of it, centered on CENTER_X. Fed to both the draw and the mouse-click
+# hit test so the target can't drift off the pixels (same discipline as the tab rects).
+func _howto_endless_counter() -> String:
+	# The "1 / 2" sub-page counter, padded so the flanking chevrons keep a small gutter.
+	# Single-sourced so the draw and the click-target geometry render the identical string.
+	return "  %d / %d  " % [_endless_page() + 1, _endless_pages()]
+
+
+func _howto_endless_nav_rects() -> Array[Rect2]:
+	var f := Art.font()
+	var mid := _howto_endless_counter()
+	var mw := f.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	var cw := f.get_string_size("<", HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	var x0 := CENTER_X - (cw + mw + cw) / 2.0
+	var top := _howto_nav_y() - 12.0
+	return [Rect2(x0 - 6.0, top, cw + 12.0, 20.0),
+		Rect2(x0 + cw + mw - 6.0, top, cw + 12.0, 20.0)]
 
 
 # The bakes carry huge transparent margins (a 64px sprite whose body is ~18px),
