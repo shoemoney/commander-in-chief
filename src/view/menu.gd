@@ -267,7 +267,7 @@ const TITLE_CAREER_FONT := 8
 # c4-04: ONE shared vertical plate padding — every TITLE header plate is its drawn font size plus this
 # pad top AND bottom, so a font-size change resizes the plate with it (no hand-tuned per-plate height).
 const TITLE_PLATE_PAD_V := 1.5
-const TITLE_WORDMARK_H := TITLE_WORDMARK_FONT + 2.0 * TITLE_PLATE_PAD_V    # 33 — "SHOEMONEY SOLDIER" plate
+const TITLE_WORDMARK_H := TITLE_WORDMARK_FONT + 2.0 * TITLE_PLATE_PAD_V    # 33 — "COMMANDER IN CHIEF" plate
 const TITLE_BYLINE_H := TITLE_BYLINE_FONT + 2.0 * TITLE_PLATE_PAD_V        # 11 — studio byline plate
 const TITLE_RECORD_PLATE_H := TITLE_TAGLINE_FONT + 2.0 * TITLE_PLATE_PAD_V # 13 — tagline & BEST share it (sized for the taller 10px tagline)
 const TITLE_CAREER_PLATE_H := TITLE_CAREER_FONT + 2.0 * TITLE_PLATE_PAD_V  # 11 — CAREER whisper plate
@@ -3178,12 +3178,12 @@ func _draw() -> void:
 		var tplate := _title_plate_col(mode, main._motion)
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
-		var ttw := Art.font().get_string_size("SHOEMONEY SOLDIER", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
+		var ttw := Art.font().get_string_size("COMMANDER IN CHIEF", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
 		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, TITLE_WORDMARK_TOP, ttw + 20.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
-		_center_text("SHOEMONEY SOLDIER", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
+		_center_text("COMMANDER IN CHIEF", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
 		# Studio byline, plated like the tagline below it (small text loses to the live
 		# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
-		var byl := "by SHOEMONEY GAME STUDIOS"
+		var byl := "by BIG IT GAME STUDIOS - a SHOEMONEY company"
 		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BYLINE_FONT).x
 		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), tplate)
 		_center_text(byl, title_baseline(TITLE_BYLINE_TOP, TITLE_BYLINE_H, TITLE_BYLINE_FONT), TITLE_BYLINE_FONT, BYLINE_COL)

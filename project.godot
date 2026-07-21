@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="ShoeMoney Soldier"
-config/description="ShoeMoney Soldier — a deterministic twin-stick vertical run-and-gun. By ShoeMoney Game Studios."
+config/name="Commander In Chief"
+config/description="Commander In Chief — a deterministic twin-stick vertical run-and-gun. By Big IT Game Studios, a ShoeMoney company."
 run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7")
 

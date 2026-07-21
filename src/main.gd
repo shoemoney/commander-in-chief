@@ -350,6 +350,15 @@ const _EVENT_SOUND := {
 
 var _hud_icons := HudIcons.new()
 var _menu := GameMenu.new()
+# Boot splash (view/boot only — no sim, determinism-safe). An animated studio card
+# ("BIG IT GAME STUDIOS / a ShoeMoney company") into the "COMMANDER IN CHIEF" wordmark,
+# then a whole-overlay fade reveals the title screen. Skippable with any input.
+const SPLASH_DUR := 5.0
+const SPLASH_STUDIO_END := 2.6     # studio card owns [0, 2.6), title card owns the rest
+const SPLASH_FADE_OUT := 4.6       # whole overlay dissolves to the title over the last 0.4s
+var _splash_t := 0.0               # seconds remaining; > 0 while the splash is on screen
+var _splash_layer: CanvasLayer
+var _splash_root: Node2D
 
 
 func _ready() -> void:
@@ -395,6 +404,7 @@ func _ready() -> void:
 	call_deferred("_bake_cursor")
 	get_viewport().size_changed.connect(_on_window_resized)   # re-bake cursor on scale-crossing resize
 	_reset()
+	_setup_splash()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
 		# Seed 18 won the 40-seed audition: vest break, two escalating
@@ -403,6 +413,78 @@ func _ready() -> void:
 		sim.players[0]["vest"] = true       # opening-ambush insurance (trailer only)
 		# NOTE: for HD captures drop an override.cfg with stretch mode
 		# "canvas_items" — the movie recorder sizes itself before _ready runs.
+
+
+func _setup_splash() -> void:
+	# Splash rides its own CanvasLayer above the HUD + menu, so it covers the whole frame.
+	_splash_layer = CanvasLayer.new()
+	_splash_layer.layer = 100
+	add_child(_splash_layer)
+	_splash_root = Node2D.new()
+	_splash_root.draw.connect(_draw_splash)
+	_splash_layer.add_child(_splash_root)
+	if OS.has_feature("movie"):
+		_splash_layer.visible = false   # trailer capture: no studio splash, straight to combat
+		return
+	_splash_t = SPLASH_DUR
+	_menu.mode = GameMenu.Mode.HIDDEN   # suspend the title/attract under the opaque splash
+	_splash_root.queue_redraw()
+
+
+func _end_splash() -> void:
+	if _splash_layer == null or not _splash_layer.visible:
+		return   # already dismissed (idempotent — skip and timeout can both fire)
+	_splash_t = 0.0
+	_splash_layer.visible = false
+	if _menu.mode == GameMenu.Mode.HIDDEN:
+		_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
+
+
+func _splash_is_skip(event: InputEvent) -> bool:
+	if event is InputEventKey and event.pressed and not event.echo:
+		return true
+	if event is InputEventJoypadButton and event.pressed:
+		return true
+	if event is InputEventMouseButton and event.pressed:
+		return true
+	return false
+
+
+func _splash_seg(t: float, in0: float, in1: float, out0: float, out1: float) -> float:
+	# Trapezoidal alpha: 0 before in0, ramps to 1 by in1, holds, ramps back to 0 by out1.
+	if t < in0 or t > out1:
+		return 0.0
+	if t < in1:
+		return clampf((t - in0) / maxf(in1 - in0, 0.0001), 0.0, 1.0)
+	if t > out0:
+		return clampf(1.0 - (t - out0) / maxf(out1 - out0, 0.0001), 0.0, 1.0)
+	return 1.0
+
+
+func _splash_center(text: String, y: float, size: int, col: Color) -> void:
+	var f := Art.font()
+	var w: float = f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	_splash_root.draw_string(f, Vector2(320.0 - w / 2.0, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+
+
+func _draw_splash() -> void:
+	var el := SPLASH_DUR - _splash_t   # elapsed
+	# The whole overlay dissolves over the final stretch, revealing the live title screen beneath.
+	var veil := 1.0
+	if el > SPLASH_FADE_OUT:
+		veil = clampf(1.0 - (el - SPLASH_FADE_OUT) / (SPLASH_DUR - SPLASH_FADE_OUT), 0.0, 1.0)
+	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.05, 0.055, 0.07, veil))
+	if el < SPLASH_STUDIO_END:
+		var a := _splash_seg(el, 0.0, 0.55, SPLASH_STUDIO_END - 0.4, SPLASH_STUDIO_END) * veil
+		_splash_center("BIG IT GAME STUDIOS", 170.0, 19, Color(0.93, 0.95, 0.88, a))
+		_splash_center("a ShoeMoney company", 192.0, 9, Color(0.72, 0.77, 0.62, a))
+	else:
+		var a := _splash_seg(el, SPLASH_STUDIO_END, SPLASH_STUDIO_END + 0.6, SPLASH_DUR - 0.4, SPLASH_DUR) * veil
+		var rise := (1.0 - clampf((el - SPLASH_STUDIO_END) / 0.6, 0.0, 1.0)) * 8.0   # words settle upward
+		_splash_center("COMMANDER", 156.0 + rise, 30, Color(0.96, 0.82, 0.28, a))
+		_splash_center("IN CHIEF", 192.0 + rise, 30, Color(0.96, 0.82, 0.28, a))
+		var lw := 118.0 * a
+		_splash_root.draw_rect(Rect2(320.0 - lw, 214.0, lw * 2.0, 2.0), Color(0.85, 0.3, 0.2, a))
 
 
 func _setup_screen_fx() -> void:
@@ -704,6 +786,11 @@ func _paint_bg(canvas: Node2D) -> void:
 
 
 func _process(_delta: float) -> void:
+	if _splash_t > 0.0:
+		_splash_t -= _delta
+		_splash_root.queue_redraw()
+		if _splash_t <= 0.0:
+			_end_splash()
 	_watch_display()   # c1-19: catch a window dragged to another monitor (fires no resize signal)
 	# c1-19: advance a running window-settle ONE sample per rendered frame — the frame loop (not
 	# recursive call_deferred) guarantees each decoration sample lands on a DISTINCT frame, so the
@@ -818,7 +905,7 @@ func _clipboard_seed() -> int:
 	return _parse_seed_text(_clipboard_text())
 
 
-const SHARE_PREFIX := "SHOEMONEY SOLDIER"   # c1-14: share-card title — the single source _copy_share_text prints and the parser recognizes
+const SHARE_PREFIX := "COMMANDER IN CHIEF"   # c1-14: share-card title — the single source _copy_share_text prints and the parser recognizes
 static var _seed_re: RegEx   # c1-14: cached trailing "seed N" field matcher (whole-word, digits to end)
 
 
@@ -1074,6 +1161,11 @@ func _apply_cursor(styled: bool) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Boot splash: any key / button / click skips straight to the title screen.
+	if _splash_t > 0.0 and _splash_is_skip(event):
+		_end_splash()
+		get_viewport().set_input_as_handled()
+		return
 	# Fullscreen: F11 / Alt+Enter — the game had NO fullscreen path at all.
 	# Handled in _input so it works with menus open; persisted with settings.
 	if event is InputEventKey and event.pressed and not event.echo:
