@@ -2681,17 +2681,17 @@ func test_enter_on_externally_muted_row_unmutes_via_activate() -> void:
 func test_a11y_summary_lists_active_aids() -> void:
 	# c1-09: EVERY aid reports its explicit ON/OFF state (not only the active ones), so
 	# the readout is the complete accessibility configuration at a glance.
-	Runner.T.eq(Menu.a11y_summary(false, false, false, true, false),
-		"DISPLAY: WINDOWED   REDUCE MOTION OFF  COLORBLIND OFF  ASSIST OFF  RUMBLE ON",
+	Runner.T.eq(Menu.a11y_summary(false, false, true, false),
+		"DISPLAY: WINDOWED   REDUCE MOTION OFF  COLORBLIND OFF  RUMBLE ON",
 		"ship-default reads WINDOWED + every aid explicitly OFF (rumble ON)")
-	Runner.T.eq(Menu.a11y_summary(true, true, true, false, true),
-		"DISPLAY: FULLSCREEN   REDUCE MOTION ON  COLORBLIND ON  ASSIST ON  RUMBLE OFF",
+	Runner.T.eq(Menu.a11y_summary(true, true, false, true),
+		"DISPLAY: FULLSCREEN   REDUCE MOTION ON  COLORBLIND ON  RUMBLE OFF",
 		"every setting active reports display + each aid's explicit state")
-	Runner.T.ok("DISPLAY: FULLSCREEN" in Menu.a11y_summary(false, false, false, true, true),
+	Runner.T.ok("DISPLAY: FULLSCREEN" in Menu.a11y_summary(false, false, true, true),
 		"fullscreen state is exposed on the OPTIONS screen")
 	# A lone active aid still reports the OTHERS as OFF — no aid can be silently dropped.
-	Runner.T.eq(Menu.a11y_summary(false, true, false, true, false),
-		"DISPLAY: WINDOWED   REDUCE MOTION OFF  COLORBLIND ON  ASSIST OFF  RUMBLE ON",
+	Runner.T.eq(Menu.a11y_summary(false, true, true, false),
+		"DISPLAY: WINDOWED   REDUCE MOTION OFF  COLORBLIND ON  RUMBLE ON",
 		"a lone active aid is named ON while the rest read OFF/ON explicitly")
 
 
@@ -2836,6 +2836,7 @@ func test_settings_groups_and_inline_accessibility_state() -> void:
 	Runner.T.eq(Menu.group_header(1), "AUDIO", "grp 1 is the AUDIO block")
 	Runner.T.eq(Menu.group_header(2), "HAPTICS", "grp 2 is the HAPTICS block")
 	Runner.T.eq(Menu.group_header(3), "ACCESSIBILITY", "grp 3 is the ACCESSIBILITY block")
+	Runner.T.eq(Menu.group_header(4), "GAMEPLAY", "grp 4 is the GAMEPLAY block")
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	stub._motion = 0.0        # REDUCE MOTION on
@@ -2851,6 +2852,7 @@ func test_settings_groups_and_inline_accessibility_state() -> void:
 	Runner.T.eq(by_id["motion"]["grp"], 3, "REDUCE MOTION sits in the ACCESSIBILITY group")
 	Runner.T.eq(by_id["rumble"]["grp"], 2, "RUMBLE sits in the HAPTICS group")
 	Runner.T.eq(by_id["sfx"]["grp"], 1, "SFX sits in the AUDIO group")
+	Runner.T.eq(by_id["assist"]["grp"], 4, "ASSIST sits in its own GAMEPLAY group, not ACCESSIBILITY")
 	m.free()
 	stub.free()
 
@@ -2948,10 +2950,10 @@ func test_reset_defaults_confirm_labels_fit_both_devices() -> void:
 # left-margin runway.
 func test_options_header_text_fits_screen() -> void:
 	var f := Art.font()
-	var full := Menu.a11y_summary(true, true, true, false, true)   # display + every aid = longest line
+	var full := Menu.a11y_summary(true, true, false, true)   # display + every aid = longest line
 	Runner.T.ok(f.get_string_size(full, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= 600.0,
 		"fullest settings summary fits the screen at 8px")
-	for grp in [1, 2, 3]:
+	for grp in [1, 2, 3, 4, 5]:
 		var cap := Menu.group_header(grp)
 		Runner.T.ok(f.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= 184.0,
 			"section caption '%s' fits the left-margin runway" % cap)
@@ -3295,7 +3297,7 @@ func test_title_info_nested_back_roundtrip_preserves_focus() -> void:
 # (main._set_win_scale_pref) applied on return to windowed; the label stays a short "WINDOW SCALE: Nx"
 # and, when the preference can't fit the display, the DISPLAY subtitle states the limit in words.
 func test_options_display_row_toggles_fullscreen() -> void:
-	Runner.T.eq(Menu.group_header(4), "DISPLAY", "grp 4 is the DISPLAY block")
+	Runner.T.eq(Menu.group_header(5), "DISPLAY", "grp 5 is the DISPLAY block")
 	Runner.T.ok("fullscreen" in Menu._TOGGLES, "FULLSCREEN is a plain arrow-flip toggle")
 	Runner.T.ok(not ("winscale" in Menu._TOGGLES), "WINDOW SCALE steps (it is not a plain flip toggle)")
 	Runner.T.eq(Menu.fullscreen_label(false), "FULLSCREEN: OFF", "fullscreen toggle reads OFF while windowed")
@@ -3885,7 +3887,7 @@ func test_display_integer_stretch_configured() -> void:
 
 # c1-09: when focus is on RESET DEFAULTS, the header summary line is REPLACED with an
 # explicit scope statement naming every settings group the two-press confirm will wipe
-# (audio / haptics / accessibility / display) — so the blast radius is stated before the
+# (audio / haptics / accessibility / gameplay / display) — so the blast radius is stated before the
 # second press, not left to the generic destructive-row treatment. Captured via the real
 # _draw_opts_header() through the _center_text seam.
 func test_reset_defaults_header_states_full_scope_when_focused() -> void:
@@ -3905,7 +3907,7 @@ func test_reset_defaults_header_states_full_scope_when_focused() -> void:
 		if String(c["txt"]).begins_with("RESET RESTORES"):
 			scope = String(c["txt"])
 	Runner.T.ok(scope != "", "focusing RESET DEFAULTS shows the scope line, not the a11y summary")
-	for grp in ["AUDIO", "HAPTICS", "ACCESSIBILITY", "DISPLAY"]:
+	for grp in ["AUDIO", "HAPTICS", "ACCESSIBILITY", "GAMEPLAY", "DISPLAY"]:
 		Runner.T.ok(grp in scope, "reset scope names the %s group" % grp)
 	Runner.T.ok(Art.font().get_string_size(scope, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= 600.0,
 		"reset scope line fits the screen at 8px")

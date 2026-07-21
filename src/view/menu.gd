@@ -854,18 +854,19 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 	if mode == Mode.OPTS:
 		# c1-09: the ONE dedicated SETTINGS screen — nothing but settings now (HALL OF
 		# FAME / HOW TO PLAY moved to the INFO screen). Reached from TITLE and from
-		# PAUSE's single OPTIONS row. The settings sit in four labelled blocks — AUDIO
-		# (grp 1) / HAPTICS (grp 2) / ACCESSIBILITY (grp 3) / DISPLAY (grp 4) — then
-		# RESET DEFAULTS (grp 5, a two-press confirm that recovers a bad choice), then
-		# BACK (grp 6). group_header() names each settings block.
+		# PAUSE's single OPTIONS row. The settings sit in five labelled blocks — AUDIO
+		# (grp 1) / HAPTICS (grp 2) / ACCESSIBILITY (grp 3) / GAMEPLAY (grp 4) /
+		# DISPLAY (grp 5) — then CONTROLS (grp 6), RESET DEFAULTS (grp 7, a two-press
+		# confirm that recovers a bad choice), then BACK (grp 8). group_header() names
+		# each settings block.
 		var oitems: Array[Dictionary] = _settings_rows()
 		# RESET DEFAULTS is a focusable, destructive-styled row: Enter/A arms it, a
 		# second press reverts every persisted setting — the recover path the screen
 		# lacked (immediate writes with no rollback). Two-press guards a stray press.
-		# c1-18: CONTROLS is a normal focusable row (grp 5, above RESET DEFAULTS) that opens
+		# c1-18: CONTROLS is a normal focusable row (grp 6, above RESET DEFAULTS) that opens
 		# the dedicated key/button rebinding screen — a first-class OPTIONS entry, not a
 		# hidden corner shortcut, so keyboard/pad reach it by simply focusing it and pressing.
-		oitems.append({"id": "controls", "label": "CONTROLS (REBIND)", "destructive": false, "grp": 5})
+		oitems.append({"id": "controls", "label": "CONTROLS (REBIND)", "destructive": false, "grp": 6})
 		# c4-11: the RESET DEFAULTS row reflects whether there is anything TO revert. With any
 		# setting off its ship default it is an armable two-press DESTRUCTIVE row (the label
 		# picks up PRESS TWICE / PRESS AGAIN via destructive_label, so it reads its own
@@ -877,16 +878,16 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		oitems.append({
 			"id": "reset_defaults", "label": "RESET DEFAULTS",
 			"destructive": not reset_at_def, "disabled": reset_at_def,
-			"badge": "AT DEFAULTS" if reset_at_def else "", "grp": 6,
+			"badge": "AT DEFAULTS" if reset_at_def else "", "grp": 7,
 		})
 		# c3-18: dirty-state exit. With unsaved staged changes the lone BACK splits into an explicit
 		# SAVE (commit) and DISCARD (revert) pair, so the deferred write is a visible, deliberate
 		# choice; a clean screen keeps the single BACK (nothing staged, so nothing to decide).
 		if _opts_dirty:
-			oitems.append({"id": "opts_save", "label": "SAVE", "destructive": false, "grp": 7})
-			oitems.append({"id": "opts_discard", "label": "DISCARD", "destructive": false, "grp": 7})
+			oitems.append({"id": "opts_save", "label": "SAVE", "destructive": false, "grp": 8})
+			oitems.append({"id": "opts_discard", "label": "DISCARD", "destructive": false, "grp": 8})
 		else:
-			oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 7})
+			oitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 8})
 		return oitems
 	if mode == Mode.REBIND:
 		# c1-18: one row per rebindable verb on the ACTIVE CATEGORY tab. The 14 keyboard
@@ -1074,12 +1075,15 @@ func _settings_rows() -> Array[Dictionary]:
 	var mus_muted: bool = _bus_off("Music")
 	var sv: int = effective_vol(sfx_muted, main._bus_vol("SFX"))
 	var mv: int = effective_vol(mus_muted, main._bus_vol("Music"))
-	# c1-09: four labelled groups — AUDIO (grp 1), HAPTICS (grp 2), ACCESSIBILITY
-	# (grp 3), DISPLAY (grp 4) — so the divider rules + group_header captions read as
-	# sections. REDUCE MOTION and COLORBLIND carry their ON/OFF in the row label AND the
-	# state dot, and are echoed in the header a11y summary, so their live state reads in
-	# both places. DISPLAY is a real toggle row now (not F11-only): every persisted
-	# setting can be reviewed AND changed from the dedicated screen.
+	# c1-09 / c4-12: five labelled groups — AUDIO (grp 1), HAPTICS (grp 2), ACCESSIBILITY
+	# (grp 3), GAMEPLAY (grp 4), DISPLAY (grp 5) — so the divider rules + group_header
+	# captions read as sections. REDUCE MOTION and COLORBLIND carry their ON/OFF in the row
+	# label AND the state dot, and are echoed in the header a11y summary, so their live state
+	# reads in both places. c4-12 pulls ASSIST (2-HIT) out of ACCESSIBILITY into its own
+	# GAMEPLAY block — it changes the run's difficulty (a design/gameplay choice), not the
+	# presentation of the game, so it no longer reads as a perceptual/motor accommodation and
+	# sits one section away from the audio/a11y rows a player scans past. DISPLAY is a real
+	# toggle row now (not F11-only): every persisted setting can be reviewed AND changed here.
 	return [
 		# c3-04: "muted" is carried EXPLICITLY (not inferred from vol == 0 downstream) so
 		# the readout and the slashed-bar off marker key off the real bus-mute state, and
@@ -1094,12 +1098,12 @@ func _settings_rows() -> Array[Dictionary]:
 		{"id": "rumble", "label": "RUMBLE: %s" % ("ON" if main._rumble_on else "OFF"), "destructive": false, "on": main._rumble_on, "grp": 2},
 		{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 3},
 		{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 3},
-		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 3},
+		{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 4},
 		# c1-19: DISPLAY is a submenu OPENER (chevron), not an inline control — the OPTS screen is
 		# at its 10-row legibility cap, so the two explicit DISPLAY controls (FULLSCREEN toggle +
 		# WINDOW SCALE stepper) live on their own roomy sub-screen. The row still shows the LIVE
 		# mode at a glance ("FULLSCREEN" / "WINDOWED 2x"), so nothing is hidden behind the opener.
-		{"id": "display", "label": display_label(main._fullscreen, main._win_scale_norm()), "destructive": false, "grp": 4, "submenu": true},
+		{"id": "display", "label": display_label(main._fullscreen, main._win_scale_norm()), "destructive": false, "grp": 5, "submenu": true},
 	]
 
 
@@ -1983,16 +1987,19 @@ func _parent(m: int) -> Dictionary:
 	return back_dest(m)
 
 
-# c1-09: group caption for the OPTIONS settings block — the settings rows carry
-# grp ids 1/2/3 (audio / haptics / accessibility) and the first row of each group
-# draws this label in the left margin, so the screen reads as three labelled
-# sections, not one flat list. Non-settings groups (meta/reset/back) have none.
+# c1-09 / c4-12: group caption for the OPTIONS settings block — the settings rows carry
+# grp ids 1..5 (audio / haptics / accessibility / gameplay / display) and the first row of
+# each group draws this label in the left margin, so the screen reads as labelled sections,
+# not one flat list. GAMEPLAY (ASSIST 2-HIT) is its own block: a difficulty choice, not a
+# perceptual/motor accommodation, so it stops hiding under ACCESSIBILITY. Non-settings
+# groups (controls/reset/back) have none.
 static func group_header(grp: int) -> String:
 	match grp:
 		1: return "AUDIO"
 		2: return "HAPTICS"
 		3: return "ACCESSIBILITY"
-		4: return "DISPLAY"
+		4: return "GAMEPLAY"
+		5: return "DISPLAY"
 	return ""
 
 
@@ -2026,20 +2033,21 @@ static func title_deploy_panel(g: Dictionary, plast: int, head_b: float) -> Rect
 		(pbot_r.position.y + pbot_r.size.y + TITLE_PANEL_PAD) - pytop)
 
 
-# c1-09: the single settings-state readout for the OPTIONS screen — DISPLAY mode
+# c1-09 / c4-12: the single settings-state readout for the OPTIONS screen — DISPLAY mode
 # first, then EVERY accessibility aid with its EXPLICIT ON/OFF state (not just the
 # active ones) so a player reviews the COMPLETE configuration in one place at a
-# glance — "MOTION OFF  COLORBLIND ON  ASSIST OFF  RUMBLE ON" — instead of inferring
-# what's off from an omission. DISPLAY is ALWAYS shown (fullscreen has no on-screen
-# toggle — it's F11 — so this is the only place its state reads), which is also what
-# makes RESET DEFAULTS honest: it restores DISPLAY to WINDOWED as a VISIBLE change
+# glance — "MOTION OFF  COLORBLIND ON  RUMBLE ON" — instead of inferring
+# what's off from an omission. c4-12 drops ASSIST from this line: it is now a GAMEPLAY /
+# difficulty choice with its own section, not a perceptual/motor accommodation, so it no
+# longer belongs in the accessibility summary. DISPLAY is ALWAYS shown (fullscreen has no
+# on-screen toggle — it's F11 — so this is the only place its state reads), which is also
+# what makes RESET DEFAULTS honest: it restores DISPLAY to WINDOWED as a VISIBLE change
 # here, not a silent flip. Pure + static so a headless test can pin the wording alone.
-static func a11y_summary(reduce_motion: bool, colorblind: bool, assist: bool, rumble: bool, fullscreen: bool) -> String:
-	return "DISPLAY: %s   REDUCE MOTION %s  COLORBLIND %s  ASSIST %s  RUMBLE %s" % [
+static func a11y_summary(reduce_motion: bool, colorblind: bool, rumble: bool, fullscreen: bool) -> String:
+	return "DISPLAY: %s   REDUCE MOTION %s  COLORBLIND %s  RUMBLE %s" % [
 		"FULLSCREEN" if fullscreen else "WINDOWED",
 		"ON" if reduce_motion else "OFF",
 		"ON" if colorblind else "OFF",
-		"ON" if assist else "OFF",
 		"ON" if rumble else "OFF",
 	]
 
@@ -4520,10 +4528,10 @@ func _draw_opts_header() -> void:
 		elif _confirm >= 0 and _confirm == sel:
 			_center_text("PRESS AGAIN TO RESTORE ALL DEFAULTS", OPTS_SUBLINE_Y, 8, WARN_COL)
 		else:
-			_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / DISPLAY TO DEFAULTS",
+			_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / GAMEPLAY / DISPLAY TO DEFAULTS",
 				OPTS_SUBLINE_Y, 8, WARN_COL)
 	else:
-		_center_text(a11y_summary(main._motion < 0.5, main.colorblind, main._assist,
+		_center_text(a11y_summary(main._motion < 0.5, main.colorblind,
 			main._rumble_on, main._fullscreen), OPTS_SUBLINE_Y, 8, SUBTITLE_COL)
 
 
