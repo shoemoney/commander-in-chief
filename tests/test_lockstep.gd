@@ -125,3 +125,24 @@ func test_encode_decode_roundtrip() -> void:
 	inp.interact = true
 	var back := SimInput.decode(inp.encode())
 	Runner.T.eq(back.hash_ints(), inp.hash_ints(), "encode/decode roundtrip preserves every field")
+
+
+func test_on_send_dispatches_encoded_input() -> void:
+	# The on_send transport seam is how a real transport (Steam Networking) ships local input.
+	# No other test assigns on_send, so submit_local_input's dispatch path was fully uncovered —
+	# a regression there would break real netplay while every loopback test (which drives
+	# receive_remote_input directly, bypassing on_send) stayed green.
+	var sess := LockstepSession.new(SimWorld.new(SEED, 2), 0)
+	var sent: Array = []
+	sess.on_send = func(tick: int, payload: Array) -> void:
+		sent.append({"tick": tick, "payload": payload})
+	var inp := SimInput.new()
+	inp.move_x = 128
+	inp.fire = true
+	var msg := sess.submit_local_input(inp)
+	Runner.T.eq(sent.size(), 1, "on_send fired once for one submitted input")
+	Runner.T.eq(sent[0]["tick"], msg["tick"], "on_send tick matches the returned msg tick")
+	Runner.T.eq(sent[0]["payload"], msg["payload"], "on_send payload matches the returned msg payload")
+	var decoded := SimInput.decode(sent[0]["payload"])
+	Runner.T.eq(decoded.move_x, 128, "dispatched payload round-trips move_x")
+	Runner.T.ok(decoded.fire, "dispatched payload round-trips fire")
