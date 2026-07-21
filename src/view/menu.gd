@@ -1497,7 +1497,15 @@ func _unhandled_input(ev: InputEvent) -> void:
 	# c3-10: F1 is the direct HOW TO PLAY shortcut — from any menu screen it jumps straight to
 	# the help pages (the footer/legend advertises "F1 HOW TO"). Placed AFTER rebind capture so a
 	# listen can still bind F1 and it never fires mid-capture; skipped if help is already open.
-	if mode != Mode.HIDDEN and mode != Mode.HOWTO and ev is InputEventKey \
+	# c4-fix: HOW TO PLAY lives in the TITLE tree (BACK from HOWTO climbs INFO->SETUP->TITLE).
+	# Firing it from the PAUSE tree strands the paused run — HOWTO backs out to TITLE with no
+	# RESUME, and the attract bot then eats the orphaned sim. Firing it from a dirty OPTS/DISP
+	# session orphans the unsaved preview and stales the Save/Discard baseline. So block F1 in
+	# those contexts (a no-op is safe; the shortcut is a title-tree convenience, not core input).
+	var _f1_blocked := mode == Mode.PAUSE \
+			or (mode in [Mode.OPTS, Mode.DISP, Mode.REBIND] and _opts_parent == Mode.PAUSE) \
+			or (mode in [Mode.OPTS, Mode.DISP] and _opts_dirty)
+	if mode != Mode.HIDDEN and mode != Mode.HOWTO and not _f1_blocked and ev is InputEventKey \
 			and ev.pressed and not ev.echo \
 			and (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode) == _help_code():
 		open(Mode.HOWTO)

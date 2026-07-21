@@ -3296,6 +3296,7 @@ func _bus_vol(name: String) -> int:
 
 
 const _SFX_SLAVED_BUSES: Array[String] = ["UI", "VO"]   # a3-16: jingle UI + radio VO both ride the one SFX knob
+var _sfx_base_db := 0.0   # user's chosen SFX level in dB — the VO-duck rests here, not at 0 (else the slider won't hold)
 
 
 func _set_bus_vol(name: String, v: int) -> void:
@@ -3311,6 +3312,8 @@ func _set_bus_vol(name: String, v: int) -> void:
 	if v > 0:
 		AudioServer.set_bus_volume_db(b, linear_to_db(v / 10.0))
 	if name == "SFX":
+		if v > 0:
+			_sfx_base_db = linear_to_db(v / 10.0)   # remember the baseline the VO-duck must rest at
 		# a3-16: the jingle "UI" bus AND the radio "VO" bus both slave to the SFX
 		# control — one user-facing knob for every non-music voice/cue. The radio VO
 		# sent straight to Master before, so muting SFX still left the Commander blaring.
@@ -3936,7 +3939,7 @@ func _drive_audio() -> void:
 		_vo("vo_pilot_plea", 2, 600, true)
 	# VO owns the mix while speaking: rides the existing duck channel.
 	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on(sim))
-	_sfx.duck_sfx_under_vo(_sfx.vo_active())   # a1-14 AUD#6: the combat bus dips under the radio too
+	_sfx.duck_sfx_under_vo(_sfx.vo_active(), _sfx_base_db)   # a1-14 AUD#6: dip under radio, rest at the user's SFX level (c4-fix)
 	# a3-15: place-sense for the ambience beds — is a river band on screen, and are we in the
 	# endless intermission shop? (near-water reuses the terrain draw window; early-out scan.)
 	var near_water := false

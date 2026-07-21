@@ -204,13 +204,17 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	ply.play()
 
 
-func duck_sfx_under_vo(active: bool) -> void:
+func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:
 	# a1-14 AUD#6: dip the whole SFX (combat) bus while a radio line is on air so the
 	# VO lands over gunfire — music/amb already duck under VO, the SFX bus did not.
+	# base_db is the user's chosen SFX level in dB (c3-04/c4-01 made the SFX bus
+	# volume_db persistent user state). Rest AT that baseline, not 0 dB — otherwise
+	# this per-frame lerp drags any sub-max SFX setting back up to full and the
+	# volume slider stops holding. -6 dB below baseline while a radio line is on air.
 	var idx := AudioServer.get_bus_index("SFX")
 	if idx == -1:
 		return
-	var target := -6.0 if active else 0.0
+	var target := base_db - 6.0 if active else base_db
 	AudioServer.set_bus_volume_db(idx, lerpf(AudioServer.get_bus_volume_db(idx), target, 0.15))
 
 
