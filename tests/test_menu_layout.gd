@@ -3679,6 +3679,55 @@ func test_toggle_arrow_rects_track_row_geometry_across_modes() -> void:
 	Runner.T.ok(seen_geoms.size() >= 3, "the cases exercised at least 3 distinct row geometries (got %d)" % seen_geoms.size())
 
 
+# c4-04: the layout-constant standardization guarantee. Draw and input can only agree if EVERY
+# row plate, arrow box, and click test derive from the ONE BTN-sized row_rect — never a per-screen
+# literal. This pins that single source across every mode that draws the shared column:
+#   (a) the plate rect _draw renders (row_rect) is BTN-derived — left = center - BTN.x/2, width = BTN.x ;
+#   (b) toggle_arrow_rects hang exactly off that plate's edges (the draw glyph == the click target) ;
+#   (c) the plate's own vertical center hit-tests back to its row, and its horizontal span is exactly
+#       the BTN.x-wide band the row hit-test gates on — so draw and the mouse hit-test cannot drift.
+func test_c4_04_draw_plate_arrows_and_hit_test_share_btn_geometry() -> void:
+	var half := Menu.BTN.x / 2.0
+	var cases := [
+		[Menu.Mode.PAUSE, _row_count(Menu.Mode.PAUSE, false)],
+		[Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false)],
+		[Menu.Mode.SETUP, _row_count(Menu.Mode.SETUP, false)],
+		[Menu.Mode.DISP, 3],
+		[Menu.Mode.TITLE, 6],
+	]
+	for case in cases:
+		var mode_id: int = case[0]
+		var n: int = case[1]
+		var head: float = Menu.title_head_bottom(true, true) if mode_id == Menu.Mode.TITLE else -1.0
+		var g: Dictionary = Menu.compute_geometry(mode_id, n, head)
+		var bh: float = g["bh"]
+		var tag := "mode %d" % mode_id
+		for k in n:
+			var r: Rect2 = Menu.row_rect(g, k)   # the exact rect _draw builds every plate from
+			# (a) BTN-derived plate: same left edge and width for every row of every mode.
+			Runner.T.eq(r.position.x, Menu.CENTER_X - half, "%s row %d plate left is BTN-derived" % [tag, k])
+			Runner.T.eq(r.size.x, Menu.BTN.x, "%s row %d plate width is BTN.x" % [tag, k])
+			# (b) arrows derive from the plate edges — the click target rides the drawn glyph.
+			var arows: Array[Rect2] = Menu.toggle_arrow_rects(g, k)
+			Runner.T.eq(arows[0].position.x, r.position.x - Menu.ARROW_L_OFF, "%s row %d left arrow off plate left" % [tag, k])
+			Runner.T.eq(arows[1].position.x, r.end.x + Menu.ARROW_R_GAP, "%s row %d right arrow off plate right" % [tag, k])
+			# (c) the plate's vertical center hit-tests back to its own row, and its horizontal
+			# span is exactly the BTN.x-wide band the row hit-test gates on (|x - center| <= BTN.x/2).
+			var cy := r.position.y + bh / 2.0
+			Runner.T.eq(Menu.hit_row(g, cy), k, "%s row %d plate center hit-tests to itself" % [tag, k])
+			Runner.T.ok(absf(r.position.x - Menu.CENTER_X) <= half + 0.001
+				and absf(r.end.x - Menu.CENTER_X) <= half + 0.001,
+				"%s row %d plate spans exactly the BTN-wide row hit band" % [tag, k])
+	# The unify itself: first_row_top reproduces the retired TOP_PAUSE 130 / TOP_OPTS 102 /
+	# TOP_SUBHUB 120 offsets from the one shared formula, and OPTS/REBIND are the compact pair.
+	Runner.T.eq(Menu.first_row_top(Menu.Mode.PAUSE), Menu.PAUSE_FOOTNOTE_Y + Menu.HEADER_CLEAR, "PAUSE top = footnote + roomy clear (130)")
+	Runner.T.eq(Menu.first_row_top(Menu.Mode.OPTS), Menu.OPTS_SUBLINE_Y + Menu.HEADER_CLEAR_COMPACT, "OPTS top = subline + compact clear (102)")
+	Runner.T.eq(Menu.first_row_top(Menu.Mode.REBIND), Menu.first_row_top(Menu.Mode.OPTS), "REBIND shares the OPTS compact top")
+	Runner.T.eq(Menu.first_row_top(Menu.Mode.SETUP), Menu.HUB_SUBTITLE_Y + Menu.HEADER_CLEAR, "SETUP hub top = subtitle + roomy clear (120)")
+	Runner.T.ok(Menu.mode_is_compact(Menu.Mode.OPTS) and Menu.mode_is_compact(Menu.Mode.REBIND)
+		and not Menu.mode_is_compact(Menu.Mode.PAUSE), "only the dense OPTS/REBIND pages take the compact clearance")
+
+
 func _find_row(rows: Array[Dictionary], id: String) -> int:
 	for i in rows.size():
 		if rows[i]["id"] == id:

@@ -9,6 +9,21 @@ enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND, DISP }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
+# c4-04: THE unified button-plate size (222x36). Every column plate rect, hit-test, arrow box and
+# row-pitch ceiling (GAP_CEIL below) derives x/width/height from BTN — one edit resizes every menu
+# button and the rhythm that hangs off it, no per-screen 222/36 literals.
+# c4-04 AUDIT (menu.gd + hud.gd): the layout magic numbers this item targeted are now single-sourced —
+#   222/36 -> BTN ; the 156/118/120 first-row tops -> ONE formula, first_row_top(mode) (header
+#     baseline + a compact-or-roomy clearance); the old TOP_PAUSE/TOP_OPTS/TOP_SUBHUB constants are gone ;
+#   TITLE record plate HEIGHTS -> drawn font size + one shared TITLE_PLATE_PAD_V ; each plate TOP ->
+#     the previous plate's bottom (the whole stack chains from TITLE_WORDMARK_TOP) ; the record text
+#     baselines -> title_baseline() reading the live font descent (no TITLE_DESC_GAP_* literals) ;
+#   HUD ry += 16 -> ROW_H ; pip +7 -> PIP_ADVANCE (PIP_CHIP_PAD+GAP) ; ICON-3 -> ROW_TEXT_BASELINE ;
+#   design width 640 / 632 margin -> GameMenu.CANVAS_WIDTH / DESIGN_WIDTH - HUD_SAFE_MARGIN.
+# No bare copies of those numbers remain in either file's draw/hit-test code (grep-verified).
+# The unified first-row formula reproduces the old TOP_* values exactly (PAUSE 130 / OPTS 102 /
+# SUBHUB 120) so no non-TITLE pixel moved; the TITLE header stack shifts a couple px as its plate
+# heights become font-derived, still clearing every >=20px floor test_menu_layout pins.
 const BTN := Vector2(222, 36)
 # c1-12: ◄/► cycle-arrow layout — shared by _draw and the mouse hit-test via
 # toggle_arrow_rects so the glyph and its click target can never drift apart.
@@ -183,26 +198,55 @@ const FOOTER_Y := 341.0
 const CANVAS_WIDTH := 640.0     # design-space canvas size (the view scales this up)
 const CANVAS_HEIGHT := 360.0
 const CENTER_X := CANVAS_WIDTH / 2.0   # horizontal centre (button column + centred text)
-# Per-mode y of the FIRST row plate (compute_geometry). c3-02: every top is now
-# DERIVED as (the baseline of the lowest header line that mode draws) + a clearance,
-# mirroring TOP_SUBHUB — no mode carries a bare top literal any more. The header
-# baselines (PAUSE_FOOTNOTE_Y, OPTS_SUBLINE_Y, HUB_SUBTITLE_Y) are declared below;
-# GDScript folds the forward const reference. Nudging a header baseline now reflows
-# that screen's row column with it instead of drifting off a hand-tuned number.
+# Per-mode y of the FIRST row plate (compute_geometry -> first_row_top). c3-02/c4-04: every top is
+# DERIVED as (the baseline of the lowest header line that mode draws) + one of these two clearances,
+# through the single first_row_top(mode) formula — no mode carries a bare top literal any more. The
+# header baselines (PAUSE_FOOTNOTE_Y, OPTS_SUBLINE_Y, HUB_SUBTITLE_Y) live in mode_header_bottom;
+# nudging one reflows that screen's row column with it instead of drifting off a hand-tuned number.
 # Two clearances: the roomy HEADER_CLEAR for the sparse hubs/PAUSE, and the tighter
 # HEADER_CLEAR_COMPACT for the DENSE paginated OPTS/REBIND pages — a full HEADER_CLEAR
 # there would push their 10th plate below the >=20px readable floor (bounded by the
 # plate floor, not taste).
 const HEADER_CLEAR := 16.0         # gap a sparse column keeps below the header block it seats under
 const HEADER_CLEAR_COMPACT := 8.0  # tighter clear for the dense <=10-row OPTS/REBIND pages
-const TOP_PAUSE := PAUSE_FOOTNOTE_Y + HEADER_CLEAR      # 130 — under PAUSED + status + RUN# footnote
-const TOP_OPTS := OPTS_SUBLINE_Y + HEADER_CLEAR_COMPACT # 102 — OPTS + REBIND under their compact 2-line header
-const TOP_SUBHUB := HUB_SUBTITLE_Y + HEADER_CLEAR       # 120 — SETUP / INFO / DISP hubs
-# HALL/HOWTO/HIDDEN never draw the shared row column (they return early with a lone
-# BACK button), so the generic fallback is a defensive default only — ONE derived top
-# (no <=4 / >4 row-count branch) clearing a generic header at the hub rhythm.
-const TOP_GENERIC := TOP_SUBHUB
+# c4-04: the per-mode first-row top is no longer a table of named offsets — every non-TITLE mode
+# shares ONE formula, first_row_top(mode): the baseline of the lowest header line that mode draws
+# (mode_header_bottom) + a common clearance (HEADER_CLEAR, or the tighter HEADER_CLEAR_COMPACT for
+# the dense <=10-row OPTS/REBIND pages whose 10th plate would otherwise crush under 20px). The old
+# TOP_PAUSE 130 / TOP_OPTS 102 / TOP_SUBHUB 120 constants are gone; the formula reproduces those
+# exact values (PAUSE_FOOTNOTE_Y+16 / OPTS_SUBLINE_Y+8 / HUB_SUBTITLE_Y+16) from the header baselines,
+# so nudging a header line reflows its column and no screen carries a bare top offset. TITLE is the
+# outlier (derives its top from title_head_bottom). See mode_header_bottom / mode_is_compact /
+# first_row_top near compute_geometry.
 const TITLE_HEAD_MARGIN := 2.0     # TITLE seats its column this far below the drawn header block
+# c4-04: TITLE record-header stack — ONE anchor (TITLE_WORDMARK_TOP) plus font-derived plate heights.
+# Each plate HEIGHT is its drawn font size plus a single shared vertical pad, and each plate TOP below
+# the wordmark is the previous plate's BOTTOM — so the whole stack chains from one number and one pad.
+# title_head_bottom() DERIVES the column's header clearance from the same tops+heights. Before this the
+# plate y's and title_head_bottom's 115/127/139 returns were hand-tuned literal sets nudged in lockstep
+# by eye (the exact drift this item kills): a record line now moves only by editing its FONT SIZE or the
+# shared pad, and the plates below it reflow with no overlap and no hand-copied y.
+# ---- drawn font sizes (the size passed to _center_text; the heights below derive from these) ----
+const TITLE_WORDMARK_FONT := 30
+const TITLE_BYLINE_FONT := 8
+const TITLE_TAGLINE_FONT := 10     # the taller of the two lines the shared record plate must seat
+const TITLE_BEST_FONT := 9
+const TITLE_CAREER_FONT := 8
+# c4-04: ONE shared vertical plate padding — every TITLE header plate is its drawn font size plus this
+# pad top AND bottom, so a font-size change resizes the plate with it (no hand-tuned per-plate height).
+const TITLE_PLATE_PAD_V := 1.5
+const TITLE_WORDMARK_H := TITLE_WORDMARK_FONT + 2.0 * TITLE_PLATE_PAD_V    # 33 — "SHOEMONEY SOLDIER" plate
+const TITLE_BYLINE_H := TITLE_BYLINE_FONT + 2.0 * TITLE_PLATE_PAD_V        # 11 — studio byline plate
+const TITLE_RECORD_PLATE_H := TITLE_TAGLINE_FONT + 2.0 * TITLE_PLATE_PAD_V # 13 — tagline & BEST share it (sized for the taller 10px tagline)
+const TITLE_CAREER_PLATE_H := TITLE_CAREER_FONT + 2.0 * TITLE_PLATE_PAD_V  # 11 — CAREER whisper plate
+const TITLE_WORDMARK_TOP := 60.0   # wordmark plate top — the stack's one anchor (10px horizontal pad, applied at draw)
+# Each plate top below the wordmark is the previous plate's BOTTOM (top + height): resize any height
+# and the plates below reflow with it, no overlap, no hand-copied y.
+const TITLE_BYLINE_TOP := TITLE_WORDMARK_TOP + TITLE_WORDMARK_H    # studio byline plate top
+const TITLE_TAGLINE_TOP := TITLE_BYLINE_TOP + TITLE_BYLINE_H       # tagline plate top
+const TITLE_BEST_TOP := TITLE_TAGLINE_TOP + TITLE_RECORD_PLATE_H   # BEST-run plate top (abuts the tagline plate bottom)
+const TITLE_CAREER_TOP := TITLE_BEST_TOP + TITLE_RECORD_PLATE_H    # CAREER whisper plate top (abuts the BEST plate bottom)
+const TITLE_HEAD_SEAM := 1.0       # tagline-only column seats 1px below the tagline plate bottom
 const BOTTOM_BOUND := 310.0        # y the last row / BACK plate clears (leaves the footer legend room)
 const LEGEND_Y := 322.0            # TITLE input-legend plate top (the column band ends 4px above it)
 const LEGEND_H := 34.0             # ...and its height
@@ -257,9 +301,9 @@ const FRAME_INNER_R := 612.0       # right edge of the chrome frame's interior (
 const TEXT_MID_10 := 4.0           # visual mid of a 10px cap-height glyph below its baseline (cap sits ~y-8..y); centers a sprite box on the text row
 const PAUSE_HEADER_Y := 78.0       # PAUSED title baseline
 const PAUSE_SUBTITLE_Y := 100.0    # PAUSE run-status subline
-const PAUSE_FOOTNOTE_Y := 114.0    # PAUSE RUN# footnote — the lowest header line TOP_PAUSE clears
+const PAUSE_FOOTNOTE_Y := 114.0    # PAUSE RUN# footnote — the lowest header line first_row_top(PAUSE) clears
 const OPTS_TITLE_Y := 80.0         # OPTIONS title baseline
-const OPTS_SUBLINE_Y := 94.0       # OPTIONS a11y-summary subline — the lowest header line TOP_OPTS clears
+const OPTS_SUBLINE_Y := 94.0       # OPTIONS a11y-summary subline — the lowest header line first_row_top(OPTS) clears
 # Horizontal half-padding of the small dark plates behind TITLE's byline / tagline /
 # BEST / CAREER lines (a plate spans measured_text_w + 2x this).
 const PLATE_PAD_SM := 4.0
@@ -1923,27 +1967,53 @@ static func setting_help(id: String) -> String:
 	return TranslationServer.translate(src) if src != "" else ""
 
 
+# c4-04: the baseline of the LOWEST header line a non-TITLE mode draws — the one input the
+# shared first-row-top formula keys off. PAUSE clears its PAUSED+status+RUN# stack, OPTS/REBIND
+# their compact 2-line header, the SETUP/INFO/DISP hubs their lone subtitle. HIDDEN/HALL/HOWTO
+# never draw this column (they return early with a lone BACK button), so they take the hub default.
+static func mode_header_bottom(mode_id: int) -> float:
+	match mode_id:
+		Mode.PAUSE: return PAUSE_FOOTNOTE_Y
+		Mode.OPTS, Mode.REBIND: return OPTS_SUBLINE_Y
+		_: return HUB_SUBTITLE_Y
+# c4-04: the compact flag — the dense <=10-row OPTS/REBIND pages take the tighter header clearance
+# so their 10th plate stays above the >=20px readable floor; every sparse screen takes the roomy one.
+static func mode_is_compact(mode_id: int) -> bool:
+	return mode_id == Mode.OPTS or mode_id == Mode.REBIND
+# c4-04: THE first-row top — ONE formula for every non-TITLE mode (header baseline + a common
+# clearance, compact or roomy). No screen carries a bare top offset any more; move a header line
+# and its column follows. TITLE overrides this off title_head_bottom() in compute_geometry.
+static func first_row_top(mode_id: int) -> float:
+	return mode_header_bottom(mode_id) + (HEADER_CLEAR_COMPACT if mode_is_compact(mode_id) else HEADER_CLEAR)
+
+
+# c4-04: a TITLE record line's text baseline sits the FONT'S OWN descender depth up from its plate
+# bottom, read from live font metrics (Art.font().get_descent) rather than a hand-copied
+# TITLE_DESC_GAP_* constant — so swapping the font (a different descent at the same size) carries the
+# baseline with it and the glyph tail always lands just inside the plate bottom.
+static func title_baseline(plate_top: float, plate_h: float, font_size: int) -> float:
+	return plate_top + plate_h - Art.font().get_descent(font_size)
+
+
 # Pure, view-free layout math for the button column — extracted so a headless
 # regression test can pin the decompressed TITLE geometry (>=20px plates, 16px
 # icons, header/legend clearance) without standing up a Control, Art, or `main`.
 # `head_bottom` is the y of the lowest header plate the caller actually drew
 # (TITLE varies it by which BEST/CAREER lines are present); other modes pass -1.
 static func compute_geometry(mode_id: int, n: int, head_bottom: float, split_at := -1, split_gap := 0.0) -> Dictionary:
-	# c3-02: each column mode keys its first-row y off a header baseline (the derived
-	# TOP_* consts): PAUSE clears its PAUSED+status+RUN# stack, OPTS/REBIND clear their
-	# compact 2-line header (REBIND's <=10-row pages are why that clearance is tighter —
-	# a full HEADER_CLEAR would crush the 10th plate under 20px), the SETUP/INFO/DISP
-	# hubs clear their lone subtitle. The old >4-row `many` tier is retired: the only
-	# modes that fall through to TOP_GENERIC (HIDDEN/HALL/HOWTO) return early without ever
-	# drawing this column, so a row-count branch there was dead weight.
-	var top := TOP_PAUSE if mode_id == Mode.PAUSE \
-		else (TOP_OPTS if (mode_id == Mode.OPTS or mode_id == Mode.REBIND) \
-		else (TOP_SUBHUB if (mode_id == Mode.SETUP or mode_id == Mode.INFO or mode_id == Mode.DISP) else TOP_GENERIC))
+	# c4-04: every non-TITLE column reads the ONE shared first-row-top formula (header baseline +
+	# a compact-or-roomy clearance) — no per-screen top literal, no row-count branch (the modes that
+	# would fall through, HIDDEN/HALL/HOWTO, return early without drawing this column). TITLE
+	# overrides `top` below off its header stack.
+	var top := first_row_top(mode_id)
 	var gap: float
 	if mode_id == Mode.TITLE:
 		# top tracks whichever header lines are actually present (head_bottom) — a
 		# fresh install (no BEST/CAREER) starts ~24px higher, so the list decompresses
 		# into real height instead of a fixed 156 that crushed bh to ~11px + 8px specks.
+		# c4-04: TITLE's first-row top is FULLY DERIVED from title_head_bottom() (the caller passes
+		# it as head_bottom) + TITLE_HEAD_MARGIN — the old 156 literal is gone; move a record plate
+		# top and this override, the column, and the hit-test all follow from the one source.
 		top = head_bottom + TITLE_HEAD_MARGIN
 		# Spread across the WHOLE band down to the y322 input legend. Dividing by
 		# n (not n-1) reserves the final row's own height, so QUIT self-clears the
@@ -1986,11 +2056,13 @@ static func compute_geometry(mode_id: int, n: int, head_bottom: float, split_at 
 # single source shared by compute_geometry and _draw so the column top can't
 # drift off the header block. Non-TITLE modes have no record header (returns -1).
 static func title_head_bottom(has_best: bool, has_career: bool) -> float:
+	# c4-04: DERIVED from the record-stack tops+heights the plates actually draw with, so the
+	# column top can't drift off the header block (141 / 130 / 118 for career / best / tagline-only).
 	if has_career:
-		return 139.0   # CAREER whisper plate bottom (implies the whole stack)
+		return TITLE_CAREER_TOP + TITLE_CAREER_PLATE_H   # CAREER whisper plate bottom (implies the whole stack)
 	if has_best:
-		return 127.0   # BEST line plate bottom
-	return 115.0       # tagline plate bottom (always drawn)
+		return TITLE_BEST_TOP + TITLE_RECORD_PLATE_H     # BEST line plate bottom
+	return TITLE_TAGLINE_TOP + TITLE_RECORD_PLATE_H + TITLE_HEAD_SEAM   # tagline plate bottom + seam (always drawn)
 
 
 # Where BACK / Esc goes from each screen — one level up. HALL and HOW TO PLAY
@@ -2760,49 +2832,49 @@ func _draw() -> void:
 	if mode == Mode.TITLE:
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
-		var ttw := Art.font().get_string_size("SHOEMONEY SOLDIER", HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
-		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, 60.0, ttw + 20.0, 32.0), PLATE_BG)   # a2-04 r2: match sibling plate alpha
-		_center_text("SHOEMONEY SOLDIER", 86, 30, HEADER_ACCENT)
+		var ttw := Art.font().get_string_size("SHOEMONEY SOLDIER", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
+		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, TITLE_WORDMARK_TOP, ttw + 20.0, TITLE_WORDMARK_H), PLATE_BG)   # a2-04 r2: match sibling plate alpha
+		_center_text("SHOEMONEY SOLDIER", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
 		# Studio byline, plated like the tagline below it (small text loses to the live
 		# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
 		var byl := "by SHOEMONEY GAME STUDIOS"
-		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, 93.0, bylw + PLATE_PAD_SM * 2.0, 9.0), PLATE_BG)
-		_center_text(byl, 100, 8, BYLINE_COL)
+		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BYLINE_FONT).x
+		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), PLATE_BG)
+		_center_text(byl, title_baseline(TITLE_BYLINE_TOP, TITLE_BYLINE_H, TITLE_BYLINE_FONT), TITLE_BYLINE_FONT, BYLINE_COL)
 		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
 		# seed-hint siblings — small text straight on the live attract firefight
 		# loses to bright terrain no matter the alpha (the codebase's own thrice-
 		# cited lesson; a white explosion drops the gold line under 2:1 contrast).
 		var tagline := "ONE HIT. ONE WAR CHEST. NO MERCY."
-		var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		# Height 13 (was 14): its 101..114 span now abuts the BEST plate's 114 top
-		# instead of overlapping it by 1px — a double-darkened seam under the record.
-		draw_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, 101.0, tgw + PLATE_PAD_SM * 2.0, 13.0),
+		var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_TAGLINE_FONT).x
+		# The tagline plate abuts the BEST plate below it (BEST top == tagline bottom),
+		# derived from the shared TITLE_RECORD_PLATE_H so the seam can't double-darken.
+		draw_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, TITLE_TAGLINE_TOP, tgw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
 			PLATE_BG)
-		_center_text(tagline, 112, 10, TAGLINE_COL)
+		_center_text(tagline, title_baseline(TITLE_TAGLINE_TOP, TITLE_RECORD_PLATE_H, TITLE_TAGLINE_FONT), TITLE_TAGLINE_FONT, TAGLINE_COL)
 		# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
-		# c1-02: the record block was pulled UP into a tight two-line stack (BEST
-		# baseline 124, CAREER 136) from the old 132/145 spread — freeing ~14px so
-		# the button column starts higher and every TITLE state clears a >=20px plate
-		# instead of the old crush. _row_geometry's TITLE top tracks these baselines.
+		# c1-02: the record block is a tight two-line stack (BEST then CAREER) abutting the
+		# tagline, freeing height so the button column starts higher and every TITLE state clears
+		# a >=20px plate instead of the old crush. _row_geometry's TITLE top tracks title_head_bottom,
+		# which derives from these same plate tops+heights, so the column follows the record stack.
 		if main.best_score > 0:
 			# a2-04 HUD#8: only show the record fields that are non-zero (via a testable
 			# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
 			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist)
-			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, 114.0, bw + PLATE_PAD_SM * 2.0, 13.0),
+			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BEST_FONT).x
+			draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP, bw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
 				PLATE_BG)
-			_center_text(best_line, 124, 9, BEST_LINE_COL)
+			_center_text(best_line, title_baseline(TITLE_BEST_TOP, TITLE_RECORD_PLATE_H, TITLE_BEST_FONT), TITLE_BEST_FONT, BEST_LINE_COL)
 		if main._life_runs > 0:
 			var wpct: int = main._life_wins * 100 / main._life_runs
 			var career := "CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
 				main._life_kills, wpct]
 			# Plated like the input legend: 8px dim text straight on the live
 			# attract firefight loses to bright terrain no matter the alpha.
-			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			draw_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, 127.0, cpw + PLATE_PAD_SM * 2.0, 12.0),
+			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_CAREER_FONT).x
+			draw_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, TITLE_CAREER_TOP, cpw + PLATE_PAD_SM * 2.0, TITLE_CAREER_PLATE_H),
 				PLATE_BG)
-			_center_text(career, 136, 8, CAREER_COL)
+			_center_text(career, title_baseline(TITLE_CAREER_TOP, TITLE_CAREER_PLATE_H, TITLE_CAREER_FONT), TITLE_CAREER_FONT, CAREER_COL)
 	elif mode == Mode.OPTS:
 		_draw_opts_header()
 	elif mode == Mode.REBIND:
