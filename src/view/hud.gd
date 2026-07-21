@@ -111,6 +111,12 @@ var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 var _prev_score := 0
 var _score_pulse := 0.0   # gold flash on the score medal when it ticks up
+# c4-02: the gold-pulse value as LAST PAINTED (0 under reduce motion, since _draw draws the flash as
+# 0 there). _anim_active dirties on a change in THIS drawn value, not the raw _chest/_score_pulse — so
+# toggling reduce motion ON mid-pulse repaints exactly ONCE (gold -> flat snap) and the invisible
+# decay afterward triggers no wasted repaints, while a visible pulse still animates every frame.
+var _chest_pulse_drawn := 0.0
+var _score_pulse_drawn := 0.0
 var _disp_chest := -1.0   # displayed value, catches up to war_chest so big jumps roll up
 var _disp_score := -1.0   # displayed value, catches up to score so big jumps roll up
 var _disp_sim_id := 0     # c3-07: SimWorld the odometer tracks — a fresh run (new instance) snaps
@@ -201,21 +207,20 @@ func _process(delta: float) -> void:
 	if main == null or main.sim == null:
 		return
 	var sim: SimWorld = main.sim
+	# c4-02: arm/advance the pulse VALUE only — the repaint request is owned by _anim_active's
+	# _drawn_pulse comparison below, so a pulse that isn't actually painted (reduce motion draws it as
+	# 0) never dirties, while a visible one animates every frame including the frame it settles to 0.
 	if sim.war_chest > _prev_chest:
 		_chest_pulse = 1.0
-		_dirty = true
 	_prev_chest = sim.war_chest
 	if sim.score > _prev_score:
 		_score_pulse = 1.0
-		_dirty = true
 	_prev_score = sim.score
 	var decay := 3.0 * delta   # == the old -0.05/frame at 60 Hz
 	if _chest_pulse > 0.0:
 		_chest_pulse = maxf(0.0, _chest_pulse - decay)
-		_dirty = true   # includes the frame it reaches 0, so the settled color paints once
 	if _score_pulse > 0.0:
 		_score_pulse = maxf(0.0, _score_pulse - decay)
-		_dirty = true
 	# c3-07: a fresh run resets war_chest/score to 0; snap the odometer to the new values so it
 	# doesn't roll the prior run's stale totals DOWNWARD (the >1000 threshold snap in _rollup only
 	# catches huge diffs, so a sub-1000 reset would visibly animate down). PRIMARY signal is a NEW
@@ -278,8 +283,81 @@ func _process(delta: float) -> void:
 	_verb_was_paused = paused
 	if _verb_alpha(_verb_show, main._motion) != verb_a:
 		_dirty = true
+	# c4-02: HUD self-redraw. main._update_hud repaints on each sim step, but this Control must
+	# also drive its OWN animation so it never freezes when main isn't stepping it (the pause
+	# overlay, where _physics_process early-returns). _anim_active reports whether any cue still
+	# has a frame to change; request a repaint whenever it does. A fully-settled HUD reports false
+	# and idles — a held cooldown/timer draws identically each frame, so it never repaints forever.
+	if is_visible_in_tree():
+		if _anim_active(sim):
+			_dirty = true
+	else:
+		# Hidden this frame, so _draw won't run to refresh the pulse paint snapshots — track them here so
+		# the FIRST paint after the HUD becomes visible again compares _anim_active against live state,
+		# not a stale pre-hide value (which could spuriously repaint, or miss a change that landed while
+		# hidden). The blink check keeps no snapshot (it reads live presence), so nothing else to refresh.
+		_chest_pulse_drawn = _drawn_pulse(_chest_pulse)
+		_score_pulse_drawn = _drawn_pulse(_score_pulse)
 	if _dirty:
 		queue_redraw()
+
+
+## c4-02: is any HUD cue still mid-animation — i.e., will it draw DIFFERENTLY next frame? The
+## single predicate the self-redraw uses, so the Control keeps animating itself even while main
+## isn't stepping it, yet a fully-settled HUD idles.
+##
+## The design rests on ONE fact about when the HUD needs to invalidate ITSELF (main._physics_process
+## early-returns under a pause menu without repainting it, yet _process keeps running): a sim-driven
+## value — a draining cooldown ring, a counting-down streak/RALLYING/SHOP-OPEN/pressure timer — only
+## ever moves when the sim STEPS, and every sim step already routes through main._update_hud ->
+## queue_redraw. Under a pause the sim is frozen, so those values hold perfectly still and need no
+## self-redraw. This is why we do NOT enumerate cooldown/timer fields here (the old _cd_sum did, and
+## that list had to be kept in lockstep with _draw and could alias two counters cancelling in a frame).
+## Only two families actually animate WITHOUT a sim step, so only these are checked:
+##   1. delta-eased VIEW fields still settling toward their target (chest/score gold pulse, the odometer
+##      rollup, the endless-shop strip fade) — _process advances these every frame, pause or not. The
+##      pulse is compared as its DRAWN value (_drawn_pulse, 0 under reduce motion) so an invisible pulse
+##      never repaints while a visible one animates and the reduce-motion snap paints exactly once.
+##   2. an _mblink warning chip on screen (dry MG ammo, dry grenade, a timed buff in its final 2s). Its
+##      blink PHASE toggles off the physics-frame counter, which advances under a pause, so a repaint
+##      each frame is what keeps it blinking. We test the chip's PRESENCE (the exact conditions _draw
+##      shows it under), never keep a stale value — so nothing can drift out of sync. Steady, hence no
+##      repaint, under reduce motion (where _mblink holds one phase).
+func _anim_active(sim: SimWorld) -> bool:
+	if _drawn_pulse(_chest_pulse) != _chest_pulse_drawn or _drawn_pulse(_score_pulse) != _score_pulse_drawn:
+		return true
+	if int(round(_disp_chest)) != sim.war_chest or int(round(_disp_score)) != sim.score:
+		return true
+	if absf(_shop_anim - (1.0 if _shop_open(sim) else 0.0)) > SHOP_ANIM_EPS:
+		return true
+	return main._motion >= 0.5 and _blink_chip_present(sim)
+
+
+## c4-02: the gold-pulse value as _draw actually PAINTS it — the raw pulse above _motion 0.5, else 0
+## (reduce motion draws no flash). The single gate shared by _draw's snapshot and _anim_active's
+## dirty check, so "did the pulse change on screen" is asked and answered against one formula.
+func _drawn_pulse(pulse: float) -> float:
+	return 0.0 if main._motion < 0.5 else pulse
+
+
+## c4-02: is any _mblink-driven warning chip on screen this frame? Its red toggles off the physics-frame
+## counter (which advances under a pause), so while one is up the HUD must repaint every frame to keep it
+## blinking. This tests PRESENCE under the SAME conditions _draw shows each chip — the only cues that
+## animate without a sim step besides the eased view fields, so it is the whole blink surface:
+##   - a dry MG-ammo or dry-grenade chip (_onfoot_chips flashes it when the pool hits 0), and
+##   - a timed buff in its final 2s: pierce/spread/rend/smoke, matching _buff_col's `ticks < 120` red
+##     window; spread's chip is suppressed once Triple is owned, so mirror that.
+## Caller gates on motion (_mblink is a steady phase under reduce motion, so nothing blinks there).
+func _blink_chip_present(sim: SimWorld) -> bool:
+	for p in sim.players:
+		if p["mg_ammo"] == 0 or p["grenade_ammo"] == 0:
+			return true
+		if (p["pierce_ticks"] > 0 and p["pierce_ticks"] < 120) \
+				or (p["spread_ticks"] > 0 and p["spread_ticks"] < 120 and not p["triple"]) \
+				or (p["rend_ticks"] > 0 and p["rend_ticks"] < 120) \
+				or (p["smoke_ticks"] > 0 and p["smoke_ticks"] < 120):
+			return true
+	return false
 
 
 ## c2-09: the drawn alpha of the bottom verb-reminder chip for a given countdown + motion —
@@ -445,8 +523,10 @@ func _draw() -> void:
 	var sim: SimWorld = main.sim
 	# REDUCE MOTION: the value rollup still runs (_process), but the visual
 	# pulse (scale-thump + gold color lerp) holds at 0 — no animated flash.
-	var chest_pulse: float = 0.0 if main._motion < 0.5 else _chest_pulse
-	var score_pulse: float = 0.0 if main._motion < 0.5 else _score_pulse
+	var chest_pulse: float = _drawn_pulse(_chest_pulse)
+	var score_pulse: float = _drawn_pulse(_score_pulse)
+	_chest_pulse_drawn = chest_pulse   # c4-02: snapshot the pulse this paint reflects (see _anim_active)
+	_score_pulse_drawn = score_pulse
 	# c1-15: first-draw fade sync — a _draw can beat the frame's first _process, so snap an unseen
 	# sim here too (correct content on frame one, no fade-in-from-zero, no stale prior-run content).
 	var sid := sim.get_instance_id()
