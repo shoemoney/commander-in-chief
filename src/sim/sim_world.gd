@@ -4251,13 +4251,18 @@ func _scaled_boss_hp(base: int) -> int:
 
 
 func colossus_phase() -> int:
-	## 1..3 by HP thirds; 0 when absent.
+	## 1..3 by HP thirds of the ACTUAL scaled max, 0 when absent. The boss spawns with
+	## _scaled_boss_hp(COLOSSUS_HP) (96 in 2P, 90 hard), so thresholding the unscaled
+	## COLOSSUS_HP=60 pinned it in phase 1 for most of a scaled fight and crammed phases
+	## 2-3 into the last 40 HP — mis-firing every phase-keyed behavior (mortars, sappers,
+	## descent speed, ring migration). Gate on the stored max instead.
 	if colossus.is_empty() or not colossus["alive"]:
 		return 0
 	var hp: int = colossus["hp"]
-	if hp > (COLOSSUS_HP * 2) / 3:
+	var mx: int = colossus.get("max_hp", _scaled_boss_hp(COLOSSUS_HP))
+	if hp > (mx * 2) / 3:
 		return 1
-	if hp > COLOSSUS_HP / 3:
+	if hp > mx / 3:
 		return 2
 	return 3
 
@@ -4341,7 +4346,7 @@ func _step_colossus() -> void:
 		for g in gates:
 			if g.get("final", false) and g["y"] >= camera_top and g["y"] <= camera_top + VIEW_H and not victory:
 				colossus = {
-					"alive": true, "hp": _scaled_boss_hp(COLOSSUS_HP),
+					"alive": true, "hp": _scaled_boss_hp(COLOSSUS_HP), "max_hp": _scaled_boss_hp(COLOSSUS_HP),
 					"x": SCREEN_CX, "y": g["y"] - 120 * F_ONE,
 					"spray_cd": COLOSSUS_SPRAY_CD_TICKS,
 					"volley_cd": COLOSSUS_VOLLEY_CD_TICKS,

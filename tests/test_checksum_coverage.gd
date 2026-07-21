@@ -61,8 +61,11 @@ const KNOWN := {
 	# struts are authored seg>=2 so they never enter a torture window.
 	"barrel": ["x", "y", "armed", "fuse_ticks", "strut"],
 	"observer": ["x", "strike_cd", "spawn_cam"],
-	"colossus": ["alive", "hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
+	"colossus": ["alive", "hp", "max_hp", "x", "y", "spray_cd", "volley_cd", "spawn_cd",
 		"core_cd", "core_open", "pv", "sweep_cd"],
+	# max_hp is a spawn-time constant = _scaled_boss_hp(COLOSSUS_HP), a deterministic function of
+	# player_count + hard (both already identical across peers), never mutated — so it adds no
+	# independent state and is intentionally NOT in checksum(); it only sizes colossus_phase() thirds.
 }
 
 
