@@ -715,8 +715,14 @@ func _process(_delta: float) -> void:
 	if _resize_save_t > 0.0:
 		_resize_save_t -= _delta
 		if _resize_save_t <= 0.0:
-			_resize_save_t = 0.0
-			_save_settings()
+			# c4-fix: never flush a full settings write while OPTIONS has staged, unsaved previews
+			# — _save_settings snapshots the LIVE (previewed) values and would commit them to disk,
+			# defeating the Save/Discard model. Re-arm and wait for the edit to commit or discard.
+			if _menu != null and _menu._opts_dirty:
+				_resize_save_t = 0.15
+			else:
+				_resize_save_t = 0.0
+				_save_settings()
 	# Sync the concussion overlay every rendered frame (covers gameplay, attract,
 	# and pause — where _concussion is force-zeroed). Hidden at zero = pure no-op.
 	if _screen_fx_rect == null:
@@ -1208,7 +1214,11 @@ func _notification(what: int) -> void:
 			or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
 		if _resize_save_t > 0.0:
 			_resize_save_t = 0.0
-			_save_settings()
+			# c4-fix: on close/focus-out, skip the flush if OPTIONS has unsaved previews — persisting
+			# them here would commit un-confirmed changes past Discard. Losing a pending window-scale
+			# save in this rare edge (resize, then edit OPTIONS, then focus out) is the safe trade.
+			if _menu == null or not _menu._opts_dirty:
+				_save_settings()
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
 		# no_autopause: the screenshot harness runs unfocused by design — without
 		# this every staged gameplay shot captures the pause overlay instead.
@@ -2679,7 +2689,18 @@ func _load_bests() -> void:
 		last_run_score = cf.get_value("replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
 		replay_watched_score = cf.get_value("replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
 		_seen = cf.get_value("seen", "hints", {})
-		hall.assign(cf.get_value("hall", "runs", []))
+		# c4-fix: a type-corrupt "runs" value (wrong element type from an older/newer build or
+		# partial file corruption) makes Array[Dictionary].assign() throw a runtime error and
+		# abort the rest of _load_bests BEFORE _apply_settings runs — silently reverting ALL
+		# settings to defaults with no signal. The .bak fallback doesn't engage (the file parsed
+		# fine; the corruption is per-value). Build the hall defensively so a bad entry can never
+		# cost the user their settings.
+		hall.clear()
+		var _raw_hall = cf.get_value("hall", "runs", [])
+		if _raw_hall is Array:
+			for _he in _raw_hall:
+				if _he is Dictionary:
+					hall.append(_he)
 		# Resume the id counter past the highest hid on disk so a fresh run can never
 		# collide with a reloaded entry's id (old saves lack hid -> starts at 0).
 		for r in hall:
