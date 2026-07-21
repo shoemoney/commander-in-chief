@@ -49,6 +49,10 @@ const HALL_KEEP := 40
 # c2-06: the "1-8 OF N" total-count footer's color — one const so the empty ("0-0 OF 0"),
 # single-page, and multi-page counters all read in the SAME warm gold and can't drift apart.
 const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
+# c4-13: the right x the fixed PAGE x/y position tag is right-aligned to, on the tab row (y66).
+# 528 mirrors the filter tabs' left margin (x112) for a symmetric header — filter left, page right —
+# and sits well clear of the ENDLESS tab + its cycle arrow, so the tag never moves or collides.
+const HALL_PAGE_TAG_R := 528.0
 const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint under colorblind mode so the white-alpha sprite keeps body
 
 # c4-07: the two shared center-banner status tints. Single-sourced HERE (the class main already
@@ -1464,6 +1468,31 @@ func _unhandled_input(ev: InputEvent) -> void:
 		if vpf1 != null:
 			vpf1.set_input_as_handled()
 		return
+	# c4-13: HALL fast-travel paging — Home/End leap to the FIRST/LAST page, so a deep board (a
+	# full TOP-HALL_KEEP list runs many pages) is reachable without holding DOWN through every one.
+	# ONLY Home/End: single-step paging is already up/down + wheel + PREV/NEXT, so PageUp/PageDown
+	# would be a hidden duplicate — the two keys added here are exactly the two the footer's HOME/END
+	# JUMP hint teaches, no binding without an on-screen prompt. HALL-only so they never shadow other
+	# screens, and clamped (never wraps). A key that doesn't move the page (e.g. Home on page 1)
+	# falls through unconsumed.
+	if mode == Mode.HALL and main != null and ev is InputEventKey and ev.pressed and not ev.echo:
+		# main-null guard: _hall_rows() and the _sfx cue below both read main, so gate the whole
+		# handler on it — keeps a headless/unit context (menu with no Main) from crashing on a keypress.
+		var hp := _hall_pages(_hall_rows().size())
+		if hp > 1:
+			var jump := _hall_page
+			match ev.keycode:
+				KEY_HOME: jump = 0
+				KEY_END: jump = hp - 1
+			if jump != _hall_page:
+				_hall_page = jump
+				_refresh_page_hover()   # the new page may flip a boundary — re-light/dim under a still cursor
+				main._sfx.play("pickup", -14.0, 1.3)
+				_mark_dirty()
+				var vpj := get_viewport()
+				if vpj != null:
+					vpj.set_input_as_handled()
+				return
 	# c1-18: on the GAMEPAD tab, ◄/► (keyboard A/D/arrows or pad d-pad L/R) switches which
 	# PLAYER's layout is being edited (P1 <-> P2). The two pad maps are independent, so a
 	# left-handed or differently-abled P2 remaps without touching P1. Handled before nav so the
@@ -1819,7 +1848,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 		elif ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var wdir := -1 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1
 			if mode == Mode.HALL:
-				_nav(wdir, 0)   # c3-06: HALL wheel SCROLLS the board — up/down turns the page so runs past row 8 are reachable by wheel, matching the PREV/NEXT buttons (filters still cycle on left/right)
+				# c3-06/c4-13: HALL wheel SCROLLS the board a page at a time (up = earlier, down =
+				# later), so runs past row 8 are reachable by wheel too — one more paging input
+				# alongside up/dn, PREV/NEXT, and Home/End. Filters still cycle on left/right, never
+				# the wheel, so the two axes never fight.
+				_nav(wdir, 0)
 			elif mode == Mode.HOWTO:
 				_nav(0, wdir)   # HOWTO turns the page — its sections live on the horizontal axis, not a 1-row list
 			else:
@@ -3859,10 +3892,11 @@ func _draw_hall() -> void:
 	# RANK header sits in the gap between the # and the right-aligned SCORE — drawn
 	# outside the parallel header/col_x arrays so it doesn't reshuffle the columns.
 	Art.text(self, "RANK", Vector2(130.0, 96), 10, Color(1.0, 0.82, 0.4))
-	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. Switching
-	# the filter tab resets _hall_page to 0 (see the nav + click handlers); this clamp is
-	# the belt-and-braces catch for a page stranded past the end after a filter shrank the
-	# list, so the visible window and the "OF N" count below can never point off the board.
+	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. Switching the filter
+	# tab resets _hall_page to 0 (see the nav + click handlers); c4-13: this clamp runs EVERY draw,
+	# so even if the filter or row count shrinks the board underneath a stale page index (from any
+	# path, not just manual key nav), the page is pulled back into 0..pages-1 before the window,
+	# counter, and PAGE x/y indicator are computed — none can ever point off the board.
 	var pages := _hall_pages(rows.size())
 	_hall_page = clampi(_hall_page, 0, pages - 1)
 	var win := hall_page_window(_hall_page, rows.size())
@@ -3875,6 +3909,14 @@ func _draw_hall() -> void:
 	# the bottom. Full width, so the long combined variants never clip. The bottom counter
 	# has no room for the cap (it'd collide with the PREV/NEXT buttons), so it lives here.
 	var keep_note := "KEEPS TOP %d" % HALL_KEEP
+	# c4-13: the footer row-window counter ("1-8 OF N", drawn below) says WHICH rows show; this
+	# top-band PAGE x/y says which of how many pages you are on, so a player on a deep board (a
+	# full TOP-HALL_KEEP list runs many pages) sees their position AND the page total, not just
+	# that more rows follow. Empty on a single page so a short board carries no redundant "PAGE 1/1".
+	var ptag := hall_page_tag(_hall_page, pages)
+	if ptag != "":
+		var psw := f.get_string_size(ptag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		Art.text(self, ptag, Vector2(HALL_PAGE_TAG_R - psw, 66), 10, HALL_COUNT_COL)
 	if latest_idx >= 0:
 		@warning_ignore("integer_division")
 		var lpage := latest_idx / HALL_PAGE_ROWS
@@ -3911,6 +3953,10 @@ func _draw_hall() -> void:
 		# populated counters (HALL_COUNT_COL) so the total reads identically in every state.
 		_center_text("0-0 OF 0", 306, 11, HALL_COUNT_COL)
 	else:
+		# c4-13: the visible slice is the paged window [start, stop) from hall_page_window, NOT a
+		# hard mini(rows.size(), 8) crop — start = page*8, stop clamps to the row count, so every
+		# run past row 8 is reachable by turning the page (up/dn, wheel, PREV/NEXT, Home/End); no
+		# entry is silently dropped off the bottom.
 		for i in range(start, stop):
 			var run: Dictionary = rows[i]
 			var row := i - start   # 0..HALL_PAGE_ROWS-1 within this page (drives the y baseline)
@@ -3983,10 +4029,12 @@ func _draw_hall() -> void:
 		# single-page board states its count outright — the board's size is never hidden.
 		if pages > 1:
 			# Visible row window + filtered total, in the spec's compact "1-8 OF N" form (the
-			# retention cap is stated in the top status band — it won't fit here without colliding
-			# with the flanking PREV/NEXT buttons). Widest variant "33-40 OF 240" measures 106px in
-			# Art.font() at 11px, centered on x320 (edges 267..373) — inside the PREV/NEXT gap
-			# (prev right edge 238, next left edge 402) with ~29px of clearance on each side.
+			# retention cap AND the c4-13 PAGE x/y position both ride the roomy top status band —
+			# neither fits here without colliding with the flanking PREV/NEXT buttons). Widest
+			# variant "33-40 OF 240" measures 106px in Art.font() at 11px, centered on x320 (edges
+			# 267..373) — inside the PREV/NEXT gap (prev right edge 238, next left edge 402) with
+			# ~29px of clearance on each side. So the two indicators split cleanly: rows here, page
+			# there — a player reads which rows show AND which of how many pages they are on.
 			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], 306, 11, HALL_COUNT_COL)
 			# Mouse-clickable page buttons flanking the counter — a second way to page for the
 			# mouse (c3-06: the wheel now scrolls the board too). Each carries a VERTICAL arrow glyph, not just a
@@ -4051,6 +4099,16 @@ func _hall_rows() -> Array:
 
 func _hall_pages(n: int) -> int:
 	return maxi(1, (n + HALL_PAGE_ROWS - 1) / HALL_PAGE_ROWS)
+
+
+# c4-13: the fixed PAGE x/y position-tag text drawn on the tab row's right. Empty for a 0-row or
+# single-page board (nothing to page, so no tag), else "PAGE <page+1>/<pages>" with the page index
+# clamped into range. Pure/static so _draw_hall and a headless test share ONE source — the empty /
+# single-page / multi-page states can't drift between what's drawn and what's asserted.
+static func hall_page_tag(page: int, pages: int) -> String:
+	if pages <= 1:
+		return ""
+	return "PAGE %d/%d" % [clampi(page, 0, pages - 1) + 1, pages]
 
 
 func _hall_latest_page() -> int:
@@ -4948,6 +5006,12 @@ func _mode_hint_segs(focused: Dictionary) -> Array:
 			var head: Array = footer_hall_filter_segs()
 			if main != null and _hall_pages(_hall_rows().size()) > 1:
 				head += footer_page_segs()   # UP/DN = PAGE only when the board actually pages
+				# c4-13: teach the keyboard fast-travel keys (Home/End = FIRST/LAST page) so the
+				# page-jump added in _unhandled_input is discoverable, not a hidden binding. Home/End
+				# don't exist on a pad, so only stamp them off-pad -- a controller player never sees a
+				# key they can't press.
+				if not Art.use_pad:
+					head += footer_page_jump_segs()
 			return head
 		Mode.HOWTO:
 			return footer_howto_page_segs()
@@ -5110,6 +5174,14 @@ func _footer_segs() -> Array:
 # so one axis-stamped cap reads on either device. Static so a headless test can pin it.
 static func footer_page_segs() -> Array:
 	return [{"tex": "glyph_key_wide", "stamp": "UP/DN", "label": "PAGE"}]
+
+
+# c4-13: the keyboard fast-travel hint — Home/End leap to the FIRST/LAST page, so a deep board is
+# reachable without holding DOWN through every page. Keyboard-only keys, so _mode_hint_segs only
+# appends this off-pad. Wide keycap stamped HOME/END, same seg grammar as footer_page_segs. Static
+# so a headless test can pin it without a Control or draw context.
+static func footer_page_jump_segs() -> Array:
+	return [{"tex": "glyph_key_wide", "stamp": "HOME/END", "label": "JUMP"}]
 
 
 # c2-02: the HOW-TO paging hint — the pages turn on the horizontal axis, so the

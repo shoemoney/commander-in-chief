@@ -1360,6 +1360,81 @@ func test_hall_wheel_scrolls_pages_to_reach_rows_past_eight() -> void:
 	estub.free()
 
 
+# c4-13: Home/End leap to the FIRST/LAST page (fast-travel for a deep board), matching the footer's
+# HOME/END JUMP hint. PageUp/PageDown are deliberately UNBOUND (they'd duplicate up/down), so they
+# must leave the page put — no hidden binding. Pinned so the item's added affordances can't regress.
+func test_hall_home_end_page_jump() -> void:
+	var stub := _StubMain.new()
+	for i in 20:
+		stub.hall.append({"mode": "campaign", "streak": i, "sector": i, "won": false})
+	var m := _hall_menu_headless(stub)
+	m._hall_filter = 0
+	m._hall_page = 1
+	m._unhandled_input(_key_ev(KEY_END, true))
+	Runner.T.eq(m._hall_page, 2, "END leaps to the last page (3 pages of 8 from 20 runs)")
+	m._unhandled_input(_key_ev(KEY_END, false))
+	m._unhandled_input(_key_ev(KEY_HOME, true))
+	Runner.T.eq(m._hall_page, 0, "HOME leaps back to the first page")
+	m._unhandled_input(_key_ev(KEY_HOME, false))
+	# END already on the last page is a clamped no-op (never wraps).
+	m._hall_page = 2
+	m._unhandled_input(_key_ev(KEY_END, true))
+	Runner.T.eq(m._hall_page, 2, "END on the last page stays put (clamped, never wraps)")
+	m._unhandled_input(_key_ev(KEY_END, false))
+	# PageDown is NOT bound in HALL — the page must not move (no hidden duplicate of up/down).
+	m._hall_page = 1
+	m._unhandled_input(_key_ev(KEY_PAGEDOWN, true))
+	Runner.T.eq(m._hall_page, 1, "PageDown is unbound in HALL — the page stays put")
+	m._unhandled_input(_key_ev(KEY_PAGEDOWN, false))
+	m.free()
+	stub.free()
+
+
+# c4-13: hall_page_tag is the SINGLE source for the fixed PAGE x/y position tag — empty for a 0-row
+# or single-page board (nothing to page, so no tag), else "PAGE cur/total" with the page clamped in.
+# Pins the exact empty / single-page / multi-page states _draw_hall renders so they can't drift.
+func test_hall_page_tag_states() -> void:
+	Runner.T.eq(Menu.hall_page_tag(0, 1), "", "single-page board draws no PAGE tag")
+	Runner.T.eq(Menu.hall_page_tag(0, 0), "", "a 0-row board (pages floored to 1) draws no PAGE tag")
+	Runner.T.eq(Menu.hall_page_tag(0, 3), "PAGE 1/3", "multi-page: first page reads PAGE 1/3")
+	Runner.T.eq(Menu.hall_page_tag(2, 3), "PAGE 3/3", "multi-page: last page reads PAGE 3/3")
+	Runner.T.eq(Menu.hall_page_tag(9, 3), "PAGE 3/3", "an out-of-range page index clamps into the tag")
+	Runner.T.eq(Menu.hall_page_tag(-4, 3), "PAGE 1/3", "a negative page index clamps up to page 1")
+
+
+# c4-13: the fixed PAGE x/y tag (right-aligned at HALL_PAGE_TAG_R on the tab row) must not overlap
+# the filter tabs on the left, and the HALL footer's three hint segs (FILTER + PAGE + HOME/END JUMP)
+# plus SELECT/BACK must fit the safe legend band after gap compression — so neither the header nor
+# the footer clips once the page affordances are added.
+func test_hall_page_tag_and_footer_layout() -> void:
+	var stub := _StubMain.new()
+	var m := _hall_menu_headless(stub)
+	# Widest realistic tag; its LEFT edge must clear the rightmost filter tab (+ its cycle arrow).
+	var tagw := Art.font().get_string_size("PAGE 99/99", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	var tag_left := Menu.HALL_PAGE_TAG_R - tagw
+	var tabs: Array[Rect2] = m._hall_tab_rects()
+	var last_right: float = tabs[tabs.size() - 1].end.x
+	# The right filter-cycle arrow draws at (last_right - 4) + 8 .. + 11, i.e. out to last_right + 15;
+	# the tag must clear THAT, not just the tab plate.
+	var arrow_right := last_right - 4.0 + 8.0 + 11.0
+	Runner.T.ok(tag_left > arrow_right, "the PAGE x/y tag clears the filter tabs AND their cycle arrow")
+	Runner.T.ok(Menu.HALL_PAGE_TAG_R <= 640.0, "the tag stays on-canvas")
+	# Vertically the tag baseline (y66) sits a full line above the centered status band (HALL_RECENCY_Y,
+	# y82) — the two never share a row, so a long "LATEST RUN IS ON PAGE n / KEEPS TOP N" band can't
+	# collide with the right-aligned tag even when it runs wide.
+	Runner.T.ok(Menu.HALL_RECENCY_Y - 66.0 >= 10.0, "the PAGE tag row clears the centered status band row")
+	m.free()
+	stub.free()
+	# Footer: all three HALL hint segs + nav fit the safe band once legend_fit_gap compresses them.
+	var segs := Menu.footer_hall_filter_segs() + Menu.footer_page_segs() \
+		+ Menu.footer_page_jump_segs() + Menu.footer_nav_segs()
+	var gap := Menu.legend_fit_gap(segs)
+	var cap := Menu.legend_label_cap(segs)
+	var ext: Array = Menu.legend_extent(segs, gap, cap)
+	Runner.T.ok(float(ext[1]) <= Menu.LEG_SAFE_W + 0.5,
+		"the full HALL footer hint row (filter + page + jump + nav) fits the safe band, no clip")
+
+
 # c1-05: mouse-click selection stays correct for EVERY tab rect (the pre-existing
 # path the fix must not regress), driven through the real _unhandled_input button
 # branch. Clicking each tab's center selects that filter; a click clear of every
