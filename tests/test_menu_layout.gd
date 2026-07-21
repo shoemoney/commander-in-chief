@@ -90,6 +90,20 @@ class _StubMain extends Node2D:
 			"rumble": _rumble_on, "swap_sticks": _swap_sticks[0], "swap_sticks_p2": _swap_sticks[1],
 			"sfx_vol": _bus_vol("SFX"), "music_vol": _bus_vol("Music"),
 			"fullscreen": _fullscreen, "window_scale": _win_scale}
+	# c4-11: mirror real main so the RESET DEFAULTS row can decide enabled/disabled. Compares the
+	# live snapshot against the authoritative SETTINGS_DEFAULTS (stub SFX/Music start at 8, not the
+	# default 10, so this reads false by default and the row stays an armable destructive row).
+	func _settings_at_defaults() -> bool:
+		var snap := _settings_snapshot()
+		for k in MainScript.SETTINGS_DEFAULTS:
+			if snap[k] != MainScript.SETTINGS_DEFAULTS[k]:
+				return false
+		return true
+	# c4-11: RESET DEFAULTS activation calls this — mirror real main (apply the ship defaults
+	# to the live fields, then persist) so a headless reset test observes the real restore+save.
+	func _reset_settings() -> void:
+		_apply_settings(MainScript.SETTINGS_DEFAULTS)
+		_save_settings()
 	func _apply_settings(d: Dictionary) -> void:
 		colorblind = d["colorblind"]
 		_assist = d["assist"]
@@ -963,6 +977,57 @@ func test_options_discard_reverts_staged_changes_without_persisting() -> void:
 	Runner.T.eq(stub._saved, 0, "DISCARD writes nothing")
 	Runner.T.ok(not m._opts_dirty, "DISCARD clears the dirty flag")
 	Runner.T.eq(m.mode, Menu.Mode.SETUP, "DISCARD climbs to the OPTIONS opener")
+	m.free()
+	stub.free()
+
+
+# c4-11: RESET DEFAULTS is one confirmed action that reverts EVERY misconfigured setting to its
+# factory value and re-saves. Off-default state -> two-press confirm -> live fields reset + disk
+# write; the row then flips to the DISABLED "AT DEFAULTS" readout so it cannot fire on a no-op.
+func test_reset_defaults_restores_every_setting_and_resaves() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	# Misconfigure across every group: accessibility, haptics, display, and volume.
+	stub.colorblind = true
+	stub._assist = true
+	stub._motion = 0.0            # reduce motion ON
+	stub._rumble_on = false
+	stub._fullscreen = true
+	stub._win_scale = 3
+	stub._levels = {"SFX": 3, "Music": 0}
+	m.open(Menu.Mode.OPTS)
+	var ri := _row_index(m, "reset_defaults")
+	Runner.T.ok(ri >= 0, "OPTIONS exposes a RESET DEFAULTS row")
+	var row: Dictionary = m._menu_items()[ri]
+	Runner.T.ok(row["destructive"] and not row.get("disabled", false),
+		"off-default settings make RESET DEFAULTS an armable destructive row")
+	# First press ARMS (mis-press guard) — restores nothing yet.
+	m.sel = ri
+	m._confirm = -1
+	stub._saved = 0
+	m._press()
+	Runner.T.eq(m._confirm, ri, "first press ARMS the reset (no restore yet)")
+	Runner.T.ok(stub.colorblind and stub._assist, "settings untouched after only one press")
+	# Second press FIRES: every field returns to its ship default AND the settings persist.
+	m._press()
+	Runner.T.ok(not stub.colorblind and not stub._assist and stub._motion >= 0.5 and stub._rumble_on,
+		"reset restores accessibility + haptics to defaults")
+	Runner.T.ok(not stub._fullscreen and stub._win_scale == 2, "reset restores display defaults")
+	Runner.T.eq(stub._bus_vol("SFX"), 10, "reset restores SFX volume default")
+	Runner.T.eq(stub._bus_vol("Music"), 10, "reset restores Music volume default")
+	Runner.T.ok(stub._saved >= 1, "reset re-saves the restored settings to disk")
+	Runner.T.ok(not m._opts_dirty, "a committed reset leaves no unsaved-dirty state")
+	# The row now reads AT DEFAULTS + disabled, so a further press is a no-op (cannot re-arm).
+	var after: Dictionary = m._menu_items()[ri]
+	Runner.T.ok(after.get("disabled", false) and not after["destructive"],
+		"post-reset the row flips to the disabled AT DEFAULTS state")
+	Runner.T.eq(after.get("badge", ""), "AT DEFAULTS", "the disabled row carries the AT DEFAULTS badge")
+	m._confirm = -1
+	var saves_after: int = stub._saved
+	m._press()
+	Runner.T.eq(m._confirm, -1, "the disabled at-defaults row cannot be armed")
+	Runner.T.eq(stub._saved, saves_after, "a press on the no-op reset row writes nothing")
 	m.free()
 	stub.free()
 

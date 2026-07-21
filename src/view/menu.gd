@@ -866,7 +866,19 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# the dedicated key/button rebinding screen — a first-class OPTIONS entry, not a
 		# hidden corner shortcut, so keyboard/pad reach it by simply focusing it and pressing.
 		oitems.append({"id": "controls", "label": "CONTROLS (REBIND)", "destructive": false, "grp": 5})
-		oitems.append({"id": "reset_defaults", "label": "RESET DEFAULTS", "destructive": true, "grp": 6})
+		# c4-11: the RESET DEFAULTS row reflects whether there is anything TO revert. With any
+		# setting off its ship default it is an armable two-press DESTRUCTIVE row (the label
+		# picks up PRESS TWICE / PRESS AGAIN via destructive_label, so it reads its own
+		# armed/unarmed state). Once every setting matches SETTINGS_DEFAULTS -- including the
+		# instant a reset lands -- it goes DISABLED with an "AT DEFAULTS" badge (same locked
+		# convention as a completed DAILY RUN), so a pointless confirm can't fire and the flip
+		# is the visible "restore succeeded" feedback.
+		var reset_at_def: bool = main._settings_at_defaults()
+		oitems.append({
+			"id": "reset_defaults", "label": "RESET DEFAULTS",
+			"destructive": not reset_at_def, "disabled": reset_at_def,
+			"badge": "AT DEFAULTS" if reset_at_def else "", "grp": 6,
+		})
 		# c3-18: dirty-state exit. With unsaved staged changes the lone BACK splits into an explicit
 		# SAVE (commit) and DISCARD (revert) pair, so the deferred write is a visible, deliberate
 		# choice; a clean screen keeps the single BACK (nothing staged, so nothing to decide).
@@ -2588,7 +2600,7 @@ func _activate() -> void:
 				# Snapshot reduce-motion BEFORE the reset (which re-enables motion): a
 				# motion-sensitive player still gets a snapped, non-animated banner.
 				_reset_flash_anim = main._motion >= 0.5
-				main._reset_settings()   # applies SETTINGS_DEFAULTS AND persists (it calls _save_settings)
+				main._reset_settings()   # applies SETTINGS_DEFAULTS to the live fields AND persists (it calls _save_settings)
 				# c3-18: RESET DEFAULTS is a deliberate two-press COMMIT — main._reset_settings already
 				# wrote the defaults to disk, so they ARE the new baseline. Re-capture that baseline and
 				# clear staged-dirty: a following tweak-and-DISCARD now reverts to the just-written
@@ -2596,7 +2608,11 @@ func _activate() -> void:
 				# with disk).
 				_opts_snapshot = main._settings_snapshot()
 				_opts_dirty = false
-				_items_valid = false   # dirty cleared -> the exit row reverts SAVE/DISCARD back to a single BACK now
+				# c4-11: canonical row-invalidate (per the _mark_dirty contract) — the settings just
+				# changed, so the rows must rebuild THIS frame: the exit row reverts SAVE/DISCARD back to
+				# a single BACK, and the RESET DEFAULTS row itself now reads at-defaults and flips to the
+				# DISABLED "AT DEFAULTS" state, so the row can't be re-armed on a no-op.
+				_mark_dirty()
 				_reset_flash = 1.6
 				_flash_all_settings()   # c1-17: halo every reset row, not just the banner
 			"restart":
@@ -4493,8 +4509,19 @@ func _draw_opts_header() -> void:
 		# When focus is on RESET DEFAULTS, the summary line names EXACTLY what the
 		# two-press confirm will wipe — every settings group at once — so the player
 		# knows the blast radius BEFORE the second press, not just "this is destructive".
-		_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / DISPLAY TO DEFAULTS",
-			OPTS_SUBLINE_Y, 8, WARN_COL)
+		# c4-11: once armed (first press latched _confirm on this row), the header flips
+		# from the blast-radius description to the explicit second-press CONFIRM prompt, so
+		# the header tracks the same armed/unarmed state the row label does — the player is
+		# never mid-confirm reading passive "this restores X" copy. When the row is DISABLED
+		# (every setting already at its factory default) the header says so plainly instead of
+		# threatening a wipe that would change nothing.
+		if _menu_items()[sel].get("disabled", false):
+			_center_text("EVERY SETTING IS ALREADY AT ITS FACTORY DEFAULT", OPTS_SUBLINE_Y, 8, SUBTITLE_COL)
+		elif _confirm >= 0 and _confirm == sel:
+			_center_text("PRESS AGAIN TO RESTORE ALL DEFAULTS", OPTS_SUBLINE_Y, 8, WARN_COL)
+		else:
+			_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / DISPLAY TO DEFAULTS",
+				OPTS_SUBLINE_Y, 8, WARN_COL)
 	else:
 		_center_text(a11y_summary(main._motion < 0.5, main.colorblind, main._assist,
 			main._rumble_on, main._fullscreen), OPTS_SUBLINE_Y, 8, SUBTITLE_COL)

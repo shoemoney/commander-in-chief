@@ -2941,6 +2941,18 @@ func _settings_snapshot() -> Dictionary:
 	}
 
 
+# c4-11: true when every persisted setting already equals its ship default, so the OPTIONS
+# RESET DEFAULTS row can disable itself (nothing to revert) and flip to an "AT DEFAULTS" badge
+# the instant a reset lands -- the flip is itself the "it worked" feedback. Compares the live
+# snapshot (the exact dict RESET writes) against SETTINGS_DEFAULTS, so the two can never drift.
+func _settings_at_defaults() -> bool:
+	var snap := _settings_snapshot()
+	for k in SETTINGS_DEFAULTS:
+		if snap[k] != SETTINGS_DEFAULTS[k]:
+			return false
+	return true
+
+
 func _save_settings() -> void:
 	# Persist only the [settings] keys; load-then-set so we never clobber
 	# [best]/[hall]/[seen]. Called from the OPTIONS SAVE commit and the rebind toggles.
