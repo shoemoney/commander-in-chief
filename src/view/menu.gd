@@ -30,6 +30,8 @@ const BTN := Vector2(222, 36)
 const ARROW_SZ := 10.0        # arrow glyph box edge (px)
 const ARROW_L_OFF := 23.0     # left arrow's far (outer) edge, left of the plate
 const ARROW_R_GAP := 5.0      # right arrow's near edge, right of the plate
+const ARROW_HIT_PAD := 3.0    # c4-15: click-target forgiveness grown around each drawn arrow rect, so the mouse box and the visible cycle glyph derive from ONE geometry (toggle_arrow_rects) and can't drift
+const ARROW_REST_ALPHA := 0.4 # c4-15: resting opacity of an UNSELECTED cycle row's glyph — dim enough to read as a hint, bright enough to flag the row as cyclable at a glance (the selected row overrides brighter + pulses)
 # c1-13: HALL rows per page. The board holds far more runs than fit on one screen,
 # so _draw_hall pages HALL_PAGE_ROWS at a time and up/down turns the page.
 const HALL_PAGE_ROWS := 8
@@ -1840,23 +1842,35 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_nav(1, 0)
 					return
 			var crow := _row_at(ev.position)
-			# c1-19: a click on the SELECTED row's ◄/► cycle affordance must step by SIDE (left =
-			# down, right = up) — checked BEFORE the row-plate _press() so a directional row (WINDOW
-			# SCALE, volume) can never fall through to _press()'s upward-only Enter step even if the
-			# arrow hitbox overlaps the plate. The arrows draw OUTSIDE the plate, so without this a
-			# mouse-only player would lose the ◄ (down) direction entirely.
-			if mode != Mode.HALL and mode != Mode.HOWTO \
-					and _row_cycles(_menu_items()[sel]):
+			# c1-19/c4-15: a click on a cycle row's left/right affordance must step by SIDE (left =
+			# down, right = up). This runs BEFORE the row-plate _press() branch below — that ORDERING
+			# is the real safeguard: a directional row (WINDOW SCALE, volume) can never fall through to
+			# _press()'s upward-only Enter step, even for the hair of overlap where an arrow's grown
+			# hitbox meets the plate edge. The arrow columns sit in _row_geometry's outer margins, so
+			# they need their own Rect2 hit-test rather than the row band _row_at reports.
+			# c4-15: scan EVERY cycle row (not just sel), so each of the now-always-drawn glyphs is a
+			# live click target that selects AND steps its own row. Both boxes come from the SAME
+			# toggle_arrow_rects _draw renders, grown by the shared ARROW_HIT_PAD, so the visible glyph
+			# and its click target can never drift.
+			if mode != Mode.HALL and mode != Mode.HOWTO:
 				var g := _row_geometry()
-				var arows := toggle_arrow_rects(g, sel)   # same source _draw renders from
-				var la := arows[0].grow(3.0)
-				var ra := arows[1].grow(3.0)
-				if la.has_point(ev.position) or ra.has_point(ev.position):
-					# Side matters: volume + WINDOW SCALE step down/up per arrow, so a mouse-only
-					# player has BOTH directions (the ◄ arrow lowers). Plain toggles flip either way.
-					_nav(0, -1 if la.has_point(ev.position) else 1)
-					_mark_dirty()
-					return
+				var items := _menu_items()
+				for ri in items.size():
+					# c4-15: only LIVE cycle rows take an arrow click — the SAME _row_cyclable gate
+					# _draw uses to emit the glyph, so a disabled/locked setting that shows no arrow
+					# can't secretly still be clicked (the two paths can't drift).
+					if not _row_cyclable(items[ri]):
+						continue
+					var arows := toggle_arrow_rects(g, ri)   # same source _draw renders from
+					var la := arows[0].grow(ARROW_HIT_PAD)
+					var ra := arows[1].grow(ARROW_HIT_PAD)
+					if la.has_point(ev.position) or ra.has_point(ev.position):
+						sel = ri   # select the clicked row so _nav's hmove step lands on it
+						# Side matters: volume + WINDOW SCALE step down/up per arrow, so a mouse-only
+						# player has BOTH directions (the left arrow lowers). Plain toggles flip either way.
+						_nav(0, -1 if la.has_point(ev.position) else 1)
+						_mark_dirty()
+						return
 			if crow >= 0:
 				sel = crow
 				_press()
@@ -2461,6 +2475,14 @@ func _step_vol(bus: String, delta: int) -> void:
 # footer legend and the missing-copy dev guard key off. A future stepper just sets "step": true.
 func _row_cycles(item: Dictionary) -> bool:
 	return item.get("id", "") in _TOGGLES or item.has("step")
+
+
+# c4-15: a row is a LIVE cycle affordance — draws the ◄/► glyphs AND accepts an arrow click — only
+# when it cycles AND isn't disabled. Both _draw (glyph) and _unhandled_input (hit-test) route through
+# this one predicate so the "disabled/locked settings never show or take an arrow" rule can't drift
+# apart between the two paths (previously each spelled the disabled check itself).
+func _row_cyclable(item: Dictionary) -> bool:
+	return _row_cycles(item) and not item.get("disabled", false)
 
 
 # c1-19: step the integer window scale one clean rung — ◄/► and Enter share this, so arrows and
@@ -3571,11 +3593,18 @@ func _draw() -> void:
 		if badge != "":
 			Art.text(self, badge, Vector2(r.end.x - 8.0 - badge_w, cy + 3.0), 9,
 				DISABLED_TEXT if disabled else Color(1.0, 0.85, 0.5, 0.85))
-		# Left/right cycle affordance on the selected toggle row — toggles flipped
-		# silently and read identical to action rows. mi_arrow points RIGHT;
-		# a negative rect width flips it for the left side.
-		if selected and _row_cycles(mitems[k]):
-			var fcol := Color(1.0, 0.92, 0.55, 0.55 + 0.45 * (0.0 if main._motion < 0.5 else Art.pulse(0.2)))
+		# c4-15: left/right cycle affordance drawn on EVERY cycle row, not just the selected one.
+		# A dim resting glyph flags "this row cycles (left/right / Enter)" so keyboard users can
+		# tell a settings row from an action row at a glance (previously the arrows only appeared —
+		# and only pulsed — on select, so the affordance was easy to miss). The SELECTED row
+		# brightens and pulses (static under Reduce Motion); the rest sit at a quiet resting alpha.
+		# Geometry is toggle_arrow_rects, the SAME source the mouse hit-test grows its click box
+		# from, so glyph and target can't drift. mi_arrow points RIGHT; a negative rect width flips
+		# it for the left side.
+		if _row_cyclable(mitems[k]):
+			var pulse := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
+			var fa := (0.55 + 0.45 * pulse) if selected else ARROW_REST_ALPHA
+			var fcol := Color(1.0, 0.92, 0.55, fa)
 			var at := Art.tex("mi_arrow")
 			var arows := toggle_arrow_rects(g, k)   # shared with the mouse hit-test
 			var lft := arows[0]
