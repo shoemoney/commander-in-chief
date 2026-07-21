@@ -130,6 +130,238 @@ func test_select_priority_all_fit() -> void:
 	Runner.T.ok(sel["keep"].has("a") and sel["keep"].has("b"), "both retained")
 
 
+# c4-03: the +N clip tints red (alert) only when a DROPPED chip is an actionable readout above the
+# vanity band top; dropping only vanity records / persistent charges stays the calm gold clip. The
+# boundary is passed in from the caller's own band table (never a magic literal), so this pins the
+# derived boundary against drift.
+func test_ovf_alert_only_on_dropped_actionable() -> void:
+	var vtop := int(HudIcons.CHIP_PRIO["flawless"])   # top of the row-0 vanity band, read from the table
+	var cands: Array = [
+		{"id": "mutator", "prio": int(HudIcons.CHIP_PRIO["mutator"]), "w": 60.0},   # lethal-timer (actionable)
+		{"id": "best", "prio": int(HudIcons.CHIP_PRIO["best"]), "w": 40.0},         # vanity record
+		{"id": "deathless", "prio": int(HudIcons.CHIP_PRIO["deathless"]), "w": 40.0}, # vanity, below the line
+		{"id": "supplies", "prio": int(HudIcons.CHIP_PRIO["supplies"]), "w": 40.0}, # discoverability cue (below vanity)
+	]
+	# The exact list the reason statement names — SUPPLIES + BEST + DEATHLESS all shed while the
+	# actionable mutator is kept -> calm gold clip (no false alarm on a vanity-only cull).
+	Runner.T.ok(not HudIcons._ovf_alert(cands, {"mutator": true}, vtop),
+		"dropping only SUPPLIES / BEST / DEATHLESS does NOT alert")
+	# The actionable mutator dropped -> red alert clip.
+	Runner.T.ok(HudIcons._ovf_alert(cands, {"best": true, "deathless": true}, vtop),
+		"a dropped objective/lethal readout alerts")
+	# flawless itself sits AT the boundary (strictly-above test): dropping it alone stays calm.
+	Runner.T.ok(not HudIcons._ovf_alert([{"id": "flawless", "prio": vtop, "w": 30.0}], {}, vtop),
+		"the vanity band top is below the alert boundary (strictly-above)")
+	# Nothing dropped -> no alert.
+	Runner.T.ok(not HudIcons._ovf_alert(cands, {"mutator": true, "best": true, "deathless": true, "supplies": true}, vtop),
+		"a fully-kept row never alerts")
+	# Malformed candidates (missing id/prio, or a non-dict) are skipped, never crashed on.
+	Runner.T.ok(not HudIcons._ovf_alert([{"foo": 1}, "junk"], {}, vtop),
+		"a malformed candidate set does not crash the alert check")
+
+	# Buff row: a TIMED buff (above persistent) alerts; a persistent charge alone does not.
+	var bp := int(HudIcons.BUFF_PRIO_PERSIST)
+	var buffs: Array = [
+		{"id": 0, "prio": bp, "w": 20.0},                        # vest (persistent)
+		{"id": 1, "prio": HudIcons._buff_prio(120), "w": 30.0},  # a live 2s timer (actionable)
+	]
+	Runner.T.ok(HudIcons._ovf_alert(buffs, {}, bp), "a dropped timed buff alerts on the buff row")
+	Runner.T.ok(not HudIcons._ovf_alert(buffs, {1: true}, bp),
+		"dropping only the persistent charge does NOT alert")
+	# MIXED drop: a vanity record AND an actionable readout both shed together -> the alert still fires
+	# (one actionable culled is enough), even though vanity chips are in the dropped set too.
+	Runner.T.ok(HudIcons._ovf_alert(cands, {}, vtop),
+		"a mixed drop (vanity + actionable both culled) still raises the alert")
+
+	# The alert bool maps to the named color constants in exactly one place (_ovf_palette), shared by
+	# the real _emit_ovf and the capture — assert both moods resolve to their constants.
+	var alert_pal := HudIcons._ovf_palette(true)
+	Runner.T.ok(alert_pal["border"] == HudIcons.OVF_BORDER_ALERT and alert_pal["ink"] == HudIcons.OVF_INK_ALERT,
+		"alert palette is the warn-red border + ink constants")
+	var calm_pal := HudIcons._ovf_palette(false)
+	Runner.T.ok(calm_pal["border"] == HudIcons.OVF_BORDER_VANITY and calm_pal["ink"] == HudIcons.OVF_INK_VANITY,
+		"vanity palette is the calm gold border + ink constants")
+
+
+# c4-03 END-TO-END: drive the REAL row-0 planner (measure pass -> CHIP_PRIO priority selection ->
+# +N reserve) on a crowded endless row, then feed its kept set through the SAME _ovf_alert the draw
+# path uses and render the clip on a capture hud. Proves the priority strip plans by CHIP_PRIO, the
+# +N chip is actually drawn, and its alert flag reflects whether an actionable chip was culled.
+func test_row0_overflow_alert_end_to_end() -> void:
+	var vtop := int(HudIcons.CHIP_PRIO["flawless"])
+	# --- crowded row where an ACTIONABLE readout is forced to overflow -> red clip ---
+	var hot := _ChipCaptureHud.new()
+	hot.main = _RowMain.new()
+	hot.main.best_wave = 1
+	var sim := SimWorld.new(0, 1, "endless")
+	# A maximally-crowded endless row: streak (vanity), the wave-4 HOSTILES + WAVE dashboard, a
+	# mutator, and an active flashbang — so the optional run holds BOTH vanity chips and several
+	# actionable objective/lethal chips for the planner to choose between.
+	sim.kill_streak = 12
+	sim.kill_streak_timer = 30
+	sim.wave = 4              # >1 so the HOSTILES/WAVE dashboard (objective band) is enumerated
+	sim.wave_mod = 4         # a live mutator chip (lethal band, prio > vanity_top -> actionable)
+	sim.flash_ticks = 120    # an active flashbang chip (lethal band -> actionable)
+	# A usable edge (px) far narrower than the actionable chips' combined width, so the priority
+	# planner cannot keep them all and MUST shed at least one chip from above the vanity band into
+	# the +N clip — the "fight peaks, combat readout culled" case the alert exists to flag. Well
+	# under the ~130px HOSTILES dashboard alone, guaranteeing overflow regardless of exact widths.
+	const TIGHT_EDGE := 150.0
+	hot._fit_full = TIGHT_EDGE
+	var plan: Dictionary = hot._plan_row0(sim, 8.0, 6.0, false)
+	Runner.T.ok(int(plan["hidden"]) > 0, "the crowded row overflows into a +N clip")
+	var hot_alert := HudIcons._ovf_alert(hot._opt_cands, plan["keep"], vtop)
+	Runner.T.ok(hot_alert, "an actionable objective/lethal readout was culled on the tight row")
+	hot._measure = false
+	hot._opt_keep = plan["keep"]
+	hot.boxes = []
+	# Anchor via the SAME _ovf_slot_w() production reserves with, so the clip's right edge matches the
+	# real draw path exactly (not a "+N"-only width that could disagree once alert swaps in the "!").
+	var ow: float = hot._ovf_slot_w(int(plan["hidden"]))
+	hot._ovf_chip(hot._fit_full - ow, 6.0, int(plan["hidden"]), hot_alert)
+	Runner.T.ok(_first_kind(hot.boxes, "ovf")["box"].end.x <= hot._fit_full + 0.01,
+		"the alert clip's right edge stays within the usable edge")
+	var hot_clip := _first_kind(hot.boxes, "ovf")
+	Runner.T.ok(hot_clip.get("alert", false), "the drawn +N clip carries the red alert flag")
+	# The clip renders in the warn-red dialect, not the calm gold — assert the actual drawn colors.
+	Runner.T.ok(hot_clip.get("border") == HudIcons.OVF_BORDER_ALERT, "the +N clip border is the alert red")
+	Runner.T.ok(hot_clip.get("ink") == HudIcons.OVF_INK_ALERT, "the +N numeral ink is the alert red")
+	# Non-color cue: the alert clip leads with "!" (not "+"), so colorblind players still read urgency.
+	Runner.T.ok(String(hot_clip.get("id", "")).begins_with("!"), "the alert clip leads with a '!' glyph, not '+'")
+	hot.main.free()
+	hot.free()
+
+	# --- REAL row-0 path where the actionable chips FIT and only VANITY overflows -> calm gold clip.
+	# Same crowded endless row, but the usable edge is sized (from a measure pass) to hold exactly the
+	# actionable chips + the +N slot, so the priority planner keeps every objective/lethal readout and
+	# sheds only the vanity ones. Drives _plan_row0 + the real _ovf_alert/_ovf_chip draw, proving the
+	# gold mood is emitted by production, not just the red one.
+	var calm := _ChipCaptureHud.new()
+	calm.main = _RowMain.new()
+	calm.main.best_wave = 1
+	var sim2 := SimWorld.new(0, 1, "endless")
+	sim2.kill_streak = 12
+	sim2.kill_streak_timer = 30   # streak (vanity)
+	sim2.wave = 4                 # HOSTILES + WAVE (objective) + DEATHLESS (vanity) all enumerate
+	sim2.deaths_this_wave = 0
+	sim2.wave_mod = 4             # mutator (lethal band, actionable)
+	sim2.flash_ticks = 120        # flashbang (lethal band, actionable)
+	# Measure pass at full width to learn each chip's band + width.
+	calm._fit_full = HudIcons.RIGHT
+	var mplan: Dictionary = calm._plan_row0(sim2, 8.0, 6.0, false)
+	var act_sum := 0.0
+	var van_count := 0
+	var van_min := 1e9
+	for c in calm._opt_cands:
+		if int(c["prio"]) > vtop:
+			act_sum += float(c["w"])          # actionable chips we want KEPT
+		else:
+			van_count += 1
+			van_min = minf(van_min, float(c["w"]))
+	Runner.T.ok(van_count > 0 and act_sum > 0.0, "the row has BOTH actionable and vanity chips to split")
+	var mand: float = float(mplan["mandatory_sum"])
+	# Edge holds mandatory + all actionable + the +N reserve, but NOT even the narrowest vanity chip.
+	var edge := 8.0 + mand + act_sum + calm._ovf_slot_w(van_count) + minf(2.0, van_min - 1.0)
+	calm._fit_full = edge
+	var plan2: Dictionary = calm._plan_row0(sim2, 8.0, 6.0, false)
+	var keep2: Dictionary = plan2["keep"]
+	Runner.T.ok(int(plan2["hidden"]) > 0, "the sized row still overflows (vanity sheds)")
+	for c in calm._opt_cands:
+		if int(c["prio"]) > vtop:
+			Runner.T.ok(keep2.has(c["id"]), "actionable chip '%s' is KEPT at the sized edge" % c["id"])
+	var calm_alert := HudIcons._ovf_alert(calm._opt_cands, keep2, vtop)
+	Runner.T.ok(not calm_alert, "only vanity shed -> the real row-0 path raises NO alert")
+	calm._measure = false
+	calm._opt_keep = keep2
+	calm.boxes = []
+	var ow2: float = calm._ovf_slot_w(int(plan2["hidden"]))
+	calm._ovf_chip(calm._fit_full - ow2, 6.0, int(plan2["hidden"]), calm_alert)
+	var calm_clip := _first_kind(calm.boxes, "ovf")
+	Runner.T.ok(not calm_clip.get("alert", true), "the drawn +N clip carries NO alert flag")
+	# The clip renders in the calm gold dialect in the real draw path — assert the actual drawn colors.
+	Runner.T.ok(calm_clip.get("border") == HudIcons.OVF_BORDER_VANITY, "the +N clip border is the calm gold")
+	Runner.T.ok(calm_clip.get("ink") == HudIcons.OVF_INK_VANITY, "the +N numeral ink is the calm gold")
+	# The calm clip keeps the "+" glyph; only the alert clip swaps to "!".
+	Runner.T.ok(String(calm_clip.get("id", "")).begins_with("+"), "the calm clip keeps the '+' glyph")
+	# The reserved slot is the _ovf_slot_w CONTRACT (the wider of the two moods + OVF_PAD), so BOTH the
+	# calm "+N" and the alert "!N" label provably fit their reserved slot regardless of which font glyph
+	# is wider — assert against that contract, not the brittle "'!' <= '+'" font accident.
+	for n in [1, 3, 12]:
+		var slot: float = calm._ovf_slot_w(n)
+		Runner.T.ok(calm._tw("+%d" % n) + HudIcons.OVF_PAD <= slot + 0.01, "the '+%d' label fits the reserved slot" % n)
+		Runner.T.ok(calm._tw("!%d" % n) + HudIcons.OVF_PAD <= slot + 0.01, "the '!%d' label fits the reserved slot" % n)
+	calm.main.free()
+	calm.free()
+
+
+# c4-03 CONSERVATION: on a maximally-crowded row-0, every enumerated optional chip is ACCOUNTED FOR —
+# either kept (drawn) or counted into the +N clip. kept + hidden == total, so no optional chip can be
+# silently omitted (the whole point of the priority-strip + more-chip system). Replays the real
+# measure + plan at a tight edge.
+func test_row0_no_optional_chip_silently_dropped() -> void:
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h.main.best_wave = 1
+	var sim := SimWorld.new(0, 1, "endless")
+	sim.kill_streak = 12
+	sim.kill_streak_timer = 30
+	sim.wave = 4
+	sim.deaths_this_wave = 0
+	sim.wave_mod = 4
+	sim.flash_ticks = 120
+	h._fit_full = 140.0   # tight -> several chips overflow
+	var plan: Dictionary = h._plan_row0(sim, 8.0, 6.0, false)
+	var total := h._opt_cands.size()
+	var kept := 0
+	for c in h._opt_cands:
+		if plan["keep"].has(c["id"]):
+			kept += 1
+	Runner.T.ok(total > 0, "the crowded row enumerated optional chips")
+	Runner.T.ok(int(plan["hidden"]) > 0, "the tight row really overflows")
+	Runner.T.eq(kept + int(plan["hidden"]), total, "kept + hidden == total: no optional chip vanishes uncounted")
+	h.main.free()
+	h.free()
+
+
+# c4-03: mechanized call-site AUDIT of the silent-drop removal, scanning the real hud.gd source (code
+# only, comments stripped). (1) The legacy `_fits`/`_fit_right` guards that dropped SUPPLIES/BEST/
+# DEATHLESS/mutator/buff chips with no cue are GONE — no definition or call of either survives (only the
+# routed successors _fits2 / _row_fits / _pip_fits remain). (2) Every `_row_fits(` guard on a direct-draw
+# row routes its miss through `_row_ovf` (a +N clip), never a bare draw — so no player-row readout can
+# spill off-panel uncounted. This is the proof the reviewer can verify, not a comment asserting removal.
+func test_no_legacy_silent_drop_fit_helpers() -> void:
+	var f := FileAccess.open("res://src/view/hud.gd", FileAccess.READ)
+	Runner.T.ok(f != null, "hud.gd source opens for the call-site audit")
+	var src := f.get_as_text()
+	f.close()
+	# Strip line comments so a `#`-comment mentioning a helper never trips the code scan.
+	var code_lines: Array = []
+	for line in src.split("\n"):
+		var hpos := line.find("#")
+		code_lines.append(line if hpos < 0 else line.substr(0, hpos))
+	var code := "\n".join(code_lines)
+	# No legacy helper survives. Word-boundary so `_fits(` matches ONLY the bare helper, never
+	# _fits2(/_row_fits(/_pip_fits(, and `_fit_right` never matches _fit_full.
+	var re := RegEx.new()
+	re.compile("(?<![A-Za-z0-9_])_fits\\(|(?<![A-Za-z0-9_])_fit_right\\b")
+	var hit := re.search(code)
+	Runner.T.ok(hit == null, "no legacy _fits(/_fit_right silent-drop guard remains in hud.gd code")
+	# Every `_row_fits` miss-guard routes to `_row_ovf` within a few lines (the whole point: a miss
+	# surfaces a +N, never a silent clip). Count the guards so the audit fails if they all vanish too.
+	var guards := 0
+	for i in code_lines.size():
+		if not String(code_lines[i]).contains("not _row_fits("):
+			continue
+		guards += 1
+		var routed := false
+		for j in range(i, mini(i + 4, code_lines.size())):
+			if String(code_lines[j]).contains("_row_ovf("):
+				routed = true
+				break
+		Runner.T.ok(routed, "the _row_fits guard at line %d routes its miss to _row_ovf" % (i + 1))
+	Runner.T.ok(guards >= 3, "direct-draw player rows still fit-guard through _row_fits (found %d)" % guards)
+
+
 # c3-01: the shared tier-overflow fit (_ovf_fit) that BOTH row-0 (_select_with_reserve) and the
 # buff tail (_buff_chips) route through. Exercised directly on the selection function, not via a
 # render capture. A high-priority chip + a wide low-priority chip on a budget that holds the high
@@ -1182,6 +1414,32 @@ func test_buff_chips_real_render_p1_p2_bounds_and_overlap() -> void:
 		Runner.T.ok(absf(float(geoms[0][i]) - float(geoms[1][i])) < 0.01, "P1/P2 buff primitive %d shares an x position" % i)
 
 
+# c4-03 END-TO-END (buff row): the actual _buff_chips() on a tight edge crowded with TIMED buffs must
+# shed at least one timed countdown (all timed buffs outrank the persistent band) and surface it as a
+# RED "!" clip — the "an expiring buff you may need to re-up is now hidden" cue, in the real draw path.
+func test_buff_chips_overflow_alerts_on_hidden_timer() -> void:
+	# Four timed buffs, no persistent charge — so every candidate is above BUFF_PRIO_PERSIST and any
+	# chip forced into the clip is an actionable countdown (alert), not a persistent charge.
+	var buffs := {
+		"vest": false, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
+		"rend_ticks": 300, "smoke_ticks": 300, "claymores": 0,
+	}
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h._fit_full = 90.0    # far too tight for four ~2-digit-second buff chips -> the tail overflows
+	h._measure = false
+	h.boxes = []
+	h._buff_chips(buffs, 8.0, 20.0, 0)
+	Runner.T.ok(_has_kind(h.boxes, "ovf"), "the crowded timed-buff row draws a +N clip")
+	var clip := _first_kind(h.boxes, "ovf")
+	Runner.T.ok(clip.get("alert", false), "a hidden timed buff raises the alert on the buff row")
+	Runner.T.ok(String(clip.get("id", "")).begins_with("!"), "the buff-row alert clip leads with '!'")
+	Runner.T.ok(clip.get("border") == HudIcons.OVF_BORDER_ALERT, "the buff-row clip border is the alert red")
+	Runner.T.ok(clip.get("ink") == HudIcons.OVF_INK_ALERT, "the buff-row clip ink is the alert red")
+	h.main.free()
+	h.free()
+
+
 # c3-01: the buff tail reserves the EXACT "+N" clip width, not the crude worst-case "+chips.size()".
 # On a row where only ONE buff overflows, the old worst-case reserve (sized for "every chip hidden")
 # subtracted more width than the real "+1" clip needs, which could drop a SECOND buff that actually
@@ -1379,6 +1637,57 @@ func test_dead_row_revive_clips_when_starved() -> void:
 	Runner.T.ok(starved_ovf, "starved dead row surfaces a +N clip instead of spilling the prompt past RIGHT")
 	Runner.T.ok(not starved_revive, "starved dead row does not draw the REVIVE prompt off-panel")
 	Runner.T.ok(end2 <= h2._fit_full + 0.01, "starved dead row cursor ends within the usable edge")
+	h2.main.free()
+	h2.free()
+
+
+# c4-03: the OTHER direct-draw _row_fits miss branch — a downed player in LAST STAND draws a bare
+# "K.I.A." with no chip run, so its fit guard (a distinct call site from the REVIVE path above) must
+# route the miss into the shared +N clip, never a silent clip past RIGHT. Drives the real _dead_chips
+# render at a starved edge, proving the mandatory death-state readout also never vanishes uncounted.
+func test_dead_row_kia_clips_into_ovf_when_starved() -> void:
+	var sim := SimWorld.new(0, 1, "endless")
+	var p: Dictionary = sim.players[0]
+	sim.last_stand = true          # forces the K.I.A. branch (before the RALLYING / REVIVE paths)
+	p["broke_timer"] = 0
+	# Roomy edge: K.I.A. draws, nothing clips.
+	var h := _FrameCaptureHud.new()
+	h.main = _FrameMain.new()
+	h.main.sim = sim
+	h._fit_full = HudIcons.RIGHT
+	h._measure = false
+	var end_px: float = h._dead_chips(p, 8.0, 20.0, 0, sim)
+	var roomy_ovf := false
+	var has_kia := false
+	for b in h.boxes:
+		Runner.T.ok(b["box"].end.x <= h._fit_full + 0.01, "roomy K.I.A. '%s' within the usable edge" % b["id"])
+		if b["k"] == "ovf":
+			roomy_ovf = true
+		if b["k"] == "text" and String(b["id"]) == "K.I.A.":
+			has_kia = true
+	Runner.T.ok(has_kia, "roomy last-stand row draws the K.I.A. readout")
+	Runner.T.ok(not roomy_ovf, "roomy last-stand row surfaces no +N clip (K.I.A. fits)")
+	Runner.T.ok(end_px <= h._fit_full + 0.01, "roomy last-stand row cursor ends within the usable edge")
+	h.main.free()
+	h.free()
+	# Starved edge: too narrow for K.I.A. -> the miss routes to a bounded +N, K.I.A. is NOT drawn off-panel.
+	var h2 := _FrameCaptureHud.new()
+	h2.main = _FrameMain.new()
+	h2.main.sim = sim
+	h2._fit_full = 50.0
+	h2._measure = false
+	var end2: float = h2._dead_chips(p, 8.0, 20.0, 0, sim)
+	var starved_ovf := false
+	var starved_kia := false
+	for b in h2.boxes:
+		Runner.T.ok(b["box"].end.x <= h2._fit_full + 0.01, "starved last-stand '%s' within the usable edge" % b["id"])
+		if b["k"] == "ovf":
+			starved_ovf = true
+		if b["k"] == "text" and String(b["id"]) == "K.I.A.":
+			starved_kia = true
+	Runner.T.ok(starved_ovf, "starved last-stand row routes the _row_fits miss into a +N clip")
+	Runner.T.ok(not starved_kia, "starved last-stand row does not draw K.I.A. off-panel")
+	Runner.T.ok(end2 <= h2._fit_full + 0.01, "starved last-stand row cursor ends within the usable edge")
 	h2.main.free()
 	h2.free()
 
@@ -1627,6 +1936,13 @@ func test_row0_pathological_fallback_captured_render() -> void:
 	var plan: Dictionary = h._plan_row0(sim, 600.0, 6.0, false)
 	Runner.T.eq(plan["tele"]["kind"], "", "the pathological head DROPS the telegraph (defined, not silent)")
 	Runner.T.eq(int(plan["hidden"]), cand_n + 1, "+N accounts for every demoted candidate PLUS the dropped telegraph")
+	Runner.T.ok(plan.get("tele_dropped", false), "the plan flags the telegraph as dropped")
+	# c4-03: the dropped PRESSURE telegraph is an ACTIONABLE objective, so the row's alert must fire
+	# even though every remaining CANDIDATE culled is a vanity chip — the clip goes red via the OR-ed
+	# tele_dropped flag, exactly as the real _draw path computes it.
+	var actionable_culled := HudIcons._ovf_alert(h._opt_cands, plan["keep"], int(HudIcons.CHIP_PRIO["flawless"])) \
+		or bool(plan.get("tele_dropped", false))
+	Runner.T.ok(actionable_culled, "a dropped telegraph raises the red alert even with only vanity candidates culled")
 	# Render the real row-0 body (candidate pass + telegraph + +N) through the seams.
 	h._measure = false
 	h._opt_keep = plan["keep"]
@@ -1635,10 +1951,12 @@ func test_row0_pathological_fallback_captured_render() -> void:
 	h._row0_opt(sim, 600.0, 6.0, false)   # every candidate demoted -> paints nothing
 	if plan["tele"]["kind"] != "":
 		h._draw_telegraph(sim, plan["tele"], plan["tele_left"], 6.0)
-	var ovf_w: float = h._tw("+%d" % int(plan["hidden"])) + HudIcons.OVF_PAD
-	var ovf_right: float = h._ovf_chip(HudIcons.RIGHT - ovf_w, 6.0, int(plan["hidden"]))
+	var ovf_w: float = h._ovf_slot_w(int(plan["hidden"]))
+	var ovf_right: float = h._ovf_chip(HudIcons.RIGHT - ovf_w, 6.0, int(plan["hidden"]), actionable_culled)
 	Runner.T.eq(h.boxes.size(), 1, "only the +N chip renders under the extreme head")
 	Runner.T.eq(h.boxes[0]["k"], "ovf", "the single rendered box is the +N affordance")
+	Runner.T.ok(String(h.boxes[0].get("id", "")).begins_with("!"), "the dropped-telegraph clip leads with '!'")
+	Runner.T.ok(h.boxes[0].get("border") == HudIcons.OVF_BORDER_ALERT, "the dropped-telegraph clip is the alert red")
 	var box: Rect2 = h.boxes[0]["box"]
 	Runner.T.ok(box.position.x >= 0.0, "the +N stays on-screen (left)")
 	Runner.T.ok(box.end.x <= HudIcons.RIGHT + 0.01, "the +N never spills the usable edge (right)")
@@ -1795,8 +2113,13 @@ class _ChipCaptureHud extends HudIcons:
 		boxes.append({"k": "text", "id": txt, "box": Rect2(pos - Vector2(0.0, f.get_ascent(HudIcons.FONT_SIZE)), s), "alpha": _c.a})
 	func _emit_icon(icon: String, r: Rect2, mod := Color.WHITE) -> void:
 		boxes.append({"k": "icon", "id": icon, "box": r, "alpha": mod.a})
-	func _emit_ovf(ox: float, y: float, w: float, txt: String) -> void:
-		boxes.append({"k": "ovf", "id": txt, "box": Rect2(ox, y + 1.0, w, 12.0)})
+	func _emit_ovf(ox: float, y: float, w: float, txt: String, alert := false) -> void:
+		# c4-03: record the EXACT frame/ink colors the production _emit_ovf would draw with (via the
+		# shared _ovf_palette), so a test can assert the clip renders warn-red vs gold — not just that
+		# the alert bool was passed.
+		var pal := HudIcons._ovf_palette(alert)
+		boxes.append({"k": "ovf", "id": txt, "box": Rect2(ox, y + 1.0, w, 12.0),
+			"alert": alert, "border": pal["border"], "ink": pal["ink"]})
 	func _emit_bg_rect(r: Rect2, _c: Color) -> void:
 		boxes.append({"k": "bg", "id": "bg", "box": r})
 	func _emit_marker(r: Rect2, _c: Color) -> void:

@@ -36,25 +36,25 @@ const PIP_SUPPRESS := Vector2(RIGHT, RIGHT)  # zero-width fail-closed band: _pip
 const OVF_PAD := 8.0   # c1-06: horizontal padding inside the "+N" overflow chip; the slot
                        # reserved for it is the MEASURED text width plus this, never a fixed
                        # guess that could under- or over-reserve.
-# c2-01: THE ONE fixed chip priority order, banded economy > objective > lethal timers >
-# vanity. Every optional row-0 chip's _fits2 priority is a NAMED entry here, so "what survives
-# a crowded row" lives in a single auditable table instead of scattered magic numbers — no
-# vanity readout (BEST/DEATHLESS/streak/records) can ever be tuned above a combat one by
-# accident, and higher == kept first. The economy HEAD (chest/score/tokens) is undroppable, so
-# it needs no entry; every dropped chip of any band surfaces in the shared "+N" clip chip
-# (nothing vanishes uncounted). Bands are spaced by 10 so a future chip slots inside one
-# cleanly. Buff-row chips use _buff_prio() below, not this table.
+# c4-03: the "+N" clip palette — one dark backing, two frame/ink pairs. VANITY (calm gold) = only
+# records/persistent charges culled; ALERT (warn-red) = an objective/lethal readout culled while the
+# row peaked. Named so the moods can't drift as inline RGB. Red-vs-gold is hue-only (a deuteranope can
+# miss it), so _ovf_chip ALSO swaps "+"->"!" as a redundant shape channel (see the dual-channel × tag).
+const OVF_BACKING := Color(0.1, 0.11, 0.09, 0.85)
+const OVF_BORDER_VANITY := Color(1.0, 0.8, 0.4, 0.4)
+const OVF_INK_VANITY := Color(1.0, 0.85, 0.45)
+const OVF_BORDER_ALERT := Color(1.0, 0.4, 0.3, 0.55)
+const OVF_INK_ALERT := Color(1.0, 0.5, 0.4)
+# c2-01: THE ONE fixed chip priority order, banded economy > objective > lethal > vanity. Every
+# optional row-0 chip's _fits2 priority is a NAMED entry here (higher == kept first), so "what
+# survives a crowded row" is one auditable table, not scattered literals — no vanity readout can be
+# tuned above a combat one by accident. Bands spaced by 10 for future chips. Buff row uses _buff_prio.
 const CHIP_PRIO := {
-	# economy — the headline currency counters (chest / score / tokens). Drawn as a FIXED,
-	# undroppable head that never routes through _fits2, so these entries are documentation of
-	# the top band's order (highest of all); _fmt_stat width-bounds them so they can never grow
-	# into the right-anchored overflow chip. Listed here so the full economy>objective>lethal>
-	# vanity order is auditable top-to-bottom in one place.
+	# economy — chest/score/tokens: a FIXED, undroppable head that never routes through _fits2;
+	# listed for order only, _fmt_stat width-bounds them out of the overflow chip.
 	"chest": 999, "score": 998, "tokens": 997,
-	# objective — the live "what must I do right now" readouts. shop (95) tops hostiles (90)
-	# because the buy window is the more PERISHABLE readout (it closes on a timer and the buy is
-	# gone); the HOSTILES push-or-hold dashboard persists across the whole wave, so on a row too
-	# tight for both, the expiring shop timer is the one that must survive.
+	# objective — live "what do I do now" readouts. shop (95) tops hostiles: the buy window is the
+	# more perishable (it closes on a timer), so on a too-tight row the shop timer survives.
 	"shop": 95, "hostiles": 90, "wave": 85, "sector": 82,
 	# lethal timers — active field effects / threat modifiers on a clock
 	"flashbang": 80, "mutator": 70,
@@ -64,14 +64,10 @@ const CHIP_PRIO := {
 	# utility discoverability cue
 	"supplies": 20,
 }
-const CHIP_UNBANDED := -1  # c2-01 (attempt-2 judge fix): the fallback band for an id NOT in
-                       # CHIP_PRIO. Below every real band (supplies=20 is the lowest) so an unbanded
-                       # chip sorts LAST and is dropped FIRST — a missing band can never silently
-                       # PROMOTE a chip into (or above) the vanity band, which a middle-of-vanity
-                       # fallback (60 == flawless) used to do. Paired with a push_error so the gap is
-                       # also loud at runtime, and pinned by test_every_row0_chip_is_banded, which
-                       # replays the real measure pass and fails the suite if any drawn chip id is
-                       # unbanded — the static/compile-time guard against drift.
+const CHIP_UNBANDED := -1  # c2-01: fallback band for an id NOT in CHIP_PRIO — below every real band
+                       # so it sorts LAST and drops FIRST (a missing band can't silently promote a
+                       # chip into/above vanity). Paired with a push_error in _fits2 and pinned by
+                       # test_every_row0_chip_is_banded.
 const TELE_OVF_GAP := 3.0  # c1-06 (attempt-4 judge polish): breathing gap between the right-
                        # anchored PRESSURE/GATE telegraph backing and the +N chip when both land
                        # at the far right, so their borders never directly abut. Folded into the
@@ -564,17 +560,10 @@ func _draw() -> void:
 	x = _token_chip(sim, x, y)
 	var opt_start := x
 
-	# c1-06: TWO-PASS PRIORITY layout for row 0. Pass 1 (inside _plan_row0, _measure on)
-	# draws nothing but ENUMERATES every chip past the fixed chest/score/tokens head as a
-	# priority candidate (id, explicit priority, width) — INCLUDING the once-hardcoded
-	# flawless/SHOP/WAVE/SECTOR chips, which are demotable candidates now, not unconditional
-	# draws. The right-side telegraph (PRESSURE / CLEAR THE GATE) is measured up front and
-	# reserved at the right, so candidates co-layout AROUND it instead of it clamping backward
-	# over already-placed chips. The planner keeps the highest-PRIORITY set that fits the
-	# remaining budget (a live SHOP timer / HOSTILES dashboard outranks vanity records
-	# regardless of draw position) and counts the rest into +N. The +N slot is reserved ONLY
-	# on real overflow, its width recomputed from the FINAL hidden count so a digit-width
-	# change can never exceed its slot. Pass 2 (below) draws for real, keeping only kept ids.
+	# c1-06: TWO-PASS PRIORITY layout for row 0. Pass 1 (_plan_row0) enumerates every chip past the
+	# fixed head as an {id, priority, width} candidate and reserves the right-anchored telegraph, then
+	# keeps the highest-priority set that fits and counts the rest into +N (reserved only on real
+	# overflow, width from the FINAL hidden count). Pass 2 (below) draws for real, keeping only kept ids.
 	var plan := _plan_row0(sim, opt_start, y, shop_row)
 	var tele: Dictionary = plan["tele"]
 	var tele_w: float = plan["tele_w"]
@@ -582,8 +571,9 @@ func _draw() -> void:
 	var hidden: int = plan["hidden"]
 	# Pass 2 (real): draw only the kept ids.
 	_measure = false
-	_opt_keep = plan["keep"]
-	_ovf = hidden
+	var keep: Dictionary = plan["keep"]   # c4-03: hold the FRESH plan keep set locally so both the
+	_opt_keep = keep                      # draw pass and the _ovf_alert below read THIS frame's decision
+	_ovf = hidden                         # (never a stale _opt_keep from a prior frame/plan).
 	x = _row0_opt(sim, opt_start, y, shop_row)
 	var row_r := x
 
@@ -594,17 +584,19 @@ func _draw() -> void:
 	if tele["kind"] != "":
 		row_r = maxf(row_r, _draw_telegraph(sim, tele, tele_left, y))
 
-	# c1-06: +N overflow affordance — when the fit pass suppressed one or more optional
-	# readouts (RECORD/BEST/DEATHLESS/mutator/SUPPLIES/streak…), a "+N" chip right-anchored
-	# in the reserved far-right slot says "N more here" instead of dropping them silently.
-	# Its border/text stay fully within _fit_full.
+	# c1-06 / c4-03: +N overflow affordance — when the fit pass suppressed optional readouts
+	# (RECORD/BEST/DEATHLESS/mutator/SUPPLIES/streak…), a right-anchored "+N" chip says "N more
+	# here" instead of dropping them silently. It tints red ("!N") when an actionable objective/
+	# lethal readout was culled, gold otherwise (boundary = CHIP_PRIO["flawless"], the vanity-band
+	# top), computed from THIS frame's kept set. Anchored at [_fit_full - ovf_w, _fit_full] so the
+	# border stays within the usable edge (head is _fmt_stat-bounded, candidates stop left of here).
 	if _ovf > 0:
-		var ovf_w := _tw("+%d" % _ovf) + OVF_PAD
-		# Right-anchored to the usable edge — [ _fit_full - ovf_w, _fit_full ] — so the border
-		# is ALWAYS within _fit_full. The head is width-bounded (_fmt_stat) and the reserve in
-		# _plan_row0 keeps candidates left of here, so the +N never overlaps the head OR spills
-		# the screen edge for any reachable state (proved by the head-bound layout test).
-		row_r = maxf(row_r, _ovf_chip(_fit_full - ovf_w, y, _ovf))
+		var ovf_w := _ovf_slot_w(_ovf)
+		# A dropped PRESSURE/GATE telegraph is a non-candidate actionable readout folded into +N, so it
+		# alerts too (OR-ed in) — not just a culled candidate chip.
+		var actionable_culled := _ovf_alert(_opt_cands, keep, int(CHIP_PRIO["flawless"])) \
+			or bool(plan.get("tele_dropped", false))
+		row_r = maxf(row_r, _ovf_chip(_fit_full - ovf_w, y, _ovf, actionable_culled))
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame. c2-09: the plate is
@@ -972,29 +964,19 @@ func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float
 	return inner_x + pw + 48.0
 
 
-## c1-06: the row-0 chip run (everything past the fixed chest/score/tokens head), drawn
-## left-to-right in draw order. Runs TWICE per frame: once in _measure mode (draw funnels
-## advance x but paint nothing, and EVERY chip — vanity, combat, and the once-hardcoded
-## flawless star / SHOP timer / WAVE flag / SECTOR — routes through _fits2 which ENUMERATES
-## it as a priority candidate: id, explicit priority, exact width) and once for real, where
-## _fits2 returns whether the planner kept that id. The planner (_select_priority) keeps the
-## highest-PRIORITY set that fits, so a live SHOP/HOSTILES readout outranks a vanity record
-## regardless of draw position, and any chip that doesn't fit — vanity OR a demoted
-## flawless/SHOP/WAVE/SECTOR — feeds the +N count instead of overrunning the row.
-## c1-06: plan the full row-0 optional/mandatory chip layout for THIS frame and return the
-## decisions the real pass + telegraph + +N draws consume — {keep, hidden, ovf_reserve, tele,
-## tele_w, tele_left, tele_right, mandatory_sum, budget}. Runs the measure pass (enumerating
-## every chip's id/priority/width) then the shared priority selection: the highest-priority set
-## that fits the width left of the right-anchored telegraph and the +N slot is kept, and the
-## rest — vanity OR a demoted flawless/SHOP/WAVE/SECTOR — feeds +N. Reserving the +N slot only
-## on real overflow, iterated so its width matches the FINAL hidden count. Extracted from _draw
-## so a headless test can replay the exact geometry and assert every footprint stays in bounds
-## and non-overlapping. Requires _fit_full already set for the frame. Leaves _measure true —
-## the caller flips it to draw for real with the returned keep set.
+## c1-06: plan the full row-0 chip layout for THIS frame and return the decisions the real pass +
+## telegraph + +N draws consume — {keep, hidden, ovf_reserve, tele, tele_w, tele_left, tele_right,
+## mandatory_sum, budget}. Runs the measure pass (which enumerates every chip — vanity, combat, and
+## the once-hardcoded flawless/SHOP/WAVE/SECTOR — as an {id, priority, width} candidate via _fits2)
+## then the shared priority selection: the highest-priority set that fits left of the right-anchored
+## telegraph + +N slot is kept, the rest feeds +N (reserved only on real overflow, its width iterated
+## to match the FINAL hidden count). Extracted from _draw so a headless test can replay the geometry.
+## Requires _fit_full set; leaves _measure true — the caller flips it to draw with the returned keep.
 func _plan_row0(sim: SimWorld, opt_start: float, y: float, shop_row: bool) -> Dictionary:
 	var tele := _telegraph_spec(sim)
 	var tele_w: float = tele["w"]
 	var tele_slot: float = (tele_w + 3.0) if tele_w > 0.0 else 0.0
+	var tele_dropped := false
 	# Pass 1: enumerate candidates + measure any residual fixed footprint (final x).
 	_measure = true
 	_opt_cands = []
@@ -1009,14 +991,10 @@ func _plan_row0(sim: SimWorld, opt_start: float, y: float, shop_row: bool) -> Di
 	# Select with the FULL telegraph slot reserved at the right (normal case). extra_hidden 0:
 	# only the candidate chips can overflow so far.
 	var res := _select_with_reserve(opt_start, mandatory_sum, tele_slot, 0)
-	# Width-starved fallback, applied in a DEFINED order so a critical readout is degraded
-	# gracefully, never silently: (1) if the full telegraph would back over the head/candidates
-	# but its COMPACT presentation ("GATE!" / lightning+"!") fits, use that — abbreviated, not
-	# dropped; (2) only if even the compact form can't fit is the telegraph dropped, and then it
-	# is COUNTED as one suppressed readout in +N (nothing vanishes uncounted); (3) either way,
-	# reclaiming the reserved slot re-selects, so freed width can let a demoted candidate back
-	# in. Guards on opt_start intruding the +N slot directly (a head so wide it reaches the
-	# right edge) — the head is width-bounded (_fmt_stat) so this only exercises the branch.
+	# Width-starved fallback, in a DEFINED order so a critical readout degrades gracefully, never
+	# silently: (1) if the full telegraph won't fit but its COMPACT form ("GATE!" / lightning+"!")
+	# does, use that; (2) else drop the telegraph and COUNT it as one suppressed readout in +N; (3)
+	# either way, reclaiming the slot re-selects so freed width can re-admit a demoted candidate.
 	if tele_w > 0.0 and _fit_full - res["ovf_reserve"] - tele_w < opt_start:
 		var cw: float = tele.get("cw", 0.0)
 		var compact_slot: float = (cw + 3.0) if cw > 0.0 else 0.0
@@ -1030,62 +1008,60 @@ func _plan_row0(sim: SimWorld, opt_start: float, y: float, shop_row: bool) -> Di
 			tele = {"kind": "", "w": 0.0}
 			tele_w = 0.0
 			tele_slot = 0.0
+			tele_dropped = true   # c4-03: a PRESSURE/GATE telegraph (an actionable objective) got culled
 			res = _select_with_reserve(opt_start, mandatory_sum, 0.0, 1)
 	var ovf_reserve: float = res["ovf_reserve"]
 	var tele_right: float = _fit_full - ovf_reserve
 	return {
 		"keep": res["keep"], "hidden": res["hidden"], "ovf_reserve": ovf_reserve,
-		"tele": tele, "tele_w": tele_w, "tele_right": tele_right,
+		"tele": tele, "tele_w": tele_w, "tele_right": tele_right, "tele_dropped": tele_dropped,
 		"tele_left": tele_right - tele_w, "mandatory_sum": mandatory_sum,
 		"budget": _fit_full - opt_start - mandatory_sum - tele_slot,
 	}
 
 
-## c1-06: run the priority selection + the fixpoint-iterated +N reserve for a given budget
-## shape and return {keep, hidden, ovf_reserve}. `extra_hidden` is the count of NON-candidate
-## suppressed readouts folded into the displayed +N (e.g. a telegraph dropped by the
-## pathological fallback) so the affordance accounts for EVERY hidden readout, and its reserved
-## width matches the FINAL displayed count. Reserve the +N slot ONLY on real overflow; iterate
-## because dropping a chip to make room for the reserve can grow the count (a wider "+NN" needs
-## more room) — the fixpoint settles in a couple of steps.
+## c1-06: run the priority selection + fixpoint-iterated +N reserve for a given budget and return
+## {keep, hidden, ovf_reserve}. `extra_hidden` folds NON-candidate suppressed readouts (e.g. a
+## dropped telegraph) into the displayed +N. TELE_OVF_GAP is a breathing band folded into the reserve
+## so a right-anchored telegraph backing stops short of the +N border (none when no telegraph shown).
 func _select_with_reserve(opt_start: float, mandatory_sum: float, tele_slot: float,
 		extra_hidden: int) -> Dictionary:
 	var budget: float = _fit_full - opt_start - mandatory_sum - tele_slot
-	# c1-06 (attempt-4 judge polish): when a right-anchored telegraph AND a +N chip both land at
-	# the far right, fold a small breathing gap into the reserve so the telegraph backing stops
-	# short of the +N border instead of the two abutting. tele_right = _fit_full - ovf_reserve, so
-	# baking the gap into ovf_reserve pushes the telegraph left by exactly TELE_OVF_GAP while the
-	# +N still draws flush at _fit_full - chip_width (bounds invariant unchanged). No gap when no
-	# telegraph is shown — nothing to separate from, and existing width-tuned rows stay put.
 	var gap: float = TELE_OVF_GAP if tele_slot > 0.0 else 0.0
 	return _ovf_fit(_opt_cands, budget, gap, extra_hidden)
 
 
 ## c3-01: the ONE priority-tier overflow fit both chip rows share. Keep the highest-priority chips
 ## that fit `budget`, reserve the +N clip slot ONLY on real overflow, and FIXPOINT-iterate that
-## reserve so its width matches the FINAL hidden count (dropping a chip to make room for a wider +N
-## can only hold or shrink the count, so it settles in a couple of steps). `gap` is a breathing
-## band folded into the reserve (row 0 uses it to separate the telegraph backing from the +N;
-## the buff row passes 0). `extra_hidden` folds NON-candidate suppressed readouts (e.g. a dropped
-## telegraph) into the displayed count. The streak tier-hint is a subordinate decoration, so
-## _display_hidden never tallies it as its own "more here"; for the buff row (integer ids) that
-## is just chips - kept. Extracted from _select_with_reserve so the buff tail gets the SAME EXACT
-## reserve instead of the crude worst-case "+all" it used to reserve (which could demote a
-## higher-priority buff that actually fits under the real, narrower clip).
+## reserve so its width matches the FINAL hidden count (settles in a couple of steps). `gap` separates
+## a telegraph backing from the +N (buff row passes 0); `extra_hidden` folds in non-candidate hidden
+## readouts. The subordinate streak_hint is never tallied as its own "more here" (see _display_hidden).
 func _ovf_fit(cands: Array, budget: float, gap: float, extra_hidden: int) -> Dictionary:
 	var sel := _select_priority(cands, budget)
 	var hidden: int = _display_hidden(cands, sel["keep"]) + extra_hidden
 	if hidden > 0:
 		for _i in 4:
-			var reserve: float = _tw("+%d" % hidden) + OVF_PAD + gap
+			var reserve: float = _ovf_slot_w(hidden) + gap
 			sel = _select_priority(cands, budget - reserve)
 			var nd: int = _display_hidden(cands, sel["keep"]) + extra_hidden
 			if nd == hidden:
 				break
 			hidden = nd
+	# c4-03: conservation guard — every enumerated candidate is either KEPT (drawn) or COUNTED into
+	# the displayed +N, save the subordinate streak_hint decoration; extra_hidden is the non-candidate
+	# tally (a dropped telegraph). push_error (survives release, unlike a stripped assert) so a future
+	# chip that slips through uncounted is LOUD, not a silent drop — the invariant this item exists for.
+	var counted: int = hidden - extra_hidden
+	var subordinate := 0
+	for c in cands:
+		if not sel["keep"].has(c["id"]) and c["id"] is String and c["id"] == "streak_hint":
+			subordinate += 1
+	if sel["keep"].size() + counted + subordinate != cands.size():
+		push_error("hud +N conservation broke: %d kept + %d counted + %d subordinate != %d candidates"
+			% [sel["keep"].size(), counted, subordinate, cands.size()])
 	return {
 		"keep": sel["keep"], "hidden": hidden,
-		"ovf_reserve": (_tw("+%d" % hidden) + OVF_PAD + gap) if hidden > 0 else 0.0,
+		"ovf_reserve": (_ovf_slot_w(hidden) + gap) if hidden > 0 else 0.0,
 	}
 
 
@@ -1626,12 +1602,9 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	for i in chips.size():
 		cands.append({"id": i, "prio": chips[i]["prio"], "w": _chip_w(chips[i])})
 	var budget := _fit_full - px
-	# c3-01: the buff tail now reserves the EXACT +N slot via the SHARED _ovf_fit fixpoint (the same
-	# one row-0's _select_with_reserve uses), not the crude worst-case "+chips.size()" it used to.
-	# The old reserve always sized for "every chip hidden" (e.g. "+5"), which on a row where only one
-	# buff overflows subtracts far more width than the real "+1" clip needs — and that extra
-	# reservation could DROP a higher-priority (nearly-expiring) buff chip that would otherwise fit,
-	# silently clipping the very readout the tier is meant to pin. Pinned by
+	# c3-01: the buff tail reserves the EXACT +N slot via the SHARED _ovf_fit fixpoint (same as row 0),
+	# not the crude worst-case "+chips.size()" it used to — which subtracted too much width and could
+	# drop a higher-priority (nearly-expiring) buff that would otherwise fit. Pinned by
 	# test_c3_01_buff_tail_reserves_exact_plus_n_not_worst_case.
 	var sel := _ovf_fit(cands, budget, 0.0, 0)
 	var hidden: int = sel["hidden"]
@@ -1653,11 +1626,12 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 					Color.WHITE, pi == 1)
 				px += 12.0
 	if hidden > 0:
-		# Same styled "+N" chip as row 0 (shared _ovf_chip): a buff is active but couldn't
-		# fit the row. Clamped so its border stays fully within the usable edge — the reserve
-		# guarantees room, but the clamp defends P1 and P2 identically at the far right.
-		var ow := _tw("+%d" % hidden) + OVF_PAD
-		px = _ovf_chip(minf(px, _fit_full - ow), ry, hidden)
+		# c4-03: same shared "+N" chip as row 0, clamped within the usable edge. Red ("!N") when the
+		# dropped chip is a TIMED buff (prio above BUFF_PRIO_PERSIST — an expiring countdown to re-up
+		# NOW), gold when only a persistent charge (vest / triple / claymores) sheds.
+		var ow := _ovf_slot_w(hidden)
+		var actionable_culled := _ovf_alert(cands, keep, BUFF_PRIO_PERSIST)
+		px = _ovf_chip(minf(px, _fit_full - ow), ry, hidden, actionable_culled)
 	return px
 
 
@@ -1782,7 +1756,7 @@ func _token_chip(sim: SimWorld, x: float, y: float) -> float:
 	# also clear a reserved worst-case +N slot so the chosen label leaves room for the right-anchored
 	# overflow chip (no head/+N overlap). The first rung that fits wins. If neither fits — only
 	# possible below the supported design width — the chip is dropped, never drawn past _fit_full.
-	var reserve := _tw("+99") + OVF_PAD
+	var reserve := _ovf_slot_w(99)
 	for lbl in [_token_label(sim.tokens), _token_label_compact(sim.tokens)]:
 		if x + ICON + 13.0 + _tw(lbl) + reserve <= _fit_full + 0.01:
 			return _stat("hud_star", lbl, x, y, Color(1.0, 0.85, 0.3))
@@ -1843,46 +1817,34 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	return x + segs * 3.6 + 4.0
 
 
-## c3-01: does a `w`-wide readout drawn at `px` stay within the usable edge (`_fit_full`, the
-## CB/RM-reserved boundary)? The shared fit test the DIRECT-draw player-row branches (downed/revive
-## and in-tank) use so their guard matches the on-foot / buff / status planners — the last chips
-## that bypassed a fit check now honor the SAME edge. Epsilon mirrors the row planners.
+## c3-01: does a `w`-wide readout at `px` stay within the usable edge (`_fit_full`)? The shared fit
+## test the DIRECT-draw player-row branches (downed/revive, in-tank) use, so a miss routes through
+## `_row_ovf` — never a silent drop. Unused by the optional row-0 chips (they use _fits2 + CHIP_PRIO);
+## this only guards mandatory equipment / death-state readouts. Epsilon mirrors the row planners.
 func _row_fits(px: float, w: float) -> bool:
 	return px + w <= _fit_full + 0.01
 
 
-## c3-01: a direct-draw player-row readout that misses the usable edge surfaces as the shared
-## styled "+1" clip (same _ovf_chip as row 0 / the equipment / buff rows) instead of clipping past
-## RIGHT — nothing critical vanishes uncounted. Right-anchored at `_fit_full - width` (like row-0's
-## +N) so the chip border stays within the usable edge and aligns with the other +N clips instead of
-## floating mid-row after a narrow head. Only reachable below the supported design width.
-##
-## The count is a HARD "+1", not a computed tally, because each direct-draw branch that calls this
-## has exactly ONE trailing readout left to place when it reaches here: the downed row's death-state
-## line (K.I.A. / RALLYING / REVIVE), or the in-tank BAIL-OUT prompt, or the in-tank shell count —
-## a single semantic readout per call site, so "one more here" is exact. (Row 0 and the buff/status
-## rows, which place a VARIABLE-length chip run, compute their real hidden count via _ovf_fit; these
-## fixed single-readout branches have nothing to count.)
+## c3-01: a direct-draw player-row readout that misses the edge surfaces as the shared styled "+1"
+## clip (same _ovf_chip) instead of clipping past RIGHT. Right-anchored like row-0's +N. The count is
+## a HARD "+1": each call site has exactly ONE trailing readout left (K.I.A./RALLYING/REVIVE, the
+## in-tank BAIL-OUT prompt, or the shell count), so "one more" is exact. c4-03: calm-only (default
+## actionable_culled=false) — these clip only below the supported design width and hide MANDATORY
+## equipment/death state, not a vanity-vs-objective mix, so a red alert would cry wolf. The alert is
+## reserved for the two rows that shed by band: row 0 (CHIP_PRIO) and the buff tail (_buff_prio).
 func _row_ovf(_px: float, ry: float) -> float:
-	var ow := _tw("+1") + OVF_PAD
-	# c3-01: right-flush the clip to the usable edge (like row-0's right-anchored +N) so the
-	# "more here" indicator aligns with the other +N chips instead of floating mid-row after a
-	# narrow head. Only reachable below the supported design width; `_px` (the overflowing cursor)
-	# is unused now that placement is edge-anchored, kept in the signature so call sites read uniformly.
+	var ow := _ovf_slot_w(1)
+	# c3-01: right-flush to the usable edge (like row-0's +N). `_px` is unused now that placement is
+	# edge-anchored, kept in the signature so call sites read uniformly.
 	return _ovf_chip(_fit_full - ow, ry, 1)
 
 
 ## c3-01: the DOWNED player row — the skull death count THEN the death-state readout (K.I.A. /
 ## RALLYING countdown / REVIVE cost + prompt glyph). This branch drew straight to the edge with no
-## fit check, so under width pressure the revive prompt — the readout the downed player MUST act on
-## — could clip past RIGHT uncounted. Now every readout is guarded against the usable edge with the
-## SAME shared "+N" clip the on-foot / buff / status rows use, making the fit guard UNIVERSAL across
-## every player-row branch. The skull count sits near x=8 (always fits); only the trailing readout
-## can overflow, and only on a sub-design-width viewport (a no-op at every supported width, so
-## normal play is byte-identical — the normal path returns the SAME post-skull cursor the inline
-## code did, leaving plate sizing unchanged). Extracted from _draw so a capture test can drive the
-## exact path with a tight `_fit_full`, mirroring _onfoot_chips. Pinned by
-## test_dead_row_revive_clips_when_starved.
+## fit check, so the revive prompt could clip past RIGHT uncounted. Now every readout routes through
+## the SAME shared "+N" clip, making the fit guard universal across player-row branches. The skull
+## count sits near x=8 (always fits); only the trailing readout can overflow, and only below design
+## width (a no-op at every supported width). Extracted from _draw so a capture test can drive it.
 func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> float:
 	px = _stat("icon_skull", "x%d" % p["deaths"], px, ry)
 	var ty := ry + ICON - 3.0
@@ -1978,7 +1940,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	var mag_adv := 8.0 * 3.6 + 4.0   # == _mag_bar(...) advance (8 segs * 3.6 + 4)
 	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + mag_adv
 	var gren_w := ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])
-	var eq_plan := plan_chips([ammo_w, gren_w, ICON + 2.0], px, _fit_full, _tw("+3") + OVF_PAD)
+	var eq_plan := plan_chips([ammo_w, gren_w, ICON + 2.0], px, _fit_full, _ovf_slot_w(3))
 	var eq_shown: int = eq_plan["shown"]
 	if eq_shown >= 1:
 		var ammo_x := px
@@ -2022,7 +1984,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# surfaces in the shared +N clip and the buff/status tail is skipped — nothing off-panel would
 	# fit anyway, and the +N says "more readouts here" rather than truncating ammo silently.
 	if eq_plan["hidden"] > 0:
-		var ow := _tw("+%d" % eq_plan["hidden"]) + OVF_PAD
+		var ow := _ovf_slot_w(eq_plan["hidden"])
 		return _ovf_chip(minf(px, _fit_full - ow), ry, eq_plan["hidden"])
 	return _status_chips(p, px, ry, i, sim)
 
@@ -2092,7 +2054,7 @@ func _status_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	var widths: Array[float] = []
 	for pp in pips:
 		widths.append(_tw(pp["short"]) + 7.0)
-	var ovf_w := _tw("+%d" % pips.size()) + OVF_PAD
+	var ovf_w := _ovf_slot_w(pips.size())
 	var plan := plan_chips(widths, px, edge, ovf_w)
 	var shown: int = plan["shown"]
 	for j in shown:
@@ -2102,7 +2064,7 @@ func _status_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		# shown>0: the reserve guarantees px + ow <= edge, so the +N sits flush after the last kept
 		# pip (monotonic, no overlap). shown==0: nothing was drawn, so clamping the lone +N to the
 		# edge can't overlap anything.
-		var ow := _tw("+%d" % hidden) + OVF_PAD
+		var ow := _ovf_slot_w(hidden)
 		px = _ovf_chip(px if shown > 0 else minf(px, edge - ow), ry, hidden)
 	return px
 
@@ -2174,10 +2136,12 @@ func _emit_hud_text(txt: String, pos: Vector2, col: Color) -> void:
 	Art.text(self, txt, pos, FONT_SIZE, col)
 func _emit_icon(icon: String, r: Rect2, mod := Color.WHITE) -> void:
 	draw_texture_rect(Art.tex(icon), r, false, mod)
-func _emit_ovf(ox: float, y: float, w: float, txt: String) -> void:
-	draw_rect(Rect2(ox, y + 1.0, w, 12.0), Color(0.1, 0.11, 0.09, 0.85))
-	draw_rect(Rect2(ox, y + 1.0, w, 12.0), Color(1.0, 0.8, 0.4, 0.4), false, 1.0)
-	_emit_hud_text(txt, Vector2(ox + 4.0, y + ICON - 3.0), Color(1.0, 0.85, 0.45))
+func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := false) -> void:
+	# c4-03: same dark backing always; only the frame + ink recolor via _ovf_palette.
+	var pal := _ovf_palette(actionable_culled)
+	draw_rect(Rect2(ox, y + 1.0, w, 12.0), OVF_BACKING)
+	draw_rect(Rect2(ox, y + 1.0, w, 12.0), pal["border"], false, 1.0)
+	_emit_hud_text(txt, Vector2(ox + 4.0, y + ICON - 3.0), pal["ink"])
 # c1-10: seam for the inline gameplay-verb glyphs the chip rows plant (roll / revive / interact /
 # supply-wheel) — like every other HUD draw seam, a one-line indirection so a headless capture
 # subclass can record them and the full _draw frame is exercisable without a live draw context.
@@ -2185,15 +2149,48 @@ func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt:
 	Art.draw_glyph(self, act, center, size, col, alt)
 
 
-## c1-06: the ONE "+N more here" overflow chip, shared by row 0 AND the player buff rows so
-## both surface a suppressed readout identically. Drawn left-anchored at `ox`; its whole
-## border spans [ox, ox+w] and the caller is responsible for clamping `ox` so that stays
-## within the usable edge. Returns the chip's true right edge.
-func _ovf_chip(ox: float, y: float, n: int) -> float:
-	var txt := "+%d" % n
-	var w := _tw(txt) + OVF_PAD
-	_emit_ovf(ox, y, w, txt)
+## c4-03: reserved pixel width of the "+N" clip — sized off the WIDER of "+N"/"!N" so the alert
+## glyph swap can never spill the slot. Every reserve site and the draw share this helper, so the
+## planner budget and the drawn chip agree exactly.
+func _ovf_slot_w(n: int) -> float:
+	return maxf(_tw("+%d" % n), _tw("!%d" % n)) + OVF_PAD
+
+
+## c1-06: the ONE "+N more here" chip, shared by row 0 and the player buff/direct-draw rows so all
+## surface a suppressed readout identically. Left-anchored at `ox` (caller clamps it within the edge);
+## returns the true right edge. c4-03: on `actionable_culled` the lead "+" swaps to "!" — a non-color
+## channel so the cue survives colorblind play — but the slot width is unchanged (no layout shift).
+func _ovf_chip(ox: float, y: float, n: int, actionable_culled := false) -> float:
+	var w := _ovf_slot_w(n)
+	var txt := ("!%d" % n) if actionable_culled else ("+%d" % n)
+	_emit_ovf(ox, y, w, txt, actionable_culled)
 	return ox + w
+
+
+## c4-03: does the +N clip stand for at least one ACTIONABLE dropped chip — one whose band is strictly
+## ABOVE `vanity_top`? The planner sheds lowest-band first, so a dropped chip above the vanity line
+## means even a combat readout got culled (the "fight peaks, info vanishes" case). Each caller passes
+## its own band top (row 0: CHIP_PRIO["flawless"]; buff row: BUFF_PRIO_PERSIST) so the boundary is
+## derived, never a magic literal. Malformed candidates are skipped, not crashed on. Pure/static.
+static func _ovf_alert(cands: Array, keep: Dictionary, vanity_top: int) -> bool:
+	for c in cands:
+		if not (c is Dictionary and c.has("id") and c.has("prio")):
+			continue
+		# Mirror _display_hidden: the subordinate streak_hint decoration is never a "more here" of its
+		# own, so a dropped hint must not paint the clip red — it isn't an actionable readout.
+		if c["id"] is String and c["id"] == "streak_hint":
+			continue
+		if not keep.has(c["id"]) and int(c["prio"]) > vanity_top:
+			return true
+	return false
+
+
+## c4-03: the ONE place `actionable_culled` maps to concrete frame+ink colors — warn-red when an
+## actionable readout was culled, calm gold otherwise — so _emit_ovf and tests can't drift. Pure/static.
+static func _ovf_palette(actionable_culled: bool) -> Dictionary:
+	if actionable_culled:
+		return {"border": OVF_BORDER_ALERT, "ink": OVF_INK_ALERT}
+	return {"border": OVF_BORDER_VANITY, "ink": OVF_INK_VANITY}
 
 
 ## c1-06: the ONE gate every optional row-0 chip routes through. In the MEASURE pass it
