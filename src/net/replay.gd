@@ -14,6 +14,8 @@ const MAGIC := "IKARI_REPLAY_1"
 var seed_value: int = 0
 var mode: String = "campaign"
 var player_count: int = 1
+var assist: bool = false   # accessibility 2-hit vest — MUST be restored on replay or the sim diverges
+var hard: bool = false     # NG+ HARD spawn curve — alters the RNG stream + checksum, restore on replay
 var frames: Array = []   # each element: Array of per-player encoded SimInput ([move_x,move_y,aim_x,aim_y,flags])
 
 
@@ -26,7 +28,7 @@ func record_tick(inputs: Array) -> void:
 
 func to_dict() -> Dictionary:
 	return {"magic": MAGIC, "seed": seed_value, "mode": mode,
-		"players": player_count, "frames": frames}
+		"players": player_count, "assist": assist, "hard": hard, "frames": frames}
 
 
 func save(path: String) -> Error:
@@ -57,10 +59,23 @@ static func load_from(path: String) -> Replay:
 		return null
 	if typeof(data["frames"]) != TYPE_ARRAY:
 		return null
+	# Validate each frame's SHAPE, not just that `frames` is an array — a malformed but
+	# well-typed file (frame not an array, or an encoded input shorter than the 5 fields
+	# SimInput.decode indexes) would pass the outer gate and crash later in decode(). Reject
+	# it at the trust boundary instead.
+	for frame in data["frames"]:
+		if typeof(frame) != TYPE_ARRAY:
+			return null
+		for enc in frame:
+			if typeof(enc) != TYPE_ARRAY or (enc as Array).size() < 5:
+				return null
 	var r := Replay.new()
 	r.seed_value = int(data["seed"])
 	r.mode = str(data["mode"])
 	r.player_count = int(data["players"])
+	# assist/hard default false for pre-existing replays that predate these fields (back-compat).
+	r.assist = bool(data.get("assist", false))
+	r.hard = bool(data.get("hard", false))
 	r.frames = data["frames"]
 	return r
 
@@ -70,6 +85,14 @@ static func load_from(path: String) -> Replay:
 ## run on any platform — the cross-arch determinism proof, replayable on demand.
 func play(sample_every := 0) -> Array[int]:
 	var sim := SimWorld.new(seed_value, player_count, mode)
+	# Mirror the post-construction config main.gd applies to the LIVE run (see _start_run),
+	# or an assist/hard run replays as a vanilla one: both flags feed checksum() and hard
+	# diverts the seeded RNG stream, so omitting them makes the very first sample diverge.
+	sim.assist_mode = assist
+	sim.hard = hard
+	if assist:
+		for pl in sim.players:
+			pl["vest"] = true
 	var samples: Array[int] = []
 	for i in frames.size():
 		var inputs: Array = []

@@ -936,6 +936,8 @@ func _reset() -> void:
 	_recorder.seed_value = seed_v
 	_recorder.mode = sim.mode
 	_recorder.player_count = sim.players.size()
+	_recorder.assist = sim.assist_mode   # capture the config the sim was seeded with, or the
+	_recorder.hard = sim.hard            # replay rebuilds a vanilla sim and diverges (c4-fix)
 	_replay_saved = false
 	# A restart mid-replay must not keep feeding recorded frames into the new sim.
 	_watching = false
