@@ -6814,7 +6814,7 @@ func _draw_colossus() -> void:
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
 	# a3-11: hp-keyed hull damage — drawn HERE in world space, before the HUD bar's
 	# transform-cancel below flips to screen space (the same fraction the bar uses).
-	_boss_wounds(cbody, 1.0 - float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP), 40.0)
+	_boss_wounds(cbody, 1.0 - float(sim.colossus["hp"]) / float(sim.colossus.get("max_hp", SimWorld.COLOSSUS_HP)), 40.0)
 	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
 	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
 	for bx in [-24.0, 24.0]:
@@ -6846,7 +6846,9 @@ func _draw_colossus() -> void:
 	# does NOT use that boundary; the two never share the band. Shake-immune: fixed HUD slot,
 	# cancel the node transform for the bar block.
 	draw_set_transform_matrix(get_transform().affine_inverse())
-	var cfrac := float(sim.colossus["hp"]) / float(SimWorld.COLOSSUS_HP)
+	# c4-fix r2: divide by the stored scaled max (96 in 2P, 90 hard), not the unscaled constant —
+	# else the bar reads full and frozen for the first third of any scaled fight (matches colossus_phase).
+	var cfrac := float(sim.colossus["hp"]) / float(sim.colossus.get("max_hp", SimWorld.COLOSSUS_HP))
 	# a2-17 HUD#1: plate the colossus phase label too (highest-stakes fight).
 	# a2-17 r2 HUD#6: name the colossus phases (actionable), matching the escalation
 	# banners (phase 2 = mortar volleys, phase 3 = sappers out).

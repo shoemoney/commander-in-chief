@@ -697,10 +697,15 @@ func _draw() -> void:
 				var bailtxt := "BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60)
 				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
 					px = _row_ovf(px, ry)
-				elif _mblink(8):
-					var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, Color(1.0, 0.3, 0.2))
-					_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
-						Color.WHITE, i == 1)
+				else:
+					# Draw the prompt on-blink, but ALWAYS advance px past its reserved width so the
+					# shared buff chips (now drawn after this block) start PAST the BAIL OUT readout
+					# instead of painting over it — the burning branch used to leave px unmoved.
+					if _mblink(8):
+						var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, Color(1.0, 0.3, 0.2))
+						_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
+							Color.WHITE, i == 1)
+					px += _tw(bailtxt) + REVIVE_GLYPH_ADV
 			# c3-01: the cannon-shell count is a direct-draw tank chip — fit-guard it against the
 			# usable edge like every other player-row readout so a starved viewport surfaces a "+N"
 			# clip rather than clipping the shell count past RIGHT. A no-op at every supported width
