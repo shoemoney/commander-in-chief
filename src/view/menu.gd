@@ -2827,7 +2827,7 @@ func _draw() -> void:
 		else:
 			_draw_howto()
 		_draw_back_button()
-		_footer_legend()
+		_footer_legend()   # c4-05: HALL / HOWTO carry the same device-aware bindings strip
 		return
 	if mode == Mode.TITLE:
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
@@ -3400,8 +3400,10 @@ func _draw() -> void:
 		_legend_row(row1, 330.0, 1.0)
 		_legend_row(row2, 346.0, 0.9)
 	else:
-		# c1-04: PAUSE/OPTS/SETUP get the same SELECT/BACK footer (HALL/HOWTO are
-		# handled in the content-well branch, which returns before this point).
+		# c1-04 / c4-05: every non-TITLE menu that reaches here (PAUSE / OPTS / SETUP / DISP /
+		# INFO / REBIND) draws the same device-aware bindings strip through the ONE canonical
+		# _footer_legend seam (HALL/HOWTO route through it too, in the content-well branch that
+		# returns above) — so no menu can silently ship without a legend.
 		_footer_legend()
 
 
@@ -4374,6 +4376,9 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 
 
 const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)
+const LEG_GAP := 14.0        # c4-05: default inter-segment spacing on a legend/footer row
+const LEG_MIN_GAP := 5.0     # c4-05: floor the gap compresses to (glyph+label never collide)
+const LEG_SAFE_W := CANVAS_WIDTH - 16.0   # c4-05: legend must fit this band (8px safe margin/side)
 
 
 # Legend glyph width for a segment: "tex" = registry sprite, "stamp" = letters
@@ -4394,14 +4399,56 @@ static func _glyph_w(seg: Dictionary) -> float:
 # the ACTUAL on-screen footer/verb bounds — which depend on the last-used device,
 # since pad button glyphs and keyboard keycaps differ in width — instead of a
 # re-derived approximation.
-static func legend_extent(segs: Array) -> Array:
+static func legend_extent(segs: Array, gap := LEG_GAP, label_cap := 0.0) -> Array:
 	var f := Art.font()
-	var total := -14.0   # segments separated by 14px; first one has no gap
+	var total := -gap   # segments separated by `gap` px; first one has no gap
 	for seg in segs:
 		var gw := _glyph_w(seg)
-		total += gw + (3.0 if gw > 0.0 else 0.0) \
-			+ f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 14.0
+		var lw := f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+		if label_cap > 0.0:
+			lw = minf(lw, label_cap)   # c4-05: ellipsized labels measure at the cap (last-resort)
+		total += gw + (3.0 if gw > 0.0 else 0.0) + lw + gap
 	return [CENTER_X - total / 2.0, total]
+
+
+# c4-05: the inter-segment gap the footer/legend strip compresses TO when its natural
+# LEG_GAP-spaced width would overrun the canvas — so the fullest binding sets (PAUSE's
+# verb+nav+HELP row, HALL's FILTER+PAGE+nav, or ANY row after a player rebinds cancel/
+# help to a long-named key that widens its keycap) stay wholly on-screen instead of
+# clipping a prompt off the edge. Derived so every remaining seg still fits the safe band.
+static func legend_fit_gap(segs: Array) -> float:
+	var n := segs.size()
+	if n < 2:
+		return LEG_GAP
+	var natural: float = legend_extent(segs)[1]
+	if natural <= LEG_SAFE_W:
+		return LEG_GAP   # fits at the roomy default; leave it be
+	# natural = content + LEG_GAP*(n-1); solve for the gap that lands the row on LEG_SAFE_W,
+	# then floor it at LEG_MIN_GAP so glyph and label never collide when the set is huge.
+	var content := natural - LEG_GAP * float(n - 1)
+	return maxf(LEG_MIN_GAP, (LEG_SAFE_W - content) / float(n - 1))
+
+
+# c4-05: the HARD ceiling behind the gap compression - the per-label width the row clamps every
+# label to when even the floored LEG_MIN_GAP spacing still overruns the safe band (a pathological
+# set: very many segments, or several long-rebind keycaps at once). Water-filled: budget/n, so a
+# label already SHORTER than the cap stays whole while the long ones ellipsize, and the summed
+# labels can never exceed the budget -> no binding EVER clips off-canvas. 0.0 means "no cap needed"
+# (the compressed gap already fits), which is every real menu; this only arms in the extreme case.
+static func legend_label_cap(segs: Array) -> float:
+	var n := segs.size()
+	if n < 2:
+		return 0.0
+	# The tightest the gap can go is LEG_MIN_GAP; if the row fits there, no label cap is needed.
+	if legend_extent(segs, LEG_MIN_GAP)[1] <= LEG_SAFE_W:
+		return 0.0
+	var glyph_w := 0.0
+	for seg in segs:
+		var gw := _glyph_w(seg)
+		glyph_w += gw + (3.0 if gw > 0.0 else 0.0)
+	# Whatever the glyphs and the minimum gaps don't claim is the shared label budget.
+	var budget := LEG_SAFE_W - glyph_w - LEG_MIN_GAP * float(n - 1)
+	return maxf(1.0, budget / float(n))
 
 
 # c1-04: the EXACT drawn boxes of a legend row — one entry per segment carrying its
@@ -4410,9 +4457,9 @@ static func legend_extent(segs: Array) -> Array:
 # (glyph AND rendered label/font footprints), not a re-derivation — a headless test
 # reads these boxes to prove nothing clips 640x360 or overlaps, in either device
 # mode. `y` is the glyph center; label baseline sits at y+3 (8px font, ~8px ascent).
-static func legend_primitives(segs: Array, y: float) -> Array:
+static func legend_primitives(segs: Array, y: float, gap := LEG_GAP, label_cap := 0.0) -> Array:
 	var f := Art.font()
-	var ext := legend_extent(segs)
+	var ext := legend_extent(segs, gap, label_cap)
 	var x: float = ext[0]
 	var out: Array = []
 	for seg in segs:
@@ -4422,11 +4469,14 @@ static func legend_primitives(segs: Array, y: float) -> Array:
 			grect = Rect2(x, y - _LEG_H / 2.0, gw, _LEG_H)
 			x += gw + 3.0
 		var lsz := f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
+		var lw: float = lsz.x
+		if label_cap > 0.0:
+			lw = minf(lw, label_cap)   # c4-05: last-resort ellipsis width so nothing clips off-canvas
 		# Real font metrics (measured width + ascent/height), not a hard-coded 8/9px
 		# box: Art.text places the baseline at y+3, so the ink spans up by the ascent.
-		var lrect := Rect2(x, y + 3.0 - f.get_ascent(8), lsz.x, lsz.y)
+		var lrect := Rect2(x, y + 3.0 - f.get_ascent(8), lw, lsz.y)
 		out.append({"seg": seg, "glyph": grect, "label": lrect})
-		x += lsz.x + 14.0
+		x += lw + gap
 	return out
 
 
@@ -4498,7 +4548,12 @@ func _emit_group_caption(mitems: Array, k: int, cy: float) -> void:
 # where the test measures — and the capture test sees the real commands.
 func _legend_row(segs: Array, y: float, a: float) -> void:
 	var f := Art.font()
-	for p in legend_primitives(segs, y):
+	# c4-05: two-stage no-clip guarantee. First shrink the inter-segment gap when the natural
+	# spacing would push a prompt off-screen (the fullest PAUSE/HALL binding rows, or a row whose
+	# keycap grew after a long rebind). If even the floored gap still can't fit, the HARD ceiling
+	# arms: every label is capped and ellipsized (legend_label_cap) so no binding EVER clips.
+	var cap := legend_label_cap(segs)
+	for p in legend_primitives(segs, y, legend_fit_gap(segs), cap):
 		var seg: Dictionary = p["seg"]
 		var grect: Rect2 = p["glyph"]
 		if grect.size.x > 0.0:
@@ -4513,8 +4568,12 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 					var sw := f.get_string_size(st, HORIZONTAL_ALIGNMENT_LEFT, -1, 6).x
 					_emit_stamp(st, Vector2(grect.position.x + (grect.size.x - sw) / 2.0, y + 2.0),
 						Color(0.15, 0.16, 0.12, a))
+		# When the hard cap is armed, clamp the label draw to the SAME width the layout reserved
+		# so Art.text ellipsizes to match its measured box (0.0 = no clip, the usual path).
+		_label_max_w = p["label"].size.x if cap > 0.0 else 0.0
 		_emit_label(seg.get("label", ""), Vector2(p["label"].position.x, y + 3.0),
 			Color(0.82, 0.87, 0.77, a))
+	_label_max_w = 0.0   # reset the transient clip stamp so it can't leak to the next draw
 
 
 # c1-04: input legend BEYOND the TITLE screen. One SELECT/BACK footer on EVERY
@@ -4550,7 +4609,50 @@ func _draw_footer_help(row_help: String, strip_top: float) -> float:
 static var _help_warned := {}
 
 
+# c4-05: the per-menu binding hint the footer legend prepends ahead of the shared SELECT/BACK
+# nav — the context controls each non-TITLE screen must teach so a player never has to guess
+# how to filter, page, or adjust after backing into it (or after swapping input mid-session):
+#   HALL  -> L/R = FILTER, plus UP/DN = PAGE once the board spills past one page
+#   HOWTO -> L/R = PAGE (the field-manual tabs turn on the horizontal axis)
+#   REBIND-> the SECTION tab-switch (TAB / shoulder button), device-aware
+#   OPTS / SETUP / DISP (and any menu with a focused adjustable row) -> the row's ADJUST/TOGGLE
+# Every other menu (PAUSE / INFO) returns [] and rides the plain SELECT/BACK (+ PAUSE verbs)
+# nav. Pulled out of _footer_legend so the "which bindings on which menu" contract reads in one
+# place and a headless test can assert each menu's hint without a live draw.
+func _mode_hint_segs(focused: Dictionary) -> Array:
+	match mode:
+		Mode.HALL:
+			var head: Array = footer_hall_filter_segs()
+			if main != null and _hall_pages(_hall_rows().size()) > 1:
+				head += footer_page_segs()   # UP/DN = PAGE only when the board actually pages
+			return head
+		Mode.HOWTO:
+			return footer_howto_page_segs()
+		Mode.REBIND:
+			return _footer_rebind_tab_segs()
+		_:
+			# On the settings screens the focused row's ◄/► adjust it in place (toggle flip,
+			# volume/scale step) — surface that bind whenever the focused row is an adjustable one.
+			if not focused.is_empty() and _row_cycles(focused):
+				return footer_cycle_segs(focused)
+	return []
+
+
+# c4-05: TRUE when the last-used input device changed enough to re-skin every legend glyph —
+# either the keyboard<->pad flip (use_pad) OR a pad-brand swap (Xbox<->PlayStation<->Switch) that
+# keeps use_pad true but repaints the A/B/X/Y button art. main.gd calls this on each _input to
+# decide whether an idle menu (a settled Reduce-Motion screen repaints on nothing) must repaint so
+# the strip never keeps teaching the OLD device's buttons after a mid-session swap. Pure/static so
+# a headless test pins every transition (flip, brand-only, no-op) without an InputEvent or live Main.
+static func device_glyphs_changed(was_pad: bool, was_brand: String, use_pad: bool, brand: String) -> bool:
+	return use_pad != was_pad or brand != was_brand
+
+
 func _footer_legend() -> void:
+	# c4-05: THE single canonical input-legend seam. Every non-TITLE menu's _draw() routes here
+	# (PAUSE / OPTS / SETUP / DISP / INFO / REBIND directly, HALL / HOWTO via the content-well
+	# branch) — TITLE alone draws its own richer two-row control legend inline. So "does this menu
+	# show its bindings?" has ONE answer and a newly-added menu can't silently ship without a strip.
 	# c3-09: on a value-holding settings row the footer grows a SECOND line — the row's effect +
 	# persistence description on top, the SELECT/BACK legend below (see _draw_footer_help). Shared by
 	# OPTIONS / DISPLAY / RUN SETUP; other screens hold no such rows, so it stays one line. It sits
@@ -4578,39 +4680,9 @@ func _footer_legend() -> void:
 	var legend_y := FOOTER_Y + 8.0
 	if two_line:
 		legend_y = _draw_footer_help(row_help, strip_top)
-	var segs := _footer_segs()
-	# c1-13: when the Hall spills past one page, the footer strip carries an EXPLICIT
-	# UP/DOWN = PAGE key hint. The PREV/NEXT plates flank the counter left/right, but the
-	# input axis is vertical (left/right cycles the FILTER), so the control strip states
-	# the real key here — the one place players read for bindings. Only in HALL and only
-	# when it actually pages; guarded on main so the headless capture menu (no board) skips.
-	if mode == Mode.HALL:
-		# c2-03: HALL's filter tabs cycle on left/right — the device glyph legend that
-		# used to live only on TITLE never told keyboard/pad players this. Prepend a
-		# permanent L/R = FILTER hint (the tabs exist on every page), then the UP/DN =
-		# PAGE hint ONLY when the board actually spills past one page (guarded on main so
-		# the headless capture menu, which has no board, skips it).
-		var head: Array = footer_hall_filter_segs()
-		if main != null and _hall_pages(_hall_rows().size()) > 1:
-			head += footer_page_segs()
-		segs = head + segs
-	elif mode == Mode.HOWTO:
-		# c2-02: HOW TO PLAY pages on left/right — state the axis in the one strip
-		# players read for bindings, same as HALL's UP/DN page hint.
-		segs = footer_howto_page_segs() + segs
-	elif mode == Mode.REBIND:
-		# c3-10: the REBIND screen switches its MOVE-AIM / ACTIONS / GAMEPAD category tabs on
-		# TAB (keyboard) or the shoulder buttons (pad) — a bind the strip never advertised, so
-		# players couldn't find the ACTIONS/GAMEPAD sections. Device-aware, prepended ahead of
-		# the SELECT/BACK nav like every other axis hint.
-		segs = _footer_rebind_tab_segs() + segs
-	elif not focused.is_empty():
-		# c2-03: on the settings screens the focused row's ◄/► arrows adjust it in place
-		# (toggle flip, volume/scale step). Surface that bind in the footer strip whenever
-		# the focused row is an adjustable one — so PAUSE/OPTS/DISP/SETUP keep a Toggle
-		# prompt, not just Select/Back. Reuses the row dict cached above (no second _menu_items).
-		if _row_cycles(focused):
-			segs = footer_cycle_segs(focused) + segs
+	# c4-05: prepend THIS menu's context bindings ahead of the shared SELECT/BACK nav — the
+	# per-screen hint the strip would otherwise leave a device-swapped player to guess.
+	var segs := _mode_hint_segs(focused) + _footer_segs()
 	# c4-01: Enter/click on a volume row STEPS the level up (never a mute toggle), so the confirm
 	# verb names that real action instead of the generic "SELECT": "UNMUTE" while the bus is silent
 	# (a press lifts it off 0), "MAX" once it is pinned at the ceiling (a further press only rail-

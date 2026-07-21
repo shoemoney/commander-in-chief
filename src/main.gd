@@ -1068,6 +1068,7 @@ func _input(event: InputEvent) -> void:
 	# Track the LAST-USED device so glyphs/legends teach the right buttons —
 	# a merely-connected idle pad shouldn't override an active keyboard.
 	var was_pad := Art.use_pad
+	var was_brand := Art.pad_brand
 	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		if event is InputEventJoypadMotion and absf(event.axis_value) < 0.5:
 			return
@@ -1082,7 +1083,13 @@ func _input(event: InputEvent) -> void:
 	# A settled menu under Reduce Motion idles without repainting, so a keyboard<->pad switch
 	# would strand stale prompts on screen. Repaint the instant the device flips so the footer's
 	# SELECT/BACK/PAUSE glyphs swap to match the hands actually holding the controls.
-	if Art.use_pad != was_pad and _menu != null and _menu.is_active():
+	# c4-05: also repaint when the PAD BRAND changes with use_pad already true — swapping one
+	# controller for another of a different brand mid-session (Xbox->PlayStation->Switch) re-skins
+	# every legend glyph via Art.pad_brand, but use_pad never flips, so the strip would otherwise
+	# keep teaching the old pad's buttons until the next unrelated repaint. The stale-glyph test is
+	# the pure GameMenu.device_glyphs_changed predicate (unit-tested), so this line stays a one-liner.
+	if _menu != null and _menu.is_active() \
+			and GameMenu.device_glyphs_changed(was_pad, was_brand, Art.use_pad, Art.pad_brand):
 		_menu.queue_redraw()
 	# Pad redeploy: START on the debrief/victory card mirrors keyboard R — pad
 	# players otherwise had to reach for a keyboard (or tunnel through pause →

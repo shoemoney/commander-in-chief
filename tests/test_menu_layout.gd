@@ -732,6 +732,130 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
+# c4-05: the footer legend must keep EVERY binding on-screen even when the set is at its
+# widest — a normal set keeps the roomy default gap, but an oversized one (many segments,
+# or a keycap widened by a long rebind) compresses the inter-segment gap instead of letting
+# a prompt clip off the canvas edge. Pins legend_fit_gap's contract and proves the compressed
+# row's captured command boxes all land inside the LEG_SAFE_W band.
+func test_legend_row_compresses_to_keep_all_bindings_on_screen() -> void:
+	# A short set that already fits keeps the full default spacing (no needless squeeze).
+	var small: Array = Menu.footer_nav_segs()
+	Runner.T.eq(Menu.legend_fit_gap(small), Menu.LEG_GAP, "a set that fits keeps the default gap")
+	Runner.T.eq(Menu.legend_fit_gap([{"label": "ONLY"}]), Menu.LEG_GAP, "a single segment never compresses")
+	# Grow a realistic PAUSE-style row (each entry a wide keycap + label, as a long rebind
+	# would produce) until its natural LEG_GAP width just overruns the safe band — metric-robust
+	# so a font-metric change can't silently make this set fit and skip the assertion.
+	var wide: Array = []
+	while Menu.legend_extent(wide)[1] <= Menu.LEG_SAFE_W:
+		wide.append({"tex": "glyph_key_wide", "stamp": "L/R", "label": "SUPPLY WHEEL"})
+	var n: int = wide.size()
+	var natural: float = Menu.legend_extent(wide)[1]
+	Runner.T.ok(natural > Menu.LEG_SAFE_W, "the grown set really would overrun the safe band at the default gap")
+	# This set fits once compressed (its min-gap width is still within the band), so fit_gap
+	# lands it exactly on LEG_SAFE_W without hitting the LEG_MIN_GAP floor.
+	var content: float = natural - Menu.LEG_GAP * float(n - 1)
+	Runner.T.ok(content + Menu.LEG_MIN_GAP * float(n - 1) <= Menu.LEG_SAFE_W, "the set is compressible within the floor")
+	var fit: float = Menu.legend_fit_gap(wide)
+	Runner.T.ok(fit < Menu.LEG_GAP and fit >= Menu.LEG_MIN_GAP, "oversized set compresses the gap (>= the min-gap floor)")
+	# The compressed row's ACTUAL drawn command boxes must all land inside the safe band.
+	var y := Menu.FOOTER_Y + 8.0
+	var left := 640.0
+	var right := 0.0
+	for p in Menu.legend_primitives(wide, y, fit):
+		for k in ["glyph", "label"]:
+			var box: Rect2 = p[k]
+			if box.size.x <= 0.0:
+				continue
+			left = minf(left, box.position.x)
+			right = maxf(right, box.end.x)
+	Runner.T.ok(left >= 8.0 and right <= 632.0,
+		"compressed legend keeps every binding in the safe band [%d,%d]" % [int(left), int(right)])
+	Runner.T.ok(absf((left + right) / 2.0 - 320.0) < 2.0, "compressed legend stays centered on 320")
+
+
+# c4-05: the HARD ceiling behind the gap compression — when even the floored LEG_MIN_GAP spacing
+# can't fit the row (a pathological set of many wide segments), legend_label_cap arms and every
+# label is capped+ellipsized so NO binding clips off-canvas. Proves the cap engages only in the
+# extreme case (a normal footer returns 0.0) and that the capped row's boxes land in the safe band.
+func test_legend_hard_ceiling_caps_labels_so_nothing_clips() -> void:
+	# A normal footer fits after gap compression, so no label cap is needed.
+	Runner.T.eq(Menu.legend_label_cap(Menu.footer_nav_segs()), 0.0, "a normal footer needs no label cap")
+	# Grow a set until it overruns even at the tightest LEG_MIN_GAP spacing — the cap must arm.
+	var huge: Array = []
+	while Menu.legend_extent(huge, Menu.LEG_MIN_GAP)[1] <= Menu.LEG_SAFE_W:
+		huge.append({"tex": "glyph_key_wide", "stamp": "BACKSPACE", "label": "SUPPLY WHEEL"})
+	var cap: float = Menu.legend_label_cap(huge)
+	Runner.T.ok(cap > 0.0, "an un-compressible set arms the label cap")
+	# With the cap applied, every drawn glyph AND (ellipsized) label box stays in the safe band.
+	var y := Menu.FOOTER_Y + 8.0
+	var left := 640.0
+	var right := 0.0
+	for p in Menu.legend_primitives(huge, y, Menu.legend_fit_gap(huge), cap):
+		for k in ["glyph", "label"]:
+			var box: Rect2 = p[k]
+			if box.size.x <= 0.0:
+				continue
+			left = minf(left, box.position.x)
+			right = maxf(right, box.end.x)
+	Runner.T.ok(left >= 8.0 and right <= 632.0,
+		"hard-capped legend keeps every binding in the safe band [%d,%d]" % [int(left), int(right)])
+
+
+# c4-05: EVERY non-TITLE menu (PAUSE, OPTS, SETUP, DISP, HALL, HOWTO, INFO, REBIND) must
+# render a NON-EMPTY input-legend strip that teaches BACK, and — after the fit compression —
+# stays wholly inside the safe canvas band in BOTH keyboard and pad modes. Drives the REAL
+# _footer_legend() through the capture seams so this is the drawn result, not a helper guess:
+# the discoverability guarantee the item is about (back-out/adjust bindings on every screen).
+func test_every_menu_renders_an_in_band_legend_both_devices() -> void:
+	var was_pad: bool = Art.use_pad
+	var stub := _StubMain.new()
+	for pad in [false, true]:
+		Art.use_pad = pad
+		var dev := "pad" if pad else "kb"
+		# Each menu, its context-hint label, and a settings row to focus (or "" for none) so the
+		# hint the item promises (FILTER/PAGE/SECTION/ADJUST-or-TOGGLE) is actually exercised.
+		for spec in [[Menu.Mode.PAUSE, "", ""], [Menu.Mode.OPTS, "TOGGLE", "motion"],
+				[Menu.Mode.SETUP, "TOGGLE", "coop"], [Menu.Mode.DISP, "ADJUST", "winscale"],
+				[Menu.Mode.HALL, "FILTER", ""], [Menu.Mode.HOWTO, "PAGE", ""],
+				[Menu.Mode.INFO, "", ""], [Menu.Mode.REBIND, "SECTION", ""]]:
+			var mode_id: int = spec[0]
+			var hint: String = spec[1]
+			var focus_id: String = spec[2]
+			var cap := _CaptureMenu.new()
+			cap.main = stub
+			cap.mode = mode_id
+			if focus_id != "":
+				cap.sel = _row_index(cap, focus_id)
+			cap._footer_legend()   # the REAL canonical seam every non-TITLE _draw() routes through
+			var labels := _labels_of(cap.ops)
+			Runner.T.ok(labels.size() > 0, "%s mode %d renders a non-empty legend" % [dev, mode_id])
+			Runner.T.ok("BACK" in labels, "%s mode %d legend teaches BACK" % [dev, mode_id])
+			if hint != "":
+				Runner.T.ok(hint in labels, "%s mode %d legend teaches its context bind '%s'" % [dev, mode_id, hint])
+				Runner.T.ok(labels.find(hint) < labels.find("BACK"), "%s mode %d hint reads before BACK/nav" % [dev, mode_id])
+			for op in cap.ops:
+				if op["k"] == "rect":
+					continue   # the full-width strip plate spans 640 by design
+				var box: Rect2 = op["box"]
+				Runner.T.ok(box.position.x >= 8.0 and box.end.x <= 632.0,
+					"%s mode %d legend '%s' stays in the 8-632 safe band" % [dev, mode_id, op["id"]])
+			cap.free()
+	stub.free()
+	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
+
+
+# c4-05: the stale-glyph repaint predicate main.gd calls on every _input — an idle (Reduce-Motion)
+# menu must repaint the instant the LAST-USED device changes so the legend never keeps teaching the
+# old device's buttons after a mid-session swap. Covers the keyboard<->pad flip AND a pad-brand swap
+# (Xbox<->PlayStation) that keeps use_pad true, plus the no-op case that must NOT force a repaint.
+func test_device_glyph_change_triggers_menu_repaint() -> void:
+	Runner.T.ok(Menu.device_glyphs_changed(false, "xbox", true, "xbox"), "keyboard -> pad flip repaints")
+	Runner.T.ok(Menu.device_glyphs_changed(true, "xbox", false, "xbox"), "pad -> keyboard flip repaints")
+	Runner.T.ok(Menu.device_glyphs_changed(true, "xbox", true, "playstation"), "pad brand swap (same use_pad) repaints")
+	Runner.T.ok(not Menu.device_glyphs_changed(true, "xbox", true, "xbox"), "no device/brand change does NOT repaint")
+	Runner.T.ok(not Menu.device_glyphs_changed(false, "xbox", false, "xbox"), "steady keyboard does NOT repaint")
+
+
 # BACK / Esc must climb exactly one level: c2-04 SETUP -> TITLE, OPTIONS + INFO ->
 # SETUP (the hub they were demoted into), HALL + HOW TO PLAY -> INFO, and the roots
 # (TITLE/PAUSE/HIDDEN) have no back target.
