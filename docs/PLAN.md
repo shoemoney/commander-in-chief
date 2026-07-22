@@ -136,7 +136,7 @@ Ammo Cache, Grenade Crate, Fuel, Long Range, Speed Shot, Piercing Rounds, Blast 
 
 **Staffing:** 1 full-time pixel artist (from P1) + contract art director (25%, style bible + keyframe approval). Humans draw everything that ships.
 
-**AI-agent policy:** agents do **mechanical operations only** on shipped assets — sheet packing, palette-swap math, atlas generation, normal-map baking from human-authored height layers, localization-kit prep. No generative AI output ships in game files (retro communities and Valve both punish it). Agents fully unleashed on code, tools, tests, CI, and designer-approved level-JSON drafting.
+**AI-agent policy:** agents are fully unleashed on code, tools, tests, CI, level-JSON drafting, AND asset generation — generative-AI output is allowed to ship in game files (the earlier no-generative-AI restriction was dropped).
 
 **Pipeline:** Aseprite (`.ase` sources, CLI export) → Blender headless for vehicle/explosion pre-renders + normal passes → LDtk for levels. `assets_src/` is truth, `assets/` is generated + committed; fully reproducible headless.
 

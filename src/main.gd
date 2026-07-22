@@ -353,12 +353,13 @@ var _menu := GameMenu.new()
 # Boot splash (view/boot only — no sim, determinism-safe). An animated studio card
 # ("BIG IT GAME STUDIOS / a ShoeMoney company") into the "COMMANDER IN CHIEF" wordmark,
 # then a whole-overlay fade reveals the title screen. Skippable with any input.
-const SPLASH_DUR := 5.0
-const SPLASH_STUDIO_END := 2.6     # studio card owns [0, 2.6), title card owns the rest
-const SPLASH_FADE_OUT := 4.6       # whole overlay dissolves to the title over the last 0.4s
+const SPLASH_DUR := 6.0
+const SPLASH_STUDIO_END := 2.4     # studio card owns [0, 2.4), the emblem/title card owns the rest
+const SPLASH_FADE_OUT := 5.5       # whole overlay dissolves to the title over the last 0.5s
 var _splash_t := 0.0               # seconds remaining; > 0 while the splash is on screen
 var _splash_layer: CanvasLayer
 var _splash_root: Node2D
+var _splash_icon: Texture2D        # the shield emblem (res://icon.png), stamped in on the title card
 
 
 func _ready() -> void:
@@ -423,6 +424,8 @@ func _setup_splash() -> void:
 	_splash_root = Node2D.new()
 	_splash_root.draw.connect(_draw_splash)
 	_splash_layer.add_child(_splash_root)
+	if ResourceLoader.exists("res://icon.png"):
+		_splash_icon = load("res://icon.png")
 	if OS.has_feature("movie"):
 		_splash_layer.visible = false   # trailer capture: no studio splash, straight to combat
 		return
@@ -467,6 +470,13 @@ func _splash_center(text: String, y: float, size: int, col: Color) -> void:
 	_splash_root.draw_string(f, Vector2(320.0 - w / 2.0, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
 
 
+func _splash_back(t: float) -> float:
+	# back-ease-out: overshoots slightly past 1.0 then settles — a satisfying stamp.
+	var c1 := 1.70158
+	var p := t - 1.0
+	return 1.0 + (c1 + 1.0) * p * p * p + c1 * p * p
+
+
 func _draw_splash() -> void:
 	var el := SPLASH_DUR - _splash_t   # elapsed
 	# The whole overlay dissolves over the final stretch, revealing the live title screen beneath.
@@ -476,15 +486,29 @@ func _draw_splash() -> void:
 	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.05, 0.055, 0.07, veil))
 	if el < SPLASH_STUDIO_END:
 		var a := _splash_seg(el, 0.0, 0.55, SPLASH_STUDIO_END - 0.4, SPLASH_STUDIO_END) * veil
-		_splash_center("BIG IT GAME STUDIOS", 170.0, 19, Color(0.93, 0.95, 0.88, a))
-		_splash_center("a ShoeMoney company", 192.0, 9, Color(0.72, 0.77, 0.62, a))
-	else:
-		var a := _splash_seg(el, SPLASH_STUDIO_END, SPLASH_STUDIO_END + 0.6, SPLASH_DUR - 0.4, SPLASH_DUR) * veil
-		var rise := (1.0 - clampf((el - SPLASH_STUDIO_END) / 0.6, 0.0, 1.0)) * 8.0   # words settle upward
-		_splash_center("COMMANDER", 156.0 + rise, 30, Color(0.96, 0.82, 0.28, a))
-		_splash_center("IN CHIEF", 192.0 + rise, 30, Color(0.96, 0.82, 0.28, a))
-		var lw := 118.0 * a
-		_splash_root.draw_rect(Rect2(320.0 - lw, 214.0, lw * 2.0, 2.0), Color(0.85, 0.3, 0.2, a))
+		_splash_center("BIG IT GAME STUDIOS", 168.0, 19, Color(0.93, 0.95, 0.88, a))
+		_splash_center("a ShoeMoney company", 190.0, 9, Color(0.72, 0.77, 0.62, a))
+		return
+	# --- emblem + title card ---
+	var et := el - SPLASH_STUDIO_END          # seconds since the title card began
+	# The shield emblem stamps in: back-ease overshoot scale over 0.45s, fading over 0.28s.
+	var cy := 140.0
+	var scl := _splash_back(clampf(et / 0.45, 0.0, 1.0))
+	var ia := clampf(et / 0.28, 0.0, 1.0) * veil
+	if _splash_icon != null and ia > 0.001:
+		var w := 156.0 * scl
+		_splash_root.draw_texture_rect(_splash_icon, Rect2(320.0 - w / 2.0, cy - w / 2.0, w, w), false, Color(1, 1, 1, ia))
+	# A white impact flash the instant the shield lands (~et 0.45).
+	var flash := clampf(1.0 - absf(et - 0.45) / 0.12, 0.0, 1.0) * 0.4 * veil
+	if flash > 0.01:
+		_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(1.0, 1.0, 1.0, flash))
+	# Wordmark rises in under the shield after the stamp.
+	var ta := clampf((et - 0.55) / 0.5, 0.0, 1.0)
+	if ta > 0.001:
+		var rise := (1.0 - ta) * 6.0
+		_splash_center("COMMANDER IN CHIEF", 262.0 + rise, 24, Color(0.96, 0.82, 0.28, ta * veil))
+		var lw := 132.0 * ta
+		_splash_root.draw_rect(Rect2(320.0 - lw, 280.0, lw * 2.0, 2.0), Color(0.85, 0.3, 0.2, ta * veil))
 
 
 func _setup_screen_fx() -> void:
