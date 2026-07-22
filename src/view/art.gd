@@ -153,7 +153,10 @@ const TEX := {
 	"cap_smoke": preload(SY + "icons/cap_smoke.png"),
 	"cap_flash": preload(SY + "icons/cap_flash.png"),
 	# --- Kenney CC0 (ground tiles, projectiles, FX) ---
-	"grass": preload(KN + "grass.png"),
+	# a5-01 Iran desert reskin: base ground tile is now the sand card (was
+	# grass.png) — the "grass" key name stays put since main.gd's ground-paint
+	# loop and biome ramp still reference Art.tex("grass") everywhere.
+	"grass": preload(KN + "sand.png"),
 	"dirt": preload(KN + "dirt.png"),
 	"sand": preload(KN + "sand.png"),
 	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
