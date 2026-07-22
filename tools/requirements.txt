@@ -1,0 +1,4 @@
+# For generate_desert_assets.py. Also needs a working
+# ~/.claude/skills/image-toolkit install (generate.py + OPENROUTER_API_KEY
+# in ~/.keys) and a Godot 4.x headless binary on PATH or $GODOT.
+Pillow
