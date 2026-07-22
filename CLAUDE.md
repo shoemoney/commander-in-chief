@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Project Ikari is a deterministic twin-stick vertical run-and-gun (modern *Ikari Warriors* remake) on **Godot 4.7 / GDScript**. The repo is currently at the **P3 greybox** milestone; `docs/PLAN.md` is the full P0–P7 production plan (much of it aspirational). **The sim code is the source of truth for what actually exists** — don't assume a feature described in the plan or README is implemented.
+Commander In Chief is a deterministic twin-stick vertical run-and-gun (modern *Ikari Warriors* remake) on **Godot 4.7 / GDScript**. The repo is currently at the **P3 greybox** milestone; `docs/PLAN.md` is the full P0–P7 production plan (much of it aspirational). **The sim code is the source of truth for what actually exists** — don't assume a feature described in the plan or README is implemented.
 
 ## Commands
 

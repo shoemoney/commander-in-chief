@@ -1,5 +1,5 @@
 extends SceneTree
-## legacy 3D pack Military → top-down sprite baker for Project Ikari.
+## legacy 3D pack Military → top-down sprite baker for Commander In Chief.
 ## Regenerates assets/legacy-art/*.png (units, vehicles, props, foliage) from the
 ## purchased legacy art pack. Renders each model through an orthographic top-down
 ## Camera3D into a transparent SubViewport and saves a per-sized PNG.

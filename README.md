@@ -1,4 +1,4 @@
-# ⚔️ PROJECT IKARI
+# ⚔️ COMMANDER IN CHIEF
 
 <div align="center">
 
@@ -250,7 +250,7 @@ without touching the loop.
    <https://godotengine.org/download/archive/4.7-stable/> — native on M1–M4. 🍎
 2. Run it:
    ```sh
-   /Applications/Godot.app/Contents/MacOS/Godot --path /path/to/project-ikari
+   /Applications/Godot.app/Contents/MacOS/Godot --path /path/to/commander-in-chief
    ```
    …or open the editor, **Import** → `project.godot` → ⌘R.
 3. Gatekeeper complains? Right-click → Open once, or

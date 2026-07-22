@@ -1,5 +1,5 @@
 extends SceneTree
-## Raw-FBX → top-down sprite baker for Project Ikari's War/War_Map/Nature props.
+## Raw-FBX → top-down sprite baker for Commander In Chief's War/War_Map/Nature props.
 ## legacy art FBX import grey (their atlas albedo isn't auto-assigned), so each job names
 ## the atlas to force onto every surface. Same ortho top-down rig + premultiply-resize
 ## as tools/bake_sprites_decor.gd so these read consistent with the shipped bakes.

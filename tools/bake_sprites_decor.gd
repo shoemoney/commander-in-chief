@@ -1,5 +1,5 @@
 extends SceneTree
-## legacy 3D pack Military → battlefield-litter (decor) sprite baker for Project Ikari.
+## legacy 3D pack Military → battlefield-litter (decor) sprite baker for Commander In Chief.
 ## Regenerates assets/legacy-art/decor/*.png (the _LITTER props scattered by _draw_terrain) from the
 ## purchased legacy art pack. Renders each model through an orthographic top-down
 ## Camera3D into a transparent SubViewport and saves a per-sized PNG.

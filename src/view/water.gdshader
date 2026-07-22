@@ -1,7 +1,7 @@
 shader_type canvas_item;
 render_mode blend_mix;
 
-// Procedural river water for Project Ikari (view-only, deterministic-safe).
+// Procedural river water for Commander In Chief (view-only, deterministic-safe).
 //
 // Each visible water band is a ColorRect quad (main.gd _sync_water) sized WATER_H
 // tall, spanning the screen width, sitting at z=-1 (under the immediate-mode units,

@@ -1,5 +1,5 @@
 extends SceneTree
-## legacy 3D pack War (FBX-only pack) → top-down sprite baker for Project Ikari.
+## legacy 3D pack War (FBX-only pack) → top-down sprite baker for Commander In Chief.
 ## Same pipeline as tools/bake_sprites_decor.gd (ortho top-down, transparent
 ## SubViewport, premultiply→Lanczos→unpremultiply) but the FBX packs ship
 ## meshes with BLANK materials, so every surface gets a StandardMaterial3D

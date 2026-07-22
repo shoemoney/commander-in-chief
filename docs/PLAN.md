@@ -1,4 +1,4 @@
-# PROJECT IKARI — Game-Focused Master Build Plan
+# COMMANDER IN CHIEF — Game-Focused Master Build Plan
 *A modern remake of Ikari Warriors (SNK, 1986): vertical scrolling, grenades-and-guys, power-ups, tanks, co-op — modern graphics, Steam-ready.*
 
 ## Context
