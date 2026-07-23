@@ -236,7 +236,8 @@ const TEX := {
 	"tank_shell": preload(SY + "p2/tank_shell.png"),
 	"pickup_vest": preload(SY + "p2/pickup_vest.png"),
 	"tank_hulk": preload(SY + "p2/tank_hulk.png"),
-	# charred dead-cactus for the foundry/late-war canopy set (replaces tree_dead1-3).
+	# charred dead-cactus for the foundry/late-war canopy set (tree_dead1-3 retired,
+	# both from the registry and on disk — Iran has no jungle deadfall to burn).
 	"cactus_dead1": preload(SY + "p2/cactus_dead1.png"),
 	"cactus_dead2": preload(SY + "p2/cactus_dead2.png"),
 	"cactus_dead3": preload(SY + "p2/cactus_dead3.png"),
