@@ -56,8 +56,11 @@ const TEX := {
 	"crate_ammo": preload(SY + "crate_ammo.png"),
 	"crate_grenade": preload(SY + "crate_grenade.png"),
 	"crate_airstrike": preload(SY + "crate_airstrike.png"),
-	"tree_large": preload(SY + "tree_large.png"),
-	"tree_small": preload(SY + "tree_small.png"),
+	# Iran desert reskin: nano-banana cactus art (see desert_assets_source.md),
+	# baked to the same canvas size as the jungle tree_large/tree_small.png it
+	# replaces (120px/96px) so SCALE/TINT below carry over unchanged.
+	"cactus_large": preload(SY + "cactus_large.png"),
+	"cactus_small": preload(SY + "cactus_small.png"),
 	"fern": preload(SY + "fern.png"),
 	# --- legacy art icon bakes (HUD + spend-wheel) ---
 	"icon_ammo": preload(SY + "icons/icon_ammo.png"),
@@ -233,9 +236,10 @@ const TEX := {
 	"tank_shell": preload(SY + "p2/tank_shell.png"),
 	"pickup_vest": preload(SY + "p2/pickup_vest.png"),
 	"tank_hulk": preload(SY + "p2/tank_hulk.png"),
-	"tree_dead1": preload(SY + "p2/tree_dead1.png"),
-	"tree_dead2": preload(SY + "p2/tree_dead2.png"),
-	"tree_dead3": preload(SY + "p2/tree_dead3.png"),
+	# charred dead-cactus for the foundry/late-war canopy set (replaces tree_dead1-3).
+	"cactus_dead1": preload(SY + "p2/cactus_dead1.png"),
+	"cactus_dead2": preload(SY + "p2/cactus_dead2.png"),
+	"cactus_dead3": preload(SY + "p2/cactus_dead3.png"),
 	"wall_sandbag": preload(SY + "p2/wall_sandbag.png"),
 	"wall_sandbag_end": preload(SY + "p2/wall_sandbag_end.png"),
 	"bunker2": preload(SY + "p2/bunker2.png"),
@@ -342,7 +346,7 @@ const SCALE := {
 	"gunship_barrel": 0.5, "colossus_barrel": 0.6,
 	"sandbag_beige": 0.83,
 	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
-	"tree_large": 0.89, "tree_small": 0.91, "fern": 0.9,
+	"cactus_large": 0.89, "cactus_small": 0.91, "fern": 0.9,
 	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
 	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
 	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
@@ -377,7 +381,7 @@ const SCALE := {
 	"tank_shell": 0.8,               # ~grenade footprint (26px)
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
 	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)
-	"tree_dead1": 0.89, "tree_dead2": 0.89, "tree_dead3": 0.89,   # ~tree_large
+	"cactus_dead1": 0.89, "cactus_dead2": 0.89, "cactus_dead3": 0.89,   # ~cactus_large
 	"wall_sandbag": 0.28, "wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
 	"bunker2": 0.17,                 # ~bunker (same 440px canvas)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
@@ -403,12 +407,18 @@ const BOSS_VEH := Color(0.60, 0.63, 0.66)
 # a2-02 r2: one warm-hostile tint for every enemy vehicle (technical + spotters).
 const HOSTILE_VEH := Color(1.22, 0.87, 0.61)
 const FOLIAGE := Color(0.66, 0.92, 0.62)   # a3-08 AD#5/ENV#1: DEEPER + COOLER than the yellow-green grass (was 0.82,1.0,0.66) so ferns/trees separate as distinct masses, not lawn texture
+# Iran reskin: cactus_large/cactus_small get their OWN tint, not FOLIAGE — the
+# jungle FOLIAGE multiply, stacked on the already-sage-green cactus art and
+# main.gd's cactus_col mod, doubled down into a saturated jungle green instead
+# of a dusty desert plant. Warmer + lighter so it reads sun-bleached, not lawn.
+const DESERT_FOLIAGE := Color(0.92, 0.88, 0.7)
 # a1-05: charred late-run foliage. The flat FOLIAGE green used to multiply back
 # into every fern/tree even after main.gd browned them (fern_col), so the foundry
 # re-greened. tint() now ramps the FOLIAGE keys toward ash by foliage_march (set
 # each frame from _sector_march), compounding with fern_col so the foundry chars.
 const FOLIAGE_ASH := Color(0.66, 0.60, 0.50)
-const _FOLIAGE_KEYS := {"tree_large": true, "tree_small": true, "fern": true,
+const _CACTUS_KEYS := {"cactus_large": true, "cactus_small": true}
+const _FOLIAGE_KEYS := {"fern": true,
 	"fern2": true, "hedge": true}   # a1-05 r2: the foundry undergrowth is ALL hedges — char them too
 # a2-01: the prop/rock/wreck/hulk/corpse layer chars WITH the ground toward the
 # foundry (A1 only ramped ground+foliage, so cool-green jungle rocks sat strewn on
@@ -446,7 +456,10 @@ const TINT := {
 	"sandbag_beige": Color(0.88, 0.92, 0.66),
 	"crate_ammo": Color(0.82, 0.88, 0.62), "crate_grenade": Color(0.82, 0.88, 0.62),
 	"crate_airstrike": Color(0.82, 0.88, 0.62),
-	"tree_large": FOLIAGE, "tree_small": FOLIAGE, "fern": FOLIAGE,
+	# cactus_large/cactus_small/fern entries below are shadowed at read time —
+	# tint() special-cases _CACTUS_KEYS/_FOLIAGE_KEYS before consulting TINT — kept
+	# here only as the documented default (matches fern's pre-existing pattern).
+	"cactus_large": DESERT_FOLIAGE, "cactus_small": DESERT_FOLIAGE, "fern": FOLIAGE,
 	# Decor is SCENERY — muted and mossy so it recedes into the terrain and
 	# never competes with the warm-bright enemies for the player's eye.
 	"barrel": Color(0.72, 0.8, 0.6), "crate_stack": Color(0.78, 0.76, 0.62),
@@ -497,8 +510,8 @@ const TINT := {
 	"pickup_vest": Color(0.82, 0.88, 0.62),
 	# Dead things recede like the wreck/decor litter.
 	"tank_hulk": Color(0.55, 0.58, 0.52),
-	"tree_dead1": Color(0.72, 0.68, 0.55), "tree_dead2": Color(0.72, 0.68, 0.55),
-	"tree_dead3": Color(0.72, 0.68, 0.55),
+	"cactus_dead1": Color(0.72, 0.68, 0.55), "cactus_dead2": Color(0.72, 0.68, 0.55),
+	"cactus_dead3": Color(0.72, 0.68, 0.55),
 	"corpse_soldier1": Color(0.7, 0.68, 0.58), "corpse_soldier2": Color(0.7, 0.68, 0.58),
 	"wall_sandbag": Color(0.88, 0.92, 0.66), "wall_sandbag_end": Color(0.88, 0.92, 0.66),
 }
@@ -579,6 +592,8 @@ static func draw_scale(name: String) -> float:
 
 
 static func tint(name: String) -> Color:
+	if _CACTUS_KEYS.has(name):
+		return DESERT_FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
 	if _FOLIAGE_KEYS.has(name):
 		return FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
 	if _DECOR_KEYS.has(name):

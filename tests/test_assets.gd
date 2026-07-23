@@ -68,7 +68,7 @@ func test_a1_foliage_tint_ramps_to_ash() -> void:
 	var f := Art.tint("fern")
 	Runner.T.ok(f.is_equal_approx(Art.FOLIAGE_ASH), "foundry (march 1) foliage chars to FOLIAGE_ASH")
 	Runner.T.ok(f.g < Art.FOLIAGE.g - 0.2, "charred foliage loses green — no re-green multiply at the foundry")
-	Runner.T.ok(Art.tint("tree_large").is_equal_approx(Art.FOLIAGE_ASH), "trees ramp with ferns")
+	Runner.T.ok(Art.tint("cactus_large").is_equal_approx(Art.FOLIAGE_ASH), "cactus ramps with ferns")
 	# the ramp is foliage-ONLY: unit/decor tints are untouched
 	Runner.T.ok(Art.tint("rusher").is_equal_approx(Color(2.1, 1.7, 1.15)), "unit tints ignore foliage_march")
 	Art.foliage_march = 0.0   # restore the static for other suites
@@ -415,22 +415,22 @@ func test_a2_jungle_water_decerulaned() -> void:
 	Runner.T.ok(deep[0].b < 0.30, "jungle deep water pulled off the saturated blue")
 
 
-# --- a2-08: tree instance variety ---
+# --- a2-08: cactus instance variety ---
 
-func test_a2_tree_instance_variety() -> void:
+func test_a2_cactus_instance_variety() -> void:
 	var ms = load("res://src/main.gd")
 	var mn := 99.0
 	var mx := 0.0
 	var deads := 0
 	for h in range(0, 220):
-		var ti: Dictionary = ms._tree_instance(h)
+		var ti: Dictionary = ms._cactus_instance(h)
 		mn = minf(mn, ti["scale_mul"])
 		mx = maxf(mx, ti["scale_mul"])
 		if ti["dead"]:
 			deads += 1
-	Runner.T.ok(absf(mn - 0.85) < 0.01, "min tree scale is 0.85")
-	Runner.T.ok(mx > 1.12 and mx < 1.15, "max tree scale ~1.14 (0.85..1.138)")
-	Runner.T.ok(deads > 8 and deads < 45, "a minority (1-in-11) of trees are dead (%d/220)" % deads)
+	Runner.T.ok(absf(mn - 0.85) < 0.01, "min cactus scale is 0.85")
+	Runner.T.ok(mx > 1.12 and mx < 1.15, "max cactus scale ~1.14 (0.85..1.138)")
+	Runner.T.ok(deads > 8 and deads < 45, "a minority (1-in-11) of cactus are dead (%d/220)" % deads)
 
 
 # --- a2-12: kind-specific gib (metal sparks vs blood) ---
@@ -1093,11 +1093,11 @@ func test_a3_rock_top_light_is_warm_and_bright() -> void:
 	var rl: Color = c["ROCK_TOP_LIGHT"]
 	Runner.T.ok(rl.r > rl.b, "the rock top-light is WARM (sunlit, r > b)")
 	Runner.T.ok(rl.r > 0.9 and rl.g > 0.9, "the rock top-light is BRIGHT (a lit rim, not a shadow)")
-	# Only the DOMED boulders get the raised-rim highlight; the flat log does not.
+	# Only the DOMED boulders get the raised-rim highlight; the flat dead cactus does not.
 	var ms = load("res://src/main.gd")
 	Runner.T.ok(ms._rock_has_top_light("rock1") and ms._rock_has_top_light("rock2"),
 		"domed boulders (rock1/rock2) get the raised-rim top-light")
-	Runner.T.ok(not ms._rock_has_top_light("tree_dead2"), "the flat log gets NO top-light (no raised dome)")
+	Runner.T.ok(not ms._rock_has_top_light("cactus_dead2"), "the flat dead cactus gets NO top-light (no raised dome)")
 
 
 # --- a3-10: the marsh floor reads wet — dark silt pools with a cooler specular sheen so

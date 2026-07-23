@@ -861,9 +861,9 @@ func test_cover_sprites_fit_their_collision() -> void:
 	# collision half-width (+4px art tolerance for soft edges).
 	var MainS := load("res://src/main.gd")
 	var m = MainS.new()
-	for tex_name in ["rock1", "rock2", "tree_dead2"]:
+	for tex_name in ["rock1", "rock2", "cactus_dead2"]:
 		var half_w: float = Art.tex(tex_name).get_size().x * Art.draw_scale(tex_name) \
-			* {"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[tex_name] / 2.0
+			* {"rock1": 1.3, "rock2": 1.05, "cactus_dead2": 0.35}[tex_name] / 2.0
 		Runner.T.ok(half_w <= 20.0,
 			"%s drawn half-width %.1f fits the 16px cover AABB (+4 tolerance)" % [tex_name, half_w])
 	# Endless quadrant rocks are SIM entities now (art that reads as cover IS cover).

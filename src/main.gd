@@ -23,8 +23,8 @@ const SCREEN_CENTER := Vector2(320, 180)
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
 const _LITTER_EARLY := ["barrel", "crate_stack", "tent", "ammobox", "barrier",
 	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
-const _LITTER_MID_A := [   # tree_dead* removed: log-shaped things are only ever REAL cover now
-	"barrel", "tank_trap", "hedge", "flag_marker"]   # stump-field band: the jungle thins
+const _LITTER_MID_A := [   # cactus_dead* removed: dead-cactus-shaped things are only ever REAL cover now
+	"barrel", "tank_trap", "hedge", "flag_marker"]   # scrub-field band: the vegetation thins
 const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
 	"barricade", "ammobox"]                 # marsh/ruins band: the war shows
 # Authored setpiece stamps (5v: the corridor between gates is uniform noise —
@@ -4372,8 +4372,8 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 
 # Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
 const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
-# Same idiom for the late-run dead canopy — "tree_dead%d" % allocated per tree per frame.
-const _TREE_DEAD := ["tree_dead1", "tree_dead2", "tree_dead3"]
+# Same idiom for the late-run dead canopy — "cactus_dead%d" % allocated per cactus per frame.
+const _CACTUS_DEAD := ["cactus_dead1", "cactus_dead2", "cactus_dead3"]
 
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
 const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
@@ -4555,8 +4555,8 @@ const SPINE_LANE := Vector2(232.0, 408.0)
 
 static func _rock_has_top_light(rtex: String) -> bool:
 	# a3-09: only the DOMED boulders (rock1/rock2) get the lit top-edge rim that reads as
-	# raised cover; the flat log (tree_dead2) has no raised dome, so no top-light.
-	return rtex != "tree_dead2"
+	# raised cover; the flat dead cactus (cactus_dead2) has no raised dome, so no top-light.
+	return rtex != "cactus_dead2"
 
 
 static func _has_canopy_dapple(ash: float) -> bool:
@@ -4989,13 +4989,13 @@ func _draw_terrain() -> void:
 	if jst < 820.0:
 		_spr("m_jet", Vector2(jst - 90.0, 120.0 + fposmod(-cam_y * 0.2, 300.0)),
 			PI / 2, 0.34, Color(0.0, 0.02, 0.0, 0.16))
-	# The foliage joins the grass/skyglow in shifting jungle -> scorched toward the
-	# Foundry finale (grass already recolors via march; the green ferns/trees used
+	# The foliage joins the grass/skyglow in shifting desert -> scorched toward the
+	# Foundry finale (grass already recolors via march; the green ferns/cacti used
 	# to stay lush, breaking the progression). Lerp their tint ashen by march.
-	Art.foliage_march = _sector_march()   # a1-05: ramp the flat FOLIAGE tint so ferns/trees char with the run
+	Art.foliage_march = _sector_march()   # a1-05: ramp the flat FOLIAGE tint so ferns/cacti char with the run
 	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
 	var fern_col := Color(0.82, 0.92, 0.72).lerp(Color(0.6, 0.52, 0.42), ash)
-	var tree_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
+	var cactus_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
 	# Per-band undergrowth SPECIES (c2 3v: same fern table everywhere, only
 	# tinted): marsh leans reeds, ruins leans scrub, the foundry chars to
 	# stumps outright (see the anchor branch below).
@@ -5079,13 +5079,13 @@ func _draw_terrain() -> void:
 			var f_col := fern_col.lerp(Color(0.72, 0.78, 0.5), f_jit * 0.5)
 			if ug_band == 4:
 				# Foundry (c2 3v): no green survives the ash — charred struts only.
-				_spr(_TREE_DEAD[hf % 3], Vector2(fx, fy_px), 0.0,
+				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0,
 					0.16 + 0.04 * float(hf % 3), Color(0.2, 0.17, 0.15))
 			elif hf % 23 == 0:
-				_spr(_TREE_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, f_col)
+				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, f_col)
 			else:
 				# a3-08: a tiny dark contact dab grounds the fern CLUMP anchor — ferns got
-				# no _ground_shadow (only trees/litter did), so they floated on the lawn.
+				# no _ground_shadow (only cacti/litter did), so they floated on the lawn.
 				# One dab per anchor (satellites cluster on it), not per tuft.
 				_ground_shadow(Vector2(fx, fy_px + 2.0), FERN_DAB["r"], FERN_DAB["a"], Color(0.0, 0.04, 0.0))
 				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
@@ -5123,11 +5123,12 @@ func _draw_terrain() -> void:
 				if ug_band == 4:
 					# Foundry (c2 judge r1: no residual green): fringe with
 					# charred scrub, not ferns.
-					_spr(_TREE_DEAD[hfr % 3], fpos, 0.0, 0.12, Color(0.2, 0.17, 0.15))
+					_spr(_CACTUS_DEAD[hfr % 3], fpos, 0.0, 0.12, Color(0.2, 0.17, 0.15))
 				else:
 					_spr("fern", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, fern_col)
 
-	# Jungle tree lines on the flanks, sparse singles in the field.
+	# Desert cactus lines on the flanks, sparse singles in the field
+	# (cactus_large/cactus_small keys).
 	var toy := -fposmod(cam_y, 48.0)
 	for ty in 9:
 		var wy := toy + ty * 48.0
@@ -5154,23 +5155,25 @@ func _draw_terrain() -> void:
 				_ground_shadow(Vector2(px, wy_px), 6.0 if big else 4.0)
 				if ash > 0.33:
 					# Past the ash midpoint the canopy dies for real: swap to the baked
-					# dead-tree set (hash-picked per tree) instead of only tinting green art.
+					# dead-cactus set (hash-picked per cactus) instead of only tinting green art.
 					# Band 4 (c2 judge r3): even the dead set chars to charcoal — no
-					# warm bark survives the foundry.
-					_spr(_TREE_DEAD[h2 % 3], Vector2(px, wy_px),
+					# warm husk survives the foundry. (This mod IS the foundry ramp for
+					# cactus_dead* — they're not in _CACTUS_KEYS/_FOLIAGE_KEYS, so
+					# Art.tint() would otherwise return their static tan TINT unramped.)
+					_spr(_CACTUS_DEAD[h2 % 3], Vector2(px, wy_px),
 						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34,
 						Color(0.24, 0.20, 0.18) if ug_band == 4 else Color.WHITE)
 				else:
 					# a2-08 AD#9/ENV#8: per-instance scale + tint-value jitter (and a rare dead
-					# tree) so the tree layer stops reading as one card stamped repeatedly.
-					var ti := _tree_instance(h2)
+					# cactus) so the cactus layer stops reading as one card stamped repeatedly.
+					var ti := _cactus_instance(h2)
 					var tsc: float = (0.42 if big else 0.34) * float(ti["scale_mul"])
-					var tval := tree_col.lerp(tree_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
+					var tval := cactus_col.lerp(cactus_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
 					if ti["dead"]:
-						_spr(_TREE_DEAD[h2 % 3], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
+						_spr(_CACTUS_DEAD[h2 % 3], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
 							tsc, tval.lerp(Color(0.42, 0.36, 0.3), 0.5))
 					else:
-						_spr("tree_large" if big else "tree_small", Vector2(px, wy_px),
+						_spr("cactus_large" if big else "cactus_small", Vector2(px, wy_px),
 							float(h2 % 628) / 100.0 + tsway, tsc, tval)
 
 	# a3-10 (AD#9/ENV#5): the MARSH floor gets wet — reflective silt patches with a cool
@@ -5530,14 +5533,14 @@ func _draw_rocks() -> void:
 				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5, fade))
 			_:
 				_ground_shadow(pos, 12.0, 0.42 * fade)
-				var rtex: String = ["rock1", "rock2", "tree_dead2"][rh3 % 3]   # logs are REAL cover now too
-				var rcol := Color(0.78, 0.8, 0.78) if rtex != "tree_dead2" else Color(0.7, 0.62, 0.5)
-				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "tree_dead2": 0.35}[rtex]
+				var rtex: String = ["rock1", "rock2", "cactus_dead2"][rh3 % 3]   # dead cactus is REAL cover too
+				var rcol := Color(0.78, 0.8, 0.78) if rtex != "cactus_dead2" else Color(0.7, 0.62, 0.5)
+				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "cactus_dead2": 0.35}[rtex]
 				_spr(rtex, pos, float(rh3 % 628) / 100.0, rsc, Color(rcol.r, rcol.g, rcol.b, fade))
 				# a3-09 (AD#6): a lit top-edge highlight — a thin warm crescent on the
 				# boulder's upper rim implies overhead light, so a rock reads as RAISED
 				# cover (the inverse of a1-07's crater inner-pit), not a threat or a hole.
-				# Only the domed boulders; the flat log (tree_dead2) has no raised rim.
+				# Only the domed boulders; the flat dead cactus (cactus_dead2) has no raised rim.
 				if _rock_has_top_light(rtex):
 					var rr := 9.0 * rsc + 2.0
 					draw_arc(pos + Vector2(0.0, 0.5), rr, PI + 0.55, TAU - 0.2, 12,
@@ -7131,9 +7134,9 @@ static func _player_ring_dashed(slot: int) -> bool:
 	return slot != 0
 
 
-static func _tree_instance(h2: int) -> Dictionary:
-	# a2-08: per-instance tree variety from the cell hash — scale x0.85..1.138 and a
-	# 1-in-11 dead-tree swap — so the canopy stops reading as a repeated stamp.
+static func _cactus_instance(h2: int) -> Dictionary:
+	# a2-08: per-instance cactus variety from the cell hash — scale x0.85..1.138 and a
+	# 1-in-11 dead-cactus swap — so the canopy stops reading as a repeated stamp.
 	return {"scale_mul": 0.85 + float(h2 % 7) * 0.048, "dead": h2 % 11 == 0}
 
 
