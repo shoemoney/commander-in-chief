@@ -1389,7 +1389,7 @@ func _verb_legend() -> void:
 func _emit_rect(r: Rect2, c: Color) -> void:
 	draw_rect(r, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
-	Art.draw_glyph(self, act, center, size, c)
+	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 	Art.text(self, txt, pos, 8, c)
 
@@ -2242,7 +2242,7 @@ func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := 
 # supply-wheel) — like every other HUD draw seam, a one-line indirection so a headless capture
 # subclass can record them and the full _draw frame is exercisable without a live draw context.
 func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt: bool) -> void:
-	Art.draw_glyph(self, act, center, size, col, alt)
+	Art.draw_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act))
 
 
 ## c4-03: reserved pixel width of the "+N" clip — sized off the WIDER of "+N"/"!N" so the alert

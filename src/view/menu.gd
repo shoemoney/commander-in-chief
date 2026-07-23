@@ -5010,7 +5010,8 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 				draw_texture_rect(t, Rect2(x, base_y - 10.0, gw, 12.0), false)
 				x += gw + 4.0
 			else:
-				Art.draw_glyph(self, action, Vector2(x + 6.0, base_y - 4.0), 12.0)
+				Art.draw_glyph(self, action, Vector2(x + 6.0, base_y - 4.0), 12.0,
+					Color.WHITE, false, main.bind_for_glyph(action))
 				x += 16.0
 		else:
 			# c2-02: clamp each text segment to the frame interior (right edge 612) so
@@ -5144,7 +5145,7 @@ func _emit_rect(r: Rect2, c: Color) -> void:
 func _emit_tex(key: String, r: Rect2, c: Color) -> void:
 	draw_texture_rect(Art.tex(key), r, false, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
-	Art.draw_glyph(self, act, center, size, c)
+	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act))
 func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
 	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:

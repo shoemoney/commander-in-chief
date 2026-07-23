@@ -443,6 +443,10 @@ func _setup_splash() -> void:
 	_splash_layer.layer = 101
 	add_child(_splash_layer)
 	_splash_root = Node2D.new()
+	# gfx-loop review panel (ReviewKIMK): splash draws the 1280x1280 keyart/medallion
+	# scaled down to <=382px through a separate CanvasLayer that never got the same
+	# NEAREST fix as main's own root — same bilinear-smear bug, different node.
+	_splash_root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_splash_root.draw.connect(_draw_splash)
 	_splash_layer.add_child(_splash_root)
 	if ResourceLoader.exists("res://icon.png"):
@@ -2329,7 +2333,14 @@ func _check_enemy_hits() -> void:
 		_enemy_hp_prev[eidx] = ehp
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
-			_enemy_flash[eidx] = eflash - 0.2
+			# gfx-loop review panel (Reviewini/ReviewGPT/Reviewok): exponential decay
+			# instead of a fixed -0.2/tick step — linear decay dropped the flash/flinch
+			# in uniform ticks that read as robotic; exponential mimics phosphor falloff.
+			var decayed := eflash * 0.72
+			if decayed < 0.02:
+				_enemy_flash.erase(eidx)
+			else:
+				_enemy_flash[eidx] = decayed
 
 
 func _ev_shot(ev: Dictionary) -> void:
@@ -3156,6 +3167,16 @@ static func apply_bind(binds: Dictionary, action: String, code: int, unbound: in
 # false, so an UNBOUND verb simply reads as never-pressed on the keyboard.
 func bind(action: String) -> int:
 	return int(_binds.get(action, BIND_DEFAULTS.get(action, 0)))
+
+
+# gfx-loop: "wheel" is the UI glyph/hint name (Art._GLYPH_KEY/_GLYPH_PAD, the
+# HOLD-FOR-SUPPLY-WHEEL hint) — the actual rebindable action underneath it is
+# "buy" (the REBIND screen labels that row "SUPPLY WHEEL"). Every other glyph
+# name already matches its bind() key directly. Callers drawing an Art.draw_glyph
+# from a dynamic action string (not a hardcoded "interact"/"revive"/"roll") should
+# route through this instead of bind() directly.
+func bind_for_glyph(action: String) -> int:
+	return bind("buy") if action == "wheel" else bind(action)
 
 
 # c1-18: the pad button a verb is bound to on `device` (0 == P1, 1 == P2; -1 == UNBOUND) —
@@ -6342,7 +6363,7 @@ func _draw_tanks() -> void:
 			var bc := Color(1.0, 0.35, 0.2) if bail > 0.35 else Color(1.0, 0.85, 0.2)
 			draw_arc(c, 20.0, -PI / 2, -PI / 2 + TAU * bail, 28, bc, 2.5)
 		elif t["occupant"] < 0:
-			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0)
+			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0, Color.WHITE, false, bind("interact"))
 		else:
 			# Fuel gauge: the ~20s tank clock was invisible until the 300t LOW FUEL
 			# sputter (last 25%). Same ring radius the bail countdown uses, so the
@@ -6405,6 +6426,11 @@ func _draw_enemies() -> void:
 		# Placed AFTER the flash-offset read above (state itself lives in
 		# _check_enemy_hits(), so hit tracking stays correct even while off-screen).
 		if epos.y < -60.0 or epos.y > 420.0:
+			continue
+		# gfx-loop review panel (Reviewok/ReviewKIMK): Phase 1 only band-culled Y —
+		# dutch-roll/shake/kick swings the camera ~20-24px sideways too, and wide
+		# encounters (multiple enemies abreast) can sit fully off-screen horizontally.
+		if epos.x < -80.0 or epos.x > 720.0:
 			continue
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).
@@ -7231,6 +7257,9 @@ func _draw_projectiles() -> void:
 		# (tighter margin than the 60px entity band — no shadow/outline overhang).
 		if bpos.y < -20.0 or bpos.y > 380.0:
 			continue
+		# gfx-loop review panel: same X-axis gap as the enemy cull above.
+		if bpos.x < -40.0 or bpos.x > 680.0:
+			continue
 		if col_on and bpos.distance_to(col_pos) < SimWorld.COLOSSUS_HIT_RADIUS * PX + 4.0:
 			if (b["x"] / 4099 + Engine.get_physics_frames()) % 2 == 0:
 				draw_circle(bpos, 2.4, Color(1.0, 0.85, 0.4, 0.8))
@@ -7275,6 +7304,9 @@ func _draw_projectiles() -> void:
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		if bpos.y < -20.0 or bpos.y > 380.0:
+			continue
+		# gfx-loop review panel: same X-axis gap as the enemy cull above.
+		if bpos.x < -40.0 or bpos.x > 680.0:
 			continue
 		# Travel streak behind the orb so incoming fire reads as moving ordnance,
 		# not a hovering dot (the player tracers already get this motion read).
@@ -7439,7 +7471,7 @@ func _draw_players() -> void:
 					draw_set_transform_matrix(get_transform().affine_inverse())
 					draw_circle(edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
 					draw_line(edge, edge + bdir * 9.0, pcol, 2.0)
-					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0)
+					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0, Color.WHITE, false, bind("revive"))
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
@@ -7454,7 +7486,7 @@ func _draw_players() -> void:
 				var rtxt := "REVIVE %d" % cost
 				draw_string(Art.font(), pos + Vector2(-18, -16), rtxt,
 					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0)
+				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0, Color.WHITE, false, bind("revive"))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
 			# responsive while arrow-key 45° pops still glide instead of snapping.
@@ -8733,7 +8765,7 @@ func _draw_wheel() -> void:
 			Art.text(self, cue_l, Vector2(cx0, c.y + 52.0), 8,
 				Color(0.9, 0.92, 0.8, 0.85) if cue_afford else Color(1.0, 0.55, 0.45, 0.9))
 			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + 48.5), 10.0,
-				Color.WHITE, i == 1)   # P2's wheel is pad-driven — show pad B, not the C keycap
+				Color.WHITE, i == 1, bind("roll"))   # P2's wheel is pad-driven — show pad B, not the C keycap
 			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + 52.0), 8, Color(0.9, 0.92, 0.8, 0.85))
 		else:
 			Art.text_center(self, "FLICK TO PICK · RELEASE TO CLOSE", c.x, c.y + 52.0, 8,
