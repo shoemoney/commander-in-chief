@@ -890,6 +890,92 @@ func test_sol_frogman_variant() -> void:
 	Runner.T.eq(ms._frogman_tex(false), "frogman", "surfaced diver shows the RIFLE (sol-12)")
 
 
+func test_sie_endless_infantry_family() -> void:
+	# sie-01: the four blurry native-64px legacy art ENDLESS-roster specialists (GRENADIER/GHILLIE/SAPPER/
+	# SHIELD) are re-baked as authored 1024px cel-shaded infantry, same convention as the sol-08 red-team
+	# swap -- own black keyline (out of OUTLINE, no double rim), a real SCALE row, imports lossless and
+	# size-limited, watermark corner scrubbed. "courier" is explicitly untouched (still the native bake).
+	var art: Dictionary = load("res://src/view/art.gd").get_script_constant_map()
+	var tex: Dictionary = art["TEX"]
+	var scale: Dictionary = art["SCALE"]
+	var outline: Dictionary = art["OUTLINE"]
+	var key_path := {"m_bombsuit": "legacy-art/mil2/bombsuit", "m_soldier2": "legacy-art/mil2/soldier2",
+		"ghillie": "legacy-art/p2/ghillie", "sapper": "legacy-art/p2/sapper"}
+	for k in key_path:
+		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains(key_path[k]),
+			"%s still maps to its re-baked path — no TEX-key drift (sie-01)" % k)
+		# family-standard footprint: same SCALE the enemy_assault/enemy_smg/enemy_shotgun/enemy_lmg/
+		# enemy_sniper siblings use on their own 128px-limited canvas (sie-01), not a one-off number.
+		Runner.T.eq(scale[k], 0.5, "%s SCALE matches the enemy_* family standard, no accidental footprint drift (sie-01)" % k)
+		Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sie-01)" % k)
+	Runner.T.ok(outline.has("courier"), "courier is untouched — still the native legacy art bake, still needs its runtime rim (sie-01)")
+	# footprint cross-check (data, not just the constant): the 4 re-baked keys must land on the exact
+	# same imported-canvas x SCALE footprint as an established red-team sibling, not merely "some" 0.5.
+	var sib_tex: Texture2D = tex["enemy_assault"]
+	var sib_footprint: float = sib_tex.get_size().x * float(scale["enemy_assault"])
+	for k in key_path:
+		var footprint: float = tex[k].get_size().x * float(scale[k])
+		Runner.T.ok(absf(footprint - sib_footprint) < 0.5,
+			"%s footprint (%.1f) matches the enemy_assault sibling's (%.1f) — same family, not a one-off (sie-01)" % [k, footprint, sib_footprint])
+	var files := {
+		"res://assets/legacy-art/mil2/soldier2.png": 128,
+		"res://assets/legacy-art/mil2/bombsuit.png": 128,
+		"res://assets/legacy-art/p2/ghillie.png": 128,
+		"res://assets/legacy-art/p2/sapper.png": 128,
+	}
+	for path in files:
+		var lim: int = files[path]
+		var t: Texture2D = load(path)
+		Runner.T.ok(t != null, "%s imports" % path)
+		if t == null:
+			continue
+		# exact, not just capped: the 1024px source only ever downsamples through the import's own
+		# size_limit, so a healthy reimport lands EXACTLY on the family's 128px canvas (a lesser size
+		# would mean a stray pre-shrunk source snuck in; a cap-only check wouldn't catch that).
+		Runner.T.eq(t.get_size(), Vector2(lim, lim),
+			"%s imports at exactly %dx%d (VRAM guard, sie-01)" % [path, lim, lim])
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var s := img.get_size()
+		var maxa := 0.0
+		for sx in [2, 7, 12]:
+			for sy in [int(s.y) - 3, int(s.y) - 8]:
+				maxa = maxf(maxa, img.get_pixel(sx, sy).a)
+		Runner.T.ok(maxa < 0.05, "%s bottom-left watermark corner scrubbed transparent (sie-01)" % path)
+		# sol-07-style pivot discipline: these keys center-rotate on `face` every tick (_draw_enemies
+		# passes `face` as _spr's angle arg), so the alpha-mass centroid must sit near canvas center or
+		# the sprite visibly wobbles off its own body as it turns. Padded-to-centroid at bake time (not
+		# bbox-centered) — pin it within 1% of the canvas so a future re-bake can't regress it silently.
+		var mass := 0.0
+		var msum := Vector2.ZERO
+		for py in range(int(s.y)):
+			for px in range(int(s.x)):
+				var pa: float = img.get_pixel(px, py).a
+				if pa > 0.0:
+					mass += pa
+					msum += Vector2(px, py) * pa
+		var centroid: Vector2 = msum / maxf(mass, 0.001)
+		var off_pct: Vector2 = (centroid - Vector2(s) * 0.5).abs() / Vector2(s) * 100.0
+		Runner.T.ok(off_pct.x < 1.0 and off_pct.y < 1.0,
+			"%s alpha-mass centroid within 1%% of canvas center (%.2f%%, %.2f%%) — center-rotation pivot (sie-01)" % [path, off_pct.x, off_pct.y])
+		var cf := ConfigFile.new()
+		if cf.load(path + ".import") == OK:
+			Runner.T.eq(int(cf.get_value("params", "compress/mode", -1)), 0,
+				"%s imports lossless (compress/mode=0, sie-01)" % path)
+			Runner.T.eq(int(cf.get_value("params", "detect_3d/compress_to", -1)), 0,
+				"%s keeps detect_3d off (sie-01)" % path)
+			Runner.T.eq(int(cf.get_value("params", "process/size_limit", -1)), 128,
+				"%s import-side size_limit locked to 128 (sie-01)" % path)
+			Runner.T.ok(not bool(cf.get_value("params", "mipmaps/generate", true)),
+				"%s skips mipmaps — flat 2D sprite, no mip use (sie-01)" % path)
+			var meta: Dictionary = cf.get_value("remap", "metadata", {})
+			Runner.T.ok(not meta.get("vram_texture", false),
+				"%s is not a vram_texture (lossless canvas sprite, sie-01)" % path)
+		else:
+			Runner.T.ok(false, "%s.import is readable" % path)
+
+
 func test_sol_walk_frames_not_wired() -> void:
 	# sol-13 (resolved by ground-truth): the pack's walk/*.png frames are a 3/4 running pose (888-922px
 	# tall, 41px inter-frame centroid jitter) vs the top-down IDLE hero (684px). Wiring them would pop the

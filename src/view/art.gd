@@ -408,7 +408,11 @@ const SCALE := {
 	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
-	"m_bombsuit": 0.56, "m_pilot": 0.52, "m_soldier2": 0.56,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
+	"m_bombsuit": 0.5, "m_pilot": 0.52, "m_soldier2": 0.5,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
+	# sie-01: m_bombsuit/m_soldier2 re-baked as authored 1024px cel-shaded infantry (matches the
+	# enemy_* red-team convention) at SCALE 0.5 -- same footprint math as enemy_assault (128px
+	# imported canvas x 0.5), so the on-screen SHIELD/GRENADIER silhouette lands where the old
+	# native-64px legacy art blob used to.
 	"m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34,
 	"m_technical": 0.6,
@@ -419,7 +423,10 @@ const SCALE := {
 	"mg_stand": 0.3,   # 160px canvas → ~48px emplacement
 	# p2: specialists match cast2 unit footprints (64px canvas vs cast2's 300px,
 	# so raw multipliers run larger); litter/hulks fold to their swap targets.
-	"ghillie": 2.45, "courier": 2.45, "sapper": 2.45,
+	# sie-01: ghillie/sapper re-baked as authored 1024px cel-shaded infantry too -- SCALE drops from
+	# the old native-64px multiplier (2.45) to the same 0.5 family footprint (courier is untouched,
+	# still the native legacy art bake, still needs its old multiplier).
+	"ghillie": 0.5, "courier": 2.45, "sapper": 0.5,
 	"tank_shell": 0.8,               # ~grenade footprint (26px)
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
 	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)
@@ -571,7 +578,9 @@ const OUTLINE := {
 	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
 	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
-	"m_bombsuit": true, "m_pilot": true, "m_soldier2": true,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
+	"m_pilot": true,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
+	# sie-01: m_bombsuit/m_soldier2 dropped from OUTLINE -- the re-baked authored art carries its
+	# own black keyline, matching the enemy_* red-team convention (no double rim).
 	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
@@ -581,7 +590,11 @@ const OUTLINE := {
 	# capsules above (plus the planted claymore + its ghost — rim alpha follows
 	# tint.a, so the 0.28-alpha preview stays subtle).
 	"icon_rend": true, "wep_claymore": true, "wep_smoke": true, "wep_flashbang": true,
-	"ghillie": true, "courier": true, "sapper": true,
+	# sie-01: courier is the one remaining native-bake enemy infantry sprite (SUPPLY COURIER, main.gd
+	# "courier"/"courier_escape") -- same blurry 64px legacy art class as the four re-baked below, deliberately
+	# LEFT UNTOUCHED here: out of this item's scope, a fine target for a future infantry-family pass.
+	"courier": true,
+	# sie-01: ghillie/sapper dropped from OUTLINE too -- same re-bake, same baked keyline.
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
 	"wall_sandbag": true, "wall_sandbag_end": true,
 	"tank_trap": true, "barricade": true, "flak_gun": true, "trench": true,
