@@ -55,6 +55,7 @@ from PIL import Image, ImageDraw
 DEFAULT_GENERATE_PY = (os.environ.get("IMAGE_TOOLKIT_GENERATE_PY")
                         or str(Path.home() / ".claude/skills/image-toolkit/scripts/generate.py"))
 DEFAULT_GODOT = (shutil.which("godot")
+                  or os.environ.get("GODOT_BIN")
                   or os.environ.get("GODOT")
                   or "/Applications/Godot.app/Contents/MacOS/Godot")
 # Pinned so a reroll can't silently drift onto whatever generate.py's own

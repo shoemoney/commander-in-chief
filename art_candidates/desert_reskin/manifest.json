@@ -1,0 +1,279 @@
+{
+  "cactus_large": {
+    "replaces": "assets/legacy-art/cactus_large.png",
+    "canvas_size": 120,
+    "group": "cacti",
+    "prompt": "A tall saguaro-style desert cactus cluster with two upright arms, dusty sage-green faceted low-poly surface with darker green shading crevices. Match the same dusty sage-green low-poly cactus material as the rest of the cacti group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "cactus_large/variant_1.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_large/variant_2.png",
+        "backend": "fal"
+      },
+      {
+        "path": "cactus_large/variant_3.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "cactus_large/variant_4.png",
+        "backend": "replicate-enhance"
+      }
+    ],
+    "contact_sheet": "cactus_large/contact_sheet.png",
+    "attempts_used": 5,
+    "skips": [
+      {
+        "attempt": 1,
+        "backend": "openrouter",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/cactus_large_a1.png: 6077/174119 opaque pixels (3.5%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      }
+    ],
+    "winner": null
+  },
+  "cactus_small": {
+    "replaces": "assets/legacy-art/cactus_small.png",
+    "canvas_size": 96,
+    "group": "cacti",
+    "prompt": "A small cluster of round barrel cacti and prickly pear paddles, dusty sage-green faceted low-poly surface. Match the same dusty sage-green low-poly cactus material as the rest of the cacti group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "cactus_small/variant_1.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "cactus_small/variant_2.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_small/variant_3.png",
+        "backend": "fal"
+      },
+      {
+        "path": "cactus_small/variant_4.png",
+        "backend": "openrouter"
+      }
+    ],
+    "contact_sheet": "cactus_small/contact_sheet.png",
+    "attempts_used": 4,
+    "skips": [],
+    "winner": null
+  },
+  "scrub": {
+    "replaces": "assets/legacy-art/scrub.png",
+    "canvas_size": 72,
+    "group": "scrub",
+    "prompt": "A small sparse dry desert scrub bush with a few thin spiky low-poly branches, dusty olive-brown faceted surface. Match the same sun-bleached dry-brush low-poly material as the rest of the scrub group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "scrub/variant_1.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "scrub/variant_2.png",
+        "backend": "fal"
+      },
+      {
+        "path": "scrub/variant_3.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "scrub/variant_4.png",
+        "backend": "replicate-enhance"
+      }
+    ],
+    "contact_sheet": "scrub/contact_sheet.png",
+    "attempts_used": 8,
+    "skips": [
+      {
+        "attempt": 1,
+        "backend": "openrouter",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/scrub_a1.png: 3744/42619 opaque pixels (8.8%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      },
+      {
+        "attempt": 4,
+        "backend": "openrouter",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/scrub_a4.png: 6926/63997 opaque pixels (10.8%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      },
+      {
+        "attempt": 6,
+        "backend": "fal",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/scrub_a6.png: 1170/34387 opaque pixels (3.4%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      },
+      {
+        "attempt": 7,
+        "backend": "openrouter",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/scrub_a7.png: 3034/38601 opaque pixels (7.9%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      }
+    ],
+    "winner": null
+  },
+  "tumbleweed": {
+    "replaces": "assets/legacy-art/decor/tumbleweed.png",
+    "canvas_size": 200,
+    "group": "scrub",
+    "prompt": "A round classic tumbleweed, a tangled ball of dry dead brush and thorny twigs, faceted low-poly spherical silhouette, straw-tan and dry-brown coloring. Match the same sun-bleached dry-brush low-poly material as the rest of the scrub group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "tumbleweed/variant_1.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "tumbleweed/variant_2.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "tumbleweed/variant_3.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "tumbleweed/variant_4.png",
+        "backend": "fal"
+      }
+    ],
+    "contact_sheet": "tumbleweed/contact_sheet.png",
+    "attempts_used": 6,
+    "skips": [
+      {
+        "attempt": 1,
+        "backend": "openrouter",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/tumbleweed_a1.png: 8703/244848 opaque pixels (3.6%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      },
+      {
+        "attempt": 3,
+        "backend": "fal",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/tumbleweed_a3.png: 4227/208207 opaque pixels (2.0%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      }
+    ],
+    "winner": null
+  },
+  "dry_shrub": {
+    "replaces": "assets/legacy-art/decor/dry_shrub.png",
+    "canvas_size": 220,
+    "group": "scrub",
+    "prompt": "A row of four stacked rounded dry desert scrub mounds forming a long hedge-shaped bush line, sun-bleached olive-tan faceted low-poly surface, dense enough a soldier could crouch and hide behind it. Match the same sun-bleached dry-brush low-poly material as the rest of the scrub group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "dry_shrub/variant_1.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "dry_shrub/variant_2.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "dry_shrub/variant_3.png",
+        "backend": "fal"
+      },
+      {
+        "path": "dry_shrub/variant_4.png",
+        "backend": "openrouter"
+      }
+    ],
+    "contact_sheet": "dry_shrub/contact_sheet.png",
+    "attempts_used": 4,
+    "skips": [],
+    "winner": null
+  },
+  "cactus_dead1": {
+    "replaces": "assets/legacy-art/p2/cactus_dead1.png",
+    "canvas_size": 120,
+    "group": "dead",
+    "prompt": "A charred blackened dead cactus husk, scorched and burnt, low-poly faceted surface, sooty black and ash-grey coloring, one broken stub arm. Match the same sooty black and ash-grey charred low-poly material as the rest of the dead group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "cactus_dead1/variant_1.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "cactus_dead1/variant_2.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead1/variant_3.png",
+        "backend": "fal"
+      },
+      {
+        "path": "cactus_dead1/variant_4.png",
+        "backend": "openrouter"
+      }
+    ],
+    "contact_sheet": "cactus_dead1/contact_sheet.png",
+    "attempts_used": 4,
+    "skips": [],
+    "winner": null
+  },
+  "cactus_dead2": {
+    "replaces": "assets/legacy-art/p2/cactus_dead2.png",
+    "canvas_size": 120,
+    "group": "dead",
+    "prompt": "A charred blackened dead cactus husk lying tilted, scorched and burnt, low-poly faceted surface, sooty black and ash-grey coloring, cracked surface. Match the same sooty black and ash-grey charred low-poly material as the rest of the dead group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "cactus_dead2/variant_1.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "cactus_dead2/variant_2.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead2/variant_3.png",
+        "backend": "fal"
+      },
+      {
+        "path": "cactus_dead2/variant_4.png",
+        "backend": "openrouter"
+      }
+    ],
+    "contact_sheet": "cactus_dead2/contact_sheet.png",
+    "attempts_used": 4,
+    "skips": [],
+    "winner": null
+  },
+  "cactus_dead3": {
+    "replaces": "assets/legacy-art/p2/cactus_dead3.png",
+    "canvas_size": 120,
+    "group": "dead",
+    "prompt": "A charred blackened dead tumbleweed husk, scorched and burnt tangled dry brush ball, low-poly faceted surface, sooty black and ash-grey coloring. Match the same sooty black and ash-grey charred low-poly material as the rest of the dead group. legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded geometry, isometric top-down camera angle looking slightly downward, prop centered and fully in frame with generous margin, pure solid magenta background #FF00FF (not transparent, not white), no ground plane, no shadow, no text, no watermark",
+    "variants": [
+      {
+        "path": "cactus_dead3/variant_1.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "cactus_dead3/variant_2.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead3/variant_3.png",
+        "backend": "openrouter"
+      },
+      {
+        "path": "cactus_dead3/variant_4.png",
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead3/variant_5.png",
+        "backend": "fal"
+      }
+    ],
+    "contact_sheet": "cactus_dead3/contact_sheet.png",
+    "attempts_used": 5,
+    "skips": [
+      {
+        "attempt": 3,
+        "backend": "fal",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/cactus_dead3_a3.png: 38083/355700 opaque pixels (10.7%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      }
+    ],
+    "winner": null
+  },
+  "backend_legend": {
+    "or": "openrouter",
+    "re": "replicate-enhance",
+    "fa": "fal"
+  }
+}
