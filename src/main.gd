@@ -715,13 +715,13 @@ func _paint_bg(canvas: Node2D) -> void:
 			var variant := (h / 7) % 4
 			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
 			if variant == 0:
-				canvas.draw_texture_rect(Art.tex("grass"), Rect2(pos, Vector2(64, 64)), false, gcol)
+				canvas.draw_texture_rect(Art.tex("sand"), Rect2(pos, Vector2(64, 64)), false, gcol)
 			else:
 				# Flip via transform — draw_texture_rect silently drops
 				# negative-size rects (learned the gray-void way).
 				canvas.draw_set_transform(pos + Vector2(32, 32), 0.0,
 					Vector2(-1.0 if variant & 1 else 1.0, -1.0 if variant & 2 else 1.0))
-				canvas.draw_texture_rect(Art.tex("grass"), Rect2(Vector2(-32, -32), Vector2(64, 64)), false, gcol)
+				canvas.draw_texture_rect(Art.tex("sand"), Rect2(Vector2(-32, -32), Vector2(64, 64)), false, gcol)
 				canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			if h % maxi(3, 7 - int(march * 4.0)) == 0:   # a1-06: bare-earth density climbs toward the foundry
 				for dc in 2 + (h % 2):

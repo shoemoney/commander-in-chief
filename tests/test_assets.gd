@@ -526,7 +526,7 @@ func test_a2_pipeline_vram_reclaimed() -> void:
 	for cap in ["cap_pierce", "cap_spread", "cap_triple", "cap_rend", "cap_claymore", "cap_smoke", "cap_flash"]:
 		var c := FileAccess.get_file_as_string("res://assets/legacy-art/icons/%s.png.import" % cap)
 		Runner.T.ok(c.contains("size_limit=128"), "capsule glyph %s imports size-limited" % cap)
-	for tile in ["grass", "dirt", "sand"]:
+	for tile in ["dirt", "sand"]:
 		var ti := FileAccess.get_file_as_string("res://assets/kenney/%s.png.import" % tile)
 		Runner.T.ok(ti.contains("mipmaps/generate=false"), "the 1:1 Kenney %s tile has mipmaps OFF" % tile)
 
