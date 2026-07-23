@@ -30,6 +30,9 @@ var _vo := AudioStreamPlayer.new()      # Radio Commander / Spotter (VO bus, rad
 var _vo_dry := AudioStreamPlayer.new()  # the pilot's dry close-mic plea
 var _vo_streams: Dictionary = {}
 var _vo_priority := -1                  # priority of the line currently on air
+var _cmd := AudioStreamPlayer.new()     # the player Commander's own voice (dry, close-mic — NOT radio)
+var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Trump bark pool per trigger
+var _cmd_next_frame := 0                # global bark cooldown (physics frames) so combat isn't a monologue
 var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
 var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
@@ -96,6 +99,12 @@ func _ready() -> void:
 	_vo_dry.bus = "UI"   # the pilot's close-mic plea: NO radio filter by design
 	_vo_dry.volume_db = -4.0
 	add_child(_vo_dry)
+	# The Commander (player) speaks in his own dry close-mic voice on the UI bus —
+	# he's on the field shouting, not a radio narrator, so NO band-pass/overdrive.
+	_cmd.bus = "UI"
+	_cmd.volume_db = 0.0
+	add_child(_cmd)
+	_load_cmd_barks()
 	for k in ["vo_chest_empty", "vo_wiped", "vo_last_stand", "vo_observer", "vo_surge",
 			"vo_core", "vo_flawless", "vo_ransom_lost", "vo_victoly", "vo_airstrike",
 			"vo_pilot_down", "vo_shop_locked", "vo_clip_dry", "vo_pilot_plea"]:
@@ -202,6 +211,45 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	_vo_priority = priority
 	ply.stream = _vo_streams[key]
 	ply.play()
+
+
+func _load_cmd_barks() -> void:
+	## Load the Commander's Trump-voiced bark pools from assets/vo/cmd/. Keyed by
+	## event; each event has N numbered clips (cmd_<event>_<n>.mp3) fired at random.
+	var groups := {"levelstart": 6, "rally": 3, "streak": 4, "shoot": 4,
+			"grenade": 3, "boom": 3, "pickup": 3, "down": 3, "hit": 6,
+			"victory": 3, "revive": 3}
+	for ev in groups:
+		var arr: Array = []
+		for i in range(1, int(groups[ev]) + 1):
+			var res := load("res://assets/vo/cmd/cmd_%s_%d.mp3" % [ev, i])
+			if res != null:
+				arr.append(res)
+		if not arr.is_empty():
+			_cmd_barks[ev] = arr
+
+
+func play_cmd_bark(event: String, min_gap := 48, force := false) -> void:
+	## Fire a random Commander bark for `event` (view-only, dry UI bus). A global
+	## cooldown (min_gap physics-frames) keeps combat from becoming a monologue and
+	## one bark plays at a time. `force` (used for the down/victory beats) bypasses
+	## the cooldown and interrupts an in-flight flavor bark so the big moment lands.
+	## randi() is fine here: the whole VO layer is view-side, excluded from the
+	## determinism checksum (same as the spawn-shout / death-yell pools).
+	if not _cmd_barks.has(event):
+		return
+	var f := Engine.get_physics_frames()
+	if not force:
+		if f < _cmd_next_frame or _cmd.playing:
+			return
+		if (_vo.playing or _vo_dry.playing) and _vo_priority >= 2:
+			return
+	elif _cmd.playing:
+		_cmd.stop()
+	var pool: Array = _cmd_barks[event]
+	_cmd.stream = pool[randi() % pool.size()]
+	_cmd.play()
+	_cmd_next_frame = f + min_gap
 
 
 func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:

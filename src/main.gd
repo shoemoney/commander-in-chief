@@ -184,6 +184,7 @@ var _hit_dir_player := 0         # which player's body the wedge emanates from
 var _downed_by := ""             # label of the last lethal source, shown in the K.I.A. debrief
 var _record_fired := false       # NEW RECORD banner once per run
 var _deep_fired := false         # DEEPEST WAVE banner once per run
+var _levelstart_pending := false # fire the Commander's level-1 motivation line once combat actually starts
 var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the draining chip
 var _boss_hpmax := {}            # view-side max HP seen per boss key: the endless gunship spawns above BOSS_HP (sim_world.gd:1581), which pegged its bar at 100% for half the fight
 var _endless_boss_key := ""      # last endless miniboss's dict key, so its hpmax/ghost entries get pruned on death (gate_y is unique per spawn — they'd accrete forever)
@@ -1107,6 +1108,7 @@ func _reset() -> void:
 	_hitmarker = [0.0, 0.0]
 	_hit_dir_t = 0.0
 	_record_fired = false
+	_levelstart_pending = true   # arm the level-1 rally line for the first live-combat frame
 	_deep_fired = false
 	_boss_ghost.clear()
 	_boss_hpmax.clear()
@@ -1558,6 +1560,12 @@ func _lane_sector_dust(wy: float) -> Color:
 
 
 func _consume_events() -> void:
+	# Level-1 motivation: gate_open covers sectors 2+, but the opening sector has
+	# no gate to cross — fire the rally once, the first frame we're actually in
+	# combat (not still under the title/splash). _cmd_bark self-gates on HIDDEN.
+	if _levelstart_pending and _menu.mode == GameMenu.Mode.HIDDEN:
+		_levelstart_pending = false
+		_cmd_bark("levelstart", 300)
 	var armor_pinged := false   # one ricochet ping per tick, not per bullet
 	var boss_pinged := false    # one boss-hit ping per tick, not per bullet
 	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
@@ -1567,6 +1575,8 @@ func _consume_events() -> void:
 		var kind: String = ev["t"]
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
+			if ev.get("cost", 0) == 0:
+				_cmd_bark("pickup", 240)   # occasional "best weapons" gloat on a free supply grab
 			# Collect pop: common crates used to vanish on a quiet blip — a spark
 			# kiss + brief ground light marks WHERE the supply went. Reuses the
 			# existing glow-layer fx grammar; rare drops keep their bigger
@@ -1727,7 +1737,9 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": deny_txt, "col": Color(1.0, 0.45, 0.35)})
 			"shot":
 				_ev_shot(ev)
+				_cmd_bark("shoot", 1200)   # ~20s cooldown: an occasional "eat lead" over sustained fire
 			"throw":
+				_cmd_bark("grenade", 1200)   # ~20s cooldown: "hey terrorists, catch!"
 				# The lob has weight too: kick the thrower's body back along the aim,
 				# lighter than a gunshot — throwing was the one action with no feedback.
 				if ev["i"] < _recoil.size():
@@ -1917,6 +1929,7 @@ func _consume_events() -> void:
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
+				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
 				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % (Art.pad_label("revive") if Art.use_pad else "E"), true)
 				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
 				# out with a red descending sting so it registers as a setback, not a
@@ -2038,6 +2051,7 @@ func _consume_events() -> void:
 				_vo("vo_chest_empty", 2, 600)
 			"gate_open":
 				_ev_gate_open(ev)
+				_cmd_bark("levelstart", 300)   # motivation line entering each new sector/level
 			"token_mint":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext", "size": 12,
 					"rate": 0.012, "text": "COMMENDATION *%d" % ev.get("n", 1), "col": Color(1.0, 0.85, 0.3)})
@@ -2095,6 +2109,7 @@ func _consume_events() -> void:
 					"rate": 0.014, "text": "DROP STOLEN", "col": Color(1.0, 0.45, 0.35)})
 			"revive":
 				_ev_revive(ev)
+				_cmd_bark("revive", 60)   # back in the fight
 			"enemy_shot":
 				# a1-09: incoming fire gets a DIRECTIONAL red muzzle FAN aimed at the nearest
 				# player (view-only — the sim sends only x,y) so you see WHO fired in a wall
@@ -2154,6 +2169,7 @@ func _consume_events() -> void:
 				_sfx.play("alarm", -6.0, 1.3)
 			"airstrike_called":
 				_vo("vo_airstrike", 1, 300)
+				_cmd_bark("boom", 90)   # "fire and fury" as the strike goes in
 				# Commit beat: the strike is inbound, not instant — announce it.
 				show_banner("AIRSTRIKE INBOUND")
 				_sfx.play("whistle", -3.0, 0.85)
@@ -2169,6 +2185,7 @@ func _consume_events() -> void:
 			"victory":
 				_vo("vo_victoly", 3, 6000)
 				_ev_victory(ev)
+				_cmd_bark("victory", 0, true)   # force: the win beat always lands
 
 
 func _ev_shot(ev: Dictionary) -> void:
@@ -2228,6 +2245,15 @@ func _vo(key: String, priority := 1, throttle_frames := 240, dry := false) -> vo
 		return
 	_vo_last[key] = now
 	_sfx.play_vo(key, priority, dry)
+
+
+func _cmd_bark(event: String, gap := 48, force := false) -> void:
+	# The Commander (player) only shouts in LIVE combat — never over the title,
+	# pause, attract demo, or debrief. Sfx owns the random pool + cooldown; this
+	# wrapper is just the gameplay gate so barks never leak into a menu.
+	if _menu.mode != GameMenu.Mode.HIDDEN:
+		return
+	_sfx.play_cmd_bark(event, gap, force)
 
 
 func _ev_explosion(ev: Dictionary) -> void:
@@ -2470,6 +2496,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_rumble = maxf(_rumble, 0.35)
 		_punch = maxf(_punch, 0.03)
 	if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
+		_cmd_bark("streak", 60)   # Commander gloats at a kill-streak milestone
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 			"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
 		# The sim awards a real +25/50/100% score bonus at these tiers, but only
@@ -2711,6 +2738,7 @@ func _check_boss_intro() -> void:
 		_seen_bosses[g["y"]] = true
 		show_banner("BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
 		_sfx.play("alarm", -2.0, 0.85)
+		_cmd_bark("rally", 60)   # Commander rallies the troops at the boss arrival
 		_trauma = minf(1.0, _trauma + 0.3)
 		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
 		_cinematic = maxf(_cinematic, 0.6)   # brief letterbox sells the arrival moment
@@ -3808,6 +3836,10 @@ func _mark_hit_dir(px: int, py: int, pidx: int) -> void:
 			_downed_by = src
 		if pidx >= 0 and pidx < _hit_flinch.size():
 			_hit_flinch[pidx] -= _hit_dir * 3.0   # shove the body AWAY from the source
+		# Commander barks a random "taking fire" line on every hit (long cooldown so
+		# it doesn't machine-gun). On the FATAL hit, player_down force-fires "down"
+		# right after this, interrupting the hit bark so the death beat wins.
+		_cmd_bark("hit", 110)
 
 
 static func _boss_music_on(sw: SimWorld) -> bool:
