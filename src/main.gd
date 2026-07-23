@@ -7072,9 +7072,10 @@ func _draw_projectiles() -> void:
 			# Real AP shell, nose to velocity (was a re-tinted spinning grenade).
 			_spr("tank_shell", body, Vector2(g["vx"], g["vy"]).angle() + PI / 2)
 		else:
-			draw_set_transform(body, spin, Vector2.ONE)
-			draw_texture_rect(Art.tex("wep_grenade"), Rect2(-5, -5, 10, 10), false)
-			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			# Routed through _spr (was a raw draw_texture_rect with a hardcoded
+			# 10x10 rect) so the frag picks up Art.SCALE/TINT/OUTLINE like every
+			# other unit/prop sprite instead of bypassing the registry.
+			_spr("wep_grenade", body, spin)
 			# Fuse ember: live ordnance glows. The frag was the one airborne object
 			# emitting nothing — easy to lose over bright terrain despite being the
 			# biggest damage source. Flicker desynced per grenade off its x.
