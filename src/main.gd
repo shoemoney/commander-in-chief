@@ -713,7 +713,10 @@ func _paint_bg(canvas: Node2D) -> void:
 			if (base_iy + ty) % 3 == 0:
 				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
 			var variant := (h / 7) % 4
-			var gcol := Color(shade * gt.r, (shade + 0.03) * gt.g, shade * gt.b)
+			# retune: dropped the old +0.03 green-only shade boost (a jungle-grass
+			# leftover) — it re-lifted G right after _ground_stops suppressed it
+			# specifically to stop the sand tile reading olive.
+			var gcol := Color(shade * gt.r, shade * gt.g, shade * gt.b)
 			if variant == 0:
 				canvas.draw_texture_rect(Art.tex("sand"), Rect2(pos, Vector2(64, 64)), false, gcol)
 			else:
@@ -769,16 +772,16 @@ func _paint_bg(canvas: Node2D) -> void:
 				for tk2 in 2:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz / 8.0 + float(tk2) * 12.0 - 6.0, -msz / 2.0), Vector2(msz / 4.0, msz)),
-						false, Color(0.02, 0.05, 0.0, 0.10))
+						false, Color(0.05, 0.03, 0.0, 0.10))   # retune: was G-dominant (mossy tread), now warm packed-earth
 			else:
-				# GPT round-2: not just dark — 1-in-3 mottle cells go BRIGHT
-				# (sun-worn grass) and every cell carries a faint temperature
-				# lean (warm khaki vs cool blue-green) so the variation stops
-				# reading as one algorithmic dark stamp.
+				# Not just dark — 1-in-3 mottle cells go BRIGHT (sun-worn sand)
+				# and every cell carries a faint temperature lean (warm khaki
+				# vs cool slate) so the variation stops reading as one
+				# algorithmic dark stamp.
 				var m_bright := (mh / 11) % 3 == 0
-				var m_warm := (mh / 5) % 10 < (3 + int(march * 6.0))   # a1-06: warm lean climbs jungle(3/10)->foundry(9/10)
+				var m_warm := (mh / 5) % 10 < (3 + int(march * 6.0))   # a1-06: warm lean climbs desert(3/10)->foundry(9/10)
 				var mcol := Color(0.55, 0.5, 0.28, 0.16) if m_bright else \
-					(Color(0.10, 0.07, 0.0, 0.16) if m_warm else Color(0.0, 0.05, 0.06, 0.16))   # a1-06 r2: stronger SOFT mottle (was 0.10) for value variation without the tile grid
+					(Color(0.10, 0.07, 0.0, 0.16) if m_warm else Color(0.03, 0.03, 0.06, 0.16))   # retune: cool lean was G-dominant (swampy); now a neutral cool slate-blue
 				canvas.draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + float(mh % 5) * 0.16))
 				canvas.draw_texture_rect(Art.tex("fx_softspot"),
 					Rect2(-Vector2.ONE * msz / 2.0, Vector2.ONE * msz), false, mcol)
@@ -4982,35 +4985,40 @@ func _draw_terrain() -> void:
 	# water quads). Everything below still draws in _draw() over the water.
 	var cam_y := sim.camera_top * PX
 	# Drifting cloud shadows: large soft dark blobs scrolling diagonally at a
-	# slower rate than the camera — instant depth, the jungle feels alive.
+	# slower rate than the camera — instant depth, the desert feels alive.
 	var ct := float(Engine.get_physics_frames()) * 0.15
 	for c in 3:
 		var cxw := fposmod(ct * (0.6 + c * 0.2) + c * 260.0, 900.0) - 130.0
 		var cyw := fposmod(-cam_y * 0.35 + c * 190.0 + ct * 0.3, 620.0) - 130.0
 		# Soft-falloff card, not draw_circle: a hard disc rim crawling over bright
-		# grass read as a moving outline — clouds get a penumbra like every other
+		# sand read as a moving outline — clouds get a penumbra like every other
 		# shadow in the game. Alpha up vs the flat discs since the card peaks center.
 		var cr := 90.0 + c * 22.0
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(Vector2(cxw - cr, cyw - cr), Vector2(cr, cr) * 2.0),
-			false, Color(0.0, 0.02, 0.0, 0.09))
+			false, Color(0.0, 0.0, 0.0, 0.09))   # retune: dropped the G-only push (leftover jungle-shadow cast)
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(Vector2(cxw + 40.0 - 70.0, cyw + 24.0 - 70.0), Vector2(140, 140)),
-			false, Color(0.0, 0.02, 0.0, 0.08))
+			false, Color(0.0, 0.0, 0.0, 0.08))
 	# A jet-shadow streaks across the ground on a long cycle — an aircraft passing
 	# high overhead, same shadow idiom as the cloud blobs above (nose-right at PI/2,
 	# matching the gunship's PI=down facing). Decor, not the called-airstrike jet.
 	var jst := fposmod(ct * 6.0 + 200.0, 1600.0)
 	if jst < 820.0:
 		_spr("m_jet", Vector2(jst - 90.0, 120.0 + fposmod(-cam_y * 0.2, 300.0)),
-			PI / 2, 0.34, Color(0.0, 0.02, 0.0, 0.16))
-	# The foliage joins the grass/skyglow in shifting desert -> scorched toward the
-	# Foundry finale (grass already recolors via march; the desert scrub/cacti used
+			PI / 2, 0.34, Color(0.0, 0.0, 0.0, 0.16))
+	# The foliage joins the sand/skyglow in shifting desert -> scorched toward the
+	# Foundry finale (the ground already recolors via march; the desert scrub/cacti used
 	# to stay bright, breaking the progression). Lerp their tint ashen by march.
 	Art.foliage_march = _sector_march()   # a1-05: ramp the desert-flora tint so scrub/cacti char with the run
 	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
 	# desert_flora_col is the shared desert-flora tint mod — cacti AND the low
 	# scrub/tumbleweed/dry_shrub undergrowth below all lerp through it, so
 	# nothing in the flora layer carries a leftover jungle-green cast.
-	var desert_flora_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
+	# retune: this multiplies straight onto Art.tint()'s DESERT_FOLIAGE in _spr
+	# (tint = mod * Art.tint), so a G-dominant mod here re-greens even a tan
+	# base tint — was (0.75, 0.85, 0.72), G highest, flipping the product's
+	# dominant channel to green. R>=G>=B (sun-bleached khaki) so the multiply
+	# only ever darkens/warms DESERT_FOLIAGE, never re-greens it.
+	var desert_flora_col := Color(0.88, 0.78, 0.6).lerp(Color(0.55, 0.5, 0.44), ash)
 	# Per-band undergrowth SPECIES (c2 3v: same scrub table everywhere, only
 	# tinted): marsh leans tumbleweed, ruins leans scrub, the foundry chars to
 	# stumps outright (see the anchor branch below).
@@ -5166,7 +5174,7 @@ func _draw_terrain() -> void:
 				# the shade implies a top light direction (nods to ENV#9). Dead canopy casts none.
 				if _has_canopy_dapple(ash):
 					_ground_shadow(Vector2(px + float(h2 % 9) - 4.0, wy_px + 9.0),
-						28.0 if big else 20.0, 0.16, Color(0.0, 0.035, 0.02))
+						28.0 if big else 20.0, 0.16, Color(0.02, 0.015, 0.0))   # retune: was G-dominant (mossy canopy), now warm cactus-shade
 				_ground_shadow(Vector2(px, wy_px), 6.0 if big else 4.0)
 				if ash > 0.33:
 					# Past the ash midpoint the canopy dies for real: swap to the baked
