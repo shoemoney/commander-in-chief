@@ -31,3 +31,47 @@ func test_kind1_rock_cover_stays_concealment_not_blocking() -> void:
 	Runner.T.eq(k1.get("sprite", ""), "dry_shrub", "kind==1 (concealment) must draw dry_shrub")
 	Runner.T.ok(str(k1.get("sprite", "")).find("cactus") == -1,
 		"kind==1 (concealment) must not be reskinned to cactus — that reads as blocking cover")
+
+
+# --- Pins that concealment cover READS as tan scrub, not the retired green hedge:
+# raw asset, tint, and rendered (texture*tint) composite, at both foliage_march ends. ---
+
+func test_kind1_cover_reads_as_scrub_not_hedge() -> void:
+	var tex: Texture2D = load("res://assets/legacy-art/decor/dry_shrub.png")
+	if tex == null:
+		Runner.T.ok(false, "assets/legacy-art/decor/dry_shrub.png failed to load")
+		return
+	var shrub_img: Image = tex.get_image()
+	if shrub_img == null:
+		Runner.T.ok(false, "dry_shrub.png texture has no Image data")
+		return
+	if shrub_img.is_compressed():
+		shrub_img.decompress()
+
+	var src_sum := Color(0, 0, 0)
+	var src_n := 0
+	for y in range(0, shrub_img.get_height(), 2):   # every-other-pixel, same sampling stride as test_assets.gd
+		for x in range(0, shrub_img.get_width(), 2):
+			var px := shrub_img.get_pixel(x, y)
+			if px.a > 0.12:   # skip transparent/AA-fringe pixels
+				src_sum += Color(px.r, px.g, px.b)
+				src_n += 1
+	Runner.T.ok(src_n > 0, "dry_shrub.png must have opaque pixels to sample")
+	if src_n == 0:
+		return
+	var src_avg: Color = src_sum / src_n
+	# Guard the ASSET ITSELF, independent of the tint multiply below — a future
+	# reskin to a green-dominant source image must fail even if tint math is fine.
+	Runner.T.ok(src_avg.r >= src_avg.g,
+		"dry_shrub.png source average must be tan/khaki (r>=g), not green like the retired hedge")
+
+	var saved_march: float = Art.foliage_march   # static var — restore so other tests aren't perturbed
+	for march in [0.0, 1.0]:
+		Art.foliage_march = march
+		var shrub_tint: Color = Art.tint("dry_shrub")
+		Runner.T.ok(shrub_tint.is_equal_approx(Art.DESERT_FOLIAGE.lerp(Art.FOLIAGE_ASH, march)),
+			"dry_shrub tint at march=%.1f must be the documented DESERT_FOLIAGE->FOLIAGE_ASH ramp" % march)
+		var rendered: Color = src_avg * shrub_tint   # Godot's own componentwise Color*Color multiply
+		Runner.T.ok(rendered.r >= rendered.g,
+			"dry_shrub RENDERED pixel (texture*tint) at march=%.1f must read tan/khaki (r>=g), not green" % march)
+	Art.foliage_march = saved_march
