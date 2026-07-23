@@ -107,7 +107,7 @@ func _ready() -> void:
 	_load_cmd_barks()
 	for k in ["vo_chest_empty", "vo_wiped", "vo_last_stand", "vo_observer", "vo_surge",
 			"vo_core", "vo_flawless", "vo_ransom_lost", "vo_victoly", "vo_airstrike",
-			"vo_pilot_down", "vo_shop_locked", "vo_clip_dry", "vo_pilot_plea"]:
+			"vo_pilot_down", "vo_shop_locked", "vo_clip_dry", "vo_pilot_plea", "intro_crawl"]:
 		var res := load("res://assets/vo/%s.mp3" % k)
 		if res != null:
 			_vo_streams[k] = res
@@ -211,6 +211,13 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	_vo_priority = priority
 	ply.stream = _vo_streams[key]
 	ply.play()
+
+
+func stop_vo() -> void:
+	## Cut any radio/dry VO line immediately (used to kill the intro crawl on skip).
+	_vo.stop()
+	_vo_dry.stop()
+	_vo_priority = -1
 
 
 func _load_cmd_barks() -> void:

@@ -354,13 +354,20 @@ var _menu := GameMenu.new()
 # Boot splash (view/boot only — no sim, determinism-safe). An animated studio card
 # ("BIG IT GAME STUDIOS / a ShoeMoney company") into the "COMMANDER IN CHIEF" wordmark,
 # then a whole-overlay fade reveals the title screen. Skippable with any input.
-const SPLASH_DUR := 6.0
-const SPLASH_STUDIO_END := 2.4     # studio card owns [0, 2.4), the emblem/title card owns the rest
-const SPLASH_FADE_OUT := 5.5       # whole overlay dissolves to the title over the last 0.5s
+# a5-02 intro cinematic — 5 skippable beats over the boot splash:
+#   studio [0,3) → narration crawl+VO [3,10.5) → title+shield [10.5,13) → hero key-art [13,16) → dissolve.
+const SPLASH_DUR := 16.0
+const SPLASH_STUDIO_END := 3.0     # animated Big IT medallion + "presents"
+const SPLASH_CRAWL_END := 10.5     # scrolling narration crawl (Trump VO rides under it, 7.36s)
+const SPLASH_TITLE_END := 13.0     # shield stamp + COMMANDER IN CHIEF wordmark
+const SPLASH_FADE_OUT := 15.5      # whole overlay dissolves to the title over the last 0.5s
 var _splash_t := 0.0               # seconds remaining; > 0 while the splash is on screen
 var _splash_layer: CanvasLayer
 var _splash_root: Node2D
 var _splash_icon: Texture2D        # the shield emblem (res://icon.png), stamped in on the title card
+var _splash_bigit: Texture2D       # Big IT studio medallion spritesheet (6×6 grid, 31 frames @200px)
+var _splash_keyart: Texture2D      # the hero key-art poster, revealed on beat 4
+var _splash_vo_fired := false      # latch: fire the crawl narration once as the crawl beat begins
 
 
 func _ready() -> void:
@@ -427,6 +434,10 @@ func _setup_splash() -> void:
 	_splash_layer.add_child(_splash_root)
 	if ResourceLoader.exists("res://icon.png"):
 		_splash_icon = load("res://icon.png")
+	if ResourceLoader.exists("res://assets/ui/intro/bigit_sheet.png"):
+		_splash_bigit = load("res://assets/ui/intro/bigit_sheet.png")
+	if ResourceLoader.exists("res://assets/ui/intro/keyart.png"):
+		_splash_keyart = load("res://assets/ui/intro/keyart.png")
 	if OS.has_feature("movie"):
 		_splash_layer.visible = false   # trailer capture: no studio splash, straight to combat
 		return
@@ -440,6 +451,7 @@ func _end_splash() -> void:
 		return   # already dismissed (idempotent — skip and timeout can both fire)
 	_splash_t = 0.0
 	_splash_layer.visible = false
+	_sfx.stop_vo()   # cut the crawl narration if the player skipped the intro
 	if _menu.mode == GameMenu.Mode.HIDDEN:
 		_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
 
@@ -479,37 +491,83 @@ func _splash_back(t: float) -> float:
 
 
 func _draw_splash() -> void:
-	var el := SPLASH_DUR - _splash_t   # elapsed
-	# The whole overlay dissolves over the final stretch, revealing the live title screen beneath.
+	var el := SPLASH_DUR - _splash_t   # elapsed seconds
+	# The whole overlay dissolves over the final stretch, revealing the live title beneath.
 	var veil := 1.0
 	if el > SPLASH_FADE_OUT:
 		veil = clampf(1.0 - (el - SPLASH_FADE_OUT) / (SPLASH_DUR - SPLASH_FADE_OUT), 0.0, 1.0)
-	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.05, 0.055, 0.07, veil))
+	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.04, 0.045, 0.06, veil))
 	if el < SPLASH_STUDIO_END:
-		var a := _splash_seg(el, 0.0, 0.55, SPLASH_STUDIO_END - 0.4, SPLASH_STUDIO_END) * veil
-		_splash_center("BIG IT GAME STUDIOS", 168.0, 19, Color(0.93, 0.95, 0.88, a))
-		_splash_center("a ShoeMoney company", 190.0, 9, Color(0.72, 0.77, 0.62, a))
+		_draw_splash_studio(el, veil)
+	elif el < SPLASH_CRAWL_END:
+		_draw_splash_crawl(el - SPLASH_STUDIO_END, veil)
+	elif el < SPLASH_TITLE_END:
+		_draw_splash_title(el - SPLASH_CRAWL_END, veil)
+	else:
+		_draw_splash_hero(el - SPLASH_TITLE_END, veil)
+
+
+func _draw_splash_studio(el: float, veil: float) -> void:
+	# BEAT 1: the animated Big IT medallion (6×6 sheet, 31 frames @200px) + "presents".
+	var a := _splash_seg(el, 0.0, 0.6, SPLASH_STUDIO_END - 0.5, SPLASH_STUDIO_END) * veil
+	if _splash_bigit != null:
+		var fr := int(el * 12.0) % 31
+		var src := Rect2(200.0 * (fr % 6), 200.0 * (fr / 6), 200.0, 200.0)
+		var w := 150.0
+		_splash_root.draw_texture_rect_region(_splash_bigit,
+			Rect2(320.0 - w / 2.0, 96.0, w, w), src, Color(1, 1, 1, a))
+	_splash_center("BIG IT GAME STUDIOS", 268.0, 16, Color(0.93, 0.95, 0.88, a))
+	_splash_center("presents", 288.0, 11, Color(0.72, 0.77, 0.62, a))
+
+
+func _draw_splash_crawl(ct: float, veil: float) -> void:
+	# BEAT 2: the narration crawl scrolls bottom→top, fading in then out; the Trump
+	# VO (fired from _process) rides under it. ct = seconds since the crawl began.
+	var span := SPLASH_CRAWL_END - SPLASH_STUDIO_END   # 7.5s
+	var a := _splash_seg(ct, 0.0, 0.9, span - 1.0, span) * veil
+	if a < 0.001:
 		return
-	# --- emblem + title card ---
-	var et := el - SPLASH_STUDIO_END          # seconds since the title card began
-	# The shield emblem stamps in: back-ease overshoot scale over 0.45s, fading over 0.28s.
+	var lines := ["When tragedy strikes the", "United States fighting force…",
+		"", "there is only one man who can", "go in and WIN THE WAR", "for the USA."]
+	var top := 236.0 - ct * 12.0   # drifts up ~90px over the beat
+	for i in lines.size():
+		var line: String = lines[i]
+		if line == "":
+			continue
+		var big := line == "go in and WIN THE WAR"
+		_splash_center(line, top + float(i) * 24.0, 16 if big else 13,
+			Color(0.96, 0.86, 0.4, a) if big else Color(0.9, 0.92, 0.85, a))
+
+
+func _draw_splash_title(et: float, veil: float) -> void:
+	# BEAT 3: the shield emblem stamps in (back-ease overshoot), white impact flash,
+	# then the wordmark rises in — the folded-in shield beat.
 	var cy := 140.0
 	var scl := _splash_back(clampf(et / 0.45, 0.0, 1.0))
 	var ia := clampf(et / 0.28, 0.0, 1.0) * veil
 	if _splash_icon != null and ia > 0.001:
 		var w := 156.0 * scl
 		_splash_root.draw_texture_rect(_splash_icon, Rect2(320.0 - w / 2.0, cy - w / 2.0, w, w), false, Color(1, 1, 1, ia))
-	# A white impact flash the instant the shield lands (~et 0.45).
 	var flash := clampf(1.0 - absf(et - 0.45) / 0.12, 0.0, 1.0) * 0.4 * veil
 	if flash > 0.01:
 		_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(1.0, 1.0, 1.0, flash))
-	# Wordmark rises in under the shield after the stamp.
 	var ta := clampf((et - 0.55) / 0.5, 0.0, 1.0)
 	if ta > 0.001:
 		var rise := (1.0 - ta) * 6.0
 		_splash_center("COMMANDER IN CHIEF", 262.0 + rise, 24, Color(0.96, 0.82, 0.28, ta * veil))
 		var lw := 132.0 * ta
 		_splash_root.draw_rect(Rect2(320.0 - lw, 280.0, lw * 2.0, 2.0), Color(0.85, 0.3, 0.2, ta * veil))
+
+
+func _draw_splash_hero(ht: float, veil: float) -> void:
+	# BEAT 4: the hero key-art poster fades in with a slow push-in; its built-in
+	# banner IS the title. Square source fit to the 360px canvas height, centered.
+	if _splash_keyart == null:
+		return
+	var a := clampf(ht / 0.7, 0.0, 1.0) * veil
+	var h := 360.0 * (1.0 + clampf(ht / 3.0, 0.0, 1.0) * 0.06)   # slow 6% push-in
+	_splash_root.draw_texture_rect(_splash_keyart,
+		Rect2(320.0 - h / 2.0, 180.0 - h / 2.0, h, h), false, Color(1, 1, 1, a))
 
 
 func _setup_screen_fx() -> void:
@@ -816,6 +874,10 @@ func _paint_bg(canvas: Node2D) -> void:
 func _process(_delta: float) -> void:
 	if _splash_t > 0.0:
 		_splash_t -= _delta
+		# Fire the Trump narration once as the crawl beat begins (dry cinematic VO).
+		if not _splash_vo_fired and (SPLASH_DUR - _splash_t) >= SPLASH_STUDIO_END:
+			_splash_vo_fired = true
+			_sfx.play_vo("intro_crawl", 3, true)
 		_splash_root.queue_redraw()
 		if _splash_t <= 0.0:
 			_end_splash()
