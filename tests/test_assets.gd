@@ -1000,7 +1000,7 @@ func test_a3_meta_screen_scrim_seals_content_screens() -> void:
 
 
 # --- a3-03: endless gets its OWN base ground palette (warm rust/ochre) instead of
-# campaign jungle-green nudged +0.04, so the arena reads as its own place. ---
+# a nudge on the campaign's own desert sand, so the arena reads as its own place. ---
 
 func test_a3_endless_has_its_own_ground_palette() -> void:
 	var ms = load("res://src/main.gd")
@@ -1010,11 +1010,12 @@ func test_a3_endless_has_its_own_ground_palette() -> void:
 	var cg: Array = campaign[0]  # campaign grass stops
 	Runner.T.eq(eg.size(), 5, "endless grass ramp has 5 stops (matches the ramp)")
 	Runner.T.eq(campaign[1].size(), 5, "campaign dirt ramp has 5 stops")
-	# The base (wave-1 / sector-1) floor must read distinctly NON-jungle: campaign starts
-	# bright yellow-green (g >= r), endless starts warm rust-ochre (r clearly > g).
+	# The base (wave-1 / sector-1) floor must read distinctly NON-jungle: both theaters
+	# are desert now (r well above g), but campaign's pale sand and endless's rust-ochre
+	# stay visibly different colors.
 	var e0: Color = eg[0]
 	var c0: Color = cg[0]
-	Runner.T.ok(c0.g >= c0.r, "campaign start is green-forward (g >= r)")
+	Runner.T.ok(c0.r > c0.g, "campaign start is sand-forward (r > g), not olive lawn")
 	Runner.T.ok(e0.r > e0.g + 0.15, "endless start is warm rust-ochre (r well above g)")
 	Runner.T.ok(e0 != c0, "endless base is a genuinely different color, not a nudge")
 	# The ramp marches ochre -> grey ASH: the late stop is DARKER and DESATURATED (r-g gap

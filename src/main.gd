@@ -695,7 +695,7 @@ func _paint_bg(canvas: Node2D) -> void:
 	# rides the breach line where the gate rubble + dust already live. The
 	# quantized stops stay flat (KIMK pin) — no lerp, just a moving seam.
 	var stops := _ground_stops(sim.mode)
-	var grass_stops: Array = stops[0]
+	var desert_stops: Array = stops[0]
 	var dirt_stops: Array = stops[1]
 	for ty in 8:
 		# Per-row march: rows south of the last march-step snap keep the old
@@ -703,7 +703,7 @@ func _paint_bg(canvas: Node2D) -> void:
 		var row_wy_fp := int(float(base_iy + ty) * 64.0 * Fixed.ONE)
 		var row_march := _litter_march_prev if row_wy_fp >= _litter_cam_snap else march
 		var dirt_col := _biome_ramp(row_march, dirt_stops)
-		var gt := _biome_ramp(row_march, grass_stops)
+		var gt := _biome_ramp(row_march, desert_stops)
 		for tx in 10:
 			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
 			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
@@ -4513,11 +4513,10 @@ func _aim_angle(p: Dictionary) -> float:
 
 
 static func _ground_stops(mode: String) -> Array:
-	# [grass_stops, dirt_stops] — the 5-stop biome ramps the ground marches through.
+	# [desert_stops, dirt_stops] — the 5-stop biome ramps the ground marches through.
 	# a3-03: ENDLESS gets its OWN base palette (a warm rust/ochre floor that scorches to
-	# ash as the wave march climbs) instead of the campaign jungle-green nudged +0.04, so
-	# the arena reads as its own PLACE, not the campaign lawn with the a2-10 dressing
-	# rearranged on it. Campaign keeps its jungle→marsh→foundry ramp unchanged.
+	# ash as the wave march climbs) so the arena reads as its own PLACE, not the campaign
+	# sand with the a2-10 dressing rearranged on it.
 	if mode == "endless":
 		# The grass TEXTURE is green, so the modulate must SUPPRESS green/blue (not just
 		# out-red them) or the floor reads olive — the campaign foundry stop reads red-
@@ -4532,9 +4531,15 @@ static func _ground_stops(mode: String) -> Array:
 			[Color(0.56, 0.38, 0.24, 0.72), Color(0.52, 0.37, 0.26, 0.74), Color(0.48, 0.36, 0.28, 0.78),
 				Color(0.44, 0.35, 0.30, 0.8), Color(0.40, 0.34, 0.32, 0.82)],
 		]
+	# Campaign: Iran desert theater. The grass TEXTURE is green, so like endless the
+	# modulate must SUPPRESS green (G well under R), not just tint it, or the sand reads
+	# olive lawn — the old ramp's G values (1.06/0.86/0.90/0.88) rode ABOVE red and baked
+	# in exactly that jungle cast on top of a desert tile. Ramp: bright pale sand -> warm
+	# ochre -> tan -> rust as the biome march climbs to the [4] foundry stop (kept — its
+	# green was already low, it already read as scorched red-brown dirt).
 	return [
-		[Color(1.0, 1.06, 0.75), Color(1.14, 0.86, 0.62), Color(0.94, 0.90, 0.55),
-			Color(0.92, 0.88, 0.78), Color(0.52, 0.30, 0.24)],
+		[Color(0.95, 0.72, 0.42), Color(0.90, 0.62, 0.34), Color(0.82, 0.52, 0.28),
+			Color(0.70, 0.44, 0.26), Color(0.52, 0.30, 0.24)],
 		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
 			Color(0.44, 0.42, 0.40, 0.7), Color(0.32, 0.26, 0.22, 0.8)],
 	]
