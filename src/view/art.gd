@@ -135,6 +135,8 @@ const TEX := {
 	"flak_gun": preload(SY + "decor/flak_gun.png"),
 	"trench": preload(SY + "decor/trench.png"),
 	"flag_marker": preload(SY + "decor/flag_marker.png"),
+	# iran-flag: the enemy faction banner hung behind each level-end boss.
+	"flag_iran": preload(SY + "decor/flag_iran.png"),
 	"radio_tower": preload(SY + "decor/radio_tower.png"),
 	"dry_shrub": preload(SY + "decor/dry_shrub.png"),
 	"tumbleweed": preload(SY + "decor/tumbleweed.png"),
@@ -358,6 +360,7 @@ const SCALE := {
 	# p4 War/War_Map/Nature props — folded to litter footprints (retuned by eye).
 	"tank_trap": 0.14, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
 	"flag_marker": 0.16, "radio_tower": 0.18, "dry_shrub": 0.15, "tumbleweed": 0.14,
+	"flag_iran": 0.22,   # iran-flag: 306x600 banner -> ~132px tall behind a gunship (call-site scales up for the colossus)
 	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
 	"dropped_shield": 0.12, "fallen_merc": 0.2,
 	# capsule glyphs: large Apocalypse UI icons folded to pickup footprint
@@ -477,6 +480,8 @@ const TINT := {
 	"tank_trap": Color(0.72, 0.76, 0.62), "barricade": Color(0.74, 0.76, 0.64),
 	"flak_gun": Color(0.66, 0.72, 0.6), "trench": Color(0.72, 0.76, 0.64),
 	"flag_marker": Color(0.85, 0.86, 0.76), "radio_tower": Color(0.68, 0.72, 0.64),
+	# iran-flag: barely muted so the faction colours still read, but not neon over the dusty scene.
+	"flag_iran": Color(0.92, 0.9, 0.84),
 	"dry_shrub": DESERT_FOLIAGE, "tumbleweed": DESERT_FOLIAGE,
 	"wreck_halftrack": Color(0.55, 0.58, 0.52),
 	"crater_field": Color(0.6, 0.6, 0.54), "crater_water": Color(0.62, 0.68, 0.72),
