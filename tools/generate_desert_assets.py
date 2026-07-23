@@ -35,8 +35,9 @@ Usage:
         # group-dispatch wiring with synthetic placeholders, no API key,
         # no image-toolkit skill, and nothing under assets/ touched
 
-Requires ~/.claude/skills/image-toolkit/scripts/generate.py and its usual
-OPENROUTER_API_KEY (read from ~/.keys by that script) unless --dry-run.
+Requires ~/.claude/skills/image-toolkit/scripts/generate.py and a backend key
+(fal by default, or replicate) resolved by that script from model gateway then the
+environment (FAL_KEY / REPLICATE_API_TOKEN) unless --dry-run.
 Writes the final sprites straight into their assets/legacy-art/... homes --
 rerun any time to regenerate a fresh batch (e.g. to restyle) before
 committing.
@@ -60,8 +61,8 @@ DEFAULT_GODOT = (shutil.which("godot")
                   or "/Applications/Godot.app/Contents/MacOS/Godot")
 # Pinned so a reroll can't silently drift onto whatever generate.py's own
 # default happens to be later -- every job in this file was prompted and
-# tuned against this exact model.
-IMAGE_MODEL = "google/gemini-3-pro-image-preview"
+# tuned against this exact model (fal.ai's nano-banana).
+IMAGE_MODEL = "fal-ai/nano-banana"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # The project's existing lossless legacy art-bake convention (no VRAM/BC

@@ -29,33 +29,30 @@ rescue wave re-tries the shortfall with a loosened tolerance before giving
 up -- generating several candidates per asset is specifically meant to
 tolerate exactly this kind of bad roll.
 
-Backends (--backend): every asset also gets generated through more than one
-image tool, tagged per-variant in the manifest (manifest["backend_legend"]
-spells out the abbreviated contact-sheet tags) so the contact sheet is a
-real cross-tool A/B, not just N rolls of one model:
-  - openrouter (default): OpenRouter google/gemini-3-pro-image-preview
-    ("nano-banana"), via ~/.claude/skills/image-toolkit/scripts/generate.py.
-  - replicate-enhance: the same nano-banana render, then run through
+Backends (--backend): assets can be generated through more than one image
+tool, tagged per-variant in the manifest (manifest["backend_legend"] spells
+out the abbreviated contact-sheet tags) so the contact sheet is a real
+cross-tool A/B, not just N rolls of one model:
+  - fal (default): nano-banana served straight from fal.ai (fal-ai/nano-banana)
+    via a plain stdlib HTTP POST to fal.run -- no fal-client dependency.
+    Reads $FAL_KEY, falling back to a FAL_KEY= line in ~/.keys (same
+    file/format generate.py's own key loader uses). No key provisioned ->
+    that one attempt is skipped with a clear "FAL_KEY not provisioned, vault
+    one with the add-key skill" message (same skip-and-retry machinery as a
+    bad chroma-key roll) instead of aborting the whole run.
+  - replicate-enhance: the same fal.ai nano-banana render, then run through
     Replicate topazlabs/image-upscale (CGI model) via
     ~/.claude/skills/image-toolkit/scripts/upscale.py -- a real second
-    service call using the REPLICATE_API_TOKEN already in ~/.keys.
-  - fal: nano-banana served straight from fal.ai (fal-ai/nano-banana) via a
-    plain stdlib HTTP POST to fal.run -- no fal-client dependency, same
-    stdlib-urllib shape generate.py already uses for OpenRouter. Reads
-    $FAL_KEY, falling back to a FAL_KEY= line in ~/.keys (same file/format
-    generate.py's own load_keys() uses). No key provisioned -> that one
-    attempt is skipped with a clear "FAL_KEY not provisioned, vault one
-    with the add-key skill" message (same skip-and-retry machinery as a
-    bad chroma-key roll) instead of aborting the whole run.
-  - mix: cycles openrouter / replicate-enhance / fal per attempt (1st, 2nd,
-    3rd, 4th attempt = openrouter again, ...), so one run covers all three
-    tools the user actually asked to compare ("nano fal and Replicate")
-    without three separate invocations.
+    service call using the REPLICATE_API_TOKEN (resolved by upscale.py from
+    model gateway then the environment).
+  - mix: cycles fal / replicate-enhance per attempt (1st, 2nd, 3rd, 4th
+    attempt = fal again, ...), so one run covers both tools the user asked
+    to compare ("nano fal and Replicate") without two separate invocations.
 
 Usage:
-    python3 tools/generate_desert_variants.py                      # all 8 assets, 4 variants each, openrouter only
-    python3 tools/generate_desert_variants.py --backend fal        # nano-banana via fal.ai instead of OpenRouter
-    python3 tools/generate_desert_variants.py --backend mix        # cycle openrouter / replicate-enhance / fal
+    python3 tools/generate_desert_variants.py                      # all 8 assets, 4 variants each, fal only
+    python3 tools/generate_desert_variants.py --backend replicate-enhance  # fal base + Replicate topaz-CGI upscale
+    python3 tools/generate_desert_variants.py --backend mix        # cycle fal / replicate-enhance
     python3 tools/generate_desert_variants.py --variants 6         # 6 variants each
     python3 tools/generate_desert_variants.py --group cacti        # just the cacti group
     python3 tools/generate_desert_variants.py --dry-run --variants 3
@@ -111,8 +108,8 @@ ATTEMPT_BUDGET_MULT = 3
 # bad key.
 RESCUE_FRINGE_TOLERANCE = 0.15
 
-BACKEND_CHOICES = ("openrouter", "replicate-enhance", "fal", "mix")
-BACKEND_LEGEND = {"or": "openrouter", "re": "replicate-enhance", "fa": "fal"}  # contact-sheet tag -> full name
+BACKEND_CHOICES = ("fal", "replicate-enhance", "mix")
+BACKEND_LEGEND = {"fa": "fal", "re": "replicate-enhance"}  # contact-sheet tag -> full name
 DEFAULT_UPSCALE_PY = Path.home() / ".claude/skills/image-toolkit/scripts/upscale.py"
 FAL_KEYS_FILE = Path.home() / ".keys"  # same file/format generate.py's load_keys() reads
 FAL_API_URL = "https://fal.run/fal-ai/nano-banana"
@@ -126,15 +123,14 @@ _DRY_RUN_FILLS = [
 ]
 
 
-_MIX_CYCLE = ("openrouter", "replicate-enhance", "fal")
+_MIX_CYCLE = ("fal", "replicate-enhance")
 
 
 def backend_for_attempt(backend: str, attempt_idx: int) -> str:
     """Resolve the CLI --backend choice to the concrete tool used for one
-    attempt. 'mix' cycles through all three real tools (openrouter,
-    replicate-enhance, fal) so a single run covers the exact comparison the
-    user asked for -- "nano fal and Replicate" -- not just two of the
-    three."""
+    attempt. 'mix' cycles through both real tools (fal, replicate-enhance) so
+    a single run covers the exact comparison the user asked for -- "nano fal
+    and Replicate"."""
     if backend == "mix":
         return _MIX_CYCLE[(attempt_idx - 1) % len(_MIX_CYCLE)]
     return backend
@@ -149,9 +145,8 @@ def synth_variant_placeholder(dest: Path, attempt_idx: int) -> None:
 
 def _load_fal_key() -> str | None:
     """$FAL_KEY, falling back to a FAL_KEY= line in ~/.keys -- the same
-    file/format generate.py's own load_keys() reads for OPENROUTER_API_KEY,
-    so vaulting one key file (via the add-key skill) covers every backend
-    here."""
+    file/format generate.py's own key loader reads, so vaulting one key file
+    (via the add-key skill) covers the fal backend here."""
     key = os.environ.get("FAL_KEY")
     if key:
         return key
@@ -171,8 +166,7 @@ def fal_generate(prompt: str, dest: Path) -> str | None:
     branch in run_attempt() uses, so a fal failure is skipped-and-retried
     exactly like a bad chroma-key roll rather than aborting the batch.
     Plain stdlib urllib, no fal-client dependency -- fal.ai's synchronous
-    REST API for this model is one POST, the same shape generate.py already
-    uses for OpenRouter."""
+    REST API for this model is one POST."""
     key = _load_fal_key()
     if not key:
         return ("FAL_KEY not provisioned -- vault one with the add-key skill "
@@ -203,26 +197,22 @@ def fal_generate(prompt: str, dest: Path) -> str | None:
 
 def run_attempt(name: str, prompt: str, attempt_idx: int, backend: str, raw_dir: Path,
                  generate_py: Path, upscale_py: Path, model: str, dry_run: bool):
-    """Blocking: runs one attempt's full backend pipeline (openrouter
-    generate, optionally piped through a Replicate enhance pass, or a
-    direct fal.ai call) and returns (attempt_idx, raw_path_or_None, backend,
-    error_or_None). Meant to run inside a thread pool so several attempts --
-    even multi-stage ones -- proceed concurrently."""
+    """Blocking: runs one attempt's full backend pipeline. The base render
+    always comes from fal.ai's nano-banana; 'replicate-enhance' then pipes it
+    through a Replicate topaz-CGI upscale pass. Returns (attempt_idx,
+    raw_path_or_None, backend, error_or_None). Meant to run inside a thread
+    pool so several attempts -- even multi-stage ones -- proceed concurrently.
+    generate_py/model are vestigial (an earlier subprocess base render used
+    them); # ponytail: left in the signature so the caller plumbing stays a
+    no-op diff, drop them if this ever needs a real cleanup."""
     raw_path = raw_dir / f"{name}_a{attempt_idx}.png"
     if dry_run:
         synth_variant_placeholder(raw_path, attempt_idx)
         return attempt_idx, raw_path, backend, None
 
-    if backend == "fal":
-        err = fal_generate(prompt, raw_path)
-        if err is not None:
-            return attempt_idx, None, backend, err
-        return attempt_idx, raw_path, backend, None
-
-    cmd = [sys.executable, str(generate_py), prompt, "-o", str(raw_path), "--model", model]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0 or not raw_path.exists():
-        return attempt_idx, None, backend, f"generation call failed (exit {r.returncode}): {(r.stdout or '')[-500:]}"
+    err = fal_generate(prompt, raw_path)
+    if err is not None:
+        return attempt_idx, None, backend, err
 
     if backend == "replicate-enhance":
         enhanced_path = raw_dir / f"{name}_a{attempt_idx}_enh.png"
@@ -279,7 +269,7 @@ def save_contact_sheet(images_backends: list[tuple[Image.Image, str]], dest: Pat
         ox = x0 + (cell - im.width) // 2
         oy = y0 + (cell - im.height) // 2
         sheet.paste(im, (ox, oy), im)
-        # Abbreviated tag ("or"/"re"/"fa") -- the full backend name overflows
+        # Abbreviated tag ("fa"/"re") -- the full backend name overflows
         # into the neighboring cell on the narrowest (72px) canvases.
         draw.text((x0 + 2, y0 + cell + 2), f"{i + 1} {backend[:2]}", fill=(255, 255, 0))
     sheet.save(dest)
@@ -360,7 +350,7 @@ def _run_wave(states, requested_backend, raw_dir, generate_py, upscale_py, model
 
 def run_generation(jobs, n_variants, max_attempts, raw_dir, out_root,
                     generate_py, model, dry_run, fringe_tolerance=None,
-                    backend="openrouter", upscale_py=None) -> dict:
+                    backend="fal", upscale_py=None) -> dict:
     upscale_py = upscale_py or DEFAULT_UPSCALE_PY
     states = {name: AssetState(name, subject, dest, size, group, n_variants, max_attempts)
               for name, subject, dest, size, group in jobs}
@@ -430,7 +420,7 @@ def run_generation(jobs, n_variants, max_attempts, raw_dir, out_root,
                               f"edge QC than the strict 2% default")
         manifest[state.name] = entry
     # Top-level, not per-asset -- BACKEND_LEGEND spells out the abbreviated
-    # contact-sheet tags ("or"/"re") so a reviewer doesn't need to read the
+    # contact-sheet tags ("fa"/"re") so a reviewer doesn't need to read the
     # script to know what they mean.
     manifest["backend_legend"] = BACKEND_LEGEND
     return manifest
@@ -456,13 +446,14 @@ def main() -> int:
                           "for every attempt (e.g. 0.12); default None keeps the strict gate "
                           "and lets the automatic rescue wave (see RESCUE_FRINGE_TOLERANCE) "
                           "handle a shortfall instead")
-    ap.add_argument("--backend", choices=BACKEND_CHOICES, default="openrouter",
-                     help="image tool(s) to generate through (default: openrouter/nano-banana "
+    ap.add_argument("--backend", choices=BACKEND_CHOICES, default="fal",
+                     help="image tool(s) to generate through (default: fal/nano-banana "
                           "only). 'fal' calls fal.ai's nano-banana endpoint directly (needs "
                           "$FAL_KEY or a FAL_KEY= line in ~/.keys -- errors clearly per-attempt "
-                          "if missing, see module docstring). 'mix' cycles openrouter, a "
-                          "Replicate topaz-CGI enhance pass, and fal per attempt so the contact "
-                          "sheet is a real 3-tool A/B")
+                          "if missing, see module docstring). 'replicate-enhance' takes the fal "
+                          "base render and pipes it through a Replicate topaz-CGI upscale pass. "
+                          "'mix' cycles fal and replicate-enhance per attempt so the contact "
+                          "sheet is a real 2-tool A/B")
     ap.add_argument("--group", choices=sorted(GROUPS), default=None,
                      help="only generate variants for this one asset group (default: all)")
     ap.add_argument("--generate-py", default=None,
@@ -473,7 +464,9 @@ def main() -> int:
                      help="path to the image-toolkit skill's upscale.py, used by "
                           "--backend replicate-enhance/mix")
     ap.add_argument("--model", default=IMAGE_MODEL,
-                     help=f"image model slug passed to generate.py --model (default: {IMAGE_MODEL})")
+                     help=f"image model slug (default: {IMAGE_MODEL}). # ponytail: vestigial "
+                          f"since the base render is now the hardcoded fal-ai/nano-banana "
+                          f"endpoint; kept so the CLI stays stable")
     ap.add_argument("--keep-raw", action="store_true",
                      help="keep the raw pre-chroma-key renders instead of deleting the throwaway raw-dir")
     ap.add_argument("--dry-run", action="store_true",
@@ -493,10 +486,8 @@ def main() -> int:
     raw_dir.mkdir(parents=True, exist_ok=True)
     is_temp_raw_dir = args.raw_dir is None
 
-    if not args.dry_run and args.backend != "fal" and not generate_py.exists():
-        print(f"missing {generate_py} -- is the image-toolkit skill installed? "
-              f"(pass --generate-py or set $IMAGE_TOOLKIT_GENERATE_PY)", file=sys.stderr)
-        return 1
+    # ponytail: no generate.py existence check any more -- every backend's base
+    # render comes from fal.ai directly, generate.py is no longer invoked here.
     if not args.dry_run and args.backend in ("replicate-enhance", "mix") and not upscale_py.exists():
         print(f"missing {upscale_py} -- is the image-toolkit skill installed? "
               f"(pass --upscale-py)", file=sys.stderr)
