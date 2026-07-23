@@ -48,6 +48,16 @@ const TEX := {
 	"trophy": preload(SY + "cast2/trophy.png"),
 	"tank_body": preload(SY + "tank_body.png"),
 	"tank_barrel": preload(SY + "tank_barrel.png"),
+	# nt-02: bespoke generated boss art (fal.ai + Replicate) replacing the old
+	# gunship/colossus bakes, which literally shared tank_body/tank_barrel's
+	# camo material and read as up-scaled generic vehicles. gunship_body is
+	# now an attack-helicopter silhouette (rotor mast/tail boom/cockpit/
+	# weapon pods); colossus_body is a fortress-walker hull with a glowing
+	# core hatch baked in under the separately-drawn CORE EXPOSED overlay.
+	# Both bodies are pre-rotated 180 so their "nose" lands under the
+	# chin-turret/twin-barrel offsets in main.gd once the PI draw rotation
+	# flips them to face the players. Same filenames -> SCALE/TINT/BOSS_RIM
+	# below carry over unchanged.
 	"gunship_body": preload(SY + "gunship_body.png"),
 	"gunship_barrel": preload(SY + "gunship_barrel.png"),
 	"colossus_body": preload(SY + "colossus_body.png"),
