@@ -193,17 +193,27 @@
       },
       {
         "path": "cactus_dead1/variant_3.png",
-        "backend": "fal"
+        "backend": "openrouter"
       },
       {
         "path": "cactus_dead1/variant_4.png",
-        "backend": "openrouter"
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead1/variant_5.png",
+        "backend": "fal"
       }
     ],
     "contact_sheet": "cactus_dead1/contact_sheet.png",
-    "attempts_used": 4,
-    "skips": [],
-    "winner": null
+    "attempts_used": 6,
+    "skips": [
+      {
+        "attempt": 3,
+        "backend": "fal",
+        "reason": "FAL_KEY not provisioned -- vault one with the add-key skill (`fal`) or set $FAL_KEY, then retry --backend fal"
+      }
+    ],
+    "winner": 1
   },
   "cactus_dead2": {
     "replaces": "assets/legacy-art/p2/cactus_dead2.png",
@@ -221,17 +231,27 @@
       },
       {
         "path": "cactus_dead2/variant_3.png",
-        "backend": "fal"
+        "backend": "openrouter"
       },
       {
         "path": "cactus_dead2/variant_4.png",
-        "backend": "openrouter"
+        "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead2/variant_5.png",
+        "backend": "fal"
       }
     ],
     "contact_sheet": "cactus_dead2/contact_sheet.png",
-    "attempts_used": 4,
-    "skips": [],
-    "winner": null
+    "attempts_used": 6,
+    "skips": [
+      {
+        "attempt": 3,
+        "backend": "fal",
+        "reason": "FAL_KEY not provisioned -- vault one with the add-key skill (`fal`) or set $FAL_KEY, then retry --backend fal"
+      }
+    ],
+    "winner": 1
   },
   "cactus_dead3": {
     "replaces": "assets/legacy-art/p2/cactus_dead3.png",
@@ -241,19 +261,19 @@
     "variants": [
       {
         "path": "cactus_dead3/variant_1.png",
-        "backend": "openrouter"
+        "backend": "replicate-enhance"
       },
       {
         "path": "cactus_dead3/variant_2.png",
-        "backend": "replicate-enhance"
-      },
-      {
-        "path": "cactus_dead3/variant_3.png",
         "backend": "openrouter"
       },
       {
-        "path": "cactus_dead3/variant_4.png",
+        "path": "cactus_dead3/variant_3.png",
         "backend": "replicate-enhance"
+      },
+      {
+        "path": "cactus_dead3/variant_4.png",
+        "backend": "openrouter"
       },
       {
         "path": "cactus_dead3/variant_5.png",
@@ -261,15 +281,25 @@
       }
     ],
     "contact_sheet": "cactus_dead3/contact_sheet.png",
-    "attempts_used": 5,
+    "attempts_used": 8,
     "skips": [
+      {
+        "attempt": 1,
+        "backend": "openrouter",
+        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_7ane4ldk/cactus_dead3_a1.png: 8048/397670 opaque pixels (2.0%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+      },
       {
         "attempt": 3,
         "backend": "fal",
-        "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/cactus_dead3_a3.png: 38083/355700 opaque pixels (10.7%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
+        "reason": "FAL_KEY not provisioned -- vault one with the add-key skill (`fal`) or set $FAL_KEY, then retry --backend fal"
+      },
+      {
+        "attempt": 6,
+        "backend": "fal",
+        "reason": "FAL_KEY not provisioned -- vault one with the add-key skill (`fal`) or set $FAL_KEY, then retry --backend fal"
       }
     ],
-    "winner": null
+    "winner": 2
   },
   "backend_legend": {
     "or": "openrouter",
