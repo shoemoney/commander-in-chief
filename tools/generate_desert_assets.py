@@ -4,13 +4,24 @@ and post-process them into drop-in, Godot-import-ready legacy art-style sprites.
 
 Reproduces the generate-desert-assets pass documented in
 assets/legacy-art/desert_assets_source.md end to end:
-  1. one background image-toolkit process per sprite, all launched in
-     parallel and waited on together
-  2. each render chroma-keyed to transparent, trimmed to its content, and
+  0. jobs are organized into asset GROUPS (cacti, scrub, dead -- see
+     GROUPS below); dispatch_groups() fans out one subprocess PER GROUP,
+     each one this same script re-invoked with `--group <name>` -- a real
+     independent worker process, not just a loop -- and every job in a
+     group gets that group's consistency note appended to its prompt so
+     siblings render as one matching material family instead of
+     independent rolls. Each group subprocess in turn fans out its own
+     jobs as background image-toolkit processes, launched together and
+     waited on together. Two levels of fan-out: groups, then jobs within
+     a group.
+  1. each render chroma-keyed to transparent, trimmed to its content, and
      letterboxed onto a square canvas matching the sprite it stands in for
-  3. `godot --headless --import` to generate a first-pass .import (which
-     lands on the project's default VRAM/BC-compressed texture preset)
-  4. each new *.png.import hand-corrected back to the existing legacy art-bake
+  2. `godot --headless --import` to generate a first-pass .import (which
+     lands on the project's default VRAM/BC-compressed texture preset) --
+     run once by the top-level process after every group finishes, not
+     per group (concurrent `--import` calls would race on the shared
+     .godot/imported/ cache)
+  3. each new *.png.import hand-corrected back to the existing legacy art-bake
      lossless convention (compress/mode=0, detect_3d/compress_to=0,
      vram_texture=false) and re-imported, so the BC compressor never mushes
      the low-poly outline silhouettes -- see
@@ -18,11 +29,17 @@ assets/legacy-art/desert_assets_source.md end to end:
 
 Usage:
     python3 tools/generate_desert_assets.py [--out-dir DIR] [--godot-bin PATH]
+    python3 tools/generate_desert_assets.py --group cacti   # regen one group only
+    python3 tools/generate_desert_assets.py --dry-run --skip-import \
+        --out-dir /tmp/scratch                              # exercise the
+        # group-dispatch wiring with synthetic placeholders, no API key,
+        # no image-toolkit skill, and nothing under assets/ touched
 
 Requires ~/.claude/skills/image-toolkit/scripts/generate.py and its usual
-OPENROUTER_API_KEY (read from ~/.keys by that script). Writes the final
-sprites straight into their assets/legacy-art/... homes -- rerun any time to
-regenerate a fresh batch (e.g. to restyle) before committing.
+OPENROUTER_API_KEY (read from ~/.keys by that script) unless --dry-run.
+Writes the final sprites straight into their assets/legacy-art/... homes --
+rerun any time to regenerate a fresh batch (e.g. to restyle) before
+committing.
 """
 import argparse
 import os
@@ -33,7 +50,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 DEFAULT_GENERATE_PY = (os.environ.get("IMAGE_TOOLKIT_GENERATE_PY")
                         or str(Path.home() / ".claude/skills/image-toolkit/scripts/generate.py"))
@@ -63,34 +80,72 @@ STYLE = (
     "plane, no shadow, no text, no watermark"
 )
 
-# (raw render name, subject prompt, dest path under assets/legacy-art, target square px)
-JOBS = [
-    ("cactus_large", "A tall saguaro-style desert cactus cluster with two "
-     "upright arms, dusty sage-green faceted low-poly surface with darker "
-     "green shading crevices.", "cactus_large.png", 120),
-    ("cactus_small", "A small cluster of round barrel cacti and prickly "
-     "pear paddles, dusty sage-green faceted low-poly surface.",
-     "cactus_small.png", 96),
-    ("scrub", "A small sparse dry desert scrub bush with a few thin spiky "
-     "low-poly branches, dusty olive-brown faceted surface.",
-     "scrub.png", 72),
-    ("tumbleweed", "A round classic tumbleweed, a tangled ball of dry dead "
-     "brush and thorny twigs, faceted low-poly spherical silhouette, "
-     "straw-tan and dry-brown coloring.", "decor/tumbleweed.png", 200),
-    ("dry_shrub", "A row of four stacked rounded dry desert scrub mounds "
-     "forming a long hedge-shaped bush line, sun-bleached olive-tan "
-     "faceted low-poly surface, dense enough a soldier could crouch and "
-     "hide behind it.", "decor/dry_shrub.png", 220),
-    ("cactus_dead1", "A charred blackened dead cactus husk, scorched and "
-     "burnt, low-poly faceted surface, sooty black and ash-grey coloring, "
-     "one broken stub arm.", "p2/cactus_dead1.png", 120),
-    ("cactus_dead2", "A charred blackened dead cactus husk lying tilted, "
-     "scorched and burnt, low-poly faceted surface, sooty black and "
-     "ash-grey coloring, cracked surface.", "p2/cactus_dead2.png", 120),
-    ("cactus_dead3", "A charred blackened dead tumbleweed husk, scorched "
-     "and burnt tangled dry brush ball, low-poly faceted surface, sooty "
-     "black and ash-grey coloring.", "p2/cactus_dead3.png", 120),
-]
+# Jobs are fanned out per ASSET GROUP, not as one flat pile of 8: every job
+# in a group appends the same GROUPS[group]["consistency"] note to the
+# shared STYLE suffix, so e.g. the two cacti renders share explicit
+# cross-references to each other's material instead of two independent
+# rolls of the dice that happen to both say "sage-green". Groups are still
+# launched together (fan-out concurrency is unchanged -- see main()); the
+# grouping is a prompt-consistency and reporting axis, not a serialization
+# one. A future group (e.g. a "tile" ground-texture group) drops in the
+# same way: add a GROUPS entry, no other code changes.
+GROUPS = {
+    "cacti": {
+        "consistency": "Match the same dusty sage-green low-poly cactus "
+                        "material as the rest of the cacti group.",
+        "jobs": [
+            ("cactus_large", "A tall saguaro-style desert cactus cluster "
+             "with two upright arms, dusty sage-green faceted low-poly "
+             "surface with darker green shading crevices.",
+             "cactus_large.png", 120),
+            ("cactus_small", "A small cluster of round barrel cacti and "
+             "prickly pear paddles, dusty sage-green faceted low-poly "
+             "surface.", "cactus_small.png", 96),
+        ],
+    },
+    "scrub": {
+        "consistency": "Match the same sun-bleached dry-brush low-poly "
+                        "material as the rest of the scrub group.",
+        "jobs": [
+            ("scrub", "A small sparse dry desert scrub bush with a few "
+             "thin spiky low-poly branches, dusty olive-brown faceted "
+             "surface.", "scrub.png", 72),
+            ("tumbleweed", "A round classic tumbleweed, a tangled ball of "
+             "dry dead brush and thorny twigs, faceted low-poly spherical "
+             "silhouette, straw-tan and dry-brown coloring.",
+             "decor/tumbleweed.png", 200),
+            ("dry_shrub", "A row of four stacked rounded dry desert scrub "
+             "mounds forming a long hedge-shaped bush line, sun-bleached "
+             "olive-tan faceted low-poly surface, dense enough a soldier "
+             "could crouch and hide behind it.", "decor/dry_shrub.png", 220),
+        ],
+    },
+    "dead": {
+        "consistency": "Match the same sooty black and ash-grey charred "
+                        "low-poly material as the rest of the dead group.",
+        "jobs": [
+            ("cactus_dead1", "A charred blackened dead cactus husk, "
+             "scorched and burnt, low-poly faceted surface, sooty black "
+             "and ash-grey coloring, one broken stub arm.",
+             "p2/cactus_dead1.png", 120),
+            ("cactus_dead2", "A charred blackened dead cactus husk lying "
+             "tilted, scorched and burnt, low-poly faceted surface, sooty "
+             "black and ash-grey coloring, cracked surface.",
+             "p2/cactus_dead2.png", 120),
+            ("cactus_dead3", "A charred blackened dead tumbleweed husk, "
+             "scorched and burnt tangled dry brush ball, low-poly faceted "
+             "surface, sooty black and ash-grey coloring.",
+             "p2/cactus_dead3.png", 120),
+        ],
+    },
+}
+
+# Flat (name, subject, dest, size, group) view derived from GROUPS -- the
+# post-processing/import passes below don't care about grouping, only
+# generation-time prompting and progress reporting do.
+JOBS = [(name, subject, dest, size, group)
+        for group, spec in GROUPS.items()
+        for name, subject, dest, size in spec["jobs"]]
 
 
 def chroma_key(im: Image.Image, thresh: int = 60) -> tuple[Image.Image, tuple[float, float, float]]:
@@ -225,6 +280,110 @@ def run_godot_import(godot_bin: str) -> None:
                     check=True, capture_output=True, text=True)
 
 
+def synth_dry_run_render(dest: Path) -> None:
+    """--dry-run stand-in for a real nano-banana render: a small magenta
+    square with an off-key rectangle in the middle -- enough real content
+    for chroma_key/trim/fit_square/validate to run for real, so --dry-run
+    proves the per-group dispatch/wait wiring end to end without an API
+    key or the image-toolkit skill installed."""
+    im = Image.new("RGB", (64, 64), (255, 0, 255))
+    ImageDraw.Draw(im).rectangle([16, 16, 47, 47], fill=(120, 140, 90))
+    im.save(dest)
+
+
+def run_group(group: str, args: argparse.Namespace, raw_dir: Path,
+              out_root: Path, generate_py: Path) -> int:
+    """Run one asset group's full generate + post-process pipeline. This is
+    the per-group subagent unit of work: dispatch_groups() below re-invokes
+    this same script with `--group <name>` as an independent subprocess per
+    group, so each group is its own OS-process worker running in parallel
+    with its siblings; this function is also what that child process runs.
+    Godot import is intentionally NOT done here -- it's a single shared
+    step the top-level orchestrator runs once after every group finishes,
+    since concurrent `godot --import` calls would race on the same
+    .godot/imported/ cache."""
+    jobs = [(name, subject, dest, size, group) for name, subject, dest, size in GROUPS[group]["jobs"]]
+    print(f"[{group}] fanning out {len(jobs)} sprite render(s)"
+          f"{' (dry-run)' if args.dry_run else ''}...")
+
+    procs = []
+    for name, subject, _dest, _size, grp in jobs:
+        raw_path = raw_dir / f"{name}.png"
+        if args.dry_run:
+            synth_dry_run_render(raw_path)
+            procs.append((name, raw_path, None))
+            continue
+        prompt = f"{subject} {GROUPS[grp]['consistency']} {STYLE}"
+        cmd = [sys.executable, str(generate_py), prompt, "-o", str(raw_path), "--model", args.model]
+        procs.append((name, raw_path, subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)))
+
+    failed = []
+    for name, raw_path, proc in procs:
+        if proc is None:  # dry-run: rendered synchronously above
+            continue
+        out, _ = proc.communicate()
+        if proc.returncode != 0 or not raw_path.exists():
+            failed.append(name)
+            print(f"--- [{group}] generation failed: {name} (exit {proc.returncode}) ---", file=sys.stderr)
+            print(out, file=sys.stderr)
+    if failed:
+        print(f"[{group}] generation failed for: {failed}", file=sys.stderr)
+        return 1
+
+    print(f"[{group}] post-processing (chroma-key -> trim -> letterbox -> validate)...")
+    for name, _subject, dest, size, _grp in jobs:
+        raw_path = raw_dir / f"{name}.png"
+        im, key_color = chroma_key(Image.open(raw_path))
+        check_key_quality(im, key_color, dest)
+        im = fit_square(trim(im), size)
+        validate(im, dest, size)
+        dest_path = out_root / dest
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        im.save(dest_path)
+        print(f"  [{group}] {dest_path} ({im.width}x{im.height})")
+    return 0
+
+
+def dispatch_groups(args: argparse.Namespace, raw_dir: Path, out_root: Path,
+                     generate_py: Path) -> tuple[int, list[Path]]:
+    """Fan out one subprocess per asset group -- this script re-invoked
+    with `--group <name>`, all launched together and waited on together.
+    This is the literal "subagents per asset group" the goal asks for:
+    each group is dispatched, runs, and reports back as an independent
+    worker, not a single process looping over a flat job list."""
+    self_path = str(Path(__file__).resolve())
+    procs = []
+    for group in GROUPS:
+        cmd = [sys.executable, self_path, "--group", group,
+               "--out-dir", str(out_root), "--raw-dir", str(raw_dir),
+               "--generate-py", str(generate_py), "--model", args.model,
+               "--skip-import"]
+        if args.dry_run:
+            cmd.append("--dry-run")
+        procs.append((group, subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)))
+
+    failed = []
+    for group, proc in procs:
+        out, _ = proc.communicate()
+        if out:
+            print(out, end="" if out.endswith("\n") else "\n")
+        if proc.returncode != 0:
+            failed.append(group)
+    if failed:
+        print(f"group dispatch failed for: {failed}", file=sys.stderr)
+        return 1, []
+
+    dest_paths = [out_root / dest for spec in GROUPS.values()
+                  for _name, _subject, dest, _size in spec["jobs"]]
+    missing = [p for p in dest_paths if not p.exists()]
+    if missing:
+        print(f"expected outputs missing after group dispatch: {missing}", file=sys.stderr)
+        return 1, []
+    return 0, dest_paths
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", default=str(PROJECT_ROOT / "assets/legacy-art"),
@@ -250,6 +409,21 @@ def main() -> int:
     ap.add_argument("--keep-raw", action="store_true",
                      help="keep the raw pre-chroma-key renders instead of "
                           "deleting the throwaway raw-dir on success")
+    ap.add_argument("--group", choices=sorted(GROUPS), default=None,
+                     help="internal: run only this one asset group's "
+                          "generate+post-process pipeline and exit. This is "
+                          "what dispatch_groups() invokes as each group's "
+                          "subprocess; pass it yourself to regenerate a "
+                          "single group without touching the others.")
+    ap.add_argument("--dry-run", action="store_true",
+                     help="skip the real nano-banana render and synthesize a "
+                          "placeholder instead, so the per-group dispatch/"
+                          "wait wiring can be exercised without an API key "
+                          "or the image-toolkit skill. Requires --out-dir to "
+                          "point outside assets/ (refuses the default) and "
+                          "always implies --skip-import, so synthetic "
+                          "placeholder pixels can never overwrite a "
+                          "committed sprite or get baked into a real .import")
     args = ap.parse_args()
 
     out_root = Path(args.out_dir)
@@ -258,48 +432,39 @@ def main() -> int:
     raw_dir.mkdir(parents=True, exist_ok=True)
     is_temp_raw_dir = args.raw_dir is None
 
-    if not generate_py.exists():
+    if args.dry_run:
+        assets_root = (PROJECT_ROOT / "assets").resolve()
+        out_resolved = out_root.resolve()
+        under_assets = out_resolved == assets_root or assets_root in out_resolved.parents
+        if under_assets:
+            print(f"--dry-run refuses to write into {out_root} (inside the real "
+                  f"assets/ tree) -- pass a scratch --out-dir so synthetic "
+                  f"placeholder pixels can never overwrite a committed sprite.",
+                  file=sys.stderr)
+            return 1
+        if not args.skip_import:
+            print("--dry-run implies --skip-import (a synthetic placeholder must "
+                  "never get baked into a real .import); forcing it.", file=sys.stderr)
+            args.skip_import = True
+
+    if not args.dry_run and not generate_py.exists():
         print(f"missing {generate_py} -- is the image-toolkit skill installed? "
               f"(pass --generate-py or set $IMAGE_TOOLKIT_GENERATE_PY)", file=sys.stderr)
         return 1
+
+    if args.group:
+        return run_group(args.group, args, raw_dir, out_root, generate_py)
 
     godot_bin = None
     if not args.skip_import:
         godot_bin = resolve_godot(args.godot_bin)  # fail fast, before spending API calls
 
-    print(f"fanning out {len(JOBS)} nano-banana renders (model={args.model}) into {raw_dir} ...")
-    procs = []
-    for name, subject, _dest, _size in JOBS:
-        raw_path = raw_dir / f"{name}.png"
-        cmd = [sys.executable, str(generate_py), f"{subject} {STYLE}",
-               "-o", str(raw_path), "--model", args.model]
-        procs.append((name, raw_path, subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)))
-
-    failed = []
-    for name, raw_path, proc in procs:
-        out, _ = proc.communicate()
-        if proc.returncode != 0 or not raw_path.exists():
-            failed.append(name)
-            print(f"--- generation failed: {name} (exit {proc.returncode}) ---", file=sys.stderr)
-            print(out, file=sys.stderr)
-    if failed:
-        print(f"generation failed for: {failed}", file=sys.stderr)
-        return 1
-
-    print("post-processing (chroma-key -> trim -> letterbox -> validate)...")
-    dest_paths = []
-    for name, _subject, dest, size in JOBS:
-        raw_path = raw_dir / f"{name}.png"
-        im, key_color = chroma_key(Image.open(raw_path))
-        check_key_quality(im, key_color, dest)
-        im = fit_square(trim(im), size)
-        validate(im, dest, size)
-        dest_path = out_root / dest
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        im.save(dest_path)
-        dest_paths.append(dest_path)
-        print(f"  {dest_path} ({im.width}x{im.height})")
+    print(f"dispatching {len(GROUPS)} asset-group subagents "
+          f"({', '.join(GROUPS)}) in parallel -- {len(JOBS)} sprites total "
+          f"-- into {raw_dir} ...")
+    rc, dest_paths = dispatch_groups(args, raw_dir, out_root, generate_py)
+    if rc:
+        return rc
 
     if is_temp_raw_dir and not args.keep_raw:
         shutil.rmtree(raw_dir, ignore_errors=True)
