@@ -77,6 +77,15 @@ jobs:
           chmod +x "$GODOT"
           "$GODOT" --headless --path . --import
 
+      - name: Asset import sidecar lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! "$GODOT" --headless --path . -s res://tools/lint_assets.gd 2>&1 | tee lint-assets-output.log; then
+            echo "::error::Asset import sidecar lint failed; see lint-assets-output.log"
+            exit 1
+          fi
+
       - name: Run test suite
         shell: bash
         run: |
