@@ -22,9 +22,9 @@ const SCREEN_CENTER := Vector2(320, 180)
 # Litter biases with the run: early sectors are an intact outpost (tents/crates/
 # rocks), late sectors a wrecked front (hulks/wire/towers/fallen). Picked by _sector_march.
 const _LITTER_EARLY := ["barrel", "crate_stack", "tent", "ammobox", "barrier",
-	"tank_trap", "flak_gun", "hedge", "fern2", "flag_marker", "mg_tripod"]
+	"tank_trap", "flak_gun", "dry_shrub", "tumbleweed", "flag_marker", "mg_tripod"]
 const _LITTER_MID_A := [   # cactus_dead* removed: dead-cactus-shaped things are only ever REAL cover now
-	"barrel", "tank_trap", "hedge", "flag_marker"]   # scrub-field band: the vegetation thins
+	"barrel", "tank_trap", "dry_shrub", "flag_marker"]   # scrub-field band: the vegetation thins
 const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse_soldier1",
 	"barricade", "ammobox"]                 # marsh/ruins band: the war shows
 # Authored setpiece stamps (5v: the corridor between gates is uniform noise —
@@ -667,7 +667,7 @@ func _sync_water() -> void:
 func _paint_bg(canvas: Node2D) -> void:
 	# The opaque grass/dirt base, relocated verbatim from _draw_terrain so it can
 	# render on _bg_root (below the water). Drawn onto `canvas` (== _bg_root); the
-	# rest of the terrain decor (clouds, ferns, trees, litter) stays in _draw().
+	# rest of the terrain decor (clouds, scrub, cacti, litter) stays in _draw().
 	if sim == null:
 		return
 	var cam_y := sim.camera_top * PX
@@ -4423,7 +4423,7 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 # < 0.4) and every additive term is capped <= 0.66 so MG-spam sums lower and explosions keep
 # the white-hot bright-point monopoly. Pinned so the hierarchy can't regress silently.
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
-const FERN_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a fern clump anchor (under the sprite)
+const SCRUB_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a scrub clump anchor (under the sprite)
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
 const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
 const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
@@ -4990,18 +4990,20 @@ func _draw_terrain() -> void:
 		_spr("m_jet", Vector2(jst - 90.0, 120.0 + fposmod(-cam_y * 0.2, 300.0)),
 			PI / 2, 0.34, Color(0.0, 0.02, 0.0, 0.16))
 	# The foliage joins the grass/skyglow in shifting desert -> scorched toward the
-	# Foundry finale (grass already recolors via march; the green ferns/cacti used
-	# to stay lush, breaking the progression). Lerp their tint ashen by march.
-	Art.foliage_march = _sector_march()   # a1-05: ramp the flat FOLIAGE tint so ferns/cacti char with the run
+	# Foundry finale (grass already recolors via march; the desert scrub/cacti used
+	# to stay bright, breaking the progression). Lerp their tint ashen by march.
+	Art.foliage_march = _sector_march()   # a1-05: ramp the desert-flora tint so scrub/cacti char with the run
 	var ash := clampf(_sector_march() * 0.65, 0.0, 0.65)
-	var fern_col := Color(0.82, 0.92, 0.72).lerp(Color(0.6, 0.52, 0.42), ash)
-	var cactus_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
-	# Per-band undergrowth SPECIES (c2 3v: same fern table everywhere, only
-	# tinted): marsh leans reeds, ruins leans scrub, the foundry chars to
+	# desert_flora_col is the shared desert-flora tint mod — cacti AND the low
+	# scrub/tumbleweed/dry_shrub undergrowth below all lerp through it, so
+	# nothing in the flora layer carries a leftover jungle-green cast.
+	var desert_flora_col := Color(0.75, 0.85, 0.72).lerp(Color(0.55, 0.5, 0.44), ash)
+	# Per-band undergrowth SPECIES (c2 3v: same scrub table everywhere, only
+	# tinted): marsh leans tumbleweed, ruins leans scrub, the foundry chars to
 	# stumps outright (see the anchor branch below).
 	var ug_band := clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)
-	var ug_species: Array = [["fern", "fern2", "hedge"], ["fern", "fern2", "hedge"],
-		["fern2", "fern2", "fern"], ["hedge", "fern", "hedge"], ["hedge", "hedge", "hedge"]][ug_band]
+	var ug_species: Array = [["scrub", "tumbleweed", "dry_shrub"], ["scrub", "tumbleweed", "dry_shrub"],
+		["tumbleweed", "tumbleweed", "scrub"], ["dry_shrub", "scrub", "dry_shrub"], ["dry_shrub", "dry_shrub", "dry_shrub"]][ug_band]
 	# Water-band snapshot: sim.waters is append-only (never swept), so the ~50
 	# sim._in_water calls below were each scanning EVERY band ever streamed.
 	# Only the <=2 bands overlapping the view can matter for on-screen decor —
@@ -5015,8 +5017,8 @@ func _draw_terrain() -> void:
 		if w["y"] <= whi and w["y"] + SimWorld.WATER_H >= wlo:
 			wbands.append([w["y"], w["y"] + SimWorld.WATER_H,
 				w["ford_x"] - SimWorld.FORD_HALF_W, w["ford_x"] + SimWorld.FORD_HALF_W])
-	# Low fern understory scattered through the field (hash decorrelated from
-	# the tree grid so ferns and trees don't stack on the same cell).
+	# Low scrub understory scattered through the field (hash decorrelated from
+	# the cactus grid so scrub and cacti don't stack on the same cell).
 	# Each decor grid anchors to ITS OWN spacing modulus — the shared 64px grass
 	# modulus made every layer's sampled world rows jump by 64 (a non-multiple of
 	# 40/48/80) whenever cam_y crossed a tile boundary, reshuffling the field.
@@ -5033,8 +5035,8 @@ func _draw_terrain() -> void:
 			if _in_wbands(wbands, int(fx / PX), sim.camera_top + int(fy_px / PX)):
 				continue
 			var fsway := sin(float(Engine.get_physics_frames()) * 0.045 + float(hf)) * 0.07 * _motion
-			# 4v variety pass: hash-picked stamp (fern/fern2/hedge shrub), a
-			# 0.6/0.8/1.0/1.2 scale ladder, olive->deep-green tint drift, rare
+			# 4v variety pass: hash-picked stamp (scrub/tumbleweed/dry_shrub shrub), a
+			# 0.6/0.8/1.0/1.2 scale ladder, sage->dusty-khaki tint drift, rare
 			# dead stump, and CLUMPS — 1-in-5 anchors grow 1-3 satellite tufts
 			# so undergrowth reads as drifts, not evenly-spaced speckle.
 			# Edge-aware taper (GPT round-3): where the 64px terrain sample
@@ -5076,19 +5078,19 @@ func _draw_terrain() -> void:
 				else ug_species[(hf >> 3) % 3]
 			var f_scl := 0.30 * (0.6 + 0.2 * float((hf >> 5) % 4))
 			var f_jit := float((hf >> 7) % 5) / 4.0
-			var f_col := fern_col.lerp(Color(0.72, 0.78, 0.5), f_jit * 0.5)
+			var flora_col := desert_flora_col.lerp(Color(0.8, 0.72, 0.5), f_jit * 0.5)
 			if ug_band == 4:
 				# Foundry (c2 3v): no green survives the ash — charred struts only.
 				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0,
 					0.16 + 0.04 * float(hf % 3), Color(0.2, 0.17, 0.15))
 			elif hf % 23 == 0:
-				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, f_col)
+				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, flora_col)
 			else:
-				# a3-08: a tiny dark contact dab grounds the fern CLUMP anchor — ferns got
-				# no _ground_shadow (only cacti/litter did), so they floated on the lawn.
+				# a3-08: a tiny dark contact dab grounds the scrub CLUMP anchor — scrub got
+				# no _ground_shadow (only cacti/litter did), so it floated on the sand.
 				# One dab per anchor (satellites cluster on it), not per tuft.
-				_ground_shadow(Vector2(fx, fy_px + 2.0), FERN_DAB["r"], FERN_DAB["a"], Color(0.0, 0.04, 0.0))
-				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, f_col)
+				_ground_shadow(Vector2(fx, fy_px + 2.0), SCRUB_DAB["r"], SCRUB_DAB["a"], Color(0.05, 0.03, 0.0))
+				_spr(f_tex, Vector2(fx, fy_px), float(hf % 628) / 100.0 + fsway, f_scl, flora_col)
 				# Context bias (GPT round-2): vegetation drifts hug dirt-patch
 				# cells (same 64px hash predicate as the ground painter) — the
 				# world's features shape the clustering, not just hash frequency.
@@ -5103,9 +5105,9 @@ func _draw_terrain() -> void:
 						var c_tex: String = ug_species[(ch >> 2) % 3]
 						_spr(c_tex, Vector2(fx, fy_px) + Vector2.from_angle(c_ang) * c_dist,
 							c_ang * 2.0, 0.30 * (0.6 + 0.2 * float((ch >> 5) % 4)) * 0.8,
-							fern_col.lerp(Color(0.72, 0.78, 0.5), float((ch >> 7) % 5) / 8.0))
+							desert_flora_col.lerp(Color(0.8, 0.72, 0.5), float((ch >> 7) % 5) / 8.0))
 
-	# Dirt-patch fern fringing (7-vote de-checkerboard, part e): 1-2 ferns on
+	# Dirt-patch scrub fringing (7-vote de-checkerboard, part e): 1-2 scrub tufts on
 	# the border of each 64px dirt cell (same hash predicate as _paint_bg) so
 	# no 90-degree patch corner survives naked.
 	var doy := -fposmod(cam_y, 64.0)
@@ -5122,10 +5124,10 @@ func _draw_terrain() -> void:
 				var fpos := dpos + Vector2(32.0, 32.0) + Vector2.from_angle(edge_ang) * (26.0 + float(hfr % 8))
 				if ug_band == 4:
 					# Foundry (c2 judge r1: no residual green): fringe with
-					# charred scrub, not ferns.
+					# charred scrub, not live scrub.
 					_spr(_CACTUS_DEAD[hfr % 3], fpos, 0.0, 0.12, Color(0.2, 0.17, 0.15))
 				else:
-					_spr("fern", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, fern_col)
+					_spr("scrub", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, desert_flora_col)
 
 	# Desert cactus lines on the flanks, sparse singles in the field
 	# (cactus_large/cactus_small keys).
@@ -5158,7 +5160,7 @@ func _draw_terrain() -> void:
 					# dead-cactus set (hash-picked per cactus) instead of only tinting green art.
 					# Band 4 (c2 judge r3): even the dead set chars to charcoal — no
 					# warm husk survives the foundry. (This mod IS the foundry ramp for
-					# cactus_dead* — they're not in _CACTUS_KEYS/_FOLIAGE_KEYS, so
+					# cactus_dead* — they're not in _DESERT_FLORA_KEYS, so
 					# Art.tint() would otherwise return their static tan TINT unramped.)
 					_spr(_CACTUS_DEAD[h2 % 3], Vector2(px, wy_px),
 						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34,
@@ -5168,7 +5170,7 @@ func _draw_terrain() -> void:
 					# cactus) so the cactus layer stops reading as one card stamped repeatedly.
 					var ti := _cactus_instance(h2)
 					var tsc: float = (0.42 if big else 0.34) * float(ti["scale_mul"])
-					var tval := cactus_col.lerp(cactus_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
+					var tval := desert_flora_col.lerp(desert_flora_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
 					if ti["dead"]:
 						_spr(_CACTUS_DEAD[h2 % 3], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
 							tsc, tval.lerp(Color(0.42, 0.36, 0.3), 0.5))
@@ -5188,7 +5190,7 @@ func _draw_terrain() -> void:
 	_draw_ruins_rubble()
 	_draw_trenches()
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
-	# Hash grid decorrelated from trees/ferns so nothing stacks on a cell.
+	# Hash grid decorrelated from cacti/scrub so nothing stacks on a cell.
 	var loy := -fposmod(cam_y, 80.0)
 	for ty in 6:
 		var ly := loy + ty * 80.0
@@ -5298,7 +5300,7 @@ func _draw_trenches() -> void:
 
 func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 	# Per-band SIGNATURE silhouettes (c2 3v: sectors were palette swaps): band
-	# 1 scorched = cracked ember vents, band 2 marsh = field reed screens,
+	# 1 scorched = cracked ember vents, band 2 marsh = tumbleweed scrub screens,
 	# band 3 ruins = freestanding half-walls, band 4 foundry = slag ridges
 	# with glowing pits. Hash grid (decorrelated salt), march-frozen like
 	# litter, water-band aware. Jungle (band 0) stays clean — its identity IS
@@ -5326,12 +5328,14 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 						draw_circle(Vector2(sx, sy_px), 1.6, Color(1.0, 0.45, 0.15, e_a))
 				2:
 					if hs % 10 == 0:
-						# Reed screen: a short row of field reeds away from the river.
+						# Scrub screen: a short row of tumbleweeds away from the river. No
+						# color mod — rides Art.tint("tumbleweed")'s own march-ramped
+						# desert tint instead of a fixed color frozen off the march.
 						for rj in 4 + hs % 3:
 							var rh := Art.cell_hash(hs + rj * 41, rj)
-							_spr("fern2", Vector2(sx + float(rj * 7) - 12.0 + float(rh % 5),
+							_spr("tumbleweed", Vector2(sx + float(rj * 7) - 12.0 + float(rh % 5),
 								sy_px + float((rh / 7) % 7) - 3.0), float(rh % 628) / 100.0,
-								0.26 + 0.06 * float(rh % 3), Color(0.62, 0.72, 0.5))
+								0.26 + 0.06 * float(rh % 3))
 				3:
 					if hs % 16 == 0:
 						# Half-wall: dark base slab + a broken barrier pair.
@@ -5508,14 +5512,16 @@ func _draw_rocks() -> void:
 		var fade := _bottom_fade(pos.y)   # c2 2v: fade cover off the player's back
 		match rk.get("kind", 0):
 			1:
-				# Tall grass: soft green clump, NO hard shadow — concealment,
+				# Dry scrub clump: soft dusty mass, NO hard shadow — concealment,
 				# not a wall. The lighter translucent read telegraphs "you can
-				# stand in this but bullets pass through."
+				# stand in this but bullets pass through." Alpha-only mod (no color
+				# multiply) so it rides Art.tint("dry_shrub")'s own march-ramped
+				# desert tint instead of a second fixed tan stacked on top.
 				var g_sway := sin(float(Engine.get_physics_frames()) * 0.04 + float(rh3)) * 0.06 * _motion
 				for gt in 3:
 					var gh := Art.cell_hash(rh3 + gt * 13, gt)
-					_spr("hedge", pos + Vector2(float(gh % 44) - 22.0, float((gh / 5) % 30) - 15.0),
-						g_sway + float(gh % 628) / 100.0, 0.5, Color(0.5, 0.72, 0.42, 0.82 * fade))
+					_spr("dry_shrub", pos + Vector2(float(gh % 44) - 22.0, float((gh / 5) % 30) - 15.0),
+						g_sway + float(gh % 628) / 100.0, 0.5, Color(1.0, 1.0, 1.0, 0.82 * fade))
 			2:
 				# Ruined wall slab: wide, low, hard — the corridor narrows to
 				# lanes between slabs (40x10 extent → 80x20 footprint).
@@ -5839,18 +5845,19 @@ func _draw_water() -> void:
 			draw_line(Vector2(rx + 6.0, ry - 7.0), Vector2(rx + 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
 			_spr("rock1" if (wseed + r) % 2 == 0 else "rock2", Vector2(rx, ry),
 				float((wseed / (r + 1)) % 628) / 100.0, 1.4, Color(0.5, 0.58, 0.6))
-		# Reed scatter at the waterline (5v): fern2 silhouettes soften where
-		# grass meets water; never inside the ford approach.
+		# Tumbleweed scatter at the waterline (5v): tumbleweed silhouettes soften
+		# where sand meets water; never inside the ford approach. No color mod —
+		# rides Art.tint("tumbleweed")'s own march-ramped desert tint instead of
+		# a second hardcoded base stacked on top.
 		for rk in 9:
 			var rh := Art.cell_hash(nseed + rk * 31, rk + 9)
 			var rrx := float(rh % 620) + 10.0
 			if rrx > nford_l and rrx < nford_r:
 				continue
-			var reed_y := (wy - 4.0) if rk % 2 == 0 else (wy + wh + 2.0)
-			# Multi-scale clumps (Grok round-2): big anchor reeds + small tufts.
-			_spr("fern2", Vector2(rrx, reed_y), float(rh % 628) / 100.0,
-				0.4 + float(rh % 5) * 0.1,
-				Color(0.8, 0.9, 0.7).lerp(Color(0.5, 0.45, 0.4), soot))
+			var tumble_y := (wy - 4.0) if rk % 2 == 0 else (wy + wh + 2.0)
+			# Multi-scale clumps (Grok round-2): big anchor tumbleweeds + small tufts.
+			_spr("tumbleweed", Vector2(rrx, tumble_y), float(rh % 628) / 100.0,
+				0.4 + float(rh % 5) * 0.1)
 		# Armor-barrier telegraph: a tank can't ford deep water (it just stops
 		# dead at the bank, reading as a broken control). When an occupied tank
 		# is near this band, hatch the deep-water banks red and flag the ford.

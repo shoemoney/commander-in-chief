@@ -61,7 +61,7 @@ const TEX := {
 	# replaces (120px/96px) so SCALE/TINT below carry over unchanged.
 	"cactus_large": preload(SY + "cactus_large.png"),
 	"cactus_small": preload(SY + "cactus_small.png"),
-	"fern": preload(SY + "fern.png"),
+	"scrub": preload(SY + "scrub.png"),
 	# --- legacy art icon bakes (HUD + spend-wheel) ---
 	"icon_ammo": preload(SY + "icons/icon_ammo.png"),
 	"icon_grenade": preload(SY + "icons/icon_grenade.png"),
@@ -136,8 +136,8 @@ const TEX := {
 	"trench": preload(SY + "decor/trench.png"),
 	"flag_marker": preload(SY + "decor/flag_marker.png"),
 	"radio_tower": preload(SY + "decor/radio_tower.png"),
-	"hedge": preload(SY + "decor/hedge.png"),
-	"fern2": preload(SY + "decor/fern2.png"),
+	"dry_shrub": preload(SY + "decor/dry_shrub.png"),
+	"tumbleweed": preload(SY + "decor/tumbleweed.png"),
 	"wreck_halftrack": preload(SY + "decor/wreck_halftrack.png"),
 	"crater_field": preload(SY + "decor/crater_field.png"),
 	"crater_water": preload(SY + "decor/crater_water.png"),
@@ -346,7 +346,7 @@ const SCALE := {
 	"gunship_barrel": 0.5, "colossus_barrel": 0.6,
 	"sandbag_beige": 0.83,
 	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
-	"cactus_large": 0.89, "cactus_small": 0.91, "fern": 0.9,
+	"cactus_large": 0.89, "cactus_small": 0.91, "scrub": 0.9,
 	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
 	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
 	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
@@ -357,7 +357,7 @@ const SCALE := {
 	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
 	# p4 War/War_Map/Nature props — folded to litter footprints (retuned by eye).
 	"tank_trap": 0.14, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
-	"flag_marker": 0.16, "radio_tower": 0.18, "hedge": 0.15, "fern2": 0.14,
+	"flag_marker": 0.16, "radio_tower": 0.18, "dry_shrub": 0.15, "tumbleweed": 0.14,
 	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
 	"dropped_shield": 0.12, "fallen_merc": 0.2,
 	# capsule glyphs: large Apocalypse UI icons folded to pickup footprint
@@ -406,20 +406,18 @@ const OLIVE_VEH := Color(0.76, 0.85, 0.52)
 const BOSS_VEH := Color(0.60, 0.63, 0.66)
 # a2-02 r2: one warm-hostile tint for every enemy vehicle (technical + spotters).
 const HOSTILE_VEH := Color(1.22, 0.87, 0.61)
-const FOLIAGE := Color(0.66, 0.92, 0.62)   # a3-08 AD#5/ENV#1: DEEPER + COOLER than the yellow-green grass (was 0.82,1.0,0.66) so ferns/trees separate as distinct masses, not lawn texture
-# Iran reskin: cactus_large/cactus_small get their OWN tint, not FOLIAGE — the
-# jungle FOLIAGE multiply, stacked on the already-sage-green cactus art and
-# main.gd's cactus_col mod, doubled down into a saturated jungle green instead
-# of a dusty desert plant. Warmer + lighter so it reads sun-bleached, not lawn.
+# Iran reskin: cactus_large/cactus_small/scrub/tumbleweed/dry_shrub all share
+# ONE desert-flora tint, not the old jungle FOLIAGE green — the green multiply,
+# stacked on the already-sage-green cactus art and main.gd's desert_flora_col mod,
+# doubled down into a saturated jungle green instead of a dusty desert plant.
+# Warmer + lighter so it reads sun-bleached, not lawn.
 const DESERT_FOLIAGE := Color(0.92, 0.88, 0.7)
-# a1-05: charred late-run foliage. The flat FOLIAGE green used to multiply back
-# into every fern/tree even after main.gd browned them (fern_col), so the foundry
-# re-greened. tint() now ramps the FOLIAGE keys toward ash by foliage_march (set
-# each frame from _sector_march), compounding with fern_col so the foundry chars.
+# a1-05: charred late-run foliage. tint() ramps the desert-flora keys toward
+# ash by foliage_march (set each frame from _sector_march), compounding with
+# main.gd's desert_flora_col so the foundry chars.
 const FOLIAGE_ASH := Color(0.66, 0.60, 0.50)
-const _CACTUS_KEYS := {"cactus_large": true, "cactus_small": true}
-const _FOLIAGE_KEYS := {"fern": true,
-	"fern2": true, "hedge": true}   # a1-05 r2: the foundry undergrowth is ALL hedges — char them too
+const _DESERT_FLORA_KEYS := {"cactus_large": true, "cactus_small": true,
+	"scrub": true, "tumbleweed": true, "dry_shrub": true}   # a1-05 r2: the foundry undergrowth is ALL dry_shrub — char it too
 # a2-01: the prop/rock/wreck/hulk/corpse layer chars WITH the ground toward the
 # foundry (A1 only ramped ground+foliage, so cool-green jungle rocks sat strewn on
 # the molten floor). Each prop lerps from its own muted tint toward this warm charred
@@ -456,10 +454,10 @@ const TINT := {
 	"sandbag_beige": Color(0.88, 0.92, 0.66),
 	"crate_ammo": Color(0.82, 0.88, 0.62), "crate_grenade": Color(0.82, 0.88, 0.62),
 	"crate_airstrike": Color(0.82, 0.88, 0.62),
-	# cactus_large/cactus_small/fern entries below are shadowed at read time —
-	# tint() special-cases _CACTUS_KEYS/_FOLIAGE_KEYS before consulting TINT — kept
-	# here only as the documented default (matches fern's pre-existing pattern).
-	"cactus_large": DESERT_FOLIAGE, "cactus_small": DESERT_FOLIAGE, "fern": FOLIAGE,
+	# cactus_large/cactus_small/scrub/tumbleweed/dry_shrub entries below are all
+	# shadowed at read time — tint() special-cases _DESERT_FLORA_KEYS before
+	# consulting TINT — kept here only as the documented default.
+	"cactus_large": DESERT_FOLIAGE, "cactus_small": DESERT_FOLIAGE, "scrub": DESERT_FOLIAGE,
 	# Decor is SCENERY — muted and mossy so it recedes into the terrain and
 	# never competes with the warm-bright enemies for the player's eye.
 	"barrel": Color(0.72, 0.8, 0.6), "crate_stack": Color(0.78, 0.76, 0.62),
@@ -479,7 +477,7 @@ const TINT := {
 	"tank_trap": Color(0.72, 0.76, 0.62), "barricade": Color(0.74, 0.76, 0.64),
 	"flak_gun": Color(0.66, 0.72, 0.6), "trench": Color(0.72, 0.76, 0.64),
 	"flag_marker": Color(0.85, 0.86, 0.76), "radio_tower": Color(0.68, 0.72, 0.64),
-	"hedge": Color(0.66, 0.78, 0.58), "fern2": Color(0.64, 0.8, 0.56),
+	"dry_shrub": DESERT_FOLIAGE, "tumbleweed": DESERT_FOLIAGE,
 	"wreck_halftrack": Color(0.55, 0.58, 0.52),
 	"crater_field": Color(0.6, 0.6, 0.54), "crater_water": Color(0.62, 0.68, 0.72),
 	"mg_tripod": Color(0.66, 0.7, 0.62),
@@ -543,7 +541,7 @@ const OUTLINE := {
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
 	"wall_sandbag": true, "wall_sandbag_end": true,
 	"tank_trap": true, "barricade": true, "flak_gun": true, "trench": true,
-	"flag_marker": true, "radio_tower": true, "hedge": true, "fern2": true,
+	"flag_marker": true, "radio_tower": true, "dry_shrub": true, "tumbleweed": true,
 	"wreck_halftrack": true, "crater_field": true, "crater_water": true, "mg_tripod": true,
 	"dropped_shield": true, "fallen_merc": true,
 	"cap_pierce": true, "cap_spread": true, "cap_triple": true, "cap_rend": true,
@@ -592,10 +590,8 @@ static func draw_scale(name: String) -> float:
 
 
 static func tint(name: String) -> Color:
-	if _CACTUS_KEYS.has(name):
+	if _DESERT_FLORA_KEYS.has(name):
 		return DESERT_FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
-	if _FOLIAGE_KEYS.has(name):
-		return FOLIAGE.lerp(FOLIAGE_ASH, foliage_march)
 	if _DECOR_KEYS.has(name):
 		return TINT.get(name, Color(0.7, 0.76, 0.62)).lerp(DECOR_ASH, foliage_march * 0.7)
 	return TINT.get(name, Color.WHITE)

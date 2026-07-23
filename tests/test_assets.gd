@@ -63,12 +63,21 @@ func test_a1_water_stops_are_five_and_biome_distinct() -> void:
 
 func test_a1_foliage_tint_ramps_to_ash() -> void:
 	Art.foliage_march = 0.0
-	Runner.T.ok(Art.tint("fern").is_equal_approx(Art.FOLIAGE), "jungle (march 0) keeps the lush FOLIAGE tint")
+	Runner.T.ok(Art.tint("scrub").is_equal_approx(Art.DESERT_FOLIAGE), "desert open (march 0) keeps the sun-bleached DESERT_FOLIAGE tint")
 	Art.foliage_march = 1.0
-	var f := Art.tint("fern")
+	var f := Art.tint("scrub")
 	Runner.T.ok(f.is_equal_approx(Art.FOLIAGE_ASH), "foundry (march 1) foliage chars to FOLIAGE_ASH")
-	Runner.T.ok(f.g < Art.FOLIAGE.g - 0.2, "charred foliage loses green — no re-green multiply at the foundry")
-	Runner.T.ok(Art.tint("cactus_large").is_equal_approx(Art.FOLIAGE_ASH), "cactus ramps with ferns")
+	Runner.T.ok(f.g < Art.DESERT_FOLIAGE.g - 0.2, "charred foliage loses its sun-bleached green — no re-lightening multiply at the foundry")
+	Runner.T.ok(Art.tint("cactus_large").is_equal_approx(Art.FOLIAGE_ASH), "cactus ramps with scrub")
+	# a4 swap-undergrowth: tumbleweed/dry_shrub are desert flora too, not just
+	# scrub/cactus — they must share the exact same march ramp, not a stale
+	# green FOLIAGE fallback left behind by a partial rename.
+	Runner.T.ok(Art.tint("tumbleweed").is_equal_approx(Art.FOLIAGE_ASH), "tumbleweed ramps with scrub")
+	Runner.T.ok(Art.tint("dry_shrub").is_equal_approx(Art.FOLIAGE_ASH), "dry_shrub ramps with scrub")
+	Art.foliage_march = 0.0
+	Runner.T.ok(Art.tint("tumbleweed").is_equal_approx(Art.DESERT_FOLIAGE), "tumbleweed (march 0) keeps DESERT_FOLIAGE")
+	Runner.T.ok(Art.tint("dry_shrub").is_equal_approx(Art.DESERT_FOLIAGE), "dry_shrub (march 0) keeps DESERT_FOLIAGE")
+	Art.foliage_march = 1.0
 	# the ramp is foliage-ONLY: unit/decor tints are untouched
 	Runner.T.ok(Art.tint("rusher").is_equal_approx(Color(2.1, 1.7, 1.15)), "unit tints ignore foliage_march")
 	Art.foliage_march = 0.0   # restore the static for other suites
@@ -1070,19 +1079,28 @@ func test_a3_muzzle_heat_capped_below_explosions() -> void:
 	Runner.T.ok(mh["fan_a"] <= 0.66 and mh["core_a"] <= 0.66, "fan + core additive alphas capped so MG-spam sums low")
 
 
-# --- a3-08: the undergrowth tint lifts OFF the grass hue (deeper + cooler) so ferns/trees
-# read as distinct masses, not lawn texture painted on the grass. ---
+# --- a3-08 (Iran reskin): desert flora shares the sand palette — no longer a
+# hue-separated green mass. Scrub/tumbleweed/dry_shrub/cactus separate from the
+# ground by VALUE (a touch duller than the brightest sand stop) plus shape and
+# ground-contact shadow, not a green-vs-tan hue lift. ---
 
-func test_a3_foliage_lifts_off_grass_hue() -> void:
+func test_a3_foliage_reads_desert_not_jungle() -> void:
 	var ms = load("res://src/main.gd")
-	var fol: Color = Art.FOLIAGE
-	var g0: Color = ms._ground_stops("campaign")[0][0]   # bright jungle grass stop
-	Runner.T.ok(fol.r < g0.r, "foliage is DEEPER than the bright grass (lower r)")
-	Runner.T.ok((fol.g - fol.r) > (g0.g - g0.r) + 0.1, "foliage is COOLER / more green-forward than the yellow-green grass")
-	# The fern contact dab that grounds each clump anchor: small radius, soft alpha.
-	var fd: Dictionary = _consts()["FERN_DAB"]
-	Runner.T.ok(fd["r"] > 0.0 and fd["r"] <= 5.0, "the fern dab is a small contact shadow (<= 5px)")
-	Runner.T.ok(fd["a"] > 0.0 and fd["a"] <= 0.35, "the fern dab is soft (grounds without a hard blob)")
+	var fol: Color = Art.DESERT_FOLIAGE
+	# Pin the brightest of the 5 campaign grass stops by actual r-value, not by
+	# assuming stop [0] stays brightest — a future sand-palette retune could
+	# reorder the ramp and would otherwise silently compare against the wrong stop.
+	var grass_stops: Array = ms._ground_stops("campaign")[0]
+	var g0: Color = grass_stops[0]
+	for gs in grass_stops:
+		if gs.r > g0.r:
+			g0 = gs
+	Runner.T.ok(fol.g <= fol.r, "desert flora tint is not green-dominant (r >= g) — reads sun-bleached, not jungle")
+	Runner.T.ok(fol.r < g0.r, "desert flora is a touch DULLER than the brightest sand stop, so it still separates as its own mass")
+	# The scrub contact dab that grounds each clump anchor: small radius, soft alpha.
+	var fd: Dictionary = _consts()["SCRUB_DAB"]
+	Runner.T.ok(fd["r"] > 0.0 and fd["r"] <= 5.0, "the scrub dab is a small contact shadow (<= 5px)")
+	Runner.T.ok(fd["a"] > 0.0 and fd["a"] <= 0.35, "the scrub dab is soft (grounds without a hard blob)")
 
 
 # --- a3-09: field boulders get a lit top-edge highlight (warm, bright) so they read as
