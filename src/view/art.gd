@@ -46,6 +46,13 @@ const TEX := {
 	"observer": preload(SY + "cast2/observer2.png"),
 	"bunker": preload(SY + "cast2/bunker.png"),
 	"trophy": preload(SY + "cast2/trophy.png"),
+	# nt-03: bespoke generated player-tank art (fal.ai + Replicate) replacing
+	# a plain camo rectangle with no hull/turret/track shape at all. tank_body
+	# is now an armored hull with a turret ring + glacis wedge; tank_barrel is
+	# an isolated cannon tube (no hull baked in -- main.gd rotates it as its
+	# own sprite, independent of the hull). Both pre-rotated front-up to match
+	# the hull = dv.angle() + PI/2 correction _draw_tanks() applies -- same
+	# filenames, SCALE/TINT carry over unchanged.
 	"tank_body": preload(SY + "tank_body.png"),
 	"tank_barrel": preload(SY + "tank_barrel.png"),
 	# nt-02: bespoke generated boss art (fal.ai + Replicate) replacing the old
@@ -214,6 +221,15 @@ const TEX := {
 	"m_pilot": preload(SY + "mil2/pilot.png"),
 	"m_soldier2": preload(SY + "mil2/soldier2.png"),
 	#"m_apc": preload(SY + "mil2/apc.png"),
+	# nt-03: bespoke generated art (fal.ai + Replicate) replacing the old
+	# radar_tank/rocket_truck/technical bakes -- like tank_body, the same flat
+	# camo-rectangle non-vehicle, just re-scaled, so the observer spotter duo
+	# and the roaming hostile were unreadable blobs. Now a light armored car
+	# with a dish antenna, a flatbed with an MLRS rocket rack, and an armed
+	# desert pickup (technical) -- distinct silhouettes, front pre-rotated up
+	# to match the static PI/2 (spotter duo) / t_face (technical) draw angles
+	# in main.gd. wreck_technical below shares this file, so the litter hulk
+	# improves too.
 	"m_radar_tank": preload(SY + "mil2/radar_tank.png"),
 	"m_rocket_truck": preload(SY + "mil2/rocket_truck.png"),
 	"m_jet": preload(SY + "mil2/jet.png"),

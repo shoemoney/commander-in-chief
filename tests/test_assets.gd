@@ -7,6 +7,26 @@ extends RefCounted
 const Runner := preload("res://tests/run_tests.gd")
 
 
+func _opaque_row_width_avg(img: Image, y0: int, y1: int) -> float:
+	# Average per-row opaque-pixel span (rightmost minus leftmost alpha>0.05 column) across
+	# [y0, y1) -- used to compare the "girth" of two bands of a directional sprite (nt-03).
+	var w := img.get_width()
+	var total := 0.0
+	var rows := 0
+	for y in range(y0, y1):
+		var lo := -1
+		var hi := -1
+		for x in range(w):
+			if img.get_pixel(x, y).a > 0.05:
+				if lo < 0:
+					lo = x
+				hi = x
+		if hi >= lo and lo >= 0:
+			total += float(hi - lo + 1)
+			rows += 1
+	return total / float(maxi(rows, 1))
+
+
 func _consts() -> Dictionary:
 	# Typed as the Script base (not the class) so the instance method resolves —
 	# calling it through the preloaded class type is a static-call error.
@@ -1372,3 +1392,82 @@ func test_a3_ambience_march_drives_bed_volumes() -> void:
 	for i in 300: sfx.set_ambience_march(1.0, false, false)
 	Runner.T.ok(sfx._foundry.volume_db > -35.0, "the foundry machinery bed swells past the mid-march")
 	sfx.free()
+
+
+# --- nt-03: player-tank + enemy-vehicle bakes are real silhouettes, not blob rectangles ---
+
+func test_nt03_vehicle_bakes_are_not_blob_rectangles() -> void:
+	# nt-03 replaced tank_body/tank_barrel/technical/radar_tank/rocket_truck — visually the
+	# same generic flat camo-cloth rectangle material re-scaled per file, no hull/turret/track
+	# shape at all. Pin a plausibility envelope on each bake's alpha silhouette so a future
+	# regeneration that lands a near-blank canvas (broken chroma-key, wrong crop) or a
+	# near-solid rectangle (chroma-key never ran) fails HERE instead of only showing up in a
+	# screenshot. Also checks the front-up half (per the hull=dv.angle()+PI/2 / static PI/2
+	# draw-rotation convention these use) isn't accidentally empty — a 180-off rotation or a
+	# bad crop offset would starve one half. Finally, hashes all 5 files and requires them
+	# distinct — the exact "same generic bake copy-pasted across every vehicle" failure mode
+	# this item fixed, so a future shortcut back to one shared placeholder fails here too.
+	# (Regen pipeline note: the raw renders were re-keyed on HSV HUE distance, not the plain
+	# RGB-distance key nt-01/nt-02 use — desert tan camo sits close enough to a magenta
+	# backdrop in raw RGB distance that the old tol+feather=120 erased most of the vehicle.
+	# HSV hue separates them cleanly (magenta ~330deg vs tan ~30deg); the key used hue_tol=14,
+	# hue_feather=14, sat_gate=0.12, and a per-image value floor at val_frac=0.72 of the
+	# corner-sampled backdrop brightness, so GI-bounced magenta-tinted shadow on dark vehicle
+	# detail — tires, tracks — isn't mistaken for background. Re-derive these from the corner
+	# color of any future raw render rather than reusing the numbers verbatim.)
+	var files := {
+		"res://assets/legacy-art/tank_body.png": Vector2i(104, 104),
+		"res://assets/legacy-art/tank_barrel.png": Vector2i(72, 72),
+		"res://assets/legacy-art/mil2/technical.png": Vector2i(96, 96),
+		"res://assets/legacy-art/mil2/radar_tank.png": Vector2i(104, 104),
+		"res://assets/legacy-art/mil2/rocket_truck.png": Vector2i(104, 104),
+	}
+	var seen_hashes := {}
+	for path in files:
+		var t: Texture2D = load(path)
+		Runner.T.ok(t != null, "%s imports" % path)
+		if t == null:
+			continue
+		Runner.T.eq(Vector2i(t.get_size()), files[path], "%s keeps its replaced-bake canvas size" % path)
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var w := img.get_width()
+		var h := img.get_height()
+		var opaque := 0
+		var top_opaque := 0
+		var total := 0
+		var top_total := 0
+		for y in range(0, h, 2):
+			for x in range(0, w, 2):
+				total += 1
+				var top := y < h / 2
+				if top:
+					top_total += 1
+				if img.get_pixel(x, y).a > 0.05:
+					opaque += 1
+					if top:
+						top_opaque += 1
+		var cov := float(opaque) / float(total)
+		Runner.T.ok(cov > 0.06 and cov < 0.75,
+			"%s alpha coverage reads as a vehicle silhouette, not blank or a solid rect (nt-03): %.2f" % [path, cov])
+		var top_cov := float(top_opaque) / float(maxi(top_total, 1))
+		Runner.T.ok(top_cov > 0.04,
+			"%s front-up half carries real opaque content (nt-03): %.2f" % [path, top_cov])
+		var file_hash := FileAccess.get_sha256(path)
+		Runner.T.ok(not seen_hashes.has(file_hash),
+			"%s is not a byte-for-byte copy of %s (nt-03, no shared placeholder bake)" %
+				[path, seen_hashes.get(file_hash, "")])
+		seen_hashes[file_hash] = path
+		if path == "res://assets/legacy-art/tank_barrel.png":
+			# tank_barrel's "front" isn't alpha-mass (both ends are opaque, it's a thin
+			# cylinder) -- it's the round mount-plate BASE (wide) vs the muzzle-brake TIP
+			# (narrower). _draw_tanks() defaults an unset turret to barrel_angle=-PI/2, which
+			# with its +PI/2 draw correction is exactly 0 net rotation -- so a fresh/parked
+			# tank shows this canvas completely unrotated, muzzle pointing straight up-screen.
+			# Assert the base really is the wide end here, i.e. the canvas is mounted
+			# base-down/muzzle-up as that default expects, not mounted backwards.
+			var top_w := _opaque_row_width_avg(img, 0, int(h * 0.15))
+			var bot_w := _opaque_row_width_avg(img, int(h * 0.85), h)
+			Runner.T.ok(bot_w > top_w,
+				"tank_barrel.png mount base (bottom, %.1fpx) is wider than the muzzle tip (top, %.1fpx) -- base-down/muzzle-up canvas, matching the barrel_angle=-PI/2 default's zero-rotation rest pose (nt-03)" % [bot_w, top_w])
