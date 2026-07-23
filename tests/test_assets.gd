@@ -1119,6 +1119,82 @@ func test_a3_rock_top_light_is_warm_and_bright() -> void:
 	Runner.T.ok(not ms._rock_has_top_light("cactus_dead2"), "the flat dead cactus gets NO top-light (no raised dome)")
 
 
+# --- preserve-concealment-semantics: the "hedge" asset was retired for a dry_shrub
+# reskin (kind==1 pass-through cover, guarded gameplay-side in test_main.gd). This
+# just proves the OLD asset is actually gone and nothing in the whole res:// tree
+# still points at it — a stray scene/resource re-wiring hedge.png back in wouldn't
+# fail any gameplay test since main.gd never loads it by path. ---
+
+## Every top-level res:// dir except the gitignored/tooling ones (.godot's import
+## cache, build/tmp output, .shoop/.claude/.opencode/.remember/.git housekeeping) —
+## so a stray reference under assets/docs/media/etc. can't hide from the scan just
+## because it's outside src/tests/addons/tools.
+const _SCAN_ROOT_SKIP := ["build", "tmp", ".godot", ".git", ".shoop", ".claude", ".opencode", ".remember"]
+
+func _scannable_roots() -> Array[String]:
+	var roots: Array[String] = []
+	var da := DirAccess.open("res://")
+	Runner.T.ok(da != null, "could not open res:// to enumerate scan roots")
+	if da == null:
+		return roots
+	for d in da.get_directories():
+		if not _SCAN_ROOT_SKIP.has(d):
+			roots.append("res://" + d)
+	return roots
+
+
+## Recursively scans every text asset under a res:// dir for any of `needles`.
+## A scene referencing a retired texture by UID rather than path won't contain
+## the filename, so callers should pass both.
+func _scan_dir_for_strings(root: String, exts: PackedStringArray, needles: PackedStringArray, skip: String) -> Array[String]:
+	var hits: Array[String] = []
+	var stack: Array[String] = [root]
+	while not stack.is_empty():
+		var d: String = stack.pop_back()
+		var da := DirAccess.open(d)
+		if da == null:
+			continue
+		var err := da.list_dir_begin()
+		Runner.T.ok(err == OK, "list_dir_begin failed on %s: %s" % [d, error_string(err)])
+		if err != OK:
+			continue
+		var f := da.get_next()
+		while f != "":
+			var full := d + "/" + f
+			if da.current_is_dir():
+				stack.append(full)
+			elif full != skip:
+				for ext in exts:
+					if f.ends_with(ext):
+						var txt := FileAccess.get_file_as_string(full)
+						for needle in needles:
+							if txt.find(needle) != -1:
+								hits.append(full)
+								break
+						break
+			f = da.get_next()
+		da.list_dir_end()
+	return hits
+
+
+func test_hedge_asset_fully_retired() -> void:
+	Runner.T.ok(not FileAccess.file_exists("res://assets/legacy-art/decor/hedge.png"),
+		"the pre-reskin hedge sprite must be deleted, not left as a dead asset that could get silently re-wired")
+	# Scan the ENTIRE res:// tree (minus gitignored/tooling dirs) for the retired
+	# sprite's path AND its .import uid (a scene can preload by uid:// with no
+	# "hedge.png" literal anywhere) — assets/docs/media included, not just code.
+	var hits: Array[String] = []
+	for root in _scannable_roots():
+		hits.append_array(_scan_dir_for_strings(root,
+			[".gd", ".tscn", ".tres", ".import", ".gdshader"],
+			["hedge.png", "uid://bchguurpaw56h"], "res://tests/test_assets.gd"))
+	Runner.T.ok(hits.is_empty(), "these files still reference the retired hedge asset: %s" % str(hits))
+	# The replacement must actually exist and be registered, not just absent-hedge.
+	Runner.T.ok(FileAccess.file_exists("res://assets/legacy-art/decor/dry_shrub.png"),
+		"the dry_shrub replacement sprite must exist on disk")
+	Runner.T.ok(Art.TEX.has("dry_shrub"), "dry_shrub must be registered in Art.TEX so _spr(\"dry_shrub\", ...) resolves")
+
+
 # --- a3-10: the marsh floor reads wet — dark silt pools with a cooler specular sheen so
 # the mid-game sector is a wetland, not generic green. The sheen must be lighter than the
 # pool (a glint) and both soft enough to not black out the ground. ---

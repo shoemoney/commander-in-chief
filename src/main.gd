@@ -4425,6 +4425,14 @@ const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-
 const MUZZLE_HEAT := {"pop_lerp": 0.32, "pop_a": 0.66, "fan_a": 0.66, "core_a": 0.66}
 const SCRUB_DAB := {"r": 3.5, "a": 0.22}   # a3-08: the tiny contact dab that grounds a scrub clump anchor (under the sprite)
 const ROCK_TOP_LIGHT := Color(0.97, 0.95, 0.84)   # a3-09: warm lit top-edge on a boulder — reads as RAISED cover (overhead light)
+# preserve-concealment-semantics: single source of truth for what each _draw_rocks()
+# `rk["kind"]` actually IS, read by both the draw switch and test_main.gd — so a future
+# asset reskin can't silently swap kind==1 (pass-through concealment) for a sprite that
+# implies hard blocking cover without the guard test catching the mismatch.
+const ROCK_KIND_COVER := {
+	1: {"sprite": "dry_shrub", "blocking": false},       # dry scrub clump: concealment only, bullets pass through
+	3: {"sprite": "wreck_halftrack", "blocking": true},  # hero wreck: hard cover
+}
 const BOSS_WOUND := {"scar_start": 0.18, "scar_step": 0.15, "spark": 0.6}   # a3-11: wound frac (1-hp) — first scar / per-scar step / hull sparks near death
 const ELITE_AURA := Color(0.85, 0.18, 0.12)   # a3-12: warm-red persistent threat halo under EVERY elite
 const HERO_APEX := Color(0.86, 0.93, 1.0)   # a4-03: cool crown catch-light — the hero is the brightest+coolest point
@@ -5523,9 +5531,10 @@ func _draw_rocks() -> void:
 				# multiply) so it rides Art.tint("dry_shrub")'s own march-ramped
 				# desert tint instead of a second fixed tan stacked on top.
 				var g_sway := sin(float(Engine.get_physics_frames()) * 0.04 + float(rh3)) * 0.06 * _motion
+				var g_tex: String = ROCK_KIND_COVER[1]["sprite"]
 				for gt in 3:
 					var gh := Art.cell_hash(rh3 + gt * 13, gt)
-					_spr("dry_shrub", pos + Vector2(float(gh % 44) - 22.0, float((gh / 5) % 30) - 15.0),
+					_spr(g_tex, pos + Vector2(float(gh % 44) - 22.0, float((gh / 5) % 30) - 15.0),
 						g_sway + float(gh % 628) / 100.0, 0.5, Color(1.0, 1.0, 1.0, 0.82 * fade))
 			2:
 				# Ruined wall slab: wide, low, hard — the corridor narrows to
@@ -5541,7 +5550,7 @@ func _draw_rocks() -> void:
 				# Scale 1.7 reads clearly 1.5-2x a classic rock (judge r1) while
 				# still matching the 32x24 collision (art==collision pin).
 				_ground_shadow(pos + Vector2(0, 8), 26.0, 0.5 * fade)
-				_spr("wreck_halftrack", pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5, fade))
+				_spr(ROCK_KIND_COVER[3]["sprite"], pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5, fade))
 			_:
 				_ground_shadow(pos, 12.0, 0.42 * fade)
 				var rtex: String = ["rock1", "rock2", "cactus_dead2"][rh3 % 3]   # dead cactus is REAL cover too
