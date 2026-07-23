@@ -31,7 +31,7 @@
         "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/cactus_large_a1.png: 6077/174119 opaque pixels (3.5%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
       }
     ],
-    "winner": null
+    "winner": 2
   },
   "cactus_small": {
     "replaces": "assets/legacy-art/cactus_small.png",
@@ -59,7 +59,7 @@
     "contact_sheet": "cactus_small/contact_sheet.png",
     "attempts_used": 4,
     "skips": [],
-    "winner": null
+    "winner": 3
   },
   "scrub": {
     "replaces": "assets/legacy-art/scrub.png",
@@ -108,7 +108,7 @@
         "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/scrub_a7.png: 3034/38601 opaque pixels (7.9%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
       }
     ],
-    "winner": null
+    "winner": 3
   },
   "tumbleweed": {
     "replaces": "assets/legacy-art/decor/tumbleweed.png",
@@ -147,7 +147,7 @@
         "reason": "/var/folders/_5/kk_5dshn1zx_mn3ftl5dl7g40000gp/T/desert_variants_raw_cg96cd7s/tumbleweed_a3.png: 4227/208207 opaque pixels (2.0%) still near the magenta key color -- chroma-key threshold likely too low, leftover fringe would ship"
       }
     ],
-    "winner": null
+    "winner": 4
   },
   "dry_shrub": {
     "replaces": "assets/legacy-art/decor/dry_shrub.png",
@@ -175,7 +175,7 @@
     "contact_sheet": "dry_shrub/contact_sheet.png",
     "attempts_used": 4,
     "skips": [],
-    "winner": null
+    "winner": 1
   },
   "cactus_dead1": {
     "replaces": "assets/legacy-art/p2/cactus_dead1.png",

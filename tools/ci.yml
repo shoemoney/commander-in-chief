@@ -117,3 +117,14 @@ jobs:
             echo "::error::Headless boot smoke test hit a script/parse error in main.gd/view"
             exit 1
           fi
+
+      - name: Desert-reskin asset winner audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet -r tools/requirements.txt
+          python3 tools/test_generate_desert_variants.py
+          python3 tools/test_apply_desert_winner.py
+          python3 tools/test_verify_desert_winners.py
+          python3 tools/test_build_desert_preview.py
+          python3 tools/verify_desert_winners.py
