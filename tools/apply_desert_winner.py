@@ -30,10 +30,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generate_desert_assets import (  # noqa: E402
     DEFAULT_GODOT,
     PROJECT_ROOT,
+    Image,
     assert_lossless_legacy-art_import,
     fix_import_settings,
     resolve_godot,
     run_godot_import,
+    validate_winner_install,
 )
 
 DEFAULT_MANIFEST = PROJECT_ROOT / "art_candidates" / "desert_reskin" / "manifest.json"
@@ -79,6 +81,15 @@ def main() -> int:
         return 0
 
     for name, src, dest in picked:
+        orig_size = None
+        if dest.exists():
+            orig_size = Image.open(dest).size
+        else:
+            print(f"  warning: {dest} has no existing sprite to size-check against "
+                  f"(new asset) -- skipping the dimension guard for {name}")
+        # Validate on every run, dry or not -- a --dry-run should surface a corrupt/opaque/
+        # transparent/size-mismatched winner too, not just report the copy it would skip.
+        validate_winner_install(src, orig_size)
         print(f"{'[dry-run] would copy' if args.dry_run else 'copying'} {src} -> {dest}")
         if not args.dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)

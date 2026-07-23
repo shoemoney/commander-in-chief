@@ -222,6 +222,32 @@ def validate(im: Image.Image, dest_path: Path, size: int) -> None:
         raise ValueError(f"{dest_path}: fully transparent -- chroma-key ate the subject")
 
 
+def validate_winner_install(src_path: Path, orig_size: tuple[int, int] | None) -> None:
+    """Guard the copy step in apply_desert_winner.py: a winner variant that
+    was fine on its own contact sheet can still be a bad drop-in if it's
+    corrupt, opaque (no alpha -- reads as a black/solid box over transparent
+    ground), fully see-through (an empty sprite), or sized differently than
+    the sprite it replaces (the live SCALE constants in art.gd assume the
+    original canvas, so a size mismatch silently shrinks or overflows the
+    on-screen footprint). Raises with the failing reason; callers must run
+    this on the CANDIDATE file BEFORE copying it over the live asset, so a
+    rejected winner never lands on disk and the (expensive) godot --import
+    passes never see it."""
+    try:
+        im = Image.open(src_path)
+        im.load()
+    except Exception as exc:  # noqa: BLE001 - report any decode failure, not just a chosen subset
+        raise ValueError(f"{src_path}: winner PNG failed to decode: {exc}") from exc
+    if im.mode not in ("RGBA", "LA") and "transparency" not in im.info:
+        raise ValueError(f"{src_path}: winner PNG has no alpha channel (mode={im.mode}) "
+                          f"-- would render as an opaque box, not a transparent-ground sprite")
+    if im.convert("RGBA").getbbox() is None:
+        raise ValueError(f"{src_path}: winner PNG is fully transparent -- an invisible sprite")
+    if orig_size is not None and im.size != orig_size:
+        raise ValueError(f"{src_path}: winner PNG is {im.size}, but the sprite it replaces was "
+                          f"{orig_size} -- SCALE constants in art.gd assume the original canvas")
+
+
 def fix_import_settings(png_path: Path) -> None:
     """Rewrite a freshly-`--import`-ed *.png.import back to the project's
     existing legacy art-bake convention. Takes REFERENCE_IMPORT (a real,
