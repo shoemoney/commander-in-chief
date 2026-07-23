@@ -15,5 +15,13 @@ __pycache__/
 
 .shoop/
 
-# shoop asset-candidate scratch (generators re-create these; not source of truth)
-art_candidates/
+# shoop asset-candidate scratch (generators re-create these; not source of
+# truth). Ignore contents via /** (not a bare directory rule) so the
+# .gdignore exception below can actually apply — git can't re-include a
+# file whose parent directory itself is excluded — and so any future scratch
+# subdirectory is covered regardless of nesting depth.
+art_candidates/**
+# ...except the Godot editor-ignore marker itself, so a fresh clone's very
+# first --import never scans whatever raw candidate renders happen to be
+# sitting in that scratch dir (they're throwaway and not always valid PNGs).
+!art_candidates/.gdignore

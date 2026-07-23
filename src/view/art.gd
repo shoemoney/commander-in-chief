@@ -167,7 +167,10 @@ const TEX := {
 	# the wep_grenade bake (AP shells tank_shell), and every smoke puff draws
 	# fx_smoke. Dead preloads cost VRAM and mislead asset audits; skip in loops.
 	# Explosion frames: VERIFIED vendor non-match (no owned pack ships explosion
-	# art — Particle_FX is crystals/trails/rings). Keep Kenney; skip in asset loops.
+	# art — Particle_FX is crystals/trails/rings). nt-01: the flat-cartoon Kenney
+	# blobs were replaced in place with a fal.ai-generated painterly top-down
+	# 4-frame sequence (flash -> fireball -> big fireball -> smoke); same path,
+	# same file names, so no other call site changed. Skip in asset loops.
 	"explosion0": preload(KN + "explosion0.png"),
 	"explosion1": preload(KN + "explosion1.png"),
 	"explosion2": preload(KN + "explosion2.png"),
@@ -329,6 +332,16 @@ const SCALE := {
 	# legacy art Particle_FX cards are large (fx_smoke_01 is 200px vs Kenney smoke.png's
 	# 92px), so scale down to keep the same on-screen puff footprint.
 	"fx_smoke": 0.46,
+	# nt-01: the generated explosion frames render on a shared 128px canvas;
+	# the old Kenney frames were each a DIFFERENT size (explosion2 the biggest
+	# at 90x99, explosion3 smallest at 79x79) and _draw_fx's spr_scale ramps
+	# monotonically UP across the animation (0.45 -> 0.95) — the old per-frame
+	# size was what actually made the blast grow-then-plateau instead of
+	# growing forever. Per-frame scale = sqrt(orig_w*orig_h)/128 reproduces
+	# each original frame's on-screen footprint exactly (128 * scale_i ==
+	# orig_i) so that grow/plateau timing, and the EXPLO_WHITE_R_* white-hot
+	# core sizing tuned against it, both carry over unchanged.
+	"explosion0": 0.680, "explosion1": 0.707, "explosion2": 0.737, "explosion3": 0.617,
 	# cast2 bakes use a 300px canvas. Enemies run LARGER than the strict
 	# old-footprint math: at ~7px the dark insurgents read as "black dots,
 	# or is that a bullet?" — straight from playtest.
