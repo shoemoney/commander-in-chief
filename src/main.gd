@@ -6790,6 +6790,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# by _motion so REDUCE MOTION damps it.
 	var _bf := float(Engine.get_physics_frames())
 	bpos += Vector2(sin(_bf * 0.05 + slot) * 1.5, sin(_bf * 0.08 + slot * 2.0) * 2.5) * _motion
+	# iran-flag: the enemy faction banner hung behind the level-end boss. Drawn
+	# FIRST (before shadow/hull/rotor) so every gunship element renders on top of
+	# it; a faint sway sells cloth in the wind without a sim/state change.
+	_spr("flag_iran", bpos + Vector2(0, -6), sin(_bf * 0.02 + slot) * 0.03 * _motion, 1.0)
 	# Mortar-phase warning: the hull flashes red while volleys are near
 	# (they land at phase_t 200/240/280 of the 360-tick cycle).
 	var pt: int = boss["phase_t"]
@@ -6954,6 +6958,10 @@ func _draw_colossus() -> void:
 	var stomp := sin(float(Engine.get_physics_frames()) * 0.12) * 0.5 + 0.5
 	var cbody := cpos + Vector2(0, stomp * 2.0)
 	var csquash := 1.0 - stomp * 0.06
+	# iran-flag: faction banner behind the finale boss — bigger (1.6x) for the
+	# colossus's mass, hung high so it frames the body without hiding the crush
+	# telegraph at its feet. Drawn before the shadow/body so they render on top.
+	_spr("flag_iran", cbody + Vector2(0, -22), sin(float(Engine.get_physics_frames()) * 0.02) * 0.025, 1.6)
 	# a3-01: cool the contact shadow to a blue-black — the colossus ONLY fights on the
 	# hot foundry floor, where the default green-black shadow reads as a wrong-hue smear.
 	_ground_shadow(cpos, 30.0, 0.42, Color(0.02, 0.02, 0.05))
