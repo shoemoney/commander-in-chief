@@ -1637,3 +1637,12 @@ func test_nt03_vehicle_bakes_are_not_blob_rectangles() -> void:
 			var bot_w := _opaque_row_width_avg(img, int(h * 0.85), h)
 			Runner.T.ok(bot_w > top_w,
 				"tank_barrel.png mount base (bottom, %.1fpx) is wider than the muzzle tip (top, %.1fpx) -- base-down/muzzle-up canvas, matching the barrel_angle=-PI/2 default's zero-rotation rest pose (nt-03)" % [bot_w, top_w])
+
+
+# endless-meta-retention: the VETERAN PERKS row (menu.gd _submenu_icon "perks")
+# points at "mi_trophy" -- pin that the registry actually resolves it to a real,
+# non-empty texture, same as HALL OF FAME's own trophy badge already shares.
+func test_endless_meta_mi_trophy_icon_exists() -> void:
+	var tex := Art.tex("mi_trophy")
+	Runner.T.ok(tex != null, "mi_trophy resolves to a texture in Art.TEX")
+	Runner.T.ok(tex.get_size().x > 0 and tex.get_size().y > 0, "mi_trophy is a real (non-zero-sized) image, not a stub")

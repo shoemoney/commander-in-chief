@@ -180,6 +180,33 @@ class _StubMain extends Node2D:
 		_menu_binds = MainScript.MENU_BIND_DEFAULTS.duplicate()
 		_persisted.append({"binds": _binds.duplicate(), "padbinds": _pad_binds[0].duplicate(),
 			"padbinds2": _pad_binds[1].duplicate(), "menubinds": _menu_binds.duplicate()})
+	# endless-meta-retention: PERKS screen stub -- mirrors real main's perk_def/
+	# perk_level/buy_perk against the REAL MainScript.PERK_DEFS (typed PERK_VEST/
+	# PERK_CHEST/PERK_TOKEN id constants), not a parallel re-implementation of
+	# the tier/cost table that could drift from it.
+	var vet_points := 0
+	var _perk_levels: Dictionary = {}
+	var PERK_DEFS := MainScript.PERK_DEFS   # _menu_items() reads main.PERK_DEFS directly
+	func perk_def(id: String) -> Dictionary:
+		for pd in MainScript.PERK_DEFS:
+			if pd["id"] == id:
+				return pd
+		return {}
+	func perk_level(id: String) -> int: return int(_perk_levels.get(id, 0))
+	func buy_perk(id: String) -> bool:
+		var pd := perk_def(id)
+		if pd.is_empty():
+			return false
+		var lvl := perk_level(id)
+		var costs: Array = pd["cost"]
+		if lvl >= costs.size():
+			return false
+		var cost: int = int(costs[lvl])
+		if vet_points < cost:
+			return false
+		vet_points -= cost
+		_perk_levels[id] = lvl + 1
+		return true
 
 
 # Real generated row count for a mode, via a throwaway Menu bound to a stub main.
@@ -5768,5 +5795,119 @@ func test_modes_and_chapter_select_screens() -> void:
 		Runner.T.ok((zi["name"] as String) in ch_items[gi]["label"],
 			"chapter %d row names its zone (%s)" % [gi + 1, zi["name"]])
 	Runner.T.eq(ch_items[ch_items.size() - 1]["id"], "back", "CHAPTER SELECT ends on BACK")
+	m.free()
+	stub.free()
+
+
+# endless-meta-retention: SETUP -> VETERAN PERKS -> BACK, proving the SETUP row
+# actually opens the real Mode.PERKS screen (not just that back_dest() maps it,
+# which test_modes_and_chapter_select_screens-style unit checks already cover
+# for MODES/CHAPTERS) and that BACK restores focus to the row that opened it —
+# same end-to-end pattern as test_title_info_nested_back_roundtrip_preserves_focus.
+func test_setup_perks_row_opens_and_back_restores_focus() -> void:
+	var stub := _StubMain.new()
+	var m := Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.SETUP
+
+	var perks_i := _row_index(m, "perks")
+	Runner.T.ok(perks_i >= 0, "SETUP hub carries a VETERAN PERKS row")
+	m.sel = perks_i
+	m._activate()                       # SETUP PERKS -> the perk-shop screen
+	Runner.T.eq(m.mode, Menu.Mode.PERKS, "VETERAN PERKS opens from the SETUP row")
+
+	m._unhandled_input(_key_ev(KEY_ESCAPE, true))   # BACK: PERKS -> SETUP (its opener)
+	Runner.T.eq(m.mode, Menu.Mode.SETUP, "BACK from PERKS returns to SETUP, not TITLE")
+	Runner.T.eq(m.sel, _row_index(m, "perks"), "focus restored to the SETUP PERKS row")
+
+	m.free()
+	stub.free()
+
+
+# endless-meta-retention: a purchase must be reflected in the row label the very
+# next frame -- the row shows the NEXT tier's cost (or MAX), so a stale label
+# after a successful buy would read as "nothing happened".
+func test_perks_row_labels_refresh_after_a_purchase() -> void:
+	var stub := _StubMain.new()
+	stub.vet_points = 40   # exactly affords VETERAN VEST's single tier (40 VP)
+	var m := Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.PERKS
+
+	var vest_i := _row_index(m, MainScript.PERK_VEST)
+	Runner.T.ok(vest_i >= 0, "PERKS carries a VETERAN VEST row")
+	var label_before: String = m._menu_items()[vest_i]["label"]
+	Runner.T.ok("40 VP" in label_before, "unbought VETERAN VEST shows its one listed cost")
+
+	m.sel = vest_i
+	m._activate()                       # spends the 40 VP -- see _activate_perk
+	Runner.T.eq(stub.perk_level(MainScript.PERK_VEST), 1, "the purchase actually applied")
+	var label_after: String = m._menu_items()[vest_i]["label"]
+	Runner.T.ok(label_after != label_before, "the row label refreshed off the new tier, not a stale snapshot")
+	Runner.T.ok("MAX" in label_after, "single-tier VETERAN VEST now reads MAX")
+
+	m.free()
+	stub.free()
+
+
+# endless-meta-retention: the PERKS subtitle doubles as the selected row's own
+# description (extracted to _perk_subtitle_text so it's assertable without a
+# render pass -- see menu.gd's comment on the function).
+func test_perks_subtitle_shows_selected_perk_description() -> void:
+	var stub := _StubMain.new()
+	stub.vet_points = 123
+	var m := Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.PERKS
+
+	var chest_i := _row_index(m, MainScript.PERK_CHEST)
+	m.sel = chest_i
+	var pd: Dictionary = stub.perk_def(MainScript.PERK_CHEST)
+	var sub := m._perk_subtitle_text()
+	Runner.T.ok((pd["desc"] as String) in sub, "subtitle names the FOCUSED row's own description")
+	Runner.T.ok("123" in sub, "subtitle also states the VP total banked")
+
+	var vest_i := _row_index(m, MainScript.PERK_VEST)
+	m.sel = vest_i
+	var pd2: Dictionary = stub.perk_def(MainScript.PERK_VEST)
+	Runner.T.ok((pd2["desc"] as String) in m._perk_subtitle_text(),
+		"moving focus swaps the subtitle to the NEWLY selected row's description")
+	Runner.T.ok(not ((pd["desc"] as String) in m._perk_subtitle_text()),
+		"the PREVIOUS row's description does not linger once focus moves")
+
+	m.free()
+	stub.free()
+
+
+# endless-meta-retention: _activate_perk's three outcomes (denied / bought /
+# already maxed) must each raise their own distinct notice text -- a player
+# pressing the same row twice needs to be told WHY nothing happened differently
+# than a player who was simply short on VP.
+func test_activate_perk_emits_three_distinct_notices() -> void:
+	var stub := _StubMain.new()
+	var m := Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.PERKS
+	m.sel = _row_index(m, MainScript.PERK_VEST)
+
+	stub.vet_points = 0
+	m._activate_perk()
+	var deny_msg := m._rebind_msg
+	Runner.T.ok("NEED" in deny_msg and "MORE VP" in deny_msg, "short on VP raises the NEED-more-VP deny notice")
+	Runner.T.eq(stub.perk_level(MainScript.PERK_VEST), 0, "a denied buy never advances the tier")
+
+	stub.vet_points = 40
+	m._activate_perk()
+	var bought_msg := m._rebind_msg
+	Runner.T.ok("UNLOCKED" in bought_msg, "a successful buy raises the PERK UNLOCKED notice")
+	Runner.T.eq(stub.perk_level(MainScript.PERK_VEST), 1, "the buy actually applied")
+
+	m._activate_perk()   # VETERAN VEST is single-tier -- already maxed
+	var maxed_msg := m._rebind_msg
+	Runner.T.ok("MAXED" in maxed_msg, "re-pressing an already-maxed row raises the MAXED notice")
+
+	Runner.T.ok(deny_msg != bought_msg and bought_msg != maxed_msg and deny_msg != maxed_msg,
+		"all three notices are textually distinct -- deny/unlock/maxed never share a message")
+
 	m.free()
 	stub.free()

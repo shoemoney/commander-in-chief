@@ -8,7 +8,7 @@ extends Control
 # authored-campaign-and-modes: MODES (the SETUP-hub row for BOSS RUSH /
 # ARCADE / CHAPTER SELECT) and CHAPTERS (the chapter-picker CHAPTER SELECT
 # opens) join the hub family alongside SETUP/INFO/OPTS.
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND, DISP, MODES, CHAPTERS, AUDIO }
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND, DISP, MODES, CHAPTERS, AUDIO, PERKS }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -861,6 +861,9 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 			# secondary screen — BOSS RUSH / ARCADE / CHAPTER SELECT are real
 			# menu entries here, not just the F3/F4 debug toggles.
 			{"id": "modes", "label": "MODES", "destructive": false, "grp": 1, "submenu": true},
+			# endless-meta-retention: VETERAN PERKS spends Veteran Points banked
+			# from Endless runs on permanent Endless starting-loadout perks.
+			{"id": "perks", "label": "VETERAN PERKS", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "info", "label": "INFO", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 2},
@@ -886,6 +889,26 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 				"destructive": false, "grp": 0})
 		citems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 1})
 		return citems
+	if mode == Mode.PERKS:
+		# endless-meta-retention: one row per PERK_DEFS entry — label shows
+		# MAX once every tier is owned, else the tier progress + next cost.
+		# Purchases are permanent and only ever apply to Endless runs (see
+		# main._reset()).
+		var pkitems: Array[Dictionary] = []
+		for pd in main.PERK_DEFS:
+			var lvl: int = main.perk_level(pd["id"])
+			var costs: Array = pd["cost"]
+			var val: String
+			if lvl >= costs.size():
+				val = "MAX"
+			elif costs.size() > 1:
+				val = "LVL %d/%d — %d VP" % [lvl, costs.size(), int(costs[lvl])]
+			else:
+				val = "%d VP" % int(costs[lvl])
+			pkitems.append({"id": pd["id"], "label": "%s — %s" % [pd["label"], val],
+				"destructive": false, "grp": 0})
+		pkitems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 1})
+		return pkitems
 	if mode == Mode.INFO:
 		# c1-09: the look-back screens, split off OPTIONS so settings stand alone. HALL
 		# OF FAME + HOW TO PLAY + (when a replay exists) WATCH LAST RUN, then BACK. All
@@ -1404,6 +1427,7 @@ func _row_icon(id: String) -> String:
 		"quit": return "mi_cancel"
 		# authored-campaign-and-modes
 		"modes": return "mi_combat"
+		"perks": return "mi_trophy"   # endless-meta-retention
 		"boss_rush": return "mi_combat"
 		"arcade": return "mi_play"
 		"chapter_select": return "mi_book"
@@ -2436,6 +2460,7 @@ static func back_dest(mode_id: int) -> Dictionary:
 		Mode.AUDIO: return {"mode": Mode.OPTS, "sel": "audio"}   # audio-identity: AUDIO sub-screen hangs off the OPTIONS AUDIO row — BACK restores focus to it
 		Mode.MODES: return {"mode": Mode.SETUP, "sel": "modes"}   # authored-campaign-and-modes: MODES hangs off the SETUP hub
 		Mode.CHAPTERS: return {"mode": Mode.MODES, "sel": "chapter_select"}   # CHAPTER SELECT hangs off the MODES screen
+		Mode.PERKS: return {"mode": Mode.SETUP, "sel": "perks"}   # endless-meta-retention: PERKS hangs off the SETUP hub
 		_: return {}
 
 
@@ -2735,6 +2760,12 @@ func _activate() -> void:
 	if _is_seed_row():
 		_activate_seed()
 		return
+	# endless-meta-retention: PERKS rows gate the same way — a purchase can
+	# fail (already owned / not enough VP), so it plays its own buy/deny chime
+	# instead of the unconditional one below.
+	if mode == Mode.PERKS:
+		_activate_perk()
+		return
 	main._sfx.play("buy", -8.0)
 	if mode == Mode.HALL or mode == Mode.HOWTO:
 		# The lone BACK plate on the HALL/HOWTO content screens climbs to INFO.
@@ -2797,6 +2828,7 @@ func _activate() -> void:
 				open(Mode.OPTS)
 			"info": open(Mode.INFO)   # c2-04: reached from the SETUP hub; BACK returns there
 			"modes": open(Mode.MODES)   # authored-campaign-and-modes: reached from the SETUP hub; BACK returns there
+			"perks": open(Mode.PERKS)   # endless-meta-retention: reached from the SETUP hub; BACK returns there
 			"boss_rush": main.start_boss_rush()   # authored-campaign-and-modes: real menu entry (was F4-only)
 			"arcade": main.start_arcade(1)        # quick-play chapter 1; CHAPTER SELECT below picks any of the 6
 			"chapter_select": open(Mode.CHAPTERS)
@@ -3135,6 +3167,50 @@ func _update_seed_preview(delta := 0.0, force := false) -> void:
 		_seed_poll_t = 0.0    # re-arm the throttle so the next focus samples immediately
 
 
+# endless-meta-retention: the PERKS subtitle doubles as the selected row's
+# description — it changes as focus moves, same live-readout spirit as the
+# DISPLAY sub-screen's disp_subtitle() above. Factored out of _draw (rather
+# than inlined) so a test can assert the exact string without a render pass.
+func _perk_subtitle_text() -> String:
+	var pk_desc := "PERMANENT ENDLESS UPGRADES"
+	var pk_mi := _menu_items()
+	if sel >= 0 and sel < pk_mi.size():
+		var pk_pd: Dictionary = main.perk_def(pk_mi[sel]["id"])
+		if not pk_pd.is_empty():
+			pk_desc = pk_pd["desc"]
+	return "%d VP BANKED — %s" % [main.vet_points, pk_desc]
+
+
+# endless-meta-retention: BACK climbs to SETUP like any other submenu. A
+# maxed row is informational (its own soft chime, never a deny buzz); any
+# other row spends VP on the next tier through main.buy_perk (true = bought,
+# false = unaffordable) and names the exact shortfall so a denied press
+# reads as "keep playing", not "broken".
+func _activate_perk() -> void:
+	var id: String = _menu_items()[sel]["id"]
+	if id == "back":
+		main._sfx.play("buy", -8.0)
+		var d := _parent(mode)
+		open(d["mode"], d["sel"])
+		return
+	var pd: Dictionary = main.perk_def(id)
+	if pd.is_empty():
+		return
+	var lvl: int = main.perk_level(id)
+	var costs: Array = pd["cost"]
+	if lvl >= costs.size():
+		main._sfx.play("buy", -8.0)
+		_notice("%s MAXED" % pd["label"])
+		return
+	if main.buy_perk(id):
+		main._sfx.play("buy", -8.0)
+		_items_valid = false   # rebuild the row label from the new tier/VP total
+		_notice("PERK UNLOCKED — %s" % pd["label"])
+	else:
+		main._sfx.play("deny", -5.0, 0.7)
+		_notice("NEED %d MORE VP" % (int(costs[lvl]) - main.vet_points))
+
+
 func _activate_seed() -> void:
 	# c1-14: refresh SYNCHRONOUSLY first — a mouse/touch click can select AND activate
 	# this row in one input event, before the next _process poll runs, so re-read the
@@ -3362,6 +3438,9 @@ func _draw() -> void:
 	elif mode == Mode.CHAPTERS:
 		_center_text("CHAPTER SELECT", HUB_HEADER_Y, 22, HEADER_COL)
 		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.PERKS:
+		_center_text("VETERAN PERKS", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text(_perk_subtitle_text(), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	else:
 		_center_text("PAUSED", PAUSE_HEADER_Y, 22, HEADER_COL)
 		# Pause doubles as a status check — the run so far.

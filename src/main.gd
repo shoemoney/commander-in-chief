@@ -219,6 +219,9 @@ var _run_kills := 0              # this-run tally for the debrief card
 var _run_kind_kills := {}        # enemy kind → this-run kills, feeds the debrief top-prey row
 var _run_rescues := 0            # pilot ransoms this run — the signature mechanic earns a tally line
 var _run_best_streak := 0
+var _run_vp_gain := 0            # endless-meta-retention: VP this run actually banked (0 unless
+                                  # Endless + score-verified) -- shown on the debrief/victory card,
+                                  # not just the transient BANKED banner (see _track_bests below)
 var _run_had_down := false       # any player went down this run — gates the NO_DEATH_WIN achievement
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
@@ -277,6 +280,42 @@ var _hall_seq := 0                  # monotonic run id ("hid") so the Hall ident
 var _best_dirty := false
 var _seen_dirty := false          # first-time hints ratchet in memory, flushed with bests
 var _prev_colossus_phase := 0     # phase-change escalation banners
+# endless-meta-retention: Veteran Points are a persistent meta-currency banked
+# from EVERY Endless run (1 per wave survived) and spent on permanent, STACKING
+# Endless starting-loadout perks (tiers give VP income a real long-tail sink
+# instead of maxing out after one good run). Perks are applied post-construction
+# in _reset() -- same trick assist_mode already uses to force pl["vest"] = true
+# -- so the sim itself (and its golden checksums) never learns a perk exists.
+var vet_points := 0
+var _perk_levels: Dictionary = {}   # perk id -> owned tier (0 = not owned; matches PERK_DEFS "cost".size() = max tier)
+const PERK_CHEST_BONUS := 60        # HEAD START perk: War Chest added to the run's start PER OWNED TIER
+# endless-meta-retention: typed perk-id constants -- main.gd, menu.gd and the
+# tests all key off these instead of scattering raw "perk_xxx" string literals
+# (a typo in a string never gets caught by the parser; a typo in a const does).
+const PERK_VEST := "perk_vest"
+const PERK_CHEST := "perk_chest"
+const PERK_TOKEN := "perk_token"
+const PERK_DEFS := [
+	{"id": PERK_VEST, "label": "VETERAN VEST", "cost": [40],
+		"desc": "ENDLESS RUNS START WITH A FLAK VEST ALREADY ON"},
+	{"id": PERK_CHEST, "label": "HEAD START", "cost": [30, 45, 60],
+		"desc": "ENDLESS RUNS START WITH +60 WAR CHEST PER TIER OWNED (STACKS)"},
+	{"id": PERK_TOKEN, "label": "SIGNAL FLARE", "cost": [50, 70],
+		"desc": "ENDLESS RUNS START WITH +1 COMMENDATION PER TIER OWNED (STACKS)"},
+]
+
+
+# endless-meta-retention: PERK_DEFS lookup by id, or {} if unknown.
+func perk_def(id: String) -> Dictionary:
+	for pd in PERK_DEFS:
+		if pd["id"] == id:
+			return pd
+	return {}
+
+
+# endless-meta-retention: tiers already owned for a perk id (0 = not owned yet).
+func perk_level(id: String) -> int:
+	return int(_perk_levels.get(id, 0))
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 var _wheel_aim := [Vector2.ZERO, Vector2.ZERO]   # aim latched while the wheel is open (sector flicks must not whip the sim aim)
@@ -1215,6 +1254,15 @@ func _reset() -> void:
 	if _assist:
 		for pl in sim.players:
 			pl["vest"] = true
+	if _mode_str == "endless":
+		# endless-meta-retention: owned perk tiers are applied post-construction,
+		# same trick as the assist-vest loop above, so SimWorld itself never
+		# learns a perk system exists. CHEST/TOKEN stack per owned tier.
+		if perk_level(PERK_VEST) > 0:
+			for pl in sim.players:
+				pl["vest"] = true
+		sim.war_chest += PERK_CHEST_BONUS * perk_level(PERK_CHEST)
+		sim.tokens += perk_level(PERK_TOKEN)
 	if _mode_str == "arcade":
 		# authored-campaign-and-modes: CHAPTER SELECT — start at the mouth of
 		# the chosen zone instead of gate 1 (see SimWorld.jump_to_chapter).
@@ -1299,6 +1347,7 @@ func _reset() -> void:
 	_last_gate_tick = 0
 	_best_gate_split = 0
 	_run_best_streak = 0
+	_run_vp_gain = 0   # endless-meta-retention: a fresh run starts with no VP banked yet
 	_down_frames = 0
 	_debrief = false
 	_fire_swallow = true   # a SPACE/Enter/LMB redeploy press must not open the run firing
@@ -3084,6 +3133,27 @@ func _persist(sections: Dictionary) -> void:
 	_save_cfg(cf)
 
 
+# endless-meta-retention: spend banked Veteran Points on the NEXT tier of a
+# permanent Endless perk. Returns false (no-op) if already at max tier or the
+# next tier is unaffordable -- the menu plays "buy" on true and "deny" on
+# false, same as any other purchase.
+func buy_perk(id: String) -> bool:
+	var pd := perk_def(id)
+	if pd.is_empty():
+		return false
+	var lvl := perk_level(id)
+	var costs: Array = pd["cost"]
+	if lvl >= costs.size():
+		return false   # already maxed
+	var cost: int = int(costs[lvl])
+	if vet_points < cost:
+		return false
+	vet_points -= cost
+	_perk_levels[id] = lvl + 1
+	_persist({"meta": {"vp": vet_points, "levels": _perk_levels}})
+	return true
+
+
 func _load_bests() -> void:
 	var cf := ConfigFile.new()
 	# c1-18: binds always start at their ship defaults; the load branch overlays any
@@ -3148,6 +3218,8 @@ func _load_bests() -> void:
 		_life_kills = cf.get_value("life", "kills", 0)
 		_life_wins = cf.get_value("life", "wins", 0)
 		_daily_done_seed = cf.get_value("daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
+		vet_points = cf.get_value("meta", "vp", 0)   # endless-meta-retention: persistent perk currency
+		_perk_levels = cf.get_value("meta", "levels", {})   # perk id -> owned tier
 		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
 		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
 		# push it through the SAME _apply_settings path fresh-install and RESET use —
@@ -3831,8 +3903,18 @@ func _set_bus_vol(name: String, v: int) -> void:
 ## which has no backend yet -- this is the local, synchronous half of the plan.
 func _apply_score_verdict(score: int, verified: bool) -> void:
 	if verified:
+		# endless-meta-retention: VP is gated behind this SAME verified flag --
+		# _record_run below is the only place vet_points ever moves, and it only
+		# ever runs from inside this branch, so an unverified run can never bank
+		# VP any more than it can bank the Hall/Steam entry. _run_vp_gain is the
+		# diff the debrief/victory card reads (see _draw) -- naturally 0 for a
+		# non-Endless run (vet_points never moves) or a failed verification
+		# (this branch never runs), no separate mode/verified guard needed here.
+		var vp_before := vet_points
 		_record_run(score)   # bank this run into the Hall of Fame once (also uploads to Steam -- see _report_to_steam)
+		_run_vp_gain = vet_points - vp_before
 	else:
+		_run_vp_gain = 0
 		push_warning("Run score %d failed replay verification -- not banked to the Hall of Fame or Steam" % score)
 		show_banner("SCORE NOT VERIFIED", GameMenu.BANNER_COL_FAIL)
 
@@ -3887,6 +3969,12 @@ func _record_run(score: int) -> void:
 	cf.set_value("best", "score", best_score)
 	cf.set_value("best", "wave", best_wave)
 	cf.set_value("best", "dist", best_dist)
+	if sim.mode == "endless":
+		# endless-meta-retention: 1 Veteran Point per wave survived -- a deeper
+		# run always banks more toward the next perk, independent of score.
+		vet_points += sim.wave
+		cf.set_value("meta", "vp", vet_points)
+		cf.set_value("meta", "levels", _perk_levels)
 	cf.set_value("seen", "hints", _seen)
 	_best_dirty = false
 	_seen_dirty = false
@@ -4045,7 +4133,11 @@ func _track_bests() -> void:
 			# No recorder means no replay to audit -- default to UNVERIFIED, not
 			# trusted, so a missing recorder can never be a backdoor around the check.
 			var _score_verified := _recorder != null and _recorder.verify_score(sim.score)
-			_apply_score_verdict(sim.score, _score_verified)   # extracted gate -- see tests/test_leaderboard.gd
+			_apply_score_verdict(sim.score, _score_verified)   # extracted gate -- see tests/test_leaderboard.gd; also sets _run_vp_gain
+			if sim.mode == "endless" and _run_vp_gain > 0:
+				# _run_vp_gain is what the debrief/victory card reads too (see _draw below) --
+				# not just this transient banner, so the gain survives past the banner's decay.
+				show_banner("BANKED +%d VP" % _run_vp_gain, Color(0.6, 0.9, 0.55))
 			if not _replay_saved and _recorder != null:
 				# Stringifying a whole run's input log is the biggest one-frame
 				# stall in the view — push it to a worker so the debrief card
@@ -9488,6 +9580,13 @@ func _draw_banners(top_msg: String) -> void:
 		elif sim.mode == "campaign" and best_dist > 0 and dist < best_dist:
 			rows.append({"text": "%dm SHORT OF YOUR BEST PUSH" % (best_dist - dist),
 				"color": Color(1.0, 0.85, 0.5)})
+		if sim.mode == "endless":
+			# endless-meta-retention: the BANKED banner decays in ~2s and is gone long
+			# before the player leaves this card -- state the total + this run's gain
+			# here too, so the currency's advance is visible before REDEPLOY/TITLE.
+			rows.append({"text": ("%d VP BANKED  (+%d)" % [vet_points, _run_vp_gain]) if _run_vp_gain > 0
+				else "%d VP BANKED" % vet_points, "color": Color(0.7, 0.95, 0.6),
+				"icon": "mi_trophy", "icon_size": 14.0})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)
 		# fronts the row via the panel's icon slot.
