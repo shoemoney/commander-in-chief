@@ -222,12 +222,12 @@ func _row_count(mode_id: int, has_replay: bool) -> int:
 	return n
 
 
-# c2-04: TITLE is a fixed 6 rows now (4 start verbs + SETUP hub + QUIT) — CO-OP /
-# NG+ HARD / OPTIONS / INFO / WATCH all live one level down, so a replay no longer
-# grows the list. Every record-header state must decompress to legible plates.
+# c-titlechrome: TITLE is a fixed 5 rows now (CAMPAIGN / ENDLESS / DAILY / SETUP / QUIT) —
+# CHALLENGE SEED moved down to the SETUP hub with CO-OP / NG+ HARD / OPTIONS / INFO / WATCH,
+# so a replay no longer grows the list. Every record-header state must decompress to legible plates.
 func test_title_states_all_clear_20px_plate_and_16px_icon() -> void:
 	var counts := [_row_count(Menu.Mode.TITLE, false), _row_count(Menu.Mode.TITLE, true)]
-	Runner.T.eq(counts.max(), 6, "TITLE holds a fixed 6-row cap (got %d)" % counts.max())
+	Runner.T.eq(counts.max(), 5, "TITLE holds a fixed 5-row cap (got %d)" % counts.max())
 	for n in counts:                       # real list sizes, not hard-coded
 		for has_best in [false, true]:
 			for has_career in [false, true]:
@@ -291,14 +291,11 @@ func test_c3_03_title_split_floor_gap_and_no_header_overlap() -> void:
 			var panel: Rect2 = Menu.title_deploy_panel(g, split_at - 1, head)
 			Runner.T.ok(panel.position.y > head, "%s: DEPLOY panel top %d clears header %d" % [tag, int(panel.position.y), int(head)])
 			Runner.T.ok(panel.end.y <= more_top, "%s: DEPLOY panel bottom %d stays above the MORE block %d" % [tag, int(panel.end.y), int(more_top)])
-			# (c2) the REAL DEPLOY / MORE caption boxes (pill+rule via _emit_group_caption) clear
-			# the record header and each other. Each caption is captured alone so its full
-			# footprint is the union of its emitted primitives.
+			# c-titlechrome: TITLE no longer draws DEPLOY/MORE gutter captions (the divider +
+			# backing panel alone mark the split), so _emit_group_caption is a no-op here.
 			var dbox := _title_caption_box(stub, mi, g, 0, bh)
 			var mbox := _title_caption_box(stub, mi, g, split_at, bh)
-			Runner.T.ok(dbox.size.y > 0.0 and mbox.size.y > 0.0, "%s: both DEPLOY and MORE captions drew" % tag)
-			Runner.T.ok(dbox.position.y > head, "%s: DEPLOY caption top %d clears header %d" % [tag, int(dbox.position.y), int(head)])
-			Runner.T.ok(dbox.end.y <= mbox.position.y, "%s: DEPLOY caption bottom %d clears the MORE caption top %d" % [tag, int(dbox.end.y), int(mbox.position.y)])
+			Runner.T.ok(dbox.size.y == 0.0 and mbox.size.y == 0.0, "%s: TITLE draws no gutter captions" % tag)
 	m.free()
 	stub.free()
 
@@ -439,7 +436,10 @@ func test_c4_14_group_caption_tracks_wrapped_column() -> void:
 # through the _CaptureMenu seams — the plate_left variant so a wrapped column can be measured.
 func _caption_box_plate(mitems: Array, k: int, cy: float, plate_left: float) -> Rect2:
 	var cap := _CaptureMenu.new()
-	cap.mode = Menu.Mode.TITLE
+	# c-titlechrome: TITLE no longer draws group captions (title_group_header() is empty);
+	# this test is pure column-wrap geometry, so route it through OPTS (which still names
+	# its settings-block headers via group_header()) to keep exercising the real draw path.
+	cap.mode = Menu.Mode.OPTS
 	cap._emit_group_caption(mitems, k, cy, plate_left)
 	var box := Rect2()
 	var first := true
@@ -4423,9 +4423,9 @@ func test_seed_preview_tracks_focus_and_clipboard_change() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	var seed_i := _seed_row_index(m)
-	Runner.T.ok(seed_i >= 0, "TITLE exposes a CHALLENGE SEED row")
+	Runner.T.ok(seed_i >= 0, "SETUP exposes a CHALLENGE SEED row")
 	# Unfocused row: a valid clipboard is NOT previewed (no side effect off-row).
 	stub._clip = "4242"
 	m.sel = 0
@@ -4468,7 +4468,7 @@ func test_seed_first_press_arms_second_press_launches() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	m.sel = _seed_row_index(m)
 	stub._clip = "777"
 	m._seed_preview = -1
@@ -4498,7 +4498,7 @@ func test_seed_paste_posts_transient_status_banner() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	m.sel = _seed_row_index(m)
 	var fail_col := Menu.BANNER_COL_FAIL       # the shared orange-red both deny banners carry
 	var load_col := Menu.BANNER_COL_DEFAULT    # the shared default warm-gold the LOADED banner inherits
@@ -4539,7 +4539,7 @@ func test_seed_changed_clipboard_re_arms_instead_of_launching_blind() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	m.sel = _seed_row_index(m)
 	stub._clip = "777"
 	m._seed_clip_raw = ""
@@ -4566,7 +4566,7 @@ func test_seed_arm_cancels_on_focus_leave_and_timeout() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	var seed_i := _seed_row_index(m)
 	m.sel = seed_i
 	stub._clip = "777"
@@ -4596,7 +4596,7 @@ func test_seed_activation_denies_on_empty_clipboard() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	m.sel = _seed_row_index(m)
 	stub._clip = ""            # nothing to paste
 	m._seed_preview = -1
@@ -4811,7 +4811,7 @@ func test_seed_preview_throttles_clipboard_sampling() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	m.sel = _seed_row_index(m)
 	stub._clip = "111"
 	# First focused frame samples once (throttle re-armed to 0 on focus entry paths).
@@ -4841,7 +4841,7 @@ func test_seed_deny_flash_never_hides_a_now_valid_seed() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.TITLE
+	m.mode = Menu.Mode.SETUP
 	m.sel = _seed_row_index(m)
 	# Empty paste -> deny + red flash, nothing armed, nothing launched.
 	stub._clip = ""
@@ -4885,7 +4885,7 @@ func test_open_clears_all_seed_state() -> void:
 	m._seed_armed_t = 2.0
 	m._seed_flash = 1.0
 	m._seed_poll_t = 0.15
-	m.open(Menu.Mode.TITLE)
+	m.open(Menu.Mode.SETUP)
 	Runner.T.ok(not m._seed_armed, "open() clears the armed flag (no single-press launch on reopen)")
 	Runner.T.eq(m._seed_armed_val, -1, "open() clears the armed seed value")
 	Runner.T.eq(m._seed_armed_t, 0.0, "open() clears the arm timer")

@@ -292,7 +292,7 @@ const TITLE_CAREER_TOP := TITLE_BEST_TOP + TITLE_RECORD_PLATE_H    # CAREER whis
 const TITLE_HEAD_SEAM := 1.0       # tagline-only column seats 1px below the tagline plate bottom
 const BOTTOM_BOUND := 310.0        # y the last row / BACK plate clears (leaves the footer legend room)
 const LEGEND_Y := 322.0            # TITLE input-legend plate top (the column band ends 4px above it)
-const LEGEND_H := 34.0             # ...and its height
+const LEGEND_H := 17.0             # ...and its height
 const ROW_INSET_TITLE := 2.0       # TITLE inter-row inset (reclaimed band => taller plates)
 const ROW_INSET_DEFAULT := 3.0     # inter-row inset on every other screen
 # c3-02: ONE row-pitch ceiling, derived from the plate height BTN.y so a button resize
@@ -816,7 +816,6 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 			# it never clips the label and stays scannable, mirroring the toggle-dot slot.
 			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0,
 				"disabled": main.daily_done(), "badge": "COMPLETED" if main.daily_done() else ""},
-			{"id": "paste_seed", "label": SEED_ROW_LABEL, "destructive": false, "grp": 0},
 			# grp 1: run-config gets its own block (a divider splits it from the start
 			# verbs above and the meta screens below). The row carries its own live
 			# config tail — players and an EXPLICIT NORMAL/HARD difficulty — so a stale
@@ -840,17 +839,6 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# split, and the DEPLOY block gets a backing panel in _draw so the start verbs read as
 		# one dominant cluster, not the top of an undifferentiated phone list.
 		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 1})
-		# c2-12: while the CHALLENGE SEED row is FOCUSED, rebuild its label here — in the
-		# standard menu-item refresh flow every draw reads — to echo the raw clipboard text
-		# the poll keeps fresh (_seed_clip_raw). This means the visible label tracks a
-		# clipboard change LIVE (no refocus needed) and the player sees exactly what a press
-		# will use; the right-margin hint (seed_hint_lines) says whether it parses.
-		for i in titems.size():
-			if titems[i]["id"] == "paste_seed":
-				if sel == i:
-					titems[i]["label"] = seed_row_label(titems[i]["label"], true,
-						_seed_clip_raw, _seed_preview >= 0)
-				break
 		return titems
 	if mode == Mode.SETUP:
 		# c1-02: CO-OP / NG+ HARD live on their own labeled RUN SETUP screen (reached
@@ -860,9 +848,12 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# run config (CO-OP / NG+ HARD); grp 1 is the two secondary screens (OPTIONS / INFO)
 		# demoted off TITLE. The grp 0->grp 1 divider (brightened in _draw) reads as the
 		# "this run" vs "everything else" split.
-		return [
+		# c-titlechrome: CHALLENGE SEED moved down from TITLE — a pre-run choice, same
+		# block as CO-OP / NG+ HARD, not a front-page row.
+		var setup_items: Array[Dictionary] = [
 			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players, "grp": 0},
 			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 0},
+			{"id": "paste_seed", "label": SEED_ROW_LABEL, "destructive": false, "grp": 0},
 			# authored-campaign-and-modes: MODES joins OPTIONS/INFO as a third
 			# secondary screen — BOSS RUSH / ARCADE / CHAPTER SELECT are real
 			# menu entries here, not just the F3/F4 debug toggles.
@@ -874,6 +865,18 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 			{"id": "info", "label": "INFO", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 2},
 		]
+		# c2-12: while the CHALLENGE SEED row is FOCUSED, rebuild its label here — in the
+		# standard menu-item refresh flow every draw reads — to echo the raw clipboard text
+		# the poll keeps fresh (_seed_clip_raw). This means the visible label tracks a
+		# clipboard change LIVE (no refocus needed) and the player sees exactly what a press
+		# will use; the right-margin hint (seed_hint_lines) says whether it parses.
+		for i in setup_items.size():
+			if setup_items[i]["id"] == "paste_seed":
+				if sel == i:
+					setup_items[i]["label"] = seed_row_label(setup_items[i]["label"], true,
+						_seed_clip_raw, _seed_preview >= 0)
+				break
+		return setup_items
 	if mode == Mode.MODES:
 		# authored-campaign-and-modes: the mode picker. BOSS RUSH and ARCADE
 		# start immediately (own leaderboard tab / chapter-1 quick-play);
@@ -2246,9 +2249,8 @@ static func group_header(grp: int) -> String:
 # phone list once SETUP/QUIT sit under them. Kept separate from group_header so the
 # TITLE grp ids (which collide with OPTS's AUDIO/HAPTICS grp ids) can't cross-wire.
 static func title_group_header(grp: int) -> String:
-	match grp:
-		0: return "DEPLOY"
-		1: return "MORE"
+	# c-titlechrome: no gutter captions on TITLE — the backing panel + divider
+	# still mark the DEPLOY/MORE split, the text label read as a settings app.
 	return ""
 
 
@@ -2830,7 +2832,6 @@ func _activate() -> void:
 			"endless": main.start_game(true)
 			"daily": main.start_daily()
 			"watch": _watch_last_run()
-			"paste_seed": _activate_seed()   # gated above; here only defensively
 			"setup": open(Mode.SETUP)   # c2-04: SETUP hub (run config + OPTIONS + INFO)
 			"quit": get_tree().quit()
 	else:
@@ -3017,7 +3018,7 @@ static func seed_row_label(base: String, selected: bool, clip_raw: String, valid
 func _is_seed_row() -> bool:
 	# c1-14: safe "is the CHALLENGE SEED row focused?" — bounds-checks sel BEFORE indexing
 	# _menu_items() so a transient/invalid selection can never throw out of range.
-	if mode != Mode.TITLE:
+	if mode != Mode.SETUP:
 		return false
 	var items := _menu_items()
 	return sel >= 0 and sel < items.size() and items[sel]["id"] == "paste_seed"
@@ -3709,8 +3710,15 @@ func _draw() -> void:
 			# the widest wording that fits the plate (measured) so the cue never ellipsizes to
 			# nonsense: "<NAME>  PRESS TWICE" pre-armed, "<VERB> PRESS AGAIN" armed, degrading
 			# only as far as needed. See destructive_label.
-			label = destructive_label(items[k], armed_verb(mitems[k]), armed, Art.font(),
-				label_r - (r.position.x + 30.0))
+			# c-titlechrome: TITLE's resting QUIT plate reads a bare "QUIT" — the
+			# "PRESS TWICE" instruction-manual tail is dropped for that one row/mode.
+			# The two-press safety itself is untouched: it still arms and flips to
+			# "QUIT  PRESS AGAIN" with the red flood + countdown gauge on the armed frame.
+			if mode == Mode.TITLE and not armed:
+				label = mitems[k]["label"]
+			else:
+				label = destructive_label(items[k], armed_verb(mitems[k]), armed, Art.font(),
+					label_r - (r.position.x + 30.0))
 		if armed:
 			# The armed affordances that ride ON TOP of the red flood (drawn above):
 			# a countdown bar draining along the bottom edge showing the disarm
@@ -3963,41 +3971,18 @@ func _draw() -> void:
 		# firefight lose to bright terrain and particles at the old 0.55; seal it darker
 		# and more opaque than the title plates, still motion-aware via the shared scrim.
 		draw_rect(Rect2(0, LEGEND_Y, CANVAS_WIDTH, LEGEND_H), _legend_plate_col(mode, main._motion))
-		var row1: Array
-		if Art.use_pad:
-			row1 = [{"tex": "glyph_stick_l", "label": "MOVE"},
-				{"tex": "glyph_stick_r", "label": "AIM"},
-				{"tex": "glyph_rt", "label": "FIRE"},
-				{"tex": "glyph_lb", "label": "GRENADE"},
-				{"act": "roll", "label": "ROLL"}]
-		else:
-			row1 = [{"stamp": "WASD", "label": "MOVE"},
-				{"label": "MOUSE AIM"},
-				{"tex": "glyph_mouse_l", "label": "FIRE"},
-				{"tex": "glyph_mouse_r", "label": "GRENADE"},
-				{"act": "roll", "label": "ROLL"}]
-		var row2: Array = [{"act": "interact", "label": "INTERACT"},
-			{"act": "revive", "label": "REVIVE"},
-			{"act": "wheel", "label": "SUPPLY WHEEL"}]
-		# c3-10: teach the two meta controls the gameplay legend never named — PAUSE and the
-		# HOW TO PLAY shortcut. Keyboard-only players had no on-screen cue the run is pausable
-		# at all, nor a direct key to the help. Device-aware: on a pad, START opens PAUSE (help
-		# is reached through the menus); on keyboard, the PAUSE keycap is DERIVED from the live
-		# menu_cancel binding (never a hardcoded "ESC" literal — a rebound cancel key teaches
-		# THEIR key via _back_keycap), and F1 jumps straight to HOW TO PLAY. Both stamped keycaps
-		# ride the wide blank (via _glyph_w's stamp default), same grammar as the SELECT/BACK footer.
-		if Art.use_pad:
-			row2.append({"tex": Art.glyph_key("start"), "label": "PAUSE"})
-		else:
-			row2.append(_keycap_seg(_back_keycap(), "PAUSE"))
-			row2.append(_keycap_seg(_help_keycap(), "HOW TO"))
+		# c-titlechrome: the full 8-verb controller cheat-sheet read as an in-engine debug
+		# launcher, not a game. The reference lives one press away at HOW TO PLAY -> CONTROLS
+		# (and the in-game HUD verb chip), so the title just needs SELECT + the HOW TO shortcut.
+		var segs: Array = []
 		# c2-13: only advertise SELECT when the focused row can actually be activated.
 		# A locked row (e.g. DAILY RUN completed) draws NO confirm cue, so the legend
 		# never contradicts the dim/COMPLETED state by promising a press that only buzzes.
 		if not (sel < mitems.size() and mitems[sel].get("disabled", false)):
-			row2.append({"tex": Art.glyph_key("confirm"), "label": "SELECT"})
-		_legend_row(row1, 330.0, 1.0)
-		_legend_row(row2, 346.0, 0.9)
+			segs.append({"tex": Art.glyph_key("confirm"), "label": "SELECT"})
+		if not Art.use_pad:
+			segs.append(_keycap_seg(_help_keycap(), "HOW TO"))
+		_legend_row(segs, 330.0, 0.9)
 	else:
 		# c1-04 / c4-05: every non-TITLE menu that reaches here (PAUSE / OPTS / SETUP / DISP /
 		# INFO / REBIND) draws the same device-aware bindings strip through the ONE canonical
