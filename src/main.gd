@@ -910,19 +910,35 @@ func _paint_bg(canvas: Node2D) -> void:
 					dirt_cards.append([pos + Vector2(16.0 + float(dh % 33), 14.0 + float((dh / 5) % 33)),
 						float(dh % 628) / 100.0,
 						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0), dirt_col])
+	# opt-loop: THREE passes over the same cards (all outer halos, then all inner halos, then
+	# all fills) instead of one interleaved pass — same idiom the sand/grass tile loop above
+	# already uses (see its comment on the batching trap this exact interleave falls into).
+	# Godot's 2D batcher only merges CONSECUTIVE same-texture draws; the old order broke the
+	# fx_softspot run once per card (softspot, softspot, dirt, softspot, softspot, dirt, ...)
+	# — every dirt draw was a texture-switch. Grouped, it's one switch total (softspot->dirt)
+	# instead of ~2 per card. NOTE: this reorders alpha blending where cards spatially overlap
+	# (a neighbor's halo can now land under this card's fill instead of over it) — soft
+	# low-alpha feathers, so the visible delta should be subtle, but wants a screenshot pass
+	# once a real display/Xvfb is available (this headless env can't render one to check).
+	# a3-05: TWO feather rings grade the bare-earth patch into the turf so the hard rotated
+	# `dirt` rect stops reading as a pasted rectangular/diamond decal — the single 0.28-
+	# effective halo left the card's own edge showing (4v: figure-ground). Wide faint outer
+	# ring, then a stronger inner halo, both under the hard fill.
 	for card in dirt_cards:
 		var dirt_col: Color = card[3]   # this card's per-row stop (c2 3v)
 		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
-		# a3-05: TWO feather rings grade the bare-earth patch into the turf so the hard
-		# rotated `dirt` rect stops reading as a pasted rectangular/diamond decal — the
-		# single 0.28-effective halo left the card's own edge showing (4v: figure-ground).
-		# Wide faint outer ring, then a stronger inner halo, both under the hard fill.
 		var halo_out: Vector2 = card[2] * DIRT_FEATHER["out_scale"]
 		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo_out / 2.0, halo_out), false,
 			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * DIRT_FEATHER["out_a"]))
+	for card in dirt_cards:
+		var dirt_col: Color = card[3]
+		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
 		var halo: Vector2 = card[2] * DIRT_FEATHER["in_scale"]
 		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo / 2.0, halo), false,
 			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * DIRT_FEATHER["in_a"]))
+	for card in dirt_cards:
+		var dirt_col: Color = card[3]
+		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
 		canvas.draw_texture_rect(Art.tex("dirt"), Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
