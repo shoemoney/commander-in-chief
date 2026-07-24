@@ -31,7 +31,7 @@ var _vo_dry := AudioStreamPlayer.new()  # the pilot's dry close-mic plea
 var _vo_streams: Dictionary = {}
 var _vo_priority := -1                  # priority of the line currently on air
 var _cmd := AudioStreamPlayer.new()     # the player Commander's own voice (dry, close-mic — NOT radio)
-var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Trump bark pool per trigger
+var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Commander bark pool per trigger
 var _cmd_next_frame := 0                # global bark cooldown (physics frames) so combat isn't a monologue
 var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
 var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
@@ -277,7 +277,7 @@ func stop_vo() -> void:
 
 
 func _load_cmd_barks() -> void:
-	## Load the Commander's Trump-voiced bark pools from assets/vo/cmd/. Keyed by
+	## Load the Commander's voiced bark pools from assets/vo/cmd/. Keyed by
 	## event; each event has N numbered clips (cmd_<event>_<n>.mp3) fired at random.
 	var groups := {"levelstart": 6, "rally": 3, "streak": 4, "shoot": 4,
 			"grenade": 3, "boom": 3, "pickup": 3, "down": 3, "hit": 6,
