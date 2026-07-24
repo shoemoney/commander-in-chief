@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"   # nightly 3-hour soak only (see the `soak` job's `if:`)
+
+# Single source of truth for the engine version lives in tools/versions.lock
+# -- the `resolve-godot-version` step below reads it so this file never
+# drifts from what the sim's determinism goldens were recorded against.
+
+jobs:
+  resolve-godot-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          v=$(grep '^godot_version=' tools/versions.lock | cut -d= -f2 | sed 's/-stable$//')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  # Cross-platform + cross-arch test gate: the deterministic core must produce
+  # bit-identical golden checksums on every OS/arch combo the game ships on
+  # (test_determinism.gd asserts this). SCRIPT ERROR in the log is a hard fail
+  # even if every assertion happens to pass (see CLAUDE.md test-running note).
+  test:
+    needs: resolve-godot-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+          - os: macos-latest
+            name: macos-arm64
+          - os: windows-latest
+            name: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+
+      - name: Import assets
+        shell: bash
+        run: godot --headless --path . --import
+
+      - name: Boot smoke test (scene tree + view layer)
+        shell: bash
+        run: godot --headless --path . -s res://tools/smoke.gd
+
+      - name: Full deterministic test suite
+        shell: bash
+        run: godot --headless --path . -s res://tests/run_tests.gd | tee test_output.log
+
+      - name: Fail on SCRIPT ERROR
+        shell: bash
+        run: |
+          if grep -q "SCRIPT ERROR" test_output.log; then
+            echo "::error::SCRIPT ERROR found in test output -- a runtime error can silently abort a test method's remaining assertions without failing the run"
+            exit 1
+          fi
+
+      - name: Fail unless PASS line present
+        shell: bash
+        run: grep -qE "^PASS —" test_output.log
+
+  # Export smoke: prove the real shippable Linux binary boots and survives a
+  # few seconds under the actual export pipeline (export_presets.cfg), not
+  # just the editor/headless test harness above.
+  export-smoke:
+    needs: resolve-godot-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Godot (with export templates)
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Import assets
+        run: godot --headless --path . --import
+
+      - name: Export Linux x86_64 build
+        run: |
+          mkdir -p build
+          godot --headless --path . --export-debug "Linux x86_64" build/CommanderInChief-linux.x86_64
+
+      - name: Boot the exported binary and auto-quit after 200 frames
+        run: |
+          set -euo pipefail
+          chmod +x build/CommanderInChief-linux.x86_64
+          ./build/CommanderInChief-linux.x86_64 --headless --quit-after 200 2>&1 | tee export_smoke.log
+          ! grep -q "SCRIPT ERROR" export_smoke.log
+
+      - name: Upload exported Linux build (binary + .pck)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CommanderInChief-linux-x86_64
+          path: build/CommanderInChief-linux*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Windows export smoke: the item's whole point is "ships reliably on
+  # Windows, Linux, Proton, and Steam Deck" (Proton runs the Windows build,
+  # and Steam Deck's default runtime is Proton) -- so the actual Windows
+  # export_presets.cfg preset has to be proven bootable on a real Windows
+  # runner, not just assumed to work because the Linux export does.
+  export-smoke-windows:
+    needs: resolve-godot-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Godot (with export templates)
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Import assets
+        shell: bash
+        run: godot --headless --path . --import
+
+      - name: Export Windows x86_64 build
+        shell: bash
+        run: |
+          mkdir -p build
+          godot --headless --path . --export-debug "Windows x86_64" build/CommanderInChief-windows.exe
+
+      - name: Boot the exported binary and auto-quit after 200 frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build/CommanderInChief-windows.exe --headless --quit-after 200 2>&1 | tee export_smoke_windows.log
+          ! grep -q "SCRIPT ERROR" export_smoke_windows.log
+
+      - name: Upload exported Windows build (binary + .pck)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CommanderInChief-windows-x86_64
+          path: build/CommanderInChief-windows*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Real 3-hour memory soak (Steam Deck's typical undocked handheld session
+  # length) -- too slow to run on every PR, so it's nightly + manual only.
+  # The fast PR gate above still runs test_soak.gd, just at a 10-minute
+  # sim-time default (see tests/test_soak.gd DEFAULT_TICKS).
+  soak:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: resolve-godot-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+      - name: Import assets
+        run: godot --headless --path . --import
+      - name: 3-hour-equivalent soak (648000 ticks @ 60 Hz)
+        env:
+          SOAK_TICKS: "648000"
+          SUITE: "soak"
+        run: |
+          set -euo pipefail
+          godot --headless --path . -s res://tests/run_tests.gd | tee soak_output.log
+
+      - name: Fail on SCRIPT ERROR
+        run: |
+          if grep -q "SCRIPT ERROR" soak_output.log; then
+            echo "::error::SCRIPT ERROR found in soak output -- see the fast test job's comment on why this can't be caught by exit code alone"
+            exit 1
+          fi
+
+      - name: Fail unless PASS line present
+        run: grep -qE "^PASS —" soak_output.log
