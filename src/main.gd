@@ -73,6 +73,10 @@ var _trauma := 0.0
 var _hitstop_frames := 0
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+# opt-loop: incremental live-"mote" count kept in lockstep with every _fx
+# append/removal touching a mote — was an O(n) scan of the whole (up to
+# 400-entry) array every ~3rd physics frame just to enforce the ambient cap.
+var _mote_count := 0
 var _trench_prev: Array[bool] = []   # c3: per-player last-tick in-trench, for the drop-in cue (view-only)
 var _rear_wedge_t := 0.0              # c4: rear-warn bottom-edge wedge timer (seconds)
 var _rear_wedge_x := 320.0            # c4: screen-x of the pending rear spawn
@@ -407,6 +411,10 @@ func _ready() -> void:
 	_glow_root = Node2D.new()
 	_glow_root.z_index = 20            # explicit pin over all z=0 world draws (belt-and-braces
 	_glow_root.z_as_relative = false   # vs relying on tree order alone; HUD CanvasLayer still wins)
+	# opt-loop: the same LINEAR_MIPMAP-inherited blur already fixed on main/_bg_root/
+	# _splash_root — missed here, and this is the layer every muzzle flash/spark/
+	# shockwave/light/ember draws through, i.e. the busiest additive draws in combat.
+	_glow_root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var glow_mat := CanvasItemMaterial.new()
 	glow_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	_glow_root.material = glow_mat
@@ -1157,6 +1165,7 @@ func _reset() -> void:
 	_hitstop_frames = 0
 	_flash_alpha = 0.0
 	_fx.clear()
+	_mote_count = 0
 	_pending_blasts.clear()
 	_scorch.clear()
 	_corpses.clear()
@@ -1570,7 +1579,17 @@ func _physics_process(_delta: float) -> void:
 			position = Vector2.ZERO
 			scale = Vector2.ONE
 			rotation = 0.0
-		queue_redraw()
+		# opt-loop: the pause branch above squares the camera transform and never
+		# calls sim.step() — the whole ~150-300-draw-call world (terrain, enemies,
+		# their y-sort, fx) was still rebuilding at full 60Hz for a frame that's
+		# provably unchanged except the ambient drone-loiter orbit (main.gd:4927-4930,
+		# reads Engine.get_physics_frames() directly). Throttled to ~10Hz instead of
+		# fully frozen so that breathing motion still reads, just far less redundantly.
+		if _menu.mode != GameMenu.Mode.TITLE:
+			if Engine.get_physics_frames() % 6 == 0:
+				queue_redraw()
+		else:
+			queue_redraw()
 		return
 	_hud_icons.visible = true
 	if _watching:
@@ -4112,7 +4131,15 @@ func _update_feel() -> void:
 			vi += 1
 		if vi >= _fx.size():
 			break
-		_fx.remove_at(vi)
+		# opt-loop: remove_at(vi) on a near-front index shifts the whole ~400-
+		# element array down by one — O(n) per eviction, worst-case O(n^2) when a
+		# boss-death chain dumps many entries in one tick. Swap-pop is O(1); draw
+		# order for the relocated entry shifts negligibly (_fx isn't used for
+		# gameplay logic, only translucent/additive VFX).
+		if _fx[vi]["kind"] == "mote":
+			_mote_count -= 1
+		_fx[vi] = _fx[_fx.size() - 1]
+		_fx.remove_at(_fx.size() - 1)
 	# Hit-stop freezes the particles WITH the sim: explosions hang at their
 	# brightest frame and gibs hang mid-air through the freeze, then resume —
 	# completing the freeze-frame the held impact envelopes above start.
@@ -4139,6 +4166,8 @@ func _update_feel() -> void:
 					tinks += 1
 					_sfx.play_at("tank_board", _to_screen(fx["x"], fx["y"]),
 						-24.0, randf_range(2.2, 2.7))
+				if fx["kind"] == "mote":
+					_mote_count -= 1
 				_fx.remove_at(i)
 		# Scheduled boss-death secondaries: each pops a full _blast_debris when its
 		# timer elapses, so detonations ripple across the wreck instead of at once.
@@ -4566,8 +4595,16 @@ const _SKYLINE_H: Array[float] = [26.0, 34.0, 22.0, 30.0, 40.0, 24.0]
 # Axis-aligned text outline (floattext) — hoisted like _OUTLINE_OFFSETS below.
 const _TEXT_OUTLINE_OFFSETS: Array[Vector2] = [
 	Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]
+# opt-loop: was 4 diagonal offsets (5 draw_texture calls/sprite total, ~72 of 90
+# registered textures route through the outline path) — 2-lens consensus flagged
+# this as the largest fillrate multiplier in the file. A real single-pass outline
+# shader needs a per-CanvasItem material main.gd's shared-_draw() architecture
+# can't give it without a bigger rendering-architecture change (deferred, high
+# blast radius); cutting to 2 opposite corners halves the multiplier (5x -> 3x)
+# for zero architecture risk — the rim reads as a 1-2px separator at a distance,
+# not a focal detail, per the prior pass's own offset-count tuning notes.
 const _OUTLINE_OFFSETS: Array[Vector2] = [
-	Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1),
+	Vector2(1, 1), Vector2(-1, -1),
 ]
 
 # Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
@@ -4823,11 +4860,17 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 
 	# Weight-graded (7v): heavy armor passes ~0.42 so a tank visually outweighs
 	# a rifleman (panel's 0.6 was sourceless — starting at 0.42, screenshot-tuned);
 	# wading shadows pass a dimmer, cooler read (light scatters in water).
+	# opt-loop: every shadow is axis-aligned (rotation always 0), so the
+	# draw_set_transform/draw_texture/reset dance was pure ellipse-scaling that
+	# draw_texture_rect reproduces exactly with a plain Rect2 — no transform
+	# command, so consecutive shadows (all the same fx_shadow texture, called
+	# from ~27 sites) can batch instead of each forcing its own draw call.
 	var sh := Art.tex("fx_shadow")
 	var ss := (r * 1.15) / (sh.get_size().x * 0.5)
-	draw_set_transform(pos + Vector2(0, r * 0.32), 0.0, Vector2(ss, ss * 0.45))
-	draw_texture(sh, -sh.get_size() / 2.0, Color(tint.r, tint.g, tint.b, a))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var draw_size := Vector2(sh.get_size().x * ss, sh.get_size().y * ss * 0.45)
+	var center := pos + Vector2(0, r * 0.32)
+	draw_texture_rect(sh, Rect2(center - draw_size / 2.0, draw_size), false,
+		Color(tint.r, tint.g, tint.b, a))
 
 
 func _draw() -> void:
@@ -6397,10 +6440,16 @@ func _draw_enemies() -> void:
 	if _esort_order.size() != ecount:
 		_esort_order.resize(ecount)
 		_esort_ys.resize(ecount)
-	for si in ecount:
-		_esort_order[si] = si
-		_esort_ys[si] = sim.enemies[si]["y"]
-	_esort_order.sort_custom(_esort_cmp)
+	# opt-loop: during hitstop sim.step() is skipped entirely (main.gd's hitstop
+	# branch), so enemy Y-positions — and therefore the sort order computed the
+	# tick hitstop began — are provably frozen for every remaining hitstop tick.
+	# Re-sorting the same unchanged positions every tick was pure waste, worst
+	# during exactly the moments (big hits) with the most enemies on screen.
+	if _hitstop_frames <= 0:
+		for si in ecount:
+			_esort_order[si] = si
+			_esort_ys[si] = sim.enemies[si]["y"]
+		_esort_order.sort_custom(_esort_cmp)
 	# gfx-loop: slot pruning + hp-edge-detect/flash-trigger/decay moved to
 	# _check_enemy_hits() (runs once per sim tick) — _draw_enemies() is now a
 	# pure reader of _enemy_flash, safe to call more than once per tick.
@@ -7763,12 +7812,8 @@ func _spawn_ambient_motes() -> void:
 	var cap := 6 if reduced else 16
 	if Engine.get_physics_frames() % 3 != 0 or randf() > (0.10 if reduced else 0.35):
 		return
-	var live := 0
-	for fx in _fx:
-		if fx["kind"] == "mote":
-			live += 1
-			if live >= cap:
-				return
+	if _mote_count >= cap:
+		return
 	var march := _sector_march()
 	var col := Color(0.66, 0.78, 0.6)   # cool green-grey pollen
 	if march < 0.5:
@@ -7782,6 +7827,7 @@ func _spawn_ambient_motes() -> void:
 	_fx.append({"x": wx, "y": wy, "t": 0.0, "kind": "mote",
 		"rate": randf_range(0.0025, 0.004), "dx": randf_range(-4.0, 4.0),
 		"dy": randf_range(-9.0, -3.0), "col": col, "sz": randf_range(0.7, 1.3)})
+	_mote_count += 1
 
 
 func _kick_dust(i: int, wx: int, wy: int, prev: Array, big: bool) -> void:
@@ -7880,6 +7926,13 @@ func _draw_fx() -> void:
 		if _GLOW_KINDS.has(fx["kind"]):
 			continue   # drawn by _draw_glow on the additive layer
 		var pos := _to_screen(fx["x"], fx["y"])
+		# opt-loop: every other entity array (enemies/bullets/bunkers/pickups)
+		# already band-culls off-screen draws — _fx (up to 400 live entries,
+		# walked twice per frame across this loop + _draw_glow) was the one
+		# array left out, so long-lived kinds (mote/smoke) drifting off-screen
+		# behind the ratchet camera still paid full draw cost until they expired.
+		if pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0:
+			continue
 		var t: float = fx["t"]
 		if fx["kind"] == "explosion":
 			var frame := mini(3, int(t * 4.0))
@@ -8069,6 +8122,9 @@ func _draw_glow() -> void:
 		if not _GLOW_KINDS.has(fx["kind"]):
 			continue
 		var pos := _to_screen(fx["x"], fx["y"])
+		# opt-loop: same off-screen cull as the _draw_fx pass above.
+		if pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0:
+			continue
 		var t: float = fx["t"]
 		if fx["kind"] == "muzzle":
 			# Alphas trimmed ~0.8x vs the old mix-blend draws: a single additive glow
