@@ -32,3 +32,4 @@ art_candidates/**
 # regen_entities.py review scratch (promote via --install, never commit)
 *.regen.png
 *.regen.png.import
+.aaa/
