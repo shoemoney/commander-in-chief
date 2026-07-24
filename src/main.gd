@@ -105,6 +105,7 @@ var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_r
 var _cursor_menu: ImageTexture        # boot-baked scaled menu pointer (from ui_cursor)
 var _cursor_s := 1                     # window integer scale the cursors were baked at
 var _sfx := Sfx.new()
+var _steam := SteamBridge.new()   # Steamworks facade -- no-ops offline (see src/steam/steam_bridge.gd)
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
 var _kick := Vector2.ZERO         # directional screen nudge from firing
@@ -218,6 +219,7 @@ var _run_kills := 0              # this-run tally for the debrief card
 var _run_kind_kills := {}        # enemy kind → this-run kills, feeds the debrief top-prey row
 var _run_rescues := 0            # pilot ransoms this run — the signature mechanic earns a tally line
 var _run_best_streak := 0
+var _run_had_down := false       # any player went down this run — gates the NO_DEATH_WIN achievement
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
@@ -920,6 +922,7 @@ func _paint_bg(canvas: Node2D) -> void:
 
 
 func _process(_delta: float) -> void:
+	_steam.process()   # pumps Steamworks callbacks -- a safe no-op offline
 	if _splash_t > 0.0:
 		_splash_t -= _delta
 		# Fire the Trump narration once as the crawl beat begins (dry cinematic VO).
@@ -1206,6 +1209,7 @@ func _reset() -> void:
 	var _mode_str := "endless" if _endless else ("boss_rush" if _boss_rush \
 		else ("arcade" if _arcade_chapter >= 1 else "campaign"))
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, _mode_str)
+	_steam.set_presence("Running: %s" % _mode_str.capitalize())
 	sim.assist_mode = _assist   # accessibility: 2-hit vest each life, flagged on the leaderboard
 	sim.hard = _hard and not _endless and not _boss_rush and _arcade_chapter < 1   # NG+ HARD applies to campaign only
 	if _assist:
@@ -1290,6 +1294,7 @@ func _reset() -> void:
 	_run_kills = 0
 	_run_kind_kills.clear()
 	_run_rescues = 0
+	_run_had_down = false
 	_downed_by = ""
 	_last_gate_tick = 0
 	_best_gate_split = 0
@@ -2122,6 +2127,7 @@ func _consume_events() -> void:
 				_kick += Vector2(0, -3)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
+				_run_had_down = true
 				_trauma = minf(1.0, _trauma + 0.5)
 				# A one-hit death is the loudest beat in the game — hold the
 				# freeze longer and punch the camera in so the loss lands.
@@ -3851,6 +3857,40 @@ func _record_run() -> void:
 	_best_dirty = false
 	_seen_dirty = false
 	_save_cfg(cf)
+	# Called LAST in _record_run, after hall/life/best are both updated in
+	# memory (hall.assign(...) above) AND committed to disk (_save_cfg(cf)
+	# just above) -- so the HALL_TOP_1 check inside _report_to_steam reads
+	# the exact same final state a reloaded save would see, not a
+	# provisional pre-save snapshot.
+	_report_to_steam(entry)
+
+
+func _report_to_steam(entry: Dictionary) -> void:
+	# Steamworks MVP hook: fires at the END of _record_run (see the call
+	# site's comment just above) -- achievements/leaderboards report against
+	# the fully-banked-and-saved run, not an in-flight one. _steam no-ops
+	# safely when Steam isn't present (dev/CI/non-Steam builds) -- this call
+	# is always safe to make.
+	_steam.upload_score(sim.mode, sim.score)
+	# unlock(id, false) skips the per-call store_stats() round trip -- a run can
+	# clear several milestones in one tick (e.g. a Boss Rush no-death win), and
+	# flush_stats() below reports them to Steam in a single batch.
+	if sim.victory:
+		_steam.unlock("FIRST_VICTORY", false)
+		if not _run_had_down:
+			_steam.unlock("NO_DEATH_WIN", false)
+		if sim.mode == "boss_rush":
+			_steam.unlock("BOSS_RUSH_CLEAR", false)
+	if sim.mode == "endless" and sim.wave >= 10:
+		_steam.unlock("WAVE_10", false)
+	if _daily and sim.victory:
+		_steam.unlock("DAILY_DONE", false)   # a completed win, not merely an attempted daily
+	# hall is ALREADY sorted+capped with this run's entry by the time _record_run
+	# calls us (see the hall.assign(...) above), so hall[0] is this run's actual
+	# rank, not the pre-bank board.
+	if hall.size() > 0 and int(hall[0].get("hid", -1)) == int(entry.get("hid", -2)):
+		_steam.unlock("HALL_TOP_1", false)
+	_steam.flush_stats()
 
 
 static func _hall_capped(sorted_runs: Array, latest: Dictionary, cap: int) -> Array:
@@ -4564,18 +4604,28 @@ func _gather_inputs() -> Array[SimInput]:
 		_fire_swallow = false
 	# c1-18: the fire TRIGGER (analog, always live) stays fixed; the rebindable pad
 	# button reads through pad_pressed. Keyboard reads its rebound physical key.
+	# steamworks-and-steam-input: fire_trigger_value()/button_pressed() read Steam
+	# Input's action-HANDLE data (assets/input/actions.vdf) -- the Deck-Verified-
+	# required path a raw JOY_AXIS_TRIGGER_RIGHT/JOY_BUTTON_* read alone can miss
+	# on a real Deck. Both return an inert value (-1.0 / false) whenever Steam
+	# Input isn't wired up, so every OR below is free offline.
 	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(bind("fire"))
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))) \
 		or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
+		or _steam.fire_trigger_value(0) > 0.5 \
 		or pad_pressed(0, "fire")
 	p1.grenade = Input.is_physical_key_pressed(bind("grenade")) \
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-		or pad_pressed(0, "grenade")
-	p1.roll = Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll")
-	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact")
-	p1.revive = Input.is_physical_key_pressed(bind("revive")) or pad_pressed(0, "revive")
+		or pad_pressed(0, "grenade") \
+		or _steam.button_pressed(0, "grenade")
+	p1.roll = Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll") \
+		or _steam.button_pressed(0, "roll")
+	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact") \
+		or _steam.button_pressed(0, "interact")
+	p1.revive = Input.is_physical_key_pressed(bind("revive")) or pad_pressed(0, "revive") \
+		or _steam.button_pressed(0, "revive")
 	p1.buy = _update_wheel(0,
-		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy"),
+		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy") or _steam.button_pressed(0, "buy"),
 		wheel_dir, Vector2(kx, ky))
 	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
 	# not a dodge) and sector flicks steer the wheel, not the gun.
@@ -4599,13 +4649,17 @@ func _gather_inputs() -> Array[SimInput]:
 		p2.move_y = _quantize_axis(p2_move.y)
 		p2.aim_x = _quantize_axis(p2_aim.x)
 		p2.aim_y = _quantize_axis(p2_aim.y)
+		# steamworks-and-steam-input: P2 also gets Steam Input's action-handle
+		# reads (fire_trigger_value(1)/button_pressed(1, ...)) -- previously only
+		# P1 (device 0) resolved a Steam Input controller handle at all.
 		p2.fire = Input.get_joy_axis(1, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-			or pad_pressed(1, "fire")
-		p2.grenade = pad_pressed(1, "grenade")
-		p2.roll = pad_pressed(1, "roll")
-		p2.interact = pad_pressed(1, "interact")
-		p2.revive = pad_pressed(1, "revive")
-		p2.buy = _update_wheel(1, pad_pressed(1, "buy"),
+			or pad_pressed(1, "fire") \
+			or _steam.fire_trigger_value(1) > 0.5
+		p2.grenade = pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
+		p2.roll = pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
+		p2.interact = pad_pressed(1, "interact") or _steam.button_pressed(1, "interact")
+		p2.revive = pad_pressed(1, "revive") or _steam.button_pressed(1, "revive")
+		p2.buy = _update_wheel(1, pad_pressed(1, "buy") or _steam.button_pressed(1, "buy"),
 			p2_aim, p2_move)
 		if _wheel[1]["open"]:
 			p2.roll = false
@@ -4642,7 +4696,7 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		# pad 0, P2 = pad 1 only — so one player's roll can't cancel the OTHER's
 		# pick. The rebound roll key matches the roll verb (AZERTY-safe physical read).
 		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(bind("roll"))) \
-			or pad_pressed(i, "roll")
+			or pad_pressed(i, "roll") or _steam.button_pressed(i, "roll")
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("click_dry", -12.0, 1.4)   # soft declined tick — the dedicated dry-click voice

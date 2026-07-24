@@ -1,0 +1,78 @@
+"In Game Actions"
+{
+	"actions"
+	{
+		"Gameplay"
+		{
+			"title"			"#Set_Gameplay"
+			"StickPadGyro"
+			{
+				"move"
+				{
+					"title"		"#Action_Move"
+					"input_mode"	"joystick_move"
+				}
+				"aim"
+				{
+					"title"		"#Action_Aim"
+					"input_mode"	"joystick_move"
+				}
+			}
+			"AnalogTrigger"
+			{
+				"fire"
+				{
+					"title"		"#Action_Fire"
+				}
+			}
+			"Button"
+			{
+				"grenade"		{ "title" "#Action_Grenade" }
+				"roll"			{ "title" "#Action_Roll" }
+				"interact"		{ "title" "#Action_Interact" }
+				"revive"		{ "title" "#Action_Revive" }
+				"buy"			{ "title" "#Action_SupplyWheel" }
+			}
+		}
+		"MenuControls"
+		{
+			"title"			"#Set_MenuControls"
+			"StickPadGyro"
+			{
+				"menu_move"
+				{
+					"title"		"#Action_MenuMove"
+					"input_mode"	"dpad"
+				}
+			}
+			"Button"
+			{
+				"menu_confirm"		{ "title" "#Action_MenuConfirm" }
+				"menu_cancel"		{ "title" "#Action_MenuCancel" }
+				"menu_next_tab"		{ "title" "#Action_MenuNextTab" }
+				"menu_help"		{ "title" "#Action_MenuHelp" }
+			}
+		}
+	}
+	"localization"
+	{
+		"english"
+		{
+			"Set_Gameplay"			"Gameplay"
+			"Set_MenuControls"		"Menu"
+			"Action_Move"			"Move"
+			"Action_Aim"			"Aim / Shoot Direction"
+			"Action_Fire"			"Fire"
+			"Action_Grenade"		"Grenade"
+			"Action_Roll"			"Roll / Dodge"
+			"Action_Interact"		"Interact"
+			"Action_Revive"			"Revive"
+			"Action_SupplyWheel"		"Open Supply Wheel"
+			"Action_MenuMove"		"Navigate"
+			"Action_MenuConfirm"		"Confirm"
+			"Action_MenuCancel"		"Cancel / Back"
+			"Action_MenuNextTab"		"Next Tab"
+			"Action_MenuHelp"		"How To Play"
+		}
+	}
+}
