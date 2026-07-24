@@ -16,7 +16,7 @@ Godot lives at `/Applications/Godot.app/Contents/MacOS/Godot` (universal binary,
 # class_name script (Godot's global class cache must re-scan). CI does this.
 godot --headless --path . --import
 
-# Full test suite (~seconds; count grows constantly — 159 methods / 1771 assertions as of the 2026-07-17 corpus drain)
+# Full test suite (~seconds; count grows constantly — 606 methods / 12,029 assertions as of the 2026-07-23 UI-loop pass)
 godot --headless --path . -s res://tests/run_tests.gd
 
 # Single suite: filter by substring of the script filename
@@ -55,4 +55,4 @@ The same discipline applies to `checksum()` itself: if you add a sim field that 
 - **Fixed-point**: multiply/divide via `Fixed.mul`/`Fixed.div`, never `*`/`/` on two fixed values directly. Constants suffixed `_TICKS`/`_RAW` are not fixed-point; everything else in the sim is.
 - **`.gd.uid` files** are Godot 4.x script-UID sidecars — committed, machine-generated, don't hand-edit.
 - **Assets** in `assets/kenney/` are CC0 (Kenney) interim greybox art. `.import` files are generated on `--import`. (Generative-AI assets are allowed — the earlier no-AI policy was dropped.)
-- The README/PLAN reference a CI pipeline (float/RNG lint, cross-arch runners). There is currently **no `.github/workflows` in the repo** — the determinism guarantee is carried by `test_determinism.gd`, which you should run locally.
+- **CI is live**: `.github/workflows/ci.yml` runs a 3-OS matrix (Linux · macOS-arm64 · Windows) that imports, boot-smokes (`tools/smoke.gd`), and runs the full golden-checksum suite, failing on any `SCRIPT ERROR` or a missing `PASS` line. The Godot version is pinned in `tools/versions.lock`. Still run the suite locally before pushing — CI is the backstop, not the first check.
