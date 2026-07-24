@@ -34,7 +34,7 @@ const ARROW_SZ := 10.0        # arrow glyph box edge (px)
 const ARROW_L_OFF := 23.0     # left arrow's far (outer) edge, left of the plate
 const ARROW_R_GAP := 5.0      # right arrow's near edge, right of the plate
 const ARROW_HIT_PAD := 3.0    # c4-15: click-target forgiveness grown around each drawn arrow rect, so the mouse box and the visible cycle glyph derive from ONE geometry (toggle_arrow_rects) and can't drift
-const ARROW_REST_ALPHA := 0.4 # c4-15: resting opacity of an UNSELECTED cycle row's glyph — dim enough to read as a hint, bright enough to flag the row as cyclable at a glance (the selected row overrides brighter + pulses)
+const ARROW_REST_ALPHA := 0.55 # c4-15: resting opacity of an UNSELECTED cycle row's glyph — dim enough to read as a hint, bright enough to flag the row as cyclable at a glance (the selected row overrides brighter + pulses). ui-loop a11y: lifted 0.4→0.55 — a 40%-alpha glyph was the sole "this row cycles" cue and missed the UI-element contrast floor.
 # c1-13: HALL rows per page. The board holds far more runs than fit on one screen,
 # so _draw_hall pages HALL_PAGE_ROWS at a time and up/down turns the page.
 const HALL_PAGE_ROWS := 8
@@ -361,6 +361,7 @@ const OPTS_SUBLINE_Y := 94.0       # OPTIONS a11y-summary subline — the lowest
 # Horizontal half-padding of the small dark plates behind TITLE's byline / tagline /
 # BEST / CAREER lines (a plate spans measured_text_w + 2x this).
 const PLATE_PAD_SM := 4.0
+const TITLE_WORDMARK_PAD_H := 10.0   # ui-loop: the wordmark plate's wider horizontal gutter, named (was a bare 10.0/+20.0 literal at the draw while its four sibling plates use PLATE_PAD_SM) so the intentional 2.5× gutter can't drift when the pad convention changes
 
 # ===== THEME (colors) =====
 # Shared plate colors. PLATE_BG is the dark warm backdrop behind header/footer
@@ -418,7 +419,7 @@ const ROW_LABEL_SIZE := 11                                # c3-13: the main row-
 const ROW_LABEL_BASELINE_DY := 4.0                        # c3-13: main row-label baseline offset below the row center (cy) — shared with the seed sub-label so the two never drift apart
 const SEED_ROW_LABEL := "CHALLENGE SEED"                  # the CHALLENGE SEED row's base label — single-sourced so a rename/relocalize can't desync the sub-label's name-column measurement
 const SEED_SOURCE_COPY := "(FROM CLIPBOARD)"              # the at-rest source sub-label copy — one source, used by both seed_hint_lines() and the in-plate tag draw (no coupling to hint-line param order)
-const SEED_TAG_COL := Color(0.74, 0.8, 0.7, 0.62)        # in-plate source sub-label (helper text)
+const SEED_TAG_COL := Color(0.74, 0.8, 0.7, 0.88)        # in-plate source sub-label (helper text). ui-loop a11y: 0.62→0.88 alpha — 62% over a textured plate missed the body-text contrast floor.
 const SEED_TAG_SIZE := 7                                  # px; the ONE size seed sub-lines are measured AND drawn at
 const SEED_DENY_RED := Color(0.62, 0.13, 0.08)           # red for the invalid-seed status stripe + faint veil
 const SEED_DENY_VEIL_A := 0.09                            # faint full-plate tint (far below the destructive flood's ~0.82, so the two never read alike)
@@ -434,8 +435,8 @@ const SEED_SUB_MARGIN := 2.0   # bottom breath so a stacked line's descenders ne
 # c3-03: DEPLOY backing-panel chrome (the raised cluster behind the start verbs) — hoisted
 # out of _draw so the fill/border hues live with the rest of the THEME block, not as bare
 # inline Color() literals. Alpha is scaled by _open_t at draw so the panel fades in with the column.
-const PANEL_FILL := Color(0.10, 0.14, 0.09, 0.5)        # DEPLOY panel fill
-const PANEL_BORDER := Color(HEADER_ACCENT, 0.3)         # DEPLOY panel accent keyline
+const PANEL_FILL := Color(0.10, 0.14, 0.09, 0.72)       # DEPLOY panel fill. ui-loop taste: 0.5→0.72 — this panel exists to make the primary start verbs read as the screen's focus, but 50% alpha washed out over the live attract firefight (same lesson TITLE_PLATE_ALPHA_FLOOR 0.72 already learned for text plates).
+const PANEL_BORDER := Color(HEADER_ACCENT, 0.5)         # DEPLOY panel accent keyline. ui-loop: 0.3→0.5 so the CTA frame holds its edge over bright tracers.
 
 
 func _ready() -> void:
@@ -3234,11 +3235,11 @@ func _draw() -> void:
 		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
 		var ttw := Art.font().get_string_size("COMMANDER IN CHIEF", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
-		draw_rect(Rect2(CENTER_X - ttw / 2.0 - 10.0, TITLE_WORDMARK_TOP, ttw + 20.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
+		draw_rect(Rect2(CENTER_X - ttw / 2.0 - TITLE_WORDMARK_PAD_H, TITLE_WORDMARK_TOP, ttw + TITLE_WORDMARK_PAD_H * 2.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
 		_center_text("COMMANDER IN CHIEF", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
 		# Studio byline, plated like the tagline below it (small text loses to the live
 		# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
-		var byl := "by BIG IT GAME STUDIOS - a SHOEMONEY company"
+		var byl := "by BIG IT GAME STUDIOS · a SHOEMONEY company"   # ui-loop taste: middot separator matches the house style (RECORDS · HOW TO PLAY, CAREER — N RUNS · M KILLS), not a lone hyphen
 		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BYLINE_FONT).x
 		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), tplate)
 		_center_text(byl, title_baseline(TITLE_BYLINE_TOP, TITLE_BYLINE_H, TITLE_BYLINE_FONT), TITLE_BYLINE_FONT, BYLINE_COL)
