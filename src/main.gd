@@ -1403,11 +1403,25 @@ func _notification(what: int) -> void:
 			if _menu == null or not _menu._opts_dirty:
 				_save_settings()
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
-		# no_autopause: the screenshot harness runs unfocused by design — without
-		# this every staged gameplay shot captures the pause overlay instead.
-		if _menu.mode == GameMenu.Mode.HIDDEN and not sim.wiped and not sim.victory and not no_autopause:
+		var splash_up := _splash_layer != null and _splash_layer.visible
+		if should_autopause_on_focus_out(_menu.mode, sim.wiped, sim.victory, no_autopause, splash_up):
 			_menu.open(GameMenu.Mode.PAUSE)
 			queue_redraw()
+
+
+# Auto-pause-on-focus-out decision, pure + static so it's headless-assertable (same idiom as
+# needs_refit). Fires only for a LIVE run: the sim only steps while the menu is HIDDEN, so
+# HIDDEN + no wipe/victory is "in play" — alt-tabbing away would otherwise blind-tick the run to
+# a death that reads as a bug. Two carve-outs:
+#  * no_autopause: the screenshot harness runs unfocused by design (staged shots, not the overlay).
+#  * splash_up: the menu is ALSO HIDDEN under the opaque boot splash (_setup_splash suspends the
+#    title). A focus-out during the splash — exactly what a Terminal `open …; exit` launch fires as
+#    focus leaves the closing shell — must NOT open PAUSE under the splash: _end_splash would then
+#    refuse to reveal the title (its `mode == HIDDEN` gate fails), stranding a RESUME with no run.
+static func should_autopause_on_focus_out(menu_mode: int, wiped: bool, victory: bool,
+		no_autopause: bool, splash_up: bool) -> bool:
+	return menu_mode == GameMenu.Mode.HIDDEN and not wiped and not victory \
+		and not no_autopause and not splash_up
 
 
 func _update_cursor() -> void:
@@ -2873,17 +2887,22 @@ func _load_bests() -> void:
 		# c1-18: overlay saved binds action-by-action (never wholesale-replace the map)
 		# so a verb added in a later build keeps its default when an older save lacks it,
 		# and a legacy save with NO [binds]/[padbinds]/[menubinds] stays fully at defaults.
+		# has_section_key guard: ConfigFile.get_value with a NIL default still logs
+		# "Couldn't find the given section … and no default was given" for every miss —
+		# so a save predating bind-persistence (has [best]/[replay] but no [binds]) spammed
+		# ~34 red ERROR lines to the console on every launch. Absent key -> null (overlay_binds
+		# then keeps the ship default), quietly.
 		var saved_kb := {}
 		var saved_pad := {}
 		var saved_pad2 := {}
 		var saved_menu := {}
 		for a in BIND_DEFAULTS:
-			saved_kb[a] = cf.get_value("binds", a, null)
+			saved_kb[a] = cf.get_value("binds", a, null) if cf.has_section_key("binds", a) else null
 		for a in PAD_DEFAULTS:
-			saved_pad[a] = cf.get_value("padbinds", a, null)
-			saved_pad2[a] = cf.get_value("padbinds2", a, null)   # P2's independent layout
+			saved_pad[a] = cf.get_value("padbinds", a, null) if cf.has_section_key("padbinds", a) else null
+			saved_pad2[a] = cf.get_value("padbinds2", a, null) if cf.has_section_key("padbinds2", a) else null   # P2's independent layout
 		for a in MENU_BIND_DEFAULTS:
-			saved_menu[a] = cf.get_value("menubinds", a, null)
+			saved_menu[a] = cf.get_value("menubinds", a, null) if cf.has_section_key("menubinds", a) else null
 		# Keyboard/menu keycodes are nonnegative (lo=0); pad buttons run -1(UNBOUND)..
 		# JOY_BUTTON_MAX-1 (JOY_BUTTON_MAX itself is the enum COUNT sentinel, not a real button).
 		_binds = overlay_binds(BIND_DEFAULTS, saved_kb, 0)

@@ -75,3 +75,35 @@ func test_kind1_cover_reads_as_scrub_not_hedge() -> void:
 		Runner.T.ok(rendered.r >= rendered.g,
 			"dry_shrub RENDERED pixel (texture*tint) at march=%.1f must read tan/khaki (r>=g), not green" % march)
 	Art.foliage_march = saved_march
+
+
+# --- boot-splash focus-out must NOT strand a PAUSE menu ---
+# The menu is HIDDEN under the opaque boot splash (main._setup_splash suspends the title).
+# The focus-out auto-pause keys off HIDDEN too, so a focus-out DURING the splash — exactly
+# what a Terminal `open …; exit` launch fires as focus leaves the closing shell — used to
+# open PAUSE under the splash; _end_splash then refused to reveal the title (its `mode ==
+# HIDDEN` gate failed), stranding a RESUME with no run behind it. should_autopause_on_focus_out
+# is the pure decision (headless-assertable, like needs_refit) — pin every branch of it.
+func test_focus_out_autopause_decision() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var GM: Script = load("res://src/view/menu.gd")
+	var HIDDEN: int = GM.Mode.HIDDEN
+	var TITLE: int = GM.Mode.TITLE
+
+	# THE BUG: HIDDEN under the splash (splash_up=true) must NOT auto-pause.
+	Runner.T.ok(not ms.should_autopause_on_focus_out(HIDDEN, false, false, false, true),
+		"focus-out during the boot splash must NOT auto-pause (would strand a dead RESUME)")
+
+	# A live run (HIDDEN, splash gone, no wipe/victory) MUST auto-pause — the anti-blind-death feature.
+	Runner.T.ok(ms.should_autopause_on_focus_out(HIDDEN, false, false, false, false),
+		"focus-out during a live run STILL auto-pauses (anti-blind-death feature preserved)")
+
+	# Every other carve-out stays a no-op: on the title, mid-wipe, at victory, and under no_autopause.
+	Runner.T.ok(not ms.should_autopause_on_focus_out(TITLE, false, false, false, false),
+		"focus-out on the TITLE/attract screen must not auto-pause (menu already up)")
+	Runner.T.ok(not ms.should_autopause_on_focus_out(HIDDEN, true, false, false, false),
+		"a wiped run must not auto-pause on focus-out")
+	Runner.T.ok(not ms.should_autopause_on_focus_out(HIDDEN, false, true, false, false),
+		"a victorious run must not auto-pause on focus-out")
+	Runner.T.ok(not ms.should_autopause_on_focus_out(HIDDEN, false, false, true, false),
+		"no_autopause (screenshot harness) must not auto-pause on focus-out")
