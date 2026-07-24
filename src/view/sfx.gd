@@ -70,8 +70,16 @@ var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Co
 var _cmd_next_frame := 0                # global bark cooldown (physics frames) so combat isn't a monologue
 var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
 var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
-var _death_yells_loaded := false        # opt-loop: lazy-load guard (see play_death_yell) — distinct
-var _spawn_shouts_loaded := false       # from bank.is_empty() so a directory scan never retries
+# opt-loop pass 2: the lazy-load guard cut boot-time synchronous loads, but the first
+# play_death_yell/play_spawn_shout of a run now paid a synchronous DirAccess scan + load()
+# loop mid-combat — exactly the worst frame to stall (right as the first enemy engages).
+# Fixed with ResourceLoader.load_threaded_request instead: kicked off from
+# _finish_boot_audio (background thread, splash still paints), polled in _process,
+# streams land in the bank as each one finishes. A death/spawn before its bank finishes
+# just silently skips that one yell (_play_bank_at already no-ops on an empty bank) —
+# a far smaller miss than the stall it replaces.
+var _death_yells_pending: Array[String] = []
+var _spawn_shouts_pending: Array[String] = []
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 # audio-identity (judge follow-up) MusicDirector: a tonal riff layer over the drums — the
 # combat/lull war-drum bed above is rhythm-only percussion; these two add an actual pitched
@@ -94,6 +102,10 @@ var _cap_is_vo := false  # true if the CURRENT caption came from play_vo (not a 
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
 var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
 var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
+
+
+func _process(_delta: float) -> void:
+	_poll_mp3_banks()
 
 
 func _ready() -> void:
@@ -186,6 +198,12 @@ func _ready() -> void:
 
 
 func _finish_boot_audio() -> void:
+	# opt-loop pass 4: kick the death-yell/spawn-shout MP3 banks off threaded, here rather
+	# than lazily on first play — ResourceLoader.load_threaded_request runs on Godot's own
+	# background thread (doesn't block this or any rendered frame), and _process's
+	# _poll_mp3_banks sweeps finished loads in as they land, well before combat needs them.
+	_load_death_yells()
+	_load_spawn_shouts()
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -441,25 +459,51 @@ func vo_active() -> bool:
 	return _vo.playing or _vo_dry.playing
 
 
-func _load_mp3_bank(dir_path: String, into: Array) -> void:
-	into.clear()
+func _load_mp3_bank_async(dir_path: String, pending: Array[String]) -> void:
+	## Enumerates dir_path (cheap — a directory listing, not the I/O cost) and kicks off a
+	## threaded load request per .mp3; _poll_mp3_banks picks up finished ones in _process.
 	for fname in ResourceLoader.list_directory(dir_path):
 		if not fname.ends_with(".mp3"):
 			continue
-		var res = load("%s/%s" % [dir_path, fname])
-		if res != null:
-			into.append(res)
+		var path := "%s/%s" % [dir_path, fname]
+		if ResourceLoader.load_threaded_request(path) == OK:
+			pending.append(path)
+
+
+func _poll_mp3_banks() -> void:
+	## Called from _process every frame; cheap when both pending lists are already empty
+	## (post-load steady state, which is almost always). Sweeps finished loads into their
+	## bank array and drops them from pending — no polling once the bank is fully in.
+	if not _death_yells_pending.is_empty():
+		_poll_mp3_bank(_death_yells_pending, _death_yells)
+	if not _spawn_shouts_pending.is_empty():
+		_poll_mp3_bank(_spawn_shouts_pending, _spawn_shouts)
+
+
+func _poll_mp3_bank(pending: Array[String], into: Array) -> void:
+	var i: int = pending.size() - 1
+	while i >= 0:
+		var path: String = pending[i]
+		var status: int = ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_LOADED:
+			var res := ResourceLoader.load_threaded_get(path)
+			if res != null:
+				into.append(res)
+			pending.remove_at(i)
+		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+			pending.remove_at(i)   # skip a bad file rather than poll it forever
+		i -= 1
 
 
 func _load_death_yells() -> void:
 	## Infantry death agony bank — male Arabic "Ya Zahra"/"Ya Hossein" takes
-	## (speech synthesis via model gateway). Loaded as MP3 streams; play_death_yell picks one.
-	_load_mp3_bank("res://assets/audio/enemy_death", _death_yells)
+	## (speech synthesis via model gateway). Threaded; play_death_yell picks from whatever's landed so far.
+	_load_mp3_bank_async("res://assets/audio/enemy_death", _death_yells_pending)
 
 
 func _load_spawn_shouts() -> void:
-	## Infantry first-sight taunts — "Marg bar Amrika/Esrail" + "Allahu Akbar".
-	_load_mp3_bank("res://assets/audio/enemy_spawn", _spawn_shouts)
+	## Infantry first-sight taunts — "Marg bar Amrika/Esrail" + "Allahu Akbar". Threaded.
+	_load_mp3_bank_async("res://assets/audio/enemy_spawn", _spawn_shouts_pending)
 
 
 func _play_bank_at(bank: Array, screen_pos: Vector2, vol_db: float) -> void:
@@ -487,18 +531,15 @@ func _play_bank_at(bank: Array, screen_pos: Vector2, vol_db: float) -> void:
 
 
 func play_death_yell(screen_pos: Vector2, vol_db := -5.0) -> void:
-	## Positional agony yell on an infantry kill.
-	if not _death_yells_loaded:
-		_death_yells_loaded = true
-		_load_death_yells()
+	## Positional agony yell on an infantry kill. The bank loads threaded from boot
+	## (_finish_boot_audio) — this just plays whatever's landed so far; _play_bank_at
+	## no-ops silently on an empty bank (first kill before the load finishes).
 	_play_bank_at(_death_yells, screen_pos, vol_db)
 
 
 func play_spawn_shout(screen_pos: Vector2, vol_db := -8.0) -> void:
-	## Positional battle cry when an infantry first enters the viewport.
-	if not _spawn_shouts_loaded:
-		_spawn_shouts_loaded = true
-		_load_spawn_shouts()
+	## Positional battle cry when an infantry first enters the viewport. Same threaded
+	## load as play_death_yell.
 	_play_bank_at(_spawn_shouts, screen_pos, vol_db)
 
 

@@ -1505,6 +1505,31 @@ func test_a3_ambience_beds_are_synthesized_and_distinct() -> void:
 # at a fixed level before, so muting SFX still left the Commander blaring — a real mix
 # gap. _set_bus_vol slaves every bus in _SFX_SLAVED_BUSES to the SFX control. ---
 
+# opt-loop pass 4: death-yell/spawn-shout MP3 banks moved from a synchronous first-play
+# load to ResourceLoader.load_threaded_request, polled by _poll_mp3_banks. This is the
+# ONLY coverage of that path (play_death_yell/play_spawn_shout no longer trigger a load
+# themselves) — proves the threaded request/poll/land cycle actually delivers streams
+# into the bank, not just that it compiles.
+func test_mp3_banks_load_threaded_and_land_in_the_bank() -> void:
+	var sfx := Sfx.new()
+	sfx._load_death_yells()
+	sfx._load_spawn_shouts()
+	Runner.T.ok(not sfx._death_yells_pending.is_empty(), "death-yell bank has pending threaded loads")
+	Runner.T.ok(not sfx._spawn_shouts_pending.is_empty(), "spawn-shout bank has pending threaded loads")
+	var waited_ms := 0
+	while (not sfx._death_yells_pending.is_empty() or not sfx._spawn_shouts_pending.is_empty()) and waited_ms < 5000:
+		sfx._poll_mp3_banks()
+		OS.delay_msec(10)
+		waited_ms += 10
+	Runner.T.ok(sfx._death_yells_pending.is_empty(), "death-yell bank finished loading within 5s")
+	Runner.T.ok(sfx._spawn_shouts_pending.is_empty(), "spawn-shout bank finished loading within 5s")
+	Runner.T.ok(sfx._death_yells.size() > 0, "death-yell bank has streams after the load completes (%d)" % sfx._death_yells.size())
+	Runner.T.ok(sfx._spawn_shouts.size() > 0, "spawn-shout bank has streams after the load completes (%d)" % sfx._spawn_shouts.size())
+	for s in sfx._death_yells:
+		Runner.T.ok(s is AudioStream, "every landed death-yell entry is a real AudioStream")
+	sfx.free()
+
+
 func test_a3_vo_bus_slaved_to_sfx_control() -> void:
 	var slaved: Array = _consts()["_SFX_SLAVED_BUSES"]
 	Runner.T.ok("VO" in slaved, "the radio VO bus now rides the SFX volume knob (was ungoverned)")
