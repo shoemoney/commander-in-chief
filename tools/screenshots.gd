@@ -78,6 +78,14 @@ func _advance() -> void:
 	main.set_physics_process(false)   # no stepping: poses must stay exactly as posed
 	var sim: SimWorld = shots[current]["build"].call()
 	main.sim = sim
+	# Every pose builds a FRESH SimWorld, and HudIcons.verb_step rearms its 6s opening
+	# reminder whenever the sim instance id changes -- so the transient tutorial chip was at
+	# full alpha in EVERY staged shot, and the boot levelstart bark's subtitle rode the first
+	# ~2s of them. Both are correct in game and pure lies in a screenshot. Suppress by default;
+	# a shot that wants to document them opts in via its dress fn.
+	main._hud_icons._verb_show = 0.0
+	main._hud_icons._verb_sim_id = sim.get_instance_id()
+	main._sfx._cap_until = 0
 	# Feel decay never runs while posing — scrub prior dress state so one
 	# shot's garnish can't leak into the next.
 	main._fx.clear()
@@ -123,6 +131,14 @@ func _dress_victoly(m: Node2D) -> void:
 			"col": Color(1.0, 0.82, 0.35), "vx": cos(a) * 2.0, "vy": sin(a) * 2.0})
 
 
+func _dress_prompts(m: Node2D) -> void:
+	# The one shot that documents the opening-beat tutorial chip/caption, opted back in
+	# over the harness-wide suppression above.
+	_dress_firefight(m)
+	m._hud_icons._verb_show = 300.0
+	m._sfx._arm_caption("COMMANDER: \"Move out!\"", null, false, false)
+
+
 func _dress_river(m: Node2D) -> void:
 	# a2-07: offset the prev-pos so the wading players read as MOVING (the wake needs
 	# frame-to-frame movement; the harness never steps, so pose it).
@@ -141,6 +157,7 @@ func _cam(sim: SimWorld, offset_px: int) -> int:
 func _build_shots() -> void:
 	shots = [
 		{"name": "jungle-firefight", "build": _shot_firefight, "dress": _dress_firefight},
+		{"name": "opening-beat-prompts", "build": _shot_firefight, "dress": _dress_prompts},
 		{"name": "tank-assault", "build": _shot_tank},
 		{"name": "river-crossing", "build": _shot_river, "dress": _dress_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},

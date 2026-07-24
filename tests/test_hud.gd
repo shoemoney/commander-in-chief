@@ -1,7 +1,7 @@
 extends RefCounted
-## c1-04: HUD verb-reminder window guards. The in-run ROLL/WHEEL/REVIVE legend
+## c1-04: HUD verb-reminder window guards. The in-run ROLL/WHEEL legend
 ## must reliably rearm on EVERY run start/restart (keyed on a fresh SimWorld, not
-## a tick_count), freeze while a menu is up, and re-brighten after an unpause —
+## a tick_count), freeze while a menu is up, and NOT re-brighten on unpause —
 ## then decay to zero and fade FULLY OUT (transient, so it never permanently
 ## overlays the playfield; the recoverable reference lives on PAUSE + HOW TO PLAY).
 ## The window checks drive the pure static HudIcons.verb_step; the bounds check
@@ -37,15 +37,15 @@ func test_menu_freezes_window() -> void:
 	Runner.T.eq(int(r[1]), 999, "paused: sim id unchanged")
 
 
-# Unpausing (same run) re-brightens a decayed window to at least ~3s, so bindings
-# are legible again right after resuming — without a full 6s rearm.
-func test_unpause_refreshes_window() -> void:
-	# Expired to the floor, same sim id, first frame after a pause: bumped to ~180.
+# Unpausing (same run) must NOT re-brighten a decayed window — a hint that keeps
+# coming back every time a menu opens is a hint that never went away. The window
+# just keeps decaying from wherever it was.
+func test_unpause_does_not_refresh_window() -> void:
+	# Expired to the floor, same sim id, first frame after a pause: stays decaying, no bump.
 	var r := Hud.verb_step(0.0, 42, 42, false, true, DT)
-	Runner.T.ok(r[0] > 175.0 and r[0] <= 180.0, "unpause refreshes to ~3s (show=%.1f)" % r[0])
-	# A still-brighter window is NOT cut down by the unpause bump (maxf, not set).
+	Runner.T.eq(r[0], 0.0, "unpause does not re-show an expired chip (show=%.1f)" % r[0])
 	var r2 := Hud.verb_step(300.0, 42, 42, false, true, DT)
-	Runner.T.ok(r2[0] > 295.0, "unpause never shortens a brighter window (show=%.1f)" % r2[0])
+	Runner.T.ok(r2[0] < 300.0, "unpause continues decaying, not bumping (show=%.1f)" % r2[0])
 
 
 # Normal play (same run, no pause) decays one frame's worth and never underflows.
@@ -1585,6 +1585,16 @@ func test_onfoot_equipment_clips_when_starved() -> void:
 	h2.free()
 
 
+# triple-A: pin the invariant that REVIVE is taught CONTEXTUALLY (only over a downed
+# partner's row, via _dead_chips below) and never lives on the always-on verb legend —
+# so a future pass can't silently put it back on the billboard for a solo player with
+# nobody to revive.
+func test_revive_is_contextual_not_on_permanent_legend() -> void:
+	Runner.T.ok(not (["revive", "REVIVE"] in Hud.VERB_SEGS), "VERB_SEGS does not include revive")
+	for seg in Hud.VERB_SEGS:
+		Runner.T.ok(seg[0] != "revive", "no VERB_SEGS entry uses the revive act (%s)" % [seg])
+
+
 # c3-01: the DOWNED player row (skull + REVIVE cost + prompt glyph) was a direct-draw branch with
 # NO fit check — under width pressure the revive prompt could clip past RIGHT uncounted. It now
 # routes through the SAME shared "+N" clip as every other player-row branch: at a roomy edge the
@@ -2145,7 +2155,7 @@ class _CaptureHud extends HudIcons:
 
 # c1-04 TRUE draw-command capture: invoke the REAL _verb_legend() (bright window
 # armed) in BOTH device modes and inspect what it actually emitted — the plate rect,
-# the three device-aware verb glyphs (roll/wheel/revive), and their labels. Every
+# the device-aware verb glyphs (roll/wheel), and their labels. Every
 # emitted command's box (real font ascent/height, not a hard-coded label height) lands
 # inside 640x360 and the low HUD-safe band, is centered on 320, never overlaps, and
 # every verb glyph resolves to a real texture. Fails if _verb_legend stops drawing a
@@ -2170,9 +2180,10 @@ func test_verb_legend_draw_commands_captured_both_devices() -> void:
 				glyphs.append(op["id"])
 			elif op["k"] == "rect":
 				plate = op["box"]
-		Runner.T.ok("ROLL" in labels and "SUPPLY WHEEL" in labels and "REVIVE" in labels,
-			"%s verb chip draws ROLL/WHEEL/REVIVE labels" % dev)
-		for a in ["roll", "wheel", "revive"]:
+		Runner.T.ok("ROLL" in labels and "SUPPLY WHEEL" in labels,
+			"%s verb chip draws ROLL/WHEEL labels" % dev)
+		Runner.T.ok(not ("REVIVE" in labels), "%s verb chip no longer advertises REVIVE (contextual only)" % dev)
+		for a in ["roll", "wheel"]:
 			Runner.T.ok(a in glyphs, "%s verb chip emits the %s glyph" % [dev, a])
 			Runner.T.ok(_act_glyph_resolves(a), "%s verb glyph '%s' resolves to a texture" % [dev, a])
 		Runner.T.ok(plate.position.x >= 0.0 and plate.end.x <= 640.0, "%s verb plate within 640 [%d,%d]" % [dev, int(plate.position.x), int(plate.end.x)])

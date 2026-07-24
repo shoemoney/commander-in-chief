@@ -229,7 +229,13 @@ func test_audio_identity_caption_arms_and_expires_with_stream_length() -> void:
 	var cap: Dictionary = sfx.active_caption()
 	Runner.T.eq(cap["text"], "COMMANDER: \"Move out!\"", "armed caption text reads back immediately")
 	Runner.T.eq(cap["radio"], false, "a dry (non-VO-radio) caption reports radio=false")
+	Runner.T.eq(cap["fade"], 1.0, "freshly armed caption is at full fade/alpha")
 	Runner.T.ok(sfx._cap_until > Engine.get_physics_frames(), "arming sets an expiry in the future, not the past")
+	# Mid-ramp: put _cap_until inside the CAPTION_FADE_FRAMES window and confirm the
+	# fade value dissolves (0,1) rather than snapping straight from 1.0 to 0.0.
+	sfx._cap_until = Engine.get_physics_frames() + int(Sfx.CAPTION_FADE_FRAMES / 2)
+	var mid: Dictionary = sfx.active_caption()
+	Runner.T.ok(mid["fade"] > 0.0 and mid["fade"] < 1.0, "mid-ramp caption fade is between 0 and 1 (fade=%.2f)" % mid["fade"])
 	# Force the expiry frame into the past (deterministic stand-in for time actually elapsing)
 	# and confirm active_caption() blanks out rather than reading a stale line forever.
 	sfx._cap_until = Engine.get_physics_frames()

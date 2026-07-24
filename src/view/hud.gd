@@ -167,14 +167,13 @@ var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
 var _verb_show := 360.0   # c1-04: ticks-worth of the BRIGHT gameplay-verb reminder
-                          # left; armed at run start, re-bumped on unpause. ~6s — a
+                          # left; armed at run start only. ~6s — a
                           # reminder of already-taught bindings, kept short so the chip
                           # isn't over the playfield long. After it runs out the transient
                           # chip fades FULLY out — the permanent ROLL/WHEEL/REVIVE
                           # reference lives on the PAUSE footer instead.
 var _verb_sim_id := 0     # instance id of the SimWorld the window was armed for — a new
                           # SimWorld (every start_game/_reset) rearms, independent of ticks
-var _verb_was_paused := false
 var _dirty := true        # c2-09: a VIEW field changed since the last _draw — the sole trigger
                           # for the self-invalidating repaint in _process, cleared in _draw. Set
                           # at each mutation site below, and only when the DRAWN pixels actually
@@ -300,10 +299,9 @@ func _process(delta: float) -> void:
 	var paused: bool = main._menu != null and main._menu.is_active()
 	var verb_a := _verb_alpha(_verb_show, main._motion)
 	var res := verb_step(_verb_show, _verb_sim_id, sim.get_instance_id(),
-		paused, _verb_was_paused, delta)
+		paused, false, delta)
 	_verb_show = res[0]
 	_verb_sim_id = int(res[1])
-	_verb_was_paused = paused
 	if _verb_alpha(_verb_show, main._motion) != verb_a:
 		_dirty = true
 	# c4-02: HUD self-redraw. main._update_hud repaints on each sim step, but this Control must
@@ -407,13 +405,15 @@ static func _verb_alpha(show: float, motion: float) -> float:
 
 
 ## c1-04: pure state step for the BRIGHT verb-reminder window — returns
-## [new_show, new_sim_id]. Extracted so a headless test can pin the three
-## transitions the judge called out (run-start/restart rearm, pause-hold, unpause
-## refresh) without a live SimWorld / menu / Art. Rearm is keyed on the SimWorld's
-## instance id changing — every start_game/_reset builds a fresh one — so it fires
-## reliably on EVERY run start, not on a tick_count a reused object might keep high.
+## [new_show, new_sim_id]. Extracted so a headless test can pin the transitions
+## (run-start/restart rearm, pause-hold) without a live SimWorld / menu / Art. Rearm is
+## keyed on the SimWorld's instance id changing — every start_game/_reset builds a fresh
+## one — so it fires reliably on EVERY run start, not on a tick_count a reused object
+## might keep high. triple-A: no longer re-arms on unpause — a hint that keeps coming
+## back every time you open a menu is a hint that never went away. The bindings stay
+## recoverable via the pause menu's permanent footer reference and HOW TO PLAY.
 static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
-		was_paused: bool, delta: float) -> Array:
+		_was_paused: bool, delta: float) -> Array:
 	if paused:
 		return [show, sim_id]   # frozen while any menu is up (the sim isn't ticking either)
 	var s := show
@@ -421,8 +421,6 @@ static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
 	if cur_sim_id != sim_id:
 		s = 360.0               # ~6s bright window on a brand-new run/restart
 		sid = cur_sim_id
-	elif was_paused:
-		s = maxf(s, 180.0)      # ~3s bright refresher the first frame after unpausing
 	return [maxf(0.0, s - delta * 60.0), sid]
 
 
@@ -1363,7 +1361,11 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	return x
 
 
-const VERB_SEGS := [["roll", "ROLL"], ["wheel", "SUPPLY WHEEL"], ["revive", "REVIVE"]]
+# triple-A: REVIVE left the always-on legend — it is only ever actionable over a DOWNED
+# partner, and _dead_chips already plants the contextual "REVIVE <cost>" + bound glyph on
+# that player's row (plus main.gd's off-screen downed-partner beacon). Advertising it to a
+# solo player with nobody to revive is what made the bar read as a permanent tutorial.
+const VERB_SEGS := [["roll", "ROLL"], ["wheel", "SUPPLY WHEEL"]]
 const VERB_GH := 11.0   # verb glyph height (square device prompt)
 
 
@@ -1451,6 +1453,11 @@ func _draw_caption() -> void:
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
 	var txt := TranslationServer.translate(raw)
 	var col: Color = Color(0.75, 0.95, 1.0) if cap.get("radio", false) else Color(0.95, 0.9, 0.75)
+	# triple-A: dissolve the strip over its last 0.4s instead of snapping off. REDUCE MOTION
+	# snaps (same contract as _verb_alpha), so a motion-sensitive player gets no cross-fade.
+	var a := 1.0 if main._motion < 0.5 else float(cap.get("fade", 1.0))
+	if a <= 0.0:
+		return
 	var font := Art.font()
 	var lines := _wrap_caption(txt, font, FONT_SIZE, CAPTION_MAX_W)
 	var y_bottom := VERB_LEGEND_Y - 20.0
@@ -1464,22 +1471,24 @@ func _draw_caption() -> void:
 	# (radio-blue / dry-amber) so the strip stays readable over bright, busy gameplay (particles,
 	# explosions, terrain) instead of washing out. Art.text_center's own +1px drop-shadow (drawn
 	# per line below) is the glyph-level half of the contrast fix.
-	_emit_bg_rect(bg.grow(1.0), Color(col.r, col.g, col.b, 0.4))
-	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.88))
+	_emit_bg_rect(bg.grow(1.0), Color(col.r, col.g, col.b, 0.4 * a))
+	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.88 * a))
 	for i in lines.size():
-		Art.text_center(self, lines[i], 320.0, y0 + float(i) * CAPTION_LINE_H, FONT_SIZE, col)
+		Art.text_center(self, lines[i], 320.0, y0 + float(i) * CAPTION_LINE_H, FONT_SIZE, Color(col.r, col.g, col.b, a))
 
 
 ## c1-04: TRANSIENT gameplay-verb reminder — the non-obvious bindings the TITLE
-## legend taught (ROLL/WHEEL/REVIVE) vanish the moment play begins, so re-show them
-## low-center with device-aware glyphs. BRIGHT for the opening seconds of a run (and
-## a few after each unpause), then it fades FULLY OUT — it never continuously overlays
-## actors/combat near the viewport floor (the judge's note on the old always-on
-## floor). The bindings stay recoverable because PAUSE — the one menu reachable
-## mid-run — carries a PERMANENT ROLL/WHEEL/REVIVE footer reference, and HOW TO PLAY
-## teaches them in full. Under REDUCE MOTION it snaps on/off (no fade). Hidden while a
-## menu is up. Only acts Art.draw_glyph resolves belong here; FIRE/GRENADE are
-## device-plain (LMB/RMB, RT/LB) on the TITLE legend.
+## legend taught (ROLL/WHEEL) vanish the moment play begins, so re-show them
+## low-center with device-aware glyphs. REVIVE is deliberately absent here — it is
+## only ever actionable over a DOWNED partner, and _dead_chips already plants the
+## contextual "REVIVE <cost>" + bound glyph on that player's row. BRIGHT for the
+## opening ~6s of a run ONLY — never re-armed on unpause — then it fades FULLY OUT —
+## it never continuously overlays actors/combat near the viewport floor (the judge's
+## note on the old always-on floor). The bindings stay recoverable because PAUSE —
+## the one menu reachable mid-run — carries a PERMANENT ROLL/WHEEL/REVIVE footer
+## reference, and HOW TO PLAY teaches them in full. Under REDUCE MOTION it snaps
+## on/off (no fade). Hidden while a menu is up. Only acts Art.draw_glyph resolves
+## belong here; FIRE/GRENADE are device-plain (LMB/RMB, RT/LB) on the TITLE legend.
 func _verb_legend() -> void:
 	if main._menu != null and main._menu.is_active():
 		return

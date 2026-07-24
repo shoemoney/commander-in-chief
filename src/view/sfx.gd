@@ -38,16 +38,16 @@ const _VO_CAPTIONS := {
 	"vo_clip_dry": "SPOTTER: \"You're dry, reload!\"",
 	"vo_pilot_plea": "PILOT: \"Don't leave me out here!\"",
 }
+# triple-A: streak/shoot/grenade/boom/pickup/hit dropped from captions — they're pure
+# reaction-noise flavor barks ("Ugh!", "Good, good.") whose info is already on screen
+# (damage vignette, pickup pop, streak ring), and they re-armed the subtitle strip
+# constantly mid-fight, which is what made a transient strip READ as permanent. The
+# informational lines (levelstart/rally/down/revive/victory) stay captioned — AUD#4
+# accessibility is not regressed. Do not "restore" the flavor ones.
 const _BARK_CAPTIONS := {
 	"levelstart": "COMMANDER: \"Move out!\"",
 	"rally": "COMMANDER: \"Rally to me!\"",
-	"streak": "COMMANDER: \"That's how it's done!\"",
-	"shoot": "COMMANDER: \"Take 'em out!\"",
-	"grenade": "COMMANDER: \"Frag out!\"",
-	"boom": "COMMANDER: \"Fire and fury!\"",
-	"pickup": "COMMANDER: \"Good, good.\"",
 	"down": "COMMANDER: \"Man down!\"",
-	"hit": "COMMANDER: \"Ugh!\"",
 	"victory": "COMMANDER: \"Total victory. Believe me.\"",
 	"revive": "COMMANDER: \"Back in it!\"",
 }
@@ -426,12 +426,19 @@ func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool) -
 	_cap_until = Engine.get_physics_frames() + int(ceil(maxf(len, 1.0) * pfps)) + pfps / 2
 
 
+const CAPTION_FADE_FRAMES := 24.0   # 0.4s alpha ramp so the strip DISSOLVES rather than snapping
+
+
 func active_caption() -> Dictionary:
-	## {"text": String, "radio": bool} for hud.gd's subtitle strip. text == "" means nothing
-	## to show. `radio` picks the Spotter (radio-filtered) vs Commander/pilot (dry) tint.
-	if Engine.get_physics_frames() >= _cap_until:
-		return {"text": "", "radio": false}
-	return {"text": _cap_text, "radio": _cap_radio}
+	## {"text": String, "radio": bool, "fade": float} for hud.gd's subtitle strip. text == ""
+	## means nothing to show. `radio` picks the Spotter (radio-filtered) vs Commander/pilot
+	## (dry) tint. `fade` ramps 1.0 -> 0.0 over the caption's final CAPTION_FADE_FRAMES so it
+	## dissolves instead of hard-snapping off.
+	var left := _cap_until - Engine.get_physics_frames()
+	if left <= 0:
+		return {"text": "", "radio": false, "fade": 0.0}
+	return {"text": _cap_text, "radio": _cap_radio,
+		"fade": minf(float(left) / CAPTION_FADE_FRAMES, 1.0)}
 
 
 func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:
