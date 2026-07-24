@@ -1,0 +1,8 @@
+PixelOperator8.ttf
+Released by Jayvee Enaguas (HarvettFox96) <harvettfox96 [at] protonmail [dot] com>,
+licensed under Creative Commons Zero (CC0) 1.0.
+https://creativecommons.org/licenses/zero/1.0/
+(c) 2009-2018.
+
+CC0 places the work in the public domain; no attribution is required. This file
+is shipped for provenance clarity, matching assets/kenney/LICENSE-CC0.txt.
