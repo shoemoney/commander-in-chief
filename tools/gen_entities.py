@@ -121,13 +121,25 @@ def person(p: Pad, *, helm=P.HELM_A, helm_d=P.HELM_A_D, cloth=P.CLOTH,
         p.keyline(keyline)
         return
 
-    # boots -- two dark toe caps peeking south of the torso
+    # legs: short thigh stubs plus boots. Without them the silhouette is a
+    # rounded slab and reads as a beetle rather than a person.
     for sx in (-1, 1):
-        p.rrect_c(cx + sx * 0.085 * s, cy + 0.215 * s, 0.052 * s, 0.055 * s, 0.02, P.BOOT)
+        p.rrect_c(cx + sx * 0.082 * s, cy + 0.170 * s, 0.055 * s, 0.075 * s, 0.02,
+                  cloth_d)
+        p.rrect_c(cx + sx * 0.085 * s, cy + 0.232 * s, 0.050 * s, 0.048 * s, 0.02,
+                  P.BOOT)
 
     # torso: WIDE and SHORT. A tall ellipse reads as a beetle from above.
     p.rrect_c(cx, cy + 0.045 * s, 0.205 * s, 0.135 * s, 0.075, cloth)
     p.rrect_c(cx, cy + 0.115 * s, 0.205 * s, 0.065 * s, 0.055, cloth_d)   # shadowed back
+    # chest rig: one bright horizontal band. At 32-64px this single stripe does
+    # more to say "soldier" than any amount of interior detail.
+    p.rrect_c(cx, cy - 0.010 * s, 0.150 * s, 0.032 * s, 0.012,
+              tuple(int(c * 0.62) for c in cloth))
+    # shoulder pads -- break the torso outline so the figure has real shoulders
+    for sx in (-1, 1):
+        p.ell(cx + sx * 0.185 * s, cy - 0.020 * s, 0.075 * s, 0.068 * s,
+              fill=tuple(min(255, int(c * 1.12)) for c in cloth))
 
     if pack:
         p.rrect_c(cx, cy + 0.150 * s, 0.115 * s, 0.075 * s, 0.03, pack)
@@ -148,9 +160,10 @@ def person(p: Pad, *, helm=P.HELM_A, helm_d=P.HELM_A_D, cloth=P.CLOTH,
         p.rrect_c(cx, cy - 0.095 * s, 0.255 * s, 0.090 * s, 0.04, P.STEEL_D)
 
     # helmet crown last: from directly overhead nothing sits above it
-    p.ell(cx - 0.020 * s, cy - 0.035 * s, 0.100 * s, 0.096 * s, fill=helm)
-    p.ell(cx - 0.020 * s, cy - 0.044 * s, 0.082 * s, 0.078 * s, fill=helm_d)
-    p.ell(cx - 0.044 * s, cy - 0.072 * s, 0.032 * s, 0.026 * s, fill=helm)
+    p.ell(cx - 0.020 * s, cy - 0.035 * s, 0.104 * s, 0.100 * s,
+          fill=tuple(min(255, int(c * 1.25)) for c in helm))      # lit crown rim
+    p.ell(cx - 0.020 * s, cy - 0.040 * s, 0.086 * s, 0.082 * s, fill=helm)
+    p.ell(cx - 0.020 * s, cy - 0.046 * s, 0.062 * s, 0.058 * s, fill=helm_d)
     p.keyline(keyline)
 
 
@@ -180,6 +193,9 @@ def _weapon_overhead(p: Pad, cx, cy, s, kind: str):
     p.rrect_c(x - 0.014 * s, cy - 0.020 * s, 0.020 * s, rlen * s / 2.4, 0.012, P.GUN_HI)
     if stock:
         p.rrect_c(x, cy + 0.055 * s, 0.040 * s, 0.052 * s, 0.015, P.GUN)
+    if kind in ("rifle", "smg", "shotgun", "sniper", "lmg"):   # foregrip
+        p.rrect_c(x, cy - 0.055 * s - blen * s * 0.55, 0.072 * s, 0.030 * s,
+                  0.012, P.GUN_HI)
     if kind == "lmg":     # box magazine slung under the receiver
         p.rrect_c(x + 0.055 * s, cy + 0.010 * s, 0.040 * s, 0.055 * s, 0.012, P.GUN_HI)
     if kind == "sniper":  # scope

@@ -34,10 +34,11 @@ As of 2026-07-24 every IMAGE in this repository is either owned by the project
 the project) or CC0 (assets/kenney/, assets/fonts/). The previously bundled
 legacy art and infantry set pack art has been removed from the working tree.
 
-⚠️ NOT YET CLEARED FOR PUBLIC RELEASE. The bundled AUDIO under assets/vo/ and
-assets/audio/ is speech synthesis text-to-speech output whose onward-redistribution
-terms are unresolved, and assets/vo/ additionally synthesises the voice of an
-identifiable living public figure. Those files are NOT covered by this license
-and must be resolved or removed before publishing. Note also that the removed
-proprietary art remains present in this repository's GIT HISTORY and requires a
-history purge, not merely a working-tree deletion.
+The bundled AUDIO under assets/vo/ and assets/audio/ is speech synthesis text-to-speech
+output. Onward redistribution was confirmed permitted with speech synthesis on
+2026-07-24. It is documented in ASSETS.md rather than granted by this file.
+
+⚠️ ONE STEP REMAINS BEFORE PUBLISHING: the previously bundled proprietary art
+was removed from the working tree but is still present in this repository's GIT
+HISTORY, recoverable from any older commit. Run tools/purge_history.sh before
+making the repository public — a working-tree deletion is not sufficient.

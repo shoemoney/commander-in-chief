@@ -6,9 +6,9 @@ list, treat it as unlicensed until it is.
 
 Release status is tracked in [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md).
 
-> ⚠️ **This repository is not yet cleared for public release.** Every image is
-> owned or CC0, but the bundled **audio** is not resolved and the removed
-> proprietary art still exists in **git history**. See "Outstanding" below.
+> ⚠️ **One step remains before public release.** Every image is owned or CC0 and
+> the audio is cleared — but the removed proprietary art still exists in **git
+> history**. See "Outstanding" below.
 
 ## ✅ Images — all owned or CC0
 
@@ -28,7 +28,7 @@ canvas sizes and `.import` `size_limit`s are preserved so no draw site moves.
 
 **Historical note.** Earlier revisions bundled art from legacy 3D pack/INTERFACE
 packs and from a purchased `infantry set` pack. Both are proprietary and
-non-redistributable. All of it has been replaced — but see "Outstanding".
+non-redistributable. All of it has been replaced — but it survives in git history; see "Outstanding".
 
 ## ✅ Fonts
 
@@ -36,27 +36,24 @@ non-redistributable. All of it has been replaced — but see "Outstanding".
 |---|---|---|
 | `assets/fonts/PixelOperator8.ttf` | Jayvee Enaguas (HarvettFox96) | **CC0** — `assets/fonts/LICENSE-CC0.txt` |
 
-## 🔴 Audio — NOT cleared
+## ✅ Audio — speech synthesis redistribution cleared
 
 | Path | Files | Source | Status |
 |---|---|---|---|
-| `assets/vo/cmd/` | 56 mp3 | speech synthesis TTS — commander barks + intro narration | 🔴 **blocked** |
-| `assets/audio/{enemy_death,enemy_spawn,ya_chants}/` | 118 mp3 | speech synthesis TTS, stock voices (see each folder's `README.md`) | 🔴 **unresolved** |
+| `assets/vo/cmd/` | 56 mp3 | speech synthesis TTS — commander barks + intro narration | ✅ cleared with speech synthesis |
+| `assets/audio/{enemy_death,enemy_spawn,ya_chants}/` | 118 mp3 | speech synthesis TTS, stock voices (see each folder's `README.md`) | ✅ cleared with speech synthesis |
 
-Two separate problems:
+The open question on these 174 files was whether speech synthesis' terms permit
+**redistributing** the output onward — an MIT/CC0 grant sublicenses it to
+everyone who clones the repo, which is more than a licence to *use* it. The
+owner raised this directly with speech synthesis and confirmed it is permitted
+(2026-07-24).
 
-1. **`assets/vo/` synthesises an identifiable living public figure**
-   (`src/view/sfx.gd` describes the pools as Trump-voiced). That is a
-   right-of-publicity question independent of any license, and speech synthesis'
-   terms separately prohibit voice clones of real people without consent.
-2. **All 174 mp3 are speech synthesis output.** Their terms grant the account holder a
-   license to *use* the output. Whether that extends to **sublicensing it onward**
-   to everyone who clones a public repo — which is what an MIT/CC0 grant does —
-   is a different question and is not settled by having paid for a plan.
-
-Neither is a code problem, and neither can be fixed by regenerating art. Options:
-strip the audio, regenerate with a non-impersonating voice under terms that
-permit redistribution, or ship the audio as a separate non-MIT asset pack.
+> ℹ️ One thing that clearance does not cover, noted for the record rather than
+> as a blocker: `assets/vo/` synthesises the voice of an identifiable living
+> public figure. Publicity/likeness rights belong to that person, not to
+> speech synthesis, so they are not speech synthesis' to grant. The owner has been told and
+> it is their call.
 
 ## 📋 Non-asset files
 
@@ -67,9 +64,10 @@ permit redistribution, or ship the audio as a separate non-MIT asset pack.
 
 ## Outstanding before publishing
 
-1. **Audio** — resolve the two problems above.
-2. **Git history** — the proprietary art was removed from the working tree but
+1. **Git history** — the proprietary art was removed from the working tree but
    remains in every historical commit, recoverable with `git checkout <old-sha>`.
    The folder was renamed `assets/legacy-art/` → `assets/art/`, so a purge must cover
    **both** paths plus `assets/soldiers/`. Working-tree deletion is not enough.
-3. **Promo media** — `docs/media/` and `media/` still show the replaced art.
+   Run `tools/purge_history.sh` (dry-run first). This is the last blocker.
+2. **Promo media** (cosmetic, not a blocker) — `docs/media/` and `media/` still
+   show the replaced art and should be re-captured.

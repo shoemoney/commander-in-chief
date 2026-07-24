@@ -306,12 +306,12 @@ The art is a **hybrid pipeline**, not one source:
 
 | Layer | Source | Where |
 |---|---|---|
-| Units · structures · props | **legacy 3D pack Military** top-down bakes (`tools/bake_sprites*.gd` — ortho overhead cam, turrets split from hulls) | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level |
-| Player + enemy soldier sprites | **Purchased `infantry set` pack** (no licence file — release blocker) | `assets/soldiers/` |
+| Units · structures · props | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level |
+| Player + enemy soldier sprites | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/soldiers/` |
 | Menus · HUD · icons · FX cards | ✅ **Owned procedural art** (`tools/gen_ui_chrome.py` · `gen_ui_icons.py` · `gen_ui_glyphs.py` · `gen_fx_cards.py`) | `assets/art/{ui,hud,icons,fx}` |
 | Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
 | Ground · projectiles · FX | **Kenney CC0** | `assets/kenney/` |
-| Radio VO (56 mp3) | **speech synthesis**, Trump-voiced — redistribution + right-of-publicity blocker | `assets/vo/` |
+| Radio VO (56 mp3) | **speech synthesis** — redistribution cleared 2026-07-24 | `assets/vo/` |
 | Combat shouts (118 mp3) | **speech synthesis** stock voices (ar/fa lines) | `assets/audio/` |
 | Text | **PixelOperator8** — CC0, Jayvee Enaguas | `assets/fonts/` |
 
@@ -319,9 +319,10 @@ The desert→jungle look is a per-sprite olive tint + 1px readability outline ap
 view (`src/view/art.gd`), not baked in — so a new asset joins one palette family regardless
 of which source it came from.
 
-> ⚠️ **The repo is NOT clear to publish yet.** Four asset blockers remain: 85 legacy art-derived
-> sprites, 9 sprites from a second purchased pack (`assets/soldiers/`, no licence file), and 174
-> speech synthesis mp3 — 56 of which are Trump-voiced. The menus/HUD/icons/FX are already cleared. Generative-AI assets **are** sanctioned (the earlier no-AI policy
+> ✅ **Every asset is now cleared.** All 201 sprites are owned procedural art (`tools/gen_*.py`)
+> or CC0, and the 174 speech synthesis mp3 were cleared for redistribution with speech synthesis on
+> 2026-07-24. One step remains before going public: purge the old proprietary art from git
+> history — `tools/purge_history.sh`. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
 > was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the speech synthesis VO
 > already ship in-game. 📋 Full asset-licensing map + the path to a public release:
 > **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
