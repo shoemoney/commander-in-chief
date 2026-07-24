@@ -319,7 +319,8 @@ of which source it came from.
 > legacy art-derived sprites are proprietary (purchased license), **not** CC0 — clear them before
 > making this repo public. Generative-AI assets **are** sanctioned (the earlier no-AI policy
 > was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the speech synthesis VO
-> already ship in-game.
+> already ship in-game. 📋 Full asset-licensing map + the path to a public release:
+> **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
 
 <details><summary>🖼️ <b>Promo / key-art variants</b></summary>
 

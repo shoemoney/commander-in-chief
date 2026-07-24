@@ -9,6 +9,9 @@ tmp_*
 .opencode/
 tmp/
 
+# Internal agent tooling / notes — must never ship in a public release
+.claude/
+
 # python bytecode cache
 __pycache__/
 *.pyc
