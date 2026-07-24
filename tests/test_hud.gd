@@ -3058,3 +3058,31 @@ func test_audio_identity_caption_wrap_keeps_short_lines_single_and_splits_long_o
 		Runner.T.ok(w <= HudIcons.CAPTION_MAX_W + 0.5, "wrapped line '%s' fits within CAPTION_MAX_W" % ln)
 	Runner.T.eq(" ".join(long_line).replace("  ", " "), "SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\"",
 		"wrapping never drops or reorders a word")
+
+
+# --- bottom-band lift: caption/verb overlays vs. the persistent colossus block ---
+
+func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
+	var sim := SimWorld.new(1, 1)
+	sim.colossus = {}
+	Runner.T.eq(HudIcons.bottom_band_lift(sim), 0.0, "no colossus -> layout is byte-identical to the fixed slots")
+	Runner.T.eq(HudIcons.bottom_band_lift(null), 0.0, "a HUD mock with no sim never lifts")
+	sim.colossus = {"alive": true, "hp": 14, "x": 0, "y": 0}
+	var lift: float = HudIcons.bottom_band_lift(sim)
+	Runner.T.ok(lift > 0.0, "a live colossus reserves the bottom band")
+	var reserve: float = HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP
+	# Widest real caption AND the widest phase label — the worst pair, both measured, not assumed.
+	var font := Art.font()
+	for txt in ["COMMANDER: \"Move out!\"",
+			"SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\""]:
+		var lines := HudIcons._wrap_caption(txt, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
+		var w := 0.0
+		for ln in lines:
+			w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE).x)
+		var bg := HudIcons.caption_bg_rect(lines.size(), w, HudIcons.VERB_LEGEND_Y - 20.0 - lift)
+		Runner.T.ok(bg.end.y <= reserve, "caption scrim bottom %d clears the colossus label band" % int(bg.end.y))
+		Runner.T.ok(bg.position.y > 0.0, "caption never lifts off the top of the viewport")
+		# The verb chip is the lower sibling: clears the reserve AND never lands on the caption.
+		var verb_top: float = HudIcons.VERB_LEGEND_Y - lift - HudIcons.VERB_PLATE_BELOW
+		Runner.T.ok(verb_top + 2.0 * HudIcons.VERB_PLATE_BELOW <= reserve, "verb chip clears the colossus HP bar")
+		Runner.T.ok(verb_top >= bg.end.y, "lifted verb chip still sits below the caption strip")
