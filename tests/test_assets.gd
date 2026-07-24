@@ -202,6 +202,54 @@ func test_a1_boss_music_heavier_and_ambience_marches() -> void:
 	a.free(); b.free(); c.free(); d.free()
 
 
+# --- audio-identity: MusicDirector tonal riff layer rides the drums, phase-locked ---
+
+func test_audio_identity_riff_crossfades_with_intensity_and_locks_pitch_to_drums() -> void:
+	var lull := Sfx.new()
+	for i in 200: lull.set_music_intensity(0.0, 0.0, false)
+	var combat := Sfx.new()
+	for i in 200: combat.set_music_intensity(1.0, 0.0, false)
+	Runner.T.ok(combat._music_riff.volume_db > lull._music_riff.volume_db,
+		"riff layer rises into the mix as combat intensity climbs, same as the drum bed")
+	Runner.T.eq(combat._music_riff.pitch_scale, combat._music.pitch_scale,
+		"riff pitch_scale tracks the drum bed's exactly -- a boss key change can't leave it behind")
+	Runner.T.eq(combat._music_riff_lull.pitch_scale, combat._music_lull.pitch_scale,
+		"lull riff pitch_scale tracks the lull drum bed's exactly")
+	Runner.T.ok(combat._music_riff.volume_db < combat._music.volume_db,
+		"the riff still rides UNDER the drums at full combat, not competing with them")
+	lull.free(); combat.free()
+
+
+# --- AUD#4: caption arm/expire timing (Sfx.active_caption) ---
+
+func test_audio_identity_caption_arms_and_expires_with_stream_length() -> void:
+	var sfx := Sfx.new()
+	Runner.T.eq(sfx.active_caption()["text"], "", "no caption armed yet reads empty")
+	sfx._arm_caption("COMMANDER: \"Move out!\"", null, false, false)
+	var cap: Dictionary = sfx.active_caption()
+	Runner.T.eq(cap["text"], "COMMANDER: \"Move out!\"", "armed caption text reads back immediately")
+	Runner.T.eq(cap["radio"], false, "a dry (non-VO-radio) caption reports radio=false")
+	Runner.T.ok(sfx._cap_until > Engine.get_physics_frames(), "arming sets an expiry in the future, not the past")
+	# Force the expiry frame into the past (deterministic stand-in for time actually elapsing)
+	# and confirm active_caption() blanks out rather than reading a stale line forever.
+	sfx._cap_until = Engine.get_physics_frames()
+	Runner.T.eq(sfx.active_caption()["text"], "", "an expired caption reads empty, not the stale line")
+	sfx.free()
+
+
+func test_audio_identity_stop_vo_clears_only_its_own_vo_caption() -> void:
+	var sfx := Sfx.new()
+	# Arm a VO caption, then a bark caption on top (they use separate players/buses and can
+	# legitimately overlap) -- stop_vo() must drop only the VO line's caption, never the bark's.
+	sfx._arm_caption("SPOTTER: \"Enemy observer spotted!\"", null, true, true)
+	sfx._cap_text = "COMMANDER: \"Rally to me!\""
+	sfx._cap_is_vo = false
+	sfx.stop_vo()
+	Runner.T.eq(sfx.active_caption()["text"], "COMMANDER: \"Rally to me!\"",
+		"stop_vo leaves a concurrently-armed bark caption alone")
+	sfx.free()
+
+
 # --- a1-14 r2: the SFX bus ducks under a live VO line and recovers ---
 
 func test_a1_sfx_bus_ducks_under_vo() -> void:

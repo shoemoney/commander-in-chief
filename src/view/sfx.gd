@@ -17,6 +17,41 @@ const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 # swamp adjacent steps — play them dead on pitch.
 const _LADDERED := {"alarm": true, "kill": true, "ping_shell": true}
 
+# AUD#4 (audio-identity item): subtitle captions for the VO/bark accessibility strip hud.gd
+# draws. These are descriptive lines, not verbatim transcripts — the mp3s are one-off radio
+# reads / randomized Trump-voiced bark pools with no stored script, so a caption speaks the
+# INTENT of the line, keyed the same way the audio itself is. intro_crawl is deliberately
+# absent: the title-screen crawl already renders its own on-screen scroll text.
+const _VO_CAPTIONS := {
+	"vo_chest_empty": "SPOTTER: \"War chest's empty, no revives!\"",
+	"vo_wiped": "SPOTTER: \"Squad's wiped. Run's over.\"",
+	"vo_last_stand": "SPOTTER: \"This is it, LAST STAND!\"",
+	"vo_observer": "SPOTTER: \"Enemy observer spotted!\"",
+	"vo_surge": "SPOTTER: \"You're on a tear, keep it up!\"",
+	"vo_core": "SPOTTER: \"Core's exposed, open fire!\"",
+	"vo_flawless": "SPOTTER: \"Flawless gate clear!\"",
+	"vo_ransom_lost": "SPOTTER: \"Ransom lost, pilot's gone!\"",
+	"vo_victoly": "SPOTTER: \"Total victoly! Believe me!\"",
+	"vo_airstrike": "SPOTTER: \"Airstrike inbound, clear the area!\"",
+	"vo_pilot_down": "SPOTTER: \"Pilot down, get to him!\"",
+	"vo_shop_locked": "SPOTTER: \"Shop's locked, boss incoming!\"",
+	"vo_clip_dry": "SPOTTER: \"You're dry, reload!\"",
+	"vo_pilot_plea": "PILOT: \"Don't leave me out here!\"",
+}
+const _BARK_CAPTIONS := {
+	"levelstart": "COMMANDER: \"Move out!\"",
+	"rally": "COMMANDER: \"Rally to me!\"",
+	"streak": "COMMANDER: \"That's how it's done!\"",
+	"shoot": "COMMANDER: \"Take 'em out!\"",
+	"grenade": "COMMANDER: \"Frag out!\"",
+	"boom": "COMMANDER: \"Fire and fury!\"",
+	"pickup": "COMMANDER: \"Good, good.\"",
+	"down": "COMMANDER: \"Man down!\"",
+	"hit": "COMMANDER: \"Ugh!\"",
+	"victory": "COMMANDER: \"Total victory. Believe me.\"",
+	"revive": "COMMANDER: \"Back in it!\"",
+}
+
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
@@ -38,6 +73,12 @@ var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / A
 var _death_yells_loaded := false        # opt-loop: lazy-load guard (see play_death_yell) — distinct
 var _spawn_shouts_loaded := false       # from bank.is_empty() so a directory scan never retries
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
+# audio-identity (judge follow-up) MusicDirector: a tonal riff layer over the drums — the
+# combat/lull war-drum bed above is rhythm-only percussion; these two add an actual pitched
+# musical hook (a repeating bass riff, see _synth_riff) crossfaded the SAME way and phase-locked
+# to the SAME 4-bar/110 BPM grid, so the score reads as composed, not just louder drums.
+var _music_riff := AudioStreamPlayer.new()        # combat riff, phase-locked to _music
+var _music_riff_lull := AudioStreamPlayer.new()   # sparse calm riff, phase-locked to _music_lull
 var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
 var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
 var _shop := AudioStreamPlayer.new()         # a3-15: calm pad, up in the intermission shop
@@ -45,6 +86,11 @@ var _beds: Dictionary = {}                   # a3-15: the three ambience-bed loo
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
+var _cap_text := ""      # AUD#4: active subtitle caption (hud.gd reads via active_caption())
+var _cap_radio := false  # true = radio-filtered Spotter line, false = dry Commander/pilot voice
+var _cap_until := 0      # physics frame the caption stays legible until
+var _cap_is_vo := false  # true if the CURRENT caption came from play_vo (not a Commander bark) —
+                         # lets stop_vo() clear only its own line, never a bark it didn't arm
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
 var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
 var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
@@ -188,8 +234,21 @@ func _finish_boot_audio() -> void:
 	_music_lull.bus = "Music"
 	_music_lull.volume_db = -60.0
 	add_child(_music_lull)
+	# audio-identity (judge follow-up) MusicDirector: the tonal riff pair, built from the SAME
+	# pattern arrays (so its note timing can never drift from the drums' bar length) and started
+	# in the SAME frame as _music/_music_lull below, so all four loops stay phase-locked.
+	_music_riff.stream = _synth_riff(_combat_ab)
+	_music_riff.bus = "Music"
+	_music_riff.volume_db = -60.0
+	add_child(_music_riff)
+	_music_riff_lull.stream = _synth_riff(_PATTERN_LULL)
+	_music_riff_lull.bus = "Music"
+	_music_riff_lull.volume_db = -60.0
+	add_child(_music_riff_lull)
 	_music.play()
 	_music_lull.play()
+	_music_riff.play()
+	_music_riff_lull.play()
 	# Ambience bed (6-vote: dead air between fights): one baked 14.3s wind
 	# loop — lowpassed hash noise, 0.07 Hz swell LFO baked in (integer cycle =
 	# seamless). Rides the Music bus so the concussion LPF muffles it for free.
@@ -244,6 +303,8 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	_vo_priority = priority
 	ply.stream = _vo_streams[key]
 	ply.play()
+	if _VO_CAPTIONS.has(key):
+		_arm_caption(_VO_CAPTIONS[key], ply.stream, not dry, true)
 
 
 func _fade_then_stop(ply: AudioStreamPlayer, is_dry: bool) -> void:
@@ -274,6 +335,15 @@ func stop_vo() -> void:
 	_vo.stop()
 	_vo_dry.stop()
 	_vo_priority = -1
+	# AUD#4: also drop the subtitle armed for the line we just cut short — otherwise a
+	# skip/interrupt leaves the LAST line's caption legible on screen (_cap_until keeps
+	# counting down against a clip that is no longer playing) instead of clearing with it.
+	# Gated on _cap_is_vo: a Commander bark can be legitimately playing (and captioned)
+	# AT THE SAME TIME as a VO line (they're separate players/buses) — this must only
+	# blank OUR OWN line, never hide a concurrent bark's caption out from under it.
+	if _cap_is_vo:
+		_cap_text = ""
+		_cap_until = 0
 
 
 func _load_cmd_barks() -> void:
@@ -313,6 +383,37 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> void:
 	_cmd.stream = pool[randi() % pool.size()]
 	_cmd.play()
 	_cmd_next_frame = f + min_gap
+	if _BARK_CAPTIONS.has(event):
+		_arm_caption(_BARK_CAPTIONS[event], _cmd.stream, false, false)
+
+
+# AUD#4: arm the on-screen subtitle for a line that's actually about to play (VO/bark
+# priority + cooldown gates above have already decided that). hud.gd owns the paint;
+# this just tracks how long the line reads for. Deliberately keyed off
+# Engine.get_physics_frames() rather than get_process_frames(): _cmd_next_frame (the bark
+# cooldown right above) already uses the same clock, main._physics_process is the one tick
+# this game guarantees runs while unpaused, and a caption must expire in lockstep with the
+# audio gate that armed it — a render-frame clock would drift against that gate under frame
+# drops or an uncapped fps. This is a VIEW-only read (active_caption is never consulted by
+# src/sim), so borrowing the sim's tick counter costs no determinism.
+# A stream that fails to report a length (rare, e.g. a null load) still gets a readable 1s floor.
+func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool) -> void:
+	var len := stream.get_length() if stream != null else 0.0
+	_cap_text = text
+	_cap_radio = radio
+	_cap_is_vo = is_vo
+	# get_physics_frames() ticks at Engine.physics_ticks_per_second (not a hardcoded 60) --
+	# stays correct if that project setting is ever changed from its current 60 default.
+	var pfps := Engine.physics_ticks_per_second
+	_cap_until = Engine.get_physics_frames() + int(ceil(maxf(len, 1.0) * pfps)) + pfps / 2
+
+
+func active_caption() -> Dictionary:
+	## {"text": String, "radio": bool} for hud.gd's subtitle strip. text == "" means nothing
+	## to show. `radio` picks the Spotter (radio-filtered) vs Commander/pilot (dry) tint.
+	if Engine.get_physics_frames() >= _cap_until:
+		return {"text": "", "radio": false}
+	return {"text": _cap_text, "radio": _cap_radio}
 
 
 func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:
@@ -469,11 +570,22 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	# floor (-36) at full combat; same duck as the drums.
 	_amb.volume_db = lerpf(_amb.volume_db, lerpf(-24.0, -36.0, level) - duck * 16.0, rate)
 	_music_lull.volume_db = lerpf(_music_lull.volume_db, lull_db, rate)
+	# audio-identity (judge follow-up) MusicDirector: the tonal riff crossfades the SAME
+	# equal-power way as the drums (one bar-locked combat/lull pair, mixed by volume only) but
+	# sits ~8dB under them and a touch quieter still in the lull, so it reads as the score's
+	# melodic hook riding IN on top of the drums, not a third competing rhythm.
+	var riff_base := lerpf(-32.0, -17.0, level) - duck * 16.0
+	var riff_combat_db := riff_base + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0)
+	var riff_lull_db := riff_base + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) - 6.0
+	_music_riff.volume_db = lerpf(_music_riff.volume_db, riff_combat_db, rate)
+	_music_riff_lull.volume_db = lerpf(_music_riff_lull.volume_db, riff_lull_db, rate)
 	# a1-15 AUD#7: a boss fight drops the pitch FLOOR (heavier kick/low-tom) so it
 	# reads as its own theme, not just louder wave-1.
 	var p := lerpf(_music.pitch_scale, lerpf(0.82, 0.98, level) if boss else lerpf(0.9, 1.08, level), 0.04)
 	_music.pitch_scale = p
 	_music_lull.pitch_scale = p   # identical playback speed = zero drift
+	_music_riff.pitch_scale = p        # same key change as the drums — the riff can never drift sharp/flat
+	_music_riff_lull.pitch_scale = p
 
 
 func set_ambience_march(march: float, near_water := false, in_shop := false) -> void:
@@ -1013,6 +1125,38 @@ func _synth_drums(pattern: Array[Array]) -> AudioStreamWAV:
 			if hit[3]:
 				v += _nz(ofs + j) * exp(-t * 24.0) * 0.3 + sin(TAU * 190.0 * t) * exp(-t * 28.0) * 0.2
 			buf[ofs + j] += v
+	var wav := _to_wav(buf)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_end = buf.size()
+	return wav
+
+
+# audio-identity (judge follow-up) MusicDirector: a repeating natural-minor-flavored bass
+# scale for the tonal riff layer (D2 / F2 / G2 / Eb2) — gives the drum-only bed a real
+# musical identity instead of pure percussion. Stepped in order, one note per KICK hit.
+const _RIFF_SCALE: Array[float] = [73.42, 87.31, 98.00, 77.78]
+
+
+func _synth_riff(pattern: Array[Array]) -> AudioStreamWAV:
+	# The tonal companion to _synth_drums: same 8th-note grid/BPM, built from THIS SAME `pattern`
+	# array — so it can never drift a step out of phase with the drum loop it rides under (no
+	# separate note-timing table to keep in sync). Fires one band-limited-square bass note per
+	# KICK step (pattern[k][0]), cycling _RIFF_SCALE so the loop reads as a real repeating riff,
+	# not a static drone.
+	var step := int(RATE * 60.0 / 110.0 / 2.0)
+	var buf := _buf(float(step * pattern.size()) / RATE)
+	var note_i := 0
+	for k in pattern.size():
+		if not pattern[k][0]:
+			continue
+		var f: float = _RIFF_SCALE[note_i % _RIFF_SCALE.size()]
+		note_i += 1
+		var ofs := k * step
+		for j in int(0.4 * RATE):
+			if ofs + j >= buf.size():
+				break
+			var t := float(j) / RATE
+			buf[ofs + j] += _sqbl(t, f) * exp(-t * 5.0) * 0.3
 	var wav := _to_wav(buf)
 	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	wav.loop_end = buf.size()

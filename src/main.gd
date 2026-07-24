@@ -137,6 +137,7 @@ var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
 var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
+var _captions := true            # accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption)
 var _binds: Dictionary = {}      # c1-18: keyboard rebinds (action -> physical keycode, 0 == UNBOUND); filled from BIND_DEFAULTS + [binds] in _load_bests
 var _pad_binds: Array[Dictionary] = [{}, {}]  # c1-18: PER-PLAYER gamepad button rebinds (action -> JOY_BUTTON_*, -1 == UNBOUND). [0]=P1 (device 0, [padbinds]), [1]=P2 (device 1, [padbinds2]) — two INDEPENDENT layouts so a left-handed P2 can remap without disturbing P1
 var _menu_binds: Dictionary = {} # c1-18: rebindable MENU-navigation keys (action -> physical keycode); filled from MENU_BIND_DEFAULTS + [menubinds]. Read ADDITIVELY over the immutable W/S/arrows/Enter/Esc fallback the menu always honors
@@ -3161,6 +3162,8 @@ func _load_bests() -> void:
 			# c1-19: read the saved windowed scale back (missing this dropped it on every load,
 			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
 			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
+			# audio-identity: captions default ON; a save predating the toggle lands there too.
+			"captions": cf.get_value("settings", "captions", SETTINGS_DEFAULTS["captions"]),
 		})
 	else:
 		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
@@ -3184,6 +3187,7 @@ const SETTINGS_DEFAULTS := {
 	"music_vol": 10,
 	"fullscreen": false,
 	"window_scale": 2,
+	"captions": true,
 }
 
 
@@ -3412,6 +3416,7 @@ func _settings_snapshot() -> Dictionary:
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
 		"window_scale": _win_scale,
+		"captions": _captions,
 	}
 
 
@@ -3462,6 +3467,9 @@ func _apply_settings(d: Dictionary) -> void:
 	# (NOT clamped to the current monitor) so a scale saved on a bigger display survives a load on
 	# a smaller one; _apply_windowed_scale sizes the window to the live per-monitor fit.
 	_win_scale = clampi(int(d.get("window_scale", 2)), 1, WIN_SCALE_MAX)
+	# audio-identity: .get (not d["captions"]) — a save predating the toggle lacks the key,
+	# same back-compat pattern as swap_sticks/window_scale above.
+	_captions = bool(d.get("captions", true))
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
 		else DisplayServer.WINDOW_MODE_WINDOWED)
 	if not _fullscreen:

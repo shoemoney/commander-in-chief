@@ -3041,3 +3041,20 @@ func test_c1_15_strip_crossfade_is_smooth_and_never_overlaps() -> void:
 		h.free()
 		main.free()
 	Art.colorblind = was_cb
+
+
+# --- AUD#4 (audio-identity): the caption strip's own word-wrap helper ---
+
+func test_audio_identity_caption_wrap_keeps_short_lines_single_and_splits_long_ones() -> void:
+	var font := Art.font()
+	var short := HudIcons._wrap_caption("Frag out!", font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
+	Runner.T.eq(short.size(), 1, "a short bark caption stays a single line (no spurious wrap)")
+	var long_line := HudIcons._wrap_caption(
+		"SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\"",
+		font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
+	Runner.T.ok(long_line.size() > 1, "a long VO caption wraps onto more than one line")
+	for ln in long_line:
+		var w: float = font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE).x
+		Runner.T.ok(w <= HudIcons.CAPTION_MAX_W + 0.5, "wrapped line '%s' fits within CAPTION_MAX_W" % ln)
+	Runner.T.eq(" ".join(long_line).replace("  ", " "), "SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\"",
+		"wrapping never drops or reorders a word")

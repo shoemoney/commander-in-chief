@@ -48,6 +48,7 @@ class _StubMain extends Node2D:
 	var _rumble_on := true
 	var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad toggle the SWAP STICKS row reads
 	var _assist := false
+	var _captions := true   # audio-identity: mirrors main._captions the CAPTIONS row reads
 	var _fullscreen := false
 	var _win_scale := 2   # c1-19: windowed integer scale the WINDOW SCALE row reads/steps
 	var _saved := 0
@@ -89,7 +90,7 @@ class _StubMain extends Node2D:
 		return {"colorblind": colorblind, "assist": _assist, "reduce_motion": _motion < 0.5,
 			"rumble": _rumble_on, "swap_sticks": _swap_sticks[0], "swap_sticks_p2": _swap_sticks[1],
 			"sfx_vol": _bus_vol("SFX"), "music_vol": _bus_vol("Music"),
-			"fullscreen": _fullscreen, "window_scale": _win_scale}
+			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _captions}
 	# c4-11: mirror real main so the RESET DEFAULTS row can decide enabled/disabled. Compares the
 	# live snapshot against the authoritative SETTINGS_DEFAULTS (stub SFX/Music start at 8, not the
 	# default 10, so this reads false by default and the row stays an armable destructive row).
@@ -115,6 +116,7 @@ class _StubMain extends Node2D:
 		_set_bus_vol("Music", d["music_vol"])
 		_fullscreen = d["fullscreen"]
 		_win_scale = int(d.get("window_scale", 2))
+		_captions = bool(d.get("captions", true))
 	# c1-19: WINDOW SCALE stub — headless has no display, so cap the ladder at 3x and
 	# apply the clamped absolute scale the menu's ◄/►/Enter drive (records a save).
 	func _max_win_scale() -> int: return 3
@@ -727,18 +729,22 @@ func test_footer_prepends_hints_through_real_draw() -> void:
 	ocap.main = stub
 	ocap.mode = Menu.Mode.OPTS
 	var mi := _row_index(ocap, "motion")
-	var vi := _row_index(ocap, "sfx")
 	var bi := _row_index(ocap, "back")
 	ocap.sel = mi
 	ocap._footer_legend()
 	var tl := _labels_of(ocap.ops)
 	Runner.T.ok("TOGGLE" in tl and tl.find("TOGGLE") < tl.find("SELECT"), "focused toggle row prepends TOGGLE before SELECT")
 	ocap.ops.clear()
+	# audio-identity (judge follow-up): SFX now lives on the AUDIO sub-screen (consolidated off
+	# the flat OPTIONS list) — same footer_legend seam, just a different mode.
+	ocap.mode = Menu.Mode.AUDIO
+	var vi := _row_index(ocap, "sfx")
 	ocap.sel = vi
 	ocap._footer_legend()
 	var vl := _labels_of(ocap.ops)
 	Runner.T.ok("ADJUST" in vl and not ("TOGGLE" in vl), "focused volume row prepends ADJUST (not TOGGLE)")
 	ocap.ops.clear()
+	ocap.mode = Menu.Mode.OPTS   # BACK lives on OPTS itself, not the AUDIO sub-screen
 	ocap.sel = bi
 	ocap._footer_legend()
 	var bl := _labels_of(ocap.ops)
@@ -1065,17 +1071,24 @@ func test_volume_step_is_clamped_both_ways() -> void:
 	Runner.T.eq(Menu.step_level(5, -1), 4, "mid-range step down")
 
 
-# Integration: the real _settings_rows() on a live Menu produces mute-aware rows
-# (headless buses read unmuted, so the stub level shows through as a number+bar).
+# Integration: the real settings rows on a live Menu produce mute-aware rows (headless buses
+# read unmuted, so the stub level shows through as a number+bar). audio-identity (judge
+# follow-up): SFX/MUSIC live on the AUDIO sub-screen now; the OPTIONS opener itself carries a
+# summary label reflecting both levels, checked separately below.
 func test_settings_rows_integration_reflects_level() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.OPTS
-	var rows: Array[Dictionary] = m._settings_rows()
+	m.mode = Menu.Mode.AUDIO
+	var rows: Array[Dictionary] = m._menu_items()
 	Runner.T.eq(rows[0]["label"], "SFX: 8", "SFX row label carries the level")
 	Runner.T.eq(rows[0]["vol"], 8, "SFX bar level matches the label")
 	Runner.T.eq(rows[1]["label"], "MUSIC: 8", "MUSIC row label carries the level")
+	m.mode = Menu.Mode.OPTS
+	var by_id := {}
+	for row in m._settings_rows():
+		by_id[row["id"]] = row
+	Runner.T.eq(by_id["audio"]["label"], "SFX 8 / MUSIC 8", "OPTIONS AUDIO opener summarizes both live levels")
 	m.free()
 	stub.free()
 
@@ -1289,13 +1302,13 @@ func test_activate_and_nav_reach_step_vol() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.OPTS
+	m.mode = Menu.Mode.AUDIO   # audio-identity: SFX now lives on the AUDIO sub-screen
 	var rows: Array[Dictionary] = m._menu_items()
 	var sfx_i := -1
 	for i in rows.size():
 		if rows[i]["id"] == "sfx":
 			sfx_i = i
-	Runner.T.ok(sfx_i >= 0, "OPTS exposes an SFX volume row")
+	Runner.T.ok(sfx_i >= 0, "AUDIO exposes an SFX volume row")
 	m.sel = sfx_i
 	m._activate()      # Enter/click path -> +1 (stateful stub 8 -> 9)
 	m._nav(0, -1)      # ◄ path (keyboard + mouse arrows both call _nav): reads 9 -> 8
@@ -2130,7 +2143,7 @@ func test_enter_clamps_at_max_and_never_wraps_to_mute() -> void:
 	var stub := _StubMain.new()
 	stub._levels["SFX"] = 9
 	m.main = stub
-	m.mode = Menu.Mode.OPTS
+	m.mode = Menu.Mode.AUDIO   # audio-identity: SFX now lives on the AUDIO sub-screen
 	var sfx_i := -1
 	var rows: Array[Dictionary] = m._menu_items()
 	for i in rows.size():
@@ -2234,10 +2247,14 @@ func test_externally_muted_bus_shows_muted_and_step_unmutes_to_one() -> void:
 	mn._sfx = _NullSfx.new()   # inject the no-op cue so _step_vol needs no audio graph
 	var m: Control = Menu.new()
 	m.main = mn
-	m.mode = Menu.Mode.OPTS
-	var rows: Array[Dictionary] = m._settings_rows()
+	# audio-identity (judge follow-up): the raw SFX row (label/vol/muted) now lives on the AUDIO
+	# sub-screen (consolidated off the flat OPTIONS list) — the opener row itself carries a
+	# summary label, not the "vol"/"muted" schema this test pins.
+	m.mode = Menu.Mode.AUDIO
+	var rows: Array[Dictionary] = m._menu_items()
 	Runner.T.eq(rows[0]["label"], "SFX: MUTED", "externally-muted bus reads MUTED, not the stale '8'")
 	Runner.T.eq(rows[0]["vol"], 0, "muted bus shows an empty bar (vol 0), never a full green one")
+	m.mode = Menu.Mode.OPTS   # the rest of this test drives real _step_vol via `m` on OPTS/AUDIO alike
 
 	# Direction matters from the muted floor: ◄ (down) must NOT write — the bus
 	# stays muted at the stored db (step clamps 0 -> 0, a no-op, not a re-mute).
@@ -2881,13 +2898,13 @@ func test_enter_on_externally_muted_row_unmutes_via_activate() -> void:
 	mn._sfx = _NullSfx.new()
 	var m: Control = Menu.new()
 	m.main = mn
-	m.mode = Menu.Mode.OPTS
+	m.mode = Menu.Mode.AUDIO   # audio-identity: SFX now lives on the AUDIO sub-screen
 	var rows: Array[Dictionary] = m._menu_items()
 	var sfx_row := -1
 	for i in rows.size():
 		if rows[i]["id"] == "sfx":
 			sfx_row = i
-	Runner.T.ok(sfx_row >= 0, "OPTS exposes an SFX row to activate")
+	Runner.T.ok(sfx_row >= 0, "AUDIO exposes an SFX row to activate")
 	m.sel = sfx_row
 	m._activate()   # Enter/click path -> _step_vol("SFX", 1)
 	Runner.T.ok(not AudioServer.is_bus_mute(sfx_i), "Enter on the muted row unmutes it")
@@ -3076,7 +3093,7 @@ func test_settings_groups_and_inline_accessibility_state() -> void:
 	Runner.T.eq(by_id["colorblind"]["label"], "COLORBLIND: ON", "COLORBLIND state reads in its row label")
 	Runner.T.eq(by_id["motion"]["grp"], 3, "REDUCE MOTION sits in the ACCESSIBILITY group")
 	Runner.T.eq(by_id["rumble"]["grp"], 2, "RUMBLE sits in the HAPTICS group")
-	Runner.T.eq(by_id["sfx"]["grp"], 1, "SFX sits in the AUDIO group")
+	Runner.T.eq(by_id["audio"]["grp"], 1, "AUDIO opener sits in the AUDIO group")   # audio-identity: SFX+MUSIC consolidated behind this opener
 	Runner.T.eq(by_id["assist"]["grp"], 4, "ASSIST sits in its own GAMEPLAY group, not ACCESSIBILITY")
 	m.free()
 	stub.free()
@@ -3138,9 +3155,11 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 
 
 # c1-09/c1-18: the dedicated OPTIONS screen is settings + CONTROLS now — 7 settings
-# (AUDIO x2, RUMBLE, REDUCE MOTION, COLORBLIND, ASSIST, DISPLAY) + CONTROLS (opens the
-# rebind screen) + RESET DEFAULTS + BACK = 10 rows. Pin that count and prove the screen
-# still clears a >=20px plate and keeps its selected-row glow off the footer.
+# (AUDIO opener, RUMBLE, REDUCE MOTION, COLORBLIND, CAPTIONS, ASSIST, DISPLAY) + CONTROLS
+# (opens the rebind screen) + RESET DEFAULTS + BACK = 10 rows. audio-identity (judge follow-up):
+# SFX + MUSIC consolidated behind the AUDIO opener freed the slot CAPTIONS needed, so the total
+# stays 10. Pin that count and prove the screen still clears a >=20px plate and keeps its
+# selected-row glow off the footer.
 func test_options_settings_only_nine_row_screen_stays_legible() -> void:
 	var n := _row_count(Menu.Mode.OPTS, false)
 	Runner.T.eq(n, 10, "OPTIONS is the settings + CONTROLS 10-row screen (no HALL/HOWTO)")
@@ -3191,7 +3210,7 @@ func test_options_header_text_fits_screen() -> void:
 func test_settings_help_lines_fit_footer() -> void:
 	var f := Art.font()
 	var help_budget := Menu.CANVAS_WIDTH - 24.0
-	for id in ["sfx", "music", "rumble", "motion", "colorblind", "assist",
+	for id in ["sfx", "music", "rumble", "motion", "colorblind", "assist", "captions",
 			"fullscreen", "winscale", "coop", "hard"]:
 		var h := Menu.setting_help(id)
 		Runner.T.ok(h != "", "settings row '%s' has a help description" % id)
@@ -3201,8 +3220,8 @@ func test_settings_help_lines_fit_footer() -> void:
 	for id in ["coop", "hard"]:
 		Runner.T.ok("NEXT RUN" in Menu.setting_help(id) and not ("SAVED" in Menu.setting_help(id)),
 			"run-config row '%s' states it applies next run, not that it is saved" % id)
-	# Navigation openers (DISPLAY/OPTIONS/INFO/CONTROLS) and actions change no value, so no help.
-	for id in ["display", "options", "info", "controls", "reset_defaults", "back", "resume"]:
+	# Navigation openers (DISPLAY/AUDIO/OPTIONS/INFO/CONTROLS) and actions change no value, so no help.
+	for id in ["display", "audio", "options", "info", "controls", "reset_defaults", "back", "resume"]:
 		Runner.T.eq(Menu.setting_help(id), "", "value-less row '%s' has no help description" % id)
 
 
@@ -3397,7 +3416,7 @@ func test_setting_help_mapping_and_persistence_contract() -> void:
 	var defaults: Dictionary = main_script.get_script_constant_map()["SETTINGS_DEFAULTS"]
 	# Menu row id -> the SETTINGS_DEFAULTS key it persists (for the "SAVED" contract).
 	var persisted := {"sfx": "sfx_vol", "music": "music_vol", "rumble": "rumble",
-		"motion": "reduce_motion", "colorblind": "colorblind", "assist": "assist",
+		"motion": "reduce_motion", "colorblind": "colorblind", "assist": "assist", "captions": "captions",
 		"fullscreen": "fullscreen", "winscale": "window_scale"}
 	for key in persisted.values():
 		Runner.T.ok(defaults.has(key), "SETTINGS_DEFAULTS still carries the persisted key '%s'" % key)
@@ -3406,7 +3425,7 @@ func test_setting_help_mapping_and_persistence_contract() -> void:
 	var stub := _StubMain.new()
 	var m := _CaptureMenu.new()
 	m.main = stub
-	for mode_id in [Menu.Mode.OPTS, Menu.Mode.DISP, Menu.Mode.SETUP]:
+	for mode_id in [Menu.Mode.OPTS, Menu.Mode.DISP, Menu.Mode.AUDIO, Menu.Mode.SETUP]:
 		m.mode = mode_id
 		for row in m._menu_items():
 			var id: String = row["id"]
@@ -4279,12 +4298,13 @@ func test_arrow_clicks_route_left_right_actions_via_unhandled_input() -> void:
 	var m: Control = Menu.new()
 	var stub := _StubMain.new()
 	m.main = stub
-	m.mode = Menu.Mode.OPTS
+	# audio-identity (judge follow-up): SFX/MUSIC now live on the AUDIO sub-screen (consolidated
+	# off the flat OPTIONS list) — exercise their arrow clicks there, COLORBLIND stays on OPTS.
+	m.mode = Menu.Mode.AUDIO
 	var rows: Array[Dictionary] = m._menu_items()
 	var sfx_i := _find_row(rows, "sfx")
 	var music_i := _find_row(rows, "music")
-	var cb_i := _find_row(rows, "colorblind")
-	Runner.T.ok(sfx_i >= 0 and music_i >= 0 and cb_i >= 0, "OPTS exposes sfx, music, colorblind rows")
+	Runner.T.ok(sfx_i >= 0 and music_i >= 0, "AUDIO exposes sfx and music rows")
 
 	# VOLUME (two different row Ys): ► steps up, ◄ steps down, each to the right bus.
 	_click_arrow(m, sfx_i, false)     # SFX 8 -> 9
@@ -4310,19 +4330,23 @@ func test_arrow_clicks_route_left_right_actions_via_unhandled_input() -> void:
 	m._unhandled_input(_click_ev(Vector2(ra.end.x + 2.0, ra.get_center().y)))
 	Runner.T.eq(stub._set_calls, [["Music", 9]], "a click in the grow(3) margin past the arrow box still steps it")
 
-	# PLAIN TOGGLE row: either arrow FLIPS it (no direction), via _activate.
-	var before: bool = stub.colorblind
-	_click_arrow(m, cb_i, true)
-	Runner.T.eq(stub.colorblind, not before, "clicking a plain-toggle row's ◄ arrow flips it")
-	_click_arrow(m, cb_i, false)
-	Runner.T.eq(stub.colorblind, before, "clicking its ► arrow flips it back")
-
 	# A click just INSIDE the plate edge (X within BTN/2) is the plate, NOT the arrow:
 	# proves the arrow branch only claims clicks that clear the row's own hit band.
 	stub._set_calls.clear()
 	m.sel = sfx_i
 	m._unhandled_input(_click_ev(Vector2(320.0 - Menu.BTN.x / 2.0 + 1.0, _row_cy(m, sfx_i))))
 	Runner.T.eq(stub._set_calls, [["SFX", 10]], "a click just inside the plate edge is a plate press (up: 9 -> 10), not an arrow")
+
+	# PLAIN TOGGLE row: either arrow FLIPS it (no direction), via _activate. COLORBLIND stays a
+	# flat OPTIONS row (only SFX/MUSIC moved to AUDIO), so switch mode to find it.
+	m.mode = Menu.Mode.OPTS
+	var cb_i := _find_row(m._menu_items(), "colorblind")
+	Runner.T.ok(cb_i >= 0, "OPTS still exposes the colorblind row")
+	var before: bool = stub.colorblind
+	_click_arrow(m, cb_i, true)
+	Runner.T.eq(stub.colorblind, not before, "clicking a plain-toggle row's ◄ arrow flips it")
+	_click_arrow(m, cb_i, false)
+	Runner.T.eq(stub.colorblind, before, "clicking its ► arrow flips it back")
 	m.free()
 	stub.free()
 
