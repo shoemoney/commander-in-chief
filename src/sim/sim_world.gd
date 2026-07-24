@@ -231,7 +231,28 @@ const ARENAS := {
 	4: {"b1": [240, 50], "b2": [368, 50], "props": [    # crossfire-close: barrels
 		["barrel", 290, 120], ["barrel", 306, 120], ["barrel", 322, 120],   # center seam, held
 		["mine", 120, 70], ["mine", 500, 70]]},   # >blast+AABB reach of both locks (test-pinned)
+	# c2-authored-campaign: gate 5 was "final" pre-P3.6 (FINAL_GATE_INDEX==5) and
+	# never ran this branch at all. Now a regular arena wearing the CRASHED
+	# CONVOY (RUINS) landmark — a staggered depth pair (mirrors gate 2's read,
+	# but the mine sits BEHIND b2 instead of in front, so the two staggered
+	# gates don't play identically) with a held center barrel pair.
+	5: {"b1": [340, 130], "b2": [180, 40], "props": [
+		["mine", 190, 90], ["barrel", 320, 110], ["barrel", 336, 110]]},
 }
+# Zone identity (authored-campaign-and-modes): the narrative/UI name for the
+# stretch CULMINATING in each gate — index i is gate (i+1), so this indexes
+# 1:1 with _gate_counter (and with ARENAS' per-sector landmark above). Pure
+# flavor data (name shown by the Chapter Select screen + the zone-arrival
+# banner, blurb shown on the Chapter Select row) — reading it never touches
+# gameplay state, so it carries zero checksum/determinism risk.
+const ZONE_INFO: Array[Dictionary] = [
+	{"name": "STAGING GROUND", "blurb": "The LZ perimeter. Two bunkers, no surprises — learn the rules here."},
+	{"name": "MARSH BASIN", "blurb": "Flooded pipeline flats. Grenades drift on the water; frogmen surface from the fords."},
+	{"name": "BRIDGE GUNSHIP", "blurb": "A lone gunship holds the span — no bunkers here, the boss IS the lock."},
+	{"name": "FOUNDRY WORKS", "blurb": "The ironworks quarter. Heat vents cook the approach on a cycle — time the crossing."},
+	{"name": "CRASHED CONVOY", "blurb": "A derailed supply train wedged across the road, dug in and defended."},
+	{"name": "THE FOUNDRY CORE", "blurb": "The Colossus's throne. No revives past this line — finish it."},
+]
 const GATE_CAMERA_PAD := 60 * F_ONE
 # Flak Vest: absorbs exactly one hit, then a mercy window.
 const VEST_IFRAME_TICKS := 90
@@ -377,11 +398,14 @@ const LANE_BLOCK_WARN := 45                  # 0.75s dust tell before a seal
 const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
 const FORK_GATES := [2, 4]             # the route-fork gates: their approach band is a cover-free decision apron
 # c2 3v BREATHING CURVE: one whole-band calm beat — the pre-Foundry exhale.
-# Band 4 (between gate 4 and the Foundry) stands down its ambush litter:
-# no mines, no barrels, no choke, no blockade. The seg-4+ foundry VENTS stay
-# — the breath has heat, not ambush; a self-telegraphing biome verb IS the
+# The band right before the Foundry stands down its ambush litter: no mines,
+# no barrels, no choke, no blockade. The seg-4+ foundry VENTS stay — the
+# breath has heat, not ambush; a self-telegraphing biome verb IS the
 # "you've arrived somewhere" story. seg >= 2 by value, so golden-inert.
-const CALM_BAND_SEG := 4
+# c2-authored-campaign: tracks FINAL_GATE_INDEX - 1 (4 -> 5 when the finale
+# moved from gate 5 to gate 6) so the exhale always sits immediately before
+# whichever gate is the actual finale.
+const CALM_BAND_SEG := 5
 const RUINS_SEG := 3               # c3 5v: the ruins sector — dog-leg maze chokes, wall-heavy cover, half-speed rubble
 const CHOKE_OFF_LO := 150 * F_ONE
 const CHOKE_OFF_HI := 390 * F_ONE
@@ -416,7 +440,13 @@ const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_C
 # it advances DOWN the map at the players. Armor: grenades only. Three
 # phases by HP thirds. Engaging it triggers the Last Stand rule: no more
 # War Chest revives; on victory the remaining chest converts to score.
-const FINAL_GATE_INDEX := 5
+# c2-authored-campaign: 5 -> 6 gates. Gate 5 (previously final) is now a
+# regular bunker arena wearing the RUINS crashed-convoy landmark that used to
+# be dead code (lm_sector case 3 could never fire -- gate 3 is always the
+# boss gate). The Foundry Colossus finale just moves one gate deeper; nothing
+# else reads this const positionally, so the shift is torture-inert (the
+# 60s campaign torture never streams past gate ~2 -- see test_determinism.gd).
+const FINAL_GATE_INDEX := 6
 const COLOSSUS_HP := 60
 const COLOSSUS_GRENADE_DAMAGE := 4
 const COLOSSUS_SPEED := F_ONE / 2
@@ -465,6 +495,13 @@ const BOSS_SPRAY_INTERVAL_TICKS := 12
 const BOSS_BOUNTY := COIN_BUNKER * 4
 # Mortar volley: the three strike ticks within the second half of the phase cycle.
 const BOSS_MORTAR_TICKS := [200, 240, 280]
+# Boss Rush mode (authored-campaign-and-modes): every gate is a gunship, back
+# to back, capped by the same Foundry Colossus finale campaign ends on — a
+# practice/replay mode for the fights, no field filler between them. Gates are
+# pre-authored in _setup_boss_rush() rather than streamed by _step_camera
+# (which no-ops entirely for this mode — see the mode guard there).
+const BOSS_RUSH_COUNT := 3          # gunships fought before the Colossus caps the run
+const BOSS_RUSH_HP_STEPS: Array[int] = [0, 14, 32]  # non-linear escalation knob
 const ENEMY_BULLET_SPEED := 3 * F_ONE
 const ENEMY_BULLET_TTL_TICKS := 180
 const ENEMY_BULLET_HIT_RADIUS := 8 * F_ONE
@@ -605,6 +642,77 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"triple": false,
 			"flush_cd": 0,   # c3 2v: tall-grass flush-grenade cooldown (0 = clear; runs only while camping grass near enemies)
 		})
+	if game_mode == "boss_rush":
+		# Called AFTER players[] above (not from the game_mode branch further up)
+		# so _scaled_boss_hp sees the real roster -- a 2P Boss Rush escalates HP
+		# the same way every other boss fight in the game does.
+		_setup_boss_rush()
+
+
+func _setup_boss_rush() -> void:
+	## Boss Rush (authored-campaign-and-modes): BOSS_RUSH_COUNT gunships back-
+	## to-back, each escalating per BOSS_RUSH_HP_STEPS (a non-linear per-boss
+	## knob table -- design can retune any single fight without reshaping the
+	## whole ramp), capped by the same Foundry Colossus finale campaign ends on
+	## (colossus engage/victory/last-stand are all mode-agnostic already -- see
+	## _step_colossus). Gates are pre-authored here rather than streamed by
+	## _step_camera (which no-ops entirely for this mode): it's a practice/
+	## replay mode for the boss cadence, with no field filler between fights,
+	## not a shrunk campaign.
+	var gy := -GATE_SPACING
+	for i in BOSS_RUSH_COUNT:
+		_stamp_gunship_gate(gy, BOSS_RUSH_HP_STEPS[i], false)
+		gy -= GATE_SPACING
+	_stamp_final_gate(gy)
+	_world_ended = true
+	_next_gate_y = gy - GATE_SPACING   # belt-and-braces: _step_camera's mode guard already no-ops streaming
+	_gate_counter = BOSS_RUSH_COUNT + 1
+
+
+func jump_to_chapter(target_gate: int) -> void:
+	## Arcade (authored-campaign-and-modes): start already at the mouth of
+	## `target_gate`'s zone (1..FINAL_GATE_INDEX), skipping the chapters before
+	## it, by priming every streaming cursor forward the same distance the
+	## camera would have covered getting there. Safe because every streamed
+	## pick keyed off these cursors (gate arena template, per-sector landmark,
+	## mine/barrel/vent/rock chunk) is a pure function of ABSOLUTE world
+	## position -- a Knuth-hash of a slot/gate index (_mix), never a
+	## sequential rng draw -- so shifting every cursor by an identical amount
+	## reproduces the same *kind* of catch-up streaming a fresh campaign start
+	## does, just deeper in. (Only the gate 2/4 fork content and pickup-kind
+	## rolls consume the shared rng stream sequentially; those come out as
+	## valid but seed-shifted flavor rather than a bit-exact match to a
+	## hypothetical continuous run -- fine for a practice jump, and it changes
+	## nothing about determinism: same seed + same chapter always replays
+	## identically.) No-op for chapter 1 (nothing to skip) and a no-op call
+	## for any non-arcade mode never happens -- main.gd only calls this after
+	## constructing an "arcade" SimWorld.
+	target_gate = clampi(target_gate, 1, FINAL_GATE_INDEX)
+	var skip: int = (target_gate - 1) * GATE_SPACING
+	if skip <= 0:
+		return
+	camera_top -= skip
+	_prev_camera_top = camera_top
+	for p in players:
+		p["y"] -= skip
+	_next_bunker_y -= skip
+	_next_gate_y -= skip
+	_next_tank_y -= skip
+	_next_water_y -= skip
+	_next_mine_y -= skip
+	_next_barrel_y -= skip
+	_next_rock_y -= skip
+	_next_vent_y -= skip
+	_next_rear_y -= skip
+	_gate_counter = target_gate - 1
+
+
+static func zone_info(gate_idx: int) -> Dictionary:
+	## The named zone CULMINATING in gate `gate_idx` (1..FINAL_GATE_INDEX) --
+	## ZONE_INFO index gate_idx-1. Clamped so a caller past the finale (e.g.
+	## "opened+1" right after the last gate) still gets a valid entry instead
+	## of an out-of-bounds crash.
+	return ZONE_INFO[clampi(gate_idx, 1, ZONE_INFO.size()) - 1]
 
 
 func is_solo() -> bool:
@@ -677,6 +785,13 @@ func step(inputs: Array) -> void:
 		if not observer.is_empty():
 			_step_observer()
 		_resolve_strikes()   # grenadier lobs detonate even with no observer
+	elif mode == "boss_rush":
+		_step_boss()
+		_step_colossus()
+		_step_gates()
+		_step_camera()   # ratchet + gate-hold only — the streaming appendix no-ops (mode != campaign)
+		_step_observer()
+		_resolve_strikes()
 	else:
 		_step_spawner()
 		_step_mines()
@@ -3283,6 +3398,12 @@ func _step_camera() -> void:
 		if desired < camera_top:
 			camera_top = desired
 
+	if mode != "campaign" and mode != "arcade":
+		return   # boss_rush pre-authors its whole gate gauntlet in _init; nothing to stream
+		# (endless never reaches here at all -- see step()). Arcade reuses the
+		# FULL campaign streaming machinery below (it's the same authored world,
+		# just entered mid-way via jump_to_chapter()), so it must NOT no-op here.
+
 	# Stream the world ahead of the scroll: bunkers between gates, a gate
 	# arena every GATE_SPACING, a parked tank between each pair of gates.
 	var horizon := camera_top - 2 * VIEW_H
@@ -3315,7 +3436,13 @@ func _step_camera() -> void:
 				# the ring — only the offending mines vanish, not the pattern.
 				var m_py: int = _next_mine_y + od[1] * F_ONE
 				var m_px: int = _arena_margin_x(m_ax + od[0] * F_ONE, m_py)
-				if not _near_stream_bunker(m_px, m_py):
+				# c2-authored-campaign: the calm-band guard above only tests the
+				# ROW ANCHOR -- a chunk member with a large dy offset can still
+				# land inside the calm band from an anchor that sits just
+				# outside it (BARREL_SPACING/MINE_SPACING don't divide
+				# GATE_SPACING evenly, so this can happen for any seed). Re-test
+				# the ACTUAL placement, same as the bunker-exclusion re-test.
+				if not _near_stream_bunker(m_px, m_py) and not _is_calm_band(m_py):
 					mines.append({"x": m_px, "y": m_py, "armed": true})
 		_next_mine_y -= MINE_SPACING
 	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
@@ -3331,10 +3458,12 @@ func _step_camera() -> void:
 			var b_chunk: Array = BARREL_CHUNKS[bh2 % BARREL_CHUNKS.size()]
 			var b_ax: int = (120 + (bh2 >> 8) % 400) * F_ONE
 			for od in b_chunk:
-				# Same per-offset bunker exclusion as the mine stream.
+				# Same per-offset bunker exclusion as the mine stream, plus the
+				# same per-offset calm-band re-test (see the mine stream above
+				# for why the row-anchor-only guard isn't enough).
 				var b_py: int = _next_barrel_y + od[1] * F_ONE
 				var b_px: int = _arena_margin_x(b_ax + od[0] * F_ONE, b_py)
-				if not _near_stream_bunker(b_px, b_py):
+				if not _near_stream_bunker(b_px, b_py) and not _is_calm_band(b_py):
 					barrels.append({"x": b_px, "y": b_py, "armed": true, "fuse_ticks": 0})
 		_next_barrel_y -= BARREL_SPACING
 	# Foundry heat vents (c2 5v): seg-4+ EXCLUSIVE — authored chunks on their
@@ -3443,84 +3572,12 @@ func _step_camera() -> void:
 		_gate_counter += 1
 		if _gate_counter == FINAL_GATE_INDEX:
 			# The end of the road: the Foundry. Nothing streams past it.
-			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
-				"boss": {}, "final": true})
-			# Trench parapets (2v elevation, trimmed of the z-axis): two dug-in
-			# world-bag columns guard the Foundry approach — pure arithmetic,
-			# exempt from the player buy cap via the "world" flag.
-			# parapet = the column x, a non-hashed tag so the colossus phase-rise
-			# hook can COLLAPSE the nearest column (c3 2v) without touching any
-			# player-authored or other world bag. sandbags feed only x,y -> inert.
-			for tcx in [220, 420]:
-				for ti2 in 5:
-					sandbags.append({"x": tcx * F_ONE, "y": _next_gate_y + (280 + ti2 * 14) * F_ONE, "world": 1, "parapet": tcx})
-			# Foundry phase terrain (5v): three live barrel clusters seed the
-			# finale floor — each colossus phase-shift COOKS the nearest one
-			# (the arena itself escalates). Fixed coords, no rng; the torture
-			# never reaches gate 5 -> inert.
-			# Left cluster 100 (not 90) clears the c2 ARENA_MARGIN; the paired
-			# barrel offsets INWARD (-16) so both authored barrels stay 96..544.
-			for fbx in [100, 296, 500]:
-				var fby1: int = _next_gate_y + 140 * F_ONE
-				var fby2: int = _next_gate_y + 148 * F_ONE
-				barrels.append({"x": _arena_margin_x(fbx * F_ONE, fby1), "y": fby1,
-					"armed": true, "fuse_ticks": 0})
-				barrels.append({"x": _arena_margin_x((fbx - 16) * F_ONE, fby2), "y": fby2,
-					"armed": true, "fuse_ticks": 0})
+			_stamp_final_gate(_next_gate_y)
 			_world_ended = true
 			break
 		if _gate_counter % BOSS_GATE_EVERY == 0:
 			# Bridge boss gate: no arena bunkers — the Gunship IS the lock.
-			gates.append({"y": _next_gate_y, "open": false, "b1": {}, "b2": {},
-				"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP), "x": SCREEN_CX,
-					"dir": 1, "phase_t": 0, "gate_y": _next_gate_y}})
-			# Boss-arena cover (5v): four bags in two mirrored lines turn the
-			# strafe half into a COVER fight (mortars ignore cover, so the
-			# volley half stays a movement fight). Reuses the whole sandbag
-			# grammar; torture never streams gate 3 -> inert.
-			# c3 2v BREAKS THE MIRROR: the right pair shifts +40px so the inner
-			# gap no longer centers on 296 — the straight-up center lane is gone
-			# and the gunship arena gets its own asymmetric identity.
-			for bag in GUNSHIP_COVER_BAGS:
-				sandbags.append({"x": bag[0] * F_ONE,
-					"y": _next_gate_y + bag[1] * F_ONE})
-			# c3 2v PARTIAL BRIDGE-SPAN WRECK: a 2-slab kind-2 wall straddling
-			# center (256/336) denies the center run — commit to a flank. Flank
-			# lanes [16,216]/[376,624] >> HULL_CLEARANCE.
-			for bwx in [256, 336]:
-				rocks.append({"x": bwx * F_ONE, "y": _next_gate_y + 160 * F_ONE, "kind": 2})
-			# c3 2v SHORE-BATTERY STUBS: hard cover at both outer walls (kind-0).
-			rocks.append({"x": 60 * F_ONE, "y": _next_gate_y + 90 * F_ONE, "kind": 0})
-			rocks.append({"x": 532 * F_ONE, "y": _next_gate_y + 90 * F_ONE, "kind": 0})
-			# c3 2v ONE-SIDED destructible AMMO CACHE (LEFT only): 2 barrels as a
-			# crate + a free ammo pickup behind — an asymmetric reward pulling you
-			# off the line to the left (grenade the barrels to reach it).
-			barrels.append({"x": 110 * F_ONE, "y": _next_gate_y + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
-			barrels.append({"x": 128 * F_ONE, "y": _next_gate_y + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
-			pickups.append({"x": 120 * F_ONE, "y": _next_gate_y + 150 * F_ONE, "kind": 0, "cost": 0})
-			# c3 2v APPROACH RAMP (gate 3 / Bridge Gunship only — gate 5 already
-			# ships the calm band + parapets + vents). Density ESCALATES toward the
-			# gate so the boss room does not appear with no warning: 1 lone MG nest
-			# far out (+780, ~-2220 seg 2, south of the ~-1957 torture horizon),
-			# then 2 flanking nests closer (+360), each dug in behind a world-bag.
-			# A low checkpoint threshold bag row at +340 is the visible marker
-			# backing the shipped BRIDGE GUNSHIP banner. Gate-relative, no rng.
-			_spawn_mg_nest(SCREEN_CX, _next_gate_y + 780 * F_ONE)
-			sandbags.append({"x": SCREEN_CX, "y": _next_gate_y + 800 * F_ONE, "world": 1})
-			for nsx in [SCREEN_CX - 90 * F_ONE, SCREEN_CX + 90 * F_ONE]:
-				_spawn_mg_nest(nsx, _next_gate_y + 360 * F_ONE)
-				sandbags.append({"x": nsx, "y": _next_gate_y + 380 * F_ONE, "world": 1})
-			# Threshold checkpoint row (~1 screen south): a low bag line with a
-			# center gap >= HULL_CLEARANCE so the crossing reads as a doorway.
-			for thx in [SCREEN_CX - 130 * F_ONE, SCREEN_CX + 130 * F_ONE]:
-				sandbags.append({"x": thx, "y": _next_gate_y + 340 * F_ONE, "world": 1})
-			# c3-12 r2 CALM STAGING BEAT (judge TO_TEN): an authored hazard-free
-			# pocket immediately south of the threshold — two staging bags far to
-			# the sides mark a regroup point with a wide-open center and NO nests/
-			# barrels between +420 and +500, so the calm reads as its own beat
-			# before the doorway rather than an implied gap.
-			for stx in [SCREEN_CX - 190 * F_ONE, SCREEN_CX + 190 * F_ONE]:
-				sandbags.append({"x": stx, "y": _next_gate_y + 460 * F_ONE, "world": 1})
+			_stamp_gunship_gate(_next_gate_y, 0, true)
 			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
 			_stamp_stretch_setpieces()
 		else:
@@ -3544,11 +3601,15 @@ func _step_camera() -> void:
 			# c4 2v PER-SECTOR LANDMARK (was a 1-in-2 random ruined wall): a UNIQUE
 			# authored solid mass keyed by SECTOR so a large landmark tells you which
 			# sector you are in (a routing anchor, not a random wall) — sector 2 marsh
-			# = a PIPELINE run (kind-2), sector 4 foundry = a CRANE hero pair (kind-3);
-			# other sectors keep the classic wall. Seg>=2 only (the ~-1957 stream
-			# horizon leaves gate 2+ unstreamed in torture -> goldens byte-identical);
-			# every lane clears HULL_CLEARANCE by the 80px kind-2 pitch; solidity is
-			# free via the rock move-revert. Opposite flank to the hero wreck.
+			# = a PIPELINE run (kind-2), sector 4 foundry = a CRANE hero pair (kind-3),
+			# sector 5 = a crashed RUINS convoy (kind-2 line). Seg>=2 only (the ~-1957
+			# stream horizon leaves gate 2+ unstreamed in torture -> goldens byte-
+			# identical); every lane clears HULL_CLEARANCE by the 80px kind-2 pitch;
+			# solidity is free via the rock move-revert. Opposite flank to the hero wreck.
+			# c2-authored-campaign: the RUINS case moves off dead case-3 (gate 3 is
+			# ALWAYS the boss gate -- BOSS_GATE_EVERY -- so lm_sector could never be 3;
+			# this landmark had never once fired) onto case-5, which the FINAL_GATE_INDEX
+			# 5->6 shift just turned into a real, reachable bunker arena.
 			if absi(_next_gate_y) / GATE_SPACING >= COVER_VARIETY_SEG:
 				var lm_sector: int = absi(_next_gate_y) / GATE_SPACING
 				var wall_side: int = 460 if _gate_counter % 2 == 1 else 60   # opposite the hero
@@ -3561,24 +3622,37 @@ func _step_camera() -> void:
 						var pg: int = _mix(_gate_counter, 907) % 3
 						for ws in 3:
 							if ws != pg:
-								rocks.append({"x": (wall_side + (ws - 1) * 80) * F_ONE, "y": lm_y, "kind": 2})
-					3:
-						# RUINS crashed-train: a 4-slab kind-2 LINE that dovetails the maze,
+								rocks.append({"x": _arena_margin_x((wall_side + (ws - 1) * 80) * F_ONE, lm_y), "y": lm_y, "kind": 2})
+					4:
+						# FOUNDRY crane: a kind-3 hero focal PAIR (a tall recognizable mass).
+						rocks.append({"x": _arena_margin_x(wall_side * F_ONE, lm_y), "y": lm_y, "kind": 3})
+						rocks.append({"x": _arena_margin_x((wall_side + inward) * F_ONE, lm_y), "y": lm_y - 44 * F_ONE, "kind": 3})
+					5:
+						# RUINS crashed-convoy: a 4-slab kind-2 LINE that dovetails the maze,
 						# 76px pitch with a hash-dropped car (the gap threads a hull lane).
+						# c2-authored-campaign: gate 5 sits inside the COLOSSUS_ARENA_SEG
+						# escape corridor (band >= 4) for the first time now that it's a
+						# real arena, not the old truncation point -- the 228px-wide line
+						# (4 slabs @ 76px pitch) can reach past the ARENA_MARGIN corridor
+						# at either wall_side, so it's the one landmark that needs the
+						# same clamp the ambient mine/barrel streams already carry. Its row
+						# also sits at +160 (not the shared +220) -- test-swept against the
+						# ambient ROCK stream's own hero-kind pieces at every gate-5 seed the
+						# opposite-flank suite checks (3/43/97): +220 lands within 200y of an
+						# unrelated ambient kind-3 piece for seed 3.
+						var lm_y5: int = _next_gate_y + 160 * F_ONE
 						var tg: int = _mix(_gate_counter, 907) % 4
 						for ws in 4:
 							if ws != tg:
-								rocks.append({"x": (wall_side + (ws - 1) * 76) * F_ONE, "y": lm_y, "kind": 2})
-					4:
-						# FOUNDRY crane: a kind-3 hero focal PAIR (a tall recognizable mass).
-						rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 3})
-						rocks.append({"x": (wall_side + inward) * F_ONE, "y": lm_y - 44 * F_ONE, "kind": 3})
+								rocks.append({"x": _arena_margin_x((wall_side + (ws - 1) * 76) * F_ONE, lm_y5), "y": lm_y5, "kind": 2})
 					_:
-						# default OFFSET STACK: three kind-2 slabs stepped diagonally so its
-						# mass reads as strongly as the pipeline/train lines.
-						rocks.append({"x": wall_side * F_ONE, "y": lm_y, "kind": 2})
-						rocks.append({"x": (wall_side + inward) * F_ONE, "y": lm_y - 24 * F_ONE, "kind": 2})
-						rocks.append({"x": (wall_side + inward + inward) * F_ONE, "y": lm_y - 48 * F_ONE, "kind": 2})
+						# Belt-and-braces default (unreachable today: every arena-gate
+						# lm_sector is 1 [excluded by the guard above], 2, 4 or 5, all
+						# named above) -- an offset stack so a future arena gate never
+						# silently drops the landmark grammar.
+						rocks.append({"x": _arena_margin_x(wall_side * F_ONE, lm_y), "y": lm_y, "kind": 2})
+						rocks.append({"x": _arena_margin_x((wall_side + inward) * F_ONE, lm_y), "y": lm_y - 24 * F_ONE, "kind": 2})
+						rocks.append({"x": _arena_margin_x((wall_side + inward + inward) * F_ONE, lm_y), "y": lm_y - 48 * F_ONE, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
 					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
@@ -3728,7 +3802,13 @@ func _step_camera() -> void:
 			"fuel": TANK_FUEL_TICKS, "burn_ticks": 0,
 			"fire_cd": 0, "occupant": -1,
 		})
-		if absi(_next_tank_y / GATE_SPACING) % 2 == 1:
+		# c2-authored-campaign: this pocket had no calm-band guard at all (the
+		# OTHER anti-armor barrel pair a few lines down does) -- harmless while
+		# CALM_BAND_SEG==4 never lined up with an odd tank row for the swept
+		# seeds, but CALM_BAND_SEG==5 does (tank rows land on every *1000 from
+		# a -750 base, so an odd row can coincide with any band). Same guard
+		# as the sibling pair below, for the same reason.
+		if absi(_next_tank_y / GATE_SPACING) % 2 == 1 and not _is_calm_band(_next_tank_y):
 			# Cover pocket (2v): a barrel pair tucked beside every other parked
 			# tank — hard cover with a live-ordnance tradeoff.
 			barrels.append({"x": SCREEN_CX - 46 * F_ONE, "y": _next_tank_y + 8 * F_ONE,
@@ -3831,6 +3911,97 @@ func _step_camera() -> void:
 		_rear_warn_ticks = REAR_WARN_TICKS
 		events.append({"t": "rear_warn", "x": rear_x, "y": camera_top + 380 * F_ONE})
 		_next_rear_y -= REAR_TRICKLE_SPACING
+
+
+func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void:
+	## Bridge Gunship gate: no arena bunkers -- the Gunship IS the lock. Shared
+	## by the campaign gate-3 stream and Boss Rush (authored-campaign-and-
+	## modes), which restamps this exact arena back-to-back with an escalating
+	## hp_bonus per boss (via BOSS_RUSH_HP_STEPS) -- DRY, and it means Boss Rush
+	## fights in the SAME authored room the campaign gunship does, not a
+	## stripped-down stand-in. include_approach skips the MG-nest approach ramp
+	## for Boss Rush (a deliberate "no field filler between fights" design
+	## choice -- see _setup_boss_rush) while the campaign stream keeps it.
+	gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
+		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
+			"dir": 1, "phase_t": 0, "gate_y": gy}})
+	# Boss-arena cover (5v): four bags in two mirrored lines turn the
+	# strafe half into a COVER fight (mortars ignore cover, so the
+	# volley half stays a movement fight). Reuses the whole sandbag
+	# grammar; torture never streams gate 3 -> inert.
+	# c3 2v BREAKS THE MIRROR: the right pair shifts +40px so the inner
+	# gap no longer centers on 296 — the straight-up center lane is gone
+	# and the gunship arena gets its own asymmetric identity.
+	for bag in GUNSHIP_COVER_BAGS:
+		sandbags.append({"x": bag[0] * F_ONE, "y": gy + bag[1] * F_ONE})
+	# c3 2v PARTIAL BRIDGE-SPAN WRECK: a 2-slab kind-2 wall straddling
+	# center (256/336) denies the center run — commit to a flank. Flank
+	# lanes [16,216]/[376,624] >> HULL_CLEARANCE.
+	for bwx in [256, 336]:
+		rocks.append({"x": bwx * F_ONE, "y": gy + 160 * F_ONE, "kind": 2})
+	# c3 2v SHORE-BATTERY STUBS: hard cover at both outer walls (kind-0).
+	rocks.append({"x": 60 * F_ONE, "y": gy + 90 * F_ONE, "kind": 0})
+	rocks.append({"x": 532 * F_ONE, "y": gy + 90 * F_ONE, "kind": 0})
+	# c3 2v ONE-SIDED destructible AMMO CACHE (LEFT only): 2 barrels as a
+	# crate + a free ammo pickup behind — an asymmetric reward pulling you
+	# off the line to the left (grenade the barrels to reach it).
+	barrels.append({"x": 110 * F_ONE, "y": gy + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
+	barrels.append({"x": 128 * F_ONE, "y": gy + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
+	pickups.append({"x": 120 * F_ONE, "y": gy + 150 * F_ONE, "kind": 0, "cost": 0})
+	if not include_approach:
+		return
+	# c3 2v APPROACH RAMP (gate 3 / Bridge Gunship only — the final gate
+	# already ships the calm band + parapets + vents). Density ESCALATES
+	# toward the gate so the boss room does not appear with no warning: 1
+	# lone MG nest far out (+780, ~-2220 seg 2, south of the ~-1957 torture
+	# horizon), then 2 flanking nests closer (+360), each dug in behind a
+	# world-bag. A low checkpoint threshold bag row at +340 is the visible
+	# marker backing the shipped BRIDGE GUNSHIP banner. Gate-relative, no rng.
+	_spawn_mg_nest(SCREEN_CX, gy + 780 * F_ONE)
+	sandbags.append({"x": SCREEN_CX, "y": gy + 800 * F_ONE, "world": 1})
+	for nsx in [SCREEN_CX - 90 * F_ONE, SCREEN_CX + 90 * F_ONE]:
+		_spawn_mg_nest(nsx, gy + 360 * F_ONE)
+		sandbags.append({"x": nsx, "y": gy + 380 * F_ONE, "world": 1})
+	# Threshold checkpoint row (~1 screen south): a low bag line with a
+	# center gap >= HULL_CLEARANCE so the crossing reads as a doorway.
+	for thx in [SCREEN_CX - 130 * F_ONE, SCREEN_CX + 130 * F_ONE]:
+		sandbags.append({"x": thx, "y": gy + 340 * F_ONE, "world": 1})
+	# c3-12 r2 CALM STAGING BEAT (judge TO_TEN): an authored hazard-free
+	# pocket immediately south of the threshold — two staging bags far to
+	# the sides mark a regroup point with a wide-open center and NO nests/
+	# barrels between +420 and +500, so the calm reads as its own beat
+	# before the doorway rather than an implied gap.
+	for stx in [SCREEN_CX - 190 * F_ONE, SCREEN_CX + 190 * F_ONE]:
+		sandbags.append({"x": stx, "y": gy + 460 * F_ONE, "world": 1})
+
+
+func _stamp_final_gate(gy: int) -> void:
+	## The end of the road: the Foundry. Nothing streams past it in campaign;
+	## Boss Rush (authored-campaign-and-modes) stamps this same finale to cap
+	## its own gauntlet, so both modes end on an identical Colossus arena.
+	gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "boss": {}, "final": true})
+	# Trench parapets (2v elevation, trimmed of the z-axis): two dug-in
+	# world-bag columns guard the Foundry approach — pure arithmetic,
+	# exempt from the player buy cap via the "world" flag.
+	# parapet = the column x, a non-hashed tag so the colossus phase-rise
+	# hook can COLLAPSE the nearest column (c3 2v) without touching any
+	# player-authored or other world bag. sandbags feed only x,y -> inert.
+	for tcx in [220, 420]:
+		for ti2 in 5:
+			sandbags.append({"x": tcx * F_ONE, "y": gy + (280 + ti2 * 14) * F_ONE, "world": 1, "parapet": tcx})
+	# Foundry phase terrain (5v): three live barrel clusters seed the
+	# finale floor — each colossus phase-shift COOKS the nearest one
+	# (the arena itself escalates). Fixed coords, no rng; the torture
+	# never reaches the final gate -> inert.
+	# Left cluster 100 (not 90) clears the c2 ARENA_MARGIN; the paired
+	# barrel offsets INWARD (-16) so both authored barrels stay 96..544.
+	for fbx in [100, 296, 500]:
+		var fby1: int = gy + 140 * F_ONE
+		var fby2: int = gy + 148 * F_ONE
+		barrels.append({"x": _arena_margin_x(fbx * F_ONE, fby1), "y": fby1,
+			"armed": true, "fuse_ticks": 0})
+		barrels.append({"x": _arena_margin_x((fbx - 16) * F_ONE, fby2), "y": fby2,
+			"armed": true, "fuse_ticks": 0})
 
 
 func _stamp_stretch_setpieces() -> void:

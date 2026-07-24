@@ -5,7 +5,10 @@ extends Control
 ## knows nothing about menus. Keyboard (W/S + Enter, Esc) and pad
 ## (dpad + A, Start) navigation.
 
-enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND, DISP }
+# authored-campaign-and-modes: MODES (the SETUP-hub row for BOSS RUSH /
+# ARCADE / CHAPTER SELECT) and CHAPTERS (the chapter-picker CHAPTER SELECT
+# opens) join the hub family alongside SETUP/INFO/OPTS.
+enum Mode { HIDDEN, TITLE, PAUSE, HALL, HOWTO, OPTS, SETUP, INFO, REBIND, DISP, MODES, CHAPTERS }
 
 # 222 = 30px icon gutter + the widest pause label ("ASSIST (2-HIT): OFF") at
 # 11px pixel-font + padding — 190 ellipsized toggle VALUES once the gutter landed.
@@ -54,7 +57,10 @@ const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
 # c4-13: the right x the fixed PAGE x/y position tag is right-aligned to, on the tab row (y66).
 # 528 mirrors the filter tabs' left margin (x112) for a symmetric header — filter left, page right —
 # and sits well clear of the ENDLESS tab + its cycle arrow, so the tag never moves or collides.
-const HALL_PAGE_TAG_R := 528.0
+# authored-campaign-and-modes: nudged 528 -> 560 -- a 4th filter tab (RUSH)
+# widened the tab row enough that 528 no longer cleared the rightmost tab's
+# cycle arrow (test-pinned in test_hall_page_tag_and_footer_layout).
+const HALL_PAGE_TAG_R := 560.0
 const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint under colorblind mode so the white-alpha sprite keeps body
 
 # c4-07: the two shared center-banner status tints. Single-sourced HERE (the class main already
@@ -69,7 +75,7 @@ var mode: int = Mode.TITLE
 var sel := 0
 var main: Node2D
 var _confirm := -1   # index of a destructive item awaiting a 2nd press
-var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS
+var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS, 3 = BOSS RUSH
 var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown (up/down pages)
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
 var _howto_page := 0    # c3-05/c4-06/c4-09: which HOW-TO-PLAY tab (0 CONTROLS / 1 WAR CHEST / 2 MODES / 3 ENEMIES / 4 ENDLESS); left/right/wheel or tab-click pages it
@@ -851,10 +857,35 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		return [
 			{"id": "coop", "label": "CO-OP: %s" % ("ON" if main._two_players else "OFF"), "destructive": false, "on": main._two_players, "grp": 0},
 			{"id": "hard", "label": "NG+ HARD: %s" % ("ON" if main._hard else "OFF"), "destructive": false, "on": main._hard, "grp": 0},
+			# authored-campaign-and-modes: MODES joins OPTIONS/INFO as a third
+			# secondary screen — BOSS RUSH / ARCADE / CHAPTER SELECT are real
+			# menu entries here, not just the F3/F4 debug toggles.
+			{"id": "modes", "label": "MODES", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "info", "label": "INFO", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 2},
 		]
+	if mode == Mode.MODES:
+		# authored-campaign-and-modes: the mode picker. BOSS RUSH and ARCADE
+		# start immediately (own leaderboard tab / chapter-1 quick-play);
+		# CHAPTER SELECT opens the per-chapter picker below.
+		return [
+			{"id": "boss_rush", "label": "BOSS RUSH", "destructive": false, "grp": 0},
+			{"id": "arcade", "label": "ARCADE", "destructive": false, "grp": 0},
+			{"id": "chapter_select", "label": "CHAPTER SELECT", "destructive": false, "grp": 0, "submenu": true},
+			{"id": "back", "label": "BACK", "destructive": false, "grp": 1},
+		]
+	if mode == Mode.CHAPTERS:
+		# authored-campaign-and-modes: one row per authored zone (SimWorld.
+		# ZONE_INFO) — picking one starts an Arcade run at that gate via
+		# main.start_arcade(gate), which calls SimWorld.jump_to_chapter().
+		var citems: Array[Dictionary] = []
+		for gi in SimWorld.FINAL_GATE_INDEX:
+			var zi: Dictionary = SimWorld.zone_info(gi + 1)
+			citems.append({"id": "ch%d" % (gi + 1), "label": "%d. %s" % [gi + 1, zi["name"]],
+				"destructive": false, "grp": 0})
+		citems.append({"id": "back", "label": "BACK", "destructive": false, "grp": 1})
+		return citems
 	if mode == Mode.INFO:
 		# c1-09: the look-back screens, split off OPTIONS so settings stand alone. HALL
 		# OF FAME + HOW TO PLAY + (when a replay exists) WATCH LAST RUN, then BACK. All
@@ -1340,6 +1371,13 @@ func _row_icon(id: String) -> String:
 		"endless": return "mi_combat"
 		"daily": return "mi_timer"
 		"quit": return "mi_cancel"
+		# authored-campaign-and-modes
+		"modes": return "mi_combat"
+		"boss_rush": return "mi_combat"
+		"arcade": return "mi_play"
+		"chapter_select": return "mi_book"
+	if id.begins_with("ch") and id.substr(2).is_valid_int():
+		return "mi_play"   # CHAPTER SELECT rows
 	return ""
 
 
@@ -1985,7 +2023,7 @@ func _nav(move: int, hmove: int) -> void:
 			_mark_dirty()
 		return   # HALL vertical nav OWNS paging — always consume it, even at a boundary, so it never falls through to the 1-row list nav below
 	if mode == Mode.HALL and hmove != 0:
-		_hall_filter = wrapi(_hall_filter + hmove, 0, 3)
+		_hall_filter = wrapi(_hall_filter + hmove, 0, HALL_FILTER_NAMES.size())
 		_hall_page = 0   # a new filter is a fresh list — always start on page 1 (keeps the "OF N" counter honest)
 		_refresh_page_hover()   # page reset to 0 disables PREV — drop a stale hover on it
 		# _tab_hover is pointer-owned — leave it. It tracks where the cursor
@@ -2363,6 +2401,8 @@ static func back_dest(mode_id: int) -> Dictionary:
 		Mode.OPTS: return {"mode": Mode.SETUP, "sel": "options"}   # c2-04: fallback opener; _parent overrides via _opts_parent
 		Mode.REBIND: return {"mode": Mode.OPTS, "sel": "controls"}   # c1-18: rebind screen hangs off the OPTIONS CONTROLS row — BACK restores focus to that real row
 		Mode.DISP: return {"mode": Mode.OPTS, "sel": "display"}   # c1-19: DISPLAY sub-screen hangs off the OPTIONS DISPLAY row — BACK restores focus to it
+		Mode.MODES: return {"mode": Mode.SETUP, "sel": "modes"}   # authored-campaign-and-modes: MODES hangs off the SETUP hub
+		Mode.CHAPTERS: return {"mode": Mode.MODES, "sel": "chapter_select"}   # CHAPTER SELECT hangs off the MODES screen
 		_: return {}
 
 
@@ -2669,6 +2709,13 @@ func _activate() -> void:
 		open(d["mode"], d["sel"])
 		return
 	var id: String = _menu_items()[sel]["id"]
+	if mode == Mode.CHAPTERS and id.begins_with("ch"):
+		# authored-campaign-and-modes: "ch1".."ch<FINAL_GATE_INDEX>" rows —
+		# jump straight into main.start_arcade at that gate. "back" doesn't
+		# match this prefix, so it still falls through to the generic BACK
+		# handling below.
+		main.start_arcade(int(id.substr(2)))
+		return
 	if mode == Mode.REBIND:
 		# c1-18: BACK climbs to OPTIONS; RESET CONTROLS (two-press destructive) reverts
 		# every verb to its ship key; any other row is a verb — arm the key-capture listen
@@ -2716,6 +2763,10 @@ func _activate() -> void:
 				_opts_parent = mode
 				open(Mode.OPTS)
 			"info": open(Mode.INFO)   # c2-04: reached from the SETUP hub; BACK returns there
+			"modes": open(Mode.MODES)   # authored-campaign-and-modes: reached from the SETUP hub; BACK returns there
+			"boss_rush": main.start_boss_rush()   # authored-campaign-and-modes: real menu entry (was F4-only)
+			"arcade": main.start_arcade(1)        # quick-play chapter 1; CHAPTER SELECT below picks any of the 6
+			"chapter_select": open(Mode.CHAPTERS)
 			"controls": open(Mode.REBIND)   # c1-18: CONTROLS row opens the rebind screen
 			"back":
 				if mode == Mode.OPTS and _opts_dirty:
@@ -3255,8 +3306,15 @@ func _draw() -> void:
 		_center_text("SETUP", HUB_HEADER_Y, 22, HEADER_COL)
 		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
 		# the OPTIONS and INFO screens.
-		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO", HUB_SUBTITLE_Y, 8,
+		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO  ·  MODES", HUB_SUBTITLE_Y, 8,
 			SUBTITLE_COL)
+	elif mode == Mode.MODES:
+		# authored-campaign-and-modes.
+		_center_text("MODES", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("BOSS RUSH  ·  ARCADE  ·  CHAPTER SELECT", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.CHAPTERS:
+		_center_text("CHAPTER SELECT", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	else:
 		_center_text("PAUSED", PAUSE_HEADER_Y, 22, HEADER_COL)
 		# Pause doubles as a status check — the run so far.
@@ -3266,8 +3324,15 @@ func _draw() -> void:
 			for g in s.gates:
 				if g["open"]:
 					opened += 1
-			var line := "WAVE %d" % s.wave if s.mode == "endless" \
-				else "SECTOR %d/5  ·  %dm" % [mini(opened + 1, 5), -Fixed.to_int(s.camera_top) / 10]
+			var line: String
+			if s.mode == "endless":
+				line = "WAVE %d" % s.wave
+			elif s.mode == "boss_rush":
+				# authored-campaign-and-modes: gunships downed, not a sector count.
+				line = "GUNSHIPS %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
+			else:
+				line = "SECTOR %d/%d  ·  %dm" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
+					-Fixed.to_int(s.camera_top) / 10]
 			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
 				PAUSE_SUBTITLE_Y, 10, SUBTITLE_COL)
 			if main._current_seed > 0:
@@ -4009,7 +4074,7 @@ func _refresh_page_hover() -> void:
 func _hall_tab_rects() -> Array[Rect2]:
 	# The same measured tab layout _draw_hall renders, as clickable rects —
 	# keep the width math in lockstep with the loop below.
-	return _tab_rects_for(["ALL", "CAMPAIGN", "ENDLESS"])
+	return _tab_rects_for(HALL_FILTER_NAMES)
 
 
 func _howto_tab_rects() -> Array[Rect2]:
@@ -4036,8 +4101,19 @@ func _tab_rects_for(names: Array) -> Array[Rect2]:
 	return out
 
 
+# authored-campaign-and-modes: Boss Rush earns its own Hall-of-Fame filter
+# (leaderboard separation, judge TO_TEN #1) instead of pooling into CAMPAIGN
+# alongside every other non-endless mode. Single-sourced so _hall_tab_rects
+# and _draw_hall's own tab draw can never disagree on the tab set.
+# "RUSH" not "BOSS RUSH" -- the tab strip is a terse ALL/CAMPAIGN/ENDLESS
+# grammar; a 4th long tab crowds the right-aligned PAGE x/y tag off a 640px
+# canvas (test-pinned). The MODE column cell still spells out "BOSS RUSH" in
+# full -- only the compact tab label is short.
+const HALL_FILTER_NAMES := ["ALL", "CAMPAIGN", "ENDLESS", "RUSH"]
+
+
 func _draw_hall() -> void:
-	var names := ["ALL", "CAMPAIGN", "ENDLESS"]
+	var names := HALL_FILTER_NAMES
 	_center_text("HALL OF FAME", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
 	# Persistent filter tab row — the old single "◄ NAME ►" line hid the other
 	# two choices, so nobody knew left/right cycled anything. Selected tab is
@@ -4088,9 +4164,9 @@ func _draw_hall() -> void:
 	# header/cell at draw size + 14px gutters, after the right-aligned SCORE
 	# column (right edge 214); hardcoded offsets drifted on every font change.
 	var mode_w := f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	mode_w = maxf(mode_w, f.get_string_size("CAMPAIGN", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	mode_w = maxf(mode_w, f.get_string_size("BOSS RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
 	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	for s in ["SECTOR 9", "VICTORY", "WAVE 99"]:
+	for s in ["SECTOR 9", "VICTORY", "WAVE 99", "BOSS 3/3"]:
 		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
 	var streak_x := 214.0 + 14.0 + mode_w + 14.0 + reach_w + 14.0
 	var col_x := [112.0, 148.0, 214.0 + 14.0, 214.0 + 14.0 + mode_w + 14.0, streak_x]
@@ -4175,9 +4251,21 @@ func _draw_hall() -> void:
 			var run: Dictionary = rows[i]
 			var row := i - start   # 0..HALL_PAGE_ROWS-1 within this page (drives the y baseline)
 			var is_latest := i == latest_idx
-			var mode_s: String = "ENDLESS" if run.get("mode", "campaign") == "endless" else "CAMPAIGN"
-			var reached: String = "WAVE %d" % run.get("wave", 0) if run.get("mode", "campaign") == "endless" \
-				else ("VICTORY" if run.get("won", false) else "SECTOR %d" % run.get("sector", 0))
+			var run_mode: String = run.get("mode", "campaign")
+			var mode_s: String
+			match run_mode:
+				"endless": mode_s = "ENDLESS"
+				"boss_rush": mode_s = "BOSS RUSH"
+				"arcade": mode_s = "ARCADE"
+				_: mode_s = "CAMPAIGN"
+			var reached: String
+			if run_mode == "endless":
+				reached = "WAVE %d" % run.get("wave", 0)
+			elif run_mode == "boss_rush":
+				# authored-campaign-and-modes: gunships downed, not a sector.
+				reached = "VICTORY" if run.get("won", false) else "BOSS %d/%d" % [run.get("bosses", 0), SimWorld.BOSS_RUSH_COUNT]
+			else:
+				reached = "VICTORY" if run.get("won", false) else "SECTOR %d" % run.get("sector", 0)
 			var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
 			if is_latest:
 				col = Color(1.0, 0.86, 0.5)   # the run you just finished — warm recency tint
@@ -4301,12 +4389,24 @@ func _hall_rows() -> Array:
 	# The score-ordered runs visible under the current filter (ALL shows all). The
 	# .get fallbacks guard old save rows that predate the "mode" key. Single-sourced
 	# so paging math (_hall_pages / _nav) and _draw_hall can't disagree on the count.
+	# authored-campaign-and-modes: CAMPAIGN used to mean "not endless" (so a
+	# Boss Rush run quietly polluted the campaign board — no real leaderboard
+	# separation). Now each of the three run-producing modes gets its own
+	# strict tab; ALL (filter 0) is still everything, unfiltered (Arcade rows
+	# show up there only — a small board doesn't need its own tab yet).
 	var rows: Array = []
 	for run in main.hall:
-		if _hall_filter == 1 and run.get("mode", "campaign") == "endless":
-			continue
-		if _hall_filter == 2 and run.get("mode", "campaign") != "endless":
-			continue
+		var run_mode: String = run.get("mode", "campaign")
+		match _hall_filter:
+			1:
+				if run_mode != "campaign":
+					continue
+			2:
+				if run_mode != "endless":
+					continue
+			3:
+				if run_mode != "boss_rush":
+					continue
 		rows.append(run)
 	return rows
 
