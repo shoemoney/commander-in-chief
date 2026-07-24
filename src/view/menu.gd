@@ -106,6 +106,11 @@ var _stick_x := 0       # -1/1 while pushed past 0.55, re-arms below 0.45
 var _stick_y := 0
 var _stick_rep := 0.0   # countdown to the next held-stick auto-repeat step
 var _nav_frame := -1    # frame stamp: one stick nav per frame (diagonal guard)
+var _kbpad_nav_frame := -100   # ui-loop input: frame of the last kb/pad/wheel nav — hover-select is
+                               # locked out for HOVER_NAV_LOCKOUT frames after, so a WINDOW SCALE step
+                               # (which resizes the window and WARPS the pointer) can't emit a spurious
+                               # motion event that snaps selection off the row being adjusted.
+const HOVER_NAV_LOCKOUT := 10  # ~167ms @60fps
 var _confirm_t := 0.0   # armed destructive row disarms when this runs out
 var _reset_flash := 0.0 # c1-09: "DEFAULTS RESTORED" success banner countdown after RESET DEFAULTS fires
 var _seed_flash := 0.0  # c1-14: red-flash the CHALLENGE SEED hint after an empty-clipboard press (deny feedback)
@@ -1402,8 +1407,13 @@ func _rebind_capture(ev: InputEvent) -> bool:
 	# chord never formed. START never has that race.) START is therefore the only pad button NOT
 	# bindable; the d-pad and every face/shoulder button are still free to bind.
 	var pad_cancel: bool = pad_ev and ev.button_index == JOY_BUTTON_START
+	# ui-loop input: a player who reached this row with the MOUSE could enter capture (a left-click
+	# activates the row) but had no mouse way back out — only Esc/START. Right-click cancels, so the
+	# mouse is a complete path in and out. (Left-click stays swallowed below: it would otherwise read
+	# as an attempt to bind a mouse button, which the map doesn't support.)
+	var mouse_cancel: bool = ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT
 	if (ev is InputEventKey and ev.pressed and not ev.echo and ev.keycode == KEY_ESCAPE) \
-			or pad_cancel:
+			or pad_cancel or mouse_cancel:
 		_end_capture()
 		main._sfx.play("deny", -8.0)
 		_notice("CANCELLED")
@@ -1856,7 +1866,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_best_hover = bo
 					_mark_dirty()
 			var hrow := _row_at(ev.position)
-			if hrow >= 0 and hrow != sel:
+			# ui-loop input: ignore hover-select for a beat after a kb/pad/wheel nav. Stepping WINDOW
+			# SCALE (or toggling fullscreen) resizes the window and warps the OS pointer relative to the
+			# content, emitting a motion event that used to snap selection off the row mid-adjust (and
+			# replay the nav sfx). A deliberate mouse move after the lockout still hovers normally.
+			if hrow >= 0 and hrow != sel and Engine.get_process_frames() - _kbpad_nav_frame >= HOVER_NAV_LOCKOUT:
 				# Full feedback parity: funnel the hover through _nav so it plays
 				# the nav sfx, clears the rail pulse, and disarms an armed _confirm
 				# audibly, exactly like pad/kb/wheel. The old inline sel = hrow
@@ -1990,6 +2004,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 				_nav(wdir, 0)
 		return
 	if move != 0 or hmove != 0:
+		_kbpad_nav_frame = Engine.get_process_frames()   # ui-loop: stamp kb/pad/wheel nav so a window-resize pointer-warp can't hover-steal (see the mouse-motion branch)
 		_nav(move, hmove)
 	elif act:
 		_press()
