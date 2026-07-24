@@ -28,3 +28,7 @@ art_candidates/**
 # first --import never scans whatever raw candidate renders happen to be
 # sitting in that scratch dir (they're throwaway and not always valid PNGs).
 !art_candidates/.gdignore
+
+# regen_entities.py review scratch (promote via --install, never commit)
+*.regen.png
+*.regen.png.import
