@@ -4003,7 +4003,15 @@ func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, icon := "") -
 	# t starts at 1.0 and drains toward 0 over BANNER_LIFETIME_FRAMES physics-frames (~2s), the
 	# intentional read time the c4-07 seed-paste status lines rely on to stay legible long enough to
 	# catch — the same envelope as every wave/checkpoint splash (a FIFO backlog drains faster).
-	_banners.append({"text": text, "t": 1.0, "col": col, "icon": icon})
+	var entry := {"text": text, "t": 1.0, "col": col, "icon": icon}
+	# ui-loop HUD: a threat callout (icon != "" — the alarm grammar, per above) PREEMPTS a cosmetic
+	# banner sitting in slot 0, so a lethal "GUNSHIP INBOUND" / "CORE EXPOSED" isn't queued behind a
+	# "PERFECT DODGE!" and flashed for a fraction of its read time. The displaced banner keeps draining
+	# from [1] and resumes when the threat clears. Non-threat banners keep plain FIFO order.
+	if icon != "" and not _banners.is_empty() and _banners.front()["text"] != text:
+		_banners.push_front(entry)
+	else:
+		_banners.append(entry)
 
 
 func _check_dry_throw(inputs: Array[SimInput]) -> void:
