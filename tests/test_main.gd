@@ -137,3 +137,25 @@ func test_onboarding_aim_hits_target_angle_tolerance() -> void:
 		"a 90-degree-off aim must NOT register a hit")
 	Runner.T.ok(not ob.aim_hits_target(Vector2.ZERO, Vector2.RIGHT, tol),
 		"no aim input at all (Vector2.ZERO, e.g. stick centered) must never register a hit")
+
+
+# --- feel-stack-juice-haptics: _prox_falloff/_rumble_merge are the pure math
+# behind the per-player HD/adaptive haptics (_blast_prox_for/_buzz) — pin them
+# directly rather than driving a live Main+SimWorld just to reach two numbers. ---
+
+func test_prox_falloff_matches_reference_points() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.eq(ms._prox_falloff(0.0), 1.0, "point-blank (and anything under 60px) must be full-force 1.0")
+	Runner.T.eq(ms._prox_falloff(60.0), 1.0, "60px is the full-force floor")
+	Runner.T.eq(ms._prox_falloff(340.0), 0.35, "340px is the far-corner floor of 0.35")
+	Runner.T.eq(ms._prox_falloff(9999.0), 0.35, "anything past 340px must clamp to 0.35, never fall further")
+	Runner.T.eq(ms._prox_falloff(200.0), 0.675, "the midpoint (200px) must land exactly halfway between 1.0 and 0.35")
+
+
+func test_rumble_merge_clamps_and_keeps_louder() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.eq(ms._rumble_merge(0.0, 0.4), 0.4, "an empty pad picks up the new pulse")
+	Runner.T.eq(ms._rumble_merge(0.6, 0.4), 0.6, "a quieter pulse must not stomp a louder one already queued this frame")
+	Runner.T.eq(ms._rumble_merge(0.2, 0.9), 0.9, "a louder pulse must win over a quieter one already queued")
+	Runner.T.eq(ms._rumble_merge(0.0, 5.0), 1.0, "magnitude must clamp to 1.0 even if a caller passes something absurd")
+	Runner.T.eq(ms._rumble_merge(0.0, -3.0), 0.0, "magnitude must clamp to 0.0, never go negative")

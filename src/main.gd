@@ -111,7 +111,8 @@ var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player bo
 var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _kill_streak := 0             # decaying combo counter for kill-blip pitch
 var _last_kill_frame := -100
-var _rumble := 0.0                # pending gamepad vibration this frame
+var _rumble: Array[float] = [0.0, 0.0]   # pending gamepad vibration this frame, PER PLAYER (device 0/1)
+var _rumble_sharp: Array[bool] = [false, false]   # true = punchy crack (gunfire/melee), false = boomy rumble (blasts)
 var _rumble_on := true            # accessibility: gamepad vibration on/off
 var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad option — swap the MOVE (left) and AIM (right) analog sticks. [0]=P1, [1]=P2, independent like the per-player pad button layouts, so a left-handed P2 swaps without touching P1. The sticks aren't per-button rebindable, so this is the accessible way to reassign them for left-handed / adaptive-controller players. Applied view-side in _gather_inputs.
 var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
@@ -1337,7 +1338,8 @@ func _reset() -> void:
 	_kick = Vector2.ZERO
 	_kill_streak = 0
 	_last_kill_frame = -100
-	_rumble = 0.0
+	_rumble = [0.0, 0.0]
+	_rumble_sharp = [false, false]
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
 	_banners.clear()
@@ -1737,7 +1739,7 @@ func _physics_process(_delta: float) -> void:
 			_consume_events()
 			_check_boss_intro()
 			_down_frames = 0 if not sim._all_players_down() else _down_frames + 1
-			_rumble = 0.0   # never buzz a controller on the menu
+			_rumble = [0.0, 0.0]   # never buzz a controller on the menu
 			# Attract steps the sim every frame and never decrements hit-stop, but
 			# _consume_events can SET it (near demo blasts) — a stuck freeze would
 			# wedge every feel gate (particles/envelopes/camera) forever. Clear it.
@@ -2002,9 +2004,12 @@ func _consume_events() -> void:
 					_fx.append({"x": mzx, "y": mzy, "t": 0.0, "kind": "floattext",
 						"rate": 0.05, "text": "CLICK", "col": Color(1.0, 0.42, 0.36)})
 			"bash":
-				# Brutal point-blank melee: hit-stop + a spark toward the aim.
+				# Brutal point-blank melee: hit-stop + a spark toward the aim, plus
+				# a sharp buzz on the striker's OWN pad — bash had zero haptic
+				# confirmation before despite being the most physical player verb.
 				_hitstop_frames = maxi(_hitstop_frames, 3)
 				_trauma = minf(1.0, _trauma + 0.18)
+				_buzz(0.45, ev["i"], true)
 				var bp := sim.players[ev["i"]]
 				_recoil[ev["i"]] -= Vector2(bp["aim_x"], bp["aim_y"]) * PX * 3.0
 				_fx.append({"x": ev["x"] + int(bp["aim_x"] * 12), "y": ev["y"] + int(bp["aim_y"] * 12),
@@ -2030,11 +2035,13 @@ func _consume_events() -> void:
 				if ev["i"] < _recoil.size():
 					var thrower := sim.players[ev["i"]]
 					_recoil[ev["i"]] -= Vector2(thrower["aim_x"], thrower["aim_y"]) * PX * 1.6
+					_buzz(0.22, ev["i"])   # a round heave, not a crack — boomy, not sharp
 			"tank_shot":
 				var gunner := sim.players[ev["i"]]
 				var taim := Vector2(gunner["aim_x"], gunner["aim_y"]) * PX
 				_kick -= taim * 2.5
 				_trauma = minf(1.0, _trauma + 0.15)
+				_buzz(0.5, ev["i"], true)   # the gunner's OWN pad kicks with the main gun
 				_fx.append({"x": ev["x"] + int(gunner["aim_x"] * 18),
 					"y": ev["y"] + int(gunner["aim_y"] * 18),
 					"t": 0.0, "kind": "muzzle", "rate": 0.22, "a": taim.angle(), "big": true})
@@ -2054,7 +2061,7 @@ func _consume_events() -> void:
 					# re-adding 0.3 trauma EVERY tick pinned the shake at max for the
 					# whole chain — the sound was gated but the nausea wasn't.
 					_trauma = minf(1.0, _trauma + 0.3)
-					_rumble = maxf(_rumble, 0.55)
+					_buzz(0.55)   # environmental boom, no single owner: both pads
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
@@ -2073,7 +2080,7 @@ func _consume_events() -> void:
 				# structural, not incendiary: a dust plume + tumbling debris + a
 				# heavier ground shake (distinct grammar from the barrel fireball).
 				_trauma = minf(1.0, _trauma + 0.4)
-				_rumble = maxf(_rumble, 0.6)
+				_buzz(0.6)
 				for di in 3:
 					_fx.append({"x": ev["x"], "y": ev["y"] - di * 8.0, "t": 0.0, "kind": "tex",
 						"tex": "fx_smoke", "sz": 18.0 + di * 6.0, "grow": 1.0, "fade": 2.4,
@@ -2117,7 +2124,7 @@ func _consume_events() -> void:
 				# c4 2v: a supply pod SLAMS in a fresh 3x3 cover fort — an impact
 				# shockwave + dust ring + shake so the renewed cover reads loud.
 				_trauma = minf(1.0, _trauma + 0.35)
-				_rumble = maxf(_rumble, 0.5)
+				_buzz(0.5)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.05})
 				_burst(ev["x"], ev["y"], "dust", 8, 1.2, 2.4, 0.35)
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(18.0, 24.0)})
@@ -2167,7 +2174,7 @@ func _consume_events() -> void:
 			"mast_pulse":
 				# c3 3v: the core vents — a wide radial shockwave + shake denies the orbit.
 				_trauma = minf(1.0, _trauma + 0.35)
-				_rumble = maxf(_rumble, 0.6)
+				_buzz(0.6)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.045})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
 					"r": 130.0, "col": Color(1.0, 0.55, 0.2)})
@@ -2199,7 +2206,7 @@ func _consume_events() -> void:
 				# The bail-out clock just started (alarm already sounds) — punch the
 				# camera + throw an alert ring so it lands as a real "get out" beat.
 				_trauma = minf(1.0, _trauma + 0.28)
-				_rumble = maxf(_rumble, 0.55)
+				_buzz(0.55, -1, true)   # a jolt, not a boom — sharp split
 				_kick += Vector2(0, -3)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
@@ -2211,7 +2218,7 @@ func _consume_events() -> void:
 				_flash_alpha = maxf(_flash_alpha, 0.35)
 				_damage_vignette = 1.0
 				_punch = maxf(_punch, 0.14)
-				_rumble = maxf(_rumble, 1.0)
+				_buzz(1.0, ev.get("p", 0), true)   # the fallen player's OWN pad, not their squadmate's
 				_duck = 1.0
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
@@ -2263,7 +2270,7 @@ func _consume_events() -> void:
 				# a gun-truck's charge tell should carry more weight than infantry
 				# (it previously had less camera acknowledgment than a grenade lob).
 				_burst(ev["x"], ev["y"], "dust", 4, 0.5, 1.2, 0.5, 0.07)
-				_rumble = maxf(_rumble, 0.35)
+				_buzz(0.35)
 			"pilot_down":
 				_vo("vo_pilot_down", 2, 600)
 				_vo_plea_at = int(Engine.get_physics_frames()) + 90
@@ -2286,8 +2293,11 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"] + 20, "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": "PILOT CAPTURED", "col": Color(0.7, 0.65, 0.6)})
 			"roll":
-				# Launch poof grounds the dodge.
+				# Launch poof grounds the dodge, plus a soft launch buzz on the
+				# roller's OWN pad — the dodge used to be the one core verb with
+				# zero haptic confirmation at all.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.6, 1.4, 0.5, 0.08)
+				_buzz(0.18, ev["i"])
 				var rp: Dictionary = sim.players[ev["i"]]
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_wind",
 					"sz": 15.0, "grow": 0.4, "fade": 1.2, "rate": 0.05,
@@ -2314,7 +2324,7 @@ func _consume_events() -> void:
 				# 1.5x speed you now HOLD announces itself, not just a HUD number.
 				_trauma = minf(1.0, _trauma + 0.22)
 				_punch = maxf(_punch, 0.05)
-				_rumble = maxf(_rumble, 0.5)
+				_buzz(0.5, -1, true)
 				_kick += Vector2(0, -4)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.1})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
@@ -2465,7 +2475,7 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.6)
 				_flash_alpha = maxf(_flash_alpha, 0.4)
 				_hitstop_frames = maxi(_hitstop_frames, 8)
-				_rumble = maxf(_rumble, 1.0)
+				_buzz(1.0)
 				show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
 			"victory":
@@ -2547,6 +2557,12 @@ func _ev_shot(ev: Dictionary) -> void:
 	_kick -= aim * 0.5
 	if ev["i"] < _heat.size():
 		_heat[ev["i"]] = minf(1.0, _heat[ev["i"]] + 0.09)
+		# Every shot buzzes the shooter's OWN pad, magnitude climbing with barrel
+		# heat — a cold burst taps lightly, a red-hot barrel snaps harder, so the
+		# heat mechanic is felt in the hand, not just read off the reticle bloom.
+		# (Regular gunfire had ZERO haptic feedback before this — the core 30
+		# seconds of fire was the one thing the rumble stack never touched.)
+		_buzz(0.12 + _heat[ev["i"]] * 0.22, ev["i"], true)
 		# Overheated barrel vents steam at the muzzle — the heat
 		# mechanic gets a physical tell, not just reticle bloom.
 		if _heat[ev["i"]] >= 0.95 and Engine.get_physics_frames() % 8 == 0:
@@ -2577,15 +2593,65 @@ func _ev_shot(ev: Dictionary) -> void:
 			"col": Color(1.0, 0.9, 0.5)})
 
 
+# Haptic envelope profile: `sharp` events (gunfire, melee, a lost soldier) get
+# a punchier weak/strong split and a short snap; boomy ones (explosions,
+# structural collapse) get a rounder, longer roll. Named once here so the two
+# call sites in _update_feel (2P-split and solo/fallback) can't drift apart.
+const HAPTIC_SHARP_WEAK_RATIO := 0.55
+const HAPTIC_SHARP_DUR := 0.07
+const HAPTIC_BOOMY_WEAK_RATIO := 0.35
+const HAPTIC_BOOMY_DUR := 0.16
+
+
+static func _prox_falloff(dist_px: float) -> float:
+	## Pure distance→proximity curve shared by _blast_prox/_blast_prox_for:
+	## 1.0 point-blank easing to 0.35 at 340px+, 60px and under is full force.
+	return remap(clampf(dist_px, 60.0, 340.0), 60.0, 340.0, 1.0, 0.35)
+
+
 func _blast_prox(x: int, y: int) -> float:
-	# Proximity of a blast to the nearest alive player: 1.0 point-blank easing to
-	# 0.35 at the far corner. Drives camera impact AND boom volume so the eye and
-	# ear agree. Full force when no one is alive to measure against.
+	# Proximity of a blast to the nearest alive player. Drives camera impact
+	# AND boom volume so the eye and ear agree. Full force when no one is
+	# alive to measure against.
 	var near := sim._nearest_alive_player(x, y)
 	if near.is_empty():
 		return 1.0
 	var dist_px := Vector2(float(x - near["x"]), float(y - near["y"])).length() * PX
-	return remap(clampf(dist_px, 60.0, 340.0), 60.0, 340.0, 1.0, 0.35)
+	return _prox_falloff(dist_px)
+
+
+func _blast_prox_for(x: int, y: int, pidx: int) -> float:
+	# Same falloff as _blast_prox but measured against ONE specific player, not
+	# whichever is nearest — so in 2P a blast at P1's feet buzzes P1's pad hard
+	# while P2, three screens away, barely feels it (adaptive/spatial haptics).
+	if pidx >= sim.players.size() or not sim.players[pidx]["alive"]:
+		return 0.0
+	var pl := sim.players[pidx]
+	var dist_px := Vector2(float(x - pl["x"]), float(y - pl["y"])).length() * PX
+	return _prox_falloff(dist_px)
+
+
+static func _rumble_merge(cur: float, amt: float) -> float:
+	## Pure merge used by _buzz: clamp the incoming pulse to a valid haptic
+	## magnitude, then keep whichever of current/incoming hits harder — the
+	## same tick's loudest event wins, it never averages/stacks past 1.0.
+	return maxf(cur, clampf(amt, 0.0, 1.0))
+
+
+func _buzz(amt: float, pidx := -1, sharp := false) -> void:
+	## Route a haptic pulse to ONE player's pad (pidx 0/1) or both (-1, for
+	## environmental beats with no single owner). `sharp` picks a punchier
+	## weak/strong split and a shorter pulse for crisp impacts (gunfire, melee)
+	## vs a longer, rounder rumble for booms/collapses — applied in _update_feel.
+	if pidx == -1:
+		for i in _rumble.size():
+			_rumble[i] = _rumble_merge(_rumble[i], amt)
+			_rumble_sharp[i] = _rumble_sharp[i] or sharp
+		return
+	if pidx < 0 or pidx >= _rumble.size():
+		return
+	_rumble[pidx] = _rumble_merge(_rumble[pidx], amt)
+	_rumble_sharp[pidx] = _rumble_sharp[pidx] or sharp
 
 
 func _vo(key: String, priority := 1, throttle_frames := 240, dry := false) -> void:
@@ -2630,7 +2696,12 @@ func _ev_explosion(ev: Dictionary) -> void:
 		_trauma = minf(1.0, _trauma + 0.35 * prox)
 		if prox > 0.7:
 			_hitstop_frames = maxi(_hitstop_frames, 4)
-		_rumble = maxf(_rumble, 0.7 * prox)
+		# Spatial haptics: each player's OWN pad buzzes by ITS OWN distance to the
+		# blast, not the nearest player's — in 2P, a grenade at P1's feet used to
+		# buzz P2's controller across the map just as hard. Capped at _rumble's
+		# size so a future 3P+ mode can't index past the 2-slot per-pad array.
+		for pidx in mini(sim.players.size(), _rumble.size()):
+			_buzz(0.7 * _blast_prox_for(ev["x"], ev["y"], pidx), pidx)
 		_punch = maxf(_punch, 0.05 * prox)
 		_duck = maxf(_duck, 0.7 * prox)
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
@@ -2845,7 +2916,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_sfx.play_death_yell(_to_screen(ev["x"], ev["y"]), -6.0)
 	if big:
 		_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
-		_rumble = maxf(_rumble, 0.35)
+		_buzz(0.35, -1, true)   # kill confirm: sharp, no single shooter attributed
 		_punch = maxf(_punch, 0.03)
 	if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
 		_cmd_bark("streak", 60)   # Commander gloats at a kill-streak milestone
@@ -2915,7 +2986,7 @@ func _ev_bunker_break(ev: Dictionary) -> void:
 	# The "explosion" SFX already fires (_EVENT_SOUND) but nothing
 	# detonated on screen — give the demolished bunker its blast.
 	_trauma = minf(1.0, _trauma + 0.22)
-	_rumble = maxf(_rumble, 0.5)
+	_buzz(0.5)
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.14})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.1,
@@ -2971,7 +3042,7 @@ func _boss_death_finale(x: int, y: int) -> void:
 	# (_rumble_on) and should compensate for damped visuals, not vanish with
 	# them — every other rumble site (player_down, wiped, proximity) fires
 	# under RM already; only the boss kill was silent.
-	_rumble = maxf(_rumble, 1.0)
+	_buzz(1.0)
 	if not reduced:
 		_punch = maxf(_punch, 0.09)
 	# Rising smoke pillar: puffs stacked up the center, drifting up and thinning
@@ -3051,6 +3122,13 @@ func _ev_revive(ev: Dictionary) -> void:
 
 
 func _ev_vest_break(ev: Dictionary) -> void:
+	# Losing your armor is the loudest "you got hit" beat short of dying, but it
+	# used to carry zero camera/hitstop/haptic punch — only a flash + vignette +
+	# lowpass. A small shake + freeze + a sharp buzz on the HIT player's own pad
+	# (not their co-op partner's) sells it as a real blow landing.
+	_trauma = minf(1.0, _trauma + 0.16)
+	_hitstop_frames = maxi(_hitstop_frames, 2)
+	_buzz(0.55, ev.get("p", 0), true)
 	_flash_alpha = maxf(_flash_alpha, 0.35)
 	_damage_vignette = maxf(_damage_vignette, 0.75)
 	_concussion = maxf(_concussion, 0.7)
@@ -4551,7 +4629,7 @@ func _update_feel() -> void:
 				_fx.append({"x": pb["x"], "y": pb["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 					"r": 40.0, "col": Color(1.0, 0.7, 0.35)})
 				_blast_debris(pb["x"], pb["y"])
-				_rumble = maxf(_rumble, 0.4)   # haptics ride _rumble_on, not reduce-motion
+				_buzz(0.4)   # haptics ride _rumble_on, not reduce-motion
 				if _motion >= 0.5:
 					_trauma = minf(1.0, _trauma + 0.12)
 				_pending_blasts.remove_at(i)
@@ -4617,12 +4695,43 @@ func _update_feel() -> void:
 			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
 	if _hitstop_frames == 0:
 		_kick *= 0.78
-	# Gamepad rumble: one pooled pulse per frame across connected pads.
-	if _rumble > 0.01:
-		if _rumble_on:
-			for pad in Input.get_connected_joypads():
-				Input.start_joy_vibration(pad, _rumble * 0.4, _rumble, 0.12)
-		_rumble = 0.0
+	# Gamepad rumble: HD/adaptive — in 2P each pad buzzes for ITS OWN player's hits
+	# only (device 0 == P1, device 1 == P2), and `sharp` events (gunfire, melee,
+	# a lost soldier) get a punchier weak/strong split and a short snap, while
+	# boomy ones (explosions, structural collapse) get a rounder, longer roll —
+	# previously every event fired the identical 0.4x/1.0/0.12s buzz on both pads.
+	if (_rumble[0] > 0.01 or _rumble[1] > 0.01) and _rumble_on:
+		var pads := Input.get_connected_joypads()
+		# Device ids 0/1 are the established P1/P2 convention everywhere else in
+		# this file (pad_bind/pad_pressed/rebind_pad default device 0/1) — check
+		# BOTH ids are actually present rather than just "2+ pads connected",
+		# so a non-contiguous id (e.g. device 0 dropped, only 1 and 2 remain)
+		# doesn't get treated as if it were P1.
+		if _two_players and pads.has(0) and pads.has(1):
+			for pi in 2:
+				var amt: float = _rumble[pi]
+				if amt > 0.01:
+					var sh: bool = _rumble_sharp[pi]
+					var weak := amt * (HAPTIC_SHARP_WEAK_RATIO if sh else HAPTIC_BOOMY_WEAK_RATIO)
+					Input.start_joy_vibration(pi, weak, amt, HAPTIC_SHARP_DUR if sh else HAPTIC_BOOMY_DUR)
+		else:
+			# Broadcast the LOUDER player's own pulse — magnitude and sharp paired
+			# together, not or-ing sharp across both players independently. Two
+			# players queuing different event types the same frame (one a boomy
+			# explosion, one a sharp gunshot) must not let a quieter sharp flag
+			# force a sharp envelope onto a louder boomy pulse.
+			var amt: float = _rumble[0]
+			var sharp: bool = _rumble_sharp[0]
+			if _rumble[1] > amt:
+				amt = _rumble[1]
+				sharp = _rumble_sharp[1]
+			var weak := amt * (HAPTIC_SHARP_WEAK_RATIO if sharp else HAPTIC_BOOMY_WEAK_RATIO)
+			var dur := HAPTIC_SHARP_DUR if sharp else HAPTIC_BOOMY_DUR
+			for pad in pads:
+				Input.start_joy_vibration(pad, weak, amt, dur)
+	if _rumble[0] > 0.01 or _rumble[1] > 0.01:
+		_rumble = [0.0, 0.0]
+		_rumble_sharp = [false, false]
 	# A held freeze-frame holds the whole transform: envelopes are pinned at peak
 	# above, but re-rolling a fresh random rattle from held trauma every frame
 	# made the "frozen" world buzz at max amplitude through the freeze.
@@ -4696,7 +4805,7 @@ func _drive_audio() -> void:
 	if _tension > 0.3 and Engine.get_physics_frames() - _heart_frame > 55:
 		_heart_frame = Engine.get_physics_frames()
 		_sfx.play("heartbeat", -14.0 + _tension * 6.0, 1.0)
-		_rumble = maxf(_rumble, _tension * 0.4)
+		_buzz(_tension * 0.4, -1, true)   # lub-dub reads as a sharp double-tap, not a boom
 
 
 static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
