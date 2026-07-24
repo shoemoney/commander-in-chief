@@ -21,6 +21,7 @@ never silently overwrite working art).
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -215,7 +216,33 @@ DECOR = {
                               "a bright rectangular lid with a bold dark carry handle across it", 16),
 }
 
-CATEGORIES = {"vehicle": VEHICLES, "prop": DECOR}
+
+# Characters. NOTE the real on-screen budget is TINY: these sources are 1024px but their
+# .import caps them at 128px, and the draw then applies SCALE (0.5) * the call-site
+# spr_scale (~0.5), so a soldier lands around 32-35px. At that size a face is 2 pixels --
+# the read is entirely silhouette + the shoulder/weapon shape.
+# ⚠️ THE CHARACTER TEMPLATE IS NOT SHIP-READY. The 2026-07-24 pilot regenerated the three
+# below, installed them, and rendered them through the real _spr at their real ~32px budget:
+# the results graded C+/B- and were a REGRESSION on what they replace. The existing legacy art
+# bakes are TRUE 90-degree overhead (you see the helmet crown from directly above; the
+# ghillie is a shaggy prone strip). Every generated attempt -- across three prompt revisions
+# -- came back a 3/4 STANDING figure, because the model strongly resists a true overhead
+# human. The art was reverted; only the pipeline fixes were kept.
+# Before running this category for real, solve the angle problem first (candidate approaches:
+# feed a true-overhead reference that is not a tiny dark blob, or render posed 3D and bake).
+CHARACTERS = {
+    "mil2/soldier2":  ("an enemy grenadier soldier standing, lobbing arm cocked, seen from straight above",
+                       "the dark helmet crown centred in a broad shoulder mass, with one arm swung out "
+                       "wide holding a grenade so the pose reads as THROWING", 33),
+    "p2/ghillie":     ("an enemy sniper in a shaggy ghillie suit lying prone, seen from straight above",
+                       "a ragged shaggy-edged blob with a long dark rifle barrel projecting from one end -- "
+                       "the frayed outline plus the protruding barrel are the whole read", 32),
+    "p2/sapper":      ("an enemy combat engineer carrying a satchel charge, seen from straight above",
+                       "the helmet crown and shoulders with a bulky square satchel pack clearly overhanging "
+                       "one side of the silhouette", 32),
+}
+
+CATEGORIES = {"vehicle": VEHICLES, "prop": DECOR, "character": CHARACTERS}
 
 
 def target_size(png: Path) -> int:
@@ -315,6 +342,15 @@ def install(key: str, godot_bin: str) -> str:
     regen = src.with_suffix(".regen.png")
     if not regen.exists():
         return f"{key}: no .regen.png to install"
+    # fix_import_settings() rewrites the sidecar from ONE reference file, which carries
+    # process/size_limit=0. Sprites whose own sidecar caps them (the 1024px characters use
+    # size_limit=128) would silently import at full resolution and draw ~20x too large --
+    # exactly what the 2026-07-24 character pilot rendered. Capture the ORIGINAL cap here
+    # and restore it after the rewrite.
+    imp = src.with_name(src.name + ".import")
+    prior = imp.read_text() if imp.exists() else ""
+    m = re.search(r"^process/size_limit=(\d+)$", prior, re.M)
+    orig_limit = m.group(1) if m else None
     regen.replace(src)
     # Godot will have already imported the .regen.png while it sat in the tree, leaving a
     # <name>.regen.png.import sidecar behind once the PNG itself moves. That orphan keeps
@@ -323,8 +359,17 @@ def install(key: str, godot_bin: str) -> str:
     regen.with_name(regen.name + ".import").unlink(missing_ok=True)
     run_godot_import(godot_bin)
     fix_import_settings(src)
+    if orig_limit and orig_limit != "0":
+        txt = imp.read_text()
+        txt = re.sub(r"^process/size_limit=\d+$", f"process/size_limit={orig_limit}", txt, count=1, flags=re.M)
+        imp.write_text(txt)
     assert_lossless_art_import(src)
-    return f"{key}: installed + import repaired"
+    # Hard guard: the cap must survive the rewrite, or the sprite silently draws oversized.
+    now = re.search(r"^process/size_limit=(\d+)$", imp.read_text(), re.M)
+    if orig_limit and (now is None or now.group(1) != orig_limit):
+        raise ValueError(f"{src}: size_limit {orig_limit} was lost by the import rewrite")
+    cap = f" (size_limit {orig_limit} preserved)" if orig_limit and orig_limit != "0" else ""
+    return f"{key}: installed + import repaired{cap}"
 
 
 def main() -> int:
