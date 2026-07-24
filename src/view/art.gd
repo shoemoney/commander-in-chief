@@ -291,7 +291,6 @@ const TEX := {
 	"glyph_stick_r": preload(SY + "ui/glyphs/stick_r.png"),
 	"glyph_mouse_l": preload(SY + "ui/glyphs/mouse_l.png"),
 	"glyph_mouse_r": preload(SY + "ui/glyphs/mouse_r.png"),
-	"glyph_key_space": preload(SY + "ui/glyphs/key_space.png"),
 	"glyph_key_enter": preload(SY + "ui/glyphs/key_enter.png"),
 	"glyph_key_wide": preload(SY + "ui/glyphs/key_wide.png"),
 	# Brand-correct pad sets (PlayStation / Switch), swapped in by pad_brand.
