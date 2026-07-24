@@ -974,10 +974,13 @@ func _process(_delta: float) -> void:
 			_scan_mat_hs_prev = hs
 	# a4-01/a4-15: the master grade eases into a calm "breather" during the endless shop
 	# intermission (safe to buy → a tonal breath), then eases back for the next wave. A slow
-	# gentle tonal shift, not a strobe — reduce-motion-safe, so it isn't _motion-gated.
+	# gentle tonal shift, not a strobe.
 	if _grade_mat != null:
 		var want := 0.0 if sim == null else _grade_breather_target(sim.mode, sim.intermission_ticks)
-		_grade_breather = lerpf(_grade_breather, want, 0.06)
+		# ui-loop a11y: REDUCE MOTION's own copy promises "no shake, flash, or scroll fx", and this
+		# is a screen-wide animated tonal push — so under reduce-motion snap straight to target
+		# instead of lerping, so no animated grade reaches the shader (honors the setting's promise).
+		_grade_breather = want if _motion < 0.5 else lerpf(_grade_breather, want, 0.06)
 		if absf(_grade_breather - _grade_mat_breather_prev) > 0.001:
 			_grade_mat.set_shader_parameter("breather", _grade_breather)
 			_grade_mat_breather_prev = _grade_breather
@@ -4000,7 +4003,15 @@ func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, icon := "") -
 	# t starts at 1.0 and drains toward 0 over BANNER_LIFETIME_FRAMES physics-frames (~2s), the
 	# intentional read time the c4-07 seed-paste status lines rely on to stay legible long enough to
 	# catch — the same envelope as every wave/checkpoint splash (a FIFO backlog drains faster).
-	_banners.append({"text": text, "t": 1.0, "col": col, "icon": icon})
+	var entry := {"text": text, "t": 1.0, "col": col, "icon": icon}
+	# ui-loop HUD: a threat callout (icon != "" — the alarm grammar, per above) PREEMPTS a cosmetic
+	# banner sitting in slot 0, so a lethal "GUNSHIP INBOUND" / "CORE EXPOSED" isn't queued behind a
+	# "PERFECT DODGE!" and flashed for a fraction of its read time. The displaced banner keeps draining
+	# from [1] and resumes when the threat clears. Non-threat banners keep plain FIFO order.
+	if icon != "" and not _banners.is_empty() and _banners.front()["text"] != text:
+		_banners.push_front(entry)
+	else:
+		_banners.append(entry)
 
 
 func _check_dry_throw(inputs: Array[SimInput]) -> void:
