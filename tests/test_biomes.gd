@@ -205,3 +205,61 @@ func test_c3_grenade_breakwater() -> void:
 	for i in 6:
 		sim2._step_grenades()
 	Runner.T.ok(g2["x"] != x0, "with no breakwater the drift applies as before")
+
+
+func test_six_authored_zones_and_ruins_landmark_is_reachable() -> void:
+	## authored-campaign-and-modes: FINAL_GATE_INDEX moved 5 -> 6 so gate 5
+	## (previously "final" and untested arena territory) is a real bunker
+	## arena wearing the RUINS crashed-convoy landmark -- lm_sector case 3 was
+	## DEAD CODE before this (gate 3 is always the boss gate, never a bunker
+	## arena), so this is the first time it can ever fire.
+	Runner.T.eq(SimWorld.FINAL_GATE_INDEX, 6, "six gates now cap the campaign")
+	Runner.T.eq(SimWorld.ZONE_INFO.size(), SimWorld.FINAL_GATE_INDEX, "one named zone per gate")
+	for zi in SimWorld.ZONE_INFO:
+		Runner.T.ok(not (zi["name"] as String).is_empty(), "every zone has a name")
+		Runner.T.ok(not (zi["blurb"] as String).is_empty(), "every zone has a narrative blurb")
+	Runner.T.ok(SimWorld.ARENAS.has(5), "gate 5 has its own authored arena template")
+	var sim := SimWorld.new(3, 1)
+	sim.camera_top = -10000 * Fixed.ONE
+	sim._step_camera()
+	Runner.T.ok(sim._world_ended, "streaming reaches the (now deeper) Foundry finale")
+	var gate5_rocks := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 2 and rk["y"] > -4900 * Fixed.ONE and rk["y"] < -4700 * Fixed.ONE:
+			gate5_rocks += 1
+	Runner.T.ok(gate5_rocks > 0, "the RUINS landmark actually placed rocks at gate 5 (was unreachable)")
+
+
+func test_jump_to_chapter_offsets_every_stream_cursor() -> void:
+	## authored-campaign-and-modes: Arcade's chapter jump must move the camera,
+	## players, and every streaming cursor by an identical amount (an exact
+	## multiple of GATE_SPACING) so the next gate streamed is chapter 4 at its
+	## natural authored y -- not a chapter-1 gate relabeled.
+	var jumped := SimWorld.new(7, 1, "arcade")
+	jumped.jump_to_chapter(4)
+	Runner.T.eq(jumped._gate_counter, 3, "gate_counter primed so the NEXT streamed gate is #4")
+	var skip: int = 3 * SimWorld.GATE_SPACING
+	Runner.T.eq(jumped.camera_top, -SimWorld.VIEW_H - skip, "camera starts chapter 4's distance in")
+	jumped._step_camera()
+	var found_gate4 := false
+	for g in jumped.gates:
+		if g["y"] == -4 * SimWorld.GATE_SPACING:
+			found_gate4 = true
+	Runner.T.ok(found_gate4, "the first streamed gate lands exactly at chapter 4's authored y")
+	# Chapter 1 is a no-op (nothing to skip) — a plain campaign-shaped start.
+	var fresh := SimWorld.new(7, 1, "arcade")
+	var before := fresh.camera_top
+	fresh.jump_to_chapter(1)
+	Runner.T.eq(fresh.camera_top, before, "chapter 1 jump is a no-op")
+
+
+func test_arcade_mode_streams_like_campaign() -> void:
+	## Arcade reuses the FULL campaign streaming machinery (mines/barrels/
+	## gates/landmarks) -- it must NOT hit the boss_rush/no-op early return in
+	## _step_camera the way "campaign only" mode gating would otherwise cause.
+	var sim := SimWorld.new(11, 1, "arcade")
+	sim.camera_top = -3000 * Fixed.ONE
+	sim._step_camera()
+	Runner.T.ok(sim.gates.size() > 0, "arcade streams real gates, unlike boss_rush's guard")
+	Runner.T.ok(not sim.mines.is_empty() or not sim.barrels.is_empty(),
+		"arcade streams field hazards like campaign")

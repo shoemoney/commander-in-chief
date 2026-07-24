@@ -1376,20 +1376,22 @@ func test_hall_keyboard_cycles_via_unhandled_input() -> void:
 	m._unhandled_input(_key_ev(KEY_RIGHT, true))
 	Runner.T.eq(m._hall_filter, 1, "KEY_RIGHT cycles ALL -> CAMPAIGN (arrow == A/D parity)")
 	m._unhandled_input(_key_ev(KEY_RIGHT, false))
-	# Forward WRAP at the top boundary: press D from ENDLESS -> ALL.
-	m._hall_filter = 2
+	# authored-campaign-and-modes: a 4th tab (BOSS RUSH) joined ALL/CAMPAIGN/
+	# ENDLESS, moving the wrap boundary from ENDLESS(2) to BOSS RUSH(3).
+	# Forward WRAP at the top boundary: press D from BOSS RUSH -> ALL.
+	m._hall_filter = 3
 	m._unhandled_input(_key_ev(KEY_D, true))
-	Runner.T.eq(m._hall_filter, 0, "KEY_D from ENDLESS wraps forward to ALL")
+	Runner.T.eq(m._hall_filter, 0, "KEY_D from BOSS RUSH wraps forward to ALL")
 	m._unhandled_input(_key_ev(KEY_D, false))
-	# Backward WRAP at the bottom boundary: press A from ALL -> ENDLESS.
+	# Backward WRAP at the bottom boundary: press A from ALL -> BOSS RUSH.
 	m._hall_filter = 0
 	m._unhandled_input(_key_ev(KEY_A, true))
-	Runner.T.eq(m._hall_filter, 2, "KEY_A from ALL wraps backward to ENDLESS")
-	# Held-key REPEAT also wraps at the boundary: parked on ENDLESS, the repeat
-	# tick (still latched from the A press) steps ENDLESS -> CAMPAIGN, never sticks.
+	Runner.T.eq(m._hall_filter, 3, "KEY_A from ALL wraps backward to BOSS RUSH")
+	# Held-key REPEAT also wraps at the boundary: parked on BOSS RUSH, the repeat
+	# tick (still latched from the A press) steps BOSS RUSH -> ENDLESS, never sticks.
 	m._key_hrep = 0.05
 	m._process(0.1)
-	Runner.T.eq(m._hall_filter, 1, "held-A repeat steps across the boundary (ENDLESS -> CAMPAIGN)")
+	Runner.T.eq(m._hall_filter, 2, "held-A repeat steps across the boundary (BOSS RUSH -> ENDLESS)")
 	m._unhandled_input(_key_ev(KEY_A, false))
 	m.free()
 	stub.free()
@@ -5701,4 +5703,46 @@ func test_c3_08_reduce_motion_threshold_matches_project() -> void:
 	Runner.T.ok(stub._motion < 0.5, "reduce-motion ON reads below the 0.5 gate (glyph holds steady)")
 	stub._motion = 1.0
 	Runner.T.ok(not (stub._motion < 0.5), "reduce-motion OFF reads above the 0.5 gate (glyph pulses)")
+	stub.free()
+
+
+# authored-campaign-and-modes: BOSS RUSH / ARCADE / CHAPTER SELECT are real menu
+# screens now (Mode.MODES / Mode.CHAPTERS), reached off the SETUP hub — not just
+# the F3/F4 debug toggles. Row-content + BACK-wiring only (no _activate(), which
+# would need start_boss_rush/start_arcade stubs _StubMain doesn't carry, same as
+# every other TITLE start-verb here).
+func test_modes_and_chapter_select_screens() -> void:
+	var stub := _StubMain.new()
+	var m := Menu.new()
+	m.main = stub
+	# SETUP hub grew a MODES row alongside OPTIONS/INFO.
+	m.mode = Menu.Mode.SETUP
+	var setup_ids: Array = []
+	for it in m._menu_items():
+		setup_ids.append(it["id"])
+	Runner.T.ok("modes" in setup_ids, "SETUP hub carries a MODES row")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.MODES), {"mode": Menu.Mode.SETUP, "sel": "modes"},
+		"MODES back -> SETUP/modes")
+	# MODES screen: BOSS RUSH / ARCADE start immediately; CHAPTER SELECT opens a submenu.
+	m.mode = Menu.Mode.MODES
+	var modes_items := m._menu_items()
+	var modes_ids: Array = []
+	for it in modes_items:
+		modes_ids.append(it["id"])
+	Runner.T.ok("boss_rush" in modes_ids, "MODES offers BOSS RUSH")
+	Runner.T.ok("arcade" in modes_ids, "MODES offers ARCADE")
+	Runner.T.ok("chapter_select" in modes_ids, "MODES offers CHAPTER SELECT")
+	Runner.T.ok("back" in modes_ids, "MODES has a BACK row")
+	Runner.T.eq(Menu.back_dest(Menu.Mode.CHAPTERS), {"mode": Menu.Mode.MODES, "sel": "chapter_select"},
+		"CHAPTERS back -> MODES/chapter_select")
+	# CHAPTER SELECT: one row per authored zone (SimWorld.ZONE_INFO), named, + BACK.
+	m.mode = Menu.Mode.CHAPTERS
+	var ch_items := m._menu_items()
+	Runner.T.eq(ch_items.size(), SimWorld.FINAL_GATE_INDEX + 1, "one row per zone + BACK")
+	for gi in SimWorld.FINAL_GATE_INDEX:
+		var zi: Dictionary = SimWorld.zone_info(gi + 1)
+		Runner.T.ok((zi["name"] as String) in ch_items[gi]["label"],
+			"chapter %d row names its zone (%s)" % [gi + 1, zi["name"]])
+	Runner.T.eq(ch_items[ch_items.size() - 1]["id"], "back", "CHAPTER SELECT ends on BACK")
+	m.free()
 	stub.free()

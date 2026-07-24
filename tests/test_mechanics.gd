@@ -1185,25 +1185,30 @@ func test_c2_mud_bank_rock() -> void:
 
 
 func test_c2_calm_band_breathes() -> void:
-	# The pre-Foundry exhale (c2 3v): band 4 stands down mines, barrels,
-	# chokes, and blockades — while the seg-4 foundry vents STAY (the breath
-	# has heat, not ambush).
+	# The pre-Foundry exhale (c2 3v): the band right before the finale stands
+	# down mines, barrels, chokes, and blockades — while the seg-4+ foundry
+	# vents STAY (the breath has heat, not ambush).
+	# c2-authored-campaign: the finale moved from gate 5 to gate 6
+	# (FINAL_GATE_INDEX 5 -> 6), so the exhale band is now between gate 5 and
+	# gate 6 (was gate 4 / gate 5) — CALM_BAND_SEG tracks the const, this test
+	# tracks CALM_BAND_SEG.
 	var sim := SimWorld.new(43, 1)
-	sim.camera_top = -6000 * SimWorld.F_ONE
+	sim.camera_top = -7000 * SimWorld.F_ONE
 	sim._step_camera()
-	var lo: int = -5000 * SimWorld.F_ONE
-	var hi: int = -4000 * SimWorld.F_ONE
+	var lo: int = -(SimWorld.CALM_BAND_SEG + 1) * SimWorld.GATE_SPACING
+	var hi: int = -SimWorld.CALM_BAND_SEG * SimWorld.GATE_SPACING
 	for m in sim.mines:
 		Runner.T.ok(m["y"] < lo or m["y"] > hi, "no mine in the calm band")
 	for b in sim.barrels:
 		if b["y"] >= lo and b["y"] <= hi:
-			# GATE punctuation stays: arena props (gate 4) and the foundry
-			# phase-terrain clusters (gate 5 + 140, KIMK-pinned finale floor)
-			# are setpieces, not stream litter — only streamed rows stand down.
+			# GATE punctuation stays: arena props (gate 5, the RUINS arena) and
+			# the foundry phase-terrain clusters (gate 6 + 140, KIMK-pinned
+			# finale floor) are setpieces, not stream litter — only streamed
+			# rows stand down.
 			var gate_rel: int = absi(b["y"]) % SimWorld.GATE_SPACING
 			Runner.T.ok(gate_rel <= 160 * SimWorld.F_ONE or gate_rel >= 850 * SimWorld.F_ONE,
 				"only gate-punctuation barrels sit in the calm band (rel %dpx)" % (gate_rel / SimWorld.F_ONE))
-	Runner.T.eq(sim._choke_bounds(-(4000 + 200) * SimWorld.F_ONE)[0], SimWorld.WORLD_LEFT,
+	Runner.T.eq(sim._choke_bounds(-(SimWorld.CALM_BAND_SEG * 1000 + 200) * SimWorld.F_ONE)[0], SimWorld.WORLD_LEFT,
 		"the calm band never chokes")
 	var cb2: Array = sim._choke_bounds(-(2000 + 200) * SimWorld.F_ONE)
 	Runner.T.ok(cb2[0] != SimWorld.WORLD_LEFT or cb2[1] != SimWorld.WORLD_RIGHT,

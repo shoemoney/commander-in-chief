@@ -16,6 +16,7 @@ var mode: String = "campaign"
 var player_count: int = 1
 var assist: bool = false   # accessibility 2-hit vest — MUST be restored on replay or the sim diverges
 var hard: bool = false     # NG+ HARD spawn curve — alters the RNG stream + checksum, restore on replay
+var chapter: int = 1       # authored-campaign-and-modes: Arcade's jump_to_chapter() start gate (1 = no jump)
 var frames: Array = []   # each element: Array of per-player encoded SimInput ([move_x,move_y,aim_x,aim_y,flags])
 
 
@@ -28,7 +29,7 @@ func record_tick(inputs: Array) -> void:
 
 func to_dict() -> Dictionary:
 	return {"magic": MAGIC, "seed": seed_value, "mode": mode,
-		"players": player_count, "assist": assist, "hard": hard, "frames": frames}
+		"players": player_count, "assist": assist, "hard": hard, "chapter": chapter, "frames": frames}
 
 
 func save(path: String) -> Error:
@@ -76,6 +77,7 @@ static func load_from(path: String) -> Replay:
 	# assist/hard default false for pre-existing replays that predate these fields (back-compat).
 	r.assist = bool(data.get("assist", false))
 	r.hard = bool(data.get("hard", false))
+	r.chapter = int(data.get("chapter", 1))   # pre-existing replays predate Arcade -> chapter 1 (no jump)
 	r.frames = data["frames"]
 	return r
 
@@ -93,6 +95,8 @@ func play(sample_every := 0) -> Array[int]:
 	if assist:
 		for pl in sim.players:
 			pl["vest"] = true
+	if mode == "arcade":
+		sim.jump_to_chapter(chapter)   # mirror main._reset()'s post-construction Arcade jump
 	var samples: Array[int] = []
 	for i in frames.size():
 		var inputs: Array = []

@@ -9,7 +9,7 @@ extends Node2D
 ##        Q (hold) spend-wheel
 ##   Gamepad — LS move, RS aim, RT/R1 fire, L1 grenade, B roll, X interact,
 ##        Y revive, BACK (hold) spend-wheel
-##   F2 toggles local 2P · F3 toggles Endless War · R restarts.
+##   F2 toggles local 2P · F3 toggles Endless War · F4 toggles Boss Rush · R restarts.
 
 const PX := 1.0 / Fixed.ONE
 const SCREEN_W := 640.0
@@ -65,6 +65,8 @@ var _replay_saved := false        # save the replay once per run, at the debrief
 var _replay_task := -1            # WorkerThreadPool id of the async replay write
 var _two_players := false
 var _endless := false
+var _boss_rush := false          # authored-campaign-and-modes: F4 debug toggle — gunship gauntlet capped by the Colossus
+var _arcade_chapter := -1        # authored-campaign-and-modes: >=1 while an Arcade run is live/queued (CHAPTER SELECT); -1 = not Arcade
 var _daily := false              # seed-of-the-day challenge run
 var _daily_done_seed := -1       # c2-13: seed of the most recently COMPLETED daily; == today's => the DAILY RUN row locks as done for the day
 var _seed_override := -1         # CHALLENGE SEED: one-shot forced seed (-1 = none)
@@ -933,6 +935,8 @@ func _process(_delta: float) -> void:
 func start_game(endless: bool) -> void:
 	_endless = endless
 	_daily = false
+	_boss_rush = false     # authored-campaign-and-modes: CAMPAIGN/ENDLESS always clear any stale MODES pick
+	_arcade_chapter = -1
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0   # cut from the title into combat, not a hard snap
@@ -942,11 +946,45 @@ func start_game(endless: bool) -> void:
 		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
 
 
+func start_boss_rush() -> void:
+	# authored-campaign-and-modes: the MODES-screen entry point (menu.gd's real
+	# UI row, not just the F4 debug toggle) — three gunships back-to-back,
+	# capped by the Colossus finale. Own Hall-of-Fame filter (mode == "boss_rush").
+	_endless = false
+	_daily = false
+	_boss_rush = true
+	_arcade_chapter = -1
+	_reset()
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_fade = 1.0
+	if _two_players and Input.get_connected_joypads().size() < 2:
+		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
+
+
+func start_arcade(chapter: int) -> void:
+	# authored-campaign-and-modes: CHAPTER SELECT — the full campaign world
+	# (same mechanics/hazards/landmarks), started at the mouth of `chapter`'s
+	# zone via SimWorld.jump_to_chapter() instead of gate 1. chapter 1 is a
+	# plain campaign-shaped quick-play (jump is a no-op); ARCADE's own menu row
+	# calls this with chapter 1.
+	_endless = false
+	_daily = false
+	_boss_rush = false
+	_arcade_chapter = clampi(chapter, 1, SimWorld.FINAL_GATE_INDEX)
+	_reset()
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_fade = 1.0
+	if _two_players and Input.get_connected_joypads().size() < 2:
+		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
+
+
 func start_daily() -> void:
 	# Seed-of-the-day: everyone who plays today fights the identical layout — the
 	# deterministic core turned into a shared, comparable challenge.
 	_endless = false
 	_daily = true
+	_boss_rush = false
+	_arcade_chapter = -1
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0
@@ -979,6 +1017,8 @@ func start_seeded(seed_v: int) -> void:
 	# a daily-tagged Hall of Fame slot.
 	_endless = false
 	_daily = false
+	_boss_rush = false
+	_arcade_chapter = -1
 	_seed_override = seed_v
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
@@ -1083,6 +1123,8 @@ func start_watch() -> void:
 		replay_watched_score = last_run_score
 		_persist({"replay": {"watched_score": replay_watched_score}})
 	_endless = r.mode == "endless"
+	_boss_rush = r.mode == "boss_rush"
+	_arcade_chapter = r.chapter if r.mode == "arcade" else -1
 	_two_players = r.player_count >= 2
 	_seed_override = r.seed_value
 	_reset()
@@ -1109,18 +1151,25 @@ func _reset() -> void:
 	else:
 		seed_v = _daily_seed() if _daily else randi()
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
-	sim = SimWorld.new(seed_v, 2 if _two_players else 1, "endless" if _endless else "campaign")
+	var _mode_str := "endless" if _endless else ("boss_rush" if _boss_rush \
+		else ("arcade" if _arcade_chapter >= 1 else "campaign"))
+	sim = SimWorld.new(seed_v, 2 if _two_players else 1, _mode_str)
 	sim.assist_mode = _assist   # accessibility: 2-hit vest each life, flagged on the leaderboard
-	sim.hard = _hard and not _endless   # NG+ HARD applies to campaign only
+	sim.hard = _hard and not _endless and not _boss_rush and _arcade_chapter < 1   # NG+ HARD applies to campaign only
 	if _assist:
 		for pl in sim.players:
 			pl["vest"] = true
+	if _mode_str == "arcade":
+		# authored-campaign-and-modes: CHAPTER SELECT — start at the mouth of
+		# the chosen zone instead of gate 1 (see SimWorld.jump_to_chapter).
+		sim.jump_to_chapter(_arcade_chapter)
 	_recorder = Replay.new()   # record this run's inputs for a replayable last-run (passive; sim untouched)
 	_recorder.seed_value = seed_v
 	_recorder.mode = sim.mode
 	_recorder.player_count = sim.players.size()
 	_recorder.assist = sim.assist_mode   # capture the config the sim was seeded with, or the
 	_recorder.hard = sim.hard            # replay rebuilds a vanilla sim and diverges (c4-fix)
+	_recorder.chapter = _arcade_chapter if _mode_str == "arcade" else 1   # Arcade's jump_to_chapter start gate
 	_replay_saved = false
 	# A restart mid-replay must not keep feeding recorded frames into the new sim.
 	_watching = false
@@ -1315,6 +1364,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_reset()
 		elif event.keycode == KEY_F3:
 			_endless = not _endless
+			if _endless:
+				_boss_rush = false
+				_arcade_chapter = -1
+			_reset()
+		elif event.keycode == KEY_F4:
+			_boss_rush = not _boss_rush
+			if _boss_rush:
+				_endless = false
+				_arcade_chapter = -1
 			_reset()
 		elif event.keycode == KEY_R:
 			if _watching:
@@ -1344,9 +1402,16 @@ func _run_rank() -> Dictionary:
 	var mvp := _run_kills * 2 + _run_best_streak * 5 + opened * 20
 	if sim.mode == "endless":
 		mvp += sim.wave * 12
+	elif sim.mode == "boss_rush":
+		# authored-campaign-and-modes: a rush gate is a whole gunship kill, not
+		# a bunker pair — worth more than the generic opened*20 a campaign
+		# checkpoint pays, so a clean rush scores like the first-class mode
+		# it is, not a shrunk campaign run.
+		mvp += opened * 25
 	var grade := "S" if mvp >= 300 else "A" if mvp >= 200 else "B" if mvp >= 120 else "C" if mvp >= 60 else "D"
 	var gtitle := "GRUNT"
-	if _run_best_streak >= 20: gtitle = "ONE-MAN ARMY"
+	if sim.mode == "boss_rush" and sim.victory: gtitle = "GUNSHIP KILLER"
+	elif _run_best_streak >= 20: gtitle = "ONE-MAN ARMY"
 	elif _run_best_streak >= 12: gtitle = "IRON NERVES"
 	elif _run_kills >= 60: gtitle = "EXTERMINATOR"
 	elif opened >= 3: gtitle = "TRAILBLAZER"
@@ -2748,6 +2813,17 @@ func _ev_gate_open(ev: Dictionary) -> void:
 	if _best_gate_split == 0 or split < _best_gate_split:
 		_best_gate_split = split
 	show_banner("GATE SECURED — %.1fs%s" % [split / 60.0, tag])
+	# authored-campaign-and-modes: name the zone you're entering (narrative
+	# hook per the six authored sectors — see SimWorld.ZONE_INFO). Queues onto
+	# the same FIFO the GATE SECURED banner just used, so it reads as a beat,
+	# not a collision. Campaign/Arcade only — Boss Rush's gates aren't zones.
+	if sim.mode == "campaign" or sim.mode == "arcade":
+		var opened := 0
+		for g in sim.gates:
+			if g["open"]:
+				opened += 1
+		var zi := SimWorld.zone_info(opened + 1)
+		show_banner(zi["name"], Color(0.75, 0.9, 1.0))
 
 
 func _ev_revive(ev: Dictionary) -> void:
@@ -3585,7 +3661,10 @@ func _record_run() -> void:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
 	var entry := {"score": sim.score, "mode": sim.mode, "wave": sim.wave,
-		"sector": mini(opened + 1, 5), "dist": -Fixed.to_int(sim.camera_top) / 10,
+		"sector": mini(opened + 1, SimWorld.FINAL_GATE_INDEX), "dist": -Fixed.to_int(sim.camera_top) / 10,
+		# authored-campaign-and-modes: bosses cleared, meaningful only for a
+		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
+		"bosses": mini(opened, SimWorld.BOSS_RUSH_COUNT),
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
 		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
 		"hid": _hall_seq}
@@ -9002,8 +9081,16 @@ func _draw_banners(top_msg: String) -> void:
 				"icon": "icon_medal", "icon_size": 16.0},
 			{"text": "%d¢ WAR CHEST BANKED" % sim.war_chest, "color": Color(1.0, 0.92, 0.55),
 				"icon": "icon_coin", "icon_size": 14.0},
-			{"text": "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10], "color": Color(0.8, 0.84, 0.74)},
 		]
+		if sim.mode == "boss_rush":
+			# authored-campaign-and-modes: a distance-pushed line is meaningless
+			# here (the camera barely moves) -- say what the mode is actually
+			# about instead: every gunship downed, back to back.
+			vrows.append({"text": "%d GUNSHIPS DOWNED — RUSH CLEARED" % SimWorld.BOSS_RUSH_COUNT,
+				"color": Color(0.8, 0.84, 0.74)})
+		else:
+			vrows.append({"text": "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10],
+				"color": Color(0.8, 0.84, 0.74)})
 		if _run_rescues > 0:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
@@ -9034,8 +9121,19 @@ func _draw_banners(top_msg: String) -> void:
 			if g["open"]:
 				opened += 1
 		var dist := -Fixed.to_int(sim.camera_top) / 10
+		var progress_row: Dictionary
+		if sim.mode == "boss_rush":
+			# authored-campaign-and-modes: bosses cleared, not sectors/distance —
+			# a rush debrief that reads like its own mode, not a stripped campaign
+			# card. `opened` counts gunship gates fallen (the finale gate, once
+			# reached, doesn't add to this — capped defensively regardless).
+			progress_row = {"text": "GUNSHIPS DOWNED  %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT],
+				"color": Color(0.9, 0.92, 0.85)}
+		else:
+			progress_row = {"text": "SECTOR %d/%d   %dm PUSHED" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX, dist],
+				"color": Color(0.9, 0.92, 0.85)}
 		var rows := [
-			{"text": "SECTOR %d/5   %dm PUSHED" % [mini(opened + 1, 5), dist], "color": Color(0.9, 0.92, 0.85)},
+			progress_row,
 			{"text": "SCORE %s   KILLS %d" % [Art.group_digits(sim.score), _run_kills], "color": Color(0.9, 0.92, 0.85)},
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]

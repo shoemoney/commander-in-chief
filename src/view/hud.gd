@@ -1316,15 +1316,22 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 							Color.WHITE if micon == "icon_coin" else mcol)
 					x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
 	else:
-		# SECTOR n/5: campaign progress toward the Foundry finale. Demotable (prio 82):
-		# above vanity/records but below the live SHOP/HOSTILES combat readouts, so an
-		# extreme-economy row sheds the progress chip into +N before dropping a live stat.
+		# SECTOR n/N: campaign progress toward the Foundry finale (N =
+		# SimWorld.FINAL_GATE_INDEX -- 6 zones as of authored-campaign-and-
+		# modes, was a hardcoded 5). Demotable (prio 82): above vanity/records
+		# but below the live SHOP/HOSTILES combat readouts, so an extreme-
+		# economy row sheds the progress chip into +N before dropping a live stat.
 		var opened := 0
 		for g in sim.gates:
 			if g["open"]:
 				opened += 1
-		var sectxt := "SECTOR %d/%d  %dm" % [mini(opened + 1, 5), 5,
-			-Fixed.to_int(sim.camera_top) / 10]
+		var sectxt: String
+		if sim.mode == "boss_rush":
+			# Boss Rush: gunships downed, not a sector count -- see the debrief.
+			sectxt = "GUNSHIPS %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
+		else:
+			sectxt = "SECTOR %d/%d  %dm" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
+				-Fixed.to_int(sim.camera_top) / 10]
 		if _fits2("sector", _tw(sectxt) + 10.0):
 			x = _text(sectxt, x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
