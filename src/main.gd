@@ -211,6 +211,7 @@ var _boss_ghost := {}            # view-side prev-HP fraction per boss, for the 
 var _boss_hpmax := {}            # view-side max HP seen per boss key: the endless gunship spawns above BOSS_HP (sim_world.gd:1581), which pegged its bar at 100% for half the fight
 var _endless_boss_key := ""      # last endless miniboss's dict key, so its hpmax/ghost entries get pruned on death (gate_y is unique per spawn — they'd accrete forever)
 var _seen := {}                  # persisted first-time-hint flags
+var _onboarding: OnboardingTutorial = null   # onboarding-first-ten-minutes: non-null only while the boot firing-range tutorial is on screen
 var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
@@ -266,6 +267,11 @@ const _KIND_TEACH := {
 const SAVE_PATH := "user://ikari_best.cfg"
 const SAVE_TMP := "user://ikari_best.cfg.tmp"
 const SAVE_BAK := "user://ikari_best.cfg.bak"
+# onboarding-first-ten-minutes: the boot tutorial's one-shot flag lives in its OWN tiny
+# file, deliberately separate from SAVE_PATH -- a wiped/corrupt/missing high-score save
+# (or a fresh install on another machine) must never re-trigger the tutorial, and a
+# player who quits before ever banking a run must still never see it twice.
+const ONBOARD_PATH := "user://onboarding.cfg"
 var best_score := 0
 var best_wave := 0
 var best_dist := 0
@@ -538,7 +544,26 @@ func _end_splash() -> void:
 	_splash_layer.visible = false
 	_sfx.stop_vo()   # cut the crawl narration if the player skipped the intro
 	if _menu.mode == GameMenu.Mode.HIDDEN:
-		_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
+		# onboarding-first-ten-minutes: a brand-new player (dedicated flag never set --
+		# see ONBOARD_PATH) gets the hands-on firing-range tutorial instead of TITLE,
+		# exactly once. Skippable at any moment (ESC/pad BACK); every later launch, and
+		# every launch mid-tutorial-skip, falls straight through to TITLE as before.
+		if not load_onboard_seen(ONBOARD_PATH):
+			_start_onboarding()
+		else:
+			_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
+
+
+func _start_onboarding() -> void:
+	_onboarding = OnboardingTutorial.new(self)
+	add_child(_onboarding)
+	_onboarding.finished.connect(_on_onboarding_finished)
+
+
+func _on_onboarding_finished() -> void:
+	save_onboard_seen(ONBOARD_PATH)   # flushed immediately -- independent of the bests/_seen save cadence
+	_onboarding = null
+	_menu.open(GameMenu.Mode.TITLE)
 
 
 func _splash_is_skip(event: InputEvent) -> bool:
@@ -1691,6 +1716,8 @@ func _physics_process(_delta: float) -> void:
 	# c4-08: Art.colorblind is now kept in lockstep by the `colorblind` setter (_set_colorblind) at
 	# every assignment site, so the old per-frame re-sync here is gone -- the palette can't drift.
 	_update_cursor()
+	if _onboarding != null:
+		return   # onboarding-first-ten-minutes: the tutorial drives its own _process; no sim/attract stepping while it's up
 	if _menu.is_active():
 		# Arm the fire-swallow every menu frame: the SPACE/LMB press that closes
 		# the menu (RESUME click, title confirm) must not fire on resume.
@@ -3152,6 +3179,21 @@ func buy_perk(id: String) -> bool:
 	_perk_levels[id] = lvl + 1
 	_persist({"meta": {"vp": vet_points, "levels": _perk_levels}})
 	return true
+
+
+# onboarding-first-ten-minutes: pure path-in/path-out so a headless test can round-trip
+# these without instancing Main. save_onboard_seen() writes synchronously the instant the
+# tutorial finishes or is skipped -- it does not wait for the next _flush_bests() (which
+# only fires on _reset/_exit_tree), so a hard-killed process still can't see it twice.
+static func load_onboard_seen(path: String) -> bool:
+	var cf := ConfigFile.new()
+	return cf.load(path) == OK and bool(cf.get_value("tutorial", "seen_boot", false))
+
+
+static func save_onboard_seen(path: String) -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("tutorial", "seen_boot", true)
+	cf.save(path)
 
 
 func _load_bests() -> void:

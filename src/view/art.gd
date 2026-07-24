@@ -611,8 +611,8 @@ const OUTLINE := {
 }
 
 const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
-	"roll": "ui_pad_b", "wheel": "ui_pad_back"}
-const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q"}
+	"roll": "ui_pad_b", "wheel": "ui_pad_back", "grenade": "glyph_lb"}
+const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q", "grenade": "SHIFT"}
 # (Hint-toast button WORDS live in _PAD_LABELS / pad_label below — the two
 # parallel loops built the same helper twice; pad_label won: its Switch table
 # is positionally correct where the duplicate transplanted Xbox letters.)
