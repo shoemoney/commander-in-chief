@@ -1,5 +1,5 @@
 extends SceneTree
-## p3 bake — BattleRoyale-pack riot_shield sprite (assets/legacy-art/p2/riot_shield.png).
+## p3 bake — BattleRoyale-pack riot_shield sprite (assets/art/p2/riot_shield.png).
 ## Same camera/light/downscale recipe as tools/bake_sprites_p2_br.gd.
 ##
 ## To reproduce (vendor stays read-only; only PNGs are written):
@@ -12,7 +12,7 @@ extends SceneTree
 ##   #   renderer/rendering_method="gl_compatibility"
 ##   cp tools/bake_sprites_p3_br.gd "$STAGE/"
 ##   godot --headless --path "$STAGE" --import
-##   SHOT_DIR=<repo>/assets/legacy-art/p2 godot --path "$STAGE" \
+##   SHOT_DIR=<repo>/assets/art/p2 godot --path "$STAGE" \
 ##       --rendering-method gl_compatibility -s res://bake_sprites_p3_br.gd
 ##
 ## The shield is modeled upright (face in the XY plane); rot tips it flat so

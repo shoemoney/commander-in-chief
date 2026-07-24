@@ -1,6 +1,6 @@
 extends SceneTree
 ## p3 bake (military native-Godot pack) — replaces the blank gunship_barrel /
-## colossus_barrel placeholders (assets/legacy-art/) and adds icons/icon_rend.png.
+## colossus_barrel placeholders (assets/art/) and adds icons/icon_rend.png.
 ## Same recipe as tools/bake_sprites.gd (SubViewport, ortho cam, premultiply→
 ## Lanczos→unpremultiply); adds "yaw" (spin subject so the muzzle lands where
 ## the draw code expects) and "cam": "iso" (front three-quarter, icon style).
@@ -16,9 +16,9 @@ extends SceneTree
 ##   # patch $STAGE/project.godot renderer → "gl_compatibility"
 ##   cp tools/bake_sprites_p3_mil.gd $STAGE/
 ##   godot --headless --path $STAGE --import
-##   SHOT_DIR=<repo>/assets/legacy-art godot --path $STAGE \
+##   SHOT_DIR=<repo>/assets/art godot --path $STAGE \
 ##       --rendering-method gl_compatibility -s res://bake_sprites_p3_mil.gd
-##   mv <repo>/assets/legacy-art/icon_rend.png <repo>/assets/legacy-art/icons/
+##   mv <repo>/assets/art/icon_rend.png <repo>/assets/art/icons/
 
 const A := "res://Assets/legacy art/PolygonMilitary/Prefabs/"
 const VE := A + "Vehicles/"
@@ -183,7 +183,7 @@ func _frame_camera(model: Node3D, kind: String) -> bool:
 		return false
 	var center := aabb.position + aabb.size * 0.5
 	if kind == "iso":
-		# Front three-quarter: raised camera on +Z, matches assets/legacy-art/icons/.
+		# Front three-quarter: raised camera on +Z, matches assets/art/icons/.
 		var d := aabb.size.length() + 4.0
 		cam.global_position = center + Vector3(0, d * 0.85, d)
 		cam.look_at(center, Vector3.UP)

@@ -1,5 +1,5 @@
 extends SceneTree
-## p2 bake — military-pack half of assets/legacy-art/p2/ (ghillie/courier/sapper/
+## p2 bake — military-pack half of assets/art/p2/ (ghillie/courier/sapper/
 ## tank_shell). Same recipe as tools/bake_sprites.gd; "attach" adds an
 ## attachment prefab at "attach_pos" so kit reads on the character from above.
 ##
@@ -10,7 +10,7 @@ extends SceneTree
 ##   # patch /tmp/legacy-art-bake-p2/mil/project.godot renderer → "gl_compatibility"
 ##   cp tools/bake_sprites_p2_mil.gd /tmp/legacy-art-bake-p2/mil/
 ##   godot --headless --path /tmp/legacy-art-bake-p2/mil --import
-##   SHOT_DIR=<repo>/assets/legacy-art/p2 godot --path /tmp/legacy-art-bake-p2/mil \
+##   SHOT_DIR=<repo>/assets/art/p2 godot --path /tmp/legacy-art-bake-p2/mil \
 ##       --rendering-method gl_compatibility -s res://bake_sprites_p2_mil.gd
 
 const A := "res://Assets/legacy art/PolygonMilitary/Prefabs/"

@@ -2,7 +2,7 @@ class_name HudIcons
 extends Control
 ## Icon HUD drawn on the shake-immune CanvasLayer. Replaces the P3 plain-text
 ## readout: War Chest coin, score medal, and per-player ammo/grenade/vest/
-## fuel/skull states render as baked legacy art icons (assets/legacy-art/icons/).
+## fuel/skull states render as baked legacy art icons (assets/art/icons/).
 
 const ICON := 13.0
 const FONT_SIZE := 10
@@ -1894,7 +1894,7 @@ const FUEL_END_PAD := 8.0  # c3-12: trailing gap after the F label before the ne
 # item removed. `icon_fuel` is a plain jerry-can silhouette (same legacy art icon bake, siblings the
 # grenade/ammo chips), so the fuel row now reads "fuel + how much is left", no second dial.
 # Preloaded here rather than via Art.tex because the jerry-can bake is unregistered in art.gd.
-const FUEL_ICON := preload("res://assets/legacy-art/icons/icon_fuel.png")
+const FUEL_ICON := preload("res://assets/art/icons/icon_fuel.png")
 # --- Player-row layout system (shared with ROW_TEXT_BASELINE below) ---
 const ROW_LABEL_GAP := 7.0   # c3-12: gap after the "P1"/"P2" row label before the first chip
 const STAT_ICON_GAP := 3.0   # c3-12: gap between a chip's icon and its text (the canonical

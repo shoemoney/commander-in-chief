@@ -12,24 +12,36 @@
  ▒ ░░ ░▒ ▒░  ▒   ▒▒ ░  ░▒ ░ ▒░ ▒ ░
 ```
 
+<img src="docs/media/keyart_hero.png" width="82%" alt="Commander In Chief — key art"/>
+
 ![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-159%20methods%20%2F%201771%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-606%20methods%20%2F%2012029%20asserts-brightgreen)
+![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
-![Milestone](https://img.shields.io/badge/milestone-P3%20greybox-orange)
+![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
 ![License](https://img.shields.io/badge/assets-legacy art%20licensed%20%C2%B7%20not%20public--ready-red)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
 a shared coin economy where every kill mints and every revive spends.
 
+### 🎬 Gameplay demo
+
+<img src="docs/media/demo.gif" width="72%" alt="Live gameplay — desert firefight, threat callouts, War Chest HUD"/>
+
+<sub>☝️ **Live in-engine capture** (movie-mode render, seed 18) — one-hit twin-stick, threat callouts, the corner War Chest economy. Not a mockup.</sub>
+
 </div>
 
-> ⚠️ **Status: P3 greybox.** Playable start-to-finish (campaign ends at the Foundry
-> Colossus 🏭), Endless War is deep, the feel stack is real — but the art is baked
-> greybox stand-ins and there is **no CI pipeline yet**: determinism is enforced by
-> the golden-checksum suite **run locally**. `docs/PLAN.md` is the aspirational P0–P7
-> master plan — **the sim code is the source of truth for what exists.**
+> ⚠️ **Status: P3, playable start→finish.** Campaign runs studio splash → Foundry
+> Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
+> Select · Daily Run), and the feel stack is real. Art is **legacy 3D pack bakes + bespoke
+> generated boss/vehicle/desert art** over a Kenney-CC0 FX base — no longer pure greybox.
+> **CI is live**: `.github/workflows/ci.yml` runs import + boot-smoke + the golden-checksum
+> suite across **Linux · macOS-arm64 · Windows**, failing on any `SCRIPT ERROR` or a missing
+> `PASS` line. `docs/PLAN.md` is the aspirational P0–P7 master plan — **the sim code is the
+> source of truth for what exists.**
 
 ---
 
@@ -210,7 +222,7 @@ godot --headless --path . -s res://tests/run_tests.gd   # full suite
 SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter by suite name 🎯
 ```
 
-**159 test methods / 1771 assertions** — fixed-point math, seeded RNG streams, the 1986
+**606 test methods / 12,029 assertions** — fixed-point math, seeded RNG streams, the 1986
 mechanic grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus,
 every archetype's behavior contract (nest armor, technical charge lock, pilot
 rescue/grace/forfeit), Endless War waves & shop, lockstep loopback, replay integrity,
@@ -279,19 +291,48 @@ docs/PLAN.md         📜 The aspirational P0–P7 master plan
 
 ## 🎨 Art
 
-Units, vehicles, bosses, structures (`assets/legacy-art/`) are **top-down renders of legacy art
-POLYGON Military** 3D models, baked to sprites by the `tools/bake_sprites*.gd` family
-(orthographic overhead camera, posed characters, turrets split from hulls so they
-rotate). The desert→jungle look is a per-sprite olive tint + 1px readability outline
-applied in the view (`src/view/art.gd`), not baked in. Ground tiles, projectiles and
-FX stay **Kenney CC0** (`assets/kenney/`).
+<table>
+<tr>
+<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Desert firefight" width="100%"/></td>
+<td width="50%"><img src="docs/media/gameplay_colossus.png" alt="Foundry Colossus boss" width="100%"/></td>
+</tr>
+<tr>
+<td align="center"><sub>Desert firefight — one-hit twin-stick</sub></td>
+<td align="center"><sub>The Foundry Colossus 🏭 — campaign finale</sub></td>
+</tr>
+</table>
 
-> ⚠️ The legacy art-derived sprites are proprietary (purchased license), **not** CC0 —
-> clear them before making this repo public. Final art per the master plan is a
-> commissioned pixel-art pass; these are the readability layer until then.
-> **No generative-AI *art* ships.** 🚫🤖 The 14 VO radio barks (`assets/vo/`) are the
-> one sanctioned exception: speech synthesis-generated per the 9/9 voices-panel consensus,
-> owner-approved 2026-07-17.
+The art is a **hybrid pipeline**, not one source:
+
+| Layer | Source | Where |
+|---|---|---|
+| Units · structures · props | **legacy 3D pack Military** top-down bakes (`tools/bake_sprites*.gd` — ortho overhead cam, turrets split from hulls) | `assets/art/` |
+| Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
+| Ground · projectiles · FX | **Kenney CC0** | `assets/kenney/` |
+| Radio VO (14 barks) | **speech synthesis**, 9/9 voices-panel consensus, owner-approved 2026-07-17 | `assets/vo/` |
+
+The desert→jungle look is a per-sprite olive tint + 1px readability outline applied in the
+view (`src/view/art.gd`), not baked in — so a new asset joins one palette family regardless
+of which source it came from.
+
+> ⚠️ **The public-release blocker is the legacy art license, not generative AI.** The
+> legacy art-derived sprites are proprietary (purchased license), **not** CC0 — clear them before
+> making this repo public. Generative-AI assets **are** sanctioned (the earlier no-AI policy
+> was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the speech synthesis VO
+> already ship in-game. 📋 Full asset-licensing map + the path to a public release:
+> **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
+
+<details><summary>🖼️ <b>Promo / key-art variants</b></summary>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/poster_hero.png" alt="Hero poster variant" width="100%"/></td>
+<td width="50%"><img src="docs/media/poster_comic.png" alt="Comic tank poster variant" width="100%"/></td>
+</tr>
+</table>
+
+<sub>Marketing key-art variants (generative-AI). Full 4K titled poster lives in the asset drop, not the repo.</sub>
+</details>
 
 Accessibility baked into the view 🧏: colorblind-safe palette routing (`Art.safe`),
 reduce-motion mode (steady lights instead of strobes/pulses), photosensitivity

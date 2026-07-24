@@ -427,7 +427,7 @@ var _menu := GameMenu.new()
 #   studio [0,3) → narration crawl+VO [3,10.5) → title+shield [10.5,13) → hero key-art [13,16) → dissolve.
 const SPLASH_DUR := 16.0
 const SPLASH_STUDIO_END := 3.0     # animated Big IT medallion + "presents"
-const SPLASH_CRAWL_END := 10.5     # scrolling narration crawl (Trump VO rides under it, 7.36s)
+const SPLASH_CRAWL_END := 10.5     # scrolling narration crawl (Commander VO rides under it, 7.36s)
 const SPLASH_TITLE_END := 13.0     # shield stamp + COMMANDER IN CHIEF wordmark
 const SPLASH_FADE_OUT := 15.5      # whole overlay dissolves to the title over the last 0.5s
 var _splash_t := 0.0               # seconds remaining; > 0 while the splash is on screen
@@ -632,7 +632,7 @@ func _draw_splash_studio(el: float, veil: float) -> void:
 
 
 func _draw_splash_crawl(ct: float, veil: float) -> void:
-	# BEAT 2: the narration crawl scrolls bottom→top, fading in then out; the Trump
+	# BEAT 2: the narration crawl scrolls bottom→top, fading in then out; the Commander
 	# VO (fired from _process) rides under it. ct = seconds since the crawl began.
 	var span := SPLASH_CRAWL_END - SPLASH_STUDIO_END   # 7.5s
 	var a := _splash_seg(ct, 0.0, 0.9, span - 1.0, span) * veil
@@ -990,7 +990,7 @@ func _process(_delta: float) -> void:
 	_steam.process()   # pumps Steamworks callbacks -- a safe no-op offline
 	if _splash_t > 0.0:
 		_splash_t -= _delta
-		# Fire the Trump narration once as the crawl beat begins (dry cinematic VO).
+		# Fire the Commander narration once as the crawl beat begins (dry cinematic VO).
 		if not _splash_vo_fired and (SPLASH_DUR - _splash_t) >= SPLASH_STUDIO_END:
 			_splash_vo_fired = true
 			_sfx.play_vo("intro_crawl", 3, true)
@@ -1043,10 +1043,13 @@ func _process(_delta: float) -> void:
 			_scan_mat_hs_prev = hs
 	# a4-01/a4-15: the master grade eases into a calm "breather" during the endless shop
 	# intermission (safe to buy → a tonal breath), then eases back for the next wave. A slow
-	# gentle tonal shift, not a strobe — reduce-motion-safe, so it isn't _motion-gated.
+	# gentle tonal shift, not a strobe.
 	if _grade_mat != null:
 		var want := 0.0 if sim == null else _grade_breather_target(sim.mode, sim.intermission_ticks)
-		_grade_breather = lerpf(_grade_breather, want, 0.06)
+		# ui-loop a11y: REDUCE MOTION's own copy promises "no shake, flash, or scroll fx", and this
+		# is a screen-wide animated tonal push — so under reduce-motion snap straight to target
+		# instead of lerping, so no animated grade reaches the shader (honors the setting's promise).
+		_grade_breather = want if _motion < 0.5 else lerpf(_grade_breather, want, 0.06)
 		if absf(_grade_breather - _grade_mat_breather_prev) > 0.001:
 			_grade_mat.set_shader_parameter("breather", _grade_breather)
 			_grade_mat_breather_prev = _grade_breather
@@ -4324,7 +4327,15 @@ func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, icon := "") -
 	# t starts at 1.0 and drains toward 0 over BANNER_LIFETIME_FRAMES physics-frames (~2s), the
 	# intentional read time the c4-07 seed-paste status lines rely on to stay legible long enough to
 	# catch — the same envelope as every wave/checkpoint splash (a FIFO backlog drains faster).
-	_banners.append({"text": text, "t": 1.0, "col": col, "icon": icon})
+	var entry := {"text": text, "t": 1.0, "col": col, "icon": icon}
+	# ui-loop HUD: a threat callout (icon != "" — the alarm grammar, per above) PREEMPTS a cosmetic
+	# banner sitting in slot 0, so a lethal "GUNSHIP INBOUND" / "CORE EXPOSED" isn't queued behind a
+	# "PERFECT DODGE!" and flashed for a fraction of its read time. The displaced banner keeps draining
+	# from [1] and resumes when the threat clears. Non-threat banners keep plain FIFO order.
+	if icon != "" and not _banners.is_empty() and _banners.front()["text"] != text:
+		_banners.push_front(entry)
+	else:
+		_banners.append(entry)
 
 
 func _check_dry_throw(inputs: Array[SimInput]) -> void:

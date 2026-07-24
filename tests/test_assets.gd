@@ -355,8 +355,8 @@ func test_a1_record_hud_mode() -> void:
 
 # --- a1-19: legacy art bakes stay lossless (no BC edge-mush on the silhouettes) ---
 
-func test_a1_legacy-art_bakes_are_lossless() -> void:
-	var stack: Array[String] = ["res://assets/legacy-art"]
+func test_a1_art_bakes_are_lossless() -> void:
+	var stack: Array[String] = ["res://assets/art"]
 	var checked := 0
 	var offenders: Array[String] = []
 	var detect3d: Array[String] = []
@@ -592,7 +592,7 @@ func test_a2_registry_has_no_dead_rows() -> void:
 
 func test_a2_pipeline_vram_reclaimed() -> void:
 	for cap in ["cap_pierce", "cap_spread", "cap_triple", "cap_rend", "cap_claymore", "cap_smoke", "cap_flash"]:
-		var c := FileAccess.get_file_as_string("res://assets/legacy-art/icons/%s.png.import" % cap)
+		var c := FileAccess.get_file_as_string("res://assets/art/icons/%s.png.import" % cap)
 		Runner.T.ok(c.contains("size_limit=128"), "capsule glyph %s imports size-limited" % cap)
 	for tile in ["dirt", "sand"]:
 		var ti := FileAccess.get_file_as_string("res://assets/kenney/%s.png.import" % tile)
@@ -979,8 +979,8 @@ func test_sie_endless_infantry_family() -> void:
 	var tex: Dictionary = art["TEX"]
 	var scale: Dictionary = art["SCALE"]
 	var outline: Dictionary = art["OUTLINE"]
-	var key_path := {"m_bombsuit": "legacy-art/mil2/bombsuit", "m_soldier2": "legacy-art/mil2/soldier2",
-		"ghillie": "legacy-art/p2/ghillie", "sapper": "legacy-art/p2/sapper"}
+	var key_path := {"m_bombsuit": "art/mil2/bombsuit", "m_soldier2": "art/mil2/soldier2",
+		"ghillie": "art/p2/ghillie", "sapper": "art/p2/sapper"}
 	for k in key_path:
 		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains(key_path[k]),
 			"%s still maps to its re-baked path — no TEX-key drift (sie-01)" % k)
@@ -998,10 +998,10 @@ func test_sie_endless_infantry_family() -> void:
 		Runner.T.ok(absf(footprint - sib_footprint) < 0.5,
 			"%s footprint (%.1f) matches the enemy_assault sibling's (%.1f) — same family, not a one-off (sie-01)" % [k, footprint, sib_footprint])
 	var files := {
-		"res://assets/legacy-art/mil2/soldier2.png": 128,
-		"res://assets/legacy-art/mil2/bombsuit.png": 128,
-		"res://assets/legacy-art/p2/ghillie.png": 128,
-		"res://assets/legacy-art/p2/sapper.png": 128,
+		"res://assets/art/mil2/soldier2.png": 128,
+		"res://assets/art/mil2/bombsuit.png": 128,
+		"res://assets/art/p2/ghillie.png": 128,
+		"res://assets/art/p2/sapper.png": 128,
 	}
 	for path in files:
 		var lim: int = files[path]
@@ -1364,7 +1364,7 @@ func _scan_dir_for_strings(root: String, exts: PackedStringArray, needles: Packe
 
 
 func test_hedge_asset_fully_retired() -> void:
-	Runner.T.ok(not FileAccess.file_exists("res://assets/legacy-art/decor/hedge.png"),
+	Runner.T.ok(not FileAccess.file_exists("res://assets/art/decor/hedge.png"),
 		"the pre-reskin hedge sprite must be deleted, not left as a dead asset that could get silently re-wired")
 	# Scan the ENTIRE res:// tree (minus gitignored/tooling dirs) for the retired
 	# sprite's path AND its .import uid (a scene can preload by uid:// with no
@@ -1376,7 +1376,7 @@ func test_hedge_asset_fully_retired() -> void:
 			["hedge.png", "uid://bchguurpaw56h"], "res://tests/test_assets.gd"))
 	Runner.T.ok(hits.is_empty(), "these files still reference the retired hedge asset: %s" % str(hits))
 	# The replacement must actually exist and be registered, not just absent-hedge.
-	Runner.T.ok(FileAccess.file_exists("res://assets/legacy-art/decor/dry_shrub.png"),
+	Runner.T.ok(FileAccess.file_exists("res://assets/art/decor/dry_shrub.png"),
 		"the dry_shrub replacement sprite must exist on disk")
 	Runner.T.ok(Art.TEX.has("dry_shrub"), "dry_shrub must be registered in Art.TEX so _spr(\"dry_shrub\", ...) resolves")
 
@@ -1522,19 +1522,19 @@ func test_a3_vo_bus_slaved_to_sfx_control() -> void:
 func test_a3_ui_bakes_are_size_limited() -> void:
 	# Input glyphs — draw_glyph uses an explicit 12..84px rect, so a 128 cap never blurs.
 	for g in ["pad_a", "ps_a", "sw_a", "key_enter", "mouse_l", "stick_l", "dpad_lr", "pad_start"]:
-		var c := FileAccess.get_file_as_string("res://assets/legacy-art/ui/glyphs/%s.png.import" % g)
+		var c := FileAccess.get_file_as_string("res://assets/art/ui/glyphs/%s.png.import" % g)
 		Runner.T.ok(c.contains("size_limit=128"), "input glyph %s imports size-limited (was full-res)" % g)
 	# Minimap icons — drawn ~16-24px on the rail.
 	for ic in ["ICON_Map_Fire", "ICON_Map_Skull", "ICON_Map_Vehicle", "ICON_Map_Target"]:
-		var c := FileAccess.get_file_as_string("res://assets/legacy-art/hud/%s.png.import" % ic)
+		var c := FileAccess.get_file_as_string("res://assets/art/hud/%s.png.import" % ic)
 		Runner.T.ok(c.contains("size_limit=128"), "minimap icon %s imports size-limited" % ic)
 	# The 512x256 muzzle-fan card draws at ~fl*1.4 (<=~56px) via a raw draw_texture_rect.
-	var mf := FileAccess.get_file_as_string("res://assets/legacy-art/fx/fx_muzzle_fan.png.import")
+	var mf := FileAccess.get_file_as_string("res://assets/art/fx/fx_muzzle_fan.png.import")
 	Runner.T.ok(mf.contains("size_limit=128"), "the muzzle-fan card imports size-limited")
 	# NEGATIVE check (a3-17 r2): SCALE-coupled in-world bakes (footprint = imported_px * SCALE,
 	# drawn via _spr) are DELIBERATELY left full-res — capping them would shift on-screen size
 	# and need a per-texture SCALE recompute. Guard that they were NOT swept.
-	for scaled in ["res://assets/legacy-art/decor/rock1.png.import", "res://assets/legacy-art/units/rusher.png.import"]:
+	for scaled in ["res://assets/art/decor/rock1.png.import", "res://assets/art/units/rusher.png.import"]:
 		if FileAccess.file_exists(scaled):
 			Runner.T.ok(FileAccess.get_file_as_string(scaled).contains("size_limit=0"),
 				"SCALE-coupled bake %s stays full-res (not swept)" % scaled.get_file())
@@ -1582,11 +1582,11 @@ func test_nt03_vehicle_bakes_are_not_blob_rectangles() -> void:
 	# detail — tires, tracks — isn't mistaken for background. Re-derive these from the corner
 	# color of any future raw render rather than reusing the numbers verbatim.)
 	var files := {
-		"res://assets/legacy-art/tank_body.png": Vector2i(104, 104),
-		"res://assets/legacy-art/tank_barrel.png": Vector2i(72, 72),
-		"res://assets/legacy-art/mil2/technical.png": Vector2i(96, 96),
-		"res://assets/legacy-art/mil2/radar_tank.png": Vector2i(104, 104),
-		"res://assets/legacy-art/mil2/rocket_truck.png": Vector2i(104, 104),
+		"res://assets/art/tank_body.png": Vector2i(104, 104),
+		"res://assets/art/tank_barrel.png": Vector2i(72, 72),
+		"res://assets/art/mil2/technical.png": Vector2i(96, 96),
+		"res://assets/art/mil2/radar_tank.png": Vector2i(104, 104),
+		"res://assets/art/mil2/rocket_truck.png": Vector2i(104, 104),
 	}
 	var seen_hashes := {}
 	for path in files:
@@ -1625,7 +1625,7 @@ func test_nt03_vehicle_bakes_are_not_blob_rectangles() -> void:
 			"%s is not a byte-for-byte copy of %s (nt-03, no shared placeholder bake)" %
 				[path, seen_hashes.get(file_hash, "")])
 		seen_hashes[file_hash] = path
-		if path == "res://assets/legacy-art/tank_barrel.png":
+		if path == "res://assets/art/tank_barrel.png":
 			# tank_barrel's "front" isn't alpha-mass (both ends are opaque, it's a thin
 			# cylinder) -- it's the round mount-plate BASE (wide) vs the muzzle-brake TIP
 			# (narrower). _draw_tanks() defaults an unset turret to barrel_angle=-PI/2, which

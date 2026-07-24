@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prove the desert-reskin winner map is honest: for every asset in
 art_candidates/desert_reskin/manifest.json, hash the recorded "winner"
-variant and the live assets/legacy-art/ sprite it claims to have shipped, and
+variant and the live assets/art/ sprite it claims to have shipped, and
 fail if they ever diverge (hand-edited sprite, bumped winner without
 re-running tools/apply_desert_winner.py, etc).
 
