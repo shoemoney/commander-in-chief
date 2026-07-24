@@ -378,7 +378,7 @@ var _menu := GameMenu.new()
 #   studio [0,3) → narration crawl+VO [3,10.5) → title+shield [10.5,13) → hero key-art [13,16) → dissolve.
 const SPLASH_DUR := 16.0
 const SPLASH_STUDIO_END := 3.0     # animated Big IT medallion + "presents"
-const SPLASH_CRAWL_END := 10.5     # scrolling narration crawl (Trump VO rides under it, 7.36s)
+const SPLASH_CRAWL_END := 10.5     # scrolling narration crawl (Commander VO rides under it, 7.36s)
 const SPLASH_TITLE_END := 13.0     # shield stamp + COMMANDER IN CHIEF wordmark
 const SPLASH_FADE_OUT := 15.5      # whole overlay dissolves to the title over the last 0.5s
 var _splash_t := 0.0               # seconds remaining; > 0 while the splash is on screen
@@ -564,7 +564,7 @@ func _draw_splash_studio(el: float, veil: float) -> void:
 
 
 func _draw_splash_crawl(ct: float, veil: float) -> void:
-	# BEAT 2: the narration crawl scrolls bottom→top, fading in then out; the Trump
+	# BEAT 2: the narration crawl scrolls bottom→top, fading in then out; the Commander
 	# VO (fired from _process) rides under it. ct = seconds since the crawl began.
 	var span := SPLASH_CRAWL_END - SPLASH_STUDIO_END   # 7.5s
 	var a := _splash_seg(ct, 0.0, 0.9, span - 1.0, span) * veil
@@ -921,7 +921,7 @@ func _paint_bg(canvas: Node2D) -> void:
 func _process(_delta: float) -> void:
 	if _splash_t > 0.0:
 		_splash_t -= _delta
-		# Fire the Trump narration once as the crawl beat begins (dry cinematic VO).
+		# Fire the Commander narration once as the crawl beat begins (dry cinematic VO).
 		if not _splash_vo_fired and (SPLASH_DUR - _splash_t) >= SPLASH_STUDIO_END:
 			_splash_vo_fired = true
 			_sfx.play_vo("intro_crawl", 3, true)
