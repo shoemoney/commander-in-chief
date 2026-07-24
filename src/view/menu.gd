@@ -5201,11 +5201,21 @@ static func legend_extent(segs: Array, gap := LEG_GAP, label_cap := 0.0) -> Arra
 	var total := -gap   # segments separated by `gap` px; first one has no gap
 	for seg in segs:
 		var gw := _glyph_w(seg)
-		var lw := f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+		var lw := f.get_string_size(_legend_label(seg), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 		if label_cap > 0.0:
 			lw = minf(lw, label_cap)   # c4-05: ellipsized labels measure at the cap (last-resort)
 		total += gw + (3.0 if gw > 0.0 else 0.0) + lw + gap
 	return [CENTER_X - total / 2.0, total]
+
+
+# localization-text-pipeline: single choke point for EVERY nav/footer/verb-legend label
+# (SELECT, BACK, HALL's FILTER, PAUSE's ROLL/WHEEL/REVIVE, per-row keycap labels, ...) --
+# legend_extent above, legend_primitives, and _legend_row below all read a seg's label
+# through here, so one translate() call localizes the whole legend system without
+# touching the dozens of scattered {"label": "BACK"/"SELECT"/...} dict literals that
+# build `segs` arrays across menu.gd and hud.gd.
+static func _legend_label(seg: Dictionary) -> String:
+	return TranslationServer.translate(seg.get("label", ""))
 
 
 # c4-05: the inter-segment gap the footer/legend strip compresses TO when its natural
@@ -5265,7 +5275,7 @@ static func legend_primitives(segs: Array, y: float, gap := LEG_GAP, label_cap :
 		if gw > 0.0:
 			grect = Rect2(x, y - _LEG_H / 2.0, gw, _LEG_H)
 			x += gw + 3.0
-		var lsz := f.get_string_size(seg.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
+		var lsz := f.get_string_size(_legend_label(seg), HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
 		var lw: float = lsz.x
 		if label_cap > 0.0:
 			lw = minf(lw, label_cap)   # c4-05: last-resort ellipsis width so nothing clips off-canvas
@@ -5371,7 +5381,7 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 		# When the hard cap is armed, clamp the label draw to the SAME width the layout reserved
 		# so Art.text ellipsizes to match its measured box (0.0 = no clip, the usual path).
 		_label_max_w = p["label"].size.x if cap > 0.0 else 0.0
-		_emit_label(seg.get("label", ""), Vector2(p["label"].position.x, y + 3.0),
+		_emit_label(_legend_label(seg), Vector2(p["label"].position.x, y + 3.0),
 			Color(0.82, 0.87, 0.77, a))
 	_label_max_w = 0.0   # reset the transient clip stamp so it can't leak to the next draw
 

@@ -1,0 +1,189 @@
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# TRANSLATOR NOTE: preserve every %s / %d / %%d verbatim (GDScript formats them
+# AFTER TranslationServer.translate() runs, so the placeholder must survive the
+# lookup unchanged). hud.gd's VO/bark caption strip wraps at CAPTION_MAX_W=560px
+# (see HudIcons._wrap_caption) -- word-wrapped for space-delimited scripts, and
+# character-wrapped as a fallback for space-less scripts (Japanese/Chinese), so a
+# caption line of any length is safe, but a SETTING_HELP/hint line elsewhere is
+# ellipsized instead of wrapped -- keep those reasonably close to the English
+# source's length where you can.
+
+msgid "SFX: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS. SAVED AUTOMATICALLY."
+msgstr "SFX：銃声・命中・爆発音の音量。自動保存されます。"
+
+msgid "MUSIC: LOUDNESS OF THE BACKGROUND SOUNDTRACK. SAVED AUTOMATICALLY."
+msgstr "音楽：背景音楽の音量。自動保存されます。"
+
+msgid "RUMBLE: CONTROLLER VIBRATION ON HITS AND EXPLOSIONS. SAVED AUTOMATICALLY."
+msgstr "振動：命中・爆発時のコントローラー振動。自動保存されます。"
+
+msgid "REDUCE MOTION: HOLDS THE SCREEN STEADY - NO SHAKE, FLASH, OR SCROLL FX. SAVED AUTOMATICALLY."
+msgstr "モーション軽減：画面を安定させ、揺れ・フラッシュ・スクロールFXを無くします。自動保存されます。"
+
+msgid "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVED AUTOMATICALLY."
+msgstr "色弱者モード：緑のサインを青に再着色し、形状を追加します。自動保存されます。"
+
+msgid "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVED AUTOMATICALLY."
+msgstr "アシスト：各ライフは1発ではなく2発耐えます。記録には*ASSISTが付きます。自動保存されます。"
+
+msgid "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVED AUTOMATICALLY."
+msgstr "字幕：指揮官・観測兵のボイスに字幕を表示。自動保存されます。"
+
+msgid "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVED AUTOMATICALLY."
+msgstr "フルスクリーン：ウィンドウではなく画面全体を使用。自動保存されます。"
+
+msgid "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY."
+msgstr "ウィンドウスケール：フルスクリーン以外のウィンドウサイズ。自動保存されます。"
+
+msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
+msgstr "協力プレイ：2人目のローカルプレイヤーを追加。次回プレイから適用。"
+
+msgid "NG+ HARD: A TOUGHER CAMPAIGN SPAWN CURVE. APPLIES TO YOUR NEXT RUN."
+msgstr "NG+ハード：キャンペーンの出現曲線がより厳しくなります。次回プレイから適用。"
+
+msgid "SPOTTER: \"War chest's empty, no revives!\""
+msgstr "観測兵：「戦費が尽きた、もう蘇生できない！」"
+
+msgid "SPOTTER: \"Squad's wiped. Run's over.\""
+msgstr "観測兵：「部隊壊滅。作戦終了。」"
+
+msgid "SPOTTER: \"This is it, LAST STAND!\""
+msgstr "観測兵：「いよいよ最後の抵抗だ！」"
+
+msgid "SPOTTER: \"Enemy observer spotted!\""
+msgstr "観測兵：「敵の観測兵を発見！」"
+
+msgid "SPOTTER: \"You're on a tear, keep it up!\""
+msgstr "観測兵：「この調子だ、このまま進め！」"
+
+msgid "SPOTTER: \"Core's exposed, open fire!\""
+msgstr "観測兵：「コアが露出した、撃て！」"
+
+msgid "SPOTTER: \"Flawless gate clear!\""
+msgstr "観測兵：「ノーミスでゲート突破！」"
+
+msgid "SPOTTER: \"Ransom lost, pilot's gone!\""
+msgstr "観測兵：「身代金を失い、パイロットは消えた。」"
+
+# TRANSLATOR NOTE: "victoly" is a deliberate r/l malapropism in the English source (a
+# running joke voice tic). Japanese does NOT carry an equivalent pun here -- an r/l
+# mix-up reads as a real-world stereotype in a language associated with exactly that
+# mispronunciation, not a joke, so this translation stays the correct/clean word.
+msgid "SPOTTER: \"Total victoly! Believe me!\""
+msgstr "観測兵：「完全勝利！信じてくれ。」"
+
+msgid "SPOTTER: \"Airstrike inbound, clear the area!\""
+msgstr "観測兵：「空襲が迫る、エリアを離れろ！」"
+
+msgid "SPOTTER: \"Pilot down, get to him!\""
+msgstr "観測兵：「パイロット撃墜、彼のもとへ！」"
+
+msgid "SPOTTER: \"Shop's locked, boss incoming!\""
+msgstr "観測兵：「店は閉鎖、ボスが来るぞ！」"
+
+msgid "SPOTTER: \"You're dry, reload!\""
+msgstr "観測兵：「弾切れだ、リロード！」"
+
+msgid "PILOT: \"Don't leave me out here!\""
+msgstr "パイロット：「こんなところに置いていかないでくれ！」"
+
+msgid "COMMANDER: \"Move out!\""
+msgstr "指揮官：「出発するぞ！」"
+
+msgid "COMMANDER: \"Rally to me!\""
+msgstr "指揮官：「集合だ！」"
+
+msgid "COMMANDER: \"That's how it's done!\""
+msgstr "指揮官：「よくやった！」"
+
+msgid "COMMANDER: \"Take 'em out!\""
+msgstr "指揮官：「やっちまえ！」"
+
+msgid "COMMANDER: \"Frag out!\""
+msgstr "指揮官：「手榴弾、投下！」"
+
+msgid "COMMANDER: \"Fire and fury!\""
+msgstr "指揮官：「炎と怒りだ！」"
+
+msgid "COMMANDER: \"Good, good.\""
+msgstr "指揮官：「よし、よし。」"
+
+msgid "COMMANDER: \"Man down!\""
+msgstr "指揮官：「味方が倒れた！」"
+
+msgid "COMMANDER: \"Ugh!\""
+msgstr "指揮官：「うげっ！」"
+
+msgid "COMMANDER: \"Total victory. Believe me.\""
+msgstr "指揮官：「完全勝利。信じてくれ。」"
+
+msgid "COMMANDER: \"Back in it!\""
+msgstr "指揮官：「戦線復帰！」"
+
+msgid "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN"
+msgstr "貫通弾—弾丸が貫通する。列の延長上を狙え"
+
+msgid "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN"
+msgstr "トレンチガン—続く限り3発の扇形。トリプル中は5方向扇形に"
+
+msgid "TRIPLE SHOT — PERMANENT 3-ROUND FAN. STACK SPREAD FOR A 5-WAY FAN"
+msgstr "トリプルショット—恒久的3発扇形。スプレッドと重ねれば5方向扇形に"
+
+msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
+msgstr "引裂弾—重機銃が機動隊の盾を貫通する"
+
+msgid "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING"
+msgstr "スモーク—照準を遮るが突進は止めない。動き続けろ"
+
+msgid "FLASHBANG — INFANTRY STUNNED. PUSH!"
+msgstr "フラッシュバング—歩兵をしびれさせた。進め！"
+
+msgid "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT"
+msgstr "巣は銃撃でひび割れていく—撃ち続けるか、手榴弾を投げろ"
+
+msgid "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS"
+msgstr "手榴弾は装甲を割る—バンカーは弾丸を通さない"
+
+msgid "ARMORED — WAIT FOR THE CORE"
+msgstr "装甲済み—コアが露出するまで待て"
+
+msgid "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
+msgstr "クレイモア—戦車から離れた[%s]で設置せよ（両陣営に害が及ぶ）"
+
+msgid "FEED THE WAR CHEST TO REVIVE — [%s]"
+msgstr "戦費を消費して蘇生させろ—[%s]"
+
+msgid "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM"
+msgstr "撃墜されたパイロットを救出しろ—撃つな、触れろ。身代金%d¢"
+
+msgid "HOLD [%s] FOR THE SUPPLY WHEEL"
+msgstr "[%s]を長押しで補給ホイール"
+
+msgid "AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]"
+msgstr "空襲は今や補給ホイールから—[%s]を長押し"
+
+msgid "K.I.A."
+msgstr "戦死"
+
+msgid "BAIL OUT! %ds"
+msgstr "脱出せよ！残り%d秒"
+
+msgid "ROLL"
+msgstr "ロール"
+
+msgid "SUPPLY WHEEL"
+msgstr "補給ホイール"
+
+msgid "REVIVE"
+msgstr "蘇生"
+
+msgid "SELECT"
+msgstr "決定"
+
+msgid "BACK"
+msgstr "戻る"
+

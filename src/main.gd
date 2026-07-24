@@ -1817,7 +1817,7 @@ func _consume_events() -> void:
 					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN")
 					6: _hint("triple", "TRIPLE SHOT — PERMANENT 3-ROUND FAN. STACK SPREAD FOR A 5-WAY FAN")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
-					8: _hint("claymore", "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
+					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_label("interact") if Art.use_pad else "F"))
 					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
@@ -2140,7 +2140,7 @@ func _consume_events() -> void:
 				_concussion = 1.0   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
-				_hint("revive", "FEED THE WAR CHEST TO REVIVE — [%s]" % (Art.pad_label("revive") if Art.use_pad else "E"), true)
+				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_label("revive") if Art.use_pad else "E"), true)
 				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
 				# out with a red descending sting so it registers as a setback, not a
 				# silent reset. Flags ride the checksum-excluded event (golden-safe).
@@ -2201,7 +2201,7 @@ func _consume_events() -> void:
 				# The banner carries the stakes BEFORE the player commits to the
 				# chase: the payout number, and the friendly-fire trap (a stray
 				# round pays nothing — sim rule the green ring alone can't teach).
-				_hint("pilot", "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM" % sim.PILOT_RANSOM, true)
+				_hint("pilot", TranslationServer.translate("RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM") % sim.PILOT_RANSOM, true)
 			"pilot_rescued":
 				_run_rescues += 1
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
@@ -3986,6 +3986,16 @@ func _hint(id: String, text: String, urgent := false) -> void:
 	if _seen.get(id, false):
 		return
 	_seen[id] = true
+	# localization-text-pipeline: single choke point for every STATIC onboarding hint —
+	# translate() keys off the exact English literal callers pass in, same
+	# source-string-as-key contract as Menu.setting_help/hud.gd's caption strip. The
+	# five hints that interpolate a device glyph/number (claymore/revive/pilot/supply/
+	# airstrike_wheel) translate their OWN template at the call site before formatting
+	# in the glyph -- translate() is a plain dict lookup on the msgid, so a "%s"/"%d"
+	# placeholder in a .po msgid survives translation untouched and still formats
+	# correctly here. This second call is a safe no-op for those five (translate() on
+	# an already-translated string that carries no further match just returns it).
+	text = TranslationServer.translate(text)
 	if urgent:
 		# Queue-jump (8-of-9 panel consensus on toast priority): a time-critical
 		# cue — a downed buddy's revive, an escaping ransom — must not wait ~3s
@@ -4007,11 +4017,11 @@ func _track_bests() -> void:
 	# Supply-wheel discoverability: the first time the chest can afford the
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
-		_hint("supply", "HOLD [%s] FOR THE SUPPLY WHEEL" % (Art.pad_label("wheel") if Art.use_pad else "Q"))
+		_hint("supply", TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % (Art.pad_label("wheel") if Art.use_pad else "Q"))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
 	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
-		_hint("airstrike_wheel", "AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]"
+		_hint("airstrike_wheel", TranslationServer.translate("AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]")
 			% (Art.pad_label("wheel") if Art.use_pad else "Q"))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).

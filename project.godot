@@ -16,6 +16,10 @@ run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.png"
 
+[autoload]
+
+MCPGameBridge="res://addons/godot_mcp/game_bridge/mcp_game_bridge.gd"
+
 [display]
 
 window/size/viewport_width=640
@@ -42,8 +46,11 @@ texture={
 "compress/mode": 2
 }
 
+[internationalization]
+
+locale/translations=PackedStringArray("res://locale/strings.es.po", "res://locale/strings.fr.po", "res://locale/strings.ja.po")
+
 [rendering]
 
 textures/canvas_textures/default_texture_filter=3
 textures/vram_compression/import_etc2_astc=true
-anti_aliasing/quality/msaa_2d=0

@@ -700,7 +700,10 @@ func _draw() -> void:
 				# cannon's shell count is suppressed while burning (moot — you're leaving the tank).
 				# The 3s fuse gets a number, like every other lethal window on this HUD
 				# (RALLYING/fuel/SHOP OPEN) — ceil grammar from the fuel dial (3s → 2s → 1s → boom).
-				var bailtxt := "BAIL OUT! %ds" % ((t["burn_ticks"] + 59) / 60)
+				# localization-text-pipeline: translate the template BEFORE formatting
+				# in the countdown number, so the _tw()/_row_fits() measurement below
+				# and the _warn_text() draw both see the same (translated) string.
+				var bailtxt: String = TranslationServer.translate("BAIL OUT! %ds") % ((t["burn_ticks"] + 59) / 60)
 				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
 					px = _row_ovf(px, ry)
 				else:
@@ -1394,9 +1397,33 @@ static func _wrap_caption(txt: String, font: Font, size: int, max_w: float) -> A
 		else:
 			lines.append(cur)
 			cur = w
+		# localization-text-pipeline: CJK (Japanese/Chinese) has no spaces, so txt.split(" ")
+		# hands the WHOLE line to this loop as one unbreakable "word" -- the comment this
+		# replaces used to accept that ("a single word wider than max_w still gets its own
+		# line") on the assumption an oversized token is a rare Latin edge case. A translated
+		# caption makes it the COMMON case, so fall back to a character-level greedy wrap
+		# instead of leaving an unbroken line to overflow CAPTION_MAX_W.
+		while font.get_string_size(cur, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+			var split_at := _fit_chars(cur, font, size, max_w)
+			if split_at <= 0 or split_at >= cur.length():
+				break   # even one glyph alone exceeds max_w -- nothing more to split
+			lines.append(cur.substr(0, split_at))
+			cur = cur.substr(split_at)
 	if cur != "":
 		lines.append(cur)
 	return lines
+
+
+## Character-level counterpart of the word-level fit check above: the longest prefix of `s`
+## (by character count, not byte count -- safe for multi-byte CJK) whose measured width is
+## still <= max_w. Only consulted by _wrap_caption's CJK/oversized-token fallback.
+static func _fit_chars(s: String, font: Font, size: int, max_w: float) -> int:
+	var n := 0
+	for i in range(1, s.length() + 1):
+		if font.get_string_size(s.substr(0, i), HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+			break
+		n = i
+	return n
 
 
 func _draw_caption() -> void:
@@ -1494,7 +1521,10 @@ static func verb_legend_extent() -> Array:
 	var f := Art.font()
 	var total := -12.0
 	for s in VERB_SEGS:
-		total += VERB_GH + 3.0 + f.get_string_size(s[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 12.0
+		# localization-text-pipeline: translate() BEFORE measuring, same reasoning as
+		# hud.gd's K.I.A./BAIL OUT fix -- verb_legend_primitives below measures/draws
+		# the SAME translated string, so the two never disagree on width.
+		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 12.0
 	return [320.0 - total / 2.0, total]
 
 
@@ -1510,10 +1540,14 @@ static func verb_legend_primitives(y: float) -> Array:
 	for s in VERB_SEGS:
 		var grect := Rect2(x, y - VERB_GH / 2.0, VERB_GH, VERB_GH)
 		x += VERB_GH + 3.0
+		# localization-text-pipeline: translate ONCE, store the TRANSLATED text as
+		# label_txt (the actual string _emit_label draws below), and measure it with
+		# the SAME string verb_legend_extent used above.
+		var label_txt := TranslationServer.translate(s[1])
 		# Real font metrics (measured width + ascent/height), not a hard-coded box —
 		# Art.text places the baseline at y+3, so the ink spans up by the ascent.
-		var lsz := f.get_string_size(s[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
-		out.append({"act": s[0], "label_txt": s[1], "glyph": grect,
+		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
+		out.append({"act": s[0], "label_txt": label_txt, "glyph": grect,
 			"label": Rect2(x, y + 3.0 - f.get_ascent(8), lsz.x, lsz.y)})
 		x += lsz.x + 12.0
 	return out
@@ -2038,9 +2072,14 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 	px = _stat("icon_skull", "x%d" % p["deaths"], px, ry)
 	var ty := ry + ICON - 3.0
 	if sim.last_stand:
-		if not _row_fits(px, _tw("K.I.A.")):
+		# localization-text-pipeline: translate ONCE and measure/draw the SAME
+		# translated string — measuring the English literal while drawing a
+		# (possibly wider) translation would let a longer localization slip
+		# past the fit guard it's meant to satisfy.
+		var kia_txt := TranslationServer.translate("K.I.A.")
+		if not _row_fits(px, _tw(kia_txt)):
 			return _row_ovf(px, ry)
-		_warn_text("K.I.A.", px, ty, Color(0.9, 0.35, 0.3))
+		_warn_text(kia_txt, px, ty, Color(0.9, 0.35, 0.3))
 		return px
 	if p["broke_timer"] > 0:
 		# A free rescue is already ticking — say so, or it reads as death.

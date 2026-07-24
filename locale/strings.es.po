@@ -1,0 +1,188 @@
+msgid ""
+msgstr ""
+"Language: es\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# TRANSLATOR NOTE: preserve every %s / %d / %%d verbatim (GDScript formats them
+# AFTER TranslationServer.translate() runs, so the placeholder must survive the
+# lookup unchanged). hud.gd's VO/bark caption strip wraps at CAPTION_MAX_W=560px
+# (see HudIcons._wrap_caption) -- word-wrapped for space-delimited scripts, and
+# character-wrapped as a fallback for space-less scripts (Japanese/Chinese), so a
+# caption line of any length is safe, but a SETTING_HELP/hint line elsewhere is
+# ellipsized instead of wrapped -- keep those reasonably close to the English
+# source's length where you can.
+
+msgid "SFX: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS. SAVED AUTOMATICALLY."
+msgstr "SFX: VOLUMEN DE DISPAROS, IMPACTOS Y EXPLOSIONES. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "MUSIC: LOUDNESS OF THE BACKGROUND SOUNDTRACK. SAVED AUTOMATICALLY."
+msgstr "MÚSICA: VOLUMEN DE LA BANDA SONORA. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "RUMBLE: CONTROLLER VIBRATION ON HITS AND EXPLOSIONS. SAVED AUTOMATICALLY."
+msgstr "VIBRACIÓN: VIBRACIÓN DEL MANDO EN IMPACTOS Y EXPLOSIONES. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "REDUCE MOTION: HOLDS THE SCREEN STEADY - NO SHAKE, FLASH, OR SCROLL FX. SAVED AUTOMATICALLY."
+msgstr "REDUCIR MOVIMIENTO: PANTALLA ESTABLE - SIN TEMBLOR, DESTELLOS NI SCROLL FX. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVED AUTOMATICALLY."
+msgstr "DALTONISMO: RECOLOREA LAS SEÑALES VERDES A AZUL Y AÑADE FORMAS. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVED AUTOMATICALLY."
+msgstr "ASISTENCIA: CADA VIDA AGUANTA DOS IMPACTOS, NO UNO. LAS PARTIDAS SE MARCAN *ASISTIDA. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVED AUTOMATICALLY."
+msgstr "SUBTÍTULOS: SUBTÍTULOS PARA LAS VOCES DEL COMANDANTE Y EL OBSERVADOR. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVED AUTOMATICALLY."
+msgstr "PANTALLA COMPLETA: OCUPA TODA LA PANTALLA EN VEZ DE UNA VENTANA. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY."
+msgstr "ESCALA DE VENTANA: TAMAÑO DE LA VENTANA SIN PANTALLA COMPLETA. SE GUARDA AUTOMÁTICAMENTE."
+
+msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
+msgstr "COOPERATIVO: AÑADE UN SEGUNDO JUGADOR LOCAL. SE APLICA EN TU PRÓXIMA PARTIDA."
+
+msgid "NG+ HARD: A TOUGHER CAMPAIGN SPAWN CURVE. APPLIES TO YOUR NEXT RUN."
+msgstr "NG+ DIFÍCIL: UNA CURVA DE APARICIÓN MÁS DURA EN LA CAMPAÑA. SE APLICA EN TU PRÓXIMA PARTIDA."
+
+msgid "SPOTTER: \"War chest's empty, no revives!\""
+msgstr "OBSERVADOR: \"¡El fondo de guerra está vacío, sin reanimaciones!\""
+
+msgid "SPOTTER: \"Squad's wiped. Run's over.\""
+msgstr "OBSERVADOR: \"Escuadrón aniquilado. Partida terminada.\""
+
+msgid "SPOTTER: \"This is it, LAST STAND!\""
+msgstr "OBSERVADOR: \"¡Esto es todo, ÚLTIMA RESISTENCIA!\""
+
+msgid "SPOTTER: \"Enemy observer spotted!\""
+msgstr "OBSERVADOR: \"¡Observador enemigo detectado!\""
+
+msgid "SPOTTER: \"You're on a tear, keep it up!\""
+msgstr "OBSERVADOR: \"¡Vas que te sales, sigue así!\""
+
+msgid "SPOTTER: \"Core's exposed, open fire!\""
+msgstr "OBSERVADOR: \"¡Núcleo al descubierto, abran fuego!\""
+
+msgid "SPOTTER: \"Flawless gate clear!\""
+msgstr "OBSERVADOR: \"¡Puerta despejada sin fallos!\""
+
+msgid "SPOTTER: \"Ransom lost, pilot's gone!\""
+msgstr "OBSERVADOR: \"¡Rescate perdido, el piloto se ha ido!\""
+
+# TRANSLATOR NOTE: "victoly" is a deliberate r/l malapropism in the English source (a
+# running joke voice tic), not a typo -- "victolia" mirrors it in Spanish; don't "fix"
+# it to "victoria".
+msgid "SPOTTER: \"Total victoly! Believe me!\""
+msgstr "OBSERVADOR: \"¡Victolia total! Créanme.\""
+
+msgid "SPOTTER: \"Airstrike inbound, clear the area!\""
+msgstr "OBSERVADOR: \"¡Ataque aéreo entrante, despejen la zona!\""
+
+msgid "SPOTTER: \"Pilot down, get to him!\""
+msgstr "OBSERVADOR: \"¡Piloto derribado, id a por él!\""
+
+msgid "SPOTTER: \"Shop's locked, boss incoming!\""
+msgstr "OBSERVADOR: \"¡Tienda cerrada, jefe llegando!\""
+
+msgid "SPOTTER: \"You're dry, reload!\""
+msgstr "OBSERVADOR: \"¡Te has quedado sin munición, recarga!\""
+
+msgid "PILOT: \"Don't leave me out here!\""
+msgstr "PILOTO: \"¡No me dejéis aquí afuera!\""
+
+msgid "COMMANDER: \"Move out!\""
+msgstr "COMANDANTE: \"¡En marcha!\""
+
+msgid "COMMANDER: \"Rally to me!\""
+msgstr "COMANDANTE: \"¡A reagruparse conmigo!\""
+
+msgid "COMMANDER: \"That's how it's done!\""
+msgstr "COMANDANTE: \"¡Así se hace!\""
+
+msgid "COMMANDER: \"Take 'em out!\""
+msgstr "COMANDANTE: \"¡Acábenlos!\""
+
+msgid "COMMANDER: \"Frag out!\""
+msgstr "COMANDANTE: \"¡Granada fuera!\""
+
+msgid "COMMANDER: \"Fire and fury!\""
+msgstr "COMANDANTE: \"¡Fuego y furia!\""
+
+msgid "COMMANDER: \"Good, good.\""
+msgstr "COMANDANTE: \"Bien, bien.\""
+
+msgid "COMMANDER: \"Man down!\""
+msgstr "COMANDANTE: \"¡Hombre abatido!\""
+
+msgid "COMMANDER: \"Ugh!\""
+msgstr "COMANDANTE: \"¡Argh!\""
+
+msgid "COMMANDER: \"Total victory. Believe me.\""
+msgstr "COMANDANTE: \"Victoria total. Créanme.\""
+
+msgid "COMMANDER: \"Back in it!\""
+msgstr "COMANDANTE: \"¡De vuelta a la lucha!\""
+
+msgid "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN"
+msgstr "MUNICIÓN PERFORANTE — LOS DISPAROS ATRAVIESAN. APUNTA A LO LARGO DE LA COLUMNA"
+
+msgid "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN"
+msgstr "ESCOPETA DE TRINCHERA — ABANICO DE 3 DISPAROS MIENTRAS DURE. CON TRIPLE ES UN ABANICO DE 5"
+
+msgid "TRIPLE SHOT — PERMANENT 3-ROUND FAN. STACK SPREAD FOR A 5-WAY FAN"
+msgstr "DISPARO TRIPLE — ABANICO PERMANENTE DE 3 DISPAROS. SUMA DISPERSIÓN PARA UN ABANICO DE 5"
+
+msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
+msgstr "MUNICIÓN DESGARRADORA — TU AMETRALLADORA ATRAVIESA ESCUDOS ANTIDISTURBIOS"
+
+msgid "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING"
+msgstr "HUMO — BLOQUEA SU PUNTERÍA, NO SU CARGA. SIGUE MOVIÉNDOTE"
+
+msgid "FLASHBANG — INFANTRY STUNNED. PUSH!"
+msgstr "CEGADORA — INFANTERÍA ATURDIDA. ¡AVANZA!"
+
+msgid "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT"
+msgstr "EL NIDO SE AGRIETA BAJO FUEGO — SIGUE DISPARANDO O LANZA UNA GRANADA"
+
+msgid "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS"
+msgstr "LAS GRANADAS AGRIETAN LA ARMADURA — LOS BÚNKERES NO RESISTEN BALAS"
+
+msgid "ARMORED — WAIT FOR THE CORE"
+msgstr "BLINDADO — ESPERA AL NÚCLEO"
+
+msgid "CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)"
+msgstr "CLAYMORE — COLÓCALA CON [%s] LEJOS DE LOS TANQUES (DAÑA A AMBOS BANDOS)"
+
+msgid "FEED THE WAR CHEST TO REVIVE — [%s]"
+msgstr "ALIMENTA EL FONDO DE GUERRA PARA REANIMAR — [%s]"
+
+msgid "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM"
+msgstr "RESCATA AL PILOTO CAÍDO — TÓCALO, NO DISPARES — %d¢ DE RESCATE"
+
+msgid "HOLD [%s] FOR THE SUPPLY WHEEL"
+msgstr "MANTÉN [%s] PARA LA RUEDA DE SUMINISTROS"
+
+msgid "AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]"
+msgstr "LOS ATAQUES AÉREOS YA ESTÁN EN LA RUEDA DE SUMINISTROS — MANTÉN [%s]"
+
+msgid "K.I.A."
+msgstr "BAJA"
+
+msgid "BAIL OUT! %ds"
+msgstr "¡SALTA! %ds"
+
+msgid "ROLL"
+msgstr "RODAR"
+
+msgid "SUPPLY WHEEL"
+msgstr "RUEDA DE SUMINISTROS"
+
+msgid "REVIVE"
+msgstr "REANIMAR"
+
+msgid "SELECT"
+msgstr "SELECCIONAR"
+
+msgid "BACK"
+msgstr "ATRÁS"
+

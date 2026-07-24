@@ -33,6 +33,7 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_main.gd",
 	"res://tests/test_steam_bridge.gd",
 	"res://tests/test_menu_layout.gd",
+	"res://tests/test_localization.gd",
 	"res://tests/test_hud.gd",
 	"res://tests/test_perf.gd",
 	"res://tests/test_soak.gd",
