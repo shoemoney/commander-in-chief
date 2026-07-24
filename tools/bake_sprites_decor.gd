@@ -1,6 +1,6 @@
 extends SceneTree
 ## legacy 3D pack Military → battlefield-litter (decor) sprite baker for Commander In Chief.
-## Regenerates assets/legacy-art/decor/*.png (the _LITTER props scattered by _draw_terrain) from the
+## Regenerates assets/art/decor/*.png (the _LITTER props scattered by _draw_terrain) from the
 ## purchased legacy art pack. Renders each model through an orthographic top-down
 ## Camera3D into a transparent SubViewport and saves a per-sized PNG.
 ##
@@ -13,7 +13,7 @@ extends SceneTree
 ##   # patch /tmp/legacy-art-bake/project.godot renderer → "gl_compatibility"
 ##   cp tools/bake_sprites.gd /tmp/legacy-art-bake/
 ##   godot --headless --path /tmp/legacy-art-bake --import
-##   SHOT_DIR=<repo>/assets/legacy-art/decor godot --path /tmp/legacy-art-bake \
+##   SHOT_DIR=<repo>/assets/art/decor godot --path /tmp/legacy-art-bake \
 ##       --rendering-method gl_compatibility -s res://bake_sprites_decor.gd
 ##
 ## Tint + per-sprite draw-scale live in src/view/art.gd, applied in main._spr().
@@ -84,7 +84,7 @@ func _initialize() -> void:
 
 	# px = output square size (≈ the Kenney sprite it replaces; scales retuned in-game).
 	jobs = [
-		# --- Battlefield litter (assets/legacy-art/decor/) ---
+		# --- Battlefield litter (assets/art/decor/) ---
 		# px matches the shipped PNG sizes; art.gd draw-scales assume them.
 		{"name": "barrel", "src": PR + "Military/SM_Prop_Barrel_01.tscn", "kind": "obj", "px": 160},
 		{"name": "ammobox", "src": PR + "Military/SM_Prop_AmmoBox_01.tscn", "kind": "obj", "px": 160},

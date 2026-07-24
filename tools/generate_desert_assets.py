@@ -3,7 +3,7 @@
 and post-process them into drop-in, Godot-import-ready legacy art-style sprites.
 
 Reproduces the generate-desert-assets pass documented in
-assets/legacy-art/desert_assets_source.md end to end:
+assets/art/desert_assets_source.md end to end:
   0. jobs are organized into asset GROUPS (cacti, scrub, dead -- see
      GROUPS below); dispatch_groups() fans out one subprocess PER GROUP,
      each one this same script re-invoked with `--group <name>` -- a real
@@ -25,7 +25,7 @@ assets/legacy-art/desert_assets_source.md end to end:
      lossless convention (compress/mode=0, detect_3d/compress_to=0,
      vram_texture=false) and re-imported, so the BC compressor never mushes
      the low-poly outline silhouettes -- see
-     tests/test_assets.gd::test_a1_legacy-art_bakes_are_lossless()
+     tests/test_assets.gd::test_a1_art_bakes_are_lossless()
 
 Usage:
     python3 tools/generate_desert_assets.py [--out-dir DIR] [--godot-bin PATH]
@@ -38,7 +38,7 @@ Usage:
 Requires ~/.claude/skills/image-toolkit/scripts/generate.py and a backend key
 (fal by default, or replicate) resolved by that script from model gateway then the
 environment (FAL_KEY / REPLICATE_API_TOKEN) unless --dry-run.
-Writes the final sprites straight into their assets/legacy-art/... homes --
+Writes the final sprites straight into their assets/art/... homes --
 rerun any time to regenerate a fresh batch (e.g. to restyle) before
 committing.
 """
@@ -70,7 +70,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # checked-in import rather than duplicated into a hand-maintained template,
 # so fix_import_settings() can never drift out of sync with the convention
 # it's supposed to enforce.
-REFERENCE_IMPORT = PROJECT_ROOT / "assets/legacy-art/tree_large.png.import"
+REFERENCE_IMPORT = PROJECT_ROOT / "assets/art/tree_large.png.import"
 
 RESAMPLE_LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 
@@ -268,18 +268,18 @@ def fix_import_settings(png_path: Path) -> None:
     for stale in (PROJECT_ROOT / ".godot/imported").glob(f"{fname}-{h}.*ctex"):
         stale.unlink()
 
-    rel = png_path.resolve().relative_to((PROJECT_ROOT / "assets/legacy-art").resolve())
+    rel = png_path.resolve().relative_to((PROJECT_ROOT / "assets/art").resolve())
     ref = REFERENCE_IMPORT.read_text()
     ref = re.sub(r'^uid="uid://\w+"$', f'uid="{uid_m.group(1)}"', ref, count=1, flags=re.M)
     ref = re.sub(r'res://\.godot/imported/[\w.]+-[0-9a-f]{16,}\.ctex',
                  f'res://.godot/imported/{fname}-{h}.ctex', ref)
-    ref = re.sub(r'source_file="res://assets/legacy-art/[^"]*"',
-                 f'source_file="res://assets/legacy-art/{rel.as_posix()}"', ref, count=1)
+    ref = re.sub(r'source_file="res://assets/art/[^"]*"',
+                 f'source_file="res://assets/art/{rel.as_posix()}"', ref, count=1)
     imp_path.write_text(ref)
 
 
-def assert_lossless_legacy-art_import(png_path: Path) -> None:
-    """The same check test_a1_legacy-art_bakes_are_lossless() runs, applied to
+def assert_lossless_art_import(png_path: Path) -> None:
+    """The same check test_a1_art_bakes_are_lossless() runs, applied to
     just this file, so a bad rewrite fails loudly here instead of at the
     next full test run."""
     text = png_path.with_name(png_path.name + ".import").read_text()
@@ -414,8 +414,8 @@ def dispatch_groups(args: argparse.Namespace, raw_dir: Path, out_root: Path,
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", default=str(PROJECT_ROOT / "assets/legacy-art"),
-                     help="assets/legacy-art root to write finished sprites into")
+    ap.add_argument("--out-dir", default=str(PROJECT_ROOT / "assets/art"),
+                     help="assets/art root to write finished sprites into")
     ap.add_argument("--raw-dir", default=None,
                      help="scratch dir for the raw nano-banana renders "
                           "(default: a throwaway temp dir, never under the repo)")
@@ -508,13 +508,13 @@ def main() -> int:
     print("correcting .import settings to the lossless legacy art-bake convention...")
     for dest_path in dest_paths:
         fix_import_settings(dest_path)
-        assert_lossless_legacy-art_import(dest_path)
+        assert_lossless_art_import(dest_path)
 
     print(f"running {godot_bin} --import (pass 2: bake corrected settings)...")
     run_godot_import(godot_bin)
 
     print("done. Run `godot --headless --path . -s res://tests/run_tests.gd` "
-          "to confirm test_a1_legacy-art_bakes_are_lossless() agrees.")
+          "to confirm test_a1_art_bakes_are_lossless() agrees.")
     return 0
 
 

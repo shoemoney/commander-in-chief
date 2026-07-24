@@ -306,8 +306,8 @@ The art is a **hybrid pipeline**, not one source:
 
 | Layer | Source | Where |
 |---|---|---|
-| Units · structures · props | **legacy 3D pack Military** top-down bakes (`tools/bake_sprites*.gd` — ortho overhead cam, turrets split from hulls) | `assets/legacy-art/` |
-| Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/legacy-art/` (baked) |
+| Units · structures · props | **legacy 3D pack Military** top-down bakes (`tools/bake_sprites*.gd` — ortho overhead cam, turrets split from hulls) | `assets/art/` |
+| Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
 | Ground · projectiles · FX | **Kenney CC0** | `assets/kenney/` |
 | Radio VO (14 barks) | **speech synthesis**, 9/9 voices-panel consensus, owner-approved 2026-07-17 | `assets/vo/` |
 

@@ -1,6 +1,6 @@
 extends SceneTree
 ## legacy 3D pack Military → top-down sprite baker for Commander In Chief.
-## Regenerates assets/legacy-art/*.png (units, vehicles, props, foliage) from the
+## Regenerates assets/art/*.png (units, vehicles, props, foliage) from the
 ## purchased legacy art pack. Renders each model through an orthographic top-down
 ## Camera3D into a transparent SubViewport and saves a per-sized PNG.
 ##
@@ -13,7 +13,7 @@ extends SceneTree
 ##   # patch /tmp/legacy-art-bake/project.godot renderer → "gl_compatibility"
 ##   cp tools/bake_sprites.gd /tmp/legacy-art-bake/
 ##   godot --headless --path /tmp/legacy-art-bake --import
-##   SHOT_DIR=<repo>/assets/legacy-art godot --path /tmp/legacy-art-bake \
+##   SHOT_DIR=<repo>/assets/art godot --path /tmp/legacy-art-bake \
 ##       --rendering-method gl_compatibility -s res://bake_sprites.gd
 ##
 ## Tint + per-sprite draw-scale live in src/view/art.gd, applied in main._spr().
