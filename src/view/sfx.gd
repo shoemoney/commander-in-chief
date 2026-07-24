@@ -35,6 +35,8 @@ var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Tr
 var _cmd_next_frame := 0                # global bark cooldown (physics frames) so combat isn't a monologue
 var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
 var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
+var _death_yells_loaded := false        # opt-loop: lazy-load guard (see play_death_yell) — distinct
+var _spawn_shouts_loaded := false       # from bank.is_empty() so a directory scan never retries
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
 var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
@@ -122,9 +124,22 @@ func _ready() -> void:
 		var res := load("res://assets/vo/%s.mp3" % k)
 		if res != null:
 			_vo_streams[k] = res
-	_load_death_yells()
-	_load_spawn_shouts()
+	# opt-loop: death-yell/spawn-shout banks (178 of 234 total boot-time MP3
+	# loads) aren't touched until an enemy actually exists in combat — lazy-
+	# loaded on first use instead (see play_death_yell/play_spawn_shout).
+	#
+	# Everything below this point is content, not bus infrastructure — no other
+	# code depends on it running synchronously within THIS _ready() call (only
+	# the bus creation above is load-bearing, per main.gd's own comment on why
+	# add_child(_sfx) must run before _load_bests()). It's also the expensive
+	# part: ~2.5-3M sample-by-sample synth iterations for every SFX voice, both
+	# drum loops, and three ambience beds, run in interpreted GDScript, blocking
+	# the very first rendered frame (nothing shows, not even the boot splash)
+	# for its whole duration. Deferred so the splash gets a chance to paint first.
+	call_deferred("_finish_boot_audio")
 
+
+func _finish_boot_audio() -> void:
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -372,11 +387,17 @@ func _play_bank_at(bank: Array, screen_pos: Vector2, vol_db: float) -> void:
 
 func play_death_yell(screen_pos: Vector2, vol_db := -5.0) -> void:
 	## Positional agony yell on an infantry kill.
+	if not _death_yells_loaded:
+		_death_yells_loaded = true
+		_load_death_yells()
 	_play_bank_at(_death_yells, screen_pos, vol_db)
 
 
 func play_spawn_shout(screen_pos: Vector2, vol_db := -8.0) -> void:
 	## Positional battle cry when an infantry first enters the viewport.
+	if not _spawn_shouts_loaded:
+		_spawn_shouts_loaded = true
+		_load_spawn_shouts()
 	_play_bank_at(_spawn_shouts, screen_pos, vol_db)
 
 
