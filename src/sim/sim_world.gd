@@ -179,6 +179,7 @@ const BUNKER_H := 32 * F_ONE
 const ROLL_TICKS := 18
 const ROLL_CD_TICKS := 72
 const ROLL_BUFFER_TICKS := 8
+const GRENADE_BUFFER_TICKS := 8   # parity with the roll buffer — see _step_players
 # Tank: 0.8× player speed, cannon draws from grenade ammo, ~20 s of fuel,
 # guaranteed 3.0 s bail window once burning.
 const TANK_SPEED := (PLAYER_SPEED * 4) / 5
@@ -624,7 +625,8 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"grenade_ammo": GRENADE_AMMO_MAX,
 			"fire_cd": 0, "grenade_cd": 0,
 			"broke_timer": 0,
-			"roll_ticks": 0, "roll_cd": 0, "roll_buf": 0,
+			"roll_ticks": 0, "roll_cd": 0, "roll_buf": 0, "roll_prev": false,
+			"grenade_buf": 0,
 			"roll_iframe": false,
 			"roll_dx": 0, "roll_dy": -F_ONE,
 			"boost_ticks": 0,
@@ -819,6 +821,7 @@ func _step_players(inputs: Array) -> void:
 		p["grenade_cd"] = maxi(0, p["grenade_cd"] - 1)
 		p["roll_cd"] = maxi(0, p["roll_cd"] - 1)
 		p["roll_buf"] = maxi(0, p["roll_buf"] - 1)
+		p["grenade_buf"] = maxi(0, p["grenade_buf"] - 1)
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
 		p["pierce_ticks"] = maxi(0, p["pierce_ticks"] - 1)
@@ -859,7 +862,14 @@ func _step_players(inputs: Array) -> void:
 		# Dodge roll: locks direction at trigger, 2× speed, i-frames.
 		# You cannot roll while wading (1986 water grammar). Presses buffer for
 		# ROLL_BUFFER_TICKS so a slightly-early press still rolls on cd end.
-		if inp.roll:
+		# Rising edge only. This used to be a level read, so HOLDING roll re-armed
+		# the buffer every tick and auto-rolled the instant the cd expired — a free
+		# perpetual i-frame chain (18 i-frames per 72 ticks) off one held button,
+		# which also made the buffer meaningless (it only ever mattered for held
+		# input). Tapping still buffers exactly as before.
+		var roll_edge: bool = inp.roll and not p["roll_prev"]
+		p["roll_prev"] = inp.roll
+		if roll_edge:
 			p["roll_buf"] = ROLL_BUFFER_TICKS
 		if p["roll_buf"] > 0 and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and not wading:
 			p["roll_buf"] = 0
@@ -986,7 +996,13 @@ func _step_players(inputs: Array) -> void:
 				for e in enemies:
 					if _enemy_strikeable(e) \
 							and _dist_lte(p["x"], p["y"], e["x"], e["y"], BASH_RADIUS):
-						_kill_enemy(e, true)
+						# no_score too: bash guarantees a kill on a 40-tick cd while
+						# KILL_STREAK_WINDOW_TICKS is 90, so an out-of-ammo player
+						# parked in a swarm sustained the 20-kill streak (and its
+						# 100% score bonus + token mint) forever at zero resource
+						# cost — running dry was a leaderboard UPGRADE. Same rule
+						# the airstrike already follows: unearned kills mint nothing.
+						_kill_enemy(e, true, true)
 						p["fire_cd"] = BASH_COOLDOWN_TICKS
 						events.append({"t": "bash", "x": p["x"], "y": p["y"], "i": i})
 						bashed = true
@@ -1015,7 +1031,16 @@ func _step_players(inputs: Array) -> void:
 					_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD2_COS) + Fixed.mul(fay, SPREAD2_SIN),
 						Fixed.mul(fay, SPREAD2_COS) - Fixed.mul(fax, SPREAD2_SIN))
 
-		if grenade_edge and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
+		# Grenade presses buffer like roll does. Grenade is the panic button AND the
+		# only armor-cracker, yet it was the one verb with no buffer at all: a press
+		# anywhere inside the 30-tick cooldown was discarded outright with no re-fire.
+		# GRENADE_BUFFER_TICKS = 8 is parity with the shipped ROLL_BUFFER_TICKS (the
+		# in-repo precedent). Test: tap grenade at cd-2/-4/-8 and assert 3/3 land.
+		# If presses still feel eaten, step to 12.
+		if grenade_edge:
+			p["grenade_buf"] = GRENADE_BUFFER_TICKS
+		if p["grenade_buf"] > 0 and p["grenade_cd"] == 0 and p["grenade_ammo"] > 0:
+			p["grenade_buf"] = 0
 			p["grenade_cd"] = GRENADE_COOLDOWN_TICKS
 			p["grenade_ammo"] = p["grenade_ammo"] - 1
 			events.append({"t": "throw", "x": p["x"], "y": p["y"], "i": i})
@@ -1613,10 +1638,14 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	war_chest -= cost
 	if kind == 2:
 		vest_buys += 1
-	# Spending is not a score cut: credit the same 10x the Last Stand victory
-	# payout gives unspent chest, so a run-saving buy trades power-now for
-	# banked-score rather than costing points outright.
-	score += cost * 10
+	# Spending credits a DISCOUNTED rate against the 10x the victory payout gives
+	# unspent chest. At exact parity the "gear now vs. revives later" decision this
+	# shop is built around was fake — buying was score-neutral, so buy-everything-
+	# immediately strictly dominated and hoarding cost nothing. A 40% haircut makes
+	# a buy a real trade without punishing the run-saving purchase.
+	# Starting value 6x; test: a hoard run should out-score an all-buy run on the
+	# same seed by 10-25%. If the gap exceeds 40% (nobody ever buys), raise to 8.
+	score += cost * 6
 	# Wheel slot 4 is the sandbag: supply-kind 11 (pickup kinds 4-10 are the
 	# rare capsules — a priced crate can never carry 11, so no collision).
 	_apply_supply(p, 11 if kind == 4 else kind)
@@ -4980,7 +5009,13 @@ func _kill_observer() -> void:
 	score += COIN_ELITE * 20
 	observer = {}
 	_clear_observer_strikes()
-	stall_ticks = 0
+	# Half, not zero. Killing the spotter used to fully re-arm the 480-tick timer,
+	# so the game's only anti-camp valve paid the camper (2x elite coin + 500 score)
+	# AND bought back the whole stall window — parking at a closed gate to farm the
+	# bunker's rusher drip and pop a spotter every 8s was strictly profitable.
+	# Now a player who still hasn't moved sees the next one twice as fast, while a
+	# player who kills it and advances never notices the difference.
+	stall_ticks = OBSERVER_STALL_TICKS / 2
 
 
 func _clear_observer_strikes() -> void:
@@ -5088,6 +5123,7 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
+				int(p["roll_prev"]), p["grenade_buf"],
 				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"],
 				int(p["triple"]), p["rend_ticks"], p["smoke_ticks"], p["claymores"]]:
 			h = feed.call(v, h)

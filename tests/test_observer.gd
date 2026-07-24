@@ -77,7 +77,10 @@ func test_kill_observer_cancels_only_his_strikes() -> void:
 	Runner.T.ok(sim.observer.is_empty(), "observer down")
 	Runner.T.eq(sim.strikes.size(), 1, "observer strikes cancelled, the grenadier's lob still falls")
 	Runner.T.ok(not sim.strikes[0].get("obs", false), "the surviving strike is the non-observer one")
-	Runner.T.eq(sim.stall_ticks, 0, "stall pressure reset")
+	# Downing the spotter now HALVES the stall clock instead of zeroing it — the
+	# anti-camp valve must not fully re-arm the window it exists to punish.
+	Runner.T.eq(sim.stall_ticks, SimWorld.OBSERVER_STALL_TICKS / 2,
+		"stall pressure halved, not fully reset")
 	Runner.T.eq(sim.war_chest, chest_before + SimWorld.COIN_ELITE * 2, "observer bounty minted")
 
 

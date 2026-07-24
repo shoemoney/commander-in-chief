@@ -171,13 +171,31 @@ const SEED := 0xDEADBEEF
 ## enters the hash. Only samples 4-5 moved (the breach fires late in the torture,
 ## after gate 1's first bunker falls); 0-3 identical to the c2-12 lookahead record.
 ## ENDLESS unaffected — flank breaches are a campaign gate-streaming mechanic.
+## RE-RECORDED (2026-07-24, game-design loop — input-buffer + anti-exploit pass): five
+## deliberate sim behavior changes, all lens-consensus picks.
+##   1. grenade presses now BUFFER (new hashed `grenade_buf`, 8t, parity with roll) —
+##      grenade was the panic button and the only armor-cracker, yet the one verb whose
+##      presses inside its own cooldown were discarded outright.
+##   2. the roll buffer is armed on the RISING EDGE only (new hashed `roll_prev`). It was
+##      a level read, so HOLDING roll re-armed it every tick and auto-rolled the instant
+##      the cd expired — a free perpetual i-frame chain off one held button.
+##   3. empty-clip bash passes no_score as well as no_coin: bash guarantees a kill on a
+##      40t cd against a 90t streak window, so running dry sustained the 20-streak (and
+##      its 100% score bonus + token mint) forever at zero cost. Matches the airstrike rule.
+##   4. shop buys credit 6x instead of 10x. At 10x it exactly matched the unspent-chest
+##      victory conversion, making spending score-neutral — the "gear now vs. revives
+##      later" decision the shop is built around was fake and buy-everything dominated.
+##   5. killing the mortar observer halves the stall clock instead of zeroing it — the
+##      anti-camp valve was paying the camper AND buying back the whole stall window.
+## Both GOLDEN and ENDLESS_GOLDEN move: (1) and (2) add player fields hashed from tick 0
+## in every mode, and the torture script both holds roll and empties its clip.
 const GOLDEN: Array[int] = [
-	3960584721031551345,
-	996321938414542430,
-	5287757350757329119,
-	969675874419806883,
-	2065829588026051076,
-	5804671699702284095,
+	6008150027811385369,
+	230198598912848734,
+	4916430101724664370,
+	1338871620913869609,
+	4077714376167072192,
+	7546299269121120123,
 ]
 
 
@@ -264,12 +282,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## c2-12 (2026-07-18): VERIFIED UNCHANGED — endless never advances the camera so
 ## CAMERA_LEAD is inert here, and the courier-spawn move is past the wave-2 wipe.
 const ENDLESS_GOLDEN: Array[int] = [
-	5810251919466455340,
-	6810029477436195130,
-	1487056069058360237,
-	5646829933815705845,
-	8850168734188490941,
-	5842112675654817413,
+	6534306763330612868,
+	7103996112035364882,
+	4942609250130834189,
+	2253999871223283525,
+	1782286172442537373,
+	976135449841877,
 ]
 
 
