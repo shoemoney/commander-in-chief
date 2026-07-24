@@ -12,6 +12,7 @@ var main: Node2D
 var shots: Array[Dictionary] = []
 var current := -1
 var wait := 0
+var capturing := false
 var out_dir := "/tmp"
 
 
@@ -21,10 +22,13 @@ func _initialize() -> void:
 		out_dir = "/tmp"
 	main = (load("res://src/main.tscn") as PackedScene).instantiate()
 	root.add_child(main)
-	# We pose states; nothing may simulate. PROCESS_MODE_DISABLED freezes
-	# _physics_process for main AND children (set_physics_process(false)
-	# alone still let a few ticks through — staged sims drifted).
-	main.process_mode = Node.PROCESS_MODE_DISABLED
+	# We pose states; nothing may simulate. But PROCESS_MODE_DISABLED also kills
+	# _process, and main repaints from there — with it disabled every shot came out
+	# as a flat clear-colour frame that still saved and still printed SAVED.
+	# So: leave processing ON (drawing needs it) and kill ONLY the sim step. Doing
+	# that here would be too early (main._ready() re-enables it), so _advance()
+	# re-asserts it on every pose, after _ready has run.
+	main.process_mode = Node.PROCESS_MODE_ALWAYS
 	main._menu.mode = GameMenu.Mode.HIDDEN   # staged shots show gameplay, not the title
 	main.no_autopause = true   # harness window never holds focus; don't pause-overlay every shot
 	# SHOT_PAD=xbox|ps|switch forces the pad-glyph path for prompt verification —
@@ -40,6 +44,8 @@ func _initialize() -> void:
 
 
 func _on_frame() -> void:
+	if capturing:
+		return   # an await is in flight; process_frame keeps firing under it
 	if current == -1:
 		_advance()
 		return
@@ -49,10 +55,17 @@ func _on_frame() -> void:
 	if wait == 2:
 		main.queue_redraw()
 	if wait <= 0:
+		capturing = true
+		# process_frame fires BEFORE the frame is rendered, so grabbing the viewport
+		# here returns the texture as it was pre-draw — a single flat colour. Every
+		# shot then saves successfully and is byte-identical garbage. Wait for the
+		# draw to actually land before reading it back.
+		await RenderingServer.frame_post_draw
 		var img := root.get_texture().get_image()
 		var path := "%s/%02d-%s.png" % [out_dir, current + 1, shots[current]["name"]]
 		img.save_png(path)
 		print("SAVED ", path)
+		capturing = false
 		_advance()
 
 
@@ -62,6 +75,7 @@ func _advance() -> void:
 		print("ALL SHOTS DONE")
 		quit(0)
 		return
+	main.set_physics_process(false)   # no stepping: poses must stay exactly as posed
 	var sim: SimWorld = shots[current]["build"].call()
 	main.sim = sim
 	# Feel decay never runs while posing — scrub prior dress state so one
@@ -69,6 +83,10 @@ func _advance() -> void:
 	main._fx.clear()
 	main._damage_vignette = 0.0
 	main._banners.clear()
+	# The boot splash paints OVER the whole frame for its first seconds — early shots
+	# captured the studio card instead of the game and still saved happily. Blanket it
+	# off; a _dress_splash* shot re-enables it for its own frame only.
+	main._splash_layer.visible = false
 	# Mutate in place: cross-script assignment of a fresh Array into the
 	# typed Array[...] properties fails at runtime.
 	for k in main._recoil.size():
@@ -350,7 +368,7 @@ func _shot_shop() -> SimWorld:
 func _dress_shop(m: Node2D) -> void:
 	# P1 mid-decision on the spend-wheel, grenades highlighted.
 	m._wheel[0] = {"open": true, "sel": 3}
-	m._show_banner("WAVE CLEARED — SHOP OPEN")
+	m.show_banner("WAVE CLEARED — SHOP OPEN")
 
 
 func _dress_colossus(m: Node2D) -> void:
