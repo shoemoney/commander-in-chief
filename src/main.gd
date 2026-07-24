@@ -241,6 +241,9 @@ var _nest_ping_frame := -100      # rate-limits the MG-nest crack ping (own cloc
 var _pilot_alarm_frame := -999    # one-shot for the pilot's ESCAPING warning tone
 var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
+var _deny_frame := -100           # rate-limits revive_deny, which the sim emits EVERY tick
+var _dry_roll_frame := -100       # separate clock for the cooldown-blocked ROLL click
+var _roll_dry := [0, 0]           # per-player frames left on the blocked-roll arc flash
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _fire_swallow := false       # eat SPACE/LMB held over from a menu click / debrief redeploy —
                                  # clicking RESUME must not spend MG ammo on the first resumed ticks
@@ -1824,6 +1827,7 @@ func _physics_process(_delta: float) -> void:
 	else:
 		var inputs := _gather_inputs()
 		_check_dry_throw(inputs)
+		_check_dry_roll(inputs)
 		_recorder.record_tick(inputs)   # same inputs the sim gets → bit-exact replay
 		sim.step(inputs)
 		_consume_events()
@@ -1942,6 +1946,15 @@ func _consume_events() -> void:
 				_sfx.play_at("explosion", _to_screen(ev["x"], ev["y"]),
 					lerpf(-12.0, -2.0, _blast_prox(ev["x"], ev["y"])))
 		elif _EVENT_SOUND.has(kind):
+			# revive_deny is emitted from a LEVEL-triggered branch in the sim, so a
+			# held revive button appends one event per tick — ~60 deny stings a second.
+			# The VO was already throttled; the sfx was not. Same 20-frame gate idiom
+			# as dry_fire/dry_throw. (Starting value 20f; test: hold revive broke for
+			# 3s and assert <=10 plays. If it still machine-guns, widen to 30.)
+			if kind == "revive_deny":
+				if Engine.get_physics_frames() - _deny_frame < 20:
+					continue
+				_deny_frame = Engine.get_physics_frames()
 			var snd: Array = _EVENT_SOUND[kind]
 			# Any world event that carries coordinates pans/attenuates from where
 			# it happened (a flank alarm tells you WHICH flank); coordinate-less
@@ -4375,11 +4388,43 @@ func _check_dry_throw(inputs: Array[SimInput]) -> void:
 		return
 	for pi in mini(inputs.size(), sim.players.size()):
 		var p := sim.players[pi]
-		if inputs[pi].grenade and p["alive"] and p["in_tank"] < 0 \
-				and p["grenade_ammo"] == 0 and p["grenade_cd"] == 0:
+		if not (inputs[pi].grenade and p["alive"] and p["in_tank"] < 0):
+			continue
+		# Two distinct denials, both previously handled only in the first case:
+		#   ammo == 0            -> "you have none"      (was already covered)
+		#   ammo > 0, cd > 0     -> "not yet"            (was FULLY silent)
+		# The cooldown denial is the worse of the two — grenade in hand, button
+		# pressed, nothing happens, no channel fires. Same click + pip, pitched
+		# lower so "not yet" is audibly distinct from "none left".
+		if p["grenade_ammo"] == 0 and p["grenade_cd"] == 0:
 			_dry_grenade_frame = Engine.get_physics_frames()
 			_sfx.play("tank_board", -12.0, 2.4)
 			_grenade_dry[pi] = 12   # HUD grenade pip flashes red
+			return
+		if p["grenade_ammo"] > 0 and p["grenade_cd"] > 0:
+			_dry_grenade_frame = Engine.get_physics_frames()
+			_sfx.play("tank_board", -16.0, 1.6)
+			_grenade_dry[pi] = 8
+			return
+
+
+func _check_dry_roll(inputs: Array[SimInput]) -> void:
+	# Roll refused while on cooldown (or wading) was the last fully-silent denial:
+	# the only tell was the passive recharge arc, which the player is not looking at
+	# mid-fight. Two channels, view-side: a quiet click + a white flash on that
+	# player's own recharge arc. (Starting value 14f gate / 6f flash, matching the
+	# shipped dry-fire grammar; test: mash roll on cooldown and assert exactly one
+	# click per ~14 frames rather than silence.)
+	if Engine.get_physics_frames() - _dry_roll_frame < 14:
+		return
+	for pi in mini(inputs.size(), sim.players.size()):
+		var p := sim.players[pi]
+		if inputs[pi].roll and p["alive"] and p["in_tank"] < 0 \
+				and p["roll_ticks"] <= 0 and p["roll_cd"] > 0:
+			_dry_roll_frame = Engine.get_physics_frames()
+			_sfx.play("click_dry", -16.0, 1.5)
+			_roll_dry[pi] = 6
+			_buzz(0.08, pi)
 			return
 
 
@@ -4586,6 +4631,17 @@ func _update_feel() -> void:
 	_music_hold = maxi(0, _music_hold - 1)
 	for _gi in _grenade_dry.size():
 		_grenade_dry[_gi] = maxi(0, _grenade_dry[_gi] - 1)
+	for _ri in _roll_dry.size():
+		_roll_dry[_ri] = maxi(0, _roll_dry[_ri] - 1)
+	# Stalling is the one punished behaviour whose RESPONSE was never stated in words.
+	# The pressure gauge fills silently for 8s and the only sentence that explains it
+	# ("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON") fires on observer_spawn — i.e.
+	# after the punishment has already arrived. Say it at the halfway mark instead,
+	# while there is still time to act on it. (Starting value OBSERVER_STALL_TICKS/2
+	# = 4s in, 4s left to react; test: does a new player push north before the first
+	# observer ever spawns? If they still eat it, move to /3.)
+	if sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS / 2:
+		_hint("pressure", "YOU'RE STALLING — PUSH NORTH OR MORTARS ZERO IN", true)
 	_hint_t = maxf(0.0, _hint_t - 0.006)
 	if _hint_t <= 0.02 and not _hint_queue.is_empty():
 		_hint_text = _hint_queue.pop_front()
@@ -6397,7 +6453,11 @@ func _draw_mines() -> void:
 		# (both sides still trip both; the color is identity, not safety).
 		var mb := Art.pulse(0.1)
 		var mc := Art.safe(Color(0.3, 0.9, 0.75)) if m.get("friendly", false) else Color(1.0, 0.35, 0.2)
-		draw_circle(mp, 8.0 + mb * 3.0, Color(mc.r, mc.g, mc.b, 0.14 + mb * 0.12))
+		# Footprint honesty: the soft fill used to breathe 8..11px while the lethal
+		# radius is a flat 9 — in a game where a touch is a death, the drawn edge
+		# must not overstate the kill edge. Pin the radius, pulse only the alpha.
+		draw_circle(mp, float(SimWorld.MINE_TRIGGER_RADIUS) / float(Fixed.ONE),
+			Color(mc.r, mc.g, mc.b, 0.14 + mb * 0.12))
 		if m.get("friendly", false):
 			# Dashed ring: ownership must survive colorblindness — shape, not hue.
 			for seg in 6:
@@ -7574,7 +7634,13 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 			var gtp := _to_screen(gt["x"], gt["y"])
 			draw_line(chin, chin + (gtp - chin).normalized() * 60.0, Color(1.0, 0.3, 0.2, 0.3), 1.0)
 	var hull_mod := Color.WHITE
-	if pt >= 170 and pt <= 290 and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
+	# The hull red-flash is the mortar volley's anticipation tell. Deeper waves add a
+	# 4th (tier>=2, t==320) and 5th (tier>=3, t==340) strike, so a fixed 170..290 window
+	# let the last two shells launch with the hull already cooled — the tell was lying
+	# about the phase being over. Derive the tail from the same tier the sim uses.
+	var _btier: int = sim.wave / 5
+	var _warn_end := 290 + (30 if _btier >= 2 else 0) + (20 if _btier >= 3 else 0)
+	if pt >= 170 and pt <= _warn_end and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	# Ground shadow: the heli was the one unit floating untethered (drone and
@@ -8292,8 +8358,13 @@ func _draw_players() -> void:
 			# Roll recharge: arc sweeps closed while the dodge is on cooldown.
 			if p["roll_cd"] > 0 and p["roll_ticks"] == 0:
 				var ready := 1.0 - float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS)
-				draw_arc(pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20,
-					Color(0.7, 0.9, 1.0, 0.55), 1.5)
+				# A refused roll flashes this arc white — it turns the passive
+				# recharge readout into the ANSWER to "why didn't I roll?".
+				var rdry: int = _roll_dry[i] if i < _roll_dry.size() else 0
+				var rcol := Color(0.7, 0.9, 1.0, 0.55)
+				if rdry > 0:
+					rcol = rcol.lerp(Color(1, 1, 1, 0.95), float(rdry) / 6.0)
+				draw_arc(pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20, rcol, 1.5)
 		else:
 			# Knockdown tween: topple from the last aim into the fallen pose, colour
 			# and scale settling over ~8 frames instead of snapping in one tick.
@@ -9491,7 +9562,7 @@ func _draw_threat_pips() -> void:
 			continue
 		var k: String = e["kind"]
 		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone" \
-				and k != "technical":
+				and k != "technical" and k != "mg_nest":
 			continue
 		var sp := _to_screen(e["x"], e["y"])
 		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:
