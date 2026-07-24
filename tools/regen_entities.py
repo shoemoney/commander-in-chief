@@ -78,11 +78,20 @@ TEMPLATES = {
                 "top surfaces. Avoid flat mid-tone fills -- they turn to mush.\n"
                 "- Chunky bold shapes, thick forms, NO thin lines or fine detail (they vanish).\n"
                 + STYLE),
-    # Props drift photoreal without the explicit style clamp (pilot: the barrel came
-    # back as a rusted photo, and drifted blue out of the desert palette).
+    # Props drift photoreal without the explicit style clamp (pilot: the barrel came back
+    # as a rusted photo, and drifted blue out of the desert palette). They are also the
+    # SMALLEST things on screen -- most decor lands at 16-40px -- so the outer silhouette
+    # carries the entire read and interior detail is wasted pixels.
     "prop": ("Top-down orthographic sprite of {subject}, seen from directly overhead at a strict "
-             "90-degree bird's-eye angle. Match the silhouette and proportions of the reference "
-             "image. " + STYLE),
+             "90-degree bird's-eye angle, matching the ORIENTATION of the reference image.\n"
+             "CRITICAL — this prop is displayed at only about {onscreen} PIXELS on screen:\n"
+             "- {hero}\n"
+             "- The OUTER SILHOUETTE carries the whole read. Make the outline shape instantly "
+             "recognisable in one glance; interior detail is wasted at this size.\n"
+             "- Use STRONG VALUE CONTRAST: near-black shadow against bright sunlit top faces, so "
+             "the shape separates from the tan desert ground it sits on.\n"
+             "- Chunky bold forms, NO thin lines, NO fine texture, NO small text or markings.\n"
+             + STYLE),
     # Characters are the hard case: the model wants to draw a portrait. The camera has
     # to be described as a physical ceiling camera, and the occlusion spelled out.
     "character": ("A video-game sprite viewed from a CEILING CAMERA looking straight DOWN at the "
@@ -133,7 +142,80 @@ VEHICLES = {
         "a small quadcopter reconnaissance drone",
         "four thick rotor arms forming a bold unmistakable X, with chunky dark rotor discs at each tip", 16),
 }
-CATEGORIES = {"vehicle": VEHICLES}
+
+# Decor props. NOTE: decor/dry_shrub + decor/tumbleweed are already OUR OWN nano-banana
+# desert art -- they are deliberately absent here. decor/flag_iran is also absent: it is
+# the one non-square canvas (306x600, which fit_square cannot handle) and it is the
+# reputational call the checklist parks for a human.
+DECOR = {
+    "decor/landmine":        ("a round anti-tank landmine half-buried in sand, its pressure plate exposed",
+                              "a bold dark ring around a raised central pressure plate, like a target", 160),
+    "decor/bridge_mid":      ("a straight section of a military pontoon bridge deck spanning water",
+                              "hard parallel plank lines running across the deck, with dark edge rails", 97),
+    "decor/bridge_ramp":     ("the sloped approach ramp section of a military pontoon bridge",
+                              "a clear wedge taper from wide to narrow so it reads as a ramp, not a flat deck", 97),
+    "decor/skyline_mast":    ("a tall industrial radio mast seen from above, foreshortened to its footprint",
+                              "a bold X of guy-wires anchoring a chunky central mast block", 80),
+    # "overlapping craters" produced a regular honeycomb/flower lattice -- say scattered
+    # and irregular, and explicitly forbid the pattern reading.
+    "decor/crater_field":    ("a patch of desert ground scarred by three or four SCATTERED bomb craters of "
+                              "DIFFERENT sizes at irregular random positions",
+                              "each crater a dark shadowed pit with a bright sand rim. The craters must be "
+                              "IRREGULAR and RANDOMLY placed -- absolutely NOT a honeycomb, NOT a repeating "
+                              "grid, NOT a flower or cellular pattern, NOT evenly spaced", 72),
+    "decor/crater_water":    ("a large explosion crater that has filled with murky water",
+                              "a dark still water pool filling the pit, ringed by a bright blasted sand rim", 72),
+    "decor/wreck_halftrack": ("a burnt-out armoured halftrack, destroyed and blackened",
+                              "a charred hollow hull with the track units still visible as dark bars", 72),
+    "decor/skyline_chimney": ("a squat industrial smokestack seen from directly above",
+                              "a bold dark circular flue mouth inside a thick ring of brickwork", 64),
+    # "long dark slot" came back as a decorative squiggle -- demand a straight channel.
+    "decor/trench":          ("a STRAIGHT infantry trench channel dug into desert ground, running edge to edge",
+                              "a wide near-black rectangular trough of shadow running straight across the "
+                              "sprite, flanked by bright heaped spoil banks on both long sides. It must read "
+                              "as a dug channel in the ground -- NOT a winding ribbon, NOT a squiggle, NOT a "
+                              "rope or snake shape", 52),
+    "decor/tent":            ("an olive military field tent",
+                              "a strong ridge line down the middle splitting two bright sloped roof panels", 49),
+    "decor/crater":          ("a single explosion crater blasted into desert ground",
+                              "a dark elliptical pit with a bright raised rim of thrown sand", 48),
+    "decor/watchtower":      ("a wooden guard watchtower seen from above",
+                              "a square railed platform sitting on a bold X of support legs", 42),
+    "decor/radio_tower":     ("a lattice radio antenna tower seen from above",
+                              "a bold triangular lattice footprint with a bright antenna hub at the centre", 40),
+    "decor/wreck":           ("a generic burnt-out vehicle wreck, blackened and hollowed",
+                              "a charred hollow shell shape, clearly gutted rather than intact", 37),
+    "decor/rock2":           ("a large desert boulder",
+                              "a chunky angular rock mass, bright sunlit top faces against deep shadow sides", 36),
+    "decor/fallen_merc":     ("the body of a fallen soldier lying face-down on the ground",
+                              "a clear sprawled human silhouette with arms and legs splayed outward", 36),
+    "decor/barbedwire":      ("a coil of barbed razor wire strung between short stakes",
+                              "a bold zig-zag coil of wire loops between two dark stake posts", 35),
+    "decor/flak_gun":        ("an emplaced anti-aircraft flak gun on a wheeled carriage",
+                              "twin long barrels angled outward from a chunky round base", 35),
+    "decor/flag_marker":     ("a small marker flag on a pole planted in the ground",
+                              "a bright triangular pennant reading clearly off a thin dark pole", 32),
+    "decor/barricade":       ("a wooden and sandbag barricade wall segment",
+                              "a solid horizontal bar of stacked sandbags with a bright top edge", 30),
+    "decor/barrier":         ("a concrete road barrier block",
+                              "a heavy trapezoid concrete slab with bright top face and dark base shadow", 29),
+    "decor/crate_stack":     ("a stack of military supply crates",
+                              "two or three overlapping bright square crate lids with dark seams between them", 29),
+    "decor/rock1":           ("a small desert boulder",
+                              "a compact angular rock lump with a bright sunlit crown and dark shadow side", 29),
+    "decor/tank_trap":       ("a steel anti-tank hedgehog obstacle",
+                              "three thick steel beams crossing in a bold six-pointed star", 28),
+    "decor/mg_tripod":       ("a machine gun mounted on a tripod",
+                              "a dark barrel line over a bold three-legged tripod splay", 19),
+    "decor/barrel":          ("a weathered steel oil barrel standing upright",
+                              "a bold ringed circular lid, dark rim against a bright top", 18),
+    "decor/dropped_shield":  ("a riot shield dropped flat on the ground",
+                              "a bright rounded rectangle plate with a dark grip bar across it", 17),
+    "decor/ammobox":         ("a metal ammunition box",
+                              "a bright rectangular lid with a bold dark carry handle across it", 16),
+}
+
+CATEGORIES = {"vehicle": VEHICLES, "prop": DECOR}
 
 
 def target_size(png: Path) -> int:
@@ -174,14 +256,56 @@ def generate_one(key: str, spec: tuple, category: str, dry_run: bool) -> tuple[s
     if im.getbbox() is None:
         out.unlink(missing_ok=True)
         return key, False, "chroma-key ate the whole subject (backdrop too close to the art?)"
+    # ORDER MATTERS: gate on the RAW keyed image first. despill() nudges pixels away from
+    # pure magenta, so running it before this check let a bad key slip through -- that is
+    # exactly how bridge_ramp (9.3% magenta) and tent (8.7%) shipped fringe on 2026-07-24.
     try:
         check_key_quality(im, key_color, out)
     except ValueError as exc:
         out.unlink(missing_ok=True)
         return key, False, str(exc)[-160:]
+    im = despill(im)
+    # Hard backstop: after despill NOTHING may still read as magenta or cyan tinted. despill
+    # only lowers R/B toward G, so a cyan result means the source art really is teal.
+    px = im.load()
+    mag = op = 0
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a < 16:
+                continue
+            op += 1
+            if r > g + 30 and b > g + 30:
+                mag += 1
+    if op and mag / op > 0.01:
+        out.unlink(missing_ok=True)
+        return key, False, f"{mag / op:.1%} of opaque pixels still read magenta after despill"
     im.save(out)
     opaque = sum(1 for v in im.getchannel("A").tobytes() if v > 15) / (size * size)
     return key, True, f"{size}x{size} ({opaque:.0%} opaque) -> {out.relative_to(PROJECT_ROOT)}"
+
+
+def despill(im: Image.Image) -> Image.Image:
+    """Suppress magenta spill on the surviving opaque pixels.
+
+    chroma_key() only zeroes pixels CLOSE to the key colour; a thin bright edge
+    (a flag pennant, a gun barrel) antialiases into the matte and lands as a pinkish
+    pixel that is too far from pure magenta to be keyed but close enough to trip
+    check_key_quality -- which is exactly how flag_marker/flak_gun failed twice.
+    Standard fix: magenta is high R+B / low G, so clamp R and B toward G on any pixel
+    where both exceed it. Neutral on art that has no spill.
+    """
+    im = im.copy()
+    px = im.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            if r > g and b > g:
+                lim = int(g + 0.25 * (max(r, b) - g))
+                px[x, y] = (min(r, lim), g, min(b, lim), a)
+    return im
 
 
 def install(key: str, godot_bin: str) -> str:
