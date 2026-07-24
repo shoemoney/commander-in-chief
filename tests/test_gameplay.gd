@@ -166,6 +166,7 @@ func test_spawner_escalates_with_opened_gates() -> void:
 
 func test_elite_drops_pickup() -> void:
 	var sim := SimWorld.new(1, 1)
+	var before := sim.pickups.size()
 	var p := sim.players[0]
 	sim._spawn_enemy(p["x"], p["y"] - 40 * Fixed.ONE, true)  # red elite
 	var inp := SimInput.new()
@@ -173,7 +174,23 @@ func test_elite_drops_pickup() -> void:
 	inp.fire = true
 	for i in 20:
 		sim.step(_inputs(inp if i == 0 else _idle()))
-	Runner.T.eq(sim.pickups.size(), 1, "red elite dropped a crate")
+	Runner.T.eq(sim.pickups.size(), before + 1, "red elite dropped a crate")
+
+
+func test_lz_teaches_by_placement_campaign_only() -> void:
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var free_nade := 0
+	for pk in sim.pickups:
+		if pk["kind"] == 1 and pk.get("cost", 0) == 0 and pk["y"] > -(400 * Fixed.ONE):
+			free_nade += 1
+	Runner.T.eq(free_nade, 1, "the LZ puts one free grenade crate on the walking line")
+	var lane_bunker := false
+	for bk in sim.bunkers:
+		if bk["y"] > -(500 * Fixed.ONE) and absi(bk["x"] + SimWorld.BUNKER_W / 2 - SimWorld.SCREEN_CX) < 8 * Fixed.ONE:
+			lane_bunker = true
+	Runner.T.ok(lane_bunker, "an armored bunker sits in the opening lane, past the crate")
+	var endless := SimWorld.new(0xC0FFEE, 1, "endless")
+	Runner.T.ok(endless.bunkers.is_empty(), "endless authors no LZ — its goldens must not move")
 
 
 func test_kill_streak_bonuses_score_not_chest() -> void:

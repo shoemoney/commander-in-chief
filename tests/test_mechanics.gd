@@ -1339,7 +1339,7 @@ func test_c2_grass_conceals_like_smoke() -> void:
 	sim.rocks.append({"x": p["x"], "y": p["y"], "kind": 1})
 	Runner.T.ok(sim._concealed(p), "standing in grass conceals like smoke")
 	# But grass is not smoke — a classic rock at the same spot does NOT conceal.
-	sim.rocks[0]["kind"] = 0
+	sim.rocks[sim.rocks.size() - 1]["kind"] = 0
 	Runner.T.ok(not sim._concealed(p), "a solid rock does not conceal (only grass/smoke do)")
 
 

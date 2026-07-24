@@ -604,6 +604,8 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 		# BE cover) — they ride the full rock grammar: bullets, boots, treads.
 		for qr in [[80, -300], [560, -300], [80, -60], [560, -60], [210, -320], [430, -50]]:
 			rocks.append({"x": qr[0] * F_ONE, "y": qr[1] * F_ONE})
+	elif game_mode == "campaign":
+		_author_lz()
 	_next_bunker_y = -(500 * F_ONE)
 	_next_gate_y = -GATE_SPACING
 	_next_tank_y = -(750 * F_ONE)
@@ -4165,6 +4167,25 @@ func _stamp_stretch_setpieces() -> void:
 				# "Priced" pinned: 10 + 5/segment past 2, capped 30.
 				pickups.append({"x": spx2, "y": sp_y, "kind": 0,
 					"cost": mini(30, 10 + (absi(_next_gate_y / GATE_SPACING) - 2) * 5)})
+
+
+func _author_lz() -> void:
+	## The landing zone IS the tutorial (no training room, no cards). Three
+	## authored props on the player's walking line, in the order the verbs are
+	## needed: cover -> the grenade box -> the thing rifles can't touch.
+	## Fixed coords, no rng draw -- the streamed world past -500 is unchanged.
+	# 1. Seawall: two kind-0 (solid) rock runs with a single center lane
+	#    (192px >> HULL_CLEARANCE). Teaches "cover is real, pick a lane" by
+	#    standing in the way of the first rushers.
+	for sx in [96, 160, 224, 416, 480, 544]:
+		rocks.append({"x": sx * F_ONE, "y": -(180 * F_ONE), "kind": 0})
+	# 2. The conspicuous grenade box, dead center in the lane, free.
+	pickups.append({"x": SCREEN_CX, "y": -(300 * F_ONE), "kind": 1, "cost": 0})
+	# 3. 120px past it: an armored bunker at the lane mouth, spitting infantry
+	#    every 2s. Rifle rounds spark off it (armor_block -> the view's existing
+	#    ricochet), one grenade seals it for 50 coins. Gate 1 then repeats the
+	#    lesson as a hard wall. Corner-origin like every streamed bunker.
+	bunkers.append(_make_bunker(SCREEN_CX - BUNKER_W / 2, -(420 * F_ONE)))
 
 
 func _make_bunker(x: int, y: int) -> Dictionary:

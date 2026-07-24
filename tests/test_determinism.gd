@@ -206,13 +206,20 @@ const SEED := 0xDEADBEEF
 ##      instead of auto-firing the instant you reach dry land.
 ## Every sample moves in both modes: (4) adds a field hashed from tick 0 and the torture
 ## script holds fire, and (1)/(2) change ammo state as soon as it dies or fans.
+## RE-RECORDED (2026-07-24, kill the firing-range tutorial: the LZ replaces it): campaign
+## _init now authors the landing zone -- a 6-rock seawall at -180, a free kind-1 grenade
+## crate at (320,-300) and a center bunker at (296,-420) -- so the opening teaches
+## shoot/cover/grenade-vs-armor by placement instead of a boot tutorial room. All 6
+## campaign samples move (the torture walks the LZ from tick 0); no rng draw is added, so
+## the streamed world past -500 is unchanged. ENDLESS_GOLDEN VERIFIED UNCHANGED (the
+## authoring is campaign-gated).
 const GOLDEN: Array[int] = [
-	1962524240500092892,
-	8541964552380406519,
-	5136961855272590427,
-	1569141505342201728,
-	4538768033078665561,
-	4829510499393421025,
+	8118371945864493936,
+	1975911482936326783,
+	2033003659266520302,
+	1406630943552076265,
+	3512377309567778653,
+	7050485700111601822,
 ]
 
 

@@ -109,34 +109,6 @@ func test_focus_out_autopause_decision() -> void:
 		"no_autopause (screenshot harness) must not auto-pause on focus-out")
 
 
-# --- onboarding-first-ten-minutes: the boot firing-range tutorial's one-shot flag and
-# its aim-hit-test angle math are both pure/static — pin them directly rather than
-# driving the CanvasLayer (which needs real input + a live tree). ---
-
-func test_onboard_seen_flag_round_trips_independent_of_save() -> void:
-	var ms: Script = load("res://src/main.gd")
-	var path := "user://test_onboard_flag.cfg"
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
-	Runner.T.eq(ms.load_onboard_seen(path), false,
-		"a path with no onboarding.cfg yet must read as NOT seen (fresh install)")
-	ms.save_onboard_seen(path)
-	Runner.T.eq(ms.load_onboard_seen(path), true,
-		"save_onboard_seen must persist synchronously — no waiting on _flush_bests")
-	DirAccess.remove_absolute(path)
-
-
-func test_onboarding_aim_hits_target_angle_tolerance() -> void:
-	var ob: Script = load("res://src/view/onboarding.gd")
-	var tol := 16.0
-	Runner.T.ok(ob.aim_hits_target(Vector2.RIGHT, Vector2.RIGHT, tol),
-		"aiming dead-on the target direction must register a hit")
-	Runner.T.ok(ob.aim_hits_target(Vector2(1.0, 0.2).normalized(), Vector2.RIGHT, tol),
-		"a small angle inside the tolerance must still register a hit")
-	Runner.T.ok(not ob.aim_hits_target(Vector2.UP, Vector2.RIGHT, tol),
-		"a 90-degree-off aim must NOT register a hit")
-	Runner.T.ok(not ob.aim_hits_target(Vector2.ZERO, Vector2.RIGHT, tol),
-		"no aim input at all (Vector2.ZERO, e.g. stick centered) must never register a hit")
 
 
 # --- feel-stack-juice-haptics: _prox_falloff/_rumble_merge are the pure math

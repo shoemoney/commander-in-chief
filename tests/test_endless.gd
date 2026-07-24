@@ -409,7 +409,8 @@ func test_c3_siege_drop_off_center() -> void:
 		var pk0: int = sim.pickups.size()
 		sim._step_colossus()
 		Runner.T.ok(sim.pickups.size() > pk0, "seed %d: the siege dropped a supply crate" % sd)
-		for pk in sim.pickups:
+		for i in range(pk0, sim.pickups.size()):
+			var pk: Dictionary = sim.pickups[i]
 			if pk.get("cost", 0) == 0 and pk.get("kind", 0) == 1:
 				Runner.T.ok(absi(pk["x"] - SimWorld.SCREEN_CX) >= 64 * SimWorld.F_ONE,
 					"seed %d: the siege drop pulls off the center rail" % sd)
