@@ -543,6 +543,10 @@ func _end_splash() -> void:
 		return   # already dismissed (idempotent — skip and timeout can both fire)
 	_splash_t = 0.0
 	_splash_layer.visible = false
+	# opt-loop: the splash never plays again this session, but _splash_keyart (a 6.5MB RGBA8
+	# poster, loaded once at boot) was never released — pinned in VRAM for the rest of the
+	# run, which in Endless mode can be hours. _draw_splash_hero already null-guards it.
+	_splash_keyart = null
 	_sfx.stop_vo()   # cut the crawl narration if the player skipped the intro
 	if _menu.mode == GameMenu.Mode.HIDDEN:
 		# onboarding-first-ten-minutes: a brand-new player (dedicated flag never set --
@@ -1046,7 +1050,11 @@ func _process(_delta: float) -> void:
 	# gentle tonal shift, not a strobe — reduce-motion-safe, so it isn't _motion-gated.
 	if _grade_mat != null:
 		var want := 0.0 if sim == null else _grade_breather_target(sim.mode, sim.intermission_ticks)
-		_grade_breather = lerpf(_grade_breather, want, 0.06)
+		# opt-loop: was a flat 0.06/frame lerp in _process (variable-rate) — converged ~2.4x
+		# faster at 144Hz than 60Hz, the same frame-rate-dependent bug menu.gd/hud.gd already
+		# fixed elsewhere (see hud.gd:292/1879, menu.gd:586/588). k=3.7 matches the old 0.06/frame
+		# convergence rate at a 60Hz baseline.
+		_grade_breather = lerpf(_grade_breather, want, 1.0 - exp(-3.7 * _delta))
 		if absf(_grade_breather - _grade_mat_breather_prev) > 0.001:
 			_grade_mat.set_shader_parameter("breather", _grade_breather)
 			_grade_mat_breather_prev = _grade_breather
@@ -2062,19 +2070,24 @@ func _consume_events() -> void:
 					# whole chain — the sound was gated but the nausea wasn't.
 					_trauma = minf(1.0, _trauma + 0.3)
 					_buzz(0.55)   # environmental boom, no single owner: both pads
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
-					"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
-				# Same fireball/smoke grammar as _ev_explosion, slightly smaller — the
-				# cooking drum used to pop with ring+light only, no combustion body.
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
-					"sz": 24.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.75, 0.4, 0.85)})
-				for si in 2:
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
-						"sz": 16.0 + si * 7.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
-						"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
-						"col": Color(0.25, 0.22, 0.2, 0.7)})
-				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
+					# opt-loop: the visual payload was OUTSIDE this gate — a fuse chain firing
+					# several barrel_blast events in one tick stamped N stacked, pixel-identical
+					# shockwave rings + N overlapping scorch decals at the same point (a visible
+					# double-exposure, not just wasted draw calls). Moved inside the gate to match
+					# the sound/shake, same one-per-tick idiom.
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.13})
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
+						"r": 58.0, "col": Color(1.0, 0.6, 0.2)})
+					# Same fireball/smoke grammar as _ev_explosion, slightly smaller — the
+					# cooking drum used to pop with ring+light only, no combustion body.
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
+						"sz": 24.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.75, 0.4, 0.85)})
+					for si in 2:
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
+							"sz": 16.0 + si * 7.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
+							"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+							"col": Color(0.25, 0.22, 0.2, 0.7)})
+					_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"parapet_collapse":
 				# A Foundry trench-parapet column drops as the boss escalates —
 				# structural, not incendiary: a dust plume + tumbling debris + a
@@ -9016,6 +9029,10 @@ static func _cmp_threat_bottom(a: Dictionary, b: Dictionary) -> bool:
 	return a["danger"] and not b["danger"]
 
 
+static func _cmp_mark_priority(a: Dictionary, b: Dictionary) -> bool:
+	return a["pr"] < b["pr"]
+
+
 func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	## Shared sort->cap->draw pass for the top/bottom off-screen threat
 	## chevrons: ties prefer the lethal ranged killers, capped to the
@@ -9130,7 +9147,7 @@ func _draw_objective_markers() -> void:
 				"icon": _marker_icon("free"), "col": Art.safe(Color(0.7, 0.85, 0.6)), "pr": 2})
 	# Weight-sort BEFORE the edge cap of 6, so the cap always spends its slots on
 	# the highest-priority marks. On-screen icons are uncapped (anchored).
-	marks.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["pr"] < b["pr"])
+	marks.sort_custom(_cmp_mark_priority)
 	var panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
 	var placed: Array[Vector2] = []
 	var edge_used := 0
