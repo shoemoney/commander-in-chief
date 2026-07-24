@@ -10,6 +10,14 @@ shader_type canvas_item;
 //
 // A `grade` uniform (0..1) master-scales the whole effect; `breather` folds in the
 // a4-15 shop/intermission calm variant (gentle exposure lift + extra desaturation).
+//
+// This is the TOP of the unification stack, not the whole of it: the per-sprite
+// TINT/OUTLINE tables in src/view/art.gd already pull the 4 asset sources (legacy art
+// bakes, Kenney tiles, authored soldier PNGs, generated boss/vehicle art) onto one
+// palette family BEFORE this pass ever runs (warm-bright threats, olive/gunmetal
+// vehicles, receding mossy decor, one shared Art.PRINT_INK dark rim/backing). This
+// shader is the final full-frame "print" laid over that already-graded source art.
+// See assets_src/style_bible.md for the full family writeup + swatch values.
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float grade : hint_range(0.0, 1.0) = 1.0;
 uniform float breather : hint_range(0.0, 1.0) = 0.0;

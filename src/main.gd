@@ -4576,7 +4576,9 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
 		# Boss authority (7v): boss-class sprites wear a thicker WARM rim that
 		# lerps white with the shipped hit-flash — the fleet rim stays neutral.
-		var oc := Color(0.05, 0.06, 0.04, tint.a)
+		# a4-02: Art.PRINT_INK is the ONE dark rim/backing color shared with
+		# _metal_plate()'s HUD chrome below — see assets_src/style_bible.md.
+		var oc := Color(Art.PRINT_INK, tint.a)
 		var d := 1.1 / s
 		if _BOSS_RIM.has(tex_name):
 			# a3-01: the warm-dark boss rim was tuned for the gunship over GREEN; on the
@@ -9107,9 +9109,11 @@ func _metal_plate(r: Rect2, a: float) -> void:
 	# Hand 3-slice from the baked plate_metal_* set (190x230 slices): caps at the
 	# ends + a stretched center, laid over the old dark rect (text contrast) and
 	# tinted way down so it stays muted retro-metal under the text, not chrome.
-	draw_rect(r, Color(0.05, 0.06, 0.04, 0.5 * a))
+	# a4-02: both greys below are named Art constants (PRINT_INK / PLATE_STEEL),
+	# not independently-chosen HUD literals — see assets_src/style_bible.md.
+	draw_rect(r, Color(Art.PRINT_INK, 0.5 * a))
 	var cap := minf(r.size.y * (190.0 / 230.0), r.size.x / 2.0)
-	var mcol := Color(0.5, 0.52, 0.5, 0.5 * a)
+	var mcol := Color(Art.PLATE_STEEL, 0.5 * a)
 	draw_texture_rect(Art.tex("plate_metal_l"), Rect2(r.position, Vector2(cap, r.size.y)), false, mcol)
 	if r.size.x > cap * 2.0:
 		draw_texture_rect(Art.tex("plate_metal_c"),

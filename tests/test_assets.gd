@@ -625,6 +625,38 @@ func test_a4_grade_shader_is_wired() -> void:
 	Runner.T.ok(is_equal_approx(float(mat.get_shader_parameter("grade")), 1.0), "grade rides at full strength (always on)")
 
 
+func test_a4_print_ink_is_shared_and_documented() -> void:
+	# a4-02: the world-sprite outline rim (main._spr) and the HUD metal-plate backing
+	# (main._metal_plate) key off the SAME near-black warm-neutral instead of two
+	# independently-chosen literals — locks the value + the doc that explains why.
+	Runner.T.ok(Art.PRINT_INK.is_equal_approx(Color(0.05, 0.06, 0.04)),
+		"Art.PRINT_INK holds the documented print-ink value")
+	Runner.T.ok(Art.PLATE_STEEL.is_equal_approx(Color(0.5, 0.52, 0.5)),
+		"Art.PLATE_STEEL holds the documented plate-metal midtone value")
+	Runner.T.ok(Art.PRINT_INK.g >= Art.PRINT_INK.r and Art.PRINT_INK.r >= Art.PRINT_INK.b,
+		"the print ink is a warm-neutral near-black, not pure 0,0,0")
+	var main_src := FileAccess.get_file_as_string("res://src/main.gd")
+	# Hard guard: neither literal may still be hand-inlined anywhere in main.gd —
+	# a re-duplicated Color(0.05, 0.06, 0.04...) or Color(0.5, 0.52, 0.5...) would
+	# silently fork the "one ink" claim this whole item exists to make true.
+	Runner.T.ok(not ("0.05, 0.06, 0.04" in main_src), "no bare print-ink literal survives in main.gd (Art.PRINT_INK only)")
+	Runner.T.ok(not ("0.5, 0.52, 0.5" in main_src), "no bare plate-steel literal survives in main.gd (Art.PLATE_STEEL only)")
+	var spr_start := main_src.find("func _spr(")
+	var spr_body := main_src.substr(spr_start, main_src.find("func _metal_plate(") - spr_start)
+	Runner.T.ok("Art.PRINT_INK" in spr_body, "_spr()'s outline rim reads Art.PRINT_INK")
+	var plate_start := main_src.find("func _metal_plate(")
+	var plate_body := main_src.substr(plate_start, 800)
+	Runner.T.ok("Art.PRINT_INK" in plate_body and "Art.PLATE_STEEL" in plate_body,
+		"_metal_plate() reads BOTH Art.PRINT_INK and Art.PLATE_STEEL")
+	var bible := FileAccess.get_file_as_string("res://assets_src/style_bible.md")
+	Runner.T.ok(not bible.is_empty(), "the style bible exists (assets_src/style_bible.md)")
+	Runner.T.ok("PRINT_INK" in bible and "PLATE_STEEL" in bible and "grade.gdshader" in bible,
+		"the style bible documents the draw-time ink constants and the full-frame grade pass")
+	var shader_src := FileAccess.get_file_as_string("res://src/view/grade.gdshader")
+	Runner.T.ok("style_bible.md" in shader_src,
+		"the grade shader points back at the style bible (per-sprite unification happens BEFORE this pass)")
+
+
 func test_a4_group_digits() -> void:
 	# a4-17: thousands separators so big scores scan (264500 -> "264,500").
 	Runner.T.eq(Art.group_digits(0), "0", "zero")

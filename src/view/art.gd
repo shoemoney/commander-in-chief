@@ -472,6 +472,11 @@ const _DESERT_FLORA_KEYS := {"cactus_large": true, "cactus_small": true,
 # the molten floor). Each prop lerps from its own muted tint toward this warm charred
 # debris color by foliage_march (capped 0.7 so jungle keeps prop variety).
 const DECOR_ASH := Color(0.48, 0.40, 0.32)   # a2-01 r2: nudged toward the FOLIAGE_ASH ground family for palette lock
+# a4-02: one shared dark ink for every sprite outline rim (main._spr) and HUD
+# metal-plate backing (main._metal_plate) — see assets_src/style_bible.md.
+const PRINT_INK := Color(0.05, 0.06, 0.04)
+# a4-02: one shared HUD steel midtone for the plate_metal_* cap/center tint.
+const PLATE_STEEL := Color(0.5, 0.52, 0.5)
 const _DECOR_KEYS := {"rock1": true, "rock2": true, "wreck": true, "wreck_apc": true,
 	"wreck_halftrack": true, "wreck_technical": true, "wreck_light_tank": true, "tank_hulk": true,
 	"corpse_soldier1": true, "corpse_soldier2": true, "barrel": true, "crate_stack": true,
