@@ -120,6 +120,11 @@ func _advance() -> void:
 
 
 func _dress_victoly(m: Node2D) -> void:
+	# The debrief card reads these off main, not off the sim — unposed they render a
+	# VICTORY screen boasting 0 KILLS / STREAK x0, which is the harness lying about the
+	# game. A reviewer judging the shot correctly calls that a broken results screen.
+	m._run_kills = 214
+	m._run_best_streak = 17
 	# a1-11: pose gold confetti casings mid-arc so the GOLD col path is captured
 	# (the real confetti is event-spawned by _ev_victory, absent in a static pose).
 	var cx := 320 * F
@@ -348,7 +353,7 @@ func _shot_victoly() -> SimWorld:
 	var sim := SimWorld.new(7, 2)
 	sim.victory = true
 	sim.last_stand = true
-	sim.war_chest = 0
+	sim.war_chest = 1240   # banked, not zero — the card prints this as WAR CHEST BANKED
 	sim.score = 264500
 	var p := sim.players[0]
 	p["x"] = 290 * F
