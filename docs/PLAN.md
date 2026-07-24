@@ -126,6 +126,8 @@ Ammo Cache, Grenade Crate, Fuel, Long Range, Speed Shot, Piercing Rounds, Blast 
 
 **Leaderboard anti-cheat:** every score attaches its deterministic input replay (Steam UGC attachment); a headless validation service (the shipping sim on a ~$25/mo VPS) re-simulates the top 100 nightly; mismatch = purge. Determinism does triple duty: netcode + regression testing + score validation.
 
+**Current (P3) implementation vs. the plan above:** `Replay.verify_score()` / `_apply_score_verdict()` in `src/main.gd` gate the *local* Hall of Fame bank and Steam score upload on a synchronous re-simulation of the run's own recorded inputs, and `tools/validate_replay.gd` runs the same check offline against a submitted replay file. This closes the easy exploit (a hex-edited save or a memory-poked `sim.score` that never touches the recorded inputs) but is **not** the full anti-cheat plan above: there is no server-side replay storage or per-account signed submission yet, so (1) a crafted/bot-perfect input sequence still replays and verifies -- it earned its score legitimately, it is just inhuman, and (2) nothing yet stops one player from submitting another player's legitimately-recorded replay as their own. Closing both needs the headless validation service + signed submissions described above; until that ships, treat replay verification as "can't fake a number," not "can't cheat."
+
 **Saves:** per-Steam-user versioned JSON, atomic write, CRC + last-good backup, Auto-Cloud. **Crash/analytics:** Sentry GDExtension + death-heatmap telemetry, both opt-IN (GDPR); Windows builds code-signed.
 
 ---

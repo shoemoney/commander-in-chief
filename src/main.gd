@@ -3805,14 +3805,48 @@ func _set_bus_vol(name: String, v: int) -> void:
 				AudioServer.set_bus_volume_db(s, linear_to_db(v / 10.0))
 
 
-func _record_run() -> void:
-	# Bank the finished run into the top-8 Hall of Fame (by score).
+## replay-validated-leaderboards: the actual bank-or-deny GATE the debrief-frame
+## transition in _track_bests runs, factored out to its own method (rather than
+## left inline) so a stub Main subclass in tests/test_leaderboard.gd can override
+## _record_run()/show_banner() and prove BOTH branches of the real gate fire
+## correctly -- not just that Replay.verify_score() returns the right bool
+## (already covered), but that a failed verify actually suppresses the Hall/Steam
+## bank and actually raises the deny banner, while a passing run actually
+## proceeds to _record_run(). Called with the same score/verified pair the
+## debrief transition just computed -- never re-derives them, so there is only
+## one place that decides what "failed verification" means. The score is then
+## threaded into _record_run(score) as an explicit argument rather than left for
+## it to re-read sim.score itself, so the ONLY score that can reach the Hall of
+## Fame / Steam upload (_report_to_steam, below) is the value that just cleared
+## this gate -- a stray future call site can never accidentally bank a live,
+## unverified sim.score just because it still has a reference to `main`.
+##
+## Trust-boundary note (see docs/PLAN.md "Leaderboard anti-cheat" for the full
+## plan): this catches score tampering -- a hex-edited save or a memory-poked
+## sim.score -- because replaying the run's OWN recorded inputs always
+## recomputes the true score. It does NOT catch a crafted/bot-perfect input
+## sequence (it earned its score fair and square, just inhumanly), or one
+## player submitting another player's legitimately-recorded replay as their
+## own. Closing those needs server-side replay storage + signed submissions,
+## which has no backend yet -- this is the local, synchronous half of the plan.
+func _apply_score_verdict(score: int, verified: bool) -> void:
+	if verified:
+		_record_run(score)   # bank this run into the Hall of Fame once (also uploads to Steam -- see _report_to_steam)
+	else:
+		push_warning("Run score %d failed replay verification -- not banked to the Hall of Fame or Steam" % score)
+		show_banner("SCORE NOT VERIFIED", GameMenu.BANNER_COL_FAIL)
+
+
+func _record_run(score: int) -> void:
+	# Bank the finished run into the top-8 Hall of Fame (by score). `score` is
+	# always the caller's explicit, already-verified argument -- never sim.score
+	# re-read here -- see _apply_score_verdict above for why that matters.
 	var opened := 0
 	for g in sim.gates:
 		if g["open"]:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
-	var entry := {"score": sim.score, "mode": sim.mode, "wave": sim.wave,
+	var entry := {"score": score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, SimWorld.FINAL_GATE_INDEX), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		# authored-campaign-and-modes: bosses cleared, meaningful only for a
 		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
@@ -3862,16 +3896,17 @@ func _record_run() -> void:
 	# just above) -- so the HALL_TOP_1 check inside _report_to_steam reads
 	# the exact same final state a reloaded save would see, not a
 	# provisional pre-save snapshot.
-	_report_to_steam(entry)
+	_report_to_steam(entry, score)
 
 
-func _report_to_steam(entry: Dictionary) -> void:
+func _report_to_steam(entry: Dictionary, score: int) -> void:
 	# Steamworks MVP hook: fires at the END of _record_run (see the call
 	# site's comment just above) -- achievements/leaderboards report against
 	# the fully-banked-and-saved run, not an in-flight one. _steam no-ops
 	# safely when Steam isn't present (dev/CI/non-Steam builds) -- this call
-	# is always safe to make.
-	_steam.upload_score(sim.mode, sim.score)
+	# is always safe to make. `score` is the same already-verified argument
+	# _record_run received -- never sim.score re-read here.
+	_steam.upload_score(sim.mode, score)
 	# unlock(id, false) skips the per-call store_stats() round trip -- a run can
 	# clear several milestones in one tick (e.g. a Boss Rush no-death win), and
 	# flush_stats() below reports them to Steam in a single batch.
@@ -3985,14 +4020,33 @@ func _track_bests() -> void:
 	else:
 		_down_frames += 1
 	if sim.victory or sim.wiped or (_down_frames > 150 and sim.last_stand):
+		# `if not _debrief` below fires exactly ONCE per run: it's the only place
+		# _debrief flips true, and every later tick of this same victory/wipe state
+		# re-enters the outer `if` but finds _debrief already true and skips the
+		# whole block -- so the ~64ms resim below never repeats across frames.
 		if not _debrief:
-			_record_run()   # bank this run into the Hall of Fame once
+			# replay-validated-leaderboards: sim.score is about to be banked into
+			# the Hall of Fame AND uploaded to the Steam leaderboard (inside
+			# _record_run) -- verify it against the run's OWN recorded inputs
+			# first. A legit run always matches (same deterministic sim, same
+			# inputs, ~64ms even for a full 5-minute 2P run -- measured, not a
+			# per-frame cost, just this one debrief transition); a memory-poked
+			# sim.score does not, and must never reach a shared leaderboard.
+			# No recorder means no replay to audit -- default to UNVERIFIED, not
+			# trusted, so a missing recorder can never be a backdoor around the check.
+			var _score_verified := _recorder != null and _recorder.verify_score(sim.score)
+			_apply_score_verdict(sim.score, _score_verified)   # extracted gate -- see tests/test_leaderboard.gd
 			if not _replay_saved and _recorder != null:
 				# Stringifying a whole run's input log is the biggest one-frame
 				# stall in the view — push it to a worker so the debrief card
 				# doesn't hitch. Shallow-duplicate the outer frames array: the
 				# main thread may still append, but per-frame arrays are
 				# immutable once recorded, so the snapshot is race-free.
+				# Stamp the score THIS run's live sim reported (and whether it
+				# already cleared the check above) onto the recorder before
+				# snapshotting, so the saved replay always carries what it claims.
+				_recorder.claimed_score = sim.score
+				_recorder.verified = _score_verified
 				var snap := _recorder.to_dict()
 				snap["frames"] = _recorder.frames.duplicate()
 				# Retire the previous run's write first: the pool only frees a
@@ -4001,7 +4055,7 @@ func _track_bests() -> void:
 				if _replay_task != -1:
 					WorkerThreadPool.wait_for_task_completion(_replay_task)
 				_replay_task = WorkerThreadPool.add_task(
-					Replay.save_dict.bind(snap, "user://last_run.replay"))
+					Replay.save_and_verify.bind(snap, "user://last_run.replay"))
 				_replay_saved = true
 				# c4-18: bank THIS run's score alongside its replay so the TITLE BEST chip can tell,
 				# even after a relaunch, whether the on-disk replay IS the best run (chip -> shortcut).

@@ -517,7 +517,7 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 	Runner.T.eq(main._current_seed, main._daily_seed(),
 		"the daily start path sets _current_seed to the EXACT daily seed (guarantees midnight banking)")
 	# Debrief: _record_run banks _current_seed under daily/done_seed and writes it to disk.
-	main._record_run()
+	main._record_run(main.sim.score)
 	Runner.T.eq(main._daily_done_seed, main._current_seed,
 		"_record_run banks the seed ACTUALLY played into _daily_done_seed")
 
@@ -2073,7 +2073,7 @@ func test_hall_record_run_save_reload_integration() -> void:
 	# latest and ranks past the 40-cap — the pin path _record_run must protect.
 	for i in 41:
 		main.sim.score = (100 - i) * 10
-		main._record_run()
+		main._record_run(main.sim.score)
 	Runner.T.eq(main.hall.size(), 41, "the pinned latest rides on top of the 40-cap (40 kept + 1 pinned)")
 	Runner.T.eq(int(main._hall_seq), 41, "hid counter advanced once per banked run")
 	Runner.T.ok(main.hall_latest.get("over_cap", false), "the low latest run is flagged over_cap (pinned, not slotted)")
