@@ -37,9 +37,9 @@ func test_kind1_rock_cover_stays_concealment_not_blocking() -> void:
 # raw asset, tint, and rendered (texture*tint) composite, at both foliage_march ends. ---
 
 func test_kind1_cover_reads_as_scrub_not_hedge() -> void:
-	var tex: Texture2D = load("res://assets/legacy-art/decor/dry_shrub.png")
+	var tex: Texture2D = load("res://assets/art/decor/dry_shrub.png")
 	if tex == null:
-		Runner.T.ok(false, "assets/legacy-art/decor/dry_shrub.png failed to load")
+		Runner.T.ok(false, "assets/art/decor/dry_shrub.png failed to load")
 		return
 	var shrub_img: Image = tex.get_image()
 	if shrub_img == null:

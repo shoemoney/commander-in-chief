@@ -4,13 +4,13 @@ can be picked by eye before anything overwrites the live sprite.
 
 This is the A/B contact-sheet sibling of generate_desert_assets.py, which
 generates exactly one render per asset and writes straight into
-assets/legacy-art/. This script generates N (default 4, clamp 3-6) renders per
+assets/art/. This script generates N (default 4, clamp 3-6) renders per
 asset instead of one, runs each candidate through the SAME chroma-key/trim/
 letterbox/validate pipeline (imported from generate_desert_assets.py, not
 duplicated) so every candidate already matches the exact canvas size and
 transparency the live sprite needs, and writes them to a scratch
-art_candidates/ tree -- never into assets/legacy-art/. Picking a winner and
-copying it into assets/legacy-art/ is a separate, later step (this script only
+art_candidates/ tree -- never into assets/art/. Picking a winner and
+copying it into assets/art/ is a separate, later step (this script only
 produces the contact sheet).
 
 The 8 desert target assets are read straight from generate_desert_assets.py
@@ -397,7 +397,7 @@ def run_generation(jobs, n_variants, max_attempts, raw_dir, out_root,
             save_contact_sheet(images_backends, sheet_path)
             contact_sheet_rel = str(sheet_path.relative_to(out_root))
         entry = {
-            "replaces": f"assets/legacy-art/{state.dest}",
+            "replaces": f"assets/art/{state.dest}",
             "canvas_size": state.size,
             "group": state.group,
             "prompt": f"{state.subject} {GROUPS[state.group]['consistency']} {STYLE}",
@@ -430,7 +430,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", default=str(CANDIDATES_ROOT),
                      help="candidate root to write variant PNGs + manifest.json into "
-                          "(default: art_candidates/desert_reskin, never assets/legacy-art)")
+                          "(default: art_candidates/desert_reskin, never assets/art)")
     ap.add_argument("--raw-dir", default=None,
                      help="scratch dir for raw pre-chroma-key renders (default: a throwaway temp dir)")
     ap.add_argument("--variants", type=int, default=4,
@@ -518,7 +518,7 @@ def main() -> int:
 
     print(f"done. Review the variants per asset under {out_root}, "
           f"set manifest.json's \"winner\" for each, then copy the chosen "
-          f"variant_<n>.png over its \"replaces\" path in assets/legacy-art/ and re-run "
+          f"variant_<n>.png over its \"replaces\" path in assets/art/ and re-run "
           f"`godot --headless --path . --import`.")
     return 0
 

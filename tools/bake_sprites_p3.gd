@@ -29,7 +29,7 @@ extends SceneTree
 ##      tools/bake_sprites_p3.gd "$T/"
 ##   printf 'config_version=5\n[application]\nconfig/name="bake"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n' > "$T/project.godot"
 ##   godot --headless --path "$T" --import
-##   SHOT_DIR=<repo>/assets/legacy-art godot --path "$T" \
+##   SHOT_DIR=<repo>/assets/art godot --path "$T" \
 ##       --rendering-method gl_compatibility -s res://bake_sprites_p3.gd
 
 const WAR_ATLAS := "res://PolygonWar_Texture_01_A.png"
@@ -85,7 +85,7 @@ func _initialize() -> void:
 
 	# px = baked square size, decor-convention resolution (160-260 like the
 	# shipped decor/); art.gd draw-scales down to on-screen size (~48/~96 px).
-	# "out" is the subdir under SHOT_DIR (= assets/legacy-art).
+	# "out" is the subdir under SHOT_DIR (= assets/art).
 	jobs = [
 		{"name": "mg_stand", "out": "mil2", "src": "res://SM_Prop_Mg_stand_01.fbx",
 			"atlas": MIL_ATLAS, "px": 160},

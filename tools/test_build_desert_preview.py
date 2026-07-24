@@ -26,18 +26,18 @@ def check_composite_regenerates_from_scratch_input() -> None:
         (candidates_root / "cactus_large").mkdir(parents=True)
         (candidates_root / "scrub").mkdir(parents=True)
 
-        legacy-art_dir = tmp_root / "assets" / "legacy-art"
-        legacy-art_dir.mkdir(parents=True)
-        Image.new("RGBA", (32, 32), (10, 120, 40, 255)).save(legacy-art_dir / "cactus_large.png")
-        Image.new("RGBA", (16, 16), (140, 110, 60, 255)).save(legacy-art_dir / "scrub.png")
+        art_dir = tmp_root / "assets" / "art"
+        art_dir.mkdir(parents=True)
+        Image.new("RGBA", (32, 32), (10, 120, 40, 255)).save(art_dir / "cactus_large.png")
+        Image.new("RGBA", (16, 16), (140, 110, 60, 255)).save(art_dir / "scrub.png")
 
         sand_tile = tmp_root / "sand.png"
         Image.new("RGB", (8, 8), (200, 170, 110)).save(sand_tile)
 
         manifest = {
-            "cactus_large": {"replaces": "assets/legacy-art/cactus_large.png", "winner": 1,
+            "cactus_large": {"replaces": "assets/art/cactus_large.png", "winner": 1,
                               "variants": [{"path": "cactus_large/variant_1.png", "backend": "fal"}]},
-            "scrub": {"replaces": "assets/legacy-art/scrub.png", "winner": None,  # unpicked -- must be skipped, not crash
+            "scrub": {"replaces": "assets/art/scrub.png", "winner": None,  # unpicked -- must be skipped, not crash
                       "variants": [{"path": "scrub/variant_1.png", "backend": "fal"}]},
             "backend_legend": {"fa": "fal"},
         }

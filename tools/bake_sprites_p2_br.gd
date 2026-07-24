@@ -1,5 +1,5 @@
 extends SceneTree
-## p2 bake — BattleRoyale-pack half of assets/legacy-art/p2/ (pickup_vest/tank_hulk).
+## p2 bake — BattleRoyale-pack half of assets/art/p2/ (pickup_vest/tank_hulk).
 ## Same recipe as tools/bake_sprites.gd.
 ##
 ## To reproduce (vendor stays read-only; only PNGs are written):
@@ -9,7 +9,7 @@ extends SceneTree
 ##   # patch /tmp/legacy-art-bake-p2/br/project.godot renderer → "gl_compatibility"
 ##   cp tools/bake_sprites_p2_br.gd /tmp/legacy-art-bake-p2/br/
 ##   godot --headless --path /tmp/legacy-art-bake-p2/br --import
-##   SHOT_DIR=<repo>/assets/legacy-art/p2 godot --path /tmp/legacy-art-bake-p2/br \
+##   SHOT_DIR=<repo>/assets/art/p2 godot --path /tmp/legacy-art-bake-p2/br \
 ##       --rendering-method gl_compatibility -s res://bake_sprites_p2_br.gd
 
 const A := "res://Assets/PolygonBattleRoyale/Prefabs/"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply the winner picked from generate_desert_variants.py's contact
 sheets: copy each asset's chosen variant_<n>.png over its live
-assets/legacy-art/ sprite and re-bake the .import sidecar.
+assets/art/ sprite and re-bake the .import sidecar.
 
 This is the deliberately-deferred other half of the winner-selection
 handoff generate_desert_variants.py prints at the end of a run -- reads
@@ -31,7 +31,7 @@ from generate_desert_assets import (  # noqa: E402
     DEFAULT_GODOT,
     PROJECT_ROOT,
     Image,
-    assert_lossless_legacy-art_import,
+    assert_lossless_art_import,
     fix_import_settings,
     resolve_godot,
     run_godot_import,
@@ -47,7 +47,7 @@ def main() -> int:
                      help=f"manifest.json written by generate_desert_variants.py "
                           f"(default: {DEFAULT_MANIFEST})")
     ap.add_argument("--dry-run", action="store_true",
-                     help="print what would be copied without touching assets/legacy-art/")
+                     help="print what would be copied without touching assets/art/")
     ap.add_argument("--skip-import", action="store_true",
                      help="copy the winning PNGs but skip the godot --import re-bake pass")
     ap.add_argument("--godot-bin", default=DEFAULT_GODOT, help="Godot headless binary")
@@ -109,13 +109,13 @@ def main() -> int:
     print("correcting .import settings to the lossless legacy art-bake convention...")
     for _name, _src, dest in picked:
         fix_import_settings(dest)
-        assert_lossless_legacy-art_import(dest)
+        assert_lossless_art_import(dest)
     print(f"running {godot_bin} --import (pass 2: bake corrected settings)...")
     run_godot_import(godot_bin)
 
     print(f"done. {len(picked)} asset(s) updated: {[n for n, _s, _d in picked]}. "
           f"Run `godot --headless --path . -s res://tests/run_tests.gd` to confirm "
-          f"test_a1_legacy-art_bakes_are_lossless() agrees.")
+          f"test_a1_art_bakes_are_lossless() agrees.")
     return 0
 
 

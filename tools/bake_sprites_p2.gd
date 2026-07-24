@@ -10,7 +10,7 @@ extends SceneTree
 ## read-only vendor; only PNGs are written):
 ##
 ##   godot --headless --path /tmp/legacy-art-bake-war --import
-##   SHOT_DIR=<repo>/assets/legacy-art/p2 godot --path /tmp/legacy-art-bake-war \
+##   SHOT_DIR=<repo>/assets/art/p2 godot --path /tmp/legacy-art-bake-war \
 ##       --rendering-method gl_compatibility -s res://bake_p2.gd
 
 const WAR_ATLAS := "res://PolygonWar_Texture_01_A.png"
@@ -78,7 +78,7 @@ func _initialize() -> void:
 		{"name": "corpse_soldier1", "src": "res://SM_Char_DeadBody_01.fbx", "atlas": WAR_ATLAS, "px": 140},
 		{"name": "corpse_soldier2", "src": "res://SM_Char_DeadBody_02.fbx", "atlas": WAR_ATLAS, "px": 140},
 		# Flame card baked FACE-ON (billboard) + unshaded so it keeps the flat
-		# legacy art particle style like the shipped assets/legacy-art/fx/ cards. Keeps
+		# legacy art particle style like the shipped assets/art/fx/ cards. Keeps
 		# the FBX's own diffuse-color materials (the ParticleFX atlas is a
 		# palette sheet — this mesh's colors live in the FBX materials).
 		{"name": "fx_flame", "src": "res://SM_Flame_FX.fbx", "px": 200,

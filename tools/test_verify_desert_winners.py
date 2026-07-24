@@ -4,7 +4,7 @@
     python3 tools/test_verify_desert_winners.py
 
 Drives check_winners() against a scratch manifest + candidate tree (no
-real assets/legacy-art/ touched):
+real assets/art/ touched):
 
   1. Match path: a winner whose variant bytes equal the live sprite bytes
      reports match=True and no mismatch.
@@ -50,41 +50,41 @@ def _run_scratch_manifest_and_get_rows():
         _write(candidates_root / "tumbleweed" / "variant_1.png", b"DDDD")
 
         # cactus_large: winner=1 and the live sprite genuinely IS variant_1's bytes -- match.
-        _write(tmp_root / "assets" / "legacy-art" / "cactus_large.png", b"AAAA")
+        _write(tmp_root / "assets" / "art" / "cactus_large.png", b"AAAA")
         # scrub: winner=1 but the live sprite holds something else -- drift, must be flagged.
-        _write(tmp_root / "assets" / "legacy-art" / "scrub.png", b"DRIFTED")
+        _write(tmp_root / "assets" / "art" / "scrub.png", b"DRIFTED")
         # tumbleweed: winner=1, live sprite missing entirely.
         # (no file written -- exercises the "dest does not exist" branch)
 
         manifest = {
             "cactus_large": {
-                "replaces": "assets/legacy-art/cactus_large.png",
+                "replaces": "assets/art/cactus_large.png",
                 "variants": [{"path": "cactus_large/variant_1.png", "backend": "fal"},
                              {"path": "cactus_large/variant_2.png", "backend": "openrouter"}],
                 "winner": 1,
             },
             "scrub": {
-                "replaces": "assets/legacy-art/scrub.png",
+                "replaces": "assets/art/scrub.png",
                 "variants": [{"path": "scrub/variant_1.png", "backend": "fal"}],
                 "winner": 1,
             },
             "tumbleweed": {
-                "replaces": "assets/legacy-art/decor/tumbleweed.png",
+                "replaces": "assets/art/decor/tumbleweed.png",
                 "variants": [{"path": "tumbleweed/variant_1.png", "backend": "fal"}],
                 "winner": 1,
             },
             "dry_shrub": {
-                "replaces": "assets/legacy-art/decor/dry_shrub.png",
+                "replaces": "assets/art/decor/dry_shrub.png",
                 "variants": [{"path": "dry_shrub/variant_1.png", "backend": "fal"}],
                 "winner": None,  # not picked yet -- must be skipped, not a mismatch
             },
             "cactus_dead1": {
-                "replaces": "assets/legacy-art/p2/cactus_dead1.png",
+                "replaces": "assets/art/p2/cactus_dead1.png",
                 "variants": [{"path": "cactus_dead1/variant_1.png", "backend": "fal"}],
                 "winner": 9,  # out of range for a 1-variant entry
             },
             "cactus_dead2": {
-                "replaces": "assets/legacy-art/p2/cactus_dead2.png",
+                "replaces": "assets/art/p2/cactus_dead2.png",
                 # winner variant file is never written to disk below --
                 # exercises the "recorded winner variant does not exist" guard.
                 "variants": [{"path": "cactus_dead2/variant_1.png", "backend": "fal"}],
@@ -133,10 +133,10 @@ def check_markdown_and_write_winners_cli() -> None:
     try:
         candidates_root = tmp_root / "candidates"
         _write(candidates_root / "cactus_large" / "variant_1.png", b"AAAA")
-        _write(tmp_root / "assets" / "legacy-art" / "cactus_large.png", b"AAAA")
+        _write(tmp_root / "assets" / "art" / "cactus_large.png", b"AAAA")
         manifest = {
             "cactus_large": {
-                "replaces": "assets/legacy-art/cactus_large.png",
+                "replaces": "assets/art/cactus_large.png",
                 "variants": [{"path": "cactus_large/variant_1.png", "backend": "fal"}],
                 "winner": 1,
             },
