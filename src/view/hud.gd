@@ -191,6 +191,12 @@ const TW_CACHE_CAP := 512   # c3-16: upper bound on distinct measured strings be
 
 
 func _ready() -> void:
+	# opt-loop: a CanvasLayer boundary breaks texture_filter inheritance — HUD/menu
+	# Controls sit under the $HUD CanvasLayer, so they fell back to the project's
+	# LINEAR_MIPMAP default instead of main's NEAREST override, same bug already
+	# fixed on main/_bg_root/_splash_root/_glow_root, just missed on the one
+	# surface that's always on screen during gameplay.
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_plate_ci = RenderingServer.canvas_item_create()
 	RenderingServer.canvas_item_set_parent(_plate_ci, get_canvas_item())
 	RenderingServer.canvas_item_set_z_index(_plate_ci, -1)

@@ -433,6 +433,10 @@ const PANEL_BORDER := Color(HEADER_ACCENT, 0.3)         # DEPLOY panel accent ke
 
 
 func _ready() -> void:
+	# opt-loop: same CanvasLayer-boundary texture_filter fix as HudIcons — the
+	# always-visible pause/HUD/legend text and icons were the one major render
+	# surface left on LINEAR_MIPMAP after main/_bg_root/_splash_root/_glow_root.
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# Pad yanked mid-run = pause. The sim only steps while no menu is visible,
 	# so opening PAUSE from here is the whole fix — no main.gd surgery.
 	Input.joy_connection_changed.connect(_on_joy_changed)
