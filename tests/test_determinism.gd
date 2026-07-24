@@ -189,13 +189,30 @@ const SEED := 0xDEADBEEF
 ##      anti-camp valve was paying the camper AND buying back the whole stall window.
 ## Both GOLDEN and ENDLESS_GOLDEN move: (1) and (2) add player fields hashed from tick 0
 ## in every mode, and the torture script both holds roll and empties its clip.
+## RE-RECORDED (2026-07-24, design-loop phase 3 — panel-consensus economy + input pass):
+##   1. respawn gives a PARTIAL kit (49 rounds / 4 grenades, was a free 99/12). A full
+##      restock cost ~190 coins at shop rates and the broke fallback is free, so dying
+##      strictly dominated buying and the supply economy was decorative.
+##   2. a Triple/Trench fan now costs 2 rounds instead of 1 — 3-5 pellets per single
+##      decrement made the permanent Triple mod a free 3-5x DPS multiplier.
+##   3. supply prices creep on GATES OPENED in campaign. Campaign is always wave 0, so
+##      the existing `wave/3` creep never fired there and every price was frozen for the
+##      whole run; the endless creep is now capped at +150 so late waves stop starving.
+##   4. bash is edge-triggered (new hashed `fire_prev`) — as a level read, holding fire
+##      in a swarm auto-bashed a guaranteed kill every 40t with no further input.
+##   5. the roll buffer no longer decays DURING a roll (buffer 8 < ROLL_TICKS 18, so a
+##      press made mid-roll — the usual way anyone queues the next dodge — always
+##      expired unheard), and a roll pressed in water is dropped with a deny event
+##      instead of auto-firing the instant you reach dry land.
+## Every sample moves in both modes: (4) adds a field hashed from tick 0 and the torture
+## script holds fire, and (1)/(2) change ammo state as soon as it dies or fans.
 const GOLDEN: Array[int] = [
-	6008150027811385369,
-	230198598912848734,
-	4916430101724664370,
-	1338871620913869609,
-	4077714376167072192,
-	7546299269121120123,
+	1962524240500092892,
+	8541964552380406519,
+	5136961855272590427,
+	1569141505342201728,
+	4538768033078665561,
+	4829510499393421025,
 ]
 
 
@@ -282,12 +299,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## c2-12 (2026-07-18): VERIFIED UNCHANGED — endless never advances the camera so
 ## CAMERA_LEAD is inert here, and the courier-spawn move is past the wave-2 wipe.
 const ENDLESS_GOLDEN: Array[int] = [
-	6534306763330612868,
-	7103996112035364882,
-	4942609250130834189,
-	2253999871223283525,
-	1782286172442537373,
-	976135449841877,
+	870682775949389125,
+	2998730705561210490,
+	4845480010581780169,
+	7510121251359973883,
+	6349860726657738568,
+	1566297511967932093,
 ]
 
 

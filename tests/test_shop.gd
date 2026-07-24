@@ -5,10 +5,24 @@ const Runner := preload("res://tests/run_tests.gd")
 
 
 func test_supply_cost_scales_with_wave() -> void:
-	var sim := SimWorld.new(7, 1)
+	# Endless creeps on wave; campaign creeps on gates opened (campaign is always
+	# wave 0, so the wave creep never fired there and prices were frozen all run).
+	var sim := SimWorld.new(7, 1, "endless")
 	Runner.T.eq(sim._supply_cost(0), SimWorld.SHOP_AMMO_COST, "wave 0 is base price, no surcharge")
 	sim.wave = 6
 	Runner.T.eq(sim._supply_cost(0), SimWorld.SHOP_AMMO_COST + 20, "wave 6 adds (6/3)*10 surcharge")
+	sim.wave = 600
+	Runner.T.eq(sim._supply_cost(0), SimWorld.SHOP_AMMO_COST + 150,
+		"the endless creep is capped so late waves aren't price starvation")
+
+	var camp := SimWorld.new(7, 1)
+	camp.wave = 6
+	Runner.T.eq(camp._supply_cost(0), SimWorld.SHOP_AMMO_COST,
+		"campaign ignores wave — it is always wave 0")
+	if not camp.gates.is_empty():
+		camp.gates[0]["open"] = true
+		Runner.T.eq(camp._supply_cost(0), SimWorld.SHOP_AMMO_COST + 10,
+			"campaign creeps on each gate opened instead")
 
 
 func test_apply_supply_clamps_mg_ammo_at_max() -> void:

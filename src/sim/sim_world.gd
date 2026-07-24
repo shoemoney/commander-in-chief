@@ -626,7 +626,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"fire_cd": 0, "grenade_cd": 0,
 			"broke_timer": 0,
 			"roll_ticks": 0, "roll_cd": 0, "roll_buf": 0, "roll_prev": false,
-			"grenade_buf": 0,
+			"grenade_buf": 0, "fire_prev": false,
 			"roll_iframe": false,
 			"roll_dx": 0, "roll_dy": -F_ONE,
 			"boost_ticks": 0,
@@ -820,7 +820,12 @@ func _step_players(inputs: Array) -> void:
 		p["fire_cd"] = maxi(0, p["fire_cd"] - 1)
 		p["grenade_cd"] = maxi(0, p["grenade_cd"] - 1)
 		p["roll_cd"] = maxi(0, p["roll_cd"] - 1)
-		p["roll_buf"] = maxi(0, p["roll_buf"] - 1)
+		# Freeze the roll buffer for the duration of a roll. ROLL_BUFFER_TICKS is 8
+		# but ROLL_TICKS is 18, so a press made DURING a roll — the single most
+		# common way anyone queues the next dodge — always expired before the roll
+		# ended and could never be honoured. The buffer only worked from a standstill.
+		if p["roll_ticks"] <= 0:
+			p["roll_buf"] = maxi(0, p["roll_buf"] - 1)
 		p["grenade_buf"] = maxi(0, p["grenade_buf"] - 1)
 		p["boost_ticks"] = maxi(0, p["boost_ticks"] - 1)
 		p["hurt_iframes"] = maxi(0, p["hurt_iframes"] - 1)
@@ -870,7 +875,16 @@ func _step_players(inputs: Array) -> void:
 		var roll_edge: bool = inp.roll and not p["roll_prev"]
 		p["roll_prev"] = inp.roll
 		if roll_edge:
-			p["roll_buf"] = ROLL_BUFFER_TICKS
+			if wading:
+				# Rolling is forbidden in water, and this was the last silent refusal:
+				# the press either died quietly or sat in the buffer and auto-fired a
+				# roll the instant you stepped onto dry land, which reads as the game
+				# rolling on its own. Refuse it out loud and drop it. `events` is
+				# checksum-excluded, so the deny cue itself is free.
+				p["roll_buf"] = 0
+				events.append({"t": "deny", "why": "water", "x": p["x"], "y": p["y"], "i": i})
+			else:
+				p["roll_buf"] = ROLL_BUFFER_TICKS
 		if p["roll_buf"] > 0 and p["roll_cd"] == 0 and p["roll_ticks"] == 0 and not wading:
 			p["roll_buf"] = 0
 			p["roll_ticks"] = ROLL_TICKS
@@ -988,7 +1002,13 @@ func _step_players(inputs: Array) -> void:
 			p["aim_x"] = Fixed.div(ax, alen)
 			p["aim_y"] = Fixed.div(ay, alen)
 
-		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
+		# Bash is edge-triggered too, for the same reason roll and grenade now are:
+		# as a level read, simply HOLDING fire in a swarm auto-bashed a guaranteed
+		# kill every 40 ticks with no further input. It was the last held-button
+		# autopilot left in the kit.
+		var fire_edge: bool = inp.fire and not p["fire_prev"]
+		p["fire_prev"] = inp.fire
+		if fire_edge and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
 			# Empty-clip bash: one enemy in reach dies (no coin), on a long
 			# cooldown — running dry is a beat of danger, not pure helplessness.
 			var bashed := false
@@ -1009,6 +1029,10 @@ func _step_players(inputs: Array) -> void:
 						break
 			if not bashed:
 				events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
+		elif inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
+			# Held fire on an empty clip still deserves the empty-mag click — the
+			# edge gate above governs the BASH, not the feedback.
+			events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
 		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
@@ -1016,7 +1040,17 @@ func _step_players(inputs: Array) -> void:
 			var fax: int = p["aim_x"]
 			var fay: int = p["aim_y"]
 			_spawn_mg_bullet(p, i, fax, fay)
+			# Charge for the fan. A Triple/Trench burst spawned 3 (or 5 with both)
+			# pellets for a SINGLE ammo decrement, so the permanent Triple mod was a
+			# free 3-5x DPS multiplier and ammo stopped being a resource at all —
+			# the softest sink in the game. One extra round per pellet PAIR keeps the
+			# upgrade clearly worth taking while making it cost something.
+			# Starting values (+1 for a 3-fan, +2 for a 5-fan); test: time-to-empty
+			# from 99 should fall to roughly half the base gun's, not stay identical.
+			# If Triple then feels punitive rather than powerful, drop the 5-fan to +1.
 			if p["spread_ticks"] > 0 or p["triple"]:
+				var fan_cost := 2 if (p["spread_ticks"] > 0 and p["triple"]) else 1
+				p["mg_ammo"] = maxi(0, p["mg_ammo"] - fan_cost)
 				# Trench Gun (timed) / Triple Shot (permanent mod) both spray this one
 				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
@@ -1448,8 +1482,16 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 
 func _respawn(p: Dictionary, at_y: int) -> void:
 	p["alive"] = true
-	p["mg_ammo"] = MG_AMMO_MAX         # death restores ammo (1986 rule)
-	p["grenade_ammo"] = GRENADE_AMMO_MAX
+	# PARTIAL resupply, not a full one. A free 99 rounds + 12 grenades cost ~190
+	# coins at shop rates (3x SHOP_AMMO_COST + 3x SHOP_GRENADE_COST), and the
+	# broke fallback respawns you for nothing — so once you carried no upgrades,
+	# dying strictly dominated buying and the whole supply economy was decorative.
+	# Half a clip and 4 grenades still ends the helplessness the 1986 rule was
+	# protecting, while leaving a restock DECISION on the table.
+	# Starting values (49/4); test: dying must be worse EV than one 30-coin ammo
+	# buy. If players now feel stranded on respawn, raise grenades to 6.
+	p["mg_ammo"] = MG_AMMO_MAX / 2
+	p["grenade_ammo"] = 4
 	p["broke_timer"] = 0
 	p["roll_ticks"] = 0
 	p["boost_ticks"] = 0
@@ -1577,7 +1619,21 @@ func _supply_cost(kind: int) -> int:
 		# 60/75/90/105/120, capped after 4 buys. Starting values (+15, cap
 		# 120 — panel consensus cheap end); tune up if vests still subscribe.
 		return mini(SHOP_VEST_COST + vest_buys * 15, 120)
-	return SUPPLY_COSTS[kind] + (wave / 3) * 10
+	# Campaign is ALWAYS wave 0, so the `wave/3` creep below never fired there —
+	# every non-vest price was frozen for the whole 7-gate run while coin income
+	# kept climbing, and the wheel quietly stopped being a choice. Campaign's
+	# depth axis is `opened` (the gate count the spawner already ramps on), so
+	# creep on that instead. Starting value +10/gate (matches the endless step);
+	# test: end-of-sector chest should stay under ~3 affordable buys. Endless
+	# keeps its wave creep, now capped — prices used to outrun a difficulty curve
+	# that flatlines around wave 12, turning late endless into price starvation.
+	if mode == "campaign":
+		var gates_open := 0
+		for g in gates:
+			if g["open"]:
+				gates_open += 1
+		return SUPPLY_COSTS[kind] + gates_open * 10
+	return SUPPLY_COSTS[kind] + mini((wave / 3) * 10, 150)
 
 
 func _mint_token(x: int, y: int) -> void:
@@ -5123,7 +5179,7 @@ func checksum() -> int:
 	for p in players:
 		for v in [p["x"], p["y"], int(p["alive"]), p["deaths"], p["mg_ammo"], p["grenade_ammo"],
 				p["fire_cd"], p["broke_timer"], p["roll_ticks"], p["roll_cd"], p["roll_buf"],
-				int(p["roll_prev"]), p["grenade_buf"],
+				int(p["roll_prev"]), p["grenade_buf"], int(p["fire_prev"]),
 				p["boost_ticks"], p["in_tank"], int(p["vest"]), p["hurt_iframes"], p["pierce_ticks"], p["spread_ticks"],
 				int(p["triple"]), p["rend_ticks"], p["smoke_ticks"], p["claymores"]]:
 			h = feed.call(v, h)

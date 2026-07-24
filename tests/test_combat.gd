@@ -117,7 +117,7 @@ func test_ally_revive_snaps_y_to_reviver_keeps_x_and_restores_ammo() -> void:
 	Runner.T.eq(chest0 - sim.war_chest, cost, "revive spent exactly revive_cost from the shared chest")
 	Runner.T.eq(p1["y"], p2["y"], "revived player snaps to the reviver's Y line")
 	Runner.T.eq(p1["x"], x1_before, "revived player's X stays where they fell — only Y snaps")
-	Runner.T.eq(p1["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX, "death/revive restores grenade ammo too")
+	Runner.T.eq(p1["grenade_ammo"], 4, "death/revive restores a PARTIAL 4 grenades")
 	Runner.T.ok(p1["hurt_iframes"] > 0, "revive grants a post-spawn mercy window")
 
 

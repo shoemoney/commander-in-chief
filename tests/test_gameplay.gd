@@ -90,7 +90,8 @@ func test_one_hit_death_and_ammo_restore() -> void:
 	revive.revive = true
 	sim.step(_inputs(_idle(), revive))
 	Runner.T.ok(p["alive"], "partner revive brings player back")
-	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX, "death restores MG ammo")
+	# PARTIAL resupply: a free full restock made dying cheaper than shopping.
+	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX / 2, "death restores HALF the MG ammo")
 
 
 func test_roll_press_buffered_through_cooldown() -> void:
@@ -304,7 +305,8 @@ func test_spread_shot_fires_three_bullets() -> void:
 	inp.fire = true
 	sim.step(_inputs(inp))
 	Runner.T.eq(sim.bullets.size(), 3, "spread shot spawns a 3-bullet fan")
-	Runner.T.eq(p["mg_ammo"], ammo0 - 1, "spread shot still costs one round of ammo")
+	# The fan is charged for now — 3 pellets on one round made ammo a fake sink.
+	Runner.T.eq(p["mg_ammo"], ammo0 - 2, "the 3-pellet spread fan costs two rounds")
 
 
 func test_assist_mode_gives_a_two_hit_vest_each_life() -> void:
@@ -418,7 +420,7 @@ func test_triple_shot_sprays_three_bullets() -> void:
 	inp.fire = true
 	sim.step(_inputs(inp))
 	Runner.T.eq(sim.bullets.size(), 3, "triple shot fires three bullets on one trigger pull")
-	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX - 1, "the 3-round fan still costs a single round")
+	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX - 2, "the 3-round fan costs two rounds")
 	var vmin := 1 << 40
 	var vmax := -(1 << 40)
 	for b in sim.bullets:
