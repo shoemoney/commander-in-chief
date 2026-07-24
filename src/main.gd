@@ -575,6 +575,10 @@ func _on_onboarding_finished() -> void:
 
 
 func _splash_is_skip(event: InputEvent) -> bool:
+	# c-title-sting: the studio medallion always gets its first second on screen —
+	# a stray keypress at frame 0 no longer flashes straight past the parade.
+	if SPLASH_DUR - _splash_t < 1.0:
+		return false
 	if event is InputEventKey and event.pressed and not event.echo:
 		return true
 	if event is InputEventJoypadButton and event.pressed:
@@ -2390,6 +2394,18 @@ func _consume_events() -> void:
 				_forks.append({"y": ev["y"], "x": ev["x"], "bait": true})
 			"revive_deny":
 				_vo("vo_chest_empty", 2, 600)
+			"deny":
+				# A refused verb that the sim itself rejected. Today the only source is
+				# a roll pressed while wading: previously the press either vanished or
+				# sat in the buffer and fired itself the moment you reached dry land.
+				# Two channels — the shared deny tick plus a floating reason — so the
+				# player learns the RULE ("no rolling in water"), not just that it failed.
+				if ev.get("why", "") == "water":
+					_sfx.play_at("deny", _to_screen(ev["x"], ev["y"]), -10.0)
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+						"rate": 0.05, "text": "NO ROLL IN WATER", "col": Color(0.6, 0.8, 1.0)})
+				else:
+					_sfx.play("deny", -10.0)
 			"gate_open":
 				_ev_gate_open(ev)
 				_cmd_bark("levelstart", 300)   # motivation line entering each new sector/level
@@ -8365,6 +8381,12 @@ func _draw_players() -> void:
 				if rdry > 0:
 					rcol = rcol.lerp(Color(1, 1, 1, 0.95), float(rdry) / 6.0)
 				draw_arc(pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20, rcol, 1.5)
+				# A press that WAS caught by the buffer looked identical to one that
+				# got eaten — only refusals had a tell. Ghost the remaining arc while
+				# a roll is queued so "held, will fire" is legible as its own state.
+				if p["roll_buf"] > 0:
+					draw_arc(pos, 11.0, -PI / 2 + TAU * ready, -PI / 2 + TAU, 20,
+						Color(0.85, 0.95, 1.0, 0.3), 1.5)
 		else:
 			# Knockdown tween: topple from the last aim into the fallen pose, colour
 			# and scale settling over ~8 frames instead of snapping in one tick.
