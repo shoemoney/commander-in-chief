@@ -318,10 +318,17 @@ def _wheels(p, cx, cy, hw, hh, n=3, col=(40, 42, 38)):
 
 
 def _burnt(p, cx, cy, hw, hh):
-    """Scorch + a blown-open hole: what makes a hull read as a WRECK."""
-    p.ell(cx, cy, hw * 0.95, hh * 0.85, fill=(30, 28, 26))
-    p.ell(cx + hw * 0.12, cy - hh * 0.10, hw * 0.42, hh * 0.34, fill=(16, 15, 14))
-    p.ell(cx - hw * 0.30, cy + hh * 0.30, hw * 0.26, hh * 0.20, fill=(20, 19, 18))
+    """Scorch + a blown-open hole: what makes a hull read as a WRECK.
+
+    Kept DELIBERATELY SMALL. An earlier version covered ~95% of the hull in
+    near-black, which made apc / light_tank / technical / wreck all collapse into
+    the same dark blob at their real 26-37px. The hull silhouette is what tells
+    them apart, so the burn is now a couple of scorch marks ON the hull rather
+    than a coat of paint over it.
+    """
+    p.ell(cx + hw * 0.10, cy - hh * 0.08, hw * 0.44, hh * 0.36, fill=(22, 21, 20))
+    p.ell(cx - hw * 0.34, cy + hh * 0.34, hw * 0.24, hh * 0.19, fill=(30, 28, 26))
+    p.ell(cx + hw * 0.30, cy + hh * 0.42, hw * 0.18, hh * 0.14, fill=(34, 32, 30))
 
 
 def o_technical(p):        # live militia pickup -- the MG is the hero feature
