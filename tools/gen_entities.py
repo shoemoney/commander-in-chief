@@ -422,12 +422,12 @@ def o_wreck_halftrack(p):
 
 # --- structures --------------------------------------------------------------
 def o_bunker(p):
-    p.rrect_c(0.5, 0.52, 0.40, 0.34, 0.05, (128, 122, 104))
-    p.rrect_c(0.5, 0.62, 0.40, 0.24, 0.05, (92, 88, 74))
-    p.rrect_c(0.5, 0.34, 0.30, 0.055, 0.01, (26, 26, 24))       # firing slit
+    p.rrect_c(0.5, 0.52, 0.40, 0.34, 0.05, (170, 162, 138))
+    p.rrect_c(0.5, 0.64, 0.40, 0.22, 0.05, (74, 70, 60))
+    p.rrect_c(0.5, 0.34, 0.32, 0.085, 0.01, (18, 18, 16))       # firing slit, oversized
     for sx in (-1, 1):
         p.rrect_c(0.5 + sx * 0.315, 0.52, 0.075, 0.320, 0.03, (108, 102, 86))
-    p.keyline(0.014)
+    p.keyline(0.026)
 
 
 def o_watchtower(p):
@@ -555,14 +555,14 @@ def o_skyline_mast(p):
 
 # --- props -------------------------------------------------------------------
 def o_ammobox(p):
-    p.rrect_c(0.5, 0.54, 0.34, 0.26, 0.04, (86, 96, 62))
+    p.rrect_c(0.5, 0.54, 0.34, 0.26, 0.04, (52, 60, 36))
     p.rrect_c(0.5, 0.46, 0.34, 0.18, 0.04, (116, 128, 84))
     p.rrect_c(0.5, 0.44, 0.155, 0.050, 0.02, (44, 48, 38))     # carry handle
     p.keyline(0.024)
 
 
 def o_barrel(p):
-    p.ell(0.5, 0.52, 0.40, 0.40, fill=(88, 74, 48))
+    p.ell(0.5, 0.52, 0.40, 0.40, fill=(56, 46, 30))
     p.ell(0.5, 0.50, 0.40, 0.40, fill=(140, 116, 70))
     p.ell(0.5, 0.50, 0.28, 0.28, fill=(112, 92, 56))
     p.ell(0.5, 0.50, 0.10, 0.10, fill=(70, 58, 36))
@@ -579,31 +579,31 @@ def o_barricade(p):
 
 
 def o_barrier(p):
-    p.poly([(0.14, 0.72), (0.24, 0.30), (0.76, 0.30), (0.86, 0.72)], (176, 172, 160))
-    p.poly([(0.14, 0.72), (0.86, 0.72), (0.80, 0.84), (0.20, 0.84)], (116, 112, 102))
+    p.poly([(0.14, 0.72), (0.24, 0.30), (0.76, 0.30), (0.86, 0.72)], (186, 182, 170))
+    p.poly([(0.14, 0.72), (0.86, 0.72), (0.80, 0.84), (0.20, 0.84)], (68, 66, 60))
     p.keyline(0.022)
 
 
 def o_crate_stack(p):
-    p.rrect_c(0.42, 0.60, 0.30, 0.28, 0.03, (118, 92, 58))
+    p.rrect_c(0.42, 0.60, 0.30, 0.28, 0.03, (78, 60, 38))
     p.rrect_c(0.62, 0.40, 0.26, 0.24, 0.03, (150, 120, 76))
     p.rrect_c(0.36, 0.34, 0.22, 0.20, 0.03, (168, 138, 90))
-    for c, w, h in ((0.42, 0.30, 0.28), (0.62, 0.26, 0.24), (0.36, 0.22, 0.20)):
-        pass
     p.keyline(0.022)
 
 
 def o_rock(p, big: bool):
+    # rocks sit ON the tan ground, so a tan rock disappears -- go grey-brown and
+    # keep a hard dark shadow half.
     r = 0.44 if big else 0.38
     pts = []
     for i in range(7):
         a = i * 2 * math.pi / 7
         rr = r * (0.78 + 0.22 * ((i * 5) % 3) / 2.0)
         pts.append((0.5 + math.cos(a) * rr, 0.52 + math.sin(a) * rr * 0.92))
-    p.poly(pts, (128, 118, 100))
-    p.poly([(x, y + 0.10) for x, y in pts[3:]] + [pts[3]], (86, 78, 66))
+    p.poly(pts, (104, 96, 84))
+    p.poly([(x, y + 0.10) for x, y in pts[3:]] + [pts[3]], (54, 50, 44))
     p.poly([(0.5 + (x - 0.5) * 0.52, 0.46 + (y - 0.52) * 0.52) for x, y in pts],
-           (170, 158, 134))
+           (156, 146, 126))
     p.keyline(0.024)
 
 
@@ -636,7 +636,7 @@ def o_landmine(p):
 
 
 def o_dropped_shield(p):
-    p.rrect_c(0.5, 0.52, 0.30, 0.42, 0.08, (108, 114, 108))
+    p.rrect_c(0.5, 0.52, 0.30, 0.42, 0.08, (62, 66, 62))
     p.rrect_c(0.5, 0.46, 0.30, 0.34, 0.08, (156, 162, 154))
     p.rrect_c(0.5, 0.52, 0.19, 0.055, 0.02, (48, 50, 46))
     p.keyline(0.026)
@@ -724,8 +724,8 @@ def w_gun(p, kind: str):
 
 
 def w_grenade(p, kind: str):
-    body = {"grenade": (86, 100, 58), "flashbang": (140, 144, 138),
-            "smoke": (96, 104, 92), "claymore": (86, 96, 62)}[kind]
+    body = {"grenade": (62, 78, 40), "flashbang": (196, 200, 194),
+            "smoke": (70, 78, 66), "claymore": (58, 70, 38)}[kind]
     if kind == "claymore":
         p.poly([(0.18, 0.34), (0.82, 0.34), (0.76, 0.66), (0.24, 0.66)], body)
         p.poly([(0.18, 0.34), (0.82, 0.34), (0.80, 0.44), (0.20, 0.44)],
@@ -742,7 +742,7 @@ def w_grenade(p, kind: str):
 
 def i_binoculars(p):
     for sx in (-1, 1):
-        p.rrect_c(0.5 + sx * 0.185, 0.50, 0.160, 0.330, 0.06, (54, 58, 50))
+        p.rrect_c(0.5 + sx * 0.185, 0.50, 0.160, 0.330, 0.06, (34, 38, 32))
         p.ell(0.5 + sx * 0.185, 0.26, 0.135, 0.100, fill=(70, 96, 110))
     p.rrect_c(0.5, 0.54, 0.110, 0.130, 0.03, (40, 44, 38))
     p.keyline(0.032)
@@ -873,19 +873,49 @@ OBJECTS = {
 }
 
 
+def recenter(im: Image.Image) -> Image.Image:
+    """Shift the art so its ALPHA-MASS centroid lands on the canvas centre.
+
+    tests/test_assets.gd pins this to 1%: these sprites rotate about the canvas
+    centre, so an off-centre mass makes a unit wobble as it turns. A figure whose
+    weapon projects north and whose boots hang south is naturally off-centre, so
+    correct it here rather than hand-tuning every pose.
+    """
+    a = im.getchannel("A")
+    px = a.load()
+    w, h = im.size
+    tot = sx = sy = 0.0
+    for y in range(h):
+        for x in range(w):
+            v = px[x, y]
+            if v:
+                tot += v
+                sx += x * v
+                sy += y * v
+    if tot == 0:
+        return im
+    dx = int(round((w - 1) / 2.0 - sx / tot))
+    dy = int(round((h - 1) / 2.0 - sy / tot))
+    if dx == 0 and dy == 0:
+        return im
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    out.paste(im, (dx, dy))
+    return out
+
+
 def build(key: str) -> Image.Image:
     if key in HUMANS:
         cfg = dict(HUMANS[key])
         n = cfg.pop("canvas")
         p = _pad(n)
         person(p, **cfg)
-        return p.out()
+        return recenter(p.out())
     if key in CORPSES:
         cfg = dict(CORPSES[key])
         n = cfg.pop("canvas")
         p = _pad(n)
         _corpse(p, **cfg)
-        return p.out()
+        return recenter(p.out())
     if key in OBJECTS:
         canvas, fn = OBJECTS[key]
         w, h = canvas if isinstance(canvas, tuple) else (canvas, canvas)
