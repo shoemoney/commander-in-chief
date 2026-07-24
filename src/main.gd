@@ -447,6 +447,10 @@ func _ready() -> void:
 	_setup_splash()
 	if OS.has_feature("movie"):
 		_menu.mode = GameMenu.Mode.HIDDEN   # trailer capture: straight into combat
+		# A movie render's window never holds OS focus, so the focus-out auto-pause
+		# would slap the PAUSED overlay over the trailer instead of the combat pitch —
+		# same reason tools/screenshots.gd + biome_capture.gd set this.
+		no_autopause = true
 		# Seed 18 won the 40-seed audition: vest break, two escalating
 		# revives, ends alive — the War Chest pitch in 16 seconds.
 		sim = SimWorld.new(18, 1)
