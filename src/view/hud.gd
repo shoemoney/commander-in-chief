@@ -191,6 +191,12 @@ const TW_CACHE_CAP := 512   # c3-16: upper bound on distinct measured strings be
 
 
 func _ready() -> void:
+	# opt-loop: a CanvasLayer boundary breaks texture_filter inheritance — HUD/menu
+	# Controls sit under the $HUD CanvasLayer, so they fell back to the project's
+	# LINEAR_MIPMAP default instead of main's NEAREST override, same bug already
+	# fixed on main/_bg_root/_splash_root/_glow_root, just missed on the one
+	# surface that's always on screen during gameplay.
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_plate_ci = RenderingServer.canvas_item_create()
 	RenderingServer.canvas_item_set_parent(_plate_ci, get_canvas_item())
 	RenderingServer.canvas_item_set_z_index(_plate_ci, -1)
@@ -1389,7 +1395,7 @@ func _verb_legend() -> void:
 func _emit_rect(r: Rect2, c: Color) -> void:
 	draw_rect(r, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
-	Art.draw_glyph(self, act, center, size, c)
+	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 	Art.text(self, txt, pos, 8, c)
 
@@ -2242,7 +2248,7 @@ func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := 
 # supply-wheel) — like every other HUD draw seam, a one-line indirection so a headless capture
 # subclass can record them and the full _draw frame is exercisable without a live draw context.
 func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt: bool) -> void:
-	Art.draw_glyph(self, act, center, size, col, alt)
+	Art.draw_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act))
 
 
 ## c4-03: reserved pixel width of the "+N" clip — sized off the WIDER of "+N"/"!N" so the alert

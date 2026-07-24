@@ -35,6 +35,8 @@ var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Tr
 var _cmd_next_frame := 0                # global bark cooldown (physics frames) so combat isn't a monologue
 var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
 var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
+var _death_yells_loaded := false        # opt-loop: lazy-load guard (see play_death_yell) — distinct
+var _spawn_shouts_loaded := false       # from bank.is_empty() so a directory scan never retries
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
 var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
@@ -43,6 +45,9 @@ var _beds: Dictionary = {}                   # a3-15: the three ambience-bed loo
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
+var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
+var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
+var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
 
 
 func _ready() -> void:
@@ -52,6 +57,7 @@ func _ready() -> void:
 		AudioServer.set_bus_name(idx, "SFX")
 		AudioServer.set_bus_send(idx, "Master")
 		AudioServer.add_bus_effect(idx, AudioEffectHardLimiter.new())
+	_sfx_bus_idx = AudioServer.get_bus_index("SFX")
 	if AudioServer.get_bus_index("Music") == -1:
 		var mi := AudioServer.get_bus_count()
 		AudioServer.add_bus(mi)
@@ -68,12 +74,19 @@ func _ready() -> void:
 	# Concussion low-pass on Master: swept open normally, clamped down for the
 	# 'ears ringing, world underwater' beat right after a near-death hit. Held
 	# by reference so a later Master effect can't shift its index out from us.
-	_lpf = AudioEffectLowPassFilter.new()
-	_lpf.cutoff_hz = 20500.0
-	AudioServer.add_bus_effect(0, _lpf)
-	# Master safety limiter AFTER the LPF: the SFX bus limits itself, but the drum
-	# bed sums into Master past it — loud combat + a kick could land ~+2dBFS.
-	AudioServer.add_bus_effect(0, AudioEffectHardLimiter.new())
+	# gfx-loop: guarded like every other bus setup block above — unguarded, a
+	# second Sfx._ready() call (a future splitscreen instance, an integration
+	# test booting the real scene twice) would silently stack duplicate
+	# LPF+limiter chains on Master and progressively muffle all audio.
+	if AudioServer.get_bus_effect_count(0) == 0:
+		_lpf = AudioEffectLowPassFilter.new()
+		_lpf.cutoff_hz = 20500.0
+		AudioServer.add_bus_effect(0, _lpf)
+		# Master safety limiter AFTER the LPF: the SFX bus limits itself, but the drum
+		# bed sums into Master past it — loud combat + a kick could land ~+2dBFS.
+		AudioServer.add_bus_effect(0, AudioEffectHardLimiter.new())
+	else:
+		_lpf = AudioServer.get_bus_effect(0, 0)
 	# VO bus (voices panel 9/9: ONE radio-filtered Commander): band-passed +
 	# lightly driven so every line lands as tactical radio, not narration.
 	# Rides Master (the concussion LPF lives there — a stunned soldier hears
@@ -111,9 +124,22 @@ func _ready() -> void:
 		var res := load("res://assets/vo/%s.mp3" % k)
 		if res != null:
 			_vo_streams[k] = res
-	_load_death_yells()
-	_load_spawn_shouts()
+	# opt-loop: death-yell/spawn-shout banks (178 of 234 total boot-time MP3
+	# loads) aren't touched until an enemy actually exists in combat — lazy-
+	# loaded on first use instead (see play_death_yell/play_spawn_shout).
+	#
+	# Everything below this point is content, not bus infrastructure — no other
+	# code depends on it running synchronously within THIS _ready() call (only
+	# the bus creation above is load-bearing, per main.gd's own comment on why
+	# add_child(_sfx) must run before _load_bests()). It's also the expensive
+	# part: ~2.5-3M sample-by-sample synth iterations for every SFX voice, both
+	# drum loops, and three ambience beds, run in interpreted GDScript, blocking
+	# the very first rendered frame (nothing shows, not even the boot splash)
+	# for its whole duration. Deferred so the splash gets a chance to paint first.
+	call_deferred("_finish_boot_audio")
 
+
+func _finish_boot_audio() -> void:
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 32
 	_player.stream = poly
@@ -206,11 +232,41 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	if _vo.playing or _vo_dry.playing:
 		if priority <= _vo_priority:
 			return
-		_vo.stop()
-		_vo_dry.stop()
+		# gfx-loop: only fade the OTHER player — `ply` is about to play new
+		# content immediately, so cutting it is masked by the new attack; the
+		# idle player would otherwise go silent mid-waveform (audible click).
+		if ply == _vo:
+			_fade_then_stop(_vo_dry, true)
+			_vo.stop()
+		else:
+			_fade_then_stop(_vo, false)
+			_vo_dry.stop()
 	_vo_priority = priority
 	ply.stream = _vo_streams[key]
 	ply.play()
+
+
+func _fade_then_stop(ply: AudioStreamPlayer, is_dry: bool) -> void:
+	## Short volume-fade before .stop() so an interrupted VO/bark line doesn't
+	## click by cutting mid-waveform. `is_dry` picks which in-flight tween slot
+	## to track so a re-trigger mid-fade kills the stale one instead of racing it.
+	if not ply.playing:
+		return
+	var orig_db := ply.volume_db
+	if is_dry:
+		if _vo_dry_fade_tween != null and _vo_dry_fade_tween.is_valid():
+			_vo_dry_fade_tween.kill()
+	elif _vo_fade_tween != null and _vo_fade_tween.is_valid():
+		_vo_fade_tween.kill()
+	var tw := create_tween()
+	if is_dry:
+		_vo_dry_fade_tween = tw
+	else:
+		_vo_fade_tween = tw
+	tw.tween_property(ply, "volume_db", orig_db - 24.0, 0.025)
+	tw.tween_callback(func() -> void:
+		ply.stop()
+		ply.volume_db = orig_db)
 
 
 func stop_vo() -> void:
@@ -266,11 +322,18 @@ func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:
 	# volume_db persistent user state). Rest AT that baseline, not 0 dB — otherwise
 	# this per-frame lerp drags any sub-max SFX setting back up to full and the
 	# volume slider stops holding. -6 dB below baseline while a radio line is on air.
-	var idx := AudioServer.get_bus_index("SFX")
-	if idx == -1:
-		return
+	if _sfx_bus_idx == -1:
+		# Normally cached in _ready(); lazy-resolve here too since tests exercise
+		# Sfx via .new() without adding it to the tree (so _ready() never runs).
+		_sfx_bus_idx = AudioServer.get_bus_index("SFX")
+		if _sfx_bus_idx == -1:
+			return
 	var target := base_db - 6.0 if active else base_db
-	AudioServer.set_bus_volume_db(idx, lerpf(AudioServer.get_bus_volume_db(idx), target, 0.15))
+	var current := AudioServer.get_bus_volume_db(_sfx_bus_idx)
+	# gfx-loop: skip the redundant set_bus_volume_db call once the lerp has converged —
+	# this runs every physics tick for the whole run.
+	if absf(current - target) > 0.01:
+		AudioServer.set_bus_volume_db(_sfx_bus_idx, lerpf(current, target, 0.15))
 
 
 func vo_active() -> bool:
@@ -324,11 +387,17 @@ func _play_bank_at(bank: Array, screen_pos: Vector2, vol_db: float) -> void:
 
 func play_death_yell(screen_pos: Vector2, vol_db := -5.0) -> void:
 	## Positional agony yell on an infantry kill.
+	if not _death_yells_loaded:
+		_death_yells_loaded = true
+		_load_death_yells()
 	_play_bank_at(_death_yells, screen_pos, vol_db)
 
 
 func play_spawn_shout(screen_pos: Vector2, vol_db := -8.0) -> void:
 	## Positional battle cry when an infantry first enters the viewport.
+	if not _spawn_shouts_loaded:
+		_spawn_shouts_loaded = true
+		_load_spawn_shouts()
 	_play_bank_at(_spawn_shouts, screen_pos, vol_db)
 
 
@@ -500,8 +569,13 @@ func engine_at(key: int, screen_pos: Vector2, on: bool) -> void:
 	if on:
 		voice.position = screen_pos
 	else:
-		voice.queue_free()
+		# gfx-loop: every other continuous bed (music/wind/river/foundry/shop) fades
+		# via volume_db lerp toward silence — the engine loop was the one place that
+		# hard-cut a live loop at a random waveform phase (audible click/pop).
 		_engines.erase(key)
+		var tw := create_tween()
+		tw.tween_property(voice, "volume_db", -80.0, 0.15)
+		tw.tween_callback(voice.queue_free)
 
 
 func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:

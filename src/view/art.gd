@@ -792,16 +792,22 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
 
 
-static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false) -> void:
+static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1) -> void:
 	# force_pad: P2 is hardwired to pad 1 (main._gather_inputs), so P2's OWN
 	# prompts must show pad buttons even while P1's mouse aim keeps the global
 	# use_pad false — per-player call sites pass `i == 1`.
+	# gfx-loop review panel (Reviewok/ReviewMAX/ReviewGLM/ReviewGEM): the keyboard
+	# letter used to be a hardcoded ship-default (_GLYPH_KEY) regardless of the
+	# player's actual rebind (main.rebind() persists to _binds, and the REBIND
+	# screen itself shows the live key via GameMenu.key_label() — only in-game
+	# prompts didn't). `keycode` (a physical keycode from main.bind(action), -1 ==
+	# "caller didn't pass one") lets callers route the live bind through here.
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
 	if use_pad or force_pad:
 		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false, mod)
 	else:
 		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88) * mod)
-		var letter: String = _GLYPH_KEY[action]
+		var letter: String = GameMenu.key_label(keycode) if keycode >= 0 else _GLYPH_KEY[action]
 		var f := font()
 		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
 		# whole strokes below native scale (a 6px 'E' loses horizontals).
