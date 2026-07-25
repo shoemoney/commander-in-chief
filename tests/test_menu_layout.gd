@@ -3084,6 +3084,38 @@ func test_settings_defaults_cover_every_persisted_key() -> void:
 # c2-04: OPTIONS climbs BACK to whichever screen opened it — the SETUP hub from the
 # title flow, or PAUSE when opened mid-run — so backing out of settings returns to the
 # paused run instead of dumping the player to the title (which would look like abandoning it).
+# GHOST-OVERLAY REGRESSION. Closing the menu (mode -> HIDDEN) used to leave the last painted
+# frame stuck on the CanvasItem forever: _draw() clears by early-returning on HIDDEN, but the
+# only queue_redraw() call sat behind _process's `mode != HIDDEN` gate, so it was never reached
+# once hidden. Live repro: RESUME resumed the sim (score/ammo moved, the player died AND revived)
+# while a pixel-identical "PAUSED" overlay stayed on screen — the player kept pressing RESUME on
+# an already-running game. _process must request exactly ONE repaint after the menu closes.
+func test_closing_the_menu_requests_the_clearing_repaint() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.PAUSE
+	m._process(0.016)
+	Runner.T.ok(not m._painted_hidden, "an OPEN menu is never marked as having painted its hidden frame")
+	# Close it — this is the transition that used to strand the overlay.
+	m.mode = Menu.Mode.HIDDEN
+	m._process(0.016)
+	Runner.T.ok(m._painted_hidden, "closing the menu requests the repaint that clears the overlay")
+	# ...and only once: a hidden menu must then idle, not queue a redraw every frame.
+	m._painted_hidden = false
+	m.mode = Menu.Mode.HIDDEN
+	m._process(0.016)
+	m._process(0.016)
+	Runner.T.ok(m._painted_hidden, "still latched after repeated hidden frames (one repaint, then idle)")
+	# Re-opening must re-arm it, so the NEXT close clears again (a latch that never resets would
+	# strand the overlay on every close after the first).
+	m.mode = Menu.Mode.PAUSE
+	m._process(0.016)
+	Runner.T.ok(not m._painted_hidden, "re-opening re-arms the clear for the next close")
+	m.free()
+	stub.free()
+
+
 func test_options_back_returns_to_its_opener() -> void:
 	var stub := _StubMain.new()
 	var m: Control = Menu.new()
