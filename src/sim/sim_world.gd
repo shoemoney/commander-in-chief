@@ -1392,6 +1392,14 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		var cost: int = pk.get("cost", 0)
 		if cost > 0 and war_chest < cost:
 			continue
+		# A supply the player is already capped on grants nothing (mini() eats it,
+		# or the vest is already on). A PRICED one must not be auto-bought on
+		# proximity: that was a silent chest debit PLUS a cost*10 score credit for
+		# nothing (an endless laundering loop). Leave it standing — the view
+		# already greys it and prints MAXED.
+		var full := _supply_full(p, pk["kind"])
+		if cost > 0 and full:
+			continue
 		war_chest -= cost
 		if pk["kind"] == 2:
 			vest_buys += 1   # priced crates ride the same campaign creep (no loophole)
@@ -1399,10 +1407,8 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
 			score += cost * 10
-		# Claymore capsule grabbed at the 3-charge cap grants nothing (mini()
-		# eats it) — flag the event so the view can stop paying the celebratory
-		# callout for a no-op. Events are checksum-excluded: golden-safe.
-		var full: bool = pk["kind"] == 8 and p["claymores"] >= CLAYMORE_CAP
+		# `full` rides the event so the view can stop paying the celebratory
+		# callout for a free no-op too. Events are checksum-excluded: golden-safe.
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
 			"kind": pk["kind"], "cost": cost, "full": full})
@@ -1557,6 +1563,19 @@ func _fire_mission() -> void:
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
 			_kill_enemy(e, true, true)
+
+
+func _supply_full(p: Dictionary, kind: int) -> bool:
+	## True when _apply_supply(kind) would grant this player NOTHING — the mini()
+	## clamp eats it, or the vest is already on. Only the capped kinds answer
+	## true; every timed capsule (4/5/7/9), the one-shot flashbang and the
+	## sandbag re-apply usefully, so they are never "full".
+	match kind:
+		0: return p["mg_ammo"] >= MG_AMMO_MAX
+		1: return p["grenade_ammo"] >= GRENADE_AMMO_MAX
+		2: return p["vest"]
+		8: return p["claymores"] >= CLAYMORE_CAP
+	return false
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -4200,13 +4219,18 @@ func _author_lz() -> void:
 	for sr in [[96, 0, 0], [158, -22, 0], [226, 14, 0],
 			[414, 18, 0], [478, -16, 0], [546, 6, 0]]:
 		rocks.append({"x": sr[0] * F_ONE, "y": -((180 + sr[1]) * F_ONE), "kind": sr[2]})
-	# 2. The conspicuous grenade box, dead center in the lane, free.
-	pickups.append({"x": SCREEN_CX, "y": -(300 * F_ONE), "kind": 1, "cost": 0})
-	# 3. 120px past it: an armored bunker at the lane mouth, spitting infantry
-	#    every 2s. Rifle rounds spark off it (armor_block -> the view's existing
-	#    ricochet), one grenade seals it for 50 coins. Gate 1 then repeats the
-	#    lesson as a hard wall. Corner-origin like every streamed bunker.
+	# 2. An armored bunker at the lane mouth, spitting infantry every 2s. Rifle
+	#    rounds spark off it (armor_block -> the view's existing ricochet), one
+	#    grenade seals it for 50 coins. Gate 1 then repeats the lesson as a hard
+	#    wall. Corner-origin like every streamed bunker.
 	bunkers.append(_make_bunker(SCREEN_CX - BUNKER_W / 2, -(420 * F_ONE)))
+	# 3. The conspicuous grenade box, dead center in the lane, free -- 60px PAST
+	#    the bunker's north face. Players spawn at GRENADE_AMMO_MAX, so a crate
+	#    placed BEFORE the bunker granted mini(MAX, ammo+4) = nothing and taught
+	#    nothing. On the far side it refills the grenade the bunker just cost,
+	#    which is the actual lesson: grenades are a resource that gets resupplied.
+	#    Clear of the streamed bunker row at y=-500 (that one sits at x=120).
+	pickups.append({"x": SCREEN_CX, "y": -(480 * F_ONE), "kind": 1, "cost": 0})
 
 
 func _make_bunker(x: int, y: int) -> Dictionary:

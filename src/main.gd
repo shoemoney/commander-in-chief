@@ -1923,7 +1923,9 @@ func _consume_events() -> void:
 		var kind: String = ev["t"]
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
-			if ev.get("cost", 0) == 0:
+			if ev.get("cost", 0) == 0 and not ev.get("full", false):
+				# Free grab at cap grants nothing — no gloat for a no-op (the sim
+				# now refuses the PRICED version outright; free ones still vanish).
 				_cmd_bark("pickup", 240)   # occasional "best weapons" gloat on a free supply grab
 			# Collect pop: common crates used to vanish on a quiet blip — a spark
 			# kiss + brief ground light marks WHERE the supply went. Reuses the

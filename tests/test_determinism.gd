@@ -218,13 +218,25 @@ const SEED := 0xDEADBEEF
 ## pure placement, no new rng draw, no kind change, lane still >= HULL_CLEARANCE.
 ## All 6 campaign samples move; ENDLESS_GOLDEN VERIFIED UNCHANGED (the authoring
 ## is campaign-gated).
+## RE-RECORDED (2026-07-25, the LZ grenade crate was a placebo): players spawn at
+## GRENADE_AMMO_MAX, so the free kind-1 crate at (320,-300) -- BEFORE the bunker --
+## granted mini(MAX, ammo+4) = ZERO and taught nothing. It moved PAST the bunker to
+## (320,-480), where it refills the grenade the bunker just cost. Pure placement:
+## no new rng draw, no kind/cost change, and -480 is clear of both the LZ bunker
+## (-420..-388) and the streamed bunker row at y=-500 (x=120). Also in this pass:
+## _collect_pickups now refuses a PRICED crate the player is capped on instead of
+## charging the chest + crediting cost*10 for a no-op -- inert for the campaign
+## torture (it never stands on a priced crate at cap) but it is sim logic, so it is
+## noted here. All 6 campaign samples move (the torture walks the LZ from tick 0, so
+## the crate's new y shifts collection timing). ENDLESS_GOLDEN VERIFIED UNCHANGED
+## (the LZ authoring is campaign-gated and endless has no priced-crate-at-cap beat).
 const GOLDEN: Array[int] = [
-	8824309749638634364,
-	6749052236834509168,
-	2266527914986358408,
-	7994727017838703917,
-	4594530292734471620,
-	1982583823041702415,
+	2004797444122876796,
+	2785173544312476016,
+	4851684418590918280,
+	1188156206178530605,
+	5591809566939131332,
+	4230145854939474447,
 ]
 
 
