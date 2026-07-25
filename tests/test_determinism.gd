@@ -293,13 +293,20 @@ const SEED := 0xDEADBEEF
 ## torture never streams as far as gate 3 (the first bridge gunship) and the
 ## endless torture wipes at wave 2, well before the wave-5 miniboss -- so no
 ## torture tick ever runs _step_one_boss. Re-checked, not assumed.
+## RE-RECORDED (2026-07-25, 17-branch merge): samples 4 and 5 ONLY. 0-3 are byte-identical
+## to the previous record, which is the exact fingerprint of a change that bites once the
+## first gate opens — the per-sector special roster gives MARSH BASIN a 2-entry table, so the
+## shared stream-rng draw span differs from that point on. Every other sim change merged here
+## (frogman re-telegraph, bunker sweep, LZ crate, colossus damage, endless armor, economy
+## creep, enemy cover collision) argued its own inertness to the torture and all of them hold:
+## if any were wrong, samples 0-3 would have moved too.
 const GOLDEN: Array[int] = [
 	506778608736561550,
 	7590183919185690526,
 	241001744564993750,
 	8011787666350042381,
-	9156448604151922468,
-	4756524505527291036,
+	1378208880990403486,
+	5406986129690569999,
 ]
 
 
