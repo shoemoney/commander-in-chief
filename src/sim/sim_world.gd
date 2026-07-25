@@ -4027,7 +4027,8 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	## for Boss Rush (a deliberate "no field filler between fights" design
 	## choice -- see _setup_boss_rush) while the campaign stream keeps it.
 	gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
-		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
+		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus),
+			"max_hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
 			"dir": 1, "phase_t": 0, "gate_y": gy}})
 	# Boss-arena cover (5v): four bags in two mirrored lines turn the
 	# strafe half into a COVER fight (mortars ignore cover, so the
@@ -4510,6 +4511,7 @@ func _start_wave() -> void:
 		# no longer lands on top of the wave_start card). Already-hashed field,
 		# zero new state; the arrival emits the endless_boss event instead.
 		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
+			"max_hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
 			"x": SCREEN_CX, "dir": 1, "phase_t": -420, "gate_y": camera_top + 90 * F_ONE}
 	if wave >= 4 and not _live_drop() and rng.range_i(0, 2) == 0:
 		# Mid-wave optional objective (5-vote panel, trimmed to the drop beat):
@@ -4585,6 +4587,29 @@ func _colossus_ring(dist: int) -> int:
 	if dist <= r[1] * F_ONE:
 		return 1
 	return 2
+
+
+func _colossus_strike(p: Dictionary) -> void:
+	## Every colossus mortar LEADS its target — the same poor-man's velocity the
+	## gunship volley uses (_step_boss): sample the player, project the delta since
+	## the last sample one full telegraph forward. A 45t warn + 28px kill ring aimed
+	## at the tile you're STANDING on can never catch a 2.4px/tick walker (108px of
+	## travel vs a 28px ring), so the phase-2 volley, the lane-sweep punisher and the
+	## inner-ring punisher were all free auto-dodges for anyone who kept walking —
+	## the whole escalation ladder was banners over an inert threat. Standing still
+	## gives a zero delta, so a camper is hit exactly where they always were.
+	## The sample lives on the player (per-player: 2P leads both) and is SHARED by
+	## all three sources — a fresher sample only sharpens the lead.
+	var aim_x: int = p["x"]
+	var aim_y: int = p["y"]
+	if p.has("lead_t"):
+		var elapsed: int = maxi(1, tick_count - int(p["lead_t"]))
+		aim_x += (p["x"] - int(p["lead_x"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+		aim_y += (p["y"] - int(p["lead_y"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+	p["lead_x"] = p["x"]
+	p["lead_y"] = p["y"]
+	p["lead_t"] = tick_count
+	_add_strike(clampi(aim_x, WORLD_LEFT, WORLD_RIGHT), aim_y)
 
 
 func _step_colossus() -> void:
@@ -4696,7 +4721,7 @@ func _step_colossus() -> void:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
 		if colossus["volley_cd"] <= 0 and not _concealed(target):
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
-			_add_strike(target["x"], target["y"])
+			_colossus_strike(target)
 	if phase == 3:
 		colossus["spawn_cd"] = colossus["spawn_cd"] - 1
 		if colossus["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
@@ -4712,7 +4737,7 @@ func _step_colossus() -> void:
 	if colossus["sweep_cd"] <= 0 \
 			and (target["x"] < ARENA_MARGIN or target["x"] > SCREEN_W_FP - ARENA_MARGIN):
 		colossus["sweep_cd"] = COLOSSUS_SWEEP_CD_TICKS
-		_add_strike(target["x"], target["y"])
+		_colossus_strike(target)
 
 	# c4 2v ROTATING RINGS: the inner DANGER ring GROWS each phase rise (the safe
 	# annulus migrates OUTWARD). A player camping inside the inner ring eats a
@@ -4723,7 +4748,7 @@ func _step_colossus() -> void:
 			if rp["alive"]:
 				var rd := Fixed.length(colossus["x"] - rp["x"], colossus["y"] - rp["y"])
 				if _colossus_ring(rd) == 0:   # camping the (growing) inner ring is punished
-					_add_strike(rp["x"], rp["y"])
+					_colossus_strike(rp)
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
@@ -4908,7 +4933,12 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 	# edge, no new boss field), reuses hashed rocks[]; only the campaign gunship
 	# has span slabs to crack (endless minibosses no-op), and gate 3 is torture-
 	# unreachable, so both goldens stay byte-identical.
-	var maxhp := _scaled_boss_hp(BOSS_HP)
+	# Thresholds come off the SPAWN-time pool (colossus precedent), not a fresh
+	# _scaled_boss_hp(BOSS_HP): that ignored the Boss Rush hp_bonus and the endless
+	# depth scaling, and re-read the LIVE player count — so a partner dying mid-fight
+	# shifted both crack thresholds under the fight (a 2P gunship at 64/96 HP could
+	# skip its first crack entirely). Test callers stage bare boss dicts, hence .get.
+	var maxhp: int = boss.get("max_hp", _scaled_boss_hp(BOSS_HP))
 	for thr in [maxhp * 2 / 3, maxhp / 3]:
 		if old_hp > thr and boss["hp"] <= thr:
 			_crack_bridge_span(boss)

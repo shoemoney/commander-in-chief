@@ -220,3 +220,56 @@ func test_c4_colossus_rotating_rings() -> void:
 	var s0: int = sim.strikes.size()
 	sim._step_colossus()
 	Runner.T.ok(sim.strikes.size() > s0, "camping the grown inner ring draws a telegraphed strike")
+
+
+func test_colossus_mortars_lead_a_moving_target() -> void:
+	# Every colossus mortar (phase-2 volley, lane sweep, inner-ring punisher) now
+	# routes through _colossus_strike, which projects the target's velocity one
+	# telegraph forward. Aimed at the tile you STAND on, a 45t warn + 28px ring
+	# never catches a 2.4px/tick walker (108px of travel), so the whole escalation
+	# ladder was a free auto-dodge for anyone who kept walking.
+	var sim := SimWorld.new(7, 1)
+	var gy := sim.camera_top - 3 * SimWorld.GATE_SPACING
+	sim.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP / 2,   # phase 2 -> volleys
+		"x": SimWorld.SCREEN_CX, "y": gy, "spray_cd": 999, "volley_cd": 1, "spawn_cd": 999,
+		"core_cd": 999, "core_open": 0, "pv": 2, "sweep_cd": 999}
+	sim.last_stand = true
+	var p: Dictionary = sim.players[0]
+	p["x"] = 120 * SimWorld.F_ONE
+	p["y"] = gy + 200 * SimWorld.F_ONE   # outside the crush/inner ring; the 0.5px/t boss can't close
+	sim.tick_count = 1
+	var strike := {}
+	var fire_x := 0
+	for i in 130:   # two volleys 120t apart: the first samples, the second leads
+		var n: int = sim.strikes.size()
+		sim._step_colossus()
+		if sim.strikes.size() > n:
+			strike = sim.strikes[sim.strikes.size() - 1]
+			fire_x = p["x"]
+		p["x"] = p["x"] + SimWorld.PLAYER_SPEED   # walking right at full speed
+		sim.tick_count += 1
+	Runner.T.ok(not strike.is_empty(), "the phase-2 volley fired")
+	var impact_x: int = fire_x + SimWorld.STRIKE_TELEGRAPH_TICKS * SimWorld.PLAYER_SPEED
+	Runner.T.ok(strike["x"] > fire_x + 90 * SimWorld.F_ONE,
+		"the strike lands AHEAD of the walker, not on their current tile")
+	Runner.T.ok(sim._dist_lte(strike["x"], strike["y"], impact_x, p["y"], SimWorld.GRENADE_RADIUS),
+		"the led strike is inside its kill radius when the walker arrives")
+	Runner.T.ok(not sim._dist_lte(fire_x, p["y"], impact_x, p["y"], SimWorld.GRENADE_RADIUS),
+		"the old current-position aim would have whiffed by more than the blast radius")
+	# A camper has zero delta, so the lead is a no-op — still struck dead-on.
+	var sim2 := SimWorld.new(7, 1)
+	sim2.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP / 2, "x": SimWorld.SCREEN_CX, "y": gy,
+		"spray_cd": 999, "volley_cd": 1, "spawn_cd": 999,
+		"core_cd": 999, "core_open": 0, "pv": 2, "sweep_cd": 999}
+	sim2.last_stand = true
+	var p2: Dictionary = sim2.players[0]
+	p2["x"] = 120 * SimWorld.F_ONE
+	p2["y"] = gy + 200 * SimWorld.F_ONE
+	sim2.tick_count = 1
+	for i in 130:
+		sim2._step_colossus()
+		sim2.tick_count += 1
+	Runner.T.ok(sim2.strikes.size() >= 2, "the camper drew both volleys")
+	var last2: Dictionary = sim2.strikes[sim2.strikes.size() - 1]
+	Runner.T.eq(last2["x"], p2["x"], "a stationary target is still struck exactly where they stand")
+	Runner.T.eq(last2["y"], p2["y"], "...on both axes")

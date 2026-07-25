@@ -20,7 +20,13 @@ const KNOWN := {
 		"roll_prev", "grenade_buf", "fire_prev",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
 		"grenade_prev", "vest", "hurt_iframes", "pierce_ticks", "spread_ticks", "triple",
-		"rend_ticks", "smoke_ticks", "claymores", "flush_cd"],
+		"rend_ticks", "smoke_ticks", "claymores", "flush_cd",
+		# lead_x/lead_y/lead_t are the colossus mortar's velocity sample of this
+		# player (_colossus_strike, the gunship stx/sty/st_at idiom). EXCLUDED:
+		# pure derived history of already-hashed x/y/tick_count, never read back
+		# into gameplay except to aim a strike whose x/y IS hashed. Only written
+		# during a colossus fight, which neither torture window reaches.
+		"lead_x", "lead_y", "lead_t"],
 	"bullet": ["x", "y", "vx", "vy", "ttl", "owner"],
 	"grenade": ["x", "y", "vx", "vy", "z", "zv", "owner", "shell", "hold"],
 	# flank_x (c3 2v) is the sack flanker's nest-side crossing target — spawn-
@@ -39,7 +45,9 @@ const KNOWN := {
 	# feed — so it needs no direct feed to be desync-detectable.
 	"gate": ["y", "open", "b1", "b2", "boss", "final", "fork_x", "flanked",
 		"breach_cd", "breach_first_left"],
-	"boss": ["alive", "hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at"],
+	# max_hp: spawn-time constant (same rationale as the colossus's, below) — it
+	# only sizes _damage_boss's arena-crack thirds, so it is NOT in checksum().
+	"boss": ["alive", "hp", "max_hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at"],
 	"strike": ["x", "y", "ticks", "obs"],
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
