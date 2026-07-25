@@ -724,11 +724,19 @@ func is_solo() -> bool:
 
 
 func revive_cost(p: Dictionary) -> int:
-	# Soft-cap the multiplier at 3 deaths: a linear ramp against flat kill
-	# income becomes an unrecoverable death spiral otherwise.
-	var cost: int = REVIVE_BASE_COST * mini(p["deaths"], 3)
+	var cost: int
 	if mode == "endless":
-		cost += (wave / 5) * 20   # deep-endless revives cost more (kill income scales too)
+		# Endless has no ending, so the ONLY brake on a run is what a body costs.
+		# The old rule (deaths capped at 3, +20/5 waves) topped out near 150 while
+		# wave income climbed ~35/wave — the chest outran it ~9:1 and the wipe
+		# became unreachable. Here deaths COMPOUND uncapped and the price is
+		# wave-MULTIPLIED, so a fat late chest is one bad patch from zero: keep
+		# clean and the surcharge never touches you, chain deaths and the run ends.
+		cost = REVIVE_BASE_COST * maxi(p["deaths"], 1) * (1 + wave / 5)
+	else:
+		# Campaign keeps the soft cap at 3 deaths: with checkpoints and a finish
+		# line, a linear ramp against flat kill income is just a death spiral.
+		cost = REVIVE_BASE_COST * mini(p["deaths"], 3)
 	if is_solo():
 		cost = cost / 2
 	return maxi(cost, REVIVE_BASE_COST / (2 if is_solo() else 1))
@@ -2104,9 +2112,13 @@ func _step_bullets() -> void:
 						# Rend beat the block — a distinct shear event so the payoff
 						# reads AT the shield (a silent skip looked like a normal kill).
 						events.append({"t": "rend_pierce", "x": bx, "y": by})
-					# MG Nest is armored: 3 bullets to crack (a grenade still one-shots
-					# it via _explode). Only a lethal round routes through _kill_enemy.
-					if e["kind"] == "mg_nest" or e["kind"] == "technical" or e["kind"] == "broadcast":
+					# Armor: a body with hp > 1 eats the round instead of dying (a
+					# grenade still one-shots it via _explode). Only a lethal round
+					# routes through _kill_enemy. Was a kind whitelist (mg_nest/
+					# technical/broadcast, hp 3/TECHNICAL_HP/BROADCAST_HP); reading
+					# hp itself is behaviour-identical for those and lets deep-endless
+					# VETERAN ARMOR (_wave_armor) harden the bulk roster too.
+					if e.get("hp", 1) > 1:
 						e["hp"] = e["hp"] - 1
 						if e["hp"] > 0:
 							events.append({"t": "armor_block", "x": bx, "y": by})
@@ -2307,7 +2319,7 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
-	if wave_mod == 4:
+	if has_mod(4):
 		coin *= 2   # PAYDAY wave: every bounty doubles
 	# kind rides the (checksum-excluded) kill event so the view can spawn a
 	# per-type death throe + corpse — golden-safe.
@@ -2382,7 +2394,7 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	## rushes 40% faster" means the WHOLE swarm. wave_mod is endless-only and the
 	## torture wipes long before wave 6, so this stays golden-inert.
 	var spd := base_spd
-	if wave_mod == 6:
+	if has_mod(6):
 		spd = (spd * 7) / 5
 	# Broadcast Tower rally aura: any live mast within 140 px drives ground
 	# troops +25% — deliberately under FRENZY's +40% so aura+FRENZY stacking
@@ -2814,7 +2826,7 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
 	if dlen > F_ONE:
 		var spd := ENEMY_SPEED
-		if wave_mod == 6:
+		if has_mod(6):
 			spd = (spd * 7) / 5   # FRENZY wave: the swarm rushes 40% faster
 		if _in_water(e["x"], e["y"]):
 			spd = spd / 2
@@ -3056,6 +3068,12 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 		# silhouette cloned N times. Derived from spawn position (NO rng draw) and
 		# excluded from checksum() -> golden-safe (see KNOWN["enemy"] in coverage).
 		e["skin"] = (x / F_ONE + y / F_ONE) & 3
+	# Deep-endless veteran armor (wave 13+): the bulk roster takes an extra
+	# bullet. Only SET when it applies, so the (already hashed) hp feed stays
+	# absent — and both goldens byte-identical — everywhere else.
+	var arm := _wave_armor()
+	if arm > 0:
+		e["hp"] = e.get("hp", 1) + arm
 	enemies.append(e)
 
 
@@ -3141,6 +3159,12 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 		e["marked"] = true
 	if kind == "technical":
 		e["hp"] = TECHNICAL_HP   # armored like the nest — hp is already hashed
+	# Deep-endless veteran armor (wave 13+): the bulk roster takes an extra
+	# bullet. Only SET when it applies, so the (already hashed) hp feed stays
+	# absent — and both goldens byte-identical — everywhere else.
+	var arm := _wave_armor()
+	if arm > 0:
+		e["hp"] = e.get("hp", 1) + arm
 	enemies.append(e)
 
 
@@ -4215,6 +4239,41 @@ func _make_bunker(x: int, y: int) -> Dictionary:
 
 # --- Endless War (roguelite survival mode) ---
 
+func second_mod() -> int:
+	## The wave-15+ STACKED mutator. Every difficulty knob in endless bottoms out
+	## early (spawn cadence at wave 12, elite density at 10, roster complete at 7),
+	## after which the only delta was +2 bodies against the MAX_ENEMIES wall. From
+	## wave 15 a SECOND mutator rides along, so the combination space keeps opening
+	## (BLITZ+MARKSMEN reads nothing like FRENZY+BOMBARDMENT).
+	## Pure function of wave + world seed: no new hashed field, no rng draw, so the
+	## mutator/miniboss/drop streams and both goldens are untouched by construction.
+	## Miniboss waves stay single-mutator (the shipped ramp-smoothing rule).
+	if mode != "endless" or wave < 15 or wave % 5 == 0:
+		return 0
+	var m: int = 1 + _mix(wave * 7 + 3, _world_seed) % 8
+	if m == wave_mod:
+		m = 1 + m % 8   # never double the primary — that would read as no mutator
+	return m
+
+
+func has_mod(m: int) -> bool:
+	## True when mutator `m` is live from EITHER slot. Every mutator effect reads
+	## through here so wave-15+ stacking needs no per-effect plumbing.
+	return wave_mod == m or second_mod() == m
+
+
+func _wave_armor() -> int:
+	## Deep-endless VETERAN ARMOR — the curve's only unbounded term. The spawn
+	## cadence floors at 8 ticks, which is exactly FIRE_COOLDOWN_TICKS, so from
+	## wave 12 a perfect player broke even with the treadmill forever. One extra
+	## bullet per body every 6 waves past 12 pushes time-to-kill past the cadence
+	## permanently. Grenades/mines/airstrikes still one-shot, so armor redirects
+	## the overflowing War Chest into spending instead of walling the player out.
+	if mode != "endless" or wave < 13:
+		return 0
+	return 1 + (wave - 13) / 6
+
+
 func _step_waves() -> void:
 	# Supply-drop TTL: the contested beat expires instead of pinning rushers
 	# forever. Torture-inert (no drop exists before wave 4).
@@ -4251,7 +4310,7 @@ func _step_waves() -> void:
 		wave_spawn_cd -= 1
 		if wave_spawn_cd <= 0 and enemies.size() < MAX_ENEMIES:
 			var interval := maxi(8, WAVE_SPAWN_INTERVAL_TICKS - wave)
-			if wave_mod == 1:   # Blitz: spawns pour in twice as fast
+			if has_mod(1):   # Blitz: spawns pour in twice as fast
 				interval = maxi(4, interval / 2)
 			wave_spawn_cd = interval
 			wave_pending -= 1
@@ -4265,16 +4324,19 @@ func _step_waves() -> void:
 				xpx = clampi([160, 320, 480][pressure_side] + (xpx - 320) * 120 / 296, 24, 616)
 			var x := xpx * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
-			var is_elite: bool = wave_mod == 2 or (wave_pending % elite_every) == 0
+			var is_elite: bool = has_mod(2) or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
 			# threat vector varies (Blitz/wave1-2 stay pure rushers/elites).
+			# Deliberately reads the PRIMARY slot only: a wave-15+ stacked Blitz
+			# must not veto its partner's theme, or the stack would read as a
+			# downgrade. Blitz-as-primary keeps its shipped "pure bodies" identity.
 			if wave >= 3 and is_elite and wave_mod != 1:
 				var roll := rng.range_i(0, 9)
 				# c3 2v per-wave COMPOSITION THEMES: remap the SAME draw (no extra rng)
 				# onto a themed subset so a marksmen/bombardment wave reads as a unit.
-				if wave_mod == 7:   # MARKSMEN: balanced sniper(1)/ghillie(4)/drone(5)
+				if has_mod(7):   # MARKSMEN: balanced sniper(1)/ghillie(4)/drone(5)
 					roll = [1, 4, 5, 1, 4, 5, 1, 4, 5, 4][roll]   # ranged paint, even weights
-				elif wave_mod == 8:   # BOMBARDMENT: balanced grenadier(0)/sapper(3)
+				elif has_mod(8):   # BOMBARDMENT: balanced grenadier(0)/sapper(3)
 					roll = [0, 3, 0, 3, 0, 3, 0, 3, 0, 3][roll]   # area denial, 50/50
 				if roll == 0:
 					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
@@ -4302,12 +4364,12 @@ func _step_waves() -> void:
 					_spawn_broadcast(x, camera_top - 24 * F_ONE)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
-			elif wave_mod == 7 and wave_pending % 3 == 0:
+			elif has_mod(7) and wave_pending % 3 == 0:
 				# c3-17 r2: ~1/3 of the NON-elite bulk also reads thematic on a themed
 				# wave (deterministic from wave_pending, NO rng draw) so the WHOLE wave
 				# reads as the theme, not only its elites. Endless wave>=3 -> golden-inert.
 				_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
-			elif wave_mod == 8 and wave_pending % 3 == 0:
+			elif has_mod(8) and wave_pending % 3 == 0:
 				_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
@@ -4495,7 +4557,7 @@ func _start_wave() -> void:
 	# stay legal for flavor. Roll-then-clamp preserves the rng stream.
 	if wave % 5 == 0 and wave_mod in [1, 2, 3, 6, 7, 8]:
 		wave_mod = 0
-	if wave_mod == 3:
+	if has_mod(3):
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
 			"x": rng.range_i(60, 580) * F_ONE,
@@ -4528,7 +4590,8 @@ func _start_wave() -> void:
 		# strictly-dominant "never collect it" aggro pin (re-review, all three).
 		pickups.append({"x": drx, "y": dry, "kind": 1 + rng.range_i(0, 1), "cost": 0, "drop": 600})
 		events.append({"t": "supply_drop", "x": drx, "y": dry})
-	events.append({"t": "wave_start", "x": SCREEN_CX, "y": camera_top + 40 * F_ONE, "mod": wave_mod})
+	events.append({"t": "wave_start", "x": SCREEN_CX, "y": camera_top + 40 * F_ONE,
+		"mod": wave_mod, "mod2": second_mod()})
 
 
 # --- Foundry Colossus (the finale) ---
@@ -4921,7 +4984,7 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		var bounty: int = BOSS_BOUNTY
 		if mode == "endless" and wave >= 5:
 			bounty += (wave / 5 - 1) * (BOSS_BOUNTY / 2)
-		if wave_mod == 4:
+		if has_mod(4):
 			bounty *= 2   # PAYDAY wave: every bounty doubles (same rule as _kill_enemy)
 		war_chest += bounty
 		score += bounty * 10

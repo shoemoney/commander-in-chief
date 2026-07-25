@@ -2489,7 +2489,10 @@ func _consume_events() -> void:
 			"vest_break":
 				_ev_vest_break(ev)
 			"wave_start":
-				var mod_name: String = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS", "  — FRENZY", "  — MARKSMEN", "  — BOMBARDMENT"][ev.get("mod", 0)]
+				var mod_names: Array[String] = ["", "  — BLITZ", "  — ELITE GUARD", "  — SPOTTER", "  — PAYDAY", "  — NIGHT OPS", "  — FRENZY", "  — MARKSMEN", "  — BOMBARDMENT"]
+				# Wave 15+ stacks a second mutator; the banner names BOTH or the
+				# extra pressure lands with no tell.
+				var mod_name: String = mod_names[ev.get("mod", 0)] + mod_names[ev.get("mod2", 0)]
 				show_banner("WAVE %d%s" % [sim.wave, mod_name])
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 				# Horde dust-bank: a wide low roll of dust at the top edge before the
@@ -5677,7 +5680,7 @@ func _draw_field_dim() -> void:
 	# NIGHT OPS mutator: dim the field to a blue dusk so the tracers, muzzle
 	# flashes and threat markers become your eyes. No hit-radius change — the
 	# challenge is visibility, not fairness.
-	if sim.mode == "endless" and sim.wave_mod == 5:
+	if sim.mode == "endless" and sim.has_mod(5):
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.02, 0.03, 0.09, 0.34))
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.0, 0.02, 0.12, 0.55))

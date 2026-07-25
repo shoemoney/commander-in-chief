@@ -73,7 +73,9 @@ const CHIP_PRIO := {
 	"hostiles_immune": 89,
 	"wave": 85, "sector": 82,
 	# lethal timers — active field effects / threat modifiers on a clock
-	"flashbang": 80, "mutator": 70,
+	# mutator2 = the wave-15+ STACKED mutator; one band under the primary so a
+	# tight row sheds the second chip first, never the wave's headline modifier.
+	"flashbang": 80, "mutator": 70, "mutator2": 69,
 	# vanity — records / streaks the player enjoys but never has to ACT on
 	"flawless": 60, "deathless": 55, "streak": 50,
 	"record": 35, "best": 35, "wave_record": 30,
@@ -1305,24 +1307,32 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				var dpul: float = 1.0 if main._motion < 0.5 else Art.pulse(0.25)
 				var dcol := Art.safe(Color(0.55, 0.9, 0.5)).lerp(Color(1.0, 0.9, 0.5), 0.4 * dpul)
 				x = _text("DEATHLESS", x, y + ICON - 3.0, dcol) + 8.0
-			# Persistent mutator chip — the wave's identity, not just a one-shot banner.
-			if sim.wave_mod > 0:
-				var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY", "NIGHT OPS", "FRENZY"]
-				# Icon badge per mutator (every other threat callout got one in p3):
-				# lightning=fast spawns, skull=elites, target=spotted, coin=double
-				# bounties, radiation=hazard field (vision dims), fire=frenzy speed.
-				var micons: Array[String] = ["", "hud_lightning", "hud_skull", "hud_target",
-					"icon_coin", "hud_radiation", "hud_fire"]
-				var mchip: String = mnames[sim.wave_mod] if sim.wave_mod < mnames.size() else ""
-				if mchip != "" and _fits2("mutator", ICON + 3.0 + _tw(mchip) + 8.0):
-					var mcol := Color(1.0, 0.6, 0.35)
-					# icon_coin is a colored bake — keep it gold; the white map
-					# glyphs take the chip tint.
-					var micon: String = micons[sim.wave_mod]
-					if not _measure:
-						draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
-							Color.WHITE if micon == "icon_coin" else mcol)
-					x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
+			# Persistent mutator chip(s) — the wave's identity, not just a one-shot
+			# banner. Wave 15+ stacks a SECOND mutator, so both slots get a chip:
+			# a modifier the player can't read is a modifier that reads as cheating.
+			var mnames: Array[String] = ["", "BLITZ", "ELITE GUARD", "SPOTTER", "PAYDAY",
+				"NIGHT OPS", "FRENZY", "MARKSMEN", "BOMBARDMENT"]
+			# Icon badge per mutator (every other threat callout got one in p3):
+			# lightning=fast spawns, skull=elites, target=spotted/painted, coin=double
+			# bounties, radiation=hazard field (vision dims), fire=frenzy/shelling.
+			var micons: Array[String] = ["", "hud_lightning", "hud_skull", "hud_target",
+				"icon_coin", "hud_radiation", "hud_fire", "hud_target", "hud_fire"]
+			var mslots: Array[int] = [sim.wave_mod, sim.second_mod()]
+			for si in mslots.size():
+				var mid: int = mslots[si]
+				if mid <= 0 or mid >= mnames.size():
+					continue
+				var mchip: String = mnames[mid]
+				if not _fits2("mutator" if si == 0 else "mutator2", ICON + 3.0 + _tw(mchip) + 8.0):
+					continue
+				var mcol := Color(1.0, 0.6, 0.35)
+				# icon_coin is a colored bake — keep it gold; the white map
+				# glyphs take the chip tint.
+				var micon: String = micons[mid]
+				if not _measure:
+					draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
+						Color.WHITE if micon == "icon_coin" else mcol)
+				x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
 	else:
 		# SECTOR n/N: campaign progress toward the Foundry finale (N =
 		# SimWorld.FINAL_GATE_INDEX -- 6 zones as of authored-campaign-and-
