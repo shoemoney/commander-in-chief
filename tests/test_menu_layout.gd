@@ -3031,6 +3031,79 @@ func test_focused_row_text_contrast() -> void:
 		"the focused row plate is still brighter than an unfocused one")
 
 
+# a11y: the LAST hole in the contrast fixture — the IN-WORLD callouts. Every test above
+# measures a label against HUD/menu chrome the game controls; these eight are 8px type
+# drawn straight onto desert ground that scrolls under them. Against the brightest ground
+# row this fixture derives, bare: LOW FUEL 3.24:1, SILENCE THE SPOTTER 2.01:1, "+N" 2.33:1,
+# the violet REND capsule 1.82:1 — all under AA's 4.5:1 (the a11y audit eyeballed 1.4-1.6:1
+# off a lighter sand sample; same verdict, and this one is computed from the shipped ramp).
+# They now route through main._world_label, which lays the SAME plate the boss/colossus
+# phase labels wear (_label_plate_rect + LABEL_PLATE_FILL) under the glyphs and holds the
+# ink at CALLOUT_INK_FLOOR, landing the family at 4.74:1 (REND) .. 13.84:1.
+#
+# Nothing here is a hand-copied literal: the ground comes from main._ground_stops (the
+# shipped biome ramp) * GROUND_SHADE, the plate from LABEL_PLATE_FILL, the inks from the
+# CALLOUT_* constants and _CAPSULE_COL. Change any of them in main.gd and this test moves
+# with it. _CAPSULE_COL is included because the violet REND capsule is the DIMMEST ink in
+# the family and is therefore what actually pins CALLOUT_INK_FLOOR — the four named inks
+# have headroom. (The two remaining _world_label inks not listed, the cyan reinforcement
+# clock and the safe-green rescue label, are brighter than every ink checked here.)
+func test_world_callout_contrast() -> void:
+	# Brightest ground the campaign ever paints: the ramp's first (pale sand) stop at the
+	# base shade, i.e. the sand card at full white. Every later biome stop is darker, so
+	# this is the worst case a world label ever lands on.
+	var stop: Color = MainScript._ground_stops("campaign")[0][0]
+	var ground := Color(stop.r * MainScript.GROUND_SHADE, stop.g * MainScript.GROUND_SHADE,
+		stop.b * MainScript.GROUND_SHADE)
+	var fill: Color = MainScript.LABEL_PLATE_FILL
+	var plate := _blend(_opaque(fill), ground, fill.a)
+	var floor_a: float = MainScript.CALLOUT_INK_FLOOR
+
+	# 1. The plate is doing the work: bare on sand, these labels genuinely fail AA. If a
+	#    future change drops the backing, this half goes red instead of quietly regressing.
+	for ink in [MainScript.CALLOUT_FUEL, MainScript.CALLOUT_SPOTTER, MainScript.CALLOUT_OVERFLOW]:
+		Runner.T.ok(_wcag_contrast(_opaque(ink), ground) < 4.5,
+			"an unbacked world callout really does fail AA on sand (%.2f) — the plate is load-bearing"
+				% _wcag_contrast(_opaque(ink), ground))
+
+	# 2. Every callout ink, at the WORST alpha _world_label can draw it (the floor),
+	#    composited over its own plate, clears AA-normal.
+	var inks := [
+		[MainScript.CALLOUT_FUEL, "LOW FUEL"],
+		[MainScript.CALLOUT_ALERT, "ESCAPING! / HOLD FIRE"],
+		[MainScript.CALLOUT_SPOTTER, "SILENCE THE SPOTTER"],
+		[MainScript.CALLOUT_OVERFLOW, "threat-overflow +N"],
+	]
+	for ci in MainScript._CAPSULE_COL.size():
+		inks.append([MainScript._CAPSULE_COL[ci], "capsule label %d" % ci])
+	for pair in inks:
+		var ratio := _wcag_contrast(_blend(_opaque(pair[0]), plate, floor_a), plate)
+		Runner.T.ok(ratio >= 4.5,
+			"world callout '%s' contrast %.2f on its plate clears AA-normal (>=4.5)" % [pair[1], ratio])
+
+	# 3. The floor is what buys that — a callout drawn at the OLD pulse trough (0.5) does
+	#    not clear it, so nobody can "simplify" _callout_ink_alpha away without going red.
+	Runner.T.ok(_wcag_contrast(_blend(_opaque(MainScript.CALLOUT_SPOTTER), plate, 0.5), plate) < 4.5,
+		"the pre-fix 0.5 pulse trough fails AA even on the plate — hence CALLOUT_INK_FLOOR")
+	Runner.T.ok(is_equal_approx(MainScript._callout_ink_alpha(0.5), floor_a),
+		"_callout_ink_alpha lifts a sub-floor label to the floor")
+	Runner.T.ok(is_equal_approx(MainScript._callout_ink_alpha(1.0), 1.0),
+		"...and never dims one that was already opaque")
+	Runner.T.ok(is_equal_approx(MainScript._callout_ink_alpha(0.0), 0.0),
+		"...and a fully faded label still disappears instead of popping to the floor")
+
+	# 4. The plate must cover the glyphs at the ACCESSIBILITY-scaled size too: the height
+	#    was hard-coded to the 10px boss label, which under-backs a 200% TEXT SIZE callout.
+	for sz in [8, 10, 16]:
+		var r: Rect2 = MainScript._label_plate_rect(100.0, 200.0, 40.0, sz)
+		Runner.T.ok(r.position.y <= 200.0 - float(sz),
+			"the %dpx callout plate covers a full %dpx ascent above the baseline" % [sz, sz])
+		Runner.T.ok(r.end.y > 200.0, "the %dpx callout plate still straddles the baseline" % sz)
+	var ship: Rect2 = MainScript._label_plate_rect(100.0, 200.0, 40.0)
+	Runner.T.eq(ship, MainScript._label_plate_rect(100.0, 200.0, 40.0, 10),
+		"the default plate rect is byte-identical to the 10px boss-label plate it came from")
+
+
 # src over dst at alpha a -> opaque composite color (per-channel).
 func _blend(src: Color, dst: Color, a: float) -> Color:
 	return Color(src.r * a + dst.r * (1.0 - a), src.g * a + dst.g * (1.0 - a), src.b * a + dst.b * (1.0 - a))
