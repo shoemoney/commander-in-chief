@@ -3341,3 +3341,62 @@ func test_labelled_economy_head_draws_in_bounds() -> void:
 	Runner.T.ok(x <= edge + 0.01, "the labelled head still ends within the narrowest usable edge")
 	h.main.free()
 	h.free()
+
+
+# --- c-onboard: the two economy numerals. The code itself recorded that playtesters conflated
+# spendable coin with vanity score and that the applied fix was a HUE change; hue is a single
+# channel a colorblind player cannot read at all, and it did not settle it. Each counter now
+# carries its own compact unit IN ITS TEXT, so the two read apart in greyscale. ---
+
+func test_chest_and_score_carry_distinct_unit_labels() -> void:
+	var digits := Art.group_digits(1234)
+	var chest := HudIcons.chest_label(1234)
+	var score := HudIcons.score_label(1234)
+	Runner.T.ok(chest != score, "the two economy readouts no longer render identical text")
+	Runner.T.ok(chest != digits, "the war chest carries a unit, not a bare numeral")
+	Runner.T.ok(score != digits, "the score carries a unit, not a bare numeral")
+	# A label, not a reformat — the value the player reads is untouched.
+	Runner.T.ok(chest.contains(digits), "the chest label still shows the full grouped value")
+	Runner.T.ok(score.contains(digits), "the score label still shows the full grouped value")
+	# The units are distinct STRINGS, so the difference survives a greyscale / colorblind view.
+	var chest_unit := chest.replace(digits, "").strip_edges()
+	var score_unit := score.replace(digits, "").strip_edges()
+	Runner.T.ok(chest_unit != "", "the chest unit is non-empty")
+	Runner.T.ok(score_unit != "", "the score unit is non-empty")
+	Runner.T.ok(chest_unit != score_unit,
+		"chest '%s' and score '%s' units differ — the two read as different quantities" % [chest_unit, score_unit])
+	# Zero and the compaction extremes stay labelled too (no unlabelled edge case).
+	for v in [0, 5000000000000, 9223372036854775807]:
+		Runner.T.ok(HudIcons.chest_label(v).begins_with(chest_unit), "chest stays unit-marked at %d" % v)
+		Runner.T.ok(HudIcons.score_label(v).ends_with(score_unit), "score stays unit-marked at %d" % v)
+
+
+# --- c-onboard: pure filter behind the chip — a USED verb retires, an UNUSED one persists.
+# (test_reduced_verb_chip_emits_only_surviving_segments proves _verb_legend actually honors it.) ---
+
+func test_used_verb_retires_unused_verb_persists() -> void:
+	Runner.T.eq(Hud.verb_active_segs({}), Hud.VERB_SEGS, "an untouched run shows every segment, in order")
+	var after_roll := Hud.verb_active_segs({"roll": true})
+	Runner.T.eq(after_roll.size(), Hud.VERB_SEGS.size() - 1, "using ROLL retires exactly one segment")
+	var acts: Array = []
+	for s in after_roll:
+		Runner.T.ok(s[0] != "roll", "the USED roll segment is gone (saw %s)" % [s])
+		acts.append(s[0])
+	Runner.T.ok("grenade" in acts, "the UNUSED grenade segment persists past the old 6s window")
+	Runner.T.ok("wheel" in acts, "the UNUSED supply-wheel segment persists past the old 6s window")
+	Runner.T.eq(Hud.verb_active_segs({"roll": true, "grenade": true, "wheel": true}).size(), 0,
+		"once every verb has fired the chip retires completely")
+	Runner.T.eq(Hud.verb_active_segs({"fire": true}).size(), Hud.VERB_SEGS.size(),
+		"an act that isn't on the chip retires nothing")
+	# The drawn geometry follows the SURVIVORS: narrower, and still centered on the 640px canvas.
+	var full_w: float = Hud.verb_legend_extent()[1]
+	var part_w: float = Hud.verb_legend_extent(after_roll)[1]
+	Runner.T.ok(part_w + 0.01 <= full_w, "a retired segment shrinks the drawn chip (%d vs %d)" % [int(part_w), int(full_w)])
+	Runner.T.ok(absf(float(Hud.verb_legend_extent(after_roll)[0]) + part_w / 2.0 - 320.0) <= 0.01,
+		"the shrunken chip stays centered on the 640px canvas")
+	Runner.T.eq(Hud.verb_legend_primitives(200.0, after_roll).size(), after_roll.size(),
+		"one drawn primitive per SURVIVING segment")
+	# The never-pressed backstop outlasts a landing-zone read but is still a real upper bound.
+	Runner.T.ok(Hud.VERB_WINDOW >= 1200.0,
+		"the unused-verb window outlasts a landing-zone read (%d ticks)" % int(Hud.VERB_WINDOW))
+	Runner.T.ok(Hud.VERB_WINDOW <= 3600.0, "but is still bounded — the chip is never permanent")
