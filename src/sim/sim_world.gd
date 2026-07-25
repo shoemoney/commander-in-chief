@@ -2579,9 +2579,13 @@ func _step_enemies() -> void:
 			_broadcasts.append(be)
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
-		# (The mast used to be exempt from the off-screen sweep — the one entity
-		# that could never be swept. It spawns inside the reachable band now, so
-		# it plays by the same rule as everything else.)
+		# Rally masts have NO sweep exemption. They used to be the one entity that could
+		# never be swept; a sibling pass then made them spawn at camera_top+40 (inside the
+		# reachable band) instead of above the player's own ceiling. Under endless's FIXED
+		# camera an in-band rooted mast can never exceed camera_top+420, so sweeping
+		# unconditionally cannot remove a live one — and campaign's ratcheting camera needs
+		# the sweep or every mast walked past lives forever in enemies[] and in the per-tick
+		# _broadcasts aura scan. One rule beats a mode-conditional special case.
 		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
 			enemies.remove_at(i)
 			continue

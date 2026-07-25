@@ -74,7 +74,13 @@ const LOG_DIR := "user://logs"
 ## — the headless DisplayServer keyboard-layout call in menu.gd, the null-default ConfigFile reads
 ## in test_menu_layout.gd, and the un-seamed HUD draws that the capture stubs couldn't intercept.
 ## "N resources still in use at exit" is emitted AFTER quit(), so it never reaches this gate.)
-const ERROR_ALLOW: Array[String] = []
+const ERROR_ALLOW: Array[String] = [
+	# The save-robustness tests WRITE a deliberately corrupt ikari_best.cfg to prove the .bak
+	# recovery path works — ConfigFile logs a parse error on the way past, by design. The error
+	# IS the scenario, so gating on it would forbid testing corruption at all. Narrow on purpose:
+	# it matches only the user:// config parse, not parse errors anywhere else.
+	"ConfigFile parse error at user://",
+]
 
 
 class T:

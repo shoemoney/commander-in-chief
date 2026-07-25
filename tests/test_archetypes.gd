@@ -274,8 +274,14 @@ func test_rend_unlocks_exactly_where_shieldmen_can_exist() -> void:
 func test_campaign_sweeps_rally_masts_the_ratchet_left_behind() -> void:
 	# CRASHED CONVOY fields broadcast masts, and the campaign camera ratchets: a
 	# mast exempt from the off-screen sweep would live in enemies[] (and in the
-	# per-tick _broadcasts aura scan) for the rest of the run. Endless keeps the
-	# exemption — nothing ever leaves the band there and the mast is an objective.
+	# per-tick _broadcasts aura scan) for the rest of the run.
+	# The exemption is GONE IN EVERY MODE, not just campaign. A sibling pass moved
+	# endless masts to camera_top+40 (they used to spawn above the player's own
+	# clamp ceiling, unreachable), and under endless's fixed camera an in-band
+	# rooted mast can never exceed camera_top+420 — so the unconditional sweep
+	# cannot remove a live one, and one rule beats a mode-conditional special case.
+	# This test therefore drives an ARTIFICIAL out-of-band endless mast, which real
+	# play cannot produce, purely to pin that the rule has no exception.
 	var camp := SimWorld.new(5, 1)
 	camp.enemies.clear()
 	camp._spawn_broadcast(0, camp.camera_top + 900 * Fixed.ONE)   # well below the live band
@@ -285,7 +291,7 @@ func test_campaign_sweeps_rally_masts_the_ratchet_left_behind() -> void:
 	endless.enemies.clear()
 	endless._spawn_broadcast(0, endless.camera_top + 900 * Fixed.ONE)
 	endless._step_enemies()
-	Runner.T.eq(endless.enemies.size(), 1, "endless masts keep their sweep exemption")
+	Runner.T.eq(endless.enemies.size(), 0, "the sweep has no mode exception — an out-of-band mast goes too")
 
 
 # --- Duplicate-pair splits ----------------------------------------------------

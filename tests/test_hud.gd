@@ -84,6 +84,10 @@ func _act_glyph_resolves(act: String) -> bool:
 # how a missing field hides: the read aborts the call and the row measures as absent, green.
 class _MainStub extends Node2D:
 	var sim: SimWorld = null
+	# hud.gd's caption/verb suppression reads main._debrief (the result card owns the bottom
+	# band while it is up). Every stub needs it or the real _draw takes a different branch
+	# than production — which is exactly the drift the stub-parity ratchet exists to catch.
+	var _debrief := false
 	var _menu = null
 	var _motion := 1.0
 	var best_score := 0
@@ -796,7 +800,9 @@ func test_colossus_hazard_ring_is_shape_encoded_not_hue_encoded() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
 	var i := src.find("ONE migrating ring")
 	Runner.T.ok(i != -1, "the arena still documents its single-ring contract")
-	var blk := src.substr(i, 900)
+	# 1600, not 900: the block's own rationale comment is ~700 chars, so a short window
+	# measures the comment and never reaches the draw it is supposed to be pinning.
+	var blk := src.substr(i, 1600)
 	Runner.T.ok(blk.contains("for di in"), "the hazard ring is DASHED (drawn as segments, not one stroke)")
 	Runner.T.ok(not blk.contains("0.35, 0.8, 0.45"), "no green 'safe belt' arc came back")
 	var alpha_ok := blk.contains("0.85") and blk.contains("0.65")
@@ -2077,15 +2083,10 @@ class _ChipCaptureHud extends HudIcons:
 	# c2-16: the strip's centered NAME line lands in its OWN list, never `boxes` — the strip/frame
 	# band scans treat every box in `boxes` as a left-advancing chip, and the names are centered
 	# UNDER those chips (deliberately overlapping them in x).
-	var shop_names: Array = []
 	# Magazine segments live INSIDE the bar's own advance — recorded separately for the same reason.
 	var mag_segs: Array = []
 	func _emit_mag_seg(r: Rect2, c: Color) -> void:
 		mag_segs.append({"box": r, "col": c})
-	func _emit_shop_name(txt: String, cx: float, y: float, _c: Color) -> void:
-		var s := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.SHOP_NAME_SIZE)
-		shop_names.append({"id": txt, "alpha": _c.a,
-			"box": Rect2(cx - s.x / 2.0, y - Art.font().get_ascent(HudIcons.SHOP_NAME_SIZE), s.x, s.y)})
 	func _emit_marker(r: Rect2, _c: Color) -> void:
 		boxes.append({"k": "marker", "id": "arm", "box": r})
 	# The PRESSURE telegraph's mini-bar draws directly (draw_rect/draw_texture_rect); record
@@ -2102,6 +2103,15 @@ class _ChipCaptureHud extends HudIcons:
 
 # A HudIcons whose draw SEAMS record instead of paint — so calling the REAL
 # _verb_legend() outside a live draw context captures the exact commands it issues.
+class _PipCaptureHud extends _ChipCaptureHud:
+	var band := Vector2(HudIcons.PIP_MIN_X, HudIcons.RIGHT)
+	func _pip_bounds() -> Vector2:
+		return band   # inject the band a stretch/letterbox viewport-to-HUD conversion would yield
+	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
+		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
+		boxes.append({"k": "bg", "id": "pip_plate:" + txt, "box": r})
+		return HudIcons._pip_x(b.y, _tw(txt), b.x)
+
 class _CaptureHud extends HudIcons:
 	var ops: Array = []
 	func _emit_rect(r: Rect2, _c: Color) -> void:

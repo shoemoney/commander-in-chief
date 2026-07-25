@@ -4117,7 +4117,10 @@ func test_text_scale_persistence_migration_and_reset() -> void:
 	Runner.T.eq(Art.text_scale, 1.5, "(d) Art.text_scale tracks the loaded percent")
 	# (d) the multiplier actually reaches the chosen sizes — the 7px shop name and the 8px world
 	# callouts are the specific labels this setting exists for.
-	Runner.T.eq(Art.fs(HudIcons.SHOP_NAME_SIZE), 11, "the 7px shop-item NAME scales with TEXT SIZE (7 -> 11 at 150%)")
+	# (the 7px shop-item NAME assertion retired with SHOP_NAME_SIZE itself: the name is no
+	# longer a 7px centered label — it draws inline at the row size, which was the readability
+	# complaint this setting existed to compensate for. The 7px seed tag below still pins the
+	# smallest-type case.)
 	Runner.T.eq(Art.fs(Menu.SEED_TAG_SIZE), 11, "the 7px seed-validity tag scales with TEXT SIZE")
 	Runner.T.eq(Art.fs(8), 12, "the 8px in-world callouts scale with TEXT SIZE")
 
