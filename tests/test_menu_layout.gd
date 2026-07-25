@@ -60,6 +60,13 @@ class _StubMain extends Node2D:
 	var _wheel: Array = []            # open() iterates this; empty stub keeps it a no-op
 	var hall: Array = []              # c1-13: score-ordered Hall board the menu pages over
 	var hall_latest: Dictionary = {} # c1-13: the run just banked — the Hall must always surface it
+	# c4-18: the menu's watch-replay row reads both of these off main (_replay_is_new /
+	# _replay_is_best). Without them every layout test that walks a TITLE row logged
+	# "Invalid access to property or key 'last_run_score'" — the assertions still passed
+	# (the row just measured as absent), so the suite stayed green while CI, which fails
+	# on any SCRIPT ERROR, would not have.
+	var last_run_score := -1
+	var replay_watched_score := -999
 	var _clip := ""   # c1-14: test-settable clipboard text the menu reads via _clipboard_text
 	var _clip_reads := 0   # c1-14: counts clipboard samples so the throttle can be asserted
 	var _started: Array = []   # c1-14: records start_seeded(seed) so activation can be asserted
