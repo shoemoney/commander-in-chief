@@ -8,6 +8,17 @@ extends SceneTree
 
 const F := Fixed.ONE
 
+# --- Capture liveness gate ---------------------------------------------------
+# This harness shipped SEVEN stacked bugs that each printed "SAVED" for a
+# 1768-byte flat-colour PNG, and nothing in the repo could tell a real capture
+# from a blank one. A blank capture must be a HARD failure, never a silent one.
+# Thresholds mirror the external verifier (skills/triple-a-game verify_shots.py):
+# a real game frame has hundreds of colours and a wide luma spread; a flat or
+# near-black fill has 1-3 colours and a stddev at ~0.
+const MIN_COLORS := 12     # distinct RGB values among the sampled pixels
+const MIN_STDDEV := 6.0    # luma (Rec.709) standard deviation, 0-255 scale
+const SAMPLE_STRIDE := 4   # subsample — plenty for a blank/not-blank decision
+
 var main: Node2D
 var shots: Array[Dictionary] = []
 var current := -1
@@ -17,6 +28,13 @@ var out_dir := "/tmp"
 
 
 func _initialize() -> void:
+	# --headless is a dummy renderer: RenderingServer.frame_post_draw never fires, so
+	# the capture loop below would hang forever instead of failing. Say why, up front.
+	if DisplayServer.get_name() == "headless":
+		push_error("screenshots: --headless has no framebuffer — run under a GL context (X/Xvfb), e.g. --rendering-method gl_compatibility")
+		print("SHOTS UNUSABLE — headless has no framebuffer; nothing was captured")
+		quit(1)
+		return
 	out_dir = OS.get_environment("SHOT_DIR")
 	if out_dir.is_empty():
 		out_dir = "/tmp"
@@ -57,6 +75,8 @@ func _run() -> void:
 	# shot ("BIG IT GAME STUDIOS presents" on all 12).
 	_kill_splash()
 	_freeze_physics(main)
+	var digests := {}   # md5 -> path, so two shots can never be the same picture
+	var failures := 0
 	for i in shots.size():
 		current = i
 		_pose(i)
@@ -71,14 +91,72 @@ func _run() -> void:
 		# reading it from process_frame (pre-render) is what produced the black shots.
 		var img := root.get_texture().get_image()
 		var path := "%s/%02d-%s.png" % [out_dir, i + 1, shots[i]["name"]]
+		if img == null or img.is_empty():
+			push_error("screenshots: viewport handed back no image for %s — run under a GL context (--headless has no framebuffer)" % path)
+			print("FAILED ", path, " — no framebuffer")
+			failures += 1
+			continue
 		var err := img.save_png(path)
 		if err != OK:
 			push_error("screenshots: save_png failed (%s) for %s — does SHOT_DIR exist?" % [err, path])
 			print("FAILED ", path)
-		else:
-			print("SAVED ", path)
-	print("ALL SHOTS DONE")
+			failures += 1
+			continue
+		# Written to disk on purpose even when dead: a human needs to SEE the garbage.
+		# It just never gets to call itself SAVED.
+		var st := frame_stats(img)
+		if not _frame_is_live(img):
+			push_error("screenshots: %s carries no picture (%d distinct colours, luma stddev %.2f) — the pose never reached the viewport" % [path, st["colors"], st["stddev"]])
+			print("FAILED %s — dead frame (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+			failures += 1
+			continue
+		var digest := FileAccess.get_md5(path)
+		if digests.has(digest):
+			push_error("screenshots: %s is byte-identical to %s — the pose never reached the viewport" % [path, digests[digest]])
+			print("FAILED %s — identical to %s" % [path, digests[digest]])
+			failures += 1
+			continue
+		digests[digest] = path
+		print("SAVED %s (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+	if failures > 0:
+		push_error("screenshots: %d of %d shots are unusable — refusing to report success" % [failures, shots.size()])
+		print("SHOTS UNUSABLE — %d of %d failed; do not hand these to a reviewer" % [failures, shots.size()])
+		quit(1)
+		return
+	print("ALL SHOTS DONE — %d live, %d unique" % [shots.size(), digests.size()])
 	quit(0)
+
+
+static func frame_stats(img: Image) -> Dictionary:
+	## Distinct-colour count and luma stddev over a strided sample of `img`.
+	## Static so smoke.gd and tests/test_capture_guard.gd share the exact predicate
+	## the harness gates on — a detector only one caller uses is a detector that rots.
+	var colors := {}
+	var sum := 0.0
+	var sum_sq := 0.0
+	var n := 0
+	for y in range(0, img.get_height(), SAMPLE_STRIDE):
+		for x in range(0, img.get_width(), SAMPLE_STRIDE):
+			var c := img.get_pixel(x, y)
+			colors[(c.r8 << 16) | (c.g8 << 8) | c.b8] = true
+			var luma := 0.2126 * float(c.r8) + 0.7152 * float(c.g8) + 0.0722 * float(c.b8)
+			sum += luma
+			sum_sq += luma * luma
+			n += 1
+	var inv := 1.0 / float(maxi(n, 1))
+	var mean := sum * inv
+	return {"colors": colors.size(), "stddev": sqrt(maxf(sum_sq * inv - mean * mean, 0.0)), "pixels": n}
+
+
+static func _frame_is_live(img: Image) -> bool:
+	## False for anything that carries no picture: a missing/empty image (no GL
+	## context), a solid fill, or a near-flat frame that has colour count but no
+	## contrast. Both arms matter — a black frame fails on colours, a subtly
+	## dithered blank fails on stddev.
+	if img == null or img.is_empty():
+		return false
+	var s := frame_stats(img)
+	return int(s["colors"]) >= MIN_COLORS and float(s["stddev"]) >= MIN_STDDEV
 
 
 func _kill_splash() -> void:
