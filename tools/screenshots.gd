@@ -17,6 +17,11 @@ var out_dir := "/tmp"
 
 
 func _initialize() -> void:
+	# Seed the engine RNG the VIEW uses (fx jitter, scorch radii, casing spin) so
+	# two runs of the harness produce byte-identical PNGs. Without this, shots
+	# differ run-to-run and can't be diffed to prove a view change is a no-op.
+	# Pair with --fixed-fps 60 so the time-driven pulses land on the same phase.
+	seed(0xC0FFEE)
 	out_dir = OS.get_environment("SHOT_DIR")
 	if out_dir.is_empty():
 		out_dir = "/tmp"

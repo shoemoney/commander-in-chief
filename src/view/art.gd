@@ -897,20 +897,25 @@ static func cell_hash(ix: int, iy: int) -> int:
 ## (ci prepended), quantized to whole pixels via a cached distance-band
 ## bitmap, so every ring/line steps like the terrain grid instead of
 ## anti-aliasing against it. View-layer only — never called from src/sim.
-static var _ring_cache := {}   # Vector3i(r, w, filled) -> {offsets, tex}
+static var _ring_cache := {}   # Vector3i(r, w, filled) -> {offsets, angles, tex}
+
+## Cache ceiling. Live runs pin ~64 distinct keys, but animated radii mint new
+## ones constantly (explosion cores alone sweep r=12..58), so the working set
+## spikes well past that during a fight.
+const RING_CACHE_CAP := 256
 
 
 static func _ring_entry(r: int, w: int, filled: bool) -> Dictionary:
 	var key := Vector3i(r, w, 1 if filled else 0)
-	if _ring_cache.has(key):
-		return _ring_cache[key]
-	# ponytail: process-lifetime cache, but radii/widths only span a few dozen
-	# distinct values in practice — cap it so a pathological caller can't grow
-	# it unbounded. Bumped 64->128: measured live runs pin at 64 distinct keys
-	# already, one novel radius from a full clear-and-rebuild hitch.
-	if _ring_cache.size() > 128:
-		_ring_cache.clear()
-	var offs := PackedVector2Array()
+	var hit: Variant = _ring_cache.get(key)
+	if hit != null:
+		return hit
+	# ponytail: FIFO-evict one entry (Godot Dictionaries keep insertion order)
+	# rather than clear() the lot. A wholesale clear made ONE novel radius cost
+	# the rebuild of the entire working set — O(r²) image fills and GPU uploads,
+	# all inside _draw. Upgrade path: LRU, if a profile ever shows FIFO thrash.
+	if _ring_cache.size() >= RING_CACHE_CAP:
+		_ring_cache.erase(_ring_cache.keys()[0])
 	var r2 := r * r
 	var inner := 0 if filled else maxi(0, r - w)
 	# filled: -1 so d2 == 0 (the centre pixel) always passes d2 > inner2 —
@@ -918,13 +923,32 @@ static func _ring_entry(r: int, w: int, filled: bool) -> Dictionary:
 	# with a hollow-diamond hole (r=1 becomes 4 pixels instead of a solid dot).
 	var inner2 := -1 if filled else inner * inner
 	var img := Image.create_empty(r * 2 + 1, r * 2 + 1, false, Image.FORMAT_RGBA8)
+	# Only arc()'s partial sweep reads the per-pixel offsets, and it only ever
+	# asks for hollow rings — circle() draws from the texture alone. A filled
+	# disc's offsets were ~10.5k dead Vector2s (~85 KB at r=58) built on every
+	# rebuild and retained for nothing.
+	var ranked: Array = []
 	for dy in range(-r, r + 1):
 		for dx in range(-r, r + 1):
 			var d2 := dx * dx + dy * dy
 			if d2 <= r2 and d2 > inner2:
-				offs.append(Vector2(dx, dy))
 				img.set_pixel(dx + r, dy + r, Color.WHITE)
-	var entry := {"offsets": offs, "tex": ImageTexture.create_from_image(img)}
+				if not filled:
+					ranked.append([fposmod(Vector2(dx, dy).angle(), TAU), dx, dy])
+	# Sorted by angle so a partial sweep is a bsearch'd contiguous slice instead
+	# of an atan2-per-pixel scan of the whole ring (the barrel blast ring alone
+	# is ~1,760 pixels, every one of them paying a Vector2.angle()).
+	ranked.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var offs := PackedVector2Array()
+	var angles := PackedFloat64Array()
+	offs.resize(ranked.size())
+	angles.resize(ranked.size())
+	for i in ranked.size():
+		var e: Array = ranked[i]
+		angles[i] = e[0]
+		offs[i] = Vector2(e[1], e[2])
+	var entry := {"offsets": offs, "angles": angles,
+		"tex": ImageTexture.create_from_image(img)}
 	_ring_cache[key] = entry
 	return entry
 
@@ -969,10 +993,28 @@ static func arc(ci: CanvasItem, center: Vector2, radius: float,
 	if span < 0.0:
 		lo = end_angle
 		span = -span
-	for o in entry["offsets"]:
-		var a: float = fposmod(o.angle() - lo, TAU) + lo
-		if a <= lo + span:
-			ci.draw_rect(Rect2(c + o, Vector2.ONE), color)
+	var offs: PackedVector2Array = entry["offsets"]
+	var win := _arc_span(entry["angles"], lo, span)
+	for i in range(win.x, win.y):
+		ci.draw_rect(Rect2(c + offs[i], Vector2.ONE), color)
+	for i in win.z:
+		ci.draw_rect(Rect2(c + offs[i], Vector2.ONE), color)
+
+
+## Index window of a sweep over angle-sorted ring offsets: stamp [x, y), plus
+## [0, z) for the part that wraps past 0. The cached offsets are sorted by
+## angle, so the window is a bsearch'd contiguous slice — no per-pixel atan2,
+## and no visit to the ~90% of the ring outside the sweep. Selects exactly the
+## pixels the old `fposmod(o.angle() - lo, TAU) <= span` scan did (pinned by
+## test_assets.gd::test_art_arc_slice_matches_the_angle_scan_it_replaced).
+static func _arc_span(angles: PackedFloat64Array, lo: float, span: float) -> Vector3i:
+	var lo_n := fposmod(lo, TAU)
+	var hi_n := lo_n + span
+	# `>=`, not `>`: the sweep window is CLOSED at hi, so a hi_n landing exactly
+	# on TAU still has to pick up the pixels at angle 0. `>` dropped them, which
+	# is one whole pixel off the end of every -PI/2-anchored cooldown dial.
+	return Vector3i(angles.bsearch(lo_n, true), angles.bsearch(hi_n, false),
+		angles.bsearch(hi_n - TAU, false) if hi_n >= TAU else 0)
 
 
 ## Viewport + margin used to clip line() so an off-screen-anchored beam (e.g.
