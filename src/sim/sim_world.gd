@@ -2376,7 +2376,8 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 
 func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) -> void:
 	## Shared "move toward target at base_spd, halved while wading" step used by
-	## rushers, shieldmen, elites, grenadiers and snipers. Same fixed-point ops,
+	## rushers, shieldmen, elites, grenadiers, snipers, sappers, lunging frogmen
+	## and technicals (both phases). Same fixed-point ops,
 	## same order, as the code this replaces — golden-safe.
 	## FRENZY (wave_mod 6) belongs HERE, not just in _step_sapper: "the swarm
 	## rushes 40% faster" means the WHOLE swarm. wave_mod is endless-only and the
@@ -2721,8 +2722,9 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 		if llen > F_ONE:
 			var prev_x: int = e["x"]
 			var prev_y: int = e["y"]
-			e["x"] = e["x"] + Fixed.mul(Fixed.div(lx, llen), TECHNICAL_SPEED)
-			e["y"] = e["y"] + Fixed.mul(Fixed.div(ly, llen), TECHNICAL_SPEED)
+			# Shared mover step (it smashes sandbags above, but rocks, hulks and
+			# sealed lane blocks used to be phased straight through mid-charge).
+			_advance_toward(e, lx, ly, llen, TECHNICAL_SPEED)
 			if _in_water(e["x"], e["y"]):
 				e["x"] = prev_x
 				e["y"] = prev_y
@@ -2750,8 +2752,7 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	if dlen > F_ONE:
 		var cpx: int = e["x"]
 		var cpy: int = e["y"]
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), ENEMY_SPEED)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), ENEMY_SPEED)
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)   # cover is cover for wheels too
 		if _in_water(e["x"], e["y"]):   # wheels don't swim (tank rule)
 			e["x"] = cpx
 			e["y"] = cpy
@@ -2786,8 +2787,10 @@ func _step_frogman(e: Dictionary) -> void:
 	if e["lunge_ticks"] > 0:
 		e["lunge_ticks"] = e["lunge_ticks"] - 1
 		if dlen > F_ONE:
-			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), FROGMAN_LUNGE_SPEED)
-			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), FROGMAN_LUNGE_SPEED)
+			# Shared mover step: the lunge is fast, not incorporeal — it stops at
+			# sandbags/rocks/hulks/sealed blocks like every other ground mover, and
+			# wades out of its own river at half pace.
+			_advance_toward(e, dx, dy, dlen, FROGMAN_LUNGE_SPEED)
 	elif dlen > FROGMAN_CALM_RADIUS and _in_water(e["x"], e["y"]):
 		e["submerged"] = true
 	else:
@@ -2812,14 +2815,11 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 		e["fire_cd"] = SAPPER_MINE_CD_TICKS
 		mines.append({"x": e["x"], "y": e["y"], "armed": true})
 		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
+	# Moves through the shared mover step, so the sapper respects the cover the
+	# player PAID for: hand-rolled movement here phased straight through sandbags,
+	# rocks, tank hulks and sealed lane blocks (and skipped mud/rubble/wire).
 	if dlen > F_ONE:
-		var spd := ENEMY_SPEED
-		if wave_mod == 6:
-			spd = (spd * 7) / 5   # FRENZY wave: the swarm rushes 40% faster
-		if _in_water(e["x"], e["y"]):
-			spd = spd / 2
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 
 
 func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
