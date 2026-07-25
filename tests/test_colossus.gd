@@ -331,3 +331,52 @@ func test_standoff_closes_over_the_phases() -> void:
 		var gap: int = (p["y"] - sim.colossus["y"]) / SimWorld.F_ONE
 		Runner.T.eq(gap, spec[1], "phase standoff settles at %dpx" % spec[1])
 	Runner.T.ok(SimWorld.COLOSSUS_CRUSH_RADIUS > 0, "phase 3 parks inside the crush radius")
+
+
+func test_spray_cooldown_stays_bounded_under_smoke() -> void:
+	# The spray is an AIMED shot, so concealment cancels it ("concealment beats
+	# AIM, not AREA" — the mortar volley below it is deliberately exempt). But the
+	# decrement ran unconditionally, so under sustained smoke spray_cd counted
+	# down without limit: -595 after ten seconds. main.gd draws the barrel-tip
+	# warm-up glow as `1 - spray_cd / COLOSSUS_SPRAY_CD_TICKS`, so that runaway
+	# rendered a warm factor of 20.83 — an ever-brighter "about to fire" telegraph
+	# for a shot being cancelled every single tick. Clamped at 0: the telegraph
+	# tops out at "loaded", which is TRUE, and the gun still fires the instant the
+	# lock comes back. Measured by running the stepper, not by reading the const.
+	var sim := SimWorld.new(7, 1)
+	var p: Dictionary = sim.players[0]
+	p["x"] = SimWorld.SCREEN_CX
+	p["y"] = sim.camera_top + 200 * SimWorld.F_ONE
+	p["hurt_iframes"] = 99999
+	sim.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP, "x": SimWorld.SCREEN_CX,
+		"y": sim.camera_top - 3 * SimWorld.GATE_SPACING,
+		"spray_cd": 5, "volley_cd": 99999, "spawn_cd": 99999,
+		"core_cd": 99999, "core_open": 0, "pv": 1, "sweep_cd": 99999}
+	sim.last_stand = true
+	var worst := 0
+	var shots := 0
+	for i in 600:
+		p["smoke_ticks"] = 600   # sustained concealment: every spray is cancelled
+		var ev0: int = sim.events.size()
+		sim._step_colossus()
+		for e in range(ev0, sim.events.size()):
+			if sim.events[e]["t"] == "enemy_shot":
+				shots += 1
+		worst = mini(worst, sim.colossus["spray_cd"])
+	Runner.T.eq(shots, 0, "10s of smoke: concealment cancels every aimed spray")
+	Runner.T.eq(worst, 0, "and spray_cd floors at 0 instead of running unbounded negative")
+	# The telegraph the view draws off it therefore stays inside [0, 1].
+	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
+	Runner.T.ok(warm >= 0.0 and warm <= 1.0,
+		"the barrel-tip warm-up glow stays truthful (%.2f must be within [0,1])" % warm)
+	# Concealment beats AIM, it does not disarm: the shot lands the tick it lifts.
+	p["smoke_ticks"] = 0
+	var ev1: int = sim.events.size()
+	sim._step_colossus()
+	var fired := false
+	for e in range(ev1, sim.events.size()):
+		if sim.events[e]["t"] == "enemy_shot":
+			fired = true
+	Runner.T.ok(fired, "the held-back spray fires on the first un-smoked tick")
+	Runner.T.eq(sim.colossus["spray_cd"], SimWorld.COLOSSUS_SPRAY_CD_TICKS,
+		"and re-arms to a full cooldown — smoke banked no extra shots")

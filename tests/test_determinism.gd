@@ -404,6 +404,29 @@ const SEED := 0xDEADBEEF
 ## where it used to no-op. Both shift respawn ticks/positions, which is the whole
 ## stream downstream. The elite lane-leash party-trip (3) is torture-inert: the script
 ## never reaches a fork gauntlet.
+##
+## 2026-07-25 -- ONE SPEND RATE: ENDLESS_GOLDEN RE-RECORDED (samples 1-5; sample 0
+## byte-identical). Campaign GOLDEN VERIFIED UNCHANGED, measured not assumed: it was
+## re-run with this change in place and all 6 campaign samples came back identical.
+## `_collect_pickups` credited a priced ground crate `cost * 10` under a comment
+## claiming parity with the spend wheel's `cost * 6`; both now read the single
+## SPEND_SCORE_MULT (= 6). `score` IS hashed, so every sample after the torture's
+## first priced purchase shifts. MEASURED, not assumed: replaying both torture inputs
+## while counting `pickup` events carrying cost > 0 reports campaign=0 (it never
+## streams a priced crate at all) and endless=1, collected at TICK 840. SAMPLE_EVERY
+## is 600, so tick 840 lands inside sample 1 -- which is precisely the observed
+## fingerprint: sample 0 byte-identical, samples 1-5 moved. This is a pure VALUE
+## shift; no branch and no rng draw changed, so nothing moved but the number hashed.
+##
+## BOTH GOLDENS VERIFIED UNCHANGED (2026-07-25, colossus spray_cd clamped at 0 so
+## sustained smoke can no longer drive it unbounded negative -- the view's barrel-tip
+## warm-up glow is 1 - spray_cd/CD_TICKS and was rendering a warm factor of 20.83).
+## Inert three times over, and the first two are measured: the same replay counts
+## colossus-alive ticks and reports 0 in BOTH streams (endless tops out at wave 2 and
+## never fields it; the campaign torture never streams as far as the Foundry), and the
+## clamp is behaviour-identical regardless -- `<= 0` fires on the same tick at 0 as at
+## -595, so only the hashed value could ever have moved. Covered instead by a direct
+## test: test_colossus::test_spray_cooldown_stays_bounded_under_smoke.
 const GOLDEN: Array[int] = [
 	1137374205060789435,
 	8552575976495711450,
@@ -544,11 +567,11 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## combined tree. Both notes above still describe what moved and why.
 const ENDLESS_GOLDEN: Array[int] = [
 	3184915394758128358,
-	7048541855390065830,
-	6799870600685586555,
-	3455937350047002514,
-	3243110019923381098,
-	5716657775938348482,
+	869516778180359838,
+	7791110598466866467,
+	831481001753506170,
+	7685674951049540642,
+	776010126801259658,
 ]
 
 

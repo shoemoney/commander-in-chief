@@ -162,7 +162,7 @@ func test_priced_crate_at_cap_is_not_auto_bought() -> void:
 		sim.events.clear()
 		sim._collect_pickups(p, 0)
 		Runner.T.eq(sim.war_chest, 500, "kind %d at cap: the chest is not charged" % kind)
-		Runner.T.eq(sim.score, 0, "kind %d at cap: no cost*10 score laundering" % kind)
+		Runner.T.eq(sim.score, 0, "kind %d at cap: no spend-rate score laundering" % kind)
 		Runner.T.eq(sim.pickups.size(), 1, "kind %d at cap: the crate is left standing" % kind)
 		var fired := false
 		for ev in sim.events:
@@ -184,7 +184,11 @@ func test_priced_crate_still_bought_when_it_grants_something() -> void:
 	sim.events.clear()
 	sim._collect_pickups(p, 0)
 	Runner.T.eq(sim.war_chest, 480, "a useful priced crate still charges its cost")
-	Runner.T.eq(sim.score, 200, "a useful priced crate still credits cost*10")
+	# Was a hardcoded 200 (= cost*10) while the identical wheel buy paid cost*6, under
+	# a crate comment claiming the two matched. Both now read SPEND_SCORE_MULT; the
+	# crate-vs-wheel parity itself is pinned in test_view_honesty.
+	Runner.T.eq(sim.score, 20 * SimWorld.SPEND_SCORE_MULT,
+		"a useful priced crate credits the shared spend rate")
 	Runner.T.eq(p["grenade_ammo"], 6, "the supply was actually delivered")
 	Runner.T.eq(sim.pickups.size(), 0, "the crate was consumed")
 

@@ -114,8 +114,15 @@ var _steam := SteamBridge.new()   # Steamworks facade -- no-ops offline (see src
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
 var _kick := Vector2.ZERO         # directional screen nudge from firing
-var _kill_streak := 0             # decaying combo counter for kill-blip pitch
+# AUDIO ONLY. Its window advances on PHYSICS FRAMES (which keep running through
+# hitstop and pause) and it counts mg_nest kills the sim deliberately excludes, so
+# it is NOT the run's streak — it is a blip-pitch ramp that must never be read as
+# score-bearing. `sim.kill_streak` is the authoritative one; the RANK grade, the
+# milestone pop and _run_best_streak all read that. Renamed from `_kill_streak`
+# after the graded value and the simulated value were found to disagree.
+var _blip_streak := 0             # decaying combo counter for kill-blip pitch (audio only)
 var _last_kill_frame := -100
+var _streak_popped := 0           # last sim streak tier the milestone FX fired for (no double-pop)
 var _rumble: Array[float] = [0.0, 0.0]   # pending gamepad vibration this frame, PER PLAYER (device 0/1)
 var _rumble_sharp: Array[bool] = [false, false]   # true = punchy crack (gunfire/melee), false = boomy rumble (blasts)
 var _rumble_on := true            # accessibility: gamepad vibration on/off
@@ -1406,8 +1413,9 @@ func _reset() -> void:
 	_cinematic = 0.0
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
 	_kick = Vector2.ZERO
-	_kill_streak = 0
+	_blip_streak = 0
 	_last_kill_frame = -100
+	_streak_popped = 0
 	_rumble = [0.0, 0.0]
 	_rumble_sharp = [false, false]
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
@@ -3157,9 +3165,9 @@ func _ev_kill(ev: Dictionary) -> void:
 	# Kill-streak: rising blip pitch + milestone combo pop.
 	var big: bool = ev.get("coin", 0) >= 25
 	if Engine.get_physics_frames() - _last_kill_frame < 90:
-		_kill_streak += 1
+		_blip_streak += 1
 	else:
-		_kill_streak = 1
+		_blip_streak = 1
 	_last_kill_frame = Engine.get_physics_frames()
 	# The +0.06/kill ladder tops out at streak 15, and "kill" is in Sfx._LADDERED
 	# so it also skips the humanising detune — past 15 every kill was a byte-identical
@@ -3167,9 +3175,9 @@ func _ev_kill(ev: Dictionary) -> void:
 	# climbing audibly, and an explicit +/-3% jitter (small enough not to smear the
 	# 0.06 ladder steps below it) hands the humanise back where the ladder no longer
 	# carries information.
-	var kill_pitch := 1.0 + minf(0.9, _kill_streak * 0.06)
-	if _kill_streak > 15:
-		kill_pitch = (kill_pitch + minf(0.30, float(_kill_streak - 15) * 0.01)) * randf_range(0.97, 1.03)
+	var kill_pitch := 1.0 + minf(0.9, _blip_streak * 0.06)
+	if _blip_streak > 15:
+		kill_pitch = (kill_pitch + minf(0.30, float(_blip_streak - 15) * 0.01)) * randf_range(0.97, 1.03)
 	_sfx.play("kill", -7.0, kill_pitch)
 	# Infantry agony yell (Ya Zahra / Ya Hossein bank) — flesh only. Machines
 	# already boom via their own branch; pilots skip the reward path entirely.
@@ -3179,23 +3187,32 @@ func _ev_kill(ev: Dictionary) -> void:
 		_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
 		_buzz(0.35, -1, true)   # kill confirm: sharp, no single shooter attributed
 		_punch = maxf(_punch, 0.03)
-	if _kill_streak == 5 or _kill_streak == 10 or _kill_streak == 20:
+	# The milestone pop advertises the sim's +25/50/100% bonus, so it reads the
+	# SIM's streak, not the audio ramp above (which counts mg_nest kills the sim
+	# excludes and rides physics frames, so it drifted off the awarded tier).
+	# _streak_popped stops a same-tier re-pop when a following kill event leaves
+	# sim.kill_streak parked on the tier (mg_nest), and clears when it lapses.
+	var sstreak: int = sim.kill_streak
+	if sstreak < _streak_popped:
+		_streak_popped = 0
+	if sstreak != _streak_popped and (sstreak == 5 or sstreak == 10 or sstreak == 20):
+		_streak_popped = sstreak
 		_cmd_bark("streak", 60)   # Commander gloats at a kill-streak milestone
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-			"rate": 0.02, "text": "x%d STREAK" % _kill_streak, "col": Color(1.0, 0.75, 0.3)})
+			"rate": 0.02, "text": "x%d STREAK" % sstreak, "col": Color(1.0, 0.75, 0.3)})
 		# The sim awards a real +25/50/100% score bonus at these tiers, but only
 		# the 20-streak ever FELT it. Pop the earned bonus as a bold gold headline
 		# + a brief white flash so hitting 5 and 10 read as milestones, not noise.
-		var streak_bonus := 25 if _kill_streak == 5 else 50 if _kill_streak == 10 else 100
+		var streak_bonus := 25 if sstreak == 5 else 50 if sstreak == 10 else 100
 		_fx.append({"x": ev["x"], "y": ev["y"] - 12, "t": -0.14, "kind": "floattext",
 			"rate": 0.016, "size": 13, "text": "+%d%%!" % streak_bonus, "col": Color(1.0, 0.92, 0.4)})
 		# a1-12 VFX#8: a LOCALIZED gold bloom at the kill instead of a whole-screen
 		# white flash — the milestone pops without strobing the whole frame mid-fight.
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.05,
-			"r": 32.0 + float(_kill_streak) * 1.4, "col": Color(1.0, 0.82, 0.35)})
+			"r": 32.0 + float(sstreak) * 1.4, "col": Color(1.0, 0.82, 0.35)})
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_circle",
 			"sz": 16.0, "grow": 1.1, "fade": 1.2, "rate": 0.05, "col": Color(1.0, 0.85, 0.4, 0.6)})
-		_sfx.play("buy_fanfare", -8.0, 0.9 + _kill_streak * 0.015)   # a2-16: kill-streak milestone
+		_sfx.play("buy_fanfare", -8.0, 0.9 + sstreak * 0.015)   # a2-16: kill-streak milestone
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
 		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, Color(1.0, 0.9, 0.45), 0.025)
@@ -4548,7 +4565,12 @@ func _hint(id: String, text: String, urgent := false) -> void:
 
 
 func _track_bests() -> void:
-	_run_best_streak = maxi(_run_best_streak, _kill_streak)
+	# THE GRADED value. _run_rank() weights this at 5x, so it must be the number the
+	# SIM ran the run with — not the view's audio ramp (_blip_streak), which counts
+	# mg_nest kills the sim excludes and whose window advances on physics frames that
+	# keep running through hitstop and pause. Reading the ramp here graded the player
+	# on a streak the simulation never agreed happened.
+	_run_best_streak = maxi(_run_best_streak, sim.kill_streak)
 	# Supply-wheel discoverability: the first time the chest can afford the
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
