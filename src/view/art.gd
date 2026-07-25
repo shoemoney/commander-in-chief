@@ -843,3 +843,167 @@ static func cell_hash(ix: int, iy: int) -> int:
 	var h := ix * 374761393 + iy * 668265263
 	h = (h ^ (h >> 13)) * 1274126177
 	return absi(h ^ (h >> 16))
+
+
+## --- Pixel-grid draw primitives ---------------------------------------
+## Godot's draw_arc/draw_circle/draw_line are smooth vector primitives — on a
+## nearest-filtered 640x360 buffer they read as "vector UI over pixel art".
+## These stand in with the SAME argument order as the builtins they replace
+## (ci prepended), quantized to whole pixels via a cached distance-band
+## bitmap, so every ring/line steps like the terrain grid instead of
+## anti-aliasing against it. View-layer only — never called from src/sim.
+static var _ring_cache := {}   # Vector3i(r, w, filled) -> {offsets, tex}
+
+
+static func _ring_entry(r: int, w: int, filled: bool) -> Dictionary:
+	var key := Vector3i(r, w, 1 if filled else 0)
+	if _ring_cache.has(key):
+		return _ring_cache[key]
+	# ponytail: process-lifetime cache, but radii/widths only span a few dozen
+	# distinct values in practice — cap it so a pathological caller can't grow
+	# it unbounded. Bumped 64->128: measured live runs pin at 64 distinct keys
+	# already, one novel radius from a full clear-and-rebuild hitch.
+	if _ring_cache.size() > 128:
+		_ring_cache.clear()
+	var offs := PackedVector2Array()
+	var r2 := r * r
+	var inner := 0 if filled else maxi(0, r - w)
+	# filled: -1 so d2 == 0 (the centre pixel) always passes d2 > inner2 —
+	# otherwise inner2 == 0 excludes the centre and every filled disc ships
+	# with a hollow-diamond hole (r=1 becomes 4 pixels instead of a solid dot).
+	var inner2 := -1 if filled else inner * inner
+	var img := Image.create_empty(r * 2 + 1, r * 2 + 1, false, Image.FORMAT_RGBA8)
+	for dy in range(-r, r + 1):
+		for dx in range(-r, r + 1):
+			var d2 := dx * dx + dy * dy
+			if d2 <= r2 and d2 > inner2:
+				offs.append(Vector2(dx, dy))
+				img.set_pixel(dx + r, dy + r, Color.WHITE)
+	var entry := {"offsets": offs, "tex": ImageTexture.create_from_image(img)}
+	_ring_cache[key] = entry
+	return entry
+
+
+## Mirrors draw_circle(position, radius, color, filled, width, antialiased) —
+## a filled disc or a whole-pixel-width ring, pixel-grid shaped, cached.
+static func circle(ci: CanvasItem, position: Vector2, radius: float,
+		color: Color, filled := true, width := -1.0, _aa := false) -> void:
+	var r := roundi(radius)
+	if r <= 0:
+		# Sub-pixel decorative dots (0.7 / 1.2 radius embers, grit) stay a
+		# single speck instead of inflating to a 5px plus via maxi(1, ...).
+		ci.draw_rect(Rect2(position.round(), Vector2.ONE), color)
+		return
+	var w := r if filled else maxi(1, roundi(width if width > 0.0 else 1.0))
+	var entry := _ring_entry(r, w, filled)
+	var p := position.round()
+	ci.draw_texture_rect(entry["tex"], Rect2(p - Vector2(r, r), Vector2(r, r) * 2.0 + Vector2.ONE),
+		false, color)
+
+
+## Mirrors draw_arc(center, radius, start_angle, end_angle, point_count,
+## color, width, antialiased). A full sweep reuses the cached ring texture
+## (one draw call); a partial sweep (cooldown dials, telegraphs) stamps the
+## same cached offsets per-pixel, filtered to the angle window.
+static func arc(ci: CanvasItem, center: Vector2, radius: float,
+		start_angle: float, end_angle: float, _point_count: int,
+		color: Color, width := 1.0, _aa := false) -> void:
+	var r := roundi(radius)
+	if r <= 0:
+		ci.draw_rect(Rect2(center.round(), Vector2.ONE), color)
+		return
+	var w := maxi(1, roundi(width))
+	var entry := _ring_entry(r, w, false)
+	var c := center.round()
+	var span := end_angle - start_angle
+	if absf(span) >= TAU - 0.001:
+		ci.draw_texture_rect(entry["tex"], Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0 + Vector2.ONE),
+			false, color)
+		return
+	var lo := start_angle
+	if span < 0.0:
+		lo = end_angle
+		span = -span
+	for o in entry["offsets"]:
+		var a: float = fposmod(o.angle() - lo, TAU) + lo
+		if a <= lo + span:
+			ci.draw_rect(Rect2(c + o, Vector2.ONE), color)
+
+
+## Viewport + margin used to clip line() so an off-screen-anchored beam (e.g.
+## a 900px sniper laser) doesn't emit hundreds of dead draw_rect calls for
+## the off-frame portion (the cheap integer walk itself still runs).
+const _CLIP := Rect2(-2.0, -2.0, 644.0, 364.0)
+
+## Mirrors draw_line(from, to, color, width, antialiased): Bresenham, stamped
+## as one perpendicular strip per major-axis step so thick/translucent lines
+## get exactly one coverage per pixel (no compositing overlap) instead of an
+## AA'd quad.
+static func line(ci: CanvasItem, from: Vector2, to: Vector2,
+		color: Color, width := 1.0, _aa := false) -> void:
+	var w := maxi(1, roundi(width))
+	var x0 := roundi(from.x)
+	var y0 := roundi(from.y)
+	var x1 := roundi(to.x)
+	var y1 := roundi(to.y)
+	var dx := absi(x1 - x0)
+	var dy := -absi(y1 - y0)
+	var sx := 1 if x0 < x1 else -1
+	var sy := 1 if y0 < y1 else -1
+	var err := dx + dy
+	var half := floori((w - 1) / 2.0)
+	# x-major (shallow line): one 1-wide, w-tall strip per x step, thickness
+	# applied vertically. y-major (steep line): mirrored. Either way each
+	# pixel is covered by exactly one rect — no double-composited alpha.
+	var x_major := dx >= -dy
+	while true:
+		if _CLIP.has_point(Vector2(x0, y0)):
+			if x_major:
+				ci.draw_rect(Rect2(x0, y0 - half, 1, w), color)
+			else:
+				ci.draw_rect(Rect2(x0 - half, y0, w, 1), color)
+		if x0 == x1 and y0 == y1:
+			break
+		var e2 := err * 2
+		if e2 >= dy:
+			err += dy
+			x0 += sx
+		if e2 <= dx:
+			err += dx
+			y0 += sy
+
+
+## Dashed variant of line() — replaces draw_dashed_line(from, to, color,
+## width, dash) call sites (those don't mirror a builtin 1:1, so this is a
+## small hand-written helper rather than an argument-mirrored stand-in).
+static func dashed_line(ci: CanvasItem, from: Vector2, to: Vector2,
+		color: Color, width := 1.0, dash := 4.0) -> void:
+	var total := from.distance_to(to)
+	if total < 0.01:
+		return
+	var dir := (to - from) / total
+	var t := 0.0
+	var on := true
+	while t < total:
+		var seg_len := minf(dash, total - t)
+		if on:
+			line(ci, from + dir * t, from + dir * (t + seg_len), color, width)
+		t += seg_len
+		on = not on
+
+
+## Closed/open polyline through points, replacing draw_polyline() call sites.
+static func polyline(ci: CanvasItem, points: PackedVector2Array, color: Color, width := 1.0) -> void:
+	for i in points.size() - 1:
+		line(ci, points[i], points[i + 1], color, width)
+
+
+## Rounds a polygon's points to whole pixels for draw_colored_polygon(), which
+## has no pixel-grid substitute of its own (a filled triangle rasterizes fine —
+## it's fractional VERTICES that put it off-grid).
+static func rnd(points: PackedVector2Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	out.resize(points.size())
+	for i in points.size():
+		out[i] = points[i].round()
+	return out

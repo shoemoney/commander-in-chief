@@ -1813,3 +1813,43 @@ func test_event_banners_never_span_the_playfield() -> void:
 	var body := src.substr(src.find("func _metal_plate("), 800)
 	Runner.T.ok(not ("draw_rect(" in body),
 		"_metal_plate paints a soft-edged ribbon, never a hard rectangle")
+
+
+# --- field overlays draw on the pixel grid, not as smooth vector primitives ---
+
+func test_field_overlays_are_pixel_grid_snapped() -> void:
+	for path in ["res://src/main.gd", "res://src/view/hud.gd"]:
+		var fsrc := FileAccess.get_file_as_string(path)
+		var re := RegEx.create_from_string("(?<![.\\w])draw_(arc|circle|line|polyline|dashed_line)\\(")
+		Runner.T.eq(re.search_all(fsrc).size(), 0,
+			"%s draws field overlays through Art.arc/circle/line (pixel grid), never raw vector primitives" % path)
+	# _to_screen is the shared grid seam -- it must round.
+	var m := FileAccess.get_file_as_string("res://src/main.gd")
+	var body2 := m.substr(m.find("func _to_screen("), 300)
+	Runner.T.ok("roundf(" in body2, "_to_screen snaps to whole pixels")
+
+
+func test_art_ring_is_pixel_perfect_not_a_polygon() -> void:
+	# A midpoint circle is 4-way symmetric on integer offsets; a draw_arc N-gon
+	# approximation is not. r=12, w=1 is a typical HUD/telegraph ring size.
+	var entry: Dictionary = Art._ring_entry(12, 1, false)
+	var offsets: PackedVector2Array = entry["offsets"]
+	Runner.T.ok(offsets.size() > 0, "the ring has pixels")
+	var have := {}
+	for o in offsets:
+		Runner.T.eq(o.x, roundf(o.x), "ring offset.x is a whole pixel")
+		Runner.T.eq(o.y, roundf(o.y), "ring offset.y is a whole pixel")
+		have[Vector2i(int(o.x), int(o.y))] = true
+	for o in offsets:
+		var v := Vector2i(int(o.x), int(o.y))
+		Runner.T.ok(have.has(Vector2i(-v.x, v.y)), "ring is symmetric across the y-axis")
+		Runner.T.ok(have.has(Vector2i(v.x, -v.y)), "ring is symmetric across the x-axis")
+	# Filled discs must include the centre pixel (regression: inner2 == 0
+	# excluded d2 == 0, shipping every filled circle with a hollow centre).
+	var filled: Dictionary = Art._ring_entry(1, 1, true)
+	var foffsets: PackedVector2Array = filled["offsets"]
+	Runner.T.eq(foffsets.size(), 5, "r=1 filled disc is a solid 5-pixel plus (centre + 4 neighbors)")
+	var fhave := {}
+	for o in foffsets:
+		fhave[Vector2i(int(o.x), int(o.y))] = true
+	Runner.T.ok(fhave.has(Vector2i.ZERO), "r=1 filled disc has its centre pixel")
