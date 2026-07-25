@@ -60,7 +60,7 @@ jobs:
 
       - name: Full deterministic test suite
         shell: bash
-        run: godot --headless --path . -s res://tests/run_tests.gd | tee test_output.log
+        run: godot --headless --path . -s res://tests/run_tests.gd 2>&1 | tee test_output.log
 
       - name: Fail on SCRIPT ERROR
         shell: bash
@@ -180,7 +180,7 @@ jobs:
           SUITE: "soak"
         run: |
           set -euo pipefail
-          godot --headless --path . -s res://tests/run_tests.gd | tee soak_output.log
+          godot --headless --path . -s res://tests/run_tests.gd 2>&1 | tee soak_output.log
 
       - name: Fail on SCRIPT ERROR
         run: |
