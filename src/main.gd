@@ -7260,7 +7260,7 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			Art.text(self, _CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), Art.fs(8), pcol)
+			_world_label(_CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
@@ -7345,7 +7345,7 @@ func _draw_tanks() -> void:
 				_spr("fx_smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
 					Color(0.5, 0.5, 0.5, 0.5))
 			if (Engine.get_physics_frames() / 14) % 2 == 0:
-				Art.text(self, "LOW FUEL", c + Vector2(-16, -26), Art.fs(8), Color(1.0, 0.7, 0.2))
+				_world_label("LOW FUEL", c + Vector2(-16, -26), CALLOUT_FUEL)
 		if t["burning"]:
 			# Vehicle fires burn dirty: dark oily smoke, not the pale dust puff.
 			_spr("fx_smoke", c + Vector2(4, -14), 0.0, 0.5, Color(0.3, 0.28, 0.26, 0.8))
@@ -7664,17 +7664,19 @@ func _draw_enemies() -> void:
 			var pi_esc := float(e["y"] - (sim.camera_top - 30 * Fixed.ONE)) / float(Fixed.ONE)
 			if pi_esc < 60.0 and not e.get("submerged", false):
 				# DANGER stays red even in colorblind mode — Art.safe remaps greens.
-				pi_col = Color(1.0, 0.45, 0.35)
+				pi_col = CALLOUT_ALERT
 				if Engine.get_physics_frames() - _pilot_alarm_frame >= 120:
 					_pilot_alarm_frame = Engine.get_physics_frames()
 					_sfx.play("alarm", -18.0, 0.6)
 				# The warning window plays out near the top edge — pin the label
-				# on-screen instead of letting it draw above the viewport.
-				Art.text(self, "ESCAPING!", Vector2(epos.x - 20.0, maxf(epos.y - 18.0, 10.0)), Art.fs(8), pi_col)
+				# on-screen instead of letting it draw above the viewport. The floor is the
+				# label PLATE's top now, not the glyph's: the backing rises above the
+				# baseline, so a bare 10.0 hung it off the top edge.
+				_world_label("ESCAPING!", Vector2(epos.x - 20.0, maxf(epos.y - 18.0, float(Art.fs(8)) + 2.0)), pi_col)
 			else:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
-				Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), Art.fs(8), pi_col)
+				_world_label("RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), pi_col)
 			Art.arc(self, epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
@@ -7888,7 +7890,11 @@ func _draw_observer() -> void:
 	for q in 4:
 		var qa := q * TAU / 4.0 + PI / 4.0
 		Art.arc(self, op, tr, qa - 0.5, qa + 0.5, 8, tcol, 1.5)
-	Art.text(self, "SILENCE THE SPOTTER", op + Vector2(-38, -20), Art.fs(8), Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
+	# The label's own 0.5..0.9 alpha throb is gone: 0.5 measured 2.4:1 even ON the plate, and
+	# _world_label's AA floor clipped the survivable part of the range to a 2% wobble nobody
+	# could see. The "look at me" motion is still there — it just lives entirely in the
+	# reticle above (tr/tcol, which pulse on `tp`), where it costs no legibility.
+	_world_label("SILENCE THE SPOTTER", op + Vector2(-38, -20), CALLOUT_SPOTTER)
 
 
 func _draw_gunships() -> void:
@@ -7918,13 +7924,63 @@ func _draw_gunships() -> void:
 
 const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.92)   # a2-17: shared boss-label plate fill
 
-static func _label_plate_rect(origin_x: float, baseline_y: float, w: float) -> Rect2:
+static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size := 10) -> Rect2:
 	# a2-17: a label-anchored dark plate — starts 3px LEFT of the label origin, 6px wider,
 	# so it always sits UNDER the (left-anchored) boss phase label in 1P and 2P.
 	# Art.text draws from the BASELINE, so the plate must rise ABOVE baseline_y to
 	# cover the glyphs (it used to be laid out below it, backing the HP bar instead
 	# of the label — the phase name sat bare on terrain).
-	return Rect2(origin_x - 3.0, baseline_y - 11.0, w + 6.0, 15.0)
+	# `size` is the RESOLVED draw size: the height was hard-coded to the 10px boss label,
+	# which under-covered an accessibility-scaled label (Art.fs). 10 reproduces the
+	# original -11/15 exactly, so the boss/colossus plates are byte-identical.
+	return Rect2(origin_x - 3.0, baseline_y - float(size) - 1.0, w + 6.0, float(size) + 5.0)
+
+
+## a11y: the alpha floor an in-world callout's INK is held at. Same shape as
+## _banner_plate_alpha (a fully-faded label still disappears), but the floor is set by
+## WCAG rather than by taste: at 0.88 the DIMMEST shipped callout ink — the violet REND
+## capsule (0.78, 0.38, 1.0) — still measures ~4.7:1 against its own LABEL_PLATE_FILL
+## backing over the brightest desert row, and below ~0.85 it drops under AA's 4.5:1.
+## SILENCE THE SPOTTER used to throb down to 0.5, i.e. below legible at the trough.
+const CALLOUT_INK_FLOOR := 0.88
+
+## The named in-world callout inks, centralized so tests/test_menu_layout.gd's WCAG fixture
+## measures the EXACT colors _draw uses and can never drift from them. Every one is checked
+## at CALLOUT_INK_FLOOR against its composited LABEL_PLATE_FILL backing over the brightest
+## desert ground row. (_CAPSULE_COL is measured by the same test and holds the dimmest ink
+## of the family — the violet REND capsule — so it, not these, sets the floor.)
+const CALLOUT_FUEL := Color(1.0, 0.7, 0.2)        # LOW FUEL, on the tank
+const CALLOUT_ALERT := Color(1.0, 0.45, 0.35)     # ESCAPING! / HOLD FIRE — the pilot-danger family
+const CALLOUT_SPOTTER := Color(1.0, 0.4, 0.3)     # SILENCE THE SPOTTER
+const CALLOUT_OVERFLOW := Color(1.0, 0.5, 0.3)    # the threat-chevron "+N" tail
+
+
+static func _callout_ink_alpha(a: float) -> float:
+	return (maxf(a, CALLOUT_INK_FLOOR) if a > 0.05 else 0.0)
+
+
+## a11y: THE draw for every in-world callout — the 8px type that sits on bare desert
+## ground and moves with the camera (LOW FUEL, SILENCE THE SPOTTER, RESCUE, HOLD FIRE,
+## ESCAPING!, the capsule name, the reinforcement clock, the threat-overflow +N). Drawn
+## bare these measure 2.0–3.2:1 against the brightest desert row (the a11y audit's eyeball
+## figures were 1.4–1.6:1 against a lighter sand sample — either way, AA wants 4.5:1).
+## Plated they land at 5.2–8.2:1; test_world_callout_contrast pins the arithmetic.
+##
+## The backing is the plate the HUD ALREADY puts under its boss/colossus phase names
+## (_label_plate_rect + LABEL_PLATE_FILL) — one plate language, not a second style. The
+## banner scrim (_banner_plate/_metal_plate) is deliberately NOT reused here: it feathers
+## 30px past its rect to avoid a silhouette on a screen-centered strip, which around a
+## 40px world label is a smear the size of the actor it labels.
+##
+## Plate alpha is FLAT (as the boss label draws it) rather than tracking the ink — a plate
+## that fades with a pulsing label puts the trough right back under AA.
+func _world_label(txt: String, pos: Vector2, col: Color) -> void:
+	var a := _callout_ink_alpha(col.a)
+	if a <= 0.0:
+		return
+	var sz := Art.fs(8)
+	draw_rect(_label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz), LABEL_PLATE_FILL)
+	Art.text(self, txt, pos, sz, Color(col.r, col.g, col.b, a))
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
@@ -8624,8 +8680,7 @@ func _draw_players() -> void:
 					var pi_rel := _to_screen(pe2["x"], pe2["y"]) - pos
 					var pi_along := pi_rel.dot(aim)
 					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
-						Art.text(self, "HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), Art.fs(8),
-							Color(1.0, 0.45, 0.35))
+						_world_label("HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), CALLOUT_ALERT)
 						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
 			# will land if INTERACT fires now — ghost sprite + the 9px trigger
@@ -8760,7 +8815,7 @@ func _draw_players() -> void:
 				var brw := Art.tw(btxt, Art.fs(8))
 				# Warms toward amber in the final second so "almost back" reads.
 				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
-				Art.text(self, btxt, pos + Vector2(-brw / 2.0, -26), Art.fs(8),
+				_world_label(btxt, pos + Vector2(-brw / 2.0, -26),
 					Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
@@ -9566,8 +9621,12 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	if threats.size() > 6:
 		# The cap hides the tail — say so, so a drowned edge still reads as "many"
 		# instead of "exactly six".
-		Art.text(self, "+%d" % (threats.size() - 6),
-			Vector2(606.0, 40.0 if is_top else 350.0), 8, Color(1.0, 0.5, 0.3, 0.75))
+		# Bottom copy honours the reserved-band contract: 350 is LAST_STAND_Y, so in the
+		# colossus finale the plated label would paint into the bottom-docked block.
+		# band_bottom() is SCREEN_BOTTOM in every other frame, so the default y is unchanged.
+		var oy := 40.0 if is_top else minf(350.0, HudIcons.band_bottom(sim))
+		# (The old 0.75 ink alpha is dropped, not floored: it sat under CALLOUT_INK_FLOOR.)
+		_world_label("+%d" % (threats.size() - 6), Vector2(606.0, oy), CALLOUT_OVERFLOW)
 
 
 func _draw_objective_markers() -> void:
