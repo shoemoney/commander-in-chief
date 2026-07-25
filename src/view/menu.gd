@@ -1638,7 +1638,13 @@ func _unhandled_input(ev: InputEvent) -> void:
 	# those contexts (a no-op is safe; the shortcut is a title-tree convenience, not core input).
 	var _f1_blocked := mode == Mode.PAUSE \
 			or (mode in [Mode.OPTS, Mode.DISP, Mode.AUDIO, Mode.REBIND] and _opts_parent == Mode.PAUSE) \
-			or (mode in [Mode.OPTS, Mode.DISP, Mode.AUDIO] and _opts_dirty)
+			or (mode in [Mode.OPTS, Mode.DISP, Mode.AUDIO, Mode.REBIND] and _opts_dirty)
+			# REBIND belongs in BOTH clauses. It was only in the parent==PAUSE one, so
+			# TITLE -> SETUP -> OPTIONS -> (toggle anything) -> CONTROLS -> F1 escaped with
+			# _opts_dirty still latched. That latch is global: open(OPTS) then refuses to
+			# re-snapshot (so a later DISCARD reverts to a stale baseline), main.gd skips the
+			# focus-out settings flush forever, and the resize-save timer re-arms on a write
+			# that can never land.
 	if mode != Mode.HIDDEN and mode != Mode.HOWTO and not _f1_blocked and ev is InputEventKey \
 			and ev.pressed and not ev.echo \
 			and (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode) == _help_code():

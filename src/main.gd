@@ -1805,6 +1805,13 @@ func _physics_process(_delta: float) -> void:
 			_concussion = 0.0
 			_duck = 0.0
 			_sfx.set_concussion(0.0)
+			# Undo the VO duck too. _drive_audio() (the only caller of duck_sfx_under_vo)
+			# does not run on this branch, so pausing while a line was playing left the SFX
+			# bus parked at base-6dB forever. _bus_vol() derives the user's 0-10 level FROM
+			# the bus, so the AUDIO row then reads 5/10 instead of 10/10, _opts_snapshot
+			# captures 5 as the "pristine" baseline, and SAVE *and* DISCARD both persist it —
+			# players were silently losing volume across sessions.
+			_sfx.duck_sfx_under_vo(false, _sfx_base_db)
 			# _drive_audio stops on pause, so the drums would stay frozen at combat
 			# level behind the menu — ease them to the lull instead.
 			_sfx.set_music_intensity(0.0, 0.0)

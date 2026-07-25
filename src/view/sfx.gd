@@ -463,7 +463,12 @@ func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:
 
 
 func vo_active() -> bool:
-	return _vo.playing or _vo_dry.playing
+	## _cmd counts. It was excluded, and it is the LOUDEST and most frequent voice in
+	## the game (a "hit" bark can fire every ~110 frames, "streak" every 60) — so the
+	## one voice players hear most was the one voice that ducked neither the music
+	## (main.gd's 0.45 music duck) nor the SFX bus, and it competed with the gunfire
+	## it is talking over. Both duck paths already key off this predicate.
+	return _vo.playing or _vo_dry.playing or _cmd.playing
 
 
 func _load_mp3_bank_async(dir_path: String, pending: Array[String]) -> void:
