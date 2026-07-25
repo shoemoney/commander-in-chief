@@ -599,6 +599,23 @@ func test_a2_pipeline_vram_reclaimed() -> void:
 		Runner.T.ok(ti.contains("mipmaps/generate=false"), "the 1:1 Kenney %s tile has mipmaps OFF" % tile)
 
 
+func test_ground_tile_is_seamless() -> void:
+	# The ground base is drawn as one repeat-tiled strip per row — a sand card whose
+	# wrap edge doesn't match its own interior would put the grid straight back.
+	var img: Image = (load("res://assets/kenney/sand.png") as Texture2D).get_image()
+	var w := img.get_width()
+	var h := img.get_height()
+	var inner := 0.0
+	var wrap := 0.0
+	for y in h:
+		for x in w - 1:
+			inner += absf(img.get_pixel(x + 1, y).v - img.get_pixel(x, y).v)
+		wrap += absf(img.get_pixel(0, y).v - img.get_pixel(w - 1, y).v)
+	inner /= float(h * (w - 1))
+	wrap /= float(h)
+	Runner.T.ok(wrap <= inner * 1.5, "sand.png wraps seamlessly (wrap %.4f vs inner %.4f)" % [wrap, inner])
+
+
 # --- a2-17: boss phase labels are named (not "PHASE n") ---
 
 func test_a2_boss_phase_names() -> void:
