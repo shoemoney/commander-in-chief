@@ -16,7 +16,7 @@ Godot lives at `/Applications/Godot.app/Contents/MacOS/Godot` (universal binary,
 # class_name script (Godot's global class cache must re-scan). CI does this.
 godot --headless --path . --import
 
-# Full test suite (~seconds; count grows constantly — 661 methods / 12,354 assertions as of 2026-07-24)
+# Full test suite (~seconds; count grows constantly — 679 methods / 14,360 assertions as of 2026-07-25)
 godot --headless --path . -s res://tests/run_tests.gd
 
 # Single suite: filter by substring of the script filename
@@ -27,7 +27,11 @@ SHOT_DIR=/abs/path godot --path . --rendering-method gl_compatibility \
     -s res://tools/screenshots.gd
 ```
 
-**Running a single test suite:** set the `SUITE` env var to a substring of the suite filename (e.g. `SUITE=mechanics`) — the runner filters its `TEST_SCRIPTS` array on it. Each suite is a plain `RefCounted` whose `test_*` methods assert via the `Runner.T.ok/eq` helpers (no GUT addon). ⚠️ A runtime error mid-method silently aborts that method's remaining assertions without failing the run — grep the output for `SCRIPT ERROR`, and hold dict references across `sim.step()` (dead entities are swept from the sim arrays).
+**Running a single test suite:** set the `SUITE` env var to a substring of the suite filename (e.g. `SUITE=mechanics`) — the runner filters its `TEST_SCRIPTS` array on it. Each suite is a plain `RefCounted` whose `test_*` methods assert via the `Runner.T.ok/eq` helpers (no GUT addon). ⚠️ A runtime error mid-method silently aborts that method's remaining assertions without failing the run — hold dict references across `sim.step()` (dead entities are swept from the sim arrays).
+
+**Two ratchets guard the "green but wrong" failure mode — don't neuter either:**
+- **Engine-error gate** (`run_tests.gd::_gate_engine_errors`). Godot's own `ERROR:` lines fail nothing on their own, and the suite was printing ~400 of them while reporting PASS. The runner now reads its own engine log back (`user://logs`, enabled by `debug/file_logging` in `project.godot`, debug builds only) and fails on any un-allowlisted `ERROR:`. `ERROR_ALLOW` is deliberately empty — fix the cause, and only add an entry with a written justification. If the gate reports "no log carried this run's marker", that's parallel Godot processes rotating the log away: run ONE.
+- **Stub parity** (`tests/test_stub_parity.gd`). Every `main.<x>` / `main.get("<x>")` that `src/view/menu.gd` and `src/view/hud.gd` execute must exist on every hand-written `main` stub the headless tests hand them. A missing field aborts the reading call, the row measures as ABSENT, and every assertion still passes — which is exactly how the c4-18 `last_run_score` gap shipped. Add a `main.` read to a view script and you add the field to the stubs, or the suite goes red.
 
 ## Architecture: the sim/view split
 

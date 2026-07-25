@@ -40,6 +40,22 @@ class _NullSfx extends Sfx:
 
 class _StubMain extends Node2D:
 	var best_score := 0
+	# Everything below to _starts exists because test_stub_parity.gd demands the stub answer every
+	# name menu.gd reads off `main` — an unanswered one aborts the reading call mid-way and the row
+	# under test measures as ABSENT with all assertions still green (the c4-18 trap, below).
+	var best_wave := 0
+	var best_dist := 0
+	var _life_wins := 0
+	var _life_kills := 0
+	var _current_seed := 0
+	var sim: SimWorld = null   # attract/PAUSE branches gate on this; a menu test has no live run
+	var _starts: Array = []    # records the mode-launch calls TITLE activation makes
+	func start_game(endless: bool) -> void: _starts.append(["game", endless])
+	func start_daily() -> void: _starts.append(["daily"])
+	func start_boss_rush() -> void: _starts.append(["boss_rush"])
+	func start_arcade(gate: int) -> void: _starts.append(["arcade", gate])
+	func start_watch() -> void: _starts.append(["watch"])
+	func bind_for_glyph(a: String) -> int: return bind(a)
 	var _life_runs := 0
 	var _two_players := false
 	var _hard := false
@@ -5735,7 +5751,9 @@ func test_binds_configfile_roundtrip_and_legacy_reload() -> void:
 	Runner.T.eq(rd.load(path), OK, "the saved file reloads")
 	var saved_kb := {}
 	for a in MainScript.BIND_DEFAULTS:
-		saved_kb[a] = rd.get_value("binds", a, null)
+		# has_section_key guard exactly as _load_bests does it: ConfigFile.get_value errors when the
+		# key is missing AND the default is null, so the read must be gated, not defaulted.
+		saved_kb[a] = rd.get_value("binds", a, null) if rd.has_section_key("binds", a) else null
 	var kb := MainScript.overlay_binds(MainScript.BIND_DEFAULTS, saved_kb, 0)
 	Runner.T.eq(int(kb["fire"]), KEY_J, "FIRE reloads from disk")
 	Runner.T.eq(int(kb["move_up"]), KEY_I, "MOVE UP reloads from disk")
@@ -5744,13 +5762,13 @@ func test_binds_configfile_roundtrip_and_legacy_reload() -> void:
 	Runner.T.eq(int(kb["roll"]), int(MainScript.BIND_DEFAULTS["roll"]), "an unsaved verb reloads at its default")
 	var saved_pad := {}
 	for a in MainScript.PAD_DEFAULTS:
-		saved_pad[a] = rd.get_value("padbinds", a, null)
+		saved_pad[a] = rd.get_value("padbinds", a, null) if rd.has_section_key("padbinds", a) else null
 	var pad := MainScript.overlay_binds(MainScript.PAD_DEFAULTS, saved_pad)
 	Runner.T.eq(int(pad["roll"]), JOY_BUTTON_A, "the pad ROLL button reloads from disk")
 	# c1-18: P2 reloads from its OWN [padbinds2] section, independent of P1's [padbinds].
 	var saved_pad2 := {}
 	for a in MainScript.PAD_DEFAULTS:
-		saved_pad2[a] = rd.get_value("padbinds2", a, null)
+		saved_pad2[a] = rd.get_value("padbinds2", a, null) if rd.has_section_key("padbinds2", a) else null
 	var pad2 := MainScript.overlay_binds(MainScript.PAD_DEFAULTS, saved_pad2)
 	Runner.T.eq(int(pad2["roll"]), JOY_BUTTON_X, "P2's ROLL button reloads from its own section")
 	Runner.T.eq(int(pad["roll"]), JOY_BUTTON_A, "P1's ROLL is unchanged by P2's section (independent maps)")
@@ -5763,7 +5781,7 @@ func test_binds_configfile_roundtrip_and_legacy_reload() -> void:
 	lrd.load(lpath)
 	var lkb := {}
 	for a in MainScript.BIND_DEFAULTS:
-		lkb[a] = lrd.get_value("binds", a, null)
+		lkb[a] = lrd.get_value("binds", a, null) if lrd.has_section_key("binds", a) else null
 	Runner.T.eq(MainScript.overlay_binds(MainScript.BIND_DEFAULTS, lkb), MainScript.BIND_DEFAULTS,
 		"a legacy save with no [binds] reloads at full ship defaults (no wipe)")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))

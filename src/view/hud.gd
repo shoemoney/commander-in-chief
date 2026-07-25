@@ -517,8 +517,8 @@ func _draw_shop_strip(sim: SimWorld) -> float:
 		# not the left-aligned _emit_hud_text price seam), so it neither widens the priced strip nor reads
 		# as a fading price. The row-0 SUPPLIES wheel cue is suppressed for the whole eligible run (see
 		# _draw), so the strip and the cue are never both shown.
-		Art.text_center(self, SHOP_NAMES[kind], sx + SHOP_ICON / 2.0, SHOP_NAME_Y,
-			SHOP_NAME_SIZE, Color(0.86, 0.88, 0.82, icon_a))
+		_emit_shop_name(SHOP_NAMES[kind], sx + SHOP_ICON / 2.0, SHOP_NAME_Y,
+			Color(0.86, 0.88, 0.82, icon_a))
 		# Price immediately to the RIGHT of the icon (strip width unchanged from the old icon+price form),
 		# fading in with the window (a=0 when closed) while the icon slot stays put.
 		# "×" suffix: affordability readable without color vision -- same mark the spend wheel (the primary
@@ -2220,8 +2220,15 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	if frac <= 0.45:
 		_emit_bg_rect(Rect2(x - 1.0, y - 1.0, segs * 3.6 + 1.0, 7.0), PIP_SCRIM)
 	for s in segs:
-		draw_rect(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else Color(0.22, 0.2, 0.18))
+		_emit_mag_seg(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else Color(0.22, 0.2, 0.18))
 	return x + segs * 3.6 + 4.0
+
+
+## One magazine segment. A seam like every other HUD primitive, so a headless capture subclass can
+## run the real _mag_bar with no live draw context (the segments sit INSIDE the bar's own advance,
+## so they are deliberately not part of the row's box sequence).
+func _emit_mag_seg(r: Rect2, col: Color) -> void:
+	draw_rect(r, col)
 
 
 ## c3-01: does a `w`-wide readout at `px` stay within the usable edge (`_fit_full`)? The shared fit
@@ -2546,6 +2553,11 @@ func _text(txt: String, x: float, y: float, col := Color(0.95, 0.96, 0.9), shado
 # pass issues — in bounds, non-overlapping — without a live GL draw context. Defaults draw.
 func _emit_hud_text(txt: String, pos: Vector2, col: Color) -> void:
 	Art.text(self, txt, pos, FONT_SIZE, col)
+# c2-16: the shop strip's CENTERED name line — its own seam (not _emit_hud_text, which is the
+# left-aligned price primitive) so a headless capture subclass can record it separately from the
+# prices and the full _draw frame runs with no live draw context.
+func _emit_shop_name(txt: String, cx: float, y: float, col: Color) -> void:
+	Art.text_center(self, txt, cx, y, SHOP_NAME_SIZE, col)
 func _emit_icon(icon: String, r: Rect2, mod := Color.WHITE) -> void:
 	draw_texture_rect(Art.tex(icon), r, false, mod)
 func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := false) -> void:

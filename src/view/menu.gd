@@ -1182,9 +1182,12 @@ func _apply_kb_bind(action: String, code: int) -> String:
 static func key_label(physical: int) -> String:
 	if physical == 0:
 		return "UNBOUND"
-	var logical := DisplayServer.keyboard_get_keycode_from_physical(physical)
-	if logical != 0:
-		return OS.get_keycode_string(logical)
+	# The headless display server has no keyboard-layout mapping at all — calling it there is a
+	# hard engine ERROR (not a 0 return), which is why the capability is checked, not the result.
+	if DisplayServer.get_name() != "headless":
+		var logical := DisplayServer.keyboard_get_keycode_from_physical(physical)
+		if logical != 0:
+			return OS.get_keycode_string(logical)
 	return OS.get_keycode_string(physical)
 
 

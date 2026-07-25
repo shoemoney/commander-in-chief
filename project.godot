@@ -16,6 +16,15 @@ run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.png"
 
+[debug]
+
+; Debug builds only (the editor binary the tests run under) — the shipped release template is
+; unaffected. run_tests.gd reads this log back to fail the suite on any engine ERROR: line; see
+; the engine-error gate there. max_log_files is raised so parallel Godot runs on the same project
+; can't rotate a live run's log out from under it.
+file_logging/enable_file_logging.debug=true
+file_logging/max_log_files.debug=24
+
 [display]
 
 window/size/viewport_width=640
