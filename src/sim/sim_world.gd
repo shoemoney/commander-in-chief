@@ -138,7 +138,6 @@ const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
 const BARREL_SPACING := 420 * F_ONE
-const BARREL_CLUSTER_GAP := 18 * F_ONE
 const BARREL_FUSE_TICKS := 8         # chained barrels cook this long before detonating (rollable ripple)
 const MG_NEST_AIM_TICKS := 30       # telegraph before the first round of a burst
 const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
@@ -409,11 +408,7 @@ const FORK_GATES := [2, 4]             # the route-fork gates: their approach ba
 const CALM_BAND_SEG := 5
 const RUINS_SEG := 3               # c3 5v: the ruins sector — dog-leg maze chokes, wall-heavy cover, half-speed rubble
 const CHOKE_OFF_LO := 150 * F_ONE
-const CHOKE_OFF_HI := 390 * F_ONE
-const CHOKE_BITE := 240 * F_ONE
 const ROCK_SPACING := 260 * F_ONE
-const ROCK_HALF_W := 16 * F_ONE   # sized to the DRAWN rock (KIMK pin: art == collision)
-const ROCK_HALF_H := 12 * F_ONE
 # Cover TIERS (c2 3v: one-size rocks made every LOS puzzle "is there a rock
 # between us"). Each streamed cover carries a "kind"; extents + solidity read
 # from this table (art == collision holds — the view scales each sprite to

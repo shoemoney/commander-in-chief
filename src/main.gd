@@ -1182,10 +1182,6 @@ func _clipboard_text() -> String:
 	return DisplayServer.clipboard_get()
 
 
-func _clipboard_seed() -> int:
-	return _parse_seed_text(_clipboard_text())
-
-
 const SHARE_PREFIX := "COMMANDER IN CHIEF"   # c1-14: share-card title — the single source _copy_share_text prints and the parser recognizes
 static var _seed_re: RegEx   # c1-14: cached trailing "seed N" field matcher (whole-word, digits to end)
 
@@ -1241,16 +1237,6 @@ static func _seed_from_digits(s: String) -> int:
 	if canon.length() == _MAX_I64_STR.length() and canon > _MAX_I64_STR:
 		return -1
 	return canon.to_int()
-
-
-func start_seed_from_clipboard() -> void:
-	# CHALLENGE SEED: load the clipboard's seed. The menu previews + gates this now,
-	# so an empty clipboard never reaches here; the banner stays as a belt-and-braces.
-	var sd := _clipboard_seed()
-	if sd < 0:
-		show_banner("CLIPBOARD HAS NO SEED")
-		return
-	start_seeded(sd)
 
 
 func start_watch() -> void:
