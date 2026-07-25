@@ -29,7 +29,7 @@ func test_wave_one_spawns_and_escalates() -> void:
 	for pk in sim.pickups:
 		if pk.get("cost", 0) > 0:
 			shop_crates += 1
-	Runner.T.eq(shop_crates, 3, "shop stocked three priced crates (ammo/grenade/vest; airstrike is wheel-only)")
+	Runner.T.eq(shop_crates, 3, "shop stocked three priced crates (3 drawn from CRATE_POOL; airstrike is wheel-only)")
 	# Ride out the intermission: wave 2 with a bigger budget.
 	for i in SimWorld.WAVE_INTERMISSION_TICKS + 2:
 		sim.step([_idle()])
@@ -795,3 +795,168 @@ func test_supply_pod_reports_when_it_truly_cannot_land() -> void:
 	Runner.T.ok(not blocked.is_empty(), "an impossible pod REPORTS instead of vanishing")
 	Runner.T.eq(sim.rocks.size(), rocks0, "the blocked pod planted no rock")
 	Runner.T.eq(sim.sandbags.size(), bags0, "player-paid cover is never recycled out from under them")
+
+
+func _clear_wave(sim: SimWorld) -> void:
+	## Kill the field by fiat until the shop opens (the intermission's own entry point).
+	for _i in 900:
+		sim.step([_idle()])
+		for e in sim.enemies:
+			e["alive"] = false
+		if sim.intermission_ticks > 0:
+			return
+
+
+func test_shop_crates_draw_from_the_wider_pool() -> void:
+	# The offer used to be a LITERAL [ammo, grenade, vest] at three fixed x's every
+	# single wave — a ritual, not a read. It now draws 3 of CRATE_POOL, so which
+	# goods are on the ground varies wave to wave (and seed to seed).
+	var seen := {}
+	for seed_i in 24:
+		var sim := SimWorld.new(seed_i * 13 + 1, 1, "endless")
+		_clear_wave(sim)
+		Runner.T.ok(sim.intermission_ticks > 0, "seed %d opened the shop" % seed_i)
+		var kinds: Array[int] = []
+		var xs := {}
+		for pk in sim.pickups:
+			if pk.get("cost", 0) <= 0:
+				continue
+			kinds.append(pk["kind"])
+			xs[pk["x"]] = true
+			Runner.T.ok(SimWorld.CRATE_POOL.has(pk["kind"]),
+				"crate kind %d came from the pool" % pk["kind"])
+			Runner.T.ok(pk["kind"] != 3,
+				"the airstrike stays wheel-only (a priced crate auto-buys on proximity)")
+			Runner.T.ok(pk["cost"] > 0, "every shop crate is priced")
+		Runner.T.eq(kinds.size(), 3, "three crates stocked")
+		Runner.T.eq(xs.size(), 3, "one crate per slot — no two crates share an x")
+		Runner.T.eq({kinds[0]: 0, kinds[1]: 0, kinds[2]: 0}.size(), 3,
+			"the draw is WITHOUT replacement — three distinct goods")
+		kinds.sort()
+		seen[str(kinds)] = true
+	Runner.T.ok(seen.size() >= 4,
+		"the offer actually varies across seeds (saw %d distinct offers, want >= 4)" % seen.size())
+
+
+func test_staple_crate_prices_did_not_move_with_the_wider_pool() -> void:
+	# The pool draw must not re-price the goods that were already in it: a crate's
+	# cost is still _econ_scale(base), i.e. exactly what the wheel charges.
+	var sim := SimWorld.new(3, 1, "endless")
+	sim.wave = 7   # 2 depth steps -> +50%
+	for i in SimWorld.CRATE_POOL.size():
+		var kind: int = SimWorld.CRATE_POOL[i]
+		var base: int = SimWorld.CRATE_POOL_BASE[i]
+		Runner.T.eq(sim._econ_scale(base), base * 3 / 2, "crate base %d rides the depth curve" % base)
+		if kind <= 2:
+			Runner.T.eq(sim._econ_scale(base), sim._supply_cost(kind),
+				"crate kind %d still costs exactly what the wheel charges" % kind)
+
+
+func test_intermission_shortens_with_depth() -> void:
+	var sim := SimWorld.new(3, 1, "endless")
+	sim.wave = 1
+	Runner.T.eq(sim._intermission_len(), SimWorld.WAVE_INTERMISSION_TICKS,
+		"wave 1 keeps the full breather (you're still learning the shop)")
+	sim.wave = 6
+	Runner.T.ok(sim._intermission_len() < SimWorld.WAVE_INTERMISSION_TICKS,
+		"the breather shrinks as the run deepens")
+	sim.wave = 40
+	Runner.T.eq(sim._intermission_len(), SimWorld.WAVE_INTERMISSION_MIN_TICKS,
+		"deep waves bottom out at the floor instead of 5s of dead air")
+	sim.wave = 4000
+	Runner.T.eq(sim._intermission_len(), SimWorld.WAVE_INTERMISSION_MIN_TICKS,
+		"the floor holds forever (no negative intermission)")
+
+
+func test_ready_up_ends_the_intermission_early() -> void:
+	var sim := SimWorld.new(5, 1, "endless")
+	_clear_wave(sim)
+	var left0: int = sim.intermission_ticks
+	Runner.T.ok(left0 > SimWorld.READY_HOLD_TICKS + 10, "plenty of window left to skip")
+	var ready := SimInput.new()
+	ready.revive = true
+	var called := false
+	for _i in SimWorld.READY_HOLD_TICKS:
+		sim.step([ready])
+		for ev in sim.events:
+			if ev.get("t", "") == "wave_ready":
+				called = true
+	Runner.T.ok(called, "holding REVIVE for READY_HOLD_TICKS calls the wave in")
+	Runner.T.eq(sim.intermission_ticks, 0, "the intermission ended early")
+	Runner.T.eq(sim.ready_hold, 0, "the hold counter resets with the window")
+	Runner.T.eq(sim.wave, 2, "the next wave started on the same tick the window closed")
+	var stock := 0
+	for pk in sim.pickups:
+		if pk.get("cost", 0) > 0:
+			stock += 1
+	Runner.T.eq(stock, 0, "an early deploy packs the unbought stock up like a normal expiry")
+
+
+func test_ready_up_needs_a_sustained_hold_and_the_whole_living_party() -> void:
+	var sim := SimWorld.new(5, 1, "endless")
+	_clear_wave(sim)
+	var ready := SimInput.new()
+	ready.revive = true
+	# Taps don't count: the counter resets the moment the press lapses.
+	for _i in SimWorld.READY_HOLD_TICKS * 2:
+		sim.step([ready])
+		sim.step([_idle()])
+	Runner.T.ok(sim.intermission_ticks > 0, "mashing REVIVE never skips the shop — it takes a HOLD")
+	Runner.T.eq(sim.ready_hold, 0, "a lapsed hold resets to zero")
+
+	# 2P: one player alone can't deploy the party out of the shop.
+	var two := SimWorld.new(5, 2, "endless")
+	for _i in 900:
+		two.step([_idle(), _idle()])
+		for e in two.enemies:
+			e["alive"] = false
+		if two.intermission_ticks > 0:
+			break
+	Runner.T.ok(two.intermission_ticks > 0, "2P shop open")
+	for _i in SimWorld.READY_HOLD_TICKS + 5:
+		two.step([ready, _idle()])
+	Runner.T.ok(two.intermission_ticks > 0, "P1 alone cannot end P2's shopping trip")
+	# And a DOWNED partner gives REVIVE its rescue meaning straight back.
+	two.players[1]["alive"] = false
+	for _i in SimWorld.READY_HOLD_TICKS + 5:
+		two.step([ready, ready])
+	Runner.T.ok(two.intermission_ticks > 0, "with a body on the floor, REVIVE is a rescue — not a skip")
+
+
+func test_airstrike_wipe_scores_and_carries_the_streak() -> void:
+	# The wipe was a DOMINATED buy: no coin AND no score, and no_score also blocked
+	# the streak feed, so a full-screen clear silently dropped an in-flight streak
+	# (its bonus, its surge, its token). Reduced-rate score + streak makes it a
+	# situational answer instead of a trap.
+	var sim := SimWorld.new(11, 1, "endless")
+	var p := sim.players[0]
+	for i in 6:
+		sim._spawn_enemy(p["x"] + (i - 3) * 40 * Fixed.ONE, p["y"] - 120 * Fixed.ONE, false)
+	sim.kill_streak = 7
+	sim.kill_streak_timer = SimWorld.KILL_STREAK_WINDOW_TICKS
+	var chest0: int = sim.war_chest
+	var score0: int = sim.score
+	sim._fire_mission()
+	Runner.T.eq(sim.war_chest, chest0, "the wipe still mints NO coin (no money printer)")
+	Runner.T.ok(sim.score > score0, "wipe kills score instead of paying nothing at all")
+	var full_rate: int = 6 * SimWorld.COIN_RUSHER * 10
+	Runner.T.ok(sim.score - score0 < full_rate,
+		"...but at a reduced rate (%d < %d), so hand-clearing still pays more"
+		% [sim.score - score0, full_rate])
+	Runner.T.eq(sim.kill_streak, 13, "the in-flight streak survived the wipe and counted the bodies")
+	Runner.T.eq(sim.kill_streak_timer, SimWorld.KILL_STREAK_WINDOW_TICKS,
+		"the streak window was refreshed — a wipe no longer strands a 20-streak on an empty screen")
+
+
+func test_pilot_execution_still_pays_absolutely_nothing() -> void:
+	# score_pct must not have opened a back door on the no_score cases.
+	var sim := SimWorld.new(11, 1, "endless")
+	var pilot := {"x": 100 * Fixed.ONE, "y": sim.camera_top + 100 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "pilot"}
+	sim.enemies.append(pilot)
+	sim.kill_streak = 4
+	sim.kill_streak_timer = 30
+	var score0: int = sim.score
+	sim._kill_enemy(pilot)
+	Runner.T.eq(sim.score, score0, "executing the rescue target still scores nothing")
+	Runner.T.eq(sim.kill_streak, 4, "and still cannot keep a combo alive")

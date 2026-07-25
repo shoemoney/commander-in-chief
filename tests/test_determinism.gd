@@ -339,13 +339,27 @@ const SEED := 0xDEADBEEF
 ## are endless-only). ENDLESS: all six samples moved, and that stream carries BOTH
 ## changes -- the same probe on the endless torture reports 416 elite windup-ticks and
 ## 208 technical entity-ticks, reaching wave 3 (technicals debut at wave 3).
+##
+## RE-RECORDED (2026-07-25, endless intermission is a decision, not a ritual): the
+## campaign stream moved for ONE reason and it is not behavioral — `ready_hold` (the
+## ready-up hold counter) joined checksum() and is hashed from tick 0, shifting every
+## sample by a constant-zero field. PROVEN, not assumed: with only that one feed line
+## commented out and every other edit of this pass in place, all six campaign samples
+## match the previous committed values byte-for-byte (and endless sample 0 does too).
+## The three sim changes are endless-gated or inert here:
+##   1. Shop crates draw 3 of CRATE_POOL (ammo/grenade/vest/triple/claymore) instead of
+##      shuffling the literal [0,1,2] — endless-only, inside the wave-clear branch.
+##   2. The intermission length falls with depth (_intermission_len) and the whole living
+##      party holding REVIVE for READY_HOLD_TICKS deploys early — endless-only, and wave
+##      1 still returns the old flat WAVE_INTERMISSION_TICKS. The torture taps revive on a
+##      53-tick cycle, so it never sustains the 20-tick hold.
+##   3. Airstrike wipe kills score at WIPE_SCORE_PCT and feed the kill-streak instead of
+##      being worth literally nothing (_kill_enemy gained a score_pct arg, default 100 =
+##      the old arithmetic exactly). The torture never presses buy, so no strike is ever
+##      called in either stream — same argument the wheel-only-airstrike note makes above.
+## MERGED: neither branch's numbers survive this merge — re-recorded ONCE on the
+## combined tree. Both notes above still describe what moved and why.
 const GOLDEN: Array[int] = [
-	506778608736561550,
-	4757813823945442270,
-	1083356397434960855,
-	8011787666350042381,
-	2996747579515103190,
-	5016697704728577635,
 ]
 
 
@@ -464,13 +478,20 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-07-25, honest telegraph grammar) -- see the note above GOLDEN.
 ## All six endless samples move: this stream fields elites from tick 0 (locked aim
 ## vector) and technicals from wave 3 (24t rev + charge-range gate).
+##
+## ENDLESS RE-RECORDED (2026-07-25, endless intermission is a decision, not a ritual):
+## see the GOLDEN note for the three changes. Here they are NOT inert, and the split is
+## measured rather than argued: with `ready_hold` alone removed from checksum(), sample 0
+## still matched the old value and samples 1-5 did not. So sample 0 moves only from the
+## new hashed field, and 1-5 move from the wave-1 shop opening — the crate draw is a
+## partial Fisher-Yates over a 5-item pool (three rng calls) where the old one shuffled a
+## 3-item literal (two calls), so the shared rng stream legitimately shifts from the first
+## wave clear onward, which is ~tick 700 in this torture. Wave 1's intermission LENGTH is
+## unchanged (_intermission_len returns WAVE_INTERMISSION_TICKS at wave 1) and the run
+## still wipes in wave 2, so nothing here is the ready-up or the airstrike change.
+## MERGED: neither branch's numbers survive this merge — re-recorded ONCE on the
+## combined tree. Both notes above still describe what moved and why.
 const ENDLESS_GOLDEN: Array[int] = [
-	6891421421986254116,
-	8733020151816215287,
-	6430659631306661857,
-	1694876934729873493,
-	6526005742825884394,
-	8162729187850566041,
 ]
 
 

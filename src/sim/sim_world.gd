@@ -310,11 +310,27 @@ const ARENA_LAYOUTS := [
 ]
 const WAVE_ENEMIES_PER_WAVE := 2
 const WAVE_SPAWN_INTERVAL_TICKS := 20
-const WAVE_INTERMISSION_TICKS := 300
+const WAVE_INTERMISSION_TICKS := 300   # wave-1 length; shrinks with depth (see _intermission_len)
+const WAVE_INTERMISSION_MIN_TICKS := 120
+const READY_HOLD_TICKS := 20           # hold REVIVE this long (whole living party) to deploy early
 const SHOP_AMMO_COST := 30
 const SHOP_GRENADE_COST := 30
 const SHOP_VEST_COST := 60
 const SHOP_AIRSTRIKE_COST := 100
+const SHOP_TRIPLE_COST := 120        # crate-only big ticket: a permanent 3-round fan, above the airstrike
+const SHOP_CLAYMORE_COST := 50       # crate-only: one carried charge (grenade 30 < claymore < vest 60)
+# Endless shop crate pool, as PICKUP kinds + their pre-scale base prices. The
+# three slots draw 3 OF THESE (Fisher-Yates on the seeded rng), so the offer is
+# a read instead of the same [ammo, grenade, vest] rank every single wave.
+# PERSISTENT goods only: a timed capsule (pierce/spread/rend/smoke) would start
+# burning down the instant it's grabbed, i.e. during the shopping window with
+# nothing to shoot, and the flashbang would resolve into an empty arena.
+# Airstrike (3) still stays out — a priced crate is bought on PROXIMITY, so it
+# would call a strike on an empty screen; it remains a telegraphed wheel buy.
+const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8]
+const CRATE_POOL_BASE: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST,
+	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST]
+const WIPE_SCORE_PCT := 25           # airstrike screen-clear kills score at a quarter rate (see _fire_mission)
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
 const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
@@ -594,6 +610,7 @@ var wave_spawn_cd: int = 0
 var wave_mod: int = 0              # endless-only wave mutator (0 none, 1 blitz, 2 elite-guard, 3 spotter, 4 payday, 5 night, 6 frenzy, 7 marksmen, 8 bombardment)
 var pressure_side: int = -1        # c3 7v: endless spawn pressure quadrant (0 left/1 center/2 right, -1 none); rotates every 3rd wave so the camp SPOT migrates
 var intermission_ticks: int = 0
+var ready_hold: int = 0            # ticks the whole living party has held REVIVE to deploy early
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
 var flash_ticks: int = 0           # flashbang stun: field enemies skip their step while > 0
 var colossus: Dictionary = {}
@@ -832,7 +849,7 @@ func step(inputs: Array) -> void:
 			_fire_mission()
 	_step_bunkers()
 	if mode == "endless":
-		_step_waves()
+		_step_waves(inputs)
 		_step_mast_hazard()   # c3 3v: the central mast periodically denies its own orbit
 		# Sappers are ENDLESS-ONLY, but _step_mines() (the only code that detonates or
 		# culls a laid mine) ran only in the campaign branch — so every mine a Sapper
@@ -1641,10 +1658,17 @@ func _fire_mission() -> void:
 	## objective is not a hostile, and an unaimed 100-coin buy silently
 	## deleting the 100-coin ransom read as the game cheating. Mints NO coin —
 	## a 100-coin buy that reaped a full screen's bounty was a money printer.
+	## Score, though, was ZEROED — and zero score also meant zero streak, so a
+	## wipe silently dropped an in-flight 20-streak (its 100% bonus, its surge and
+	## its token) on top of paying nothing. Clearing the same screen by hand beat
+	## buying it by ~1700 points: a strictly DOMINATED buy, i.e. a trap. Wipe kills
+	## now score at WIPE_SCORE_PCT and carry the streak instead of breaking it —
+	## still a bad way to farm (quarter rate, no coin, and you paid for it), but a
+	## real answer to a screen you cannot clear in time.
 	events.append({"t": "explosion", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
-			_kill_enemy(e, true, true)
+			_kill_enemy(e, true, false, WIPE_SCORE_PCT)
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -1778,9 +1802,9 @@ func _supply_full(p: Dictionary, kind: int) -> bool:
 func _mint_token(x: int, y: int) -> void:
 	## Commendation mint: only the two already-telegraphed peaks pay (streak-20
 	## surge, flawless gate) — no new tiers to teach. Cap 2 = starting value
-	## (test: a run crossing 3 milestones holds 2). Airstrike wipes can't feed
-	## kill_streak (no_score) and the MG Nest is streak-excluded, so there is
-	## no low-risk token farm.
+	## (test: a run crossing 3 milestones holds 2). The MG Nest is streak-excluded,
+	## and an airstrike wipe (which CAN now carry a streak) mints no coin and costs
+	## more than a token is worth, so there is no low-risk token farm.
 	if tokens < 2:
 		tokens += 1
 		events.append({"t": "token_mint", "x": x, "y": y, "n": tokens})
@@ -2428,10 +2452,11 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 	_explode(bl["x"], bl["y"], no_coin, "barrel")
 
 
-func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
-	## no_score: unaimed screen-wipes (airstrike) mint no score and can't feed
-	## the kill-streak either — a 100-coin buy vaulting the streak tiers was
-	## a leaderboard printer. Barrel kills (no_coin only) still score.
+func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct := 100) -> void:
+	## no_score: no score AND no kill-streak feed (the rescue pilot — executing him
+	## was a free combo-keepalive). Barrel kills (no_coin only) still score.
+	## score_pct: score paid at a reduced rate while still feeding the streak —
+	## the airstrike wipe's terms (see _fire_mission).
 	e["alive"] = false
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	if e["kind"] == "mg_nest":
@@ -2469,7 +2494,7 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 	# Last Stand doubles the score credit — the finale strips revives, so reward
 	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
 	if not no_score:
-		score += coin * 10 * (2 if last_stand else 1)
+		score += coin * 10 * (2 if last_stand else 1) * score_pct / 100
 	# Kill-streak: consecutive kills inside the window escalate a SCORE-ONLY
 	# bonus at the tiers the view telegraphs (5/10/20). War Chest stays flat —
 	# the streak rewards aggression on the leaderboard, not the economy.
@@ -2486,7 +2511,7 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 		elif kill_streak >= 5:
 			streak_bonus_pct = 25
 		if streak_bonus_pct > 0:
-			score += (coin * 10 * streak_bonus_pct) / 100
+			score += (coin * 10 * streak_bonus_pct * score_pct) / 10000
 		if kill_streak == 20:
 			# The 20-streak stops being just a number: every alive fighter gets a
 			# ~3s adrenaline surge (reuses the tank-bail speed boost), so the reward
@@ -4493,7 +4518,30 @@ func _wave_armor() -> int:
 	return 1 + (wave - 13) / 6
 
 
-func _step_waves() -> void:
+func _intermission_len() -> int:
+	## The breather shrinks as the run deepens: 5s at wave 1 (you still need to
+	## learn the shop) down to a 2s floor by wave ~16, where the buy is muscle
+	## memory and a flat 5s of standing in an empty arena is just noise.
+	return maxi(WAVE_INTERMISSION_MIN_TICKS, WAVE_INTERMISSION_TICKS - (wave - 1) * 12)
+
+
+func _ready_up(inputs: Array) -> bool:
+	## True while EVERY living player holds REVIVE and nobody is down. The
+	## down-player check is what keeps REVIVE's real meaning intact — the moment a
+	## body is on the floor, the same press goes back to being a rescue and can't
+	## also be skipping the shop. Stateless apart from the hold counter, so 2P
+	## can't have one player deploy the other out of the shop.
+	if players.is_empty() or inputs.size() < players.size():
+		return false
+	for i in players.size():
+		if not players[i]["alive"]:
+			return false
+		if not (inputs[i] as SimInput).revive:
+			return false
+	return true
+
+
+func _step_waves(inputs: Array = []) -> void:
 	# Supply-drop TTL: the contested beat expires instead of pinning rushers
 	# forever. Torture-inert (no drop exists before wave 4).
 	for di in range(pickups.size() - 1, -1, -1):
@@ -4505,7 +4553,21 @@ func _step_waves() -> void:
 				pickups.remove_at(di)
 	if intermission_ticks > 0:
 		intermission_ticks -= 1
+		# READY UP: the whole living party holding REVIVE ends the breather early.
+		# The intermission was a flat 5s at every depth — longer than the wave-1
+		# fight and dead air by wave 40 — so the length now falls with depth AND
+		# the players can call it. Reuses an existing bind rather than growing the
+		# input word: REVIVE does nothing while nobody is down, and _ready_up()
+		# gives it straight back the moment anyone is (see there).
+		if _ready_up(inputs):
+			ready_hold += 1
+			if ready_hold >= READY_HOLD_TICKS:
+				intermission_ticks = 0
+				events.append({"t": "wave_ready", "x": SCREEN_CX, "y": camera_top + 150 * F_ONE})
+		else:
+			ready_hold = 0
 		if intermission_ticks == 0:
+			ready_hold = 0
 			# Unbought shop stock is packed up when the next wave lands.
 			for k in range(pickups.size() - 1, -1, -1):
 				if pickups[k].get("cost", 0) > 0:
@@ -4602,7 +4664,7 @@ func _step_waves() -> void:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
 	elif _wave_hostiles_cleared() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
-		intermission_ticks = WAVE_INTERMISSION_TICKS
+		intermission_ticks = _intermission_len()
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
 		# this wave pays a bonus, so cautious and reckless play stop earning alike.
@@ -4615,21 +4677,27 @@ func _step_waves() -> void:
 			score += 1500
 			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
-		# Shuffle the crate→slot mapping each wave so the shop stays a live read
-		# (far-left ≠ always ammo), Fisher-Yates on the seeded SimRng.
-		# Airstrike (kind 3) is deliberately absent: it stays a WHEEL-ONLY
-		# telegraphed buy so a priced crate can't auto-buy it into an empty shop
-		# on proximity. Ammo/grenade/vest remain the crate pool.
-		var kinds := [0, 1, 2]
-		for si in range(2, 0, -1):
+		# DRAW 3 FROM CRATE_POOL (partial Fisher-Yates on the seeded SimRng): both
+		# WHICH crates are offered and which slot they land in change every wave, so
+		# the shop is a live read instead of the same three items at the same three
+		# x's forever. The staples still show often enough (3 of 5), and the wheel
+		# sells ammo/grenade/vest/airstrike/sandbag at all times, so a pool draw can
+		# never strand a player without restock.
+		var pool := CRATE_POOL.duplicate()
+		var base := CRATE_POOL_BASE.duplicate()
+		for si in range(pool.size() - 1, pool.size() - 4, -1):
 			var sj := rng.range_i(0, si)
-			var tmp: int = kinds[si]
-			kinds[si] = kinds[sj]
-			kinds[sj] = tmp
+			var tmp: int = pool[si]
+			pool[si] = pool[sj]
+			pool[sj] = tmp
+			var tmpc: int = base[si]
+			base[si] = base[sj]
+			base[sj] = tmpc
 		var xs := [190, 350, 510]
 		for ci in 3:
-			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": kinds[ci],
-				"cost": _supply_cost(kinds[ci])})
+			var pi: int = pool.size() - 1 - ci
+			pickups.append({"x": xs[ci] * F_ONE, "y": shop_y, "kind": pool[pi],
+				"cost": _econ_scale(base[pi])})
 		# c4 2v SHOP BARRICADES: from wave 2 on, wall the shop wheel with 4
 		# destructible L-shaped world-bag clusters at the shop cluster's corners
 		# so the tactical reset is a regroup pocket, not a wide-open dead-end.
@@ -5578,6 +5646,7 @@ func checksum() -> int:
 	if mode == "endless":
 		h = feed.call(wave_mod, h)   # endless-only: campaign checksums unchanged
 	h = feed.call(intermission_ticks, h)
+	h = feed.call(ready_hold, h)
 	h = feed.call(pending_airstrike, h)
 	h = feed.call(flash_ticks, h)
 	h = feed.call(int(last_stand), h)
