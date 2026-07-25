@@ -75,11 +75,107 @@ func test_strafe_sprays_and_volley_strikes() -> void:
 		sim.step([_idle()])
 	Runner.T.ok(boss["x"] != start_x, "boss strafes during the first half-cycle")
 	Runner.T.ok(sim.enemy_bullets.size() > 0 or not sim.players[0]["alive"], "spray produced enemy fire")
-	# Jump to the volley phase and cross the strike timestamps.
-	boss["phase_t"] = 199
+	# Jump to the volley phase and cross the first strike timestamp.
+	boss["phase_t"] = int(SimWorld.BOSS_MORTAR_TICKS[0]) - 1
 	var strikes_before := sim.strikes.size()
 	sim.step([_idle()])
-	Runner.T.ok(sim.strikes.size() > strikes_before, "mortar volley called a tracked strike (t=200)")
+	Runner.T.ok(sim.strikes.size() > strikes_before,
+		"mortar volley called a tracked strike (t=%d)" % SimWorld.BOSS_MORTAR_TICKS[0])
+
+
+func test_act_two_is_reached_before_any_plausible_kill() -> void:
+	## PACING: the mortar act has to open before the gunship can plausibly die,
+	## or act two — and the entire telegraph kit built for it — is content most
+	## runs never see. Bound the fastest kills a 1P campaign player can produce
+	## and require the act boundary to sit under both.
+	var bullet_only: int = SimWorld.BOSS_HP * SimWorld.FIRE_COOLDOWN_TICKS
+	var frags: int = (SimWorld.BOSS_HP + SimWorld.BOSS_GRENADE_DAMAGE - 1) / SimWorld.BOSS_GRENADE_DAMAGE
+	# Perfect frag rush: (frags - 1) throw cooldowns plus the last one's airtime
+	# (thrown up at ZVEL, pulled back by GRAV).
+	var airtime: int = 2 * SimWorld.GRENADE_ZVEL / SimWorld.GRENADE_GRAV
+	var frag_only: int = (frags - 1) * SimWorld.GRENADE_COOLDOWN_TICKS + airtime
+	var fastest: int = mini(bullet_only, frag_only)
+	Runner.T.ok(SimWorld.BOSS_STRAFE_TICKS < fastest,
+		"act two opens (t=%d) before the fastest plausible kill (%d ticks)"
+			% [SimWorld.BOSS_STRAFE_TICKS, fastest])
+	Runner.T.ok(int(SimWorld.BOSS_MORTAR_TICKS[0]) < fastest,
+		"the first shell fires (t=%d) before that kill too — act two is felt, not glimpsed"
+			% SimWorld.BOSS_MORTAR_TICKS[0])
+	# ...and reaching it must not have been bought with a longer fight: the
+	# cycle got SHORTER, and the mortar act kept its full 180-tick shape.
+	Runner.T.ok(SimWorld.BOSS_CYCLE_TICKS <= 360, "the boss cycle is no longer than it was")
+	Runner.T.eq(SimWorld.BOSS_CYCLE_TICKS - SimWorld.BOSS_STRAFE_TICKS, 180,
+		"the mortar act keeps its full length — the strafe act is what shrank")
+
+
+func test_mortar_tick_tables_are_one_source_of_truth() -> void:
+	## TELEGRAPH HONESTY: the HP-bar countdown and the hull flash both read
+	## boss_mortar_ticks(), so the tables must agree with each other, and every
+	## shell must sit inside the mortar act it belongs to.
+	Runner.T.eq(SimWorld.boss_mortar_ticks(0), SimWorld.BOSS_MORTAR_TICKS, "tier 0 = base volley")
+	Runner.T.eq(SimWorld.boss_mortar_ticks(1), SimWorld.BOSS_MORTAR_TICKS, "tier 1 = base volley")
+	Runner.T.eq(SimWorld.boss_mortar_ticks(2).size(), 4, "tier 2 adds a 4th shell")
+	Runner.T.eq(SimWorld.boss_mortar_ticks(3).size(), 5, "tier 3 adds a 5th")
+	Runner.T.eq(SimWorld.boss_mortar_ticks(9), SimWorld.boss_mortar_ticks(3), "tier caps at 3")
+	for tier in [0, 1, 2, 3]:
+		var ts: Array = SimWorld.boss_mortar_ticks(tier)
+		Runner.T.eq(ts.slice(0, SimWorld.BOSS_MORTAR_TICKS.size()), SimWorld.BOSS_MORTAR_TICKS,
+			"tier %d starts with the base three shells" % tier)
+		var prev := -1
+		for t in ts:
+			Runner.T.ok(t > prev, "shells are ordered (tier %d)" % tier)
+			Runner.T.ok(t >= SimWorld.BOSS_STRAFE_TICKS and t < SimWorld.BOSS_CYCLE_TICKS,
+				"shell t=%d fires inside the mortar act (tier %d)" % [t, tier])
+			prev = t
+
+
+func test_deep_tier_shells_actually_fire() -> void:
+	## The 4th/5th shells the countdown now promises must be real: step the boss
+	## across each tier-3 strike tick and count the strikes it calls.
+	var sim := SimWorld.new(41, 1)
+	var gate := _inject_boss_gate(sim)
+	var boss: Dictionary = gate["boss"]
+	sim.wave = 15   # tier 3
+	for t in SimWorld.boss_mortar_ticks(3):
+		boss["phase_t"] = int(t) - 1
+		var before := sim.strikes.size()
+		sim._step_one_boss(boss)
+		Runner.T.ok(sim.strikes.size() > before, "tier-3 shell at t=%d called a strike" % t)
+	# A campaign gunship (tier 0) does NOT fire the deep-tier shells.
+	sim.wave = 0
+	for t in [SimWorld.boss_mortar_ticks(3)[3], SimWorld.boss_mortar_ticks(3)[4]]:
+		boss["phase_t"] = int(t) - 1
+		var before2 := sim.strikes.size()
+		sim._step_one_boss(boss)
+		Runner.T.eq(sim.strikes.size(), before2, "tier 0 stays silent at t=%d" % t)
+
+
+func test_strafe_opener_locks_the_player_it_will_track() -> void:
+	## TELEGRAPH HONESTY: the act-one opener used to ship the boss's own x as a
+	## "sweep lane" — a lane it never sweeps, since every spray re-aims at the
+	## nearest player. It now names that player so the view can paint the lock.
+	var sim := SimWorld.new(41, 1)
+	var gate := _inject_boss_gate(sim)
+	var boss: Dictionary = gate["boss"]
+	var p: Dictionary = sim.players[0]
+	boss["phase_t"] = SimWorld.BOSS_CYCLE_TICKS - 1   # next step wraps to t == 0
+	sim._step_one_boss(boss)
+	var lock := {}
+	for ev in sim.events:
+		if ev["t"] == "strafe_lock":
+			lock = ev
+		Runner.T.ok(ev["t"] != "strafe_lane", "the fictional sweep-lane event is gone")
+	Runner.T.ok(not lock.is_empty(), "the strafe act opens with a lock event")
+	Runner.T.eq(lock.get("tx", 0), p["x"], "the lock names the tracked player's x")
+	Runner.T.eq(lock.get("ty", 0), p["y"], "the lock names the tracked player's y")
+	# No live player -> no target claimed (the view draws no reticle).
+	p["alive"] = false
+	sim.events.clear()
+	boss["phase_t"] = SimWorld.BOSS_CYCLE_TICKS - 1
+	sim._step_one_boss(boss)
+	for ev in sim.events:
+		if ev["t"] == "strafe_lock":
+			Runner.T.ok(not ev.has("tx"), "with nobody alive the opener claims no target")
 
 
 func test_enemy_bullet_kills_and_roll_dodges() -> void:

@@ -512,15 +512,29 @@ const BOSS_GRENADE_DAMAGE := 8
 const BOSS_HIT_RADIUS := 20 * F_ONE
 const BOSS_SPEED := 2 * F_ONE
 const BOSS_Y_OFFSET := 40 * F_ONE
-const BOSS_CYCLE_TICKS := 360
+const BOSS_CYCLE_TICKS := 300
+# How much of the cycle act one (the strafing run) owns; the mortar act owns the
+# rest. This used to be an implicit BOSS_CYCLE_TICKS / 2 = 180, which put the
+# first shell at t=200 — but a 1P campaign gunship (40 HP, 1/bullet at an 8t
+# cooldown, 8/grenade at a 30t cooldown + 32t airtime) dies somewhere between
+# ~150 ticks (a perfect five-frag rush) and ~320, so the whole mortar act and
+# its telegraph kit was content most runs never reached. Act one now ends at
+# 120: even the theoretical fastest kill crosses it, and the mortar act keeps
+# its full 180-tick shape, so the fight is not one tick longer.
+const BOSS_STRAFE_TICKS := 120
 # The four gunship-arena cover bags as [x, y_off_from_gate] pairs — the ONE
 # source of truth shared by the arena authoring AND the rotating-denial
 # invalidator, so a denied spot can never drift off a real bag.
 const GUNSHIP_COVER_BAGS := [[164, 120], [200, 120], [432, 200], [468, 200]]
 const BOSS_SPRAY_INTERVAL_TICKS := 12
 const BOSS_BOUNTY := COIN_BUNKER * 4
-# Mortar volley: the three strike ticks within the second half of the phase cycle.
-const BOSS_MORTAR_TICKS := [200, 240, 280]
+# Mortar volley: the strike ticks within the mortar act, by endless tier —
+# deeper waves add a 4th (tier >= 2) and 5th (tier >= 3) shell at the same
+# +40/+60 spacing they always had. Read through boss_mortar_ticks() so the sim
+# and the HP-bar countdown can never disagree about which shells exist.
+const BOSS_MORTAR_TICKS := [140, 180, 220]
+const BOSS_MORTAR_TICKS_T2 := [140, 180, 220, 260]
+const BOSS_MORTAR_TICKS_T3 := [140, 180, 220, 260, 280]
 # Boss Rush mode (authored-campaign-and-modes): every gate is a gunship, back
 # to back, capped by the same Foundry Colossus finale campaign ends on — a
 # practice/replay mode for the fights, no field filler between them. Gates are
@@ -5035,6 +5049,17 @@ func _step_boss() -> void:
 		_step_one_boss(g["boss"])
 
 
+static func boss_mortar_ticks(tier: int) -> Array:
+	## The shells this gunship actually fires at `tier` (= wave / 5; 0 in
+	## campaign). Const arrays, so no per-tick allocation — _step_one_boss reads
+	## it every mortar-act tick and the HP-bar countdown reads it every frame.
+	if tier >= 3:
+		return BOSS_MORTAR_TICKS_T3
+	if tier == 2:
+		return BOSS_MORTAR_TICKS_T2
+	return BOSS_MORTAR_TICKS
+
+
 func _step_one_boss(boss: Dictionary) -> void:
 	if boss["phase_t"] < 0:
 		# Endless fly-in: unhittable and silent until arrival (campaign bosses
@@ -5046,15 +5071,23 @@ func _step_one_boss(boss: Dictionary) -> void:
 	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 	var t: int = boss["phase_t"]
 	if t == 0:
-		# Strafe-half opener: the view paints the sweep lane (checksum-excluded).
-		events.append({"t": "strafe_lane", "x": boss["x"], "y": boss["gate_y"] - BOSS_Y_OFFSET,
-			"dir": boss["dir"]})
+		# Act-one opener: the gunship ACQUIRES the nearest player and every
+		# spray in the act re-aims at him, so the honest telegraph is a lock on
+		# that player (checksum-excluded, like every event). It used to ship the
+		# boss's own x as a "sweep lane" the view painted as a 300px column —
+		# a lane this boss has never once swept.
+		var lock := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
+		var lock_ev := {"t": "strafe_lock", "x": boss["x"], "y": boss["gate_y"] - BOSS_Y_OFFSET}
+		if not lock.is_empty():
+			lock_ev["tx"] = lock["x"]
+			lock_ev["ty"] = lock["y"]
+		events.append(lock_ev)
 	# c4 2v ROTATING POSITIONAL ZONES (gunship): each boss CYCLE, one of the four
 	# arena cover spots is INVALIDATED by a telegraphed radial strike (which spot
 	# rotates per cycle), so no single firing spot stays safe. Campaign gunship
 	# (gate 3) only — endless minibosses have no such bags (no-op) — so gate 3 is
 	# torture-inert and ENDLESS_GOLDEN is untouched.
-	if mode == "campaign" and t == BOSS_CYCLE_TICKS / 2:
+	if mode == "campaign" and t == BOSS_STRAFE_TICKS:
 		var spot_i: int = posmod(tick_count / BOSS_CYCLE_TICKS, GUNSHIP_COVER_BAGS.size())
 		var bag: Array = GUNSHIP_COVER_BAGS[spot_i]
 		_add_strike(bag[0] * F_ONE, boss["gate_y"] + bag[1] * F_ONE)
@@ -5067,7 +5100,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 	if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
 		boss["dir"] = -boss["dir"]
 		boss["x"] = clampi(boss["x"], 60 * F_ONE, 580 * F_ONE)
-	if t < BOSS_CYCLE_TICKS / 2:
+	if t < BOSS_STRAFE_TICKS:
 		# Strafe run: spray tightens with depth (jitter 40px -> 16px by w20,
 		# cadence 12t -> 6t; starting values, staged-tier test asserts both).
 		var spray_iv: int = maxi(6, BOSS_SPRAY_INTERVAL_TICKS - 2 * maxi(0, tier - 1))
@@ -5083,7 +5116,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 					events.append({"t": "enemy_shot", "x": boss["x"], "y": by})
 					_spawn_enemy_bullet(boss["x"], by, dx, dy, dlen)
 		# Arm the mortar-lead sampler as the strafe half closes.
-		if t == BOSS_CYCLE_TICKS / 2 - 1:
+		if t == BOSS_STRAFE_TICKS - 1:
 			var s0 := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
 			if not s0.is_empty():
 				boss["stx"] = s0["x"]
@@ -5095,7 +5128,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 		# never catch a walker without aiming ahead). Poor-man's velocity:
 		# delta since the last sample, projected one telegraph forward.
 		# Deeper waves add a 4th (w10+) and 5th (w15+) strike.
-		if t in BOSS_MORTAR_TICKS or (tier >= 2 and t == 320) or (tier >= 3 and t == 340):
+		if t in boss_mortar_ticks(tier):
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
 			if not target2.is_empty() and not _concealed(target2):

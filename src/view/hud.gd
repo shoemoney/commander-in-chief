@@ -1494,19 +1494,8 @@ static func band_bottom(sim) -> float:
 ## and doubled by a second concentric hairline, while the danger ring stays ONE continuous
 ## stroke. Desaturate the frame entirely and the two still read apart. Alphas raised ~3x.
 ## Static + view-free so `_draw_foundry_arena` and the a11y test share one truth.
-const COLOSSUS_SAFE_DASHES := 14           # >1 == a broken ring; the danger ring is 1 == solid
-const COLOSSUS_SAFE_DASH_DUTY := 0.55      # lit fraction of each dash slot (the gaps ARE the encoding)
-const COLOSSUS_SAFE_HAIRLINE := 4.0        # px inside the belt the second concentric line rides
-const COLOSSUS_RING_ALPHA := 0.38          # was 0.12
-const COLOSSUS_RING_ALPHA_PULSE := 0.14    # ...+ this * pulse (peak 0.52, was 0.18)
 
 
-static func colossus_ring_style(is_safe: bool, pulse: float) -> Dictionary:
-	var a := COLOSSUS_RING_ALPHA + COLOSSUS_RING_ALPHA_PULSE * pulse
-	if is_safe:
-		return {"dashes": COLOSSUS_SAFE_DASHES, "duty": COLOSSUS_SAFE_DASH_DUTY,
-			"hairline": COLOSSUS_SAFE_HAIRLINE, "col": Art.safe(Color(0.35, 0.9, 0.5, a))}
-	return {"dashes": 1, "duty": 1.0, "hairline": 0.0, "col": Art.warn(Color(1.0, 0.3, 0.15, a))}
 
 
 ## True exactly when main.gd `_draw_colossus` paints its bottom-docked block — same predicate,

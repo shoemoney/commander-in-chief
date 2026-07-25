@@ -287,6 +287,12 @@ const SEED := 0xDEADBEEF
 ## GHILLIE_RECLOAK_TICKS -- where the sniper stays standing and can be traded with
 ## at any time. ENDLESS_GOLDEN VERIFIED UNCHANGED: the endless wave spawner has its
 ## own roster, and its torture wipes at wave 2, before grenadiers/ghillies exist.
+## VERIFIED UNCHANGED (2026-07-25, gunship act-two pacing): BOSS_CYCLE_TICKS
+## 360 -> 300, the strafe/mortar boundary moved to BOSS_STRAFE_TICKS = 120 and
+## BOSS_MORTAR_TICKS shifted to [140,180,220]. Both goldens hold: the campaign
+## torture never streams as far as gate 3 (the first bridge gunship) and the
+## endless torture wipes at wave 2, well before the wave-5 miniboss -- so no
+## torture tick ever runs _step_one_boss. Re-checked, not assumed.
 const GOLDEN: Array[int] = [
 	506778608736561550,
 	7590183919185690526,

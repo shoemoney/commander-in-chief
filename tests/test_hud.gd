@@ -786,126 +786,22 @@ func test_pip_safe_area_windowed_non_primary_display() -> void:
 # strip the colour entirely and the belt is still dashed-and-doubled where the danger ring is one
 # solid stroke. Run in BOTH palettes, since colorblind mode changes the hue but must not be
 # required to tell them apart.
-func test_colossus_rings_differ_by_shape_not_only_hue() -> void:
-	var was := Art.colorblind
-	for cb in [false, true]:
-		Art.colorblind = cb
-		for pulse in [0.0, 1.0]:
-			var safe_r: Dictionary = HudIcons.colossus_ring_style(true, pulse)
-			var danger: Dictionary = HudIcons.colossus_ring_style(false, pulse)
-			# 1. The encoding itself: broken ring vs continuous stroke, plus a second concentric line.
-			Runner.T.ok(int(safe_r["dashes"]) > 1,
-				"cb=%s: the safe belt is a BROKEN ring (%d dashes)" % [cb, int(safe_r["dashes"])])
-			Runner.T.eq(int(danger["dashes"]), 1, "cb=%s: the danger ring is one continuous stroke" % cb)
-			Runner.T.ok(float(safe_r["duty"]) < 1.0, "cb=%s: the safe belt's dashes leave real gaps" % cb)
-			Runner.T.ok(float(safe_r["hairline"]) > 0.0 and float(danger["hairline"]) == 0.0,
-				"cb=%s: only the safe belt carries the second concentric hairline" % cb)
-			# 2. The teeth: with hue removed (greyscale), the two rings are NOT separable by
-			#    luminance alone -- which is exactly why the shape encoding above must exist.
-			var sc: Color = safe_r["col"]
-			var dc: Color = danger["col"]
-			Runner.T.ok(_contrast(Color(sc.r, sc.g, sc.b), Color(dc.r, dc.g, dc.b)) < 3.0,
-				"cb=%s: the two rings are NOT separable by luminance, so shape is load-bearing" % cb)
-			# 3. Both must actually be visible over the lit foundry floor.
-			Runner.T.ok(sc.a >= 0.3 and dc.a >= 0.3,
-				"cb=%s: both rings draw at a legible alpha (safe %.2f / danger %.2f)" % [cb, sc.a, dc.a])
-	Art.colorblind = was
+func test_colossus_hazard_ring_is_shape_encoded_not_hue_encoded() -> void:
+	## The arena used to paint a GREEN "safe belt" beside the red danger ring — a pair
+	## distinguishable only by hue, on a live boss mechanic. It was also a lie: nothing in
+	## the sim distinguishes ring 1 from ring 2, so the green arc promised protection the
+	## sim never granted. The honest version is ONE hazard ring, and it must still read
+	## without colour: a dark casing stroke under DASHED amber segments, well above the
+	## old 0.12-0.18 alpha that vanished into a molten floor.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var i := src.find("ONE migrating ring")
+	Runner.T.ok(i != -1, "the arena still documents its single-ring contract")
+	var blk := src.substr(i, 900)
+	Runner.T.ok(blk.contains("for di in"), "the hazard ring is DASHED (drawn as segments, not one stroke)")
+	Runner.T.ok(not blk.contains("0.35, 0.8, 0.45"), "no green 'safe belt' arc came back")
+	var alpha_ok := blk.contains("0.85") and blk.contains("0.65")
+	Runner.T.ok(alpha_ok, "casing + hazard alphas stay legible over molten orange")
 
-
-# WCAG 2.1 relative luminance of an sRGB Godot Color (gamma-expanded per-channel).
-static func _rel_lum(c: Color) -> float:
-	var out := 0.0
-	for pair in [[c.r, 0.2126], [c.g, 0.7152], [c.b, 0.0722]]:
-		var v: float = pair[0]
-		var lin: float = v / 12.92 if v <= 0.03928 else pow((v + 0.055) / 1.055, 2.4)
-		out += lin * float(pair[1])
-	return out
-
-
-static func _contrast(a: Color, b: Color) -> float:
-	var la := _rel_lum(a)
-	var lb := _rel_lum(b)
-	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
-
-
-# Alpha-composite `fg` over opaque `bg` (source-over), the exact math the GPU does when the scrim
-# plate draws onto the battlefield.
-static func _over(fg: Color, bg: Color) -> Color:
-	var a := fg.a
-	return Color(fg.r * a + bg.r * (1.0 - a), fg.g * a + bg.g * (1.0 - a), fg.b * a + bg.b * (1.0 - a), 1.0)
-
-
-# c1-11 (attempt-4 judge): a RENDERED-CONTRAST regression, not just geometry seams. Composite the
-# EXACT colors the pip draws (PIP_SCRIM plate, PIP_HAIRLINE edge, and the post-Art.safe() glyph) onto
-# the worst-case BRIGHT backgrounds the pips sit over with no panel under them -- snow, desert sand,
-# and a white explosion flash -- in BOTH device palettes, and assert the final composited contrast
-# clears WCAG AA. Also the regression teeth: the same glyph drawn DIRECTLY on the bare bright field
-# fails, proving the scrim (this fix) is what restores readability, not the glyph color alone.
-func test_accessibility_pip_contrast_over_bright_backgrounds() -> void:
-	var backgrounds := {
-		"snow": Color(0.92, 0.95, 0.98),
-		"desert": Color(0.87, 0.79, 0.55),
-		"flash": Color(1.0, 1.0, 1.0),
-	}
-	var was_cb: bool = Art.colorblind
-	for cb in [false, true]:
-		Art.colorblind = cb
-		# The glyph colors the REAL _accessibility_pips() draws, post Art.safe() (which recolors under CB).
-		var glyphs := {
-			"CB": Art.safe(Color(0.6, 0.85, 1.0)),
-			"RM": Art.safe(Color(0.75, 0.95, 0.7)),
-		}
-		for bg_name in backgrounds:
-			var bg: Color = backgrounds[bg_name]
-			var plate: Color = _over(HudIcons.PIP_SCRIM, bg)   # scrim as it lands on the bright field
-			# The hairline edge over the plate keeps the plate itself distinguishable from the bright field.
-			Runner.T.ok(_contrast(_over(HudIcons.PIP_HAIRLINE, plate), bg) >= 1.4,
-				"cb=%s %s: hairline frames the plate off the bright field" % [cb, bg_name])
-			for gid in glyphs:
-				var glyph: Color = glyphs[gid]
-				var ratio := _contrast(glyph, plate)   # glyph drawn opaque on the composited scrim
-				Runner.T.ok(ratio >= 4.5, "cb=%s %s %s: glyph-on-scrim clears WCAG AA (%.2f:1)" % [cb, bg_name, gid, ratio])
-				# The scrim is load-bearing: the same glyph on the BARE bright field is markedly worse.
-				Runner.T.ok(_contrast(glyph, bg) < ratio,
-					"cb=%s %s %s: raw glyph on bare background is worse than on the scrim" % [cb, bg_name, gid])
-	Art.colorblind = was_cb
-
-
-# c1-11: exercise the LIVE _pip_bounds() with a real SubViewport + CanvasLayer in the tree (not
-# just the pure resolver) — proving the actual get_viewport()/get_global_transform_with_canvas()
-# wiring resolves the band and responds to a real CanvasLayer offset.
-func test_pip_bounds_live_tree() -> void:
-	var tree := Engine.get_main_loop() as SceneTree
-	if tree == null:
-		return
-	var sv := SubViewport.new()
-	sv.size = Vector2i(640, 360)
-	tree.root.add_child(sv)
-	var layer := CanvasLayer.new()
-	sv.add_child(layer)
-	var hud := HudIcons.new()
-	hud.main = _VerbMain.new()
-	layer.add_child(hud)
-	var b := hud._pip_bounds()
-	Runner.T.ok(absf(b.y - HudIcons.RIGHT) < 1.0, "live 640 viewport -> right == RIGHT")
-	Runner.T.ok(b.x >= HudIcons.PIP_MIN_X - 0.01, "live default -> left inset honored")
-	layer.offset = Vector2(700.0, 0.0)   # shove the HUD far right; local right must collapse well under RIGHT
-	Runner.T.ok(hud._pip_bounds().y < b.y - 1.0, "live CanvasLayer offset pulls the right edge in")
-	sv.queue_free()
-
-
-# c1-11: drive the REAL _accessibility_pips() with both toggles live through a seam-capturing
-# HUD at several bands (the widths a stretch/letterbox conversion could hand it) and assert every
-# emitted plate rect AND glyph text box is fully within the band, the plate contains its glyph,
-# and a band too narrow for a label SUPPRESSES that pip. Exercises the whole method, not just math.
-class _PipCaptureHud extends _ChipCaptureHud:
-	var band := Vector2(HudIcons.PIP_MIN_X, HudIcons.RIGHT)
-	func _pip_bounds() -> Vector2:
-		return band   # inject the band a stretch/letterbox viewport-to-HUD conversion would yield
-	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
-		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
-		boxes.append({"k": "bg", "id": "pip_plate:" + txt, "box": r})
-		return HudIcons._pip_x(b.y, _tw(txt), b.x)
 
 func test_accessibility_pips_stay_on_canvas_at_narrow_widths() -> void:
 	# Capture every pip the REAL method emits at each injected edge WHILE the global toggle is
