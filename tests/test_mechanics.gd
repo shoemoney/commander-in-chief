@@ -308,6 +308,19 @@ func test_boss_death_spawns_a_pilot_and_shooting_him_pays_nothing() -> void:
 	Runner.T.eq(sim.score, score0, "and no score")
 
 
+func test_shooting_the_pilot_does_not_feed_the_kill_streak() -> void:
+	## The pilot minted no coin and no score, but WITHOUT no_score he still
+	## incremented kill_streak and refreshed the window — a free combo-keepalive
+	## for executing the man you were sent to rescue.
+	var sim := SimWorld.new(25, 1)
+	sim.enemies.append({"x": 0, "y": 0, "alive": true, "elite": false, "kind": "pilot"})
+	sim.kill_streak = 3
+	sim.kill_streak_timer = 5
+	sim._kill_enemy(sim.enemies[sim.enemies.size() - 1])
+	Runner.T.eq(sim.kill_streak, 3, "the pilot does not advance the streak")
+	Runner.T.eq(sim.kill_streak_timer, 5, "nor refresh the streak window")
+
+
 func test_pilot_punchout_grace_blocks_the_touch_then_expires() -> void:
 	var sim := SimWorld.new(24, 1)
 	var p := sim.players[0]

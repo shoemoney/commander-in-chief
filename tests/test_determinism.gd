@@ -300,6 +300,17 @@ const SEED := 0xDEADBEEF
 ## (frogman re-telegraph, bunker sweep, LZ crate, colossus damage, endless armor, economy
 ## creep, enemy cover collision) argued its own inertness to the torture and all of them hold:
 ## if any were wrong, samples 0-3 would have moved too.
+## BOTH GOLDENS VERIFIED UNCHANGED (2026-07-25, two sim guards: the pilot no longer feeds
+## kill_streak, and a walking pilot no longer vetoes the ghillie all-cloaked force-reveal).
+## NO sample moved in either stream, and that is proven, not assumed: replaying this exact
+## 2P torture with a counter over both windows reports ticks_with_pilot=0, pilot_kills=0,
+## ticks_with_ghillie=0, all_cloaked_states=0 in BOTH campaign and endless. Neither entity
+## ever exists in a torture tick -- the pilot ejects only from a gunship death the campaign
+## stream never reaches, and the endless torture wipes at wave 2, before ghillies spawn --
+## so both new branches are structurally unreachable here. Covered instead by two direct
+## tests: test_mechanics::test_shooting_the_pilot_does_not_feed_the_kill_streak and
+## test_archetypes::test_all_ghillie_wave_force_reveals_even_with_a_pilot_walking, each
+## confirmed red against the pre-guard sim.
 const GOLDEN: Array[int] = [
 	506778608736561550,
 	7590183919185690526,
@@ -411,6 +422,8 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ##      keeps the 3-death soft cap verbatim -> GOLDEN untouched by construction. Below
 ##      wave 5 the endless formula (50 * max(deaths,1) * 1) equals the old one for 0-3
 ##      deaths, which is the entire reach of the endless torture (it wipes in wave 2).
+## VERIFIED UNCHANGED (2026-07-25, pilot streak guard + pilot-skipping ghillie reveal):
+## see the GOLDEN note -- measured zero pilot and zero ghillie ticks in this stream too.
 const ENDLESS_GOLDEN: Array[int] = [
 	870682775949389125,
 	2998730705561210490,

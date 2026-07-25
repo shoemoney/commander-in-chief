@@ -2405,9 +2405,12 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 		coin = COIN_ELITE * 4   # fat bounty for catching the runner
 	if e["kind"] == "pilot":
 		# Gunning down the man you were meant to rescue pays NOTHING — no
-		# chest, no score, no avenge. The corpse is the only receipt.
+		# chest, no score, no avenge, and no STREAK: without no_score the pilot
+		# still ticked kill_streak and refreshed the window, so executing the
+		# rescue target was a free combo-keepalive. The corpse is the only receipt.
 		coin = 0
 		no_coin = true
+		no_score = true
 	if e.get("marked", false):
 		coin *= 3   # bounty target pays triple (chest + score)
 		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
@@ -4592,13 +4595,20 @@ func _step_waves() -> void:
 		# notice radius — a soft-lock they trip without understanding why. When
 		# ONLY cloaked ghillies remain, force the reveal: the wave must always
 		# be finishable from where the player stands.
+		# A walking rescue pilot is NOT a hostile (same rule as
+		# _wave_hostiles_cleared), so it must not veto the reveal — otherwise the
+		# guarantee above lapses for the ~85 ticks the pilot takes to walk off.
 		var all_cloaked := not enemies.is_empty()
 		for e in enemies:
+			if e["kind"] == "pilot":
+				continue
 			if not (e["kind"] == "ghillie" and e.get("submerged", false)):
 				all_cloaked = false
 				break
 		if all_cloaked:
 			for e in enemies:
+				if e["kind"] != "ghillie":
+					continue   # don't surface the pilot we just skipped
 				e["submerged"] = false
 				e["surface_ticks"] = GHILLIE_REVEAL_TICKS
 				events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})

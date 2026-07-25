@@ -378,3 +378,41 @@ func test_ghillie_fires_once_then_vanishes_where_the_sniper_stays_up() -> void:
 	sim2.bullets.append({"x": s2["x"], "y": s2["y"], "vx": 0, "vy": -SimWorld.BULLET_SPEED, "ttl": 60})
 	sim2._step_bullets()
 	Runner.T.ok(not s2["alive"], "so he can be shot back the very next tick")
+
+
+func test_all_ghillie_wave_force_reveals_even_with_a_pilot_walking() -> void:
+	## The anti-stall promise is "the wave must ALWAYS be finishable". The scan
+	## seeded all_cloaked from every enemy, so a walking rescue pilot — not a
+	## hostile, per _wave_hostiles_cleared — vetoed the reveal for the ~85 ticks
+	## he takes to clear the top edge, and the ghillies stayed bullet-immune.
+	var sim := SimWorld.new(31, 1, "endless")
+	sim.wave = 3
+	sim.wave_pending = 0
+	sim.intermission_ticks = 0
+	sim.enemies.clear()
+	var g := {"x": 0, "y": -220 * Fixed.ONE, "alive": true, "elite": true, "kind": "ghillie",
+		"fire_cd": 0, "windup": 0, "submerged": true, "surface_ticks": 0,
+		"aim_lx": 0, "aim_ly": 0}
+	var pilot := {"x": 40 * Fixed.ONE, "y": -100 * Fixed.ONE, "alive": true,
+		"elite": false, "kind": "pilot"}
+	sim.enemies.append(g)
+	sim.enemies.append(pilot)
+	sim._step_waves()
+	Runner.T.ok(not g["submerged"], "the last cloaked ghillie surfaces despite the live pilot")
+	Runner.T.eq(g["surface_ticks"], SimWorld.GHILLIE_REVEAL_TICKS, "with the full reveal window")
+	Runner.T.ok(not pilot.get("submerged", false), "and the pilot is not dragged into the reveal")
+	Runner.T.ok(not pilot.has("surface_ticks"), "nor given a ghillie-only surface timer")
+	# Control: a real hostile alongside still legitimately vetoes the reveal.
+	var sim2 := SimWorld.new(31, 1, "endless")
+	sim2.wave = 3
+	sim2.wave_pending = 0
+	sim2.intermission_ticks = 0
+	sim2.enemies.clear()
+	var g2 := {"x": 0, "y": -220 * Fixed.ONE, "alive": true, "elite": true, "kind": "ghillie",
+		"fire_cd": 0, "windup": 0, "submerged": true, "surface_ticks": 0,
+		"aim_lx": 0, "aim_ly": 0}
+	sim2.enemies.append(g2)
+	sim2.enemies.append({"x": 0, "y": -80 * Fixed.ONE, "alive": true, "elite": false,
+		"kind": "rusher"})
+	sim2._step_waves()
+	Runner.T.ok(g2["submerged"], "a live rusher means the wave is already finishable — no reveal")
