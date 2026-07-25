@@ -3296,8 +3296,7 @@ func test_verb_used_marks_dirty_once_and_drops_that_segment() -> void:
 # the real draw seams (the whole chip, plate included) rather than the pure geometry helpers.
 func test_reduced_verb_chip_emits_only_surviving_segments() -> void:
 	var h := _CaptureHud.new()
-	h.main = _BandMain.new()
-	h.main.sim = SimWorld.new(3, 1)
+	h.main = _VerbMain.new()
 	h._verb_show = 300.0                 # window armed so the chip actually draws
 	h.verb_used("roll")                  # ...but ROLL has been used, so it must not be emitted
 	h._verb_legend()
