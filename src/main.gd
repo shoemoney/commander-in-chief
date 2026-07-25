@@ -733,6 +733,9 @@ func _setup_water() -> void:
 	# stays crisp — the project default_texture_filter is LINEAR_MIPMAP (right for the
 	# legacy art bakes) but bilinear-smears the pixel tiles at integer scale.
 	_bg_root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# a-seam: draw_texture_rect(tile=true) silently edge-clamps unless the canvas
+	# item enables repeat — needed for the seamless-strip ground draw below.
+	_bg_root.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 	_bg_root.draw.connect(_paint_bg.bind(_bg_root))
 	add_child(_bg_root)
 	for _i in 4:
@@ -860,32 +863,26 @@ func _paint_bg(canvas: Node2D) -> void:
 		var row_march := _litter_march_prev if row_wy_fp >= _litter_cam_snap else march
 		var dirt_col := _biome_ramp(row_march, dirt_stops)
 		var gt := _biome_ramp(row_march, desert_stops)
+		var row_y: float = floor(oy + ty * 64.0)   # floor(): fractional origins shimmer the seam while scrolling
+		# a-seam: ONE seamless tiled strip per row, ONE flat colour. The old per-cell
+		# `shade` hash + %3 row stripe were a CONSTANT tint across a 64px block,
+		# i.e. a hard luminance step on every cell edge — that WAS the grid. The
+		# mirror variants also broke sand.png's own tiling on Y-flipped edges.
+		# Value variation now comes entirely from the soft 256px macro mottle,
+		# the dirt cards, the spine and the cloud shadows below — none grid-aligned.
+		# 0.5 scale is required: tile=true repeats at NATIVE 128px, which would
+		# show only the top half of the card and re-cut it every row.
+		canvas.draw_set_transform(Vector2(-32.0, row_y), 0.0, Vector2(0.5, 0.5))
+		canvas.draw_texture_rect(Art.tex("sand"), Rect2(Vector2.ZERO, Vector2(1408, 128)), true,
+			Color(GROUND_SHADE * gt.r, GROUND_SHADE * gt.g, GROUND_SHADE * gt.b))
+		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		for tx in 11:
-			# floor(): oy is fractional (fposmod of cam_y) — subpixel tile origins
-			# shimmer the seams while scrolling. Per-tile snap only; units stay smooth.
 			# gfx-loop: -32 gives a half-tile of horizontal overscan on each edge
 			# (mirrors oy's implicit vertical margin) — screen shake/kick/roll can
 			# swing the camera transform ~20-24px sideways at a corner, which used
 			# to reveal an undrawn void past the ground's flush-edge column.
-			var pos := Vector2(tx * 64.0 - 32.0, floor(oy + ty * 64.0))
+			var pos := Vector2(tx * 64.0 - 32.0, row_y)
 			var h := Art.cell_hash(tx, base_iy + ty)
-			var shade := 0.49 + float(h % 7) * 0.012   # a1-06: tiny tile micro-var; ~0.020 band checkerboards (macro value lives on the 0.16 mottle below)
-			if (base_iy + ty) % 3 == 0:
-				shade -= 0.012   # breaks the horizontal scan rhythm (4v: "stripes")
-			var variant := (h / 7) % 4
-			# retune: dropped the old +0.03 green-only shade boost (a jungle-grass
-			# leftover) — it re-lifted G right after _ground_stops suppressed it
-			# specifically to stop the sand tile reading olive.
-			var gcol := Color(shade * gt.r, shade * gt.g, shade * gt.b)
-			if variant == 0:
-				canvas.draw_texture_rect(Art.tex("sand"), Rect2(pos, Vector2(64, 64)), false, gcol)
-			else:
-				# Flip via transform — draw_texture_rect silently drops
-				# negative-size rects (learned the gray-void way).
-				canvas.draw_set_transform(pos + Vector2(32, 32), 0.0,
-					Vector2(-1.0 if variant & 1 else 1.0, -1.0 if variant & 2 else 1.0))
-				canvas.draw_texture_rect(Art.tex("sand"), Rect2(Vector2(-32, -32), Vector2(64, 64)), false, gcol)
-				canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			if h % maxi(3, 7 - int(march * 4.0)) == 0:   # a1-06: bare-earth density climbs toward the foundry
 				for dc in 2 + (h % 2):
 					var dh := Art.cell_hash(tx * 3 + dc + 1, base_iy + ty)
@@ -5360,6 +5357,11 @@ static func _ground_stops(mode: String) -> Array:
 # a3-05: the two feather rings that grade a bare-earth patch into the turf. Outer wide
 # faint ring + a stronger inner halo, both scaled off the card size and dirt alpha.
 const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a": 0.52}
+# a-seam: the flat ground-base modulate. 0.522 == the OLD per-tile average
+# (0.49 + mean(h%7)*0.012 - 1/3*0.012), so removing the per-cell tint hash
+# changes the grid, not the exposure — every alpha tuned against this ground
+# (mottle 0.16, spine 0.16, feathers, scorch) keeps its contrast.
+const GROUND_SHADE := 0.522
 
 
 # a4-04: the worn spine down the play lane. Warm packed earth (darker than turf) + a faint
