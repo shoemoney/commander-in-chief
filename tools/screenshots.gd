@@ -73,7 +73,7 @@ func _run() -> void:
 	# _splash_layer) and re-shows it, so an earlier kill is simply overwritten. Once physics
 	# is frozen the splash timer would never expire, and its opaque cinematic covered every
 	# shot ("BIG IT GAME STUDIOS presents" on all 12).
-	_kill_splash()
+	_kill_splash(main)
 	_freeze_physics(main)
 	var digests := {}   # md5 -> path, so two shots can never be the same picture
 	var failures := 0
@@ -159,20 +159,23 @@ static func _frame_is_live(img: Image) -> bool:
 	return int(s["colors"]) >= MIN_COLORS and float(s["stddev"]) >= MIN_STDDEV
 
 
-func _kill_splash() -> void:
-	main._splash_t = 0.0
-	if main._splash_layer != null:
-		main._splash_layer.visible = false
+static func _kill_splash(m: Node) -> void:
+	## Static + node-argument so biome_capture.gd reuses THIS one, rather than
+	## re-deriving the same three hard-won fixes (warmup, freeze, splash) and
+	## re-acquiring the same blank-frame bug.
+	m._splash_t = 0.0
+	if m._splash_layer != null:
+		m._splash_layer.visible = false
 
 
-func _redraw_all(n: Node) -> void:
+static func _redraw_all(n: Node) -> void:
 	if n is CanvasItem:
 		(n as CanvasItem).queue_redraw()
 	for c in n.get_children():
 		_redraw_all(c)
 
 
-func _freeze_physics(n: Node) -> void:
+static func _freeze_physics(n: Node) -> void:
 	## Stop the sim advancing WITHOUT stopping the view drawing. process_mode =
 	## PROCESS_MODE_DISABLED does both — it also suppresses CanvasItem redraws, so every
 	## posed shot re-captured the same frozen frame (12 byte-identical PNGs). Killing
@@ -209,7 +212,7 @@ func _pose(idx: int) -> void:
 	# the visible field on the PRIOR shot's palette. Pre-sync _bg_march so _draw's
 	# transition-reset is skipped, invalidate _bg_cam to force the repaint, and clear
 	# the freeze snap so every visible row uses the posed sector march.
-	_kill_splash()   # re-assert: a pose must never surface the intro cinematic
+	_kill_splash(main)   # re-assert: a pose must never surface the intro cinematic
 	main._bg_march = main._sector_march()
 	main._bg_cam = -2147483647
 	main._litter_cam_snap = 9223372036854775807
