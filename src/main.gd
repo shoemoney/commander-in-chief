@@ -137,6 +137,14 @@ var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyb
 var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
+
+# a11y (WCAG 2.3.1 / photosensitivity): EVERY in-world countdown strobe routes through
+# _safe_strobe. A half-period of STROBE_HALF_TICKS ticks is 60/(2*10) == 3 flashes/sec —
+# the same threshold _draw_damage_vignette already names for the sniper-paint edge, which
+# was the ONLY strobe honoring it. REDUCE MOTION holds the lit phase steady rather than
+# suppressing the cue: these are lethal telegraphs, so hiding them is not the accessible
+# answer. `n` is the counting-down tick value the strobe rides (windup, seal, iframes).
+const STROBE_HALF_TICKS := 10
 var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
 var _captions := true            # accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption)
@@ -1601,13 +1609,17 @@ func _flush_bests() -> void:
 	# rollover) and _exit_tree (covers app quit).
 	var sections := {}
 	if _best_dirty:
-		_best_dirty = false
 		sections["best"] = {"score": best_score, "wave": best_wave, "dist": best_dist}
 	if _seen_dirty:
-		_seen_dirty = false
 		sections["seen"] = {"hints": _seen}
-	if not sections.is_empty():
-		_persist(sections)
+	if sections.is_empty():
+		return
+	# save-integrity: clear the dirty flags only once the write actually LANDED.
+	# Clearing them up front turned a failed save into a silent no-op that never
+	# retried — the next _flush_bests saw nothing dirty and skipped the disk.
+	if _persist(sections) == OK:
+		_best_dirty = false
+		_seen_dirty = false
 
 
 func _exit_tree() -> void:
@@ -1899,7 +1911,9 @@ func _consume_events() -> void:
 		var kind: String = ev["t"]
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
-			if ev.get("cost", 0) == 0:
+			if ev.get("cost", 0) == 0 and not ev.get("full", false):
+				# Free grab at cap grants nothing — no gloat for a no-op (the sim
+				# now refuses the PRICED version outright; free ones still vanish).
 				_cmd_bark("pickup", 240)   # occasional "best weapons" gloat on a free supply grab
 			# Collect pop: common crates used to vanish on a quiet blip — a spark
 			# kiss + brief ground light marks WHERE the supply went. Reuses the
@@ -2007,7 +2021,11 @@ func _consume_events() -> void:
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
 				if not nest_hit:
-					_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
+					# The hint that fires on the ONE wall bullets can't solve must NAME the
+					# button — same device-aware [%s] pattern the revive/supply hints use
+					# (pad label off the live brand, else the keyboard default).
+					_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
+						% (Art.pad_label("grenade") if Art.use_pad else "SHIFT"))
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("ping_armor", -16.0, 1.0)
@@ -3181,12 +3199,12 @@ func _ev_revive(ev: Dictionary) -> void:
 	# heal-burst + rising motes off the revived body.
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.09})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
-		"r": 34.0, "col": Color(0.4, 1.0, 0.5)})
+		"r": 34.0, "col": Art.safe(Color(0.4, 1.0, 0.5))})
 	for d in 8:
 		var rva := d * TAU / 8.0 + randf() * 0.3
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.05,
 			"vx": cos(rva) * randf_range(0.6, 1.6), "vy": sin(rva) * randf_range(0.6, 1.6) - 1.0,
-			"spin": 0.0, "col": Color(0.5, 1.0, 0.6)})
+			"spin": 0.0, "col": Art.safe(Color(0.5, 1.0, 0.6))})
 
 
 func _ev_vest_break(ev: Dictionary) -> void:
@@ -3278,32 +3296,56 @@ func _check_boss_intro() -> void:
 		_prev_colossus_phase = phase
 
 
-func _save_cfg(cf: ConfigFile) -> void:
+func _save_cfg(cf: ConfigFile) -> Error:
 	# Atomic, crash-safe write: a mid-save crash must never corrupt the single
 	# ikari_best.cfg (= total progress wipe). Write to .tmp; on success snapshot
 	# the current real file to .bak, then atomically rename .tmp over the real
 	# path. rename_absolute is an OS rename — atomic on the same filesystem.
+	# Returns OK only when the rename actually landed: callers hold dirty flags
+	# (and thus a retry) until then, so a failed write is never a silent no-op.
 	if cf.save(SAVE_TMP) != OK:
 		push_warning("ikari: config save failed")
-		return
+		return FAILED
+	# save-integrity: refresh the .bak ONLY from a primary that still PARSES.
+	# Copying a corrupt primary over the backup destroyed the last good save in
+	# the very call that was supposed to be able to recover from it.
 	if FileAccess.file_exists(SAVE_PATH):
-		DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
-	DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
+		if ConfigFile.new().load(SAVE_PATH) == OK:
+			var cerr := DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
+			if cerr != OK:
+				push_warning("ikari: config backup copy failed (%d)" % cerr)   # not fatal: the primary write below still stands
+		else:
+			push_warning("ikari: primary save is corrupt — keeping the older .bak snapshot")
+	var err := DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
+	if err != OK:
+		push_warning("ikari: config rename failed (%d)" % err)
+	return err
 
 
-func _persist(sections: Dictionary) -> void:
+# save-integrity: THE read side of every read-merge-write. A primary that fails
+# to parse must NOT silently become an empty ConfigFile — merging into one and
+# saving drops every section the caller doesn't rewrite (a _persist({"settings"})
+# would erase [hall]/[best]/[life]/[meta]). Fall back to the .bak snapshot, the
+# same ladder _load_bests walks.
+func _load_cfg_for_merge() -> ConfigFile:
+	var cf := ConfigFile.new()
+	if cf.load(SAVE_PATH) != OK:
+		cf.load(SAVE_BAK)
+	return cf
+
+
+func _persist(sections: Dictionary) -> Error:
 	# Shared load-then-merge-then-save boilerplate: load first so sibling
 	# sections ([best]/[hall]/[seen]/[settings]) already on disk never get
 	# clobbered by a save that only knows about its own section. Takes
 	# {section: {key: value}} so multiple dirty sections share ONE disk dance
 	# (an R-restart with best+seen both dirty used to pay the 4-op load/tmp/
 	# bak/rename twice back-to-back on the keypress frame).
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
+	var cf := _load_cfg_for_merge()
 	for section in sections:
 		for k in sections[section]:
 			cf.set_value(section, k, sections[section][k])
-	_save_cfg(cf)
+	return _save_cfg(cf)
 
 
 # endless-meta-retention: spend banked Veteran Points on the NEXT tier of a
@@ -3325,6 +3367,24 @@ func buy_perk(id: String) -> bool:
 	_perk_levels[id] = lvl + 1
 	_persist({"meta": {"vp": vet_points, "levels": _perk_levels}})
 	return true
+
+
+# save-integrity: every scalar read in _load_bests goes through these. The target
+# fields are inferred-type (`var best_score := 0`, `var _perk_levels: Dictionary`),
+# so a wrong-typed value from a partially corrupt file throws a runtime error on
+# ASSIGNMENT and aborts the rest of _load_bests — _apply_settings never runs, and
+# the zeroed in-memory state is then written back over the still-good save on the
+# next flush. Same defensive shape the hall.runs rebuild below already uses: a bad
+# value costs only that one field. A bare float is accepted (ConfigFile can widen
+# an int on some round-trips); anything else falls back to the ship default.
+func _cfg_int(cf: ConfigFile, section: String, key: String, def: int) -> int:
+	var v: Variant = cf.get_value(section, key, def)
+	return int(v) if (v is int or v is float) else def
+
+
+func _cfg_dict(cf: ConfigFile, section: String, key: String) -> Dictionary:
+	var v: Variant = cf.get_value(section, key, {})
+	return v if v is Dictionary else {}
 
 
 func _load_bests() -> void:
@@ -3365,12 +3425,12 @@ func _load_bests() -> void:
 		_pad_binds = [overlay_binds(PAD_DEFAULTS, saved_pad, -1, JOY_BUTTON_MAX - 1),
 			overlay_binds(PAD_DEFAULTS, saved_pad2, -1, JOY_BUTTON_MAX - 1)]
 		_menu_binds = overlay_binds(MENU_BIND_DEFAULTS, saved_menu, 0)
-		best_score = cf.get_value("best", "score", 0)
-		best_wave = cf.get_value("best", "wave", 0)
-		best_dist = cf.get_value("best", "dist", 0)
-		last_run_score = cf.get_value("replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
-		replay_watched_score = cf.get_value("replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
-		_seen = cf.get_value("seen", "hints", {})
+		best_score = _cfg_int(cf, "best", "score", 0)
+		best_wave = _cfg_int(cf, "best", "wave", 0)
+		best_dist = _cfg_int(cf, "best", "dist", 0)
+		last_run_score = _cfg_int(cf, "replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
+		replay_watched_score = _cfg_int(cf, "replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
+		_seen = _cfg_dict(cf, "seen", "hints")
 		# c4-fix: a type-corrupt "runs" value (wrong element type from an older/newer build or
 		# partial file corruption) makes Array[Dictionary].assign() throw a runtime error and
 		# abort the rest of _load_bests BEFORE _apply_settings runs — silently reverting ALL
@@ -3387,12 +3447,12 @@ func _load_bests() -> void:
 		# collide with a reloaded entry's id (old saves lack hid -> starts at 0).
 		for r in hall:
 			_hall_seq = maxi(_hall_seq, int(r.get("hid", -1)) + 1)
-		_life_runs = cf.get_value("life", "runs", 0)
-		_life_kills = cf.get_value("life", "kills", 0)
-		_life_wins = cf.get_value("life", "wins", 0)
-		_daily_done_seed = cf.get_value("daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
-		vet_points = cf.get_value("meta", "vp", 0)   # endless-meta-retention: persistent perk currency
-		_perk_levels = cf.get_value("meta", "levels", {})   # perk id -> owned tier
+		_life_runs = _cfg_int(cf, "life", "runs", 0)
+		_life_kills = _cfg_int(cf, "life", "kills", 0)
+		_life_wins = _cfg_int(cf, "life", "wins", 0)
+		_daily_done_seed = _cfg_int(cf, "daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
+		vet_points = _cfg_int(cf, "meta", "vp", 0)   # endless-meta-retention: persistent perk currency
+		_perk_levels = _cfg_dict(cf, "meta", "levels")   # perk id -> owned tier
 		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
 		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
 		# push it through the SAME _apply_settings path fresh-install and RESET use —
@@ -4126,8 +4186,7 @@ func _record_run(score: int) -> void:
 		_life_wins += 1
 	# One load+save for hall/life/best together — this lands on the debrief
 	# frame, and each _persist() is a full read/write/backup/rename dance.
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
+	var cf := _load_cfg_for_merge()
 	cf.set_value("hall", "runs", hall)
 	if _daily:
 		# c2-13: this run WAS a seed-of-the-day — bank the seed ACTUALLY PLAYED
@@ -4149,9 +4208,12 @@ func _record_run(score: int) -> void:
 		cf.set_value("meta", "vp", vet_points)
 		cf.set_value("meta", "levels", _perk_levels)
 	cf.set_value("seen", "hints", _seen)
-	_best_dirty = false
-	_seen_dirty = false
-	_save_cfg(cf)
+	# save-integrity: same rule as _flush_bests — the flags stay dirty unless the
+	# write landed, so a failed save is retried at the next flush instead of
+	# being silently dropped.
+	if _save_cfg(cf) == OK:
+		_best_dirty = false
+		_seen_dirty = false
 	# Called LAST in _record_run, after hall/life/best are both updated in
 	# memory (hall.assign(...) above) AND committed to disk (_save_cfg(cf)
 	# just above) -- so the HALL_TOP_1 check inside _report_to_steam reads
@@ -4310,7 +4372,7 @@ func _track_bests() -> void:
 			if sim.mode == "endless" and _run_vp_gain > 0:
 				# _run_vp_gain is what the debrief/victory card reads too (see _draw below) --
 				# not just this transient banner, so the gain survives past the banner's decay.
-				show_banner("BANKED +%d VP" % _run_vp_gain, Color(0.6, 0.9, 0.55))
+				show_banner("BANKED +%d VP" % _run_vp_gain, Art.safe(Color(0.6, 0.9, 0.55)))
 			if not _replay_saved and _recorder != null:
 				# Stringifying a whole run's input log is the biggest one-frame
 				# stall in the view — push it to a worker so the debrief card
@@ -6277,19 +6339,38 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 						Art.circle(self, Vector2(sx - 2.0, sy_px - 5.0), 1.2, Color(1.0, 0.6, 0.22, g_a * 0.8))
 
 
+## Photosensitivity-clamped strobe — see STROBE_HALF_TICKS. true == the strobe's LIT phase.
+func _safe_strobe(n: int) -> bool:
+	return true if _motion < 0.5 else (n / STROBE_HALF_TICKS) % 2 == 0
+
+
 func _draw_foundry_arena() -> void:
 	# c4 2v: three tinted concentric RINGS around the boss so the rotating safe
 	# annulus reads — an inner melee-risk ring (red) and the outer boundary of the
 	# safe belt (green); both radii GROW with the phase (HP thirds), so the safe
 	# band visibly migrates outward as the boss escalates. View-only.
+	# a11y: the belt/danger pair is SHAPE-encoded (dashed + doubled vs one solid stroke,
+	# see HudIcons.colossus_ring_style) so this live boss mechanic survives a colorblind
+	# player and a greyscale frame; hue is now redundant reinforcement, not the signal.
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 		var ph: int = sim.colossus_phase()
 		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
 		var mr := float(SimWorld.COLOSSUS_RING_OUTER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
-		var ra := 0.12 + 0.06 * Art.pulse(0.05)
-		Art.arc(self, cpos, ir, 0.0, TAU, 48, Color(1.0, 0.3, 0.15, ra), 2.0)   # inner danger ring
-		Art.arc(self, cpos, mr, 0.0, TAU, 48, Color(0.35, 0.8, 0.45, ra), 2.0)  # safe-belt outer edge
+		var rpul := 1.0 if _motion < 0.5 else Art.pulse(0.05)   # steady-bright under reduce-motion
+		var dsty := HudIcons.colossus_ring_style(false, rpul)
+		var ssty := HudIcons.colossus_ring_style(true, rpul)
+		Art.arc(self, cpos, ir, 0.0, TAU, 48, dsty["col"], 2.0)   # inner danger ring — ONE unbroken stroke
+		var dashes: int = ssty["dashes"]
+		var slot := TAU / float(dashes)
+		var lit: float = slot * float(ssty["duty"])
+		var hair: float = ssty["hairline"]
+		var hcol: Color = ssty["col"]
+		hcol.a *= 0.7
+		for d in dashes:
+			var a0 := float(d) * slot
+			Art.arc(self, cpos, mr, a0, a0 + lit, 6, ssty["col"], 2.0)          # dashed safe-belt edge
+			Art.arc(self, cpos, mr - hair, a0, a0 + lit, 6, hcol, 1.0)          # ...doubled by a hairline
 	# Foundry ARENA dressing (c2 3v: the finale was "a big enemy in a field").
 	# Molten pools ring the three KIMK barrel clusters (drawn UNDER them —
 	# each phase-shift cook now torches a molten stage mark), grounded
@@ -7104,14 +7185,14 @@ func _draw_tanks() -> void:
 		# occupied one (mirrors the colossus crush grammar players already know).
 		if t["occupant"] < 0 and not t["burning"]:
 			Art.arc(self, c, SimWorld.TANK_BOARD_RADIUS * PX, 0, TAU, 28,
-				Color(0.85, 0.95, 0.6, 0.35), 1.0)
+				Art.safe(Color(0.85, 0.95, 0.6, 0.35)), 1.0)   # board = SAFE, paired with the red crush ring below
 		elif t["occupant"] >= 0:
 			var cp := Art.pulse(0.2)
 			Art.arc(self, c, SimWorld.TANK_CRUSH_RADIUS * PX, 0, TAU, 24,
 				Color(1.0, 0.3, 0.2, 0.25 + cp * 0.2), 1.5)
 		var burn_mod := Color.WHITE
 		if t["burning"]:
-			burn_mod = Color(1.3, 0.6, 0.45) if (t["burn_ticks"] / 6) % 2 == 0 else Color(0.9, 0.5, 0.4)
+			burn_mod = Color(1.3, 0.6, 0.45) if _safe_strobe(t["burn_ticks"]) else Color(0.9, 0.5, 0.4)   # 3 Hz (was 5 Hz)
 		if t["occupant"] >= 0 and not t["burning"] and not sim._in_water(t["x"], t["y"]):
 			_kick_dust(t["occupant"], t["x"], t["y"], _tank_dust_prev, true)
 		_ground_shadow(c, 15.0, 0.42)
@@ -7342,7 +7423,7 @@ func _draw_enemies() -> void:
 				bdir = bdir.normalized() if bdir.length() > 0.001 else Vector2.RIGHT
 				# Final moments: strobe white (matches the mortar-telegraph grammar).
 				var lcol := Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5)
-				if swu <= 10 and (swu / 2) % 2 == 0:
+				if swu <= 10 and _safe_strobe(swu):
 					lcol = Color(1.0, 1.0, 1.0, 0.95)
 				Art.line(self, epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
 				Art.circle(self, lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
@@ -7617,7 +7698,7 @@ func _draw_enemies() -> void:
 					# ghillie fires the same lethal shot and deserves the same fair
 					# 'get off the line NOW' warning, not a silent kill.
 					var lcol2 := Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5)
-					if gwu2 <= 10 and (gwu2 / 2) % 2 == 0:
+					if gwu2 <= 10 and _safe_strobe(gwu2):
 						lcol2 = Color(1.0, 1.0, 1.0, 0.95)
 					Art.line(self, epos, epos + bdir2 * 900.0, lcol2, 1.0 + pf2)
 					Art.circle(self, lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
@@ -7793,7 +7874,8 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# about the phase being over. Derive the tail from the same tier the sim uses.
 	var _btier: int = sim.wave / 5
 	var _warn_end := 290 + (30 if _btier >= 2 else 0) + (20 if _btier >= 3 else 0)
-	if pt >= 170 and pt <= _warn_end and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
+	# 3 Hz (was 5 Hz); _safe_strobe keeps the existing steady-red hold under REDUCE MOTION.
+	if pt >= 170 and pt <= _warn_end and _safe_strobe(Engine.get_physics_frames()):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	# Ground shadow: the heli was the one unit floating untethered (drone and
@@ -7841,7 +7923,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
-	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * 22.0
+	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# Same strafe/mortar half-cycle the sim uses to pick behavior in
 	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 	# colossus bar labels its phase.
@@ -7970,7 +8052,7 @@ func _draw_colossus() -> void:
 		var ccore := Color(1.0, 0.95, 0.7, 0.9)
 		var cring := Color(1.0, 1.0, 0.6, 0.9)
 		if sealf > 0.0:
-			var seal_strobe := Color(1.0, 0.2, 0.15) if (co / 2) % 2 == 0 else Color(1.0, 0.85, 0.45)
+			var seal_strobe := Color(1.0, 0.2, 0.15) if _safe_strobe(co) else Color(1.0, 0.85, 0.45)
 			ccore = ccore.lerp(seal_strobe, sealf)
 			cring = cring.lerp(Color(1.0, 0.2, 0.15, 0.95), sealf)
 		Art.circle(self, cpos, (9.0 + pulse * 4.0) * cshrink, ccore)
@@ -8309,8 +8391,11 @@ func _draw_players() -> void:
 				var rdir := Vector2(p["roll_dx"], p["roll_dy"]) * PX
 				_spr(tex_name, pos - rdir * 10.0, angle, 0.52, Color(1, 1, 1, 0.14))
 				_spr(tex_name, pos - rdir * 5.0, angle, 0.52, Color(1, 1, 1, 0.28))
-			elif p["hurt_iframes"] > 0 and (p["hurt_iframes"] / 4) % 2 == 0:
-				mod = Color(1, 1, 1, 0.4)   # mercy-window blink
+			elif p["hurt_iframes"] > 0:
+				# Mercy-window blink, clamped to 3 Hz (was 7.5 Hz). REDUCE MOTION holds ONE
+				# steady translucent phase — the i-frames still read, with zero flicker.
+				mod = Color(1, 1, 1, 0.7) if _motion < 0.5 \
+					else Color(1, 1, 1, 0.4 if _safe_strobe(p["hurt_iframes"]) else 1.0)
 			# Wading: ripple rings at the feet say "slow, no roll" at a glance.
 			if sim._in_water(p["x"], p["y"]):
 				var wt := float((Engine.get_physics_frames() + i * 31) % 50) / 50.0
@@ -8449,7 +8534,8 @@ func _draw_players() -> void:
 								and sim._dist_lte(p["x"], p["y"], e["x"], e["y"], SimWorld.BASH_RADIUS):
 							bash_ready = true
 							break
-				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				# P1 green / P2 amber is a red-green split — route P1 through the shared palette.
+				var rcol := Art.safe(Color(0.9, 1.0, 0.65)) if i == 0 else Color(1.0, 0.9, 0.55)
 				# Dry-and-waiting: empty MG with bash NOT ready → grey the reticle so
 				# "nothing will fire" stops reading as "locked and loaded". Pierce/spread/
 				# bash overrides below still win when they apply.
@@ -9115,7 +9201,7 @@ func _draw_telegraphs() -> void:
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(uw, uw) / 2.0, Vector2(uw, uw)),
 			false, Color(0.0, 0.0, 0.0, STRIKE_UNDERLAY["alpha"]))
 		var col := Color(1.0, 0.9 - frac * 0.6, 0.2, 0.9)
-		if s["ticks"] <= 10 and (s["ticks"] / 3) % 2 == 0:
+		if s["ticks"] <= 10 and _safe_strobe(s["ticks"]):   # 3 Hz (was 10 Hz)
 			col = Color(1.0, 1.0, 1.0, 0.95)
 		Art.arc(self, sp, r, 0, TAU, 32, col, 1.5)
 		Art.circle(self, sp, r * frac, Color(col.r, col.g, col.b, 0.20))
@@ -9305,19 +9391,19 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	## chevrons: ties prefer the lethal ranged killers, capped to the
 	## nearest 6 so a dense swarm can't paint a solid warning row.
 	threats.sort_custom(_cmp_threat_top if is_top else _cmp_threat_bottom)
-	var _panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
+	var top_band := _hud_icons.band_top()   # reserved-zone contract (incl. the 2P strip-drop rule)
 	for i in mini(6, threats.size()):
 		var e: Dictionary = threats[i]["e"]
 		var off: float = threats[i]["off"]
 		var danger: bool = threats[i]["danger"]
 		if is_top:
 			var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
-			# Under the corner HUD panel's real footprint (x<262), drop the chevron
-			# below the panel's bottom edge instead of skipping it outright — still
-			# a warning, just relocated clear of the opaque HUD art.
+			# Under the corner HUD panel's real footprint, drop the chevron below the
+			# reserved top band instead of skipping it outright — still a warning, just
+			# relocated clear of the opaque HUD art it could never have drawn over.
 			var tbase := 28.0
 			if tx < _hud_icons.plate_right():
-				tbase = _panel_bot + 12.0
+				tbase = top_band
 			var ta := clampf(1.0 + off / 180.0, 0.2, 0.7)
 			if e.get("windup", 0) > 0:
 				# Steady full boost under reduce-motion — the windup must still read.
@@ -9337,10 +9423,12 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 				Art.line(self, Vector2(tx, ttip + 5.0), Vector2(tx + tspr, tbase + 5.0), tcol, 2.0)
 		else:
 			var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
-			if sim.last_stand and sx > 165.0 and sx < 475.0:
-				# keep clear of the colossus HP bar / LAST STAND readout parked
-				# at bottom-center of the screen in the finale
-				sx = 165.0 if sx < 320.0 else 475.0
+			# Keep clear of the colossus HP bar / LAST STAND readout parked at bottom-center in
+			# the finale. The dodge window derives from the bar itself (HudIcons.COLOSSUS_BAR_*):
+			# the old 165/475 literal pair was a hand-mirror of a bar that spans 170..470.
+			if (sim.last_stand or HudIcons.colossus_bar_visible(sim)) \
+					and sx > HudIcons.COLOSSUS_DODGE_L and sx < HudIcons.COLOSSUS_DODGE_R:
+				sx = HudIcons.COLOSSUS_DODGE_L if sx < 320.0 else HudIcons.COLOSSUS_DODGE_R
 			var a := clampf(1.2 - (off - 360.0) / 200.0, 0.25, 0.85)
 			if e.get("windup", 0) > 0:
 				a = clampf(a + (0.35 if _motion < 0.5 else Art.pulse(0.28) * 0.35), 0.25, 1.0)
@@ -9415,7 +9503,7 @@ func _draw_objective_markers() -> void:
 	# Weight-sort BEFORE the edge cap of 6, so the cap always spends its slots on
 	# the highest-priority marks. On-screen icons are uncapped (anchored).
 	marks.sort_custom(_cmp_mark_priority)
-	var panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
+	var top_band := _hud_icons.band_top()   # reserved-zone contract (incl. the 2P strip-drop rule)
 	var placed: Array[Vector2] = []
 	var edge_used := 0
 	for m in marks:
@@ -9432,9 +9520,9 @@ func _draw_objective_markers() -> void:
 			edge_used += 1
 			var ep := _marker_edge(mp)
 			# Never under the corner HUD panel (it reaches ~y58 in 2P, deeper with
-			# the endless shop row) — drop the marker below its bottom edge.
-			if ep.x < _hud_icons.plate_right() and ep.y < panel_bot + 8.0:
-				ep.y = panel_bot + 8.0
+			# the endless shop row) — drop the marker below the reserved top band.
+			if ep.x < _hud_icons.plate_right() and ep.y < top_band:
+				ep.y = top_band
 			# Min spacing on a shared edge: slide along the edge until clear so
 			# stacked marks can't overprint into one unreadable diamond.
 			var on_h_edge: bool = ep.y <= 40.0 or ep.y >= 340.0
@@ -9701,8 +9789,8 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 		return
 	var frac := 1.0 - float(sim.pending_airstrike) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
 	var a := 0.05 + frac * 0.16
-	if _motion >= 0.5 and sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
-		a = 0.34   # final-second strobe — full-motion only
+	if sim.pending_airstrike < 10 and _safe_strobe(sim.pending_airstrike):
+		a = 0.34   # final-second strobe, clamped to 3 Hz (was 10 Hz)
 	# Reduce-motion: no strobe, but the wash must stay VISIBLE — the old
 	# a*_motion+0.03 dimmed a lethal warning to alpha 0.03 for exactly the
 	# players who asked for a steadier signal, not a hidden one.
@@ -9728,7 +9816,16 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	if top_msg != "airstrike":
 		return
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
-	Art.text_center(self, txt, 320, 46, 12, Color(1.0, 0.85, 0.3))
+	Art.text_center(self, txt, 320, _banner_band_y(), 12, Color(1.0, 0.85, 0.3))
+
+
+## THE baseline every top-center transient banner docks at. main.gd draws at z=0 under the $HUD
+## CanvasLayer, so a banner whose plate reaches into the corner-plate footprint doesn't overlap it
+## — it vanishes under it. One rail: below the corner plate, below any live boss bars, and below
+## the persistent replay ribbon while a replay plays back. `top_msg` makes the four banners
+## mutually exclusive, so they all share this slot without stacking.
+func _banner_band_y() -> float:
+	return _hud_icons.band_top(_boss_bar_slots, 1 if _watching else 0)
 
 
 func _draw_threat_pips() -> void:
@@ -9739,7 +9836,7 @@ func _draw_threat_pips() -> void:
 	# Corner-HUD avoidance mirrors the edge chevrons: a pip clamped to the top edge
 	# under the opaque icon plate would be over-painted by the $HUD CanvasLayer.
 	var plate_r := _hud_icons.plate_right()
-	var panel_b := _hud_icons.panel_bottom() + 12.0
+	var panel_b := _hud_icons.band_top()   # reserved-zone contract, same rail the chevrons use
 	for e in sim.enemies:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
@@ -9889,15 +9986,17 @@ func _draw_banners(top_msg: String) -> void:
 	# needs the RULE ("the camera stays until the wave dies"), not a red strobe.
 	if top_msg == "hold":
 		var htxt := "HOLD THE ARENA — CLEAR THE WAVE"
-		_banner_plate(htxt, 46.0, 10, 0.8)
-		Art.text_center(self, htxt, 320, 46, 10, Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
+		var hby := _banner_band_y()
+		_banner_plate(htxt, hby, 10, 0.8)
+		Art.text_center(self, htxt, 320, hby, 10, Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if top_msg == "mortar":
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
 		var wtxt := "MORTARS RANGING — ADVANCE!"
-		_banner_plate(wtxt, 46.0, 11, 1.0)
-		Art.text_center(self, wtxt, 320, 46, 11, Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
+		var wby := _banner_band_y()
+		_banner_plate(wtxt, wby, 11, 1.0)
+		Art.text_center(self, wtxt, 320, wby, 11, Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
@@ -9911,10 +10010,9 @@ func _draw_banners(top_msg: String) -> void:
 			if a > 0.05:
 				a = maxf(a, 0.85)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
-			# the same shared boundary hud.gd sizes its corner panel against) instead
-			# of overprinting the PHASE label.
-			var by := HudIcons.BOSS_BAR_TOP + 6.0 + 22.0 * float(_boss_bar_slots)
+			# Duck below the reserved top band (corner plate, boss bars, replay ribbon) instead
+			# of overprinting the PHASE label — or, worse, silently vanishing under the HUD.
+			var by := _banner_band_y()
 			# Fit at the BASE size only — the pop-in punch below is a transform
 			# scale, not a font-size bump, so it no longer fights this shrink loop
 			# (a long teach string at a punched-up font size used to overflow
@@ -10045,7 +10143,7 @@ func _draw_banners(top_msg: String) -> void:
 			# before the player leaves this card -- state the total + this run's gain
 			# here too, so the currency's advance is visible before REDEPLOY/TITLE.
 			rows.append({"text": ("%d VP BANKED  (+%d)" % [vet_points, _run_vp_gain]) if _run_vp_gain > 0
-				else "%d VP BANKED" % vet_points, "color": Color(0.7, 0.95, 0.6),
+				else "%d VP BANKED" % vet_points, "color": Art.safe(Color(0.7, 0.95, 0.6)),
 				"icon": "mi_trophy", "icon_size": 14.0})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)
@@ -10065,8 +10163,11 @@ func _draw_banners(top_msg: String) -> void:
 	# keep saying "this is playback, inputs are frozen" for the whole watch.
 	if _watching:
 		var wpul := 1.0 if _motion < 0.5 else (0.7 + 0.3 * Art.pulse(0.15))
+		# The ribbon is PERSISTENT, so it owns the first slot of the reserved top band and the
+		# transient banners stack one row under it (_banner_band_y passes stacked_rows=1 while
+		# _watching). Its old y=30 was above panel_bottom — i.e. under the HUD, which draws over us.
 		Art.text_center(self, "— REPLAY — %s TO EXIT —" % ("START" if Art.use_pad else "R"),
-			320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
+			320, _hud_icons.band_top(_boss_bar_slots), 9, Color(0.55, 0.9, 1.0, wpul))
 	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
 		var ha := minf(1.0, _hint_t * 3.0)
 		var hf := Art.font()
@@ -10075,13 +10176,13 @@ func _draw_banners(top_msg: String) -> void:
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
 		var hx := 320.0 - hw / 2.0 - 8.0
-		# Duck below active boss bars (same 22px/slot offset the splash banner
-		# uses) — at one slot the splash lands at y=92 right on this plate.
-		var hy := 22.0 * float(_boss_bar_slots)
-		_metal_plate(Rect2(hx, 92 + hy, hw + 16, 18), ha)
-		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, 90.0 + hy, 22, 22), false,
+		# One BOSS_BAR_STRIDE below whatever banner shares the band this frame — the same 22px
+		# relationship the old 92-vs-70 literal pair encoded, now derived off the one rail.
+		var hy := _banner_band_y() + HudIcons.BOSS_BAR_STRIDE
+		_metal_plate(Rect2(hx, hy, hw + 16, 18), ha)
+		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, hy - 2.0, 22, 22), false,
 			Color(1.0, 0.95, 0.75, ha))
-		Art.text_center(self, _hint_text, 320, 105 + hy, 11, Color(1.0, 0.95, 0.7, ha))
+		Art.text_center(self, _hint_text, 320, hy + 13.0, 11, Color(1.0, 0.95, 0.7, ha))
 
 
 ## Shared victory/debrief result-card scaffold: translucent panel + centered

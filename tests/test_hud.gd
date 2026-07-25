@@ -768,6 +768,39 @@ func test_pip_safe_area_windowed_non_primary_display() -> void:
 		"a real overlapping notch still insets the right edge (not muted wholesale)")
 
 
+# a11y: the colossus arena's SAFE BELT vs its inner DANGER ring is a live boss mechanic, so it
+# may not be encoded in hue alone. The pair used to be a bare green/red literal at alpha
+# 0.12..0.18 measuring 1.63:1 against each other — a colorblind player, or anyone on a washed-out
+# panel, had nothing to read. This asserts the SHAPE channel carries the distinction on its own:
+# strip the colour entirely and the belt is still dashed-and-doubled where the danger ring is one
+# solid stroke. Run in BOTH palettes, since colorblind mode changes the hue but must not be
+# required to tell them apart.
+func test_colossus_rings_differ_by_shape_not_only_hue() -> void:
+	var was := Art.colorblind
+	for cb in [false, true]:
+		Art.colorblind = cb
+		for pulse in [0.0, 1.0]:
+			var safe_r: Dictionary = HudIcons.colossus_ring_style(true, pulse)
+			var danger: Dictionary = HudIcons.colossus_ring_style(false, pulse)
+			# 1. The encoding itself: broken ring vs continuous stroke, plus a second concentric line.
+			Runner.T.ok(int(safe_r["dashes"]) > 1,
+				"cb=%s: the safe belt is a BROKEN ring (%d dashes)" % [cb, int(safe_r["dashes"])])
+			Runner.T.eq(int(danger["dashes"]), 1, "cb=%s: the danger ring is one continuous stroke" % cb)
+			Runner.T.ok(float(safe_r["duty"]) < 1.0, "cb=%s: the safe belt's dashes leave real gaps" % cb)
+			Runner.T.ok(float(safe_r["hairline"]) > 0.0 and float(danger["hairline"]) == 0.0,
+				"cb=%s: only the safe belt carries the second concentric hairline" % cb)
+			# 2. The teeth: with hue removed (greyscale), the two rings are NOT separable by
+			#    luminance alone -- which is exactly why the shape encoding above must exist.
+			var sc: Color = safe_r["col"]
+			var dc: Color = danger["col"]
+			Runner.T.ok(_contrast(Color(sc.r, sc.g, sc.b), Color(dc.r, dc.g, dc.b)) < 3.0,
+				"cb=%s: the two rings are NOT separable by luminance, so shape is load-bearing" % cb)
+			# 3. Both must actually be visible over the lit foundry floor.
+			Runner.T.ok(sc.a >= 0.3 and dc.a >= 0.3,
+				"cb=%s: both rings draw at a legible alpha (safe %.2f / danger %.2f)" % [cb, sc.a, dc.a])
+	Art.colorblind = was
+
+
 # WCAG 2.1 relative luminance of an sRGB Godot Color (gamma-expanded per-channel).
 static func _rel_lum(c: Color) -> float:
 	var out := 0.0
@@ -2182,8 +2215,11 @@ func test_verb_legend_draw_commands_captured_both_devices() -> void:
 				plate = op["box"]
 		Runner.T.ok("ROLL" in labels and "SUPPLY WHEEL" in labels,
 			"%s verb chip draws ROLL/WHEEL labels" % dev)
+		# GRENADE is the only armor-cracker (the landing zone is a bunker you must grenade)
+		# and nothing else in-run names its button — the chip must state it on both devices.
+		Runner.T.ok("GRENADE" in labels, "%s verb chip names GRENADE" % dev)
 		Runner.T.ok(not ("REVIVE" in labels), "%s verb chip no longer advertises REVIVE (contextual only)" % dev)
-		for a in ["roll", "wheel"]:
+		for a in ["roll", "grenade", "wheel"]:
 			Runner.T.ok(a in glyphs, "%s verb chip emits the %s glyph" % [dev, a])
 			Runner.T.ok(_act_glyph_resolves(a), "%s verb glyph '%s' resolves to a texture" % [dev, a])
 		Runner.T.ok(plate.position.x >= 0.0 and plate.end.x <= 640.0, "%s verb plate within 640 [%d,%d]" % [dev, int(plate.position.x), int(plate.end.x)])
@@ -3084,8 +3120,11 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 	var reserve: float = HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP
 	# Widest real caption AND the widest phase label — the worst pair, both measured, not assumed.
 	var font := Art.font()
-	for txt in ["COMMANDER: \"Move out!\"",
-			"SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\""]:
+	# Built through caption_line (the real speaker-prefix helper _draw_caption calls), so the
+	# a11y prefix can never widen the strip past this layout guard without failing here.
+	for txt in [HudIcons.caption_line("\"Move out!\"", false),
+			HudIcons.caption_line(
+				"\"War chest's empty, no revives left for the rest of this desperate last stand!\"", true)]:
 		var lines := HudIcons._wrap_caption(txt, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
 		var w := 0.0
 		for ln in lines:
@@ -3110,3 +3149,96 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 	# and the label/bar pair inside the block
 	Runner.T.ok(HudIcons.COLOSSUS_BAR_RECT.position.y >= HudIcons.COLOSSUS_LABEL_Y + 2.0,
 		"the HP bar clears the phase label's baseline")
+
+
+# --- the reserved-zone band contract ---------------------------------------------------------
+# main.gd's `_draw` is a Node2D at z=0; `$HUD` is a CanvasLayer at layer 1. main.gd can therefore
+# NEVER paint above the HUD chrome — an overlay that overlaps the corner plate or the boss bars
+# doesn't win the z-fight, it silently disappears under it. So every transient main.gd overlay
+# ducks through HudIcons.band_top() / band_bottom() instead of its own literal, and this test
+# pins that across the full config matrix: {1P,2P} x {campaign,endless} x {colossus on/off}.
+
+class _BandMain extends Node2D:
+	var sim: SimWorld = null
+	var _motion := 1.0
+	var _menu = null
+	var _debrief := false
+
+
+func test_reserved_zone_band_contract() -> void:
+	var font := Art.font()
+	# The widest caption the game can emit — the worst case for the bottom rail.
+	var worst := "SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\""
+	for pc in [1, 2]:
+		for mode in ["campaign", "endless"]:
+			for colossus in [false, true]:
+				var m := _BandMain.new()
+				var h := HudIcons.new()
+				h.main = m
+				var sim := SimWorld.new(7, pc, mode)
+				m.sim = sim
+				sim.colossus = {"alive": true, "hp": 14, "x": 0, "y": 0} if colossus else {}
+				var tag := "%dP/%s/%s" % [pc, mode, "colossus" if colossus else "no-colossus"]
+				var pb := h.panel_bottom()
+				# --- TOP RAIL: every banner slot clears the corner plate it can't draw over.
+				for slots in [0, 1, 2]:
+					for rows in [0, 1]:
+						var by := h.band_top(slots, rows)
+						Runner.T.ok(by >= pb + HudIcons.TOP_RESERVE_GAP,
+							"%s: banner y %d clears panel_bottom %d (slots %d, rows %d)"
+								% [tag, int(by), int(pb), slots, rows])
+						if slots > 0:
+							Runner.T.ok(by >= HudIcons.BOSS_BAR_TOP
+									+ HudIcons.BOSS_BAR_STRIDE * float(slots),
+								"%s: banner y %d clears %d boss bar(s)" % [tag, int(by), slots])
+						# A stacked persistent row (the replay ribbon) never lands on the banner.
+						if rows == 1:
+							Runner.T.ok(by >= h.band_top(slots, 0) + HudIcons.ROW_H,
+								"%s: the replay ribbon and the banner never share a slot" % tag)
+					# Stacking a bar can only push the band DOWN, never up.
+					Runner.T.ok(h.band_top(slots + 1) >= h.band_top(slots),
+						"%s: the top band is monotonic in boss slots" % tag)
+				# --- BOTTOM RAIL: caption + verb chip clear the persistent colossus block.
+				var bb := h.band_bottom(sim)
+				var want_bb: float = (HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP) \
+					if colossus else HudIcons.SCREEN_BOTTOM
+				Runner.T.eq(bb, want_bb, "%s: band_bottom reports the reserved floor" % tag)
+				var lift := HudIcons.bottom_band_lift(sim)
+				Runner.T.eq(lift > 0.0, colossus, "%s: the lift fires exactly when the block is up" % tag)
+				var lines := HudIcons._wrap_caption(worst, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
+				var w := 0.0
+				for ln in lines:
+					w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE).x)
+				var cap := HudIcons.caption_bg_rect(lines.size(), w, HudIcons.VERB_LEGEND_Y - 20.0 - lift)
+				Runner.T.ok(cap.end.y <= bb,
+					"%s: caption scrim bottom %d clears COLOSSUS_BLOCK_TOP" % [tag, int(cap.end.y)])
+				Runner.T.ok(cap.position.y > h.band_top(2),
+					"%s: the caption never rides up into the top band" % tag)
+				Runner.T.ok(HudIcons.VERB_LEGEND_Y - lift + HudIcons.VERB_PLATE_BELOW <= bb,
+					"%s: verb chip bottom clears COLOSSUS_BLOCK_TOP" % tag)
+				m.free()
+				h.free()
+	# The bottom edge-chevron dodge derives from the bar it dodges — the old 165/475 literal pair
+	# in main.gd was mirroring a bar that actually spans 170..470.
+	Runner.T.ok(HudIcons.COLOSSUS_DODGE_L < HudIcons.COLOSSUS_BAR_X,
+		"the dodge window opens left of the colossus bar")
+	Runner.T.ok(HudIcons.COLOSSUS_DODGE_R > HudIcons.COLOSSUS_BAR_X + HudIcons.COLOSSUS_BAR_W,
+		"the dodge window closes right of the colossus bar")
+
+
+# The caption strip and verb chip must OPT OUT while main.gd paints a result card: the card is
+# drawn at z=0 under this CanvasLayer, so "draw the card later" can never cover them.
+func test_result_card_suppresses_the_bottom_overlays() -> void:
+	var m := _BandMain.new()
+	var h := HudIcons.new()
+	h.main = m
+	var sim := SimWorld.new(7, 1)
+	m.sim = sim
+	Runner.T.eq(h._result_card_up(), false, "a live run shows the caption/verb overlays")
+	m._debrief = true
+	Runner.T.eq(h._result_card_up(), true, "the K.I.A. debrief suppresses them")
+	m._debrief = false
+	sim.victory = true
+	Runner.T.eq(h._result_card_up(), true, "the victory card suppresses them")
+	m.free()
+	h.free()

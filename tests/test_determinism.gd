@@ -218,13 +218,56 @@ const SEED := 0xDEADBEEF
 ## pure placement, no new rng draw, no kind change, lane still >= HULL_CLEARANCE.
 ## All 6 campaign samples move; ENDLESS_GOLDEN VERIFIED UNCHANGED (the authoring
 ## is campaign-gated).
+## RE-RECORDED (2026-07-25, ghost-bunker budget leak): `bunkers` was never removed
+## from and _step_bunkers had no on-screen gate, so every passed-but-unsealed bunker
+## kept spawning infantry behind the camera forever — rushers that ate the shared
+## MAX_ENEMIES budget, drew from the shared stream-rng, and were culled by
+## _step_enemies the very next tick, starving the real front-line spawner on deep
+## runs. Bunkers now ride the same `y > camera_top + 420` sweep as enemies/sandbags/
+## rocks, which both prunes them and gates their spawning. The campaign torture
+## ratchets past the LZ bunker inside the first sample window, so ALL 6 campaign
+## samples move (fewer ghost spawns = a different rng trajectory from there on).
+## Gate arenas are unaffected: gates hold their own b1/b2 dict refs, and a closed
+## gate pins the camera within GATE_CAMERA_PAD+150px of its pair — always in band.
+## ENDLESS_GOLDEN VERIFIED UNCHANGED: endless streams no bunkers at all, and the
+## same-pass rooted-spawn fix (endless mg_nest/broadcast now spawn at camera_top+40
+## instead of the unreachable camera_top-24, and the rally mast lost its blanket
+## exemption from the off-screen cull) is wave-3+/wave-7+ — the endless torture
+## wipes during wave 2. Proven instead by the two new tests in test_endless.gd.
+## RE-RECORDED (2026-07-25, the LZ grenade crate was a placebo): players spawn at
+## GRENADE_AMMO_MAX, so the free kind-1 crate at (320,-300) -- BEFORE the bunker --
+## granted mini(MAX, ammo+4) = ZERO and taught nothing. It moved PAST the bunker to
+## (320,-480), where it refills the grenade the bunker just cost. Pure placement:
+## no new rng draw, no kind/cost change, and -480 is clear of both the LZ bunker
+## (-420..-388) and the streamed bunker row at y=-500 (x=120). Also in this pass:
+## _collect_pickups now refuses a PRICED crate the player is capped on instead of
+## charging the chest + crediting cost*10 for a no-op -- inert for the campaign
+## torture (it never stands on a priced crate at cap) but it is sim logic, so it is
+## noted here. All 6 campaign samples move (the torture walks the LZ from tick 0, so
+## the crate's new y shifts collection timing). ENDLESS_GOLDEN VERIFIED UNCHANGED
+## (the LZ authoring is campaign-gated and endless has no priced-crate-at-cap beat).
+## VERIFIED UNCHANGED (2026-07-25, enemy movement honours collision): _step_sapper,
+## _step_frogman and _step_technical now route through the shared _advance_toward step
+## instead of open-coding their movement, so they respect sandbags (a 40-coin player
+## purchase), rocks, tank hulks and sealed lane blocks, plus the mud/rubble/wire slow
+## and the broadcast rally aura, like every other ground mover. Behavioural, not a
+## rounding artifact -- test_archetypes::test_sapper_cannot_cross_a_sandbag_line fails
+## on the old code -- but golden-inert HERE: the campaign torture carries frogmen for
+## ~10.9k enemy-ticks and not one of them ever surfaces, so the touched lunge branch
+## never executes; sappers and technicals are endless-only.
+## RE-RECORDED ONCE FOR THE COMBINED TREE (2026-07-25): three of the changes above
+## landed as separate branches, and two of them each re-recorded GOLDEN in isolation
+## against their own baseline. Neither set survives the merge — the real checksums of
+## the combined sim match only a fresh recording, so this is that recording. The
+## individual notes above still explain WHY each change moves the trajectory; this
+## line explains why the numbers match none of them.
 const GOLDEN: Array[int] = [
-	8824309749638634364,
-	6749052236834509168,
-	2266527914986358408,
-	7994727017838703917,
-	4594530292734471620,
-	1982583823041702415,
+	506778608736561550,
+	7590183919185690526,
+	241001744564993750,
+	8011787666350042381,
+	9156448604151922468,
+	4756524505527291036,
 ]
 
 
@@ -310,6 +353,10 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## the endless stream legitimately moves from tick 0. Campaign GOLDEN untouched (endless-gated).
 ## c2-12 (2026-07-18): VERIFIED UNCHANGED — endless never advances the camera so
 ## CAMERA_LEAD is inert here, and the courier-spawn move is past the wave-2 wipe.
+## VERIFIED UNCHANGED (2026-07-25, enemy movement honours collision): see GOLDEN note.
+## The endless torture wipes at wave 2, before the first sapper spawn; the 208 technical
+## enemy-ticks it does step sit clear of every piece of cover and slow terrain the shared
+## step adds, so _advance_toward reproduces the old positions byte for byte.
 const ENDLESS_GOLDEN: Array[int] = [
 	870682775949389125,
 	2998730705561210490,

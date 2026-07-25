@@ -40,6 +40,15 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_soak.gd",
 ]
 
+## Opt-in only: suites whose assertions are wall-clock timings. A shared CI
+## runner is a noisy neighbour, so these fail for reasons unrelated to the
+## commit, and a gate that reddens at random stops being read. Excluded from the
+## default full run; still runnable (and run by CI's advisory `perf` job) via
+## SUITE=perf.
+const OPT_IN_SUITES: Array[String] = [
+	"res://tests/test_perf.gd",
+]
+
 
 class T:
 	static var failures: Array[String] = []
@@ -57,8 +66,11 @@ class T:
 
 func _init() -> void:
 	var suite_filter := OS.get_environment("SUITE")
-	var scripts: Array[String] = TEST_SCRIPTS if suite_filter.is_empty() else \
-		TEST_SCRIPTS.filter(func(p: String) -> bool: return p.contains(suite_filter))
+	var scripts: Array[String] = TEST_SCRIPTS.filter(
+		func(p: String) -> bool:
+			if suite_filter.is_empty():
+				return not OPT_IN_SUITES.has(p)
+			return p.contains(suite_filter))
 	var total_methods := 0
 	for path in scripts:
 		var script: GDScript = load(path)

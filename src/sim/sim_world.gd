@@ -1392,6 +1392,14 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		var cost: int = pk.get("cost", 0)
 		if cost > 0 and war_chest < cost:
 			continue
+		# A supply the player is already capped on grants nothing (mini() eats it,
+		# or the vest is already on). A PRICED one must not be auto-bought on
+		# proximity: that was a silent chest debit PLUS a cost*10 score credit for
+		# nothing (an endless laundering loop). Leave it standing — the view
+		# already greys it and prints MAXED.
+		var full := _supply_full(p, pk["kind"])
+		if cost > 0 and full:
+			continue
 		war_chest -= cost
 		if pk["kind"] == 2:
 			vest_buys += 1   # priced crates ride the same campaign creep (no loophole)
@@ -1399,10 +1407,8 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
 			score += cost * 10
-		# Claymore capsule grabbed at the 3-charge cap grants nothing (mini()
-		# eats it) — flag the event so the view can stop paying the celebratory
-		# callout for a no-op. Events are checksum-excluded: golden-safe.
-		var full: bool = pk["kind"] == 8 and p["claymores"] >= CLAYMORE_CAP
+		# `full` rides the event so the view can stop paying the celebratory
+		# callout for a free no-op too. Events are checksum-excluded: golden-safe.
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
 			"kind": pk["kind"], "cost": cost, "full": full})
@@ -1557,6 +1563,19 @@ func _fire_mission() -> void:
 	for e in enemies:
 		if e["alive"] and not e.get("submerged", false) and e["kind"] != "pilot":
 			_kill_enemy(e, true, true)
+
+
+func _supply_full(p: Dictionary, kind: int) -> bool:
+	## True when _apply_supply(kind) would grant this player NOTHING — the mini()
+	## clamp eats it, or the vest is already on. Only the capped kinds answer
+	## true; every timed capsule (4/5/7/9), the one-shot flashbang and the
+	## sandbag re-apply usefully, so they are never "full".
+	match kind:
+		0: return p["mg_ammo"] >= MG_AMMO_MAX
+		1: return p["grenade_ammo"] >= GRENADE_AMMO_MAX
+		2: return p["vest"]
+		8: return p["claymores"] >= CLAYMORE_CAP
+	return false
 
 
 func _apply_supply(p: Dictionary, kind: int) -> void:
@@ -2376,7 +2395,8 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false) -> void:
 
 func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) -> void:
 	## Shared "move toward target at base_spd, halved while wading" step used by
-	## rushers, shieldmen, elites, grenadiers and snipers. Same fixed-point ops,
+	## rushers, shieldmen, elites, grenadiers, snipers, sappers, lunging frogmen
+	## and technicals (both phases). Same fixed-point ops,
 	## same order, as the code this replaces — golden-safe.
 	## FRENZY (wave_mod 6) belongs HERE, not just in _step_sapper: "the swarm
 	## rushes 40% faster" means the WHOLE swarm. wave_mod is endless-only and the
@@ -2474,7 +2494,10 @@ func _step_enemies() -> void:
 			_broadcasts.append(be)
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
-		if not e["alive"] or (e["y"] > camera_top + 420 * F_ONE and e["kind"] != "broadcast"):
+		# (The mast used to be exempt from the off-screen sweep — the one entity
+		# that could never be swept. It spawns inside the reachable band now, so
+		# it plays by the same rule as everything else.)
+		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
 			enemies.remove_at(i)
 			continue
 		if flash_ticks > 0:
@@ -2721,8 +2744,9 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 		if llen > F_ONE:
 			var prev_x: int = e["x"]
 			var prev_y: int = e["y"]
-			e["x"] = e["x"] + Fixed.mul(Fixed.div(lx, llen), TECHNICAL_SPEED)
-			e["y"] = e["y"] + Fixed.mul(Fixed.div(ly, llen), TECHNICAL_SPEED)
+			# Shared mover step (it smashes sandbags above, but rocks, hulks and
+			# sealed lane blocks used to be phased straight through mid-charge).
+			_advance_toward(e, lx, ly, llen, TECHNICAL_SPEED)
 			if _in_water(e["x"], e["y"]):
 				e["x"] = prev_x
 				e["y"] = prev_y
@@ -2750,8 +2774,7 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	if dlen > F_ONE:
 		var cpx: int = e["x"]
 		var cpy: int = e["y"]
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), ENEMY_SPEED)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), ENEMY_SPEED)
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)   # cover is cover for wheels too
 		if _in_water(e["x"], e["y"]):   # wheels don't swim (tank rule)
 			e["x"] = cpx
 			e["y"] = cpy
@@ -2786,8 +2809,10 @@ func _step_frogman(e: Dictionary) -> void:
 	if e["lunge_ticks"] > 0:
 		e["lunge_ticks"] = e["lunge_ticks"] - 1
 		if dlen > F_ONE:
-			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), FROGMAN_LUNGE_SPEED)
-			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), FROGMAN_LUNGE_SPEED)
+			# Shared mover step: the lunge is fast, not incorporeal — it stops at
+			# sandbags/rocks/hulks/sealed blocks like every other ground mover, and
+			# wades out of its own river at half pace.
+			_advance_toward(e, dx, dy, dlen, FROGMAN_LUNGE_SPEED)
 	elif dlen > FROGMAN_CALM_RADIUS and _in_water(e["x"], e["y"]):
 		e["submerged"] = true
 	else:
@@ -2812,14 +2837,11 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 		e["fire_cd"] = SAPPER_MINE_CD_TICKS
 		mines.append({"x": e["x"], "y": e["y"], "armed": true})
 		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
+	# Moves through the shared mover step, so the sapper respects the cover the
+	# player PAID for: hand-rolled movement here phased straight through sandbags,
+	# rocks, tank hulks and sealed lane blocks (and skipped mud/rubble/wire).
 	if dlen > F_ONE:
-		var spd := ENEMY_SPEED
-		if wave_mod == 6:
-			spd = (spd * 7) / 5   # FRENZY wave: the swarm rushes 40% faster
-		if _in_water(e["x"], e["y"]):
-			spd = spd / 2
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), spd)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), spd)
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 
 
 func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
@@ -2882,8 +2904,21 @@ func _nearest_alive_player(x: int, y: int) -> Dictionary:
 
 
 func _step_bunkers() -> void:
-	# Bunkers spawn infantry until sealed (the 1986 infinite-spawn grammar).
-	for bk in bunkers:
+	# Bunkers spawn infantry until sealed (the 1986 infinite-spawn grammar) —
+	# but only while they're still in the live band. `bunkers` was never removed
+	# from and this loop had no on-screen gate, so every passed-but-unsealed
+	# bunker kept spitting rushers behind the camera forever: they ate the shared
+	# MAX_ENEMIES budget, got culled by _step_enemies the next tick, and starved
+	# the real front-line spawner on deep runs. Same off-screen test the enemy /
+	# sandbag / rock sweeps use, so it prunes and gates in one pass.
+	# Safe for gate arenas: gates hold their own b1/b2 dict refs (removal from
+	# this array doesn't touch them), and a closed gate pins the camera within
+	# GATE_CAMERA_PAD + 150px of its pair — well inside the band.
+	for i in range(bunkers.size() - 1, -1, -1):
+		var bk := bunkers[i]
+		if bk["y"] > camera_top + 420 * F_ONE:
+			bunkers.remove_at(i)
+			continue
 		if not bk["alive"]:
 			continue
 		bk["spawn_cd"] = bk["spawn_cd"] - 1
@@ -4027,7 +4062,8 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	## for Boss Rush (a deliberate "no field filler between fights" design
 	## choice -- see _setup_boss_rush) while the campaign stream keeps it.
 	gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
-		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
+		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus),
+			"max_hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
 			"dir": 1, "phase_t": 0, "gate_y": gy}})
 	# Boss-arena cover (5v): four bags in two mirrored lines turn the
 	# strafe half into a COVER fight (mortars ignore cover, so the
@@ -4200,13 +4236,18 @@ func _author_lz() -> void:
 	for sr in [[96, 0, 0], [158, -22, 0], [226, 14, 0],
 			[414, 18, 0], [478, -16, 0], [546, 6, 0]]:
 		rocks.append({"x": sr[0] * F_ONE, "y": -((180 + sr[1]) * F_ONE), "kind": sr[2]})
-	# 2. The conspicuous grenade box, dead center in the lane, free.
-	pickups.append({"x": SCREEN_CX, "y": -(300 * F_ONE), "kind": 1, "cost": 0})
-	# 3. 120px past it: an armored bunker at the lane mouth, spitting infantry
-	#    every 2s. Rifle rounds spark off it (armor_block -> the view's existing
-	#    ricochet), one grenade seals it for 50 coins. Gate 1 then repeats the
-	#    lesson as a hard wall. Corner-origin like every streamed bunker.
+	# 2. An armored bunker at the lane mouth, spitting infantry every 2s. Rifle
+	#    rounds spark off it (armor_block -> the view's existing ricochet), one
+	#    grenade seals it for 50 coins. Gate 1 then repeats the lesson as a hard
+	#    wall. Corner-origin like every streamed bunker.
 	bunkers.append(_make_bunker(SCREEN_CX - BUNKER_W / 2, -(420 * F_ONE)))
+	# 3. The conspicuous grenade box, dead center in the lane, free -- 60px PAST
+	#    the bunker's north face. Players spawn at GRENADE_AMMO_MAX, so a crate
+	#    placed BEFORE the bunker granted mini(MAX, ammo+4) = nothing and taught
+	#    nothing. On the far side it refills the grenade the bunker just cost,
+	#    which is the actual lesson: grenades are a resource that gets resupplied.
+	#    Clear of the streamed bunker row at y=-500 (that one sits at x=120).
+	pickups.append({"x": SCREEN_CX, "y": -(480 * F_ONE), "kind": 1, "cost": 0})
 
 
 func _make_bunker(x: int, y: int) -> Dictionary:
@@ -4264,6 +4305,14 @@ func _step_waves() -> void:
 			if pressure_side >= 0:
 				xpx = clampi([160, 320, 480][pressure_side] + (xpx - 320) * 120 / 296, 24, 616)
 			var x := xpx * F_ONE
+			# ROOTED spawns (mg_nest / broadcast) can't use the walk-in-from-the-top
+			# y: endless never runs _step_camera, so camera_top is pinned at -VIEW_H
+			# forever and camera_top-24 sits ABOVE the player's own _clamp_actor
+			# ceiling (camera_top+16). A rooted unit there is permanently
+			# unreachable — blind-fire only — yet it counts in _wave_hostiles_cleared
+			# and holds the wave open indefinitely. Root them inside the reachable
+			# band instead (16..344 below camera_top).
+			var rooted_y: int = camera_top + 40 * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = wave_mod == 2 or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
@@ -4292,14 +4341,14 @@ func _step_waves() -> void:
 					# (the same beat the first miniboss lands).
 					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
 				elif roll == 6:
-					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+					_spawn_mg_nest(x, rooted_y)
 				elif roll == 7:
 					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
 				elif roll == 8 and wave >= 7:
 					# Late-debut archetype: deep waves stop being static. Roll 8 fell
 					# to plain-elite before, and still does under wave 7 — the rng
 					# stream is untouched, only the wave-7+ interpretation changes.
-					_spawn_broadcast(x, camera_top - 24 * F_ONE)
+					_spawn_broadcast(x, rooted_y)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			elif wave_mod == 7 and wave_pending % 3 == 0:
@@ -4510,6 +4559,7 @@ func _start_wave() -> void:
 		# no longer lands on top of the wave_start card). Already-hashed field,
 		# zero new state; the arrival emits the endless_boss event instead.
 		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
+			"max_hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
 			"x": SCREEN_CX, "dir": 1, "phase_t": -420, "gate_y": camera_top + 90 * F_ONE}
 	if wave >= 4 and not _live_drop() and rng.range_i(0, 2) == 0:
 		# Mid-wave optional objective (5-vote panel, trimmed to the drop beat):
@@ -4585,6 +4635,29 @@ func _colossus_ring(dist: int) -> int:
 	if dist <= r[1] * F_ONE:
 		return 1
 	return 2
+
+
+func _colossus_strike(p: Dictionary) -> void:
+	## Every colossus mortar LEADS its target — the same poor-man's velocity the
+	## gunship volley uses (_step_boss): sample the player, project the delta since
+	## the last sample one full telegraph forward. A 45t warn + 28px kill ring aimed
+	## at the tile you're STANDING on can never catch a 2.4px/tick walker (108px of
+	## travel vs a 28px ring), so the phase-2 volley, the lane-sweep punisher and the
+	## inner-ring punisher were all free auto-dodges for anyone who kept walking —
+	## the whole escalation ladder was banners over an inert threat. Standing still
+	## gives a zero delta, so a camper is hit exactly where they always were.
+	## The sample lives on the player (per-player: 2P leads both) and is SHARED by
+	## all three sources — a fresher sample only sharpens the lead.
+	var aim_x: int = p["x"]
+	var aim_y: int = p["y"]
+	if p.has("lead_t"):
+		var elapsed: int = maxi(1, tick_count - int(p["lead_t"]))
+		aim_x += (p["x"] - int(p["lead_x"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+		aim_y += (p["y"] - int(p["lead_y"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+	p["lead_x"] = p["x"]
+	p["lead_y"] = p["y"]
+	p["lead_t"] = tick_count
+	_add_strike(clampi(aim_x, WORLD_LEFT, WORLD_RIGHT), aim_y)
 
 
 func _step_colossus() -> void:
@@ -4696,7 +4769,7 @@ func _step_colossus() -> void:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
 		if colossus["volley_cd"] <= 0 and not _concealed(target):
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
-			_add_strike(target["x"], target["y"])
+			_colossus_strike(target)
 	if phase == 3:
 		colossus["spawn_cd"] = colossus["spawn_cd"] - 1
 		if colossus["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
@@ -4712,7 +4785,7 @@ func _step_colossus() -> void:
 	if colossus["sweep_cd"] <= 0 \
 			and (target["x"] < ARENA_MARGIN or target["x"] > SCREEN_W_FP - ARENA_MARGIN):
 		colossus["sweep_cd"] = COLOSSUS_SWEEP_CD_TICKS
-		_add_strike(target["x"], target["y"])
+		_colossus_strike(target)
 
 	# c4 2v ROTATING RINGS: the inner DANGER ring GROWS each phase rise (the safe
 	# annulus migrates OUTWARD). A player camping inside the inner ring eats a
@@ -4723,7 +4796,7 @@ func _step_colossus() -> void:
 			if rp["alive"]:
 				var rd := Fixed.length(colossus["x"] - rp["x"], colossus["y"] - rp["y"])
 				if _colossus_ring(rd) == 0:   # camping the (growing) inner ring is punished
-					_add_strike(rp["x"], rp["y"])
+					_colossus_strike(rp)
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
@@ -4908,7 +4981,12 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 	# edge, no new boss field), reuses hashed rocks[]; only the campaign gunship
 	# has span slabs to crack (endless minibosses no-op), and gate 3 is torture-
 	# unreachable, so both goldens stay byte-identical.
-	var maxhp := _scaled_boss_hp(BOSS_HP)
+	# Thresholds come off the SPAWN-time pool (colossus precedent), not a fresh
+	# _scaled_boss_hp(BOSS_HP): that ignored the Boss Rush hp_bonus and the endless
+	# depth scaling, and re-read the LIVE player count — so a partner dying mid-fight
+	# shifted both crack thresholds under the fight (a 2P gunship at 64/96 HP could
+	# skip its first crack entirely). Test callers stage bare boss dicts, hence .get.
+	var maxhp: int = boss.get("max_hp", _scaled_boss_hp(BOSS_HP))
 	for thr in [maxhp * 2 / 3, maxhp / 3]:
 		if old_hp > thr and boss["hp"] <= thr:
 			_crack_bridge_span(boss)

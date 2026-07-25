@@ -907,6 +907,10 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 					glyphs.append(op["id"])
 			# SELECT + BACK are drawn on EVERY non-TITLE footer.
 			Runner.T.ok("SELECT" in labels and "BACK" in labels, "%s mode %d footer draws SELECT + BACK" % [dev, mode_id])
+			# The HELP pointer at the manual (the only place FIRE is named) is device-agnostic —
+			# it used to be keyboard-only, leaving pad players with no cue. Everywhere but HOWTO.
+			Runner.T.eq("HELP" in labels, mode_id != Menu.Mode.HOWTO,
+				"%s mode %d advertises HELP unless the manual is already open" % [dev, mode_id])
 			if mode_id == Menu.Mode.PAUSE:
 				for v in ["ROLL", "SUPPLY WHEEL", "REVIVE"]:
 					Runner.T.ok(v in labels, "%s PAUSE footer draws the %s reference" % [dev, v])
@@ -1063,6 +1067,33 @@ func test_device_glyph_change_triggers_menu_repaint() -> void:
 	Runner.T.ok(Menu.device_glyphs_changed(true, "xbox", true, "playstation"), "pad brand swap (same use_pad) repaints")
 	Runner.T.ok(not Menu.device_glyphs_changed(true, "xbox", true, "xbox"), "no device/brand change does NOT repaint")
 	Runner.T.ok(not Menu.device_glyphs_changed(false, "xbox", false, "xbox"), "steady keyboard does NOT repaint")
+
+
+# HOW TO PLAY is the ONLY place FIRE is named, and PAUSE is the only menu reachable mid-run —
+# so PAUSE must host a "howto" row, and BACK out of the manual must return to the PAUSED run
+# (never the INFO screen, which would strand the run's menu tree at the title).
+func test_pause_exposes_how_to_play_and_backs_out_to_the_paused_run() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.PAUSE
+	var ids: Array = []
+	for it in m._menu_items():
+		ids.append(it["id"])
+	Runner.T.ok("howto" in ids, "PAUSE offers a HOW TO PLAY row (rows %s)" % [ids])
+	Runner.T.ok("resume" in ids, "PAUSE still offers RESUME alongside it")
+	# The opener is recorded exactly like OPTIONS' — BACK follows the row the player came through.
+	m._howto_parent = Menu.Mode.PAUSE
+	Runner.T.eq(m._parent(Menu.Mode.HOWTO), {"mode": Menu.Mode.PAUSE, "sel": "howto"},
+		"HOWTO opened from PAUSE backs out to PAUSE")
+	m._howto_parent = Menu.Mode.INFO
+	Runner.T.eq(m._parent(Menu.Mode.HOWTO), {"mode": Menu.Mode.INFO, "sel": "howto"},
+		"HOWTO opened from INFO still backs out to INFO")
+	m._howto_parent = Menu.Mode.TITLE   # stale/unset value can never strand the player
+	Runner.T.eq(m._parent(Menu.Mode.HOWTO), {"mode": Menu.Mode.INFO, "sel": "howto"},
+		"a stale opener falls back to the INFO screen")
+	m.free()
+	stub.free()
 
 
 # BACK / Esc must climb exactly one level: c2-04 SETUP -> TITLE, OPTIONS + INFO ->
@@ -2882,6 +2913,28 @@ func test_destructive_text_contrast() -> void:
 				"armed label contrast %.2f over composited flood (a=%.2f) clears AA-normal" % [ratio, a])
 
 
+# a11y: the NORMAL (non-destructive) focused row was the hole in the contrast fixture —
+# test_destructive_text_contrast only ever measured RESTART/TITLE/QUIT, so the row every
+# player reads on every screen went unchecked and sat at 4.25:1, under AA-normal. The label
+# is drawn on Art.menu_plate's BODY band (tint * Art.PLATE_BODY), which is the darkest and
+# therefore worst-case of the plate's three bands under the glyphs — the 1px keyline (PLATE_HI)
+# is a silhouette edge the text never lands on. Unselected is checked too so darkening the
+# focused plate can never invert the focus read.
+func test_focused_row_text_contrast() -> void:
+	var body := func(tint: Color) -> Color:
+		return Color(tint.r * Art.PLATE_BODY, tint.g * Art.PLATE_BODY, tint.b * Art.PLATE_BODY)
+	var sel_ratio := _wcag_contrast(Menu.ROW_TEXT_SEL, body.call(Menu.PLATE_SEL))
+	Runner.T.ok(sel_ratio >= 4.5,
+		"focused row label contrast %.2f clears AA-normal (>=4.5)" % sel_ratio)
+	var unsel_ratio := _wcag_contrast(Menu.ROW_TEXT_UNSEL, body.call(_opaque(Menu.PLATE_UNSEL)))
+	Runner.T.ok(unsel_ratio >= 4.5,
+		"unfocused row label contrast %.2f clears AA-normal (>=4.5)" % unsel_ratio)
+	# The focused plate must stay the BRIGHTER of the two, or the contrast fix would have
+	# traded away the "where am I" cue it was meant to protect.
+	Runner.T.ok(Menu.PLATE_SEL.get_luminance() > _opaque(Menu.PLATE_UNSEL).get_luminance(),
+		"the focused row plate is still brighter than an unfocused one")
+
+
 # src over dst at alpha a -> opaque composite color (per-channel).
 func _blend(src: Color, dst: Color, a: float) -> Color:
 	return Color(src.r * a + dst.r * (1.0 - a), src.g * a + dst.g * (1.0 - a), src.b * a + dst.b * (1.0 - a))
@@ -2986,7 +3039,10 @@ func test_pause_dedups_settings_behind_one_options_row() -> void:
 	Runner.T.ok("options" in ids, "PAUSE fronts settings through a single OPTIONS row")
 	var opt_i := ids.find("options")
 	Runner.T.ok(m._menu_items()[opt_i].get("submenu", false), "the PAUSE OPTIONS row is a submenu (opens the screen)")
-	Runner.T.eq(ids, ["resume", "options", "restart", "title"], "PAUSE is RESUME / OPTIONS / RESTART / TITLE only")
+	# HOW TO PLAY joined the list (the manual is the only place FIRE is named, and PAUSE is
+	# the one menu reachable mid-run) — still a submenu opener, still no duplicated settings.
+	Runner.T.eq(ids, ["resume", "options", "howto", "restart", "title"],
+		"PAUSE is RESUME / OPTIONS / HOW TO PLAY / RESTART / TITLE only")
 	m.free()
 	stub.free()
 

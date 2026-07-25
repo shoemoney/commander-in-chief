@@ -179,16 +179,25 @@ func test_elite_drops_pickup() -> void:
 
 func test_lz_teaches_by_placement_campaign_only() -> void:
 	var sim := SimWorld.new(0xC0FFEE, 1)
+	var nade_y := 0
 	var free_nade := 0
 	for pk in sim.pickups:
-		if pk["kind"] == 1 and pk.get("cost", 0) == 0 and pk["y"] > -(400 * Fixed.ONE):
+		if pk["kind"] == 1 and pk.get("cost", 0) == 0 and pk["y"] > -(500 * Fixed.ONE):
 			free_nade += 1
+			nade_y = pk["y"]
 	Runner.T.eq(free_nade, 1, "the LZ puts one free grenade crate on the walking line")
-	var lane_bunker := false
+	var lane_bunker_y := 1
 	for bk in sim.bunkers:
 		if bk["y"] > -(500 * Fixed.ONE) and absi(bk["x"] + SimWorld.BUNKER_W / 2 - SimWorld.SCREEN_CX) < 8 * Fixed.ONE:
-			lane_bunker = true
-	Runner.T.ok(lane_bunker, "an armored bunker sits in the opening lane, past the crate")
+			lane_bunker_y = bk["y"]
+	Runner.T.ok(lane_bunker_y < 0, "an armored bunker sits in the opening lane")
+	# The crate must sit NORTH of (past) the bunker. Players spawn at
+	# GRENADE_AMMO_MAX, so a crate before the bunker grants mini(MAX, ammo+4) = 0
+	# and teaches nothing; past it, it refills the grenade the bunker cost.
+	Runner.T.ok(nade_y < lane_bunker_y,
+		"the free grenade crate is past the bunker, so it actually refills something")
+	Runner.T.ok(sim.players[0]["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX,
+		"players spawn grenade-capped — that's why the crate can't come first")
 	var endless := SimWorld.new(0xC0FFEE, 1, "endless")
 	Runner.T.ok(endless.bunkers.is_empty(), "endless authors no LZ — its goldens must not move")
 

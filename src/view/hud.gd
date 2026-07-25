@@ -12,6 +12,9 @@ const HEAD_H := 26.0  # row-0 header block (coin/score/tokens + gap) above the p
 const BOSS_BAR_TOP := 64.0  # c1-15: THE shared HUD-layout boundary — the y the top-center boss/mini
                        # HP bars dock at. main.gd imports it directly (HudIcons.BOSS_BAR_TOP) for its
                        # bar renderers, so the corner panel and the bars share one source, no mirror.
+const BOSS_BAR_STRIDE := 22.0  # vertical stride between stacked top-center boss/mini HP bars. Was a
+                       # bare 22.0 in THREE places in main.gd (the bar renderer itself, the splash
+                       # banner's duck, the hint tooltip's duck) — hoisted so they can't drift.
 const SHOP_STRIP_CLEARANCE := 4.0  # c1-15: breathing gap the corner panel keeps below the bar line.
 const SHOP_SAFE_H := BOSS_BAR_TOP - SHOP_STRIP_CLEARANCE  # c1-15: corner-panel content-height cap,
                        # derived at parse time. Header + rows + strip must fit or the strip drops (2P).
@@ -426,8 +429,14 @@ static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
 ## so the amber/red states stay legible without flashing.
+## a11y (WCAG 2.3.1): the period is FLOORED here rather than trusted from the call site — a
+## half-period of MIN_BLINK_PERIOD ticks is 60/(2*10) == 3 flashes/sec, the seizure threshold
+## main.gd already respects for the sniper vignette. Clamping in the shared helper fixes every
+## caller at once (the dry-grenade chip asked for 4 == 7.5 Hz, the boarding chip for 8 == 3.75 Hz).
+const MIN_BLINK_PERIOD := 10
+
 func _mblink(period: int) -> bool:
-	return main._motion < 0.5 or Art.blink(period)
+	return main._motion < 0.5 or Art.blink(maxi(period, MIN_BLINK_PERIOD))
 
 
 func _buff_col(ticks: int, base: Color) -> Color:
@@ -674,7 +683,9 @@ func _draw() -> void:
 	for i in sim.players.size():
 		var p := sim.players[i]
 		var px := 8.0
-		var pcol := Color(0.75, 0.95, 0.7) if i == 0 else Color(0.95, 0.85, 0.6)
+		# P1 green vs P2 amber is a red-green-axis split — route P1 through the shared
+		# colorblind palette so the two player rows stay separable, not just tinted.
+		var pcol := Art.safe(Color(0.75, 0.95, 0.7)) if i == 0 else Color(0.95, 0.85, 0.6)
 		px = _text("P%d" % (i + 1), px, ry + ROW_TEXT_BASELINE, pcol) + ROW_LABEL_GAP
 		if not p["alive"]:
 			px = _dead_chips(p, px, ry, i, sim)
@@ -1365,7 +1376,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 # partner, and _dead_chips already plants the contextual "REVIVE <cost>" + bound glyph on
 # that player's row (plus main.gd's off-screen downed-partner beacon). Advertising it to a
 # solo player with nobody to revive is what made the bar read as a permanent tutorial.
-const VERB_SEGS := [["roll", "ROLL"], ["wheel", "SUPPLY WHEEL"]]
+const VERB_SEGS := [["roll", "ROLL"], ["grenade", "GRENADE"], ["wheel", "SUPPLY WHEEL"]]
 const VERB_GH := 11.0   # verb glyph height (square device prompt)
 
 
@@ -1379,30 +1390,112 @@ const VERB_GH := 11.0   # verb glyph height (square device prompt)
 # audio-identity (judge follow-up): the caption strip's own wrap width — leaves ~40px clear on
 # each side of the 640px canvas so a long/localized line never rides the frame edge.
 const CAPTION_MAX_W := 560.0
+
+## a11y: WHO is speaking must be in the TEXT, not only the tint. The radio-Spotter blue and the
+## dry-Commander amber measure 1.04:1 against each other — a speaker cue invisible to a
+## colorblind player, inside the feature that exists FOR players who can't use the audio. The
+## name is a separate translate() key so a .po can localize the speaker without touching the line.
+static func caption_line(txt: String, radio: bool) -> String:
+	return "%s: %s" % [TranslationServer.translate("SPOTTER" if radio else "COMMANDER"), txt]
 # Tight leading for the wrapped strip. Grows UPWARD from the original single-line baseline
 # (VERB_LEGEND_Y - 20.0), so a one-line caption (the overwhelming common case) draws at the
 # EXACT same y/rect it always did — only a caption long enough to wrap moves anything.
 const CAPTION_LINE_H := 11.0
 
 # The bottom counterpart of BOSS_BAR_TOP. main.gd's `_draw_colossus` docks a PERSISTENT block on
-# the viewport floor for the whole finale (phase label at COLOSSUS_LABEL_Y, plate, HP bar at
-# COLOSSUS_BAR_RECT, core-countdown tick to COLOSSUS_BLOCK_BOTTOM). These two TRANSIENT overlays (caption strip, verb chip) used to
+# the viewport floor for the whole finale (phase label at COLOSSUS_LABEL_Y, plate, HP bar at y330,
+# core-countdown tick to y345). These two TRANSIENT overlays (caption strip, verb chip) used to
 # paint straight over it — the strip's centered scrim ate the right half of "FOUNDRY COLOSSUS",
 # and the chip sat on the HP bar. The block's y's live HERE (not as literals in main.gd) so the
 # only file that draws over them can see them.
 const COLOSSUS_LABEL_X := 172.0
+# 316, moved UP from 326 together with the bar (330 -> 320): LAST STAND at y350 was printing
+# straight through the HP bar. Raising the whole block is what buys the clearance — test_hud
+# pins both the >=4px LAST STAND gap and the bar-clears-label-baseline pair, and neither holds
+# if only one of the two moves.
 const COLOSSUS_LABEL_Y := 316.0                      # text baseline of the phase label
-const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - 9.0   # label glyph top (Art.font() ascent @ FONT_SIZE)
+const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - 9.0   # 317: label glyph top (Art.font() ascent @ FONT_SIZE)
 const BOTTOM_RESERVE_GAP := 3.0                      # breathing gap an overlay keeps above the reserve
 const CAPTION_BG_ABOVE := 9.0   # caption scrim extent above the LAST line's baseline (was inline -9.0)
 const CAPTION_BG_BELOW := 5.0   # ...and below it (was inline: height 14 = 9 + 5)
 const VERB_PLATE_BELOW := 8.0   # verb chip plate extent below VERB_LEGEND_Y (Rect2(..., y-8, ..., 16))
-# aaa-2/#2: the block's own members, previously bare literals in main.gd — needed here so the
-# bottom-band gap between the HP bar and LAST STAND is a real, checkable measurement.
-const COLOSSUS_BAR_RECT := Rect2(170.0, 320.0, 300.0, 13.0)
-const COLOSSUS_BLOCK_BOTTOM := 335.0   # COLOSSUS_BAR_RECT.end.y + 2.0: the core-countdown tick's reach
+# The colossus HP bar main.gd `_draw_colossus` docks on the floor, and the x-span a bottom edge
+# chevron must dodge around it. main.gd carried a 165.0/475.0 literal pair that was *mirroring*
+# this bar — and had drifted: the bar spans 170..470, so the mirror was guarding the wrong window.
+# Both the bar and the dodge now derive from one origin/width.
+const COLOSSUS_BAR_X := 170.0
+# y=320, not the old 330: the bar was moved UP so LAST STAND stops printing through it.
+# test_hud pins a >=4px gap that only holds at 320.
+const COLOSSUS_BAR_Y := 320.0
+const COLOSSUS_BAR_W := 300.0
+const COLOSSUS_BAR_H := 13.0
+# One Rect2 over the same numbers, so the block can be measured (and intersected in tests)
+# without four separate reads. Scalars stay the origin; this derives.
+const COLOSSUS_BAR_RECT := Rect2(COLOSSUS_BAR_X, COLOSSUS_BAR_Y, COLOSSUS_BAR_W, COLOSSUS_BAR_H)
+const COLOSSUS_BLOCK_BOTTOM := 335.0   # bar end + 2.0: the core-countdown tick's reach
 const LAST_STAND_Y := 350.0
 const LAST_STAND_TOP := LAST_STAND_Y - 9.0   # same -9 ascent idiom as COLOSSUS_BLOCK_TOP
+const COLOSSUS_DODGE_PAD := 5.0
+const COLOSSUS_DODGE_L := COLOSSUS_BAR_X - COLOSSUS_DODGE_PAD                    # 165
+const COLOSSUS_DODGE_R := COLOSSUS_BAR_X + COLOSSUS_BAR_W + COLOSSUS_DODGE_PAD   # 475
+
+
+# --- the reserved-zone band contract -------------------------------------------------------
+# THE reason this exists: main.gd's `_draw` is a Node2D at z=0 and `$HUD` (this Control) lives on
+# a CanvasLayer at layer 1. main.gd can therefore NEVER paint above the corner plate, the boss
+# bars, or anything else drawn here — a "top" overlay that overlaps HUD chrome doesn't win the
+# z-fight, it silently disappears under it. So main.gd's transient overlays must DODGE the
+# reserved bands, and the bands' geometry has to live in the file that owns the chrome.
+# Before this there were five independent y-arbiters in main.gd using four different magic gaps
+# (+8, +12, +16, a bare 30) plus two mirrored colossus literals. Now: two rails, one gap.
+const TOP_RESERVE_GAP := 12.0   # the single breathing gap below the reserved top band (was 8/12/16)
+const SCREEN_BOTTOM := 360.0    # viewport floor — the bottom rail when nothing is docked on it
+
+
+## First y a main.gd overlay may occupy under the reserved TOP band.
+## Rails, stacked: the corner plate (`panel_bottom`, which already folds in the 2P shop-strip drop),
+## then `boss_slots` top-center HP bars when any are up, then `stacked_rows` of persistent chrome
+## already parked in the band (today: the replay ribbon). `boss_slots == 0` means there are no bars
+## to clear, so the band collapses back to the plate — a left-anchored marker isn't pushed to y76
+## just because BOSS_BAR_TOP exists.
+func band_top(boss_slots: int = 0, stacked_rows: int = 0) -> float:
+	var y := panel_bottom()
+	if boss_slots > 0:
+		y = maxf(y, BOSS_BAR_TOP + BOSS_BAR_STRIDE * float(boss_slots))
+	return y + TOP_RESERVE_GAP + float(stacked_rows) * ROW_H
+
+
+## The mirror of band_top(): the last y a bottom-anchored overlay may occupy. main.gd's
+## `_draw_colossus` docks a PERSISTENT block on the viewport floor for the whole finale (phase
+## label at COLOSSUS_LABEL_Y, plate, HP bar at COLOSSUS_BAR_Y, core-countdown tick to y345); the
+## caption strip and verb chip used to paint straight over it — the strip's centered scrim ate the
+## right half of "FOUNDRY COLOSSUS", and the chip sat on the HP bar.
+## ponytail: one reserved band, one client file. If a second persistent bottom element ever
+## appears, make this a min() over a list of bands rather than growing a second constant.
+static func band_bottom(sim) -> float:
+	return (COLOSSUS_BLOCK_TOP - BOTTOM_RESERVE_GAP) if colossus_bar_visible(sim) else SCREEN_BOTTOM
+
+
+## a11y: the colossus arena's SAFE BELT and its inner DANGER ring are a live boss mechanic that
+## used to be encoded in hue alone — a bare green/red literal pair at alpha 0.12..0.18 measuring
+## 1.63:1 against each other, i.e. unreadable to a deuteran player and nearly invisible over the
+## lit foundry floor. The safe belt is now SHAPE-encoded: broken into COLOSSUS_SAFE_DASHES arcs
+## and doubled by a second concentric hairline, while the danger ring stays ONE continuous
+## stroke. Desaturate the frame entirely and the two still read apart. Alphas raised ~3x.
+## Static + view-free so `_draw_foundry_arena` and the a11y test share one truth.
+const COLOSSUS_SAFE_DASHES := 14           # >1 == a broken ring; the danger ring is 1 == solid
+const COLOSSUS_SAFE_DASH_DUTY := 0.55      # lit fraction of each dash slot (the gaps ARE the encoding)
+const COLOSSUS_SAFE_HAIRLINE := 4.0        # px inside the belt the second concentric line rides
+const COLOSSUS_RING_ALPHA := 0.38          # was 0.12
+const COLOSSUS_RING_ALPHA_PULSE := 0.14    # ...+ this * pulse (peak 0.52, was 0.18)
+
+
+static func colossus_ring_style(is_safe: bool, pulse: float) -> Dictionary:
+	var a := COLOSSUS_RING_ALPHA + COLOSSUS_RING_ALPHA_PULSE * pulse
+	if is_safe:
+		return {"dashes": COLOSSUS_SAFE_DASHES, "duty": COLOSSUS_SAFE_DASH_DUTY,
+			"hairline": COLOSSUS_SAFE_HAIRLINE, "col": Art.safe(Color(0.35, 0.9, 0.5, a))}
+	return {"dashes": 1, "duty": 1.0, "hairline": 0.0, "col": Art.warn(Color(1.0, 0.3, 0.15, a))}
 
 
 ## True exactly when main.gd `_draw_colossus` paints its bottom-docked block — same predicate,
@@ -1412,15 +1505,11 @@ static func colossus_bar_visible(sim) -> bool:
 
 
 ## px the WHOLE bottom overlay cluster shifts up while that block owns the floor. Sized off the
-## LOWEST member (the verb chip) and applied to every member, so the cluster's internal spacing is
-## unchanged and the two can't collide with each other. Returns 0.0 in every other frame in the
-## game — the default layout is byte-identical to before.
-## ponytail: one reserve, one client file. If a second persistent bottom element ever appears,
-## make this a max() over a list of reserved bands rather than growing a second constant.
+## LOWEST member (the verb chip) against band_bottom() and applied to every member, so the
+## cluster's internal spacing is unchanged and the two can't collide with each other. Returns 0.0
+## in every other frame in the game — the default layout is byte-identical to before.
 static func bottom_band_lift(sim) -> float:
-	if not colossus_bar_visible(sim):
-		return 0.0
-	return VERB_LEGEND_Y + VERB_PLATE_BELOW + BOTTOM_RESERVE_GAP - COLOSSUS_BLOCK_TOP   # 48.0
+	return maxf(0.0, VERB_LEGEND_Y + VERB_PLATE_BELOW - band_bottom(sim))   # 38.0 in the finale
 
 
 ## The caption scrim's exact rect — the one measurement both the draw and the layout test read,
@@ -1474,10 +1563,22 @@ static func _fit_chars(s: String, font: Font, size: int, max_w: float) -> int:
 	return n
 
 
+## True while main.gd is painting a result card (V I C T O R Y ! / K.I.A.). Same layer inversion
+## band_top() exists for, in the other direction: the card is drawn by main.gd at z=0, UNDER this
+## CanvasLayer, so a transient overlay emitted here lands ON TOP of the card and can't be fixed by
+## reordering. The overlays have to opt out. `get()` (not a direct field read) because the headless
+## HUD test doubles are plain Node2D mocks that declare neither field.
+func _result_card_up() -> bool:
+	var s = main.get("sim")
+	return main.get("_debrief") == true or (s != null and s.victory)
+
+
 func _draw_caption() -> void:
 	if main == null:
 		return
 	if main._menu != null and main._menu.is_active():
+		return
+	if _result_card_up():
 		return
 	# main.get(...) (not main._sfx) — the headless HUD test doubles are plain Node2D mocks that
 	# don't declare _sfx, and a direct property access would SCRIPT ERROR on them; get() returns
@@ -1497,7 +1598,7 @@ func _draw_caption() -> void:
 	# Localize via the English source string as the key — same contract as Menu.setting_help:
 	# with no translation loaded translate() returns the source unchanged, so English is the
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
-	var txt := TranslationServer.translate(raw)
+	var txt := caption_line(TranslationServer.translate(raw), cap.get("radio", false))
 	var col: Color = Color(0.75, 0.95, 1.0) if cap.get("radio", false) else Color(0.95, 0.9, 0.75)
 	# triple-A: dissolve the strip over its last 0.4s instead of snapping off. REDUCE MOTION
 	# snaps (same contract as _verb_alpha), so a motion-sensitive player gets no cross-fade.
@@ -1548,9 +1649,13 @@ func _draw_caption() -> void:
 ## the one menu reachable mid-run — carries a PERMANENT ROLL/WHEEL/REVIVE footer
 ## reference, and HOW TO PLAY teaches them in full. Under REDUCE MOTION it snaps
 ## on/off (no fade). Hidden while a menu is up. Only acts Art.draw_glyph resolves
-## belong here; FIRE/GRENADE are device-plain (LMB/RMB, RT/LB) on the TITLE legend.
+## belong here. GRENADE is ON the chip: it is the ONLY armor-cracker (the landing zone
+## is a bunker you must grenade) and the TITLE legend that once named it is long gone —
+## it is now SELECT + HOW TO only, so nothing else states the button in-run.
 func _verb_legend() -> void:
 	if main._menu != null and main._menu.is_active():
+		return
+	if _result_card_up():
 		return
 	if _verb_show <= 0.0:
 		return   # bright window elapsed — fully gone, no persistent playfield overlay
@@ -1885,7 +1990,7 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	# Carried claymore charges: a count, not a countdown — and the verb
 	# glyph rides along so "how do I plant this" never dead-ends here.
 	if p["claymores"] > 0:
-		chips.append({"icon": "wep_claymore", "txt": "x%d" % p["claymores"], "col": Color(0.75, 0.9, 0.6), "glyph": true, "prio": BUFF_PRIO_PERSIST})
+		chips.append({"icon": "wep_claymore", "txt": "x%d" % p["claymores"], "col": Art.safe(Color(0.75, 0.9, 0.6)), "glyph": true, "prio": BUFF_PRIO_PERSIST})
 	# Pre-measure each chip via _chip_w (the EXACT x-advance its drawing produces, so the fit
 	# measure can never disagree with what lands), then run the shared priority planner used by
 	# row 0: keep the top-priority set that fits, reserving the worst-case +N slot only on real

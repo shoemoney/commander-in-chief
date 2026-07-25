@@ -8,6 +8,12 @@ on:
   schedule:
     - cron: "0 3 * * *"   # nightly 3-hour soak only (see the `soak` job's `if:`)
 
+# Superseded runs are dead weight: two runs once sat queued 4h42m reporting
+# nothing while the branch had already moved on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Single source of truth for the engine version lives in tools/versions.lock
 # -- the `resolve-godot-version` step below reads it so this file never
 # drifts from what the sim's determinism goldens were recorded against.
@@ -15,14 +21,53 @@ on:
 jobs:
   resolve-godot-version:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      # `shell: bash` is load-bearing: it turns on pipefail. Without it a failed
+      # grep here yields an EMPTY version that the setup-godot action then chokes
+      # on much later -- exactly how the last CI break went unnoticed for 6 pushes.
       - id: read
+        shell: bash
         run: |
           v=$(grep '^godot_version=' tools/versions.lock | cut -d= -f2 | sed 's/-stable$//')
+          if [ -z "$v" ]; then
+            echo "::error::could not resolve godot_version from tools/versions.lock"
+            exit 1
+          fi
+          echo "resolved Godot $v"
           echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  # Static invariant gates -- seconds, one runner. lint_sim is the guard on the
+  # no-floats/no-engine-RNG/no-Time/no-scene-tree rule the entire cross-arch
+  # determinism story rests on; lint_assets catches a PNG landing without its
+  # .import sidecar. Both were committed and then run by nothing until now.
+  lint:
+    needs: resolve-godot-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+
+      - name: Import assets
+        shell: bash
+        run: godot --headless --path . --import
+
+      - name: Lint sim determinism invariants
+        shell: bash
+        run: godot --headless --path . -s res://tools/lint_sim.gd
+
+      - name: Lint asset .import sidecars
+        shell: bash
+        run: godot --headless --path . -s res://tools/lint_assets.gd
 
   # Cross-platform + cross-arch test gate: the deterministic core must produce
   # bit-identical golden checksums on every OS/arch combo the game ships on
@@ -41,6 +86,7 @@ jobs:
           - os: windows-latest
             name: windows-x86_64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -54,9 +100,27 @@ jobs:
         shell: bash
         run: godot --headless --path . --import
 
+      # This step used to assert NOTHING -- and smoke.gd's own exit code can't
+      # carry the signal: with main.gd failing to PARSE, the scene still
+      # instantiates, the frame counter still runs, and smoke.gd prints
+      # "SMOKE OK" and exits 0 (verified locally). So grep the log for both the
+      # sentinel and SCRIPT ERROR. The step timeout covers the other failure
+      # mode: if main.tscn fails to LOAD, _initialize dies before connecting
+      # process_frame, the SceneTree spins forever, and the job used to sit
+      # there for the default 360 minutes instead of failing.
       - name: Boot smoke test (scene tree + view layer)
         shell: bash
-        run: godot --headless --path . -s res://tools/smoke.gd
+        timeout-minutes: 5
+        run: |
+          godot --headless --path . -s res://tools/smoke.gd 2>&1 | tee smoke.log
+          if ! grep -q "SMOKE OK" smoke.log; then
+            echo "::error::smoke.gd never reached its SMOKE OK sentinel -- the main scene did not survive 200 frames"
+            exit 1
+          fi
+          if grep -q "SCRIPT ERROR" smoke.log; then
+            echo "::error::SCRIPT ERROR during boot smoke -- main.gd/view failed to parse or threw at runtime (smoke.gd still reaches SMOKE OK in this case, so the sentinel alone can't catch it)"
+            exit 1
+          fi
 
       - name: Full deterministic test suite
         shell: bash
@@ -80,6 +144,7 @@ jobs:
   export-smoke:
     needs: resolve-godot-version
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -121,6 +186,7 @@ jobs:
   export-smoke-windows:
     needs: resolve-godot-version
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -155,6 +221,36 @@ jobs:
           path: build/CommanderInChief-windows*
           if-no-files-found: error
           retention-days: 7
+
+  # Perf budgets, ADVISORY ONLY (continue-on-error). test_perf.gd asserts
+  # wall-clock microseconds per tick; a shared GitHub runner is a noisy
+  # neighbour, so those assertions fail for reasons that have nothing to do with
+  # the commit. A gate that goes red at random stops being read at all -- which
+  # is how the permanent-red CI stopped carrying signal. It still RUNS on every
+  # PR (the numbers are in the log, and a real regression shows as a sustained
+  # shift), it just no longer blocks. run_tests.gd correspondingly skips
+  # test_perf.gd unless SUITE selects it, so the blocking gate above is
+  # timing-free.
+  perf:
+    needs: resolve-godot-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+      - name: Import assets
+        shell: bash
+        run: godot --headless --path . --import
+      - name: Tick-cost budgets (advisory)
+        shell: bash
+        env:
+          SUITE: "perf"
+        run: godot --headless --path . -s res://tests/run_tests.gd 2>&1 | tee perf_output.log
 
   # Real 3-hour memory soak (Steam Deck's typical undocked handheld session
   # length) -- too slow to run on every PR, so it's nightly + manual only.

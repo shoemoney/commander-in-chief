@@ -51,3 +51,76 @@ func test_try_buy_denies_when_broke() -> void:
 	Runner.T.eq(sim.war_chest, cost - 1, "broke buy left the chest untouched")
 	Runner.T.eq(p["mg_ammo"], 10, "no supply delivered when broke")
 	Runner.T.eq(sim.events[-1]["t"], "deny", "deny event fired instead of buy")
+
+
+func test_priced_crate_at_cap_is_not_auto_bought() -> void:
+	# Auto-buy on proximity had NO need check: walking over a priced crate you
+	# cannot use charged the chest, credited cost*10 score (an endless laundering
+	# loop) and fired the celebratory pickup event for a guaranteed no-op.
+	for kind in [0, 1, 2]:
+		var sim := SimWorld.new(7, 1)
+		var p := sim.players[0]
+		p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+		p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+		p["vest"] = true
+		sim.pickups.clear()
+		sim.pickups.append({"x": p["x"], "y": p["y"], "kind": kind, "cost": 20})
+		sim.war_chest = 500
+		sim.score = 0
+		sim.events.clear()
+		sim._collect_pickups(p, 0)
+		Runner.T.eq(sim.war_chest, 500, "kind %d at cap: the chest is not charged" % kind)
+		Runner.T.eq(sim.score, 0, "kind %d at cap: no cost*10 score laundering" % kind)
+		Runner.T.eq(sim.pickups.size(), 1, "kind %d at cap: the crate is left standing" % kind)
+		var fired := false
+		for ev in sim.events:
+			if ev["t"] == "pickup":
+				fired = true
+		Runner.T.ok(not fired, "kind %d at cap: no celebratory pickup event" % kind)
+
+
+func test_priced_crate_still_bought_when_it_grants_something() -> void:
+	# The guard must only refuse a crate that grants NOTHING — the normal buy and
+	# the free-crate path are untouched.
+	var sim := SimWorld.new(7, 1)
+	var p := sim.players[0]
+	p["grenade_ammo"] = 2
+	sim.pickups.clear()
+	sim.pickups.append({"x": p["x"], "y": p["y"], "kind": 1, "cost": 20})
+	sim.war_chest = 500
+	sim.score = 0
+	sim.events.clear()
+	sim._collect_pickups(p, 0)
+	Runner.T.eq(sim.war_chest, 480, "a useful priced crate still charges its cost")
+	Runner.T.eq(sim.score, 200, "a useful priced crate still credits cost*10")
+	Runner.T.eq(p["grenade_ammo"], 6, "the supply was actually delivered")
+	Runner.T.eq(sim.pickups.size(), 0, "the crate was consumed")
+
+	# Free crates are never refused (they cost nothing) — they just carry
+	# full=true so the view can skip the celebration.
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	sim.pickups.append({"x": p["x"], "y": p["y"], "kind": 1, "cost": 0})
+	sim.events.clear()
+	sim._collect_pickups(p, 0)
+	Runner.T.eq(sim.pickups.size(), 0, "a free crate at cap is still collected")
+	Runner.T.ok(sim.events[-1]["full"], "the free no-op is flagged full for the view")
+
+
+func test_supply_full_covers_every_capped_kind() -> void:
+	var sim := SimWorld.new(7, 1)
+	var p := sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	p["vest"] = true
+	p["claymores"] = SimWorld.CLAYMORE_CAP
+	for kind in [0, 1, 2, 8]:
+		Runner.T.ok(sim._supply_full(p, kind), "kind %d reads full at its cap" % kind)
+	p["mg_ammo"] = 0
+	p["grenade_ammo"] = 0
+	p["vest"] = false
+	p["claymores"] = 0
+	for kind in [0, 1, 2, 8]:
+		Runner.T.ok(not sim._supply_full(p, kind), "kind %d reads usable when empty" % kind)
+	# Timed capsules / one-shots always re-apply usefully, so never "full".
+	for kind in [4, 5, 7, 9, 10, 11]:
+		Runner.T.ok(not sim._supply_full(p, kind), "kind %d is never full" % kind)

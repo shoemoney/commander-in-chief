@@ -158,3 +158,31 @@ func test_sniper_fires_exactly_when_windup_hits_zero() -> void:
 	Runner.T.eq(sim.enemy_bullets.size(), 1, "the shot fires on the exact tick windup hits zero")
 	sim.step([_idle()])
 	Runner.T.eq(sim.enemy_bullets.size(), 1, "no follow-up shot fires once windup rests at zero (fire_cd still cooling)")
+
+
+func test_sapper_cannot_cross_a_sandbag_line() -> void:
+	## Regression: _step_sapper open-coded its movement instead of routing through
+	## _advance_toward, so it phased straight through sandbags — a 40-coin player
+	## purchase — plus rocks, hulks and sealed lane blocks. Cover you paid for has
+	## to stop the thing that lays mines under it.
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["x"] = 0
+	p["y"] = 0
+	sim.enemies.clear()
+	sim.sandbags.clear()
+	sim.rocks.clear()
+	var wall_y := 50 * Fixed.ONE
+	# Three segments (half-width 18px) laid shoulder to shoulder: a solid -54..54 wall.
+	for n in [-36, 0, 36]:
+		sim.sandbags.append({"x": n * Fixed.ONE, "y": wall_y, "player": 1})
+	var start_y := 120 * Fixed.ONE
+	sim._spawn_special(0, start_y, "sapper")
+	var sap := sim.enemies[sim.enemies.size() - 1]
+	for _i in 200:   # far more ticks than the ~44 a clear walk to the player would need
+		var dx: int = p["x"] - sap["x"]
+		var dy: int = p["y"] - sap["y"]
+		sim._step_sapper(sap, dx, dy, Fixed.length(dx, dy))
+	Runner.T.ok(sap["y"] > wall_y, "sapper never ends up on the player's side of the bag line")
+	Runner.T.ok(sap["y"] < start_y, "it did close on the wall (not passing by standing still)")
+	Runner.T.ok(sim.mines.size() > 0, "and it still lays mines on its cadence while stalled")
