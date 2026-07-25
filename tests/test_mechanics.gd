@@ -331,7 +331,8 @@ func test_drone_paints_a_tracked_strike() -> void:
 func test_technical_charge_follows_the_locked_line_not_the_player() -> void:
 	var sim := SimWorld.new(21, 1, "endless")
 	var p := sim.players[0]
-	sim._spawn_special(p["x"], p["y"] - 200 * Fixed.ONE, "technical")
+	# Inside TECHNICAL_CHARGE_RANGE — outside it the truck refuses to rev (below).
+	sim._spawn_special(p["x"], p["y"] - 120 * Fixed.ONE, "technical")
 	var e := sim.enemies[0]
 	e["fire_cd"] = 0
 	sim._step_enemies()   # rev starts (windup armed)
@@ -348,6 +349,60 @@ func test_technical_charge_follows_the_locked_line_not_the_player() -> void:
 	Runner.T.eq(e["aim_lx"], lock_lx, "mid-charge the locked vector never re-aims")
 	Runner.T.ok(e["y"] != y0, "the charge travels")
 	Runner.T.eq(e["x"], x0, "a straight-down lock gains no sideways ground on a dodger")
+
+
+func test_technical_does_not_rev_out_of_charge_range() -> void:
+	# A rev is a promise something is coming AT you. Out of reach it must stay
+	# silent — a telegraph for a threat that cannot land teaches players to
+	# ignore telegraphs. And the tell itself must clear the 24t reaction floor.
+	Runner.T.ok(SimWorld.TECHNICAL_REV_TICKS >= 24,
+		"the rev clears the 24-tick reaction floor the rest of the game pins")
+	Runner.T.eq(SimWorld.TECHNICAL_CHARGE_RANGE,
+		SimWorld.TECHNICAL_CHARGE_TICKS * SimWorld.TECHNICAL_SPEED,
+		"the gate is the charge's own reach, not a magic number")
+	var sim := SimWorld.new(41, 1, "endless")
+	var p := sim.players[0]
+	# 400px out: well past the ~150px a charge travels.
+	sim._spawn_special(p["x"], p["y"] - 400 * Fixed.ONE, "technical")
+	var far := sim.enemies[0]
+	far["fire_cd"] = 0
+	sim._step_enemies()
+	Runner.T.eq(far["windup"], 0, "a technical 400px away does not rev")
+	Runner.T.eq(far.get("lunge_ticks", 0), 0, "and never commits a charge that dies short")
+	# Same truck, inside reach: it revs.
+	far["x"] = p["x"]
+	far["y"] = p["y"] - 100 * Fixed.ONE
+	far["fire_cd"] = 0
+	sim._step_enemies()
+	Runner.T.ok(far["windup"] > 0, "inside charge range the same truck revs")
+
+
+func test_elite_fires_down_the_vector_it_telegraphed() -> void:
+	# The drawn bead is a "where", not just a "when": the shot must fly down the
+	# vector locked at windup start even if the player has since moved (sniper
+	# grammar). Previously it re-aimed on the fire tick.
+	var sim := SimWorld.new(42, 1)
+	var p := sim.players[0]
+	sim._spawn_enemy(p["x"], p["y"] - 100 * Fixed.ONE, true)
+	var e := sim.enemies[0]
+	e["fire_cd"] = 0
+	sim._step_enemies()   # windup arms + locks the vector
+	Runner.T.ok(e["windup"] > 0, "the elite winds up before firing")
+	var lx: int = e["aim_lx"]
+	var ly: int = e["aim_ly"]
+	Runner.T.ok(lx != 0 or ly != 0, "windup start locks a shot vector")
+	# Teleport the player far sideways mid-windup — the shot must NOT follow.
+	p["x"] = p["x"] + 400 * Fixed.ONE
+	for t in SimWorld.ELITE_WINDUP_TICKS:
+		sim._step_enemies()
+	Runner.T.eq(e["aim_lx"], lx, "the locked vector never re-aims mid-windup")
+	Runner.T.eq(sim.enemy_bullets.size(), 1, "the windup ends in exactly one shot")
+	var b: Dictionary = sim.enemy_bullets[0]
+	var llen := Fixed.length(lx, ly)
+	Runner.T.eq(b["vx"], Fixed.mul(Fixed.div(lx, llen), SimWorld.ENEMY_BULLET_SPEED),
+		"the fired vx matches the telegraphed vector")
+	Runner.T.eq(b["vy"], Fixed.mul(Fixed.div(ly, llen), SimWorld.ENEMY_BULLET_SPEED),
+		"the fired vy matches the telegraphed vector")
 
 
 func test_pilot_rescue_pays_ransom_and_escape_forfeits() -> void:
