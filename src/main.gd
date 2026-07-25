@@ -231,6 +231,7 @@ var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 const BANNER_LIFETIME_FRAMES := 125           # c4-07: a lone banner's on-screen life in physics-frames (~2s at 60Hz); show_banner starts t=1.0 and _update_feel drains 1.0/this each frame. The seed-paste status lines lean on this read time; a FIFO backlog drains proportionally faster (see _update_feel).
+const BANNER_MAX_W := 420.0                   # splash banner scrim width cap (66% of SCREEN_W) — never spans the playfield
 var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
 var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
 var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
@@ -263,9 +264,9 @@ const _KIND_TEACH := {
 	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
 	# The counterplay is counterintuitive (it outruns a straight sprint at
 	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
-	"technical": "TECHNICAL — SIDESTEP ITS CHARGE LINE, ONE SHOT DROPS IT",
-	"courier": "SUPPLY COURIER — GUN IT DOWN BEFORE IT ESCAPES (4x BOUNTY)",
-	"broadcast": "BROADCAST TOWER — KILL THE MAST, BREAK THE RALLY",
+	"technical": "TECHNICAL — SIDESTEP ITS CHARGE",
+	"courier": "COURIER — 4x BOUNTY, GUN IT DOWN",
+	"broadcast": "BROADCAST TOWER — KILL THE MAST",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -2507,7 +2508,7 @@ func _consume_events() -> void:
 			"observer_spawn":
 				_vo("vo_observer", 1, 600)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
-				show_banner("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON", GameMenu.BANNER_COL_DEFAULT, "hud_lightning")
+				show_banner("MORTAR OBSERVER — SHOOT IT DOWN", GameMenu.BANNER_COL_DEFAULT, "hud_lightning")
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -4653,7 +4654,7 @@ func _update_feel() -> void:
 		_roll_dry[_ri] = maxi(0, _roll_dry[_ri] - 1)
 	# Stalling is the one punished behaviour whose RESPONSE was never stated in words.
 	# The pressure gauge fills silently for 8s and the only sentence that explains it
-	# ("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON") fires on observer_spawn — i.e.
+	# ("MORTAR OBSERVER — SHOOT IT DOWN") fires on observer_spawn — i.e.
 	# after the punishment has already arrived. Say it at the halfway mark instead,
 	# while there is still time to act on it. (Starting value OBSERVER_STALL_TICKS/2
 	# = 4s in, 4s left to react; test: does a new player push north before the first
@@ -9905,16 +9906,17 @@ func _draw_banners(top_msg: String) -> void:
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
 			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
 			# the same shared boundary hud.gd sizes its corner panel against) instead
-			# of overprinting the PHASE label; pop-in scale punch on the first ~10%
-			# of life, stilled under reduce-motion.
+			# of overprinting the PHASE label.
 			var by := HudIcons.BOSS_BAR_TOP + 6.0 + 22.0 * float(_boss_bar_slots)
-			var bsize := 16
+			# Fit at the BASE size only — the pop-in punch below is a transform
+			# scale, not a font-size bump, so it no longer fights this shrink loop
+			# (a long teach string at a punched-up font size used to overflow
+			# BANNER_MAX_W and get shoved straight back to base, so the punch was
+			# dead for exactly the strings that most needed the shrink).
+			var bsize := banner_fit_size(btext, 16)
+			var punch := 1.0
 			if _motion >= 0.5:
-				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
-			# Shrink-to-fit: long teach strings (TECHNICAL 52ch, COURIER 58ch) at
-			# punch sizes overflow the 640px viewport and shove the badge off-screen.
-			while bsize > 8 and Art.font().get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, bsize).x > 600.0:
-				bsize -= 1
+				punch = 1.0 + 0.28 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)
 			# A badge (if any) sits left of the centered text — the plate must
 			# extend to cover it, or the skull/target/lightning floats off the
 			# metal onto bare shaking terrain (the plate exists to prevent exactly
@@ -9922,6 +9924,9 @@ func _draw_banners(top_msg: String) -> void:
 			var bic: String = bn.get("icon", "")
 			var bis := float(bsize) + 4.0
 			var pad_left := (bis + 8.0) if not bic.is_empty() else 0.0
+			if punch > 1.0:
+				draw_set_transform_matrix(get_transform().affine_inverse()
+					* Transform2D(0.0, Vector2.ONE * punch, 0.0, Vector2(320.0, by) * (1.0 - punch)))
 			_banner_plate(btext, by, bsize, a, pad_left)
 			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
 			# Threat-callout badge (skull/target/lightning) fronting the text —
@@ -9931,6 +9936,8 @@ func _draw_banners(top_msg: String) -> void:
 				draw_texture_rect(Art.tex(bic),
 					Rect2(320.0 - biw / 2.0 - bis - 6.0, by - float(bsize) / 2.0 - bis / 2.0, bis, bis),
 					false, Color(bc.r, bc.g, bc.b, a))
+			if punch > 1.0:
+				draw_set_transform_matrix(get_transform().affine_inverse())
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		var vrr := _run_rank()
@@ -10079,32 +10086,44 @@ static func _banner_plate_alpha(text_a: float) -> float:
 	return (maxf(text_a, 0.7) if text_a > 0.05 else 0.0)
 
 
+## Shrink-to-fit: caps a banner string's draw size so its scrim never
+## approaches full screen width (BANNER_MAX_W). Lifted out of _draw_banners
+## so a headless test can assert against the exact arithmetic the draw uses.
+static func banner_fit_size(txt: String, base: int) -> int:
+	var sz := base
+	while sz > 8 and Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x > BANNER_MAX_W:
+		sz -= 1
+	return sz
+
+
+## The banner scrim's exact rect — the one measurement both _banner_plate and
+## a layout test read, so a test can't pass against arithmetic the draw
+## doesn't actually use. pad_left extends the plate leftward under a fronting
+## badge; the text stays centered on 320, so only the left edge grows.
+static func banner_plate_rect(txt: String, y: float, size: int, pad_left: float) -> Rect2:
+	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	return Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0, w + 10.0 + pad_left, size + 7.0)
+
+
 func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
-	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	# pad_left extends the plate leftward under a fronting badge; the text stays
-	# centered on 320, so only the left edge grows (right stays symmetric to text).
-	var plate_a := _banner_plate_alpha(a)
-	_metal_plate(Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0,
-		w + 10.0 + pad_left, size + 7.0), plate_a)
+	_metal_plate(banner_plate_rect(txt, y, size, pad_left), _banner_plate_alpha(a))
 
 
 func _metal_plate(r: Rect2, a: float) -> void:
-	# Hand 3-slice from the baked plate_metal_* set (190x230 slices): caps at the
-	# ends + a stretched center, laid over the old dark rect (text contrast) and
-	# tinted way down so it stays muted retro-metal under the text, not chrome.
+	# Soft-edged ribbon (fx_softspot's radial falloff) instead of a hard-edged
+	# slab: no rectangle silhouette ever lands on the play field, but the
+	# elliptical core still sits at full strength under the glyphs.
 	# a4-02: both greys below are named Art constants (PRINT_INK / PLATE_STEEL),
 	# not independently-chosen HUD literals — see assets_src/style_bible.md.
-	draw_rect(r, Color(Art.PRINT_INK, 0.5 * a))
-	var cap := minf(r.size.y * (190.0 / 230.0), r.size.x / 2.0)
-	var mcol := Color(Art.PLATE_STEEL, 0.5 * a)
-	draw_texture_rect(Art.tex("plate_metal_l"), Rect2(r.position, Vector2(cap, r.size.y)), false, mcol)
-	if r.size.x > cap * 2.0:
-		draw_texture_rect(Art.tex("plate_metal_c"),
-			Rect2(r.position + Vector2(cap, 0.0), Vector2(r.size.x - cap * 2.0, r.size.y)), false, mcol)
-	draw_texture_rect(Art.tex("plate_metal_r"),
-		Rect2(r.position + Vector2(r.size.x - cap, 0.0), Vector2(cap, r.size.y)), false, mcol)
+	draw_texture_rect(Art.tex("fx_softspot"), r.grow_individual(30.0, 6.0, 30.0, 6.0), false,
+		Color(Art.PRINT_INK, 0.62 * a))
+	var rule_col := Color(Art.PLATE_STEEL, 0.5 * a)
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(r.position.x - 30.0, r.position.y, r.size.x + 60.0, 2.0),
+		false, rule_col)
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(r.position.x - 30.0, r.end.y - 2.0, r.size.x + 60.0, 2.0),
+		false, rule_col)
 
 
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false) -> void:

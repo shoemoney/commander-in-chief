@@ -1504,8 +1504,17 @@ func _draw_caption() -> void:
 	# (radio-blue / dry-amber) so the strip stays readable over bright, busy gameplay (particles,
 	# explosions, terrain) instead of washing out. Art.text_center's own +1px drop-shadow (drawn
 	# per line below) is the glyph-level half of the contrast fix.
-	_emit_bg_rect(bg.grow(1.0), Color(col.r, col.g, col.b, 0.4))
-	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.88))
+	# Soft-edged scrim (fx_softspot's radial falloff) instead of a flat opaque
+	# box: the elliptical core still sits at full density where the glyphs are,
+	# but the strip no longer reads as a hard dark rectangle over bright terrain.
+	# The flat _emit_bg_rect call is KEPT (not removed) — captions are an
+	# accessibility feature, so the contrast floor under the glyphs doesn't get
+	# traded away, only softened at the edges by the layer drawn over it.
+	var soft := bg.grow_individual(26.0, 3.0, 26.0, 3.0)
+	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.5))
+	draw_texture_rect(Art.tex("fx_softspot"), soft, false, Color(0.02, 0.03, 0.02, 0.9))
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(soft.position.x, soft.end.y - 1.0, soft.size.x, 2.0),
+		false, Color(col.r, col.g, col.b, 0.45))
 	for i in lines.size():
 		Art.text_center(self, lines[i], 320.0, y0 + float(i) * CAPTION_LINE_H, FONT_SIZE, col)
 

@@ -1791,3 +1791,25 @@ func test_sandbag_bakes_are_not_a_mechanical_grid() -> void:
 				"%s is a distinct bake, not a byte-for-byte copy of %s" % [path, wall_body_hashes.get(file_hash, "")])
 			wall_body_hashes[file_hash] = path
 	Runner.T.eq(wall_body_hashes.size(), 3, "all 3 wall_sandbag body variants are distinct bakes")
+
+
+# --- event banner scrims never span the playfield ---
+
+func test_event_banners_never_span_the_playfield() -> void:
+	var ms = load("res://src/main.gd")
+	var strs: Array = ms._KIND_TEACH.values()
+	strs.append_array(["BRIDGE GUNSHIP", "MORTAR OBSERVER — SHOOT IT DOWN",
+		"GUNSHIP INBOUND", "CORE EXPOSED — OPEN FIRE", "AIRSTRIKE INBOUND",
+		"COLOSSUS ENRAGED — MORTAR VOLLEYS", "DESTROY THE GUNSHIP TO ADVANCE",
+		"HOLD THE ARENA — CLEAR THE WAVE", "MORTARS RANGING — ADVANCE!"])
+	for s in strs:
+		var sz: int = ms.banner_fit_size(s, 16)
+		var r: Rect2 = ms.banner_plate_rect(s, 70.0, sz, 24.0)   # 24 = worst-case badge pad
+		Runner.T.ok(r.size.x <= 0.72 * ms.SCREEN_W,
+			"'%s' scrim %dpx never spans the playfield" % [s, int(r.size.x)])
+		Runner.T.ok(sz >= 12, "'%s' stays readable (size %d >= 12)" % [s, sz])
+	# the slab itself may not come back
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var body := src.substr(src.find("func _metal_plate("), 800)
+	Runner.T.ok(not ("draw_rect(" in body),
+		"_metal_plate paints a soft-edged ribbon, never a hard rectangle")

@@ -395,7 +395,7 @@ func _shot_shop() -> SimWorld:
 func _dress_shop(m: Node2D) -> void:
 	# P1 mid-decision on the spend-wheel, grenades highlighted.
 	m._wheel[0] = {"open": true, "sel": 3}
-	m._show_banner("WAVE CLEARED — SHOP OPEN")
+	m.show_banner("WAVE CLEARED — SHOP OPEN")
 
 
 func _dress_colossus(m: Node2D) -> void:
