@@ -2474,7 +2474,10 @@ func _step_enemies() -> void:
 			_broadcasts.append(be)
 	for i in range(enemies.size() - 1, -1, -1):
 		var e := enemies[i]
-		if not e["alive"] or (e["y"] > camera_top + 420 * F_ONE and e["kind"] != "broadcast"):
+		# (The mast used to be exempt from the off-screen sweep — the one entity
+		# that could never be swept. It spawns inside the reachable band now, so
+		# it plays by the same rule as everything else.)
+		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
 			enemies.remove_at(i)
 			continue
 		if flash_ticks > 0:
@@ -2882,8 +2885,21 @@ func _nearest_alive_player(x: int, y: int) -> Dictionary:
 
 
 func _step_bunkers() -> void:
-	# Bunkers spawn infantry until sealed (the 1986 infinite-spawn grammar).
-	for bk in bunkers:
+	# Bunkers spawn infantry until sealed (the 1986 infinite-spawn grammar) —
+	# but only while they're still in the live band. `bunkers` was never removed
+	# from and this loop had no on-screen gate, so every passed-but-unsealed
+	# bunker kept spitting rushers behind the camera forever: they ate the shared
+	# MAX_ENEMIES budget, got culled by _step_enemies the next tick, and starved
+	# the real front-line spawner on deep runs. Same off-screen test the enemy /
+	# sandbag / rock sweeps use, so it prunes and gates in one pass.
+	# Safe for gate arenas: gates hold their own b1/b2 dict refs (removal from
+	# this array doesn't touch them), and a closed gate pins the camera within
+	# GATE_CAMERA_PAD + 150px of its pair — well inside the band.
+	for i in range(bunkers.size() - 1, -1, -1):
+		var bk := bunkers[i]
+		if bk["y"] > camera_top + 420 * F_ONE:
+			bunkers.remove_at(i)
+			continue
 		if not bk["alive"]:
 			continue
 		bk["spawn_cd"] = bk["spawn_cd"] - 1
@@ -4265,6 +4281,14 @@ func _step_waves() -> void:
 			if pressure_side >= 0:
 				xpx = clampi([160, 320, 480][pressure_side] + (xpx - 320) * 120 / 296, 24, 616)
 			var x := xpx * F_ONE
+			# ROOTED spawns (mg_nest / broadcast) can't use the walk-in-from-the-top
+			# y: endless never runs _step_camera, so camera_top is pinned at -VIEW_H
+			# forever and camera_top-24 sits ABOVE the player's own _clamp_actor
+			# ceiling (camera_top+16). A rooted unit there is permanently
+			# unreachable — blind-fire only — yet it counts in _wave_hostiles_cleared
+			# and holds the wave open indefinitely. Root them inside the reachable
+			# band instead (16..344 below camera_top).
+			var rooted_y: int = camera_top + 40 * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = wave_mod == 2 or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
@@ -4293,14 +4317,14 @@ func _step_waves() -> void:
 					# (the same beat the first miniboss lands).
 					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
 				elif roll == 6:
-					_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+					_spawn_mg_nest(x, rooted_y)
 				elif roll == 7:
 					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
 				elif roll == 8 and wave >= 7:
 					# Late-debut archetype: deep waves stop being static. Roll 8 fell
 					# to plain-elite before, and still does under wave 7 — the rng
 					# stream is untouched, only the wave-7+ interpretation changes.
-					_spawn_broadcast(x, camera_top - 24 * F_ONE)
+					_spawn_broadcast(x, rooted_y)
 				else:
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
 			elif wave_mod == 7 and wave_pending % 3 == 0:

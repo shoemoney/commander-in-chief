@@ -86,6 +86,31 @@ func test_bunker_infinite_spawn_and_seal() -> void:
 	Runner.T.eq(sim.enemies.size(), before + 2, "a destroyed bunker never spawns again")
 
 
+func test_passed_by_bunker_stops_spawning_and_is_pruned() -> void:
+	## Budget leak: `bunkers` was never removed from and _step_bunkers had no
+	## on-screen gate, so every passed-but-unsealed bunker kept spawning infantry
+	## behind the camera — rushers that eat the shared MAX_ENEMIES budget and get
+	## culled the next tick, starving the real front-line spawner on deep runs.
+	var sim := SimWorld.new(4, 1)
+	sim.bunkers.clear()
+	sim.enemies.clear()
+	var behind := {"x": 300 * Fixed.ONE, "y": sim.camera_top + 500 * Fixed.ONE,
+		"alive": true, "spawn_cd": 1}
+	sim.bunkers.append(behind)
+	sim._step_bunkers()
+	Runner.T.eq(sim.enemies.size(), 0, "a bunker below the live band spawns nothing")
+	Runner.T.ok(sim.bunkers.is_empty(), "and is swept out of the array")
+
+	# Band edge: the sweep uses the same +420 test as the enemy cull, so a bunker
+	# still on screen keeps its 1986 infinite spawn.
+	var edge := {"x": 300 * Fixed.ONE, "y": sim.camera_top + 420 * Fixed.ONE,
+		"alive": true, "spawn_cd": 1}
+	sim.bunkers.append(edge)
+	sim._step_bunkers()
+	Runner.T.eq(sim.enemies.size(), 1, "a bunker inside the band still spawns")
+	Runner.T.eq(sim.bunkers.size(), 1, "and survives the sweep")
+
+
 func test_mine_roll_safety() -> void:
 	var sim := SimWorld.new(9, 1)
 	var p := sim.players[0]
