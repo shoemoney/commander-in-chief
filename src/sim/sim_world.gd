@@ -1612,19 +1612,6 @@ func _fire_mission() -> void:
 			_kill_enemy(e, true, true)
 
 
-func _supply_full(p: Dictionary, kind: int) -> bool:
-	## True when _apply_supply(kind) would grant this player NOTHING — the mini()
-	## clamp eats it, or the vest is already on. Only the capped kinds answer
-	## true; every timed capsule (4/5/7/9), the one-shot flashbang and the
-	## sandbag re-apply usefully, so they are never "full".
-	match kind:
-		0: return p["mg_ammo"] >= MG_AMMO_MAX
-		1: return p["grenade_ammo"] >= GRENADE_AMMO_MAX
-		2: return p["vest"]
-		8: return p["claymores"] >= CLAYMORE_CAP
-	return false
-
-
 func _apply_supply(p: Dictionary, kind: int) -> void:
 	## One supply grammar shared by ground pickups, shop crates and buys.
 	match kind:
