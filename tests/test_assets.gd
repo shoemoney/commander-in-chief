@@ -1904,10 +1904,90 @@ func test_art_ring_is_pixel_perfect_not_a_polygon() -> void:
 		Runner.T.ok(have.has(Vector2i(v.x, -v.y)), "ring is symmetric across the x-axis")
 	# Filled discs must include the centre pixel (regression: inner2 == 0
 	# excluded d2 == 0, shipping every filled circle with a hollow centre).
+	# Read the TEXTURE, not offsets — circle() draws the texture, and filled
+	# entries deliberately carry no offsets (only arc() reads those, and it
+	# only ever asks for hollow rings).
 	var filled: Dictionary = Art._ring_entry(1, 1, true)
-	var foffsets: PackedVector2Array = filled["offsets"]
-	Runner.T.eq(foffsets.size(), 5, "r=1 filled disc is a solid 5-pixel plus (centre + 4 neighbors)")
-	var fhave := {}
-	for o in foffsets:
-		fhave[Vector2i(int(o.x), int(o.y))] = true
-	Runner.T.ok(fhave.has(Vector2i.ZERO), "r=1 filled disc has its centre pixel")
+	var fimg: Image = (filled["tex"] as ImageTexture).get_image()
+	var lit := 0
+	for y in fimg.get_height():
+		for x in fimg.get_width():
+			if fimg.get_pixel(x, y).a > 0.0:
+				lit += 1
+	Runner.T.eq(lit, 5, "r=1 filled disc is a solid 5-pixel plus (centre + 4 neighbors)")
+	Runner.T.ok(fimg.get_pixel(1, 1).a > 0.0, "r=1 filled disc has its centre pixel")
+	Runner.T.eq((filled["offsets"] as PackedVector2Array).size(), 0,
+		"filled discs carry no offsets — only arc() reads them, and never filled")
+
+
+func test_art_arc_slice_matches_the_angle_scan_it_replaced() -> void:
+	# Art.arc's partial sweep used to scan EVERY pixel of the ring, paying a
+	# Vector2.angle() (atan2) + fposmod each — thousands per frame in a fight.
+	# It now bsearches a contiguous slice of angle-sorted offsets. That is only
+	# legitimate if it picks the IDENTICAL pixel set, so pin it: brute-force the
+	# old predicate and compare, over real call-site angles and random sweeps.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xA12C
+	# Angle windows lifted from live call sites — the axis-aligned starts
+	# (-PI/2 dials, 0-based wedges) are where float boundaries actually bite.
+	var cases: Array = [[0.0, TAU / 12.0], [-PI / 2, TAU * 0.25], [-PI / 2, TAU * 0.75],
+		[-PI / 2, 0.0], [PI + 0.55, TAU - 0.2 - PI - 0.55], [0.0, TAU - 0.01],
+		[-PI, TAU / 5.0 - 0.3], [PI, 1.1], [0.0, 0.0], [TAU * 3.0 + 0.4, 1.9]]
+	for _k in 40:
+		cases.append([rng.randf_range(-40.0, 40.0), rng.randf_range(0.0, TAU - 0.002)])
+	var compared := 0
+	var drew := 0
+	for r in [1, 2, 5, 12, 21, 48, 58]:
+		for w in [1, 2, 3]:
+			var entry: Dictionary = Art._ring_entry(r, w, false)
+			var offs: PackedVector2Array = entry["offsets"]
+			var angles: PackedFloat64Array = entry["angles"]
+			Runner.T.eq(angles.size(), offs.size(), "r=%d w=%d has one angle per offset" % [r, w])
+			for case in cases:
+				var lo: float = case[0]
+				var span: float = case[1]
+				var want := {}
+				for o in offs:
+					if fposmod(o.angle() - lo, TAU) <= span:
+						want[o] = true
+				var got := {}
+				var win: Vector3i = Art._arc_span(angles, lo, span)
+				for i in range(win.x, win.y):
+					got[offs[i]] = true
+				for i in win.z:
+					got[offs[i]] = true
+				compared += 1
+				drew += got.size()
+				if want.size() != got.size():
+					Runner.T.eq(got.size(), want.size(),
+						"r=%d w=%d lo=%f span=%f selects the same pixel COUNT" % [r, w, lo, span])
+					continue
+				var same := true
+				for o in want:
+					if not got.has(o):
+						same = false
+						break
+				Runner.T.ok(same, "r=%d w=%d lo=%f span=%f selects the same pixel SET" % [r, w, lo, span])
+	Runner.T.ok(compared >= 1000, "the equivalence sweep actually ran (%d windows)" % compared)
+	Runner.T.ok(drew > 0, "the sweeps selected pixels — a slice that always picked nothing would 'match' trivially")
+
+
+func test_art_ring_cache_evicts_one_entry_instead_of_clearing() -> void:
+	# Regression: at the cap the cache clear()ed wholesale, so ONE novel radius
+	# — and call sites animate radii constantly (explosion cores sweep r=12..58)
+	# — threw away the entire working set and rebuilt every disc from scratch:
+	# an O(r²) Image fill plus a GPU upload each, all inside _draw.
+	var cap: int = Art.RING_CACHE_CAP
+	Art._ring_cache.clear()
+	# cap distinct (r, w) keys, all small enough that filling them is cheap.
+	var side := int(ceil(sqrt(float(cap))))
+	for i in cap:
+		Art._ring_entry(1 + i / side, 1 + i % side, false)
+	Runner.T.eq(Art._ring_cache.size(), cap, "cache fills to exactly the cap")
+	var first: Vector3i = Art._ring_cache.keys()[0]
+	var last: Vector3i = Art._ring_cache.keys()[cap - 1]
+	Art._ring_entry(1 + side, 1, false)   # one novel key, cache already full
+	Runner.T.eq(Art._ring_cache.size(), cap, "a novel key past the cap evicts one entry, not all of them")
+	Runner.T.ok(not Art._ring_cache.has(first), "the oldest entry is the one evicted")
+	Runner.T.ok(Art._ring_cache.has(last), "the newest entries survive a novel key")
+	Art._ring_cache.clear()   # shared static; leave it cold, not full of test junk
