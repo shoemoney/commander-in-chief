@@ -216,6 +216,11 @@ const REAR_CAMP_TICKS := 300                  # 5s camping a choke before the re
 const REAR_WARN_TICKS := 90                    # c4 2v: 1.5s lead warn before a rear-trickle spawn (>= the 24t reaction floor)
 const OBSERVER_STRIKE_CD_TICKS := 90
 const STRIKE_TELEGRAPH_TICKS := 45
+# Blind-fire scatter (px, RAW): how far a mortar/volley aimed at a CONCEALED
+# target can miss. Deliberately > the 28px GRENADE_RADIUS kill ring, so a shell
+# fired into smoke is a coin flip on the ring rather than a guaranteed hit —
+# concealment DEGRADES area fire instead of switching it off. See _blind_scatter.
+const BLIND_SCATTER_RAW := 44
 const OBSERVER_DESPAWN_ADVANCE := 150 * F_ONE
 const OBSERVER_Y_OFFSET := 14 * F_ONE
 # Gates: a full-width barrier every 1000 world units, flanked by two bunkers;
@@ -1242,6 +1247,31 @@ func _concealed(t: Dictionary) -> bool:
 	## The unified fire-acquisition gate: smoke OR tall grass. Segs 0-1 stream
 	## no grass, so in the torture window this is exactly the old smoke gate.
 	return t["smoke_ticks"] > 0 or _in_grass(t) or _in_trench(t["x"], t["y"])
+
+
+func _blind_scatter(t: Dictionary) -> Array:
+	## THE CONCEALMENT RULE, in one place: smoke/grass/trench beats AIM, not AREA.
+	##
+	## `_concealed` still hard-gates every AIMED shooter (elite, sniper, technical
+	## charge, gunship spray, colossus spray) — a bullet needs a target it can see.
+	## AREA fire (grenadier lobs, drone paints, observer barrage, gunship mortars,
+	## every colossus strike) no longer checks it at all; instead it takes this
+	## offset, which is zero in the open and a BLIND_SCATTER_RAW-box miss when the
+	## target is hidden. The shell still comes, it just lands where you probably
+	## were — which is exactly what the 45t telegraph ring is FOR.
+	##
+	## Why this and not the alternatives: a cost/cooldown on smoke only delays the
+	## off-switch (a supply drop re-arms it mid-siege), and a "boss sweeps the
+	## smoke" reaction needs new hashed boss state for a rule the player still has
+	## to be told. This one is a single sentence the HUD can teach, it keeps smoke
+	## genuinely strong (every direct-fire threat in the game goes silent), and it
+	## leaves both set-pieces with a live, dodgeable offense while you hide.
+	if not _concealed(t):
+		return [0, 0]
+	# View-only teaching cue (events are checksum-excluded, so this is free).
+	events.append({"t": "blind_shell", "x": t["x"], "y": t["y"]})
+	return [rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE,
+		rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE]
 
 
 func _lane_blocked(x: int, y: int) -> bool:
@@ -2759,14 +2789,20 @@ func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 			if dlen > F_ONE:
 				px = -Fixed.mul(Fixed.div(dy, dlen), GRENADIER_CLUSTER_SPREAD)
 				py = Fixed.mul(Fixed.div(dx, dlen), GRENADIER_CLUSTER_SPREAD)
-			_add_strike(target["x"] - px, target["y"] - py)
-			_add_strike(target["x"], target["y"])
-			_add_strike(target["x"] + px, target["y"] + py)
+			# One scatter for the whole cluster: concealment DISPLACES the firing
+			# line, it does not scramble it (the walked line is this threat's
+			# identity — see above). Zero offset in the open.
+			var sc := _blind_scatter(target)
+			var cx: int = target["x"] + sc[0]
+			var cy: int = target["y"] + sc[1]
+			_add_strike(cx - px, cy - py)
+			_add_strike(cx, cy)
+			_add_strike(cx + px, cy + py)
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > GRENADIER_STANDOFF:
 		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
-	elif e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
+	elif e["fire_cd"] == 0:   # AREA fire: smoke scatters the lobs, it does not stop them
 		e["fire_cd"] = GRENADIER_FIRE_CD_TICKS
 		e["windup"] = GRENADIER_WINDUP_TICKS
 		events.append({"t": "grenadier_windup", "x": e["x"], "y": e["y"]})
@@ -2809,13 +2845,14 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0:
-			_add_strike(target["x"], target["y"])
+			var sc := _blind_scatter(target)
+			_add_strike(target["x"] + sc[0], target["y"] + sc[1])
 		return   # holds position while painting
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > DRONE_STANDOFF:
 		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), DRONE_SPEED)
 		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), DRONE_SPEED)
-	elif e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
+	elif e["fire_cd"] == 0:   # AREA fire: smoke scatters the paint, it does not stop it
 		e["fire_cd"] = DRONE_FIRE_CD_TICKS
 		e["windup"] = DRONE_WINDUP_TICKS
 		events.append({"t": "drone_windup", "x": e["x"], "y": e["y"]})
@@ -4843,7 +4880,11 @@ func _colossus_strike(p: Dictionary) -> void:
 	p["lead_x"] = p["x"]
 	p["lead_y"] = p["y"]
 	p["lead_t"] = tick_count
-	_add_strike(clampi(aim_x, WORLD_LEFT, WORLD_RIGHT), aim_y)
+	# Every colossus mortar source (volley, lane sweep, ring punisher) funnels
+	# here, so the blind-fire scatter belongs here too: hiding degrades the
+	# fortress's shelling, it never silences it.
+	var sc := _blind_scatter(p)
+	_add_strike(clampi(aim_x + sc[0], WORLD_LEFT, WORLD_RIGHT), aim_y + sc[1])
 
 
 func _step_colossus() -> void:
@@ -4958,7 +4999,7 @@ func _step_colossus() -> void:
 				_spawn_enemy_bullet(colossus["x"], colossus["y"], bx, by, blen)
 	if phase >= 2:
 		colossus["volley_cd"] = colossus["volley_cd"] - 1
-		if colossus["volley_cd"] <= 0 and not _concealed(target):
+		if colossus["volley_cd"] <= 0:   # AREA fire: _colossus_strike scatters into smoke, it never stops
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
 			_colossus_strike(target)
 	if phase == 3:
@@ -5122,14 +5163,15 @@ func _step_one_boss(boss: Dictionary) -> void:
 		if t in boss_mortar_ticks(tier):
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
-			if not target2.is_empty() and not _concealed(target2):
+			if not target2.is_empty():   # AREA fire: smoke scatters the volley, it does not stop it
 				var aim_x: int = target2["x"]
 				var aim_y: int = target2["y"]
 				if boss.has("stx"):
 					var elapsed: int = maxi(1, t - int(boss["st_at"]))
 					aim_x += (target2["x"] - int(boss["stx"])) * STRIKE_TELEGRAPH_TICKS / elapsed
 					aim_y += (target2["y"] - int(boss["sty"])) * STRIKE_TELEGRAPH_TICKS / elapsed
-				_add_strike(clampi(aim_x, WORLD_LEFT, WORLD_RIGHT), aim_y)
+				var sc := _blind_scatter(target2)
+				_add_strike(clampi(aim_x + sc[0], WORLD_LEFT, WORLD_RIGHT), aim_y + sc[1])
 				boss["stx"] = target2["x"]
 				boss["sty"] = target2["y"]
 				boss["st_at"] = t
@@ -5364,8 +5406,9 @@ func _step_observer() -> void:
 			if observer["strike_cd"] <= 0:
 				observer["strike_cd"] = OBSERVER_STRIKE_CD_TICKS
 				var target := _nearest_alive_player(observer["x"], camera_top + OBSERVER_Y_OFFSET)
-				if not target.is_empty() and not _concealed(target):   # can't paint into smoke
-					_add_strike(target["x"], target["y"], true)
+				if not target.is_empty():   # AREA fire: smoke scatters the barrage, it does not stop it
+					var sc := _blind_scatter(target)
+					_add_strike(target["x"] + sc[0], target["y"] + sc[1], true)
 	# NOTE: strike resolution is NOT here — step() calls _resolve_strikes()
 	# once per tick for both modes. (Calling it here too double-decremented
 	# every strike, halving its telegraph window; fixed iter 28.)

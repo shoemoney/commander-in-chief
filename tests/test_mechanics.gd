@@ -221,6 +221,83 @@ func test_smoke_blinds_ranged_fire_but_not_pathing() -> void:
 	Runner.T.ok(e.get("windup", 0) > 0, "elite opens fire once the smoke clears")
 
 
+func test_concealment_beats_aim_but_only_scatters_area_fire() -> void:
+	# THE concealment rule, pinned at its single source. One smoke capsule used to
+	# gate the gunship's spray AND mortars and the colossus's spray AND volley —
+	# an off-switch on both set-pieces. Now: aimed fire can't acquire you at all,
+	# area fire still comes and just lands where you PROBABLY were.
+	var sim := SimWorld.new(21, 1)
+	var p: Dictionary = sim.players[0]
+	Runner.T.eq(sim._blind_scatter(p), [0, 0], "a visible target is shelled pinpoint (zero offset)")
+	Runner.T.eq(sim.events.size(), 0, "no teaching event fires while the target is in the open")
+	p["smoke_ticks"] = 100
+	sim.events.clear()
+	var any_off := false
+	for i in 4:
+		var sc := sim._blind_scatter(p)
+		if sc[0] != 0 or sc[1] != 0:
+			any_off = true
+		Runner.T.ok(absi(sc[0]) <= SimWorld.BLIND_SCATTER_RAW * SimWorld.F_ONE
+			and absi(sc[1]) <= SimWorld.BLIND_SCATTER_RAW * SimWorld.F_ONE,
+			"a blind shell stays inside the declared scatter box")
+	Runner.T.ok(any_off, "a concealed target draws a SCATTERED shell, not silence")
+	var taught := false
+	for ev in sim.events:
+		if ev["t"] == "blind_shell":
+			taught = true
+	Runner.T.ok(taught, "blind fire emits the blind_shell event the first-time HUD hint teaches off")
+	# The miss box is wider than the kill ring, so hiding genuinely degrades the
+	# shelling instead of merely decorating it.
+	Runner.T.ok(SimWorld.BLIND_SCATTER_RAW * SimWorld.F_ONE > SimWorld.GRENADE_RADIUS,
+		"the scatter can exceed the 28px kill radius — a blind shell can miss outright")
+	# Grass and trench route through the same gate, so the rule is one rule.
+	var sim2 := SimWorld.new(21, 1)
+	var p2: Dictionary = sim2.players[0]
+	sim2.rocks.append({"x": p2["x"], "y": p2["y"], "kind": 1})
+	Runner.T.ok(sim2._blind_scatter(p2) != [0, 0], "grass concealment scatters area fire the same way smoke does")
+
+
+func test_smoke_cannot_switch_off_the_colossus() -> void:
+	# Boss audit: a single 5s smoke capsule blanked the colossus's spray AND its
+	# volley. The turret still goes blind (that IS smoke's value); the mortars do not.
+	var sim := SimWorld.new(7, 1)
+	var gy := sim.camera_top - 3 * SimWorld.GATE_SPACING
+	sim.colossus = {"alive": true, "hp": SimWorld.COLOSSUS_HP / 2,   # phase 2 -> volleys
+		"x": SimWorld.SCREEN_CX, "y": gy, "spray_cd": 1, "volley_cd": 1, "spawn_cd": 999,
+		"core_cd": 999, "core_open": 0, "pv": 2, "sweep_cd": 999}
+	sim.last_stand = true
+	var p: Dictionary = sim.players[0]
+	p["x"] = 120 * SimWorld.F_ONE
+	p["y"] = gy + 200 * SimWorld.F_ONE   # outside crush + inner-ring punisher, off the margin lanes
+	p["smoke_ticks"] = 9999             # stepping _step_colossus directly never decays it
+	sim.tick_count = 1
+	var b0: int = sim.enemy_bullets.size()
+	var s0: int = sim.strikes.size()
+	for i in 130:
+		sim._step_colossus()
+		sim.tick_count += 1
+	Runner.T.eq(sim.enemy_bullets.size(), b0, "smoke still blinds the colossus TURRET — aimed fire cannot acquire")
+	Runner.T.ok(sim.strikes.size() > s0, "but the mortar volley keeps falling — smoke is not an off-switch")
+
+
+func test_smoke_cannot_switch_off_the_gunship() -> void:
+	# Same rule at the gate boss: spray denied, mortar act uninterrupted.
+	var sim := SimWorld.new(11, 1)
+	var by := sim.camera_top + 120 * SimWorld.F_ONE
+	var boss := {"alive": true, "hp": 999, "max_hp": 999, "x": SimWorld.SCREEN_CX,
+		"dir": 1, "phase_t": 0, "gate_y": by}
+	var p: Dictionary = sim.players[0]
+	p["x"] = SimWorld.SCREEN_CX
+	p["y"] = by + 220 * SimWorld.F_ONE
+	p["smoke_ticks"] = 9999
+	var b0: int = sim.enemy_bullets.size()
+	var s0: int = sim.strikes.size()
+	for i in SimWorld.BOSS_CYCLE_TICKS:
+		sim._step_one_boss(boss)
+	Runner.T.eq(sim.enemy_bullets.size(), b0, "smoke still blinds the gunship SPRAY (aimed fire)")
+	Runner.T.ok(sim.strikes.size() > s0, "the mortar volley still lands — one smoke no longer blanks the fight")
+
+
 func test_flashbang_stuns_field_enemies_then_releases() -> void:
 	var sim := SimWorld.new(14, 1)
 	var p := sim.players[0]
