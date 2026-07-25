@@ -192,3 +192,41 @@ func test_cap_flags_terminates_runs() -> void:
 		"a middle bag in one of two full stacked rows must render as an ordinary middle segment, not CAP_CORNER")
 	Runner.T.eq(ms.cap_flags(full_xs, full_ys, 4), 0,
 		"same for the row directly below it — stacked rows are not corners")
+
+
+# The campaign ramps continuously desert -> scorched -> marsh -> ruins -> Foundry (see
+# _sector_march), so hardcoding ANY biome noun into player-facing copy is wrong somewhere along
+# that ramp, not just at launch. FOUNDRY is a real authored sector name (sim_world.gd's "FOUNDRY
+# WORKS", main.gd's "FOUNDRY COLOSSUS — %s"), not leaked biome copy, so it's deliberately excluded.
+# DESERT / SCORCHED DESERT are likewise excluded: they're band-driven authored terrain words
+# from main.gd's TERRAIN_WORDS (fed by _terrain_word(_sector_march())), not a hardcoded literal
+# that drifts when the campaign ramps to another biome — same status as FOUNDRY above.
+func test_no_hardcoded_biome_word_in_player_copy() -> void:
+	var re := RegEx.new()
+	re.compile("\"[^\"\\n]*\\b(JUNGLE|SWAMP|SNOW|TUNDRA|FOREST|ARCTIC)\\b[^\"\\n]*\"")
+	var hits: Array = []
+	var paths: Array = ["res://src/main.gd"]
+	var dir := DirAccess.open("res://src/view")
+	if dir:
+		dir.list_dir_begin()
+		var fname := dir.get_next()
+		while fname != "":
+			if fname.ends_with(".gd"):
+				paths.append("res://src/view/%s" % fname)
+			fname = dir.get_next()
+		dir.list_dir_end()
+	for path in paths:
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null:
+			continue
+		var src := f.get_as_text()
+		f.close()
+		var code_lines: Array = []
+		for line in src.split("\n"):
+			var hpos := line.find("#")
+			code_lines.append(line if hpos < 0 else line.substr(0, hpos))
+		var code := "\n".join(code_lines)
+		for m in re.search_all(code):
+			hits.append("%s: %s" % [path, m.get_string()])
+	Runner.T.eq(hits.size(), 0,
+		"no hardcoded biome noun in player-facing copy, found: %s" % str(hits))

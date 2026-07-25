@@ -3138,9 +3138,9 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 	var font := Art.font()
 	# Built through caption_line (the real speaker-prefix helper _draw_caption calls), so the
 	# a11y prefix can never widen the strip past this layout guard without failing here.
-	for txt in [HudIcons.caption_line("\"Move out!\"", false),
+	for txt in [HudIcons.caption_line(Sfx._BARK_CAPTIONS["levelstart"]),
 			HudIcons.caption_line(
-				"\"War chest's empty, no revives left for the rest of this desperate last stand!\"", true)]:
+				"SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\"")]:
 		var lines := HudIcons._wrap_caption(txt, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
 		var w := 0.0
 		for ln in lines:
@@ -3258,3 +3258,20 @@ func test_result_card_suppresses_the_bottom_overlays() -> void:
 	Runner.T.eq(h._result_card_up(), true, "the victory card suppresses them")
 	m.free()
 	h.free()
+
+
+# The caption TABLES in sfx.gd already author the speaker ("COMMANDER: …", "SPOTTER: …",
+# "PILOT: …") or deliberately omit it for bracketed non-speech cues ("[MORTAR INCOMING]").
+# caption_line() is the ONE place a caption becomes display text — it must never invent a
+# second speaker on top of what the table already wrote.
+func test_caption_line_never_doubles_the_speaker() -> void:
+	for tbl in [Sfx._BARK_CAPTIONS, Sfx._VO_CAPTIONS, Sfx.SFX_CAPTIONS]:
+		for k in tbl:
+			var line: String = HudIcons.caption_line(tbl[k])
+			var tags: int = line.count("COMMANDER:") + line.count("SPOTTER:") + line.count("PILOT:")
+			Runner.T.ok(tags <= 1, "caption '%s' names its speaker at most once (got %d)" % [k, tags])
+			Runner.T.eq(line, tbl[k], "caption '%s' renders exactly as authored" % k)
+	Runner.T.ok(HudIcons.caption_line(Sfx.SFX_CAPTIONS["strike_warn"]).begins_with("["),
+		"a bracketed non-speech cue is never attributed to a speaker")
+	Runner.T.ok(HudIcons.caption_line(Sfx._VO_CAPTIONS["vo_pilot_plea"]).begins_with("PILOT:"),
+		"the pilot's line stays the pilot's")

@@ -1405,10 +1405,14 @@ const CAPTION_MAX_W := 560.0
 
 ## a11y: WHO is speaking must be in the TEXT, not only the tint. The radio-Spotter blue and the
 ## dry-Commander amber measure 1.04:1 against each other — a speaker cue invisible to a
-## colorblind player, inside the feature that exists FOR players who can't use the audio. The
-## name is a separate translate() key so a .po can localize the speaker without touching the line.
-static func caption_line(txt: String, radio: bool) -> String:
-	return "%s: %s" % [TranslationServer.translate("SPOTTER" if radio else "COMMANDER"), txt]
+## colorblind player, inside the feature that exists FOR players who can't use the audio.
+## The caption TABLES in sfx.gd already author the speaker ("COMMANDER: …", "SPOTTER: …",
+## "PILOT: …") or deliberately omit it for bracketed non-speech cues ("[MORTAR INCOMING]").
+## This is the ONE place a caption is turned into display text — it must never add a second
+## speaker on top. The .po msgids are the full prefixed lines, so translate() localizes the
+## speaker with the line.
+static func caption_line(raw: String) -> String:
+	return TranslationServer.translate(raw)
 # Tight leading for the wrapped strip. Grows UPWARD from the original single-line baseline
 # (VERB_LEGEND_Y - 20.0), so a one-line caption (the overwhelming common case) draws at the
 # EXACT same y/rect it always did — only a caption long enough to wrap moves anything.
@@ -1603,7 +1607,7 @@ func _draw_caption() -> void:
 	# Localize via the English source string as the key — same contract as Menu.setting_help:
 	# with no translation loaded translate() returns the source unchanged, so English is the
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
-	var txt := caption_line(TranslationServer.translate(raw), cap.get("radio", false))
+	var txt := caption_line(raw)
 	var col: Color = Color(0.75, 0.95, 1.0) if cap.get("radio", false) else Color(0.95, 0.9, 0.75)
 	# triple-A: dissolve the strip over its last 0.4s instead of snapping off. REDUCE MOTION
 	# snaps (same contract as _verb_alpha), so a motion-sensitive player gets no cross-fade.
