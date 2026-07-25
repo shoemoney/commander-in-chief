@@ -8,6 +8,17 @@ extends SceneTree
 
 const F := Fixed.ONE
 
+# --- Capture liveness gate ---------------------------------------------------
+# This harness shipped SEVEN stacked bugs that each printed "SAVED" for a
+# 1768-byte flat-colour PNG, and nothing in the repo could tell a real capture
+# from a blank one. A blank capture must be a HARD failure, never a silent one.
+# Thresholds mirror the external verifier (skills/triple-a-game verify_shots.py):
+# a real game frame has hundreds of colours and a wide luma spread; a flat or
+# near-black fill has 1-3 colours and a stddev at ~0.
+const MIN_COLORS := 12     # distinct RGB values among the sampled pixels
+const MIN_STDDEV := 6.0    # luma (Rec.709) standard deviation, 0-255 scale
+const SAMPLE_STRIDE := 4   # subsample — plenty for a blank/not-blank decision
+
 var main: Node2D
 var shots: Array[Dictionary] = []
 var current := -1
@@ -17,6 +28,13 @@ var out_dir := "/tmp"
 
 
 func _initialize() -> void:
+	# --headless is a dummy renderer: RenderingServer.frame_post_draw never fires, so
+	# the capture loop below would hang forever instead of failing. Say why, up front.
+	if DisplayServer.get_name() == "headless":
+		push_error("screenshots: --headless has no framebuffer — run under a GL context (X/Xvfb), e.g. --rendering-method gl_compatibility")
+		print("SHOTS UNUSABLE — headless has no framebuffer; nothing was captured")
+		quit(1)
+		return
 	# Seed the engine RNG the VIEW uses (fx jitter, scorch radii, casing spin) so
 	# two runs of the harness produce byte-identical PNGs. Without this, shots
 	# differ run-to-run and can't be diffed to prove a view change is a no-op.
@@ -60,8 +78,10 @@ func _run() -> void:
 	# _splash_layer) and re-shows it, so an earlier kill is simply overwritten. Once physics
 	# is frozen the splash timer would never expire, and its opaque cinematic covered every
 	# shot ("BIG IT GAME STUDIOS presents" on all 12).
-	_kill_splash()
+	_kill_splash(main)
 	_freeze_physics(main)
+	var digests := {}   # md5 -> path, so two shots can never be the same picture
+	var failures := 0
 	for i in shots.size():
 		current = i
 		_pose(i)
@@ -76,30 +96,91 @@ func _run() -> void:
 		# reading it from process_frame (pre-render) is what produced the black shots.
 		var img := root.get_texture().get_image()
 		var path := "%s/%02d-%s.png" % [out_dir, i + 1, shots[i]["name"]]
+		if img == null or img.is_empty():
+			push_error("screenshots: viewport handed back no image for %s — run under a GL context (--headless has no framebuffer)" % path)
+			print("FAILED ", path, " — no framebuffer")
+			failures += 1
+			continue
 		var err := img.save_png(path)
 		if err != OK:
 			push_error("screenshots: save_png failed (%s) for %s — does SHOT_DIR exist?" % [err, path])
 			print("FAILED ", path)
-		else:
-			print("SAVED ", path)
-	print("ALL SHOTS DONE")
+			failures += 1
+			continue
+		# Written to disk on purpose even when dead: a human needs to SEE the garbage.
+		# It just never gets to call itself SAVED.
+		var st := frame_stats(img)
+		if not _frame_is_live(img):
+			push_error("screenshots: %s carries no picture (%d distinct colours, luma stddev %.2f) — the pose never reached the viewport" % [path, st["colors"], st["stddev"]])
+			print("FAILED %s — dead frame (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+			failures += 1
+			continue
+		var digest := FileAccess.get_md5(path)
+		if digests.has(digest):
+			push_error("screenshots: %s is byte-identical to %s — the pose never reached the viewport" % [path, digests[digest]])
+			print("FAILED %s — identical to %s" % [path, digests[digest]])
+			failures += 1
+			continue
+		digests[digest] = path
+		print("SAVED %s (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+	if failures > 0:
+		push_error("screenshots: %d of %d shots are unusable — refusing to report success" % [failures, shots.size()])
+		print("SHOTS UNUSABLE — %d of %d failed; do not hand these to a reviewer" % [failures, shots.size()])
+		quit(1)
+		return
+	print("ALL SHOTS DONE — %d live, %d unique" % [shots.size(), digests.size()])
 	quit(0)
 
 
-func _kill_splash() -> void:
-	main._splash_t = 0.0
-	if main._splash_layer != null:
-		main._splash_layer.visible = false
+static func frame_stats(img: Image) -> Dictionary:
+	## Distinct-colour count and luma stddev over a strided sample of `img`.
+	## Static so smoke.gd and tests/test_capture_guard.gd share the exact predicate
+	## the harness gates on — a detector only one caller uses is a detector that rots.
+	var colors := {}
+	var sum := 0.0
+	var sum_sq := 0.0
+	var n := 0
+	for y in range(0, img.get_height(), SAMPLE_STRIDE):
+		for x in range(0, img.get_width(), SAMPLE_STRIDE):
+			var c := img.get_pixel(x, y)
+			colors[(c.r8 << 16) | (c.g8 << 8) | c.b8] = true
+			var luma := 0.2126 * float(c.r8) + 0.7152 * float(c.g8) + 0.0722 * float(c.b8)
+			sum += luma
+			sum_sq += luma * luma
+			n += 1
+	var inv := 1.0 / float(maxi(n, 1))
+	var mean := sum * inv
+	return {"colors": colors.size(), "stddev": sqrt(maxf(sum_sq * inv - mean * mean, 0.0)), "pixels": n}
 
 
-func _redraw_all(n: Node) -> void:
+static func _frame_is_live(img: Image) -> bool:
+	## False for anything that carries no picture: a missing/empty image (no GL
+	## context), a solid fill, or a near-flat frame that has colour count but no
+	## contrast. Both arms matter — a black frame fails on colours, a subtly
+	## dithered blank fails on stddev.
+	if img == null or img.is_empty():
+		return false
+	var s := frame_stats(img)
+	return int(s["colors"]) >= MIN_COLORS and float(s["stddev"]) >= MIN_STDDEV
+
+
+static func _kill_splash(m: Node) -> void:
+	## Static + node-argument so biome_capture.gd reuses THIS one, rather than
+	## re-deriving the same three hard-won fixes (warmup, freeze, splash) and
+	## re-acquiring the same blank-frame bug.
+	m._splash_t = 0.0
+	if m._splash_layer != null:
+		m._splash_layer.visible = false
+
+
+static func _redraw_all(n: Node) -> void:
 	if n is CanvasItem:
 		(n as CanvasItem).queue_redraw()
 	for c in n.get_children():
 		_redraw_all(c)
 
 
-func _freeze_physics(n: Node) -> void:
+static func _freeze_physics(n: Node) -> void:
 	## Stop the sim advancing WITHOUT stopping the view drawing. process_mode =
 	## PROCESS_MODE_DISABLED does both — it also suppresses CanvasItem redraws, so every
 	## posed shot re-captured the same frozen frame (12 byte-identical PNGs). Killing
@@ -136,7 +217,7 @@ func _pose(idx: int) -> void:
 	# the visible field on the PRIOR shot's palette. Pre-sync _bg_march so _draw's
 	# transition-reset is skipped, invalidate _bg_cam to force the repaint, and clear
 	# the freeze snap so every visible row uses the posed sector march.
-	_kill_splash()   # re-assert: a pose must never surface the intro cinematic
+	_kill_splash(main)   # re-assert: a pose must never surface the intro cinematic
 	main._bg_march = main._sector_march()
 	main._bg_cam = -2147483647
 	main._litter_cam_snap = 9223372036854775807

@@ -11,17 +11,27 @@ extends SceneTree
 ## Dev tool only — never shipped; not part of the deterministic sim.
 
 const F := Fixed.ONE
+const Shots := preload("res://tools/screenshots.gd")   # shared capture-liveness gate
 
 var main: Node2D
+var _digests := {}   # md5 -> path, so two biomes can never be the same picture
 var shots: Array[Dictionary] = []
 var current := -1
-var wait := 0
+const WARMUP_FRAMES := 6   # main must render live at least once before it is frozen
+const SETTLE_FRAMES := 12  # rendered frames between posing a shot and grabbing the pixels
 var out_dir := "/tmp"
 var expect_w := 640   # overwritten below from the project's actual viewport size
 var expect_h := 360
 
 
 func _initialize() -> void:
+	# --headless is a dummy renderer: frame_post_draw never fires, so the capture
+	# loop below would hang forever instead of failing. Say why, up front.
+	if DisplayServer.get_name() == "headless":
+		push_error("biome_capture: --headless has no framebuffer — run under a GL context (X/Xvfb), e.g. --rendering-method gl_compatibility")
+		print("SHOTS UNUSABLE — headless has no framebuffer; nothing was captured")
+		quit(1)
+		return
 	# Read the real viewport size instead of hardcoding 640x360, so this guard
 	# doesn't false-fail (or worse, silently pass a wrong-size frame) if
 	# display/window/size/viewport_* ever changes in project.godot.
@@ -37,56 +47,75 @@ func _initialize() -> void:
 		return
 	main = (load("res://src/main.tscn") as PackedScene).instantiate()
 	root.add_child(main)
-	main.process_mode = Node.PROCESS_MODE_DISABLED   # pose states only, never step (see screenshots.gd)
 	main._menu.mode = GameMenu.Mode.HIDDEN
 	main.no_autopause = true
 	_build_shots()
-	process_frame.connect(_on_frame)
+	_run()
 
 
-func _on_frame() -> void:
-	if current == -1:
-		_advance()
-		return
-	if current >= shots.size():
-		return
-	wait -= 1
-	if wait == 2:
-		main.queue_redraw()
-	if wait <= 0:
+func _run() -> void:
+	## ONE linear coroutine, matching screenshots.gd. The old process_frame handler
+	## + `wait` counter froze main with PROCESS_MODE_DISABLED, which also suppresses
+	## CanvasItem redraws AND freezes the node before it has drawn once — so this
+	## harness was writing solid 1-colour PNGs and printing SAVED for every one of
+	## them. The liveness gate below is what finally caught it.
+	for _i in WARMUP_FRAMES:
+		await RenderingServer.frame_post_draw
+	Shots._kill_splash(main)      # opaque intro cinematic would cover every shot
+	Shots._freeze_physics(main)   # stop sim.step() WITHOUT stopping _draw
+	var failures := 0
+	for i in shots.size():
+		current = i
+		_pose()
+		for _s in SETTLE_FRAMES:
+			Shots._redraw_all(main)   # bg root, HUD and menu are separate CanvasItems
+			await RenderingServer.frame_post_draw
+		# frame_post_draw is the ONLY point where the viewport texture holds real pixels.
 		var img := root.get_texture().get_image()
-		var path := "%s/%02d-%s.png" % [out_dir, current + 1, shots[current]["name"]]
-		# save_png returning OK only means the write succeeded, not that the
-		# viewport actually rendered — a dummy/headless driver can hand back a
-		# null texture (no GL context) or a valid-looking blank/wrong-size
-		# frame. Catch both here so a bad capture fails loud instead of
-		# quietly reaching the downstream asset-review pass.
-		if img == null:
-			push_error("biome_capture: get_image() returned null (no renderable viewport) for %s" % path)
-			quit(1)
-			return
-		if img.get_width() != expect_w or img.get_height() != expect_h or img.is_empty():
+		var path := "%s/%02d-%s.png" % [out_dir, i + 1, shots[i]["name"]]
+		if img == null or img.is_empty():
+			push_error("biome_capture: viewport handed back no image for %s" % path)
+			print("FAILED ", path, " — no framebuffer")
+			failures += 1
+			continue
+		if img.get_width() != expect_w or img.get_height() != expect_h:
 			push_error("biome_capture: captured frame is %dx%d (expected %dx%d) for %s" %
 				[img.get_width(), img.get_height(), expect_w, expect_h, path])
-			quit(1)
-			return
+			print("FAILED ", path, " — wrong size")
+			failures += 1
+			continue
 		var err := img.save_png(path)
 		if err != OK:
-			# Fatal, not skip-and-continue: a hole in the tour silently starves
-			# the downstream asset-review/winner-picking pass of that biome.
 			push_error("biome_capture: save_png failed (%d) for %s" % [err, path])
-			quit(1)
-			return
-		print("SAVED ", path)
-		_advance()
-
-
-func _advance() -> void:
-	current += 1
-	if current >= shots.size():
-		print("ALL SHOTS DONE")
-		quit(0)
+			print("FAILED ", path)
+			failures += 1
+			continue
+		# Written to disk even when dead: a human needs to SEE the garbage. It just
+		# never gets to call itself SAVED.
+		var st := Shots.frame_stats(img)
+		if not Shots._frame_is_live(img):
+			push_error("biome_capture: %s carries no picture (%d distinct colours, luma stddev %.2f) — the pose never reached the viewport" % [path, st["colors"], st["stddev"]])
+			print("FAILED %s — dead frame (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+			failures += 1
+			continue
+		var digest := FileAccess.get_md5(path)
+		if _digests.has(digest):
+			push_error("biome_capture: %s is byte-identical to %s — the pose never reached the viewport" % [path, _digests[digest]])
+			print("FAILED %s — identical to %s" % [path, _digests[digest]])
+			failures += 1
+			continue
+		_digests[digest] = path
+		print("SAVED %s (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+	if failures > 0:
+		push_error("biome_capture: %d of %d shots are unusable — refusing to report success" % [failures, shots.size()])
+		print("SHOTS UNUSABLE — %d of %d failed; do not hand these to a reviewer" % [failures, shots.size()])
+		quit(1)
 		return
+	print("ALL SHOTS DONE — %d live, %d unique" % [shots.size(), _digests.size()])
+	quit(0)
+
+
+func _pose() -> void:
 	var sim: SimWorld = shots[current]["build"].call()
 	main.sim = sim
 	main._fx.clear()
@@ -105,16 +134,16 @@ func _advance() -> void:
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)
 	# Force the retained ground canvas to repaint at THIS shot's march (see the
-	# matching note in screenshots.gd::_advance — the same seam bites here).
+	# matching note in screenshots.gd::_pose — the same seam bites here).
 	main._bg_march = main._sector_march()
 	main._bg_cam = -2147483647
 	main._litter_cam_snap = 9223372036854775807
 	# _update_hud() must run AFTER the ground-canvas invalidation above: HUD
 	# elements keyed on the current march (e.g. sector name/progress) need to
 	# read the just-set _bg_march, not the previous shot's stale value.
+	Shots._kill_splash(main)   # re-assert: a pose must never surface the intro cinematic
 	main._update_hud()
 	main.queue_redraw()
-	wait = 6
 
 
 func _cam(sim: SimWorld, offset_px: int) -> int:
