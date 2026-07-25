@@ -474,22 +474,20 @@ const SHOP_ICON_DIM := 0.22  # c1-15: closed-state alpha of the 4 supply icons. 
 
 
 # c2-16: short names for the four buyables so the endless strip isn't an icon-only rebus. They draw
-# CENTERED BENEATH each icon (see _draw_shop_strip), dimmed with the icon so the CLOSED preview reads
-# as named stock, not a rebus. Order matches the icon/cost `kind`: ammo, grenade, vest, airstrike.
+# INLINE between each icon and its price (see _draw_shop_strip), dimmed with the icon so the CLOSED
+# preview reads as named stock, not a rebus. Order matches the icon/cost `kind`: ammo, grenade, vest,
+# airstrike.
 const SHOP_NAMES := ["AMMO", "GREN", "VEST", "AIR"]
-const SHOP_ICON := 9.0        # c2-16: strip icon size (< ICON=13) so a name line fits BELOW it inside
-                              # the one reserved ROW_H -- a 13px icon + a label won't stack in 16px.
-const SHOP_NAME_SIZE := 7     # c2-16: name font -- smaller than the FONT_SIZE(10) price, per the spec.
-const SHOP_NAME_Y := 38.0     # c2-16: name baseline -- tucked between the shrunk icon (ends STRIP_TOP+
-                              # SHOP_ICON) and the first player row (player_rows_top=STRIP_TOP+ROW_H).
+const SHOP_ICON := 9.0        # c2-16: strip icon size (< ICON=13) so the name+price line clears it
+                              # vertically inside the one reserved ROW_H.
 
 
 # c1-15: paint the reserved strip band as ONE continuous cross-fade (no threshold swap): the buy icons
 # brighten from a dim structural floor to full as the window opens; each price + affordability color
 # fades in with them. Closed = dim icons + dim NAMES (a named preview, never mistaken for a live
 # purchase -- no price shows); open = full named, priced chips. Icon x is fixed for the whole fade, so
-# the two states share the same slots and can never overlap. c2-16: returns the icon+price strip's
-# right edge so _draw folds THAT (not the centered-below names) into the plate width.
+# the two states share the same slots and can never overlap. Returns the strip's right edge so _draw
+# folds it into the plate width.
 func _draw_shop_strip(sim: SimWorld) -> float:
 	var a := _shop_anim
 	var icon_a := SHOP_ICON_DIM + (1.0 - SHOP_ICON_DIM) * a
@@ -501,15 +499,18 @@ func _draw_shop_strip(sim: SimWorld) -> float:
 		var cost: int = sim._supply_cost(kind)
 		var afford: bool = sim.war_chest >= cost
 		# c2-16: the NAME is dimmed WITH the icon (icon_a floor, NOT the price window alpha), so the
-		# CLOSED strip is named stock -- not the icon-only rebus the spec calls out. Centered beneath its
-		# icon at a smaller font and drawn straight through Art.text_center (a distinct centered primitive,
-		# not the left-aligned _emit_hud_text price seam), so it neither widens the priced strip nor reads
-		# as a fading price. The row-0 SUPPLIES wheel cue is suppressed for the whole eligible run (see
+		# CLOSED strip is named stock -- not the icon-only rebus the spec calls out. It reads INLINE on
+		# the chip's single baseline, "[icon] NAME cost", the same icon+label+value idiom every other HUD
+		# chip uses. It used to be centered BELOW the icon at y=38 in a 7px face -- which put the first
+		# name at x=-2 (off the left edge) and printed it through its OWN price, because the reserved row
+		# is 16px and has no second text line. Both were invisible to every layout assertion until
+		# Art.text grew a capture seam; drawing through _text puts the name in the HUD capture with
+		# everything else. The row-0 SUPPLIES wheel cue is suppressed for the whole eligible run (see
 		# _draw), so the strip and the cue are never both shown.
-		Art.text_center(self, SHOP_NAMES[kind], sx + SHOP_ICON / 2.0, SHOP_NAME_Y,
-			SHOP_NAME_SIZE, Color(0.86, 0.88, 0.82, icon_a))
-		# Price immediately to the RIGHT of the icon (strip width unchanged from the old icon+price form),
-		# fading in with the window (a=0 when closed) while the icon slot stays put.
+		var nx: float = _text(SHOP_NAMES[kind], sx + SHOP_ICON + 3.0, ty,
+			Color(0.86, 0.88, 0.82, icon_a)) + 3.0
+		# Price immediately after the name, fading in with the window (a=0 when closed) while the icon
+		# and name slots stay put.
 		# "×" suffix: affordability readable without color vision -- same mark the spend wheel (the primary
 		# buy surface) draws beside its sockets.
 		# c2-07: the unaffordable price routes through the colorblind palette (Art.warn -> magenta shift)
@@ -517,7 +518,7 @@ func _draw_shop_strip(sim: SimWorld) -> float:
 		# (which would collide with the strip's tight non-overlap layout anyway).
 		var scol := (Art.safe(Color(0.55, 0.9, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.4)))
 		scol.a = a
-		sx = _text(str(cost) + ("" if afford else "×"), sx + SHOP_ICON + 3.0, ty, scol) + 10.0
+		sx = _text(str(cost) + ("" if afford else "×"), nx, ty, scol) + 10.0
 	return sx - 10.0
 
 
@@ -1655,10 +1656,16 @@ func _refresh_pip_cache() -> void:
 ## (see _pip_plate), so text and backing stay locked without threading the scrim emit through here.
 func _pip_glyphs() -> void:
 	var acc_y := PIP_TOP        # c2-18: shared with _draw_plate's header sizing so the plate covers the stack
+	# PIP_TOP/PIP_STEP address the row's TOP — that is what _pip_plate_rect builds the scrim from
+	# (top = py - 1, height PIP_H = the 9px ascent + 1px breathing). _text takes a BASELINE, so the row
+	# top has to be advanced by the ascent. Passing it through raw drew every pip a full line ABOVE its
+	# own contrast tray: the CB/RM labels floated on bare panel while their scrims backed empty pixels.
+	# The suite compared plate-vs-glyph on the X AXIS ONLY, so an 8px vertical miss was invisible to it.
+	var base := acc_y + Art.font().get_ascent(FONT_SIZE)
 	for pip in _pips:           # c4-16: once-per-paint cache; _pip_band is the same frame's usable band
 		var label: String = pip[0]
-		_text(label, _pip_x(_pip_band.y, _tw(label), _pip_band.x), acc_y, pip[1])
-		acc_y += PIP_STEP
+		_text(label, _pip_x(_pip_band.y, _tw(label), _pip_band.x), base, pip[1])
+		base += PIP_STEP
 
 
 ## c2-07 / c3-11: each pip's contrast backing is the opaque _pip_plate scrim (PIP_SCRIM, the SAME dark

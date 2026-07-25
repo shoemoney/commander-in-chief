@@ -915,6 +915,15 @@ func test_accessibility_pips_stay_on_canvas_at_narrow_widths() -> void:
 					mate = p["box"]
 			Runner.T.ok(gr.position.x >= band.x - 0.01 and gr.end.x <= band.y + 0.01, "%s: %s glyph within band" % [tag, g["id"]])
 			Runner.T.ok(mate.position.x <= gr.position.x + 0.01 and mate.end.x >= gr.end.x - 0.01, "%s: %s plate contains its glyph" % [tag, g["id"]])
+			# ...and VERTICALLY. This axis was never compared, which is how the scrim came to be drawn a
+			# full PIP row BELOW its own label: the tray backed bare panel while the glyph floated above
+			# it. The captured glyph box is the font LINE box (ascent + a 2px descent no capital uses),
+			# so the contract is that the plate covers the ASCENT band — top aligned, bottom at/after the
+			# baseline — not the unused descender.
+			Runner.T.ok(mate.position.y <= gr.position.y + 0.01,
+				"%s: %s plate top covers the glyph top (plate %s vs glyph %s)" % [tag, g["id"], str(mate), str(gr)])
+			Runner.T.ok(mate.end.y >= gr.end.y - Art.font().get_descent(HudIcons.FONT_SIZE) - 0.01,
+				"%s: %s plate bottom reaches the glyph baseline (plate %s vs glyph %s)" % [tag, g["id"], str(mate), str(gr)])
 			# The _pip_fits gate guarantees a SHOWN pip keeps its full PIP_PAD_L left overhang (the scrim
 			# padding never collapses to 0 at the minimum supported width).
 			Runner.T.ok(gr.position.x - mate.position.x >= HudIcons.PIP_PAD_L - 0.01, "%s: %s plate keeps its full left padding" % [tag, g["id"]])
@@ -1702,21 +1711,14 @@ func test_dead_row_kia_clips_into_ovf_when_starved() -> void:
 	h2.free()
 
 
-# Assert a captured set of rendered boxes all sit within the usable edge and — ignoring the
-# dark backing scrims (bg) and the arm-point marker (both intentionally overlay their own
-# gauge/label) — never overlap.
+# Assert a captured set of rendered boxes all sit within the usable edge and never overlap in
+# EITHER axis (see Runner.T.no_overlap — the x-only sort this used to do could not see a
+# vertical collision at all).
 func _assert_render_bounds_nonoverlap(boxes: Array, fit_full: float, tag: String) -> void:
-	var fg: Array = []
 	for b in boxes:
 		Runner.T.ok(b["box"].position.x >= -0.01, "%s '%s' on-screen (left edge)" % [tag, b["id"]])
 		Runner.T.ok(b["box"].end.x <= fit_full + 0.01, "%s '%s' within the usable edge" % [tag, b["id"]])
-		if b["k"] != "bg" and b["k"] != "marker":
-			fg.append(b)
-	fg.sort_custom(func(a, c): return a["box"].position.x < c["box"].position.x)
-	var prev := -1.0
-	for b in fg:
-		Runner.T.ok(b["box"].position.x >= prev - 0.5, "%s '%s' does not overlap the previous" % [tag, b["id"]])
-		prev = maxf(prev, b["box"].end.x)
+	Runner.T.no_overlap(boxes, tag)
 
 
 # c1-06 END-TO-END captured render of a NORMAL crowded ENDLESS row: the SHOP timer (top
@@ -2138,6 +2140,12 @@ class _ChipCaptureHud extends HudIcons:
 	# it so the real _draw_telegraph runs headless without a live draw context.
 	func _mini_bar(rect: Rect2, _frac: float, _fill: Color, _alpha := 1.0) -> void:
 		boxes.append({"k": "bar", "id": "mini", "box": rect, "frac": _frac, "alpha": _alpha})
+	# The low-ammo magazine bar draws straight onto the CanvasItem too. Captured HERE (not only on
+	# the full-frame subclass) so every on-foot row test records it instead of spraying "Drawing is
+	# only allowed inside _draw()" — an uncaptured primitive is one the overlap sweep cannot see.
+	func _mag_bar(x: float, y: float, _ammo: int, _maxa: int) -> float:
+		boxes.append({"k": "bg", "id": "mag", "box": Rect2(x, y, 8 * 3.6, 5.0)})
+		return x + 8 * 3.6 + 4.0   # mirrors HudIcons._mag_bar's advance
 
 
 # A HudIcons whose draw SEAMS record instead of paint — so calling the REAL
@@ -2655,7 +2663,7 @@ func test_full_draw_frame_at_narrowest_viewport() -> void:
 	h.main = main
 	h._verb_show = 0.0                          # skip the transient verb legend (its own tested path)
 	h._ready()                                  # create the z:-1 plate canvas item the frame sizes
-	h._draw()                                   # THE REAL FULL FRAME
+	_capture_draw(h)                            # THE REAL FULL FRAME
 	var edge: float = HudIcons.RIGHT - HudIcons._corner_reserve(true, 0.0)
 	# Split the captured boxes into row bands so the x-sorted non-overlap check never cross-flags two
 	# chips that share an x at a different y. The corner CB/RM pips stack VERTICALLY in the reserved
@@ -2706,6 +2714,94 @@ func test_full_draw_frame_at_narrowest_viewport() -> void:
 	Art.colorblind = was_cb                     # restore global so device state can't leak to other suites
 
 
+# Full-frame capture that ALSO records the verb-legend seams (_emit_rect / _emit_glyph / _emit_label),
+# so the transient ROLL/WHEEL chip and the persistent chip rows land in ONE box list and can finally be
+# collision-checked against EACH OTHER. Every other capture class covers one widget family.
+class _CrossWidgetCaptureHud extends _FrameCaptureHud:
+	func _emit_rect(r: Rect2, _c: Color) -> void:
+		boxes.append({"k": "rect", "id": "verb_plate", "box": r})
+	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
+		boxes.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
+	func _emit_label(txt: String, pos: Vector2, _c: Color) -> void:
+		var f := Art.font()
+		boxes.append({"k": "label", "id": txt,
+			"box": Rect2(pos - Vector2(0.0, f.get_ascent(8)), f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8))})
+
+
+# THE CROSS-WIDGET COLLISION CHECK the suite never had. Every prior capture test either split the
+# frame into row BANDS before asserting (so two widgets in different bands were never compared at all)
+# or skipped the verb legend outright (_verb_show = 0.0). This drives the REAL full frame with
+# everything live at once — a crowded row-0 head, the reserved shop strip, the player rows with their
+# buff/status pips, the corner CB/RM pip cluster AND the armed ROLL/WHEEL verb chip — with Art's text
+# seam capturing the direct Art.text callsites too, then runs the WHOLE capture through one
+# Rect2.intersects sweep. Newly-compared pairs: HUD chips vs the verb legend, the pip cluster vs the
+# row-0 head, and the shop strip vs the player rows.
+func test_full_frame_widgets_never_collide_across_bands() -> void:
+	var was_cb: bool = Art.colorblind
+	var was_pad: bool = Art.use_pad
+	for pad in [false, true]:                   # both glyph sets — a pad glyph is a different width
+		Art.colorblind = true                   # CB + RM corner pips live -> the tightest usable edge
+		Art.use_pad = pad
+		var sim := _FrameSim.new()
+		sim.intermission_ticks = 300            # shop strip OPEN (named, priced chips)
+		sim.wave = 3
+		sim.tokens = 500
+		sim.war_chest = 123456
+		sim.score = 40
+		sim.deaths_this_wave = 0
+		sim.flash_ticks = 120
+		var p: Dictionary = sim.players[0]
+		p["boost_ticks"] = 200                  # SPEED BOOST pip (+ WADING from _FrameSim)
+		p["vest"] = true
+		p["pierce_ticks"] = 300
+		p["spread_ticks"] = 300
+		p["rend_ticks"] = 300
+		p["smoke_ticks"] = 300
+		p["claymores"] = 2
+		var main := _FrameMain.new()
+		main.sim = sim
+		main._motion = 0.0
+		main.best_score = 999999
+		main.best_wave = 1
+		main._grenade_dry = [0]
+		var h := _CrossWidgetCaptureHud.new()
+		h.main = main
+		h._ready()
+		h._shop_sim_id = sim.get_instance_id()
+		h._shop_anim = 1.0
+		h._verb_show = 300.0                    # THE VERB CHIP IS ARMED — never captured with the rows before
+		_capture_draw(h)
+		h._verb_legend()                        # _draw gates the chip on _process state; drive it explicitly
+		var dev := "pad" if pad else "kb"
+		# The verb chip actually made it into this capture (otherwise the sweep below proves nothing).
+		var verb_boxes := 0
+		for b in h.boxes:
+			if b["k"] == "glyph" or b["k"] == "label" or String(b["id"]) == "verb_plate":
+				verb_boxes += 1
+		Runner.T.ok(verb_boxes >= 5, "%s: the armed verb chip is part of the full-frame capture (%d boxes)" % [dev, verb_boxes])
+		# Every box on screen, and NO pair of widgets sharing pixels — across bands, both axes.
+		for b in h.boxes:
+			Runner.T.ok(b["box"].position.x >= -0.01 and b["box"].end.x <= HudIcons.RIGHT + 0.01,
+				"%s: '%s' %s within the design width" % [dev, b["id"], str(b["box"])])
+			Runner.T.ok(b["box"].position.y >= -0.01 and b["box"].end.y <= 360.0 + 0.01,
+				"%s: '%s' %s within the viewport height" % [dev, b["id"], str(b["box"])])
+		Runner.T.no_overlap(h.boxes, "cross-widget %s" % dev)
+		h.free()
+		main.free()
+	Art.colorblind = was_cb
+	Art.use_pad = was_pad
+
+
+# Run the REAL _draw() with Art's text seam pointed at the capture's own box list, so the direct
+# Art.text / Art.text_center callsites — the shop item NAMES, the caption strip, the phase banner —
+# land in `boxes` alongside the _emit_* seams instead of being structurally invisible (and instead of
+# spraying "Drawing is only allowed inside _draw()" at a headless run).
+func _capture_draw(h) -> void:
+	Art.text_capture = h.boxes
+	h._draw()
+	Art.text_capture = null
+
+
 # c1-10: SimWorld stub for the full-frame test — endless mode, and _in_water always true so the
 # WADING status pip fires without staging real terrain.
 class _FrameSim extends SimWorld:
@@ -2734,9 +2830,6 @@ class _FrameMain extends Node2D:
 class _FrameCaptureHud extends _ChipCaptureHud:
 	func _emit_act_glyph(act: String, center: Vector2, size: float, _col: Color, _alt: bool) -> void:
 		boxes.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
-	func _mag_bar(x: float, y: float, _ammo: int, _maxa: int) -> float:
-		boxes.append({"k": "bg", "id": "mag", "box": Rect2(x, y, 8 * 3.6, 5.0)})
-		return x + 8 * 3.6 + 4.0   # mirrors HudIcons._mag_bar's advance
 	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate", "box": r})
@@ -2927,10 +3020,11 @@ func test_c1_15_strip_renders_at_reserved_y_with_faded_content() -> void:
 	h._shop_sim_id = sim.get_instance_id()
 	var anim := 0.75
 	h._shop_anim = anim
-	h._draw()
+	_capture_draw(h)
 	var icon_a := HudIcons.SHOP_ICON_DIM + (1.0 - HudIcons.SHOP_ICON_DIM) * anim
 	var strip_icons := 0
-	var strip_texts := 0
+	var strip_prices := 0
+	var strip_names := 0
 	for b in h.boxes:
 		if b["k"] != "icon" and b["k"] != "text":
 			continue
@@ -2940,12 +3034,18 @@ func test_c1_15_strip_renders_at_reserved_y_with_faded_content() -> void:
 				strip_icons += 1
 				Runner.T.ok(absf(float(b["alpha"]) - icon_a) < 0.01,
 					"strip icon '%s' brightens from the dim floor with the fade" % b["id"])
+			elif String(b["id"]) in HudIcons.SHOP_NAMES:
+				# The item NAME rides the ICON's alpha (structural stock preview), not the price window.
+				strip_names += 1
+				Runner.T.ok(absf(float(b["alpha"]) - icon_a) < 0.01,
+					"strip name '%s' brightens with its icon, not the price window" % b["id"])
 			else:
-				strip_texts += 1
+				strip_prices += 1
 				Runner.T.ok(absf(float(b["alpha"]) - anim) < 0.01,
 					"strip price '%s' fades in on its own alpha" % b["id"])
 	Runner.T.eq(strip_icons, 4, "all four buy icons render at the reserved STRIP_TOP row")
-	Runner.T.ok(strip_texts >= 4, "each buy chip's cost label renders and fades alongside its icon")
+	Runner.T.eq(strip_names, 4, "every buy chip renders its spelled-out item name (never an icon-only rebus)")
+	Runner.T.ok(strip_prices >= 4, "each buy chip's cost label renders and fades alongside its icon")
 	# The player rows render exactly one ROW_H below the reserved strip (the strip pushed them down).
 	Runner.T.eq(h.player_rows_top(sim), HudIcons.STRIP_TOP + HudIcons.ROW_H,
 		"1P player rows sit one ROW_H below the reserved strip")
@@ -3019,7 +3119,7 @@ func test_c1_15_strip_crossfade_is_smooth_and_never_overlaps() -> void:
 		h._ready()
 		h._shop_sim_id = sim.get_instance_id()      # hold our fade value past the first-draw snap
 		h._shop_anim = anim
-		h._draw()
+		_capture_draw(h)
 		var tag := "anim=%.2f" % anim
 		var icon_a := -1.0
 		var price_a := 0.0
@@ -3031,8 +3131,8 @@ func test_c1_15_strip_crossfade_is_smooth_and_never_overlaps() -> void:
 			band.append(b)
 			if b["k"] == "icon":
 				icon_a = float(b["alpha"])          # all 4 icons share one alpha
-			elif b["k"] == "text":
-				price_a = maxf(price_a, float(b["alpha"]))
+			elif b["k"] == "text" and not (String(b["id"]) in HudIcons.SHOP_NAMES):
+				price_a = maxf(price_a, float(b["alpha"]))   # names ride icon_a, only PRICES gate on the window
 		# Icons are always present (never an empty band) and brighten monotonically from the dim floor.
 		Runner.T.ok(icon_a >= HudIcons.SHOP_ICON_DIM - 0.01, "%s: buy icons never fall below the dim floor" % tag)
 		Runner.T.ok(icon_a >= prev_icon_a - 0.01, "%s: icon alpha rises monotonically with the fade" % tag)
@@ -3042,13 +3142,9 @@ func test_c1_15_strip_crossfade_is_smooth_and_never_overlaps() -> void:
 		Runner.T.ok(price_a >= prev_price_a - 0.01, "%s: price alpha rises monotonically with the fade" % tag)
 		prev_icon_a = icon_a
 		prev_price_a = price_a
-		# Strip chips never overlap in x (sorted left-to-right, each starts at/after the previous end).
-		band.sort_custom(func(a, b): return a["box"].position.x < b["box"].position.x)
-		for i in range(1, band.size()):
-			var prev_box: Rect2 = band[i - 1]["box"]
-			var cur: Rect2 = band[i]["box"]
-			Runner.T.ok(cur.position.x >= prev_box.end.x - 0.01,
-				"%s: strip box '%s' does not overlap the previous" % [tag, band[i]["id"]])
+		# Strip chips never collide — in EITHER axis, at any fade value. (This used to be an x-sort
+		# comparison, which could not see the item name printing through its own price one line down.)
+		Runner.T.no_overlap(band, "%s strip" % tag)
 		h.free()
 		main.free()
 	Art.colorblind = was_cb

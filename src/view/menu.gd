@@ -5485,17 +5485,25 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 # a safety net so an edited/localized string can never overrun the canvas. Returns the y the
 # SELECT/BACK legend sits at, one line below.
 func _draw_footer_help(row_help: String, strip_top: float) -> float:
-	# Description baseline strip_top+10 (glyphs y340..348 at 8px) — nudged 2px down from the strip top
-	# so its ascenders clear the last-row glow by ~6.5px instead of crowding it. The returned legend
-	# baseline strip_top+17 seats the legend's label (drawn at +3 inside _legend_row) at glyphs
-	# y350..358 — flush with the strip bottom, no descender spill. The 1px rule sits at strip_top+12
-	# (y349), cleanly in the gap between the two lines.
+	# The three lines are packed BOTTOM-UP inside the 21px strip (strip_top y337 .. y358), because
+	# FOOTER_HELP_RISE cannot grow — the strip top already clears the fullest OPTS list's last-row glow
+	# (y333.5) by only 3.5px. Working up from the floor:
+	#   legend baseline strip_top+15 (y352): the legend's _LEG_H=11 KEYCAP is drawn CENTERED on this
+	#     baseline, so it spans y346.5..357.5 — inside the strip. Its label (drawn at +3 inside
+	#     _legend_row) sits at y348..356.
+	#   the 1px rule at strip_top+8 (y345), in the clear gap above the keycaps.
+	#   description baseline strip_top+7 (y344): 8px glyphs spanning y337..345, flush to the strip top.
+	# These offsets used to be +10 / +12 / +17, which were reasoned about from the legend LABEL box
+	# (y350..358) and forgot the keycap sprite is 5.5px TALLER on top: the hairline rule was drawn
+	# straight through the top pixel row of every keycap and the caps hung 1.5px off the strip's
+	# bottom edge. Both are pure vertical misses, so the layout suite's x-sorted overlap check could
+	# not see either — pinned now by test_two_line_footer_help_never_collides_with_the_legend.
 	# c3-17: the ONLY other _ellipsize caller — footer help text, which carries no destructive
 	# cue (no keep_tail/warn needed). Every destructive-row label routes through _row_fit above,
 	# so the cue-preserving path covers all destructive truncation.
-	_center_text(_ellipsize(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 10.0, 8, FOOTER_HELP_COL)
-	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + 12.0, BTN.x, 1.0), DIVIDER_DIM)
-	return strip_top + 17.0
+	_center_text(_ellipsize(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 7.0, 8, FOOTER_HELP_COL)
+	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + 8.0, BTN.x, 1.0), DIVIDER_DIM)
+	return strip_top + 15.0
 
 
 # c3-09: dedupes the missing-copy dev warning so it fires once per id, not every frame.

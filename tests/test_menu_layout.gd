@@ -861,8 +861,17 @@ func _act_glyph_resolves(act: String) -> bool:
 class _CaptureMenu extends GameMenu:
 	var ops: Array = []
 	var centered: Array = []   # c1-09: {txt, y} from _center_text (header lines)
-	func _center_text(txt: String, y: float, _size: int, _col: Color) -> void:
+	# _center_text goes straight to Art.text_center, bypassing every _emit_* seam — so the header
+	# lines and the two-line footer's row description used to be recorded WITHOUT GEOMETRY, the one
+	# menu ink no layout assertion could compare against anything. Run the REAL primitive with Art's
+	# capture seam armed: it records the production box and returns instead of painting, so the
+	# recorded rect can never drift from what ships.
+	func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 		centered.append({"txt": txt, "y": y})
+		var prev = Art.text_capture
+		Art.text_capture = ops
+		super._center_text(txt, y, size, col)
+		Art.text_capture = prev
 	func _emit_rect(r: Rect2, _c: Color) -> void:
 		ops.append({"k": "rect", "id": "", "box": r})
 	func _emit_tex(key: String, r: Rect2, _c: Color) -> void:
@@ -938,6 +947,62 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 			Runner.T.ok(absf((span_left + span_right) / 2.0 - 320.0) < 2.0,
 				"%s mode %d footer centered on 320 (captured span [%d,%d])" % [dev, mode_id, int(span_left), int(span_right)])
 			cap.free()
+	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
+
+
+# CROSS-WIDGET check on the TWO-LINE footer — the pair the suite never compared. The row-description
+# banner is drawn through _center_text -> Art.text_center, which bypasses every _emit_* seam, so it was
+# captured as {txt, y} with NO GEOMETRY: the one widget in the strip whose box could not be checked
+# against the SELECT/BACK legend six pixels below it, or against the hairline rule between them. With
+# the capture now recording the real box (see _CaptureMenu._center_text), drive the REAL two-line
+# footer on every screen that grows one, in both device modes, and assert the whole strip is
+# collision-free in 2D — not just left-to-right.
+func test_two_line_footer_help_never_collides_with_the_legend() -> void:
+	var was_pad: bool = Art.use_pad
+	var stub := _StubMain.new()
+	# Each entry: the mode and a focused row id that HOLDS a value, so setting_help is non-empty and
+	# _footer_legend takes its two-line branch.
+	var cases := [[Menu.Mode.OPTS, "motion"], [Menu.Mode.AUDIO, "sfx"], [Menu.Mode.DISP, "winscale"],
+		[Menu.Mode.DISP, "fullscreen"], [Menu.Mode.SETUP, "coop"]]
+	for pad in [false, true]:
+		Art.use_pad = pad
+		var dev := "pad" if pad else "kb"
+		for case in cases:
+			var cap := _CaptureMenu.new()
+			cap.main = stub
+			cap.mode = case[0]
+			cap.sel = _row_index(cap, case[1])
+			cap._footer_legend()
+			var tag := "%s %s/%s two-line footer" % [dev, case[0], case[1]]
+			# The help line really is in this capture — otherwise the sweep below proves nothing.
+			var help := Rect2()
+			for op in cap.ops:
+				if op["k"] == "text":
+					help = op["box"]
+			Runner.T.ok(help.size.x > 0.0, "%s: the row-description banner is captured with real geometry" % tag)
+			# The strip grew for it: the help line sits ABOVE the SELECT/BACK legend, both inside the
+			# raised strip, nothing off the canvas floor.
+			var strip_top: float = Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
+			var strip_bottom: float = strip_top + Menu.FOOTER_H + Menu.FOOTER_HELP_RISE
+			Runner.T.ok(strip_bottom <= 360.0, "%s: the raised strip stays inside the viewport" % tag)
+			for op in cap.ops:
+				var box: Rect2 = op["box"]
+				if box.size.x <= 0.0 and box.size.y <= 0.0:
+					continue
+				Runner.T.ok(box.position.x >= 0.0 and box.end.x <= Menu.CANVAS_WIDTH,
+					"%s: %s '%s' %s within the canvas width" % [tag, op["k"], op["id"], str(box)])
+				# On the PLATE, not merely on the canvas — an 11px keycap centered on the legend
+				# baseline used to hang 1.5px past the strip's bottom edge onto bare terrain.
+				Runner.T.ok(box.position.y >= strip_top - 0.01 and box.end.y <= strip_bottom + 0.01,
+					"%s: %s '%s' %s stays on the footer plate [%d,%d]"
+					% [tag, op["k"], op["id"], str(box), int(strip_top), int(strip_bottom)])
+			for op in cap.ops:
+				if op["k"] == "label":
+					Runner.T.ok(op["box"].position.y >= help.end.y - 0.01,
+						"%s: the '%s' legend prompt reads BELOW the description, never through it" % [tag, op["id"]])
+			Runner.T.no_overlap(cap.ops, tag)
+			cap.free()
+	stub.free()
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 

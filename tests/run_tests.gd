@@ -54,6 +54,56 @@ class T:
 	static func eq(a, b, msg: String) -> void:
 		ok(a == b, "%s (got %s, want %s)" % [msg, str(a), str(b)])
 
+	# --- shared 2D layout assertion -------------------------------------------------------------
+	# Kinds that are BACKINGS by design — a dark scrim, a plate, a legend strip, a gauge track, the
+	# arm-point marker riding its own bar. They earn an overlap pass ONLY where the backing encloses
+	# what it sits under; a scrim that merely clips a neighbouring widget is still a layout bug.
+	const BACKING_KINDS := ["bg", "marker", "bar", "rect", "tex", "plate"]
+
+	# A scrim is sized to the glyph INK, but a captured text box carries the font's full LINE box —
+	# ascent plus a descent that every all-caps HUD/menu label leaves empty. Allow a backing that
+	# misses by less than that when judging enclosure, or every correctly-backed label reads as a
+	# collision. Small enough that two genuinely distinct widgets can't hide behind it.
+	const BACKING_SLACK := 3.0
+
+	# True when this pair is allowed to share pixels: one is a backing that ENCLOSES the other, or
+	# it is the same string re-emitted at the same spot (a label's outline/shadow pass).
+	static func overlap_is_intentional(a: Dictionary, b: Dictionary) -> bool:
+		if String(a["k"]) == String(b["k"]) and String(a["id"]) == String(b["id"]) \
+				and a["box"].position.distance_to(b["box"].position) < 2.0:
+			return true
+		if String(a["k"]) in BACKING_KINDS and a["box"].grow(BACKING_SLACK).encloses(b["box"]):
+			return true
+		if String(b["k"]) in BACKING_KINDS and b["box"].grow(BACKING_SLACK).encloses(a["box"]):
+			return true
+		return false
+
+	## THE 2D collision assertion. Sorting captured draw ops by x and comparing x-extents — what the
+	## HUD/menu layout tests used to do — is blind to anything stacked VERTICALLY, which is how the
+	## same UI overlaps kept surviving review after review. This runs Rect2.intersects over every
+	## pair, both axes, whitelisting only enclosing backings. Boxes are shrunk 0.5px so pixel-kissing
+	## neighbours (one chip ending exactly where the next begins) are not flagged.
+	## `boxes` is the capture shape the view harnesses record: {k, id, box}.
+	static func no_overlap(boxes: Array, tag: String) -> void:
+		for i in boxes.size():
+			var a: Rect2 = boxes[i]["box"]
+			if a.size.x <= 0.0 or a.size.y <= 0.0:
+				continue
+			var hits := PackedStringArray()
+			for j in boxes.size():
+				if i == j:
+					continue
+				var c: Rect2 = boxes[j]["box"]
+				if c.size.x <= 0.0 or c.size.y <= 0.0:
+					continue
+				if not a.grow(-0.5).intersects(c.grow(-0.5)):
+					continue
+				if overlap_is_intentional(boxes[i], boxes[j]):
+					continue
+				hits.append("%s '%s' %s" % [boxes[j]["k"], boxes[j]["id"], str(c)])
+			ok(hits.is_empty(), "%s: %s '%s' %s overlaps nothing (hit: %s)"
+				% [tag, boxes[i]["k"], boxes[i]["id"], str(a), ", ".join(hits)])
+
 
 func _init() -> void:
 	var suite_filter := OS.get_environment("SUITE")

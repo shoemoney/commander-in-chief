@@ -1874,3 +1874,60 @@ func test_art_ring_is_pixel_perfect_not_a_polygon() -> void:
 	for o in foffsets:
 		fhave[Vector2i(int(o.x), int(o.y))] = true
 	Runner.T.ok(fhave.has(Vector2i.ZERO), "r=1 filled disc has its centre pixel")
+
+
+# --- layout-capture ratchet: no new text may bypass Art's capture seam --------------------
+#
+# Art.text / Art.text_center is the ONE choke point every string in the view passes through, and it
+# is now a test seam: with Art.text_capture armed it records the box it would paint instead of
+# painting, which is what finally made ~91 direct callsites (shop item names, menu headers, the
+# footer's row description, main.gd's floaters) visible to the layout assertions. A raw
+# CanvasItem.draw_string / draw_char routes around that seam entirely, so its ink is once again
+# structurally invisible — no layout test can see it, no overlap check can flag it.
+#
+# This is the ratchet. The callsites below predate the seam and are allowlisted BY LINE CONTENT, not
+# by count, so the list can only shrink by fixing one — it cannot silently absorb a new one.
+# Everything else must go through Art.text / Art.text_center.
+const _RAW_TEXT_DRAW_ALLOWLIST := {
+	"res://src/main.gd": [
+		"_splash_root.draw_string",   # boot splash: paints onto a bare RID canvas, no CanvasItem yet
+		# Worldspace ink — the revive prompt and the damage/pickup floaters follow entities around the
+		# playfield, so they have no fixed box for a HUD layout assertion to compare against.
+		"Art.font(), pos + Vector2(-18, -16)",
+		"ffont, frel",
+	],
+	"res://src/view/menu.gd": [
+		"draw_string(Art.font(), Vector2(r.position.x + 6.0",    # HALL board row cells
+		"draw_string(Art.font(), Vector2(pr.position.x + 4.0",   # HALL board page cells
+		"draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)",   # _emit_stamp: already a capture seam
+	],
+}
+
+
+func test_no_new_text_draw_bypasses_the_art_capture_seam() -> void:
+	# The seam itself must exist and be inert by default — a leaked capture array would silently
+	# blank every string in a real build.
+	Runner.T.eq(Art.text_capture, null, "Art.text_capture is null outside a capturing test")
+	var art := FileAccess.get_file_as_string("res://src/view/art.gd")
+	Runner.T.ok(art.contains("if text_capture != null:"),
+		"Art.text still routes through the capture seam before it paints")
+	var offenders: Array[String] = []
+	for path in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd"]:
+		var text := FileAccess.get_file_as_string(path)
+		Runner.T.ok(not text.is_empty(), "%s is readable" % path)
+		var allow: Array = _RAW_TEXT_DRAW_ALLOWLIST.get(path, [])
+		var lines := text.split("\n")
+		for i in lines.size():
+			var line: String = lines[i].strip_edges()
+			if line.begins_with("#"):
+				continue
+			if not ("draw_string(" in line or "draw_char(" in line or "draw_multiline_string(" in line):
+				continue
+			var excused := false
+			for frag in allow:
+				if line.contains(frag):
+					excused = true
+			if not excused:
+				offenders.append("%s:%d  %s" % [path, i + 1, line])
+	Runner.T.eq(offenders, [] as Array[String],
+		"every new view string draws through Art.text/text_center (the captured seam), not raw draw_string")
