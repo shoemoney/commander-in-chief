@@ -263,3 +263,69 @@ func test_arcade_mode_streams_like_campaign() -> void:
 	Runner.T.ok(sim.gates.size() > 0, "arcade streams real gates, unlike boss_rush's guard")
 	Runner.T.ok(not sim.mines.is_empty() or not sim.barrels.is_empty(),
 		"arcade streams field hazards like campaign")
+
+
+# --- The debrief copy must NAME the terrain the ground actually renders. The victory
+# card shipped "%dm OF JUNGLE PUSHED" over sand, cacti and tumbleweed for the whole
+# desert retheme: the words were hardcoded, the art moved, nothing failed. -------------
+
+## Words no band of either ground palette may ever be called: every stop of both
+## ramps is a warm sand/rust modulate, so a wet/green biome name is always a lie.
+const WET_GREEN_WORDS := ["JUNGLE", "FOREST", "SWAMP", "GRASSLAND", "CANOPY",
+	"TUNDRA", "SNOWFIELD", "ARCTIC", "MEADOW"]
+
+
+func test_terrain_word_matches_the_ground_band_it_names() -> void:
+	var MainS := load("res://src/main.gd")
+	var m = MainS.new()
+	for mode in ["campaign", "endless"]:
+		var stops: Array = MainS._ground_stops(mode)[0]
+		Runner.T.eq(MainS.TERRAIN_WORDS.size(), stops.size(),
+			"%s: one terrain word per ground band" % mode)
+		for band in stops.size():
+			var c: Color = stops[band]
+			var march := float(band) / 5.0
+			var word: String = MainS.TERRAIN_WORDS[band]
+			# Red-dominant with green suppressed == sand/ochre/rust. Both palettes are
+			# built that way on purpose (see _ground_stops); if a retheme ever breaks it,
+			# the words below stop being true and this fails first.
+			Runner.T.ok(c.r > c.g and c.g >= c.b,
+				"%s band %d ground stop %s is a warm desert color" % [mode, band, c])
+			for w in WET_GREEN_WORDS:
+				Runner.T.ok(not word.contains(w),
+					"%s band %d renders warm sand but its word says %s (%s)" % [mode, band, w, word])
+			# The word and the color are picked with the SAME band index — that is the
+			# coupling that keeps the copy from desyncing from the art again.
+			Runner.T.eq(MainS._terrain_word(march), word,
+				"%s band %d word tracks the band index" % [mode, band])
+			Runner.T.eq(m._biome_ramp(march, stops), c,
+				"%s band %d color tracks the same band index" % [mode, band])
+	Runner.T.eq(MainS._terrain_word(1.0), MainS.TERRAIN_WORDS[4],
+		"a finished run holds the final band's word (same clamp as _biome_ramp)")
+	m.free()
+
+
+func test_no_view_string_names_a_biome_the_game_never_renders() -> void:
+	## Source scan over every file that draws user-facing copy: an ALL-CAPS biome word
+	## inside a string literal is player-visible text, and the game has exactly one
+	## theater (Iran desert). This is the check that would have caught the victory card.
+	for path in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd"]:
+		var src := FileAccess.get_file_as_string(path)
+		Runner.T.ok(not src.is_empty(), "read %s" % path)
+		var offenders := PackedStringArray()
+		var line_no := 0
+		for line in src.split("\n"):
+			line_no += 1
+			if line.strip_edges().begins_with("#"):
+				continue   # prose comments talk about the old jungle theme freely
+			var parts := line.split("\"")
+			if parts.size() % 2 == 0:
+				continue   # unbalanced quotes (a comment quoting a word) — not scannable
+			var i := 1
+			while i < parts.size():
+				for w in WET_GREEN_WORDS:
+					if (parts[i] as String).contains(w):
+						offenders.append("%s:%d %s" % [path, line_no, w])
+				i += 2   # odd indices are the quoted spans
+		Runner.T.eq(", ".join(offenders), "",
+			"%s: user-facing copy names a biome the game never renders" % path)

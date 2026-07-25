@@ -5911,6 +5911,19 @@ func _biome_ramp(march: float, stops: Array) -> Color:
 	return stops[clampi(int(march * 5.0 + 0.0001), 0, stops.size() - 1)]
 
 
+## The terrain the debrief copy is allowed to NAME — one word per _ground_stops band,
+## in the same order and picked with the same band index _biome_ramp uses for the color.
+## The victory card used to hardcode "JUNGLE" and kept saying it after the theater was
+## rethemed to Iran desert (sand ground, cacti, tumbleweed), so the card named a biome
+## the screen has never rendered. Retheming the ramp now means retuning THIS table in the
+## same file — and test_biomes pins every word against its band's actual hue.
+const TERRAIN_WORDS := ["DESERT", "DESERT", "BADLANDS", "SCORCHED DESERT", "SCORCHED DESERT"]
+
+
+static func _terrain_word(march: float) -> String:
+	return TERRAIN_WORDS[clampi(int(march * 5.0 + 0.0001), 0, TERRAIN_WORDS.size() - 1)]
+
+
 ## Memo for _sector_march(): _draw called it 12+ times a frame — one of them INSIDE the
 ## 48-cell litter loop — and every call re-walked sim.gates.
 ##
@@ -10163,7 +10176,11 @@ func _draw_banners(top_msg: String) -> void:
 			vrows.append({"text": "%d GUNSHIPS DOWNED — RUSH CLEARED" % SimWorld.BOSS_RUSH_COUNT,
 				"color": Color(0.8, 0.84, 0.74)})
 		else:
-			vrows.append({"text": "%dm OF JUNGLE PUSHED" % [-Fixed.to_int(sim.camera_top) / 10],
+			# The terrain word comes from the SAME band that picks the ground color
+			# (_terrain_word / _biome_ramp), so the card can never name a biome the
+			# screen is not rendering — it hardcoded "JUNGLE" through the desert retheme.
+			vrows.append({"text": "%dm OF %s PUSHED" % [-Fixed.to_int(sim.camera_top) / 10,
+					_terrain_word(_sector_march())],
 				"color": Color(0.8, 0.84, 0.74)})
 		if _run_rescues > 0:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
