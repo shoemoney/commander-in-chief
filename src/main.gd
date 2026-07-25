@@ -1958,7 +1958,7 @@ func _consume_events() -> void:
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_label("interact") if Art.use_pad else "F"))
-					9: _hint("smoke", "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING")
+					9: _hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
@@ -2584,6 +2584,12 @@ func _consume_events() -> void:
 				# A fast attack-heli escort streaks the top band ahead of the boss.
 				_fx.append({"x": 0, "y": 0, "t": 0.0, "kind": "chopper", "rate": 0.02,
 					"tex": "m_heli_attack2", "scl": 0.5, "sy": 52.0})
+			"blind_shell":
+				# The one moment that TEACHES the concealment rule: you are hidden,
+				# their guns went quiet — and a mortar ring is still being painted on
+				# your ground. Fires the first time it ever happens (persisted), which
+				# is the only honest place to say it: while it is happening.
+				_hint("blind_shell", "THEY'RE SHELLING BLIND — SMOKE STOPS BULLETS, NOT MORTARS. MOVE OFF THE RING", true)
 			"core_open":
 				_vo("vo_core", 2, 300)
 				show_banner("CORE EXPOSED — OPEN FIRE", GameMenu.BANNER_COL_DEFAULT, "hud_target")

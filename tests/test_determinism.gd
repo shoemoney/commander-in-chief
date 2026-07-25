@@ -311,6 +311,15 @@ const SEED := 0xDEADBEEF
 ## tests: test_mechanics::test_shooting_the_pilot_does_not_feed_the_kill_streak and
 ## test_archetypes::test_all_ghillie_wave_force_reveals_even_with_a_pilot_walking, each
 ## confirmed red against the pre-guard sim.
+## BOTH GOLDENS VERIFIED UNCHANGED (2026-07-25, concealment beats aim not area):
+## area fire (grenadier lobs, drone paints, observer barrage, gunship mortars,
+## every colossus strike) no longer checks _concealed and instead takes the
+## _blind_scatter offset, which draws from `rng` -- so it WOULD move the stream,
+## but only on a tick where a player is actually concealed. MEASURED, not assumed:
+## replaying both torture inputs and counting concealed player-ticks gives 0 in
+## campaign and 0 in endless (torture segs 0-1 stream no grass and no trench, no
+## smoke capsule is ever collected, and endless wipes at wave 2). Zero rng draws
+## added, zero aim points displaced -> both sample sets byte-identical.
 const GOLDEN: Array[int] = [
 	506778608736561550,
 	7590183919185690526,
