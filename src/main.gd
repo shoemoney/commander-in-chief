@@ -460,6 +460,11 @@ const SPLASH_STUDIO_END := 3.0     # animated Big IT medallion + "presents"
 const SPLASH_CRAWL_END := 10.5     # scrolling narration crawl (Commander VO rides under it, 7.36s)
 const SPLASH_TITLE_END := 13.0     # shield stamp + COMMANDER IN CHIEF wordmark
 const SPLASH_FADE_OUT := 15.5      # whole overlay dissolves to the title over the last 0.5s
+const SPLASH_SKIP_ARM := 1.0       # the studio medallion's guaranteed first second — skip is DEAD
+                                   # until here (see splash_skip_armed), and the on-screen prompt
+                                   # is gated on the SAME constant so it can never advertise a
+                                   # skip the input handler would refuse.
+const SPLASH_SKIP_Y := 344.0       # baseline of the skip affordance, low-center inside the 360px canvas
 var _splash_t := 0.0               # seconds remaining; > 0 while the splash is on screen
 var _splash_layer: CanvasLayer
 var _splash_root: Node2D
@@ -582,10 +587,27 @@ func _end_splash() -> void:
 		_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
 
 
+## c-onboard: is the boot splash's skip live at `el` seconds elapsed? THE gate — both the
+## input handler and the on-screen prompt read it, so the affordance can never appear while
+## a press would still be swallowed (a prompt that lies for a second is worse than none).
+static func splash_skip_armed(el: float) -> bool:
+	return el >= SPLASH_SKIP_ARM
+
+
+## c-onboard: alpha of the "PRESS ANY BUTTON TO SKIP" affordance at `el` seconds elapsed —
+## 0 while the skip is disarmed, then a 0.4s fade-in. The overlay's own dissolve (`veil`) is
+## applied by the caller, so the prompt leaves with the rest of the splash. Pure: a headless
+## test pins that the prompt is absent for exactly as long as the skip is.
+static func splash_skip_alpha(el: float) -> float:
+	if not splash_skip_armed(el):
+		return 0.0
+	return clampf((el - SPLASH_SKIP_ARM) / 0.4, 0.0, 1.0)
+
+
 func _splash_is_skip(event: InputEvent) -> bool:
 	# c-title-sting: the studio medallion always gets its first second on screen —
 	# a stray keypress at frame 0 no longer flashes straight past the parade.
-	if SPLASH_DUR - _splash_t < 1.0:
+	if not splash_skip_armed(SPLASH_DUR - _splash_t):
 		return false
 	if event is InputEventKey and event.pressed and not event.echo:
 		return true
@@ -635,6 +657,12 @@ func _draw_splash() -> void:
 		_draw_splash_title(el - SPLASH_CRAWL_END, veil)
 	else:
 		_draw_splash_hero(el - SPLASH_TITLE_END, veil)
+	# c-onboard: a 16s intro that never SAYS it can be skipped reads as a 16s intro you must
+	# sit through. Drawn last so it rides over every beat, and only once the skip is armed.
+	var skip_a := splash_skip_alpha(el) * veil
+	if skip_a > 0.001:
+		_splash_center(TranslationServer.translate("PRESS ANY BUTTON TO SKIP"), SPLASH_SKIP_Y, 8,
+			Color(0.78, 0.81, 0.72, skip_a))
 
 
 func _draw_splash_studio(el: float, veil: float) -> void:
@@ -5230,6 +5258,19 @@ func _gather_inputs() -> Array[SimInput]:
 		else:
 			_wheel_aim[1] = p2_aim
 		inputs.append(p2)
+	# c-onboard: retire a verb-chip segment the moment its input actually FIRES. This is the ONE
+	# place every player's verb input is resolved (keyboard, pad, and Steam Input all land here),
+	# so a single hook covers every device and both players. ROLL is force-cleared while the wheel
+	# is open (it's the cancel there), hence the wheel check reads _wheel["open"] directly — the
+	# player holding the buy button HAS used the wheel even before a purchase resolves.
+	for gi in inputs:
+		if gi.roll:
+			_hud_icons.verb_used("roll")
+		if gi.grenade:
+			_hud_icons.verb_used("grenade")
+	for wi in _wheel.size():
+		if _wheel[wi]["open"]:
+			_hud_icons.verb_used("wheel")
 	return inputs
 
 
