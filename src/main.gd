@@ -7840,12 +7840,15 @@ func _draw_enemies() -> void:
 				var wfrac := 1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)
 				Art.circle(self, epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
 					Color(1.0, 0.85 - wfrac * 0.55, 0.2, 0.4 + wfrac * 0.6))
-				# Aim-stub: a short dashed lane toward the target, borrowing the sniper
+				# Aim-stub: a short lane down the locked shot vector, borrowing the sniper
 				# beam grammar so the elite's "I'm drawing a bead on YOU" reads instead
-				# of a lone chest ember. Kept a stub — the sim only aims at fire-time.
-				var edir := Vector2.from_angle(face)
-				Art.dashed_line(self, epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
-					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac, 3.0)
+				# of a lone chest ember. It rides the LOCKED aim_lx/aim_ly and is SOLID,
+				# not dashed: the sim commits the vector at windup start now, and dashed
+				# is this game's "still aiming" (the technical's rev line vs its corridor).
+				var eaim := Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
+				var edir := eaim.normalized() if eaim.length() > 0.001 else Vector2.from_angle(face)
+				Art.line(self, epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
+					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			_spr("enemy_assault", epos, face, 0.62 * esw)   # sol-08: elite = the authored red assault trooper, drawn larger than fodder (TINT carries the vermilion; the red aura + size keep it distinct)
 		else:

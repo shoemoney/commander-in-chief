@@ -320,13 +320,32 @@ const SEED := 0xDEADBEEF
 ## campaign and 0 in endless (torture segs 0-1 stream no grass and no trench, no
 ## smoke capsule is ever collected, and endless wipes at wave 2). Zero rng draws
 ## added, zero aim points displaced -> both sample sets byte-identical.
+## RE-RECORDED (2026-07-25, honest telegraph grammar — elite lock + technical gate):
+##   1. the ELITE now locks aim_lx/aim_ly at WINDUP START and fires down that vector,
+##      instead of re-aiming at the live target on the fire tick. The sniper already
+##      worked this way, so the game taught "a drawn line is a committed shot" and then
+##      broke the promise on its most common ranged unit. aim_lx/aim_ly are already
+##      hashed for every enemy, so an elite that previously fed 0/0 now feeds a real
+##      vector -- and the fired bullet velocity changes wherever the player moved
+##      during the 24t windup.
+##   2. TECHNICAL_REV_TICKS 18 -> 24 (the reaction floor REAR_WARN_TICKS/VENT_WARN_TICKS
+##      already pin and comment), and the rev is now gated on dlen <= the charge's own
+##      reach (TECHNICAL_CHARGE_TICKS * TECHNICAL_SPEED = 150px). 300ms in front of a
+##      one-hit-kill charge is below human reaction time, and an ungated rev telegraphed
+##      a 150px charge at targets 400px away.
+## WHICH SAMPLES MOVED: CAMPAIGN 1, 2, 4 and 5 (0 and 3 byte-identical). That is the
+## ELITE change alone -- MEASURED by replaying this exact 2P campaign torture with a
+## counter: 1070 elite windup-ticks, 0 technical entity-ticks, max wave 0 (technicals
+## are endless-only). ENDLESS: all six samples moved, and that stream carries BOTH
+## changes -- the same probe on the endless torture reports 416 elite windup-ticks and
+## 208 technical entity-ticks, reaching wave 3 (technicals debut at wave 3).
 const GOLDEN: Array[int] = [
 	506778608736561550,
-	7590183919185690526,
-	241001744564993750,
+	4757813823945442270,
+	1083356397434960855,
 	8011787666350042381,
-	1378208880990403486,
-	5406986129690569999,
+	2996747579515103190,
+	5016697704728577635,
 ]
 
 
@@ -442,13 +461,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## torture wipes in wave 2, so the recycle path is never reached, and campaign never
 ## enters either branch at all. Confirmed empirically: the full suite is green with the
 ## committed values untouched.
+## RE-RECORDED (2026-07-25, honest telegraph grammar) -- see the note above GOLDEN.
+## All six endless samples move: this stream fields elites from tick 0 (locked aim
+## vector) and technicals from wave 3 (24t rev + charge-range gate).
 const ENDLESS_GOLDEN: Array[int] = [
-	870682775949389125,
-	2998730705561210490,
-	4845480010581780169,
-	7510121251359973883,
-	6349860726657738568,
-	1566297511967932093,
+	6891421421986254116,
+	8733020151816215287,
+	6430659631306661857,
+	1694876934729873493,
+	6526005742825884394,
+	8162729187850566041,
 ]
 
 

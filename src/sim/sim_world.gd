@@ -70,12 +70,17 @@ const DRONE_WINDUP_TICKS := 24
 # round kills it (fragile). Starting values; test: a strafing player at
 # 100px+ must dodge every charge — if charges land on movers, widen REV_TICKS.
 const TECHNICAL_SPEED := 3 * F_ONE            # player is 2.4 px/t — it outruns you on a straight
-const TECHNICAL_REV_TICKS := 18               # rev tell, cut from 30: a lock landing 80t before
-	# impact let a 2.4px/t strafer clear the point with a 4-tick nudge. Starting
-	# value; test: a late-reacting strafer eats ~2/10 charges — widen toward 24
-	# if first contact feels unreactable (the sighting card teaches the rule).
+const TECHNICAL_REV_TICKS := 24               # the 24t reaction floor (REAR_WARN/VENT_WARN precedent).
+	# Was 18 (300ms) in front of a one-hit-kill charge — below human reaction time
+	# for a lethal threat, and the old comment's own escape hatch said "widen
+	# toward 24 if first contact feels unreactable". It is unreactable; widened.
 const TECHNICAL_CHARGE_TICKS := 50            # one charge = ~150px of travel
 const TECHNICAL_LOCK_CD_TICKS := 70           # pause between charges (the dodge rhythm)
+# A rev is a promise that something is coming AT you. Un-gated, the truck revved
+# at targets 400px away and the charge died 250px short — a telegraph for a
+# threat that cannot reach you is how players learn to ignore telegraphs. Rev
+# only from inside the charge's own reach (ticks x speed = the exact travel).
+const TECHNICAL_CHARGE_RANGE := TECHNICAL_CHARGE_TICKS * TECHNICAL_SPEED
 const TECHNICAL_HP := 3                       # a truck is not a paper target (nest precedent)
 # Downed Pilot ransom: a dead gunship's pilot punches out at the crash site and
 # staggers for the enemy line at the TOP edge. TOUCH him to rescue (+ransom);
@@ -2762,9 +2767,17 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 			return
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
-		if e["windup"] == 0 and dlen > F_ONE:
-			events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
-			_spawn_enemy_bullet(e["x"], e["y"], dx, dy, dlen)
+		if e["windup"] == 0:
+			# Fire down the LOCKED vector (sniper precedent). It used to re-aim at
+			# the live target on the fire tick, so the drawn bead was a "when", not
+			# a "where" — the game teaches "a drawn line is a committed shot" with
+			# the sniper and then broke that promise with the elite.
+			var lx: int = e.get("aim_lx", dx)
+			var ly: int = e.get("aim_ly", dy)
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
+				events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
+				_spawn_enemy_bullet(e["x"], e["y"], lx, ly, llen)
 		return   # rooted while winding up
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > ELITE_STANDOFF:
@@ -2772,6 +2785,8 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	elif e["fire_cd"] == 0 and not _concealed(target):   # can't aim into smoke
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS
 		e["windup"] = ELITE_WINDUP_TICKS
+		e["aim_lx"] = dx   # lock the shot vector at windup start (view draws it)
+		e["aim_ly"] = dy
 		events.append({"t": "elite_windup", "x": e["x"], "y": e["y"]})
 
 
@@ -2920,7 +2935,9 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 			e["x"] = cpx
 			e["y"] = cpy
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
-	if e["fire_cd"] == 0 and not _concealed(target):   # can't line up a charge into smoke
+	# Rev only when the charge can actually arrive: cooldown spent, target inside
+	# TECHNICAL_CHARGE_RANGE, and not smoked (can't line up a charge into smoke).
+	if e["fire_cd"] == 0 and dlen <= TECHNICAL_CHARGE_RANGE and not _concealed(target):
 		e["fire_cd"] = TECHNICAL_LOCK_CD_TICKS
 		e["windup"] = TECHNICAL_REV_TICKS
 		events.append({"t": "technical_rev", "x": e["x"], "y": e["y"]})
