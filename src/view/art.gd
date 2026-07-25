@@ -812,6 +812,17 @@ static func tw(txt: String, size: int) -> float:
 static func flush_tw() -> void:
 	_tw_cache.clear()
 
+## LAYOUT-TEST SEAM. Non-null (an Array) only while a headless test is capturing:
+## Art.text then RECORDS the box it would have painted and returns without touching the
+## CanvasItem. This is the one choke point every string in the view passes through —
+## the HUD/menu `_emit_*` seams cover their own primitives, but ~91 direct
+## Art.text / Art.text_center callsites (hud/menu/main) bypass them, which made that ink
+## structurally invisible to every layout assertion. Always null in the game; view-only,
+## so the sim checksum is untouched.
+## Records the same {k, id, box, alpha} shape the HUD capture harness uses, so a test can
+## simply point this at its existing `boxes`/`ops` array and get merged geometry.
+static var text_capture = null
+
 
 ## Shadowed text: black copy offset +1px, then the colored text on top — the
 ## drop-shadow pattern hand-inlined across the view, now in one place.
@@ -823,6 +834,11 @@ static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Colo
 	# odd w), which smears a bitmap pixel font across two source texels under the
 	# canvas's linear-mipmap filter. View-only, so golden-safe.
 	pos = pos.floor()
+	if text_capture != null:
+		var sz := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, w, size)
+		text_capture.append({"k": "text", "id": txt, "alpha": col.a, "size": size,
+			"box": Rect2(pos - Vector2(0.0, f.get_ascent(size)), sz)})
+		return
 	# outline > 0: a hard black rim for the mid-fight alert band — a 1px shadow
 	# alone loses these glyphs against dirt noise under shake.
 	if outline > 0:
