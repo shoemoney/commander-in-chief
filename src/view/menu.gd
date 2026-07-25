@@ -4796,7 +4796,7 @@ func _howto_page_modes() -> void:
 	# ("CAMPAIGN" / "ENDLESS WAR" / "DAILY RUN") — that is the label the player actually clicks, so
 	# the page teaches the exact word on the button, not the shorter "ENDLESS" the roster TAB uses.
 	var modes := [
-		["hud_flag", "CAMPAIGN", "Fight up five sectors to the Foundry finale. The main run."],
+		["hud_flag", "CAMPAIGN", "Fight up six sectors to the Foundry finale. The main run."],
 		["hud_skull", "ENDLESS WAR", "Hold out against escalating waves for score. Ranged threats join wave 3+."],
 		["mi_timer", "DAILY RUN", "One shared seed a day, one attempt. Everyone races the same board."],
 		["icon_vest", "ASSIST (2-HIT)", "Each life takes TWO hits, not one. Runs are tagged *ASSIST."]]
