@@ -246,6 +246,16 @@ const SEED := 0xDEADBEEF
 ## noted here. All 6 campaign samples move (the torture walks the LZ from tick 0, so
 ## the crate's new y shifts collection timing). ENDLESS_GOLDEN VERIFIED UNCHANGED
 ## (the LZ authoring is campaign-gated and endless has no priced-crate-at-cap beat).
+## VERIFIED UNCHANGED (2026-07-25, enemy movement honours collision): _step_sapper,
+## _step_frogman and _step_technical now route through the shared _advance_toward step
+## instead of open-coding their movement, so they respect sandbags (a 40-coin player
+## purchase), rocks, tank hulks and sealed lane blocks, plus the mud/rubble/wire slow
+## and the broadcast rally aura, like every other ground mover. Behavioural, not a
+## rounding artifact -- test_archetypes::test_sapper_cannot_cross_a_sandbag_line fails
+## on the old code -- but golden-inert HERE: the campaign torture carries frogmen for
+## ~10.9k enemy-ticks and not one of them ever surfaces, so the touched lunge branch
+## never executes; sappers and technicals are endless-only.
+const GOLDEN: Array[int] = [
 const GOLDEN: Array[int] = [
 ]
 
@@ -332,6 +342,10 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## the endless stream legitimately moves from tick 0. Campaign GOLDEN untouched (endless-gated).
 ## c2-12 (2026-07-18): VERIFIED UNCHANGED — endless never advances the camera so
 ## CAMERA_LEAD is inert here, and the courier-spawn move is past the wave-2 wipe.
+## VERIFIED UNCHANGED (2026-07-25, enemy movement honours collision): see GOLDEN note.
+## The endless torture wipes at wave 2, before the first sapper spawn; the 208 technical
+## enemy-ticks it does step sit clear of every piece of cover and slow terrain the shared
+## step adds, so _advance_toward reproduces the old positions byte for byte.
 const ENDLESS_GOLDEN: Array[int] = [
 	870682775949389125,
 	2998730705561210490,
