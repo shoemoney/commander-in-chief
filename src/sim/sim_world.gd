@@ -101,6 +101,15 @@ const GRENADE_SPEED := 3 * F_ONE
 const GRENADE_ZVEL := 2 * F_ONE
 const GRENADE_GRAV := F_ONE / 8
 const GRENADE_RADIUS := 28 * F_ONE
+# hitbox-fairness audit: GRENADE_RADIUS is BOTH the ring a mortar telegraph
+# draws at you (_draw_telegraphs reads this constant, so it is truthful by
+# construction — leave it) and the reach of YOUR frag. The fireball the view
+# actually plays peaks at ~33px radius, so at 28 an enemy standing inside the
+# visible flame walked out alive. 30 is the enemy-kill scan only: incoming
+# lethality stays pinned to the honest 28px ring, outgoing reaches what the
+# player sees burn. Cover/bunker/boss reach deliberately still uses the 28 the
+# arena keep-out distances are test-pinned against.
+const BLAST_KILL_RADIUS := 30 * F_ONE
 const WALL_CRACK_HITS := 6                   # c4 2v: bullets to breach a kind-2 ruined-wall slab (1 explosion breaches instantly)
 const GRENADE_COOLDOWN_TICKS := 30
 const ENEMY_SPEED := (F_ONE * 8) / 5          # 1.6 px/tick
@@ -147,6 +156,14 @@ const GHILLIE_NOTICE_RADIUS := 210 * F_ONE
 const GHILLIE_REVEAL_TICKS := 26
 const GHILLIE_RECLOAK_TICKS := 90   # reveal(26)+paint(55) after it ≈ the sniper's 170t cadence
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
+# hitbox-fairness audit: the LETHAL contact ring and the FRIENDLY pilot-rescue
+# grab used to share one constant, so tuning either dragged the other. Measured:
+# the hero silhouette is 19.1x20.4px drawn and infantry 18.5x17.0, so bodies
+# visually touch at ~19px of centre separation — contact death at 10px is 52% of
+# that (deep overlap, arcade-fair), but the RESCUE reach inherited the same
+# stinginess and made grabbing the pilot feel like it whiffed. Friendly touch is
+# the one interaction that should be generous: 14px = ~73% of visual contact.
+const PILOT_RESCUE_RADIUS := 14 * F_ONE
 # Landmines: deterministic field hazards. Any grounded unit (player on foot, or
 # an enemy) that steps within the trigger radius detonates them via _explode() —
 # herd rushers onto them, or respect them yourself. Rolling clears them safely.
@@ -158,7 +175,13 @@ const MG_NEST_AIM_TICKS := 30       # telegraph before the first round of a burs
 const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
 const MG_NEST_BURST_ROUNDS := 3
 const MG_NEST_BURST_CD_TICKS := 90  # reload between bursts
-const BULLET_HIT_RADIUS := 9 * F_ONE
+# hitbox-fairness audit: the player's OWN round. Fodder infantry draws 18.5px
+# wide (half-width 9.2), so the old 9 made a bullet land only if its centre was
+# inside the silhouette — 98% of the drawn body, i.e. no generosity at all on
+# the one hitbox that should have some. 10 = 109% of a fodder half-width: a
+# round that visually grazes the shoulder now counts. Outgoing generous,
+# incoming tight — the arcade bias, applied in the right direction.
+const BULLET_HIT_RADIUS := 10 * F_ONE
 const BROADCAST_HP := 5                       # starting value: outlasts a 3-round burst, a grenade still one-shots (nest grammar)
 const BROADCAST_AURA_RADIUS := 140 * F_ONE    # starting value ~half a screen — rusher inside must visibly outpace one outside
 const BROADCAST_PULSE_TICKS := 90             # view metronome only (rides hashed fire_cd)
@@ -570,7 +593,13 @@ const BOSS_RUSH_COUNT := 3          # gunships fought before the Colossus caps t
 const BOSS_RUSH_HP_STEPS: Array[int] = [0, 14, 32]  # non-linear escalation knob
 const ENEMY_BULLET_SPEED := 3 * F_ONE
 const ENEMY_BULLET_TTL_TICKS := 180
-const ENEMY_BULLET_HIT_RADIUS := 8 * F_ONE
+# hitbox-fairness audit: the round that ONE-SHOTS you. The hero silhouette is
+# 19.1x20.4px drawn, so its inscribed radius is 9.55px and the old 8 made the
+# lethal disc 84% of the drawn body — nearly the whole sprite lethal in a game
+# where one hit ends the run. 7 = 73%: the round has to be visibly INSIDE the
+# soldier, never a shoulder graze. Incoming lethal is the one hitbox that should
+# always be smaller than it looks.
+const ENEMY_BULLET_HIT_RADIUS := 7 * F_ONE
 
 var tick_count: int = 0
 var rng: SimRng
@@ -820,6 +849,10 @@ func step(inputs: Array) -> void:
 	_step_bullets()
 	_step_enemy_bullets()
 	_step_grenades()
+	# Hitbox fairness: contact death resolves AFTER the player's own offense has
+	# landed (a rusher your bullet killed this tick can no longer kill you) and
+	# BEFORE enemies move (so nothing kills you from a position never rendered).
+	_step_contact_deaths()
 	_step_enemies()
 	# Kill-streak lapses if no kill lands within the window.
 	# Last Stand terminal state (9v, campaign + solo endless): all fighters
@@ -1188,29 +1221,44 @@ func _step_players(inputs: Array) -> void:
 		for e in enemies:
 			# Same axis pre-reject + truncation proof as the bullet scan (:1007):
 			# |dx| > r means _dist_lte was already false — checksum-neutral.
-			if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+			if absi(p["x"] - e["x"]) > PILOT_RESCUE_RADIUS:
 				continue
 			if e["alive"] and e["kind"] == "pilot" and not e.get("submerged", false) \
-					and _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+					and _dist_lte(p["x"], p["y"], e["x"], e["y"], PILOT_RESCUE_RADIUS):
 				_rescue_pilot(e)
 
-		# Contact with any enemy = one-hit death (roll i-frames protect;
-		# submerged frogmen must surface before they can strike).
-		if not p["roll_iframe"] and p["in_tank"] < 0:
-			for e in enemies:
-				if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
-					continue
-				if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
-						or e["kind"] == "broadcast" \
-						or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
-					continue
-				_hurt_player(p)
-				break
+		# Contact death is NOT here — see _step_contact_deaths(), which step()
+		# runs after the player's own bullets/grenades have resolved.
 
 		# Pickups. Shop crates carry a price paid from the shared War Chest;
 		# an unaffordable crate stays on the ground.
 		if p["alive"]:
 			_collect_pickups(p, i)
+
+
+func _step_contact_deaths() -> void:
+	## HITBOX FAIRNESS — RESOLUTION ORDER. Contact with any enemy is a one-hit
+	## death (roll i-frames protect; submerged frogmen must surface first).
+	##
+	## This used to live at the tail of _step_players, i.e. BEFORE _step_bullets
+	## and _step_grenades — so a rusher your own round killed on tick T still
+	## killed YOU on tick T. "I shot him and we both died" is the textbook
+	## unfair-death report. step() now calls this after the player's offense has
+	## resolved, so a tie goes to the player, and still BEFORE _step_enemies so
+	## the scan reads the enemy positions the player last SAW rendered (an
+	## enemy can never move onto you and kill you in the same unrendered tick).
+	for p in players:
+		if not p["alive"] or p["roll_iframe"] or p["in_tank"] >= 0:
+			continue
+		for e in enemies:
+			if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
+				continue
+			if not _enemy_strikeable(e) or e["kind"] == "courier" or e["kind"] == "pilot" \
+					or e["kind"] == "broadcast" \
+					or not _dist_lte(p["x"], p["y"], e["x"], e["y"], ENEMY_TOUCH_RADIUS):
+				continue
+			_hurt_player(p)
+			break
 
 
 static func _mix(a: int, b: int) -> int:
@@ -2371,7 +2419,13 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		# a sapper mine or grenadier lob on his fixed walk was a ransom
 		# coin-flip the player couldn't influence. Bullets still kill him —
 		# "don't shoot the rescue" stays the player's lesson.
-		if e["alive"] and e["kind"] != "pilot" and _dist_lte(x, y, e["x"], e["y"], GRENADE_RADIUS):
+		# BLAST_KILL_RADIUS, not GRENADE_RADIUS: the ENEMY-kill scan is the
+		# outgoing half of the blast and reaches what the player watches burn
+		# (the fireball peaks at ~33px). Every other scan below — cover, bunkers,
+		# tanks, bosses — keeps the 28 the arena keep-out distances are pinned to,
+		# and the player-lethal strike/barrel checks keep it too, so incoming
+		# never grew.
+		if e["alive"] and e["kind"] != "pilot" and _dist_lte(x, y, e["x"], e["y"], BLAST_KILL_RADIUS):
 			_kill_enemy(e, no_coin)
 			frags += 1
 	if frags >= 3:
@@ -2446,7 +2500,13 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 			rocks.append({"x": sdx + (sds - 1) * 80 * F_ONE, "y": sdy, "kind": 2})
 		events.append({"t": "cover_crack", "x": sdx, "y": sdy})
 	for p in players:
-		if p["alive"] and p["in_tank"] < 0 and p["roll_ticks"] == 0 \
+		# Hitbox fairness: this was the ONE lethal check keyed on `roll_ticks == 0`
+		# instead of `roll_iframe`. They differ by exactly one tick — the final
+		# roll tick decrements roll_ticks 1->0 and THEN sets roll_iframe — so on
+		# that tick the roll dodged every hazard in the game except a barrel.
+		# A one-frame hole in i-frames is invisible and unlearnable; use the same
+		# flag the other lethal checks all use.
+		if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
 				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
 			_hurt_player(p)
 	_explode(bl["x"], bl["y"], no_coin, "barrel")

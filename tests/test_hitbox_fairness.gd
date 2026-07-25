@@ -1,0 +1,310 @@
+extends RefCounted
+## HITBOX FAIRNESS — the collision-vs-silhouette ratchet.
+##
+## The player dies in ONE hit, so a lethal radius a few pixels wider than the
+## thing it belongs to is the whole difference between "I made a mistake" and
+## "this game is unfair". The sim's radii are plain numbers with no memory of
+## the art, and the art is regenerated from tools/gen_*.py — so a sprite tweak
+## could silently make an incoming hitbox larger than what it looks like and
+## nothing in the suite would notice.
+##
+## This suite closes that loop. It MEASURES each sprite the way the game draws
+## it — the opaque alpha bounding box of the imported texture, times the
+## art.gd SCALE row, times the main.gd call-site scale — and asserts each sim
+## radius against it. The house rule, and the direction every assertion points:
+##
+##   INCOMING lethal hitboxes must be SMALLER than they look.
+##   The player's OWN weapons may be more generous than they look.
+##
+## Sim world units ARE screen pixels (VIEW_H 360 / SCREEN_W 640 in Fixed), so a
+## radius converts with a plain / Fixed.ONE — no camera zoom in between.
+##
+## If a re-baked sprite moves a ratio out of band, FIX THE RATIO, don't widen
+## the band: the band IS the design.
+
+const Runner := preload("res://tests/run_tests.gd")
+const Art := preload("res://src/view/art.gd")
+
+## Call-site spr_scale for each texture, read off src/main.gd. Kept here beside
+## the assertion rather than derived, because the point of the test is to fail
+## when the two drift apart.
+const CALL_SCALE := {
+	"player1": 0.52,        # main.gd _draw_players (alive body)
+	"enemy_smg": 0.5,       # _draw_enemies, plain rusher
+	"enemy_assault": 0.62,  # elite
+	"frogman": 0.5,
+	"m_technical": 0.55,
+	"colossus_body": 1.9,
+	"wep_claymore": 1.05,   # mines / claymores
+	"bunker": 0.78,         # _draw_bunkers
+}
+
+
+func _px(fixed_radius: int) -> float:
+	return float(fixed_radius) / float(Fixed.ONE)
+
+
+func _silhouette(tex_name: String) -> Vector2:
+	## The drawn opaque footprint in screen px: alpha bbox x SCALE x call scale.
+	## Returns Vector2.ZERO when the texture is missing so the caller can skip
+	## rather than assert against a phantom (art.gd guards every lookup too).
+	if not Art.TEX.has(tex_name):
+		return Vector2.ZERO
+	var t: Texture2D = Art.tex(tex_name)
+	if t == null:
+		return Vector2.ZERO
+	var img := t.get_image()
+	if img == null:
+		return Vector2.ZERO
+	var sz := img.get_size()
+	var x0 := sz.x
+	var y0 := sz.y
+	var x1 := -1
+	var y1 := -1
+	for y in sz.y:
+		for x in sz.x:
+			if img.get_pixel(x, y).a > 0.35:
+				x0 = mini(x0, x)
+				y0 = mini(y0, y)
+				x1 = maxi(x1, x)
+				y1 = maxi(y1, y)
+	if x1 < 0:
+		return Vector2.ZERO
+	var s: float = float(CALL_SCALE[tex_name]) * Art.draw_scale(tex_name)
+	return Vector2(float(x1 - x0 + 1) * s, float(y1 - y0 + 1) * s)
+
+
+func _half(tex_name: String) -> float:
+	## Mean half-extent — the single "visual radius" a circular sim hitbox is
+	## fairly compared against for a roughly-square top-down sprite.
+	var d := _silhouette(tex_name)
+	if d == Vector2.ZERO:
+		return 0.0
+	return (d.x + d.y) / 4.0
+
+
+func _band(label: String, ratio: float, lo: float, hi: float) -> void:
+	Runner.T.ok(ratio >= lo and ratio <= hi,
+		"%s: collision is %.0f%% of the drawn silhouette (band %.0f-%.0f%%)"
+			% [label, ratio * 100.0, lo * 100.0, hi * 100.0])
+
+
+# --- INCOMING: must be smaller than it looks -------------------------------
+
+func test_enemy_bullet_is_smaller_than_the_soldier_it_kills() -> void:
+	# The round that one-shots you. Compared against the player's INSCRIBED
+	# radius (the largest circle that fits inside the drawn body), because the
+	# sim test is a circle: anything at or above 1.0 means the whole visible
+	# soldier is lethal surface, which in a one-hit-kill game is the single
+	# most-reported unfairness in the genre.
+	var d := _silhouette("player1")
+	if d == Vector2.ZERO:
+		Runner.T.ok(true, "player1 texture absent — silhouette check skipped")
+		return
+	var inscribed := minf(d.x, d.y) / 2.0
+	var r := _px(SimWorld.ENEMY_BULLET_HIT_RADIUS)
+	_band("enemy bullet vs player", r / inscribed, 0.60, 0.80)
+	Runner.T.ok(r < inscribed,
+		"an enemy round must land visibly INSIDE the soldier, never on his outline")
+
+
+func test_contact_death_demands_deep_visual_overlap() -> void:
+	# Body contact is checked centre-to-centre, so the honest comparison is the
+	# distance at which the two SILHOUETTES touch (sum of the half-extents).
+	# Arcade bias: you should already look buried in the man before it kills.
+	var ph := _half("player1")
+	if ph == 0.0:
+		Runner.T.ok(true, "player1 texture absent — contact check skipped")
+		return
+	var r := _px(SimWorld.ENEMY_TOUCH_RADIUS)
+	for foe in ["enemy_smg", "enemy_assault", "frogman", "m_technical"]:
+		var fh := _half(foe)
+		if fh == 0.0:
+			continue
+		_band("contact death vs %s" % foe, r / (ph + fh), 0.35, 0.60)
+
+
+func test_colossus_crush_never_outgrows_its_hull() -> void:
+	# The crawler's treads. 143px of drawn monster with a 26px crush ring is
+	# wildly player-favourable and that is the correct direction — the ratchet
+	# here only guards the other way, i.e. a future re-bake shrinking the sprite
+	# under the crush radius, which would kill you outside the machine.
+	var ch := _half("colossus_body")
+	if ch == 0.0:
+		Runner.T.ok(true, "colossus_body texture absent — crush check skipped")
+		return
+	var r := _px(SimWorld.COLOSSUS_CRUSH_RADIUS)
+	Runner.T.ok(r < ch,
+		"colossus crush (%.0fpx) must stay inside its own drawn hull (%.0fpx half-extent)" % [r, ch])
+	_band("colossus crush vs hull", r / ch, 0.20, 0.75)
+
+
+func test_mine_trigger_needs_the_player_standing_on_it() -> void:
+	# A 9px trigger around an 8px claymore reads as generous ON THE MINE, but
+	# the player's own 19px body is what actually has to reach it: at 9px of
+	# centre separation the soldier is unambiguously stood on the thing.
+	var ph := _half("player1")
+	var mh := _half("wep_claymore")
+	if ph == 0.0 or mh == 0.0:
+		Runner.T.ok(true, "mine/player texture absent — trigger check skipped")
+		return
+	_band("mine trigger", _px(SimWorld.MINE_TRIGGER_RADIUS) / (ph + mh), 0.45, 0.80)
+
+
+func test_the_bunker_wall_that_eats_rounds_is_the_wall_you_can_see() -> void:
+	# The strongpoint blocks bullets BOTH ways via a hard 48x32 AABB
+	# (_point_in_aabb). Its SCALE row was tuned against a 440px source, then an
+	# import sweep capped the texture at 128px without re-tuning — and _spr sizes
+	# off the IMPORTED texture, so the sprite silently shrank 3.44x to 14x12px
+	# while the AABB stayed 48x32. That is 343% collision-to-silhouette: rounds
+	# died in invisible armour most of a sprite-width off the drawn wall, which
+	# is the "no visible cause" failure pointed at the player's own offense.
+	# The drawn body must COVER the AABB it enforces.
+	var d := _silhouette("bunker")
+	if d == Vector2.ZERO:
+		Runner.T.ok(true, "bunker texture absent — armour check skipped")
+		return
+	var aw := float(SimWorld.BUNKER_W) / float(Fixed.ONE)
+	var ah := float(SimWorld.BUNKER_H) / float(Fixed.ONE)
+	Runner.T.ok(d.x >= aw * 0.95,
+		"drawn bunker is %.0fpx wide vs a %.0fpx blocking AABB — armour must not be invisible"
+			% [d.x, aw])
+	Runner.T.ok(d.y >= ah * 0.95,
+		"drawn bunker is %.0fpx tall vs a %.0fpx blocking AABB" % [d.y, ah])
+	Runner.T.ok(d.x <= aw * 1.6 and d.y <= ah * 1.9,
+		"...and must not overhang so far that visible wall stops nothing (%.0fx%.0f drawn)"
+			% [d.x, d.y])
+
+
+func test_incoming_blast_radius_is_exactly_what_the_telegraph_draws() -> void:
+	# main.gd _draw_telegraphs draws its ring at GRENADE_RADIUS * PX, so the
+	# mortar/airstrike/grenadier kill line is truthful BY CONSTRUCTION — and
+	# _resolve_strikes / _detonate_barrel must keep using that same constant.
+	# The split introduced for the player's own frag must never leak into the
+	# incoming side: that is the whole point of having two names.
+	Runner.T.ok(SimWorld.BLAST_KILL_RADIUS > SimWorld.GRENADE_RADIUS,
+		"the outgoing kill scan is the generous one")
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	Runner.T.ok(not src.is_empty(), "sim source readable")
+	for lethal in ["_resolve_strikes", "_detonate_barrel"]:
+		var i := src.find("func %s(" % lethal)
+		Runner.T.ok(i >= 0, "%s exists" % lethal)
+		var j := src.find("\nfunc ", i + 1)
+		var body := src.substr(i, (len(src) if j < 0 else j) - i)
+		Runner.T.ok(body.contains("_hurt_player"), "%s is a player-lethal path" % lethal)
+		Runner.T.ok(not body.contains("BLAST_KILL_RADIUS"),
+			"%s must stay on the honest 28px GRENADE_RADIUS the telegraph ring draws — "
+			% lethal + "the widened blast is for killing ENEMIES only")
+
+
+# --- OUTGOING: may be more generous than it looks ---------------------------
+
+func test_player_bullet_is_generous_against_infantry() -> void:
+	# The player's own round. Below 1.0 the bullet has to be inside the sprite
+	# to count, which is the wrong bias for the weapon you aim yourself.
+	var fh := _half("enemy_smg")
+	if fh == 0.0:
+		Runner.T.ok(true, "enemy_smg texture absent — bullet check skipped")
+		return
+	var r := _px(SimWorld.BULLET_HIT_RADIUS)
+	Runner.T.ok(r > fh, "a player round grazing the silhouette must count as a hit")
+	_band("player bullet vs fodder", r / fh, 1.00, 1.30)
+
+
+func test_pilot_rescue_reaches_further_than_the_touch_that_kills() -> void:
+	# The one FRIENDLY touch in the game. It shared ENEMY_TOUCH_RADIUS with the
+	# lethal contact ring, so the grab was as stingy as the kill; a friendly
+	# interaction is exactly where generosity belongs.
+	Runner.T.ok(SimWorld.PILOT_RESCUE_RADIUS > SimWorld.ENEMY_TOUCH_RADIUS,
+		"the rescue grab must out-reach the contact-kill ring, not match it")
+	var ph := _half("player1")
+	if ph == 0.0:
+		return
+	_band("pilot rescue", _px(SimWorld.PILOT_RESCUE_RADIUS) / (ph * 2.0), 0.55, 1.05)
+
+
+func test_frag_reaches_the_flame_the_player_watches() -> void:
+	# The drawn fireball peaks around a 33px radius (explosion frames on a 128px
+	# canvas, SCALE ~0.68-0.74, ramped by _draw_fx's 0.45->0.95 spr_scale). An
+	# enemy standing in visible flame surviving is the outgoing mirror of the
+	# same complaint. Keep the kill scan inside that flame, not beyond it.
+	var r := _px(SimWorld.BLAST_KILL_RADIUS)
+	Runner.T.ok(r >= 30.0 and r <= 34.0,
+		"frag kill radius %.0fpx sits inside the ~33px drawn fireball" % r)
+
+
+# --- ORDER + no-invisible-damage ------------------------------------------
+
+func test_contact_death_resolves_after_the_players_own_offense() -> void:
+	# Dying to something you had already killed that tick is its own class of
+	# unfairness. Pin the ORDER in step(): the contact pass must come after the
+	# bullet and grenade passes (so a tie goes to the player) and before the
+	# enemy step (so nothing kills you from a position that was never drawn).
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var i := src.find("func step(")
+	Runner.T.ok(i >= 0, "step() found")
+	var j := src.find("\nfunc ", i + 1)
+	var body := src.substr(i, (len(src) if j < 0 else j) - i)
+	var bullets := body.find("_step_bullets()")
+	var grenades := body.find("_step_grenades()")
+	var contact := body.find("_step_contact_deaths()")
+	var foes := body.find("_step_enemies()")
+	Runner.T.ok(contact >= 0, "step() runs the contact-death pass")
+	Runner.T.ok(contact > bullets, "contact death resolves AFTER the player's bullets")
+	Runner.T.ok(contact > grenades, "contact death resolves AFTER the player's grenades")
+	Runner.T.ok(contact < foes, "contact death resolves BEFORE enemies move")
+
+
+func test_a_bullet_kill_on_the_touching_tick_saves_the_player() -> void:
+	# The behavioural half of the order test: a rusher sitting exactly on the
+	# player, with a player round already on top of it, must die WITHOUT taking
+	# the player with it.
+	var sim := SimWorld.new(11, 1, "campaign")
+	var p := sim.players[0]
+	sim.enemies.clear()
+	sim.bullets.clear()
+	sim._spawn_enemy(p["x"], p["y"], false)
+	var e: Dictionary = sim.enemies[sim.enemies.size() - 1]
+	# A round one step short of the rusher, closing on it this tick.
+	sim.bullets.append({"x": p["x"], "y": p["y"] + SimWorld.BULLET_SPEED,
+		"vx": 0, "vy": -SimWorld.BULLET_SPEED, "ttl": 60, "owner": 0, "pierce": 0})
+	sim.step([SimInput.new()])
+	Runner.T.ok(not e["alive"], "the round killed the rusher on the contact tick")
+	Runner.T.ok(p["alive"],
+		"a rusher killed by the player's own round on tick T can no longer kill the player on tick T")
+
+
+func test_every_lethal_check_honours_the_dodge_iframes() -> void:
+	# _hurt_player is the single funnel, but each CALLER decides whether the
+	# roll protects. One of them keyed on `roll_ticks == 0` instead of
+	# `roll_iframe` — and they differ by exactly one tick (the final roll tick
+	# decrements roll_ticks to 0 and THEN raises roll_iframe), so a barrel could
+	# kill through a dodge that stopped everything else. A one-frame hole in
+	# i-frames is invisible and therefore unlearnable: pin the flag.
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var lines := src.split("\n")
+	for n in lines.size():
+		if not lines[n].contains("_hurt_player(p)"):
+			continue
+		# Walk back over the (wrapped) guard that leads to this call.
+		var guard := ""
+		for k in range(maxi(0, n - 6), n):
+			guard += lines[k]
+		if not guard.contains("roll"):
+			continue   # in-tank / vest paths guard on other state
+		Runner.T.ok(guard.contains("roll_iframe"),
+			"the lethal check at line %d guards on roll_iframe, not the off-by-one-tick roll_ticks" % (n + 1))
+
+
+func test_no_lethal_radius_is_invisible_to_the_view() -> void:
+	# "Damage with no visible cause" audit. Every player-lethal AREA hazard has
+	# to be drawn at a radius the sim actually kills at, and the only safe way
+	# to guarantee that is for the draw to READ the sim constant instead of
+	# hardcoding a number that drifts. Pin the two that used to hardcode.
+	var view := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(view.contains("SimWorld.GRENADE_RADIUS * PX"),
+		"the mortar/airstrike telegraph ring is drawn from the kill radius itself")
+	Runner.T.ok(view.contains("SimWorld.VENT_HURT_RADIUS"),
+		"the foundry vent's jet and warn ring are drawn from VENT_HURT_RADIUS — "
+		+ "they used to hardcode 24/10 while killing at 24, so the telegraph shrank "
+		+ "onto a hazard that never did")

@@ -6898,16 +6898,27 @@ func _draw_vents() -> void:
 		for s in 3:
 			var sy := vp + Vector2(0, -3.0 + s * 3.0)
 			Art.line(self, sy - Vector2(4.5, 0), sy + Vector2(4.5, 0), Color(0.55, 0.3, 0.15, 0.8), 1.2)
+		# Hitbox fairness: the lethal footprint is VENT_HURT_RADIUS and NOTHING
+		# drew it honestly. The jet's outer disc was hardcoded 24 at alpha 0.16
+		# (invisible over the foundry floor) while the readable flame stopped at
+		# 14 — you died 10px outside anything you could see. Worse, the warn ring
+		# TIGHTENED from 24 down to 10, advertising a shrinking hazard over a
+		# constant one. Both now key off the sim constant: the warn ring closes
+		# ONTO the kill radius from outside it, and the jet's lethal edge is an
+		# actually-visible rim. Nothing here touches the sim.
+		var vr := float(SimWorld.VENT_HURT_RADIUS) * PX
 		if ph >= jet_at:
 			# JET: white-hot core + orange column, flicker off the global clock.
 			var jf := 0.75 + 0.25 * Art.pulse(0.035)
-			Art.circle(self, vp, 24.0, Color(1.0, 0.42, 0.1, 0.16 * jf))
-			Art.circle(self, vp, 14.0, Color(1.0, 0.62, 0.2, 0.45 * jf))
+			Art.circle(self, vp, vr, Color(1.0, 0.42, 0.1, 0.30 * jf))
+			Art.arc(self, vp, vr, 0, TAU, 24, Color(1.0, 0.55, 0.15, 0.7 * jf), 1.4)
+			Art.circle(self, vp, vr * 0.58, Color(1.0, 0.62, 0.2, 0.45 * jf))
 			Art.circle(self, vp, 6.5, Color(1.0, 0.93, 0.7, 0.9))
 		elif ph >= jet_at - SimWorld.VENT_WARN_TICKS:
-			# WARN: ring tightens over the 30t telegraph — read it, step off.
+			# WARN: ring closes from 1.5x the kill radius ONTO it — read it, step off.
 			var wt := float(ph - (jet_at - SimWorld.VENT_WARN_TICKS)) / float(SimWorld.VENT_WARN_TICKS)
-			Art.arc(self, vp, 24.0 - 14.0 * wt, 0, TAU, 20, Color(1.0, 0.5, 0.15, 0.35 + 0.45 * wt), 1.6)
+			Art.arc(self, vp, vr * (1.5 - 0.5 * wt), 0, TAU, 20,
+				Color(1.0, 0.5, 0.15, 0.35 + 0.45 * wt), 1.6)
 
 
 func _draw_barrels() -> void:
