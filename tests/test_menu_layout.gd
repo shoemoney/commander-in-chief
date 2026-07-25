@@ -2882,6 +2882,28 @@ func test_destructive_text_contrast() -> void:
 				"armed label contrast %.2f over composited flood (a=%.2f) clears AA-normal" % [ratio, a])
 
 
+# a11y: the NORMAL (non-destructive) focused row was the hole in the contrast fixture —
+# test_destructive_text_contrast only ever measured RESTART/TITLE/QUIT, so the row every
+# player reads on every screen went unchecked and sat at 4.25:1, under AA-normal. The label
+# is drawn on Art.menu_plate's BODY band (tint * Art.PLATE_BODY), which is the darkest and
+# therefore worst-case of the plate's three bands under the glyphs — the 1px keyline (PLATE_HI)
+# is a silhouette edge the text never lands on. Unselected is checked too so darkening the
+# focused plate can never invert the focus read.
+func test_focused_row_text_contrast() -> void:
+	var body := func(tint: Color) -> Color:
+		return Color(tint.r * Art.PLATE_BODY, tint.g * Art.PLATE_BODY, tint.b * Art.PLATE_BODY)
+	var sel_ratio := _wcag_contrast(Menu.ROW_TEXT_SEL, body.call(Menu.PLATE_SEL))
+	Runner.T.ok(sel_ratio >= 4.5,
+		"focused row label contrast %.2f clears AA-normal (>=4.5)" % sel_ratio)
+	var unsel_ratio := _wcag_contrast(Menu.ROW_TEXT_UNSEL, body.call(_opaque(Menu.PLATE_UNSEL)))
+	Runner.T.ok(unsel_ratio >= 4.5,
+		"unfocused row label contrast %.2f clears AA-normal (>=4.5)" % unsel_ratio)
+	# The focused plate must stay the BRIGHTER of the two, or the contrast fix would have
+	# traded away the "where am I" cue it was meant to protect.
+	Runner.T.ok(Menu.PLATE_SEL.get_luminance() > _opaque(Menu.PLATE_UNSEL).get_luminance(),
+		"the focused row plate is still brighter than an unfocused one")
+
+
 # src over dst at alpha a -> opaque composite color (per-channel).
 func _blend(src: Color, dst: Color, a: float) -> Color:
 	return Color(src.r * a + dst.r * (1.0 - a), src.g * a + dst.g * (1.0 - a), src.b * a + dst.b * (1.0 - a))

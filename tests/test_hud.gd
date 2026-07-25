@@ -768,6 +768,39 @@ func test_pip_safe_area_windowed_non_primary_display() -> void:
 		"a real overlapping notch still insets the right edge (not muted wholesale)")
 
 
+# a11y: the colossus arena's SAFE BELT vs its inner DANGER ring is a live boss mechanic, so it
+# may not be encoded in hue alone. The pair used to be a bare green/red literal at alpha
+# 0.12..0.18 measuring 1.63:1 against each other — a colorblind player, or anyone on a washed-out
+# panel, had nothing to read. This asserts the SHAPE channel carries the distinction on its own:
+# strip the colour entirely and the belt is still dashed-and-doubled where the danger ring is one
+# solid stroke. Run in BOTH palettes, since colorblind mode changes the hue but must not be
+# required to tell them apart.
+func test_colossus_rings_differ_by_shape_not_only_hue() -> void:
+	var was := Art.colorblind
+	for cb in [false, true]:
+		Art.colorblind = cb
+		for pulse in [0.0, 1.0]:
+			var safe_r: Dictionary = HudIcons.colossus_ring_style(true, pulse)
+			var danger: Dictionary = HudIcons.colossus_ring_style(false, pulse)
+			# 1. The encoding itself: broken ring vs continuous stroke, plus a second concentric line.
+			Runner.T.ok(int(safe_r["dashes"]) > 1,
+				"cb=%s: the safe belt is a BROKEN ring (%d dashes)" % [cb, int(safe_r["dashes"])])
+			Runner.T.eq(int(danger["dashes"]), 1, "cb=%s: the danger ring is one continuous stroke" % cb)
+			Runner.T.ok(float(safe_r["duty"]) < 1.0, "cb=%s: the safe belt's dashes leave real gaps" % cb)
+			Runner.T.ok(float(safe_r["hairline"]) > 0.0 and float(danger["hairline"]) == 0.0,
+				"cb=%s: only the safe belt carries the second concentric hairline" % cb)
+			# 2. The teeth: with hue removed (greyscale), the two rings are NOT separable by
+			#    luminance alone -- which is exactly why the shape encoding above must exist.
+			var sc: Color = safe_r["col"]
+			var dc: Color = danger["col"]
+			Runner.T.ok(_contrast(Color(sc.r, sc.g, sc.b), Color(dc.r, dc.g, dc.b)) < 3.0,
+				"cb=%s: the two rings are NOT separable by luminance, so shape is load-bearing" % cb)
+			# 3. Both must actually be visible over the lit foundry floor.
+			Runner.T.ok(sc.a >= 0.3 and dc.a >= 0.3,
+				"cb=%s: both rings draw at a legible alpha (safe %.2f / danger %.2f)" % [cb, sc.a, dc.a])
+	Art.colorblind = was
+
+
 # WCAG 2.1 relative luminance of an sRGB Godot Color (gamma-expanded per-channel).
 static func _rel_lum(c: Color) -> float:
 	var out := 0.0
@@ -3084,8 +3117,11 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 	var reserve: float = HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP
 	# Widest real caption AND the widest phase label — the worst pair, both measured, not assumed.
 	var font := Art.font()
-	for txt in ["COMMANDER: \"Move out!\"",
-			"SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\""]:
+	# Built through caption_line (the real speaker-prefix helper _draw_caption calls), so the
+	# a11y prefix can never widen the strip past this layout guard without failing here.
+	for txt in [HudIcons.caption_line("\"Move out!\"", false),
+			HudIcons.caption_line(
+				"\"War chest's empty, no revives left for the rest of this desperate last stand!\"", true)]:
 		var lines := HudIcons._wrap_caption(txt, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
 		var w := 0.0
 		for ln in lines:

@@ -384,7 +384,13 @@ const PLATE_BG := Color(0.03, 0.05, 0.03, 0.55)
 const TITLE_PLATE_ALPHA_FLOOR := 0.72
 const LEGEND_PLATE_ALPHA_FLOOR := 0.85
 const LEGEND_PLATE_RGB := Color(0.02, 0.03, 0.02)   # near-black backing under the 8px legend glyphs
-const PLATE_SEL := Color(1.0, 0.92, 0.55)
+# a11y: the FOCUSED row's label (ROW_TEXT_SEL) sits on this tint * Art.PLATE_BODY. At the old
+# (1.0, 0.92, 0.55) that composite measured 4.25:1 — under the 4.5 AA-normal bar the destructive
+# rows already clear. Darkened ~6% to 4.74:1; still far the brightest plate on screen, so the
+# "this row is focused" read is untouched. Locked by test_focused_row_text_contrast.
+const PLATE_SEL := Color(0.94, 0.86, 0.48)
+const ROW_TEXT_SEL := Color(1.0, 0.95, 0.75)     # focused row label — measured against PLATE_SEL
+const ROW_TEXT_UNSEL := Color(0.8, 0.84, 0.74)
 const PLATE_UNSEL := Color(0.55, 0.62, 0.45, 0.8)
 const DISABLED_PLATE := Color(0.3, 0.34, 0.3, 0.7)   # c2-13: locked/unavailable row plate (dim, desaturated)
 const DISABLED_TEXT := Color(0.55, 0.58, 0.52)       # c2-13: muted label on a locked row
@@ -3669,7 +3675,7 @@ func _draw() -> void:
 			if not armed and not disabled:
 				Art.focus_ring(self, gr.grow(roundf(3.0 + mp * 1.5)),
 					Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
-		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
+		var col := ROW_TEXT_SEL if selected else ROW_TEXT_UNSEL
 		if disabled:
 			col = DISABLED_TEXT   # c2-13: muted label completes the dim/locked read
 		var label: String = items[k]
@@ -5068,7 +5074,7 @@ func _draw_opts_header() -> void:
 		# full alpha (no fade ramp) — captured pre-reset, since the reset itself turns
 		# motion back on. It still clears on its timer; only the animation is snapped.
 		var ba := clampf(_reset_flash / 0.6, 0.0, 1.0) if _reset_flash_anim else 1.0
-		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 9, Color(0.55, 0.95, 0.5, ba))
+		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 9, Art.safe(Color(0.55, 0.95, 0.5, ba)))
 	elif _menu_items()[sel]["id"] == "reset_defaults":
 		# When focus is on RESET DEFAULTS, the summary line names EXACTLY what the
 		# two-press confirm will wipe — every settings group at once — so the player
