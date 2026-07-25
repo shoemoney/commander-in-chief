@@ -2,7 +2,11 @@
 # regression suite passes on all platforms (see docs/PLAN.md §4).
 # 4.6.3 → 4.7: full suite incl. determinism goldens passed unchanged on 4.7
 # (the pure-int sim reproduces the committed checksums — no golden re-record).
+# 4.7 → 4.7.1 (2026-07-24): NOT a feature bump — CI's setup-godot action rejects a
+# two-component version ("⛔️ Invalid version: 4.7") and every run since has died at
+# the Set up Godot step, before importing anything. 4.7.1 is what local dev already
+# runs, so this aligns CI with the toolchain the suite is actually verified on.
 # Hash is sha256 of the official GitHub release zip, verified against 4.6.3's.
-godot_version=4.7-stable
-godot_linux_x86_64_zip_sha256=0b1a6c54c2c619c12e169fe9241edda4b81080b519451cec2984bf0d2c6cb73c
+godot_version=4.7.1-stable
+godot_linux_x86_64_zip_sha256=c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba
 godot_download_base=https://github.com/godotengine/godot/releases/download/
