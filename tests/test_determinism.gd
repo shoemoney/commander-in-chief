@@ -411,6 +411,15 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ##      keeps the 3-death soft cap verbatim -> GOLDEN untouched by construction. Below
 ##      wave 5 the endless formula (50 * max(deaths,1) * 1) equals the old one for 0-3
 ##      deaths, which is the entire reach of the endless torture (it wipes in wave 2).
+##
+## 2026-07-25 — endless arena-shift / supply-pod congestion fix: BOTH GOLDEN AND
+## ENDLESS_GOLDEN VERIFIED UNCHANGED, no re-record. The every-3rd-wave L-drop now walks
+## the slot table TWICE (second lap recycles stale non-player cover via _cover_blocked)
+## and the wave-5 supply pod gained the same walk plus a supply_pod_blocked report.
+## Every edited branch is gated `mode == "endless" and wave >= 3` / `>= 5`; the endless
+## torture wipes in wave 2, so the recycle path is never reached, and campaign never
+## enters either branch at all. Confirmed empirically: the full suite is green with the
+## committed values untouched.
 const ENDLESS_GOLDEN: Array[int] = [
 	870682775949389125,
 	2998730705561210490,

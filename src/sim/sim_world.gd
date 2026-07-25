@@ -4620,6 +4620,34 @@ func _wave_hostiles_cleared() -> bool:
 	return true
 
 
+func _cover_blocked(bx: int, by: int, recycle: bool) -> bool:
+	## The 20px dedupe both endless arena drops (the every-3rd-wave L and the
+	## wave-5 supply pod) share. `recycle` is the congestion escape hatch: the
+	## stale cover in the way is DESTROYED — loudly, through the crater/break
+	## events the view already renders — instead of blocking the drop. A
+	## player-BOUGHT sandbag is never recycled (you don't bulldoze what someone
+	## paid for) and rocks stop being eaten at ARENA_ROCK_FLOOR, so both keep
+	## blocking; with 6 slots x 3-8 cells there is always somewhere else.
+	var blocked := false
+	for si in range(sandbags.size() - 1, -1, -1):
+		var sb: Dictionary = sandbags[si]
+		if absi(sb["x"] - bx) < 20 * F_ONE and absi(sb["y"] - by) < 20 * F_ONE:
+			if recycle and sb.get("player", 0) == 0:
+				events.append({"t": "sandbag_break", "x": sb["x"], "y": sb["y"]})
+				sandbags.remove_at(si)
+			else:
+				blocked = true
+	for ri in range(rocks.size() - 1, -1, -1):
+		var rk: Dictionary = rocks[ri]
+		if absi(rk["x"] - bx) < 20 * F_ONE and absi(rk["y"] - by) < 20 * F_ONE:
+			if recycle and rocks.size() > ARENA_ROCK_FLOOR:
+				events.append({"t": "rock_crater", "x": rk["x"], "y": rk["y"]})
+				rocks.remove_at(ri)
+			else:
+				blocked = true
+	return blocked
+
+
 func _start_wave() -> void:
 	wave += 1
 	wave_start_tick = tick_count
@@ -4649,13 +4677,21 @@ func _start_wave() -> void:
 			rocks.remove_at(scar_i)
 		# Slot fallthrough (judge r1): if every bag of the picked L dedupes
 		# away, walk the table — a DROP beat is never a no-op under congestion.
+		# The walk alone was NOT enough (endless audit): by ~wave 30 the fixed
+		# 6-slot table is full and the whole walk planted NOTHING, so the
+		# advertised "the arena keeps changing" beat died in silence while the
+		# rock-crater half kept firing. It now walks the table TWICE — the
+		# second lap RECYCLES, destroying the stale non-player cover in the
+		# footprint (loudly, via the same crater/break events the view already
+		# renders) so a shift wave always plants something.
 		var slot_base: int = (amix >> 8) % ARENA_L_SLOTS.size()
 		# c4 3v: the every-3rd-wave drop now stamps a whole LAYOUT (barricade belt /
 		# corner L / wreck line, _mix-picked) anchored to the SAME slot — footprint
 		# stays put but the ARRANGEMENT swaps, so old muscle memory dies with the
 		# co-cratered rock. Endless wave>=3 -> past the wave-2 wipe -> golden-inert.
 		var layout: Array = ARENA_LAYOUTS[(amix >> 12) % ARENA_LAYOUTS.size()]
-		for attempt in ARENA_L_SLOTS.size():
+		for attempt in ARENA_L_SLOTS.size() * 2:
+			var recycle := attempt >= ARENA_L_SLOTS.size()
 			var slot: Array = ARENA_L_SLOTS[(slot_base + attempt) % ARENA_L_SLOTS.size()]
 			var l_ax: int = slot[0] * F_ONE
 			var l_ay: int = slot[1] * F_ONE
@@ -4664,18 +4700,12 @@ func _start_wave() -> void:
 			for bo in layout:
 				var l_bx: int = l_ax + (bo[0] * mir) * F_ONE
 				var l_by: int = l_ay + bo[1] * F_ONE
-				var l_clear := true
-				for sb in sandbags:
-					if absi(sb["x"] - l_bx) < 20 * F_ONE and absi(sb["y"] - l_by) < 20 * F_ONE:
-						l_clear = false
-				for rk in rocks:
-					if absi(rk["x"] - l_bx) < 20 * F_ONE and absi(rk["y"] - l_by) < 20 * F_ONE:
-						l_clear = false
-				if l_clear:
+				if not _cover_blocked(l_bx, l_by, recycle):
 					sandbags.append({"x": l_bx, "y": l_by})
 					planted += 1
 			if planted > 0:
-				events.append({"t": "arena_shift", "x": l_ax, "y": l_ay})
+				events.append({"t": "arena_shift", "x": l_ax, "y": l_ay,
+					"forced": 1 if recycle else 0})
 				break
 	# c4 2v RENEWABLE COVER: a supply pod impacts every 5th wave and carves a 3x3
 	# RIM of fresh solid rock (8 outer cells; center left open = an instant micro-
@@ -4684,32 +4714,40 @@ func _start_wave() -> void:
 	# wave>=5 -> past the wave-2 ENDLESS_GOLDEN wipe -> byte-identical. (The
 	# DRIFTING moving-solid cover was cut: it is the L14 solid-vs-occupant
 	# impossibility + a new hashed velocity field for a 2-vote item.)
+	# The pod had NO fallthrough at all (endless audit): one congested slot and a
+	# PROMISED resupply silently evaporated — measured missing from wave 20 on.
+	# Same two-lap walk as the L-drop above (polite lap, then recycle), and if
+	# even the recycle lap finds nowhere, it says so out loud instead of no-oping.
 	if mode == "endless" and wave >= 5 and wave % 5 == 0:
 		var pmix := _mix(wave * 3 + 1, _world_seed)
-		var pslot: Array = ARENA_L_SLOTS[(pmix >> 4) % ARENA_L_SLOTS.size()]
-		var pcx: int = pslot[0] * F_ONE
-		var pcy: int = pslot[1] * F_ONE
+		var pbase: int = (pmix >> 4) % ARENA_L_SLOTS.size()
 		var planted_pod := 0
-		for oy in [-48, 0, 48]:
-			for ox in [-48, 0, 48]:
-				if ox == 0 and oy == 0:
-					continue   # center open = a LEGAL hull pocket (64px, standable)
-				if ox == 0 and oy == 48:
-					continue   # south DOORWAY so the player can actually enter the fort
-				var pbx: int = pcx + ox * F_ONE
-				var pby: int = pcy + oy * F_ONE
-				var pclear := true
-				for sb in sandbags:
-					if absi(sb["x"] - pbx) < 20 * F_ONE and absi(sb["y"] - pby) < 20 * F_ONE:
-						pclear = false
-				for rk in rocks:
-					if absi(rk["x"] - pbx) < 20 * F_ONE and absi(rk["y"] - pby) < 20 * F_ONE:
-						pclear = false
-				if pclear:
-					rocks.append({"x": pbx, "y": pby, "kind": 0})
-					planted_pod += 1
-		if planted_pod > 0:
-			events.append({"t": "supply_pod", "x": pcx, "y": pcy})
+		var pcx: int = ARENA_L_SLOTS[pbase][0] * F_ONE
+		var pcy: int = ARENA_L_SLOTS[pbase][1] * F_ONE
+		for pattempt in ARENA_L_SLOTS.size() * 2:
+			var precycle := pattempt >= ARENA_L_SLOTS.size()
+			var pslot: Array = ARENA_L_SLOTS[(pbase + pattempt) % ARENA_L_SLOTS.size()]
+			pcx = pslot[0] * F_ONE
+			pcy = pslot[1] * F_ONE
+			for oy in [-48, 0, 48]:
+				for ox in [-48, 0, 48]:
+					if ox == 0 and oy == 0:
+						continue   # center open = a LEGAL hull pocket (64px, standable)
+					if ox == 0 and oy == 48:
+						continue   # south DOORWAY so the player can actually enter the fort
+					var pbx: int = pcx + ox * F_ONE
+					var pby: int = pcy + oy * F_ONE
+					if not _cover_blocked(pbx, pby, precycle):
+						rocks.append({"x": pbx, "y": pby, "kind": 0})
+						planted_pod += 1
+			if planted_pod > 0:
+				events.append({"t": "supply_pod", "x": pcx, "y": pcy,
+					"forced": 1 if precycle else 0})
+				break
+		if planted_pod == 0:
+			# Loud failure beats a quiet one: the view banners this so a lost
+			# resupply is never something the player just has to notice missing.
+			events.append({"t": "supply_pod_blocked", "x": pcx, "y": pcy})
 	if wave >= 3 and rng.range_i(0, 2) == 0:
 		_spawn_courier()   # ~1-in-3 waves field a fleeing bounty runner
 	# Wave mutators give each wave an identity (and make the shop a counter-
