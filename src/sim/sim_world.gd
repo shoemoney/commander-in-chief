@@ -4177,8 +4177,12 @@ func _author_lz() -> void:
 	# 1. Seawall: two kind-0 (solid) rock runs with a single center lane
 	#    (192px >> HULL_CLEARANCE). Teaches "cover is real, pick a lane" by
 	#    standing in the way of the first rushers.
-	for sx in [96, 160, 224, 416, 480, 544]:
-		rocks.append({"x": sx * F_ONE, "y": -(180 * F_ONE), "kind": 0})
+	# Hand-staggered depth + mixed tiers — a placed seawall, not a stamped
+	# row. x within +-4 of the original six, y within +-26px of -180 (clear
+	# of the -300 grenade crate and the -420 bunker), kind fixed at 0.
+	for sr in [[96, 0, 0], [158, -22, 0], [226, 14, 0],
+			[414, 18, 0], [478, -16, 0], [546, 6, 0]]:
+		rocks.append({"x": sr[0] * F_ONE, "y": -((180 + sr[1]) * F_ONE), "kind": sr[2]})
 	# 2. The conspicuous grenade box, dead center in the lane, free.
 	pickups.append({"x": SCREEN_CX, "y": -(300 * F_ONE), "kind": 1, "cost": 0})
 	# 3. 120px past it: an armored bunker at the lane mouth, spitting infantry

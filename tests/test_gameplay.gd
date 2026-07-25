@@ -193,6 +193,22 @@ func test_lz_teaches_by_placement_campaign_only() -> void:
 	Runner.T.ok(endless.bunkers.is_empty(), "endless authors no LZ — its goldens must not move")
 
 
+func test_lz_seawall_is_not_a_straight_row() -> void:
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var ys := {}
+	var lane_l := -99999 * Fixed.ONE
+	var lane_r := 99999 * Fixed.ONE
+	for rk in sim.rocks:
+		if rk["y"] > -(260 * Fixed.ONE):
+			ys[rk["y"]] = true
+			if rk["x"] < SimWorld.SCREEN_CX:
+				lane_l = maxi(lane_l, rk["x"])
+			else:
+				lane_r = mini(lane_r, rk["x"])
+	Runner.T.ok(ys.size() >= 4, "the LZ seawall staggers depth (>=4 distinct y), not one row")
+	Runner.T.ok(lane_r - lane_l >= SimWorld.HULL_CLEARANCE, "the center lane still clears a hull")
+
+
 func test_kill_streak_bonuses_score_not_chest() -> void:
 	# The streak is a leaderboard reward, never an economy pump: the chest mints
 	# the flat bounty on every kill; score gets an escalating bonus at 5/10/20.

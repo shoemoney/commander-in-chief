@@ -5974,9 +5974,11 @@ func _draw_terrain() -> void:
 		for tx in 14:
 			var h2 := Art.cell_hash(tx * 31, iy)
 			var margin: bool = tx < 2 or tx > 11
-			if (margin and h2 % 3 != 0) or (not margin and h2 % 19 == 0):
-				var px := tx * 48.0 + float(h2 % 24) - 12.0
-				var wy_px := wy + float((h2 / 7) % 20)
+			# Drop ~25% of margin cells so the flank reads as a broken tree
+			# line, not a fence; near-full-cell jitter below breaks the rows.
+			if (margin and h2 % 3 != 0 and (h2 >> 16) % 4 != 0) or (not margin and h2 % 19 == 0):
+				var px := tx * 48.0 + float(h2 % 44) - 22.0
+				var wy_px := wy + float((h2 / 7) % 44)
 				var world_x := int(px / PX)
 				var world_y := sim.camera_top + int(wy_px / PX)
 				if _in_wbands(wbands, world_x, world_y):
@@ -6378,7 +6380,24 @@ func _draw_rocks() -> void:
 				_ground_shadow(pos, 12.0, 0.42 * fade)
 				var rtex: String = ["rock1", "rock2", "cactus_dead2"][rh3 % 3]   # dead cactus is REAL cover too
 				var rcol := Color(0.78, 0.8, 0.78) if rtex != "cactus_dead2" else Color(0.7, 0.62, 0.5)
-				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "cactus_dead2": 0.35}[rtex]
+				# Weathering: no two boulders share a size or a value — a fixed
+				# per-sprite scale/tint was the "identical stamp" tell.
+				rcol = rcol.lerp(rcol.darkened(0.20), float((rh3 >> 8) % 4) / 3.0)
+				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "cactus_dead2": 0.35}[rtex] \
+					* (0.90 + 0.04 * float((rh3 >> 4) % 5))
+				if (rh3 >> 12) % 3 == 0:
+					# Lee-side sand drift: reads as a boulder that's been sitting
+					# there, not dropped there. Drawn UNDER the sprite (before _spr)
+					# and the shed chips pushed outside the rock's own silhouette
+					# (~18px half-width) so they read as debris, not stray pixels.
+					var drift_pos := pos + Vector2(0, 5)
+					draw_texture_rect(Art.tex("fx_softspot"), Rect2(drift_pos - Vector2(9.0, 3.5), Vector2(18.0, 7.0)),
+						false, Color(0.62, 0.55, 0.40, 0.13 * fade))
+					for ck in 2:
+						var ch := Art.cell_hash(rh3 + ck * 7, ck)
+						var cang := float(ch % 628) / 100.0
+						draw_circle(pos + Vector2.from_angle(cang) * (20.0 + float(ch % 6)), 1.0,
+							Color(0.55, 0.5, 0.42, 0.3 * fade))
 				_spr(rtex, pos, float(rh3 % 628) / 100.0, rsc, Color(rcol.r, rcol.g, rcol.b, fade))
 				# a3-09 (AD#6): a lit top-edge highlight — a thin warm crescent on the
 				# boulder's upper rim implies overhead light, so a rock reads as RAISED
@@ -6749,10 +6768,57 @@ func _draw_gates() -> void:
 			_spr("wall_sandbag_end", Vector2(24, gy), 0.0, 1.0, open_wall)
 			_spr("wall_sandbag_end", Vector2(616, gy), PI, 1.0, open_wall, -1.0)
 		else:
+			# Base slab first: spans the full wall-art height (~gy-16..gy+18) so any
+			# sliver between jittered segments reads as a shadowed inner course
+			# instead of ground showing through.
+			draw_rect(Rect2(Vector2(24, gy - 16.0), Vector2(592, 34.0)), Color(0.32, 0.29, 0.22, 0.75))
+			# Wall-length ground shadow — offset BELOW the sandbag art (which
+			# occupies roughly gy-17..gy+18) so it actually emerges on screen
+			# instead of being fully occluded by the sprites drawn on top of it.
 			for i in 9:
+				_ground_shadow(Vector2(70 + i * 60, gy + 20.0), 26.0, 0.42)
+			# Base blending: dirt-drift gradients + scuff dots at the wall's FOOT
+			# (below the art) so they're actually visible, not overdraw hidden
+			# under the sprites.
+			draw_rect(Rect2(Vector2(24, gy + 16.0), Vector2(592, 12.0)), Color(0.42, 0.36, 0.24, 0.16))
+			draw_rect(Rect2(Vector2(24, gy + 20.0), Vector2(592, 8.0)), Color(0.15, 0.13, 0.10, 0.18))
+			for sc in 9:
+				var sch := Art.cell_hash(gh + sc * 17, sc)
+				var scuff_y := gy + 14.0 + float(sch % 15)  # gy+14..gy+28, below the art
+				if sch % 4 == 0:
+					scuff_y = gy - 24.0 + float(sch % 6)  # a few above too (wall's far side)
+				draw_circle(Vector2(30.0 + float(sch % 580), scuff_y), 1.2,
+					Color(0.2, 0.17, 0.12, 0.24))
+			# Two hash-picked "damaged" segments per wall: a torn-open half-width
+			# section, and a stacked barrier on a scarred one. Reused sprites only.
+			# dmg1 excludes the fixed end caps (i==0/8) so it never doubles up
+			# with them into a lumpy blob.
+			var dmg1 := 1 + (gh % 7)
+			var dmg2 := (gh / 9) % 9
+			if dmg2 == dmg1:
+				dmg2 = (dmg2 + 1) % 9
+			for i in 9:
+				var sh := Art.cell_hash(g["y"], i)
 				var flip: bool = (i + gh) % 2 == 0
-				_spr("wall_sandbag", Vector2(70 + i * 60, gy), PI if flip else 0.0, 1.0,
-					shut_wall, -1.0 if flip else 1.0)
+				var jx := float(sh % 7) - 3.0
+				var jy := float((sh / 7) % 11) - 5.0
+				var jsc := 0.92 + 0.18 * (float((sh / 77) % 12) / 11.0)
+				var tilt := (float((sh / 924) % 13) / 12.0 - 0.5) * 0.12
+				var jtint := shut_wall.lerp(shut_wall.darkened(0.18), float((sh / 421) % 5) / 4.0)
+				var seg_pos := Vector2(70 + i * 60 + jx, gy + jy)
+				var seg_angle := (PI if flip else 0.0) + tilt
+				if i == dmg1:
+					# Reads as damage, not another full stack: smaller, sootier,
+					# sagged lower, with two spilled chunks at the wall's foot.
+					var dmg_pos := seg_pos + Vector2(0.0, 6.0)
+					var soot_tint := jtint.darkened(0.35)
+					_spr("wall_sandbag_end", dmg_pos, seg_angle, 0.7, soot_tint, -1.0 if flip else 1.0)
+					_spr("wall_sandbag_end", dmg_pos + Vector2(-16.0, 12.0), 0.3, 0.35, soot_tint)
+					_spr("wall_sandbag_end", dmg_pos + Vector2(16.0, 14.0), -0.3, 0.35, soot_tint, -1.0)
+				else:
+					_spr("wall_sandbag", seg_pos, seg_angle, jsc, jtint, -1.0 if flip else 1.0)
+					if i == dmg2:
+						_spr("barrier", seg_pos + Vector2(0.0, -8.0), 0.0, 0.5, jtint)
 			_spr("wall_sandbag_end", Vector2(30, gy), 0.0, 1.0, shut_wall)
 			_spr("wall_sandbag_end", Vector2(610, gy), PI, 1.0, shut_wall, -1.0)
 			# Lock pips: how many of the two locking bunkers are still up —

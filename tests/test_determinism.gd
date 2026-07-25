@@ -213,13 +213,18 @@ const SEED := 0xDEADBEEF
 ## campaign samples move (the torture walks the LZ from tick 0); no rng draw is added, so
 ## the streamed world past -500 is unchanged. ENDLESS_GOLDEN VERIFIED UNCHANGED (the
 ## authoring is campaign-gated).
+## RE-RECORDED (2026-07-25, seawall depth stagger): the LZ seawall's six rocks
+## moved off a single y=-180 line onto a hand-authored +-26px depth stagger --
+## pure placement, no new rng draw, no kind change, lane still >= HULL_CLEARANCE.
+## All 6 campaign samples move; ENDLESS_GOLDEN VERIFIED UNCHANGED (the authoring
+## is campaign-gated).
 const GOLDEN: Array[int] = [
-	8118371945864493936,
-	1975911482936326783,
-	2033003659266520302,
-	1406630943552076265,
-	3512377309567778653,
-	7050485700111601822,
+	8824309749638634364,
+	6749052236834509168,
+	2266527914986358408,
+	7994727017838703917,
+	4594530292734471620,
+	1982583823041702415,
 ]
 
 
