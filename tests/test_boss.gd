@@ -250,6 +250,30 @@ func test_c4_gunship_arena_crack() -> void:
 	Runner.T.ok(cracked, "the crack emits an arena_crack event for the view")
 
 
+func test_arena_crack_thresholds_use_the_spawn_pool() -> void:
+	# _damage_boss used to recompute _scaled_boss_hp(BOSS_HP) for its crack
+	# thresholds: that dropped the Boss Rush hp_bonus AND re-read the LIVE player
+	# count, so a partner dying mid-fight moved both thirds under the fight. The
+	# boss now stores max_hp at spawn (colossus precedent) and reads it back.
+	var sim := SimWorld.new(41, 2)
+	var gy: int = sim.camera_top + 100 * Fixed.ONE
+	sim._stamp_gunship_gate(gy, 20, false)
+	var boss: Dictionary = sim.gates[sim.gates.size() - 1]["boss"]
+	Runner.T.eq(boss["max_hp"], boss["hp"], "the gunship banks its scaled starting pool at spawn")
+	Runner.T.ok(boss["max_hp"] > SimWorld.BOSS_HP, "2P + Boss Rush bonus scales well past the flat pool")
+	# One span slab to crack, then lose the partner: the live count now says 1P.
+	var span_y: int = gy + 160 * Fixed.ONE
+	sim.rocks.append({"x": SimWorld.SCREEN_CX, "y": span_y, "kind": 2, "burn_ticks": 0})
+	sim._kill_player(sim.players[1])
+	var maxhp: int = boss["max_hp"]
+	sim._damage_boss(boss, maxhp - (maxhp * 2 / 3))   # lands exactly on the first third
+	var cracked := false
+	for ev in sim.events:
+		if ev.get("t", "") == "arena_crack":
+			cracked = true
+	Runner.T.ok(cracked, "the first third still cracks the span after a partner dies mid-fight")
+
+
 func test_c4_endless_miniboss_no_crack() -> void:
 	# c4 5v: the arena crack is gunship-arena specific — an endless miniboss (no
 	# bridge-span slab) crosses the same HP thirds with ZERO geometry change, so
