@@ -778,6 +778,41 @@ static func font() -> Font:
 	return _font
 
 
+## Measured pixel width of `txt` at `size` in the view font — the memo hud.gd already
+## has (_tw/_tw_cache), lifted here so main.gd and art.gd share it. The font is fixed for
+## a run, so a (txt, size) width never changes; without this, _draw re-shapes the same
+## static strings every frame (the banner path measured ONE string 3-5x per frame, and
+## banner_fit_size shapes it up to 9 more times stepping the size down).
+##
+## Keyed as size -> {txt -> width} rather than a concatenated "txt@size" key: main.gd
+## measures at ~8 different point sizes, and a composite key would burn a String alloc
+## on every lookup INCLUDING the hits, which are the hot path.
+static var _tw_cache := {}
+const TW_CACHE_CAP := 512   # distinct strings per size before that size's memo resets
+
+
+static func tw(txt: String, size: int) -> float:
+	var by_size: Dictionary = _tw_cache.get(size, {})
+	if by_size.is_empty():
+		_tw_cache[size] = by_size
+	elif by_size.has(txt):
+		return by_size[txt]
+	var w: float = font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	# Bound the memo the way hud.gd does: view strings are a small finite set (static
+	# labels + short numerics), so the cap is headroom that never trips in practice. A
+	# plain clear-on-overflow beats LRU bookkeeping — the next frame re-warms the live set.
+	if by_size.size() >= TW_CACHE_CAP:
+		by_size.clear()
+	by_size[txt] = w
+	return w
+
+
+## Flush the width memo. Called from main._notification on a theme/translation swap —
+## the only events that could put a different font under the cached measurements.
+static func flush_tw() -> void:
+	_tw_cache.clear()
+
+
 ## Shadowed text: black copy offset +1px, then the colored text on top — the
 ## drop-shadow pattern hand-inlined across the view, now in one place.
 ## max_w > 0 clips the string to that width instead of letting it bleed past the bound.
@@ -798,7 +833,7 @@ static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Colo
 
 ## Same shadow+color text, horizontally centered on cx at y.
 static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0, outline := 0) -> void:
-	var w := font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var w := tw(txt, size)
 	if max_w > 0.0:
 		w = minf(w, max_w)
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w, outline)
@@ -867,7 +902,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
 		# whole strokes below native scale (a 6px 'E' loses horizontals).
 		var fs := maxi(8, int(size * 0.62))
-		var w := f.get_string_size(letter, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var w := tw(letter, fs)
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
 
@@ -1018,7 +1053,8 @@ static func _arc_span(angles: PackedFloat64Array, lo: float, span: float) -> Vec
 
 ## Viewport + margin used to clip line() so an off-screen-anchored beam (e.g.
 ## a 900px sniper laser) doesn't emit hundreds of dead draw_rect calls for
-## the off-frame portion (the cheap integer walk itself still runs).
+## the off-frame portion — and, since line()'s walk bails once it leaves this
+## rect, doesn't burn the integer steps for it either.
 const _CLIP := Rect2(-2.0, -2.0, 644.0, 364.0)
 
 ## Mirrors draw_line(from, to, color, width, antialiased): Bresenham, stamped
@@ -1042,12 +1078,22 @@ static func line(ci: CanvasItem, from: Vector2, to: Vector2,
 	# applied vertically. y-major (steep line): mirrored. Either way each
 	# pixel is covered by exactly one rect — no double-composited alpha.
 	var x_major := dx >= -dy
+	# opt: the clip test above suppressed the DRAW but not the WALK — a 900px
+	# sniper beam anchored on-screen still ran ~900 iterations + has_point calls
+	# to stamp the ~40 that land. _CLIP is convex, so a straight line crosses it
+	# in exactly ONE interval: once we've been inside and step out, we can never
+	# come back. Bail there. Pixel-identical by construction — the walk state
+	# (x0/y0/err) is untouched, we only stop iterating past the last drawn pixel.
+	var was_in := false
 	while true:
 		if _CLIP.has_point(Vector2(x0, y0)):
+			was_in = true
 			if x_major:
 				ci.draw_rect(Rect2(x0, y0 - half, 1, w), color)
 			else:
 				ci.draw_rect(Rect2(x0 - half, y0, w, 1), color)
+		elif was_in:
+			return
 		if x0 == x1 and y0 == y1:
 			break
 		var e2 := err * 2
