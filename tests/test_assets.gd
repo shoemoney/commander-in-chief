@@ -1408,6 +1408,33 @@ func test_a3_muzzle_heat_capped_below_explosions() -> void:
 	Runner.T.ok(mh["fan_a"] <= 0.66 and mh["core_a"] <= 0.66, "fan + core additive alphas capped so MG-spam sums low")
 
 
+# --- juice pass: landing REAL damage on a multi-HP enemy must spawn the AUTHORED
+# impact cards (sparkle scatter + dark strike mark), not just the procedural light
+# + dots it used to — "a hit that doesn't sell" was a blind-review verbatim. ---
+
+func test_damaging_hit_spawns_authored_impact_cards() -> void:
+	var m = load("res://src/main.gd").new()
+	m.sim = SimWorld.new(11, 1)
+	m._motion = 1.0
+	m.sim.enemies.clear()
+	m.sim.enemies.append({"alive": true, "kind": "mg_nest", "hp": 3,
+		"x": 100 * Fixed.ONE, "y": 100 * Fixed.ONE})
+	m._check_enemy_hits()          # first pass only seeds hp_prev — no fx yet
+	Runner.T.eq(m._fx.size(), 0, "seeding the hp edge-detect spawns nothing")
+	m.sim.enemies[0]["hp"] = 2     # a round gets through the armour
+	m._check_enemy_hits()
+	var kinds := {}
+	var texes := {}
+	for f in m._fx:
+		kinds[f.get("kind", "")] = true
+		if f.get("kind", "") == "tex":
+			texes[f.get("tex", "")] = true
+	Runner.T.ok(kinds.has("light"), "the damaging hit still throws its local light")
+	Runner.T.ok(kinds.has("spark"), "the damaging hit gets the authored sparkle scatter, like a ricochet")
+	Runner.T.ok(texes.has("fx_impactdark"), "the damaging hit stamps the dark strike mark")
+	m.free()
+
+
 # --- a3-08 (Iran reskin): desert flora shares the sand palette — no longer a
 # hue-separated green mass. Scrub/tumbleweed/dry_shrub/cactus separate from the
 # ground by VALUE (a touch duller than the brightest sand stop) plus shape and
