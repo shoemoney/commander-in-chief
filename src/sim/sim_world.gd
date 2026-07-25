@@ -1600,7 +1600,15 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			# clears it; mortar rings ignore it (strikes never check cover).
 			var sbx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
 			var sby: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
-			sandbags.append({"x": sbx, "y": sby})
+			# "player": 1 is what SANDBAG_FIELD_CAP counts. Counting *untagged* bags
+			# instead meant every authored bag on the field billed against the player's
+			# 6-bag allowance: endless plants 16 in _init, so the 40-coin shop bag
+			# answered deny/"cap" from tick 0 — in the only mode that has a shop, and
+			# the exact loop _init's own comment calls intended. ("world" could not be
+			# reused for this: in endless it marks the TEMPORARY shop barricades that
+			# crumble at intermission end, so tagging permanent cover with it deletes
+			# the arena's cover every wave — tests/test_endless.gd:492 pins that.)
+			sandbags.append({"x": sbx, "y": sby, "player": 1})
 			events.append({"t": "sandbag_plant", "x": sbx, "y": sby})
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
@@ -1681,7 +1689,7 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	var cost: int = _supply_cost(kind)
 	var player_bags := 0
 	for pb in sandbags:
-		if not pb.has("world"):
+		if pb.get("player", 0) == 1:
 			player_bags += 1
 	if kind == 4 and (player_bags >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
 		# Sandbag-specific denials: field cap reached, or buying from a tank
@@ -2783,7 +2791,16 @@ func _step_frogman(e: Dictionary) -> void:
 	elif dlen > FROGMAN_CALM_RADIUS and _in_water(e["x"], e["y"]):
 		e["submerged"] = true
 	else:
-		e["lunge_ticks"] = FROGMAN_LUNGE_TICKS   # rewind for another lunge
+		# Re-telegraph before lunging again, instead of rewinding the lunge on the spot.
+		# The old `lunge_ticks = FROGMAN_LUNGE_TICKS` here was unescapable: a lunge is
+		# 135px but the water band is ~80px, so the frogman lands on DRY GROUND, and the
+		# `_in_water` half of the elif above can then never be true again. It rewound
+		# every tick — a permanent 3.0px/t homing one-hit kill chasing a 2.4px/t player,
+		# with no telegraph, no cooldown, and no cull (it stays glued to the target).
+		# Routing back through the surface telegraph keeps it rooted and harmless for
+		# FROGMAN_SURFACE_TICKS first, which is the window the player needs to break away.
+		e["surface_ticks"] = FROGMAN_SURFACE_TICKS
+		events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
 
 
 func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:

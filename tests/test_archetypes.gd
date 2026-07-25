@@ -112,6 +112,33 @@ func test_frogman_resubmerges_once_lunge_ends_in_calm_water() -> void:
 	Runner.T.ok(frog["submerged"], "frogman re-submerges once the water calms")
 
 
+func test_frogman_stranded_on_land_retelegraphs_instead_of_lunging_forever() -> void:
+	## Regression: a lunge is FROGMAN_LUNGE_DIST but a water band is ~80px, so a lunging
+	## frogman lands on DRY GROUND. The re-submerge branch required `_in_water`, which is
+	## then false forever, and the else rewound lunge_ticks every tick — an unescapable
+	## 3.0px/t homing one-hit kill versus a 2.4px/t player, no telegraph, no cooldown,
+	## and no cull (it stays glued to the target). It must re-telegraph instead.
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["x"] = 0
+	p["y"] = 0
+	sim.enemies.clear()
+	sim.waters.append({"y": -400 * Fixed.ONE, "ford_x": 9999 * Fixed.ONE})
+	sim._spawn_frogman(0, 0)
+	var frog := sim.enemies[sim.enemies.size() - 1]
+	frog["x"] = 0
+	frog["y"] = 0   # on land, right on top of the player: close AND dry
+	Runner.T.ok(not sim._in_water(frog["x"], frog["y"]), "frogman is stranded on dry land")
+	frog["submerged"] = false
+	frog["surface_ticks"] = 0
+	frog["lunge_ticks"] = 1
+	sim._step_frogman(frog)   # exhausts the lunge
+	Runner.T.eq(frog["lunge_ticks"], 0, "lunge counted down to zero")
+	sim._step_frogman(frog)   # the old code rewound lunge_ticks here, forever
+	Runner.T.eq(frog["lunge_ticks"], 0, "does NOT instantly re-arm the lunge on land")
+	Runner.T.ok(frog["surface_ticks"] > 0, "re-telegraphs (surfaced + rooted) before lunging again")
+
+
 func test_sniper_fires_exactly_when_windup_hits_zero() -> void:
 	var sim := SimWorld.new(1, 1)
 	var p := sim.players[0]
