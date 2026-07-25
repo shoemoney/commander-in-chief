@@ -51,6 +51,7 @@ class _StubMain extends Node2D:
 	var _captions := true   # audio-identity: mirrors main._captions the CAPTIONS row reads
 	var _fullscreen := false
 	var _win_scale := 2   # c1-19: windowed integer scale the WINDOW SCALE row reads/steps
+	var _text_scale := MainScript.TEXT_SCALE_MIN   # accessibility: percent the TEXT SIZE row reads/steps
 	var _saved := 0
 	var _set_calls: Array = []       # records every _set_bus_vol(name, v) the menu makes
 	var _levels := {"SFX": 8, "Music": 8}   # STATEFUL: a step reads back what the last one wrote
@@ -97,7 +98,8 @@ class _StubMain extends Node2D:
 		return {"colorblind": colorblind, "assist": _assist, "reduce_motion": _motion < 0.5,
 			"rumble": _rumble_on, "swap_sticks": _swap_sticks[0], "swap_sticks_p2": _swap_sticks[1],
 			"sfx_vol": _bus_vol("SFX"), "music_vol": _bus_vol("Music"),
-			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _captions}
+			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _captions,
+			"text_scale": _text_scale}
 	# c4-11: mirror real main so the RESET DEFAULTS row can decide enabled/disabled. Compares the
 	# live snapshot against the authoritative SETTINGS_DEFAULTS (stub SFX/Music start at 8, not the
 	# default 10, so this reads false by default and the row stays an armable destructive row).
@@ -124,9 +126,22 @@ class _StubMain extends Node2D:
 		_fullscreen = d["fullscreen"]
 		_win_scale = int(d.get("window_scale", 2))
 		_captions = bool(d.get("captions", true))
+		_set_text_scale(int(d.get("text_scale", MainScript.TEXT_SCALE_MIN)))
 	# c1-19: WINDOW SCALE stub — headless has no display, so cap the ladder at 3x and
 	# apply the clamped absolute scale the menu's ◄/►/Enter drive (records a save).
 	func _max_win_scale() -> int: return 3
+	# accessibility: TEXT SIZE stub — mirrors real main (snap+clamp in the setter, bounds in the
+	# stepper) WITHOUT touching the Art.text_scale static, so a menu test can never leak a scaled
+	# font into an unrelated suite sharing this SceneTree.
+	func _set_text_scale(pct: int) -> void:
+		var snapped := int(round(float(pct) / float(MainScript.TEXT_SCALE_STEP))) * MainScript.TEXT_SCALE_STEP
+		_text_scale = clampi(snapped, MainScript.TEXT_SCALE_MIN, MainScript.TEXT_SCALE_MAX)
+	func _step_text_scale(dir: int) -> bool:
+		var nxt := _text_scale + dir * MainScript.TEXT_SCALE_STEP
+		if nxt < MainScript.TEXT_SCALE_MIN or nxt > MainScript.TEXT_SCALE_MAX:
+			return false
+		_set_text_scale(nxt)
+		return true
 	func _win_scale_norm() -> int: return clampi(_win_scale, 1, _max_win_scale())
 	# c3-18: `persist` mirrors the real main — the OPTIONS dirty-state flips these LIVE but defers
 	# the write, so a deferred call must NOT bump _saved (the disk touch waits for SAVE).
@@ -3277,7 +3292,7 @@ func test_settings_help_lines_fit_footer() -> void:
 	var f := Art.font()
 	var help_budget := Menu.CANVAS_WIDTH - 24.0
 	for id in ["sfx", "music", "rumble", "motion", "colorblind", "assist", "captions",
-			"fullscreen", "winscale", "coop", "hard"]:
+			"fullscreen", "winscale", "textscale", "coop", "hard"]:
 		var h := Menu.setting_help(id)
 		Runner.T.ok(h != "", "settings row '%s' has a help description" % id)
 		Runner.T.ok(f.get_string_size(h, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= help_budget,
@@ -3483,7 +3498,7 @@ func test_setting_help_mapping_and_persistence_contract() -> void:
 	# Menu row id -> the SETTINGS_DEFAULTS key it persists (for the "SAVED" contract).
 	var persisted := {"sfx": "sfx_vol", "music": "music_vol", "rumble": "rumble",
 		"motion": "reduce_motion", "colorblind": "colorblind", "assist": "assist", "captions": "captions",
-		"fullscreen": "fullscreen", "winscale": "window_scale"}
+		"fullscreen": "fullscreen", "winscale": "window_scale", "textscale": "text_scale"}
 	for key in persisted.values():
 		Runner.T.ok(defaults.has(key), "SETTINGS_DEFAULTS still carries the persisted key '%s'" % key)
 	var run_config := ["coop", "hard"]
@@ -3618,7 +3633,7 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	Runner.T.ok(Menu.winscale_label(8).length() < "ASSIST (2-HIT): OFF".length(), "the WINDOW SCALE label fits within the widest toggle label's budget (no ellipsis at 640x360)")
 	# The subtitle carries the words: windowed names both controls; fullscreen either notes the
 	# windowed-only application or, when the preference can't fit, states the limit in plain language.
-	Runner.T.eq(Menu.disp_subtitle(false), "FULLSCREEN & WINDOW SCALE", "windowed subtitle names both controls")
+	Runner.T.eq(Menu.disp_subtitle(false), "FULLSCREEN, WINDOW SCALE & TEXT SIZE", "windowed subtitle names every control on the screen")
 	Runner.T.eq(Menu.disp_subtitle(true, 2, 2), "WINDOW SCALE APPLIES IN WINDOWED MODE", "fullscreen subtitle notes the windowed-only application when the preference fits")
 	Runner.T.eq(Menu.disp_subtitle(true, 7, 3), "LIMITED TO 3x ON THIS DISPLAY", "fullscreen subtitle states the limit in words when the preference can't fit this display")
 	var mn: Node2D = MainScript.new()
@@ -3644,7 +3659,7 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	var by_id := {}
 	for row in m._menu_items():
 		by_id[row["id"]] = row
-	Runner.T.ok(by_id.has("fullscreen") and by_id.has("winscale"), "the DISPLAY screen holds SEPARATE FULLSCREEN + WINDOW SCALE rows")
+	Runner.T.ok(by_id.has("fullscreen") and by_id.has("winscale") and by_id.has("textscale"), "the DISPLAY screen holds SEPARATE FULLSCREEN + WINDOW SCALE + TEXT SIZE rows")
 	Runner.T.eq(by_id["fullscreen"]["label"], "FULLSCREEN: OFF", "fullscreen row reads the live mode")
 	Runner.T.eq(by_id["winscale"]["label"], "WINDOW SCALE: 2x", "window scale row reads the live windowed scale")
 	Runner.T.ok(not by_id["fullscreen"]["on"], "fullscreen state dot reads OFF while windowed")
@@ -3652,7 +3667,7 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	Runner.T.ok(not by_id["winscale"].get("inactive", false), "WINDOW SCALE is never marked inactive (always a live control)")
 	Runner.T.ok(m._row_cycles(by_id["winscale"]), "WINDOW SCALE shows the cycle arrows while windowed")
 	# The 3-row DISPLAY screen decompresses to a legible plate (roomy, unlike a crammed OPTS row).
-	Runner.T.ok(float(Menu.compute_geometry(Menu.Mode.DISP, 3, -1.0)["bh"]) >= MIN_PLATE, "DISPLAY screen plates clear the >=20px legible floor")
+	Runner.T.ok(float(Menu.compute_geometry(Menu.Mode.DISP, 4, -1.0)["bh"]) >= MIN_PLATE, "DISPLAY screen plates clear the >=20px legible floor")
 
 	var wi := -1
 	var fi := -1
@@ -3930,6 +3945,119 @@ func test_display_scale_persistence_migration_and_reset() -> void:
 	_restore_buses(snap)
 
 
+# accessibility (TEXT SIZE): the REAL main.gd plumbing for the new persisted setting, exercised
+# headless end to end — the same shape the WINDOW SCALE test above pins, because the two rows are
+# siblings on the DISPLAY screen and a divergence between them is exactly how one of them rots.
+# What must hold:
+#   (a) a save predating the setting MIGRATES to 100% (the shipped sizes) — never to a surprise;
+#   (b) an in-range saved percent loads verbatim, and an out-of-range/off-rung one is snapped and
+#       clamped by the setter, so a hand-edited config can only ever install an offered value;
+#   (c) the live value round-trips through _settings_snapshot (which is literally what gets
+#       written to disk) — a setting that loads but never saves is the bug this catches;
+#   (d) Art.text_scale, the static every small-label draw site actually reads, tracks the percent —
+#       the setting existing in a dict but not reaching the font size would otherwise pass (a);
+#   (e) RESET DEFAULTS reverts it with everything else.
+# Restores Art.text_scale before returning: it is process-global static state, and a leaked 2.0
+# would silently resize the fonts under every other suite's layout measurements.
+func test_text_scale_persistence_migration_and_reset() -> void:
+	_ensure_audio_buses()
+	var snap := _snapshot_buses()
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+
+	# (a) legacy save with no text_scale key -> the ship default, at 1.0x fonts.
+	var legacy: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	legacy.erase("text_scale")
+	mn._apply_settings(legacy)
+	Runner.T.eq(mn._text_scale, MainScript.TEXT_SCALE_MIN, "a save missing text_scale migrates to the 100% ship default")
+	Runner.T.eq(Art.text_scale, 1.0, "the migrated default leaves the font multiplier at 1.0 (byte-identical to pre-setting output)")
+
+	# (b) in-range verbatim; off-rung snapped; absurd clamped; below-floor clamped.
+	var saved: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	saved["text_scale"] = 150
+	mn._apply_settings(saved)
+	Runner.T.eq(mn._text_scale, 150, "an in-range saved text_scale loads verbatim")
+	Runner.T.eq(Art.text_scale, 1.5, "(d) Art.text_scale tracks the loaded percent")
+	# (d) the multiplier actually reaches the chosen sizes — the 7px shop name and the 8px world
+	# callouts are the specific labels this setting exists for.
+	Runner.T.eq(Art.fs(HudIcons.SHOP_NAME_SIZE), 11, "the 7px shop-item NAME scales with TEXT SIZE (7 -> 11 at 150%)")
+	Runner.T.eq(Art.fs(Menu.SEED_TAG_SIZE), 11, "the 7px seed-validity tag scales with TEXT SIZE")
+	Runner.T.eq(Art.fs(8), 12, "the 8px in-world callouts scale with TEXT SIZE")
+
+	var offrung: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	offrung["text_scale"] = 137
+	mn._apply_settings(offrung)
+	Runner.T.eq(mn._text_scale, 125, "an off-rung saved text_scale snaps to a real offered rung")
+
+	var absurd: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	absurd["text_scale"] = 9000
+	mn._apply_settings(absurd)
+	Runner.T.eq(mn._text_scale, MainScript.TEXT_SCALE_MAX, "an absurd saved text_scale is clamped to the ceiling")
+	var tiny: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
+	tiny["text_scale"] = 10
+	mn._apply_settings(tiny)
+	Runner.T.eq(mn._text_scale, MainScript.TEXT_SCALE_MIN, "a below-floor saved text_scale is clamped up to 100% (never SMALLER than the design sizes)")
+
+	# (c) the value the game would WRITE matches the live value, and re-loading that exact dict is
+	# a fixed point — the round-trip a restart actually performs.
+	mn._set_text_scale(175)
+	var written: Dictionary = mn._settings_snapshot()
+	Runner.T.eq(written["text_scale"], 175, "_settings_snapshot carries text_scale, so SAVE persists it")
+	mn._apply_settings(written)
+	Runner.T.eq(mn._text_scale, 175, "the persisted snapshot round-trips back to the same size on load")
+
+	# (e) RESET DEFAULTS reverts it along with everything else, statics included.
+	mn._reset_settings()
+	Runner.T.eq(mn._text_scale, MainScript.SETTINGS_DEFAULTS["text_scale"], "RESET DEFAULTS reverts text_scale to the ship default")
+	Runner.T.eq(Art.text_scale, 1.0, "RESET DEFAULTS also restores the font multiplier")
+
+	mn.free()
+	Art.text_scale = 1.0   # process-global static: never leak a scaled font into another suite
+	_restore_buses(snap)
+
+
+# accessibility (TEXT SIZE): the OPTIONS surface for the same setting — it is a real, reachable,
+# rail-not-wrap stepper on the DISPLAY sub-screen (where WINDOW SCALE already lives, and where
+# there is room; the flat OPTIONS list is at its 10-row legibility cap). Enter and ► must be the
+# same call, and both ends must RAIL rather than wrap a player who is holding the key because they
+# cannot read the screen straight past the size they wanted.
+func test_display_text_size_row_steps_and_rails() -> void:
+	Runner.T.eq(Menu.textscale_label(100), "TEXT SIZE: 100%", "the row reads its live percent")
+	Runner.T.ok(not ("textscale" in Menu._TOGGLES), "TEXT SIZE steps (it is not a plain flip toggle)")
+	Runner.T.ok(Menu.textscale_label(200).length() < "ASSIST (2-HIT): OFF".length(),
+		"the TEXT SIZE label fits within the widest toggle label's budget (no ellipsis at 640x360)")
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.DISP
+	var row := {}
+	var ti := -1
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "textscale":
+			row = rows[i]
+			ti = i
+	Runner.T.ok(ti >= 0, "the DISPLAY screen carries a TEXT SIZE row")
+	Runner.T.ok(row.get("step", false), "the TEXT SIZE row carries the step value-marker")
+	Runner.T.ok(m._row_cycles(row), "TEXT SIZE shows the cycle arrows")
+	Runner.T.eq(Menu.footer_cycle_segs(row)[0]["label"], "ADJUST", "its footer hint reads ADJUST")
+
+	m.sel = ti
+	m._step_text_size(1)
+	Runner.T.eq(stub._text_scale, 125, "> steps TEXT SIZE up one rung")
+	m._press()   # Enter is the SAME call as > — no second behavior to keep in sync
+	Runner.T.eq(stub._text_scale, 150, "Enter steps TEXT SIZE up the same rung > does")
+	for i in 10:
+		m._step_text_size(1)
+	Runner.T.eq(stub._text_scale, MainScript.TEXT_SCALE_MAX, "held > rails at the ceiling and never wraps back to tiny text")
+	for i in 20:
+		m._step_text_size(-1)
+	Runner.T.eq(stub._text_scale, MainScript.TEXT_SCALE_MIN, "held < rails at the 100% floor and never wraps up")
+	Runner.T.eq(m._menu_items()[ti]["label"], "TEXT SIZE: 100%", "the row label tracks the stepped value")
+	m.free()
+	stub.free()
+
+
 # c1-19: F11 (Alt+Enter) into fullscreen and back must RESTORE the player's selected windowed
 # scale, not whatever size the OS left — proving the toggle and the on-screen ladder agree on
 # the same stored scale. Also proves _set_win_scale drops fullscreen and clamps, driving the
@@ -4039,7 +4167,7 @@ func test_display_fullscreen_transition_preserves_scale_across_resize_events() -
 
 	# The DISPLAY subtitle names both controls while windowed and, while fullscreen, states that
 	# WINDOW SCALE applies on return to windowed (the row stays adjustable; it isn't a dead control).
-	Runner.T.eq(Menu.disp_subtitle(false), "FULLSCREEN & WINDOW SCALE", "windowed subtitle names both controls")
+	Runner.T.eq(Menu.disp_subtitle(false), "FULLSCREEN, WINDOW SCALE & TEXT SIZE", "windowed subtitle names every control on the screen")
 	Runner.T.ok("WINDOWED" in Menu.disp_subtitle(true), "fullscreen subtitle explains WINDOW SCALE applies in windowed mode")
 	mn.free()
 
@@ -4301,7 +4429,7 @@ func test_c4_04_draw_plate_arrows_and_hit_test_share_btn_geometry() -> void:
 		[Menu.Mode.PAUSE, _row_count(Menu.Mode.PAUSE, false)],
 		[Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false)],
 		[Menu.Mode.SETUP, _row_count(Menu.Mode.SETUP, false)],
-		[Menu.Mode.DISP, 3],
+		[Menu.Mode.DISP, 4],
 		[Menu.Mode.TITLE, 6],
 	]
 	for case in cases:

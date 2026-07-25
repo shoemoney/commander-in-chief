@@ -243,6 +243,85 @@ func test_audio_identity_caption_arms_and_expires_with_stream_length() -> void:
 	sfx.free()
 
 
+# --- accessibility: SFX captions (Sfx.caption_sfx) ---
+
+# The contract of the table itself, checked against the code that has to fire it. Every key must be
+# a cue main.gd can actually reach, or the caption is dead text nobody will ever notice is missing;
+# every line must be bracketed (the closed-caption convention that separates a SOUND from a spoken
+# line, which is also the only thing distinguishing these from the VO/bark captions on screen); and
+# the set must stay SMALL relative to the ~90-cue sound table — the whole point is that these are
+# the sounds that are the ONLY warning of something, not a running transcript of the mix.
+func test_sfx_captions_only_cover_reachable_warning_cues() -> void:
+	var main_script: GDScript = load("res://src/main.gd")
+	var event_sound: Dictionary = main_script.get_script_constant_map()["_EVENT_SOUND"]
+	# armor_block is played from its own per-target branch in _ev_hit, not the _EVENT_SOUND table.
+	var off_table := {"armor_block": true}
+	for key in Sfx.SFX_CAPTIONS:
+		Runner.T.ok(event_sound.has(key) or off_table.has(key),
+			"captioned cue '%s' is a real sim-event sound main.gd can fire" % key)
+		var line: String = Sfx.SFX_CAPTIONS[key]
+		Runner.T.ok(line.begins_with("[") and line.ends_with("]"),
+			"'%s' uses the bracketed sound-effect caption form, not the SPEAKER: form" % key)
+		# Must fit the strip on ONE line: these fire mid-fight, and a warning that wraps is a
+		# warning that costs a second of reading the player does not have.
+		var w: float = Art.font().get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE).x
+		Runner.T.ok(w <= HudIcons.CAPTION_MAX_W, "'%s' fits the caption strip on one line" % key)
+	Runner.T.ok(Sfx.SFX_CAPTIONS.size() < event_sound.size() / 4,
+		"the captioned set stays a small subset of the cue table (%d of %d)" % [Sfx.SFX_CAPTIONS.size(), event_sound.size()])
+
+
+# The gating, which is the whole design: an unlisted cue is silent on screen, a listed one arms,
+# and NOTHING can stomp a caption that is still inside its stable pre-fade window — not another
+# warning, not a Spotter line, not a bark. Once a line starts dissolving the strip is free again,
+# and a cue that repeats every tick (the armour plink) is held off by its own per-key cooldown so
+# it can't pin the strip open for as long as the player keeps firing.
+func test_sfx_caption_gating_never_stomps_a_line_still_being_read() -> void:
+	var sfx := Sfx.new()
+	var f := Engine.get_physics_frames()
+
+	# An un-captioned cue (a plain shot) never touches the strip.
+	sfx.caption_sfx("shot")
+	Runner.T.eq(sfx.active_caption()["text"], "", "an un-captioned cue leaves the strip empty")
+
+	# A listed warning arms, dry (not radio-tinted — it is the world making noise, not the radio).
+	sfx.caption_sfx("strike_warn")
+	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["strike_warn"], "a listed warning cue arms the strip")
+	Runner.T.eq(sfx.active_caption()["radio"], false, "a warning caption is dry-tinted, not a radio line")
+	Runner.T.ok(not sfx._cap_is_vo, "a warning caption is not flagged VO, so stop_vo can never clear it")
+
+	# A DIFFERENT warning arriving while that one is still stable does not stomp it.
+	sfx.caption_sfx("sniper_paint")
+	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["strike_warn"],
+		"a second warning cannot stomp a caption still inside its readable window")
+
+	# Once the line is inside its fade ramp, the strip is available again.
+	sfx._cap_until = Engine.get_physics_frames() + 1
+	sfx.caption_sfx("sniper_paint")
+	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["sniper_paint"],
+		"a warning takes over once the previous line has started dissolving")
+
+	# The SAME cue can't re-arm inside its cooldown, even with the strip completely free — this is
+	# what stops a per-bullet cue from pinning the strip open.
+	sfx._cap_until = Engine.get_physics_frames()
+	sfx.caption_sfx("sniper_paint")
+	Runner.T.eq(sfx.active_caption()["text"], "", "the same cue cannot re-arm inside SFX_CAPTION_GAP")
+	Runner.T.ok(int(sfx._sfx_cap_next["sniper_paint"]) >= f + Sfx.SFX_CAPTION_GAP,
+		"arming a cue records its next-allowed frame a full gap ahead")
+	# ...and once the gap has passed it is allowed again (rewind the recorded frame rather than
+	# waiting 3 real seconds).
+	sfx._sfx_cap_next["sniper_paint"] = 0
+	sfx.caption_sfx("sniper_paint")
+	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["sniper_paint"], "past its cooldown the cue captions again")
+
+	# A live Spotter VO line outranks a warning for the same reason a warning outranks a warning:
+	# whatever is on screen gets read to the end.
+	sfx._arm_caption("SPOTTER: \"Enemy observer spotted!\"", null, true, true)
+	sfx.caption_sfx("elite_windup")
+	Runner.T.eq(sfx.active_caption()["text"], "SPOTTER: \"Enemy observer spotted!\"",
+		"a warning never interrupts a VO line mid-read")
+	sfx.free()
+
+
 func test_audio_identity_stop_vo_clears_only_its_own_vo_caption() -> void:
 	var sfx := Sfx.new()
 	# Arm a VO caption, then a bark caption on top (they use separate players/buses and can

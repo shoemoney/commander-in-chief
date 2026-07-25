@@ -52,6 +52,42 @@ const _BARK_CAPTIONS := {
 	"revive": "COMMANDER: \"Back in it!\"",
 }
 
+# accessibility (deaf / hard-of-hearing): the two tables above caption SPEECH. This one captions
+# the handful of NON-speech cues where the SOUND IS THE ONLY WARNING that something is about to
+# happen to you — the mortar whistle, the sniper/drone/MG-nest paint whine, an elite or technical
+# winding up, the sub-klaxon that says they're coming in behind you, and the armour plink that
+# means "your bullets are doing nothing to this". Without these a deaf player's first notice of an
+# aimed shot is the damage.
+#
+# Keyed by main.gd's SIM-EVENT kind (the keys of its _EVENT_SOUND table), so a cue is captioned at
+# the same choke point it's played from and the two can't drift; "armor_block" is captioned from
+# its own branch, which plays the ping outside that table.
+#
+# Deliberately NOT every sound. Anything already spelled out on screen (banners, floattext, the
+# gate/wave/shop jingles), pure feedback (shots, hits, coin) and ambience stay uncaptioned, for the
+# same reason the flavor barks were dropped: a strip that never stops reading is a strip nobody
+# reads, and a warning that shares the line with "+30 AMMO" isn't a warning any more.
+#
+# Bracketed rather than the SPEAKER: "line" form — the standard closed-caption convention for a
+# sound effect rather than dialogue, which doubles as the visual tell that this is the world
+# making a noise at you, not someone talking to you.
+const SFX_CAPTIONS := {
+	"strike_warn": "[MORTAR INCOMING]",
+	"sniper_paint": "[SNIPER LOCKED ON YOU]",
+	"drone_windup": "[DRONE LOCKED ON YOU]",
+	"mg_nest_aim": "[MG NEST TRACKING YOU]",
+	"elite_windup": "[ELITE WINDING UP]",
+	"grenadier_windup": "[GRENADE INBOUND]",
+	"technical_rev": "[TECHNICAL CHARGING]",
+	"rear_warn": "[ENEMIES CLOSING FROM BEHIND]",
+	"flank_warn": "[FLANK BREACH INCOMING]",
+	"armor_block": "[ROUNDS BOUNCING OFF ARMOR]",
+}
+# Per-key re-arm cooldown, in physics frames. Several of these cues repeat every few ticks for as
+# long as the threat lasts (the armour plink fires per blocked bullet); without a gate the strip
+# would be pinned open by one sustained event and stop reading as news.
+const SFX_CAPTION_GAP := 180
+
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
@@ -99,6 +135,7 @@ var _cap_radio := false  # true = radio-filtered Spotter line, false = dry Comma
 var _cap_until := 0      # physics frame the caption stays legible until
 var _cap_is_vo := false  # true if the CURRENT caption came from play_vo (not a Commander bark) —
                          # lets stop_vo() clear only its own line, never a bark it didn't arm
+var _sfx_cap_next: Dictionary = {}   # SFX_CAPTIONS key -> earliest physics frame it may re-arm
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
 var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
 var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
@@ -427,6 +464,31 @@ func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool) -
 
 
 const CAPTION_FADE_FRAMES := 24.0   # 0.4s alpha ramp so the strip DISSOLVES rather than snapping
+
+
+func caption_sfx(key: String) -> void:
+	## accessibility: arm the subtitle strip for a non-speech WARNING cue (see SFX_CAPTIONS).
+	## A no-op for every key that isn't in that table, so main.gd can call it blindly from its
+	## one sim-event → sound choke point without a second whitelist to keep in sync.
+	##
+	## Two gates, and both are about READABILITY rather than audio:
+	##  1. A caption still inside its stable (pre-fade) window is never stomped. Whatever is on
+	##     screen — a Spotter line, a Commander bark, an earlier warning — gets read to the end.
+	##     A warning that flickers past under the next one warns nobody, and the threats these
+	##     cover all carry a visual too (edge threat pips, ground telegraphs, the paint vignette),
+	##     so text is the redundant channel here, not the only one.
+	##  2. The same cue can't re-arm for SFX_CAPTION_GAP frames.
+	## Arms with a null stream, which _arm_caption's no-length floor turns into a fixed ~1.5s —
+	## right for a short bracketed line, and there's no clip whose length could speak for it.
+	if not SFX_CAPTIONS.has(key):
+		return
+	var f := Engine.get_physics_frames()
+	if _cap_until - f > int(CAPTION_FADE_FRAMES):
+		return
+	if f < int(_sfx_cap_next.get(key, 0)):
+		return
+	_sfx_cap_next[key] = f + SFX_CAPTION_GAP
+	_arm_caption(SFX_CAPTIONS[key], null, false, false)
 
 
 func active_caption() -> Dictionary:
