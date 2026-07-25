@@ -516,3 +516,62 @@ func test_c4_shop_barricades() -> void:
 		if sb.get("world", 0) == 1:
 			b1 += 1
 	Runner.T.eq(b1, 0, "the wave-1 clear places no barricades (gate holds)")
+
+
+func test_rooted_wave_spawns_land_where_the_player_can_reach_them() -> void:
+	## Endless never calls _step_camera, so camera_top is pinned at -VIEW_H for
+	## the whole run. Rooted units (mg_nest / broadcast) spawned at the same
+	## camera_top-24 the walkers use never move down into reach — that y sits
+	## ABOVE the player's own _clamp_actor ceiling (camera_top+16), so the mast
+	## or nest could only ever be blind-fired at, while still counting toward
+	## _wave_hostiles_cleared and holding the wave open indefinitely.
+	var lo := 0
+	var hi := 0
+	var nests := 0
+	var masts := 0
+	var idle := SimInput.new()
+	for s in [7, 23]:
+		var sim := SimWorld.new(s, 1, "endless")
+		sim.step([idle])
+		# Wave 12: past the broadcast debut (7), off the wave%5 miniboss/mast
+		# beats, elite_every == 2 so the special roll comes up often.
+		sim.wave = 12
+		sim.wave_mod = 0     # no themed remap, and not Blitz (which skips specials)
+		sim.wave_pending = 400
+		sim.wave_spawn_cd = 1
+		lo = sim.camera_top + 16 * SimWorld.F_ONE
+		hi = sim.camera_top + 344 * SimWorld.F_ONE
+		for i in 2000:
+			sim.step([idle])
+			for e in sim.enemies:
+				if e["kind"] == "mg_nest" or e["kind"] == "broadcast":
+					Runner.T.ok(e["y"] >= lo and e["y"] <= hi,
+						"rooted %s spawns inside the player's reachable band" % e["kind"])
+					if e["kind"] == "mg_nest":
+						nests += 1
+					else:
+						masts += 1
+			# Clear the field each tick: keeps the lone player alive so the wave
+			# keeps trickling, and stops rooted units piling into MAX_ENEMIES.
+			for e in sim.enemies:
+				e["alive"] = false
+			if nests > 0 and masts > 0:
+				break
+		if nests > 0 and masts > 0:
+			break
+	Runner.T.ok(nests > 0, "the run actually spawned an mg nest to check")
+	Runner.T.ok(masts > 0, "the run actually spawned a rally mast to check")
+
+
+func test_the_rally_mast_is_not_exempt_from_the_off_screen_sweep() -> void:
+	## The mast used to be the one entity the off-screen cull skipped outright —
+	## it could never be swept, at any position. It spawns in the live band now,
+	## so it plays by the same rule as every other enemy.
+	var sim := SimWorld.new(31, 1, "endless")
+	sim.enemies.clear()
+	sim._spawn_broadcast(300 * SimWorld.F_ONE, sim.camera_top + 500 * SimWorld.F_ONE)
+	sim._spawn_broadcast(320 * SimWorld.F_ONE, sim.camera_top + 100 * SimWorld.F_ONE)
+	sim.step([_idle()])
+	Runner.T.eq(sim.enemies.size(), 1, "the mast behind the camera is swept like anything else")
+	Runner.T.eq(sim.enemies[0]["y"], sim.camera_top + 100 * SimWorld.F_ONE,
+		"the in-band mast survives")

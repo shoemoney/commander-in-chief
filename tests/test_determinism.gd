@@ -218,13 +218,29 @@ const SEED := 0xDEADBEEF
 ## pure placement, no new rng draw, no kind change, lane still >= HULL_CLEARANCE.
 ## All 6 campaign samples move; ENDLESS_GOLDEN VERIFIED UNCHANGED (the authoring
 ## is campaign-gated).
+## RE-RECORDED (2026-07-25, ghost-bunker budget leak): `bunkers` was never removed
+## from and _step_bunkers had no on-screen gate, so every passed-but-unsealed bunker
+## kept spawning infantry behind the camera forever — rushers that ate the shared
+## MAX_ENEMIES budget, drew from the shared stream-rng, and were culled by
+## _step_enemies the very next tick, starving the real front-line spawner on deep
+## runs. Bunkers now ride the same `y > camera_top + 420` sweep as enemies/sandbags/
+## rocks, which both prunes them and gates their spawning. The campaign torture
+## ratchets past the LZ bunker inside the first sample window, so ALL 6 campaign
+## samples move (fewer ghost spawns = a different rng trajectory from there on).
+## Gate arenas are unaffected: gates hold their own b1/b2 dict refs, and a closed
+## gate pins the camera within GATE_CAMERA_PAD+150px of its pair — always in band.
+## ENDLESS_GOLDEN VERIFIED UNCHANGED: endless streams no bunkers at all, and the
+## same-pass rooted-spawn fix (endless mg_nest/broadcast now spawn at camera_top+40
+## instead of the unreachable camera_top-24, and the rally mast lost its blanket
+## exemption from the off-screen cull) is wave-3+/wave-7+ — the endless torture
+## wipes during wave 2. Proven instead by the two new tests in test_endless.gd.
 const GOLDEN: Array[int] = [
-	8824309749638634364,
-	6749052236834509168,
-	2266527914986358408,
-	7994727017838703917,
-	4594530292734471620,
-	1982583823041702415,
+	1375888124737907086,
+	7993107920359128990,
+	610992939748277974,
+	4118435957975969037,
+	2204170038489693988,
+	8732644276269288604,
 ]
 
 
