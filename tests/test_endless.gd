@@ -681,3 +681,117 @@ func test_stacked_payday_actually_fires() -> void:
 	sim._kill_enemy(e)
 	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_RUSHER * 2,
 		"a mutator in the SECOND slot pays out exactly like the first")
+
+
+func test_arena_shift_never_dies_under_congestion() -> void:
+	# Endless audit: the shift beat planted into a FIXED 6-slot table with a 20px
+	# dedupe, so once the slots congested the fallthrough walked the whole table
+	# and planted NOTHING — "the arena keeps changing" quietly stopped somewhere
+	# past wave 30 while the rock-crater half kept firing. Measured before the
+	# fix: 13-16 of 20 shift beats over 60 waves. Every one must land now.
+	for sd in [7, 11, 23]:
+		var sim := SimWorld.new(sd, 1, "endless")
+		var beats := 0
+		var fired := 0
+		var first_miss := -1
+		while sim.wave < 60:
+			sim.events.clear()
+			sim._start_wave()
+			if sim.wave % SimWorld.ARENA_SHIFT_CADENCE != 0:
+				continue
+			beats += 1
+			var got := false
+			for ev in sim.events:
+				if ev.get("t", "") == "arena_shift":
+					got = true
+			if got:
+				fired += 1
+			elif first_miss < 0:
+				first_miss = sim.wave
+		Runner.T.eq(fired, beats,
+			"seed %d: every one of %d shift beats plants (first silent wave %d)" % [sd, beats, first_miss])
+		Runner.T.ok(sim.rocks.size() >= SimWorld.ARENA_ROCK_FLOOR,
+			"seed %d: the recycle lap still respects the rock floor (%d)" % [sd, sim.rocks.size()])
+
+
+func test_arena_shift_recycles_a_full_table() -> void:
+	# Direct proof of the escape hatch: wall EVERY slot footprint with world bags
+	# so the polite lap can't plant a single cell, then take a shift wave. The
+	# recycle lap must destroy the stale cover (loudly) and plant anyway.
+	var sim := SimWorld.new(11, 1, "endless")
+	while sim.wave < 2:
+		sim._start_wave()
+	sim.sandbags.clear()
+	for slot in SimWorld.ARENA_L_SLOTS:
+		for ox in range(-40, 41, 16):
+			for oy in range(-80, 41, 16):
+				sim.sandbags.append({"x": (slot[0] + ox) * SimWorld.F_ONE,
+					"y": (slot[1] + oy) * SimWorld.F_ONE})
+	var bags0: int = sim.sandbags.size()
+	sim.events.clear()
+	sim._start_wave()   # wave 3: the first shift beat, into a fully congested table
+	var shift := {}
+	var breaks := 0
+	for ev in sim.events:
+		if ev.get("t", "") == "arena_shift":
+			shift = ev
+		if ev.get("t", "") == "sandbag_break":
+			breaks += 1
+	Runner.T.ok(not shift.is_empty(), "a fully congested table still plants a shift")
+	Runner.T.eq(shift.get("forced", 0), 1, "the drop reports it had to RECYCLE, not silently succeed")
+	Runner.T.ok(breaks > 0, "the recycled cover leaves a loud sandbag_break trail (%d)" % breaks)
+	Runner.T.ok(sim.sandbags.size() > 0, "the arena still has cover after the recycle")
+	Runner.T.ok(bags0 > 0, "the congestion fixture actually filled the table")
+
+
+func test_supply_pod_always_lands_or_reports() -> void:
+	# The wave-5 pod had NO fallthrough at all — a congested slot silently ate a
+	# PROMISED resupply (measured missing from wave 20 on). Every pod wave must
+	# now emit either supply_pod or the loud supply_pod_blocked. Never neither.
+	for sd in [7, 11, 23, 0xC0FFEE]:
+		var sim := SimWorld.new(sd, 1, "endless")
+		var beats := 0
+		var landed := 0
+		var reported := 0
+		while sim.wave < 60:
+			sim.events.clear()
+			sim._start_wave()
+			if sim.wave < 5 or sim.wave % 5 != 0:
+				continue
+			beats += 1
+			for ev in sim.events:
+				if ev.get("t", "") == "supply_pod":
+					landed += 1
+				if ev.get("t", "") == "supply_pod_blocked":
+					reported += 1
+		Runner.T.eq(landed + reported, beats,
+			"seed %d: all %d pod waves land or report (landed %d, reported %d)" % [sd, beats, landed, reported])
+		Runner.T.eq(landed, beats, "seed %d: in practice every pod finds ground" % sd)
+
+
+func test_supply_pod_reports_when_it_truly_cannot_land() -> void:
+	# A player-BOUGHT sandbag is never bulldozed, so walling every slot with them
+	# is the one way to make the pod genuinely impossible. It must SAY so —
+	# a lost resupply is a loud failure, never a silent no-op.
+	var sim := SimWorld.new(11, 1, "endless")
+	while sim.wave < 4:
+		sim._start_wave()
+	sim.sandbags.clear()
+	for slot in SimWorld.ARENA_L_SLOTS:
+		for ox in [-48, 0, 48]:
+			for oy in [-48, 0, 48]:
+				sim.sandbags.append({"x": (slot[0] + ox) * SimWorld.F_ONE,
+					"y": (slot[1] + oy) * SimWorld.F_ONE, "player": 1})
+	var rocks0: int = sim.rocks.size()
+	var bags0: int = sim.sandbags.size()
+	sim.events.clear()
+	sim._start_wave()   # wave 5: the pod, with nowhere legal to land
+	var blocked := {}
+	for ev in sim.events:
+		if ev.get("t", "") == "supply_pod":
+			Runner.T.ok(false, "the pod cannot land inside player-paid cover")
+		if ev.get("t", "") == "supply_pod_blocked":
+			blocked = ev
+	Runner.T.ok(not blocked.is_empty(), "an impossible pod REPORTS instead of vanishing")
+	Runner.T.eq(sim.rocks.size(), rocks0, "the blocked pod planted no rock")
+	Runner.T.eq(sim.sandbags.size(), bags0, "player-paid cover is never recycled out from under them")

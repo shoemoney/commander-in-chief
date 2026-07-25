@@ -2219,6 +2219,11 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.05})
 				_burst(ev["x"], ev["y"], "dust", 8, 1.2, 2.4, 0.35)
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(18.0, 24.0)})
+			"supply_pod_blocked":
+				# The promised wave-5 resupply found nowhere to land. It used to
+				# vanish in silence; now the player is TOLD they lost it.
+				show_banner("SUPPLY DROP ABORTED — NO CLEAR GROUND", Color(1.0, 0.55, 0.3))
+				_sfx.play("deny", -5.0, 0.7)
 			"lane_warn":
 				# c4 2v: a lane is about to SEAL — a rising dust tell + alert at the span,
 				# the dust recolored by the sector (marsh / ruins / foundry).
