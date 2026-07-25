@@ -123,6 +123,7 @@ var _seed_armed_t := 0.0 # c1-14: arm auto-disarm window (mirrors _confirm_t) �
 var _seed_poll_t := 0.0  # c1-14: throttle countdown — the focused row samples the clipboard ~5x/s, not every frame (activation still forces an immediate read)
 var _reset_flash_anim := true   # c1-09: whether that banner fades — captured from the PRE-reset reduce-motion state (reset itself re-enables motion, so reading it live would never snap)
 var _opts_parent := Mode.SETUP   # c2-04: which screen OPTIONS was opened from (the SETUP hub or PAUSE) — drives BACK
+var _howto_parent := Mode.INFO   # which screen HOW TO PLAY was opened from (the INFO screen or PAUSE) — drives BACK, same pattern as _opts_parent
 # c3-18: OPTIONS dirty-state. Every audio/haptics/a11y toggle used to write the settings file
 # the instant it flipped, so merely BROWSING options (nudging a volume, peeking a toggle)
 # persisted the change. Now those toggles apply LIVE (so the preview still works) but only STAGE
@@ -1082,6 +1083,11 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 	var pitems: Array[Dictionary] = [
 		{"id": "resume", "label": "RESUME", "destructive": false, "grp": 0},
 		{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
+		# The manual is the ONLY place FIRE is named. Mid-run it used to be reachable
+		# only by ABANDONING the run to the title, so the one player who needs it least
+		# (already playing) paid the most to read it. Same row/id/opener the INFO screen
+		# uses; BACK returns HERE via _howto_parent.
+		{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 1, "submenu": true},
 	]
 	pitems.append({"id": "restart", "label": "RESTART", "destructive": true, "grp": 2})
 	pitems.append({"id": "title", "label": "QUIT TO TITLE", "destructive": true, "grp": 3})
@@ -1631,13 +1637,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 	# c3-10: F1 is the direct HOW TO PLAY shortcut — from any menu screen it jumps straight to
 	# the help pages (the footer/legend advertises "F1 HOW TO"). Placed AFTER rebind capture so a
 	# listen can still bind F1 and it never fires mid-capture; skipped if help is already open.
-	# c4-fix: HOW TO PLAY lives in the TITLE tree (BACK from HOWTO climbs INFO->SETUP->TITLE).
-	# Firing it from the PAUSE tree strands the paused run — HOWTO backs out to TITLE with no
-	# RESUME, and the attract bot then eats the orphaned sim. Firing it from a dirty OPTS/DISP
-	# session orphans the unsaved preview and stales the Save/Discard baseline. So block F1 in
-	# those contexts (a no-op is safe; the shortcut is a title-tree convenience, not core input).
-	var _f1_blocked := mode == Mode.PAUSE \
-			or (mode in [Mode.OPTS, Mode.DISP, Mode.AUDIO, Mode.REBIND] and _opts_parent == Mode.PAUSE) \
+	# c4-fix: firing F1 from a dirty OPTS/DISP session orphans the unsaved preview and stales
+	# the Save/Discard baseline, so block it there (a no-op is safe; the shortcut is a
+	# convenience, not core input). PAUSE is no longer blocked: HOWTO now records its opener
+	# (_howto_parent) and BACK climbs straight back to the paused run, so the shortcut the
+	# footer advertises on that screen actually works instead of silently doing nothing.
+	var _f1_blocked := (mode in [Mode.OPTS, Mode.DISP, Mode.AUDIO, Mode.REBIND] and _opts_parent == Mode.PAUSE) \
 			or (mode in [Mode.OPTS, Mode.DISP, Mode.AUDIO, Mode.REBIND] and _opts_dirty)
 			# REBIND belongs in BOTH clauses. It was only in the parent==PAUSE one, so
 			# TITLE -> SETUP -> OPTIONS -> (toggle anything) -> CONTROLS -> F1 escaped with
@@ -1648,6 +1653,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 	if mode != Mode.HIDDEN and mode != Mode.HOWTO and not _f1_blocked and ev is InputEventKey \
 			and ev.pressed and not ev.echo \
 			and (ev.physical_keycode if ev.physical_keycode != 0 else ev.keycode) == _help_code():
+		_howto_parent = Mode.PAUSE if mode == Mode.PAUSE else Mode.INFO   # BACK returns to the paused run, else the INFO row
 		open(Mode.HOWTO)
 		main._sfx.play("pickup", -12.0)
 		var vpf1 := get_viewport()
@@ -2250,6 +2256,12 @@ func _parent(m: int) -> Dictionary:
 	if m == Mode.OPTS:
 		var opener := _opts_parent if _opts_parent in [Mode.PAUSE, Mode.SETUP] else Mode.SETUP
 		return {"mode": opener, "sel": "options"}
+	# HOW TO PLAY now hangs off BOTH the INFO screen and PAUSE (mid-run recovery), so it
+	# climbs to whichever hosted the row — the paused run is never traded for the manual.
+	# Same stale-value guard as OPTIONS: only those two screens host a "howto" row.
+	if m == Mode.HOWTO:
+		var hopener := _howto_parent if _howto_parent in [Mode.PAUSE, Mode.INFO] else Mode.INFO
+		return {"mode": hopener, "sel": "howto"}
 	return back_dest(m)
 
 
@@ -2903,7 +2915,9 @@ func _activate() -> void:
 			"hard":
 				main._hard = not main._hard
 				_flash_setting()
-			"howto": open(Mode.HOWTO)   # help screen under INFO; back returns here
+			"howto":
+				_howto_parent = mode   # INFO or PAUSE — BACK returns to the row the player came through
+				open(Mode.HOWTO)
 			"sfx", "music":
 				# c3-04: primary confirm STEPS the level up one (+1, rails at 10) -- the SAME
 				# clamped 0..10 model ◄/► use, NOT a mute toggle. So Enter/click can never
@@ -5678,12 +5692,14 @@ func _footer_nav_segs() -> Array:
 
 # c3-10: the full footer legend a screen draws — SELECT/BACK nav on every non-TITLE screen
 # (with the LIVE keycaps), the gameplay-verb reference prepended on PAUSE (the mid-run recovery
-# hub). On keyboard EVERY menu footer also advertises the F1 = HELP (HOW TO PLAY) shortcut so
-# help is one keypress away and discoverable everywhere — except HOWTO itself, where it's
-# already open. Pad reaches HOW TO through the menus (no F1), so the hint is keyboard-only.
+# hub). EVERY menu footer also advertises the F1 = HELP (HOW TO PLAY) shortcut so help is one
+# keypress away and discoverable everywhere — except HOWTO itself, where it's already open.
+# Shown on a PAD too: the manual is the only place FIRE is documented, the help key is a plain
+# key event the handler takes whatever the last-used device was, and hiding the pointer left pad
+# players with no cue at all. (The PAUSE screen also carries a real HOW TO PLAY row.)
 func _footer_segs() -> Array:
 	var segs: Array = footer_verb_segs() + _footer_nav_segs() if mode == Mode.PAUSE else _footer_nav_segs()
-	if not Art.use_pad and mode != Mode.HOWTO:
+	if mode != Mode.HOWTO:
 		segs.append(_keycap_seg(_help_keycap(), "HELP"))
 	return segs
 

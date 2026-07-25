@@ -1365,7 +1365,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 # partner, and _dead_chips already plants the contextual "REVIVE <cost>" + bound glyph on
 # that player's row (plus main.gd's off-screen downed-partner beacon). Advertising it to a
 # solo player with nobody to revive is what made the bar read as a permanent tutorial.
-const VERB_SEGS := [["roll", "ROLL"], ["wheel", "SUPPLY WHEEL"]]
+const VERB_SEGS := [["roll", "ROLL"], ["grenade", "GRENADE"], ["wheel", "SUPPLY WHEEL"]]
 const VERB_GH := 11.0   # verb glyph height (square device prompt)
 
 
@@ -1542,7 +1542,9 @@ func _draw_caption() -> void:
 ## the one menu reachable mid-run — carries a PERMANENT ROLL/WHEEL/REVIVE footer
 ## reference, and HOW TO PLAY teaches them in full. Under REDUCE MOTION it snaps
 ## on/off (no fade). Hidden while a menu is up. Only acts Art.draw_glyph resolves
-## belong here; FIRE/GRENADE are device-plain (LMB/RMB, RT/LB) on the TITLE legend.
+## belong here. GRENADE is ON the chip: it is the ONLY armor-cracker (the landing zone
+## is a bunker you must grenade) and the TITLE legend that once named it is long gone —
+## it is now SELECT + HOW TO only, so nothing else states the button in-run.
 func _verb_legend() -> void:
 	if main._menu != null and main._menu.is_active():
 		return

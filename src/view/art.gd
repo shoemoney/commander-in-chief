@@ -704,9 +704,9 @@ static func _brand(key: String) -> String:
 ## semantic verbs → what's printed on the last-used pad. Unknown brands
 ## fall back to Xbox labels, same as the glyph lookups.
 const _PAD_LABELS := {
-	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK"},
-	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "SHARE"},
-	"switch": {"interact": "Y", "revive": "X", "wheel": "MINUS"},
+	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK", "grenade": "LB"},
+	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "SHARE", "grenade": "L1"},
+	"switch": {"interact": "Y", "revive": "X", "wheel": "MINUS", "grenade": "L"},
 }
 
 
