@@ -3,7 +3,7 @@
 
 ## Context
 
-You asked for a complete, end-to-end, step-by-step plan to build a modern Ikari Warriors remake and told me to focus **on the game itself** — you have IP/legal, market, and awards handled. This plan was produced by a 14-agent research workflow (8 parallel deep-research agents on the original game, engines, asset pipelines, and Steam; 3 synthesis agents; 2 adversarial critics; 1 reconciliation pass — 781k tokens, all contradictions resolved). Full research briefs are archived at `/tmp/claude-0/.../scratchpad/wf-result-*.md` and the complete master plan (including the IP/market/awards sections you're handling) is in `wf-result-13.md`.
+You asked for a complete, end-to-end, step-by-step plan to build a modern Ikari Warriors remake and told me to focus **on the game itself** — you have IP/legal, market, and awards handled. This plan was produced by a 14-agent research workflow (8 parallel deep-research agents on the original game, engines, asset pipelines, and Steam; 3 synthesis agents; 2 adversarial critics; 1 reconciliation pass — 781k tokens, all contradictions resolved). Full research briefs were written to a scratchpad under `/tmp/` (`wf-result-*.md`, master plan in `wf-result-13.md`) — **they are not in this repo and that temp directory is long gone**, so this file is the only surviving copy of the plan.
 
 **Scope note:** since you own IP strategy, this plan is written IP-agnostic — every mechanic works whether you ship licensed (*Ikari Warriors: Rage Reborn*) or as a spiritual successor. Where a decision depends on the license (names, 1986 Mode, original OST arrangement), it's flagged `[IP-dependent — your call]`.
 
@@ -87,7 +87,8 @@ Ammo Cache, Grenade Crate, Fuel, Long Range, Speed Shot, Piercing Rounds, Blast 
 - **Never**: procedural campaign, default HP bars, 4P, melee pivot.
 
 ### Onboarding, scoring, accessibility
-- First boot: 30s skippable control test range. Zone 1 beach = diegetic tutorial (aim-persist strafing → first bunker teaches grenades-vs-armor → scripted elite drop teaches pickups → first death triggers one-time slow-mo War Chest explainer). Nothing unskippable.
+- ~~First boot: 30s skippable control test range.~~ **Cut, shipped differently.** The firing-range tutorial was built and then deliberately deleted (`51726d2`, "de-checklist the firing-range tutorial"); `src/view/onboarding.gd` no longer exists. What ships instead: the landing zone *is* the tutorial (`SimWorld._author_lz()` — seawall → grenade box → armored bunker, authored on the player's walking line in the order the verbs are needed), plus `main.gd::_hint()` just-in-time cues that fire once ever and persist as seen, and a paged HOW TO PLAY menu screen (`GameMenu.HOWTO_TABS` — CONTROLS / WAR CHEST / MODES / ENEMIES / ENDLESS). Nothing unskippable.
+- Zone 1 beach = diegetic tutorial (aim-persist strafing → first bunker teaches grenades-vs-armor → scripted elite drop teaches pickups → first death triggers one-time slow-mo War Chest explainer). *(The bunker/grenade-box half of this shipped; the slow-mo War Chest explainer is still aspirational — the War Chest teaches through `_hint()` text.)*
 - Scoring: chain multipliers, hostage ±, no-death zone bonuses. Per-zone + full-run Steam leaderboards (filters: solo/co-op, difficulty, assists, mode). Built-in speedrun timer with load-removal + per-gate splits. Sanctioned skip-tech (tank-boost jumps, grenade-boosting) tuned in, never patched out.
 - Accessibility (MVP): full remap incl. single-stick; hold/toggle everything; aim-assist tiers; per-toggle assists (2-hit vest, 75% speed, infinite revives) flagged on leaderboards, never locked out; colorblind-safe shape-coded palettes; shake/flash sliders; subtitles + visual indicators for off-screen audio telegraphs; photosensitivity pass.
 
@@ -100,7 +101,7 @@ Ammo Cache, Grenade Crate, Fuel, Long Range, Speed Shot, Piercing Rounds, Blast 
 **Architecture spine — sim/view split (lands first; load-bearing for netcode, testing, perf):**
 - `src/sim/` = deterministic, render-free gameplay core at fixed 60 Hz — 16.16 fixed-point math, seeded xoshiro RNG, own AABB/circle collision vs LDtk IntGrid data.
 - Scene tree is a *view* that interpolates sim state.
-- CI lint forbids floats/engine-RNG/`Time.*`/node queries in sim code.
+- CI lint forbids floats/engine-RNG/`Time.*`/node queries in sim code. ✅ **shipped** — `tools/lint_sim.gd`, run by the `lint` job in `.github/workflows/ci.yml` alongside `tools/lint_assets.gd`.
 - **P0 hard requirement: 4-week determinism spike** — cross-platform (Win/Linux/Proton) replay-checksum agreement over 100k ticks with 300+ live projectiles. This is a G1 exit criterion; prove it month 2, not month 14.
 
 **Entities & AI:** composition over inheritance — actors are thin `.tscn` views over SimEntity state; shared components (`Health`, `AmmoPool`, `Boardable`, `LootDrop`); a new enemy = one scene + one stats `.tres`. AI = hierarchical state machines as pure deterministic functions (5 templates: rusher, strafer, emplacement, kamikaze, submerged); bespoke boss scripts; no behavior-tree framework. Spawn Director = authored LDtk trigger-lines (backbone) + seeded token-bucket intensity controller (64-enemy cap) owning mortar call-for-fire.
@@ -114,15 +115,17 @@ Ammo Cache, Grenade Crate, Fuel, Long Range, Speed Shot, Piercing Rounds, Blast 
 - **Online 2P ships as a free update ~day-60**: deterministic lockstep, 3-tick input delay, Steam Networking Messages (SDR relay), ~400-line loop, per-second checksums, desync auto-report + host-snapshot resync. The fixed-point sim makes it deterministic by construction.
 - **Rollback is the fallback**: if lockstep fails structured 150ms+ latency playtests, the snopek godot-rollback-netcode port slots in — the sim already meets its requirements.
 
+**Netcode: shipped state (P3).** Local 2P co-op works. Online does not exist: `src/net/lockstep.gd` is 108 lines with **zero production callers** (nothing constructs a `LockstepSession` outside `tests/`), no Steam Networking transport is written, and `test_lockstep.gd` drives it over an in-memory `FakeWire` that models latency jitter only — no loss, duplication, reordering fault, or disconnect. The value delivered so far is the *determinism proof* the design depends on, not the netplay. No structured latency playtest has been run, so the lockstep-vs-rollback decision above is still untested.
+
 **Feel systems:** ratchet free-scroll camera; co-op leash with bottom-edge mortar anti-troll; trauma-based screen shake on a rig offset node; 50–80ms hit-stop on explosions only; 1-frame white damage flash. **Weekly feel ritual from P0**: 90 minutes controller-in-hand against a feel checklist, director signs off — headless CI can't evaluate feel; humans on hardware do, weekly.
 
 **Rendering:** 640×360 internal virtual resolution, nearest filtering; UI on full-res CanvasLayer; MSDF fonts (Latin/Cyrillic) + dynamic TTF (Noto Sans CJK) for JP/KO/zh; native 16:9/16:10 with optional integer-scaled "Arcade Crop" pillarbox SubViewport; per-frame normal maps on hero sprites; one sun light + pooled point lights; GPU particle pools; 12-occluder budget.
 
 **Performance:** 60fps floor on Steam Deck LCD at worst case (2P, 64 enemies, 300 bullets, 8 lights). CI perf gate fails >4ms average sim tick. Weekly automated 3-hour soak test (scripted input, full campaign ×3) asserting a flat memory ceiling — a no-loading 50-minute game lives or dies on leaks.
 
-**Testing & CI:** GUT unit tests on sim; headless integration runs with injected input streams; **replay regression suite** (seed + inputs + per-second checksums; every fixed bug adds a replay); export smoke tests both platforms; nightly Proton smoke; godot-ci image; every PR runs the full ladder. Depot upload via `steamcmd` from CI on tags.
+**Testing & CI:** unit tests on sim (**shipped without GUT** — `tests/run_tests.gd` is a zero-dependency runner; suites are plain `RefCounted` classes with `test_*` methods); headless integration runs with injected input streams; **replay regression suite** (seed + inputs + per-second checksums; every fixed bug adds a replay); export smoke tests both platforms; nightly Proton smoke; godot-ci image; every PR runs the full ladder. Depot upload via `steamcmd` from CI on tags.
 
-**Steamworks (`SteamBridge` autoload, graceful no-op offline), priority order:** Local Co-Op flag/RPT → Steam Input action manifest + glyphs → leaderboards → achievements → Auto-Cloud saves → Rich Presence → lobbies/Networking Messages for the online update.
+**Steamworks** — shipped as `src/steam/steam_bridge.gd`, a view-side facade instantiated by `main.gd` (*not* an autoload as written below). It is graceful-no-op by design and **none of it has ever run against real Steam**: `Engine.has_singleton("Steam")` is false in every dev/CI environment, GodotSteam is not vendored, and the exact API surface is unpinned (`docs/godotsteam_api_version.md`). **Priority order:** Local Co-Op flag/RPT → Steam Input action manifest + glyphs → leaderboards → achievements → Auto-Cloud saves → Rich Presence → lobbies/Networking Messages for the online update.
 
 **Leaderboard anti-cheat:** every score attaches its deterministic input replay (Steam UGC attachment); a headless validation service (the shipping sim on a ~$25/mo VPS) re-simulates the top 100 nightly; mismatch = purge. Determinism does triple duty: netcode + regression testing + score validation.
 
@@ -147,6 +150,8 @@ Ammo Cache, Grenade Crate, Fuel, Long Range, Speed Shot, Piercing Rounds, Blast 
 ---
 
 ## 6. Step-by-Step Build Phases
+
+> ⚠️ **What "P3" means in this repo vs in this plan.** README/CLAUDE.md label the repo **P3**, meaning *playable start→finish with all modes in*. It does **not** mean the plan's P3 exit criteria were met. Built by one owner plus agents, not the 4-person team costed below, so everything human-in-the-loop below is unstarted: no external playtests, no hired artist or art director, no contract composer, no Steam page/Playtest, no external QA or compat matrix, no LQA. Localization is 3 languages (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze. Treat the phase table as the plan it is; the code is the source of truth for what exists.
 
 Monthly external playtests from P1 (10–20 testers); one-hit-death churn and War Chest pricing get monthly telemetry checkpoints. Durations assume a 4-person core (director, lead engineer, engineer #3 from P2, pixel artist) + contractors, heavily agent-assisted on code/tools/CI.
 
@@ -176,7 +181,8 @@ QA passes #2–3 on the compat matrix (Win10/11; NVIDIA/AMD/Intel iGPU; Deck LCD
 
 **P7 — Post-Launch (12 mo, funded).** Day-30 patch (Endless War expansion) ∥ **online co-op update: beta month 1, ships ~day-60 as its own beat** ∥ day-90 patch ∥ console ports via Godot-specialized porting partner (W4 Games / Pineapple Works class; Switch + PS5 + Xbox, months 6–10; local co-op only on console v1) ∥ speedrun.com board seeded week 1.
 
-**Permanent cuts (already taken — scope discipline):** helicopter vehicle, War Dog, Magnum, ghost replays, Daily Op, zones 7–8, 4P.
+**Permanent cuts (already taken — scope discipline):** helicopter vehicle, War Dog, Magnum, ghost replays, ~~Daily Op~~, zones 7–8, 4P.
+*(Correction: the Daily cut was reversed in code — a seed-of-the-day **Daily Run** mode ships, and Hall of Fame entries carry a `*DAILY` tag. The other six cuts still hold; run recording ships as "Watch Last Run" replay playback, which is not the cut ghost-replay feature.)*
 
 ---
 

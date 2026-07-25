@@ -16,11 +16,11 @@
 
 ![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-606%20methods%20%2F%2012029%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-693%20methods%20%C2%B7%20~14.7k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
-![License](https://img.shields.io/badge/assets-legacy art%20licensed%20%C2%B7%20not%20public--ready-red)
+![License](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20git%20history%20not%20purged-orange)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -36,12 +36,16 @@ a shared coin economy where every kill mints and every revive spends.
 
 > ⚠️ **Status: P3, playable start→finish.** Campaign runs studio splash → Foundry
 > Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
-> Select · Daily Run), and the feel stack is real. Art is **legacy 3D pack bakes + bespoke
-> generated boss/vehicle/desert art** over a Kenney-CC0 FX base — no longer pure greybox.
-> **CI is live**: `.github/workflows/ci.yml` runs import + boot-smoke + the full
-> golden-checksum suite (**661 methods / 12,354 assertions**) across **Linux-x86_64 ·
-> macOS-arm64 · Windows-x86_64**, failing on any `SCRIPT ERROR` or a missing `PASS` line —
-> plus packaged-export smoke tests on Linux and Windows, and a nightly 3-hour soak run.
+> Select · Daily Run), and the feel stack is real. Art is **owned procedural art
+> (`tools/gen_*.py`) + bespoke generated boss/vehicle/desert pieces** over a Kenney-CC0
+> FX base — no longer greybox, and no longer legacy art-derived (every encumbered sprite was
+> replaced; see [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)).
+> **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
+> determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
+> golden-checksum suite (**693 methods / ~14.7k assertions** — the runner prints the exact
+> pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
+> `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
+> Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
 > The engine version is pinned in `tools/versions.lock`, the one source CI reads, so the
 > build can't drift from what the determinism goldens were recorded against.
 > `docs/PLAN.md` is the aspirational P0–P7 master plan — **the sim code is the
@@ -125,7 +129,7 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 
 | Mode | What it is |
 |---|---|
-| 🏔️ **Campaign** | 5 gated sectors → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**). Gates 2 & 4 **fork**: `< CACHE` (free crate ringed by mines) vs `BOUNTY >` (two elites, one marked) — walking a side IS the choice 🛣️ |
+| 🏔️ **Campaign** | 6 gated sectors (`SimWorld.FINAL_GATE_INDEX`) → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**). Gates 2 & 4 **fork**: `< CACHE` (free crate ringed by mines) vs `BOUNTY >` (two elites, one marked) — walking a side IS the choice 🛣️ |
 | ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, minibosses that **fly in** over 7s and **escalate by tier** (tighter spray, extra mortars by w15), contested **parachute supply drops** rushers try to steal 🪂, and the wave-7+ **Broadcast Tower** debut |
 | 👥 **Local 2P co-op** | Shared War Chest, revive tether, per-device input glyphs |
 | 📅 **Daily Run** | Seed-of-the-day challenge run (Hall entries wear a `*DAILY` tag) |
@@ -224,13 +228,20 @@ Concussion muffles the radio too — by intent. A stunned soldier hears underwat
 godot --headless --path . --import                      # once after cloning / new class_name scripts
 godot --headless --path . -s res://tests/run_tests.gd   # full suite
 SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter by suite name 🎯
+SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
 ```
 
-**661 test methods / 12,354 assertions** — fixed-point math, seeded RNG streams, the 1986
-mechanic grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus,
-every archetype's behavior contract (nest armor, technical charge lock, pilot
-rescue/grace/forfeit), Endless War waves & shop, lockstep loopback, replay integrity,
-checksum coverage classification, and the campaign+endless **golden determinism** runs.
+**693 test methods / ~14.7k assertions** (the `PASS —` line prints the exact pair) — fixed-point
+math, seeded RNG streams, the 1986 mechanic grammar, the War Chest economy,
+tank/observer/gates/water/gunship/colossus, every archetype's behavior contract (nest armor,
+technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop, lockstep loopback,
+replay integrity, checksum coverage classification, and the campaign+endless **golden
+determinism** runs.
+
+`test_perf.gd` asserts wall-clock microseconds, so it sits in `run_tests.gd`'s `OPT_IN_SUITES`:
+the default full run **skips** it (that's why the method count above is 693, not 695), and CI
+runs it in an advisory `continue-on-error` job. A shared runner is a noisy neighbour and a
+randomly-red gate stops being read.
 
 > 🧷 Gotcha: the runner counts a method green even if a runtime error aborts it
 > mid-way — watch for `SCRIPT ERROR` lines, and hold dict references across
@@ -238,7 +249,17 @@ checksum coverage classification, and the campaign+endless **golden determinism*
 
 ---
 
-## 🌐 Netcode: deterministic lockstep
+## 🌐 Netcode: deterministic lockstep — **a design sketch, not shipped online play**
+
+> ⚠️ **Read this before believing the diagram.** `src/net/lockstep.gd` has **zero production
+> callers** — nothing in `src/main.gd` or the menus constructs a `LockstepSession`, and no
+> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a 108-line
+> loop plus `tests/test_lockstep.gd`, whose `FakeWire` is a deterministic **in-memory** wire with
+> latency jitter only: it never drops, duplicates, corrupts-by-network, disconnects, or times out
+> a packet (the one corruption test flips a payload byte by hand to prove the checksum exchange
+> notices). So the test proves the *sim* is deterministic enough for lockstep and that the loop's
+> stall/catch-up/desync-flag logic is self-consistent — it proves **nothing** about behavior on a
+> real lossy network. Treat the section below as the intended design. 🎯
 
 `src/net/lockstep.gd` — transport-agnostic; only encoded inputs cross the wire. 📡
 
@@ -252,11 +273,13 @@ sequenceDiagram
     Note over A,B: each sim advances ONLY when both inputs for the next tick exist
     A-->>B: checksum every 60 ticks
     B-->>A: checksum every 60 ticks
-    Note over A,B: mismatch ⇒ 🚨 desync detected — proven by two-sim loopback over a jittery fake wire
+    Note over A,B: mismatch ⇒ 🚨 desync flagged — exercised by a two-sim in-memory loopback
 ```
 
-Steam Networking Messages plugs into `on_send` / `receive_remote_input` later
-without touching the loop.
+Steam Networking Messages is *meant* to plug into `on_send` / `receive_remote_input` without
+touching the loop — that transport has not been written, so the seam is untested against a real
+socket. Per `docs/PLAN.md` online 2P is a post-launch beat, not a launch promise; local 2P and
+Remote Play Together are the co-op that actually ships.
 
 ---
 
@@ -285,9 +308,11 @@ project.godot        Godot 4.7 project (640×360 virtual res, 60 Hz physics)
 src/sim/             🔒 Deterministic core — int-only, no engine RNG, no Time.*
 src/main.gd|.tscn    🖼️ The view + input quantization boundary
 src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · sfx.gd
-src/net/             lockstep.gd (netcode core) · replay.gd (run recorder)
-tests/               Headless runner + suites (SUITE=<name> filter, golden checksums)
-tools/               bake_sprites*.gd (legacy art→sprite pipeline) · screenshots.gd
+src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketch, no callers)
+tests/               Headless runner + 33 suites (SUITE=<name> filter, golden checksums)
+tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_assets.gd (CI gates)
+                     screenshots.gd · smoke.gd · validate_replay.gd · purge_history.sh
+                     bake_sprites*.gd — LEGACY: needs the legacy art source project, nothing ships from it
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
 
@@ -323,10 +348,10 @@ The desert→jungle look is a per-sprite olive tint + 1px readability outline ap
 view (`src/view/art.gd`), not baked in — so a new asset joins one palette family regardless
 of which source it came from.
 
-> ✅ **Every asset is now cleared.** All 201 sprites are owned procedural art (`tools/gen_*.py`)
-> or CC0, and the 174 speech synthesis mp3 were cleared for redistribution with speech synthesis on
-> 2026-07-24. One step remains before going public: purge the old proprietary art from git
-> history — `tools/purge_history.sh`. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
+> ✅ **Every asset is now cleared.** All 266 PNGs under `assets/` are owned procedural art
+> (`tools/gen_*.py`), owned generative-AI pieces, or CC0 (Kenney), and the 174 speech synthesis mp3
+> were cleared for redistribution with speech synthesis on 2026-07-24. One step remains before going
+> public: purge the old proprietary art from git history — `tools/purge_history.sh`. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
 > was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the speech synthesis VO
 > already ship in-game. 📋 Full asset-licensing map + the path to a public release:
 > **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
