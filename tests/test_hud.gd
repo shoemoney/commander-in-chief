@@ -1998,25 +1998,40 @@ func test_row0_head_width_bounded_never_overlaps_overflow() -> void:
 	var h := HudIcons.new()
 	var usable: float = HudIcons.RIGHT - HudIcons._corner_reserve(true, 1.0)   # CB pip live: tightest edge
 	var widest_ovf: float = h._tw("+99") + HudIcons.OVF_PAD                    # generous cap on any row's +N
-	# Worst-case heads: the widest FULL-digit value (just under the compaction threshold) and
-	# the 64-bit maximum (which compacts). Tokens maxed too. Replicate _draw's head layout:
-	# coin _stat, medal _stat (advance == ICON+13+tw), then the tokens _stat (ICON+13+tw).
-	for val in [999999999999, 9223372036854775807]:
-		var x := 8.0
-		x += HudIcons.ICON + 13.0 + h._tw(HudIcons._fmt_stat(val))
-		x += HudIcons.ICON + 13.0 + h._tw(HudIcons._fmt_stat(val))
+	# Worst-case head: the widest FULL-digit value just under EACH slot's compaction threshold,
+	# plus the 64-bit maximum (which compacts). c-onboard: the coin/medal slots now draw the
+	# UNIT-LABELLED strings ("$N" / "N PTS") and compact one band earlier to pay for the unit, so
+	# each slot's widest form is taken INDEPENDENTLY — the worst head is a mix (a labelled slot at
+	# its own threshold beside a token slot at the bare one), which one shared `val` would miss.
+	var head_vals := [999999999, 999999999999, 9223372036854775807]
+	var w_chest := 0.0
+	var w_score := 0.0
+	var w_token := 0.0
+	for val in head_vals:
+		w_chest = maxf(w_chest, h._tw(HudIcons.chest_label(val)))
+		w_score = maxf(w_score, h._tw(HudIcons.score_label(val)))
 		# c1-10: tokens is a spelled-out star _stat, same advance shape as coin/medal. On a crowded
 		# head _token_chip adapts to the shorter "COMMENDATIONS N" (the full label yields first), so
 		# that compact form bounds the worst case — even it + a full-digit value stays short enough
 		# (thanks to _fmt_stat compaction) that the +N can't be forced to overlap it.
-		x += HudIcons.ICON + 13.0 + h._tw(HudIcons._token_label_compact(val))
-		Runner.T.ok(x + widest_ovf <= usable + 0.01,
-			"head end %d + widest +N clears the usable edge (head can't overlap +N)" % int(x))
+		w_token = maxf(w_token, h._tw(HudIcons._token_label_compact(val)))
+	# Replicate _draw's head layout: coin _stat, medal _stat, tokens _stat (advance == ICON+13+tw).
+	var x: float = 8.0 + (HudIcons.ICON + 13.0) * 3.0 + w_chest + w_score + w_token
+	Runner.T.ok(x + widest_ovf <= usable + 0.01,
+		"worst-case head end %d + widest +N clears the usable edge (head can't overlap +N)" % int(x))
 	# The everyday range is displayed UNCHANGED (full grouped digits); only astronomical
 	# values compact — so this bound never alters real play.
 	Runner.T.eq(HudIcons._fmt_stat(1234567), Art.group_digits(1234567), "reachable scores read as full grouped digits")
 	Runner.T.eq(HudIcons._fmt_stat(999999999999), Art.group_digits(999999999999), "values below the threshold stay full")
 	Runner.T.ok(HudIcons._fmt_stat(5000000000000).ends_with("T"), "astronomical values compact to a suffix")
+	# c-onboard: the labelled heads' own (tighter) threshold behaves the same way, and still sits
+	# orders of magnitude past anything a real run reaches — so the unit costs no everyday clarity.
+	Runner.T.ok(HudIcons.chest_label(1234567).contains(Art.group_digits(1234567)),
+		"a reachable war chest still reads as full grouped digits under the label")
+	Runner.T.ok(HudIcons.score_label(5000000000).contains("B"),
+		"only astronomical labelled values compact to a suffix")
+	Runner.T.ok(HudIcons.LABEL_COMPACT_AT >= 1000000000,
+		"the labelled-head threshold stays far past any reachable score")
 	h.free()
 
 
@@ -2452,8 +2467,8 @@ func test_commendations_head_with_row0_overflow_at_narrowest_edge() -> void:
 	# DRAW the real head: coin + medal stats, then the TOKENS chip via its real
 	# _draw callsite. This captures the actual icons/labels, not a reconstructed width sum.
 	var x := 8.0
-	x = h._stat("icon_coin", HudIcons._fmt_stat(sim.war_chest), x, 6.0, Color(1.0, 0.93, 0.78))
-	x = h._stat("icon_medal", HudIcons._fmt_stat(sim.score), x, 6.0, Color(0.84, 0.9, 1.0))
+	x = h._stat("icon_coin", HudIcons.chest_label(sim.war_chest), x, 6.0, Color(1.0, 0.93, 0.78))
+	x = h._stat("icon_medal", HudIcons.score_label(sim.score), x, 6.0, Color(0.84, 0.9, 1.0))
 	x = h._token_chip(sim, x, 6.0)
 	var head_end := x
 	# The captured head chips are on-screen and non-overlapping at the narrowest edge.
@@ -3275,3 +3290,128 @@ func test_caption_line_never_doubles_the_speaker() -> void:
 		"a bracketed non-speech cue is never attributed to a speaker")
 	Runner.T.ok(HudIcons.caption_line(Sfx._VO_CAPTIONS["vo_pilot_plea"]).begins_with("PILOT:"),
 		"the pilot's line stays the pilot's")
+# verb_used() is the live seam main._gather_inputs drives: idempotent, marks the HUD dirty on a
+# REAL change only, and feeds the same verb_active_segs filter the draw path reads.
+func test_verb_used_marks_dirty_once_and_drops_that_segment() -> void:
+	var h := HudIcons.new()
+	h._dirty = false
+	h.verb_used("grenade")
+	Runner.T.eq(h._dirty, true, "the first use of a verb dirties the HUD (the chip changed)")
+	h._dirty = false
+	h.verb_used("grenade")
+	Runner.T.eq(h._dirty, false, "a repeat press is idempotent — no wasted repaint")
+	var live: Array = Hud.verb_active_segs(h._verb_used)
+	Runner.T.eq(live.size(), Hud.VERB_SEGS.size() - 1, "the used verb is dropped from the live chip")
+	for s in live:
+		Runner.T.ok(s[0] != "grenade", "grenade no longer appears in the live segment list")
+	h.free()
+
+
+# A partly-retired chip re-measures and re-centers off the SURVIVING segments — pinned through
+# the real draw seams (the whole chip, plate included) rather than the pure geometry helpers.
+func test_reduced_verb_chip_emits_only_surviving_segments() -> void:
+	var h := _CaptureHud.new()
+	h.main = _VerbMain.new()
+	h._verb_show = 300.0                 # window armed so the chip actually draws
+	h.verb_used("roll")                  # ...but ROLL has been used, so it must not be emitted
+	h._verb_legend()
+	var glyphs: Array = []
+	for op in h.ops:
+		Runner.T.ok(op["box"].position.y >= 0.0 and op["box"].end.y <= 360.0,
+			"reduced-chip %s '%s' stays inside the canvas" % [op["k"], op["id"]])
+		if op["k"] == "glyph":
+			glyphs.append(op["id"])
+	Runner.T.eq(glyphs.size(), Hud.VERB_SEGS.size() - 1, "one glyph per SURVIVING segment")
+	Runner.T.ok(not ("roll" in glyphs), "the used ROLL segment is not drawn")
+	Runner.T.ok("grenade" in glyphs and "wheel" in glyphs, "the unused segments are still drawn")
+	# Using the rest empties the chip: nothing at all is emitted.
+	h.ops.clear()
+	h.verb_used("grenade")
+	h.verb_used("wheel")
+	h._verb_legend()
+	Runner.T.eq(h.ops.size(), 0, "a fully-retired chip draws nothing at all — not even its plate")
+	h.main.free()
+	h.free()
+
+
+# The labelled counters are what row 0 actually DRAWS: same _stat advance, on screen, never
+# overlapping — driven through the real draw seams so a unit can't quietly push the FIXED head
+# past the usable edge at the narrowest supported width.
+func test_labelled_economy_head_draws_in_bounds() -> void:
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h._measure = false
+	var edge: float = HudIcons.RIGHT - HudIcons._corner_reserve(true, 0.0)   # narrowest supported
+	h._fit_full = edge
+	var x := 8.0
+	x = h._stat("icon_coin", HudIcons.chest_label(9999), x, 6.0, Color(1.0, 0.93, 0.78))
+	x = h._stat("icon_medal", HudIcons.score_label(9999), x, 6.0, Color(0.84, 0.9, 1.0))
+	_assert_render_bounds_nonoverlap(h.boxes, edge, "labelled-economy-head")
+	var texts: Array = []
+	for b in h.boxes:
+		if b["k"] == "text":
+			texts.append(b["id"])
+	Runner.T.ok(HudIcons.chest_label(9999) in texts, "the drawn chest text carries its unit")
+	Runner.T.ok(HudIcons.score_label(9999) in texts, "the drawn score text carries its unit")
+	Runner.T.ok(x <= edge + 0.01, "the labelled head still ends within the narrowest usable edge")
+	h.main.free()
+	h.free()
+
+
+# --- c-onboard: the two economy numerals. The code itself recorded that playtesters conflated
+# spendable coin with vanity score and that the applied fix was a HUE change; hue is a single
+# channel a colorblind player cannot read at all, and it did not settle it. Each counter now
+# carries its own compact unit IN ITS TEXT, so the two read apart in greyscale. ---
+
+func test_chest_and_score_carry_distinct_unit_labels() -> void:
+	var digits := Art.group_digits(1234)
+	var chest := HudIcons.chest_label(1234)
+	var score := HudIcons.score_label(1234)
+	Runner.T.ok(chest != score, "the two economy readouts no longer render identical text")
+	Runner.T.ok(chest != digits, "the war chest carries a unit, not a bare numeral")
+	Runner.T.ok(score != digits, "the score carries a unit, not a bare numeral")
+	# A label, not a reformat — the value the player reads is untouched.
+	Runner.T.ok(chest.contains(digits), "the chest label still shows the full grouped value")
+	Runner.T.ok(score.contains(digits), "the score label still shows the full grouped value")
+	# The units are distinct STRINGS, so the difference survives a greyscale / colorblind view.
+	var chest_unit := chest.replace(digits, "").strip_edges()
+	var score_unit := score.replace(digits, "").strip_edges()
+	Runner.T.ok(chest_unit != "", "the chest unit is non-empty")
+	Runner.T.ok(score_unit != "", "the score unit is non-empty")
+	Runner.T.ok(chest_unit != score_unit,
+		"chest '%s' and score '%s' units differ — the two read as different quantities" % [chest_unit, score_unit])
+	# Zero and the compaction extremes stay labelled too (no unlabelled edge case).
+	for v in [0, 5000000000000, 9223372036854775807]:
+		Runner.T.ok(HudIcons.chest_label(v).begins_with(chest_unit), "chest stays unit-marked at %d" % v)
+		Runner.T.ok(HudIcons.score_label(v).ends_with(score_unit), "score stays unit-marked at %d" % v)
+
+
+# --- c-onboard: pure filter behind the chip — a USED verb retires, an UNUSED one persists.
+# (test_reduced_verb_chip_emits_only_surviving_segments proves _verb_legend actually honors it.) ---
+
+func test_used_verb_retires_unused_verb_persists() -> void:
+	Runner.T.eq(Hud.verb_active_segs({}), Hud.VERB_SEGS, "an untouched run shows every segment, in order")
+	var after_roll := Hud.verb_active_segs({"roll": true})
+	Runner.T.eq(after_roll.size(), Hud.VERB_SEGS.size() - 1, "using ROLL retires exactly one segment")
+	var acts: Array = []
+	for s in after_roll:
+		Runner.T.ok(s[0] != "roll", "the USED roll segment is gone (saw %s)" % [s])
+		acts.append(s[0])
+	Runner.T.ok("grenade" in acts, "the UNUSED grenade segment persists past the old 6s window")
+	Runner.T.ok("wheel" in acts, "the UNUSED supply-wheel segment persists past the old 6s window")
+	Runner.T.eq(Hud.verb_active_segs({"roll": true, "grenade": true, "wheel": true}).size(), 0,
+		"once every verb has fired the chip retires completely")
+	Runner.T.eq(Hud.verb_active_segs({"fire": true}).size(), Hud.VERB_SEGS.size(),
+		"an act that isn't on the chip retires nothing")
+	# The drawn geometry follows the SURVIVORS: narrower, and still centered on the 640px canvas.
+	var full_w: float = Hud.verb_legend_extent()[1]
+	var part_w: float = Hud.verb_legend_extent(after_roll)[1]
+	Runner.T.ok(part_w + 0.01 <= full_w, "a retired segment shrinks the drawn chip (%d vs %d)" % [int(part_w), int(full_w)])
+	Runner.T.ok(absf(float(Hud.verb_legend_extent(after_roll)[0]) + part_w / 2.0 - 320.0) <= 0.01,
+		"the shrunken chip stays centered on the 640px canvas")
+	Runner.T.eq(Hud.verb_legend_primitives(200.0, after_roll).size(), after_roll.size(),
+		"one drawn primitive per SURVIVING segment")
+	# The never-pressed backstop outlasts a landing-zone read but is still a real upper bound.
+	Runner.T.ok(Hud.VERB_WINDOW >= 1200.0,
+		"the unused-verb window outlasts a landing-zone read (%d ticks)" % int(Hud.VERB_WINDOW))
+	Runner.T.ok(Hud.VERB_WINDOW <= 3600.0, "but is still bounded — the chip is never permanent")

@@ -230,3 +230,27 @@ func test_no_hardcoded_biome_word_in_player_copy() -> void:
 			hits.append("%s: %s" % [path, m.get_string()])
 	Runner.T.eq(hits.size(), 0,
 		"no hardcoded biome noun in player-facing copy, found: %s" % str(hits))
+# --- c-onboard: the 16s boot intro IS skippable after its first second, but nothing on
+# screen said so. The affordance and the input gate must share ONE arm point, or the prompt
+# advertises a skip that gets swallowed (a prompt that lies is worse than no prompt). ---
+
+func test_splash_skip_prompt_only_appears_once_skip_is_armed() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var arm: float = ms.SPLASH_SKIP_ARM
+	# Disarmed: the medallion's guaranteed opening. No prompt, and the gate agrees.
+	for el in [0.0, arm * 0.5, arm - 0.001]:
+		Runner.T.ok(not ms.splash_skip_armed(el), "skip is disarmed at el=%.3f" % el)
+		Runner.T.eq(ms.splash_skip_alpha(el), 0.0,
+			"no skip prompt drawn while the skip is disarmed (el=%.3f)" % el)
+	# Armed: the gate opens and the prompt starts fading in on the SAME frame.
+	Runner.T.ok(ms.splash_skip_armed(arm), "skip arms exactly at SPLASH_SKIP_ARM")
+	Runner.T.ok(ms.splash_skip_alpha(arm + 0.4) > 0.99,
+		"the prompt reaches full alpha shortly after arming")
+	Runner.T.ok(ms.splash_skip_alpha(arm + 0.2) > 0.0,
+		"the prompt is already visible mid-fade-in")
+	# It never re-hides while the splash is still running (the veil handles the dissolve).
+	Runner.T.ok(ms.splash_skip_alpha(float(ms.SPLASH_DUR) - 0.1) > 0.99,
+		"the prompt stays up for the whole armed stretch of the intro")
+	# And it is drawn inside the 360px canvas, low-center, clear of the crawl/wordmark rows.
+	Runner.T.ok(float(ms.SPLASH_SKIP_Y) < 360.0 and float(ms.SPLASH_SKIP_Y) > 300.0,
+		"the skip prompt sits low-center inside the canvas (y=%d)" % int(ms.SPLASH_SKIP_Y))

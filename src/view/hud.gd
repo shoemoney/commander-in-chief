@@ -171,12 +171,21 @@ var _opt_keep := {}       # c1-06: id -> true for the optional chips the planner
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
-var _verb_show := 360.0   # c1-04: ticks-worth of the BRIGHT gameplay-verb reminder
-                          # left; armed at run start only. ~6s — a
-                          # reminder of already-taught bindings, kept short so the chip
-                          # isn't over the playfield long. After it runs out the transient
+const VERB_WINDOW := 1800.0  # c-onboard: UPPER BOUND (ticks) on the verb chip, armed at run start.
+                          # It used to be 360 (~6s of wall clock) and each segment retired on that
+                          # clock whether or not the player ever pressed the button — the window
+                          # expired while a new player was still reading the landing zone. Segments
+                          # now retire on USE (verb_used), so this is only the backstop for a player
+                          # who never presses one at all: 30s, then the chip leaves regardless so it
+                          # can't become a permanent playfield overlay.
+var _verb_show := VERB_WINDOW   # c1-04: ticks-worth of the BRIGHT gameplay-verb reminder
+                          # left; armed at run start only. After it runs out the transient
                           # chip fades FULLY out — the permanent ROLL/WHEEL/REVIVE
                           # reference lives on the PAUSE footer instead.
+var _verb_used := {}      # c-onboard: act -> true for every verb whose input has actually FIRED
+                          # this run. A used segment drops off the chip immediately (the reminder
+                          # did its job); the rest stay up. Cleared on a fresh SimWorld alongside
+                          # _verb_sim_id, so a restart re-teaches all three.
 var _verb_sim_id := 0     # instance id of the SimWorld the window was armed for — a new
                           # SimWorld (every start_game/_reset) rearms, independent of ticks
 var _dirty := true        # c2-09: a VIEW field changed since the last _draw — the sole trigger
@@ -303,6 +312,9 @@ func _process(delta: float) -> void:
 	# over the final ~1.5s, so mark dirty on a change in the DRAWN alpha — not the raw countdown,
 	# which would needlessly repaint the whole static bright phase.
 	var paused: bool = main._menu != null and main._menu.is_active()
+	if sim.get_instance_id() != _verb_sim_id and not _verb_used.is_empty():
+		_verb_used.clear()   # c-onboard: a fresh run re-teaches every segment (verb_step rearms below)
+		_dirty = true
 	var verb_a := _verb_alpha(_verb_show, main._motion)
 	var res := verb_step(_verb_show, _verb_sim_id, sim.get_instance_id(),
 		paused, false, delta)
@@ -425,9 +437,30 @@ static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
 	var s := show
 	var sid := sim_id
 	if cur_sim_id != sim_id:
-		s = 360.0               # ~6s bright window on a brand-new run/restart
+		s = VERB_WINDOW         # bright window (upper bound) on a brand-new run/restart
 		sid = cur_sim_id
 	return [maxf(0.0, s - delta * 60.0), sid]
+
+
+## c-onboard: record that `act`'s input actually fired — its chip segment retires immediately.
+## Called from main._gather_inputs (the ONE place every player's verb input is resolved), so a
+## pad, a keyboard and a Steam Input press all route through the same door. Idempotent.
+func verb_used(act: String) -> void:
+	if _verb_used.has(act):
+		return
+	_verb_used[act] = true
+	_dirty = true
+
+
+## c-onboard: the VERB_SEGS still worth showing — every segment whose verb the player has not
+## used yet, in the canonical order. Pure, so a test can pin "a used verb retires, an unused
+## one persists" without a live Control.
+static func verb_active_segs(used: Dictionary) -> Array:
+	var out: Array = []
+	for s in VERB_SEGS:
+		if not used.has(s[0]):
+			out.append(s)
+	return out
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
@@ -608,10 +641,12 @@ func _draw() -> void:
 	# Two economies, two casts (3-vote play-panel: the numerals were identical
 	# and players conflated spendable coin with vanity score): the CHEST reads
 	# warm cream (money-gold family), the SCORE cool steel — both still flash
-	# gold on their pulse. Chest / score / tokens are MANDATORY (never dropped).
-	x = _stat("icon_coin", _fmt_stat(int(round(_disp_chest))), x, y,
+	# gold on their pulse. c-onboard: hue alone did NOT settle it, so each counter also
+	# carries its own compact UNIT ("$" / "PTS") — see chest_label/score_label.
+	# Chest / score / tokens are MANDATORY (never dropped).
+	x = _stat("icon_coin", chest_label(int(round(_disp_chest))), x, y,
 		Color(1.0, 0.93, 0.78).lerp(Color(1.0, 0.85, 0.3), chest_pulse), chest_pulse)
-	x = _stat("icon_medal", _fmt_stat(int(round(_disp_score))), x, y,
+	x = _stat("icon_medal", score_label(int(round(_disp_score))), x, y,
 		Color(0.84, 0.9, 1.0).lerp(Color(1.0, 0.9, 0.4), score_pulse), score_pulse)
 	x = _token_chip(sim, x, y)
 	var opt_start := x
@@ -1674,9 +1709,12 @@ func _verb_legend() -> void:
 	if _result_card_up():
 		return
 	if _verb_show <= 0.0:
-		return   # bright window elapsed — fully gone, no persistent playfield overlay
+		return   # upper bound elapsed — fully gone, no persistent playfield overlay
+	var segs := verb_active_segs(_verb_used)
+	if segs.is_empty():
+		return   # every verb has been used — the reminder taught what it had to teach
 	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
-	var ext := verb_legend_extent()
+	var ext := verb_legend_extent(segs)
 	var x: float = float(ext[0])
 	var total: float = float(ext[1])
 	var y := VERB_LEGEND_Y - bottom_band_lift(main.get("sim"))
@@ -1686,7 +1724,7 @@ func _verb_legend() -> void:
 		Color(0.03, 0.05, 0.03, 0.55 * a))
 	# Emit straight off the primitive list (through the seams below), so pixels land
 	# exactly where the test measures and the capture test sees the real commands.
-	for p in verb_legend_primitives(y):
+	for p in verb_legend_primitives(y, segs):
 		_emit_glyph(p["act"], p["glyph"].get_center(), VERB_GH, Color(1, 1, 1, a))
 		_emit_label(p["label_txt"], Vector2(p["label"].position.x, y + 3.0),
 			Color(0.82, 0.87, 0.77, a))
@@ -1707,10 +1745,10 @@ func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 ## c1-04: pure geometry of the transient verb chip — [left_x, content_width]. Same
 ## measure the draw loop uses, so a headless test can pin the ACTUAL chip bounds
 ## (left/right + centering) inside the HUD-safe band and the 640px width.
-static func verb_legend_extent() -> Array:
+static func verb_legend_extent(segs: Array = VERB_SEGS) -> Array:
 	var f := Art.font()
 	var total := -12.0
-	for s in VERB_SEGS:
+	for s in segs:
 		# localization-text-pipeline: translate() BEFORE measuring, same reasoning as
 		# hud.gd's K.I.A./BAIL OUT fix -- verb_legend_primitives below measures/draws
 		# the SAME translated string, so the two never disagree on width.
@@ -1722,12 +1760,12 @@ static func verb_legend_extent() -> Array:
 ## rendered label rect (plus label text + act key). The single list _verb_legend
 ## iterates to draw, so a headless test reads it to prove the ACTUAL glyph + font
 ## footprints stay on-screen and centered. `y` is the glyph center.
-static func verb_legend_primitives(y: float) -> Array:
+static func verb_legend_primitives(y: float, segs: Array = VERB_SEGS) -> Array:
 	var f := Art.font()
-	var ext := verb_legend_extent()
+	var ext := verb_legend_extent(segs)
 	var x: float = float(ext[0])
 	var out: Array = []
-	for s in VERB_SEGS:
+	for s in segs:
 		var grect := Rect2(x, y - VERB_GH / 2.0, VERB_GH, VERB_GH)
 		x += VERB_GH + 3.0
 		# localization-text-pipeline: translate ONCE, store the TRANSLATED text as
@@ -2122,8 +2160,12 @@ func _mini_bar(rect: Rect2, frac: float, fill: Color, alpha := 1.0) -> void:
 ## caps the head at a handful of glyphs so the +N can NEVER be forced to overlap it — a
 ## deterministic upper bound that makes the no-overlap invariant hold for ANY 64-bit input,
 ## not a visible change to normal play (real scores never approach the threshold).
-static func _fmt_stat(v: int) -> String:
-	if v < 1000000000000:   # < 1 trillion — full grouped digits (well past any reachable score)
+## c-onboard: `compact_at` is that threshold, defaulted to the historical 1e12 so every existing
+## caller is byte-identical. The two UNIT-LABELLED heads pass a tighter one — their unit spends
+## glyphs from the same fixed head budget, so they compact one band earlier and the invariant
+## holds unchanged. Still ~1e9, i.e. still far past anything a real run can reach.
+static func _fmt_stat(v: int, compact_at: int = 1000000000000) -> String:
+	if v < compact_at:   # full grouped digits (well past any reachable score)
 		return Art.group_digits(v)
 	var units := ["", "K", "M", "B", "T", "Q"]
 	var f := float(v)
@@ -2132,6 +2174,27 @@ static func _fmt_stat(v: int) -> String:
 		f /= 1000.0
 		i += 1
 	return "%.1f%s" % [f, units[i]]
+
+
+## c-onboard: the war chest and the score sat side by side as two BARE numerals. The earlier fix
+## was a hue split alone (warm cream vs cool steel) — hue is a single channel a colorblind player
+## can't read at all, and playtesters still conflated spendable coin with vanity score. Each
+## counter now carries a compact UNIT in its own string: the chest is money-marked "$", the score
+## is unitised "PTS". Built into the counter text on purpose — it flows through the same
+## _stat/_text advance and the same _fmt_stat width bound the fixed row-0 head is planned from,
+## so the labels need no new geometry and no new band, and the head-width invariant test
+## measures the REAL drawn strings. The unit's glyphs come OUT of the head's fixed budget
+## (LABEL_COMPACT_AT), not on top of it, so the +N can still never be forced to overlap the head.
+## PTS is a separate translate() key so a .po can unitise the score without touching the digits;
+## "$" is a symbol and stays as-is.
+const LABEL_COMPACT_AT := 1000000000   # 1 billion — the unit-labelled heads compact one band
+                                       # earlier than the bare _fmt_stat default to pay for the unit
+static func chest_label(v: int) -> String:
+	return "$" + _fmt_stat(v, LABEL_COMPACT_AT)
+
+
+static func score_label(v: int) -> String:
+	return _fmt_stat(v, LABEL_COMPACT_AT) + " " + TranslationServer.translate("PTS")
 
 
 ## c1-10: the commendation-token head chip's FULL, self-explanatory text — "" (chip suppressed)
