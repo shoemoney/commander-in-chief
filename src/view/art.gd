@@ -272,6 +272,8 @@ const TEX := {
 	"cactus_dead2": preload(ART + "p2/cactus_dead2.png"),
 	"cactus_dead3": preload(ART + "p2/cactus_dead3.png"),
 	"wall_sandbag": preload(ART + "p2/wall_sandbag.png"),
+	"wall_sandbag_b": preload(ART + "p2/wall_sandbag_b.png"),
+	"wall_sandbag_c": preload(ART + "p2/wall_sandbag_c.png"),
 	"wall_sandbag_end": preload(ART + "p2/wall_sandbag_end.png"),
 	"bunker2": preload(ART + "p2/bunker2.png"),
 	"corpse_soldier1": preload(ART + "p2/corpse_soldier1.png"),
@@ -430,7 +432,8 @@ const SCALE := {
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
 	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)
 	"cactus_dead1": 0.89, "cactus_dead2": 0.89, "cactus_dead3": 0.89,   # ~cactus_large
-	"wall_sandbag": 0.28, "wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
+	"wall_sandbag": 0.28, "wall_sandbag_b": 0.28, "wall_sandbag_c": 0.28,
+	"wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
 	"bunker2": 0.17,                 # ~bunker (same 440px canvas)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
@@ -574,7 +577,8 @@ const TINT := {
 	"cactus_dead1": Color(0.72, 0.68, 0.55), "cactus_dead2": Color(0.72, 0.68, 0.55),
 	"cactus_dead3": Color(0.72, 0.68, 0.55),
 	"corpse_soldier1": Color(0.7, 0.68, 0.58), "corpse_soldier2": Color(0.7, 0.68, 0.58),
-	"wall_sandbag": Color(0.88, 0.92, 0.66), "wall_sandbag_end": Color(0.88, 0.92, 0.66),
+	"wall_sandbag": Color(0.88, 0.92, 0.66), "wall_sandbag_b": Color(0.88, 0.92, 0.66),
+	"wall_sandbag_c": Color(0.88, 0.92, 0.66), "wall_sandbag_end": Color(0.88, 0.92, 0.66),
 }
 
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
@@ -608,7 +612,7 @@ const OUTLINE := {
 	"courier": true,
 	# sie-01: ghillie/sapper dropped from OUTLINE too -- same re-bake, same baked keyline.
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
-	"wall_sandbag": true, "wall_sandbag_end": true,
+	"wall_sandbag": true, "wall_sandbag_b": true, "wall_sandbag_c": true, "wall_sandbag_end": true,
 	"tank_trap": true, "barricade": true, "flak_gun": true, "trench": true,
 	"flag_marker": true, "radio_tower": true, "dry_shrub": true, "tumbleweed": true,
 	"wreck_halftrack": true, "crater_field": true, "crater_water": true, "mg_tripod": true,

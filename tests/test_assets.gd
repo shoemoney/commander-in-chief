@@ -1714,3 +1714,80 @@ func test_no_dev_addon_autoloads_in_project_godot() -> void:
 			offenders.append(line.split("=")[0])
 	Runner.T.eq(offenders, [] as Array[String],
 		"no [autoload] entry points into addons/ (dev-only tooling must not ship)")
+
+
+# --- kill-the-copy-pasted-sandbag-wall-tiling: the BAKE must not be a mechanical
+# grid of identical stamps -- per-segment placement jitter (wall_variant/cap_flags,
+# tests/test_main.gd) cannot rescue a source PNG that is N identical flat-fill
+# ovals on a ruled line. Pins the anti-grid properties tools/gen_entities.py's
+# _sandbag_wall/_bag builder is supposed to guarantee, so a future regeneration
+# back to a stamped grid fails HERE instead of only showing up in a screenshot
+# review. ---------------------------------------------------------------------
+
+func test_sandbag_bakes_are_not_a_mechanical_grid() -> void:
+	# (path, committed alpha-bbox (min_y, max_y) -- new bake must stay within 3px)
+	var files := {
+		"res://assets/art/p2/wall_sandbag.png": Vector2i(64, 181),
+		"res://assets/art/p2/wall_sandbag_b.png": Vector2i(64, 181),
+		"res://assets/art/p2/wall_sandbag_c.png": Vector2i(64, 181),
+		"res://assets/art/p2/wall_sandbag_end.png": Vector2i(31, 92),
+		"res://assets/art/sandbag.png": Vector2i(17, 63),
+	}
+	var wall_body_hashes := {}
+	for path in files:
+		var t: Texture2D = load(path)
+		Runner.T.ok(t != null, "%s imports" % path)
+		if t == null:
+			continue
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var w := img.get_width()
+		var h := img.get_height()
+		var top_rows: Array[int] = []
+		var colors := {}
+		var bbox_min_y := h        # ANY nonzero alpha, matching PIL's getbbox() -- the
+		var bbox_max_y := -1       # committed footprint below was measured that way.
+		for x in w:
+			var first := -1
+			for y in h:
+				var a := img.get_pixel(x, y).a
+				if a > 0.0:
+					bbox_min_y = mini(bbox_min_y, y)
+					bbox_max_y = maxi(bbox_max_y, y)
+				if a > 0.05:
+					if first == -1:
+						first = y
+					colors[img.get_pixel(x, y).to_html(false)] = true
+			if first != -1:
+				top_rows.append(first)
+		Runner.T.ok(top_rows.size() > 4, "%s has real opaque width (>4 columns)" % path)
+		var distinct := {}
+		var mean := 0.0
+		for r in top_rows:
+			distinct[r] = true
+			mean += r
+		mean /= maxf(1.0, top_rows.size())
+		var variance := 0.0
+		for r in top_rows:
+			variance += (r - mean) * (r - mean)
+		variance /= maxf(1.0, top_rows.size())
+		var stddev := sqrt(variance)
+		Runner.T.ok(distinct.size() >= 4,
+			"%s top edge has >=4 distinct heights across the run, not a ruled stamp line (got %d)" %
+				[path, distinct.size()])
+		Runner.T.ok(stddev > 1.5,
+			"%s top-edge height stddev > 1.5px, a silhouette not a flat grid (got %.2f)" % [path, stddev])
+		Runner.T.ok(colors.size() >= 6,
+			"%s has >=6 distinct opaque RGB values -- real shading, not 2 flat fills + a keyline (got %d)" %
+				[path, colors.size()])
+		var target: Vector2i = files[path]
+		Runner.T.ok(absi(bbox_min_y - target.x) <= 3 and absi(bbox_max_y - target.y) <= 3,
+			"%s alpha bbox height (%d..%d) stays within 3px of the pinned footprint (%d..%d) -- must not draw taller than the sim's SANDBAG_HALF hitbox" %
+				[path, bbox_min_y, bbox_max_y, target.x, target.y])
+		if path.contains("wall_sandbag") and not path.contains("_end"):
+			var file_hash := FileAccess.get_sha256(path)
+			Runner.T.ok(not wall_body_hashes.has(file_hash),
+				"%s is a distinct bake, not a byte-for-byte copy of %s" % [path, wall_body_hashes.get(file_hash, "")])
+			wall_body_hashes[file_hash] = path
+	Runner.T.eq(wall_body_hashes.size(), 3, "all 3 wall_sandbag body variants are distinct bakes")

@@ -2418,6 +2418,11 @@ func _consume_events() -> void:
 			"sandbag_plant":
 				# One-beat dig-in puff: planted cover kicks real dust (9/9 panel).
 				_burst(ev["x"], ev["y"], "dust", 5, 0.8, 1.8, 0.35)
+			"sandbag_break":
+				# Cover's gone (tank crush / raider smash / explosion) -- had a
+				# sound (main.gd:398) but no visual. Reuse the burst/scorch pattern.
+				_burst(ev["x"], ev["y"], "dust", 7, 1.2, 2.4, 0.5)
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(9.0, 13.0)})
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
@@ -6518,7 +6523,12 @@ func _wall_seg(pos: Vector2, base_scale: float, tint: Color, hx: int, hy: int,
 	elif caps & CAP_RIGHT:
 		_spr("wall_sandbag_end", p, PI, base_scale, col, -1.0)           # run ends here (h-mirror)
 	else:
-		_spr("wall_sandbag", p, (PI + v["rot"]) if v["flip"] else v["rot"], s, col,
+		# Three baked-body variants (kill-the-copy-pasted-stamp): hashed off the
+		# same (hx, hy) as wall_variant but re-mixed (*3, *5) so the pick doesn't
+		# correlate with flip/shade -- frame-stable while the camera scrolls.
+		const _WALL_BODY := ["wall_sandbag", "wall_sandbag_b", "wall_sandbag_c"]
+		var body: String = _WALL_BODY[Art.cell_hash(hx * 3, hy * 5) % 3]
+		_spr(body, p, (PI + v["rot"]) if v["flip"] else v["rot"], s, col,
 			-1.0 if v["flip"] else 1.0)
 	if v["slump"]:
 		# Damage state: spilled bags + a scorch smear at the foot of a shelled segment.
