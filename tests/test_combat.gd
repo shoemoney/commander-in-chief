@@ -12,6 +12,18 @@ func _idle() -> SimInput:
 	return SimInput.new()
 
 
+func _pstep(sim: SimWorld, inputs: Array) -> void:
+	## Contact death no longer lives at the tail of _step_players — hitbox
+	## fairness moved it to its own late pass (_step_contact_deaths), which
+	## step() runs AFTER the player's bullets/grenades resolve so a rusher your
+	## own round killed this tick can no longer kill you. Tests that drive
+	## _step_players directly must drive the contact pass too, or they measure a
+	## player who can never die by touch — exactly the silently-green shape the
+	## stub-parity gate exists to catch.
+	sim._step_players(inputs)
+	sim._step_contact_deaths()
+
+
 func test_roll_iframes_block_contact_damage_then_expire() -> void:
 	# A rolling player is immune to contact damage for every tick that actually
 	# executes roll movement — including the final active-roll tick, where
@@ -29,27 +41,27 @@ func test_roll_iframes_block_contact_damage_then_expire() -> void:
 	var roll := SimInput.new()
 	roll.move_x = 256
 	roll.roll = true
-	sim._step_players([roll])
+	_pstep(sim, [roll])
 	Runner.T.ok(p["roll_ticks"] > 0, "roll triggered")
 	Runner.T.ok(p["alive"], "mid-roll i-frames: the triggering tick's contact did not kill")
 	var idle := SimInput.new()
 	while p["roll_ticks"] > 1:
 		e["x"] = p["x"]
 		e["y"] = p["y"]
-		sim._step_players([idle])
+		_pstep(sim, [idle])
 	Runner.T.ok(p["alive"], "player survived every roll tick except the last")
 	# Final active-roll tick: roll_ticks decrements to 0 THIS tick, but the
 	# player still executed roll movement this tick, so i-frames still protect.
 	e["x"] = p["x"]
 	e["y"] = p["y"]
-	sim._step_players([idle])
+	_pstep(sim, [idle])
 	Runner.T.eq(p["roll_ticks"], 0, "roll has ended")
 	Runner.T.ok(p["alive"], "the final active-roll tick is still protected")
 	# One more idle tick: roll has fully ended (no roll-move happened this
 	# tick), so contact damage resumes.
 	e["x"] = p["x"]
 	e["y"] = p["y"]
-	sim._step_players([idle])
+	_pstep(sim, [idle])
 	Runner.T.ok(not p["alive"], "contact damage resumes once the roll fully ends")
 
 
@@ -65,13 +77,13 @@ func test_bash_cooldown_leaves_player_vulnerable_to_second_attacker() -> void:
 	var e1 := sim.enemies[sim.enemies.size() - 1]
 	var inp := SimInput.new()
 	inp.fire = true
-	sim._step_players([inp])
+	_pstep(sim, [inp])
 	Runner.T.ok(not e1["alive"], "first bash kills the adjacent enemy")
 	Runner.T.eq(p["fire_cd"], SimWorld.BASH_COOLDOWN_TICKS, "bash arms its long cooldown")
 	Runner.T.ok(p["alive"], "player survives the bash tick")
 	sim._spawn_enemy(p["x"] + 5 * Fixed.ONE, p["y"], false)   # well within touch range too
 	var e2 := sim.enemies[sim.enemies.size() - 1]
-	sim._step_players([inp])
+	_pstep(sim, [inp])
 	Runner.T.ok(e2["alive"], "bash cooldown blocks a second melee kill")
 	Runner.T.ok(not p["alive"], "no bash + no ammo + contact = death during the cooldown window")
 
@@ -155,16 +167,16 @@ func test_post_respawn_mercy_window_blocks_immediate_recontact() -> void:
 	sim._kill_player(p)
 	var revive := SimInput.new()
 	revive.revive = true
-	sim._step_players([revive])
+	_pstep(sim, [revive])
 	Runner.T.ok(p["alive"], "self-revive succeeded")
 	Runner.T.eq(p["hurt_iframes"], SimWorld.VEST_IFRAME_TICKS, "respawn grants the full post-spawn mercy window")
 	sim.enemies.clear()
 	sim._spawn_enemy(p["x"], p["y"], false)   # standing exactly on the fresh spawn
 	var idle := SimInput.new()
-	sim._step_players([idle])
+	_pstep(sim, [idle])
 	Runner.T.ok(p["alive"], "mercy window absorbs the immediate re-contact with no vest needed")
 	for i in SimWorld.VEST_IFRAME_TICKS:
-		sim._step_players([idle])
+		_pstep(sim, [idle])
 		if not p["alive"]:
 			break
 	Runner.T.ok(not p["alive"], "contact damage resumes once the mercy window lapses")

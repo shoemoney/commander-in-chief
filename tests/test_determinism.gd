@@ -320,13 +320,43 @@ const SEED := 0xDEADBEEF
 ## campaign and 0 in endless (torture segs 0-1 stream no grass and no trench, no
 ## smoke capsule is ever collected, and endless wipes at wave 2). Zero rng draws
 ## added, zero aim points displaced -> both sample sets byte-identical.
+## RE-RECORDED (2026-07-25, HITBOX FAIRNESS AUDIT). Every lethal interaction was
+## measured against the sprite the player actually sees (tools/measure_hitbox.gd
+## dumps the opaque alpha bbox of each drawn texture x its call scale; the ratios
+## are now pinned by tests/test_hitbox_fairness.gd). Five sim changes move this
+## stream, all of them from tick 0 because the torture is nose-to-nose with
+## rushers the whole run:
+##   1. RESOLUTION ORDER — contact death left the tail of _step_players for its
+##      own pass, _step_contact_deaths(), which step() now runs AFTER
+##      _step_bullets/_step_enemy_bullets/_step_grenades and BEFORE _step_enemies.
+##      It used to resolve FIRST, so a rusher the player's own round killed on
+##      tick T still killed the player on tick T. A tie now goes to the player,
+##      and nothing can kill from a position that was never rendered. This alone
+##      moves sample 0: the torture holds fire into point-blank rushers.
+##   2. ENEMY_BULLET_HIT_RADIUS 8 -> 7. The hero silhouette draws 19.1x20.4px
+##      (inscribed radius 9.55), so 8 made 84% of the drawn body lethal in a
+##      one-hit-kill game; 7 is 73% — the round must be visibly INSIDE the man.
+##   3. BULLET_HIT_RADIUS 9 -> 10. The player's OWN round was 98% of a fodder
+##      half-width (9.2px) — no generosity at all on the one hitbox that should
+##      have some. 10 = 109%, a one-pixel forgiveness collar.
+##   4. BLAST_KILL_RADIUS 30 splits the ENEMY-kill scan out of GRENADE_RADIUS 28.
+##      The drawn fireball peaks at ~33px radius, so enemies standing in visible
+##      flame used to walk out. Player-LETHAL blast checks (strike, barrel) and
+##      every cover/bunker/boss keep-out still use 28 — incoming never grew.
+##   5. PILOT_RESCUE_RADIUS 14 splits the friendly pilot grab off the lethal
+##      ENEMY_TOUCH_RADIUS 10 they used to share, plus the barrel's player-hurt
+##      check moved from `roll_ticks == 0` to `not roll_iframe` (it was the one
+##      lethal check in the sim with a one-tick hole in the dodge i-frames).
+## ENDLESS_GOLDEN VERIFIED UNCHANGED: re-measured with these values committed and
+## the endless samples are byte-identical (the endless torture wipes in wave 2,
+## before its stream diverges on any of the above).
 const GOLDEN: Array[int] = [
-	506778608736561550,
-	7590183919185690526,
-	241001744564993750,
-	8011787666350042381,
-	1378208880990403486,
-	5406986129690569999,
+	6937428189844233967,
+	7886711908080620170,
+	7775363677604074106,
+	115322671397911826,
+	5827643751213607334,
+	6960011303206835115,
 ]
 
 

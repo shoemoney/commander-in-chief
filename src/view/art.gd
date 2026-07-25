@@ -377,7 +377,16 @@ const SCALE := {
 	"player1": 0.25, "player2": 0.25, "rusher": 0.53, "elite": 0.58,   # sol-04: hero folds the 256px pack canvas to the ~18px on-screen footprint (was 0.56/0.47 for the 300px legacy art bake)
 	# sol-08: enemy pack sprites fold the 128px canvas to the ~18-20px infantry footprint (call-scale 0.5 × 0.5 × 128 ≈ 32px canvas).
 	"enemy_assault": 0.5, "enemy_smg": 0.5, "enemy_shotgun": 0.5, "enemy_lmg": 0.5, "enemy_sniper": 0.5,
-	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24, "bunker": 0.17,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the legacy art bake)
+	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the legacy art bake)
+	# HITBOX FAIRNESS (2026-07-25): 0.17 was tuned against a 440px canvas, then an
+	# import sweep added `process/size_limit=128` to bunker/bunker2 without
+	# re-tuning SCALE — and _spr sizes off the IMPORTED texture. The strongpoint
+	# quietly shrank 3.44x, to a 14x12px sprite guarding a 48x32px collision AABB:
+	# 343% collision-to-silhouette, the worst ratio in the game. Rounds died in
+	# invisible armour a full sprite-width off the drawn wall. 0.58 restores the
+	# authored ~58px footprint, which lands the opaque silhouette at 48px wide —
+	# exactly SimWorld.BUNKER_W. Pinned by test_hitbox_fairness.gd.
+	"bunker": 0.58,
 	"tank_body": 0.72, "tank_barrel": 0.69,
 	"gunship_body": 0.67, "colossus_body": 0.59,
 	# Real barrel bakes replacing the 4x4 blanks: sized so the minigun sits
@@ -432,7 +441,7 @@ const SCALE := {
 	"cactus_dead1": 0.89, "cactus_dead2": 0.89, "cactus_dead3": 0.89,   # ~cactus_large
 	"wall_sandbag": 0.28, "wall_sandbag_b": 0.28, "wall_sandbag_c": 0.28,
 	"wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
-	"bunker2": 0.17,                 # ~bunker (same 440px canvas)
+	"bunker2": 0.58,                 # ~bunker (same 440px source, same 128px import — see the bunker note)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
 	# _spr sizes off the IMPORTED texture, so size_limit changes must land here
