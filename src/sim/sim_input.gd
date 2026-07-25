@@ -6,6 +6,9 @@ extends RefCounted
 ## boundary — the sim never sees a float. Quantized inputs are also what the
 ## replay format and (later) lockstep netcode serialize.
 
+## The quantized-axis range `_quantize_axis` produces and `decode` enforces.
+const AXIS_MAX := 256
+
 var move_x: int = 0
 var move_y: int = 0
 var aim_x: int = 0
@@ -32,12 +35,21 @@ func encode() -> Array[int]:
 
 
 static func decode(data: Array) -> SimInput:
+	## TRUST BOUNDARY. This decodes bytes from a remote peer (lockstep) or a file
+	## someone mailed in with a bug report (replay) — never trust either. replay.gd
+	## already validates frame SHAPE here and says why; range was still unchecked:
+	## `_quantize_axis` guarantees [-256,256] locally, but a crafted payload can send
+	## anything, and sim_world's `inp.move_x * 256` feeds Fixed.length, which overflows
+	## int64 past ~2^24. That stays perfectly DETERMINISTIC (both peers consume the same
+	## bytes), so it is a silent cheat vector with no desync to detect it.
 	var inp := SimInput.new()
-	inp.move_x = data[0]
-	inp.move_y = data[1]
-	inp.aim_x = data[2]
-	inp.aim_y = data[3]
-	var flags: int = data[4]
+	if data.size() < 5:
+		return inp   # short payload: neutral input beats indexing past the end mid-step
+	inp.move_x = clampi(int(data[0]), -AXIS_MAX, AXIS_MAX)
+	inp.move_y = clampi(int(data[1]), -AXIS_MAX, AXIS_MAX)
+	inp.aim_x = clampi(int(data[2]), -AXIS_MAX, AXIS_MAX)
+	inp.aim_y = clampi(int(data[3]), -AXIS_MAX, AXIS_MAX)
+	var flags: int = int(data[4])
 	inp.fire = (flags & 1) != 0
 	inp.grenade = (flags & 2) != 0
 	inp.revive = (flags & 4) != 0

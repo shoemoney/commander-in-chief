@@ -108,3 +108,32 @@ func test_replay_save_load_roundtrip() -> void:
 	var a := _last_replay.play(200)
 	var b := loaded.play(200)
 	Runner.T.eq(a, b, "loaded replay reproduces the original run")
+
+
+func test_decode_clamps_hostile_axes_and_survives_short_payload() -> void:
+	## SimInput.decode is a trust boundary — it eats bytes from a remote lockstep peer
+	## and from replay files people mail in with bug reports. Unclamped axes reach
+	## `inp.move_x * 256` -> Fixed.length, which overflows int64 past ~2^24, and a short
+	## payload used to index data[4] and throw mid-sim.step(). Neither desyncs (both
+	## peers consume the same bytes), so nothing downstream would ever notice.
+	var wild := SimInput.decode([1 << 40, -(1 << 40), 999999, -999999, 0])
+	Runner.T.eq(wild.move_x, SimInput.AXIS_MAX, "huge move_x clamped to AXIS_MAX")
+	Runner.T.eq(wild.move_y, -SimInput.AXIS_MAX, "huge negative move_y clamped")
+	Runner.T.eq(wild.aim_x, SimInput.AXIS_MAX, "huge aim_x clamped")
+	Runner.T.eq(wild.aim_y, -SimInput.AXIS_MAX, "huge negative aim_y clamped")
+	var short := SimInput.decode([1, 2])
+	Runner.T.eq(short.move_x, 0, "short payload yields neutral input, not a crash")
+	Runner.T.eq(short.buy, 0, "short payload presses nothing")
+	# In-range values still round-trip exactly.
+	var ok_in := SimInput.new()
+	ok_in.move_x = 256
+	ok_in.move_y = -128
+	ok_in.aim_x = -256
+	ok_in.aim_y = 7
+	ok_in.fire = true
+	ok_in.buy = 5
+	var rt := SimInput.decode(ok_in.encode())
+	Runner.T.eq(rt.move_x, 256, "in-range move_x survives")
+	Runner.T.eq(rt.move_y, -128, "in-range move_y survives")
+	Runner.T.eq(rt.aim_x, -256, "in-range aim_x survives")
+	Runner.T.ok(rt.fire and rt.buy == 5, "flags and buy survive the clamp path")
