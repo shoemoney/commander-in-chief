@@ -305,6 +305,17 @@ func test_a1_wheel_socket_display_gating() -> void:
 	Runner.T.eq(ms._wheel_socket_display(false, false), "none", "unselected unaffordable shows neither (the × cue handles it)")
 
 
+func test_wheel_text_rows_never_stack() -> void:
+	# The AAA tell: two size-8/9 rows 11px apart read as one collided mush.
+	# PixelOperator8 paints ascent+descent+1px shadow = 11px at size 9.
+	var c := _consts()
+	var rows := [c["WHEEL_ROW_WARN"], c["WHEEL_ROW_LABEL"], c["WHEEL_ROW_CUE"]]
+	rows.sort()
+	for i in rows.size() - 1:
+		Runner.T.ok(rows[i + 1] - rows[i] >= 11.0,
+			"wheel text rows keep >= one line-height of padding")
+
+
 # --- a1-17: banner plate alpha floor ---
 
 func test_a1_banner_plate_alpha_floor() -> void:

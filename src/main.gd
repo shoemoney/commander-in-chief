@@ -336,6 +336,13 @@ const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUN
 # diagonals empty (-1) so a sloppy flick can never buy something unnamed.
 const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, 5]   # E,SE,S,SW,W,NW,N,NE(token)
 
+# Hub-anchored text rows, y offsets from the wheel hub. Kept >= FONT_H apart on
+# purpose: every socket label is laid out HORIZONTALLY on WHEEL_ROW_LABEL, so
+# these three are the only stacked runs the wheel has. Pinned by test_assets.
+const WHEEL_ROW_WARN := -68.0    # revive-guard warning
+const WHEEL_ROW_LABEL := -56.0   # pick label + cost + stock (one row)
+const WHEEL_ROW_CUE := 52.0      # RELEASE TO BUY / CANCEL
+
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
 	"shot": ["shot", -9.0, 1.0],
@@ -9381,8 +9388,9 @@ func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
 
 
 static func _wheel_socket_display(selected: bool, afford: bool) -> String:
-	# a1-16: what a spend-wheel socket shows — the SELECTED socket shows full
-	# cost+stock; an unselected AFFORDABLE socket shows a compact can-buy dot;
+	# a1-16: what a spend-wheel socket shows — the SELECTED socket's numbers
+	# ride the hub label row (one horizontal line, not stacked under the
+	# socket); an unselected AFFORDABLE socket shows a compact can-buy dot;
 	# otherwise (unselected + unaffordable) neither (the × cue handles that).
 	if selected:
 		return "full"
@@ -9400,7 +9408,7 @@ func _draw_wheel() -> void:
 			continue
 		var c := _to_screen(p["x"], p["y"])
 		# Keep the whole wheel readable at the arena edges: hub, pick label
-		# (c.y-52) and cue line (c.y+52) must all stay on-screen.
+		# (c.y+WHEEL_ROW_LABEL) and cue line (c.y+WHEEL_ROW_CUE) must all stay on-screen.
 		c.x = clampf(c.x, 78.0, 562.0)
 		c.y = clampf(c.y, 96.0, 296.0)
 		# (No entrance-scale envelope: the old draw_set_transform pop was clobbered by
@@ -9453,79 +9461,91 @@ func _draw_wheel() -> void:
 			if not afford:
 				# Non-color "can't buy" cue beside the socket (colorblind-safe).
 				Art.text(self, "×", ipos + Vector2(12.0, -8.0), 9, Color(1.0, 0.5, 0.4))
-			# a1-16 HUD#1/LEG#6: the full cost + stock text draws ONLY on the SELECTED
-			# socket — the other seven stop crowding every ring with numbers. Unselected
-			# AFFORDABLE sockets get a compact green "can-buy" dot; the × already carries
-			# the not-afford read (colorblind-safe). Declutters 1P AND relieves 2P stacking.
-			var wdisp := _wheel_socket_display(selected, afford)
-			if wdisp == "full":
-				var cost_txt := ("%d*" % acost) if is_token else str(acost)
-				var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-				Art.text(self, cost_txt, ipos + Vector2(-costw / 2.0, 24), 8,
-					Color(1.0, 0.95, 0.65) if afford else Color(0.9, 0.5, 0.45))
-				var stock := ""
-				match int(item["kind"]):
-					0: stock = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
-					1: stock = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
-					2: stock = "VEST ON" if p["vest"] else "NO VEST"
-					4: stock = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
-					5: stock = "%d* HELD" % sim.tokens
-				if stock != "":
-					var empty := stock.begins_with("0/") or stock == "NO VEST"
-					var sw2 := f.get_string_size(stock, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-					Art.text(self, stock, ipos + Vector2(-sw2 / 2.0, 33), 8,
-						Color(1.0, 0.55, 0.45) if empty else Color(1.0, 0.97, 0.9))
-			elif wdisp == "dot":
-				# compact "can-buy" dot: affordability reads at a glance, no numbers
-				draw_circle(ipos + Vector2(0.0, 14.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
+			# a1-16 HUD#1/LEG#6: the selected socket's cost+stock now rides the
+			# hub label row (one horizontal line below the hub) instead of
+			# stacking under the socket, where it collided with the cue/
+			# countdown rows. Unselected AFFORDABLE sockets still get a
+			# compact green "can-buy" dot; the × already carries the
+			# not-afford read (colorblind-safe).
+			if _wheel_socket_display(selected, afford) == "dot":
+				draw_circle(ipos + Vector2(0.0, 11.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
 		# Device-aware verb cue under the hub: the wheel states its own controls,
 		# and the cancel button is the real glyph (pad B / keycap C), not a letter.
+		# Selected item's cost/afford, computed once and reused by the revive
+		# guard, the cue line and the hub label row below (was recomputed three
+		# separate ways — that's how the wheel's fixed rows and the socket's
+		# radial numbers drifted onto each other).
+		var sel: int = _wheel[i]["sel"]
+		var sel_item: Dictionary = {}
+		var sel_is_token := false
+		var sel_cost := 0
+		var sel_afford := false
+		if sel >= 0:
+			sel_item = WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]
+			sel_is_token = int(sel_item["kind"]) == 5
+			sel_cost = 1 if sel_is_token else sim._supply_cost(sel_item["kind"])
+			sel_afford = (sim.tokens >= 1) if sel_is_token else (sim.war_chest >= sel_cost)
 		# Revive-guard (5-vote panel item): with a teammate down, a buy that
 		# would price their revive out of the shared chest is a silent trap —
 		# name it BEFORE the release commits the coin.
-		if _wheel[i]["sel"] >= 0 and not sim.last_stand:
-			var gitem: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[_wheel[i]["sel"]]]
-			var gcost: int = sim._supply_cost(gitem["kind"])
+		if sel >= 0 and not sim.last_stand:
+			var gcost: int = sim._supply_cost(sel_item["kind"])
 			if sim.war_chest >= gcost:
 				for q in sim.players.size():
 					var dq := sim.players[q]
 					if not dq["alive"] and sim.war_chest - gcost < sim.revive_cost(dq):
 						Art.text_center(self, "BUY LEAVES NO REVIVE FOR P%d" % (q + 1),
-							c.x, c.y - 63.0, 8, Color(1.0, 0.7, 0.3))
+							c.x, c.y + WHEEL_ROW_WARN, 8, Color(1.0, 0.7, 0.3))
 						break
-		if _wheel[i]["sel"] >= 0:
+		if sel >= 0:
 			# The verb line must not promise a purchase the sim will deny — an
 			# unaffordable pick tints its socket red, so the cue says so too
 			# (release on it fires the deny path, not a buy).
-			var cue_item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[_wheel[i]["sel"]]]
-			var cue_afford: bool = (sim.tokens >= 1) if int(cue_item["kind"]) == 5 \
-				else sim.war_chest >= sim._supply_cost(cue_item["kind"])
-			var cue_l := "RELEASE TO BUY · " if cue_afford else "CAN'T AFFORD · "
+			var cue_l := "RELEASE TO BUY · " if sel_afford else "CAN'T AFFORD · "
 			var cue_r := " CANCEL"
 			var wl := f.get_string_size(cue_l, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 			var wr := f.get_string_size(cue_r, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
 			var cx0 := c.x - (wl + 10.0 + wr) / 2.0
-			Art.text(self, cue_l, Vector2(cx0, c.y + 52.0), 8,
-				Color(0.9, 0.92, 0.8, 0.85) if cue_afford else Color(1.0, 0.55, 0.45, 0.9))
-			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + 48.5), 10.0,
+			Art.text(self, cue_l, Vector2(cx0, c.y + WHEEL_ROW_CUE), 8,
+				Color(0.9, 0.92, 0.8, 0.85) if sel_afford else Color(1.0, 0.55, 0.45, 0.9))
+			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + WHEEL_ROW_CUE - 3.5), 10.0,
 				Color.WHITE, i == 1, bind("roll"))   # P2's wheel is pad-driven — show pad B, not the C keycap
-			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + 52.0), 8, Color(0.9, 0.92, 0.8, 0.85))
+			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + WHEEL_ROW_CUE), 8, Color(0.9, 0.92, 0.8, 0.85))
 		else:
-			Art.text_center(self, "FLICK TO PICK · RELEASE TO CLOSE", c.x, c.y + 52.0, 8,
+			Art.text_center(self, "FLICK TO PICK · RELEASE TO CLOSE", c.x, c.y + WHEEL_ROW_CUE, 8,
 				Color(0.9, 0.92, 0.8, 0.85))
-		# What the selected socket actually delivers.
-		var sel: int = _wheel[i]["sel"]
+		# What the selected socket actually delivers: ONE horizontal row (label
+		# + cost + stock) on the hub label row, instead of three stacked runs
+		# fighting the cue/countdown rows below. The removed "NEXT WAVE IN %ds"
+		# duplicated the top-bar "SHOP OPEN %ds" chip (hud.gd) anyway — and drew
+		# twice in 2P, once per hub.
 		if sel >= 0:
-			var lbl: String = WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]["label"]
-			# Anchored ABOVE this player's hub — the old global y=71 left P2's
-			# pick floating at the top of the screen, nowhere near their wheel.
-			Art.text_center(self, lbl, c.x, c.y - 52.0, 9, Color(1.0, 0.95, 0.7))
-		# Next-wave clock (c2 2v): the intermission buy should take 2 seconds,
-		# not 10 — give it a countdown right under the cue line so the decision
-		# has its clock. Reads the already-checksummed intermission_ticks.
-		if sim.mode == "endless" and sim.intermission_ticks > 0:
-			Art.text_center(self, "NEXT WAVE IN %ds" % ceili(sim.intermission_ticks / 60.0),
-				c.x, c.y + 63.0, 8, Color(1.0, 0.95, 0.65))
+			var lbl: String = sel_item["label"]
+			var cost_txt := ("%d*" % sel_cost) if sel_is_token else str(sel_cost)
+			var stock_txt := ""
+			match int(sel_item["kind"]):
+				0: stock_txt = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
+				1: stock_txt = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
+				2: stock_txt = "VEST ON" if p["vest"] else "NO VEST"
+				4: stock_txt = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
+				5: stock_txt = "%d* HELD" % sim.tokens
+			var stock_empty := stock_txt.begins_with("0/") or stock_txt == "NO VEST"
+			var lblw := f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			var stockw := f.get_string_size(stock_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			var gap := 8.0
+			var total_w := lblw + gap + costw + (gap + stockw if stock_txt != "" else 0.0)
+			var rx := c.x - total_w / 2.0
+			var ry := c.y + WHEEL_ROW_LABEL
+			Art.text(self, lbl, Vector2(rx, ry), 9, Color(1.0, 0.95, 0.7))
+			rx += lblw + gap
+			Art.text(self, cost_txt, Vector2(rx, ry), 8,
+				Color(1.0, 0.95, 0.65) if sel_afford else Color(0.9, 0.5, 0.45))
+			rx += costw
+			if stock_txt != "":
+				rx += gap
+				Art.text(self, stock_txt, Vector2(rx, ry), 8,
+					Color(1.0, 0.55, 0.45) if stock_empty else Color(1.0, 0.97, 0.9))
 
 
 func _top_center_priority() -> String:
