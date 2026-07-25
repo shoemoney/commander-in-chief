@@ -230,6 +230,7 @@ var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 const BANNER_LIFETIME_FRAMES := 125           # c4-07: a lone banner's on-screen life in physics-frames (~2s at 60Hz); show_banner starts t=1.0 and _update_feel drains 1.0/this each frame. The seed-paste status lines lean on this read time; a FIFO backlog drains proportionally faster (see _update_feel).
+const BANNER_MAX_W := 420.0                   # splash banner scrim width cap (66% of SCREEN_W) — never spans the playfield
 var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
 var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
 var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
@@ -262,9 +263,9 @@ const _KIND_TEACH := {
 	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
 	# The counterplay is counterintuitive (it outruns a straight sprint at
 	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
-	"technical": "TECHNICAL — SIDESTEP ITS CHARGE LINE, ONE SHOT DROPS IT",
-	"courier": "SUPPLY COURIER — GUN IT DOWN BEFORE IT ESCAPES (4x BOUNTY)",
-	"broadcast": "BROADCAST TOWER — KILL THE MAST, BREAK THE RALLY",
+	"technical": "TECHNICAL — SIDESTEP ITS CHARGE",
+	"courier": "COURIER — 4x BOUNTY, GUN IT DOWN",
+	"broadcast": "BROADCAST TOWER — KILL THE MAST",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -2391,6 +2392,11 @@ func _consume_events() -> void:
 			"sandbag_plant":
 				# One-beat dig-in puff: planted cover kicks real dust (9/9 panel).
 				_burst(ev["x"], ev["y"], "dust", 5, 0.8, 1.8, 0.35)
+			"sandbag_break":
+				# Cover's gone (tank crush / raider smash / explosion) -- had a
+				# sound (main.gd:398) but no visual. Reuse the burst/scorch pattern.
+				_burst(ev["x"], ev["y"], "dust", 7, 1.2, 2.4, 0.5)
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(9.0, 13.0)})
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
@@ -2475,7 +2481,7 @@ func _consume_events() -> void:
 			"observer_spawn":
 				_vo("vo_observer", 1, 600)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
-				show_banner("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON", GameMenu.BANNER_COL_DEFAULT, "hud_lightning")
+				show_banner("MORTAR OBSERVER — SHOOT IT DOWN", GameMenu.BANNER_COL_DEFAULT, "hud_lightning")
 			"colossus_engage":
 				_trauma = 1.0
 				_hitstop_frames = maxi(_hitstop_frames, 8)
@@ -4606,7 +4612,7 @@ func _update_feel() -> void:
 		_roll_dry[_ri] = maxi(0, _roll_dry[_ri] - 1)
 	# Stalling is the one punished behaviour whose RESPONSE was never stated in words.
 	# The pressure gauge fills silently for 8s and the only sentence that explains it
-	# ("MORTAR OBSERVER — SHOOT IT DOWN OR PUSH ON") fires on observer_spawn — i.e.
+	# ("MORTAR OBSERVER — SHOOT IT DOWN") fires on observer_spawn — i.e.
 	# after the punishment has already arrived. Say it at the halfway mark instead,
 	# while there is still time to act on it. (Starting value OBSERVER_STALL_TICKS/2
 	# = 4s in, 4s left to react; test: does a new player push north before the first
@@ -4822,7 +4828,7 @@ func _update_feel() -> void:
 	# (π rad/frame), flipping sign almost every frame — buzz, not roll.
 	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _motion
 	rotation = rot
-	position = shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)
+	position = (shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
 
 
 func _drive_audio() -> void:
@@ -5118,7 +5124,9 @@ func _quantize_axis(v: float) -> int:
 
 
 func _to_screen(fx: int, fy: int) -> Vector2:
-	return Vector2(fx * PX, (fy - sim.camera_top) * PX)
+	# Pixel-grid lock: every world-anchored draw (sprites AND overlays) shares this
+	# seam, so rounding here is what keeps rings/reticles on the same grid as terrain.
+	return Vector2(roundf(fx * PX), roundf((fy - sim.camera_top) * PX))
 
 
 func _bottom_fade(screen_y: float) -> float:
@@ -5146,8 +5154,8 @@ func _draw_hazard_telegraphs() -> void:
 				var ap := _to_screen(hz["x"], hz["y"] + 80 * Fixed.ONE)
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(ap - Vector2(12.0, 7.0), Vector2(24.0, 14.0)),
 					false, Color(0.14, 0.11, 0.07, 0.45 * pulse))
-				draw_line(ap + Vector2(-6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
-				draw_line(ap + Vector2(6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
+				Art.line(self, ap + Vector2(-6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
+				Art.line(self, ap + Vector2(6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
 
 
 # 4 diagonal offsets cover both axes at once — visually ≈ the old 8-neighbor rim
@@ -5272,7 +5280,7 @@ func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod :=
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2(cr, cr), Vector2(cr, cr) * 2.0),
 			false, Color(0.03, 0.02, 0.02, 0.5))
 	var tint := mod * Art.tint(tex_name)
-	draw_set_transform(pos, angle, Vector2(s, s * stretch))
+	draw_set_transform(pos.round(), angle, Vector2(s, s * stretch))
 	var origin := -t.get_size() / 2.0
 	if Art.outlined(tex_name):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
@@ -5370,6 +5378,61 @@ const GROUND_SHADE := 0.522
 const SPINE_COL := Color(0.10, 0.075, 0.03, 0.16)   # a4-04 r2: +a so the continuous spine reads over grass mottle, not just the ford (still faint, <0.2)
 const SPINE_TREAD := Color(0.02, 0.04, 0.0, 0.14)
 const SPINE_LANE := Vector2(232.0, 408.0)
+
+
+# --- Modular cover set (view-only). A wall is an EMPLACEMENT, not a tilemap
+# brush: every segment gets a deterministic per-position variant, and the
+# segments that terminate a run get real cap/corner pieces. Hashes off the
+# bag's WORLD fixed-point coords via Art.cell_hash so the variation is
+# frame-stable while the camera scrolls (never Engine time / randf()).
+const BAG_LINK_RAW := 48 * Fixed.ONE   # x-gap under which two bags are one run (sim pitches: 24 / 45)
+const BAG_ROW_RAW := 10 * Fixed.ONE    # y-tolerance for "same row"
+const CAP_LEFT := 1
+const CAP_RIGHT := 2
+const CAP_CORNER := 4                  # has an x-neighbour AND a y-neighbour → the run turns
+
+static func wall_variant(ix: int, iy: int) -> Dictionary:
+	var h := Art.cell_hash(ix, iy)
+	return {
+		"dy": float(h % 5) * 0.9 - 1.8,           # ±1.8px: the line stops being a ruler
+		"ds": 0.93 + float((h >> 3) % 13) * 0.011, # 0.93..1.06
+		"rot": (float((h >> 7) % 9) - 4.0) * 0.014, # ±0.056 rad settle
+		"flip": ((h >> 11) & 1) == 1,
+		"shade": 1.0 - float((h >> 13) % 7) * 0.018, # per-bag value break
+		"slump": ((h >> 17) % 11) == 0,             # ~1-in-11 shelled/slumped segment
+	}
+
+
+static func _in_row(xs: PackedInt64Array, ys: PackedInt64Array, j: int) -> bool:
+	# Is bag j itself part of an x-running row? Used to tell a genuine corner
+	# (the run turns into a lone perpendicular bag) from two full rows simply
+	# STACKED in y (the shop's 14px row pitch) — a bag in a stacked row has an
+	# x-neighbour of its own and must not disqualify its neighbours as corners.
+	for k in xs.size():
+		if k == j:
+			continue
+		if absi(ys[k] - ys[j]) <= BAG_ROW_RAW and absi(xs[k] - xs[j]) <= BAG_LINK_RAW:
+			return true
+	return false
+
+
+static func cap_flags(xs: PackedInt64Array, ys: PackedInt64Array, i: int) -> int:
+	# ponytail: O(n^3) worst case over the VISIBLE bags only (band-culled, ≤ ~40:
+	# 40^3 = 64k, trivial) — a spatial hash + precomputed row membership if a
+	# level ever puts hundreds of bags on screen at once.
+	var f := CAP_LEFT | CAP_RIGHT
+	var has_row := false
+	for j in xs.size():
+		if j == i:
+			continue
+		var dx: int = xs[j] - xs[i]
+		var dy: int = ys[j] - ys[i]
+		if absi(dy) <= BAG_ROW_RAW and absi(dx) <= BAG_LINK_RAW:
+			has_row = true
+			f &= ~(CAP_LEFT if dx < 0 else CAP_RIGHT)
+		elif absi(dx) <= BAG_ROW_RAW and absi(dy) <= BAG_LINK_RAW and not _in_row(xs, ys, j):
+			f |= CAP_CORNER   # j is a lone perpendicular bag, not a parallel row — the run really turns here
+	return f if has_row else (f | CAP_CORNER)   # a lone bag is a corner post, not a wall stub
 
 
 static func _rock_has_top_light(rtex: String) -> bool:
@@ -5513,7 +5576,7 @@ func _draw() -> void:
 					break
 			if is_locker:
 				var lp: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)   # steady-bright under reduce-motion
-				draw_arc(c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
+				Art.arc(self, c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
 			_ground_shadow(c, 17.0, 0.42)
 			# Hash-picked bunker variant: bunker / bunker2 / mirrored bunker (the
 			# mirror is a free third look — angle PI + stretch -1 = h-flip).
@@ -5535,7 +5598,7 @@ func _draw() -> void:
 				draw_texture_rect(Art.tex("fx_softspot"),
 					Rect2(mouth - Vector2.ONE * (4.0 + cr * 7.0), Vector2.ONE * (8.0 + cr * 14.0)),
 					false, Color(1.0, 0.6, 0.25, 0.22 + cr * 0.5))
-				draw_circle(mouth, 1.5 + cr * 2.5, Color(1.0, 0.85, 0.5, 0.4 + cr * 0.5))
+				Art.circle(self, mouth, 1.5 + cr * 2.5, Color(1.0, 0.85, 0.5, 0.4 + cr * 0.5))
 			# A recon drone loiters above an active strongpoint — a small orbiting
 			# silhouette that reads the bunker as 'watched'. Phase offset per bunker
 			# so multiples don't fly in lockstep. Pure ambient view.
@@ -5591,8 +5654,8 @@ func _draw() -> void:
 		var ra := clampf(_rear_wedge_t / 1.5, 0.0, 1.0) * rpulse
 		draw_rect(Rect2(0, SCREEN_H - 20.0, SCREEN_W, 20.0), Color(0.8, 0.35, 0.12, ra * 0.4))
 		var rwx := clampf(_rear_wedge_x, 20.0, SCREEN_W - 20.0)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(rwx - 16.0, SCREEN_H), Vector2(rwx + 16.0, SCREEN_H), Vector2(rwx, SCREEN_H - 22.0)]),
+		draw_colored_polygon(Art.rnd(PackedVector2Array([
+			Vector2(rwx - 16.0, SCREEN_H), Vector2(rwx + 16.0, SCREEN_H), Vector2(rwx, SCREEN_H - 22.0)])),
 			Color(1.0, 0.45, 0.15, ra))
 
 
@@ -5780,8 +5843,8 @@ func _draw_terrain() -> void:
 			false, Color(0.30, 0.26, 0.20, 0.08))
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(lm_pos - Vector2(72, 52), Vector2(144, 104)),
 			false, Color(0.30, 0.25, 0.18, 0.16))
-		draw_arc(lm_pos, 152.0, 0, TAU, 56, Color(0.32, 0.27, 0.20, 0.22), 2.0)
-		draw_arc(lm_pos, 168.0, 0, TAU, 60, Color(0.30, 0.26, 0.20, 0.12), 1.5)   # a2-10 r2: softer wider outer scar (lm_pos IS the arena center = the mast)
+		Art.arc(self, lm_pos, 152.0, 0, TAU, 56, Color(0.32, 0.27, 0.20, 0.22), 2.0)
+		Art.arc(self, lm_pos, 168.0, 0, TAU, 60, Color(0.30, 0.26, 0.20, 0.12), 1.5)   # a2-10 r2: softer wider outer scar (lm_pos IS the arena center = the mast)
 		# a2-10 AD#7: a warm dust-haze band along the top edge (wave-keyed), so the
 		# arena has a world-edge/sky, not a top-down cutout. Screen-anchored (shake-
 		# cancel) like the campaign skyglow.
@@ -6161,7 +6224,7 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 							Color(0.3, 0.25, 0.22))
 						var e_a := (0.5 - absf(fposmod(float(Engine.get_physics_frames() + hs),
 							120.0) / 120.0 - 0.5)) * 0.8
-						draw_circle(Vector2(sx, sy_px), 1.6, Color(1.0, 0.45, 0.15, e_a))
+						Art.circle(self, Vector2(sx, sy_px), 1.6, Color(1.0, 0.45, 0.15, e_a))
 				2:
 					if hs % 10 == 0:
 						# Scrub screen: a short row of tumbleweeds away from the river. No
@@ -6193,9 +6256,9 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 						draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 						var g_a := (0.5 - absf(fposmod(float(Engine.get_physics_frames() + hs),
 							90.0) / 90.0 - 0.5)) * 0.9
-						draw_circle(Vector2(sx + 6.0, sy_px), 1.8, Color(1.0, 0.5, 0.18, g_a))
-						draw_circle(Vector2(sx - 10.0, sy_px + 4.0), 1.4, Color(1.0, 0.4, 0.12, g_a * 0.7))
-						draw_circle(Vector2(sx - 2.0, sy_px - 5.0), 1.2, Color(1.0, 0.6, 0.22, g_a * 0.8))
+						Art.circle(self, Vector2(sx + 6.0, sy_px), 1.8, Color(1.0, 0.5, 0.18, g_a))
+						Art.circle(self, Vector2(sx - 10.0, sy_px + 4.0), 1.4, Color(1.0, 0.4, 0.12, g_a * 0.7))
+						Art.circle(self, Vector2(sx - 2.0, sy_px - 5.0), 1.2, Color(1.0, 0.6, 0.22, g_a * 0.8))
 
 
 func _draw_foundry_arena() -> void:
@@ -6209,8 +6272,8 @@ func _draw_foundry_arena() -> void:
 		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
 		var mr := float(SimWorld.COLOSSUS_RING_OUTER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
 		var ra := 0.12 + 0.06 * Art.pulse(0.05)
-		draw_arc(cpos, ir, 0.0, TAU, 48, Color(1.0, 0.3, 0.15, ra), 2.0)   # inner danger ring
-		draw_arc(cpos, mr, 0.0, TAU, 48, Color(0.35, 0.8, 0.45, ra), 2.0)  # safe-belt outer edge
+		Art.arc(self, cpos, ir, 0.0, TAU, 48, Color(1.0, 0.3, 0.15, ra), 2.0)   # inner danger ring
+		Art.arc(self, cpos, mr, 0.0, TAU, 48, Color(0.35, 0.8, 0.45, ra), 2.0)  # safe-belt outer edge
 	# Foundry ARENA dressing (c2 3v: the finale was "a big enemy in a field").
 	# Molten pools ring the three KIMK barrel clusters (drawn UNDER them —
 	# each phase-shift cook now torches a molten stage mark), grounded
@@ -6229,23 +6292,23 @@ func _draw_foundry_arena() -> void:
 			var a2 := pool_pts[ci]
 			var b2 := pool_pts[ci + 1]
 			if maxf(a2.y, b2.y) > -60.0 and minf(a2.y, b2.y) < 420.0:
-				draw_line(a2, b2, Color(0.10, 0.07, 0.06, 0.9), 7.0)
-				draw_line(a2, b2, Color(1.0, 0.45, 0.12, 0.35 + pt * 0.2), 2.5)
+				Art.line(self, a2, b2, Color(0.10, 0.07, 0.06, 0.9), 7.0)
+				Art.line(self, a2, b2, Color(1.0, 0.45, 0.12, 0.35 + pt * 0.2), 2.5)
 		for pp in pool_pts:
 			if pp.y > -60.0 and pp.y < 420.0:
-				draw_circle(pp, 24.0, Color(0.12, 0.08, 0.07, 0.85))
+				Art.circle(self, pp, 24.0, Color(0.12, 0.08, 0.07, 0.85))
 				# a1-10: the pool ROILS — hot layers wobble off-center + breathe and ember
 				# bubbles rise, so it reads as LIVE molten metal churning, not a static bullseye.
 				var pph := float(Engine.get_physics_frames()) * 0.08 + pp.x * 0.05
 				var woff := Vector2(sin(pph) * 2.4, cos(pph * 1.3) * 2.0) * _motion
-				draw_circle(pp + woff * 0.5, 19.0 + sin(pph * 0.7) * 1.5, Color(0.8, 0.25, 0.08, 0.5 + pt * 0.2))
-				draw_circle(pp + woff, 12.0 + sin(pph + 1.0) * 1.8, Color(1.0, 0.5, 0.15, 0.55 + pt * 0.25))
-				draw_circle(pp + woff * 1.3, 6.0 + sin(pph * 1.5) * 1.2, Color(1.0, 0.85, 0.45, 0.75 + sin(pph * 2.0) * 0.2))
+				Art.circle(self, pp + woff * 0.5, 19.0 + sin(pph * 0.7) * 1.5, Color(0.8, 0.25, 0.08, 0.5 + pt * 0.2))
+				Art.circle(self, pp + woff, 12.0 + sin(pph + 1.0) * 1.8, Color(1.0, 0.5, 0.15, 0.55 + pt * 0.25))
+				Art.circle(self, pp + woff * 1.3, 6.0 + sin(pph * 1.5) * 1.2, Color(1.0, 0.85, 0.45, 0.75 + sin(pph * 2.0) * 0.2))
 				for bi in 3:
 					var bt := fposmod(pph * 0.5 + float(bi) * 0.33, 1.0)
 					# a1-10 r2: embers kept INSIDE the 24px crucible rim (rise 11 + horiz 6 +
 					# radius) and fade toward the top so none crawl past the pool edge.
-					draw_circle(Vector2(pp.x + sin(pph + float(bi) * 2.1) * 6.0, pp.y - bt * 11.0),
+					Art.circle(self, Vector2(pp.x + sin(pph + float(bi) * 2.1) * 6.0, pp.y - bt * 11.0),
 						(1.0 - bt) * 2.0, Color(1.0, 0.7, 0.3, (1.0 - bt) * (1.0 - bt) * 0.85))
 				# a2-09 ENV#3: rising HEAT-HAZE — the crucible radiates hot air into the
 				# frame (translucent warm blobs rising + fading above the pool), so it reads
@@ -6265,17 +6328,17 @@ func _draw_foundry_arena() -> void:
 					var sgh := int(pp.x) + sg * 37
 					var sgp := pp + Vector2(19.0 - 38.0 * float(sg) + float(sgh % 5) - 2.0, 13.0 + float((sgh / 5) % 6))
 					var sgr := 3.0 + float(sgh % 3)
-					draw_circle(sgp, sgr, Color(0.10, 0.08, 0.07, 0.9))
-					draw_circle(sgp + Vector2(0, -1), 1.4, Color(1.0, 0.45, 0.15, 0.5 + pt * 0.2))
-					draw_line(sgp + Vector2(-sgr, 1.0), sgp + Vector2(sgr, 1.0), Color(0.05, 0.04, 0.03, 0.7), 1.0)
+					Art.circle(self, sgp, sgr, Color(0.10, 0.08, 0.07, 0.9))
+					Art.circle(self, sgp + Vector2(0, -1), 1.4, Color(1.0, 0.45, 0.15, 0.5 + pt * 0.2))
+					Art.line(self, sgp + Vector2(-sgr, 1.0), sgp + Vector2(sgr, 1.0), Color(0.05, 0.04, 0.03, 0.7), 1.0)
 		# Scrap heaps + pipe run (judge r2): wrecked-industry mass around the
 		# boss path, riding loaded litter textures — no new assets.
 		var pipe_a := _to_screen(40 * Fixed.ONE, g["y"] + 250 * Fixed.ONE)
 		var pipe_b := _to_screen(600 * Fixed.ONE, g["y"] + 250 * Fixed.ONE)
 		if pipe_a.y > -60.0 and pipe_a.y < 420.0:
-			draw_line(pipe_a, pipe_b, Color(0.22, 0.18, 0.16, 0.9), 5.0)
+			Art.line(self, pipe_a, pipe_b, Color(0.22, 0.18, 0.16, 0.9), 5.0)
 			for rv in 8:
-				draw_circle(pipe_a.lerp(pipe_b, float(rv) / 7.0), 2.2, Color(0.32, 0.26, 0.22))
+				Art.circle(self, pipe_a.lerp(pipe_b, float(rv) / 7.0), 2.2, Color(0.32, 0.26, 0.22))
 		for sk in [[160, 90, "wreck_halftrack"], [420, 60, "crater_field"], [250, 230, "wreck_halftrack"]]:
 			var sp3 := _to_screen(sk[0] * Fixed.ONE, g["y"] + sk[1] * Fixed.ONE)
 			if sp3.y > -60.0 and sp3.y < 420.0:
@@ -6289,9 +6352,9 @@ func _draw_foundry_arena() -> void:
 			if fpp.y > -60.0 and fpp.y < 420.0:
 				draw_rect(Rect2(fpp + Vector2(-24.0, -12.0), Vector2(48.0, 24.0)), Color(0.15, 0.13, 0.12, 0.95))
 				for rv2 in 4:
-					draw_circle(fpp + Vector2(-18.0 + float(rv2) * 12.0, -9.0), 1.4, Color(0.3, 0.25, 0.22))
-				draw_circle(fpp + Vector2(8.0, 4.0), 6.0, Color(0.1, 0.08, 0.07))
-				draw_circle(fpp + Vector2(8.0, 4.0), 3.5, Color(1.0, 0.55, 0.18, 0.6 + pt * 0.25))
+					Art.circle(self, fpp + Vector2(-18.0 + float(rv2) * 12.0, -9.0), 1.4, Color(0.3, 0.25, 0.22))
+				Art.circle(self, fpp + Vector2(8.0, 4.0), 6.0, Color(0.1, 0.08, 0.07))
+				Art.circle(self, fpp + Vector2(8.0, 4.0), 3.5, Color(1.0, 0.55, 0.18, 0.6 + pt * 0.25))
 		# Smokestack CLUSTERS (judge r2/r3: industrial verticals must dominate
 		# the MID-ARENA frustum, not just the rims) — five rim stacks plus two
 		# big in-fight forge towers on the boss path.
@@ -6303,7 +6366,7 @@ func _draw_foundry_arena() -> void:
 				_spr("skyline_chimney", cp, 0.0, ck[2], Color(0.36, 0.3, 0.28))
 				for pk2 in 3:
 					var s_ph := fposmod(float(Engine.get_physics_frames()) / 120.0 + float(pk2) / 3.0, 1.0)
-					draw_circle(cp + Vector2(sin(s_ph * TAU + float(ck[0])) * 4.0,
+					Art.circle(self, cp + Vector2(sin(s_ph * TAU + float(ck[0])) * 4.0,
 						(-26.0 - s_ph * 34.0) * ck[2]),
 						3.0 + s_ph * 6.0, Color(0.25, 0.23, 0.22, (1.0 - s_ph) * 0.45))
 		return
@@ -6386,32 +6449,84 @@ func _draw_rocks() -> void:
 				# Only the domed boulders; the flat dead cactus (cactus_dead2) has no raised rim.
 				if _rock_has_top_light(rtex):
 					var rr := 9.0 * rsc + 2.0
-					draw_arc(pos + Vector2(0.0, 0.5), rr, PI + 0.55, TAU - 0.2, 12,
+					Art.arc(self, pos + Vector2(0.0, 0.5), rr, PI + 0.55, TAU - 0.2, 12,
 						Color(ROCK_TOP_LIGHT.r, ROCK_TOP_LIGHT.g, ROCK_TOP_LIGHT.b, 0.5 * fade), 1.8)
 
 
+func _wall_seg(pos: Vector2, base_scale: float, tint: Color, hx: int, hy: int,
+		caps: int, fade := 1.0) -> void:
+	var v: Dictionary = wall_variant(hx, hy)
+	var p := pos + Vector2(0.0, v["dy"] + (2.0 if v["slump"] else 0.0))
+	var s: float = base_scale * v["ds"]
+	var col := Color(tint.r * v["shade"], tint.g * v["shade"], tint.b * v["shade"], tint.a * fade)
+	# Contextual AO: the contact wedge widens where the run continues, so joints
+	# read as bags LEANING on bags — same weight as the old flat per-bag AO
+	# (10.0 / 0.42) so field cover doesn't lose contact shadow vs. pre-fix.
+	_ground_shadow(p, 9.0 + (3.0 if caps & CAP_LEFT == 0 else 0.0)
+			+ (3.0 if caps & CAP_RIGHT == 0 else 0.0), 0.42 * fade)
+	if caps & CAP_CORNER:
+		# Corner/terminator: alternate between the mound and an end-cap stack so an
+		# authored arena's turns/diamonds/L-stubs still read as SANDBAG cover, not a
+		# single re-skinned brush (review #3). sandbag_beige's alpha bbox is 80x46
+		# (1.74:1, NOT round) against the 36x10 SANDBAG_HALF box, so rotation stays
+		# capped at +-0.17 rad (review #2) and scale is pinned to base_scale*0.78,
+		# same as the old constrained mound, ~20px tall at field 0.62 — never the
+		# unconstrained full 0..2pi spin that let it draw taller than the hitbox.
+		if Art.cell_hash(hx, hy) % 2 == 0:
+			_spr("sandbag_beige", p, v["rot"] * 3.0, base_scale * 0.78, col)
+		else:
+			_spr("wall_sandbag_end", p, 0.0, base_scale * 0.85, col)
+			_spr("wall_sandbag_end", p, PI, base_scale * 0.7, col, -1.0)
+	elif caps == (CAP_LEFT | CAP_RIGHT):
+		_spr("wall_sandbag_end", p, 0.0, base_scale * 0.9, col)          # isolated: capped both ends
+	elif caps & CAP_LEFT:
+		_spr("wall_sandbag_end", p, 0.0, base_scale, col)                # run starts here
+	elif caps & CAP_RIGHT:
+		_spr("wall_sandbag_end", p, PI, base_scale, col, -1.0)           # run ends here (h-mirror)
+	else:
+		# Three baked-body variants (kill-the-copy-pasted-stamp): hashed off the
+		# same (hx, hy) as wall_variant but re-mixed (*3, *5) so the pick doesn't
+		# correlate with flip/shade -- frame-stable while the camera scrolls.
+		const _WALL_BODY := ["wall_sandbag", "wall_sandbag_b", "wall_sandbag_c"]
+		var body: String = _WALL_BODY[Art.cell_hash(hx * 3, hy * 5) % 3]
+		_spr(body, p, (PI + v["rot"]) if v["flip"] else v["rot"], s, col,
+			-1.0 if v["flip"] else 1.0)
+	if v["slump"]:
+		# Damage state: spilled bags + a scorch smear at the foot of a shelled segment.
+		_spr("fx_impactdark", p + Vector2(0.0, 5.0), 0.0, 0.5, Color(0.15, 0.11, 0.07, 0.30 * fade))
+		_spr("sandbag_beige", p + Vector2(-9.0, 7.0), v["rot"] * 9.0, base_scale * 0.42, col)
+		_spr("sandbag_beige", p + Vector2(7.0, 8.5), -v["rot"] * 7.0, base_scale * 0.36, col)
+	# Ground blend (moved here from _draw_sandbags, now every wall gets it): spoil
+	# skirt + hash speckles so the bags are DUG IN, not resting on the dirt card.
+	draw_rect(Rect2(p + Vector2(-14.0, 3.0), Vector2(28.0, 2.2)), Color(0.25, 0.18, 0.10, 0.10 * fade))
+	draw_rect(Rect2(p + Vector2(-12.0, 4.4), Vector2(24.0, 1.4)), Color(0.25, 0.18, 0.10, 0.06 * fade))
+	for spk in 4:
+		var sh2 := Art.cell_hash(hx + spk * 7, hy + spk * 13)
+		Art.circle(self, p + Vector2(-11.0 + float(sh2 % 23), -2.5 + float((sh2 / 23) % 6)), 0.7,
+			Color(0.30, 0.24, 0.14, (0.08 + float(sh2 % 3) * 0.02) * fade))
+
+
 func _draw_sandbags() -> void:
-	# Player-authored cover: the gate-wall bake at field scale, warm-tinted so
-	# YOUR cover reads apart from the neutral gate walls.
+	# Player-authored cover: modular wall set (wall_variant + cap_flags), not one
+	# repeated stamp. Two passes: band-cull + collect world coords for cap_flags'
+	# neighbour scan, then draw — the scan needs every visible bag's position
+	# before it can tell which ones terminate a run.
+	var visible: Array[Dictionary] = []
+	var bxs := PackedInt64Array()
+	var bys := PackedInt64Array()
 	for sb in sim.sandbags:
 		var pos := _to_screen(sb["x"], sb["y"])
 		if pos.y < -20.0 or pos.y > 380.0:
 			continue
-		# 9/9 panel: cover must sit as heavy as a barrel (0.42 armor-grade
-		# shadow) and live in the khaki band — the old warm tan collided with
-		# the warm hulk/threat grammar. Value lifted ~0.1 over the dirt cards.
-		var sb_fade := _bottom_fade(pos.y)   # c2 2v: fade off the player's back
-		_ground_shadow(pos, 10.0, 0.42 * sb_fade)
-		_spr("wall_sandbag", pos, 0.0, 0.62, Color(1.02, 0.98, 0.74, sb_fade))
-		# Field weathering (DS round-2 feedback): a soft dirt gradient at the
-		# base + sparse hash-placed scuff speckles — planted cover reads
-		# dug-in, not factory-fresh. All translucent overdraw, no new assets.
-		draw_rect(Rect2(pos + Vector2(-14.0, 3.0), Vector2(28.0, 2.2)), Color(0.25, 0.18, 0.10, 0.10))
-		draw_rect(Rect2(pos + Vector2(-12.0, 4.4), Vector2(24.0, 1.4)), Color(0.25, 0.18, 0.10, 0.06))
-		for spk in 4:
-			var sh2 := Art.cell_hash(sb["x"] / 65536 + spk * 7, sb["y"] / 65536 + spk * 13)
-			draw_circle(pos + Vector2(-11.0 + float(sh2 % 23), -2.5 + float((sh2 / 23) % 6)), 0.7,
-				Color(0.30, 0.24, 0.14, 0.08 + float(sh2 % 3) * 0.02))
+		visible.append(sb)
+		bxs.append(sb["x"])
+		bys.append(sb["y"])
+	for i in visible.size():
+		var sb: Dictionary = visible[i]
+		var pos := _to_screen(sb["x"], sb["y"])
+		# c2 2v: cover fades off the player's back near the bottom of the ratchet view.
+		_wall_seg(pos, 0.62, Color(1.02, 0.98, 0.74), sb["x"] / 65536, sb["y"] / 65536,
+			cap_flags(bxs, bys, i), _bottom_fade(pos.y))
 
 func _draw_mines() -> void:
 	for m in sim.mines:
@@ -6432,25 +6547,25 @@ func _draw_mines() -> void:
 		# Footprint honesty: the soft fill used to breathe 8..11px while the lethal
 		# radius is a flat 9 — in a game where a touch is a death, the drawn edge
 		# must not overstate the kill edge. Pin the radius, pulse only the alpha.
-		draw_circle(mp, float(SimWorld.MINE_TRIGGER_RADIUS) / float(Fixed.ONE),
+		Art.circle(self, mp, float(SimWorld.MINE_TRIGGER_RADIUS) / float(Fixed.ONE),
 			Color(mc.r, mc.g, mc.b, 0.14 + mb * 0.12))
 		if m.get("friendly", false):
 			# Dashed ring: ownership must survive colorblindness — shape, not hue.
 			for seg in 6:
 				var a0 := seg * TAU / 6.0
-				draw_arc(mp, 7.0 + mb * 2.0, a0, a0 + TAU / 12.0, 5,
+				Art.arc(self, mp, 7.0 + mb * 2.0, a0, a0 + TAU / 12.0, 5,
 					Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
 		else:
-			draw_arc(mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
+			Art.arc(self, mp, 7.0 + mb * 2.0, 0, TAU, 16, Color(mc.r, mc.g, mc.b, 0.5 + mb * 0.3), 1.2)
 		# Real claymore silhouette (was the plain 'landmine' decor pip). Scale 1.05
 		# ~= the old 4.5x0.07 effective size, so the footprint is unchanged.
 		# Ground shadow + dark backing disc (c2 4v): the lethal silhouette gets
 		# the same grounding grammar as every collidable, and the dark rim keeps
 		# it readable on busy late-run litter.
 		_ground_shadow(mp, 5.0, 0.42)
-		draw_circle(mp, 4.2, Color(0.05, 0.04, 0.03, 0.85))
+		Art.circle(self, mp, 4.2, Color(0.05, 0.04, 0.03, 0.85))
 		_spr("wep_claymore", mp, 0.0, 1.05)
-		draw_circle(mp, 2.0, Color(mc.r, mc.g, mc.b, 0.65 + mb * 0.35))
+		Art.circle(self, mp, 2.0, Color(mc.r, mc.g, mc.b, 0.65 + mb * 0.35))
 
 
 func _draw_vents() -> void:
@@ -6465,21 +6580,21 @@ func _draw_vents() -> void:
 		# Grate: dark slotted disc, always visible — the hazard has a silhouette
 		# even mid-idle (hazard-vs-litter rule: lethal objects never camouflage).
 		_ground_shadow(vp, 9.0, 0.4)
-		draw_circle(vp, 8.0, Color(0.16, 0.13, 0.12))
-		draw_arc(vp, 8.0, 0, TAU, 16, Color(0.42, 0.2, 0.1, 0.9), 1.4)
+		Art.circle(self, vp, 8.0, Color(0.16, 0.13, 0.12))
+		Art.arc(self, vp, 8.0, 0, TAU, 16, Color(0.42, 0.2, 0.1, 0.9), 1.4)
 		for s in 3:
 			var sy := vp + Vector2(0, -3.0 + s * 3.0)
-			draw_line(sy - Vector2(4.5, 0), sy + Vector2(4.5, 0), Color(0.55, 0.3, 0.15, 0.8), 1.2)
+			Art.line(self, sy - Vector2(4.5, 0), sy + Vector2(4.5, 0), Color(0.55, 0.3, 0.15, 0.8), 1.2)
 		if ph >= jet_at:
 			# JET: white-hot core + orange column, flicker off the global clock.
 			var jf := 0.75 + 0.25 * Art.pulse(0.035)
-			draw_circle(vp, 24.0, Color(1.0, 0.42, 0.1, 0.16 * jf))
-			draw_circle(vp, 14.0, Color(1.0, 0.62, 0.2, 0.45 * jf))
-			draw_circle(vp, 6.5, Color(1.0, 0.93, 0.7, 0.9))
+			Art.circle(self, vp, 24.0, Color(1.0, 0.42, 0.1, 0.16 * jf))
+			Art.circle(self, vp, 14.0, Color(1.0, 0.62, 0.2, 0.45 * jf))
+			Art.circle(self, vp, 6.5, Color(1.0, 0.93, 0.7, 0.9))
 		elif ph >= jet_at - SimWorld.VENT_WARN_TICKS:
 			# WARN: ring tightens over the 30t telegraph — read it, step off.
 			var wt := float(ph - (jet_at - SimWorld.VENT_WARN_TICKS)) / float(SimWorld.VENT_WARN_TICKS)
-			draw_arc(vp, 24.0 - 14.0 * wt, 0, TAU, 20, Color(1.0, 0.5, 0.15, 0.35 + 0.45 * wt), 1.6)
+			Art.arc(self, vp, 24.0 - 14.0 * wt, 0, TAU, 20, Color(1.0, 0.5, 0.15, 0.35 + 0.45 * wt), 1.6)
 
 
 func _draw_barrels() -> void:
@@ -6505,14 +6620,14 @@ func _draw_barrels() -> void:
 			var bheat := 1.0 - float(bfuse) / 8.0
 			var bblink := 1.0 if _motion < 0.5 else (0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 1.6))
 			_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.75 + bheat * 0.25, 0.55 + bheat * 0.45))
-			draw_circle(bp + Vector2(0, -2), 2.2 + bheat * 2.0,
+			Art.circle(self, bp + Vector2(0, -2), 2.2 + bheat * 2.0,
 				Color(1.0, 0.95, 0.75, (0.6 + bheat * 0.4) * bblink))
-			draw_arc(bp, 7.0 + bheat * 3.0, 0, TAU, 16,
+			Art.arc(self, bp, 7.0 + bheat * 3.0, 0, TAU, 16,
 				Color(1.0, 0.85, 0.5, (0.5 + bheat * 0.5) * bblink), 1.6 + bheat)
 		else:
 			_spr("barrel", bp, 0.0, 1.4, Color(1.0, 0.5, 0.2))   # in-gamut hot orange (1.9 clamped to tan)
-			draw_circle(bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
-			draw_arc(bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
+			Art.circle(self, bp + Vector2(0, -2), 1.6, Color(1.0, 0.65, 0.22, 0.45 + wb * 0.4))
+			Art.arc(self, bp, 7.0 + wb * 2.0, 0, TAU, 16, Color(1.0, 0.45, 0.15, 0.25 + wb * 0.2), 1.0)
 		# Blast-radius ring: shares GRENADE_RADIUS with the player's grenade circle,
 		# but a chained barrel HURTS YOU inside it (the grenade never does) — so draw
 		# it as a DASHED RED hazard ring (mine/danger grammar), not the friendly
@@ -6523,7 +6638,7 @@ func _draw_barrels() -> void:
 			if di % 2 == 1:
 				continue
 			var a0 := TAU * di / 20.0
-			draw_arc(bp, br, a0, a0 + TAU / 20.0, 3, brc, 1.4)
+			Art.arc(self, bp, br, a0, a0 + TAU / 20.0, 3, brc, 1.4)
 		# Non-color danger cue: hue-blind players got only orange — the "!" pip
 		# carries "live ordnance" on the shape channel (destructive-row grammar).
 		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
@@ -6655,8 +6770,8 @@ func _draw_water() -> void:
 		draw_rect(Rect2(bx - deck_w / 2.0 + 4.0, wy + 4.0, deck_w, wh), Color(0.0, 0.02, 0.05, 0.28))
 		for bj in bseg + 1:
 			var bjy := wy + float(bj) * wh / float(bseg)
-			draw_line(Vector2(bx - deck_w / 2.0 + 3.0, bjy), Vector2(bx - deck_w / 2.0 + 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
-			draw_line(Vector2(bx + deck_w / 2.0 - 3.0, bjy), Vector2(bx + deck_w / 2.0 - 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
+			Art.line(self, Vector2(bx - deck_w / 2.0 + 3.0, bjy), Vector2(bx - deck_w / 2.0 + 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
+			Art.line(self, Vector2(bx + deck_w / 2.0 - 3.0, bjy), Vector2(bx + deck_w / 2.0 - 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
 			for bside in [-1.0, 1.0]:
 				var bfx: float = bx + bside * (deck_w / 2.0 - 3.0)
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(bfx - 5.0, minf(bjy + 4.0, wy + wh - 3.0), 10.0, 6.0),
@@ -6682,8 +6797,8 @@ func _draw_water() -> void:
 			# upstream wake, so it reads as sitting IN the water, not floating on it.
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(rx - 13.0, ry - 7.0, 26.0, 14.0),
 				false, Color(0.82, 0.86, 0.82, 0.22))
-			draw_line(Vector2(rx - 6.0, ry - 7.0), Vector2(rx - 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
-			draw_line(Vector2(rx + 6.0, ry - 7.0), Vector2(rx + 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
+			Art.line(self, Vector2(rx - 6.0, ry - 7.0), Vector2(rx - 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
+			Art.line(self, Vector2(rx + 6.0, ry - 7.0), Vector2(rx + 3.0, ry - 15.0), Color(0.78, 0.84, 0.8, 0.22), 1.5)
 			_spr("rock1" if (wseed + r) % 2 == 0 else "rock2", Vector2(rx, ry),
 				float((wseed / (r + 1)) % 628) / 100.0, 1.4, Color(0.5, 0.58, 0.6))
 		# Tumbleweed scatter at the waterline (5v): tumbleweed silhouettes soften
@@ -6711,7 +6826,7 @@ func _draw_water() -> void:
 			var hy := wy if (w["y"] > sim.camera_top) else wy + wh
 			for hx in range(0, 640, 16):
 				if hx + 8 < ford_left or hx > ford_left + ford_w:
-					draw_line(Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
+					Art.line(self, Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
 			# Shadowed + colorblind-routed like the gate pips/price tints that share
 			# this green — raw unshadowed green over red-hatched sand was the
 			# worst-case read for the tank driver it guides.
@@ -6745,25 +6860,68 @@ func _draw_gates() -> void:
 		var gnum_col := Color(0.30, 0.27, 0.22, 0.85) if not g["open"] else Color(0.5, 0.46, 0.4, 0.6)
 		Art.text(self, str(g_idx), Vector2(320.0 - 4.0, gy - 8.0), 24, gnum_col)
 		if g["open"]:
-			# Blown-open remnants: a lone end cap survives at each flank.
+			# Blown-open remnants: a lone end cap survives at each flank, plus a
+			# scorch + crater at the blown centre — open/shut now read as two
+			# states of the same kit instead of two unrelated art pieces.
 			_spr("wall_sandbag_end", Vector2(24, gy), 0.0, 1.0, open_wall)
 			_spr("wall_sandbag_end", Vector2(616, gy), PI, 1.0, open_wall, -1.0)
+			# ponytail: crater's _spr already stacks its own fx_softspot underlay
+			# (main.gd _CRATER_KEYS) — a separate fx_impactdark on top doubled up
+			# and read as an opaque black pit instead of scorch (review #4).
+			_spr("crater", Vector2(320, gy + 6.0), 0.0, 0.9, open_wall)
 		else:
+			# Continuous AO/berm strip under the whole wall (was NO shadow at all) —
+			# fx_shadow is the same card ~27 other shadow sites use, so it still batches.
+			draw_texture_rect(Art.tex("fx_shadow"), Rect2(Vector2(6, gy - 4), Vector2(628, 30)),
+				false, Color(0.0, 0.02, 0.02, 0.30))
+			draw_rect(Rect2(Vector2(6, gy + 9), Vector2(628, 4)), Color(0.25, 0.18, 0.10, 0.12))
+			# Rear parapet row, half-pitch offset: joints no longer line up in a
+			# single column, the wall gains depth.
+			for i in 8:
+				_wall_seg(Vector2(100 + i * 60, gy - 7), 0.86, shut_wall.darkened(0.22),
+					int(g["y"]) + 1, i, 0)
+			# Front row: wall_variant supplies jitter, per-segment value break, and the
+			# ~1-in-11 slumped/shelled damage state. That damage state must NEVER leave a
+			# visual gap — a shut gate is a hard boundary — it only lowers/tilts/darkens
+			# the segment and spills loose bags; the sprite itself is never skipped.
 			for i in 9:
-				var flip: bool = (i + gh) % 2 == 0
-				_spr("wall_sandbag", Vector2(70 + i * 60, gy), PI if flip else 0.0, 1.0,
-					shut_wall, -1.0 if flip else 1.0)
+				_wall_seg(Vector2(70 + i * 60, gy), 1.0, shut_wall, int(g["y"]), i, 0)
 			_spr("wall_sandbag_end", Vector2(30, gy), 0.0, 1.0, shut_wall)
 			_spr("wall_sandbag_end", Vector2(610, gy), PI, 1.0, shut_wall, -1.0)
+			# Corner returns: the wall turns south into the flank instead of dying
+			# flat at the screen edge.
+			_spr("wall_sandbag", Vector2(26, gy + 18), PI / 2.0, 0.80, shut_wall)
+			_spr("wall_sandbag", Vector2(26, gy + 34), PI / 2.0, 0.66, shut_wall)
+			_spr("wall_sandbag", Vector2(614, gy + 18), PI / 2.0, 0.80, shut_wall, -1.0)
+			_spr("wall_sandbag", Vector2(614, gy + 34), PI / 2.0, 0.66, shut_wall, -1.0)
+			# Modular set-dressing from props already in the registry (zero new art),
+			# hash-picked off the existing per-gate gh so no two gates dress alike.
+			# `reach` steps each coil OUT from the flank by wf (10/22/34px) so the
+			# three ~26px-wide sprites never land on the same spot — they used to
+			# all resolve into the same 12px window (40/46/52 or 588/594/600) and
+			# read as one clumped, duplicated picket. y + rotation + scale also
+			# vary per coil so a spread stack still doesn't look like a stamp.
+			for wf in 3:
+				var wfh := Art.cell_hash(gh + wf * 17, wf)
+				# ponytail: coils 0/1 pinned one per flank so a gate can't clump all
+				# three coils on one side (review #5); only the 3rd is hash-picked.
+				var side := 1.0 if wf == 0 else (-1.0 if wf == 1 else (1.0 if (gh >> wf) & 1 == 0 else -1.0))
+				var reach := 10.0 + float(wf) * 12.0 + float(wfh % 6)
+				var wfx := (34.0 + reach) if side > 0.0 else (606.0 - reach)
+				var wfy := gy + 16.0 + float(wf) * 4.0 + float(wfh % 5)
+				_spr("barbedwire", Vector2(wfx, wfy), float(wfh % 12) * 0.02 - 0.12,
+					0.68 + float(wfh % 4) * 0.03, Color(0.55, 0.5, 0.45))
+			_spr("tank_trap", Vector2(14.0 + float(gh % 5), gy + 26.0), 0.0, 0.9, shut_wall)
+			_spr("tank_trap", Vector2(626.0 - float((gh >> 3) % 5), gy + 26.0), 0.0, 0.9, shut_wall)
 			# Lock pips: how many of the two locking bunkers are still up —
 			# turns a black-box wall into 'one down, one to go'.
 			if not g.get("b1", {}).is_empty():
 				var down := int(not g["b1"]["alive"]) + int(not g["b2"]["alive"])
 				for k in 2:
 					var lit: bool = k >= down
-					draw_circle(Vector2(300 + k * 40, gy), 5.0,
+					Art.circle(self, Vector2(300 + k * 40, gy), 5.0,
 						Color(1.0, 0.3, 0.2) if lit else Art.safe(Color(0.3, 0.7, 0.3)))
-					draw_arc(Vector2(300 + k * 40, gy), 5.0, 0, TAU, 12, Color(0, 0, 0, 0.6), 1.0)
+					Art.arc(self, Vector2(300 + k * 40, gy), 5.0, 0, TAU, 12, Color(0, 0, 0, 0.6), 1.0)
 
 	# Route-fork lane signposts: the approach band south of gates 2 & 4 reads
 	# CACHE (left, supplies + mines) vs BOUNTY (right, elites + marked pay).
@@ -6804,8 +6962,8 @@ func _draw_gates() -> void:
 				var bdy := _to_screen(0, fk["y"] + (490 + bd * 40) * Fixed.ONE).y
 				if bdy < -20.0 or bdy > 380.0:
 					continue
-				_ground_shadow(Vector2(bait_x, bdy), 10.0, 0.42)
-				_spr("wall_sandbag", Vector2(bait_x + bd * 20.0, bdy), 0.0, 0.62, Color(1.02, 0.98, 0.74))
+				_wall_seg(Vector2(bait_x + bd * 20.0, bdy), 0.62, Color(1.02, 0.98, 0.74),
+					int(bait_x) + bd, fk["y"] / 65536 + 490 + bd * 40, 0)
 		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
 		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
 		var cache_txt := "< CACHE"
@@ -6858,13 +7016,13 @@ func _draw_pickups() -> void:
 			# objective crate read as ordinary loot): canopy + cyan TTL arc.
 			var dfrac := clampf(float(pk["drop"]) / 600.0, 0.0, 1.0)
 			var dcol := Art.safe(Color(0.55, 0.9, 1.0))
-			draw_arc(ppos, 13.0, 0, TAU, 20, Color(dcol.r, dcol.g, dcol.b, 0.25), 1.0)
-			draw_arc(ppos, 13.0, -PI / 2, -PI / 2 + TAU * dfrac, 20, dcol, 1.5)
+			Art.arc(self, ppos, 13.0, 0, TAU, 20, Color(dcol.r, dcol.g, dcol.b, 0.25), 1.0)
+			Art.arc(self, ppos, 13.0, -PI / 2, -PI / 2 + TAU * dfrac, 20, dcol, 1.5)
 			var ctop := ppos + Vector2(0, -16.0)
-			draw_colored_polygon(PackedVector2Array([ctop + Vector2(-7, 0), ctop + Vector2(7, 0), ctop + Vector2(0, -6)]),
+			draw_colored_polygon(Art.rnd(PackedVector2Array([ctop + Vector2(-7, 0), ctop + Vector2(7, 0), ctop + Vector2(0, -6)])),
 				Color(dcol.r, dcol.g, dcol.b, 0.8))
-			draw_line(ctop + Vector2(-7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
-			draw_line(ctop + Vector2(7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
+			Art.line(self, ctop + Vector2(-7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
+			Art.line(self, ctop + Vector2(7, 0), ppos + Vector2(0, -6), Color(dcol.r, dcol.g, dcol.b, 0.5), 1.0)
 		# Lootable salience (4v): common crates get the capsule grammar at lower
 		# intensity — a soft safe-green ring + 2px bob (reduce-motion pins the
 		# bob at its raised pose, matching the capsule pulse-freeze).
@@ -6877,7 +7035,7 @@ func _draw_pickups() -> void:
 				draw_rect(Rect2(ppos.x - 36 + hz * 12, ppos.y + 11, 6, 3), Color(0.8, 0.7, 0.2, 0.5))
 		if pk["kind"] <= 3 and not maxed:
 			var crring := Art.safe(Color(0.5, 1.0, 0.5))
-			draw_arc(ppos, 11.0, 0, TAU, 20, Color(crring.r, crring.g, crring.b, 0.14 + cpg * 0.14), 1.0)
+			Art.arc(self, ppos, 11.0, 0, TAU, 20, Color(crring.r, crring.g, crring.b, 0.14 + cpg * 0.14), 1.0)
 		_spr(tex_name, ppos + (Vector2(0, -2.0 * cpg) if pk["kind"] <= 3 else Vector2.ZERO), 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
@@ -6888,9 +7046,9 @@ func _draw_pickups() -> void:
 			var cap_i: int = clampi(pk["kind"] - 4, 0, _CAPSULE_LABEL.size() - 1)
 			var pcol := _CAPSULE_COL[cap_i]
 			var pg := 1.0 if _motion < 0.5 else Art.pulse(0.18)   # steady under reduce-motion
-			draw_circle(ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
-			draw_arc(ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
-			draw_line(ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
+			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
+			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
+			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
 			Art.text(self, _CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), 8, pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
@@ -6929,11 +7087,11 @@ func _draw_tanks() -> void:
 		# Board-range ring on a parked tank; tread-crush footprint under an
 		# occupied one (mirrors the colossus crush grammar players already know).
 		if t["occupant"] < 0 and not t["burning"]:
-			draw_arc(c, SimWorld.TANK_BOARD_RADIUS * PX, 0, TAU, 28,
+			Art.arc(self, c, SimWorld.TANK_BOARD_RADIUS * PX, 0, TAU, 28,
 				Color(0.85, 0.95, 0.6, 0.35), 1.0)
 		elif t["occupant"] >= 0:
 			var cp := Art.pulse(0.2)
-			draw_arc(c, SimWorld.TANK_CRUSH_RADIUS * PX, 0, TAU, 24,
+			Art.arc(self, c, SimWorld.TANK_CRUSH_RADIUS * PX, 0, TAU, 24,
 				Color(1.0, 0.3, 0.2, 0.25 + cp * 0.2), 1.5)
 		var burn_mod := Color.WHITE
 		if t["burning"]:
@@ -6983,7 +7141,7 @@ func _draw_tanks() -> void:
 			# Bail-out countdown: the hidden ~3s lethal timer, made visible.
 			var bail := float(t["burn_ticks"]) / float(SimWorld.TANK_BAIL_TICKS)
 			var bc := Color(1.0, 0.35, 0.2) if bail > 0.35 else Color(1.0, 0.85, 0.2)
-			draw_arc(c, 20.0, -PI / 2, -PI / 2 + TAU * bail, 28, bc, 2.5)
+			Art.arc(self, c, 20.0, -PI / 2, -PI / 2 + TAU * bail, 28, bc, 2.5)
 		elif t["occupant"] < 0:
 			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0, Color.WHITE, false, bind("interact"))
 		else:
@@ -6994,11 +7152,11 @@ func _draw_tanks() -> void:
 			# View-only readout of TANK_FUEL_TICKS; no sim numbers move.
 			var ffrac := clampf(float(t["fuel"]) / float(SimWorld.TANK_FUEL_TICKS), 0.0, 1.0)
 			var fcol := Color(1.0, 0.75, 0.35, 0.35) if t["fuel"] >= 300 else Color(1.0, 0.4, 0.22, 0.6)
-			draw_arc(c, 20.0, -PI / 2, -PI / 2 + TAU * ffrac, 28, fcol, 1.5)
+			Art.arc(self, c, 20.0, -PI / 2, -PI / 2 + TAU * ffrac, 28, fcol, 1.5)
 		# Cannon reload ring: the trigger isn't dead, it's cycling.
 		if t["occupant"] >= 0 and t["fire_cd"] > 0:
 			var rdy := 1.0 - float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS)
-			draw_arc(c, 17.0, -PI / 2, -PI / 2 + TAU * rdy, 24, Color(1.0, 0.8, 0.4, 0.6), 2.0)
+			Art.arc(self, c, 17.0, -PI / 2, -PI / 2 + TAU * rdy, 24, Color(1.0, 0.8, 0.4, 0.6), 2.0)
 
 
 func _draw_enemies() -> void:
@@ -7071,12 +7229,12 @@ func _draw_enemies() -> void:
 			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff
 			# reads across a chaotic field before you commit to chasing it.
 			var mb := Art.pulse(0.16)
-			draw_arc(epos, 11.0 + mb * 2.0, 0, TAU, 20, Color(1.0, 0.85, 0.3, 0.5 + mb * 0.4), 1.5)
+			Art.arc(self, epos, 11.0 + mb * 2.0, 0, TAU, 20, Color(1.0, 0.85, 0.3, 0.5 + mb * 0.4), 1.5)
 			var cy := epos.y - 12.0
 			for ci in 3:
 				var cx := epos.x - 4.0 + ci * 4.0
-				draw_line(Vector2(cx, cy), Vector2(cx, cy - 3.0), Color(1.0, 0.85, 0.3), 1.5)
-			draw_line(Vector2(epos.x - 5, cy), Vector2(epos.x + 5, cy), Color(1.0, 0.85, 0.3), 1.5)
+				Art.line(self, Vector2(cx, cy), Vector2(cx, cy - 3.0), Color(1.0, 0.85, 0.3), 1.5)
+			Art.line(self, Vector2(epos.x - 5, cy), Vector2(epos.x + 5, cy), Color(1.0, 0.85, 0.3), 1.5)
 		# Run-cycle bob: a small per-unit-phased vertical hop so a charging
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
 		# Gated on actual movement (like the player bob) — a standing unit
@@ -7113,8 +7271,8 @@ func _draw_enemies() -> void:
 			if e["submerged"]:
 				# Idle ripple loop so occupied water reads as occupied.
 				var ph := float((Engine.get_physics_frames() + eidx * 17) % 90) / 90.0
-				draw_arc(epos, 4.0 + ph * 9.0, 0, TAU, 16, Color(0.6, 0.8, 0.9, 0.4 * (1.0 - ph)), 1.0)
-				draw_arc(epos, 5.0, 0, TAU, 12, Color(0.6, 0.8, 0.9, 0.55), 1.5)
+				Art.arc(self, epos, 4.0 + ph * 9.0, 0, TAU, 16, Color(0.6, 0.8, 0.9, 0.4 * (1.0 - ph)), 1.0)
+				Art.arc(self, epos, 5.0, 0, TAU, 12, Color(0.6, 0.8, 0.9, 0.55), 1.5)
 				# Breath bubbles trickling up from the submerged diver (stateless loop).
 				var bph := float((Engine.get_physics_frames() * 2 + eidx * 31) % 120) / 120.0
 				_spr("fx_bubble1" if eidx % 2 == 0 else "fx_bubble2",
@@ -7134,7 +7292,7 @@ func _draw_enemies() -> void:
 				# Surfacing telegraph: bold ripple burst + the body rising up.
 				var sfrac := 1.0 - float(st) / float(SimWorld.FROGMAN_SURFACE_TICKS)
 				for k in 2:
-					draw_arc(epos, 6.0 + sfrac * 14.0 + k * 5.0, 0, TAU, 20,
+					Art.arc(self, epos, 6.0 + sfrac * 14.0 + k * 5.0, 0, TAU, 20,
 						Color(0.85, 0.95, 1.0, 0.7 - k * 0.25 - sfrac * 0.3), 2.0)
 					# Burst bubbles riding the surfacing ripple.
 					_spr("fx_bubble1" if k == 0 else "fx_bubble2",
@@ -7150,7 +7308,7 @@ func _draw_enemies() -> void:
 					# sell "this is the dangerous frame", so the kill window that
 					# just closed isn't followed by a silent death.
 					var fdir := Vector2.from_angle(face)
-					draw_line(epos - fdir * 10.0, epos + fdir * 2.0, Color(1.0, 0.3, 0.2, 0.5), 3.0)
+					Art.line(self, epos - fdir * 10.0, epos + fdir * 2.0, Color(1.0, 0.3, 0.2, 0.5), 3.0)
 					_spr(_frogman_tex(e["submerged"]), epos, face, 0.52, Color(1.5, 0.5, 0.4))
 				else:
 					_spr(_frogman_tex(e["submerged"]), epos, face, 0.5)
@@ -7170,15 +7328,15 @@ func _draw_enemies() -> void:
 				var lcol := Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5)
 				if swu <= 10 and (swu / 2) % 2 == 0:
 					lcol = Color(1.0, 1.0, 1.0, 0.95)
-				draw_line(epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
-				draw_circle(lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
+				Art.line(self, epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
+				Art.circle(self, lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
 			var ssw := (1.0 + (1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)) * 0.14) if swu > 0 else 1.0
 			_spr("enemy_sniper", epos, face, 0.5 * ssw)   # sol-08: authored red marksman (scoped-rifle silhouette); the laser + ghillie behaviour identify it, TINT carries the vermilion
 		elif e["kind"] == "grenadier":
 			var gwu: int = e.get("windup", 0)
 			if gwu > 0:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
-				draw_circle(epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
+				Art.circle(self, epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
 				# Where the mortar lands: a faint amber ground ring at the LIVE
 				# target (the grenadier re-aims at fire time, so following it is
 				# honest), sized to the real kill footprint and filling as the lob
@@ -7186,8 +7344,8 @@ func _draw_enemies() -> void:
 				if not target.is_empty():
 					var mtp := _to_screen(target["x"], target["y"])
 					var mr := SimWorld.GRENADE_RADIUS * PX
-					draw_arc(mtp, mr, 0, TAU, 28, Color(1.0, 0.6, 0.15, 0.12 + gf * 0.35), 1.5)
-					draw_arc(mtp, mr * gf, 0, TAU, 24, Color(1.0, 0.55, 0.1, 0.15 + gf * 0.4), 1.5)
+					Art.arc(self, mtp, mr, 0, TAU, 28, Color(1.0, 0.6, 0.15, 0.12 + gf * 0.35), 1.5)
+					Art.arc(self, mtp, mr * gf, 0, TAU, 24, Color(1.0, 0.55, 0.1, 0.15 + gf * 0.4), 1.5)
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("m_soldier2", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber, own silhouette
 		elif e["kind"] == "drone":
@@ -7197,7 +7355,7 @@ func _draw_enemies() -> void:
 			var dwu: int = e.get("windup", 0)
 			var hb := sin(float(Engine.get_physics_frames()) * 0.11 + float(eidx) * 1.7) * 1.5
 			# Shadow breathes opposite the bob — higher drone, smaller/fainter shadow.
-			draw_circle(epos + Vector2(3.0, 8.0), 4.0 - hb * 0.5, Color(0, 0, 0, 0.18 - hb * 0.03))
+			Art.circle(self, epos + Vector2(3.0, 8.0), 4.0 - hb * 0.5, Color(0, 0, 0, 0.18 - hb * 0.03))
 			if dwu > 0:
 				var df := 1.0 - float(dwu) / float(SimWorld.DRONE_WINDUP_TICKS)
 				# Lock-line to the tracked target (6-vote panel item): the paint
@@ -7208,13 +7366,13 @@ func _draw_enemies() -> void:
 					# Dark under-line (the chevron under-lay grammar) so the amber
 					# dash survives bright grass and hue-blindness; the endpoint
 					# ring marks WHO is painted — the tether used to just stop.
-					draw_dashed_line(epos + Vector2(1, -4.0 + hb), dtp + Vector2(1, 1),
+					Art.dashed_line(self, epos + Vector2(1, -4.0 + hb), dtp + Vector2(1, 1),
 						Color(0, 0, 0, 0.3 + df * 0.25), 1.0, 6.0)
-					draw_dashed_line(epos + Vector2(0, -5.0 + hb), dtp,
+					Art.dashed_line(self, epos + Vector2(0, -5.0 + hb), dtp,
 						Color(1.0, 0.7, 0.25, 0.35 + df * 0.35), 1.0, 6.0)
-					draw_arc(dtp, 9.0 + df * 3.0, 0, TAU, 14,
+					Art.arc(self, dtp, 9.0 + df * 3.0, 0, TAU, 14,
 						Color(1.0, 0.7, 0.25, 0.3 + df * 0.4), 1.2)
-				draw_circle(epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
+				Art.circle(self, epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
 					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
 			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
 		elif e["kind"] == "technical":
@@ -7247,11 +7405,11 @@ func _draw_enemies() -> void:
 				var t_left := float(t_lunge) / float(SimWorld.TECHNICAL_CHARGE_TICKS)
 				# Dark under-line (the drone-tether under-lay idiom) so the thin
 				# red-orange corridor survives bright grass.
-				draw_line(epos + Vector2(1, 1), epos + t_dir * (t_lunge * 3.0 * PX) + Vector2(1, 1),
+				Art.line(self, epos + Vector2(1, 1), epos + t_dir * (t_lunge * 3.0 * PX) + Vector2(1, 1),
 					Color(0, 0, 0, 0.3), 1.5)
-				draw_line(epos, epos + t_dir * (t_lunge * 3.0 * PX),
+				Art.line(self, epos, epos + t_dir * (t_lunge * 3.0 * PX),
 					Color(1.0, 0.4, 0.25, 0.2 + t_left * 0.35), 1.5)
-				draw_line(epos - t_dir * 14.0, epos - t_dir * 26.0,
+				Art.line(self, epos - t_dir * 14.0, epos - t_dir * 26.0,
 					Color(0.85, 0.8, 0.7, 0.45), 2.0)
 				# Churned-ground dust: the fastest thing on the field was leaving no
 				# trail. Frame-clock phase, no state; count halves under reduce-motion.
@@ -7259,7 +7417,7 @@ func _draw_enemies() -> void:
 				for dk in (1 if _motion < 0.5 else 3):
 					var d_off := -t_dir * (16.0 + dk * 9.0 + fmod(t_ph * 2.0 + dk * 13.0, 9.0))
 					d_off += Vector2.from_angle(t_face + PI / 2.0) * sin(t_ph * 0.7 + dk * 2.1) * 4.0
-					draw_circle(epos + d_off, 2.4 - dk * 0.5,
+					Art.circle(self, epos + d_off, 2.4 - dk * 0.5,
 						Color(0.62, 0.55, 0.42, 0.30 - dk * 0.07))
 			elif t_wu > 0:
 				var t_rf := 1.0 - float(t_wu) / float(SimWorld.TECHNICAL_REV_TICKS)
@@ -7268,10 +7426,10 @@ func _draw_enemies() -> void:
 				# tracks you (the sim locks at rev-end, not rev-start): dashed =
 				# "still aiming", the solid charge corridor = "committed".
 				# Dark under-line beneath the low-alpha rev dash (drone-tether idiom).
-				draw_dashed_line(epos + Vector2(1, 1),
+				Art.dashed_line(self, epos + Vector2(1, 1),
 					epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0) + Vector2(1, 1),
 					Color(0, 0, 0, 0.3), 1.5, 5.0)
-				draw_dashed_line(epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
+				Art.dashed_line(self, epos, epos + Vector2.from_angle(face) * (30.0 + t_rf * 30.0),
 					Color(1.0, 0.45, 0.3, 0.25 + t_rf * 0.45), 1.5, 5.0)
 			elif e.get("fire_cd", 0) == 0 and _any_player_smoked():
 				# Smoke-deny tell: cooldown is spent but the truck can't line up a
@@ -7280,7 +7438,7 @@ func _draw_enemies() -> void:
 				var qp: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)
 				# Threat-family amber on a dark disc (the _pip idiom) — the old 10px
 				# neutral grey washed out on bright sand.
-				draw_circle(epos + Vector2(0, -26), 7.0, Color(0.08, 0.09, 0.07, 0.6))
+				Art.circle(self, epos + Vector2(0, -26), 7.0, Color(0.08, 0.09, 0.07, 0.6))
 				Art.text(self, "?", epos + Vector2(-3, -22), 12, Color(1.0, 0.75, 0.4, 0.5 + qp * 0.4))
 			_spr("m_technical", epos, t_face, 0.55, Art.HOSTILE_VEH, 1.1 if t_lunge > 0 else 1.0)   # a2-02: warm-hostile vehicle tint
 		elif e["kind"] == "pilot":
@@ -7306,7 +7464,7 @@ func _draw_enemies() -> void:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
 				Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), 8, pi_col)
-			draw_arc(epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
+			Art.arc(self, epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
 				# Punch-out grace: he's climbing out of the wreck — sprawled and
@@ -7331,7 +7489,7 @@ func _draw_enemies() -> void:
 			# still read across a chaotic field. Forward lean = closing momentum.
 			_spr("courier", epos, face, 0.5, Color.WHITE, 1.12)
 			var lb: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)   # steady-bright under reduce-motion
-			draw_arc(epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
+			Art.arc(self, epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 		elif e["kind"] == "shield":
 			_spr("m_bombsuit", epos, face, 0.55, Color(0.85, 0.9, 1.0))   # armored EOD bulk sells the block
 			# The riot shield: the baked plate held across the front — this side
@@ -7343,14 +7501,14 @@ func _draw_enemies() -> void:
 			# flank counter. A faint green arc behind it (opposite the bright front
 			# arc) teaches "get around him" — Art.safe keeps it legible in colorblind.
 			var srear := face + PI
-			draw_arc(epos, 13.0, srear - 1.15, srear + 1.15, 14,
+			Art.arc(self, epos, 13.0, srear - 1.15, srear + 1.15, 14,
 				Art.safe(Color(0.4, 1.0, 0.5, 0.4)), 2.0)
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
 			# "he's seeding the ground behind him" is a gameplay telegraph.
 			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
 			var spp: float = 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady-bright under reduce-motion
-			draw_circle(epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
+			Art.circle(self, epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "broadcast":
 			# Rally mast: the decor radio tower militarized — red-keyed, hp pips
 			# in the nest grammar, and a faint breathing ring that draws the
@@ -7360,12 +7518,12 @@ func _draw_enemies() -> void:
 			# Now a TIGHT dark-backed base ring owns the structure identity, and
 			# the 90-tick pulse (below) truthfully sweeps the real aura reach.
 			var bpul := Art.pulse(0.2) if _motion >= 0.5 else 0.5
-			draw_arc(epos, 48.0, 0, TAU, 32, Color(0.1, 0.05, 0.05, 0.5), 3.5)
-			draw_arc(epos, 48.0, 0, TAU, 32, Color(1.0, 0.4, 0.35, 0.25 + bpul * 0.35), 2.0)
+			Art.arc(self, epos, 48.0, 0, TAU, 32, Color(0.1, 0.05, 0.05, 0.5), 3.5)
+			Art.arc(self, epos, 48.0, 0, TAU, 32, Color(1.0, 0.4, 0.35, 0.25 + bpul * 0.35), 2.0)
 			_spr("radio_tower", epos, 0.0, 0.9, Color(1.15, 0.62, 0.55))
 			var b_hp: int = e.get("hp", SimWorld.BROADCAST_HP)
 			for bpi in SimWorld.BROADCAST_HP:
-				draw_circle(epos + Vector2(-12.0 + bpi * 6.0, 14.0), 2.0,
+				Art.circle(self, epos + Vector2(-12.0 + bpi * 6.0, 14.0), 2.0,
 					Color(1.0, 0.3, 0.2) if bpi < b_hp else Color(0.25, 0.22, 0.2))
 		elif e["kind"] == "mg_nest":
 			# Rooted emplacement: sandbag nest + gunner + a full lane lifecycle
@@ -7387,7 +7545,7 @@ func _draw_enemies() -> void:
 				Color(1.0 - n_dmg * 0.15, 1.0 - n_dmg * 0.17, 1.0 - n_dmg * 0.15))
 			# Armor pips (gate lock-pip grammar): filled = hits still to crack.
 			for npi in 3:
-				draw_circle(epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8,
+				Art.circle(self, epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8,
 					Color(1.0, 0.78, 0.35, 0.9) if npi < n_hp else Color(0.22, 0.2, 0.18, 0.75))
 			# Lane band-cull (7/9 panel): an off-band nest drew its full 640px lane
 			# every aim frame. Sandbags + pips above still draw — only the lane skips.
@@ -7405,16 +7563,16 @@ func _draw_enemies() -> void:
 					# commits — the old ramp was inverted (dimmest when you could still
 					# dodge, brightest when you couldn't). Firing draws its own hot line.
 					var af := float(nwu) / float(SimWorld.MG_NEST_AIM_TICKS)
-					draw_line(epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
+					Art.line(self, epos, lane_end, Color(1.0, 0.45, 0.2, 0.15 + af * 0.4), 1.0 + af)
 				elif nburst > 0:
 					# FIRING: hot lethal-red, sniper-line vocabulary — holds through
 					# the 8-tick gaps so the 3-round burst reads as one rake.
-					draw_line(epos, lane_end, Color(1.0, 0.15, 0.12, 0.7), 2.0)
-					draw_circle(epos + nld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
+					Art.line(self, epos, lane_end, Color(1.0, 0.15, 0.12, 0.7), 2.0)
+					Art.circle(self, epos + nld * 44.0, 2.0, Color(1.0, 0.4, 0.25, 0.75))
 				else:
 					# RELOAD: a dim stub down the LAST lane — the rooted-turret
 					# threat must not vanish for the whole 1.5s between bursts.
-					draw_line(epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.2), 1.0)   # 0.12 read as a dead lane, not a reloading turret
+					Art.line(self, epos, epos + nld * 90.0, Color(1.0, 0.4, 0.2, 0.2), 1.0)   # 0.12 read as a dead lane, not a reloading turret
 		elif e["kind"] == "ghillie":
 			var gst: int = e.get("surface_ticks", 0)
 			var gwu2: int = e.get("windup", 0)
@@ -7422,12 +7580,12 @@ func _draw_enemies() -> void:
 				# Dug in and cloaked: only a faint foliage shimmer betrays it —
 				# the laser paint on reveal is the real warning. Kept very subtle.
 				var gcp := Art.pulse(0.08)
-				draw_circle(epos, 5.0, Color(0.34, 0.5, 0.24, 0.10 + gcp * 0.06))
+				Art.circle(self, epos, 5.0, Color(0.34, 0.5, 0.24, 0.10 + gcp * 0.06))
 			elif gst > 0:
 				# Rising out of cover: a bold leaf/dust burst as it reveals.
 				var rf := 1.0 - float(gst) / float(SimWorld.GHILLIE_REVEAL_TICKS)
 				for k in 2:
-					draw_arc(epos, 6.0 + rf * 12.0 + k * 4.0, 0, TAU, 18,
+					Art.arc(self, epos, 6.0 + rf * 12.0 + k * 4.0, 0, TAU, 18,
 						Color(0.6, 0.75, 0.4, 0.6 - k * 0.2 - rf * 0.3), 2.0)
 				_spr("ghillie", epos, face, 0.42 + rf * 0.08, Color(1, 1, 1, 0.4 + rf * 0.6))
 			else:
@@ -7445,8 +7603,8 @@ func _draw_enemies() -> void:
 					var lcol2 := Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5)
 					if gwu2 <= 10 and (gwu2 / 2) % 2 == 0:
 						lcol2 = Color(1.0, 1.0, 1.0, 0.95)
-					draw_line(epos, epos + bdir2 * 900.0, lcol2, 1.0 + pf2)
-					draw_circle(lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
+					Art.line(self, epos, epos + bdir2 * 900.0, lcol2, 1.0 + pf2)
+					Art.circle(self, lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
 				_spr("ghillie", epos, face, 0.5)   # real ghillie bake (was a green-keyed frogman)
 		elif e["elite"]:
 			# a3-12 (UNIT#2): a persistent warm aura marks EVERY elite as an elevated
@@ -7461,13 +7619,13 @@ func _draw_enemies() -> void:
 			var wu: int = e.get("windup", 0)
 			if wu > 0:
 				var wfrac := 1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)
-				draw_circle(epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
+				Art.circle(self, epos + Vector2.from_angle(face) * 8.0, 1.5 + wfrac * 3.5,
 					Color(1.0, 0.85 - wfrac * 0.55, 0.2, 0.4 + wfrac * 0.6))
 				# Aim-stub: a short dashed lane toward the target, borrowing the sniper
 				# beam grammar so the elite's "I'm drawing a bead on YOU" reads instead
 				# of a lone chest ember. Kept a stub — the sim only aims at fire-time.
 				var edir := Vector2.from_angle(face)
-				draw_dashed_line(epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
+				Art.dashed_line(self, epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
 					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac, 3.0)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			_spr("enemy_assault", epos, face, 0.62 * esw)   # sol-08: elite = the authored red assault trooper, drawn larger than fodder (TINT carries the vermilion; the red aura + size keep it distinct)
@@ -7483,12 +7641,12 @@ func _draw_enemies() -> void:
 				# The ring DEPLETES with the stun (4-vote panel item): the whole
 				# tactical window is readable per body, not just its edges.
 				var stf := float(sim.flash_ticks) / float(SimWorld.FLASH_STUN_TICKS)
-				draw_arc(epos + Vector2(0, -10.0), 3.5, -PI / 2, -PI / 2 + TAU * stf, 10,
+				Art.arc(self, epos + Vector2(0, -10.0), 3.5, -PI / 2, -PI / 2 + TAU * stf, 10,
 					Color(0.75, 0.88, 1.0, 0.85), 1.3)
 				if _motion >= 0.5:   # orbit dots are motion — the ring alone under reduce-motion
 					for sd in 3:
 						var sa := float(Engine.get_physics_frames()) * 0.12 + sd * TAU / 3.0
-						draw_circle(epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
+						Art.circle(self, epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
 							Color(1.0, 1.0, 0.8, 0.9))
 
 
@@ -7501,7 +7659,7 @@ func _draw_observer() -> void:
 	# as one artillery unit, not a lone jeep with magic mortars.
 	_spr("m_rocket_truck", op + Vector2(40, 5), PI / 2, 0.5, Art.HOSTILE_VEH)   # a2-02: warm-hostile
 	_spr("m_radar_tank", op, PI / 2, 0.5, Art.HOSTILE_VEH)   # a2-02: warm-hostile spotter vehicle
-	draw_line(op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
+	Art.line(self, op + Vector2(8, 0), op + Vector2(8, -12), Color(0.95, 0.8, 0.2), 2.0)
 	# Baked flag glyph (last greybox rect on this unit) — same hud_flag the map markers wear.
 	_spr("hud_flag", op + Vector2(11.5, -9.5), 0.0, 0.04, Color(0.9, 0.25, 0.2))
 	# Radar sweep: a rotating scan beam off the antenna sells the spotter's whole job
@@ -7509,8 +7667,8 @@ func _draw_observer() -> void:
 	var sweep := float(Engine.get_physics_frames()) * 0.09
 	var atop := op + Vector2(8, -12)
 	var sdir := Vector2(cos(sweep), sin(sweep) * 0.5)
-	draw_line(atop, atop + sdir * 9.0, Color(0.4, 1.0, 0.5, 0.7), 1.5)
-	draw_arc(atop, 9.0, sweep - 0.4, sweep + 0.4, 6, Color(0.4, 1.0, 0.5, 0.25), 2.0)
+	Art.line(self, atop, atop + sdir * 9.0, Color(0.4, 1.0, 0.5, 0.7), 1.5)
+	Art.arc(self, atop, 9.0, sweep - 0.4, sweep + 0.4, 6, Color(0.4, 1.0, 0.5, 0.25), 2.0)
 	# Kill-me target reticle: the spotter is one-hit-killable and killing him
 	# ends the barrage — a second way out the ADVANCE directive never mentions.
 	var tp := Art.pulse(0.2)
@@ -7518,7 +7676,7 @@ func _draw_observer() -> void:
 	var tcol := Color(1.0, 0.3, 0.25, 0.85)
 	for q in 4:
 		var qa := q * TAU / 4.0 + PI / 4.0
-		draw_arc(op, tr, qa - 0.5, qa + 0.5, 8, tcol, 1.5)
+		Art.arc(self, op, tr, qa - 0.5, qa + 0.5, 8, tcol, 1.5)
 	Art.text(self, "SILENCE THE SPOTTER", op + Vector2(-38, -20), 8, Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
 
 
@@ -7578,7 +7736,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		var rlen := 42.0 * (asc / 1.3)
 		for fri in 2:
 			var fra := frr + fri * PI / 2
-			draw_line(apos - Vector2.from_angle(fra) * rlen, apos + Vector2.from_angle(fra) * rlen,
+			Art.line(self, apos - Vector2.from_angle(fra) * rlen, apos + Vector2.from_angle(fra) * rlen,
 				Color(0.85, 0.9, 0.95, 0.20 + eta_f * 0.15), 1.5)
 		return
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
@@ -7602,13 +7760,13 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		var chin := bpos + Vector2(0, 20)
 		if sk >= 6 or _motion < 0.5:
 			var ca := 0.3 if _motion < 0.5 else (float(sk - 6) / 5.0) * 0.6
-			draw_circle(chin, 3.5, Color(1.0, 0.6, 0.3, ca))
+			Art.circle(self, chin, 3.5, Color(1.0, 0.6, 0.3, ca))
 		if sk == 0:
-			draw_circle(chin, 6.0, Color(1, 1, 1, 0.85))
+			Art.circle(self, chin, 6.0, Color(1, 1, 1, 0.85))
 		var gt := sim._nearest_alive_player(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 		if not gt.is_empty():
 			var gtp := _to_screen(gt["x"], gt["y"])
-			draw_line(chin, chin + (gtp - chin).normalized() * 60.0, Color(1.0, 0.3, 0.2, 0.3), 1.0)
+			Art.line(self, chin, chin + (gtp - chin).normalized() * 60.0, Color(1.0, 0.3, 0.2, 0.3), 1.0)
 	var hull_mod := Color.WHITE
 	# The hull red-flash is the mortar volley's anticipation tell. Deeper waves add a
 	# 4th (tier>=2, t==320) and 5th (tier>=3, t==340) strike, so a fixed 170..290 window
@@ -7630,7 +7788,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# rotor wash + altitude/mass the small hull alone never conveyed.
 	var _dwt := float(Engine.get_physics_frames()) * 0.9
 	var dw := fposmod(_dwt * 0.12, 1.0)
-	draw_arc(bpos + Vector2(0, 30), 12.0 + dw * 40.0, 0, TAU, 26,
+	Art.arc(self, bpos + Vector2(0, 30), 12.0 + dw * 40.0, 0, TAU, 26,
 		Color(0.80, 0.78, 0.60, (1.0 - dw) * 0.22 * _motion), 2.0)
 	_spr(body_tex, bpos, PI, 1.3, hull_mod)
 	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
@@ -7640,13 +7798,13 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	var rt := float(Engine.get_physics_frames()) * 0.9
 	for i in 2:
 		var a := rt + i * PI / 2
-		draw_line(bpos - Vector2.from_angle(a) * 42.0, bpos + Vector2.from_angle(a) * 42.0,
+		Art.line(self, bpos - Vector2.from_angle(a) * 42.0, bpos + Vector2.from_angle(a) * 42.0,
 			Color(0.85, 0.85, 0.85, 0.5), 3.0)
-	draw_circle(bpos, 5.0, Color(0.3, 0.3, 0.35))
+	Art.circle(self, bpos, 5.0, Color(0.3, 0.3, 0.35))
 	# a1-01 hit BLOOM: a heavier white flash bloom on _boss_flash — drawn last so
 	# it sits on the full silhouette (hull + chin + rotor), not under the blades.
 	if _boss_flash > 0.01:
-		draw_circle(bpos, 34.0 + _boss_flash * 12.0, Color(1, 1, 1, _boss_flash * 0.28))
+		Art.circle(self, bpos, 34.0 + _boss_flash * 12.0, Color(1, 1, 1, _boss_flash * 0.28))
 	var bkey := "boss%d" % boss["gate_y"]
 	# Divide by the most HP this boss has ever shown, not the campaign constant —
 	# exact for any scaling without duplicating the sim's spawn formula.
@@ -7693,9 +7851,9 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 			vseg_end = SimWorld.BOSS_MORTAR_TICKS[1]
 		var vfrac := float(pt - vseg_start) / float(vseg_end - vseg_start)
 		var vx := bar_x + bar_w * vfrac
-		draw_line(Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
+		Art.line(self, Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
 			Color(1.0, 0.85, 0.3, 0.9), 2.0)
-		draw_arc(Vector2(vx, bar_y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
+		Art.arc(self, Vector2(vx, bar_y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
@@ -7732,14 +7890,14 @@ func _boss_wounds(center: Vector2, wound: float, r: float) -> void:
 		var ph := fposmod(t * 0.02 + float(i) * 0.37, 1.0)
 		var sx := center.x + sin(float(i) * 2.1 + t * 0.03) * r * 0.4
 		var sy := center.y - ph * (r + 12.0)
-		draw_circle(Vector2(sx, sy), 4.0 + ph * 6.0,
+		Art.circle(self, Vector2(sx, sy), 4.0 + ph * 6.0,
 			Color(0.15, 0.14, 0.13, (1.0 - ph) * 0.3 * wound * _motion))
 	# Near death: sparks sputter off the hull.
 	if wound > BOSS_WOUND["spark"]:
 		for i in 3:
 			var spp := center + Vector2.from_angle(t * 0.2 + float(i) * 2.0) \
 				* r * (0.4 + fposmod(t * 0.05 + float(i), 1.0) * 0.5)
-			draw_circle(spp, 1.3, Color(1.0, 0.7, 0.3, (0.6 + 0.4 * sin(t * 0.4 + float(i))) * _motion))
+			Art.circle(self, spp, 1.3, Color(1.0, 0.7, 0.3, (0.6 + 0.4 * sin(t * 0.4 + float(i))) * _motion))
 
 
 func _draw_colossus() -> void:
@@ -7751,8 +7909,8 @@ func _draw_colossus() -> void:
 	# ground like a mortar telegraph — 'do not enter' in the no-revive finale.
 	var crush := SimWorld.COLOSSUS_CRUSH_RADIUS * PX
 	var cpulse := Art.pulse(0.18)
-	draw_arc(cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
-	draw_circle(cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
+	Art.arc(self, cpos, crush, 0, TAU, 28, Color(1.0, 0.2, 0.15, 0.4 + cpulse * 0.35), 2.0)
+	Art.circle(self, cpos, crush, Color(1.0, 0.15, 0.1, 0.08))
 	var mod := Color.WHITE if phase < 3 else Color(1.4, 0.62, 0.55)
 	mod = mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	# Foundry-stomp: a slow settle-squash gives the heaviest thing on the field weight,
@@ -7777,7 +7935,7 @@ func _draw_colossus() -> void:
 	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
 	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
 	for bx in [-24.0, 24.0]:
-		draw_circle(cpos + Vector2(bx, 34.0), 2.0 + warm * 3.5,
+		Art.circle(self, cpos + Vector2(bx, 34.0), 2.0 + warm * 3.5,
 			Color(1.0, 0.55, 0.15, 0.15 + warm * 0.55))
 	var pulse := Art.pulse(0.2)
 	# Core window: when the plating is retracted, the core glows white-hot and
@@ -7796,10 +7954,10 @@ func _draw_colossus() -> void:
 			var seal_strobe := Color(1.0, 0.2, 0.15) if (co / 2) % 2 == 0 else Color(1.0, 0.85, 0.45)
 			ccore = ccore.lerp(seal_strobe, sealf)
 			cring = cring.lerp(Color(1.0, 0.2, 0.15, 0.95), sealf)
-		draw_circle(cpos, (9.0 + pulse * 4.0) * cshrink, ccore)
-		draw_arc(cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
+		Art.circle(self, cpos, (9.0 + pulse * 4.0) * cshrink, ccore)
+		Art.arc(self, cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
 	else:
-		draw_circle(cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
+		Art.circle(self, cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
 	# Bottom-center (y=330) so the fill never hides under the top-left HUD panel — this boss bar
 	# deliberately docks OPPOSITE the top-center gunship/mini bars (HudIcons.BOSS_BAR_TOP), so it
 	# does NOT use that boundary; the two never share the band. Shake-immune: fixed HUD slot,
@@ -7824,8 +7982,8 @@ func _draw_colossus() -> void:
 		var cc: int = sim.colossus.get("core_cd", SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
 		var cvfrac := 1.0 - float(cc) / float(SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
 		var cvx := 170.0 + 300.0 * clampf(cvfrac, 0.0, 1.0)
-		draw_line(Vector2(cvx, 328.0), Vector2(cvx, 345.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
-		draw_arc(Vector2(cvx, 327.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
+		Art.line(self, Vector2(cvx, 328.0), Vector2(cvx, 345.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
+		Art.arc(self, Vector2(cvx, 327.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
@@ -7833,7 +7991,7 @@ func _draw_projectiles() -> void:
 	for g in sim.grenades:
 		var base := _to_screen(g["x"], g["y"])
 		var zf := clampf(float(g["z"]) * PX * 0.02, 0.0, 0.6)   # shadow shrinks+fades as the frag climbs = reads as height
-		draw_circle(base + Vector2(2, 2), 3.0 * (1.0 - zf), Color(0, 0, 0, 0.35 * (1.0 - zf)))
+		Art.circle(self, base + Vector2(2, 2), 3.0 * (1.0 - zf), Color(0, 0, 0, 0.35 * (1.0 - zf)))
 		# Per-grenade spin phase (hashed off x) — a volley no longer rotates in lockstep.
 		var spin := float(Engine.get_physics_frames()) * 0.4 + float(g["x"] % 6283) * 0.001
 		var body := base - Vector2(0, g["z"] * PX * 0.5)
@@ -7853,7 +8011,7 @@ func _draw_projectiles() -> void:
 			var fz := 0.5 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.9 + float(g["x"] % 6283) * 0.01)
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(body - Vector2(3.5, 3.5), Vector2(7, 7)),
 				false, Color(1.0, 0.6, 0.2, 0.8 * fz))
-			draw_circle(body, 1.0, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * fz))
+			Art.circle(self, body, 1.0, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * fz))
 		# Landing marker: the parabola is deterministic — solve where it lands.
 		var zv := float(g["zv"])
 		var grav := float(SimWorld.GRENADE_GRAV)
@@ -7866,10 +8024,10 @@ func _draw_projectiles() -> void:
 		var blast := SimWorld.GRENADE_RADIUS * PX
 		draw_texture_rect(Art.tex("fx_ring"), Rect2(land - Vector2.ONE * blast, Vector2.ONE * blast * 2.0),
 			false, Color(GRENADE_PREVIEW_COL.r, GRENADE_PREVIEW_COL.g, GRENADE_PREVIEW_COL.b, 0.18))   # a2-15 LEG#5
-		draw_arc(land, blast, 0, TAU, 28, Color(GRENADE_PREVIEW_COL.r, GRENADE_PREVIEW_COL.g, GRENADE_PREVIEW_COL.b, 0.35), 1.0)
-		draw_arc(land, lr, 0, TAU, 16, lc, 1.0)
-		draw_line(land + Vector2(-2.5, 0), land + Vector2(2.5, 0), lc, 1.0)
-		draw_line(land + Vector2(0, -2.5), land + Vector2(0, 2.5), lc, 1.0)
+		Art.arc(self, land, blast, 0, TAU, 28, Color(GRENADE_PREVIEW_COL.r, GRENADE_PREVIEW_COL.g, GRENADE_PREVIEW_COL.b, 0.35), 1.0)
+		Art.arc(self, land, lr, 0, TAU, 16, lc, 1.0)
+		Art.line(self, land + Vector2(-2.5, 0), land + Vector2(2.5, 0), lc, 1.0)
+		Art.line(self, land + Vector2(0, -2.5), land + Vector2(0, 2.5), lc, 1.0)
 	# Colossus ricochet: bullets do NOTHING to the finale (grenades only), but
 	# the sim never collides them — so ping them off the armor here to teach it.
 	var col_on: bool = not sim.colossus.is_empty() and sim.colossus.get("alive", false)
@@ -7893,8 +8051,8 @@ func _draw_projectiles() -> void:
 			continue
 		if col_on and bpos.distance_to(col_pos) < SimWorld.COLOSSUS_HIT_RADIUS * PX + 4.0:
 			if (b["x"] / 4099 + Engine.get_physics_frames()) % 2 == 0:
-				draw_circle(bpos, 2.4, Color(1.0, 0.85, 0.4, 0.8))
-				draw_circle(bpos, 1.0, Color(1.0, 1.0, 0.9))
+				Art.circle(self, bpos, 2.4, Color(1.0, 0.85, 0.4, 0.8))
+				Art.circle(self, bpos, 1.0, Color(1.0, 1.0, 0.9))
 			# Armor plink (9v): heavy plate SOUNDS armored too — deep ping,
 			# throttled, silent while the core window is open (those rounds
 			# matter), plus a one-shot ARMORED teach hint.
@@ -7909,7 +8067,7 @@ func _draw_projectiles() -> void:
 		var deflect := false
 		for sp in submerged_pos:
 			if bpos.distance_to(sp) < 7.0:
-				draw_circle(bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
+				Art.circle(self, bpos, 2.0, Color(0.7, 0.9, 1.0, 0.8))
 				deflect = true
 				break
 		if deflect:
@@ -7930,8 +8088,8 @@ func _draw_projectiles() -> void:
 		draw_set_transform(bpos, dir.angle(), Vector2.ONE)
 		draw_texture_rect(Art.tex("fx_bullettrail"), Rect2(-tlen, -twid / 2.0, tlen, twid), false, tail)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		draw_line(bpos - dir * 3.0, bpos, Color(0.7, 0.95, 1.0, 0.95) if piercing else Color(1.0, 0.95, 0.7, 0.95), 1.4)
-		draw_circle(bpos, 1.3 if piercing else 1.1, Color(0.9, 1.0, 1.0) if piercing else Color(1.0, 1.0, 0.85))
+		Art.line(self, bpos - dir * 3.0, bpos, Color(0.7, 0.95, 1.0, 0.95) if piercing else Color(1.0, 0.95, 0.7, 0.95), 1.4)
+		Art.circle(self, bpos, 1.3 if piercing else 1.1, Color(0.9, 1.0, 1.0) if piercing else Color(1.0, 1.0, 0.85))
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		if bpos.y < -20.0 or bpos.y > 380.0:
@@ -7963,8 +8121,8 @@ func _draw_projectiles() -> void:
 		# Universal white-hot core inside a colored rim (4v — the all-red orb
 		# mush was HATE #3): threat hue lives on the rim, the core is ALWAYS
 		# white so every live round pops off the red-tinted chaos.
-		draw_circle(bpos, 2.6, Color(0.75, 0.9, 1.0) if fast else Color(1.0, 0.35, 0.2))
-		draw_circle(bpos, 1.6, Color(1, 1, 1))
+		Art.circle(self, bpos, 2.6, Color(0.75, 0.9, 1.0) if fast else Color(1.0, 0.35, 0.2))
+		Art.circle(self, bpos, 1.6, Color(1, 1, 1))
 
 
 static func _player_ident_color(slot: int, a := 1.0) -> Color:
@@ -8008,7 +8166,7 @@ func _draw_players() -> void:
 				_spr("player2" if i == 1 else "player1", gdpos, 0.0, 0.42, Color(1.1, 1.1, 1.05))
 				var gaim := Vector2(p["aim_x"], p["aim_y"])
 				if gaim.length() > 0.01:
-					draw_line(gdpos, gdpos + gaim.normalized() * 16.0, Color(0.9, 0.97, 1.0, 0.9), 1.0)
+					Art.line(self, gdpos, gdpos + gaim.normalized() * 16.0, Color(0.9, 0.97, 1.0, 0.9), 1.0)
 			continue   # driver renders as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO) + (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO)
 		# Run-cycle bob: a per-step vertical hop while moving, matching the charging
@@ -8079,9 +8237,9 @@ func _draw_players() -> void:
 			if _player_ring_dashed(i):
 				for ds in 8:
 					var da := ds * TAU / 8.0
-					draw_arc(pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
+					Art.arc(self, pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
 			else:
-				draw_arc(pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+				Art.arc(self, pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
 			# Revive-from-here affordance: revive has NO range check (the buddy
 			# teleports to you), but the beacon on the body implies you must run
 			# to it. Tell the reviver they can pay from where they stand.
@@ -8100,8 +8258,8 @@ func _draw_players() -> void:
 					# Shake-immune like every other screen-edge indicator (the
 					# threat edges, the boss bars) — the gunship-bar idiom.
 					draw_set_transform_matrix(get_transform().affine_inverse())
-					draw_circle(edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
-					draw_line(edge, edge + bdir * 9.0, pcol, 2.0)
+					Art.circle(self, edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
+					Art.line(self, edge, edge + bdir * 9.0, pcol, 2.0)
 					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0, Color.WHITE, false, bind("revive"))
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				var cost := sim.revive_cost(dp)
@@ -8113,7 +8271,7 @@ func _draw_players() -> void:
 					draw_string(Art.font(), pos + Vector2(-18, -16), "REVIVE %d" % cost,
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(1.0, 0.5, 0.4)))
 					continue
-				draw_dashed_line(pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
+				Art.dashed_line(self, pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
 				draw_string(Art.font(), pos + Vector2(-18, -16), rtxt,
 					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(0.5, 1.0, 0.6)))
@@ -8136,9 +8294,9 @@ func _draw_players() -> void:
 			# Wading: ripple rings at the feet say "slow, no roll" at a glance.
 			if sim._in_water(p["x"], p["y"]):
 				var wt := float((Engine.get_physics_frames() + i * 31) % 50) / 50.0
-				draw_arc(pos + Vector2(0, 4), 4.0 + wt * 8.0, 0, TAU, 16,
+				Art.arc(self, pos + Vector2(0, 4), 4.0 + wt * 8.0, 0, TAU, 16,
 					Color(0.75, 0.9, 1.0, 0.5 * (1.0 - wt)), 1.2)
-				draw_arc(pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
+				Art.arc(self, pos + Vector2(0, 4), 5.0, 0, TAU, 12, Color(0.75, 0.9, 1.0, 0.4), 1.0)
 				# a2-07 ENV#7/VFX#2: a directional BOW-WAVE ahead + trailing V-WAKE when the
 				# wader is MOVING — water displaced in the travel direction, so a crossing
 				# reads as pushing through the current, not standing in it.
@@ -8146,17 +8304,17 @@ func _draw_players() -> void:
 					var wdir := Vector2(float(p["x"] - _dust_prev[i].x), float(p["y"] - _dust_prev[i].y)).normalized()
 					var wperp := Vector2(-wdir.y, wdir.x)
 					# bow-wave arc + foot-splash dot AHEAD, on the move frame
-					draw_arc(pos + wdir * 5.0, 4.5, wdir.angle() - 1.1, wdir.angle() + 1.1, 8,
+					Art.arc(self, pos + wdir * 5.0, 4.5, wdir.angle() - 1.1, wdir.angle() + 1.1, 8,
 						Color(0.86, 0.93, 1.0, 0.45 * _motion), 1.3)
-					draw_circle(pos + wdir * 3.0, 1.5, Color(0.92, 0.96, 1.0, 0.4 * _motion))
+					Art.circle(self, pos + wdir * 3.0, 1.5, Color(0.92, 0.96, 1.0, 0.4 * _motion))
 					# segmented trailing V-wake: edge pairs spread back from just behind the
 					# feet (proper displaced-water wake, not rays from center)
 					var apex := pos - wdir * 3.0
 					for sgn in [1.0, -1.0]:
 						var e1: Vector2 = apex - wdir * 6.0 + wperp * (5.0 * float(sgn))
 						var e2: Vector2 = apex - wdir * 13.0 + wperp * (9.0 * float(sgn))
-						draw_line(apex, e1, Color(0.82, 0.91, 0.98, 0.34 * _motion), 1.3)
-						draw_line(e1, e2, Color(0.82, 0.91, 0.98, 0.20 * _motion), 1.1)
+						Art.line(self, apex, e1, Color(0.82, 0.91, 0.98, 0.34 * _motion), 1.3)
+						Art.line(self, e1, e2, Color(0.82, 0.91, 0.98, 0.20 * _motion), 1.1)
 			# Get-up: blend the residual knockdown topple back out while the decaying
 			# _down_anim drains, so a revive rises instead of snapping upright.
 			var da_res: float = _down_anim[i] if i < _down_anim.size() else 0.0
@@ -8186,19 +8344,19 @@ func _draw_players() -> void:
 				var dry_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.3)
 				if p["fire_cd"] > 0:
 					var dry_frac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
-					draw_arc(pos, 8.0, -PI / 2, -PI / 2 + TAU * dry_frac, 14,
+					Art.arc(self, pos, 8.0, -PI / 2, -PI / 2 + TAU * dry_frac, 14,
 						Color(0.9, 0.6, 0.3, 0.55 + 0.35 * dry_pulse), 1.5)
 				else:
-					draw_arc(pos, 8.0, 0, TAU, 14, Color(1.0, 0.3, 0.25, 0.4 + 0.35 * dry_pulse), 1.5)
+					Art.arc(self, pos, 8.0, 0, TAU, 14, Color(1.0, 0.3, 0.25, 0.4 + 0.35 * dry_pulse), 1.5)
 			# Directional damage wedge — _hit_dir/_hit_dir_t were set on every hit,
 			# decayed in feel, and even aim the death gore, yet nothing ever DREW
 			# them: flank fire and frontal fire looked identical. A red arc on the
 			# hit body, opening toward the shooter (5 of 9 panel reviewers flagged it).
 			if i == _hit_dir_player and _hit_dir_t > 0.02 and _hit_dir.length_squared() > 0.25:
 				var wa := _hit_dir.angle()
-				draw_arc(pos, 21.0, wa - 0.55, wa + 0.55, 12,
+				Art.arc(self, pos, 21.0, wa - 0.55, wa + 0.55, 12,
 					Color(1.0, 0.18, 0.1, 0.85 * _hit_dir_t), 3.0)
-				draw_arc(pos, 24.0, wa - 0.3, wa + 0.3, 8,
+				Art.arc(self, pos, 24.0, wa - 0.3, wa + 0.3, 8,
 					Color(1.0, 0.45, 0.3, 0.5 * _hit_dir_t), 1.5)
 			# Adrenaline aura: the 20-streak / tank-bail speed surge (boost_ticks) is a
 			# real 1.5x buff that was otherwise invisible. A hot ring that fades as the
@@ -8212,15 +8370,15 @@ func _draw_players() -> void:
 				var bo_ph := float(Engine.get_physics_frames() + i * 17)
 				var bo_pulse := 1.0 if _motion < 0.5 else 0.5 + 0.5 * sin(bo_ph * 0.45)
 				var bo_spin := 0.0 if _motion < 0.5 else bo_ph * 0.08
-				draw_arc(pos, 16.0 + bo_pulse * 3.0, 0, TAU, 28,
+				Art.arc(self, pos, 16.0 + bo_pulse * 3.0, 0, TAU, 28,
 					Color(1.0, 0.55, 0.15, (0.35 + 0.4 * bo_pulse) * bo_frac), 2.0 + bo_frac)
 				for bo_s in 6:
 					var bo_ang := bo_s * TAU / 6.0 + bo_spin
 					var bo_dir := Vector2.from_angle(bo_ang)
-					draw_line(pos + bo_dir * 12.0, pos + bo_dir * (17.0 + bo_pulse * 4.0),
+					Art.line(self, pos + bo_dir * 12.0, pos + bo_dir * (17.0 + bo_pulse * 4.0),
 						Color(1.0, 0.72, 0.3, 0.5 * bo_frac), 1.5)
 			if p["vest"]:
-				draw_arc(pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
+				Art.arc(self, pos, 14.0, 0, TAU, 24, Color(0.55, 0.7, 1.0, 0.9), 2.0)
 			else:
 				# No-vest fragility: one hit from death, and the exposed stakes
 				# should read where the eye already is. A faint, gapped
@@ -8230,7 +8388,7 @@ func _draw_players() -> void:
 				var frag_col := Color(0.55, 0.4, 0.4, 0.15 + 0.12 * frag_pulse)
 				for frag_s in 5:
 					var frag_a0 := frag_s * TAU / 5.0 + 0.15
-					draw_arc(pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
+					Art.arc(self, pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
 			# HOLD FIRE cue: the reticle warns when the gun is trained on the
@@ -8252,11 +8410,13 @@ func _draw_players() -> void:
 			if p["claymores"] > 0 and aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
 				var gpos := pos + aim * 20.0
 				_spr("wep_claymore", gpos, 0.0, 1.05, Color(1, 1, 1, 0.28))
-				draw_arc(gpos, 9.0, 0, TAU, 12, Art.safe(Color(0.5, 0.95, 0.7, 0.35)), 1.0)
+				Art.arc(self, gpos, 9.0, 0, TAU, 12, Art.safe(Color(0.5, 0.95, 0.7, 0.35)), 1.0)
 			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
 				# Heat-bloom: the crosshair spreads with sustained fire (the
 				# barrel-heat mechanic, made visible at the point of attention).
-				var bloom: float = (_heat[i] if i < _heat.size() else 0.0) * 5.0
+				# Quantized to whole pixels — a continuously-varying float bloom
+				# resamples the nearest-filtered reticle art at a non-integer ratio.
+				var bloom := roundf((_heat[i] if i < _heat.size() else 0.0) * 5.0)
 				var rrect := Rect2(pos + aim * 27.0 - Vector2(8 + bloom, 8 + bloom),
 					Vector2(16 + bloom * 2.0, 16 + bloom * 2.0))
 				# Bash-in-range tell: dry MG + an enemy in melee reach + off cooldown
@@ -8286,7 +8446,7 @@ func _draw_players() -> void:
 				if bash_ready:
 					rcol = Color(1.0, 0.55, 0.2)
 					var bp := Art.pulse(0.25)
-					draw_arc(pos, SimWorld.BASH_RADIUS * PX, 0, TAU, 20,
+					Art.arc(self, pos, SimWorld.BASH_RADIUS * PX, 0, TAU, 20,
 						Color(1.0, 0.55, 0.2, 0.3 + bp * 0.2), 1.5)
 				# Shape follows the fire pattern, not just hue (protan-safe): the
 				# pierce octagon rings the point it punches through; the fan
@@ -8299,13 +8459,20 @@ func _draw_players() -> void:
 					rtex = Art.tex("ui_ret_pierce")
 				elif p["spread_ticks"] > 0 or p["triple"]:
 					rtex = Art.tex("ui_ret_spread")
-					var bw := rrect.size.x * 0.45
-					rects = [Rect2(-rrect.size.x * 0.62, -rrect.size.y / 2.0, bw, rrect.size.y),
-						Rect2(rrect.size.x * 0.62, -rrect.size.y / 2.0, -bw, rrect.size.y)]
-				# Confirm-thump: the reticle itself scale-punches on a landed hit.
-				var rpunch := 1.0 + (_hitmarker[i] if i < _hitmarker.size() else 0.0) * 0.3
-				var rcen := rrect.get_center()
-				draw_set_transform(rcen, 0.0, Vector2.ONE * rpunch)
+					var bw := roundf(rrect.size.x * 0.45)
+					rects = [Rect2(roundf(-rrect.size.x * 0.62), -rrect.size.y / 2.0, bw, rrect.size.y),
+						Rect2(roundf(rrect.size.x * 0.62), -rrect.size.y / 2.0, -bw, rrect.size.y)]
+				# Confirm-thump: the reticle itself punches on a landed hit. A fractional
+				# SCALE on nearest-filtered art resamples rows/columns irregularly, so the
+				# punch is a whole-pixel GROW of the rect bounds instead of a transform scale.
+				var rgrow := roundf((_hitmarker[i] if i < _hitmarker.size() else 0.0) * 2.0)   # 0..2 px
+				var rcen := rrect.get_center().round()
+				draw_set_transform(rcen, 0.0, Vector2.ONE)
+				if rgrow > 0.0:
+					var grown: Array[Rect2] = []
+					for rd in rects:
+						grown.append(Rect2(rd.position - Vector2.ONE * rgrow, rd.size + Vector2.ONE * rgrow * 2.0))
+					rects = grown
 				# a4-05: centered dark halo (all 8 sides) instead of a one-sided drop-shadow —
 				# the aim point keeps a full dark keyline against any hot terrain, never just two edges.
 				# Diagonals draw LIGHTER (RETICLE_HALO_DIAG) so the corner double-coverage doesn't
@@ -8321,7 +8488,7 @@ func _draw_players() -> void:
 				# Hitmarker: reticle flicks bright + kicks four ticks on a landed hit.
 				if i < _hitmarker.size() and _hitmarker[i] > 0.01:
 					var hc := Color(1.0, 1.0, 0.85, _hitmarker[i])
-					var rc := rrect.get_center()
+					var rc := rrect.get_center().round()
 					# Eased fling: ticks shoot out fast, then settle.
 					var off := 8.0 + (1.0 - _hitmarker[i] * _hitmarker[i]) * 4.0
 					var hl := Art.tex("hudfx_hitlines")
@@ -8340,12 +8507,12 @@ func _draw_players() -> void:
 				var rcol := Color(0.7, 0.9, 1.0, 0.55)
 				if rdry > 0:
 					rcol = rcol.lerp(Color(1, 1, 1, 0.95), float(rdry) / 6.0)
-				draw_arc(pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20, rcol, 1.5)
+				Art.arc(self, pos, 11.0, -PI / 2, -PI / 2 + TAU * ready, 20, rcol, 1.5)
 				# A press that WAS caught by the buffer looked identical to one that
 				# got eaten — only refusals had a tell. Ghost the remaining arc while
 				# a roll is queued so "held, will fire" is legible as its own state.
 				if p["roll_buf"] > 0:
-					draw_arc(pos, 11.0, -PI / 2 + TAU * ready, -PI / 2 + TAU, 20,
+					Art.arc(self, pos, 11.0, -PI / 2 + TAU * ready, -PI / 2 + TAU, 20,
 						Color(0.85, 0.95, 1.0, 0.3), 1.5)
 		else:
 			# Knockdown tween: topple from the last aim into the fallen pose, colour
@@ -8356,7 +8523,7 @@ func _draw_players() -> void:
 			var dpose := lerp_angle(_aim_angle(p), PI / 2, de)
 			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), de)
 			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - de) * 0.12), dcol)
-			draw_arc(pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
+			Art.arc(self, pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
 			# Broke-respawn clock: a downed player with no coins to revive earns a
 			# free reinforcement at broke_timer==0 (BROKE_RESPAWN_TICKS from the KO).
 			# The co-op partner — and the solo player — had no idea when help lands;
@@ -8378,7 +8545,7 @@ func _draw_players() -> void:
 						partner_up = true
 				if partner_up:
 					var bp := float(Engine.get_physics_frames() % 45) / 45.0
-					draw_arc(pos, 6.0 + bp * 20.0, 0, TAU, 24,
+					Art.arc(self, pos, 6.0 + bp * 20.0, 0, TAU, 24,
 						Color(0.5, 0.9, 1.0, 0.8 * (1.0 - bp)), 2.0)
 
 
@@ -8506,7 +8673,7 @@ func _draw_sector_embers() -> void:
 		var ey := 360.0 - ephase * 380.0 * maxf(_motion, 0.3)
 		# Low-sat ash flecks, NOT ember-orange (c2 4v): drifting motes in the
 		# mine/barrel hue band camouflaged real hazards in the foundry sector.
-		draw_circle(Vector2(ex + sin(ephase * TAU) * 6.0, ey), 1.2,
+		Art.circle(self, Vector2(ex + sin(ephase * TAU) * 6.0, ey), 1.2,
 			Color(0.85, 0.78, 0.7, (0.5 - absf(ephase - 0.5)) * 0.8))
 
 
@@ -8552,8 +8719,8 @@ func _draw_fx() -> void:
 				# first EXPLO_WHITE_T of its life, then cools to the orange fireball — a
 				# concussive flashbulb instead of blooming red-first/muddy.
 				var wf := 1.0 - t / EXPLO_WHITE_T
-				draw_circle(pos, EXPLO_WHITE_R_OUT + t * 46.0, Color(1.0, 0.98, 0.9, 0.88 * wf))
-				draw_circle(pos, EXPLO_WHITE_R_IN + t * 22.0, Color(1.0, 1.0, 0.98, 0.9 * wf))
+				Art.circle(self, pos, EXPLO_WHITE_R_OUT + t * 46.0, Color(1.0, 0.98, 0.9, 0.88 * wf))
+				Art.circle(self, pos, EXPLO_WHITE_R_IN + t * 22.0, Color(1.0, 1.0, 0.98, 0.9 * wf))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
 			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
@@ -8585,7 +8752,7 @@ func _draw_fx() -> void:
 			var rr := float(Engine.get_physics_frames()) * 0.9
 			for ri in 2:
 				var ra := rr + ri * PI / 2
-				draw_line(cpos - Vector2.from_angle(ra) * 15.0, cpos + Vector2.from_angle(ra) * 15.0,
+				Art.line(self, cpos - Vector2.from_angle(ra) * 15.0, cpos + Vector2.from_angle(ra) * 15.0,
 					Color(0.85, 0.85, 0.85, 0.35), 1.5)
 		elif fx["kind"] == "fragpop":
 			# Mini frag icons flung outward on a grenade multi-kill — extra pop
@@ -8634,7 +8801,7 @@ func _draw_fx() -> void:
 				Color(1, 1, 1, (0.6 - t * 0.55) * smoothstep(0.0, 0.15, t)))
 		elif fx["kind"] == "gib":
 			var gc: Color = fx.get("col", Color(0.5, 0.1, 0.08))
-			draw_circle(pos, 1.6 * (1.0 - t * 0.6), Color(gc.r, gc.g, gc.b, 1.0 - t))
+			Art.circle(self, pos, 1.6 * (1.0 - t * 0.6), Color(gc.r, gc.g, gc.b, 1.0 - t))
 		elif fx["kind"] == "dust":
 			var dust_col: Color = fx.get("col", Color(0.7, 0.65, 0.5))
 			var dust_sz: float = fx.get("sz", 1.0)
@@ -8657,7 +8824,7 @@ func _draw_fx() -> void:
 			var mpos := pos + Vector2(fx["dx"], fx["dy"]) * t
 			var menv := smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.7, 1.0, t))
 			var mcol: Color = fx["col"]
-			draw_circle(mpos, fx["sz"], Color(mcol.r, mcol.g, mcol.b, 0.35 * menv))
+			Art.circle(self, mpos, fx["sz"], Color(mcol.r, mcol.g, mcol.b, 0.35 * menv))
 		elif fx["kind"] == "coin":
 			# Bounty coin arcs from the kill up to the HUD War Chest icon, landing
 			# just as the counter pulses — the kill funded the chest, made visible.
@@ -8712,7 +8879,7 @@ func _draw_glow() -> void:
 		for em in 4:
 			var eh := Art.cell_hash(int(hpos.x) + em * 11, int(hk["burn_ticks"] / 40) + em)
 			var epos := hpos + Vector2(-12.0 + float(eh % 25), -8.0 + float((eh / 25) % 17))
-			g.draw_circle(epos, 1.1, Color(1.0, 0.6 + float(eh % 3) * 0.1, 0.2, (0.5 + float(eh % 4) * 0.1) * hfade))
+			Art.circle(g, epos, 1.1, Color(1.0, 0.6 + float(eh % 3) * 0.1, 0.2, (0.5 + float(eh % 4) * 0.1) * hfade))
 
 	for t in sim.tanks:
 		if t["alive"] and t["burning"]:
@@ -8749,7 +8916,7 @@ func _draw_glow() -> void:
 			g.draw_texture_rect(Art.tex("fx_muzzle_fan"), Rect2(-fl * 0.7, -fl, fl * 1.4, fl), false, mc)
 			g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			var mcore := mbase.lerp(Color(1.0, 1.0, 0.9), 0.6)
-			g.draw_circle(pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, MUZZLE_HEAT["core_a"] * (0.9 - t * 0.8)))
+			Art.circle(g, pos, sz * 0.32, Color(mcore.r, mcore.g, mcore.b, MUZZLE_HEAT["core_a"] * (0.9 - t * 0.8)))
 			# First-frame-only: an oversize pop + 3 radiating slivers — the crack of the
 			# shot, gone before the next frame (4v: fan read soft). a3-06: the pop was
 			# pure-white (lerp 0.55 @ 0.9a) — the SAME white-hot read as an explosion core,
@@ -8770,10 +8937,10 @@ func _draw_glow() -> void:
 						false, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
 					g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				else:
-					g.draw_circle(pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
+					Art.circle(g, pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
 				for ml in 3:
 					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
-					g.draw_line(pos + Vector2.from_angle(mla) * sz * 0.4,
+					Art.line(g, pos + Vector2.from_angle(mla) * sz * 0.4,
 						pos + Vector2.from_angle(mla) * sz * (1.7 + float(ml % 2) * 0.5),
 						Color(1, 1, 1, 0.75), 1.2)
 		elif fx["kind"] == "spark":
@@ -8810,16 +8977,16 @@ func _draw_glow() -> void:
 			# dimming fast as it flies — now genuinely additive.
 			var ea := 1.0 - t
 			var ec := Color(1.0, 0.85 - t * 0.4, 0.35 - t * 0.3)
-			g.draw_circle(pos, 2.0 * (1.0 - t * 0.5), Color(ec.r, ec.g, ec.b, ea * 0.5))
-			g.draw_circle(pos, 0.9, Color(1.0, 0.95, 0.75, ea))
+			Art.circle(g, pos, 2.0 * (1.0 - t * 0.5), Color(ec.r, ec.g, ec.b, ea * 0.5))
+			Art.circle(g, pos, 0.9, Color(1.0, 0.95, 0.75, ea))
 		elif fx["kind"] == "flash":
 			# Delayed secondary core: negative t holds it dark for ~2 frames after the
 			# main blast, then it pops bright and fades — a two-stage punch.
 			if t < 0.0:
 				continue
 			var la2 := 1.0 - t
-			g.draw_circle(pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.68 * la2 * la2))
-			g.draw_circle(pos, 4.5, Color(1.0, 1.0, 0.95, 0.8 * la2))
+			Art.circle(g, pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.68 * la2 * la2))
+			Art.circle(g, pos, 4.5, Color(1.0, 1.0, 0.95, 0.8 * la2))
 
 
 func _draw_flame(g: CanvasItem, fp: Vector2, strength: float, flick: float) -> void:
@@ -8859,8 +9026,8 @@ func _draw_scorch() -> void:
 		draw_set_transform(pos, float(int(s["x"]) % 360) * 0.01745, Vector2.ONE)
 		draw_texture_rect(Art.tex("fx_groundbreak"), Rect2(-gr, -gr, gr * 2.0, gr * 2.0), false, Color(0.16, 0.13, 0.1, a * 1.15))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		draw_circle(pos, s["r"], Color(0.12, 0.1, 0.08, a))
-		draw_circle(pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
+		Art.circle(self, pos, s["r"], Color(0.12, 0.1, 0.08, a))
+		Art.circle(self, pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
 		if s.get("crack", false):
 			# Radial fracture lines, stable per-decal via the stored seed.
 			var sd: int = s.get("seed", 0)
@@ -8868,7 +9035,7 @@ func _draw_scorch() -> void:
 			for k in 5:
 				var ka := k * TAU / 5.0 + float(sd % 13) * 0.24
 				var cl: float = s["r"] * (0.7 + float((sd >> (k * 2)) & 3) * 0.12)
-				draw_line(pos, pos + Vector2.from_angle(ka) * cl, Color(0.03, 0.02, 0.02, ca), 1.0)
+				Art.line(self, pos, pos + Vector2.from_angle(ka) * cl, Color(0.03, 0.02, 0.02, ca), 1.0)
 	# Dead-tank hulks: a persistent burned-out wreck where a tank died — scorch
 	# decal under the hulk sprite, plus a drifting smolder fume while fresh.
 	for h in _hulks:
@@ -8883,7 +9050,7 @@ func _draw_scorch() -> void:
 		draw_texture_rect(Art.tex("fx_groundbreak"), Rect2(-26, -26, 52, 52), false,
 			Color(0.14, 0.11, 0.09, 0.55))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		draw_circle(hp, 15.0, Color(0.08, 0.07, 0.06, 0.4))
+		Art.circle(self, hp, 15.0, Color(0.08, 0.07, 0.06, 0.4))
 		_spr("tank_hulk", hp, hrot, 0.62)
 		var smf: float = 1.0 - h["t"]
 		if smf > 0.05:
@@ -8930,11 +9097,11 @@ func _draw_telegraphs() -> void:
 		var col := Color(1.0, 0.9 - frac * 0.6, 0.2, 0.9)
 		if s["ticks"] <= 10 and (s["ticks"] / 3) % 2 == 0:
 			col = Color(1.0, 1.0, 1.0, 0.95)
-		draw_arc(sp, r, 0, TAU, 32, col, 1.5)
-		draw_circle(sp, r * frac, Color(col.r, col.g, col.b, 0.20))
-		draw_arc(sp, r * frac, 0, TAU, 28, col, 2.0)
-		draw_line(sp + Vector2(-5, 0), sp + Vector2(5, 0), col, 1.5)
-		draw_line(sp + Vector2(0, -5), sp + Vector2(0, 5), col, 1.5)
+		Art.arc(self, sp, r, 0, TAU, 32, col, 1.5)
+		Art.circle(self, sp, r * frac, Color(col.r, col.g, col.b, 0.20))
+		Art.arc(self, sp, r * frac, 0, TAU, 28, col, 2.0)
+		Art.line(self, sp + Vector2(-5, 0), sp + Vector2(5, 0), col, 1.5)
+		Art.line(self, sp + Vector2(0, -5), sp + Vector2(0, 5), col, 1.5)
 
 
 func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18),
@@ -8954,7 +9121,7 @@ func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18),
 	# Phase ticks: thirds/halves so the fight's structure is legible.
 	for k in range(1, ticks):
 		var tx := well.position.x + fw * float(k) / float(ticks)
-		draw_line(Vector2(tx, well.position.y), Vector2(tx, well.position.y + well.size.y),
+		Art.line(self, Vector2(tx, well.position.y), Vector2(tx, well.position.y + well.size.y),
 			Color(0.05, 0.04, 0.03, 0.8), 1.0)
 	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
 
@@ -8979,7 +9146,7 @@ func _draw_progress_rail() -> void:
 	var rx := 632.0
 	var top := 30.0
 	var bot := 330.0
-	draw_line(Vector2(rx, top), Vector2(rx, bot), Color(0.2, 0.22, 0.18, 0.7), 2.0)
+	Art.line(self, Vector2(rx, top), Vector2(rx, bot), Color(0.2, 0.22, 0.18, 0.7), 2.0)
 	# Map world-y over the run span to the rail. Gates stream at -1000/unit.
 	var span := SimWorld.GATE_SPACING * SimWorld.FINAL_GATE_INDEX
 	var to_rail := func(wy: int) -> float:
@@ -8989,13 +9156,13 @@ func _draw_progress_rail() -> void:
 		var gc := Art.safe(Color(0.4, 0.9, 0.4)) if g["open"] else Color(0.95, 0.3, 0.2)
 		if g.get("final", false):
 			gc = Color(1.0, 0.6, 0.2)
-		draw_circle(Vector2(rx, yy), 3.5, gc)
+		Art.circle(self, Vector2(rx, yy), 3.5, gc)
 	# Finale marker at the top even before it streams in.
 	draw_rect(Rect2(rx - 3, top - 3, 6, 6), Color(1.0, 0.6, 0.2))
 	# You-are-here.
 	var you: float = to_rail.call(sim.camera_top + int(SimWorld.VIEW_H / 2))
-	draw_circle(Vector2(rx, you), 2.5, Color(1, 1, 1))
-	draw_arc(Vector2(rx, you), 4.5, 0, TAU, 12, Color(1, 1, 1, 0.7), 1.0)
+	Art.circle(self, Vector2(rx, you), 2.5, Color(1, 1, 1))
+	Art.arc(self, Vector2(rx, you), 4.5, 0, TAU, 12, Color(1, 1, 1, 0.7), 1.0)
 
 
 func _draw_threat_edges() -> void:
@@ -9054,10 +9221,10 @@ func _draw_threat_edges() -> void:
 	if near_found:
 		var bp := 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady under reduce-motion
 		var bcol := Color(1.0, 0.3, 0.2, 0.55 + bp * 0.35)
-		draw_line(Vector2(near_x - 6, 14), Vector2(near_x, 5), bcol, 2.5)
-		draw_line(Vector2(near_x, 5), Vector2(near_x + 6, 14), bcol, 2.5)
-		draw_line(Vector2(near_x - 6, 22), Vector2(near_x, 13), bcol, 2.5)
-		draw_line(Vector2(near_x, 13), Vector2(near_x + 6, 22), bcol, 2.5)
+		Art.line(self, Vector2(near_x - 6, 14), Vector2(near_x, 5), bcol, 2.5)
+		Art.line(self, Vector2(near_x, 5), Vector2(near_x + 6, 14), bcol, 2.5)
+		Art.line(self, Vector2(near_x - 6, 22), Vector2(near_x, 13), bcol, 2.5)
+		Art.line(self, Vector2(near_x, 13), Vector2(near_x + 6, 22), bcol, 2.5)
 	# Off-screen downed-partner revive locator: the revive beacon + dashed
 	# tether in _draw_players only render at the body's on-screen world pos,
 	# so a KO'd partner scrolled past the held camera's edge is invisible and
@@ -9084,12 +9251,12 @@ func _draw_threat_edges() -> void:
 			# rx-18 used to start the text off-screen there).
 			var rlx := clampf(rx - 18.0, 4.0, 596.0)
 			if rsy > 360.0:
-				draw_line(Vector2(rx - 6, 336), Vector2(rx, 345), rcol, 2.5)
-				draw_line(Vector2(rx, 345), Vector2(rx + 6, 336), rcol, 2.5)
+				Art.line(self, Vector2(rx - 6, 336), Vector2(rx, 345), rcol, 2.5)
+				Art.line(self, Vector2(rx, 345), Vector2(rx + 6, 336), rcol, 2.5)
 				Art.text(self, "REVIVE", Vector2(rlx, 332), 9, rcol)
 			else:
-				draw_line(Vector2(rx - 6, 40), Vector2(rx, 31), rcol, 2.5)
-				draw_line(Vector2(rx, 31), Vector2(rx + 6, 40), rcol, 2.5)
+				Art.line(self, Vector2(rx - 6, 40), Vector2(rx, 31), rcol, 2.5)
+				Art.line(self, Vector2(rx, 31), Vector2(rx + 6, 40), rcol, 2.5)
 				# Slot bump: the top-center strip owns y46 when a banner/directive
 				# is live — drop the label a slot so the two never overprint.
 				var rly := 62.0 if _top_center_priority() != "" and absf(rx - 320.0) < 90.0 else 50.0
@@ -9139,15 +9306,15 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var tspr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var ttip := tbase - (6.0 if danger else 4.0)
 			var tuc := Color(0, 0, 0, ta * 0.55)   # 1px drop under-lay: reads over bright terrain
-			draw_line(Vector2(tx - tspr, tbase + 1.0), Vector2(tx, ttip + 1.0), tuc, 2.0)
-			draw_line(Vector2(tx, ttip + 1.0), Vector2(tx + tspr, tbase + 1.0), tuc, 2.0)
-			draw_line(Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
-			draw_line(Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
+			Art.line(self, Vector2(tx - tspr, tbase + 1.0), Vector2(tx, ttip + 1.0), tuc, 2.0)
+			Art.line(self, Vector2(tx, ttip + 1.0), Vector2(tx + tspr, tbase + 1.0), tuc, 2.0)
+			Art.line(self, Vector2(tx - tspr, tbase), Vector2(tx, ttip), tcol, 2.0)
+			Art.line(self, Vector2(tx, ttip), Vector2(tx + tspr, tbase), tcol, 2.0)
 			if colorblind and danger:
 				# Colorblind: red-vs-orange hue alone can't carry "lethal ranged". Add
 				# a second nested caret so SHAPE (a doubled chevron) encodes danger too.
-				draw_line(Vector2(tx - tspr, tbase + 5.0), Vector2(tx, ttip + 5.0), tcol, 2.0)
-				draw_line(Vector2(tx, ttip + 5.0), Vector2(tx + tspr, tbase + 5.0), tcol, 2.0)
+				Art.line(self, Vector2(tx - tspr, tbase + 5.0), Vector2(tx, ttip + 5.0), tcol, 2.0)
+				Art.line(self, Vector2(tx, ttip + 5.0), Vector2(tx + tspr, tbase + 5.0), tcol, 2.0)
 		else:
 			var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
 			if sim.last_stand and sx > 165.0 and sx < 475.0:
@@ -9161,14 +9328,14 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 			var spr := 6.0 if danger else 4.0   # spikier spread for ranged killers
 			var tip := 361.0 if danger else 358.0
 			var uc := Color(0, 0, 0, a * 0.55)   # 1px drop under-lay: reads over bright terrain
-			draw_line(Vector2(sx - spr, 354), Vector2(sx, tip + 1.0), uc, 2.0)
-			draw_line(Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
-			draw_line(Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
-			draw_line(Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
+			Art.line(self, Vector2(sx - spr, 354), Vector2(sx, tip + 1.0), uc, 2.0)
+			Art.line(self, Vector2(sx, tip + 1.0), Vector2(sx + spr, 354), uc, 2.0)
+			Art.line(self, Vector2(sx - spr, 353), Vector2(sx, tip), col, 2.0)
+			Art.line(self, Vector2(sx, tip), Vector2(sx + spr, 353), col, 2.0)
 			if colorblind and danger:
 				# Doubled chevron: shape-redundant danger cue for colorblind mode.
-				draw_line(Vector2(sx - spr, 348), Vector2(sx, tip - 5.0), col, 2.0)
-				draw_line(Vector2(sx, tip - 5.0), Vector2(sx + spr, 348), col, 2.0)
+				Art.line(self, Vector2(sx - spr, 348), Vector2(sx, tip - 5.0), col, 2.0)
+				Art.line(self, Vector2(sx, tip - 5.0), Vector2(sx + spr, 348), col, 2.0)
 	if threats.size() > 6:
 		# The cap hides the tail — say so, so a drowned edge still reads as "many"
 		# instead of "exactly six".
@@ -9302,13 +9469,13 @@ func _marker_edge(pos: Vector2) -> Vector2:
 
 
 func _marker_diamond(p: Vector2, r: float, col: Color) -> void:
-	var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
-		p + Vector2(0, r), p + Vector2(-r, 0)])
+	var pts := Art.rnd(PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0),
+		p + Vector2(0, r), p + Vector2(-r, 0)]))
 	draw_colored_polygon(pts, Color(col.r, col.g, col.b, 0.85))
 	# Dark outline, same treatment the threat pips get — keeps the diamond
 	# readable over bright water/sand.
 	pts.append(pts[0])
-	draw_polyline(pts, Color(0, 0, 0, 0.55), 1.0)
+	Art.polyline(self, pts, Color(0, 0, 0, 0.55), 1.0)
 
 
 static func _wheel_socket_display(selected: bool, afford: bool) -> String:
@@ -9334,6 +9501,7 @@ func _draw_wheel() -> void:
 		# (c.y-52) and cue line (c.y+52) must all stay on-screen.
 		c.x = clampf(c.x, 78.0, 562.0)
 		c.y = clampf(c.y, 96.0, 296.0)
+		c = c.round()
 		# (No entrance-scale envelope: the old draw_set_transform pop was clobbered by
 		# the first nested _spr's identity reset, so only the plate ever scaled — the
 		# hub/sockets/labels popped in at full size, which read worse than no pop at
@@ -9363,7 +9531,7 @@ func _draw_wheel() -> void:
 				continue
 			var item: Dictionary = WHEEL_ITEMS[_SECTOR_TO_ITEM[s]]
 			var ang := s * TAU / 8.0
-			var ipos := c + Vector2.from_angle(ang) * 31.0
+			var ipos := (c + Vector2.from_angle(ang) * 31.0).round()
 			var is_token: bool = int(item["kind"]) == 5
 			var acost: int = 1 if is_token else sim._supply_cost(item["kind"])   # wave-scaled in endless
 			var afford: bool = (sim.tokens >= 1) if is_token else (sim.war_chest >= acost)
@@ -9376,9 +9544,9 @@ func _draw_wheel() -> void:
 			# Eased 31→38 pop on the picked socket (pop advances in _update_wheel).
 			var pop: float = float(_wheel[i].get("pop", 1.0)) if selected else 0.0
 			_spr("ui_wheel_socket", ipos, ang + PI / 2.0,
-				lerpf(31.0, 38.0, pop) / Art.tex("ui_wheel_socket").get_size().x, sock_mod)
+				roundf(lerpf(31.0, 38.0, pop)) / Art.tex("ui_wheel_socket").get_size().x, sock_mod)
 			var icon_mod := Color.WHITE if afford else Color(0.8, 0.35, 0.35, 0.55)
-			var isz := lerpf(14.0, 18.0, pop)
+			var isz := roundf(lerpf(14.0, 18.0, pop))
 			draw_texture_rect(Art.tex(item["icon"]),
 				Rect2(ipos - Vector2(isz, isz) / 2.0, Vector2(isz, isz)), false, icon_mod)
 			if not afford:
@@ -9408,7 +9576,7 @@ func _draw_wheel() -> void:
 						Color(1.0, 0.55, 0.45) if empty else Color(1.0, 0.97, 0.9))
 			elif wdisp == "dot":
 				# compact "can-buy" dot: affordability reads at a glance, no numbers
-				draw_circle(ipos + Vector2(0.0, 14.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
+				Art.circle(self, ipos + Vector2(0.0, 14.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
 		# Device-aware verb cue under the hub: the wheel states its own controls,
 		# and the cancel button is the real glyph (pad B / keycap C), not a letter.
 		# Revive-guard (5-vote panel item): with a teammate down, a buy that
@@ -9561,17 +9729,17 @@ func _draw_threat_pips() -> void:
 		var perp := Vector2(-dir.y, dir.x)
 		var tip := edge + dir * (7.0 + pf * 3.0)
 		var base := edge - dir * 4.0
-		var tri := PackedVector2Array([tip, base + perp * 5.0, base - perp * 5.0])
-		draw_circle(edge, 9.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.14 + pf * 0.08))
+		var tri := Art.rnd(PackedVector2Array([tip, base + perp * 5.0, base - perp * 5.0]))
+		Art.circle(self, edge, 9.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.14 + pf * 0.08))
 		if k == "grenadier" or k == "drone":
 			# AREA strike incoming = HOLLOW arrow; aimed shot = filled. The
 			# amber/red hue split collapses under deuteranopia, so the shape
 			# carries the "move off this spot" vs "break the line" semantic.
-			draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]),
+			Art.polyline(self, PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]),
 				Color(col.r, col.g, col.b, 0.95), 2.0)
 		else:
 			draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
-		draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
+		Art.polyline(self, PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
 	# Off-screen mortar strikes: a telegraph that scrolls off-frame between cast and
 	# impact gave zero warning; clamp an urgency-scaled amber-red wedge to the edge.
 	for st in sim.strikes:
@@ -9588,10 +9756,10 @@ func _draw_threat_pips() -> void:
 		var sperp := Vector2(-sdir.y, sdir.x)
 		var stip := sedge + sdir * (8.0 + urg * 5.0)
 		var sbase := sedge - sdir * 4.0
-		var stri := PackedVector2Array([stip, sbase + sperp * 6.0, sbase - sperp * 6.0])
-		draw_circle(sedge, 10.0 + urg * 3.0, Color(1.0, 0.5, 0.2, 0.14 + urg * 0.14))
+		var stri := Art.rnd(PackedVector2Array([stip, sbase + sperp * 6.0, sbase - sperp * 6.0]))
+		Art.circle(self, sedge, 10.0 + urg * 3.0, Color(1.0, 0.5, 0.2, 0.14 + urg * 0.14))
 		draw_colored_polygon(stri, Color(1.0, 0.5, 0.2, 0.75 + urg * 0.25))
-		draw_polyline(PackedVector2Array([stri[0], stri[1], stri[2], stri[0]]), Color(0, 0, 0, 0.55), 1.0)
+		Art.polyline(self, PackedVector2Array([stri[0], stri[1], stri[2], stri[0]]), Color(0, 0, 0, 0.55), 1.0)
 
 
 func _draw_banners(top_msg: String) -> void:
@@ -9666,8 +9834,8 @@ func _draw_banners(top_msg: String) -> void:
 		mid = Vector2(clampf(mid.x, 12.0, 628.0), clampf(mid.y, 12.0, 348.0))
 		var perp := Vector2(-_hit_dir.y, _hit_dir.x)
 		var wc := Color(1.0, 0.2, 0.15, _hit_dir_t * 0.8)
-		var pts := PackedVector2Array([mid + perp * 46.0, mid - perp * 46.0,
-			mid + _hit_dir * 26.0])
+		var pts := Art.rnd(PackedVector2Array([mid + perp * 46.0, mid - perp * 46.0,
+			mid + _hit_dir * 26.0]))
 		draw_colored_polygon(pts, wc)
 	# Arena-lock directive: the camera holds at closed gates by design, but
 	# the objective must be said out loud (playtest: "scrolling just stops").
@@ -9708,16 +9876,17 @@ func _draw_banners(top_msg: String) -> void:
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
 			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
 			# the same shared boundary hud.gd sizes its corner panel against) instead
-			# of overprinting the PHASE label; pop-in scale punch on the first ~10%
-			# of life, stilled under reduce-motion.
+			# of overprinting the PHASE label.
 			var by := HudIcons.BOSS_BAR_TOP + 6.0 + 22.0 * float(_boss_bar_slots)
-			var bsize := 16
+			# Fit at the BASE size only — the pop-in punch below is a transform
+			# scale, not a font-size bump, so it no longer fights this shrink loop
+			# (a long teach string at a punched-up font size used to overflow
+			# BANNER_MAX_W and get shoved straight back to base, so the punch was
+			# dead for exactly the strings that most needed the shrink).
+			var bsize := banner_fit_size(btext, 16)
+			var punch := 1.0
 			if _motion >= 0.5:
-				bsize = int(16.0 * (1.0 + 0.4 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)))
-			# Shrink-to-fit: long teach strings (TECHNICAL 52ch, COURIER 58ch) at
-			# punch sizes overflow the 640px viewport and shove the badge off-screen.
-			while bsize > 8 and Art.font().get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, bsize).x > 600.0:
-				bsize -= 1
+				punch = 1.0 + 0.28 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)
 			# A badge (if any) sits left of the centered text — the plate must
 			# extend to cover it, or the skull/target/lightning floats off the
 			# metal onto bare shaking terrain (the plate exists to prevent exactly
@@ -9725,6 +9894,9 @@ func _draw_banners(top_msg: String) -> void:
 			var bic: String = bn.get("icon", "")
 			var bis := float(bsize) + 4.0
 			var pad_left := (bis + 8.0) if not bic.is_empty() else 0.0
+			if punch > 1.0:
+				draw_set_transform_matrix(get_transform().affine_inverse()
+					* Transform2D(0.0, Vector2.ONE * punch, 0.0, Vector2(320.0, by) * (1.0 - punch)))
 			_banner_plate(btext, by, bsize, a, pad_left)
 			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
 			# Threat-callout badge (skull/target/lightning) fronting the text —
@@ -9734,6 +9906,8 @@ func _draw_banners(top_msg: String) -> void:
 				draw_texture_rect(Art.tex(bic),
 					Rect2(320.0 - biw / 2.0 - bis - 6.0, by - float(bsize) / 2.0 - bis / 2.0, bis, bis),
 					false, Color(bc.r, bc.g, bc.b, a))
+			if punch > 1.0:
+				draw_set_transform_matrix(get_transform().affine_inverse())
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		var vrr := _run_rank()
@@ -9882,32 +10056,44 @@ static func _banner_plate_alpha(text_a: float) -> float:
 	return (maxf(text_a, 0.7) if text_a > 0.05 else 0.0)
 
 
+## Shrink-to-fit: caps a banner string's draw size so its scrim never
+## approaches full screen width (BANNER_MAX_W). Lifted out of _draw_banners
+## so a headless test can assert against the exact arithmetic the draw uses.
+static func banner_fit_size(txt: String, base: int) -> int:
+	var sz := base
+	while sz > 8 and Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x > BANNER_MAX_W:
+		sz -= 1
+	return sz
+
+
+## The banner scrim's exact rect — the one measurement both _banner_plate and
+## a layout test read, so a test can't pass against arithmetic the draw
+## doesn't actually use. pad_left extends the plate leftward under a fronting
+## badge; the text stays centered on 320, so only the left edge grows.
+static func banner_plate_rect(txt: String, y: float, size: int, pad_left: float) -> Rect2:
+	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	return Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0, w + 10.0 + pad_left, size + 7.0)
+
+
 func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
-	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	# pad_left extends the plate leftward under a fronting badge; the text stays
-	# centered on 320, so only the left edge grows (right stays symmetric to text).
-	var plate_a := _banner_plate_alpha(a)
-	_metal_plate(Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0,
-		w + 10.0 + pad_left, size + 7.0), plate_a)
+	_metal_plate(banner_plate_rect(txt, y, size, pad_left), _banner_plate_alpha(a))
 
 
 func _metal_plate(r: Rect2, a: float) -> void:
-	# Hand 3-slice from the baked plate_metal_* set (190x230 slices): caps at the
-	# ends + a stretched center, laid over the old dark rect (text contrast) and
-	# tinted way down so it stays muted retro-metal under the text, not chrome.
+	# Soft-edged ribbon (fx_softspot's radial falloff) instead of a hard-edged
+	# slab: no rectangle silhouette ever lands on the play field, but the
+	# elliptical core still sits at full strength under the glyphs.
 	# a4-02: both greys below are named Art constants (PRINT_INK / PLATE_STEEL),
 	# not independently-chosen HUD literals — see assets_src/style_bible.md.
-	draw_rect(r, Color(Art.PRINT_INK, 0.5 * a))
-	var cap := minf(r.size.y * (190.0 / 230.0), r.size.x / 2.0)
-	var mcol := Color(Art.PLATE_STEEL, 0.5 * a)
-	draw_texture_rect(Art.tex("plate_metal_l"), Rect2(r.position, Vector2(cap, r.size.y)), false, mcol)
-	if r.size.x > cap * 2.0:
-		draw_texture_rect(Art.tex("plate_metal_c"),
-			Rect2(r.position + Vector2(cap, 0.0), Vector2(r.size.x - cap * 2.0, r.size.y)), false, mcol)
-	draw_texture_rect(Art.tex("plate_metal_r"),
-		Rect2(r.position + Vector2(r.size.x - cap, 0.0), Vector2(cap, r.size.y)), false, mcol)
+	draw_texture_rect(Art.tex("fx_softspot"), r.grow_individual(30.0, 6.0, 30.0, 6.0), false,
+		Color(Art.PRINT_INK, 0.62 * a))
+	var rule_col := Color(Art.PLATE_STEEL, 0.5 * a)
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(r.position.x - 30.0, r.position.y, r.size.x + 60.0, 2.0),
+		false, rule_col)
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(r.position.x - 30.0, r.end.y - 2.0, r.size.x + 60.0, 2.0),
+		false, rule_col)
 
 
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false) -> void:
