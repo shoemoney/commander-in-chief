@@ -251,6 +251,12 @@ var _run_vp_gain := 0            # endless-meta-retention: VP this run actually 
 var _run_had_down := false       # any player went down this run — gates the NO_DEATH_WIN achievement
 var _down_frames := 0            # sustained all-players-down → debrief
 var _debrief := false
+## honesty: the War Chest is converted to score and ZEROED on the same tick the
+## sim sets `victory`, so the result card's live `sim.war_chest` read was always
+## 0¢. The victory event now carries the pre-zero chest; latch it here.
+var _boost_max: Dictionary = {}   # per-player: the boost_ticks THIS boost started at (see the surge ring)
+var _victory_banked := 0
+var _victory_banked_score := 0
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
@@ -1441,6 +1447,9 @@ func _reset() -> void:
 	_run_vp_gain = 0   # endless-meta-retention: a fresh run starts with no VP banked yet
 	_down_frames = 0
 	_debrief = false
+	_boost_max.clear()
+	_victory_banked = 0
+	_victory_banked_score = 0
 	_fire_swallow = true   # a SPACE/Enter/LMB redeploy press must not open the run firing
 	_warn_p2_pad()   # after _banners.clear(), so the warning survives the reset
 
@@ -2466,15 +2475,26 @@ func _consume_events() -> void:
 				# A disciplined, deathless checkpoint clear — gold payoff + sting,
 				# louder as the clean-gate streak compounds.
 				var fm: int = ev.get("mult", 1)
-				var ftxt := "FLAWLESS  +%d¢  +%d" % [50 * fm, 2000 * fm]
+				# honesty: this hardcoded 50*mult coin. The GATE path pays that; the
+				# COLOSSUS path fires the same event and credits NO coin at all (the
+				# chest is converted to score seconds later), so a deathless finale
+				# advertised 50/100/150¢ that never arrived. Read the amounts off the
+				# event and drop the coin clause when the sim paid none.
+				var fcoin: int = int(ev.get("coin", 50 * fm))
+				var fscore: int = int(ev.get("score", 2000 * fm))
+				var fpay := ("  +%d¢  +%d" % [fcoin, fscore]) if fcoin > 0 else ("  +%d" % fscore)
+				var ftxt := "FLAWLESS" + fpay
 				if fm > 1:
-					ftxt = "FLAWLESS x%d  +%d¢  +%d" % [fm, 50 * fm, 2000 * fm]
+					ftxt = "FLAWLESS x%d" % fm + fpay
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.016, "text": ftxt, "col": Color(1.0, 0.92, 0.45)})
 				_sfx.play("buy_fanfare", -3.0, 1.0 + fm * 0.06)   # a2-16: flawless-streak milestone
 			"avenge":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.03, "text": "AVENGED +5¢", "col": Color(0.7, 0.9, 1.0)})
+					# honesty: was a hardcoded "+5¢"; endless scales it +5 per wave/5 step
+					# (55 by wave 50), so the callout under-reported its own payout.
+					"rate": 0.03, "text": "AVENGED +%d¢" % int(ev.get("coin", 5)),
+					"col": Color(0.7, 0.9, 1.0)})
 				_sfx.play("avenge", -5.0)
 			"surge":
 				_vo("vo_surge", 0, 900)
@@ -2630,7 +2650,11 @@ func _consume_events() -> void:
 				_sfx.play("wave_clear", -4.0, 1.3)
 			"wave_flawless":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Art.safe(Color(0.5, 1.0, 0.7))})
+					"rate": 0.015, "col": Art.safe(Color(0.5, 1.0, 0.7)),
+					# honesty: this read a hardcoded "+40¢". The bonus rides
+					# _econ_scale, so the sim pays 40 + 10*(wave/3) — 140 by wave 30.
+					# Read the amounts the sim actually banked, off the event.
+					"text": "CLEAN WAVE  +%d¢  +%d" % [int(ev.get("coin", 40)), int(ev.get("score", 1500))]})
 				_sfx.play("buy_fanfare", -3.0, 1.1)   # a2-16: CLEAN WAVE milestone
 			"courier_escape":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
@@ -3360,6 +3384,8 @@ func _ev_vest_break(ev: Dictionary) -> void:
 
 
 func _ev_victory(ev: Dictionary) -> void:
+	_victory_banked = int(ev.get("banked", 0))
+	_victory_banked_score = int(ev.get("banked_score", 0))
 	_trauma = 1.0
 	_flash_alpha = 0.6
 	_punch = maxf(_punch, 0.18)   # the run's one win-state finally out-hits a common kill
@@ -3406,7 +3432,7 @@ func _check_boss_intro() -> void:
 	var phase := sim.colossus_phase()
 	if phase > _prev_colossus_phase and phase >= 2:
 		show_banner("COLOSSUS ENRAGED — MORTAR VOLLEYS" if phase == 2
-			else "COLOSSUS CRITICAL — SAPPERS OUT", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
+			else "COLOSSUS CRITICAL — TROOP DROPS", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
 		# 0.65, NOT 0.7: the alarm ladder's exact pitch IS the threat identity
 		# (sfx.gd _LADDERED) and 0.7 is elite_windup's recurring incoming-attack
 		# cue — same class of collision pilot_down already fixed. 0.65 is an
@@ -6155,6 +6181,7 @@ func _draw_terrain() -> void:
 		draw_texture_rect(Art.tex("fx_shadow"), Rect2(lm_pos - Vector2(20, 8), Vector2(40, 20)),
 			false, Color(0.1, 0.08, 0.05, 0.5))
 		_spr("radio_tower", lm_pos, 0.0, 1.1, Color(0.85, 0.88, 0.85))
+		_draw_mast_hazard(lm_pos)
 		# (Quadrant rocks now live in sim.rocks — real cover draws itself.)
 		# World-anchored grass tiling, darkened toward jungle; deterministic dirt
 	# patches and tree lines from a cell hash (decor only, not sim state).
@@ -6937,6 +6964,38 @@ func _draw_vents() -> void:
 				Color(1.0, 0.5, 0.15, 0.35 + 0.45 * wt), 1.6)
 
 
+func _draw_mast_hazard(mp: Vector2) -> void:
+	## honesty: the endless mast's 120px one-shot zone was drawn ONLY by two
+	## one-shot event FX, and both lied.
+	##   * `mast_warn` spawned a `tex` card with sz 240, grow -0.3 — a ring that
+	##     SHRANK 120px -> 84px over a kill radius that is a constant 120. That is
+	##     the exact defect _draw_vents was rewritten to fix, on a bigger hazard.
+	##   * its life is 1/rate = 1/0.02 = 50 ticks against a 90-tick MAST_WARN_TICKS
+	##     lead, and alpha fades as (1-t)^1.5, so it was gone well before the jet.
+	##   * during the 60 lethal MAST_JET_TICKS the only draws were a 22-tick
+	##     shockwave and a 12-tick light — ~38 ticks of instadeath with NOTHING
+	##     on screen.
+	## Fixed the way the vent is: re-derive the sim's own phase every frame (no
+	## state, no event, cannot drift), warn ring closes onto the kill radius from
+	## OUTSIDE it, and the jet draws its true edge for its whole lethal window.
+	if sim.wave < 5 or sim.wave % 5 != 0:
+		return   # same guard as _step_mast_hazard — no hazard, no telegraph
+	var phase: int = posmod(sim.tick_count - sim.wave_start_tick, SimWorld.MAST_CYCLE_TICKS)
+	var jet_at: int = SimWorld.MAST_CYCLE_TICKS - SimWorld.MAST_JET_TICKS
+	var hr := float(SimWorld.MAST_HAZARD_RADIUS) * PX
+	if phase >= jet_at:
+		# JET: the lethal edge, drawn for every one of its MAST_JET_TICKS.
+		var jf := 0.75 + 0.25 * Art.pulse(0.035)
+		Art.circle(self, mp, hr, Color(1.0, 0.4, 0.12, 0.16 * jf))
+		Art.arc(self, mp, hr, 0, TAU, 48, Color(1.0, 0.55, 0.15, 0.75 * jf), 2.0)
+		Art.circle(self, mp, hr * 0.35, Color(1.0, 0.65, 0.25, 0.22 * jf))
+	elif phase >= jet_at - SimWorld.MAST_WARN_TICKS:
+		# WARN: ring closes from 1.4x the kill radius ONTO it — never inside it.
+		var wt := float(phase - (jet_at - SimWorld.MAST_WARN_TICKS)) / float(SimWorld.MAST_WARN_TICKS)
+		Art.arc(self, mp, hr * (1.4 - 0.4 * wt), 0, TAU, 44,
+			Color(1.0, 0.5, 0.15, 0.28 + 0.42 * wt), 1.8)
+
+
 func _draw_barrels() -> void:
 	for bl in sim.barrels:
 		if not bl["armed"]:
@@ -7661,15 +7720,28 @@ func _draw_enemies() -> void:
 			if gwu > 0:
 				var gf := 1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)
 				Art.circle(self, epos + Vector2(0, -6), 2.0 + gf * 3.0, Color(1.0, 0.7, 0.2, 0.4 + gf * 0.5))
-				# Where the mortar lands: a faint amber ground ring at the LIVE
+				# Where the mortar lands: faint amber ground rings at the LIVE
 				# target (the grenadier re-aims at fire time, so following it is
 				# honest), sized to the real kill footprint and filling as the lob
 				# nears — hands straight off to the strike telegraph on fire.
+				# honesty: this drew ONE 28px ring under the player. The sim lobs
+				# THREE (_step_grenadier): centre, and a pair offset
+				# +/-GRENADIER_CLUSTER_SPREAD PERPENDICULAR to the firing line. The
+				# real footprint is a ~116px-wide bar across that line, so the one
+				# drawn ring taught the exactly-wrong dodge — stepping sideways off
+				# it walks into an outer lob. The sim's own comment says the dodge
+				# is "running the line lengthwise"; now the telegraph shows it.
 				if not target.is_empty():
+					var gdir := Vector2(float(target["x"] - e["x"]), float(target["y"] - e["y"]))
+					var gperp := Vector2.ZERO
+					if gdir.length() > 1.0:
+						gperp = Vector2(-gdir.y, gdir.x).normalized() \
+							* (float(SimWorld.GRENADIER_CLUSTER_SPREAD) * PX)
 					var mtp := _to_screen(target["x"], target["y"])
 					var mr := SimWorld.GRENADE_RADIUS * PX
-					Art.arc(self, mtp, mr, 0, TAU, 28, Color(1.0, 0.6, 0.15, 0.12 + gf * 0.35), 1.5)
-					Art.arc(self, mtp, mr * gf, 0, TAU, 24, Color(1.0, 0.55, 0.1, 0.15 + gf * 0.4), 1.5)
+					for glob in [mtp - gperp, mtp, mtp + gperp]:
+						Art.arc(self, glob, mr, 0, TAU, 28, Color(1.0, 0.6, 0.15, 0.12 + gf * 0.35), 1.5)
+						Art.arc(self, glob, mr * gf, 0, TAU, 24, Color(1.0, 0.55, 0.1, 0.15 + gf * 0.4), 1.5)
 			var gsw := (1.0 + (1.0 - float(gwu) / float(SimWorld.GRENADIER_WINDUP_TICKS)) * 0.14) if gwu > 0 else 1.0
 			_spr("m_soldier2", epos, face, 0.52 * gsw, Color(1.3, 1.1, 0.55))   # amber lobber, own silhouette
 		elif e["kind"] == "drone":
@@ -7679,6 +7751,12 @@ func _draw_enemies() -> void:
 			var dwu: int = e.get("windup", 0)
 			var hb := sin(float(Engine.get_physics_frames()) * 0.11 + float(eidx) * 1.7) * 1.5
 			# Shadow breathes opposite the bob — higher drone, smaller/fainter shadow.
+			# honesty: the body draws at epos+(0,-5+hb) but the drone contact-KILLS at
+			# epos, and the only ground mark was a 4px disc offset a further +8y — so
+			# the lethal point had nothing on it. Mark it at ENEMY_TOUCH_RADIUS, on
+			# the spot the sim actually tests, under the elevated hull.
+			Art.circle(self, epos, float(SimWorld.ENEMY_TOUCH_RADIUS) * PX,
+				Color(0.9, 0.25, 0.15, 0.10 + hb * 0.02))
 			Art.circle(self, epos + Vector2(3.0, 8.0), 4.0 - hb * 0.5, Color(0, 0, 0, 0.18 - hb * 0.03))
 			if dwu > 0:
 				var df := 1.0 - float(dwu) / float(SimWorld.DRONE_WINDUP_TICKS)
@@ -7694,8 +7772,18 @@ func _draw_enemies() -> void:
 						Color(0, 0, 0, 0.3 + df * 0.25), 1.0, 6.0)
 					Art.dashed_line(self, epos + Vector2(0, -5.0 + hb), dtp,
 						Color(1.0, 0.7, 0.25, 0.35 + df * 0.35), 1.0, 6.0)
-					Art.arc(self, dtp, 9.0 + df * 3.0, 0, TAU, 14,
-						Color(1.0, 0.7, 0.25, 0.3 + df * 0.4), 1.2)
+					# honesty: this ring was a hardcoded 9->12px, GROWING, over a
+					# paint that lands a GRENADE_RADIUS (28px) kill circle — you
+					# could stand a clear 16px outside everything drawn and still
+					# die. Its sibling (the grenadier, above) already reads the sim
+					# constant; this one is now the same true footprint, filling
+					# toward its edge as the paint completes instead of growing
+					# toward a number the sim never uses.
+					var dr := SimWorld.GRENADE_RADIUS * PX
+					Art.arc(self, dtp, dr, 0, TAU, 28,
+						Color(1.0, 0.7, 0.25, 0.2 + df * 0.4), 1.2)
+					Art.arc(self, dtp, dr * df, 0, TAU, 24,
+						Color(1.0, 0.65, 0.2, 0.15 + df * 0.4), 1.2)
 				Art.circle(self, epos + Vector2(0, -8.0 + hb), 2.0 + df * 3.0,
 					Color(1.0, 0.7, 0.2, 0.4 + df * 0.5))
 			_spr("m_drone", epos + Vector2(0, -5.0 + hb), face, 0.5, Color(1.15, 1.25, 1.35))
@@ -7729,9 +7817,16 @@ func _draw_enemies() -> void:
 				var t_left := float(t_lunge) / float(SimWorld.TECHNICAL_CHARGE_TICKS)
 				# Dark under-line (the drone-tether under-lay idiom) so the thin
 				# red-orange corridor survives bright grass.
-				Art.line(self, epos + Vector2(1, 1), epos + t_dir * (t_lunge * 3.0 * PX) + Vector2(1, 1),
+				# honesty: remaining travel is TICKS x px-per-tick. This used a
+				# hardcoded 3 px/tick with a spurious PX factor on top (PX converts
+				# FIXED->px; that product was already in px), so the whole corridor
+				# drew 150/65536 = 0.002 px long — the "sidestep this lane" promise
+				# never rendered at all. Derive the per-tick distance from the sim
+				# constant so it cannot drift again. Pinned by test_view_honesty.
+				var t_travel := float(t_lunge) * float(SimWorld.TECHNICAL_SPEED) * PX
+				Art.line(self, epos + Vector2(1, 1), epos + t_dir * t_travel + Vector2(1, 1),
 					Color(0, 0, 0, 0.3), 1.5)
-				Art.line(self, epos, epos + t_dir * (t_lunge * 3.0 * PX),
+				Art.line(self, epos, epos + t_dir * t_travel,
 					Color(1.0, 0.4, 0.25, 0.2 + t_left * 0.35), 1.5)
 				Art.line(self, epos - t_dir * 14.0, epos - t_dir * 26.0,
 					Color(0.85, 0.8, 0.7, 0.45), 2.0)
@@ -8100,7 +8195,11 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> void:
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
-const COLOSSUS_PHASE_NAMES := ["ADVANCE", "MORTAR VOLLEYS", "SAPPERS OUT"]
+# honesty: phase 3 was named "SAPPERS OUT" — the persistent label under the boss
+# bar for the whole final phase of the final fight. The sim spawns _spawn_enemy(...,
+# false) there, which builds kind "rusher"; NO sapper reaches the Foundry at all
+# (SECTOR_SPECIALS[5] has none). It taught mine-avoidance against a charge.
+const COLOSSUS_PHASE_NAMES := ["ADVANCE", "MORTAR VOLLEYS", "TROOP DROPS"]
 
 
 func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "gunship_body") -> void:
@@ -8142,14 +8241,22 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# at this tier, so none of them can advertise a volley shape the boss does
 	# not have.
 	var mticks: Array = SimWorld.boss_mortar_ticks(sim.wave / 5)
-	# Spray telegraph (8v): the chin turret charges over the last 6 ticks of
-	# each 12-tick spray interval, and a faint aim hint restores the danger
-	# gradient at close range (information, so it survives reduce-motion).
+	# Spray telegraph (8v): the chin turret charges over the back HALF of each
+	# spray interval, and a faint aim hint restores the danger gradient at close
+	# range (information, so it survives reduce-motion).
+	# honesty: this counted a flat BOSS_SPRAY_INTERVAL_TICKS (12), but the sim's
+	# cadence TIGHTENS with tier (12/12/10/8/6). From endless wave 10 the charge
+	# swell and the white muzzle pop were on a different clock than the rounds —
+	# at wave 20 the boss fired twice per cue. Read the sim's own cadence, and
+	# scale the charge window with it so the swell still lands ON the shot.
 	if pt < SimWorld.BOSS_STRAFE_TICKS:
-		var sk := pt % SimWorld.BOSS_SPRAY_INTERVAL_TICKS
+		var spray_iv: int = SimWorld.boss_spray_interval(sim.wave / 5)
+		var sk := pt % spray_iv
+		var charge_at: int = spray_iv / 2   # back half of the interval, whatever the tier
 		var chin := bpos + Vector2(0, 20)
-		if sk >= 6 or _motion < 0.5:
-			var ca := 0.3 if _motion < 0.5 else (float(sk - 6) / 5.0) * 0.6
+		if sk >= charge_at or _motion < 0.5:
+			var ca := 0.3 if _motion < 0.5 else \
+				(float(sk - charge_at) / float(maxi(1, spray_iv - 1 - charge_at))) * 0.6
 			Art.circle(self, chin, 3.5, Color(1.0, 0.6, 0.3, ca))
 		if sk == 0:
 			Art.circle(self, chin, 6.0, Color(1, 1, 1, 0.85))
@@ -8764,7 +8871,12 @@ func _draw_players() -> void:
 			# Reduce-motion: steady ring + static spokes (the pulse/rotation was the
 			# one aura in this file ignoring the gate).
 			if p["boost_ticks"] > 0:
-				var bo_frac: float = clampf(float(p["boost_ticks"]) / float(SimWorld.BAIL_BOOST_TICKS * 2), 0.0, 1.0)
+				# Denominator was always BAIL_BOOST_TICKS*2 (180), but that is only the x20
+				# SURGE max — a tank bail grants BAIL_BOOST_TICKS (90), so the common case
+				# opened its ring at half-full and never filled. Track the max this boost
+				# actually started at.
+				_boost_max[i] = maxf(_boost_max.get(i, 0.0), float(p["boost_ticks"]))
+				var bo_frac: float = clampf(float(p["boost_ticks"]) / maxf(1.0, _boost_max[i]), 0.0, 1.0)
 				var bo_ph := float(Engine.get_physics_frames() + i * 17)
 				var bo_pulse := 1.0 if _motion < 0.5 else 0.5 + 0.5 * sin(bo_ph * 0.45)
 				var bo_spin := 0.0 if _motion < 0.5 else bo_ph * 0.08
@@ -8809,13 +8921,14 @@ func _draw_players() -> void:
 				_spr("wep_claymore", gpos, 0.0, 1.05, Color(1, 1, 1, 0.28))
 				Art.arc(self, gpos, 9.0, 0, TAU, 12, Art.safe(Color(0.5, 0.95, 0.7, 0.35)), 1.0)
 			if aim.length_squared() > 0.01 and p["roll_ticks"] == 0:
-				# Heat-bloom: the crosshair spreads with sustained fire (the
-				# barrel-heat mechanic, made visible at the point of attention).
-				# Quantized to whole pixels — a continuously-varying float bloom
-				# resamples the nearest-filtered reticle art at a non-integer ratio.
-				var bloom := roundf((_heat[i] if i < _heat.size() else 0.0) * 5.0)
-				var rrect := Rect2(pos + aim * 27.0 - Vector2(8 + bloom, 8 + bloom),
-					Vector2(16 + bloom * 2.0, 16 + bloom * 2.0))
+				# honesty: this used to SPREAD the crosshair up to 5px with sustained
+				# fire, captioned "the barrel-heat mechanic, made visible". There is no
+				# barrel-heat mechanic: _spawn_mg_bullet fires down p["aim_x"/"aim_y"]
+				# exactly, with no jitter and no heat term anywhere in the sim, so a
+				# widening reticle advertised an accuracy penalty the player never paid
+				# — and taught them to stop holding the trigger for nothing. `_heat`
+				# still drives rumble and muzzle heat, which claim feel, not precision.
+				var rrect := Rect2(pos + aim * 27.0 - Vector2(8, 8), Vector2(16, 16))
 				# Bash-in-range tell: dry MG + an enemy in melee reach + off cooldown
 				# → the reticle goes orange and the bash reach ring shows, so you
 				# know the empty-clip counter is LIVE before you press fire.
@@ -10064,7 +10177,7 @@ func _draw_wheel() -> void:
 				0: stock_txt = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
 				1: stock_txt = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
 				2: stock_txt = "VEST ON" if p["vest"] else "NO VEST"
-				4: stock_txt = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
+				4: stock_txt = "%d/%d UP" % [sim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP]
 				5: stock_txt = "%d* HELD" % sim.tokens
 			var stock_empty := stock_txt.begins_with("0/") or stock_txt == "NO VEST"
 			var lblw := Art.tw(lbl, 9)
@@ -10390,8 +10503,11 @@ func _draw_banners(top_msg: String) -> void:
 				"icon_col": vrr.col},
 			{"text": "SCORE  %s" % Art.group_digits(sim.score), "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
-			{"text": "%d¢ WAR CHEST BANKED" % sim.war_chest, "color": Color(1.0, 0.92, 0.55),
-				"icon": "icon_coin", "icon_size": 14.0},
+			# The chest is CONVERTED at 10x and zeroed on the victory tick, so a live
+			# `sim.war_chest` read here was 0 on every win. Say what it turned into.
+			{"text": "%d¢ WAR CHEST BANKED  → +%s" % [_victory_banked,
+				Art.group_digits(_victory_banked_score)],
+				"color": Color(1.0, 0.92, 0.55), "icon": "icon_coin", "icon_size": 14.0},
 		]
 		if sim.mode == "boss_rush":
 			# authored-campaign-and-modes: a distance-pushed line is meaningless

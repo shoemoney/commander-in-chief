@@ -1818,6 +1818,19 @@ func _econ_scale(base: int) -> int:
 	return base + base * _econ_depth() / 4
 
 
+func player_sandbag_count() -> int:
+	## Bags THIS PARTY planted — the population SANDBAG_FIELD_CAP actually caps.
+	## Public because the supply wheel prints "N/CAP UP": it was printing
+	## sandbags.size(), which also counts the arena's authored bags (endless
+	## plants 16 in _init) and the per-wave shop barricades, so the readout sat
+	## at "28/6 UP" — a numerator over a denominator from a different population.
+	var n := 0
+	for pb in sandbags:
+		if pb.get("player", 0) == 1:
+			n += 1
+	return n
+
+
 func _supply_cost(kind: int) -> int:
 	## Prices creep with depth so a fat late chest still faces a real spend
 	## decision — income scales with depth, so the shop must scale with it too,
@@ -1898,10 +1911,7 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return
 	var cost: int = _supply_cost(kind)
-	var player_bags := 0
-	for pb in sandbags:
-		if pb.get("player", 0) == 1:
-			player_bags += 1
+	var player_bags := player_sandbag_count()
 	if kind == 4 and (player_bags >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
 		# Sandbag-specific denials: field cap reached, or buying from a tank
 		# (no hands on the deck to dig in). Deny is loud AND says why —
@@ -2541,11 +2551,14 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 		coin = 0
 		no_coin = true
 		no_score = true
-	if e.get("marked", false):
-		coin *= 3   # bounty target pays triple (chest + score)
-		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
 	if has_mod(4):
 		coin *= 2   # PAYDAY wave: every bounty doubles
+	if e.get("marked", false):
+		coin *= 3   # bounty target pays triple (chest + score)
+		# Emitted AFTER the PAYDAY doubling (it used to sit between the two, so the
+		# "BOUNTY +N¢" pop under-reported itself by exactly half on every PAYDAY
+		# wave). Multiplication commutes, so the coin actually banked is unchanged.
+		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
 	# kind rides the (checksum-excluded) kill event so the view can spawn a
 	# per-type death throe + corpse — golden-safe.
 	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin,
@@ -2558,8 +2571,11 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 			if not pl["alive"] and _dist_lte(e["x"], e["y"], pl["x"], pl["y"], 60 * F_ONE):
 				# Scales with the same wave/5 step as revive_cost, or deep-endless
 				# revive inflation turns the avenge beat into pocket change.
-				war_chest += 5 + ((wave / 5) * 5 if mode == "endless" else 0)
-				events.append({"t": "avenge", "x": e["x"], "y": e["y"]})
+				var avenge_coin: int = 5 + ((wave / 5) * 5 if mode == "endless" else 0)
+				war_chest += avenge_coin
+				# Ship the amount: the view hardcoded "AVENGED +5¢", true only in
+				# campaign and on endless waves < 5 (it is 55 by wave 50).
+				events.append({"t": "avenge", "x": e["x"], "y": e["y"], "coin": avenge_coin})
 				break
 	# Last Stand doubles the score credit — the finale strips revives, so reward
 	# pushing into the crush radius instead of kiting (War Chest bounty stays flat).
@@ -3600,7 +3616,12 @@ func _step_gates() -> void:
 				var fmult: int = mini(flawless_streak, 3)
 				war_chest += 50 * fmult
 				score += 2000 * fmult
-				events.append({"t": "gate_flawless", "x": SCREEN_CX, "y": g["y"], "mult": fmult})
+				# Ship what was actually credited. The COLOSSUS path fires the same
+				# event with no war_chest line at all (see _damage_colossus), and the
+				# view printed a flat "+50¢ x mult" for both — advertising coin the
+				# finale never pays.
+				events.append({"t": "gate_flawless", "x": SCREEN_CX, "y": g["y"], "mult": fmult,
+					"coin": 50 * fmult, "score": 2000 * fmult})
 			deaths_since_gate = 0
 			# Guaranteed cache past every checkpoint — the gate-open beat had a big
 			# audiovisual payoff but no mechanical reward; a free grenade/vest crate
@@ -4755,9 +4776,15 @@ func _step_waves(inputs: Array = []) -> void:
 			# same helper now, so price inflation can never erode it into a
 			# rounding error (nor outrun it). Value-identical to the old
 			# `40 + (wave/3)*10`; that expression IS 25%-of-base per depth step.
-			war_chest += _econ_scale(40)
+			var clean_coin: int = _econ_scale(40)
+			war_chest += clean_coin
 			score += 1500
-			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
+			# Ship the AMOUNTS on the event (gate_flawless already ships "mult").
+			# The view hardcoded "+40¢" — true only on wave 2, the one wave this
+			# bonus can first pay; by wave 30 the sim pays 140 and the callout
+			# still said 40. Events are checksum-excluded, so this is golden-safe.
+			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE,
+				"coin": clean_coin, "score": 1500})
 		var shop_y: int = camera_top + 120 * F_ONE
 		# DRAW 3 FROM CRATE_POOL (partial Fisher-Yates on the seeded SimRng): both
 		# WHICH crates are offered and which slot they land in change every wave, so
@@ -5201,7 +5228,9 @@ func _step_colossus() -> void:
 			colossus["core_open"] = COLOSSUS_CORE_OPEN_TICKS
 			events.append({"t": "core_open", "x": colossus["x"], "y": colossus["y"]})
 
-	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: sapper drops.
+	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: infantry drops
+	# (_spawn_enemy -> "rusher"; this comment said "sapper" and the HUD label
+	# copied it, naming an enemy the finale never fields).
 	colossus["spray_cd"] = colossus["spray_cd"] - 1
 	if colossus["spray_cd"] <= 0 and not _concealed(target):   # can't aim into smoke (descent continues)
 		colossus["spray_cd"] = COLOSSUS_SPRAY_CD_TICKS
@@ -5266,7 +5295,8 @@ func _damage_colossus(amount: int) -> void:
 		colossus["alive"] = false
 		victory = true
 		events.append({"t": "explosion", "x": colossus["x"], "y": colossus["y"]})
-		events.append({"t": "victory", "x": colossus["x"], "y": colossus["y"]})
+		var vic_ev := {"t": "victory", "x": colossus["x"], "y": colossus["y"]}
+		events.append(vic_ev)
 		# The finale joins the Flawless economy: a deathless Colossus clear pays
 		# the same checkpoint bonus (capped 3×) instead of ending a streak unpaid.
 		if deaths_since_gate == 0:
@@ -5274,10 +5304,20 @@ func _damage_colossus(amount: int) -> void:
 			_mint_token(SCREEN_CX, camera_top + 60 * F_ONE)
 			var fmult: int = mini(flawless_streak, 3)
 			score += 2000 * fmult
-			events.append({"t": "gate_flawless", "x": colossus["x"], "y": colossus["y"], "mult": fmult})
+			# coin: 0 — the finale pays this bonus in SCORE only (the chest is
+			# converted and zeroed below, so coin here would be meaningless).
+			# Shipped explicitly so the view stops printing the gate path's "+50¢".
+			events.append({"t": "gate_flawless", "x": colossus["x"], "y": colossus["y"],
+				"mult": fmult, "coin": 0, "score": 2000 * fmult})
 		# Last Stand payout: the unspent War Chest converts to score.
+		# The result card reads sim.war_chest, which this zeroes on the SAME tick —
+		# so the card said "0¢ WAR CHEST BANKED" on every win ever. Ship the
+		# pre-zero chest and what it converted to on the victory event.
+		var banked: int = war_chest
 		score += war_chest * 10 + 5000
 		war_chest = 0
+		vic_ev["banked"] = banked
+		vic_ev["banked_score"] = banked * 10
 		for g in gates:
 			if g.get("final", false):
 				g["open"] = true
@@ -5305,6 +5345,16 @@ static func boss_mortar_ticks(tier: int) -> Array:
 	if tier == 2:
 		return BOSS_MORTAR_TICKS_T2
 	return BOSS_MORTAR_TICKS
+
+
+static func boss_spray_interval(tier: int) -> int:
+	## Ticks between strafe-act chin-turret rounds at `tier` (= wave / 5). The
+	## cadence tightens 12 -> 6 with depth. Extracted (boss_mortar_ticks
+	## precedent) because the VIEW's charge/pop telegraph was hardcoded to the
+	## flat BOSS_SPRAY_INTERVAL_TICKS 12: from wave 10 the boss fired on a 10/8/6
+	## clock while the muzzle cue kept popping every 12, so most rounds left the
+	## chin with no charge-up at all. Pure arithmetic, no state — goldens unmoved.
+	return maxi(6, BOSS_SPRAY_INTERVAL_TICKS - 2 * maxi(0, tier - 1))
 
 
 func _step_one_boss(boss: Dictionary) -> void:
@@ -5350,7 +5400,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 	if t < BOSS_STRAFE_TICKS:
 		# Strafe run: spray tightens with depth (jitter 40px -> 16px by w20,
 		# cadence 12t -> 6t; starting values, staged-tier test asserts both).
-		var spray_iv: int = maxi(6, BOSS_SPRAY_INTERVAL_TICKS - 2 * maxi(0, tier - 1))
+		var spray_iv: int = boss_spray_interval(tier)
 		if t % spray_iv == 0:
 			var jit: int = maxi(16, 40 - 8 * maxi(0, tier - 1))
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET

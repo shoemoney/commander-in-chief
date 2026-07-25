@@ -2036,17 +2036,17 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 		# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
 		# icon is the non-color channel (pierce+rend both active = twin rifles
 		# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
-		chips.append({"icon": "item_bullet", "txt": "%ds" % (p["pierce_ticks"] / 60 + 1), "col": _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)), "prio": _buff_prio(p["pierce_ticks"])})
+		chips.append({"icon": "item_bullet", "txt": "%ds" % ((p["pierce_ticks"] + 59) / 60), "col": _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)), "prio": _buff_prio(p["pierce_ticks"])})
 	if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
-		chips.append({"icon": "wep_shotgun", "txt": "%ds" % (p["spread_ticks"] / 60 + 1), "col": _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)), "prio": _buff_prio(p["spread_ticks"])})
+		chips.append({"icon": "wep_shotgun", "txt": "%ds" % ((p["spread_ticks"] + 59) / 60), "col": _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)), "prio": _buff_prio(p["spread_ticks"])})
 	if p["triple"]:
 		chips.append({"icon": "wep_mg", "txt": "x3", "col": Color(1.0, 0.6, 0.9), "prio": BUFF_PRIO_PERSIST})
 	if p["rend_ticks"] > 0:
 		# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
 		# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
-		chips.append({"icon": "icon_rend", "txt": "%ds" % (p["rend_ticks"] / 60 + 1), "col": _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)), "prio": _buff_prio(p["rend_ticks"])})
+		chips.append({"icon": "icon_rend", "txt": "%ds" % ((p["rend_ticks"] + 59) / 60), "col": _buff_col(p["rend_ticks"], Color(1.0, 0.55, 0.4)), "prio": _buff_prio(p["rend_ticks"])})
 	if p["smoke_ticks"] > 0:
-		chips.append({"icon": "wep_smoke", "txt": "%ds" % (p["smoke_ticks"] / 60 + 1), "col": _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)), "prio": _buff_prio(p["smoke_ticks"])})
+		chips.append({"icon": "wep_smoke", "txt": "%ds" % ((p["smoke_ticks"] + 59) / 60), "col": _buff_col(p["smoke_ticks"], Color(0.8, 0.85, 0.9)), "prio": _buff_prio(p["smoke_ticks"])})
 	# Carried claymore charges: a count, not a countdown — and the verb
 	# glyph rides along so "how do I plant this" never dead-ends here.
 	if p["claymores"] > 0:
@@ -2349,7 +2349,10 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 		return px
 	if p["broke_timer"] > 0:
 		# A free rescue is already ticking — say so, or it reads as death.
-		var rtxt := "RALLYING %ds" % (p["broke_timer"] / 60 + 1)
+		# ceil, not t/60+1: the latter over-reports by a whole second at every exact
+		# multiple of 60 (300t read "6s" for a 5.0s timer, while the world label on
+		# the same timer read "5.0s"). (t+59)/60 is the idiom the rest of this file uses.
+		var rtxt := "RALLYING %ds" % ((p["broke_timer"] + 59) / 60)
 		if not _row_fits(px, _tw(rtxt)):
 			return _row_ovf(px, ry)
 		_text(rtxt, px, ty, Color(0.6, 0.85, 1.0))
