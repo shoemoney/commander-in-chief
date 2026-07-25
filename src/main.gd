@@ -1633,13 +1633,17 @@ func _flush_bests() -> void:
 	# rollover) and _exit_tree (covers app quit).
 	var sections := {}
 	if _best_dirty:
-		_best_dirty = false
 		sections["best"] = {"score": best_score, "wave": best_wave, "dist": best_dist}
 	if _seen_dirty:
-		_seen_dirty = false
 		sections["seen"] = {"hints": _seen}
-	if not sections.is_empty():
-		_persist(sections)
+	if sections.is_empty():
+		return
+	# save-integrity: clear the dirty flags only once the write actually LANDED.
+	# Clearing them up front turned a failed save into a silent no-op that never
+	# retried — the next _flush_bests saw nothing dirty and skipped the disk.
+	if _persist(sections) == OK:
+		_best_dirty = false
+		_seen_dirty = false
 
 
 func _exit_tree() -> void:
@@ -3316,32 +3320,56 @@ func _check_boss_intro() -> void:
 		_prev_colossus_phase = phase
 
 
-func _save_cfg(cf: ConfigFile) -> void:
+func _save_cfg(cf: ConfigFile) -> Error:
 	# Atomic, crash-safe write: a mid-save crash must never corrupt the single
 	# ikari_best.cfg (= total progress wipe). Write to .tmp; on success snapshot
 	# the current real file to .bak, then atomically rename .tmp over the real
 	# path. rename_absolute is an OS rename — atomic on the same filesystem.
+	# Returns OK only when the rename actually landed: callers hold dirty flags
+	# (and thus a retry) until then, so a failed write is never a silent no-op.
 	if cf.save(SAVE_TMP) != OK:
 		push_warning("ikari: config save failed")
-		return
+		return FAILED
+	# save-integrity: refresh the .bak ONLY from a primary that still PARSES.
+	# Copying a corrupt primary over the backup destroyed the last good save in
+	# the very call that was supposed to be able to recover from it.
 	if FileAccess.file_exists(SAVE_PATH):
-		DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
-	DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
+		if ConfigFile.new().load(SAVE_PATH) == OK:
+			var cerr := DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
+			if cerr != OK:
+				push_warning("ikari: config backup copy failed (%d)" % cerr)   # not fatal: the primary write below still stands
+		else:
+			push_warning("ikari: primary save is corrupt — keeping the older .bak snapshot")
+	var err := DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
+	if err != OK:
+		push_warning("ikari: config rename failed (%d)" % err)
+	return err
 
 
-func _persist(sections: Dictionary) -> void:
+# save-integrity: THE read side of every read-merge-write. A primary that fails
+# to parse must NOT silently become an empty ConfigFile — merging into one and
+# saving drops every section the caller doesn't rewrite (a _persist({"settings"})
+# would erase [hall]/[best]/[life]/[meta]). Fall back to the .bak snapshot, the
+# same ladder _load_bests walks.
+func _load_cfg_for_merge() -> ConfigFile:
+	var cf := ConfigFile.new()
+	if cf.load(SAVE_PATH) != OK:
+		cf.load(SAVE_BAK)
+	return cf
+
+
+func _persist(sections: Dictionary) -> Error:
 	# Shared load-then-merge-then-save boilerplate: load first so sibling
 	# sections ([best]/[hall]/[seen]/[settings]) already on disk never get
 	# clobbered by a save that only knows about its own section. Takes
 	# {section: {key: value}} so multiple dirty sections share ONE disk dance
 	# (an R-restart with best+seen both dirty used to pay the 4-op load/tmp/
 	# bak/rename twice back-to-back on the keypress frame).
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
+	var cf := _load_cfg_for_merge()
 	for section in sections:
 		for k in sections[section]:
 			cf.set_value(section, k, sections[section][k])
-	_save_cfg(cf)
+	return _save_cfg(cf)
 
 
 # endless-meta-retention: spend banked Veteran Points on the NEXT tier of a
@@ -3363,6 +3391,24 @@ func buy_perk(id: String) -> bool:
 	_perk_levels[id] = lvl + 1
 	_persist({"meta": {"vp": vet_points, "levels": _perk_levels}})
 	return true
+
+
+# save-integrity: every scalar read in _load_bests goes through these. The target
+# fields are inferred-type (`var best_score := 0`, `var _perk_levels: Dictionary`),
+# so a wrong-typed value from a partially corrupt file throws a runtime error on
+# ASSIGNMENT and aborts the rest of _load_bests — _apply_settings never runs, and
+# the zeroed in-memory state is then written back over the still-good save on the
+# next flush. Same defensive shape the hall.runs rebuild below already uses: a bad
+# value costs only that one field. A bare float is accepted (ConfigFile can widen
+# an int on some round-trips); anything else falls back to the ship default.
+func _cfg_int(cf: ConfigFile, section: String, key: String, def: int) -> int:
+	var v: Variant = cf.get_value(section, key, def)
+	return int(v) if (v is int or v is float) else def
+
+
+func _cfg_dict(cf: ConfigFile, section: String, key: String) -> Dictionary:
+	var v: Variant = cf.get_value(section, key, {})
+	return v if v is Dictionary else {}
 
 
 func _load_bests() -> void:
@@ -3403,12 +3449,12 @@ func _load_bests() -> void:
 		_pad_binds = [overlay_binds(PAD_DEFAULTS, saved_pad, -1, JOY_BUTTON_MAX - 1),
 			overlay_binds(PAD_DEFAULTS, saved_pad2, -1, JOY_BUTTON_MAX - 1)]
 		_menu_binds = overlay_binds(MENU_BIND_DEFAULTS, saved_menu, 0)
-		best_score = cf.get_value("best", "score", 0)
-		best_wave = cf.get_value("best", "wave", 0)
-		best_dist = cf.get_value("best", "dist", 0)
-		last_run_score = cf.get_value("replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
-		replay_watched_score = cf.get_value("replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
-		_seen = cf.get_value("seen", "hints", {})
+		best_score = _cfg_int(cf, "best", "score", 0)
+		best_wave = _cfg_int(cf, "best", "wave", 0)
+		best_dist = _cfg_int(cf, "best", "dist", 0)
+		last_run_score = _cfg_int(cf, "replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
+		replay_watched_score = _cfg_int(cf, "replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
+		_seen = _cfg_dict(cf, "seen", "hints")
 		# c4-fix: a type-corrupt "runs" value (wrong element type from an older/newer build or
 		# partial file corruption) makes Array[Dictionary].assign() throw a runtime error and
 		# abort the rest of _load_bests BEFORE _apply_settings runs — silently reverting ALL
@@ -3425,12 +3471,12 @@ func _load_bests() -> void:
 		# collide with a reloaded entry's id (old saves lack hid -> starts at 0).
 		for r in hall:
 			_hall_seq = maxi(_hall_seq, int(r.get("hid", -1)) + 1)
-		_life_runs = cf.get_value("life", "runs", 0)
-		_life_kills = cf.get_value("life", "kills", 0)
-		_life_wins = cf.get_value("life", "wins", 0)
-		_daily_done_seed = cf.get_value("daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
-		vet_points = cf.get_value("meta", "vp", 0)   # endless-meta-retention: persistent perk currency
-		_perk_levels = cf.get_value("meta", "levels", {})   # perk id -> owned tier
+		_life_runs = _cfg_int(cf, "life", "runs", 0)
+		_life_kills = _cfg_int(cf, "life", "kills", 0)
+		_life_wins = _cfg_int(cf, "life", "wins", 0)
+		_daily_done_seed = _cfg_int(cf, "daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
+		vet_points = _cfg_int(cf, "meta", "vp", 0)   # endless-meta-retention: persistent perk currency
+		_perk_levels = _cfg_dict(cf, "meta", "levels")   # perk id -> owned tier
 		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
 		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
 		# push it through the SAME _apply_settings path fresh-install and RESET use —
@@ -4164,8 +4210,7 @@ func _record_run(score: int) -> void:
 		_life_wins += 1
 	# One load+save for hall/life/best together — this lands on the debrief
 	# frame, and each _persist() is a full read/write/backup/rename dance.
-	var cf := ConfigFile.new()
-	cf.load(SAVE_PATH)
+	var cf := _load_cfg_for_merge()
 	cf.set_value("hall", "runs", hall)
 	if _daily:
 		# c2-13: this run WAS a seed-of-the-day — bank the seed ACTUALLY PLAYED
@@ -4187,9 +4232,12 @@ func _record_run(score: int) -> void:
 		cf.set_value("meta", "vp", vet_points)
 		cf.set_value("meta", "levels", _perk_levels)
 	cf.set_value("seen", "hints", _seen)
-	_best_dirty = false
-	_seen_dirty = false
-	_save_cfg(cf)
+	# save-integrity: same rule as _flush_bests — the flags stay dirty unless the
+	# write landed, so a failed save is retried at the next flush instead of
+	# being silently dropped.
+	if _save_cfg(cf) == OK:
+		_best_dirty = false
+		_seen_dirty = false
 	# Called LAST in _record_run, after hall/life/best are both updated in
 	# memory (hall.assign(...) above) AND committed to disk (_save_cfg(cf)
 	# just above) -- so the HALL_TOP_1 check inside _report_to_steam reads
