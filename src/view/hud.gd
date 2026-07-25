@@ -1515,10 +1515,14 @@ static func bottom_band_lift(sim) -> float:
 
 ## The caption scrim's exact rect — the one measurement both the draw and the layout test read,
 ## so a test can't pass against arithmetic the draw doesn't actually use.
-static func caption_bg_rect(line_count: int, widest: float, y_bottom: float) -> Rect2:
-	var y0 := y_bottom - float(line_count - 1) * CAPTION_LINE_H
-	return Rect2(320.0 - widest / 2.0 - 6.0, y0 - CAPTION_BG_ABOVE, widest + 12.0,
-		float(line_count - 1) * CAPTION_LINE_H + CAPTION_BG_ABOVE + CAPTION_BG_BELOW)
+## `line_h` / `above` default to the ship values, so an unscaled caption measures exactly as it
+## always did; TEXT SIZE passes the scaled leading + ascent so a 200% caption's scrim still wraps
+## its glyphs instead of being clipped by a plate sized for 10px type.
+static func caption_bg_rect(line_count: int, widest: float, y_bottom: float,
+		line_h := CAPTION_LINE_H, above := CAPTION_BG_ABOVE) -> Rect2:
+	var y0 := y_bottom - float(line_count - 1) * line_h
+	return Rect2(320.0 - widest / 2.0 - 6.0, y0 - above, widest + 12.0,
+		float(line_count - 1) * line_h + above + CAPTION_BG_BELOW)
 
 
 ## Greedy word-wrap for the caption strip only (menu.gd's screens hand-split their own copy
@@ -1607,13 +1611,20 @@ func _draw_caption() -> void:
 	if a <= 0.0:
 		return
 	var font := Art.font()
-	var lines := _wrap_caption(txt, font, FONT_SIZE, CAPTION_MAX_W)
+	# accessibility: subtitles are the one HUD element a player may be reading INSTEAD of hearing
+	# the game, so TEXT SIZE scales them. Wrap, measure, leading, scrim and draw all key off this
+	# ONE resolved size, so a scaled caption re-wraps to the same CAPTION_MAX_W box (it grows
+	# downward in line count, never sideways past the frame) and its plate grows with it.
+	var cs := Art.fs(FONT_SIZE)
+	var line_h := CAPTION_LINE_H * float(cs) / float(FONT_SIZE)
+	var lines := _wrap_caption(txt, font, cs, CAPTION_MAX_W)
 	var y_bottom := VERB_LEGEND_Y - 20.0 - bottom_band_lift(main.get("sim"))
-	var y0 := y_bottom - float(lines.size() - 1) * CAPTION_LINE_H
+	var y0 := y_bottom - float(lines.size() - 1) * line_h
 	var w := 0.0
 	for ln in lines:
-		w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x)
-	var bg := caption_bg_rect(lines.size(), w, y_bottom)
+		w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, cs).x)
+	var bg := caption_bg_rect(lines.size(), w, y_bottom, line_h,
+		CAPTION_BG_ABOVE * float(cs) / float(FONT_SIZE))
 	# audio-identity (judge follow-up): a higher-contrast scrim than the old flat 0.7-alpha fill —
 	# a near-opaque near-black backing plus a thin keyline tinted to the line's own role color
 	# (radio-blue / dry-amber) so the strip stays readable over bright, busy gameplay (particles,
@@ -1636,7 +1647,7 @@ func _draw_caption() -> void:
 	draw_texture_rect(Art.tex("fx_softspot"), Rect2(soft.position.x, soft.end.y - 1.0, soft.size.x, 2.0),
 		false, Color(col.r, col.g, col.b, 0.45 * a))
 	for i in lines.size():
-		Art.text_center(self, lines[i], 320.0, y0 + float(i) * CAPTION_LINE_H, FONT_SIZE, Color(col.r, col.g, col.b, a))
+		Art.text_center(self, lines[i], 320.0, y0 + float(i) * line_h, cs, Color(col.r, col.g, col.b, a))
 
 
 ## c1-04: TRANSIENT gameplay-verb reminder — the non-obvious bindings the TITLE

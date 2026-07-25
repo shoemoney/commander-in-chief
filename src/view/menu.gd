@@ -1007,6 +1007,13 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 			# (this row shows ◄/► arrows) AND footer_cycle_segs (its hint reads ADJUST) — no id
 			# special-case anywhere; a future stepper just sets "step": true.
 			{"id": "winscale", "label": winscale_label(main._win_scale if main._fullscreen else main._win_scale_norm()), "destructive": false, "grp": 0, "step": true},
+			# accessibility: TEXT SIZE — a third stepper on the SAME sub-screen, not a new OPTIONS row
+			# (that screen is at its 10-row / >=20px-plate cap). It belongs here beside WINDOW SCALE
+			# because the two are the pair a player reaches for when they can't read something: scale
+			# grows the whole picture, TEXT SIZE grows only the small load-bearing type. Reuses the
+			# "step" schema flag wholesale, so arrows/Enter/footer-hint/help all work with no id
+			# special-case anywhere.
+			{"id": "textscale", "label": textscale_label(main._text_scale), "destructive": false, "grp": 0, "step": true},
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 1},
 		]
 	if mode == Mode.AUDIO:
@@ -1323,6 +1330,14 @@ static func winscale_label(scale: int) -> String:
 	return "WINDOW SCALE: %dx" % scale
 
 
+# accessibility: the TEXT SIZE row label. A percent, not a SMALL/MEDIUM/LARGE word ladder — the
+# rungs are 25% apart and a number says exactly how far the last press moved things, which a
+# player stepping it BECAUSE they can't read the screen needs more than a nicer noun. Short for
+# the same reason winscale_label is: it shares that plate budget. Pure + static so it's pinnable.
+static func textscale_label(pct: int) -> String:
+	return "TEXT SIZE: %d%%" % pct
+
+
 # c1-19: the DISPLAY sub-screen subtitle — the words that keep the short WINDOW SCALE label honest.
 # Windowed: names both controls. Fullscreen: if the stored preference can't fit the current display
 # (effective < pref) it states the limit in plain language ("LIMITED TO 3x ON THIS DISPLAY"), else it
@@ -1330,7 +1345,7 @@ static func winscale_label(scale: int) -> String:
 # where the plate label can't. Pure + static so every wording is headless-pinnable.
 static func disp_subtitle(fullscreen: bool, pref := -1, effective := -1) -> String:
 	if not fullscreen:
-		return "FULLSCREEN & WINDOW SCALE"
+		return "FULLSCREEN, WINDOW SCALE & TEXT SIZE"
 	if pref >= 0 and effective >= 0 and effective != pref:
 		return "LIMITED TO %dx ON THIS DISPLAY" % effective
 	return "WINDOW SCALE APPLIES IN WINDOWED MODE"
@@ -1483,6 +1498,7 @@ func _row_icon(id: String) -> String:
 		"reset_controls": return "mi_reload"
 		"info": return "mi_book"
 		"display", "fullscreen", "winscale": return "mi_camera"
+		"textscale": return "mi_book"   # accessibility: reading aid, same book glyph as CAPTIONS
 		"restart", "reset_defaults": return "mi_reload"
 		"title": return "mi_home"
 		"rumble": return "mi_controller"
@@ -2219,6 +2235,13 @@ func _nav(move: int, hmove: int) -> void:
 		_step_scale(hmove)
 		_mark_dirty()
 		return
+	# accessibility: ◄/► on TEXT SIZE steps the small-label scale one rung, clamped (no wrap) —
+	# same rail-don't-wrap contract as WINDOW SCALE right above, and it applies LIVE so a player
+	# sees the size they're choosing while they choose it.
+	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] == "textscale":
+		_step_text_size(hmove)
+		_mark_dirty()
+		return
 	# Left/right on a toggle row flips it directly — no confirm press needed
 	# (same activation path, so save/sfx behavior stays identical).
 	if hmove != 0 and mode != Mode.HALL and _menu_items()[sel]["id"] in _TOGGLES:
@@ -2376,6 +2399,7 @@ const SETTING_HELP := {
 	"captions": "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVED AUTOMATICALLY.",
 	"fullscreen": "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVED AUTOMATICALLY.",
 	"winscale": "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY.",
+	"textscale": "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVED AUTOMATICALLY.",
 	"coop": "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN.",
 	"hard": "NG+ HARD: A TOUGHER CAMPAIGN SPAWN CURVE. APPLIES TO YOUR NEXT RUN.",
 }
@@ -2769,6 +2793,19 @@ func _step_scale(dir: int) -> void:
 		main._sfx.play("pickup", -14.0, 1.0)
 
 
+# accessibility: TEXT SIZE's counterpart to _step_scale. main owns the bounds (they live with the
+# TEXT_SCALE_* constants) and answers "did it move?"; a railed press bounces the row exactly like a
+# railed WINDOW SCALE press instead of silently doing nothing. Applies live, defers the disk write
+# to the OPTIONS SAVE — this screen shares that dirty session, so DISCARD restores the old size.
+func _step_text_size(dir: int) -> void:
+	if not main._step_text_scale(dir):
+		_display_rail(dir)
+		return
+	_stage_opts()
+	_flash_setting()
+	main._sfx.play("pickup", -14.0, 1.0)
+
+
 # c1-19: a DISPLAY step that hit a rail (1x floor / fullscreen ceiling) — bounce the row like the
 # volume rails and deny-chime, instead of a silent no-op.
 func _display_rail(rail_dir: int) -> void:
@@ -3005,6 +3042,10 @@ func _activate() -> void:
 				# fullscreen). Live in both modes: windowed it resizes now, fullscreen it moves the
 				# preference applied on return to windowed.
 				_step_scale(1)
+			"textscale":
+				# accessibility: Enter steps TEXT SIZE UP one rung — the SAME call ► uses, so
+				# activation and the arrows behave identically (rails at 200%, never wraps).
+				_step_text_size(1)
 			"reset_defaults":
 				# c1-09: the two-press confirm already fired (destructive row → _press
 				# arms, a second press lands here) — revert the shown settings to their
@@ -3102,8 +3143,9 @@ func _seed_tag_stacks(r: Rect2, cy: float) -> bool:
 	# tag slot when it does NOT stack) and _draw_seed_subline (which places the tag) can never
 	# disagree about which layout is in play. Uses the same ROW_LABEL_* geometry the name draws at.
 	var f := Art.font()
+	var ts := Art.fs(SEED_TAG_SIZE)   # accessibility: TEXT SIZE — see _draw_seed_subline
 	var label_bottom := cy + ROW_LABEL_BASELINE_DY + f.get_descent(ROW_LABEL_SIZE)
-	return label_bottom + f.get_ascent(SEED_TAG_SIZE) + f.get_descent(SEED_TAG_SIZE) + SEED_SUB_MARGIN <= r.end.y
+	return label_bottom + f.get_ascent(ts) + f.get_descent(ts) + SEED_SUB_MARGIN <= r.end.y
 
 
 func _seed_flash_amt() -> float:
@@ -3126,12 +3168,17 @@ func _draw_seed_subline(r: Rect2, cy: float, text: String, col: Color) -> int:
 	var f := Art.font()
 	var lx := r.position.x + 30.0   # SAME left column the main label is drawn at
 	var right := r.end.x - SEED_SUB_PAD   # inner right bound, mirrors the main label's r.end.x-8
-	# Route through the _emit_label seam (not raw Art.text) at SEED_TAG_SIZE with a max_w clamp,
+	# accessibility: Art.fs — "(OK)" / "(INVALID)" on a pasted seed is 7px, the smallest type on
+	# the TITLE screen, and it is the ONLY confirmation that the seed you pasted took. TEXT SIZE
+	# scales it, and _seed_tag_stacks re-measures at the SAME scaled size, so a size the plate can
+	# no longer stack falls back to the right-margin hint instead of overrunning the plate.
+	var ts := Art.fs(SEED_TAG_SIZE)
+	# Route through the _emit_label seam (not raw Art.text) at that size with a max_w clamp,
 	# so a draw-capture test can inspect these lines and they can never overdraw the plate border.
-	_label_size = SEED_TAG_SIZE
+	_label_size = ts
 	if _seed_tag_stacks(r, cy):
 		_label_max_w = right - lx
-		_emit_label(text, Vector2(lx, r.end.y - f.get_descent(SEED_TAG_SIZE) - SEED_SUB_MARGIN), col)
+		_emit_label(text, Vector2(lx, r.end.y - f.get_descent(ts) - SEED_SUB_MARGIN), col)
 		_label_size = 8
 		_label_max_w = 0.0
 		return SEED_SUB_STACKED

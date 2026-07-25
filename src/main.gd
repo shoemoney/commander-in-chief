@@ -153,6 +153,18 @@ const STROBE_HALF_TICKS := 10
 var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
 var _captions := true            # accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption)
+# accessibility: TEXT SIZE, as a PERCENT of the design font sizes (100 = the shipped 640x360
+# sizes). The game draws load-bearing information at 7-8px inside a 640x360 design frame — the
+# shop item NAME, the seed-validity tag, the in-world RESCUE/HOLD FIRE/LOW FUEL callouts — which
+# is below the legible floor for a lot of players even at 3x window scale. Stepped on the OPTIONS
+# → DISPLAY sub-screen, persisted in [settings], and applied through Art.text_scale (see
+# _set_text_scale). Window scale magnifies EVERYTHING including the playfield; this magnifies only
+# the small type, which is the accommodation a player who can read the 10px HUD but not the 7px
+# shop name actually needs.
+var _text_scale := TEXT_SCALE_MIN
+const TEXT_SCALE_MIN := 100      # ship size (1.0x) — the floor, never smaller than the design sizes
+const TEXT_SCALE_MAX := 200      # 2x the design size; past this the 8px world callouts eat the actor they label
+const TEXT_SCALE_STEP := 25      # one rung of the DISPLAY stepper (100/125/150/175/200)
 var _binds: Dictionary = {}      # c1-18: keyboard rebinds (action -> physical keycode, 0 == UNBOUND); filled from BIND_DEFAULTS + [binds] in _load_bests
 var _pad_binds: Array[Dictionary] = [{}, {}]  # c1-18: PER-PLAYER gamepad button rebinds (action -> JOY_BUTTON_*, -1 == UNBOUND). [0]=P1 (device 0, [padbinds]), [1]=P2 (device 1, [padbinds2]) — two INDEPENDENT layouts so a left-handed P2 can remap without disturbing P1
 var _menu_binds: Dictionary = {} # c1-18: rebindable MENU-navigation keys (action -> physical keycode); filled from MENU_BIND_DEFAULTS + [menubinds]. Read ADDITIVELY over the immutable W/S/arrows/Enter/Esc fallback the menu always honors
@@ -1981,6 +1993,12 @@ func _consume_events() -> void:
 				_sfx.play_at(snd[0], _to_screen(ev["x"], ev["y"]), snd[1], snd[2])
 			else:
 				_sfx.play(snd[0], snd[1], snd[2])
+			# accessibility (deaf/HoH): a handful of these cues — the mortar whistle, the sniper/
+			# drone paint, a windup — are the only WARNING the game gives before something hits
+			# you, and the pan that says WHERE is lost on a player who can't hear it at all. Sfx
+			# owns the small caption whitelist and ignores every other kind, so this stays one
+			# unconditional call at the same choke point that decided the sound.
+			_sfx.caption_sfx(kind)
 		match kind:
 			"bullet_dirt":
 				# Spent rounds kick dirt (or a splash) where they land — bullets
@@ -2027,6 +2045,11 @@ func _consume_events() -> void:
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("ping_armor", -16.0, 1.0)
+					# accessibility: armor_block isn't in _EVENT_SOUND (the ping is picked here,
+					# per hit-target), so it needs its own caption call. The plink is what tells a
+					# player their bullets are doing NOTHING to this — the _hint teaches it once
+					# ever, then it's audio-only forever.
+					_sfx.caption_sfx("armor_block")
 				# Riot-shield deflect: armor_block fires for bunkers AND shields, but a
 				# shieldman eating your frontal rounds looked identical to plinking a
 				# wall. If the block landed on a shieldman, add a bright cyan ricochet
@@ -3495,6 +3518,8 @@ func _load_bests() -> void:
 			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
 			# audio-identity: captions default ON; a save predating the toggle lands there too.
 			"captions": cf.get_value("settings", "captions", SETTINGS_DEFAULTS["captions"]),
+			# accessibility: a save predating TEXT SIZE lands at 100% (the shipped sizes).
+			"text_scale": cf.get_value("settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
 		})
 	else:
 		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
@@ -3519,6 +3544,7 @@ const SETTINGS_DEFAULTS := {
 	"fullscreen": false,
 	"window_scale": 2,
 	"captions": true,
+	"text_scale": TEXT_SCALE_MIN,
 }
 
 
@@ -3748,6 +3774,7 @@ func _settings_snapshot() -> Dictionary:
 		"fullscreen": _fullscreen,
 		"window_scale": _win_scale,
 		"captions": _captions,
+		"text_scale": _text_scale,
 	}
 
 
@@ -3782,6 +3809,34 @@ func _set_colorblind(v: bool) -> void:
 	Art.colorblind = v
 
 
+# accessibility: THE single funnel for TEXT SIZE — same contract as _set_colorblind above, so the
+# persisted percent and the Art static every small-label draw site reads through can never drift a
+# frame apart. Snapped to a whole TEXT_SCALE_STEP rung and clamped, so a hand-edited or corrupted
+# save can only ever land on a real offered value. Does not persist (callers decide), matching
+# _apply_settings' contract.
+func _set_text_scale(pct: int) -> void:
+	var snapped := int(round(float(pct) / float(TEXT_SCALE_STEP))) * TEXT_SCALE_STEP
+	_text_scale = clampi(snapped, TEXT_SCALE_MIN, TEXT_SCALE_MAX)
+	Art.text_scale = float(_text_scale) / 100.0
+	# The HUD only repaints when a VIEW field it watches changes (hud.gd _dirty), and font size
+	# is not one of those — without this the shop-strip name would keep its old size until some
+	# unrelated cue happened to dirty the panel. Tree-guarded: _apply_settings also runs during
+	# boot, before the HUD Control is parented.
+	if _hud_icons.is_inside_tree():
+		_hud_icons.queue_redraw()
+
+
+# accessibility: move TEXT SIZE one rung, or report that it railed. Bounds live here (next to the
+# constants) rather than in the menu, so the OPTIONS stepper stays a pure "did it move?" caller —
+# the same shape _set_win_scale gives the WINDOW SCALE row.
+func _step_text_scale(dir: int) -> bool:
+	var nxt := _text_scale + dir * TEXT_SCALE_STEP
+	if nxt < TEXT_SCALE_MIN or nxt > TEXT_SCALE_MAX:
+		return false
+	_set_text_scale(nxt)
+	return true
+
+
 func _apply_settings(d: Dictionary) -> void:
 	colorblind = d["colorblind"]
 	_assist = d["assist"]
@@ -3801,6 +3856,9 @@ func _apply_settings(d: Dictionary) -> void:
 	# audio-identity: .get (not d["captions"]) — a save predating the toggle lacks the key,
 	# same back-compat pattern as swap_sticks/window_scale above.
 	_captions = bool(d.get("captions", true))
+	# accessibility: .get — a save predating TEXT SIZE lands at the shipped 100%. The setter
+	# snaps/clamps, so no caller (load, RESET, DISCARD) can install an off-rung value.
+	_set_text_scale(int(d.get("text_scale", TEXT_SCALE_MIN)))
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
 		else DisplayServer.WINDOW_MODE_WINDOWED)
 	if not _fullscreen:
@@ -7184,7 +7242,7 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			Art.text(self, _CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), 8, pcol)
+			Art.text(self, _CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), Art.fs(8), pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
@@ -7269,7 +7327,7 @@ func _draw_tanks() -> void:
 				_spr("fx_smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
 					Color(0.5, 0.5, 0.5, 0.5))
 			if (Engine.get_physics_frames() / 14) % 2 == 0:
-				Art.text(self, "LOW FUEL", c + Vector2(-16, -26), 8, Color(1.0, 0.7, 0.2))
+				Art.text(self, "LOW FUEL", c + Vector2(-16, -26), Art.fs(8), Color(1.0, 0.7, 0.2))
 		if t["burning"]:
 			# Vehicle fires burn dirty: dark oily smoke, not the pale dust puff.
 			_spr("fx_smoke", c + Vector2(4, -14), 0.0, 0.5, Color(0.3, 0.28, 0.26, 0.8))
@@ -7594,11 +7652,11 @@ func _draw_enemies() -> void:
 					_sfx.play("alarm", -18.0, 0.6)
 				# The warning window plays out near the top edge — pin the label
 				# on-screen instead of letting it draw above the viewport.
-				Art.text(self, "ESCAPING!", Vector2(epos.x - 20.0, maxf(epos.y - 18.0, 10.0)), 8, pi_col)
+				Art.text(self, "ESCAPING!", Vector2(epos.x - 20.0, maxf(epos.y - 18.0, 10.0)), Art.fs(8), pi_col)
 			else:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
-				Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), 8, pi_col)
+				Art.text(self, "RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), Art.fs(8), pi_col)
 			Art.arc(self, epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
@@ -7812,7 +7870,7 @@ func _draw_observer() -> void:
 	for q in 4:
 		var qa := q * TAU / 4.0 + PI / 4.0
 		Art.arc(self, op, tr, qa - 0.5, qa + 0.5, 8, tcol, 1.5)
-	Art.text(self, "SILENCE THE SPOTTER", op + Vector2(-38, -20), 8, Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
+	Art.text(self, "SILENCE THE SPOTTER", op + Vector2(-38, -20), Art.fs(8), Color(1.0, 0.4, 0.3, 0.5 + tp * 0.4))
 
 
 func _draw_gunships() -> void:
@@ -8548,7 +8606,7 @@ func _draw_players() -> void:
 					var pi_rel := _to_screen(pe2["x"], pe2["y"]) - pos
 					var pi_along := pi_rel.dot(aim)
 					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
-						Art.text(self, "HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), 8,
+						Art.text(self, "HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), Art.fs(8),
 							Color(1.0, 0.45, 0.35))
 						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
@@ -8679,10 +8737,12 @@ func _draw_players() -> void:
 			var bt: int = p.get("broke_timer", 0)
 			if bt > 0:
 				var btxt := "REINFORCEMENTS IN %.1fs" % (bt / 60.0)
-				var brw := Art.tw(btxt, 8)
+				# Memoized width, measured at the SAME resolved size it draws at (accessibility
+				# TEXT SIZE) — measuring at the design size drifts the centering by half the scale-up.
+				var brw := Art.tw(btxt, Art.fs(8))
 				# Warms toward amber in the final second so "almost back" reads.
 				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
-				Art.text(self, btxt, pos + Vector2(-brw / 2.0, -26), 8,
+				Art.text(self, btxt, pos + Vector2(-brw / 2.0, -26), Art.fs(8),
 					Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.

@@ -768,6 +768,23 @@ static func blink(period: int) -> bool:
 static var _font: Font = null
 
 
+## accessibility (OPTIONS → DISPLAY → TEXT SIZE): multiplier on the SMALL, load-bearing
+## label sizes — the 7px shop-item name, the 7px seed-validity tag, the 8px in-world
+## callouts and the caption strip. Headings, plates and the 10px HUD readouts are
+## deliberately NOT routed through it: those are already legible and sit on hand-fitted
+## geometry that a blind global scale would overflow. Static for the same reason
+## `colorblind` above is — every draw site reads it without threading a reference
+## through — and main._set_text_scale is the ONE writer.
+static var text_scale := 1.0
+
+
+## The size a `size`-px label actually draws at. Whole pixels (the font is a bitmap face
+## with no subpixel sizes) and never below the design size, so 100% is byte-identical to
+## the pre-setting behavior.
+static func fs(size: int) -> int:
+	return maxi(size, int(round(float(size) * text_scale)))
+
+
 static func font() -> Font:
 	if _font == null:
 		var f: FontFile = preload("res://assets/fonts/PixelOperator8.ttf")
