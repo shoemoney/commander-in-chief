@@ -273,3 +273,61 @@ func test_colossus_mortars_lead_a_moving_target() -> void:
 	var last2: Dictionary = sim2.strikes[sim2.strikes.size() - 1]
 	Runner.T.eq(last2["x"], p2["x"], "a stationary target is still struck exactly where they stand")
 	Runner.T.eq(last2["y"], p2["y"], "...on both axes")
+
+func test_core_window_is_the_payoff() -> void:
+	# The finale spends its whole UI budget on "ARMORED — WAIT FOR THE CORE" then
+	# "CORE EXPOSED — OPEN FIRE". That teach is only honest if the core window is
+	# also the best damage in the fight. Pin the relationship in raw uptime terms:
+	# one full open window vs a full cycle of ungated grenades. (Grenade AMMO —
+	# 12 carried, +4 per 300t siege drop — widens the real gap further; this is
+	# the floor of the guarantee, not the ceiling.)
+	var cycle: int = SimWorld.COLOSSUS_CORE_CYCLE_TICKS + SimWorld.COLOSSUS_CORE_OPEN_TICKS
+	var core_dmg: int = (SimWorld.COLOSSUS_CORE_OPEN_TICKS / SimWorld.FIRE_COOLDOWN_TICKS) \
+		* SimWorld.COLOSSUS_BULLET_DAMAGE
+	var nade_dmg: int = (cycle / SimWorld.GRENADE_COOLDOWN_TICKS) * SimWorld.COLOSSUS_GRENADE_DAMAGE
+	Runner.T.ok(core_dmg > nade_dmg,
+		"one core window out-damages a whole cycle of grenades (%d vs %d)" % [core_dmg, nade_dmg])
+	# ...and grenades stay a real answer to sealed plating, not a token one.
+	Runner.T.ok(nade_dmg * 2 > core_dmg, "grenades still matter while the plating is sealed")
+	# The boss has to outlive one window or the teach never gets a second beat.
+	Runner.T.ok(SimWorld.COLOSSUS_HP > core_dmg, "the Colossus survives a single core window")
+	# Behaviour, not just arithmetic: a bullet on the hull is armor while sealed
+	# and COLOSSUS_BULLET_DAMAGE while the core is open.
+	var sim := SimWorld.new(61, 1)
+	var col := _engage(sim)
+	col["y"] = sim.camera_top + 200 * SimWorld.F_ONE   # mid-screen: bullets there aren't culled off-band
+	col["core_open"] = 0
+	col["core_cd"] = 999
+	var hp0: int = col["hp"]
+	sim.bullets.append({"x": col["x"], "y": col["y"], "vx": 0, "vy": 0,
+		"ttl": SimWorld.BULLET_TTL_TICKS, "owner": 0})
+	sim.step([_idle()])
+	Runner.T.eq(col["hp"], hp0, "sealed: bullets plink off")
+	sim.bullets.clear()   # the plinked round is still in flight — retire it
+	col["core_open"] = 60
+	sim.bullets.append({"x": col["x"], "y": col["y"], "vx": 0, "vy": 0,
+		"ttl": SimWorld.BULLET_TTL_TICKS, "owner": 0})
+	sim.step([_idle()])
+	Runner.T.eq(col["hp"], hp0 - SimWorld.COLOSSUS_BULLET_DAMAGE, "core open: bullets bite for real")
+
+
+func test_standoff_closes_over_the_phases() -> void:
+	# The crush used to be opt-in: a flat 60px standoff meant the treads could
+	# never reach a player who simply stood still. The standoff now shrinks with
+	# the phase, so by phase 3 the fortress drives onto your y-line.
+	for spec in [[SimWorld.COLOSSUS_HP, 60], [SimWorld.COLOSSUS_HP / 4, 0]]:
+		var sim := SimWorld.new(7, 1)
+		var p: Dictionary = sim.players[0]
+		p["y"] = sim.camera_top + 200 * SimWorld.F_ONE
+		p["x"] = SimWorld.SCREEN_CX
+		p["hurt_iframes"] = 9999   # measure the closure, don't measure the kill
+		sim.colossus = {"alive": true, "hp": spec[0], "x": SimWorld.SCREEN_CX,
+			"y": p["y"] - 100 * SimWorld.F_ONE,
+			"spray_cd": 999, "volley_cd": 999, "spawn_cd": 999,
+			"core_cd": 999, "core_open": 0, "pv": 3, "sweep_cd": 999}
+		sim.last_stand = true
+		for i in 300:
+			sim._step_colossus()
+		var gap: int = (p["y"] - sim.colossus["y"]) / SimWorld.F_ONE
+		Runner.T.eq(gap, spec[1], "phase standoff settles at %dpx" % spec[1])
+	Runner.T.ok(SimWorld.COLOSSUS_CRUSH_RADIUS > 0, "phase 3 parks inside the crush radius")
