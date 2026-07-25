@@ -907,6 +907,10 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 					glyphs.append(op["id"])
 			# SELECT + BACK are drawn on EVERY non-TITLE footer.
 			Runner.T.ok("SELECT" in labels and "BACK" in labels, "%s mode %d footer draws SELECT + BACK" % [dev, mode_id])
+			# The HELP pointer at the manual (the only place FIRE is named) is device-agnostic —
+			# it used to be keyboard-only, leaving pad players with no cue. Everywhere but HOWTO.
+			Runner.T.eq("HELP" in labels, mode_id != Menu.Mode.HOWTO,
+				"%s mode %d advertises HELP unless the manual is already open" % [dev, mode_id])
 			if mode_id == Menu.Mode.PAUSE:
 				for v in ["ROLL", "SUPPLY WHEEL", "REVIVE"]:
 					Runner.T.ok(v in labels, "%s PAUSE footer draws the %s reference" % [dev, v])
@@ -1063,6 +1067,33 @@ func test_device_glyph_change_triggers_menu_repaint() -> void:
 	Runner.T.ok(Menu.device_glyphs_changed(true, "xbox", true, "playstation"), "pad brand swap (same use_pad) repaints")
 	Runner.T.ok(not Menu.device_glyphs_changed(true, "xbox", true, "xbox"), "no device/brand change does NOT repaint")
 	Runner.T.ok(not Menu.device_glyphs_changed(false, "xbox", false, "xbox"), "steady keyboard does NOT repaint")
+
+
+# HOW TO PLAY is the ONLY place FIRE is named, and PAUSE is the only menu reachable mid-run —
+# so PAUSE must host a "howto" row, and BACK out of the manual must return to the PAUSED run
+# (never the INFO screen, which would strand the run's menu tree at the title).
+func test_pause_exposes_how_to_play_and_backs_out_to_the_paused_run() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.PAUSE
+	var ids: Array = []
+	for it in m._menu_items():
+		ids.append(it["id"])
+	Runner.T.ok("howto" in ids, "PAUSE offers a HOW TO PLAY row (rows %s)" % [ids])
+	Runner.T.ok("resume" in ids, "PAUSE still offers RESUME alongside it")
+	# The opener is recorded exactly like OPTIONS' — BACK follows the row the player came through.
+	m._howto_parent = Menu.Mode.PAUSE
+	Runner.T.eq(m._parent(Menu.Mode.HOWTO), {"mode": Menu.Mode.PAUSE, "sel": "howto"},
+		"HOWTO opened from PAUSE backs out to PAUSE")
+	m._howto_parent = Menu.Mode.INFO
+	Runner.T.eq(m._parent(Menu.Mode.HOWTO), {"mode": Menu.Mode.INFO, "sel": "howto"},
+		"HOWTO opened from INFO still backs out to INFO")
+	m._howto_parent = Menu.Mode.TITLE   # stale/unset value can never strand the player
+	Runner.T.eq(m._parent(Menu.Mode.HOWTO), {"mode": Menu.Mode.INFO, "sel": "howto"},
+		"a stale opener falls back to the INFO screen")
+	m.free()
+	stub.free()
 
 
 # BACK / Esc must climb exactly one level: c2-04 SETUP -> TITLE, OPTIONS + INFO ->
@@ -3008,7 +3039,10 @@ func test_pause_dedups_settings_behind_one_options_row() -> void:
 	Runner.T.ok("options" in ids, "PAUSE fronts settings through a single OPTIONS row")
 	var opt_i := ids.find("options")
 	Runner.T.ok(m._menu_items()[opt_i].get("submenu", false), "the PAUSE OPTIONS row is a submenu (opens the screen)")
-	Runner.T.eq(ids, ["resume", "options", "restart", "title"], "PAUSE is RESUME / OPTIONS / RESTART / TITLE only")
+	# HOW TO PLAY joined the list (the manual is the only place FIRE is named, and PAUSE is
+	# the one menu reachable mid-run) — still a submenu opener, still no duplicated settings.
+	Runner.T.eq(ids, ["resume", "options", "howto", "restart", "title"],
+		"PAUSE is RESUME / OPTIONS / HOW TO PLAY / RESTART / TITLE only")
 	m.free()
 	stub.free()
 

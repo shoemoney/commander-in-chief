@@ -2041,7 +2041,11 @@ func _consume_events() -> void:
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
 				if not nest_hit:
-					_hint("armor", "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS")
+					# The hint that fires on the ONE wall bullets can't solve must NAME the
+					# button — same device-aware [%s] pattern the revive/supply hints use
+					# (pad label off the live brand, else the keyboard default).
+					_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
+						% (Art.pad_label("grenade") if Art.use_pad else "SHIFT"))
 				if not armor_pinged:
 					armor_pinged = true
 					_sfx.play("ping_armor", -16.0, 1.0)

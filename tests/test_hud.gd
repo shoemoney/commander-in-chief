@@ -2215,8 +2215,11 @@ func test_verb_legend_draw_commands_captured_both_devices() -> void:
 				plate = op["box"]
 		Runner.T.ok("ROLL" in labels and "SUPPLY WHEEL" in labels,
 			"%s verb chip draws ROLL/WHEEL labels" % dev)
+		# GRENADE is the only armor-cracker (the landing zone is a bunker you must grenade)
+		# and nothing else in-run names its button — the chip must state it on both devices.
+		Runner.T.ok("GRENADE" in labels, "%s verb chip names GRENADE" % dev)
 		Runner.T.ok(not ("REVIVE" in labels), "%s verb chip no longer advertises REVIVE (contextual only)" % dev)
-		for a in ["roll", "wheel"]:
+		for a in ["roll", "grenade", "wheel"]:
 			Runner.T.ok(a in glyphs, "%s verb chip emits the %s glyph" % [dev, a])
 			Runner.T.ok(_act_glyph_resolves(a), "%s verb glyph '%s' resolves to a texture" % [dev, a])
 		Runner.T.ok(plate.position.x >= 0.0 and plate.end.x <= 640.0, "%s verb plate within 640 [%d,%d]" % [dev, int(plate.position.x), int(plate.end.x)])
