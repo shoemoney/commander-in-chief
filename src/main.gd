@@ -7741,7 +7741,7 @@ func _boss_wounds(center: Vector2, wound: float, r: float) -> void:
 
 
 func _draw_colossus() -> void:
-	if sim.colossus.is_empty() or not sim.colossus["alive"]:
+	if not HudIcons.colossus_bar_visible(sim):
 		return
 	var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 	var phase := sim.colossus_phase()
@@ -7811,8 +7811,8 @@ func _draw_colossus() -> void:
 	# banners (phase 2 = mortar volleys, phase 3 = sappers out).
 	var clabel := "FOUNDRY COLOSSUS — %s" % COLOSSUS_PHASE_NAMES[clampi(phase - 1, 0, 2)]
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_rect(_label_plate_rect(172.0, 324.0, clw), LABEL_PLATE_FILL)
-	Art.text(self, clabel, Vector2(172, 326), 10, Color(1.0, 0.55, 0.45))
+	draw_rect(_label_plate_rect(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y - 2.0, clw), LABEL_PLATE_FILL)
+	Art.text(self, clabel, Vector2(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y), 10, Color(1.0, 0.55, 0.45))
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar

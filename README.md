@@ -38,9 +38,13 @@ a shared coin economy where every kill mints and every revive spends.
 > Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
 > Select · Daily Run), and the feel stack is real. Art is **legacy 3D pack bakes + bespoke
 > generated boss/vehicle/desert art** over a Kenney-CC0 FX base — no longer pure greybox.
-> **CI is live**: `.github/workflows/ci.yml` runs import + boot-smoke + the golden-checksum
-> suite across **Linux · macOS-arm64 · Windows**, failing on any `SCRIPT ERROR` or a missing
-> `PASS` line. `docs/PLAN.md` is the aspirational P0–P7 master plan — **the sim code is the
+> **CI is live**: `.github/workflows/ci.yml` runs import + boot-smoke + the full
+> golden-checksum suite (**661 methods / 12,354 assertions**) across **Linux-x86_64 ·
+> macOS-arm64 · Windows-x86_64**, failing on any `SCRIPT ERROR` or a missing `PASS` line —
+> plus packaged-export smoke tests on Linux and Windows, and a nightly 3-hour soak run.
+> The engine version is pinned in `tools/versions.lock`, the one source CI reads, so the
+> build can't drift from what the determinism goldens were recorded against.
+> `docs/PLAN.md` is the aspirational P0–P7 master plan — **the sim code is the
 > source of truth for what exists.**
 
 ---
@@ -222,7 +226,7 @@ godot --headless --path . -s res://tests/run_tests.gd   # full suite
 SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter by suite name 🎯
 ```
 
-**606 test methods / 12,029 assertions** — fixed-point math, seeded RNG streams, the 1986
+**661 test methods / 12,354 assertions** — fixed-point math, seeded RNG streams, the 1986
 mechanic grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus,
 every archetype's behavior contract (nest armor, technical charge lock, pilot
 rescue/grace/forfeit), Endless War waves & shop, lockstep loopback, replay integrity,

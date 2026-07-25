@@ -16,10 +16,6 @@ run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.png"
 
-[autoload]
-
-MCPGameBridge="res://addons/godot_mcp/game_bridge/mcp_game_bridge.gd"
-
 [display]
 
 window/size/viewport_width=640

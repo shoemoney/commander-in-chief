@@ -1677,3 +1677,29 @@ func test_endless_meta_mi_trophy_icon_exists() -> void:
 	var tex := Art.tex("mi_trophy")
 	Runner.T.ok(tex != null, "mi_trophy resolves to a texture in Art.TEX")
 	Runner.T.ok(tex.get_size().x > 0 and tex.get_size().y > 0, "mi_trophy is a real (non-zero-sized) image, not a stub")
+
+
+# --- dev-only autoloads must never ship -----------------------------------------------
+# The godot-mcp editor plugin re-adds an [autoload] MCPGameBridge entry to project.godot
+# every time the editor runs with the plugin enabled. It points at addons/godot_mcp/,
+# which is UNTRACKED, so an exported build cannot resolve it and spams
+# "Failed to instantiate an autoload, can't load from path: ..." on every launch.
+# It was removed once already (PR #22) and came back. This test is the ratchet: any
+# autoload pointing into addons/ fails here instead of silently reaching a player build.
+func test_no_dev_addon_autoloads_in_project_godot() -> void:
+	var text := FileAccess.get_file_as_string("res://project.godot")
+	Runner.T.ok(not text.is_empty(), "project.godot is readable")
+	var offenders: Array[String] = []
+	var in_autoload := false
+	for raw in text.split("\n"):
+		var line := raw.strip_edges()
+		if line.begins_with("["):
+			in_autoload = line == "[autoload]"
+			continue
+		if not in_autoload or line.is_empty() or line.begins_with(";"):
+			continue
+		# An autoload whose target lives under addons/ is dev tooling, not shippable content.
+		if line.contains("addons/"):
+			offenders.append(line.split("=")[0])
+	Runner.T.eq(offenders, [] as Array[String],
+		"no [autoload] entry points into addons/ (dev-only tooling must not ship)")

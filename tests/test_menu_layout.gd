@@ -4618,9 +4618,7 @@ func test_seed_activation_denies_on_empty_clipboard() -> void:
 # button. Asserting the pure layout source IS the render check (headless has no GL
 # surface for pixel readback).
 func test_seed_hint_lines_and_plate_layout() -> void:
-	# State strings, all cases (the judge's invalid + unselected included).
-	Runner.T.eq(Menu.seed_hint_lines(false, -1, false, true), PackedStringArray(["(FROM CLIPBOARD)"]),
-		"unselected row names the source")
+	# State strings, all cases (the judge's invalid case included).
 	# Empty vs malformed clipboard read DIFFERENT failure copy (clip_empty distinguishes).
 	Runner.T.eq(Menu.seed_hint_lines(true, -1, false, true), PackedStringArray(["NO SEED - COPY ONE"]),
 		"selected with an EMPTY clipboard reads NO SEED - COPY ONE")
@@ -4661,7 +4659,7 @@ func test_seed_hint_lines_and_plate_layout() -> void:
 # malformed, and valid. seed_row_label is the pure source the row draws, so asserting it IS
 # the label render check.
 func test_seed_row_label_states_and_format() -> void:
-	var base := "CHALLENGE SEED"
+	var base := Menu.SEED_ROW_LABEL
 	# UNFOCUSED: bare label regardless of clipboard contents (valid flag is moot).
 	Runner.T.eq(Menu.seed_row_label(base, false, "12345", true), base,
 		"an unfocused row shows the plain label, never the clipboard echo")
@@ -4715,6 +4713,37 @@ func test_seed_row_label_states_and_format() -> void:
 	Runner.T.ok(fitted.begins_with("%s (OK)" % base),
 		"the ellipsized label still leads with the status tag (only the raw tail is trimmed)")
 	m.free()
+
+
+# The TITLE seed row must draw exactly ONE string — its name — and every author-written
+# state of that name must fit the 184px label column at every record-header state. The
+# c3-13 "(FROM CLIPBOARD)" sub-label cost 95px of that column and shipped the name as
+# "CHALL…" + an overflow chip. Player-pasted text may still ellipsize; fixed copy may not.
+func test_seed_row_name_never_ellipsizes_and_draws_no_subline() -> void:
+	var m: Control = _CaptureMenu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+	for st in [[false, false], [true, false], [true, true]]:
+		var g := Menu.compute_geometry(Menu.Mode.TITLE, 6,
+			Menu.title_head_bottom(st[0], st[1]), 4, Menu.TITLE_BLOCK_GAP)
+		var r := Menu.row_rect(g, 3)                       # the seed row
+		var avail := (r.end.x - 8.0) - (r.position.x + 30.0)
+		var cy := floorf(r.position.y + float(g["bh"]) / 2.0)
+		# 1. AT REST the row emits NO in-plate sub-label (nothing steals the column).
+		m.ops.clear()
+		m._draw_seed_hint(r, cy, false)
+		Runner.T.eq(m.ops.size(), 0, "at-rest seed row draws no sub-label (header %s)" % [st])
+		# 2. Every FIXED label state fits the full column with no ellipsis.
+		for lab in [Menu.SEED_ROW_LABEL,
+				Menu.seed_row_label(Menu.SEED_ROW_LABEL, true, "", false),        # (EMPTY)
+				Menu.seed_row_label(Menu.SEED_ROW_LABEL, true, "1", true).split(":")[0],   # (OK)
+				Menu.seed_row_label(Menu.SEED_ROW_LABEL, true, "x", false).split(":")[0]]: # (INVALID)
+			var fit: Dictionary = m._row_fit(lab, Menu.ROW_LABEL_SIZE, avail, 15.0)
+			Runner.T.ok(not bool(fit["overflow"]), "'%s' fits the %dpx column" % [lab, int(avail)])
+			Runner.T.eq(String(fit["shown"]), lab, "'%s' draws in full, no ellipsis" % lab)
+	m.free()
+	stub.free()
 
 
 # c2-14: glyph-aware ellipsize — never split a multi-codepoint glyph, keep the toggle

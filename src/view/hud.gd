@@ -1384,6 +1384,46 @@ const CAPTION_MAX_W := 560.0
 # EXACT same y/rect it always did — only a caption long enough to wrap moves anything.
 const CAPTION_LINE_H := 11.0
 
+# The bottom counterpart of BOSS_BAR_TOP. main.gd's `_draw_colossus` docks a PERSISTENT block on
+# the viewport floor for the whole finale (phase label at COLOSSUS_LABEL_Y, plate, HP bar at y330,
+# core-countdown tick to y345). These two TRANSIENT overlays (caption strip, verb chip) used to
+# paint straight over it — the strip's centered scrim ate the right half of "FOUNDRY COLOSSUS",
+# and the chip sat on the HP bar. The block's y's live HERE (not as literals in main.gd) so the
+# only file that draws over them can see them.
+const COLOSSUS_LABEL_X := 172.0
+const COLOSSUS_LABEL_Y := 326.0                      # text baseline of the phase label
+const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - 9.0   # 317: label glyph top (Art.font() ascent @ FONT_SIZE)
+const BOTTOM_RESERVE_GAP := 3.0                      # breathing gap an overlay keeps above the reserve
+const CAPTION_BG_ABOVE := 9.0   # caption scrim extent above the LAST line's baseline (was inline -9.0)
+const CAPTION_BG_BELOW := 5.0   # ...and below it (was inline: height 14 = 9 + 5)
+const VERB_PLATE_BELOW := 8.0   # verb chip plate extent below VERB_LEGEND_Y (Rect2(..., y-8, ..., 16))
+
+
+## True exactly when main.gd `_draw_colossus` paints its bottom-docked block — same predicate,
+## one definition. `sim` is untyped so a headless HUD mock without a sim (null) reads false.
+static func colossus_bar_visible(sim) -> bool:
+	return sim != null and not sim.colossus.is_empty() and sim.colossus.get("alive", false)
+
+
+## px the WHOLE bottom overlay cluster shifts up while that block owns the floor. Sized off the
+## LOWEST member (the verb chip) and applied to every member, so the cluster's internal spacing is
+## unchanged and the two can't collide with each other. Returns 0.0 in every other frame in the
+## game — the default layout is byte-identical to before.
+## ponytail: one reserve, one client file. If a second persistent bottom element ever appears,
+## make this a max() over a list of reserved bands rather than growing a second constant.
+static func bottom_band_lift(sim) -> float:
+	if not colossus_bar_visible(sim):
+		return 0.0
+	return VERB_LEGEND_Y + VERB_PLATE_BELOW + BOTTOM_RESERVE_GAP - COLOSSUS_BLOCK_TOP   # 38.0
+
+
+## The caption scrim's exact rect — the one measurement both the draw and the layout test read,
+## so a test can't pass against arithmetic the draw doesn't actually use.
+static func caption_bg_rect(line_count: int, widest: float, y_bottom: float) -> Rect2:
+	var y0 := y_bottom - float(line_count - 1) * CAPTION_LINE_H
+	return Rect2(320.0 - widest / 2.0 - 6.0, y0 - CAPTION_BG_ABOVE, widest + 12.0,
+		float(line_count - 1) * CAPTION_LINE_H + CAPTION_BG_ABOVE + CAPTION_BG_BELOW)
+
 
 ## Greedy word-wrap for the caption strip only (menu.gd's screens hand-split their own copy
 ## into fixed lines; this is the one HUD string whose length is unbounded — VO/bark lines
@@ -1460,12 +1500,12 @@ func _draw_caption() -> void:
 		return
 	var font := Art.font()
 	var lines := _wrap_caption(txt, font, FONT_SIZE, CAPTION_MAX_W)
-	var y_bottom := VERB_LEGEND_Y - 20.0
+	var y_bottom := VERB_LEGEND_Y - 20.0 - bottom_band_lift(main.get("sim"))
 	var y0 := y_bottom - float(lines.size() - 1) * CAPTION_LINE_H
 	var w := 0.0
 	for ln in lines:
 		w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x)
-	var bg := Rect2(320.0 - w / 2.0 - 6.0, y0 - 9.0, w + 12.0, float(lines.size() - 1) * CAPTION_LINE_H + 14.0)
+	var bg := caption_bg_rect(lines.size(), w, y_bottom)
 	# audio-identity (judge follow-up): a higher-contrast scrim than the old flat 0.7-alpha fill —
 	# a near-opaque near-black backing plus a thin keyline tinted to the line's own role color
 	# (radio-blue / dry-amber) so the strip stays readable over bright, busy gameplay (particles,
@@ -1498,7 +1538,7 @@ func _verb_legend() -> void:
 	var ext := verb_legend_extent()
 	var x: float = float(ext[0])
 	var total: float = float(ext[1])
-	var y := VERB_LEGEND_Y
+	var y := VERB_LEGEND_Y - bottom_band_lift(main.get("sim"))
 	# Plate sized to the content (centered), not full width — a chip reads as a
 	# reminder where a full-width bar reads as a letterbox. Fades with the glyphs.
 	_emit_rect(Rect2(x - 8.0, y - 8.0, total + 16.0, 16.0),
