@@ -405,6 +405,12 @@ const SEED := 0xDEADBEEF
 ## stream downstream. The elite lane-leash party-trip (3) is torture-inert: the script
 ## never reaches a fork gauntlet.
 const GOLDEN: Array[int] = [
+	1137374205060789435,
+	8552575976495711450,
+	8596890941918905151,
+	1060946695091977990,
+	1098902499213753401,
+	5824548073172713623,
 ]
 
 
@@ -537,6 +543,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## MERGED: neither branch's numbers survive this merge — re-recorded ONCE on the
 ## combined tree. Both notes above still describe what moved and why.
 const ENDLESS_GOLDEN: Array[int] = [
+	3184915394758128358,
+	7048541855390065830,
+	6799870600685586555,
+	3455937350047002514,
+	3243110019923381098,
+	5716657775938348482,
 ]
 
 
