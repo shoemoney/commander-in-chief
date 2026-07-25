@@ -1568,6 +1568,18 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 		return
 	# Broke fallback: if nobody can afford a revive, a timer respawns you at
 	# the last opened gate (or the bottom of the screen before any gate).
+	# The affordability test is re-run EVERY tick while you're down, not just on
+	# the death tick. In 2P the chest is shared and your partner keeps spending
+	# it: a rich death armed no timer, then the partner bought a vest and you
+	# were down with no timer, no self-revive and no partner who could pay —
+	# stranded for the rest of the run. It also disarms the other way (partner
+	# banks a kill and the chest covers you again), so dying broke stops being
+	# strictly cheaper than dying rich.
+	if p["broke_timer"] == 0:
+		if war_chest < revive_cost(p):
+			p["broke_timer"] = BROKE_RESPAWN_TICKS
+	elif war_chest >= revive_cost(p):
+		p["broke_timer"] = 0
 	if p["broke_timer"] > 0:
 		p["broke_timer"] = p["broke_timer"] - 1
 		if p["broke_timer"] == 0:
@@ -1606,13 +1618,15 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 	## no revives past the final gate (the arcade's no-continue finale).
 	if last_stand:
 		return
-	if reviver_index == -1:
-		# Dead self-revive is the solo/all-down fallback ONLY: with a partner
-		# still standing, the rescue is theirs to perform — the co-op decision
-		# (walk to the body, spend together) must not be mashable from the floor.
-		for pl in players:
-			if pl["alive"]:
-				return
+	# Self-revive used to be blocked outright while ANY partner was standing, to
+	# keep the rescue theirs to perform. That left a downed player with a rich
+	# chest zero actions and zero timer — waiting, indefinitely, on a partner who
+	# might be three screens north or simply not looking. The decision survives
+	# without the strand because the two rescues land you in DIFFERENT places:
+	# a partner revives you at their side (back in the fight), paying from the
+	# floor puts you at the checkpoint at the bottom of the screen. Same price,
+	# worse position — so waiting for the rescue is still the better play, and
+	# nobody is ever a spectator against their will.
 	for j in players.size():
 		var target := players[j]
 		if target["alive"]:
@@ -1625,13 +1639,10 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 			var at_y: int = reviver["y"] if reviver["alive"] else _checkpoint_y()
 			_respawn(target, at_y)
 		else:
-			if target["broke_timer"] == 0:
-				target["broke_timer"] = BROKE_RESPAWN_TICKS
-				# One 'can't afford it' cue on the first denial (not per-mash) — a
-				# denied revive was as silent as a denied buy is loud. Event only,
-				# checksum-excluded, so golden-safe.
-			# Deny is NEVER silent (9v): _kill_player pre-arms broke_timer on a
-			# broke death, which muted this exact event in the most common case.
+			# The broke fallback is armed by _step_dead_player (one place, re-checked
+			# every tick), so a denial only has to be LOUD. Event only, checksum-
+			# excluded, so golden-safe — and never silent: it fires on every press,
+			# regardless of whether the fallback timer is already running.
 			events.append({"t": "revive_deny", "x": target["x"], "y": target["y"], "cost": cost})
 
 
@@ -1694,10 +1705,9 @@ func _kill_player(p: Dictionary) -> void:
 	# excluded) event so the view can sting a "LOADOUT LOST" beat. Golden-safe.
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"],
 		"triple": p["triple"], "pierce": p["pierce_ticks"] > 0, "spread": p["spread_ticks"] > 0})
-	# Arm the broke fallback on death itself, not only on a revive press: the
-	# wipe (endless's only run-ender) must not require a button press.
-	if war_chest < revive_cost(p):
-		p["broke_timer"] = BROKE_RESPAWN_TICKS
+	# The broke fallback arms itself in _step_dead_player from the next tick on
+	# (and re-evaluates every tick as the shared chest moves), so the wipe —
+	# endless's only run-ender — still never requires a button press.
 
 
 func _fire_mission() -> void:
@@ -2831,8 +2841,20 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 	# Route-fork lane leash: gauntlet elites HOLD their lane (no advance, no
 	# fire) until a player crosses the band's south edge — then the leash
 	# clears for good. hold_y is spawn-immutable, unhashed-classified.
+	# 2P: the trip is a PARTY test, not a target test. `target` is the NEAREST
+	# alive player, so a partner loitering south of the line pinned the leash on
+	# while the other player walked the whole lane untouched — and the elite
+	# stood frozen in the advancing player's face, a free kill for one player and
+	# a dead encounter for both. ANY alive player crossing clears it, for good.
+	# (Solo is unchanged by construction: the nearest player IS the only player.)
 	if e.get("hold_y", 0) != 0:
-		if target["y"] > e["hold_y"]:
+		var tripped: bool = target["y"] <= e["hold_y"]
+		if not tripped:
+			for pl in players:
+				if pl["alive"] and pl["y"] <= e["hold_y"]:
+					tripped = true
+					break
+		if not tripped:
 			return
 		e.erase("hold_y")
 	# c3 2v flanker crossing: once the leash clears, the sack flanker CROSSES

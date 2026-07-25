@@ -69,7 +69,8 @@ func test_endless_death_spiral_reaches_the_wipe() -> void:
 	Runner.T.ok(sim.war_chest < sim.revive_cost(p),
 		"...still cannot cover the 6th body at wave 20 (%d)" % sim.revive_cost(p))
 	sim._kill_player(p)
-	Runner.T.eq(p["broke_timer"], SimWorld.BROKE_RESPAWN_TICKS,
+	sim.step([_idle()])   # the fallback arms itself in _step_dead_player, no press needed
+	Runner.T.eq(p["broke_timer"], SimWorld.BROKE_RESPAWN_TICKS - 1,
 		"dying broke arms the wipe timer without needing a button press")
 	for i in SimWorld.BROKE_RESPAWN_TICKS + 2:
 		sim.step([_idle()])
@@ -2829,3 +2830,55 @@ func test_c4_encounter_midpoint_transform() -> void:
 		if stk["x"] >= SimWorld.ARENA_MARGIN and stk["x"] <= SimWorld.SCREEN_W_FP - SimWorld.ARENA_MARGIN:
 			mid_strikes += 1
 	Runner.T.ok(mid_strikes >= 3, "a colossus phase rise sweeps the mid-arena (%d strikes)" % mid_strikes)
+
+
+func test_gauntlet_leash_trips_on_the_party_not_the_nearest_player() -> void:
+	# 2P: the leash was tested against `target` — the NEAREST alive player — so a
+	# partner loitering south of the line pinned every gauntlet elite in place
+	# while the other player walked the lane untouched. The elite stood frozen in
+	# his face: a free kill for one player and a dead encounter for both.
+	var sim := SimWorld.new(11, 2)
+	var line: int = -600 * SimWorld.F_ONE
+	sim._spawn_enemy(100 * SimWorld.F_ONE, line - 10 * SimWorld.F_ONE, true)
+	var e: Dictionary = sim.enemies[0]
+	e["hold_y"] = line
+	# P1 has committed north of the leash; P2 loiters south of it and is NEARER.
+	sim.players[0]["x"] = 500 * SimWorld.F_ONE
+	sim.players[0]["y"] = line - 100 * SimWorld.F_ONE
+	sim.players[1]["x"] = 100 * SimWorld.F_ONE
+	sim.players[1]["y"] = line + 20 * SimWorld.F_ONE
+	var target := sim._nearest_alive_player(e["x"], e["y"])
+	Runner.T.eq(target["idx"], 1, "the loitering partner is the nearest player (the trap case)")
+	var dx: int = target["x"] - e["x"]
+	var dy: int = target["y"] - e["y"]
+	sim._step_elite(e, target, dx, dy, Fixed.length(dx, dy))
+	Runner.T.ok(not e.has("hold_y"), "a partner crossing the line releases the leash for good")
+	# ...and it still HOLDS while the whole party is south of the line.
+	var sim2 := SimWorld.new(11, 2)
+	sim2._spawn_enemy(100 * SimWorld.F_ONE, line - 10 * SimWorld.F_ONE, true)
+	var e2: Dictionary = sim2.enemies[0]
+	e2["hold_y"] = line
+	var sx: int = e2["x"]
+	var sy: int = e2["y"]
+	for pl in sim2.players:
+		pl["x"] = 100 * SimWorld.F_ONE
+		pl["y"] = line + 20 * SimWorld.F_ONE
+	var t2 := sim2._nearest_alive_player(sx, sy)
+	sim2._step_elite(e2, t2, t2["x"] - sx, t2["y"] - sy, Fixed.length(t2["x"] - sx, t2["y"] - sy))
+	Runner.T.ok(e2.get("hold_y", 0) == line, "nobody has crossed: the ambush stays leashed")
+	Runner.T.ok(e2["x"] == sx and e2["y"] == sy, "a leashed elite holds its lane")
+
+
+func test_shared_camera_never_strands_the_lagging_player_offscreen() -> void:
+	# One screen, two players: the camera ratchets to whoever is furthest north.
+	# The lagging player must be DRAGGED along, never left behind the bottom edge
+	# with no way back into the fight.
+	var sim := SimWorld.new(11, 2)
+	var north := SimInput.new()
+	north.move_y = -256
+	for _i in 600:
+		sim.step([north, _idle()])   # P1 sprints, P2 stands still
+	var p2 := sim.players[1]
+	Runner.T.ok(p2["y"] >= sim.camera_top and p2["y"] <= sim.camera_top + 360 * SimWorld.F_ONE,
+		"the idle partner is still on screen after 10 s of the other advancing")
+	Runner.T.ok(sim.players[0]["y"] < p2["y"], "...and the runner really did advance ahead of them")

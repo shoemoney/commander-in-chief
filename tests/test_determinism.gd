@@ -390,6 +390,20 @@ const SEED := 0xDEADBEEF
 ## ENDLESS_GOLDEN VERIFIED UNCHANGED: re-measured with these values committed and
 ## the endless samples are byte-identical (the endless torture wipes in wave 2,
 ## before its stream diverges on any of the above).
+##
+##
+## 2026-07-25 -- 2P CO-OP AUDIT: campaign GOLDEN RE-RECORDED (samples 1-5; sample 0
+## byte-identical, the change needs a death first). ENDLESS_GOLDEN VERIFIED UNCHANGED.
+## The torture script mashes revive on a 2P run, so it walks straight through the two
+## sim fixes: (1) the broke fallback is armed/disarmed by _step_dead_player every tick
+## against the CURRENT shared chest instead of once at _kill_player -- a partner
+## draining the chest under a downed body now arms it (previously: down forever), and
+## a recovered chest cancels the free respawn; the arming also lands one tick later
+## than it used to. (2) a downed player may pay their own revive while a partner is
+## still up (it was blocked outright), so the mashed revive in the script now fires
+## where it used to no-op. Both shift respawn ticks/positions, which is the whole
+## stream downstream. The elite lane-leash party-trip (3) is torture-inert: the script
+## never reaches a fork gauntlet.
 const GOLDEN: Array[int] = [
 ]
 
