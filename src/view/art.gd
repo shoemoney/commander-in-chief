@@ -412,8 +412,22 @@ const SCALE := {
 	"dropped_shield": 0.12, "fallen_merc": 0.2,
 	# capsule glyphs: large Apocalypse UI icons folded to pickup footprint
 	# (weapons 512x256, explosives 1024²) — retuned by eye.
-	"cap_pierce": 0.14, "cap_spread": 0.14, "cap_triple": 0.14, "cap_rend": 0.14,
-	"cap_claymore": 0.06, "cap_smoke": 0.06, "cap_flash": 0.06,
+	# IMPORT-SCALE DRIFT (2026-07-25), same shape as the bunker note above: 0.14/0.06
+	# were tuned by eye against the UNCAPPED sources (size_limit=0 at p4c, verified in
+	# git), then an import sweep set size_limit=128 — weapons 512→128 (4x), explosives
+	# 1024→128 (8x) — and _spr sizes off the IMPORTED texture. The drop that a 1-in-6
+	# elite kill is supposed to advertise was drawing at 3 PIXELS under a 12px pickup
+	# radius: an invisible reward you walk over. x4 / x8 restore the authored footprint
+	# exactly, which lands the explosives at ~23x20px — the crate_ammo footprint the
+	# whole pickup family shares. Pinned by test_view_honesty.gd::SPRITE_CANVAS.
+	"cap_pierce": 0.56, "cap_spread": 0.56, "cap_triple": 0.56, "cap_rend": 0.56,
+	"cap_claymore": 0.48, "cap_smoke": 0.48, "cap_flash": 0.48,
+	# hud_flag is the ONE map-marker glyph that also draws through _spr (the pennant on
+	# the spotter's radar truck, main.gd at spr_scale 0.04). That 0.04 was authored against
+	# the uncapped 256px source; a later sweep set size_limit=128 and halved the flag to a
+	# 3x4px speck on a 12px pole. 2.0 restores the authored ~7x9px WITHOUT touching the
+	# HUD/menu draws, which fit the same texture into explicit rects and never read SCALE.
+	"hud_flag": 2.0,
 	"skyline_chimney": 0.4, "skyline_mast": 0.4,   # bypassed — skyline draw site (main.gd) uses raw draw_texture_rect with its own rects
 	# mil2: characters ~unit size, vehicles ~tank size, weapons/items small pickups
 	"m_bombsuit": 0.5, "m_pilot": 0.52, "m_soldier2": 0.5,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
@@ -434,7 +448,14 @@ const SCALE := {
 	# sie-01: ghillie/sapper re-baked as authored 1024px cel-shaded infantry too -- SCALE drops from
 	# the old native-64px multiplier (2.45) to the same 0.5 family footprint (courier is untouched,
 	# still the native legacy art bake, still needs its old multiplier).
-	"ghillie": 0.5, "courier": 2.45, "sapper": 0.5,
+	# courier: 2.45 folded the 64px legacy art bake onto the PRE-cap cast2 footprint
+	# (300px canvas x 0.53 ~= 159px). Both anchors then moved out from under it —
+	# cast2 imports at 256px now, and sie-01 re-baked every other specialist to the
+	# 128px x 0.5 family — leaving the supply runner drawn 47x37px next to 19x17px
+	# infantry. Its bullet hitbox never moved: BULLET_HIT_RADIUS is 10px, so the
+	# drawn courier was 2.09x its own hittable half-extent and rounds visibly
+	# through the sprite did nothing. 1.05 lands it on the family's 19x16px.
+	"ghillie": 0.5, "courier": 1.05, "sapper": 0.5,
 	"tank_shell": 0.8,               # ~grenade footprint (26px)
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
 	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)

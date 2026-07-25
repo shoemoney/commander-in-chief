@@ -25,6 +25,7 @@ extends RefCounted
 ## so every comparison below is a plain number against a plain number.
 
 const Runner := preload("res://tests/run_tests.gd")
+const Art := preload("res://src/view/art.gd")
 const PX := 1.0 / Fixed.ONE
 
 
@@ -440,3 +441,85 @@ func test_px_is_only_ever_applied_to_fixed_point_quantities() -> void:
 			suspicious.append("main.gd:%d  %s" % [n + 1, line.strip_edges()])
 	Runner.T.eq(suspicious.size(), 0,
 		"every `* PX` converts a fixed-point sim value; unexplained ones: %s" % str(suspicious))
+
+
+# --- 11. IMPORT-SCALE DRIFT: a SCALE row must know the canvas it was tuned on ---
+
+## Every `Art.SCALE` row is a multiplier authored against ONE canvas size, and
+## `main._spr` sizes off the IMPORTED texture — not the source PNG. So adding or
+## changing `process/size_limit` in a `.import` resizes that sprite on screen with
+## no error, no warning and no failing test. Nothing in the sim moves with it, so
+## every extent tied to the art (a blocking AABB, a hitbox, a pickup radius) stays
+## exactly where it was and quietly stops matching what the player can see.
+##
+## It has shipped three times:
+##   * the bunker — SCALE tuned on a 440px source, capped to 128px: the strongpoint
+##     drew 3.44x too small around an unchanged 48x32 AABB, so rounds died in
+##     invisible armour a sprite-width off the drawn wall (343% of its silhouette).
+##   * the capsule glyphs — tuned uncapped at 512/1024px, capped to 128px: the
+##     1-in-6 elite reward drew at THREE PIXELS under a 12px pickup radius.
+##   * the spotter's pennant — tuned on 256px, capped to 128px: halved to a speck.
+## In all three the numbers still read fine in review, because the diff that broke
+## them was in a different file from the number it invalidated.
+##
+## SPRITE_CANVAS is the missing half of each SCALE row: the imported canvas that
+## row was tuned against. Kept here beside the assertion rather than derived —
+## deriving it from the same import the test is checking would assert nothing. An
+## import sweep, a re-bake at a new resolution, or a brand-new SCALE row all move
+## a number out from under this table and turn the suite red. When that happens
+## the fix is to re-tune SCALE by the same factor the canvas moved (that is all
+## three fixes above were) and THEN update the row — never the row alone.
+const SPRITE_CANVAS := {
+	"ammobox": 160, "barbedwire": 220, "barrel": 160, "barricade": 200, "barrier": 220, "bridge_mid": 220,
+	"bridge_ramp": 220, "bunker": 128, "bunker2": 128, "cactus_dead1": 120, "cactus_dead2": 120,
+	"cactus_dead3": 120, "cactus_large": 120, "cactus_small": 96, "cap_claymore": 128, "cap_flash": 128,
+	"cap_pierce": 128, "cap_rend": 128, "cap_smoke": 128, "cap_spread": 128, "cap_triple": 128,
+	"colossus_barrel": 72, "colossus_body": 128, "corpse_soldier1": 140, "corpse_soldier2": 140,
+	"courier": 64, "crate_airstrike": 56, "crate_ammo": 56, "crate_grenade": 56, "crate_stack": 220,
+	"crater": 160, "crater_field": 240, "crater_water": 240, "dropped_shield": 140, "dry_shrub": 220,
+	"elite": 256, "enemy_assault": 128, "enemy_lmg": 128, "enemy_shotgun": 128, "enemy_smg": 128,
+	"enemy_sniper": 128, "explosion0": 128, "explosion1": 128, "explosion2": 128, "explosion3": 128,
+	"fallen_merc": 180, "flag_iran": 600, "flag_marker": 200, "flak_gun": 220, "frogman": 128,
+	"frogman_speargun": 128, "fx_bubble1": 64, "fx_bubble2": 64, "fx_flame": 200, "fx_fumes": 128,
+	"fx_impactdark": 200, "fx_muzzle_fan": 128, "fx_smoke": 200, "ghillie": 128, "gunship_barrel": 48,
+	"gunship_body": 112, "hud_flag": 128, "item_binoculars": 40, "item_bullet": 32, "item_bullet_shotgun": 32,
+	"m_bombsuit": 128, "m_drone": 48, "m_heli_attack2": 112, "m_heli_transport": 112, "m_jet": 128,
+	"m_pilot": 56, "m_radar_tank": 104, "m_rocket_truck": 104, "m_soldier2": 128, "m_technical": 96,
+	"mg_stand": 160, "mg_tripod": 160, "mz_pop": 128, "observer": 128, "pickup_vest": 56, "player1": 256,
+	"player2": 256, "radio_tower": 220, "riot_shield": 64, "rock1": 220, "rock2": 260, "rusher": 256,
+	"sandbag_beige": 80, "sapper": 128, "scrub": 72, "skyline_chimney": 160, "skyline_mast": 200,
+	"tank_barrel": 72, "tank_body": 104, "tank_hulk": 104, "tank_shell": 32, "tank_trap": 200,
+	"tent": 260, "trench": 260, "tumbleweed": 200, "wall_sandbag": 240, "wall_sandbag_b": 240,
+	"wall_sandbag_c": 240, "wall_sandbag_end": 120, "watchtower": 260, "wep_claymore": 40, "wep_flashbang": 40,
+	"wep_grenade": 40, "wep_mg": 56, "wep_rifle": 56, "wep_shotgun": 56, "wep_smoke": 40, "wreck": 220,
+	"wreck_apc": 104, "wreck_halftrack": 240, "wreck_light_tank": 96, "wreck_technical": 96,
+}
+
+
+func test_every_scale_row_still_has_the_canvas_it_was_tuned_against() -> void:
+	for key in Art.SCALE:
+		Runner.T.ok(Art.TEX.has(key), "SCALE row '%s' has a texture to scale" % key)
+		if not Art.TEX.has(key):
+			continue
+		Runner.T.ok(SPRITE_CANVAS.has(key),
+			"new SCALE row '%s' must record the imported canvas its multiplier was tuned " % key
+			+ "against — see the note above; _spr sizes off the IMPORT, not the source PNG")
+		if not SPRITE_CANVAS.has(key):
+			continue
+		var t: Texture2D = Art.tex(key)
+		var got := maxi(int(t.get_size().x), int(t.get_size().y))
+		var want: int = SPRITE_CANVAS[key]
+		Runner.T.ok(got == want,
+			("'%s' imports at %dpx but its SCALE (%.3f) was tuned on a %dpx canvas — it now "
+				% [key, got, Art.draw_scale(key), want])
+			+ ("draws %.2fx its authored size while every sim extent tied to it stayed put. "
+				% (float(got) / float(maxi(want, 1))))
+			+ "Re-tune SCALE by that factor, THEN update SPRITE_CANVAS.")
+
+
+func test_the_canvas_table_does_not_outlive_the_scale_rows() -> void:
+	## The other direction: a retired sprite must not leave a stale row behind to
+	## be silently "verified" forever. A ratchet nobody prunes stops being read.
+	for key in SPRITE_CANVAS:
+		Runner.T.ok(Art.SCALE.has(key),
+			"SPRITE_CANVAS still lists '%s', which no longer has an Art.SCALE row" % key)

@@ -37,6 +37,11 @@ const CALL_SCALE := {
 	"colossus_body": 1.9,
 	"wep_claymore": 1.05,   # mines / claymores
 	"bunker": 0.78,         # _draw_bunkers
+	"courier": 0.5,         # _draw_enemies, fleeing supply runner
+	"crate_ammo": 0.55,     # _draw_pickups — every pickup shares one spr_scale
+	"pickup_vest": 0.55,
+	"cap_pierce": 0.55,
+	"cap_claymore": 0.55,
 }
 
 
@@ -209,6 +214,32 @@ func test_player_bullet_is_generous_against_infantry() -> void:
 	var r := _px(SimWorld.BULLET_HIT_RADIUS)
 	Runner.T.ok(r > fh, "a player round grazing the silhouette must count as a hit")
 	_band("player bullet vs fodder", r / fh, 1.00, 1.30)
+	# The courier is the same infantry class and the same 10px bullet test, but its
+	# SCALE was left behind by two separate re-bakes (cast2 300->256, then the
+	# sie-01 specialists onto a 128px canvas). It drew 47x37px — 2.09x its own
+	# hittable half-extent — so rounds visibly through the runner did nothing, on
+	# the ONE enemy the game asks you to shoot before it escapes.
+	var ch := _half("courier")
+	if ch > 0.0:
+		_band("player bullet vs courier", r / ch, 1.00, 1.30)
+
+
+func test_a_pickup_is_the_size_of_the_radius_that_collects_it() -> void:
+	# PICKUP_RADIUS is one constant for the whole drop family — crates, the vest,
+	# and the rare capsules — so every one of them has to be drawn at roughly the
+	# size that constant reaches. The capsule glyphs were not: their SCALE rows
+	# were eyeballed against uncapped 512/1024px sources and a later import sweep
+	# capped them to 128px, so the 1-in-6 elite reward drew at THREE PIXELS inside
+	# a 12px collect ring. Nothing failed — a reward you cannot see is not an
+	# error, it is just a reward nobody notices. Band both ways: below 1.0 the
+	# drop out-grows the ring that takes it (you stand on loot and it ignores
+	# you); far above it the ring is a vacuum around an invisible speck.
+	var r := _px(SimWorld.PICKUP_RADIUS)
+	for drop in ["crate_ammo", "pickup_vest", "cap_pierce", "cap_claymore"]:
+		var dh := _half(drop)
+		if dh == 0.0:
+			continue
+		_band("pickup radius vs %s" % drop, r / dh, 0.90, 2.00)
 
 
 func test_pilot_rescue_reaches_further_than_the_touch_that_kills() -> void:
