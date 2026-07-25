@@ -178,7 +178,7 @@ var _scan_mat_hs_prev := -1.0        # gfx-loop: last pushed scan "strength" arg
 var _grade_mat_breather_prev := -1.0 # gfx-loop: last pushed grade "breather" arg — skip redundant re-pushes
 var _water_shader: Shader            # animated river water (view-only, see water.gdshader)
 var _water_rects: Array[ColorRect] = []   # pooled per-band water quads (z=-1, under units)
-var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot, splash_t] last sent to the shader
+var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot, splash_t, wake0, wake1] last sent to the shader
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _bg_cam := -1                    # last (camera_top, march) painted onto _bg_root —
 var _bg_march := -1.0                # its ~90-rect rebuild is a pure function of these
@@ -753,16 +753,35 @@ func _setup_water() -> void:
 		r.z_as_relative = false
 		var m := ShaderMaterial.new()
 		m.shader = _water_shader
-		m.set_shader_parameter("rect_size", Vector2(640.0, SimWorld.WATER_H * PX))
+		m.set_shader_parameter("rect_size", Vector2(640.0, SimWorld.WATER_H * PX + WATER_PAD * 2.0))
 		r.material = m
 		add_child(r)
 		_water_rects.append(r)
-		_water_pushed.append([-1, -1.0, 0.0])
+		_water_pushed.append([-1, -1.0, 0.0, Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0)])
 	# Warm the water shader too (same first-draw compile hitch as screen_fx):
 	# show one rect as a 1px off-screen-bottom sliver for the boot frame —
 	# _sync_water repositions or hides it on the first real draw.
 	_water_rects[0].position = Vector2(0.0, 359.0)
 	_water_rects[0].visible = true
+
+
+# Organic shoreline: two out-of-phase sines in screen-x displace the waterline so
+# neither the sand bank nor the shader edge is a ruler line. Amplitudes/freqs are
+# pushed to water.gdshader as uniforms — this is the ONLY definition.
+const BANK_AMP := Vector2(5.0, 2.5)     # px of displacement per harmonic
+const BANK_FREQ := Vector2(6.5, 15.0)   # radians across the 640px screen width (~1 + ~2.4 cycles, so BOTH halves visibly wander, not just the left)
+const WATER_PAD := 14.0                 # px the shader quad grows past the sim band
+# Dry-side edge of the bank polygon MUST clear the max possible shore displacement
+# (BANK_AMP.x + BANK_AMP.y) or the wet/dry edges can cross and the polygon self-intersects,
+# which makes draw_colored_polygon fail triangulation and drop the whole bank silently.
+const BANK_BASE := BANK_AMP.x + BANK_AMP.y + 2.0
+
+
+static func _bank_offset(u: float, phase: float, top: bool) -> float:
+	## u = 0..1 across the screen. Returns px to push this shore INTO the band
+	## (positive = narrower river). Mirrored phase per shore so banks aren't parallel.
+	var ph := phase + (0.0 if top else 2.1)
+	return BANK_AMP.x * sin(u * BANK_FREQ.x + ph) + BANK_AMP.y * sin(u * BANK_FREQ.y + ph * 1.7)
 
 
 # a1-03: the water body follows the SAME 5-stop biome ramp as grass/dirt. It was
@@ -799,21 +818,43 @@ func _sync_water() -> void:
 		var pushed: Array = _water_pushed[vis]
 		vis += 1
 		rect.visible = true
-		rect.position = Vector2(0.0, wy)
-		rect.size = Vector2(640.0, SimWorld.WATER_H * PX)
-		# All five uniforms are constant per band + soot level, and each
+		rect.position = Vector2(0.0, wy - WATER_PAD)
+		rect.size = Vector2(640.0, SimWorld.WATER_H * PX + WATER_PAD * 2.0)
+		# All uniforms are constant per band + soot level, and each
 		# set_shader_parameter dirties the material. Re-push only when this pool
 		# rect is re-assigned to a different band or the sector soot moves.
 		if pushed[0] != w["y"] or pushed[1] != wsec:
 			pushed[0] = w["y"]
 			pushed[1] = wsec
 			var mat: ShaderMaterial = rect.material
+			mat.set_shader_parameter("rect_size", rect.size)
 			mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
 			mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
 			# De-sync ripples per band: derive a stable phase from the band's world y.
 			mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
 			mat.set_shader_parameter("shallow_col", w_shallow)
 			mat.set_shader_parameter("deep_col", w_deep)
+			mat.set_shader_parameter("pad_px", WATER_PAD)
+			mat.set_shader_parameter("band_px", SimWorld.WATER_H * PX)
+			mat.set_shader_parameter("bank_amp", BANK_AMP)
+			mat.set_shader_parameter("bank_freq", BANK_FREQ)
+		# Bow wake: alive players standing in THIS band push a foam ring + trailing V
+		# (same idiom as the splash ring above — band-relative UV, x/y/strength).
+		var wk := [Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0)]
+		var wn := 0
+		for pp in sim.players:
+			if wn >= 2:
+				break
+			if pp["alive"] and sim._in_water(pp["x"], pp["y"]) \
+					and pp["y"] >= w["y"] and pp["y"] < w["y"] + SimWorld.WATER_H:
+				wk[wn] = Vector3((pp["x"] * PX) / 640.0,
+					float(pp["y"] - w["y"]) / float(SimWorld.WATER_H), 1.0)
+				wn += 1
+		for wi in 2:
+			if wk[wi].distance_to(pushed[3 + wi]) > 0.002:
+				pushed[3 + wi] = wk[wi]
+				var wmat: ShaderMaterial = rect.material
+				wmat.set_shader_parameter("wake0" if wi == 0 else "wake1", wk[wi])
 		# Wet-blast splash ring: only the band containing the blast animates it.
 		# Guarded like the uniforms above — pushes only while a ring is live.
 		var in_band: bool = _water_splash["t"] > 0.0 and _water_splash["y"] >= w["y"] \
@@ -6568,24 +6609,36 @@ func _draw_water() -> void:
 		# every crossed river kept drawing banks + bridge + rocks off-screen.
 		if wy + wh < -20.0 or wy > 380.0:
 			continue
-		# Water body, wave ripples and sun glint are the water.gdshader quad synced
-		# under the units by _sync_water(); here we only draw what sits ON the water.
-		# Banks (drawn over the shader's shore edges).
-		draw_texture_rect(Art.tex("sand"), Rect2(0, wy - 6, 640, 8), true, bank_col)
-		draw_texture_rect(Art.tex("sand"), Rect2(0, wy + wh - 2, 640, 8), true, bank_col)
-		# a2-06 AD#8: a lighter/warmer SHALLOWS band hugging each bank so the river reads
-		# with DEPTH (shallow at the edges -> deep mid-channel) instead of a flat slab.
-		var wsec2 := clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)
-		var shallows: Color = _WATER_SHALLOW_STOPS[wsec2].lerp(Color(0.72, 0.74, 0.62), 0.45)
-		draw_rect(Rect2(0, wy + 1.0, 640.0, 5.0), Color(shallows.r, shallows.g, shallows.b, 0.4))
-		draw_rect(Rect2(0, wy + wh - 6.0, 640.0, 5.0), Color(shallows.r, shallows.g, shallows.b, 0.4))
+		# Water body, wave ripples, sun glint and shore-foam depth gradient are the
+		# water.gdshader quad synced under the units by _sync_water(); here we only
+		# draw what sits ON the water.
 		# Mud banks (2v second terrain): brown half-speed strips flanking the
-		# band — drawn under the sand lips so the slow zone reads as terrain.
+		# band — drawn BEFORE the sand lips so the curved bank polygon's water-side
+		# wobble stays on top of the mud instead of the mud burying the sand lip
+		# wherever the offset dips inward (r2 fix — was drawn after and covered it).
 		# Alpha 0.75 -> 0.92 (c2 3v: half-speed ground must not read as a
 		# translucent decal you can ignore).
 		var mud_c := Color(0.42, 0.32, 0.2, 0.92).lerp(Color(0.3, 0.25, 0.2, 0.92), soot)
 		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy - 6 - 40, 640, 40), true, mud_c)
 		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy + wh + 2, 640, 40), true, mud_c)
+		# Banks: a wobbling polygon (not a ruler-straight strip) that shares the
+		# exact sine curve the shader displaces its shoreline by, so sand and water
+		# edge track each other instead of drifting into two parallel tells.
+		var wph := fmod(float(w["y"]) * 0.00013, 37.0)   # same phase _sync_water gives the shader
+		for shore_top in [true, false]:
+			var pts := PackedVector2Array()
+			var uvs := PackedVector2Array()
+			var base := (wy - BANK_BASE) if shore_top else (wy + wh + BANK_BASE)   # dry-side edge
+			for s in 33:                                   # 20px steps across 640
+				var u := float(s) / 32.0
+				var ex := u * 640.0
+				var ey := (wy + _bank_offset(u, wph, true)) if shore_top \
+					else (wy + wh - _bank_offset(u, wph, false))
+				pts.append(Vector2(ex, ey)); uvs.append(Vector2(ex / 64.0, ey / 64.0))
+			for s in range(32, -1, -1):                    # back along the dry edge
+				var ex2 := float(s) / 32.0 * 640.0
+				pts.append(Vector2(ex2, base)); uvs.append(Vector2(ex2 / 64.0, base / 64.0))
+			draw_colored_polygon(pts, bank_col, uvs, Art.tex("sand"))
 		# Mud OUTER edge (c2 3v): a 2px dark lip + hash notches on the dry
 		# side of both strips — the exact line where half-speed begins reads
 		# before you step in. Same deterministic notch idiom as the banks.
@@ -6601,41 +6654,12 @@ func _draw_water() -> void:
 				5.0 + float(mnh % 6), 2.5), mud_lip)
 			draw_rect(Rect2(float((mnh * 13) % 630), wy + wh + 42.0 + float((mnh >> 3) % 3),
 				5.0 + float((mnh >> 5) % 6), 2.5), mud_lip)
-		# Broken banks (5v: the ruler-straight sand edge was the tell): ~14
-		# hash-notches per bank bite into the strip, skipping the ford span.
+		# Tumbleweed-skip seed/bounds (used below): kept even though the sand-edge
+		# notches that used to share it were deleted (the curved bank polygon is
+		# the irregularity now) — the tumbleweed scatter still needs them.
 		var nseed := Art.cell_hash(int(w["y"] / 4096) * 29, 3)
 		var nford_l: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX - 12.0
 		var nford_r: float = (w["ford_x"] + SimWorld.FORD_HALF_W) * PX + 12.0
-		var notch_col := bank_col.darkened(0.25)
-		# Wet-sand line: a thin damp band hugging the waterline on both banks
-		# (Grok round-2: the dry sand met the water with no transition).
-		var damp := bank_col.darkened(0.38)
-		draw_rect(Rect2(0, wy + 1.0, 640.0, 1.5), Color(damp.r, damp.g, damp.b, 0.5))
-		draw_rect(Rect2(0, wy + wh - 1.5, 640.0, 1.5), Color(damp.r, damp.g, damp.b, 0.5))
-		# Foam flecks along the damp line (Grok round-3): irregular low-alpha
-		# off-white ticks where water worries the sand.
-		var fseed := Art.cell_hash(int(w["y"] / 4096) * 41, 11)
-		for fk in 8:
-			var fh := Art.cell_hash(fseed + fk * 23, fk)
-			var ffx := float(fh % 630)
-			var ffw := 2.0 + float(fh % 3)
-			draw_rect(Rect2(ffx, wy + 1.0 + float(fh % 2), ffw, 1.0), Color(0.9, 0.94, 0.9, 0.22))
-			draw_rect(Rect2(float((fh * 5) % 630), wy + wh - 2.0 - float(fh % 2), ffw, 1.0), Color(0.9, 0.94, 0.9, 0.22))
-		for nk in 14:
-			var nh := Art.cell_hash(nseed + nk * 17, nk)
-			var nx := float(nh % 640)
-			if nx > nford_l and nx < nford_r:
-				continue
-			var nw2 := 6.0 + float(nh % 5)
-			var njit := float((nh / 7) % 5) - 2.0
-			draw_rect(Rect2(nx, wy - 1.0 + njit, nw2, 2.0 + float(nh % 2)), notch_col)
-			draw_rect(Rect2(float((nh * 7) % 640), wy + wh + 1.0 + njit, nw2, 2.0 + float((nh / 3) % 2)), notch_col)
-			# Second irregularity scale (Grok round-2): wide shallow bites layered
-			# under the small notches so the profile stops reading as dashed.
-			if nk % 3 == 0:
-				var bw := 14.0 + float(nh % 7)
-				draw_rect(Rect2(float((nh * 3) % 620), wy - 2.0, bw, 1.4), Color(notch_col.r, notch_col.g, notch_col.b, 0.6))
-				draw_rect(Rect2(float((nh * 11) % 620), wy + wh + 2.5, bw, 1.4), Color(notch_col.r, notch_col.g, notch_col.b, 0.6))
 		# The dry ford — at the SIM's compressed per-band width (c2 3v BUG: the
 		# view drew full FORD_HALF_W on every band while the sim tightens
 		# -4px/band; on deep bands walkable ground rendered as water and drawn

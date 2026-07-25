@@ -1742,3 +1742,19 @@ func test_no_dev_addon_autoloads_in_project_godot() -> void:
 			offenders.append(line.split("=")[0])
 	Runner.T.eq(offenders, [] as Array[String],
 		"no [autoload] entry points into addons/ (dev-only tooling must not ship)")
+
+
+# --- river shoreline is a curve, not a ruler line ---------------------------------------
+func test_river_shore_is_curved_and_shader_shares_the_params() -> void:
+	var m := load("res://src/main.gd")
+	var lo := 999.0
+	var hi := -999.0
+	for i in 33:
+		var v: float = m._bank_offset(float(i) / 32.0, 3.7, true)
+		lo = minf(lo, v); hi = maxf(hi, v)
+	Runner.T.ok(hi - lo > 4.0, "bank offset actually varies across the screen")
+	Runner.T.ok(absf(hi) <= m.BANK_AMP.x + m.BANK_AMP.y + 0.01, "bank offset stays bounded by its amplitudes")
+	Runner.T.ok(m.BANK_AMP.x + m.BANK_AMP.y < m.BANK_BASE, "bank polygon can never self-intersect its dry edge")
+	var src := FileAccess.get_file_as_string("res://src/view/water.gdshader")
+	for u in ["bank_amp", "bank_freq", "pad_px", "band_px"]:
+		Runner.T.ok(u in src, "water.gdshader still consumes uniform " + u)
