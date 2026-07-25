@@ -627,9 +627,11 @@ func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 	Runner.T.ok(r["x"] > sb["x"], "rusher never phases through the bag line (at %d vs bag %d)" % [r["x"], sb["x"]])
 	sim._explode(sb["x"], sb["y"])
 	Runner.T.eq(sim.sandbags.size(), 0, "one grenade clears the bag")
-	# Field cap denies the 7th bag, loudly.
+	# Field cap denies the 7th bag, loudly. These stand in for bags the PLAYER planted,
+	# so they carry "player": 1 — the cap counts player-tagged bags now, not untagged
+	# ones (authored cover used to bill against the player's allowance; see _try_buy).
 	for n in SimWorld.SANDBAG_FIELD_CAP:
-		sim.sandbags.append({"x": n * 40 * SimWorld.F_ONE, "y": p["y"]})
+		sim.sandbags.append({"x": n * 40 * SimWorld.F_ONE, "y": p["y"], "player": 1})
 	var chest0: int = sim.war_chest
 	sim._try_buy(p, 4)
 	Runner.T.eq(sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP, "field cap holds at 6")
