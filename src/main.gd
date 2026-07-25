@@ -2558,7 +2558,13 @@ func _consume_events() -> void:
 					_fx.append({"x": dbx, "y": sim.camera_top + 18 * Fixed.ONE, "t": 0.0, "kind": "tex",
 						"tex": "fx_smoke", "sz": 42.0, "grow": 0.6, "fade": 2.4, "rate": 0.007, "col": dbcol})
 			"wave_clear":
-				show_banner("WAVE CLEARED — SHOP OPEN")
+				# The ready-up is only a mechanic if it's discoverable: the banner that
+				# already announces the shop teaches the skip on the same breath.
+				show_banner(TranslationServer.translate("WAVE CLEARED — SHOP OPEN · HOLD [%s] TO DEPLOY")
+					% (Art.pad_label("revive") if Art.use_pad else OS.get_keycode_string(bind("revive"))))
+			"wave_ready":
+				show_banner("READY UP — DEPLOYING")
+				_sfx.play("wave_clear", -4.0, 1.3)
 			"wave_flawless":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.015, "text": "CLEAN WAVE  +40¢  +1500", "col": Art.safe(Color(0.5, 1.0, 0.7))})
@@ -4430,6 +4436,11 @@ func _track_bests() -> void:
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
 		_hint("supply", TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % (Art.pad_label("wheel") if Art.use_pad else "Q"))
+	# The intermission can be called early — teach the ready-up hold the first
+	# time a shop window is actually open (the only place it does anything).
+	if sim.mode == "endless" and sim.intermission_ticks > 0:
+		_hint("wave_ready", TranslationServer.translate("HOLD [%s] TO DEPLOY EARLY")
+			% (Art.pad_label("revive") if Art.use_pad else "E"))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
 	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:

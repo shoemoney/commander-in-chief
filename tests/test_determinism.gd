@@ -320,13 +320,30 @@ const SEED := 0xDEADBEEF
 ## campaign and 0 in endless (torture segs 0-1 stream no grass and no trench, no
 ## smoke capsule is ever collected, and endless wipes at wave 2). Zero rng draws
 ## added, zero aim points displaced -> both sample sets byte-identical.
+## RE-RECORDED (2026-07-25, endless intermission is a decision, not a ritual): the
+## campaign stream moved for ONE reason and it is not behavioral — `ready_hold` (the
+## ready-up hold counter) joined checksum() and is hashed from tick 0, shifting every
+## sample by a constant-zero field. PROVEN, not assumed: with only that one feed line
+## commented out and every other edit of this pass in place, all six campaign samples
+## match the previous committed values byte-for-byte (and endless sample 0 does too).
+## The three sim changes are endless-gated or inert here:
+##   1. Shop crates draw 3 of CRATE_POOL (ammo/grenade/vest/triple/claymore) instead of
+##      shuffling the literal [0,1,2] — endless-only, inside the wave-clear branch.
+##   2. The intermission length falls with depth (_intermission_len) and the whole living
+##      party holding REVIVE for READY_HOLD_TICKS deploys early — endless-only, and wave
+##      1 still returns the old flat WAVE_INTERMISSION_TICKS. The torture taps revive on a
+##      53-tick cycle, so it never sustains the 20-tick hold.
+##   3. Airstrike wipe kills score at WIPE_SCORE_PCT and feed the kill-streak instead of
+##      being worth literally nothing (_kill_enemy gained a score_pct arg, default 100 =
+##      the old arithmetic exactly). The torture never presses buy, so no strike is ever
+##      called in either stream — same argument the wheel-only-airstrike note makes above.
 const GOLDEN: Array[int] = [
-	506778608736561550,
-	7590183919185690526,
-	241001744564993750,
-	8011787666350042381,
-	1378208880990403486,
-	5406986129690569999,
+	2900340741888354810,
+	2408893846638637894,
+	916404381956013810,
+	8354892605075175823,
+	4018536360133665946,
+	6638835686111312835,
 ]
 
 
@@ -442,13 +459,23 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## torture wipes in wave 2, so the recycle path is never reached, and campaign never
 ## enters either branch at all. Confirmed empirically: the full suite is green with the
 ## committed values untouched.
+## ENDLESS RE-RECORDED (2026-07-25, endless intermission is a decision, not a ritual):
+## see the GOLDEN note for the three changes. Here they are NOT inert, and the split is
+## measured rather than argued: with `ready_hold` alone removed from checksum(), sample 0
+## still matched the old value and samples 1-5 did not. So sample 0 moves only from the
+## new hashed field, and 1-5 move from the wave-1 shop opening — the crate draw is a
+## partial Fisher-Yates over a 5-item pool (three rng calls) where the old one shuffled a
+## 3-item literal (two calls), so the shared rng stream legitimately shifts from the first
+## wave clear onward, which is ~tick 700 in this torture. Wave 1's intermission LENGTH is
+## unchanged (_intermission_len returns WAVE_INTERMISSION_TICKS at wave 1) and the run
+## still wipes in wave 2, so nothing here is the ready-up or the airstrike change.
 const ENDLESS_GOLDEN: Array[int] = [
-	870682775949389125,
-	2998730705561210490,
-	4845480010581780169,
-	7510121251359973883,
-	6349860726657738568,
-	1566297511967932093,
+	7378248570151103495,
+	868125611630360645,
+	726022612886355580,
+	2119675881134991003,
+	2548487990103045715,
+	9105982173161199403,
 ]
 
 
