@@ -721,10 +721,6 @@ static func _nz(i: int) -> float:
 	return 2.0 * (x - floor(x)) - 1.0
 
 
-static func _sq(t: float, f: float) -> float:
-	return 1.0 if sin(TAU * f * t) >= 0.0 else -1.0
-
-
 static func _sqbl(t: float, f: float) -> float:
 	# Band-limited square: odd-harmonic sum capped below Nyquist. The naive ±1
 	# square aliases its upper harmonics into inharmonic grit — audible on the

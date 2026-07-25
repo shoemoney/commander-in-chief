@@ -456,7 +456,6 @@ const SCALE := {
 ## Desert→jungle shift, multiplied onto the draw modulate. Units/vehicles take
 ## a darker olive-drab so they read against the bright jungle ground (with the
 ## outline below); foliage deepens green. Absent = white.
-const UNIT := Color(0.85, 0.81, 0.58)
 const OLIVE_VEH := Color(0.76, 0.85, 0.52)
 # a2-02: bosses break out of the disposable-tank olive into a heavy desaturated
 # GUNMETAL so the gunship + colossus read as an apex tier, not up-scaled jeeps.
