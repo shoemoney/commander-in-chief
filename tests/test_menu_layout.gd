@@ -2372,7 +2372,7 @@ func test_hover_plays_nav_sfx_like_other_devices() -> void:
 	m._unhandled_input(_motion_ev(Vector2(320.0, _row_cy(m, 3)), Vector2(0.0, 4.0)))
 	Runner.T.eq(m.sel, 3, "hover moved selection to row 3")
 	Runner.T.eq(stub._sfx.plays.size(), 1, "hover nav plays exactly one cue")
-	Runner.T.eq(stub._sfx.plays[0][0], "pickup", "hover nav plays the shared 'pickup' nav sfx")
+	Runner.T.eq(stub._sfx.plays[0][0], "ui_tick", "hover nav plays the dedicated ui_tick nav sfx (not the pickup jingle)")
 	m.free()
 	stub.free()
 
@@ -2403,7 +2403,7 @@ func test_hover_disarms_armed_destructive_row_audibly() -> void:
 	# row move (and unlike the 'arm' ping that primed it). No silent defuse.
 	Runner.T.eq(stub._sfx.plays.size(), 2, "disarming an armed row plays two cues (defuse + nav tick)")
 	Runner.T.eq(String(stub._sfx.plays[0][0]), "disarm", "the distinct stand-down cue fires first")
-	Runner.T.eq(String(stub._sfx.plays[1][0]), "pickup", "the ordinary nav tick still rides under it")
+	Runner.T.eq(String(stub._sfx.plays[1][0]), "ui_tick", "the ordinary nav tick still rides under it")
 	m.free()
 	stub.free()
 
