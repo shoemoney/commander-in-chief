@@ -1550,6 +1550,36 @@ func test_revive_is_contextual_not_on_permanent_legend() -> void:
 		Runner.T.ok(seg[0] != "revive", "no VERB_SEGS entry uses the revive act (%s)" % [seg])
 
 
+# 2P co-op: the downed row's prompt glyph must be keyed to the seat that actually presses the
+# button. P2 is hardwired to pad device 1 and deliberately never sets Art.use_pad (P1's mouse aim
+# keeps it false), so a flat `false` taught a pad-only P2 a keycap for a key they don't have. The
+# sim now lets a downed player pay from the floor themselves, so the seat that acts on this row IS
+# the row's own player — force_pad follows the row index, and P1's row keeps teaching keycaps.
+func test_downed_row_prompt_glyph_follows_the_seat_that_presses_it() -> void:
+	var sim := SimWorld.new(0, 2, "endless")
+	sim.last_stand = false
+	sim.war_chest = 999999          # affordable -> the REVIVE label + prompt glyph branch
+	for i in 2:
+		var p: Dictionary = sim.players[i]
+		p["deaths"] = 1
+		p["broke_timer"] = 0
+		var h := _FrameCaptureHud.new()
+		h.main = _FrameMain.new()
+		h.main.sim = sim
+		h._fit_full = HudIcons.RIGHT
+		h._measure = false
+		h._dead_chips(p, 8.0, 20.0, i, sim)
+		var seen := false
+		for b in h.boxes:
+			if b["k"] == "glyph" and b["id"] == "revive":
+				seen = true
+				Runner.T.eq(b["alt"], i == 1,
+					"P%d's downed row teaches P%d's OWN device (force_pad == %s)" % [i + 1, i + 1, i == 1])
+		Runner.T.ok(seen, "P%d's downed row draws the revive prompt glyph" % (i + 1))
+		h.main.free()
+		h.free()
+
+
 # c3-01: the DOWNED player row (skull + REVIVE cost + prompt glyph) was a direct-draw branch with
 # NO fit check — under width pressure the revive prompt could clip past RIGHT uncounted. It now
 # routes through the SAME shared "+N" clip as every other player-row branch: at a roomy edge the
@@ -2804,7 +2834,10 @@ class _FrameMain extends _MainStub:
 # produces, so the frame's layout is unchanged.
 class _FrameCaptureHud extends _ChipCaptureHud:
 	func _emit_act_glyph(act: String, center: Vector2, size: float, _col: Color, _alt: bool) -> void:
-		boxes.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
+		# `alt` == Art.draw_glyph's force_pad. Captured so the co-op tests can pin WHICH
+		# seat a contextual prompt is teaching (P2 is pad-only and never sets use_pad).
+		boxes.append({"k": "glyph", "id": act, "alt": _alt,
+			"box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
 	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate", "box": r})

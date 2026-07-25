@@ -2370,16 +2370,25 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
 				_run_had_down = true
-				_trauma = minf(1.0, _trauma + 0.5)
 				# A one-hit death is the loudest beat in the game — hold the
 				# freeze longer and punch the camera in so the loss lands.
-				_hitstop_frames = maxi(_hitstop_frames, 10)
+				# ...but the whole kit fired GLOBALLY, so in 2P a P2 knockdown
+				# detonated P1's screen: a 10-frame freeze mid-firefight plus a red
+				# damage vignette and an ears-ringing lowpass that both say "YOU are
+				# hit" to a player who wasn't. down_self_scale ducks only those
+				# SELF-directed channels while a squadmate is still standing. The
+				# SHARED ones stay full — one camera and one music bus, so the
+				# trauma/punch/flash/duck of a buddy hitting the dirt are genuinely
+				# everyone's. Solo (nobody left standing) is unchanged by construction.
+				var down_scale := down_self_scale(sim.players.any(func(q): return q["alive"]))
+				_trauma = minf(1.0, _trauma + 0.5)
+				_hitstop_frames = maxi(_hitstop_frames, maxi(3, int(10.0 * down_scale)))
 				_flash_alpha = maxf(_flash_alpha, 0.35)
-				_damage_vignette = 1.0
+				_damage_vignette = maxf(_damage_vignette, down_scale)
 				_punch = maxf(_punch, 0.14)
 				_buzz(1.0, ev.get("p", 0), true)   # the fallen player's OWN pad, not their squadmate's
 				_duck = 1.0
-				_concussion = 1.0   # the world goes underwater for a beat
+				_concussion = maxf(_concussion, down_scale)   # the world goes underwater for a beat
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
 				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_label("revive") if Art.use_pad else "E"), true)
@@ -2838,6 +2847,16 @@ func _blast_prox_for(x: int, y: int, pidx: int) -> float:
 	var pl := sim.players[pidx]
 	var dist_px := Vector2(float(x - pl["x"]), float(y - pl["y"])).length() * PX
 	return _prox_falloff(dist_px)
+
+
+static func down_self_scale(partner_standing: bool) -> float:
+	## How loud the SELF-directed half of the player_down beat (damage vignette,
+	## concussion lowpass, hitstop) should play. A KO with nobody left standing is
+	## the run ending in your hands — full force, exactly as before. A KO with a
+	## squadmate still up is THEIR problem to solve, and freezing/vignetting their
+	## screen mislabels it as their own wound while stealing the frames they need
+	## to go get the body. Pure + static so the co-op tests can pin it with no sim.
+	return 0.35 if partner_standing else 1.0
 
 
 static func _rumble_merge(cur: float, amt: float) -> float:

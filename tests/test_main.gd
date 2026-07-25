@@ -273,3 +273,35 @@ func test_p2_pad_gate_asks_for_device_1_not_a_pad_count() -> void:
 		"the co-op pad warning has exactly one call site (reached from _reset)")
 	Runner.T.ok(src.find("Input.joy_connection_changed.connect(_on_pad_count_changed)") != -1,
 		"...and a pad yanked mid-run re-raises it")
+
+
+
+# --- 2P co-op: a partner's KO must not detonate the survivor's screen ---
+
+func test_partner_ko_ducks_only_the_self_directed_channels() -> void:
+	# player_down fired the whole concussive kit GLOBALLY: a 10-frame freeze, a red
+	# damage vignette and an ears-ringing lowpass. In 2P that told the player still
+	# STANDING they were hit — they weren't — and froze their fight for a sixth of a
+	# second at the exact moment they need to move. down_self_scale ducks the
+	# self-directed half while a squadmate is up; with nobody standing it is a hard
+	# 1.0, so solo (and a team wipe) plays the old beat bit-for-bit.
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.eq(ms.down_self_scale(false), 1.0,
+		"nobody left standing -> the full death beat, unchanged")
+	Runner.T.ok(ms.down_self_scale(true) < 1.0,
+		"a partner still up -> the self-directed channels duck")
+	Runner.T.ok(ms.down_self_scale(true) > 0.0,
+		"...ducked, not muted — the KO still has to register on the shared screen")
+	Runner.T.ok(int(10.0 * ms.down_self_scale(true)) < 10,
+		"the freeze shortens for the player who still has agency")
+	# The SHARED channels (one camera, one music bus) must NOT be scaled — a squadmate
+	# hitting the dirt still shakes the frame and ducks the music for both seats.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.find("_damage_vignette = maxf(_damage_vignette, down_scale)") != -1,
+		"the damage vignette routes through the scale")
+	Runner.T.ok(src.find("_concussion = maxf(_concussion, down_scale)") != -1,
+		"the concussion lowpass routes through the scale")
+	Runner.T.eq(src.count("down_self_scale("), 2,
+		"exactly one caller plus the definition — one place, every KO")
+	Runner.T.ok(src.find("_duck = 1.0") != -1 and src.find("_punch = maxf(_punch, 0.14)") != -1,
+		"the shared music duck / camera punch stay unscaled")
