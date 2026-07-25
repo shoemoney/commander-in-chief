@@ -270,6 +270,23 @@ const SEED := 0xDEADBEEF
 ## torture never presses buy (a purchase needs progress the 60s script never reaches), the
 ## endless torture wipes in wave 2 so no shop crate is ever priced or collected, and the
 ## Clean Wave payout is arithmetically the same integer at every wave.
+## RE-RECORDED (2026-07-25, per-sector enemy rosters + duplicate-pair splits): the
+## campaign field spawner stopped rolling ONE flat ["grenadier","sniper","shield"]
+## +mg_nest list from sector 2 to the finale and now draws from SECTOR_SPECIALS --
+## a per-zone roster indexed 1:1 with ZONE_INFO, so the six authored sectors field
+## six different threat vocabularies. The torture opens gate 1 late in its 60s, so
+## it enters MARSH BASIN ["grenadier","sapper"]: a different roster, a different
+## draw span (2 entries, not 4), and therefore a different shared-rng sequence from
+## that point on. ONLY samples 4-5 move -- 0-3 are byte-identical to the seawall
+## record, which is exactly the fingerprint of a change that bites only after the
+## first gate opens. Riding along in the same pass (and NOT what moved these
+## values -- both are past the torture's reach): the grenadier's lob became a
+## THREE-blast cluster walked across the firing line (the drone keeps the single
+## precise circle, so the two _add_strike users are no longer the same dodge), and
+## the ghillie now fires-and-vanishes -- back under the grass, bullet-immune, for
+## GHILLIE_RECLOAK_TICKS -- where the sniper stays standing and can be traded with
+## at any time. ENDLESS_GOLDEN VERIFIED UNCHANGED: the endless wave spawner has its
+## own roster, and its torture wipes at wave 2, before grenadiers/ghillies exist.
 const GOLDEN: Array[int] = [
 	506778608736561550,
 	7590183919185690526,

@@ -65,9 +65,9 @@ func test_grenadier_lob_lands_on_stood_ground_but_missed_if_player_leaves() -> v
 		"kind": "grenadier", "fire_cd": SimWorld.GRENADIER_FIRE_CD_TICKS, "windup": 1}
 	sim.enemies.append(e)
 	sim.step([_idle()])
-	Runner.T.eq(sim.strikes.size(), 1, "windup hitting zero lobs a tracked strike")
-	Runner.T.eq(sim.strikes[0]["x"], pos_x, "strike lands on the player's x at lob time")
-	Runner.T.eq(sim.strikes[0]["y"], pos_y, "strike lands on the player's y at lob time")
+	Runner.T.eq(sim.strikes.size(), 3, "windup hitting zero lobs the three-blast cluster")
+	Runner.T.eq(sim.strikes[1]["x"], pos_x, "centre strike lands on the player's x at lob time")
+	Runner.T.eq(sim.strikes[1]["y"], pos_y, "centre strike lands on the player's y at lob time")
 	for i in SimWorld.STRIKE_TELEGRAPH_TICKS:
 		sim.step([_idle()])
 	Runner.T.ok(not p["alive"], "player who stayed in the blast is hurt when it resolves")
@@ -82,7 +82,7 @@ func test_grenadier_lob_lands_on_stood_ground_but_missed_if_player_leaves() -> v
 		"kind": "grenadier", "fire_cd": SimWorld.GRENADIER_FIRE_CD_TICKS, "windup": 1}
 	sim2.enemies.append(e2)
 	sim2.step([_idle()])
-	Runner.T.eq(sim2.strikes.size(), 1, "windup hitting zero lobs a tracked strike (case 2)")
+	Runner.T.eq(sim2.strikes.size(), 3, "windup hitting zero lobs the cluster (case 2)")
 	p2["x"] = pos_x + SimWorld.GRENADE_RADIUS + 20 * Fixed.ONE
 	p2["y"] = pos_y + SimWorld.GRENADE_RADIUS + 20 * Fixed.ONE
 	for i in SimWorld.STRIKE_TELEGRAPH_TICKS:
@@ -186,3 +186,189 @@ func test_sapper_cannot_cross_a_sandbag_line() -> void:
 	Runner.T.ok(sap["y"] > wall_y, "sapper never ends up on the player's side of the bag line")
 	Runner.T.ok(sap["y"] < start_y, "it did close on the wall (not passing by standing still)")
 	Runner.T.ok(sim.mines.size() > 0, "and it still lays mines on its cadence while stalled")
+# --- Per-sector rosters -------------------------------------------------------
+# The campaign used to run ONE flat ["grenadier","sniper","shield"]+mg_nest roll
+# from sector 2 all the way to the finale, while ZONE_INFO promised six distinct
+# zones. SECTOR_SPECIALS is that promise made real; these pin it.
+
+const SPAWNABLE_SPECIALS := ["grenadier", "sniper", "shield", "sapper", "ghillie",
+	"drone", "technical", "mg_nest", "broadcast"]
+
+
+func test_sector_specials_is_one_distinct_roster_per_authored_zone() -> void:
+	Runner.T.eq(SimWorld.SECTOR_SPECIALS.size(), SimWorld.ZONE_INFO.size(),
+		"one special roster per named zone")
+	Runner.T.ok(SimWorld.SECTOR_SPECIALS[0].is_empty(),
+		"sector 1 (STAGING GROUND) fields no specials — 'no surprises, learn the rules here'")
+	var seen_rosters := {}
+	for i in range(SimWorld.SECTOR_SPECIALS.size()):
+		var roster: Array = SimWorld.SECTOR_SPECIALS[i]
+		if i > 0:
+			Runner.T.ok(not roster.is_empty(), "sector %d fields specials" % (i + 1))
+		for k in roster:
+			Runner.T.ok(SPAWNABLE_SPECIALS.has(k),
+				"sector %d kind '%s' is one the spawner can actually build" % [i + 1, k])
+		var key: String = ",".join(roster)
+		Runner.T.ok(not seen_rosters.has(key),
+			"sector %d's roster is not a duplicate of sector %s's" % [i + 1, seen_rosters.get(key, "?")])
+		seen_rosters[key] = i + 1
+	# Every archetype the table can name must actually be USED, or the advertised
+	# vocabulary is quietly narrower than the roster list looks.
+	var used := {}
+	for roster in SimWorld.SECTOR_SPECIALS:
+		for k in roster:
+			used[k] = true
+	for k in SPAWNABLE_SPECIALS:
+		Runner.T.ok(used.has(k), "archetype '%s' appears in at least one sector roster" % k)
+
+
+func _spawner_kinds(sector: int) -> Dictionary:
+	## Every kind the campaign field spawner produces while fighting `sector`
+	## (0-based). _gate_counter is what an Arcade chapter jump primes and what a
+	## continuous run reaches; gates stay shut so `opened` alone would say sector 1.
+	var sim := SimWorld.new(0xBEEF + sector, 1)
+	sim._gate_counter = sector + 1
+	var seen := {}
+	for i in 600:
+		sim.tick_count = 0        # % interval == 0: every call spawns
+		sim._spawn_grace = 0
+		sim.enemies.clear()
+		sim._step_spawner()
+		for e in sim.enemies:
+			seen[e["kind"]] = true
+	return seen
+
+
+func test_field_spawner_only_fields_the_current_sectors_roster() -> void:
+	for sector in range(SimWorld.SECTOR_SPECIALS.size()):
+		var roster: Array = SimWorld.SECTOR_SPECIALS[sector]
+		var seen := _spawner_kinds(sector)
+		Runner.T.ok(seen.has("rusher"), "sector %d still fields ordinary rushers" % (sector + 1))
+		for k in seen:
+			if k == "rusher" or k == "elite":
+				continue
+			Runner.T.ok(roster.has(k),
+				"sector %d spawned '%s', which is not on its roster" % [sector + 1, k])
+		for k in roster:
+			Runner.T.ok(seen.has(k),
+				"sector %d never fielded its own '%s' in 600 spawns" % [sector + 1, k])
+
+
+func test_rend_unlocks_exactly_where_shieldmen_can_exist() -> void:
+	# Rend is the shield counter; offering it in a sector that fields no shields
+	# is a dead draw (and withholding it where they DO spawn is worse).
+	for sector in range(SimWorld.SECTOR_SPECIALS.size()):
+		var sim := SimWorld.new(3, 1)
+		sim._gate_counter = sector + 1
+		Runner.T.eq(sim._shields_possible(), SimWorld.SECTOR_SPECIALS[sector].has("shield"),
+			"sector %d Rend gate matches its roster" % (sector + 1))
+	# A shieldman carried over from an earlier sector still counts.
+	var carry := SimWorld.new(3, 1)
+	carry._gate_counter = 2   # MARSH BASIN — no shields on the roster
+	carry.enemies.clear()
+	Runner.T.ok(not carry._shields_possible(), "no shields on the marsh roster")
+	carry.enemies.append({"x": 0, "y": 0, "alive": true, "elite": true, "kind": "shield"})
+	Runner.T.ok(carry._shields_possible(), "a shieldman still walking re-opens the Rend drop")
+
+
+func test_campaign_sweeps_rally_masts_the_ratchet_left_behind() -> void:
+	# CRASHED CONVOY fields broadcast masts, and the campaign camera ratchets: a
+	# mast exempt from the off-screen sweep would live in enemies[] (and in the
+	# per-tick _broadcasts aura scan) for the rest of the run. Endless keeps the
+	# exemption — nothing ever leaves the band there and the mast is an objective.
+	var camp := SimWorld.new(5, 1)
+	camp.enemies.clear()
+	camp._spawn_broadcast(0, camp.camera_top + 900 * Fixed.ONE)   # well below the live band
+	camp._step_enemies()
+	Runner.T.eq(camp.enemies.size(), 0, "a passed-by mast is swept in campaign")
+	var endless := SimWorld.new(5, 1, "endless")
+	endless.enemies.clear()
+	endless._spawn_broadcast(0, endless.camera_top + 900 * Fixed.ONE)
+	endless._step_enemies()
+	Runner.T.eq(endless.enemies.size(), 1, "endless masts keep their sweep exemption")
+
+
+# --- Duplicate-pair splits ----------------------------------------------------
+
+func test_grenadier_lobs_a_cluster_across_the_firing_line_not_one_circle() -> void:
+	# Grenadier and drone both terminate in _add_strike. The cluster is what makes
+	# them read as two different threats: the drone's single circle is a
+	# step-off-the-spot dodge, the grenadier's wall must be broken LENGTHWISE.
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["x"] = 0
+	p["y"] = -100 * Fixed.ONE
+	sim.enemies.clear()
+	# Grenadier due EAST of the player: the firing line is horizontal, so the
+	# cluster must walk vertically.
+	var e := {"x": 60 * Fixed.ONE, "y": -100 * Fixed.ONE, "alive": true, "elite": true,
+		"kind": "grenadier", "fire_cd": SimWorld.GRENADIER_FIRE_CD_TICKS, "windup": 1}
+	sim.enemies.append(e)
+	sim.step([_idle()])
+	Runner.T.eq(sim.strikes.size(), 3, "one lob, three craters")
+	for s in sim.strikes:
+		Runner.T.eq(s["x"], p["x"], "every crater sits ON the firing line's x — the spread is perpendicular")
+	var ys := [sim.strikes[0]["y"], sim.strikes[1]["y"], sim.strikes[2]["y"]]
+	ys.sort()
+	Runner.T.eq(ys[1], p["y"], "the middle crater is on the player")
+	Runner.T.eq(p["y"] - ys[0], SimWorld.GRENADIER_CLUSTER_SPREAD, "near crater is one spread out")
+	Runner.T.eq(ys[2] - p["y"], SimWorld.GRENADIER_CLUSTER_SPREAD, "far crater is one spread the other way")
+	# The wall is wider than one fat circle — you cannot no-op it by standing still.
+	Runner.T.ok(SimWorld.GRENADIER_CLUSTER_SPREAD > SimWorld.GRENADE_RADIUS,
+		"craters are spread wider than one blast radius (a wall, not one fat circle)")
+
+	# The drone, from the identical setup, still calls exactly ONE circle.
+	var sim2 := SimWorld.new(1, 1)
+	var p2 := sim2.players[0]
+	p2["x"] = 0
+	p2["y"] = -100 * Fixed.ONE
+	sim2.enemies.clear()
+	sim2.enemies.append({"x": 60 * Fixed.ONE, "y": -100 * Fixed.ONE, "alive": true,
+		"elite": true, "kind": "drone", "fire_cd": SimWorld.DRONE_FIRE_CD_TICKS, "windup": 1})
+	sim2.step([_idle()])
+	Runner.T.eq(sim2.strikes.size(), 1, "the drone's paint is still a single precise circle")
+
+
+func test_ghillie_fires_once_then_vanishes_where_the_sniper_stays_up() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	p["x"] = 0
+	p["y"] = -100 * Fixed.ONE
+	sim.enemies.clear()
+	# Mid-paint, one tick from firing, well inside the notice radius.
+	var g := {"x": 0, "y": -220 * Fixed.ONE, "alive": true, "elite": true, "kind": "ghillie",
+		"fire_cd": 0, "windup": 1, "submerged": false, "surface_ticks": 0,
+		"aim_lx": 0, "aim_ly": 120 * Fixed.ONE}
+	sim.enemies.append(g)
+	sim.step([_idle()])
+	Runner.T.eq(sim.enemy_bullets.size(), 1, "the paint resolves into exactly one shot")
+	Runner.T.ok(g["submerged"], "and he is back under the grass the same tick he fires")
+	Runner.T.eq(g["fire_cd"], SimWorld.GHILLIE_RECLOAK_TICKS, "the cloak lockout is armed")
+	# Cloaked = untouchable: the kill window closed with the muzzle flash.
+	sim.bullets.append({"x": g["x"], "y": g["y"], "vx": 0, "vy": -SimWorld.BULLET_SPEED, "ttl": 60})
+	sim._step_bullets()
+	Runner.T.ok(g["alive"], "a re-cloaked ghillie eats no damage — you missed the window")
+	# He stays gone for the whole lockout even though the player never left range.
+	for i in SimWorld.GHILLIE_RECLOAK_TICKS - 1:
+		sim.step([_idle()])
+	Runner.T.ok(g["submerged"], "still cloaked one tick short of the lockout")
+	sim.step([_idle()])
+	Runner.T.ok(not g["submerged"], "surfaces again the tick the lockout expires — a NEW window")
+
+	# The sniper's whole counter-loop is the opposite: he fires and STAYS up, so
+	# he can be traded with at any time.
+	var sim2 := SimWorld.new(1, 1)
+	var p2 := sim2.players[0]
+	p2["x"] = 0
+	p2["y"] = -100 * Fixed.ONE
+	sim2.enemies.clear()
+	var s2 := {"x": 0, "y": -220 * Fixed.ONE, "alive": true, "elite": true, "kind": "sniper",
+		"fire_cd": SimWorld.SNIPER_FIRE_CD_TICKS, "windup": 1,
+		"aim_lx": 0, "aim_ly": 120 * Fixed.ONE}
+	sim2.enemies.append(s2)
+	sim2.step([_idle()])
+	Runner.T.eq(sim2.enemy_bullets.size(), 1, "the sniper fires his one shot too")
+	Runner.T.ok(not s2.get("submerged", false), "but the sniper does not vanish")
+	sim2.bullets.append({"x": s2["x"], "y": s2["y"], "vx": 0, "vy": -SimWorld.BULLET_SPEED, "ttl": 60})
+	sim2._step_bullets()
+	Runner.T.ok(not s2["alive"], "so he can be shot back the very next tick")

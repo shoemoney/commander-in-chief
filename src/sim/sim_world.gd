@@ -109,10 +109,15 @@ const ELITE_SPEED := 2 * F_ONE
 const ELITE_STANDOFF := 120 * F_ONE
 const ELITE_FIRE_CD_TICKS := 150
 const ELITE_WINDUP_TICKS := 24
-# Grenadier (endless-only): mid-range zoner that lobs a telegraphed area strike.
+# Grenadier: mid-range zoner that lobs a telegraphed area strike. The lob is a
+# CLUSTER of three walked ACROSS the firing line — that is the whole difference
+# between him and the drone, who calls one precise circle from the same
+# _add_strike. Drone = step off the spot; grenadier = a wall you have to break
+# lengthwise (run at him or away from him, never sideways).
 const GRENADIER_STANDOFF := 150 * F_ONE
 const GRENADIER_FIRE_CD_TICKS := 130
 const GRENADIER_WINDUP_TICKS := 40
+const GRENADIER_CLUSTER_SPREAD := 44 * F_ONE   # perpendicular offset of the outer two lobs
 # Sniper (endless-only): long-range, paints a laser line then fires one fast shot.
 const SNIPER_STANDOFF := 240 * F_ONE
 const SNIPER_FIRE_CD_TICKS := 170
@@ -125,12 +130,17 @@ const SHIELD_SPEED := F_ONE
 # mine-drop timer — no new hashed field.
 const SAPPER_MINE_CD_TICKS := 40
 const SAPPER_MAX_MINES := 40
-# Ghillie (endless-only): a cloaked sniper dug into LAND. Sits 'submerged' (no
-# threat arrow, bullet-immune) until you enter notice range, briefly reveals,
-# then runs the STATIONARY sniper paint→fire cycle. Reuses submerged/
-# surface_ticks/windup/aim_lx/aim_ly/fire_cd — no new hashed field.
+# Ghillie: a cloaked marksman dug into LAND. Sits 'submerged' (no threat arrow,
+# bullet-immune) until you enter notice range, briefly reveals, paints, fires ONE
+# shot — and then VANISHES again. That fire-and-vanish is the whole difference
+# between him and the sniper: the sniper stands there and can be traded with at
+# any time, the ghillie only exists inside a reveal→paint window, so the counter
+# is to rush the grass and kill him before he sinks back in. fire_cd doubles as
+# the post-shot cloak lockout. Reuses submerged/surface_ticks/windup/aim_lx/
+# aim_ly/fire_cd — no new hashed field.
 const GHILLIE_NOTICE_RADIUS := 210 * F_ONE
 const GHILLIE_REVEAL_TICKS := 26
+const GHILLIE_RECLOAK_TICKS := 90   # reveal(26)+paint(55) after it ≈ the sniper's 170t cadence
 const ENEMY_TOUCH_RADIUS := 10 * F_ONE
 # Landmines: deterministic field hazards. Any grounded unit (player on foot, or
 # an enemy) that steps within the trigger radius detonates them via _explode() —
@@ -252,6 +262,21 @@ const ZONE_INFO: Array[Dictionary] = [
 	{"name": "FOUNDRY WORKS", "blurb": "The ironworks quarter. Heat vents cook the approach on a cycle — time the crossing."},
 	{"name": "CRASHED CONVOY", "blurb": "A derailed supply train wedged across the road, dug in and defended."},
 	{"name": "THE FOUNDRY CORE", "blurb": "The Colossus's throne. No revives past this line — finish it."},
+]
+# Per-sector special roster — index i is the stretch culminating in gate i+1, so
+# it lines up 1:1 with ZONE_INFO above. The field spawner draws its specials from
+# THIS list, so each authored zone fields its own threat vocabulary instead of the
+# old flat grenadier/sniper/shield/mg_nest roll running unchanged from sector 2 to
+# the finale. Sector 1 stays empty on purpose (ZONE_INFO: "no surprises — learn
+# the rules here"). Every entry must be a kind the spawner can build (see
+# _spawn_special / _spawn_mg_nest / _spawn_broadcast) — test-pinned.
+const SECTOR_SPECIALS: Array[Array] = [
+	[],                                    # 1 STAGING GROUND — rushers and elites only
+	["grenadier", "sapper"],               # 2 MARSH BASIN — area denial across the flats
+	["sniper", "mg_nest"],                 # 3 BRIDGE GUNSHIP — long open span, rooted guns
+	["shield", "technical"],               # 4 FOUNDRY WORKS — armor down the vent lanes
+	["ghillie", "broadcast", "sapper"],    # 5 CRASHED CONVOY — dug in among the wreckage
+	["drone", "grenadier", "mg_nest", "shield"],   # 6 THE FOUNDRY CORE — the throne bombards
 ]
 const GATE_CAMERA_PAD := 60 * F_ONE
 # Flak Vest: absorbs exactly one hit, then a mercy window.
@@ -2719,7 +2744,19 @@ func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	if e["windup"] > 0:
 		e["windup"] = e["windup"] - 1
 		if e["windup"] == 0:
-			_add_strike(target["x"], target["y"])   # telegraphed blast where you stand
+			# THREE lobs walked ACROSS the firing line, not one circle underfoot.
+			# The drone calls the identical _add_strike as a single precise
+			# circle — the cluster is what makes these two read as different
+			# threats: you dodge the drone by stepping off the spot, you dodge
+			# the grenadier by running the line lengthwise (at him or away).
+			var px := 0
+			var py := 0
+			if dlen > F_ONE:
+				px = -Fixed.mul(Fixed.div(dy, dlen), GRENADIER_CLUSTER_SPREAD)
+				py = Fixed.mul(Fixed.div(dx, dlen), GRENADIER_CLUSTER_SPREAD)
+			_add_strike(target["x"] - px, target["y"] - py)
+			_add_strike(target["x"], target["y"])
+			_add_strike(target["x"] + px, target["y"] + py)
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > GRENADIER_STANDOFF:
@@ -2906,10 +2943,14 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	## A cloaked sniper dug into the ground: bullet-immune + harmless + no threat
 	## arrow while submerged, reveals when you enter notice range, then paints and
-	## fires ONE locked shot from cover (stationary — never chases). Killing it
-	## during the reveal/paint window defuses the shot. Reuses sniper paint state.
+	## fires ONE locked shot from cover (stationary — never chases), then SINKS
+	## BACK IN. Killing it during the reveal/paint window defuses the shot — and
+	## that window is the only time it can be killed at all, which is what makes
+	## it a different problem from the sniper standing in the open. Reuses sniper
+	## paint state; fire_cd is the post-shot cloak lockout while submerged.
 	if e["submerged"]:
-		if dlen <= GHILLIE_NOTICE_RADIUS:
+		e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
+		if e["fire_cd"] == 0 and dlen <= GHILLIE_NOTICE_RADIUS:
 			e["submerged"] = false
 			e["surface_ticks"] = GHILLIE_REVEAL_TICKS
 			events.append({"t": "frogman_surface", "x": e["x"], "y": e["y"]})
@@ -2931,14 +2972,20 @@ func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: in
 					"vy": Fixed.mul(Fixed.div(ly, llen), SNIPER_BULLET_SPEED),
 					"ttl": ENEMY_BULLET_TTL_TICKS,
 				})
+			# FIRE AND VANISH: the shot leaves and he is instantly back under the
+			# grass, bullet-immune. Where the sniper stays standing and can be
+			# traded with whenever you like, the ghillie only exists inside a
+			# reveal→paint window — rush the grass in that window or you never get
+			# to touch him. fire_cd is the lockout before he can surface again.
+			e["submerged"] = true
+			e["fire_cd"] = GHILLIE_RECLOAK_TICKS
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if dlen > GHILLIE_NOTICE_RADIUS:
 		e["submerged"] = true   # you slipped out of range — re-cloak and wait
 		return
 	if e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
-		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
-		e["windup"] = SNIPER_WINDUP_TICKS
+		e["windup"] = SNIPER_WINDUP_TICKS   # fire_cd is the CLOAK timer here, not a reload
 		e["aim_lx"] = dx   # lock the shot vector at paint start (view draws the line)
 		e["aim_ly"] = dy
 		events.append({"t": "sniper_paint", "x": e["x"], "y": e["y"]})
@@ -3110,15 +3157,18 @@ func _step_spawner() -> void:
 		return
 	_spawn_counter += 1
 	var x := rng.range_i(24, 616) * F_ONE
-	# Sector 2+ (1 gate opened): the endless ranged roster starts bleeding into
-	# the campaign field, so later sectors get a genuinely new threat vocabulary
-	# (laser-paint sniper, riot shield) — not just faster rushers.
-	if opened >= 1 and rng.range_i(0, 3 if hard else 4) == 0:  # NG+: 1-in-4 specials
-		var spick := rng.range_i(0, 3)   # +mg_nest turret
-		if spick == 3:
+	# Sector 2+: the ranged roster bleeds into the campaign field, drawn from THIS
+	# sector's own vocabulary (SECTOR_SPECIALS) so the six authored zones are six
+	# different fights, not one flat list reskinned. Sector 1's roster is empty.
+	var roster: Array = SECTOR_SPECIALS[_sector_index(opened)]
+	if not roster.is_empty() and rng.range_i(0, 3 if hard else 4) == 0:  # NG+: 1-in-4 specials
+		var kind: String = roster[rng.range_i(0, roster.size() - 1)]
+		if kind == "mg_nest":
 			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+		elif kind == "broadcast":
+			_spawn_broadcast(x, camera_top - 24 * F_ONE)
 		else:
-			_spawn_special(x, camera_top - 24 * F_ONE, ["grenadier", "sniper", "shield"][spick])
+			_spawn_special(x, camera_top - 24 * F_ONE, kind)
 	else:
 		# Elite ratio tightens with each opened gate (every 7th → every 3rd by
 		# gate 4) so late campaign escalates composition, not just cadence.
@@ -3182,17 +3232,32 @@ func _windup_for(kind: String) -> int:
 	return ELITE_WINDUP_TICKS
 
 
+func _sector_index(opened: int) -> int:
+	## 0-based ZONE_INFO/SECTOR_SPECIALS index of the stretch being fought.
+	## `opened` tracks it in a continuous run; `_gate_counter - 1` tracks it too
+	## and survives an Arcade chapter jump (jump_to_chapter primes the streaming
+	## cursors without opening any gate), so take the larger of the two — in a
+	## continuous campaign they are always equal, a closed gate being a hard lock.
+	return clampi(maxi(opened, _gate_counter - 1), 0, SECTOR_SPECIALS.size() - 1)
+
+
 func _shields_possible() -> bool:
-	## True once the shield archetype can actually spawn (campaign: 1 gate
-	## opened, matching _step_spawner's special roster; endless: wave 3+) —
-	## gates the Rend drop so it's never inert.
+	## True when the shield archetype can actually turn up — gates the Rend drop
+	## so it's never inert. Campaign: this sector's roster fields shieldmen, or one
+	## is still walking (spawned in an earlier sector and carried over). Endless:
+	## wave 3+, matching _step_wave_spawner's roster.
 	if mode == "endless":
 		return wave >= 3
 	var opened := 0
 	for g in gates:
 		if g["open"]:
 			opened += 1
-	return opened >= 1
+	if SECTOR_SPECIALS[_sector_index(opened)].has("shield"):
+		return true
+	for e in enemies:
+		if e["alive"] and e["kind"] == "shield":
+			return true
+	return false
 
 
 func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
@@ -3238,6 +3303,7 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 	if kind == "ghillie":
 		e["submerged"] = true   # dug in, cloaked until you close the distance
 		e["surface_ticks"] = 0
+		e["fire_cd"] = 0        # already in position: fire_cd is his cloak lockout, and it's spent
 	if kind == "drone":
 		# The marquee aerial threat kills like a trophy, not a grunt: marked
 		# rides the existing bounty grammar (3× pay + gold fountain + crown).
