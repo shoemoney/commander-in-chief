@@ -3133,3 +3133,96 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 		var verb_top: float = HudIcons.VERB_LEGEND_Y - lift - HudIcons.VERB_PLATE_BELOW
 		Runner.T.ok(verb_top + 2.0 * HudIcons.VERB_PLATE_BELOW <= reserve, "verb chip clears the colossus HP bar")
 		Runner.T.ok(verb_top >= bg.end.y, "lifted verb chip still sits below the caption strip")
+
+
+# --- the reserved-zone band contract ---------------------------------------------------------
+# main.gd's `_draw` is a Node2D at z=0; `$HUD` is a CanvasLayer at layer 1. main.gd can therefore
+# NEVER paint above the HUD chrome — an overlay that overlaps the corner plate or the boss bars
+# doesn't win the z-fight, it silently disappears under it. So every transient main.gd overlay
+# ducks through HudIcons.band_top() / band_bottom() instead of its own literal, and this test
+# pins that across the full config matrix: {1P,2P} x {campaign,endless} x {colossus on/off}.
+
+class _BandMain extends Node2D:
+	var sim: SimWorld = null
+	var _motion := 1.0
+	var _menu = null
+	var _debrief := false
+
+
+func test_reserved_zone_band_contract() -> void:
+	var font := Art.font()
+	# The widest caption the game can emit — the worst case for the bottom rail.
+	var worst := "SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\""
+	for pc in [1, 2]:
+		for mode in ["campaign", "endless"]:
+			for colossus in [false, true]:
+				var m := _BandMain.new()
+				var h := HudIcons.new()
+				h.main = m
+				var sim := SimWorld.new(7, pc, mode)
+				m.sim = sim
+				sim.colossus = {"alive": true, "hp": 14, "x": 0, "y": 0} if colossus else {}
+				var tag := "%dP/%s/%s" % [pc, mode, "colossus" if colossus else "no-colossus"]
+				var pb := h.panel_bottom()
+				# --- TOP RAIL: every banner slot clears the corner plate it can't draw over.
+				for slots in [0, 1, 2]:
+					for rows in [0, 1]:
+						var by := h.band_top(slots, rows)
+						Runner.T.ok(by >= pb + HudIcons.TOP_RESERVE_GAP,
+							"%s: banner y %d clears panel_bottom %d (slots %d, rows %d)"
+								% [tag, int(by), int(pb), slots, rows])
+						if slots > 0:
+							Runner.T.ok(by >= HudIcons.BOSS_BAR_TOP
+									+ HudIcons.BOSS_BAR_STRIDE * float(slots),
+								"%s: banner y %d clears %d boss bar(s)" % [tag, int(by), slots])
+						# A stacked persistent row (the replay ribbon) never lands on the banner.
+						if rows == 1:
+							Runner.T.ok(by >= h.band_top(slots, 0) + HudIcons.ROW_H,
+								"%s: the replay ribbon and the banner never share a slot" % tag)
+					# Stacking a bar can only push the band DOWN, never up.
+					Runner.T.ok(h.band_top(slots + 1) >= h.band_top(slots),
+						"%s: the top band is monotonic in boss slots" % tag)
+				# --- BOTTOM RAIL: caption + verb chip clear the persistent colossus block.
+				var bb := h.band_bottom(sim)
+				var want_bb: float = (HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP) \
+					if colossus else HudIcons.SCREEN_BOTTOM
+				Runner.T.eq(bb, want_bb, "%s: band_bottom reports the reserved floor" % tag)
+				var lift := HudIcons.bottom_band_lift(sim)
+				Runner.T.eq(lift > 0.0, colossus, "%s: the lift fires exactly when the block is up" % tag)
+				var lines := HudIcons._wrap_caption(worst, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
+				var w := 0.0
+				for ln in lines:
+					w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE).x)
+				var cap := HudIcons.caption_bg_rect(lines.size(), w, HudIcons.VERB_LEGEND_Y - 20.0 - lift)
+				Runner.T.ok(cap.end.y <= bb,
+					"%s: caption scrim bottom %d clears COLOSSUS_BLOCK_TOP" % [tag, int(cap.end.y)])
+				Runner.T.ok(cap.position.y > h.band_top(2),
+					"%s: the caption never rides up into the top band" % tag)
+				Runner.T.ok(HudIcons.VERB_LEGEND_Y - lift + HudIcons.VERB_PLATE_BELOW <= bb,
+					"%s: verb chip bottom clears COLOSSUS_BLOCK_TOP" % tag)
+				m.free()
+				h.free()
+	# The bottom edge-chevron dodge derives from the bar it dodges — the old 165/475 literal pair
+	# in main.gd was mirroring a bar that actually spans 170..470.
+	Runner.T.ok(HudIcons.COLOSSUS_DODGE_L < HudIcons.COLOSSUS_BAR_X,
+		"the dodge window opens left of the colossus bar")
+	Runner.T.ok(HudIcons.COLOSSUS_DODGE_R > HudIcons.COLOSSUS_BAR_X + HudIcons.COLOSSUS_BAR_W,
+		"the dodge window closes right of the colossus bar")
+
+
+# The caption strip and verb chip must OPT OUT while main.gd paints a result card: the card is
+# drawn at z=0 under this CanvasLayer, so "draw the card later" can never cover them.
+func test_result_card_suppresses_the_bottom_overlays() -> void:
+	var m := _BandMain.new()
+	var h := HudIcons.new()
+	h.main = m
+	var sim := SimWorld.new(7, 1)
+	m.sim = sim
+	Runner.T.eq(h._result_card_up(), false, "a live run shows the caption/verb overlays")
+	m._debrief = true
+	Runner.T.eq(h._result_card_up(), true, "the K.I.A. debrief suppresses them")
+	m._debrief = false
+	sim.victory = true
+	Runner.T.eq(h._result_card_up(), true, "the victory card suppresses them")
+	m.free()
+	h.free()
