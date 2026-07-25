@@ -137,6 +137,14 @@ var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyb
 var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
 var _down_anim: Array[float] = [0.0, 0.0]   # per-player death-knockdown tween (0→1)
 var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignette
+
+# a11y (WCAG 2.3.1 / photosensitivity): EVERY in-world countdown strobe routes through
+# _safe_strobe. A half-period of STROBE_HALF_TICKS ticks is 60/(2*10) == 3 flashes/sec —
+# the same threshold _draw_damage_vignette already names for the sniper-paint edge, which
+# was the ONLY strobe honoring it. REDUCE MOTION holds the lit phase steady rather than
+# suppressing the cue: these are lethal telegraphs, so hiding them is not the accessible
+# answer. `n` is the counting-down tick value the strobe rides (windup, seal, iframes).
+const STROBE_HALF_TICKS := 10
 var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
 var _captions := true            # accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption)
@@ -3205,12 +3213,12 @@ func _ev_revive(ev: Dictionary) -> void:
 	# heal-burst + rising motes off the revived body.
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.09})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.08,
-		"r": 34.0, "col": Color(0.4, 1.0, 0.5)})
+		"r": 34.0, "col": Art.safe(Color(0.4, 1.0, 0.5))})
 	for d in 8:
 		var rva := d * TAU / 8.0 + randf() * 0.3
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.05,
 			"vx": cos(rva) * randf_range(0.6, 1.6), "vy": sin(rva) * randf_range(0.6, 1.6) - 1.0,
-			"spin": 0.0, "col": Color(0.5, 1.0, 0.6)})
+			"spin": 0.0, "col": Art.safe(Color(0.5, 1.0, 0.6))})
 
 
 func _ev_vest_break(ev: Dictionary) -> void:
@@ -4334,7 +4342,7 @@ func _track_bests() -> void:
 			if sim.mode == "endless" and _run_vp_gain > 0:
 				# _run_vp_gain is what the debrief/victory card reads too (see _draw below) --
 				# not just this transient banner, so the gain survives past the banner's decay.
-				show_banner("BANKED +%d VP" % _run_vp_gain, Color(0.6, 0.9, 0.55))
+				show_banner("BANKED +%d VP" % _run_vp_gain, Art.safe(Color(0.6, 0.9, 0.55)))
 			if not _replay_saved and _recorder != null:
 				# Stringifying a whole run's input log is the biggest one-frame
 				# stall in the view — push it to a worker so the debrief card
@@ -6318,19 +6326,38 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 						Art.circle(self, Vector2(sx - 2.0, sy_px - 5.0), 1.2, Color(1.0, 0.6, 0.22, g_a * 0.8))
 
 
+## Photosensitivity-clamped strobe — see STROBE_HALF_TICKS. true == the strobe's LIT phase.
+func _safe_strobe(n: int) -> bool:
+	return true if _motion < 0.5 else (n / STROBE_HALF_TICKS) % 2 == 0
+
+
 func _draw_foundry_arena() -> void:
 	# c4 2v: three tinted concentric RINGS around the boss so the rotating safe
 	# annulus reads — an inner melee-risk ring (red) and the outer boundary of the
 	# safe belt (green); both radii GROW with the phase (HP thirds), so the safe
 	# band visibly migrates outward as the boss escalates. View-only.
+	# a11y: the belt/danger pair is SHAPE-encoded (dashed + doubled vs one solid stroke,
+	# see HudIcons.colossus_ring_style) so this live boss mechanic survives a colorblind
+	# player and a greyscale frame; hue is now redundant reinforcement, not the signal.
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 		var ph: int = sim.colossus_phase()
 		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
 		var mr := float(SimWorld.COLOSSUS_RING_OUTER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
-		var ra := 0.12 + 0.06 * Art.pulse(0.05)
-		Art.arc(self, cpos, ir, 0.0, TAU, 48, Color(1.0, 0.3, 0.15, ra), 2.0)   # inner danger ring
-		Art.arc(self, cpos, mr, 0.0, TAU, 48, Color(0.35, 0.8, 0.45, ra), 2.0)  # safe-belt outer edge
+		var rpul := 1.0 if _motion < 0.5 else Art.pulse(0.05)   # steady-bright under reduce-motion
+		var dsty := HudIcons.colossus_ring_style(false, rpul)
+		var ssty := HudIcons.colossus_ring_style(true, rpul)
+		Art.arc(self, cpos, ir, 0.0, TAU, 48, dsty["col"], 2.0)   # inner danger ring — ONE unbroken stroke
+		var dashes: int = ssty["dashes"]
+		var slot := TAU / float(dashes)
+		var lit: float = slot * float(ssty["duty"])
+		var hair: float = ssty["hairline"]
+		var hcol: Color = ssty["col"]
+		hcol.a *= 0.7
+		for d in dashes:
+			var a0 := float(d) * slot
+			Art.arc(self, cpos, mr, a0, a0 + lit, 6, ssty["col"], 2.0)          # dashed safe-belt edge
+			Art.arc(self, cpos, mr - hair, a0, a0 + lit, 6, hcol, 1.0)          # ...doubled by a hairline
 	# Foundry ARENA dressing (c2 3v: the finale was "a big enemy in a field").
 	# Molten pools ring the three KIMK barrel clusters (drawn UNDER them —
 	# each phase-shift cook now torches a molten stage mark), grounded
@@ -7145,14 +7172,14 @@ func _draw_tanks() -> void:
 		# occupied one (mirrors the colossus crush grammar players already know).
 		if t["occupant"] < 0 and not t["burning"]:
 			Art.arc(self, c, SimWorld.TANK_BOARD_RADIUS * PX, 0, TAU, 28,
-				Color(0.85, 0.95, 0.6, 0.35), 1.0)
+				Art.safe(Color(0.85, 0.95, 0.6, 0.35)), 1.0)   # board = SAFE, paired with the red crush ring below
 		elif t["occupant"] >= 0:
 			var cp := Art.pulse(0.2)
 			Art.arc(self, c, SimWorld.TANK_CRUSH_RADIUS * PX, 0, TAU, 24,
 				Color(1.0, 0.3, 0.2, 0.25 + cp * 0.2), 1.5)
 		var burn_mod := Color.WHITE
 		if t["burning"]:
-			burn_mod = Color(1.3, 0.6, 0.45) if (t["burn_ticks"] / 6) % 2 == 0 else Color(0.9, 0.5, 0.4)
+			burn_mod = Color(1.3, 0.6, 0.45) if _safe_strobe(t["burn_ticks"]) else Color(0.9, 0.5, 0.4)   # 3 Hz (was 5 Hz)
 		if t["occupant"] >= 0 and not t["burning"] and not sim._in_water(t["x"], t["y"]):
 			_kick_dust(t["occupant"], t["x"], t["y"], _tank_dust_prev, true)
 		_ground_shadow(c, 15.0, 0.42)
@@ -7383,7 +7410,7 @@ func _draw_enemies() -> void:
 				bdir = bdir.normalized() if bdir.length() > 0.001 else Vector2.RIGHT
 				# Final moments: strobe white (matches the mortar-telegraph grammar).
 				var lcol := Color(1.0, 0.15, 0.12, 0.35 + pf * 0.5)
-				if swu <= 10 and (swu / 2) % 2 == 0:
+				if swu <= 10 and _safe_strobe(swu):
 					lcol = Color(1.0, 1.0, 1.0, 0.95)
 				Art.line(self, epos, epos + bdir * 900.0, lcol, 1.0 + pf * 2.0)
 				Art.circle(self, lp, 2.0 + pf * 3.0, Color(lcol.r, lcol.g, lcol.b, 0.4 + pf * 0.5))
@@ -7658,7 +7685,7 @@ func _draw_enemies() -> void:
 					# ghillie fires the same lethal shot and deserves the same fair
 					# 'get off the line NOW' warning, not a silent kill.
 					var lcol2 := Color(1.0, 0.15, 0.12, 0.35 + pf2 * 0.5)
-					if gwu2 <= 10 and (gwu2 / 2) % 2 == 0:
+					if gwu2 <= 10 and _safe_strobe(gwu2):
 						lcol2 = Color(1.0, 1.0, 1.0, 0.95)
 					Art.line(self, epos, epos + bdir2 * 900.0, lcol2, 1.0 + pf2)
 					Art.circle(self, lp2, 2.0 + pf2 * 2.0, Color(lcol2.r, lcol2.g, lcol2.b, 0.4 + pf2 * 0.4))
@@ -7834,7 +7861,8 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# about the phase being over. Derive the tail from the same tier the sim uses.
 	var _btier: int = sim.wave / 5
 	var _warn_end := 290 + (30 if _btier >= 2 else 0) + (20 if _btier >= 3 else 0)
-	if pt >= 170 and pt <= _warn_end and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
+	# 3 Hz (was 5 Hz); _safe_strobe keeps the existing steady-red hold under REDUCE MOTION.
+	if pt >= 170 and pt <= _warn_end and _safe_strobe(Engine.get_physics_frames()):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	# Ground shadow: the heli was the one unit floating untethered (drone and
@@ -8011,7 +8039,7 @@ func _draw_colossus() -> void:
 		var ccore := Color(1.0, 0.95, 0.7, 0.9)
 		var cring := Color(1.0, 1.0, 0.6, 0.9)
 		if sealf > 0.0:
-			var seal_strobe := Color(1.0, 0.2, 0.15) if (co / 2) % 2 == 0 else Color(1.0, 0.85, 0.45)
+			var seal_strobe := Color(1.0, 0.2, 0.15) if _safe_strobe(co) else Color(1.0, 0.85, 0.45)
 			ccore = ccore.lerp(seal_strobe, sealf)
 			cring = cring.lerp(Color(1.0, 0.2, 0.15, 0.95), sealf)
 		Art.circle(self, cpos, (9.0 + pulse * 4.0) * cshrink, ccore)
@@ -8349,8 +8377,11 @@ func _draw_players() -> void:
 				var rdir := Vector2(p["roll_dx"], p["roll_dy"]) * PX
 				_spr(tex_name, pos - rdir * 10.0, angle, 0.52, Color(1, 1, 1, 0.14))
 				_spr(tex_name, pos - rdir * 5.0, angle, 0.52, Color(1, 1, 1, 0.28))
-			elif p["hurt_iframes"] > 0 and (p["hurt_iframes"] / 4) % 2 == 0:
-				mod = Color(1, 1, 1, 0.4)   # mercy-window blink
+			elif p["hurt_iframes"] > 0:
+				# Mercy-window blink, clamped to 3 Hz (was 7.5 Hz). REDUCE MOTION holds ONE
+				# steady translucent phase — the i-frames still read, with zero flicker.
+				mod = Color(1, 1, 1, 0.7) if _motion < 0.5 \
+					else Color(1, 1, 1, 0.4 if _safe_strobe(p["hurt_iframes"]) else 1.0)
 			# Wading: ripple rings at the feet say "slow, no roll" at a glance.
 			if sim._in_water(p["x"], p["y"]):
 				var wt := float((Engine.get_physics_frames() + i * 31) % 50) / 50.0
@@ -8489,7 +8520,8 @@ func _draw_players() -> void:
 								and sim._dist_lte(p["x"], p["y"], e["x"], e["y"], SimWorld.BASH_RADIUS):
 							bash_ready = true
 							break
-				var rcol := Color(0.9, 1.0, 0.65) if i == 0 else Color(1.0, 0.9, 0.55)
+				# P1 green / P2 amber is a red-green split — route P1 through the shared palette.
+				var rcol := Art.safe(Color(0.9, 1.0, 0.65)) if i == 0 else Color(1.0, 0.9, 0.55)
 				# Dry-and-waiting: empty MG with bash NOT ready → grey the reticle so
 				# "nothing will fire" stops reading as "locked and loaded". Pierce/spread/
 				# bash overrides below still win when they apply.
@@ -9155,7 +9187,7 @@ func _draw_telegraphs() -> void:
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(sp - Vector2(uw, uw) / 2.0, Vector2(uw, uw)),
 			false, Color(0.0, 0.0, 0.0, STRIKE_UNDERLAY["alpha"]))
 		var col := Color(1.0, 0.9 - frac * 0.6, 0.2, 0.9)
-		if s["ticks"] <= 10 and (s["ticks"] / 3) % 2 == 0:
+		if s["ticks"] <= 10 and _safe_strobe(s["ticks"]):   # 3 Hz (was 10 Hz)
 			col = Color(1.0, 1.0, 1.0, 0.95)
 		Art.arc(self, sp, r, 0, TAU, 32, col, 1.5)
 		Art.circle(self, sp, r * frac, Color(col.r, col.g, col.b, 0.20))
@@ -9741,8 +9773,8 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 		return
 	var frac := 1.0 - float(sim.pending_airstrike) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
 	var a := 0.05 + frac * 0.16
-	if _motion >= 0.5 and sim.pending_airstrike < 10 and (sim.pending_airstrike / 3) % 2 == 0:
-		a = 0.34   # final-second strobe — full-motion only
+	if sim.pending_airstrike < 10 and _safe_strobe(sim.pending_airstrike):
+		a = 0.34   # final-second strobe, clamped to 3 Hz (was 10 Hz)
 	# Reduce-motion: no strobe, but the wash must stay VISIBLE — the old
 	# a*_motion+0.03 dimmed a lethal warning to alpha 0.03 for exactly the
 	# players who asked for a steadier signal, not a hidden one.
@@ -10085,7 +10117,7 @@ func _draw_banners(top_msg: String) -> void:
 			# before the player leaves this card -- state the total + this run's gain
 			# here too, so the currency's advance is visible before REDEPLOY/TITLE.
 			rows.append({"text": ("%d VP BANKED  (+%d)" % [vet_points, _run_vp_gain]) if _run_vp_gain > 0
-				else "%d VP BANKED" % vet_points, "color": Color(0.7, 0.95, 0.6),
+				else "%d VP BANKED" % vet_points, "color": Art.safe(Color(0.7, 0.95, 0.6)),
 				"icon": "mi_trophy", "icon_size": 14.0})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)

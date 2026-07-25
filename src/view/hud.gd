@@ -426,8 +426,14 @@ static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,
 ## so the amber/red states stay legible without flashing.
+## a11y (WCAG 2.3.1): the period is FLOORED here rather than trusted from the call site — a
+## half-period of MIN_BLINK_PERIOD ticks is 60/(2*10) == 3 flashes/sec, the seizure threshold
+## main.gd already respects for the sniper vignette. Clamping in the shared helper fixes every
+## caller at once (the dry-grenade chip asked for 4 == 7.5 Hz, the boarding chip for 8 == 3.75 Hz).
+const MIN_BLINK_PERIOD := 10
+
 func _mblink(period: int) -> bool:
-	return main._motion < 0.5 or Art.blink(period)
+	return main._motion < 0.5 or Art.blink(maxi(period, MIN_BLINK_PERIOD))
 
 
 func _buff_col(ticks: int, base: Color) -> Color:
@@ -674,7 +680,9 @@ func _draw() -> void:
 	for i in sim.players.size():
 		var p := sim.players[i]
 		var px := 8.0
-		var pcol := Color(0.75, 0.95, 0.7) if i == 0 else Color(0.95, 0.85, 0.6)
+		# P1 green vs P2 amber is a red-green-axis split — route P1 through the shared
+		# colorblind palette so the two player rows stay separable, not just tinted.
+		var pcol := Art.safe(Color(0.75, 0.95, 0.7)) if i == 0 else Color(0.95, 0.85, 0.6)
 		px = _text("P%d" % (i + 1), px, ry + ROW_TEXT_BASELINE, pcol) + ROW_LABEL_GAP
 		if not p["alive"]:
 			px = _dead_chips(p, px, ry, i, sim)
@@ -1379,6 +1387,13 @@ const VERB_GH := 11.0   # verb glyph height (square device prompt)
 # audio-identity (judge follow-up): the caption strip's own wrap width — leaves ~40px clear on
 # each side of the 640px canvas so a long/localized line never rides the frame edge.
 const CAPTION_MAX_W := 560.0
+
+## a11y: WHO is speaking must be in the TEXT, not only the tint. The radio-Spotter blue and the
+## dry-Commander amber measure 1.04:1 against each other — a speaker cue invisible to a
+## colorblind player, inside the feature that exists FOR players who can't use the audio. The
+## name is a separate translate() key so a .po can localize the speaker without touching the line.
+static func caption_line(txt: String, radio: bool) -> String:
+	return "%s: %s" % [TranslationServer.translate("SPOTTER" if radio else "COMMANDER"), txt]
 # Tight leading for the wrapped strip. Grows UPWARD from the original single-line baseline
 # (VERB_LEGEND_Y - 20.0), so a one-line caption (the overwhelming common case) draws at the
 # EXACT same y/rect it always did — only a caption long enough to wrap moves anything.
@@ -1397,6 +1412,28 @@ const BOTTOM_RESERVE_GAP := 3.0                      # breathing gap an overlay 
 const CAPTION_BG_ABOVE := 9.0   # caption scrim extent above the LAST line's baseline (was inline -9.0)
 const CAPTION_BG_BELOW := 5.0   # ...and below it (was inline: height 14 = 9 + 5)
 const VERB_PLATE_BELOW := 8.0   # verb chip plate extent below VERB_LEGEND_Y (Rect2(..., y-8, ..., 16))
+
+
+## a11y: the colossus arena's SAFE BELT and its inner DANGER ring are a live boss mechanic that
+## used to be encoded in hue alone — a bare green/red literal pair at alpha 0.12..0.18 measuring
+## 1.63:1 against each other, i.e. unreadable to a deuteran player and nearly invisible over the
+## lit foundry floor. The safe belt is now SHAPE-encoded: broken into COLOSSUS_SAFE_DASHES arcs
+## and doubled by a second concentric hairline, while the danger ring stays ONE continuous
+## stroke. Desaturate the frame entirely and the two still read apart. Alphas raised ~3x.
+## Static + view-free so `_draw_foundry_arena` and the a11y test share one truth.
+const COLOSSUS_SAFE_DASHES := 14           # >1 == a broken ring; the danger ring is 1 == solid
+const COLOSSUS_SAFE_DASH_DUTY := 0.55      # lit fraction of each dash slot (the gaps ARE the encoding)
+const COLOSSUS_SAFE_HAIRLINE := 4.0        # px inside the belt the second concentric line rides
+const COLOSSUS_RING_ALPHA := 0.38          # was 0.12
+const COLOSSUS_RING_ALPHA_PULSE := 0.14    # ...+ this * pulse (peak 0.52, was 0.18)
+
+
+static func colossus_ring_style(is_safe: bool, pulse: float) -> Dictionary:
+	var a := COLOSSUS_RING_ALPHA + COLOSSUS_RING_ALPHA_PULSE * pulse
+	if is_safe:
+		return {"dashes": COLOSSUS_SAFE_DASHES, "duty": COLOSSUS_SAFE_DASH_DUTY,
+			"hairline": COLOSSUS_SAFE_HAIRLINE, "col": Art.safe(Color(0.35, 0.9, 0.5, a))}
+	return {"dashes": 1, "duty": 1.0, "hairline": 0.0, "col": Art.warn(Color(1.0, 0.3, 0.15, a))}
 
 
 ## True exactly when main.gd `_draw_colossus` paints its bottom-docked block — same predicate,
@@ -1491,7 +1528,7 @@ func _draw_caption() -> void:
 	# Localize via the English source string as the key — same contract as Menu.setting_help:
 	# with no translation loaded translate() returns the source unchanged, so English is the
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
-	var txt := TranslationServer.translate(raw)
+	var txt := caption_line(TranslationServer.translate(raw), cap.get("radio", false))
 	var col: Color = Color(0.75, 0.95, 1.0) if cap.get("radio", false) else Color(0.95, 0.9, 0.75)
 	# triple-A: dissolve the strip over its last 0.4s instead of snapping off. REDUCE MOTION
 	# snaps (same contract as _verb_alpha), so a motion-sensitive player gets no cross-fade.
@@ -1879,7 +1916,7 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	# Carried claymore charges: a count, not a countdown — and the verb
 	# glyph rides along so "how do I plant this" never dead-ends here.
 	if p["claymores"] > 0:
-		chips.append({"icon": "wep_claymore", "txt": "x%d" % p["claymores"], "col": Color(0.75, 0.9, 0.6), "glyph": true, "prio": BUFF_PRIO_PERSIST})
+		chips.append({"icon": "wep_claymore", "txt": "x%d" % p["claymores"], "col": Art.safe(Color(0.75, 0.9, 0.6)), "glyph": true, "prio": BUFF_PRIO_PERSIST})
 	# Pre-measure each chip via _chip_w (the EXACT x-advance its drawing produces, so the fit
 	# measure can never disagree with what lands), then run the shared priority planner used by
 	# row 0: keep the top-priority set that fits, reserving the worst-case +N slot only on real
