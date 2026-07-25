@@ -192,3 +192,24 @@ func test_cap_flags_terminates_runs() -> void:
 		"a middle bag in one of two full stacked rows must render as an ordinary middle segment, not CAP_CORNER")
 	Runner.T.eq(ms.cap_flags(full_xs, full_ys, 4), 0,
 		"same for the row directly below it — stacked rows are not corners")
+
+
+# --- 2P co-op pad-assignment gate ---
+
+func test_p2_pad_gate_asks_for_device_1_not_a_pad_count() -> void:
+	# P2 is HARDWIRED to pad device 1 in _gather_inputs, so a
+	# `get_connected_joypads().size() < 2` count is the wrong question: with
+	# devices {0, 2} connected the count passes and P2 silently receives zero
+	# input for the whole run. The warning also has to live in ONE place — it was
+	# copy-pasted into three of the seven run entry points, so DAILY, SEEDED, the
+	# replay watcher and the F2 toggle never warned at all, and a pad yanked
+	# mid-run benched P2 with no message ever again.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.find("get_connected_joypads().size() < 2") == -1,
+		"the pad-COUNT predicate is gone (it passes on a non-contiguous device id)")
+	Runner.T.ok(src.find("Input.get_connected_joypads().has(1)") != -1,
+		"the gate asks whether P2's actual device is present")
+	Runner.T.eq(src.count("show_banner(\"P2: CONNECT A CONTROLLER\""), 1,
+		"the co-op pad warning has exactly one call site (reached from _reset)")
+	Runner.T.ok(src.find("Input.joy_connection_changed.connect(_on_pad_count_changed)") != -1,
+		"...and a pad yanked mid-run re-raises it")

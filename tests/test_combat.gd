@@ -130,12 +130,14 @@ func test_broke_countdown_can_be_beaten_by_a_late_revive() -> void:
 	var p := sim.players[0]
 	sim.war_chest = 0
 	sim._kill_player(p)
-	# All-loops batch: dying broke arms the timer AT DEATH (no press required —
+	# All-loops batch: dying broke arms the timer on its own (no press required —
 	# the endless wipe, the only run-ender, must never hang on an idle pad).
-	Runner.T.eq(p["broke_timer"], SimWorld.BROKE_RESPAWN_TICKS, "dying broke auto-arms the fallback timer")
+	# _step_dead_player owns the arming now, and re-checks it every tick, so a
+	# partner emptying the shared chest under a downed body arms it too.
 	var revive := SimInput.new()
 	revive.revive = true
 	sim.step([revive])
+	Runner.T.ok(p["broke_timer"] > 0, "dying broke auto-arms the fallback timer")
 	Runner.T.ok(not p["alive"], "broke: first revive attempt denied")
 	Runner.T.ok(p["broke_timer"] > 0 and p["broke_timer"] < SimWorld.BROKE_RESPAWN_TICKS,
 		"the countdown is running (a denied press does not reset it)")

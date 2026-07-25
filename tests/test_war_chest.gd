@@ -110,3 +110,107 @@ func test_kills_mint_coin() -> void:
 	sim._kill_enemy(sim.enemies[1])
 	Runner.T.eq(sim.war_chest, SimWorld.COIN_RUSHER + SimWorld.COIN_ELITE, "rusher + elite minted correct coin")
 	Runner.T.ok(sim.score > 0, "kills also score")
+
+
+# --- 2P co-op: the downed player is never a spectator ------------------------
+
+func test_downed_player_can_pay_their_own_way_back_with_a_partner_up() -> void:
+	# The strand: P2 goes down with a rich chest, so no broke fallback arms —
+	# and self-revive used to be blocked outright while ANY partner stood. P2
+	# had zero actions and zero timer, waiting on a partner who might be three
+	# screens north. Paying from the floor is always available now.
+	var sim := SimWorld.new(7, 2)
+	var p2 := sim.players[1]
+	sim.war_chest = 500
+	sim._kill_player(p2)
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([_idle(), revive])   # P1 idle: nobody is coming
+	Runner.T.ok(p2["alive"], "the downed player revives themselves while the partner is up")
+	Runner.T.eq(sim.war_chest, 450, "self-revive paid the same 50 the partner would have")
+
+
+func test_self_revive_lands_at_the_checkpoint_partner_revive_at_the_partner() -> void:
+	# The co-op decision survives the strand fix: same price, different place.
+	var sim := SimWorld.new(7, 2)
+	sim.war_chest = 500
+	var p1 := sim.players[0]
+	var p2 := sim.players[1]
+	p1["y"] = sim.camera_top + 40 * Fixed.ONE     # partner pushed way north
+	sim._kill_player(p2)
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([revive, _idle()])                   # P1 performs the rescue
+	Runner.T.eq(p2["y"], p1["y"], "a partner rescue puts you back at their side")
+	sim._kill_player(p2)
+	sim.step([_idle(), revive])                   # P2 pays from the floor
+	Runner.T.ok(p2["y"] > p1["y"], "paying from the floor drops you back at the checkpoint")
+
+
+func test_partner_draining_the_chest_arms_the_downed_players_fallback() -> void:
+	# Hard strand: a RICH death arms no timer. The partner then spends the shared
+	# chest, and the body is left with no timer, no affordable revive and nobody
+	# who can pay — dead for the rest of the run. The fallback re-checks every tick.
+	var sim := SimWorld.new(7, 2)
+	var p2 := sim.players[1]
+	sim.war_chest = 500
+	sim._kill_player(p2)
+	sim.step([_idle(), _idle()])
+	Runner.T.eq(p2["broke_timer"], 0, "a rich death arms no fallback (the partner should rescue)")
+	sim.war_chest = 0             # partner buys a vest / airstrike
+	sim.step([_idle(), _idle()])
+	Runner.T.ok(p2["broke_timer"] > 0, "the chest draining under a downed player arms the fallback")
+	for _i in SimWorld.BROKE_RESPAWN_TICKS:
+		sim.step([_idle(), _idle()])
+	Runner.T.ok(p2["alive"], "the stranded player is back in the fight")
+
+
+func test_broke_fallback_disarms_when_the_chest_recovers() -> void:
+	# The other direction, or dying BROKE is strictly cheaper than dying rich:
+	# free respawn on a timer vs. a 50-coin bill.
+	var sim := SimWorld.new(7, 2)
+	var p2 := sim.players[1]
+	sim.war_chest = 0
+	sim._kill_player(p2)
+	sim.step([_idle(), _idle()])
+	Runner.T.ok(p2["broke_timer"] > 0, "broke death arms the fallback")
+	sim.war_chest = 200           # partner banks a kill
+	sim.step([_idle(), _idle()])
+	Runner.T.eq(p2["broke_timer"], 0, "the fallback disarms once the chest can pay")
+	Runner.T.ok(not p2["alive"], "...and the free ride is off the table: somebody pays")
+
+
+func test_revive_is_symmetric_between_p1_and_p2() -> void:
+	# Nothing about the rescue may depend on WHICH seat you sit in.
+	var sim := SimWorld.new(7, 2)
+	var p1 := sim.players[0]
+	var p2 := sim.players[1]
+	sim.war_chest = 500
+	sim._kill_player(p1)
+	Runner.T.eq(sim.revive_cost(p1), sim.revive_cost(p2), "both seats price a body identically")
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([_idle(), revive])
+	Runner.T.ok(p1["alive"], "P2 can rescue P1")
+	Runner.T.eq(sim.war_chest, 450, "P2's rescue costs what P1's does")
+	sim._kill_player(p2)
+	sim.step([revive, _idle()])
+	Runner.T.ok(p2["alive"], "P1 can rescue P2")
+	Runner.T.eq(sim.war_chest, 400, "...for the same price")
+
+
+func test_last_stand_all_down_latches_the_wipe_in_2p() -> void:
+	# No revives past the final gate — so the only thing that must not happen is
+	# two bodies on the floor with the sim still running and no way out.
+	var sim := SimWorld.new(7, 2)
+	sim.last_stand = true
+	sim.war_chest = 5000
+	sim._kill_player(sim.players[0])
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([revive, revive])
+	Runner.T.ok(not sim.wiped, "one down, one up: the run continues")
+	Runner.T.ok(not sim.players[0]["alive"], "no coin reader in Last Stand")
+	sim._kill_player(sim.players[1])
+	sim.step([revive, revive])
+	Runner.T.ok(sim.wiped, "both down in Last Stand latches the wipe — never a frozen run")

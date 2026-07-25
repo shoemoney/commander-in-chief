@@ -493,6 +493,7 @@ func _ready() -> void:
 	# sync. min_size keeps the floor at a clean 1x. The OPTIONS WINDOW SCALE row remains the way to
 	# jump to an exact centered multiple; dragging is just the other, equally valid, path.
 	add_child(_sfx)
+	Input.joy_connection_changed.connect(_on_pad_count_changed)
 	_hud_icons.main = self
 	$HUD.add_child(_hud_icons)
 	_menu.main = self
@@ -1116,10 +1117,6 @@ func start_game(endless: bool) -> void:
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0   # cut from the title into combat, not a hard snap
-	# Co-op with no pad for P2 reads as a broken game (P2 gets zero input and no
-	# on-screen reason). Say so — it's a setup step, not a bug.
-	if _two_players and Input.get_connected_joypads().size() < 2:
-		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
 
 
 func start_boss_rush() -> void:
@@ -1133,8 +1130,6 @@ func start_boss_rush() -> void:
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0
-	if _two_players and Input.get_connected_joypads().size() < 2:
-		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
 
 
 func start_arcade(chapter: int) -> void:
@@ -1150,8 +1145,6 @@ func start_arcade(chapter: int) -> void:
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0
-	if _two_players and Input.get_connected_joypads().size() < 2:
-		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
 
 
 func start_daily() -> void:
@@ -1421,6 +1414,29 @@ func _reset() -> void:
 	_down_frames = 0
 	_debrief = false
 	_fire_swallow = true   # a SPACE/Enter/LMB redeploy press must not open the run firing
+	_warn_p2_pad()   # after _banners.clear(), so the warning survives the reset
+
+
+func p2_pad_missing() -> bool:
+	## P2 is HARDWIRED to pad device 1 (_gather_inputs), so "2 or more pads are
+	## connected" is the wrong question — with devices {0, 2} the count passes
+	## and P2 still receives zero input. Ask the same both-ids question the
+	## rumble router already asks. Public so the co-op tests can drive it.
+	return _two_players and not Input.get_connected_joypads().has(1)
+
+
+func _warn_p2_pad() -> void:
+	# Co-op with no pad for P2 reads as a broken game (P2 gets zero input and no
+	# on-screen reason). Say so — it's a setup step, not a bug. Lives in _reset
+	# so EVERY entry point is covered: the three that hand-rolled this check,
+	# plus DAILY, SEEDED, the replay watcher and the F2 toggle, which never did.
+	if p2_pad_missing():
+		show_banner("P2: CONNECT A CONTROLLER", Color(1.0, 0.6, 0.35))
+
+
+func _on_pad_count_changed(_device: int, _connected: bool) -> void:
+	# ...and a pad yanked MID-RUN silently benched P2 for the rest of the run.
+	_warn_p2_pad()
 
 
 var _joy_brand_cache := {}   # device id → "xbox"/"ps"/"switch" (name lookup once per pad)
@@ -8542,7 +8558,10 @@ func _draw_players() -> void:
 					draw_set_transform_matrix(get_transform().affine_inverse())
 					Art.circle(self, edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
 					Art.line(self, edge, edge + bdir * 9.0, pcol, 2.0)
-					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0, Color.WHITE, false, bind("revive"))
+					# force_pad on i (the REVIVER's seat), not a flat false: P2 is
+					# hardwired to pad 1 and never sets Art.use_pad, so a P2 reviver
+					# was being taught P1's keycap for a button they don't have.
+					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0, Color.WHITE, i == 1, bind("revive"))
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
@@ -8557,7 +8576,7 @@ func _draw_players() -> void:
 				var rtxt := "REVIVE %d" % cost
 				draw_string(Art.font(), pos + Vector2(-18, -16), rtxt,
 					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0, Color.WHITE, false, bind("revive"))
+				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0, Color.WHITE, i == 1, bind("revive"))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
 			# responsive while arrow-key 45° pops still glide instead of snapping.
@@ -8823,6 +8842,19 @@ func _draw_players() -> void:
 				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
 				_world_label(btxt, pos + Vector2(-brw / 2.0, -26),
 					Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg))
+			elif not sim.last_stand:
+				# No countdown means the chest CAN cover this body — and the sim now
+				# lets a downed player pay from the floor themselves instead of
+				# waiting on a partner who may be three screens north. That option
+				# was invisible: every revive cue on screen (tether, chevron, cost)
+				# is drawn for the RESCUER. This one is addressed to the body, in
+				# their own seat's glyph (P2 is pad-only), so a downed player always
+				# knows they still have a move.
+				var gtxt := "GET UP  %d" % sim.revive_cost(p)
+				var grw := Art.tw(gtxt, Art.fs(8))
+				_world_label(gtxt, pos + Vector2(-grw / 2.0 - 6.0, -26), Art.safe(Color(0.6, 1.0, 0.7)))
+				Art.draw_glyph(self, "revive", pos + Vector2(grw / 2.0 + 2.0, -29),
+					9.0, Color.WHITE, i == 1, bind("revive"))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
