@@ -442,6 +442,14 @@ const SCALE := {
 	"fx_muzzle_fan": 0.18,   # 512x256 card, same norm as the bubbles — bypassed: draw site (main.gd) uses raw draw_texture_rect with its own rect
 	"mz_pop": 0.5,   # sol-15: draw site uses its own rect off `sz`; SCALE row present so the registry has no dead config
 	"riot_shield": 1.1,   # 64px canvas → ~half a p2 specialist's span; tune in wiring
+	# aaa3-r2: fx_impactdark is a 200x200 solid octagon card. Its other three call sites
+	# (main.gd _consume_events) go through the "kind":"tex" _fx particle path, which sizes
+	# off an explicit "sz" pixel footprint and never touches this table. _spr (_wall_seg's
+	# damage smear + the open-gate blast center) DOES fold through SCALE, and with no row
+	# here it fell back to 1.0 -> a call-site scale of 0.5/1.1 drew a 100-220px hard-edged
+	# black polygon over the ground. 0.12 folds it to the same small-scorch-accent family
+	# as the other litter (dropped_shield/tank_trap sit at 0.12/0.14).
+	"fx_impactdark": 0.12,
 }
 
 ## Desert→jungle shift, multiplied onto the draw modulate. Units/vehicles take

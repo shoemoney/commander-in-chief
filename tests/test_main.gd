@@ -159,3 +159,64 @@ func test_rumble_merge_clamps_and_keeps_louder() -> void:
 	Runner.T.eq(ms._rumble_merge(0.2, 0.9), 0.9, "a louder pulse must win over a quieter one already queued")
 	Runner.T.eq(ms._rumble_merge(0.0, 5.0), 1.0, "magnitude must clamp to 1.0 even if a caller passes something absurd")
 	Runner.T.eq(ms._rumble_merge(0.0, -3.0), 0.0, "magnitude must clamp to 0.0, never go negative")
+
+
+# --- kill-the-copy-pasted-sandbag-wall-tiling: wall_variant/cap_flags are the pure
+# per-segment jitter + run-termination math behind _wall_seg (main.gd). Pinning them
+# directly means a "flatten the wall back to one repeated sprite" regression fails a
+# test, not just a screenshot diff. ---
+
+func test_wall_variant_is_stable_and_varied() -> void:
+	var ms: Script = load("res://src/main.gd")
+	# Frame-stability: the wall must not crawl while the camera scrolls — the same
+	# world cell must always produce the exact same variant.
+	var first: Dictionary = ms.wall_variant(37, -912)
+	for _n in 5:
+		Runner.T.eq(ms.wall_variant(37, -912), first, "wall_variant must be a pure function of (ix, iy)")
+	# Actually varied: across a spread of cells, ds/flip must not collapse to one value,
+	# and neither can outgrow the sim's 36x10 sandbag collision box.
+	var ds_seen := {}
+	var flip_seen := {}
+	for ix in 8:
+		for iy in 8:
+			var v: Dictionary = ms.wall_variant(ix * 41, iy * 67)
+			ds_seen[v["ds"]] = true
+			flip_seen[v["flip"]] = true
+			Runner.T.ok(v["ds"] >= 0.93 and v["ds"] <= 1.063, "ds must stay inside [0.93, 1.063]")
+			Runner.T.ok(absf(v["dy"]) <= 2.0, "dy must stay inside +-2.0px (the sim's 36x10 bag AABB)")
+	Runner.T.ok(ds_seen.size() >= 12,
+		"64 sampled cells must produce at least 12 distinct ds values, got %d" % ds_seen.size())
+	Runner.T.eq(flip_seen.size(), 2, "64 sampled cells must show both flip states")
+
+
+func test_cap_flags_terminates_runs() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var step: int = ms.BAG_LINK_RAW / 2   # 24px pitch (the sim's sandbag row pitch)
+	# A 3-bag row: the middle bag has neighbours on both sides (no cap), the two
+	# ends cap outward toward the missing neighbour.
+	var xs := PackedInt64Array([0, step, step * 2])
+	var ys := PackedInt64Array([0, 0, 0])
+	Runner.T.eq(ms.cap_flags(xs, ys, 0), ms.CAP_LEFT, "the row's left end must cap CAP_LEFT")
+	Runner.T.eq(ms.cap_flags(xs, ys, 1), 0, "the row's middle bag has neighbours both sides — no cap")
+	Runner.T.eq(ms.cap_flags(xs, ys, 2), ms.CAP_RIGHT, "the row's right end must cap CAP_RIGHT")
+	# A lone bag with no neighbours at all is a corner post, not a wall stub.
+	Runner.T.eq(ms.cap_flags(PackedInt64Array([0]), PackedInt64Array([0]), 0),
+		ms.CAP_LEFT | ms.CAP_RIGHT | ms.CAP_CORNER,
+		"a lone bag with no neighbours must read as a corner post")
+	# A genuine corner: a row that terminates into a LONE perpendicular bag (the
+	# run turns 90deg) must flag CAP_CORNER on the joint bag.
+	var stack_xs := PackedInt64Array([0, step, 0])
+	var stack_ys := PackedInt64Array([0, 0, 14 * Fixed.ONE])
+	Runner.T.ok(ms.cap_flags(stack_xs, stack_ys, 0) & ms.CAP_CORNER != 0,
+		"a row-end bag whose only y-neighbour is a lone perpendicular bag must flag CAP_CORNER")
+	# Regression (aaa3-r2): the shop's stacked FULL rows (14px pitch, main.gd's own
+	# comment) must NOT flag CAP_CORNER just because a bag has a y-neighbour above/
+	# below it — that y-neighbour is itself part of a parallel row, so this is two
+	# rows of wall stacked deep, not a turn. Getting this wrong flattened the whole
+	# shop cluster into identical corner-mound stamps (the tell come back re-skinned).
+	var full_xs := PackedInt64Array([0, step, step * 2, 0, step, step * 2])
+	var full_ys := PackedInt64Array([0, 0, 0, 14 * Fixed.ONE, 14 * Fixed.ONE, 14 * Fixed.ONE])
+	Runner.T.eq(ms.cap_flags(full_xs, full_ys, 1), 0,
+		"a middle bag in one of two full stacked rows must render as an ordinary middle segment, not CAP_CORNER")
+	Runner.T.eq(ms.cap_flags(full_xs, full_ys, 4), 0,
+		"same for the row directly below it — stacked rows are not corners")

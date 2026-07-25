@@ -5414,6 +5414,61 @@ const SPINE_TREAD := Color(0.02, 0.04, 0.0, 0.14)
 const SPINE_LANE := Vector2(232.0, 408.0)
 
 
+# --- Modular cover set (view-only). A wall is an EMPLACEMENT, not a tilemap
+# brush: every segment gets a deterministic per-position variant, and the
+# segments that terminate a run get real cap/corner pieces. Hashes off the
+# bag's WORLD fixed-point coords via Art.cell_hash so the variation is
+# frame-stable while the camera scrolls (never Engine time / randf()).
+const BAG_LINK_RAW := 48 * Fixed.ONE   # x-gap under which two bags are one run (sim pitches: 24 / 45)
+const BAG_ROW_RAW := 10 * Fixed.ONE    # y-tolerance for "same row"
+const CAP_LEFT := 1
+const CAP_RIGHT := 2
+const CAP_CORNER := 4                  # has an x-neighbour AND a y-neighbour → the run turns
+
+static func wall_variant(ix: int, iy: int) -> Dictionary:
+	var h := Art.cell_hash(ix, iy)
+	return {
+		"dy": float(h % 5) * 0.9 - 1.8,           # ±1.8px: the line stops being a ruler
+		"ds": 0.93 + float((h >> 3) % 13) * 0.011, # 0.93..1.06
+		"rot": (float((h >> 7) % 9) - 4.0) * 0.014, # ±0.056 rad settle
+		"flip": ((h >> 11) & 1) == 1,
+		"shade": 1.0 - float((h >> 13) % 7) * 0.018, # per-bag value break
+		"slump": ((h >> 17) % 11) == 0,             # ~1-in-11 shelled/slumped segment
+	}
+
+
+static func _in_row(xs: PackedInt64Array, ys: PackedInt64Array, j: int) -> bool:
+	# Is bag j itself part of an x-running row? Used to tell a genuine corner
+	# (the run turns into a lone perpendicular bag) from two full rows simply
+	# STACKED in y (the shop's 14px row pitch) — a bag in a stacked row has an
+	# x-neighbour of its own and must not disqualify its neighbours as corners.
+	for k in xs.size():
+		if k == j:
+			continue
+		if absi(ys[k] - ys[j]) <= BAG_ROW_RAW and absi(xs[k] - xs[j]) <= BAG_LINK_RAW:
+			return true
+	return false
+
+
+static func cap_flags(xs: PackedInt64Array, ys: PackedInt64Array, i: int) -> int:
+	# ponytail: O(n^3) worst case over the VISIBLE bags only (band-culled, ≤ ~40:
+	# 40^3 = 64k, trivial) — a spatial hash + precomputed row membership if a
+	# level ever puts hundreds of bags on screen at once.
+	var f := CAP_LEFT | CAP_RIGHT
+	var has_row := false
+	for j in xs.size():
+		if j == i:
+			continue
+		var dx: int = xs[j] - xs[i]
+		var dy: int = ys[j] - ys[i]
+		if absi(dy) <= BAG_ROW_RAW and absi(dx) <= BAG_LINK_RAW:
+			has_row = true
+			f &= ~(CAP_LEFT if dx < 0 else CAP_RIGHT)
+		elif absi(dx) <= BAG_ROW_RAW and absi(dy) <= BAG_LINK_RAW and not _in_row(xs, ys, j):
+			f |= CAP_CORNER   # j is a lone perpendicular bag, not a parallel row — the run really turns here
+	return f if has_row else (f | CAP_CORNER)   # a lone bag is a corner post, not a wall stub
+
+
 static func _rock_has_top_light(rtex: String) -> bool:
 	# a3-09: only the DOMED boulders (rock1/rock2) get the lit top-edge rim that reads as
 	# raised cover; the flat dead cactus (cactus_dead2) has no raised dome, so no top-light.
@@ -6432,28 +6487,75 @@ func _draw_rocks() -> void:
 						Color(ROCK_TOP_LIGHT.r, ROCK_TOP_LIGHT.g, ROCK_TOP_LIGHT.b, 0.5 * fade), 1.8)
 
 
+func _wall_seg(pos: Vector2, base_scale: float, tint: Color, hx: int, hy: int,
+		caps: int, fade := 1.0) -> void:
+	var v: Dictionary = wall_variant(hx, hy)
+	var p := pos + Vector2(0.0, v["dy"] + (2.0 if v["slump"] else 0.0))
+	var s: float = base_scale * v["ds"]
+	var col := Color(tint.r * v["shade"], tint.g * v["shade"], tint.b * v["shade"], tint.a * fade)
+	# Contextual AO: the contact wedge widens where the run continues, so joints
+	# read as bags LEANING on bags — same weight as the old flat per-bag AO
+	# (10.0 / 0.42) so field cover doesn't lose contact shadow vs. pre-fix.
+	_ground_shadow(p, 9.0 + (3.0 if caps & CAP_LEFT == 0 else 0.0)
+			+ (3.0 if caps & CAP_RIGHT == 0 else 0.0), 0.42 * fade)
+	if caps & CAP_CORNER:
+		# Corner/terminator: alternate between the mound and an end-cap stack so an
+		# authored arena's turns/diamonds/L-stubs still read as SANDBAG cover, not a
+		# single re-skinned brush (review #3). sandbag_beige's alpha bbox is 80x46
+		# (1.74:1, NOT round) against the 36x10 SANDBAG_HALF box, so rotation stays
+		# capped at +-0.17 rad (review #2) and scale is pinned to base_scale*0.78,
+		# same as the old constrained mound, ~20px tall at field 0.62 — never the
+		# unconstrained full 0..2pi spin that let it draw taller than the hitbox.
+		if Art.cell_hash(hx, hy) % 2 == 0:
+			_spr("sandbag_beige", p, v["rot"] * 3.0, base_scale * 0.78, col)
+		else:
+			_spr("wall_sandbag_end", p, 0.0, base_scale * 0.85, col)
+			_spr("wall_sandbag_end", p, PI, base_scale * 0.7, col, -1.0)
+	elif caps == (CAP_LEFT | CAP_RIGHT):
+		_spr("wall_sandbag_end", p, 0.0, base_scale * 0.9, col)          # isolated: capped both ends
+	elif caps & CAP_LEFT:
+		_spr("wall_sandbag_end", p, 0.0, base_scale, col)                # run starts here
+	elif caps & CAP_RIGHT:
+		_spr("wall_sandbag_end", p, PI, base_scale, col, -1.0)           # run ends here (h-mirror)
+	else:
+		_spr("wall_sandbag", p, (PI + v["rot"]) if v["flip"] else v["rot"], s, col,
+			-1.0 if v["flip"] else 1.0)
+	if v["slump"]:
+		# Damage state: spilled bags + a scorch smear at the foot of a shelled segment.
+		_spr("fx_impactdark", p + Vector2(0.0, 5.0), 0.0, 0.5, Color(0.15, 0.11, 0.07, 0.30 * fade))
+		_spr("sandbag_beige", p + Vector2(-9.0, 7.0), v["rot"] * 9.0, base_scale * 0.42, col)
+		_spr("sandbag_beige", p + Vector2(7.0, 8.5), -v["rot"] * 7.0, base_scale * 0.36, col)
+	# Ground blend (moved here from _draw_sandbags, now every wall gets it): spoil
+	# skirt + hash speckles so the bags are DUG IN, not resting on the dirt card.
+	draw_rect(Rect2(p + Vector2(-14.0, 3.0), Vector2(28.0, 2.2)), Color(0.25, 0.18, 0.10, 0.10 * fade))
+	draw_rect(Rect2(p + Vector2(-12.0, 4.4), Vector2(24.0, 1.4)), Color(0.25, 0.18, 0.10, 0.06 * fade))
+	for spk in 4:
+		var sh2 := Art.cell_hash(hx + spk * 7, hy + spk * 13)
+		draw_circle(p + Vector2(-11.0 + float(sh2 % 23), -2.5 + float((sh2 / 23) % 6)), 0.7,
+			Color(0.30, 0.24, 0.14, (0.08 + float(sh2 % 3) * 0.02) * fade))
+
+
 func _draw_sandbags() -> void:
-	# Player-authored cover: the gate-wall bake at field scale, warm-tinted so
-	# YOUR cover reads apart from the neutral gate walls.
+	# Player-authored cover: modular wall set (wall_variant + cap_flags), not one
+	# repeated stamp. Two passes: band-cull + collect world coords for cap_flags'
+	# neighbour scan, then draw — the scan needs every visible bag's position
+	# before it can tell which ones terminate a run.
+	var visible: Array[Dictionary] = []
+	var bxs := PackedInt64Array()
+	var bys := PackedInt64Array()
 	for sb in sim.sandbags:
 		var pos := _to_screen(sb["x"], sb["y"])
 		if pos.y < -20.0 or pos.y > 380.0:
 			continue
-		# 9/9 panel: cover must sit as heavy as a barrel (0.42 armor-grade
-		# shadow) and live in the khaki band — the old warm tan collided with
-		# the warm hulk/threat grammar. Value lifted ~0.1 over the dirt cards.
-		var sb_fade := _bottom_fade(pos.y)   # c2 2v: fade off the player's back
-		_ground_shadow(pos, 10.0, 0.42 * sb_fade)
-		_spr("wall_sandbag", pos, 0.0, 0.62, Color(1.02, 0.98, 0.74, sb_fade))
-		# Field weathering (DS round-2 feedback): a soft dirt gradient at the
-		# base + sparse hash-placed scuff speckles — planted cover reads
-		# dug-in, not factory-fresh. All translucent overdraw, no new assets.
-		draw_rect(Rect2(pos + Vector2(-14.0, 3.0), Vector2(28.0, 2.2)), Color(0.25, 0.18, 0.10, 0.10))
-		draw_rect(Rect2(pos + Vector2(-12.0, 4.4), Vector2(24.0, 1.4)), Color(0.25, 0.18, 0.10, 0.06))
-		for spk in 4:
-			var sh2 := Art.cell_hash(sb["x"] / 65536 + spk * 7, sb["y"] / 65536 + spk * 13)
-			draw_circle(pos + Vector2(-11.0 + float(sh2 % 23), -2.5 + float((sh2 / 23) % 6)), 0.7,
-				Color(0.30, 0.24, 0.14, 0.08 + float(sh2 % 3) * 0.02))
+		visible.append(sb)
+		bxs.append(sb["x"])
+		bys.append(sb["y"])
+	for i in visible.size():
+		var sb: Dictionary = visible[i]
+		var pos := _to_screen(sb["x"], sb["y"])
+		# c2 2v: cover fades off the player's back near the bottom of the ratchet view.
+		_wall_seg(pos, 0.62, Color(1.02, 0.98, 0.74), sb["x"] / 65536, sb["y"] / 65536,
+			cap_flags(bxs, bys, i), _bottom_fade(pos.y))
 
 func _draw_mines() -> void:
 	for m in sim.mines:
@@ -6787,16 +6889,59 @@ func _draw_gates() -> void:
 		var gnum_col := Color(0.30, 0.27, 0.22, 0.85) if not g["open"] else Color(0.5, 0.46, 0.4, 0.6)
 		Art.text(self, str(g_idx), Vector2(320.0 - 4.0, gy - 8.0), 24, gnum_col)
 		if g["open"]:
-			# Blown-open remnants: a lone end cap survives at each flank.
+			# Blown-open remnants: a lone end cap survives at each flank, plus a
+			# scorch + crater at the blown centre — open/shut now read as two
+			# states of the same kit instead of two unrelated art pieces.
 			_spr("wall_sandbag_end", Vector2(24, gy), 0.0, 1.0, open_wall)
 			_spr("wall_sandbag_end", Vector2(616, gy), PI, 1.0, open_wall, -1.0)
+			# ponytail: crater's _spr already stacks its own fx_softspot underlay
+			# (main.gd _CRATER_KEYS) — a separate fx_impactdark on top doubled up
+			# and read as an opaque black pit instead of scorch (review #4).
+			_spr("crater", Vector2(320, gy + 6.0), 0.0, 0.9, open_wall)
 		else:
+			# Continuous AO/berm strip under the whole wall (was NO shadow at all) —
+			# fx_shadow is the same card ~27 other shadow sites use, so it still batches.
+			draw_texture_rect(Art.tex("fx_shadow"), Rect2(Vector2(6, gy - 4), Vector2(628, 30)),
+				false, Color(0.0, 0.02, 0.02, 0.30))
+			draw_rect(Rect2(Vector2(6, gy + 9), Vector2(628, 4)), Color(0.25, 0.18, 0.10, 0.12))
+			# Rear parapet row, half-pitch offset: joints no longer line up in a
+			# single column, the wall gains depth.
+			for i in 8:
+				_wall_seg(Vector2(100 + i * 60, gy - 7), 0.86, shut_wall.darkened(0.22),
+					int(g["y"]) + 1, i, 0)
+			# Front row: wall_variant supplies jitter, per-segment value break, and the
+			# ~1-in-11 slumped/shelled damage state. That damage state must NEVER leave a
+			# visual gap — a shut gate is a hard boundary — it only lowers/tilts/darkens
+			# the segment and spills loose bags; the sprite itself is never skipped.
 			for i in 9:
-				var flip: bool = (i + gh) % 2 == 0
-				_spr("wall_sandbag", Vector2(70 + i * 60, gy), PI if flip else 0.0, 1.0,
-					shut_wall, -1.0 if flip else 1.0)
+				_wall_seg(Vector2(70 + i * 60, gy), 1.0, shut_wall, int(g["y"]), i, 0)
 			_spr("wall_sandbag_end", Vector2(30, gy), 0.0, 1.0, shut_wall)
 			_spr("wall_sandbag_end", Vector2(610, gy), PI, 1.0, shut_wall, -1.0)
+			# Corner returns: the wall turns south into the flank instead of dying
+			# flat at the screen edge.
+			_spr("wall_sandbag", Vector2(26, gy + 18), PI / 2.0, 0.80, shut_wall)
+			_spr("wall_sandbag", Vector2(26, gy + 34), PI / 2.0, 0.66, shut_wall)
+			_spr("wall_sandbag", Vector2(614, gy + 18), PI / 2.0, 0.80, shut_wall, -1.0)
+			_spr("wall_sandbag", Vector2(614, gy + 34), PI / 2.0, 0.66, shut_wall, -1.0)
+			# Modular set-dressing from props already in the registry (zero new art),
+			# hash-picked off the existing per-gate gh so no two gates dress alike.
+			# `reach` steps each coil OUT from the flank by wf (10/22/34px) so the
+			# three ~26px-wide sprites never land on the same spot — they used to
+			# all resolve into the same 12px window (40/46/52 or 588/594/600) and
+			# read as one clumped, duplicated picket. y + rotation + scale also
+			# vary per coil so a spread stack still doesn't look like a stamp.
+			for wf in 3:
+				var wfh := Art.cell_hash(gh + wf * 17, wf)
+				# ponytail: coils 0/1 pinned one per flank so a gate can't clump all
+				# three coils on one side (review #5); only the 3rd is hash-picked.
+				var side := 1.0 if wf == 0 else (-1.0 if wf == 1 else (1.0 if (gh >> wf) & 1 == 0 else -1.0))
+				var reach := 10.0 + float(wf) * 12.0 + float(wfh % 6)
+				var wfx := (34.0 + reach) if side > 0.0 else (606.0 - reach)
+				var wfy := gy + 16.0 + float(wf) * 4.0 + float(wfh % 5)
+				_spr("barbedwire", Vector2(wfx, wfy), float(wfh % 12) * 0.02 - 0.12,
+					0.68 + float(wfh % 4) * 0.03, Color(0.55, 0.5, 0.45))
+			_spr("tank_trap", Vector2(14.0 + float(gh % 5), gy + 26.0), 0.0, 0.9, shut_wall)
+			_spr("tank_trap", Vector2(626.0 - float((gh >> 3) % 5), gy + 26.0), 0.0, 0.9, shut_wall)
 			# Lock pips: how many of the two locking bunkers are still up —
 			# turns a black-box wall into 'one down, one to go'.
 			if not g.get("b1", {}).is_empty():
@@ -6846,8 +6991,8 @@ func _draw_gates() -> void:
 				var bdy := _to_screen(0, fk["y"] + (490 + bd * 40) * Fixed.ONE).y
 				if bdy < -20.0 or bdy > 380.0:
 					continue
-				_ground_shadow(Vector2(bait_x, bdy), 10.0, 0.42)
-				_spr("wall_sandbag", Vector2(bait_x + bd * 20.0, bdy), 0.0, 0.62, Color(1.02, 0.98, 0.74))
+				_wall_seg(Vector2(bait_x + bd * 20.0, bdy), 0.62, Color(1.02, 0.98, 0.74),
+					int(bait_x) + bd, fk["y"] / 65536 + 490 + bd * 40, 0)
 		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
 		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
 		var cache_txt := "< CACHE"
