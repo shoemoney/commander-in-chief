@@ -2006,9 +2006,17 @@ func _consume_events() -> void:
 				# near-misses); capped so MG spam can't sandstorm the screen.
 				if dirt_puffs < 2:
 					dirt_puffs += 1
-					_burst(ev["x"], ev["y"],
-						"splash" if sim._in_water(ev["x"], ev["y"]) else "dust",
+					var wet_dirt: bool = sim._in_water(ev["x"], ev["y"])
+					_burst(ev["x"], ev["y"], "splash" if wet_dirt else "dust",
 						2, 0.3, 0.8, 0.3, 0.05)
+					# juice pass ("no light cast on the ground"): a round striking dirt
+					# threw two grey motes and nothing else — the single most frequent
+					# impact in the game left the terrain unlit. One tiny, fast additive
+					# pool (already the light kind's grammar) says the round HIT THERE,
+					# and rides the same 2/tick cap so MG spam can't sum into a glow.
+					if not wet_dirt:
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+							"rate": 0.34, "r": 9.0, "col": Color(1.0, 0.85, 0.55)})
 			"armor_block":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "spark", "rate": 0.3})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
@@ -2044,6 +2052,12 @@ func _consume_events() -> void:
 						% (Art.pad_label("grenade") if Art.use_pad else "SHIFT"))
 				if not armor_pinged:
 					armor_pinged = true
+					# juice pass: the ricochet threw sparks but cast no light — a
+					# cold-white pool under the strike so "that round did NOTHING to
+					# this" reads at a glance, not just in the ears. Rides the same
+					# once-per-tick gate as the ping, so a wall of bullets = one pool.
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+						"rate": 0.3, "r": 12.0, "col": Color(0.85, 0.92, 1.0)})
 					_sfx.play("ping_armor", -16.0, 1.0)
 					# accessibility: armor_block isn't in _EVENT_SOUND (the ping is picked here,
 					# per hit-target), so it needs its own caption call. The plink is what tells a
@@ -2074,6 +2088,11 @@ func _consume_events() -> void:
 				_boss_flash = minf(1.0, _boss_flash + 0.35)   # the big body reacts, not just a spark
 				if not boss_pinged:
 					boss_pinged = true
+					# juice pass: same as armor_block — a landed round on the boss hull
+					# lit nothing. Warm (this one is DAMAGE, not a deflection) so the
+					# two impact colours teach hurting-it vs wasting-it.
+					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+						"rate": 0.28, "r": 14.0, "col": Color(1.0, 0.8, 0.45)})
 					_sfx.play("ping_shell", -10.0, 1.2)
 			"dry_fire":
 				if Engine.get_physics_frames() - _dry_frame >= 14:
@@ -2664,6 +2683,15 @@ func _check_enemy_hits() -> void:
 			_enemy_flash[eidx] = 1.0
 			if _motion >= 0.5:   # a2-11 r3: REDUCE MOTION suppresses the pop + sparks (not just the flinch)
 				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
+				# juice pass ("a hit that doesn't sell"): landing REAL damage on the only
+				# multi-HP kinds (mg_nest / technical / broadcast) looked flatter than
+				# plinking armour off a wall — 4 procedural dots vs. the authored sparkle
+				# scatter a ricochet gets. Give the damaging hit the same authored card
+				# grammar plus a dark strike mark, so chewing through a nest reads as
+				# progress, not as the deflect that means "stop shooting this".
+				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "spark", "rate": 0.22})
+				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
+					"sz": 9.0, "fade": 1.5, "rate": 0.14, "col": Color(0.15, 0.13, 0.12, 0.65)})
 				for sp in 4:
 					var sa := float(sp) * PI / 2.0 + 0.4
 					_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
@@ -9005,9 +9033,20 @@ func _draw_fx() -> void:
 				# a1-08 WHITE-HOT lead: the blast flashes a bright near-white core for the
 				# first EXPLO_WHITE_T of its life, then cools to the orange fireball — a
 				# concussive flashbulb instead of blooming red-first/muddy.
+				# juice pass: these were two hard-edged Art.circle DISCS — a flat white
+				# blob that stamped over the fireball sprite and read (blind-review
+				# verbatim) as a "solid white starburst" of "flat vector primitives".
+				# Same envelope, same radii, drawn as the authored soft radial card the
+				# `light` kind already uses, so the core BLOOMS off into the fireball
+				# instead of ending on an aliased edge. One draw each, either way.
 				var wf := 1.0 - t / EXPLO_WHITE_T
-				Art.circle(self, pos, EXPLO_WHITE_R_OUT + t * 46.0, Color(1.0, 0.98, 0.9, 0.88 * wf))
-				Art.circle(self, pos, EXPLO_WHITE_R_IN + t * 22.0, Color(1.0, 1.0, 0.98, 0.9 * wf))
+				var wsoft := Art.tex("fx_softspot")
+				var wro := EXPLO_WHITE_R_OUT + t * 46.0
+				var wri := EXPLO_WHITE_R_IN + t * 22.0
+				draw_texture_rect(wsoft, Rect2(pos - Vector2.ONE * wro, Vector2.ONE * wro * 2.0),
+					false, Color(1.0, 0.98, 0.9, 0.88 * wf))
+				draw_texture_rect(wsoft, Rect2(pos - Vector2.ONE * wri, Vector2.ONE * wri * 2.0),
+					false, Color(1.0, 1.0, 0.98, 0.9 * wf))
 		elif fx["kind"] == "debris":
 			# Flung rock/wood shard: arcs out on vx/vy, tumbling, then rests.
 			var dcol: Color = fx.get("col", Color(0.4, 0.38, 0.34))
@@ -9223,12 +9262,22 @@ func _draw_glow() -> void:
 						false, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
 					g.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				else:
-					Art.circle(g, pos, sz * 0.9, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
-				for ml in 3:
-					var mla: float = fx["a"] + (float(ml) - 1.0) * 0.42
-					Art.line(g, pos + Vector2.from_angle(mla) * sz * 0.4,
-						pos + Vector2.from_angle(mla) * sz * (1.7 + float(ml % 2) * 0.5),
-						Color(1, 1, 1, 0.75), 1.2)
+					# juice pass: was a hard-edged Art.circle DISC — the red faction's
+					# ignition read as a flat pale coin punched over the fan. Same
+					# radius/alpha on the authored soft radial card, so it blooms out of
+					# the fan instead of sitting on it. Still NOT mz_pop: sol-16 keeps the
+					# authored crack-pop exclusive to the player's gun.
+					var msoft := sz * 0.9
+					g.draw_texture_rect(Art.tex("fx_softspot"),
+						Rect2(pos - Vector2.ONE * msoft, Vector2.ONE * msoft * 2.0),
+						false, Color(mpop.r, mpop.g, mpop.b, MUZZLE_HEAT["pop_a"]))
+				# (Dropped: 3 radiating pure-white Art.line slivers stamped on EVERY
+				# muzzle, both factions. They were the literal "solid white starburst"
+				# blind reviewers named — the ONE additive term a3-06 left uncapped at
+				# white 0.75, so small-arms fire out-bloomed the explosions it was
+				# capped below, and the authored fan/pop card under it was invisible
+				# behind an asterisk. Also ~150 draw_rects/shot: Art.line is pixel-grid,
+				# one rect per covered pixel.)
 		elif fx["kind"] == "spark":
 			# Ricochet: legacy art sparkle cards flung radially — armor says no.
 			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
@@ -9271,7 +9320,14 @@ func _draw_glow() -> void:
 			if t < 0.0:
 				continue
 			var la2 := 1.0 - t
-			Art.circle(g, pos, 12.0 * (1.0 - t) + 3.0, Color(1.0, 0.95, 0.8, 0.68 * la2 * la2))
+			# juice pass: the bloom was a hard-edged Art.circle disc stacked on a second
+			# disc — a flat two-tone coin. The bloom is now the soft radial card (with
+			# room to spread, since its falloff eats the edge); only the small hot POINT
+			# stays a crisp disc, which is what a secondary core should look like.
+			var fr := 20.0 * (1.0 - t) + 5.0
+			g.draw_texture_rect(Art.tex("fx_softspot"),
+				Rect2(pos - Vector2.ONE * fr, Vector2.ONE * fr * 2.0),
+				false, Color(1.0, 0.95, 0.8, 0.68 * la2 * la2))
 			Art.circle(g, pos, 4.5, Color(1.0, 1.0, 0.95, 0.8 * la2))
 
 
