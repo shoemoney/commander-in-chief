@@ -918,7 +918,7 @@ func _paint_bg(canvas: Node2D) -> void:
 		# i.e. a hard luminance step on every cell edge — that WAS the grid. The
 		# mirror variants also broke sand.png's own tiling on Y-flipped edges.
 		# Value variation now comes entirely from the soft 256px macro mottle,
-		# the dirt cards, the spine and the cloud shadows below — none grid-aligned.
+		# the dirt cards and the cloud shadows below — none grid-aligned.
 		# 0.5 scale is required: tile=true repeats at NATIVE 128px, which would
 		# show only the top half of the card and re-cut it every row.
 		canvas.draw_set_transform(Vector2(-32.0, row_y), 0.0, Vector2(0.5, 0.5))
@@ -983,13 +983,9 @@ func _paint_bg(canvas: Node2D) -> void:
 			var mrot := float(mh % 628) / 100.0
 			var msz := 192.0 + float(mh % 97)
 			if mh % 6 == 0:
-				# Wheel tracks (c2 2v wayfinding): the route reads as a TRAFFICKED
-				# LINE, not random scuffs — 2-of-3 tracks snap near-vertical (the
-				# corridor's travel axis) and hug the center lane; 1-in-3 stays
-				# wild so it doesn't read as painted-on. Odds bumped 1/8->1/6.
-				if mh / 17 % 3 != 0:
-					mrot = PI / 2.0 + (float(mh % 60) / 100.0 - 0.3)   # within ±0.3rad of vertical
-					mpos.x = 320.0 + (float((mh / 5) % 240) - 120.0)   # biased to the 200-440 lane
+				# Wheel tracks: scattered surface decals — hashed rotation and x,
+				# same as every other mottle cell, so they read as scuffs rather
+				# than snapping into a painted centre-lane route.
 				canvas.draw_set_transform(mpos, mrot, Vector2(0.25, 2.5))
 				for tk2 in 2:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
@@ -1012,26 +1008,6 @@ func _paint_bg(canvas: Node2D) -> void:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
 						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
-	# a4-04: a COHERENT worn spine down the play lane — the mid-ground anchor + forward
-	# wayfinding the stochastic mottle/scuffs above never gave (they read as random, not a
-	# route). Overlapping soft packed-earth cards follow _spine_center_x (a PURE fn of
-	# absolute world-y, so the trail scrolls seamlessly and never teleports laterally),
-	# fusing into one connected trail; a faint tread pair rides its center. The old
-	# center-biased wheel scuffs now land ON this spine and reinforce it. Drawn last so it
-	# reads as the most-trampled ground; under the water layer so a ford still crosses it.
-	var spine_top: float = floor(moy) - 96.0
-	for si in 16:
-		var sy: float = spine_top + float(si) * 56.0
-		var cx: float = _spine_center_x(cam_y + sy)
-		canvas.draw_set_transform(Vector2(cx, sy), 0.0, Vector2.ONE)
-		canvas.draw_texture_rect(Art.tex("fx_softspot"),
-			Rect2(Vector2(-48.0, -68.0), Vector2(96.0, 136.0)), false, SPINE_COL)
-		if si % 2 == 0:
-			for tk in 2:
-				canvas.draw_texture_rect(Art.tex("fx_softspot"),
-					Rect2(Vector2(-11.0 + float(tk) * 22.0 - 3.0, -58.0), Vector2(6.0, 116.0)),
-					false, SPINE_TREAD)
-	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _process(_delta: float) -> void:
@@ -5423,16 +5399,8 @@ const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a":
 # a-seam: the flat ground-base modulate. 0.522 == the OLD per-tile average
 # (0.49 + mean(h%7)*0.012 - 1/3*0.012), so removing the per-cell tint hash
 # changes the grid, not the exposure — every alpha tuned against this ground
-# (mottle 0.16, spine 0.16, feathers, scorch) keeps its contrast.
+# (mottle 0.16, feathers, scorch) keeps its contrast.
 const GROUND_SHADE := 0.522
-
-
-# a4-04: the worn spine down the play lane. Warm packed earth (darker than turf) + a faint
-# tread pair snapped onto it; SPINE_LANE is the x-band its meandering centerline stays in
-# (the play corridor), so the trail is always a route through open ground, never a wall.
-const SPINE_COL := Color(0.10, 0.075, 0.03, 0.16)   # a4-04 r2: +a so the continuous spine reads over grass mottle, not just the ford (still faint, <0.2)
-const SPINE_TREAD := Color(0.02, 0.04, 0.0, 0.14)
-const SPINE_LANE := Vector2(232.0, 408.0)
 
 
 # --- Modular cover set (view-only). A wall is an EMPLACEMENT, not a tilemap
@@ -5513,15 +5481,6 @@ static func _hero_shows_apex(down_residual: float) -> bool:
 	# a4-03: the hero value-apex crown catch-light shows only while UP — a downed / reviving
 	# body (down_residual > 0) must NOT read as the brightest point on the field.
 	return down_residual <= 0.01
-
-
-static func _spine_center_x(world_y: float) -> float:
-	# a4-04: the worn-spine centerline — a slow low-frequency wander around the 320 center
-	# lane, a PURE function of absolute world-y so the trail scrolls seamlessly and never
-	# teleports laterally as the camera moves. The two sine terms keep it inside SPINE_LANE
-	# (|dev| <= 72) and give it an organic, non-repeating meander rather than a road-straight
-	# stripe. Continuous by construction: max lateral slope ~0.26 px/px.
-	return 320.0 + sin(world_y * 0.0022) * 52.0 + sin(world_y * 0.0071 + 1.3) * 20.0
 
 
 static func _grade_breather_target(mode: String, intermission_ticks: int) -> float:
@@ -8033,7 +7992,7 @@ func _draw_colossus() -> void:
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	draw_rect(_label_plate_rect(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y, clw), LABEL_PLATE_FILL)
 	Art.text(self, clabel, Vector2(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
-	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
+	_draw_bar(HudIcons.COLOSSUS_BAR_RECT, cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar
 	# marker above, so the plating-retract window is timeable off the fixed
@@ -8041,9 +8000,10 @@ func _draw_colossus() -> void:
 	if sim.colossus.get("core_open", 0) == 0:
 		var cc: int = sim.colossus.get("core_cd", SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
 		var cvfrac := 1.0 - float(cc) / float(SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
-		var cvx := 170.0 + 300.0 * clampf(cvfrac, 0.0, 1.0)
-		Art.line(self, Vector2(cvx, 328.0), Vector2(cvx, 345.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
-		Art.arc(self, Vector2(cvx, 327.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
+		var cvx := HudIcons.COLOSSUS_BAR_RECT.position.x + HudIcons.COLOSSUS_BAR_RECT.size.x * clampf(cvfrac, 0.0, 1.0)
+		Art.line(self, Vector2(cvx, HudIcons.COLOSSUS_BAR_RECT.position.y - 2.0),
+			Vector2(cvx, HudIcons.COLOSSUS_BAR_RECT.end.y + 2.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
+		Art.arc(self, Vector2(cvx, HudIcons.COLOSSUS_BAR_RECT.position.y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
 
 
@@ -10096,7 +10056,7 @@ func _draw_banners(top_msg: String) -> void:
 	elif sim.last_stand:
 		# Shadowed + centered via the shared helper — was the one banner holdout
 		# still drawing raw, unshadowed, hardcoded-position text.
-		Art.text_center(self, "LAST STAND — NO REVIVES", 320.0, 350.0, 10, Color(0.95, 0.4, 0.3))
+		Art.text_center(self, "LAST STAND — NO REVIVES", 320.0, HudIcons.LAST_STAND_Y, 10, Color(0.95, 0.4, 0.3))
 	# Black fade covering the title→combat cut.
 	if _fade > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, _fade))

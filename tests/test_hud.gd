@@ -3097,3 +3097,16 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 		var verb_top: float = HudIcons.VERB_LEGEND_Y - lift - HudIcons.VERB_PLATE_BELOW
 		Runner.T.ok(verb_top + 2.0 * HudIcons.VERB_PLATE_BELOW <= reserve, "verb chip clears the colossus HP bar")
 		Runner.T.ok(verb_top >= bg.end.y, "lifted verb chip still sits below the caption strip")
+	# aaa-2/#2: the block's OWN members must be disjoint too — LAST STAND used to
+	# print through the colossus HP bar.
+	var lsw: float = font.get_string_size("LAST STAND — NO REVIVES",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	var ls := Rect2(320.0 - lsw / 2.0, HudIcons.LAST_STAND_TOP, lsw, 12.0)
+	Runner.T.ok(not HudIcons.COLOSSUS_BAR_RECT.grow(2.0).intersects(ls),
+		"LAST STAND never prints through the colossus HP bar")
+	var gap: float = ls.position.y - HudIcons.COLOSSUS_BLOCK_BOTTOM
+	Runner.T.ok(gap >= 4.0, "LAST STAND clears the colossus block by %.1fpx (need >= 4)" % gap)
+	Runner.T.ok(ls.end.y <= 358.0, "LAST STAND stays off the viewport floor")
+	# and the label/bar pair inside the block
+	Runner.T.ok(HudIcons.COLOSSUS_BAR_RECT.position.y >= HudIcons.COLOSSUS_LABEL_Y + 2.0,
+		"the HP bar clears the phase label's baseline")

@@ -1385,18 +1385,24 @@ const CAPTION_MAX_W := 560.0
 const CAPTION_LINE_H := 11.0
 
 # The bottom counterpart of BOSS_BAR_TOP. main.gd's `_draw_colossus` docks a PERSISTENT block on
-# the viewport floor for the whole finale (phase label at COLOSSUS_LABEL_Y, plate, HP bar at y330,
-# core-countdown tick to y345). These two TRANSIENT overlays (caption strip, verb chip) used to
+# the viewport floor for the whole finale (phase label at COLOSSUS_LABEL_Y, plate, HP bar at
+# COLOSSUS_BAR_RECT, core-countdown tick to COLOSSUS_BLOCK_BOTTOM). These two TRANSIENT overlays (caption strip, verb chip) used to
 # paint straight over it — the strip's centered scrim ate the right half of "FOUNDRY COLOSSUS",
 # and the chip sat on the HP bar. The block's y's live HERE (not as literals in main.gd) so the
 # only file that draws over them can see them.
 const COLOSSUS_LABEL_X := 172.0
-const COLOSSUS_LABEL_Y := 326.0                      # text baseline of the phase label
-const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - 9.0   # 317: label glyph top (Art.font() ascent @ FONT_SIZE)
+const COLOSSUS_LABEL_Y := 316.0                      # text baseline of the phase label
+const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - 9.0   # label glyph top (Art.font() ascent @ FONT_SIZE)
 const BOTTOM_RESERVE_GAP := 3.0                      # breathing gap an overlay keeps above the reserve
 const CAPTION_BG_ABOVE := 9.0   # caption scrim extent above the LAST line's baseline (was inline -9.0)
 const CAPTION_BG_BELOW := 5.0   # ...and below it (was inline: height 14 = 9 + 5)
 const VERB_PLATE_BELOW := 8.0   # verb chip plate extent below VERB_LEGEND_Y (Rect2(..., y-8, ..., 16))
+# aaa-2/#2: the block's own members, previously bare literals in main.gd — needed here so the
+# bottom-band gap between the HP bar and LAST STAND is a real, checkable measurement.
+const COLOSSUS_BAR_RECT := Rect2(170.0, 320.0, 300.0, 13.0)
+const COLOSSUS_BLOCK_BOTTOM := 335.0   # COLOSSUS_BAR_RECT.end.y + 2.0: the core-countdown tick's reach
+const LAST_STAND_Y := 350.0
+const LAST_STAND_TOP := LAST_STAND_Y - 9.0   # same -9 ascent idiom as COLOSSUS_BLOCK_TOP
 
 
 ## True exactly when main.gd `_draw_colossus` paints its bottom-docked block — same predicate,
@@ -1414,7 +1420,7 @@ static func colossus_bar_visible(sim) -> bool:
 static func bottom_band_lift(sim) -> float:
 	if not colossus_bar_visible(sim):
 		return 0.0
-	return VERB_LEGEND_Y + VERB_PLATE_BELOW + BOTTOM_RESERVE_GAP - COLOSSUS_BLOCK_TOP   # 38.0
+	return VERB_LEGEND_Y + VERB_PLATE_BELOW + BOTTOM_RESERVE_GAP - COLOSSUS_BLOCK_TOP   # 48.0
 
 
 ## The caption scrim's exact rect — the one measurement both the draw and the layout test read,
