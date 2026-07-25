@@ -34,14 +34,46 @@ func test_revive_cost_solo_halves() -> void:
 	Runner.T.eq(sim.revive_cost(p), 50, "solo halves the deaths-scaled cost (100/2)")
 
 
-func test_revive_cost_endless_adds_wave_surcharge() -> void:
+func test_revive_cost_endless_compounds_and_wave_multiplies() -> void:
+	# Endless's only brake on a run. The shipped rule (deaths capped at 3, +20 per
+	# 5 waves) topped out ~150 against ~35/wave of income growth, so the chest
+	# outran it forever and the wipe was unreachable. Now deaths compound uncapped
+	# and the price is wave-MULTIPLIED.
 	var sim := SimWorld.new(1, 2, "endless")
 	var p := sim.players[0]
 	p["deaths"] = 1
+	sim.wave = 4
+	Runner.T.eq(sim.revive_cost(p), 50, "first death in the first band is still the base 50")
 	sim.wave = 9
-	Runner.T.eq(sim.revive_cost(p), 70, "wave 9 adds (9/5)*20 = 20 to the base 50")
+	Runner.T.eq(sim.revive_cost(p), 100, "wave 9 doubles the price (1 + 9/5 = 2)")
 	sim.wave = 25
-	Runner.T.eq(sim.revive_cost(p), 150, "wave 25 adds (25/5)*20 = 100 to the base 50")
+	Runner.T.eq(sim.revive_cost(p), 300, "wave 25 is a 6x multiplier on the base")
+	p["deaths"] = 6
+	Runner.T.eq(sim.revive_cost(p), 1800, "deaths compound past 3 (50 * 6 * 6) — no cap in endless")
+	# Campaign is untouched: the 3-death soft cap still guards the checkpointed run.
+	var camp := SimWorld.new(1, 2, "campaign")
+	var cp := camp.players[0]
+	cp["deaths"] = 6
+	Runner.T.eq(camp.revive_cost(cp), 150, "campaign still soft-caps at 3 deaths")
+
+
+func test_endless_death_spiral_reaches_the_wipe() -> void:
+	# The failure state, end to end: a solo run whose deaths have outgrown the
+	# chest can no longer buy a body, so death arms the broke timer and its
+	# expiry (whole party down, no rescue) wipes the run.
+	var sim := SimWorld.new(3, 1, "endless")
+	sim.wave = 20
+	var p := sim.players[0]
+	p["deaths"] = 5
+	sim.war_chest = 600   # a healthy late chest...
+	Runner.T.ok(sim.war_chest < sim.revive_cost(p),
+		"...still cannot cover the 6th body at wave 20 (%d)" % sim.revive_cost(p))
+	sim._kill_player(p)
+	Runner.T.eq(p["broke_timer"], SimWorld.BROKE_RESPAWN_TICKS,
+		"dying broke arms the wipe timer without needing a button press")
+	for i in SimWorld.BROKE_RESPAWN_TICKS + 2:
+		sim.step([_idle()])
+	Runner.T.ok(sim.wiped, "the broke timer expiring with the party down ends the run")
 
 
 func test_flawless_streak_compounds_and_caps_at_3x() -> void:

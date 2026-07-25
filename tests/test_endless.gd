@@ -575,3 +575,109 @@ func test_the_rally_mast_is_not_exempt_from_the_off_screen_sweep() -> void:
 	Runner.T.eq(sim.enemies.size(), 1, "the mast behind the camera is swept like anything else")
 	Runner.T.eq(sim.enemies[0]["y"], sim.camera_top + 100 * SimWorld.F_ONE,
 		"the in-band mast survives")
+func test_deep_wave_veteran_armor_escalates_without_a_ceiling() -> void:
+	# The regression this pins: every endless knob bottomed out early — spawn
+	# cadence at wave 12 (floor 8 ticks, EXACTLY FIRE_COOLDOWN_TICKS, so a perfect
+	# player broke even with the treadmill forever), elite density at 10, roster
+	# complete at 7. Veteran armor is the one term with no ceiling.
+	Runner.T.eq(SimWorld.FIRE_COOLDOWN_TICKS, 8,
+		"the cadence floor still equals the fire cooldown — armor is what breaks the tie")
+	var sim := SimWorld.new(5, 1, "endless")
+	var prev := -1
+	for w in [1, 12, 13, 18, 19, 30, 100]:
+		sim.wave = w
+		var arm: int = sim._wave_armor()
+		Runner.T.ok(arm >= prev, "armor never regresses going deeper (wave %d)" % w)
+		prev = arm
+	sim.wave = 12
+	Runner.T.eq(sim._wave_armor(), 0, "wave 12 and under is untouched — the shipped curve stands")
+	sim.wave = 13
+	Runner.T.eq(sim._wave_armor(), 1, "wave 13 starts the ramp the old curve never had")
+	sim.wave = 19
+	Runner.T.eq(sim._wave_armor(), 2, "one more bullet per body every 6 waves")
+	sim.wave = 100
+	Runner.T.ok(sim._wave_armor() >= 15, "the ramp is unbounded, so pressure never flatlines")
+	# Campaign is authored, not endless — it must never see armor.
+	var camp := SimWorld.new(5, 1, "campaign")
+	camp.wave = 40
+	Runner.T.eq(camp._wave_armor(), 0, "campaign is authored: no wave armor, ever")
+
+
+func test_veteran_armor_lands_on_spawns_and_eats_a_bullet() -> void:
+	var sim := SimWorld.new(5, 1, "endless")
+	sim.rocks.clear()      # a clean firing lane: cover would eat the test bullet
+	sim.sandbags.clear()
+	var ey: int = sim.camera_top + 100 * Fixed.ONE   # inside the bullet band
+	sim.wave = 12
+	sim._spawn_enemy(100 * Fixed.ONE, ey, false)
+	Runner.T.ok(not sim.enemies[0].has("hp"),
+		"pre-ramp spawns carry no hp field at all (the hashed feed stays untouched)")
+	sim.enemies.clear()
+	sim.wave = 19
+	sim._spawn_enemy(100 * Fixed.ONE, ey, false)
+	sim._spawn_special(200 * Fixed.ONE, ey, "sniper")
+	Runner.T.eq(sim.enemies[0]["hp"], 3, "wave 19 rushers take 3 bullets")
+	Runner.T.eq(sim.enemies[1]["hp"], 3, "specials harden on the same ramp")
+	# ...and the generalised armor branch actually absorbs the round.
+	var e: Dictionary = sim.enemies[0]
+	sim.bullets.append({"x": e["x"], "y": e["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.ok(e["alive"], "an armored rusher survives the first hit")
+	Runner.T.eq(e["hp"], 2, "...and the round came off its armor")
+	# A grenade is still the answer to armor — it one-shots through it.
+	sim._explode(e["x"], e["y"], SimWorld.GRENADE_RADIUS)
+	Runner.T.ok(not e["alive"], "explosives still one-shot armor (spend, don't stall)")
+
+
+func test_second_mutator_stacks_from_wave_15() -> void:
+	var sim := SimWorld.new(5, 1, "endless")
+	sim.wave_mod = 4
+	for w in [1, 7, 12, 14]:
+		sim.wave = w
+		Runner.T.eq(sim.second_mod(), 0, "no stacked mutator before wave 15 (wave %d)" % w)
+	var stacked := 0
+	for w in range(15, 40):
+		sim.wave = w
+		var m2: int = sim.second_mod()
+		if w % 5 == 0:
+			Runner.T.eq(m2, 0, "miniboss waves stay single-mutator (wave %d)" % w)
+			continue
+		Runner.T.ok(m2 >= 1 and m2 <= 8, "wave %d stacks a real mutator (got %d)" % [w, m2])
+		Runner.T.ok(m2 != sim.wave_mod, "the stack never doubles the primary (wave %d)" % w)
+		stacked += 1
+	Runner.T.ok(stacked >= 15, "most deep waves carry two mutators, not one")
+	# Effects read through has_mod, so the second slot is live, not decorative.
+	sim.wave = 16
+	var m: int = sim.second_mod()
+	Runner.T.ok(sim.has_mod(m) and sim.has_mod(4), "has_mod sees BOTH slots")
+	# Endless-only, and deterministic for a given seed+wave (no rng draw taken).
+	var camp := SimWorld.new(5, 1, "campaign")
+	camp.wave = 22
+	Runner.T.eq(camp.second_mod(), 0, "campaign never stacks mutators")
+	var twin := SimWorld.new(5, 1, "endless")
+	twin.wave = 16
+	twin.wave_mod = 4
+	Runner.T.eq(twin.second_mod(), m, "same seed + wave = same stack (pure, no rng draw)")
+
+
+func test_stacked_payday_actually_fires() -> void:
+	# Proof the stacking is wired to effects, not just reported: pick the wave
+	# whose SECOND slot is PAYDAY and check the coin doubles from that slot alone.
+	var sim := SimWorld.new(5, 1, "endless")
+	sim.wave_mod = 1   # primary is BLITZ — the payday can only come from slot 2
+	var found := -1
+	for w in range(15, 200):
+		if w % 5 == 0:
+			continue
+		sim.wave = w
+		if sim.second_mod() == 4:
+			found = w
+			break
+	Runner.T.ok(found > 0, "a stacked PAYDAY wave exists in the first 200")
+	sim.wave = found
+	var chest0 := sim.war_chest
+	var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+	sim.enemies.append(e)
+	sim._kill_enemy(e)
+	Runner.T.eq(sim.war_chest - chest0, SimWorld.COIN_RUSHER * 2,
+		"a mutator in the SECOND slot pays out exactly like the first")

@@ -366,6 +366,21 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## The endless torture wipes at wave 2, before the first sapper spawn; the 208 technical
 ## enemy-ticks it does step sit clear of every piece of cover and slow terrain the shared
 ## step adds, so _advance_toward reproduces the old positions byte for byte.
+## BOTH GOLDENS VERIFIED UNCHANGED (2026-07-25, endless difficulty curve + reachable
+## failure state). Four sim changes, none of which the torture windows can observe:
+##   1. Veteran armor (_wave_armor) hardens endless spawns — gated wave >= 13, and it
+##      only WRITES e["hp"] when the bonus is nonzero, so the (already hashed) hp feed
+##      stays absent everywhere the torture reaches.
+##   2. second_mod()/has_mod() stack a second wave mutator — gated wave >= 15, derived
+##      purely from wave + world seed (no new hashed field, no rng draw), and has_mod()
+##      reduces to `wave_mod == m` whenever second_mod() is 0.
+##   3. The bullet armor branch now reads e.get("hp", 1) > 1 instead of a kind whitelist
+##      (mg_nest/technical/broadcast) — behaviour-identical for those three, since they
+##      are the only kinds that carried an hp field.
+##   4. revive_cost() compounds uncapped and wave-multiplies IN ENDLESS ONLY. Campaign
+##      keeps the 3-death soft cap verbatim -> GOLDEN untouched by construction. Below
+##      wave 5 the endless formula (50 * max(deaths,1) * 1) equals the old one for 0-3
+##      deaths, which is the entire reach of the endless torture (it wipes in wave 2).
 const ENDLESS_GOLDEN: Array[int] = [
 	870682775949389125,
 	2998730705561210490,
