@@ -82,6 +82,9 @@ func test_buy_is_edge_triggered() -> void:
 	# Holding the buy input across ticks must purchase exactly once.
 	var sim := SimWorld.new(7, 1)
 	sim.war_chest = 500
+	# Players spawn at GRENADE_AMMO_MAX, and a buy that delivers nothing is now
+	# denied outright — burn one first so this stays a test of edge-triggering.
+	sim.players[0]["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX - 1
 	var buy := SimInput.new()
 	buy.buy = 2   # kind 1 = grenades
 	for i in 10:
