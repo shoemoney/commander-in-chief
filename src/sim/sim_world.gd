@@ -449,7 +449,7 @@ const SUPPLY_COSTS: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_C
 # 60s campaign torture never streams past gate ~2 -- see test_determinism.gd).
 const FINAL_GATE_INDEX := 6
 const COLOSSUS_HP := 60
-const COLOSSUS_GRENADE_DAMAGE := 4
+const COLOSSUS_GRENADE_DAMAGE := 2
 const COLOSSUS_SPEED := F_ONE / 2
 const COLOSSUS_HIT_RADIUS := 34 * F_ONE
 const COLOSSUS_CRUSH_RADIUS := 26 * F_ONE
@@ -464,9 +464,14 @@ const FLUSH_RADIUS := 100 * F_ONE      # c3 2v: an enemy this close to a grass-c
 const FLUSH_CD_TICKS := 600            # 10s between flushes — grass conceals, but sitting in it near a threat costs you
 # Core window: every cycle the plating retracts for a beat during which
 # BULLETS also chip the Colossus — a timing/aggression path for a dry pool.
+# The window is 90 of every 330 ticks (27% uptime), so the per-hit number has to
+# carry the whole mechanic: at 3 dmg a full open window pays 90/8*3 = 33, while
+# grenades — never gated by the window — pay 330/30*2 = 22 over the same cycle.
+# The fight shouts "WAIT FOR THE CORE / OPEN FIRE"; these two numbers are what
+# make that the profitable read instead of a lie (test_core_window_is_the_payoff).
 const COLOSSUS_CORE_CYCLE_TICKS := 240
 const COLOSSUS_CORE_OPEN_TICKS := 90
-const COLOSSUS_BULLET_DAMAGE := 1
+const COLOSSUS_BULLET_DAMAGE := 3
 const SUPPLY_DROP_INTERVAL_TICKS := 300
 # Water: rivers between gate arenas. Wading halves speed, disables the roll,
 # and walls out tanks; submerged frogmen answer only to grenades (1986 rule).
@@ -4664,11 +4669,16 @@ func _step_colossus() -> void:
 	var phase := colossus_phase()
 
 	# The scroll inverts: the fortress advances DOWN the map at the players.
+	# The standoff CLOSES with the phases (60 / 30 / 0 px): at phase 1 it parks
+	# out of reach and the treads are a threat you opt into, by phase 3 it drives
+	# onto your y-line and the crush is only avoided by moving. Lateral tracking
+	# rides `descent` for the same reason — still under half PLAYER_SPEED (2.4),
+	# so kiting works, but it has to be kiting and not standing.
 	var descent: int = COLOSSUS_SPEED * (2 if phase == 3 else 1)
-	if colossus["y"] < target["y"] - 60 * F_ONE:
+	if colossus["y"] < target["y"] - (3 - phase) * 30 * F_ONE:
 		colossus["y"] = colossus["y"] + descent
 	var dx: int = target["x"] - colossus["x"]
-	colossus["x"] = colossus["x"] + clampi(dx, -COLOSSUS_SPEED, COLOSSUS_SPEED)
+	colossus["x"] = colossus["x"] + clampi(dx, -descent, descent)
 
 	# Core window cycle: plating retracts (core_open ticks) then re-seals.
 	if colossus["core_open"] > 0:
