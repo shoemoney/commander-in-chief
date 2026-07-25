@@ -11,7 +11,8 @@ const F := Fixed.ONE
 var main: Node2D
 var shots: Array[Dictionary] = []
 var current := -1
-var wait := 0
+var warmup := 6            # frames the scene renders live before we freeze it (see _run)
+const SETTLE_FRAMES := 12  # rendered frames between posing a shot and grabbing the pixels
 var out_dir := "/tmp"
 
 
@@ -24,7 +25,10 @@ func _initialize() -> void:
 	# We pose states; nothing may simulate. PROCESS_MODE_DISABLED freezes
 	# _physics_process for main AND children (set_physics_process(false)
 	# alone still let a few ticks through — staged sims drifted).
-	main.process_mode = Node.PROCESS_MODE_DISABLED
+	# ...but it must NOT be set until the scene has rendered at least once. Disabling it
+	# here (before frame 0) meant main never drew a single frame, so every shot came out
+	# solid black while still printing SAVED — a silent failure that survived until the
+	# boot splash made it total. _on_frame arms it after WARMUP frames instead.
 	main._menu.mode = GameMenu.Mode.HIDDEN   # staged shots show gameplay, not the title
 	main.no_autopause = true   # harness window never holds focus; don't pause-overlay every shot
 	# SHOT_PAD=xbox|ps|switch forces the pad-glyph path for prompt verification —
@@ -34,34 +38,75 @@ func _initialize() -> void:
 		Art.use_pad = true
 		Art.pad_brand = pad
 	_build_shots()
-	process_frame.connect(_on_frame)
-	# First _advance happens on the first frame — after main._ready() has run
-	# (its _reset() would otherwise clobber the first staged sim).
+	_run()
 
 
-func _on_frame() -> void:
-	if current == -1:
-		_advance()
-		return
-	if current >= shots.size():
-		return
-	wait -= 1
-	if wait == 2:
-		main.queue_redraw()
-	if wait <= 0:
+func _run() -> void:
+	## ONE linear coroutine drives the whole capture. This used to be a process_frame
+	## handler with a wait counter, but adding the required `await frame_post_draw` made
+	## that handler re-entrant — the coroutine resumed while later frame callbacks were
+	## still firing, so poses and captures interleaved and shots landed on the wrong
+	## states (results even shifted between runs). A straight-line loop has no such race.
+	# Let the scene render live for a few frames before freezing it: a node frozen at
+	# frame 0 never draws at all, which is why every shot used to be solid black.
+	for _i in warmup:
+		await RenderingServer.frame_post_draw
+	# Retire the boot splash HERE, not in _initialize: main._ready() arms it (_splash_t,
+	# _splash_layer) and re-shows it, so an earlier kill is simply overwritten. Once physics
+	# is frozen the splash timer would never expire, and its opaque cinematic covered every
+	# shot ("BIG IT GAME STUDIOS presents" on all 12).
+	_kill_splash()
+	_freeze_physics(main)
+	for i in shots.size():
+		current = i
+		_pose(i)
+		# Settle: the posed state needs several rendered frames to reach the viewport.
+		# Re-request the redraw each frame — a single request can land on a frame the
+		# pose hadn't propagated to yet.
+		for _s in SETTLE_FRAMES:
+			_redraw_all(main)   # main alone isn't enough — the bg root, HUD and menu are
+			                    # separate CanvasItems that each need their own redraw
+			await RenderingServer.frame_post_draw
+		# frame_post_draw is the ONLY point where the viewport texture holds real pixels;
+		# reading it from process_frame (pre-render) is what produced the black shots.
 		var img := root.get_texture().get_image()
-		var path := "%s/%02d-%s.png" % [out_dir, current + 1, shots[current]["name"]]
-		img.save_png(path)
-		print("SAVED ", path)
-		_advance()
+		var path := "%s/%02d-%s.png" % [out_dir, i + 1, shots[i]["name"]]
+		var err := img.save_png(path)
+		if err != OK:
+			push_error("screenshots: save_png failed (%s) for %s — does SHOT_DIR exist?" % [err, path])
+			print("FAILED ", path)
+		else:
+			print("SAVED ", path)
+	print("ALL SHOTS DONE")
+	quit(0)
 
 
-func _advance() -> void:
-	current += 1
-	if current >= shots.size():
-		print("ALL SHOTS DONE")
-		quit(0)
-		return
+func _kill_splash() -> void:
+	main._splash_t = 0.0
+	if main._splash_layer != null:
+		main._splash_layer.visible = false
+
+
+func _redraw_all(n: Node) -> void:
+	if n is CanvasItem:
+		(n as CanvasItem).queue_redraw()
+	for c in n.get_children():
+		_redraw_all(c)
+
+
+func _freeze_physics(n: Node) -> void:
+	## Stop the sim advancing WITHOUT stopping the view drawing. process_mode =
+	## PROCESS_MODE_DISABLED does both — it also suppresses CanvasItem redraws, so every
+	## posed shot re-captured the same frozen frame (12 byte-identical PNGs). Killing
+	## _physics_process recursively freezes sim.step() (the only thing that must not run)
+	## while _draw/queue_redraw still work, so each posed state actually renders.
+	n.set_physics_process(false)
+	for c in n.get_children():
+		_freeze_physics(c)
+
+
+func _pose(idx: int) -> void:
+	current = idx
 	var sim: SimWorld = shots[current]["build"].call()
 	main.sim = sim
 	# Feel decay never runs while posing — scrub prior dress state so one
@@ -86,11 +131,11 @@ func _advance() -> void:
 	# the visible field on the PRIOR shot's palette. Pre-sync _bg_march so _draw's
 	# transition-reset is skipped, invalidate _bg_cam to force the repaint, and clear
 	# the freeze snap so every visible row uses the posed sector march.
+	_kill_splash()   # re-assert: a pose must never surface the intro cinematic
 	main._bg_march = main._sector_march()
 	main._bg_cam = -2147483647
 	main._litter_cam_snap = 9223372036854775807
 	main.queue_redraw()
-	wait = 6
 
 
 func _dress_victoly(m: Node2D) -> void:
