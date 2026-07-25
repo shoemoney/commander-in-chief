@@ -70,6 +70,7 @@ const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint un
 # right-margin resting invalid hint alike (one error colour across the whole seed flow).
 const BANNER_COL_DEFAULT := Color(1.0, 0.92, 0.55)
 const BANNER_COL_FAIL := Color(1.0, 0.55, 0.4)
+const BANNER_COL_ALERT := Color(1.0, 0.78, 0.30)   # threat/teach cards: amber warning, brighter than the red deny tint
 
 var mode: int = Mode.TITLE
 var sel := 0

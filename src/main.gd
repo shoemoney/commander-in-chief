@@ -7038,7 +7038,7 @@ func _draw_enemies() -> void:
 		var ekind: String = e["kind"]
 		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
 			_seen_kinds[ekind] = true
-			show_banner(_KIND_TEACH[ekind], GameMenu.BANNER_COL_FAIL)
+			show_banner(_KIND_TEACH[ekind], GameMenu.BANNER_COL_ALERT)
 		var epos := _to_screen(e["x"], e["y"])
 		# a2-11 VFX#1: hit-flash + micro-flinch on a NON-LETHAL hit — the spark/light
 		# fx and the state itself are spawned/decayed in _check_enemy_hits(); this is
@@ -7547,12 +7547,15 @@ func _draw_gunships() -> void:
 	_boss_bar_slots = slot   # banners read this to duck below the occupied bar band
 
 
-const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.55)   # a2-17: shared boss-label plate fill
+const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.92)   # a2-17: shared boss-label plate fill
 
-static func _label_plate_rect(origin_x: float, top_y: float, w: float) -> Rect2:
+static func _label_plate_rect(origin_x: float, baseline_y: float, w: float) -> Rect2:
 	# a2-17: a label-anchored dark plate — starts 3px LEFT of the label origin, 6px wider,
 	# so it always sits UNDER the (left-anchored) boss phase label in 1P and 2P.
-	return Rect2(origin_x - 3.0, top_y, w + 6.0, 13.0)
+	# Art.text draws from the BASELINE, so the plate must rise ABOVE baseline_y to
+	# cover the glyphs (it used to be laid out below it, backing the HP bar instead
+	# of the label — the phase name sat bare on terrain).
+	return Rect2(origin_x - 3.0, baseline_y - 11.0, w + 6.0, 15.0)
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
@@ -7673,8 +7676,8 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# so the highest-stakes read has the plate language the rest of the top band has.
 	var gplabel := "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
 	var gpw := Art.font().get_string_size(gplabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_rect(_label_plate_rect(bar_x, bar_y - 2.0, gpw), LABEL_PLATE_FILL)
-	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.5, 0.4))
+	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
+	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
 	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 	# Next-volley countdown: a tick that sweeps left->right across the HP
@@ -7813,8 +7816,8 @@ func _draw_colossus() -> void:
 	# banners (phase 2 = mortar volleys, phase 3 = sappers out).
 	var clabel := "FOUNDRY COLOSSUS — %s" % COLOSSUS_PHASE_NAMES[clampi(phase - 1, 0, 2)]
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_rect(_label_plate_rect(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y - 2.0, clw), LABEL_PLATE_FILL)
-	Art.text(self, clabel, Vector2(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y), 10, Color(1.0, 0.55, 0.45))
+	draw_rect(_label_plate_rect(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y, clw), LABEL_PLATE_FILL)
+	Art.text(self, clabel, Vector2(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
 	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar
@@ -9682,21 +9685,21 @@ func _draw_banners(top_msg: String) -> void:
 				else "GRENADE THE BUNKERS TO ADVANCE"
 			var gy: float = (g["y"] - sim.camera_top) * PX + 30.0
 			_banner_plate(gtxt, gy, 11, 1.0)
-			Art.text_center(self, gtxt, 320, gy, 11, Color(1.0, 0.9, 0.4, gpulse))
+			Art.text_center(self, gtxt, 320, gy, 11, Color(1.0, 0.9, 0.4, gpulse), 0.0, 2)
 		break
 	# Arena hold: a calm statement, not an alarm — the player at the top edge
 	# needs the RULE ("the camera stays until the wave dies"), not a red strobe.
 	if top_msg == "hold":
 		var htxt := "HOLD THE ARENA — CLEAR THE WAVE"
 		_banner_plate(htxt, 46.0, 10, 0.8)
-		Art.text_center(self, htxt, 320, 46, 10, Color(0.85, 0.88, 0.75, 0.8))
+		Art.text_center(self, htxt, 320, 46, 10, Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if top_msg == "mortar":
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
 		var wtxt := "MORTARS RANGING — ADVANCE!"
 		_banner_plate(wtxt, 46.0, 11, 1.0)
-		Art.text_center(self, wtxt, 320, 46, 11, Color(1.0, 0.4, 0.25, pulse))
+		Art.text_center(self, wtxt, 320, 46, 11, Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
@@ -9705,6 +9708,10 @@ func _draw_banners(top_msg: String) -> void:
 		if top_msg == "splash" and bt > 0.01 and not btext.is_empty() \
 				and not _debrief and not sim.victory:   # never overprint the result card
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
+			# The alert band reads or it doesn't — plate, glyphs and badge all clear the same
+			# floor together; a translucent badge next to solid text reads as a render bug.
+			if a > 0.05:
+				a = maxf(a, 0.85)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
 			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
 			# the same shared boundary hud.gd sizes its corner panel against) instead
@@ -9726,7 +9733,8 @@ func _draw_banners(top_msg: String) -> void:
 			var bis := float(bsize) + 4.0
 			var pad_left := (bis + 8.0) if not bic.is_empty() else 0.0
 			_banner_plate(btext, by, bsize, a, pad_left)
-			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a))
+			# Pop-in scale (bsize above) keys off bt, not a, so the entry animation is unaffected.
+			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a), 0.0, 2)
 			# Threat-callout badge (skull/target/lightning) fronting the text —
 			# only set by the alarm banners, so routine splashes stay clean.
 			if not bic.is_empty():
@@ -9876,10 +9884,14 @@ func _draw_banners(top_msg: String) -> void:
 ## title + a stack of centered stat rows (each optionally icon-prefixed).
 ## rows: Array[Dictionary] of {text, color, size?, icon?, icon_size?, icon_col?}.
 static func _banner_plate_alpha(text_a: float) -> float:
-	# a1-17 HUD#5/LEG#7: the banner plate holds a floor (0.7) while the text is at
-	# all visible, so the dark backing LEADS the words in and never washes out at the
+	# a1-17 HUD#5/LEG#7: the banner plate holds a floor (0.85) while the text is at
+	# all visible, so the backing enters WITH the words and never washes out at the
 	# fade edges over bright terrain (was 0.5*text-alpha, fading WITH the words).
-	return (maxf(text_a, 0.7) if text_a > 0.05 else 0.0)
+	# Floor matches the splash-banner text floor (main.gd _draw_banners) — a plate
+	# opaque enough on its own still lets dirt bleed through if the text riding on
+	# top of it is still translucent, and vice versa; both halves of the read need
+	# to clear the floor together.
+	return (maxf(text_a, 0.85) if text_a > 0.05 else 0.0)
 
 
 func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
@@ -9899,7 +9911,7 @@ func _metal_plate(r: Rect2, a: float) -> void:
 	# tinted way down so it stays muted retro-metal under the text, not chrome.
 	# a4-02: both greys below are named Art constants (PRINT_INK / PLATE_STEEL),
 	# not independently-chosen HUD literals — see assets_src/style_bible.md.
-	draw_rect(r, Color(Art.PRINT_INK, 0.5 * a))
+	draw_rect(r, Color(Art.PRINT_INK, 0.94 * a))
 	var cap := minf(r.size.y * (190.0 / 230.0), r.size.x / 2.0)
 	var mcol := Color(Art.PLATE_STEEL, 0.5 * a)
 	draw_texture_rect(Art.tex("plate_metal_l"), Rect2(r.position, Vector2(cap, r.size.y)), false, mcol)

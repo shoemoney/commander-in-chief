@@ -310,7 +310,7 @@ func test_a1_wheel_socket_display_gating() -> void:
 func test_a1_banner_plate_alpha_floor() -> void:
 	var ms = load("res://src/main.gd")
 	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(1.0), 1.0), "full text -> full plate")
-	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.3), 0.7), "fading text -> plate HELD at the 0.7 floor (no wash-out)")
+	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.3), 0.85), "fading text -> plate HELD at the 0.85 floor (no wash-out)")
 	Runner.T.ok(is_equal_approx(ms._banner_plate_alpha(0.02), 0.0), "text gone -> plate gone")
 
 
@@ -639,9 +639,20 @@ func test_a2_boss_phase_names() -> void:
 func test_a2_label_plate_rect() -> void:
 	var ms = load("res://src/main.gd")
 	var r: Rect2 = ms._label_plate_rect(100.0, 50.0, 40.0)
-	Runner.T.ok(is_equal_approx(r.position.x, 97.0), "plate starts 3px LEFT of the label origin (under the text)")
+	Runner.T.ok(is_equal_approx(r.position.x, 97.0), "plate starts 3px LEFT of the label origin")
 	Runner.T.ok(is_equal_approx(r.size.x, 46.0), "plate is 6px wider than the label")
-	Runner.T.ok(is_equal_approx(r.position.y, 50.0), "plate top matches the passed y")
+	Runner.T.ok(r.position.y < 50.0 and r.end.y > 50.0,
+		"plate straddles the BASELINE — Art.text draws glyphs ABOVE y, so a plate starting at y backs nothing")
+
+
+# The mid-fight alert band must be readable over dirt: the plate ink is near-opaque
+# (a translucent plate let terrain noise through the glyphs) and the boss phase label's
+# plate straddles its baseline. Both were the "dark text on dark box" AAA tell.
+func test_alert_band_is_opaque_backed() -> void:
+	var ms = load("res://src/main.gd")
+	Runner.T.ok(ms.LABEL_PLATE_FILL.a >= 0.85, "boss phase-label plate is opaque, not a see-through wash")
+	var r: Rect2 = ms._label_plate_rect(0.0, 100.0, 50.0)
+	Runner.T.ok(r.position.y <= 90.0, "plate covers the glyph box above the baseline")
 
 
 # --- a2-11 regression: the hit-flash read must NOT assume every enemy carries

@@ -772,23 +772,27 @@ static func font() -> Font:
 ## Shadowed text: black copy offset +1px, then the colored text on top — the
 ## drop-shadow pattern hand-inlined across the view, now in one place.
 ## max_w > 0 clips the string to that width instead of letting it bleed past the bound.
-static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0) -> void:
+static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0, outline := 0) -> void:
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
 	# Snap to whole pixels: centered strings land on fractional x (cx - w/2 with
 	# odd w), which smears a bitmap pixel font across two source texels under the
 	# canvas's linear-mipmap filter. View-only, so golden-safe.
 	pos = pos.floor()
+	# outline > 0: a hard black rim for the mid-fight alert band — a 1px shadow
+	# alone loses these glyphs against dirt noise under shake.
+	if outline > 0:
+		ci.draw_string_outline(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, outline, Color(0, 0, 0, col.a))
 	ci.draw_string(f, pos + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, Color(0, 0, 0, 0.7))
 	ci.draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_LEFT, w, size, col)
 
 
 ## Same shadow+color text, horizontally centered on cx at y.
-static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0) -> void:
+static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0, outline := 0) -> void:
 	var w := font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	if max_w > 0.0:
 		w = minf(w, max_w)
-	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w)
+	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w, outline)
 
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1) -> void:
