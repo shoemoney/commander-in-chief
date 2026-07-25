@@ -3055,6 +3055,9 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 		# Cosmetic sprite variant so a rusher wave reads as varied troops, not one
 		# silhouette cloned N times. Derived from spawn position (NO rng draw) and
 		# excluded from checksum() -> golden-safe (see KNOWN["enemy"] in coverage).
+		# Bare `/ F_ONE` truncates toward 0, and y here is negative — deliberate, see
+		# the "`x / ONE` vs `to_int(x)`" contract in fixed.gd. Checksum-excluded, so
+		# the floor/truncate choice cannot move a golden either way.
 		e["skin"] = (x / F_ONE + y / F_ONE) & 3
 	enemies.append(e)
 
@@ -5047,6 +5050,10 @@ func _step_observer() -> void:
 		if found_lead and absi(lead_y) >= 2 * GATE_SPACING:
 			var cb := _choke_bounds(lead_y)
 			if cb[0] != WORLD_LEFT or cb[1] != WORLD_RIGHT:   # the lead player is in a choke
+				# camera_top is always negative, so this bare `/ F_ONE` truncates toward 0
+				# where Fixed.to_int would floor — 1 apart. It is a HASH SEED, not a
+				# coordinate: both are "correct", truncate is what the goldens recorded.
+				# See the "`x / ONE` vs `to_int(x)`" contract in fixed.gd before changing it.
 				var camp_x: int = WORLD_LEFT if _mix(absi(camera_top / F_ONE), _world_seed) & 1 else WORLD_RIGHT
 				var camp_y: int = camera_top + 380 * F_ONE
 				_spawn_enemy(camp_x, camp_y, false)
