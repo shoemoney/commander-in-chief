@@ -16,6 +16,12 @@ const _MUSICAL := {"pickup": true, "buy": true, "deny": true, "revive": true,
 # threat-ID steps, the kill blip's +0.06/streak rise), so the ±6% humanize would
 # swamp adjacent steps — play them dead on pitch.
 const _LADDERED := {"alarm": true, "kill": true, "ping_shell": true}
+# UI-bus routing is a SEPARATE question from detune. The menu cues belong on the
+# unlimited UI bus with the jingles (so a muted-SFX player still gets menu
+# feedback, and MG-spam limiter pumping can't duck them) — but the nav tick fires
+# on 0.12s auto-repeat, so unlike a jingle it very much needs the humanising
+# detune. _MUSICAL implies UI bus; this set adds UI bus WITHOUT implying in-key.
+const _UI_BUS := {"ui_tick": true, "menu_open": true, "menu_close": true}
 
 # AUD#4 (audio-identity item): subtitle captions for the VO/bark accessibility strip hud.gd
 # draws. These are descriptive lines, not verbatim transcripts — the mp3s are one-off radio
@@ -94,6 +100,8 @@ var _beds: Dictionary = {}                   # a3-15: the three ambience-bed loo
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
+var _reverb: AudioEffectReverb       # biome space on the SFX chain (see _ready / set_ambience_march)
+var _eshot_rr := 0   # enemy MG shot round-robin cursor (see _shot_rr)
 var _cap_text := ""      # AUD#4: active subtitle caption (hud.gd reads via active_caption())
 var _cap_radio := false  # true = radio-filtered Spotter line, false = dry Commander/pilot voice
 var _cap_until := 0      # physics frame the caption stays legible until
@@ -109,13 +117,37 @@ func _process(_delta: float) -> void:
 
 
 func _ready() -> void:
+	# Reverb bus — created FIRST, so its index stays BELOW the SFX bus. AudioServer
+	# mixes buses from the highest index down, so a send only reaches a bus with a
+	# LOWER index; a Reverb bus added after SFX would silently never be fed.
+	# Godot buses have a single output, so a true parallel send doesn't exist —
+	# this sits in series after SFX with dry pinned at 1.0, which is acoustically
+	# the same thing and makes wet=0 bit-identical to the old bone-dry path.
+	# set_ambience_march drives `wet`/`room_size` so the foundry hall, the shop
+	# interior and the open river stop sounding like the same anechoic room.
+	if AudioServer.get_bus_index("Reverb") == -1:
+		var ri := AudioServer.get_bus_count()
+		AudioServer.add_bus(ri)
+		AudioServer.set_bus_name(ri, "Reverb")
+		AudioServer.set_bus_send(ri, "Master")
+		var rv := AudioEffectReverb.new()
+		rv.dry = 1.0
+		rv.wet = 0.0
+		rv.room_size = 0.5
+		rv.damping = 0.55
+		rv.spread = 0.7
+		rv.hipass = 0.2   # keep the sub out of the tail: reverbed booms turn to mud
+		AudioServer.add_bus_effect(ri, rv)
+	_reverb = AudioServer.get_bus_effect(AudioServer.get_bus_index("Reverb"), 0)
 	if AudioServer.get_bus_index("SFX") == -1:
 		var idx := AudioServer.get_bus_count()
 		AudioServer.add_bus(idx)
 		AudioServer.set_bus_name(idx, "SFX")
-		AudioServer.set_bus_send(idx, "Master")
 		AudioServer.add_bus_effect(idx, AudioEffectHardLimiter.new())
 	_sfx_bus_idx = AudioServer.get_bus_index("SFX")
+	# Set unconditionally (not inside the creation guard): a pre-existing SFX bus
+	# from an older layout still needs re-pointing at the new Reverb bus.
+	AudioServer.set_bus_send(_sfx_bus_idx, "Reverb")
 	if AudioServer.get_bus_index("Music") == -1:
 		var mi := AudioServer.get_bus_count()
 		AudioServer.add_bus(mi)
@@ -561,6 +593,9 @@ func _rr_shot(sound: String) -> String:
 	if sound == "shot":
 		_shot_rr = (_shot_rr + 1) % 3
 		return "shot" if _shot_rr == 0 else "shot%d" % _shot_rr
+	if sound == "enemy_shot":
+		_eshot_rr = (_eshot_rr + 1) % 3
+		return "enemy_shot" if _eshot_rr == 0 else "enemy_shot%d" % _eshot_rr
 	return sound
 
 
@@ -568,12 +603,12 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 	sound = _rr_shot(sound)
 	if _pb == null or not _sounds.has(sound):
 		return
-	if _MUSICAL.has(sound):
+	if not _MUSICAL.has(sound) and not _LADDERED.has(sound):   # pitch-ladder grammar plays dead on pitch
+		pitch *= randf_range(0.94, 1.06)
+	if _MUSICAL.has(sound) or _UI_BUS.has(sound):
 		if _ui_pb != null:   # jingles ride the unlimited UI bus, in key
 			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 		return
-	if not _LADDERED.has(sound):   # pitch-ladder grammar plays dead on pitch
-		pitch *= randf_range(0.94, 1.06)
 	_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 
 
@@ -581,14 +616,14 @@ func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) ->
 	sound = _rr_shot(sound)
 	if _pool.is_empty() or not _sounds.has(sound):
 		return
-	if _MUSICAL.has(sound):
+	if not _MUSICAL.has(sound) and not _LADDERED.has(sound):
+		pitch *= randf_range(0.94, 1.06)
+	if _MUSICAL.has(sound) or _UI_BUS.has(sound):
 		# Jingles are screen-global rewards: same UI-bus routing as play() (the
 		# MG-spam limiter was ducking positional gate_open/revive cues), centered.
 		if _ui_pb != null:
 			_ui_pb.play_stream(_sounds[sound], 0.0, vol_db, pitch)
 		return
-	if not _LADDERED.has(sound):
-		pitch *= randf_range(0.94, 1.06)
 	# Steal policy: prefer an idle voice; else take the one closest to finishing —
 	# index-0 stealing cut long booms mid-tail under heavy fire.
 	var p: AudioStreamPlayer2D = _pool[0]
@@ -656,6 +691,16 @@ func set_ambience_march(march: float, near_water := false, in_shop := false) -> 
 	_river.volume_db = lerpf(_river.volume_db, river_t, 0.05)
 	_foundry.volume_db = lerpf(_foundry.volume_db, foundry_t, 0.03)
 	_shop.volume_db = lerpf(_shop.volume_db, shop_t, 0.06)
+	# Reverb rides the SAME crossfade the beds do, so the space matches the bed you
+	# hear: open jungle/river = near-dry with a short slap, the foundry = a big hard
+	# hall, the shop = a small dead room. Lerped at the bed rate so walking into the
+	# plant swells the tail instead of snapping it on.
+	if _reverb != null:
+		var interior := smoothstep(0.62, 1.0, m)
+		var wet_t := 0.16 if in_shop else lerpf(0.06 if not near_water else 0.11, 0.34, interior)
+		var room_t := 0.30 if in_shop else lerpf(0.45, 0.88, interior)
+		_reverb.wet = lerpf(_reverb.wet, wet_t, 0.03)
+		_reverb.room_size = lerpf(_reverb.room_size, room_t, 0.03)
 
 
 func set_concussion(amount: float) -> void:
@@ -803,11 +848,21 @@ func _synth_all() -> void:
 		s["shot" if sv == 0 else "shot%d" % sv] = shot
 
 	# Enemy fire: duller, quieter cousin of the MG so it reads as "not yours".
-	var eshot := _buf(0.08)
-	for i in eshot.size():
-		var t := float(i) / RATE
-		eshot[i] = _nz(i * 3 + 7) * exp(-t * 40.0) * 0.5 + sin(TAU * 130.0 * t) * exp(-t * 30.0) * 0.4
-	s["enemy_shot"] = eshot
+	# 3 variants round-robined in play(), for the same reason the player's shot has
+	# them — enemy fire is the second-most-fired sound in the game, and one buffer
+	# machine-gunning at that rate reads as a stuck sample no matter the detune.
+	# Same recipe, offset noise seed, crack decay {40,34,47}, body {130,118,145} Hz;
+	# variant 0 IS the old enemy_shot, byte for byte.
+	var eshot_seed := [7, 3007, 6007]
+	var eshot_decay := [40.0, 34.0, 47.0]
+	var eshot_body := [130.0, 118.0, 145.0]
+	for ev in 3:
+		var eshot := _buf(0.08)
+		for i in eshot.size():
+			var t := float(i) / RATE
+			eshot[i] = _nz(i * 3 + eshot_seed[ev]) * exp(-t * eshot_decay[ev]) * 0.5 \
+				+ sin(TAU * eshot_body[ev] * t) * exp(-t * 30.0) * 0.4
+		s["enemy_shot" if ev == 0 else "enemy_shot%d" % ev] = eshot
 
 	# Tank cannon: long low sweep + heavy noise.
 	var cannon := _buf(0.5)
@@ -931,6 +986,33 @@ func _synth_all() -> void:
 		clp = clp * 0.8 + _nz(i) * 0.2
 		clickd[i] = clp * exp(-t * 110.0) * 0.9
 	s["click_dry"] = clickd
+	# --- menu voice ---------------------------------------------------------
+	# ui_tick: the dedicated menu nav tick. Every row move used to fire "pickup" —
+	# the 3-note reward arpeggio, which is _MUSICAL and therefore skips detune, so a
+	# held direction auto-repeating every 0.12s machine-gunned one identical jingle.
+	# This is a short filtered blip instead: no melody to recognise, and it takes the
+	# ±6% detune (see _UI_BUS), so a held scroll reads as texture, not a stuck sample.
+	var utick := _buf(0.045)
+	var ulp := 0.0
+	for i in utick.size():
+		var t := float(i) / RATE
+		ulp = ulp * 0.55 + _nz(i) * 0.45
+		utick[i] = (ulp * 0.5 + sin(TAU * 1650.0 * t) * 0.55) * exp(-t * 95.0) * 0.55
+	s["ui_tick"] = utick
+	# menu_open / menu_close: opening a menu was completely SILENT. A short filtered
+	# noise swoosh with a rising (open) / falling (close) tone rides the same UI bus,
+	# so a screen transition is confirmed by ear before the drop-in animation lands.
+	for mo in 2:
+		var opening := mo == 0
+		var swoosh := _buf(0.22)
+		var mlp := 0.0
+		for i in swoosh.size():
+			var t := float(i) / RATE
+			mlp = mlp * 0.90 + _nz(i + 4400 * mo) * 0.10
+			var env := sin(PI * t / 0.22)
+			var tone := _sweep(t, 300.0, 720.0, 0.22) if opening else _sweep(t, 660.0, 240.0, 0.22)
+			swoosh[i] = (mlp * 3.4 * env * env + tone * exp(-t * 9.0) * 0.30) * 0.55
+		s["menu_open" if opening else "menu_close"] = swoosh
 	# tink: tiny high casing chime.
 	var tink := _buf(0.06)
 	for i in tink.size():

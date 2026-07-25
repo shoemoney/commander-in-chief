@@ -2999,7 +2999,16 @@ func _ev_kill(ev: Dictionary) -> void:
 	else:
 		_kill_streak = 1
 	_last_kill_frame = Engine.get_physics_frames()
-	_sfx.play("kill", -7.0, 1.0 + minf(0.9, _kill_streak * 0.06))
+	# The +0.06/kill ladder tops out at streak 15, and "kill" is in Sfx._LADDERED
+	# so it also skips the humanising detune — past 15 every kill was a byte-identical
+	# blip, exactly when kills are densest. Past the top: a much slower crawl keeps it
+	# climbing audibly, and an explicit +/-3% jitter (small enough not to smear the
+	# 0.06 ladder steps below it) hands the humanise back where the ladder no longer
+	# carries information.
+	var kill_pitch := 1.0 + minf(0.9, _kill_streak * 0.06)
+	if _kill_streak > 15:
+		kill_pitch = (kill_pitch + minf(0.30, float(_kill_streak - 15) * 0.01)) * randf_range(0.97, 1.03)
+	_sfx.play("kill", -7.0, kill_pitch)
 	# Infantry agony yell (Ya Zahra / Ya Hossein bank) — flesh only. Machines
 	# already boom via their own branch; pilots skip the reward path entirely.
 	if not _METAL_KINDS.has(kkind) and kkind != "colossus" and kkind != "broadcast":

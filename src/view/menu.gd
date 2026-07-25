@@ -664,11 +664,30 @@ func is_active() -> bool:
 	return mode != Mode.HIDDEN
 
 
+func close() -> void:
+	## Dismiss the menu back to gameplay WITH the falling counterpart of open()'s
+	## swoosh. Every in-menu dismissal routes through here so the cue can't be
+	## forgotten at a new exit site; main.gd's own `mode = Mode.HIDDEN` writes
+	## (splash suspend, trailer capture, run start) stay silent by design.
+	if mode == Mode.HIDDEN:
+		return
+	mode = Mode.HIDDEN
+	if main != null:
+		main._sfx.play("menu_close", -9.0)
+
+
 func open(m: int, select_id := "") -> void:
 	# Menu-to-menu keeps ~60% scrim — a full _open_t reset dipped the backdrop
 	# to ~0 for a frame and flashed the live attract firefight between screens.
 	# Only entering from gameplay replays the full fade + drop-in.
-	_open_t = 0.0 if mode == Mode.HIDDEN else 0.6
+	var from_game := mode == Mode.HIDDEN
+	_open_t = 0.0 if from_game else 0.6
+	# Opening a menu was completely silent — the drop-in animation was the ONLY
+	# feedback that a screen arrived. A screen entered from gameplay gets the full
+	# swoosh; a menu-to-menu step gets the same cue 6dB down and a touch brighter,
+	# so "went deeper" and "left the fight" don't sound identical.
+	if main != null:
+		main._sfx.play("menu_open", -8.0 if from_game else -14.0, 1.0 if from_game else 1.25)
 	mode = m
 	sel = 0
 	# c3-16: the mode/sel just changed — drop the row memo NOW, before the select_id re-read below (or
@@ -1703,7 +1722,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			if jump != _hall_page:
 				_hall_page = jump
 				_refresh_page_hover()   # the new page may flip a boundary — re-light/dim under a still cursor
-				main._sfx.play("pickup", -14.0, 1.3)
+				main._sfx.play("ui_tick", -13.0)
 				_mark_dirty()
 				var vpj := get_viewport()
 				if vpj != null:
@@ -1735,7 +1754,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			_rebind_pad_dev = to_dev if to_dev >= 0 else wrapi(_rebind_pad_dev + dev_step, 0, 2)
 			_rebind_msg = ""
 			_rebind_msg_t = 0.0
-			main._sfx.play("pickup", -14.0, 1.3)
+			main._sfx.play("ui_tick", -13.0)
 			_mark_dirty()
 			return
 	# c1-18: the menu_next_tab key (kb, default TAB) or a shoulder (pad) cycles the MOVE/AIM ->
@@ -1764,7 +1783,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			sel = 0   # different row set per tab — land on the first verb
 			_rebind_msg = ""
 			_rebind_msg_t = 0.0
-			main._sfx.play("pickup", -14.0, 1.3)
+			main._sfx.play("ui_tick", -13.0)
 			_mark_dirty()
 			return
 	var move := 0
@@ -2000,7 +2019,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 							_hall_page = 0   # fresh filtered list ALWAYS lands on page 1 (the counter's "OF N" total then matches this tab)
 							_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
 							_refresh_page_hover()   # page reset to 0 disables PREV under a still cursor
-							main._sfx.play("pickup", -14.0, 1.3)
+							main._sfx.play("ui_tick", -13.0)
 						_mark_dirty()
 						return
 			if mode == Mode.HOWTO:
@@ -2012,7 +2031,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 							_howto_page = ti
 							_howto_endless_page = 0   # c4-06: clicking the ENDLESS tab always lands on its first roster page
 							_howto_nav_hover = -1   # leaving/entering a tab drops any stale chevron hover
-							main._sfx.play("pickup", -14.0, 1.3)
+							main._sfx.play("ui_tick", -13.0)
 						_mark_dirty()
 						return
 				# c4-06: the in-page PREV/NEXT chevrons page the ENDLESS roster — the ONE
@@ -2030,7 +2049,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 							# swallow input meant for whatever sits under it.
 							if np != _howto_endless_page:
 								_howto_endless_page = np
-								main._sfx.play("pickup", -14.0, 1.3)
+								main._sfx.play("ui_tick", -13.0)
 								_mark_dirty()
 								return
 			if mode == Mode.HALL and _hall_pages(_hall_rows().size()) > 1:
@@ -2108,7 +2127,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 	elif act:
 		_press()
 	elif back and mode == Mode.PAUSE:
-		mode = Mode.HIDDEN
+		close()
 	elif back and mode == Mode.OPTS:
 		_exit_opts(false)   # c3-18: Esc/cancel out of OPTIONS DISCARDS any staged changes (no persist)
 	elif back and not _parent(mode).is_empty():
@@ -2134,7 +2153,7 @@ func _nav(move: int, hmove: int) -> void:
 		if np != _hall_page:
 			_hall_page = np
 			_refresh_page_hover()   # the new page may flip a boundary — re-light/dim under a still cursor
-			main._sfx.play("pickup", -14.0, 1.3)
+			main._sfx.play("ui_tick", -13.0)
 			_mark_dirty()
 		return   # HALL vertical nav OWNS paging — always consume it, even at a boundary, so it never falls through to the 1-row list nav below
 	if mode == Mode.HALL and hmove != 0:
@@ -2147,7 +2166,7 @@ func _nav(move: int, hmove: int) -> void:
 		# cursor sits on the tab we just selected, _draw_hall's `not on` gate hides
 		# the hover automatically, so no double-treatment slips through either.
 		_filter_pulse = 0.0 if main._motion < 0.5 else 1.0
-		main._sfx.play("pickup", -14.0, 1.3)
+		main._sfx.play("ui_tick", -13.0)
 		_mark_dirty()
 		return
 	# c2-02: HOW TO PLAY is paged on the HORIZONTAL axis — left/right (and the wheel,
@@ -2166,7 +2185,7 @@ func _nav(move: int, hmove: int) -> void:
 			var ep := _howto_endless_page + hmove
 			if ep >= 0 and ep < _endless_pages():
 				_howto_endless_page = ep
-				main._sfx.play("pickup", -14.0, 1.3)
+				main._sfx.play("ui_tick", -13.0)
 				_mark_dirty()
 				return
 		var np := clampi(_howto_page + hmove, 0, HOWTO_TABS.size() - 1)
@@ -2175,7 +2194,7 @@ func _nav(move: int, hmove: int) -> void:
 			if np == HOWTO_ENDLESS_TAB:
 				_howto_endless_page = 0   # entering ENDLESS from ENEMIES lands on its first roster page
 			_howto_nav_hover = -1   # left the ENDLESS tab (or arrived) — drop any stale chevron hover
-			main._sfx.play("pickup", -14.0, 1.3)
+			main._sfx.play("ui_tick", -13.0)
 			_mark_dirty()
 		return
 	# ◄/► on a volume row nudges the 0..10 level, clamped — the SAME shared stepper
@@ -2221,7 +2240,7 @@ func _nav(move: int, hmove: int) -> void:
 	if _confirm >= 0:
 		main._sfx.play("disarm", -10.0)
 	_disarm_confirm()   # c2-09: moving off the armed row cancels the confirm (and its countdown)
-	main._sfx.play("pickup", -14.0, 1.3)
+	main._sfx.play("ui_tick", -13.0)
 	_mark_dirty()
 
 
@@ -2883,7 +2902,7 @@ func _activate() -> void:
 			"quit": get_tree().quit()
 	else:
 		match id:
-			"resume": mode = Mode.HIDDEN
+			"resume": close()
 			"options":
 				# c1-09: PAUSE fronts settings through ONE dedicated OPTIONS screen (the
 				# six a11y/audio rows no longer live on the pause list). c2-04: SETUP now

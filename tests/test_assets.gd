@@ -152,6 +152,24 @@ func test_a1_every_event_sound_resolves_to_a_synth_voice() -> void:
 		var sound_name: String = evmap[ev_key][0]
 		Runner.T.ok(sounds.has(sound_name),
 			"event '%s' -> sound '%s' must be a synthesized voice, not dead air" % [ev_key, sound_name])
+	# The _EVENT_SOUND sweep above can't see the names that only appear INSIDE Sfx —
+	# the round-robin variants _rr_shot swaps in, the routing/detune tables, and the
+	# cue names menu.gd hard-codes. A typo in any of those is the same silent no-op
+	# with a green build, so sweep them from the same fixture.
+	var sfx_consts: Dictionary = load("res://src/view/sfx.gd").get_script_constant_map()
+	for tbl in ["_MUSICAL", "_LADDERED", "_UI_BUS"]:
+		for nm in (sfx_consts[tbl] as Dictionary):
+			Runner.T.ok(sounds.has(nm),
+				"%s lists '%s', which must be a synthesized voice" % [tbl, nm])
+	for base in ["shot", "enemy_shot"]:
+		for v in 3:
+			var variant: String = base if v == 0 else "%s%d" % [base, v]
+			Runner.T.ok(sounds.has(variant),
+				"_rr_shot round-robins '%s' — it must exist or every 3rd shot is silent" % variant)
+	var menu_src := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	for cue in ["ui_tick", "menu_open", "menu_close"]:
+		Runner.T.ok(sounds.has(cue) and menu_src.contains('"%s"' % cue),
+			"menu cue '%s' is both synthesized and actually wired in menu.gd" % cue)
 	sfx.free()
 
 
@@ -200,6 +218,27 @@ func test_a1_boss_music_heavier_and_ambience_marches() -> void:
 	var jungle_air: float = d._amb.pitch_scale
 	Runner.T.ok(foundry_air < jungle_air, "foundry ambience is a lower hum than the jungle's airy bed")
 	a.free(); b.free(); c.free(); d.free()
+
+
+# --- reverb: the foundry interior and the open river stop sharing one anechoic room ---
+
+func test_reverb_space_follows_the_biome() -> void:
+	var deep := Sfx.new()
+	var field := Sfx.new()
+	var shop := Sfx.new()
+	for sx in [deep, field, shop]:
+		(sx as Sfx)._reverb = AudioEffectReverb.new()
+	for i in 400:
+		deep.set_ambience_march(1.0)          # inside the foundry plant
+		field.set_ambience_march(0.1, true)   # open river bank
+		shop.set_ambience_march(0.5, false, true)
+	Runner.T.ok(deep._reverb.wet > field._reverb.wet,
+		"the foundry interior is wetter than the open river (%.3f > %.3f)" % [deep._reverb.wet, field._reverb.wet])
+	Runner.T.ok(deep._reverb.room_size > shop._reverb.room_size,
+		"the foundry hall is a bigger space than the shop's small room")
+	Runner.T.ok(field._reverb.wet < 0.2, "open ground stays near-dry — no cathedral outdoors")
+	Runner.T.ok(shop._reverb.wet > field._reverb.wet, "the shop interior reads as indoors")
+	deep.free(); field.free(); shop.free()
 
 
 # --- audio-identity: MusicDirector tonal riff layer rides the drums, phase-locked ---
