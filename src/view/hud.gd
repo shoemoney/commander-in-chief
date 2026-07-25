@@ -208,6 +208,7 @@ func _notification(what: int) -> void:
 	# Handled BEFORE the _plate_ci guard so the flush runs regardless of the plate item's state.
 	if what == NOTIFICATION_THEME_CHANGED or what == NOTIFICATION_TRANSLATION_CHANGED:
 		_tw_cache.clear()
+		Art.flush_tw()   # the shared main.gd/art.gd memo has the same fixed-font assumption
 	if not _plate_ci.is_valid():
 		return
 	match what:

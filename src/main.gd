@@ -36,6 +36,11 @@ const _LITTER_MID_B := ["crater", "crater_field", "barbedwire", "wreck", "corpse
 # consumed by the draw and asserted in test.
 const RIDGE_A_LO := 0.22
 const RIDGE_A_HI := 0.35
+# [dx, dy, weight] offsets for the undergrowth edge-taper gradient (cardinals weigh 2,
+# diagonals 1). Hoisted out of the densest terrain loop: as a literal it rebuilt 9 Arrays
+# (the outer + 8 inner) per accepted anchor — ~290 anchors a frame.
+const _EDGE_NB := [[1, 0, 2], [-1, 0, 2], [0, 1, 2], [0, -1, 2],
+	[1, 1, 1], [1, -1, 1], [-1, 1, 1], [-1, -1, 1]]
 const _SETPIECES := [
 	[["wreck_apc", -30, 0, 1.0], ["wreck_technical", 25, 18, 0.9], ["crater", 5, -20, 1.0]],   # dead convoy
 	[["tent", -28, -10, 1.0], ["tent", 24, 6, 0.9], ["ammobox", -2, 20, 1.0], ["barrier", 30, -22, 0.9]],   # abandoned camp
@@ -584,7 +589,7 @@ func _splash_seg(t: float, in0: float, in1: float, out0: float, out1: float) -> 
 
 func _splash_center(text: String, y: float, size: int, col: Color) -> void:
 	var f := Art.font()
-	var w: float = f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var w: float = Art.tw(text, size)
 	_splash_root.draw_string(f, Vector2(320.0 - w / 2.0, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
 
 
@@ -1363,6 +1368,7 @@ func _reset() -> void:
 	_tech_lunge_prev.clear()
 	_litter_cam_snap = 1 << 60
 	_litter_march_prev = 0.0
+	_march_sim = null
 	_blast_warp = 0.0
 	_cinematic = 0.0
 	_recoil = [Vector2.ZERO, Vector2.ZERO]
@@ -1617,6 +1623,12 @@ func _exit_tree() -> void:
 
 
 func _notification(what: int) -> void:
+	# opt: Art.tw's txt->width memo assumes a fixed font. A translation swap is the only
+	# thing reachable from here that can put a different face under it (main is a Node2D —
+	# NOTIFICATION_THEME_CHANGED is Control-only, and Hud._notification covers that half
+	# alongside its own _tw_cache flush).
+	if what == NOTIFICATION_TRANSLATION_CHANGED:
+		Art.flush_tw()
 	# One-death sim: alt-tabbing away keeps sim.step() ticking blind and hands the
 	# player a death that reads as a bug, not a loss. Auto-open pause the instant the
 	# window loses focus during live play. sim.step() is already gated behind
@@ -5771,7 +5783,32 @@ func _biome_ramp(march: float, stops: Array) -> Color:
 	return stops[clampi(int(march * 5.0 + 0.0001), 0, stops.size() - 1)]
 
 
+## Memo for _sector_march(): _draw called it 12+ times a frame — one of them INSIDE the
+## 48-cell litter loop — and every call re-walked sim.gates.
+##
+## Keyed on the state it actually reads, not on a clock. The value is a pure function of
+## sim (victory, colossus, mode, gate open-count, wave), and sim only changes two ways:
+## step() bumps tick_count, or the whole world is replaced (restart, tools/screenshots.gd
+## posing a shot). So (identity, tick_count) is an exact key.
+##
+## A frame-counter key was tried first and is WRONG here: screenshots.gd swaps main.sim
+## mid-frame, leaving one frame that still serves the previous shot's march — and _draw's
+## `march != _bg_march` latch then freezes that stale value into _litter_march_prev
+## permanently, which repainted the Foundry finale's scorched ground back to jungle tan.
+var _march_sim: SimWorld = null
+var _march_tick := -1
+var _march_cache := 0.0
+
+
 func _sector_march() -> float:
+	if _march_sim != sim or _march_tick != sim.tick_count:
+		_march_sim = sim
+		_march_tick = sim.tick_count
+		_march_cache = _compute_sector_march()
+	return _march_cache
+
+
+func _compute_sector_march() -> float:
 	# Sector march: the ground shifts jungle-olive → ashen/scorched as the run
 	# pushes toward the Foundry finale (campaign: opened gates; endless: wave).
 	# a1-04: the colossus ONLY fights at the Foundry finale — force the full
@@ -5967,8 +6004,7 @@ func _draw_terrain() -> void:
 			# shapes now bend the density field too, not just axis edges.
 			# Suppression = score * 5% (0..60%), continuous with geometry.
 			var edge_s := 0
-			for nb in [[1, 0, 2], [-1, 0, 2], [0, 1, 2], [0, -1, 2],
-					[1, 1, 1], [1, -1, 1], [-1, 1, 1], [-1, -1, 1]]:
+			for nb in _EDGE_NB:
 				if here_dirt != (Art.cell_hash(cell_x + nb[0], cell_y + nb[1]) % 6 == 0):
 					edge_s += nb[2]
 			if edge_s > 0 and (hf >> 11) % 100 < edge_s * 5:
@@ -6942,6 +6978,13 @@ func _draw_gates() -> void:
 	# Route-fork lane signposts: the approach band south of gates 2 & 4 reads
 	# CACHE (left, supplies + mines) vs BOUNTY (right, elites + marked pay).
 	# Choice is pure position, so the telegraph must land before the band does.
+	# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp), HUD-family
+	# backing plates, Art.text shadow, mirrored 84px margins. Both strings are literals
+	# and 24 is a literal, so the widths are loop-invariant — measured once, above the loop.
+	var cache_txt := "< CACHE"
+	var bounty_txt := "BOUNTY >"
+	var cw2 := Art.tw(cache_txt, 24)
+	var bw2 := Art.tw(bounty_txt, 24)
 	for fk in _forks:
 		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
 		if fy < -20.0 or fy > 380.0:
@@ -6980,12 +7023,6 @@ func _draw_gates() -> void:
 					continue
 				_wall_seg(Vector2(bait_x + bd * 20.0, bdy), 0.62, Color(1.02, 0.98, 0.74),
 					int(bait_x) + bd, fk["y"] / 65536 + 490 + bd * 40, 0)
-		# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp),
-		# HUD-family backing plates, Art.text shadow, mirrored 84px margins.
-		var cache_txt := "< CACHE"
-		var bounty_txt := "BOUNTY >"
-		var cw2 := Art.font().get_string_size(cache_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
-		var bw2 := Art.font().get_string_size(bounty_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
 		draw_rect(Rect2(80.0, fy - 22.0, cw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
 		draw_rect(Rect2(556.0 - bw2 - 4.0, fy - 22.0, bw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
 		Art.text(self, cache_txt, Vector2(84, fy), 24, Art.safe(Color(0.5, 1.0, 0.7)))
@@ -7849,7 +7886,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
 	var gplabel := "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
-	var gpw := Art.font().get_string_size(gplabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	var gpw := Art.tw(gplabel, 10)
 	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
 	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
@@ -7989,7 +8026,7 @@ func _draw_colossus() -> void:
 	# a2-17 r2 HUD#6: name the colossus phases (actionable), matching the escalation
 	# banners (phase 2 = mortar volleys, phase 3 = sappers out).
 	var clabel := "FOUNDRY COLOSSUS — %s" % COLOSSUS_PHASE_NAMES[clampi(phase - 1, 0, 2)]
-	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	var clw := Art.tw(clabel, 10)
 	draw_rect(_label_plate_rect(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y, clw), LABEL_PLATE_FILL)
 	Art.text(self, clabel, Vector2(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
 	_draw_bar(HudIcons.COLOSSUS_BAR_RECT, cfrac,
@@ -8551,7 +8588,7 @@ func _draw_players() -> void:
 			var bt: int = p.get("broke_timer", 0)
 			if bt > 0:
 				var btxt := "REINFORCEMENTS IN %.1fs" % (bt / 60.0)
-				var brw := Art.font().get_string_size(btxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+				var brw := Art.tw(btxt, 8)
 				# Warms toward amber in the final second so "almost back" reads.
 				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
 				Art.text(self, btxt, pos + Vector2(-brw / 2.0, -26), 8,
@@ -8790,8 +8827,7 @@ func _draw_fx() -> void:
 			fc.a = 1.0 - t * t
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
 			var ffont := Art.font()
-			var fw := ffont.get_string_size(fx["text"],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
+			var fw := Art.tw(String(fx["text"]), fsz)
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
 			var rise := 1.0 - (1.0 - t) * (1.0 - t)
@@ -9541,9 +9577,8 @@ func _draw_wheel() -> void:
 		# Scale off the imported size, not the 600px source — dial_fuel imports
 		# at size_limit=64 now (it never draws bigger than 34px).
 		_spr("ui_dial_fuel", c, 0.0, 34.0 / Art.tex("ui_dial_fuel").get_size().x)
-		var f := Art.font()
 		var chest := str(sim.war_chest)
-		var cw := f.get_string_size(chest, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+		var cw := Art.tw(chest, 8)
 		var cx := c.x - (10.0 + cw) / 2.0
 		draw_texture_rect(Art.tex("icon_coin"), Rect2(cx, c.y - 5.0, 9, 9), false)
 		Art.text(self, chest, Vector2(cx + 10.0, c.y + 3.0), 8, Color(1.0, 0.95, 0.65))
@@ -9615,8 +9650,8 @@ func _draw_wheel() -> void:
 			# (release on it fires the deny path, not a buy).
 			var cue_l := "RELEASE TO BUY · " if sel_afford else "CAN'T AFFORD · "
 			var cue_r := " CANCEL"
-			var wl := f.get_string_size(cue_l, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			var wr := f.get_string_size(cue_r, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			var wl := Art.tw(cue_l, 8)
+			var wr := Art.tw(cue_r, 8)
 			var cx0 := c.x - (wl + 10.0 + wr) / 2.0
 			Art.text(self, cue_l, Vector2(cx0, c.y + WHEEL_ROW_CUE), 8,
 				Color(0.9, 0.92, 0.8, 0.85) if sel_afford else Color(1.0, 0.55, 0.45, 0.9))
@@ -9642,9 +9677,9 @@ func _draw_wheel() -> void:
 				4: stock_txt = "%d/%d UP" % [sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP]
 				5: stock_txt = "%d* HELD" % sim.tokens
 			var stock_empty := stock_txt.begins_with("0/") or stock_txt == "NO VEST"
-			var lblw := f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
-			var costw := f.get_string_size(cost_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-			var stockw := f.get_string_size(stock_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+			var lblw := Art.tw(lbl, 9)
+			var costw := Art.tw(cost_txt, 8)
+			var stockw := Art.tw(stock_txt, 8)
 			var gap := 8.0
 			var total_w := lblw + gap + costw + (gap + stockw if stock_txt != "" else 0.0)
 			var rx := c.x - total_w / 2.0
@@ -9940,7 +9975,7 @@ func _draw_banners(top_msg: String) -> void:
 			# Threat-callout badge (skull/target/lightning) fronting the text —
 			# only set by the alarm banners, so routine splashes stay clean.
 			if not bic.is_empty():
-				var biw := Art.font().get_string_size(btext, HORIZONTAL_ALIGNMENT_LEFT, -1, bsize).x
+				var biw := Art.tw(btext, bsize)
 				draw_texture_rect(Art.tex(bic),
 					Rect2(320.0 - biw / 2.0 - bis - 6.0, by - float(bsize) / 2.0 - bis / 2.0, bis, bis),
 					false, Color(bc.r, bc.g, bc.b, a))
@@ -10069,8 +10104,7 @@ func _draw_banners(top_msg: String) -> void:
 			320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
 	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
 		var ha := minf(1.0, _hint_t * 3.0)
-		var hf := Art.font()
-		var hw := hf.get_string_size(_hint_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		var hw := Art.tw(_hint_text, 11)
 		# Tooltip plate + the baked attention badge (ui_tooltip is a round "!"
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
@@ -10103,7 +10137,7 @@ static func _banner_plate_alpha(text_a: float) -> float:
 ## so a headless test can assert against the exact arithmetic the draw uses.
 static func banner_fit_size(txt: String, base: int) -> int:
 	var sz := base
-	while sz > 8 and Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x > BANNER_MAX_W:
+	while sz > 8 and Art.tw(txt, sz) > BANNER_MAX_W:
 		sz -= 1
 	return sz
 
@@ -10113,7 +10147,7 @@ static func banner_fit_size(txt: String, base: int) -> int:
 ## doesn't actually use. pad_left extends the plate leftward under a fronting
 ## badge; the text stays centered on 320, so only the left edge grows.
 static func banner_plate_rect(txt: String, y: float, size: int, pad_left: float) -> Rect2:
-	var w := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var w := Art.tw(txt, size)
 	return Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0, w + 10.0 + pad_left, size + 7.0)
 
 
@@ -10139,7 +10173,6 @@ func _metal_plate(r: Rect2, a: float) -> void:
 
 
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false) -> void:
-	var rf := Art.font()
 	var panel_top := 112.0
 	var title_y := 150.0
 	var row_start_y := 178.0
@@ -10147,9 +10180,9 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 	var panel_h := (row_start_y - panel_top) + maxi(rows.size(), 1) * row_h + 14.0
 	# Width adapts to the widest row (icon included) so a long DOWNED-BY line
 	# can't escape the plate; 300 stays the floor so short tallies keep their shape.
-	var max_w := rf.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+	var max_w := Art.tw(title, 24)
 	for row in rows:
-		var rw: float = rf.get_string_size(row["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, row.get("size", 11)).x
+		var rw: float = Art.tw(String(row["text"]), int(row.get("size", 11)))
 		if not String(row.get("icon", "")).is_empty():
 			rw += row.get("icon_size", 14.0) + 6.0
 		max_w = maxf(max_w, rw)
@@ -10184,7 +10217,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		var icon: String = row.get("icon", "")
 		var icon_size: float = row.get("icon_size", 14.0)
 		var y := row_start_y + i * row_h
-		var text_w := rf.get_string_size(row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size).x
+		var text_w := Art.tw(row_text, row_size)
 		var gap := 6.0
 		var total_w := text_w + (icon_size + gap if not icon.is_empty() else 0.0)
 		var x := 320.0 - total_w / 2.0
