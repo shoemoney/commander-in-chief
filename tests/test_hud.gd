@@ -79,16 +79,27 @@ func _act_glyph_resolves(act: String) -> bool:
 	return Art._GLYPH_KEY.has(act) and Art.tex("ui_key_blank") != null
 
 
-class _VerbMain extends Node2D:
+# Every `main` stub the HUD gets handed answers the FULL set of names hud.gd reads off main —
+# pinned by tests/test_stub_parity.gd. A stub that answers only what its own test happens to hit is
+# how a missing field hides: the read aborts the call and the row measures as absent, green.
+class _MainStub extends Node2D:
+	var sim: SimWorld = null
 	var _menu = null
-	var _motion := 1.0
-
-
-class _RowMain extends Node2D:
 	var _motion := 1.0
 	var best_score := 0
 	var best_wave := 0
-	var _menu = null
+	var _grenade_dry: Array = [0, 0]
+	var _sfx = null        # no audio in a headless HUD test; _draw_caption bails on the null
+	var _captions := true
+	func bind_for_glyph(_a: String) -> int: return 0
+
+
+class _VerbMain extends _MainStub:
+	pass
+
+
+class _RowMain extends _MainStub:
+	pass
 
 
 # c1-06: the row-0 planner keeps the highest-PRIORITY optional chips, not the ones that
@@ -2132,6 +2143,18 @@ class _ChipCaptureHud extends HudIcons:
 			"alert": alert, "border": pal["border"], "ink": pal["ink"]})
 	func _emit_bg_rect(r: Rect2, _c: Color) -> void:
 		boxes.append({"k": "bg", "id": "bg", "box": r})
+	# c2-16: the strip's centered NAME line lands in its OWN list, never `boxes` — the strip/frame
+	# band scans treat every box in `boxes` as a left-advancing chip, and the names are centered
+	# UNDER those chips (deliberately overlapping them in x).
+	var shop_names: Array = []
+	# Magazine segments live INSIDE the bar's own advance — recorded separately for the same reason.
+	var mag_segs: Array = []
+	func _emit_mag_seg(r: Rect2, c: Color) -> void:
+		mag_segs.append({"box": r, "col": c})
+	func _emit_shop_name(txt: String, cx: float, y: float, _c: Color) -> void:
+		var s := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.SHOP_NAME_SIZE)
+		shop_names.append({"id": txt, "alpha": _c.a,
+			"box": Rect2(cx - s.x / 2.0, y - Art.font().get_ascent(HudIcons.SHOP_NAME_SIZE), s.x, s.y)})
 	func _emit_marker(r: Rect2, _c: Color) -> void:
 		boxes.append({"k": "marker", "id": "arm", "box": r})
 	# The PRESSURE telegraph's mini-bar draws directly (draw_rect/draw_texture_rect); record
@@ -2717,13 +2740,8 @@ class _FrameSim extends SimWorld:
 
 # c1-10: the minimal `main` the real _draw reads (sim + the view-only fields it samples). A plain
 # stub so the full frame runs without booting src/main.gd's float/scene machinery.
-class _FrameMain extends Node2D:
-	var sim: SimWorld = null
-	var _motion := 1.0
-	var best_score := 0
-	var best_wave := 0
-	var _menu = null
-	var _grenade_dry: Array = [0]
+class _FrameMain extends _MainStub:
+	pass
 
 
 # c1-10: capture HUD for the full-frame test — records the seam draws like _ChipCaptureHud AND
@@ -2751,12 +2769,8 @@ class _FrameCaptureHud extends _ChipCaptureHud:
 # is genuinely SHARED (derived from main.BOSS_BAR_TOP, not a mirrored 60/64 literal), and confirm the
 # row-0 SHOP timer / SUPPLIES cue stay intentional in 2P.
 
-class _ShopMain extends Node2D:
-	var sim: SimWorld = null
-	var _motion := 1.0
-	var best_score := 0
-	var best_wave := 0
-	var _menu = null
+class _ShopMain extends _MainStub:
+	pass
 
 
 # The reserved strip row, the panel height, and the first player-row Y are all INVARIANT when
