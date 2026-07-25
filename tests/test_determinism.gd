@@ -218,6 +218,12 @@ const SEED := 0xDEADBEEF
 ## pure placement, no new rng draw, no kind change, lane still >= HULL_CLEARANCE.
 ## All 6 campaign samples move; ENDLESS_GOLDEN VERIFIED UNCHANGED (the authoring
 ## is campaign-gated).
+## VERIFIED UNCHANGED (2026-07-25, gunship act-two pacing): BOSS_CYCLE_TICKS
+## 360 -> 300, the strafe/mortar boundary moved to BOSS_STRAFE_TICKS = 120 and
+## BOSS_MORTAR_TICKS shifted to [140,180,220]. Both goldens hold: the campaign
+## torture never streams as far as gate 3 (the first bridge gunship) and the
+## endless torture wipes at wave 2, well before the wave-5 miniboss -- so no
+## torture tick ever runs _step_one_boss. Re-checked, not assumed.
 const GOLDEN: Array[int] = [
 	8824309749638634364,
 	6749052236834509168,

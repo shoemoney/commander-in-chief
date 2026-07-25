@@ -359,7 +359,7 @@ const _EVENT_SOUND := {
 	"drop_stolen": ["alarm", -9.0, 0.6],     # low growl: the crate is gone
 	"drop_gone": ["alarm", -12.0, 0.45],     # lower fizzle: the window closed on its own
 	"broadcast_pulse": ["alarm", -14.0, 0.5],  # sub-rumble rally tick — felt more than heard, under every threat cue
-	"strafe_lane": ["alarm", -13.0, 1.6],     # high tick: the sweep lane lights up
+	"strafe_lock": ["alarm", -13.0, 1.6],     # high tick: the gunship has picked its man
 	"flank_warn": ["alarm_low", -11.0, 0.85],    # c2/a1-13: structural sub-klaxon pre-tell
 	"flank_breach": ["alarm_low", -6.0, 1.1],    # a1-13: structural sub-klaxon: the walls answer
 	"revive": ["revive", -5.0, 1.0],
@@ -387,7 +387,7 @@ const _EVENT_SOUND := {
 	"cover_crack": ["rubble", -7.0, 1.2], # c3/a1-13
 	# a1-13 alarm taxonomy: STRUCTURAL breaches -> alarm_low; AERIAL paints (drone/
 	# sniper/mg-nest) -> alarm_air; all OTHER generic threat cues (elite/grenadier
-	# windups, observer_spawn, tank_ignite, strafe_lane, arena_pressure, vent/mast/
+	# windups, observer_spawn, tank_ignite, strafe_lock, arena_pressure, vent/mast/
 	# lane warns, colossus_engage, broadcast_pulse) intentionally stay on base "alarm".
 	"rear_warn": ["alarm_low", -12.0, 0.9],   # c4/a1-13: structural sub-klaxon LEAD warn
 	"rear_breach": ["alarm_low", -8.0, 1.0],   # c3/a1-13: structural sub-klaxon
@@ -2444,11 +2444,20 @@ func _consume_events() -> void:
 					"rate": 0.014, "text": "FLANKS!", "col": Color(1.0, 0.5, 0.3)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
 					"sz": 20.0, "grow": 1.0, "fade": 1.4, "rate": 0.02, "col": Color(0.5, 0.42, 0.35, 0.5)})
-			"strafe_lane":
-				# The gunship's sweep column, painted for ~0.4s at the strafe start.
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_bullettrail",
-					"sz": 300.0, "grow": 0.0, "fade": 0.4, "rate": 0.04, "rot90": true,
-					"col": Color(1.0, 0.35, 0.25, 0.22)})
+			"strafe_lock":
+				# Act-one opener. This used to paint a 300px vertical "sweep
+				# lane" at the boss's own x — but the strafe spray re-aims at
+				# the nearest player every 12 ticks, so the boss never sweeps a
+				# lane and the column pointed at empty bridge. Honest version:
+				# a reticle CONVERGING on the player the sim actually locked
+				# (sim ships him as tx/ty), plus a flare at the chin turret it
+				# will fire from.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+					"rate": 0.05, "r": 20.0, "col": Color(1.0, 0.5, 0.3)})
+				if ev.has("tx"):
+					_fx.append({"x": ev["tx"], "y": ev["ty"], "t": 0.0, "kind": "tex",
+						"tex": "fx_ring", "sz": 90.0, "grow": -0.75, "fade": 0.8,
+						"rate": 0.03, "col": Color(1.0, 0.35, 0.25, 0.6)})
 			"broadcast_pulse":
 				# Expanding rally ring: the buff source and its reach, drawn from
 				# the checksum-excluded event — the aura is invisible otherwise.
@@ -6278,18 +6287,25 @@ func _draw_band_signatures(cam_y: float, wbands: Array) -> void:
 
 
 func _draw_foundry_arena() -> void:
-	# c4 2v: three tinted concentric RINGS around the boss so the rotating safe
-	# annulus reads — an inner melee-risk ring (red) and the outer boundary of the
-	# safe belt (green); both radii GROW with the phase (HP thirds), so the safe
-	# band visibly migrates outward as the boss escalates. View-only.
+	# c4 2v: ONE migrating ring around the boss — the inner radius inside which
+	# camping is shelled (_step_colossus strikes anyone in ring 0 every 90
+	# ticks). It grows with the phase (HP thirds), so the spot that was fine at
+	# phase 1 becomes a kill box at phase 3 and you have to kite outward.
+	# Honesty pass: this used to also paint a GREEN "safe-belt outer edge" at the
+	# mid radius, but ring 1 and ring 2 are gameplay-identical (nothing in the
+	# sim distinguishes them) — the green arc promised a protected band the sim
+	# never granted, and green reads "stand here". Both arcs also sat at alpha
+	# 0.12-0.18 over a red-hot foundry floor, i.e. invisible. Now: a dark casing
+	# arc under a dashed hazard arc, which reads over molten orange.
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 		var ph: int = sim.colossus_phase()
 		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
-		var mr := float(SimWorld.COLOSSUS_RING_OUTER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
-		var ra := 0.12 + 0.06 * Art.pulse(0.05)
-		Art.arc(self, cpos, ir, 0.0, TAU, 48, Color(1.0, 0.3, 0.15, ra), 2.0)   # inner danger ring
-		Art.arc(self, cpos, mr, 0.0, TAU, 48, Color(0.35, 0.8, 0.45, ra), 2.0)  # safe-belt outer edge
+		var ra := 0.65 + 0.2 * Art.pulse(0.05)
+		Art.arc(self, cpos, ir, 0.0, TAU, 48, Color(0.03, 0.02, 0.02, 0.85), 5.0)
+		for di in 12:
+			var d0 := float(di) * TAU / 12.0
+			Art.arc(self, cpos, ir, d0, d0 + TAU / 24.0, 6, Color(1.0, 0.86, 0.22, ra), 2.5)
 	# Foundry ARENA dressing (c2 3v: the finale was "a big enemy in a field").
 	# Molten pools ring the three KIMK barrel clusters (drawn UNDER them —
 	# each phase-shift cook now torches a molten stage mark), grounded
@@ -7769,12 +7785,16 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# it; a faint sway sells cloth in the wind without a sim/state change.
 	_spr("flag_iran", bpos + Vector2(0, -6), sin(_bf * 0.02 + slot) * 0.03 * _motion, 1.0)
 	# Mortar-phase warning: the hull flashes red while volleys are near
-	# (they land at phase_t 200/240/280 of the 360-tick cycle).
+	# (act two runs phase_t 120..299 of the 300-tick cycle; see BOSS_STRAFE_TICKS).
 	var pt: int = boss["phase_t"]
+	# Every gunship telegraph below reads the shells the sim will actually fire
+	# at this tier, so none of them can advertise a volley shape the boss does
+	# not have.
+	var mticks: Array = SimWorld.boss_mortar_ticks(sim.wave / 5)
 	# Spray telegraph (8v): the chin turret charges over the last 6 ticks of
 	# each 12-tick spray interval, and a faint aim hint restores the danger
 	# gradient at close range (information, so it survives reduce-motion).
-	if pt < SimWorld.BOSS_CYCLE_TICKS / 2:
+	if pt < SimWorld.BOSS_STRAFE_TICKS:
 		var sk := pt % SimWorld.BOSS_SPRAY_INTERVAL_TICKS
 		var chin := bpos + Vector2(0, 20)
 		if sk >= 6 or _motion < 0.5:
@@ -7787,13 +7807,13 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 			var gtp := _to_screen(gt["x"], gt["y"])
 			Art.line(self, chin, chin + (gtp - chin).normalized() * 60.0, Color(1.0, 0.3, 0.2, 0.3), 1.0)
 	var hull_mod := Color.WHITE
-	# The hull red-flash is the mortar volley's anticipation tell. Deeper waves add a
-	# 4th (tier>=2, t==320) and 5th (tier>=3, t==340) strike, so a fixed 170..290 window
-	# let the last two shells launch with the hull already cooled — the tell was lying
-	# about the phase being over. Derive the tail from the same tier the sim uses.
-	var _btier: int = sim.wave / 5
-	var _warn_end := 290 + (30 if _btier >= 2 else 0) + (20 if _btier >= 3 else 0)
-	if pt >= 170 and pt <= _warn_end and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
+	# The hull red-flash is the mortar volley's anticipation tell: it lights 30
+	# ticks before the first shell and cools 10 after the last one the sim will
+	# actually fire at this tier (a fixed window let deep-wave shells 4 and 5
+	# launch with the hull already cooled — the tell lied about the act ending).
+	var _warn_end: int = int(mticks[mticks.size() - 1]) + 10
+	if pt >= int(mticks[0]) - 30 and pt <= _warn_end \
+			and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
 	# Ground shadow: the heli was the one unit floating untethered (drone and
@@ -7842,10 +7862,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
 	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * 22.0
-	# Same strafe/mortar half-cycle the sim uses to pick behavior in
-	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
-	# colossus bar labels its phase.
-	var gphase := 1 if pt < SimWorld.BOSS_CYCLE_TICKS / 2 else 2
+	# Same act boundary the sim uses to pick behavior in _step_one_boss
+	# (t < BOSS_STRAFE_TICKS), surfaced the way the colossus bar labels
+	# its phase.
+	var gphase := 1 if pt < SimWorld.BOSS_STRAFE_TICKS else 2
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
 	var gplabel := "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
@@ -7855,19 +7875,20 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	_draw_bar(Rect2(Vector2(bar_x, bar_y + 4), Vector2(bar_w, 8)), bfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost(bkey, bfrac), 2)
 	# Next-volley countdown: a tick that sweeps left->right across the HP
-	# bar and lands on the right edge exactly as each mortar strike lands
-	# (170->200, 200->240, 240->280) — the barrage is now anticipable on
-	# the bar you're already watching, not just the hull-flash that can
-	# sit off-screen above the held camera.
-	if pt >= 170 and pt < SimWorld.BOSS_MORTAR_TICKS[2]:
-		var vseg_start := 170
-		var vseg_end := SimWorld.BOSS_MORTAR_TICKS[0]
-		if pt >= SimWorld.BOSS_MORTAR_TICKS[1]:
-			vseg_start = SimWorld.BOSS_MORTAR_TICKS[1]
-			vseg_end = SimWorld.BOSS_MORTAR_TICKS[2]
-		elif pt >= SimWorld.BOSS_MORTAR_TICKS[0]:
-			vseg_start = SimWorld.BOSS_MORTAR_TICKS[0]
-			vseg_end = SimWorld.BOSS_MORTAR_TICKS[1]
+	# bar and lands on the right edge exactly as each mortar shell fires —
+	# the barrage is anticipable on the bar you're already watching, not
+	# just the hull-flash that can sit off-screen above the held camera.
+	# It walks `mticks`, so at tier 2/3 the 4th and 5th shells get a
+	# countdown too (it used to stop dead at BOSS_MORTAR_TICKS[2] and let
+	# them arrive unannounced, even though the hull flash knew about them).
+	var vlast: int = int(mticks[mticks.size() - 1])
+	if pt >= int(mticks[0]) - 30 and pt < vlast:
+		var vseg_start: int = int(mticks[0]) - 30
+		var vseg_end: int = int(mticks[0])
+		for vi in mticks.size() - 1:
+			if pt >= int(mticks[vi]):
+				vseg_start = int(mticks[vi])
+				vseg_end = int(mticks[vi + 1])
 		var vfrac := float(pt - vseg_start) / float(vseg_end - vseg_start)
 		var vx := bar_x + bar_w * vfrac
 		Art.line(self, Vector2(vx, bar_y - 2.0), Vector2(vx, bar_y + 16.0),
