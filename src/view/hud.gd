@@ -12,6 +12,9 @@ const HEAD_H := 26.0  # row-0 header block (coin/score/tokens + gap) above the p
 const BOSS_BAR_TOP := 64.0  # c1-15: THE shared HUD-layout boundary — the y the top-center boss/mini
                        # HP bars dock at. main.gd imports it directly (HudIcons.BOSS_BAR_TOP) for its
                        # bar renderers, so the corner panel and the bars share one source, no mirror.
+const BOSS_BAR_STRIDE := 22.0  # vertical stride between stacked top-center boss/mini HP bars. Was a
+                       # bare 22.0 in THREE places in main.gd (the bar renderer itself, the splash
+                       # banner's duck, the hint tooltip's duck) — hoisted so they can't drift.
 const SHOP_STRIP_CLEARANCE := 4.0  # c1-15: breathing gap the corner panel keeps below the bar line.
 const SHOP_SAFE_H := BOSS_BAR_TOP - SHOP_STRIP_CLEARANCE  # c1-15: corner-panel content-height cap,
                        # derived at parse time. Header + rows + strip must fit or the strip drops (2P).
@@ -1397,6 +1400,53 @@ const BOTTOM_RESERVE_GAP := 3.0                      # breathing gap an overlay 
 const CAPTION_BG_ABOVE := 9.0   # caption scrim extent above the LAST line's baseline (was inline -9.0)
 const CAPTION_BG_BELOW := 5.0   # ...and below it (was inline: height 14 = 9 + 5)
 const VERB_PLATE_BELOW := 8.0   # verb chip plate extent below VERB_LEGEND_Y (Rect2(..., y-8, ..., 16))
+# The colossus HP bar main.gd `_draw_colossus` docks on the floor, and the x-span a bottom edge
+# chevron must dodge around it. main.gd carried a 165.0/475.0 literal pair that was *mirroring*
+# this bar — and had drifted: the bar spans 170..470, so the mirror was guarding the wrong window.
+# Both the bar and the dodge now derive from one origin/width.
+const COLOSSUS_BAR_X := 170.0
+const COLOSSUS_BAR_Y := 330.0
+const COLOSSUS_BAR_W := 300.0
+const COLOSSUS_BAR_H := 13.0
+const COLOSSUS_DODGE_PAD := 5.0
+const COLOSSUS_DODGE_L := COLOSSUS_BAR_X - COLOSSUS_DODGE_PAD                    # 165
+const COLOSSUS_DODGE_R := COLOSSUS_BAR_X + COLOSSUS_BAR_W + COLOSSUS_DODGE_PAD   # 475
+
+
+# --- the reserved-zone band contract -------------------------------------------------------
+# THE reason this exists: main.gd's `_draw` is a Node2D at z=0 and `$HUD` (this Control) lives on
+# a CanvasLayer at layer 1. main.gd can therefore NEVER paint above the corner plate, the boss
+# bars, or anything else drawn here — a "top" overlay that overlaps HUD chrome doesn't win the
+# z-fight, it silently disappears under it. So main.gd's transient overlays must DODGE the
+# reserved bands, and the bands' geometry has to live in the file that owns the chrome.
+# Before this there were five independent y-arbiters in main.gd using four different magic gaps
+# (+8, +12, +16, a bare 30) plus two mirrored colossus literals. Now: two rails, one gap.
+const TOP_RESERVE_GAP := 12.0   # the single breathing gap below the reserved top band (was 8/12/16)
+const SCREEN_BOTTOM := 360.0    # viewport floor — the bottom rail when nothing is docked on it
+
+
+## First y a main.gd overlay may occupy under the reserved TOP band.
+## Rails, stacked: the corner plate (`panel_bottom`, which already folds in the 2P shop-strip drop),
+## then `boss_slots` top-center HP bars when any are up, then `stacked_rows` of persistent chrome
+## already parked in the band (today: the replay ribbon). `boss_slots == 0` means there are no bars
+## to clear, so the band collapses back to the plate — a left-anchored marker isn't pushed to y76
+## just because BOSS_BAR_TOP exists.
+func band_top(boss_slots: int = 0, stacked_rows: int = 0) -> float:
+	var y := panel_bottom()
+	if boss_slots > 0:
+		y = maxf(y, BOSS_BAR_TOP + BOSS_BAR_STRIDE * float(boss_slots))
+	return y + TOP_RESERVE_GAP + float(stacked_rows) * ROW_H
+
+
+## The mirror of band_top(): the last y a bottom-anchored overlay may occupy. main.gd's
+## `_draw_colossus` docks a PERSISTENT block on the viewport floor for the whole finale (phase
+## label at COLOSSUS_LABEL_Y, plate, HP bar at COLOSSUS_BAR_Y, core-countdown tick to y345); the
+## caption strip and verb chip used to paint straight over it — the strip's centered scrim ate the
+## right half of "FOUNDRY COLOSSUS", and the chip sat on the HP bar.
+## ponytail: one reserved band, one client file. If a second persistent bottom element ever
+## appears, make this a min() over a list of bands rather than growing a second constant.
+static func band_bottom(sim) -> float:
+	return (COLOSSUS_BLOCK_TOP - BOTTOM_RESERVE_GAP) if colossus_bar_visible(sim) else SCREEN_BOTTOM
 
 
 ## True exactly when main.gd `_draw_colossus` paints its bottom-docked block — same predicate,
@@ -1406,15 +1456,11 @@ static func colossus_bar_visible(sim) -> bool:
 
 
 ## px the WHOLE bottom overlay cluster shifts up while that block owns the floor. Sized off the
-## LOWEST member (the verb chip) and applied to every member, so the cluster's internal spacing is
-## unchanged and the two can't collide with each other. Returns 0.0 in every other frame in the
-## game — the default layout is byte-identical to before.
-## ponytail: one reserve, one client file. If a second persistent bottom element ever appears,
-## make this a max() over a list of reserved bands rather than growing a second constant.
+## LOWEST member (the verb chip) against band_bottom() and applied to every member, so the
+## cluster's internal spacing is unchanged and the two can't collide with each other. Returns 0.0
+## in every other frame in the game — the default layout is byte-identical to before.
 static func bottom_band_lift(sim) -> float:
-	if not colossus_bar_visible(sim):
-		return 0.0
-	return VERB_LEGEND_Y + VERB_PLATE_BELOW + BOTTOM_RESERVE_GAP - COLOSSUS_BLOCK_TOP   # 38.0
+	return maxf(0.0, VERB_LEGEND_Y + VERB_PLATE_BELOW - band_bottom(sim))   # 38.0 in the finale
 
 
 ## The caption scrim's exact rect — the one measurement both the draw and the layout test read,
@@ -1468,10 +1514,22 @@ static func _fit_chars(s: String, font: Font, size: int, max_w: float) -> int:
 	return n
 
 
+## True while main.gd is painting a result card (V I C T O R Y ! / K.I.A.). Same layer inversion
+## band_top() exists for, in the other direction: the card is drawn by main.gd at z=0, UNDER this
+## CanvasLayer, so a transient overlay emitted here lands ON TOP of the card and can't be fixed by
+## reordering. The overlays have to opt out. `get()` (not a direct field read) because the headless
+## HUD test doubles are plain Node2D mocks that declare neither field.
+func _result_card_up() -> bool:
+	var s = main.get("sim")
+	return main.get("_debrief") == true or (s != null and s.victory)
+
+
 func _draw_caption() -> void:
 	if main == null:
 		return
 	if main._menu != null and main._menu.is_active():
+		return
+	if _result_card_up():
 		return
 	# main.get(...) (not main._sfx) — the headless HUD test doubles are plain Node2D mocks that
 	# don't declare _sfx, and a direct property access would SCRIPT ERROR on them; get() returns
@@ -1545,6 +1603,8 @@ func _draw_caption() -> void:
 ## belong here; FIRE/GRENADE are device-plain (LMB/RMB, RT/LB) on the TITLE legend.
 func _verb_legend() -> void:
 	if main._menu != null and main._menu.is_active():
+		return
+	if _result_card_up():
 		return
 	if _verb_show <= 0.0:
 		return   # bright window elapsed — fully gone, no persistent playfield overlay

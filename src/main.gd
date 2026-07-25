@@ -7882,7 +7882,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
-	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * 22.0
+	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# Same strafe/mortar half-cycle the sim uses to pick behavior in
 	# _step_one_boss (t < BOSS_CYCLE_TICKS/2), surfaced the way the
 	# colossus bar labels its phase.
@@ -8033,7 +8033,8 @@ func _draw_colossus() -> void:
 	var clw := Art.font().get_string_size(clabel, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	draw_rect(_label_plate_rect(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y, clw), LABEL_PLATE_FILL)
 	Art.text(self, clabel, Vector2(HudIcons.COLOSSUS_LABEL_X, HudIcons.COLOSSUS_LABEL_Y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
-	_draw_bar(Rect2(Vector2(170, 330), Vector2(300, 13)), cfrac,
+	_draw_bar(Rect2(Vector2(HudIcons.COLOSSUS_BAR_X, HudIcons.COLOSSUS_BAR_Y),
+		Vector2(HudIcons.COLOSSUS_BAR_W, HudIcons.COLOSSUS_BAR_H)), cfrac,
 		Color(0.85, 0.25, 0.18), _bar_ghost("colossus", cfrac), 3)
 	# Next-core-open countdown: same sweeping tick as the gunship's mortar
 	# marker above, so the plating-retract window is timeable off the fixed
@@ -8041,7 +8042,7 @@ func _draw_colossus() -> void:
 	if sim.colossus.get("core_open", 0) == 0:
 		var cc: int = sim.colossus.get("core_cd", SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
 		var cvfrac := 1.0 - float(cc) / float(SimWorld.COLOSSUS_CORE_CYCLE_TICKS)
-		var cvx := 170.0 + 300.0 * clampf(cvfrac, 0.0, 1.0)
+		var cvx := HudIcons.COLOSSUS_BAR_X + HudIcons.COLOSSUS_BAR_W * clampf(cvfrac, 0.0, 1.0)
 		Art.line(self, Vector2(cvx, 328.0), Vector2(cvx, 345.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
 		Art.arc(self, Vector2(cvx, 327.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
@@ -9345,19 +9346,19 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	## chevrons: ties prefer the lethal ranged killers, capped to the
 	## nearest 6 so a dense swarm can't paint a solid warning row.
 	threats.sort_custom(_cmp_threat_top if is_top else _cmp_threat_bottom)
-	var _panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
+	var top_band := _hud_icons.band_top()   # reserved-zone contract (incl. the 2P strip-drop rule)
 	for i in mini(6, threats.size()):
 		var e: Dictionary = threats[i]["e"]
 		var off: float = threats[i]["off"]
 		var danger: bool = threats[i]["danger"]
 		if is_top:
 			var tx: float = clampf(e["x"] * PX, 8.0, 632.0)
-			# Under the corner HUD panel's real footprint (x<262), drop the chevron
-			# below the panel's bottom edge instead of skipping it outright — still
-			# a warning, just relocated clear of the opaque HUD art.
+			# Under the corner HUD panel's real footprint, drop the chevron below the
+			# reserved top band instead of skipping it outright — still a warning, just
+			# relocated clear of the opaque HUD art it could never have drawn over.
 			var tbase := 28.0
 			if tx < _hud_icons.plate_right():
-				tbase = _panel_bot + 12.0
+				tbase = top_band
 			var ta := clampf(1.0 + off / 180.0, 0.2, 0.7)
 			if e.get("windup", 0) > 0:
 				# Steady full boost under reduce-motion — the windup must still read.
@@ -9377,10 +9378,12 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 				Art.line(self, Vector2(tx, ttip + 5.0), Vector2(tx + tspr, tbase + 5.0), tcol, 2.0)
 		else:
 			var sx: float = clampf(e["x"] * PX, 8.0, 632.0)
-			if sim.last_stand and sx > 165.0 and sx < 475.0:
-				# keep clear of the colossus HP bar / LAST STAND readout parked
-				# at bottom-center of the screen in the finale
-				sx = 165.0 if sx < 320.0 else 475.0
+			# Keep clear of the colossus HP bar / LAST STAND readout parked at bottom-center in
+			# the finale. The dodge window derives from the bar itself (HudIcons.COLOSSUS_BAR_*):
+			# the old 165/475 literal pair was a hand-mirror of a bar that spans 170..470.
+			if (sim.last_stand or HudIcons.colossus_bar_visible(sim)) \
+					and sx > HudIcons.COLOSSUS_DODGE_L and sx < HudIcons.COLOSSUS_DODGE_R:
+				sx = HudIcons.COLOSSUS_DODGE_L if sx < 320.0 else HudIcons.COLOSSUS_DODGE_R
 			var a := clampf(1.2 - (off - 360.0) / 200.0, 0.25, 0.85)
 			if e.get("windup", 0) > 0:
 				a = clampf(a + (0.35 if _motion < 0.5 else Art.pulse(0.28) * 0.35), 0.25, 1.0)
@@ -9455,7 +9458,7 @@ func _draw_objective_markers() -> void:
 	# Weight-sort BEFORE the edge cap of 6, so the cap always spends its slots on
 	# the highest-priority marks. On-screen icons are uncapped (anchored).
 	marks.sort_custom(_cmp_mark_priority)
-	var panel_bot := _hud_icons.panel_bottom()   # single source (incl. 2P strip-drop rule)
+	var top_band := _hud_icons.band_top()   # reserved-zone contract (incl. the 2P strip-drop rule)
 	var placed: Array[Vector2] = []
 	var edge_used := 0
 	for m in marks:
@@ -9472,9 +9475,9 @@ func _draw_objective_markers() -> void:
 			edge_used += 1
 			var ep := _marker_edge(mp)
 			# Never under the corner HUD panel (it reaches ~y58 in 2P, deeper with
-			# the endless shop row) — drop the marker below its bottom edge.
-			if ep.x < _hud_icons.plate_right() and ep.y < panel_bot + 8.0:
-				ep.y = panel_bot + 8.0
+			# the endless shop row) — drop the marker below the reserved top band.
+			if ep.x < _hud_icons.plate_right() and ep.y < top_band:
+				ep.y = top_band
 			# Min spacing on a shared edge: slide along the edge until clear so
 			# stacked marks can't overprint into one unreadable diamond.
 			var on_h_edge: bool = ep.y <= 40.0 or ep.y >= 340.0
@@ -9768,7 +9771,16 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	if top_msg != "airstrike":
 		return
 	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
-	Art.text_center(self, txt, 320, 46, 12, Color(1.0, 0.85, 0.3))
+	Art.text_center(self, txt, 320, _banner_band_y(), 12, Color(1.0, 0.85, 0.3))
+
+
+## THE baseline every top-center transient banner docks at. main.gd draws at z=0 under the $HUD
+## CanvasLayer, so a banner whose plate reaches into the corner-plate footprint doesn't overlap it
+## — it vanishes under it. One rail: below the corner plate, below any live boss bars, and below
+## the persistent replay ribbon while a replay plays back. `top_msg` makes the four banners
+## mutually exclusive, so they all share this slot without stacking.
+func _banner_band_y() -> float:
+	return _hud_icons.band_top(_boss_bar_slots, 1 if _watching else 0)
 
 
 func _draw_threat_pips() -> void:
@@ -9779,7 +9791,7 @@ func _draw_threat_pips() -> void:
 	# Corner-HUD avoidance mirrors the edge chevrons: a pip clamped to the top edge
 	# under the opaque icon plate would be over-painted by the $HUD CanvasLayer.
 	var plate_r := _hud_icons.plate_right()
-	var panel_b := _hud_icons.panel_bottom() + 12.0
+	var panel_b := _hud_icons.band_top()   # reserved-zone contract, same rail the chevrons use
 	for e in sim.enemies:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
@@ -9929,15 +9941,17 @@ func _draw_banners(top_msg: String) -> void:
 	# needs the RULE ("the camera stays until the wave dies"), not a red strobe.
 	if top_msg == "hold":
 		var htxt := "HOLD THE ARENA — CLEAR THE WAVE"
-		_banner_plate(htxt, 46.0, 10, 0.8)
-		Art.text_center(self, htxt, 320, 46, 10, Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
+		var hby := _banner_band_y()
+		_banner_plate(htxt, hby, 10, 0.8)
+		Art.text_center(self, htxt, 320, hby, 10, Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if top_msg == "mortar":
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
 		var wtxt := "MORTARS RANGING — ADVANCE!"
-		_banner_plate(wtxt, 46.0, 11, 1.0)
-		Art.text_center(self, wtxt, 320, 46, 11, Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
+		var wby := _banner_band_y()
+		_banner_plate(wtxt, wby, 11, 1.0)
+		Art.text_center(self, wtxt, 320, wby, 11, Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
@@ -9951,10 +9965,9 @@ func _draw_banners(top_msg: String) -> void:
 			if a > 0.05:
 				a = maxf(a, 0.85)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			# Duck below any active boss bars (they dock at HudIcons.BOSS_BAR_TOP + slot*22 —
-			# the same shared boundary hud.gd sizes its corner panel against) instead
-			# of overprinting the PHASE label.
-			var by := HudIcons.BOSS_BAR_TOP + 6.0 + 22.0 * float(_boss_bar_slots)
+			# Duck below the reserved top band (corner plate, boss bars, replay ribbon) instead
+			# of overprinting the PHASE label — or, worse, silently vanishing under the HUD.
+			var by := _banner_band_y()
 			# Fit at the BASE size only — the pop-in punch below is a transform
 			# scale, not a font-size bump, so it no longer fights this shrink loop
 			# (a long teach string at a punched-up font size used to overflow
@@ -10105,8 +10118,11 @@ func _draw_banners(top_msg: String) -> void:
 	# keep saying "this is playback, inputs are frozen" for the whole watch.
 	if _watching:
 		var wpul := 1.0 if _motion < 0.5 else (0.7 + 0.3 * Art.pulse(0.15))
+		# The ribbon is PERSISTENT, so it owns the first slot of the reserved top band and the
+		# transient banners stack one row under it (_banner_band_y passes stacked_rows=1 while
+		# _watching). Its old y=30 was above panel_bottom — i.e. under the HUD, which draws over us.
 		Art.text_center(self, "— REPLAY — %s TO EXIT —" % ("START" if Art.use_pad else "R"),
-			320, 30, 9, Color(0.55, 0.9, 1.0, wpul))
+			320, _hud_icons.band_top(_boss_bar_slots), 9, Color(0.55, 0.9, 1.0, wpul))
 	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
 		var ha := minf(1.0, _hint_t * 3.0)
 		var hf := Art.font()
@@ -10115,13 +10131,13 @@ func _draw_banners(top_msg: String) -> void:
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
 		var hx := 320.0 - hw / 2.0 - 8.0
-		# Duck below active boss bars (same 22px/slot offset the splash banner
-		# uses) — at one slot the splash lands at y=92 right on this plate.
-		var hy := 22.0 * float(_boss_bar_slots)
-		_metal_plate(Rect2(hx, 92 + hy, hw + 16, 18), ha)
-		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, 90.0 + hy, 22, 22), false,
+		# One BOSS_BAR_STRIDE below whatever banner shares the band this frame — the same 22px
+		# relationship the old 92-vs-70 literal pair encoded, now derived off the one rail.
+		var hy := _banner_band_y() + HudIcons.BOSS_BAR_STRIDE
+		_metal_plate(Rect2(hx, hy, hw + 16, 18), ha)
+		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, hy - 2.0, 22, 22), false,
 			Color(1.0, 0.95, 0.75, ha))
-		Art.text_center(self, _hint_text, 320, 105 + hy, 11, Color(1.0, 0.95, 0.7, ha))
+		Art.text_center(self, _hint_text, 320, hy + 13.0, 11, Color(1.0, 0.95, 0.7, ha))
 
 
 ## Shared victory/debrief result-card scaffold: translucent panel + centered
