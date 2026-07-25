@@ -166,6 +166,9 @@ var _last_ptr := Vector2(-1.0, -1.0)  # last mouse position seen — lets a page
 # property setter dropped the memo on EVERY _dirty = true (including the per-frame animator writes),
 # forcing a redundant intra-frame rebuild each time. (See _mark_dirty and _menu_items.)
 var _dirty := true
+# GHOST-OVERLAY FIX: has the empty (mode == HIDDEN) frame been painted since the menu closed?
+# _draw() clears the overlay by early-returning, but only when a redraw is requested — see _process.
+var _painted_hidden := false
 # c3-16: once-per-frame memo for _menu_items(). It is read many times per frame — every _draw layout
 # pass, the mouse hit-test, nav, and press — and each raw rebuild allocates fresh dicts/arrays; this
 # holds one snapshot and reuses it until _mark_dirty() drops it. Engaged ONLY while in the scene tree
@@ -499,7 +502,24 @@ func _on_joy_changed(_device: int, connected: bool) -> void:
 func _process(delta: float) -> void:
 	if main == null:
 		return   # c3-07: menu can outlive main during teardown; every branch below reads main._motion
-	if mode != Mode.HIDDEN:
+	if mode == Mode.HIDDEN:
+		# GHOST-OVERLAY FIX. _draw() early-returns on HIDDEN, but that clearing path only runs
+		# if a redraw is actually REQUESTED — and the sole queue_redraw() call lives further down
+		# this function, behind the `mode != HIDDEN` gate. So closing the menu left the last
+		# painted frame (the whole PAUSED overlay) stuck on the CanvasItem forever: the sim
+		# resumed and stepped on underneath, but the player still saw "PAUSED" and kept pressing
+		# RESUME on an already-resumed run. Reproduced live: score/ammo changed and the player
+		# died and revived behind a pixel-identical frozen overlay.
+		# Tracked with its own flag rather than _dirty because HIDDEN is assigned from ~7 sites
+		# (here, _unhandled_input, and several direct `_menu.mode = HIDDEN` writes in main.gd) —
+		# only some of which mark dirty. One repaint per close, then idle.
+		if not _painted_hidden:
+			_painted_hidden = true
+			_dirty = false
+			queue_redraw()   # paints the empty frame that actually clears the overlay
+		return
+	_painted_hidden = false
+	if mode != Mode.HIDDEN:   # redundant after the early return above; kept to hold the diff to 2 lines
 		# Armed RESTART/TITLE/QUIT rows disarm after 2.5 s — a stale confirm
 		# must not end a run on a press that lands minutes later.
 		if _confirm >= 0:

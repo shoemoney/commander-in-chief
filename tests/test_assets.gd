@@ -1758,3 +1758,140 @@ func test_river_shore_is_curved_and_shader_shares_the_params() -> void:
 	var src := FileAccess.get_file_as_string("res://src/view/water.gdshader")
 	for u in ["bank_amp", "bank_freq", "pad_px", "band_px"]:
 		Runner.T.ok(u in src, "water.gdshader still consumes uniform " + u)
+# --- kill-the-copy-pasted-sandbag-wall-tiling: the BAKE must not be a mechanical
+# grid of identical stamps -- per-segment placement jitter (wall_variant/cap_flags,
+# tests/test_main.gd) cannot rescue a source PNG that is N identical flat-fill
+# ovals on a ruled line. Pins the anti-grid properties tools/gen_entities.py's
+# _sandbag_wall/_bag builder is supposed to guarantee, so a future regeneration
+# back to a stamped grid fails HERE instead of only showing up in a screenshot
+# review. ---------------------------------------------------------------------
+
+func test_sandbag_bakes_are_not_a_mechanical_grid() -> void:
+	# (path, committed alpha-bbox (min_y, max_y) -- new bake must stay within 3px)
+	var files := {
+		"res://assets/art/p2/wall_sandbag.png": Vector2i(64, 181),
+		"res://assets/art/p2/wall_sandbag_b.png": Vector2i(64, 181),
+		"res://assets/art/p2/wall_sandbag_c.png": Vector2i(64, 181),
+		"res://assets/art/p2/wall_sandbag_end.png": Vector2i(31, 92),
+		"res://assets/art/sandbag.png": Vector2i(17, 63),
+	}
+	var wall_body_hashes := {}
+	for path in files:
+		var t: Texture2D = load(path)
+		Runner.T.ok(t != null, "%s imports" % path)
+		if t == null:
+			continue
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var w := img.get_width()
+		var h := img.get_height()
+		var top_rows: Array[int] = []
+		var colors := {}
+		var bbox_min_y := h        # ANY nonzero alpha, matching PIL's getbbox() -- the
+		var bbox_max_y := -1       # committed footprint below was measured that way.
+		for x in w:
+			var first := -1
+			for y in h:
+				var a := img.get_pixel(x, y).a
+				if a > 0.0:
+					bbox_min_y = mini(bbox_min_y, y)
+					bbox_max_y = maxi(bbox_max_y, y)
+				if a > 0.05:
+					if first == -1:
+						first = y
+					colors[img.get_pixel(x, y).to_html(false)] = true
+			if first != -1:
+				top_rows.append(first)
+		Runner.T.ok(top_rows.size() > 4, "%s has real opaque width (>4 columns)" % path)
+		var distinct := {}
+		var mean := 0.0
+		for r in top_rows:
+			distinct[r] = true
+			mean += r
+		mean /= maxf(1.0, top_rows.size())
+		var variance := 0.0
+		for r in top_rows:
+			variance += (r - mean) * (r - mean)
+		variance /= maxf(1.0, top_rows.size())
+		var stddev := sqrt(variance)
+		Runner.T.ok(distinct.size() >= 4,
+			"%s top edge has >=4 distinct heights across the run, not a ruled stamp line (got %d)" %
+				[path, distinct.size()])
+		Runner.T.ok(stddev > 1.5,
+			"%s top-edge height stddev > 1.5px, a silhouette not a flat grid (got %.2f)" % [path, stddev])
+		Runner.T.ok(colors.size() >= 6,
+			"%s has >=6 distinct opaque RGB values -- real shading, not 2 flat fills + a keyline (got %d)" %
+				[path, colors.size()])
+		var target: Vector2i = files[path]
+		Runner.T.ok(absi(bbox_min_y - target.x) <= 3 and absi(bbox_max_y - target.y) <= 3,
+			"%s alpha bbox height (%d..%d) stays within 3px of the pinned footprint (%d..%d) -- must not draw taller than the sim's SANDBAG_HALF hitbox" %
+				[path, bbox_min_y, bbox_max_y, target.x, target.y])
+		if path.contains("wall_sandbag") and not path.contains("_end"):
+			var file_hash := FileAccess.get_sha256(path)
+			Runner.T.ok(not wall_body_hashes.has(file_hash),
+				"%s is a distinct bake, not a byte-for-byte copy of %s" % [path, wall_body_hashes.get(file_hash, "")])
+			wall_body_hashes[file_hash] = path
+	Runner.T.eq(wall_body_hashes.size(), 3, "all 3 wall_sandbag body variants are distinct bakes")
+
+
+# --- event banner scrims never span the playfield ---
+
+func test_event_banners_never_span_the_playfield() -> void:
+	var ms = load("res://src/main.gd")
+	var strs: Array = ms._KIND_TEACH.values()
+	strs.append_array(["BRIDGE GUNSHIP", "MORTAR OBSERVER — SHOOT IT DOWN",
+		"GUNSHIP INBOUND", "CORE EXPOSED — OPEN FIRE", "AIRSTRIKE INBOUND",
+		"COLOSSUS ENRAGED — MORTAR VOLLEYS", "DESTROY THE GUNSHIP TO ADVANCE",
+		"HOLD THE ARENA — CLEAR THE WAVE", "MORTARS RANGING — ADVANCE!"])
+	for s in strs:
+		var sz: int = ms.banner_fit_size(s, 16)
+		var r: Rect2 = ms.banner_plate_rect(s, 70.0, sz, 24.0)   # 24 = worst-case badge pad
+		Runner.T.ok(r.size.x <= 0.72 * ms.SCREEN_W,
+			"'%s' scrim %dpx never spans the playfield" % [s, int(r.size.x)])
+		Runner.T.ok(sz >= 12, "'%s' stays readable (size %d >= 12)" % [s, sz])
+	# the slab itself may not come back
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var body := src.substr(src.find("func _metal_plate("), 800)
+	Runner.T.ok(not ("draw_rect(" in body),
+		"_metal_plate paints a soft-edged ribbon, never a hard rectangle")
+
+
+# --- field overlays draw on the pixel grid, not as smooth vector primitives ---
+
+func test_field_overlays_are_pixel_grid_snapped() -> void:
+	for path in ["res://src/main.gd", "res://src/view/hud.gd"]:
+		var fsrc := FileAccess.get_file_as_string(path)
+		var re := RegEx.create_from_string("(?<![.\\w])draw_(arc|circle|line|polyline|dashed_line)\\(")
+		Runner.T.eq(re.search_all(fsrc).size(), 0,
+			"%s draws field overlays through Art.arc/circle/line (pixel grid), never raw vector primitives" % path)
+	# _to_screen is the shared grid seam -- it must round.
+	var m := FileAccess.get_file_as_string("res://src/main.gd")
+	var body2 := m.substr(m.find("func _to_screen("), 300)
+	Runner.T.ok("roundf(" in body2, "_to_screen snaps to whole pixels")
+
+
+func test_art_ring_is_pixel_perfect_not_a_polygon() -> void:
+	# A midpoint circle is 4-way symmetric on integer offsets; a draw_arc N-gon
+	# approximation is not. r=12, w=1 is a typical HUD/telegraph ring size.
+	var entry: Dictionary = Art._ring_entry(12, 1, false)
+	var offsets: PackedVector2Array = entry["offsets"]
+	Runner.T.ok(offsets.size() > 0, "the ring has pixels")
+	var have := {}
+	for o in offsets:
+		Runner.T.eq(o.x, roundf(o.x), "ring offset.x is a whole pixel")
+		Runner.T.eq(o.y, roundf(o.y), "ring offset.y is a whole pixel")
+		have[Vector2i(int(o.x), int(o.y))] = true
+	for o in offsets:
+		var v := Vector2i(int(o.x), int(o.y))
+		Runner.T.ok(have.has(Vector2i(-v.x, v.y)), "ring is symmetric across the y-axis")
+		Runner.T.ok(have.has(Vector2i(v.x, -v.y)), "ring is symmetric across the x-axis")
+	# Filled discs must include the centre pixel (regression: inner2 == 0
+	# excluded d2 == 0, shipping every filled circle with a hollow centre).
+	var filled: Dictionary = Art._ring_entry(1, 1, true)
+	var foffsets: PackedVector2Array = filled["offsets"]
+	Runner.T.eq(foffsets.size(), 5, "r=1 filled disc is a solid 5-pixel plus (centre + 4 neighbors)")
+	var fhave := {}
+	for o in foffsets:
+		fhave[Vector2i(int(o.x), int(o.y))] = true
+	Runner.T.ok(fhave.has(Vector2i.ZERO), "r=1 filled disc has its centre pixel")

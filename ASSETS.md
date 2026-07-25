@@ -16,7 +16,7 @@ Release status is tracked in [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.
 |---|---|---|---|
 | `assets/art/ui/` `hud/` `icons/` | 128 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
 | `assets/art/fx/` | 21 | Procedurally generated — `tools/gen_fx_cards.py` | Project-owned |
-| `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 85 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
+| `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 87 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | `assets/soldiers/` | 9 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | Bosses, player tank, desert flora (14 files) | 14 | Generative AI — fal.ai · Replicate · `nano-banana`. Pipeline: `tools/generate_desert_assets.py`, provenance: `assets/art/desert_assets_source.md` | Project-owned (verify each service's output-ownership terms) |
 | `assets/ui/intro/` | 2 | Generative AI (intro cinematic key art) | Project-owned |

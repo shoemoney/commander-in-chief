@@ -505,14 +505,77 @@ def o_flak_gun(p):
     p.keyline(0.018)
 
 
-def o_wall_sandbag(p, end: bool):
-    n = 3 if end else 6
-    for r in range(2):
-        for i in range(n):
-            x = (i + 0.5) / n
-            p.ell(x, 0.40 + r * 0.22, 0.5 / n * 0.92, 0.115,
-                  fill=(190, 166, 116) if r == 0 else (146, 124, 82))
+def _j(seed: int, i: int, k: int) -> float:
+    """Deterministic 0..1 jitter (Art.cell_hash's mixer). No `random` -- a re-run
+    must reproduce the committed PNG byte-for-byte."""
+    h = (seed * 374761393 + i * 668265263 + k * 2654435761) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((h ^ (h >> 16)) & 0xFFFF) / 65535.0
+
+
+def _rot_pt(cx, cy, dx, dy, tilt):
+    ct, st = math.cos(tilt), math.sin(tilt)
+    return (cx + dx * ct - dy * st, cy + dx * st + dy * ct)
+
+
+def _epoly(cx, cy, rx, ry, tilt, n=14):
+    return [_rot_pt(cx, cy, rx * math.cos(2 * math.pi * k / n),
+                     ry * math.sin(2 * math.pi * k / n), tilt) for k in range(n)]
+
+
+def _bag(p, cx, cy, hw, hh, tilt, base):
+    """One burlap sandbag, camera-overhead: dark contact shadow, mid body, a
+    crown lit to the NORTH (matches ROCK_TOP_LIGHT's overhead-light convention,
+    main.gd:6530), and a seam line -- a stamped oval has none of the three."""
+    dark = tuple(max(0, int(c * 0.60)) for c in base)
+    lit = tuple(min(255, int(c * 1.24)) for c in base)
+    p.poly(_epoly(cx, cy + hh * 0.14, hw * 1.03, hh * 0.94, tilt), dark)
+    p.poly(_epoly(cx, cy, hw, hh, tilt), base)
+    p.poly(_epoly(cx, cy - hh * 0.28, hw * 0.60, hh * 0.40, tilt), lit)
+    p.line([_rot_pt(cx, cy, -hw * 0.55, -hh * 0.08, tilt),
+            _rot_pt(cx, cy, 0.0, hh * 0.10, tilt),
+            _rot_pt(cx, cy, hw * 0.55, -hh * 0.08, tilt)], dark, hh * 0.09)
+
+
+def _sandbag_wall(p, n: int, seed: int, y_top: float, y_bot: float) -> None:
+    """Brick-staggered two-course sandbag run: a shaded back course (n-1 bags,
+    half-pitch offset) drawn first, a lit front course (n bags) on top. Every
+    bag gets its own hashed width/height/tilt/dy/shade off (seed, i) -- no two
+    bags in the run are identical, and the brick offset kills the ruled grid.
+    A hashed spoil-berm skirt along the bottom blends the run into the ground.
+    """
+    front_pitch = 1.0 / n
+    back_n = max(1, n - 1)
+    back_pitch = 1.0 / back_n
+    course_h = y_bot - y_top
+    for i in range(back_n):
+        x = (i + 0.5) * back_pitch
+        w = front_pitch * 0.5 * (0.80 + _j(seed, i, 1) * 0.22)
+        h = course_h * 0.48 * (0.86 + _j(seed, i, 2) * 0.30)
+        tilt = (_j(seed, i, 3) - 0.5) * 0.24
+        dy = (_j(seed, i, 4) - 0.5) * course_h * 0.14
+        shade = 0.80 * (0.93 + _j(seed, i, 5) * 0.15)
+        base = tuple(max(0, min(255, int(c * shade))) for c in (146, 124, 82))
+        _bag(p, x, y_top + dy, w, h, tilt, base)
+    for i in range(n):
+        x = (i + 0.5) * front_pitch
+        w = front_pitch * 0.5 * (0.80 + _j(seed, i, 6) * 0.22)
+        h = course_h * 0.36 * (0.86 + _j(seed, i, 7) * 0.30)
+        tilt = (_j(seed, i, 8) - 0.5) * 0.24
+        dy = (_j(seed, i, 9) - 0.5) * course_h * 0.4
+        shade = 0.93 + _j(seed, i, 10) * 0.15
+        base = tuple(max(0, min(255, int(c * shade))) for c in (190, 166, 116))
+        _bag(p, x, y_bot + dy, w, h, tilt, base)
+    for i in range(n + 1):
+        bx = (i + 0.3 + _j(seed, i, 11) * 0.4) / (n + 1)
+        by = y_bot + course_h * 0.14 + _j(seed, i, 12) * course_h * 0.06
+        br = front_pitch * (0.20 + _j(seed, i, 13) * 0.10)
+        p.ell(bx, by, br, br * 0.36, fill=(150, 128, 86))
     p.keyline(0.016)
+
+
+def o_wall_sandbag(p, end: bool, seed: int = 0):
+    _sandbag_wall(p, 2 if end else 4, seed, 0.40, 0.62)
 
 
 # --- terrain -----------------------------------------------------------------
@@ -672,11 +735,7 @@ def o_flag_marker(p):
 
 
 def o_sandbag(p):
-    for r in range(2):
-        for i in range(3):
-            p.ell((i + 0.5) / 3, 0.38 + r * 0.24, 0.155, 0.125,
-                  fill=(194, 170, 120) if r == 0 else (150, 128, 86))
-    p.keyline(0.020)
+    _sandbag_wall(p, 3, 10, 0.38, 0.62)
 
 
 def o_tree(p, big: bool):
@@ -847,7 +906,9 @@ OBJECTS = {
     "mil2/mg_stand": (160, o_mg_stand),
     "decor/mg_tripod": (160, o_mg_tripod),
     "decor/flak_gun": (220, o_flak_gun),
-    "p2/wall_sandbag": (240, lambda p: o_wall_sandbag(p, False)),
+    "p2/wall_sandbag": (240, lambda p: o_wall_sandbag(p, False, 0)),
+    "p2/wall_sandbag_b": (240, lambda p: o_wall_sandbag(p, False, 1)),
+    "p2/wall_sandbag_c": (240, lambda p: o_wall_sandbag(p, False, 2)),
     "p2/wall_sandbag_end": (120, lambda p: o_wall_sandbag(p, True)),
     "decor/crater": (160, o_crater),
     "decor/crater_field": (240, o_crater_field),

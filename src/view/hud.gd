@@ -728,9 +728,9 @@ func _draw() -> void:
 				# chip — the shells only ride the grenade pool as ammo, not as a cooldown.
 				if t["fire_cd"] > 0:
 					var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
-					draw_arc(fuel_c, ICON * 0.55,
+					Art.arc(self, fuel_c, ICON * 0.55,
 						0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-					draw_arc(fuel_c, ICON * 0.55,
+					Art.arc(self, fuel_c, ICON * 0.55,
 						-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 			# c4-fix: buff chips draw in ALL tank sub-states (burning / shell-overflow / normal), not
 			# just this normal else. The sim decrements pierce/spread/rend/smoke unconditionally while
@@ -1173,8 +1173,8 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			if not _measure:
 				# Dim full-circle track under the drain, so remaining time reads
 				# against a whole instead of a floating partial arc.
-				draw_arc(sc, STREAK_RING_R, 0, TAU, 24, Color(scol.r, scol.g, scol.b, 0.25), STREAK_RING_W)
-				draw_arc(sc, STREAK_RING_R, -PI / 2, -PI / 2 + TAU * sfrac, 24, rcol, STREAK_RING_W)
+				Art.arc(self, sc, STREAK_RING_R, 0, TAU, 24, Color(scol.r, scol.g, scol.b, 0.25), STREAK_RING_W)
+				Art.arc(self, sc, STREAK_RING_R, -PI / 2, -PI / 2 + TAU * sfrac, 24, rcol, STREAK_RING_W)
 			x += STREAK_RING_SLOT
 			# Next-tier pip: how close to the x5/x10/x20 bonus, since the
 			# ring alone only reads "streak alive", not "how close".
@@ -1511,8 +1511,22 @@ func _draw_caption() -> void:
 	# (radio-blue / dry-amber) so the strip stays readable over bright, busy gameplay (particles,
 	# explosions, terrain) instead of washing out. Art.text_center's own +1px drop-shadow (drawn
 	# per line below) is the glyph-level half of the contrast fix.
-	_emit_bg_rect(bg.grow(1.0), Color(col.r, col.g, col.b, 0.4 * a))
-	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.88 * a))
+	# Soft-edged scrim (fx_softspot's radial falloff) instead of a flat opaque
+	# box: the elliptical core still sits at full density where the glyphs are,
+	# but the strip no longer reads as a hard dark rectangle over bright terrain.
+	# The flat _emit_bg_rect call is KEPT (not removed) — captions are an
+	# accessibility feature, so the contrast floor under the glyphs doesn't get
+	# traded away, only softened at the edges by the layer drawn over it.
+	# MERGE NOTE: every alpha here stays multiplied by `a`. The AAA-polish branch
+	# introduced this soft scrim with FLAT alphas (0.5 / 0.9 / 0.45), which would have
+	# left the backing plate and keyline at full strength while the caption text itself
+	# faded out — a lingering dark bar under nothing. The role-tinted keyline is the
+	# other half of the pre-existing contrast fix and is kept as the bottom edge.
+	var soft := bg.grow_individual(26.0, 3.0, 26.0, 3.0)
+	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.5 * a))
+	draw_texture_rect(Art.tex("fx_softspot"), soft, false, Color(0.02, 0.03, 0.02, 0.9 * a))
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(soft.position.x, soft.end.y - 1.0, soft.size.x, 2.0),
+		false, Color(col.r, col.g, col.b, 0.45 * a))
 	for i in lines.size():
 		Art.text_center(self, lines[i], 320.0, y0 + float(i) * CAPTION_LINE_H, FONT_SIZE, Color(col.r, col.g, col.b, a))
 
@@ -2226,9 +2240,9 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		# reads distinctly from "input ignored".
 		if ammo == 0 and p["fire_cd"] > 0:
 			var bfrac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
-			draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				0, TAU, 16, Color(0.9, 0.6, 0.3, 0.18), 1.5)
-			draw_arc(Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(ammo_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 		# Segmented magazine bar next to the numeral — clip fill at a glance.
 		px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
@@ -2239,9 +2253,9 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		# as "wait a beat", not a dropped input (matches the bash ring).
 		if p["grenade_cd"] > 0:
 			var gfrac := clampf(float(p["grenade_cd"]) / float(SimWorld.GRENADE_COOLDOWN_TICKS), 0.0, 1.0)
-			draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-			draw_arc(Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 	if eq_shown >= 3:
 		# Dodge availability: the roll's long cooldown was only shown as a faint arc at the player's
@@ -2253,9 +2267,9 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		px = roll_x + ICON + 2.0
 		if p["roll_cd"] > 0:
 			var rfrac := clampf(float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS), 0.0, 1.0)
-			draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-			draw_arc(Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				-PI / 2, -PI / 2 + TAU * rfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 	# c2-01: any equipment unit that missed the edge (only reachable below the supported width)
 	# surfaces in the shared +N clip and the buff/status tail is skipped — nothing off-panel would
