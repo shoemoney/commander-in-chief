@@ -255,8 +255,19 @@ const SEED := 0xDEADBEEF
 ## on the old code -- but golden-inert HERE: the campaign torture carries frogmen for
 ## ~10.9k enemy-ticks and not one of them ever surfaces, so the touched lunge branch
 ## never executes; sappers and technicals are endless-only.
+## RE-RECORDED ONCE FOR THE COMBINED TREE (2026-07-25): three of the changes above
+## landed as separate branches, and two of them each re-recorded GOLDEN in isolation
+## against their own baseline. Neither set survives the merge — the real checksums of
+## the combined sim match only a fresh recording, so this is that recording. The
+## individual notes above still explain WHY each change moves the trajectory; this
+## line explains why the numbers match none of them.
 const GOLDEN: Array[int] = [
-const GOLDEN: Array[int] = [
+	506778608736561550,
+	7590183919185690526,
+	241001744564993750,
+	8011787666350042381,
+	9156448604151922468,
+	4756524505527291036,
 ]
 
 
