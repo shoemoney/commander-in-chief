@@ -523,3 +523,88 @@ func test_the_canvas_table_does_not_outlive_the_scale_rows() -> void:
 	for key in SPRITE_CANVAS:
 		Runner.T.ok(Art.SCALE.has(key),
 			"SPRITE_CANVAS still lists '%s', which no longer has an Art.SCALE row" % key)
+# --- 11. The GRADED number is the SIMULATED number ---
+
+func test_graded_kill_streak_is_the_sims_kill_streak() -> void:
+	## The view kept its own combo counter and the RANK grade read IT. Two ways it
+	## drifted from `sim.kill_streak`, both measured below:
+	##   * it counted every "kill" event, including the mg_nest kills the sim
+	##     deliberately excludes from the streak;
+	##   * its window advanced on PHYSICS FRAMES, which keep running through
+	##     hitstop and pause, while the sim's window advances on TICKS.
+	## So `_run_rank()` — which weights the streak at 5x to pick the letter the
+	## player is graded with, plus the ONE-MAN ARMY / IRON NERVES titles — graded
+	## the run on a number the simulation never agreed happened. The view counter
+	## survives as `_blip_streak` (blip pitch only, renamed so it can never again
+	## be mistaken for the authoritative one); the graded value reads the sim.
+	var sim := SimWorld.new(7, 1)
+	var kill_events := 0
+	for k in 4:
+		var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+		sim.enemies.append(e)
+		sim._kill_enemy(e)
+	# ...then a nest, which fires a kill EVENT but must not advance the streak.
+	var nest := {"x": 0, "y": 0, "alive": true, "elite": true, "kind": "mg_nest"}
+	sim.enemies.append(nest)
+	sim._kill_enemy(nest)
+	for ev in sim.events:
+		if ev["t"] == "kill":
+			kill_events += 1
+	Runner.T.eq(kill_events, 5, "5 kill events fired (the view's per-event counter reads 5)")
+	Runner.T.eq(sim.kill_streak, 4, "the SIM's streak is 4 — the nest is excluded")
+	Runner.T.ok(kill_events != sim.kill_streak,
+		"the two numbers provably differ, so which one the grade reads is load-bearing")
+	# The grade path must read the sim's number, and only the sim's number.
+	var view := _view_src()
+	Runner.T.ok(view.contains("_run_best_streak = maxi(_run_best_streak, sim.kill_streak)"),
+		"_track_bests feeds the graded streak straight from sim.kill_streak")
+	Runner.T.ok(not view.contains("maxi(_run_best_streak, _blip_streak)"),
+		"the graded streak is never fed from the view's audio-facing ramp")
+	Runner.T.ok(not view.contains("var _kill_streak"),
+		"the ambiguous `_kill_streak` name is gone — the audio ramp is `_blip_streak`")
+	var rank_body := view.substr(view.find("func _run_rank("))
+	rank_body = rank_body.substr(0, rank_body.find("\nfunc "))
+	Runner.T.ok(rank_body.contains("_run_best_streak") and not rank_body.contains("_blip_streak"),
+		"_run_rank() grades on _run_best_streak and never touches the audio ramp")
+	# ...and the milestone pop, which advertises the sim's +25/50/100% bonus, reads
+	# the same sim streak — on the ramp it claimed a bonus the sim had not awarded.
+	Runner.T.ok(view.contains("var sstreak: int = sim.kill_streak"),
+		"the streak-milestone FX reads the sim's streak, not the ramp")
+
+
+# --- 12. Two spend paths, one rate: the comment said "same", the code said otherwise ---
+
+func test_crate_and_wheel_credit_the_same_score() -> void:
+	## `_collect_pickups` credited `cost * 10` under a comment reading "Same score
+	## credit as the spend-wheel buy ... (the _try_buy invariant)", while `_try_buy`
+	## credited `cost * 6`. The comment was the lie, and the drift mattered twice
+	## over: walking to a crate paid 67% more score than radioing the IDENTICAL item
+	## in, and at 10x the crate was the one spend path at exact parity with the 10x
+	## the victory payout gives an UNSPENT chest — i.e. the score-neutral
+	## buy-everything-immediately that the 40% haircut in _try_buy exists to kill.
+	## Both now read SPEND_SCORE_MULT. Measured by spending, not read off constants.
+	var cost := SimWorld.SHOP_AMMO_COST
+	var a := SimWorld.new(0xC0FFEE, 1)
+	var pa: Dictionary = a.players[0]
+	a.war_chest = 5000
+	pa["mg_ammo"] = 0
+	a.pickups = [{"x": pa["x"], "y": pa["y"], "kind": 0, "cost": cost}]
+	var a_score: int = a.score
+	var a_chest: int = a.war_chest
+	a._collect_pickups(pa, 0)
+	var b := SimWorld.new(0xC0FFEE, 1)
+	var pb: Dictionary = b.players[0]
+	b.war_chest = 5000
+	pb["mg_ammo"] = 0
+	var b_score: int = b.score
+	var b_chest: int = b.war_chest
+	b._try_buy(pb, 0)
+	Runner.T.eq(a_chest - a.war_chest, cost, "the ground crate charged the chest")
+	Runner.T.eq(b_chest - b.war_chest, cost, "the wheel charged the same chest")
+	Runner.T.eq(a.score - a_score, b.score - b_score,
+		"the same item costs the same and scores the same however it was bought")
+	Runner.T.eq(a.score - a_score, cost * SimWorld.SPEND_SCORE_MULT,
+		"and both pay the single-sourced SPEND_SCORE_MULT rate")
+	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < 10,
+		"spending stays DISCOUNTED against the 10x an unspent chest converts at on victory — "
+		+ "at parity, buying everything on sight costs nothing and hoarding is never a choice")

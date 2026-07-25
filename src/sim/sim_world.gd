@@ -354,6 +354,11 @@ const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8]
 const CRATE_POOL_BASE: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST,
 	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST]
 const WIPE_SCORE_PCT := 25           # airstrike screen-clear kills score at a quarter rate (see _fire_mission)
+# ONE spend->score rate for EVERY way a coin leaves the chest (spend-wheel and priced
+# ground crates both). It used to be two literals, 6 in _try_buy and 10 in
+# _collect_pickups, each commented as matching the other. See _try_buy for why it is
+# a discount against the 10x the victory payout gives an UNSPENT chest.
+const SPEND_SCORE_MULT := 6
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
 const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
@@ -1551,9 +1556,15 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		if pk["kind"] == 2:
 			vest_buys += 1   # priced crates ride the same campaign creep (no loophole)
 		# Same score credit as the spend-wheel buy: a priced ground crate must not
-		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
+		# silently gain or lose score vs an identical wheel purchase (the _try_buy
+		# invariant). It said "same" and paid cost * 10 against the wheel's cost * 6
+		# — so the crate was the ONE spend path at exact parity with the victory
+		# conversion, i.e. the score-neutral "buy everything immediately" the 40%
+		# haircut in _try_buy was introduced to kill, plus a strict reason to walk
+		# to a crate rather than radio the identical item in. Pinned by
+		# test_view_honesty::test_crate_and_wheel_credit_the_same_score.
 		if cost > 0:
-			score += cost * 10
+			score += cost * SPEND_SCORE_MULT
 		# `full` rides the event so the view can stop paying the celebratory
 		# callout for a free no-op too. Events are checksum-excluded: golden-safe.
 		_apply_supply(p, pk["kind"])
@@ -1938,7 +1949,9 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	# a buy a real trade without punishing the run-saving purchase.
 	# Starting value 6x; test: a hoard run should out-score an all-buy run on the
 	# same seed by 10-25%. If the gap exceeds 40% (nobody ever buys), raise to 8.
-	score += cost * 6
+	# Single-sourced as SPEND_SCORE_MULT — priced ground crates hardcoded 10 here
+	# while claiming parity, so the crate quietly undid the haircut.
+	score += cost * SPEND_SCORE_MULT
 	# Wheel slot 4 is the sandbag: supply-kind 11 (pickup kinds 4-10 are the
 	# rare capsules — a priced crate can never carry 11, so no collision).
 	_apply_supply(p, 11 if kind == 4 else kind)
@@ -5231,7 +5244,14 @@ func _step_colossus() -> void:
 	# Phase 1+: turret spray. Phase 2+: mortar volleys. Phase 3: infantry drops
 	# (_spawn_enemy -> "rusher"; this comment said "sapper" and the HUD label
 	# copied it, naming an enemy the finale never fields).
-	colossus["spray_cd"] = colossus["spray_cd"] - 1
+	# CLAMPED AT 0. The spray is an AIMED shot, so concealment cancels it (the
+	# "concealment beats AIM, not AREA" rule the volley below is exempt from) —
+	# but the decrement ran anyway, so sustained smoke drove spray_cd unbounded
+	# negative. The view's barrel-tip warm-up glow is 1 - spray_cd/CD_TICKS, so a
+	# runaway negative grew an ever-brighter telegraph for a shot cancelled every
+	# tick. At 0 the telegraph tells the truth: the gun IS loaded and it fires the
+	# instant the lock returns — it just has nothing to aim at.
+	colossus["spray_cd"] = maxi(colossus["spray_cd"] - 1, 0)
 	if colossus["spray_cd"] <= 0 and not _concealed(target):   # can't aim into smoke (descent continues)
 		colossus["spray_cd"] = COLOSSUS_SPRAY_CD_TICKS
 		events.append({"t": "enemy_shot", "x": colossus["x"], "y": colossus["y"]})
