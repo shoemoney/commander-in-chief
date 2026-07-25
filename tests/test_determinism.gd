@@ -218,6 +218,15 @@ const SEED := 0xDEADBEEF
 ## pure placement, no new rng draw, no kind change, lane still >= HULL_CLEARANCE.
 ## All 6 campaign samples move; ENDLESS_GOLDEN VERIFIED UNCHANGED (the authoring
 ## is campaign-gated).
+## VERIFIED UNCHANGED (2026-07-25, economy inversion fix -- price/income parity): the
+## supply creep went flat-and-capped -> proportional-and-uncapped on a shared _econ_depth
+## axis, the campaign vest stopped bypassing that creep, the Clean Wave bonus now calls
+## _econ_scale(40) (VALUE-IDENTICAL to the `40 + (wave/3)*10` it replaced -- proven by
+## test_shop::test_clean_wave_bonus_rides_the_price_curve), and _try_buy/_collect_pickups
+## refuse to bill for a supply that delivers nothing. BOTH goldens hold byte-for-byte: the
+## torture never presses buy (a purchase needs progress the 60s script never reaches), the
+## endless torture wipes in wave 2 so no shop crate is ever priced or collected, and the
+## Clean Wave payout is arithmetically the same integer at every wave.
 const GOLDEN: Array[int] = [
 	8824309749638634364,
 	6749052236834509168,

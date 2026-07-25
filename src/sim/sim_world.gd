@@ -1392,6 +1392,8 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		var cost: int = pk.get("cost", 0)
 		if cost > 0 and war_chest < cost:
 			continue
+		if cost > 0 and _supply_full(p, pk["kind"]):
+			continue   # never bill the chest for a restock that delivers nothing
 		war_chest -= cost
 		if pk["kind"] == 2:
 			vest_buys += 1   # priced crates ride the same campaign creep (no loophole)
@@ -1399,10 +1401,11 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# silently lose score vs an identical wheel purchase (the _try_buy invariant).
 		if cost > 0:
 			score += cost * 10
-		# Claymore capsule grabbed at the 3-charge cap grants nothing (mini()
-		# eats it) — flag the event so the view can stop paying the celebratory
-		# callout for a no-op. Events are checksum-excluded: golden-safe.
-		var full: bool = pk["kind"] == 8 and p["claymores"] >= CLAYMORE_CAP
+		# A FREE capsule grabbed at the cap grants nothing (mini() eats it) —
+		# flag the event so the view can stop paying the celebratory callout for
+		# a no-op. Events are checksum-excluded: golden-safe. (Priced crates
+		# never get here: the guard above leaves them on the ground unbilled.)
+		var full: bool = _supply_full(p, pk["kind"])
 		_apply_supply(p, pk["kind"])
 		events.append({"t": "pickup", "x": pk["x"], "y": pk["y"],
 			"kind": pk["kind"], "cost": cost, "full": full})
@@ -1618,32 +1621,73 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			events.append({"t": "airstrike_called", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
 
 
-func _supply_cost(kind: int) -> int:
-	## Endless prices creep up every 3 waves so a fat late-game chest still faces
-	## a real spend decision (income scales with the wave, so the shop must too).
-	## Campaign is wave 0 → base price, unchanged.
-	if kind < 0 or kind >= SUPPLY_COSTS.size():
-		return 0
-	if kind == 2 and mode == "campaign":
-		# Per-purchase creep, campaign only (endless already wave-creeps):
-		# 60/75/90/105/120, capped after 4 buys. Starting values (+15, cap
-		# 120 — panel consensus cheap end); tune up if vests still subscribe.
-		return mini(SHOP_VEST_COST + vest_buys * 15, 120)
-	# Campaign is ALWAYS wave 0, so the `wave/3` creep below never fired there —
-	# every non-vest price was frozen for the whole 7-gate run while coin income
-	# kept climbing, and the wheel quietly stopped being a choice. Campaign's
-	# depth axis is `opened` (the gate count the spawner already ramps on), so
-	# creep on that instead. Starting value +10/gate (matches the endless step);
-	# test: end-of-sector chest should stay under ~3 affordable buys. Endless
-	# keeps its wave creep, now capped — prices used to outrun a difficulty curve
-	# that flatlines around wave 12, turning late endless into price starvation.
+func _econ_depth() -> int:
+	## The ONE depth axis every scaling price and payout reads: campaign counts
+	## gates opened, endless counts 3-wave steps. Prices and income must ride the
+	## same number or the economy inverts (see _supply_cost).
 	if mode == "campaign":
 		var gates_open := 0
 		for g in gates:
 			if g["open"]:
 				gates_open += 1
-		return SUPPLY_COSTS[kind] + gates_open * 10
-	return SUPPLY_COSTS[kind] + mini((wave / 3) * 10, 150)
+		return gates_open
+	return wave / 3
+
+
+func _econ_scale(base: int) -> int:
+	## +25% of base per depth step. PROPORTIONAL, not flat, and NOT capped —
+	## both of those broke the shop:
+	##   - Flat +10/step is regressive: it tripled the 30c ammo across a campaign
+	##     while the 100c airstrike moved 1.7x, so "what do I buy" collapsed to
+	##     "buy the expensive thing, it barely moved".
+	##   - The endless +150 ceiling capped the SINK while every SOURCE kept
+	##     climbing (a wave's kill income grows with WAVE_ENEMIES_PER_WAVE, the
+	##     Clean Wave bonus and the miniboss bounty ride the wave too). A full
+	##     restock was ~1 wave's income at wave 10 and under a THIRD of it by
+	##     wave 100 — buy-everything went from a trade to a formality, the exact
+	##     failure the 6x score haircut in _try_buy exists to prevent.
+	## 25%/step is the rate the Clean Wave bonus was already authored at
+	## (40 + depth*10 IS 40 scaled by 25%/step), so the two now provably track.
+	return base + base * _econ_depth() / 4
+
+
+func _supply_cost(kind: int) -> int:
+	## Prices creep with depth so a fat late chest still faces a real spend
+	## decision — income scales with depth, so the shop must scale with it too,
+	## at the same rate and with the same (absent) ceiling. Endless creeps every
+	## 3 waves; campaign creeps per gate opened (it is ALWAYS wave 0, so the wave
+	## term never fired there and every price was frozen for the whole 7-gate run).
+	## Test: end-of-sector chest should stay under ~3 affordable buys.
+	if kind < 0 or kind >= SUPPLY_COSTS.size():
+		return 0
+	var base: int = SUPPLY_COSTS[kind]
+	if kind == 2 and mode == "campaign":
+		# Per-purchase creep, campaign only (endless prices on the wave alone):
+		# 60/75/90/105/120, capped after 4 buys. This USED to return early, so
+		# the one item that grants an extra life was also the only item that
+		# never gate-crept — the cheapest thing on the endgame wheel. It now
+		# feeds the depth scale like everything else.
+		base = mini(SHOP_VEST_COST + vest_buys * 15, 120)
+	return _econ_scale(base)
+
+
+func _supply_full(p: Dictionary, kind: int) -> bool:
+	## True when this supply would deliver NOTHING to p (already at the cap /
+	## already wearing it). Shared by every path that hands out a supply so none
+	## of them can bill for a no-op: the wheel buy, priced ground crates, and the
+	## view's "don't play the celebratory callout" flag.
+	match kind:
+		0:
+			return p["mg_ammo"] >= MG_AMMO_MAX
+		1:
+			return p["grenade_ammo"] >= GRENADE_AMMO_MAX
+		2:
+			return p["vest"]
+		6:
+			return p["triple"]
+		8:
+			return p["claymores"] >= CLAYMORE_CAP
+	return false
 
 
 func _mint_token(x: int, y: int) -> void:
@@ -1697,6 +1741,12 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		# "NEED COINS" at a full field with 400 in the chest was a HUD lie.
 		events.append({"t": "deny", "x": p["x"], "y": p["y"],
 			"why": "cap" if player_bags >= SANDBAG_FIELD_CAP else "tank"})
+		return
+	if _supply_full(p, kind):
+		# Buying a vest you're already wearing, or ammo at the cap, used to
+		# charge the chest AND credit score for nothing delivered — the same
+		# silent no-op _collect_pickups denies. Deny loudly instead.
+		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "full"})
 		return
 	if war_chest < cost:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "coins"})
@@ -4318,9 +4368,11 @@ func _step_waves() -> void:
 		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
 		# this wave pays a bonus, so cautious and reckless play stop earning alike.
 		if deaths_this_wave == 0 and wave > 1:
-			# Bonus rides the same creep curve as _supply_cost, or price inflation
-			# quietly erodes it into a rounding error by deep waves.
-			war_chest += 40 + (wave / 3) * 10
+			# Bonus rides the same creep curve as _supply_cost — literally the
+			# same helper now, so price inflation can never erode it into a
+			# rounding error (nor outrun it). Value-identical to the old
+			# `40 + (wave/3)*10`; that expression IS 25%-of-base per depth step.
+			war_chest += _econ_scale(40)
 			score += 1500
 			events.append({"t": "wave_flawless", "x": 320 * F_ONE, "y": camera_top + 150 * F_ONE})
 		var shop_y: int = camera_top + 120 * F_ONE
