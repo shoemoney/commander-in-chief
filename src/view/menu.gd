@@ -271,7 +271,7 @@ const TITLE_HEAD_MARGIN := 2.0     # TITLE seats its column this far below the d
 # by eye (the exact drift this item kills): a record line now moves only by editing its FONT SIZE or the
 # shared pad, and the plates below it reflow with no overlap and no hand-copied y.
 # ---- drawn font sizes (the size passed to _center_text; the heights below derive from these) ----
-const TITLE_WORDMARK_FONT := 30
+const TITLE_WORDMARK_FONT := 32   # 4.000x on PixelOperator8's 8px em -- 30 (3.746x) uneven-quantized stems
 const TITLE_BYLINE_FONT := 8
 const TITLE_TAGLINE_FONT := 10     # the taller of the two lines the shared record plate must seat
 const TITLE_BEST_FONT := 9
@@ -354,6 +354,7 @@ const REBIND_TAB_GAP := 6.0        # gap between REBIND tab / device plates
 # lands in one place instead of per-screen literals in _draw). The INFO/DISP/SETUP
 # hubs share one title+subtitle rhythm; HALL/HOWTO share one content-title baseline.
 const HUB_HEADER_Y := 84.0         # INFO / DISP / SETUP header title baseline
+const HUB_HEADER_FONT := 24        # 3.000x on PixelOperator8's 8px em -- 22 (2.746x) uneven-quantized stems
 const HUB_SUBTITLE_Y := 104.0      # ...and their subtitle line
 const CONTENT_TITLE_Y := 38.0      # HALL / HOWTO content-screen title baseline
 const TAB_BASELINE_Y := 66.0       # HALL filter / HOWTO page tab-label text baseline (plate top y54)
@@ -363,6 +364,7 @@ const PAUSE_HEADER_Y := 78.0       # PAUSED title baseline
 const PAUSE_SUBTITLE_Y := 100.0    # PAUSE run-status subline
 const PAUSE_FOOTNOTE_Y := 114.0    # PAUSE RUN# footnote — the lowest header line first_row_top(PAUSE) clears
 const OPTS_TITLE_Y := 80.0         # OPTIONS title baseline
+const OPTS_TITLE_FONT := 16        # 2.000x on PixelOperator8's 8px em -- 18 (2.254x) uneven-quantized stems
 const OPTS_SUBLINE_Y := 94.0       # OPTIONS a11y-summary subline — the lowest header line first_row_top(OPTS) clears
 # Horizontal half-padding of the small dark plates behind TITLE's byline / tagline /
 # BEST / CAREER lines (a plate spans measured_text_w + 2x this).
@@ -3406,11 +3408,11 @@ func _draw() -> void:
 	elif mode == Mode.REBIND:
 		_draw_rebind_header()
 	elif mode == Mode.INFO:
-		_center_text("INFO", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("INFO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# The look-back screens: records, the field manual, and your last run.
 		_center_text("RECORDS · HOW TO PLAY · REPLAY", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	elif mode == Mode.DISP:
-		_center_text("DISPLAY", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("DISPLAY", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# c1-19: the subtitle NAMES the two controls while windowed, and while FULLSCREEN it EXPLAINS
 		# that WINDOW SCALE applies on return to windowed — so the row's deferred behavior is spelled
 		# out in words, matching the inline "(WINDOWED)" tag on the value label. The row itself stays
@@ -3420,26 +3422,26 @@ func _draw() -> void:
 		# audio-identity (judge follow-up): the AUDIO sub-screen header — same lone-subtitle hub
 		# style as DISPLAY above (roomy, non-compact clearance; mode_header_bottom's default falls
 		# through to HUB_SUBTITLE_Y for any mode not explicitly listed there).
-		_center_text("AUDIO", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("AUDIO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		_center_text("SFX & MUSIC VOLUME", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	elif mode == Mode.SETUP:
-		_center_text("SETUP", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("SETUP", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
 		# the OPTIONS and INFO screens.
 		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO  ·  MODES", HUB_SUBTITLE_Y, 8,
 			SUBTITLE_COL)
 	elif mode == Mode.MODES:
 		# authored-campaign-and-modes.
-		_center_text("MODES", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("MODES", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		_center_text("BOSS RUSH  ·  ARCADE  ·  CHAPTER SELECT", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	elif mode == Mode.CHAPTERS:
-		_center_text("CHAPTER SELECT", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("CHAPTER SELECT", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	elif mode == Mode.PERKS:
-		_center_text("VETERAN PERKS", HUB_HEADER_Y, 22, HEADER_COL)
+		_center_text("VETERAN PERKS", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		_center_text(_perk_subtitle_text(), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	else:
-		_center_text("PAUSED", PAUSE_HEADER_Y, 22, HEADER_COL)
+		_center_text("PAUSED", PAUSE_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# Pause doubles as a status check — the run so far.
 		if main.sim != null:
 			var s: SimWorld = main.sim
@@ -3550,7 +3552,7 @@ func _draw() -> void:
 				plate = DESTR_ARMED_PLATE_UNSEL if armed else DESTR_PLATE_UNSEL
 		elif disabled:
 			plate = DISABLED_PLATE   # c2-13: dim, so a locked row can't read as actionable even while focused
-		draw_texture_rect(Art.tex("ui_menu_button"), r, false, plate)
+		Art.menu_plate(self, r, plate)
 		if disabled:
 			# c2-13: extra scrim over the plate interior so the icon + label read muted too —
 			# the row is clearly "unavailable", not just a differently-tinted button.
@@ -3606,15 +3608,17 @@ func _draw() -> void:
 		# by live state) — rows without one just stay text.
 		var icon := _row_icon(mitems[k]["id"])
 		if icon != "":
-			# Icon SCALES WITH THE PLATE FLOOR: bh-3 keeps a 1px breath each side, clamped
-			# to [9,16]. c4-14: since compute_geometry now column-WRAPS an overflowing TITLE
-			# instead of crushing the pitch, bh never drops below TITLE_MIN_PLATE (22), so the
-			# icon lands at its full 16px art in every reachable state — the old 8px speck the
-			# 11-row crush produced is structurally gone (the 9px clamp floor is now just a
-			# backstop for any future sub-floor caller, not a state the real menu can hit).
-			var isz := clampf(bh - 3.0, 9.0, 16.0)
+			# ONE pixel grid: 16px icon (16:1 off the 256px master) on any plate tall enough
+			# to seat it, else 8px (32:1) -- never the old per-screen bh-3 scale drift, which
+			# was its own mixel tell. Threshold is 18.0, not 19.0: dirty OPTS (an unsaved
+			# setting splits BACK into SAVE + DISCARD, see _opts_dirty) pushes OPTS to 11
+			# rows -> bh == 18, and that state must still land on the 16px icon or every row
+			# icon halves the moment the player toggles anything. floorf((18-16)/2) == 1, so
+			# centering stays whole-pixel at the threshold. The 8px branch is now only a
+			# backstop for any hypothetical sub-18 caller, not a state the real menu can hit.
+			var isz := 16.0 if bh >= 18.0 else 8.0
 			draw_texture_rect(Art.tex(icon), Rect2(Vector2(r.position.x + 9.0,
-				r.position.y + (bh - isz) / 2.0), Vector2(isz, isz)), false,
+				floorf(r.position.y + (bh - isz) / 2.0)), Vector2(isz, isz)), false,
 				Color(1, 1, 1, 0.35 if disabled else (1.0 if selected else 0.7)))
 		if selected:
 			# Breathing selection glow that GLIDES between rows instead of teleporting
@@ -3626,7 +3630,7 @@ func _draw() -> void:
 			_sel_target = ty
 			if _sel_y < 0.0 or main._motion < 0.5:
 				_sel_y = ty
-			var gr := Rect2(Vector2(r.position.x, _sel_y), Vector2(r.size.x, bh))
+			var gr := Rect2(Vector2(r.position.x, floorf(_sel_y)), Vector2(r.size.x, bh))
 			var mp := 0.0 if main._motion < 0.5 else Art.pulse(0.2)
 			# Fade the glow while it's still catching up to the row — a lagging box
 			# at full alpha reads as misplaced; dimming it makes the glide read as motion.
@@ -3637,7 +3641,7 @@ func _draw() -> void:
 			# c2-13: no amber "actionable" glow on a locked row — the crisp focus ring
 			# (drawn below) still shows WHERE focus is without implying the row will act.
 			if not armed and not disabled:
-				draw_texture_rect(Art.tex("ui_menu_button_sel"), gr.grow(3.0 + mp * 1.5), false,
+				Art.focus_ring(self, gr.grow(roundf(3.0 + mp * 1.5)),
 					Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
 		var col := Color(1.0, 0.95, 0.75) if selected else Color(0.8, 0.84, 0.74)
 		if disabled:
@@ -4046,7 +4050,7 @@ func _draw_rebind_header() -> void:
 func _draw_back_button() -> void:
 	var r := _back_rect()
 	draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
-	draw_texture_rect(Art.tex("ui_menu_button_sel"), r.grow(3), false, Color(1.0, 0.9, 0.4, 0.95))
+	Art.menu_plate(self, r.grow(3), Color(1.0, 0.9, 0.4, 0.95))
 	draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)   # focus ring (only row here)
 	_center_text("BACK", r.position.y + 16.0, 11, Color(1.0, 0.95, 0.75))
 
@@ -5017,7 +5021,7 @@ func _draw_opts_header() -> void:
 	# before the player reaches the bottom of the list. Measured/drawn from the live title so the gear
 	# stays seated on the actual (possibly wider) title box.
 	var title := "OPTIONS *" if _opts_dirty else "OPTIONS"
-	var titlew := f.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	var titlew := f.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, OPTS_TITLE_FONT).x
 	var isz := 16.0
 	# c2-11: seat the gear on the title's CAP BOX, not the ascent-to-descent line. "OPTIONS"
 	# is all-caps sitting on the y80 baseline; for PixelOperator8 the caps rise the full
@@ -5029,7 +5033,7 @@ func _draw_opts_header() -> void:
 	var iy := cap_top + (cap_h - isz) / 2.0
 	var ix := (CENTER_X - titlew / 2.0) - 6.0 - isz
 	_emit_tex("mi_settings", Rect2(ix, iy, isz, isz), Color(1, 1, 1, 0.9))
-	_center_text(title, OPTS_TITLE_Y, 18, HEADER_COL)
+	_center_text(title, OPTS_TITLE_Y, OPTS_TITLE_FONT, HEADER_COL)
 	# After RESET DEFAULTS fires, the summary line briefly becomes a success banner;
 	# otherwise it's the single place to review live settings state — the DISPLAY mode
 	# (no on-screen toggle) and EVERY accessibility aid's explicit ON/OFF state.

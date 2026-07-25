@@ -53,8 +53,6 @@ SIZES = {
     "ui/cursor": (64, 64),
     "ui/dial_fuel": (600, 600),
     "ui/key_blank": (256, 256),
-    "ui/menu_button": (512, 512),
-    "ui/menu_button_sel": (512, 512),
     "ui/pad_b": (256, 256),
     "ui/pad_back": (256, 256),
     "ui/pad_x": (256, 256),
@@ -202,24 +200,6 @@ def key_blank(w, h):
     _rounded(d, [S * 0.06, S * 0.06, S * 0.94, S * 0.94], S * 0.17, fill=255)
     _rounded(d, [S * 0.13, S * 0.13, S * 0.87, S * 0.87], S * 0.12, fill=190)
     return _down(m, w, h, blur=0.4)
-
-
-def menu_button(w, h, selected: bool):
-    m, d = _mask(w, h)
-    S = w * SS
-    c = S / 2
-    d.polygon(_ngon(c, c, c * 0.94, 8, math.pi / 8), fill=255)
-    if selected:
-        base = _bevel(w, h, (232, 236, 228), (186, 190, 182), (128, 132, 126))
-    else:
-        base = _bevel(w, h, (176, 180, 172), (126, 131, 126), (72, 76, 72))
-    bd = ImageDraw.Draw(base)
-    bd.polygon(_ngon(c, c, c * 0.94, 8, math.pi / 8),
-               outline=AMBER if selected else STEEL_LO, width=max(2, int(S * 0.022)))
-    bd.polygon(_ngon(c, c, c * 0.80, 8, math.pi / 8),
-               outline=(238, 240, 232) if selected else (150, 154, 148),
-               width=max(1, int(S * 0.010)))
-    return _down(m, w, h, blur=0.35, rgb=base)
 
 
 def pad_face(w, h, letter: str, disc: tuple[int, int, int]):
@@ -564,10 +544,6 @@ def build(key: str, w: int, h: int) -> Image.Image:
     }
     if key in simple:
         return simple[key](w, h)
-    if key == "ui/menu_button":
-        return menu_button(w, h, False)
-    if key == "ui/menu_button_sel":
-        return menu_button(w, h, True)
     if key.startswith("ui/plate_metal_"):
         return plate_metal(w, h, key[-1])
     faces = {"ui/pad_b": ("B", (196, 66, 58)), "ui/pad_x": ("X", (62, 150, 198)),

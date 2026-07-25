@@ -5947,3 +5947,37 @@ func test_activate_perk_emits_three_distinct_notices() -> void:
 
 	m.free()
 	stub.free()
+
+
+# Menu-chrome mixel-tell fix: the squashed square button bitmaps are gone (plates draw as
+# primitives now, crisp at any plate height), row/icon geometry lands on whole pixels, and
+# the surviving display font sizes are whole multiples of PixelOperator8's 8px em.
+func test_menu_chrome_is_pixel_grid_exact() -> void:
+	Runner.T.ok(not Art.TEX.has("ui_menu_button") and not Art.TEX.has("ui_menu_button_sel"),
+		"the squashed square button bitmaps are gone -- plates draw as primitives")
+	for m in [Menu.Mode.TITLE, Menu.Mode.PAUSE, Menu.Mode.OPTS, Menu.Mode.SETUP, Menu.Mode.INFO]:
+		for n in range(4, 12):
+			var g := Menu.compute_geometry(m, n, Menu.title_head_bottom(true, true))
+			var bh: float = g["bh"]
+			var isz := 16.0 if bh >= 18.0 else 8.0
+			for k in n:
+				var r := Menu.row_rect(g, k)
+				for v in [r.position.x, r.position.y, r.size.x, r.size.y,
+						floorf(r.position.y + (bh - isz) / 2.0)]:
+					Runner.T.ok(is_equal_approx(v, floorf(v)),
+						"mode %d n=%d row %d draws on whole pixels (%f)" % [m, n, k, v])
+	for fs in [Menu.TITLE_WORDMARK_FONT, Menu.HUB_HEADER_FONT, Menu.OPTS_TITLE_FONT]:
+		Runner.T.eq(fs % 8, 0, "display font size %d is a whole multiple of PixelOperator8's 8px em" % fs)
+	# Pin the actual threshold, not just the expression that reproduces it: clean OPTS
+	# (n=10) sits at bh 20 -> 16px icons, matching the flagged screenshot. The moment a
+	# setting is staged, _opts_dirty splits BACK into SAVE + DISCARD (n=11) -> bh 18, and
+	# that row must STILL resolve to 16px -- if the threshold drifts back to 19.0, this
+	# is the assertion that catches every row icon halving to 8px mid-session.
+	var g_clean := Menu.compute_geometry(Menu.Mode.OPTS, 10, Menu.title_head_bottom(true, true))
+	Runner.T.eq(float(g_clean["bh"]), 20.0, "clean OPTS (n=10) is bh 20")
+	var g_dirty := Menu.compute_geometry(Menu.Mode.OPTS, 11, Menu.title_head_bottom(true, true))
+	Runner.T.eq(float(g_dirty["bh"]), 18.0, "dirty OPTS (n=11, SAVE+DISCARD split) is bh 18")
+	Runner.T.eq(16.0 if float(g_clean["bh"]) >= 18.0 else 8.0, 16.0,
+		"clean OPTS (n=10, bh 20) resolves to the 16px icon")
+	Runner.T.eq(16.0 if float(g_dirty["bh"]) >= 18.0 else 8.0, 16.0,
+		"dirty OPTS (n=11, bh 18) still resolves to the 16px icon -- not a 2x shrink")

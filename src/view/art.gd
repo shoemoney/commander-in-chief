@@ -111,8 +111,6 @@ const TEX := {
 	"ui_pad_y": preload(ART + "ui/pad_y.png"),
 	"ui_pad_b": preload(ART + "ui/pad_b.png"),
 	"ui_pad_back": preload(ART + "ui/pad_back.png"),
-	"ui_menu_button": preload(ART + "ui/menu_button.png"),
-	"ui_menu_button_sel": preload(ART + "ui/menu_button_sel.png"),
 	"ui_reticle": preload(ART + "ui/reticle.png"),
 	# Weapon-state reticle silhouettes (Apocalypse HUD) — pierce/spread stop being
 	# hue-only signals (protan-safe). Bracket_Sml is byte-identical to ui_reticle,
@@ -793,6 +791,49 @@ static func text_center(ci: CanvasItem, txt: String, cx: float, y: float, size: 
 	if max_w > 0.0:
 		w = minf(w, max_w)
 	text(ci, txt, Vector2(cx - w / 2.0, y), size, col, max_w, outline)
+
+
+# Measured off the retired menu_button.png so the primitive plate reproduces the
+# shipped value ramp: body 125/255, top rail 164/255, bottom rail 84/255.
+const PLATE_BODY := 0.49
+const PLATE_HI := 0.64
+const PLATE_LO := 0.33
+const PLATE_CHAMFER := 3.0
+
+static func _chamfer_fill(ci: CanvasItem, b: Rect2, ch: float, col: Color) -> void:
+	ci.draw_rect(Rect2(b.position.x, b.position.y + ch, b.size.x, b.size.y - 2.0 * ch), col)
+	ci.draw_rect(Rect2(b.position.x + ch, b.position.y, b.size.x - 2.0 * ch, ch), col)
+	ci.draw_rect(Rect2(b.position.x + ch, b.end.y - ch, b.size.x - 2.0 * ch, ch), col)
+
+
+## Pixel-exact menu button plate. Replaces the 512x512 `ui_menu_button` bitmap,
+## which draw_texture_rect squashed 3x-6.6x harder vertically than horizontally
+## (222 x 15..36 from a square source) — the mixel tell. Crisp at ANY plate height.
+static func menu_plate(ci: CanvasItem, r: Rect2, tint: Color) -> void:
+	var b := Rect2(r.position.round(), r.size.round())
+	var key := Color(tint.r * PLATE_HI, tint.g * PLATE_HI, tint.b * PLATE_HI, tint.a)
+	_chamfer_fill(ci, b, PLATE_CHAMFER, key)                      # 1px keyline silhouette
+	_chamfer_fill(ci, b.grow(-1.0), PLATE_CHAMFER - 1.0,
+		Color(tint.r * PLATE_BODY, tint.g * PLATE_BODY, tint.b * PLATE_BODY, tint.a))
+	ci.draw_rect(Rect2(b.position.x + PLATE_CHAMFER, b.end.y - 2.0,
+		b.size.x - 2.0 * PLATE_CHAMFER, 1.0),
+		Color(tint.r * PLATE_LO, tint.g * PLATE_LO, tint.b * PLATE_LO, tint.a))
+
+
+## Hollow chamfered focus ring — the selection/BACK amber, drawn as whole-pixel
+## rects (incl. a 1px-per-step corner staircase) so it can never resample.
+static func focus_ring(ci: CanvasItem, r: Rect2, col: Color, thick := 1.0) -> void:
+	var b := Rect2(r.position.round(), r.size.round())
+	var ch := PLATE_CHAMFER
+	ci.draw_rect(Rect2(b.position.x + ch, b.position.y, b.size.x - 2.0 * ch, thick), col)
+	ci.draw_rect(Rect2(b.position.x + ch, b.end.y - thick, b.size.x - 2.0 * ch, thick), col)
+	ci.draw_rect(Rect2(b.position.x, b.position.y + ch, thick, b.size.y - 2.0 * ch), col)
+	ci.draw_rect(Rect2(b.end.x - thick, b.position.y + ch, thick, b.size.y - 2.0 * ch), col)
+	for i in int(ch):
+		ci.draw_rect(Rect2(b.position.x + ch - 1.0 - i, b.position.y + i, thick, thick), col)
+		ci.draw_rect(Rect2(b.end.x - ch + i, b.position.y + i, thick, thick), col)
+		ci.draw_rect(Rect2(b.position.x + ch - 1.0 - i, b.end.y - 1.0 - i, thick, thick), col)
+		ci.draw_rect(Rect2(b.end.x - ch + i, b.end.y - 1.0 - i, thick, thick), col)
 
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1) -> void:
