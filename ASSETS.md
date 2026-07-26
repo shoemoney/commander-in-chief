@@ -41,7 +41,8 @@ non-redistributable. All of it has been replaced — but it survives in git hist
 | Path | Files | Source | Status |
 |---|---|---|---|
 | `assets/vo/cmd/` | 56 mp3 | speech synthesis TTS — commander barks + intro narration | ✅ cleared with speech synthesis |
-| `assets/audio/{enemy_death,enemy_spawn,ya_chants}/` | 118 mp3 | speech synthesis TTS, stock voices (see each folder's `README.md`) | ✅ cleared with speech synthesis |
+| `assets/audio/{enemy_death,enemy_spawn}/` | 88 mp3 | speech synthesis TTS, stock voices (see each folder's `README.md`) | ✅ cleared with speech synthesis |
+| `assets/audio/ya_chants/` | 30 mp3 | The **audition reel** the death bank was cast from — 15 voices, `multilingual-v2`, no delivery direction. `enemy_death/` re-cut the 6 approved voices in `synth-v3` with agony tags, so these are source material, not spare content. `.gdignore`d: kept for provenance, **excluded from the build** | ✅ cleared with speech synthesis |
 
 The open question on these 174 files was whether speech synthesis' terms permit
 **redistributing** the output onward — an MIT/CC0 grant sublicenses it to

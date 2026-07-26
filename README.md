@@ -312,7 +312,6 @@ src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketc
 tests/               Headless runner + 33 suites (SUITE=<name> filter, golden checksums)
 tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_assets.gd (CI gates)
                      screenshots.gd · smoke.gd · validate_replay.gd · purge_history.sh
-                     bake_sprites*.gd — LEGACY: needs the legacy art source project, nothing ships from it
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
 
