@@ -3772,8 +3772,9 @@ func _in_fork_wire(x: int, y: int) -> bool:
 				or (y >= g["y"] + 210 * F_ONE and y <= g["y"] + 230 * F_ONE) \
 				or (y >= g["y"] + 330 * F_ONE and y <= g["y"] + 350 * F_ONE) \
 				or (y >= g["y"] + 450 * F_ONE and y <= g["y"] + 470 * F_ONE):
-			if (fx3 == 260 and x < fx3 * F_ONE - 44 * F_ONE) \
-					or (fx3 == 380 and x > fx3 * F_ONE + 44 * F_ONE):
+			var cache_left := fork_cache_is_left(fx3)
+			if (cache_left and x < fx3 * F_ONE - 44 * F_ONE) \
+					or (not cache_left and x > fx3 * F_ONE + 44 * F_ONE):
 				return true
 	return false
 
@@ -3870,6 +3871,48 @@ func _in_fork_divider(x: int, y: int, gate_y: int, fork_x: int) -> bool:
 	## started-inside escape rule, so the three can never disagree.
 	return y >= gate_y + 40 * F_ONE and y <= gate_y + 620 * F_ONE \
 		and absi(x - fork_x * F_ONE) < 44 * F_ONE
+
+
+static func fork_cache_is_left(fork_x: int) -> bool:
+	## The CACHE lane is the NARROW side of the wreck island: left at gate 2
+	## (fork_x 260), right at gate 4 (fork_x 380, WORLD_LEFT 16 + WORLD_RIGHT
+	## 624 = 640, and 640-260=380 — gate 4 mirrors the island). THE predicate —
+	## the wire zone, every fork content beat (_fork_lane_x), and main.gd's
+	## signposts all read this, so no copy can name the wrong lane. Raw px
+	## (fork_x is stored unscaled on gates[]), not fixed-point.
+	return fork_x < 320
+
+
+const FORK_BEAT_CLEAR := 8   # extra px past the divider face a fork beat's x must clear
+
+static func _mirror_fork_x(gate_n: int, x_at_gate_2: int) -> int:
+	## Fork beats are authored against gate 2's island at x=260. Gate 4's island
+	## MIRRORS to x=380 (640 - 260), so a beat x that isn't also mirrored lands on
+	## the WRONG SIDE of gate 4's divider — the class of bug this fixes: 108 beats
+	## authored only against gate 2's geometry landed in the wrong lane at gate 4.
+	return (640 - x_at_gate_2) if gate_n == 4 else x_at_gate_2
+
+
+func _clear_fork_divider_x(gate_n: int, x: int) -> int:
+	## Pushes an ABSOLUTE (already-mirrored, or never-needed-mirroring) x off the
+	## impassable divider band — mirroring a legal gate-2 x can drop it inside gate
+	## 4's island, and some beats (the deep cache mines) sit close enough to their
+	## OWN gate's divider to need this even without ever being mirrored.
+	## ponytail: clamps to the band edge rather than reflecting a colliding x across
+	## the island — a small pile at the lane mouth reads as a guarded entrance, and
+	## it's one branch instead of a second mirrored geometry.
+	var fx: int = 260 if gate_n == 2 else 380
+	var clear: int = 44 + FORK_BEAT_CLEAR
+	var out := x
+	if absi(out - fx) < clear:
+		out = fx + (clear if out >= fx else -clear)
+	return clampi(out, 24, 616)
+
+
+func _fork_lane_x(gate_n: int, x_at_gate_2: int) -> int:
+	## Mirror THEN clamp — the one-stop call for a beat authored purely in gate-2
+	## space (the common case: the free crate, guard mines, gauntlet elites).
+	return _clear_fork_divider_x(gate_n, _mirror_fork_x(gate_n, x_at_gate_2))
 
 
 func _in_mud(_x: int, y: int) -> bool:
@@ -4263,23 +4306,38 @@ func _step_camera() -> void:
 				# threat), else HONEST killbox. The sandbag LOOK never changes;
 				# only the defenders do — reading past the dressing is the skill.
 				var is_bluff: bool = _mix(_gate_counter, _world_seed) % 4 == 2
-				var fcx: int = (90 + rng.range_i(0, 120)) * F_ONE
+				# fork-gate-bunker: every beat below was authored as an absolute gate-2
+				# x and never mirrored for gate 4's island (which sits at x=380, not
+				# 260) — _fork_lane_x mirrors (gate 4 only) THEN clears the divider band,
+				# so gate 4 now gets the same lane assignment gate 2 does instead of a
+				# reward that streams into the wrong lane or inside the wreck island.
+				var fcx: int = _fork_lane_x(_gate_counter, 90 + rng.range_i(0, 120)) * F_ONE
 				var fcy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 				pickups.append({"x": fcx, "y": fcy, "kind": 1 + rng.range_i(0, 1), "cost": 0})
 				for m in 3:
-					var fmx: int = (70 + rng.range_i(0, 180)) * F_ONE
+					# Mirror first (pure reflection, preserves the crate's relative
+					# distance below); the divider-clearance clamp runs LAST, after the
+					# on-crate nudge, so the nudge itself can't land back in the island.
+					var fmx0: int = _mirror_fork_x(_gate_counter, 70 + rng.range_i(0, 180))
 					var fmy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 					# A mine sitting ON the free crate priced the "free" cache at
 					# 1 HP (re-review, ~9%/fork) — nudge it clear deterministically.
-					if absi(fmx - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
-						fmx += 48 * F_ONE
+					# Compare each side's CLAMPED resting x, not the raw mirrored fmx0:
+					# fcx is already mirror+clamped, and an unclamped mine can
+					# independently clamp onto the SAME divider edge as the crate even
+					# when their raw values differ by >=28px (measured: gate 4 mine raw
+					# 390 -> 432, crate raw 430 -> 432 — the pre-clamp gap hid the
+					# post-clamp collision and the nudge never fired).
+					if absi(_clear_fork_divider_x(_gate_counter, fmx0) * F_ONE - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
+						fmx0 += 48
+					var fmx: int = _clear_fork_divider_x(_gate_counter, fmx0) * F_ONE
 					mines.append({"x": fmx, "y": fmy, "armed": true})
 				# c3 4v: on a BLUFF seed the gauntlet's defenders never spawn — the
 				# lane LOOKS the same (sandbags below still stream) but is empty.
 				# The rng draws stay unconditional so the (torture-inert) fork
 				# stream is byte-identical seed-to-seed; only the spawns are gated.
 				for s in 2:
-					var fex: int = (360 + rng.range_i(0, 160)) * F_ONE
+					var fex: int = _fork_lane_x(_gate_counter, 360 + rng.range_i(0, 160)) * F_ONE
 					var fey: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 					if is_bluff:
 						continue
@@ -4317,7 +4375,12 @@ func _step_camera() -> void:
 				# clean so the choice reads) and route through the same bunker
 				# exclusion as the main streams.
 				for dm in 2:
-					var cmx: int = (cache_x0 + (fmix >> (dm * 4)) % 150) * F_ONE
+					# cache_x0 is already the correct side per-gate (70 left @ gate 2,
+					# 400 right @ gate 4) — no mirror needed, but its +0..149 spread runs
+					# right up against gate 4's divider face (400+149=549 clears, but the
+					# low end at 400 sits inside the 336..424 band), so it still needs
+					# the clearance clamp.
+					var cmx: int = _clear_fork_divider_x(_gate_counter, cache_x0 + (fmix >> (dm * 4)) % 150) * F_ONE
 					var cmy: int = _next_gate_y + (500 + dm * 80) * F_ONE
 					if not _near_stream_bunker(cmx, cmy):
 						mines.append({"x": cmx, "y": cmy, "armed": true})

@@ -1719,6 +1719,157 @@ func _stream_fork(seed: int) -> SimWorld:
 	return sim
 
 
+func _stream_fork_at(seed: int, gate_n: int) -> SimWorld:
+	# Generalises _stream_fork to either fork gate: _gate_counter is only an arena/
+	# fork-x LOOKUP key (ARENAS.get(_gate_counter,...), the gate-2-vs-4 mirror decision)
+	# — the spawner places the gate at whatever _next_gate_y already is, so setting
+	# _gate_counter = gate_n - 1 makes the very next spawn look up gate_n's content.
+	# _next_gate_y is ALSO moved to gate_n's REAL segment slot (-gate_n * GATE_SPACING,
+	# what actual progression would leave it at) instead of a fresh sim's default (the
+	# map's very start, y~-1000): that default slot overlaps the map-opening tutorial
+	# grenade pickup at (SCREEN_CX, -480), unrelated to any fork, which a broad pickup
+	# scan miscounts as a stray "reward" in whichever lane it falls in. An ARBITRARY far
+	# y (tried first) is just as wrong the other way — segment-keyed content (ruins/
+	# trench/etc, keyed off absi(y)/GATE_SPACING) then activates at a segment gate_n
+	# would never actually reach, seeding unrelated mines inside the divider band that
+	# have nothing to do with the fork mirror bug. Gate_n's OWN real segment avoids both.
+	var sim := SimWorld.new(seed, 1)
+	sim._gate_counter = gate_n - 1
+	sim._next_gate_y = -gate_n * SimWorld.GATE_SPACING
+	sim.camera_top = sim._next_gate_y + 2 * SimWorld.VIEW_H - SimWorld.F_ONE
+	sim.step([_idle()])
+	return sim
+
+
+# fork-gate-bunker: fork beats (free crate, guard mines, gauntlet elites) were authored
+# as absolute gate-2 x's and never mirrored for gate 4's island (which sits at the
+# MIRRORED x=380, not x=260) — so at gate 4 every one of these beats streams on the
+# wrong side of the divider from the one main.gd's signpost + the sim's own wire zone
+# call CACHE. Measured on HEAD: gate 4's real CACHE lane (fork_cache_is_left(380) ==
+# false, i.e. the RIGHT side) holds ZERO free-tier pickups in 40/40 seeds. Pins the
+# INVARIANT over the whole beat set, not one x — any future beat authored against a
+# bare gate-2 coordinate without going through _fork_lane_x fails this at BOTH gates.
+func test_every_fork_lane_owns_a_reward() -> void:
+	var f := SimWorld.F_ONE
+	for gate_n in SimWorld.FORK_GATES:
+		var cache_rewards := 0
+		var bounty_rewards := 0
+		var cache_mines := 0
+		for sd in range(1, 41):
+			var sim := _stream_fork_at(sd, gate_n)
+			var gate_y := 0
+			var fx := 0
+			for g in sim.gates:
+				if g.get("fork_x", 0) != 0:
+					gate_y = g["y"]
+					fx = g["fork_x"]
+					break
+			Runner.T.ok(fx != 0, "gate %d seed %d: a fork gate streamed" % [gate_n, sd])
+			var cache_left: bool = SimWorld.fork_cache_is_left(fx)
+			var band_lo: int = gate_y + 40 * f
+			var band_hi: int = gate_y + 700 * f
+			for pk in sim.pickups:
+				if pk["y"] < band_lo or pk["y"] > band_hi or int(pk.get("cost", 0)) != 0:
+					continue
+				var is_left: bool = pk["x"] / f < fx
+				if is_left == cache_left:
+					cache_rewards += 1
+				else:
+					bounty_rewards += 1
+			for m in sim.mines:
+				if m["y"] < band_lo or m["y"] > band_hi:
+					continue
+				var is_left: bool = m["x"] / f < fx
+				if is_left == cache_left:
+					cache_mines += 1
+		Runner.T.ok(cache_rewards >= 40, "gate %d: the CACHE lane holds >= 1 free reward per fork across 40 seeds (got %d)" % [gate_n, cache_rewards])
+		Runner.T.ok(absi(cache_rewards - bounty_rewards) <= 2,
+			"gate %d: cache vs bounty reward counts stay close (cache %d, bounty %d)" % [gate_n, cache_rewards, bounty_rewards])
+		Runner.T.ok(cache_mines >= 40, "gate %d: the cache lane still costs something (>= 1 mine per fork, got %d)" % [gate_n, cache_mines])
+
+
+# fork-gate-bunker: a LIVE-sim scan for "nothing sealed in the island" (walking
+# sim.mines/pickups/enemies broadly, as the first draft of this test did) is
+# contaminated by systems that have NOTHING to do with the fork mechanic and were
+# never in scope here: the ambient landmine stream (_next_mine_y, x in a
+# gate-agnostic 150..490 spread) and river/frogman placement both coincidentally
+# land inside a fork's divider band on most seeds, regardless of any fix — measured
+# directly (tools inspection, 2026-07-26): the two "sealed" entities surviving
+# after the mirror+clamp fix were a plain ambient-minefield mine and a frogman, at
+# offsets the fork block never places anything at. A single big camera jump (what
+# _stream_fork_at does, and what a real playthrough never does) also skips the
+# normal off-camera SWEEP that culls that ambient content in a real run, inflating
+# the collision odds further. So instead of scanning live state, prove the GUARANTEE
+# directly against the pure helpers for the exact input range every fork beat call
+# site actually draws from — exhaustive, and untouched by anything else the sim streams.
+func test_fork_lane_x_clears_the_divider_for_every_possible_beat_draw() -> void:
+	var sim := SimWorld.new(1, 1)   # instance needed only for the non-static _clear_fork_divider_x/_fork_lane_x calls
+	# [lo, count] pairs matching rng.range_i(0, count) at each fork beat call site
+	# (fcx, fmx, fex) -- these route through the mirror+clamp _fork_lane_x.
+	var mirrored_ranges := [[90, 120], [70, 180], [360, 160]]
+	# cache_x0's spread (already the correct side per gate -- only needs the clamp,
+	# not the mirror) -- checked directly against _clear_fork_divider_x per gate's
+	# own cache_x0, matching the real call site.
+	for gate_n in SimWorld.FORK_GATES:
+		var fx: int = 260 if gate_n == 2 else 380
+		for rng_pair in mirrored_ranges:
+			for raw in range(rng_pair[0], rng_pair[0] + rng_pair[1] + 1):
+				var x: int = sim._fork_lane_x(gate_n, raw)
+				Runner.T.ok(absi(x - fx) >= 44, "gate %d: _fork_lane_x(%d) = %d clears the %d-wide divider face at %d" % [gate_n, raw, x, 44, fx])
+		var cache_x0: int = 70 if gate_n == 2 else 400
+		for raw in range(cache_x0, cache_x0 + 150):
+			var x: int = sim._clear_fork_divider_x(gate_n, raw)
+			Runner.T.ok(absi(x - fx) >= 44, "gate %d: _clear_fork_divider_x(%d) = %d clears the divider face at %d" % [gate_n, raw, x, fx])
+	# The on-crate mine nudge (+48 raw px, AFTER the mirror, BEFORE the final clamp)
+	# is the one place a mirrored value gets perturbed post-mirror -- re-derive the
+	# real per-gate mirrored range and confirm the final clamp still holds after the
+	# nudge, for every possible draw.
+	for gate_n in SimWorld.FORK_GATES:
+		var fx: int = 260 if gate_n == 2 else 380
+		for raw in range(70, 70 + 180 + 1):
+			var mirrored: int = sim._mirror_fork_x(gate_n, raw)
+			var nudged: int = mirrored + 48
+			var x: int = sim._clear_fork_divider_x(gate_n, nudged)
+			Runner.T.ok(absi(x - fx) >= 44, "gate %d: a nudged mine at %d clamps to %d, still clearing the divider" % [gate_n, nudged, x])
+	# 4v review: the BOUNTY-side beats (gauntlet sandbags, deep elite, vault reward +
+	# ring, bait sandbags/ambush/mines/event -- sim_world.gd ~4354-4438) never route
+	# through _clear_fork_divider_x at all; they clear the divider today purely
+	# because bounty_x0 sits far from the divider face at both gates (measured: gate
+	# 2 spans x 400..555 against the divider band 216..304, gate 4 spans x 60..235
+	# against 336..424). Nothing pinned that arithmetic, so a future bounty_x0 tweak
+	# could silently reintroduce the sealed-in-island bug this whole fix exists to
+	# close. Pin every real call-site offset against bounty_x0, for both gates,
+	# exhaustively over each beat's draw range -- same style as the mirrored-range
+	# scan above, no sim change needed since the class currently holds by margin.
+	var bounty_offset_ranges := [
+		[40, 4, 45],    # gauntlet sandbags (fbg in 0..3): bounty_x0 + 40 + fbg*45
+		[40, 120, 1],   # deep elite: bounty_x0 + 40 + (fmix>>8)%120
+		[40, 2, 45],    # bait sandbags (bg2 in 0..1): bounty_x0 + 40 + bg2*45
+		[30, 2, 60],    # bait ambush (amb in 0..1): bounty_x0 + 30 + amb*60
+		[20, 3, 40],    # bait mines (bm in 0..2): bounty_x0 + 20 + bm*40
+	]
+	for gate_n in SimWorld.FORK_GATES:
+		var fx: int = 260 if gate_n == 2 else 380
+		var bounty_x0: int = 380 if gate_n == 2 else 60
+		for r in bounty_offset_ranges:
+			for i in r[1]:
+				var bx: int = bounty_x0 + r[0] + i * r[2]
+				Runner.T.ok(absi(bx - fx) >= 44,
+					"gate %d: bounty beat at bounty_x0+%d clears the divider face at %d (got x=%d)" % [gate_n, r[0] + i * r[2], fx, bx])
+		# vault reward anchor (bounty_x0+60) plus its 3-mine ring (vmo) and 2 framing
+		# sandbags (vbo) -- the only bounty beats offset from a fixed point rather
+		# than a swept rng range.
+		Runner.T.ok(absi(bounty_x0 + 60 - fx) >= 44, "gate %d: vault/offense reward anchor bounty_x0+60 clears the divider" % gate_n)
+		for vmo in [-40, 0, 40]:
+			var vmx: int = bounty_x0 + 60 + vmo
+			Runner.T.ok(absi(vmx - fx) >= 44, "gate %d: vault mine at bounty_x0+60%+d clears the divider (got x=%d)" % [gate_n, vmo, vmx])
+		for vbo in [-56, 56]:
+			var vbx: int = bounty_x0 + 60 + vbo
+			Runner.T.ok(absi(vbx - fx) >= 44, "gate %d: vault sandbag at bounty_x0+60%+d clears the divider (got x=%d)" % [gate_n, vbo, vbx])
+		# bait event anchor (bounty_x0+80) -- a single point, no rng spread.
+		Runner.T.ok(absi(bounty_x0 + 80 - fx) >= 44, "gate %d: bait event anchor bounty_x0+80 clears the divider" % gate_n)
+
+
 func test_c2_fork_commitment_depth() -> void:
 	# c2 2v: the fork island now spans a real ~1.7-screen COMMITMENT (+40..+620),
 	# so you can't sidestep the lane you picked — only ride it north.

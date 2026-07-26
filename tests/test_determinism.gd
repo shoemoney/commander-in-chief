@@ -463,13 +463,25 @@ const SEED := 0xDEADBEEF
 ## a gate-2 construction at tick 1309 can first reach the sample at tick 1800, which is
 ## sample index 2 -- and samples 2,3,4,5 are exactly the four that moved, with 0 and 1
 ## byte-identical. The delta is fully accounted for; nothing else in the sim was touched.
+## 2026-07-26 -- FORK-GATE-BUNKER: campaign GOLDEN RE-RECORDED AGAIN (samples 2-5; 0 and 1
+## byte-identical, same reasoning as the entry above -- gate 4 is still torture-inert, gate 2
+## still first reaches a sample at index 2). This is the SAME class the entry above fixed,
+## finishing the other 97% of the set: the entry above only fixed the 3 AUTHORED ARENAS
+## coordinates that predated the fork wreck-island; it left the STREAMED fork beats (the free
+## crate, guard mines, gauntlet elites, deep cache mines -- all rng-drawn, gate 2 AND gate 4)
+## still authored as bare gate-2 x's, unmirrored for gate 4 and unclamped off the divider at
+## either gate. `_fork_lane_x`/`_clear_fork_divider_x` now mirror (gate 4 only) and clamp
+## every one of those beats. Gate 4 is torture-inert so its half is golden-invisible; gate 2's
+## beats DO stream in the torture window, and the clamp nudges a few of them off the divider
+## face by a handful of px, moving samples 2-5 exactly like last time. ENDLESS_GOLDEN VERIFIED
+## UNCHANGED (endless streams no gate arenas, fork or otherwise).
 const GOLDEN: Array[int] = [
 	1137374205060789435,
 	8552575976495711450,
-	5754048499518112575,
-	4824291660626149689,
-	6005489445420184346,
-	959187230877754963,
+	1787114763677303615,
+	2922900905325379897,
+	5421628544716761125,
+	2597296559667926356,
 ]
 
 
