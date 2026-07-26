@@ -387,6 +387,18 @@ func perk_def(id: String) -> Dictionary:
 # endless-meta-retention: tiers already owned for a perk id (0 = not owned yet).
 func perk_level(id: String) -> int:
 	return int(_perk_levels.get(id, 0))
+
+
+# endless-meta-retention: true once every perk sits at its top tier. The whole
+# sink is 295 VP (40 + 30/45/60 + 50/70) against `vet_points += sim.wave` per
+# finished Endless run, so a player reaching the high teens empties the tree in
+# ~20 runs and every run after that banks a currency with nothing to buy. The
+# debrief kept celebrating the gain anyway; these two sites ask this first.
+func perks_maxed() -> bool:
+	for pd in PERK_DEFS:
+		if perk_level(pd["id"]) < (pd["cost"] as Array).size():
+			return false
+	return true
 # War Chest spend-wheel (hold Q / pad BACK, flick a direction, release to buy).
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 var _wheel_aim := [Vector2.ZERO, Vector2.ZERO]   # aim latched while the wheel is open (sector flicks must not whip the sim aim)
@@ -4695,7 +4707,10 @@ func _track_bests() -> void:
 			if sim.mode == "endless" and _run_vp_gain > 0:
 				# _run_vp_gain is what the debrief/victory card reads too (see _draw below) --
 				# not just this transient banner, so the gain survives past the banner's decay.
-				show_banner("BANKED +%d VP" % _run_vp_gain, Art.safe(Color(0.6, 0.9, 0.55)))
+				# Once perks_maxed() the gain buys nothing, so shouting "+N VP" is a reward cue
+				# for a currency with no sink -- state the real end-state instead.
+				show_banner("ALL PERKS MASTERED" if perks_maxed()
+					else "BANKED +%d VP" % _run_vp_gain, Art.safe(Color(0.6, 0.9, 0.55)))
 			if not _replay_saved and _recorder != null:
 				# Stringifying a whole run's input log is the biggest one-frame
 				# stall in the view — push it to a worker so the debrief card
@@ -11008,8 +11023,13 @@ func _draw_banners(top_msg: String) -> void:
 			# endless-meta-retention: the BANKED banner decays in ~2s and is gone long
 			# before the player leaves this card -- state the total + this run's gain
 			# here too, so the currency's advance is visible before REDEPLOY/TITLE.
-			rows.append({"text": ("%d VP BANKED  (+%d)" % [vet_points, _run_vp_gain]) if _run_vp_gain > 0
-				else "%d VP BANKED" % vet_points, "color": Art.safe(Color(0.7, 0.95, 0.6)),
+			# Same honesty gate as the BANKED banner above: with the tree emptied the
+			# (+N) is still TRUE, but reading it as progress is not -- the row says so.
+			var vp_row: String = "%d VP BANKED  (+%d)" % [vet_points, _run_vp_gain] if _run_vp_gain > 0 \
+				else "%d VP BANKED" % vet_points
+			if perks_maxed():
+				vp_row = "%d VP BANKED  —  ALL PERKS MASTERED" % vet_points
+			rows.append({"text": vp_row, "color": Art.safe(Color(0.7, 0.95, 0.6)),
 				"icon": "mi_trophy", "icon_size": 14.0})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)
