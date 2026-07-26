@@ -1059,13 +1059,25 @@ func _step_players(inputs: Array) -> void:
 			# choice is a real COMMITMENT — you can't switch mid-fork, only ride
 			# your pick north to the gate (progress is always possible; only
 			# lateral crossing is blocked, so no softlock under the ratchet).
-			if p["y"] >= g2["y"] + 40 * F_ONE and p["y"] <= g2["y"] + 620 * F_ONE \
-					and absi(p["x"] - fx2 * F_ONE) < 44 * F_ONE:
-				if not (rpy >= g2["y"] + 40 * F_ONE and rpy <= g2["y"] + 620 * F_ONE \
-						and absi(rpx - fx2 * F_ONE) < 44 * F_ONE):
-					p["x"] = rpx
-					p["y"] = rpy
-				break
+			if not _in_fork_divider(p["x"], p["y"], g2["y"], fx2):
+				continue
+			if _in_fork_divider(rpx, rpy, g2["y"], fx2):
+				break   # started inside (post-respawn edge case) — escape rule, walk out
+			# AXIS-SEPARATED resolve. This used to revert BOTH axes together, which made
+			# the promise written above ("progress is always possible; only lateral
+			# crossing is blocked") false: a player holding a diagonal INTO the face had
+			# the legal north component cancelled along with the illegal lateral one and
+			# stood dead still. Measured: the scripted bot pinned at x=214 against the
+			# gate-2 divider (fork_x=260) for 44,000+ ticks and 358 knockdowns, never
+			# finishing the run. Deny only the axis that actually crossed.
+			if not _in_fork_divider(p["x"], rpy, g2["y"], fx2):
+				p["y"] = rpy   # entered through the north/south nose — keep the strafe
+			elif not _in_fork_divider(rpx, p["y"], g2["y"], fx2):
+				p["x"] = rpx   # lateral crossing denied — KEEP the northward progress
+			else:
+				p["x"] = rpx
+				p["y"] = rpy
+			break
 		# Parked/dead armor is solid to boots (2v hulk-cover; escape rule):
 		for hk2 in tanks:
 			if (hk2["alive"] and hk2["occupant"] < 0) or (not hk2["alive"] and hk2["burn_ticks"] > 0):
@@ -3818,6 +3830,14 @@ func _in_trench(x: int, y: int) -> bool:
 	var ty: int = (200 + th % 500) * F_ONE
 	var tx: int = (120 + (th >> 8) % 380) * F_ONE
 	return off >= ty - 24 * F_ONE and off <= ty + 24 * F_ONE and absi(x - tx) <= 60 * F_ONE
+
+
+func _in_fork_divider(x: int, y: int, gate_y: int, fork_x: int) -> bool:
+	## The fork wreck-island AABB for the gate at `gate_y` — the ONE definition the
+	## move-revert consults for the new position, each candidate axis, and the
+	## started-inside escape rule, so the three can never disagree.
+	return y >= gate_y + 40 * F_ONE and y <= gate_y + 620 * F_ONE \
+		and absi(x - fork_x * F_ONE) < 44 * F_ONE
 
 
 func _in_mud(_x: int, y: int) -> bool:

@@ -805,3 +805,29 @@ func test_god_mode_badge_gets_its_own_band_row_and_never_collides() -> void:
 		"the badge draw pulls its row from the band like every other consumer")
 	Runner.T.ok(src.find("_draw_god_badge()   #") != -1,
 		"the badge is drawn from the screen-anchored pass, last, so nothing paints over it")
+
+# --- Anti-softlock ratchet for the scripted bot -------------------------------
+# The 2026-07-25 difficulty study could not be trusted until this held. On seed 7
+# the bot pinned itself against gate 2's fork divider and burned 44,000+ ticks and
+# 358 knockdowns without ever opening the gate — two independent causes, both since
+# fixed: the divider's move-revert ate northward progress (see
+# test_mechanics.gd::test_fork_divider_denies_the_crossing_without_eating_north_progress),
+# and demo_input's tank chase had no give-up condition, so it y-aligned with a tank
+# parked across the divider, zeroed its own march and pushed into the wall forever.
+#
+# A capture harness that cannot traverse the game photographs sector 1 and calls it
+# a review; a difficulty probe that cannot traverse the game reports the bot's
+# pathing luck as the game's difficulty curve. This pins traversal itself.
+
+func test_scripted_bot_clears_the_fork_gate_that_used_to_trap_it() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var sim := SimWorld.new(7, 1, "campaign")
+	sim.god_mode = true   # the run must not be able to END, so a stall reads as a stall
+	var best_y: int = sim.players[0]["y"]
+	for t in 4000:
+		sim.step([ms.demo_input(t, sim)] as Array[SimInput])
+		best_y = mini(best_y, sim.players[0]["y"])
+		if best_y < -2 * SimWorld.GATE_SPACING:
+			break
+	Runner.T.ok(best_y < -2 * SimWorld.GATE_SPACING,
+		"the bot gets north of gate 2 within 4000 ticks (it once never got there at all)")
