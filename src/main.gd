@@ -144,6 +144,7 @@ var _settle_active := false            # c1-19: is a settle chain running? Drive
 var _settle_gen := 0                    # c1-19: monotonic generation tag for the settle chain. Each new windowed mode/scale change bumps it and stamps its deferred _settle_window calls; a callback whose stamp != the current gen is STALE (a newer choice superseded it) and drops out — so rapid mode/scale toggling can't have an old settle chain share counters with, or recenter/resize after, the newest choice.
 const SETTLE_MAX_TRIES := 16            # c1-19: hard ceiling on settle retries — high enough that the SETTLE_ZERO_FRAMES streak (and a slow compositor's late title-bar attach) has room to complete, low enough that a genuinely stuck window manager can't loop the deferred settle forever (~0.27s at 60Hz worst case, only on a mode change).
 var no_autopause := false         # set by dev harnesses whose window never holds focus
+var demo_autoplay := false        # set by dev harnesses that need the scripted bot (demo_input) to actually PLAY the run — same effect as the movie-render feature flag, without --write-movie. Never set from shipped code paths: a real player's input would be ignored.
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyboard 8-way aim snapped in 45° pops (enemies already lerp via _enemy_face)
 var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
@@ -5265,8 +5266,13 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 
 
 func _gather_inputs() -> Array[SimInput]:
-	if OS.has_feature("movie"):
-		return [demo_input(sim.tick_count, sim)]
+	if OS.has_feature("movie") or demo_autoplay:
+		# One scripted input per player, same as the title attract screen — demo_input
+		# steers off players[0], so P2 just replays P1's plan 53 ticks out of phase.
+		var demo: Array[SimInput] = []
+		for pi in sim.players.size():
+			demo.append(demo_input(sim.tick_count + pi * 53, sim))
+		return demo
 	var inputs: Array[SimInput] = []
 	var p1 := SimInput.new()
 	# c1-18: movement + aim + verbs all read their REBOUND physical keycodes (bind()), so
@@ -7594,7 +7600,13 @@ func _draw_enemies() -> void:
 	# a farther one — sim array order broke that overlap. Buffers + comparator are
 	# reused members so the per-frame sort allocates nothing and never hashes a dict.
 	var ecount := sim.enemies.size()
-	if _esort_order.size() != ecount:
+	# A resize only truncates/pads — the surviving entries are INDICES into the previous,
+	# larger enemies array, so any of them may now be out of range. Re-sorting is the only
+	# thing that makes them valid again, and the hitstop short-circuit below must not skip
+	# it on a frame where the count moved (sim.step() sweeps the dead and _consume_events()
+	# arms hitstop in that same tick, so "frozen during hitstop" isn't true of the first one).
+	var ecount_changed := _esort_order.size() != ecount
+	if ecount_changed:
 		_esort_order.resize(ecount)
 		_esort_pairs.resize(ecount)
 	# opt-loop: during hitstop sim.step() is skipped entirely (main.gd's hitstop
@@ -7602,7 +7614,7 @@ func _draw_enemies() -> void:
 	# tick hitstop began — are provably frozen for every remaining hitstop tick.
 	# Re-sorting the same unchanged positions every tick was pure waste, worst
 	# during exactly the moments (big hits) with the most enemies on screen.
-	if _hitstop_frames <= 0:
+	if _hitstop_frames <= 0 or ecount_changed:
 		for si in ecount:
 			_esort_pairs[si] = Vector2(float(sim.enemies[si]["y"]), float(si))
 		_esort_pairs.sort()

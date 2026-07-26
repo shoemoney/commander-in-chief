@@ -305,3 +305,48 @@ func test_partner_ko_ducks_only_the_self_directed_channels() -> void:
 		"exactly one caller plus the definition — one place, every KO")
 	Runner.T.ok(src.find("_duck = 1.0") != -1 and src.find("_punch = maxf(_punch, 0.14)") != -1,
 		"the shared music duck / camera punch stay unscaled")
+
+
+# --- Dev-harness autoplay: the AAA capture harness screenshotted 45 review cycles of a
+# soldier standing still, dying and respawning at sector 1, because nothing injected input.
+# demo_input() (the scripted bot the trailer/attract screen already run) was reachable only
+# behind OS.has_feature("movie"). demo_autoplay is the second opt-in. It must default OFF —
+# a build that boots with it set ignores the human holding the controller. ---
+
+func test_demo_autoplay_defaults_off_and_feeds_the_scripted_bot() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var m: Node2D = ms.new()
+	Runner.T.eq(m.demo_autoplay, false,
+		"demo_autoplay MUST default off — on, the sim ignores every real input")
+	m.sim = SimWorld.new(0xC0FFEE, 2)
+	m.demo_autoplay = true
+	var got: Array = m._gather_inputs()
+	Runner.T.eq(got.size(), 2,
+		"one scripted input per player — a 2P capture must not leave P2 standing still")
+	var want: SimInput = ms.demo_input(m.sim.tick_count, m.sim)
+	Runner.T.eq(str(got[0].encode()), str(want.encode()),
+		"P1 is exactly demo_input() — the same bot movie mode drives")
+	Runner.T.ok(got[0].move_y < 0, "the bot marches north (an idle capture never leaves sector 1)")
+	Runner.T.ok(got[0].fire, "...and holds the trigger, so the reviewer sees combat")
+	m.free()
+	# The flag is dev-harness-only: nothing under src/ may set it, or it ships enabled.
+	for f in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd"]:
+		Runner.T.ok(FileAccess.get_file_as_string(f).find("demo_autoplay = true") == -1,
+			"%s must never set demo_autoplay — only dev harnesses may" % f)
+
+
+# --- _draw_enemies' painter-sort cache: _esort_order holds INDICES into sim.enemies.
+# resize() truncates but never revalidates them, and the opt-loop hitstop short-circuit
+# skipped the re-sort — so a tick that swept dead enemies AND armed hitstop (i.e. any
+# big kill) left stale out-of-range indices and threw "Out of bounds get index" out of
+# _draw, aborting the rest of the frame. Only reproducible while the game is actually
+# being played, which is why it survived until the capture harness got input. ---
+
+func test_enemy_sort_cache_revalidates_when_the_count_moves() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.find("if _hitstop_frames <= 0 or ecount_changed:") != -1,
+		"a changed enemy count must force the painter re-sort even during hitstop — "
+		+ "reusing the cache there indexes sim.enemies past its end")
+	Runner.T.ok(src.find("var ecount_changed := _esort_order.size() != ecount") != -1,
+		"the resize and the re-sort must read the SAME changed-flag — computing it after "
+		+ "the resize would always be false")
