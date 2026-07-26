@@ -151,6 +151,7 @@ var _settle_gen := 0                    # c1-19: monotonic generation tag for th
 const SETTLE_MAX_TRIES := 16            # c1-19: hard ceiling on settle retries — high enough that the SETTLE_ZERO_FRAMES streak (and a slow compositor's late title-bar attach) has room to complete, low enough that a genuinely stuck window manager can't loop the deferred settle forever (~0.27s at 60Hz worst case, only on a mode change).
 var no_autopause := false         # set by dev harnesses whose window never holds focus
 var demo_autoplay := false        # set by dev harnesses that need the scripted bot (demo_input) to actually PLAY the run — same effect as the movie-render feature flag, without --write-movie. Never set from shipped code paths: a real player's input would be ignored.
+var god_mode := false             # DEBUG-ONLY (F8, or set by dev harnesses like demo_autoplay). Auto-restore, NOT invulnerability — see SimWorld._god_restore(). _physics_process re-asserts `and OS.is_debug_build()` on every tick, so an exported build ignores this even if something sets it.
 var _heat: Array[float] = [0.0, 0.0]   # per-player MG barrel heat (sustained-fire feel)
 var _player_face: Array[float] = [PI / 2, PI / 2]   # smoothed body facing: keyboard 8-way aim snapped in 45° pops (enemies already lerp via _enemy_face)
 var _boss_flash := 0.0           # white-hot flash on the boss/colossus body when shot
@@ -284,6 +285,11 @@ const BAND_ROW_STRIDE := 22.0    # one band row — mirrors HudIcons.BOSS_BAR_ST
 const BAND_HINT_SIZE := 11       # hint tooltip's base draw size (shrink-to-fit from here)
 const BAND_HINT_H := 18.0        # hint plate height
 const BAND_HINT_BADGE_W := 22.0  # the "!" badge fronting the hint plate, left of it
+## DEBUG-ONLY god-mode badge. Deliberately NOT localized and deliberately un-suppressible: a
+## tester who forgets god mode is on reports "the difficulty feels fine" about a run that cannot
+## end, and that false signal is worse than no playtest at all.
+const BAND_GOD_TEXT := "GOD MODE - DEBUG ONLY - RUN CANNOT END"
+const BAND_GOD_SIZE := 12
 var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
 var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
 var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
@@ -1647,6 +1653,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_endless = false
 				_arcade_chapter = -1
 			_reset()
+		elif event.keycode == KEY_F8 and OS.is_debug_build():
+			# DEBUG-ONLY god mode (F8 — the first free key after the F2/F3/F4 debug row).
+			# The `and OS.is_debug_build()` here is belt; the braces are in _physics_process,
+			# which re-asserts it before every sim.step(). No _reset(): the whole point is to
+			# flip it mid-run and keep going.
+			god_mode = not god_mode
 		elif event.keycode == KEY_R:
 			if _watching:
 				_watching = false
@@ -1864,6 +1876,11 @@ static func needs_refit(actual: Vector2i, scale: int) -> bool:
 
 
 func _physics_process(_delta: float) -> void:
+	# THE god-mode gate, and the only place `sim.god_mode` is ever written. Re-asserted every
+	# tick rather than at the toggle, so it survives `_reset()` rebuilding the sim and a harness
+	# setting `god_mode` at any point in the frame — and so a release build can NEVER run with it
+	# on: OS.is_debug_build() is compiled false there, and this line runs before every step().
+	sim.god_mode = god_mode and OS.is_debug_build()
 	# c4-08: Art.colorblind is now kept in lockstep by the `colorblind` setter (_set_colorblind) at
 	# every assignment site, so the old per-frame re-sync here is gone -- the palette can't drift.
 	_update_cursor()
@@ -6013,6 +6030,7 @@ func _draw() -> void:
 	_draw_progress_rail()
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
+	_draw_god_badge()   # DEBUG-ONLY; LAST on the screen-anchored pass so nothing can paint over it
 	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
 	# Gated by reduce-motion like every sibling effect — this was the one holdout.
 	if _cinematic > 0.01 and _motion >= 0.5:
@@ -10362,9 +10380,22 @@ func _top_center_priority() -> String:
 ## Pure + static so tests/test_main.gd can assert the geometry without a scene tree.
 ## Each row: {id, text, size, baseline, plate, rect} — `plate` is the scrim as drawn, `rect`
 ## the full ink footprint (plate + any fronting badge), which is what must never intersect.
-static func band_rows(band_y: float, top_text: String, top_size: int, top_badge: bool,
-		hint_text: String) -> Array[Dictionary]:
+static func band_rows(y_top: float, top_text: String, top_size: int, top_badge: bool,
+		hint_text: String, god_on := false) -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
+	# DEBUG-ONLY god-mode badge takes the TOP of the rail and pushes every transient message down
+	# one stride. Allocated here, through the same arbiter as everything else on this rail, so it
+	# cannot share pixels with a banner by construction — and so it never SUPPRESSES one either
+	# (stealing the "top" row would hide the very banners god mode exists to let you observe).
+	var band_y := y_top
+	if god_on:
+		# Shrink-to-fit like every other row: the accessibility TEXT SIZE multiplier scales this
+		# label too, and a warning that runs off both edges is not a warning.
+		var gs := banner_fit_size(BAND_GOD_TEXT, BAND_GOD_SIZE)
+		var gp := banner_plate_rect(BAND_GOD_TEXT, band_y, gs, 0.0)
+		rows.append({"id": "god", "text": BAND_GOD_TEXT, "size": gs, "pad_left": 0.0,
+			"baseline": band_y, "plate": gp, "rect": gp})
+		band_y += BAND_ROW_STRIDE
 	if not top_text.is_empty():
 		# Shrink-to-fit EVERY alert, not just the splash banner: the other three carried fixed
 		# sizes chosen against their English literals, so a longer translation walked them off
@@ -10452,7 +10483,7 @@ func _band_rows(top_msg: String) -> Array[Dictionary]:
 	var top := _band_top_text(top_msg)
 	var hint := "" if (_hint_t <= 0.02 or _debrief or sim.victory) else _hint_text
 	return band_rows(_banner_band_y(), String(top.get("text", "")), int(top.get("size", 11)),
-		bool(top.get("badge", false)), hint)
+		bool(top.get("badge", false)), hint, sim.god_mode)
 
 
 func _draw_airstrike_telegraph(top_msg: String) -> void:
@@ -10565,6 +10596,20 @@ func _draw_threat_pips() -> void:
 		Art.circle(self, sedge, 10.0 + urg * 3.0, Color(1.0, 0.5, 0.2, 0.14 + urg * 0.14))
 		draw_colored_polygon(stri, Color(1.0, 0.5, 0.2, 0.75 + urg * 0.25))
 		Art.polyline(self, PackedVector2Array([stri[0], stri[1], stri[2], stri[0]]), Color(0, 0, 0, 0.55), 1.0)
+
+
+func _draw_god_badge() -> void:
+	## DEBUG-ONLY. Unmissable by construction: its own band row (so nothing shares its pixels),
+	## a full-strength plate, hazard amber/red, and a ~1 Hz pulse so it reads as a live warning
+	## rather than chrome. No reduce-motion gate on the COLOUR — the pulse is well under the
+	## 3 Hz photosensitivity ceiling and this is the one label that must never fade into the HUD.
+	var row := band_row(_band, "god")
+	if row.is_empty():
+		return
+	_metal_plate(row["plate"], 0.9)
+	var pulse := 0.5 + 0.5 * sin(float(Engine.get_physics_frames()) * 0.1)
+	Art.text_center(self, row["text"], 320, row["baseline"], row["size"],
+		Color(1.0, 0.32, 0.22).lerp(Color(1.0, 0.88, 0.2), pulse))
 
 
 func _draw_banners(top_msg: String) -> void:

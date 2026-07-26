@@ -569,3 +569,170 @@ func test_enemy_sort_cache_revalidates_when_the_count_moves() -> void:
 	Runner.T.ok(src.find("var ecount_changed := _esort_order.size() != ecount") != -1,
 		"the resize and the re-sort must read the SAME changed-flag — computing it after "
 		+ "the resize would always be false")
+
+
+# --- DEBUG-ONLY god mode. Nothing has ever seen the back half of this game: a human playtest
+# died 8x in sector 1, and the scripted bot dies in sector 2. God mode is the instrument that
+# makes sectors 3-6, the Colossus and the victory card observable. It is auto-RESTORE, not
+# invulnerability — the player still gets hit and still goes down (so hit reactions, the downed
+# state, the revive prompt and the difficulty signal all stay real), the run just cannot END.
+#
+# It must be IMPOSSIBLE to ship enabled. This repo has form: a dev-only autoload regressed into
+# project.godot twice and now carries its own ratchet (test_assets.gd). Same seriousness here. ---
+
+func test_god_mode_defaults_off_everywhere() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var m: Node2D = ms.new()
+	Runner.T.eq(m.god_mode, false,
+		"main.god_mode MUST default off — a build that boots god-mode cannot be lost")
+	m.free()
+	Runner.T.eq(SimWorld.new(0xC0FFEE, 1).god_mode, false,
+		"SimWorld.god_mode MUST default off — the sim is what actually grants it")
+	Runner.T.eq(SimWorld.new(0xC0FFEE, 2, "endless").god_mode, false,
+		"...in every mode, not just campaign")
+
+
+func test_god_mode_cannot_ship_enabled() -> void:
+	# 1. Nothing under src/ may turn it on. The ONE write to sim.god_mode is the per-tick
+	#    re-assertion in _physics_process, and that write must carry the debug-build gate on
+	#    the same line — a gate one line above is a gate a future edit walks out from under.
+	var writes := 0
+	for f in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd",
+			"res://src/sim/sim_world.gd", "res://src/net/lockstep.gd"]:
+		var src := FileAccess.get_file_as_string(f)
+		Runner.T.eq(src.count("god_mode = true"), 0,
+			"%s must never set god_mode true — only a dev harness or the F8 toggle may" % f)
+		for line in src.split("\n"):
+			if line.lstrip("\t").begins_with("#") or line.find("sim.god_mode =") == -1:
+				continue
+			writes += 1
+			Runner.T.ok(line.find("OS.is_debug_build()") != -1,
+				"every write to sim.god_mode must carry the debug-build gate ON THE SAME LINE: %s"
+					% line.strip_edges())
+	Runner.T.eq(writes, 1,
+		"exactly ONE writer of sim.god_mode — a second one is a second thing to forget to gate")
+	# 2. The live toggle is debug-gated too, so a release build's F8 is inert.
+	var mgd := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(mgd.find("event.keycode == KEY_F8 and OS.is_debug_build()") != -1,
+		"the F8 toggle must be gated on OS.is_debug_build() at the keycode test")
+	# 3. F8 is FREE — it must not collide with the existing F2/F3/F4/R/C debug + card keys.
+	Runner.T.eq(mgd.count("KEY_F8"), 1, "F8 is claimed exactly once")
+
+
+func test_god_mode_restores_the_downed_through_the_real_respawn_path() -> void:
+	# The whole design: the player DIES normally, then comes back on a fixed heartbeat via the
+	# same _respawn() the coin reader uses. If this ever becomes "cannot be hit", every system a
+	# reviewer needs to judge (hit reaction, downed state, revive economy) stops being observable.
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	sim.god_mode = true
+	sim.war_chest = 0          # broke: the normal fallback is 300 ticks away, so any revive
+	                           # inside 61 ticks can only be god mode's
+	sim._kill_player(sim.players[0])
+	Runner.T.eq(sim.players[0]["alive"], false,
+		"god mode must NOT make the player unhittable — the death still happens")
+	Runner.T.eq(sim.players[0]["deaths"], 1,
+		"...and it still COUNTS, so knockdowns-per-sector stays real difficulty telemetry")
+	var down_ticks := 0
+	for _i in SimWorld.GOD_RESTORE_TICKS + 1:
+		sim.step([SimInput.new()])
+		if not sim.players[0]["alive"]:
+			down_ticks += 1
+	Runner.T.eq(sim.players[0]["alive"], true,
+		"the downed player is back on their feet within one GOD_RESTORE_TICKS heartbeat")
+	Runner.T.ok(down_ticks > 0,
+		"...but not instantly — the downed state must actually be entered and drawn")
+	Runner.T.ok(sim.players[0]["mg_ammo"] >= SimWorld.MG_AMMO_MAX,
+		"the heartbeat tops ammo up: a run that stalls out of ammo never reaches sector 3")
+	Runner.T.eq(sim.players[0]["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX,
+		"...grenades too — they are the only armor-cracker, so a dry belt cannot open a gate")
+
+
+func test_god_mode_off_leaves_the_run_losable() -> void:
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	sim.war_chest = 0
+	sim._kill_player(sim.players[0])
+	for _i in SimWorld.GOD_RESTORE_TICKS + 1:
+		sim.step([SimInput.new()])
+	Runner.T.eq(sim.players[0]["alive"], false,
+		"with god mode OFF a broke death stays down for the full broke fallback — no free rescue")
+
+
+func test_god_mode_clears_both_run_enders_but_never_a_victory() -> void:
+	# `wiped` is a LATCH that freezes step() before any stepper runs, and it is set by BOTH the
+	# endless wipe and the Last Stand terminal state — i.e. by the Colossus finale, the single
+	# piece of content this mode exists to let us watch.
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim.god_mode = true
+	sim.wiped = true
+	for _i in SimWorld.GOD_RESTORE_TICKS + 1:
+		sim.step([SimInput.new()])
+	Runner.T.eq(sim.wiped, false, "god mode un-freezes a wiped run, or the sim never steps again")
+	var won := SimWorld.new(0xC0FFEE, 1)
+	won.god_mode = true
+	won.victory = true
+	won._kill_player(won.players[0])
+	for _i in SimWorld.GOD_RESTORE_TICKS + 1:
+		won.step([SimInput.new()])
+	Runner.T.eq(won.victory, true, "winning is a real end state — god mode must not restore past it")
+	Runner.T.eq(won.players[0]["alive"], false, "...and must not resurrect anyone behind the card")
+
+
+func test_god_mode_is_in_the_checksum_but_leaves_goldens_untouched() -> void:
+	# CLAUDE.md: a gameplay-affecting field belongs in the checksum. Fed CONDITIONALLY (the
+	# assist_mode/hard precedent) so an OFF flag leaves the hash stream byte-identical and the
+	# committed goldens hold — which the determinism suite proves independently.
+	var off := SimWorld.new(0xC0FFEE, 2)
+	var on := SimWorld.new(0xC0FFEE, 2)
+	on.god_mode = true
+	Runner.T.ok(off.checksum() != on.checksum(),
+		"god mode must perturb the checksum — an ungated desync must not be able to hide in it")
+	var plain := SimWorld.new(0xC0FFEE, 2)
+	Runner.T.eq(off.checksum(), plain.checksum(),
+		"...and an OFF flag must leave the stream identical, so no golden moves")
+
+
+func test_god_mode_badge_gets_its_own_band_row_and_never_collides() -> void:
+	# The indicator is not decoration. A tester who forgets god mode is on reports "the
+	# difficulty feels fine" about a run that cannot end, and that false signal is worse than no
+	# testing. It is dealt by band_rows() — the single arbiter of the top-centre rail — so it can
+	# neither be painted over nor SUPPRESS the banners god mode exists to let you observe.
+	var ms: Script = load("res://src/main.gd")
+	var consts: Dictionary = ms.get_script_constant_map()
+	var top := "DESTROY THE GUNSHIP TO ADVANCE"
+	var hint := "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS"
+	Runner.T.eq(ms.band_rows(56.0, top, 11, false, hint).size(), 2,
+		"god OFF is the shipped band, unchanged — two rows")
+	var was_scale: float = Art.text_scale
+	var collisions := 0
+	var escapes := 0
+	var missing := 0
+	for scale in [1.0, float(consts["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var y := _BAND_RAIL_MIN
+		while y <= _BAND_RAIL_MAX:
+			var rows: Array = ms.band_rows(y, top, 11, false, hint, true)
+			if rows.size() != 3 or rows[0]["id"] != "god":
+				missing += 1
+			for a in rows.size():
+				var ra: Rect2 = rows[a]["rect"]
+				if ra.position.x < -0.5 or ra.end.x > 640.5 or ra.end.y > 360.5:
+					escapes += 1
+				for b in range(a + 1, rows.size()):
+					if ra.grow(-0.5).intersects(rows[b]["rect"].grow(-0.5)):
+						collisions += 1
+			y += 2.0
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(missing, 0, "god ON always deals a 'god' row FIRST, whatever else owns the rail")
+	Runner.T.eq(collisions, 0, "the god badge never shares pixels with a banner or a hint")
+	Runner.T.eq(escapes, 0, "...and nothing on the god-shifted rail escapes the 640x360 frame")
+	# The badge must SAY it, in the copy, not just be a coloured pip.
+	var txt: String = consts["BAND_GOD_TEXT"]
+	Runner.T.ok(txt.find("GOD MODE") != -1 and txt.find("DEBUG") != -1,
+		"the badge names itself AND names the build it only exists in: '%s'" % txt)
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.eq(src.count("band_row(_band, \"god\")"), 1,
+		"the badge draw pulls its row from the band like every other consumer")
+	Runner.T.ok(src.find("_draw_god_badge()   #") != -1,
+		"the badge is drawn from the screen-anchored pass, last, so nothing paints over it")

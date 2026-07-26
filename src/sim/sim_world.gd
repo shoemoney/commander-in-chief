@@ -193,6 +193,7 @@ const BUNKER_SPAWN_INTERVAL_TICKS := 120
 const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
 const BROKE_RESPAWN_TICKS := 300
+const GOD_RESTORE_TICKS := 60      # DEBUG-ONLY god mode's heartbeat: once a second the downed get put back on their feet. See _god_restore().
 const COIN_RUSHER := 10
 const COIN_MG_NEST := 15   # stationary/telegraphed: pays less than a mobile elite
 const COIN_ELITE := 25
@@ -651,6 +652,7 @@ var colossus: Dictionary = {}
 var endless_boss: Dictionary = {}   # endless-only miniboss (reuses the gunship schema)
 var assist_mode: bool = false       # accessibility: every life starts with a flak vest (2-hit)
 var hard: bool = false              # New Game+ HARD: a tighter campaign spawn curve
+var god_mode: bool = false          # DEBUG-ONLY auto-restore (see _god_restore). main.gd is the ONLY writer and re-asserts `and OS.is_debug_build()` every tick, so this can never be true in a shipped build.
 var last_stand: bool = false
 var victory: bool = false
 var wiped: bool = false            # endless: whole party down with no rescue → run over
@@ -846,6 +848,10 @@ func step(inputs: Array) -> void:
 	## Advance one tick. `inputs` is one SimInput per player.
 	tick_count += 1
 	events.clear()
+	# DEBUG-ONLY. Must run BEFORE the `wiped` freeze below — `wiped` is a latch and the
+	# frozen sim never reaches another stepper, so restoring after it could never clear it.
+	if god_mode:
+		_god_restore()
 	if wiped:
 		return   # the run is over; the sim is frozen behind the debrief
 	_prev_camera_top = camera_top
@@ -1607,6 +1613,40 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 	# or when the partner is also down).
 	if inp.revive:
 		_try_revive(-1, p)
+
+
+func _god_restore() -> void:
+	## DEBUG-ONLY god mode. NOT invulnerability — deliberately.
+	##
+	## In a one-hit-kill design there is no health bar to top up, so "heal to full every
+	## second" maps onto this game as "put the downed back on their feet every second".
+	## The player still gets hit, still goes down, still plays the death beat; the run
+	## simply cannot END. That keeps every system a reviewer needs to see alive — hit
+	## reactions, the downed state, the revive prompt and its economy, the broke timer —
+	## all of which invulnerability would erase, while inviting the false read that the
+	## pacing is fine because nothing ever killed you.
+	##
+	## It also leaves real telemetry behind: p["deaths"] keeps counting, so knockdowns
+	## per sector are readable straight off the sim. That is this game's first difficulty
+	## signal, and an unhittable player reports none of it.
+	##
+	## Revival goes through the SAME _respawn() the coin reader and the broke fallback
+	## use, so the shipped path stays exercised rather than shadowed by a parallel one.
+	## Ammo is topped up on the same heartbeat and NOT continuously: between beats you
+	## still run dry and still hear the empty-mag click (the pressure stays observable),
+	## but a dry gun can never permanently stall the run it exists to drive deep.
+	if tick_count % GOD_RESTORE_TICKS != 0:
+		return
+	if victory:
+		return   # winning is a real end state, not a stall — never restore past it
+	# Clears both run-enders: the endless wipe and the Last Stand latch. Cleared here
+	# rather than at the death site so there is exactly one god-mode write path.
+	wiped = false
+	for p in players:
+		if not p["alive"]:
+			_respawn(p, _checkpoint_y())
+		p["mg_ammo"] = MG_AMMO_MAX
+		p["grenade_ammo"] = GRENADE_AMMO_MAX
 
 
 func _all_players_down() -> bool:
@@ -5808,6 +5848,13 @@ func checksum() -> int:
 		h = feed.call(2166136261, h)   # only perturbs the hash when assist is ON (torture: OFF)
 	if hard:
 		h = feed.call(40503, h)        # only perturbs the hash when HARD is ON (torture: OFF)
+	if god_mode:
+		# CLAUDE.md: a gameplay-affecting field belongs in the checksum. God mode is fed
+		# — conditionally, the assist_mode/hard precedent — so an unrecorded desync can't
+		# hide behind it, while an OFF flag leaves the hash stream byte-identical and the
+		# committed goldens hold. The torture run never enables it, and it CANNOT be
+		# enabled in a shipped build (main.gd re-asserts OS.is_debug_build() every tick).
+		h = feed.call(0x60DB0DE, h)
 	if vest_buys > 0:
 		h = feed.call(vest_buys, h)   # conditional: 0 buys = untouched stream (torture never buys)
 	for p in players:
