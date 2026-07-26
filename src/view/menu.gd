@@ -1151,7 +1151,9 @@ static func step_level(cur: int, delta: int) -> int:
 const REBIND_TABS := ["MOVE / AIM", "ACTIONS", "GAMEPAD", "MENUS"]
 const REBIND_MOVE_AIM := ["move_up", "move_down", "move_left", "move_right",
 	"aim_up", "aim_down", "aim_left", "aim_right"]
-const REBIND_ACTIONS := ["fire", "grenade", "roll", "interact", "revive", "buy"]
+# ALWAYS-FIRE retired the "fire" row (no fire key exists); "grenade_alt" took its place —
+# the secondary SHIFT throw that keeps pre-E muscle memory (and any saved rebind) working.
+const REBIND_ACTIONS := ["grenade", "grenade_alt", "roll", "interact", "revive", "buy"]
 const REBIND_MENUNAV := ["menu_up", "menu_down", "menu_left", "menu_right", "menu_confirm", "menu_cancel", "menu_help", "menu_next_tab"]
 
 
@@ -1210,8 +1212,8 @@ static func rebind_label(action: String) -> String:
 		"aim_down": return "AIM DOWN"
 		"aim_left": return "AIM LEFT"
 		"aim_right": return "AIM RIGHT"
-		"fire": return "FIRE"
 		"grenade": return "GRENADE"
+		"grenade_alt": return "GRENADE (ALT)"
 		"roll": return "ROLL"
 		"interact": return "INTERACT"
 		"revive": return "REVIVE"
@@ -5325,7 +5327,10 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 	for seg: String in segs:
 		if seg.begins_with("@"):
 			var action := seg.substr(1)
-			if action == "grenade" or action == "fire":
+			# grenade left this branch when it moved onto E: it is a real keyboard verb with
+			# a live bind now, and the hint sprite here is a HARDCODED device icon (RMB / LB),
+			# so it would have drawn a right-mouse button beside an E-key action.
+			if action == "fire":
 				# No Art.draw_glyph entry for these — use the device hint art
 				# (mouse button / trigger sprite), aspect preserved.
 				var t := Art.tex(Art.glyph_key(action))
@@ -5712,15 +5717,21 @@ static func footer_nav_segs() -> Array:
 	return nav
 
 
-# c1-04: the PERMANENT ROLL / WHEEL / REVIVE reference. The in-run HUD reminder is
+# c1-04: the PERMANENT ROLL / WHEEL / GRENADE reference. The in-run HUD reminder is
 # TRANSIENT now (it fades out so it never continuously overlays the playfield), so
 # PAUSE — the one menu reachable mid-run — carries these bindings permanently: a
 # player who forgot them pauses and re-reads them. "act" keys resolve device-aware
 # through Art.draw_glyph, same as the TITLE legend's verb row.
+#
+# The third slot used to be REVIVE. It is GRENADE now: E carries both verbs, and the
+# permanent reference has to name the permanent one — revive is contextual (it exists
+# only over a downed partner, where the HUD already plants "REVIVE <cost> [E]" and
+# "GET UP <cost> [E]" on the body itself). Same key either way, so a player reading the
+# footer mid-run is never taught the wrong finger.
 static func footer_verb_segs() -> Array:
 	return [{"act": "roll", "label": "ROLL"},
 		{"act": "wheel", "label": "SUPPLY WHEEL"},
-		{"act": "revive", "label": "REVIVE"}]
+		{"act": "grenade", "label": "GRENADE"}]
 
 
 # c3-10: the keycap the footer/legend stamps for BACK & PAUSE, DERIVED from the LIVE

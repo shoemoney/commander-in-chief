@@ -427,6 +427,24 @@ const SEED := 0xDEADBEEF
 ## clamp is behaviour-identical regardless -- `<= 0` fires on the same tick at 0 as at
 ## -595, so only the hashed value could ever have moved. Covered instead by a direct
 ## test: test_colossus::test_spray_cooldown_stays_bounded_under_smoke.
+##
+## BOTH GOLDENS VERIFIED UNCHANGED (2026-07-25, ALWAYS-FIRE control scheme). The scheme
+## removes the fire key: the MG runs continuously and aim is the whole weapon verb. That is
+## a change to main._gather_inputs — the VIEW — and this torture drives SimWorld directly
+## from its own scripted_input, so the input change cannot reach these numbers at all.
+## The one SIM edit it forced is the empty-clip bash: it was gated on a RISING EDGE of
+## `fire`, which with no button would arrive exactly once per run and delete the mechanic,
+## so it is level-triggered again (still rationed by BASH_COOLDOWN_TICKS, still no_coin/
+## no_score). That edit IS reachable here and was MEASURED rather than assumed — instrument
+## the two torture streams and they report:
+##     campaign  dry ticks P1=0  P2=72   bash=1  dry_fire=4    (never leaves sector 0)
+##     endless   dry ticks P1=838 P2=511 bash=3  dry_fire=454  (wipes at tick 1813, wave 2)
+## So both streams DO run dry and DO bash — and all 12 sampled checksums still came back
+## byte-identical, because the torture holds fire on (t%3)!=0: a rising edge is never more
+## than two ticks from any level-true tick, and in these two streams the bash landed on the
+## same tick either way. Inert by measurement, not by argument. The behaviour change itself
+## is pinned directly by test_controls::test_empty_clip_bash_survives_the_loss_of_the_fire_edge
+## and ::test_bash_is_still_rationed_by_its_cooldown_not_by_the_button.
 const GOLDEN: Array[int] = [
 	1137374205060789435,
 	8552575976495711450,
