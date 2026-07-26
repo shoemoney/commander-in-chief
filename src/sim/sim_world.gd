@@ -1102,9 +1102,7 @@ func _step_players(inputs: Array) -> void:
 		for hk2 in tanks:
 			if (hk2["alive"] and hk2["occupant"] < 0) or (not hk2["alive"] and hk2["burn_ticks"] > 0):
 				if absi(p["x"] - hk2["x"]) <= HULK_HALF_W and absi(p["y"] - hk2["y"]) <= HULK_HALF_H:
-					if absi(rpx - hk2["x"]) > HULK_HALF_W or absi(rpy - hk2["y"]) > HULK_HALF_H:
-						p["x"] = rpx
-						p["y"] = rpy
+					_slide_aabb(p, rpx, rpy, hk2["x"], hk2["y"], HULK_HALF_W, HULK_HALF_H)
 					break
 		# Rocks are a hard wall to boots too (escape rule: a step that STARTED
 		# inside — post-respawn edge case — may walk out).
@@ -1115,23 +1113,33 @@ func _step_players(inputs: Array) -> void:
 				var rhw := _rk_hw(rk)
 				var rhh := _rk_hh(rk)
 				if absi(p["x"] - rk["x"]) <= rhw and absi(p["y"] - rk["y"]) <= rhh:
-					if absi(rpx - rk["x"]) > rhw or absi(rpy - rk["y"]) > rhh:
-						p["x"] = rpx
-						p["y"] = rpy
+					_slide_aabb(p, rpx, rpy, rk["x"], rk["y"], rhw, rhh)
 					break
 		# c4 2v: a SEALED lane-block is solid to boots — revert a step that ENTERS
 		# it (escape-rule: a step started inside can still walk out). The open
 		# opposite flank is the guaranteed bypass, so you reroute, never softlock.
+		# Axis-separated (same shape as the fork-divider resolve above): a
+		# diagonal approach only loses the crossed axis, not the free one.
 		if _lane_blocked(p["x"], p["y"]) and not _lane_blocked(rpx, rpy):
-			p["x"] = rpx
-			p["y"] = rpy
+			if not _lane_blocked(p["x"], rpy):
+				p["y"] = rpy
+			elif not _lane_blocked(rpx, p["y"]):
+				p["x"] = rpx
+			else:
+				p["x"] = rpx
+				p["y"] = rpy
 		# c4 2v: the one-way ledge blocks a RETREAT step (southbound over the line).
 		if _crosses_ledge_south(p["x"], p["y"], rpy):
 			p["y"] = rpy
 		# c4 2v: a keyed-encounter barricade is solid until you push past its midpoint.
 		if _barricade_solid(p["x"], p["y"]) and not _barricade_solid(rpx, rpy):
-			p["x"] = rpx
-			p["y"] = rpy
+			if not _barricade_solid(p["x"], rpy):
+				p["y"] = rpy
+			elif not _barricade_solid(rpx, p["y"]):
+				p["x"] = rpx
+			else:
+				p["x"] = rpx
+				p["y"] = rpy
 		_clamp_actor(p)
 		# c3 2v: stepping into deep-river MUD (band>=2) proactively SURFACES any
 		# lurking frogman within MUD_SURFACE_RADIUS — reusing the frogman surface
@@ -2741,6 +2749,35 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 
 # --- Enemies / bunkers / spawner ---
 
+func _slide_aabb(m: Dictionary, pvx: int, pvy: int, cx: int, cy: int, hw: int, hh: int) -> void:
+	## Deny only the axis that actually ENTERED cover, so a body slides along the
+	## face instead of stopping dead. Same escape rule as before (a step that
+	## started inside walks out); same axis order as the fork-divider resolve in
+	## _step_players, which fixed this exact freeze for the player in c4.
+	## 2026-07-26: was "revert BOTH axes on any AABB contact" everywhere a ground
+	## mover or the player touched a rock/sandbag/hulk — a diagonal approach had
+	## its legal free-axis component cancelled along with the blocked one and
+	## froze solid at first contact (measured: a rusher pinned 0.0px/600 ticks
+	## against a rock; the endless census held rushers/shields stationary for
+	## 9k-17k+ ticks against seeded quadrant cover, holding waves open forever).
+	## By the time this runs the CALLER has already confirmed the new (m.x,m.y)
+	## sits inside the box on BOTH axes (that's its own if-guard) -- so testing
+	## the new position here can never find a clear axis, it's always inside by
+	## construction. The PREVIOUS position is what tells you which axis just
+	## crossed: the escape-rule guard below already rules out "both pv axes
+	## were inside", so at least one of pvx/pvy was still outside the box the
+	## tick before contact, and that's the one that just entered.
+	if absi(pvx - cx) <= hw and absi(pvy - cy) <= hh:
+		return                                  # started inside — escape rule
+	if absi(pvx - cx) > hw:
+		m["x"] = pvx                            # x just entered — revert it, keep the y advance/strafe
+	elif absi(pvy - cy) > hh:
+		m["y"] = pvy                            # y just entered — revert it, keep the x advance/strafe
+	else:
+		m["x"] = pvx
+		m["y"] = pvy                            # true corner (defensive; excluded by the guard above)
+
+
 func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) -> void:
 	## Shared "move toward target at base_spd, halved while wading" step used by
 	## rushers, shieldmen, elites, grenadiers, snipers, sappers, lunging frogmen
@@ -2781,9 +2818,7 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 	for hk3 in tanks:
 		if (hk3["alive"] and hk3["occupant"] < 0) or (not hk3["alive"] and hk3["burn_ticks"] > 0):
 			if absi(e["x"] - hk3["x"]) <= HULK_HALF_W and absi(e["y"] - hk3["y"]) <= HULK_HALF_H:
-				if absi(pvx - hk3["x"]) > HULK_HALF_W or absi(pvy - hk3["y"]) > HULK_HALF_H:
-					e["x"] = pvx
-					e["y"] = pvy
+				_slide_aabb(e, pvx, pvy, hk3["x"], hk3["y"], HULK_HALF_W, HULK_HALF_H)
 				break
 	if not rocks.is_empty():
 		for rk in rocks:
@@ -2792,24 +2827,30 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 			var rhw := _rk_hw(rk)
 			var rhh := _rk_hh(rk)
 			if absi(e["x"] - rk["x"]) <= rhw and absi(e["y"] - rk["y"]) <= rhh:
-				if absi(pvx - rk["x"]) > rhw or absi(pvy - rk["y"]) > rhh:
-					e["x"] = pvx
-					e["y"] = pvy
+				_slide_aabb(e, pvx, pvy, rk["x"], rk["y"], rhw, rhh)
 				break
-	# c4 2v: enemies reroute around a SEALED lane-block too (same escape rule).
+	# c4 2v: enemies reroute around a SEALED lane-block too (same escape rule,
+	# axis-separated: only the crossed axis is denied, so a diagonal approach
+	# still rides the y-band instead of freezing on the x-threshold).
 	if _lane_blocked(e["x"], e["y"]) and not _lane_blocked(pvx, pvy):
-		e["x"] = pvx
-		e["y"] = pvy
+		if not _lane_blocked(e["x"], pvy):
+			e["y"] = pvy
+		elif not _lane_blocked(pvx, e["y"]):
+			e["x"] = pvx
+		else:
+			e["x"] = pvx
+			e["y"] = pvy
 	if not sandbags.is_empty():
 		for sb in sandbags:
 			if absi(e["x"] - sb["x"]) <= SANDBAG_HALF_W and absi(e["y"] - sb["y"]) <= SANDBAG_HALF_H:
 				# Escape rule: revert only steps ENTERING the bag — a mover the
 				# bag was planted ON walks out instead of freezing bulletproof
-				# forever (re-review: the frozen immortal blocker).
-				if absi(pvx - sb["x"]) > SANDBAG_HALF_W or absi(pvy - sb["y"]) > SANDBAG_HALF_H:
-					e["x"] = pvx
-					e["y"] = pvy
-				break
+				# forever (re-review: the frozen immortal blocker). No break: the
+				# endless diamond emplacement packs four segments ~32px apart, so
+				# a diagonal approach can land inside more than one bag's AABB in
+				# the same tick — resolve against every bag it's touching, not
+				# just the first found, or the un-checked second bag re-traps it.
+				_slide_aabb(e, pvx, pvy, sb["x"], sb["y"], SANDBAG_HALF_W, SANDBAG_HALF_H)
 
 
 func _spawn_enemy_bullet(x: int, y: int, dx: int, dy: int, dlen: int, speed: int = ENEMY_BULLET_SPEED) -> void:
@@ -2954,10 +2995,14 @@ func _step_enemies() -> void:
 					events.append({"t": "drop_stolen", "x": drop["x"], "y": drop["y"]})
 					continue
 				elif ddlen > F_ONE:
-					var mpx: int = e["x"]
-					var mpy: int = e["y"]
 					_advance_toward(e, ddx, ddy, ddlen, ENEMY_SPEED)
-					if e["x"] != mpx or e["y"] != mpy:
+					# Progress toward the CRATE specifically, not just "moved at
+					# all": a wall the rusher can slide along (2026-07-26 cover
+					# fix) still counts as movement every tick, so a crate sealed
+					# behind cover used to re-chase it forever, sliding the same
+					# face on a stable loop. Only keep chasing while the distance
+					# to the drop is actually shrinking.
+					if Fixed.length(drop["x"] - e["x"], drop["y"] - e["y"]) < ddlen:
 						continue
 					# Blocked (sandbag wall around the crate) — fall through to
 					# the player chase instead of pinning here forever.

@@ -421,6 +421,7 @@ const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, 5]   # E,SE,S,SW,W,N
 const WHEEL_ROW_WARN := -68.0    # revive-guard warning
 const WHEEL_ROW_LABEL := -56.0   # pick label + cost + stock (one row)
 const WHEEL_ROW_CUE := 52.0      # RELEASE TO BUY / CANCEL
+const WHEEL_TEXT_ROWS := [WHEEL_ROW_WARN, WHEEL_ROW_LABEL, WHEEL_ROW_CUE]
 
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
@@ -8454,6 +8455,14 @@ func _draw_gunships() -> void:
 
 const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.92)   # a2-17: shared boss-label plate fill
 
+## Shop-wheel plate tint. 2026-07-26: overturns the c2 2v cut (0.92 -> 0.55, "so
+## the mast, scars, drops and hazards read THROUGH it during the buy") — the
+## plate art (SPR_Apocalypse_WeaponWheel.png cell 0,0) is opaque out to ~0.9
+## radius, so that see-through was the modulate alone, and it also unmasked
+## the three WHEEL_ROW_* text rows, which had no backing of their own. Back to
+## near-opaque; the hub icon still reads fine on top of it either way.
+const WHEEL_PLATE_MOD := Color(0.72, 0.78, 0.7, 0.93)
+
 static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size := 10) -> Rect2:
 	# a2-17: a label-anchored dark plate — starts 3px LEFT of the label origin, 6px wider,
 	# so it always sits UNDER the (left-anchored) boss phase label in 1P and 2P.
@@ -10386,6 +10395,13 @@ static func _wheel_socket_display(selected: bool, afford: bool) -> String:
 	return "none"
 
 
+func _wheel_row_plate(cx: float, row_y: float, w: float, size: int) -> void:
+	## Backs one WHEEL_ROW_* text run with the shipped label-plate language
+	## (_label_plate_rect + LABEL_PLATE_FILL) instead of inventing a second
+	## style — the same plate boss/colossus labels already wear.
+	draw_rect(_label_plate_rect(cx - w / 2.0, row_y, w, size), LABEL_PLATE_FILL)
+
+
 func _draw_wheel() -> void:
 	for i in sim.players.size():
 		if i >= _wheel.size() or not _wheel[i]["open"]:
@@ -10407,11 +10423,8 @@ func _draw_wheel() -> void:
 		# atlas — one cell is the round plate) instead of a flat alpha disc.
 		var plate := Art.tex("ui_wheel_plate")
 		var pcell := Vector2(plate.get_size().x / 4.0, plate.get_size().y / 2.0)
-		# c2 2v: plate alpha 0.92 -> 0.55 (the ~40% cut) so the mast, scars,
-		# drops and hazards read THROUGH it during the buy — the sockets/icons
-		# and shadowed text stay full-alpha, so clarity rides the text shadows.
 		draw_texture_rect_region(plate, Rect2(c - Vector2(51, 51), Vector2(102, 102)),
-			Rect2(Vector2.ZERO, pcell), Color(0.72, 0.78, 0.7, 0.55))
+			Rect2(Vector2.ZERO, pcell), WHEEL_PLATE_MOD)
 		# Center hub: the fuel-cap ring framing the War Chest itself — this
 		# wheel drains the same pool that funds revives.
 		# Scale off the imported size, not the 600px source — dial_fuel imports
@@ -10481,7 +10494,9 @@ func _draw_wheel() -> void:
 				for q in sim.players.size():
 					var dq := sim.players[q]
 					if not dq["alive"] and sim.war_chest - gcost < sim.revive_cost(dq):
-						Art.text_center(self, "BUY LEAVES NO REVIVE FOR P%d" % (q + 1),
+						var warn_txt := "BUY LEAVES NO REVIVE FOR P%d" % (q + 1)
+						_wheel_row_plate(c.x, c.y + WHEEL_ROW_WARN, Art.tw(warn_txt, 8), 8)
+						Art.text_center(self, warn_txt,
 							c.x, c.y + WHEEL_ROW_WARN, 8, Color(1.0, 0.7, 0.3))
 						break
 		if sel >= 0:
@@ -10493,13 +10508,16 @@ func _draw_wheel() -> void:
 			var wl := Art.tw(cue_l, 8)
 			var wr := Art.tw(cue_r, 8)
 			var cx0 := c.x - (wl + 10.0 + wr) / 2.0
+			_wheel_row_plate(c.x, c.y + WHEEL_ROW_CUE, wl + 10.0 + wr, 8)
 			Art.text(self, cue_l, Vector2(cx0, c.y + WHEEL_ROW_CUE), 8,
 				Color(0.9, 0.92, 0.8, 0.85) if sel_afford else Color(1.0, 0.55, 0.45, 0.9))
 			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + WHEEL_ROW_CUE - 3.5), 10.0,
 				Color.WHITE, i == 1, bind("roll"))   # P2's wheel is pad-driven — show pad B, not the C keycap
 			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + WHEEL_ROW_CUE), 8, Color(0.9, 0.92, 0.8, 0.85))
 		else:
-			Art.text_center(self, "FLICK TO PICK · RELEASE TO CLOSE", c.x, c.y + WHEEL_ROW_CUE, 8,
+			var cue_txt := "FLICK TO PICK · RELEASE TO CLOSE"
+			_wheel_row_plate(c.x, c.y + WHEEL_ROW_CUE, Art.tw(cue_txt, 8), 8)
+			Art.text_center(self, cue_txt, c.x, c.y + WHEEL_ROW_CUE, 8,
 				Color(0.9, 0.92, 0.8, 0.85))
 		# What the selected socket actually delivers: ONE horizontal row (label
 		# + cost + stock) on the hub label row, instead of three stacked runs
@@ -10523,6 +10541,7 @@ func _draw_wheel() -> void:
 			var gap := 8.0
 			var total_w := lblw + gap + costw + (gap + stockw if stock_txt != "" else 0.0)
 			var rx := c.x - total_w / 2.0
+			_wheel_row_plate(c.x, c.y + WHEEL_ROW_LABEL, total_w, 9)
 			var ry := c.y + WHEEL_ROW_LABEL
 			Art.text(self, lbl, Vector2(rx, ry), 9, Color(1.0, 0.95, 0.7))
 			rx += lblw + gap

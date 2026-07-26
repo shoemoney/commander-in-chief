@@ -3193,6 +3193,133 @@ func test_world_callout_contrast() -> void:
 		"the default plate rect is byte-identical to the 10px boss-label plate it came from")
 
 
+# The shop wheel's own version of the callout-contrast hole above: the plate alpha was
+# cut 0.92 -> 0.55 (c2 2v, "so the mast, scars, drops and hazards read THROUGH it during
+# the buy") and its three text rows (WHEEL_ROW_WARN/LABEL/CUE) were never backed at all —
+# drawn straight onto scrolling terrain with only Art.text's 1px shadow. The plate art
+# itself is opaque out to ~0.9 radius (assets/art/hud/SPR_Apocalypse_WeaponWheel.png cell
+# 0,0); the see-through was purely the modulate alpha. Overturning the cut back to
+# WHEEL_PLATE_MOD.
+func test_wheel_plate_masks_the_terrain() -> void:
+	var plate_tex := Art.tex("ui_wheel_plate")
+	var img := plate_tex.get_image()
+	var cell_w := float(img.get_width()) / 4.0
+	var cell_h := float(img.get_height()) / 2.0
+	# The socket ring sits at radius 31 in the 102px on-screen draw of a cell_w-wide
+	# source cell -> source-space radius, sampled along a socket-free axis (east).
+	var r := 31.0 / 102.0 * cell_w
+	var sample: Color = img.get_pixel(int(cell_w / 2.0 + r), int(cell_h / 2.0))
+	var alpha_eff: float = sample.a * MainScript.WHEEL_PLATE_MOD.a
+	var stops: Array = MainScript._ground_stops("campaign")[0]
+	var brightest := 0.0
+	var darkest := 1.0
+	for stop in stops:
+		# Plain (r+g+b)/3 brightness, not WCAG relative luminance: this check
+		# is about how much of the terrain's actual tonal SWING shows through
+		# the disc, not text-on-plate readability (that's check 1b, below).
+		var l: float = (stop.r + stop.g + stop.b) / 3.0 * MainScript.GROUND_SHADE
+		brightest = maxf(brightest, l)
+		darkest = minf(darkest, l)
+	var bleed := (1.0 - alpha_eff) * (brightest - darkest)
+	Runner.T.ok(bleed <= 0.05,
+		"wheel plate terrain bleed-through %.3f stays masked (<=0.05, alpha_eff=%.2f)" % [bleed, alpha_eff])
+
+
+# The class half of the wheel fix: every WHEEL_ROW_* text row must be backed by its own
+# plate, not just the hub disc. Scrapes the real _draw_wheel source rather than hand-copying
+# literals, so a row added tomorrow (or an ink changed) is covered the day it lands.
+func test_every_wheel_text_run_is_backed() -> void:
+	var f := FileAccess.open("res://src/main.gd", FileAccess.READ)
+	Runner.T.ok(f != null, "main.gd source opens for the wheel-row audit")
+	var src := f.get_as_text()
+	f.close()
+	var fn_start := src.find("func _draw_wheel() -> void:")
+	Runner.T.ok(fn_start >= 0, "_draw_wheel is still the function name this audit scrapes")
+	var fn_end := src.find("\nfunc ", fn_start + 1)
+	if fn_end < 0:
+		fn_end = src.length()
+	var body := src.substr(fn_start, fn_end - fn_start)
+	# Strip line comments so a `#`-comment mentioning a row const (e.g. the
+	# on-screen-clamp note above) never counts as its "first use".
+	var raw_lines := body.split("\n")
+	var lines: Array = []
+	for raw_line in raw_lines:
+		var hpos := raw_line.find("#")
+		lines.append(raw_line if hpos < 0 else raw_line.substr(0, hpos))
+	body = "\n".join(lines)
+
+	# 1. Every WHEEL_ROW_* const declared anywhere in main.gd is enumerated in
+	#    WHEEL_TEXT_ROWS.
+	var row_names: Array = []
+	var re_const := RegEx.new()
+	re_const.compile("const (WHEEL_ROW_[A-Z_]+) :=")
+	for m in re_const.search_all(src):
+		row_names.append(m.get_string(1))
+	Runner.T.ok(row_names.size() >= 3, "found the wheel's WHEEL_ROW_* consts to audit (%d)" % row_names.size())
+	var rows_list_txt := ""
+	var re_list := RegEx.new()
+	re_list.compile("const WHEEL_TEXT_ROWS :=\\s*\\[([^\\]]*)\\]")
+	var lm := re_list.search(src)
+	if lm != null:
+		rows_list_txt = lm.get_string(1)
+	for row in row_names:
+		Runner.T.ok(rows_list_txt.find(row) >= 0, "%s is enumerated in WHEEL_TEXT_ROWS" % row)
+
+	# 2. Every row gets a plate BEFORE its text: the row const's first mention in
+	#    the function body must sit on a _wheel_row_plate(...) call line.
+	for row in row_names:
+		var first_line := -1
+		for i in lines.size():
+			if lines[i].find(row) >= 0:
+				first_line = i
+				break
+		Runner.T.ok(first_line >= 0, "%s is actually used inside _draw_wheel" % row)
+		if first_line < 0:
+			continue
+		Runner.T.ok(lines[first_line].find("_wheel_row_plate(") >= 0,
+			"%s's first use in _draw_wheel is backed by _wheel_row_plate (line: %s)"
+				% [row, lines[first_line].strip_edges()])
+
+	# 3. _label_plate_rect covers the row text at shipped size and 200% text size
+	#    (the same two-scale rule test_world_callout_contrast uses above).
+	for sz in [8, 9, 16, 18]:
+		var r: Rect2 = MainScript._label_plate_rect(100.0, 200.0, 40.0, sz)
+		Runner.T.ok(r.position.y <= 200.0 - float(sz),
+			"the %dpx wheel-row plate covers a full %dpx ascent above the baseline" % [sz, sz])
+		Runner.T.ok(r.end.y > 200.0, "the %dpx wheel-row plate still straddles the baseline" % sz)
+
+	# 4. Every ink literal drawn on a row clears AA-normal against that row's own
+	#    plate (LABEL_PLATE_FILL composited over the brightest ground the campaign paints).
+	var stop: Color = MainScript._ground_stops("campaign")[0][0]
+	var ground := Color(stop.r * MainScript.GROUND_SHADE, stop.g * MainScript.GROUND_SHADE,
+		stop.b * MainScript.GROUND_SHADE)
+	var fill: Color = MainScript.LABEL_PLATE_FILL
+	var plate := _blend(_opaque(fill), ground, fill.a)
+	var re_color := RegEx.new()
+	re_color.compile("Color\\(([0-9.]+),\\s*([0-9.]+),\\s*([0-9.]+)(?:,\\s*([0-9.]+))?\\)")
+	var checked := 0
+	for row in row_names:
+		var first_line := -1
+		for i in lines.size():
+			if lines[i].find(row) >= 0:
+				first_line = i
+				break
+		if first_line < 0:
+			continue
+		var window_end: int = mini(lines.size(), first_line + 20)
+		var window := "\n".join(lines.slice(first_line, window_end))
+		for m in re_color.search_all(window):
+			var a: float = m.get_string(4).to_float() if m.get_string(4) != "" else 1.0
+			var ink := Color(m.get_string(1).to_float(), m.get_string(2).to_float(), m.get_string(3).to_float())
+			var composite := _blend(ink, plate, a)
+			var ratio := _wcag_contrast(composite, plate)
+			Runner.T.ok(ratio >= 4.5,
+				"wheel row %s ink (%.2f,%.2f,%.2f,%.2f) contrast %.2f clears AA-normal on its plate"
+					% [row, ink.r, ink.g, ink.b, a, ratio])
+			checked += 1
+	Runner.T.ok(checked >= 3, "scraped at least one ink per wheel row (found %d)" % checked)
+
+
 # src over dst at alpha a -> opaque composite color (per-channel).
 func _blend(src: Color, dst: Color, a: float) -> Color:
 	return Color(src.r * a + dst.r * (1.0 - a), src.g * a + dst.g * (1.0 - a), src.b * a + dst.b * (1.0 - a))

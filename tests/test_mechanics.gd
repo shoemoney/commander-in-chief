@@ -1028,6 +1028,123 @@ func test_rocks_are_real_cover() -> void:
 	Runner.T.eq(sim.rocks.size(), before, "grenades arc over — no rock dies to a blast")
 
 
+# Probe a single ground mover into an AABB blocker at a diagonal approach angle,
+# starting 2px off the face (the escape-rule boundary), and measure how far it
+# travels over 300 ticks of _advance_toward with a fixed target on the far side.
+# A wedge (revert-both-axes) freezes it at first contact -> ~0px. A slide
+# (deny-only-the-entered-axis) rides the free axis -> real displacement.
+func _probe_cover_slide(sim: SimWorld, e: Dictionary, cx: int, cy: int, hw: int, hh: int, ang_deg: float) -> Dictionary:
+	var ang := deg_to_rad(ang_deg)
+	var dirx := cos(ang)
+	var diry := sin(ang)
+	var hw_px := float(hw) / SimWorld.F_ONE
+	var hh_px := float(hh) / SimWorld.F_ONE
+	# Distance from center to the face this ray exits through (box/ray intersection).
+	var t := 100000.0
+	if absf(dirx) > 0.0001:
+		t = minf(t, hw_px / absf(dirx))
+	if absf(diry) > 0.0001:
+		t = minf(t, hh_px / absf(diry))
+	var cxf := float(cx) / SimWorld.F_ONE
+	var cyf := float(cy) / SimWorld.F_ONE
+	var start_x := int(roundf((cxf - dirx * (t + 2.0)) * SimWorld.F_ONE))
+	var start_y := int(roundf((cyf - diry * (t + 2.0)) * SimWorld.F_ONE))
+	var target_x := int(roundf((cxf + dirx * 400.0) * SimWorld.F_ONE))
+	var target_y := int(roundf((cyf + diry * 400.0) * SimWorld.F_ONE))
+	e["x"] = start_x
+	e["y"] = start_y
+	for i in 300:
+		var ddx: int = target_x - e["x"]
+		var ddy: int = target_y - e["y"]
+		var dlen: int = Fixed.length(ddx, ddy)
+		if dlen == 0:
+			break
+		sim._advance_toward(e, ddx, ddy, dlen, SimWorld.ENEMY_SPEED)
+	var disp: int = Fixed.length(e["x"] - start_x, e["y"] - start_y)
+	return {"disp": disp, "start_x": start_x, "start_y": start_y}
+
+
+func test_cover_never_wedges_a_ground_mover() -> void:
+	## Class pin (not the-one-rock): the reported wedge is one code shape — "new
+	## position lands inside an AABB -> revert BOTH axes" — repeated across every
+	## ground blocker. 45+90k-degree angles are deliberately skipped: a dead-on
+	## approach (0/90/180/270) has no free axis and legitimately fully stops even
+	## after the fix (test_rocks_are_real_cover's dx-only case pins that), and a
+	## square-tie diagonal is a genuine corner. The other 8 offsets always have a
+	## clear axis, so a healthy mover always rides it.
+	var angles := [20.0, 70.0, 110.0, 160.0, 200.0, 250.0, 290.0, 340.0]
+	var rx: int = 300 * SimWorld.F_ONE
+	var ry: int = -2000 * SimWorld.F_ONE
+	for ang in angles:
+		var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+		var sim := SimWorld.new(1, 1)
+		sim.rocks.append({"x": rx, "y": ry})
+		var hw := SimWorld._rk_hw(sim.rocks[0])
+		var hh := SimWorld._rk_hh(sim.rocks[0])
+		var r := _probe_cover_slide(sim, e, rx, ry, hw, hh, ang)
+		Runner.T.ok(r["disp"] > 24 * SimWorld.F_ONE,
+			"rock ang=%.0f: mover slides > 24px along the free axis (got %.2fpx)"
+				% [ang, float(r["disp"]) / SimWorld.F_ONE])
+		Runner.T.ok(absi(e["x"] - rx) > hw or absi(e["y"] - ry) > hh,
+			"rock ang=%.0f: mover never ends up inside the rock's AABB" % ang)
+
+	var bx: int = 300 * SimWorld.F_ONE
+	var by: int = -2000 * SimWorld.F_ONE
+	for ang in angles:
+		var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+		var sim := SimWorld.new(1, 1)
+		sim.sandbags.append({"x": bx, "y": by})
+		var r := _probe_cover_slide(sim, e, bx, by, SimWorld.SANDBAG_HALF_W, SimWorld.SANDBAG_HALF_H, ang)
+		Runner.T.ok(r["disp"] > 24 * SimWorld.F_ONE,
+			"sandbag ang=%.0f: mover slides > 24px along the free axis (got %.2fpx)"
+				% [ang, float(r["disp"]) / SimWorld.F_ONE])
+		Runner.T.ok(absi(e["x"] - bx) > SimWorld.SANDBAG_HALF_W or absi(e["y"] - by) > SimWorld.SANDBAG_HALF_H,
+			"sandbag ang=%.0f: mover never ends up inside the sandbag's AABB" % ang)
+
+	var hx: int = 300 * SimWorld.F_ONE
+	var hy: int = -2000 * SimWorld.F_ONE
+	for ang in angles:
+		var e := {"x": 0, "y": 0, "alive": true, "elite": false, "kind": "rusher"}
+		var sim := SimWorld.new(1, 1)
+		sim.tanks.append({"x": hx, "y": hy, "alive": true, "occupant": -1})
+		var r := _probe_cover_slide(sim, e, hx, hy, SimWorld.HULK_HALF_W, SimWorld.HULK_HALF_H, ang)
+		Runner.T.ok(r["disp"] > 24 * SimWorld.F_ONE,
+			"hulk ang=%.0f: mover slides > 24px along the free axis (got %.2fpx)"
+				% [ang, float(r["disp"]) / SimWorld.F_ONE])
+		Runner.T.ok(absi(e["x"] - hx) > SimWorld.HULK_HALF_W or absi(e["y"] - hy) > SimWorld.HULK_HALF_H,
+			"hulk ang=%.0f: mover never ends up inside the hulk's AABB" % ang)
+
+	# Sealed lane block is a half-plane clipped to a ~120px y-band, not a boxed
+	# AABB, so the same 8-angle sweep doesn't apply the same way — but the bug
+	# shape does: a diagonal approach into the sealed x-threshold used to wipe
+	# the still-legal y progress along with the denied x crossing. Pin that
+	# directly, reusing test_c4_lane_block_reroute's geometry.
+	var sim2 := SimWorld.new(1, 1)   # campaign by default
+	var band := 2
+	var lh: int = SimWorld._mix(band, 733)
+	var span_off: int = 250 + lh % 400
+	var span_y: int = -(band * SimWorld.GATE_SPACING + (span_off + 60) * SimWorld.F_ONE)
+	var blk_left: bool = lh & 1 == 0
+	var edge_x: int = (SimWorld.WORLD_LEFT + 200 * SimWorld.F_ONE) if blk_left else (SimWorld.WORLD_RIGHT - 200 * SimWorld.F_ONE)
+	sim2.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300   # sealed phase
+	var e2 := {"x": edge_x + (2 if blk_left else -2) * SimWorld.F_ONE, "y": span_y,
+		"alive": true, "elite": false, "kind": "rusher"}
+	var target_x: int = edge_x + (-60 if blk_left else 60) * SimWorld.F_ONE   # across the sealed line
+	var target_y: int = span_y + 60 * SimWorld.F_ONE                          # diagonal, along the free axis
+	for i in 200:
+		var ddx: int = target_x - e2["x"]
+		var ddy: int = target_y - e2["y"]
+		var dlen: int = Fixed.length(ddx, ddy)
+		if dlen == 0:
+			break
+		sim2._advance_toward(e2, ddx, ddy, dlen, SimWorld.ENEMY_SPEED)
+	Runner.T.ok(absi(e2["y"] - span_y) > 24 * SimWorld.F_ONE,
+		"sealed lane block: mover rides the free (y) axis instead of freezing (moved %.2fpx)"
+			% (float(absi(e2["y"] - span_y)) / SimWorld.F_ONE))
+	Runner.T.ok(not sim2._lane_blocked(e2["x"], e2["y"]),
+		"sealed lane block: mover never ends up on the sealed side")
+
+
 func test_arena_templates_are_clearable_and_barrel_safe() -> void:
 	# KIMK round-2: prove the arenas PLAY, not just that coordinates match.
 	var sim := SimWorld.new(41, 1)

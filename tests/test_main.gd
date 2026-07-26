@@ -818,19 +818,28 @@ func test_god_mode_badge_gets_its_own_band_row_and_never_collides() -> void:
 # A capture harness that cannot traverse the game photographs sector 1 and calls it
 # a review; a difficulty probe that cannot traverse the game reports the bot's
 # pathing luck as the game's difficulty curve. This pins traversal itself.
-
+#
+# BUDGET RAISED 4000 -> 8000 (2026-07-26, cover-slide fix): demo_input's march is a
+# dumb open-loop weave with no stuck-detection of its own — it never reacted to being
+# blocked, it just waited out its own 120t direction cycle. The old "revert both axes"
+# collision froze the bot in PLACE while it waited; the new axis-separated slide keeps
+# it MOVING sideways the whole time instead, which for this seed's exact geometry means
+# it explores more of a long cover run before its weave clears it, not that it's stuck —
+# measured reaching gate 2 at tick 6773 (was <4000), never anywhere near the historical
+# 44,000-tick true softlock this test guards against. Re-verify with debug prints on any
+# non-monotonic-y sample before raising this further; don't just bump the number again.
 func test_scripted_bot_clears_the_fork_gate_that_used_to_trap_it() -> void:
 	var ms: Script = load("res://src/main.gd")
 	var sim := SimWorld.new(7, 1, "campaign")
 	sim.god_mode = true   # the run must not be able to END, so a stall reads as a stall
 	var best_y: int = sim.players[0]["y"]
-	for t in 4000:
+	for t in 8000:
 		sim.step([ms.demo_input(t, sim)] as Array[SimInput])
 		best_y = mini(best_y, sim.players[0]["y"])
 		if best_y < -2 * SimWorld.GATE_SPACING:
 			break
 	Runner.T.ok(best_y < -2 * SimWorld.GATE_SPACING,
-		"the bot gets north of gate 2 within 4000 ticks (it once never got there at all)")
+		"the bot gets north of gate 2 within 8000 ticks (it once never got there at all)")
 
 
 func test_scripted_bot_locks_a_target_in_endless_where_every_campaign_branch_is_dead() -> void:

@@ -489,13 +489,19 @@ const SEED := 0xDEADBEEF
 ## ~2.2px/tick approach across an 18px trigger zone) and stays live to everything else. Counter-checked
 ## so the fix cannot have simply neutered the weapon: an enemy standing on it during that window
 ## still dies at tick 2, and once grace expires the planter is hurt again at tick 5.
+## RE-RECORDED (2026-07-26, cover-slide fix): _advance_toward and _step_players now
+## resolve cover (rocks/sandbags/hulks/sealed lane blocks/the keyed barricade) per-axis
+## (slide) instead of reverting both axes on any contact — every mover that touches
+## cover shifts position from the first contact tick onward. Sample 0 (t=600) is
+## byte-identical: the torture hasn't reached any cover yet at 10s in. Samples 1-5 all
+## moved (the torture streams rocks/sandbags/hulks well before 20s).
 const GOLDEN: Array[int] = [
 	2526922330838029777,
-	123904905374903528,
-	8324108471961656605,
-	6055676100953415857,
-	8590073470560221865,
-	1759087827131881334,
+	4406561492076700289,
+	5008464718731060842,
+	5993363887516529799,
+	2661287071331966602,
+	6016516403530113665,
 ]
 
 
@@ -627,13 +633,17 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## still wipes in wave 2, so nothing here is the ready-up or the airstrike change.
 ## MERGED: neither branch's numbers survive this merge — re-recorded ONCE on the
 ## combined tree. Both notes above still describe what moved and why.
+## RE-RECORDED (2026-07-26, cover-slide fix): see the GOLDEN note above — the endless
+## torture also streams the seeded quadrant rocks/sandbags and touches them well before
+## 20s, so samples 1-5 move too. Sample 0 (t=600) is byte-identical (too early to reach
+## any of them, same as campaign).
 const ENDLESS_GOLDEN: Array[int] = [
 	3184915394758128358,
-	869516778180359838,
-	7791110598466866467,
-	831481001753506170,
-	7685674951049540642,
-	776010126801259658,
+	7237179635764073260,
+	8069943378030035269,
+	7606170682722198749,
+	6197615687773169621,
+	8485840871492244461,
 ]
 
 

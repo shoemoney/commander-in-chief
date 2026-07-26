@@ -960,3 +960,75 @@ func test_pilot_execution_still_pays_absolutely_nothing() -> void:
 	sim._kill_enemy(pilot)
 	Runner.T.eq(sim.score, score0, "executing the rescue target still scores nothing")
 	Runner.T.eq(sim.kill_streak, 4, "and still cannot keep a combo alive")
+
+
+func test_no_hostile_stalls_an_endless_wave() -> void:
+	## The run-fatal pin: a cover wedge doesn't just look wrong, it can hold a
+	## whole wave open forever (the frozen hostile is still "live" for
+	## _wave_hostiles_cleared). This test isolates the MOVEMENT question from
+	## combat competency: a dead solo player (no ally to revive it) makes
+	## every enemy legitimately freeze ("no target" in _step_enemies) -- that
+	## is not a wedge, and would silently mask one if it gated the census
+	## (measured: just setting "alive" back to true between steps still let
+	## the player get touch-killed and re-die WITHIN the next step, before
+	## _step_enemies ran that same tick -- a true god-mode needs hurt_iframes
+	## held open too, or the "no target" freeze reappears and reads as a wedge
+	## it isn't). So the player is kept genuinely invincible (alive + a huge
+	## hurt_iframes buffer, no combat) and holds still, while the field is
+	## force-cleared every 800 ticks (same fiat _clear_wave already uses
+	## elsewhere) so the wave march keeps progressing without a working combat
+	## bot. 800 > the 300-tick pin, so any wedge in a cycle's first 800 ticks
+	## still trips it before that cycle's fiat clear erases it.
+	## Track every rusher/shield by REFERENCE (dicts are swept from enemies[]
+	## on death, so a stashed ref would go stale silently otherwise), failing
+	## if any of them sits at the exact same position for 300+ ticks running.
+	var sim := SimWorld.new(2, 1, "endless")
+	var tracked: Array = []   # [{ref, x, y, streak, max_streak, kind}]
+	for t in 6000:
+		sim.step([_idle()])
+		sim.players[0]["alive"] = true
+		sim.players[0]["hurt_iframes"] = 999999   # genuine invincibility, not just the flag
+		if t % 800 == 799:
+			for e in sim.enemies:
+				e["alive"] = false
+		var any_alive := false
+		for p in sim.players:
+			if p["alive"]:
+				any_alive = true
+				break
+		for e in sim.enemies:
+			if not e["alive"] or (e["kind"] != "rusher" and e["kind"] != "shield"):
+				continue
+			# Sitting adjacent to a stationary player it has actually REACHED is
+			# a legitimate stop (touch range), not a wedge -- only count a hold
+			# still short of the target as suspicious.
+			var still_closing := true
+			for p in sim.players:
+				if p["alive"] and Fixed.length(e["x"] - p["x"], e["y"] - p["y"]) <= 24 * SimWorld.F_ONE:
+					still_closing = false
+					break
+			var entry = null
+			for te in tracked:
+				if is_same(te["ref"], e):
+					entry = te
+					break
+			if entry == null:
+				tracked.append({"ref": e, "x": e["x"], "y": e["y"], "streak": 0,
+					"max_streak": 0, "kind": e["kind"]})
+				continue
+			if any_alive and still_closing and e["x"] == entry["x"] and e["y"] == entry["y"]:
+				entry["streak"] += 1
+				entry["max_streak"] = maxi(entry["max_streak"], entry["streak"])
+			else:
+				entry["streak"] = 0
+			entry["x"] = e["x"]
+			entry["y"] = e["y"]
+	Runner.T.ok(sim.wave >= 3, "the wave march actually advances over 6000 ticks (got wave %d)" % sim.wave)
+	var worst := 0
+	var worst_kind := ""
+	for te in tracked:
+		if te["max_streak"] > worst:
+			worst = te["max_streak"]
+			worst_kind = te["kind"]
+	Runner.T.ok(worst < 300,
+		"no rusher/shield sits stationary for 300+ ticks (worst: %s streak %d ticks)" % [worst_kind, worst])
