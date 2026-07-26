@@ -254,12 +254,35 @@ def plate_metal(w, h, side: str):
 
 
 def reticle(w, h):
-    """Single chevron bracket -- the HUD draws four of these, rotated."""
+    """Aim crosshair: centre dot, four gapped ticks, dark ink keyline.
+
+    Was a single CHEVRON (`<`) with the docstring "the HUD draws four of these,
+    rotated" -- nothing ever did. main.gd draws exactly ONE, and bakes the same
+    file as the gameplay OS cursor, so the aim point read on screen as a boomerang
+    that never pointed at anything. Four cardinal ticks around an open centre put
+    the aim point in the GAP (nothing occludes what you are shooting) and the dot
+    gives it a precise middle. The dilated INK ring is what makes it survive both
+    pale sand and dark cover -- a bare white stencil vanished on the first and the
+    in-game halo only backs the in-game draw, never the OS cursor.
+
+    Symmetric about the canvas centre ON PURPOSE: the cursor hotspot is the canvas
+    centre (main.gd::_apply_cursor), and test_main.gd ratchets the art's used-rect
+    centre against it.
+    """
     m, d = _mask(w, h)
     S = w * SS
-    d.line([(S * 0.62, S * 0.18), (S * 0.34, S * 0.50), (S * 0.62, S * 0.82)],
-           fill=255, width=max(2, int(S * 0.10)), joint="curve")
-    return _down(m, w, h, blur=0.3, rgb=(242, 244, 236))
+    c = S / 2.0
+    arm = S * 0.048          # tick half-thickness
+    gap, tip = S * 0.165, S * 0.46   # inner gap / outer reach of each tick
+    for a, b in ((gap, tip), (-tip, -gap)):
+        d.rectangle([c + a, c - arm, c + b, c + arm], fill=255)   # E / W tick
+        d.rectangle([c - arm, c + a, c + arm, c + b], fill=255)   # S / N tick
+    ring = m.filter(ImageFilter.MaxFilter(int(S * 0.062) | 1))
+    out = _down(ring, w, h, blur=0.15, rgb=INK)
+    white = Image.new("RGBA", (w, h), (242, 244, 236, 0))
+    white.putalpha(m.filter(ImageFilter.GaussianBlur(0.3 * SS)).resize((w, h), Image.LANCZOS))
+    out.alpha_composite(white)
+    return out
 
 
 def vignette(w, h):

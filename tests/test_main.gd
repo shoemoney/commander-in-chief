@@ -326,6 +326,11 @@ func test_partner_ko_ducks_only_the_self_directed_channels() -> void:
 const CURSOR_ART_CANVAS := 64          # imported square both cursor sprites must stay
 const CURSOR_TIP_ALPHA := 8            # /255 — above the fix_alpha_border fringe, at the visible tip
 const CURSOR_ARROW_BBOX := Rect2i(8, 2, 42, 60)   # opaque bbox of cursor.png at that alpha
+# Battlefield yardsticks the gameplay crosshair is sized against, in LOGICAL px of the
+# 640x360 viewport. Measured off a real gameplay capture, not guessed: the player soldier
+# renders ~20px, and main.gd's own in-world aim reticle (`rrect`) is a 16px square.
+const PLAYER_SPRITE_PX := 20
+const INGAME_RETICLE_PX := 16
 
 
 static func _opaque_bbox(img: Image, alpha: int) -> Rect2i:
@@ -355,14 +360,29 @@ func test_both_os_cursors_bake_to_one_fixed_canvas_smaller_than_the_source() -> 
 		+ "bakes at native*scale is not sized, it is whatever the art happens to be")
 	Runner.T.eq(c.get("CURSOR_SRC_PX", 0), CURSOR_ART_CANVAS,
 		"CURSOR_SRC_PX must state the canvas the tip was actually measured on")
+	# The two cursors are NOT one object and must not share one size. The crosshair rode
+	# CURSOR_PX (sized against a title-screen menu row) onto the BATTLEFIELD, where 24
+	# logical px is wider than the ~20px player sprite and wider than the enemies it aims
+	# at — 48 physical px at the default 1280x720 window. RETICLE_PX is anchored to the aim
+	# marker main.gd already draws for itself (`rrect`, 16 logical px at the player).
+	var rpx: int = c.get("RETICLE_PX", 0)
+	Runner.T.ok(rpx > 0 and rpx <= PLAYER_SPRITE_PX,
+		"RETICLE_PX (%d) must not exceed the ~%dpx player sprite it aims past — an aim mark "
+			% [rpx, PLAYER_SPRITE_PX]
+		+ "bigger than the character occludes the thing you are shooting at")
+	Runner.T.eq(rpx, INGAME_RETICLE_PX,
+		"RETICLE_PX must equal the %dpx aim reticle main.gd draws in-world — one game, one aim "
+			% INGAME_RETICLE_PX
+		+ "mark. Re-measure `rrect` at the player draw and move BOTH, never this row alone")
 	var ms: Script = load("res://src/main.gd")
 	for s in [1, 2, 3]:
 		for key in ["ui_cursor", "ui_reticle"]:
+			var kpx: int = px if key == "ui_cursor" else rpx
 			var src := _raw(key)
-			var baked: Image = ms.bake_cursor_image(src, px * s)
-			Runner.T.eq(Vector2i(baked.get_width(), baked.get_height()), Vector2i(px * s, px * s),
+			var baked: Image = ms.bake_cursor_image(src, kpx * s)
+			Runner.T.eq(Vector2i(baked.get_width(), baked.get_height()), Vector2i(kpx * s, kpx * s),
 				"'%s' at window scale %dx must bake to %dpx square, not %dpx"
-					% [key, s, px * s, baked.get_width()])
+					% [key, s, kpx * s, baked.get_width()])
 			# The bake must not eat its own source: Texture2D.get_image() returns the
 			# texture's OWN Image, so an in-place resize here poisons every later re-bake.
 			Runner.T.eq(src.get_width(), CURSOR_ART_CANVAS,
@@ -384,8 +404,19 @@ func test_menu_hotspot_tracks_the_arrow_tip_at_every_window_scale() -> void:
 			+ "the art gets — a hand-tuned constant drifts off the pointer the moment either moves")
 		Runner.T.ok(hs.x >= 0.0 and hs.y >= 0.0 and hs.x < float(px * s) and hs.y < float(px * s),
 			"menu_hotspot(%d) = %s must land inside the %dpx baked image" % [s, str(hs), px * s])
-	# The crosshair's hotspot is the canvas centre, so it has to scale with the bake too.
-	Runner.T.eq(float(px) / 2.0 * 2.0, float(px), "crosshair hotspot is CURSOR_PX/2 * scale")
+	# An arrow aims from its TIP; a crosshair aims from its dead CENTRE. This row used to be
+	# `eq(px / 2.0 * 2.0, px)` — an identity that asserted nothing about the crosshair at all,
+	# and it stayed green while the crosshair hotspot was hard-wired to CURSOR_PX/2 inside
+	# _apply_cursor. Pin it the same way menu_hotspot is pinned.
+	var rpx: int = c.get("RETICLE_PX", 0)
+	for s in [1, 2, 3]:
+		var chs: Vector2 = ms.crosshair_hotspot(s)
+		Runner.T.ok(chs.is_equal_approx(Vector2.ONE * (rpx / 2.0) * float(s)),
+			"crosshair_hotspot(%d) = %s must be the dead CENTRE of the %dpx bake — off-centre and "
+				% [s, str(chs), rpx * s]
+			+ "every mouse-aimed shot leaves by that offset")
+		Runner.T.ok(chs.x > 0.0 and chs.x < float(rpx * s) and chs.y == chs.x,
+			"crosshair_hotspot(%d) = %s must be square and inside the baked image" % [s, str(chs)])
 
 
 func test_cursor_source_art_still_matches_the_constants_measured_off_it() -> void:
@@ -411,6 +442,44 @@ func test_cursor_source_art_still_matches_the_constants_measured_off_it() -> voi
 		"reticle art sits %s off its canvas centre, but the crosshair hotspot IS the canvas "
 			% str(off)
 		+ "centre — re-centre the art or stop assuming centre")
+
+
+func test_reticle_art_is_a_crosshair_and_not_a_bracket() -> void:
+	# ui/reticle.png was a single CHEVRON (`<`) — a UI angle-bracket reused as the aim mark —
+	# while _bake_cursor's comment called it "a crosshair" and the OS cursor baked it 48px
+	# wide. On screen it read as a boomerang that pointed at nothing. Nothing measured the
+	# SHAPE, so the lie survived every pass. Four cardinal ticks around an open centre is a
+	# crosshair; a bracket has arms on the diagonals and mass on one side only.
+	var img := _raw("ui_reticle")
+	var lo := CURSOR_ART_CANVAS / 2 - 1   # 64px canvas: the centre falls BETWEEN 31 and 32
+	var hi := CURSOR_ART_CANVAS / 2
+	var a := func(x: int, y: int) -> int: return int(img.get_pixel(x, y).a * 255.0)
+	# 1. Open centre. The aim point must not be under ink — you shoot what you can see.
+	for r in range(0, 5):
+		for v in [a.call(hi + r, lo), a.call(lo - r, lo), a.call(lo, hi + r), a.call(lo, lo - r)]:
+			Runner.T.ok(v < 16, "the crosshair's centre gap is opaque %d/255 at radius %d — the "
+				% [v, r] + "aim mark is covering the thing being aimed at")
+	# 2. All FOUR cardinal ticks present, at the same reach. A chevron/bracket fails this:
+	#    its mass sits on one side, so two of these four come back empty.
+	for r in [12, 20, 28]:
+		for probe in [[hi + r, lo, "E"], [lo - r, lo, "W"], [lo, hi + r, "S"], [lo, lo - r, "N"]]:
+			Runner.T.ok(a.call(probe[0], probe[1]) > 200,
+				"no %s tick at radius %d (alpha %d) — a crosshair reaches out all four cardinals; "
+					% [probe[2], r, a.call(probe[0], probe[1])]
+				+ "one-sided art is a bracket, and it reads on screen as a boomerang")
+	# 3. Diagonals EMPTY — the discriminator a chevron cannot pass, since its arms are diagonal.
+	for r in [10, 14, 18, 22]:
+		Runner.T.ok(a.call(hi + r, hi + r) < 16 and a.call(lo - r, lo - r) < 16 \
+				and a.call(hi + r, lo - r) < 16 and a.call(lo - r, hi + r) < 16,
+			"ink on the diagonals at radius %d — a crosshair's arms are cardinal only" % r)
+	# 4. A dark keyline flanks each tick. The OS cursor gets NO in-game halo (RETICLE_HALO only
+	#    backs the in-world draw), so without baked-in ink it vanishes on pale sand.
+	var side := img.get_pixel(lo - 4, lo - 20)
+	Runner.T.ok(side.a > 0.7 and side.get_luminance() < 0.2,
+		"the pixel beside a tick is %s — the crosshair needs a dark keyline baked in or it "
+			% str(side) + "disappears against the desert the moment it leaves dark cover")
+
+
 # --- THE top-center message band's one arbiter (main.band_rows) -----------------------------
 # Observed live at sector 1: a pickup teach line ("PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM
 # DOWN THE COLUMN") and the closed-gate objective line ("GRENADE THE BUNKERS TO ADVANCE")
