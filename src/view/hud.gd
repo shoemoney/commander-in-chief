@@ -178,6 +178,9 @@ const VERB_WINDOW := 1800.0  # c-onboard: UPPER BOUND (ticks) on the verb chip, 
                           # now retire on USE (verb_used), so this is only the backstop for a player
                           # who never presses one at all: 30s, then the chip leaves regardless so it
                           # can't become a permanent playfield overlay.
+                          # c-onboard2: the countdown is GATED on ENGAGEMENT (see verb_step) — it
+                          # does not start until the player has pressed one of these verbs, so it
+                          # can't expire on the player who is still working out the controls.
 var _verb_show := VERB_WINDOW   # c1-04: ticks-worth of the BRIGHT gameplay-verb reminder
                           # left; armed at run start only. After it runs out the transient
                           # chip fades FULLY out — the permanent ROLL/WHEEL/REVIVE
@@ -317,7 +320,7 @@ func _process(delta: float) -> void:
 		_dirty = true
 	var verb_a := _verb_alpha(_verb_show, main._motion)
 	var res := verb_step(_verb_show, _verb_sim_id, sim.get_instance_id(),
-		paused, false, delta)
+		paused, false, delta, not _verb_used.is_empty())
 	_verb_show = res[0]
 	_verb_sim_id = int(res[1])
 	if _verb_alpha(_verb_show, main._motion) != verb_a:
@@ -430,8 +433,18 @@ static func _verb_alpha(show: float, motion: float) -> float:
 ## might keep high. triple-A: no longer re-arms on unpause — a hint that keeps coming
 ## back every time you open a menu is a hint that never went away. The bindings stay
 ## recoverable via the pause menu's permanent footer reference and HOW TO PLAY.
+## c-onboard2: `engaged` == the player has pressed AT LEAST ONE of the chip's verbs this run.
+## The 30s backstop does not start running until they have. Playtest that found this: a fresh
+## campaign, eight deaths in sector 1, and the chip — the only in-run control hint there is — had
+## already timed out on its wall clock while the player was still reading the landing zone. A
+## clock started at run-open measures READING time, not learning; the first verb press is the
+## real proof that the player has connected chip to button, so that is what starts it. Once one
+## verb lands the old 30s runs out for the rest, so the chip still can't become a permanent
+## playfield overlay, and it can't wedge on a player who never opens the supply wheel (used
+## segments retire individually regardless — see verb_active_segs). Defaults true (= the old
+## unconditional countdown) so existing callers/tests keep the previous behaviour.
 static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
-		_was_paused: bool, delta: float) -> Array:
+		_was_paused: bool, delta: float, engaged := true) -> Array:
 	if paused:
 		return [show, sim_id]   # frozen while any menu is up (the sim isn't ticking either)
 	var s := show
@@ -439,6 +452,8 @@ static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
 	if cur_sim_id != sim_id:
 		s = VERB_WINDOW         # bright window (upper bound) on a brand-new run/restart
 		sid = cur_sim_id
+	if not engaged:
+		return [s, sid]         # backstop held until the player has actually used a verb
 	return [maxf(0.0, s - delta * 60.0), sid]
 
 
@@ -1703,6 +1718,9 @@ func _draw_caption() -> void:
 ## belong here. GRENADE is ON the chip: it is the ONLY armor-cracker (the landing zone
 ## is a bunker you must grenade) and the TITLE legend that once named it is long gone —
 ## it is now SELECT + HOW TO only, so nothing else states the button in-run.
+## c-onboard2: MOVE/AIM are deliberately NOT segments — they are taught on HOW TO PLAY's
+## CONTROLS page (which now leads with them, off the live binds). What changed here is the
+## backstop: it no longer starts ticking until the player has actually used a verb (verb_step).
 func _verb_legend() -> void:
 	if main._menu != null and main._menu.is_active():
 		return

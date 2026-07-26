@@ -1165,6 +1165,80 @@ func test_device_glyph_change_triggers_menu_repaint() -> void:
 	Runner.T.ok(not Menu.device_glyphs_changed(false, "xbox", false, "xbox"), "steady keyboard does NOT repaint")
 
 
+# c-onboard2: a GameMenu whose _verb_line records its segments instead of painting them, so the
+# REAL _howto_page_controls() can be invoked outside a draw context. (_verb_line issues native
+# draw_texture_rect/draw_string calls that would be hard engine ERRORs headless; the page's only
+# other ink is Art.text, which Art.text_capture intercepts.)
+class _HowtoCaptureMenu extends GameMenu:
+	var lines: Array = []
+	func _verb_line(segs: Array, _base_y: float, _col: Color) -> void:
+		lines.append(segs)
+
+
+# c-onboard2: THE CONTROLS PAGE MUST TEACH MOVE AND AIM, FIRST, OFF THE LIVE BINDS.
+# Found by playing: a fresh campaign, eight deaths in sector 1, then HOW TO PLAY -> CONTROLS —
+# which taught GRENADE / ROLL / BOARD / PLANT and never once said how to move or how the weapon
+# works. Those two are what every other verb is built on. The page reads main.bind(), so a
+# rebound player must be told the keys they actually have, never a hardcoded WASD.
+func test_howto_controls_teaches_move_and_aim_off_the_live_binds() -> void:
+	var was_pad: bool = Art.use_pad
+	var stub := _StubMain.new()
+	var m := _HowtoCaptureMenu.new()
+	m.main = stub
+	Art.use_pad = false
+	var prev = Art.text_capture
+	var head: Array = []
+	Art.text_capture = head
+	m._howto_page_controls()
+	Art.text_capture = prev
+
+	# Flatten the recorded verb lines to [glyph_act -> full text].
+	var by_act := {}
+	var order: Array = []
+	for segs in m.lines:
+		var act := ""
+		var txt := ""
+		for seg: String in segs:
+			if seg.begins_with("@"):
+				act = seg.substr(1)
+			else:
+				txt += seg
+		order.append(act)
+		by_act[act] = txt
+	Runner.T.ok(by_act.has("move"), "the CONTROLS page has a MOVE line (rows %s)" % [order])
+	Runner.T.ok(by_act.has("aim"), "the CONTROLS page has an AIM line (rows %s)" % [order])
+	# FIRST — they are the prerequisite verbs, so they lead the page, not trail the extras.
+	Runner.T.eq(order.slice(0, 2), ["move", "aim"], "MOVE and AIM lead the page (order %s)" % [order])
+	# The four verbs the page already taught are all still there (nothing was traded away).
+	for act in ["grenade", "roll", "interact"]:
+		Runner.T.ok(act in order, "the existing %s line survives (order %s)" % [act, order])
+	Runner.T.eq(order.count("interact"), 2, "BOARD and PLANT both keep their shared-button line")
+	# The retired header claimed a button count that a fifth line makes false.
+	var heads: Array = []
+	for op in head:
+		heads.append(op["id"])
+	for h in heads:
+		Runner.T.ok(not ("THREE BUTTONS" in str(h)),
+			"the stale 'THREE BUTTONS, FOUR VERBS' header is gone (saw '%s')" % h)
+
+	# --- REBINDS. Default WASD keys are NAMED, then a rebind moves what the page says.
+	for k in ["W", "A", "S", "D"]:
+		Runner.T.ok(k in by_act["move"], "MOVE names the live '%s' bind (line '%s')" % [k, by_act["move"]])
+	Runner.T.ok("MOUSE" in by_act["aim"], "AIM names the mouse on keyboard (line '%s')" % by_act["aim"])
+	# Always-fire: there is no trigger, so the page must say the gun shoots by itself.
+	Runner.T.ok("fires on its own" in by_act["aim"], "AIM states the weapon fires on its own (line '%s')" % by_act["aim"])
+	stub._binds["move_up"] = KEY_K
+	Runner.T.eq(m._dir_devices("move"), "K/A/S/D", "a rebound MOVE UP changes what the page prints")
+
+	# --- DEVICE. On a pad the page names the sticks, not keycaps that don't exist there.
+	Art.use_pad = true
+	Runner.T.eq(m._dir_devices("move"), "the LEFT STICK", "pad MOVE names the left stick")
+	Runner.T.eq(m._dir_devices("aim"), "the RIGHT STICK", "pad AIM names the right stick")
+	Art.use_pad = was_pad
+	m.free()
+	stub.free()
+
+
 # HOW TO PLAY is the ONLY place FIRE is named, and PAUSE is the only menu reachable mid-run —
 # so PAUSE must host a "howto" row, and BACK out of the manual must return to the PAUSED run
 # (never the INFO screen, which would strand the run's menu tree at the title).
