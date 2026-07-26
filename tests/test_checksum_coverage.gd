@@ -51,7 +51,9 @@ const KNOWN := {
 	"strike": ["x", "y", "ticks", "obs"],
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
-	"mine": ["x", "y", "armed", "friendly"],
+	# `grace` = planter-immunity countdown on a player-planted claymore. HASHED: it decides
+	# whether a player takes the hit, so it is gameplay, not presentation.
+	"mine": ["x", "y", "armed", "friendly", "grace"],
 	"sandbag": ["x", "y", "world"],
 	# "kind" is the cover TIER (c2 3v) — DERIVED from position at spawn, never
 	# fed to the checksum (position already is); variety is gated past the

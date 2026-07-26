@@ -45,7 +45,17 @@ const REND_TICKS := 480
 # Player Claymore: a carried charge (capped) planted with INTERACT on foot away
 # from any tank. Reuses the landmine array wholesale — it hurts both sides.
 const CLAYMORE_CAP := 3
-const CLAYMORE_PLANT_OFFSET := 20 * F_ONE   # behind the aim, outside its own trigger radius
+const CLAYMORE_PLANT_OFFSET := 20 * F_ONE   # ALONG the aim (the comment used to say "behind" —
+                                            # stale; see the plant site for why it moved)
+# PLANTER GRACE. Placement alone can never fix planting-into-yourself, because both placements
+# self-kill on the input the game teaches: measured with tools/probe_claymore.gd, planting ALONG the
+# aim and then advancing hurts you at TICK 5, and the previous behind-the-aim placement did the same
+# at ~5 ticks on a full backpedal. So the charge stays lethal to everyone else immediately — which is
+# the whole point of dropping one while you fall back — and simply cannot bite the player who planted
+# it for this many ticks. 20 ticks is measured, not guessed: the planter closes 11px in 5 ticks
+# (~2.2px/tick), so crossing the 18px-wide trigger zone takes ~8 ticks; 20 clears it with margin
+# even if you stop dead on top of it.
+const CLAYMORE_ARM_TICKS := 20
 # Smoke capsule: personal concealment — while active NO enemy AI can target you
 # (one guard in _nearest_alive_player covers every ranged/mortar/chase caller).
 const SMOKE_TICKS := 300
@@ -1248,7 +1258,9 @@ func _step_players(inputs: Array) -> void:
 			var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
 			# `friendly` is view-only identity (yours vs the sapper's) — same
 			# trigger, same blast, NOT hashed (see test_checksum_coverage).
-			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true})
+			# `grace` is hashed (it decides whether a player takes a hit, so it is gameplay).
+			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true,
+				"grace": CLAYMORE_ARM_TICKS})
 			events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
 
 		# The rescue touch ignores roll i-frames — i-frames stop contact DEATH,
@@ -3218,7 +3230,7 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if e["fire_cd"] == 0 and mines.size() < SAPPER_MAX_MINES:
 		e["fire_cd"] = SAPPER_MINE_CD_TICKS
-		mines.append({"x": e["x"], "y": e["y"], "armed": true})
+		mines.append({"x": e["x"], "y": e["y"], "armed": true, "grace": 0})
 		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
 	# Moves through the shared mover step, so the sapper respects the cover the
 	# player PAID for: hand-rolled movement here phased straight through sandbags,
@@ -3336,9 +3348,15 @@ func _step_mines() -> void:
 			mines.remove_at(i)
 			continue
 		var triggered := false
+		# Grace ticks down every frame it exists. While it lasts the charge ignores PLAYERS only —
+		# enemies still trip it instantly, so a claymore dropped in a pursuer's path works on the
+		# tick it lands. Without this, walking the direction you are aiming kills you at tick 5.
+		var grace: int = m.get("grace", 0)
+		if grace > 0:
+			m["grace"] = grace - 1
 		# A player on foot (not rolling) stepping on it takes the hit + detonates.
 		for p in players:
-			if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+			if grace <= 0 and p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
 				_hurt_player(p)
 				triggered = true
@@ -4065,7 +4083,7 @@ func _step_camera() -> void:
 				# GATE_SPACING evenly, so this can happen for any seed). Re-test
 				# the ACTUAL placement, same as the bunker-exclusion re-test.
 				if not _near_stream_bunker(m_px, m_py) and not _is_calm_band(m_py):
-					mines.append({"x": m_px, "y": m_py, "armed": true})
+					mines.append({"x": m_px, "y": m_py, "armed": true, "grace": 0})
 		_next_mine_y -= MINE_SPACING
 	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
 	# grenade chains through (and that catches you if you stand too close).
@@ -4277,7 +4295,7 @@ func _step_camera() -> void:
 						rocks.append({"x": _arena_margin_x((wall_side + inward + inward) * F_ONE, lm_y), "y": lm_y - 48 * F_ONE, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
-					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
+					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true, "grace": 0})
 				else:
 					barrels.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE,
 						"armed": true, "fuse_ticks": 0})
@@ -4331,7 +4349,7 @@ func _step_camera() -> void:
 					if absi(_clear_fork_divider_x(_gate_counter, fmx0) * F_ONE - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
 						fmx0 += 48
 					var fmx: int = _clear_fork_divider_x(_gate_counter, fmx0) * F_ONE
-					mines.append({"x": fmx, "y": fmy, "armed": true})
+					mines.append({"x": fmx, "y": fmy, "armed": true, "grace": 0})
 				# c3 4v: on a BLUFF seed the gauntlet's defenders never spawn — the
 				# lane LOOKS the same (sandbags below still stream) but is empty.
 				# The rng draws stay unconditional so the (torture-inert) fork
@@ -4383,7 +4401,7 @@ func _step_camera() -> void:
 					var cmx: int = _clear_fork_divider_x(_gate_counter, cache_x0 + (fmix >> (dm * 4)) % 150) * F_ONE
 					var cmy: int = _next_gate_y + (500 + dm * 80) * F_ONE
 					if not _near_stream_bunker(cmx, cmy):
-						mines.append({"x": cmx, "y": cmy, "armed": true})
+						mines.append({"x": cmx, "y": cmy, "armed": true, "grace": 0})
 				# The deep gauntlet elite also stands down on a bluff seed.
 				if not is_bluff:
 					_spawn_enemy((bounty_x0 + 40 + (fmix >> 8) % 120) * F_ONE,
@@ -4412,7 +4430,7 @@ func _step_camera() -> void:
 						var vmx: int = (bounty_x0 + 60) * F_ONE + vmo * F_ONE
 						var vmy: int = _next_gate_y + 660 * F_ONE
 						if not _near_stream_bunker(vmx, vmy):
-							mines.append({"x": vmx, "y": vmy, "armed": true})
+							mines.append({"x": vmx, "y": vmy, "armed": true, "grace": 0})
 					for vbo in [-56, 56]:
 						sandbags.append({"x": (bounty_x0 + 60) * F_ONE + vbo * F_ONE,
 							"y": _next_gate_y + 600 * F_ONE})
@@ -4440,7 +4458,7 @@ func _step_camera() -> void:
 						var bmx: int = (bounty_x0 + 20 + bm * 40) * F_ONE
 						var bmy: int = _next_gate_y + (500 + bm * 30) * F_ONE
 						if not _near_stream_bunker(bmx, bmy):
-							mines.append({"x": bmx, "y": bmy, "armed": true})
+							mines.append({"x": bmx, "y": bmy, "armed": true, "grace": 0})
 					events.append({"t": "route_bait", "x": (bounty_x0 + 80) * F_ONE, "y": _next_gate_y})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > horizon:
@@ -6046,6 +6064,7 @@ func checksum() -> int:
 		h = feed.call(m["x"], h)
 		h = feed.call(m["y"], h)
 		h = feed.call(int(m["armed"]), h)
+		h = feed.call(m.get("grace", 0), h)
 	h = feed.call(barrels.size(), h)
 	for bl in barrels:
 		h = feed.call(bl["x"], h)

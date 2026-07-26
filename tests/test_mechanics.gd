@@ -181,6 +181,77 @@ func test_rend_rounds_punch_through_the_shield_block() -> void:
 	Runner.T.ok(not e["alive"], "with Rend the same round punches through the block")
 
 
+func test_claymore_cannot_kill_the_planter_walking_the_taught_direction() -> void:
+	# REGRESSION, measured with tools/probe_claymore.gd. The charge plants ALONG the aim and
+	# armed instantly, so advancing while aiming the same way — the twin-stick input the game
+	# actively teaches — walked you into your own blast at TICK 5. Placement cannot fix it:
+	# the previous behind-the-aim placement had the mirror bug at ~5 ticks on a full backpedal,
+	# and the plant site's comment records that trade. CLAYMORE_ARM_TICKS grace resolves both
+	# directions at once by making the charge ignore PLAYERS briefly, while staying live to
+	# everything else. All three assertions below must hold together — the first alone would
+	# pass just as well if the fix had simply made claymores harmless.
+	var sim := SimWorld.new(12, 1)
+	var p: Dictionary = sim.players[0]
+	sim._apply_supply(p, 8)
+	sim.step([SimInput.new()])
+	var plant := SimInput.new()
+	plant.aim_y = -256          # aim north
+	plant.interact = true
+	sim.step([plant])
+	var deaths0: int = p["deaths"]
+	var vest0: bool = p.get("vest", false)
+	# 1. Advance INTO your own aim: this is the self-kill, and it must not happen.
+	var hurt_at := -1
+	for t in 60:
+		var adv := SimInput.new()
+		adv.aim_y = -256
+		adv.move_y = -256
+		sim.step([adv])
+		var q: Dictionary = sim.players[0]
+		if q["deaths"] > deaths0 or (vest0 and not q.get("vest", false)):
+			hurt_at = t + 1
+			break
+	Runner.T.eq(hurt_at, -1, "walking the direction you aim never detonates your own claymore")
+	# 2. It is still instantly lethal to an enemy standing on it DURING that grace.
+	var s2 := SimWorld.new(12, 1)
+	var p2: Dictionary = s2.players[0]
+	s2._apply_supply(p2, 8)
+	s2.step([SimInput.new()])
+	s2.step([plant])
+	var m2: Dictionary = s2.mines[s2.mines.size() - 1]
+	Runner.T.ok(m2.get("grace", 0) > 0, "a freshly planted claymore carries planter grace")
+	s2._spawn_enemy(m2["x"], m2["y"], false)
+	var n0: int = s2.enemies.size()
+	var killed := false
+	for t in 20:
+		s2.step([SimInput.new()])
+		if s2.enemies.size() < n0:
+			killed = true
+			break
+	Runner.T.ok(killed, "grace protects the planter only — an enemy on the charge still trips it")
+	# 3. Once the grace runs out the charge is live to the planter again (1986 grammar intact).
+	var s3 := SimWorld.new(12, 1)
+	var p3: Dictionary = s3.players[0]
+	s3._apply_supply(p3, 8)
+	s3.step([SimInput.new()])
+	s3.step([plant])
+	for t in SimWorld.CLAYMORE_ARM_TICKS + 4:
+		s3.step([SimInput.new()])          # stand still until grace expires
+	var d3: int = s3.players[0]["deaths"]
+	var v3: bool = s3.players[0].get("vest", false)
+	var late := -1
+	for t in 60:
+		var adv2 := SimInput.new()
+		adv2.aim_y = -256
+		adv2.move_y = -256
+		s3.step([adv2])
+		var q3: Dictionary = s3.players[0]
+		if q3["deaths"] > d3 or (v3 and not q3.get("vest", false)):
+			late = t + 1
+			break
+	Runner.T.ok(late > 0, "after grace expires your own claymore hurts you again (it hurts both sides)")
+
+
 func test_claymore_plants_on_interact_and_consumes_a_charge() -> void:
 	var sim := SimWorld.new(12, 1)
 	var p := sim.players[0]

@@ -475,13 +475,27 @@ const SEED := 0xDEADBEEF
 ## beats DO stream in the torture window, and the clamp nudges a few of them off the divider
 ## face by a handful of px, moving samples 2-5 exactly like last time. ENDLESS_GOLDEN VERIFIED
 ## UNCHANGED (endless streams no gate arenas, fork or otherwise).
+## 2026-07-26 -- CLAYMORE PLANTER GRACE: campaign GOLDEN RE-RECORDED (ALL 6 samples). A new hashed
+## mine field `grace` joins checksum() and the mines[] block feeds unconditionally, so every sample
+## shifts by the added field even though the torture never plants a claymore -- the same structural
+## shift the barrels[] block caused. ENDLESS_GOLDEN: expected unchanged for the same reason it always
+## is (endless streams no gate arenas), verified by the suite.
+##
+## WHY THE FIELD EXISTS, measured not argued (tools/probe_claymore.gd): the charge planted ALONG the
+## aim and armed instantly, so ADVANCING while aiming the same way -- the twin-stick input the game
+## teaches -- detonated it on YOU at tick 5. Placement cannot fix this: the earlier behind-the-aim
+## placement had the mirror bug at ~5 ticks on a full backpedal, which is why it was moved in the
+## first place. So the charge now ignores PLAYERS for CLAYMORE_ARM_TICKS (20, sized from the measured
+## ~2.2px/tick approach across an 18px trigger zone) and stays live to everything else. Counter-checked
+## so the fix cannot have simply neutered the weapon: an enemy standing on it during that window
+## still dies at tick 2, and once grace expires the planter is hurt again at tick 5.
 const GOLDEN: Array[int] = [
-	1137374205060789435,
-	8552575976495711450,
-	1787114763677303615,
-	2922900905325379897,
-	5421628544716761125,
-	2597296559667926356,
+	2526922330838029777,
+	123904905374903528,
+	8324108471961656605,
+	6055676100953415857,
+	8590073470560221865,
+	1759087827131881334,
 ]
 
 
