@@ -275,6 +275,14 @@ var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
 const BANNER_LIFETIME_FRAMES := 125           # c4-07: a lone banner's on-screen life in physics-frames (~2s at 60Hz); show_banner starts t=1.0 and _update_feel drains 1.0/this each frame. The seed-paste status lines lean on this read time; a FIFO backlog drains proportionally faster (see _update_feel).
 const BANNER_MAX_W := 420.0                   # splash banner scrim width cap (66% of SCREEN_W) — never spans the playfield
+const BANNER_PUNCH_MAX := 1.28                # the splash banner's peak pop-in scale (1.0 + 0.28), named so the row allocator's headroom can be asserted against it
+## THE top-center message band, rebuilt once per `_draw` by `_band_rows()` and read by every
+## consumer (the four banner draws, the hint tooltip, the world-toast floor). See band_rows().
+var _band: Array[Dictionary] = []
+const BAND_ROW_STRIDE := 22.0    # one band row — mirrors HudIcons.BOSS_BAR_STRIDE, the same rail the ribbon stacks on
+const BAND_HINT_SIZE := 11       # hint tooltip's base draw size (shrink-to-fit from here)
+const BAND_HINT_H := 18.0        # hint plate height
+const BAND_HINT_BADGE_W := 22.0  # the "!" badge fronting the hint plate, left of it
 var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
 var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
 var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
@@ -5977,6 +5985,11 @@ func _draw() -> void:
 	draw_set_transform_matrix(Transform2D())
 	_draw_projectiles()
 	_draw_players()
+	# Deal the top-center message band BEFORE the fx pass: world toasts are held below it
+	# (_band_floor), and _draw_gunships above has already published this frame's boss-bar
+	# count, which is what the band's rail is measured from.
+	var top_msg := _top_center_priority()
+	_band = _band_rows(top_msg)
 	_draw_fx()
 	_draw_telegraphs()
 	_draw_wheel()   # world-anchored (rings the player) — must ride the shake
@@ -5992,7 +6005,6 @@ func _draw() -> void:
 	_draw_threat_pips()
 	_draw_objective_markers()
 	_draw_progress_rail()
-	var top_msg := _top_center_priority()
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
 	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
@@ -9287,10 +9299,12 @@ func _draw_fx() -> void:
 			_fx_glow_idx.append(i)
 		else:
 			_fx_alpha_idx.append(i)
-	# Floattext anchors drawn so far this frame: a toast only stacks (11px slot)
-	# under toasts within 24px of ITS anchor. The old global per-frame index
-	# displaced unrelated toasts and made them snap 11px when an earlier one expired.
-	var floattext_anchors: Array[Vector2] = []
+	# Toast slots already taken this frame: (x, y, half-width) of every floattext DRAWN so far.
+	# A toast that would land on one of them drops an 11px row until it doesn't. Positions, not
+	# anchors — see the stacking block below; the old anchor-proximity test let toasts that
+	# started >24px apart drift into each other and overprint.
+	var floattext_anchors: Array[Vector3] = []
+	var band_floor := _band_floor()   # hoisted: constant for the frame, walked per toast otherwise
 	for idx in _fx_alpha_idx:
 		var fx := _fx[idx]
 		var pos := _to_screen(fx["x"], fx["y"])
@@ -9381,12 +9395,28 @@ func _draw_fx() -> void:
 			# A "drop" floater (e.g. LOADOUT LOST) sinks instead of rising — a felt
 			# down-beat. Default is the rise every other callout uses.
 			var fydir: float = 1.0 if fx.get("drop", false) else -1.0
-			var fstack := 0
-			for fa in floattext_anchors:
-				if fa.distance_to(pos) < 24.0:
-					fstack += 1
-			floattext_anchors.append(pos)
-			var fpivot := pos + Vector2(0.0, fydir * (18.0 + rise * 22.0) - float(fstack) * 11.0)
+			var fpivot := pos + Vector2(0.0, fydir * (18.0 + rise * 22.0))
+			# Hold world toasts BELOW the reserved top band. A callout that rises into it is
+			# either over-painted by the $HUD corner plate (main.gd draws at z=0, under it) or
+			# smears the band text — which is exactly what a "PIERCING ROUNDS" grab callout did
+			# to its own teach line. Same rail every other main.gd overlay dodges.
+			fpivot.y = maxf(fpivot.y, band_floor + float(fsz))
+			# Stack against where toasts are actually DRAWN and how WIDE they are, not against
+			# their anchors: the anchor test missed every pair whose rise/drop (or the band
+			# clamp above) carried them into each other from more than 24px apart — the
+			# "LOADOUT LOST printed over another callout" case. Stacking goes DOWN so a toast
+			# pinned on the band floor can't climb back into the band. Bounded at 6 rows.
+			var fhw := fw / 2.0
+			for _bump in 6:
+				var hit := false
+				for fa in floattext_anchors:
+					if absf(fa.x - fpivot.x) < fa.z + fhw and absf(fa.y - fpivot.y) < 11.0:
+						hit = true
+						break
+				if not hit:
+					break
+				fpivot.y += 11.0
+			floattext_anchors.append(Vector3(fpivot.x, fpivot.y, fhw))
 			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
@@ -10299,6 +10329,120 @@ func _top_center_priority() -> String:
 	return ""
 
 
+## THE band's row allocator — the single choke point that owns WHERE every visible top-center
+## message lands, the way `_world_label()` owns in-world label plating.
+##
+## `_top_center_priority()` above decides WHICH of the four mutually-exclusive alert messages
+## wins the band; it never said where they draw, so each one carried its own y. Three did dock
+## on `_banner_band_y()`, but the closed-gate objective line anchored itself to the GATE's
+## world y (`gate_screen_y + 30`) and the just-in-time hint sat on a hard band_y+22 — so the
+## moment a pickup teach line fired inside a gate arena, "GRENADE THE BUNKERS TO ADVANCE" and
+## "PIERCING ROUNDS — SHOTS PUNCH THROUGH…" printed on the SAME baseline and smeared into an
+## unreadable stack (reproduced at sector 1). Now every row is dealt off one rail, one
+## BAND_ROW_STRIDE apart, so two band messages CANNOT share pixels by construction.
+##
+## Nothing is hidden to achieve that: the four alerts were already mutually exclusive (the
+## arbiter picks one, and a displaced splash keeps draining from the FIFO and shows next), and
+## the hint keeps its own one-at-a-time queue — it just gets its own reserved row instead of
+## whatever pixels were left. Row 0 is reserved for the alert whether or not one is showing,
+## so a live hint never jumps 22px when a banner arrives or decays above it.
+##
+## Pure + static so tests/test_main.gd can assert the geometry without a scene tree.
+## Each row: {id, text, size, baseline, plate, rect} — `plate` is the scrim as drawn, `rect`
+## the full ink footprint (plate + any fronting badge), which is what must never intersect.
+static func band_rows(band_y: float, top_text: String, top_size: int, top_badge: bool,
+		hint_text: String) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if not top_text.is_empty():
+		# Shrink-to-fit EVERY alert, not just the splash banner: the other three carried fixed
+		# sizes chosen against their English literals, so a longer translation walked them off
+		# the frame. One cap, one place.
+		var ts := banner_fit_size(top_text, top_size)
+		# A fronting threat badge sits left of the centered text; the plate reserves its width
+		# so the skull/target never floats off the metal onto bare shaking terrain.
+		var top_pad_left := (float(ts) + 4.0 + 8.0) if top_badge else 0.0
+		var tp := banner_plate_rect(top_text, band_y, ts, top_pad_left)
+		# The splash banner's pop-in is a transform scale about (320, band_y), so its plate
+		# reaches BANNER_PUNCH_MAX further out than the measured rect at the peak of the punch.
+		# Bank that into the footprint or the stride below is only correct once the pop settles.
+		var punched := Rect2(320.0 + (tp.position.x - 320.0) * BANNER_PUNCH_MAX,
+			band_y + (tp.position.y - band_y) * BANNER_PUNCH_MAX,
+			tp.size.x * BANNER_PUNCH_MAX, tp.size.y * BANNER_PUNCH_MAX)
+		rows.append({"id": "top", "text": top_text, "size": ts, "pad_left": top_pad_left,
+			"baseline": band_y, "plate": tp, "rect": punched})
+	if not hint_text.is_empty():
+		var hy := band_y + BAND_ROW_STRIDE
+		# Shrink-to-fit, same helper the splash banner uses: the hint had NO width cap, and the
+		# longest shipped teach line already spans ~525 of the 640px frame at 11px — one longer
+		# translation and it walks off both edges.
+		var hs := banner_fit_size(hint_text, BAND_HINT_SIZE)
+		var hw := Art.tw(hint_text, hs)
+		var hplate := Rect2(320.0 - hw / 2.0 - 8.0, hy, hw + 16.0, BAND_HINT_H)
+		rows.append({"id": "hint", "text": hint_text, "size": hs, "baseline": hy + 13.0,
+			"plate": hplate,
+			"rect": Rect2(hplate.position.x - BAND_HINT_BADGE_W, hy - 2.0,
+				hplate.size.x + BAND_HINT_BADGE_W, BAND_HINT_BADGE_W)})
+	return rows
+
+
+## The row `id` owns this frame, or {} when that row is empty.
+static func band_row(band: Array, id: String) -> Dictionary:
+	for r in band:
+		if r["id"] == id:
+			return r
+	return {}
+
+
+## First screen y BELOW the whole band — the floor world toasts are held under so a rising
+## pickup callout can't drift into the message it is being explained by (or under the corner
+## plate, which paints over main.gd entirely).
+func _band_floor() -> float:
+	var y := _banner_band_y()
+	for r in _band:
+		y = maxf(y, r["rect"].end.y)
+	return y
+
+
+## What the winning band message actually PRINTS. One place resolves it so the row allocator
+## measures exactly the string the draw paints — a second copy of these literals is how the
+## band's geometry drifts out from under its own layout test.
+func _band_top_text(top_msg: String) -> Dictionary:
+	match top_msg:
+		"airstrike":
+			return {"text": "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0), "size": 12}
+		"boss":
+			for g in sim.gates:
+				if g["open"] or g.get("final", false):
+					continue
+				if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
+					continue
+				return {"text": "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty()
+					else "GRENADE THE BUNKERS TO ADVANCE", "size": 11}
+			return {}
+		"mortar":
+			return {"text": "MORTARS RANGING — ADVANCE!", "size": 11}
+		"hold":
+			return {"text": "HOLD THE ARENA — CLEAR THE WAVE", "size": 10}
+		"splash":
+			# The result card owns the screen outright — never overprint it.
+			if _banners.is_empty() or _debrief or sim.victory:
+				return {}
+			var bn: Dictionary = _banners[0]
+			var btext: String = bn["text"]
+			if float(bn["t"]) <= 0.01 or btext.is_empty():
+				return {}
+			return {"text": btext, "size": 16, "badge": not String(bn.get("icon", "")).is_empty()}
+	return {}
+
+
+## Build this frame's band. The ONE writer of `_band`.
+func _band_rows(top_msg: String) -> Array[Dictionary]:
+	var top := _band_top_text(top_msg)
+	var hint := "" if (_hint_t <= 0.02 or _debrief or sim.victory) else _hint_text
+	return band_rows(_banner_band_y(), String(top.get("text", "")), int(top.get("size", 11)),
+		bool(top.get("badge", false)), hint)
+
+
 func _draw_airstrike_telegraph(top_msg: String) -> void:
 	# The called airstrike's incoming window: a red wash that ramps and strobes as
 	# impact nears, so the wipe reads as an anticipated event, not a silent zap.
@@ -10332,8 +10476,10 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 		Vector2(msz2, msz2)), false, Color(1.0, 0.8, 0.6, 0.2 + frac * 0.15))
 	if top_msg != "airstrike":
 		return
-	var txt := "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0)
-	Art.text_center(self, txt, 320, _banner_band_y(), 12, Color(1.0, 0.85, 0.3))
+	var row := band_row(_band, "top")
+	if row.is_empty():
+		return
+	Art.text_center(self, row["text"], 320, row["baseline"], row["size"], Color(1.0, 0.85, 0.3))
 
 
 ## THE baseline every top-center transient banner docks at. main.gd draws at z=0 under the $HUD
@@ -10484,68 +10630,56 @@ func _draw_banners(top_msg: String) -> void:
 		var pts := Art.rnd(PackedVector2Array([mid + perp * 46.0, mid - perp * 46.0,
 			mid + _hit_dir * 26.0]))
 		draw_colored_polygon(pts, wc)
+	# Every alert below docks on the band's row 0 — `band_row` is the ONLY place its y and its
+	# string come from, so none of them can wander off the rail the way the objective line did.
+	var trow := band_row(_band, "top")
 	# Arena-lock directive: the camera holds at closed gates by design, but
 	# the objective must be said out loud (playtest: "scrolling just stops").
-	for g in sim.gates:
-		if g["open"] or g.get("final", false):
-			continue
-		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
-			continue
-		if top_msg == "boss" and sim.stall_ticks > 90:
-			var gpulse := 1.0 if _motion < 0.5 else Art.pulse(0.15)
-			var gtxt := "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty() \
-				else "GRENADE THE BUNKERS TO ADVANCE"
-			var gy: float = (g["y"] - sim.camera_top) * PX + 30.0
-			_banner_plate(gtxt, gy, 11, 1.0)
-			Art.text_center(self, gtxt, 320, gy, 11, Color(1.0, 0.9, 0.4, gpulse), 0.0, 2)
-		break
+	if top_msg == "boss" and not trow.is_empty():
+		var gpulse := 1.0 if _motion < 0.5 else Art.pulse(0.15)
+		_banner_plate(trow["text"], trow["baseline"], trow["size"], 1.0)
+		Art.text_center(self, trow["text"], 320, trow["baseline"], trow["size"],
+			Color(1.0, 0.9, 0.4, gpulse), 0.0, 2)
 	# Arena hold: a calm statement, not an alarm — the player at the top edge
 	# needs the RULE ("the camera stays until the wave dies"), not a red strobe.
-	if top_msg == "hold":
-		var htxt := "HOLD THE ARENA — CLEAR THE WAVE"
-		var hby := _banner_band_y()
-		_banner_plate(htxt, hby, 10, 0.8)
-		Art.text_center(self, htxt, 320, hby, 10, Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
+	if top_msg == "hold" and not trow.is_empty():
+		_banner_plate(trow["text"], trow["baseline"], trow["size"], 0.8)
+		Art.text_center(self, trow["text"], 320, trow["baseline"], trow["size"],
+			Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
-	if top_msg == "mortar":
+	if top_msg == "mortar" and not trow.is_empty():
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
-		var wtxt := "MORTARS RANGING — ADVANCE!"
-		var wby := _banner_band_y()
-		_banner_plate(wtxt, wby, 11, 1.0)
-		Art.text_center(self, wtxt, 320, wby, 11, Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
+		_banner_plate(trow["text"], trow["baseline"], trow["size"], 1.0)
+		Art.text_center(self, trow["text"], 320, trow["baseline"], trow["size"],
+			Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
 		var bt: float = bn["t"]
 		var btext: String = bn["text"]
-		if top_msg == "splash" and bt > 0.01 and not btext.is_empty() \
-				and not _debrief and not sim.victory:   # never overprint the result card
+		if top_msg == "splash" and not trow.is_empty():
 			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
 			# The alert band reads or it doesn't — plate, glyphs and badge all clear the same
 			# floor together; a translucent badge next to solid text reads as a render bug.
 			if a > 0.05:
 				a = maxf(a, 0.85)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			# Duck below the reserved top band (corner plate, boss bars, replay ribbon) instead
-			# of overprinting the PHASE label — or, worse, silently vanishing under the HUD.
-			var by := _banner_band_y()
-			# Fit at the BASE size only — the pop-in punch below is a transform
-			# scale, not a font-size bump, so it no longer fights this shrink loop
-			# (a long teach string at a punched-up font size used to overflow
-			# BANNER_MAX_W and get shoved straight back to base, so the punch was
-			# dead for exactly the strings that most needed the shrink).
-			var bsize := banner_fit_size(btext, 16)
+			# y, string and draw size all come from the band's row 0 (which already ducked the
+			# corner plate / boss bars / replay ribbon and shrank the string to BANNER_MAX_W —
+			# fit at the BASE size, since the pop-in punch below is a transform scale, not a
+			# font-size bump, so it can't fight the shrink loop).
+			var by: float = trow["baseline"]
+			var bsize: int = trow["size"]
 			var punch := 1.0
 			if _motion >= 0.5:
-				punch = 1.0 + 0.28 * clampf((bt - 0.9) * 10.0, 0.0, 1.0)
-			# A badge (if any) sits left of the centered text — the plate must
-			# extend to cover it, or the skull/target/lightning floats off the
-			# metal onto bare shaking terrain (the plate exists to prevent exactly
-			# that). Measure it BEFORE plating so the plate can reserve its width.
+				punch = 1.0 + (BANNER_PUNCH_MAX - 1.0) * clampf((bt - 0.9) * 10.0, 0.0, 1.0)
+			# A badge (if any) sits left of the centered text — the row already reserved the
+			# plate width for it, or the skull/target/lightning would float off the metal
+			# onto bare shaking terrain (the plate exists to prevent exactly that).
 			var bic: String = bn.get("icon", "")
 			var bis := float(bsize) + 4.0
-			var pad_left := (bis + 8.0) if not bic.is_empty() else 0.0
+			var pad_left: float = trow["pad_left"]
 			if punch > 1.0:
 				draw_set_transform_matrix(get_transform().affine_inverse()
 					* Transform2D(0.0, Vector2.ONE * punch, 0.0, Vector2(320.0, by) * (1.0 - punch)))
@@ -10692,20 +10826,21 @@ func _draw_banners(top_msg: String) -> void:
 		# _watching). Its old y=30 was above panel_bottom — i.e. under the HUD, which draws over us.
 		Art.text_center(self, "— REPLAY — %s TO EXIT —" % ("START" if Art.use_pad else "R"),
 			320, _hud_icons.band_top(_boss_bar_slots), 9, Color(0.55, 0.9, 1.0, wpul))
-	if _hint_t > 0.02 and not _hint_text.is_empty() and not _debrief and not sim.victory:
+	# Just-in-time onboarding cue — band row 1, allocated by band_rows() off the same rail as
+	# the alert above it (it used to compute its own y and could land under the objective line).
+	var hrow := band_row(_band, "hint")
+	if not hrow.is_empty():
 		var ha := minf(1.0, _hint_t * 3.0)
-		var hw := Art.tw(_hint_text, 11)
 		# Tooltip plate + the baked attention badge (ui_tooltip is a round "!"
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
-		var hx := 320.0 - hw / 2.0 - 8.0
-		# One BOSS_BAR_STRIDE below whatever banner shares the band this frame — the same 22px
-		# relationship the old 92-vs-70 literal pair encoded, now derived off the one rail.
-		var hy := _banner_band_y() + HudIcons.BOSS_BAR_STRIDE
-		_metal_plate(Rect2(hx, hy, hw + 16, 18), ha)
-		draw_texture_rect(Art.tex("ui_tooltip"), Rect2(hx - 22.0, hy - 2.0, 22, 22), false,
-			Color(1.0, 0.95, 0.75, ha))
-		Art.text_center(self, _hint_text, 320, hy + 13.0, 11, Color(1.0, 0.95, 0.7, ha))
+		var hplate: Rect2 = hrow["plate"]
+		_metal_plate(hplate, ha)
+		draw_texture_rect(Art.tex("ui_tooltip"),
+			Rect2(hplate.position.x - BAND_HINT_BADGE_W, hplate.position.y - 2.0,
+				BAND_HINT_BADGE_W, BAND_HINT_BADGE_W), false, Color(1.0, 0.95, 0.75, ha))
+		Art.text_center(self, hrow["text"], 320, hrow["baseline"], hrow["size"],
+			Color(1.0, 0.95, 0.7, ha))
 
 
 ## Shared victory/debrief result-card scaffold: translucent panel + centered

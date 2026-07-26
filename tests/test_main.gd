@@ -411,3 +411,118 @@ func test_cursor_source_art_still_matches_the_constants_measured_off_it() -> voi
 		"reticle art sits %s off its canvas centre, but the crosshair hotspot IS the canvas "
 			% str(off)
 		+ "centre — re-centre the art or stop assuming centre")
+# --- THE top-center message band's one arbiter (main.band_rows) -----------------------------
+# Observed live at sector 1: a pickup teach line ("PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM
+# DOWN THE COLUMN") and the closed-gate objective line ("GRENADE THE BUNKERS TO ADVANCE")
+# printed on the SAME baseline and smeared into unreadable mush. `_top_center_priority()`
+# arbitrated WHICH alert owned the band but never where anything DREW: the objective line
+# anchored itself to the gate's world y, and the hint sat on its own hard offset. Every band
+# message is now dealt a row by main.band_rows(), so this pins the thing that actually broke —
+# two band messages sharing pixels — rather than the one string pair that happened to be caught.
+
+const _BAND_RAIL_MIN := 40.0    # the rail bottoms out at the 1P corner plate…
+const _BAND_RAIL_MAX := 132.0   # …and tops out at 2P + shop strip + 3 boss bars + replay ribbon
+
+
+## Every band string src/main.gd actually ships, scraped from the calls that produce them, so
+## a NEW hint or banner is covered by this test the day it lands instead of the day it collides.
+## Split by slot: `show_banner()` copy can only ever land in the alert row, `_hint()` copy only
+## in the hint row, and the two rows have different size floors.
+func _shipped_band_strings(token: String) -> Array[String]:
+	var out: Array[String] = []
+	for line in FileAccess.get_file_as_string("res://src/main.gd").split("\n"):
+		if line.find(token) == -1:
+			continue
+		var parts := line.split("\"")
+		var i := 1
+		while i < parts.size():
+			var lit: String = parts[i]
+			# Odd-index splits are the quoted literals; keep the sentence-shaped ones (the
+			# short ones are hint ids and format fragments, which never reach the band alone).
+			if lit.length() >= 12 and lit.find(" ") != -1:
+				out.append(lit)
+			i += 2
+	return out
+
+
+func test_band_rows_never_share_pixels() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var alerts := _shipped_band_strings("show_banner(")
+	var hints := _shipped_band_strings("_hint(")
+	Runner.T.ok(alerts.size() >= 10 and hints.size() >= 10,
+		"scraped the shipped band copy (%d alerts / %d hints) — the scrape itself must not silently find nothing"
+			% [alerts.size(), hints.size()])
+	# TEXT SIZE is an accessibility multiplier on the small label sizes; a bigger one can only
+	# make a collision MORE likely, so the band is measured at BOTH ends of the setting.
+	var was_scale: float = Art.text_scale
+	var worst_hits := 0
+	var worst_wide := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		for top in alerts:
+			for hint in hints:
+				# Sweep the whole rail: band_top() moves with player count, the shop strip,
+				# live boss bars and the replay ribbon, and none of those may open a gap.
+				var y := _BAND_RAIL_MIN
+				while y <= _BAND_RAIL_MAX:
+					var rows: Array = ms.band_rows(y, top, 16, false, hint)
+					if rows.size() == 2:
+						var a: Rect2 = rows[0]["rect"]
+						var b: Rect2 = rows[1]["rect"]
+						if a.grow(-0.5).intersects(b.grow(-0.5)):
+							worst_hits += 1
+							if worst_hits <= 3:
+								Runner.T.ok(false, "band rows overlap at y=%.0f scale=%.2f: '%s' %s vs '%s' %s"
+									% [y, scale, top, str(a), hint, str(b)])
+					for r in rows:
+						var rect: Rect2 = r["rect"]
+						if rect.position.x < -0.5 or rect.end.x > 640.5 or rect.end.y > 360.5:
+							worst_wide += 1
+							if worst_wide <= 3:
+								Runner.T.ok(false, "band row '%s' %s escapes the 640x360 frame (scale=%.2f)"
+									% [r["text"], str(rect), scale])
+					y += 2.0
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(worst_hits, 0, "no two band messages ever occupy the same rect")
+	Runner.T.eq(worst_wide, 0, "no band row ever escapes the frame")
+
+
+func test_band_reserves_row_zero_so_a_live_hint_never_jumps() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var hint := "GRENADES CRACK ARMOR — BUNKERS TAKE NO BULLETS"
+	var alone: Array = ms.band_rows(56.0, "", 16, false, hint)
+	var under: Array = ms.band_rows(56.0, "MORTARS RANGING — ADVANCE!", 11, false, hint)
+	Runner.T.eq(alone.size(), 1, "no alert -> the band is the hint row only")
+	Runner.T.eq(under.size(), 2, "alert + hint -> two rows")
+	Runner.T.eq(alone[0]["baseline"], under[1]["baseline"],
+		"row 0 is RESERVED: a live hint must not jump 22px when a banner arrives or decays above it")
+
+
+func test_band_hint_shrinks_to_fit_the_frame() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var consts: Dictionary = ms.get_script_constant_map()
+	# The hint tooltip had no width cap at all; the longest shipped teach line already spans
+	# ~525 of the 640px frame, so one longer translation walked it off both edges.
+	var long_hint := "CLAYMORE — PLANT WITH [INTERACT] AWAY FROM TANKS BECAUSE IT HURTS BOTH SIDES"
+	var rows: Array = ms.band_rows(56.0, "", 16, false, long_hint)
+	Runner.T.eq(rows.size(), 1, "the over-wide hint still gets a row")
+	Runner.T.ok(int(rows[0]["size"]) < int(consts["BAND_HINT_SIZE"]),
+		"an over-wide hint is shrunk to fit, not printed off the edge (size %d)" % int(rows[0]["size"]))
+	Runner.T.ok(rows[0]["rect"].position.x >= -0.5 and rows[0]["rect"].end.x <= 640.5,
+		"...and the shrunk row, badge included, lands inside the frame: %s" % str(rows[0]["rect"]))
+
+
+func test_no_band_message_computes_its_own_y() -> void:
+	# The defect was structural, not cosmetic: the objective line derived its y from the GATE's
+	# world position while still claiming the band's slot. If any band draw goes back to
+	# inventing a y, the geometry test above passes and the screen smears anyway.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.eq(src.count("sim.camera_top) * PX + 30.0"), 0,
+		"the closed-gate objective line must not re-anchor itself to the gate's world y")
+	Runner.T.eq(src.count("_band = _band_rows("), 1,
+		"exactly one writer of the frame's band")
+	# Every band consumer reads its row through band_row(_band, ...) — the choke point.
+	Runner.T.ok(src.count("band_row(_band, \"top\")") >= 2 and src.count("band_row(_band, \"hint\")") == 1,
+		"the alert draws and the hint draw all pull their row from the band, not from a local y")
