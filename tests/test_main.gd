@@ -305,3 +305,109 @@ func test_partner_ko_ducks_only_the_self_directed_channels() -> void:
 		"exactly one caller plus the definition — one place, every KO")
 	Runner.T.ok(src.find("_duck = 1.0") != -1 and src.find("_punch = maxf(_punch, 0.14)") != -1,
 		"the shared music duck / camera punch stay unscaled")
+
+
+# --- OS cursor baking (src/main.gd::_bake_cursor / bake_cursor_image / menu_hotspot) ---
+# The menu pointer shipped ENORMOUS: it baked at `native_size * window_scale`, which is
+# not a size at all — it is whatever the source art happens to be. cursor.png is 64px, so
+# a 2x window (the DEFAULT 1280x720) drew a 128px pointer and 3x drew 192px, against a
+# ~24-32px system norm. Its hotspot was a flat (2,2)*s while the arrow's tip sits at
+# (8,2) of that 64px canvas, so every menu click landed 6*s physical px LEFT of where the
+# arrow visibly pointed. And the resize ran IN PLACE on the texture's own Image, so each
+# re-bake (resize / fullscreen / options) compounded off an already-mangled source.
+#
+# These rows are the missing half of CURSOR_PX / CURSOR_TIP_SRC — the source canvas and
+# tip position those constants were measured against. Same deal as SPRITE_CANVAS in
+# test_view_honesty.gd: re-bake cursor.png at another resolution or nudge the arrow, and
+# the constants silently stop describing the art. Kept as literals ON PURPOSE — deriving
+# them from the import this is checking would assert nothing. When a row moves, re-measure
+# the tip and update CURSOR_TIP_SRC, THEN the row — never the row alone. ---
+
+const CURSOR_ART_CANVAS := 64          # imported square both cursor sprites must stay
+const CURSOR_TIP_ALPHA := 8            # /255 — above the fix_alpha_border fringe, at the visible tip
+const CURSOR_ARROW_BBOX := Rect2i(8, 2, 42, 60)   # opaque bbox of cursor.png at that alpha
+
+
+static func _opaque_bbox(img: Image, alpha: int) -> Rect2i:
+	var lo := Vector2i(1 << 30, 1 << 30)
+	var hi := Vector2i(-1, -1)
+	for y in img.get_height():
+		for x in img.get_width():
+			if int(img.get_pixel(x, y).a * 255.0) >= alpha:
+				lo = Vector2i(mini(lo.x, x), mini(lo.y, y))
+				hi = Vector2i(maxi(hi.x, x), maxi(hi.y, y))
+	return Rect2i(lo, hi - lo + Vector2i.ONE)
+
+
+static func _raw(key: String) -> Image:
+	var img: Image = Art.tex(key).get_image().duplicate()
+	if img.is_compressed():
+		img.decompress()
+	return img
+
+
+func test_both_os_cursors_bake_to_one_fixed_canvas_smaller_than_the_source() -> void:
+	var c := _consts()
+	var px: int = c.get("CURSOR_PX", 0)
+	Runner.T.ok(px > 0 and px < CURSOR_ART_CANVAS,
+		"CURSOR_PX (%d) must be a real target SIZE below the %dpx source canvas — a pointer that "
+			% [px, CURSOR_ART_CANVAS]
+		+ "bakes at native*scale is not sized, it is whatever the art happens to be")
+	Runner.T.eq(c.get("CURSOR_SRC_PX", 0), CURSOR_ART_CANVAS,
+		"CURSOR_SRC_PX must state the canvas the tip was actually measured on")
+	var ms: Script = load("res://src/main.gd")
+	for s in [1, 2, 3]:
+		for key in ["ui_cursor", "ui_reticle"]:
+			var src := _raw(key)
+			var baked: Image = ms.bake_cursor_image(src, px * s)
+			Runner.T.eq(Vector2i(baked.get_width(), baked.get_height()), Vector2i(px * s, px * s),
+				"'%s' at window scale %dx must bake to %dpx square, not %dpx"
+					% [key, s, px * s, baked.get_width()])
+			# The bake must not eat its own source: Texture2D.get_image() returns the
+			# texture's OWN Image, so an in-place resize here poisons every later re-bake.
+			Runner.T.eq(src.get_width(), CURSOR_ART_CANVAS,
+				"baking '%s' must leave the source art at %dpx — resize a COPY, or the next "
+					% [key, CURSOR_ART_CANVAS]
+				+ "re-bake (resize/fullscreen/options) scales an already-shrunk image")
+
+
+func test_menu_hotspot_tracks_the_arrow_tip_at_every_window_scale() -> void:
+	var c := _consts()
+	var px: int = c.get("CURSOR_PX", 0)
+	var tip: Vector2 = c.get("CURSOR_TIP_SRC", Vector2.ZERO)
+	var ms: Script = load("res://src/main.gd")
+	for s in [1, 2, 3]:
+		var hs: Vector2 = ms.menu_hotspot(s)
+		Runner.T.ok(hs.is_equal_approx(tip * (float(px) / float(CURSOR_ART_CANVAS)) * float(s)),
+			"menu_hotspot(%d) = %s must be the source tip carried through the SAME normalisation "
+				% [s, str(hs)]
+			+ "the art gets — a hand-tuned constant drifts off the pointer the moment either moves")
+		Runner.T.ok(hs.x >= 0.0 and hs.y >= 0.0 and hs.x < float(px * s) and hs.y < float(px * s),
+			"menu_hotspot(%d) = %s must land inside the %dpx baked image" % [s, str(hs), px * s])
+	# The crosshair's hotspot is the canvas centre, so it has to scale with the bake too.
+	Runner.T.eq(float(px) / 2.0 * 2.0, float(px), "crosshair hotspot is CURSOR_PX/2 * scale")
+
+
+func test_cursor_source_art_still_matches_the_constants_measured_off_it() -> void:
+	for key in ["ui_cursor", "ui_reticle"]:
+		var img := _raw(key)
+		Runner.T.eq(Vector2i(img.get_width(), img.get_height()),
+			Vector2i(CURSOR_ART_CANVAS, CURSOR_ART_CANVAS),
+			"'%s' imports at %dx%d but CURSOR_SRC_PX / CURSOR_TIP_SRC were measured on a %dpx "
+				% [key, img.get_width(), img.get_height(), CURSOR_ART_CANVAS]
+			+ "canvas — re-measure the tip and re-tune the constants, THEN update this row")
+	var arrow := _opaque_bbox(_raw("ui_cursor"), CURSOR_TIP_ALPHA)
+	Runner.T.eq(arrow, CURSOR_ARROW_BBOX,
+		"cursor.png's arrow now occupies %s, not the %s CURSOR_TIP_SRC was read off — the menu "
+			% [str(arrow), str(CURSOR_ARROW_BBOX)]
+		+ "click point no longer sits on the visible tip. Re-measure, update CURSOR_TIP_SRC, THEN this row")
+	Runner.T.eq(Vector2(arrow.position), _consts().get("CURSOR_TIP_SRC", Vector2.ZERO),
+		"CURSOR_TIP_SRC must BE the arrow bbox corner — the tip is this art's top-left pixel")
+	# The crosshair takes canvas-centre as its hotspot; that is only honest while the
+	# reticle art is actually centred in its canvas.
+	var ret := _raw("ui_reticle").get_used_rect()
+	var off := (Vector2(ret.position) + Vector2(ret.size) * 0.5) - Vector2.ONE * (CURSOR_ART_CANVAS * 0.5)
+	Runner.T.ok(off.length() <= 2.0,
+		"reticle art sits %s off its canvas centre, but the crosshair hotspot IS the canvas "
+			% str(off)
+		+ "centre — re-centre the art or stop assuming centre")

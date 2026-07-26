@@ -109,6 +109,12 @@ var _cursor_styled := false           # custom OS cursor active (menus/debrief o
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
 var _cursor_menu: ImageTexture        # boot-baked scaled menu pointer (from ui_cursor)
 var _cursor_s := 1                     # window integer scale the cursors were baked at
+# Both OS cursors bake to this canvas at 1x. A pointer is a SIZE, never "whatever the
+# source art happens to be" — the menu arrow used to bake at its native 64px * scale,
+# which drew a 128px pointer at 2x and 192px at 3x against a ~24-32px system norm.
+const CURSOR_PX := 24
+const CURSOR_SRC_PX := 64              # cursor.png / reticle.png authored canvas
+const CURSOR_TIP_SRC := Vector2(8, 2)  # arrow tip in that canvas (opaque bbox x 8..49, y 2..61)
 var _sfx := Sfx.new()
 var _steam := SteamBridge.new()   # Steamworks facade -- no-ops offline (see src/steam/steam_bridge.gd)
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
@@ -1515,19 +1521,31 @@ func _bake_cursor() -> void:
 	# bake at the window's integer scale (24px at 1x looked half-size at 2x).
 	var win := DisplayServer.window_get_size()
 	var s := maxi(1, mini(win.x / 640, win.y / 360))
-	var cur_img := Art.tex("ui_reticle").get_image()
-	if cur_img.is_compressed():
-		cur_img.decompress()   # reticle ships VRAM-compressed; resize needs raw pixels
-	cur_img.resize(24 * s, 24 * s, Image.INTERPOLATE_LANCZOS)
-	_cursor_crosshair = ImageTexture.create_from_image(cur_img)
-	# Menu pointer scaled to match (was native-size — a speck at 2x/3x).
-	var men_img := Art.tex("ui_cursor").get_image()
-	if men_img.is_compressed():
-		men_img.decompress()
-	men_img.resize(men_img.get_width() * s, men_img.get_height() * s, Image.INTERPOLATE_LANCZOS)
-	_cursor_menu = ImageTexture.create_from_image(men_img)
+	# Both cursors normalise to the SAME canvas. The menu pointer used to bake at
+	# `native * s`, which is not a size at all — it is whatever the source art happens
+	# to be. cursor.png is 64px, so a 2x window drew a 128px pointer against a ~24-32px
+	# system norm, and a 3x window drew 192px. Anchoring both to CURSOR_PX means a
+	# re-bake of the art can never resize the pointer again.
+	_cursor_crosshair = ImageTexture.create_from_image(
+		bake_cursor_image(Art.tex("ui_reticle").get_image(), CURSOR_PX * s))
+	_cursor_menu = ImageTexture.create_from_image(
+		bake_cursor_image(Art.tex("ui_cursor").get_image(), CURSOR_PX * s))
 	_cursor_s = s
 	_apply_cursor(_cursor_styled)   # re-apply the current cursor at the freshly-baked scale
+
+
+## Normalises one cursor sprite onto a `px` square. COPIES first: Texture2D.get_image()
+## hands back the texture's OWN Image, so the old in-place resize permanently shrank the
+## shared source art on the first bake — and _bake_cursor re-runs on every resize,
+## fullscreen toggle and options change, each one scaling an already-mangled image.
+## Combined with the old `native * s` sizing that compounded: boot at 2x left a 128px
+## source, so a later 3x window asked for 384px — past Godot's 256px cursor ceiling.
+static func bake_cursor_image(src: Image, px: int) -> Image:
+	var img: Image = src.duplicate()
+	if img.is_compressed():
+		img.decompress()   # a VRAM-compressed import has no raw pixels to resize
+	img.resize(px, px, Image.INTERPOLATE_LANCZOS)
+	return img
 
 
 func _apply_cursor(styled: bool) -> void:
@@ -1535,7 +1553,15 @@ func _apply_cursor(styled: bool) -> void:
 	# drifts off the pointer at 2x/3x/fullscreen.
 	Input.set_custom_mouse_cursor(_cursor_menu if styled else _cursor_crosshair,
 		Input.CURSOR_ARROW,
-		(Vector2.ONE * 2.0 * _cursor_s) if styled else (Vector2.ONE * 12.0 * _cursor_s))
+		menu_hotspot(_cursor_s) if styled else (Vector2.ONE * (CURSOR_PX / 2.0) * _cursor_s))
+
+
+## Click point of the menu arrow, DERIVED from where its tip actually is in the source
+## art rather than hand-tuned. The old value was a flat (2,2)*s while the tip sits at
+## (8,2) of a 64px canvas, so every menu click landed 6*s physical px LEFT of the point
+## the arrow was visibly aiming at. Measured from the PNG's opaque bbox (x 8..49, y 2..61).
+static func menu_hotspot(cursor_s: int) -> Vector2:
+	return CURSOR_TIP_SRC * (float(CURSOR_PX) / float(CURSOR_SRC_PX)) * float(cursor_s)
 
 
 func _input(event: InputEvent) -> void:
