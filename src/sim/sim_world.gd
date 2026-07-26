@@ -270,11 +270,21 @@ const GATE_BLOCK_PAD := 14 * F_ONE
 # *F_ONE at the use site. props: [kind, x, y_off] with kind "mine"/"barrel".
 const ARENAS := {
 	1: {"b1": [180, 50], "b2": [412, 50], "props": []},
-	2: {"b1": [300, 150], "b2": [160, 40], "props": [   # staggered depth: a front
-		["mine", 240, 100], ["mine", 350, 60]]},        # sentinel screens the rear
-	4: {"b1": [240, 50], "b2": [368, 50], "props": [    # crossfire-close: barrels
+	# ⚠️ FORK GATES (2 and 4) must also clear their wreck island. These coordinates
+	# predate the island by 13 minutes (1124c29 -> da70544/91993f1, which stamped in
+	# x=260 and its 320-mirror x=380 without ever reading ARENAS), so three of them
+	# were sitting in boots-impassable scenery: gate 4's b2 was at 368, i.e. its
+	# entire 48px body inside the blocked 336..424 band, and gate 2's front sentinel
+	# mine at 240 was buried in the 216..304 band where no player can ever come
+	# within MINE_TRIGGER_RADIUS of it. A lock stays killable there (grenades ignore
+	# the island) but you cannot walk to it, so the arena lies about its own layout.
+	# test_no_authored_arena_geometry_hides_inside_a_fork_divider pins all of it now,
+	# deriving the island from the streamed gates — keep new coords out of the band.
+	2: {"b1": [312, 150], "b2": [160, 40], "props": [   # staggered depth: a front
+		["mine", 120, 100], ["mine", 350, 60]]},        # sentinel screens the rear
+	4: {"b1": [240, 50], "b2": [432, 50], "props": [    # crossfire-close: barrels
 		["barrel", 290, 120], ["barrel", 306, 120], ["barrel", 322, 120],   # center seam, held
-		["mine", 120, 70], ["mine", 500, 70]]},   # >blast+AABB reach of both locks (test-pinned)
+		["mine", 120, 70], ["mine", 528, 70]]},   # >blast+AABB reach of both locks
 	# c2-authored-campaign: gate 5 was "final" pre-P3.6 (FINAL_GATE_INDEX==5) and
 	# never ran this branch at all. Now a regular arena wearing the CRASHED
 	# CONVOY (RUINS) landmark — a staggered depth pair (mirrors gate 2's read,
@@ -4238,8 +4248,13 @@ func _step_camera() -> void:
 			# (pure position: no new input, no stored state, gates[] is unhashed).
 			# LEFT = Cache lane: a free crate ringed by extra mines. RIGHT =
 			# Gauntlet lane: two extra elites, one a guaranteed marked bounty.
-			# Torture-inert: the 60 s campaign run never streams past gate 1
-			# (probe-verified — camera_top ends ~43 units short of gate 2).
+			# ⚠️ NOT torture-inert any more. This read "never streams past gate 1
+			# (probe-verified — camera_top ends ~43 units short of gate 2)", and that
+			# went stale as the run got faster. Re-measured 2026-07-25 with
+			# tools/probe_torture_gates.gd: the torture builds gate 1 @tick 0, GATE 2
+			# @tick 1309 and gate 3 @tick 3108, ending 563 px PAST gate 2. So gate-2
+			# arena/fork state DOES reach GOLDEN (from sample 2 on); gate 4 is still
+			# out of reach. Measure before calling anything here inert.
 			if _gate_counter == 2 or _gate_counter == 4:
 				# c3 4v: the gauntlet stops being always-a-killbox. mod-4 of the
 				# per-seed _mix gives three READS you must learn to tell apart:
@@ -4292,7 +4307,8 @@ func _step_camera() -> void:
 					"y": _next_gate_y})
 				# c2 2v: DEEPEN the fork into a ~1.7-screen commitment + a 1-in-4
 				# BAIT variant. All _mix-derived (the shared rng sequence stays
-				# clean), gate 2/4 only (torture never streams here), no new gate
+				# clean), gate 2/4 only (gate 2 DOES stream in the torture -- see
+				# the re-measure note above), no new gate
 				# field. bounty_x0 is the GAUNTLET (fortified-looking) side.
 				var fmix := _mix(_gate_counter, _world_seed)
 				# Deeper content beats: CACHE +2 mines, GAUNTLET +1 leashed elite.
@@ -4498,7 +4514,9 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	# Boss-arena cover (5v): four bags in two mirrored lines turn the
 	# strafe half into a COVER fight (mortars ignore cover, so the
 	# volley half stays a movement fight). Reuses the whole sandbag
-	# grammar; torture never streams gate 3 -> inert.
+	# grammar; the torture DOES construct gate 3 (@tick 3108, re-measured
+	# 2026-07-25) -- it is inert because the goldens were recorded with it, not
+	# because it is unreachable.
 	# c3 2v BREAKS THE MIRROR: the right pair shifts +40px so the inner
 	# gap no longer centers on 296 — the straight-up center lane is gone
 	# and the gunship arena gets its own asymmetric identity.

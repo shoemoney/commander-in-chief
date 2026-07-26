@@ -907,7 +907,11 @@ func test_arena_templates_vary_by_gate_and_still_open() -> void:
 	sim._step_camera()
 	Runner.T.ok(sim.gates.size() >= 4, "streamed through gate 4")
 	Runner.T.eq(sim.gates[0]["b1"]["x"], 180 * SimWorld.F_ONE, "gate 1 keeps the classic left sentinel")
-	Runner.T.eq(sim.gates[1]["b1"]["x"], 300 * SimWorld.F_ONE, "gate 2 goes staggered-front")
+	# 300 -> 312: the authored 300 put b1's west face 4px inside gate 2's fork island
+	# (the blocked band is 216..304). Still the staggered-FRONT lock, just clear of
+	# scenery boots cannot enter — see
+	# test_no_authored_arena_geometry_hides_inside_a_fork_divider.
+	Runner.T.eq(sim.gates[1]["b1"]["x"], 312 * SimWorld.F_ONE, "gate 2 goes staggered-front")
 	Runner.T.eq(sim.gates[1]["b2"]["y"] - sim.gates[1]["y"], 40 * SimWorld.F_ONE, "gate 2 rear bunker tucks at +40")
 	Runner.T.eq(sim.gates[3]["b1"]["x"], 240 * SimWorld.F_ONE, "gate 4 goes crossfire-close")
 	var g2: Dictionary = sim.gates[1]
@@ -1784,6 +1788,73 @@ func test_fork_divider_denies_the_crossing_without_eating_north_progress() -> vo
 	# by a wide margin without pinning the exact diagonal speed.
 	Runner.T.ok(best_y <= y0 - 60 * SimWorld.F_ONE,
 		"holding north-east INTO the face still makes real northward progress")
+
+
+func test_no_authored_arena_geometry_hides_inside_a_fork_divider() -> void:
+	# REGRESSION (a CLASS, not one gate). The ARENAS coordinates shipped 13 minutes
+	# BEFORE the fork wreck-island existed — 1124c29 22:19:42 authored them, da70544
+	# 22:32:54 stamped gate 2's island in as a bare `260` literal, 91993f1 22:38:26
+	# mirrored it to 380 for gate 4 (320 + (320-260), computed from the gate-2 value
+	# alone). Neither fork commit read ARENAS, so nothing ever checked the island's x
+	# against the locks standing in it. Result: gate 4's b2 [368,+50] ended up with
+	# its whole 48px body (368..416) inside the blocked band (336..424), and gate 2's
+	# front-sentinel mine [240,+100] ended up buried in gate 2's island, where the
+	# nearest x boots may legally occupy is 216 and MINE_TRIGGER_RADIUS is 9 — it can
+	# never be triggered by anyone.
+	#
+	# Nothing caught it because the one test that claims the arenas "PLAY"
+	# (test_arena_templates_are_clearable_and_barrel_safe) kills each lock with a
+	# direct sim._explode() at the lock's own centre. No player stands anywhere in
+	# it, so a lock sealed in scenery boots cannot enter passes it every time.
+	#
+	# NOT a softlock (verified, and the original report claimed one): bunkers are
+	# immune to bullets by design (sim_world.gd:2361) and grenades have no in-flight
+	# collision at all, so an engulfed lock is still killable by lob. What it costs
+	# is legibility — you walk a required objective into an invisible wall — plus a
+	# forced grenade tax on a lock you can never take at contact range.
+	#
+	# The gate set, each island's x and every lock/prop position are all READ FROM
+	# THE STREAMED SIM, and the containment question is asked of _in_fork_divider
+	# itself — the one definition the movement code uses. So a future gate that
+	# gains a fork, or an island that changes width, is covered without editing this
+	# test, and the 44/40/620 literals are never restated here to drift apart.
+	var sim := SimWorld.new(41, 1)
+	sim.camera_top = sim._next_gate_y - 5 * SimWorld.GATE_SPACING
+	sim._step_camera()
+	var forks := 0
+	for g in sim.gates:
+		var fx: int = g.get("fork_x", 0)
+		if fx == 0:
+			continue
+		forks += 1
+		var gy: int = g["y"]
+		var gate_no: int = absi(gy / SimWorld.GATE_SPACING)
+		# A lock is a BODY, not a point: sample its whole 48x32 AABB on a 4px grid.
+		for who in ["b1", "b2"]:
+			var bk: Dictionary = g.get(who, {})
+			if bk.is_empty():
+				continue
+			var buried := ""
+			var sx: int = bk["x"]
+			while sx <= bk["x"] + SimWorld.BUNKER_W:
+				var sy: int = bk["y"]
+				while sy <= bk["y"] + SimWorld.BUNKER_H:
+					if sim._in_fork_divider(sx, sy, gy, fx) and buried == "":
+						buried = "(%d,%+d)" % [sx / SimWorld.F_ONE, (sy - gy) / SimWorld.F_ONE]
+					sy += 4 * SimWorld.F_ONE
+				sx += 4 * SimWorld.F_ONE
+			Runner.T.ok(buried == "",
+				"gate %d %s (a REQUIRED lock) keeps its whole body out of the fork island, fork_x=%d — buried at %s"
+					% [gate_no, who, fx, buried])
+		# Authored props are points, and an authored point inside the island is
+		# content the player can never interact with.
+		for pr in SimWorld.ARENAS.get(gate_no, {}).get("props", []):
+			var px: int = pr[1] * SimWorld.F_ONE
+			var py: int = gy + pr[2] * SimWorld.F_ONE
+			Runner.T.ok(not sim._in_fork_divider(px, py, gy, fx),
+				"gate %d authored %s [%d,+%d] sits where a player can reach it, fork_x=%d"
+					% [gate_no, pr[0], pr[1], pr[2], fx])
+	Runner.T.ok(forks >= 2, "both fork gates streamed (got %d)" % forks)
 
 
 func test_c2_bait_fork_exists_and_stays_fair() -> void:

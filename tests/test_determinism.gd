@@ -445,13 +445,31 @@ const SEED := 0xDEADBEEF
 ## same tick either way. Inert by measurement, not by argument. The behaviour change itself
 ## is pinned directly by test_controls::test_empty_clip_bash_survives_the_loss_of_the_fire_edge
 ## and ::test_bash_is_still_rationed_by_its_cooldown_not_by_the_button.
+## 2026-07-25 -- FORK-ISLAND CLEARANCE: campaign GOLDEN RE-RECORDED (samples 2-5; 0 and 1
+## byte-identical). ENDLESS_GOLDEN VERIFIED UNCHANGED (endless streams no gate arenas at
+## all). Three authored ARENAS coordinates were sitting inside a fork gate's wreck island,
+## i.e. in scenery boots cannot enter: gate 4's b2 (368 -> 432; its whole 48px body was
+## inside the blocked 336..424 band), gate 2's b1 (300 -> 312; west face 4px in), and gate
+## 2's front sentinel mine (240 -> 120; buried where no player can ever reach
+## MINE_TRIGGER_RADIUS of it). Gate 4's flank mine moved 500 -> 528 to stay outside the
+## relocated b2's blast+AABB envelope.
+##
+## WHY THESE SAMPLES: gate 4 is genuinely torture-inert, but GATE 2 IS NOT -- and the
+## ARENAS comment that claimed it was ("never streams past gate 1, probe-verified --
+## camera_top ends ~43 units short of gate 2") had gone STALE and is corrected in this
+## same commit. MEASURED, not argued (tools/probe_torture_gates.gd): the torture now
+## constructs gate 1 @tick 0, gate 2 @tick 1309 and gate 3 @tick 3108, ending at
+## camera_top = -2563 px -- 563 px PAST gate 2, not 43 short of it. At SAMPLE_EVERY=600
+## a gate-2 construction at tick 1309 can first reach the sample at tick 1800, which is
+## sample index 2 -- and samples 2,3,4,5 are exactly the four that moved, with 0 and 1
+## byte-identical. The delta is fully accounted for; nothing else in the sim was touched.
 const GOLDEN: Array[int] = [
 	1137374205060789435,
 	8552575976495711450,
-	8596890941918905151,
-	1060946695091977990,
-	1098902499213753401,
-	5824548073172713623,
+	5754048499518112575,
+	4824291660626149689,
+	6005489445420184346,
+	959187230877754963,
 ]
 
 
