@@ -5325,6 +5325,32 @@ static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
 	## front of the two things it had to destroy to advance. Aiming at your
 	## objective is not bot cleverness, it is the minimum for the capture to be a
 	## measurement of the GAME rather than of the sweep's duty cycle.
+	if dsim.mode == "endless":
+		# Endless has no gates, no colossus and nothing to march toward, so every
+		# branch below is dead code here and the bot fell back to the +-30deg north
+		# sweep. That sweep cannot cover an endless arena: bodies enter anywhere in
+		# x 24..616 (sim_world.gd:4790) and converge diagonally, so a flanker sits
+		# ~80deg off north. And killing is the ONLY way an endless wave advances
+		# (_step_waves opens the intermission on _wave_hostiles_cleared), so a bot
+		# that cannot aim at a flanker cannot reach wave 2 — measured at 4-6 live
+		# enemies across 30,000 ticks x 5 seeds before this branch existed.
+		# Nearest-hostile is safe here in a way it was NOT in campaign (see the
+		# bunker note below): there is no objective to be distracted FROM.
+		if not dsim.endless_boss.is_empty() and dsim.endless_boss["alive"]:
+			return {"x": dsim.endless_boss["x"],
+				"y": dsim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET}
+		var near := {}
+		var neard := 1 << 62
+		for e in dsim.enemies:
+			if not e["alive"]:
+				continue
+			var ex: int = e["x"] - p["x"]
+			var ey: int = e["y"] - p["y"]
+			var d2: int = (ex / 256) * (ex / 256) + (ey / 256) * (ey / 256)
+			if d2 < neard:
+				neard = d2
+				near = {"x": e["x"], "y": e["y"]}
+		return near
 	if not dsim.colossus.is_empty() and dsim.colossus["alive"]:
 		return {"x": dsim.colossus["x"], "y": dsim.colossus["y"]}
 	for g in dsim.gates:

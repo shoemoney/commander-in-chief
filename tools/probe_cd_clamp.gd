@@ -50,6 +50,6 @@ func _init() -> void:
 				if sim.victory:
 					break
 				t += 1
-			print("%-9s seed=%-9d ticks=%-6d peak_roster=%-3d capped_ticks=%-6d min_bunker_cd=%-7d min_colossus_cd=%-7d bunker_glow_lie_ticks=%d"
-				% [mode, sd, t, peak_roster, capped_ticks, min_bunker, min_colossus, charge_lies])
+			print("%-9s seed=%-9d ticks=%-6d wave=%-3d score=%-7d peak_roster=%-3d capped_ticks=%-6d min_bunker_cd=%-7d min_colossus_cd=%-7d bunker_glow_lie_ticks=%d"
+				% [mode, sd, t, sim.wave, sim.score, peak_roster, capped_ticks, min_bunker, min_colossus, charge_lies])
 	quit()

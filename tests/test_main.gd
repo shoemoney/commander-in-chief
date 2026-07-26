@@ -831,3 +831,37 @@ func test_scripted_bot_clears_the_fork_gate_that_used_to_trap_it() -> void:
 			break
 	Runner.T.ok(best_y < -2 * SimWorld.GATE_SPACING,
 		"the bot gets north of gate 2 within 4000 ticks (it once never got there at all)")
+
+
+func test_scripted_bot_locks_a_target_in_endless_where_every_campaign_branch_is_dead() -> void:
+	## _demo_boss_target's colossus / gate / tank branches are all written only by
+	## _step_camera and _step_colossus, neither of which endless calls — so in endless
+	## the function returned {} and the bot fell back to its open-loop +-30deg north
+	## sweep. Endless bodies enter anywhere in x 24..616 and converge diagonally, and
+	## killing is the ONLY way a wave advances, so the bot never left wave 1: measured
+	## 30,000 ticks x 3 seeds at wave 1 / score 350 / 4 live enemies — which is exactly
+	## the "wave 1, 350 points" the backlog reported. With the lock: wave 11 / 50,220.
+	## Asserted here at the function, not by a 30k-tick run, to keep the suite fast.
+	var ms: Script = load("res://src/main.gd")
+	var sim := SimWorld.new(7, 1, "endless")
+	var p: Dictionary = sim.players[0]
+	sim.enemies.clear()
+	# A flanker the north sweep could never cover: far off-lane, well above.
+	sim.enemies.append({"x": 40 * Fixed.ONE, "y": p["y"] - 200 * Fixed.ONE,
+		"alive": true, "kind": 0, "hp": 1})
+	var lock: Dictionary = ms._demo_boss_target(sim, p)
+	Runner.T.ok(not lock.is_empty(), "endless returns a target instead of falling through to the sweep")
+	Runner.T.eq(lock["x"], 40 * Fixed.ONE, "and it is the flanker's x, not the lane's")
+
+	# Nearest wins when several are up, so the bot answers what is actually on it.
+	sim.enemies.append({"x": p["x"], "y": p["y"] - 30 * Fixed.ONE,
+		"alive": true, "kind": 0, "hp": 1})
+	lock = ms._demo_boss_target(sim, p)
+	Runner.T.eq(lock["y"], p["y"] - 30 * Fixed.ONE, "the nearer body wins the lock")
+
+	# Campaign must be untouched by the endless branch — it returns {} with no gates.
+	var csim := SimWorld.new(7, 1, "campaign")
+	csim.enemies.clear()
+	csim.enemies.append({"x": 40 * Fixed.ONE, "y": 0, "alive": true, "kind": 0, "hp": 1})
+	Runner.T.ok(ms._demo_boss_target(csim, csim.players[0]).is_empty(),
+		"campaign still ignores loose infantry — the boss-only policy that measured best on 8 seeds")
