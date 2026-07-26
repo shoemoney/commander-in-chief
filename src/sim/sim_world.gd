@@ -973,7 +973,7 @@ func _step_players(inputs: Array) -> void:
 				_try_buy(p, inp.buy - 1)
 
 		if p["in_tank"] >= 0:
-			_drive_tank(i, p, inp, interact_edge)
+			_drive_tank(i, p, inp, interact_edge, grenade_edge)
 			continue
 
 		# Movement: quantized stick [-256,256] -> fixed direction, normalized.
@@ -2082,7 +2082,8 @@ func _boardable_tank_near(p: Dictionary) -> bool:
 	return false
 
 
-func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge: bool) -> void:
+func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge: bool,
+		grenade_edge: bool) -> void:
 	var tank := tanks[p["in_tank"]]
 	if not tank["alive"]:
 		p["in_tank"] = -1
@@ -2127,8 +2128,29 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 		p["aim_x"] = Fixed.div(ax, alen)
 		p["aim_y"] = Fixed.div(ay, alen)
 
-	# Cannon: draws from the grenade pool (1986 rule) and lands like one.
-	if inp.fire and tank["fire_cd"] == 0 and p["grenade_ammo"] > 0:
+	# Cannon: draws from the grenade pool (1986 rule) and lands like one — so it rides
+	# the GRENADE verb, not fire. It used to read `inp.fire`, which ALWAYS-FIRE pinned
+	# permanently true: boarding dumped all 12 grenades in ~8 s of a 20 s ride and you
+	# dismounted with zero, right where bunkers and bosses need the only armour-cracker
+	# in the game. Same verb, same ammo pool, and the trigger is the player's again.
+	#
+	# THE E-ABOARD-A-TANK RULE: E means aboard exactly what it means on foot — the
+	# grenade verb. It fires the cannon INSTEAD of a hand throw (a rider has no throw:
+	# the on-foot lob lives past the `continue` above, and always did), unless a rescue
+	# is genuinely on the table — partner down and affordable, or the endless shop
+	# window — in which case main.revive_context still wins the key and the cannon holds
+	# fire. A rider can never be the downed one (_kill_player clears in_tank), so that
+	# clause of the rule cannot fire for a driver. SHIFT (grenade_alt) sits outside the
+	# arbitration and always fires the cannon: that is the escape hatch for shooting
+	# while a partner bleeds out. The coax gunner keeps the always-fire MG (see
+	# _ride_as_gunner) and never touches this pool, so no seat is left without a trigger.
+	#
+	# EDGE-triggered, like every other discrete verb (roll, grenade, bash). A level read
+	# would leave the same drain in place for anyone who simply HOLDS E. ponytail: no
+	# input buffer here — the on-foot lob has one because a swallowed press feels like
+	# a lie, but this bug was over-firing, not under-firing; add one if 45t of dropped
+	# taps ever measures as a complaint.
+	if grenade_edge and tank["fire_cd"] == 0 and p["grenade_ammo"] > 0:
 		tank["fire_cd"] = TANK_FIRE_COOLDOWN_TICKS
 		p["grenade_ammo"] = p["grenade_ammo"] - 1
 		events.append({"t": "tank_shot", "x": tank["x"], "y": tank["y"], "i": player_index})

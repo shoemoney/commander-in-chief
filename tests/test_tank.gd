@@ -64,11 +64,57 @@ func test_cannon_draws_grenade_ammo() -> void:
 	_board(sim, tank)
 	var shells_before: int = p["grenade_ammo"]
 	var fire := SimInput.new()
-	fire.fire = true
+	fire.grenade = true   # the cannon rides the GRENADE verb — it spends grenade ammo
 	fire.aim_y = -256
 	sim.step([fire])
 	Runner.T.eq(p["grenade_ammo"], shells_before - 1, "cannon consumed grenade ammo")
 	Runner.T.ok(sim.grenades.size() == 1 and sim.grenades[0]["shell"], "shell projectile spawned")
+
+
+func test_cannon_ignores_always_fire_and_is_edge_triggered() -> void:
+	## THE grenade-incinerator regression. ALWAYS-FIRE pins inp.fire permanently true, so
+	## a cannon on the fire verb emptied all 12 grenades in ~8 s of a 20 s ride and the
+	## player dismounted with zero — with no way to decline. The cannon is on GRENADE now,
+	## and edge-triggered, so neither holding fire nor holding E can drain the pool.
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	var full: int = p["grenade_ammo"]
+	var held := SimInput.new()
+	held.fire = true         # always-fire, the shipped input shape
+	held.grenade = true      # ...and E welded down on top of it
+	held.aim_y = -256
+	for _t in SimWorld.TANK_FUEL_TICKS:
+		if p["in_tank"] < 0:
+			break
+		sim.step([held])
+	Runner.T.eq(p["grenade_ammo"], full - 1,
+		"a whole ride of held fire + held E spends exactly ONE shell (the single edge)")
+	Runner.T.ok(p["grenade_ammo"] > 0, "the rider dismounts with grenades left")
+
+
+func test_cannon_never_fires_without_the_grenade_verb() -> void:
+	## Ride out the whole fuel clock with always-fire on and E never pressed: not one
+	## shell, not one grenade gone. The trigger belongs to the player again.
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	var full: int = p["grenade_ammo"]
+	var fire := SimInput.new()
+	fire.fire = true
+	fire.aim_y = -256
+	var shells := 0
+	for _t in SimWorld.TANK_FUEL_TICKS:
+		if p["in_tank"] < 0:
+			break
+		sim.step([fire])
+		for ev in sim.events:
+			if ev.get("t", "") == "tank_shot":
+				shells += 1
+	Runner.T.eq(shells, 0, "always-fire alone never fires the cannon")
+	Runner.T.eq(p["grenade_ammo"], full, "a full ride costs zero grenades if you never tap E")
 
 
 func test_fuel_out_ignites_and_bail_window() -> void:

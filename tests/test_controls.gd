@@ -205,6 +205,26 @@ func test_last_stand_hands_e_back_to_the_grenade() -> void:
 		"past the final gate the coin reader is dead, so E is a grenade again")
 
 
+func test_e_aboard_a_tank_is_the_cannon_unless_a_rescue_is_on_the_table() -> void:
+	# THE E-ABOARD-A-TANK RULE (mirrored in SimWorld._drive_tank's comment). E means the
+	# same thing aboard as on foot: the grenade verb. Aboard, the grenade verb is the
+	# CANNON — which spends the same pool — so nothing new needs arbitrating and the rule
+	# above stands unchanged. A rider can never be the downed one (_kill_player clears
+	# in_tank), but a PARTNER can, and then the rescue still wins the key.
+	var sim := SimWorld.new(7, 2, "campaign")
+	sim.players[0]["in_tank"] = 0
+	Runner.T.ok(not MainScript.revive_context(sim, 0),
+		"riding, nobody down: E is the cannon")
+	sim.players[1]["alive"] = false
+	sim.war_chest = sim.revive_cost(sim.players[1])
+	Runner.T.ok(MainScript.revive_context(sim, 0),
+		"riding with a downed, affordable partner: E is the rescue and the cannon holds fire")
+	# ...and SHIFT (grenade_alt) is the escape hatch: a pure throw OUTSIDE the arbitration,
+	# so a driver can always shell something even while a partner bleeds out.
+	var shift := MainScript.shared_e(false, true, false, true, true)
+	Runner.T.ok(shift[0], "SHIFT still fires the cannon through a live rescue prompt")
+
+
 func test_endless_intermission_gives_e_to_the_ready_up_hold() -> void:
 	# SimWorld._ready_up reads `revive` as HOLD TO DEPLOY EARLY, and the hint already names E.
 	var sim := SimWorld.new(7, 1, "endless")

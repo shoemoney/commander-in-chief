@@ -5315,10 +5315,15 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	inp.revive = (tick % 90) == 0       # downed: feed the coin reader
 	var p := dsim.players[0]
 	if p["in_tank"] >= 0:
-		# Tank time: gentler weave, cannon on the same trigger, stay aboard.
+		# Tank time: gentler weave, stay aboard. The cannon now rides the GRENADE verb
+		# (it always spent grenade ammo; ALWAYS-FIRE made `fire` a permanent trigger and
+		# turned every ride into a grenade incinerator), so the bot pulls the cannon
+		# trigger the same way a player does — and ONLY with a bunker actually in reach,
+		# which is what the line below always claimed to do. That keeps the gate-cracking
+		# on camera while leaving the bot ammo to dismount with.
 		inp.move_x = [0, 128, -128, 0][(tick / 100) % 4]
 		inp.roll = false
-		inp.grenade = false
+		inp.grenade = (tick % 60) < 30   # one cannon EDGE per second — a pulled trigger, not a held one
 		# Shell the nearest bunker in reach — crack the gate on camera.
 		for bk in dsim.bunkers:
 			if bk["alive"]:
@@ -5455,6 +5460,10 @@ func _gather_inputs() -> Array[SimInput]:
 	#   * downed                             — _step_dead_player, which has no firing branch
 	#   * ammo / reload cadence / dry click  — mg_ammo + FIRE_COOLDOWN_TICKS, untouched
 	#   * tank + coax seats                  — still routed through _drive_tank/_ride_as_gunner
+	# The one refusal that DIDN'T hold was the tank cannon: it read `fire`, so a permanently
+	# true trigger emptied all 12 grenades in ~8 s of a 20 s ride. It now rides the GRENADE
+	# verb it always billed (SimWorld._drive_tank carries the rule); the coax MG still runs
+	# on always-fire because it spends mg_ammo like the on-foot gun does.
 	# The one thing that DID need a new refusal is the supply wheel (below): it hijacks the
 	# aim vector for sector selection, so firing through an open wheel would spray wherever
 	# the flick points and bill you for it.
