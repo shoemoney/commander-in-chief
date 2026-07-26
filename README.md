@@ -113,11 +113,11 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 |---|---|---|
 | Move | WASD | Left stick |
 | Aim (decoupled) | Mouse or arrow keys | Right stick |
-| Fire / tank cannon 🔫 | Space / LMB | RT / R1 |
-| Grenade 💣 — **hold through the apex = AIRBURST** 🎈 | Shift / RMB | L1 |
+| Fire / tank cannon 🔫 — **always on**, there is no fire button: aim *is* the weapon | — | — |
+| Grenade 💣 — **hold through the apex = AIRBURST** 🎈 | E (Shift = alt) / RMB | L1 |
 | Dodge roll (i-frames) 🤸 | C | B |
 | Interact 🚜 (board/exit tank · **gunner seat** on an occupied hull · **salvage hulks** · plant claymores) | F | X |
-| Revive (spend War Chest) 💸 | E | Y |
+| Revive (spend War Chest) 💸 — **shares E with grenade**: E revives when a rescue is on the table (you're down, or a downed partner the chest can afford), otherwise it throws | E | Y |
 | **Supply wheel** (hold, flick, release) 🎡 | Q | BACK |
 | Toggle local 2P 👥 | F2 | — |
 | Toggle Endless War ♾️ | F3 | — |

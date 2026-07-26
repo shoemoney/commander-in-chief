@@ -1,0 +1,231 @@
+extends RefCounted
+## The owner-requested control scheme, pinned:
+##   1. ALWAYS FIRE — the MG has no button. It must fire wherever the game allows firing and
+##      stay silent everywhere the game already forbade it.
+##   2. E IS SHARED — grenade in normal play, revive when a rescue is really on the table.
+##      Solo is trivial; the 2P rule is the one that needed writing down (main.revive_context).
+##      SHIFT stays a secondary, PURE throw.
+
+const Runner := preload("res://tests/run_tests.gd")
+const MainScript = preload("res://src/main.gd")
+const Menu := preload("res://src/view/menu.gd")
+
+
+func _fire() -> SimInput:
+	var inp := SimInput.new()
+	inp.fire = true
+	inp.aim_y = -256
+	return inp
+
+
+func _shots(sim: SimWorld) -> int:
+	var n := 0
+	for ev in sim.events:
+		if ev.get("t") == "shot":
+			n += 1
+	return n
+
+
+# --- 1. ALWAYS FIRE -----------------------------------------------------------------
+
+func test_there_is_no_fire_binding_and_space_is_free() -> void:
+	Runner.T.ok(not MainScript.BIND_DEFAULTS.has("fire"),
+		"no keyboard FIRE binding exists — aiming is the whole weapon verb")
+	Runner.T.ok(not MainScript.PAD_DEFAULTS.has("fire"), "no pad FIRE button either")
+	for a in MainScript.BIND_DEFAULTS:
+		Runner.T.ok(int(MainScript.BIND_DEFAULTS[a]) != KEY_SPACE,
+			"SPACE stays unclaimed — '%s' must not take it" % a)
+
+
+func test_held_fire_keeps_shooting_on_the_cooldown_cadence() -> void:
+	# Always-fire's whole point: a permanently-true `fire` must land a round every
+	# FIRE_COOLDOWN_TICKS for as long as there is ammo, with no edge anywhere.
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p := sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+	var fired := 0
+	for i in 80:
+		sim.events.clear()   # _step_players does not clear; step() does
+		sim._step_players([_fire()])
+		fired += _shots(sim)
+	Runner.T.eq(fired, 80 / SimWorld.FIRE_COOLDOWN_TICKS,
+		"held fire lands exactly one round per FIRE_COOLDOWN_TICKS")
+
+	Runner.T.eq(int(p["mg_ammo"]), SimWorld.MG_AMMO_MAX - fired, "and bills one round each")
+
+
+func test_full_clip_dries_in_the_advertised_thirteen_seconds() -> void:
+	# The economy headline, pinned as arithmetic the sim actually performs: a full clip at
+	# max cadence is ~13 s of continuous fire. If either constant moves, this says so.
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p := sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+	var t := 0
+	while int(p["mg_ammo"]) > 0 and t < 3600:
+		sim._step_players([_fire()])
+		t += 1
+	# The first round leaves on tick 1 (fire_cd starts at 0), so the last of N rounds lands
+	# on tick (N-1)*cd + 1 — 785 ticks / 13.1 s for the shipped 99 rounds at an 8-tick cadence.
+	Runner.T.eq(t, (SimWorld.MG_AMMO_MAX - 1) * SimWorld.FIRE_COOLDOWN_TICKS + 1,
+		"a full %d-round clip empties in %.1f s of continuous fire"
+			% [SimWorld.MG_AMMO_MAX,
+				float((SimWorld.MG_AMMO_MAX - 1) * SimWorld.FIRE_COOLDOWN_TICKS + 1) / 60.0])
+
+
+func test_a_downed_player_never_fires_however_hard_fire_is_held() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p := sim.players[0]
+	p["alive"] = false
+	for i in 60:
+		sim._step_players([_fire()])
+		Runner.T.eq(_shots(sim), 0, "a body on the floor fires nothing")
+	Runner.T.eq(int(p["mg_ammo"]), SimWorld.MG_AMMO_MAX, "and spends no ammo doing it")
+
+
+func test_a_wiped_run_fires_nothing() -> void:
+	# A wipe freezes the whole sim: step() returns before _step_players, so always-fire
+	# cannot spend a round into a finished run.
+	# (VICTORY deliberately not asserted here: SimWorld.step() only early-returns on `wiped`.
+	# A won run keeps simulating behind the debrief card until the player redeploys, so the
+	# gun keeps going — exactly as it did for anyone holding the old fire key. Pre-existing,
+	# and post-victory ammo has no value: the score is already banked by then.)
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p := sim.players[0]
+	sim.wiped = true
+	var before: int = p["mg_ammo"]
+	for i in 30:
+		sim.step([_fire()])
+	Runner.T.eq(int(p["mg_ammo"]), before, "a wiped run freezes the gun with it")
+
+
+func test_empty_clip_bash_survives_the_loss_of_the_fire_edge() -> void:
+	# Bash used to be edge-gated. With no fire button the edge arrives once per RUN, so an
+	# edge gate would have quietly deleted the empty-clip counter. Level-triggered now, and
+	# still rationed by BASH_COOLDOWN_TICKS rather than by the button.
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p := sim.players[0]
+	p["mg_ammo"] = 0
+	sim.enemies.clear()
+	var held := _fire()
+	sim._step_players([held])   # burn the one and only rising edge
+	sim._spawn_enemy(p["x"] + 12 * Fixed.ONE, p["y"], false)
+	var e1 := sim.enemies[sim.enemies.size() - 1]
+	sim._step_players([held])
+	Runner.T.ok(not e1["alive"], "a dry player still bashes with fire already held down")
+	Runner.T.eq(int(p["fire_cd"]), SimWorld.BASH_COOLDOWN_TICKS, "and pays the long cooldown")
+
+
+func test_bash_is_still_rationed_by_its_cooldown_not_by_the_button() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p := sim.players[0]
+	p["mg_ammo"] = 0
+	sim.enemies.clear()
+	var held := _fire()
+	var kills := 0
+	for i in SimWorld.BASH_COOLDOWN_TICKS:
+		sim._spawn_enemy(p["x"] + 12 * Fixed.ONE, p["y"], false)
+		var e := sim.enemies[sim.enemies.size() - 1]
+		sim._step_players([held])
+		if not e["alive"]:
+			kills += 1
+		p["hurt_iframes"] = 60   # the point is the bash cadence, not contact death
+	Runner.T.eq(kills, 1, "one bash per BASH_COOLDOWN_TICKS even with fire permanently held")
+
+
+# --- 2. THE SHARED E ----------------------------------------------------------------
+
+func test_e_defaults_to_grenade_and_shares_the_key_with_revive() -> void:
+	Runner.T.eq(int(MainScript.BIND_DEFAULTS["grenade"]), KEY_E, "GRENADE ships on E")
+	Runner.T.eq(int(MainScript.BIND_DEFAULTS["revive"]), KEY_E, "REVIVE ships on the same E")
+	Runner.T.eq(int(MainScript.BIND_DEFAULTS["grenade_alt"]), KEY_SHIFT,
+		"SHIFT survives as the secondary throw")
+
+
+func test_shift_always_throws_even_when_e_is_busy_reviving() -> void:
+	# [grenade, revive] for: E down, SHIFT down, revive-context ON, keys shared.
+	var both := MainScript.shared_e(true, true, true, true, true)
+	Runner.T.ok(both[0], "SHIFT throws while a rescue is on the table")
+	Runner.T.ok(both[1], "...and the same held E still performs the rescue")
+	var alt_only := MainScript.shared_e(false, true, false, true, false)
+	Runner.T.ok(alt_only[0] and not alt_only[1], "SHIFT alone is a pure throw, never a revive")
+
+
+func test_shared_e_truth_table() -> void:
+	# E alone, keys shared. revives=false -> throw; revives=true -> revive. Never both.
+	var throw := MainScript.shared_e(true, false, true, true, false)
+	Runner.T.ok(throw[0] and not throw[1], "no rescue on the table: E throws")
+	var rescue := MainScript.shared_e(true, false, true, true, true)
+	Runner.T.ok(rescue[1] and not rescue[0], "rescue on the table: the same E revives instead")
+	# Rebound apart (or a pad, where they are two real buttons): no muting at all.
+	var split_up := MainScript.shared_e(true, false, false, false, true)
+	Runner.T.ok(split_up[0] and not split_up[1],
+		"once the keys differ, the grenade key throws even mid-rescue")
+	var split_rev := MainScript.shared_e(false, false, true, false, false)
+	Runner.T.ok(split_rev[1] and not split_rev[0],
+		"...and the revive key revives even with nobody down (the sim just no-ops it)")
+	var idle := MainScript.shared_e(false, false, false, true, true)
+	Runner.T.ok(not idle[0] and not idle[1], "nothing held, nothing fires")
+
+
+func test_solo_context_is_down_revives_up_throws() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	Runner.T.ok(not MainScript.revive_context(sim, 0), "solo and standing: E is a grenade")
+	sim.players[0]["alive"] = false
+	Runner.T.ok(MainScript.revive_context(sim, 0), "solo and down: E is GET UP")
+
+
+func test_two_player_rule_downed_partner_plus_affordable_chest() -> void:
+	# THE 2P RULE: you are up, your partner is down. E revives only if the chest can pay.
+	var sim := SimWorld.new(7, 2, "campaign")
+	Runner.T.ok(not MainScript.revive_context(sim, 0), "both up: E throws")
+	sim.players[1]["alive"] = false
+	sim.war_chest = 0
+	Runner.T.ok(not MainScript.revive_context(sim, 0),
+		"partner down but the chest is broke: E keeps throwing — a rescue you cannot "
+		+ "perform must not disarm the only armor-cracker in the fight")
+	sim.war_chest = sim.revive_cost(sim.players[1])
+	Runner.T.ok(MainScript.revive_context(sim, 0), "partner down and affordable: E is the rescue")
+
+
+func test_a_downed_player_revives_regardless_of_price() -> void:
+	# Rule 2: your own body ignores affordability. You cannot throw from the floor anyway,
+	# and gating it would swallow the revive_deny cue that explains the silence.
+	var sim := SimWorld.new(7, 2, "campaign")
+	sim.players[0]["alive"] = false
+	sim.war_chest = 0
+	Runner.T.ok(MainScript.revive_context(sim, 0), "broke and down: E is still GET UP, so the deny cue fires")
+
+
+func test_last_stand_hands_e_back_to_the_grenade() -> void:
+	var sim := SimWorld.new(7, 2, "campaign")
+	sim.players[1]["alive"] = false
+	sim.war_chest = 9999
+	sim.last_stand = true
+	Runner.T.ok(not MainScript.revive_context(sim, 0),
+		"past the final gate the coin reader is dead, so E is a grenade again")
+
+
+func test_endless_intermission_gives_e_to_the_ready_up_hold() -> void:
+	# SimWorld._ready_up reads `revive` as HOLD TO DEPLOY EARLY, and the hint already names E.
+	var sim := SimWorld.new(7, 1, "endless")
+	Runner.T.ok(not MainScript.revive_context(sim, 0), "mid-wave: E throws")
+	sim.intermission_ticks = 120
+	Runner.T.ok(MainScript.revive_context(sim, 0), "shop window open: E is the ready-up hold")
+
+
+# --- 3. THE SURFACES THAT TEACH IT ---------------------------------------------------
+
+func test_no_ui_surface_still_advertises_a_fire_key() -> void:
+	Runner.T.ok(not ("fire" in Menu.REBIND_ACTIONS),
+		"the REBIND screen no longer offers a FIRE row to rebind")
+	Runner.T.ok("grenade_alt" in Menu.REBIND_ACTIONS, "GRENADE (ALT) is rebindable in its place")
+
+
+func test_pause_footer_names_the_permanent_verb_on_e() -> void:
+	# The pause footer is the PERMANENT reference; revive is contextual, grenade is not.
+	var acts: Array = []
+	for seg in Menu.footer_verb_segs():
+		acts.append(seg["act"])
+	Runner.T.ok("grenade" in acts, "the mid-run footer names GRENADE (the always-available E)")
+	Runner.T.ok(not ("revive" in acts),
+		"...not REVIVE, which only exists over a body and is taught there")

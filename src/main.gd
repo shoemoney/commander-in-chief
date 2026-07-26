@@ -307,8 +307,6 @@ var _deny_frame := -100           # rate-limits revive_deny, which the sim emits
 var _dry_roll_frame := -100       # separate clock for the cooldown-blocked ROLL click
 var _roll_dry := [0, 0]           # per-player frames left on the blocked-roll arc flash
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
-var _fire_swallow := false       # eat SPACE/LMB held over from a menu click / debrief redeploy —
-                                 # clicking RESUME must not spend MG ammo on the first resumed ticks
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
 var _tech_lunge_prev := {}              # per-slot technical lunge_ticks — charge-end skid cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
@@ -1482,7 +1480,6 @@ func _reset() -> void:
 	_boost_max.clear()
 	_victory_banked = 0
 	_victory_banked_score = 0
-	_fire_swallow = true   # a SPACE/Enter/LMB redeploy press must not open the run firing
 	_warn_p2_pad()   # after _banners.clear(), so the warning survives the reset
 
 
@@ -1891,9 +1888,11 @@ func _physics_process(_delta: float) -> void:
 	# every assignment site, so the old per-frame re-sync here is gone -- the palette can't drift.
 	_update_cursor()
 	if _menu.is_active():
-		# Arm the fire-swallow every menu frame: the SPACE/LMB press that closes
-		# the menu (RESUME click, title confirm) must not fire on resume.
-		_fire_swallow = true
+		# (The old fire-swallow lived here: it ate the SPACE/LMB press that closed a menu so
+		# RESUME did not spend MG ammo on the first resumed tick. Always-fire retired it —
+		# there is no fire key to swallow, and the gun would re-open fire a frame later
+		# anyway. Keeping it would have been worse than useless: it only cleared once LMB
+		# read released, so any held mouse button would have silenced the MG outright.)
 		_hud_icons.visible = _menu.mode != GameMenu.Mode.TITLE
 		# Attract mode: the title runs a LIVE firefight behind the overlay
 		# (reusing the tuned trailer bot) so the game sells itself before a
@@ -2167,8 +2166,11 @@ func _consume_events() -> void:
 					# The hint that fires on the ONE wall bullets can't solve must NAME the
 					# button — same device-aware [%s] pattern the revive/supply hints use
 					# (pad label off the live brand, else the keyboard default).
+					# ...and the keyboard half now reads the LIVE bind instead of a hardcoded
+					# stamp: grenade moved SHIFT->E, and a stamped key would have lied about it
+					# (and about every rebind) exactly like the old one did.
 					_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
-						% (Art.pad_label("grenade") if Art.use_pad else "SHIFT"))
+						% (Art.pad_label("grenade") if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 				if not armor_pinged:
 					armor_pinged = true
 					# juice pass: the ricochet threw sparks but cast no light — a
@@ -3772,8 +3774,13 @@ const BIND_DEFAULTS := {
 	"aim_down": KEY_DOWN,
 	"aim_left": KEY_LEFT,
 	"aim_right": KEY_RIGHT,
-	"fire": KEY_SPACE,
-	"grenade": KEY_SHIFT,
+	# ALWAYS-FIRE: there is NO "fire" binding any more — the MG runs continuously and aim is
+	# the whole weapon verb (see _gather_inputs). SPACE is deliberately left unclaimed.
+	# GRENADE moved onto E and SHARES it with REVIVE contextually (revive_context);
+	# "grenade_alt" keeps the old SHIFT throw alive so existing muscle memory (and any saved
+	# [binds] that rebound "grenade") still works — it is a PURE throw, never contextual.
+	"grenade": KEY_E,
+	"grenade_alt": KEY_SHIFT,
 	"roll": KEY_C,
 	"interact": KEY_F,
 	"revive": KEY_E,
@@ -3786,7 +3793,9 @@ const BIND_DEFAULTS := {
 # always live (documented on the rebind screen), so the rebindable pad set is the buttons.
 # -1 == UNBOUND. Both pads (P1 dev 0, P2 dev 1) share this one layout.
 const PAD_DEFAULTS := {
-	"fire": JOY_BUTTON_RIGHT_SHOULDER,
+	# No "fire" row: always-fire retired the trigger. RIGHT_SHOULDER / RT are now free.
+	# GRENADE and REVIVE stay TWO REAL BUTTONS on a pad (LB / Y) — the contextual share is a
+	# keyboard-only arbitration (one key, two verbs), so a pad player never loses either.
 	"grenade": JOY_BUTTON_LEFT_SHOULDER,
 	"roll": JOY_BUTTON_B,
 	"interact": JOY_BUTTON_X,
@@ -5322,6 +5331,56 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	return inp
 
 
+## The shared-E ARBITRATION, kept as a pure function so the rule below is pinnable without
+## a real keyboard (test_controls.gd walks its whole truth table). Returns [grenade, revive]
+## for ONE device. `shared` is true when the grenade and revive keys are literally the same
+## key — only then does either verb get muted; unshare them in REBIND and both go back to
+## being unconditional, which is also why a pad (grenade LB, revive Y) never passes through
+## the mute at all. `alt` is the GRENADE (ALT) key (SHIFT): a pure throw, outside the rule.
+static func shared_e(primary: bool, alt: bool, revive_key: bool, shared: bool,
+		revives: bool) -> Array:
+	return [(primary and not (shared and revives)) or alt,
+		revive_key and (revives or not shared)]
+
+
+## THE SHARED-E RULE. E throws a grenade in normal play and revives when a rescue is
+## actually on the table. Solo is unambiguous — you are down (GET UP) or you are not
+## (throw). 2P is the case that needs a written rule, and this is it:
+##
+##   1. ENDLESS INTERMISSION -> revive. The shop window is the one place the revive press
+##      already meant something else (SimWorld._ready_up reads `revive` as HOLD TO DEPLOY
+##      EARLY, and the "HOLD [E] TO DEPLOY EARLY" hint already names E). Nothing is alive
+##      to throw at in an intermission, so nothing is lost.
+##   2. YOU ARE DOWN -> revive, unconditionally. A body cannot throw (_step_dead_player has
+##      no grenade branch), and gating this on price would swallow the revive_deny cue that
+##      is the only thing telling a broke, downed player why E did nothing.
+##   3. YOU ARE UP AND A PARTNER IS DOWN -> revive only if the War Chest can actually pay,
+##      and only while the coin reader is alive (Last Stand kills it). Otherwise E throws.
+##
+## Rule 3 is the owner's proposed rule minus its range clause, because that clause has no
+## referent in this sim: SimWorld._try_revive has NO radius — an alive player revives every
+## downed partner wherever they are standing, and the "at their side" respawn is the reward
+## for being close, not a precondition. Adding a radius would be a brand-new nerf to revive,
+## not a disambiguation of E. Affordability is the condition that already exists, and it is
+## the one that matters: without it, a broke rescue would disarm the only armor-cracker in
+## the game for the whole broke-fallback timer, in the exact fight that created the body.
+## Pinned by test_controls.gd.
+## Static (and sim-in, bool-out) so test_controls.gd can walk the rule without standing up a
+## whole Main node — the reason the old instance method leaked 160 objects per test.
+static func revive_context(w: SimWorld, i: int) -> bool:
+	if w.mode == "endless" and w.intermission_ticks > 0:
+		return true
+	if not w.players[i]["alive"]:
+		return true
+	if w.last_stand:
+		return false
+	for q in w.players.size():
+		var other: Dictionary = w.players[q]
+		if q != i and not other["alive"] and w.war_chest >= w.revive_cost(other):
+			return true
+	return false
+
+
 func _gather_inputs() -> Array[SimInput]:
 	if OS.has_feature("movie") or demo_autoplay:
 		# One scripted input per player, same as the title attract screen — demo_input
@@ -5370,26 +5429,29 @@ func _gather_inputs() -> Array[SimInput]:
 	p1.move_y = _quantize_axis(ky)
 	p1.aim_x = _quantize_axis(ax)
 	p1.aim_y = _quantize_axis(ay)
-	# Fire-swallow: menu rows activate on LMB press and SPACE is menu-confirm /
-	# debrief-redeploy — without this, clicking RESUME fired live rounds at the
-	# crosshair on the first resumed ticks. Re-arms once both keys read released.
-	# View-only (the input never reaches the sim), golden-safe.
-	if _fire_swallow and not Input.is_physical_key_pressed(bind("fire")) \
-			and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		_fire_swallow = false
-	# c1-18: the fire TRIGGER (analog, always live) stays fixed; the rebindable pad
-	# button reads through pad_pressed. Keyboard reads its rebound physical key.
-	# steamworks-and-steam-input: fire_trigger_value()/button_pressed() read Steam
-	# Input's action-HANDLE data (assets/input/actions.vdf) -- the Deck-Verified-
-	# required path a raw JOY_AXIS_TRIGGER_RIGHT/JOY_BUTTON_* read alone can miss
-	# on a real Deck. Both return an inert value (-1.0 / false) whenever Steam
-	# Input isn't wired up, so every OR below is free offline.
-	p1.fire = (not _fire_swallow and (Input.is_physical_key_pressed(bind("fire"))
-		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))) \
-		or Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-		or _steam.fire_trigger_value(0) > 0.5 \
-		or pad_pressed(0, "fire")
-	p1.grenade = Input.is_physical_key_pressed(bind("grenade")) \
+	# ALWAYS FIRE. There is no fire key, no fire trigger and no fire pad button: the MG runs
+	# continuously and AIM is the entire weapon verb, so a laptop player is never holding a
+	# fire key + a grenade key + WASD at once. The existing refusals all still hold, because
+	# none of them were ever implemented as "don't press fire":
+	#   * menus / pause / cutscene overlays  — _physics_process never reaches sim.step()
+	#   * victory / wiped                    — SimWorld.step() returns before _step_players
+	#   * downed                             — _step_dead_player, which has no firing branch
+	#   * ammo / reload cadence / dry click  — mg_ammo + FIRE_COOLDOWN_TICKS, untouched
+	#   * tank + coax seats                  — still routed through _drive_tank/_ride_as_gunner
+	# The one thing that DID need a new refusal is the supply wheel (below): it hijacks the
+	# aim vector for sector selection, so firing through an open wheel would spray wherever
+	# the flick points and bill you for it.
+	p1.fire = true
+	# E IS THE SHARED VERB — grenade normally, revive when a rescue is really on the table
+	# (revive_context holds the rule). Only a key bound to BOTH verbs gets arbitrated: a pad
+	# has grenade on LB and revive on Y, two real buttons, so neither is ever muted there.
+	# GRENADE (ALT) — SHIFT by default — is a PURE throw and sits outside the arbitration on
+	# purpose, so old muscle memory throws even while a partner is bleeding out.
+	var e := shared_e(Input.is_physical_key_pressed(bind("grenade")),
+		Input.is_physical_key_pressed(bind("grenade_alt")),
+		Input.is_physical_key_pressed(bind("revive")),
+		bind("grenade") == bind("revive"), revive_context(sim, 0))
+	p1.grenade = e[0] \
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
 		or pad_pressed(0, "grenade") \
 		or _steam.button_pressed(0, "grenade")
@@ -5397,7 +5459,8 @@ func _gather_inputs() -> Array[SimInput]:
 		or _steam.button_pressed(0, "roll")
 	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact") \
 		or _steam.button_pressed(0, "interact")
-	p1.revive = Input.is_physical_key_pressed(bind("revive")) or pad_pressed(0, "revive") \
+	p1.revive = e[1] \
+		or pad_pressed(0, "revive") \
 		or _steam.button_pressed(0, "revive")
 	p1.buy = _update_wheel(0,
 		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy") or _steam.button_pressed(0, "buy"),
@@ -5406,6 +5469,10 @@ func _gather_inputs() -> Array[SimInput]:
 	# not a dodge) and sector flicks steer the wheel, not the gun.
 	if _wheel[0]["open"]:
 		p1.roll = false
+		# Always-fire's ONE new refusal: the wheel steers the aim vector, and the gun fires
+		# down the aim vector. Left live, opening the shop sprayed the sector you were
+		# picking and charged you a round per flick.
+		p1.fire = false
 		p1.aim_x = _quantize_axis(_wheel_aim[0].x)
 		p1.aim_y = _quantize_axis(_wheel_aim[0].y)
 	else:
@@ -5427,9 +5494,9 @@ func _gather_inputs() -> Array[SimInput]:
 		# steamworks-and-steam-input: P2 also gets Steam Input's action-handle
 		# reads (fire_trigger_value(1)/button_pressed(1, ...)) -- previously only
 		# P1 (device 0) resolved a Steam Input controller handle at all.
-		p2.fire = Input.get_joy_axis(1, JOY_AXIS_TRIGGER_RIGHT) > 0.5 \
-			or pad_pressed(1, "fire") \
-			or _steam.fire_trigger_value(1) > 0.5
+		# Always-fire (see P1): no trigger read at all. P2 is pad-only, so grenade (LB) and
+		# revive (Y) stay two distinct buttons and need no contextual arbitration.
+		p2.fire = true
 		p2.grenade = pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
 		p2.roll = pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
 		p2.interact = pad_pressed(1, "interact") or _steam.button_pressed(1, "interact")
@@ -5438,6 +5505,7 @@ func _gather_inputs() -> Array[SimInput]:
 			p2_aim, p2_move)
 		if _wheel[1]["open"]:
 			p2.roll = false
+			p2.fire = false   # same wheel refusal as P1
 			p2.aim_x = _quantize_axis(_wheel_aim[1].x)
 			p2.aim_y = _quantize_axis(_wheel_aim[1].y)
 		else:

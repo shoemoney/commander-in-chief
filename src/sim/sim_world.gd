@@ -1116,13 +1116,19 @@ func _step_players(inputs: Array) -> void:
 			p["aim_x"] = Fixed.div(ax, alen)
 			p["aim_y"] = Fixed.div(ay, alen)
 
-		# Bash is edge-triggered too, for the same reason roll and grenade now are:
-		# as a level read, simply HOLDING fire in a swarm auto-bashed a guaranteed
-		# kill every 40 ticks with no further input. It was the last held-button
-		# autopilot left in the kit.
-		var fire_edge: bool = inp.fire and not p["fire_prev"]
+		# Bash WAS edge-triggered, for the same reason roll and grenade are: as a level
+		# read, HOLDING fire in a swarm auto-bashed a guaranteed kill every 40 ticks with
+		# no further input — the last held-button autopilot in the kit.
+		#
+		# ALWAYS-FIRE retires that gate, because it retires the button. `fire` is true from
+		# tick 0 forever, so an edge arrives exactly ONCE per run and an edge-gated bash
+		# would be dead content — the empty-clip counter would simply never exist again.
+		# Level-triggered is safe now for the reason the edge was defending: the bash still
+		# costs BASH_COOLDOWN_TICKS, and it was already minted no_coin/no_score, so camping
+		# dry in a swarm still buys survival and nothing else. `fire_prev` is kept (hashed
+		# state, and the honest record of the wire input) even though nothing reads it.
 		p["fire_prev"] = inp.fire
-		if fire_edge and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
+		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
 			# Empty-clip bash: one enemy in reach dies (no coin), on a long
 			# cooldown — running dry is a beat of danger, not pure helplessness.
 			var bashed := false
@@ -1142,11 +1148,10 @@ func _step_players(inputs: Array) -> void:
 						bashed = true
 						break
 			if not bashed:
+				# Empty-mag click. (The separate `elif` that used to carry this for HELD
+				# fire is gone: with the edge gate removed its condition is now identical
+				# to the branch above, so it was unreachable.)
 				events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
-		elif inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
-			# Held fire on an empty clip still deserves the empty-mag click — the
-			# edge gate above governs the BASH, not the feedback.
-			events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
 		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
