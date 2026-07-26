@@ -45,7 +45,17 @@ const REND_TICKS := 480
 # Player Claymore: a carried charge (capped) planted with INTERACT on foot away
 # from any tank. Reuses the landmine array wholesale — it hurts both sides.
 const CLAYMORE_CAP := 3
-const CLAYMORE_PLANT_OFFSET := 20 * F_ONE   # behind the aim, outside its own trigger radius
+const CLAYMORE_PLANT_OFFSET := 20 * F_ONE   # ALONG the aim (the comment used to say "behind" —
+                                            # stale; see the plant site for why it moved)
+# PLANTER GRACE. Placement alone can never fix planting-into-yourself, because both placements
+# self-kill on the input the game teaches: measured with tools/probe_claymore.gd, planting ALONG the
+# aim and then advancing hurts you at TICK 5, and the previous behind-the-aim placement did the same
+# at ~5 ticks on a full backpedal. So the charge stays lethal to everyone else immediately — which is
+# the whole point of dropping one while you fall back — and simply cannot bite the player who planted
+# it for this many ticks. 20 ticks is measured, not guessed: the planter closes 11px in 5 ticks
+# (~2.2px/tick), so crossing the 18px-wide trigger zone takes ~8 ticks; 20 clears it with margin
+# even if you stop dead on top of it.
+const CLAYMORE_ARM_TICKS := 20
 # Smoke capsule: personal concealment — while active NO enemy AI can target you
 # (one guard in _nearest_alive_player covers every ranged/mortar/chase caller).
 const SMOKE_TICKS := 300
@@ -270,11 +280,21 @@ const GATE_BLOCK_PAD := 14 * F_ONE
 # *F_ONE at the use site. props: [kind, x, y_off] with kind "mine"/"barrel".
 const ARENAS := {
 	1: {"b1": [180, 50], "b2": [412, 50], "props": []},
-	2: {"b1": [300, 150], "b2": [160, 40], "props": [   # staggered depth: a front
-		["mine", 240, 100], ["mine", 350, 60]]},        # sentinel screens the rear
-	4: {"b1": [240, 50], "b2": [368, 50], "props": [    # crossfire-close: barrels
+	# ⚠️ FORK GATES (2 and 4) must also clear their wreck island. These coordinates
+	# predate the island by 13 minutes (1124c29 -> da70544/91993f1, which stamped in
+	# x=260 and its 320-mirror x=380 without ever reading ARENAS), so three of them
+	# were sitting in boots-impassable scenery: gate 4's b2 was at 368, i.e. its
+	# entire 48px body inside the blocked 336..424 band, and gate 2's front sentinel
+	# mine at 240 was buried in the 216..304 band where no player can ever come
+	# within MINE_TRIGGER_RADIUS of it. A lock stays killable there (grenades ignore
+	# the island) but you cannot walk to it, so the arena lies about its own layout.
+	# test_no_authored_arena_geometry_hides_inside_a_fork_divider pins all of it now,
+	# deriving the island from the streamed gates — keep new coords out of the band.
+	2: {"b1": [312, 150], "b2": [160, 40], "props": [   # staggered depth: a front
+		["mine", 120, 100], ["mine", 350, 60]]},        # sentinel screens the rear
+	4: {"b1": [240, 50], "b2": [432, 50], "props": [    # crossfire-close: barrels
 		["barrel", 290, 120], ["barrel", 306, 120], ["barrel", 322, 120],   # center seam, held
-		["mine", 120, 70], ["mine", 500, 70]]},   # >blast+AABB reach of both locks (test-pinned)
+		["mine", 120, 70], ["mine", 528, 70]]},   # >blast+AABB reach of both locks
 	# c2-authored-campaign: gate 5 was "final" pre-P3.6 (FINAL_GATE_INDEX==5) and
 	# never ran this branch at all. Now a regular arena wearing the CRASHED
 	# CONVOY (RUINS) landmark — a staggered depth pair (mirrors gate 2's read,
@@ -1238,7 +1258,9 @@ func _step_players(inputs: Array) -> void:
 			var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
 			# `friendly` is view-only identity (yours vs the sapper's) — same
 			# trigger, same blast, NOT hashed (see test_checksum_coverage).
-			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true})
+			# `grace` is hashed (it decides whether a player takes a hit, so it is gameplay).
+			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true,
+				"grace": CLAYMORE_ARM_TICKS})
 			events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
 
 		# The rescue touch ignores roll i-frames — i-frames stop contact DEATH,
@@ -3208,7 +3230,7 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if e["fire_cd"] == 0 and mines.size() < SAPPER_MAX_MINES:
 		e["fire_cd"] = SAPPER_MINE_CD_TICKS
-		mines.append({"x": e["x"], "y": e["y"], "armed": true})
+		mines.append({"x": e["x"], "y": e["y"], "armed": true, "grace": 0})
 		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
 	# Moves through the shared mover step, so the sapper respects the cover the
 	# player PAID for: hand-rolled movement here phased straight through sandbags,
@@ -3334,9 +3356,15 @@ func _step_mines() -> void:
 			mines.remove_at(i)
 			continue
 		var triggered := false
+		# Grace ticks down every frame it exists. While it lasts the charge ignores PLAYERS only —
+		# enemies still trip it instantly, so a claymore dropped in a pursuer's path works on the
+		# tick it lands. Without this, walking the direction you are aiming kills you at tick 5.
+		var grace: int = m.get("grace", 0)
+		if grace > 0:
+			m["grace"] = grace - 1
 		# A player on foot (not rolling) stepping on it takes the hit + detonates.
 		for p in players:
-			if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+			if grace <= 0 and p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
 				_hurt_player(p)
 				triggered = true
@@ -3770,8 +3798,9 @@ func _in_fork_wire(x: int, y: int) -> bool:
 				or (y >= g["y"] + 210 * F_ONE and y <= g["y"] + 230 * F_ONE) \
 				or (y >= g["y"] + 330 * F_ONE and y <= g["y"] + 350 * F_ONE) \
 				or (y >= g["y"] + 450 * F_ONE and y <= g["y"] + 470 * F_ONE):
-			if (fx3 == 260 and x < fx3 * F_ONE - 44 * F_ONE) \
-					or (fx3 == 380 and x > fx3 * F_ONE + 44 * F_ONE):
+			var cache_left := fork_cache_is_left(fx3)
+			if (cache_left and x < fx3 * F_ONE - 44 * F_ONE) \
+					or (not cache_left and x > fx3 * F_ONE + 44 * F_ONE):
 				return true
 	return false
 
@@ -3868,6 +3897,48 @@ func _in_fork_divider(x: int, y: int, gate_y: int, fork_x: int) -> bool:
 	## started-inside escape rule, so the three can never disagree.
 	return y >= gate_y + 40 * F_ONE and y <= gate_y + 620 * F_ONE \
 		and absi(x - fork_x * F_ONE) < 44 * F_ONE
+
+
+static func fork_cache_is_left(fork_x: int) -> bool:
+	## The CACHE lane is the NARROW side of the wreck island: left at gate 2
+	## (fork_x 260), right at gate 4 (fork_x 380, WORLD_LEFT 16 + WORLD_RIGHT
+	## 624 = 640, and 640-260=380 — gate 4 mirrors the island). THE predicate —
+	## the wire zone, every fork content beat (_fork_lane_x), and main.gd's
+	## signposts all read this, so no copy can name the wrong lane. Raw px
+	## (fork_x is stored unscaled on gates[]), not fixed-point.
+	return fork_x < 320
+
+
+const FORK_BEAT_CLEAR := 8   # extra px past the divider face a fork beat's x must clear
+
+static func _mirror_fork_x(gate_n: int, x_at_gate_2: int) -> int:
+	## Fork beats are authored against gate 2's island at x=260. Gate 4's island
+	## MIRRORS to x=380 (640 - 260), so a beat x that isn't also mirrored lands on
+	## the WRONG SIDE of gate 4's divider — the class of bug this fixes: 108 beats
+	## authored only against gate 2's geometry landed in the wrong lane at gate 4.
+	return (640 - x_at_gate_2) if gate_n == 4 else x_at_gate_2
+
+
+func _clear_fork_divider_x(gate_n: int, x: int) -> int:
+	## Pushes an ABSOLUTE (already-mirrored, or never-needed-mirroring) x off the
+	## impassable divider band — mirroring a legal gate-2 x can drop it inside gate
+	## 4's island, and some beats (the deep cache mines) sit close enough to their
+	## OWN gate's divider to need this even without ever being mirrored.
+	## ponytail: clamps to the band edge rather than reflecting a colliding x across
+	## the island — a small pile at the lane mouth reads as a guarded entrance, and
+	## it's one branch instead of a second mirrored geometry.
+	var fx: int = 260 if gate_n == 2 else 380
+	var clear: int = 44 + FORK_BEAT_CLEAR
+	var out := x
+	if absi(out - fx) < clear:
+		out = fx + (clear if out >= fx else -clear)
+	return clampi(out, 24, 616)
+
+
+func _fork_lane_x(gate_n: int, x_at_gate_2: int) -> int:
+	## Mirror THEN clamp — the one-stop call for a beat authored purely in gate-2
+	## space (the common case: the free crate, guard mines, gauntlet elites).
+	return _clear_fork_divider_x(gate_n, _mirror_fork_x(gate_n, x_at_gate_2))
 
 
 func _in_mud(_x: int, y: int) -> bool:
@@ -4020,7 +4091,7 @@ func _step_camera() -> void:
 				# GATE_SPACING evenly, so this can happen for any seed). Re-test
 				# the ACTUAL placement, same as the bunker-exclusion re-test.
 				if not _near_stream_bunker(m_px, m_py) and not _is_calm_band(m_py):
-					mines.append({"x": m_px, "y": m_py, "armed": true})
+					mines.append({"x": m_px, "y": m_py, "armed": true, "grace": 0})
 		_next_mine_y -= MINE_SPACING
 	# Stream explosive fuel-barrel CLUSTERS off the gate rows — live ordnance a
 	# grenade chains through (and that catches you if you stand too close).
@@ -4232,7 +4303,7 @@ func _step_camera() -> void:
 						rocks.append({"x": _arena_margin_x((wall_side + inward + inward) * F_ONE, lm_y), "y": lm_y - 48 * F_ONE, "kind": 2})
 			for pr in arena["props"]:
 				if pr[0] == "mine":
-					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true})
+					mines.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE, "armed": true, "grace": 0})
 				else:
 					barrels.append({"x": pr[1] * F_ONE, "y": _next_gate_y + pr[2] * F_ONE,
 						"armed": true, "fuse_ticks": 0})
@@ -4246,8 +4317,13 @@ func _step_camera() -> void:
 			# (pure position: no new input, no stored state, gates[] is unhashed).
 			# LEFT = Cache lane: a free crate ringed by extra mines. RIGHT =
 			# Gauntlet lane: two extra elites, one a guaranteed marked bounty.
-			# Torture-inert: the 60 s campaign run never streams past gate 1
-			# (probe-verified — camera_top ends ~43 units short of gate 2).
+			# ⚠️ NOT torture-inert any more. This read "never streams past gate 1
+			# (probe-verified — camera_top ends ~43 units short of gate 2)", and that
+			# went stale as the run got faster. Re-measured 2026-07-25 with
+			# tools/probe_torture_gates.gd: the torture builds gate 1 @tick 0, GATE 2
+			# @tick 1309 and gate 3 @tick 3108, ending 563 px PAST gate 2. So gate-2
+			# arena/fork state DOES reach GOLDEN (from sample 2 on); gate 4 is still
+			# out of reach. Measure before calling anything here inert.
 			if _gate_counter == 2 or _gate_counter == 4:
 				# c3 4v: the gauntlet stops being always-a-killbox. mod-4 of the
 				# per-seed _mix gives three READS you must learn to tell apart:
@@ -4256,23 +4332,38 @@ func _step_camera() -> void:
 				# threat), else HONEST killbox. The sandbag LOOK never changes;
 				# only the defenders do — reading past the dressing is the skill.
 				var is_bluff: bool = _mix(_gate_counter, _world_seed) % 4 == 2
-				var fcx: int = (90 + rng.range_i(0, 120)) * F_ONE
+				# fork-gate-bunker: every beat below was authored as an absolute gate-2
+				# x and never mirrored for gate 4's island (which sits at x=380, not
+				# 260) — _fork_lane_x mirrors (gate 4 only) THEN clears the divider band,
+				# so gate 4 now gets the same lane assignment gate 2 does instead of a
+				# reward that streams into the wrong lane or inside the wreck island.
+				var fcx: int = _fork_lane_x(_gate_counter, 90 + rng.range_i(0, 120)) * F_ONE
 				var fcy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 				pickups.append({"x": fcx, "y": fcy, "kind": 1 + rng.range_i(0, 1), "cost": 0})
 				for m in 3:
-					var fmx: int = (70 + rng.range_i(0, 180)) * F_ONE
+					# Mirror first (pure reflection, preserves the crate's relative
+					# distance below); the divider-clearance clamp runs LAST, after the
+					# on-crate nudge, so the nudge itself can't land back in the island.
+					var fmx0: int = _mirror_fork_x(_gate_counter, 70 + rng.range_i(0, 180))
 					var fmy: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 					# A mine sitting ON the free crate priced the "free" cache at
 					# 1 HP (re-review, ~9%/fork) — nudge it clear deterministically.
-					if absi(fmx - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
-						fmx += 48 * F_ONE
-					mines.append({"x": fmx, "y": fmy, "armed": true})
+					# Compare each side's CLAMPED resting x, not the raw mirrored fmx0:
+					# fcx is already mirror+clamped, and an unclamped mine can
+					# independently clamp onto the SAME divider edge as the crate even
+					# when their raw values differ by >=28px (measured: gate 4 mine raw
+					# 390 -> 432, crate raw 430 -> 432 — the pre-clamp gap hid the
+					# post-clamp collision and the nudge never fired).
+					if absi(_clear_fork_divider_x(_gate_counter, fmx0) * F_ONE - fcx) < 28 * F_ONE and absi(fmy - fcy) < 28 * F_ONE:
+						fmx0 += 48
+					var fmx: int = _clear_fork_divider_x(_gate_counter, fmx0) * F_ONE
+					mines.append({"x": fmx, "y": fmy, "armed": true, "grace": 0})
 				# c3 4v: on a BLUFF seed the gauntlet's defenders never spawn — the
 				# lane LOOKS the same (sandbags below still stream) but is empty.
 				# The rng draws stay unconditional so the (torture-inert) fork
 				# stream is byte-identical seed-to-seed; only the spawns are gated.
 				for s in 2:
-					var fex: int = (360 + rng.range_i(0, 160)) * F_ONE
+					var fex: int = _fork_lane_x(_gate_counter, 360 + rng.range_i(0, 160)) * F_ONE
 					var fey: int = _next_gate_y + (60 + rng.range_i(0, 240)) * F_ONE
 					if is_bluff:
 						continue
@@ -4300,7 +4391,8 @@ func _step_camera() -> void:
 					"y": _next_gate_y})
 				# c2 2v: DEEPEN the fork into a ~1.7-screen commitment + a 1-in-4
 				# BAIT variant. All _mix-derived (the shared rng sequence stays
-				# clean), gate 2/4 only (torture never streams here), no new gate
+				# clean), gate 2/4 only (gate 2 DOES stream in the torture -- see
+				# the re-measure note above), no new gate
 				# field. bounty_x0 is the GAUNTLET (fortified-looking) side.
 				var fmix := _mix(_gate_counter, _world_seed)
 				# Deeper content beats: CACHE +2 mines, GAUNTLET +1 leashed elite.
@@ -4309,10 +4401,15 @@ func _step_camera() -> void:
 				# clean so the choice reads) and route through the same bunker
 				# exclusion as the main streams.
 				for dm in 2:
-					var cmx: int = (cache_x0 + (fmix >> (dm * 4)) % 150) * F_ONE
+					# cache_x0 is already the correct side per-gate (70 left @ gate 2,
+					# 400 right @ gate 4) — no mirror needed, but its +0..149 spread runs
+					# right up against gate 4's divider face (400+149=549 clears, but the
+					# low end at 400 sits inside the 336..424 band), so it still needs
+					# the clearance clamp.
+					var cmx: int = _clear_fork_divider_x(_gate_counter, cache_x0 + (fmix >> (dm * 4)) % 150) * F_ONE
 					var cmy: int = _next_gate_y + (500 + dm * 80) * F_ONE
 					if not _near_stream_bunker(cmx, cmy):
-						mines.append({"x": cmx, "y": cmy, "armed": true})
+						mines.append({"x": cmx, "y": cmy, "armed": true, "grace": 0})
 				# The deep gauntlet elite also stands down on a bluff seed.
 				if not is_bluff:
 					_spawn_enemy((bounty_x0 + 40 + (fmix >> 8) % 120) * F_ONE,
@@ -4341,7 +4438,7 @@ func _step_camera() -> void:
 						var vmx: int = (bounty_x0 + 60) * F_ONE + vmo * F_ONE
 						var vmy: int = _next_gate_y + 660 * F_ONE
 						if not _near_stream_bunker(vmx, vmy):
-							mines.append({"x": vmx, "y": vmy, "armed": true})
+							mines.append({"x": vmx, "y": vmy, "armed": true, "grace": 0})
 					for vbo in [-56, 56]:
 						sandbags.append({"x": (bounty_x0 + 60) * F_ONE + vbo * F_ONE,
 							"y": _next_gate_y + 600 * F_ONE})
@@ -4369,7 +4466,7 @@ func _step_camera() -> void:
 						var bmx: int = (bounty_x0 + 20 + bm * 40) * F_ONE
 						var bmy: int = _next_gate_y + (500 + bm * 30) * F_ONE
 						if not _near_stream_bunker(bmx, bmy):
-							mines.append({"x": bmx, "y": bmy, "armed": true})
+							mines.append({"x": bmx, "y": bmy, "armed": true, "grace": 0})
 					events.append({"t": "route_bait", "x": (bounty_x0 + 80) * F_ONE, "y": _next_gate_y})
 		_next_gate_y -= GATE_SPACING
 	while _next_tank_y > horizon:
@@ -4506,7 +4603,9 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	# Boss-arena cover (5v): four bags in two mirrored lines turn the
 	# strafe half into a COVER fight (mortars ignore cover, so the
 	# volley half stays a movement fight). Reuses the whole sandbag
-	# grammar; torture never streams gate 3 -> inert.
+	# grammar; the torture DOES construct gate 3 (@tick 3108, re-measured
+	# 2026-07-25) -- it is inert because the goldens were recorded with it, not
+	# because it is unreachable.
 	# c3 2v BREAKS THE MIRROR: the right pair shifts +40px so the inner
 	# gap no longer centers on 296 — the straight-up center lane is gone
 	# and the gunship arena gets its own asymmetric identity.
@@ -5984,6 +6083,7 @@ func checksum() -> int:
 		h = feed.call(m["x"], h)
 		h = feed.call(m["y"], h)
 		h = feed.call(int(m["armed"]), h)
+		h = feed.call(m.get("grace", 0), h)
 	h = feed.call(barrels.size(), h)
 	for bl in barrels:
 		h = feed.call(bl["x"], h)

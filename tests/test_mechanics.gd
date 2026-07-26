@@ -181,6 +181,77 @@ func test_rend_rounds_punch_through_the_shield_block() -> void:
 	Runner.T.ok(not e["alive"], "with Rend the same round punches through the block")
 
 
+func test_claymore_cannot_kill_the_planter_walking_the_taught_direction() -> void:
+	# REGRESSION, measured with tools/probe_claymore.gd. The charge plants ALONG the aim and
+	# armed instantly, so advancing while aiming the same way — the twin-stick input the game
+	# actively teaches — walked you into your own blast at TICK 5. Placement cannot fix it:
+	# the previous behind-the-aim placement had the mirror bug at ~5 ticks on a full backpedal,
+	# and the plant site's comment records that trade. CLAYMORE_ARM_TICKS grace resolves both
+	# directions at once by making the charge ignore PLAYERS briefly, while staying live to
+	# everything else. All three assertions below must hold together — the first alone would
+	# pass just as well if the fix had simply made claymores harmless.
+	var sim := SimWorld.new(12, 1)
+	var p: Dictionary = sim.players[0]
+	sim._apply_supply(p, 8)
+	sim.step([SimInput.new()])
+	var plant := SimInput.new()
+	plant.aim_y = -256          # aim north
+	plant.interact = true
+	sim.step([plant])
+	var deaths0: int = p["deaths"]
+	var vest0: bool = p.get("vest", false)
+	# 1. Advance INTO your own aim: this is the self-kill, and it must not happen.
+	var hurt_at := -1
+	for t in 60:
+		var adv := SimInput.new()
+		adv.aim_y = -256
+		adv.move_y = -256
+		sim.step([adv])
+		var q: Dictionary = sim.players[0]
+		if q["deaths"] > deaths0 or (vest0 and not q.get("vest", false)):
+			hurt_at = t + 1
+			break
+	Runner.T.eq(hurt_at, -1, "walking the direction you aim never detonates your own claymore")
+	# 2. It is still instantly lethal to an enemy standing on it DURING that grace.
+	var s2 := SimWorld.new(12, 1)
+	var p2: Dictionary = s2.players[0]
+	s2._apply_supply(p2, 8)
+	s2.step([SimInput.new()])
+	s2.step([plant])
+	var m2: Dictionary = s2.mines[s2.mines.size() - 1]
+	Runner.T.ok(m2.get("grace", 0) > 0, "a freshly planted claymore carries planter grace")
+	s2._spawn_enemy(m2["x"], m2["y"], false)
+	var n0: int = s2.enemies.size()
+	var killed := false
+	for t in 20:
+		s2.step([SimInput.new()])
+		if s2.enemies.size() < n0:
+			killed = true
+			break
+	Runner.T.ok(killed, "grace protects the planter only — an enemy on the charge still trips it")
+	# 3. Once the grace runs out the charge is live to the planter again (1986 grammar intact).
+	var s3 := SimWorld.new(12, 1)
+	var p3: Dictionary = s3.players[0]
+	s3._apply_supply(p3, 8)
+	s3.step([SimInput.new()])
+	s3.step([plant])
+	for t in SimWorld.CLAYMORE_ARM_TICKS + 4:
+		s3.step([SimInput.new()])          # stand still until grace expires
+	var d3: int = s3.players[0]["deaths"]
+	var v3: bool = s3.players[0].get("vest", false)
+	var late := -1
+	for t in 60:
+		var adv2 := SimInput.new()
+		adv2.aim_y = -256
+		adv2.move_y = -256
+		s3.step([adv2])
+		var q3: Dictionary = s3.players[0]
+		if q3["deaths"] > d3 or (v3 and not q3.get("vest", false)):
+			late = t + 1
+			break
+	Runner.T.ok(late > 0, "after grace expires your own claymore hurts you again (it hurts both sides)")
+
+
 func test_claymore_plants_on_interact_and_consumes_a_charge() -> void:
 	var sim := SimWorld.new(12, 1)
 	var p := sim.players[0]
@@ -907,7 +978,11 @@ func test_arena_templates_vary_by_gate_and_still_open() -> void:
 	sim._step_camera()
 	Runner.T.ok(sim.gates.size() >= 4, "streamed through gate 4")
 	Runner.T.eq(sim.gates[0]["b1"]["x"], 180 * SimWorld.F_ONE, "gate 1 keeps the classic left sentinel")
-	Runner.T.eq(sim.gates[1]["b1"]["x"], 300 * SimWorld.F_ONE, "gate 2 goes staggered-front")
+	# 300 -> 312: the authored 300 put b1's west face 4px inside gate 2's fork island
+	# (the blocked band is 216..304). Still the staggered-FRONT lock, just clear of
+	# scenery boots cannot enter — see
+	# test_no_authored_arena_geometry_hides_inside_a_fork_divider.
+	Runner.T.eq(sim.gates[1]["b1"]["x"], 312 * SimWorld.F_ONE, "gate 2 goes staggered-front")
 	Runner.T.eq(sim.gates[1]["b2"]["y"] - sim.gates[1]["y"], 40 * SimWorld.F_ONE, "gate 2 rear bunker tucks at +40")
 	Runner.T.eq(sim.gates[3]["b1"]["x"], 240 * SimWorld.F_ONE, "gate 4 goes crossfire-close")
 	var g2: Dictionary = sim.gates[1]
@@ -1715,6 +1790,157 @@ func _stream_fork(seed: int) -> SimWorld:
 	return sim
 
 
+func _stream_fork_at(seed: int, gate_n: int) -> SimWorld:
+	# Generalises _stream_fork to either fork gate: _gate_counter is only an arena/
+	# fork-x LOOKUP key (ARENAS.get(_gate_counter,...), the gate-2-vs-4 mirror decision)
+	# — the spawner places the gate at whatever _next_gate_y already is, so setting
+	# _gate_counter = gate_n - 1 makes the very next spawn look up gate_n's content.
+	# _next_gate_y is ALSO moved to gate_n's REAL segment slot (-gate_n * GATE_SPACING,
+	# what actual progression would leave it at) instead of a fresh sim's default (the
+	# map's very start, y~-1000): that default slot overlaps the map-opening tutorial
+	# grenade pickup at (SCREEN_CX, -480), unrelated to any fork, which a broad pickup
+	# scan miscounts as a stray "reward" in whichever lane it falls in. An ARBITRARY far
+	# y (tried first) is just as wrong the other way — segment-keyed content (ruins/
+	# trench/etc, keyed off absi(y)/GATE_SPACING) then activates at a segment gate_n
+	# would never actually reach, seeding unrelated mines inside the divider band that
+	# have nothing to do with the fork mirror bug. Gate_n's OWN real segment avoids both.
+	var sim := SimWorld.new(seed, 1)
+	sim._gate_counter = gate_n - 1
+	sim._next_gate_y = -gate_n * SimWorld.GATE_SPACING
+	sim.camera_top = sim._next_gate_y + 2 * SimWorld.VIEW_H - SimWorld.F_ONE
+	sim.step([_idle()])
+	return sim
+
+
+# fork-gate-bunker: fork beats (free crate, guard mines, gauntlet elites) were authored
+# as absolute gate-2 x's and never mirrored for gate 4's island (which sits at the
+# MIRRORED x=380, not x=260) — so at gate 4 every one of these beats streams on the
+# wrong side of the divider from the one main.gd's signpost + the sim's own wire zone
+# call CACHE. Measured on HEAD: gate 4's real CACHE lane (fork_cache_is_left(380) ==
+# false, i.e. the RIGHT side) holds ZERO free-tier pickups in 40/40 seeds. Pins the
+# INVARIANT over the whole beat set, not one x — any future beat authored against a
+# bare gate-2 coordinate without going through _fork_lane_x fails this at BOTH gates.
+func test_every_fork_lane_owns_a_reward() -> void:
+	var f := SimWorld.F_ONE
+	for gate_n in SimWorld.FORK_GATES:
+		var cache_rewards := 0
+		var bounty_rewards := 0
+		var cache_mines := 0
+		for sd in range(1, 41):
+			var sim := _stream_fork_at(sd, gate_n)
+			var gate_y := 0
+			var fx := 0
+			for g in sim.gates:
+				if g.get("fork_x", 0) != 0:
+					gate_y = g["y"]
+					fx = g["fork_x"]
+					break
+			Runner.T.ok(fx != 0, "gate %d seed %d: a fork gate streamed" % [gate_n, sd])
+			var cache_left: bool = SimWorld.fork_cache_is_left(fx)
+			var band_lo: int = gate_y + 40 * f
+			var band_hi: int = gate_y + 700 * f
+			for pk in sim.pickups:
+				if pk["y"] < band_lo or pk["y"] > band_hi or int(pk.get("cost", 0)) != 0:
+					continue
+				var is_left: bool = pk["x"] / f < fx
+				if is_left == cache_left:
+					cache_rewards += 1
+				else:
+					bounty_rewards += 1
+			for m in sim.mines:
+				if m["y"] < band_lo or m["y"] > band_hi:
+					continue
+				var is_left: bool = m["x"] / f < fx
+				if is_left == cache_left:
+					cache_mines += 1
+		Runner.T.ok(cache_rewards >= 40, "gate %d: the CACHE lane holds >= 1 free reward per fork across 40 seeds (got %d)" % [gate_n, cache_rewards])
+		Runner.T.ok(absi(cache_rewards - bounty_rewards) <= 2,
+			"gate %d: cache vs bounty reward counts stay close (cache %d, bounty %d)" % [gate_n, cache_rewards, bounty_rewards])
+		Runner.T.ok(cache_mines >= 40, "gate %d: the cache lane still costs something (>= 1 mine per fork, got %d)" % [gate_n, cache_mines])
+
+
+# fork-gate-bunker: a LIVE-sim scan for "nothing sealed in the island" (walking
+# sim.mines/pickups/enemies broadly, as the first draft of this test did) is
+# contaminated by systems that have NOTHING to do with the fork mechanic and were
+# never in scope here: the ambient landmine stream (_next_mine_y, x in a
+# gate-agnostic 150..490 spread) and river/frogman placement both coincidentally
+# land inside a fork's divider band on most seeds, regardless of any fix — measured
+# directly (tools inspection, 2026-07-26): the two "sealed" entities surviving
+# after the mirror+clamp fix were a plain ambient-minefield mine and a frogman, at
+# offsets the fork block never places anything at. A single big camera jump (what
+# _stream_fork_at does, and what a real playthrough never does) also skips the
+# normal off-camera SWEEP that culls that ambient content in a real run, inflating
+# the collision odds further. So instead of scanning live state, prove the GUARANTEE
+# directly against the pure helpers for the exact input range every fork beat call
+# site actually draws from — exhaustive, and untouched by anything else the sim streams.
+func test_fork_lane_x_clears_the_divider_for_every_possible_beat_draw() -> void:
+	var sim := SimWorld.new(1, 1)   # instance needed only for the non-static _clear_fork_divider_x/_fork_lane_x calls
+	# [lo, count] pairs matching rng.range_i(0, count) at each fork beat call site
+	# (fcx, fmx, fex) -- these route through the mirror+clamp _fork_lane_x.
+	var mirrored_ranges := [[90, 120], [70, 180], [360, 160]]
+	# cache_x0's spread (already the correct side per gate -- only needs the clamp,
+	# not the mirror) -- checked directly against _clear_fork_divider_x per gate's
+	# own cache_x0, matching the real call site.
+	for gate_n in SimWorld.FORK_GATES:
+		var fx: int = 260 if gate_n == 2 else 380
+		for rng_pair in mirrored_ranges:
+			for raw in range(rng_pair[0], rng_pair[0] + rng_pair[1] + 1):
+				var x: int = sim._fork_lane_x(gate_n, raw)
+				Runner.T.ok(absi(x - fx) >= 44, "gate %d: _fork_lane_x(%d) = %d clears the %d-wide divider face at %d" % [gate_n, raw, x, 44, fx])
+		var cache_x0: int = 70 if gate_n == 2 else 400
+		for raw in range(cache_x0, cache_x0 + 150):
+			var x: int = sim._clear_fork_divider_x(gate_n, raw)
+			Runner.T.ok(absi(x - fx) >= 44, "gate %d: _clear_fork_divider_x(%d) = %d clears the divider face at %d" % [gate_n, raw, x, fx])
+	# The on-crate mine nudge (+48 raw px, AFTER the mirror, BEFORE the final clamp)
+	# is the one place a mirrored value gets perturbed post-mirror -- re-derive the
+	# real per-gate mirrored range and confirm the final clamp still holds after the
+	# nudge, for every possible draw.
+	for gate_n in SimWorld.FORK_GATES:
+		var fx: int = 260 if gate_n == 2 else 380
+		for raw in range(70, 70 + 180 + 1):
+			var mirrored: int = sim._mirror_fork_x(gate_n, raw)
+			var nudged: int = mirrored + 48
+			var x: int = sim._clear_fork_divider_x(gate_n, nudged)
+			Runner.T.ok(absi(x - fx) >= 44, "gate %d: a nudged mine at %d clamps to %d, still clearing the divider" % [gate_n, nudged, x])
+	# 4v review: the BOUNTY-side beats (gauntlet sandbags, deep elite, vault reward +
+	# ring, bait sandbags/ambush/mines/event -- sim_world.gd ~4354-4438) never route
+	# through _clear_fork_divider_x at all; they clear the divider today purely
+	# because bounty_x0 sits far from the divider face at both gates (measured: gate
+	# 2 spans x 400..555 against the divider band 216..304, gate 4 spans x 60..235
+	# against 336..424). Nothing pinned that arithmetic, so a future bounty_x0 tweak
+	# could silently reintroduce the sealed-in-island bug this whole fix exists to
+	# close. Pin every real call-site offset against bounty_x0, for both gates,
+	# exhaustively over each beat's draw range -- same style as the mirrored-range
+	# scan above, no sim change needed since the class currently holds by margin.
+	var bounty_offset_ranges := [
+		[40, 4, 45],    # gauntlet sandbags (fbg in 0..3): bounty_x0 + 40 + fbg*45
+		[40, 120, 1],   # deep elite: bounty_x0 + 40 + (fmix>>8)%120
+		[40, 2, 45],    # bait sandbags (bg2 in 0..1): bounty_x0 + 40 + bg2*45
+		[30, 2, 60],    # bait ambush (amb in 0..1): bounty_x0 + 30 + amb*60
+		[20, 3, 40],    # bait mines (bm in 0..2): bounty_x0 + 20 + bm*40
+	]
+	for gate_n in SimWorld.FORK_GATES:
+		var fx: int = 260 if gate_n == 2 else 380
+		var bounty_x0: int = 380 if gate_n == 2 else 60
+		for r in bounty_offset_ranges:
+			for i in r[1]:
+				var bx: int = bounty_x0 + r[0] + i * r[2]
+				Runner.T.ok(absi(bx - fx) >= 44,
+					"gate %d: bounty beat at bounty_x0+%d clears the divider face at %d (got x=%d)" % [gate_n, r[0] + i * r[2], fx, bx])
+		# vault reward anchor (bounty_x0+60) plus its 3-mine ring (vmo) and 2 framing
+		# sandbags (vbo) -- the only bounty beats offset from a fixed point rather
+		# than a swept rng range.
+		Runner.T.ok(absi(bounty_x0 + 60 - fx) >= 44, "gate %d: vault/offense reward anchor bounty_x0+60 clears the divider" % gate_n)
+		for vmo in [-40, 0, 40]:
+			var vmx: int = bounty_x0 + 60 + vmo
+			Runner.T.ok(absi(vmx - fx) >= 44, "gate %d: vault mine at bounty_x0+60%+d clears the divider (got x=%d)" % [gate_n, vmo, vmx])
+		for vbo in [-56, 56]:
+			var vbx: int = bounty_x0 + 60 + vbo
+			Runner.T.ok(absi(vbx - fx) >= 44, "gate %d: vault sandbag at bounty_x0+60%+d clears the divider (got x=%d)" % [gate_n, vbo, vbx])
+		# bait event anchor (bounty_x0+80) -- a single point, no rng spread.
+		Runner.T.ok(absi(bounty_x0 + 80 - fx) >= 44, "gate %d: bait event anchor bounty_x0+80 clears the divider" % gate_n)
+
+
 func test_c2_fork_commitment_depth() -> void:
 	# c2 2v: the fork island now spans a real ~1.7-screen COMMITMENT (+40..+620),
 	# so you can't sidestep the lane you picked — only ride it north.
@@ -1784,6 +2010,73 @@ func test_fork_divider_denies_the_crossing_without_eating_north_progress() -> vo
 	# by a wide margin without pinning the exact diagonal speed.
 	Runner.T.ok(best_y <= y0 - 60 * SimWorld.F_ONE,
 		"holding north-east INTO the face still makes real northward progress")
+
+
+func test_no_authored_arena_geometry_hides_inside_a_fork_divider() -> void:
+	# REGRESSION (a CLASS, not one gate). The ARENAS coordinates shipped 13 minutes
+	# BEFORE the fork wreck-island existed — 1124c29 22:19:42 authored them, da70544
+	# 22:32:54 stamped gate 2's island in as a bare `260` literal, 91993f1 22:38:26
+	# mirrored it to 380 for gate 4 (320 + (320-260), computed from the gate-2 value
+	# alone). Neither fork commit read ARENAS, so nothing ever checked the island's x
+	# against the locks standing in it. Result: gate 4's b2 [368,+50] ended up with
+	# its whole 48px body (368..416) inside the blocked band (336..424), and gate 2's
+	# front-sentinel mine [240,+100] ended up buried in gate 2's island, where the
+	# nearest x boots may legally occupy is 216 and MINE_TRIGGER_RADIUS is 9 — it can
+	# never be triggered by anyone.
+	#
+	# Nothing caught it because the one test that claims the arenas "PLAY"
+	# (test_arena_templates_are_clearable_and_barrel_safe) kills each lock with a
+	# direct sim._explode() at the lock's own centre. No player stands anywhere in
+	# it, so a lock sealed in scenery boots cannot enter passes it every time.
+	#
+	# NOT a softlock (verified, and the original report claimed one): bunkers are
+	# immune to bullets by design (sim_world.gd:2361) and grenades have no in-flight
+	# collision at all, so an engulfed lock is still killable by lob. What it costs
+	# is legibility — you walk a required objective into an invisible wall — plus a
+	# forced grenade tax on a lock you can never take at contact range.
+	#
+	# The gate set, each island's x and every lock/prop position are all READ FROM
+	# THE STREAMED SIM, and the containment question is asked of _in_fork_divider
+	# itself — the one definition the movement code uses. So a future gate that
+	# gains a fork, or an island that changes width, is covered without editing this
+	# test, and the 44/40/620 literals are never restated here to drift apart.
+	var sim := SimWorld.new(41, 1)
+	sim.camera_top = sim._next_gate_y - 5 * SimWorld.GATE_SPACING
+	sim._step_camera()
+	var forks := 0
+	for g in sim.gates:
+		var fx: int = g.get("fork_x", 0)
+		if fx == 0:
+			continue
+		forks += 1
+		var gy: int = g["y"]
+		var gate_no: int = absi(gy / SimWorld.GATE_SPACING)
+		# A lock is a BODY, not a point: sample its whole 48x32 AABB on a 4px grid.
+		for who in ["b1", "b2"]:
+			var bk: Dictionary = g.get(who, {})
+			if bk.is_empty():
+				continue
+			var buried := ""
+			var sx: int = bk["x"]
+			while sx <= bk["x"] + SimWorld.BUNKER_W:
+				var sy: int = bk["y"]
+				while sy <= bk["y"] + SimWorld.BUNKER_H:
+					if sim._in_fork_divider(sx, sy, gy, fx) and buried == "":
+						buried = "(%d,%+d)" % [sx / SimWorld.F_ONE, (sy - gy) / SimWorld.F_ONE]
+					sy += 4 * SimWorld.F_ONE
+				sx += 4 * SimWorld.F_ONE
+			Runner.T.ok(buried == "",
+				"gate %d %s (a REQUIRED lock) keeps its whole body out of the fork island, fork_x=%d — buried at %s"
+					% [gate_no, who, fx, buried])
+		# Authored props are points, and an authored point inside the island is
+		# content the player can never interact with.
+		for pr in SimWorld.ARENAS.get(gate_no, {}).get("props", []):
+			var px: int = pr[1] * SimWorld.F_ONE
+			var py: int = gy + pr[2] * SimWorld.F_ONE
+			Runner.T.ok(not sim._in_fork_divider(px, py, gy, fx),
+				"gate %d authored %s [%d,+%d] sits where a player can reach it, fork_x=%d"
+					% [gate_no, pr[0], pr[1], pr[2], fx])
+	Runner.T.ok(forks >= 2, "both fork gates streamed (got %d)" % forks)
 
 
 func test_c2_bait_fork_exists_and_stays_fair() -> void:

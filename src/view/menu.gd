@@ -3386,10 +3386,66 @@ static func _content_well(scrim_mode: int) -> bool:
 	return scrim_mode == Mode.HALL or scrim_mode == Mode.HOWTO
 
 
+# fork-gate-bunker review: the two overlay modes that draw NO dialog box are HIDDEN
+# (nothing to frame) and TITLE (the attract firefight IS the screen). Every other
+# Mode is a modal and wears the frame — that used to be true only for HALL/HOWTO
+# (the _content_well two), leaving PAUSE/OPTS/SETUP/INFO/REBIND/DISP/MODES/CHAPTERS/
+# AUDIO/PERKS bare (10 of 14 screens with no chrome at all). Adding a Mode without
+# adding it here frames it by default — that is deliberate.
+const UNFRAMED_MODES := [Mode.HIDDEN, Mode.TITLE]
+
+static func _content_frame(scrim_mode: int) -> bool:
+	return not (scrim_mode in UNFRAMED_MODES)
+
+
+# ui_frame_lrg / ui_frame_lrg_under draw their outlines at 6% / 5% of the texture
+# rect (tools/gen_ui_chrome.py::frame_lrg, frame_underlay) — so the rect you pass is
+# NOT the line you see. Author the visible BORDER, derive the texture rect.
+const FRAME_LINE_INSET := 0.06
+
+static func _frame_rect_for_border(b: Rect2) -> Rect2:
+	var s := 1.0 / (1.0 - FRAME_LINE_INSET * 2.0)
+	return Rect2(b.position - b.size * (FRAME_LINE_INSET * s), b.size * s)
+
+
+static func content_frame_border(scrim_mode: int) -> Rect2:
+	# HALL/HOWTO keep their shipped box to the pixel (border 56..584 x 28.6..331.4).
+	if _content_well(scrim_mode):
+		return Rect2(56.0, 28.64, 528.0, 302.72)
+	# List screens: a wider dialog seated ABOVE the FOOTER_Y hint strip, which stays
+	# outside the box on purpose (dialog + hint bar, the standard pairing). Top is 40,
+	# not the naive 44 — REBIND's category-tab strip (_rebind_tab_rect) starts at y=42,
+	# the earliest header ink of any of the 10 list screens; bottom holds at 336 (same
+	# clearance over COLUMN_BOTTOM=333/FOOTER_Y=341) by growing the height to match.
+	return Rect2(24.0, 40.0, 592.0, 296.0)
+
+
+static func content_frame_rect(scrim_mode: int) -> Rect2:
+	return Rect2(20, 8, 600, 344) if _content_well(scrim_mode) \
+		else _frame_rect_for_border(content_frame_border(scrim_mode))
+
+
 static func _content_well_rect() -> Rect2:
 	# The interior fill, inset inside the Rect2(20,8,600,344) chrome frame so the frame's
 	# decorative border still draws over its own edge (chrome is drawn AFTER the well).
 	return Rect2(30, 17, 580, 326)
+
+
+func _draw_content_frame() -> void:
+	if not _content_frame(mode):
+		return
+	if _content_well(mode):
+		# a3-02: a SOLID desaturating dark well seals the frame INTERIOR before the
+		# chrome — the _under frame texture has transparent regions the firefight showed
+		# through even at a high scrim. Cool-dark near-opaque fill; the frame draws on top.
+		# Routed through _emit_rect (thin draw_rect wrapper in production, capturable in
+		# tests) rather than a raw draw_rect — this whole function now gets invoked
+		# straight from a headless test, which errors on a bare draw_rect outside a
+		# live NOTIFICATION_DRAW pass.
+		_emit_rect(_content_well_rect(), Color(WELL_BASE, 0.92 * _open_t))
+	var fr := content_frame_rect(mode)
+	_emit_tex("ui_frame_lrg_under", fr, Color(FRAME_UNDER_TINT, FRAME_UNDER_TINT.a * _open_t))
+	_emit_tex("ui_frame_lrg", fr, Color(FRAME_TINT, _open_t))
 
 
 static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
@@ -3432,6 +3488,74 @@ static func _legend_plate_col(scrim_mode: int, motion: float) -> Color:
 	return Color(LEGEND_PLATE_RGB.r, LEGEND_PLATE_RGB.g, LEGEND_PLATE_RGB.b, a)
 
 
+# fork-gate-bunker: the OPTS/REBIND/INFO/DISP/AUDIO/SETUP/MODES/CHAPTERS/PERKS/PAUSE
+# header chain, pulled out of _draw() verbatim (pure move, zero pixel change) so a
+# headless capture test can invoke the REAL header draw and measure the ACTUAL header
+# strings' ink boxes against content_frame_border() — a formula guess about label
+# lengths would miss the day someone lengthens a subtitle. TITLE stays inline in
+# _draw() (unframed, raw draw_rect — the attract stage, not a modal).
+func _draw_mode_header() -> void:
+	if mode == Mode.OPTS:
+		_draw_opts_header()
+	elif mode == Mode.REBIND:
+		_draw_rebind_header()
+	elif mode == Mode.INFO:
+		_center_text("INFO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		# The look-back screens: records, the field manual, and your last run.
+		_center_text("RECORDS · HOW TO PLAY · REPLAY", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.DISP:
+		_center_text("DISPLAY", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		# c1-19: the subtitle NAMES the two controls while windowed, and while FULLSCREEN it EXPLAINS
+		# that WINDOW SCALE applies on return to windowed — so the row's deferred behavior is spelled
+		# out in words, matching the inline "(WINDOWED)" tag on the value label. The row itself stays
+		# fully adjustable in both modes; nothing here is a dead, silently-ignored control.
+		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.AUDIO:
+		# audio-identity (judge follow-up): the AUDIO sub-screen header — same lone-subtitle hub
+		# style as DISPLAY above (roomy, non-compact clearance; mode_header_bottom's default falls
+		# through to HUB_SUBTITLE_Y for any mode not explicitly listed there).
+		_center_text("AUDIO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		_center_text("SFX & MUSIC VOLUME", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.SETUP:
+		_center_text("SETUP", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
+		# the OPTIONS and INFO screens.
+		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO  ·  MODES", HUB_SUBTITLE_Y, 8,
+			SUBTITLE_COL)
+	elif mode == Mode.MODES:
+		# authored-campaign-and-modes.
+		_center_text("MODES", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		_center_text("BOSS RUSH  ·  ARCADE  ·  CHAPTER SELECT", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.CHAPTERS:
+		_center_text("CHAPTER SELECT", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	elif mode == Mode.PERKS:
+		_center_text("VETERAN PERKS", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		_center_text(_perk_subtitle_text(), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+	else:
+		_center_text("PAUSED", PAUSE_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
+		# Pause doubles as a status check — the run so far.
+		if main.sim != null:
+			var s: SimWorld = main.sim
+			var opened := 0
+			for g in s.gates:
+				if g["open"]:
+					opened += 1
+			var line: String
+			if s.mode == "endless":
+				line = "WAVE %d" % s.wave
+			elif s.mode == "boss_rush":
+				# authored-campaign-and-modes: gunships downed, not a sector count.
+				line = "GUNSHIPS %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
+			else:
+				line = "SECTOR %d/%d  ·  %dm" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
+					-Fixed.to_int(s.camera_top) / 10]
+			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
+				PAUSE_SUBTITLE_Y, 10, SUBTITLE_COL)
+			if main._current_seed > 0:
+				_center_text("RUN #%d" % main._current_seed, PAUSE_FOOTNOTE_Y, 8, RUN_FOOTNOTE_COL)
+
+
 func _draw() -> void:
 	if mode == Mode.HIDDEN or main == null:
 		return   # c3-07: nothing to draw without main (reads main._motion / _menu_items below)
@@ -3442,16 +3566,18 @@ func _draw() -> void:
 	# screen where the setting is toggled, and it isn't _motion-gated itself.
 	var sa := _scrim_alpha(mode, main._motion)
 	draw_rect(Rect2(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT), Color(SCRIM_BASE, sa * _open_t))
+	# fork-gate-bunker: the frame used to be HALL/HOWTO-exclusive (_content_well), leaving
+	# 10 other overlay screens (PAUSE/OPTS/SETUP/INFO/REBIND/DISP/MODES/CHAPTERS/AUDIO/
+	# PERKS) drawn with no box chrome at all — just the scrim above. _content_frame widens
+	# that to every Mode but HIDDEN/TITLE; the well fill stays HALL/HOWTO-only (PAUSE et
+	# al recede via scrim alone, per _scrim_alpha's own comment).
+	# Extracted to its own func (not inlined here) so a headless test can invoke the REAL
+	# draw and assert the frame texture op actually lands — deleting the _emit_tex calls
+	# now reds a captured-op assertion instead of only a geometry-formula one.
+	_draw_content_frame()
 	if _content_well(mode):
 		# Plate the bare text on the Apocalypse frame, debrief-style (underlay
 		# darkens the well, frame carries the chrome).
-		var fr := Rect2(20, 8, 600, 344)
-		# a3-02: a SOLID desaturating dark well seals the frame INTERIOR before the
-		# chrome — the _under frame texture has transparent regions the firefight showed
-		# through even at a high scrim. Cool-dark near-opaque fill; the frame draws on top.
-		draw_rect(_content_well_rect(), Color(WELL_BASE, 0.92 * _open_t))
-		draw_texture_rect(Art.tex("ui_frame_lrg_under"), fr, false, Color(FRAME_UNDER_TINT, FRAME_UNDER_TINT.a * _open_t))
-		draw_texture_rect(Art.tex("ui_frame_lrg"), fr, false, Color(FRAME_TINT, _open_t))
 		if mode == Mode.HALL:
 			_draw_hall()
 		else:
@@ -3520,65 +3646,8 @@ func _draw() -> void:
 			draw_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, TITLE_CAREER_TOP, cpw + PLATE_PAD_SM * 2.0, TITLE_CAREER_PLATE_H),
 				tplate)
 			_center_text(career, title_baseline(TITLE_CAREER_TOP, TITLE_CAREER_PLATE_H, TITLE_CAREER_FONT), TITLE_CAREER_FONT, CAREER_COL)
-	elif mode == Mode.OPTS:
-		_draw_opts_header()
-	elif mode == Mode.REBIND:
-		_draw_rebind_header()
-	elif mode == Mode.INFO:
-		_center_text("INFO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		# The look-back screens: records, the field manual, and your last run.
-		_center_text("RECORDS · HOW TO PLAY · REPLAY", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
-	elif mode == Mode.DISP:
-		_center_text("DISPLAY", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		# c1-19: the subtitle NAMES the two controls while windowed, and while FULLSCREEN it EXPLAINS
-		# that WINDOW SCALE applies on return to windowed — so the row's deferred behavior is spelled
-		# out in words, matching the inline "(WINDOWED)" tag on the value label. The row itself stays
-		# fully adjustable in both modes; nothing here is a dead, silently-ignored control.
-		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
-	elif mode == Mode.AUDIO:
-		# audio-identity (judge follow-up): the AUDIO sub-screen header — same lone-subtitle hub
-		# style as DISPLAY above (roomy, non-compact clearance; mode_header_bottom's default falls
-		# through to HUB_SUBTITLE_Y for any mode not explicitly listed there).
-		_center_text("AUDIO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text("SFX & MUSIC VOLUME", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
-	elif mode == Mode.SETUP:
-		_center_text("SETUP", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
-		# the OPTIONS and INFO screens.
-		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO  ·  MODES", HUB_SUBTITLE_Y, 8,
-			SUBTITLE_COL)
-	elif mode == Mode.MODES:
-		# authored-campaign-and-modes.
-		_center_text("MODES", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text("BOSS RUSH  ·  ARCADE  ·  CHAPTER SELECT", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
-	elif mode == Mode.CHAPTERS:
-		_center_text("CHAPTER SELECT", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
-	elif mode == Mode.PERKS:
-		_center_text("VETERAN PERKS", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text(_perk_subtitle_text(), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
 	else:
-		_center_text("PAUSED", PAUSE_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		# Pause doubles as a status check — the run so far.
-		if main.sim != null:
-			var s: SimWorld = main.sim
-			var opened := 0
-			for g in s.gates:
-				if g["open"]:
-					opened += 1
-			var line: String
-			if s.mode == "endless":
-				line = "WAVE %d" % s.wave
-			elif s.mode == "boss_rush":
-				# authored-campaign-and-modes: gunships downed, not a sector count.
-				line = "GUNSHIPS %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
-			else:
-				line = "SECTOR %d/%d  ·  %dm" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
-					-Fixed.to_int(s.camera_top) / 10]
-			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
-				PAUSE_SUBTITLE_Y, 10, SUBTITLE_COL)
-			if main._current_seed > 0:
-				_center_text("RUN #%d" % main._current_seed, PAUSE_FOOTNOTE_Y, 8, RUN_FOOTNOTE_COL)
+		_draw_mode_header()
 	var mitems := _menu_items()   # dicts: label + destructive flag for pre-press tinting
 	var items := _items()
 	# Fit-to-height layout via the shared helper (the mouse hit-test reads the
@@ -4113,14 +4182,18 @@ func _draw_rebind_header() -> void:
 	var pad := not _rebind_is_kb()
 	# Category tabs: the active one is a lit plate, the others dim — TAB/shoulders cycle them,
 	# a mouse can click them. Draw + hit-test share _rebind_tab_rect so they can't drift.
+	# fork-gate-bunker: routed through the _emit_rect/_emit_rect_outline/_center_text_at seams
+	# (was raw draw_rect/draw_string) — pure swap, zero pixel change, but it means this whole
+	# function no longer throws "Drawing is only allowed inside..." when invoked outside a
+	# live NOTIFICATION_DRAW pass, so a headless capture test can finally measure the REAL
+	# header ink instead of substituting a geometry-only mirror.
 	for d in REBIND_TABS.size():
 		var r := _rebind_tab_rect(d)
 		var on := d == _rebind_tab
-		draw_rect(r, Color(0.14, 0.3, 0.16, 0.95) if on else Color(0.07, 0.1, 0.06, 0.7))
-		draw_rect(r, Color(0.9, 0.95, 0.6, 0.9) if on else Color(0.4, 0.45, 0.36, 0.6), false, 1.0)
+		_emit_rect(r, Color(0.14, 0.3, 0.16, 0.95) if on else Color(0.07, 0.1, 0.06, 0.7))
+		_emit_rect_outline(r, Color(0.9, 0.95, 0.6, 0.9) if on else Color(0.4, 0.45, 0.36, 0.6), 1.0)
 		var col := Color(1.0, 1.0, 0.85) if on else Color(0.6, 0.65, 0.55)
-		draw_string(Art.font(), Vector2(r.position.x + 6.0, r.position.y + 11.0),
-			REBIND_TABS[d], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 12.0, 8, col)
+		_center_text_at(REBIND_TABS[d], r.get_center().x, r.position.y + 11.0, 8, col, r.size.x - 12.0)
 	_center_text("CONTROLS", 66, 13, HEADER_COL)
 	var sub: String
 	var scol: Color
@@ -4151,11 +4224,10 @@ func _draw_rebind_header() -> void:
 		for pd in 2:
 			var pr := _rebind_pad_dev_rect(pd)
 			var pon := pd == _rebind_pad_dev
-			draw_rect(pr, Color(0.14, 0.26, 0.3, 0.95) if pon else Color(0.07, 0.09, 0.1, 0.7))
-			draw_rect(pr, Color(0.6, 0.9, 0.95, 0.9) if pon else Color(0.36, 0.42, 0.45, 0.6), false, 1.0)
-			draw_string(Art.font(), Vector2(pr.position.x + 4.0, pr.position.y + 9.0),
-				"PLAYER %d" % (pd + 1), HORIZONTAL_ALIGNMENT_CENTER, pr.size.x - 8.0, 7,
-				Color(0.95, 1.0, 1.0) if pon else Color(0.55, 0.62, 0.65))
+			_emit_rect(pr, Color(0.14, 0.26, 0.3, 0.95) if pon else Color(0.07, 0.09, 0.1, 0.7))
+			_emit_rect_outline(pr, Color(0.6, 0.9, 0.95, 0.9) if pon else Color(0.36, 0.42, 0.45, 0.6), 1.0)
+			_center_text_at("PLAYER %d" % (pd + 1), pr.get_center().x, pr.position.y + 9.0, 7,
+				Color(0.95, 1.0, 1.0) if pon else Color(0.55, 0.62, 0.65), pr.size.x - 8.0)
 	# c1-18: a fixed-input footnote just above the SELECT/BACK legend — clarifies that the
 	# always-on mouse (kb) / stick+trigger (pad) inputs are NOT rebindable here, so an
 	# UNBOUND row means "no key/button on this device", NOT that the action is switched off.
@@ -5155,6 +5227,13 @@ func _center_text(txt: String, y: float, size: int, col: Color) -> void:
 	Art.text_center(self, txt, CENTER_X, y, size, col)
 
 
+# fork-gate-bunker: _center_text's sibling for text centered on an arbitrary cx (a tab or
+# sub-selector box), not the screen's CENTER_X — same capture-safe seam pattern, overridden
+# by _CaptureMenu below exactly like _center_text is.
+func _center_text_at(txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0) -> void:
+	Art.text_center(self, txt, cx, y, size, col, max_w)
+
+
 # c1-09: the OPTIONS screen header — a compact 2-line block (title y80 / summary y94)
 # so the 8-row settings list seats at top=102 and still clears a >=20px plate. Extracted
 # so a headless capture test can invoke the REAL header draw (through _center_text, which
@@ -5514,6 +5593,11 @@ var _label_size := 8
 var _label_max_w := 0.0
 func _emit_rect(r: Rect2, c: Color) -> void:
 	draw_rect(r, c)
+# fork-gate-bunker: _emit_rect's outline-mode sibling (draw_rect(r, c, false, width)) — a
+# separate seam rather than adding params to _emit_rect so its 5 existing filled-rect call
+# sites (and _CaptureMenu's override) stay untouched.
+func _emit_rect_outline(r: Rect2, c: Color, width: float) -> void:
+	draw_rect(r, c, false, width)
 func _emit_tex(key: String, r: Rect2, c: Color) -> void:
 	draw_texture_rect(Art.tex(key), r, false, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:

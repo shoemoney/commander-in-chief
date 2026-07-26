@@ -26,6 +26,7 @@ extends RefCounted
 
 const Runner := preload("res://tests/run_tests.gd")
 const Art := preload("res://src/view/art.gd")
+const Main := preload("res://src/main.gd")
 const PX := 1.0 / Fixed.ONE
 
 
@@ -608,3 +609,65 @@ func test_crate_and_wheel_credit_the_same_score() -> void:
 	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < 10,
 		"spending stays DISCOUNTED against the 10x an unspent chest converts at on victory — "
 		+ "at parity, buying everything on sight costs nothing and hoarding is never a choice")
+
+
+# --- 13. The fork-lane signpost must name the lane the sim actually wired ---
+
+func _stream_fork_at(seed: int, gate_n: int) -> SimWorld:
+	var sim := SimWorld.new(seed, 1)
+	sim._gate_counter = gate_n - 1
+	sim.camera_top = sim._next_gate_y + 2 * SimWorld.VIEW_H - SimWorld.F_ONE
+	sim.step(_idle())
+	return sim
+
+
+func test_fork_signposts_name_the_lane_the_sim_actually_wired() -> void:
+	## main.gd's route-fork HUD painted "< CACHE" at a hardcoded LEFT x (84) and
+	## "BOUNTY >" at a hardcoded RIGHT x (556 - width) for EVERY fork gate — but the
+	## sim mirrors gate 4's island (fork_x 380, the CACHE lane on the RIGHT), so the
+	## label was pointing at the wrong road at gate 4: the sign says CACHE on the
+	## fortified-mines side while the real wire-slowed CACHE lane sits on the other
+	## side of the screen. Probe the sim's OWN wire zone (_in_fork_wire) to find which
+	## side it actually slows, and assert the drawn "< CACHE" x lands on THAT side —
+	## not a hardcoded assumption of which side is which.
+	for gate_n in SimWorld.FORK_GATES:
+		var sim := _stream_fork_at(7, gate_n)
+		var gate_y := 0
+		var fx := 0
+		for g in sim.gates:
+			if g.get("fork_x", 0) != 0:
+				gate_y = g["y"]
+				fx = g["fork_x"]
+				break
+		Runner.T.ok(fx != 0, "gate %d: a fork gate streamed" % gate_n)
+		var probe_y: int = gate_y + 100 * Fixed.ONE   # inside the first _in_fork_wire band (+90..+110)
+		var wire_left: bool = sim._in_fork_wire(fx * Fixed.ONE - 100 * Fixed.ONE, probe_y)
+		var wire_right: bool = sim._in_fork_wire(fx * Fixed.ONE + 100 * Fixed.ONE, probe_y)
+		Runner.T.ok(wire_left != wire_right, "gate %d: the wire zone slows exactly one side (left=%s right=%s)" % [gate_n, wire_left, wire_right])
+		# fork_cache_is_left is THE predicate the sim itself uses to decide the CACHE
+		# side (both the wire zone and every content beat read it after the fix) — pin
+		# it agrees with the independently-probed wire side, so a future change to
+		# either can't drift the two apart.
+		Runner.T.eq(SimWorld.fork_cache_is_left(fx), wire_left,
+			"gate %d: fork_cache_is_left(%d) agrees with the independently-probed wire side" % [gate_n, fx])
+		# The load-bearing assertion: run _draw_gates' OWN sign-placement helper
+		# (fork_sign_xs) against the sim's OWN predicate output, and check the
+		# resulting drawn x actually lands on the probed wire side. Paired with
+		# the tightened grep pin below (which requires the exact
+		# `fork_cache_is_left(int(isl_x))` call, not just the substring), a
+		# hardcoded sign (e.g. cache_left fed a literal 260 at the draw call
+		# site) now goes red — that was the gap the un-pinned substring left.
+		var xs := Main.fork_sign_xs(SimWorld.fork_cache_is_left(fx), 60.0, 70.0)
+		Runner.T.eq(xs.x < 320.0, wire_left,
+			"gate %d: the drawn '< CACHE' label x (%.1f) lands on the probed wire-slowed side (wire_left=%s)" % [gate_n, xs.x, wire_left])
+	# Grep pin (this suite's house pattern — see _view_src() at the top of the file):
+	# main.gd must derive the fork lane side from the sim's shared predicate, not
+	# restate its own 320.0 copy or draw the CACHE label at an unconditional x.
+	# Pinned to the exact call (the measured fork_x, not a hardcoded stand-in) —
+	# a bare "fork_cache_is_left(" substring check would still pass if the real
+	# argument were swapped for a literal like 260.
+	var view := _view_src()
+	Runner.T.ok(view.contains("SimWorld.fork_cache_is_left(int(isl_x))"),
+		"main.gd derives the fork lane side from the sim's own predicate, fed the real measured fork_x")
+	Runner.T.ok(not view.contains("isl_x < 320.0"),
+		"the bare 320.0 fork-side literal is gone from main.gd (collapsed into fork_cache_is_left)")

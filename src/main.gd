@@ -7511,6 +7511,17 @@ func _draw_water() -> void:
 				8, Art.safe(Color(0.6, 1.0, 0.6)))
 
 
+static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> Vector2:
+	## Pure half of the route-fork signpost placement (view-only float math, so it
+	## lives here rather than in src/sim/ — the sim's fork_cache_is_left decides
+	## WHICH lane is cache; this only lays out the two labels around that answer).
+	## Extracted so a test can assert the DRAWN label x, not just that _draw_gates
+	## calls fork_cache_is_left somewhere in its source.
+	var cx := 84.0 if cache_left else 556.0 - cache_w
+	var bx := 556.0 - bounty_w if cache_left else 84.0
+	return Vector2(cx, bx)
+
+
 func _draw_gates() -> void:
 	# Fortified sandbag wall: baked wall segments + end caps (was 14 identical
 	# sandbag-pile stamps). Alternate flips keyed off a per-gate hash so no two
@@ -7619,6 +7630,10 @@ func _draw_gates() -> void:
 		# segments (+70..+610) span the full deepened +40..+620 blocker so the
 		# art never stops short of the collision (was three at +320).
 		var isl_x := float(fk.get("x", 260 * Fixed.ONE)) * PX
+		# fork-gate-bunker: THE one predicate for which lane is CACHE -- the wire
+		# strips below and the sign labels at the loop end both read it, so the
+		# sign can never point at a lane the sim did not actually wire.
+		var cache_left := SimWorld.fork_cache_is_left(int(isl_x))
 		for wi in 7:
 			var wh2 := Art.cell_hash(fk["y"] / 65536 + wi * 13, wi)
 			var wy2 := _to_screen(0, fk["y"] + (70 + wi * 90) * Fixed.ONE).y
@@ -7630,7 +7645,7 @@ func _draw_gates() -> void:
 		# CACHE wire strips draw ON the sim's slow-band centers (mechanical truth:
 		# _in_fork_wire bands are +90..110/+210..230/+330..350/+450..470, so the
 		# sprites sit at +100/+220/+340/+460 — no drift off the real hazard).
-		var wire_x0 := 30.0 if isl_x < 320.0 else isl_x + 50.0
+		var wire_x0 := 30.0 if cache_left else isl_x + 50.0
 		for ci in 4:
 			var cy2 := _to_screen(0, fk["y"] + (100 + ci * 120) * Fixed.ONE).y
 			if cy2 < -20.0 or cy2 > 380.0:
@@ -7641,17 +7656,20 @@ func _draw_gates() -> void:
 		# reads as the better-defended reward lane — deliberately NO warning
 		# glyph (reading the bait is the skill). Matches the sim's +490/+530 bags.
 		if fk.get("bait", false):
-			var bait_x := (isl_x + 120.0) if isl_x < 320.0 else (isl_x - 120.0)
+			var bait_x := (isl_x + 120.0) if cache_left else (isl_x - 120.0)
 			for bd in 2:
 				var bdy := _to_screen(0, fk["y"] + (490 + bd * 40) * Fixed.ONE).y
 				if bdy < -20.0 or bdy > 380.0:
 					continue
 				_wall_seg(Vector2(bait_x + bd * 20.0, bdy), 0.62, Color(1.02, 0.98, 0.74),
 					int(bait_x) + bd, fk["y"] / 65536 + 490 + bd * 40, 0)
-		draw_rect(Rect2(80.0, fy - 22.0, cw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
-		draw_rect(Rect2(556.0 - bw2 - 4.0, fy - 22.0, bw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
-		Art.text(self, cache_txt, Vector2(84, fy), 24, Art.safe(Color(0.5, 1.0, 0.7)))
-		Art.text(self, bounty_txt, Vector2(556.0 - bw2, fy), 24, Color(1.0, 0.75, 0.3))
+		var sign_xs := fork_sign_xs(cache_left, cw2, bw2)
+		var cx := sign_xs.x
+		var bx := sign_xs.y
+		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
+		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
+		Art.text(self, cache_txt, Vector2(cx, fy), 24, Art.safe(Color(0.5, 1.0, 0.7)))
+		Art.text(self, bounty_txt, Vector2(bx, fy), 24, Color(1.0, 0.75, 0.3))
 
 
 func _draw_pickups() -> void:

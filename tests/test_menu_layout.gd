@@ -903,8 +903,18 @@ class _CaptureMenu extends GameMenu:
 		Art.text_capture = ops
 		super._center_text(txt, y, size, col)
 		Art.text_capture = prev
+	# fork-gate-bunker: same capture wrapper as _center_text, for the arbitrary-cx sibling
+	# (REBIND's tab labels + P1|P2 selector, the last raw draw_string in any header).
+	func _center_text_at(txt: String, cx: float, y: float, size: int, col: Color, max_w := 0.0) -> void:
+		centered.append({"txt": txt, "y": y})
+		var prev = Art.text_capture
+		Art.text_capture = ops
+		super._center_text_at(txt, cx, y, size, col, max_w)
+		Art.text_capture = prev
 	func _emit_rect(r: Rect2, _c: Color) -> void:
 		ops.append({"k": "rect", "id": "", "box": r})
+	func _emit_rect_outline(r: Rect2, _c: Color, _width: float) -> void:
+		ops.append({"k": "rect_outline", "id": "", "box": r})
 	func _emit_tex(key: String, r: Rect2, _c: Color) -> void:
 		ops.append({"k": "tex", "id": key, "box": r})
 	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
@@ -6444,3 +6454,123 @@ func test_menu_chrome_is_pixel_grid_exact() -> void:
 		"clean OPTS (n=10, bh 20) resolves to the 16px icon")
 	Runner.T.eq(16.0 if float(g_dirty["bh"]) >= 18.0 else 8.0, 16.0,
 		"dirty OPTS (n=11, bh 18) still resolves to the 16px icon -- not a 2x shrink")
+
+
+# fork-gate-bunker: PAUSE/OPTS/SETUP/INFO/REBIND/DISP/MODES/CHAPTERS/AUDIO/PERKS drew
+# straight on the live attract/frozen-run backdrop with only a scrim — no box chrome
+# at all, while HALL/HOWTO (2 of the 14 Modes) got the full frame+well treatment. Only
+# HIDDEN (nothing to frame) and TITLE (the attract fight IS the screen) should stay
+# unframed; every other Mode is a modal and must wear the frame. Three checks:
+#   1. CLASS pin off the enum itself — every Mode not in UNFRAMED_MODES is framed.
+#   2. GUARD-RAIL, not a tight bound: the border must contain the real header draw
+#      (captured through the seams) and every row plate compute_geometry/row_rect
+#      produces, for every one of the 10 newly-framed list screens. Measured
+#      2026-07-26: the worst real row-plate bottom across every mode/row-count is
+#      330.0 (n=2/5/8) and 329.0 (n=6/7/9/10/11/12/13) against the border bottom
+#      336.0 — 6-7px of slack, not a tight fit. This still catches a border shrunk
+#      back toward the old HALL box (bottom 331.36, which the mutation sweep for
+#      this test confirmed goes GREEN against the 331.36 rect — i.e. THIS specific
+#      assertion doesn't bite that regression on its own; assertion 1's class pin,
+#      not this one, is what makes reverting the frame regress loudly). Treat red
+#      here as "something moved a lot," not "something moved at all."
+#   3. The underlay texture's own 5%-inset line (drawn through the SAME shared rect at
+#      its own asset inset) must stay on-canvas and clear the footer legend.
+func test_every_overlay_screen_wears_the_box_chrome_without_crossing_its_ink() -> void:
+	# --- 1. class pin ---
+	Runner.T.eq(Menu.UNFRAMED_MODES.size(), 2, "exactly HIDDEN + TITLE stay unframed")
+	Runner.T.ok(Menu.Mode.HIDDEN in Menu.UNFRAMED_MODES and Menu.Mode.TITLE in Menu.UNFRAMED_MODES,
+		"the two unframed modes are HIDDEN and TITLE specifically")
+	var framed := 0
+	for m in Menu.Mode.values():
+		if m in Menu.UNFRAMED_MODES:
+			continue
+		framed += 1
+		Runner.T.ok(Menu._content_frame(m), "mode %d must wear the box chrome" % m)
+	Runner.T.eq(framed, 12, "12 of 14 modes are player-visible overlays that must be framed")
+
+	# --- 1b. the box is actually PAINTED, not just declared framed. _content_frame()
+	# is a boolean the fix could satisfy while a mutant deletes the real draw calls (see
+	# _draw_content_frame() in menu.gd) — invoke the REAL production draw through
+	# _CaptureMenu and require the frame texture op to be present with the exact shared
+	# rect content_frame_rect() computes. TITLE must draw NONE (it stays unframed).
+	var frame_stub := _StubMain.new()
+	for m in Menu.Mode.values():
+		if m == Menu.Mode.HIDDEN:
+			continue   # _draw()/_draw_content_frame() bail before drawing anything for HIDDEN
+		var fcap := _CaptureMenu.new()
+		fcap.main = frame_stub
+		fcap.mode = m
+		fcap._draw_content_frame()
+		var frame_ops := fcap.ops.filter(func(op): return op["k"] == "tex" and op["id"] == "ui_frame_lrg")
+		fcap.free()
+		if m in Menu.UNFRAMED_MODES:
+			Runner.T.eq(frame_ops.size(), 0, "unframed mode %d draws zero ui_frame_lrg ops" % m)
+		else:
+			Runner.T.eq(frame_ops.size(), 1, "framed mode %d draws exactly one ui_frame_lrg op" % m)
+			if frame_ops.size() == 1:
+				Runner.T.eq(frame_ops[0]["box"], Menu.content_frame_rect(m),
+					"mode %d's drawn frame rect matches content_frame_rect()" % m)
+	frame_stub.free()
+
+	# --- 2 & 3: the 10 list-screen modes (HALL/HOWTO already had a pinned box; see
+	# test_assets.gd:1315, untouched) ---
+	var list_modes := [Menu.Mode.PAUSE, Menu.Mode.OPTS, Menu.Mode.SETUP, Menu.Mode.INFO,
+		Menu.Mode.REBIND, Menu.Mode.DISP, Menu.Mode.MODES, Menu.Mode.CHAPTERS,
+		Menu.Mode.AUDIO, Menu.Mode.PERKS]
+	var stub := _StubMain.new()
+	for m in list_modes:
+		var border := Menu.content_frame_border(m)
+		# border sits above the FOOTER_Y hint strip (dialog + hint bar pairing).
+		Runner.T.ok(border.end.y < Menu.FOOTER_Y,
+			"mode %d border bottom %.1f clears FOOTER_Y %.1f" % [m, border.end.y, Menu.FOOTER_Y])
+		# Header ink: every mode, including REBIND, now draws its header purely through
+		# the _center_text/_center_text_at/_emit_rect/_emit_rect_outline/_emit_tex seams
+		# (REBIND's tab-strip + P1|P2 selector plates and labels used to be raw
+		# draw_rect/draw_string, which throws "Drawing is only allowed inside..." outside
+		# a live NOTIFICATION_DRAW pass — that's why this used to substitute the pure,
+		# geometry-only _rebind_tab_rect() mirror instead of the real draw). So
+		# _CaptureMenu can invoke the REAL production draw for every mode uniformly.
+		var ink: Array[Rect2] = []
+		var cap := _CaptureMenu.new()
+		cap.main = stub
+		cap.mode = m
+		cap._draw_mode_header()
+		for op in cap.ops:
+			ink.append(op["box"])
+		cap.free()
+		for box in ink:
+			Runner.T.ok(_rect_inside(border, box),
+				"mode %d header ink %s stays inside border %s" % [m, box, border])
+		# Row plates: every row compute_geometry/row_rect actually produce for this
+		# mode's REAL _menu_items() count. OPTS also stresses its tightest real state —
+		# staged (dirty) settings split BACK into SAVE + DISCARD (n=11, bh 18 vs the
+		# clean n=10's bh 20) and sit closest to the border's bottom edge.
+		var dirty_states := [true, false] if m == Menu.Mode.OPTS else [false]
+		for dirty in dirty_states:
+			var n_probe := GameMenu.new()
+			n_probe.main = stub
+			n_probe.mode = m
+			if dirty:
+				n_probe._opts_dirty = true
+			var n: int = n_probe._menu_items().size()
+			n_probe.free()
+			var g := Menu.compute_geometry(m, n, -1.0)
+			for k in n:
+				var rr := Menu.row_rect(g, k)
+				Runner.T.ok(_rect_inside(border, rr),
+					"mode %d (dirty=%s) row %d plate %s stays inside border %s" % [m, dirty, k, rr, border])
+		# --- 3. underlay skirt: the _under texture draws its own line at 5% of the
+		# SAME shared rect content_frame_rect() hands both textures (menu.gd draws
+		# ui_frame_lrg_under and ui_frame_lrg with the identical `fr`).
+		var fr := Menu.content_frame_rect(m)
+		var skirt := Rect2(fr.position + fr.size * 0.05, fr.size * 0.90)
+		Runner.T.ok(skirt.position.x >= 0.0 and skirt.end.x <= 640.0,
+			"mode %d underlay skirt x [%.1f,%.1f] stays inside the 640 canvas" % [m, skirt.position.x, skirt.end.x])
+		Runner.T.ok(skirt.position.y >= 0.0 and skirt.end.y < Menu.FOOTER_Y,
+			"mode %d underlay skirt y [%.1f,%.1f] clears FOOTER_Y %.1f" % [m, skirt.position.y, skirt.end.y, Menu.FOOTER_Y])
+	stub.free()
+
+
+func _rect_inside(outer: Rect2, inner: Rect2) -> bool:
+	return inner.position.x >= outer.position.x and inner.position.y >= outer.position.y \
+		and inner.end.x <= outer.end.x and inner.end.y <= outer.end.y

@@ -445,13 +445,57 @@ const SEED := 0xDEADBEEF
 ## same tick either way. Inert by measurement, not by argument. The behaviour change itself
 ## is pinned directly by test_controls::test_empty_clip_bash_survives_the_loss_of_the_fire_edge
 ## and ::test_bash_is_still_rationed_by_its_cooldown_not_by_the_button.
+## 2026-07-25 -- FORK-ISLAND CLEARANCE: campaign GOLDEN RE-RECORDED (samples 2-5; 0 and 1
+## byte-identical). ENDLESS_GOLDEN VERIFIED UNCHANGED (endless streams no gate arenas at
+## all). Three authored ARENAS coordinates were sitting inside a fork gate's wreck island,
+## i.e. in scenery boots cannot enter: gate 4's b2 (368 -> 432; its whole 48px body was
+## inside the blocked 336..424 band), gate 2's b1 (300 -> 312; west face 4px in), and gate
+## 2's front sentinel mine (240 -> 120; buried where no player can ever reach
+## MINE_TRIGGER_RADIUS of it). Gate 4's flank mine moved 500 -> 528 to stay outside the
+## relocated b2's blast+AABB envelope.
+##
+## WHY THESE SAMPLES: gate 4 is genuinely torture-inert, but GATE 2 IS NOT -- and the
+## ARENAS comment that claimed it was ("never streams past gate 1, probe-verified --
+## camera_top ends ~43 units short of gate 2") had gone STALE and is corrected in this
+## same commit. MEASURED, not argued (tools/probe_torture_gates.gd): the torture now
+## constructs gate 1 @tick 0, gate 2 @tick 1309 and gate 3 @tick 3108, ending at
+## camera_top = -2563 px -- 563 px PAST gate 2, not 43 short of it. At SAMPLE_EVERY=600
+## a gate-2 construction at tick 1309 can first reach the sample at tick 1800, which is
+## sample index 2 -- and samples 2,3,4,5 are exactly the four that moved, with 0 and 1
+## byte-identical. The delta is fully accounted for; nothing else in the sim was touched.
+## 2026-07-26 -- FORK-GATE-BUNKER: campaign GOLDEN RE-RECORDED AGAIN (samples 2-5; 0 and 1
+## byte-identical, same reasoning as the entry above -- gate 4 is still torture-inert, gate 2
+## still first reaches a sample at index 2). This is the SAME class the entry above fixed,
+## finishing the other 97% of the set: the entry above only fixed the 3 AUTHORED ARENAS
+## coordinates that predated the fork wreck-island; it left the STREAMED fork beats (the free
+## crate, guard mines, gauntlet elites, deep cache mines -- all rng-drawn, gate 2 AND gate 4)
+## still authored as bare gate-2 x's, unmirrored for gate 4 and unclamped off the divider at
+## either gate. `_fork_lane_x`/`_clear_fork_divider_x` now mirror (gate 4 only) and clamp
+## every one of those beats. Gate 4 is torture-inert so its half is golden-invisible; gate 2's
+## beats DO stream in the torture window, and the clamp nudges a few of them off the divider
+## face by a handful of px, moving samples 2-5 exactly like last time. ENDLESS_GOLDEN VERIFIED
+## UNCHANGED (endless streams no gate arenas, fork or otherwise).
+## 2026-07-26 -- CLAYMORE PLANTER GRACE: campaign GOLDEN RE-RECORDED (ALL 6 samples). A new hashed
+## mine field `grace` joins checksum() and the mines[] block feeds unconditionally, so every sample
+## shifts by the added field even though the torture never plants a claymore -- the same structural
+## shift the barrels[] block caused. ENDLESS_GOLDEN: expected unchanged for the same reason it always
+## is (endless streams no gate arenas), verified by the suite.
+##
+## WHY THE FIELD EXISTS, measured not argued (tools/probe_claymore.gd): the charge planted ALONG the
+## aim and armed instantly, so ADVANCING while aiming the same way -- the twin-stick input the game
+## teaches -- detonated it on YOU at tick 5. Placement cannot fix this: the earlier behind-the-aim
+## placement had the mirror bug at ~5 ticks on a full backpedal, which is why it was moved in the
+## first place. So the charge now ignores PLAYERS for CLAYMORE_ARM_TICKS (20, sized from the measured
+## ~2.2px/tick approach across an 18px trigger zone) and stays live to everything else. Counter-checked
+## so the fix cannot have simply neutered the weapon: an enemy standing on it during that window
+## still dies at tick 2, and once grace expires the planter is hurt again at tick 5.
 const GOLDEN: Array[int] = [
-	1137374205060789435,
-	8552575976495711450,
-	8596890941918905151,
-	1060946695091977990,
-	1098902499213753401,
-	5824548073172713623,
+	2526922330838029777,
+	123904905374903528,
+	8324108471961656605,
+	6055676100953415857,
+	8590073470560221865,
+	1759087827131881334,
 ]
 
 
