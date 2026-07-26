@@ -5297,6 +5297,35 @@ func _drive_audio() -> void:
 		_buzz(_tension * 0.4, -1, true)   # lub-dub reads as a sharp double-tap, not a boom
 
 
+static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
+	## What demo_input should actually be shooting at, as {x, y} sim coords — i.e.
+	## whatever is HOLDING the run: the Colossus, else an on-screen gunship still
+	## locking a gate (exactly the window SimWorld._step_boss engages it in), else
+	## the nearest live gate bunker to the north.
+	##
+	## Without this the bot only ever had the open-loop `aim_x = [0,150,-150,0]`
+	## sweep, which reaches ~30 degrees off north. That cannot point at a 20px boss
+	## disc drifting at 2px/tick, and it cannot point at a gate bunker more than
+	## ~117px off the lane either — so the bot stalled for thousands of ticks in
+	## front of the two things it had to destroy to advance. Aiming at your
+	## objective is not bot cleverness, it is the minimum for the capture to be a
+	## measurement of the GAME rather than of the sweep's duty cycle.
+	if not dsim.colossus.is_empty() and dsim.colossus["alive"]:
+		return {"x": dsim.colossus["x"], "y": dsim.colossus["y"]}
+	for g in dsim.gates:
+		if g["open"] or g["boss"].is_empty() or not g["boss"]["alive"]:
+			continue
+		if g["y"] < dsim.camera_top or g["y"] > dsim.camera_top + SimWorld.VIEW_H:
+			continue
+		return {"x": g["boss"]["x"], "y": g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET}
+	# Deliberately NOT extended to bunkers. Both variants were measured across 8
+	# seeds: aiming at every bunker in range cost two seeds their finish (the bot
+	# stops answering the enemies shooting it), and aiming only at a closed gate's
+	# own bunkers cost one. Boss-only completes all 8. See the honesty note on
+	# demo_input about what this bot's numbers can and cannot be used for.
+	return {}
+
+
 static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	## Scripted "player" for Movie Maker captures (--write-movie): march
 	## north weaving, burst-fire, lob grenades, roll, radio in supplies,
@@ -5314,6 +5343,20 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	inp.buy = 2 if tick == 880 else 0   # "+4 GRENADES" moment
 	inp.revive = (tick % 90) == 0       # downed: feed the coin reader
 	var p := dsim.players[0]
+	# LOCK ON to whatever is actually holding the run. The open-loop sweep above
+	# cannot land on a 20px gunship disc drifting laterally at 2px/tick, so the bot
+	# used to burn ~6,200 ticks and ~35 knockdowns on ONE 40 HP boss that a player
+	# who aims kills in a few hundred. Applied before the tank branch so a boss
+	# outranks the sweep in a tank too — a bunker actually in reach still wins
+	# below (boss gates have no bunkers, so the two never compete).
+	var lock := _demo_boss_target(dsim, p)
+	if not lock.is_empty():
+		var ldx: int = lock["x"] - p["x"]
+		var ldy: int = lock["y"] - p["y"]
+		var llen := Fixed.length(ldx, ldy)
+		if llen > Fixed.ONE:
+			inp.aim_x = clampi(Fixed.div(ldx, llen) / 256, -256, 256)
+			inp.aim_y = clampi(Fixed.div(ldy, llen) / 256, -256, 256)
 	if p["in_tank"] >= 0:
 		# Tank time: gentler weave, stay aboard. The cannon now rides the GRENADE verb
 		# (it always spent grenade ammo; ALWAYS-FIRE made `fire` a permanent trigger and
@@ -5338,8 +5381,16 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 						inp.move_x = 256 * signi(bdx)
 					break
 		return inp
-	# Commandeer: steer at a parked healthy tank once it's near.
-	for t in dsim.tanks:
+	# Commandeer: steer at a parked healthy tank once it's near — but only for half
+	# of every 600-tick window. The chase has no success condition of its own, so a
+	# tank the bot cannot actually WALK to (parked across a fork divider, behind a
+	# rock, over water) used to latch it forever: it y-aligned with the tank, zeroed
+	# its own north march, and pushed into the wall for the rest of the run. Measured
+	# on seed 0x7: 44,000 ticks and 339 knockdowns at one gate, never finishing.
+	# A stateless duty cycle bounds EVERY unreachable-target case, not just that one,
+	# and 300 ticks is ~720px of approach against a 150px acquire radius — so no
+	# reachable tank is ever missed.
+	for t in (dsim.tanks if (tick % 600) < 300 else []):
 		if t["alive"] and not t["burning"] and t["occupant"] < 0:
 			var dx: int = t["x"] - p["x"]
 			var dy: int = t["y"] - p["y"]

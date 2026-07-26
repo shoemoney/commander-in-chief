@@ -124,3 +124,32 @@ func test_flawless_streak_compounds_and_resets_on_death() -> void:
 	Runner.T.eq(sim.score - s1, 4000, "second consecutive flawless gate pays 2×")
 	sim._kill_player(sim.players[0])
 	Runner.T.eq(sim.flawless_streak, 0, "a death resets the flawless streak")
+
+
+func test_every_campaign_sector_is_the_same_length() -> void:
+	# The DIFFICULTY-RAMP ratchet. A 2026-07-25 telemetry study opened with the
+	# hypothesis that one sector was ~3x its neighbours in length and that this was
+	# why it owned ~48% of all knockdowns. It is not: GATE_SPACING is a single
+	# constant and every sector is exactly one of them, so the "one sector is
+	# longer" accident cannot exist by construction — the real cause was the
+	# scripted probe bot, which could not aim at the gate-3 gunship.
+	#
+	# That makes this cheap to keep true, and expensive to rediscover if it stops
+	# being true: per-sector spacing is exactly the kind of knob someone adds to
+	# "make the finale feel bigger", and it would silently reshape the whole ramp.
+	# If you deliberately want uneven sectors, this test is the conversation.
+	var sim := SimWorld.new(21, 1)
+	# Scroll far enough to stream the whole authored gate run.
+	for i in SimWorld.FINAL_GATE_INDEX + 1:
+		sim.camera_top = -(i * SimWorld.GATE_SPACING) - 2 * SimWorld.VIEW_H
+		sim._step_camera()
+	var ys: Array[int] = []
+	for g in sim.gates:
+		ys.append(g["y"])
+	ys.sort()
+	ys.reverse()   # -1000, -2000, ... (nearest gate first)
+	Runner.T.ok(ys.size() >= 3, "at least three gates streamed to compare")
+	Runner.T.eq(ys[0], -SimWorld.GATE_SPACING, "the first gate sits one spacing north of the start")
+	for i in range(1, ys.size()):
+		Runner.T.eq(ys[i - 1] - ys[i], SimWorld.GATE_SPACING,
+			"sector %d is exactly one GATE_SPACING long, like every other" % i)

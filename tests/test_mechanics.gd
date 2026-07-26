@@ -1744,6 +1744,48 @@ func test_c2_fork_commitment_depth() -> void:
 		"the +330 wire strip extends the CACHE-lane slow cost down the commitment")
 
 
+func test_fork_divider_denies_the_crossing_without_eating_north_progress() -> void:
+	# REGRESSION, measured. The divider's move-revert used to restore BOTH axes
+	# together, which made the promise written above it — "progress is always
+	# possible; only lateral crossing is blocked, so no softlock under the ratchet"
+	# — false. A player holding a diagonal INTO the face lost the legal northward
+	# component along with the illegal lateral one and stood dead still. The
+	# scripted bot pinned itself at x=214 against gate 2's divider (fork_x=260) on
+	# THIS seed for 44,000+ ticks and 358 knockdowns and never finished the run.
+	# The resolve is axis-separated now; this is that promise, pinned.
+	var sim := _stream_fork(7)
+	var gate_y := 0
+	var fx := 0
+	for g in sim.gates:
+		if g.get("fork_x", 0) != 0:
+			gate_y = g["y"]
+			fx = g["fork_x"] * SimWorld.F_ONE
+			break
+	Runner.T.ok(fx != 0, "a fork gate streamed")
+	sim.camera_top = gate_y + 300 * SimWorld.F_ONE
+	var p: Dictionary = sim.players[0]
+	p["x"] = fx - 46 * SimWorld.F_ONE     # west lane, just off the 44px face
+	p["y"] = gate_y + 500 * SimWorld.F_ONE
+	var y0: int = p["y"]
+	var into := SimInput.new()
+	into.move_x = 256    # east, INTO the divider — must stay denied
+	into.move_y = -256   # north, along it — must still happen
+	var best_y: int = y0
+	for i in 60:
+		sim.step([into])
+		var q: Dictionary = sim.players[0]
+		if not q["alive"]:
+			break
+		best_y = mini(best_y, q["y"])
+		Runner.T.ok(absi(q["x"] - fx) >= 44 * SimWorld.F_ONE,
+			"the divider still denies the lateral crossing every tick")
+	# The broken build advanced ~2px total (one tick, then a hard freeze). 60 ticks
+	# of the north component alone is ~100px, so 60px separates fixed from broken
+	# by a wide margin without pinning the exact diagonal speed.
+	Runner.T.ok(best_y <= y0 - 60 * SimWorld.F_ONE,
+		"holding north-east INTO the face still makes real northward progress")
+
+
 func test_c2_bait_fork_exists_and_stays_fair() -> void:
 	# Find a seed whose gate-2 fork is a BAIT, then a non-bait one; verify the
 	# bait emits its marker and the sparse (cache) lane keeps a hull passage.
