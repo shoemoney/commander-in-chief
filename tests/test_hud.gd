@@ -48,6 +48,33 @@ func test_unpause_does_not_refresh_window() -> void:
 	Runner.T.ok(r2[0] < 300.0, "unpause continues decaying, not bumping (show=%.1f)" % r2[0])
 
 
+# c-onboard2: the 30s backstop is GATED on ENGAGEMENT — it does not start until the player has
+# pressed one of the chip's own verbs. The bug this pins: a first-run player who is still working
+# out the controls watched the ONLY in-run control hint time out on a wall clock started at run
+# open (eight deaths in sector 1, chip long gone). A clock that measures reading time teaches
+# nobody. Production passes `not _verb_used.is_empty()` from _process, so the first verb press —
+# whatever it is, on whatever device — is what releases it.
+func test_verb_chip_backstop_held_until_the_player_engages() -> void:
+	# Two full minutes of wall clock with no verb pressed: the chip has not decayed a single frame.
+	var show := Hud.VERB_WINDOW
+	for _i in 7200:
+		show = Hud.verb_step(show, 7, 7, false, false, DT, false)[0]
+	Runner.T.eq(show, Hud.VERB_WINDOW,
+		"an un-engaged player never loses the chip to the clock (show=%.1f)" % show)
+	# The first verb press releases it, and from there it runs out exactly as before, so the chip
+	# still can't become a permanent playfield overlay.
+	var after := Hud.verb_step(show, 7, 7, false, false, DT, true)
+	Runner.T.ok(absf(after[0] - (Hud.VERB_WINDOW - 1.0)) < 0.001,
+		"the first verb press starts the backstop (show=%.3f)" % after[0])
+	var run := Hud.VERB_WINDOW
+	for _i in int(Hud.VERB_WINDOW) + 60:
+		run = Hud.verb_step(run, 7, 7, false, false, DT, true)[0]
+	Runner.T.eq(run, 0.0, "an engaged player's backstop still expires to zero")
+	# A rearm (fresh SimWorld) is orthogonal to the gate — a restart re-arms even un-engaged.
+	Runner.T.eq(Hud.verb_step(0.0, 1, 2, false, false, DT, false)[0], Hud.VERB_WINDOW,
+		"a restart rearms the full window even before the player has touched a verb")
+
+
 # Normal play (same run, no pause) decays one frame's worth and never underflows.
 func test_window_decays_and_floors_at_zero() -> void:
 	var r := Hud.verb_step(1.0, 7, 7, false, false, DT)

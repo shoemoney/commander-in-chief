@@ -4734,29 +4734,63 @@ func _draw_howto_tabs() -> void:
 	Art.text(self, pg, Vector2(FRAME_INNER_R - pw, TAB_BASELINE_Y), 10, Color(0.7, 0.75, 0.7, 0.85))
 
 
-# c3-05 page 1 — CONTROLS. The input verbs (grenade / roll / board / plant), one
-# per line so each glyph reads against its own complete sentence instead of the old
-# run-on "Bullets don't. ROLL... BOARD tanks..." line that packed two verbs into one
-# row. Each carries its device-aware glyph inline (text-only verbs made players hunt
-# the legend); every line is re-wrapped under ~64 chars so it can't clip at x=640.
+# c3-05 page 1 — CONTROLS. The input verbs, one per line so each glyph reads against its own
+# complete sentence instead of the old run-on "Bullets don't. ROLL... BOARD tanks..." line that
+# packed two verbs into one row. Each carries its device-aware glyph inline (text-only verbs made
+# players hunt the legend); every line is re-wrapped under ~64 chars so it can't clip at x=640.
+#
+# c-onboard2: MOVE and AIM now LEAD the page. Playtest: a fresh campaign, eight deaths in
+# sector 1, then this page opened — and it taught GRENADE / ROLL / BOARD / PLANT without ever
+# saying how to move or how the gun works. Those are the two verbs every other verb is built on
+# and they were the two missing. The old "THREE BUTTONS, FOUR VERBS" header is retired: it was a
+# button count, and it was wrong the moment a fifth line landed.
+#
+# Both new lines read the LIVE binds (main.bind via _bind_cluster / key_label) — never a
+# hardcoded WASD — so a rebound or non-QWERTY player is told the keys they actually have.
 func _howto_page_controls() -> void:
 	var col := Color(0.9, 0.92, 0.8)
 	var y := 100.0
-	# Three buttons, four verbs: BOARD and PLANT are the SAME @interact button (context
-	# picks which), shown by the repeated glyph below — so the header can't claim one
-	# button per verb.
-	Art.text(self, "THREE BUTTONS, FOUR VERBS:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
-	y += 30.0
-	# Each text token after a glyph leads with a space so the word never glues to the
-	# device art. Board and plant share the SAME button, so the two lines are parallel
-	# imperatives (BOARD… / PLANT…) that read as complete commands, not fragments.
+	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
+	y += 26.0
+	# Each text token after a glyph leads with a space so the word never glues to the device art.
+	_verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col)
+	y += 26.0
+	# The weapon has no trigger — it fires on its own, so AIM is the whole weapon verb and is
+	# the single most important thing a first-run player has to be told.
+	_verb_line(["@aim", " AIM with %s. The gun fires on its own — just point it." % _dir_devices("aim")], y, col)
+	y += 26.0
+	# Board and plant share the SAME button, so the two lines are parallel imperatives
+	# (BOARD… / PLANT…) that read as complete commands, not fragments.
 	_verb_line(["@grenade", " GRENADES crack armor — bunkers, bosses, the Colossus."], y, col)
-	y += 30.0
+	y += 26.0
 	_verb_line(["@roll", " ROLL dodges bullets — armor never stops them."], y, col)
-	y += 30.0
+	y += 26.0
 	_verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col)
-	y += 30.0
+	y += 26.0
 	_verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col)
+
+
+# c-onboard2: the LIVE key cluster behind a directional verb — "W/A/S/D" built from
+# main.bind("move_up"/"_left"/"_down"/"_right"), never a hardcoded default, so a rebind (or a
+# non-QWERTY layout, which key_label resolves through the keyboard map) shows up on the page.
+# `prefix` is "move" or "aim". UNBOUND keys surface as "UNBOUND" rather than a silent gap.
+func _bind_cluster(prefix: String) -> String:
+	var out: Array[String] = []
+	for d in ["up", "left", "down", "right"]:
+		out.append(key_label(main.bind("%s_%s" % [prefix, d])).to_upper())
+	return "/".join(out)
+
+
+# c-onboard2: how the player moves / aims, on the device they're actually holding. The sticks
+# aren't rebindable (the REBIND screen's own pad note says so), so the pad branch names them
+# outright; on keyboard the mouse is the always-on aim and the aim_* binds are the discrete
+# alternative. `prefix` is "move" or "aim", matching the bind namespace.
+func _dir_devices(prefix: String) -> String:
+	if Art.use_pad:
+		return "the LEFT STICK" if prefix == "move" else "the RIGHT STICK"
+	if prefix == "aim":
+		return "the MOUSE, or %s" % _bind_cluster("aim")
+	return _bind_cluster(prefix)
 
 
 # c3-05 page 2 — WAR CHEST. The one-hit rule and the shared-coin economy, given their
@@ -5325,9 +5359,9 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 	for seg: String in segs:
 		if seg.begins_with("@"):
 			var action := seg.substr(1)
-			if action == "grenade" or action == "fire":
-				# No Art.draw_glyph entry for these — use the device hint art
-				# (mouse button / trigger sprite), aspect preserved.
+			if action in ["grenade", "fire", "move", "aim"]:
+				# Art.draw_glyph's square prompt can't say "four keys" or "a stick" — use the
+				# device hint art (mouse button / trigger / stick / wide keycap), aspect preserved.
 				var t := Art.tex(Art.glyph_key(action))
 				var gw := 12.0 * float(t.get_width()) / float(t.get_height())
 				draw_texture_rect(t, Rect2(x, base_y - 10.0, gw, 12.0), false)
