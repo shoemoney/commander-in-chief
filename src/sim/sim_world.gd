@@ -3304,7 +3304,15 @@ func _step_bunkers() -> void:
 			continue
 		if not bk["alive"]:
 			continue
-		bk["spawn_cd"] = bk["spawn_cd"] - 1
+		# CLAMPED AT 0 — the only one of these three the PLAYER can see. The reset is
+		# gated on the enemy cap but the decrement is not, so a full field drives this
+		# negative; main.gd:6130 draws the hatch-charge glow as 1 - spawn_cd/120, which
+		# a negative pins past 100% — a mouth glowing "about to spawn" at full brightness
+		# for a spawn the cap is refusing. Measured before the clamp (tools/probe_cd_clamp.gd,
+		# 6 campaign seeds): 3 of 6 saturated the roster, worst seed reached -332 and drew
+		# the lying telegraph for 1,758 ticks (29 s). At 0 the glow tells the truth — the
+		# hatch IS loaded and opens the instant a slot frees.
+		bk["spawn_cd"] = maxi(bk["spawn_cd"] - 1, 0)
 		if bk["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
 			bk["spawn_cd"] = BUNKER_SPAWN_INTERVAL_TICKS
 			_spawn_enemy(bk["x"] + BUNKER_W / 2, bk["y"] + BUNKER_H + 8 * F_ONE, false)
@@ -4791,7 +4799,10 @@ func _step_waves(inputs: Array = []) -> void:
 	# threat scales, not just raw count. (Endless-only; campaign torture never
 	# reaches here, so campaign goldens are unaffected.)
 	if wave_pending > 0:
-		wave_spawn_cd -= 1
+		# Floored with its three siblings (bunker :3307, colossus spawn_cd/sweep_cd) —
+		# same shape, same enemy-cap gate on the reset only. Deep endless waves are
+		# where the roster actually saturates, so this is the one most likely to run.
+		wave_spawn_cd = maxi(wave_spawn_cd - 1, 0)
 		if wave_spawn_cd <= 0 and enemies.size() < MAX_ENEMIES:
 			var interval := maxi(8, WAVE_SPAWN_INTERVAL_TICKS - wave)
 			if has_mod(1):   # Blitz: spawns pour in twice as fast
@@ -5354,7 +5365,12 @@ func _step_colossus() -> void:
 			colossus["volley_cd"] = COLOSSUS_VOLLEY_CD_TICKS
 			_colossus_strike(target)
 	if phase == 3:
-		colossus["spawn_cd"] = colossus["spawn_cd"] - 1
+		# Floored like spray_cd above, and for the same reason: the reset is gated
+		# (here on the enemy cap) while the decrement is not, so a blocked drop runs
+		# the counter negative forever. Behaviour-identical — `<= 0` fires on the
+		# same tick at 0 as at -900 — and golden-inert, since checksum() feeds only
+		# hp/x/y/alive/core_open/core_cd for the colossus.
+		colossus["spawn_cd"] = maxi(colossus["spawn_cd"] - 1, 0)
 		if colossus["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
 			colossus["spawn_cd"] = COLOSSUS_SPAWN_CD_TICKS
 			_spawn_enemy(colossus["x"], colossus["y"] + 30 * F_ONE, false)
@@ -5364,7 +5380,10 @@ func _step_colossus() -> void:
 	# (reuses _add_strike: 45t warn > the 24t floor) drops on a player camping
 	# either margin lane — dodge IN is still fine, holding is not. sweep_cd
 	# rate-limits it (runs every phase, not just phase 3) so it never carpets.
-	colossus["sweep_cd"] = colossus.get("sweep_cd", COLOSSUS_SWEEP_CD_TICKS) - 1
+	# Floored for the same reason as spawn_cd: the reset needs the player to be IN
+	# a margin lane, so a fight spent anywhere else drives this one negative every
+	# tick of the whole encounter — the readiest runaway of the three.
+	colossus["sweep_cd"] = maxi(colossus.get("sweep_cd", COLOSSUS_SWEEP_CD_TICKS) - 1, 0)
 	if colossus["sweep_cd"] <= 0 \
 			and (target["x"] < ARENA_MARGIN or target["x"] > SCREEN_W_FP - ARENA_MARGIN):
 		colossus["sweep_cd"] = COLOSSUS_SWEEP_CD_TICKS

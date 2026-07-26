@@ -89,6 +89,49 @@ func test_bunker_infinite_spawn_and_seal() -> void:
 	Runner.T.eq(sim.enemies.size(), before + 2, "a destroyed bunker never spawns again")
 
 
+func test_gated_spawn_cooldowns_never_run_negative() -> void:
+	## CLASS ratchet, not an instance one. Four cooldowns share one shape: decrement
+	## unconditionally, reset only when `enemies.size() < MAX_ENEMIES`. A saturated
+	## roster therefore drives each of them negative forever unless it is floored.
+	## Only the bunker's is player-visible — main.gd:6130 draws the hatch-charge glow
+	## as `1 - spawn_cd / BUNKER_SPAWN_INTERVAL_TICKS`, which a negative pins past 100%,
+	## so a blocked hatch sat glowing "about to fire". Measured before the fix
+	## (tools/probe_cd_clamp.gd, 6 campaign seeds): 3 of 6 saturated, worst reached
+	## -332 and lied for 1,758 ticks. The floor is behaviour-neutral — `<= 0` fires on
+	## the same tick at 0 as at -332 — so this asserts the floor, never a spawn count.
+	var sim := SimWorld.new(4, 1)
+	var bunker := {"x": 300 * Fixed.ONE, "y": -100 * Fixed.ONE, "alive": true, "spawn_cd": 1}
+	sim.bunkers.clear()
+	sim.bunkers.append(bunker)
+	# Saturate the roster so every reset above is refused for the whole loop.
+	sim.enemies.clear()
+	while sim.enemies.size() < SimWorld.MAX_ENEMIES:
+		sim.enemies.append({"x": 0, "y": 0, "alive": true, "kind": 0, "hp": 1})
+	var floor_held := true
+	for i in 400:
+		sim._step_bunkers()
+		if bunker["spawn_cd"] < 0:
+			floor_held = false
+	Runner.T.ok(floor_held,
+		"bunker spawn_cd holds at 0 while the enemy cap blocks its reset (the glow stops lying)")
+	Runner.T.eq(bunker["spawn_cd"], 0, "and it rests exactly at the floor, not below it")
+
+	# The endless wave trickle shares the shape; deep waves are where it saturates.
+	var esim := SimWorld.new(4, 1, "endless")
+	esim.enemies.clear()
+	while esim.enemies.size() < SimWorld.MAX_ENEMIES:
+		esim.enemies.append({"x": 0, "y": 0, "alive": true, "kind": 0, "hp": 1})
+	esim.wave = 3
+	esim.wave_pending = 5
+	esim.wave_spawn_cd = 1
+	var wave_floor_held := true
+	for i in 400:
+		esim._step_waves()
+		if esim.wave_spawn_cd < 0:
+			wave_floor_held = false
+	Runner.T.ok(wave_floor_held, "wave_spawn_cd holds at 0 under a saturated roster too")
+
+
 func test_passed_by_bunker_stops_spawning_and_is_pruned() -> void:
 	## Budget leak: `bunkers` was never removed from and _step_bunkers had no
 	## on-screen gate, so every passed-but-unsealed bunker kept spawning infantry
