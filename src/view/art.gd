@@ -1,8 +1,10 @@
 class_name Art
 extends RefCounted
-## Sprite registry for the view. Units/vehicles/props are top-down renders of
-## legacy 3D pack Military 3D models, baked to sprites by tools/bake_sprites.gd
-## (see assets/art/). Ground tiles, projectiles and FX remain Kenney CC0
+## Sprite registry for the view. Units/vehicles/props are top-down renders in
+## assets/art/ — see OPEN_SOURCE_CHECKLIST.md for the per-subfolder provenance
+## table, which is the one place kept current. (The tools/bake_sprites*.gd that
+## once produced the legacy art-derived ones are retired to git history: they needed
+## a scratch bake project that is not in this tree.) Ground tiles, projectiles and FX remain Kenney CC0
 ## (kenney.nl). POLYGON_Nature DOES ship tiling terrain PNGs (vendor
 ## Ground_Textures/: Grass, Mud, Sand + normals) — swapping the ground is
 ## parked on an art-direction call: painterly terrain vs the pixel-integer
