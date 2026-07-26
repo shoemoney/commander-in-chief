@@ -109,10 +109,19 @@ var _cursor_styled := false           # custom OS cursor active (menus/debrief o
 var _cursor_crosshair: ImageTexture   # boot-baked gameplay crosshair (from ui_reticle)
 var _cursor_menu: ImageTexture        # boot-baked scaled menu pointer (from ui_cursor)
 var _cursor_s := 1                     # window integer scale the cursors were baked at
-# Both OS cursors bake to this canvas at 1x. A pointer is a SIZE, never "whatever the
+# Each OS cursor bakes to a fixed canvas at 1x. A pointer is a SIZE, never "whatever the
 # source art happens to be" — the menu arrow used to bake at its native 64px * scale,
 # which drew a 128px pointer at 2x and 192px at 3x against a ~24-32px system norm.
 const CURSOR_PX := 24
+# ...but the two cursors are not the same object and must not share one size. The MENU
+# arrow was sized against a title-screen menu row (24 is right there). The gameplay
+# CROSSHAIR was never checked against the BATTLEFIELD, and 24 logical px is bigger than
+# the ~20px player sprite and bigger than the enemies it aims at — at the default 1280x720
+# (2x) window it drew 48 physical px. RETICLE_PX is anchored to the aim marker the game
+# already draws for itself: `rrect` at the player is 16 logical px (see the aim-reticle
+# draw), so the OS crosshair is the same 16 — 32 physical at 2x. Verified 1:1 over a real
+# gameplay capture: the enemy fits inside the centre gap instead of under the reticle.
+const RETICLE_PX := 16
 const CURSOR_SRC_PX := 64              # cursor.png / reticle.png authored canvas
 const CURSOR_TIP_SRC := Vector2(8, 2)  # arrow tip in that canvas (opaque bbox x 8..49, y 2..61)
 var _sfx := Sfx.new()
@@ -1524,19 +1533,24 @@ func _joy_brand(device: int) -> String:
 
 func _bake_cursor() -> void:
 	# The OS arrow floated over the battlefield (mouse is the default keyboard-
-	# player aim device, LMB fires). Restyle it as a crosshair baked from the
-	# game's own reticle art — menus keep a working, clickable pointer.
+	# player aim device, LMB fires). Restyle it as the game's own aim reticle —
+	# menus keep a working, clickable pointer.
+	# That reticle art was a single chevron bracket for months while this comment
+	# claimed "crosshair": ui/reticle.png drew a `<` and read on screen as a boomerang
+	# that pointed at nothing. tools/gen_ui_chrome.py::reticle now draws an actual
+	# crosshair (four gapped ticks + ink keyline) — one asset, so the in-game aim
+	# reticle and this OS cursor are the same mark.
 	# OS cursors render in PHYSICAL pixels and ignore the viewport stretch, so
 	# bake at the window's integer scale (24px at 1x looked half-size at 2x).
 	var win := DisplayServer.window_get_size()
 	var s := maxi(1, mini(win.x / 640, win.y / 360))
-	# Both cursors normalise to the SAME canvas. The menu pointer used to bake at
+	# Each cursor normalises to a FIXED canvas. The menu pointer used to bake at
 	# `native * s`, which is not a size at all — it is whatever the source art happens
 	# to be. cursor.png is 64px, so a 2x window drew a 128px pointer against a ~24-32px
-	# system norm, and a 3x window drew 192px. Anchoring both to CURSOR_PX means a
+	# system norm, and a 3x window drew 192px. Anchoring to CURSOR_PX / RETICLE_PX means a
 	# re-bake of the art can never resize the pointer again.
 	_cursor_crosshair = ImageTexture.create_from_image(
-		bake_cursor_image(Art.tex("ui_reticle").get_image(), CURSOR_PX * s))
+		bake_cursor_image(Art.tex("ui_reticle").get_image(), RETICLE_PX * s))
 	_cursor_menu = ImageTexture.create_from_image(
 		bake_cursor_image(Art.tex("ui_cursor").get_image(), CURSOR_PX * s))
 	_cursor_s = s
@@ -1562,7 +1576,7 @@ func _apply_cursor(styled: bool) -> void:
 	# drifts off the pointer at 2x/3x/fullscreen.
 	Input.set_custom_mouse_cursor(_cursor_menu if styled else _cursor_crosshair,
 		Input.CURSOR_ARROW,
-		menu_hotspot(_cursor_s) if styled else (Vector2.ONE * (CURSOR_PX / 2.0) * _cursor_s))
+		menu_hotspot(_cursor_s) if styled else crosshair_hotspot(_cursor_s))
 
 
 ## Click point of the menu arrow, DERIVED from where its tip actually is in the source
@@ -1571,6 +1585,15 @@ func _apply_cursor(styled: bool) -> void:
 ## the arrow was visibly aiming at. Measured from the PNG's opaque bbox (x 8..49, y 2..61).
 static func menu_hotspot(cursor_s: int) -> Vector2:
 	return CURSOR_TIP_SRC * (float(CURSOR_PX) / float(CURSOR_SRC_PX)) * float(cursor_s)
+
+
+## Click/aim point of the gameplay crosshair. An arrow aims from its TIP; a crosshair aims
+## from its dead CENTRE — put it anywhere else and every shot is off by the offset. Pinned
+## the same way menu_hotspot is so the two can never drift onto one shared assumption again
+## (they already had: both used to bake at CURSOR_PX). tools/gen_ui_chrome.py::reticle draws
+## the mark symmetric about the canvas centre precisely so this stays true.
+static func crosshair_hotspot(cursor_s: int) -> Vector2:
+	return Vector2.ONE * (RETICLE_PX / 2.0) * float(cursor_s)
 
 
 func _input(event: InputEvent) -> void:
