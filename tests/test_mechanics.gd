@@ -856,13 +856,29 @@ func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_SANDBAG_COST, "bag costs SHOP_SANDBAG_COST")
 	var sb := sim.sandbags[0]
 	Runner.T.ok(sb["x"] > p["x"], "bag plants ALONG the aim, not underfoot")
-	# Bullets die inside the bag AABB — both directions use the same block.
+	# ASYMMETRIC BY DESIGN, and this assertion used to say the opposite. A bag YOU planted
+	# does not eat YOUR rounds — you fire over your own parapet — while it still stops
+	# everything incoming. The old "player bullet dies in the bag" pinned a defect: the wheel
+	# plants 20px ALONG the aim and the segment is 36x10, so its near face sat ~2px from the
+	# muzzle. Aiming north the bag spans y-25..y-15 and a 6px/tick round dies on tick 3;
+	# aiming east it dies on tick 1, six pixels out — shorter than ENEMY_TOUCH_RADIUS. The
+	# 40-coin buy disabled your own gun in the direction you were facing.
 	sim.bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
 	sim.enemy_bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10})
 	sim._step_bullets()
 	sim._step_enemy_bullets()
-	Runner.T.eq(sim.bullets.size(), 0, "player bullet dies in the bag")
-	Runner.T.eq(sim.enemy_bullets.size(), 0, "enemy bullet dies in the bag")
+	Runner.T.eq(sim.bullets.size(), 1, "your own bag does NOT eat your rounds (you fire over it)")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "but it still stops incoming fire — the reason to buy it")
+	# The exemption is scoped to player-planted bags: the level's own cover still blocks you,
+	# or authored emplacements would stop mattering the moment you bought one bag.
+	sim.bullets.clear()
+	var world_bag := {"x": sb["x"] + 200 * SimWorld.F_ONE, "y": sb["y"], "world": 1}
+	sim.sandbags.append(world_bag)
+	sim.bullets.append({"x": world_bag["x"], "y": world_bag["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.eq(sim.bullets.size(), 0, "an AUTHORED bag still eats player rounds")
+	sim.sandbags.erase(world_bag)
+	sim.bullets.clear()
 	# A rusher walking the bag line stalls (move-revert), then a grenade clears it.
 	sim._spawn_enemy(sb["x"] + 24 * SimWorld.F_ONE, sb["y"], false)
 	var r := sim.enemies[sim.enemies.size() - 1]
@@ -3372,3 +3388,44 @@ func test_boss_rush_steps_the_world_hazards_its_own_arenas_author() -> void:
 	sim2.step([_idle()])
 	Runner.T.ok(sim2.mines.is_empty() or not sim2.mines[0]["armed"],
 		"a mine under a boss-rush player detonates instead of sitting inert forever")
+
+
+func test_mg_nest_leads_a_moving_target_instead_of_shooting_where_it_was() -> void:
+	## The nest re-acquired the target each round but fired at where it WAS, and the
+	## arithmetic says that can never hit anyone moving: miss = speed x flight, and
+	## flight = range / ENEMY_BULLET_SPEED. PLAYER_SPEED 2.4 px/tick against a 3 px/tick
+	## round is 0.8 px of drift per 1 px of flight, so at 120 px range the burst lands
+	## ~96 px behind a ~10 px target. Holding a strafe was a free dodge.
+	##
+	## Uses NO new sim state: a nest is a fixed emplacement, so the change in the stored
+	## target delta between re-acquires IS the target's displacement, and the sample age
+	## is known (MG_NEST_AIM_TICKS before round 1, MG_NEST_BURST_GAP_TICKS after).
+	var F: int = SimWorld.F_ONE
+
+	# A target that has not moved must still be shot at directly — no invented lead.
+	var still := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": 0, "aim_ly": -120 * F}
+	var a: Array = SimWorld.mg_nest_led_aim(still, 0, -120 * F)
+	Runner.T.eq(a[0], 0, "a stationary target is aimed at directly, with no lead")
+	Runner.T.eq(a[1], -120 * F, "and its range is untouched")
+
+	# A target strafing +16 px over the 30-tick aim window, 120 px out. Flight is
+	# 120/3 = 40 ticks, so the lead should be about (16/30)*40 = 21 px AHEAD of it.
+	var moving := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": -16 * F, "aim_ly": -120 * F}
+	var b: Array = SimWorld.mg_nest_led_aim(moving, 0, -120 * F)
+	Runner.T.ok(b[0] > 0, "the lane swings AHEAD of a strafing target, not at where it stood")
+	Runner.T.ok(b[0] > 18 * F and b[0] < 25 * F,
+		"lead is velocity x flight (~21 px), got %d px" % (b[0] / F))
+
+	# Leading keys off VELOCITY, so reversing direction reverses the lead — a direction
+	# CHANGE still beats the nest, which is the dodge the telegraph is meant to teach.
+	var other := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": 16 * F, "aim_ly": -120 * F}
+	var c: Array = SimWorld.mg_nest_led_aim(other, 0, -120 * F)
+	Runner.T.ok(c[0] < 0, "strafing the other way leads the other way")
+
+	# A respawn/tank-teleport reads as enormous velocity; the cap stops the lane swinging
+	# clean across the arena into something no player could read.
+	var ported := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": -600 * F, "aim_ly": -120 * F}
+	var d: Array = SimWorld.mg_nest_led_aim(ported, 0, -120 * F)
+	var lead_len: int = Fixed.length(d[0] - 0, d[1] - (-120 * F))
+	Runner.T.ok(lead_len <= SimWorld.MG_NEST_LEAD_CAP + F,
+		"a teleporting target cannot swing the lane past MG_NEST_LEAD_CAP (got %d px)" % (lead_len / F))

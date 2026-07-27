@@ -183,6 +183,7 @@ const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
 const BARREL_SPACING := 420 * F_ONE
 const BARREL_FUSE_TICKS := 8         # chained barrels cook this long before detonating (rollable ripple)
+const MG_NEST_LEAD_CAP := 48 * F_ONE   # px the lead may swing the lane — see mg_nest_led_aim
 const MG_NEST_AIM_TICKS := 30       # telegraph before the first round of a burst
 const MG_NEST_BURST_GAP_TICKS := 8  # spacing between the 3 rounds
 const MG_NEST_BURST_ROUNDS := 3
@@ -2531,8 +2532,26 @@ func _step_bullets() -> void:
 					dead = true
 					break
 		if not dead and not sandbags.is_empty():
-			# Player-authored cover eats rounds the same way (both directions).
+			# Cover eats rounds both ways — EXCEPT a bag this party planted itself, which
+			# you fire over. The wheel plants at CLAYMORE_PLANT_OFFSET (20px) ALONG the aim
+			# and the segment is 36x10, so its near face lands ~2px from the muzzle, square
+			# across the firing line. Arithmetic, not opinion: aiming north the bag spans
+			# y-25..y-15 and a 6px/tick round steps to -6/-12/-18, dying on tick 3; aiming
+			# east it spans x+2..x+38 and dies on tick 1, six pixels out. Effective range
+			# along the plant axis was shorter than ENEMY_TOUCH_RADIUS, so the 40-coin buy
+			# silently disabled your gun in the one direction you were facing.
+			# The exemption is deliberately narrow: only `player`-tagged bags, only the
+			# `bullets` array (player MG rounds — _spawn_mg_bullet is its sole producer).
+			# _step_enemy_bullets still dies on these bags, so cover from incoming fire —
+			# the entire reason to buy one — is untouched; rusher pathing still blocks; one
+			# grenade or tank tread still clears it. Authored/world bags still stop player
+			# rounds, so the level's own cover keeps its tactical meaning.
+			# Mirrors the fix already made on the other side of this exchange (see
+			# _step_enemy_bullets: "cover now protects only what stands BEHIND it"), where a
+			# player standing inside his own bag was immune to everything.
 			for sb in sandbags:
+				if sb.get("player", 0) == 1:
+					continue
 				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
@@ -3860,8 +3879,9 @@ func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: i
 			# burst). Deterministic — reads hashed player positions.
 			var tgt := _nearest_alive_player(e["x"], e["y"])
 			if not tgt.is_empty():
-				e["aim_lx"] = tgt["x"] - e["x"]
-				e["aim_ly"] = tgt["y"] - e["y"]
+				var led := mg_nest_led_aim(e, tgt["x"] - e["x"], tgt["y"] - e["y"])
+				e["aim_lx"] = led[0]
+				e["aim_ly"] = led[1]
 			var lx: int = e["aim_lx"]
 			var ly: int = e["aim_ly"]
 			var llen := Fixed.length(lx, ly)
@@ -6123,6 +6143,46 @@ func _step_enemy_bullets() -> void:
 					break
 		if dead:
 			enemy_bullets.remove_at(i)
+
+
+static func mg_nest_led_aim(e: Dictionary, ndx: int, ndy: int) -> Array:
+	## Where the nest should point THIS round: the target's position when the round
+	## arrives, not where it was when the trigger pulled.
+	##
+	## Without lead the nest cannot hit a moving target at all, and the arithmetic is
+	## not close. Miss = target_speed x flight_time, flight = range / ENEMY_BULLET_SPEED.
+	## PLAYER_SPEED 2.4 px/tick against a 3 px/tick round means a strafing player drifts
+	## 0.8 px for every 1 px the bullet flies: at 120 px range the round arrives 96 px
+	## behind a ~10 px target. The burst was decorative against anyone holding a strafe.
+	##
+	## NO NEW SIM STATE. A nest is a fixed emplacement, so the change in the stored target
+	## delta between consecutive re-acquires IS the target's displacement — aim_lx/aim_ly
+	## are already hashed, and the sample age is known exactly: the arm site sets them
+	## MG_NEST_AIM_TICKS before round 1, and each re-arm sets them MG_NEST_BURST_GAP_TICKS
+	## before rounds 2-3.
+	##
+	## This is not simply "harder". Lead keys off VELOCITY, so a constant strafe — today's
+	## free dodge — is exactly what it solves for, while a CHANGE of direction still beats
+	## it. The telegraph stays honest because main.telegraph_dir() applies this same
+	## function, so the painted lane is the lane the round takes.
+	var elapsed: int = MG_NEST_AIM_TICKS if int(e.get("lunge_ticks", 0)) == MG_NEST_BURST_ROUNDS \
+		else MG_NEST_BURST_GAP_TICKS
+	var dist := Fixed.length(ndx, ndy)
+	if dist <= F_ONE or elapsed <= 0:
+		return [ndx, ndy]
+	var vx: int = (ndx - int(e.get("aim_lx", ndx))) / elapsed
+	var vy: int = (ndy - int(e.get("aim_ly", ndy))) / elapsed
+	var flight := Fixed.div(dist, ENEMY_BULLET_SPEED)   # ticks, fixed-point
+	var lx := Fixed.mul(vx, flight)
+	var ly := Fixed.mul(vy, flight)
+	# CAPPED. Respawns and tank mount/dismount teleport the target, which would otherwise
+	# read as enormous velocity and swing the lane clean across the arena — a lane nobody
+	# could read, from a nest that looks broken. Beyond the cap the shot is a spray anyway.
+	var llen := Fixed.length(lx, ly)
+	if llen > MG_NEST_LEAD_CAP:
+		lx = Fixed.mul(Fixed.div(lx, llen), MG_NEST_LEAD_CAP)
+		ly = Fixed.mul(Fixed.div(ly, llen), MG_NEST_LEAD_CAP)
+	return [ndx + lx, ndy + ly]
 
 
 func _add_strike(x: int, y: int, obs := false) -> void:

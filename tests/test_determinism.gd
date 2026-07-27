@@ -544,6 +544,38 @@ const SEED := 0xDEADBEEF
 ##     ticks_with_pilot=0 and pilot_kills=0 in both streams);
 ##   - step()'s boss_rush branch now calls _step_mines/_step_barrels (neither torture runs
 ##     that mode at all).
+##
+## RE-RECORD 2026-07-26 (mg_nest lead): the nest now aims where the target WILL be
+## rather than where it was. Its rounds' vx/vy are hashed, so the stream diverges the
+## first time a nest fires inside the torture window.
+##
+## PREDICTED BEFORE RE-RECORDING, and the prediction is the point: mg_nests are authored
+## seg>=2, and the torture reaches that band late, so ONLY the trailing sample should move.
+## It did — samples 0-4 (ticks 600..3000) are byte-identical and only sample 5 (tick 3600)
+## changed, 6016516403530113665 -> 7360276865937536353. A change that moved earlier samples
+## would have meant the lead leaked somewhere it should not, and this note would be a bug
+## report instead of a re-record.
+##
+## ENDLESS_GOLDEN VERIFIED UNCHANGED: the endless torture wipes during wave 2 and never
+## streams an mg_nest, so the endless stream cannot reach this code at all.
+##
+## RE-RECORD 2026-07-27 (MERGE of two independently-recorded trees): the two notes above
+## were recorded on SEPARATE branches, so neither array could be assumed correct here and
+## neither side was picked. The values below were re-derived once on the COMBINED tree.
+##
+## THE MEASUREMENT CONTRADICTED THE PREDICTION, so it is written down rather than smoothed
+## over. Predicted: the mg_nest lead moves sample 5 here as it did on its own branch.
+## Measured: the combined tree reproduces the SAPPER-side values byte-for-byte at all six
+## samples -- the lead is INERT in this torture once the sapper's mine offset is also in
+## the tree, because the two changes' streams diverge from tick 1778 and the campaign
+## torture no longer reaches a firing nest inside its 3600-tick window.
+##
+## DO NOT read that as "the lead got lost in the merge" -- that was checked, not assumed:
+## mg_nest_led_aim is defined at sim_world.gd:6148 and CALLED at :3882 in this tree, and
+## `git diff origin/main -- src/sim/sim_world.gd` shows no drift in any nest code. The
+## guard for that feature is its own unit test (test_mg_nest_leads_a_moving_target...),
+## which is what should hold it -- a golden that happens to be insensitive to a change is
+## not evidence about the change either way.
 const GOLDEN: Array[int] = [
 	2407026767914979979,
 	461371032039649670,
