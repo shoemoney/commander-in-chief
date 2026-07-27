@@ -6815,8 +6815,9 @@ func test_frame_inner_constants_match_the_frame_art() -> void:
 	## frame ornament, and it used to be a single hand-typed 612.0 with a comment
 	## ("CANVAS_WIDTH 640 less the 28px border") describing a border the art does
 	## not have. MEASURED off SPR_HUD_Frame_Lrg.png (256^2, opaque band at texel
-	## 15..20 / 235..240) projected through FRAME_ART_RECT: interior x 69.22..570.78,
-	## y 36.22..323.78. The old FRAME_INNER_R sat 41.2px OUTSIDE that, on bare scrim.
+	## 15..20 / 235..240) projected through the 9-slice the draw uses (corner-anchored
+	## at FRAME_SCALE, NOT the retired uniform stretch): interior x 67.02..572.98,
+	## y 39.66..320.34. The old FRAME_INNER_R sat 41.2px OUTSIDE that, on bare scrim.
 	##
 	## This is the "record the canvas the constant was tuned against" guard: re-bake
 	## the frame with a thicker border and this goes red instead of silently
