@@ -1184,3 +1184,110 @@ func test_result_panel_fits_the_screen_at_its_maximum_row_count() -> void:
 	var body := src.substr(src.find("func _draw_result_panel("))
 	Runner.T.ok(body.substr(0, body.find("\nfunc ")).contains("result_row_pitch("),
 		"_draw_result_panel() takes its row pitch from result_row_pitch()")
+
+
+# --- drain-view: RUN-TEARDOWN LEAKS. These are view-side caches that _reset() forgot, so run 2
+# booted holding run 1's state. Same class as the _esort_order crash (ff99b12): a view-side cache
+# keyed on something the sim re-binds under it. The full sweep of index-keyed view caches is
+# below — _reset already cleared every other one. ---
+
+func _fresh_main() -> Node2D:
+	# main.gd instantiated WITHOUT the scene tree — _ready never fires, so this is the bare
+	# state machine (same trick the god-mode tests use). Inline `var x := X.new()` initialisers
+	# DO run, which is why _sfx exists here at all.
+	var ms: Script = load("res://src/main.gd")
+	return ms.new()
+
+
+func test_reset_stops_the_persistent_tank_engine_loops() -> void:
+	# Sfx._engines is keyed on the SIM TANK INDEX, and engine_at() only ever fades a voice on a
+	# frame that VISITS that key. _reset() builds a whole new SimWorld, so index 2 now names a
+	# different tank — or, if the new run fields fewer tanks, no tank at all and the key is never
+	# visited again. A reset taken with a tank in the engine-on band therefore left a positional
+	# loop growling through the title screen and into the next run.
+	var m := _fresh_main()
+	var ghost := AudioStreamPlayer2D.new()
+	m._sfx._engines[2] = ghost
+	m._reset()
+	Runner.T.eq(m._sfx._engines.size(), 0,
+		"_reset() must tear down every persistent engine voice — the tank index they are keyed on now belongs to a different tank")
+	if m._sfx._engines.has(2):
+		ghost.free()
+	m._sfx.free()
+	m.free()
+
+
+func test_reset_clears_every_slot_keyed_view_cache() -> void:
+	# The sweep the engine-loop fix implied: EVERY view-side cache keyed on a compacting sim index
+	# must be forgotten at run teardown, not just the two that were reported. _enemy_water_prev was
+	# the last holdout — it is only resize()d each frame, so run 2's slot i inherited run 1's wet
+	# flag and swallowed that enemy's entry splash. Named individually rather than reflected over
+	# main's whole field list: a generic scan would also sweep the per-PLAYER and pooled arrays,
+	# which are deliberately kept.
+	var m := _fresh_main()
+	var slot_keyed := ["_tank_alive_prev", "_tank_hull", "_tank_prev", "_tank_turret",
+		"_enemy_face", "_enemy_pos_prev", "_enemy_slot_kind", "_enemy_hp_prev", "_enemy_flash",
+		"_spawn_yelled", "_tech_lunge_prev", "_enemy_water_prev"]
+	for f in slot_keyed:
+		var live = m.get(f)
+		Runner.T.ok(live != null, "%s exists on main (renamed field would silently skip this check)" % f)
+		if live is Dictionary:
+			live[7] = true
+		else:
+			live.resize(8)
+	m._reset()
+	for f in slot_keyed:
+		Runner.T.eq(m.get(f).size(), 0,
+			"_reset must clear %s — the sim index it is keyed on is re-bound by the new run" % f)
+	m._sfx.free()
+	m.free()
+
+
+func test_reset_rearms_the_water_band_shader_push_key() -> void:
+	# _water_pushed is the per-POOL-SLOT record of what was last sent to each band's shader.
+	# It survived _reset, and a fresh run puts a DIFFERENT ford on the same band world-y, so the
+	# slot measured as clean and kept run 1's ford uniforms. Re-armed IN PLACE: the array is
+	# indexed by pool slot, so clearing it would index past the end of the pool on the next draw.
+	var m := _fresh_main()
+	m._water_pushed = [[12345, 3.0, 0.7, Vector3.ONE, Vector3.ONE, true, 999],
+		[6789, 2.0, 0.1, Vector3.ONE, Vector3.ONE, true, 111]]
+	m._reset()
+	Runner.T.eq(m._water_pushed.size(), 2,
+		"_reset must not resize the pool-indexed push array — the pool rects outlive the run")
+	for i in m._water_pushed.size():
+		var row: Array = m._water_pushed[i]
+		Runner.T.eq(row[0], -1, "pool slot %d forgets run 1's band world-y" % i)
+		Runner.T.eq(row[5], false, "pool slot %d forgets run 1's ford-closed state" % i)
+		Runner.T.eq(row[6], -1, "pool slot %d forgets run 1's ford x" % i)
+	m._sfx.free()
+	m.free()
+
+
+func test_water_push_key_notices_a_ford_that_moved_on_the_same_band() -> void:
+	# The dirty key was (band y, sector soot, ford closed) — ford_x was pushed but never keyed,
+	# so a slot whose band y matched kept the OLD ford geometry. Driven through the real
+	# _sync_water() with a hand-built one-slot pool; the assertion reads the uniform that
+	# actually reached the material, not the key array.
+	var m := _fresh_main()
+	m._water_shader = load("res://src/view/water.gdshader")
+	var rect := ColorRect.new()
+	var mat := ShaderMaterial.new()
+	mat.shader = m._water_shader
+	rect.material = mat
+	m._water_rects.append(rect)
+	m._water_pushed.append([-1, -1.0, 0.0, Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0), false, -1])
+	m.sim = SimWorld.new(0xC0FFEE, 1)
+	m.sim.waters.clear()
+	m.sim.waters.append({"y": m.sim.camera_top + 40 * Fixed.ONE, "ford_x": 120 * Fixed.ONE})
+	m._sync_water()
+	var first = mat.get_shader_parameter("ford_center")
+	Runner.T.ok(first != null, "the first pass pushes the ford uniforms")
+	# Same band world-y, same sector, same open/closed — only the ford moved, which is exactly
+	# what a recycled pool slot sees across a reset.
+	m.sim.waters[0]["ford_x"] = 500 * Fixed.ONE
+	m._sync_water()
+	Runner.T.ok(mat.get_shader_parameter("ford_center") != first,
+		"a moved ford on an unchanged band must re-push the shader — ford_x belongs in the dirty key")
+	rect.free()
+	m._sfx.free()
+	m.free()

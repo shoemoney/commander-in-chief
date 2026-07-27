@@ -125,6 +125,10 @@ class _MainStub extends Node2D:
 	var _token_loss_t := 0.0
 	var _sfx = null        # no audio in a headless HUD test; _draw_caption bails on the null
 	var _captions := true
+	# drain-view: the row-0 record chip asks main._record_fired, NOT (score > best_score) —
+	# main.gd ratchets best_score up to sim.score in the same frame it detects the crossing,
+	# so the comparison the chip used to make was already destroyed by the time _draw ran.
+	var _record_fired := false
 	func bind_for_glyph(_a: String) -> int: return 0
 
 
@@ -3511,3 +3515,92 @@ func test_token_chip_survives_the_death_that_zeroes_it() -> void:
 	h2.free()
 	stub.free()
 	stub2.free()
+
+
+# --- drain-view: the RECORD badge was UNREACHABLE. hud.gd's chip asked `sim.score >
+# main.best_score`, but main.gd:4888 ratchets `best_score = sim.score` in the SAME
+# _physics_process frame that detects the crossing — so by the time _draw ran the two were
+# always equal and the badge branch could never be taken. These drive the REAL row-0 draw and
+# assert the pixels (medal icon + the word), not the ratchet variable. ---
+
+func _row0_capture(main_stub, sim: SimWorld) -> Array:
+	# _FrameCaptureHud, not _ChipCaptureHud: row 0 plants an inline verb glyph (the SUPPLIES
+	# cue) that only the frame subclass captures — uncaptured it draws for real and sprays
+	# "Drawing is only allowed inside _draw()".
+	var h := _FrameCaptureHud.new()
+	h.main = main_stub
+	h._fit_full = HudIcons.RIGHT          # roomy row: nothing demotes into +N
+	var plan := h._plan_row0(sim, 8.0, 6.0, false)   # the exact measure+select pass _draw runs first
+	h._measure = false
+	h._opt_keep = plan["keep"]            # ...wired the way _draw wires it (hud.gd:681)
+	h._row0_opt(sim, 8.0, 6.0, false)     # ...then the real paint pass, seams captured
+	var out: Array = h.boxes.duplicate()
+	h.free()
+	return out
+
+
+func test_record_badge_renders_once_the_run_beats_the_standing_best() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.score = 4200
+	var main := _RowMain.new()
+	main.sim = sim
+	main._motion = 0.0                    # steady tint (no Art.pulse dependence in the assertion)
+	# EXACTLY the state main.gd hands the HUD from the crossing frame onward: the latch is set
+	# and best_score has ALREADY been ratcheted up to sim.score by main.gd's own ratchet.
+	main.best_score = sim.score
+	main._record_fired = true
+	var boxes := _row0_capture(main, sim)
+	var medal := 0
+	var label := 0
+	var best_chip := 0
+	for b in boxes:
+		if b["k"] == "icon" and String(b["id"]) == "icon_medal":
+			medal += 1
+		elif b["k"] == "text" and String(b["id"]) == "RECORD":
+			label += 1
+		elif b["k"] == "text" and String(b["id"]).begins_with("BEST "):
+			best_chip += 1
+	Runner.T.eq(medal, 1,
+		"a run that has beaten the standing best draws the RECORD medal — best_score == sim.score is what main.gd's ratchet guarantees, not a reason to hide the badge")
+	Runner.T.eq(label, 1, "...and the word RECORD beside it")
+	Runner.T.eq(best_chip, 0, "...and the badge REPLACES the dim BEST target, never doubles it")
+	main.free()
+
+
+func test_record_chip_is_still_the_dim_best_target_before_the_crossing() -> void:
+	# The other half of the ordering fix: an ordinary run mid-flight must keep chasing a target,
+	# not wear a medal it hasn't earned.
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.score = 40
+	var main := _RowMain.new()
+	main.sim = sim
+	main._motion = 0.0
+	main.best_score = 999999
+	main._record_fired = false
+	var boxes := _row0_capture(main, sim)
+	var medal := 0
+	var best_chip := 0
+	for b in boxes:
+		if b["k"] == "icon" and String(b["id"]) == "icon_medal":
+			medal += 1
+		elif b["k"] == "text" and String(b["id"]) == "BEST 999999":
+			best_chip += 1
+	Runner.T.eq(medal, 0, "no medal before the record is actually beaten")
+	Runner.T.eq(best_chip, 1, "the dim BEST target chip is what an un-beaten run shows")
+	main.free()
+
+
+func test_no_record_chip_at_all_on_a_first_ever_run() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.score = 40
+	var main := _RowMain.new()
+	main.sim = sim
+	main._motion = 0.0
+	main.best_score = 0                   # nothing banked yet
+	main._record_fired = false
+	for b in _row0_capture(main, sim):
+		Runner.T.ok(not (b["k"] == "icon" and String(b["id"]) == "icon_medal"),
+			"a first-ever run has no record to show")
+		Runner.T.ok(not String(b["id"]).begins_with("BEST "),
+			"...and no BEST target either")
+	main.free()

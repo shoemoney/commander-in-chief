@@ -1259,7 +1259,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# Live BEST target: the record to beat, right next to the current score.
 	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
 	# the chip gold and pulse it the instant the live score passes it.
-	match _record_hud_mode(sim.score, main.best_score):
+	match _record_hud_mode(sim.score, main.best_score, main._record_fired):
 		"badge":
 			# a1-17 HUD#2/HUD#3: 'record beaten' is ONE reserved BADGE (medal + "RECORD"),
 			# not a SECOND copy of the score competing with the medal chip beside it.
@@ -1268,7 +1268,11 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
 				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
 				if not _measure:
-					draw_texture_rect(Art.tex("icon_medal"), Rect2(x, y, ICON, ICON), false, rcol)
+					# Through the _emit_icon seam, not a raw draw_texture_rect: an uncaptured
+					# primitive is one a headless frame test cannot see (it measures as ABSENT
+					# and logs "Drawing is only allowed inside _draw()"), which is precisely how
+					# an unreachable badge went unnoticed.
+					_emit_icon("icon_medal", Rect2(x, y, ICON, ICON), rcol)
 				x = _text("RECORD", x + ICON + 1.0, y + ICON - 3.0, rcol) + 8.0
 		"best":
 			# Live BEST target: the record to chase — a DIM reference chip, sunk below
@@ -2274,12 +2278,20 @@ func _token_chip(sim: SimWorld, x: float, y: float) -> float:
 	return x
 
 
-static func _record_hud_mode(score: int, best: int) -> String:
-	# a1-17: what the top-bar record chip shows — a reserved "badge" once the live
-	# score BEATS the best; a dim "best" target while it has not; nothing if no best.
+static func _record_hud_mode(score: int, best: int, beaten := false) -> String:
+	# a1-17: what the top-bar record chip shows — a reserved "badge" once this run has BEATEN
+	# the standing best; a dim "best" target while it has not; nothing if no best is banked.
+	#
+	# drain-view: `beaten` (main._record_fired) is what decides it in production; `score > best`
+	# only still answers for a caller holding a best the ratchet has not eaten yet. main.gd
+	# ratchets best_score up to sim.score in the SAME _physics_process frame that latches the
+	# crossing, so by the time _draw ran the two were always EQUAL — score > best could never be
+	# true and the badge was unreachable. Every beaten record kept wearing the dim BEST chip,
+	# echoing the player's own live score back at them. _record_fired latches BEFORE the ratchet
+	# and is cleared in _reset, so it is the ordering-safe source.
 	if best <= 0:
 		return "none"
-	return "badge" if score > best else "best"
+	return "badge" if (beaten or score > best) else "best"
 
 
 func _stat(icon: String, txt: String, x: float, y: float,
