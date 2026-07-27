@@ -5159,7 +5159,7 @@ func _endless_threats() -> Array[Array]:
 			["enemy_sniper", Art.tint("enemy_sniper"), "SNIPER — paints a laser line, then fires. Sidestep it."],   # sol-08: live red marksman
 			["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
 			["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
-			["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front blocks bullets. Flank it or grenade it."],
+			["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front eats bullets. Blow it open with a blast."],
 			["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
 			["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
 	return _endless_cache

@@ -1307,3 +1307,393 @@ func test_the_victory_card_banked_row_reads_the_event_not_the_emptied_chest() ->
 		"_ev_victory reads the banked amount off the checksum-excluded victory event")
 	Runner.T.ok(view.contains('WAR CHEST BANKED  → +%s" % [_victory_banked,'),
 		"the drawn row interpolates the event payload, not the live (already-zeroed) sim.war_chest")
+
+
+# --- Counter-verb honesty: a card may only name a verb the sim answers to ------
+#
+# The riot shield's first-sighting card said "FLANK OR GRENADE" and the ENDLESS
+# roster page said "Flank it or grenade it". Half of that is real: `_explode` has
+# no shield exemption. The other half never was — `_shield_blocks` recomputes the
+# facing as "toward the nearest player" EVERY tick (sim_world.gd:3734), so the
+# blocking arc rotates with you and there is no flank to take. Measured live over
+# 1,512 strafe/orbit trials: 46 kills, ALL of them at 9.05-10.30 px closest
+# approach, i.e. inside the ENEMY_TOUCH_RADIUS contact ring — the shield was
+# walked into, not flanked.
+#
+# The class is "a teaching card names a counter-verb the sim refuses", so the set
+# under test is scraped from source (both card surfaces), not typed out here, and
+# each promised verb is RUN against the sim it describes.
+
+const FLANK_STANDOFF := 40.0   # 4x ENEMY_TOUCH_RADIUS: a kill here cannot be muzzle-stuffing
+const FLANK_TICKS := 300       # 7x the ~40-tick close of a 1px/tick shield from 40px
+## A TAP lob flies a FIXED 96 px (GRENADE_SPEED 3 px/tick x the 32-tick fuse:
+## 2*GRENADE_ZVEL/GRENADE_GRAV), so the standoff a throw connects from depends on
+## how fast the sim walks the target in (0 px/tick rooted, 1.0 shield, 1.6 fodder).
+## The probe therefore sweeps the engagement band instead of pinning one radius —
+## the card promises the VERB works, not that it works at one magic distance.
+const GRENADE_DISTS := [80.0, 100.0, 120.0, 140.0, 160.0]
+const GRENADE_TICKS := 120     # 3.7x the 32-tick fuse
+
+## sprite key on an ENDLESS roster row -> the sim `kind` that row teaches. Asserted
+## exhaustive against the live roster below, so a row added tomorrow fails loudly
+## instead of being silently unmapped (and its verbs unchecked).
+const ROSTER_KIND := {
+	"m_soldier2": "grenadier", "enemy_sniper": "sniper", "ghillie": "ghillie",
+	"sapper": "sapper", "m_bombsuit": "shield", "m_drone": "drone",
+	"m_technical": "technical",
+}
+
+
+func _clean_arena() -> SimWorld:
+	## An endless world with every bullet-stopper and every rival threat removed,
+	## so the only thing that can save the archetype under test is its own rules.
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	for _i in 30:
+		sim.step(_idle())
+	for arr in [sim.enemies, sim.bullets, sim.enemy_bullets, sim.rocks, sim.sandbags,
+			sim.bunkers, sim.mines, sim.barrels, sim.tanks, sim.grenades]:
+		arr.clear()
+	return sim
+
+
+func _spawn_kind(sim: SimWorld, kind: String, x: int, y: int) -> Dictionary:
+	## Through the sim's OWN spawners, so the probe can't invent a soft variant.
+	match kind:
+		"mg_nest": sim._spawn_mg_nest(x, y)
+		"broadcast": sim._spawn_broadcast(x, y)
+		"fodder": sim._spawn_enemy(x, y, false)
+		_: sim._spawn_special(x, y, kind)
+	return sim.enemies[sim.enemies.size() - 1]
+
+
+func _verb_trial(kind: String, bearing: float, dist: float, strafe: int, use_grenade: bool) -> bool:
+	## One live trial. Real SimInput, real trigger, real bullets. Returns whether
+	## the archetype DIED. The player is held un-killable via hurt_iframes (never
+	## moved or respawned) so the trial measures the VERB, not who dies first.
+	var sim := _clean_arena()
+	var ex := 320 * Fixed.ONE
+	var ey: int = sim.camera_top + 140 * Fixed.ONE
+	var e := _spawn_kind(sim, kind, ex, ey)
+	var p: Dictionary = sim.players[0]
+	p["x"] = ex + int(cos(bearing) * dist * Fixed.ONE)
+	p["y"] = ey + int(sin(bearing) * dist * Fixed.ONE)
+	p["alive"] = true
+	p["in_tank"] = -1   # on foot (this field is a TANK INDEX, not a flag)
+	var ticks := GRENADE_TICKS if use_grenade else FLANK_TICKS
+	for _t in range(ticks):
+		if not e["alive"]:
+			return true
+		# Reinforcements from the endless spawner would eat rounds meant for the
+		# archetype under test; the arena stays a duel.
+		for i in range(sim.enemies.size() - 1, -1, -1):
+			if not is_same(sim.enemies[i], e):
+				sim.enemies.remove_at(i)
+		p["hurt_iframes"] = 60
+		p["mg_ammo"] = 9999
+		p["grenade_ammo"] = 12
+		var dx := float(e["x"] - p["x"])
+		var dy := float(e["y"] - p["y"])
+		var d := sqrt(dx * dx + dy * dy)
+		if d < 0.001:
+			break
+		var inp := SimInput.new()
+		inp.aim_x = int(round(dx / d * 256.0))
+		inp.aim_y = int(round(dy / d * 256.0))
+		# TAP, never hold: holding the button airbursts the charge at the arc's
+		# apex (sim_world.gd:2637) at ~half range. A tap is the full 32-tick lob.
+		if use_grenade:
+			inp.grenade = _t == 0
+		else:
+			inp.fire = true
+			# full-stick strafe perpendicular to the line of sight
+			inp.move_x = int(round(-dy / d * 256.0)) * strafe
+			inp.move_y = int(round(dx / d * 256.0)) * strafe
+		var batch: Array[SimInput] = [inp]
+		sim.step(batch)
+	return not e["alive"]
+
+
+func _verb_kills(kind: String, use_grenade: bool) -> Array:
+	## [honoured, trials] over 8 bearings. Shooting: both strafe directions must
+	## kill. Explosives: the bearing counts once ANY standoff in the band kills.
+	var honoured := 0
+	var trials := 0
+	for step_deg in range(0, 360, 45):
+		var ang := deg_to_rad(float(step_deg))
+		if use_grenade:
+			trials += 1
+			for dist in GRENADE_DISTS:
+				if _verb_trial(kind, ang, dist, 1, true):
+					honoured += 1
+					break
+		else:
+			for sd in [-1, 1]:
+				trials += 1
+				if _verb_trial(kind, ang, FLANK_STANDOFF, sd, false):
+					honoured += 1
+	return [honoured, trials]
+
+
+func _promised_verbs() -> Dictionary:
+	## kind -> {"flank": [where...], "boom": [where...]} scraped from BOTH card
+	## surfaces in source: the first-sighting teaching cards and the ENDLESS
+	## roster page. Copy added tomorrow is audited the day it lands.
+	var cards := {}   # kind -> Array[String] of the strings shown for that kind
+	for kind in Main._KIND_TEACH:
+		cards[kind] = [String(Main._KIND_TEACH[kind])]
+	var m = TML._CaptureMenu.new()
+	var roster: Array = m._endless_threats()
+	var mapped := 0
+	for row in roster:
+		var spr := String(row[0])
+		if ROSTER_KIND.has(spr):
+			mapped += 1
+			var k: String = ROSTER_KIND[spr]
+			if not cards.has(k):
+				cards[k] = []
+			cards[k].append(String(row[2]))
+	m.free()
+	Runner.T.eq(mapped, roster.size(),
+		"every ENDLESS roster row maps to a sim kind (%d/%d) — an unmapped row is an unchecked promise"
+			% [mapped, roster.size()])
+	var out := {}
+	for k in cards:
+		var flank: Array = []
+		var boom: Array = []
+		for s in cards[k]:
+			var up := String(s).to_upper()
+			if up.contains("FLANK"):
+				flank.append(s)
+			# Counter-verb PHRASES, not bare nouns: "lobs a telegraphed blast" is
+			# what the grenadier does TO you, not an instruction to the player.
+			if up.contains("GRENADE IT") or up.contains("OR GRENADE") \
+					or up.contains("BLOW IT OPEN") or up.contains("BLAST IT") \
+					or up.contains("WITH A BLAST"):
+				boom.append(s)
+		if not flank.is_empty() or not boom.is_empty():
+			out[k] = {"flank": flank, "boom": boom}
+	return out
+
+
+func test_every_counter_verb_a_card_promises_is_one_the_sim_honours() -> void:
+	# Positive controls FIRST: if the harness stopped firing, the verb sets below
+	# would pass vacuously. Plain fodder must fall to both.
+	var cf := _verb_kills("fodder", false)
+	Runner.T.eq(cf[0], cf[1],
+		"CONTROL: plain fodder dies to the %.0fpx strafe probe on every bearing (%d/%d)"
+			% [FLANK_STANDOFF, cf[0], cf[1]])
+	var cg := _verb_kills("fodder", true)
+	Runner.T.eq(cg[0], cg[1],
+		"CONTROL: plain fodder dies to a lobbed grenade on every bearing (%d/%d)"
+			% [cg[0], cg[1]])
+
+	var promised := _promised_verbs()
+	Runner.T.ok(not promised.is_empty(),
+		"the card scrape found counter-verb promises at all (%d kinds)" % promised.size())
+	for kind in promised:
+		var pr: Dictionary = promised[kind]
+		if not pr["flank"].is_empty():
+			var r := _verb_kills(kind, false)
+			Runner.T.eq(r[0], r[1],
+				"'%s' promises a FLANK — strafing it at %.0fpx kills it (%d/%d bearings): %s"
+					% [kind, FLANK_STANDOFF, r[0], r[1], String(pr["flank"][0])])
+		if not pr["boom"].is_empty():
+			var r2 := _verb_kills(kind, true)
+			Runner.T.eq(r2[0], r2[1],
+				"'%s' promises an explosive — a lobbed grenade kills it (%d/%d bearings): %s"
+					% [kind, r2[0], r2[1], String(pr["boom"][0])])
+
+
+# --- The RANK card: a scale that spends its whole range ------------------------
+#
+# `_run_rank()` graded every mode off ONE hand-tuned table topping out at S >= 300
+# mvp, and measured runs land at 758-1190 (campaign) — ~75% of the real range sits
+# above the top letter, so finishing was an automatic S and the letter carried no
+# information. The TITLE line one row below had the same defect (ONE-MAN ARMY at
+# streak >= 20 vs measured bests of 20-92), and the knockdown ledger the card
+# PRINTS two rows further down (`_continue_ledger_rows`) was not a term in either.
+#
+# This pins the INVARIANTS, not the constants: retuning the bands after a scoring
+# change must not require editing this test — re-running tools/probe_rank.gd and
+# repasting MEASURED_RUNS must.
+
+## Real driven runs, pasted verbatim from `tools/probe_rank.gd` (5 seeds x 4 modes,
+## god-mode ceiling pass + real-cost pass, 40,000-tick cap = 3.0x the longest
+## measured campaign completion of 13,364 ticks). `downs` is the `player_down`
+## count — a BOT'S knockdown distribution, which is far heavier than a competent
+## player's; that makes it the pessimistic end of the cost term, not the typical one.
+const MEASURED_RUNS := [
+	{"mode": "campaign", "kills": 269, "streak": 46, "gates": 6, "wave": 0, "victory": true, "downs": 46},   # seed 1 god
+	{"mode": "campaign", "kills": 328, "streak": 20, "gates": 5, "wave": 0, "victory": false, "downs": 52},   # seed 1
+	{"mode": "campaign", "kills": 276, "streak": 41, "gates": 6, "wave": 0, "victory": true, "downs": 38},   # seed 2 god
+	{"mode": "campaign", "kills": 234, "streak": 38, "gates": 5, "wave": 0, "victory": false, "downs": 31},   # seed 2
+	{"mode": "campaign", "kills": 264, "streak": 67, "gates": 6, "wave": 0, "victory": true, "downs": 29},   # seed 3 god
+	{"mode": "campaign", "kills": 245, "streak": 59, "gates": 5, "wave": 0, "victory": false, "downs": 26},   # seed 3
+	{"mode": "campaign", "kills": 242, "streak": 45, "gates": 6, "wave": 0, "victory": true, "downs": 33},   # seed 4 god
+	{"mode": "campaign", "kills": 315, "streak": 92, "gates": 5, "wave": 0, "victory": false, "downs": 27},   # seed 4
+	{"mode": "campaign", "kills": 317, "streak": 58, "gates": 6, "wave": 0, "victory": true, "downs": 39},   # seed 5 god
+	{"mode": "campaign", "kills": 348, "streak": 35, "gates": 5, "wave": 0, "victory": false, "downs": 47},   # seed 5
+	{"mode": "endless", "kills": 420, "streak": 26, "gates": 0, "wave": 19, "victory": false, "downs": 48},   # seed 1 god
+	{"mode": "endless", "kills": 29, "streak": 6, "gates": 0, "wave": 5, "victory": false, "downs": 5},   # seed 1
+	{"mode": "endless", "kills": 183, "streak": 24, "gates": 0, "wave": 12, "victory": false, "downs": 24},   # seed 2 god
+	{"mode": "endless", "kills": 40, "streak": 12, "gates": 0, "wave": 5, "victory": false, "downs": 6},   # seed 2
+	{"mode": "endless", "kills": 276, "streak": 27, "gates": 0, "wave": 15, "victory": false, "downs": 45},   # seed 3 god
+	{"mode": "endless", "kills": 28, "streak": 6, "gates": 0, "wave": 5, "victory": false, "downs": 5},   # seed 3
+	{"mode": "endless", "kills": 41, "streak": 10, "gates": 0, "wave": 5, "victory": false, "downs": 12},   # seed 4 god
+	{"mode": "endless", "kills": 37, "streak": 7, "gates": 0, "wave": 5, "victory": false, "downs": 5},   # seed 4
+	{"mode": "endless", "kills": 132, "streak": 17, "gates": 0, "wave": 10, "victory": false, "downs": 14},   # seed 5 god
+	{"mode": "endless", "kills": 32, "streak": 8, "gates": 0, "wave": 5, "victory": false, "downs": 5},   # seed 5
+	{"mode": "boss_rush", "kills": 5, "streak": 1, "gates": 4, "wave": 0, "victory": true, "downs": 14},   # seed 1 god
+	{"mode": "boss_rush", "kills": 3, "streak": 0, "gates": 3, "wave": 0, "victory": false, "downs": 17},   # seed 1
+	{"mode": "boss_rush", "kills": 5, "streak": 2, "gates": 4, "wave": 0, "victory": true, "downs": 16},   # seed 2 god
+	{"mode": "boss_rush", "kills": 3, "streak": 0, "gates": 3, "wave": 0, "victory": false, "downs": 15},   # seed 2
+	{"mode": "boss_rush", "kills": 5, "streak": 2, "gates": 4, "wave": 0, "victory": true, "downs": 12},   # seed 3 god
+	{"mode": "boss_rush", "kills": 3, "streak": 0, "gates": 3, "wave": 0, "victory": false, "downs": 17},   # seed 3
+	{"mode": "boss_rush", "kills": 5, "streak": 2, "gates": 4, "wave": 0, "victory": true, "downs": 11},   # seed 4 god
+	{"mode": "boss_rush", "kills": 3, "streak": 0, "gates": 3, "wave": 0, "victory": false, "downs": 17},   # seed 4
+	{"mode": "boss_rush", "kills": 5, "streak": 2, "gates": 4, "wave": 0, "victory": true, "downs": 11},   # seed 5 god
+	{"mode": "boss_rush", "kills": 3, "streak": 0, "gates": 3, "wave": 0, "victory": false, "downs": 17},   # seed 5
+	{"mode": "arcade", "kills": 280, "streak": 46, "gates": 6, "wave": 0, "victory": true, "downs": 44},   # seed 1 god
+	{"mode": "arcade", "kills": 315, "streak": 62, "gates": 5, "wave": 0, "victory": false, "downs": 40},   # seed 1
+	{"mode": "arcade", "kills": 273, "streak": 41, "gates": 6, "wave": 0, "victory": true, "downs": 38},   # seed 2 god
+	{"mode": "arcade", "kills": 235, "streak": 38, "gates": 5, "wave": 0, "victory": false, "downs": 31},   # seed 2
+	{"mode": "arcade", "kills": 372, "streak": 75, "gates": 6, "wave": 0, "victory": true, "downs": 41},   # seed 3 god
+	{"mode": "arcade", "kills": 253, "streak": 49, "gates": 5, "wave": 0, "victory": false, "downs": 26},   # seed 3
+	{"mode": "arcade", "kills": 265, "streak": 39, "gates": 6, "wave": 0, "victory": true, "downs": 30},   # seed 4 god
+	{"mode": "arcade", "kills": 310, "streak": 29, "gates": 5, "wave": 0, "victory": false, "downs": 37},   # seed 4
+	{"mode": "arcade", "kills": 305, "streak": 42, "gates": 6, "wave": 0, "victory": true, "downs": 36},   # seed 5 god
+	{"mode": "arcade", "kills": 298, "streak": 24, "gates": 5, "wave": 0, "victory": false, "downs": 41},   # seed 5
+]
+
+## The structural floor every mode can produce: spawn, die, nothing opened. Not from
+## the probe (the bot never fails that hard) — it is the zero end of the scale, and a
+## grade scale that cannot tell it apart from a finished run is not a scale.
+const FLOOR_MODES := ["campaign", "endless", "boss_rush", "arcade"]
+
+
+func _rank_of(row: Dictionary, downs: int) -> Dictionary:
+	## Grade one measured profile through the SHIPPED grader, on a real SimWorld of
+	## that mode with its gates/wave/victory posed. No formula is restated here.
+	var m = Main.new()
+	var sim := SimWorld.new(0xC0FFEE, 1, String(row["mode"]))
+	sim.gates.clear()
+	for _g in int(row["gates"]):
+		sim.gates.append({"open": true})
+	sim.wave = int(row["wave"])
+	sim.victory = bool(row["victory"])
+	m.sim = sim
+	m._run_kills = int(row["kills"])
+	m._run_best_streak = int(row["streak"])
+	m._run_knockdowns = downs
+	var rr: Dictionary = m._run_rank()
+	m.free()
+	return rr
+
+
+func _rows_for(mode: String) -> Array:
+	var out: Array = []
+	for r in MEASURED_RUNS:
+		if String(r["mode"]) == mode:
+			out.append(r)
+	return out
+
+
+## Ordering proxy ONLY — used to pick a middle row out of a mode's sample. It is
+## deliberately NOT the graded formula (restating that here is the exact bug this
+## suite exists to catch); every assertion below reads the shipped grader's output.
+func _proxy(row: Dictionary) -> int:
+	return int(row["kills"]) * 2 + int(row["streak"]) * 5 + int(row["gates"]) * 20 \
+		+ int(row["wave"]) * 12
+
+
+func _median_row(rows: Array) -> Dictionary:
+	var sorted_rows := rows.duplicate()
+	sorted_rows.sort_custom(func(a, b): return _proxy(a) < _proxy(b))
+	return sorted_rows[sorted_rows.size() / 2]
+
+
+func test_the_rank_scale_spends_its_whole_range_on_every_mode() -> void:
+	var consts: Dictionary = load("res://src/main.gd").get_script_constant_map()
+	Runner.T.ok(consts.has("RANK_BANDS"),
+		"the grade/title thresholds live in a named per-mode table (main.RANK_BANDS), not inline literals")
+	if not consts.has("RANK_BANDS"):
+		return
+	var bands: Dictionary = consts["RANK_BANDS"]
+
+	# (6) Every mode the game can CONSTRUCT has a row — scraped from the one place
+	# main.gd picks a mode string, so a fifth mode fails here the day it lands.
+	var pick := ""
+	for line in _view_src().split("\n"):
+		if line.contains("var _mode_str :="):
+			pick = line
+	Runner.T.ok(pick != "", "found main.gd's mode-string picker")
+	var re := RegEx.create_from_string('"([a-z_]+)"')
+	var seen := {}
+	for mm in re.search_all(pick):
+		seen[mm.get_string(1)] = true
+	# the else-branch mode sits on the wrapped continuation line
+	seen["campaign"] = true
+	for mode in seen:
+		Runner.T.ok(bands.has(mode), "RANK_BANDS covers constructible mode '%s'" % mode)
+	for mode in bands:
+		var mv: Array = bands[mode]["mvp"]
+		Runner.T.eq(mv.size(), 4, "%s has 4 grade thresholds [S,A,B,C]" % mode)
+		for i in mv.size() - 1:
+			Runner.T.ok(int(mv[i]) > int(mv[i + 1]),
+				"%s thresholds strictly decrease (%d > %d)" % [mode, int(mv[i]), int(mv[i + 1])])
+
+	for mode in FLOOR_MODES:
+		var rows := _rows_for(mode)
+		Runner.T.ok(rows.size() >= 5, "%s has a measured sample (%d rows)" % [mode, rows.size()])
+		if rows.is_empty():
+			continue
+		var s_thresh := int(bands[mode]["mvp"][0])
+
+		# (1) COST: the ledger the card already prints is a term in the grade.
+		var med := _median_row(rows)
+		var clean: Dictionary = _rank_of(med, 0)
+		var bloody: Dictionary = _rank_of(med, 25)
+		Runner.T.ok(clean["grade"] != bloody["grade"],
+			"%s: the median run graded clean (%s) and after 25 knockdowns (%s) are different letters"
+				% [mode, clean["grade"], bloody["grade"]])
+
+		# (2) HEADROOM: the top letter is not buried under the achievable range.
+		var top := 0
+		var grades := {}
+		var titles := {}
+		for r in rows:
+			var rr := _rank_of(r, int(r["downs"]))
+			top = maxi(top, int(rr["mvp"]))
+			grades[rr["grade"]] = true
+			titles[rr["title"]] = true
+		var floor_rank := _rank_of({"mode": mode, "kills": 0, "streak": 0, "gates": 0,
+			"wave": 0, "victory": false, "downs": 0}, 0)
+		grades[floor_rank["grade"]] = true
+		titles[floor_rank["title"]] = true
+		Runner.T.ok(top <= int(round(1.6 * float(s_thresh))),
+			"%s: best measured run (%d mvp) is within 1.6x the S band (%d) — the scale reaches the play"
+				% [mode, top, s_thresh])
+		Runner.T.eq(floor_rank["grade"], "D",
+			"%s: a spawn-and-die run grades D (got %s)" % [mode, floor_rank["grade"]])
+
+		# (3) A FINISH IS NOT A FREE S.
+		var wins: Array = []
+		for r in rows:
+			if bool(r["victory"]):
+				wins.append(r)
+		if wins.is_empty():
+			# endless has no natural end; its rows are wave-N snapshots, not completions.
+			Runner.T.ok(true, "%s has no measured completion — 'a finish is not a free S' does not apply" % mode)
+		else:
+			var mw := _median_row(wins)
+			var wr := _rank_of(mw, int(mw["downs"]))
+			Runner.T.ok(wr["grade"] != "S",
+				"%s: the median measured COMPLETION grades %s, not an automatic S" % [mode, wr["grade"]])
+
+		# (4)(5) THE SCALE IS USED — letters and titles both.
+		Runner.T.ok(grades.size() >= 3,
+			"%s: the measured profiles spread over >=3 grades (got %d: %s)"
+				% [mode, grades.size(), ", ".join(PackedStringArray(grades.keys()))])
+		Runner.T.ok(titles.size() >= 3,
+			"%s: …and >=3 titles (got %d: %s)"
+				% [mode, titles.size(), ", ".join(PackedStringArray(titles.keys()))])

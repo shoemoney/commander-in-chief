@@ -334,7 +334,7 @@ const _KIND_TEACH := {
 	"sniper": "LASER SNIPER — BREAK THE LINE",
 	"ghillie": "GHILLIE SNIPER — FLUSH IT OUT",
 	"grenadier": "GRENADIER — MOVE OFF YOUR GROUND",
-	"shield": "RIOT SHIELD — FLANK OR GRENADE",
+	"shield": "RIOT SHIELD — BLOW IT OPEN",
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
 	"sapper": "SAPPER — MIND THE MINE TRAIL",
 	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
@@ -1748,10 +1748,28 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_reset()
 
 
+## Rank bands per MODE: `mvp` is [S, A, B, C] on the NET score, `down` is what one
+## knockdown burns, `streak`/`kills` are the two title thresholds. Anchored to
+## `tools/probe_rank.gd` — 5 seeds x 4 modes, ceiling + real-cost passes: S sits just
+## above the 90th percentile of MEASURED completions and D below the floor, so a
+## finish is not automatically an S and a spawn-and-die is not a C. One table per
+## mode because the mvp scales differ ~5x (a boss rush is 5 kills and 4 gates; a
+## campaign is ~270 kills), and one shared table graded every rush B forever.
+## Re-run the probe and re-anchor if scoring or pacing moves.
+const RANK_BANDS := {
+	"campaign":  {"mvp": [700, 450, 250, 100], "down": 12, "streak": [60, 35], "kills": [60, 25]},
+	"arcade":    {"mvp": [700, 450, 250, 100], "down": 12, "streak": [60, 35], "kills": [60, 25]},
+	"endless":   {"mvp": [500, 300, 150, 60],  "down": 12, "streak": [25, 12], "kills": [100, 30]},
+	# The rush's whole scale is ~200 mvp, so a 12-point knockdown would grade every
+	# run D; the cost is scaled to the mode like the bands are.
+	"boss_rush": {"mvp": [170, 140, 80, 40],   "down": 3,  "streak": [10, 5],  "kills": [20, 8]},
+}
+
+
 func _run_rank() -> Dictionary:
 	# One source of truth for the run's rank grammar, shared by the K.I.A. debrief
 	# row and the share-card export. Pure read of view-tracked run stats.
-	# ponytail: thresholds are rough hand-tuned bands, tune to taste.
+	# Thresholds live in RANK_BANDS above, one row per mode, anchored to measured runs.
 	var opened := 0
 	for g in sim.gates:
 		if g["open"]:
@@ -1765,16 +1783,27 @@ func _run_rank() -> Dictionary:
 		# checkpoint pays, so a clean rush scores like the first-class mode
 		# it is, not a shrunk campaign run.
 		mvp += opened * 25
-	var grade := "S" if mvp >= 300 else "A" if mvp >= 200 else "B" if mvp >= 120 else "C" if mvp >= 60 else "D"
+	var band: Dictionary = RANK_BANDS.get(sim.mode, RANK_BANDS["campaign"])
+	# The ledger the card already prints two rows below (_continue_ledger_rows) is
+	# finally a TERM in the grade: a run carried by knockdowns doesn't letter like a
+	# clean one. Floored at 0 — a rank is not a debt.
+	mvp = maxi(0, mvp - _run_knockdowns * int(band["down"]))
+	var mb: Array = band["mvp"]
+	var grade := "S" if mvp >= int(mb[0]) else "A" if mvp >= int(mb[1]) \
+		else "B" if mvp >= int(mb[2]) else "C" if mvp >= int(mb[3]) else "D"
+	var sb: Array = band["streak"]
+	var kb: Array = band["kills"]
 	var gtitle := "GRUNT"
 	if sim.mode == "boss_rush" and sim.victory: gtitle = "GUNSHIP KILLER"
-	elif _run_best_streak >= 20: gtitle = "ONE-MAN ARMY"
-	elif _run_best_streak >= 12: gtitle = "IRON NERVES"
-	elif _run_kills >= 60: gtitle = "EXTERMINATOR"
+	elif _run_best_streak >= int(sb[0]): gtitle = "ONE-MAN ARMY"
+	elif _run_best_streak >= int(sb[1]): gtitle = "IRON NERVES"
+	elif _run_kills >= int(kb[0]): gtitle = "EXTERMINATOR"
 	elif opened >= 3: gtitle = "TRAILBLAZER"
-	elif _run_kills >= 25: gtitle = "SHARPSHOOTER"
+	elif _run_kills >= int(kb[1]): gtitle = "SHARPSHOOTER"
 	var gcol := Color(1.0, 0.85, 0.3) if grade == "S" else Color(0.55, 0.9, 1.0) if grade == "A" else Color(0.6, 0.9, 0.5) if grade == "B" else Color(0.85, 0.85, 0.8) if grade == "C" else Color(0.7, 0.7, 0.7)
-	return {"grade": grade, "title": gtitle, "col": gcol}
+	# `mvp` rides along so a test (and any future card row) can read the score the
+	# letter was cut from without restating the formula. Nothing draws it today.
+	return {"grade": grade, "title": gtitle, "col": gcol, "mvp": mvp}
 
 
 func _copy_share_text() -> void:

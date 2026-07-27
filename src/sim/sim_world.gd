@@ -147,7 +147,9 @@ const SNIPER_STANDOFF := 240 * F_ONE
 const SNIPER_FIRE_CD_TICKS := 170
 const SNIPER_WINDUP_TICKS := 55
 const SNIPER_BULLET_SPEED := 6 * F_ONE
-# Shield (endless-only): slow heavy; front-arc blocks bullets, flank/grenade kills.
+# Shield (endless-only): slow heavy; the front arc blocks bullets and it re-faces
+# the nearest player EVERY tick (_shield_blocks), so there is no flank to take:
+# explosives and Rend Rounds are the counter.
 const SHIELD_SPEED := F_ONE
 # Sapper (endless-only): advances like a rusher but seeds armed mines behind it,
 # authoring a hazard trail between you and the top edge. Reuses fire_cd as the
@@ -2553,8 +2555,10 @@ func _step_bullets() -> void:
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(bx, by, e["x"], e["y"], BULLET_HIT_RADIUS):
 					# Shield: a bullet arriving into the front arc (roughly
-					# opposite the shieldman's facing-toward-you) is deflected;
-					# flank it or use a grenade. Front cone ~120°.
+					# opposite the shieldman's facing-toward-you) is deflected.
+					# The facing is recomputed toward you every tick, so the
+					# answer is explosives or Rend Rounds, never a flank.
+					# Front cone ~120°.
 					if e["kind"] == "shield" and _shield_blocks(e, b):
 						# Rend Rounds: the shooter's active buff punches clean through
 						# the front-arc block — otherwise the shield eats the round.
