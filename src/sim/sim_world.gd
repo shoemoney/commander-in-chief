@@ -2049,7 +2049,16 @@ func _econ_depth() -> int:
 		for g in gates:
 			if g["open"]:
 				gates_open += 1
-		return gates_open
+		## Same cursor pair _sector_index owns, for the same reason: an Arcade
+		## chapter jump primes _gate_counter WITHOUT opening a gate, so `opened`
+		## alone under-reads the start and a chapter-6 run shopped at chapter-1
+		## prices while fielding the sector-6 roster. Measured on a 4000-tick 2P
+		## torture in both gate-streaming modes: max(_gate_counter - 1 - opened)
+		## is 0, i.e. in CONTINUOUS play the two are identical and no shipped
+		## price moves -- a closed gate is a hard camera lock, so nothing streams
+		## ahead of what you opened. Uncapped on purpose (see _econ_scale); the
+		## clamp in _sector_index is only there because it indexes an array.
+		return maxi(gates_open, _gate_counter - 1)
 	return wave / 3
 
 

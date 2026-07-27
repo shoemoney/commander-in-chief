@@ -769,10 +769,26 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ##
 ## THE SPLIT IS MEASURED, not argued: with KIND_HIT_RADIUS := {"elite": 13 * F_ONE}
 ## alone, endless samples 0 and 1 already match the values below byte-for-byte while
-## samples 2-5 do not. So the elite alone drives the first ~1200 ticks, and the
-## technical (endless-only; _spawn_special sets its hp, and specials debut at wave 3)
-## adds its own divergence from sample 2 onward. mg_nest/broadcast are gated behind
-## wave 3 / wave 7 and this torture wipes in wave 2, so neither can contribute.
+## samples 2-5 do not. So the elite alone drives the first ~1200 ticks.
+##
+## CORRECTED 2026-07-27, and the correction is the point. The first version of this
+## paragraph credited samples 2-5 to the TECHNICAL, and contradicted itself in its own
+## sentence: it also said this torture wipes in wave 2, and the technical is a wave-3
+## special, so both could not be true. Re-driving the exact torture (SEED 0xDEADBEEF,
+## 2P, scripted_input, 3600 ticks) settles it — the kinds this stream EVER fields are:
+##   courier, drone, elite, ghillie, grenadier, rusher, sapper, sniper
+## No technical, no mg_nest, no broadcast. THREE of the four KIND_HIT_RADIUS entries
+## provably cannot touch this stream at all.
+##
+## The real second driver is OBSERVER_HIT_RADIUS (10 -> 14). The same run spawns exactly
+## ONE observer, at TICK 1225 — between sample 1 (t=1200) and sample 2 (t=1800), which is
+## exactly where the elite-only isolation stops reproducing. One measured tick explains
+## the whole split; the kind-roster guess explained none of it.
+##
+## Two premises inherited from the note above are ALSO stale and are corrected here
+## rather than left to be re-quoted: this torture reaches WAVE 5, not wave 2, and wipes
+## at TICK 3132, not 1393. Those numbers were true when they were written and the sim
+## has moved since. Re-drive the probe; do not trust the prose.
 const ENDLESS_GOLDEN: Array[int] = [
 	8610209561549742921,
 	4307715087271070947,

@@ -254,3 +254,25 @@ func test_gate_priced_modes_all_creep_not_only_campaign() -> void:
 		g["open"] = true
 	Runner.T.eq(br._supply_cost(0), SimWorld.SHOP_AMMO_COST,
 		"boss_rush prices stay flat on purpose")
+
+
+func test_an_arcade_chapter_jump_prices_the_sector_it_actually_drops_you_into() -> void:
+	# _sector_index() ALREADY takes maxi(opened, _gate_counter - 1), and its comment
+	# says why: jump_to_chapter primes the streaming cursors without opening a gate,
+	# so `opened` alone under-reads a chapter start. _econ_depth counted only opened
+	# gates, so the two cursors disagreed and a deep arcade start fought the deep
+	# roster at chapter-1 prices — the same "two sites computing one value drift
+	# apart" shape the shop docstring exists to close.
+	var sim := SimWorld.new(7, 1, "arcade")
+	sim.jump_to_chapter(6)
+	var opened := 0
+	for g in sim.gates:
+		if g["open"]:
+			opened += 1
+	Runner.T.eq(opened, 0, "a chapter jump opens no gate — that is what made this invisible")
+	# Measured output, not the constant: the price the shop would actually charge.
+	Runner.T.ok(sim._supply_cost(0) > SimWorld.SHOP_AMMO_COST,
+		"a chapter-6 arcade start does not shop at chapter-1 prices")
+	# And it must ride the SAME cursor the roster does, not merely be nonzero.
+	Runner.T.eq(sim._econ_depth(), sim._sector_index(opened),
+		"price depth and roster depth read one cursor")
