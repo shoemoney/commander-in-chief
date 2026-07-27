@@ -520,15 +520,22 @@ func test_c4_shop_barricades() -> void:
 
 func test_rooted_wave_spawns_land_where_the_player_can_reach_them() -> void:
 	## Endless never calls _step_camera, so camera_top is pinned at -VIEW_H for
-	## the whole run. Rooted units (mg_nest / broadcast) spawned at the same
-	## camera_top-24 the walkers use never move down into reach — that y sits
-	## ABOVE the player's own _clamp_actor ceiling (camera_top+16), so the mast
-	## or nest could only ever be blind-fired at, while still counting toward
-	## _wave_hostiles_cleared and holding the wave open indefinitely.
+	## the whole run. Rooted units spawned at the same camera_top-24 the walkers
+	## use never move down into reach — that y sits ABOVE the player's own
+	## _clamp_actor ceiling (camera_top+16), so the mast or nest could only ever
+	## be blind-fired at, while still counting toward _wave_hostiles_cleared and
+	## holding the wave open indefinitely.
+	##
+	## THE PREDICATE IS THE RATCHET. It listed only mg_nest/broadcast, so when a
+	## THIRD rooted archetype shipped — the ghillie, whose _step_ghillie writes
+	## neither x nor y on any branch — it inherited the walker spawn y and this
+	## test stayed green. Every kind that never writes its own position belongs
+	## in this list; adding one to the sim without adding it here is the bug.
 	var lo := 0
 	var hi := 0
 	var nests := 0
 	var masts := 0
+	var ghillies := 0
 	var idle := SimInput.new()
 	for s in [7, 23]:
 		var sim := SimWorld.new(s, 1, "endless")
@@ -544,23 +551,26 @@ func test_rooted_wave_spawns_land_where_the_player_can_reach_them() -> void:
 		for i in 2000:
 			sim.step([idle])
 			for e in sim.enemies:
-				if e["kind"] == "mg_nest" or e["kind"] == "broadcast":
+				if e["kind"] == "mg_nest" or e["kind"] == "broadcast" or e["kind"] == "ghillie":
 					Runner.T.ok(e["y"] >= lo and e["y"] <= hi,
 						"rooted %s spawns inside the player's reachable band" % e["kind"])
 					if e["kind"] == "mg_nest":
 						nests += 1
-					else:
+					elif e["kind"] == "broadcast":
 						masts += 1
+					else:
+						ghillies += 1
 			# Clear the field each tick: keeps the lone player alive so the wave
 			# keeps trickling, and stops rooted units piling into MAX_ENEMIES.
 			for e in sim.enemies:
 				e["alive"] = false
-			if nests > 0 and masts > 0:
+			if nests > 0 and masts > 0 and ghillies > 0:
 				break
-		if nests > 0 and masts > 0:
+		if nests > 0 and masts > 0 and ghillies > 0:
 			break
 	Runner.T.ok(nests > 0, "the run actually spawned an mg nest to check")
 	Runner.T.ok(masts > 0, "the run actually spawned a rally mast to check")
+	Runner.T.ok(ghillies > 0, "the run actually spawned a ghillie to check")
 
 
 func test_the_rally_mast_is_not_exempt_from_the_off_screen_sweep() -> void:

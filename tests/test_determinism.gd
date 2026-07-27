@@ -518,13 +518,39 @@ const SEED := 0xDEADBEEF
 ## goldens still do not move because _step_observer only runs in endless once the Spotter wave
 ## mutator has dropped an observer, and the endless torture never draws one -- stall_ticks is 0
 ## either way. Verified by running the suite, not inferred.
+## RE-RECORDED (2026-07-27, the sapper stops standing on its own charge): CAMPAIGN ONLY,
+## samples 2-5. _step_sapper laid its mine AT the sapper's feet, and _step_mines' enemy
+## scan deliberately ignores `grace` (so a claymore dropped in a pursuer's path works on
+## the tick it lands) -- so every mine tripped against its own layer on the tick it landed
+## and the advertised trail never existed. The drop now sits one CLAYMORE_PLANT_OFFSET back
+## down the sapper's approach, clear of its own 9px trigger, and mine x/y are checksummed,
+## so this stream legitimately moves. PREDICTED FIRST, THEN CONFIRMED: sappers are in the
+## MARSH BASIN roster, so the campaign torture reaches them once gate 1 opens -- a replay
+## with a counter reports first sapper at TICK 1637, first mine_lay at TICK 1778, 17 mines
+## laid over the run. 1778 / SAMPLE_EVERY(600) = 2, so samples 2-5 move and 0-1 must not.
+## They did not: both came back byte-identical, which is the proof nothing else moved.
+## ENDLESS GOLDEN VERIFIED UNCHANGED: that torture wipes at tick 1393 (wave 2) and freezes,
+## and the sapper is a wave-3+ elite roll, so no mine is ever laid in it.
+## The other three sim fixes shipped alongside this one are golden-inert, and that is
+## MEASURED rather than argued: with ONLY the mine offset reverted and the other three
+## fixes still in the tree, this stream reproduces the PRE-FIX goldens byte-for-byte
+## (3102861628708881044 / 650205415488164338 / 1254423104984790566 / 6447189277068568902
+## at samples 2-5). If any of the three touched the campaign stream, that revert could not
+## land back on the old values. The three:
+##   - endless ghillie spawns at rooted_y instead of camera_top-24 (endless, wave>=3 -- the
+##     endless torture never gets there; the committed note above already records
+##     ticks_with_ghillie=0 in both streams);
+##   - the empty-clip bash no longer executes the rescue pilot (the same note records
+##     ticks_with_pilot=0 and pilot_kills=0 in both streams);
+##   - step()'s boss_rush branch now calls _step_mines/_step_barrels (neither torture runs
+##     that mode at all).
 const GOLDEN: Array[int] = [
 	2407026767914979979,
 	461371032039649670,
-	3102861628708881044,
-	650205415488164338,
-	1254423104984790566,
-	6447189277068568902,
+	5063156605900622803,
+	5260245357873254500,
+	1921650504382560191,
+	3727008542898902892,
 ]
 
 

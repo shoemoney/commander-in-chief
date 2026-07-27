@@ -186,6 +186,46 @@ func test_sapper_cannot_cross_a_sandbag_line() -> void:
 	Runner.T.ok(sap["y"] > wall_y, "sapper never ends up on the player's side of the bag line")
 	Runner.T.ok(sap["y"] < start_y, "it did close on the wall (not passing by standing still)")
 	Runner.T.ok(sim.mines.size() > 0, "and it still lays mines on its cadence while stalled")
+
+
+func test_sapper_does_not_detonate_its_own_mine_the_tick_it_lays_it() -> void:
+	## _step_sapper laid the mine AT the sapper's own feet (distance 0) and
+	## _step_mines' enemy scan — which deliberately ignores `grace`, so a
+	## claymore dropped in a pursuer's path works on the tick it lands — then
+	## tripped it against the layer on that same tick. Every sapper that lived
+	## long enough to lay killed itself, so the advertised "hazard trail across
+	## the arena" never existed: what the player actually got was a free kill
+	## and free coin from the blast. Measured, not theorised — the mine and the
+	## sapper are both gone one _step_mines() after the drop.
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	# Both bodies must sit INSIDE the live band: _step_mines culls anything past
+	# camera_top+420 before it ever scans, so a mine dropped south of that would
+	# vanish for the wrong reason and the check would prove nothing.
+	p["x"] = 300 * Fixed.ONE
+	p["y"] = sim.camera_top + 40 * Fixed.ONE
+	sim.enemies.clear()
+	sim.mines.clear()
+	sim.sandbags.clear()
+	sim.rocks.clear()
+	sim._spawn_special(300 * Fixed.ONE, sim.camera_top + 200 * Fixed.ONE, "sapper")
+	var sap := sim.enemies[sim.enemies.size() - 1]
+	sap["fire_cd"] = 0
+	var dx: int = p["x"] - sap["x"]
+	var dy: int = p["y"] - sap["y"]
+	sim._step_sapper(sap, dx, dy, Fixed.length(dx, dy))
+	Runner.T.eq(sim.mines.size(), 1, "the sapper laid exactly one mine")
+	# The drop must clear its own 9px trigger — the same rule the player's
+	# claymore already follows via CLAYMORE_PLANT_OFFSET.
+	var m: Dictionary = sim.mines[0]
+	Runner.T.ok(Fixed.length(m["x"] - sap["x"], m["y"] - sap["y"]) > SimWorld.MINE_TRIGGER_RADIUS,
+		"the mine lands outside the sapper's own trigger radius")
+	sim._step_mines()
+	Runner.T.eq(sim.mines.size(), 1, "the mine survives the tick it was laid on")
+	Runner.T.ok(sim.mines[0]["armed"], "and it is still armed, waiting for someone else")
+	Runner.T.ok(sap["alive"], "the sapper did not blow itself up")
+
+
 # --- Per-sector rosters -------------------------------------------------------
 # The campaign used to run ONE flat ["grenadier","sniper","shield"]+mg_nest roll
 # from sector 2 all the way to the finale, while ZONE_INFO promised six distinct

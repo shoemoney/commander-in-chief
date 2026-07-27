@@ -3334,3 +3334,41 @@ func test_shared_camera_never_strands_the_lagging_player_offscreen() -> void:
 	Runner.T.ok(p2["y"] >= sim.camera_top and p2["y"] <= sim.camera_top + 360 * SimWorld.F_ONE,
 		"the idle partner is still on screen after 10 s of the other advancing")
 	Runner.T.ok(sim.players[0]["y"] < p2["y"], "...and the runner really did advance ahead of them")
+
+
+func test_boss_rush_steps_the_world_hazards_its_own_arenas_author() -> void:
+	# step()'s boss_rush branch was a hand-copied subset of the campaign branch
+	# and it dropped two steppers whose FEED boss_rush populates itself:
+	#   _step_barrels — _stamp_gunship_gate stamps a 2-barrel ammo cache per
+	#     boss and _stamp_final_gate seeds six more, so a lit fuse latched
+	#     forever and no barrel ever cleared;
+	#   _step_mines   — the player's carried claymore joins mines[] in any mode,
+	#     and nothing else in boss_rush ever detonates or culls one.
+	# (The other two campaign-only calls are correct omissions and stay out:
+	# _step_spawner is the field-filler boss_rush deliberately has none of, and
+	# _step_grass_flush feeds on kind-1 grass rocks, which only the campaign
+	# stream authors — boss_rush's two stamps place kinds 0 and 2 only.)
+	var sim := SimWorld.new(41, 1, "boss_rush")
+	Runner.T.ok(sim.barrels.size() > 0, "boss rush pre-authors barrels to step")
+	var before: int = sim.barrels.size()
+	# Hold the dict ref, not an index or a y: the cache is two barrels 18px
+	# apart at the SAME y, so the blast chains into its neighbour and that
+	# neighbour's fresh chain fuse would read as "still lit" on a y match.
+	var lit: Dictionary = sim.barrels[0]
+	lit["fuse_ticks"] = 1
+	sim.step([_idle()])
+	Runner.T.ok(not lit["armed"], "a lit fuse in boss rush burns down instead of latching forever")
+	Runner.T.ok(sim.barrels.size() < before, "and the spent barrel actually leaves the field")
+	# Grass never streams here, so no kind-1 rock should exist to flush from.
+	var grass := 0
+	for rk in sim.rocks:
+		if rk.get("kind", 0) == 1:
+			grass += 1
+	Runner.T.eq(grass, 0, "boss rush authors no tall grass, so _step_grass_flush stays a correct omission")
+	# And a planted charge is live, not scenery.
+	var sim2 := SimWorld.new(41, 1, "boss_rush")
+	var p2 := sim2.players[0]
+	sim2.mines.append({"x": p2["x"], "y": p2["y"], "armed": true, "grace": 0})
+	sim2.step([_idle()])
+	Runner.T.ok(sim2.mines.is_empty() or not sim2.mines[0]["armed"],
+		"a mine under a boss-rush player detonates instead of sitting inert forever")

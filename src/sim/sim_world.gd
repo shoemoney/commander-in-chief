@@ -964,6 +964,16 @@ func step(inputs: Array) -> void:
 			_step_observer()
 		_resolve_strikes()   # grenadier lobs detonate even with no observer
 	elif mode == "boss_rush":
+		# These two are NOT campaign-only filler: boss_rush authors their feed
+		# itself. _stamp_gunship_gate stamps a 2-barrel ammo cache per boss and
+		# _stamp_final_gate seeds six more, and the player's carried claymore
+		# joins mines[] in every mode — with neither stepper a lit fuse latched
+		# forever and a planted charge was scenery. The two campaign calls still
+		# left out are correct omissions: _step_spawner is the field filler this
+		# mode deliberately has none of, and _step_grass_flush feeds on kind-1
+		# grass rocks, which only the campaign stream authors.
+		_step_mines()
+		_step_barrels()
 		_step_boss()
 		_step_colossus()
 		_step_gates()
@@ -1218,6 +1228,18 @@ func _step_players(inputs: Array) -> void:
 			var bashed := false
 			if p["in_tank"] < 0:
 				for e in enemies:
+					# The pilot is a non-combatant OBJECTIVE, and this ring is
+					# the last kill path that did not say so: _explode, the
+					# airstrike wipe and the tank treads all exempt him (the
+					# treads rescue instead), and only a deliberate bullet is
+					# meant to be able to execute him. Worse, the bash resolves
+					# EARLIER in this same loop than the on-foot grab below and
+					# BASH_RADIUS (16) is wider than PILOT_RESCUE_RADIUS (14), so
+					# an approach made dry killed the 100-coin rescue at every
+					# distance and the grab scan then found a corpse. `continue`,
+					# not `break` — a real hostile sharing the ring is still bashable.
+					if e["kind"] == "pilot":
+						continue
 					if _enemy_strikeable(e) \
 							and _dist_lte(p["x"], p["y"], e["x"], e["y"], BASH_RADIUS):
 						# no_score too: bash guarantees a kill on a 40-tick cd while
@@ -3392,8 +3414,24 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	if e["fire_cd"] == 0 and mines.size() < SAPPER_MAX_MINES:
 		e["fire_cd"] = SAPPER_MINE_CD_TICKS
-		mines.append({"x": e["x"], "y": e["y"], "armed": true, "grace": 0})
-		events.append({"t": "mine_lay", "x": e["x"], "y": e["y"]})
+		# Drop it BEHIND, one CLAYMORE_PLANT_OFFSET back down its own approach —
+		# the same "clear of its own 9px trigger" rule the player's claymore
+		# already follows. Laid at the sapper's feet it was at distance 0, and
+		# _step_mines' enemy scan deliberately ignores `grace` (so a claymore
+		# dropped in a pursuer's path works on the tick it lands), so the charge
+		# tripped against its own layer the same tick every time: the archetype's
+		# advertised trail never existed, and what the player actually got was a
+		# free suicide plus the blast's coin. Behind the sapper is also up-screen
+		# of it — the ground the player is pushing into, which is the trail.
+		var mx: int = e["x"]
+		var my: int = e["y"]
+		if dlen > F_ONE:
+			mx -= Fixed.mul(Fixed.div(dx, dlen), CLAYMORE_PLANT_OFFSET)
+			my -= Fixed.mul(Fixed.div(dy, dlen), CLAYMORE_PLANT_OFFSET)
+		else:
+			my -= CLAYMORE_PLANT_OFFSET   # standing on the target: no direction to read
+		mines.append({"x": mx, "y": my, "armed": true, "grace": 0})
+		events.append({"t": "mine_lay", "x": mx, "y": my})
 	# Moves through the shared mover step, so the sapper respects the cover the
 	# player PAID for: hand-rolled movement here phased straight through sandbags,
 	# rocks, tank hulks and sealed lane blocks (and skipped mud/rubble/wire).
@@ -5190,7 +5228,14 @@ func _step_waves(inputs: Array = []) -> void:
 				elif roll == 3:
 					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
 				elif roll == 4:
-					_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")
+					# ROOTED, like the nest and the mast: _step_ghillie writes
+					# neither x nor y on ANY branch (submerged / revealing /
+					# winding up / firing / re-cloaking all return in place), so
+					# it inherits its spawn y forever. At camera_top-24 that is
+					# 40px above the player's _clamp_actor ceiling and 24px above
+					# the drawn viewport — unkillable, and _wave_hostiles_cleared
+					# still counts it, holding the wave open.
+					_spawn_special(x, rooted_y, "ghillie")
 				elif roll == 5:
 					# Tracked-AoE is the hardest special to answer — waves 3-4 teach
 					# the dodge-by-aim shooters first, then the drone layers on at 5
