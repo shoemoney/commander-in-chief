@@ -7873,7 +7873,13 @@ static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
 		# vector is then the honest "last lane raked" read, and falls through.
 		var tgt := sw._nearest_alive_player(e["x"], e["y"])   # pure read, mutates nothing
 		if not tgt.is_empty():
-			return Vector2(float(tgt["x"] - e["x"]), float(tgt["y"] - e["y"]))
+			# LEAD, through the sim's own function so the lane cannot drift from the round.
+			# The nest aims where the target WILL be (SimWorld.mg_nest_led_aim); painting the
+			# target's current position would re-break the very honesty this helper exists to
+			# guarantee — the lane would promise a line the burst no longer uses.
+			# mg_nest_led_aim is static and reads nothing it mutates, so this stays a pure view call.
+			var led: Array = SimWorld.mg_nest_led_aim(e, tgt["x"] - e["x"], tgt["y"] - e["y"])
+			return Vector2(float(led[0]), float(led[1]))
 	return Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
 
 

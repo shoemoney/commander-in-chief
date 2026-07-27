@@ -3334,3 +3334,44 @@ func test_shared_camera_never_strands_the_lagging_player_offscreen() -> void:
 	Runner.T.ok(p2["y"] >= sim.camera_top and p2["y"] <= sim.camera_top + 360 * SimWorld.F_ONE,
 		"the idle partner is still on screen after 10 s of the other advancing")
 	Runner.T.ok(sim.players[0]["y"] < p2["y"], "...and the runner really did advance ahead of them")
+
+
+func test_mg_nest_leads_a_moving_target_instead_of_shooting_where_it_was() -> void:
+	## The nest re-acquired the target each round but fired at where it WAS, and the
+	## arithmetic says that can never hit anyone moving: miss = speed x flight, and
+	## flight = range / ENEMY_BULLET_SPEED. PLAYER_SPEED 2.4 px/tick against a 3 px/tick
+	## round is 0.8 px of drift per 1 px of flight, so at 120 px range the burst lands
+	## ~96 px behind a ~10 px target. Holding a strafe was a free dodge.
+	##
+	## Uses NO new sim state: a nest is a fixed emplacement, so the change in the stored
+	## target delta between re-acquires IS the target's displacement, and the sample age
+	## is known (MG_NEST_AIM_TICKS before round 1, MG_NEST_BURST_GAP_TICKS after).
+	var F: int = SimWorld.F_ONE
+
+	# A target that has not moved must still be shot at directly — no invented lead.
+	var still := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": 0, "aim_ly": -120 * F}
+	var a: Array = SimWorld.mg_nest_led_aim(still, 0, -120 * F)
+	Runner.T.eq(a[0], 0, "a stationary target is aimed at directly, with no lead")
+	Runner.T.eq(a[1], -120 * F, "and its range is untouched")
+
+	# A target strafing +16 px over the 30-tick aim window, 120 px out. Flight is
+	# 120/3 = 40 ticks, so the lead should be about (16/30)*40 = 21 px AHEAD of it.
+	var moving := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": -16 * F, "aim_ly": -120 * F}
+	var b: Array = SimWorld.mg_nest_led_aim(moving, 0, -120 * F)
+	Runner.T.ok(b[0] > 0, "the lane swings AHEAD of a strafing target, not at where it stood")
+	Runner.T.ok(b[0] > 18 * F and b[0] < 25 * F,
+		"lead is velocity x flight (~21 px), got %d px" % (b[0] / F))
+
+	# Leading keys off VELOCITY, so reversing direction reverses the lead — a direction
+	# CHANGE still beats the nest, which is the dodge the telegraph is meant to teach.
+	var other := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": 16 * F, "aim_ly": -120 * F}
+	var c: Array = SimWorld.mg_nest_led_aim(other, 0, -120 * F)
+	Runner.T.ok(c[0] < 0, "strafing the other way leads the other way")
+
+	# A respawn/tank-teleport reads as enormous velocity; the cap stops the lane swinging
+	# clean across the arena into something no player could read.
+	var ported := {"lunge_ticks": SimWorld.MG_NEST_BURST_ROUNDS, "aim_lx": -600 * F, "aim_ly": -120 * F}
+	var d: Array = SimWorld.mg_nest_led_aim(ported, 0, -120 * F)
+	var lead_len: int = Fixed.length(d[0] - 0, d[1] - (-120 * F))
+	Runner.T.ok(lead_len <= SimWorld.MG_NEST_LEAD_CAP + F,
+		"a teleporting target cannot swing the lane past MG_NEST_LEAD_CAP (got %d px)" % (lead_len / F))

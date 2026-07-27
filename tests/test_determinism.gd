@@ -495,13 +495,26 @@ const SEED := 0xDEADBEEF
 ## cover shifts position from the first contact tick onward. Sample 0 (t=600) is
 ## byte-identical: the torture hasn't reached any cover yet at 10s in. Samples 1-5 all
 ## moved (the torture streams rocks/sandbags/hulks well before 20s).
+## RE-RECORD 2026-07-26 (mg_nest lead): the nest now aims where the target WILL be
+## rather than where it was. Its rounds' vx/vy are hashed, so the stream diverges the
+## first time a nest fires inside the torture window.
+##
+## PREDICTED BEFORE RE-RECORDING, and the prediction is the point: mg_nests are authored
+## seg>=2, and the torture reaches that band late, so ONLY the trailing sample should move.
+## It did — samples 0-4 (ticks 600..3000) are byte-identical and only sample 5 (tick 3600)
+## changed, 6016516403530113665 -> 7360276865937536353. A change that moved earlier samples
+## would have meant the lead leaked somewhere it should not, and this note would be a bug
+## report instead of a re-record.
+##
+## ENDLESS_GOLDEN VERIFIED UNCHANGED: the endless torture wipes during wave 2 and never
+## streams an mg_nest, so the endless stream cannot reach this code at all.
 const GOLDEN: Array[int] = [
 	2526922330838029777,
 	4406561492076700289,
 	5008464718731060842,
 	5993363887516529799,
 	2661287071331966602,
-	6016516403530113665,
+	7360276865937536353,
 ]
 
 
