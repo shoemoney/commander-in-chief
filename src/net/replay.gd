@@ -21,6 +21,14 @@ var player_count: int = 1
 var assist: bool = false   # accessibility 2-hit vest — MUST be restored on replay or the sim diverges
 var hard: bool = false     # NG+ HARD spawn curve — alters the RNG stream + checksum, restore on replay
 var chapter: int = 1       # authored-campaign-and-modes: Arcade's jump_to_chapter() start gate (1 = no jump)
+# run-config-single-owner: the RESOLVED starting loadout the live run was seeded with,
+# never the rules that produced it. main._reset() applies Endless perk TIERS post-
+# construction from LIVE _perk_levels; a replay rebuilt from tiers would pick up
+# whatever the player owns TODAY. Recording resolved values makes the replay
+# self-describing, so Replay never learns a perk system exists.
+var start_vest: bool = false   # every player begins with a Flak Vest (assist OR VETERAN VEST perk)
+var start_chest: int = 0       # War Chest at tick 0 (HEAD START perk tiers)
+var start_tokens: int = 0      # Commendations at tick 0 (SIGNAL FLARE perk tiers)
 var frames: Array = []   # each element: Array of per-player encoded SimInput ([move_x,move_y,aim_x,aim_y,flags])
 # replay-validated-leaderboards: the score the live run's sim reported, carried
 # alongside the recorded inputs so ANY leaderboard/Hall submission can be
@@ -43,6 +51,7 @@ func record_tick(inputs: Array) -> void:
 func to_dict() -> Dictionary:
 	return {"magic": MAGIC, "seed": seed_value, "mode": mode,
 		"players": player_count, "assist": assist, "hard": hard, "chapter": chapter,
+		"start_vest": start_vest, "start_chest": start_chest, "start_tokens": start_tokens,
 		"frames": frames, "score": claimed_score, "verified": verified}
 
 
@@ -119,6 +128,10 @@ static func load_from(path: String) -> Replay:
 	r.assist = bool(data.get("assist", false))
 	r.hard = bool(data.get("hard", false))
 	r.chapter = int(data.get("chapter", 1))   # pre-existing replays predate Arcade -> chapter 1 (no jump)
+	# Defaults are the vanilla loadout, so replays predating the perk system load unchanged.
+	r.start_vest = bool(data.get("start_vest", false))
+	r.start_chest = int(data.get("start_chest", 0))
+	r.start_tokens = int(data.get("start_tokens", 0))
 	r.frames = data["frames"]
 	# score/verified default 0/false for pre-existing replays that predate
 	# replay-validated leaderboards.
@@ -127,18 +140,31 @@ static func load_from(path: String) -> Replay:
 	return r
 
 
-func _new_sim() -> SimWorld:
-	# Shared setup between play() and replay_final_score() — mirrors the
-	# post-construction config main.gd applies to the LIVE run (see _start_run),
-	# or an assist/hard/arcade run replays as a vanilla one: those all feed
-	# checksum()/score, so omitting any of them makes the replay diverge.
-	var sim := SimWorld.new(seed_value, player_count, mode)
+## THE single owner of "what configuration was this run started with". Used by
+## _new_sim() (replay verification) AND by main.start_watch(), whose _reset() builds
+## from the LIVE assist/HARD toggles and the perk tiers owned right now. Every field is
+## ASSIGNED, never accumulated, so this also OVERWRITES a config _reset() already
+## applied from stale live state. Safe on a fresh sim: SimWorld starts at
+## war_chest 0 / tokens 0 / vest false, so a legacy replay's defaults are a no-op.
+func apply_config(sim: SimWorld) -> void:
 	sim.assist_mode = assist
 	sim.hard = hard
-	if assist:
-		for pl in sim.players:
-			pl["vest"] = true
+	for pl in sim.players:
+		pl["vest"] = assist or start_vest
+	sim.war_chest = start_chest
+	sim.tokens = start_tokens
+
+
+func _new_sim() -> SimWorld:
+	# Shared setup between play() and replay_final_score() — mirrors the
+	# post-construction config main.gd applies to the LIVE run (see _reset),
+	# or an assist/hard/arcade/perked run replays as a vanilla one: those all feed
+	# checksum()/score, so omitting any of them makes the replay diverge.
+	var sim := SimWorld.new(seed_value, player_count, mode)
+	apply_config(sim)
 	if mode == "arcade":
+		# Deliberately OUTSIDE apply_config: start_watch()'s _reset() already performs
+		# this jump from _arcade_chapter, and jump_to_chapter is not known-idempotent.
 		sim.jump_to_chapter(chapter)   # mirror main._reset()'s post-construction Arcade jump
 	return sim
 

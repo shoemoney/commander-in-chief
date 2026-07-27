@@ -189,3 +189,45 @@ func test_unverified_endless_run_awards_zero_vp() -> void:
 
 	main.free()
 	_restore_save(s)
+
+
+# run-config-single-owner: the recorded replay must rebuild the SAME run. Endless perk
+# tiers are applied post-construction in _reset(); if Replay does not carry the resolved
+# loadout, _new_sim() rebuilds a vanilla sim, verify_score() fails at the debrief,
+# _apply_score_verdict takes the deny branch, _record_run() never runs -- and since
+# _record_run is the only place vet_points moves, owning one perk permanently locks the
+# player out of ever buying another.
+func test_a_perked_endless_run_replays_from_the_same_starting_loadout() -> void:
+	var main: Node2D = MainScript.new()
+	main._sfx = _NullSfx.new()
+	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 2, MainScript.PERK_TOKEN: 1}
+	main._endless = true
+	main._reset()
+	var rebuilt: SimWorld = main._recorder._new_sim()
+	Runner.T.eq(rebuilt.war_chest, main.sim.war_chest,
+		"the replay's sim starts on the same War Chest the perked run did")
+	Runner.T.eq(rebuilt.tokens, main.sim.tokens, "...the same Commendations")
+	Runner.T.eq(rebuilt.players[0]["vest"], main.sim.players[0]["vest"], "...the same starting vest")
+	Runner.T.eq(rebuilt.checksum(), main.sim.checksum(),
+		"tick-0 state is identical -- the replay rebuilds THIS run, not a vanilla one")
+	main.free()
+
+
+# The sibling surface: start_watch() routes through _reset(), which builds from the LIVE
+# toggles and the perk tiers owned RIGHT NOW. A replay recorded before the player bought
+# HEAD START must not be replayed against today's loadout.
+func test_watching_a_replay_uses_the_recorded_loadout_not_the_perks_owned_now() -> void:
+	var rep := Replay.new()
+	rep.seed_value = 7
+	rep.mode = "endless"
+	rep.player_count = 1          # start_vest/chest/tokens left at their vanilla defaults
+	var main: Node2D = MainScript.new()
+	main._sfx = _NullSfx.new()
+	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 2, MainScript.PERK_TOKEN: 1}
+	main._endless = true
+	main._reset()                 # a live, fully perked Endless sim
+	rep.apply_config(main.sim)    # exactly what start_watch() now does after _reset()
+	Runner.T.eq(main.sim.war_chest, 0, "watching a pre-perk replay must not hand it today's HEAD START chest")
+	Runner.T.eq(main.sim.tokens, 0, "...nor today's SIGNAL FLARE commendations")
+	Runner.T.ok(not main.sim.players[0]["vest"], "...nor today's VETERAN VEST")
+	main.free()
