@@ -38,14 +38,30 @@ const ARROW_REST_ALPHA := 0.55 # c4-15: resting opacity of an UNSELECTED cycle r
 # c1-13: HALL rows per page. The board holds far more runs than fit on one screen,
 # so _draw_hall pages HALL_PAGE_ROWS at a time and up/down turns the page.
 const HALL_PAGE_ROWS := 8
-# c1-13: recency messaging sits in a TOP band (under the tab underline @y72, above
-# the column headers @y96), giving it a vertical region distinct from the paging
-# counter (~y306) and the BACK plate (~y310) at the bottom — the four never overlap.
-# y82 @size9 spans box [74,84] (PixelOperator ascent 8 / descent 2, measured): its
-# bottom clears the y96 headers' box top (87) by 3px and the y72 underline by 2px, so
-# the recency line and the headers never collide at the real font metrics (attempt 3
-# put it at y85 — box [77,87] — which OVERLAPPED the old y92 headers' [83,94] by 4px).
-const HALL_RECENCY_Y := 82.0
+# c1-13: recency messaging sits in a TOP band (under the tab underline, above the
+# column headers), giving it a vertical region distinct from the paging counter and the
+# BACK plate at the bottom — the four never overlap.
+# The whole HALL column stack is DERIVED from the tab row (see TAB_PLATE_Y, below) for
+# exactly one reason: this used to be a hand-typed `82.0` tuned against a TAB_BASELINE_Y
+# of 66. When the content well dropped 10px the tab row moved to 76 and the underline to
+# 80..82 — and 82 stayed put, so the size-9 band (box [74,84]) drew straight THROUGH both
+# the tab labels (box [67,78], 4px) and the underline (2px): "BOARD KEEPS YOUR TOP 40
+# RUNS" printed over "CAMPAIGN ENDLESS RUSH". Typed copies of a layout constant go stale
+# silently; derived ones move with it.
+# PixelOperator metrics, MEASURED: size 9 = ascent 8 / descent 2, size 10 = 9 / 2,
+# size 11 = 10 / 2. So the stack below reads, top to bottom:
+#   underline  80..82   ·  recency @92 box [84,94]  ·  headers @107 box [98,109]
+#   row0 @122 box [112,124] … row7 @276 box [266,278]  ·  counter @294 box [284,296]
+# Gaps: 2 / 4 / 3 px, and row 7's 20px latest-run glow band (264..284) stops exactly on
+# the counter's cap top.
+const HALL_RECENCY_Y := TAB_PLATE_Y + 16.0 + 12.0
+# Column-header baseline, one line under the recency band.
+const HALL_HEADER_Y := HALL_RECENCY_Y + 15.0
+# First score row, one line under the headers, and the row pitch. The pitch came down
+# 24 -> 22 to buy the 22px the recency+header rows needed at the top without pushing
+# row 7 into the "1-8 OF N" counter.
+const HALL_ROW0_Y := HALL_HEADER_Y + 15.0
+const HALL_ROW_PITCH := 22.0
 # c1-13: how many runs the board retains — the SINGLE SOURCE for the cap. main.gd's
 # _record_run passes THIS const into _hall_capped, and the top status band states it on
 # screen, so the retention limit the Hall enforces and the one it advertises can't drift.
@@ -295,7 +311,11 @@ const TITLE_TAGLINE_TOP := TITLE_BYLINE_TOP + TITLE_BYLINE_H       # tagline pla
 const TITLE_BEST_TOP := TITLE_TAGLINE_TOP + TITLE_RECORD_PLATE_H   # BEST-run plate top (abuts the tagline plate bottom)
 const TITLE_CAREER_TOP := TITLE_BEST_TOP + TITLE_RECORD_PLATE_H    # CAREER whisper plate top (abuts the BEST plate bottom)
 const TITLE_HEAD_SEAM := 1.0       # tagline-only column seats 1px below the tagline plate bottom
-const BOTTOM_BOUND := 310.0        # y the last row / BACK plate clears (leaves the footer legend room)
+const BOTTOM_BOUND := 300.0        # y the last row / BACK plate clears (leaves the footer legend room).
+                                   # 310 put the BACK *label* at y316..328 — 4.2px onto the frame's bottom
+                                   # ornament. The PLATE is chrome and may still seat on the rail; the label
+                                   # may not. _howto_nav_y() and the ENDLESS derived pitch hang off
+                                   # _back_rect() and follow automatically (pitch still measures 30).
 const LEGEND_Y := 322.0            # TITLE input-legend plate top (the column band ends 4px above it)
 const LEGEND_H := 17.0             # ...and its height
 const ROW_INSET_TITLE := 2.0       # TITLE inter-row inset (reclaimed band => taller plates)
@@ -360,9 +380,35 @@ const REBIND_TAB_GAP := 6.0        # gap between REBIND tab / device plates
 const HUB_HEADER_Y := 84.0         # INFO / DISP / SETUP header title baseline
 const HUB_HEADER_FONT := 24        # 3.000x on PixelOperator8's 8px em -- 22 (2.746x) uneven-quantized stems
 const HUB_SUBTITLE_Y := 104.0      # ...and their subtitle line
-const CONTENT_TITLE_Y := 38.0      # HALL / HOWTO content-screen title baseline
-const TAB_BASELINE_Y := 66.0       # HALL filter / HOWTO page tab-label text baseline (plate top y54)
-const FRAME_INNER_R := 612.0       # right edge of the chrome frame's interior (CANVAS_WIDTH 640 less the 28px border) — content clamps/right-aligns here
+const CONTENT_TITLE_Y := 58.0      # HALL / HOWTO content-screen title baseline (was 38: at size 22 that put the cap top at y18, 18.2px ABOVE the frame's real interior)
+const CONTENT_TITLE_SIZE := 18     # ...and its size. 22 no longer fits between FRAME_INNER_T and the tab plate.
+const TAB_PLATE_Y := 64.0          # HALL filter / HOWTO page tab plate top (16px tall)
+const TAB_BASELINE_Y := 76.0       # ...its label baseline, and TAB_PLATE_Y + 16 its underline
+const TAB_ARROW_Y := TAB_PLATE_Y + 2.0   # HALL's left/right cycle affordance, seated in the plate band
+const CONTENT_BODY_Y := 100.0      # first content baseline under the tab row, both content screens
+
+# --- The chrome frame's REAL interior, measured off the art (not guessed from 640) ---
+# ui_frame_lrg is a 256x256 texture STRETCHED (no 9-patch) into FRAME_ART_RECT: 2.34375x
+# horizontally, 1.34375x vertically. Its opaque border band lives at texel 15..20 and
+# 235..240 on both axes, so the interior hole projects to x 69.22..570.78, y 36.22..323.78
+# — NOT the x28..612 the old lone `FRAME_INNER_R := 612.0` claimed. That constant was
+# never derived from the art, and every one of the 7 content-well screens paid for it:
+# the "N / 5" counter right-aligned 41.2px past the border onto bare scrim, body copy ran
+# to x923 (352.2px over, hard-clipped mid-word by draw_string), the title cap sat 18.2px
+# above the interior and the ENDLESS sprite column was half-buried in the left ornament.
+# The four constants below are that measurement plus a 4.8px safe pad.
+# A frame re-bake that moves the border fails
+# tests/test_menu_layout.gd::test_frame_inner_constants_match_the_frame_art.
+const FRAME_ART_RECT := Rect2(20, 8, 600, 344)   # the rect ui_frame_lrg is stretched into
+const FRAME_INNER_L := 74.0        # 69.22 + 4.8 pad
+const FRAME_INNER_R := 566.0       # 570.78 - 4.8 — content clamps/right-aligns here
+const FRAME_INNER_T := 41.0        # 36.22 + 4.8
+const FRAME_INNER_B := 319.0       # 323.78 - 4.8
+const VERB_PITCH := 27.0           # baseline-to-baseline of the CONTROLS verb rows (one may wrap to 2 lines)
+const VERB_LEAD := 13.0            # leading between wrapped continuation lines of a CONTROLS verb sentence
+const ICON_X := FRAME_INNER_L      # left edge of every content-well sprite/glyph column
+const TEXT_X := FRAME_INNER_L + 36.0   # ...and the text column beside it (36 = icon box + gutter)
+const BODY_W := FRAME_INNER_R - TEXT_X # 456px of usable body width (the old figure was a fictional 552)
 const TEXT_MID_10 := 4.0           # visual mid of a 10px cap-height glyph below its baseline (cap sits ~y-8..y); centers a sprite box on the text row
 const PAUSE_HEADER_Y := 78.0       # PAUSED title baseline
 const PAUSE_SUBTITLE_Y := 100.0    # PAUSE run-status subline
@@ -4301,6 +4347,9 @@ static func hall_page_window(page: int, total: int) -> Vector2i:
 	return Vector2i(start, mini(start + HALL_PAGE_ROWS, total))
 
 
+const HALL_PAGE_ROW_Y := BOTTOM_BOUND - 6.0   # baseline of the "1-8 OF N" counter / bottom of its PREV+NEXT targets
+
+
 static func hall_page_rects() -> Array[Rect2]:
 	# Clickable PREV/NEXT page targets flanking the centered "1-8 OF N" counter at
 	# baseline y306. Static + view-free (fixed pixel geometry) so _draw_hall, the
@@ -4309,9 +4358,11 @@ static func hall_page_rects() -> Array[Rect2]:
 	# the pair frames the count evenly. 74x16 targets whose INNER edges (262/378) sit
 	# just OUTSIDE the widest counter span: "33-40 OF 240" is 106px centered on 320
 	# (edges 267..373), so the label can never clip either hit rect (5px clearance each
-	# side). The bottom edge (y306) clears the HALL BACK button's DRAWN plate (its
-	# texture is _back_rect.grow(3), top y307), so the two clickable controls never overlap.
-	return [Rect2(188.0, 290.0, 74.0, 16.0), Rect2(378.0, 290.0, 74.0, 16.0)]
+	# side). The bottom edge DERIVES from the BACK button's DRAWN plate top
+	# (_back_rect.grow(3) == BOTTOM_BOUND - 3) less a 3px gutter, so lifting BOTTOM_BOUND
+	# carries the pager with it instead of leaving it under the plate — which is exactly
+	# what happened when BOTTOM_BOUND moved 310 -> 300.
+	return [Rect2(188.0, HALL_PAGE_ROW_Y - 16.0, 74.0, 16.0), Rect2(378.0, HALL_PAGE_ROW_Y - 16.0, 74.0, 16.0)]
 
 
 static func hall_page_style(enabled: bool, hov: bool, press: float) -> Dictionary:
@@ -4407,7 +4458,7 @@ const HALL_FILTER_NAMES := ["ALL", "CAMPAIGN", "ENDLESS", "RUSH"]
 
 func _draw_hall() -> void:
 	var names := HALL_FILTER_NAMES
-	_center_text("HALL OF FAME", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
+	_center_text("HALL OF FAME", CONTENT_TITLE_Y, CONTENT_TITLE_SIZE, HEADER_ACCENT)
 	# Persistent filter tab row — the old single "◄ NAME ►" line hid the other
 	# two choices, so nobody knew left/right cycled anything. Selected tab is
 	# underlined and flashes briefly on change (_filter_pulse). Geometry comes
@@ -4430,26 +4481,25 @@ func _draw_hall() -> void:
 			# Filled plate under the live tab (the underline alone read as decoration,
 			# not state) — a dimmer echo for the hover preview so the pointer's target
 			# reads as a real button, not just tinted text.
-			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), plate)
-		Art.text(self, names[i], Vector2(tr.position.x + 4.0, 66), 10, st["text"])
+			_emit_rect(Rect2(tr.position.x, TAB_PLATE_Y, tr.size.x, 16.0), plate)
+		Art.text(self, names[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), 10, st["text"])
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
 			# Underline: 2px live rule for the selected tab, a fainter 1px preview on
 			# hover so it clearly reads as "click to make this the live filter".
-			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
+			_emit_rect(Rect2(tr.position.x + 2.0, TAB_PLATE_Y + 16.0, tr.size.x - 4.0, uh), st["underline"])
 	# The cycle affordance itself: dpad art on pad, arrow text on keyboard.
 	var left := tabs[0].position.x + 4.0
 	var right := tabs[tabs.size() - 1].end.x - 4.0
 	if Art.use_pad:
 		var t := Art.tex("glyph_dpad_lr")
 		var gw := 13.0 * float(t.get_width()) / float(t.get_height())
-		draw_texture_rect(t, Rect2(left - gw - 12.0, 56.0, gw, 13.0), false)
+		_emit_tex("glyph_dpad_lr", Rect2(left - gw - 12.0, TAB_ARROW_Y, gw, 13.0), Color.WHITE)
 	else:
 		# mi_arrow points RIGHT; negative rect width flips it for the left side.
-		var at := Art.tex("mi_arrow")
 		var acol := Color(0.84, 0.86, 0.78)
-		draw_texture_rect(at, Rect2(left - 19.0, 56.0, -11.0, 11.0), false, acol)
-		draw_texture_rect(at, Rect2(right + 8.0, 56.0, 11.0, 11.0), false, acol)
+		_emit_tex("mi_arrow", Rect2(left - 19.0, TAB_ARROW_Y, -11.0, 11.0), acol)
+		_emit_tex("mi_arrow", Rect2(right + 8.0, TAB_ARROW_Y, 11.0, 11.0), acol)
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows := _hall_rows()
 	# Measured column layout — Art.font() is proportional, so each column draws
@@ -4464,17 +4514,18 @@ func _draw_hall() -> void:
 	var streak_x := 214.0 + 14.0 + mode_w + 14.0 + reach_w + 14.0
 	var col_x := [112.0, 148.0, 214.0 + 14.0, 214.0 + 14.0 + mode_w + 14.0, streak_x]
 	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
-	# Headers at y96 (was y92): dropped 4px so the y82 recency band above clears them
-	# at the real font metrics (see HALL_RECENCY_Y) — the two lines no longer collide.
+	# Headers ride HALL_HEADER_Y, derived one line under the recency band, which is
+	# itself derived off the tab row — so the whole column stack moves together when
+	# the content well shifts (see HALL_RECENCY_Y for what a typed copy cost us).
 	for c in headers.size():
 		if c == 1:
 			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			Art.text(self, headers[c], Vector2(214.0 - hw, 96), 10, Color(1.0, 0.82, 0.4))
+			Art.text(self, headers[c], Vector2(214.0 - hw, HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
 		else:
-			Art.text(self, headers[c], Vector2(col_x[c], 96), 10, Color(1.0, 0.82, 0.4))
+			Art.text(self, headers[c], Vector2(col_x[c], HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
 	# RANK header sits in the gap between the # and the right-aligned SCORE — drawn
 	# outside the parallel header/col_x arrays so it doesn't reshuffle the columns.
-	Art.text(self, "RANK", Vector2(130.0, 96), 10, Color(1.0, 0.82, 0.4))
+	Art.text(self, "RANK", Vector2(130.0, HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
 	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. Switching the filter
 	# tab resets _hall_page to 0 (see the nav + click handlers); c4-13: this clamp runs EVERY draw,
 	# so even if the filter or row count shrinks the board underneath a stale page index (from any
@@ -4499,7 +4550,7 @@ func _draw_hall() -> void:
 	var ptag := hall_page_tag(_hall_page, pages)
 	if ptag != "":
 		var psw := f.get_string_size(ptag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		Art.text(self, ptag, Vector2(HALL_PAGE_TAG_R - psw, 66), 10, HALL_COUNT_COL)
+		Art.text(self, ptag, Vector2(HALL_PAGE_TAG_R - psw, TAB_BASELINE_Y), 10, HALL_COUNT_COL)
 	if latest_idx >= 0:
 		@warning_ignore("integer_division")
 		var lpage := latest_idx / HALL_PAGE_ROWS
@@ -4534,7 +4585,7 @@ func _draw_hall() -> void:
 		# populated board uses, and the SAME "start-stop OF total" shape ("0-0 OF 0"), so the
 		# counter never changes form when a filter has no runs. Same warm gold as the
 		# populated counters (HALL_COUNT_COL) so the total reads identically in every state.
-		_center_text("0-0 OF 0", 306, 11, HALL_COUNT_COL)
+		_center_text("0-0 OF 0", HALL_PAGE_ROW_Y, 11, HALL_COUNT_COL)
 	else:
 		# c4-13: the visible slice is the paged window [start, stop) from hall_page_window, NOT a
 		# hard mini(rows.size(), 8) crop — start = page*8, stop clamps to the row count, so every
@@ -4572,7 +4623,7 @@ func _draw_hall() -> void:
 				if run.get("assist", false):
 					tag += "  *A"
 				streak_s = "x%d%s" % [run.get("streak", 0), tag]
-			var y := 112 + row * 24   # rows stay at 112 (header @96 already clears row0's box top 102 by 4px); pushing them down crowds the 8th row's glow into the page buttons
+			var y := HALL_ROW0_Y + row * HALL_ROW_PITCH   # derived off HALL_HEADER_Y; the pitch is what keeps row 7's glow band clear of the page buttons
 			if is_latest:
 				# Glow band + a warm ribbon down the left edge so the run you opened the
 				# board for reads instantly, wherever it ranks. Drawn under the cells.
@@ -4630,7 +4681,7 @@ func _draw_hall() -> void:
 			# 267..373) — inside the PREV/NEXT gap (prev right edge 238, next left edge 402) with
 			# ~29px of clearance on each side. So the two indicators split cleanly: rows here, page
 			# there — a player reads which rows show AND which of how many pages they are on.
-			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], 306, 11, HALL_COUNT_COL)
+			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], HALL_PAGE_ROW_Y, 11, HALL_COUNT_COL)
 			# Mouse-clickable page buttons flanking the counter — a second way to page for the
 			# mouse (c3-06: the wheel now scrolls the board too). Each carries a VERTICAL arrow glyph, not just a
 			# word: paging is bound to UP/DOWN (left/right is the filter), so a horizontal cue
@@ -4675,7 +4726,7 @@ func _draw_hall() -> void:
 			# format AND the same warm gold (HALL_COUNT_COL) the paged footer uses, so the
 			# indicator reads identically across every filter state (here start=0,
 			# stop=rows.size(), so it renders "1-N OF N").
-			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], 306, 11, HALL_COUNT_COL)
+			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], HALL_PAGE_ROW_Y, 11, HALL_COUNT_COL)
 
 
 func _hall_rows() -> Array:
@@ -4751,7 +4802,7 @@ func _draw_howto() -> void:
 	# Title baseline y38 (size 22, ~4px descent -> bottom ~42) matched to HALL so both
 	# content screens share one header rhythm; the tab plate top sits at y54, a clear
 	# ~12px below, so the two never overlap regardless of font metrics.
-	_center_text("HOW TO PLAY", CONTENT_TITLE_Y, 22, HEADER_ACCENT)
+	_center_text("HOW TO PLAY", CONTENT_TITLE_Y, CONTENT_TITLE_SIZE, HEADER_ACCENT)
 	# c2-02/c3-05/c4-06: the wall of ~17 lines is split into four TABS — CONTROLS / WAR
 	# CHEST / ENEMIES / ENDLESS — each drawn on its own screen with a fresh top-of-screen y
 	# cursor. Nothing stacks a section onto the next, so no row can land on the BACK plate,
@@ -4790,11 +4841,11 @@ func _draw_howto_tabs() -> void:
 		var st := hall_tab_style(on, hov, 0.0)
 		var plate: Color = st["plate"]
 		if plate.a > 0.0:
-			draw_rect(Rect2(tr.position.x, 54.0, tr.size.x, 16.0), plate)
+			_emit_rect(Rect2(tr.position.x, TAB_PLATE_Y, tr.size.x, 16.0), plate)
 		Art.text(self, HOWTO_TABS[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), 10, st["text"])
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
-			draw_rect(Rect2(tr.position.x + 2.0, 70.0, tr.size.x - 4.0, uh), st["underline"])
+			_emit_rect(Rect2(tr.position.x + 2.0, TAB_PLATE_Y + 16.0, tr.size.x - 4.0, uh), st["underline"])
 	# c3-05/c4-06/c4-09: a "N / 5" counter, right-aligned at the frame edge on the tab baseline, so
 	# a first-time player can see at a glance there are more pages than the one on
 	# screen — the tabs alone read as a static header, and nobody paged through them.
@@ -4823,24 +4874,24 @@ func _draw_howto_tabs() -> void:
 # hardcoded WASD — so a rebound or non-QWERTY player is told the keys they actually have.
 func _howto_page_controls() -> void:
 	var col := Color(0.9, 0.92, 0.8)
-	var y := 100.0
-	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
-	y += 26.0
+	var y := CONTENT_BODY_Y
+	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	y += 24.0
 	# Each text token after a glyph leads with a space so the word never glues to the device art.
 	_verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col)
-	y += 26.0
+	y += VERB_PITCH
 	# The weapon has no trigger — it fires on its own, so AIM is the whole weapon verb and is
 	# the single most important thing a first-run player has to be told.
 	_verb_line(["@aim", " AIM with %s. The gun fires on its own — just point it." % _dir_devices("aim")], y, col)
-	y += 26.0
+	y += VERB_PITCH
 	# Board and plant share the SAME button, so the two lines are parallel imperatives
 	# (BOARD… / PLANT…) that read as complete commands, not fragments.
 	_verb_line(["@grenade", " GRENADES crack armor — bunkers, bosses, the Colossus."], y, col)
-	y += 26.0
+	y += VERB_PITCH
 	_verb_line(["@roll", " ROLL dodges bullets — armor never stops them."], y, col)
-	y += 26.0
+	y += VERB_PITCH
 	_verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col)
-	y += 26.0
+	y += VERB_PITCH
 	_verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col)
 
 
@@ -4872,17 +4923,17 @@ func _dir_devices(prefix: String) -> String:
 # inline via _verb_line (was a lowercase fragment with the glyph spliced by hand into
 # the middle of a wrapped line), so it reads as one plain sentence.
 func _howto_page_warchest() -> void:
-	var y := 100.0
-	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(60, y), 13, Color(1.0, 0.9, 0.6))
+	var y := CONTENT_BODY_Y
+	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(ICON_X, y), 13, Color(1.0, 0.9, 0.6))
+	y += 22.0
+	y = _body_block("No health bar, no second chance — use cover and keep moving.",
+		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 26.0
-	Art.text(self, "No health bar, no second chance — use cover and keep moving.",
-		Vector2(60, y), 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - 60.0)
-	y += 40.0
-	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(60, y), 11, Color(1.0, 0.9, 0.6))
-	y += 26.0
-	Art.text(self, "Spend it to REVIVE a fallen partner or BUY supplies.",
-		Vector2(60, y), 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - 60.0)
-	y += 30.0
+	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(ICON_X, y), 11, Color(1.0, 0.9, 0.6))
+	y += 22.0
+	y = _body_block("Spend it to REVIVE a fallen partner or BUY supplies.",
+		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
+	y += 18.0
 	_verb_line(["Hold ", "@wheel", " to open the supply wheel. That's the choice."],
 		y, Color(0.85, 0.9, 0.8))
 
@@ -4892,9 +4943,12 @@ func _howto_page_warchest() -> void:
 # ASSIST (2-HIT) toggle actually does. Each mode gets a plain sentence, amber NAME + muted tip on
 # one width-clamped line (same grammar as the ENDLESS roster) so the page scans by name.
 func _howto_page_modes() -> void:
-	var y := 100.0
-	Art.text(self, "MODES + ASSIST:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
-	y += 22.0
+	var y := CONTENT_BODY_Y
+	Art.text(self, "MODES + ASSIST:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	# 22 put the first 26px icon box at y100..126 — its TOP EDGE exactly on this size-10
+	# header's baseline (box [91,102]), so the flag sprite read as sitting on the copy.
+	# 30 gives the box top y108, 6px under the header's descender.
+	y += 30.0
 	var name_col := Color(1.0, 0.85, 0.45)
 	var body_col := Color(0.9, 0.92, 0.82)
 	# [icon, NAME, tip] — each mode leads with a glyph so the page shares the sprite-led row
@@ -4908,26 +4962,31 @@ func _howto_page_modes() -> void:
 		["hud_skull", "ENDLESS WAR", "Hold out against escalating waves for score. Ranged threats join wave 3+."],
 		["mi_timer", "DAILY RUN", "One shared seed a day, one attempt. Everyone races the same board."],
 		["icon_vest", "ASSIST (2-HIT)", "Each life takes TWO hits, not one. Runs are tagged *ASSIST."]]
-	var f := Art.font()
 	for m in modes:
 		# c4-09: guard the glyph key BEFORE Art.tint()/_draw_sprite_fit so a renamed or
 		# missing icon never reaches Art.tex()'s hard TEX[key] index — the row falls back
 		# to its amber NAME + tip (the load-bearing copy) instead of crashing the screen.
 		if Art.TEX.has(m[0]):
-			_draw_sprite_fit(m[0], Rect2(74, y - 22, 28, 26), Art.tint(m[0]))
+			_draw_sprite_fit(m[0], Rect2(ICON_X, y - 22, 28, 26), Art.tint(m[0]))
 		var nm: String = m[1]
-		var nw := f.get_string_size(nm + "  ", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		Art.text(self, nm, Vector2(110, y - 6), 11, name_col)
-		Art.text(self, m[2], Vector2(110.0 + nw, y - 6), 11, body_col, maxf(0.0, FRAME_INNER_R - (110.0 + nw)))
-		y += 34.0
+		Art.text(self, nm, Vector2(TEXT_X, y - 6), 11, name_col)
+		# The tip drops to its OWN line under the amber NAME (it used to trail it on
+		# one line and run to x862 — 291px past the border, hard-clipped mid-word).
+		# ...which made the fixed 36px pitch too tight: a tip that WRAPS puts its second
+		# baseline at y+19 (box [y+9, y+21]) while the next row's amber NAME cap top sat
+		# at y+20 — a 1px strike-through, so "run." and "ENDLESS WAR" read as one line.
+		# Advance off the block's OWN returned end instead of a constant, so a wrapped
+		# row takes the room it needs and a single-line row keeps the tighter pitch.
+		var after := _body_block(m[2], TEXT_X, y + 7, 11, body_col, BODY_W)
+		y = maxf(after + 8.0, y + 32.0)
 
 
 # c3-05 ENEMIES tab — the standard red-team roster with live sprites, at a roomy pitch
 # instead of the 18px it once crammed under the ranged block.
 func _howto_page_enemies() -> void:
-	var y := 100.0
-	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
-	y += 22.0
+	var y := CONTENT_BODY_Y
+	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	y += 24.0
 	# sol-08: front the LIVE red-team sprites the player now sees (rusher/elite draw the pack enemy_* cel bakes).
 	# c4-09: the FROGMAN line now names its bullet-IMMUNITY outright — while submerged, bullets pass
 	# clean over it (grenades only), so "GRENADES ONLY" reads as a rule, not a preference, and ammo
@@ -4936,18 +4995,17 @@ func _howto_page_enemies() -> void:
 		["enemy_assault", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — submerged: bullets pass over, GRENADES ONLY"]]
 	for r in roster:
-		_draw_sprite_fit(r[0], Rect2(74, y - 22, 28, 26), Art.tint(r[0]))
-		Art.text(self, r[1], Vector2(110, y - 6), 11, Color(0.9, 0.92, 0.82), FRAME_INNER_R - 110.0)
-		y += 34.0
+		_draw_sprite_fit(r[0], Rect2(ICON_X, y - 22, 28, 26), Art.tint(r[0]))
+		y = maxf(y + 12.0, _body_block(r[1], TEXT_X, y - 6, 11, Color(0.9, 0.92, 0.82), BODY_W)) + 16.0
 	# c4-09: the DOWNED PILOT is the reason the HOSTILES tally can read fewer than the bodies on
 	# screen — he is a rescue objective, not a kill (the sim's wave-clear check and the HUD counter
 	# both skip him), and shooting him does nothing. Called out as a note UNDER the red-team roster
 	# (he isn't "shooting back", so he stays out of it) exactly where a player hunting the mismatch looks.
 	y += 6.0
 	if Art.TEX.has("m_pilot"):   # c4-09: same guard — the pilot NOTE survives a missing sprite
-		_draw_sprite_fit("m_pilot", Rect2(74, y - 22, 28, 26), Art.tint("m_pilot"))
-	Art.text(self, "DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him.",
-		Vector2(110, y - 6), 11, Color(0.85, 0.95, 0.85), FRAME_INNER_R - 110.0)
+		_draw_sprite_fit("m_pilot", Rect2(ICON_X, y - 22, 28, 26), Art.tint("m_pilot"))
+	_body_block("DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him.",
+		TEXT_X, y - 6, 11, Color(0.85, 0.95, 0.85), BODY_W)
 
 
 # c3-05 ENDLESS tab — the Endless War ranged specialists.
@@ -5001,15 +5059,15 @@ func _endless_page() -> int:
 
 
 func _howto_page_endless(page: int = 0) -> void:
-	var y := 100.0
+	var y := CONTENT_BODY_Y
 	var special := _endless_threats()
 	var pages := _endless_pages()
 	page = clampi(page, 0, pages - 1)
 	var rows := special.slice(page * ENDLESS_PER_PAGE, page * ENDLESS_PER_PAGE + ENDLESS_PER_PAGE)
 	# Endless War fields ranged specialists (wave 3+) — teach their counters. The
 	# "(1/2)" marker tells a paging player this roster continues on the next tab.
-	Art.text(self, "ENDLESS WAR — RANGED THREATS (%d/%d):" % [page + 1, pages], Vector2(60, y), 10, Color(1.0, 0.7, 0.4))
-	y += 20.0
+	Art.text(self, "ENDLESS WAR — RANGED THREATS (%d/%d):" % [page + 1, pages], Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	y += 24.0
 	# Threat rows are the tight spot, so their pitch is DERIVED, not typed: fit
 	# every row's text baseline between here (`y`) and the last baseline the BACK
 	# plate allows. Pitch is the fit value capped and NEVER clamped upward, so the
@@ -5043,7 +5101,7 @@ func _howto_page_endless(page: int = 0) -> void:
 	# (text starts at x76, right edge FRAME_INNER_R) so a long or LOCALIZED tip clips with
 	# an ellipsis instead of bleeding through the chrome past x=640 — the same overflow
 	# guard the ENEMIES roster and the BASIC verb lines carry.
-	var text_w := maxf(0.0, FRAME_INNER_R - 76.0)
+	var text_w := BODY_W
 	# c4-06: draw the threat NAME (always the first token) in the amber header accent
 	# and trail the tip in the muted body color, so the rows scan by name at a glance
 	# instead of reading as one grey block. The tip clamps to the width the name leaves
@@ -5056,13 +5114,13 @@ func _howto_page_endless(page: int = 0) -> void:
 		# c3-05: center the sprite box on the text's visual mid (10px cap-height sits
 		# ~sy-8..sy, mid ~sy-4) instead of hanging it off the baseline, so the body and
 		# its tip line up on one row.
-		_draw_sprite_fit(rows[i][0], Rect2(50, sy - TEXT_MID_10 - box / 2.0, box, box), rows[i][1])
+		_draw_sprite_fit(rows[i][0], Rect2(ICON_X, sy - TEXT_MID_10 - box / 2.0, box, box), rows[i][1])
 		var parts: PackedStringArray = String(rows[i][2]).split(" ", true, 1)
 		var name := parts[0]
 		var name_w := f.get_string_size(name + " ", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		Art.text(self, name, Vector2(76, sy), 10, name_col, text_w)
+		Art.text(self, name, Vector2(TEXT_X, sy), 10, name_col, text_w)
 		if parts.size() > 1:
-			Art.text(self, parts[1], Vector2(76.0 + name_w, sy), 10, body_col, maxf(0.0, text_w - name_w))
+			_body_block(parts[1], TEXT_X + name_w, sy, 10, body_col, maxf(0.0, text_w - name_w), 11.0)
 	_draw_howto_endless_nav(page, pages)
 
 
@@ -5087,8 +5145,8 @@ func _draw_howto_endless_nav(page: int, pages: int) -> void:
 			# Brighter fill + border when the pointer hovers this chevron, so it reads
 			# as a focusable button (parity with the tab/hover plates).
 			var hot := side == _howto_nav_hover
-			draw_rect(rects[side], Color(1, 1, 1, 0.22 if hot else 0.10))
-			draw_rect(rects[side], Color(0.85, 0.9, 0.72, 0.6 if hot else 0.35), false)
+			_emit_rect(rects[side], Color(1, 1, 1, 0.22 if hot else 0.10))
+			_emit_rect_outline(rects[side], Color(0.85, 0.9, 0.72, 0.6 if hot else 0.35), 1.0)
 	Art.text_center(self, "<", rects[0].get_center().x, ny, 12, live if enabled[0] else dim)
 	Art.text_center(self, ">", rects[1].get_center().x, ny, 12, live if enabled[1] else dim)
 	# Draw the SAME padded string the geometry measures (see _howto_endless_counter), so the
@@ -5155,7 +5213,7 @@ func _draw_sprite_fit(key: String, box: Rect2, mod: Color) -> void:
 	# Snap size and position to whole pixels — fractional dst rects blur pixel art.
 	var dst := (Vector2(reg.size.x, reg.size.y) * s).round()
 	var pos := (box.position + (box.size - dst) / 2.0).round()
-	draw_texture_rect_region(t, Rect2(pos, dst), reg, mod)
+	_emit_fit(key, Rect2(pos, dst), reg, mod)
 
 
 func _replay_unwatched() -> bool:
@@ -5434,9 +5492,31 @@ func _overflow_chip_rect(label_r: float, cy: float) -> Rect2:
 # One howto line at x=60: "@action" segments draw the device glyph inline,
 # plain segments draw as text; x flows left to right (same measure-then-place
 # pattern as the wheel line above).
+# Word-wraps `txt` to `max_w` and draws each line through Art.text, returning the
+# baseline AFTER the block. The manual's copy used to be passed straight to Art.text's
+# max_w, which is draw_string's `width` — a HARD clip with no ellipsis and no wrap, so a
+# long line was amputated mid-word ("The gun fires on i"). Every line here is emitted
+# separately, so tests/test_menu_layout.gd sees (and bounds-checks) each one.
+func _body_block(txt: String, x: float, y: float, size: int, col: Color, max_w: float, lead := 12.0) -> float:
+	var f := Art.font()
+	var line := ""
+	for word in txt.split(" ", false):
+		var probe: String = word if line == "" else line + " " + word
+		if line != "" and f.get_string_size(probe, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+			Art.text(self, line, Vector2(x, y), size, col)
+			y += lead
+			line = word
+		else:
+			line = probe
+	if line != "":
+		Art.text(self, line, Vector2(x, y), size, col)
+		y += lead
+	return y
+
+
 func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 	var f := Art.font()
-	var x := 60.0
+	var x := ICON_X
 	for seg: String in segs:
 		if seg.begins_with("@"):
 			var action := seg.substr(1)
@@ -5448,18 +5528,23 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 			if action in ["fire", "move", "aim"]:
 				var t := Art.tex(Art.glyph_key(action))
 				var gw := 12.0 * float(t.get_width()) / float(t.get_height())
-				draw_texture_rect(t, Rect2(x, base_y - 10.0, gw, 12.0), false)
+				_emit_tex(Art.glyph_key(action), Rect2(x, base_y - 10.0, gw, 12.0), Color.WHITE)
 				x += gw + 4.0
 			else:
-				Art.draw_glyph(self, action, Vector2(x + 6.0, base_y - 4.0), 12.0,
-					Color.WHITE, false, main.bind_for_glyph(action))
+				_emit_glyph(action, Vector2(x + 6.0, base_y - 4.0), 12.0, Color.WHITE)
 				x += 16.0
 		else:
-			# c2-02: clamp each text segment to the frame interior (right edge 612) so
-			# a long or localized verb line clips instead of bleeding past x=640 into
-			# the chrome — same width guard the ENEMIES / ENDLESS pages use.
-			Art.text(self, seg, Vector2(x, base_y), 11, col, maxf(0.0, 612.0 - x))
-			x += f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			# The verb sentence WRAPS at the frame interior instead of being clipped
+			# mid-word at a hardcoded 612 (which was 41px outside the real border, so
+			# the clip landed on the ornament). Continuation lines hang under the
+			# text column, clear of the device glyph.
+			var seg_w := f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			if x + seg_w <= FRAME_INNER_R:
+				Art.text(self, seg, Vector2(x, base_y), 11, col)
+				x += seg_w
+			else:
+				_body_block(seg, x, base_y, 11, col, FRAME_INNER_R - x, VERB_LEAD)
+				x = FRAME_INNER_R
 
 
 const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)
@@ -5598,6 +5683,12 @@ func _emit_rect(r: Rect2, c: Color) -> void:
 # sites (and _CaptureMenu's override) stay untouched.
 func _emit_rect_outline(r: Rect2, c: Color, width: float) -> void:
 	draw_rect(r, c, false, width)
+# The fitted-sprite seam: _draw_sprite_fit computes the cropped-to-opaque-bounds
+# destination rect, then hands it here. Separate from _emit_tex because the source
+# region matters (and because a text-only capture is blind to a sliced icon — which
+# is exactly the defect test_content_well_ink_never_touches_the_frame_border pins).
+func _emit_fit(_key: String, r: Rect2, reg: Rect2, c: Color) -> void:
+	draw_texture_rect_region(Art.tex(_key), r, reg, c)
 func _emit_tex(key: String, r: Rect2, c: Color) -> void:
 	draw_texture_rect(Art.tex(key), r, false, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:

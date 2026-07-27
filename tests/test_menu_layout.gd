@@ -917,6 +917,8 @@ class _CaptureMenu extends GameMenu:
 		ops.append({"k": "rect_outline", "id": "", "box": r})
 	func _emit_tex(key: String, r: Rect2, _c: Color) -> void:
 		ops.append({"k": "tex", "id": key, "box": r})
+	func _emit_fit(key: String, r: Rect2, _reg: Rect2, _c: Color) -> void:
+		ops.append({"k": "fit", "id": key, "box": r})
 	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
 		ops.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
 	func _emit_stamp(txt: String, pos: Vector2, _c: Color) -> void:
@@ -1832,10 +1834,23 @@ func test_hall_page_tag_and_footer_layout() -> void:
 	var arrow_right := last_right - 4.0 + 8.0 + 11.0
 	Runner.T.ok(tag_left > arrow_right, "the PAGE x/y tag clears the filter tabs AND their cycle arrow")
 	Runner.T.ok(Menu.HALL_PAGE_TAG_R <= 640.0, "the tag stays on-canvas")
-	# Vertically the tag baseline (y66) sits a full line above the centered status band (HALL_RECENCY_Y,
-	# y82) — the two never share a row, so a long "LATEST RUN IS ON PAGE n / KEEPS TOP N" band can't
+	# Vertically the tag baseline sits a full line above the centered status band (HALL_RECENCY_Y) —
+	# the two never share a row, so a long "LATEST RUN IS ON PAGE n / KEEPS TOP N" band can't
 	# collide with the right-aligned tag even when it runs wide.
-	Runner.T.ok(Menu.HALL_RECENCY_Y - 66.0 >= 10.0, "the PAGE tag row clears the centered status band row")
+	# This assertion USED to read `HALL_RECENCY_Y - 66.0`: a stale hand-copied duplicate of
+	# TAB_BASELINE_Y left behind when the tab row dropped 66 -> 76. It kept measuring 16px of
+	# clearance that no longer existed (the true figure was 6) and let the recency band ship
+	# drawn straight THROUGH the tab labels. Read the live constant, never a copy of it.
+	Runner.T.ok(Menu.HALL_RECENCY_Y - Menu.TAB_BASELINE_Y >= 10.0,
+		"the PAGE tag / filter-tab row (baseline %.0f) clears the centered status band row (%.0f)"
+			% [Menu.TAB_BASELINE_Y, Menu.HALL_RECENCY_Y])
+	# ...and the selected tab's 2px underline (TAB_PLATE_Y + 16 .. + 18) sits BELOW both labels,
+	# so the band's real cap top — baseline less the size-9 ascent, not the baseline — has to
+	# clear it. Baseline-to-baseline arithmetic is what hid the 2px underline strike-through.
+	var band_top := Menu.HALL_RECENCY_Y - Art.font().get_ascent(9)
+	Runner.T.ok(band_top >= Menu.TAB_PLATE_Y + 18.0,
+		"the status band's cap top (%.0f) clears the selected-tab underline bottom (%.0f)"
+			% [band_top, Menu.TAB_PLATE_Y + 18.0])
 	m.free()
 	stub.free()
 	# Footer: all three HALL hint segs + nav fit the safe band once legend_fit_gap compresses them.
@@ -2211,7 +2226,25 @@ func test_hall_footer_layout_and_latest_visibility() -> void:
 		Runner.T.ok(b.end.y <= back_plate.position.y, "a page button's bottom (%d) clears the drawn BACK plate top (%d) — no overlap" % [int(b.end.y), int(back_plate.position.y)])
 	# Recency messaging lives in its OWN top band, distinct from both the paging counter
 	# and the BACK plate — the three footers never share a vertical region.
-	Runner.T.ok(Menu.HALL_RECENCY_Y < 92.0, "recency status sits above the column headers (top band)")
+	# (Second stale typed copy found by the same sweep: `92.0` was the column-header
+	# baseline of two layouts ago. Measure against the live constant and the real font
+	# box — baseline < baseline says nothing about whether the descenders collide.)
+	var rec_bottom := Menu.HALL_RECENCY_Y + Art.font().get_descent(9)
+	var hdr_top := Menu.HALL_HEADER_Y - Art.font().get_ascent(10)
+	Runner.T.ok(rec_bottom <= hdr_top,
+		"recency status (box bottom %.0f) sits above the column headers (box top %.0f)" % [rec_bottom, hdr_top])
+	# ...and the OTHER end of the same derived stack: making room at the top pushes the
+	# score rows down, so the LAST row of a full page — and the 20px latest-run glow band
+	# drawn behind it (y-12 .. y+8) — must still clear the "1-8 OF N" counter's cap top.
+	# The content-well capture can't see this (the stub board is 3 rows and never fills a
+	# page), so it is asserted arithmetically off the constants the draw actually uses.
+	var last_row := Menu.HALL_ROW0_Y + float(Menu.HALL_PAGE_ROWS - 1) * Menu.HALL_ROW_PITCH
+	var count_top := Menu.HALL_PAGE_ROW_Y - Art.font().get_ascent(11)
+	Runner.T.ok(last_row + Art.font().get_descent(11) <= count_top,
+		"row %d (baseline %.0f) clears the row-window counter's cap top (%.0f)"
+			% [Menu.HALL_PAGE_ROWS - 1, last_row, count_top])
+	Runner.T.ok(last_row + 8.0 <= count_top,
+		"...and so does its latest-run glow band (bottom %.0f)" % [last_row + 8.0])
 	Runner.T.ok(Menu.HALL_RECENCY_Y + 12.0 < back_plate.position.y, "recency status is well clear of the BACK plate")
 	# Latest ON the visible page: the on-page recency legend gates ON, no off-page marker.
 	m._hall_page = 2
@@ -6701,3 +6734,240 @@ func test_every_overlay_screen_wears_the_box_chrome_without_crossing_its_ink() -
 func _rect_inside(outer: Rect2, inner: Rect2) -> bool:
 	return inner.position.x >= outer.position.x and inner.position.y >= outer.position.y \
 		and inner.end.x <= outer.end.x and inner.end.y <= outer.end.y
+
+
+# ---------------------------------------------------------------------------
+# The content-well (HOWTO / HALL) must stay INSIDE the chrome frame it draws in.
+# ---------------------------------------------------------------------------
+
+## Re-measure ui_frame_lrg's opaque border band and project it through FRAME_ART_RECT.
+## Returns the interior hole in canvas units.
+static func _measured_frame_interior() -> Rect2:
+	var img := Art.tex("ui_frame_lrg").get_image()
+	var tw := img.get_width()
+	var th := img.get_height()
+	var mid_row := th / 2
+	var mid_col := tw / 2
+	# Walk in from each edge: transparent margin, then the opaque border band, and
+	# the first transparent texel after it is the interior.
+	var ix := 0
+	while ix < tw and img.get_pixel(ix, mid_row).a <= 0.06:
+		ix += 1
+	while ix < tw and img.get_pixel(ix, mid_row).a > 0.06:
+		ix += 1
+	var irx := tw - 1
+	while irx >= 0 and img.get_pixel(irx, mid_row).a <= 0.06:
+		irx -= 1
+	while irx >= 0 and img.get_pixel(irx, mid_row).a > 0.06:
+		irx -= 1
+	var ity := 0
+	while ity < th and img.get_pixel(mid_col, ity).a <= 0.06:
+		ity += 1
+	while ity < th and img.get_pixel(mid_col, ity).a > 0.06:
+		ity += 1
+	var iby := th - 1
+	while iby >= 0 and img.get_pixel(mid_col, iby).a <= 0.06:
+		iby -= 1
+	while iby >= 0 and img.get_pixel(mid_col, iby).a > 0.06:
+		iby -= 1
+	var fr: Rect2 = Menu.FRAME_ART_RECT
+	var sx := fr.size.x / float(tw)
+	var sy := fr.size.y / float(th)
+	return Rect2(fr.position.x + ix * sx, fr.position.y + ity * sy,
+		(irx + 1 - ix) * sx, (iby + 1 - ity) * sy)
+
+
+func test_frame_inner_constants_match_the_frame_art() -> void:
+	## FRAME_INNER_* is the only thing standing between the manual's copy and the
+	## frame ornament, and it used to be a single hand-typed 612.0 with a comment
+	## ("CANVAS_WIDTH 640 less the 28px border") describing a border the art does
+	## not have. MEASURED off SPR_HUD_Frame_Lrg.png (256^2, opaque band at texel
+	## 15..20 / 235..240) projected through FRAME_ART_RECT: interior x 69.22..570.78,
+	## y 36.22..323.78. The old FRAME_INNER_R sat 41.2px OUTSIDE that, on bare scrim.
+	##
+	## This is the "record the canvas the constant was tuned against" guard: re-bake
+	## the frame with a thicker border and this goes red instead of silently
+	## re-sizing every content screen.
+	var m := _measured_frame_interior()
+	var pad := 8.0   # constants may sit up to this far INSIDE the hole, never outside
+	for row in [["L", Menu.FRAME_INNER_L, m.position.x, 1.0],
+			["T", Menu.FRAME_INNER_T, m.position.y, 1.0],
+			["R", Menu.FRAME_INNER_R, m.end.x, -1.0],
+			["B", Menu.FRAME_INNER_B, m.end.y, -1.0]]:
+		var name: String = row[0]
+		var have: float = row[1]
+		var want: float = row[2]
+		var inward: float = row[3]   # +1 = inward is larger, -1 = inward is smaller
+		var slack: float = (have - want) * inward
+		Runner.T.ok(slack >= 0.0 and slack <= pad,
+			"FRAME_INNER_%s = %.1f sits inside the MEASURED frame interior edge %.2f by %.2f px (0..%.0f)"
+				% [name, have, want, slack, pad])
+
+
+## Every content-well screen, derived from source rather than typed: one per HOWTO
+## tab, one per ENDLESS sub-page, plus HALL. A sixth tab or a third sub-page is
+## covered the day it lands.
+func _content_well_screens(m) -> Array:
+	var out: Array = []
+	for tab in Menu.HOWTO_TABS.size():
+		if tab == Menu.HOWTO_ENDLESS_TAB:
+			for ep in m._endless_pages():
+				out.append({"mode": Menu.Mode.HOWTO, "tab": tab, "ep": ep,
+					"tag": "HOWTO/%s p%d" % [Menu.HOWTO_TABS[tab], ep + 1]})
+		else:
+			out.append({"mode": Menu.Mode.HOWTO, "tab": tab, "ep": 0,
+				"tag": "HOWTO/%s" % Menu.HOWTO_TABS[tab]})
+	out.append({"mode": Menu.Mode.HALL, "tab": 0, "ep": 0, "tag": "HALL"})
+	return out
+
+
+func test_content_well_ink_never_touches_the_frame_border() -> void:
+	## THE CLASS ASSERTION. Content is drawn AFTER the chrome (_draw_content_frame
+	## then the page body), so left/top ink COLLIDES with the border ornament, and
+	## right-hand copy is genuinely amputated mid-word: Art.text's max_w goes
+	## straight into draw_string(..., width, ...), which hard-clips with no ellipsis
+	## and no wrap ("The gun fires on i").
+	##
+	## MEASURED at HEAD, worst overhang per screen in px (footer legend excluded —
+	## it is drawn on the scrim BELOW the frame by design and is already pinned by
+	## test_footer_draw_commands_captured_both_devices):
+	##   HOWTO/CONTROLS 228.2 · WAR CHEST 41.2 · MODES 291.2 · ENEMIES 352.2 ·
+	##   ENDLESS p1 41.2 · ENDLESS p2 41.2 · HALL 18.2   — 7 of 7 defective.
+	## All must be <= 0.
+	##
+	## TEXT IS MEASURED AT ITS NATURAL WIDTH, not the clamped width it was drawn
+	## with — otherwise "it fits" and "it was amputated to fit" give the same
+	## answer and mid-word clipping stays structurally possible.
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var f := Art.font()
+	var inner := Rect2(Menu.FRAME_INNER_L, Menu.FRAME_INNER_T,
+		Menu.FRAME_INNER_R - Menu.FRAME_INNER_L, Menu.FRAME_INNER_B - Menu.FRAME_INNER_T)
+	var back_plate: Rect2 = m._back_rect().grow(3.0)
+	var screens := _content_well_screens(m)
+	Runner.T.ok(screens.size() >= 7,
+		"the screen set is derived from HOWTO_TABS x _endless_pages() + HALL (%d screens)" % screens.size())
+	for scr in screens:
+		m.mode = scr["mode"]
+		m._howto_page = scr["tab"]
+		m._howto_endless_page = scr["ep"]
+		m.ops.clear()
+		m.centered.clear()
+		var prev = Art.text_capture
+		Art.text_capture = m.ops
+		if scr["mode"] == Menu.Mode.HALL:
+			m._draw_hall()
+		else:
+			m._draw_howto()
+		Art.text_capture = prev
+		Runner.T.ok(m.ops.size() > 4, "%s: the real draw emitted ink to inspect (%d ops)" % [scr["tag"], m.ops.size()])
+		var worst := 0.0
+		var worst_id := ""
+		var lowest := 0.0
+		var lowest_id := ""
+		for op in m.ops:
+			var box: Rect2 = op["box"]
+			# The footer legend strip is drawn on the scrim BELOW the frame by design.
+			if box.position.y > 340.0:
+				continue
+			# The BACK PLATE is chrome that seats on the bottom rail (its LABEL is not
+			# exempt and is checked like any other string).
+			if op["k"] in ["rect", "rect_outline"] and back_plate.encloses(box):
+				continue
+			if op.has("size"):
+				# An Art.text op: re-measure at NATURAL width so a hard-clipped string
+				# still reports the width it wanted.
+				var sz := int(op["size"])
+				box = Rect2(box.position,
+					Vector2(f.get_string_size(str(op["id"]), HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x, box.size.y))
+			var over: float = maxf(maxf(inner.position.x - box.position.x, box.end.x - inner.end.x),
+				maxf(inner.position.y - box.position.y, box.end.y - inner.end.y))
+			if over > worst:
+				worst = over
+				worst_id = "%s '%s' x%.0f..%.0f y%.0f..%.0f" % [op["k"], str(op["id"]).substr(0, 46),
+					box.position.x, box.end.x, box.position.y, box.end.y]
+			if box.end.y > lowest:
+				lowest = box.end.y
+				lowest_id = "%s '%s'" % [op["k"], str(op["id"]).substr(0, 46)]
+		# ...and the same ink must clear the BACK plate it shares the well with. Wrapping
+		# a clipped line into two REFLOWS the page downward, so "fits the frame" alone
+		# would let a grown block slide under BACK and stay green.
+		Runner.T.ok(lowest <= back_plate.position.y,
+			"%s: the lowest content ink (%.0f) clears the drawn BACK plate top (%.0f) — %s"
+				% [scr["tag"], lowest, back_plate.position.y, lowest_id])
+		Runner.T.ok(worst <= 0.5,
+			"%s: every drawn op fits the frame interior (worst overhang %.1f px%s)"
+				% [scr["tag"], worst, "" if worst <= 0.5 else " — " + worst_id])
+		# ...and no two strings on the screen may sit ON TOP OF EACH OTHER. Frame
+		# containment alone is blind to INTRA-content collisions: HALL_RECENCY_Y stayed
+		# at 82 when the tab row dropped 66 -> 76, so "BOARD KEEPS YOUR TOP 40 RUNS" drew
+		# straight through "CAMPAIGN ENDLESS RUSH" — inside the frame, and green through
+		# a 5822-assertion suite. Any future vertical shuffle of the content well is
+		# caught here instead of in a screenshot.
+		Runner.T.ok(_worst_text_overlap(m.ops, f) == null,
+			"%s: no two content strings overlap%s" % [scr["tag"], _overlap_msg(_worst_text_overlap(m.ops, f))])
+	m.free()
+	stub.free()
+
+
+## Worst pairwise intersection among the captured FOREGROUND ink ops (strings, fitted
+## sprites, input glyphs, loose textures), or null if the screen is clean. Text boxes
+## are the REAL font line boxes (ascent above the baseline, full line height) at
+## NATURAL width, so a string that was hard-clipped to fit still reports the ink it
+## wanted — the same measuring rule the frame-containment pass uses.
+## Plates (`rect`/`rect_outline`) are deliberately drawn UNDER their label, so they are
+## background, not ink, and are excluded.
+func _worst_text_overlap(ops: Array, f: Font):
+	var boxes: Array = []
+	for op in ops:
+		if not (op["k"] in ["text", "fit", "tex", "glyph"]):
+			continue
+		var txt := str(op["id"])
+		var box: Rect2 = op["box"]
+		if op["k"] == "text":
+			if not op.has("size"):
+				continue
+			if float(op["alpha"]) <= 0.02:
+				continue   # fully faded ink paints nothing
+			if txt.strip_edges() == "":
+				continue
+			box.size.x = f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, int(op["size"])).x
+		else:
+			# _emit_tex draws mirrored art with a NEGATIVE rect width — normalize or
+			# Rect2.intersects() silently reports nothing.
+			box = box.abs()
+			txt = "[%s %s]" % [op["k"], txt]
+		if box.position.y > 340.0:
+			continue   # footer legend, drawn on the scrim below the frame
+		boxes.append({"t": txt, "b": box})
+	var worst = null
+	var worst_area := 0.0
+	for i in boxes.size():
+		for j in range(i + 1, boxes.size()):
+			var a: Rect2 = boxes[i]["b"]
+			var c: Rect2 = boxes[j]["b"]
+			if not a.intersects(c):
+				continue
+			var ov := a.intersection(c)
+			if ov.size.x <= 0.0 or ov.size.y <= 0.0:
+				continue
+			var area := ov.size.x * ov.size.y
+			if area > worst_area:
+				worst_area = area
+				worst = [boxes[i]["t"], a, boxes[j]["t"], c, ov]
+	return worst
+
+
+func _overlap_msg(w) -> String:
+	if w == null:
+		return ""
+	var a: Rect2 = w[1]
+	var b: Rect2 = w[3]
+	var ov: Rect2 = w[4]
+	return " — '%s' (x%.0f..%.0f y%.0f..%.0f) overlaps '%s' (x%.0f..%.0f y%.0f..%.0f) by %.0fx%.0f px" \
+		% [str(w[0]).substr(0, 34), a.position.x, a.end.x, a.position.y, a.end.y,
+			str(w[2]).substr(0, 34), b.position.x, b.end.x, b.position.y, b.end.y,
+			ov.size.x, ov.size.y]

@@ -7856,6 +7856,27 @@ func _draw_tanks() -> void:
 			Art.arc(self, c, 17.0, -PI / 2, -PI / 2 + TAU * rdy, 24, Color(1.0, 0.8, 0.4, 0.6), 2.0)
 
 
+## The unit-ish vector the view PAINTS as `e`'s telegraph. SINGLE SOURCE: every
+## enemy-draw site below and tests/test_view_honesty.gd both call it, so a
+## telegraph cannot drift from the bullet it promises again.
+##
+## Every aim-locked shooter in the roster (elite/sniper/ghillie/technical) commits
+## `aim_lx/aim_ly` once and fires down exactly that — for those, the stored vector
+## IS the honest answer. The mg_nest is the lone exception: it RE-ACQUIRES the
+## nearest player at the top of every round (sim_world.gd `_step_mg_nest`, the
+## "tracking rake"), so a lane drawn off the stale stored vector promises a lane
+## the burst does not use. Return value is NOT normalised (callers normalise).
+static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
+	if e.get("kind", "") == "mg_nest" and (e.get("windup", 0) > 0 or e.get("lunge_ticks", 0) > 0):
+		# Mid-burst / winding up: the nest is tracking, so the lane must track.
+		# Outside that window (fire_cd reload) it is NOT tracking — the stored
+		# vector is then the honest "last lane raked" read, and falls through.
+		var tgt := sw._nearest_alive_player(e["x"], e["y"])   # pure read, mutates nothing
+		if not tgt.is_empty():
+			return Vector2(float(tgt["x"] - e["x"]), float(tgt["y"] - e["y"]))
+	return Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
+
+
 func _draw_enemies() -> void:
 	# ≤2 alive players, cached once — replaces an O(players) sim scan per enemy
 	# per frame that existed purely to pick a facing/laser target.
@@ -8023,7 +8044,8 @@ func _draw_enemies() -> void:
 				# Beam follows the LOCKED shot vector (aim_lx/aim_ly at paint start),
 				# not the live target — sidestepping must visibly clear the line the
 				# same way it dodges the fired bullet.
-				var lp := _to_screen(e["x"] + e.get("aim_lx", 0), e["y"] + e.get("aim_ly", 0))
+				var slv := telegraph_dir(sim, e)
+				var lp := _to_screen(e["x"] + int(slv.x), e["y"] + int(slv.y))
 				var pf := 1.0 - float(swu) / float(SimWorld.SNIPER_WINDUP_TICKS)
 				var bdir := lp - epos
 				bdir = bdir.normalized() if bdir.length() > 0.001 else Vector2.RIGHT
@@ -8125,7 +8147,7 @@ func _draw_enemies() -> void:
 			# body vibrates above it is what sells the revving.
 			_ground_shadow(epos, 11.0, 0.42)
 			if t_lunge > 0:
-				t_face = Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0))).angle()
+				t_face = telegraph_dir(sim, e).angle()
 				# Hold the smoothed-facing lerp at the locked line — otherwise it
 				# keeps tracking the player and lunge-end snaps the sprite ~180°.
 				_enemy_face[eidx] = t_face
@@ -8280,7 +8302,7 @@ func _draw_enemies() -> void:
 			# Baked tripod MG on the sandbag ring (was a shrunken red elite gunner).
 			# Image-up = muzzle, so the emplacement swivels with the live aim lane;
 			# it darkens with the bags as the nest cracks.
-			var nlv := Vector2(e.get("aim_lx", 0), e.get("aim_ly", 0))
+			var nlv := telegraph_dir(sim, e)
 			var nang: float = nlv.angle() if nlv.length() > 1.0 else face
 			_spr("mg_stand", epos + Vector2(0, -2), nang + PI / 2, 1.0,
 				Color(1.0 - n_dmg * 0.15, 1.0 - n_dmg * 0.17, 1.0 - n_dmg * 0.15))
@@ -8334,7 +8356,8 @@ func _draw_enemies() -> void:
 				if gwu2 > 0:
 					# Beam rides the LOCKED shot vector, not the live target — the
 					# fired bullet flies down aim_lx/aim_ly, so must the tell.
-					var lp2 := _to_screen(e["x"] + e.get("aim_lx", 0), e["y"] + e.get("aim_ly", 0))
+					var glv := telegraph_dir(sim, e)
+					var lp2 := _to_screen(e["x"] + int(glv.x), e["y"] + int(glv.y))
 					var pf2 := 1.0 - float(gwu2) / float(SimWorld.SNIPER_WINDUP_TICKS)
 					var bdir2 := lp2 - epos
 					bdir2 = bdir2.normalized() if bdir2.length() > 0.001 else Vector2.RIGHT
@@ -8367,7 +8390,7 @@ func _draw_enemies() -> void:
 				# of a lone chest ember. It rides the LOCKED aim_lx/aim_ly and is SOLID,
 				# not dashed: the sim commits the vector at windup start now, and dashed
 				# is this game's "still aiming" (the technical's rev line vs its corridor).
-				var eaim := Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
+				var eaim := telegraph_dir(sim, e)
 				var edir := eaim.normalized() if eaim.length() > 0.001 else Vector2.from_angle(face)
 				Art.line(self, epos + edir * 9.0, epos + edir * (30.0 + wfrac * 8.0),
 					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac)

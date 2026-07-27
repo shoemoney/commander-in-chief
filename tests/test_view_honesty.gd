@@ -671,3 +671,148 @@ func test_fork_signposts_name_the_lane_the_sim_actually_wired() -> void:
 		"main.gd derives the fork lane side from the sim's own predicate, fed the real measured fork_x")
 	Runner.T.ok(not view.contains("isl_x < 320.0"),
 		"the bare 320.0 fork-side literal is gone from main.gd (collapsed into fork_cache_is_left)")
+
+
+# --- 6. Telegraph VECTOR: the lane the view paints must be the lane the shot flies ---
+
+## Source-derived roster of every aim-locked shooter: each `e["aim_lx"] = ` in the
+## sim, resolved to its enclosing `func _step_<kind>`. Adding a sixth shooter that
+## locks an aim vector makes the equality assertion below go red the day it lands,
+## rather than shipping a sixth telegraph nobody checked.
+func _aim_locking_kinds() -> Array:
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var lines := src.split("\n")
+	var fn := ""
+	var kinds := {}
+	for ln in lines:
+		if ln.begins_with("func _step_"):
+			fn = ln.substr(11, ln.find("(") - 11)
+		elif ln.strip_edges().begins_with("e[\"aim_lx\"]") and ln.contains("=") and fn != "":
+			kinds[fn] = true
+	var out := kinds.keys()
+	out.sort()
+	return out
+
+
+func _spawn_shooter(sim: SimWorld, kind: String, x: int, y: int) -> Dictionary:
+	if kind == "mg_nest":
+		sim._spawn_mg_nest(x, y)
+	elif kind == "elite":
+		sim.enemies.append({"x": x, "y": y, "alive": true, "elite": true,
+			"kind": "elite", "fire_cd": 0, "windup": 0})
+	else:
+		sim._spawn_special(x, y, kind)
+	return sim.enemies[-1]
+
+
+func _bullets_at(sim: SimWorld, x: int, y: int) -> Array:
+	## Every live enemy bullet sitting exactly on (x, y) — i.e. still on the muzzle
+	## it was born on this tick. Used to attribute a shot to ONE shooter in a live
+	## endless field. See the note in the telegraph test.
+	var out: Array = []
+	for b in sim.enemy_bullets:
+		if b["x"] == x and b["y"] == y:
+			out.append(b)
+	return out
+
+
+func test_every_painted_telegraph_lane_fires_down_itself() -> void:
+	## THE CLASS RULE: "a drawn line is a committed shot". Four of the five
+	## aim-locked shooters obeyed it; the mg_nest opted out. It painted the lane
+	## it locked at burst start, then RE-ACQUIRED the nearest player at the top of
+	## every round (sim_world.gd `_step_mg_nest`) and fired somewhere else.
+	##
+	## MEASURED before the fix (tools/probe_mg_lane.gd, 1P endless, nest at x=320,
+	## the player strafing): the painted lane sat 20.4 / 14.8 / 10.4 deg off the
+	## bullet at 140 / 213 / 318 px range, and missed the player it was actually
+	## shooting at by 58.5 / 59.3 / 59.7 px — 5.9x BULLET_HIT_RADIUS (10 px). Six
+	## body-widths off the amber lane and you are still the thing being shot.
+	##
+	## The sim's tracking rake is a GOOD mechanic and is untouched; the view stops
+	## lying about it. Both sides now read one helper, Main.telegraph_dir().
+	##
+	## SAMPLING WINDOW vs the defect it pins: the mg_nest defect spans the whole
+	## 30-tick AIM window plus a 3-round burst at 8-tick gaps = 46 ticks, repeating
+	## every 30+16+90 = 136 ticks. This drives 600 ticks per (kind x range) cell,
+	## i.e. ~4.4 bursts per cell, and strafes the player left<->right every 40
+	## ticks so the bot never parks on a wall and stops generating drift (the
+	## probe's rounds 2-5 read 0.0 deg for exactly that reason).
+	const MAX_ANGLE_DEG := 3.0
+	var hit_r: float = float(SimWorld.BULLET_HIT_RADIUS) * PX
+	var kinds := _aim_locking_kinds()
+	Runner.T.eq(kinds, ["elite", "ghillie", "mg_nest", "sniper", "technical"],
+		"the aim-locked shooter roster derived from src/sim/sim_world.gd is the set this test drives")
+	for kind in kinds:
+		var commits := 0
+		var worst_ang := 0.0
+		var worst_perp := 0.0
+		var worst_at := ""
+		for range_px in [140, 180, 240]:
+			var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+			var p: Dictionary = sim.players[0]
+			var e := _spawn_shooter(sim, kind, 320 * Fixed.ONE, p["y"] - range_px * Fixed.ONE)
+			var inp := SimInput.new()
+			for t in 600:
+				# Strafe back and forth: a bot pinned on a wall stops drifting and
+				# would let a stale lane score 0.0 deg for free.
+				inp.move_x = 256 if (t / 40) % 2 == 0 else -256
+				var drawn := Main.telegraph_dir(sim, e)   # what the view paints THIS tick
+				var rel := Vector2(float(p["x"] - e["x"]), float(p["y"] - e["y"])) * PX
+				var ex0: int = e["x"]
+				var ey0: int = e["y"]
+				var muzzled_before := _bullets_at(sim, ex0, ey0)
+				sim.step([inp])
+				if not e.get("alive", false):
+					break
+				# A "commit" is the tick the promise is cashed. ATTRIBUTION MATTERS:
+				# this is endless, the wave spawner keeps adding OTHER shooters, and
+				# the first draft of this check read sim.enemy_bullets[-1] — charging
+				# `e` with a neighbour's bullet and reporting 11.8-40.6 deg of fake
+				# drift on the four honest shooters. A bullet born this tick still
+				# sits on its own shooter's exact fixed-point muzzle (projectiles
+				# step BEFORE enemies in SimWorld.step), so attribute by position.
+				var fired := Vector2.ZERO
+				var muzzled_after := _bullets_at(sim, e["x"], e["y"])
+				if muzzled_after.size() > muzzled_before.size():
+					var b: Dictionary = muzzled_after[-1]
+					fired = Vector2(float(b["vx"]), float(b["vy"]))
+				elif int(e.get("lunge_ticks", 0)) > 0:
+					# The technical fires no bullet — its projectile is the truck. Its
+					# painted corridor is checked against where the body ACTUALLY went.
+					fired = Vector2(float(e["x"] - ex0), float(e["y"] - ey0))
+				if fired.length() <= 0.0 or drawn.length() <= 1.0:
+					continue
+				commits += 1
+				var ld := drawn.normalized()
+				var ang := rad_to_deg(absf(ld.angle_to(fired.normalized())))
+				# The angle, restated in the units a player feels: how far apart the
+				# painted lane and the real shot are OUT WHERE YOU ARE STANDING.
+				#   NOT the drawn lane's distance from the player — for a LOCKED
+				#   shooter that distance is the mechanic (you sidestepped the sniper
+				#   line, which is the whole point), and asserting on it wrongly
+				#   reported 38-62 px of "defect" on the four honest shooters.
+				var sep: float = rel.length() * sin(deg_to_rad(ang))
+				if ang > worst_ang:
+					worst_ang = ang
+					worst_at = "%s @%dpx t=%d" % [kind, range_px, t]
+				worst_perp = maxf(worst_perp, sep)
+		Runner.T.ok(commits > 0,
+			"%s: the drive actually produced a committed shot (%d) — the check is not vacuous" % [kind, commits])
+		Runner.T.ok(worst_ang <= MAX_ANGLE_DEG,
+			"%s: painted telegraph is within %.1f deg of the shot it promises (worst %.1f deg over %d commits, %s)"
+				% [kind, MAX_ANGLE_DEG, worst_ang, commits, worst_at])
+		Runner.T.ok(worst_perp <= hit_r,
+			"%s: at the target's own range the painted lane and the real shot are within one bullet radius (%.0f px) of each other (worst %.1f px)"
+				% [kind, hit_r, worst_perp])
+
+
+func test_the_enemy_draw_path_reads_one_telegraph_source() -> void:
+	## The defect above was possible because five draw sites each restated
+	## `Vector2(e.aim_lx, e.aim_ly)` inline. Pin that they route through the one
+	## helper the test above measures — otherwise a future site can re-open the gap
+	## while test_every_painted_telegraph_lane_fires_down_itself stays green.
+	var view := _view_src()
+	Runner.T.eq(view.count("telegraph_dir(sim, e)"), 5,
+		"all five enemy telegraph draw sites (sniper/technical/mg_nest/ghillie/elite) read Main.telegraph_dir()")
+	Runner.T.eq(view.count("e.get(\"aim_lx\""), 1,
+		"main.gd reads the raw aim vector in exactly ONE place — inside telegraph_dir() — so no draw site can restate it")
