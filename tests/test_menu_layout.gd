@@ -39,6 +39,7 @@ class _NullSfx extends Sfx:
 
 
 class _StubMain extends Node2D:
+	var _token_loss_t := 0.0   # c7: hud.gd reads it to hold the zeroed commendation chip for a beat
 	var best_score := 0
 	# Everything below to _starts exists because test_stub_parity.gd demands the stub answer every
 	# name menu.gd reads off `main` — an unanswered one aborts the reading call mid-way and the row

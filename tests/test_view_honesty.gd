@@ -437,7 +437,7 @@ func test_px_is_only_ever_applied_to_fixed_point_quantities() -> void:
 			or line.contains("p[") or line.contains("b[") or line.contains("w[") \
 			or line.contains("e[") or line.contains("pk[") or line.contains("tk[") \
 			or line.contains("dp2[") or line.contains("fk.get") or line.contains("isl_x2") \
-			or line.contains("fw_fx") or line.contains("ford2_x") or line.contains("wall_x")
+			or line.contains("fw_fx") or line.contains("ford_x") or line.contains("wall_x")
 		if not ok:
 			suspicious.append("main.gd:%d  %s" % [n + 1, line.strip_edges()])
 	Runner.T.eq(suspicious.size(), 0,
@@ -1029,3 +1029,281 @@ func test_the_debrief_reports_the_continues_the_run_actually_used() -> void:
 	var vsrc := _view_src()
 	Runner.T.eq(vsrc.count("_continue_ledger_rows("), 3,
 		"the ledger is built once and called from BOTH end cards (victory + K.I.A.), not just the loss")
+
+
+# --- What death DELETES vs what the screen SAYS it deleted (cycle 7) --------
+#
+# The loss payload used to be three literals typed by hand into _kill_player's
+# `player_down` event ("triple"/"pierce"/"spread"), and `revive` carried none at
+# all. Meanwhile _respawn strips SEVEN per-player fields and _kill_player burns
+# two global ones. Measured on HEAD: 3 of 9 named. Every accrual added to the
+# strip list since was silently uncovered — the classic write-it-twice drift
+# this suite exists to pin, except here the second copy was a hand-written list.
+#
+# So: derive the strip set from the SOURCE, then prove the sim names every one
+# of them on an event and the view has a word for each.
+
+## Fields _respawn zeroes that are NOT losses — timers and cooldowns that were
+## about to expire anyway, so announcing them would be noise:
+##   broke_timer  - the revive-affordability clock, meaningless while dead
+##   roll_ticks   - the in-progress dodge-roll frame counter
+##   boost_ticks  - the sprint window
+## Same discipline as run_tests.gd's ERROR_ALLOW: an entry needs a justification.
+const EPHEMERAL := ["broke_timer", "roll_ticks", "boost_ticks"]
+
+
+## The set of accrued player state a death deletes, read out of _respawn's own body.
+func _death_strip_keys() -> Array[String]:
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var start := src.find("\nfunc _respawn(")
+	Runner.T.ok(start >= 0, "could not find _respawn( in sim_world.gd — the strip-set scrape is dead")
+	var body := src.substr(start + 1)
+	var nxt := body.find("\nfunc ")
+	if nxt > 0:
+		body = body.substr(0, nxt)
+	var re := RegEx.create_from_string('p\\["([a-z_]+)"\\]\\s*=\\s*(0|false|assist_mode)\\b')
+	var keys: Array[String] = []
+	for m in re.search_all(body):
+		var k := m.get_string(1)
+		if k not in EPHEMERAL and k not in keys:
+			keys.append(k)
+	Runner.T.ok(keys.size() >= 5,
+		"the _respawn strip-set scrape matched only %d fields — the parser is broken, not the sim" % keys.size())
+	return keys
+
+
+func test_every_field_death_strips_is_named_on_a_loss_payload() -> void:
+	var strips := _death_strip_keys()
+	var sim := SimWorld.new(7, 1)
+	sim.tokens = 2
+	sim.flawless_streak = 3
+	var p: Dictionary = sim.players[0]
+	for k in strips:
+		# Fail LOUDLY on a key the player dict doesn't carry. Reading p[k] on a missing key
+		# throws, and a throw mid-method silently aborts the remaining assertions and still
+		# reports PASS (the documented "green but wrong" trap) — measured: planting an unknown
+		# strip in _respawn took this test from 656 assertions to 635 and printed PASS.
+		if not p.has(k):
+			Runner.T.ok(false, "_respawn strips p[\"%s\"], which is not a field any player carries — the scrape or the sim is wrong" % k)
+			continue
+		p[k] = true if typeof(p[k]) == TYPE_BOOL else 300
+
+	sim.events.clear()
+	sim._kill_player(p)
+	var down := {}
+	for ev in sim.events:
+		if ev["t"] == "player_down":
+			down = ev
+	Runner.T.ok(not down.is_empty(), "_kill_player emitted no player_down event")
+
+	sim.events.clear()
+	sim._respawn(p, p["y"], 0)
+	var rev := {}
+	for ev in sim.events:
+		if ev["t"] == "revive":
+			rev = ev
+	Runner.T.ok(not rev.is_empty(), "_respawn emitted no revive event")
+	var lost: Dictionary = rev.get("lost", {})
+
+	# Every per-player accrual that actually went truthy -> falsy must be NAMED somewhere.
+	for k in strips:
+		if not p.has(k):
+			continue   # already reported above
+		var still_set: bool = (p[k] if typeof(p[k]) == TYPE_BOOL else p[k] != 0)
+		if still_set:
+			continue   # not stripped in this configuration (e.g. assist_mode re-issues the vest)
+		Runner.T.ok(lost.has(k) or down.has(k),
+			"death deletes p[\"%s\"] but neither player_down nor revive names it — the player watches it vanish with no cue" % k)
+
+	# ...and the two GLOBAL losses _kill_player takes, which nothing ever announced.
+	Runner.T.eq(down.get("token", 0), 1,
+		"_kill_player burns a Commendation but player_down does not report the spend")
+	Runner.T.eq(down.get("streak", -1), 3,
+		"_kill_player zeroes flawless_streak but player_down does not report what was broken")
+
+	# View half: a key with no noun prints nothing, which is the same silence in a new costume.
+	var vsrc := _view_src()
+	var nouns := vsrc.substr(vsrc.find("const LOSS_NOUN"))
+	nouns = nouns.substr(0, maxi(0, nouns.find("\n\n")))
+	Runner.T.ok(vsrc.find("const LOSS_NOUN") >= 0,
+		"src/main.gd has no LOSS_NOUN table — the sim can name a loss the view has no word for")
+	for k in (strips + ["token", "streak"]):
+		Runner.T.ok('"%s"' % k in nouns,
+			"the sim reports \"%s\" as lost but main.gd's LOSS_NOUN has no word for it" % k)
+
+
+# --- stall_ticks is a STALE number the moment the sim holds the camera ------
+#
+# The sim-side freeze (SimWorld._step_observer) stops the counter accruing
+# inside a gate arena, but it cannot un-accrue what a genuine loiterer banked
+# BEFORE walking in — a player at stall_ticks=400 who then enters a held arena
+# carries that 400 across the threshold. And _hint() is once-per-save-EVER, so
+# burning "PUSH NORTH" on a stale value in a mode with no north is unrecoverable.
+# Hence: every view line that reads sim.stall_ticks routes through the sim's own
+# camera_held(), or is on this allowlist with a reason.
+#
+# SCOPE, checked and found already-correct so the next cycle doesn't re-derive it:
+# src/view/hud.gd has THREE more sim.stall_ticks readers (_telegraph_spec :985 and
+# _draw_telegraph :1034/:1041), and all three are honest already — the telegraph is
+# campaign-ONLY (so endless and boss_rush never reach it) and _telegraph_spec swaps
+# "PRESSURE" for "CLEAR THE GATE" the moment a closed gate is on screen, pinned by
+# test_hud.gd::…_telegraph_spec(sim)["kind"] == "gate". Its gate predicate is broader
+# than camera_held() (`>=` the clamp plus an on-screen bound rather than an exact
+# match), which is the safe direction for a warning. So this scrape stays on main.gd,
+# where the two stale readers actually lived.
+
+## The ONE reader that is correct unguarded: the top-band objective line inside
+## `for g in sim.gates:` — it fires precisely BECAUSE a closed gate is on screen,
+## and it tells you the thing you actually can do about it ("grenade the bunkers").
+const STALL_READER_ALLOW := ["boss"]
+
+
+func test_every_stall_ticks_reader_is_guarded_by_camera_held() -> void:
+	var lines := _view_src().split("\n")
+	var readers := 0
+	var guarded := 0
+	var allowed := 0
+	for i in lines.size():
+		var ln: String = lines[i]
+		if "sim.stall_ticks" not in ln or ln.strip_edges().begins_with("#"):
+			continue
+		readers += 1
+		# The guard may sit on the same line or on the continued expression around it.
+		var expr := ln
+		var j := i
+		while j + 1 < lines.size() and expr.strip_edges().ends_with("\\"):
+			j += 1
+			expr += lines[j]
+		var tail: String = lines[j + 1] if j + 1 < lines.size() else ""
+		if "camera_held()" in expr:
+			guarded += 1
+		elif STALL_READER_ALLOW.any(func(a: String) -> bool: return '"%s"' % a in tail):
+			allowed += 1
+		else:
+			Runner.T.ok(false,
+				"src/main.gd:%d reads sim.stall_ticks unguarded — the counter is stale inside a held camera, and this line acts on it: %s" \
+					% [i + 1, ln.strip_edges()])
+	Runner.T.ok(readers >= 3,
+		"found only %d sim.stall_ticks readers in main.gd — the scrape is broken, not the view" % readers)
+	Runner.T.eq(guarded + allowed, readers,
+		"every sim.stall_ticks reader must either consult camera_held() or be allowlisted")
+
+
+# --- 8. The CLASS ratchet: every tick-phased hazard has a tell ---------------
+
+## Phase sites that deliberately do NOT telegraph, with the reason each is exempt.
+## House-style allowlist (see run_tests.gd's ERROR_ALLOW / OPT_IN_SUITES): adding a
+## row is a written decision, not a way to silence the gate.
+## Keyed by the modulus's constant FAMILY (the token up to its first underscore); a
+## bare numeric literal is its own family, and has to be justified by that number.
+const PHASE_NO_TELEGRAPH := {
+	"90": "posmod(tick_count, 90) in _step_spawner — a spawn CADENCE, not a state the player collides with",
+	"BOSS": "BOSS_CYCLE_TICKS picks the gunship's cover rotation — already telegraphed by the boss's own strafe/mortar tells",
+}
+
+
+func test_every_tick_phased_hazard_telegraphs_before_it_bites() -> void:
+	## The collapsing ford shipped as the only tick-phased hazard in the sim with no
+	## tell: the lane block, the foundry vent and the mast all emit a `_warn` event and
+	## the view handles all three. This scrapes the sim for EVERY phase site, keys each
+	## by the CONSTANT FAMILY of its modulus, and demands a telegraph per family — so
+	## the next phase-cycled hazard anyone adds is red the day it lands until it either
+	## telegraphs or earns a written row in PHASE_NO_TELEGRAPH.
+	##
+	## Keyed on the family (FORD_CYCLE_TICKS -> "FORD") rather than the exact token
+	## because the emit and the phase read legitimately live in different functions and
+	## name different members of the same const family — and because a BARE LITERAL has
+	## no family at all, which is how the ford escaped: `posmod(tick_count + band_idx *
+	## 150, 600)`, four unnamed numbers, matched to nothing and warned about nothing.
+	## `posmod(tick` (not `tick_count`) so wrapping the phase in a pure helper — which
+	## is exactly what fixing this cycle did — cannot shrink the domain being scanned.
+	var view := _view_src()
+	# Comment lines are stripped first: a doc-comment QUOTING an old phase expression
+	# is not a hazard, and counting it would invent a defect out of prose.
+	var kept := PackedStringArray()
+	for line in FileAccess.get_file_as_string("res://src/sim/sim_world.gd").split("\n"):
+		if not line.strip_edges().begins_with("#"):
+			kept.append(line)
+	var src := "\n".join(kept)
+	var funcs: Array[String] = []
+	for chunk in src.split("\nfunc "):
+		funcs.append(chunk)
+	var site_re := RegEx.new()
+	site_re.compile("posmod\\(tick[^,]*,\\s*([A-Za-z_0-9]+)\\s*\\)")
+	var warn_re := RegEx.new()
+	warn_re.compile('events\\.append\\(\\{"t":\\s*"([a-z_]+_warn)"')
+	var families := {}
+	for m in site_re.search_all(src):
+		var tok := m.get_string(1)
+		families[tok.split("_")[0]] = tok
+	Runner.T.ok(families.size() >= 4,
+		"the scrape found the sim's phase families (%d: %s)" % [families.size(), ", ".join(families.keys())])
+	var untelegraphed: Array[String] = []
+	var warn_names := {}
+	for fam: String in families.keys():
+		if PHASE_NO_TELEGRAPH.has(fam):
+			continue
+		var told := false
+		for f: String in funcs:
+			var w := warn_re.search(f)
+			if w == null or not f.contains(fam + "_"):
+				continue
+			told = true
+			warn_names[w.get_string(1)] = true
+		if not told:
+			untelegraphed.append("%s (modulus %s)" % [fam, families[fam]])
+	Runner.T.eq(untelegraphed.size(), 0,
+		"every tick-phased hazard warns before it bites (untelegraphed: %s)"
+			% ", ".join(untelegraphed))
+	# ...and a telegraph fired into the void is just as dead as no telegraph.
+	Runner.T.ok(warn_names.size() >= 3, "found the sim's telegraph events (%s)" % ", ".join(warn_names.keys()))
+	for wn: String in warn_names.keys():
+		Runner.T.ok(view.contains('"%s"' % wn), 'src/main.gd handles the "%s" event the sim emits' % wn)
+
+
+func test_the_collapsing_ford_emits_its_tell_before_the_crossing_goes() -> void:
+	## The scrape above proves a warn EXISTS; this proves it lands FORD_WARN_TICKS
+	## before the crossing actually stops being one, measured by running the sim.
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var band_idx := 3
+	var band_y: int = -(band_idx * SimWorld.GATE_SPACING)
+	sim.camera_top = band_y - 40 * Fixed.ONE
+	sim.waters.clear()
+	sim.waters.append({"y": band_y, "ford_x": 300 * Fixed.ONE})
+	var warn_at := -1
+	var closed_at := -1
+	for t in SimWorld.FORD_CYCLE_TICKS:
+		sim.tick_count = t
+		sim.events.clear()
+		sim._step_fords()
+		for ev in sim.events:
+			if ev["t"] == "ford_warn" and warn_at < 0:
+				warn_at = t
+			elif ev["t"] == "ford_closed" and closed_at < 0 and warn_at >= 0:
+				closed_at = t
+	Runner.T.ok(warn_at >= 0, "the ford emits a ford_warn somewhere in its cycle")
+	Runner.T.eq(closed_at - warn_at, SimWorld.FORD_WARN_TICKS,
+		"the tell lands exactly FORD_WARN_TICKS (%d) before the crossing washes out"
+			% SimWorld.FORD_WARN_TICKS)
+	# The tell is only useful if the crossing really is still dry when it fires, and
+	# really is gone when the close event lands. Measured against _in_water, not a const.
+	sim.tick_count = warn_at
+	Runner.T.ok(not sim._in_water(300 * Fixed.ONE, band_y + 40 * Fixed.ONE),
+		"at the warn tick the crossing is still dry — the tell is a lead, not a eulogy")
+	sim.tick_count = closed_at
+	Runner.T.ok(sim._in_water(300 * Fixed.ONE, band_y + 40 * Fixed.ONE),
+		"at the close tick the crossing is water")
+
+
+func test_the_victory_card_banked_row_reads_the_event_not_the_emptied_chest() -> void:
+	## Hardening only — GREEN on HEAD, and it cannot fail there: the defect it guards
+	## was fixed in 55a07d3. Its sibling above pins the bug's ABSENCE with a negative
+	## grep, which would also pass if the row were simply deleted. This pins the
+	## positive direction: the row exists, and it is fed by the event payload.
+	var view := _view_src()
+	Runner.T.ok(view.contains('_victory_banked'),
+		"the victory card still HAS a war-chest row (a negative grep alone would not notice)")
+	Runner.T.ok(view.contains('ev.get("banked"'),
+		"_ev_victory reads the banked amount off the checksum-excluded victory event")
+	Runner.T.ok(view.contains('WAR CHEST BANKED  → +%s" % [_victory_banked,'),
+		"the drawn row interpolates the event payload, not the live (already-zeroed) sim.war_chest")

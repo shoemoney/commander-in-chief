@@ -120,6 +120,9 @@ class _MainStub extends Node2D:
 	var best_score := 0
 	var best_wave := 0
 	var _grenade_dry: Array = [0, 0]
+	# c7: the head's commendation chip lingers (red) for a beat after the death that zeroes it,
+	# so a 1->0 loss is not a chip silently popping out of the bar. hud.gd reads it off main.
+	var _token_loss_t := 0.0
 	var _sfx = null        # no audio in a headless HUD test; _draw_caption bails on the null
 	var _captions := true
 	func bind_for_glyph(_a: String) -> int: return 0
@@ -3475,3 +3478,36 @@ func test_used_verb_retires_unused_verb_persists() -> void:
 	Runner.T.ok(Hud.VERB_WINDOW >= 1200.0,
 		"the unused-verb window outlasts a landing-zone read (%d ticks)" % int(Hud.VERB_WINDOW))
 	Runner.T.ok(Hud.VERB_WINDOW <= 3600.0, "but is still bounded — the chip is never permanent")
+
+
+# c7 THE CHIP THAT VANISHES WITHOUT A WORD: _token_chip early-returns at tokens <= 0, so the
+# death that takes your LAST commendation deletes the whole head chip from the top bar between
+# one frame and the next — the loudest state change in the meta economy, delivered as an absence.
+# The chip has to survive the zeroing long enough to be seen going red. Driven through the real
+# _token_chip callsite the rungs above use, so this pins production layout, not a copy of it.
+func test_token_chip_survives_the_death_that_zeroes_it() -> void:
+	var sim := SimWorld.new(0, 1)
+	sim.tokens = 0
+	var h := _ChipCaptureHud.new()
+	h._measure = false
+	h._fit_full = 632.0
+	var stub := _MainStub.new()
+	stub._token_loss_t = 1.0    # the death that zeroed it happened this instant
+	h.main = stub
+	var start := 120.0
+	var advance := h._token_chip(sim, start, 6.0) - start
+	Runner.T.ok(advance > HudIcons.ICON + 13.0,
+		"the commendation chip is not drawn on the frame its last token is spent — it pops out of the head bar with no cue (advance %.1f)" % advance)
+	# ...and once the beat has passed it must go, or the bar carries a permanent zero.
+	var h2 := _ChipCaptureHud.new()
+	h2._measure = false
+	h2._fit_full = 632.0
+	var stub2 := _MainStub.new()
+	stub2._token_loss_t = 0.0
+	h2.main = stub2
+	Runner.T.eq(h2._token_chip(sim, start, 6.0), start,
+		"a long-empty commendation slot still occupies the head bar")
+	h.free()
+	h2.free()
+	stub.free()
+	stub2.free()

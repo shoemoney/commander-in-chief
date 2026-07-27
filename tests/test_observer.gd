@@ -99,3 +99,116 @@ func test_strike_ignites_tank_not_infantry() -> void:
 		if e["alive"]:
 			enemy_alive = true
 	Runner.T.ok(enemy_alive, "mortar fire is harmless to enemy infantry")
+
+
+# --- The camera-hold contradiction (cycle 7) -------------------------------
+#
+# stall_ticks scores "the camera did not advance this tick" as loitering. But
+# THREE live situations pin the camera with the player pushing as hard as they
+# can: a closed gate's clamp (campaign/arcade), the same clamp on boss_rush's
+# pre-authored gauntlet, and endless (which never scrolls at all, by design).
+# In all three the game punishes the player for a wall the game itself put up,
+# and the punishment is a mortar barrage plus an on-screen "PUSH NORTH" order
+# that cannot be obeyed.
+#
+# Measured by MUTATING the fix out (drop `and not held` from the stall_ticks
+# increment) and re-running exactly this test — so these are the numbers it
+# prints, not a probe's:
+#   campaign   3691 held ticks, 3227 of them incremented stall_ticks
+#   boss_rush  3691 held ticks, 3167 of them incremented stall_ticks
+#   endless    4000 held ticks, 3624 of them incremented (live Spotter)
+# and dropping `held or` from the observer despawn leaves the pre-seeded
+# observer up in campaign AND boss_rush; dropping neither, 6 fresh observers
+# spawn while held in each.
+#
+# WINDOW SIZING. This leg observes a 3691-tick contiguous hold. Cross-checked
+# against real play (.aaa/probe_c7d.gd, the repo's combat bot over 8 seeds x
+# 6000 campaign ticks): longest contiguous hold 3678 ticks, median per-seed
+# 2549. So 4000 ticks covers the longest hold anything has measured, and is
+# 7.7x the 480-tick OBSERVER_STALL_TICKS fuse the pin must outlast for the
+# defect to bite at all. The vacuity guard below re-checks that per run.
+
+
+func _push_north() -> SimInput:
+	var inp := SimInput.new()
+	inp.move_y = -256
+	inp.aim_y = -256
+	return inp
+
+
+func test_stall_never_accrues_while_the_sim_holds_the_camera() -> void:
+	for mode in ["campaign", "boss_rush", "endless"]:
+		var sim := SimWorld.new(3, 1, mode)
+		sim.god_mode = true   # DEBUG-ONLY: keeps any_alive true so the counter's guard stays open
+		if mode == "endless":
+			# Endless only steps the observer when the Spotter mutator has dropped one.
+			sim.observer = {"x": 300 * Fixed.ONE, "strike_cd": 120, "spawn_cam": sim.camera_top}
+		var inp := _push_north()
+		var held_ticks := 0
+		var bad := 0
+		var run := 0
+		var longest := 0
+		for t in 4000:
+			inp.fire = (t % 8) != 0
+			var held: bool = sim.camera_held()
+			var before: int = sim.stall_ticks
+			sim.step([inp])
+			if not held:
+				run = 0
+				continue
+			held_ticks += 1
+			run += 1
+			longest = maxi(longest, run)
+			if sim.stall_ticks > before:
+				bad += 1
+		Runner.T.eq(bad, 0,
+			"%s: stall_ticks incremented on %d of %d ticks where camera_held() was true — the sim is scoring its own wall as the player loitering" \
+				% [mode, bad, held_ticks])
+		# Vacuity guard: a leg that never observed a hold longer than the fuse proved nothing.
+		Runner.T.ok(longest >= SimWorld.OBSERVER_STALL_TICKS,
+			"%s: longest contiguous held run was only %d ticks (< the %d-tick observer fuse) — this leg ran on nothing" \
+				% [mode, longest, SimWorld.OBSERVER_STALL_TICKS])
+
+
+func test_no_observer_spawns_or_persists_while_the_camera_is_held() -> void:
+	# (a) nothing new may arrive while the player is walled in...
+	for mode in ["campaign", "boss_rush"]:
+		var sim := SimWorld.new(3, 1, mode)
+		sim.god_mode = true
+		var inp := _push_north()
+		var spawns := 0
+		for t in 4000:
+			inp.fire = (t % 8) != 0
+			var held: bool = sim.camera_held()
+			sim.step([inp])
+			if not held:
+				continue
+			for ev in sim.events:
+				if ev["t"] == "observer_spawn":
+					spawns += 1
+		Runner.T.eq(spawns, 0,
+			"%s: %d observer(s) spawned on a tick where the sim itself was holding the camera" % [mode, spawns])
+
+	# ...(b) and one that was ALREADY up when you hit the wall must stand down.
+	# OBSERVER_DESPAWN_ADVANCE is 150px of northward advance the clamp forbids, so
+	# without this it is an unshakeable barrage: you cannot outrun it and you cannot
+	# walk away. (Endless is exempt by design — its Spotter lives until it is shot.)
+	for mode in ["campaign", "boss_rush"]:
+		var sim := SimWorld.new(3, 1, mode)
+		sim.god_mode = true
+		var inp := _push_north()
+		var seeded := false
+		for t in 4000:
+			inp.fire = (t % 8) != 0
+			if sim.camera_held():
+				if not seeded:
+					sim.observer = {"x": 300 * Fixed.ONE, "strike_cd": 120, "spawn_cam": sim.camera_top}
+					seeded = true
+					sim.step([inp])
+					continue
+				Runner.T.ok(sim.observer.is_empty(),
+					"%s: an observer that was already up when the camera got held is still firing — it can never be outrun (needs %dpx of advance the clamp forbids)" \
+						% [mode, SimWorld.OBSERVER_DESPAWN_ADVANCE / Fixed.ONE])
+				break
+			sim.step([inp])
+		Runner.T.ok(seeded, "%s: never reached a held-camera tick — the pre-existing-observer leg ran on nothing" % mode)

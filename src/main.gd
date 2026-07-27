@@ -264,6 +264,11 @@ var _seen := {}                  # persisted first-time-hint flags
 var _current_seed := 0           # this run's RNG seed (shown on pause)
 var _hint_text := ""             # current just-in-time onboarding cue
 var _hint_t := 0.0
+# c7: the head's commendation chip early-returns at tokens <= 0, so the death that takes your LAST
+# token deleted the whole chip between two frames — the meta economy's loudest state change,
+# delivered as an absence. Set on a token-losing player_down, decayed beside _hint_t, read by
+# hud.gd::_token_chip to hold the chip on screen (red) for the beat it takes to see it go.
+var _token_loss_t := 0.0
 var _hint_queue: Array[String] = []      # pending first-time hints, drained one at a time
 var _run_kills := 0              # this-run tally for the debrief card
 var _run_kind_kills := {}        # enemy kind → this-run kills, feeds the debrief top-prey row
@@ -429,6 +434,18 @@ const WHEEL_ROW_LABEL := -56.0   # pick label + cost + stock (one row)
 const WHEEL_ROW_CUE := 52.0      # RELEASE TO BUY / CANCEL
 const WHEEL_TEXT_ROWS := [WHEEL_ROW_WARN, WHEEL_ROW_LABEL, WHEEL_ROW_CUE]
 
+## What to CALL each thing a death takes, keyed by the sim's own field name. The sim ships the
+## loss on the (checksum-excluded) player_down / revive payloads; this is the only place the
+## player-facing noun lives. A key the sim can report with no entry here prints nothing, which is
+## the same silence in a new costume — tests/test_view_honesty.gd pins this table against
+## SimWorld.DEATH_LOSS_KEYS so a field added tomorrow gets a word or goes red.
+const LOSS_NOUN := {
+	"vest": "FLAK VEST", "triple": "TRIPLE SHOT", "claymores": "CLAYMORES",
+	"pierce_ticks": "PIERCING ROUNDS", "spread_ticks": "TRENCH GUN",
+	"rend_ticks": "REND ROUNDS", "smoke_ticks": "SMOKE",
+	"token": "COMMENDATION", "streak": "FLAWLESS STREAK",
+}
+
 ## Sim event → [sound, volume dB, pitch]. Pickups are special-cased on cost.
 const _EVENT_SOUND := {
 	"shot": ["shot", -9.0, 1.0],
@@ -465,6 +482,9 @@ const _EVENT_SOUND := {
 	"lane_warn": ["alarm", -11.0, 1.1],       # c4: a lane is about to seal — 0.75s dust tell
 	"lane_seal": ["rubble", -5.0, 0.95], # c4/a1-13: real rubble (was silent)
 	"lane_clear": ["click_dry", -8.0, 0.9],   # c4: the lane reopens
+	"ford_warn": ["alarm", -11.0, 1.25],      # the crossing is about to wash out — 0.5s tell
+	"ford_closed": ["rubble", -6.0, 0.8],     # the bridge goes: heavy collapse
+	"ford_open": ["click_dry", -8.0, 1.0],    # the deck settles back — it's crossable again
 	"arena_pressure": ["alarm", -9.0, 1.3],   # c3: rising pressure-shift klaxon — the hot quadrant just moved
 	"vent_warn": ["alarm", -13.0, 1.8],   # thin heat-tick: the grate is about to blow
 	"vent_jet": ["rev", -11.0, 1.7],      # flame whoosh on the rev voice, pitched clear of engines
@@ -872,7 +892,7 @@ func _setup_water() -> void:
 		r.material = m
 		add_child(r)
 		_water_rects.append(r)
-		_water_pushed.append([-1, -1.0, 0.0, Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0)])
+		_water_pushed.append([-1, -1.0, 0.0, Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0), false])
 	# Warm the water shader too (same first-draw compile hitch as screen_fx):
 	# show one rect as a 1px off-screen-bottom sliver for the boot frame —
 	# _sync_water repositions or hides it on the first real draw.
@@ -938,13 +958,22 @@ func _sync_water() -> void:
 		# All uniforms are constant per band + soot level, and each
 		# set_shader_parameter dirties the material. Re-push only when this pool
 		# rect is re-assigned to a different band or the sector soot moves.
-		if pushed[0] != w["y"] or pushed[1] != wsec:
+		var wclosed: bool = SimWorld.ford_closed(sim.tick_count, absi(w["y"] / SimWorld.GATE_SPACING))
+		if pushed[0] != w["y"] or pushed[1] != wsec or pushed[5] != wclosed:
 			pushed[0] = w["y"]
 			pushed[1] = wsec
+			pushed[5] = wclosed
 			var mat: ShaderMaterial = rect.material
 			mat.set_shader_parameter("rect_size", rect.size)
-			mat.set_shader_parameter("ford_center", (w["ford_x"] * PX) / 640.0)
-			mat.set_shader_parameter("ford_halfw", (SimWorld.FORD_HALF_W * PX) / 640.0)
+			# One source for the ford uniforms — see water_shader_params(). The band is
+			# identified by w["y"], which is already the re-push key, so no extra dirty
+			# term is needed for band_idx / flow_dir (verified: both are functions of y).
+			var wb: int = absi(w["y"] / SimWorld.GATE_SPACING)
+			var wp := water_shader_params(wb, w["ford_x"], sim.ford_flow_dir(wb),
+				SimWorld.ford_closed(sim.tick_count, wb))
+			mat.set_shader_parameter("ford_center", wp["ford_center"])
+			mat.set_shader_parameter("ford_halfw", wp["ford_halfw"])
+			mat.set_shader_parameter("flow_dir", wp["flow_dir"])
 			# De-sync ripples per band: derive a stable phase from the band's world y.
 			mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
 			mat.set_shader_parameter("shallow_col", w_shallow)
@@ -2417,6 +2446,21 @@ func _consume_events() -> void:
 			"lane_clear":
 				# c4 2v: the lane reopens — a light settling puff.
 				_burst(ev["x"], ev["y"], "dust", 4, 0.7, 1.6, 0.3)
+			"ford_warn":
+				# The collapsing bridge finally has a tell: a spray tick at the crossing
+				# plus the same alert ring the lane seal uses, and a named callout — the
+				# 0.5s in which "run for it or wait it out" is still a real choice.
+				_burst(ev["x"], ev["y"], "splash", 6, 0.9, 2.2, 0.4, 0.0, -0.4)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.02})
+				_hint("ford_wash", "FORD WASHING OUT", true)
+			"ford_closed":
+				# The deck goes. A jolt + a wide splash so the crossing visibly stops being one.
+				_trauma = minf(1.0, _trauma + 0.22)
+				_burst(ev["x"], ev["y"], "splash", 10, 1.2, 2.6, 0.4)
+				_water_splash = {"x": ev["x"], "y": ev["y"], "t": 1.0}
+			"ford_open":
+				# It settles back — a light spray so the reopen reads without a klaxon.
+				_burst(ev["x"], ev["y"], "splash", 4, 0.7, 1.6, 0.3)
 			"cover_burn":
 				# c3 5v: grass burns off under a vent jet — a puff of ash + a scorch.
 				_burst(ev["x"], ev["y"], "ember", 6, 0.8, 2.0, 0.5, 0.05, 1.0, false,
@@ -2510,12 +2554,19 @@ func _consume_events() -> void:
 				_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
 				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_label("revive") if Art.use_pad else "E"), true)
-				# Dying with a loadout (Triple/Pierce/Spread) strips it — call the loss
-				# out with a red descending sting so it registers as a setback, not a
-				# silent reset. Flags ride the checksum-excluded event (golden-safe).
-				if ev.get("triple", false) or ev.get("pierce", false) or ev.get("spread", false):
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-						"rate": 0.02, "drop": true, "text": "LOADOUT LOST", "col": Color(0.95, 0.25, 0.2)})
+				# The two GLOBAL costs of a body — one burned Commendation and the broken clean-gate
+				# streak — used to be taken in total silence, and the token chip simply popped out of
+				# the head bar. Sting them HERE, at the body, which is where the sim takes them. (The
+				# LOADOUT strip is stung at the REVIVE instead: that is the tick _respawn deletes it.)
+				var down_lost := 0
+				if int(ev.get("token", 0)) > 0:
+					_loss_sting(ev, "%s LOST" % LOSS_NOUN["token"])
+					_token_loss_t = 1.0   # ...and hold the head chip that just hit zero (hud._token_chip)
+					down_lost += 1
+				if int(ev.get("streak", 0)) >= 1:
+					_loss_sting(ev, "%s x%d BROKEN" % [LOSS_NOUN["streak"], int(ev["streak"])])
+					down_lost += 1
+				if down_lost > 0:
 					_sfx.play("deny", -5.0, 0.7)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Directional death-gore: the felling round's exit spray carries
@@ -3526,6 +3577,28 @@ func _ev_revive(ev: Dictionary) -> void:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "gib", "rate": 0.05,
 			"vx": cos(rva) * randf_range(0.6, 1.6), "vy": sin(rva) * randf_range(0.6, 1.6) - 1.0,
 			"spin": 0.0, "col": Art.safe(Color(0.5, 1.0, 0.6))})
+	# Standing back up is also the tick the loadout is actually deleted (SimWorld._respawn), so
+	# this is where the bill is read out — one red sinking line per thing taken, BY NAME. It used
+	# to be a single "LOADOUT LOST" fired at the KILL off three hand-listed flags, which covered
+	# 3 of the 7 fields _respawn strips and named none of them.
+	var lost: Dictionary = ev.get("lost", {})
+	for k in lost:
+		var noun: String = LOSS_NOUN.get(k, "")
+		if noun.is_empty():
+			continue
+		# Countable stock says HOW MUCH ("CLAYMORES x3 LOST"); flags and timers just say what.
+		var txt := "%s x%d LOST" % [noun, int(lost[k])] if k == "claymores" else "%s LOST" % noun
+		_loss_sting(ev, txt)
+	if not lost.is_empty():
+		_sfx.play("deny", -5.0, 0.7)
+
+
+func _loss_sting(ev: Dictionary, text: String) -> void:
+	## One red, sinking, world-space line for something the run just took off you. The floattext
+	## renderer already stacks same-tick toasts downward and holds them below the reserved top
+	## band, so a multi-line loss needs no bookkeeping here.
+	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+		"rate": 0.02, "drop": true, "text": text, "col": Color(0.95, 0.25, 0.2)})
 
 
 func _ev_vest_break(ev: Dictionary) -> void:
@@ -5088,9 +5161,17 @@ func _update_feel() -> void:
 	# while there is still time to act on it. (Starting value OBSERVER_STALL_TICKS/2
 	# = 4s in, 4s left to react; test: does a new player push north before the first
 	# observer ever spawns? If they still eat it, move to /3.)
-	if sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS / 2:
+	# c7: ...but never while the SIM is holding the camera. The halfway-mark timing above was a
+	# deliberate choice and it is being OVERTURNED for exactly one case: aimed at an arena the
+	# player cannot leave, "earlier" made it worse, not better — a scolding for obeying a wall the
+	# game built, and in endless a compass direction that does not exist. The sim-side freeze
+	# alone is not enough here: a genuine loiterer at stall_ticks=400 carries that 400 across the
+	# threshold, and _hint is once-per-save-EVER, so burning it on a stale value is unrecoverable.
+	# Both sides read the sim's one camera_held() instead of each guessing at "held".
+	if sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS / 2 and not sim.camera_held():
 		_hint("pressure", "YOU'RE STALLING — PUSH NORTH OR MORTARS ZERO IN", true)
 	_hint_t = maxf(0.0, _hint_t - 0.006)
+	_token_loss_t = maxf(0.0, _token_loss_t - 0.016)   # ~1 s of red hold on the zeroed commendation chip
 	if _hint_t <= 0.02 and not _hint_queue.is_empty():
 		_hint_text = _hint_queue.pop_front()
 		_hint_t = 1.0
@@ -7547,38 +7628,30 @@ func _draw_water() -> void:
 		var nseed := Art.cell_hash(int(w["y"] / 4096) * 29, 3)
 		var nford_l: float = (w["ford_x"] - SimWorld.FORD_HALF_W) * PX - 12.0
 		var nford_r: float = (w["ford_x"] + SimWorld.FORD_HALF_W) * PX + 12.0
-		# The dry ford — at the SIM's compressed per-band width (c2 3v BUG: the
-		# view drew full FORD_HALF_W on every band while the sim tightens
-		# -4px/band; on deep bands walkable ground rendered as water and drawn
-		# sand was lethal water. Formulas copied from sim_world.gd _in_water
-		# (band_idx/fw, ford2, island) — keep in sync with those lines.
+		# The dry ford. Every number here now comes from ford_visual(), which is built
+		# from SimWorld.ford_half_w / ford_closed / ford2_x / ford_island_x — the SAME
+		# functions _in_water() calls. The four formula blocks that used to live here
+		# were hand-copies (the old comment said so: "keep in sync with those lines"),
+		# and they had already drifted: the deck, ramps, beams, caustics and the green
+		# "FORD" label were drawn UNCONDITIONALLY, including the 420 of every 600 ticks
+		# in which the sim washes the crossing out and reverts an armour move outright.
 		var band_idx: int = absi(w["y"] / SimWorld.GATE_SPACING)
-		var fw_fx: int = maxi(SimWorld.FORD_HALF_W / 2, SimWorld.FORD_HALF_W - (band_idx - 1) * 4 * Fixed.ONE)
+		var fv := ford_visual(band_idx, w["ford_x"], sim.tick_count)
+		var fw_fx: int = SimWorld.ford_half_w(band_idx)
 		var ford_left: float = (w["ford_x"] - fw_fx) * PX
 		var ford_w := fw_fx * 2.0 * PX
-		draw_texture_rect(Art.tex("sand"), Rect2(ford_left, wy - 2, ford_w, wh + 4),
-			true, ford_col)
-		var wh2m: int = SimWorld._mix(band_idx, w["ford_x"] / Fixed.ONE)
-		if band_idx % 3 == 2:
-			# Second ford (sim: every 3rd band) — it existed, it was walkable,
-			# and the view never drew it. Now it's sand like the first.
-			var ford2_x: int = 80 * Fixed.ONE + ((w["ford_x"] - 80 * Fixed.ONE) + (180 + wh2m % 121) * Fixed.ONE) % (480 * Fixed.ONE)
-			draw_texture_rect(Art.tex("sand"), Rect2((ford2_x - fw_fx) * PX, wy - 2, ford_w, wh + 4),
-				true, ford_col)
-		if band_idx >= 4 and band_idx % 4 == 0:
-			# Dry mid-river island (sim: every 4th band, deep) with wet lips.
-			var isl_x2: int
-			if band_idx % 12 == 8:
-				var f2i: int = 80 * Fixed.ONE + ((w["ford_x"] - 80 * Fixed.ONE) + (180 + wh2m % 121) * Fixed.ONE) % (480 * Fixed.ONE)
-				isl_x2 = 80 * Fixed.ONE + (((w["ford_x"] + f2i) / 2 - 80 * Fixed.ONE) + 240 * Fixed.ONE) % (480 * Fixed.ONE)
+		var idamp := ford_col.darkened(0.38)
+		for dr: Rect2 in fv["dry_rects"]:
+			if dr.size.y >= wh:
+				# A full-height crossing (main ford / second ford): 2px bleed onto each bank.
+				draw_texture_rect(Art.tex("sand"), Rect2(dr.position.x, wy - 2.0, dr.size.x, wh + 4.0),
+					true, ford_col)
 			else:
-				isl_x2 = 80 * Fixed.ONE + ((w["ford_x"] - 80 * Fixed.ONE) + 120 * Fixed.ONE) % (480 * Fixed.ONE)
-			var ilx := (isl_x2 - 60 * Fixed.ONE) * PX
-			var ily := wy + 20.0
-			draw_texture_rect(Art.tex("sand"), Rect2(ilx, ily, 120.0, 40.0), true, ford_col)
-			var idamp := ford_col.darkened(0.38)
-			draw_rect(Rect2(ilx, ily - 1.5, 120.0, 1.5), Color(idamp.r, idamp.g, idamp.b, 0.6))
-			draw_rect(Rect2(ilx, ily + 40.0, 120.0, 1.5), Color(idamp.r, idamp.g, idamp.b, 0.6))
+				# Mid-river island: damp lips top and bottom, no bank bleed.
+				var ily := wy + dr.position.y
+				draw_texture_rect(Art.tex("sand"), Rect2(dr.position.x, ily, dr.size.x, dr.size.y), true, ford_col)
+				draw_rect(Rect2(dr.position.x, ily - 1.5, dr.size.x, 1.5), Color(idamp.r, idamp.g, idamp.b, 0.6))
+				draw_rect(Rect2(dr.position.x, ily + dr.size.y, dr.size.x, 1.5), Color(idamp.r, idamp.g, idamp.b, 0.6))
 		# Baked bridge deck over the dry ford (decor only — the sim's ford/collision
 		# is untouched; the sand bed stays underneath as the shore blend). Mid planks
 		# tile the crossing, ramp caps land on each bank.
@@ -7586,28 +7659,56 @@ func _draw_water() -> void:
 		var bsc := clampf(ford_w / bspan, 0.5, 1.2)         # fit the deck to the ford width
 		var bx := ford_left + ford_w / 2.0
 		var bseg := maxi(1, int(ceil(wh / (bspan * bsc))))
-		# Bridge shadow on the water + support beams at the segment joints —
-		# the deck used to float weightless over the current (5v).
-		var deck_w := bspan * bsc * 0.9
-		draw_rect(Rect2(bx - deck_w / 2.0 + 4.0, wy + 4.0, deck_w, wh), Color(0.0, 0.02, 0.05, 0.28))
-		for bj in bseg + 1:
-			var bjy := wy + float(bj) * wh / float(bseg)
-			Art.line(self, Vector2(bx - deck_w / 2.0 + 3.0, bjy), Vector2(bx - deck_w / 2.0 + 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
-			Art.line(self, Vector2(bx + deck_w / 2.0 - 3.0, bjy), Vector2(bx + deck_w / 2.0 - 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
-			for bside in [-1.0, 1.0]:
-				var bfx: float = bx + bside * (deck_w / 2.0 - 3.0)
-				draw_texture_rect(Art.tex("fx_softspot"), Rect2(bfx - 5.0, minf(bjy + 4.0, wy + wh - 3.0), 10.0, 6.0),
-					false, Color(0.0, 0.05, 0.08, 0.30))
-		# Caustic glints under the deck (Grok round-3): faint elongated light
-		# play between the support beams.
-		for cg in 2:
-			var cgy := wy + wh * (0.3 + 0.4 * float(cg))
-			draw_texture_rect(Art.tex("fx_softspot"), Rect2(bx - deck_w * 0.3, cgy - 2.0, deck_w * 0.6, 4.0),
-				false, Color(0.55, 0.75, 0.75, 0.14))
-		for bi in bseg:
-			_spr("bridge_mid", Vector2(bx, wy + (float(bi) + 0.5) * wh / float(bseg)), 0.0, bsc)
-		_spr("bridge_ramp", Vector2(bx, wy - 2.0), 0.0, bsc)
-		_spr("bridge_ramp", Vector2(bx, wy + wh + 2.0), PI, bsc)
+		if float(fv["deck_alpha"]) <= 0.0:
+			# WASHED OUT. The sim slows infantry and reverts armour across this exact
+			# span, so it is painted as the river it is: a flood wash at the water
+			# shader's own deep colour plus a drifting debris line. Never a plank.
+			var wcol: Color = _WATER_DEEP_STOPS[clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)]
+			# Feathered, not a panel: four stacked layers widening outward ramp the alpha
+			# 0.20 -> 0.59 across ~4px of each edge, and every layer's edge drifts with the
+			# same slow bob the debris uses. One flat rect with ruler-straight sides read
+			# as a missing sprite over animated water.
+			var dbob := Art.pulse(0.07)
+			for fi in 4:
+				var fo := float(3 - fi) * 1.4 + sin(dbob * TAU + float(fi)) * 0.9
+				draw_rect(Rect2(ford_left - fo, wy, ford_w + fo * 2.0, wh),
+					Color(wcol.r, wcol.g, wcol.b, 0.20))
+			for dbi in 3:
+				var dby := wy + wh * (0.2 + 0.3 * float(dbi))
+				var dbx := ford_left + ford_w * fposmod(0.15 + 0.31 * float(dbi) + dbob * 0.6, 1.0)
+				Art.line(self, Vector2(dbx - 7.0, dby), Vector2(dbx + 7.0, dby + 1.5),
+					Color(0.32, 0.24, 0.16, 0.75), 2.0)
+		else:
+			# Bridge shadow on the water + support beams at the segment joints —
+			# the deck used to float weightless over the current (5v).
+			var deck_w := bspan * bsc * 0.9
+			draw_rect(Rect2(bx - deck_w / 2.0 + 4.0, wy + 4.0, deck_w, wh), Color(0.0, 0.02, 0.05, 0.28))
+			for bj in bseg + 1:
+				var bjy := wy + float(bj) * wh / float(bseg)
+				Art.line(self, Vector2(bx - deck_w / 2.0 + 3.0, bjy), Vector2(bx - deck_w / 2.0 + 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
+				Art.line(self, Vector2(bx + deck_w / 2.0 - 3.0, bjy), Vector2(bx + deck_w / 2.0 - 3.0, minf(bjy + 6.0, wy + wh)), Color(0.28, 0.2, 0.12), 3.0)
+				for bside in [-1.0, 1.0]:
+					var bfx: float = bx + bside * (deck_w / 2.0 - 3.0)
+					draw_texture_rect(Art.tex("fx_softspot"), Rect2(bfx - 5.0, minf(bjy + 4.0, wy + wh - 3.0), 10.0, 6.0),
+						false, Color(0.0, 0.05, 0.08, 0.30))
+			# Caustic glints under the deck (Grok round-3): faint elongated light
+			# play between the support beams.
+			for cg in 2:
+				var cgy := wy + wh * (0.3 + 0.4 * float(cg))
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(bx - deck_w * 0.3, cgy - 2.0, deck_w * 0.6, 4.0),
+					false, Color(0.55, 0.75, 0.75, 0.14))
+			for bi in bseg:
+				_spr("bridge_mid", Vector2(bx, wy + (float(bi) + 0.5) * wh / float(bseg)), 0.0, bsc)
+			_spr("bridge_ramp", Vector2(bx, wy - 2.0), 0.0, bsc)
+			_spr("bridge_ramp", Vector2(bx, wy + wh + 2.0), PI, bsc)
+			# ...and in the FORD_WARN_TICKS before it goes, a rising waterline shimmer
+			# licks up both ramps. The deck stays fully solid — dry is still dry; the
+			# warn is a TELL, not a lie.
+			var wn: float = fv["warn"]
+			if wn > 0.0:
+				for wr in [wy - 1.0, wy + wh + 1.0]:
+					draw_rect(Rect2(ford_left, wr - 1.0 - wn * 2.0, ford_w, 2.0 + wn * 4.0),
+						Color(0.62, 0.82, 0.86, 0.20 + 0.45 * wn))
 		# A few deterministic rocks break up the deep water (never in the ford).
 		var wseed := Art.cell_hash(int(w["y"] / 4096) * 13, 7)
 		for r in 3:
@@ -7646,14 +7747,86 @@ func _draw_water() -> void:
 				tank_near = true
 		if tank_near:
 			var hy := wy if (w["y"] > sim.camera_top) else wy + wh
+			var deck_open: bool = float(fv["deck_alpha"]) > 0.0
 			for hx in range(0, 640, 16):
-				if hx + 8 < ford_left or hx > ford_left + ford_w:
-					Art.line(self, Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
+				# The hatching used to SKIP the ford span unconditionally — so while the
+				# crossing was washed out it painted the one impassable strip as the safe
+				# one. It only skips a span the tank can actually take.
+				if deck_open and hx + 8 >= ford_left and hx <= ford_left + ford_w:
+					continue
+				Art.line(self, Vector2(hx, hy - 4), Vector2(hx + 8, hy + 4), Color(1.0, 0.3, 0.2, 0.7), 1.5)
 			# Shadowed + colorblind-routed like the gate pips/price tints that share
 			# this green — raw unshadowed green over red-hatched sand was the
 			# worst-case read for the tank driver it guides.
-			Art.text(self, "FORD", Vector2(ford_left + ford_w / 2.0 - 12, wy - 8),
-				8, Art.safe(Color(0.6, 1.0, 0.6)))
+			var flabel: String = fv["label"]
+			Art.text(self, flabel, Vector2(ford_left + ford_w / 2.0 - float(flabel.length()) * 3.0, wy - 8),
+				8, Art.safe(fv["label_col"]))
+
+
+static func ford_visual(band_idx: int, ford_x: int, tick: int) -> Dictionary:
+	## THE seam. Everything _draw()'s water block needs to know about a river band,
+	## derived ONLY from SimWorld's own ford helpers so the drawn crossing and the
+	## simulated crossing cannot drift again. Pure + static so a test can call it
+	## with no scene (same precedent as fork_sign_xs / result_row_pitch).
+	##
+	##   dry_rects  band-relative px rects that are DRY GROUND this tick. Full-height
+	##              rects are crossings; a short one is the mid-river island.
+	##   deck_alpha 1.0 while the bridge deck is real, 0.0 while it is washed out.
+	##              deck_alpha > 0.0 <=> the sim says the main ford is dry.
+	##   label      what the tank-barrier flag is allowed to say, and its raw colour.
+	##   warn       0..1 ramp over the FORD_WARN_TICKS before the crossing goes.
+	var fw: int = SimWorld.ford_half_w(band_idx)
+	var bh: float = SimWorld.WATER_H * PX
+	var closed: bool = SimWorld.ford_closed(tick, band_idx)
+	var rects: Array[Rect2] = []
+	if not closed:
+		rects.append(Rect2((ford_x - fw) * PX, 0.0, fw * 2.0 * PX, bh))
+	if band_idx % 3 == 2:
+		# The permanent second ford deep bands earn — it does NOT cycle.
+		rects.append(Rect2((SimWorld.ford2_x(ford_x, band_idx) - fw) * PX, 0.0, fw * 2.0 * PX, bh))
+	if band_idx >= 4 and band_idx % 4 == 0:
+		var ix: int = SimWorld.ford_island_x(ford_x, band_idx)
+		rects.append(Rect2((ix - SimWorld.FORD_ISLAND_HALF_W) * PX, SimWorld.FORD_ISLAND_Y0 * PX,
+			SimWorld.FORD_ISLAND_HALF_W * 2.0 * PX,
+			(SimWorld.FORD_ISLAND_Y1 - SimWorld.FORD_ISLAND_Y0) * PX))
+	var warn := 0.0
+	if not closed and band_idx >= 2:
+		var togo: int = SimWorld.FORD_OPEN_TICKS - SimWorld.ford_phase(tick, band_idx)
+		if togo > 0 and togo <= SimWorld.FORD_WARN_TICKS:
+			warn = 1.0 - float(togo - 1) / float(SimWorld.FORD_WARN_TICKS)
+	return {
+		"dry_rects": rects,
+		"deck_alpha": 0.0 if closed else 1.0,
+		"label": "WASHED OUT" if closed else "FORD",
+		# Deep danger-red, not the usual bright alert red: this flag sits on PALE SAND,
+		# where (1.0, 0.35, 0.3) measures 1.35:1 — worse than the green it replaces
+		# (1.87:1). At 0.58/0.06/0.04 it measures 3.92:1, clearing large-text AA, and
+		# the luminance gap alone (0.81 -> 0.07) reads the state change without hue.
+		"label_col": Color(0.58, 0.06, 0.04) if closed else Color(0.6, 1.0, 0.6),
+		"warn": warn,
+	}
+
+
+static func water_shader_params(band_idx: int, ford_x: int, flow_dir: int, closed: bool) -> Dictionary:
+	## The ford uniforms _sync_water pushes to water.gdshader, in ONE place a test can
+	## read. `ford_halfw` was a flat SimWorld.FORD_HALF_W on every band while the sim
+	## tightens the crossing -4px per band (32/28/24/20/16/16 on bands 1-6), so the
+	## shader punched a 32px transparent gap through up to 16px of real water; and the
+	## streaks were hardcoded drifting +x while _ford_current shoves half the reachable
+	## bands the other way.
+	return {
+		"ford_center": (ford_x * PX) / 640.0,
+		# A washed-out crossing punches NO transparent gap: the shader's ford fade is
+		# what lets the grass show through as "dry path", and leaving it open while the
+		# sim wades you was the same lie the painted deck told, one layer down.
+		# ZERO is not closed. The fade is smoothstep(ford_halfw, ford_halfw + 0.03, df),
+		# so a 0.0 half-width still ramps the river to transparent over ~19px, and with
+		# the sand strip (correctly) gone while closed, bare terrain showed through as a
+		# warm-grey core. df bottoms out at -0.006 from its own jitter, so the closed
+		# push goes a full fade-width below that: alpha == 1.0 across the whole strip.
+		"ford_halfw": -0.05 if closed else (SimWorld.ford_half_w(band_idx) * PX) / 640.0,
+		"flow_dir": float(flow_dir),
+	}
 
 
 static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> Vector2:
@@ -10736,8 +10909,10 @@ func _top_center_priority() -> String:
 		break
 	if sim.pending_airstrike > 0:
 		return "airstrike"
+	# Same stale-counter guard as the PUSH NORTH hint: a loiterer's banked stall_ticks survives
+	# into a held arena, and MORTARS RANGING would pre-warn a barrage the sim will no longer send.
 	if sim.mode == "campaign" and sim.observer.is_empty() \
-			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180:
+			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180 and not sim.camera_held():
 		return "mortar"
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]

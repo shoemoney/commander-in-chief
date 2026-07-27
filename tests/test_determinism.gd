@@ -495,13 +495,36 @@ const SEED := 0xDEADBEEF
 ## cover shifts position from the first contact tick onward. Sample 0 (t=600) is
 ## byte-identical: the torture hasn't reached any cover yet at 10s in. Samples 1-5 all
 ## moved (the torture streams rocks/sandbags/hulks well before 20s).
+## 2026-07-27 -- CAMERA-HELD STALL FREEZE: campaign GOLDEN RE-RECORDED (ALL 6 samples).
+## ENDLESS_GOLDEN VERIFIED UNCHANGED, measured not assumed (see below).
+##
+## stall_ticks scored "the camera did not advance this tick" as the player loitering. But a closed
+## gate CLAMPS the camera (sim_world.gd _step_camera pins camera_top to g["y"] - GATE_CAMERA_PAD),
+## so the counter was scoring the game's own wall against the player, then answering with a mortar
+## observer and an on-screen order to PUSH NORTH that could not be obeyed. _step_observer now
+## consults the new pure predicate camera_held() and does not accrue while the SIM holds the camera;
+## an observer already up when the clamp binds also stands down, because escaping costs
+## OBSERVER_DESPAWN_ADVANCE (150px) of advance the clamp forbids.
+##
+## WHY EVERY SAMPLE MOVES, measured (.aaa/probe_c7.gd, .aaa/probe_c7b.gd): the 60s 2P torture spends
+## 1845 of its 3600 ticks pinned on a closed gate, peaks at stall_ticks 924 (the observer fuse is
+## 480) and spawns 1 observer while pinned. tools/probe_torture_gates.gd shows gate 1 exists from
+## tick 0, so sample 0 (t=600) moves too -- unlike most re-records here, nothing is byte-identical.
+## stall_ticks is hashed directly (checksum feed), and the observer/strikes it gates drag every
+## enemy downstream of that mortar with them.
+##
+## ENDLESS: camera_held() returns true unconditionally for endless (it never calls _step_camera at
+## all -- camera_top is pinned at -VIEW_H by design), so its stall_ticks freezes too. The endless
+## goldens still do not move because _step_observer only runs in endless once the Spotter wave
+## mutator has dropped an observer, and the endless torture never draws one -- stall_ticks is 0
+## either way. Verified by running the suite, not inferred.
 const GOLDEN: Array[int] = [
-	2526922330838029777,
-	4406561492076700289,
-	5008464718731060842,
-	5993363887516529799,
-	2661287071331966602,
-	6016516403530113665,
+	2407026767914979979,
+	461371032039649670,
+	3102861628708881044,
+	650205415488164338,
+	1254423104984790566,
+	6447189277068568902,
 ]
 
 

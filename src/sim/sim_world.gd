@@ -583,6 +583,15 @@ const SUPPLY_DROP_INTERVAL_TICKS := 300
 # and walls out tanks; submerged frogmen answer only to grenades (1986 rule).
 const WATER_H := 80 * F_ONE
 const FORD_HALF_W := 32 * F_ONE
+# c4 2v COLLAPSING BRIDGE cycle. These were four bare literals inside _in_water
+# (`posmod(tick_count + band_idx * 150, 600) >= 180`) — named here so the view can
+# read the same phase instead of re-deriving it (it never derived it at all, and
+# painted a solid bridge deck + a green "FORD" label over 420 of every 600 ticks
+# of hard armour wall). See ford_closed()/ford_phase()/ford_half_w() below.
+const FORD_CYCLE_TICKS := 600        # full open->closed->open period (10s)
+const FORD_OPEN_TICKS := 180         # the dry-foot portion of the cycle (3s)
+const FORD_PHASE_STEP := 150         # per-band phase offset, so bands don't wash out in lockstep
+const FORD_WARN_TICKS := 30          # 0.5s rising-waterline tell before the ford washes out
 const FROGMAN_NOTICE_RADIUS := 60 * F_ONE
 const FROGMAN_CALM_RADIUS := 100 * F_ONE
 const FROGMAN_LUNGE_SPEED := 3 * F_ONE
@@ -956,6 +965,7 @@ func step(inputs: Array) -> void:
 		_step_boss()
 		_step_colossus()
 		_step_gates()
+		_step_fords()
 		_step_camera()   # ratchet + gate-hold only — the streaming appendix no-ops (mode != campaign)
 		_step_observer()
 		_resolve_strikes()
@@ -966,6 +976,7 @@ func step(inputs: Array) -> void:
 		_step_boss()
 		_step_colossus()
 		_step_gates()
+		_step_fords()
 		_step_camera()
 		_step_observer()
 		_step_grass_flush()   # c3 2v: tall-grass camping draws a flush grenade
@@ -1768,12 +1779,29 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 			events.append({"t": "revive_deny", "x": target["x"], "y": target["y"], "cost": cost})
 
 
+## Everything a death DELETES from the player, in ONE place, so the loss payload can never
+## drift from the strip list again. Before this existed the payload was three literals typed by
+## hand into player_down ("triple"/"pierce"/"spread"), and every accrual added to _respawn since
+## — vest, claymores, rend, smoke — vanished in silence: 3 of 9 losses named.
+## Ephemeral timers (broke_timer, roll_ticks, boost_ticks) and RESTOCKS (mg_ammo, grenade_ammo,
+## in_tank) are not losses and are deliberately absent; test_view_honesty.gd's
+## test_every_field_death_strips_is_named_on_a_loss_payload enforces that partition by scraping
+## _respawn's own body, so a strip added here without a word for it goes red the day it lands.
+const DEATH_LOSS_KEYS: PackedStringArray = [
+	"vest", "triple", "claymores",
+	"pierce_ticks", "spread_ticks", "rend_ticks", "smoke_ticks",
+]
+
+
 func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	## `cost` is the coin the chest was just debited to buy this stand-up, and it rides the
 	## revive EVENT so the debrief can tally what the run spent getting back up without
 	## restating revive_cost view-side. The broke fallback and god-mode restore pass nothing
 	## (0) — a free rally must never be billed to the player on the card. Events are
 	## checksum-EXCLUDED and no state write changed here, so this is golden-safe.
+	var before := {}
+	for k in DEATH_LOSS_KEYS:
+		before[k] = p[k]
 	p["alive"] = true
 	# PARTIAL resupply, not a full one. A free 99 rounds + 12 grenades cost ~190
 	# coins at shop rates (3x SHOP_AMMO_COST + 3x SHOP_GRENADE_COST), and the
@@ -1799,7 +1827,15 @@ func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
-	events.append({"t": "revive", "x": p["x"], "y": p["y"], "cost": cost})
+	# The loadout is stripped HERE, not at the kill — so this is where the view gets to sting it.
+	# Diffed, never hand-listed: bool(0)/bool(false) is falsy and bool(300) is truthy, so one loop
+	# covers the flags and the tick counters alike. Assist mode re-issues the vest, which then
+	# correctly reports as no loss at all. Checksum-EXCLUDED event: golden-safe.
+	var lost := {}
+	for k in DEATH_LOSS_KEYS:
+		if bool(before[k]) and not bool(p[k]):
+			lost[k] = before[k]
+	events.append({"t": "revive", "x": p["x"], "y": p["y"], "cost": cost, "lost": lost})
 
 
 func _hurt_player(p: Dictionary) -> void:
@@ -1829,6 +1865,8 @@ func _kill_player(p: Dictionary) -> void:
 	if t_idx >= 0 and t_idx < tanks.size() and tanks[t_idx]["occupant"] == p["idx"]:
 		tanks[t_idx]["occupant"] = _tank_gunner(t_idx)
 	p["in_tank"] = -1
+	var tok_before := tokens
+	var flaw_before := flawless_streak
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
 	tokens = maxi(0, tokens - 1)   # ...and burns ONE Commendation — a full wipe let
@@ -1837,10 +1875,13 @@ func _kill_player(p: Dictionary) -> void:
 	                               # spend-them-or-lose-them pressure per body.
 	if mode == "endless":
 		deaths_this_wave += 1   # ...and forfeits this wave's Clean Wave bonus
-	# Death strips Triple/Pierce/Spread (see _respawn); flag it on the (checksum-
-	# excluded) event so the view can sting a "LOADOUT LOST" beat. Golden-safe.
+	# The two GLOBAL losses a body costs — the burned Commendation and the broken clean-gate
+	# streak — ride the (checksum-excluded) event so the view can sting them AT THE BODY, which
+	# is where the sim actually takes them. The LOADOUT losses deliberately do NOT ride this
+	# event: at the kill instant triple/pierce/spread are still live, and _respawn is what strips
+	# them, so it is _respawn's `lost` payload that reports those. Golden-safe.
 	events.append({"t": "player_down", "x": p["x"], "y": p["y"], "p": p["idx"],
-		"triple": p["triple"], "pierce": p["pierce_ticks"] > 0, "spread": p["spread_ticks"] > 0})
+		"token": tok_before - tokens, "streak": flaw_before})
 	# The broke fallback arms itself in _step_dead_player from the next tick on
 	# (and re-evaluates every tick as the shared chest moves), so the wipe —
 	# endless's only run-ender — still never requires a button press.
@@ -4069,6 +4110,55 @@ func _in_mud(_x: int, y: int) -> bool:
 	return false
 
 
+## --- Ford geometry & phase: ONE definition, sim side and view side ---
+##
+## Same idiom as camera_held() below: the sim owns the number, and every reader —
+## _in_water, _ford_current, main.gd's ford_visual()/_sync_water — calls these
+## instead of restating the arithmetic. The arithmetic here is byte-for-byte what
+## _in_water/_ford_current used to inline, so the goldens cannot move.
+
+static func ford_half_w(band_idx: int) -> int:
+	## Depth-tightening: full FORD_HALF_W at band 1, -4px per band, floored at half.
+	return maxi(FORD_HALF_W / 2, FORD_HALF_W - (band_idx - 1) * 4 * F_ONE)
+
+
+static func ford_phase(tick: int, band_idx: int) -> int:
+	return posmod(tick + band_idx * FORD_PHASE_STEP, FORD_CYCLE_TICKS)
+
+
+static func ford_closed(tick: int, band_idx: int) -> bool:
+	## True while the main ford is WASHED OUT (wade / armour-revert). Band 1 — the
+	## determinism-torture band — never cycles.
+	return band_idx >= 2 and ford_phase(tick, band_idx) >= FORD_OPEN_TICKS
+
+
+static func ford2_x(ford_x: int, band_idx: int) -> int:
+	## The second ford deep bands earn (every 3rd band): hash-derived 180-300px offset.
+	var wh2 := _mix(band_idx, ford_x / F_ONE)
+	return 80 * F_ONE + ((ford_x - 80 * F_ONE) + (180 + wh2 % 121) * F_ONE) % (480 * F_ONE)
+
+
+static func ford_island_x(ford_x: int, band_idx: int) -> int:
+	## Centre of the dry mid-river island deep bands earn (every 4th band). On the
+	## overlap bands (idx%12 == 8) it sits midway between BOTH fords, never across one.
+	if band_idx % 12 == 8:
+		return 80 * F_ONE + (((ford_x + ford2_x(ford_x, band_idx)) / 2 - 80 * F_ONE) + 240 * F_ONE) % (480 * F_ONE)
+	return 80 * F_ONE + ((ford_x - 80 * F_ONE) + 120 * F_ONE) % (480 * F_ONE)
+
+
+const FORD_ISLAND_HALF_W := 60 * F_ONE
+const FORD_ISLAND_Y0 := 20 * F_ONE
+const FORD_ISLAND_Y1 := 60 * F_ONE
+
+
+func ford_flow_dir(band_idx: int) -> int:
+	## -1 / 0 / +1 — the direction _ford_current shoves you, and the direction the
+	## water shader must draw its streaks drifting.
+	if band_idx < 2:
+		return 0
+	return 1 if _mix(band_idx, _world_seed) & 1 else -1
+
+
 func _ford_current(y: int) -> int:
 	## c3 2v: deeper river bands (idx>=2) push a wader/forder sideways
 	## FORD_CURRENT/tick in a per-band hashed, LEARNABLE direction (same _mix
@@ -4078,9 +4168,7 @@ func _ford_current(y: int) -> int:
 	for w in waters:
 		if y >= w["y"] and y <= w["y"] + WATER_H:
 			var band_idx: int = absi(w["y"] / GATE_SPACING)
-			if band_idx < 2:
-				return 0
-			return FORD_CURRENT if _mix(band_idx, _world_seed) & 1 else -FORD_CURRENT
+			return FORD_CURRENT * ford_flow_dir(band_idx)
 	return 0
 
 
@@ -4095,41 +4183,73 @@ func _in_water(x: int, y: int) -> bool:
 			# Depth-tightening (KIMK r2: rivers must EVOLVE, not just vary):
 			# ford width compresses as the run deepens — full at band 1, -4px
 			# per band, floored at half. Band 1 keeps FORD_HALF_W exactly.
-			var fw: int = maxi(FORD_HALF_W / 2, FORD_HALF_W - (band_idx - 1) * 4 * F_ONE)
+			var fw: int = ford_half_w(band_idx)
 			if x >= w["ford_x"] - fw and x <= w["ford_x"] + fw:
 				# c4 2v COLLAPSING BRIDGE (band>=2): the main ford is dry-foot only in
 				# the OPEN phase; during the CLOSED phase it washes out (you wade / edge-
 				# revert). Phase-cycled from tick_count (no contact timer, no new field);
 				# band 1 (the torture ford) is unaffected -> goldens byte-identical.
-				if band_idx >= 2 and posmod(tick_count + band_idx * 150, 600) >= 180:
+				if ford_closed(tick_count, band_idx):
 					return true   # CLOSED — the bridge is washed out (wade)
 				return false     # dry ford (OPEN)
 			# Hash stream: the SAME decorrelation-tested _mix as L10's chunks
 			# (KIMK round-3: no unaudited randomness sources).
-			var wh2 := _mix(band_idx, w["ford_x"] / F_ONE)
 			if band_idx % 3 == 2:
 				# Second ford: hash-derived 180-300px offset (was const 240 —
 				# a learnable rotation, KIMK r2), same depth-tightened width.
-				var ford2_x: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + (180 + wh2 % 121) * F_ONE) % (480 * F_ONE)
-				if x >= ford2_x - fw and x <= ford2_x + fw:
+				var f2x: int = ford2_x(w["ford_x"], band_idx)
+				if x >= f2x - fw and x <= f2x + fw:
 					return false
 			if band_idx >= 4 and band_idx % 4 == 0:
 				# Island placed relative to BOTH fords on overlap bands (idx%12
 				# == 8): midway between them, never across either (designed +
 				# pinned, KIMK r2). Otherwise offset from the main ford.
-				var isl_x2: int
-				if band_idx % 12 == 8:
-					var f2: int = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + (180 + wh2 % 121) * F_ONE) % (480 * F_ONE)
-					isl_x2 = 80 * F_ONE + (((w["ford_x"] + f2) / 2 - 80 * F_ONE) + 240 * F_ONE) % (480 * F_ONE)
-				else:
-					isl_x2 = 80 * F_ONE + ((w["ford_x"] - 80 * F_ONE) + 120 * F_ONE) % (480 * F_ONE)
-				if absi(x - isl_x2) <= 60 * F_ONE and y >= w["y"] + 20 * F_ONE and y <= w["y"] + 60 * F_ONE:
+				var isl_x2: int = ford_island_x(w["ford_x"], band_idx)
+				if absi(x - isl_x2) <= FORD_ISLAND_HALF_W and y >= w["y"] + FORD_ISLAND_Y0 and y <= w["y"] + FORD_ISLAND_Y1:
 					return false
 			return true
 	return false
 
 
 # --- Camera & world streaming ---
+
+func camera_held() -> bool:
+	## True when the SIM is holding the camera, not the player. One shared definition for the
+	## stall counter and for every view line that reads it, so the two can't drift. Pure
+	## function of already-hashed state — adds nothing to checksum().
+	##
+	## Equality is EXACT on purpose: _step_camera assigns camera_top = g["y"] - GATE_CAMERA_PAD
+	## verbatim when the clamp binds, and the ratchet camera can never sit north of a closed
+	## gate. A gate already walked past sits SOUTH of its clamp value, which a `<=` would
+	## wrongly report as held.
+	if mode == "endless":
+		return true   # endless never calls _step_camera at all; camera_top is pinned at -VIEW_H by design
+	for g in gates:
+		if not g["open"] and camera_top == g["y"] - GATE_CAMERA_PAD:
+			return true
+	return false
+
+
+func _step_fords() -> void:
+	## The collapsing bridge was the only tick-phased hazard in the game with NO tell:
+	## the lane block, the foundry vent and the mast all emit one. Events ONLY — this
+	## mutates nothing and events are checksum-EXCLUDED, so goldens cannot move (same
+	## shape as the flash_recover emit and the lane telegraph in _step_camera below).
+	for w in waters:
+		if w["y"] < camera_top - WATER_H or w["y"] > camera_top + VIEW_H:
+			continue   # off-screen band: nobody can read a tell they can't see
+		var b: int = absi(w["y"] / GATE_SPACING)
+		if b < 2:
+			continue   # band 1 never cycles
+		var ph: int = ford_phase(tick_count, b)
+		var fy: int = w["y"] + WATER_H / 2
+		if ph == FORD_OPEN_TICKS - FORD_WARN_TICKS:
+			events.append({"t": "ford_warn", "x": w["ford_x"], "y": fy})
+		elif ph == FORD_OPEN_TICKS:
+			events.append({"t": "ford_closed", "x": w["ford_x"], "y": fy})
+		elif ph == 0:
+			events.append({"t": "ford_open", "x": w["ford_x"], "y": fy})
+
 
 func _step_camera() -> void:
 	# c4 2v: lane-block TELEGRAPH — emit warn/seal/clear cues for the band in view
@@ -5975,9 +6095,21 @@ func _step_observer() -> void:
 		if p["alive"]:
 			any_alive = true
 			break
+	# ...but ONLY when the camera not advancing is the PLAYER's doing. A closed gate's clamp
+	# (campaign/arcade AND boss_rush's pre-authored gauntlet) and endless (which never scrolls at
+	# all) pin the camera with the player pushing north as hard as the game allows — and the
+	# counter scored every one of those ticks as loitering, then answered with mortars and an
+	# on-screen order to "PUSH NORTH". Measured in REAL play (.aaa/probe_c7d.gd — the repo's own
+	# combat bot, main.gd::demo_input, 8 seeds x 6000 campaign ticks, god_mode): the camera is
+	# held for 51.9% of all ticks, and BEFORE this guard 21724 of those 24889 held ticks (87.3%)
+	# scored as loitering, peaking at stall_ticks 1442 — 3.0x the 480-tick observer fuse — with
+	# 19 observers spawned and 99 mortars telegraphed while pinned. AFTER: 4 / 25106 (0.02%,
+	# all four boundary ticks where a gate opens mid-step), peak 1, and 0 / 0.
+	# You cannot be loitering inside a wall the game itself built.
+	var held := camera_held()
 	if camera_top < _prev_camera_top:
 		stall_ticks = 0
-	elif any_alive:
+	elif any_alive and not held:
 		stall_ticks += 1
 
 	# c3 3v CHOKE-CAMP breach: camping a seg-2+ choke for REAR_CAMP_TICKS (the
@@ -6014,8 +6146,14 @@ func _step_observer() -> void:
 			events.append({"t": "observer_spawn", "x": observer["x"],
 				"y": camera_top + OBSERVER_Y_OFFSET})
 	else:
-		# Pushing well past the observer despawns him (pressure released).
-		if camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
+		# Pushing well past the observer despawns him (pressure released) — OR the camera getting
+		# held, because then that release condition is unreachable by construction: escaping costs
+		# OBSERVER_DESPAWN_ADVANCE (150px) of northward advance the clamp forbids, so an observer
+		# already up when you entered the arena is a barrage you can neither outrun nor walk away
+		# from. Endless is EXEMPT and keeps its Spotter: there the observer living until it is shot
+		# is the documented, intended pressure (it only gets the stall_ticks freeze above, which
+		# never fed anything but the view).
+		if (held and mode != "endless") or camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
 			observer = {}
 			_clear_observer_strikes()
 			stall_ticks = 0

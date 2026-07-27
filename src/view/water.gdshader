@@ -24,6 +24,11 @@ uniform vec2 bank_amp = vec2(5.0, 2.5);                // px of shore displaceme
 uniform vec2 bank_freq = vec2(6.5, 15.0);              // radians across the 640px screen width (matches main.gd BANK_FREQ; always pushed, these are just the idle defaults)
 uniform float ford_center = 0.5;                      // ford center, in UV.x (0..1)
 uniform float ford_halfw = 0.05;                      // ford half-width, in UV.x
+// Which way the river runs, from SimWorld.ford_flow_dir(band): -1 / 0 / +1. The
+// streaks below were hardcoded drifting +x while _ford_current shoves you the other
+// way on half the reachable bands. 0 (band 1, which has no current) draws no streaks
+// at all rather than inventing a direction the sim does not have.
+uniform float flow_dir = 1.0;
 uniform vec4 shallow_col : source_color = vec4(0.21, 0.44, 0.47, 1.0);
 uniform vec4 deep_col : source_color = vec4(0.08, 0.19, 0.31, 1.0);
 uniform float speed : hint_range(0.0, 2.0) = 0.32;
@@ -122,10 +127,11 @@ void fragment() {
 	// water even in a still frame (units draw strictly on top, so this is free).
 	float crest = smoothstep(0.52, 0.78, ripple);
 	col += vec3(0.10, 0.17, 0.19) * crest * 1.3;
-	// Downstream current (5v river-dressing): elongated noise cells drifting +x
-	// read as flow direction even in a still frame.
-	float streak = smoothstep(0.78, 0.95, vnoise(vec2(p.x * 0.35 - t * 2.5, p.y * 7.0)));
-	col += vec3(0.18, 0.22, 0.22) * streak * 0.5;
+	// Downstream current (5v river-dressing): elongated noise cells drifting the way
+	// the sim's own ford current shoves you, so flow direction is readable in a still
+	// frame. One token flips both space and time, so the field drifts as a set.
+	float streak = smoothstep(0.78, 0.95, vnoise(vec2((p.x * 0.35 - t * 2.5) * flow_dir, p.y * 7.0)));
+	col += vec3(0.18, 0.22, 0.22) * streak * 0.5 * abs(sign(flow_dir));
 
 	// Animated sun-glint: a broad specular band drifting across, broken by ripple.
 	float glintband = 0.5 + 0.5 * sin(uv.x * 3.2 + uv.y * 6.0 - (TIME + phase) * 1.4);

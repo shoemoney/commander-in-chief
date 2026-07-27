@@ -2220,9 +2220,11 @@ static func score_label(v: int) -> String:
 ## "COMMENDATION TOKENS N" with the count width-bounded by _fmt_stat. Names the currency in full so
 ## it's never confused with the coin/medal economies beside it. _token_chip falls back to the
 ## compact form below only when this won't fit. Pure so a test pins the branches.
+## c7: zero formats like any other count ("COMMENDATION TOKENS 0") rather than collapsing to "".
+## _token_chip is the ONE gate on whether the chip draws at all, and it now keeps an empty slot on
+## screen for a beat after the death that emptied it — an empty label there drew a naked star with
+## no words, the exact cryptic chip every rung of this ladder exists to avoid.
 static func _token_label(tokens: int) -> String:
-	if tokens <= 0:
-		return ""
 	return ("COMMENDATION TOKEN " if tokens == 1 else "COMMENDATION TOKENS ") + _fmt_stat(tokens)
 
 
@@ -2232,8 +2234,6 @@ static func _token_label(tokens: int) -> String:
 ## Shorter than the full two-word form yet still self-explanatory, so it reads at a glance on a
 ## crowded head.
 static func _token_label_compact(tokens: int) -> String:
-	if tokens <= 0:
-		return ""
 	return ("COMMENDATION " if tokens == 1 else "COMMENDATIONS ") + _fmt_stat(tokens)
 
 
@@ -2248,7 +2248,13 @@ static func _token_label_compact(tokens: int) -> String:
 ## genuinely respects _fit_full, the same rule every other chip on this HUD follows. The exact call
 ## _draw makes, extracted so a test drives the real zero/nonzero/adaptive/underfit callsite.
 func _token_chip(sim: SimWorld, x: float, y: float) -> float:
-	if sim.tokens <= 0:
+	# c7: an empty slot is normally not worth a chip — but the death that spends your LAST
+	# commendation would then delete the whole chip between two frames, which is how the meta
+	# economy's loudest state change got delivered as an absence. main._token_loss_t holds it on
+	# screen, red, for ~1 s after that death. (Null main: the headless chip tests drive this
+	# callsite directly and get the plain empty behaviour.)
+	var loss := float(main.get("_token_loss_t")) if main != null else 0.0
+	if sim.tokens <= 0 and loss <= 0.01:
 		return x
 	# Degradation ladder, EVERY rung fully self-labeled (the commendation noun is never abbreviated
 	# to "COMM." nor dropped to a bare number): the FULL "COMMENDATION TOKEN(S) N", then the shorter
@@ -2257,9 +2263,14 @@ func _token_chip(sim: SimWorld, x: float, y: float) -> float:
 	# overflow chip (no head/+N overlap). The first rung that fits wins. If neither fits — only
 	# possible below the supported design width — the chip is dropped, never drawn past _fit_full.
 	var reserve := _ovf_slot_w(99)
+	var col := Color(1.0, 0.85, 0.3).lerp(Color(0.95, 0.25, 0.2), loss)
 	for lbl in [_token_label(sim.tokens), _token_label_compact(sim.tokens)]:
 		if x + ICON + 13.0 + _tw(lbl) + reserve <= _fit_full + 0.01:
-			return _stat("hud_star", lbl, x, y, Color(1.0, 0.85, 0.3))
+			# NOTE: deliberately no `pulse` 6th arg. _stat's pulse > 0.01 branch raw-draws the icon
+			# via draw_set_transform/draw_texture_rect, bypassing the _emit_icon seam every headless
+			# capture subclass overrides — the icon then measures as ABSENT in layout scans and the
+			# engine logs "Drawing is only allowed inside _draw()". The red tint carries the beat.
+			return _stat("hud_star", lbl, x, y, col)
 	return x
 
 
