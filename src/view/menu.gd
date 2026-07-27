@@ -77,6 +77,32 @@ const HALL_COUNT_COL := Color(1.0, 0.85, 0.4)
 # widened the tab row enough that 528 no longer cleared the rightmost tab's
 # cycle arrow (test-pinned in test_hall_page_tag_and_footer_layout).
 const HALL_PAGE_TAG_R := 560.0
+# drain-menu: the right edge every Hall board cell AND the latest-run highlight band stop
+# at. It was a hand-typed 628.0 in both places — a survivor of the fictional
+# `FRAME_INNER_R := 612` era this file already documents killing. The Hall is a content-well
+# screen: its frame border is x56..584 with an 11px INWARD keyline, so the band's 528px width
+# off x100 put its right edge 62px past the content clamp (566), 55px past the keyline (573)
+# and 44px past the OUTER edge of the frame art (584) — the "warm recency band" marking the
+# run you opened the board for was the one row that painted onto bare scrim outside the box.
+# Derived from the measured interior now, and shared, so the two sites cannot drift apart.
+const HALL_CELL_R := FRAME_INNER_R
+const HALL_BAND_L := 100.0    # left edge of the band and its ribbon; clears FRAME_INNER_L (74), seats left of the # column (112)
+# ONE source for the latest-run highlight band, shared by _draw_hall and the layout test.
+static func hall_highlight_band(y: float) -> Rect2:
+	return Rect2(HALL_BAND_L, y - 12.0, HALL_CELL_R - HALL_BAND_L, 20.0)
+# ...and ONE source for the board's measured column x-starts (#, SCORE-right-edge, MODE,
+# REACHED, STREAK). Art.font() is proportional, so each column starts after the widest
+# possible header/cell at its draw size plus a 14px gutter; hardcoded offsets drifted on
+# every font change. Shared with the layout test for the same reason HALL_CELL_R is: a
+# test that re-derives streak_x by hand goes quietly vacuous the day the columns move.
+static func hall_col_x() -> Array:
+	var f := Art.font()
+	var mode_w := maxf(f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x,
+		f.get_string_size("BOSS RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	for s in ["SECTOR 9", "VICTORY", "WAVE 99", "BOSS 3/3"]:
+		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	return [112.0, 148.0, 228.0, 228.0 + mode_w + 14.0, 228.0 + mode_w + 14.0 + reach_w + 14.0]
 const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint under colorblind mode so the white-alpha sprite keeps body
 
 # c4-07: the two shared center-banner status tints. Single-sourced HERE (the class main already
@@ -4609,17 +4635,10 @@ func _draw_hall() -> void:
 		_emit_tex("mi_arrow", Rect2(right + 8.0, TAB_ARROW_Y, 11.0, 11.0), acol)
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows := _hall_rows()
-	# Measured column layout — Art.font() is proportional, so each column draws
-	# at its own x. MODE/REACHED/STREAK x-starts come from the widest possible
-	# header/cell at draw size + 14px gutters, after the right-aligned SCORE
-	# column (right edge 214); hardcoded offsets drifted on every font change.
-	var mode_w := f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	mode_w = maxf(mode_w, f.get_string_size("BOSS RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
-	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	for s in ["SECTOR 9", "VICTORY", "WAVE 99", "BOSS 3/3"]:
-		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
-	var streak_x := 214.0 + 14.0 + mode_w + 14.0 + reach_w + 14.0
-	var col_x := [112.0, 148.0, 214.0 + 14.0, 214.0 + 14.0 + mode_w + 14.0, streak_x]
+	# Measured column layout (see hall_col_x): the SCORE column right-aligns to 214,
+	# MODE/REACHED/STREAK follow at measured widths + 14px gutters.
+	var col_x := hall_col_x()
+	var streak_x: float = col_x[4]
 	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
 	# Headers ride HALL_HEADER_Y, derived one line under the recency band, which is
 	# itself derived off the tab row — so the whole column stack moves together when
@@ -4724,7 +4743,7 @@ func _draw_hall() -> void:
 			if run.get("assist", false):
 				tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
 			var streak_s := "x%d%s" % [run.get("streak", 0), tag]
-			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > 628.0:
+			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > HALL_CELL_R:
 				# Cell would run off the frame — abbreviate the tags for this row.
 				tag = ("  *D" if run.get("daily", false) else "")
 				if run.get("assist", false):
@@ -4734,8 +4753,9 @@ func _draw_hall() -> void:
 			if is_latest:
 				# Glow band + a warm ribbon down the left edge so the run you opened the
 				# board for reads instantly, wherever it ranks. Drawn under the cells.
-				draw_rect(Rect2(100.0, y - 12.0, 528.0, 20.0), Color(1.0, 0.7, 0.2, 0.15))
-				draw_rect(Rect2(100.0, y - 12.0, 3.0, 20.0), Color(1.0, 0.75, 0.25, 0.95))
+				var band := hall_highlight_band(y)
+				draw_rect(band, Color(1.0, 0.7, 0.2, 0.15))
+				draw_rect(Rect2(band.position, Vector2(3.0, band.size.y)), Color(1.0, 0.75, 0.25, 0.95))
 				# A right-pointing caret in the left gutter (x104..110, the gap before the #
 				# column @112) — a SHAPE marker so the highlighted row is identifiable without
 				# relying on the warm tint alone (the top-band "= YOUR LATEST RUN" legend reads
@@ -5471,8 +5491,17 @@ func _draw_opts_header() -> void:
 			main._rumble_on, main._fullscreen), OPTS_SUBLINE_Y, 8, SUBTITLE_COL)
 
 
-# Trim a label to max_w with a trailing ellipsis (raw clipping ate whole glyphs
-# mid-character; dynamic labels like the seed row can outgrow the button).
+# drain-menu: the NAME/VALUE separators a menu ROW LABEL can use — ": " for the toggle
+# and stepper rows ("ASSIST (2-HIT): OFF", "WINDOW SCALE: 3x"), " — " for the dash-list
+# value rows ("HEAD START — LVL 1/3 — 45 VP"). This is a SET, not a priority order:
+# _ellipsize pools every occurrence of every entry and picks by POSITION (rightmost
+# first), so adding a separator here never reorders the existing ones.
+const VALUE_SEPS := [": ", " — "]
+
+
+# Trim a ROW LABEL to max_w with a trailing ellipsis (raw clipping ate whole glyphs
+# mid-character; dynamic labels like the seed row can outgrow the button). Prose does
+# NOT belong here — it has no load-bearing tail; use _trim_tail below.
 func _ellipsize(txt: String, size: int, max_w: float, keep_tail := "", warn := false) -> String:
 	var f := Art.font()
 	if f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
@@ -5500,19 +5529,53 @@ func _ellipsize(txt: String, size: int, max_w: float, keep_tail := "", warn := f
 		var mark := ell + DESTR_CUE_MARK
 		if f.get_string_size(mark, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
 			return _fit_prefix(f, head, mark, size, max_w) + mark
-	# c2-14: toggle/value rows read "NAME: STATE" (e.g. "ASSIST (2-HIT): OFF"). The
-	# STATE tail IS the point of the row, so ellipsize the NAME and KEEP the tail
-	# ("NAM…: OFF") rather than silently trimming the ON/OFF off the end. Only take
-	# this path when the "…: STATE" tail itself fits; otherwise fall through to the
-	# plain trim, which still flags the overflow with a trailing ellipsis. Trimming is
-	# glyph-aware (whole-cluster cut points) so a wide label never splits a glyph.
-	# Split on the FIRST ": " — that is the NAME/VALUE separator; any colon inside the
-	# value (a time, a ratio) stays with the preserved tail.
-	var sep := txt.find(": ")
-	if sep > 0:
-		var tail := txt.substr(sep)   # ": STATE"
+	# c2-14: toggle/value rows read "NAME<sep>VALUE" — "ASSIST (2-HIT): OFF",
+	# "HEAD START — LVL 1/3 — 45 VP". The VALUE tail IS the point of the row, so
+	# ellipsize the NAME and KEEP the tail ("NAM…: OFF") rather than silently trimming
+	# the answer off the end.
+	# drain-menu: BOTH separators are recognised now. The ": " sniff was the only one,
+	# so every " — " row — the whole VETERAN PERKS screen — was invisible to this path
+	# and dropped its price: "HEAD START — LVL 0/3 — 30 VP" drew as "HEAD START — LVL …"
+	# on the real 184px plate, a tier readout with no cost on the one screen whose job is
+	# to state costs.
+	# Every occurrence of every separator is a candidate, tried RIGHTMOST FIRST — the
+	# SHORTEST tail that fits, not the longest. Both halves are load-bearing: the tail is
+	# the answer, the head is WHICH ROW is answering, and a row reading "… — LVL 0/3 — 30 VP"
+	# has a price attached to nothing. The rightmost split spends the fewest pixels on the
+	# value and leaves the rest to the name, so "HEAD START — LVL 0/3 — 30 VP" lands as
+	# "HEAD START…— 30 VP" (name AND price) instead of trading one for the other.
+	# If not even the shortest "…<tail>" fits, fall through to the plain trim, which still
+	# flags the overflow with a trailing ellipsis. Trimming is glyph-aware (whole-cluster
+	# cut points) so a wide label never splits a glyph.
+	var splits: Array[int] = []
+	for vsep in VALUE_SEPS:
+		var at := txt.find(vsep)
+		while at > 0:
+			splits.append(at)
+			at = txt.find(vsep, at + 1)
+	splits.sort()
+	splits.reverse()
+	for at in splits:
+		var tail := txt.substr(at)
 		if f.get_string_size(ell + tail, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
-			return _fit_prefix(f, txt.substr(0, sep), ell + tail, size, max_w) + ell + tail
+			return _fit_prefix(f, txt.substr(0, at), ell + tail, size, max_w) + ell + tail
+	return _trim_tail(txt, size, max_w)
+
+
+# drain-menu: the plain glyph-aware "cut the end off and mark it" trim — no clause is
+# load-bearing, the ellipsis lands at the END, full stop. This is the ONLY correct
+# treatment for PROSE (the footer's focused-row description), and it is what the muted
+# volume rows were not getting: _ellipsize's keep-the-value-tail heuristic fired on the
+# ": " inside "SFX: LOUDNESS OF ..." — a separator that means "name: value" on a ROW
+# LABEL and means nothing at all mid-sentence — and spliced a trimmed head onto a later
+# clause: "STEP THE SLIDER RIGHT TO U…: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS."
+# That both ate the word UNMUTE (the only place the UI says how to recover a muted bus)
+# and read as neither sentence. _ellipsize is a ROW-LABEL fitter; prose calls this.
+func _trim_tail(txt: String, size: int, max_w: float) -> String:
+	var f := Art.font()
+	if f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+		return txt
+	var ell := "…" if f.has_char(0x2026) else "..."
 	return _fit_prefix(f, txt, ell, size, max_w) + ell
 
 
@@ -5900,6 +5963,13 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 # becoming unrecoverable mid-run.
 
 
+# drain-menu: the muted-bus footer line, as ONE string, so a test can drive the SHIPPED
+# wording instead of a hand-copied twin. The recovery action leads because the trim lands
+# on the TAIL — see _trim_tail for the fusion bug that used to eat it from the middle.
+static func muted_row_help(row_help: String) -> String:
+	return "STEP THE SLIDER RIGHT TO UNMUTE. %s" % row_help
+
+
 # c3-09: the TOP line of the two-line settings footer — the focused row's description in high-contrast
 # helper text (FOOTER_HELP_COL), with a hairline rule under it so the description never reads as
 # another actionable prompt. Ellipsized to the same CANVAS_WIDTH - 24 budget the wording tests assert,
@@ -5919,10 +5989,13 @@ func _draw_footer_help(row_help: String, strip_top: float) -> float:
 	# straight through the top pixel row of every keycap and the caps hung 1.5px off the strip's
 	# bottom edge. Both are pure vertical misses, so the layout suite's x-sorted overlap check could
 	# not see either — pinned now by test_two_line_footer_help_never_collides_with_the_legend.
-	# c3-17: the ONLY other _ellipsize caller — footer help text, which carries no destructive
-	# cue (no keep_tail/warn needed). Every destructive-row label routes through _row_fit above,
-	# so the cue-preserving path covers all destructive truncation.
-	_center_text(_ellipsize(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 7.0, 8, FOOTER_HELP_COL)
+	# drain-menu: this is PROSE, not a "NAME: VALUE" row label, so it takes the plain
+	# end-of-string trim. It used to call _ellipsize, whose keep-the-value-tail path fired
+	# on the ": " inside "SFX: LOUDNESS OF ..." and fused a trimmed head onto that clause —
+	# eating the UNMUTE recovery instruction the muted-row prefix front-loads. Every
+	# destructive-row label routes through _row_fit/_ellipsize above, so the cue-preserving
+	# path still covers all destructive truncation; nothing here needs keep_tail/warn.
+	_center_text(_trim_tail(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 7.0, 8, FOOTER_HELP_COL)
 	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + 8.0, BTN.x, 1.0), DIVIDER_DIM)
 	return strip_top + 15.0
 
@@ -5993,7 +6066,7 @@ func _footer_legend() -> void:
 	# and the slashed bar). The helper text is the only channel that spells out HOW to bring the bus
 	# back, so it names the slider move that un-mutes; the L/R glyph hint below reads "UNMUTE" to match.
 	if row_help != "" and focused.get("muted", false):
-		row_help = "STEP THE SLIDER RIGHT TO UNMUTE. %s" % row_help
+		row_help = muted_row_help(row_help)
 	# Dev guard: a row that HOLDS a value (on/vol/step) but has no description is missing copy — warn
 	# once so it surfaces in-game, not only in the mapping test.
 	if row_help == "" and (focused.has("on") or focused.has("vol") or focused.has("step")):

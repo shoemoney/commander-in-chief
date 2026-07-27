@@ -7232,3 +7232,154 @@ func test_no_destructive_row_bakes_its_confirmation_instruction_into_its_resting
 		"a destructive row still reserves its confirm-glyph slot")
 	m.free()
 	stub.free()
+
+
+# drain-menu (1): THE PRICE IS THE ONE NUMBER THE VETERAN PERKS SCREEN EXISTS TO SHOW.
+#
+# A perk row reads "<NAME> — <STATE>", where STATE is "MAX", "N VP", or "LVL a/b — N VP".
+# _ellipsize's keep-the-value-tail path only ever recognised a ": " separator (the toggle
+# rows' "NAME: OFF"), so a perk row's " — " tail was invisible to it and the price fell off
+# the end of the plate: the row degraded to "HEAD START — LVL 0…" — a tier readout with no
+# cost, on a screen whose only job is to say what a perk costs.
+#
+# Driven through the REAL _menu_items() (so the wording can't drift from the shipped one)
+# and the REAL _row_fit() at the REAL drawable column width _draw computes:
+#   lx      = r.position.x + 30      (fixed icon gutter)
+#   label_r = r.end.x - 8            (right margin; PERKS reserves no submenu/glyph slot)
+#   => avail = BTN.x - 38, and the overflow chip reserves 12px + OVERFLOW_CHIP_PAD.
+func test_perk_rows_never_truncate_their_vp_price() -> void:
+	var f := Art.font()
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.PERKS
+	var avail := Menu.BTN.x - 38.0
+	var reserve := 12.0 + Menu.OVERFLOW_CHIP_PAD
+	var states := 0
+	var truncated := 0
+	for pd in MainScript.PERK_DEFS:
+		var costs: Array = pd["cost"]
+		for lvl in range(costs.size() + 1):
+			stub._perk_levels[pd["id"]] = lvl
+			var label := ""
+			for row in m._menu_items():
+				if String(row["id"]) == String(pd["id"]):
+					label = String(row["label"])
+			Runner.T.ok(label != "", "PERKS row for '%s' at tier %d exists" % [pd["id"], lvl])
+			# What the player must still be able to read: the price, or MAX once maxed.
+			var want := "MAX" if lvl >= costs.size() else "%d VP" % int(costs[lvl])
+			var fit: Dictionary = m._row_fit(label, Menu.ROW_LABEL_SIZE, avail, reserve)
+			var shown := String(fit["shown"])
+			states += 1
+			if not shown.contains(want):
+				truncated += 1
+			Runner.T.ok(shown.contains(want),
+				"perk row '%s' still shows its '%s' (drew '%s' in %.0fpx; full label measures %.1fpx)"
+					% [label, want, shown, avail,
+						f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, Menu.ROW_LABEL_SIZE).x])
+			# BOTH halves are load-bearing. The first cut of this fix kept the longest
+			# fitting value tail and drew "… — 30 VP" — a price attached to no perk, and
+			# indistinguishable between rows. The row must still open with its NAME.
+			var first_word := String(pd["label"]).split(" ")[0]
+			Runner.T.ok(shown.begins_with(first_word),
+				"perk row '%s' still opens with its name (drew '%s', wanted a '%s…' head)"
+					% [label, shown, first_word])
+			# ...and whatever is drawn still fits the column it was fitted to.
+			var budget := avail - reserve if bool(fit["show_chip"]) else avail
+			Runner.T.ok(f.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, Menu.ROW_LABEL_SIZE).x <= budget,
+				"perk row '%s' drawn string fits its %.1fpx budget" % [shown, budget])
+	Runner.T.ok(states >= 9, "every PERK_DEFS tier state was exercised (%d)" % states)
+	Runner.T.eq(truncated, 0, "no perk state drops its price/MAX (%d of %d did)" % [truncated, states])
+	m.free()
+	stub.free()
+
+
+# drain-menu (2): A MUTED VOLUME ROW'S FOOTER MUST NOT FUSE INTO NONSENSE.
+#
+# _footer_legend front-loads the recovery action onto a muted SFX/MUSIC row:
+#   "STEP THE SLIDER RIGHT TO UNMUTE. " + setting_help(id)
+# That composite overruns the CANVAS_WIDTH-24 footer budget, and _ellipsize's keep-the-
+# tail heuristic then fired on the ": " inside "SFX: LOUDNESS OF ..." — a separator that
+# means "name: value" on a ROW LABEL and means nothing at all inside a prose sentence.
+# The result spliced a trimmed head onto the help text's tail across an ellipsis, eating
+# the word UNMUTE — the only place the UI says how to get the bus back — and printing a
+# fused string that reads as neither sentence.
+#
+# Composed here exactly as _footer_legend composes it, and run through the REAL footer
+# ellipsize budget, so this measures the shipped string and not a paraphrase of it.
+func test_muted_volume_row_footer_keeps_its_unmute_instruction() -> void:
+	var f := Art.font()
+	var ell := "…" if f.has_char(0x2026) else "..."
+	var budget := Menu.CANVAS_WIDTH - 24.0
+	for id in ["sfx", "music"]:
+		# The SHIPPED composition (muted_row_help + setting_help), through the REAL
+		# _draw_footer_help, captured at the _center_text seam — so this measures the
+		# string the player sees, at the real footer budget, not a paraphrase.
+		var composed := Menu.muted_row_help(Menu.setting_help(id))
+		Runner.T.ok(f.get_string_size(composed, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x > budget,
+			"the muted '%s' footer line really does overrun the %.0fpx budget (%.1fpx) — this test has something to catch"
+				% [id, budget, f.get_string_size(composed, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x])
+		var cap := _CaptureMenu.new()
+		cap.mode = Menu.Mode.AUDIO
+		cap._draw_footer_help(composed, Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE)
+		var shown := ""
+		for c in cap.centered:
+			shown = String(c["txt"])
+		var boxes: Array = cap.ops.filter(func(op): return op["k"] == "text")
+		cap.free()
+		Runner.T.ok(shown.contains("UNMUTE"),
+			"muted '%s' footer keeps the UNMUTE recovery instruction (drew '%s')" % [id, shown])
+		# A truncated sentence must read as a truncated sentence: the ellipsis belongs at the
+		# END, never spliced mid-string onto a tail that came from a different clause.
+		Runner.T.ok(not shown.contains(ell) or shown.ends_with(ell),
+			"muted '%s' footer never fuses a trimmed head onto a later clause (drew '%s')" % [id, shown])
+		Runner.T.ok(f.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= budget,
+			"muted '%s' footer fits the %.0fpx footer budget" % [id, budget])
+		# ...and the ink box the draw actually emitted stays on canvas.
+		Runner.T.ok(boxes.size() == 1, "muted '%s' footer emits exactly one description line" % id)
+		for b in boxes:
+			var box: Rect2 = b["box"]
+			Runner.T.ok(box.position.x >= 0.0 and box.end.x <= Menu.CANVAS_WIDTH,
+				"muted '%s' footer ink x [%.1f,%.1f] stays on canvas" % [id, box.position.x, box.end.x])
+
+
+# drain-menu (3): THE LATEST-RUN HIGHLIGHT BAND MUST STAY INSIDE THE HALL'S FRAME.
+#
+# The band was Rect2(100, y-12, 528, 20) — a right edge of x628 against a content-well
+# frame whose border is x56..584 with an 11px INWARD keyline. So the "warm recency band"
+# painted 44px past the OUTER edge of the frame art, straight onto bare scrim: the one
+# row the player opened the board to find was the one row that broke the box.
+# The same 628 was the STREAK cell's abbreviate-if-past clamp, so cells were licensed to
+# run out there too — both now derive from HALL_CELL_R.
+#
+# Measured against the frame the ART emits (content_frame_border minus the keyline
+# stroke), not against a layout constant, plus the documented FRAME_INNER content clamp.
+func test_hall_latest_run_band_stays_inside_the_content_frame() -> void:
+	var stroke: float = 0.022 * Menu.FRAME_SRC * Menu.FRAME_SCALE
+	var clear: Rect2 = Menu.content_frame_border(Menu.Mode.HALL).grow(-stroke)
+	for row in Menu.HALL_PAGE_ROWS:
+		var y: float = Menu.HALL_ROW0_Y + row * Menu.HALL_ROW_PITCH
+		var band: Rect2 = Menu.hall_highlight_band(y)
+		Runner.T.ok(band.position.x >= clear.position.x and band.end.x <= clear.end.x,
+			"row %d latest-run band x [%.1f,%.1f] clears the frame keyline [%.1f,%.1f]"
+				% [row, band.position.x, band.end.x, clear.position.x, clear.end.x])
+		Runner.T.ok(band.position.y >= clear.position.y and band.end.y <= clear.end.y,
+			"row %d latest-run band y [%.1f,%.1f] clears the frame keyline [%.1f,%.1f]"
+				% [row, band.position.y, band.end.y, clear.position.y, clear.end.y])
+		Runner.T.ok(band.position.x >= Menu.FRAME_INNER_L and band.end.x <= Menu.FRAME_INNER_R,
+			"row %d latest-run band x [%.1f,%.1f] honours the content clamp [%.1f,%.1f]"
+				% [row, band.position.x, band.end.x, Menu.FRAME_INNER_L, Menu.FRAME_INNER_R])
+	# The board's cell right edge is the SAME number, so a wide STREAK cell can never be
+	# licensed out past the frame either — one const, both sites.
+	Runner.T.ok(Menu.HALL_CELL_R <= Menu.FRAME_INNER_R,
+		"Hall cell right edge %.1f honours the content clamp %.1f" % [Menu.HALL_CELL_R, Menu.FRAME_INNER_R])
+	# And the widest STREAK cell the board can build still lands inside it. The column
+	# x comes from the PRODUCTION measurement (Menu.hall_col_x, which _draw_hall itself
+	# calls) — a hand-copied re-derivation of that formula goes quietly vacuous the day
+	# the font or the gutters move, which is the failure mode this whole test exists over.
+	var f := Art.font()
+	var streak_x: float = Menu.hall_col_x()[4]
+	var widest := f.get_string_size("x99  *D  *A", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	Runner.T.ok(streak_x + widest <= Menu.HALL_CELL_R,
+		"abbreviated STREAK cell (x%.1f + %.1f) fits inside the cell right edge %.1f"
+			% [streak_x, widest, Menu.HALL_CELL_R])
