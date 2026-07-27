@@ -2395,8 +2395,26 @@ func _step_bullets() -> void:
 					dead = true
 					break
 		if not dead and not sandbags.is_empty():
-			# Player-authored cover eats rounds the same way (both directions).
+			# Cover eats rounds both ways — EXCEPT a bag this party planted itself, which
+			# you fire over. The wheel plants at CLAYMORE_PLANT_OFFSET (20px) ALONG the aim
+			# and the segment is 36x10, so its near face lands ~2px from the muzzle, square
+			# across the firing line. Arithmetic, not opinion: aiming north the bag spans
+			# y-25..y-15 and a 6px/tick round steps to -6/-12/-18, dying on tick 3; aiming
+			# east it spans x+2..x+38 and dies on tick 1, six pixels out. Effective range
+			# along the plant axis was shorter than ENEMY_TOUCH_RADIUS, so the 40-coin buy
+			# silently disabled your gun in the one direction you were facing.
+			# The exemption is deliberately narrow: only `player`-tagged bags, only the
+			# `bullets` array (player MG rounds — _spawn_mg_bullet is its sole producer).
+			# _step_enemy_bullets still dies on these bags, so cover from incoming fire —
+			# the entire reason to buy one — is untouched; rusher pathing still blocks; one
+			# grenade or tank tread still clears it. Authored/world bags still stop player
+			# rounds, so the level's own cover keeps its tactical meaning.
+			# Mirrors the fix already made on the other side of this exchange (see
+			# _step_enemy_bullets: "cover now protects only what stands BEHIND it"), where a
+			# player standing inside his own bag was immune to everything.
 			for sb in sandbags:
+				if sb.get("player", 0) == 1:
+					continue
 				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true

@@ -856,13 +856,29 @@ func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_SANDBAG_COST, "bag costs SHOP_SANDBAG_COST")
 	var sb := sim.sandbags[0]
 	Runner.T.ok(sb["x"] > p["x"], "bag plants ALONG the aim, not underfoot")
-	# Bullets die inside the bag AABB — both directions use the same block.
+	# ASYMMETRIC BY DESIGN, and this assertion used to say the opposite. A bag YOU planted
+	# does not eat YOUR rounds — you fire over your own parapet — while it still stops
+	# everything incoming. The old "player bullet dies in the bag" pinned a defect: the wheel
+	# plants 20px ALONG the aim and the segment is 36x10, so its near face sat ~2px from the
+	# muzzle. Aiming north the bag spans y-25..y-15 and a 6px/tick round dies on tick 3;
+	# aiming east it dies on tick 1, six pixels out — shorter than ENEMY_TOUCH_RADIUS. The
+	# 40-coin buy disabled your own gun in the direction you were facing.
 	sim.bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
 	sim.enemy_bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10})
 	sim._step_bullets()
 	sim._step_enemy_bullets()
-	Runner.T.eq(sim.bullets.size(), 0, "player bullet dies in the bag")
-	Runner.T.eq(sim.enemy_bullets.size(), 0, "enemy bullet dies in the bag")
+	Runner.T.eq(sim.bullets.size(), 1, "your own bag does NOT eat your rounds (you fire over it)")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "but it still stops incoming fire — the reason to buy it")
+	# The exemption is scoped to player-planted bags: the level's own cover still blocks you,
+	# or authored emplacements would stop mattering the moment you bought one bag.
+	sim.bullets.clear()
+	var world_bag := {"x": sb["x"] + 200 * SimWorld.F_ONE, "y": sb["y"], "world": 1}
+	sim.sandbags.append(world_bag)
+	sim.bullets.append({"x": world_bag["x"], "y": world_bag["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.eq(sim.bullets.size(), 0, "an AUTHORED bag still eats player rounds")
+	sim.sandbags.erase(world_bag)
+	sim.bullets.clear()
 	# A rusher walking the bag line stalls (move-revert), then a grenade clears it.
 	sim._spawn_enemy(sb["x"] + 24 * SimWorld.F_ONE, sb["y"], false)
 	var r := sim.enemies[sim.enemies.size() - 1]
