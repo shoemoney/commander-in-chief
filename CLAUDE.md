@@ -31,6 +31,10 @@ tools/run_tests.sh                          # full suite
 SUITE=mechanics tools/run_tests.sh          # one suite
 tools/run_tests.sh -s res://tools/smoke.gd  # any other headless script
 
+# Sim determinism lint — the no-floats/no-RNG/no-Time/no-scene-tree gate.
+# NOT part of the suite; only CI runs it, so run it yourself after sim edits.
+tools/run_tests.sh -s res://tools/lint_sim.gd
+
 # Signature-moment screenshots (dev tool; needs a GL context — X or Xvfb)
 SHOT_DIR=/abs/path godot --path . --rendering-method gl_compatibility \
     -s res://tools/screenshots.gd
