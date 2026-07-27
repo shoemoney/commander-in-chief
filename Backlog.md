@@ -1,6 +1,6 @@
 # Backlog
 
-Open defects, design calls and debt for Commander In Chief, as of **2026-07-26 21:40**.
+Open defects, design calls and debt for Commander In Chief, as of **2026-07-26 22:30**.
 
 **Provenance.** Most entries came from `/triple-a-game` runs — a two-lens review where a
 multimodal reviewer judges screenshots and a second lens reads `src/sim/` and *drives it
@@ -142,6 +142,56 @@ one finding class that is *not* re-derived next run.
   obvious answer and is not built.
 
 ---
+
+## 7. Blocked / can't be fixed right now
+
+Real, understood, and deliberately not actionable today. Each says WHY, so nobody re-derives the
+reasoning and nobody mistakes them for oversights.
+
+- **Miniboss tier escalation stops at wave 20 — LEAVE ALONE, premise was wrong.** Escalation does
+  not stop: miniboss HP is uncapped and linear (`+20 HP per 5 waves`, forever). Two *cadence*
+  curves floor — mortar shells at tier 3 (**wave 15**, not 20) and spray interval at tier 4
+  (wave 20) — and both are explicit `maxi()` floors, i.e. deliberate. `README.md:133` already
+  scopes its promise to "extra mortars by w15", which is exactly what the code does, and
+  `tests/test_boss.gd:119` pins the cap. Adding a T4 means reversing a tested design decision,
+  and the mortar act is already spacing-compressed (T3 is +40/+40/+40/+20, so a 6th shell fits
+  only at ~295 with 4 ticks of act left). **Blocked on: wanting it at all.**
+- **`BOSS_HIT_RADIUS` 20 vs the gunship silhouette — OWNER CALL, not a bug.** The reported "47px
+  half-extent" is **rotor blades**: four 7px blades reaching the canvas edge on `m_heli_attack2`,
+  which `gunship_body` does not have. Eroded, the two hulls measure **30.92 vs 31.14 drawn px**
+  — 0.7% apart — so there is nothing to split with a per-boss radius. Raising the radius makes
+  both bosses easier to hit; that is **balance, not a fix**. Also note the view already draws its
+  hit bloom and damage art at r=34 against a 20px hit disc. **Blocked on: a difficulty decision.**
+- **Deep-wave Endless is still largely unobserved.** The scripted bot plateaus around **wave 11**
+  even after the wedge fix, so the difficulty telemetry cannot see past it and wave-20 behaviour
+  has never actually been watched by anything. **Blocked on: a better bot, or a human playing it.**
+- **The `/triple-a-game` ledger prompt is 12,272 chars and grows with the backlog.** Measured
+  2026-07-26: `ledger.json` is **45,996 chars**, of which **36,547 are backlog `detail`** (mean
+  1,142, max 3,807). That whole payload is embedded in a prompt every cycle and handed to a model
+  whose only job is to reproduce it byte-for-byte — which is exactly the setup that produced the
+  documented title-drift corruption. Capping stored `detail` at ~400 chars would cut it **69%**
+  and now costs nothing, since full text lives in this file. **Blocked on: nothing — just not done
+  yet.** (Do not "fix" it by paraphrasing entries; the titles are dedupe keys.)
+- **`tools/probe_frame_bounds.gd` ships knowing it emits 44 false `[OVER]` lines.** The gate
+  measured this, filed it, and committed anyway. The gate now blocks on it going forward, but the
+  already-committed probe is still in the tree. **Blocked on: someone fixing or deleting it.**
+- **A 20-cycle run now costs ~40-50 hours** at all-Opus/high (measured: cycle 1 = 2h29m, cycle 2
+  > 2h25m and still going). The skill's own 12-20h estimate predates the model change.
+  **Blocked on: deciding whether that is the right trade.**
+
+## 8. Other / notes
+
+- **Two entries in section 1 are marked RESOLVED rather than deleted** so a decision and its
+  outcome stay adjacent. Keep doing that.
+- **The loop now writes this file itself** at the end of each run (the `Report` phase) and MERGES
+  rather than overwrites. Hand-edits here are safe, but expect it to reorganise entries into the
+  same section headings.
+- **The ledger's backlog count grows faster than it drains** (~4 banked vs ~1 fixed per cycle).
+  That is what an honest audit of a real codebase looks like — but it means this file is a
+  **triage queue, not a work queue**, and it will not converge on its own.
+- **Where an entry has no measured number, it says so.** Treat those as suspicions, not findings —
+  this project has repeatedly had a real smell reported with the consequence wrong by a whole
+  severity class.
 
 ## Resolved 2026-07-26 (for context)
 
