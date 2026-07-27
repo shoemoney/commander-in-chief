@@ -846,6 +846,18 @@ func engine_at(key: int, screen_pos: Vector2, on: bool) -> void:
 		tw.tween_callback(voice.queue_free)
 
 
+func stop_engines() -> void:
+	## RUN TEARDOWN. _engines is keyed on the SIM TANK INDEX and engine_at() only ever fades a
+	## voice on a frame that VISITS its key — so a reset taken with a tank in the engine-on band
+	## left a positional loop playing, keyed to an index the next SimWorld re-binds to a different
+	## tank (or, with fewer tanks, never visits again). Hard-stopped, not tweened like engine_at's
+	## own declick fade: the restart's own fade already covers it, and create_tween() needs the
+	## node in the tree, which a headless main (constructed without _ready) does not give us.
+	for v in _engines.values():
+		v.queue_free()
+	_engines.clear()
+
+
 func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	# Shared tail declick: several exp-decay buffers (explosion ~0.05-0.10,
 	# splash ~0.07) are still audible at the hard cut — ramp the last 5ms to

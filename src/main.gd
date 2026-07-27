@@ -892,7 +892,7 @@ func _setup_water() -> void:
 		r.material = m
 		add_child(r)
 		_water_rects.append(r)
-		_water_pushed.append([-1, -1.0, 0.0, Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0), false])
+		_water_pushed.append(_water_pushed_row())
 	# Warm the water shader too (same first-draw compile hitch as screen_fx):
 	# show one rect as a 1px off-screen-bottom sliver for the boot frame —
 	# _sync_water repositions or hides it on the first real draw.
@@ -930,6 +930,13 @@ const _WATER_DEEP_STOPS := [Color(0.10, 0.20, 0.26), Color(0.13, 0.20, 0.16),   
 	Color(0.09, 0.20, 0.11), Color(0.12, 0.15, 0.19), Color(0.25, 0.10, 0.06)]
 
 
+func _water_pushed_row() -> Array:
+	## A never-pushed pool slot: [band world-y, sector soot, splash_t, wake0, wake1, ford closed,
+	## ford x]. Slot 6 (ford x) is part of the dirty key — two runs can put a DIFFERENT ford on
+	## the SAME band world-y, and y alone left the recycled slot measuring clean.
+	return [-1, -1.0, 0.0, Vector3(-10.0, 0.5, 0.0), Vector3(-10.0, 0.5, 0.0), false, -1]
+
+
 func _sync_water() -> void:
 	# Place a shader quad over every on-screen water band, faithful to _draw_water's
 	# geometry (full width, WATER_H tall, at the band's screen-y). View-only: reads
@@ -959,15 +966,18 @@ func _sync_water() -> void:
 		# set_shader_parameter dirties the material. Re-push only when this pool
 		# rect is re-assigned to a different band or the sector soot moves.
 		var wclosed: bool = SimWorld.ford_closed(sim.tick_count, absi(w["y"] / SimWorld.GATE_SPACING))
-		if pushed[0] != w["y"] or pushed[1] != wsec or pushed[5] != wclosed:
+		if pushed[0] != w["y"] or pushed[1] != wsec or pushed[5] != wclosed \
+				or pushed[6] != w["ford_x"]:
 			pushed[0] = w["y"]
 			pushed[1] = wsec
 			pushed[5] = wclosed
+			pushed[6] = w["ford_x"]
 			var mat: ShaderMaterial = rect.material
 			mat.set_shader_parameter("rect_size", rect.size)
-			# One source for the ford uniforms — see water_shader_params(). The band is
-			# identified by w["y"], which is already the re-push key, so no extra dirty
-			# term is needed for band_idx / flow_dir (verified: both are functions of y).
+			# One source for the ford uniforms — see water_shader_params(). band_idx and
+			# flow_dir need no extra dirty term (both are functions of w["y"], which is
+			# keyed). ford_x is NOT: a fresh run can put a different ford on the same band
+			# world-y, so it is keyed in its own right (slot 6) — see _water_pushed_row().
 			var wb: int = absi(w["y"] / SimWorld.GATE_SPACING)
 			var wp := water_shader_params(wb, w["ford_x"], sim.ford_flow_dir(wb),
 				SimWorld.ford_closed(sim.tick_count, wb))
@@ -1410,6 +1420,11 @@ func start_watch() -> void:
 
 func _reset() -> void:
 	Art.foliage_march = 0.0   # a1-05 r2: neutral until a gameplay frame feeds the march (no stale leak)
+	_sfx.stop_engines()   # tank-index-keyed loops: the next SimWorld re-binds that index (see Sfx.stop_engines)
+	# Re-arm the water pool's shader push key IN PLACE (it is indexed by pool slot, which outlives
+	# the run — clearing it would index past the end of the pool on the next _sync_water).
+	for wi in _water_pushed.size():
+		_water_pushed[wi] = _water_pushed_row()
 	_flush_bests()   # a run torn down without a debrief still banks its records
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
@@ -1479,6 +1494,7 @@ func _reset() -> void:
 	_enemy_slot_kind.clear()
 	_enemy_hp_prev.clear()
 	_enemy_flash.clear()
+	_enemy_water_prev.clear()   # the last slot-keyed cache _reset missed; run 2 slot i inherited run 1's wet flag
 	_spawn_yelled.clear()
 	_spawn_yell_cd = 0
 	_tech_lunge_prev.clear()
