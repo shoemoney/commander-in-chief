@@ -1321,10 +1321,30 @@ func test_a3_meta_screen_scrim_seals_content_screens() -> void:
 		"HALL/HOWTO draw the interior well behind the frame")
 	Runner.T.ok(not mn._content_well(PAUSE) and not mn._content_well(TITLE),
 		"PAUSE/TITLE are scrim-only (no content well)")
-	# The well must sit INSIDE the Rect2(20,8,600,344) chrome frame (frame draws over it).
+	# The well must sit INSIDE the chrome frame's own texture rect — content_frame_rect(),
+	# the rect _draw_frame_nine 9-slices into (frame draws over the well). Asserting a
+	# hand-typed quad here pinned the RETIRED uniform-stretch footprint as the contract.
 	var well: Rect2 = mn._content_well_rect()
-	var frame := Rect2(20, 8, 600, 344)
+	var frame: Rect2 = mn.content_frame_rect(mn.Mode.HALL)
 	Runner.T.ok(frame.encloses(well), "the well rect is fully inside the chrome frame")
+
+
+func test_the_retired_uniform_stretch_frame_quad_survives_nowhere() -> void:
+	## The x20 y8 600x344 quad was the frame's footprint back when ui_frame_lrg was ONE
+	## stretched texture rect. _draw_frame_nine replaced it with a corner-anchored 9-slice:
+	## the REAL interior hole is y 39.66..320.34, while the stretched model says
+	## 36.22..323.78 — 3.44px LOOSER per side vertically (so an audit built on it
+	## UNDER-reports vertical overflow) and 2.20px tighter per side horizontally (so it
+	## invents overflow that is not there). One projection only, and it is
+	## test_menu_layout.gd::_measured_frame_interior — everything else delegates.
+	# The needle is assembled, never spelled: this suite greps ITSELF, so a literal
+	# here would be its own violation and the row could never go green.
+	var dead := "600" + ", 344"
+	for p in ["res://tools/probe_frame_bounds.gd", "res://tests/test_assets.gd",
+			"res://src/view/menu.gd"]:
+		var src := FileAccess.get_file_as_string(p)
+		Runner.T.ok(not (dead in src) and not (dead.replace(" ", "") in src),
+			"%s carries no copy of the retired uniform-stretch frame quad" % p)
 
 
 # --- a3-03: endless gets its OWN base ground palette (warm rust/ochre) instead of

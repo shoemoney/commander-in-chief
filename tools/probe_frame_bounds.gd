@@ -19,46 +19,18 @@ var _interior := Rect2()
 
 
 func _initialize() -> void:
-	var img := Art.tex("ui_frame_lrg").get_image()
-	var tw := img.get_width()
-	var th := img.get_height()
-	var mid_row := th / 2
-	var mid_col := tw / 2
-	var lx := 0
-	while lx < tw and img.get_pixel(lx, mid_row).a <= 0.06:
-		lx += 1
-	var ix := lx
-	while ix < tw and img.get_pixel(ix, mid_row).a > 0.06:
-		ix += 1
-	var rx := tw - 1
-	while rx >= 0 and img.get_pixel(rx, mid_row).a <= 0.06:
-		rx -= 1
-	var irx := rx
-	while irx >= 0 and img.get_pixel(irx, mid_row).a > 0.06:
-		irx -= 1
-	var ty := 0
-	while ty < th and img.get_pixel(mid_col, ty).a <= 0.06:
-		ty += 1
-	var ity := ty
-	while ity < th and img.get_pixel(mid_col, ity).a > 0.06:
-		ity += 1
-	var by := th - 1
-	while by >= 0 and img.get_pixel(mid_col, by).a <= 0.06:
-		by -= 1
-	var iby := by
-	while iby >= 0 and img.get_pixel(mid_col, iby).a > 0.06:
-		iby -= 1
-	var fr := Rect2(20, 8, 600, 344)
-	var sx := fr.size.x / float(tw)
-	var sy := fr.size.y / float(th)
-	_interior = Rect2(fr.position.x + ix * sx, fr.position.y + ity * sy,
-		(irx + 1 - ix) * sx, (iby + 1 - ity) * sy)
-	print("[PROBE] tex %dx%d  h-band %d..%d and %d..%d   v-band %d..%d and %d..%d"
-		% [tw, th, lx, ix - 1, irx + 1, rx, ty, ity - 1, iby + 1, by])
-	print("[PROBE] frame rect %s  scale %.5f x %.5f" % [fr, sx, sy])
+	# ONE projection of the frame hole exists — Layout._measured_frame_interior(), which
+	# reads the art through the 9-slice the draw actually uses (corner-anchored, uniform
+	# FRAME_SCALE). This probe used to re-derive it from the retired uniform-stretch quad,
+	# which reported the hole 3.44px too tall per side (hiding real vertical overflow) and
+	# 2.20px too narrow per side (inventing horizontal overflow). Never re-derive it here.
+	_interior = Layout._measured_frame_interior()
+	print("[PROBE] frame rect %s  FRAME_SCALE %.6f (9-slice, corner-anchored)"
+		% [Menu.content_frame_rect(Menu.Mode.HOWTO), Menu.FRAME_SCALE])
 	print("[PROBE] MEASURED INTERIOR x %.2f..%.2f   y %.2f..%.2f"
 		% [_interior.position.x, _interior.end.x, _interior.position.y, _interior.end.y])
-	print("[PROBE] code: FRAME_INNER_R=%.1f  well=%s" % [Menu.FRAME_INNER_R, Menu._content_well_rect()])
+	print("[PROBE] code: FRAME_INNER L%.1f T%.1f R%.1f B%.1f"
+		% [Menu.FRAME_INNER_L, Menu.FRAME_INNER_T, Menu.FRAME_INNER_R, Menu.FRAME_INNER_B])
 	var f := Art.font()
 	for s in [8, 10, 11, 13, 22]:
 		print("[PROBE] font %2d ascent %.2f descent %.2f height %.2f"

@@ -432,10 +432,10 @@ const CONTENT_BODY_Y := 100.0      # first content baseline under the tab row, b
 # the 9-slice — all four still sit inside the hole, which is what kept the content screens
 # from moving. A frame re-bake that moves the border fails
 # tests/test_menu_layout.gd::test_frame_inner_constants_match_the_frame_art.
-const FRAME_INNER_L := 74.0        # 69.22 + 4.8 pad
-const FRAME_INNER_R := 566.0       # 570.78 - 4.8 — content clamps/right-aligns here
-const FRAME_INNER_T := 41.0        # 36.22 + 4.8
-const FRAME_INNER_B := 319.0       # 323.78 - 4.8
+const FRAME_INNER_L := 74.0        # 67.02 + 6.98 pad
+const FRAME_INNER_R := 566.0       # 572.98 - 6.98 — content clamps/right-aligns here
+const FRAME_INNER_T := 41.0        # 39.66 + 1.34 pad (tight: the 9-slice hole is 3.44px shorter per side than the retired stretch)
+const FRAME_INNER_B := 319.0       # 320.34 - 1.34
 const VERB_PITCH := 27.0           # baseline-to-baseline of the CONTROLS verb rows (one may wrap to 2 lines)
 const VERB_LEAD := 13.0            # leading between wrapped continuation lines of a CONTROLS verb sentence
 const ICON_X := FRAME_INNER_L      # left edge of every content-well sprite/glyph column
@@ -3557,7 +3557,7 @@ static func content_frame_under_line(scrim_mode: int) -> Rect2:
 
 
 static func _content_well_rect() -> Rect2:
-	# The interior fill, inset inside the Rect2(20,8,600,344) chrome frame so the frame's
+	# The interior fill, inset inside content_frame_rect(Mode.HALL) so the frame's
 	# decorative border still draws over its own edge (chrome is drawn AFTER the well).
 	return Rect2(30, 17, 580, 326)
 
