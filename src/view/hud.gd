@@ -982,10 +982,15 @@ const PRESSURE_ARM_TICKS := 30
 ## c1-16: shows from PRESSURE_WARN_TICKS (subdued pre-warning) onward, not only past the arm
 ## point — the reserved WIDTH is identical in both phases, so nothing reflows when it arms.
 func _telegraph_spec(sim: SimWorld) -> Dictionary:
-	if not (sim.mode == "campaign" and sim.observer.is_empty() and sim.stall_ticks > PRESSURE_WARN_TICKS):
+	if sim.mode != "campaign" or not sim.observer.is_empty():
 		return {"kind": "", "w": 0.0}
 	# A closed gate pinning the camera means advancing is impossible until it's cleared —
-	# the "advance!" PRESSURE read would be lying, so it becomes CLEAR THE GATE.
+	# the "advance!" PRESSURE read would be lying, so it becomes CLEAR THE GATE. Checked
+	# BEFORE the stall gate on purpose: SimWorld._step_observer freezes stall_ticks for
+	# exactly the ticks camera_held() is true, so requiring stall > WARN made this branch
+	# unreachable for anyone who pushed north into the clamp — stall_ticks is 0 there and
+	# stays 0. The gate predicate below (g["y"] within [camera_top, camera_top + PAD]) is
+	# already "the camera is at this gate's clamp"; it needs no stall evidence.
 	for g in sim.gates:
 		if not g["open"] and sim.camera_top >= g["y"] - SimWorld.GATE_CAMERA_PAD \
 				and g["y"] >= sim.camera_top:
@@ -993,6 +998,8 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 			# to when the full label won't fit, so this critical readout is abbreviated, not
 			# dropped, before it ever becomes a +N tally.
 			return {"kind": "gate", "w": _tw("CLEAR THE GATE") + 4.0, "cw": _tw("GATE!") + 4.0}
+	if sim.stall_ticks <= PRESSURE_WARN_TICKS:
+		return {"kind": "", "w": 0.0}
 	var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
 	# Compact pressure = lightning icon + a tiny stall-progress bar (drops the "PRESSURE" word
 	# and the wide 50px gauge, KEEPS the how-close-to-forced read), so the fallback still says
@@ -1032,7 +1039,9 @@ func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float
 	# it never jumps backward (which would misread as "pressure decreasing"). Dimming is applied
 	# ONCE, via _mini_bar's alpha (barcol stays full).
 	var armed := sim.stall_ticks > PRESSURE_ARM_TICKS
-	var body_a := 1.0 if armed else 0.5   # steady in both phases — no strobe, reduce-motion safe
+	# The GATE label is a statement of fact, never a pre-warning, so it never takes the
+	# pre-warn dim (at a held gate stall_ticks is frozen at 0, so `armed` is always false).
+	var body_a := 1.0 if (armed or tele["kind"] == "gate") else 0.5   # steady — no strobe, reduce-motion safe
 	var arm_frac := float(PRESSURE_ARM_TICKS) / float(SimWorld.OBSERVER_STALL_TICKS)
 	# Fill: honest total progress once armed; during pre-warn, the pre-arm zone [0, arm_frac] fills
 	# with progress through the WARN..ARM window (== total progress at the arm tick, so continuous).

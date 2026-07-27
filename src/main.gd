@@ -1410,6 +1410,11 @@ func start_watch() -> void:
 	_two_players = r.player_count >= 2
 	_seed_override = r.seed_value
 	_reset()
+	# run-config-single-owner: _reset() built the sim from the LIVE assist/HARD toggles and
+	# the perk tiers owned RIGHT NOW, not the ones this replay was recorded under. Stamp the
+	# recorded config back over it or playback desyncs — a perk bought after the run was
+	# recorded hands the replayed soldier a vest they never had.
+	r.apply_config(sim)
 	_menu.mode = GameMenu.Mode.HIDDEN
 	_fade = 1.0
 	_watch_replay = r
@@ -1467,6 +1472,13 @@ func _reset() -> void:
 	_recorder.assist = sim.assist_mode   # capture the config the sim was seeded with, or the
 	_recorder.hard = sim.hard            # replay rebuilds a vanilla sim and diverges (c4-fix)
 	_recorder.chapter = _arcade_chapter if _mode_str == "arcade" else 1   # Arcade's jump_to_chapter start gate
+	# run-config-single-owner: stamp the RESOLVED starting loadout, read back off the sim
+	# AFTER every post-construction tweak above (assist vest, Endless perk tiers). Recording
+	# perk LEVELS instead rebuilds the run against whatever the player owns at replay time.
+	# ponytail: one flag for all players — per-player starting loadouts would need an array.
+	_recorder.start_vest = not sim.players.is_empty() and bool(sim.players[0]["vest"])
+	_recorder.start_chest = sim.war_chest
+	_recorder.start_tokens = sim.tokens
 	_replay_saved = false
 	# A restart mid-replay must not keep feeding recorded frames into the new sim.
 	_watching = false
@@ -2218,6 +2230,8 @@ func _consume_events() -> void:
 					continue
 				_deny_frame = Engine.get_physics_frames()
 			var snd: Array = _EVENT_SOUND[kind]
+			if kind == "frogman_surface":
+				snd = _surface_cue(sim._in_water(ev["x"], ev["y"]))
 			# Any world event that carries coordinates pans/attenuates from where
 			# it happened (a flank alarm tells you WHICH flank); coordinate-less
 			# screen-global beats stay centered on the flat polyphonic player.
@@ -3315,6 +3329,25 @@ static func _wipe_chest_row(banked: int, banked_score: int) -> Array:
 		return []
 	return [{"text": "%d¢ WAR CHEST SALVAGED  →  +%s" % [banked, Art.group_digits(banked_score)],
 		"color": Color(1.0, 0.92, 0.55), "icon": "icon_coin", "icon_size": 14.0}]
+
+
+## The debrief's ONE progress row, per mode. Endless never spawns a gate and never
+## calls _step_camera (camera_top pinned at -VIEW_H), so the campaign string measured
+## a CONSTANT "SECTOR 1/6   36m PUSHED" on every endless death. Same mode-branch the
+## HUD chip (hud.gd), the pause line (menu.gd) and the share text already carry.
+static func debrief_progress_row(mode: String, opened: int, dist: int, wave: int) -> Dictionary:
+	var txt: String
+	if mode == "endless":
+		txt = "WAVE %d REACHED" % wave
+	elif mode == "boss_rush":
+		# authored-campaign-and-modes: bosses cleared, not sectors/distance —
+		# a rush debrief that reads like its own mode, not a stripped campaign
+		# card. `opened` counts gunship gates fallen (the finale gate, once
+		# reached, doesn't add to this — capped defensively regardless).
+		txt = "GUNSHIPS DOWNED  %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
+	else:
+		txt = "SECTOR %d/%d   %dm PUSHED" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX, dist]
+	return {"text": txt, "color": Color(0.9, 0.92, 0.85)}
 
 
 func _ev_kill(ev: Dictionary) -> void:
@@ -6044,7 +6077,10 @@ const _OUTLINE_OFFSETS: Array[Vector2] = [
 # Pre-built frame names — "explosion%d" % frame allocated a String per particle per frame.
 const _EXPLO_NAMES := ["explosion0", "explosion1", "explosion2", "explosion3"]
 # Same idiom for the late-run dead canopy — "cactus_dead%d" % allocated per cactus per frame.
-const _CACTUS_DEAD := ["cactus_dead1", "cactus_dead2", "cactus_dead3"]
+# cactus_dead2 is DELIBERATELY ABSENT: it is the 1-in-3 face of kind-0 ambient cover in
+# _draw_rocks(), so it must never also be walk-through decor. Index this pool with
+# `% _CACTUS_DEAD.size()` — a bare `% 3` is now an out-of-range crash.
+const _CACTUS_DEAD := ["cactus_dead1", "cactus_dead3"]
 
 # FX kinds that emit light: drawn by _draw_glow on the additive layer, skipped by _draw_fx.
 const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
@@ -6308,6 +6344,19 @@ static func _frogman_tex(submerged: bool) -> String:
 	# surfaces — a pure read of the existing e["submerged"] sim state, so the silhouette telegraphs
 	# the dive state with no new field. "frogman" is the surfaced (rifle) key.
 	return "frogman_speargun" if submerged else "frogman"
+
+
+static func _surface_cue(wet: bool) -> Array:
+	# The sim raises ONE "frogman_surface" event from five sites and only two are in a
+	# river: the diver's notice-surface (sim_world.gd:3399) and the mud-pop (:1204). The
+	# other three are DRY GROUND — the beached diver's re-telegraph (:3426), the ghillie's
+	# reveal (:3474) and the endless anti-stall reveal (:5361) — and a ghillie is a sniper
+	# dug into grass, not a swimmer (endless streams no rivers at all, so EVERY endless
+	# reveal was a river noise on bone-dry sand). Pick the timbre from the ground under the
+	# event, exactly like the bullet_dirt splash-vs-dust pick already does; a per-archetype
+	# event split would get the rare campaign ghillie rooted INSIDE a band wrong the other
+	# way. The wet row must stay byte-equal to _EVENT_SOUND["frogman_surface"].
+	return ["splash", -4.0, 1.0] if wet else ["roll", -9.0, 0.7]
 
 
 static func _hero_shows_apex(down_residual: float) -> bool:
@@ -6871,10 +6920,10 @@ func _draw_terrain() -> void:
 			var flora_col := desert_flora_col.lerp(Color(0.8, 0.72, 0.5), f_jit * 0.5)
 			if ug_band == 4:
 				# Foundry (c2 3v): no green survives the ash — charred struts only.
-				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0,
+				_spr(_CACTUS_DEAD[hf % _CACTUS_DEAD.size()], Vector2(fx, fy_px), 0.0,
 					0.16 + 0.04 * float(hf % 3), Color(0.2, 0.17, 0.15))
 			elif hf % 23 == 0:
-				_spr(_CACTUS_DEAD[hf % 3], Vector2(fx, fy_px), 0.0, 0.18, flora_col)
+				_spr(_CACTUS_DEAD[hf % _CACTUS_DEAD.size()], Vector2(fx, fy_px), 0.0, 0.18, flora_col)
 			else:
 				# a3-08: a tiny dark contact dab grounds the scrub CLUMP anchor — scrub got
 				# no _ground_shadow (only cacti/litter did), so it floated on the sand.
@@ -6915,7 +6964,7 @@ func _draw_terrain() -> void:
 				if ug_band == 4:
 					# Foundry (c2 judge r1: no residual green): fringe with
 					# charred scrub, not live scrub.
-					_spr(_CACTUS_DEAD[hfr % 3], fpos, 0.0, 0.12, Color(0.2, 0.17, 0.15))
+					_spr(_CACTUS_DEAD[hfr % _CACTUS_DEAD.size()], fpos, 0.0, 0.12, Color(0.2, 0.17, 0.15))
 				else:
 					_spr("scrub", fpos, edge_ang, 0.22 + float(hfr % 3) * 0.03, desert_flora_col)
 
@@ -6954,7 +7003,7 @@ func _draw_terrain() -> void:
 					# warm husk survives the foundry. (This mod IS the foundry ramp for
 					# cactus_dead* — they're not in _DESERT_FLORA_KEYS, so
 					# Art.tint() would otherwise return their static tan TINT unramped.)
-					_spr(_CACTUS_DEAD[h2 % 3], Vector2(px, wy_px),
+					_spr(_CACTUS_DEAD[h2 % _CACTUS_DEAD.size()], Vector2(px, wy_px),
 						float(h2 % 628) / 100.0 + tsway, 0.42 if big else 0.34,
 						Color(0.24, 0.20, 0.18) if ug_band == 4 else Color.WHITE)
 				else:
@@ -6964,7 +7013,7 @@ func _draw_terrain() -> void:
 					var tsc: float = (0.42 if big else 0.34) * float(ti["scale_mul"])
 					var tval := desert_flora_col.lerp(desert_flora_col.darkened(0.22), float((h2 / 7) % 5) / 4.0)
 					if ti["dead"]:
-						_spr(_CACTUS_DEAD[h2 % 3], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
+						_spr(_CACTUS_DEAD[h2 % _CACTUS_DEAD.size()], Vector2(px, wy_px), float(h2 % 628) / 100.0 + tsway,
 							tsc, tval.lerp(Color(0.42, 0.36, 0.3), 0.5))
 					else:
 						_spr("cactus_large" if big else "cactus_small", Vector2(px, wy_px),
@@ -10950,12 +10999,18 @@ func _top_center_priority() -> String:
 	# the splash banner, and the closed-gate objective line all want the same
 	# ~y46-90 strip and used to overprint into a smear when several fired in
 	# the same frame. Only the single most-urgent one renders per frame.
+	#
+	# The gate arm's trigger is the SIM'S OWN HOLD, not a stall timer: _step_observer
+	# freezes stall_ticks for exactly the ticks camera_held() is true, so `stall > 90`
+	# alone was unreachable for anyone who walked north into the clamp (it resets to 0
+	# on the tick the clamp binds and stays there). The stall arm is kept for the
+	# pre-clamp case — a closed gate on screen with the player parked in front of it.
 	for g in sim.gates:
 		if g["open"] or g.get("final", false):
 			continue
 		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
 			continue
-		if sim.stall_ticks > 90:
+		if sim.camera_held() or sim.stall_ticks > 90:
 			return "boss"
 		break
 	if sim.pending_airstrike > 0:
@@ -11482,17 +11537,7 @@ func _draw_banners(top_msg: String) -> void:
 			if g["open"]:
 				opened += 1
 		var dist := -Fixed.to_int(sim.camera_top) / 10
-		var progress_row: Dictionary
-		if sim.mode == "boss_rush":
-			# authored-campaign-and-modes: bosses cleared, not sectors/distance —
-			# a rush debrief that reads like its own mode, not a stripped campaign
-			# card. `opened` counts gunship gates fallen (the finale gate, once
-			# reached, doesn't add to this — capped defensively regardless).
-			progress_row = {"text": "GUNSHIPS DOWNED  %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT],
-				"color": Color(0.9, 0.92, 0.85)}
-		else:
-			progress_row = {"text": "SECTOR %d/%d   %dm PUSHED" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX, dist],
-				"color": Color(0.9, 0.92, 0.85)}
+		var progress_row := debrief_progress_row(sim.mode, opened, dist, sim.wave)
 		var rows := [
 			progress_row,
 			{"text": "SCORE %s   KILLS %d" % [Art.group_digits(sim.score), _run_kills], "color": Color(0.9, 0.92, 0.85)},

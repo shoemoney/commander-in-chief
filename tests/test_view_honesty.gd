@@ -1142,20 +1142,22 @@ func test_every_field_death_strips_is_named_on_a_loss_payload() -> void:
 # Hence: every view line that reads sim.stall_ticks routes through the sim's own
 # camera_held(), or is on this allowlist with a reason.
 #
-# SCOPE, checked and found already-correct so the next cycle doesn't re-derive it:
-# src/view/hud.gd has THREE more sim.stall_ticks readers (_telegraph_spec :985 and
-# _draw_telegraph :1034/:1041), and all three are honest already — the telegraph is
-# campaign-ONLY (so endless and boss_rush never reach it) and _telegraph_spec swaps
-# "PRESSURE" for "CLEAR THE GATE" the moment a closed gate is on screen, pinned by
-# test_hud.gd::…_telegraph_spec(sim)["kind"] == "gate". Its gate predicate is broader
-# than camera_held() (`>=` the clamp plus an on-screen bound rather than an exact
-# match), which is the safe direction for a warning. So this scrape stays on main.gd,
-# where the two stale readers actually lived.
+# SCOPE — this scrape stays on main.gd, but the earlier note here claimed hud.gd's three
+# readers were "honest already" because _telegraph_spec swaps PRESSURE for CLEAR THE GATE
+# "the moment a closed gate is on screen". That was FALSE, and writing it down is why the
+# sibling half of the defect survived a whole honesty sweep: the note read the gate loop
+# and never read the `stall_ticks > PRESSURE_WARN_TICKS` early-return three lines ABOVE it,
+# which made the gate branch unreachable at a held camera (stall_ticks is frozen at 0 there).
+# hud.gd now checks the gate branch BEFORE any stall threshold, and the reachability of both
+# gate readouts is pinned by measured sim state in
+# test_gate_guidance_reaches_the_player_the_gate_is_walling_in — not by a comment.
 
-## The ONE reader that is correct unguarded: the top-band objective line inside
-## `for g in sim.gates:` — it fires precisely BECAUSE a closed gate is on screen,
-## and it tells you the thing you actually can do about it ("grenade the bunkers").
-const STALL_READER_ALLOW := ["boss"]
+## Empty on purpose. main.gd:_top_center_priority's gate arm used to be allowlisted here as
+## "correct unguarded"; it was not — "a closed gate is on screen" and "stall_ticks > 90" are
+## mutually exclusive for anyone who walked into the clamp. It now consults camera_held(),
+## so the scrape counts it as guarded and the escape hatch is closed: any future unguarded
+## reader goes red immediately.
+const STALL_READER_ALLOW: Array[String] = []
 
 
 func test_every_stall_ticks_reader_is_guarded_by_camera_held() -> void:
@@ -1697,3 +1699,165 @@ func test_the_rank_scale_spends_its_whole_range_on_every_mode() -> void:
 		Runner.T.ok(titles.size() >= 3,
 			"%s: …and >=3 titles (got %d: %s)"
 				% [mode, titles.size(), ", ".join(PackedStringArray(titles.keys()))])
+
+
+# --- 9. The debrief's progress row must move with the run it describes -------
+
+func test_endless_debrief_names_the_wave_not_a_frozen_campaign_sector() -> void:
+	## Ground truth first: endless has no gates and a pinned camera, so the campaign
+	## progress string is CONSTANT — "SECTOR 1/6   36m PUSHED" on every endless death.
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	var top0 := sim.camera_top
+	for i in 300:
+		sim.step(_idle())
+	Runner.T.eq(sim.gates.size(), 0, "endless never spawns a gate — `opened` is pinned at 0")
+	Runner.T.eq(sim.camera_top, top0, "endless never advances the camera")
+	Runner.T.eq(-Fixed.to_int(sim.camera_top) / 10, 36, "…so the campaign row's metres are the constant 36")
+	Runner.T.ok(sim.wave >= 1, "…while WAVE is the axis that actually moves")
+	var ms: Script = load("res://src/main.gd")
+	var has_row := false
+	for meth in ms.get_script_method_list():
+		if String(meth["name"]) == "debrief_progress_row":
+			has_row = true
+	Runner.T.ok(has_row, "Main.debrief_progress_row() is the debrief's one progress-row source")
+	if has_row:
+		var txt := String(ms.debrief_progress_row("endless", 0, 36, 7).get("text", ""))
+		Runner.T.ok(not txt.contains("SECTOR"), "the endless debrief prints no campaign sector (got %s)" % txt)
+		Runner.T.ok(not txt.contains("PUSHED"), "…nor metres a camera that never moved (got %s)" % txt)
+		Runner.T.ok(txt.contains("7"), "…it names the wave reached (got %s)" % txt)
+		# The load-bearing one: the row must MOVE with the run.
+		Runner.T.ok(ms.debrief_progress_row("endless", 0, 36, 4) != ms.debrief_progress_row("endless", 0, 36, 19),
+			"two endless runs ending on different waves get different rows")
+		# The other three modes are unchanged.
+		Runner.T.ok(String(ms.debrief_progress_row("campaign", 2, 400, 0).get("text", "")) == "SECTOR 3/6   400m PUSHED",
+			"campaign keeps its sector+distance row")
+		Runner.T.ok(String(ms.debrief_progress_row("arcade", 2, 400, 0).get("text", "")).begins_with("SECTOR"),
+			"arcade has real gates and a real camera — same row as campaign")
+		Runner.T.ok(String(ms.debrief_progress_row("boss_rush", 2, 0, 0).get("text", "")) == "GUNSHIPS DOWNED  2/3",
+			"boss_rush keeps its gunship tally")
+	Runner.T.eq(_view_src().count("debrief_progress_row("), 2,
+		"the debrief builds its progress row THROUGH the helper (1 def + 1 call) — the helper can't drift into decoration")
+
+
+# --- 10. A cue's timbre comes from the ground it is raised on ----------------
+
+func test_the_surface_cue_is_picked_from_the_ground_it_rises_out_of() -> void:
+	## The sim raises ONE "frogman_surface" event from five sites and three of them are on
+	## DRY LAND (beached-diver re-telegraph, ghillie reveal, endless anti-stall reveal).
+	## The view played the water splash for all five, so a sniper crawling out of grass in a
+	## waterless endless arena made a river noise on every single reveal.
+	# NOTE: probe through a Script-typed var, never `Main._surface_cue(...)` — a direct
+	# static call on the preloaded class is resolved at PARSE time, so on a tree without
+	# the helper the whole suite fails to load instead of reporting one red assertion.
+	var ms: Script = load("res://src/main.gd")
+	var names := PackedStringArray()
+	for m in ms.get_script_method_list():
+		names.append(m["name"])
+	Runner.T.ok(names.has("_surface_cue"),
+		"the view picks the surface timbre from TERRAIN, not from the event name")
+	if not names.has("_surface_cue"):
+		return   # guard: calling a missing static aborts the method SILENTLY (see CLAUDE.md)
+	# MEASURED, not asserted from a constant: run a real ghillie reveal in endless, where the
+	# world streamer never runs and `waters` is therefore empty.
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim.enemies.clear()
+	var p: Dictionary = sim.players[0]
+	sim._spawn_special(p["x"] + 80 * Fixed.ONE, p["y"], "ghillie")
+	var dry := {}
+	for i in 20:
+		sim.step(_idle())
+		for ev in sim.events:
+			if ev["t"] == "frogman_surface":
+				dry = ev.duplicate()
+		if not dry.is_empty():
+			break
+	Runner.T.ok(not dry.is_empty(), "the ghillie reveal raises the surface cue")
+	Runner.T.ok(not sim._in_water(dry["x"], dry["y"]), "and it comes from DRY GROUND")
+	var dry_voice: String = ms._surface_cue(sim._in_water(dry["x"], dry["y"]))[0]
+	var wet_voice: String = ms._surface_cue(true)[0]
+	Runner.T.ok(dry_voice != wet_voice,
+		"a surface raised on land does not play the water voice (played '%s')" % dry_voice)
+	Runner.T.eq(wet_voice, Main._EVENT_SOUND["frogman_surface"][0],
+		"a real diver still breaks water on the splash the table names")
+	var sfx := Sfx.new()
+	sfx._synth_all()
+	Runner.T.ok(sfx._sounds.has(dry_voice),
+		"the dry surface voice '%s' is a synthesized voice, not dead air" % dry_voice)
+	sfx.free()
+
+
+# --- 11. Gate guidance must reach the player the gate is walling in ---------
+
+func test_gate_guidance_reaches_the_player_the_gate_is_walling_in() -> void:
+	## Both gate readouts existed only to explain the closed-gate clamp, and both were gated
+	## behind sim.stall_ticks — which SimWorld._step_observer freezes for exactly the ticks
+	## the clamp is binding. A player who walks north into the wall arrives at stall_ticks 0
+	## and it never moves, so the two lines were dead in the one state they were written for.
+	## Drive the real sim there with the same push-north bot test_observer.gd uses.
+	var sim := SimWorld.new(3, 1, "campaign")
+	sim.god_mode = true
+	var inp := SimInput.new()
+	inp.move_y = -256
+	inp.aim_y = -256
+	var held_at_gate := false
+	for t in 6000:
+		inp.fire = (t % 8) != 0
+		sim.step([inp])
+		if not sim.camera_held():
+			continue
+		var on_screen := false
+		for g in sim.gates:
+			if not g["open"] and not g.get("final", false) \
+					and g["y"] >= sim.camera_top and g["y"] <= sim.camera_top + SimWorld.VIEW_H:
+				on_screen = true
+				break
+		if not on_screen:
+			continue
+		held_at_gate = true
+		break
+	Runner.T.ok(held_at_gate,
+		"never reached a held camera at a closed non-final gate in 6000 ticks — this test ran on nothing")
+	var h := HudIcons.new()
+	Runner.T.eq(h._telegraph_spec(sim)["kind"], "gate",
+		"the camera is clamped by a closed gate and the HUD telegraph says \"%s\" (stall_ticks=%d) — CLEAR THE GATE is unreachable for anyone who pushed north into the wall" \
+			% [str(h._telegraph_spec(sim)["kind"]), sim.stall_ticks])
+	h.free()
+	var m = load("res://src/main.gd").new()
+	m.sim = sim
+	Runner.T.eq(m._top_center_priority(), "boss",
+		"the camera is clamped by a closed gate and the top band arbitrates to \"%s\" — the objective line (GRENADE THE BUNKERS / DESTROY THE GUNSHIP TO ADVANCE) never prints" \
+			% m._top_center_priority())
+	Runner.T.ok(not String(m._band_top_text("boss").get("text", "")).is_empty(),
+		"the winning band message resolves to a real string")
+	m.free()
+
+
+# --- 12. One silhouette, one rule: cover is never also walk-through decor ----
+
+func test_no_walkthrough_prop_wears_the_ambient_cover_silhouette() -> void:
+	## _draw_rocks() picks the kind-0 (SOLID, ROCK_KIND_EXT[0] 16x12 half-extent) sprite
+	## from an inline 3-name list; _draw_terrain() scatters the walk-through dead canopy
+	## from _CACTUS_DEAD. A name in BOTH teaches one silhouette two rules.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var word := RegEx.create_from_string('"([a-z0-9_]+)"')
+	var cov_m := RegEx.create_from_string('var rtex: String = \\[([^\\]]+)\\]\\[rh3').search(src)
+	Runner.T.ok(cov_m != null, "_draw_rocks still picks its kind-0 sprite from an inline list")
+	var cover := {}
+	for q in word.search_all(cov_m.get_string(1)):
+		cover[q.get_string(1)] = true
+	Runner.T.eq(cover.size(), 3, "kind-0 cover still draws 3 silhouettes")
+	var pool_m := RegEx.create_from_string('const _CACTUS_DEAD :?= \\[([^\\]]+)\\]').search(src)
+	Runner.T.ok(pool_m != null, "the dead-canopy decor pool still exists")
+	var pool: Array = []
+	for q in word.search_all(pool_m.get_string(1)):
+		pool.append(q.get_string(1))
+	Runner.T.ok(pool.size() >= 2, "the dead canopy keeps at least two variants")
+	for nm in pool:
+		Runner.T.ok(Art.TEX.has(nm), "dead-canopy pool entry '%s' resolves to a texture" % nm)
+		Runner.T.ok(not cover.has(nm),
+			"'%s' is scattered as walk-through decor AND drawn as kind-0 SOLID cover" % nm)
+	# The naive fix (shrink the pool, leave the indexers) is an out-of-range crash
+	# in a draw path headless tests never execute. Pin every literal modulus.
+	for q in RegEx.create_from_string('_CACTUS_DEAD\\[[a-z0-9_]+ % ([0-9]+)\\]').search_all(src):
+		Runner.T.eq(int(q.get_string(1)), pool.size(),
+			"_CACTUS_DEAD indexed %% %d but the pool holds %d" % [int(q.get_string(1)), pool.size()])
