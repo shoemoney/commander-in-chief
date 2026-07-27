@@ -281,6 +281,10 @@ var _debrief := false
 var _boost_max: Dictionary = {}   # per-player: the boost_ticks THIS boost started at (see the surge ring)
 var _victory_banked := 0
 var _victory_banked_score := 0
+# Same pair for the LOSING end — the K.I.A. card reads sim.war_chest live, which
+# _latch_wipe() zeroes on the same tick, so the debrief could never state the salvage.
+var _wipe_banked := 0
+var _wipe_banked_score := 0
 var _damage_vignette := 0.0       # red screen-edge pulse on hits/deaths
 var _water_splash := {"x": 0, "y": 0, "t": 0.0}   # wet-blast ring pushed to the water shader
 var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {text, t, col}
@@ -1499,6 +1503,8 @@ func _reset() -> void:
 	_boost_max.clear()
 	_victory_banked = 0
 	_victory_banked_score = 0
+	_wipe_banked = 0
+	_wipe_banked_score = 0
 	_warn_p2_pad()   # after _banners.clear(), so the warning survives the reset
 
 
@@ -2802,6 +2808,8 @@ func _consume_events() -> void:
 				_sfx.play("whistle", -3.0, 0.85)
 			"wiped":
 				_vo("vo_wiped", 3, 600)
+				_wipe_banked = int(ev.get("banked", 0))
+				_wipe_banked_score = int(ev.get("banked_score", 0))
 				# Whole squad down with no rescue — the endless run is over.
 				_trauma = minf(1.0, _trauma + 0.6)
 				_flash_alpha = maxf(_flash_alpha, 0.4)
@@ -3180,6 +3188,18 @@ static func _victory_extra_rows(score: int, best: int, pulse: float) -> Array:
 	rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, pulse),
 		"icon": Art.glyph_key("start"), "icon_size": 14.0})
 	return rows
+
+
+static func _wipe_chest_row(banked: int, banked_score: int) -> Array:
+	# The K.I.A. sibling of the victory card's "WAR CHEST BANKED" line. The chest is
+	# CONVERTED and zeroed by SimWorld._latch_wipe() on the wipe tick, so a live
+	# `sim.war_chest` read here is always 0 — the numbers come off the event instead,
+	# which also means the salvage multiplier is never restated view-side. Died broke:
+	# no row, the card says nothing rather than "0¢ salvaged".
+	if banked <= 0:
+		return []
+	return [{"text": "%d¢ WAR CHEST SALVAGED  →  +%s" % [banked, Art.group_digits(banked_score)],
+		"color": Color(1.0, 0.92, 0.55), "icon": "icon_coin", "icon_size": 14.0}]
 
 
 func _ev_kill(ev: Dictionary) -> void:
@@ -6194,6 +6214,7 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 
 
 
 func _draw() -> void:
+	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
 	# which disables main's processing but still calls queue_redraw(). The 1-frame
@@ -10842,20 +10863,76 @@ func _band_rows(top_msg: String) -> Array[Dictionary]:
 		bool(top.get("badge", false)), hint, sim.god_mode)
 
 
+## Every full-frame threat wash the play field is seen THROUGH. `_wash()` is the ONLY
+## place any of them is drawn, and every card listed here is CENTRE-CLEAR by
+## construction, so the middle of the screen — where the fight is — never takes paint.
+## `_wash_load` tracks the composited coverage this frame and `wash_clamp` caps it at
+## WASH_CAP, measured at the screen BORDER.
+##
+## Before this the airstrike telegraph and the last-stand pulse were FLAT RECTS and
+## hudfx_blood was centre-dirty (quadrant 3: 31.9% of its centre pixels above alpha 0.5),
+## and nothing budgeted the stack. A reachable state — finale sector + airstrike inbound +
+## near-death — composited to 0.779 coverage over the play centre, leaving 9% of an enemy
+## rifleman's contrast against the foundry floor. tests/test_main.gd pins every part of it.
+const WASH_CAP := 0.45
+# DRAW ORDER IS LOAD-BEARING and this table IS the order: the lethal warnings claim the
+# budget before the ambient dread, so "a strike is inbound" / "you took a hit" / "a sniper
+# has you" can never be crowded out by the last-stand mood pulse. Do not reorder blind.
+# airstrike 0.34->0.45 and tension 0.22->0.30 compensate for the card's edge falloff: the
+# warning gets LOUDER at the perimeter while the centre goes to zero.
+const WASH_KINDS := {
+	"airstrike": {"tex": "hudfx_dmgvig", "col": Color(1.0, 0.2, 0.1), "peak": 0.45},
+	"damage": {"tex": "hudfx_dmgvig", "col": Color(0.85, 0.12, 0.08), "peak": 1.0},
+	"blood": {"tex": "hudfx_blood", "col": Color(0.5, 0.02, 0.02), "peak": 0.57, "quad": true},
+	"paint": {"tex": "ui_vignette", "col": Color(1.0, 0.15, 0.12), "peak": 0.34},
+	"tension": {"tex": "hudfx_dmgvig", "col": Color(0.15, 0.0, 0.0), "peak": 0.30},
+}
+var _wash_load := 0.0   # composited wash coverage so far THIS frame; reset at the top of _draw()
+
+
+static func wash_clamp(a: float, load: float) -> float:
+	## How much of alpha `a` may actually be spent given the coverage already on the
+	## frame, so the composite can approach WASH_CAP but never pass it.
+	return minf(a, maxf(0.0, (WASH_CAP - load) / maxf(1.0 - load, 0.0001)))
+
+
+func _wash(kind: String, strength: float) -> void:
+	## Draw one budgeted full-frame wash. `strength` is 0..1 of the kind's own peak; each
+	## caller keeps its own ramp/strobe/reduce-motion math, this only draws and budgets.
+	var k: Dictionary = WASH_KINDS[kind]
+	var a := wash_clamp(clampf(strength, 0.0, 1.0) * float(k["peak"]), _wash_load)
+	if a <= 0.002:
+		return
+	_wash_load = 1.0 - (1.0 - _wash_load) * (1.0 - a)
+	var c: Color = k["col"]
+	c.a = a
+	var tex := Art.tex(String(k["tex"]))
+	if k.get("quad", false):
+		# Spatter atlas: cycle quadrants so repeat hits are not the same stamp.
+		var qsz: float = tex.get_size().x / 2.0
+		var q := (Engine.get_physics_frames() / 37) % 4
+		draw_texture_rect_region(tex, Rect2(0, 0, SCREEN_W, SCREEN_H),
+			Rect2(float(q % 2) * qsz, float(q / 2) * qsz, qsz, qsz), c)
+	else:
+		draw_texture_rect(tex, Rect2(0, 0, SCREEN_W, SCREEN_H), false, c)
+
+
 func _draw_airstrike_telegraph(top_msg: String) -> void:
 	# The called airstrike's incoming window: a red wash that ramps and strobes as
 	# impact nears, so the wipe reads as an anticipated event, not a silent zap.
 	if sim.pending_airstrike <= 0:
 		return
 	var frac := 1.0 - float(sim.pending_airstrike) / float(SimWorld.STRIKE_TELEGRAPH_TICKS)
-	var a := 0.05 + frac * 0.16
+	# Strength is a FRACTION OF THE WASH'S PEAK (see WASH_KINDS) — the same ramp shape as
+	# the old flat rect (0.05 + frac*0.16 of a 0.34 ceiling), now spent on a centre-clear
+	# card so the warning lives on the perimeter instead of over the fight.
+	var a := 0.15 + frac * 0.47
 	if sim.pending_airstrike < 10 and _safe_strobe(sim.pending_airstrike):
-		a = 0.34   # final-second strobe, clamped to 3 Hz (was 10 Hz)
+		a = 1.0   # final-second strobe, clamped to 3 Hz (was 10 Hz)
 	# Reduce-motion: no strobe, but the wash must stay VISIBLE — the old
 	# a*_motion+0.03 dimmed a lethal warning to alpha 0.03 for exactly the
 	# players who asked for a steadier signal, not a hidden one.
-	var wash_a := (a * _motion + 0.03) if _motion >= 0.5 else maxf(0.15, a)
-	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1.0, 0.2, 0.1, wash_a))
+	_wash("airstrike", (a * _motion + 0.09) if _motion >= 0.5 else maxf(0.44, a))
 	# A strike jet dives down the field as the payload arrives — turns a bare
 	# countdown into an anticipated run. Reuses the gunship's 'facing down' angle
 	# (PI) so the nose leads; rides the already-checksummed pending_airstrike int.
@@ -10979,17 +11056,11 @@ func _draw_banners(top_msg: String) -> void:
 		if p["alive"] and p["hurt_iframes"] > 0:
 			vig = maxf(vig, 0.3 * float(p["hurt_iframes"]) / float(SimWorld.VEST_IFRAME_TICKS))
 	if vig > 0.01:
-		draw_texture_rect(Art.tex("hudfx_dmgvig"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
-			Color(0.85, 0.12, 0.08, minf(1.0, vig) * (0.35 + 0.65 * _motion)))
+		_wash("damage", minf(1.0, vig) * (0.35 + 0.65 * _motion))
 	# Blood on the lens at the death/near-death moment only — gated well above
 	# the routine vest-graze pulse (0.3) so a normal hit never triggers it.
 	if vig > 0.62:
-		var bt := Art.tex("hudfx_blood")
-		var qsz: float = bt.get_size().x / 2.0
-		var quad := (Engine.get_physics_frames() / 37) % 4
-		draw_texture_rect_region(bt, Rect2(0, 0, SCREEN_W, SCREEN_H),
-			Rect2(float(quad % 2) * qsz, float(quad / 2) * qsz, qsz, qsz),
-			Color(0.5, 0.02, 0.02, (vig - 0.62) * 1.5))
+		_wash("blood", (vig - 0.62) / 0.38)   # 0.62..1.0 of the vignette maps to 0..peak
 	# Sniper-paint danger: a strobing red edge while any sniper winds up its
 	# locked shot, so "you're painted, MOVE" is unmissable even off the reticle.
 	var paint := 0.0
@@ -10999,9 +11070,8 @@ func _draw_banners(top_msg: String) -> void:
 	if paint > 0.01:
 		# 0.25 rad/frame ≈ 2.4 flashes/s — the old 0.4 strobed at ~3.8/s, over
 		# the 3/s photosensitivity threshold, sustained for the whole windup.
-		var pv := (0.1 + 0.24 * paint) * (0.4 + 0.6 * Art.pulse(0.25))
-		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
-			Color(1.0, 0.15, 0.12, pv * _motion))
+		var pv := (0.294 + 0.706 * paint) * (0.4 + 0.6 * Art.pulse(0.25))
+		_wash("paint", pv * _motion)
 		# 'You're being sighted' as an icon, not only a red edge: a binoculars
 		# glyph pulses top-center for the windup. Alpha is NOT gated by _motion,
 		# so it still warns under reduce-motion (where the vignette is damped).
@@ -11024,8 +11094,7 @@ func _draw_banners(top_msg: String) -> void:
 	# closes in (heartbeat plays under it). Scaled by the reduce-motion toggle.
 	if _tension > 0.02:
 		var hb := Art.pulse(0.11)
-		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H),
-			Color(0.15, 0.0, 0.0, _tension * (0.12 + 0.1 * hb) * _motion))
+		_wash("tension", _tension * (0.545 + 0.455 * hb) * _motion)
 	# Directional damage wedge: a red arc on the screen edge pointing at the
 	# threat that hit you — the "where from?" answer in a one-hit game.
 	if _hit_dir_t > 0.01:
@@ -11182,6 +11251,10 @@ func _draw_banners(top_msg: String) -> void:
 			{"text": "SCORE %s   KILLS %d" % [Art.group_digits(sim.score), _run_kills], "color": Color(0.9, 0.92, 0.85)},
 			{"text": "LONGEST STREAK  x%d" % _run_best_streak, "color": Color(0.9, 0.92, 0.85)},
 		]
+		# The unspent chest salvages at WIPE_SCORE_MULT on the wipe tick — say so, right
+		# under the SCORE it is already folded into.
+		for wr in _wipe_chest_row(_wipe_banked, _wipe_banked_score):
+			rows.insert(2, wr)
 		# Top-prey row: the kill event carries kind, so the tally can say WHAT the run was
 		# spent fighting, not just how many (a4-16: shared _top_prey_text with the victory card).
 		var kprey := _top_prey_text(_run_kind_kills)
@@ -11315,11 +11388,20 @@ func _metal_plate(r: Rect2, a: float) -> void:
 		false, rule_col)
 
 
+## Row pitch for a result card. 19px as authored, but a long tally has to FIT: the
+## endless K.I.A. card reaches 12 rows (rank · downed-by · progress · score · chest
+## salvage · streak · prey · rescues · best · waves-short · VP · REDEPLOY) and at a
+## fixed pitch the last row landed at y 387 with the plate ending at 420 — off the
+## bottom of a 360px screen, taking the REDEPLOY prompt with it. Rows compress instead.
+static func result_row_pitch(n: int) -> float:
+	return minf(19.0, (SCREEN_H - 178.0 - 14.0) / float(maxi(n, 1)))
+
+
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false) -> void:
 	var panel_top := 112.0
 	var title_y := 150.0
 	var row_start_y := 178.0
-	var row_h := 19.0
+	var row_h := result_row_pitch(rows.size())
 	var panel_h := (row_start_y - panel_top) + maxi(rows.size(), 1) * row_h + 14.0
 	# Width adapts to the widest row (icon included) so a long DOWNED-BY line
 	# can't escape the plate; 300 stays the floor so short tallies keep their shape.

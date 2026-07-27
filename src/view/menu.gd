@@ -5038,6 +5038,11 @@ func _howto_page_warchest() -> void:
 	y = _body_block("Spend it to REVIVE a fallen partner or BUY supplies.",
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 18.0
+	# Both rates come off the sim consts so this sentence can never drift from the payout.
+	y = _body_block("Spend it — %d× score. What's left when you fall salvages at only %d×."
+			% [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT],
+		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
+	y += 18.0
 	_verb_line(["Hold ", "@wheel", " to open the supply wheel. That's the choice."],
 		y, Color(0.85, 0.9, 0.8))
 

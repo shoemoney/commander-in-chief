@@ -386,6 +386,11 @@ const WIPE_SCORE_PCT := 25           # airstrike screen-clear kills score at a q
 # _collect_pickups, each commented as matching the other. See _try_buy for why it is
 # a discount against the 10x the victory payout gives an UNSPENT chest.
 const SPEND_SCORE_MULT := 6
+# A LOST run salvages the unspent chest at HALF the 6x spend rate. Before this the
+# losing end converted nothing at all: a win banked 10x + 5000 and both wipe paths
+# silently binned whatever coin was in your hand, with no screen saying so. Half of
+# spend keeps spending strictly dominant — hoarding can never out-earn the shop.
+const WIPE_SCORE_MULT := 3
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
 const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
@@ -870,6 +875,21 @@ func revive_cost(p: Dictionary) -> int:
 	return maxi(cost, REVIVE_BASE_COST / (2 if is_solo() else 1))
 
 
+func _latch_wipe(x: int, y: int) -> void:
+	## The ONE place a run ends in defeat — and therefore the one place the losing end
+	## converts the War Chest, mirroring _damage_colossus()'s shape for the winning end.
+	## There were two `wiped = true` sites (endless wipe, Last Stand) and neither paid the
+	## chest out, so terminal coin was worth zero and no card mentioned it. Keep this
+	## single: tests/test_view_honesty.gd scrapes the sim and fails on any latch outside
+	## this function.
+	wiped = true
+	var banked: int = war_chest
+	score += banked * WIPE_SCORE_MULT
+	war_chest = 0
+	events.append({"t": "wiped", "x": x, "y": y,
+		"banked": banked, "banked_score": banked * WIPE_SCORE_MULT})
+
+
 func step(inputs: Array) -> void:
 	## Advance one tick. `inputs` is one SimInput per player.
 	tick_count += 1
@@ -896,8 +916,7 @@ func step(inputs: Array) -> void:
 	# down with no revives left latches the same `wiped` freeze endless wipes
 	# already use — the debrief/restart plumbing all keys off it downstream.
 	if last_stand and not victory and not wiped and _all_players_down():
-		wiped = true
-		events.append({"t": "wiped", "x": players[0]["x"], "y": players[0]["y"]})
+		_latch_wipe(players[0]["x"], players[0]["y"])
 	if kill_streak_timer > 0:
 		kill_streak_timer -= 1
 		if kill_streak_timer == 0:
@@ -1657,8 +1676,7 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 			# the wipe, and the only way an endless run ends (and records). A
 			# partner still up rescues you; campaign still respawns at checkpoint.
 			if mode == "endless" and _all_players_down():
-				wiped = true
-				events.append({"t": "wiped", "x": p["x"], "y": p["y"]})
+				_latch_wipe(p["x"], p["y"])
 			else:
 				_respawn(p, _checkpoint_y())
 			return

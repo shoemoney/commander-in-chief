@@ -637,13 +637,25 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## torture also streams the seeded quadrant rocks/sandbags and touches them well before
 ## 20s, so samples 1-5 move too. Sample 0 (t=600) is byte-identical (too early to reach
 ## any of them, same as campaign).
+## ENDLESS RE-RECORDED (2026-07-27, a lost run finally converts the War Chest):
+## SimWorld._latch_wipe() is now the single terminal latch for the losing end, and it
+## does what _damage_colossus() always did for the winning end — banks the unspent chest
+## as score and zeroes it. Both `score` and `war_chest` are checksummed, so the endless
+## torture legitimately moves. MEASURED, not argued: the 2P endless torture wipes at
+## TICK 1393 (wave 2) holding 25 coin; score goes 730 -> 805 (+75 == 25 * WIPE_SCORE_MULT)
+## and war_chest 25 -> 0 on that tick, and the sim is frozen behind `wiped` afterwards, so
+## every later sample carries exactly that delta. Samples 0 and 1 (ticks 599/1199, both
+## BEFORE the wipe) are byte-identical to the previous values — which is the proof that
+## nothing else moved. GOLDEN (campaign) VERIFIED UNCHANGED: the campaign torture never
+## reaches ANY terminal state (measured: wiped=false victory=false, chest 235, score
+## 32497 at tick 3600), so neither converter executes in that stream.
 const ENDLESS_GOLDEN: Array[int] = [
 	3184915394758128358,
 	7237179635764073260,
-	8069943378030035269,
-	7606170682722198749,
-	6197615687773169621,
-	8485840871492244461,
+	3037718701335090259,
+	7080938837575128843,
+	2715716834934835747,
+	7881660356745458779,
 ]
 
 

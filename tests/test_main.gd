@@ -895,3 +895,287 @@ func test_attract_bot_still_finishes_the_campaign_on_the_shipped_seed() -> void:
 		t += 1
 	Runner.T.ok(sim.victory,
 		"the attract bot reaches VICTORY on seed 0xC0FFEE (tick %d of 15,000)" % t)
+
+
+# ==========================================================================================
+# FULL-FRAME THREAT WASHES — the play field is seen THROUGH these, and nothing used to cap
+# the stack. Three producers painted the play CENTRE (two flat rects + a spatter atlas), so
+# a reachable state (finale sector + airstrike inbound + near-death) put 0.779 coverage over
+# the middle of the screen and left 9% of an enemy silhouette's contrast against the foundry
+# floor. `Main._wash()` is now the only door: every card is centre-clear, and `wash_clamp`
+# budgets the composited total at the border to WASH_CAP.
+#
+# Headless has no framebuffer, so these are ANALYTIC: composited from the real imported PNG
+# alphas plus the peaks in WASH_KINDS — the same two sources the draw call itself reads. They
+# evaluate EVERY producer at its peak simultaneously, which strictly dominates any frame the
+# game can draw, so there is no time window for a defect to hide in.
+# ==========================================================================================
+
+const WASH_CENTRE_ALPHA_MAX := 2      # /255, inside the central 50%x50% of the drawn footprint
+
+
+static func _alpha_card(key: String) -> Dictionary:
+	var img := _raw(key)
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	return {"w": img.get_width(), "h": img.get_height(), "d": img.get_data()}
+
+
+# The rects of the card that each get STRETCHED to the full screen: the whole card
+# normally, or its four quadrants for a quad-cycling atlas (hudfx_blood).
+static func _wash_footprints(card: Dictionary, quad: bool) -> Array:
+	var w: int = card["w"]
+	var h: int = card["h"]
+	if not quad:
+		return [Rect2i(0, 0, w, h)]
+	return [Rect2i(0, 0, w / 2, h / 2), Rect2i(w / 2, 0, w / 2, h / 2),
+		Rect2i(0, h / 2, w / 2, h / 2), Rect2i(w / 2, h / 2, w / 2, h / 2)]
+
+
+static func _alpha_max(card: Dictionary, r: Rect2i) -> int:
+	var w: int = card["w"]
+	var d: PackedByteArray = card["d"]
+	var m := 0
+	for y in range(r.position.y, r.end.y):
+		var base := y * w * 4 + 3
+		for x in range(r.position.x, r.end.x):
+			var v: int = d[base + x * 4]
+			if v > m:
+				m = v
+	return m
+
+
+# Worst-case alpha inside the central 50%x50% of every footprint.
+static func _centre_alpha(card: Dictionary, quad: bool) -> float:
+	var m := 0
+	for f in _wash_footprints(card, quad):
+		var r := Rect2i(f.position.x + f.size.x / 4, f.position.y + f.size.y / 4,
+			f.size.x / 2, f.size.y / 2)
+		m = maxi(m, _alpha_max(card, r))
+	return float(m) / 255.0
+
+
+# Worst-case alpha on the outermost pixel ring of every footprint (the screen border).
+static func _border_alpha(card: Dictionary, quad: bool) -> float:
+	var m := 0
+	for f in _wash_footprints(card, quad):
+		m = maxi(m, _alpha_max(card, Rect2i(f.position.x, f.position.y, f.size.x, 1)))
+		m = maxi(m, _alpha_max(card, Rect2i(f.position.x, f.end.y - 1, f.size.x, 1)))
+		m = maxi(m, _alpha_max(card, Rect2i(f.position.x, f.position.y, 1, f.size.y)))
+		m = maxi(m, _alpha_max(card, Rect2i(f.end.x - 1, f.position.y, 1, f.size.y)))
+	return float(m) / 255.0
+
+
+func test_every_full_frame_wash_card_is_centre_clear() -> void:
+	var kinds: Dictionary = _consts().get("WASH_KINDS", {})
+	Runner.T.ok(kinds.size() >= 5, "WASH_KINDS enumerates every full-frame wash (found %d)" % kinds.size())
+	for name in kinds:
+		var k: Dictionary = kinds[name]
+		var card := _alpha_card(String(k["tex"]))
+		var a := _centre_alpha(card, bool(k.get("quad", false)))
+		Runner.T.ok(a * 255.0 <= float(WASH_CENTRE_ALPHA_MAX),
+			"wash '%s' (%s) is centre-clear: max alpha %d/255 in the central 50%% (cap %d)"
+				% [name, k["tex"], roundi(a * 255.0), WASH_CENTRE_ALPHA_MAX])
+
+
+func test_no_red_full_frame_draw_outside_the_arbiter() -> void:
+	## CLASS ratchet, set scraped from source: any red-dominant draw that covers the whole
+	## frame must go through _wash(), so a producer added tomorrow is budgeted the day it
+	## lands and the WASH_KINDS table cannot be bypassed.
+	var lines := FileAccess.get_file_as_string("res://src/main.gd").split("\n")
+	var fn := ""
+	var offenders: Array[String] = []
+	var i := 0
+	while i < lines.size():
+		var ln: String = lines[i]
+		if ln.begins_with("func ") or ln.begins_with("static func "):
+			fn = ln.substr(ln.find("func ") + 5).split("(")[0]
+		if ln.contains("draw_rect(") or ln.contains("draw_texture_rect"):
+			# Accumulate the whole call: keep appending lines until the parens balance.
+			var stmt := ln
+			var j := i
+			while stmt.count("(") > stmt.count(")") and j + 1 < lines.size():
+				j += 1
+				stmt += " " + lines[j].strip_edges()
+			var full_frame := stmt.contains("Rect2(0, 0, SCREEN_W, SCREEN_H)") \
+				or (stmt.contains("Rect2(-") and stmt.contains("SCREEN_W +") and stmt.contains("SCREEN_H +"))
+			if full_frame and fn != "_wash" and _is_red_literal(stmt):
+				offenders.append("main.gd:%d in %s()" % [i + 1, fn])
+			i = j
+		i += 1
+	Runner.T.eq(offenders.size(), 0,
+		"every red full-frame wash is drawn by _wash() — offenders: %s" % str(offenders))
+
+
+# r > g and r > b on the first Color(...) literal in the statement.
+static func _is_red_literal(stmt: String) -> bool:
+	var at := stmt.find("Color(")
+	if at < 0:
+		return false
+	var args := stmt.substr(at + 6).split(",")
+	if args.size() < 3:
+		return false
+	var v := PackedFloat32Array()
+	for n in 3:
+		var s: String = args[n].strip_edges()
+		if not s.is_valid_float():
+			return false
+		v.append(s.to_float())
+	return v[0] > v[1] and v[0] > v[2]
+
+
+func _wash_stack(centre: bool) -> Dictionary:
+	# Composite EVERY producer at its peak, in WASH_KINDS declaration order (== draw order),
+	# through the real arbiter. Returns {coverage, color_over} for a base color.
+	var ms: Script = load("res://src/main.gd")
+	var c := _consts()
+	var kinds: Dictionary = c["WASH_KINDS"]
+	var load_acc := 0.0
+	var layers: Array = []
+	for name in kinds:
+		var k: Dictionary = kinds[name]
+		var card := _alpha_card(String(k["tex"]))
+		var quad: bool = bool(k.get("quad", false))
+		var ca := _centre_alpha(card, quad) if centre else _border_alpha(card, quad)
+		var a: float = ms.wash_clamp(ca * float(k["peak"]), load_acc)
+		if a <= 0.002:
+			continue
+		load_acc = 1.0 - (1.0 - load_acc) * (1.0 - a)
+		layers.append([a, k["col"]])
+	return {"coverage": load_acc, "layers": layers}
+
+
+static func _wash_over(base: Color, layers: Array) -> Color:
+	var c := base
+	for l in layers:
+		var a: float = l[0]
+		var k: Color = l[1]
+		c = Color(k.r * a + c.r * (1.0 - a), k.g * a + c.g * (1.0 - a), k.b * a + c.b * (1.0 - a))
+	return c
+
+
+static func _lin(ch: float) -> float:
+	return ch / 12.92 if ch <= 0.03928 else pow((ch + 0.055) / 1.055, 2.4)
+
+
+static func _wcag(a: Color, b: Color) -> float:
+	var la := 0.2126 * _lin(a.r) + 0.7152 * _lin(a.g) + 0.0722 * _lin(a.b)
+	var lb := 0.2126 * _lin(b.r) + 0.7152 * _lin(b.g) + 0.0722 * _lin(b.b)
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
+
+
+func test_worst_case_wash_stack_keeps_silhouettes() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var c := _consts()
+	var cap: float = c["WASH_CAP"]
+	# The subject: an enemy rifleman standing on the foundry floor — the darkest sprite on
+	# the reddest ground the campaign has, i.e. the pairing the wash punishes hardest.
+	var spr := _mean_opaque("enemy_assault")
+	var stops: Array = ms._ground_stops("campaign")
+	var g: Color = stops[0][4]
+	var shade: float = c["GROUND_SHADE"]
+	var gnd := Color(g.r * shade, g.g * shade, g.b * shade)
+	var clean := _wcag(spr, gnd)
+	# Retention is measured on contrast ABOVE 1.0 (1:1 == the silhouette is gone).
+	for centre in [true, false]:
+		var st := _wash_stack(centre)
+		var cov: float = st["coverage"]
+		var washed := _wcag(_wash_over(spr, st["layers"]), _wash_over(gnd, st["layers"]))
+		var keep := (washed - 1.0) / (clean - 1.0)
+		var where := "centre" if centre else "border"
+		if centre:
+			Runner.T.ok(cov <= 0.06, "worst-case wash coverage at the play CENTRE is %.3f (cap 0.06)" % cov)
+			Runner.T.ok(keep >= 0.85,
+				"…leaving %.0f%% of the %.2f:1 silhouette contrast (min 85%%)" % [keep * 100.0, clean])
+		else:
+			Runner.T.ok(cov <= cap + 0.001,
+				"worst-case wash coverage at the BORDER is %.3f (WASH_CAP %.2f)" % [cov, cap])
+			Runner.T.ok(keep >= 0.30,
+				"…leaving %.0f%% of the %.2f:1 silhouette contrast (min 30%%)" % [keep * 100.0, clean])
+		Runner.T.ok(cov >= 0.0 and cov <= 1.0, "%s coverage is a real fraction" % where)
+
+
+static func _mean_opaque(key: String) -> Color:
+	var img := _raw(key)
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	var d := img.get_data()
+	var acc := Vector3.ZERO
+	var n := 0
+	for p in range(0, d.size(), 4):
+		if d[p + 3] > 127:
+			acc += Vector3(d[p], d[p + 1], d[p + 2])
+			n += 1
+	if n == 0:
+		return Color.BLACK
+	acc /= float(n * 255)
+	return Color(acc.x, acc.y, acc.z)
+
+
+func test_the_wash_budget_actually_binds() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var cap: float = _consts()["WASH_CAP"]
+	Runner.T.ok(cap > 0.0 and cap < 1.0, "WASH_CAP (%.2f) is a real coverage budget" % cap)
+	# Monotone in the requested alpha, never negative, never over budget.
+	var prev := -1.0
+	for i in 21:
+		var a := float(i) / 20.0
+		var got: float = ms.wash_clamp(a, 0.0)
+		Runner.T.ok(got >= 0.0 and got <= a + 1e-6, "wash_clamp never invents alpha (%.2f -> %.3f)" % [a, got])
+		Runner.T.ok(got >= prev - 1e-6, "wash_clamp is monotone in strength")
+		prev = got
+	# Five opaque washes in a row still composite to exactly the cap, not past it.
+	var acc := 0.0
+	for i in 5:
+		var a: float = ms.wash_clamp(1.0, acc)
+		acc = 1.0 - (1.0 - acc) * (1.0 - a)
+	Runner.T.ok(absf(acc - cap) < 1e-4, "five saturated washes compose to exactly WASH_CAP (%.4f)" % acc)
+	Runner.T.ok(ms.wash_clamp(0.5, 1.0) >= 0.0, "a fully-loaded frame never returns a negative alpha")
+	# …and the budget is a PER-FRAME one. Without the reset at the top of _draw() the
+	# first frame's washes would permanently exhaust it and every later frame draws none.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var body := src.substr(src.find("func _draw() -> void:"))
+	Runner.T.ok(body.substr(0, body.find("\nfunc ")).contains("_wash_load = 0.0"),
+		"_draw() zeroes _wash_load — the wash budget is per FRAME, not per run")
+
+
+# --- The result card has to FIT the 360px screen. The endless K.I.A. tally can reach
+# TWELVE rows (rank · downed-by · progress · score · war-chest salvage · streak · top
+# prey · pilots rescued · best · waves-short · VP banked · REDEPLOY) and
+# _draw_result_panel laid every one of them out at a fixed 19px pitch with no clamp:
+# last baseline 178+11*19 = 387, plate bottom 178+12*19+14 = 420 — the REDEPLOY prompt
+# fell off the bottom. Nothing pinned the panel to the screen, which is how it shipped. ---
+
+const RESULT_ROWS_MAX := 12    # the maximum endless K.I.A. row set, enumerated above
+const RESULT_ROW_Y := 178.0    # first row baseline  (mirrors _draw_result_panel)
+const RESULT_PAD := 14.0       # plate padding below the last row (ditto)
+
+
+func test_result_panel_fits_the_screen_at_its_maximum_row_count() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var screen_h: float = _consts()["SCREEN_H"]
+	var has_pitch := false
+	for m in ms.get_script_method_list():
+		if String(m["name"]) == "result_row_pitch":
+			has_pitch = true
+	Runner.T.ok(has_pitch, "Main.result_row_pitch() is the result card's one row-pitch source")
+	# Falls back to the un-clamped literal so the geometry below reports the REAL
+	# overflow numbers on an unfixed tree instead of aborting on a missing symbol.
+	var pitch: float = ms.result_row_pitch(RESULT_ROWS_MAX) if has_pitch else 19.0
+	var last_baseline := RESULT_ROW_Y + float(RESULT_ROWS_MAX - 1) * pitch
+	var panel_bottom := RESULT_ROW_Y + float(RESULT_ROWS_MAX) * pitch + RESULT_PAD
+	Runner.T.ok(last_baseline <= 356.0,
+		"%d-row result card keeps its last row (REDEPLOY) on screen: baseline %.1f <= 356"
+			% [RESULT_ROWS_MAX, last_baseline])
+	Runner.T.ok(panel_bottom <= screen_h,
+		"%d-row result plate ends on screen: bottom %.1f <= %.0f"
+			% [RESULT_ROWS_MAX, panel_bottom, screen_h])
+	# A card that already fits keeps the authored 19px pitch — the clamp is a floor
+	# under overflow, not a re-layout of every tally.
+	Runner.T.ok(absf(float(ms.result_row_pitch(6) if has_pitch else 19.0) - 19.0) < 1e-4,
+		"a 6-row card is untouched at the authored 19px pitch")
+	# …and the draw actually goes through it, so the helper can't drift into decoration.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var body := src.substr(src.find("func _draw_result_panel("))
+	Runner.T.ok(body.substr(0, body.find("\nfunc ")).contains("result_row_pitch("),
+		"_draw_result_panel() takes its row pitch from result_row_pitch()")

@@ -214,3 +214,64 @@ func test_last_stand_all_down_latches_the_wipe_in_2p() -> void:
 	sim._kill_player(sim.players[1])
 	sim.step([revive, revive])
 	Runner.T.ok(sim.wiped, "both down in Last Stand latches the wipe — never a frozen run")
+
+
+# --- Terminal value of the chest. A WIN converted it (10x + 5000); BOTH loss paths
+# silently binned it. The coin in your hand was worth exactly zero the instant the run
+# ended and no screen ever said so. `_latch_wipe()` is now the one converter for the
+# losing end, mirroring `_damage_colossus()`'s shape. ---
+
+func test_every_run_ending_converts_the_chest() -> void:
+	# Endless solo wipe. wave 12 + 3 deaths prices a body at 225, above a 200 chest,
+	# which is what arms broke_timer and (with nobody up) ends the run.
+	var e := SimWorld.new(7, 1, "endless")
+	var ep: Dictionary = e.players[0]
+	e.wave = 12
+	e.war_chest = 200
+	e._kill_player(ep)
+	ep["deaths"] = 3
+	Runner.T.eq(e.revive_cost(ep), 225, "setup: the body costs more than the chest holds")
+	# BROKE_RESPAWN_TICKS is 300 — the longest instance of this window. Drive 400.
+	var before := 0
+	for i in 400:
+		before = e.score
+		e.step([_idle()])
+		if e.wiped:
+			break
+	Runner.T.ok(e.wiped, "endless wipe latched inside the 400-tick window")
+	Runner.T.eq(e.war_chest, 0, "the wipe empties the chest instead of stranding it")
+	Runner.T.eq(e.score - before, 200 * SimWorld.WIPE_SCORE_MULT,
+		"…converting it at the salvage rate on the same tick")
+	var wev := {}
+	for ev in e.events:
+		if ev.get("t", "") == "wiped":
+			wev = ev
+	Runner.T.eq(int(wev.get("banked", -1)), 200, "the wiped event ships the PRE-zero chest for the debrief")
+	Runner.T.eq(int(wev.get("banked_score", -1)), 200 * SimWorld.WIPE_SCORE_MULT,
+		"…and what it converted to, so the view never restates the multiplier")
+
+	# The campaign / solo Last Stand latch is a copy-paste sibling of the endless one;
+	# it must route through the SAME converter.
+	var c := SimWorld.new(7, 2)
+	c.last_stand = true
+	c.war_chest = 180
+	var cbefore := c.score
+	c._kill_player(c.players[0])
+	c._kill_player(c.players[1])
+	c.step([_idle(), _idle()])
+	Runner.T.ok(c.wiped, "last-stand wipe latched")
+	Runner.T.eq(c.war_chest, 0, "the last-stand wipe converts the chest too")
+	Runner.T.eq(c.score - cbefore, 180 * SimWorld.WIPE_SCORE_MULT, "…at the same salvage rate")
+	# (The victory path's 10x + 5000 is already pinned by
+	# test_colossus.gd::test_death_pays_out_and_wins — not duplicated here.)
+
+
+func test_spending_stays_dominant() -> void:
+	# Tuning invariant: salvaging a lost chest must never pay as well as spending it,
+	# or hoarding becomes optimal and the shop stops mattering.
+	Runner.T.ok(SimWorld.WIPE_SCORE_MULT > 0, "a lost run converts the chest at all")
+	Runner.T.ok(SimWorld.WIPE_SCORE_MULT < SimWorld.SPEND_SCORE_MULT,
+		"salvage (%dx) stays strictly under spend (%dx)"
+			% [SimWorld.WIPE_SCORE_MULT, SimWorld.SPEND_SCORE_MULT])
+	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < 10,
+		"spend stays under the victory bank rate (10x) — winning is still the best exit")

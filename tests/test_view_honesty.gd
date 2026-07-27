@@ -816,3 +816,50 @@ func test_the_enemy_draw_path_reads_one_telegraph_source() -> void:
 		"all five enemy telegraph draw sites (sniper/technical/mg_nest/ghillie/elite) read Main.telegraph_dir()")
 	Runner.T.eq(view.count("e.get(\"aim_lx\""), 1,
 		"main.gd reads the raw aim vector in exactly ONE place — inside telegraph_dir() — so no draw site can restate it")
+
+
+# --- 9. TERMINAL VALUE: every way a run can end must convert the War Chest, and the
+# debrief must SAY what it converted to. The win path did both; both loss paths did
+# neither — you could die holding 224 coin and no screen ever mentioned it. ---
+
+func test_no_run_ending_bypasses_the_chest_converter() -> void:
+	## CLASS ratchet, set derived from source. `wiped = true` / `victory = true` are the
+	## sim's only terminal latches; each must sit inside the function that also converts
+	## the chest (`_latch_wipe` for the losing end, `_damage_colossus` for the win), so a
+	## terminal state added tomorrow that forgets the payout reddens the day it lands.
+	var lines := FileAccess.get_file_as_string("res://src/sim/sim_world.gd").split("\n")
+	var fn := ""
+	var found := 0
+	var offenders: Array[String] = []
+	for i in lines.size():
+		var ln: String = lines[i]
+		if ln.begins_with("func ") or ln.begins_with("static func "):
+			fn = ln.substr(ln.find("func ") + 5).split("(")[0]
+		var code: String = ln.split("#")[0].strip_edges()
+		if code == "wiped = true" or code == "victory = true":
+			found += 1
+			if fn != "_latch_wipe" and fn != "_damage_colossus":
+				offenders.append("sim_world.gd:%d  `%s` in %s()" % [i + 1, code, fn])
+	Runner.T.ok(found >= 2, "scraped the terminal-state latches out of the sim (found %d)" % found)
+	Runner.T.eq(offenders.size(), 0,
+		"every terminal latch converts the War Chest — offenders: %s" % str(offenders))
+
+
+func test_debrief_states_the_chest_conversion() -> void:
+	## The K.I.A. card must name the salvage, and take the NUMBER from the sim event —
+	## a view-side multiplier literal is exactly the drift this suite exists to stop.
+	var mult: int = SimWorld.WIPE_SCORE_MULT
+	var rows: Array = Main._wipe_chest_row(180, 180 * mult)
+	Runner.T.eq(rows.size(), 1, "a chest with coin left in it earns a debrief row")
+	if rows.size() == 1:
+		var txt := String(rows[0].get("text", ""))
+		Runner.T.ok(txt.contains("WAR CHEST"), "…and names the WAR CHEST (got %s)" % txt)
+		Runner.T.ok(txt.contains("180"), "…states the coin that was left (got %s)" % txt)
+		Runner.T.ok(txt.contains(Art.group_digits(180 * mult)),
+			"…and what it converted to, %d, computed from SimWorld.WIPE_SCORE_MULT (got %s)"
+				% [180 * mult, txt])
+	Runner.T.eq(Main._wipe_chest_row(0, 0).size(), 0, "died broke: say nothing")
+	# The HOW-TO page must teach both rates from the sim consts, never a hand-typed number.
+	var msrc := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	Runner.T.ok(msrc.contains("SimWorld.SPEND_SCORE_MULT") and msrc.contains("SimWorld.WIPE_SCORE_MULT"),
+		"the HOW-TO WAR CHEST page builds both multipliers from the sim consts")

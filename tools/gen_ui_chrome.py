@@ -28,7 +28,7 @@ import math
 import random
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from uifont import draw_text
 
@@ -562,7 +562,19 @@ def blood(w, h):
             d.ellipse([x - r, y - r, x + r, y + r], fill=rng.randint(170, 255))
         r = S * rng.uniform(0.022, 0.045)
         d.ellipse([bx - r, by - r, bx + r, by + r], fill=255)
-    return _down(m, w, h, blur=0.6)
+    out = _down(m, w, h, blur=0.6)
+    # Centre-clear the card. main.gd draws it as four QUADRANTS each stretched to the
+    # full screen, so the edge mask has to tile 2x2 -- one full-screen vignette over the
+    # whole atlas would leave three quadrants painting the play centre. Spatter over the
+    # middle of the screen is where 78% of the play centre's coverage came from.
+    vg = vignette(w // 2, h // 2).getchannel("A")
+    tile = Image.new("L", (w, h))
+    for qx in (0, w // 2):
+        for qy in (0, h // 2):
+            tile.paste(vg, (qx, qy))
+    a = ImageChops.multiply(out.getchannel("A"), tile)
+    out.putalpha(a)
+    return out
 
 
 def dmgdir(w, h):
