@@ -874,3 +874,24 @@ func test_scripted_bot_locks_a_target_in_endless_where_every_campaign_branch_is_
 	csim.enemies.append({"x": 40 * Fixed.ONE, "y": 0, "alive": true, "kind": 0, "hp": 1})
 	Runner.T.ok(ms._demo_boss_target(csim, csim.players[0]).is_empty(),
 		"campaign still ignores loose infantry — the boss-only policy that measured best on 8 seeds")
+
+
+func test_attract_bot_still_finishes_the_campaign_on_the_shipped_seed() -> void:
+	## THE RATCHET THE SUITE WAS MISSING. `demo_input` drives the TITLE attract
+	## screen, every movie capture, tools/sector_probe.gd and this project's own
+	## balance baselines — so a bot that stops finishing silently poisons all of
+	## them. It happened: making the crew killable during the burn window took
+	## seed 0xC0FFEE (the seed main.gd hard-codes) from victory at tick 10,420 to
+	## never in 30,000, and 888 test methods reported PASS. The bot had been
+	## cracking bunker gates ONLY from inside a tank; nothing measured that.
+	## Cap 15,000 against a measured 8,091 — ~1.9x headroom, so ordinary drift
+	## cannot flap it, and a 30,000-tick stall cannot hide in it. ~4 s of suite.
+	var ms: Script = load("res://src/main.gd")
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	sim.god_mode = true   # the same god-restore every balance probe in tools/ uses
+	var t := 0
+	while t < 15000 and not sim.victory:
+		sim.step([ms.demo_input(t, sim)] as Array[SimInput])
+		t += 1
+	Runner.T.ok(sim.victory,
+		"the attract bot reaches VICTORY on seed 0xC0FFEE (tick %d of 15,000)" % t)

@@ -270,6 +270,12 @@ func _build_shots() -> void:
 		{"name": "how-to-play", "build": _shot_firefight, "dress": _dress_howto},
 		{"name": "hall-of-fame", "build": _shot_firefight, "dress": _dress_hall},
 		{"name": "options-screen", "build": _shot_firefight, "dress": _dress_options},
+		# 7 of the 12 framed modes had NEVER been rendered by this harness while the
+		# bezel was being rebuilt, and REBIND is the one that was actually broken:
+		# its category-tab strip starts at y=42 against a border top the frame draws
+		# an 11px stroke inward from. CHAPTERS is the widest row content of the ten.
+		{"name": "rebind-controls", "build": _shot_firefight, "dress": _dress_rebind},
+		{"name": "chapters-select", "build": _shot_firefight, "dress": _dress_chapters},
 	]
 
 
@@ -533,6 +539,19 @@ func _dress_options(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.OPTS)
 	m._menu._open_t = 1.0
 	m._menu.sel = m._menu._menu_items().size() - 2   # focus arrow parked on RESET DEFAULTS
+	m._hud_icons.visible = false
+
+
+func _dress_rebind(m: Node2D) -> void:
+	m._menu.open(GameMenu.Mode.REBIND)
+	m._menu._open_t = 1.0
+	m._menu._rebind_tab = 1   # ACTIONS: the fullest tab
+	m._hud_icons.visible = false
+
+
+func _dress_chapters(m: Node2D) -> void:
+	m._menu.open(GameMenu.Mode.CHAPTERS)
+	m._menu._open_t = 1.0
 	m._hud_icons.visible = false
 
 

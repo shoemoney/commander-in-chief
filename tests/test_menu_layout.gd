@@ -918,7 +918,9 @@ class _CaptureMenu extends GameMenu:
 	func _emit_tex(key: String, r: Rect2, _c: Color) -> void:
 		ops.append({"k": "tex", "id": key, "box": r})
 	func _emit_fit(key: String, r: Rect2, _reg: Rect2, _c: Color) -> void:
-		ops.append({"k": "fit", "id": key, "box": r})
+		# `reg` is recorded (not dropped) so a 9-slice draw can be audited: a SQUARE
+		# source region landing in a non-square box is a squashed corner tile.
+		ops.append({"k": "fit", "id": key, "box": r, "reg": _reg})
 	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
 		ops.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
 	func _emit_stamp(txt: String, pos: Vector2, _c: Color) -> void:
@@ -6661,15 +6663,21 @@ func test_every_overlay_screen_wears_the_box_chrome_without_crossing_its_ink() -
 		fcap.main = frame_stub
 		fcap.mode = m
 		fcap._draw_content_frame()
-		var frame_ops := fcap.ops.filter(func(op): return op["k"] == "tex" and op["id"] == "ui_frame_lrg")
+		var frame_ops := fcap.ops.filter(func(op): return op["k"] == "fit" and op["id"] == "ui_frame_lrg")
 		fcap.free()
 		if m in Menu.UNFRAMED_MODES:
 			Runner.T.eq(frame_ops.size(), 0, "unframed mode %d draws zero ui_frame_lrg ops" % m)
 		else:
-			Runner.T.eq(frame_ops.size(), 1, "framed mode %d draws exactly one ui_frame_lrg op" % m)
-			if frame_ops.size() == 1:
-				Runner.T.eq(frame_ops[0]["box"], Menu.content_frame_rect(m),
-					"mode %d's drawn frame rect matches content_frame_rect()" % m)
+			# 9-slice: 4 square corners + 4 one-axis edge strips (the empty centre is skipped).
+			Runner.T.eq(frame_ops.size(), 8, "framed mode %d draws the 8 ui_frame_lrg slices" % m)
+			# ...and together they tile content_frame_rect() EXACTLY — the union of the
+			# emitted boxes is the whole footprint, with no gap and no overhang.
+			var union: Rect2 = frame_ops[0]["box"]
+			for op in frame_ops:
+				union = union.merge(op["box"])
+			Runner.T.ok(union.is_equal_approx(Menu.content_frame_rect(m)),
+				"mode %d's 8 slices tile exactly content_frame_rect() (got %s want %s)"
+					% [m, union, Menu.content_frame_rect(m)])
 	frame_stub.free()
 
 	# --- 2 & 3: the 10 list-screen modes (HALL/HOWTO already had a pinned box; see
@@ -6722,8 +6730,15 @@ func test_every_overlay_screen_wears_the_box_chrome_without_crossing_its_ink() -
 		# --- 3. underlay skirt: the _under texture draws its own line at 5% of the
 		# SAME shared rect content_frame_rect() hands both textures (menu.gd draws
 		# ui_frame_lrg_under and ui_frame_lrg with the identical `fr`).
-		var fr := Menu.content_frame_rect(m)
-		var skirt := Rect2(fr.position + fr.size * 0.05, fr.size * 0.90)
+		# Derived from the rect the DRAW uses (content_frame_under_rect less the
+		# underlay's own 5% inset), not re-typed — the hand-written `border.grow(+4)`
+		# version kept asserting a rectangle nothing emitted right through a cycle
+		# where the real skirt was inside the keyline at border.grow(-4).
+		var skirt := Menu.content_frame_under_line(m)
+		Runner.T.ok(is_equal_approx(skirt.position.x, Menu.content_frame_border(m).position.x
+				- Menu.FRAME_UNDER_SKIRT),
+			"mode %d underlay rule really lands OUTSIDE the keyline (skirt x %.1f vs border %.1f)"
+				% [m, skirt.position.x, Menu.content_frame_border(m).position.x])
 		Runner.T.ok(skirt.position.x >= 0.0 and skirt.end.x <= 640.0,
 			"mode %d underlay skirt x [%.1f,%.1f] stays inside the 640 canvas" % [m, skirt.position.x, skirt.end.x])
 		Runner.T.ok(skirt.position.y >= 0.0 and skirt.end.y < Menu.FOOTER_Y,
@@ -6740,41 +6755,52 @@ func _rect_inside(outer: Rect2, inner: Rect2) -> bool:
 # The content-well (HOWTO / HALL) must stay INSIDE the chrome frame it draws in.
 # ---------------------------------------------------------------------------
 
-## Re-measure ui_frame_lrg's opaque border band and project it through FRAME_ART_RECT.
-## Returns the interior hole in canvas units.
+## Re-measure ui_frame_lrg's opaque ink and project it through the 9-slice.
+## Returns the interior hole in canvas units — the rect the layout must clear.
+##
+## Sampled on THREE rows and THREE columns (10% / 50% / 90%), not just the middle
+## one, and reporting the INNERMOST ink found on each side. The mid-row-only
+## version could not see the corner ornament at all — `_rivets()`' own docstring
+## said so out loud — and that blind spot shipped: the corner bracket arm landed
+## at x=557 on HOWTO and bisected the "1 / 5" page counter, whose glyph ink runs
+## x 558..565 against a FRAME_INNER_R of 566. The 10%/90% rows are inside the
+## 64-texel corner tiles, which the 9-slice maps at a fixed 1:1 FRAME_SCALE from
+## the nearest corner — the same projection the middle band uses on its own axis.
 static func _measured_frame_interior() -> Rect2:
 	var img := Art.tex("ui_frame_lrg").get_image()
 	var tw := img.get_width()
 	var th := img.get_height()
-	var mid_row := th / 2
-	var mid_col := tw / 2
-	# Walk in from each edge: transparent margin, then the opaque border band, and
-	# the first transparent texel after it is the interior.
+	var rows := [int(th * 0.1), th / 2, int(th * 0.9)]
+	var cols := [int(tw * 0.1), tw / 2, int(tw * 0.9)]
+	# Innermost ink per side: scan the outer half and keep the deepest opaque texel.
 	var ix := 0
-	while ix < tw and img.get_pixel(ix, mid_row).a <= 0.06:
-		ix += 1
-	while ix < tw and img.get_pixel(ix, mid_row).a > 0.06:
-		ix += 1
 	var irx := tw - 1
-	while irx >= 0 and img.get_pixel(irx, mid_row).a <= 0.06:
-		irx -= 1
-	while irx >= 0 and img.get_pixel(irx, mid_row).a > 0.06:
-		irx -= 1
+	for r in rows:
+		for x in range(0, tw / 2):
+			if img.get_pixel(x, r).a > 0.06:
+				ix = maxi(ix, x + 1)
+		for x in range(tw - 1, tw / 2, -1):
+			if img.get_pixel(x, r).a > 0.06:
+				irx = mini(irx, x - 1)
 	var ity := 0
-	while ity < th and img.get_pixel(mid_col, ity).a <= 0.06:
-		ity += 1
-	while ity < th and img.get_pixel(mid_col, ity).a > 0.06:
-		ity += 1
 	var iby := th - 1
-	while iby >= 0 and img.get_pixel(mid_col, iby).a <= 0.06:
-		iby -= 1
-	while iby >= 0 and img.get_pixel(mid_col, iby).a > 0.06:
-		iby -= 1
-	var fr: Rect2 = Menu.FRAME_ART_RECT
-	var sx := fr.size.x / float(tw)
-	var sy := fr.size.y / float(th)
-	return Rect2(fr.position.x + ix * sx, fr.position.y + ity * sy,
-		(irx + 1 - ix) * sx, (iby + 1 - ity) * sy)
+	for c in cols:
+		for y in range(0, th / 2):
+			if img.get_pixel(c, y).a > 0.06:
+				ity = maxi(ity, y + 1)
+		for y in range(th - 1, th / 2, -1):
+			if img.get_pixel(c, y).a > 0.06:
+				iby = mini(iby, y - 1)
+	# Project through the REAL 9-slice, not a uniform stretch: the LEFT/TOP band texels
+	# live in the corner tiles anchored to the destination's top-left, the RIGHT/BOTTOM
+	# ones in the tiles anchored to its bottom-right, both at a fixed 1:1 FRAME_SCALE.
+	# (Under the old single stretched quad the two axes scaled differently — which is
+	# exactly what made every corner bracket 1.74:1 squashed.)
+	var fr: Rect2 = Menu.content_frame_rect(Menu.Mode.HOWTO)
+	var s: float = Menu.FRAME_SCALE
+	var l := fr.position.x + ix * s
+	var t := fr.position.y + ity * s
+	return Rect2(l, t, (fr.end.x - (tw - (irx + 1)) * s) - l, (fr.end.y - (th - (iby + 1)) * s) - t)
 
 
 func test_frame_inner_constants_match_the_frame_art() -> void:
@@ -6971,3 +6997,165 @@ func _overlap_msg(w) -> String:
 		% [str(w[0]).substr(0, 34), a.position.x, a.end.x, a.position.y, a.end.y,
 			str(w[2]).substr(0, 34), b.position.x, b.end.x, b.position.y, b.end.y,
 			ov.size.x, ov.size.y]
+
+
+# ---------------------------------------------------------------------------
+# The bezel, class-derived. menu.gd frames EVERY Mode except UNFRAMED_MODES —
+# 12 of 14 screens through ONE _draw_content_frame(). It used to stretch a
+# single 256^2 quad into the box: 600x344 for HALL/HOWTO (1.74:1 corner aspect
+# error) and 672.7x336.4 for the 10 list screens (2.00:1). The "notched corner
+# brackets" shipped twice as wide as tall on every screen. The mode set is read
+# from the source constant, so a Mode added tomorrow is covered the day it lands.
+# ---------------------------------------------------------------------------
+
+func test_every_framed_screen_wears_a_bezel_not_a_stretched_box() -> void:
+	var stub := _StubMain.new()
+	var covered := 0
+	for m in Menu.Mode.values():
+		if m in Menu.UNFRAMED_MODES:
+			continue
+		covered += 1
+		var cap := _CaptureMenu.new()
+		cap.main = stub
+		cap.mode = m
+		cap._draw_content_frame()
+		var border := Menu.content_frame_border(m)
+		var corner_ops := 0
+		var squashed: Array[String] = []
+		var ambient := 0
+		for op in cap.ops:
+			if op["k"] == "tex" or op["k"] == "fit":
+				# A square SOURCE region is corner art. An edge slice is non-square
+				# by construction and is allowed to stretch on its long axis.
+				var reg: Rect2 = op.get("reg", Rect2(0.0, 0.0, 1.0, 1.0))
+				if absf(reg.size.x - reg.size.y) > 0.5:
+					continue
+				corner_ops += 1
+				var bx: Rect2 = op["box"]
+				if absf(bx.size.x - bx.size.y) > 1.0:
+					squashed.append("%.1fx%.1f = %.2f:1" % [bx.size.x, bx.size.y,
+						bx.size.x / maxf(1.0, bx.size.y)])
+			elif op["k"] == "rect" and _rect_inside(border, op["box"]):
+				ambient += 1   # the content WELL fill is larger than the border, so it can't land here
+		cap.free()
+		Runner.T.eq(squashed.size(), 0,
+			"mode %d draws corner art at 1:1, never squashed: %s" % [m, squashed])
+		Runner.T.ok(corner_ops >= 8,
+			"mode %d 9-slices both frame layers (>=8 square corner tiles), got %d" % [m, corner_ops])
+		Runner.T.ok(ambient >= 1,
+			"mode %d paints a terminal-glass ambient layer inside its border" % m)
+	Runner.T.eq(covered, 12, "12 framed screens enumerated from UNFRAMED_MODES, not 4 reported")
+	stub.free()
+
+
+func test_menu_ambience_moves_and_reduce_motion_stops_it() -> void:
+	## The accessibility contract the rest of this file keeps: REDUCE MOTION must
+	## hard-freeze the ambience, not merely slow it.
+	var stub := _StubMain.new()
+	for motion in [1.0, 0.0]:
+		stub._motion = motion
+		var shots: Array[String] = []
+		for t in [0.0, 0.7]:
+			var cap := _CaptureMenu.new()
+			cap.main = stub
+			cap.mode = Menu.Mode.PAUSE
+			cap._amb_t = t
+			cap._draw_content_frame()
+			var boxes: Array[String] = []
+			for op in cap.ops:
+				boxes.append(str(op["box"]))
+			shots.append("|".join(boxes))
+			cap.free()
+		if motion >= 0.5:
+			Runner.T.ok(shots[0] != shots[1],
+				"motion ON: the ambience actually moves between _amb_t 0.0 and 0.7")
+		else:
+			Runner.T.eq(shots[0], shots[1],
+				"REDUCE MOTION: the ambience is frozen — the two captures are identical")
+	stub.free()
+
+
+## Outermost ink of ui_frame_lrg, projected through the 9-slice onto a mode's
+## content_frame_rect(). Corner-tile texels map 1:1 at FRAME_SCALE from the nearest
+## corner, which is exactly where the ornament lives.
+static func _measured_frame_ink_bounds(m) -> Rect2:
+	var img := Art.tex("ui_frame_lrg").get_image()
+	var tw := img.get_width()
+	var th := img.get_height()
+	var lx := tw
+	var rx := -1
+	var ty := th
+	var by := -1
+	for y in th:
+		for x in tw:
+			if img.get_pixel(x, y).a > 0.06:
+				lx = mini(lx, x)
+				rx = maxi(rx, x)
+				ty = mini(ty, y)
+				by = maxi(by, y)
+	var fr: Rect2 = Menu.content_frame_rect(m)
+	var s: float = Menu.FRAME_SCALE
+	return Rect2(fr.position.x + lx * s, fr.position.y + ty * s,
+		(fr.end.x - (tw - 1 - rx) * s) - (fr.position.x + lx * s),
+		(fr.end.y - (th - 1 - by) * s) - (fr.position.y + ty * s))
+
+
+func test_frame_ink_stays_on_canvas() -> void:
+	## content_frame_rect() runs OFF the 640x360 canvas on purpose — HOWTO's is
+	## y -1.4..361.4 and the 10 list screens' is x -6..646 — because it is the
+	## TEXTURE's footprint, 30 px of which is transparent margin outside the keyline.
+	## Nothing visible is lost today, but that was an unpinned claim: the corner
+	## ornament moved outboard this cycle to stop it eating HOWTO's page counter, and
+	## nothing would have noticed it walking off the screen instead. So measure the
+	## REAL outermost ink off the PNG and require THAT on canvas, for every framed
+	## mode. Measured 2026-07-26: ink sits 16.4 px outboard of the authored border
+	## against a 24 px (x) / 28.6 px (y) margin to the canvas edge.
+	for m in Menu.Mode.values():
+		if m in Menu.UNFRAMED_MODES:
+			continue
+		var ink := _measured_frame_ink_bounds(m)
+		Runner.T.ok(ink.position.x >= 0.0 and ink.end.x <= 640.0,
+			"mode %d frame ink x [%.1f,%.1f] stays on the 640 canvas" % [m, ink.position.x, ink.end.x])
+		Runner.T.ok(ink.position.y >= 0.0 and ink.end.y <= 360.0,
+			"mode %d frame ink y [%.1f,%.1f] stays on the 360 canvas" % [m, ink.position.y, ink.end.y])
+		# ...and the transparent overhang it rides on is bounded by the inset the
+		# 9-slice reserves, so "the rect leaves the screen" can never mean "ink does".
+		var fr: Rect2 = Menu.content_frame_rect(m)
+		Runner.T.ok(ink.position.x - fr.position.x <= Menu.FRAME_GROW + 0.01
+				and fr.end.x - ink.end.x <= Menu.FRAME_GROW + 0.01,
+			"mode %d ink sits within the reserved %.0fpx margin" % [m, Menu.FRAME_GROW])
+
+
+func test_no_framed_screen_puts_its_content_under_the_frame_keyline() -> void:
+	## THE UNVERIFIED SCREENS. tools/screenshots.gd only shoots TITLE/PAUSE/HOWTO/
+	## HALL/OPTS, so 7 of the 12 framed modes were never rendered once during the
+	## bezel work — REBIND in particular, whose tab strip starts at y=42 against a
+	## list-screen border top of 40.0 and an 11.0 px keyline. This is that missing
+	## capture, done headless and for ALL 12: run the real header draw through
+	## _CaptureMenu and require every emitted box to clear the keyline band, not
+	## merely the border rect (which _rect_inside already allows content to sit
+	## right on top of).
+	var keyline: float = Menu.FRAME_LINE_INSET * Menu.FRAME_SRC * Menu.FRAME_SCALE
+	# Stroke width: 2.2% of the 256 source at FRAME_SCALE. Same number the art bakes.
+	var stroke: float = 0.022 * Menu.FRAME_SRC * Menu.FRAME_SCALE
+	Runner.T.ok(absf(keyline - Menu.FRAME_GROW) < 0.01, "keyline inset is FRAME_GROW")
+	var stub := _StubMain.new()
+	var checked := 0
+	for m in Menu.Mode.values():
+		if m in Menu.UNFRAMED_MODES:
+			continue
+		checked += 1
+		var clear := Menu.content_frame_border(m).grow(-stroke)
+		var cap := _CaptureMenu.new()
+		cap.main = stub
+		cap.mode = m
+		cap._draw_mode_header()
+		var ops := cap.ops.duplicate()
+		cap.free()
+		for op in ops:
+			var box: Rect2 = op["box"]
+			Runner.T.ok(_rect_inside(clear, box),
+				"mode %d header ink %s clears the %.1fpx keyline band (clear rect %s)"
+					% [m, box, stroke, clear])
+	Runner.T.eq(checked, 12, "all 12 framed modes audited against the keyline, not the 5 screenshotted")
+	stub.free()

@@ -423,12 +423,84 @@ def weapon_wheel(w, h):
     return _down(m, w, h, blur=0.3, rgb=base)
 
 
+def _weather(im: Image.Image, seed: int, hi=(232, 236, 220), lo=(126, 134, 116),
+             amp: float = 0.26) -> Image.Image:
+    """Turn a flat stamped stroke into weathered metal.
+
+    Applied AFTER the downsample on purpose: noise painted at SS=3 and then
+    LANCZOS-resized averages straight back out to a single value (which is how
+    the frame shipped with ONE distinct alpha along its whole top keyline).
+
+    Alpha only ever gets DARKER by at most `amp`, never below the 0.06 cutoff
+    the layout tests walk the opaque band with -- grain must weather the metal,
+    not punch holes in the band and move the measured border.
+    """
+    w, h = im.size
+    px = im.load()
+    for y in range(h):
+        t = y / max(1, h - 1)          # top-lit: bright rail up top, shadow down low
+        base = tuple(int(hi[i] + (lo[i] - hi[i]) * t) for i in range(3))
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            n = (((x * 73856093) ^ (y * 19349663) ^ (seed * 83492791)) & 0xFFFF) / 65535.0
+            k = 1.0 - amp * n
+            px[x, y] = (
+                min(255, int(base[0] * (0.82 + 0.30 * n))),
+                min(255, int(base[1] * (0.82 + 0.30 * n))),
+                min(255, int(base[2] * (0.82 + 0.30 * n))),
+                int(a * k),
+            )
+    return im
+
+
+def _rivets(d: ImageDraw.ImageDraw, S: float, inset: float, lw: float) -> None:
+    """Four corner rivets, PROUD of the keyline and never inboard of it.
+
+    Seated so the disc's inner edge stops at the keyline's own inner edge
+    (inset*S + lw) and the rest of it bulges OUTWARD into the texture's
+    transparent margin. The first cut of this sat centred on the keyline with
+    r = 1.15*lw, i.e. 18 px inboard on canvas, and its docstring cheerfully
+    noted the layout test 'measures the mid row/column' -- which is exactly why
+    nothing caught the bracket arm bisecting HOWTO's '1 / 5' page counter.
+    Everything the layout has to clear now lives outside FRAME_INNER_*, and
+    _measured_frame_interior() samples the corner bands to keep it that way.
+    """
+    lo, hi = S * inset, S * (1.0 - inset)
+    r = lw
+    for cx, cy in ((lo, lo), (hi, lo), (lo, hi), (hi, hi)):
+        ox = cx - 0.5 * lw if cx == lo else cx + 0.5 * lw
+        oy = cy - 0.5 * lw if cy == lo else cy + 0.5 * lw
+        d.ellipse([ox - r, oy - r, ox + r, oy + r], fill=255)
+
+
 def frame_lrg(w, h):
     m, d = _mask(w, h)
     S = w * SS
-    d.rectangle([S * 0.06, S * 0.06, S * 0.94, S * 0.94], outline=255,
-                width=max(2, int(S * 0.022)))
-    return _down(m, w, h, blur=0.25)
+    # PRIMARY KEYLINE -- geometry unchanged at 6% inset / 2.2% width. Menu's
+    # FRAME_LINE_INSET, content_frame_border() and FRAME_INNER_* are all tuned
+    # against it; moving it silently resizes 12 screens. test_assets.gd::
+    # test_menu_chrome_is_a_bezel_not_a_flat_stroke pins the inset to +-0.004.
+    lw = max(2, int(S * 0.022))
+    d.rectangle([S * 0.06, S * 0.06, S * 0.94, S * 0.94], outline=255, width=lw)
+    _rivets(d, S, 0.06, lw)
+    # Corner brackets: a second, heavier rule running a short way along each
+    # corner -- OUTBOARD of the keyline, in the 30 px of transparent margin the
+    # 9-slice already reserves, so the ornament reads as a machined bezel
+    # without stealing a pixel from the content well. (v1 ran it 2.2*lw INBOARD:
+    # 22.9 px inside the authored border on canvas, past FRAME_INNER_R 566, and
+    # it cut the HOWTO page counter in half at x=557.)
+    arm = S * 0.13
+    aw = max(2, int(lw * 0.9))
+    for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+        cx = S * 0.06 if sx > 0 else S * 0.94
+        cy = S * 0.06 if sy > 0 else S * 0.94
+        oy = cy - (lw * 1.0) * sy
+        ox = cx - (lw * 1.0) * sx
+        d.line([(cx, oy), (cx + arm * sx, oy)], fill=255, width=aw)
+        d.line([(ox, cy), (ox, cy + arm * sy)], fill=255, width=aw)
+    return _weather(_down(m, w, h, blur=0.25), seed=17)
 
 
 def frame_underlay(w, h):
@@ -441,7 +513,8 @@ def frame_underlay(w, h):
     for cx, cy in ((S * 0.5, S * 0.05), (S * 0.5, S * 0.95),
                    (S * 0.05, S * 0.5), (S * 0.95, S * 0.5)):
         d.rectangle([cx - g, cy - g, cx + g, cy + g], fill=0)
-    return _down(m, w, h, blur=0.25, rgb=(238, 240, 232))
+    return _weather(_down(m, w, h, blur=0.25), seed=53,
+                    hi=(238, 240, 232), lo=(150, 156, 140), amp=0.20)
 
 
 def reticle_bracket(w, h):

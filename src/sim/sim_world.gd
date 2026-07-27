@@ -237,6 +237,12 @@ const TANK_FIRE_COOLDOWN_TICKS := 45
 const TANK_FUEL_TICKS := 1200
 const TANK_BAIL_TICKS := 180
 const TANK_KAMIKAZE_PAD := 20 * F_ONE
+# A manned hull EATS enemy rounds (the crew is immune behind armor) — and every
+# round it eats boils a second off the ride. Fuel is already the ride's timer, so
+# "being shot at costs you the tank" needs no new hashed field. Starting value:
+# 60 ticks a hit against a 1200-tick tank, i.e. ~20 rounds turns a 20 s fortress
+# into a 10 s one. Measured effect in the commit body.
+const TANK_HIT_FUEL_COST := 60
 const SHELL_SPEED := 5 * F_ONE
 const SHELL_ZVEL := F_ONE
 const BAIL_BOOST_TICKS := 90
@@ -1306,7 +1312,7 @@ func _step_contact_deaths() -> void:
 	## the scan reads the enemy positions the player last SAW rendered (an
 	## enemy can never move onto you and kill you in the same unrendered tick).
 	for p in players:
-		if not p["alive"] or p["roll_iframe"] or p["in_tank"] >= 0:
+		if not p["alive"] or p["roll_iframe"] or not _exposed(p):
 			continue
 		for e in enemies:
 			if absi(p["x"] - e["x"]) > ENEMY_TOUCH_RADIUS:
@@ -1778,6 +1784,10 @@ func _hurt_player(p: Dictionary) -> void:
 	## (with a mercy window), otherwise it's the 1986 rule — one hit, done.
 	if p["hurt_iframes"] > 0:
 		return
+	if not _exposed(p):
+		return   # armor eats it. The AUTHORITATIVE copy of the rule: a future
+		         # hazard that forgets its own guard cannot punch through a
+		         # healthy hull. The tank's own ignite paths are unchanged.
 	if p["vest"]:
 		p["vest"] = false
 		p["hurt_iframes"] = VEST_IFRAME_TICKS
@@ -1790,6 +1800,11 @@ func _kill_player(p: Dictionary) -> void:
 	p["alive"] = false
 	p["deaths"] = p["deaths"] + 1
 	p["broke_timer"] = 0
+	# A dying rider must not orphan the hull: hand it to the coax gunner exactly
+	# as _dismount does. Unreachable before the crew could die at all.
+	var t_idx: int = p["in_tank"]
+	if t_idx >= 0 and t_idx < tanks.size() and tanks[t_idx]["occupant"] == p["idx"]:
+		tanks[t_idx]["occupant"] = _tank_gunner(t_idx)
 	p["in_tank"] = -1
 	deaths_since_gate += 1   # a death here forfeits the next Flawless Gate bonus
 	flawless_streak = 0      # ...and breaks the compounding clean-gate streak
@@ -2073,6 +2088,18 @@ func _try_board_tank(player_index: int, p: Dictionary) -> bool:
 	return false
 
 
+func _exposed(p: Dictionary) -> bool:
+	## A rider is UNDER ARMOR until the hull catches fire. From ignition to
+	## detonation the crew is exposed like anyone on foot — the bail window is a
+	## RACE, not a guaranteed 3-second invulnerable walk-out. Every lethal
+	## predicate asks THIS instead of spelling `p["in_tank"] < 0` inline (the 8
+	## copies of that idiom were the finding: nobody could grep them as a policy,
+	## and the 9th hazard would have copied it too). Non-boarding ticks return
+	## `t < 0` exactly as before, so the whole non-riding sim is bit-identical.
+	var t: int = p["in_tank"]
+	return t < 0 or tanks[t]["burning"]
+
+
 func _tank_gunner(t: int) -> int:
 	## Index of the player riding tank t as gunner (in_tank == t but not the
 	## occupant), or -1. Always derived, never stored.
@@ -2330,11 +2357,33 @@ func _step_tanks() -> void:
 				_detonate_tank(tank)
 
 
-func _ignite_tank(tank: Dictionary) -> void:
+func _ignite_tank(tank: Dictionary, from_damage := false) -> void:
 	if not tank["burning"]:
 		tank["burning"] = true
 		tank["burn_ticks"] = TANK_BAIL_TICKS
 		events.append({"t": "tank_ignite", "x": tank["x"], "y": tank["y"]})
+		if from_damage:
+			# THE TANK COSTS SOMETHING TO HOLD. Ordnance that brews the hull rings
+			# the crew: one hit, vest rules, exactly as if they were standing in it.
+			# Without this, armor was free — bailing is instant and i-framed, so
+			# "the crew is exposed while it burns" costs a bot that bails on the
+			# ignition tick almost nothing. SHIPPED-CONFIG numbers (2026-07-26;
+			# demo_input + god_mode campaign, 8 seeds, 12,000-tick cap, ticks
+			# split mounted vs on foot) — HEAD 1.24 knockdowns/1000t vs 4.93 on
+			# foot (3.97x safer); THIS 1.35 vs 4.69 (3.47x). The ratio barely
+			# moves and structurally cannot: a bot that bails on ignition makes
+			# "mounted ticks" definitionally the ticks the hull is NOT on fire.
+			# What DID move is how long the ride lasts — mount share 31.7%
+			# (28,212/88,859 ticks) -> 16.2% (11,102/68,498), halved.
+			# FUEL STARVATION deliberately does not ring: running dry is your own
+			# clock, the fuel bar telegraphs it, and the free bail is what keeps
+			# the tank a tool instead of a death sentence.
+			# `burning` is set FIRST so this routes through the one authoritative
+			# guard (_exposed) instead of becoming a 9th copy of the rule.
+			for p in players:
+				var ti: int = p["in_tank"]
+				if p["alive"] and ti >= 0 and is_same(tanks[ti], tank):
+					_hurt_player(p)
 
 
 func _detonate_tank(tank: Dictionary) -> void:
@@ -2608,7 +2657,7 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 			bl["fuse_ticks"] = BARREL_FUSE_TICKS
 	for tank in tanks:
 		if tank["alive"] and _dist_lte(x, y, tank["x"], tank["y"], GRENADE_RADIUS):
-			_ignite_tank(tank)
+			_ignite_tank(tank, true)
 	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, GRENADE_RADIUS):
 		_kill_observer()
 	for g in gates:
@@ -2648,7 +2697,7 @@ func _detonate_barrel(bl: Dictionary, no_coin := false) -> void:
 		# that tick the roll dodged every hazard in the game except a barrel.
 		# A one-frame hole in i-frames is invisible and unlearnable; use the same
 		# flag the other lethal checks all use.
-		if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+		if p["alive"] and _exposed(p) and not p["roll_iframe"] \
 				and _dist_lte(bl["x"], bl["y"], p["x"], p["y"], GRENADE_RADIUS):
 			_hurt_player(p)
 	_explode(bl["x"], bl["y"], no_coin, "barrel")
@@ -3409,7 +3458,7 @@ func _step_mines() -> void:
 			m["grace"] = grace - 1
 		# A player on foot (not rolling) stepping on it takes the hit + detonates.
 		for p in players:
-			if grace <= 0 and p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+			if grace <= 0 and p["alive"] and _exposed(p) and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
 				_hurt_player(p)
 				triggered = true
@@ -3449,7 +3498,7 @@ func _step_mines() -> void:
 			if v_phase == VENT_CYCLE_TICKS - VENT_JET_TICKS:
 				events.append({"t": "vent_jet", "x": v["x"], "y": v["y"]})
 			for p in players:
-				if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+				if p["alive"] and _exposed(p) and not p["roll_iframe"] \
 						and _dist_lte(p["x"], p["y"], v["x"], v["y"], VENT_HURT_RADIUS):
 					_hurt_player(p)
 			# c3 5v: the jet also BURNS soft cover — grass (kind 1) burns off,
@@ -3897,7 +3946,7 @@ func _step_mast_hazard() -> void:
 		if phase == MAST_CYCLE_TICKS - MAST_JET_TICKS:
 			events.append({"t": "mast_pulse", "x": MAST_X, "y": MAST_Y})
 		for p in players:
-			if p["alive"] and p["in_tank"] < 0 and not p["roll_iframe"] \
+			if p["alive"] and _exposed(p) and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], MAST_X, MAST_Y, MAST_HAZARD_RADIUS):
 				_hurt_player(p)
 
@@ -5546,7 +5595,7 @@ func _step_colossus() -> void:
 
 	# Treads: contact with the crawler is death (vest rules apply).
 	for p in players:
-		if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
+		if p["alive"] and not p["roll_iframe"] and _exposed(p) \
 				and _dist_lte(colossus["x"], colossus["y"], p["x"], p["y"], COLOSSUS_CRUSH_RADIUS):
 			_hurt_player(p)
 
@@ -5838,7 +5887,7 @@ func _step_enemy_bullets() -> void:
 					break
 		if not dead:
 			for p in players:
-				if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
+				if p["alive"] and not p["roll_iframe"] and _exposed(p) \
 						and _dist_lte(bx, by, p["x"], p["y"], ENEMY_BULLET_HIT_RADIUS):
 					_hurt_player(p)
 					dead = true
@@ -5856,9 +5905,20 @@ func _step_enemy_bullets() -> void:
 			# Dead tanks are cover while they smolder (burn_ticks > 0): the
 			# bunker two-way rule from an asset the field already produces.
 			for hk in tanks:
-				if ((hk["alive"] and hk["occupant"] < 0) or (not hk["alive"] and hk["burn_ticks"] > 0)) \
+				# A MANNED hull is cover too, and the ride PAYS for it: the crew is
+				# untouched (the round never reached them anyway), but
+				# TANK_HIT_FUEL_COST comes off the clock — so sitting in a firefight
+				# burns the tank down to its bail window instead of parking there
+				# invulnerable. A BURNING hull is deliberately NOT cover: its crew is
+				# exposed from ignition on, and the player-hit check above has
+				# already had its shot at them.
+				var manned: bool = hk["alive"] and hk["occupant"] >= 0 and not hk["burning"]
+				if ((hk["alive"] and hk["occupant"] < 0) or manned \
+						or (not hk["alive"] and hk["burn_ticks"] > 0)) \
 						and absi(bx - hk["x"]) <= HULK_HALF_W and absi(by - hk["y"]) <= HULK_HALF_H:
 					events.append({"t": "armor_block", "x": bx, "y": by})
+					if manned:
+						hk["fuel"] = maxi(0, hk["fuel"] - TANK_HIT_FUEL_COST)
 					dead = true
 					break
 		if not dead and not rocks.is_empty():
@@ -5961,12 +6021,12 @@ func _resolve_strikes() -> void:
 			continue
 		events.append({"t": "explosion", "x": s["x"], "y": s["y"]})
 		for p in players:
-			if p["alive"] and not p["roll_iframe"] and p["in_tank"] < 0 \
+			if p["alive"] and not p["roll_iframe"] and _exposed(p) \
 					and _dist_lte(s["x"], s["y"], p["x"], p["y"], GRENADE_RADIUS):
 				_hurt_player(p)
 		for tank in tanks:
 			if tank["alive"] and _dist_lte(s["x"], s["y"], tank["x"], tank["y"], GRENADE_RADIUS):
-				_ignite_tank(tank)
+				_ignite_tank(tank, true)
 		strikes.remove_at(i)
 
 

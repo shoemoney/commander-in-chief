@@ -2097,3 +2097,71 @@ func test_art_ring_cache_evicts_one_entry_instead_of_clearing() -> void:
 	Runner.T.ok(not Art._ring_cache.has(first), "the oldest entry is the one evicted")
 	Runner.T.ok(Art._ring_cache.has(last), "the newest entries survive a novel key")
 	Art._ring_cache.clear()   # shared static; leave it cold, not full of test junk
+
+
+# ---------------------------------------------------------------------------
+# The menu bezel. SPR_HUD_Frame_Lrg used to be one `d.rectangle(outline=255)`:
+# MEASURED on the pre-fix PNG — along the top keyline run (x 15%..85%) alpha
+# stdev 0.00 with exactly 1 distinct alpha value, and 16 distinct RGBA in the
+# WHOLE 256^2 file. A perfectly uniform stroke stretched across 12 of 14 menu
+# screens reads as a prototype box, not chrome.
+#
+# Read with Image.load_from_file, NOT Art.tex(): the imported .ctex is a cache
+# and a stale one fails this on OLD PIXELS while the tree is correct.
+# ---------------------------------------------------------------------------
+
+func test_menu_chrome_is_a_bezel_not_a_flat_stroke() -> void:
+	var img := Image.load_from_file("res://assets/art/hud/SPR_HUD_Frame_Lrg.png")
+	Runner.T.ok(img != null and img.get_width() == 256, "frame art loads off DISK at 256px")
+	var w := img.get_width()
+	var h := img.get_height()
+
+	# 1. The re-bake ratchet: WHERE the primary keyline sits. Every derived menu
+	# layout constant (Menu.FRAME_LINE_INSET, content_frame_border, FRAME_INNER_*)
+	# is tuned against this canvas — a regen that moves the line must fail loudly
+	# instead of silently resizing 12 screens.
+	# The first FULL-WIDTH rule, not the first ink: the corner ornament (rivets +
+	# bracket arms) is authored OUTBOARD of the keyline so it cannot reach into the
+	# content well, and it covers ~31% of a row at texel 8. A 0.1 row-mean threshold
+	# latched onto THAT and reported the inset as 0.031. The keyline runs edge to
+	# edge (~88% coverage), so 0.6 separates them with a wide margin either way.
+	var top := -1
+	for y in h:
+		var tot := 0.0
+		for x in w:
+			tot += img.get_pixel(x, y).a
+		if tot / float(w) > 0.6:
+			top = y
+			break
+	Runner.T.ok(top >= 0, "found the top keyline band")
+	var inset := float(top) / float(h)
+	Runner.T.ok(absf(inset - 0.06) <= 0.004,
+		"keyline inset %.4f is within 0.004 of Menu.FRAME_LINE_INSET 0.06" % inset)
+
+	# 2. The keyline must read as WEATHERED METAL, not a stamped stroke. Sampled
+	# two rows into the band (clear of the anti-aliased outer edge).
+	var row: int = top + 2
+	var alphas: Array[float] = []
+	for x in range(int(w * 0.15), int(w * 0.85)):
+		alphas.append(img.get_pixel(x, row).a * 255.0)
+	var mean := 0.0
+	for a in alphas:
+		mean += a
+	mean /= float(alphas.size())
+	var var_sum := 0.0
+	var distinct := {}
+	for a in alphas:
+		var_sum += (a - mean) * (a - mean)
+		distinct[roundi(a)] = true
+	var stdev := sqrt(var_sum / float(alphas.size()))
+	Runner.T.ok(stdev >= 6.0, "keyline alpha stdev %.2f >= 6.0 (was 0.00: a flat stroke)" % stdev)
+	Runner.T.ok(distinct.size() >= 8,
+		"%d distinct alpha values along the keyline run (was 1)" % distinct.size())
+
+	# 3. Whole-file colour depth — a bezel has lit/shadowed faces and rivets.
+	var rgba := {}
+	for y in h:
+		for x in w:
+			rgba[img.get_pixel(x, y).to_rgba32()] = true
+	Runner.T.ok(rgba.size() >= 64,
+		"%d distinct RGBA in the frame art (was 16)" % rgba.size())

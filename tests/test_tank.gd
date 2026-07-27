@@ -174,3 +174,324 @@ func test_kamikaze_destroys_bunker_and_ejects_driver() -> void:
 	Runner.T.ok(p["alive"], "driver thrown clear, alive")
 	Runner.T.ok(p["boost_ticks"] > 0 or p["in_tank"] == -1, "driver ejected with escape boost")
 	Runner.T.eq(sim.war_chest, chest_before + SimWorld.COIN_BUNKER * 2, "kamikaze pays double bunker coin")
+
+
+# ---------------------------------------------------------------------------
+# The rider, not the tank. 8 lethal predicates in sim_world.gd each spelled
+# `p["in_tank"] < 0` inline, so ARMOR was absolute: measured on the pre-fix
+# tree, a boarded player took 179 ticks (the full TANK_BAIL_TICKS window) of a
+# mortar strike + a rusher + an enemy bullet ALL landing on the hull EVERY tick
+# and finished alive=true, vest intact, zero damage events. On foot the same
+# shelling killed at tick 44. The bail window was a guaranteed 3-second
+# invulnerable walk-out instead of a race.
+# ---------------------------------------------------------------------------
+
+func _shell_the_hull(sim: SimWorld, tank: Dictionary) -> void:
+	sim.strikes.append({"x": tank["x"], "y": tank["y"], "ticks": 1, "obs": false})
+
+
+func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
+	# Window = 179 ticks = the whole TANK_BAIL_TICKS bail window, i.e. >= the
+	# longest instance of the defect that can exist (at 180 the expiry kills the
+	# rider anyway, which would be a false green — so death must land STRICTLY
+	# inside the window and is reported as the tick it happened).
+	var window := SimWorld.TANK_BAIL_TICKS - 1
+
+	# --- artillery on a BURNING hull ---
+	var sim := SimWorld.new(3, 1)
+	sim.enemies.clear()
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	sim._ignite_tank(tank)
+	var died_at := -1
+	for i in window:
+		_shell_the_hull(sim, tank)
+		sim.step([_idle()])
+		if not p["alive"]:
+			died_at = i
+			break
+	Runner.T.ok(died_at >= 0 and died_at < window,
+		"burning-hull rider dies to artillery inside the bail window (tick %d of %d)" % [died_at, window])
+
+	# --- enemy bullet on a BURNING hull ---
+	var bsim := SimWorld.new(3, 1)
+	bsim.enemies.clear()
+	var bp := bsim.players[0]
+	var btank := _park_tank(bsim, bp["x"], bp["y"])
+	_board(bsim, btank)
+	bsim._ignite_tank(btank)
+	var bdied := -1
+	for i in window:
+		bsim.enemy_bullets.append({"x": btank["x"], "y": btank["y"], "vx": 0, "vy": 0,
+			"ttl": SimWorld.ENEMY_BULLET_TTL_TICKS})
+		bsim.step([_idle()])
+		if not bp["alive"]:
+			bdied = i
+			break
+	Runner.T.ok(bdied >= 0 and bdied < window,
+		"burning-hull rider dies to an enemy bullet inside the bail window (tick %d)" % bdied)
+
+	# --- landmine under a BURNING hull ---
+	var msim := SimWorld.new(3, 1)
+	msim.enemies.clear()
+	var mp := msim.players[0]
+	var mtank := _park_tank(msim, mp["x"], mp["y"])
+	_board(msim, mtank)
+	msim._ignite_tank(mtank)
+	msim.mines.append({"x": mtank["x"], "y": mtank["y"], "armed": true, "grace": 0})
+	var mdied := -1
+	for i in window:
+		msim.step([_idle()])
+		if not mp["alive"]:
+			mdied = i
+			break
+	Runner.T.ok(mdied >= 0 and mdied < window,
+		"burning-hull rider dies to the mine under it inside the bail window (tick %d)" % mdied)
+
+	# --- CONTROL 1: a HEALTHY hull is still armor, and the brew-up is the bill.
+	# Pins BOTH edges of the rule with no dead clauses: every round up to the
+	# ignition tick is eaten by the armor (crew untouched, vest intact), and the
+	# ignition itself spends exactly ONE hit. Given a vest so the difference
+	# between "rung once" and "killed" is observable rather than collapsing into
+	# `alive == false`.
+	var hsim := SimWorld.new(3, 1)
+	hsim.enemies.clear()
+	var hp := hsim.players[0]
+	var htank := _park_tank(hsim, hp["x"], hp["y"])
+	_board(hsim, htank)
+	hp["vest"] = true
+	for i in 10:
+		hsim.enemy_bullets.append({"x": htank["x"], "y": htank["y"], "vx": 0, "vy": 0,
+			"ttl": SimWorld.ENEMY_BULLET_TTL_TICKS})
+		hsim.step([_idle()])
+		Runner.T.ok(hp["alive"] and hp["vest"] and not htank["burning"],
+			"armor ate round %d — crew untouched, vest unspent, hull intact" % i)
+	# ...and the same crew, in the same hull, once ordnance brews it: exactly one
+	# hit. Both edges pinned, no dead clause.
+	hsim.strikes.append({"x": htank["x"], "y": htank["y"], "ticks": 1, "obs": false})
+	hsim.step([_idle()])
+	Runner.T.ok(htank["burning"], "the hull ignites under a shell")
+	Runner.T.ok(hp["alive"] and not hp["vest"],
+		"THE BILL: the brew-up rings the crew for exactly one hit — vest spent, rider alive")
+
+	# --- CONTROL 2: what the bail window is WORTH, pinned on both sides of
+	# assist_mode. The first version of this control staged the ignition with
+	# `_ignite_tank(etank)` — from_damage defaults to FALSE, so it only ever
+	# exercised a FUEL-OUT brew-up, the one path deliberately documented as not
+	# ringing the crew. It was a dead control for ordnance and is re-staged here
+	# with a real shell.
+	#
+	# 2a — SHIPPED DEFAULT (assist off, no vest): the shell that lights the hull
+	# rings the crew for its one hit, and one hit is the 1986 rule. There is NO
+	# race — the driver dies on the tick the shell lands, and TANK_BAIL_TICKS is
+	# dead content for that player. That is INTENDED: it is exactly what the same
+	# shell does to a man on foot (measured on foot: dead at tick 44 of the same
+	# continuous shelling; mounted: dead on the ignition tick itself).
+	var nsim := SimWorld.new(3, 1)
+	nsim.enemies.clear()
+	var np := nsim.players[0]
+	Runner.T.ok(not nsim.assist_mode and not np["vest"], "shipped default: assist off, no vest")
+	var ntank := _park_tank(nsim, np["x"], np["y"])
+	_board(nsim, ntank)
+	nsim.strikes.append({"x": ntank["x"], "y": ntank["y"], "ticks": 1, "obs": false})
+	nsim.step([_idle()])
+	Runner.T.ok(ntank["burning"], "the shell brews the hull")
+	Runner.T.ok(not np["alive"],
+		"ASSIST OFF: the shell that lights the hull kills the vestless crew on that same tick — no race, no bail")
+
+	# 2b — ASSIST ON: the vest eats the ignition hit, and only THEN is the escape
+	# real. Real strike (not a fuel-out), driver bails, walks the whole window out.
+	var esim := SimWorld.new(3, 1)
+	esim.assist_mode = true      # every life is issued a vest (_kill_player:1769)
+	esim.enemies.clear()
+	var ep := esim.players[0]
+	ep["vest"] = true            # ...seeded here for life #1, which predates any respawn
+	var etank := _park_tank(esim, ep["x"], ep["y"])
+	_board(esim, etank)
+	esim.step([_idle()])   # release the boarding press — interact is edge-triggered
+	esim.strikes.append({"x": etank["x"], "y": etank["y"], "ticks": 1, "obs": false})
+	esim.step([_idle()])
+	Runner.T.ok(etank["burning"] and ep["alive"] and not ep["vest"],
+		"ASSIST ON: the vest eats the ignition hit and the hull burns")
+	var bail := SimInput.new()
+	bail.interact = true
+	esim.step([bail])
+	Runner.T.eq(ep["in_tank"], -1, "driver bails off a hull lit by a REAL shell")
+	for i in window:
+		esim.step([_idle()])
+	Runner.T.ok(ep["alive"],
+		"...and walks the full %d-tick window out — the race is winnable, not a dead constant" % window)
+
+	# 2c — the OTHER ordnance ignition, same funnel: a barrel under the treads
+	# (_detonate_barrel -> _explode -> _ignite_tank(..., true)). Pinned so the two
+	# sources cannot drift apart: a vestless driver who rolls one dies outright too.
+	var lsim := SimWorld.new(3, 1)
+	lsim.enemies.clear()
+	var lp := lsim.players[0]
+	var ltank := _park_tank(lsim, lp["x"], lp["y"])
+	_board(lsim, ltank)
+	var barrel := {"x": ltank["x"], "y": ltank["y"], "armed": true, "fuse_ticks": 0}
+	lsim.barrels.append(barrel)
+	lsim._detonate_barrel(barrel)
+	Runner.T.ok(ltank["burning"] and not lp["alive"],
+		"a barrel under the treads brews the hull and kills the vestless driver the same way")
+
+
+func test_no_damage_predicate_gates_on_merely_being_in_a_tank() -> void:
+	## CLASS ratchet, derived from the source: a 9th hazard added tomorrow that
+	## copies the `p["in_tank"] < 0` idiom next to its _hurt_player call goes red
+	## the day it lands. Matching only `<` / `>=` left a hole — mutation-verified
+	## 2026-07-26: rewriting the strike guard as `p["in_tank"] == -1` scraped
+	## CLEAN, and only the sibling _exposed() count noticed. Comparisons against a
+	## NEGATIVE literal are matched too; the bail-expiry loop's legitimate
+	## `players[ci]["in_tank"] == ti` cannot look like one (no leading minus).
+	const BAD_GUARDS := ["in_tank\"] <", "in_tank\"] >=", "in_tank\"] == -", "in_tank\"] != -"]
+	## _exposed() coverage is asserted PER FUNCTION rather than as one global
+	## floor: a floor decays the moment a 10th call site is added, because one
+	## site can then regress while the total still reads 9.
+	const GUARDED_BY_EXPOSED := {
+		"_step_contact_deaths": 1,   # rusher contact
+		"_hurt_player": 1,           # the authoritative copy
+		"_detonate_barrel": 1,
+		"_step_mines": 2,            # landmine + vent jet
+		"_step_mast_hazard": 1,
+		"_step_colossus": 1,         # treads
+		"_step_enemy_bullets": 1,
+		"_resolve_strikes": 1,       # artillery
+	}
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	Runner.T.ok(src.length() > 0, "read sim_world.gd for the predicate scrape")
+	var lines := src.split("\n")
+	var violations: Array[String] = []
+	var per_func := {}
+	var fn := ""
+	for n in lines.size():
+		var line: String = lines[n]
+		if line.begins_with("func "):
+			fn = line.substr(5).split("(")[0]
+			continue
+		if line.contains("_exposed("):
+			per_func[fn] = int(per_func.get(fn, 0)) + 1
+		if not (line.contains("_hurt_player(") or line.contains("_kill_player(")):
+			continue
+		# The guard for a lethal predicate lives within the enclosing if/for
+		# header; 14 lines back covers the longest of the 8 (contact, 9 lines).
+		var lo: int = maxi(0, n - 14)
+		for k in range(lo, n + 1):
+			var w: String = lines[k]
+			for bad in BAD_GUARDS:
+				if w.contains(bad):
+					violations.append("line %d guards %s with `%s`" % [k + 1, line.strip_edges(), w.strip_edges()])
+	Runner.T.eq(violations.size(), 0,
+		"no damage predicate gates on merely being in a tank: %s" % [violations])
+	for f in GUARDED_BY_EXPOSED:
+		Runner.T.ok(int(per_func.get(f, 0)) >= int(GUARDED_BY_EXPOSED[f]),
+			"%s() still routes its damage through _exposed() x%d (found %d)"
+				% [f, GUARDED_BY_EXPOSED[f], per_func.get(f, 0)])
+
+
+func test_attract_bot_bails_a_burning_tank() -> void:
+	## demo_input drives the TITLE attract screen and every movie capture. It
+	## never pressed interact while mounted, so post-fix the attract screen would
+	## cremate its own bot on the menu.
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	Runner.T.ok(p["in_tank"] >= 0, "bot fixture: player is aboard")
+	var ms: Script = load("res://src/main.gd")
+	var healthy: SimInput = ms.demo_input(0, sim)
+	Runner.T.ok(not healthy.interact, "bot stays aboard a HEALTHY tank")
+	sim._ignite_tank(tank)
+	var bailing := false
+	for t in 20:
+		if ms.demo_input(t, sim).interact:
+			bailing = true
+			break
+	Runner.T.ok(bailing, "bot presses interact once the hull it rides is burning")
+
+	# ...but a wreck with a bunker in reach is SPENT, not abandoned. Bailing
+	# blind cost seed 1 its finish (9,642 -> never in 30,000): the bot's only
+	# gate-cracking tool used to be the tank it was now jumping out of.
+	var rsim := SimWorld.new(3, 1)
+	var rp := rsim.players[0]
+	var rtank := _park_tank(rsim, rp["x"], rp["y"])
+	_board(rsim, rtank)
+	rsim.bunkers.append({"x": rtank["x"] + 60 * Fixed.ONE, "y": rtank["y"] - 20 * Fixed.ONE,
+		"alive": true})
+	rsim._ignite_tank(rtank)
+	var ram: SimInput = ms.demo_input(0, rsim)
+	Runner.T.ok(not ram.interact, "bot does NOT abandon a wreck with a bunker in reach")
+	Runner.T.ok(ram.move_x > 0, "bot drives the burning hull AT the bunker (kamikaze verb)")
+
+
+func test_manned_hull_eats_enemy_rounds_and_the_ride_pays_for_them() -> void:
+	## THE TANK COSTS SOMETHING TO HOLD. Enemy rounds used to pass straight
+	## THROUGH an occupied hull — the crew was immune and the ride cost nothing,
+	## which is why a rider measured 0 knockdowns in 8,038 mounted ticks once the
+	## bot learned to bail. The armor still eats the round (that is what armor is
+	## for); the round now eats a second of the ride, so a tank parked in a
+	## firefight burns down to its bail window instead of sitting there forever.
+	var sim := SimWorld.new(3, 1)
+	sim.enemies.clear()
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	var fuel0: int = tank["fuel"]
+	sim.enemy_bullets.append({"x": tank["x"], "y": tank["y"], "vx": 0, "vy": 0,
+		"ttl": SimWorld.ENEMY_BULLET_TTL_TICKS})
+	sim.step([_idle()])
+	Runner.T.ok(p["alive"] and p["hurt_iframes"] == 0,
+		"the crew is untouched — armor still absorbs the round")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "the manned hull CONSUMED the round (it is cover now)")
+	Runner.T.eq(fuel0 - tank["fuel"], SimWorld.TANK_HIT_FUEL_COST + 1,
+		"...and the round cost the ride TANK_HIT_FUEL_COST fuel (+1 idle burn)")
+
+	# A BURNING hull is deliberately not cover: the round reaches the exposed crew.
+	var bsim := SimWorld.new(3, 1)
+	bsim.enemies.clear()
+	var bp := bsim.players[0]
+	var btank := _park_tank(bsim, bp["x"], bp["y"])
+	_board(bsim, btank)
+	bsim._ignite_tank(btank)
+	bsim.enemy_bullets.append({"x": btank["x"], "y": btank["y"], "vx": 0, "vy": 0,
+		"ttl": SimWorld.ENEMY_BULLET_TTL_TICKS})
+	bsim.step([_idle()])
+	Runner.T.ok(not bp["alive"], "a BURNING hull is not cover — the round reaches the crew")
+
+
+func test_ordnance_that_brews_the_hull_rings_the_crew_but_running_dry_does_not() -> void:
+	## The two ignition causes are deliberately NOT symmetric, and both halves
+	## are pinned here so neither can drift:
+	##   ordnance -> one hit on the crew (vest rules). The bail is instant, free
+	##     and i-framed, so without this the "crew is exposed while it burns"
+	##     rule cost a competent operator literally nothing.
+	##   fuel-out -> nothing. Running dry is your own clock, the fuel bar
+	##     telegraphs it, and the free bail is what keeps the tank a tool rather
+	##     than a death sentence.
+	var sim := SimWorld.new(3, 1)
+	sim.enemies.clear()
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	p["vest"] = true
+	sim.strikes.append({"x": tank["x"], "y": tank["y"], "ticks": 1, "obs": false})
+	for i in 4:
+		sim.step([_idle()])
+		if tank["burning"]:
+			break
+	Runner.T.ok(tank["burning"], "the shell brewed the hull")
+	Runner.T.ok(p["alive"] and not p["vest"], "ordnance ignition rings the crew for one hit")
+
+	var fsim := SimWorld.new(3, 1)
+	fsim.enemies.clear()
+	var fp := fsim.players[0]
+	var ftank := _park_tank(fsim, fp["x"], fp["y"])
+	_board(fsim, ftank)
+	fp["vest"] = true
+	ftank["fuel"] = 1
+	fsim.step([_idle()])
+	Runner.T.ok(ftank["burning"], "running dry still brews the hull")
+	Runner.T.ok(fp["alive"] and fp["vest"],
+		"...but running dry does NOT ring the crew — the bail window stays a real escape")

@@ -5368,6 +5368,54 @@ static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
 	return {}
 
 
+static func _demo_sap_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
+	## Nearest live bunker of a CLOSED bunker gate within sapping range, as {x, y}
+	## centre coords, or {} if none. Boss gates and the final gate are skipped —
+	## they have no bunkers to crack and the boss lock already owns that aim.
+	var best := {}
+	var bestd := 1 << 62
+	for g in dsim.gates:
+		if g["open"] or not g["boss"].is_empty() or g.get("final", false):
+			continue
+		for key in ["b1", "b2"]:
+			var bk: Dictionary = g.get(key, {})
+			if bk.is_empty() or not bk["alive"]:
+				continue
+			var cx: int = bk["x"] + SimWorld.BUNKER_W / 2
+			var cy: int = bk["y"] + SimWorld.BUNKER_H / 2
+			if absi(cx - p["x"]) > 220 * Fixed.ONE or absi(cy - p["y"]) > 220 * Fixed.ONE:
+				continue
+			var d2: int = ((cx - p["x"]) / 256) * ((cx - p["x"]) / 256) \
+				+ ((cy - p["y"]) / 256) * ((cy - p["y"]) / 256)
+			if d2 < bestd:
+				bestd = d2
+				best = {"x": cx, "y": cy}
+	return best
+
+
+static func _demo_ram_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
+	## Nearest live bunker a BURNING tank could still reach as {x, y} sim coords
+	## (centre, not corner), or {} if there is nothing worth spending the wreck on.
+	## RAM_REACH is 130px: the hull moves at TANK_SPEED (0.8 x player) for the
+	## TANK_BAIL_TICKS window, which is far more than 130px of travel, so this
+	## never commits to a bunker it cannot physically get to before detonation.
+	var best := {}
+	var bestd := 1 << 62
+	for bk in dsim.bunkers:
+		if not bk["alive"]:
+			continue
+		var cx: int = bk["x"] + SimWorld.BUNKER_W / 2
+		var cy: int = bk["y"] + SimWorld.BUNKER_H / 2
+		if absi(cx - p["x"]) > 130 * Fixed.ONE or absi(cy - p["y"]) > 130 * Fixed.ONE:
+			continue
+		var d2: int = ((cx - p["x"]) / 256) * ((cx - p["x"]) / 256) \
+			+ ((cy - p["y"]) / 256) * ((cy - p["y"]) / 256)
+		if d2 < bestd:
+			bestd = d2
+			best = {"x": cx, "y": cy}
+	return best
+
+
 static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	## Scripted "player" for Movie Maker captures (--write-movie): march
 	## north weaving, burst-fire, lob grenades, roll, radio in supplies,
@@ -5400,6 +5448,21 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 			inp.aim_x = clampi(Fixed.div(ldx, llen) / 256, -256, 256)
 			inp.aim_y = clampi(Fixed.div(ldy, llen) / 256, -256, 256)
 	if p["in_tank"] >= 0:
+		if dsim.tanks[p["in_tank"]]["burning"]:
+			# Hull's on fire and the crew is exposed from ignition on, so riding it
+			# out is now suicide (HEAD's bot did exactly that: 4-6 knockdowns/seed at
+			# burn expiry). Spend the wreck instead — the KAMIKAZE verb exists for
+			# this and throws the driver clear with the bail boost. Only if nothing
+			# is in reach does it jump. Bailing blind cost seed 1 its finish; ramming
+			# is what a player does with 3 seconds of burning armor.
+			var ram := _demo_ram_target(dsim, p)
+			if ram.is_empty():
+				inp.interact = true
+				return inp
+			inp.move_x = clampi((ram["x"] - p["x"]) / (2 * Fixed.ONE), -256, 256)
+			inp.move_y = clampi((ram["y"] - p["y"]) / (2 * Fixed.ONE), -256, 256)
+			inp.grenade = (tick % 60) < 30   # keep shelling on the way in
+			return inp
 		# Tank time: gentler weave, stay aboard. The cannon now rides the GRENADE verb
 		# (it always spent grenade ammo; ALWAYS-FIRE made `fire` a permanent trigger and
 		# turned every ride into a grenade incinerator), so the bot pulls the cannon
@@ -5432,6 +5495,47 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	# A stateless duty cycle bounds EVERY unreachable-target case, not just that one,
 	# and 300 ticks is ~720px of approach against a 150px acquire radius — so no
 	# reachable tank is ever missed.
+	# FOOT SAPPER. Bullets don't scratch a bunker — only a grenade blast does —
+	# and the open-loop ±30° sweep can't point one at a flank bunker, so on HEAD
+	# the bot only ever opened a bunker gate from INSIDE a tank. That crutch went
+	# away with the free ride (a manned hull now burns down under fire and the
+	# brew-up rings the crew), and the cost was measured: seed 0xC0FFEE lost its
+	# 10,420-tick finish and sat at gate y=-4000 for 24,000 ticks with one bunker
+	# still standing. Aiming at bunkers FULL TIME was measured to cost two seeds
+	# (the bot stops answering the enemies shooting it), so this rides the same
+	# stateless 600-tick duty cycle the tank chase below uses — the OTHER half of
+	# it, so the two never fight over the same tick.
+	# ⚠️ INSTRUMENT ARTIFACT, not a balance regression — read this before
+	# re-reporting the mounted-vs-foot LETHALITY ratio. This half of the cycle
+	# spends its ticks lobbing at bunker WALLS: gate progress, no kills. Measured
+	# (8 seeds × 12,000-tick cap, campaign + god_mode + demo_input, kills
+	# attributed from the tick BEFORE the step) the ratio moved 1.31x -> 1.48x,
+	# and BOTH halves say why: mounted kills/1000t 44.91 -> 45.49 (flat), on foot
+	# 34.23 -> 30.75 (-10%). The tank did not get more lethal; the BOT got less
+	# lethal per foot-tick because it started doing demolition work. Do not
+	# "fix" it by touching the tank's damage output.
+	if lock.is_empty() and (tick % 600) >= 300:
+		var sap := _demo_sap_target(dsim, p)
+		if not sap.is_empty():
+			var sdx: int = sap["x"] - p["x"]
+			var sdy: int = sap["y"] - p["y"]
+			var slen := Fixed.length(sdx, sdy)
+			if slen > Fixed.ONE:
+				inp.aim_x = clampi(Fixed.div(sdx, slen) / 256, -256, 256)
+				inp.aim_y = clampi(Fixed.div(sdy, slen) / 256, -256, 256)
+			inp.roll = false
+			var spx: int = slen / Fixed.ONE
+			if spx >= 76 and spx <= 116:
+				# TAP: released next tick, so the fuse hand never pops it — the full
+				# 32-tick lob, GRENADE_SPEED 3 -> 96 px.
+				inp.grenade = (tick % 20) == 0
+			elif spx >= 30 and spx <= 68:
+				# HOLD: the airburst verb pops it at the arc's apex, ~48 px.
+				inp.grenade = true
+			else:
+				inp.move_x = clampi(sdx / (2 * Fixed.ONE), -256, 256)
+				inp.move_y = clampi(sdy / (2 * Fixed.ONE), -256, 256)
+			return inp
 	for t in (dsim.tanks if (tick % 600) < 300 else []):
 		if t["alive"] and not t["burning"] and t["occupant"] < 0:
 			var dx: int = t["x"] - p["x"]

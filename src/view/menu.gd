@@ -117,6 +117,7 @@ const WATCH_HOTKEY := KEY_R
 var _sel_y := -1.0      # glided highlight y — the cursor slides between rows
 var _sel_target := -1.0 # where the glide is headed (set by _draw's layout pass)
 var _open_t := 0.0      # menu-open settle envelope (backdrop fade + row drop-in)
+var _amb_t := 0.0       # free-running clock for the frame's terminal-glass sweep (see _draw_menu_ambience)
 # Analog-stick nav latches — PER AXIS, so a diagonal push can't wedge the other
 # axis, and a stick resting in the 0.45–0.55 deadband can't lock nav forever.
 var _stick_x := 0       # -1/1 while pushed past 0.55, re-arms below 0.45
@@ -388,18 +389,23 @@ const TAB_ARROW_Y := TAB_PLATE_Y + 2.0   # HALL's left/right cycle affordance, s
 const CONTENT_BODY_Y := 100.0      # first content baseline under the tab row, both content screens
 
 # --- The chrome frame's REAL interior, measured off the art (not guessed from 640) ---
-# ui_frame_lrg is a 256x256 texture STRETCHED (no 9-patch) into FRAME_ART_RECT: 2.34375x
-# horizontally, 1.34375x vertically. Its opaque border band lives at texel 15..20 and
-# 235..240 on both axes, so the interior hole projects to x 69.22..570.78, y 36.22..323.78
-# — NOT the x28..612 the old lone `FRAME_INNER_R := 612.0` claimed. That constant was
-# never derived from the art, and every one of the 7 content-well screens paid for it:
-# the "N / 5" counter right-aligned 41.2px past the border onto bare scrim, body copy ran
-# to x923 (352.2px over, hard-clipped mid-word by draw_string), the title cap sat 18.2px
-# above the interior and the ENDLESS sprite column was half-buried in the left ornament.
-# The four constants below are that measurement plus a 4.8px safe pad.
-# A frame re-bake that moves the border fails
+# ui_frame_lrg is a 256x256 texture 9-SLICED onto content_frame_border() (see
+# _draw_frame_nine): the four 64px corner regions land at FRAME_CORNER x FRAME_CORNER —
+# SQUARE, 1:1 — and only the edge strips stretch, on their long axis only. It used to be
+# ONE quad stretched 2.34x horizontally and 1.34x vertically, so every corner bracket
+# shipped 1.74:1 (HALL/HOWTO) or 2.00:1 (the 10 list screens) squashed.
+# Its opaque border band lives at texel 15..20 and 235..240 on both axes, so at
+# FRAME_SCALE the stroke is a uniform 11.0px and the interior hole projects to
+# x 67.02..572.98, y 39.66..320.34 for the content-well border — NOT the x28..612 the old
+# lone `FRAME_INNER_R := 612.0` claimed. That constant was never derived from the art, and
+# every one of the 7 content-well screens paid for it: the "N / 5" counter right-aligned
+# 41.2px past the border onto bare scrim, body copy ran to x923 (352.2px over, hard-clipped
+# mid-word by draw_string), the title cap sat 18.2px above the interior and the ENDLESS
+# sprite column was half-buried in the left ornament.
+# The four constants below are that measurement plus a safe pad, and they are UNCHANGED by
+# the 9-slice — all four still sit inside the hole, which is what kept the content screens
+# from moving. A frame re-bake that moves the border fails
 # tests/test_menu_layout.gd::test_frame_inner_constants_match_the_frame_art.
-const FRAME_ART_RECT := Rect2(20, 8, 600, 344)   # the rect ui_frame_lrg is stretched into
 const FRAME_INNER_L := 74.0        # 69.22 + 4.8 pad
 const FRAME_INNER_R := 566.0       # 570.78 - 4.8 — content clamps/right-aligns here
 const FRAME_INNER_T := 41.0        # 36.22 + 4.8
@@ -572,6 +578,11 @@ func _process(delta: float) -> void:
 			queue_redraw()   # paints the empty frame that actually clears the overlay
 		return
 	_painted_hidden = false
+	# The frame's terminal-glass sweep. No _mark_dirty needed: _menu_is_animating()
+	# already returns true unconditionally while motion is on, so the menu is repainting
+	# every frame anyway — and under REDUCE MOTION _draw_menu_ambience emits no sweep at
+	# all, so a frozen menu stays frozen (and idle) no matter what this clock says.
+	_amb_t += delta
 	if mode != Mode.HIDDEN:   # redundant after the early return above; kept to hold the diff to 2 lines
 		# Armed RESTART/TITLE/QUIT rows disarm after 2.5 s — a stale confirm
 		# must not end a run on a press that lands minutes later.
@@ -3447,11 +3458,22 @@ static func _content_frame(scrim_mode: int) -> bool:
 # ui_frame_lrg / ui_frame_lrg_under draw their outlines at 6% / 5% of the texture
 # rect (tools/gen_ui_chrome.py::frame_lrg, frame_underlay) — so the rect you pass is
 # NOT the line you see. Author the visible BORDER, derive the texture rect.
+#
+# 9-SLICE, not a stretched quad. The corner regions are drawn at a fixed SQUARE size, so
+# the corner ornament keeps its 1:1 aspect on all 12 framed screens instead of squashing
+# to the box's aspect (it shipped at 1.74:1 and 2.00:1). Everything below derives from
+# FRAME_CORNER; the old inverse-inset math (_frame_rect_for_border) is gone from the draw.
 const FRAME_LINE_INSET := 0.06
-
-static func _frame_rect_for_border(b: Rect2) -> Rect2:
-	var s := 1.0 / (1.0 - FRAME_LINE_INSET * 2.0)
-	return Rect2(b.position - b.size * (FRAME_LINE_INSET * s), b.size * s)
+const FRAME_UNDER_INSET := 0.05    # ...where frame_underlay draws ITS rule
+const FRAME_SRC := 256.0           # both frame textures are 256²
+const FRAME_SRC_CORNER := 64.0     # the 9-slice corner region, in source texels
+const FRAME_CORNER := 125.0        # ...drawn this big on canvas. SQUARE — never stretched.
+const FRAME_SCALE := FRAME_CORNER / FRAME_SRC_CORNER            # 1.953125
+const FRAME_GROW := FRAME_LINE_INSET * FRAME_SRC * FRAME_SCALE  # 30.0 — border → texture rect
+# The underlay's rule sits this far OUTSIDE the main keyline (a skirt, as before). Chosen so
+# the list screens' skirt bottom still clears FOOTER_Y, which test_menu_layout.gd asserts.
+const FRAME_UNDER_SKIRT := 4.0
+const FRAME_UNDER_GROW := FRAME_UNDER_INSET * FRAME_SRC * FRAME_SCALE  # 25.0
 
 
 static func content_frame_border(scrim_mode: int) -> Rect2:
@@ -3459,16 +3481,46 @@ static func content_frame_border(scrim_mode: int) -> Rect2:
 	if _content_well(scrim_mode):
 		return Rect2(56.0, 28.64, 528.0, 302.72)
 	# List screens: a wider dialog seated ABOVE the FOOTER_Y hint strip, which stays
-	# outside the box on purpose (dialog + hint bar, the standard pairing). Top is 40,
+	# outside the box on purpose (dialog + hint bar, the standard pairing). Top is 30,
 	# not the naive 44 — REBIND's category-tab strip (_rebind_tab_rect) starts at y=42,
-	# the earliest header ink of any of the 10 list screens; bottom holds at 336 (same
-	# clearance over COLUMN_BOTTOM=333/FOOTER_Y=341) by growing the height to match.
-	return Rect2(24.0, 40.0, 592.0, 296.0)
+	# the earliest header ink of any of the 10 list screens, and the border is not a
+	# hairline: the keyline is an 11.0 px STROKE drawn INWARD from this edge. At the
+	# previous 40 the tabs sat 9 px UNDER that stroke on the one framed screen
+	# tools/screenshots.gd never shoots. 30 + 11 = 41 leaves a 1 px gutter.
+	# Bottom holds at 336 (same clearance over COLUMN_BOTTOM=333/FOOTER_Y=341) by
+	# growing the height to match.
+	return Rect2(24.0, 30.0, 592.0, 306.0)
 
 
 static func content_frame_rect(scrim_mode: int) -> Rect2:
-	return Rect2(20, 8, 600, 344) if _content_well(scrim_mode) \
-		else _frame_rect_for_border(content_frame_border(scrim_mode))
+	## The 256² source's footprint on canvas: the authored border grown by however far
+	## the keyline sits inside the texture at FRAME_SCALE. Same for every mode now —
+	## the content-well screens no longer need their own hardcoded quad.
+	##
+	## THE OVERHANG IS INTENTIONAL AND BOUNDED. This rect deliberately runs off the
+	## 640×360 canvas on some modes (HOWTO y −1.4..361.4; the list screens x −6..646)
+	## because it is the TEXTURE's footprint, not the frame's ink: the keyline sits
+	## exactly FRAME_GROW = 30 px inside it, and the corner ornament is authored at
+	## most ~16 px outboard of that, so only transparent margin ever leaves the
+	## screen. test_menu_layout.gd::test_frame_ink_stays_on_canvas measures the real
+	## outermost ink off the PNG and fails the day an ornament grows past the edge.
+	return content_frame_border(scrim_mode).grow(FRAME_GROW)
+
+
+static func content_frame_under_rect(scrim_mode: int) -> Rect2:
+	## Same, for the underlay texture. Sized so its own 5% rule lands FRAME_UNDER_SKIRT
+	## OUTSIDE the main keyline — the rule is FRAME_UNDER_GROW inside this rect, so the
+	## grow is (that + the skirt). It was (that − the skirt) for one cycle, which put
+	## the whole underlay 4 px INSIDE the keyline: buried under an 11 px stroke along
+	## every edge and only surfacing at the corners, where it made the ornament worse.
+	return content_frame_border(scrim_mode).grow(FRAME_UNDER_GROW + FRAME_UNDER_SKIRT)
+
+
+static func content_frame_under_line(scrim_mode: int) -> Rect2:
+	## Where the underlay's rule actually LANDS — the visible skirt. Derived from the
+	## rect the draw uses, so a test asserting on it cannot drift into asserting a
+	## rectangle nothing emits (which is what `border.grow(+4)` had become).
+	return content_frame_under_rect(scrim_mode).grow(-FRAME_UNDER_GROW)
 
 
 static func _content_well_rect() -> Rect2:
@@ -3489,9 +3541,61 @@ func _draw_content_frame() -> void:
 		# straight from a headless test, which errors on a bare draw_rect outside a
 		# live NOTIFICATION_DRAW pass.
 		_emit_rect(_content_well_rect(), Color(WELL_BASE, 0.92 * _open_t))
-	var fr := content_frame_rect(mode)
-	_emit_tex("ui_frame_lrg_under", fr, Color(FRAME_UNDER_TINT, FRAME_UNDER_TINT.a * _open_t))
-	_emit_tex("ui_frame_lrg", fr, Color(FRAME_TINT, _open_t))
+	_draw_menu_ambience(content_frame_border(mode))
+	_draw_frame_nine("ui_frame_lrg_under", content_frame_under_rect(mode),
+		Color(FRAME_UNDER_TINT, FRAME_UNDER_TINT.a * _open_t))
+	_draw_frame_nine("ui_frame_lrg", content_frame_rect(mode), Color(FRAME_TINT, _open_t))
+
+
+func _draw_frame_nine(key: String, r: Rect2, c: Color) -> void:
+	## 4 SQUARE corner tiles at 1:1 + 4 edge strips stretched on ONE axis. The centre
+	## slice is empty in both frame textures, so it is skipped (8 ops, not 9).
+	## Routed through _emit_fit so a headless capture can audit every region — that is
+	## what test_every_framed_screen_wears_a_bezel_not_a_stretched_box reads.
+	var k := FRAME_CORNER
+	var s := FRAME_SRC_CORNER
+	var sm := FRAME_SRC - s * 2.0          # source middle span
+	var mw := r.size.x - k * 2.0           # dest middle span
+	var mh := r.size.y - k * 2.0
+	var x1 := r.end.x - k
+	var y1 := r.end.y - k
+	var sx1 := FRAME_SRC - s
+	_emit_fit(key, Rect2(r.position.x, r.position.y, k, k), Rect2(0, 0, s, s), c)
+	_emit_fit(key, Rect2(x1, r.position.y, k, k), Rect2(sx1, 0, s, s), c)
+	_emit_fit(key, Rect2(r.position.x, y1, k, k), Rect2(0, sx1, s, s), c)
+	_emit_fit(key, Rect2(x1, y1, k, k), Rect2(sx1, sx1, s, s), c)
+	if mw > 0.0:
+		_emit_fit(key, Rect2(r.position.x + k, r.position.y, mw, k), Rect2(s, 0, sm, s), c)
+		_emit_fit(key, Rect2(r.position.x + k, y1, mw, k), Rect2(s, sx1, sm, s), c)
+	if mh > 0.0:
+		_emit_fit(key, Rect2(r.position.x, r.position.y + k, k, mh), Rect2(0, s, s, sm), c)
+		_emit_fit(key, Rect2(x1, r.position.y + k, k, mh), Rect2(sx1, s, s, sm), c)
+
+
+# Terminal glass: faint scanline bars inside the border plus one slow sweep. NO opaque
+# fill — PAUSE keeps its frozen run readable behind the list, and HALL/HOWTO keep their
+# dark well. The sweep is the only moving part and REDUCE MOTION removes it outright
+# (not "slows it"), which is the accessibility contract the rest of this file keeps.
+const AMB_PITCH := 4.0
+const AMB_ALPHA := 0.06
+const AMB_TINT := Color(0.62, 0.92, 0.72)
+
+func _draw_menu_ambience(b: Rect2) -> void:
+	var inner := b.grow(-2.0)
+	if inner.size.x <= 0.0 or inner.size.y <= 0.0:
+		return
+	var a := AMB_ALPHA * _open_t
+	var y := inner.position.y
+	while y < inner.end.y - 1.0:
+		# ponytail: ~74 thin rects per repaint at menu framerate. One tiled ui/crt_scan
+		# texture if tools/perf_probe.gd ever complains — it has not.
+		_emit_rect(Rect2(inner.position.x, y, inner.size.x, 1.0), Color(AMB_TINT, a))
+		y += AMB_PITCH
+	if main != null and main._motion >= 0.5:
+		var sweep := fposmod(_amb_t * 0.16, 1.0)
+		var sh := 10.0
+		_emit_rect(Rect2(inner.position.x, inner.position.y + sweep * (inner.size.y - sh),
+			inner.size.x, sh), Color(AMB_TINT, a * 0.9))
 
 
 static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
