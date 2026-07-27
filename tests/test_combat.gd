@@ -88,6 +88,50 @@ func test_bash_cooldown_leaves_player_vulnerable_to_second_attacker() -> void:
 	Runner.T.ok(not p["alive"], "no bash + no ammo + contact = death during the cooldown window")
 
 
+func test_empty_clip_bash_never_executes_the_rescue_pilot() -> void:
+	# The bash's auto-kill ring took the first _enemy_strikeable thing inside
+	# BASH_RADIUS with no friend/objective check — and the downed pilot is
+	# strikeable. Every other kill path in the sim already exempts him
+	# (_explode, the airstrike wipe, the tank treads, which rescue instead);
+	# only the bash did not. Worse, the bash runs EARLIER in _step_players than
+	# the on-foot rescue grab, and BASH_RADIUS (16) is wider than
+	# PILOT_RESCUE_RADIUS (14) — so an on-foot approach made dry executed the
+	# 100-coin objective at every distance, and the rescue scan then found a
+	# corpse. Measured on the war chest, not on a source constant.
+	var sim := SimWorld.new(5, 1, "campaign")
+	var p := sim.players[0]
+	p["mg_ammo"] = 0
+	sim.enemies.clear()
+	sim.enemies.append({"x": p["x"] + 10 * Fixed.ONE, "y": p["y"], "alive": true,
+		"elite": false, "kind": "pilot", "submerged": false, "surface_ticks": 0})
+	var chest_before: int = sim.war_chest
+	var inp := SimInput.new()
+	inp.fire = true
+	sim._step_players([inp])
+	Runner.T.eq(sim.war_chest, chest_before + SimWorld.PILOT_RANSOM,
+		"a dry-mag walk onto the pilot pays the ransom instead of executing him")
+	Runner.T.eq(p["fire_cd"], 0, "no bash happened, so the bash cooldown never armed")
+	var rescued := false
+	for ev in sim.events:
+		if ev.get("t") == "pilot_rescued":
+			rescued = true
+	Runner.T.ok(rescued, "the tick emits pilot_rescued, not a bash kill")
+	# And the bash still works past him: a real hostile sharing the ring dies.
+	var sim2 := SimWorld.new(5, 1, "campaign")
+	var p2 := sim2.players[0]
+	p2["mg_ammo"] = 0
+	sim2.enemies.clear()
+	# Pilot listed FIRST so the scan must skip him to reach the rusher.
+	sim2.enemies.append({"x": p2["x"] + 15 * Fixed.ONE, "y": p2["y"], "alive": true,
+		"elite": false, "kind": "pilot", "submerged": false, "surface_ticks": 0})
+	sim2._spawn_enemy(p2["x"] + 12 * Fixed.ONE, p2["y"], false)
+	var rusher := sim2.enemies[sim2.enemies.size() - 1]
+	sim2._step_players([inp])
+	Runner.T.ok(not rusher["alive"], "the bash still reaches the hostile behind the pilot")
+	Runner.T.ok(sim2.enemies[0]["alive"],
+		"and the pilot in the 14..16px annulus (bashable, not yet grabbable) is left standing")
+
+
 func test_empty_clip_out_of_bash_range_only_dry_fires() -> void:
 	# An empty-clip fire with no enemy in melee reach is a whiff, not a bash:
 	# it emits dry_fire and never arms the bash cooldown.
