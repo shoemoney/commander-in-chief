@@ -195,7 +195,20 @@ const MG_NEST_BURST_CD_TICKS := 90  # reload between bursts
 # round that visually grazes the shoulder now counts. Outgoing generous,
 # incoming tight — the arcade bias, applied in the right direction.
 const BULLET_HIT_RADIUS := 10 * F_ONE
-const BROADCAST_HP := 5                       # starting value: outlasts a 3-round burst, a grenade still one-shots (nest grammar)
+## Kinds drawn visibly LARGER than the fodder silhouette BULLET_HIT_RADIUS was tuned
+## against carry their own reach, so the player's own round is generous against EVERY
+## body the same way instead of only against a rusher. Fixing this view-side would be
+## wrong: an elite is deliberately drawn larger than fodder, a technical is a truck, a
+## nest is an emplacement — shrinking them destroys the threat read. Ratios pinned by
+## tests/test_hitbox_fairness.gd (measured drawn half-extents: elite 11.75, technical
+## 11.63, mg_nest 14.62, broadcast 15.51 px).
+const KIND_HIT_RADIUS := {"elite": 13 * F_ONE, "technical": 13 * F_ONE,
+	"mg_nest": 16 * F_ONE, "broadcast": 17 * F_ONE}
+const KIND_HIT_RADIUS_MAX := 17 * F_ONE   # widest entry — keeps the hot-loop pre-reject a plain compare
+## m_radar_tank draws 24.5x29.2px (half 13.41) and main.gd paints a pulsing 13-16px
+## "SILENCE THE SPOTTER" reticle on it — over a 10px hitbox. The reticle was a lie.
+const OBSERVER_HIT_RADIUS := 14 * F_ONE
+const BROADCAST_HP := 5                     # starting value: outlasts a 3-round burst, a grenade still one-shots (nest grammar)
 const BROADCAST_AURA_RADIUS := 140 * F_ONE    # starting value ~half a screen — rusher inside must visibly outpace one outside
 const BROADCAST_PULSE_TICKS := 90             # view metronome only (rides hashed fire_cd)
 const PICKUP_RADIUS := 12 * F_ONE
@@ -895,6 +908,14 @@ func _latch_wipe(x: int, y: int) -> void:
 	## single: tests/test_view_honesty.gd scrapes the sim and fails on any latch outside
 	## this function.
 	wiped = true
+	if god_mode:
+		# DEBUG-ONLY: _god_restore() clears this latch on its next heartbeat, so the run
+		# does NOT end here. Paying out would drain the chest and add score on every Last
+		# Stand knockdown — the instrument editing the economy tools/sector_probe.gd and
+		# tools/probe_cd_clamp.gd exist to measure. No event either: "OVERRUN — RUN OVER"
+		# is a lie 60 ticks before the sim resumes. The latch above stays UNCONDITIONAL:
+		# god mode has to have something to clear, and test_view_honesty scrapes for it.
+		return
 	var banked: int = war_chest
 	score += banked * WIPE_SCORE_MULT
 	war_chest = 0
@@ -1243,6 +1264,30 @@ func _step_players(inputs: Array) -> void:
 						continue
 					if _enemy_strikeable(e) \
 							and _dist_lte(p["x"], p["y"], e["x"], e["y"], BASH_RADIUS):
+						# The swing costs the cooldown whether or not it CONNECTS — a
+						# blocked butt-stroke is still a spent beat, the same grammar
+						# as a bullet dying on armor.
+						p["fire_cd"] = BASH_COOLDOWN_TICKS
+						events.append({"t": "bash", "x": p["x"], "y": p["y"], "i": i})
+						bashed = true
+						# Route the butt-stroke through the SAME two armour rules the
+						# bullet path owns. It was the only FREE, UNLIMITED one-shot in
+						# the game: a front-facing shieldman (whose whole design says
+						# "explosives or Rend, never a flank") and a 5-hp broadcast mast
+						# both died to one swing, in the SHIPPED campaign — hp>1 bodies
+						# are not endless-only (mg_nest 3, technical 3, broadcast 5, the
+						# authored flank elite 2). Grenades/mines/airstrikes still
+						# one-shot BY DESIGN (see _wave_armor) — they cost a resource.
+						# Rend Rounds is a BULLET buff and does not carry to melee, so
+						# the shield arc is absolute here.
+						var blocked: bool = e["kind"] == "shield" \
+								and _shield_blocks(e, {"vx": e["x"] - p["x"], "vy": e["y"] - p["y"]})
+						if not blocked and e.get("hp", 1) > 1:
+							e["hp"] = e["hp"] - 1
+							blocked = e["hp"] > 0
+						if blocked:
+							events.append({"t": "armor_block", "x": e["x"], "y": e["y"]})
+							break
 						# no_score too: bash guarantees a kill on a 40-tick cd while
 						# KILL_STREAK_WINDOW_TICKS is 90, so an out-of-ammo player
 						# parked in a swarm sustained the 20-kill streak (and its
@@ -1250,9 +1295,6 @@ func _step_players(inputs: Array) -> void:
 						# cost — running dry was a leaderboard UPGRADE. Same rule
 						# the airstrike already follows: unearned kills mint nothing.
 						_kill_enemy(e, true, true)
-						p["fire_cd"] = BASH_COOLDOWN_TICKS
-						events.append({"t": "bash", "x": p["x"], "y": p["y"], "i": i})
-						bashed = true
 						break
 			if not bashed:
 				# Empty-mag click. (The separate `elif` that used to carry this for HELD
@@ -1991,10 +2033,18 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 
 
 func _econ_depth() -> int:
-	## The ONE depth axis every scaling price and payout reads: campaign counts
+	## The ONE depth axis every scaling price and payout reads: the gate-streaming
+	## modes (campaign, arcade — the same pair _step_camera streams gates for) count
 	## gates opened, endless counts 3-wave steps. Prices and income must ride the
 	## same number or the economy inverts (see _supply_cost).
-	if mode == "campaign":
+	## Arcade was gated out and fell through to the ENDLESS `wave / 3` — but `wave`
+	## only ever increments in _start_wave(), which only endless reaches, so arcade
+	## was permanently depth 0 and its whole shop stayed at base price for the run
+	## while it took the full campaign income + spawn ratchet. Worst case: chapter 6
+	## fights the sector-6 roster from tick 0 at the game's cheapest prices.
+	## boss_rush stays flat on purpose: bounty-only income, and its escalation axis
+	## is BOSS_RUSH_HP_STEPS, not price.
+	if mode == "campaign" or mode == "arcade":
 		var gates_open := 0
 		for g in gates:
 			if g["open"]:
@@ -2037,14 +2087,15 @@ func _supply_cost(kind: int) -> int:
 	## Prices creep with depth so a fat late chest still faces a real spend
 	## decision — income scales with depth, so the shop must scale with it too,
 	## at the same rate and with the same (absent) ceiling. Endless creeps every
-	## 3 waves; campaign creeps per gate opened (it is ALWAYS wave 0, so the wave
-	## term never fired there and every price was frozen for the whole 7-gate run).
+	## 3 waves; the gate-streaming modes creep per gate opened (they are ALWAYS
+	## wave 0, so the wave term never fired there and every price was frozen for
+	## the whole run — see _econ_depth, which arcade was originally left out of).
 	## Test: end-of-sector chest should stay under ~3 affordable buys.
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return 0
 	var base: int = SUPPLY_COSTS[kind]
-	if kind == 2 and mode == "campaign":
-		# Per-purchase creep, campaign only (endless prices on the wave alone):
+	if kind == 2 and (mode == "campaign" or mode == "arcade"):
+		# Per-purchase creep, gate-streaming modes only (endless prices on the wave alone):
 		# 60/75/90/105/120, capped after 4 buys. This USED to return early, so
 		# the one item that grants an extra life was also the only item that
 		# never gate-crept — the cheapest thing on the endgame wheel. It now
@@ -2590,11 +2641,17 @@ func _step_bullets() -> void:
 				# dx² ≥ r² + 2r + 1 with 2r+1 > 1<<16 for any radius ≥ 0.5px, so
 				# Fixed.mul(dx,dx) > Fixed.mul(r,r) even after >>16 truncation —
 				# _dist_lte was already false for every pair skipped here.
-				if absi(bx - e["x"]) > BULLET_HIT_RADIUS:
+				if absi(bx - e["x"]) > KIND_HIT_RADIUS_MAX:
+					continue
+				# Per-kind reach for the bodies drawn larger than fodder. The widest-entry
+				# compare above exists so this String-keyed lookup is only paid by the few
+				# enemies that survive the cheap axis reject.
+				var ehr: int = KIND_HIT_RADIUS.get(e["kind"], BULLET_HIT_RADIUS)
+				if absi(bx - e["x"]) > ehr:
 					continue
 				# Bullets pass clean over submerged frogmen — grenades only.
 				if e["alive"] and not e.get("submerged", false) \
-						and _dist_lte(bx, by, e["x"], e["y"], BULLET_HIT_RADIUS):
+						and _dist_lte(bx, by, e["x"], e["y"], ehr):
 					# Shield: a bullet arriving into the front arc (roughly
 					# opposite the shieldman's facing-toward-you) is deflected.
 					# The facing is recomputed toward you every tick, so the
@@ -2653,7 +2710,7 @@ func _step_bullets() -> void:
 			_damage_colossus(COLOSSUS_BULLET_DAMAGE)
 			dead = true
 		if not dead and not observer.is_empty():
-			if _dist_lte(bx, by, observer["x"], camera_top + OBSERVER_Y_OFFSET, BULLET_HIT_RADIUS):
+			if _dist_lte(bx, by, observer["x"], camera_top + OBSERVER_Y_OFFSET, OBSERVER_HIT_RADIUS):
 				_kill_observer()
 				dead = true
 		if dead:

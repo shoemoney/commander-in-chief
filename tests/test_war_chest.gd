@@ -266,6 +266,29 @@ func test_every_run_ending_converts_the_chest() -> void:
 	# test_colossus.gd::test_death_pays_out_and_wins — not duplicated here.)
 
 
+func test_god_mode_never_banks_the_chest_it_is_measuring() -> void:
+	# god mode's _god_restore() clears the `wiped` latch on its next heartbeat, so a
+	# Last Stand knockdown is NOT a run ending. Paying the salvage out anyway drained
+	# the chest and added score on every knockdown — the debug instrument editing the
+	# economy the tools/ balance probes exist to measure.
+	var c := SimWorld.new(7, 2)
+	c.god_mode = true
+	c.last_stand = true
+	c.war_chest = 180
+	var before := c.score
+	c._kill_player(c.players[0])
+	c._kill_player(c.players[1])
+	c.step([_idle(), _idle()])
+	Runner.T.ok(c.wiped, "the latch still fires — god mode must not suppress the terminal state")
+	Runner.T.eq(c.war_chest, 180, "god mode must NOT drain the chest: _god_restore un-latches, so this run is not over")
+	Runner.T.eq(c.score, before, "…nor pay the 3x salvage a real run collects exactly once")
+	var saw := false
+	for ev in c.events:
+		if ev.get("t", "") == "wiped":
+			saw = true
+	Runner.T.ok(not saw, "…and fires no OVERRUN card 60 ticks before the sim resumes")
+
+
 func test_spending_stays_dominant() -> void:
 	# Tuning invariant: salvaging a lost chest must never pay as well as spending it,
 	# or hoarding becomes optimal and the shop stops mattering.

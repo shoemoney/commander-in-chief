@@ -132,6 +132,37 @@ func test_empty_clip_bash_never_executes_the_rescue_pilot() -> void:
 		"and the pilot in the 14..16px annulus (bashable, not yet grabbable) is left standing")
 
 
+func test_bash_routes_through_the_same_armour_rules_as_a_bullet() -> void:
+	# The bash consulted NEITHER armour rule the bullet path owns: not the
+	# shieldman's front arc (_shield_blocks) and not `hp > 1`. One free rifle
+	# butt therefore deleted a 3-hp MG nest and a head-on shieldman — the only
+	# free, unlimited, zero-resource one-shot in the game. Grenades/mines/
+	# airstrikes still one-shot BY DESIGN (they cost a resource).
+	var inp := SimInput.new()
+	inp.fire = true
+
+	# ARMOUR: a 3-hp MG nest.
+	var a := SimWorld.new(5, 1, "campaign")
+	a.players[0]["mg_ammo"] = 0
+	a.enemies.clear()
+	a._spawn_mg_nest(a.players[0]["x"] + 12 * Fixed.ONE, a.players[0]["y"])
+	var nest: Dictionary = a.enemies[0]
+	a._step_players([inp])
+	Runner.T.ok(nest["alive"], "one rifle butt does not delete a 3-hp MG nest")
+	Runner.T.eq(int(nest["hp"]), 2, "the bash chips exactly one point of armor")
+	Runner.T.eq(int(a.players[0]["fire_cd"]), SimWorld.BASH_COOLDOWN_TICKS,
+		"a blocked swing still costs the cooldown — same grammar as a bullet dying on armor")
+
+	# SHIELD ARC: a shieldman facing the basher.
+	var b := SimWorld.new(5, 1, "campaign")
+	b.players[0]["mg_ammo"] = 0
+	b.enemies.clear()
+	b._spawn_special(b.players[0]["x"] + 12 * Fixed.ONE, b.players[0]["y"], "shield")
+	var sh: Dictionary = b.enemies[0]
+	b._step_players([inp])
+	Runner.T.ok(sh["alive"], "a front-arc shieldman eats the rifle butt, same as a bullet")
+
+
 func test_empty_clip_out_of_bash_range_only_dry_fires() -> void:
 	# An empty-clip fire with no enemy in melee reach is a whiff, not a bash:
 	# it emits dry_fire and never arms the bash cooldown.

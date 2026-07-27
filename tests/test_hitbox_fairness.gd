@@ -42,6 +42,15 @@ const CALL_SCALE := {
 	"pickup_vest": 0.55,
 	"cap_pierce": 0.55,
 	"cap_claymore": 0.55,
+	"enemy_lmg": 0.5,       # _draw_enemies, widest rusher skin
+	"enemy_sniper": 0.5,
+	"m_soldier2": 0.52,     # grenadier
+	"m_bombsuit": 0.55,     # shield
+	"sapper": 0.5,
+	"ghillie": 0.5,
+	"radio_tower": 0.9,     # broadcast mast
+	"mg_stand": 1.0,        # MG nest
+	"m_radar_tank": 0.5,    # _draw_observer
 }
 
 
@@ -222,6 +231,114 @@ func test_player_bullet_is_generous_against_infantry() -> void:
 	var ch := _half("courier")
 	if ch > 0.0:
 		_band("player bullet vs courier", r / ch, 1.00, 1.30)
+
+
+func _clear_field(sim: SimWorld) -> void:
+	## _step_bullets scans bunkers/sandbags/tanks/rocks BEFORE the enemy loop, so a
+	## probe round can die on cover for the wrong reason. Strip the field first.
+	sim.enemies.clear()
+	sim.bullets.clear()
+	sim.rocks.clear()
+	sim.bunkers.clear()
+	sim.sandbags.clear()
+	sim.tanks.clear()
+	sim.barrels.clear()
+
+
+func _edge_probe(sim: SimWorld, e: Dictionary, off_px: float) -> bool:
+	## Fire one zero-velocity round off_px to the RIGHT of the body's centre and
+	## report whether it registered (killed it, or chipped its armor). Zero
+	## velocity is deliberate: _shield_blocks returns false when blen == 0, so the
+	## shieldman's front arc cannot confound a pure reach measurement.
+	var hp0: int = e.get("hp", 1)
+	sim.bullets.append({"x": e["x"] + int(off_px * Fixed.ONE), "y": e["y"],
+		"vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim._step_bullets()
+	return not e["alive"] or e.get("hp", 1) < hp0
+
+
+func _spawn_probe_target(sim: SimWorld, kind: String) -> Dictionary:
+	var x: int = 320 * Fixed.ONE
+	var y: int = sim.camera_top + 200 * Fixed.ONE
+	match kind:
+		"rusher":
+			sim._spawn_enemy(x, y, false)
+		"elite":
+			sim._spawn_enemy(x, y, true)
+		"mg_nest":
+			sim._spawn_mg_nest(x, y)
+		"broadcast":
+			sim._spawn_broadcast(x, y)
+		"courier":
+			sim.enemies.append({"x": x, "y": y, "alive": true, "elite": false,
+				"kind": "courier", "fire_cd": 0, "windup": 0})
+		_:
+			sim._spawn_special(x, y, kind)
+	var e: Dictionary = sim.enemies[sim.enemies.size() - 1]
+	e["submerged"] = false   # a dug-in ghillie is bullet-proof by design, not by size
+	if kind == "rusher":
+		e["skin"] = 3        # enemy_lmg — the WIDEST rusher skin, so the family is pinned honestly
+	return e
+
+
+func test_a_round_on_the_visible_edge_of_every_enemy_counts_as_a_hit() -> void:
+	# One 10px BULLET_HIT_RADIUS served every enemy kind, and four of them are
+	# drawn far larger than the fodder silhouette it was tuned against: the
+	# elite (11.75px half-extent), the technical (11.63), the MG nest (14.62)
+	# and the broadcast mast (15.51). A round landing squarely INSIDE their own
+	# drawn bodies passed straight through. Fixing this view-side is wrong —
+	# an elite is DELIBERATELY drawn larger than fodder, a nest is an
+	# emplacement — so the reach follows the art.
+	var roster := {"rusher": "enemy_lmg", "elite": "enemy_assault",
+		"sniper": "enemy_sniper", "grenadier": "m_soldier2",
+		"shield": "m_bombsuit", "sapper": "sapper", "ghillie": "ghillie",
+		"courier": "courier", "technical": "m_technical",
+		"broadcast": "radio_tower", "mg_nest": "mg_stand"}
+	for kind in roster:
+		var h := _half(roster[kind])
+		if h == 0.0:
+			continue   # texture absent — art.gd guards its lookups too
+		var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+		_clear_field(sim)
+		var e := _spawn_probe_target(sim, kind)
+		Runner.T.ok(_edge_probe(sim, e, h - 1.0),
+			"%s: a round 1px INSIDE its own drawn silhouette (%.1fpx off centre) must register"
+				% [kind, h - 1.0])
+	# ...and the reach must still stop at the body. Only the four overridden
+	# kinds — drone/pilot/frogman are deliberately far more generous than they
+	# look and must not get swept into this ceiling.
+	for kind in ["elite", "technical", "mg_nest", "broadcast"]:
+		var h := _half(roster[kind])
+		if h == 0.0:
+			continue
+		var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+		_clear_field(sim)
+		var e := _spawn_probe_target(sim, kind)
+		Runner.T.ok(not _edge_probe(sim, e, h * 1.45),
+			"%s: a round clearly OUTSIDE the drawn body (%.1fpx off centre) still misses"
+				% [kind, h * 1.45])
+
+
+func test_the_spotter_dies_inside_the_reticle_the_hud_paints_on_it() -> void:
+	# The worst honesty lie of the set: main.gd draws a pulsing 13-16px
+	# "SILENCE THE SPOTTER" reticle on m_radar_tank, which itself draws at a
+	# 13.4px half-extent — over a 10px hitbox. A round on the hull, inside the
+	# game's own kill marker, did nothing.
+	var h := _half("m_radar_tank")
+	if h == 0.0:
+		Runner.T.ok(true, "m_radar_tank texture absent — spotter check skipped")
+		return
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	_clear_field(sim)
+	sim.observer = {"x": 320 * Fixed.ONE, "strike_cd": SimWorld.OBSERVER_STRIKE_CD_TICKS,
+		"spawn_cam": sim.camera_top}
+	sim.bullets.append({"x": 320 * Fixed.ONE + int((h - 1.0) * Fixed.ONE),
+		"y": sim.camera_top + SimWorld.OBSERVER_Y_OFFSET, "vx": 0, "vy": 0,
+		"ttl": 10, "owner": 0})
+	sim._step_bullets()
+	Runner.T.ok(sim.observer.is_empty(),
+		"a round %.1fpx off the spotter's centre — on its hull and inside its own reticle — kills it"
+			% (h - 1.0))
 
 
 func test_a_pickup_is_the_size_of_the_radius_that_collects_it() -> void:

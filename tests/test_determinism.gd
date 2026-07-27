@@ -576,13 +576,43 @@ const SEED := 0xDEADBEEF
 ## guard for that feature is its own unit test (test_mg_nest_leads_a_moving_target...),
 ## which is what should hold it -- a golden that happens to be insensitive to a change is
 ## not evidence about the change either way.
+## RE-RECORDED (2026-07-27, per-kind bullet reach): BULLET_HIT_RADIUS (10px) was one
+## constant for every enemy, but four kinds are drawn far larger than the fodder
+## silhouette it was tuned against (measured drawn half-extents: elite 11.75, technical
+## 11.63, mg_nest 14.62, broadcast 15.51 px), so a round landing squarely INSIDE their
+## own bodies passed through. KIND_HIT_RADIUS gives those four their own reach; the
+## 10px DEFAULT did not move, so the fodder/courier band test_hitbox_fairness pins at
+## 1.00-1.30 is untouched. `alive`/`hp` are hashed, so an earlier kill forks the stream.
+##
+## THREE OTHER SIM EDITS SHIPPED IN THE SAME COMMIT AND ARE PROVABLY INERT HERE — this
+## was MEASURED, not argued: with KIND_HIT_RADIUS temporarily set to {} and
+## OBSERVER_HIT_RADIUS back to 10, BOTH arrays came back byte-identical to the previous
+## committed values. So the god-mode _latch_wipe guard (god_mode is false in both
+## streams), the arcade _econ_depth guard (neither stream constructs "arcade"), and the
+## bash armour rules all contribute nothing. The bash result also CONFIRMS the campaign
+## torture's single bash lands on an hp-1, non-shield body.
+##
+## THE MEASUREMENT CONTRADICTED THE PREDICTION, so it is written down rather than
+## smoothed over. Predicted: all six campaign samples move, because the first elite
+## exists at tick ~315 (SPAWN_INTERVAL_TICKS 45, every 7th spawn elite at opened == 0),
+## which is inside sample 0's window. Measured: samples 0-2 (ticks 0-1799) are
+## BYTE-IDENTICAL and the fork begins inside sample 3's window (1800-2399). Elites
+## existing is not the same as a round landing in the new 10..13px annulus of one — with
+## ALWAYS-FIRE most rounds land dead-on or clean past, and the first round to fall in
+## that ring took ~1800 ticks to arrive.
+##
+## WHICH KIND: isolated with KIND_HIT_RADIUS := {"elite": 13 * F_ONE} alone, which
+## reproduces all three moved campaign samples BYTE-FOR-BYTE. The elite is the sole
+## campaign driver; mg_nest and broadcast contribute nothing to this stream (broadcast
+## is sector-5 only, and the campaign torture never lands a round in a nest's annulus).
+## The observer needs a 480-tick stall the advancing torture never takes.
 const GOLDEN: Array[int] = [
 	2407026767914979979,
 	461371032039649670,
 	5063156605900622803,
-	5260245357873254500,
-	1921650504382560191,
-	3727008542898902892,
+	7840083679643977125,
+	8428269569959002222,
+	6332735790241153794,
 ]
 
 
@@ -730,13 +760,26 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## nothing else moved. GOLDEN (campaign) VERIFIED UNCHANGED: the campaign torture never
 ## reaches ANY terminal state (measured: wiped=false victory=false, chest 235, score
 ## 32497 at tick 3600), so neither converter executes in that stream.
+## ENDLESS RE-RECORDED (2026-07-27, per-kind bullet reach): see the GOLDEN note above
+## for the change and for the proof that the other three sim edits in this commit are
+## inert. Here ALL SIX samples move, including sample 0 — this stream fields elites from
+## tick 0, so the very first sample window can already contain a round in the new
+## 10..13px annulus, which is exactly the campaign stream's difference (it took until
+## sample 3 to land one).
+##
+## THE SPLIT IS MEASURED, not argued: with KIND_HIT_RADIUS := {"elite": 13 * F_ONE}
+## alone, endless samples 0 and 1 already match the values below byte-for-byte while
+## samples 2-5 do not. So the elite alone drives the first ~1200 ticks, and the
+## technical (endless-only; _spawn_special sets its hp, and specials debut at wave 3)
+## adds its own divergence from sample 2 onward. mg_nest/broadcast are gated behind
+## wave 3 / wave 7 and this torture wipes in wave 2, so neither can contribute.
 const ENDLESS_GOLDEN: Array[int] = [
-	3184915394758128358,
-	7237179635764073260,
-	3037718701335090259,
-	7080938837575128843,
-	2715716834934835747,
-	7881660356745458779,
+	8610209561549742921,
+	4307715087271070947,
+	2392889603967106672,
+	2697056323710043292,
+	3080589168965590143,
+	706117180998451249,
 ]
 
 

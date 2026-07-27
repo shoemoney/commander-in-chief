@@ -220,3 +220,37 @@ func test_supply_full_covers_every_capped_kind() -> void:
 	# Timed capsules / one-shots always re-apply usefully, so never "full".
 	for kind in [4, 5, 7, 9, 10, 11]:
 		Runner.T.ok(not sim._supply_full(p, kind), "kind %d is never full" % kind)
+
+
+func test_gate_priced_modes_all_creep_not_only_campaign() -> void:
+	# _econ_depth() gated on mode == "campaign" and fell through to the ENDLESS
+	# `wave / 3` for arcade — which IS a campaign run started at a chosen chapter
+	# (same gate streaming per _step_camera, same spawn/elite ratchet) and is
+	# permanently wave 0. Its entire shop was therefore frozen at base price for
+	# the whole run: the exact bug _supply_cost's own docstring says it fixed,
+	# still live in the sibling mode.
+	for m in ["campaign", "arcade"]:
+		var sim := SimWorld.new(7, 1, m)
+		Runner.T.eq(sim._supply_cost(0), SimWorld.SHOP_AMMO_COST,
+			"%s: no gate open is the base price" % m)
+		# Gates stream in as the camera advances, so author the end-of-run state.
+		sim.gates.append({"y": 0, "open": true, "b1": {}, "b2": {}, "boss": {}})
+		var opened := 0
+		for g in sim.gates:
+			g["open"] = true
+			opened += 1
+		Runner.T.eq(sim._supply_cost(0),
+			SimWorld.SHOP_AMMO_COST + SimWorld.SHOP_AMMO_COST * opened / 4,
+			"%s: ammo rides the gates it actually opened" % m)
+		# The vest's per-purchase ladder hangs off the SAME mode guard.
+		sim.vest_buys = 2
+		var vbase: int = SimWorld.SHOP_VEST_COST + 2 * 15
+		Runner.T.eq(sim._supply_cost(2), vbase + vbase * opened / 4,
+			"%s: the vest ladder rides the same guard" % m)
+	# boss_rush is DELIBERATELY excluded — bounty-only income, and its escalation
+	# axis is BOSS_RUSH_HP_STEPS, not price. Pinned so it reads as a decision.
+	var br := SimWorld.new(41, 1, "boss_rush")
+	for g in br.gates:
+		g["open"] = true
+	Runner.T.eq(br._supply_cost(0), SimWorld.SHOP_AMMO_COST,
+		"boss_rush prices stay flat on purpose")
