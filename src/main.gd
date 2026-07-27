@@ -268,6 +268,8 @@ var _hint_queue: Array[String] = []      # pending first-time hints, drained one
 var _run_kills := 0              # this-run tally for the debrief card
 var _run_kind_kills := {}        # enemy kind → this-run kills, feeds the debrief top-prey row
 var _run_rescues := 0            # pilot ransoms this run — the signature mechanic earns a tally line
+var _run_knockdowns := 0         # times a player went down this run — the continue ledger's count
+var _run_revive_coin := 0        # coin the chest paid to stand them back up (0 for a free broke rally)
 var _run_best_streak := 0
 var _run_vp_gain := 0            # endless-meta-retention: VP this run actually banked (0 unless
                                   # Endless + score-verified) -- shown on the debrief/victory card,
@@ -1492,6 +1494,8 @@ func _reset() -> void:
 	_run_kills = 0
 	_run_kind_kills.clear()
 	_run_rescues = 0
+	_run_knockdowns = 0
+	_run_revive_coin = 0
 	_run_had_down = false
 	_downed_by = ""
 	_last_gate_tick = 0
@@ -2483,6 +2487,7 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
 			"player_down":
 				_run_had_down = true
+				_run_knockdowns += 1
 				# A one-hit death is the loudest beat in the game — hold the
 				# freeze longer and punch the camera in so the loss lands.
 				# ...but the whole kit fired GLOBALLY, so in 2P a P2 knockdown
@@ -2722,6 +2727,9 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "DROP STOLEN", "col": Color(1.0, 0.45, 0.35)})
 			"revive":
+				# The coin comes off the EVENT (the sim debited it), never a view-side
+				# revive_cost re-derivation — the free broke rally rides cost 0.
+				_run_revive_coin += int(ev.get("cost", 0))
 				_ev_revive(ev)
 				_cmd_bark("revive", 60)   # back in the fight
 			"enemy_shot":
@@ -3188,6 +3196,17 @@ static func _victory_extra_rows(score: int, best: int, pulse: float) -> Array:
 	rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, pulse),
 		"icon": Art.glyph_key("start"), "icon_size": 14.0})
 	return rows
+
+
+static func _continue_ledger_rows(knockdowns: int, coin: int) -> Array:
+	# aaa-c6: the run's CONTINUES, on both end cards. The card tallied kills, streak, prey
+	# and rescues and never once said the run had been carried by revives — so a 6-knockdown
+	# finish read identically to a clean one. Same shape as _wipe_chest_row: a clean run
+	# returns [] and the card says nothing rather than "KNOCKDOWNS x0".
+	if knockdowns <= 0:
+		return []
+	return [{"text": "KNOCKDOWNS  x%d   ·   %d¢ SPENT GETTING BACK UP" % [knockdowns, coin],
+		"color": Color(1.0, 0.7, 0.55)}]
 
 
 static func _wipe_chest_row(banked: int, banked_score: int) -> Array:
@@ -11208,6 +11227,8 @@ func _draw_banners(top_msg: String) -> void:
 		if _run_rescues > 0:
 			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
+		for cr in _continue_ledger_rows(_run_knockdowns, _run_revive_coin):
+			vrows.append(cr)
 		# a4-16 (HUD#1): the win screen tells the run's STORY too — KILLS + LONGEST STREAK +
 		# TOP PREY, the rows the K.I.A. debrief always had. A win is now a full debrief, not a
 		# thinner card than a loss. (a3-14 added the NEW BEST/REDEPLOY parity below.)
@@ -11263,6 +11284,8 @@ func _draw_banners(top_msg: String) -> void:
 		if _run_rescues > 0:
 			rows.append({"text": "PILOTS RESCUED  %d" % _run_rescues,
 				"color": Art.safe(Color(0.5, 1.0, 0.7))})
+		for cr in _continue_ledger_rows(_run_knockdowns, _run_revive_coin):
+			rows.append(cr)
 		var rr := _run_rank()
 		# Grade medal (D=1 … S=5) rides the panel's existing icon slot.
 		rows.insert(0, {"text": "RANK  %s  —  %s" % [rr.grade, rr.title], "color": rr.col,

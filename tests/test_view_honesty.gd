@@ -863,3 +863,169 @@ func test_debrief_states_the_chest_conversion() -> void:
 	var msrc := FileAccess.get_file_as_string("res://src/view/menu.gd")
 	Runner.T.ok(msrc.contains("SimWorld.SPEND_SCORE_MULT") and msrc.contains("SimWorld.WIPE_SCORE_MULT"),
 		"the HOW-TO WAR CHEST page builds both multipliers from the sim consts")
+
+
+# --- 8. The COPY is a view assertion too: a rules page that names the run's contract ---
+
+const Menu := preload("res://src/view/menu.gd")
+const TML := preload("res://tests/test_menu_layout.gd")
+
+
+## Every string the menu DRAWS, joined into one corpus: HOWTO_TABS x _endless_pages()
+## (the rules pages) plus every Mode's row labels. Derived from source, so a rules page
+## added tomorrow is audited the day it lands.
+func _menu_text_corpus() -> String:
+	var stub := TML._StubMain.new()
+	var m = TML._CaptureMenu.new()
+	m.main = stub
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var parts: PackedStringArray = []
+	for tab in Menu.HOWTO_TABS.size():
+		var pages := m._endless_pages() if tab == Menu.HOWTO_ENDLESS_TAB else 1
+		for ep in pages:
+			m.mode = Menu.Mode.HOWTO
+			m._howto_page = tab
+			m._howto_endless_page = ep
+			m.ops.clear()
+			var prev = Art.text_capture
+			Art.text_capture = m.ops
+			m._draw_howto()
+			Art.text_capture = prev
+			for op in m.ops:
+				if op["k"] == "text":
+					parts.append(String(op["id"]))
+	for mode_id in Menu.Mode.values():
+		m.mode = mode_id
+		for it in m._menu_items():
+			parts.append(String(it["label"]))
+	m.free()
+	stub.free()
+	return " ".join(parts)
+
+
+func test_the_rules_page_states_every_continue_the_campaign_actually_grants() -> void:
+	## The WAR CHEST page read "No health bar, no second chance" and offered the chest
+	## only "to REVIVE a fallen partner". Three continues the sim actually grants went
+	## unmentioned — SELF-revive, the free broke-fallback rally, and the LAST STAND
+	## finale where revives genuinely stop. Measure them out of the sim first, then
+	## demand the page confess them.
+
+	# (i) BROKE: a solo player with an empty chest rallies for free after BROKE_RESPAWN_TICKS.
+	var s1 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p1: Dictionary = s1.players[0]
+	s1.war_chest = 0
+	p1["alive"] = false
+	for _i in SimWorld.BROKE_RESPAWN_TICKS + 2:
+		s1.step(_idle())
+	Runner.T.ok(p1["alive"], "a broke solo campaign player DOES rally free after %d ticks"
+		% SimWorld.BROKE_RESPAWN_TICKS)
+	Runner.T.ok(not s1.wiped, "…and the run is not over")
+
+	# (ii) SELF-REVIVE: a downed solo player with coin pays the chest and stands up NOW.
+	var s2 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p2: Dictionary = s2.players[0]
+	p2["alive"] = false
+	s2.war_chest = 2000
+	var cost: int = s2.revive_cost(p2)
+	var before: int = s2.war_chest
+	var rev: Array[SimInput] = []
+	var ri := SimInput.new()
+	ri.revive = true
+	rev.append(ri)
+	s2.step(rev)
+	Runner.T.ok(p2["alive"], "a funded downed player CAN revive themselves (no partner needed)")
+	Runner.T.eq(before - s2.war_chest, cost, "…and the chest is debited exactly revive_cost")
+
+	# (iii) LAST STAND: past the final gate BOTH continues are refused.
+	var s3 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p3: Dictionary = s3.players[0]
+	s3.last_stand = true
+	p3["alive"] = false
+	s3.war_chest = 2000
+	s3.step(rev)
+	Runner.T.ok(not p3["alive"], "LAST STAND refuses a PAID revive")
+	s3.war_chest = 0
+	for _i in SimWorld.BROKE_RESPAWN_TICKS + 2:
+		s3.step(_idle())
+	Runner.T.ok(not p3["alive"], "LAST STAND refuses the free rally too — the copy's one true 'no revives'")
+
+	# --- The page must say all of it, and take the timer off the sim const.
+	var corpus := _menu_text_corpus()
+	Runner.T.ok(corpus.length() > 400, "the menu corpus captured real ink (%d chars)" % corpus.length())
+	for lie in ["no second chance", "no continues", "one life"]:
+		Runner.T.ok(not corpus.to_lower().contains(lie),
+			"no menu string claims '%s' — the sim grants continues" % lie)
+	if corpus.to_lower().contains("no revives"):
+		Runner.T.ok(corpus.contains("LAST STAND"),
+			"the only 'no revives' sentence is the LAST STAND one")
+	Runner.T.ok(corpus.contains("REVIVE yourself"),
+		"the rules page says the chest revives YOURSELF, not just a partner")
+	Runner.T.ok(corpus.contains("%ds" % (SimWorld.BROKE_RESPAWN_TICKS / 60)),
+		"the rules page states the free-rally delay (%ds) off SimWorld.BROKE_RESPAWN_TICKS"
+			% (SimWorld.BROKE_RESPAWN_TICKS / 60))
+	Runner.T.ok(corpus.contains("LAST STAND"), "the rules page names the LAST STAND finale")
+	var msrc := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	Runner.T.ok(msrc.contains("SimWorld.BROKE_RESPAWN_TICKS"),
+		"the rally delay is DERIVED from the sim const, so a retune can't strand the copy")
+
+
+func test_the_debrief_reports_the_continues_the_run_actually_used() -> void:
+	## The card tallied kills, streak, prey and rescues — and never once said the run
+	## was carried by revives. `p["deaths"]` had exactly ONE view read (hud.gd), and
+	## the coin spent standing back up was invisible on both end cards.
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p: Dictionary = sim.players[0]
+	p["alive"] = false
+	sim.war_chest = 2000
+	var cost: int = sim.revive_cost(p)
+	var before: int = sim.war_chest
+	var rev: Array[SimInput] = []
+	var ri := SimInput.new()
+	ri.revive = true
+	rev.append(ri)
+	sim.step(rev)
+	var paid := {}
+	for e in sim.events:
+		if e.get("t", "") == "revive":
+			paid = e
+	Runner.T.ok(not paid.is_empty(), "a paid revive emits a revive event")
+	Runner.T.eq(int(paid.get("cost", -1)), before - sim.war_chest,
+		"the revive event carries the coin it cost (%d), so the card never restates a price"
+			% [before - sim.war_chest])
+	Runner.T.ok(cost > 0, "…and that price is non-zero (%d)" % cost)
+
+	# The FREE rally must never be billed to the player on the card.
+	var s2 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p2: Dictionary = s2.players[0]
+	s2.war_chest = 0
+	p2["alive"] = false
+	var free_ev := {}
+	for _i in SimWorld.BROKE_RESPAWN_TICKS + 2:
+		s2.step(_idle())
+		for e in s2.events:
+			if e.get("t", "") == "revive":
+				free_ev = e
+	Runner.T.ok(not free_ev.is_empty(), "the broke fallback respawn emits a revive event too")
+	Runner.T.eq(int(free_ev.get("cost", -1)), 0, "…and it costs 0 — the free rally is never billed")
+
+	# --- Both end cards must carry the ledger row.
+	# Loaded at RUNTIME (not via the Main const) so a missing method reports as a red
+	# assertion instead of aborting the whole suite with a parse error.
+	var ms: Script = load("res://src/main.gd")
+	var has_rows := false
+	for meth in ms.get_script_method_list():
+		if String(meth["name"]) == "_continue_ledger_rows":
+			has_rows = true
+	Runner.T.ok(has_rows, "Main._continue_ledger_rows() is the one source for the continue tally")
+	if has_rows:
+		Runner.T.eq(ms._continue_ledger_rows(0, 0).size(), 0, "a clean run says nothing")
+		var rows: Array = ms._continue_ledger_rows(3, 75)
+		Runner.T.eq(rows.size(), 1, "a run that used continues earns exactly one row")
+		if rows.size() == 1:
+			var txt := String(rows[0].get("text", ""))
+			Runner.T.ok(txt.contains("3"), "…stating the knockdown count (got %s)" % txt)
+			Runner.T.ok(txt.contains("75"), "…and the coin spent getting back up (got %s)" % txt)
+	var vsrc := _view_src()
+	Runner.T.eq(vsrc.count("_continue_ledger_rows("), 3,
+		"the ledger is built once and called from BOTH end cards (victory + K.I.A.), not just the loss")

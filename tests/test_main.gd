@@ -1140,13 +1140,18 @@ func test_the_wash_budget_actually_binds() -> void:
 
 
 # --- The result card has to FIT the 360px screen. The endless K.I.A. tally can reach
-# TWELVE rows (rank · downed-by · progress · score · war-chest salvage · streak · top
-# prey · pilots rescued · best · waves-short · VP banked · REDEPLOY) and
+# THIRTEEN rows (rank · downed-by · progress · score · war-chest salvage · streak · top
+# prey · pilots rescued · continue ledger · best · waves-short · VP banked · REDEPLOY) and
 # _draw_result_panel laid every one of them out at a fixed 19px pitch with no clamp:
 # last baseline 178+11*19 = 387, plate bottom 178+12*19+14 = 420 — the REDEPLOY prompt
 # fell off the bottom. Nothing pinned the panel to the screen, which is how it shipped. ---
+#
+# aaa-c6 bumped this 12 -> 13 for the KNOCKDOWNS continue-ledger row. At 13 the clamped
+# pitch is 12.92: last baseline 333.0 (<= 356) and panel bottom 360.0 — EXACTLY at the
+# 360px wall. A 14th row does NOT fit; the next tally needs a real re-layout, not
+# another bump. ---
 
-const RESULT_ROWS_MAX := 12    # the maximum endless K.I.A. row set, enumerated above
+const RESULT_ROWS_MAX := 13    # the maximum endless K.I.A. row set, enumerated above
 const RESULT_ROW_Y := 178.0    # first row baseline  (mirrors _draw_result_panel)
 const RESULT_PAD := 14.0       # plate padding below the last row (ditto)
 

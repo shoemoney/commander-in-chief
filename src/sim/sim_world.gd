@@ -1759,7 +1759,7 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 		if war_chest >= cost:
 			war_chest -= cost
 			var at_y: int = reviver["y"] if reviver["alive"] else _checkpoint_y()
-			_respawn(target, at_y)
+			_respawn(target, at_y, cost)
 		else:
 			# The broke fallback is armed by _step_dead_player (one place, re-checked
 			# every tick), so a denial only has to be LOUD. Event only, checksum-
@@ -1768,7 +1768,12 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 			events.append({"t": "revive_deny", "x": target["x"], "y": target["y"], "cost": cost})
 
 
-func _respawn(p: Dictionary, at_y: int) -> void:
+func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
+	## `cost` is the coin the chest was just debited to buy this stand-up, and it rides the
+	## revive EVENT so the debrief can tally what the run spent getting back up without
+	## restating revive_cost view-side. The broke fallback and god-mode restore pass nothing
+	## (0) — a free rally must never be billed to the player on the card. Events are
+	## checksum-EXCLUDED and no state write changed here, so this is golden-safe.
 	p["alive"] = true
 	# PARTIAL resupply, not a full one. A free 99 rounds + 12 grenades cost ~190
 	# coins at shop rates (3x SHOP_AMMO_COST + 3x SHOP_GRENADE_COST), and the
@@ -1794,7 +1799,7 @@ func _respawn(p: Dictionary, at_y: int) -> void:
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
-	events.append({"t": "revive", "x": p["x"], "y": p["y"]})
+	events.append({"t": "revive", "x": p["x"], "y": p["y"], "cost": cost})
 
 
 func _hurt_player(p: Dictionary) -> void:

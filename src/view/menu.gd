@@ -1104,9 +1104,9 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# hidden corner shortcut, so keyboard/pad reach it by simply focusing it and pressing.
 		oitems.append({"id": "controls", "label": "CONTROLS (REBIND)", "destructive": false, "grp": 6})
 		# c4-11: the RESET DEFAULTS row reflects whether there is anything TO revert. With any
-		# setting off its ship default it is an armable two-press DESTRUCTIVE row (the label
-		# picks up PRESS TWICE / PRESS AGAIN via destructive_label, so it reads its own
-		# armed/unarmed state). Once every setting matches SETTINGS_DEFAULTS -- including the
+		# setting off its ship default it is an armable two-press DESTRUCTIVE row (it rests as
+		# its own name and picks up PRESS AGAIN via destructive_label once armed, so it reads
+		# its own armed/unarmed state). Once every setting matches SETTINGS_DEFAULTS -- including the
 		# instant a reset lands -- it goes DISABLED with an "AT DEFAULTS" badge (same locked
 		# convention as a completed DAILY RUN), so a pointless confirm can't fire and the flip
 		# is the visible "restore succeeded" feedback.
@@ -1161,12 +1161,11 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 	# OPTIONS / RESTART / QUIT TO TITLE, each its own group so the dividers separate them.
 	# c3-14: the exit row reads "QUIT TO TITLE" — an explicit one-step exit VERB, so
 	# leaving a run never means RESTART-then-TITLE or backing out. id stays "title" (the
-	# _activate branch is keyed on it), only the label changes. Both cues resolve to the
-	# id-derived "TITLE" identity when the plate is too tight for the full words: unarmed
-	# degrades "QUIT TO TITLE  PRESS TWICE" to "TITLE PRESS TWICE" (never the misleading
-	# "QUIT ..."); armed rides armed_verb "TITLE" (pinned by test_c3_08) to "TITLE  PRESS
-	# AGAIN". So the confirm copy names the real destination in both states, never a bare
-	# "QUIT" that reads like quit-to-desktop.
+	# _activate branch is keyed on it), only the label changes. The row RESTS as the full
+	# "QUIT TO TITLE" (aaa-c6: no baked instruction to make room for, so nothing is
+	# amputated); armed it rides armed_verb "TITLE" (pinned by test_c3_08) to "TITLE  PRESS
+	# AGAIN". So the copy names the real destination in both states, never a bare "QUIT"
+	# that reads like quit-to-desktop.
 	# The two destructive actions get DISTINCT groups (2 / 3) so a divider actually splits
 	# "restart this run" from "abandon it to the title" — they must never fuse into one slab.
 	var pitems: Array[Dictionary] = [
@@ -1425,17 +1424,34 @@ func _is_destructive(i: int) -> bool:
 # c1-08: the on-plate wording for a destructive (run-ending) row, chosen against
 # the ACTUAL drawable width `avail` (px) so the cue can never ellipsize away on the
 # ~190px plate. Pure + static so a layout test can pin the fit for every row.
-#   pre-armed: "<NAME>  PRESS TWICE" — states the two-press contract up front and
-#              keeps the action name (was a lone "!" that read like plain emphasis).
+#   pre-armed: "<NAME>" — the action's own name, nothing else.
 #   armed:     "<VERB>  PRESS AGAIN" where it fits — the verb keeps WHICH action is
 #              one press from firing — degrading (single space -> "<VERB>: AGAIN" ->
 #              bare "PRESS AGAIN") only as far as the plate forces.
 # Each candidate is tried widest-first; the first that fits `avail` wins.
+#
+# aaa-c6 REVERSAL — c1-08's baked "<NAME>  PRESS TWICE" resting label is DELETED, and that
+# is a deliberate overturn of a documented decision. c1-08 chose the instruction because the
+# previous lone "!" "read like emphasis"; test_menu_layout.gd then pinned the instruction as
+# a requirement. On the real 184px plate the result was five rows that read as instruction
+# manuals — and two of them were amputated to make room: "QUIT TO TITLE" rendered
+# "TITLE PRESS TWICE" (first two words gone) and RESET DEFAULTS / RESET CONTROLS both
+# collapsed to the identical, ambiguous "RESET PRESS TWICE". A blind consumer reviewer read
+# the whole set as unpolished. Every bare label FITS 184px, so dropping the sentence RESTORES
+# the real names.
+# The danger read was never text-only, which is what makes this safe — four affordances
+# survive untouched: the warm plate (DESTR_PLATE_SEL/UNSEL), the warm 1px destructive
+# bracket, the warm label ink (DESTR_TEXT_*), and the dim pre-press confirm glyph
+# (DESTR_GLYPH_PREPRESS, c4-10). And the two-press safety itself is unchanged: the ARMED tier
+# below still floods red, grows a 4px amber frame, drains a 2.5s countdown gauge and throbs
+# the confirm glyph while reading "<VERB>  PRESS AGAIN". The dynamic confirmation state was
+# always there — the static warning was drowning it out.
+# TITLE mode already did exactly this for its QUIT row via a hand-carved exception in _draw;
+# the exception is now the rule and the special case is gone.
 # c3-17: the canonical destructive warning cue — ONE source of truth shared by
 # destructive_label (which appends it) and destructive_cue_tail (which preserves it under
 # truncation), so the two can never drift and a wording/localization edit lands in one place.
 const DESTR_CUE_ARMED := "PRESS AGAIN"
-const DESTR_CUE_PREARMED := "PRESS TWICE"
 const DESTR_CUE_ARMED_TIGHT := ": AGAIN"   # narrow-plate armed tier: "<VERB>: AGAIN"
 const DESTR_CUE_MARK := "!"                 # minimal floor cue when no spelled-out cue fits
 
@@ -1449,9 +1465,11 @@ const DESTR_CUE_MARK := "!"                 # minimal floor cue when no spelled-
 # head) or any unrecognized tail; the warn "!" floor in _ellipsize is the safety net that still
 # marks those rows destructive.
 static func destructive_cue_tail(label: String, armed: bool) -> String:
-	# Pre-armed labels only ever end with "PRESS TWICE"; armed labels end with "PRESS AGAIN" or the
-	# tightened ": AGAIN" tier — so only the armed set includes DESTR_CUE_ARMED_TIGHT.
-	var cues: Array[String] = [DESTR_CUE_PREARMED]
+	# aaa-c6: a RESTING destructive label is now just the action's name — it has no cue, so it
+	# has no load-bearing tail to reserve either (the DESTR_CUE_MARK "!" floor in _ellipsize is
+	# the truncation safety net for those rows). Only armed labels carry a cue: "PRESS AGAIN" or
+	# the tightened ": AGAIN" tier.
+	var cues: Array[String] = []
 	if armed:
 		cues = [DESTR_CUE_ARMED, DESTR_CUE_ARMED_TIGHT]
 	for cue in cues:
@@ -1462,21 +1480,13 @@ static func destructive_cue_tail(label: String, armed: bool) -> String:
 
 
 static func destructive_label(name: String, verb: String, armed: bool, font: Font, avail: float) -> String:
-	# Candidates run widest -> narrowest; the first that FITS `avail` wins. Both the
-	# action identity (name/verb, always LEADING) and the explicit two-press cue
-	# ("PRESS TWICE" pre-armed / "PRESS AGAIN" armed) ride every tier until the plate
-	# is too tight for both — and the CUE is the last thing dropped, so it is never
-	# ellipsized to nonsense. The abbreviated tiers keep the tail genuinely fitting on
-	# a narrow plate instead of returning an overflowing string. On the real ~190px
-	# plate a name/verb + full-cue tier always wins (RESTART/TITLE/QUIT verified in
-	# the layout test) — "PRESS TWICE" states the contract outright, unlike the old
-	# lone "!" that read like emphasis and made the row look single-press.
-	# The abbreviated pre-armed tier drops to the id-derived VERB identity, not the
-	# label's leading word: for "QUIT TO TITLE" the label's first word ("QUIT") reads
-	# like quit-to-desktop, while the verb ("TITLE") names the real destination and
-	# matches the armed cue. For every other destructive row the verb's leading word
-	# equals the label's (RESTART/QUIT/RESET), so this only sharpens QUIT TO TITLE.
-	var short_name := verb.split(" ")[0]
+	# Candidates run widest -> narrowest; the first that FITS `avail` wins. On the ARMED
+	# tier both the action identity (verb, always LEADING) and the explicit "PRESS AGAIN"
+	# cue ride every candidate until the plate is too tight for both — and the CUE is the
+	# last thing dropped, so it is never ellipsized to nonsense.
+	# The RESTING tier is a single candidate: the row's own name. All five shipped
+	# destructive labels measure under the real 184px plate, so this never degrades in
+	# production (see the aaa-c6 note above and the layout test that pins the fit).
 	var forms: Array[String]
 	if armed:
 		# c3-08: the verb rides with the cue as long as it fits ("<VERB>: AGAIN" is terse
@@ -1495,20 +1505,17 @@ static func destructive_label(name: String, verb: String, armed: bool, font: Fon
 			forms.append("%s%s" % [short_verb, DESTR_CUE_ARMED_TIGHT])
 		forms.append(DESTR_CUE_ARMED)
 	else:
-		forms = ["%s  %s" % [name, DESTR_CUE_PREARMED], "%s %s" % [name, DESTR_CUE_PREARMED]]
-		if short_name != name:
-			forms.append("%s %s" % [short_name, DESTR_CUE_PREARMED])
-		forms.append(DESTR_CUE_PREARMED)
+		forms = [name]
 	if font == null:
 		return forms[0]
 	for f in forms:
 		if font.get_string_size(f, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail:
 			return f
-	# MINIMUM SUPPORTED WIDTH: the narrowest form is the bare cue ("PRESS TWICE" ~102px
-	# / "PRESS AGAIN" ~99px at 11px). The only caller draws on the fixed BTN.x=222 plate
-	# (avail 184 pre / 170 armed), so a fitting identity+cue tier ALWAYS wins there and
-	# this floor is never reached in production. Below ~102px avail the cue is returned
-	# as-is and _ellipsize would trim its tail — an unsupported, sub-word plate.
+	# MINIMUM SUPPORTED WIDTH: the narrowest armed form is the bare cue ("PRESS AGAIN"
+	# ~99px at 11px); the resting form is the label itself. The only caller draws on the
+	# fixed BTN.x=222 plate (avail 184 pre / 170 armed), where every shipped row fits, so
+	# this floor is never reached in production. Below that the string is returned as-is
+	# and _ellipsize trims it (keeping the DESTR_CUE_MARK "!" floor) — an unsupported plate.
 	return forms[forms.size() - 1]
 
 
@@ -4028,17 +4035,13 @@ func _draw() -> void:
 			# drift. destructive_label keeps this verb (or its leading word) as the plate
 			# narrows, so the player always sees WHICH action is one press from firing. Pick
 			# the widest wording that fits the plate (measured) so the cue never ellipsizes to
-			# nonsense: "<NAME>  PRESS TWICE" pre-armed, "<VERB> PRESS AGAIN" armed, degrading
-			# only as far as needed. See destructive_label.
-			# c-titlechrome: TITLE's resting QUIT plate reads a bare "QUIT" — the
-			# "PRESS TWICE" instruction-manual tail is dropped for that one row/mode.
-			# The two-press safety itself is untouched: it still arms and flips to
-			# "QUIT  PRESS AGAIN" with the red flood + countdown gauge on the armed frame.
-			if mode == Mode.TITLE and not armed:
-				label = mitems[k]["label"]
-			else:
-				label = destructive_label(items[k], armed_verb(mitems[k]), armed, Art.font(),
-					label_r - (r.position.x + 30.0))
+			# nonsense: "<VERB> PRESS AGAIN" armed, degrading only as far as needed.
+			# aaa-c6: the RESTING plate is the row's own name in EVERY mode — c-titlechrome's
+			# one-row TITLE exception (a bare "QUIT") is now the rule, and its special case is
+			# deleted. The two-press safety is untouched: the row still arms and flips to
+			# "<VERB>  PRESS AGAIN" with the red flood + countdown gauge on the armed frame.
+			label = destructive_label(items[k], armed_verb(mitems[k]), armed, Art.font(),
+				label_r - (r.position.x + 30.0))
 		if armed:
 			# The armed affordances that ride ON TOP of the red flood (drawn above):
 			# a countdown bar draining along the bottom edge showing the disarm
@@ -5030,12 +5033,18 @@ func _howto_page_warchest() -> void:
 	var y := CONTENT_BODY_Y
 	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(ICON_X, y), 13, Color(1.0, 0.9, 0.6))
 	y += 22.0
-	y = _body_block("No health bar, no second chance — use cover and keep moving.",
+	y = _body_block("No health bar. Use cover and keep moving.",
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 26.0
 	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(ICON_X, y), 11, Color(1.0, 0.9, 0.6))
 	y += 22.0
-	y = _body_block("Spend it to REVIVE a fallen partner or BUY supplies.",
+	# aaa-c6: the page used to say "no second chance" and offer the chest only for a PARTNER,
+	# while the sim grants three continues it never mentioned — self-revive, a free rally at
+	# the last gate once you are broke, and the LAST STAND finale where revives really do stop.
+	# The delay comes off SimWorld.BROKE_RESPAWN_TICKS (same discipline as the multiplier line
+	# below) so a retune can never strand the copy.
+	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? You rally free at the last gate after %ds. Past the FINAL GATE, LAST STAND: no revives at all."
+			% (SimWorld.BROKE_RESPAWN_TICKS / 60),
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 18.0
 	# Both rates come off the sim consts so this sentence can never drift from the payout.

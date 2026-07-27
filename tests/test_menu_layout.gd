@@ -2990,7 +2990,11 @@ func test_destructive_label_fits_plate_and_keeps_context() -> void:
 		var idword: String = name.split(" ")[0]   # the identity token that always leads
 		var pre := Menu.destructive_label(name, verb, false, font, pre_avail)
 		var arm := Menu.destructive_label(name, verb, true, font, armed_avail)
-		Runner.T.ok(pre.find("PRESS TWICE") >= 0, "%s pre-armed states the two-press contract (got '%s')" % [name, pre])
+		# aaa-c6 FLIP: the resting label states the ACTION, not the contract. The two-press
+		# safety is carried by the armed tier below plus the warm plate / bracket / ink /
+		# confirm-glyph affordances — see test_no_destructive_row_bakes_its_confirmation_....
+		Runner.T.eq(pre, name, "%s rests as its own name, no baked instruction (got '%s')" % [name, pre])
+		Runner.T.ok(not ("PRESS" in pre), "%s pre-armed carries no instruction tail (got '%s')" % [name, pre])
 		Runner.T.eq(pre.find(idword), 0, "%s pre-armed LEADS with its identity word" % name)
 		Runner.T.ok(font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= pre_avail,
 			"%s pre-armed label fits the plate (no ellipsis): '%s'" % [name, pre])
@@ -2998,23 +3002,19 @@ func test_destructive_label_fits_plate_and_keeps_context() -> void:
 		Runner.T.ok(arm.find("AGAIN") >= 0, "%s armed says AGAIN (press again to confirm)" % name)
 		Runner.T.ok(font.get_string_size(arm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= armed_avail,
 			"%s armed label fits the tighter glyph-reserved slot: '%s'" % [name, arm])
-	# MID-NARROW plate (too tight for the full name, room for its leading word): the
-	# name ABBREVIATES to keep identity rather than dropping the two-press cue, and the
-	# abbreviated form GENUINELY fits (not an overflowing string).
+	# aaa-c6 FLIP: with no cue to make room for, the RESTING label has nothing to abbreviate
+	# away — a mid-narrow plate still shows the whole name (and _ellipsize, not this helper,
+	# is what handles a genuinely unsupported width).
 	var mid := Menu.destructive_label("TITLE SCREEN", "TITLE", false, font, 160.0)
-	Runner.T.eq(mid.find("TITLE"), 0, "mid-narrow keeps the leading identity word")
-	Runner.T.ok(mid.find("PRESS TWICE") >= 0, "mid-narrow keeps the two-press cue")
-	Runner.T.ok(font.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 160.0,
-		"mid-narrow abbreviated form genuinely fits its plate: '%s'" % mid)
-	# PATHOLOGICALLY narrow plate (narrower than the identity itself): the two-press
-	# CUE is the last token standing — never an overflowing, ellipsized-to-nonsense
-	# string. Each cue floor is checked at a width its own shortest form fits.
+	Runner.T.eq(mid, "TITLE SCREEN", "mid-narrow still shows the whole name (got '%s')" % mid)
+	Runner.T.ok(not ("PRESS" in mid), "mid-narrow has no instruction to keep")
+	# PATHOLOGICALLY narrow plate (narrower than the identity itself): the ARMED tier still
+	# keeps its spelled-out cue as the last token standing — never an overflowing,
+	# ellipsized-to-nonsense string. The resting tier just stays the name.
 	var tiny_pre := Menu.destructive_label("TITLE SCREEN", "TITLE", false, font, 110.0)
 	var tiny_arm := Menu.destructive_label("TITLE SCREEN", "TITLE", true, font, 100.0)
-	Runner.T.eq(tiny_pre, "PRESS TWICE", "narrowest fallback preserves the two-press cue intact")
+	Runner.T.eq(tiny_pre, "TITLE SCREEN", "the resting tier is the name at any width")
 	Runner.T.eq(tiny_arm, "PRESS AGAIN", "narrowest armed fallback is the explicit PRESS AGAIN, never a bare AGAIN")
-	Runner.T.ok(font.get_string_size(tiny_pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 110.0,
-		"the pre-armed cue floor genuinely fits a narrow plate")
 	Runner.T.ok(font.get_string_size(tiny_arm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 100.0,
 		"the armed cue floor genuinely fits a narrow plate")
 
@@ -3029,14 +3029,15 @@ func test_c3_17_truncation_preserves_destructive_cue() -> void:
 	# returns it WITH its leading separator so a trimmed name reads "RES… PRESS AGAIN".
 	Runner.T.eq(Menu.destructive_cue_tail("RESTART  PRESS AGAIN", true), " PRESS AGAIN",
 		"armed cue tail carries its leading separator")
-	Runner.T.eq(Menu.destructive_cue_tail("RESTART  PRESS TWICE", false), " PRESS TWICE",
-		"pre-armed cue tail is preserved with its separator")
+	# aaa-c6 FLIP: a RESTING label has no cue, so it has no load-bearing tail to reserve.
+	Runner.T.eq(Menu.destructive_cue_tail("RESTART", false), "",
+		"a resting destructive label has no cue tail to preserve")
 	Runner.T.eq(Menu.destructive_cue_tail("RESTART: AGAIN", true), ": AGAIN",
 		"the tightened ': AGAIN' armed tier is a recognized cue tail")
 	Runner.T.eq(Menu.destructive_cue_tail("PRESS AGAIN", true), "",
 		"a bare armed cue has no separable head — nothing to reserve")
-	Runner.T.eq(Menu.destructive_cue_tail("PRESS TWICE", false), "",
-		"a bare pre-armed cue returns empty")
+	Runner.T.eq(Menu.destructive_cue_tail("RESTART  PRESS TWICE", false), "",
+		"the retired PRESS TWICE tail is no longer recognized as a cue")
 	Runner.T.eq(Menu.destructive_cue_tail("NEUSTARTEN DES LAUFS  PRESS AGAIN", true), " PRESS AGAIN",
 		"a long/localized identity still exposes the cue as the load-bearing tail")
 
@@ -3495,7 +3496,9 @@ func test_c3_14_pause_quit_to_title_row() -> void:
 	Runner.T.eq(verb, "TITLE", "the title row's armed_verb stays the id-derived TITLE")
 	var pre := Menu.destructive_label(String(rows[ti]["label"]), verb, false, f, 184.0)
 	var arm := Menu.destructive_label(String(rows[ti]["label"]), verb, true, f, 170.0)
-	Runner.T.eq(pre, "TITLE PRESS TWICE", "unarmed cue degrades to TITLE (not QUIT): '%s'" % pre)
+	# aaa-c6 FLIP: nothing competes for the plate any more, so the row keeps its FULL name —
+	# the old "TITLE PRESS TWICE" amputated "QUIT TO" to fit the instruction.
+	Runner.T.eq(pre, "QUIT TO TITLE", "the resting row keeps its full name: '%s'" % pre)
 	Runner.T.eq(arm, "TITLE  PRESS AGAIN", "armed cue keeps the TITLE verb: '%s'" % arm)
 	m.free()
 	stub.free()
@@ -3712,14 +3715,17 @@ func test_options_settings_only_nine_row_screen_stays_legible() -> void:
 
 
 # c1-09: the RESET DEFAULTS armed/pre-armed CONFIRMATION labels must FIT the OPTIONS
-# plate (222px, 30 gutter, 8 pad = ~184 avail; armed reserves the confirm glyph) and
-# carry the two-press cue — and the confirm glyph must resolve on BOTH input devices.
+# plate (222px, 30 gutter, 8 pad = ~184 avail; armed reserves the confirm glyph) — and the
+# confirm glyph must resolve on BOTH input devices.
+# aaa-c6 FLIP: the RESTING label is the row's own full name ("RESET DEFAULTS"), not the
+# ambiguous "RESET PRESS TWICE" it used to share verbatim with RESET CONTROLS. The armed
+# tier still carries the spelled-out cue.
 func test_reset_defaults_confirm_labels_fit_both_devices() -> void:
 	var f := Art.font()
 	var avail := 184.0
 	var pre := Menu.destructive_label("RESET DEFAULTS", "RESET DEFAULTS", false, f, avail)
 	Runner.T.ok(f.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail, "pre-armed RESET label fits the plate")
-	Runner.T.ok("TWICE" in pre, "pre-armed RESET label states the two-press contract")
+	Runner.T.eq(pre, "RESET DEFAULTS", "resting RESET label is its own full name (got '%s')" % pre)
 	var armed := Menu.destructive_label("RESET DEFAULTS", "RESET DEFAULTS", true, f, avail - 14.0)
 	Runner.T.ok(f.get_string_size(armed, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail - 14.0, "armed RESET label fits beside the confirm glyph")
 	Runner.T.ok("AGAIN" in armed, "armed RESET label says PRESS AGAIN")
@@ -7158,4 +7164,70 @@ func test_no_framed_screen_puts_its_content_under_the_frame_keyline() -> void:
 				"mode %d header ink %s clears the %.1fpx keyline band (clear rect %s)"
 					% [m, box, stroke, clear])
 	Runner.T.eq(checked, 12, "all 12 framed modes audited against the keyline, not the 5 screenshotted")
+	stub.free()
+
+
+# aaa-c6: A DESTRUCTIVE ROW MUST NOT BAKE ITS CONFIRMATION INSTRUCTION INTO ITS RESTING LABEL.
+#
+# c1-08 chose to append "PRESS TWICE" to every un-armed destructive row. On the real
+# 184px plate that turned five distinct actions into instruction manuals — and amputated
+# two of them: "QUIT TO TITLE" degraded to "TITLE PRESS TWICE" (losing the first two
+# words) and BOTH reset rows collapsed to the identical, ambiguous "RESET PRESS TWICE".
+# A blind consumer reviewer read the result as unpolished. Every bare label FITS 184px,
+# so dropping the instruction RESTORES the real names. The two-press safety is untouched:
+# the ARMED tier still reads "<VERB>  PRESS AGAIN" over a red flood, a 4px amber frame,
+# a draining countdown gauge and a throbbing confirm glyph. The row set is derived from
+# Menu.Mode x _menu_items(), so a destructive row added tomorrow is covered the day it lands.
+func test_no_destructive_row_bakes_its_confirmation_instruction_into_its_resting_label() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	var f: Font = Art.font()
+	var pre_avail := 184.0     # real PAUSE plate drawable width, un-armed
+	var armed_avail := 170.0   # ...minus the 12px confirm glyph + 10px gap
+	# Keyed by id: Mode.HIDDEN falls through to the PAUSE branch, so RESTART/TITLE would
+	# otherwise be collected twice and collide with themselves in the uniqueness check.
+	var by_id := {}
+	for mode_id in Menu.Mode.values():
+		m.mode = mode_id
+		for it in m._menu_items():
+			if it.get("destructive", false):
+				by_id[String(it["id"])] = it
+	var ids: Array = by_id.keys()
+	var rows: Array = by_id.values()
+	Runner.T.ok(rows.size() >= 5,
+		"the destructive-row set is derived from Menu.Mode x _menu_items() (%d rows: %s)" % [rows.size(), ids])
+	for want in ["restart", "title", "quit", "reset_defaults", "reset_controls"]:
+		Runner.T.ok(want in ids, "the enumeration reaches the '%s' row (saw %s)" % [want, ids])
+	var seen: Array = []
+	for it in rows:
+		var label := String(it["label"])
+		var verb := Menu.armed_verb(it)
+		var pre := Menu.destructive_label(label, verb, false, f, pre_avail)
+		var arm := Menu.destructive_label(label, verb, true, f, armed_avail)
+		Runner.T.eq(pre, label, "'%s' rests as its own name, not an instruction (got '%s')" % [label, pre])
+		Runner.T.ok(not ("PRESS" in pre) and not ("TWICE" in pre),
+			"'%s' resting label carries no baked instruction (got '%s')" % [label, pre])
+		Runner.T.ok(not (pre in seen),
+			"'%s' resting label is unique across destructive rows (got '%s', already seen %s)" % [label, pre, seen])
+		seen.append(pre)
+		Runner.T.ok(arm != pre, "'%s' VISIBLY changes on the first press ('%s' -> '%s')" % [label, pre, arm])
+		Runner.T.ok("AGAIN" in arm, "'%s' armed label still says AGAIN (got '%s')" % [label, arm])
+		Runner.T.ok(f.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= pre_avail,
+			"'%s' bare label fits the 184px plate with no ellipsis (%.1fpx)"
+				% [pre, f.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x])
+	# The TITLE-mode hand-carved exception (which already drew a bare QUIT) must be GONE —
+	# promoted to the rule, not left as a second code path that can drift back.
+	var msrc := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	Runner.T.ok(not msrc.contains("Mode.TITLE and not armed"),
+		"the one-row TITLE exception is deleted — every mode now rests bare")
+	# THE WORDS ARE NOT THE ONLY DANGER CUE, which is what makes deleting them safe:
+	# a warm plate, warm label ink and a reserved pre-press confirm glyph all survive.
+	Runner.T.ok(Menu.DESTR_PLATE_UNSEL != Menu.PLATE_UNSEL,
+		"a destructive row still plates warm, distinct from a normal row")
+	Runner.T.ok(Menu.DESTR_TEXT_UNSEL != Menu.ROW_TEXT_UNSEL,
+		"a destructive row still inks warm, distinct from a normal row")
+	Runner.T.ok(Menu.destr_glyph_slot(431.0, Art.tex(Art.glyph_key("confirm"))).x > 0.0,
+		"a destructive row still reserves its confirm-glyph slot")
+	m.free()
 	stub.free()
