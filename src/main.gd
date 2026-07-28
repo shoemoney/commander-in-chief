@@ -2483,6 +2483,12 @@ func _consume_events() -> void:
 				# c2 arena drop: alert ring on the fresh L so the new geometry
 				# announces itself during the wave-start breath.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.03})
+			"arena_shift_blocked":
+				# Sibling of supply_pod_blocked: the every-3rd-wave cover drop found
+				# nowhere to land even on the recycle lap. It used to emit NOTHING at
+				# all, so the promised "the arena keeps changing" beat just stopped.
+				show_banner("COVER DROP ABORTED — NO CLEAR GROUND", Color(1.0, 0.55, 0.3))
+				_sfx.play("deny", -5.0, 0.7)
 			"supply_pod":
 				# c4 2v: a supply pod SLAMS in a fresh 3x3 cover fort — an impact
 				# shockwave + dust ring + shake so the renewed cover reads loud.
@@ -3797,8 +3803,13 @@ func _save_cfg(cf: ConfigFile) -> Error:
 	# path. rename_absolute is an OS rename — atomic on the same filesystem.
 	# Returns OK only when the rename actually landed: callers hold dirty flags
 	# (and thus a retry) until then, so a failed write is never a silent no-op.
+	# save-integrity: push_warning is invisible in an exported build, and ~7 of this
+	# function's callers (_save_settings, every rebind path, buy_perk, the replay
+	# last_score write) drop the Error return entirely -- so a failing disk was
+	# silently eating progress. Banner it HERE, once, and every caller is covered.
 	if cf.save(SAVE_TMP) != OK:
 		push_warning("ikari: config save failed")
+		show_banner("SAVE FAILED", GameMenu.BANNER_COL_FAIL)
 		return FAILED
 	# save-integrity: refresh the .bak ONLY from a primary that still PARSES.
 	# Copying a corrupt primary over the backup destroyed the last good save in
@@ -3813,6 +3824,7 @@ func _save_cfg(cf: ConfigFile) -> Error:
 	var err := DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
 	if err != OK:
 		push_warning("ikari: config rename failed (%d)" % err)
+		show_banner("SAVE FAILED", GameMenu.BANNER_COL_FAIL)
 	return err
 
 
