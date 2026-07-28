@@ -4966,6 +4966,8 @@ func _track_bests() -> void:
 		best_wave = sim.wave
 		_best_dirty = true
 	var dist := -Fixed.to_int(sim.camera_top) / 10
+	# NOT is_campaign_world(): dist derives from -camera_top and jump_to_chapter(N)
+	# starts N-1 gates deep, so Arcade would bank a 5000m "record" for standing still.
 	if sim.mode == "campaign" and dist > best_dist:
 		best_dist = dist
 		_best_dirty = true
@@ -6044,6 +6046,17 @@ func _to_screen(fx: int, fy: int) -> Vector2:
 	return Vector2(roundf(fx * PX), roundf((fy - sim.camera_top) * PX))
 
 
+func _visible_bands() -> Array:
+	## Bands touching the 420px draw window, inclusive. camera_top is the NORTH
+	## edge so absi() DESCENDS down the screen — the naive
+	## range(absi(top)/seg, absi(bot)/seg + 1) ran backwards and went EMPTY on
+	## every band straddle, silently dropping the ground decals.
+	var seg_h: int = SimWorld.GATE_SPACING
+	var lo: int = absi(sim.camera_top + 420 * Fixed.ONE) / seg_h
+	var hi: int = absi(sim.camera_top) / seg_h
+	return range(mini(lo, hi), maxi(lo, hi) + 1)
+
+
 func _bottom_fade(screen_y: float) -> float:
 	# c2 2v: cover in the very bottom of the ratchet view FADES (never culls —
 	# the collision AABB stays real) so a hazard or enemy behind it isn't hidden
@@ -6602,7 +6615,7 @@ func _draw_landmark_previews() -> void:
 	# the read-only gate/water spacing — no sim access beyond camera_top, no
 	# new state. Suppressed once the foundry skyline takes over (march >= 0.6)
 	# and in endless (no gate/water streaming there).
-	if sim.mode != "campaign" or _sector_march() >= 0.6:
+	if not sim.is_campaign_world() or _sector_march() >= 0.6:
 		return
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var cam: int = sim.camera_top
@@ -6726,7 +6739,7 @@ func _compute_sector_march() -> float:
 	# scorched read never flickers back to gate-fraction green after the kill.
 	if sim.victory or not sim.colossus.is_empty():
 		return 1.0
-	if sim.mode == "campaign":
+	if sim.is_campaign_world():
 		var mopened := 0
 		for g in sim.gates:
 			if g["open"]:
@@ -6739,7 +6752,7 @@ func _draw_terrain() -> void:
 # Choke walls (7v corridor modulation): the biting flank renders as rubble
 	# over a dark base with a hatched read — the lane narrowing is authored
 	# geography, not an invisible wall.
-	if sim.mode == "campaign":
+	if sim.is_campaign_world():
 		for scan in 5:
 			var wy3: int = sim.camera_top + scan * 90 * Fixed.ONE
 			var cb: Array = sim._choke_bounds(wy3)
@@ -6758,7 +6771,7 @@ func _draw_terrain() -> void:
 			break
 	# Ridge mounds (2v elevation, view-only): 2-tone dirt swells break the
 	# tabletop-flat read — light crest, dark south edge.
-	if sim.mode == "campaign":
+	if sim.is_campaign_world():
 		var rg_base := int(absi(sim.camera_top) / (64 * Fixed.ONE))
 		for rgy in 7:
 			for rgx in 10:
@@ -6770,7 +6783,7 @@ func _draw_terrain() -> void:
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(rpos - Vector2(20, 2), Vector2(40, 12)),
 					false, Color(0.18, 0.14, 0.08, RIDGE_A_LO + 0.08))
 	# Authored setpiece stamps: nameable places every ~800px of corridor.
-	if sim.mode == "campaign":
+	if sim.is_campaign_world():
 		var spb0 := absi(sim.camera_top) / (400 * Fixed.ONE)
 		for spb in range(spb0 - 1, spb0 + 2):
 			if spb < 0:
@@ -7048,6 +7061,8 @@ func _draw_terrain() -> void:
 	_draw_band_signatures(cam_y, wbands)
 	_draw_ruins_rubble()
 	_draw_trenches()
+	_draw_lane_seals()
+	_draw_ledges()
 	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
 	# Hash grid decorrelated from cacti/scrub so nothing stacks on a cell.
 	var loy := -fposmod(cam_y, 80.0)
@@ -7099,15 +7114,78 @@ func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
 	return false
 
 
+func _draw_lane_seals() -> void:
+	# The temporary lane seal reverted your step with nothing on screen. Drawn at
+	# SimWorld.lane_seal_span()'s exact AABB — the same one _lane_blocked collides
+	# against — in three states so the cycle is learnable: a faint SCAR while open
+	# (so you know where it will land), an amber WARN pulse for the 45-tick tell,
+	# a solid rubble slab while sealed.
+	if not sim.is_campaign_world():
+		return
+	for band in _visible_bands():
+		if band < SimWorld.CHOKE_START_SEG:
+			continue
+		var sp: Array = SimWorld.lane_seal_span(band)
+		var y_n := _to_screen(0, -(band * SimWorld.GATE_SPACING + sp[1])).y   # north edge
+		var y_s := _to_screen(0, -(band * SimWorld.GATE_SPACING + sp[0])).y   # south edge
+		if y_s < -20.0 or y_n > 380.0:
+			continue
+		var left: bool = sp[2] == 0
+		var edge := float(SimWorld.WORLD_LEFT + SimWorld.LANE_SEAL_DEPTH) * PX if left \
+			else float(SimWorld.WORLD_RIGHT - SimWorld.LANE_SEAL_DEPTH) * PX   # 216.0 / 424.0
+		var x0 := 0.0 if left else edge
+		var x1 := edge if left else 640.0
+		var r := Rect2(Vector2(x0, y_n), Vector2(x1 - x0, y_s - y_n))
+		var lip_x := edge - 3.0 if left else edge
+		if SimWorld.lane_sealed(sim.tick_count, band):
+			draw_rect(r, Color(0.17, 0.15, 0.13, 0.92))
+			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(3.0, y_s - y_n)), Color(0.42, 0.40, 0.34, 0.9))
+			for db in 6:   # same debris idiom as _draw_ruins_rubble
+				var dh := Art.cell_hash(band * 911 + db * 29, db)
+				draw_rect(Rect2(Vector2(x0 + float(dh % maxi(int(x1 - x0) - 6, 1)),
+					y_n + float((dh / 5) % maxi(int(y_s - y_n) - 4, 1))),
+					Vector2(4.0 + float(dh % 5), 3.0 + float(dh % 4))), Color(0.26, 0.23, 0.19, 0.9))
+		elif SimWorld.lane_warning(sim.tick_count, band):
+			var pulse := 0.10 + 0.20 * absf(sin(float(Engine.get_physics_frames()) * 0.35))
+			draw_rect(r, Color(0.85, 0.55, 0.15, pulse))
+			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(3.0, y_s - y_n)), Color(0.95, 0.62, 0.20, 0.85))
+		else:
+			draw_rect(r, Color(0.20, 0.18, 0.16, 0.16))
+			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(2.0, y_s - y_n)), Color(0.35, 0.32, 0.27, 0.35))
+
+
+func _draw_ledges() -> void:
+	# The one-way ledge silently ate every retreat step across a 320px span in
+	# EVERY band from 2 up. Drawn at SimWorld.ledge_span()'s exact extent: the lip
+	# you step off, the lower ground shadowed on the NORTH side (the free
+	# direction), chevrons pointing north so "down this way only" reads at a glance.
+	if not sim.is_campaign_world():
+		return
+	for band in _visible_bands():
+		if band < SimWorld.CHOKE_START_SEG:
+			continue
+		var sp: Array = SimWorld.ledge_span(band)
+		var pl := _to_screen(sp[1], sp[0])
+		var w := _to_screen(sp[2], sp[0]).x - pl.x       # 320.0 by construction
+		if pl.y < -20.0 or pl.y > 380.0:
+			continue
+		draw_rect(Rect2(pl + Vector2(0.0, -7.0), Vector2(w, 7.0)), Color(0.09, 0.08, 0.07, 0.5))
+		draw_rect(Rect2(pl, Vector2(w, 3.0)), Color(0.46, 0.44, 0.36, 0.85))
+		draw_rect(Rect2(pl + Vector2(0.0, 3.0), Vector2(w, 2.0)), Color(0.22, 0.20, 0.17, 0.55))
+		for i in 5:
+			var cx := pl.x + w * (float(i) + 0.5) / 5.0
+			var chev := Color(0.58, 0.55, 0.44, 0.55)
+			Art.line(self, Vector2(cx - 4.0, pl.y - 2.0), Vector2(cx, pl.y - 6.0), chev, 1.0)
+			Art.line(self, Vector2(cx, pl.y - 6.0), Vector2(cx + 4.0, pl.y - 2.0), chev, 1.0)
+
+
 func _draw_ruins_rubble() -> void:
 	# c3 5v: the seg-3 half-speed rubble VERB drawn at the sim's exact _in_rubble
 	# positions (art==collision) — a debris-strewn slow patch so the zone reads
 	# before you slog into it. Re-derives the same _mix as the sim; view-only.
 	var seg_h: int = SimWorld.GATE_SPACING
 	# Only seg-3 rows can carry rubble; find the seg-3 band(s) on screen.
-	var top_wy: int = sim.camera_top
-	var bot_wy: int = sim.camera_top + 420 * Fixed.ONE
-	for band in range(absi(top_wy) / seg_h, absi(bot_wy) / seg_h + 1):
+	for band in _visible_bands():
 		if band != SimWorld.RUINS_SEG:
 			continue
 		for k in 2:
@@ -7132,9 +7210,7 @@ func _draw_trenches() -> void:
 	# and a shadowed floor so the depth reads before you drop in. Re-derives the
 	# same _mix; view-only, band >= COVER_VARIETY_SEG like the sim.
 	var seg_h: int = SimWorld.GATE_SPACING
-	var top_wy: int = sim.camera_top
-	var bot_wy: int = sim.camera_top + 420 * Fixed.ONE
-	for band in range(absi(top_wy) / seg_h, absi(bot_wy) / seg_h + 1):
+	for band in _visible_bands():
 		if band < SimWorld.COVER_VARIETY_SEG:
 			continue
 		var th: int = SimWorld._mix(band * 70 + 7, sim._world_seed)
@@ -9297,11 +9373,12 @@ func _draw_projectiles() -> void:
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(body - Vector2(3.5, 3.5), Vector2(7, 7)),
 				false, Color(1.0, 0.6, 0.2, 0.8 * fz))
 			Art.circle(self, body, 1.0, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * fz))
-		# Landing marker: the parabola is deterministic — solve where it lands.
-		var zv := float(g["zv"])
-		var grav := float(SimWorld.GRENADE_GRAV)
-		var tt := (zv + sqrt(zv * zv + 2.0 * grav * maxf(0.0, float(g["z"])))) / grav
-		var land := base + Vector2(g["vx"], g["vy"]) * PX * tt
+		# Landing marker: replay the sim's OWN integrator (marsh drift included).
+		# The closed-form parabola that lived here ignored the seg-2 current
+		# entirely (up to 33px, > the 28px ring it drew) and undershot by one
+		# tick (~3px) on top, because the sim applies gravity AFTER the z step.
+		var lp: Array = sim.predict_grenade_landing(g)
+		var land := _to_screen(lp[0], lp[1])
 		var lr := 6.0 if g.get("shell", false) else 4.5
 		var lc := Color(1.0, 0.95, 0.7, 0.55)
 		# Blast-radius preview: grenades are the ONLY armor damage, so show the
@@ -10504,7 +10581,7 @@ func _draw_progress_rail() -> void:
 	# Right-edge vertical rail: the shape of the campaign run — gates (locked
 	# red / open green), the Foundry finale up top, and a 'you' dot. Answers
 	# 'how far is the next checkpoint' that SECTOR n/5 only says in the abstract.
-	if sim.mode != "campaign":
+	if not sim.is_campaign_world():
 		return
 	var rx := 632.0
 	var top := 30.0
@@ -11041,7 +11118,7 @@ func _top_center_priority() -> String:
 		return "airstrike"
 	# Same stale-counter guard as the PUSH NORTH hint: a loiterer's banked stall_ticks survives
 	# into a held arena, and MORTARS RANGING would pre-warn a barrage the sim will no longer send.
-	if sim.mode == "campaign" and sim.observer.is_empty() \
+	if sim.is_campaign_world() and sim.observer.is_empty() \
 			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180 and not sim.camera_held():
 		return "mortar"
 	if not _banners.is_empty():
@@ -11597,6 +11674,7 @@ func _draw_banners(top_msg: String) -> void:
 			var dw := best_wave - sim.wave
 			rows.append({"text": "%d WAVE%s SHORT OF YOUR BEST" % [dw, "" if dw == 1 else "S"],
 				"color": Color(1.0, 0.85, 0.5)})
+		# Campaign-only on purpose, same reason as the BEST PUSH write above.
 		elif sim.mode == "campaign" and best_dist > 0 and dist < best_dist:
 			rows.append({"text": "%dm SHORT OF YOUR BEST PUSH" % (best_dist - dist),
 				"color": Color(1.0, 0.85, 0.5)})

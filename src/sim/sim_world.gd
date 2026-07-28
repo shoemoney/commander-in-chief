@@ -522,6 +522,8 @@ const CHOKE_START_SEG := 2
 const LANE_BLOCK_CYCLE := 1200               # c4 2v: full temporary-lane-seal cycle (20s)
 const LANE_BLOCK_SEALED := 720               # sealed portion of the cycle (12s)
 const LANE_BLOCK_WARN := 45                  # 0.75s dust tell before a seal
+const LANE_SEAL_DEPTH := 200 * F_ONE         # flank depth the seal walls off (drawn AND collided)
+const LEDGE_HALF_W := 160 * F_ONE            # one-way ledge half-span (drawn AND collided)
 const BUNKER_EXCLUSION := 48 * F_ONE   # c2 4v: hazard keep-out ring around streamed bunkers (= BUNKER_W)
 const FORK_GATES := [2, 4]             # the route-fork gates: their approach band is a cover-free decision apron
 # c2 3v BREATHING CURVE: one whole-band calm beat — the pre-Foundry exhale.
@@ -693,7 +695,7 @@ var score: int = 0
 var camera_top: int = 0
 var last_gate_y: int = 0          # 0 = no checkpoint yet (sentinel)
 var stall_ticks: int = 0
-var mode: String = "campaign"     # "campaign" | "endless"
+var mode: String = "campaign"     # "campaign" | "arcade" | "endless" | "boss_rush"
 var wave: int = 0
 var wave_start_tick: int = 0       # c3 3v: tick the current wave began (derived; not hashed) — the mast hazard's phase is wave-LOCAL so its warn always precedes the first jet
 var wave_pending: int = 0
@@ -1512,6 +1514,25 @@ func _blind_scatter(t: Dictionary) -> Array:
 		rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE]
 
 
+static func lane_seal_span(band_idx: int) -> Array:
+	## [off_north, off_south, side] — band offsets in FIXED (absi(y) % GATE_SPACING),
+	## side 0 = LEFT flank sealed, 1 = RIGHT. One source for the collision AND the
+	## draw, so the slab that reverts your step is the slab you can see.
+	var lh := _mix(band_idx, 733)
+	var span_off: int = 250 + lh % 400
+	return [span_off * F_ONE, (span_off + 120) * F_ONE, lh & 1]
+
+
+static func lane_sealed(tick: int, band_idx: int) -> bool:
+	return band_idx >= CHOKE_START_SEG \
+		and posmod(tick + band_idx * 300, LANE_BLOCK_CYCLE) < LANE_BLOCK_SEALED
+
+
+static func lane_warning(tick: int, band_idx: int) -> bool:
+	return band_idx >= CHOKE_START_SEG \
+		and posmod(tick + band_idx * 300, LANE_BLOCK_CYCLE) >= LANE_BLOCK_CYCLE - LANE_BLOCK_WARN
+
+
 func _lane_blocked(x: int, y: int) -> bool:
 	## c4 2v TEMPORARY LANE SEAL: a ~200x120 span on a hash-picked flank seals for
 	## LANE_BLOCK_SEALED ticks each LANE_BLOCK_CYCLE (a >= HULL_CLEARANCE bypass
@@ -1519,22 +1540,20 @@ func _lane_blocked(x: int, y: int) -> bool:
 	## — so the static corridor gains a reroute beat. Pure tick_count-derived phase
 	## (no entity, no hashed field); campaign seg>=2 only, so torture (seg 0-1) and
 	## endless (band 0-1) never see it -> both goldens byte-identical.
-	if mode != "campaign":
+	## The geometry itself now lives in lane_seal_span()/lane_sealed() so the view
+	## draws the same slab this collides against (art == collision).
+	if not is_campaign_world():
 		return false
 	var band: int = absi(y) / GATE_SPACING
-	if band < CHOKE_START_SEG:
+	if not lane_sealed(tick_count, band):
 		return false
-	var lh := _mix(band, 733)
-	var span_off: int = 250 + lh % 400
+	var sp := lane_seal_span(band)
 	var off: int = absi(y) % GATE_SPACING
-	if off < span_off * F_ONE or off > (span_off + 120) * F_ONE:
+	if off < sp[0] or off > sp[1]:
 		return false
-	var phase: int = posmod(tick_count + band * 300, LANE_BLOCK_CYCLE)
-	if phase >= LANE_BLOCK_SEALED:
-		return false   # OPEN phase — free passage
-	if lh & 1 == 0:
-		return x <= WORLD_LEFT + 200 * F_ONE
-	return x >= WORLD_RIGHT - 200 * F_ONE
+	if sp[2] == 0:
+		return x <= WORLD_LEFT + LANE_SEAL_DEPTH
+	return x >= WORLD_RIGHT - LANE_SEAL_DEPTH
 
 
 func _barricade_solid(x: int, y: int) -> bool:
@@ -1544,7 +1563,7 @@ func _barricade_solid(x: int, y: int) -> bool:
 	## geometry transforms mid-encounter. The opposite flank is the guaranteed
 	## bypass (no softlock). Pure function of camera_top + position, ZERO state;
 	## campaign seg>=2 only -> torture/endless never see it -> goldens inert.
-	if mode != "campaign":
+	if not is_campaign_world():
 		return false
 	var band: int = absi(y) / GATE_SPACING
 	if band < CHOKE_START_SEG:
@@ -1562,6 +1581,14 @@ func _barricade_solid(x: int, y: int) -> bool:
 	return absi(camera_top) < band * GATE_SPACING + 250 * F_ONE   # solid until past the midpoint
 
 
+static func ledge_span(band_idx: int) -> Array:
+	## [line_y, x_min, x_max] in FIXED world units — the one-way ledge's drawn
+	## AND collided extent. One source for _crosses_ledge_south() and the view.
+	var lx: int = (100 + _mix(band_idx, 811) % 440) * F_ONE
+	return [-(band_idx * GATE_SPACING + (300 + _mix(band_idx, 617) % 380) * F_ONE),
+		lx - LEDGE_HALF_W, lx + LEDGE_HALF_W]
+
+
 func _crosses_ledge_south(nx: int, ny: int, oy: int) -> bool:
 	## c4 2v ONE-WAY LEDGE: a collapsed embankment you can drop DOWN (northward,
 	## the advance) but never climb back UP — a step that moves SOUTH (y increases,
@@ -1569,16 +1596,15 @@ func _crosses_ledge_south(nx: int, ny: int, oy: int) -> bool:
 	## the route is an irreversible commitment. Northbound is free. Pure position
 	## predicate, zero state; campaign seg>=2 only -> torture/endless never see it
 	## -> both goldens byte-identical.
-	if mode != "campaign" or ny <= oy:
+	if not is_campaign_world() or ny <= oy:
 		return false
 	var band: int = absi(oy) / GATE_SPACING
 	if band < CHOKE_START_SEG:
 		return false
-	var ly: int = -(band * GATE_SPACING + (300 + _mix(band, 617) % 380) * F_ONE)
-	var lx: int = (100 + _mix(band, 811) % 440) * F_ONE
-	if absi(nx - lx) > 160 * F_ONE:
+	var sp := ledge_span(band)
+	if nx < sp[1] or nx > sp[2]:
 		return false
-	return oy <= ly and ny > ly   # crossed the ledge going south (retreat)
+	return oy <= sp[0] and ny > sp[0]   # crossed the ledge going south (retreat)
 
 
 func _choke_bounds(y: int) -> Array:
@@ -2046,6 +2072,15 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			# giving a commit-then-wait beat instead of a silent screen-wipe.
 			pending_airstrike = STRIKE_TELEGRAPH_TICKS
 			events.append({"t": "airstrike_called", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
+
+
+func is_campaign_world() -> bool:
+	## Arcade IS the campaign world, entered mid-way via jump_to_chapter() (see
+	## the note at _step_camera's streaming guard). Every authored-corridor rule
+	## must key on this, never on the raw "campaign" string, or Arcade plays a
+	## hollowed-out version of the same map. Public because src/main.gd and
+	## src/view/hud.gd call it.
+	return mode == "campaign" or mode == "arcade"
 
 
 func _econ_depth() -> int:
@@ -2742,6 +2777,55 @@ func _step_bullets() -> void:
 			bullets.remove_at(i)
 
 
+func grenade_drift(x: int, y: int, shell: bool) -> int:
+	## The marsh current (c2 5v) as ONE definition, sim side and view side —
+	## same idiom as ford_half_w/ford_closed. _step_grenades applies it; the
+	## view's landing marker replays it. Byte-for-byte the arithmetic that
+	## used to be inline, so the goldens cannot move.
+	## c3 5v BREAKWATER: a solid rock immediately downstream stops the drift —
+	## its LEEWARD cell is a safe shadow where the current can't bank the
+	## grenade into you. Cover choice informs the hazard.
+	if shell:
+		return 0
+	var g_band: int = absi(y) / GATE_SPACING
+	if g_band != MARSH_SEG or not _in_water(x, y):
+		return 0
+	var drift: int = MARSH_DRIFT if _mix(g_band, _world_seed) & 1 else -MARSH_DRIFT
+	for wk in rocks:
+		if _rk_solid(wk) and absi(y - wk["y"]) <= _rk_hh(wk) \
+				and (x - wk["x"]) * drift < 0 \
+				and absi(x - wk["x"]) <= _rk_hw(wk) + BREAKWATER_SLACK:
+			return 0
+	return drift
+
+
+func predict_grenade_landing(g: Dictionary) -> Array:
+	## Where this airborne grenade ACTUALLY detonates, in FIXED world coords.
+	## Runs the exact integrator _step_grenades runs — position, then gravity,
+	## then grenade_drift — so the view's landing marker cannot lie about the
+	## parabola or the marsh current. Pure read: writes nothing, draws no rng,
+	## touches no hashed state. Airburst is deliberately NOT modelled: the
+	## marker answers "where does it land if I let it fly".
+	## ponytail: _in_water is sampled at the CURRENT tick_count, so a
+	## collapsing-ford phase flip mid-flight (FORD_CYCLE_TICKS >> 33) can be
+	## off by a px or two. Thread a tick offset only if that ever shows.
+	## Returns an Array, not a Vector2i: Vector2i components are int32 and an
+	## endless-mode y in fixed point overflows past ~32,700px of depth.
+	var x: int = g["x"]
+	var y: int = g["y"]
+	var z: int = g["z"]
+	var zv: int = g["zv"]
+	for _t in 128:                      # max real flight is 33 ticks; cap is a guard
+		x += g["vx"]
+		y += g["vy"]
+		z += zv
+		zv -= GRENADE_GRAV
+		x += grenade_drift(x, y, g["shell"])
+		if z <= 0 and zv < 0:
+			break
+	return [x, y]
+
+
 func _step_grenades() -> void:
 	for i in range(grenades.size() - 1, -1, -1):
 		var g := grenades[i]
@@ -2770,22 +2854,7 @@ func _step_grenades() -> void:
 		# grenades drift sideways over open marsh water, direction hashed per
 		# run band (learnable within one river). Shells exempt: heavy ordnance
 		# flies true. Pure read past the golden window — no state, no rng draw.
-		if not g["shell"]:
-			var g_band: int = absi(g["y"]) / GATE_SPACING
-			if g_band == MARSH_SEG and _in_water(g["x"], g["y"]):
-				var drift: int = MARSH_DRIFT if _mix(g_band, _world_seed) & 1 else -MARSH_DRIFT
-				# c3 5v BREAKWATER: a solid rock immediately downstream stops the
-				# drift — its LEEWARD cell is a safe shadow where the current can't
-				# bank the grenade into you. Cover choice now informs the hazard.
-				var blocked := false
-				for wk in rocks:
-					if _rk_solid(wk) and absi(g["y"] - wk["y"]) <= _rk_hh(wk) \
-							and (g["x"] - wk["x"]) * drift < 0 \
-							and absi(g["x"] - wk["x"]) <= _rk_hw(wk) + BREAKWATER_SLACK:
-						blocked = true
-						break
-				if not blocked:
-					g["x"] = g["x"] + drift
+		g["x"] = g["x"] + grenade_drift(g["x"], g["y"], g["shell"])
 		if g["z"] <= 0 and g["zv"] < 0:
 			_explode(g["x"], g["y"])
 			grenades.remove_at(i)
@@ -3630,7 +3699,7 @@ func _step_bunkers() -> void:
 			continue
 		# CLAMPED AT 0 — the only one of these three the PLAYER can see. The reset is
 		# gated on the enemy cap but the decrement is not, so a full field drives this
-		# negative; main.gd:6130 draws the hatch-charge glow as 1 - spawn_cd/120, which
+		# negative; main.gd's bunker draw builds the hatch-charge glow from 1 - spawn_cd/120, which
 		# a negative pins past 100% — a mouth glowing "about to spawn" at full brightness
 		# for a spawn the cap is refusing. Measured before the clamp (tools/probe_cd_clamp.gd,
 		# 6 campaign seeds): 3 of 6 saturated the roster, worst seed reached -332 and drew
@@ -4400,7 +4469,7 @@ func _step_fords() -> void:
 func _step_camera() -> void:
 	# c4 2v: lane-block TELEGRAPH — emit warn/seal/clear cues for the band in view
 	# so a seal reads before it commits. Checksum-excluded events; pure phase read.
-	if mode == "campaign":
+	if is_campaign_world():
 		var lb_band: int = absi(camera_top) / GATE_SPACING
 		if lb_band >= CHOKE_START_SEG:
 			var lbh := _mix(lb_band, 733)
@@ -4955,13 +5024,13 @@ func _step_camera() -> void:
 	# is READABLE in a one-hit game (the view pulses a bottom-edge wedge + scree).
 	# The warn timer is CAMERA-DERIVED and unhashed; it stays 0 for the whole
 	# torture window (REAR_TRICKLE_START=-2400 > the ~-1520 reach) so goldens hold.
-	if mode == "campaign" and _rear_warn_ticks > 0:
+	if is_campaign_world() and _rear_warn_ticks > 0:
 		_rear_warn_ticks -= 1
 		if _rear_warn_ticks == 0:
 			var sy: int = camera_top + 380 * F_ONE
 			_spawn_enemy(_rear_warn_x, sy, false)
 			events.append({"t": "rear_breach", "x": _rear_warn_x, "y": sy})
-	while mode == "campaign" and camera_top < _next_rear_y and _rear_warn_ticks == 0:
+	while is_campaign_world() and camera_top < _next_rear_y and _rear_warn_ticks == 0:
 		var rslot: int = absi(_next_rear_y / REAR_TRICKLE_SPACING)
 		var rear_x: int = WORLD_LEFT if _mix(rslot, _world_seed) & 1 else WORLD_RIGHT
 		_rear_warn_x = rear_x
@@ -5281,7 +5350,7 @@ func _step_waves(inputs: Array = []) -> void:
 	# threat scales, not just raw count. (Endless-only; campaign torture never
 	# reaches here, so campaign goldens are unaffected.)
 	if wave_pending > 0:
-		# Floored with its three siblings (bunker :3307, colossus spawn_cd/sweep_cd) —
+		# Floored with its three siblings (_step_bunkers' bk["spawn_cd"], colossus spawn_cd/sweep_cd) —
 		# same shape, same enemy-cap gate on the reset only. Deep endless waves are
 		# where the roster actually saturates, so this is the one most likely to run.
 		wave_spawn_cd = maxi(wave_spawn_cd - 1, 0)
@@ -5999,7 +6068,7 @@ func _step_one_boss(boss: Dictionary) -> void:
 	# rotates per cycle), so no single firing spot stays safe. Campaign gunship
 	# (gate 3) only — endless minibosses have no such bags (no-op) — so gate 3 is
 	# torture-inert and ENDLESS_GOLDEN is untouched.
-	if mode == "campaign" and t == BOSS_STRAFE_TICKS:
+	if is_campaign_world() and t == BOSS_STRAFE_TICKS:
 		var spot_i: int = posmod(tick_count / BOSS_CYCLE_TICKS, GUNSHIP_COVER_BAGS.size())
 		var bag: Array = GUNSHIP_COVER_BAGS[spot_i]
 		_add_strike(bag[0] * F_ONE, boss["gate_y"] + bag[1] * F_ONE)
@@ -6310,7 +6379,7 @@ func _step_observer() -> void:
 	# rusher from the rear wall behind the lead player. Single-shot by equality
 	# (advancing resets stall_ticks -> re-arms); stall_ticks is already hashed,
 	# so no new field. seg>=2 keeps the torture (which never stalls 300t) inert.
-	if mode == "campaign" and stall_ticks == REAR_CAMP_TICKS:
+	if is_campaign_world() and stall_ticks == REAR_CAMP_TICKS:
 		var lead_y := 0
 		var found_lead := false
 		for p in players:

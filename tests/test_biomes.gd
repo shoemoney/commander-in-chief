@@ -329,3 +329,33 @@ func test_no_view_string_names_a_biome_the_game_never_renders() -> void:
 				i += 2   # odd indices are the quoted spans
 		Runner.T.eq(", ".join(offenders), "",
 			"%s: user-facing copy names a biome the game never renders" % path)
+
+
+func test_arcade_obeys_the_authored_corridor_rules() -> void:
+	## ARCADE / CHAPTER SELECT routes through the campaign branch of step() and
+	## streams the same authored world — but nine corridor predicates were gated on
+	## the literal string "campaign", so Arcade played a hollowed-out version of the
+	## same map: no lane seals, no one-way ledge, and (until the econ fix) base
+	## prices. Scan for a seal rather than hard-coding a coordinate, and assert
+	## campaign finds one so a vacuous scan can't go green.
+	var arc := SimWorld.new(11, 1, "arcade")
+	var cam := SimWorld.new(11, 1, "campaign")
+	var arc_sealed := false
+	var cam_sealed := false
+	var arc_ledge := false
+	var cam_ledge := false
+	for step in range(2000, 6000, 5):
+		var wy: int = -step * SimWorld.F_ONE
+		for x in [SimWorld.WORLD_LEFT, SimWorld.WORLD_RIGHT]:
+			if arc._lane_blocked(x, wy): arc_sealed = true
+			if cam._lane_blocked(x, wy): cam_sealed = true
+			if arc._crosses_ledge_south(x, wy + 4 * SimWorld.F_ONE, wy - 4 * SimWorld.F_ONE): arc_ledge = true
+			if cam._crosses_ledge_south(x, wy + 4 * SimWorld.F_ONE, wy - 4 * SimWorld.F_ONE): cam_ledge = true
+	Runner.T.ok(cam_sealed and cam_ledge, "guard: the scan window really contains a campaign seal and ledge")
+	Runner.T.ok(arc_sealed, "ARCADE seals lanes past seg 2 — it is the same authored world")
+	Runner.T.ok(arc_ledge, "ARCADE has the one-way ledge past seg 2")
+	# Depth-scaled prices: pose 4 opened gates on both and compare the SHIPPED price.
+	for _g in 4:
+		arc.gates.append({"open": true})
+		cam.gates.append({"open": true})
+	Runner.T.eq(arc._supply_cost(0), cam._supply_cost(0), "ARCADE prices creep with depth like campaign")
