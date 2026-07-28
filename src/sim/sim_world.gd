@@ -1385,23 +1385,35 @@ func _step_players(inputs: Array) -> void:
 		if inp.revive:
 			_try_revive(i, p)
 
+		# NOTE: _try_board_tank / _try_salvage_hulk MUTATE — they must be evaluated
+		# exactly once, in this order, hence the nested `if` rather than a second
+		# short-circuit chain.
 		if interact_edge and not _try_board_tank(i, p) and not _try_salvage_hulk(p) \
-				and p["claymores"] > 0 and not _boardable_tank_near(p):
-			# Claymore: no tank in reach, so INTERACT plants a carried charge one
-			# step ALONG the aim — into the enemy lane you're already shooting,
-			# clear of your own kiting path (planting behind the aim dropped it
-			# straight into the retreat line: ~5 ticks from a self-kill at full
-			# backpedal). Still outside its own 9px trigger. It joins mines[]
-			# wholesale — armed instantly, and it hurts both sides (1986 grammar).
-			p["claymores"] = p["claymores"] - 1
-			var cmx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
-			var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
-			# `friendly` is view-only identity (yours vs the sapper's) — same
-			# trigger, same blast, NOT hashed (see test_checksum_coverage).
-			# `grace` is hashed (it decides whether a player takes a hit, so it is gameplay).
-			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true,
-				"grace": CLAYMORE_ARM_TICKS})
-			events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
+				and p["claymores"] > 0:
+			if _boardable_tank_near(p):
+				# The near-miss board guard was the ONLY refusal on INTERACT that stayed
+				# silent — it reads as "my key randomly did nothing". Say it out loud.
+				# Its OWN reason, not the sandbag path's "tank": that one means "you are
+				# INSIDE a tank, no hands to dig", and the view renders it NOT FROM THE
+				# TANK. Reusing it here told the player the opposite of the truth — this
+				# branch is only reachable with in_tank == -1, which the test asserts.
+				events.append({"t": "deny", "why": "board", "x": p["x"], "y": p["y"], "i": i})
+			else:
+				# Claymore: no tank in reach, so INTERACT plants a carried charge one
+				# step ALONG the aim — into the enemy lane you're already shooting,
+				# clear of your own kiting path (planting behind the aim dropped it
+				# straight into the retreat line: ~5 ticks from a self-kill at full
+				# backpedal). Still outside its own 9px trigger. It joins mines[]
+				# wholesale — armed instantly, and it hurts both sides (1986 grammar).
+				p["claymores"] = p["claymores"] - 1
+				var cmx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
+				var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
+				# `friendly` is view-only identity (yours vs the sapper's) — same
+				# trigger, same blast, NOT hashed (see test_checksum_coverage).
+				# `grace` is hashed (it decides whether a player takes a hit, so it is gameplay).
+				mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true,
+					"grace": CLAYMORE_ARM_TICKS})
+				events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
 
 		# The rescue touch ignores roll i-frames — i-frames stop contact DEATH,
 		# not a friendly grab (rolling through fire onto the pilot is the
@@ -5665,12 +5677,18 @@ func _start_wave() -> void:
 		# stays put but the ARRANGEMENT swaps, so old muscle memory dies with the
 		# co-cratered rock. Endless wave>=3 -> past the wave-2 wipe -> golden-inert.
 		var layout: Array = ARENA_LAYOUTS[(amix >> 12) % ARENA_LAYOUTS.size()]
+		# ...and if even the recycle lap plants nothing (every slot pinned by
+		# player-BOUGHT sandbags, which recycle never eats), say so out loud —
+		# the same fallthrough the supply pod below already got. Emitting NOTHING
+		# is how the promised beat "died in silence" in the first place.
+		var planted := 0
+		var l_ax: int = ARENA_L_SLOTS[slot_base][0] * F_ONE
+		var l_ay: int = ARENA_L_SLOTS[slot_base][1] * F_ONE
 		for attempt in ARENA_L_SLOTS.size() * 2:
 			var recycle := attempt >= ARENA_L_SLOTS.size()
 			var slot: Array = ARENA_L_SLOTS[(slot_base + attempt) % ARENA_L_SLOTS.size()]
-			var l_ax: int = slot[0] * F_ONE
-			var l_ay: int = slot[1] * F_ONE
-			var planted := 0
+			l_ax = slot[0] * F_ONE
+			l_ay = slot[1] * F_ONE
 			var mir: int = -1 if slot[0] >= 320 else 1   # arrange toward arena center
 			for bo in layout:
 				var l_bx: int = l_ax + (bo[0] * mir) * F_ONE
@@ -5682,6 +5700,8 @@ func _start_wave() -> void:
 				events.append({"t": "arena_shift", "x": l_ax, "y": l_ay,
 					"forced": 1 if recycle else 0})
 				break
+		if planted == 0:
+			events.append({"t": "arena_shift_blocked", "x": l_ax, "y": l_ay})
 	# c4 2v RENEWABLE COVER: a supply pod impacts every 5th wave and carves a 3x3
 	# RIM of fresh solid rock (8 outer cells; center left open = an instant micro-
 	# fort), so the c2-04 scar rule can no longer strip the arena bare by ~wave 15.

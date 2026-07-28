@@ -754,6 +754,34 @@ func test_arena_shift_recycles_a_full_table() -> void:
 	Runner.T.ok(bags0 > 0, "the congestion fixture actually filled the table")
 
 
+func test_arena_shift_reports_when_it_truly_cannot_plant() -> void:
+	# Sibling of test_supply_pod_reports_when_it_truly_cannot_land. The L-drop
+	# emitted arena_shift ONLY on planted > 0 — so if BOTH laps planted nothing
+	# (every slot pinned by player-BOUGHT cover, which recycle never bulldozes)
+	# the whole beat vanished with no event at all, unlike the pod next to it.
+	var sim := SimWorld.new(11, 1, "endless")
+	while sim.wave < 2:
+		sim._start_wave()
+	sim.sandbags.clear()
+	for slot in SimWorld.ARENA_L_SLOTS:
+		for ox in range(-40, 41, 16):
+			for oy in range(-80, 41, 16):
+				sim.sandbags.append({"x": (slot[0] + ox) * SimWorld.F_ONE,
+					"y": (slot[1] + oy) * SimWorld.F_ONE, "player": 1})
+	var bags0: int = sim.sandbags.size()
+	sim.events.clear()
+	sim._start_wave()   # wave 3: the first shift beat, with nowhere legal to plant
+	var blocked := {}
+	for ev in sim.events:
+		if ev.get("t", "") == "arena_shift":
+			Runner.T.ok(false, "the L-drop cannot plant inside player-paid cover")
+		if ev.get("t", "") == "arena_shift_blocked":
+			blocked = ev
+	Runner.T.ok(not blocked.is_empty(), "an impossible cover drop REPORTS instead of vanishing")
+	Runner.T.eq(sim.sandbags.size(), bags0, "player-paid cover is never recycled out from under them")
+	Runner.T.ok(bags0 > 0, "the congestion fixture actually filled the table")
+
+
 func test_supply_pod_always_lands_or_reports() -> void:
 	# The wave-5 pod had NO fallthrough at all — a congested slot silently ate a
 	# PROMISED resupply (measured missing from wave 20 on). Every pod wave must

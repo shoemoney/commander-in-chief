@@ -1,0 +1,442 @@
+From aa536e3ca2956414ebc9a90536e8f2fdfb7041bd Mon Sep 17 00:00:00 2001
+From: Jeremy Schoemaker <jeremy@shoemoney.com>
+Date: Sat, 25 Jul 2026 17:54:37 -0500
+Subject: [PATCH] =?UTF-8?q?fix:=20=F0=9F=8E=96=EF=B8=8F=20one=20perk=20pur?=
+ =?UTF-8?q?chase=20was=20bricking=20every=20Endless=20run=20forever?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The big one: _reset() applies owned Veteran Perks AFTER constructing the sim
+(vest / +war_chest / +tokens), but Replay._new_sim() only mirrored assist,
+hard and chapter — so the verification re-sim started UNEQUIPPED. Measured on
+seed 0x5EED over 1800 scripted ticks: equipped reaches wave 2 at 1300 pts, the
+identical inputs unequipped wipe on wave 1 at 0. verify_score() failed,
+_apply_score_verdict took the else branch, and _record_run never ran — the one
+path to the Hall of Fame, lifetime stats, the Steam upload and VP income. So
+the first perk you bought stopped every later run banking, you could never
+earn VP for another, and your honest replay was written verified=false for
+validate_replay.gd to call CHEAT DETECTED. Perk tiers now ride along in
+to_dict/load_from (defaulting to 0, so old replays still load and verify) and
+_new_sim replays the same three mutations. PERK_CHEST_BONUS now has one home.
+
+Also:
+- _save_cfg raises a SAVE FAILED banner in both failure branches. It only ever
+  push_warning'd (invisible in an export) and ~7 callers drop its Error, so a
+  failing disk silently ate settings, rebinds, perk purchases and the hall.
+- the every-3rd-wave arena L-drop emits arena_shift_blocked when both laps
+  plant nothing, mirroring the supply pod's existing fallthrough. It used to
+  emit nothing at all, so the "arena keeps changing" beat died in silence.
+- a near-miss board tap now emits deny/"tank" instead of eating the keypress —
+  the last silent refusal on INTERACT. main.gd already renders that text.
+
+Goldens: measured, not assumed — zero samples moved. Both sim edits are
+events-only (excluded from checksum) and the L-drop restructure preserves
+control flow exactly (`planted` accumulates but the loop breaks on >0).
+
+Suite: 804 methods / 17,881 assertions / 0 failures. SMOKE OK. lint_sim OK.
+---
+ src/main.gd                | 23 +++++++++-
+ src/net/replay.gd          | 21 ++++++++-
+ src/sim/sim_world.gd       | 51 ++++++++++++++-------
+ tests/test_endless.gd      | 28 ++++++++++++
+ tests/test_endless_meta.gd | 94 ++++++++++++++++++++++++++++++++++++++
+ tests/test_mechanics.gd    | 29 ++++++++++++
+ 6 files changed, 227 insertions(+), 19 deletions(-)
+
+diff --git a/src/main.gd b/src/main.gd
+index 12d57cbf..48ebed84 100644
+--- a/src/main.gd
++++ b/src/main.gd
+@@ -318,7 +318,7 @@ var _prev_colossus_phase := 0     # phase-change escalation banners
+ # -- so the sim itself (and its golden checksums) never learns a perk exists.
+ var vet_points := 0
+ var _perk_levels: Dictionary = {}   # perk id -> owned tier (0 = not owned; matches PERK_DEFS "cost".size() = max tier)
+-const PERK_CHEST_BONUS := 60        # HEAD START perk: War Chest added to the run's start PER OWNED TIER
++const PERK_CHEST_BONUS := Replay.PERK_CHEST_BONUS   # HEAD START perk: War Chest added to the run's start PER OWNED TIER. Single source of truth lives in Replay, which must replay the SAME mutation or a perk run never verifies.
+ # endless-meta-retention: typed perk-id constants -- main.gd, menu.gd and the
+ # tests all key off these instead of scattering raw "perk_xxx" string literals
+ # (a typo in a string never gets caught by the parser; a typo in a const does).
+@@ -1363,6 +1363,15 @@ func _reset() -> void:
+ 	_recorder.assist = sim.assist_mode   # capture the config the sim was seeded with, or the
+ 	_recorder.hard = sim.hard            # replay rebuilds a vanilla sim and diverges (c4-fix)
+ 	_recorder.chapter = _arcade_chapter if _mode_str == "arcade" else 1   # Arcade's jump_to_chapter start gate
++	if _mode_str == "endless":
++		# Same reason as assist/hard above: the perk block a few lines up mutates the
++		# freshly-built sim (vest/war_chest/tokens), all of which feed score+checksum.
++		# Omit them and the run's own replay starts UNEQUIPPED, verify_score fails, and
++		# _apply_score_verdict silently skips the only path to the Hall/VP/Steam --
++		# so buying one perk used to brick every Endless run that followed.
++		_recorder.perk_vest = perk_level(PERK_VEST)
++		_recorder.perk_chest = perk_level(PERK_CHEST)
++		_recorder.perk_token = perk_level(PERK_TOKEN)
+ 	_replay_saved = false
+ 	# A restart mid-replay must not keep feeding recorded frames into the new sim.
+ 	_watching = false
+@@ -2282,6 +2291,12 @@ func _consume_events() -> void:
+ 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.05})
+ 				_burst(ev["x"], ev["y"], "dust", 8, 1.2, 2.4, 0.35)
+ 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(18.0, 24.0)})
++			"arena_shift_blocked":
++				# Sibling of supply_pod_blocked: the every-3rd-wave cover drop found
++				# nowhere to land even on the recycle lap. It used to emit NOTHING at
++				# all, so the promised "the arena keeps changing" beat just stopped.
++				show_banner("COVER DROP ABORTED — NO CLEAR GROUND", Color(1.0, 0.55, 0.3))
++				_sfx.play("deny", -5.0, 0.7)
+ 			"supply_pod_blocked":
+ 				# The promised wave-5 resupply found nowhere to land. It used to
+ 				# vanish in silence; now the player is TOLD they lost it.
+@@ -3435,8 +3450,13 @@ func _save_cfg(cf: ConfigFile) -> Error:
+ 	# path. rename_absolute is an OS rename — atomic on the same filesystem.
+ 	# Returns OK only when the rename actually landed: callers hold dirty flags
+ 	# (and thus a retry) until then, so a failed write is never a silent no-op.
++	# save-integrity: push_warning is invisible in an exported build, and ~7 of this
++	# function's callers (_save_settings, every rebind path, buy_perk, the replay
++	# last_score write) drop the Error return entirely -- so a failing disk was
++	# silently eating progress. Banner it HERE, once, and every caller is covered.
+ 	if cf.save(SAVE_TMP) != OK:
+ 		push_warning("ikari: config save failed")
++		show_banner("SAVE FAILED", GameMenu.BANNER_COL_FAIL)
+ 		return FAILED
+ 	# save-integrity: refresh the .bak ONLY from a primary that still PARSES.
+ 	# Copying a corrupt primary over the backup destroyed the last good save in
+@@ -3451,6 +3471,7 @@ func _save_cfg(cf: ConfigFile) -> Error:
+ 	var err := DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH)
+ 	if err != OK:
+ 		push_warning("ikari: config rename failed (%d)" % err)
++		show_banner("SAVE FAILED", GameMenu.BANNER_COL_FAIL)
+ 	return err
+ 
+ 
+diff --git a/src/net/replay.gd b/src/net/replay.gd
+index 87221523..e4196f08 100644
+--- a/src/net/replay.gd
++++ b/src/net/replay.gd
+@@ -21,6 +21,16 @@ var player_count: int = 1
+ var assist: bool = false   # accessibility 2-hit vest — MUST be restored on replay or the sim diverges
+ var hard: bool = false     # NG+ HARD spawn curve — alters the RNG stream + checksum, restore on replay
+ var chapter: int = 1       # authored-campaign-and-modes: Arcade's jump_to_chapter() start gate (1 = no jump)
++# endless-meta-retention: owned Veteran Perk tiers. main._reset() applies these
++# POST-construction exactly like the assist vest, so they belong here for exactly
++# the same reason: without them a perk-equipped Endless run re-sims as an
++# unequipped one, verify_score() fails, and _apply_score_verdict skips
++# _record_run -- i.e. the first perk you buy permanently stops every later run
++# from banking to the Hall / lifetime stats / Steam / VP income.
++const PERK_CHEST_BONUS := 60   # War Chest per owned HEAD START tier (main.gd aliases this const)
++var perk_vest: int = 0
++var perk_chest: int = 0
++var perk_token: int = 0
+ var frames: Array = []   # each element: Array of per-player encoded SimInput ([move_x,move_y,aim_x,aim_y,flags])
+ # replay-validated-leaderboards: the score the live run's sim reported, carried
+ # alongside the recorded inputs so ANY leaderboard/Hall submission can be
+@@ -43,6 +53,7 @@ func record_tick(inputs: Array) -> void:
+ func to_dict() -> Dictionary:
+ 	return {"magic": MAGIC, "seed": seed_value, "mode": mode,
+ 		"players": player_count, "assist": assist, "hard": hard, "chapter": chapter,
++		"perk_vest": perk_vest, "perk_chest": perk_chest, "perk_token": perk_token,
+ 		"frames": frames, "score": claimed_score, "verified": verified}
+ 
+ 
+@@ -119,6 +130,12 @@ static func load_from(path: String) -> Replay:
+ 	r.assist = bool(data.get("assist", false))
+ 	r.hard = bool(data.get("hard", false))
+ 	r.chapter = int(data.get("chapter", 1))   # pre-existing replays predate Arcade -> chapter 1 (no jump)
++	# Perk tiers default to 0 so replays recorded before this field still load AND
++	# still verify (an old file was necessarily recorded by a build that only ever
++	# ran unequipped -- or by the broken one, whose runs never verified anyway).
++	r.perk_vest = int(data.get("perk_vest", 0))
++	r.perk_chest = int(data.get("perk_chest", 0))
++	r.perk_token = int(data.get("perk_token", 0))
+ 	r.frames = data["frames"]
+ 	# score/verified default 0/false for pre-existing replays that predate
+ 	# replay-validated leaderboards.
+@@ -135,9 +152,11 @@ func _new_sim() -> SimWorld:
+ 	var sim := SimWorld.new(seed_value, player_count, mode)
+ 	sim.assist_mode = assist
+ 	sim.hard = hard
+-	if assist:
++	if assist or perk_vest > 0:
+ 		for pl in sim.players:
+ 			pl["vest"] = true
++	sim.war_chest += PERK_CHEST_BONUS * perk_chest
++	sim.tokens += perk_token
+ 	if mode == "arcade":
+ 		sim.jump_to_chapter(chapter)   # mirror main._reset()'s post-construction Arcade jump
+ 	return sim
+diff --git a/src/sim/sim_world.gd b/src/sim/sim_world.gd
+index 33c77f86..904875fa 100644
+--- a/src/sim/sim_world.gd
++++ b/src/sim/sim_world.gd
+@@ -1197,21 +1197,30 @@ func _step_players(inputs: Array) -> void:
+ 		if inp.revive:
+ 			_try_revive(i, p)
+ 
++		# NOTE: _try_board_tank / _try_salvage_hulk MUTATE — they must be evaluated
++		# exactly once, in this order, hence the nested `if` rather than a second
++		# short-circuit chain.
+ 		if interact_edge and not _try_board_tank(i, p) and not _try_salvage_hulk(p) \
+-				and p["claymores"] > 0 and not _boardable_tank_near(p):
+-			# Claymore: no tank in reach, so INTERACT plants a carried charge one
+-			# step ALONG the aim — into the enemy lane you're already shooting,
+-			# clear of your own kiting path (planting behind the aim dropped it
+-			# straight into the retreat line: ~5 ticks from a self-kill at full
+-			# backpedal). Still outside its own 9px trigger. It joins mines[]
+-			# wholesale — armed instantly, and it hurts both sides (1986 grammar).
+-			p["claymores"] = p["claymores"] - 1
+-			var cmx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
+-			var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
+-			# `friendly` is view-only identity (yours vs the sapper's) — same
+-			# trigger, same blast, NOT hashed (see test_checksum_coverage).
+-			mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true})
+-			events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
++				and p["claymores"] > 0:
++			if _boardable_tank_near(p):
++				# The near-miss board guard was the ONLY refusal on INTERACT that stayed
++				# silent — it reads as "my key randomly did nothing". Say it out loud:
++				# main.gd already maps deny/"tank" to NOT FROM THE TANK floating text.
++				events.append({"t": "deny", "why": "tank", "x": p["x"], "y": p["y"], "i": i})
++			else:
++				# Claymore: no tank in reach, so INTERACT plants a carried charge one
++				# step ALONG the aim — into the enemy lane you're already shooting,
++				# clear of your own kiting path (planting behind the aim dropped it
++				# straight into the retreat line: ~5 ticks from a self-kill at full
++				# backpedal). Still outside its own 9px trigger. It joins mines[]
++				# wholesale — armed instantly, and it hurts both sides (1986 grammar).
++				p["claymores"] = p["claymores"] - 1
++				var cmx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
++				var cmy: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
++				# `friendly` is view-only identity (yours vs the sapper's) — same
++				# trigger, same blast, NOT hashed (see test_checksum_coverage).
++				mines.append({"x": cmx, "y": cmy, "armed": true, "friendly": true})
++				events.append({"t": "claymore_plant", "x": cmx, "y": cmy, "i": i})
+ 
+ 		# The rescue touch ignores roll i-frames — i-frames stop contact DEATH,
+ 		# not a friendly grab (rolling through fire onto the pilot is the
+@@ -4904,12 +4913,18 @@ func _start_wave() -> void:
+ 		# stays put but the ARRANGEMENT swaps, so old muscle memory dies with the
+ 		# co-cratered rock. Endless wave>=3 -> past the wave-2 wipe -> golden-inert.
+ 		var layout: Array = ARENA_LAYOUTS[(amix >> 12) % ARENA_LAYOUTS.size()]
++		# ...and if even the recycle lap plants nothing (every slot pinned by
++		# player-BOUGHT sandbags, which recycle never eats), say so out loud —
++		# the same fallthrough the supply pod below already got. Emitting NOTHING
++		# is how the promised beat "died in silence" in the first place.
++		var planted := 0
++		var l_ax: int = ARENA_L_SLOTS[slot_base][0] * F_ONE
++		var l_ay: int = ARENA_L_SLOTS[slot_base][1] * F_ONE
+ 		for attempt in ARENA_L_SLOTS.size() * 2:
+ 			var recycle := attempt >= ARENA_L_SLOTS.size()
+ 			var slot: Array = ARENA_L_SLOTS[(slot_base + attempt) % ARENA_L_SLOTS.size()]
+-			var l_ax: int = slot[0] * F_ONE
+-			var l_ay: int = slot[1] * F_ONE
+-			var planted := 0
++			l_ax = slot[0] * F_ONE
++			l_ay = slot[1] * F_ONE
+ 			var mir: int = -1 if slot[0] >= 320 else 1   # arrange toward arena center
+ 			for bo in layout:
+ 				var l_bx: int = l_ax + (bo[0] * mir) * F_ONE
+@@ -4921,6 +4936,8 @@ func _start_wave() -> void:
+ 				events.append({"t": "arena_shift", "x": l_ax, "y": l_ay,
+ 					"forced": 1 if recycle else 0})
+ 				break
++		if planted == 0:
++			events.append({"t": "arena_shift_blocked", "x": l_ax, "y": l_ay})
+ 	# c4 2v RENEWABLE COVER: a supply pod impacts every 5th wave and carves a 3x3
+ 	# RIM of fresh solid rock (8 outer cells; center left open = an instant micro-
+ 	# fort), so the c2-04 scar rule can no longer strip the arena bare by ~wave 15.
+diff --git a/tests/test_endless.gd b/tests/test_endless.gd
+index a86e9c6d..a5f6f2f3 100644
+--- a/tests/test_endless.gd
++++ b/tests/test_endless.gd
+@@ -744,6 +744,34 @@ func test_arena_shift_recycles_a_full_table() -> void:
+ 	Runner.T.ok(bags0 > 0, "the congestion fixture actually filled the table")
+ 
+ 
++func test_arena_shift_reports_when_it_truly_cannot_plant() -> void:
++	# Sibling of test_supply_pod_reports_when_it_truly_cannot_land. The L-drop
++	# emitted arena_shift ONLY on planted > 0 — so if BOTH laps planted nothing
++	# (every slot pinned by player-BOUGHT cover, which recycle never bulldozes)
++	# the whole beat vanished with no event at all, unlike the pod next to it.
++	var sim := SimWorld.new(11, 1, "endless")
++	while sim.wave < 2:
++		sim._start_wave()
++	sim.sandbags.clear()
++	for slot in SimWorld.ARENA_L_SLOTS:
++		for ox in range(-40, 41, 16):
++			for oy in range(-80, 41, 16):
++				sim.sandbags.append({"x": (slot[0] + ox) * SimWorld.F_ONE,
++					"y": (slot[1] + oy) * SimWorld.F_ONE, "player": 1})
++	var bags0: int = sim.sandbags.size()
++	sim.events.clear()
++	sim._start_wave()   # wave 3: the first shift beat, with nowhere legal to plant
++	var blocked := {}
++	for ev in sim.events:
++		if ev.get("t", "") == "arena_shift":
++			Runner.T.ok(false, "the L-drop cannot plant inside player-paid cover")
++		if ev.get("t", "") == "arena_shift_blocked":
++			blocked = ev
++	Runner.T.ok(not blocked.is_empty(), "an impossible cover drop REPORTS instead of vanishing")
++	Runner.T.eq(sim.sandbags.size(), bags0, "player-paid cover is never recycled out from under them")
++	Runner.T.ok(bags0 > 0, "the congestion fixture actually filled the table")
++
++
+ func test_supply_pod_always_lands_or_reports() -> void:
+ 	# The wave-5 pod had NO fallthrough at all — a congested slot silently ate a
+ 	# PROMISED resupply (measured missing from wave 20 on). Every pod wave must
+diff --git a/tests/test_endless_meta.gd b/tests/test_endless_meta.gd
+index 27d2357b..1cdc41a8 100644
+--- a/tests/test_endless_meta.gd
++++ b/tests/test_endless_meta.gd
+@@ -9,12 +9,25 @@ extends RefCounted
+ 
+ const Runner := preload("res://tests/run_tests.gd")
+ const MainScript := preload("res://src/main.gd")
++const Det := preload("res://tests/test_determinism.gd")
+ 
+ 
+ class _NullSfx extends Sfx:
+ 	func play(_sound: String, _vol_db := 0.0, _pitch := 1.0) -> void: pass
+ 
+ 
++# Same "subclass the REAL main.gd, override only the gated side effects" pattern
++# as test_leaderboard.gd's _StubMainGate -- so the run below exercises the actual
++# _reset()/_apply_score_verdict bodies, not a parallel copy that could drift.
++class _PerkGateMain extends MainScript:
++	var record_run_calls := 0
++	var last_recorded_score := -1
++	func _record_run(score: int) -> void:
++		record_run_calls += 1
++		last_recorded_score = score
++	func show_banner(_text: String, _col := GameMenu.BANNER_COL_DEFAULT, _icon := "") -> void: pass
++
++
+ # Move the dev's real save aside to a stash file (self-healing if a previous
+ # crashed run left one stranded), so any test that persists to disk can never
+ # touch real progress. Mirrors test_menu_layout.gd's hall/daily integration tests.
+@@ -62,6 +75,87 @@ func test_owned_perks_apply_to_a_fresh_endless_run() -> void:
+ 	main.free()
+ 
+ 
++func test_perk_equipped_endless_run_still_verifies_and_banks() -> void:
++	# THE cross-system regression. Perks were applied post-construction in _reset()
++	# but Replay rebuilt its verification sim from seed/mode/assist/hard/chapter
++	# ONLY -- so a perk-equipped run re-simulated as an UNEQUIPPED one. Measured on
++	# seed 0x5EED / 1800 scripted ticks: equipped reaches wave 2 at 1300 pts, the
++	# same inputs unequipped wipe on wave 1 at 0. verify_score() therefore failed,
++	# _apply_score_verdict took the else branch, and _record_run -- the ONLY path to
++	# the Hall of Fame, lifetime stats, the Steam upload and VP income -- never ran.
++	# Net effect: the first perk you ever bought stopped every later Endless run
++	# from banking, so you could never earn VP for another one. Each half of this
++	# was covered alone; nothing crossed them. This does.
++	var main = _PerkGateMain.new()
++	main._sfx = _NullSfx.new()
++	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 2, MainScript.PERK_TOKEN: 1}
++	main._endless = true
++	main._seed_override = 0x5EED   # one-shot: pin the run so the measured divergence above holds
++	main._reset()
++	Runner.T.ok(main.sim.war_chest > 0 and main.sim.players[0]["vest"] and main.sim.tokens > 0,
++		"sanity: this run really did start perk-equipped")
++
++	# Drive it exactly the way _physics_process does -- the same inputs into the
++	# sim and the recorder (src/main.gd: `_recorder.record_tick(inputs)`).
++	for tick in 1800:
++		var inputs := [Det.scripted_input(tick, 0)]
++		main._recorder.record_tick(inputs)
++		main.sim.step(inputs)
++	Runner.T.ok(main.sim.score > 0, "the scripted run actually scored something worth verifying")
++
++	var verified: bool = main._recorder.verify_score(main.sim.score)
++	Runner.T.ok(verified, "a perk-equipped run's OWN replay must still reproduce its score")
++	main._apply_score_verdict(main.sim.score, verified)
++	Runner.T.eq(main.record_run_calls, 1,
++		"...and must therefore still reach the one bank path (Hall / lifetime / Steam / VP)")
++	Runner.T.eq(main.last_recorded_score, main.sim.score, "the banked score is the verified one")
++
++	# Anchor: the SAME frames with the perk tiers stripped must NOT verify. Without
++	# this the test could pass vacuously if perks stopped mattering; with it, this
++	# case is provably red against the pre-fix Replay.
++	var blind := Replay.new()
++	blind.seed_value = main._recorder.seed_value
++	blind.mode = main._recorder.mode
++	blind.player_count = main._recorder.player_count
++	blind.frames = main._recorder.frames
++	Runner.T.ok(not blind.verify_score(main.sim.score),
++		"anchor: the identical frames replayed UNEQUIPPED diverge -- the exact pre-fix failure")
++	main.free()
++
++
++func test_perk_tiers_survive_a_replay_save_load_round_trip() -> void:
++	# The carried tiers are worthless if they don't survive the on-disk format,
++	# and OLD replays (recorded before the field existed) must still load and
++	# verify -- they were necessarily recorded unequipped, hence the 0 default.
++	var rep := Replay.new()
++	rep.seed_value = 0x5EED
++	rep.mode = "endless"
++	rep.perk_vest = 1
++	rep.perk_chest = 2
++	rep.perk_token = 1
++	var path := "user://tmp_test_perk_replay.json"
++	if FileAccess.file_exists(path):
++		DirAccess.remove_absolute(path)
++	Runner.T.eq(rep.save(path), OK, "the replay writes")
++	var loaded := Replay.load_from(path)
++	Runner.T.ok(loaded != null, "the replay reads back")
++	Runner.T.eq(loaded.perk_vest, 1, "VETERAN VEST tier survives the round trip")
++	Runner.T.eq(loaded.perk_chest, 2, "HEAD START tier survives the round trip")
++	Runner.T.eq(loaded.perk_token, 1, "SIGNAL FLARE tier survives the round trip")
++
++	# A pre-existing file has no perk keys at all -- it must still load, at 0.
++	var old := rep.to_dict()
++	old.erase("perk_vest")
++	old.erase("perk_chest")
++	old.erase("perk_token")
++	Runner.T.eq(Replay.save_dict(old, path), OK, "the legacy-shaped replay writes")
++	var legacy := Replay.load_from(path)
++	Runner.T.ok(legacy != null, "a replay predating the perk fields still loads (back-compat)")
++	Runner.T.eq(legacy.perk_vest + legacy.perk_chest + legacy.perk_token, 0,
++		"...defaulting to no perks, which is what such a run was actually recorded with")
++	DirAccess.remove_absolute(path)
++
++
+ func test_unowned_perks_leave_a_fresh_endless_run_untouched() -> void:
+ 	var main: Node2D = MainScript.new()
+ 	main._sfx = _NullSfx.new()
+diff --git a/tests/test_mechanics.gd b/tests/test_mechanics.gd
+index 3c76f6a7..b3b1f4b2 100644
+--- a/tests/test_mechanics.gd
++++ b/tests/test_mechanics.gd
+@@ -200,6 +200,35 @@ func test_claymore_plants_on_interact_and_consumes_a_charge() -> void:
+ 		"the plant lands outside its own trigger radius")
+ 
+ 
++func test_near_miss_board_tap_denies_out_loud_instead_of_eating_the_key() -> void:
++	# The guard that stops INTERACT arming a claymore under a boardable tank was
++	# the ONE refusal on that verb with no feedback at all: the key just did
++	# nothing, the charge stayed in the pouch, and nothing appeared on screen.
++	# It must now emit deny/"tank" (main.gd already renders that as floating text).
++	var sim := SimWorld.new(12, 1)
++	var p := sim.players[0]
++	sim._apply_supply(p, 8)
++	Runner.T.eq(p["claymores"], 1, "capsule grants the charge this tap must NOT spend")
++	sim.step([SimInput.new()])   # let the initial world-stream settle
++	# Park a boardable tank OUTSIDE board range but inside the 2x near-miss ring.
++	var tx: int = p["x"] + 36 * SimWorld.F_ONE   # > TANK_BOARD_RADIUS (24), < 2x (48)
++	sim.tanks.clear()
++	sim.tanks.append({"x": tx, "y": p["y"], "alive": true, "burning": false,
++		"fuel": 100000, "burn_ticks": 0, "fire_cd": 0, "occupant": -1})
++	var mines0 := sim.mines.size()
++	var inp := SimInput.new()
++	inp.interact = true
++	sim.step([inp])
++	Runner.T.eq(sim.mines.size(), mines0, "a near-miss board tap still refuses to arm underfoot")
++	Runner.T.eq(p["claymores"], 1, "and still costs nothing")
++	Runner.T.eq(p["in_tank"], -1, "sanity: the tank really was out of board reach")
++	var denied := false
++	for ev in sim.events:
++		if ev.get("t", "") == "deny" and ev.get("why", "") == "tank":
++			denied = true
++	Runner.T.ok(denied, "the refusal SAYS so (deny/tank) instead of silently eating the press")
++
++
+ func test_smoke_blinds_ranged_fire_but_not_pathing() -> void:
+ 	# Design-loop iter1: smoke denies the FIRE-COMMIT (windup/paint starts),
+ 	# never the pathing — blinding _nearest_alive_player wholesale froze the
