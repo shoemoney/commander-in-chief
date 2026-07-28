@@ -183,14 +183,19 @@ func _campaign_water_bands() -> Dictionary:
 	## narrows this test's domain by itself.
 	var sim := SimWorld.new(0xC0FFEE, 1)
 	var bands := {}
-	# Tick budget, not distance: the ratchet is rate-limited to MAX_CAM_STEP per tick
-	# (a gate opening used to let it take a 186px backlog in one jump), so dragging the
-	# same stretch of world past the streamer now costs ~67x the calls it did when one
-	# call moved the camera a full CAMERA_LEAD + 60.
-	for i in 14000:
+	# Only the water GEOMETRY is under test, not how fast the camera can reach it — so drive
+	# camera_top DIRECTLY rather than marching a player and waiting for the rate-limited ratchet
+	# to follow. Walking it cost 14,000 _step_camera calls (MAX_CAM_STEP per tick) and doubled
+	# the whole suite's wall clock, 10s -> 20.8s, a tax every sibling and CI run pays to
+	# re-measure a rate limit that tests/test_gates.gd already owns.
+	for i in 200:
 		for g in sim.gates:
 			g["open"] = true          # only the geometry is under test, not reachability
-		sim.players[0]["y"] = sim.camera_top - 60 * Fixed.ONE   # march north; the ratchet follows
+		# Move the camera AND the player together so _step_camera's rate limit is already
+		# satisfied and it falls straight through to the streaming half, which is the only
+		# part this helper needs.
+		sim.camera_top -= 320 * Fixed.ONE
+		sim.players[0]["y"] = sim.camera_top + 60 * Fixed.ONE
 		sim._step_camera()
 		for w in sim.waters:
 			bands[absi(w["y"] / SimWorld.GATE_SPACING)] = w["ford_x"]

@@ -1,0 +1,330 @@
+From c2ae6f8dc075fa05b76e66f9d126b9a1a6b7a6f4 Mon Sep 17 00:00:00 2001
+From: Jeremy Schoemaker <jeremy@shoemoney.com>
+Date: Sat, 25 Jul 2026 17:59:37 -0500
+Subject: [PATCH] =?UTF-8?q?fix:=20=F0=9F=8E=A5=20stop=20the=20camera=20sna?=
+ =?UTF-8?q?pping=20186px=20the=20tick=20a=20gate=20opens?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three transition defects, all verified against the sim before touching it:
+
+1. Gate open snapped the camera. _step_gates runs BEFORE _step_camera in the
+   same tick, so the gate's camera hold vanished and the ratchet took the whole
+   50-186px backlog in one uninterpolated jump. In 2P the trailing player was
+   then teleported the same distance by the next tick's _clamp_actor — onto
+   whatever was there, mines included. The ratchet is now rate-limited to
+   MAX_CAM_STEP (2x PLAYER_SPEED), which still out-runs every actor on the
+   field (TANK_SPEED is 0.8x) so it always catches up.
+
+2. The Colossus opened the finale from off-screen with no locator. It spawns at
+   final_gate.y - 120 while that never-opening gate pins camera_top to
+   final_gate.y - 60, so only its barrels peek in while it sprays aimed
+   bullets. The off-screen boss chevron iterated gate bosses and endless_boss
+   but not sim.colossus — it does now (view-only, golden-free). Also deleted
+   the dead observer branch next to it: osy was a constant +14px tested for
+   < 0, so it never fired, and the observer is pinned to camera_top and can't
+   go off-screen anyway.
+
+3. 2P: the leader dragged the trailing player into the bottom clamp. Focus is
+   min(y) over alive players and _clamp_actor was unconditional, so P2 lost
+   vertical control entirely. The trailing player now LIMITS the camera
+   instead. Dead partners drop out of the leash, so a downed player can never
+   freeze the scroll.
+
+Goldens re-recorded — all six campaign samples moved (measured); endless
+verified unchanged. Why-note in test_determinism.gd.
+---
+ src/main.gd               | 25 ++++++++++-------
+ src/sim/sim_world.gd      | 24 ++++++++++++++--
+ tests/test_colossus.gd    | 21 ++++++++++++++
+ tests/test_determinism.gd | 33 ++++++++++++++++++----
+ tests/test_gates.gd       | 37 +++++++++++++++++++++++++
+ tests/test_mechanics.gd   | 58 ++++++++++++++++++++++++++++++++++++---
+ 6 files changed, 176 insertions(+), 22 deletions(-)
+
+diff --git a/src/main.gd b/src/main.gd
+index 12d57cbf..e5e7ea90 100644
+--- a/src/main.gd
++++ b/src/main.gd
+@@ -9630,11 +9630,12 @@ func _draw_threat_edges() -> void:
+ 	# cap to the nearest few; ties prefer the lethal ranged killers.
+ 	_draw_edge_chevrons(bottom_threats, false)
+ 	_draw_edge_chevrons(top_threats, true)
+-	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
+-	# while an already-streamed boss (or the observer) sits above the visible
+-	# view — its HP bar/label live in the fixed HUD but the arena-lock
+-	# "destroy it" text points at nothing on screen. One double-chevron at the
+-	# nearest such target, so "look up" is unambiguous.
++	# Off-screen boss locator: a closed gate holds the camera while an
++	# already-streamed boss sits above the visible view — its HP bar/label live
++	# in the fixed HUD but the arena-lock "destroy it" text points at nothing on
++	# screen. One double-chevron at the nearest such target, so "look up" is
++	# unambiguous. (The observer needs no branch: it is pinned to
++	# camera_top + OBSERVER_Y_OFFSET and is therefore never off the top edge.)
+ 	var near_sy := -100000.0
+ 	var near_x := 0.0
+ 	var near_found := false
+@@ -9652,11 +9653,15 @@ func _draw_threat_edges() -> void:
+ 			near_sy = esy
+ 			near_x = clampf(sim.endless_boss["x"] * PX, 8.0, 632.0)
+ 			near_found = true
+-	if not sim.observer.is_empty():
+-		var osy: float = SimWorld.OBSERVER_Y_OFFSET * PX
+-		if osy < 0.0 and osy > near_sy:
+-			near_sy = osy
+-			near_x = clampf(sim.observer["x"] * PX, 8.0, 632.0)
++	# The Colossus spawns at final_gate.y - 120 while that (never-opening) gate
++	# pins camera_top to final_gate.y - 60, so it opens the finale from ~60px
++	# above the top edge and only its barrels peek in. Same chevron as every
++	# other boss gets.
++	if not sim.colossus.is_empty() and sim.colossus["alive"]:
++		var csy: float = (sim.colossus["y"] - sim.camera_top) * PX
++		if csy < 0.0 and csy > near_sy:
++			near_sy = csy
++			near_x = clampf(sim.colossus["x"] * PX, 8.0, 632.0)
+ 			near_found = true
+ 	if near_found:
+ 		var bp := 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady under reduce-motion
+diff --git a/src/sim/sim_world.gd b/src/sim/sim_world.gd
+index 33c77f86..ab9a16b4 100644
+--- a/src/sim/sim_world.gd
++++ b/src/sim/sim_world.gd
+@@ -209,6 +209,16 @@ const GATE_SPAWN_GRACE_TICKS := 90
+ # top-edge deaths into readable ones. Retreat room to the +344 clamp is 84px;
+ # 288 (literal bottom-20%) would leave only 56px, so 260 is the tuned floor.
+ const CAMERA_LEAD := 260 * F_ONE
++# Bottom of the band _clamp_actor holds every actor inside (camera_top + this).
++# _step_camera leashes on the same number, so the two can never drift apart.
++const CAMERA_BAND_BOTTOM := 344 * F_ONE
++# Ratchet speed limit. A gate opening drops its camera hold in ONE tick, and an
++# unlimited ratchet then took the whole backlog (50-186px) in that tick: the view
++# snapped, and in 2P the trailing player -- clamped to the band on the NEXT tick --
++# was teleported the same distance, potentially onto an armed mine. 2x PLAYER_SPEED
++# still out-runs anything on the field (TANK_SPEED is 0.8x), so the camera always
++# catches up to a player walking north at full speed; it just takes ~40 ticks.
++const MAX_CAM_STEP := PLAYER_SPEED * 2
+ const BUNKER_W := 48 * F_ONE
+ const BUNKER_H := 32 * F_ONE
+ # Dodge roll: 0.3 s i-frames, 1.2 s cooldown, 2× speed in the move direction.
+@@ -1522,7 +1532,7 @@ func _near_stream_bunker(x: int, y: int) -> bool:
+ func _clamp_actor(p: Dictionary) -> void:
+ 	var cb := _choke_bounds(p["y"])
+ 	p["x"] = clampi(p["x"], cb[0], cb[1])
+-	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
++	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
+ 	# Closed gates are a hard wall to the north.
+ 	for g in gates:
+ 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
+@@ -3843,8 +3853,18 @@ func _step_camera() -> void:
+ 		for g in gates:
+ 			if not g["open"] and desired < g["y"] - GATE_CAMERA_PAD:
+ 				desired = g["y"] - GATE_CAMERA_PAD
++		# A trailing co-op partner LIMITS the camera instead of being shoved by it.
++		# Focus is min(y) over alive players, so without this the leader drags the
++		# trailer into _clamp_actor's bottom edge and strips their vertical control
++		# for as long as the leader keeps walking. Solo is unaffected by
++		# construction (CAMERA_LEAD 260 sits inside the 344 band). A DEAD partner
++		# drops out of the loop, so a downed player can never freeze the run; two
++		# live players walking apart just hold the screen until one relents.
++		for p in players:
++			if p["alive"] and desired < p["y"] - CAMERA_BAND_BOTTOM:
++				desired = p["y"] - CAMERA_BAND_BOTTOM
+ 		if desired < camera_top:
+-			camera_top = desired
++			camera_top = maxi(desired, camera_top - MAX_CAM_STEP)
+ 
+ 	if mode != "campaign" and mode != "arcade":
+ 		return   # boss_rush pre-authors its whole gate gauntlet in _init; nothing to stream
+diff --git a/tests/test_colossus.gd b/tests/test_colossus.gd
+index 062ba6de..a6597404 100644
+--- a/tests/test_colossus.gd
++++ b/tests/test_colossus.gd
+@@ -331,3 +331,24 @@ func test_standoff_closes_over_the_phases() -> void:
+ 		var gap: int = (p["y"] - sim.colossus["y"]) / SimWorld.F_ONE
+ 		Runner.T.eq(gap, spec[1], "phase standoff settles at %dpx" % spec[1])
+ 	Runner.T.ok(SimWorld.COLOSSUS_CRUSH_RADIUS > 0, "phase 3 parks inside the crush radius")
++
++
++func test_colossus_is_offscreen_at_engage_and_the_locator_covers_it() -> void:
++	## It spawns at final_gate.y - 120 while that gate (which never opens) pins
++	## camera_top to final_gate.y - GATE_CAMERA_PAD, so the finale opens with the
++	## boss above the top edge, spraying aimed bullets from nowhere. The
++	## off-screen boss chevron must include it — it iterates gate bosses and the
++	## endless boss, and used to skip sim.colossus entirely.
++	var sim := SimWorld.new(7, 1)
++	var c := _engage(sim)
++	Runner.T.ok(not c.is_empty(), "colossus engaged")
++	Runner.T.ok(c["y"] < sim.camera_top,
++		"the colossus really does open the fight above the visible top edge")
++	var src := FileAccess.get_file_as_string("res://src/main.gd")
++	var head := src.find("func _draw_threat_edges")
++	Runner.T.ok(head >= 0, "_draw_threat_edges found in main.gd")
++	var body := src.substr(head, src.find("\nfunc ", head + 1) - head)
++	Runner.T.ok(body.contains("sim.colossus"),
++		"the off-screen boss locator reads sim.colossus, so the finale gets an edge chevron")
++	Runner.T.ok(not body.contains("var osy"),
++		"the dead observer branch is gone (it tested a constant +14 px for < 0)")
+diff --git a/tests/test_determinism.gd b/tests/test_determinism.gd
+index b50866e5..8b52fc4a 100644
+--- a/tests/test_determinism.gd
++++ b/tests/test_determinism.gd
+@@ -404,13 +404,34 @@ const SEED := 0xDEADBEEF
+ ## where it used to no-op. Both shift respawn ticks/positions, which is the whole
+ ## stream downstream. The elite lane-leash party-trip (3) is torture-inert: the script
+ ## never reaches a fork gauntlet.
++## 2026-07-25 -- CAMERA TRANSITION AUDIT: campaign GOLDEN RE-RECORDED.
++## MEASURED, not assumed: ALL SIX campaign samples moved; ENDLESS_GOLDEN VERIFIED
++## UNCHANGED (re-measured with these values committed -- the endless torture wipes
++## at wave 2 and its camera never leaves the ratchet's dead zone).
++## Two changes in _step_camera, both of which bite in the very first seconds of a
++## 2P run, which is why sample 0 moves too:
++##   (1) MAX_CAM_STEP rate-limits the ratchet. A gate opening dropped its camera
++##       hold in ONE tick and the ratchet took the whole 50-186px backlog in that
++##       tick -- an uninterpolated snap, and (2P) a same-distance teleport of the
++##       trailing player on the next tick's _clamp_actor, potentially onto an
++##       armed mine. The camera now moves at most 2x PLAYER_SPEED per tick, so it
++##       still out-runs any actor on the field but spreads the catch-up over ~40
++##       ticks. Every camera_top value along a catch-up differs -> whole stream.
++##   (2) The trailing 2P player LEASHES the camera (desired is limited to
++##       p.y - CAMERA_BAND_BOTTOM for each ALIVE player) instead of being shoved
++##       north by _clamp_actor. In the 2P torture script the two players separate
++##       constantly, so the leash engages within the first sample window and every
++##       subsequent player/enemy position shifts with it. Dead players drop out of
++##       the leash, so a downed partner cannot freeze the scroll.
++## Solo campaign is unaffected by (2) by construction (CAMERA_LEAD 260 sits inside
++## the 344 band); (1) affects solo only at a gate open.
+ const GOLDEN: Array[int] = [
+-	1137374205060789435,
+-	8552575976495711450,
+-	8596890941918905151,
+-	1060946695091977990,
+-	1098902499213753401,
+-	5824548073172713623,
++	497711827912963552,
++	5941470706231237559,
++	857583379374274728,
++	4869877786552603535,
++	9084136842806191390,
++	8792506345743268261,
+ ]
+ 
+ 
+diff --git a/tests/test_gates.gd b/tests/test_gates.gd
+index 281aa0c5..007218f6 100644
+--- a/tests/test_gates.gd
++++ b/tests/test_gates.gd
+@@ -124,3 +124,40 @@ func test_flawless_streak_compounds_and_resets_on_death() -> void:
+ 	Runner.T.eq(sim.score - s1, 4000, "second consecutive flawless gate pays 2×")
+ 	sim._kill_player(sim.players[0])
+ 	Runner.T.eq(sim.flawless_streak, 0, "a death resets the flawless streak")
++
++
++func test_gate_open_never_snaps_the_camera() -> void:
++	## A gate opening removes its camera hold in ONE tick. The ratchet used to
++	## take the whole accumulated backlog (up to 186px hugging the wall) in that
++	## tick — an uninterpolated jump, and in 2P a teleport of the trailing player.
++	var sim := SimWorld.new(21, 1)
++	sim.step([_idle()])
++	var g := sim.gates[0]
++	var p := sim.players[0]
++	# Teleport to the gate instead of fighting 17 s of campaign to reach it, then
++	# park the player hard against it — the worst case, where `desired` sits a
++	# full CAMERA_LEAD - GATE_BLOCK_PAD (186px) north of the hold.
++	sim.camera_top = g["y"] - SimWorld.GATE_CAMERA_PAD + 200 * SimWorld.F_ONE
++	for _i in 200:
++		sim.enemies.clear()
++		sim.enemy_bullets.clear()   # this is a camera test, not a survival test
++		p["y"] = g["y"] + SimWorld.GATE_BLOCK_PAD
++		sim.step([_idle()])
++	Runner.T.eq(sim.camera_top, g["y"] - SimWorld.GATE_CAMERA_PAD,
++		"camera parked exactly at the closed gate's hold")
++	g["b1"]["alive"] = false
++	g["b2"]["alive"] = false
++	var worst := 0
++	for _i in 120:
++		var before: int = sim.camera_top
++		sim.enemies.clear()
++		sim.enemy_bullets.clear()
++		p["y"] = g["y"] + SimWorld.GATE_BLOCK_PAD
++		sim.step([_idle()])
++		worst = maxi(worst, before - sim.camera_top)   # north = decreasing y
++	Runner.T.ok(g["open"], "the gate opened, dropping its camera hold in one tick")
++	Runner.T.ok(worst <= SimWorld.MAX_CAM_STEP,
++		"camera never moved more than MAX_CAM_STEP in one tick (worst %d, limit %d)"
++			% [worst, SimWorld.MAX_CAM_STEP])
++	Runner.T.eq(sim.camera_top, p["y"] - SimWorld.CAMERA_LEAD,
++		"...and the rate limit still caught all the way up, it did not stall behind the player")
+diff --git a/tests/test_mechanics.gd b/tests/test_mechanics.gd
+index 3c76f6a7..81a2beed 100644
+--- a/tests/test_mechanics.gd
++++ b/tests/test_mechanics.gd
+@@ -2871,14 +2871,64 @@ func test_gauntlet_leash_trips_on_the_party_not_the_nearest_player() -> void:
+ 
+ func test_shared_camera_never_strands_the_lagging_player_offscreen() -> void:
+ 	# One screen, two players: the camera ratchets to whoever is furthest north.
+-	# The lagging player must be DRAGGED along, never left behind the bottom edge
+-	# with no way back into the fight.
++	# The lagging player must never be left behind the bottom edge with no way
++	# back into the fight. The camera now HOLDS for them instead of dragging them
++	# (see test_trailing_2p_player_is_never_clamped_past_the_band); an idle
++	# partner standing in live fire eventually dies, and a dead partner drops out
++	# of the leash on purpose so the run cannot soft-lock — main.gd's off-screen
++	# downed-partner revive locator covers that case. So: alive => on screen.
+ 	var sim := SimWorld.new(11, 2)
+ 	var north := SimInput.new()
+ 	north.move_y = -256
++	var p2 := sim.players[1]
++	var ticks := 0
+ 	for _i in 600:
+ 		sim.step([north, _idle()])   # P1 sprints, P2 stands still
+-	var p2 := sim.players[1]
++		if not p2["alive"]:
++			break
++		ticks += 1
++	Runner.T.ok(ticks > 300, "the idle partner stood there for a real stretch (%d ticks)" % ticks)
+ 	Runner.T.ok(p2["y"] >= sim.camera_top and p2["y"] <= sim.camera_top + 360 * SimWorld.F_ONE,
+-		"the idle partner is still on screen after 10 s of the other advancing")
++		"the idle partner is still on screen for every tick they were alive")
+ 	Runner.T.ok(sim.players[0]["y"] < p2["y"], "...and the runner really did advance ahead of them")
++
++
++func test_trailing_2p_player_is_never_clamped_past_the_band() -> void:
++	# Camera focus is min(y) over alive players, so the leader used to drag the
++	# trailing partner into _clamp_actor's bottom edge and hold them there —
++	# no vertical control, and shoved onto whatever was on the field. The
++	# trailing player now LIMITS the camera instead of being shoved by it.
++	var sim := SimWorld.new(11, 2)
++	var north := SimInput.new()
++	north.move_y = -256
++	var p1 := sim.players[0]
++	var p2 := sim.players[1]
++	var start_y: int = p2["y"]
++	var alive_ticks := 0
++	for _i in 600:
++		sim.step([north, _idle()])
++		if not p2["alive"]:
++			break
++		alive_ticks += 1
++		Runner.T.ok(p2["y"] >= start_y, "the idle partner is never pushed north by the camera")
++		Runner.T.ok(sim.camera_top >= p2["y"] - SimWorld.CAMERA_BAND_BOTTOM,
++			"camera stays leashed inside the trailing player's clamp band")
++	Runner.T.ok(alive_ticks > 300, "the partner stood there long enough to matter (%d ticks)" % alive_ticks)
++	Runner.T.ok(p1["y"] < p2["y"], "the leader still advanced ahead of them")
++	Runner.T.ok(p1["y"] >= sim.camera_top + 16 * SimWorld.F_ONE,
++		"...and it is the LEADER who is held at the top edge, not the partner at the bottom")
++
++
++func test_camera_leash_releases_when_the_partner_dies() -> void:
++	# The leash must never be able to freeze the run: a dead partner drops out of
++	# it, so a downed player cannot soft-lock the scroll.
++	var sim := SimWorld.new(11, 2)
++	var north := SimInput.new()
++	north.move_y = -256
++	for _i in 120:
++		sim.step([north, _idle()])
++	sim.players[1]["alive"] = false
++	var before: int = sim.camera_top
++	for _i in 120:
++		sim.step([north, _idle()])
++	Runner.T.ok(sim.camera_top < before, "the camera scrolls on once the partner is down")

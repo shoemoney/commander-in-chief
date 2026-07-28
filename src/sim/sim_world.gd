@@ -1743,7 +1743,7 @@ func _near_stream_bunker(x: int, y: int) -> bool:
 func _clamp_actor(p: Dictionary) -> void:
 	var cb := _choke_bounds(p["y"])
 	p["x"] = clampi(p["x"], cb[0], cb[1])
-	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
+	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
 	# Closed gates are a hard wall to the north.
 	for g in gates:
 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
@@ -1968,7 +1968,7 @@ func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	p["claymores"] = 0                # ...and any carried claymore charges
 	p["triple"] = false               # ...and the Triple Shot permanent mod
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
-	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + 344 * F_ONE)
+	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
 	# The loadout is stripped HERE, not at the kill — so this is where the view gets to sting it.
 	# Diffed, never hand-listed: bool(0)/bool(false) is falsy and bool(300) is truthy, so one loop
@@ -4480,6 +4480,20 @@ func camera_held() -> bool:
 	## wrongly report as held.
 	if mode == "endless":
 		return true   # endless never calls _step_camera at all; camera_top is pinned at -VIEW_H by design
+	## The trailing-partner leash pins the camera exactly the way a closed gate does, and it is
+	## just as much the SIM's wall: a 2P leader pushing north against a trailer parked at the band
+	## bottom is not loitering. Without this the stall counter scores those ticks as the player's
+	## doing and answers with the observer barrage — aimed, absurdly, at the player who IS pushing.
+	## Exact equality for the same reason the gate branch uses it: when the leash binds,
+	## _step_camera assigns desired = p["y"] - CAMERA_BAND_BOTTOM verbatim. While the camera is
+	## still rate-limiting toward that value it sits SOUTH of it and is genuinely advancing, which
+	## a `<=` would wrongly report as held.
+	var leash := -0x7FFFFFFF
+	for p in players:
+		if p["alive"]:
+			leash = maxi(leash, p["y"] - CAMERA_BAND_BOTTOM)
+	if leash > -0x7FFFFFFF and camera_top == leash:
+		return true
 	for g in gates:
 		if not g["open"] and camera_top == g["y"] - GATE_CAMERA_PAD:
 			return true
