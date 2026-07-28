@@ -3236,7 +3236,7 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 		Runner.T.ok(verb_top >= bg.end.y, "lifted verb chip still sits below the caption strip")
 	# aaa-2/#2: the block's OWN members must be disjoint too — LAST STAND used to
 	# print through the colossus HP bar.
-	var lsw: float = font.get_string_size("LAST STAND — NO REVIVES",
+	var lsw: float = font.get_string_size("LAST STAND — NO REVIVES, 2× KILL SCORE",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	var ls := Rect2(320.0 - lsw / 2.0, HudIcons.LAST_STAND_TOP, lsw, 12.0)
 	Runner.T.ok(not HudIcons.COLOSSUS_BAR_RECT.grow(2.0).intersects(ls),
@@ -3604,3 +3604,38 @@ func test_no_record_chip_at_all_on_a_first_ever_run() -> void:
 		Runner.T.ok(not String(b["id"]).begins_with("BEST "),
 			"...and no BEST target either")
 	main.free()
+
+
+# The broke timer is TWO different things wearing one number: a free rally in
+# campaign/2P, and — in solo ENDLESS with nobody left standing — the run's death
+# clock (sim_world.gd latches the wipe at zero). The row captioned it "RALLYING"
+# unconditionally, so the most final moment in the mode read as help arriving.
+func test_downed_row_calls_the_solo_endless_death_clock_what_it_is() -> void:
+	for spec in [[1, "endless", false], [2, "endless", true], [1, "campaign", true]]:
+		var sim := SimWorld.new(0, spec[0], spec[1])
+		sim.last_stand = false
+		var p: Dictionary = sim.players[0]
+		p["alive"] = false          # _all_players_down() reads p["alive"], and
+		p["broke_timer"] = 180      # _dead_chips is driven directly, not via a death
+		Runner.T.eq(sim.rally_is_free(), spec[2],
+			"%dP %s: rally_is_free() == %s" % [spec[0], spec[1], spec[2]])
+		var h := _FrameCaptureHud.new()
+		h.main = _FrameMain.new()
+		h.main.sim = sim
+		h._fit_full = HudIcons.RIGHT
+		h._measure = false
+		h._dead_chips(p, 8.0, 20.0, 0, sim)
+		var ink := ""
+		for b in h.boxes:
+			if b["k"] == "text":
+				ink += String(b["id"]) + " "
+		if spec[2]:
+			Runner.T.ok(ink.contains("RALLYING"),
+				"%dP %s: a real free rally still says RALLYING (got '%s')" % [spec[0], spec[1], ink])
+		else:
+			Runner.T.ok(not ink.contains("RALLYING"),
+				"solo ENDLESS: the death clock must NOT be captioned as a rally (got '%s')" % ink)
+			Runner.T.ok(ink.contains("LAST BREATH"),
+				"solo ENDLESS: the row names the run ending (got '%s')" % ink)
+		h.main.free()
+		h.free()

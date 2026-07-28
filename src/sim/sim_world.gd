@@ -62,7 +62,7 @@ const SMOKE_TICKS := 300
 # Flashbang capsule: stuns the whole field roster (enemies array only — bosses,
 # the observer and the colossus shrug it off) for 1.5 s.
 const FLASH_STUN_TICKS := 90
-# Recon Drone (endless-only): a flying spotter that holds a standoff hover and
+# Recon Drone (both modes — SECTOR_SPECIALS sector 6, Endless wave 3+): a flying spotter that holds a standoff hover and
 # paints tracked mortar strikes on your CURRENT ground. Flying: never water-
 # slowed, but bullets still swat it. Reuses fire_cd/windup — no new hashed field.
 const DRONE_STANDOFF := 130 * F_ONE
@@ -74,7 +74,7 @@ const DRONE_SPEED := 2 * F_ONE
 # players still ignore it, lower fire_cd toward 80.
 const DRONE_FIRE_CD_TICKS := 100
 const DRONE_WINDUP_TICKS := 24
-# Technical raider (endless-only): the fastest thing on the field. Revs in
+# Technical raider (both modes — SECTOR_SPECIALS sector 4, Endless wave 3+): the fastest thing on the field. Revs in
 # place, LOCKS a charge line at your position, then barrels down it — it
 # cannot steer mid-charge, so repositioning off the line is the dodge. One
 # round kills it (fragile). Starting values; test: a strafing player at
@@ -142,16 +142,16 @@ const GRENADIER_STANDOFF := 150 * F_ONE
 const GRENADIER_FIRE_CD_TICKS := 130
 const GRENADIER_WINDUP_TICKS := 40
 const GRENADIER_CLUSTER_SPREAD := 44 * F_ONE   # perpendicular offset of the outer two lobs
-# Sniper (endless-only): long-range, paints a laser line then fires one fast shot.
+# Sniper (both modes — SECTOR_SPECIALS sector 3, Endless wave 3+): long-range, paints a laser line then fires one fast shot.
 const SNIPER_STANDOFF := 240 * F_ONE
 const SNIPER_FIRE_CD_TICKS := 170
 const SNIPER_WINDUP_TICKS := 55
 const SNIPER_BULLET_SPEED := 6 * F_ONE
-# Shield (endless-only): slow heavy; the front arc blocks bullets and it re-faces
+# Shield (both modes — SECTOR_SPECIALS sectors 4/6, Endless wave 3+): slow heavy; the front arc blocks bullets and it re-faces
 # the nearest player EVERY tick (_shield_blocks), so there is no flank to take:
 # explosives and Rend Rounds are the counter.
 const SHIELD_SPEED := F_ONE
-# Sapper (endless-only): advances like a rusher but seeds armed mines behind it,
+# Sapper (both modes — SECTOR_SPECIALS sectors 2/5, Endless wave 3+): advances like a rusher but seeds armed mines behind it,
 # authoring a hazard trail between you and the top edge. Reuses fire_cd as the
 # mine-drop timer — no new hashed field.
 const SAPPER_MINE_CD_TICKS := 40
@@ -973,7 +973,7 @@ func step(inputs: Array) -> void:
 	if mode == "endless":
 		_step_waves(inputs)
 		_step_mast_hazard()   # c3 3v: the central mast periodically denies its own orbit
-		# Sappers are ENDLESS-ONLY, but _step_mines() (the only code that detonates or
+		# Sappers are fielded by BOTH modes, and _step_mines() (the only code that detonates or
 		# culls a laid mine) ran only in the campaign branch — so every mine a Sapper
 		# armed here just sat forever, inert. Step them here too.
 		_step_mines()
@@ -1500,7 +1500,14 @@ func _blind_scatter(t: Dictionary) -> Array:
 	if not _concealed(t):
 		return [0, 0]
 	# View-only teaching cue (events are checksum-excluded, so this is free).
-	events.append({"t": "blind_shell", "x": t["x"], "y": t["y"]})
+	# `src` names WHICH cover hid you, so the hint can't call a grass patch smoke.
+	# Smoke first: it is the only player-INITIATED source, so it is what the player
+	# will attribute the moment to. The else is safe — _concealed() already returned
+	# true above, so if it is neither smoke nor grass it is the trench by construction.
+	var src := "smoke"
+	if t["smoke_ticks"] <= 0:
+		src = "grass" if _in_grass(t) else "trench"
+	events.append({"t": "blind_shell", "x": t["x"], "y": t["y"], "src": src})
 	return [rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE,
 		rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE]
 
@@ -1753,7 +1760,7 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 			# Endless has NO free respawn once the whole party is down — that is
 			# the wipe, and the only way an endless run ends (and records). A
 			# partner still up rescues you; campaign still respawns at checkpoint.
-			if mode == "endless" and _all_players_down():
+			if not rally_is_free():
 				_latch_wipe(p["x"], p["y"])
 			else:
 				_respawn(p, _checkpoint_y())
@@ -1803,6 +1810,15 @@ func _all_players_down() -> bool:
 		if p["alive"]:
 			return false
 	return true
+
+
+func rally_is_free() -> bool:
+	## Same branch as _step_dead_player's expiry: in ENDLESS with nobody left
+	## standing the broke timer does NOT rescue — it latches the wipe. Every view
+	## that renders p["broke_timer"] asks THIS instead of re-deriving the mode test
+	## (three copies shipped calling the death clock a free rescue). Live, not
+	## latched: it flips exactly like the arm/disarm loop the timer itself runs on.
+	return not (mode == "endless" and _all_players_down())
 
 
 func _checkpoint_y() -> int:
@@ -3361,7 +3377,8 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 
 
 func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
-	## Recon Drone (endless-only): a flying spotter that holds a standoff hover,
+	## Recon Drone (both modes — SECTOR_SPECIALS sector 6, Endless wave 3+): a flying
+	## spotter that holds a standoff hover,
 	## winds up a paint, then calls a tracked mortar strike on the target's
 	## CURRENT ground via _add_strike (the strike telegraph is the dodge window).
 	## Flying: never water-slowed. Bullets still swat it; touch still kills.
@@ -3392,7 +3409,7 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 					and absi(e["y"] - tsb["y"]) <= SANDBAG_HALF_H + 8 * F_ONE:
 				events.append({"t": "sandbag_break", "x": tsb["x"], "y": tsb["y"]})
 				sandbags.remove_at(si)
-	## Technical raider (endless-only): rev telegraph → LOCK a charge line at
+	## Technical raider (both modes — SECTOR_SPECIALS sector 4, Endless wave 3+): rev telegraph → LOCK a charge line at
 	## the target's position → barrel down it at TECHNICAL_SPEED. It cannot
 	## steer mid-charge (repositioning off the line is the dodge), water is a
 	## hard wall to wheels (tank rule — the charge dies at the bank), and an
@@ -3893,8 +3910,9 @@ func _spawn_courier() -> void:
 
 
 func _spawn_special(x: int, y: int, kind: String) -> void:
-	## Endless-only ranged/hazard archetypes (grenadier/sniper/shield/sapper/
-	## ghillie). Coin-worthy like an elite; reuse fire_cd/windup/submerged so no
+	## Ranged/hazard archetypes fielded by BOTH modes — campaign draws them per-sector
+	## from SECTOR_SPECIALS (sector 2 onward), Endless from wave 3 (grenadier/sniper/
+	## shield/sapper/ghillie/drone/technical). Coin-worthy like an elite; reuse fire_cd/windup/submerged so no
 	## new hashed enemy field is introduced.
 	var e := {"x": x, "y": y, "alive": true, "elite": true,
 		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0}
@@ -3926,7 +3944,7 @@ func _spawn_mg_nest(x: int, y: int) -> void:
 
 
 func _spawn_broadcast(x: int, y: int) -> void:
-	## Rooted rally mast (endless wave-7+ debut — panel 4-vote): fires nothing,
+	## Rooted rally mast (campaign sector 5 via SECTOR_SPECIALS; endless wave-7+ debut — panel 4-vote): fires nothing,
 	## moves nothing; every ground mover in its aura runs +25%. Killing the mast
 	## breaks the rally. Reuses hashed hp/fire_cd/windup — zero new fields.
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,

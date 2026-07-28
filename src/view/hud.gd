@@ -2398,14 +2398,20 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 		_warn_text(kia_txt, px, ty, Color(0.9, 0.35, 0.3))
 		return px
 	if p["broke_timer"] > 0:
-		# A free rescue is already ticking — say so, or it reads as death.
+		# The free rescue and the death clock are the SAME timer — sim.rally_is_free()
+		# is the one predicate that knows which (solo ENDLESS: this is the run ending).
 		# ceil, not t/60+1: the latter over-reports by a whole second at every exact
 		# multiple of 60 (300t read "6s" for a 5.0s timer, while the world label on
 		# the same timer read "5.0s"). (t+59)/60 is the idiom the rest of this file uses.
-		var rtxt := "RALLYING %ds" % ((p["broke_timer"] + 59) / 60)
+		var free_rally: bool = sim.rally_is_free()
+		var secs: int = (p["broke_timer"] + 59) / 60
+		var rtxt := ("RALLYING %ds" % secs) if free_rally else ("LAST BREATH %ds" % secs)
 		if not _row_fits(px, _tw(rtxt)):
 			return _row_ovf(px, ry)
-		_text(rtxt, px, ty, Color(0.6, 0.85, 1.0))
+		if free_rally:
+			_text(rtxt, px, ty, Color(0.6, 0.85, 1.0))
+		else:
+			_warn_text(rtxt, px, ty, Color(0.9, 0.35, 0.3))
 		return px
 	# Affordability at a glance: green if the chest covers it, red if not — the
 	# revive-or-hoard decision made legible.

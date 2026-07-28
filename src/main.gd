@@ -328,7 +328,8 @@ var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) �
 var _tech_lunge_prev := {}              # per-slot technical lunge_ticks — charge-end skid cue
 var _seen_bosses := {}            # gate_y → true once the gunship intro played
 var _seen_kinds := {}             # enemy kind → true once its first-encounter banner fired
-# First-sighting teaching cards for the lethal archetypes that debut deep (sector 4+)
+# First-sighting teaching cards for the lethal archetypes SECTOR_SPECIALS fields
+# (from sector 2 on, and every one of them in Endless too)
 # in a one-hit game — named + told how to answer, once per run. View-only.
 const _KIND_TEACH := {
 	"sniper": "LASER SNIPER — BREAK THE LINE",
@@ -343,6 +344,7 @@ const _KIND_TEACH := {
 	"technical": "TECHNICAL — SIDESTEP ITS CHARGE",
 	"courier": "COURIER — 4x BOUNTY, GUN IT DOWN",
 	"broadcast": "BROADCAST TOWER — KILL THE MAST",
+	"drone": "RECON DRONE — SHOOT IT DOWN",
 }
 # Persistent bests — the roguelite carrot.
 const SAVE_PATH := "user://ikari_best.cfg"
@@ -2913,7 +2915,17 @@ func _consume_events() -> void:
 				# their guns went quiet — and a mortar ring is still being painted on
 				# your ground. Fires the first time it ever happens (persisted), which
 				# is the only honest place to say it: while it is happening.
-				_hint("blind_shell", "THEY'RE SHELLING BLIND — SMOKE STOPS BULLETS, NOT MORTARS. MOVE OFF THE RING", true)
+				# One id = one fire ever = one rule taught, so the cue must name the
+				# cover the SIM used: _concealed() is smoke OR grass OR trench, and
+				# naming smoke lies to most players. Static literals, never a
+				# %s-template — _hint translates off the English string as msgid.
+				var bs_line := "THEY'RE SHELLING BLIND — SMOKE STOPS BULLETS, NOT MORTARS. MOVE OFF THE RING"
+				match str(ev.get("src", "smoke")):
+					"grass":
+						bs_line = "THEY'RE SHELLING BLIND — TALL GRASS STOPS BULLETS, NOT MORTARS. MOVE OFF THE RING"
+					"trench":
+						bs_line = "THEY'RE SHELLING BLIND — THE TRENCH STOPS BULLETS, NOT MORTARS. MOVE OFF THE RING"
+				_hint("blind_shell", bs_line, true)
 			"core_open":
 				_vo("vo_core", 2, 300)
 				show_banner("CORE EXPOSED — OPEN FIRE", GameMenu.BANNER_COL_DEFAULT, "hud_target")
@@ -3317,6 +3329,12 @@ static func _continue_ledger_rows(knockdowns: int, coin: int) -> Array:
 		return []
 	return [{"text": "KNOCKDOWNS  x%d   ·   %d¢ SPENT GETTING BACK UP" % [knockdowns, coin],
 		"color": Color(1.0, 0.7, 0.55)}]
+
+
+static func _downed_timer_label(ticks: int, free_rally: bool) -> String:
+	## The world label over a downed body. `free_rally` comes from SimWorld.rally_is_free():
+	## when it is false the SAME countdown is the run's death clock, not an inbound rescue.
+	return ("REINFORCEMENTS IN %.1fs" if free_rally else "RUN ENDS IN %.1fs") % (ticks / 60.0)
 
 
 static func _wipe_chest_row(banked: int, banked_score: int) -> Array:
@@ -9808,15 +9826,21 @@ func _draw_players() -> void:
 			# The co-op partner — and the solo player — had no idea when help lands;
 			# surface the ticking countdown over the body. Reads existing sim state.
 			var bt: int = p.get("broke_timer", 0)
-			if bt > 0:
-				var btxt := "REINFORCEMENTS IN %.1fs" % (bt / 60.0)
+			# `and not sim.last_stand`: _step_dead_player returns the instant last_stand
+			# latches, so a timer already ticking FREEZES at >0 and never clears — the
+			# body of a permanently-dead player kept promising reinforcements forever.
+			if bt > 0 and not sim.last_stand:
+				var free_rally: bool = sim.rally_is_free()
+				var btxt := _downed_timer_label(bt, free_rally)
 				# Memoized width, measured at the SAME resolved size it draws at (accessibility
 				# TEXT SIZE) — measuring at the design size drifts the centering by half the scale-up.
 				var brw := Art.tw(btxt, Art.fs(8))
 				# Warms toward amber in the final second so "almost back" reads.
 				var burg := clampf(1.0 - bt / 60.0, 0.0, 1.0)
-				_world_label(btxt, pos + Vector2(-brw / 2.0, -26),
-					Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg))
+				var bcol := Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg)
+				if not free_rally:
+					bcol = Art.warn(Color(1.0, 0.35, 0.3))
+				_world_label(btxt, pos + Vector2(-brw / 2.0, -26), bcol)
 			elif not sim.last_stand:
 				# No countdown means the chest CAN cover this body — and the sim now
 				# lets a downed player pay from the floor themselves instead of
@@ -11597,7 +11621,7 @@ func _draw_banners(top_msg: String) -> void:
 	elif sim.last_stand:
 		# Shadowed + centered via the shared helper — was the one banner holdout
 		# still drawing raw, unshadowed, hardcoded-position text.
-		Art.text_center(self, "LAST STAND — NO REVIVES", 320.0, HudIcons.LAST_STAND_Y, 10, Color(0.95, 0.4, 0.3))
+		Art.text_center(self, "LAST STAND — NO REVIVES, 2× KILL SCORE", 320.0, HudIcons.LAST_STAND_Y, 10, Color(0.95, 0.4, 0.3))
 	# Black fade covering the title→combat cut.
 	if _fade > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, _fade))

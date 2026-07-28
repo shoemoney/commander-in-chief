@@ -127,8 +127,8 @@ var _howto_nav_hover := -1   # c4-06: which ENDLESS chevron the pointer is over 
 # c4-09: a MODES tab joins the roster — CAMPAIGN / ENDLESS / DAILY / ASSIST used to appear in RUN
 # SETUP and the pause menu with ZERO in-game explanation, so a new player couldn't tell what DAILY
 # RUN commits to or what the ASSIST (2-HIT) toggle actually changes.
-const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "MODES", "ENEMIES", "ENDLESS"]  # c3-05/c4-06/c4-09: HOW-TO-PLAY tabs — the old BASIC page crammed the verbs AND the War Chest economy together, so each owns a tab; c4-06 gives the seven ENDLESS threats ONE tab paged by in-page chevrons (was two ENDLESS I/II tabs + chevrons — a redundant, confusing double control) so each roster row still gets a big sprite/pitch; c4-09 adds MODES
-const HOWTO_ENDLESS_TAB := 4   # index of the ENDLESS tab in HOWTO_TABS (the only paged tab)
+const HOWTO_TABS := ["CONTROLS", "WAR CHEST", "MODES", "ENEMIES", "SPECIALS"]  # c3-05/c4-06/c4-09: HOW-TO-PLAY tabs — the old BASIC page crammed the verbs AND the War Chest economy together, so each owns a tab; c4-06 gives the seven SPECIALISTS ONE tab paged by in-page chevrons (was two ENDLESS I/II tabs + chevrons — a redundant, confusing double control) so each roster row still gets a big sprite/pitch; c4-09 adds MODES
+const HOWTO_ENDLESS_TAB := 4   # index of the SPECIALS tab in HOWTO_TABS (the only paged tab)
 const REPLAY_PATH := "user://last_run.replay"  # WATCH LAST RUN's recording; existence gates the INFO menu row
 # c3-10: the HOW TO PLAY shortcut's DEFAULT keycode — the live value is the "menu_help" menu
 # binding (main.menu_bind, remappable via the save overlay); this const is only the fallback for
@@ -5013,9 +5013,11 @@ func _howto_page_controls() -> void:
 	y += VERB_PITCH
 	# Board and plant share the SAME button, so the two lines are parallel imperatives
 	# (BOARD… / PLANT…) that read as complete commands, not fragments.
-	_verb_line(["@grenade", " GRENADES crack armor — bunkers, bosses, the Colossus."], y, col)
+	_verb_line(["@grenade", " GRENADES crack armor — bunkers, bosses, the Colossus. Bullets don't."], y, col)
 	y += VERB_PITCH
-	_verb_line(["@roll", " ROLL dodges bullets — armor never stops them."], y, col)
+	# "armor" here means the ENEMY's (the grenade row above). The player DOES have a
+	# one-hit absorber — p["vest"] — so this row must not deny it.
+	_verb_line(["@roll", " ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit."], y, col)
 	y += VERB_PITCH
 	_verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col)
 	y += VERB_PITCH
@@ -5063,7 +5065,10 @@ func _howto_page_warchest() -> void:
 	# the last gate once you are broke, and the LAST STAND finale where revives really do stop.
 	# The delay comes off SimWorld.BROKE_RESPAWN_TICKS (same discipline as the multiplier line
 	# below) so a retune can never strand the copy.
-	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? You rally free at the last gate after %ds. Past the FINAL GATE, LAST STAND: no revives at all."
+	# ...and the rally is NOT always a rescue: in ENDLESS with nobody left standing the
+	# same clock latches the wipe (SimWorld.rally_is_free()). Static copy, not
+	# mode-conditional — the stub main the corpus test drives has a null sim.
+	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all."
 			% (SimWorld.BROKE_RESPAWN_TICKS / 60),
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 18.0
@@ -5094,7 +5099,7 @@ func _howto_page_modes() -> void:
 	# the campaign advance, skull = the endless swarm, timer = the once-a-day run, vest = the
 	# extra hit of armor ASSIST grants. NAMES mirror the RUN SETUP menu rows verbatim
 	# ("CAMPAIGN" / "ENDLESS WAR" / "DAILY RUN") — that is the label the player actually clicks, so
-	# the page teaches the exact word on the button, not the shorter "ENDLESS" the roster TAB uses.
+	# the page teaches the exact word on the button, not the "SPECIALS" the roster TAB uses.
 	var modes := [
 		["hud_flag", "CAMPAIGN", "Fight up six sectors to the Foundry finale. The main run."],
 		["hud_skull", "ENDLESS WAR", "Hold out against escalating waves for score. Ranged threats join wave 3+."],
@@ -5146,7 +5151,9 @@ func _howto_page_enemies() -> void:
 		TEXT_X, y - 6, 11, Color(0.85, 0.95, 0.85), BODY_W)
 
 
-# c3-05 ENDLESS tab — the Endless War ranged specialists.
+# c3-05 SPECIALS tab — the ranged specialists. NOT an Endless roster: BOTH modes
+# field it — campaign draws it per-sector from SimWorld.SECTOR_SPECIALS (sector 2
+# onward), Endless from wave 3.
 # c4-06: the seven ENDLESS ranged threats used to crowd ONE screen — even on their
 # own c3-05 tab the pitch stayed capped at 24 to squeeze all seven in, so the sprites
 # read small. They now span TWO sub-pages of the single ENDLESS tab (4 rows + 3 rows),
@@ -5202,9 +5209,10 @@ func _howto_page_endless(page: int = 0) -> void:
 	var pages := _endless_pages()
 	page = clampi(page, 0, pages - 1)
 	var rows := special.slice(page * ENDLESS_PER_PAGE, page * ENDLESS_PER_PAGE + ENDLESS_PER_PAGE)
-	# Endless War fields ranged specialists (wave 3+) — teach their counters. The
-	# "(1/2)" marker tells a paging player this roster continues on the next tab.
-	Art.text(self, "ENDLESS WAR — RANGED THREATS (%d/%d):" % [page + 1, pages], Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	# Both modes field these ranged specialists (campaign from sector 2 via
+	# SECTOR_SPECIALS, Endless from wave 3) — teach their counters. The "(1/2)"
+	# marker tells a paging player this roster continues on the next sub-page.
+	Art.text(self, "THE SPECIALISTS — RANGED & ARMORED (%d/%d):" % [page + 1, pages], Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
 	y += 24.0
 	# Threat rows are the tight spot, so their pitch is DERIVED, not typed: fit
 	# every row's text baseline between here (`y`) and the last baseline the BACK

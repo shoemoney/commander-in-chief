@@ -1861,3 +1861,172 @@ func test_no_walkthrough_prop_wears_the_ambient_cover_silhouette() -> void:
 	for q in RegEx.create_from_string('_CACTUS_DEAD\\[[a-z0-9_]+ % ([0-9]+)\\]').search_all(src):
 		Runner.T.eq(int(q.get_string(1)), pool.size(),
 			"_CACTUS_DEAD indexed %% %d but the pool holds %d" % [int(q.get_string(1)), pool.size()])
+
+
+# --- The teaching layer: a cue must name the rule the sim actually ran ---
+
+func test_the_blind_shell_cue_names_the_cover_that_actually_hid_you() -> void:
+	## `_concealed()` is smoke OR grass OR trench, but the ONE once-per-profile
+	## concealment teach hard-coded "SMOKE". Grass is a streamed cover tier and
+	## trenches are authored from band 2, so most players burn the game's only
+	## concealment lesson on a noun the sim never used for them.
+	var sim := SimWorld.new(21, 1)
+	var p: Dictionary = sim.players[0]
+	p["smoke_ticks"] = 100
+	sim.events.clear()
+	sim._blind_scatter(p)
+	Runner.T.eq(str(sim.events[0].get("src", "")), "smoke",
+		"a smoked target's blind shell is tagged smoke")
+
+	var sim2 := SimWorld.new(21, 1)
+	var p2: Dictionary = sim2.players[0]
+	p2["smoke_ticks"] = 0
+	sim2.rocks.append({"x": p2["x"], "y": p2["y"], "kind": 1})
+	sim2.events.clear()
+	sim2._blind_scatter(p2)
+	Runner.T.eq(str(sim2.events[0].get("src", "")), "grass",
+		"a grass-hidden target's blind shell is tagged grass")
+
+	# The VIEW's one-and-only concealment teach, driven through the real
+	# _consume_events — not a re-implementation of the match arm.
+	var stub := Main.new()
+	stub._menu.mode = GameMenu.Mode.HIDDEN   # _hint early-returns in Mode.TITLE
+	stub.sim = sim2
+	stub.sim.events = [{"t": "blind_shell", "x": 0, "y": 0, "src": "grass"}]
+	stub._consume_events()
+	Runner.T.eq(stub._hint_queue.size(), 1, "the grass blind-shell queues exactly one teach")
+	var line: String = stub._hint_queue[0]
+	Runner.T.ok(not line.contains("SMOKE"),
+		"the concealment teach fired by GRASS must not tell the player it was smoke (got '%s')" % line)
+	Runner.T.ok(line.contains("GRASS"), "it names the cover that actually hid them (got '%s')" % line)
+	stub.free()
+
+
+func test_the_specialist_roster_is_not_filed_under_a_mode_it_outlives() -> void:
+	## Seven of the nine CAMPAIGN special archetypes are the HOW TO PLAY roster —
+	## filed under a tab labelled ENDLESS, headed "ENDLESS WAR". They start
+	## fielding in campaign sector 2. And the ninth (drone) has no teaching card
+	## at all, so its first sighting is silent.
+	var campaign_kinds := {}
+	for sector in SimWorld.SECTOR_SPECIALS:
+		for k in sector:
+			campaign_kinds[k] = true
+	Runner.T.eq(campaign_kinds.size(), 9,
+		"SECTOR_SPECIALS fields 9 distinct archetypes across the campaign")
+
+	var m = TML._CaptureMenu.new()
+	var roster: Array = m._endless_threats()
+	var in_campaign := 0
+	for row in roster:
+		var spr := String(row[0])
+		if ROSTER_KIND.has(spr) and campaign_kinds.has(ROSTER_KIND[spr]):
+			in_campaign += 1
+	Runner.T.eq(in_campaign, roster.size(),
+		"every row on that roster is CAMPAIGN content (%d/%d)" % [in_campaign, roster.size()])
+
+	# Measured ink, not a source constant: nothing that screen draws may call the
+	# roster a mode. (The MODES tab's real "ENDLESS WAR" row is out of scope.)
+	m.main = TML._StubMain.new()
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	for ep in m._endless_pages():
+		m.mode = Menu.Mode.HOWTO
+		m._howto_page = Menu.HOWTO_ENDLESS_TAB
+		m._howto_endless_page = ep
+		m.ops.clear()
+		var prev = Art.text_capture
+		Art.text_capture = m.ops
+		m._draw_howto()
+		Art.text_capture = prev
+		for op in m.ops:
+			if op["k"] == "text":
+				Runner.T.ok(not String(op["id"]).to_upper().contains("ENDLESS"),
+					"the specialist roster page draws '%s' — it is not an ENDLESS-only roster" % op["id"])
+	var stub2 = m.main
+	m.free()
+	stub2.free()
+
+	# Standing ratchet: a kind added to SECTOR_SPECIALS without a card goes red.
+	for kind in campaign_kinds:
+		Runner.T.ok(Main._KIND_TEACH.has(kind),
+			"'%s' is fielded by the campaign but has no first-sighting teaching card" % kind)
+
+
+func test_every_view_that_draws_the_broke_timer_asks_whether_the_rally_is_free() -> void:
+	## In solo ENDLESS the broke timer is not an inbound rescue — at zero it
+	## latches the WIPE. Three view sites captioned it as a free rally anyway.
+	## One sim predicate, and every renderer must consult it.
+	for path in ["res://src/view/hud.gd", "res://src/main.gd"]:
+		var lines := FileAccess.get_file_as_string(path).split("\n")
+		var fn := ""
+		var bodies := {}
+		for ln in lines:
+			var s := String(ln).strip_edges()
+			if s.begins_with("func ") or s.begins_with("static func "):
+				fn = String(ln).substr(String(ln).find("func ") + 5).split("(")[0]
+			bodies[fn] = String(bodies.get(fn, "")) + String(ln) + "\n"
+		var hits := 0
+		for k in bodies:
+			var body: String = bodies[k]
+			if body.contains('"broke_timer"'):
+				hits += 1
+				Runner.T.ok(body.contains("rally_is_free"),
+					"%s::%s() renders broke_timer without asking rally_is_free()" % [path, k])
+		Runner.T.ok(hits >= 1, "the broke_timer view scrape found nothing in %s — parser is broken" % path)
+
+	# The rules page must name the mode where that clock is the run ending.
+	var m = TML._CaptureMenu.new()
+	m.main = TML._StubMain.new()
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	m.mode = Menu.Mode.HOWTO
+	m._howto_page = 1        # WAR CHEST
+	m.ops.clear()
+	var prev = Art.text_capture
+	Art.text_capture = m.ops
+	m._draw_howto()
+	Art.text_capture = prev
+	var page := ""
+	for op in m.ops:
+		# Skip the tab strip _draw_howto stamps on EVERY page — a tab literally
+		# named "ENDLESS" would otherwise launder this assertion green.
+		if op["k"] == "text" and not Menu.HOWTO_TABS.has(String(op["id"])):
+			page += String(op["id"]) + " "
+	var wc_stub = m.main
+	m.free()
+	wc_stub.free()
+	Runner.T.ok(page.contains("ENDLESS"),
+		"the WAR CHEST page names the mode where the rally clock is the run ending (got '%s')" % page)
+
+
+func test_the_controls_page_never_denies_the_flak_vest() -> void:
+	## menu.gd's CONTROLS row said "armor never stops them" of bullets. Measure the
+	## vest against a real enemy bullet FIRST, then demand the page stop denying it.
+
+	# (i) MEASURE: a vested player takes an enemy bullet dead-on and LIVES.
+	var s1 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p1: Dictionary = s1.players[0]
+	p1["vest"] = true
+	p1["hurt_iframes"] = 0
+	s1.enemy_bullets.append({"x": p1["x"], "y": p1["y"], "vx": 0, "vy": 0, "ttl": 10})
+	s1.step(_idle())
+	Runner.T.ok(p1["alive"], "a VESTED player survives a dead-on enemy bullet")
+	Runner.T.ok(not p1["vest"], "…and the vest is what paid for it")
+
+	# (ii) CONTROL: the same shot with no vest kills. The vest is the whole difference.
+	var s2 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p2: Dictionary = s2.players[0]
+	p2["vest"] = false
+	p2["hurt_iframes"] = 0
+	s2.enemy_bullets.append({"x": p2["x"], "y": p2["y"], "vx": 0, "vy": 0, "ttl": 10})
+	s2.step(_idle())
+	Runner.T.ok(not p2["alive"], "…and an UNVESTED player takes the identical shot and drops")
+
+	# (iii) THE PAGE MUST NOT DENY IT.
+	var corpus := _menu_text_corpus()
+	Runner.T.ok(corpus.length() > 400, "the menu corpus captured real ink (%d chars)" % corpus.length())
+	for lie in ["armor never stops", "nothing stops bullets", "nothing absorbs"]:
+		Runner.T.ok(not corpus.to_lower().contains(lie),
+			"no menu string claims '%s' — the FLAK VEST does" % lie)
+	Runner.T.ok(corpus.contains("FLAK VEST"),
+		"the rules pages name the FLAK VEST as the thing that eats a hit")
