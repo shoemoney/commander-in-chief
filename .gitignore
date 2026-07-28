@@ -37,6 +37,7 @@ reviews/
 reviewer/
 art_reviews/
 assets_src/
+!assets_src/style_bible.md
 art_candidates/
 PR_ISSUES.MD
 docs/research/
