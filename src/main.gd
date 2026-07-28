@@ -4624,6 +4624,14 @@ func _bus_vol(name: String) -> int:
 	# to is_bus_mute -- a missing bus reads as level 0 (MUTED), the safe default.
 	if b == -1 or AudioServer.is_bus_mute(b):
 		return 0
+	# SFX is NOT read off the live bus: the VO duck also writes that channel, dipping it
+	# base_db - 6 dB for every radio line and lerping back at 0.15/tick. A settings snapshot
+	# taken mid-duck persisted db_to_linear(-6)*10 = 5 for a player sitting at 10, and the next
+	# launch installed that as the new baseline — so the slider walked 10 -> 5 -> 3 -> 2 -> 1
+	# across sessions with the player never touching it and no banner to say so. _sfx_base_db
+	# IS the user's chosen level (the duck rests there and returns to it), so read that.
+	if name == "SFX":
+		return clampi(int(round(db_to_linear(_sfx_base_db) * 10.0)), 1, 10)
 	return clampi(int(round(db_to_linear(AudioServer.get_bus_volume_db(b)) * 10.0)), 1, 10)
 
 

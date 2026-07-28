@@ -837,13 +837,31 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## rather than left to be re-quoted: this torture reaches WAVE 5, not wave 2, and wipes
 ## at TICK 3132, not 1393. Those numbers were true when they were written and the sim
 ## has moved since. Re-drive the probe; do not trust the prose.
+## ENDLESS RE-RECORDED (2026-07-28, rooted spawns move off the constant rock row):
+## rooted_y went camera_top + 40 -> + 52. Endless never runs _step_camera, so camera_top is
+## pinned at -VIEW_H and +40 was the CONSTANT row y = -320 — the exact y of the kind-0 rock
+## _init authors at (210,-320), half-extents 16x12. Every rooted endless spawn was therefore
+## y-inside that rock, and _step_bullets tests rock cover BEFORE the enemy scan, so a unit
+## parked there ate every round aimed at it while still holding the wave open.
+##
+## PREDICTED, THEN MEASURED — and the prediction I started from was WRONG for a documented
+## reason. I first assumed golden-inert "because the endless torture wipes in wave 2 and rooted
+## spawns need wave >= 3". That claim is STALE: re-driving this exact torture (SEED 0xDEADBEEF,
+## 2P, scripted_input, 3600 ticks) reports max wave 5 and the wipe at tick 3132, not wave 2.
+## The first rooted spawn (a ghillie) lands at TICK 2857, and 2857 / SAMPLE_EVERY(600) = 4 —
+## so samples 4 and 5 move and 0-3 must not. They did not.
+##
+## ATTRIBUTION ISOLATED, not assumed: with ONLY the rooted_y change reverted and the other three
+## fixes in this commit still in the tree, SUITE=determinism passes on the committed values.
+## So the mortar-lead refactor, the Arcade _author_lz arm and the SFX read are all golden-inert
+## by measurement. GOLDEN (campaign) verified unchanged for the same reason.
 const ENDLESS_GOLDEN: Array[int] = [
 	8610209561549742921,
 	4307715087271070947,
 	2392889603967106672,
 	2697056323710043292,
-	3080589168965590143,
-	706117180998451249,
+	5372114510800755839,
+	8096841052034072625,
 ]
 
 

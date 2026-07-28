@@ -791,7 +791,12 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 		# BE cover) — they ride the full rock grammar: bullets, boots, treads.
 		for qr in [[80, -300], [560, -300], [80, -60], [560, -60], [210, -320], [430, -50]]:
 			rocks.append({"x": qr[0] * F_ONE, "y": qr[1] * F_ONE})
-	elif game_mode == "campaign":
+	elif is_campaign_world():
+		# ARCADE had NO arm here and fell straight through, so an arcade chapter-1 run began in
+		# a world whose first 500px was empty: no seawall, no armoured bunker (the only pre-gate-1
+		# income AND the game's entire armour lesson), no free grenade crate. Chapters 2-6 were
+		# unaffected only by luck of ordering — _author_lz runs in _init, jump_to_chapter runs
+		# after, so the props land and are then streamed past.
 		_author_lz()
 	_next_bunker_y = -(500 * F_ONE)
 	_next_gate_y = -GATE_SPACING
@@ -5446,6 +5451,13 @@ func _step_waves(inputs: Array = []) -> void:
 			if pressure_side >= 0:
 				xpx = clampi([160, 320, 480][pressure_side] + (xpx - 320) * 120 / 296, 24, 616)
 			var x := xpx * F_ONE
+			# +52, NOT +40: endless pins camera_top at -VIEW_H forever, so +40 is the CONSTANT
+			# row y=-320 — and _init authors a fixed kind-0 rock at exactly (210,-320) whose
+			# half-extents are 16x12. Every rooted spawn was therefore guaranteed y-inside that
+			# rock (|dy| = 0) and x-inside for any spawn x in [194,226]. _step_bullets tests rock
+			# cover and sets dead=true BEFORE it reaches the enemy scan, so a unit parked there
+			# eats every round aimed at it while still counting in _wave_hostiles_cleared. +52
+			# clears the 12px half-height and stays well inside the reachable 16..344 band.
 			# ROOTED spawns (mg_nest / broadcast) can't use the walk-in-from-the-top
 			# y: endless never runs _step_camera, so camera_top is pinned at -VIEW_H
 			# forever and camera_top-24 sits ABOVE the player's own _clamp_actor
@@ -5453,7 +5465,7 @@ func _step_waves(inputs: Array = []) -> void:
 			# unreachable — blind-fire only — yet it counts in _wave_hostiles_cleared
 			# and holds the wave open indefinitely. Root them inside the reachable
 			# band instead (16..344 below camera_top).
-			var rooted_y: int = camera_top + 40 * F_ONE
+			var rooted_y: int = camera_top + 52 * F_ONE
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = has_mod(2) or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
@@ -5856,6 +5868,29 @@ func _colossus_ring(dist: int) -> int:
 	return 2
 
 
+func _lead_aim(p: Dictionary) -> Array:
+	## THE one poor-man's-velocity sampler. Reads the player's previous sample, projects the
+	## delta one full telegraph forward, then refreshes the sample — and it lives on the PLAYER,
+	## so 2P leads both independently and a fresher sample only sharpens the lead.
+	##
+	## The gunship volley used to keep its own copy on the BOSS dict (boss["stx"/"sty"/"st_at"]).
+	## That slot carried no identity, so in 2P a nearest-player switch between sample and fire
+	## made the subtraction P_b(now) - P_a(then): the two players' SEPARATION, projected forward
+	## as if it were one player's velocity. The first shell of every volley has elapsed = 21
+	## against a 45-tick telegraph, a 2.14x amplification — 200px of partner separation threw the
+	## aim ~430px, at a player who had not moved. Both sources now share this one function.
+	var ax: int = p["x"]
+	var ay: int = p["y"]
+	if p.has("lead_t"):
+		var elapsed: int = maxi(1, tick_count - int(p["lead_t"]))
+		ax += (p["x"] - int(p["lead_x"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+		ay += (p["y"] - int(p["lead_y"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+	p["lead_x"] = p["x"]
+	p["lead_y"] = p["y"]
+	p["lead_t"] = tick_count
+	return [ax, ay]
+
+
 func _colossus_strike(p: Dictionary) -> void:
 	## Every colossus mortar LEADS its target — the same poor-man's velocity the
 	## gunship volley uses (_step_boss): sample the player, project the delta since
@@ -5867,15 +5902,9 @@ func _colossus_strike(p: Dictionary) -> void:
 	## gives a zero delta, so a camper is hit exactly where they always were.
 	## The sample lives on the player (per-player: 2P leads both) and is SHARED by
 	## all three sources — a fresher sample only sharpens the lead.
-	var aim_x: int = p["x"]
-	var aim_y: int = p["y"]
-	if p.has("lead_t"):
-		var elapsed: int = maxi(1, tick_count - int(p["lead_t"]))
-		aim_x += (p["x"] - int(p["lead_x"])) * STRIKE_TELEGRAPH_TICKS / elapsed
-		aim_y += (p["y"] - int(p["lead_y"])) * STRIKE_TELEGRAPH_TICKS / elapsed
-	p["lead_x"] = p["x"]
-	p["lead_y"] = p["y"]
-	p["lead_t"] = tick_count
+	var lead := _lead_aim(p)
+	var aim_x: int = lead[0]
+	var aim_y: int = lead[1]
 	# Every colossus mortar source (volley, lane sweep, ring punisher) funnels
 	# here, so the blind-fire scatter belongs here too: hiding degrades the
 	# fortress's shelling, it never silences it.
@@ -6183,11 +6212,11 @@ func _step_one_boss(boss: Dictionary) -> void:
 					_spawn_enemy_bullet(boss["x"], by, dx, dy, dlen)
 		# Arm the mortar-lead sampler as the strafe half closes.
 		if t == BOSS_STRAFE_TICKS - 1:
+			# Prime the shared sampler so the first mortar of the volley has a delta to work
+			# from. _lead_aim refreshes on every call, so this is just an early warm-up.
 			var s0 := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
 			if not s0.is_empty():
-				boss["stx"] = s0["x"]
-				boss["sty"] = s0["y"]
-				boss["st_at"] = t
+				_lead_aim(s0)
 	else:
 		# Mortar volley: strikes LEAD the walker now (8v: constant-speed
 		# walking auto-dodged every strike — 28px ring + 45t telegraph can
@@ -6198,17 +6227,9 @@ func _step_one_boss(boss: Dictionary) -> void:
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
 			if not target2.is_empty():   # AREA fire: smoke scatters the volley, it does not stop it
-				var aim_x: int = target2["x"]
-				var aim_y: int = target2["y"]
-				if boss.has("stx"):
-					var elapsed: int = maxi(1, t - int(boss["st_at"]))
-					aim_x += (target2["x"] - int(boss["stx"])) * STRIKE_TELEGRAPH_TICKS / elapsed
-					aim_y += (target2["y"] - int(boss["sty"])) * STRIKE_TELEGRAPH_TICKS / elapsed
+				var lead2 := _lead_aim(target2)
 				var sc := _blind_scatter(target2)
-				_add_strike(clampi(aim_x + sc[0], WORLD_LEFT, WORLD_RIGHT), aim_y + sc[1])
-				boss["stx"] = target2["x"]
-				boss["sty"] = target2["y"]
-				boss["st_at"] = t
+				_add_strike(clampi(lead2[0] + sc[0], WORLD_LEFT, WORLD_RIGHT), lead2[1] + sc[1])
 
 
 func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
