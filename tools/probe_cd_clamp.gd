@@ -4,17 +4,22 @@ extends SceneTree
 ##   godot --headless --path . -s res://tools/probe_cd_clamp.gd
 ##   SEEDS=0xC0FFEE,1,2  MAXT=40000  godot --headless ... -s res://tools/probe_cd_clamp.gd
 ##
-## Both `bk["spawn_cd"]` and `colossus["spawn_cd"]` decrement every tick but only
-## reset when `enemies.size() < MAX_ENEMIES`, so a full field drives them negative
-## with no floor — the same shape as the spray_cd bug already fixed at
-## sim_world.gd:5341. The question this answers is whether the roster ACTUALLY
-## saturates in play, because an unreachable branch is not a defect.
+## The four cap-gated cooldowns — `bk["spawn_cd"]` (_step_bunkers), `wave_spawn_cd`
+## (_step_waves), `colossus["spawn_cd"]` and `colossus["sweep_cd"]` (_step_colossus)
+## — decrement every tick but reset only when their gate opens (`enemies.size() <
+## MAX_ENEMIES`, or for sweep_cd the player being in a margin lane), so a saturated
+## field used to drive them unbounded negative. FIXED: all four are floored with
+## `maxi(..., 0)`, as is the `spray_cd` sibling in _step_colossus. This probe now
+## RE-VERIFIES the floor rather than hunting the bug — it should print
+## min_bunker_cd=0 min_colossus_cd=0 bunker_glow_lie_ticks=0 on every seed, and any
+## negative means a clamp was dropped.
 ##
-## Reports, per seed: the most-negative value each cooldown reached, the peak
-## roster size, and how many ticks were spent at the cap. The bunker figure is
-## the one that matters — main.gd:6130 renders `1 - spawn_cd/120` as a hatch
-## charge glow, so a negative there is a telegraph drawn at full brightness for
-## a spawn that is blocked.
+## Reports, per seed: the most-negative value each cooldown reached, the peak roster
+## size, and how many ticks were spent at the cap. The bunker figure is the one that
+## matters — main.gd's bunker draw renders `1 - spawn_cd / BUNKER_SPAWN_INTERVAL_TICKS`
+## as a hatch-charge glow, so a negative there is a telegraph pinned past 100% for a
+## spawn the cap is refusing. Pre-fix measurement: 3 of 6 campaign seeds saturated,
+## worst reached -332 and lied for 1,758 ticks (29 s).
 
 func _init() -> void:
 	var MainScript: Script = load("res://src/main.gd")

@@ -1861,3 +1861,114 @@ func test_no_walkthrough_prop_wears_the_ambient_cover_silhouette() -> void:
 	for q in RegEx.create_from_string('_CACTUS_DEAD\\[[a-z0-9_]+ % ([0-9]+)\\]').search_all(src):
 		Runner.T.eq(int(q.get_string(1)), pool.size(),
 			"_CACTUS_DEAD indexed %% %d but the pool holds %d" % [int(q.get_string(1)), pool.size()])
+
+
+func test_arcade_ground_scorches_toward_the_foundry() -> void:
+	## The ground palette marched on OPENED GATES in campaign and on `wave` in
+	## everything else — but `wave` only ever increments in _start_wave(), which
+	## only endless reaches. Arcade therefore sat at march 0.0 for the whole run:
+	## jungle-green floor under the Foundry finale it was streaming.
+	var m = Main.new()
+	m.sim = SimWorld.new(0, 1, "arcade")
+	for _g in 5:
+		m.sim.gates.append({"open": true})
+	var march: float = m._compute_sector_march()
+	m.free()
+	Runner.T.ok(march > 0.9,
+		"ARCADE ground scorches toward the Foundry — 5 gates open must read as the finale, not wave 0, got %.2f" % march)
+
+
+func test_the_ground_decal_band_loop_survives_a_band_boundary() -> void:
+	## camera_top is the NORTH edge of the view, so absi() DESCENDS down the
+	## screen. Both ground-decal loops ran range(absi(top)/seg, absi(bot)/seg + 1)
+	## — high to low — so the range went EMPTY whenever the 420px window straddled
+	## a band line, and trenches/rubble silently vanished for ~42% of every band.
+	Runner.T.ok(_view_src().contains("func _visible_bands("),
+		"the ground decals share one band-range helper")
+	if not _view_src().contains("func _visible_bands("):
+		return
+	var m = Main.new()
+	m.sim = SimWorld.new(0xC0FFEE, 1)
+	m.sim.camera_top = -3050 * Fixed.ONE        # window covers absi 2630..3050 -> bands 2 AND 3
+	var got: Array = []
+	for b in m._visible_bands():
+		got.append(b)
+	Runner.T.ok(got.has(2) and got.has(3),
+		"a view straddling the band 2/3 line draws BOTH bands' decals, got %s" % [got])
+	m.sim.camera_top = -2500 * Fixed.ONE
+	got = []
+	for b in m._visible_bands():
+		got.append(b)
+	Runner.T.ok(got == [2], "a view inside one band draws exactly that band, got %s" % [got])
+	m.free()
+
+
+func test_the_step_reverting_geometry_is_drawn_where_it_collides() -> void:
+	## Two predicates reverted your step with NOTHING on screen: the temporary lane
+	## seal (a 200x120 slab that walls off a flank for 12s of every 20s cycle) and
+	## the one-way ledge (a 320px span that eats every retreat step, in every band
+	## from 2 up). The seal had a 3-tick particle telegraph for the camera's band
+	## only; the ledge had no signal of any kind. Both are now drawn at the sim's
+	## OWN span helpers, so art == collision by construction.
+	var view := _view_src()
+	Runner.T.ok(view.contains("_draw_ledges()") and view.contains("_draw_lane_seals()"),
+		"_draw_terrain draws the one-way ledge and the lane seal")
+	Runner.T.ok(view.contains("SimWorld.ledge_span(") and view.contains("SimWorld.lane_seal_span("),
+		"...off the sim's own span helpers, not a restated _mix in the draw call")
+	var sim := SimWorld.new(0xC0FFEE, 1)   # campaign
+	for band in [2, 3, 4, 5]:
+		var lg: Array = SimWorld.ledge_span(band)
+		var north: int = lg[0] - 4 * Fixed.ONE
+		var south: int = lg[0] + 4 * Fixed.ONE
+		Runner.T.ok(sim._crosses_ledge_south(lg[1] + Fixed.ONE, south, north),
+			"band %d: the drawn LEFT end of the ledge blocks a retreat" % band)
+		Runner.T.ok(sim._crosses_ledge_south(lg[2] - Fixed.ONE, south, north),
+			"band %d: the drawn RIGHT end blocks a retreat" % band)
+		Runner.T.ok(not sim._crosses_ledge_south(lg[1] - 2 * Fixed.ONE, south, north),
+			"band %d: 2px outside the drawn LEFT end is free — art == collision" % band)
+		Runner.T.ok(not sim._crosses_ledge_south(lg[2] + 2 * Fixed.ONE, south, north),
+			"band %d: 2px outside the drawn RIGHT end is free" % band)
+		Runner.T.eq(lg[2] - lg[1], 320 * Fixed.ONE, "band %d: the drawn ledge is 320px wide" % band)
+		var sp: Array = SimWorld.lane_seal_span(band)
+		var y_in: int = -(band * SimWorld.GATE_SPACING + (sp[0] + sp[1]) / 2)
+		var y_out: int = -(band * SimWorld.GATE_SPACING + sp[1] + 2 * Fixed.ONE)
+		var x_in: int = (SimWorld.WORLD_LEFT + Fixed.ONE) if sp[2] == 0 else (SimWorld.WORLD_RIGHT - Fixed.ONE)
+		var x_out: int = (SimWorld.WORLD_LEFT + 202 * Fixed.ONE) if sp[2] == 0 else (SimWorld.WORLD_RIGHT - 202 * Fixed.ONE)
+		sim.tick_count = SimWorld.LANE_BLOCK_CYCLE - band * 300          # phase 0 -> SEALED
+		Runner.T.ok(SimWorld.lane_sealed(sim.tick_count, band), "band %d: sealed phase" % band)
+		Runner.T.ok(sim._lane_blocked(x_in, y_in), "band %d: the drawn slab is the solid slab" % band)
+		Runner.T.ok(not sim._lane_blocked(x_out, y_in), "band %d: 2px past the drawn inner edge is free" % band)
+		Runner.T.ok(not sim._lane_blocked(x_in, y_out), "band %d: 2px past the drawn north edge is free" % band)
+		sim.tick_count += SimWorld.LANE_BLOCK_SEALED                     # -> OPEN
+		Runner.T.ok(not SimWorld.lane_sealed(sim.tick_count, band), "band %d: open phase" % band)
+		Runner.T.ok(not sim._lane_blocked(x_in, y_in),
+			"band %d: the slab is passable while OPEN — the view must not draw it solid" % band)
+
+
+func test_grenade_landing_marker_is_where_the_grenade_detonates() -> void:
+	## The marker + blast ring solved a CLOSED-FORM parabola and moved the
+	## grenade along vx/vy only. The sim integrates discretely (gravity AFTER
+	## the z step -> it lands one tick later, ~3px) and shoves airborne frags
+	## MARSH_DRIFT/tick sideways over seg-2 open water. Over a full 33-tick
+	## lob that is 33px of un-previewed drift against a 28px kill radius: the
+	## ring you aimed with need not overlap the circle that kills.
+	Runner.T.ok(not _view_src().contains("sqrt(zv * zv + 2.0 * grav"),
+		"the landing marker no longer closed-forms a parabola the sim never integrates")
+	var sim := SimWorld.new(31, 1)
+	sim.waters.append({"y": -2540 * Fixed.ONE, "ford_x": 600 * Fixed.ONE})
+	var x0: int = 300 * Fixed.ONE
+	var g := {"x": x0, "y": -2500 * Fixed.ONE, "vx": 0, "vy": 0,
+		"z": 0, "zv": SimWorld.GRENADE_ZVEL, "owner": 0, "shell": false, "hold": false}
+	sim.grenades.append(g)
+	var pred: Array = sim.predict_grenade_landing(g)
+	for t in 128:
+		sim._step_grenades()
+		if sim.grenades.is_empty():
+			break
+	# _explode fires on the tick the grenade is swept; we hold the dict, so
+	# g["x"]/g["y"] ARE the coordinates it detonated at.
+	Runner.T.eq(int(pred[0]), int(g["x"]), "the previewed landing X is the X it detonates at")
+	Runner.T.eq(int(pred[1]), int(g["y"]), "the previewed landing Y is the Y it detonates at")
+	Runner.T.ok(absi(int(g["x"]) - x0) >= SimWorld.GRENADE_RADIUS,
+		"this throw really does drift %.0fpx — a full %.0fpx blast radius the old marker never showed"
+		% [absi(int(g["x"]) - x0) * PX, SimWorld.GRENADE_RADIUS * PX])

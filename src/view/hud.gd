@@ -982,7 +982,7 @@ const PRESSURE_ARM_TICKS := 30
 ## c1-16: shows from PRESSURE_WARN_TICKS (subdued pre-warning) onward, not only past the arm
 ## point — the reserved WIDTH is identical in both phases, so nothing reflows when it arms.
 func _telegraph_spec(sim: SimWorld) -> Dictionary:
-	if sim.mode != "campaign" or not sim.observer.is_empty():
+	if not sim.is_campaign_world() or not sim.observer.is_empty():
 		return {"kind": "", "w": 0.0}
 	# A closed gate pinning the camera means advancing is impossible until it's cleared —
 	# the "advance!" PRESSURE read would be lying, so it becomes CLEAR THE GATE. Checked
@@ -1256,7 +1256,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				x = _text(shint, x, y + ICON - 3.0, Color(0.85, 0.85, 0.8, 0.65)) + 6.0
 	# Flawless Gate streak: the compounding clean-checkpoint multiplier, shown as
 	# a gold star chip so the discipline reward is visible before the payoff.
-	if sim.mode == "campaign" and sim.flawless_streak >= 1:
+	if sim.is_campaign_world() and sim.flawless_streak >= 1:
 		var fltxt := "x%d" % sim.flawless_streak
 		# Demotable (prio 60): normally always shown, but on a width-starved row it drops
 		# into +N rather than overrunning the telegraph — its footprint is the star icon

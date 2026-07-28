@@ -91,9 +91,13 @@ func test_bunker_infinite_spawn_and_seal() -> void:
 
 func test_gated_spawn_cooldowns_never_run_negative() -> void:
 	## CLASS ratchet, not an instance one. Four cooldowns share one shape: decrement
-	## unconditionally, reset only when `enemies.size() < MAX_ENEMIES`. A saturated
+	## unconditionally, reset only when a gate opens (`enemies.size() < MAX_ENEMIES`,
+	## or for the colossus sweep the player parking in a margin lane). A saturated
 	## roster therefore drives each of them negative forever unless it is floored.
-	## Only the bunker's is player-visible — main.gd:6130 draws the hatch-charge glow
+	## All four are covered here — bunker, endless wave, colossus spawn, colossus
+	## sweep; the fifth sibling (colossus spray_cd, gated on concealment) is pinned
+	## by test_colossus.gd::test_spray_cooldown_stays_bounded_under_smoke.
+	## Only the bunker's is player-visible — main.gd's bunker draw builds the hatch-charge glow
 	## as `1 - spawn_cd / BUNKER_SPAWN_INTERVAL_TICKS`, which a negative pins past 100%,
 	## so a blocked hatch sat glowing "about to fire". Measured before the fix
 	## (tools/probe_cd_clamp.gd, 6 campaign seeds): 3 of 6 saturated, worst reached
@@ -130,6 +134,32 @@ func test_gated_spawn_cooldowns_never_run_negative() -> void:
 		if esim.wave_spawn_cd < 0:
 			wave_floor_held = false
 	Runner.T.ok(wave_floor_held, "wave_spawn_cd holds at 0 under a saturated roster too")
+
+	# The colossus carries the shape twice: spawn_cd (cap-gated, phase 3 only) and
+	# sweep_cd (gated on the player PARKING in a margin lane, so a fight spent
+	# anywhere else never resets it — the readiest runaway of the four).
+	var csim := SimWorld.new(4, 1)
+	var cp: Dictionary = csim.players[0]
+	cp["x"] = SimWorld.SCREEN_CX                       # dead center: never a margin lane
+	cp["y"] = csim.camera_top + 200 * SimWorld.F_ONE
+	cp["hurt_iframes"] = 99999                         # phase 3 parks inside the crush radius
+	csim.enemies.clear()
+	while csim.enemies.size() < SimWorld.MAX_ENEMIES:
+		csim.enemies.append({"x": 0, "y": 0, "alive": true, "kind": 0, "hp": 1})
+	csim.last_stand = true
+	csim.colossus = {"alive": true, "hp": 1, "max_hp": SimWorld.COLOSSUS_HP,
+		"x": SimWorld.SCREEN_CX, "y": csim.camera_top - 200 * SimWorld.F_ONE,
+		"spray_cd": 99999, "volley_cd": 99999, "spawn_cd": 30,
+		"core_cd": 99999, "core_open": 0, "pv": 3, "sweep_cd": 30}
+	var col_floor := true
+	for i in 400:
+		csim._step_colossus()
+		if int(csim.colossus["spawn_cd"]) < 0 or int(csim.colossus["sweep_cd"]) < 0:
+			col_floor = false
+	Runner.T.ok(cp["alive"], "the boss never killed the probe player (else nothing was stepped)")
+	Runner.T.ok(col_floor, "colossus spawn_cd and sweep_cd hold at 0 while their resets stay blocked")
+	Runner.T.eq(int(csim.colossus["spawn_cd"]), 0, "colossus spawn_cd rests exactly at the floor")
+	Runner.T.eq(int(csim.colossus["sweep_cd"]), 0, "colossus sweep_cd rests exactly at the floor")
 
 
 func test_passed_by_bunker_stops_spawning_and_is_pruned() -> void:
