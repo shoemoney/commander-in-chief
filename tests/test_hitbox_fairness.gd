@@ -487,3 +487,30 @@ func test_the_parked_hull_stops_you_at_the_steel_you_can_see() -> void:
 	Runner.T.ok(standoff >= d.y * 0.45,
 		"parked hull: player halts %.1fpx from centre, drawn hull half-height is %.1fpx"
 			% [standoff, d.y * 0.5])
+
+
+func test_board_reach_exceeds_the_hull_standoff_on_every_axis_including_the_corner() -> void:
+	# Honest cover and a usable verb are one constraint, not two. HULK_HALF_H grew
+	# 12 -> 23 so the parked hull stops you at the steel you can see — correct — but
+	# TANK_BOARD_RADIUS did not follow, so the collision face pushed you OUTSIDE the
+	# reach of the E you press to get in. Measured before the fix: the corner
+	# standoff sqrt(16^2 + 23^2) = 28.02 against a 24 reach, i.e. a diagonal
+	# approach could NEVER board, and the north face cleared by 1px — inside the
+	# per-tick step remainder, so head-on boarding worked on roughly half the
+	# stopping phases. A phase-dependent flaky control is worse than a refusal.
+	#
+	# Every existing hulk assertion gets EASIER as the box grows (they all check the
+	# player ends up outside it), so nothing in the suite could catch this. This one
+	# gets HARDER, which is the point.
+	var hw: int = SimWorld.HULK_HALF_W
+	var hh: int = SimWorld.HULK_HALF_H
+	var reach: int = SimWorld.TANK_BOARD_RADIUS
+	Runner.T.ok(reach > hw, "board reach clears the east/west hull face")
+	Runner.T.ok(reach > hh, "board reach clears the north/south hull face")
+	# The corner is the binding case and the one that regressed.
+	var corner_sq: int = (hw / SimWorld.F_ONE) * (hw / SimWorld.F_ONE) \
+		+ (hh / SimWorld.F_ONE) * (hh / SimWorld.F_ONE)
+	var reach_px: int = reach / SimWorld.F_ONE
+	Runner.T.ok(reach_px * reach_px > corner_sq,
+		"board reach (%dpx) clears the hull CORNER (%.1fpx), so a diagonal walk-up can board"
+			% [reach_px, sqrt(float(corner_sq))])

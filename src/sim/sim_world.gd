@@ -247,7 +247,16 @@ const GRENADE_BUFFER_TICKS := 8   # parity with the roll buffer — see _step_pl
 # Tank: 0.8× player speed, cannon draws from grenade ammo, ~20 s of fuel,
 # guaranteed 3.0 s bail window once burning.
 const TANK_SPEED := (PLAYER_SPEED * 4) / 5
-const TANK_BOARD_RADIUS := 24 * F_ONE
+const TANK_BOARD_RADIUS := 32 * F_ONE
+## Must EXCEED the hull's collision standoff on every axis or the box you cannot
+## walk through pushes you out of reach of the verb that gets you in. The binding
+## case is the corner, not the faces: sqrt(HULK_HALF_W^2 + HULK_HALF_H^2) =
+## sqrt(16^2 + 23^2) = 28.02px. At the old 24 a diagonal walk-up could NEVER
+## board, and the 23px north face cleared by 1px -- inside one tick's unspent
+## step remainder, so head-on boarding worked on roughly half the stopping
+## phases. 32 clears the corner by ~4px, which is more than a tick of travel.
+## Pinned by test_board_reach_exceeds_the_hull_standoff_on_every_axis_...; if
+## HULK_HALF_* grows again, that check goes red instead of the verb going flaky.
 const TANK_CRUSH_RADIUS := 18 * F_ONE
 const TANK_FIRE_COOLDOWN_TICKS := 45
 const TANK_FUEL_TICKS := 1200
