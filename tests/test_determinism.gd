@@ -606,13 +606,36 @@ const SEED := 0xDEADBEEF
 ## campaign driver; mg_nest and broadcast contribute nothing to this stream (broadcast
 ## is sector-5 only, and the campaign torture never lands a round in a nest's annulus).
 ## The observer needs a 480-tick stall the advancing torture never takes.
+## RE-RECORDED (2026-07-27, the parked hull blocks the steel you can see): CAMPAIGN ONLY,
+## ALL SIX SAMPLES. HULK_HALF_H 12 -> 23. The tank hull is drawn 30.4 x 46.4px (104px canvas
+## x 0.62 call scale x 0.72 art.gd SCALE) over a 32 x 24px AABB, so 11px of visible steel at
+## each end of the hull stopped nothing — boots walked through the front of the tank and
+## player rounds flew through it. H has no derived consumers (HULL_W/HULL_CLEARANCE ride
+## HULK_HALF_W, which is untouched at 105% of the drawn width), so the one constant fixes
+## all four collision sites: player slide (:1142), player-bullet block (:2523), enemy slide
+## (:2937) and enemy-bullet block incl. the manned-hull cover branch (:6065).
+## WHY SAMPLE 0 MOVES TOO, unlike the 2026-07-26 cover-slide re-record: that fix touched
+## MOVEMENT only and the torture reaches no cover by t=600. This one also moves the BULLET
+## block faces. The first tank exists at TICK 0 (streamed at y = -750, past the tick-0
+## horizon of camera_top - 2*VIEW_H = -1040) at x = SCREEN_CX = 320, and player rounds carry
+## 6px/tick x 120 ttl = 720px from a y = -60 start, i.e. out to -780 — past the hull. Any
+## round crossing x in [304, 336] now dies ~11px (2 ticks) sooner, from tick 0 onward.
+## Predicted "sample 0 is LIKELY to move, measure it"; measured: it did, along with 1-5.
+## ENDLESS GOLDEN VERIFIED UNCHANGED (run, not assumed): _stream_tanks returns early for any
+## mode that is not campaign/arcade, so the endless `tanks` array is empty for the whole run.
+## The two supply fixes shipped alongside this one are golden-inert and that is MEASURED:
+## with the airstrike arm in _supply_full, the rebuilt _try_token_drop pool and the
+## leave-free-crates-standing rule ALL in the tree and HULK_HALF_H still at 12, both streams
+## came back byte-identical to the pre-change goldens. (Argued reason: _try_buy/_try_token_drop
+## are reachable only through SimInput.buy, which scripted_input never presses; and no kind-3
+## pickup is ever constructed, while no free crate the torture walks over is ever at cap.)
 const GOLDEN: Array[int] = [
-	2407026767914979979,
-	461371032039649670,
-	5063156605900622803,
-	7840083679643977125,
-	8428269569959002222,
-	6332735790241153794,
+	8531273371570139596,
+	2860288398011830533,
+	5069393849379897797,
+	8207972238508876062,
+	3003988878224799785,
+	2086350485022355115,
 ]
 
 

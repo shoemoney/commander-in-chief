@@ -51,6 +51,7 @@ const CALL_SCALE := {
 	"radio_tower": 0.9,     # broadcast mast
 	"mg_stand": 1.0,        # MG nest
 	"m_radar_tank": 0.5,    # _draw_observer
+	"tank_body": 0.62,      # _draw_tanks — the parked hull you hide behind
 }
 
 
@@ -456,3 +457,33 @@ func test_no_lethal_radius_is_invisible_to_the_view() -> void:
 		"the foundry vent's jet and warn ring are drawn from VENT_HURT_RADIUS — "
 		+ "they used to hardcode 24/10 while killing at 24, so the telegraph shrank "
 		+ "onto a hazard that never did")
+
+
+func test_the_parked_hull_stops_you_at_the_steel_you_can_see() -> void:
+	## A parked tank is the only mid-lane cover you can hide BEHIND, and it is
+	## the one blocker whose sprite fills its whole canvas. Walk a player
+	## dead-on into its north face and measure where the sim actually stops him.
+	## Both sides are measured: the standoff is behavioural, the RHS is the
+	## shipped PNG's alpha bbox. Neither reads HULK_HALF_H.
+	var d := _silhouette("tank_body")
+	if d == Vector2.ZERO:
+		return
+	var sim := SimWorld.new(71, 1)
+	sim.tanks.clear()
+	var tx: int = 300 * SimWorld.F_ONE
+	var ty: int = sim.camera_top + 200 * SimWorld.F_ONE
+	sim.tanks.append({"x": tx, "y": ty, "alive": true, "burning": false,
+		"fuel": 99999, "burn_ticks": 0, "fire_cd": 0, "occupant": -1})
+	var p := sim.players[0]
+	p["x"] = tx
+	p["y"] = ty - 45 * SimWorld.F_ONE          # 45px north, clear of any box
+	var walk := SimInput.new()
+	walk.move_y = 256                           # straight south, into the hull
+	for _n in 25:
+		sim.enemies.clear()                     # scratch sim: keep the lane inert
+		sim.enemy_bullets.clear()
+		sim.step([walk])
+	var standoff := float(ty - p["y"]) / SimWorld.F_ONE
+	Runner.T.ok(standoff >= d.y * 0.45,
+		"parked hull: player halts %.1fpx from centre, drawn hull half-height is %.1fpx"
+			% [standoff, d.y * 0.5])
