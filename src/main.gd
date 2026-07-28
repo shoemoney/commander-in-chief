@@ -2379,6 +2379,8 @@ func _consume_events() -> void:
 				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK",
 					"token": "NO COMMENDATION", "full": "ALREADY STOCKED"}.get(
 						ev.get("why", "coins"), "NEED COINS")
+				if ev.get("why", "") == "full" and int(ev.get("kind", -1)) == 3:
+					deny_txt = "STRIKE ALREADY INBOUND"   # nothing was stocked; one is in the air
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": deny_txt, "col": Color(1.0, 0.45, 0.35)})
 			"shot":
@@ -5382,7 +5384,10 @@ func _update_feel() -> void:
 		var tk: Dictionary = sim.tanks[ti]
 		if _tank_alive_prev.get(ti, true) and not tk["alive"]:
 			_hulks.append({"x": tk["x"], "y": tk["y"], "t": 0.0,
-				"rot": float(Art.cell_hash(tk["x"], tk["y"]) % 628) / 100.0})
+				# +-0.3 rad wobble, not the full 0..2pi spin: the wreck IS an
+				# axis-aligned AABB in the sim, so a 90-degree draw put 41px of
+				# hull across a 32px block face (sandbag precedent, _draw_cover).
+				"rot": float(Art.cell_hash(tk["x"], tk["y"]) % 60) / 100.0 - 0.3})
 		_tank_alive_prev[ti] = tk["alive"]
 		# Engine idle (3-vote): persistent positional growl for alive on-screen
 		# tanks; pitch lifts when crewed so boarding audibly changes the engine.
@@ -8198,14 +8203,15 @@ func _draw_pickups() -> void:
 		# Maxed check: the sim clamps a buy via mini() against the ammo/grenade
 		# cap (or no-ops if vest is already on), so a priced crate at cap would
 		# silently eat the coin — grey the crate and swap price for "MAXED".
+		# Read the SIM's predicate instead of keeping a third copy of the cap
+		# table here — a FREE crate at cap is now left standing, so it has to
+		# grey too or the arena litters with lootable-green rings that deliver
+		# nothing.
 		var maxed := false
-		if pk.get("cost", 0) > 0 and pk["kind"] <= 2:
+		if pk["kind"] <= 3:
 			var buyer := sim._nearest_alive_player(pk["x"], pk["y"])
 			if not buyer.is_empty():
-				match pk["kind"]:
-					0: maxed = buyer["mg_ammo"] >= SimWorld.MG_AMMO_MAX
-					1: maxed = buyer["grenade_ammo"] >= SimWorld.GRENADE_AMMO_MAX
-					2: maxed = buyer["vest"]
+				maxed = sim._supply_full(buyer, pk["kind"])
 		if maxed:
 			mod = Color(0.55, 0.55, 0.55)
 		# Crates sit on the ground like every other grounded prop (litter, barrels,
@@ -8255,15 +8261,14 @@ func _draw_pickups() -> void:
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
-		if pk.get("cost", 0) > 0:
-			if maxed:
-				Art.text(self, "MAXED", ppos + Vector2(-15, -25), 9, Color(0.6, 0.6, 0.6))
-			else:
-				# Price tinted by affordability (matches the spend-wheel language).
-				var afford: bool = sim.war_chest >= pk["cost"]
-				var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
-				draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
-				Art.text(self, str(pk["cost"]), ppos + Vector2(-4, -25), 9, pcol)
+		if maxed:
+			Art.text(self, "MAXED", ppos + Vector2(-15, -25), 9, Color(0.6, 0.6, 0.6))
+		elif pk.get("cost", 0) > 0:
+			# Price tinted by affordability (matches the spend-wheel language).
+			var afford: bool = sim.war_chest >= pk["cost"]
+			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
+			Art.text(self, str(pk["cost"]), ppos + Vector2(-4, -25), 9, pcol)
 
 
 func _draw_tanks() -> void:
@@ -11073,6 +11078,7 @@ func _draw_wheel() -> void:
 				0: stock_txt = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
 				1: stock_txt = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
 				2: stock_txt = "VEST ON" if p["vest"] else "NO VEST"
+				3: stock_txt = "INBOUND" if sim.pending_airstrike > 0 else "READY"
 				4: stock_txt = "%d/%d UP" % [sim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP]
 				5: stock_txt = "%d* HELD" % sim.tokens
 			var stock_empty := stock_txt.begins_with("0/") or stock_txt == "NO VEST"

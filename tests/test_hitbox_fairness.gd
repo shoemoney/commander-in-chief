@@ -51,6 +51,7 @@ const CALL_SCALE := {
 	"radio_tower": 0.9,     # broadcast mast
 	"mg_stand": 1.0,        # MG nest
 	"m_radar_tank": 0.5,    # _draw_observer
+	"tank_body": 0.62,      # _draw_tanks — the parked hull you hide behind
 }
 
 
@@ -456,3 +457,60 @@ func test_no_lethal_radius_is_invisible_to_the_view() -> void:
 		"the foundry vent's jet and warn ring are drawn from VENT_HURT_RADIUS — "
 		+ "they used to hardcode 24/10 while killing at 24, so the telegraph shrank "
 		+ "onto a hazard that never did")
+
+
+func test_the_parked_hull_stops_you_at_the_steel_you_can_see() -> void:
+	## A parked tank is the only mid-lane cover you can hide BEHIND, and it is
+	## the one blocker whose sprite fills its whole canvas. Walk a player
+	## dead-on into its north face and measure where the sim actually stops him.
+	## Both sides are measured: the standoff is behavioural, the RHS is the
+	## shipped PNG's alpha bbox. Neither reads HULK_HALF_H.
+	var d := _silhouette("tank_body")
+	if d == Vector2.ZERO:
+		return
+	var sim := SimWorld.new(71, 1)
+	sim.tanks.clear()
+	var tx: int = 300 * SimWorld.F_ONE
+	var ty: int = sim.camera_top + 200 * SimWorld.F_ONE
+	sim.tanks.append({"x": tx, "y": ty, "alive": true, "burning": false,
+		"fuel": 99999, "burn_ticks": 0, "fire_cd": 0, "occupant": -1})
+	var p := sim.players[0]
+	p["x"] = tx
+	p["y"] = ty - 45 * SimWorld.F_ONE          # 45px north, clear of any box
+	var walk := SimInput.new()
+	walk.move_y = 256                           # straight south, into the hull
+	for _n in 25:
+		sim.enemies.clear()                     # scratch sim: keep the lane inert
+		sim.enemy_bullets.clear()
+		sim.step([walk])
+	var standoff := float(ty - p["y"]) / SimWorld.F_ONE
+	Runner.T.ok(standoff >= d.y * 0.45,
+		"parked hull: player halts %.1fpx from centre, drawn hull half-height is %.1fpx"
+			% [standoff, d.y * 0.5])
+
+
+func test_board_reach_exceeds_the_hull_standoff_on_every_axis_including_the_corner() -> void:
+	# Honest cover and a usable verb are one constraint, not two. HULK_HALF_H grew
+	# 12 -> 23 so the parked hull stops you at the steel you can see — correct — but
+	# TANK_BOARD_RADIUS did not follow, so the collision face pushed you OUTSIDE the
+	# reach of the E you press to get in. Measured before the fix: the corner
+	# standoff sqrt(16^2 + 23^2) = 28.02 against a 24 reach, i.e. a diagonal
+	# approach could NEVER board, and the north face cleared by 1px — inside the
+	# per-tick step remainder, so head-on boarding worked on roughly half the
+	# stopping phases. A phase-dependent flaky control is worse than a refusal.
+	#
+	# Every existing hulk assertion gets EASIER as the box grows (they all check the
+	# player ends up outside it), so nothing in the suite could catch this. This one
+	# gets HARDER, which is the point.
+	var hw: int = SimWorld.HULK_HALF_W
+	var hh: int = SimWorld.HULK_HALF_H
+	var reach: int = SimWorld.TANK_BOARD_RADIUS
+	Runner.T.ok(reach > hw, "board reach clears the east/west hull face")
+	Runner.T.ok(reach > hh, "board reach clears the north/south hull face")
+	# The corner is the binding case and the one that regressed.
+	var corner_sq: int = (hw / SimWorld.F_ONE) * (hw / SimWorld.F_ONE) \
+		+ (hh / SimWorld.F_ONE) * (hh / SimWorld.F_ONE)
+	var reach_px: int = reach / SimWorld.F_ONE
+	Runner.T.ok(reach_px * reach_px > corner_sq,
+		"board reach (%dpx) clears the hull CORNER (%.1fpx), so a diagonal walk-up can board"
+			% [reach_px, sqrt(float(corner_sq))])

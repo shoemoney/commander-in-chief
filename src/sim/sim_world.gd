@@ -247,7 +247,16 @@ const GRENADE_BUFFER_TICKS := 8   # parity with the roll buffer — see _step_pl
 # Tank: 0.8× player speed, cannon draws from grenade ammo, ~20 s of fuel,
 # guaranteed 3.0 s bail window once burning.
 const TANK_SPEED := (PLAYER_SPEED * 4) / 5
-const TANK_BOARD_RADIUS := 24 * F_ONE
+const TANK_BOARD_RADIUS := 32 * F_ONE
+## Must EXCEED the hull's collision standoff on every axis or the box you cannot
+## walk through pushes you out of reach of the verb that gets you in. The binding
+## case is the corner, not the faces: sqrt(HULK_HALF_W^2 + HULK_HALF_H^2) =
+## sqrt(16^2 + 23^2) = 28.02px. At the old 24 a diagonal walk-up could NEVER
+## board, and the 23px north face cleared by 1px -- inside one tick's unspent
+## step remainder, so head-on boarding worked on roughly half the stopping
+## phases. 32 clears the corner by ~4px, which is more than a tick of travel.
+## Pinned by test_board_reach_exceeds_the_hull_standoff_on_every_axis_...; if
+## HULK_HALF_* grows again, that check goes red instead of the verb going flaky.
 const TANK_CRUSH_RADIUS := 18 * F_ONE
 const TANK_FIRE_COOLDOWN_TICKS := 45
 const TANK_FUEL_TICKS := 1200
@@ -410,8 +419,14 @@ const WIPE_SCORE_MULT := 3
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
 const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
-const HULK_HALF_W := 16 * F_ONE      # dead-hull cover AABB (center-point tanks, unlike corner-origin bunkers)
-const HULK_HALF_H := 12 * F_ONE
+const HULK_HALF_W := 16 * F_ONE      # dead-hull cover AABB (center-point tanks, unlike corner-origin bunkers).
+                                     # W stays 16 deliberately: it is already 105% of the 30.4px drawn width,
+                                     # AND HULL_W/HULL_CLEARANCE derive from it, so moving W is a level-geometry
+                                     # change (gate/fork/choke passage widths), not a hitbox fix.
+const HULK_HALF_H := 23 * F_ONE      # 104px canvas x 0.62 call x 0.72 SCALE = 46.4px drawn hull; half = 23.2,
+                                     # so 23 keeps the box just INSIDE the silhouette (bunker precedent,
+                                     # test_hitbox_fairness). Was 12 — 52% of the drawn height, so 11px of
+                                     # visible steel at each end of the hull stopped nothing at all.
 const SANDBAG_FIELD_CAP := 6         # starting value: 6 x 36px = 216px can never wall the ~592px lane
 const SANDBAG_HALF_W := 18 * F_ONE   # segment is 36x10 px — rushers must flank in under ~2s
 const SANDBAG_HALF_H := 5 * F_ONE
@@ -1739,7 +1754,14 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		# nothing (an endless laundering loop). Leave it standing — the view
 		# already greys it and prints MAXED.
 		var full := _supply_full(p, pk["kind"])
-		if cost > 0 and full:
+		# CRATES (kinds 0-3) are left standing when they'd deliver nothing, free
+		# or priced: the gate cache is a 50/50 grenades-or-VEST crate dead-centre
+		# in the only path north, and walking through it while vested deleted the
+		# campaign's only guaranteed checkpoint reward. CAPSULES (kind >= 4) keep
+		# the consume-and-flag-full grammar — a Triple Shot you already own is
+		# permanent, so leaving it would litter the arena with a glowing beacon
+		# nothing can ever clear.
+		if full and (pk["kind"] <= 3 or cost > 0):
 			continue
 		war_chest -= cost
 		if pk["kind"] == 2:
@@ -2176,6 +2198,10 @@ func _supply_full(p: Dictionary, kind: int) -> bool:
 			return p["grenade_ammo"] >= GRENADE_AMMO_MAX
 		2:
 			return p["vest"]
+		3:
+			# One strike is in the air; a second call re-stamps the same timer
+			# and delivers no extra fire mission (see _apply_supply kind 3).
+			return pending_airstrike > 0
 		6:
 			return p["triple"]
 		8:
@@ -2201,18 +2227,21 @@ func _try_token_drop(p: Dictionary) -> void:
 	if tokens <= 0:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "token"})
 		return
-	tokens -= 1
-	# Roll only among USEFUL kinds — burning a Commendation on a vest you're
-	# already wearing was a silent no-op against the deny-loudly grammar
-	# (re-review). Airstrike is always live, so the pool is never empty.
+	# Roll only among USEFUL kinds — the cap test is _supply_full's job, not a
+	# fourth hand-rolled copy of it (kind 3 used to be appended unconditionally,
+	# so a token spent under an inbound strike bought a re-stamp of the same
+	# timer). The token is spent AFTER the pool is built: an empty pool must not
+	# burn it.
 	var cands: Array[int] = []
-	if p["mg_ammo"] < MG_AMMO_MAX:
-		cands.append(0)
-	if p["grenade_ammo"] < GRENADE_AMMO_MAX:
-		cands.append(1)
-	if not p["vest"]:
-		cands.append(2)
-	cands.append(3)
+	for k in [0, 1, 2, 3]:
+		if not _supply_full(p, k):
+			cands.append(k)
+	if cands.is_empty():
+		# Everything the basic table sells is already delivered — keep the token.
+		# Load-bearing, not padding: rng.range_i(0, -1) divides by zero.
+		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "full"})
+		return
+	tokens -= 1
 	var kind: int = cands[rng.range_i(0, cands.size() - 1)]
 	_apply_supply(p, kind)
 	events.append({"t": "token_drop", "x": p["x"], "y": p["y"], "kind": kind})
@@ -2236,7 +2265,7 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		# Buying a vest you're already wearing, or ammo at the cap, used to
 		# charge the chest AND credit score for nothing delivered — the same
 		# silent no-op _collect_pickups denies. Deny loudly instead.
-		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "full"})
+		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "full", "kind": kind})
 		return
 	if war_chest < cost:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "coins"})

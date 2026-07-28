@@ -192,14 +192,58 @@ func test_priced_crate_still_bought_when_it_grants_something() -> void:
 	Runner.T.eq(p["grenade_ammo"], 6, "the supply was actually delivered")
 	Runner.T.eq(sim.pickups.size(), 0, "the crate was consumed")
 
-	# Free crates are never refused (they cost nothing) — they just carry
-	# full=true so the view can skip the celebration.
+	# A FREE crate (kinds 0-3) at cap is LEFT STANDING, not eaten: the gate cache
+	# is a 50/50 grenades-or-VEST crate dead-centre in the only path north, and
+	# walking through it while vested deleted the checkpoint reward outright.
 	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
 	sim.pickups.append({"x": p["x"], "y": p["y"], "kind": 1, "cost": 0})
 	sim.events.clear()
 	sim._collect_pickups(p, 0)
-	Runner.T.eq(sim.pickups.size(), 0, "a free crate at cap is still collected")
-	Runner.T.ok(sim.events[-1]["full"], "the free no-op is flagged full for the view")
+	Runner.T.eq(sim.pickups.size(), 1, "a free crate at cap is LEFT STANDING, not deleted")
+	Runner.T.eq(sim.events.size(), 0, "...and fires no celebratory pickup event")
+	# ...and it is not a blanket refusal: the moment it's worth something, it goes.
+	p["grenade_ammo"] = 0
+	sim._collect_pickups(p, 0)
+	Runner.T.eq(sim.pickups.size(), 0, "...and is collected the moment it is worth something")
+	Runner.T.eq(p["grenade_ammo"], 4, "...delivering the supply")
+
+
+func test_a_second_airstrike_buy_inside_its_own_telegraph_is_refused() -> void:
+	# A strike already in the air delivers nothing extra — _apply_supply kind 3
+	# just re-stamps the same timer, so a second buy billed full price AND pushed
+	# the inbound strike later.
+	var sim := SimWorld.new(7, 1)
+	var p := sim.players[0]
+	sim.war_chest = 1000
+	sim.score = 0
+	sim._try_buy(p, 3)
+	var chest1 := sim.war_chest
+	var score1 := sim.score
+	sim.pending_airstrike = 25          # 20 ticks into the 45-tick telegraph
+	sim.events.clear()
+	sim._try_buy(p, 3)
+	Runner.T.eq(sim.war_chest, chest1, "a strike already inbound is not billed twice")
+	Runner.T.eq(sim.score, score1, "...and credits no spend score")
+	Runner.T.eq(sim.pending_airstrike, 25, "...and does not push the inbound strike later")
+	Runner.T.eq(sim.events[-1]["t"], "deny", "the refusal is loud")
+	Runner.T.eq(sim.events[-1]["why"], "full", "...and says why")
+
+
+func test_a_commendation_is_not_burned_on_a_strike_already_inbound() -> void:
+	# The token pool used to append kind 3 unconditionally, so a Commendation
+	# spent under an inbound strike bought a re-stamp of the same timer.
+	var sim := SimWorld.new(7, 1)
+	var p := sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	p["vest"] = true
+	sim.pending_airstrike = 30
+	sim.tokens = 1
+	sim.events.clear()
+	sim._try_token_drop(p)
+	Runner.T.eq(sim.tokens, 1, "the token survives when nothing can be delivered")
+	Runner.T.eq(sim.pending_airstrike, 30, "...and the inbound strike is not re-stamped")
+	Runner.T.eq(sim.events[-1]["why"], "full", "...and the refusal says why")
 
 
 func test_supply_full_covers_every_capped_kind() -> void:
@@ -217,6 +261,12 @@ func test_supply_full_covers_every_capped_kind() -> void:
 	p["claymores"] = 0
 	for kind in [0, 1, 2, 8]:
 		Runner.T.ok(not sim._supply_full(p, kind), "kind %d reads usable when empty" % kind)
+	# Kind 3 (airstrike) is full only while one is already inbound — it was in
+	# NONE of these lists, which is exactly how the gap shipped.
+	sim.pending_airstrike = 20
+	Runner.T.ok(sim._supply_full(p, 3), "an inbound strike reads full")
+	sim.pending_airstrike = 0
+	Runner.T.ok(not sim._supply_full(p, 3), "a clear sky reads usable")
 	# Timed capsules / one-shots always re-apply usefully, so never "full".
 	for kind in [4, 5, 7, 9, 10, 11]:
 		Runner.T.ok(not sim._supply_full(p, kind), "kind %d is never full" % kind)
