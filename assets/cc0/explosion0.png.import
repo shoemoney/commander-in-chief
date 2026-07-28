@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bkhj8o1xkxr22"
-path="res://.godot/imported/sandbag_beige.png-0bff353187bac763ecfb438eba2e4cda.ctex"
+uid="uid://dqigqwia51f5t"
+path="res://.godot/imported/explosion0.png-8b8ffee7bb29788e01c4ee17f0f157eb.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/sandbag_beige.png"
-dest_files=["res://.godot/imported/sandbag_beige.png-0bff353187bac763ecfb438eba2e4cda.ctex"]
+source_file="res://assets/cc0/explosion0.png"
+dest_files=["res://.godot/imported/explosion0.png-8b8ffee7bb29788e01c4ee17f0f157eb.ctex"]
 
 [params]
 

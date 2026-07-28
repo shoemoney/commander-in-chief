@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bq62bugo7umhw"
-path="res://.godot/imported/smoke.png-bde222199048b5968565df0b54d9c945.ctex"
+uid="uid://24ojl7lwnynl"
+path="res://.godot/imported/tank_barrel.png-148d9d7c0d53747d9a5e01f9fab9aba9.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/smoke.png"
-dest_files=["res://.godot/imported/smoke.png-bde222199048b5968565df0b54d9c945.ctex"]
+source_file="res://assets/cc0/tank_barrel.png"
+dest_files=["res://.godot/imported/tank_barrel.png-148d9d7c0d53747d9a5e01f9fab9aba9.ctex"]
 
 [params]
 

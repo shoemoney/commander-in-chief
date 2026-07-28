@@ -19,7 +19,7 @@ extends RefCounted
 ## numbers. TINT is the desert→jungle olive shift, applied in _spr().
 
 const ART := "res://assets/art/"
-const KN := "res://assets/kenney/"
+const KN := "res://assets/cc0/"
 const SOL := "res://assets/soldiers/"   # infantry set pack (authored top-down infantry, size-limited + cleaned)
 
 const TEX := {

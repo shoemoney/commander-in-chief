@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://de1aras4cur0t"
-path="res://.godot/imported/enemy_bullet.png-acf9875964bf492845ac19a08c72b5cb.ctex"
+uid="uid://lpwqm6cr803i"
+path="res://.godot/imported/colossus_barrel.png-632ed1dc4f19179889b93f3f06c0ce40.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/enemy_bullet.png"
-dest_files=["res://.godot/imported/enemy_bullet.png-acf9875964bf492845ac19a08c72b5cb.ctex"]
+source_file="res://assets/cc0/colossus_barrel.png"
+dest_files=["res://.godot/imported/colossus_barrel.png-632ed1dc4f19179889b93f3f06c0ce40.ctex"]
 
 [params]
 

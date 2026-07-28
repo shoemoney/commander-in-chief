@@ -730,14 +730,14 @@ func test_a2_pipeline_vram_reclaimed() -> void:
 		var c := FileAccess.get_file_as_string("res://assets/art/icons/%s.png.import" % cap)
 		Runner.T.ok(c.contains("size_limit=128"), "capsule glyph %s imports size-limited" % cap)
 	for tile in ["dirt", "sand"]:
-		var ti := FileAccess.get_file_as_string("res://assets/kenney/%s.png.import" % tile)
+		var ti := FileAccess.get_file_as_string("res://assets/cc0/%s.png.import" % tile)
 		Runner.T.ok(ti.contains("mipmaps/generate=false"), "the 1:1 Kenney %s tile has mipmaps OFF" % tile)
 
 
 func test_ground_tile_is_seamless() -> void:
 	# The ground base is drawn as one repeat-tiled strip per row — a sand card whose
 	# wrap edge doesn't match its own interior would put the grid straight back.
-	var img: Image = (load("res://assets/kenney/sand.png") as Texture2D).get_image()
+	var img: Image = (load("res://assets/cc0/sand.png") as Texture2D).get_image()
 	var w := img.get_width()
 	var h := img.get_height()
 	var inner := 0.0

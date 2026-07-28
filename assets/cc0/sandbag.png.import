@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://drt6b7jht2lwy"
-path="res://.godot/imported/crate_grenade.png-43a2a3b60d2b22e95c061f68eb578170.ctex"
+uid="uid://c7hqd33kf8uhi"
+path="res://.godot/imported/sandbag.png-53a660e70f5b3a9f9efc065a033a6238.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/crate_grenade.png"
-dest_files=["res://.godot/imported/crate_grenade.png-43a2a3b60d2b22e95c061f68eb578170.ctex"]
+source_file="res://assets/cc0/sandbag.png"
+dest_files=["res://.godot/imported/sandbag.png-53a660e70f5b3a9f9efc065a033a6238.ctex"]
 
 [params]
 

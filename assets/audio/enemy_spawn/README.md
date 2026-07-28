@@ -10,6 +10,6 @@ Played when an **infantry** unit first enters the viewport (not machines).
 
 **Voices:** bill, daniel, brian, callum, harry, roger  
 **Takes:** 3–4 per voice × phrase  
-**Pipeline:** model gateway → speech synthesis `synth-v3`
+**Pipeline:** in-house text-to-speech synthesis
 
 Wired in `Sfx.play_spawn_shout()` ← `main._tick_spawn_yells()` (55% chance + 0.37s cooldown).

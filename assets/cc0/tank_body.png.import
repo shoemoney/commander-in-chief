@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c7hqd33kf8uhi"
-path="res://.godot/imported/sandbag.png-e193fac54973cafdbd70c14e7e80dfb9.ctex"
+uid="uid://bkub6kb6xeppq"
+path="res://.godot/imported/tank_body.png-a83faf93b7b547f4ad66f4db9118f3f9.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/sandbag.png"
-dest_files=["res://.godot/imported/sandbag.png-e193fac54973cafdbd70c14e7e80dfb9.ctex"]
+source_file="res://assets/cc0/tank_body.png"
+dest_files=["res://.godot/imported/tank_body.png-a83faf93b7b547f4ad66f4db9118f3f9.ctex"]
 
 [params]
 

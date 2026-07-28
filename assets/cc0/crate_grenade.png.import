@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cvno21ugowriu"
-path="res://.godot/imported/frogman.png-a64db47a1128e555961d65a422d4f08a.ctex"
+uid="uid://drt6b7jht2lwy"
+path="res://.godot/imported/crate_grenade.png-ce851e93f06ebd603d6f6695221313a3.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/frogman.png"
-dest_files=["res://.godot/imported/frogman.png-a64db47a1128e555961d65a422d4f08a.ctex"]
+source_file="res://assets/cc0/crate_grenade.png"
+dest_files=["res://.godot/imported/crate_grenade.png-ce851e93f06ebd603d6f6695221313a3.ctex"]
 
 [params]
 

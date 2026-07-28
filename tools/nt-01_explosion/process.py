@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """nt-01-explosion-vfx-replacement pipeline record.
 
-Regenerates assets/kenney/explosion0..3.png from the winning fal.ai render.
+Regenerates assets/cc0/explosion0..3.png from the winning fal.ai render.
 Kept here (tracked) so the pipeline is reproducible/reviewable even though
 its raw inputs/outputs live under the gitignored art_candidates/ scratch
 dir. Run from the repo root: `python3 tools/nt-01_explosion/process.py`.
@@ -36,7 +36,7 @@ frames never had.
 Split the 2x2 grid into 4 explosion frames, chroma-key the magenta
 background to transparent, crop to content bbox, resize to a shared square
 canvas so the sim's spr_scale progression (not raw pixel size) controls the
-growth animation, and install the result over assets/kenney/explosion0..3.png
+growth animation, and install the result over assets/cc0/explosion0..3.png
 — the same 4 files this pipeline produced for the committed sprites."""
 import hashlib
 import sys

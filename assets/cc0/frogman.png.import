@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bkub6kb6xeppq"
-path="res://.godot/imported/tank_body.png-e5733f031f211db90147f3ce5a82eaa6.ctex"
+uid="uid://cvno21ugowriu"
+path="res://.godot/imported/frogman.png-2d5ba544f9253bdd9ae7f3a2fc40250a.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/tank_body.png"
-dest_files=["res://.godot/imported/tank_body.png-e5733f031f211db90147f3ce5a82eaa6.ctex"]
+source_file="res://assets/cc0/frogman.png"
+dest_files=["res://.godot/imported/frogman.png-2d5ba544f9253bdd9ae7f3a2fc40250a.ctex"]
 
 [params]
 

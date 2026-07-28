@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cwoa7rfbyuofg"
-path="res://.godot/imported/sand.png-4c7bb6e37c49efc1c1afc317d01919a3.ctex"
+uid="uid://cvyk4lro82f8x"
+path="res://.godot/imported/explosion3.png-96a2cb0f348ec0ab0c86c55adbf3c32d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/sand.png"
-dest_files=["res://.godot/imported/sand.png-4c7bb6e37c49efc1c1afc317d01919a3.ctex"]
+source_file="res://assets/cc0/explosion3.png"
+dest_files=["res://.godot/imported/explosion3.png-96a2cb0f348ec0ab0c86c55adbf3c32d.ctex"]
 
 [params]
 

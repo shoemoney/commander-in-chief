@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bd7i8a2i5o8ue"
-path="res://.godot/imported/observer.png-bb81fe2bc87bb021d0a316ce01a6d02d.ctex"
+uid="uid://bkhj8o1xkxr22"
+path="res://.godot/imported/sandbag_beige.png-fe7770aea21183b0de09082fb3919648.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/observer.png"
-dest_files=["res://.godot/imported/observer.png-bb81fe2bc87bb021d0a316ce01a6d02d.ctex"]
+source_file="res://assets/cc0/sandbag_beige.png"
+dest_files=["res://.godot/imported/sandbag_beige.png-fe7770aea21183b0de09082fb3919648.ctex"]
 
 [params]
 

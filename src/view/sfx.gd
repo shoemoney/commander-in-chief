@@ -603,7 +603,7 @@ func _poll_mp3_bank(pending: Array[String], into: Array) -> void:
 
 func _load_death_yells() -> void:
 	## Infantry death agony bank — male Arabic "Ya Zahra"/"Ya Hossein" takes
-	## (speech synthesis via model gateway). Threaded; play_death_yell picks from whatever's landed so far.
+	## (synthesized in-house). Threaded; play_death_yell picks from whatever's landed so far.
 	_load_mp3_bank_async("res://assets/audio/enemy_death", _death_yells_pending)
 
 

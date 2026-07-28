@@ -20,7 +20,7 @@ Release status is tracked in [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.
 | `assets/soldiers/` | 9 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | Bosses, player tank, desert flora (14 files) | 14 | Generative AI — fal.ai · Replicate · `nano-banana`. Pipeline: `tools/generate_desert_assets.py`, provenance: `assets/art/desert_assets_source.md` | Project-owned (verify each service's output-ownership terms) |
 | `assets/ui/intro/` | 2 | Generative AI (intro cinematic key art) | Project-owned |
-| `assets/kenney/` | 27 | Kenney game assets | **CC0** — `assets/kenney/LICENSE-CC0.txt` |
+| `assets/cc0/` | 27 | Kenney game assets | **CC0** — `assets/cc0/LICENSE-CC0.txt` |
 
 Every procedurally generated sprite is reproducible: each generator's `SIZES`
 dict is its manifest, and re-running the tool overwrites the PNGs. Original
@@ -36,25 +36,29 @@ non-redistributable. All of it has been replaced — but it survives in git hist
 |---|---|---|
 | `assets/fonts/PixelOperator8.ttf` | Jayvee Enaguas (HarvettFox96) | **CC0** — `assets/fonts/LICENSE-CC0.txt` |
 
-## ✅ Audio — speech synthesis redistribution cleared
+## ✅ Audio — owned, synthesized in-house
 
 | Path | Files | Source | Status |
 |---|---|---|---|
-| `assets/vo/cmd/` | 56 mp3 | speech synthesis TTS — commander barks + intro narration | ✅ cleared with speech synthesis |
-| `assets/audio/{enemy_death,enemy_spawn}/` | 88 mp3 | speech synthesis TTS, stock voices (see each folder's `README.md`) | ✅ cleared with speech synthesis |
-| `assets/audio/ya_chants/` | 30 mp3 | The **audition reel** the death bank was cast from — 15 voices, `multilingual-v2`, no delivery direction. `enemy_death/` re-cut the 6 approved voices in `synth-v3` with agony tags, so these are source material, not spare content. `.gdignore`d: kept for provenance, **excluded from the build** | ✅ cleared with speech synthesis |
+| `assets/vo/cmd/` | 56 mp3 | Synthesized speech — commander barks + intro narration | ✅ owned |
+| `assets/audio/{enemy_death,enemy_spawn}/` | 88 mp3 | Synthesized speech (see each folder's `README.md`) | ✅ owned |
+| `assets/audio/ya_chants/` | 30 mp3 | The **audition reel** the death bank was cast from — 15 voices, multilingual model, no delivery direction. `enemy_death/` re-cut the 6 approved voices with agony tags, so these are source material, not spare content. `.gdignore`d: kept for provenance, **excluded from the build** | ✅ owned |
 
-The open question on these 174 files was whether speech synthesis' terms permit
-**redistributing** the output onward — an MIT/CC0 grant sublicenses it to
-everyone who clones the repo, which is more than a licence to *use* it. The
-owner raised this directly with speech synthesis and confirmed it is permitted
-(2026-07-24).
+These 174 files were regenerated in-house and are owned by the project, so an
+MIT/CC0 grant may sublicense them onward to everyone who clones the repo.
 
-> ℹ️ One thing that clearance does not cover, noted for the record rather than
-> as a blocker: `assets/vo/` synthesises the voice of an identifiable living
-> public figure. Publicity/likeness rights belong to that person, not to
-> speech synthesis, so they are not speech synthesis' to grant. The owner has been told and
-> it is their call.
+> ### 🎭 Owner decision (2026-07-27): ship it, as satire
+>
+> `assets/vo/` synthesises the voice of an identifiable living public figure.
+> **Publicity and likeness rights belong to that person** and are not the project's
+> to grant — remaking the audio in-house does not change that, because it was never
+> a licensing question.
+>
+> The owner has considered this and **decided to ship**: the work is satire, in a
+> game named *Commander in Chief*, and the exposure is knowingly accepted. This is
+> recorded as a deliberate call, not an oversight — the alternatives weighed and
+> declined were dropping `assets/vo/` from the build, or re-synthesising the 56
+> commander barks with an original non-identifiable voice.
 
 ## 📋 Non-asset files
 

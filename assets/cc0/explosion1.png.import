@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://lpwqm6cr803i"
-path="res://.godot/imported/colossus_barrel.png-7acfcdde713b1ebd7333e75fb6dddc66.ctex"
+uid="uid://bfab5c8nvpjjt"
+path="res://.godot/imported/explosion1.png-ea0a7953111ff79927d56d3b07063ec8.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/colossus_barrel.png"
-dest_files=["res://.godot/imported/colossus_barrel.png-7acfcdde713b1ebd7333e75fb6dddc66.ctex"]
+source_file="res://assets/cc0/explosion1.png"
+dest_files=["res://.godot/imported/explosion1.png-ea0a7953111ff79927d56d3b07063ec8.ctex"]
 
 [params]
 

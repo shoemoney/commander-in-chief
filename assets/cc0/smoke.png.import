@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://likyglg4g7jn"
-path="res://.godot/imported/rusher.png-96c2488935fba5bdd52e4d4f4dd5e648.ctex"
+uid="uid://bq62bugo7umhw"
+path="res://.godot/imported/smoke.png-d94ecac5cafd1c4307c0840974650fc5.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/rusher.png"
-dest_files=["res://.godot/imported/rusher.png-96c2488935fba5bdd52e4d4f4dd5e648.ctex"]
+source_file="res://assets/cc0/smoke.png"
+dest_files=["res://.godot/imported/smoke.png-d94ecac5cafd1c4307c0840974650fc5.ctex"]
 
 [params]
 

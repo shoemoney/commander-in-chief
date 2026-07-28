@@ -390,9 +390,9 @@ The art is a **hybrid pipeline**, not one source:
 | Player + enemy soldier sprites | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/soldiers/` |
 | Menus · HUD · icons · FX cards | ✅ **Owned procedural art** (`tools/gen_ui_chrome.py` · `gen_ui_icons.py` · `gen_ui_glyphs.py` · `gen_fx_cards.py`) | `assets/art/{ui,hud,icons,fx}` |
 | Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
-| Ground · projectiles · FX | **Kenney CC0** | `assets/kenney/` |
-| Radio VO (56 mp3) | **speech synthesis** — redistribution cleared 2026-07-24 | `assets/vo/` |
-| Combat shouts (118 mp3) | **speech synthesis** stock voices (ar/fa lines) | `assets/audio/` |
+| Ground · projectiles · FX | **Kenney CC0** | `assets/cc0/` |
+| Radio VO (56 mp3) | **Synthesized in-house** — owned by the project | `assets/vo/` |
+| Combat shouts (118 mp3) | **Synthesized in-house** (ar/fa lines) | `assets/audio/` |
 | Text | **PixelOperator8** — CC0, Jayvee Enaguas | `assets/fonts/` |
 
 The desert→jungle look is a per-sprite olive tint + 1px readability outline applied in the
@@ -400,11 +400,11 @@ view (`src/view/art.gd`), not baked in — so a new asset joins one palette fami
 of which source it came from.
 
 > ✅ **Every asset is cleared, and the history is clean.** All 266 PNGs under `assets/` are owned
-> procedural art (`tools/gen_*.py`), owned generative-AI pieces, or CC0 (Kenney), and the 174
-> speech synthesis mp3 were cleared for redistribution with speech synthesis on 2026-07-24. The old
+> procedural art (`tools/gen_*.py`), owned generative-AI pieces, or CC0, and the 174 voice mp3
+> were synthesized in-house and are owned by the project. The old
 > proprietary art was **purged from every commit** on 2026-07-27 (`tools/purge_history.sh`) —
 > that was the last blocker, and clearing it is what let this repo go public. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
-> was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the speech synthesis VO
+> was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the synthesized VO
 > already ship in-game. 📋 Full asset-licensing map + the open-source audit trail:
 > **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
 

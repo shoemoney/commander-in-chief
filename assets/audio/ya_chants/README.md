@@ -1,6 +1,6 @@
 # Ya Zahra / Ya Hossein — male Arabic TTS takes
 
-Generated via **model gateway → speech synthesis** (`multilingual-v2`, `language_code=ar`).
+Generated via **in-house text-to-speech synthesis** (multilingual model, `language_code=ar`).
 
 | Phrase | Arabic | Count |
 |--------|--------|-------|

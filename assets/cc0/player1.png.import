@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bbnxxooprj1yy"
-path="res://.godot/imported/colossus_body.png-0ff81c6defe253d169e0ca10255f319f.ctex"
+uid="uid://qnkfvw4u7jl7"
+path="res://.godot/imported/player1.png-880751ce7993d8e852e36464f94ca9e5.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/colossus_body.png"
-dest_files=["res://.godot/imported/colossus_body.png-0ff81c6defe253d169e0ca10255f319f.ctex"]
+source_file="res://assets/cc0/player1.png"
+dest_files=["res://.godot/imported/player1.png-880751ce7993d8e852e36464f94ca9e5.ctex"]
 
 [params]
 

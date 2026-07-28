@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dql0vlfw32pff"
-path="res://.godot/imported/explosion2.png-ac2a3ea4df3e733c63b24b1bf38a12a1.ctex"
+uid="uid://de1aras4cur0t"
+path="res://.godot/imported/enemy_bullet.png-877ce7437cfcb6ab4a459d6de95301d7.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/explosion2.png"
-dest_files=["res://.godot/imported/explosion2.png-ac2a3ea4df3e733c63b24b1bf38a12a1.ctex"]
+source_file="res://assets/cc0/enemy_bullet.png"
+dest_files=["res://.godot/imported/enemy_bullet.png-877ce7437cfcb6ab4a459d6de95301d7.ctex"]
 
 [params]
 

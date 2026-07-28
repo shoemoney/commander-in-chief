@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Composite ALL 8 shipped desert-reskin winners onto the game's real
-sand ground tile (assets/kenney/sand.png), tiled and labeled, into one
+sand ground tile (assets/cc0/sand.png), tiled and labeled, into one
 PNG for winners.md.
 
 This is a compositing preview, NOT an in-engine screenshot -- this

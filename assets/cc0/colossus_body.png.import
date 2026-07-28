@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cvyk4lro82f8x"
-path="res://.godot/imported/explosion3.png-00b1c02c4e7eb8b701a5bbf1f68ef5b8.ctex"
+uid="uid://bbnxxooprj1yy"
+path="res://.godot/imported/colossus_body.png-d8ff0b86066c9fa23c5d02ac6dd6c04b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/explosion3.png"
-dest_files=["res://.godot/imported/explosion3.png-00b1c02c4e7eb8b701a5bbf1f68ef5b8.ctex"]
+source_file="res://assets/cc0/colossus_body.png"
+dest_files=["res://.godot/imported/colossus_body.png-d8ff0b86066c9fa23c5d02ac6dd6c04b.ctex"]
 
 [params]
 

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://drgdnon2ewlct"
-path="res://.godot/imported/crate_airstrike.png-cb69f181eb4783df37b21a4945a3ec24.ctex"
+uid="uid://dbc37sdsoekp1"
+path="res://.godot/imported/gunship_barrel.png-6da2506084b7a891e0ec5488226a4c07.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/crate_airstrike.png"
-dest_files=["res://.godot/imported/crate_airstrike.png-cb69f181eb4783df37b21a4945a3ec24.ctex"]
+source_file="res://assets/cc0/gunship_barrel.png"
+dest_files=["res://.godot/imported/gunship_barrel.png-6da2506084b7a891e0ec5488226a4c07.ctex"]
 
 [params]
 

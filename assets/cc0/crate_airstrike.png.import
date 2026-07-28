@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c6j16nd0qsjyb"
-path="res://.godot/imported/elite.png-64eb473187855a57e4f2645718afa9fe.ctex"
+uid="uid://drgdnon2ewlct"
+path="res://.godot/imported/crate_airstrike.png-4e699a0aaf1514b222041484d8e2007b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/elite.png"
-dest_files=["res://.godot/imported/elite.png-64eb473187855a57e4f2645718afa9fe.ctex"]
+source_file="res://assets/cc0/crate_airstrike.png"
+dest_files=["res://.godot/imported/crate_airstrike.png-4e699a0aaf1514b222041484d8e2007b.ctex"]
 
 [params]
 

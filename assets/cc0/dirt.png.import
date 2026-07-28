@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cish3wpbr315k"
-path="res://.godot/imported/crate_ammo.png-f0e6e596372c9b91775257c095e2e1c6.ctex"
+uid="uid://cyccepgcwc1uf"
+path="res://.godot/imported/dirt.png-d8ca98192316f3e8d62a5daa20484df4.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/kenney/crate_ammo.png"
-dest_files=["res://.godot/imported/crate_ammo.png-f0e6e596372c9b91775257c095e2e1c6.ctex"]
+source_file="res://assets/cc0/dirt.png"
+dest_files=["res://.godot/imported/dirt.png-d8ca98192316f3e8d62a5daa20484df4.ctex"]
 
 [params]
 
