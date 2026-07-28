@@ -16,11 +16,12 @@
 
 ![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-693%20methods%20%C2%B7%20~14.7k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-961%20methods%20%C2%B7%2021.9k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
-![License](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20git%20history%20not%20purged-orange)
+![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
+![Release](https://img.shields.io/badge/release-v0.3.0%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -28,9 +29,21 @@ a shared coin economy where every kill mints and every revive spends.
 
 ### 🎬 Gameplay demo
 
-<img src="docs/media/demo.gif" width="72%" alt="Live gameplay — desert firefight, threat callouts, War Chest HUD"/>
+<table>
+<tr>
+<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Desert firefight — threat callouts and the corner War Chest"/></td>
+<td width="50%"><img src="docs/media/gameplay_tank.png" alt="Tank assault — board a hull, spend grenade ammo as shells"/></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/media/gameplay_colossus.png" alt="Foundry Colossus — the campaign's last stand"/></td>
+<td width="50%"><img src="docs/media/gameplay_shop.png" alt="Endless War shop — coin prices off the shared War Chest"/></td>
+</tr>
+</table>
 
-<sub>☝️ **Live in-engine capture** (movie-mode render, seed 18) — one-hit twin-stick, threat callouts, the corner War Chest economy. Not a mockup.</sub>
+<sub>☝️ **Real in-engine frames**, captured by `tools/screenshots.gd` and gated for motion and
+colour before shipping — not mockups, not concept art. Clockwise: a desert firefight with threat
+callouts and the corner War Chest · boarding a tank · the Foundry Colossus last stand · the
+Endless War shop.</sub>
 
 </div>
 
@@ -42,7 +55,7 @@ a shared coin economy where every kill mints and every revive spends.
 > replaced; see [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
-> golden-checksum suite (**693 methods / ~14.7k assertions** — the runner prints the exact
+> golden-checksum suite (**961 methods / 21.9k assertions** — the runner prints the exact
 > pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
 > `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
 > Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
@@ -53,6 +66,45 @@ a shared coin economy where every kill mints and every revive spends.
 
 ---
 
+## 📥 Download & Play
+
+**[⬇️ Latest release — v0.3.0](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
+
+| 🖥️ Platform | 📦 File | 📏 | 📝 |
+|---|---|---|---|
+| 🍎 **macOS — Apple Silicon** | `CommanderInChief-macos-arm64.zip` | **41 MB** | arm64-only, recommended for M-series |
+| 🍏 **macOS — universal** | `CommanderInChief-macos.zip` | 70 MB | Apple Silicon **and** Intel |
+| 🐧 **Linux** | `CommanderInChief-linux.zip` | 39 MB | x86_64 — keep the `.pck` beside the binary |
+| 🪟 **Windows** | `CommanderInChief-windows.zip` | 48 MB | x86_64 — keep the `.pck` beside the `.exe` |
+
+> 🔐 Both macOS builds are **ad-hoc signed, not notarized** — first launch needs
+> **right-click → Open**. Godot ships no arm64-only macOS template, so the native build is the
+> universal one thinned with `lipo` and re-signed (see the note in `export_presets.cfg`).
+
+<details><summary>🏷️ <b>Version history</b></summary>
+
+```mermaid
+gitGraph
+   commit id: "v0.1.0 · P0 greybox"
+   commit id: "deterministic core"
+   commit id: "v0.2.0 · P3 playable"
+   commit id: "art swap"
+   commit id: "v0.2.5 · rebrand"
+   commit id: "history purge"
+   commit id: "v0.3.0 · public" tag: "v0.3.0"
+```
+
+| 🏷️ | 📅 | 🎯 What it marks |
+|---|---|---|
+| `v0.1.0` | 2026-07-08 | **P0** — first commit, already carrying the deterministic core, 16.16 fixed-point and 3-OS CI |
+| `v0.2.0` | 2026-07-16 | **P3 declared** — the README stops describing a prototype and starts describing the game |
+| `v0.2.5` | 2026-07-21 | **Commander In Chief** — the rebrand + animated boot splash |
+| `v0.3.0` | 2026-07-27 | **First public release** — clean history, binaries for three platforms |
+
+</details>
+
+---
+
 ## 🗺️ Table of Contents
 
 | 🧭 | | |
@@ -60,7 +112,7 @@ a shared coin economy where every kill mints and every revive spends.
 | [🏗️ Architecture](#%EF%B8%8F-architecture--the-simview-split) | [🎮 Controls](#-controls) | [🕹️ Modes](#%EF%B8%8F-modes) |
 | [👹 The Roster](#-the-roster) | [🎁 Drops & the Wheel](#-drops--the-supply-wheel) | [🧪 Testing](#-headless-test-suite) |
 | [📻 The Radio](#-the-radio) | [🌐 Netcode](#-netcode-deterministic-lockstep) | [🚀 Quick Start](#-quick-start-macos--apple-silicon) |
-| [🎨 Art](#-art) | | |
+| [🎨 Art](#-art) | [📥 **Download**](#-download--play) | |
 
 ---
 
@@ -231,7 +283,7 @@ SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter
 SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
 ```
 
-**693 test methods / ~14.7k assertions** (the `PASS —` line prints the exact pair) — fixed-point
+**961 test methods / 21,936 assertions** (the `PASS —` line prints the exact pair) — fixed-point
 math, seeded RNG streams, the 1986 mechanic grammar, the War Chest economy,
 tank/observer/gates/water/gunship/colossus, every archetype's behavior contract (nest armor,
 technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop, lockstep loopback,
@@ -347,12 +399,13 @@ The desert→jungle look is a per-sprite olive tint + 1px readability outline ap
 view (`src/view/art.gd`), not baked in — so a new asset joins one palette family regardless
 of which source it came from.
 
-> ✅ **Every asset is now cleared.** All 266 PNGs under `assets/` are owned procedural art
-> (`tools/gen_*.py`), owned generative-AI pieces, or CC0 (Kenney), and the 174 speech synthesis mp3
-> were cleared for redistribution with speech synthesis on 2026-07-24. One step remains before going
-> public: purge the old proprietary art from git history — `tools/purge_history.sh`. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
+> ✅ **Every asset is cleared, and the history is clean.** All 266 PNGs under `assets/` are owned
+> procedural art (`tools/gen_*.py`), owned generative-AI pieces, or CC0 (Kenney), and the 174
+> speech synthesis mp3 were cleared for redistribution with speech synthesis on 2026-07-24. The old
+> proprietary art was **purged from every commit** on 2026-07-27 (`tools/purge_history.sh`) —
+> that was the last blocker, and clearing it is what let this repo go public. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
 > was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the speech synthesis VO
-> already ship in-game. 📋 Full asset-licensing map + the path to a public release:
+> already ship in-game. 📋 Full asset-licensing map + the open-source audit trail:
 > **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
 
 <details><summary>🖼️ <b>Promo / key-art variants</b></summary>
