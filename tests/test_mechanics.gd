@@ -275,7 +275,8 @@ func test_near_miss_board_tap_denies_out_loud_instead_of_eating_the_key() -> voi
 	# The guard that stops INTERACT arming a claymore under a boardable tank was
 	# the ONE refusal on that verb with no feedback at all: the key just did
 	# nothing, the charge stayed in the pouch, and nothing appeared on screen.
-	# It must now emit deny/"tank" (main.gd already renders that as floating text).
+	# It must emit deny/"board" -> TOO FAR TO BOARD. NOT the sandbag path's "tank",
+	# which means "you are inside a tank" and renders as the opposite of the truth here.
 	var sim := SimWorld.new(12, 1)
 	var p := sim.players[0]
 	sim._apply_supply(p, 8)
@@ -295,7 +296,7 @@ func test_near_miss_board_tap_denies_out_loud_instead_of_eating_the_key() -> voi
 	Runner.T.eq(p["in_tank"], -1, "sanity: the tank really was out of board reach")
 	var denied := false
 	for ev in sim.events:
-		if ev.get("t", "") == "deny" and ev.get("why", "") == "tank":
+		if ev.get("t", "") == "deny" and ev.get("why", "") == "board":
 			denied = true
 	Runner.T.ok(denied, "the refusal SAYS so (deny/tank) instead of silently eating the press")
 

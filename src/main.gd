@@ -2376,7 +2376,7 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})
 			"deny":
-				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK",
+				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK", "board": "TOO FAR TO BOARD",
 					"token": "NO COMMENDATION", "full": "ALREADY STOCKED"}.get(
 						ev.get("why", "coins"), "NEED COINS")
 				if ev.get("why", "") == "full" and int(ev.get("kind", -1)) == 3:

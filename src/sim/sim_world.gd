@@ -1380,9 +1380,12 @@ func _step_players(inputs: Array) -> void:
 				and p["claymores"] > 0:
 			if _boardable_tank_near(p):
 				# The near-miss board guard was the ONLY refusal on INTERACT that stayed
-				# silent — it reads as "my key randomly did nothing". Say it out loud:
-				# main.gd already maps deny/"tank" to NOT FROM THE TANK floating text.
-				events.append({"t": "deny", "why": "tank", "x": p["x"], "y": p["y"], "i": i})
+				# silent — it reads as "my key randomly did nothing". Say it out loud.
+				# Its OWN reason, not the sandbag path's "tank": that one means "you are
+				# INSIDE a tank, no hands to dig", and the view renders it NOT FROM THE
+				# TANK. Reusing it here told the player the opposite of the truth — this
+				# branch is only reachable with in_tank == -1, which the test asserts.
+				events.append({"t": "deny", "why": "board", "x": p["x"], "y": p["y"], "i": i})
 			else:
 				# Claymore: no tank in reach, so INTERACT plants a carried charge one
 				# step ALONG the aim — into the enemy lane you're already shooting,
