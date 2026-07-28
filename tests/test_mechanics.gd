@@ -3339,17 +3339,67 @@ func test_gauntlet_leash_trips_on_the_party_not_the_nearest_player() -> void:
 
 func test_shared_camera_never_strands_the_lagging_player_offscreen() -> void:
 	# One screen, two players: the camera ratchets to whoever is furthest north.
-	# The lagging player must be DRAGGED along, never left behind the bottom edge
-	# with no way back into the fight.
+	# The lagging player must never be left behind the bottom edge with no way
+	# back into the fight. The camera now HOLDS for them instead of dragging them
+	# (see test_trailing_2p_player_is_never_clamped_past_the_band); an idle
+	# partner standing in live fire eventually dies, and a dead partner drops out
+	# of the leash on purpose so the run cannot soft-lock — main.gd's off-screen
+	# downed-partner revive locator covers that case. So: alive => on screen.
 	var sim := SimWorld.new(11, 2)
 	var north := SimInput.new()
 	north.move_y = -256
+	var p2 := sim.players[1]
+	var ticks := 0
 	for _i in 600:
 		sim.step([north, _idle()])   # P1 sprints, P2 stands still
-	var p2 := sim.players[1]
+		if not p2["alive"]:
+			break
+		ticks += 1
+	Runner.T.ok(ticks > 300, "the idle partner stood there for a real stretch (%d ticks)" % ticks)
 	Runner.T.ok(p2["y"] >= sim.camera_top and p2["y"] <= sim.camera_top + 360 * SimWorld.F_ONE,
-		"the idle partner is still on screen after 10 s of the other advancing")
+		"the idle partner is still on screen for every tick they were alive")
 	Runner.T.ok(sim.players[0]["y"] < p2["y"], "...and the runner really did advance ahead of them")
+
+
+func test_trailing_2p_player_is_never_clamped_past_the_band() -> void:
+	# Camera focus is min(y) over alive players, so the leader used to drag the
+	# trailing partner into _clamp_actor's bottom edge and hold them there —
+	# no vertical control, and shoved onto whatever was on the field. The
+	# trailing player now LIMITS the camera instead of being shoved by it.
+	var sim := SimWorld.new(11, 2)
+	var north := SimInput.new()
+	north.move_y = -256
+	var p1 := sim.players[0]
+	var p2 := sim.players[1]
+	var start_y: int = p2["y"]
+	var alive_ticks := 0
+	for _i in 600:
+		sim.step([north, _idle()])
+		if not p2["alive"]:
+			break
+		alive_ticks += 1
+		Runner.T.ok(p2["y"] >= start_y, "the idle partner is never pushed north by the camera")
+		Runner.T.ok(sim.camera_top >= p2["y"] - SimWorld.CAMERA_BAND_BOTTOM,
+			"camera stays leashed inside the trailing player's clamp band")
+	Runner.T.ok(alive_ticks > 300, "the partner stood there long enough to matter (%d ticks)" % alive_ticks)
+	Runner.T.ok(p1["y"] < p2["y"], "the leader still advanced ahead of them")
+	Runner.T.ok(p1["y"] >= sim.camera_top + 16 * SimWorld.F_ONE,
+		"...and it is the LEADER who is held at the top edge, not the partner at the bottom")
+
+
+func test_camera_leash_releases_when_the_partner_dies() -> void:
+	# The leash must never be able to freeze the run: a dead partner drops out of
+	# it, so a downed player cannot soft-lock the scroll.
+	var sim := SimWorld.new(11, 2)
+	var north := SimInput.new()
+	north.move_y = -256
+	for _i in 120:
+		sim.step([north, _idle()])
+	sim.players[1]["alive"] = false
+	var before: int = sim.camera_top
+	for _i in 120:
+		sim.step([north, _idle()])
+	Runner.T.ok(sim.camera_top < before, "the camera scrolls on once the partner is down")
 
 
 func test_boss_rush_steps_the_world_hazards_its_own_arenas_author() -> void:

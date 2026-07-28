@@ -183,7 +183,11 @@ func _campaign_water_bands() -> Dictionary:
 	## narrows this test's domain by itself.
 	var sim := SimWorld.new(0xC0FFEE, 1)
 	var bands := {}
-	for i in 200:
+	# Tick budget, not distance: the ratchet is rate-limited to MAX_CAM_STEP per tick
+	# (a gate opening used to let it take a 186px backlog in one jump), so dragging the
+	# same stretch of world past the streamer now costs ~67x the calls it did when one
+	# call moved the camera a full CAMERA_LEAD + 60.
+	for i in 14000:
 		for g in sim.gates:
 			g["open"] = true          # only the geometry is under test, not reachability
 		sim.players[0]["y"] = sim.camera_top - 60 * Fixed.ONE   # march north; the ratchet follows

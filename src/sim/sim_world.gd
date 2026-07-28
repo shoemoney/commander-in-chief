@@ -236,6 +236,18 @@ const GATE_SPAWN_GRACE_TICKS := 90
 # top-edge deaths into readable ones. Retreat room to the +344 clamp is 84px;
 # 288 (literal bottom-20%) would leave only 56px, so 260 is the tuned floor.
 const CAMERA_LEAD := 260 * F_ONE
+# Bottom of the band _clamp_actor holds every actor inside (camera_top + 344).
+# _step_camera leashes on the same number so the camera can never shove a player
+# into it; keep the two in step if either ever moves.
+const CAMERA_BAND_BOTTOM := 344 * F_ONE
+# Ratchet speed limit. A gate opening drops its camera hold in ONE tick, and an
+# unlimited ratchet then took the whole backlog (50-186px) in that tick: the view
+# snapped, and in 2P the trailing player -- clamped to the band on the NEXT tick --
+# was teleported the same distance, potentially onto an armed mine. 2x PLAYER_SPEED
+# matches the fastest thing a player can do (the dodge roll) and out-runs everything
+# else on the field (TANK_SPEED is 0.8x), so the camera always catches up; it just
+# takes ~40 ticks instead of one.
+const MAX_CAM_STEP := PLAYER_SPEED * 2
 const BUNKER_W := 48 * F_ONE
 const BUNKER_H := 32 * F_ONE
 # Dodge roll: 0.3 s i-frames, 1.2 s cooldown, 2× speed in the move direction.
@@ -4524,8 +4536,18 @@ func _step_camera() -> void:
 		for g in gates:
 			if not g["open"] and desired < g["y"] - GATE_CAMERA_PAD:
 				desired = g["y"] - GATE_CAMERA_PAD
+		# A trailing co-op partner LIMITS the camera instead of being shoved by it.
+		# Focus is min(y) over alive players, so without this the leader drags the
+		# trailer into _clamp_actor's bottom edge and strips their vertical control
+		# for as long as the leader keeps walking. Solo is unaffected by
+		# construction (CAMERA_LEAD 260 sits inside the 344 band). A DEAD partner
+		# drops out of the loop, so a downed player can never freeze the run; two
+		# live players walking apart just hold the screen until one relents.
+		for p in players:
+			if p["alive"] and desired < p["y"] - CAMERA_BAND_BOTTOM:
+				desired = p["y"] - CAMERA_BAND_BOTTOM
 		if desired < camera_top:
-			camera_top = desired
+			camera_top = maxi(desired, camera_top - MAX_CAM_STEP)
 
 	if mode != "campaign" and mode != "arcade":
 		return   # boss_rush pre-authors its whole gate gauntlet in _init; nothing to stream

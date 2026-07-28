@@ -380,3 +380,24 @@ func test_spray_cooldown_stays_bounded_under_smoke() -> void:
 	Runner.T.ok(fired, "the held-back spray fires on the first un-smoked tick")
 	Runner.T.eq(sim.colossus["spray_cd"], SimWorld.COLOSSUS_SPRAY_CD_TICKS,
 		"and re-arms to a full cooldown — smoke banked no extra shots")
+
+
+func test_colossus_is_offscreen_at_engage_and_the_locator_covers_it() -> void:
+	## It spawns at final_gate.y - 120 while that gate (which never opens) pins
+	## camera_top to final_gate.y - GATE_CAMERA_PAD, so the finale opens with the
+	## boss above the top edge, spraying aimed bullets from nowhere. The
+	## off-screen boss chevron must include it — it iterates gate bosses and the
+	## endless boss, and used to skip sim.colossus entirely.
+	var sim := SimWorld.new(7, 1)
+	var c := _engage(sim)
+	Runner.T.ok(not c.is_empty(), "colossus engaged")
+	Runner.T.ok(c["y"] < sim.camera_top,
+		"the colossus really does open the fight above the visible top edge")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var head := src.find("func _draw_threat_edges")
+	Runner.T.ok(head >= 0, "_draw_threat_edges found in main.gd")
+	var body := src.substr(head, src.find("\nfunc ", head + 1) - head)
+	Runner.T.ok(body.contains("sim.colossus"),
+		"the off-screen boss locator reads sim.colossus, so the finale gets an edge chevron")
+	Runner.T.ok(not body.contains("var osy"),
+		"the dead observer branch is gone (it tested a constant +14 px for < 0)")

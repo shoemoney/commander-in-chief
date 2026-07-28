@@ -153,3 +153,40 @@ func test_every_campaign_sector_is_the_same_length() -> void:
 	for i in range(1, ys.size()):
 		Runner.T.eq(ys[i - 1] - ys[i], SimWorld.GATE_SPACING,
 			"sector %d is exactly one GATE_SPACING long, like every other" % i)
+
+
+func test_gate_open_never_snaps_the_camera() -> void:
+	## A gate opening removes its camera hold in ONE tick. The ratchet used to
+	## take the whole accumulated backlog (up to 186px hugging the wall) in that
+	## tick — an uninterpolated jump, and in 2P a teleport of the trailing player.
+	var sim := SimWorld.new(21, 1)
+	sim.step([_idle()])
+	var g := sim.gates[0]
+	var p := sim.players[0]
+	# Teleport to the gate instead of fighting 17 s of campaign to reach it, then
+	# park the player hard against it — the worst case, where `desired` sits a
+	# full CAMERA_LEAD - GATE_BLOCK_PAD (186px) north of the hold.
+	sim.camera_top = g["y"] - SimWorld.GATE_CAMERA_PAD + 200 * SimWorld.F_ONE
+	for _i in 200:
+		sim.enemies.clear()
+		sim.enemy_bullets.clear()   # this is a camera test, not a survival test
+		p["y"] = g["y"] + SimWorld.GATE_BLOCK_PAD
+		sim.step([_idle()])
+	Runner.T.eq(sim.camera_top, g["y"] - SimWorld.GATE_CAMERA_PAD,
+		"camera parked exactly at the closed gate's hold")
+	g["b1"]["alive"] = false
+	g["b2"]["alive"] = false
+	var worst := 0
+	for _i in 120:
+		var before: int = sim.camera_top
+		sim.enemies.clear()
+		sim.enemy_bullets.clear()
+		p["y"] = g["y"] + SimWorld.GATE_BLOCK_PAD
+		sim.step([_idle()])
+		worst = maxi(worst, before - sim.camera_top)   # north = decreasing y
+	Runner.T.ok(g["open"], "the gate opened, dropping its camera hold in one tick")
+	Runner.T.ok(worst <= SimWorld.MAX_CAM_STEP,
+		"camera never moved more than MAX_CAM_STEP in one tick (worst %d, limit %d)"
+			% [worst, SimWorld.MAX_CAM_STEP])
+	Runner.T.eq(sim.camera_top, p["y"] - SimWorld.CAMERA_LEAD,
+		"...and the rate limit still caught all the way up, it did not stall behind the player")

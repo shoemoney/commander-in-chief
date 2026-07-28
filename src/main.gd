@@ -10635,11 +10635,12 @@ func _draw_threat_edges() -> void:
 	# cap to the nearest few; ties prefer the lethal ranged killers.
 	_draw_edge_chevrons(bottom_threats, false)
 	_draw_edge_chevrons(top_threats, true)
-	# Off-screen boss/spotter locator: a nearer closed gate can hold the camera
-	# while an already-streamed boss (or the observer) sits above the visible
-	# view — its HP bar/label live in the fixed HUD but the arena-lock
-	# "destroy it" text points at nothing on screen. One double-chevron at the
-	# nearest such target, so "look up" is unambiguous.
+	# Off-screen boss locator: a closed gate holds the camera while an
+	# already-streamed boss sits above the visible view — its HP bar/label live
+	# in the fixed HUD but the arena-lock "destroy it" text points at nothing on
+	# screen. One double-chevron at the nearest such target, so "look up" is
+	# unambiguous. (The observer needs no branch: it is pinned to
+	# camera_top + OBSERVER_Y_OFFSET and is therefore never off the top edge.)
 	var near_sy := -100000.0
 	var near_x := 0.0
 	var near_found := false
@@ -10657,11 +10658,15 @@ func _draw_threat_edges() -> void:
 			near_sy = esy
 			near_x = clampf(sim.endless_boss["x"] * PX, 8.0, 632.0)
 			near_found = true
-	if not sim.observer.is_empty():
-		var osy: float = SimWorld.OBSERVER_Y_OFFSET * PX
-		if osy < 0.0 and osy > near_sy:
-			near_sy = osy
-			near_x = clampf(sim.observer["x"] * PX, 8.0, 632.0)
+	# The Colossus spawns at final_gate.y - 120 while that (never-opening) gate
+	# pins camera_top to final_gate.y - 60, so it opens the finale from ~60px
+	# above the top edge and only its barrels peek in. Same chevron as every
+	# other boss gets.
+	if not sim.colossus.is_empty() and sim.colossus["alive"]:
+		var csy: float = (sim.colossus["y"] - sim.camera_top) * PX
+		if csy < 0.0 and csy > near_sy:
+			near_sy = csy
+			near_x = clampf(sim.colossus["x"] * PX, 8.0, 632.0)
 			near_found = true
 	if near_found:
 		var bp := 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady under reduce-motion

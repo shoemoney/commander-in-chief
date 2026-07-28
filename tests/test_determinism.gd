@@ -629,13 +629,38 @@ const SEED := 0xDEADBEEF
 ## came back byte-identical to the pre-change goldens. (Argued reason: _try_buy/_try_token_drop
 ## are reachable only through SimInput.buy, which scripted_input never presses; and no kind-3
 ## pickup is ever constructed, while no free crate the torture walks over is ever at cap.)
+## RE-RECORDED (2026-07-27, camera transition audit): campaign GOLDEN moves at ALL SIX
+## samples; ENDLESS_GOLDEN VERIFIED UNCHANGED (endless never calls _step_camera at all —
+## camera_top is pinned at -VIEW_H by design, so neither change can reach it).
+##
+## Two edits landed in _step_camera. WHICH ONE MOVES THE STREAM WAS MEASURED, NOT ARGUED —
+## each was reverted in turn and the suite re-run:
+##   (1) MAX_CAM_STEP rate-limits the ratchet (a gate open dropped its camera hold in ONE
+##       tick and the ratchet took the whole 186px backlog in that tick). With ONLY (1) in
+##       the tree the campaign goldens came back BYTE-IDENTICAL, and that is not luck: the
+##       limit can only bind on a SNAP, and outside a gate open the camera tracks
+##       focus - CAMERA_LEAD, so it moves at the leader's own speed (<= 2x PLAYER_SPEED =
+##       MAX_CAM_STEP). The torture's players are never hugging a gate on the tick it
+##       opens, so the limit never binds here. Its guard is test_gates.gd::
+##       test_gate_open_never_snaps_the_camera, which measures the 186px jump directly.
+##   (2) A trailing ALIVE player leashes the camera (desired >= p.y - CAMERA_BAND_BOTTOM)
+##       instead of being shoved north into _clamp_actor's bottom edge. With ONLY (2) in
+##       the tree all six samples moved — this edit owns the whole re-record.
+##
+## PREDICTED FIRST, THEN CONFIRMED: the leash binds exactly when the two players separate
+## by more than CAMERA_BAND_BOTTOM - CAMERA_LEAD = 344 - 260 = 84px. tools/probe_camera_leash.gd
+## replays this very torture and reports the first such tick at 97, peaking at 266px apart.
+## 97 / SAMPLE_EVERY(600) = 0, so sample 0 must move and every later one with it. It did —
+## nothing here is byte-identical, which is what a fork at tick 97 has to look like.
+## Solo campaign is unaffected by (2) by construction: CAMERA_LEAD 260 sits inside the 344
+## band, so a lone player's own leash term can never exceed their own focus term.
 const GOLDEN: Array[int] = [
-	8531273371570139596,
-	2860288398011830533,
-	5069393849379897797,
-	8207972238508876062,
-	3003988878224799785,
-	2086350485022355115,
+	4317574284479865013,
+	1892489906158965715,
+	7974478638996505609,
+	7827033405154250166,
+	5674018418519301982,
+	3093745513736041259,
 ]
 
 
