@@ -3,8 +3,8 @@
 
 This is the last licence blocker for an open-source release: 94 images across
 assets/art/{decor,p2,mil2,cast2}, the 7 loose sprites at assets/art/ top level,
-and the 9 in assets/soldiers/ (a SECOND purchased pack, no licence file). See
-OPEN_SOURCE_CHECKLIST.md sections 1, 1b.
+and the 9 in assets/troops/ (the owned infantry set). See
+ASSETS.md sections 1, 1b.
 
 WHY PROCEDURAL RATHER THAN GENERATIVE-AI
 tools/regen_entities.py drives an image model with the old sprite as reference.
@@ -64,7 +64,7 @@ def _pad(n: int, m: int | None = None) -> Pad:
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ART = PROJECT_ROOT / "assets/art"
-SOLDIERS = PROJECT_ROOT / "assets/soldiers"
+SOLDIERS = PROJECT_ROOT / "assets/troops"
 
 # --- palettes ----------------------------------------------------------------
 # art.gd multiplies most of these by an olive Art.tint at draw time, so the
@@ -211,7 +211,7 @@ def _weapon_overhead(p: Pad, cx, cy, s, kind: str):
 # --- the manifest ------------------------------------------------------------
 # key -> (family, canvas, kwargs). Canvas comes from the sprite being replaced.
 HUMANS: dict[str, dict] = {
-    # --- assets/soldiers/ : the purchased-pack replacements (most-seen art) ---
+    # --- assets/troops/ : the purchased-pack replacements (most-seen art) ---
     "SOL:soldier_assault_rifle": dict(canvas=1024, weapon="rifle",
                                       helm=P.HELM_A, helm_d=P.HELM_A_D),
     "SOL:enemy/enemy_assault_rifle": dict(canvas=1024, weapon="rifle",

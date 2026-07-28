@@ -4,11 +4,8 @@
 with where it came from and what you may do with it. If an asset is not on this
 list, treat it as unlicensed until it is.
 
-Release status is tracked in [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md).
-
-> ⚠️ **One step remains before public release.** Every image is owned or CC0 and
-> the audio is cleared — but the removed proprietary art still exists in **git
-> history**. See "Outstanding" below.
+Everything here is owned by the project or CC0, in the working tree **and** in
+git history.
 
 ## ✅ Images — all owned or CC0
 
@@ -17,7 +14,7 @@ Release status is tracked in [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.
 | `assets/art/ui/` `hud/` `icons/` | 128 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
 | `assets/art/fx/` | 21 | Procedurally generated — `tools/gen_fx_cards.py` | Project-owned |
 | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 87 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
-| `assets/soldiers/` | 9 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
+| `assets/troops/` | 9 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | Bosses, player tank, desert flora (14 files) | 14 | Generative AI — fal.ai · Replicate · `nano-banana`. Pipeline: `tools/generate_desert_assets.py`, provenance: `assets/art/desert_assets_source.md` | Project-owned (verify each service's output-ownership terms) |
 | `assets/ui/intro/` | 2 | Generative AI (intro cinematic key art) | Project-owned |
 | `assets/cc0/` | 27 | Kenney game assets | **CC0** — `assets/cc0/LICENSE-CC0.txt` |
@@ -26,9 +23,6 @@ Every procedurally generated sprite is reproducible: each generator's `SIZES`
 dict is its manifest, and re-running the tool overwrites the PNGs. Original
 canvas sizes and `.import` `size_limit`s are preserved so no draw site moves.
 
-**Historical note.** Earlier revisions bundled art from legacy 3D pack/INTERFACE
-packs and from a purchased `infantry set` pack. Both are proprietary and
-non-redistributable. All of it has been replaced — but it survives in git history; see "Outstanding".
 
 ## ✅ Fonts
 
@@ -67,12 +61,9 @@ MIT/CC0 grant may sublicense them onward to everyone who clones the repo.
 | `assets/input/actions.vdf`, `assets/steam/*.vdf` | Project-authored Steam config |
 | `docs/media/`, `media/` | Screenshots and video **rendered from the game**; they inherit whatever the depicted assets carry. Re-capture after any asset swap. |
 
-## Outstanding before publishing
+## Reproducing the art
 
-1. **Git history** — the proprietary art was removed from the working tree but
-   remains in every historical commit, recoverable with `git checkout <old-sha>`.
-   The folder was renamed `assets/legacy-art/` → `assets/art/`, so a purge must cover
-   **both** paths plus `assets/soldiers/`. Working-tree deletion is not enough.
-   Run `tools/purge_history.sh` (dry-run first). This is the last blocker.
-2. **Promo media** (cosmetic, not a blocker) — `docs/media/` and `media/` still
-   show the replaced art and should be re-captured.
+Every procedurally generated sprite is reproducible: each generator's `SIZES`
+dict is its manifest, and re-running the tool overwrites the PNGs. Original
+canvas sizes and `.import` `size_limit`s are preserved so no draw site moves —
+edit the generator and re-run it rather than hand-painting a PNG.

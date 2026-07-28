@@ -3,7 +3,7 @@
 
 Bucket 2 of the chrome swap: pickup icons, capability pips, medals and the menu
 symbol set. Same reasoning as tools/gen_ui_chrome.py -- no CC0 drop-in exists
-(OPEN_SOURCE_CHECKLIST.md), so these are drawn analytically rather than sourced.
+(ASSETS.md), so these are drawn analytically rather than sourced.
 
 House style: flat two-tone props (a lit face plus a shaded lower band) with an
 ink keyline, so a 24px pickup pip and a 96px menu symbol read the same. The

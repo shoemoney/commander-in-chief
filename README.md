@@ -51,8 +51,8 @@ Endless War shop.</sub>
 > Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
 > Select · Daily Run), and the feel stack is real. Art is **owned procedural art
 > (`tools/gen_*.py`) + bespoke generated boss/vehicle/desert pieces** over a Kenney-CC0
-> FX base — no longer greybox, and no longer legacy art-derived (every encumbered sprite was
-> replaced; see [`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)).
+> FX base — no longer greybox, and no longer third-party-derived (every encumbered sprite was
+> replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
 > golden-checksum suite (**961 methods / 21.9k assertions** — the runner prints the exact
@@ -387,7 +387,7 @@ The art is a **hybrid pipeline**, not one source:
 | Layer | Source | Where |
 |---|---|---|
 | Units · structures · props | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level |
-| Player + enemy soldier sprites | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/soldiers/` |
+| Player + enemy soldier sprites | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/troops/` |
 | Menus · HUD · icons · FX cards | ✅ **Owned procedural art** (`tools/gen_ui_chrome.py` · `gen_ui_icons.py` · `gen_ui_glyphs.py` · `gen_fx_cards.py`) | `assets/art/{ui,hud,icons,fx}` |
 | Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
 | Ground · projectiles · FX | **Kenney CC0** | `assets/cc0/` |
@@ -406,7 +406,7 @@ of which source it came from.
 > that was the last blocker, and clearing it is what let this repo go public. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
 > was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the synthesized VO
 > already ship in-game. 📋 Full asset-licensing map + the open-source audit trail:
-> **[`OPEN_SOURCE_CHECKLIST.md`](OPEN_SOURCE_CHECKLIST.md)**.
+> **[`ASSETS.md`](ASSETS.md)**.
 
 <details><summary>🖼️ <b>Promo / key-art variants</b></summary>
 

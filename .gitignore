@@ -33,3 +33,13 @@ art_candidates/**
 *.regen.png
 *.regen.png.import
 .aaa/
+reviews/
+reviewer/
+art_reviews/
+assets_src/
+art_candidates/
+PR_ISSUES.MD
+docs/research/
+ASSETS.md
+tools/purge_history.sh
+Backlog-raw-ledger.md

@@ -197,5 +197,5 @@ reasoning and nobody mistakes them for oversights.
 
 `bc75b0f` sandbag no longer eats the buyer's own rounds · `ca3ed3f` MG nest leads its target ·
 `3f1c11e` MG nest telegraph made honest · the four unclamped gated cooldowns · the VP parade ·
-ten retired legacy art bakers · the endless bot's aim · fork-gate island coords · the claymore
+ten retired entity bakers · the endless bot's aim · fork-gate island coords · the claymore
 self-kill.

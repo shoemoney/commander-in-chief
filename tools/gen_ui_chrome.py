@@ -4,8 +4,8 @@
 Bucket 1 of the chrome swap: plates, frames, bezels, reticles, map pips and the
 screen-space HUD cards. Every one of these is pure geometry -- a rounded plate,
 a bevelled ring, a stencil silhouette -- so drawing them analytically clears the
-legacy art licence for the bucket outright instead of trading one third-party pack
-for another. See OPEN_SOURCE_CHECKLIST.md: no CC0 drop-in exists.
+the earlier art licence for the bucket outright instead of trading one third-party pack
+for another. See ASSETS.md: no CC0 drop-in exists.
 
 Same contract as tools/gen_fx_cards.py:
   * SIZES is the manifest -- one entry per file this tool owns.
@@ -39,7 +39,7 @@ SS = 3  # supersample factor
 
 # --- house palette -----------------------------------------------------------
 # Desert-military chrome: brushed steel plate, stencil ink, amber accent. Picked
-# to sit with Art.PLATE_STEEL / Art.PRINT_INK rather than the blue-grey legacy art kit.
+# to sit with Art.PLATE_STEEL / Art.PRINT_INK rather than the blue-grey the earlier art kit.
 INK = (13, 15, 10)
 STEEL = (128, 133, 128)
 STEEL_HI = (198, 202, 194)

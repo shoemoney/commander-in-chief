@@ -2,7 +2,7 @@
 """Procedurally generate the assets/art/fx/ particle cards.
 
 Why generate rather than source a replacement: these 21 cards are the single
-largest legacy art-derived bucket by bytes (~3.8 MB) and 20 of them are pure WHITE
+largest third-party-derived bucket by bytes (~3.8 MB) and 20 of them are pure WHITE
 ALPHA MASKS -- the view tints them at draw time (see Art.TINT / the additive
 _glow_root pass), so only the alpha shape matters. A gradient or a polygon does
 not need a licensed source at all, and drawing it analytically gives a cleaner

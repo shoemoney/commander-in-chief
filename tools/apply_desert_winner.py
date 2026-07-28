@@ -106,7 +106,7 @@ def main() -> int:
     godot_bin = resolve_godot(args.godot_bin)
     print(f"running {godot_bin} --import (pass 1: bake default .import)...")
     run_godot_import(godot_bin)
-    print("correcting .import settings to the lossless legacy art-bake convention...")
+    print("correcting .import settings to the lossless entity bake convention...")
     for _name, _src, dest in picked:
         fix_import_settings(dest)
         assert_lossless_art_import(dest)

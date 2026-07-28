@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate entity sprites from their own art as the reference image.
 
-Why this exists: assets/art/{mil2,decor,p2,cast2} are legacy art-derived bakes and are
-the public-release blocker (see OPEN_SOURCE_CHECKLIST.md). This regenerates them
+Why this exists: assets/art/{mil2,decor,p2,cast2} are third-party-derived bakes and are
+the public-release blocker (see ASSETS.md). This regenerates them
 as owned generative-AI art, feeding the EXISTING sprite in as the reference image
 so silhouette / orientation / scale carry over and the game keeps reading the same.
 
@@ -223,7 +223,7 @@ DECOR = {
 # the read is entirely silhouette + the shoulder/weapon shape.
 # ⚠️ THE CHARACTER TEMPLATE IS NOT SHIP-READY. The 2026-07-24 pilot regenerated the three
 # below, installed them, and rendered them through the real _spr at their real ~32px budget:
-# the results graded C+/B- and were a REGRESSION on what they replace. The existing legacy art
+# the results graded C+/B- and were a REGRESSION on what they replace. The existing the earlier art
 # bakes are TRUE 90-degree overhead (you see the helmet crown from directly above; the
 # ghillie is a shaggy prone strip). Every generated attempt -- across three prompt revisions
 # -- came back a 3/4 STANDING figure, because the model strongly resists a true overhead

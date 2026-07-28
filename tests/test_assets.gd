@@ -488,7 +488,7 @@ func test_a1_record_hud_mode() -> void:
 	Runner.T.eq(hud._record_hud_mode(200, 0), "none", "no best yet -> no record chip")
 
 
-# --- a1-19: legacy art bakes stay lossless (no BC edge-mush on the silhouettes) ---
+# --- a1-19: entity bakes stay lossless (no BC edge-mush on the silhouettes) ---
 
 func test_a1_art_bakes_are_lossless() -> void:
 	var stack: Array[String] = ["res://assets/art"]
@@ -518,9 +518,9 @@ func test_a1_art_bakes_are_lossless() -> void:
 					vram.append(f)
 			f = da.get_next()
 		da.list_dir_end()
-	Runner.T.ok(checked > 100, "scanned the legacy art bake .import files (%d)" % checked)
+	Runner.T.ok(checked > 100, "scanned the entity bake .import files (%d)" % checked)
 	Runner.T.ok(offenders.is_empty(),
-		"no legacy art bake is BC-compressed (compress/mode=2 mushes the OUTLINE silhouette): %s" % str(offenders.slice(0, 5)))
+		"no entity bake is BC-compressed (compress/mode=2 mushes the OUTLINE silhouette): %s" % str(offenders.slice(0, 5)))
 	Runner.T.ok(detect3d.is_empty(),
 		"detect_3d is OFF so a future --import cannot re-BC the bakes: %s" % str(detect3d.slice(0, 5)))
 	Runner.T.ok(vram.is_empty(),
@@ -939,20 +939,20 @@ func test_a4_reticle_halo_is_centered() -> void:
 	Runner.T.ok(alpha > 0.2 and alpha < 0.6, "each halo pass is a dark backing (0.2 < a < 0.6), stacking into a keyline not a black box")
 
 
-func test_sol_import_discipline_and_watermark_scrub() -> void:
+func test_sol_import_discipline_and_corner_alpha() -> void:
 	# sol-01: every shipped infantry set PNG is size-limited (<=256) so the 1024² pack can't VRAM-bomb
 	# boot, and imported lossless (no VRAM-compress cel-edge bleed). sol-02: the burned-in "AI生成"
-	# watermark is scrubbed — the extreme bottom-left corner samples as fully transparent.
+	# the corner is clean — the extreme bottom-left corner samples as fully transparent.
 	var files := {
-		"res://assets/soldiers/soldier_assault_rifle.png": 256,
-		"res://assets/soldiers/enemy/enemy_assault_rifle.png": 128,
-		"res://assets/soldiers/enemy/enemy_smg.png": 128,
-		"res://assets/soldiers/enemy/enemy_sniper.png": 128,
-		"res://assets/soldiers/enemy/enemy_shotgun.png": 128,
-		"res://assets/soldiers/enemy/enemy_lmg.png": 128,
-		"res://assets/soldiers/frogman_rifle.png": 128,
-		"res://assets/soldiers/frogman_speargun.png": 128,
-		"res://assets/soldiers/fx/muzzleflash_small.png": 128,
+		"res://assets/troops/soldier_assault_rifle.png": 256,
+		"res://assets/troops/enemy/enemy_assault_rifle.png": 128,
+		"res://assets/troops/enemy/enemy_smg.png": 128,
+		"res://assets/troops/enemy/enemy_sniper.png": 128,
+		"res://assets/troops/enemy/enemy_shotgun.png": 128,
+		"res://assets/troops/enemy/enemy_lmg.png": 128,
+		"res://assets/troops/frogman_rifle.png": 128,
+		"res://assets/troops/frogman_speargun.png": 128,
+		"res://assets/troops/fx/muzzleflash_small.png": 128,
 	}
 	for path in files:
 		var lim: int = files[path]
@@ -985,7 +985,7 @@ func test_sol_import_discipline_and_watermark_scrub() -> void:
 
 
 func test_sol_hero_swap_scale_tint_outline() -> void:
-	# sol-03..06: the pale legacy art blob is swapped for the authored infantry set hero (one canonical
+	# sol-03..06: the pale placeholder blob is swapped for the authored infantry set hero (one canonical
 	# class), folded to the ~18px footprint, tinted to POP off green grass (never olive), and stripped
 	# of the _spr rim so the pack's baked keyline isn't doubled.
 	var art: Script = load("res://src/view/art.gd")
@@ -995,7 +995,7 @@ func test_sol_hero_swap_scale_tint_outline() -> void:
 	var tint: Dictionary = c["TINT"]
 	var outline: Dictionary = c["OUTLINE"]
 	for k in ["player1", "player2"]:
-		Runner.T.ok(tex[k].resource_path.contains("soldiers/soldier_assault_rifle"),
+		Runner.T.ok(tex[k].resource_path.contains("troops/soldier_assault_rifle"),
 			"%s is the infantry set authored hero (sol-03)" % k)
 		Runner.T.ok(scale[k] >= 0.12 and scale[k] <= 0.30,
 			"%s SCALE folds the 256px canvas to the ~18px footprint (sol-04)" % k)
@@ -1035,7 +1035,7 @@ func test_sol_hero_pivot_and_apex() -> void:
 	var apex_sz: Vector2 = c["HERO_APEX_SZ"]
 	Runner.T.ok(apex_dy < apex_sz.y / 2.0,
 		"crown spot covers the sprite center → seated on the dome at ALL aim angles (sol-07): dy=%.1f < %.1f" % [apex_dy, apex_sz.y / 2.0])
-	var img: Image = (load("res://assets/soldiers/soldier_assault_rifle.png") as Texture2D).get_image()
+	var img: Image = (load("res://assets/troops/soldier_assault_rifle.png") as Texture2D).get_image()
 	if img.is_compressed():
 		img.decompress()
 	var w := img.get_width()
@@ -1059,7 +1059,7 @@ func test_sol_hero_pivot_and_apex() -> void:
 func test_sol_enemy_red_team() -> void:
 	# sol-08..11: the shooting infantry (rusher rotation / elite / sniper) swap to the authored RED-team
 	# pack sprites — baked team-color friend/foe read, warm-vermilion tint OFF the pure-red danger family,
-	# single-authorship rotation (no cel/legacy art strobe), no double outline, corpses matching live bodies.
+	# single-authorship rotation (no cel/the earlier art strobe), no double outline, corpses matching live bodies.
 	var art: Script = load("res://src/view/art.gd")
 	var c: Dictionary = art.get_script_constant_map()
 	var tex: Dictionary = c["TEX"]
@@ -1071,7 +1071,7 @@ func test_sol_enemy_red_team() -> void:
 	var corpse: Dictionary = ms["_CORPSE_TEX"]
 	var keys := ["enemy_assault", "enemy_smg", "enemy_shotgun", "enemy_lmg", "enemy_sniper"]
 	for k in keys:
-		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains("soldiers/enemy/"),
+		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains("troops/enemy/"),
 			"%s is a pack red-team sprite (sol-08)" % k)
 		Runner.T.ok(scale.has(k), "%s has a SCALE row — no dead config (sol-08)" % k)
 		var t: Color = tint[k]
@@ -1083,23 +1083,23 @@ func test_sol_enemy_red_team() -> void:
 	for s in skins:
 		Runner.T.ok(keys.has(s), "rusher skin '%s' is a pack red sprite — single authorship, no strobe (sol-08)" % s)
 	for k in ["rusher", "elite", "sniper"]:
-		Runner.T.ok(keys.has(corpse[k]), "%s corpse matches its live red-team sprite, not a legacy art ghost (sol-08)" % k)
-	# sol-08 cleanup: the legacy art bakes the swap retired (m_insurgent3-5 rusher skins, m_contractor2 sniper)
+		Runner.T.ok(keys.has(corpse[k]), "%s corpse matches its live red-team sprite, not a stale ghost (sol-08)" % k)
+	# sol-08 cleanup: the entity bakes the swap retired (m_insurgent3-5 rusher skins, m_contractor2 sniper)
 	# are fully gone from TEX — no dead boot VRAM for sprites nothing draws.
 	for dead in ["m_insurgent3", "m_insurgent4", "m_insurgent5", "m_contractor2"]:
-		Runner.T.ok(not tex.has(dead), "retired legacy art enemy bake '%s' dropped from TEX — no dead preload (sol-08)" % dead)
+		Runner.T.ok(not tex.has(dead), "retired the earlier art enemy bake '%s' dropped from TEX — no dead preload (sol-08)" % dead)
 
 
 func test_sol_frogman_variant() -> void:
-	# sol-12: the legacy art frogman is swapped for the authored pack diver, with a two-pose variant keyed
+	# sol-12: the earlier frogman is swapped for the authored pack diver, with a two-pose variant keyed
 	# purely off the existing e["submerged"] sim state — speargun down, rifle up — no new field.
 	var art: Dictionary = load("res://src/view/art.gd").get_script_constant_map()
 	var tex: Dictionary = art["TEX"]
 	var outline: Dictionary = art["OUTLINE"]
 	var ms = load("res://src/main.gd")
-	Runner.T.ok(tex["frogman"].resource_path.contains("soldiers/frogman_rifle"),
+	Runner.T.ok(tex["frogman"].resource_path.contains("troops/frogman_rifle"),
 		"frogman surfaced pose = pack rifle diver (sol-12)")
-	Runner.T.ok(tex.has("frogman_speargun") and tex["frogman_speargun"].resource_path.contains("soldiers/frogman_speargun"),
+	Runner.T.ok(tex.has("frogman_speargun") and tex["frogman_speargun"].resource_path.contains("troops/frogman_speargun"),
 		"frogman submerged pose = pack speargun diver (sol-12)")
 	Runner.T.ok(not outline.has("frogman") and not outline.has("frogman_speargun"),
 		"the diver keeps its baked keyline — out of OUTLINE, no double rim (sol-12)")
@@ -1113,7 +1113,7 @@ func test_sol_frogman_variant() -> void:
 
 
 func test_sie_endless_infantry_family() -> void:
-	# sie-01: the four blurry native-64px legacy art ENDLESS-roster specialists (GRENADIER/GHILLIE/SAPPER/
+	# sie-01: the four blurry native-64px the earlier art ENDLESS-roster specialists (GRENADIER/GHILLIE/SAPPER/
 	# SHIELD) are re-baked as authored 1024px cel-shaded infantry, same convention as the sol-08 red-team
 	# swap -- own black keyline (out of OUTLINE, no double rim), a real SCALE row, imports lossless and
 	# size-limited, watermark corner scrubbed. "courier" is explicitly untouched (still the native bake).
@@ -1130,7 +1130,7 @@ func test_sie_endless_infantry_family() -> void:
 		# enemy_sniper siblings use on their own 128px-limited canvas (sie-01), not a one-off number.
 		Runner.T.eq(scale[k], 0.5, "%s SCALE matches the enemy_* family standard, no accidental footprint drift (sie-01)" % k)
 		Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sie-01)" % k)
-	Runner.T.ok(outline.has("courier"), "courier is untouched — still the native legacy art bake, still needs its runtime rim (sie-01)")
+	Runner.T.ok(outline.has("courier"), "courier is untouched — still the native entity bake, still needs its runtime rim (sie-01)")
 	# footprint cross-check (data, not just the constant): the 4 re-baked keys must land on the exact
 	# same imported-canvas x SCALE footprint as an established red-team sibling, not merely "some" 0.5.
 	var sib_tex: Texture2D = tex["enemy_assault"]
@@ -1209,7 +1209,7 @@ func test_sol_walk_frames_not_wired() -> void:
 		Runner.T.ok(not String(k).contains("walk"),
 			"no walk-frame key '%s' is registered — the golden-safe walk_bob animates the hero (sol-13)" % k)
 	# The frames aren't even in the project anymore (no dead import for pixels nothing draws).
-	Runner.T.ok(not ResourceLoader.exists("res://assets/soldiers/walk/assault_walk1.png"),
+	Runner.T.ok(not ResourceLoader.exists("res://assets/troops/walk/assault_walk1.png"),
 		"the inconsistent 3/4 walk frames were removed from the project (sol-13)")
 
 
@@ -1218,10 +1218,10 @@ func test_sol_muzzle_pop() -> void:
 	# the DIRECTIONAL primary; the watermarked/hollow-core muzzleflash_large is rejected, and the pop is
 	# alpha-capped so it never out-blooms an explosion. Enemy small-arms keep the procedural pop.
 	var tex: Dictionary = load("res://src/view/art.gd").get_script_constant_map()["TEX"]
-	Runner.T.ok(tex.has("mz_pop") and tex["mz_pop"].resource_path.contains("soldiers/fx/muzzleflash_small"),
+	Runner.T.ok(tex.has("mz_pop") and tex["mz_pop"].resource_path.contains("troops/fx/muzzleflash_small"),
 		"mz_pop = the pack's small crack-pop card (sol-15)")
 	Runner.T.ok(tex.has("fx_muzzle_fan"), "fx_muzzle_fan stays the DIRECTIONAL primary muzzle (sol-16)")
-	Runner.T.ok(not ResourceLoader.exists("res://assets/soldiers/fx/muzzleflash_large.png"),
+	Runner.T.ok(not ResourceLoader.exists("res://assets/troops/fx/muzzleflash_large.png"),
 		"the watermarked/hollow-core muzzleflash_large is NOT shipped (sol-15/16 reject)")
 	var mh: Dictionary = load("res://src/main.gd").get_script_constant_map()["MUZZLE_HEAT"]
 	Runner.T.ok(mh["pop_a"] <= 0.7 and mh["pop_lerp"] < 0.5,
@@ -1260,7 +1260,7 @@ func test_sol_guards() -> void:
 		# sol-15/16 reject: the watermarked/hollow large muzzle flash is never registered.
 		Runner.T.ok(not path.contains("muzzleflash_large"), "the rejected muzzleflash_large is unregistered (sol-15)")
 		# sol-18: every registered infantry set key resolves to a live, imported asset (no dead SOL row).
-		if path.contains("/soldiers/"):
+		if path.contains("/troops/"):
 			soldier_keys += 1
 			Runner.T.ok(ResourceLoader.exists(path), "soldier key '%s' resolves to a live asset (sol-18)" % k)
 	# sol-18: the ship-set is EXACTLY the intended subset — player1+player2 (2) + 5 enemy + 2 frogman +

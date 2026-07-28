@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fan out the nano-banana (Gemini image) renders for the Iran-desert reskin
-and post-process them into drop-in, Godot-import-ready legacy art-style sprites.
+and post-process them into drop-in, Godot-import-ready low-poly style sprites.
 
 Reproduces the generate-desert-assets pass documented in
 assets/art/desert_assets_source.md end to end:
@@ -21,7 +21,7 @@ assets/art/desert_assets_source.md end to end:
      run once by the top-level process after every group finishes, not
      per group (concurrent `--import` calls would race on the shared
      .godot/imported/ cache)
-  3. each new *.png.import hand-corrected back to the existing legacy art-bake
+  3. each new *.png.import hand-corrected back to the existing entity bake
      lossless convention (compress/mode=0, detect_3d/compress_to=0,
      vram_texture=false) and re-imported, so the BC compressor never mushes
      the low-poly outline silhouettes -- see
@@ -36,7 +36,7 @@ Usage:
         # no image-toolkit skill, and nothing under assets/ touched
 
 Requires ~/.claude/skills/image-toolkit/scripts/generate.py and a backend key
-(fal by default, or replicate) resolved by that script from model gateway then the
+(fal by default, or replicate) resolved from the environment, then the
 environment (FAL_KEY / REPLICATE_API_TOKEN) unless --dry-run.
 Writes the final sprites straight into their assets/art/... homes --
 rerun any time to regenerate a fresh batch (e.g. to restyle) before
@@ -65,7 +65,7 @@ DEFAULT_GODOT = (shutil.which("godot")
 IMAGE_MODEL = "fal-ai/nano-banana"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# The project's existing lossless legacy art-bake convention (no VRAM/BC
+# The project's existing lossless entity bake convention (no VRAM/BC
 # compression, no detect_3d auto-recompress) is read live from a real
 # checked-in import rather than duplicated into a hand-maintained template,
 # so fix_import_settings() can never drift out of sync with the convention
@@ -75,7 +75,7 @@ REFERENCE_IMPORT = PROJECT_ROOT / "assets/art/tree_large.png.import"
 RESAMPLE_LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 
 STYLE = (
-    "legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded "
+    "low-poly 3D style low-poly 3D game asset render, faceted flat-shaded "
     "geometry, isometric top-down camera angle looking slightly downward, "
     "prop centered and fully in frame with generous margin, pure solid "
     "magenta background #FF00FF (not transparent, not white), no ground "
@@ -251,7 +251,7 @@ def validate_winner_install(src_path: Path, orig_size: tuple[int, int] | None) -
 
 def fix_import_settings(png_path: Path) -> None:
     """Rewrite a freshly-`--import`-ed *.png.import back to the project's
-    existing legacy art-bake convention. Takes REFERENCE_IMPORT (a real,
+    existing entity bake convention. Takes REFERENCE_IMPORT (a real,
     already-correct checked-in import) and substitutes in only the two
     values Godot assigns itself for THIS file (uid, content hash, source
     path) -- so every other param, including ones nobody thought to add a
@@ -505,7 +505,7 @@ def main() -> int:
     print(f"running {godot_bin} --import (pass 1: bake default .import)...")
     run_godot_import(godot_bin)
 
-    print("correcting .import settings to the lossless legacy art-bake convention...")
+    print("correcting .import settings to the lossless entity bake convention...")
     for dest_path in dest_paths:
         fix_import_settings(dest_path)
         assert_lossless_art_import(dest_path)

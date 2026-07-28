@@ -12,7 +12,7 @@ shader_type canvas_item;
 // a4-15 shop/intermission calm variant (gentle exposure lift + extra desaturation).
 //
 // This is the TOP of the unification stack, not the whole of it: the per-sprite
-// TINT/OUTLINE tables in src/view/art.gd already pull the 4 asset sources (legacy art
+// TINT/OUTLINE tables in src/view/art.gd already pull the 4 asset sources (the earlier art
 // bakes, Kenney tiles, authored soldier PNGs, generated boss/vehicle art) onto one
 // palette family BEFORE this pass ever runs (warm-bright threats, olive/gunmetal
 // vehicles, receding mossy decor, one shared Art.PRINT_INK dark rim/backing). This

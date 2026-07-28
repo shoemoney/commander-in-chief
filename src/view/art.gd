@@ -1,9 +1,9 @@
 class_name Art
 extends RefCounted
 ## Sprite registry for the view. Units/vehicles/props are top-down renders in
-## assets/art/ — see OPEN_SOURCE_CHECKLIST.md for the per-subfolder provenance
+## assets/art/ — see ASSETS.md for the per-subfolder provenance
 ## table, which is the one place kept current. (The tools/bake_sprites*.gd that
-## once produced the legacy art-derived ones are retired to git history: they needed
+## once produced the third-party-derived ones are retired to git history: they needed
 ## a scratch bake project that is not in this tree.) Ground tiles, projectiles and FX remain Kenney CC0
 ## (kenney.nl). POLYGON_Nature DOES ship tiling terrain PNGs (vendor
 ## Ground_Textures/: Grass, Mud, Sand + normals) — swapping the ground is
@@ -14,19 +14,19 @@ extends RefCounted
 ## Spy_Kit/Racer are off-theme (urban/neon) for this jungle war; War_Map is WWI
 ## tabletop props; no owned pack ships audio (all SFX/music stay synthesized).
 ##
-## SCALE folds each legacy art render down to the on-screen footprint of the Kenney
+## SCALE folds each 3D render down to the on-screen footprint of the Kenney
 ## sprite it replaced, so the draw calls in main.gd keep their original scale
 ## numbers. TINT is the desert→jungle olive shift, applied in _spr().
 
 const ART := "res://assets/art/"
 const KN := "res://assets/cc0/"
-const SOL := "res://assets/soldiers/"   # infantry set pack (authored top-down infantry, size-limited + cleaned)
+const SOL := "res://assets/troops/"   # owned top-down infantry sprites, size-limited for VRAM
 
 const TEX := {
-	# --- legacy 3D pack Military (top-down bakes) ---
+	# --- Top-down entity bakes ---
 	# Cast v2: heroes are regular army (Leader + Soldier_Female), hostiles
 	# are the Insurgent faction — different silhouettes, different wardrobe.
-	# sol-03: the pale legacy art hero read as a blob at gameplay zoom — swapped for the authored
+	# sol-03: the pale the earlier art hero read as a blob at gameplay zoom — swapped for the authored
 	# infantry set top-down infantry. No sim weapon field exists, so ONE canonical class (assault)
 	# for both slots; P1/P2 stay distinct via the ident ring + _body_ident_lean + the TINT split below.
 	"player1": preload(SOL + "soldier_assault_rifle.png"),
@@ -35,13 +35,13 @@ const TEX := {
 	"elite": preload(ART + "cast2/insurgent2.png"),
 	# sol-08: authored RED-team pack sprites for the shooting infantry (rusher skins / elite / sniper).
 	# Team-color is baked in (crimson vs the olive hero) — friend/foe read for free, colorblind-safer
-	# than the old warm-tinted insurgents. Single-authorship rotation (all cel) so no cel/legacy art strobe.
+	# than the old warm-tinted insurgents. Single-authorship rotation (all cel) so no cel/the earlier art strobe.
 	"enemy_assault": preload(SOL + "enemy/enemy_assault_rifle.png"),
 	"enemy_smg": preload(SOL + "enemy/enemy_smg.png"),
 	"enemy_shotgun": preload(SOL + "enemy/enemy_shotgun.png"),
 	"enemy_lmg": preload(SOL + "enemy/enemy_lmg.png"),
 	"enemy_sniper": preload(SOL + "enemy/enemy_sniper.png"),
-	# sol-12: authored pack diver replaces the legacy art frogman bake. "frogman" is the SURFACED (rifle) pose
+	# sol-12: authored pack diver replaces the earlier frogman bake. "frogman" is the SURFACED (rifle) pose
 	# — the canonical key so corpse/bestiary/markers follow for free; the submerged variant is its own key.
 	"frogman": preload(SOL + "frogman_rifle.png"),
 	"frogman_speargun": preload(SOL + "frogman_speargun.png"),
@@ -81,7 +81,7 @@ const TEX := {
 	"cactus_large": preload(ART + "cactus_large.png"),
 	"cactus_small": preload(ART + "cactus_small.png"),
 	"scrub": preload(ART + "scrub.png"),
-	# --- legacy art icon bakes (HUD + spend-wheel) ---
+	# --- the earlier art icon bakes (HUD + spend-wheel) ---
 	"icon_ammo": preload(ART + "icons/icon_ammo.png"),
 	"icon_grenade": preload(ART + "icons/icon_grenade.png"),
 	"icon_coin": preload(ART + "icons/icon_coin.png"),
@@ -103,7 +103,7 @@ const TEX := {
 	"hud_lightning": preload(ART + "hud/ICON_Map_Lightning.png"),
 	"hud_fire": preload(ART + "hud/ICON_Map_Fire.png"),
 	"hud_radiation": preload(ART + "hud/ICON_Map_Radiation.png"),
-	# --- legacy art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
+	# --- the earlier art INTERFACE sprites (Apocalypse HUD + Modern Menus) ---
 	"ui_wheel_socket": preload(ART + "ui/wheel_socket.png"),
 	"ui_bar_frame": preload(ART + "ui/bar_frame.png"),
 	"ui_dial_fuel": preload(ART + "ui/dial_fuel.png"),
@@ -127,7 +127,7 @@ const TEX := {
 	# hudfx_glow / hudfx_dmgdir: preloaded here for months, referenced nowhere —
 	# ~0.7 MB of VRAM at boot for zero drawn pixels. Files stay for when a
 	# damage-direction or glow pass actually wants them.
-	# --- legacy art Military decor (war-torn battlefield litter) ---
+	# --- the earlier art Military decor (war-torn battlefield litter) ---
 	"barrel": preload(ART + "decor/barrel.png"),
 	"crate_stack": preload(ART + "decor/crate_stack.png"),
 	"rock1": preload(ART + "decor/rock1.png"),
@@ -194,7 +194,7 @@ const TEX := {
 	"explosion1": preload(KN + "explosion1.png"),
 	"explosion2": preload(KN + "explosion2.png"),
 	"explosion3": preload(KN + "explosion3.png"),
-	# --- legacy 3D pack Particle FX (2D textures, assets/art/fx/) ---
+	# --- low-poly 3D Particle FX (2D textures, assets/art/fx/) ---
 	"fx_bullettrail": preload(ART + "fx/fx_bullettrail.png"),
 	"fx_smoke": preload(ART + "fx/fx_smoke_01.png"),
 	"fx_fumes": preload(ART + "fx/fx_fumes_02.png"),
@@ -219,7 +219,7 @@ const TEX := {
 	# --- POLYGON Military mil2 bake (enemies, vehicles, weapon pickups, items) ---
 	"m_bombsuit": preload(ART + "mil2/bombsuit.png"),
 	# sol-08: m_contractor2 (sniper) + m_insurgent3/4/5 (rusher skins) retired — the RED enemy_* pack
-	# sprites replaced them live + as corpses, so these 300px legacy art bakes were dead boot VRAM. Deleted.
+	# sprites replaced them live + as corpses, so these 300px entity bakes were dead boot VRAM. Deleted.
 	"m_pilot": preload(ART + "mil2/pilot.png"),
 	"m_soldier2": preload(ART + "mil2/soldier2.png"),
 	#"m_apc": preload(ART + "mil2/apc.png"),
@@ -355,10 +355,10 @@ const TEX := {
 	"plate_metal_r": preload(ART + "ui/plate_metal_r.png"),
 }
 
-## Per-sprite draw multiplier so a legacy art bake lands at the Kenney footprint the
+## Per-sprite draw multiplier so a entity bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
 const SCALE := {
-	# legacy art Particle_FX cards are large (fx_smoke_01 is 200px vs Kenney smoke.png's
+	# the earlier art Particle_FX cards are large (fx_smoke_01 is 200px vs Kenney smoke.png's
 	# 92px), so scale down to keep the same on-screen puff footprint.
 	"fx_smoke": 0.46,
 	# nt-01: the generated explosion frames render on a shared 128px canvas;
@@ -376,10 +376,10 @@ const SCALE := {
 	# or is that a bullet?" — straight from playtest.
 	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
 	# elites largest infantry (they shoot), sprites ≥3× bullet size.
-	"player1": 0.25, "player2": 0.25, "rusher": 0.53, "elite": 0.58,   # sol-04: hero folds the 256px pack canvas to the ~18px on-screen footprint (was 0.56/0.47 for the 300px legacy art bake)
+	"player1": 0.25, "player2": 0.25, "rusher": 0.53, "elite": 0.58,   # sol-04: hero folds the 256px pack canvas to the ~18px on-screen footprint (was 0.56/0.47 for the 300px entity bake)
 	# sol-08: enemy pack sprites fold the 128px canvas to the ~18-20px infantry footprint (call-scale 0.5 × 0.5 × 128 ≈ 32px canvas).
 	"enemy_assault": 0.5, "enemy_smg": 0.5, "enemy_shotgun": 0.5, "enemy_lmg": 0.5, "enemy_sniper": 0.5,
-	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the legacy art bake)
+	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the entity bake)
 	# HITBOX FAIRNESS (2026-07-25): 0.17 was tuned against a 440px canvas, then an
 	# import sweep added `process/size_limit=128` to bunker/bunker2 without
 	# re-tuning SCALE — and _spr sizes off the IMPORTED texture. The strongpoint
@@ -436,7 +436,7 @@ const SCALE := {
 	# sie-01: m_bombsuit/m_soldier2 re-baked as authored 1024px cel-shaded infantry (matches the
 	# enemy_* red-team convention) at SCALE 0.5 -- same footprint math as enemy_assault (128px
 	# imported canvas x 0.5), so the on-screen SHIELD/GRENADIER silhouette lands where the old
-	# native-64px legacy art blob used to.
+	# native-64px placeholder blob used to.
 	"m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34,
 	"m_technical": 0.6,
@@ -449,8 +449,8 @@ const SCALE := {
 	# so raw multipliers run larger); litter/hulks fold to their swap targets.
 	# sie-01: ghillie/sapper re-baked as authored 1024px cel-shaded infantry too -- SCALE drops from
 	# the old native-64px multiplier (2.45) to the same 0.5 family footprint (courier is untouched,
-	# still the native legacy art bake, still needs its old multiplier).
-	# courier: 2.45 folded the 64px legacy art bake onto the PRE-cap cast2 footprint
+	# still the native entity bake, still needs its old multiplier).
+	# courier: 2.45 folded the 64px entity bake onto the PRE-cap cast2 footprint
 	# (300px canvas x 0.53 ~= 159px). Both anchors then moved out from under it —
 	# cast2 imports at 256px now, and sie-01 re-baked every other specialist to the
 	# 128px x 0.5 family — leaving the supply runner drawn 47x37px next to 19x17px
@@ -636,7 +636,7 @@ const OUTLINE := {
 	# tint.a, so the 0.28-alpha preview stays subtle).
 	"icon_rend": true, "wep_claymore": true, "wep_smoke": true, "wep_flashbang": true,
 	# sie-01: courier is the one remaining native-bake enemy infantry sprite (SUPPLY COURIER, main.gd
-	# "courier"/"courier_escape") -- same blurry 64px legacy art class as the four re-baked below, deliberately
+	# "courier"/"courier_escape") -- same blurry 64px the earlier art class as the four re-baked below, deliberately
 	# LEFT UNTOUCHED here: out of this item's scope, a fine target for a future infantry-family pass.
 	"courier": true,
 	# sie-01: ghillie/sapper dropped from OUTLINE too -- same re-bake, same baked keyline.

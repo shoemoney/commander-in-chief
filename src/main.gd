@@ -56,7 +56,7 @@ const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_
 # Base-rusher sprite variants indexed by the sim's cosmetic per-enemy "skin"
 # (spawn-derived, checksum-excluded) so a rush reads as varied troops.
 # sol-08: the base-rusher rotation is now the RED-team pack sprites (all cel — single authorship, no
-# cel/legacy art strobe, per the SIMSAFE mixed-list warning). Authored friend/foe color + per-skin weapon variety.
+# cel/the earlier art strobe, per the SIMSAFE mixed-list warning). Authored friend/foe color + per-skin weapon variety.
 const _RUSHER_SKINS := ["enemy_smg", "enemy_assault", "enemy_shotgun", "enemy_lmg"]
 # Dead hulks that slump beside a parked tank (convoy-graveyard set-dressing).
 const _TANK_HULKS := ["wreck_apc", "wreck_technical", "wreck_light_tank"]
@@ -561,7 +561,7 @@ func _ready() -> void:
 	# enables repeat — the 640px river banks were one stretched sand column.
 	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 	# gfx-loop a1-19 follow-up: the project default_texture_filter is LINEAR_MIPMAP
-	# (right for the legacy art bakes drawn elsewhere), but EVERY pixel sprite drawn
+	# (right for the entity bakes drawn elsewhere), but EVERY pixel sprite drawn
 	# through main's own _draw() (~106 draw_texture calls: players, bullets, tanks,
 	# crates, explosions...) inherited that default and drew bilinear-smeared. Only
 	# _bg_root (the ground layer) had been given the NEAREST override below — this
@@ -875,7 +875,7 @@ func _setup_water() -> void:
 	_bg_root.z_as_relative = false
 	# a1-19 PIPE#2: the 1:1 pixel ground (Kenney grass/dirt/sand) draws NEAREST so it
 	# stays crisp — the project default_texture_filter is LINEAR_MIPMAP (right for the
-	# legacy art bakes) but bilinear-smears the pixel tiles at integer scale.
+	# entity bakes) but bilinear-smears the pixel tiles at integer scale.
 	_bg_root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# a-seam: draw_texture_rect(tile=true) silently edge-clamps unless the canvas
 	# item enables repeat — needed for the seamless-strip ground draw below.
@@ -3203,7 +3203,7 @@ func _ev_explosion(ev: Dictionary) -> void:
 	# blast reads as combustion cooling off instead of a strobe that just stops.
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.03,
 		"r": 38.0, "col": Color(0.9, 0.45, 0.18, 0.5)})
-	# Textured hot-disc flash (legacy art fx_disc) over the procedural burst.
+	# Textured hot-disc flash (the earlier art fx_disc) over the procedural burst.
 	if not barrel:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
 			"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
@@ -6145,7 +6145,7 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 # sol-08: rusher/elite/sniper corpses follow their new live RED-team sprites (a fallen body must match
-# the trooper that just died — a legacy art corpse under a cel-shaded live body popped authorship on death).
+# the trooper that just died — a flat-shaded corpse under a cel-shaded live body popped authorship on death).
 const _CORPSE_TEX := {"rusher": "enemy_smg", "elite": "enemy_assault", "sniper": "enemy_sniper",
 	"grenadier": "m_soldier2", "shield": "m_bombsuit", "sapper": "sapper",
 	"courier": "courier", "frogman": "frogman", "ghillie": "ghillie", "drone": "m_drone",
@@ -6420,7 +6420,7 @@ static func _boss_rim_base(march: float) -> Color:
 
 func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 0.0)) -> void:
 	# Soft flattened drop-shadow so units/vehicles sit ON the ground instead of
-	# floating over it — a legacy art soft-dark card (fx_shadow) with baked falloff.
+	# floating over it — a soft-dark card (fx_shadow) with baked falloff.
 	# Weight-graded (7v): heavy armor passes ~0.42 so a tank visually outweighs
 	# a rifleman (panel's 0.6 was sourceless — starting at 0.42, screenshot-tuned);
 	# wading shadows pass a dimmer, cooler read (light scatters in water).
@@ -7068,7 +7068,7 @@ func _draw_terrain() -> void:
 	_draw_trenches()
 	_draw_lane_seals()
 	_draw_ledges()
-	# legacy art Military props (barrels, crates, wrecks, rocks, wire, tents).
+	# the earlier art Military props (barrels, crates, wrecks, rocks, wire, tents).
 	# Hash grid decorrelated from cacti/scrub so nothing stacks on a cell.
 	var loy := -fposmod(cam_y, 80.0)
 	for ty in 6:
@@ -9448,7 +9448,7 @@ func _draw_projectiles() -> void:
 		var piercing: bool = owner < sim.players.size() and sim.players[owner]["pierce_ticks"] > 0
 		var tail := Color(0.5, 0.9, 1.0, 0.7) if piercing \
 			else Color(1.0, 0.8, 0.35, 0.45).lerp(Color(1.0, 0.95, 0.85, 0.6), heat)
-		# Body: a legacy art streak card (fx_bullettrail) stretched back along -velocity,
+		# Body: a streak card (fx_bullettrail) stretched back along -velocity,
 		# tinted by the same hot/AP tail color; the crisp core + head stay procedural.
 		var tlen := 8.0 + heat * 3.0 + (5.0 if piercing else 0.0)
 		var twid := 5.0 if piercing else 4.0
@@ -9540,7 +9540,7 @@ func _draw_players() -> void:
 		# enemies' cadence so the player sprite isn't the one flat-gliding thing on the
 		# field. _dust_prev still holds LAST frame's pos here (updated by _kick_dust below).
 		# sol-13 (FINAL AD LOCK): the infantry set walk/ frames are a 3/4 running pose (taller, centroid-
-		# jittery) that clashes with this top-down hero, and no OWNED top-down walk sheet exists (the legacy art
+		# jittery) that clashes with this top-down hero, and no OWNED top-down walk sheet exists (the earlier art
 		# bakes are single-pose). So this golden-safe bob is the hero's locomotion by decision, not as a
 		# stopgap — the guard test keeps a future edit from re-wiring the 3/4 frames.
 		var walk_bob := 0.0
@@ -10269,7 +10269,7 @@ func _draw_fx() -> void:
 				false, Color(1.0, 0.92, 0.45, 1.0 - t * t))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "tex":
-			# Generic textured particle (legacy art Particle_FX): grows + fades over its
+			# Generic textured particle (the earlier art Particle_FX): grows + fades over its
 			# lifetime t; optional spin. Drives the beefier muzzle/blast/impact FX.
 			var tx: Texture2D = Art.tex(fx["tex"])
 			var gsz: float = float(fx["sz"]) * (1.0 + t * float(fx.get("grow", 0.0)))
@@ -10382,7 +10382,7 @@ func _draw_glow() -> void:
 				# behind an asterisk. Also ~150 draw_rects/shot: Art.line is pixel-grid,
 				# one rect per covered pixel.)
 		elif fx["kind"] == "spark":
-			# Ricochet: legacy art sparkle cards flung radially — armor says no.
+			# Ricochet: the earlier art sparkle cards flung radially — armor says no.
 			var sc := Color(1.0, 0.9, 0.5, 0.9 - t * 0.9)
 			var stex := Art.tex("fx_sparkle")
 			var ssz := 5.0 + t * 5.0
@@ -10395,7 +10395,7 @@ func _draw_glow() -> void:
 				var sp2: Vector2 = pos + Vector2.from_angle(sa) * (3.0 + t * 7.0)
 				g.draw_texture_rect(stex, Rect2(sp2 - Vector2.ONE * ssz, Vector2.ONE * ssz * 2.0), false, sc)
 		elif fx["kind"] == "shockwave":
-			# Concussive ring: a legacy art ring texture with baked inner/outer falloff
+			# Concussive ring: a ring texture with baked inner/outer falloff
 			# snaps out — reads as a pressure wave, not a flat UI stroke.
 			var swr: float = fx.get("sz", 4.0) + t * fx.get("grow_px", 34.0)
 			var swc: Color = fx.get("col", Color(1.0, 0.95, 0.8, 0.7))
@@ -10465,7 +10465,7 @@ func _draw_scorch() -> void:
 		if pos.y < -60.0 or pos.y > 420.0:
 			continue
 		var a: float = 0.4 * (1.0 - s["t"])
-		# Cracked-earth decal (legacy art fx_groundbreak) under the scorch blobs,
+		# Cracked-earth decal (the earlier art fx_groundbreak) under the scorch blobs,
 		# rotated per-decal off its world x so no two craters look identical.
 		var gr: float = s["r"] * 1.7
 		draw_set_transform(pos, float(int(s["x"]) % 360) * 0.01745, Vector2.ONE)

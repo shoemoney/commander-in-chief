@@ -54,7 +54,7 @@ this pipeline rather than reusing the existing Kenney sand tile) is a new
 the per-group consistency note):
 
 ```
-legacy 3D pack style low-poly 3D game asset render, faceted flat-shaded
+low-poly 3D style low-poly 3D game asset render, faceted flat-shaded
 geometry, isometric top-down camera angle looking slightly downward, prop
 centered and fully in frame with generous margin, pure solid magenta
 background #FF00FF (not transparent, not white), no ground plane, no
@@ -115,10 +115,10 @@ to match the sprite it stands in for (`cactus_large`/`cactus_dead1-3` ->
 
 `--headless --path . --import` initially reimports new PNGs against the
 project's default `[importer_defaults] texture { compress/mode: 2 }`
-(VRAM/BC compressed), which `tests/test_assets.gd::test_a1_legacy-art_bakes_are_lossless()`
+(VRAM/BC compressed), which `tests/test_assets.gd::test_a1_entity_bakes_are_lossless()`
 forbids for anything under `assets/art/` -- BC mushes the low-poly
 outline silhouettes. Each new `.png.import` was hand-edited to match the
-existing legacy art-bake convention (`compress/mode=0`, `detect_3d/compress_to=0`,
+existing entity bake convention (`compress/mode=0`, `detect_3d/compress_to=0`,
 `vram_texture=false`, single non-suffixed `path`/`dest_files`, mirroring
 `tree_large.png.import`), the stale `.godot/imported/*.ctex` cache entries
 were deleted, and `--import` was re-run to bake the corrected settings.

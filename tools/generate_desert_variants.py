@@ -44,7 +44,7 @@ cross-tool A/B, not just N rolls of one model:
     Replicate topazlabs/image-upscale (CGI model) via
     ~/.claude/skills/image-toolkit/scripts/upscale.py -- a real second
     service call using the REPLICATE_API_TOKEN (resolved by upscale.py from
-    model gateway then the environment).
+    the environment).
   - mix: cycles fal / replicate-enhance per attempt (1st, 2nd, 3rd, 4th
     attempt = fal again, ...), so one run covers both tools the user asked
     to compare ("nano fal and Replicate") without two separate invocations.
