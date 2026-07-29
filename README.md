@@ -499,6 +499,10 @@ tools/run_tests.sh                        # full suite under a private user://
 tools/run_tests.sh -s res://tools/lint_sim.gd
 ```
 
+Looking for something to fix? [`FINDINGS.md`](FINDINGS.md) is the open defect inventory —
+every entry adversarially verified, each with a measured rate. Read its header first: **62 of
+115 findings died on their own** last time anyone re-checked. 🔎
+
 `CLAUDE.md` is the long-form contributor guide — architecture, conventions, and a
 hard-won list of gotchas that will otherwise each cost you an hour. 🕳️
 

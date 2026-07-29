@@ -2,6 +2,14 @@
 
 Open defects, design calls and debt for Commander In Chief, as of **2026-07-26 22:30**.
 
+> ⚠️ **STALE — kept for the measurements, not as a worklist.** This snapshot predates a large
+> drain wave, six landed branches, a vendor scrub and two adversarial sweeps. When its successor
+> [`FINDINGS.md`](FINDINGS.md) re-triaged the same body of work on 2026-07-28, **62 of 115
+> entries were already fixed** — most from a different angle than the one proposed here.
+> **Read [`FINDINGS.md`](FINDINGS.md) for what is actually open.** What this file is still good
+> for is the *measured numbers* behind each entry, which were expensive to produce and did not
+> stop being true just because the defect got fixed. 📐
+
 **Provenance.** Most entries came from `/triple-a-game` runs — a two-lens review where a
 multimodal reviewer judges screenshots and a second lens reads `src/sim/` and *drives it
 headlessly to measure*. Almost every number below was measured, not estimated; where something

@@ -1,525 +1,245 @@
-# FINDINGS — confirmed defect inventory
+# 🔎 FINDINGS — open defect inventory
 
-Two read-only sweeps, 2026-07-27. Every entry was read by a scout that opened the code, then
-attacked by two independent skeptics both defaulting to *refuted*. The skeptics revised severity
-**downward** on most survivors, and several headlines were wrong in BOTH directions — a dead
-defect welded to a live one so the pair read as one major bug.
+![Open](https://img.shields.io/badge/open-56-orange) ![Resolved](https://img.shields.io/badge/resolved-66-2ea44f) ![Verified](https://img.shields.io/badge/every%20entry-adversarially%20verified-blue)
 
-Source: workflow journals `wf_1074dfab-521` (backlog triage, 51 agents) and `wf_2f32efbf-ac1`
-(10-lens sweep, 75 agents). Rebuilt from per-agent transcripts because the aggregate result
-lived only in a temp dir that was cleaned with the session.
+> ⚠️ **A findings file rots faster than the code it describes.** Re-triaged **2026-07-28**
+> against a `main` that had moved 46 commits: **62 of 115 banked findings were already fixed**,
+> most from a different angle than the one proposed. Four more were fixed the same day this
+> file was regenerated. **Re-check before you plan — no row here is a work order.**
 
-> ⚠️ Entries are keyed by title. The confirm records were joined back to their findings via each
-> agent's own prompt, NOT by array position — the results arrive out of order and a positional
-> join silently attaches the wrong file:line to the wrong defect. It did exactly that on the
-> first pass here.
+## 📊 Where the numbers went
 
-| | |
-|---|---|
-| Backlog entries triaged | 132 → 18 distinct |
-| Confirmed real | 16 |
-| Lens findings | 10 lenses, 34 findings |
+```mermaid
+flowchart LR
+    A[132 banked] --> B[18 distinct]
+    B --> C[115 re-triaged]
+    C --> D[✅ 62 already fixed]
+    C --> E[🚫 10 never real]
+    C --> F[📌 43 still real]
+    G[8 fresh lenses] --> H[23 findings]
+    H --> I[🚫 6 refuted]
+    H --> J[17 confirmed]
+    J --> K[✅ 4 fixed since]
+    J --> L[📌 13 open]
+```
 
+| | Count | Meaning |
+|---|---|---|
+| ✅ | **62** | Fixed before the re-triage. Gone, not listed |
+| ✅ | **4** | Fixed *after* the sweep — see the resolved table below |
+| 🚫 | **10** | Never reproduced. Deliberately not re-opened |
+| 🚫 | **6** | Fresh findings the skeptics refuted |
+| 📌 | **43** | Survived re-triage against current code |
+| 📌 | **13** | Fresh and still open |
+
+**Open by severity** — 🟡 minor **11** · ⚪ cosmetic **2**
 
 ---
 
-## A. From the 132-entry backlog
+## ✅ Fixed since the sweep
 
+Kept visible on purpose: these were the sweep's four majors, and a reader who saw them
+cited elsewhere should be able to confirm they are closed without re-deriving anything.
 
-### The sapper detonates its own first mine, so the advertised mine trail has never once existed\nCLAIM:   \"MEASURED, singl
+| Finding | Landed as |
+|---|---|
+| The gunship's mortar lead stores its velocity sample on the BOSS, not on the player — in 2P a … | `_lead_aim() — one sampler, stored on the player` |
+| `_init` is the one mode dispatch with no Arcade arm — ARCADE quick-play (chapter 1) starts on … | `is_campaign_world() arm in _init` |
+| The persisted SFX volume is read back off the live audio bus, which the VO duck is holding 6 d… | `_bus_vol reads _sfx_base_db` |
+| Endless roots ghillie/nest/mast at y=-320 — the exact y of the constant arena rock at (210,-32… | `rooted_y +52, off the rock row` |
 
-- **Where:** `src/sim/sim_world.gd:3388-3401 (`_step_sapper`), :3505-3548 (`_step_mines`), :3772-3778 (`_spawn_special`), :2671-2689 (`_explode`), :2774-2781 (`_kill_enemy`)`
-- **Severity:** major — Consequence: an entire archetype's defining mechanic — the mine trail, the whole reason the Sapper exists in the roster and the thing `SAPPER_MINE_CD_TICKS`/`SAPPER_MAX_MINES` are tuned for — has a 40× shortfall (1 mine instead of up to 40), and the failure mode hands the player a free 25-coin elite bounty + kill-streak tick for doing nothing. Rate: every sapper, every run that spawns one, in both campaign (sectors 2 and 5) and endless BOMBARDMENT. Not critical — no crash, no softlock, no lost p
-- **Rate:** 100% of sappers that live to lay — deterministic, no rng and no player involvement on the path. Denominator (exact, without running Godot): every sapper that survives 85 ticks from spawn lays exactly ONE mine and dies on that same tick; SAPPER_MINE_CD_TICKS=40 / SAPPER_MAX_MINES=40 intend up to 40. Sapper spawn frequency: campaign field spawner rolls a special on 1-in-5 (`rng.range_i(0, 4) == 0`, :3640) and then picks uniformly from the sector roster — sector 2 is a 2-entry list (~10% of field spawns) and sector 5 a 3-entry list (~6.7%); sectors 1/3/4/6 field none. Endless: BOMBARDMENT (`has_mod(8)`) spawns them at :5191. The backlog's measured 30 mines / 52 sappers = 0.58 is consistent with
-- **Test defending it:** None asserts the defect as a contract. Two files mention it without pinning it: tests/test_mutators.gd:141 `test_sapper_mines_detonate_in_endless` only asserts `_step_mines()` runs in endless mode (it hand-appends a mine on the player and checks it resolves) — it never spawns a sapper, so it stays green either way; and tests/test_checksum_coverage.
-- **Fix:** Two lines, both at the spawn/lay seam; do NOT touch `_step_mines` (its enemy scan being owner-blind is what makes "herd rushers into the minefield" work, :3533).
+---
 
-1. sim_world.gd:3395 — plant the mine BEHIND the sapper instead of under it, exactly mirroring the player claymore's already-correct precedent at :1303-1306 (`CLAYMORE_PLANT_OFFSET` along aim, whose comment says "Still outside its own 9px trigger"). Sapper moves along `(dx, dy)` toward the target, so offset by the negated normalized direction at > `MINE_TRIGGER_RADIUS` (9 px; use ~16 px for margin). This also makes the code match its own docstring at :154-156 ("seeds armed mines behind it") and needs no new state.
+## 🆕 Fresh findings still open — 13
 
-2. sim_world.gd:3777 — stop giving a mine-layer a sniper's reload. Add a per-kind override alongside the existing ghillie one at :3779-3782: `if kind == "sapper": e["fire_cd"] = SAPPER_MINE_CD_TICKS`, so the first mi
+From 8 lenses never swept before. Each survived a code-refuter **and** a player-consequence
+refuter, both defaulting to *refuted*. Rates are measured or explicitly `UNKNOWN` — never an
+adjective standing in for a denominator.
 
-### The economy is inverted: spending is a dominated strategy and purchasing power falls as the campaign escalates\nCLAIM:  
 
-- **Where:** `src/sim/sim_world.gd:1983-1997 (`_econ_scale`), :2013-2030 (`_supply_cost`), :2122 (`score += cost * SPEND_SCORE_MULT`), :5783 (`score += war_chest * 10 + 5000`), :390 (`SPEND_SCORE_MULT := 6`), :209-212 (flat COIN_* constants). NOTE: every line number in the finding is stale by ~70-150 lines — the file grew. Verified on fix/aaa-drain (`git rev-parse --abbrev-ref HEAD` → fix/aaa-drain).`
-- **Severity:** major — Consequence: the shop's whole late-game pitch — "a fat late chest still faces a real spend decision" (:2014) — inverts into the opposite of its documented invariant, and it compounds with the 6-vs-10 hoard discount so the correct play in the back half of a campaign is to stop buying. No crash, no softlock, nothing unwinnable. Rate: the primary mode, every run, for the last two-thirds of it. Consequence (balance-only, degrades a core system) x rate (100% of campaign runs) = major, not critical. A
-- **Rate:** Claim B: every campaign run, second half onward. Campaign authors 6 gates + a final (`gates.append` at :4554/:4840/:4900), so `_econ_depth()` walks 0→6 and every shop price and priced ground crate rises to 2.5x while coin income does not. Every shop interaction past gate 2 is affected. Claim A: every campaign run that reaches victory (the 10x at :5783 is the colossus-kill path only) — magnitude UNKNOWN without running the probe.
-- **Test defending it:** Three, and they matter for the fix shape.
-- `tests/test_shop.gd:29 test_prices_track_income_instead_of_capping_under_it` — this IS the invariant the finding names, but it builds `SimWorld.new(7, 1, "endless")` and only ever exercises endless. It pins the mode where the invariant holds and never looks at campaign. That is why this shipped.
-- `tests/
-- **Fix:** Fix the CLASS = "campaign income does not ride `_econ_depth()`", not the individual price.
+### 🟡 `_save_settings()` writes the WHOLE live snapshot, so the two callers that were never given the `_opts_dirt…
 
-Cheapest correct change is one choke point, not seven. Six of the seven `war_chest +=` sites are kill-shaped and all campaign kill income funnels through `_kill_enemy` at :2780-2806. Add the mirror of the existing scale and route the kill coin through it:
+- 📍 **Where** — `/Users/shoemoney/Projects/commander-in-chief/src/main.gd:4263-4266 (`_save_settings` persists all 12 keys of `_settings_snapshot`), guarded callers :…`
+- 📈 **Rate** — UNKNOWN — needs the interleaving "stage an OPTIONS edit, then press F11 (or walk into CONTROLS and toggle SWAP STICKS), then DISCARD/BACK". Not exotic: the DISPLAY sub-screen is exactly where a player experiments with fullscreen, and F11 is the hotkey the game advertises for that same setting. 2 of…
+- 🔧 **Fix** — Same guard the other two sites already use, at the writer instead of per-caller so the class can't regrow: first line of `_save_settings()` — `if _menu != null and _menu._opts_dirty: return` — and have `_toggle_fullscreen` fall back to `_stage_opts()` when it bails, so an F11 taken mid-session is t…
+- 🧬 **Class** — All `_save_settings()` call sites: main.gd:1197 (guarded), :1895 (guarded), :4368 (UNGUARDED — F11), :4571 / :4585 (`_set_win_scale`/`_set_win_scale_pref`, unguarded but unreachab…
 
-  func _econ_coin(base: int) -> int:
-      # campaign only: endless already grows income by enemy COUNT per wave
-      # (WAVE_ENEMIES_PER_WAVE) plus the _econ_scale(40) Clean Wave bonus at :5230,
-      # so scaling per-kill coin there would double-count and break test_shop.gd:29.
-      return _econ_scale(base) if mode == "campaign" else base
+### 🟡 [settings] is the one persisted section that bypasses the `_cfg_int`/`_cfg_dict` trust-boundary helpers — a…
 
-then at :2806 `war_chest += _econ_coin(coin)`. That single line covers the ~90% of campaign income that is kills. If the remaining fixed beats should track too, the same wrapper goes on :2402/:2710 (bunker
+- 📍 **Where** — `/Users/shoemoney/Projects/commander-in-chief/src/main.gd:3967-3986 (12 raw `cf.get_value("settings", …)` reads) versus :3934-3961 (8 sibling reads th…`
+- 📈 **Rate** — 0 on any save this build wrote — every value in `_settings_snapshot` (:4234-4248) is correctly typed. 100% of launches for a save whose [settings] carries a wrong-typed value: hand-edit, partial-sector corruption, or a future build that changes a key's type (the same schema drift the sibling helper…
+- 🔧 **Fix** — Route the six unguarded reads through the helpers that already exist — add a three-line `_cfg_bool(cf, section, key, def)` twin of `_cfg_int` (`return v if v is bool else def`) and use it for colorblind/assist/reduce_motion/rumble/fullscreen/swap_sticks/captions, and `_cfg_int` for sfx_vol/music_vo…
+- 🧬 **Class** — The one other loader that reads a container off disk with no type check is `SteamBridge._load_cache` (/Users/shoemoney/Projects/commander-in-chief/src/steam/steam_bridge.gd:256-26…
 
-### The Commendation is minted, capped, granted and burned by four rules that were never reconciled, so the currency ends every run at zero — ALREADY FIXED
+### 🟡 Duplicate "deny" arm in _consume_events' single `match kind:` — the water-roll refusal handler is dead code…
 
-- **Where:** `src/sim/sim_world.gd:2052-2060 (`_mint_token`), :1869-1886 (`_kill_player` burn + `player_down` event), :2063-2085 (`_try_token_drop`), :2840-2849 / :3905 / :5770 (the three mint sites), src/main.gd:1443 (perk grant), :2591-2594 (loss sting), :2740-2744 (mint/spend cues), src/view/hud.gd:2250-2274 (`_token_chip`)`
-- **Severity:** minor — Consequence: a milestone the game teaches as a peak (flawless gate / streak-20) pays nothing and says nothing — a feedback gap, not a state corruption; the player loses value they could have banked by spending first. Rate: only on the deathless/tight runs where the player is already at cap, bounded at ~4 refusals across a 6-gate campaign, and exactly 0 on the sloppy runs the original finding was measuring. Consequence x rate = minor. The three claims the finding leads with (wipe-on-death, wastef
-- **Rate:** Headline claim ("ends every run at zero"): UNKNOWN and unverifiable without running Godot — the probe that produced the 26-33 knockdown figure is deleted and it measured a burn rule that no longer exists. Residue (silent cap refusal): fires only at a mint moment while tokens == 2. Upper bound in campaign is 4 of 6 flawless mints on a fully deathless run; 0 on any run with deaths (burn keeps you off the cap). Perk bypass: 0 occurrences — max reachable value equals the cap.
-- **Test defending it:** None. tests/test_mechanics.gd:890 `test_commendation_tokens_mint_cap_wipe_and_spend` asserts the cap holds at 2 (:901) and that death burns exactly one (:913, :916) — it pins the FIXED behaviour, and it never asserts that `events` is empty on a refused mint, so adding a refusal event would not turn it red. tests/test_hud.gd:3488 `test_token_chip_su
-- **Fix:** Only worth doing for the residue, and only if the parent wants feedback parity. Smallest change that kills the class rather than one call site: put the else in the shared minter, not at the three mint sites — sim_world.gd:2058 becomes `if tokens < 2: ... else: events.append({"t": "token_cap", "x": x, "y": y})`, which covers all three callers (:2849 streak-20, :3905 flawless gate, :5770 colossus) in one place. Then one arm in main.gd's `_consume_events` match beside "token_mint" (:2740) floating "COMMENDATION HELD *2 — SPEND IT". `events` is checksum-excluded (sim_world.gd:6259 hashes only `tokens`), so this is golden-safe and needs no re-record. Do NOT touch the burn, the spend roll, or main.gd:1443 — those are the already-fixed parts.
-- *Collapses 3 banked entries.*
-- ⚠️ **Unreconciled:** Three cycles cite three different line numbers for the same function with no reconciliation: c3 "capped at 2 by `_mint_token` (:1986)"; c4 "src/sim/sim_world.gd:2059-2067 `_mint_token()`"; c6 "`_mint_token` (sim_world.gd:2004) caps at 2". Same drift on the mint sites (c3 ":2781 ... :3837 / :5623" vs
+- 📍 **Where** — `/Users/shoemoney/Projects/commander-in-chief/src/main.gd:2378 (live arm) and :2765 (dead arm); both inside the one `match kind:` at :2250. Emitter: /…`
+- 📈 **Rate** — 100% of `deny why:"water"` events, i.e. every roll press made while wading. Water bands stream unconditionally in BOTH modes (`src/sim/sim_world.gd:5039-5041`, `while _next_water_y > horizon`) — one river per `GATE_SPACING` of scroll — so every run of either mode crosses several, and roll is a refl…
+- 🔧 **Fix** — Two-line fix, both in /Users/shoemoney/Projects/commander-in-chief/src/main.gd: 1. Add `"water": "NO ROLL IN WATER"` to the deny_txt dict at :2379-2381 (it already sits next to "cap"/"tank"/"board"/"token"/"full"). 2. Delete the dead arm at :2765-2779 entirely. If the blue-vs-red colour distinction…
+- 🧬 **Class** — Verified across all 6 `deny` emitters — the other 5 `why` values ("board", "token", "full", "cap", coins-default) render correctly through the surviving arm. Also swept every othe…
 
-### CHAPTER SELECT / ARCADE routes through the campaign branch but nine of its ten predicates are string-gated on \"campaign
+### 🟡 Three shipped ENGLISH strings use glyphs the font does not have — the victory card, the K.I.A. debrief and …
 
-- **Where:** `src/sim/sim_world.gd:1450, :1475, :1500, :1974, :2023, :4261, :4816, :4822, :5853, :6124 (ten `mode == "campaign"` gates) vs the single taught site :4290 `if mode != "campaign" and mode != "arcade"`; src/main.gd:1427 builds the mode string`
-- **Severity:** major — Consequence x rate. Consequence: a shipped, menu-advertised mode plays a materially different game from the campaign it claims to be a chapter of — 9 authored tactical rules absent (lane seals, barricades, one-way ledge, rear trickle, choke-camp breach, gunship cover rotation, and their telegraphs), a flat 2.25x shop discount by chapter 6 against unchanged income, plus a view/sim disagreement that produces an invisible wall (sim clamps to `_choke_bounds`, main.gd:6646 refuses to draw it) and a m
-- **Rate:** Every ARCADE run, for essentially its whole length. Arcade is 1 of 4 modes and a top-level MODES entry (menu.gd:992) plus 6 CHAPTER SELECT rows (menu.gd:2971). All the disabled rules key on `band >= CHOKE_START_SEG` (2) or `camera_top < -2400`; `jump_to_chapter(N)` starts you at band N-1, so chapters 3-6 begin ALREADY inside the affected region and chapters 1-2 enter it within ~1-2 gates. The economy divergence is 100% of every arcade run from tick 0 and widens monotonically as gates open (campaign +25%/gate, arcade pinned at 0). The invisible-choke-wall is every arcade run past band 2.
-- **Fix:** One predicate, ten sim swaps, seven view swaps. In sim_world.gd add next to `_econ_depth`:
+- 📍 **Where** — `src/main.gd:11615 (victory card row, "%d¢ WAR CHEST BANKED → +%s") · src/main.gd:3356 (K.I.A. debrief row, "%d¢ WAR CHEST SALVAGED → +%s") · src/main…`
+- 📈 **Rate** — The arrow: every campaign victory card (main.gd:11615 is unconditional in the victory branch), plus every K.I.A. debrief where the chest was non-empty (main.gd:3350-3357 returns [] only when banked <= 0). The bolt: every gate that beats the run's best split — gated on `_best_gate_split > 0 and spli…
+- 🔧 **Fix** — Swap the two arrows for '->' (or for the em dash the same row already uses) and drop the bolt from the FAST tag, or add the three codepoints to the font. Cheapest durable guard, and it costs one test: add to tests/test_localization.gd a scrape of every string literal in src/**/*.gd, asserting Art.f…
+- 🧬 **Class** — Swept exhaustively — these three are the complete set across all of src/. No other non-ASCII literal in the view is missing from the font.
 
-    func is_campaign_world() -> bool:
-        return mode == "campaign" or mode == "arcade"
+### 🟡 banner_fit_size's shrink-to-fit floors at 8px with no wrap or ellipsis fallback, so 15 of 22 localized teac…
 
-(public, not underscore — the view reads it too, and tests/test_stub_parity.gd polices `main.`/`sim.` reads from view scripts.)
+- 📍 **Where** — `src/main.gd:11773-11777 (banner_fit_size, `while sz > 8 and Art.tw(txt, sz) > BANNER_MAX_W`) · src/main.gd:299 (BANNER_MAX_W := 420.0) · src/main.gd:…`
+- 📈 **Rate** — Each _hint id fires exactly once per profile, ever (src/main.gd:4857-4859: `if _seen.get(id,false): return` then `_seen[id] = true`, flushed to disk). So: 15 of the 22 translated hint strings across fr+es, one showing each, per profile; plus 2 of 14 English hints forced to the minimum size for ever…
+- 🔧 **Fix** — Two lines, one place. In band_rows at main.gd:11222, after `var hs := banner_fit_size(...)`, clamp what actually gets drawn rather than trusting the size loop: pass the hint through Hud._wrap_caption(hint_text, Art.font(), hs, BANNER_MAX_W) and lay the returned lines on BAND_HINT_H each (the plate …
+- 🧬 **Class** — banner_fit_size has 2 callers, both in band_rows: main.gd:11193 (the god-mode debug badge, short fixed literal, never near the cap) and main.gd:11222 (the hint row, the live one).…
 
-Then replace `mode == "campaign"` / `mode != "campaign"` with `is_campaign_world()` / `not is_campaign_world()` at sim_world.gd:1450, :1475, :1500, :1974, :2023, :4261, :4816, :4822, :5853, :6124 — and collapse :4290's hand-rolled `if mode != "campaign" and mode != "arcade"` into `if not is_campaign_world()` so the one site that already knows about arcade stops being a special case that can drift again.
+### 🟡 At 200% TEXT SIZE, 6 of 8 _world_label call sites hand-code an x offset sized for the 8px string, so every …
 
-Do NOT stop at the sim — that is exactly the "fixed at one call site" trap this repo has shipped three times. The same string gate is duplicated in the view and produces the invi
+- 📍 **Where** — `src/main.gd:9067-9073 (_world_label, resolves Art.fs(8) internally but takes pos from the caller) · hard-coded callers: :8272 (capsule name, -13) · :…`
+- 📈 **Rate** — Every frame those callouts are on screen, for a player on the 200% rung. TEXT_SCALE has 5 rungs (main.gd:189-191: 100/125/150/175/200); at 125% the drift is a quarter of the figures above, and at 100% it is zero, so the defect is invisible until the accessibility setting is used. Per-callout freque…
+- 🔧 **Fix** — Push the centring INTO the helper rather than patching six callers: give _world_label (main.gd:9067) a `center := false` flag, or better an overload that takes the ANCHOR point and subtracts Art.tw(txt, sz)/2.0 itself — it already computes `sz` and already calls Art.tw for the plate at :9072, so th…
+- 🧬 **Class** — grep -n '_world_label(' src/main.gd gives exactly 8 call sites (:8272 :8356 :8753 :8757 :8979 :9794 :9937 :9948 :10811 — :9067 is the definition, :11164 a comment). 6 hard-code, 2…
 
-### The empty-magazine bash bypasses every armour rule in the game — one free rifle butt kills any armoured unit\nCLAIM:   \
+### 🟡 `_step_enemy_bullets` was fixed to test the target BEFORE cover; `_step_bullets` still tests all three cove…
 
-- **Where:** `src/sim/sim_world.gd:990 (`_enemy_strikeable`), :1215-1238 (the empty-clip bash), :2556-2588 (the bullet path it bypasses), :3684-3686 + :5060 (`_wave_armor`), src/main.gd:5816 / :5871 (`fire = true`)`
-- **Severity:** major — Consequence x rate. Consequence: it voids two priced systems outright — the Rend Rounds capsule (REND_TICKS 480, the shield archetype's authored counter) and the 30-coin grenade/airstrike answer to hp>1 bodies — and it neuters the deep-endless difficulty knob (`_wave_armor`, wave 13+) at exactly the point that knob is the scaling. Any single enemy in the game except a submerged ghillie dies to one free rifle butt. Rate: the branch runs ~1-3 times per 60 s run measured (test_determinism.gd:440-44
-- **Rate:** MEASURED, in-repo, no Godot run needed — tests/test_determinism.gd:440-441 records instrumented torture streams: `campaign dry ticks P1=0 P2=72 bash=1 dry_fire=4` and `endless dry ticks P1=838 P2=511 bash=3 dry_fire=454` over 3600 ticks (60 s, 2P). So the bash branch executes ~1 (campaign) to ~3 (endless) times per 60 s run, with players dry ~19% of player-ticks (1349 of 7200) in endless. That torture holds fire at `(t%3)!=0`; SHIPPED always-fire is strictly heavier — 99 rounds ÷ FIRE_COOLDOWN_TICKS 8 = 792 ticks (13.2 s) to empty, 4.4-6.6 s with Triple/Trench fan_cost, and resupply arrives in 30-round chunks (`_apply_supply` kind 0, :1915) — so real dry share is higher than 19%, not lower. 
-- **Fix:** The CLASS is "the melee strike does not route through the two armour rules the bullet path owns". Fix it once, inside the bash branch at sim_world.gd:1221-1233, by mirroring sim_world.gd:2562-2586 rather than by special-casing kinds:
+- 📍 **Where** — `src/sim/sim_world.gd:2716 (sandbags), :2726 (hulks/tanks), :2732 (rocks) — all set `dead = true` before the enemy scan at :2750. Compare `_step_enemy…`
+- 📈 **Rate** — UNKNOWN without running the sim. Deterministically guaranteed for the Finding-1 case. Otherwise it bites once per (enemy center inside a solid rock/sandbag/hulk AABB) x (bullet fired along a line through that AABB); `_spawn_enemy`'s nudge (:3919) is the only thing that even tries to prevent the spa…
+- 🔧 **Fix** — Move the `if not dead: for e in enemies:` block (:2750-2805) above the three cover blocks in `_step_bullets`, so it reads like `_step_enemy_bullets`. That is the root-cause, all-call-sites fix and it is a block move, not new logic. It WILL move `test_determinism.gd` GOLDEN (kind-0 rocks and rushers…
+- 🧬 **Class** — Three cover blocks on the player side (:2716 sandbags, :2726 hulks, :2732 rocks) plus the barrel check at :2807 — all before the enemy scan. Four blocks on the enemy side (:6348, …
 
-1. Shield arc: reuse `_shield_blocks(e, b)`'s rule. It takes a bullet dict for its direction; the cheapest reuse is to hand it a `{"vx": p["x"] - e["x"], "vy": p["y"] - e["y"]}`-shaped literal (read `_shield_blocks` for the exact keys it reads) or extract the 3-line direction test into `_shield_blocks_dir(e, dx, dy)` and call it from both sites. Blocked -> emit the existing `armor_block` event, still arm `BASH_COOLDOWN_TICKS`, do NOT kill. Keep the bullet path's Rend exception (`p["rend_ticks"] > 0` -> `rend_pierce` + kill) so Rend Rounds stays the authored answer at melee too.
-2. hp armour: `if e.get("hp", 1) > 1: e["hp"] -= 1; events.append({"t": "armor_b
+### 🟡 `_spawn_enemy`'s "never birth a unit inside a rock" nudge is arithmetically too small to clear any rock kin…
 
-### Nothing owns \"what is a run's configuration\", so replays rebuild a different run, the DAILY lock never arms, and aband
+- 📍 **Where** — `src/sim/sim_world.gd:3919-3925`
+- 📈 **Rate** — COMPUTED, not measured. Applies to every `_spawn_enemy` call whose (x,y) overlaps a solid rock — bunker drip (:3764), field spawner (:3915), gate wall (:4210), authored ambushes (:4899/:4944/:4989), rear trickle (:5108), endless bulk (:5504/:5513), colossus adds (:6019), rear camp (:6483). Per-spaw…
+- 🔧 **Fix** — Do NOT widen the nudge in place — it just moves the failure window. Either delete the guard as ineffective (honest, and Finding 2's reorder makes it unnecessary), or lift it into one `_clear_of_cover(x, y) -> int` helper that pushes to the nearer face (`rk.x ± (_rk_hw(rk) + 4 + 1)`) and is called b…
+- 🧬 **Class** — Guard present at 1 of 5 spawn entry points. Missing at `_spawn_frogman` (:3952), `_spawn_special` (:4034), `_spawn_mg_nest` (:4060), `_spawn_broadcast` (:4068) — and the last thre…
 
-- **Where:** `src/main.gd:1377-1408 (start_watch), :1411-1459 (_reset), :1424 (_daily seed re-derive), :1428-1447 (post-construction config), :1449-1454 (_recorder stamp), :4847 (verify gate), :4663 (_daily_done_seed sole writer), :4674 (vet_points += sim.wave), :4888-4900 (bests ratchet); src/net/replay.gd:130-143 (_new_sim)`
-- **Severity:** critical — Consequence × rate. Consequence of (1): the Endless meta-progression permanently stops functioning — zero Hall rows, zero Steam scores, zero VP — and the player is told "SCORE NOT VERIFIED" (the anti-cheat deny banner, main.gd:4619) for legitimately using a purchased perk. Rate: 100% of Endless debriefs after the first perk purchase, which every VP-earning player reaches in a handful of runs. That is an unrecoverable dead-end on the game's only meta system, so critical. Sub-claims (2) daily save
-- **Rate:** Three different denominators.
-(1) Perk/replay divergence: EVERY Endless debrief once any perk tier is owned. Perks are the only VP sink; cheapest is HEAD START tier 1 at 30 VP ≈ 2-4 finished Endless runs (`vet_points += sim.wave`). After that first purchase the meta permanently self-bricks — no further VP can be banked, so the player can never progress past the perk that broke it. Whether the score numerically differs is UNKNOWN without running Godot, but VETERAN VEST changes whether a hit kills, so divergence is near-certain for that perk and likely for HEAD START (chest funds different shop buys).
-(2) Daily bypass: every daily run the player restarts (R / pad START / pause→RESTART / pause→
-- **Test defending it:** None asserts the defective behaviour. Nearest neighbours, both compatible with the fix: `tests/test_endless_meta.gd::test_owned_perks_apply_to_a_fresh_endless_run` (asserts perks DO apply in `_reset` — correct, and exactly the state `_new_sim` fails to mirror) and `tests/test_menu_layout.gd::test_c2_13_daily_done_persists_and_locks_row` (asserts `_
-- **Fix:** One owner for "run configuration", not four. The class is exactly four call sites and they must all read the same struct:
-  A. src/main.gd:1428-1447  `_reset()` post-construction config
-  B. src/net/replay.gd:135-142  `Replay._new_sim()`
-  C. src/main.gd:1449-1454  the `_recorder` stamping block
-  D. src/main.gd:1397-1401  `start_watch()` restore
+### 🟡 `_respawn` is the only player-position write in the sim that skips `_clamp_actor`, so a respawn can land ou…
 
-Smallest change that kills the class:
-1. Record RESOLVED starting state, not the rules that produced it. Add three fields to Replay beside `assist`/`hard`/`chapter` — `start_vest: bool`, `start_chest: int`, `start_tokens: int` — serialized in `to_dict()`/`load_from()` with back-compat defaults (false/0/0), exactly as `assist`/`hard` already do (replay.gd:45, 119-121). In `_reset()` (site C) stamp them from the sim AFTER the perk block: `_recorder.start_vest = sim.players[0]["vest"]`, `_recorder.start_chest = sim.war_chest`, `_recorder.start_tok
+- 📍 **Where** — `src/sim/sim_world.gd:1983-1984 (`_respawn`'s own clamps), :1755-1762 (`_clamp_actor`), :1649-1695 (`_choke_bounds`), :1242 (the on-foot call site tha…`
+- 📈 **Rate** — UNKNOWN exactly without running the game; derivable bound from the constants. Chokes are live for `seg >= CHOKE_START_SEG` (2, :548), with `CALM_BAND_SEG` 5 exempt (:1655-1657) and `RUINS_SEG` 3 on a narrower dog-leg (:1658-1672) — so roughly 4 of the campaign's ~7 segments. Within a choking segmen…
+- 🔧 **Fix** — Replace :1983-1984 with `p["y"] = at_y` then `_clamp_actor(p)` — `_clamp_actor` already applies the identical y clamp (:1758), adds the missing `_choke_bounds` x clamp, and adds the closed-gate push (:1760-1762) that `_respawn` also lacks. One line net. NOT golden-safe: this changes hashed player x…
+- 🧬 **Class** — CLASS CHECK — `_clamp_actor(` is called at :1242 (on-foot), :2442 (tank), :2523 (gunner bail), :2559 (`_dismount`). `_respawn` is the ONE player-position write that does not route…
+
+### 🟡 `roll_prev` is the only per-player edge-latch not updated on the dead or in-tank paths, so a player holding…
+
+- 📍 **Where** — `src/sim/sim_world.gd:1114-1115 (`roll_prev` write, inside the alive+on-foot path), :1076-1081 (the three latches that ARE updated for dead players), …`
+- 📈 **Rate** — UNKNOWN as a fraction — it needs the player's finger state at two specific ticks, which is not derivable from code. The structural exposure is every death→revive transition in every mode (all four `_respawn` sites) plus every dismount, and the triggering input (holding/mashing the dodge button whil…
+- 🔧 **Fix** — Move `p["roll_prev"] = inp.roll` from :1115 up beside the other three latches at :1081, and change :1114 to read the pre-update value into a local first (`var roll_edge := inp.roll and not roll_prev_before`). Sim state change (`roll_prev` is hashed, checksum.gd:6670) → `tests/test_determinism.gd` G…
+- 🧬 **Class** — CLASS CHECK — grepped all six per-player edge latches. `interact_prev`/`buy_prev`/`grenade_prev` are correctly updated above both early-outs (:1077, :1079, :1081). `fire_prev` (:1…
 
-### The frogman_surface splash cue is emitted on a loop instead of on a state edge, from dry land, by two archetypes\nCLAIM:
+### 🟡 `_reset()` tears down the engine loops but not the voice layer — the dead run's priority-3 line keeps talki…
 
-- **Where:** `src/sim/sim_world.gd:5283-5296 (anti-stall) vs src/sim/sim_world.gd:3445-3447 (_step_ghillie re-cloak); src/sim/sim_world.gd:3379-3385 (beached-frogman re-telegraph); emitters also at :1193, :3358, :3417; cue mapped src/main.gd:520, consumed src/main.gd:2202-2210; src/view/sfx.gd:677-705 + :299-304 (12-voice pool, no throttle/cull); ghillie reveal draw src/main.gd:8693-8699`
-- **Severity:** major — Consequence: a continuous ~7-11/s water-splash roar at -4 dB over dry grass, plus an enemy sprite that pulses its "rising from cover" burst at 2.2 Hz indefinitely; ~3 of the 12 sfx voices held on splash on average, and `play_at` steals the voice nearest finishing (sfx.gd:691-698), so it eats into `sniper_paint` / mortar-whistle warning cues — the only pre-hit warnings the game gives. Rate: endless, unbounded duration once the last hostiles are out-of-range cloaked ghillies; and the wrong-terrain
-- **Rate:** Terrain lie: EVERY ghillie reveal, every run that spawns one (sim_world.gd:3417 + :5296 — a ghillie is never in water), plus every beached-frogman re-telegraph (~1 per 75 ticks per beached frogman). The 2.2-cues/s-per-ghillie LOOP: endless only, and only while `wave_pending == 0`, no boss, and the only non-pilot hostiles left are cloaked ghillies out of the player's 210px notice radius. Once entered it never self-terminates — the player must go kill them. The claim's 3-of-4-seeds / 25,000-of-40,000-ticks measurement is UNVERIFIED (read-only phase, no Godot), but the 27-tick period is structural and I confirmed it from the step order.
-- **Test defending it:** tests/test_archetypes.gd:115-140 `test_frogman_stranded_on_land_retelegraphs_instead_of_lunging_forever` pins the campaign dry-land re-telegraph as a contract (`Runner.T.ok(frog["surface_ticks"] > 0, ...)` at :139) — so do NOT delete the :3385 branch, only its sound. It asserts nothing about the event, so a terrain-aware cue is free. tests/test_arc
-- **Fix:** Two independent one-liners; both are class fixes, neither touches goldens.
+- 📍 **Where** — `src/main.gd:1430 (`_sfx.stop_engines()` — the only audio teardown in `_reset`), :1499 `_vo_last.clear()` (throttles cleared, the PLAYERS are not), :1…`
+- 📈 **Rate** — Every `_reset()` taken while a VO/bark is on air. The dominant path is the common one: the run-ending line is priority 3 and 4.4-4.6 s long, redeploy is a single key, so any redeploy inside ~4.5 s of the wipe/victory hits all four effects — that is most "die, hit R" loops, the single most repeated …
+- 🔧 **Fix** — One funnel, one new method. In src/view/sfx.gd next to `stop_vo`: func stop_voices() -> void: ## RUN TEARDOWN — same contract as stop_engines(): the ending run's line must not ## narrate the next one, and _vo_priority must not gate its first bark. stop_vo() _cmd.stop() _cap_text = "" _cap_until = 0…
+- 🧬 **Class** — Grepped every persistent audio handle in src/view/sfx.gd against `_reset()`. `_engines` (:104) — covered by `stop_engines` at main.gd:1430. `_vo`/`_vo_dry` (:106-107), `_cmd` (:11…
+
+### ⚪ The priced-crate 'supply plate' is drawn only in Endless, but campaign/arcade stamp priced crates too — the…
 
-1. Terrain lie (kills it at all 5 emitters at once) — src/main.gd. Give the ghillie its own event kind, or pick the sound by terrain at the single choke point. Cheapest honest version: split the sim's ghillie emitters (sim_world.gd:3417 and :5296) to `"t": "ghillie_reveal"` and add one `_EVENT_SOUND` row near main.gd:520 with a dry rustle (`"cover_burn"`/`"vest_break"` voice is already the grass-crackle) — the two remaining `frogman_surface` sites are the mud pop and the notice-surface, both genuinely wet, except the :3385 beached tail. For that one, reuse the wet/dry idiom main.gd ALREADY runs three times (`var wet_dirt: bool = sim._in_water(ev["x"], ev["y"])` at main.gd:2225, same at :3169 and :3310): pick splash vs dust from `sim._in_water(ev["x"], ev["y"])` inside the `frogman_surface` handler.
-
-2. The 27-tic
-
-### Endless spawns wave-critical hostiles above the player-reachable band, so the wave never clears\nCLAIM:   MEASURED, 4 en
-
-- **Where:** `src/sim/sim_world.gd:5193 (branch fix/aaa-drain — the finding's ":5046" is stale; the block now starts at :5141)`
-- **Severity:** major — Consequence: not a softlock (bullets reach y=-384 and the anti-stall keeps the target surfaced), but every affected wave ends with the player unable to see the last hostile and forced to blind-fire straight up inside a 10 px x window off an edge chevron — the wave-clear/shop/pacing loop stalls for as long as that takes, and deep-endless veteran armor makes it several rounds. Rate: ~0.5-2 such ghillies on most endless waves past ~wave 9, i.e. the modal end-state of a deep endless wave. Consequenc
-- **Rate:** Every endless run, from wave 3 onward, on the majority of waves. Spawn path needs wave>=3, is_elite, wave_mod != 1 (:5176), then roll==4 of rng.range_i(0,9) → 1/10 of elites. Elites per wave = wave_pending / elite_every, with wave_pending = 4 + 2*(wave-1) (:5346) and elite_every = maxi(2, 4 - wave/5) (:5169). Expected ghillies/wave: ~0.15 at wave 3, ~0.65 at wave 9, ~1.3 at wave 12, ~2.0 at wave 19, and 4x that on a MARKSMEN wave (has_mod(7) remaps the roll table to 4-of-10 ghillie, :5181). Zero on Blitz waves. Conditional on spawning, it lands at camera_top-24 and stays there 100% of the time — 2 of the 3 rooted archetypes were fixed, 1 of 3 was not.
-- **Test defending it:** tests/test_endless.gd:521 `test_rooted_wave_spawns_land_where_the_player_can_reach_them`. It does not assert the defect as correct, but it defines "rooted" as `mg_nest or broadcast` only (:547) and its docstring enumerates the same pair — so it is the guard for this exact class with the third member omitted, which is why the regression survived. No
-- **Fix:** One token, exactly where the finding says (modulo the line number): src/sim/sim_world.gd:5193, `_spawn_special(x, camera_top - 24 * F_ONE, "ghillie")` -> `_spawn_special(x, rooted_y, "ghillie")`. `rooted_y` is already in scope at :5168.
-
-CLASS CHECK — the ghillie is the last member. I read every other call site that passes camera_top-24: :5185 grenadier, :5187/:5198/:5214 sniper, :5189 shield, :5191 sapper, :5198 drone, :5202 technical, :5209/:5216/:5218 plain/elite — all of those have movement code and walk into the band, so they must NOT be changed (that would alter the "enters from the top edge" grammar for the whole roster). :5200 and :5207 are already fixed. The campaign spawner at :3642/:3644/:3646/:3653 also uses camera_top-24, but campaign runs `_step_camera` (:4287-4288 ratchets camera_top down), so a rooted unit there either enters the reachable band or is swept by :3010 — leav
-
-### The game bills for supplies it does not deliver and prints reward numbers it does not pay\nCLAIM:   AIRSTRIKE (kind 3 is
-
-- **Where:** `src/sim/sim_world.gd:2033-2049 (`_supply_full`), :2087-2126 (`_try_buy`), :1962-1967 (`_apply_supply` kind 3), :1643-1645 (`_collect_pickups`), :2074-2081 (`_try_token_drop` cands), :2822 vs :2835 (last-stand base vs streak bonus), :3904-3913 + :5769-5776 (flawless payout); src/main.gd:2138-2162 (pickup event), :8042-8049 + :8079-8082 + :8099-8101 (crate draw / MAXED), :11055 + :11146 (AIRSTRIKE INBOUND banner + reticle); src/view/hud.gd:1250-1258 (flawless star chip)`
-- **Severity:** major — Consequence x rate, taken on the two that carry both. (2) free crates: the game's ONLY guaranteed checkpoint reward is deleted by walking through it, with the celebration jingle and the "come get me" green ring still playing, ~2-3 times per campaign, in every campaign — high rate, and it is the exact failure the sim's own comment at :1638-1642 says the view already prevents ("the view already greys it and prints MAXED") while the view gates that on `cost > 0`. (1) airstrike: the largest single s
-- **Rate:** Per sub-claim, different denominators — do not total them.
-(1) AIRSTRIKE: charge path executes on EVERY buy of kind 3, but the no-op only triggers when a second full wheel cycle (hold → flick → release, `_update_wheel` main.gd:5900-5956 returns the buy for exactly one tick on release) completes inside 45 ticks / 0.75 s. During that whole window the top-centre band shows "AIRSTRIKE INBOUND %.1fs" (main.gd:11055, priority-arbitrated at :10939) plus a shrinking ground reticle (:11146). LOW rate — a panic double-press against an on-screen countdown. The token variant (`_try_token_drop` rolling 3 while pending) is rarer still: 1-in-≤4 roll on a currency measured at 5-8 mints per campaign.
-(2) FRE
-- **Test defending it:** tests/test_shop.gd:196-202 pins the SIM half of claim (2) as a contract — `Runner.T.eq(sim.pickups.size(), 0, "a free crate at cap is still collected")` and `Runner.T.ok(sim.events[-1]["full"], "the free no-op is flagged full for the view")`. Any fix that makes a free crate stand rather than vanish goes red there; the view-side fix does not touch i
-- **Fix:** Four independent one-liners; the first two are the class fixes, the rest are the reported instances.
-
-CLASS FIX A — one predicate, three billing paths (sim_world.gd, golden re-record expected):
-  1. Add `3: return pending_airstrike > 0` to `_supply_full` (:2038-2049). That single arm covers BOTH existing call sites at once — `_try_buy` :2101 (routes to the already-built `deny`/`why:"full"`, rendered "ALREADY STOCKED" at main.gd:2348 — wants a copy variant "STRIKE ALREADY INBOUND") and `_collect_pickups` :1643 (moot today, airstrike is wheel-only per tests/test_endless.gd:829, but correct by construction).
-  2. The third path does NOT route through it: `_try_token_drop` :2074-2081 hand-rolls four `if` clauses duplicating `_supply_full` and appends 3 unconditionally. Replace the whole block with `for k in [0, 1, 2, 3]: if not _supply_full(p, k): cands.append(k)` — deletes the duplicate pre
-
-### One encounter (the gate-3 gunship) owns a third of the campaign clock, which starves the four short authored zones of airtime — OWNER DECISION
-
-- **Where:** `src/sim/sim_world.gd:4831 (_stamp_gunship_gate — finding said :4684), :607 BOSS_HP=40 (finding said :591), :606 BOSS_GATE_EVERY, :558 FINAL_GATE_INDEX, :3891-3896 gate-open predicate, :4298 stream horizon, :4283-4285 camera hold, :4884-4894 approach ramp, :2706-2711 one-grenade bunker kill, :1623-1625 player gate clamp, tests/test_boss.gd:86-109`
-- **Severity:** minor — Consequence x rate: consequence is pacing feel only — no softlock, no lost progress, no lie on screen; the encounter is fully skill-elastic (no invuln phase, grenades reach, 5 throws kill). Rate is 100% of campaign runs but the *harm* scales with how badly the player aims, and the headline 33-43% was produced by an instrument that (a) starts its clock 780 px before the arena and (b) drove at ~5-6% of available DPS. A human clearing it in 150-320 ticks sees sector 3 as roughly one normal sector p
-- **Rate:** Structural exposure: EVERY campaign run, exactly once — gate 3 is the sole campaign gunship (BOSS_GATE_EVERY=3, FINAL_GATE_INDEX=6), so 1 of 5 non-final gates, 100% of runs that get past sector 2. Magnitude of the claimed clock-share: UNKNOWN from code — it is player-DPS-elastic with a 150-tick (5-grenade) / 320-tick (rifle) floor versus the probes' 2,512-3,443, and the three banked cycles disagree (1,447-4,231 t). Cannot be measured without running the sim, which this phase forbids.
-- **Test defending it:** tests/test_boss.gd:86-109 `test_act_two_is_reached_before_any_plausible_kill` — deliberately pins the fight to a MINIMUM length: with BOSS_HP 40 the grenade rush is (5-1)*30 + 32 = 152 ticks and the test requires BOSS_MORTAR_TICKS[0] (140) < 152. Lower BOSS_HP to 32 (frags 5->4, floor 122) and that assertion goes red. It also freezes BOSS_CYCLE_TIC
-- **Fix:** Only if the owner rules the pacing is wrong. Do NOT touch SECTOR_SPECIALS (:335-341) — c8 already proved sector 3's roster is 0.93x the campaign danger rate; that is the wrong variable.
-
-The class, not the instance: gate length = approach travel + open-predicate cost, and the four bunker gates are the outlier at the *cheap* end (:2706-2711 — one grenade, no HP, so their predicate costs ~2 throws). Two honest levers, both one-line:
-  (a) shorten the boss sector's geography: the ramp in _stamp_gunship_gate spans gy+780..gy+340 (:4884-4894) and is 78% of the 1000 px sector. Pulling the far nest in to ~gy+500 cuts real sector-3 time without touching the fight the test defends.
-  (b) or raise the bunker-gate floor instead of cutting the boss — give _make_bunker (:5031) an hp field and decrement in _explode at :2706, so every gate's predicate costs more than two throws. Bigger blast radius (ta
-- *Collapses 3 banked entries.*
-- ⚠️ **Unreconciled:** The three entries give three incompatible figures for sector 3's length and nothing reconciles them: c3 "Sector 3 is 2,548-3,521 ticks against a ~1,050-tick median for every other sector, 2.4-3.4x"; c8 "it holds the player for 12,603 of 29,387 pooled ticks — 43% of the entire campaign, 2.0x the next
-
-### The teaching layer (HOW TO PLAY + first-sighting cards) states rules the sim does not run, and omits rules it does\nCLAI
-
-- **Where:** `src/view/menu.gd:4998 (the false line) · src/view/menu.gd:5082 (the contradicting line) · src/sim/sim_world.gd:1843-1857 (_hurt_player) · src/sim/sim_world.gd:2157-2166 (_exposed) · src/sim/sim_world.gd:2822 (last_stand 2x) · src/sim/sim_world.gd:2629-2643 (airburst) · src/main.gd:333-345 (_KIND_TEACH)`
-- **Severity:** minor — Consequence x rate. Consequence is teaching only — no crash, no softlock, no sim change; a player mis-prices a 60-120c shop item (SHOP_VEST_COST + vest_buys*15, capped 120, sim_world.gd:2029) and doesn't learn that a non-burning hull is bulletproof, plus loses the aggression incentive the finale's 2x score was built to create. Rate is 100% of the surface (default tab, every open). High rate x low consequence = minor, and the fix is three strings. It is NOT cosmetic: the same screen states both "
-- **Rate:** VEST LIE: every HOW TO PLAY open. CONTROLS is `_howto_page` 0, the default tab (menu.gd:4938 match), reachable from the title AND from PAUSE mid-run — 1 of 1 opens renders line 4998; the contradicting ASSIST line is 2 tabs right. LAST STAND 2x: every campaign run that reaches the Colossus (last_stand is set exactly once, sim_world.gd:5648, on colossus spawn) — 100% of finales, 0% taught. AIRBURST: every player who holds the grenade button through the arc; frequency of that input UNKNOWN without instrumenting a real session. The finding's endless-wave percentages (39.4% of playtime, 128 of 200 hits, 27.3% inside the mast disc) are UNVERIFIABLE read-only — do not carry them forward.
-- **Test defending it:** None. tests/test_menu_layout.gd:1209 `test_howto_controls_teaches_move_and_aim_off_the_live_binds` drives the REAL `_howto_page_controls()` through `_HowtoCaptureMenu` (line 1189) and asserts only that a "roll" line EXISTS (`for act in ["grenade", "roll", "interact"]: Runner.T.ok(act in order, ...)`) — it never inspects the roll line's text, so the
-- **Fix:** Three strings and one assertion; no sim change, no golden re-record. (1) menu.gd:4998 — the actual defect. Replace with the rule the sim runs, e.g. " ROLL's i-frames dodge anything. A FLAK VEST buys exactly ONE hit — nothing else does." That also stops it contradicting menu.gd:5082. (2) main.gd:11532 banner "LAST STAND — NO REVIVES" -> "LAST STAND — NO REVIVES, DOUBLE SCORE" (and optionally the same clause on menu.gd:5047, which is the only other place the view names LAST STAND — grep `last_stand`/`LAST STAND` finds exactly these two copy sites, so both get fixed in one pass). (3) airburst: one more `_verb_line` on the controls page under the grenade line — "HOLD [grenade] to pop it at the top of the arc (half range)". CLASS FIX, not instance: the class is "controls-page copy asserting a sim rule with nothing binding it", and the harness already exists — extend the existing `_HowtoCaptur
-
-### Enemy fire is committed with no visibility gate — the roster has a south cull bound and no north bound, so shooters act and fire off the top of the screen
-
-- **Where:** `src/sim/sim_world.gd:3010 (sweep, south-only), :3642 + :3644 (campaign rooted spawn above the band), :3843 (`_step_mg_nest` fire gate), :5162-5168 (the endless fix that was never carried to campaign); src/main.gd:8279, :8661, :10446-10455 (view mitigations)`
-- **Severity:** minor — Consequence x rate. CONSEQUENCE is small and already half-mitigated: the only shooter that can actually fire from north of the band is the mg_nest, its 30-tick amber aim lane IS drawn into the viewport from off-screen (main.gd:8661), a top-edge chevron marks it (main.gd:10446), and the >=28-tick bullet flight clears the repo's own 24-tick reaction floor. The player loses the muzzle sprite, not the telegraph. RATE is narrow: mg_nest is 1-in-10 spawns in 1 of 6 sectors and 1-in-20 in another, and 
-- **Rate:** UNKNOWN for the "% of enemy fire" figure — not derivable without running the sim, and I was told not to. Structural denominator I CAN derive from the code: only 2 of 6 sectors roll mg_nest at all (SECTOR_SPECIALS :335 — sector 3 roster of 2, sector 6 roster of 4). The special roll is `rng.range_i(0, 4) == 0` (:3639), so mg_nest is 1-in-10 of sector-3 field spawns and 1-in-20 of sector-6. At `SPAWN_INTERVAL_TICKS := 45` minus `opened * 6` (:3629), sector 3 spawns every 33 ticks -> roughly one nest per 330 ticks (5.5 s). Per nest, the off-band window is the first ~30px of camera advance out of the ~444px the south sweep needs to retire it (~7% of its life), UNLESS a closed gate has the camera 
-- **Test defending it:** None defends the campaign path. tests/test_endless.gd:521 `test_rooted_wave_spawns_land_where_the_player_can_reach_them` asserts the CORRECT behaviour but only for `SimWorld.new(s, 1, "endless")` — it is the fix's guard rail, scoped one mode too narrow, so it will not go red when campaign is fixed. The `camera_top - 60` spawns in tests/test_checksu
-- **Fix:** Smallest change that kills the CLASS rather than the reported instance: campaign's rooted spawns must use the in-band y the endless path already computes. Four call sites share the rooted-spawn rule; two are right and two are wrong.
-
-In `_step_spawner` (src/sim/sim_world.gd:3640-3646), replace the y at the two ROOTED branches only:
-  :3642  `_spawn_mg_nest(x, camera_top - 24 * F_ONE)`   -> `camera_top + 40 * F_ONE`
-  :3644  `_spawn_broadcast(x, camera_top - 24 * F_ONE)` -> `camera_top + 40 * F_ONE`
-Leave :3646 `_spawn_special` and :3653 `_spawn_enemy` on `camera_top - 24` — those are MOVERS, the walk-in-from-the-top spawn is the intended grammar, and their standoff gates (120/150/240) already make them physically unable to fire before they enter the band.
-
-Lift `camera_top + 40 * F_ONE` out of the endless local at :5168 into a single `func _rooted_spawn_y() -> int` (or a `ROOTED_SPAWN_DY
-- *Collapses 2 banked entries.*
-- ⚠️ **Unreconciled:** 25.1% (c1) and 48.3% (c8) are NOT in conflict — different populations (all muzzle cues vs. only the rounds that killed). But the two cycles disagree on the MG nest's share of enemy fire with no reconciliation: c1 says "the MG nest alone fires 2,096 of those 4,319 rounds — 48.5% of all enemy fire in 
-
-### The suite is green on code it does not exercise — ratchets that pin literals, helpers tested in isolation from their call sites, and pass-through assertions
-
-- **Where:** `tests/run_tests.gd:165-172 (verified on fix/aaa-drain, `git rev-parse --abbrev-ref HEAD` = fix/aaa-drain)`
-- **Severity:** minor — Consequence x rate. Consequence is developer/CI time, not shipped behaviour: it never produces a false PASS (ci.yml:139 greps for the PASS line, job capped at 30 min), so the worst case is a slow, misdiagnosed failure rather than a bug reaching the game. But the misdiagnosis cost is unusually high here because CLAUDE.md already documents TWO distinct "the suite hangs with no output at <1% CPU" modes (parallel-Godot contention, cold worktree import) with OPPOSITE remedies — this would be an indis
-- **Rate:** The loader branch: `load()` is called 39 times per full-suite run (one per TEST_SCRIPTS entry), i.e. every run of the blocking gate. The null path executes only when a suite file has a parse error or an entry names a missing file — rare (observed at least once, by the finding's own author, killed at 600 s), but 100% reproducible when it happens. Blast per occurrence: locally an indefinite silent hang; in CI, 3 OS runners x up to 30 min before a confusing "no PASS line" failure. Frequency of a broken/renamed test file per week: UNKNOWN without run history.
-- **Test defending it:** None. No test asserts the runner's load path at all — grep for `run_tests` inside tests/ finds only `Runner.T` helper references, never a test of `_init`'s loop. Nothing has written the fail-open down as a contract, so the guard can go in without re-recording anything (it touches no sim state, so golden checksums are unaffected).
-- **Fix:** Kill the class at the single loader — there is exactly one `load()` of a suite in the tree (grep `load(path)` in tests/ returns only run_tests.gd:166), so one guard covers all 39 entries and every future one:
-
-  for path in scripts:
-      var script: GDScript = load(path)
-      if script == null:
-          print("FAIL — suite %s failed to load (parse error or missing file)" % path)
-          quit(1)
-          return
-      var suite: RefCounted = script.new()
-
-`quit(1)` inside `_init` is already the established exit path (:181), so this reuses it rather than inventing a second one. Do NOT wrap it in the engine-error gate — the gate reads the log back and the point here is to exit before anything can hang.
-
-Optional second line, same file class: `_gate_engine_errors` is only reached on the happy path; moving nothing is fine, the early `quit(1)` makes the failure loud immediately.
-
-Separate
-- *Collapses 30 banked entries.*
-
-### The debrief card overflows the 360px canvas and prints a constant campaign progress row on every Endless death\nCLAIM:  
-
-- **Where:** `src/main.gd:11464-11473 (endless progress row) · src/main.gd:2563 + 3281-3289 (knockdown ledger) · src/main.gd:11623-11632 + tests/test_main.gd:1157 (overflow — already fixed)`
-- **Severity:** major — Consequence is pure text, no gameplay effect — but it is the terminal screen of a run, and in endless it burns the one row that should carry the run's actual measure (WAVE n) on a hardcoded constant, so the card is simultaneously lying and silent about the only stat that mattered. Rate is 100% of endless deaths and 100% of all K.I.A. cards for the knockdown line. Consequence(low-per-instance, high-visibility surface) x rate(every single run of a whole mode) = major, not cosmetic. It is exactly t
-- **Rate:** Endless progress row: 100% of endless K.I.A. debriefs — 1 of the 4 modes (campaign · arcade · endless · boss_rush), and endless is the mode with its own VP meta-economy, so it is a heavily-run one. Constant by construction, not "usually". Knockdown row: 100% of K.I.A. cards (the card cannot exist without >=1 death), always overcounting by >=1; the "0¢" flavour hits every run whose FIRST knockdown was fatal. Overflow: 0% — fixed and test-pinned.
-- **Test defending it:** None defends the bugs. `tests/test_main.gd:1157 test_result_panel_fits_the_screen_at_its_maximum_row_count` defends the overflow FIX (asserts pitch clamp at RESULT_ROWS_MAX=13). `tests/test_view_honesty.gd:1018-1031` pins `_continue_ledger_rows(3, 75)` shape and `vsrc.count("_continue_ledger_rows(") == 3` — it asserts the row exists on both cards a
-
-### The instruments this project tunes with edit the systems they measure, so every pacing and economy number on record is wrong
-
-- **Where:** `src/sim/sim_world.gd:1702-1733 (`_god_restore`), :889-901 (`_latch_wipe`), :26/:201/:208 (the three constants), tools/probe_rank.gd:17, tests/test_main.gd:713-716`
-- **Severity:** major — Consequence x rate. Consequence: not a player-facing bug at all — god mode cannot be true in a shipped build — but it invalidates the measurement basis every pacing/economy decision in this repo was made on, and one piece of it is a flatly false statement sitting in the sim source next to the code that contradicts it, in a repo that has spent whole cycles fixing exactly that class ("honesty sweep — 15 places the view lied about what the sim does"). It has already cost real visibility once: an en
-- **Rate:** Ammo distortion: 100% of god-mode instrumentation — every tick of every run in the 4 in-tree probes that set it (tools/sector_probe.gd:47, tools/probe_cd_clamp.gd:29, tools/fork_lane_census.gd:10, tools/probe_rank.gd:29 god pass = 20 of its 40 output rows) plus tests/test_main.gd:834 and :891. Not a sampling artifact — mg_ammo is arithmetically pinned above 76 forever, so the affected fraction is 1.0. 0% of player runs (0 shipped callers; release build compiles the gate false; attract does not set it). Chest/score distortion: fires once per `_latch_wipe` under god mode — endless all-down (:1692) or campaign `last_stand` all-down (:929-930) — and is self-limiting, since after the first latch 
-- **Test defending it:** tests/test_main.gd:713-716 — `Runner.T.ok(sim.players[0]["mg_ammo"] >= SimWorld.MG_AMMO_MAX, "the heartbeat tops ammo up: a run that stalls out of ammo never reaches sector 3")` plus the grenade twin. The top-up is a written contract, deliberately, so the fix is to tell the truth in the comment, NOT to remove the restore. Second, blinder: tests/tes
-- **Fix:** Three edits, none of which moves a golden.
-
-1. Chest/score — the actual root cause, one condition. Wrap the payout in `_latch_wipe` (sim_world.gd:897-899) in `if not god_mode:` so the latch under god mode sets `wiped = true` and nothing else. This kills the CLASS rather than the reported instance: both latch call sites (:1692 endless all-down, :930 campaign last_stand) route through this one function, and test_view_honesty.gd:828 already scrapes the sim to fail on any `wiped = true` outside it — so the single-site invariant keeps the fix single by construction. No new hashed field, so no re-record; `god_mode` is already fed conditionally into the checksum (test_main.gd:749-762 pins that an OFF flag leaves the stream byte-identical).
-
-2. Ammo — the comment, not the code. Rewrite sim_world.gd:1719-1721 to state what is true: 99 rounds against a max drain of 3 per 8 ticks means at most 22 s
-- *Collapses 9 banked entries.*
-- ⚠️ **Unreconciled:** probe_rank.gd's own sampling window is unreconciled with its data: tools/probe_rank.gd:17 and tests/test_view_honesty.gd assert "3.0x the longest measured campaign completion (13,364 ticks)" — the c1 rank probe is where 13,364 came from ("seed 3 — 466 kills, streak 54, 6 gates -> mvp 1322, S at tick
-
-### Rules that change the fight are given no visible signal and no performable counterplay\nCLAIM:   INVISIBLE WALLS: \"the 
-
-- **Where:** `src/sim/sim_world.gd:1493 `_crosses_ledge_south` (only caller :1170) · :1468 `_barricade_solid` (only caller :1173) · :1443 `_lane_blocked` (callers :1161-1164, :2952) · src/main.gd:2236-2299 (armor_block handler) · src/main.gd:7046 `_draw_trenches` (the fix precedent) · src/main.gd:9611 ('HOLD FIRE') vs :5800 ('There is no fire key')`
-- **Severity:** major — Consequence x rate, both terms. Consequence: `_crosses_ledge_south` and `_barricade_solid` silently eat a movement axis with zero pixels and zero audio — the single most reliable "this is not a finished game" tell a consumer reviewer can name, and it lands during a retreat, i.e. while dodging something lethal. No softlock (the axis-separated escape rule at :1161-1178 guarantees a bypass), so it costs feel and the occasional death, not the run. Rate: present in every campaign band from segment 2 
-- **Rate:** Geometry denominator is exact and deterministic; per-run collision count is UNKNOWN (needs a headless run, forbidden this phase).
-
-LEDGE: one invisible line in EVERY campaign band from segment 2 to the finale, covering 320px of a 608px world width (~53%). Fires only on SOUTHBOUND steps — the camera ratchet + `p["y"] = clampi(p["y"], camera_top+16, camera_top+344)` (:1621) pushes north, never south, so scrolling never triggers it; only a deliberate retreat/kite does. Bounded above by "every retreat inside a 328px window", bounded below by nothing.
-
-BARRICADE: solid in a ~194px camera-advance window per band (reachable once `absi(camera_top) >= band*GS+56` via the 344px clamp, opens at `band*G
-- **Test defending it:** None. No test asserts the defective behaviour as a contract. tests/test_mechanics.gd:3175-3184 and :3266-3272 assert the sim PREDICATES only (`_crosses_ledge_south`, `_barricade_solid` — direction, x-span, band-0/endless inertness); :3104-3146 asserts `_lane_blocked` plus that a `lane_seal` telegraph event fires, which is a fix contract, not a bug 
-- **Fix:** Kill the class view-side only — zero sim edits, zero golden re-record, no new events.
-
-INVISIBLE GEOMETRY (3 predicates, one pattern). `_draw_trenches` (main.gd:7046, called from :6967) already establishes it: re-derive the sim's own `_mix` in the view and draw at the exact collision AABB, gated on the same band floor. Add three siblings beside it, called from the same place:
-  - `_draw_lane_blocks()` — re-derive `_mix(band,733)` and `posmod(sim.tick_count + band*300, SimWorld.LANE_BLOCK_CYCLE) < LANE_BLOCK_SEALED`; draw the 200x120 rubble slab for the WHOLE sealed phase, not just the 3 telegraph ticks. This is the one that also fixes the "scrolled in mid-seal" hole.
-  - `_draw_barricades()` — re-derive `_mix(band,929)` + the `absi(sim.camera_top) < band*GATE_SPACING + 250*F_ONE` midpoint test, so the thing visibly stands and visibly collapses on the same frame the sim opens it.
-  - `_dr
-
-### HUD surfaces stop delivering: the two gate-guidance readouts are unreachable, the revive loss readout lands off-frame, and the a11y TEXT SIZE setting scales almost nothing
-
-- **Where:** `src/main.gd:10936 · src/view/hud.gd:985 · src/sim/sim_world.gd:6113-6117 · src/sim/sim_world.gd:4220-4234 · src/main.gd:10021 · src/main.gd:3626-3630 · src/view/art.gd:806-821 · src/view/hud.gd:1672 · src/main.gd:10591-10593 · src/sim/sim_world.gd:5648`
-- **Severity:** major — Consequence: the single line of guidance the code itself says was added because playtesters read the camera stopping as the game breaking ("scrolling just stops", main.gd:11341-11342) never prints, and the HUD's gate telegraph goes with it — the player is left with a stopped camera and no stated objective. Rate: 6-7 arenas per campaign run, every run, on the dominant push-north play pattern (probe measured 0 of 5717 gate-on-screen ticks). Second half: an informational readout ("CLAYMORES x3 LOST
-- **Rate:** Gate half: every closed-gate arena of every campaign run — FINAL_GATE_INDEX = 6 (sim_world.gd:558), so 6 arenas per full run for the objective line (the loop skips `final` gates) and 7 for hud's CLEAR THE GATE. Dead in all of them for any player who pushes north to the clamp; alive only while parked in the 60px pre-clamp sliver. Revive half: every revive that strips a loadout key, in the ~78% of cases where the body sits south of screen y≈320 (probe: 183/233); revives are the 2P co-op path plus the broke-timer rally. a11y: not a defect. Chevron: finale only (final gate / live colossus), not every run.
-- **Test defending it:** tests/test_view_honesty.gd:1156-1158 — `const STALL_READER_ALLOW := ["boss"]`, with the written rationale "The ONE reader that is correct unguarded ... it fires precisely BECAUSE a closed gate is on screen, and it tells you the thing you actually can do about it". That is the exact reader that can no longer fire, written down as correct-by-decision
-- **Fix:** The class bug is one inverted predicate used twice: "the player has been stalling" is standing in for "the sim is holding the camera at a closed gate", and those two are now mutually exclusive by construction. Fix both call sites the same way, in the direction the sim already tells you:
-
-1. src/main.gd:10936 — inside the existing `for g in sim.gates` loop that already proves a closed non-final gate is on screen, drop `sim.stall_ticks > 90` and gate on the hold instead. Smallest honest version: a view-side dwell counter incremented in `_physics_process` when `sim.camera_held()` and reset otherwise (`_gate_hold_frames > 90`), so the directive still waits a beat rather than popping the instant the gate appears. `return "boss"` unchanged.
-2. src/view/hud.gd:984-995 — hoist the closed-gate scan (currently :989-991) ABOVE the `sim.stall_ticks > PRESSURE_WARN_TICKS` early-out at :985, so "CLEAR
-- *Collapses 7 banked entries.*
-
-### Framed-menu ink collides with the frame chrome and with itself, and the frame geometry constants do not match the frame art
-
-- **Where:** `src/view/menu.gd:4389 (the live defect). Also read: menu.gd:41-57, :1433-1450, :76-79, :2495-2496, :2512-2607, :2717-2737, :3473-3530, :3807-3899, :4334-4389; tests/test_menu_layout.gd:1827-1857, :7086-7166; src/view/art.gd:824-908; Backlog.md:324-326.`
-- **Severity:** minor — Consequence: this is the only place in the game that states (a) mouse aim/fire and stick move/aim are always on and un-remappable, and (b) an "UNBOUND" row means no key on this device, NOT that the action is switched off — the exact misreading the comment at :4384-4386 says the line exists to prevent. ~48% of it is hidden behind an opaque plate, and the pad variant reads "...USE THE SWAP STICKS ROW BELOW" while pointing past a plate that covers the pointer. So a player who mis-reads UNBOUND as "
-- **Rate:** 1 surviving defect of 11 claimed. It fires on 4 of 4 REBIND tabs, in every frame the screen is displayed, in the resting state — i.e. 100% of visits to OPTIONS → CONTROLS, on both kb and pad variants of the string. How often a player opens that screen: UNKNOWN (no telemetry, and not measurable without running the game). Zero effect on any run in progress — REBIND is a settings sub-screen, not a gameplay surface.
-- **Test defending it:** None asserts the defect as a contract. But tests/test_menu_layout.gd:7136 `test_no_framed_screen_puts_its_content_under_the_frame_keyline` CAPTURES this exact `_center_text(note, 324, 7, ...)` call (via the `_CaptureMenu._center_text` override at :901-906) for all 12 framed modes and passes it green — it only compares boxes against the frame keylin
-- **Fix:** The class is "a view string placed at a hand-typed y that no layout constant defends", inside a column whose extent IS derived. menu.gd:44-50 already writes that class up (the HALL_RECENCY_Y post-mortem) and the fix pattern is stated there: "Typed copies of a layout constant go stale silently; derived ones move with it."
-
-Smallest fix: delete the literal and move the note ABOVE first_row_top(REBIND), inside the header block the layout math already reserves — i.e. give REBIND its own `mode_header_bottom` entry (menu.gd:2485-2487, currently sharing `OPTS_SUBLINE_Y` with OPTS) whose value is the note's own baseline const, so `first_row_top` pushes the row column down by exactly the note's height and the two can never re-collide. Note the pad tab's P1|P2 selector already occupies y 88..100 (`_rebind_pad_dev_rect`, :4331), so the note needs its own band, not a squeeze into 94.
-
-Do NOT "fix" i
-- *Collapses 11 banked entries.*
-- ⚠️ **Unreconciled:** DROPPED — 23 further open findings did not make the top 18 and are listed here so nothing is lost. They form roughly six more clusters: (1) FORD/WATER VIEW, 7 entries — 'Armour-barrier telegraph (red hatch + FORD/WASHED OUT label) is painted over by bank decor' and 'On bands 2 and 5 the permanent se
-
-
-## B. From the 10-lens read-only sweep
-
-*(Each finding is a single self-contained record — title, location and rate come from the same
-object, so no join was required here.)*
-
-
-### [major] The empty-magazine bash executes the rescue pilot: a 16px auto-kill ring strictly contains the 14px rescue ring, so a dry player literally cannot reach the objective without destroying it first — and it is the ONE of five _kill_enemy call sites with no pilot exemption
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/sim/sim_world.gd:1229 (the bash `_kill_enemy(e, true, true)`), guarded by the scan at :1221-1222; the rescue it beats is at :1317-1324 (`_rescu`
-- **Rate:** Deterministic, not probabilistic: 100% of on-foot rescue approaches made with an empty magazine, provided no other strikeable enemy was bashed within the preceding 40 ticks. The kill ring geometrically contains the rescue ring (16 > 14), the trigger is permanently held, and fire_cd is provably 0 at the crossing. What fraction of pilot punch-outs find the player dry is UNKNOWN — it needs a Godot run I was told not to make, and Backlog.md:753 records that the repo's own instrument cannot measure it at all: with god_mode armed (the state every pacing number in this project was taken in) the mag r
-- **Fix:** One condition at the scan, not at the caller — every bash victim routes through this single predicate: `if _enemy_strikeable(e) and e["kind"] != "pilot" and _dist_lte(p["x"], p["y"], e["x"], e["y"], BASH_RADIUS):` (src/sim/sim_world.gd:1221). That is the same spelling the other four sites already use, so it joins the existing class rather than adding a fifth idiom. It changes sim behaviour, so re-record GOLDEN in tests/test_determinism.gd only if the torture window actually reaches a pilot (it should not — gate-3 is torture-unreachable per the notes at :5965 — so expect byte-identical goldens; if they move, that is the signal to check why). Do NOT ship Backlog.md:586's 'one condition in _ste
-- **Class check:** Grepped all five `_kill_enemy(` call sites in src/sim/sim_world.gd — :1229 (bash), :1908 (_fire_mission), :2309 (tank treads), :2588 (_step_bullets), :2688 (_explode). FOUR of the five carry an explicit objective exemption: _fire_mission tests `e["kind"] != "pilot"` at :1907, _explode tests it at :2687, tank treads branch to `_rescue_pilot` and `co
-
-### [major] A tank's positional engine loop survives `_reset()` — it keeps growling into run 2, forever in Endless/Boss Rush, and permanently burns Sfx's 4-voice cap
-
-- **Where:** `src/main.gd:1411 (`_reset`, no `_sfx` teardown) + src/main.gd:5312-5322 (sole driver) + src/view/sfx.gd:820-846 (`engine_at`)`
-- **Rate:** Leaks on any `_reset()` taken while a live tank sits in the engine-on band. That band is deterministic: `tk_on = alive and tk_pos.y > -40.0 and tk_pos.y < 400.0` (main.gd:5321) is 440 px of every 1000-px tank row (`GATE_SPACING`, sim_world.gd:277; `_to_screen` is 1:1, main.gd:5977) => **44% of world positions have a live tank driving a voice**. `_reset()` is the single funnel for all 13 restart/mode-entry paths (main.gd:611, 1234, 1247, 1262, 1274, 1309, 1402, 1705, 1715, 1721, 1727, 1740, 1748) — R, pad START, ENTER on the card, F2/F3/F4, every menu launcher, WATCH LAST RUN. Campaign->campaig
-- **Fix:** Add to src/view/sfx.gd next to `engine_at`:
-```gdscript
-func stop_engines() -> void:
-	for key in _engines.keys():
-		engine_at(key, Vector2.ZERO, false)   # reuses the existing fade-then-free path
-```
-and call `_sfx.stop_engines()` once in `_reset()` beside `_tank_alive_prev.clear()` (main.gd:1473). One method, one call at the single funnel — covers all 13 entry paths. Do NOT patch main.gd:5312's loop to also sweep unknown keys; that fixes one site and leaves the pause surface (#2) broken.
-- **Class check:** grepped. `engine_at` is the only per-index registrar in src/view/sfx.gd, and `_engines` is the only index-keyed registry outside main.gd; all 12 in-main equivalents are cleared at main.gd:1471-1487. Same root also produces finding #2 below.
-
-### [minor] The pause branch explicitly quiets every continuous audio bed except the tank engine loop — it growls under the PAUSED overlay
-
-- **Where:** `src/main.gd:2015-2034 (pause `else` branch) vs src/main.gd:5322 (`_sfx.engine_at`)`
-- **Rate:** Every pause taken while a live tank is in the 440-of-1000-px engine band (44% of world positions, per the geometry in #1), in campaign/arcade. Pause is reachable from Esc and the pad menu button on every gameplay frame. Also covers the focus-out auto-pause (`no_autopause`, main.gd:161), so alt-tabbing out of a tank fight leaves the growl running in the background.
-- **Fix:** Same one-liner as #1: `_sfx.stop_engines()` in the pause `else` branch at main.gd:2031, right after `set_music_intensity(0.0, 0.0)`. `engine_at` already fades out over 0.15 s (sfx.gd:840-843), and the first `_update_feel()` after RESUME re-creates the voice for whatever tank is on screen — matching exactly how the music bed is eased down and back.
-- **Class check:** grepped. The pause branch is the only place that hand-quiets beds; the ambience beds (`_river`/`_foundry`/`_shop`/`_amb`, sfx.gd:132-134,103) are also frozen at their last volume here, but those are ambience and arguably correct under a pause — a positional engine growl is not.
-
-### [minor] Five of the six per-player prev-state edge arrays are not cleared in `_reset()` — `_mud_prev` is the only one that was fixed, so a pause->RESTART fires run-1's cues over run 2's spawn
-
-- **Where:** `src/main.gd:1501 (`_mud_prev = [false, false]` — the only one reset) vs declarations at src/main.gd:95, 243, 244, 248, 315, 327`
-- **Rate:** Self-heals on the common path: the sim keeps stepping through the K.I.A. debrief (main.gd:2072-2081 has no `_debrief` gate), so death drives `alive=false`/`smoke_ticks->0` and clears the flags before an R-restart. Stale only when `_reset()` runs while a player is ALIVE and in-state: pause -> RESTART -> confirm (the path main.gd:1697 names), F2/F3/F4 mid-run, and menu QUIT -> new run. Fraction of restarts taken that way: UNKNOWN without running the game.
-- **Fix:** Six lines next to the existing `_mud_prev = [false, false]` at main.gd:1501 — `_trench_prev.clear()`, `_water_prev = [false, false]`, `_smoke_prev = [0, 0]`, `_dust_prev = [Vector2i.ZERO, Vector2i.ZERO]`, `_tank_dust_prev = [Vector2i.ZERO, Vector2i.ZERO]`, `_no_target_prev = [false, false]`, `_enemy_water_prev.clear()`. `_trench_prev.clear()` is enough for that one because main.gd:2092 re-resizes it (resize pads with `false`). Fix the whole class in one hunk — patching only the trench or only the smoke site is exactly how `_mud_prev` ended up alone.
-- **Class check:** grepped every `_*_prev` at main.gd class scope. Reset: `_mud_prev` (1501), `_tank_prev` (1475), `_enemy_pos_prev` (1478), `_enemy_hp_prev` (1480), `_tank_alive_prev` (1473), `_tech_lunge_prev` (1484), `_litter_march_prev` (1486), `_last_stand_prev` (1472). NOT reset: `_trench_prev`, `_dust_prev`, `_tank_dust_prev`, `_water_prev`, `_no_target_prev`,
-
-### [major] probe_frame_bounds.gd projects the frame through the RETIRED uniform-stretch model, so it under-reports vertical overflow by 3.44 px per side — and the four FRAME_INNER_* constants were derived from the same dead projection
-
-- **Where:** `tools/probe_frame_bounds.gd:51-55 (and src/view/menu.gd:409-412)`
-- **Rate:** The probe is a dev tool (run on demand), but the constants it audits are the top/bottom/left/right clamp for EVERY content-well screen — `_content_well_screens()` enumerates 7 (5 HOWTO tabs + 2 ENDLESS sub-pages + HALL), drawn every time a player opens HOW TO PLAY or HALL OF FAME. The 1.34 px vertical clearance is live in every one.
-- **Fix:** One line: the probe already does `const Layout := preload("res://tests/test_menu_layout.gd")` at line 9 and `_measured_frame_interior()` is `static`, so replace lines 22-55 with `_interior = Layout._measured_frame_interior()` — kills the duplicate projection outright rather than porting it. Then separately re-derive FRAME_INNER_T/B against the real hole (39.66+4.8 = 44.5, 320.34-4.8 = 315.5) and drop test_menu_layout.gd:6825's `pad` from 8.0 to ~5.5 so the next projection change cannot hide 3.4 px of drift again.
-- **Class check:** grepped `Rect2(20, 8, 600, 344)` across src/ tools/ tests/: exactly 3 live sites — tools/probe_frame_bounds.gd:51, tests/test_assets.gd:1326, and the stale comment at src/view/menu.gd:3534. grepped `content_frame_rect|content_frame_border|FRAME_INNER` across tests/ and tools/: test_menu_layout.gd is the only consumer that uses the real 9-slice proj
-
-### [major] tools/lint_sim.gd has ZERO float tokens, while CLAUDE.md and ci.yml both call it "the no-floats … gate" — nothing in the repo lints floats out of src/sim
-
-- **Where:** `tools/lint_sim.gd:17-27`
-- **Rate:** The `lint` job runs on every CI push — every commit. Consequence lands on the flagship guarantee: a `float` local or a `0.5` literal entering src/sim breaks x86_64/arm64 bit-identity, and the only backstop is test_determinism.gd's goldens, which are recorded on ONE machine and would still match on that machine.
-- **Fix:** Add `"float"` (and optionally `": float"`/`"-> float"`) to `FORBIDDEN` — the existing comment-skip at line 47 already handles doc lines, and the sim is clean today so it lands green. While there, mirror lint_assets.gd's fail-closed `_collect` (return bool, count an unopenable dir as a hit) so a broken scan cannot print OK. If floats genuinely can't be a bare token match, the honest alternative is to strike "no-floats" from ci.yml:44 and CLAUDE.md rather than leave the claim standing.
-- **Class check:** grepped for lint_sim/lint_assets call sites: .github/workflows/ci.yml:66 and :70 only; no test invokes either. lint_assets.gd is sound (it fails closed on an unopenable dir at line 24, which lint_sim.gd does NOT — `_collect` returns void and a `DirAccess.open` failure there yields a silent "OK — 0 files scanned"). That's the same fail-open shape li
-
-### [major] probe_cd_clamp.gd's whole premise was fixed and shipped — its docstring still states the dead bug in the present tense, and the clamp that killed it has no test
-
-- **Where:** `tools/probe_cd_clamp.gd:7-17`
-- **Rate:** Bunker hatch-charge glow at src/main.gd:6426 (`1.0 - float(bk["spawn_cd"]) / BUNKER_SPAWN_INTERVAL_TICKS`) draws for every alive bunker, every frame. The probe's own recorded pre-fix measurement puts the regression at 3 of 6 campaign seeds, worst case 1,758 ticks (29 s) of a telegraph pinned past 100%.
-- **Fix:** Rewrite lines 7-17 to past tense ("fixed at sim_world.gd:3499/:5713; this probe re-verifies the floor holds") and fix the two line cites here and at sim_world.gd:3493. Then add ONE test that closes the loop for all four: step a sim with the roster forced to MAX_ENEMIES and assert every `spawn_cd`/`sweep_cd` stays `>= 0` — a single loop over `sim.bunkers` + `sim.colossus` beats four per-site assertions, and it is the only thing standing between a refactor and a silently re-lying telegraph.
-- **Class check:** grepped `spawn_cd` across src/ and tests/: the flooring idiom appears at sim_world.gd:3499 (bunker), :5145 (wave_spawn_cd), :5713 (colossus) — all three floored, none tested. sim_world.gd:5723 notes a fourth (`sweep_cd`) floored "for the same reason". Four clamps, zero ratchets.
-
-### [minor] The HOWTO/HALL content well is a solid fill drawn 26 px OUTSIDE the frame keyline it is supposed to hide under — and its guard test asserts enclosure against a rect nothing draws
-
-- **Where:** `src/view/menu.gd:3533-3536 and tests/test_assets.gd:1326-1327`
-- **Rate:** 2 of the 12 framed modes (HOWTO, HALL), on every open. HOW TO PLAY is reachable from the title menu, so most first sessions hit it.
-- **Fix:** Two lines, same root cause as finding 1 — stop restating the frame geometry. `_content_well_rect()` becomes `return content_frame_border(Mode.HOWTO).grow(-4.0)` (derive from the drawn border, keep a small inset so the keyline still overlaps its edge), and test_assets.gd:1326 becomes `var frame := mn.content_frame_border(HOWTO)`. Note the test currently passes and will go RED on the real rect until the well is fixed — that red is the finding, not a regression.
-- **Class check:** grepped `_content_well_rect` across src/ tests/ tools/: 3 sites — menu.gd:3536 (definition), menu.gd:3550 (the only draw), test_assets.gd:1325, plus probe_frame_bounds.gd:61 which prints it for eyeballing. grepped `content_frame_border` in tests/: test_menu_layout.gd:6697/:7029/:7155 all measure against the real border — test_assets.gd:1326 is the 
-
-### [minor] The hitbox-fairness CALL_SCALE tables (test + tool) are keyed per TEXTURE, but main.gd scales per CALL SITE — 3 of the 4 fodder-rusher skins are either untested or measured 24% too large
-
-- **Where:** `tests/test_hitbox_fairness.gd:31-46 and tools/measure_hitbox.gd:17-28`
-- **Rate:** Fodder rushers are the bulk of the roster and the backlog's own c8 measurement puts the campaign at 68% melee. `e["skin"] = (x / F_ONE + y / F_ONE) & 3` (src/sim/sim_world.gd:3680) spreads them ~uniformly over 4 skins, so ~25% of rushers wear enemy_assault (measured at the wrong scale) and ~50% wear enemy_shotgun/enemy_lmg (zero coverage). 3 skins in 4.
-- **Fix:** Don't widen the tables — narrow the gap where the class actually lives. Add `"enemy_shotgun": 0.5, "enemy_lmg": 0.5` to test_hitbox_fairness.gd:31 and change the loop at line 122 to iterate `main.gd::_RUSHER_SKINS` at the ONE fodder scale 0.5 (elites keep their own 0.62 entry under a distinct key), so the rusher check is derived from the shipped skin array rather than a hand-picked subset. Longer term the three copies of the alpha-bbox scan want to be one `static func` on art.gd that all three callers import — that is this repo's named defect class (two sites computing one value), sitting in its own fairness instrument.
-- **Class check:** grepped every `_spr("` call in src/main.gd for the keys in both tables. Confirmed single-site: player1/player2 0.52 (:9531), bunker/bunker2 0.78 (:6417-6421), colossus_body 1.9 (:9124), wep_claymore 1.05 (:7473), tank_body 0.62 (:8156), tank_hulk 0.62 (:10322), m_technical 0.55 (:8550), m_bombsuit 0.55 (:8603), courier 0.5 (:8599), sapper 0.5 (:861
-
-### [major] The top-bar RECORD badge is unreachable — main.gd ratchets best_score up to sim.score in the same tick, before the HUD draws, so the chip permanently shows "BEST <your own live score>"
-
-- **Where:** `src/view/hud.gd:1262 (call) + 2277-2282 (_record_hud_mode) vs src/main.gd:4888-4890 (ratchet), ordering at src/main.gd:2076-2085`
-- **Rate:** Every frame of every run from the moment the score passes the standing best to the end of that run — i.e. every personal-best run, which for a new profile is most of them. A run that never beats the record is unaffected (chip correctly shows the real target). First-ever run: best_score==0 -> "none", no chip.
-- **Fix:** Change `>` to `>=` in hud.gd:2281 so it matches the wave chip's already-correct `>=` at hud.gd:1358 — the ratchet makes best==score exactly when the record has been beaten, so `>=` is the honest test post-ratchet. (`main.gd:11501`'s debrief row already uses `sim.score >= best_score` for its "NEW BEST!" tag for the same reason.) Do NOT instead reorder _track_bests after _update_hud: the next frame re-equalizes them anyway, so ordering is not the root cause — the comparator is.
-- **Class check:** Grepped every `main.best_*` read in the view. The SIBLING IN THE SAME FUNCTION IS CORRECT AND PROVES THE FIX: hud.gd:1357-1359 does the wave version as `var wbeat: bool = sim.wave >= main.best_wave` — `>=`, not `>` — against best_wave, which main.gd:4899 ratchets the exact same way, and it therefore correctly renders "WAVE RECORD!". Two record chip
-
-### [cosmetic] `"BEST %d"` prints the score without thousands separators at 3 sites while every other score readout groups digits — the title screen was fixed and tagged, the three in-run/end-card siblings were missed
-
-- **Where:** `src/view/hud.gd:1276, src/main.gd:3266, src/main.gd:11501 — vs src/view/menu.gd:5394`
-- **Rate:** hud.gd:1276 — every frame of every run that has any prior best (i.e. every run after the first). main.gd:3266 and 11501 — once per run, on every victory card and every K.I.A. card respectively.
-- **Fix:** Route all three through `Art.group_digits(...)` (`%s`), matching menu.gd:5394. hud.gd already has the helper in scope via `_fmt_stat`/`Art`; main.gd already imports Art at both sites. Three one-token edits, no new helper.
-- **Class check:** grep -rn 'BEST %d\|BEST %s' src/ returns exactly these three plus hud.gd:1359 `"BEST W%d" % main.best_wave` (a wave counter, correctly ungrouped — waves never reach 1000). Every `Art.group_digits` call site checked: menu.gd:4747, menu.gd:5394, main.gd:3300, 11410, 11415, 11476, hud.gd:2187.
-
-### [minor] Spend-wheel revive guard blames the buy for a revive that was ALREADY unaffordable, and re-derives the cost it was just handed — reading 0 for the Commendation sector, which spends no coin at all
-
-- **Where:** `src/main.gd:10859-10869, against the cost computed 4 lines earlier at src/main.gd:10853-10857`
-- **Rate:** 2P only (guard is inside `for q in sim.players.size()` on a NOT-alive player, and _draw_wheel skips dead openers at main.gd:10777-10778). Fires on every wheel-open with a partner down and chest < revive_cost. Exact frequency UNKNOWN without a run.
-- **Fix:** Use the already-computed `sel_cost`… no: `sel_cost` is 1 for the token (a token count, not coins). Delete the `gcost` local entirely and use `var gcost := 0 if sel_is_token else sel_cost`, then add the missing precondition: `if not dq["alive"] and sim.war_chest >= sim.revive_cost(dq) and sim.war_chest - gcost < sim.revive_cost(dq)`. The token sector then short-circuits by construction (gcost 0 can never cross the threshold) and the warning only ever names a loss the buy actually causes.
-- **Class check:** Grepped every `revive_cost` caller. main.gd:5747 (`w.war_chest >= w.revive_cost(other)`) and main.gd:10510 (`sim.war_chest < sim.revive_cost(dp2)`) are plain affordability reads with no buy term — correct as written. hud.gd:2391-2392 is the downed-player prompt, also a plain read. sim_world.gd:1681/1683/1771 are the sim's own gates. This guard at m
-
-### [cosmetic] Priced TRIPLE / CLAYMORE shop crates draw their coin icon and price straight through their own name label
-
-- **Where:** `src/main.gd:8095 (label) vs src/main.gd:8099-8103 (coin icon + price)`
-- **Rate:** Endless only. sim_world.gd:5246-5260 draws 3 of the 5-item CRATE_POOL per wave-clear intermission (partial Fisher-Yates), so P(a given kind shown) = 3/5 and the expected count of kind-6/8 crates is 1.2 of the 3 crates on every shop, i.e. ~2 of every 5 priced crates, every wave clear, for the whole run.
-- **Fix:** Follow main.gd:8575: for `kind >= 4 and cost > 0` fold the price into the label string (`"%s  %d¢" % [_CAPSULE_LABEL[cap_i], pk["cost"]]`) and skip the separate coin-icon/price block, so one plate covers one run of text. Cheaper alternative if the coin glyph must stay: lift the capsule label to `Vector2(-13, -36)` so it clears the py-33 icon top.
-- **Class check:** grep -n '_world_label' src/main.gd: the only other world-space label sharing a sprite with a price is the pilot at main.gd:8575 (`"RESCUE +%d¢"`), which bakes the number INTO the label string instead of drawing a second run — the correct pattern, and the proof the collision is an oversight rather than the house style. No other call site combines _w
-
-### [major] The water shader's re-push key omits ford_x, and _water_pushed survives _reset() — after a restart the river draws its crossable lane at the PREVIOUS run's ford position
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.gd:962 (dirty-key), :974 (the uniform it gates), :230 (decl), :1411-1540 (_reset, which never touches it)`
-- **Rate:** The dirty-key check runs for every visible water band on every drawn frame (1-4 rects x 60 Hz, and it is driven from _draw() so it also runs on the title's attract loop). The stale-skip fires on a _reset() whose new southernmost visible band == the old run's last rect-0 band with the same sector index and closed state. Band 1 (y=-1500, the first river the player ever crosses) is `band_idx < 2`, so `ford_closed` is always false and `flow_dir` always 0 for it — two of the three key terms match unconditionally, leaving only y (fixed) and wsec. That makes the first river the highest-probability vi
-- **Fix:** One line: add the per-run terms to the compare at main.gd:962 — `if pushed[0] != w["y"] or pushed[1] != wsec or pushed[5] != wclosed or pushed[6] != w["ford_x"]:` (extend the sentinel appended at :895 with a 7th slot, set it inside the block). That fixes the restart case AND any future path that changes ford_x for a fixed y, at the one site that owns the push, instead of adding a `_water_pushed` line to _reset() that the next cache will forget. Add flow_dir only if you want belt-and-braces — it is a pure function of (band_idx, _world_seed), so ford_x covers it in practice but not by construction.
-- **Class check:** grepped every shader-push throttle in the view. `_scan_mat_hs_prev` (main.gd:226) and `_grade_mat_breather_prev` (:227) key on the pushed value itself — cannot go stale. `_bg_cam`/`_bg_march` (:232-233, used at :6359) key the ~90-rect ground rebuild on (camera_top, march) and are also absent from _reset, but _paint_bg additionally reads `sim.mode` 
-
-### [minor] Six of the seven per-player/per-slot edge-detect 'prev' buffers are missing from _reset()'s clear list — a restart fires a false EXPOSED callout and a false trench climb-out on tick 1 of the new run
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.gd:4754 (`if _smoke_prev[i] > 0 and st == 0 and sim.players[i]["alive"]:`), :2105 (`elif not now and _trench_prev[i]:`), :9859 (`if wet an`
-- **Rate:** Every `_reset()` — R key, pause->RESTART, pause->QUIT TO TITLE, and the attract loop's auto-reset at main.gd:2013 — where the corresponding state was set on the last tick of the outgoing run. The EXPOSED case needs live smoke at teardown; the trench case needs a player standing in a trench at teardown; the `_enemy_water_prev` case needs any enemy slot to have been over water. Fraction of restarts: UNKNOWN without running Godot. The _reset() path itself is 100% of run teardowns.
-- **Fix:** Six lines next to main.gd:1501 (`_smoke_prev = [0, 0]`, `_water_prev = [false, false]`, `_trench_prev.clear()`, `_enemy_water_prev.clear()`, `_dust_prev`/`_tank_dust_prev` back to ZERO). If you want the class closed rather than the instances: adopt hud.gd:318's instance-id guard in main.gd so any per-run buffer added later is neutralised by construction — but that is a bigger diff than six lines and the six lines are what is broken today.
-- **Class check:** grepped all seven. `_mud_prev` fixed, six not — the one-site-fix pattern the brief warns about, in its purest form. Note hud.gd already solved this class properly at /Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/view/hud.gd:318 — `if sim.get_instance_id() != _verb_sim_id and not _verb_used.is_empty(): _verb_used.clear
-
-### [minor] Enemy slot-reuse: the prune stamps KIND, not identity — every remove_at shifts the array down and each same-kind slot inherits its dead neighbour's hit-flash, hp and facing
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.gd:2930-2941 (out-of-range prune), :2947-2955 (the kind-stamp reseed), :2959-2976 (the hp edge-detect it guards); the sim's sweep is /User`
-- **Rate:** Every enemy removal whose array neighbour is the same kind. Campaign sweeps units off the bottom continuously as the camera ratchets north (sim_world.gd:3010), and rusher waves spawn adjacent same-kind runs, so this is hundreds of executions per run — not an edge case. The spurious-spark sub-case is narrower: it needs a multi-HP kind (only mg_nest / technical / broadcast carry an "hp" field; everything else defaults to the constant 1 at :2958 and cannot trip the edge-detect). Exact counts: UNKNOWN without running Godot.
-- **Fix:** Stamp identity, not kind. GDScript Dictionaries are reference types and the sim already relies on that — `is_same(tanks[ti], tank)` at sim_world.gd:2451. Store the enemy dict itself in `_enemy_slot_kind` (rename to `_enemy_slot_id`) and change :2948 to `if not is_same(_enemy_slot_kind.get(eidx), e):`. Same one-line change at the second call site, main.gd:3456 in `_tick_spawn_yells`. Zero sim change, exact detection of every swap including same-kind ones, and it keeps only one dead dict reference per slot (immediately overwritten). Do NOT fix only _check_enemy_hits — _tick_spawn_yells is the sibling that makes this a three-times bug.
-- **Class check:** grepped every enemy-index-keyed cache in the view. The six above route through this one prune block (good). `_spawn_yelled` (main.gd:3441-3463) is a SECOND, independent copy of the same idiom with the same defect — it prunes `sk >= ecount` and compares kind strings, so a same-kind shift makes a unit inherit 'already shouted' and stay silent, or a d
-
-### [minor] Sfx._engines is keyed on the sim tank index and nothing stops those looping voices on run teardown — a restart can leave an engine growl playing forever for a tank that no longer exists
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/view/sfx.gd:104 (decl), :819-846 (`engine_at`); sole caller /Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.g`
-- **Rate:** `_reset()` is 100% of run teardowns (R, pause->RESTART, pause->QUIT TO TITLE, attract auto-reset at main.gd:2013). The leak needs a live voice at teardown, i.e. a tank that is alive and within the `tk_pos.y > -40.0 and tk_pos.y < 400.0` window (main.gd:5321) on the final tick. One tank is parked per gate at SCREEN_CX, so this is 'restarted while a tank was on screen'. Fraction: UNKNOWN without running Godot. Note the same loop is also the only owner of these voices during a PAUSE (main.gd:2016-2035 returns before `_update_feel()`), but the ambience beds behave identically there, so continuing-
-- **Fix:** One line in `_reset()` next to the other view-cache clears, and one small method in sfx.gd: `func stop_engines() -> void:` that iterates `_engines.values()`, runs the same 0.15s fade-then-queue_free tween already written at sfx.gd:844-846, and clears the dict. Reuse that tween code rather than hard-stopping — the comment at :841 explains why the hard cut was removed in the first place.
-- **Class check:** grepped every persistent audio handle in sfx.gd: `_beds` (:135), the music/wind/river/foundry loops and `duck_sfx_under_vo` are all re-driven every tick from `_drive_audio()` (main.gd:5415-5454) with an absolute level, so a stale value is corrected on the next frame. `_engines` is the only one whose lifetime is keyed on a sim ARRAY INDEX rather tha
-
-### [major] Boss Rush never calls _step_barrels(), so every lit barrel fuse latches at 8 forever — and main.gd paints the white-hot "about to blow" telegraph for the rest of the run
-
-- **Where:** `src/sim/sim_world.gd:966-973 (boss_rush step branch) vs :977 (_step_barrels, campaign-only call site); reader src/main.gd:7567-7576`
-- **Rate:** Every Boss Rush run. Boss Rush is a shipped menu row (src/view/menu.gd:991 `{"id": "boss_rush", "label": "BOSS RUSH"}` → :3021 `main.start_boss_rush()`), with its own Hall-of-Fame filter and debrief title (main.gd:1765, :1797). 12 armed barrels stamped per run; 2 of them GUARANTEED latched by the two Colossus phase rises (the finale is the only way the mode ends), and any of the other 10 latch the moment a grenade lands near them — which is the verb the gunship-gate ammo cache is explicitly authored to teach. Campaign/arcade/endless are unaffected (arcade falls through to the `else:` branch at
-- **Fix:** Add `_step_barrels()` (and `_step_mines()` alongside it, matching what endless already does at :957) to the boss_rush branch, next to `_step_gates()` at sim_world.gd:969. Two lines, no new state. Golden-safe: tests/test_determinism.gd carries only GOLDEN (campaign torture) and ENDLESS_GOLDEN — there is no boss_rush golden, and no boss_rush path feeds either. Do NOT instead clamp fuse_ticks or teach the view to ignore a stale fuse: the barrel is supposed to explode, and patching the reader would leave the authored ammo cache permanently un-grenadeable.
-- **Class check:** grepped `_step_barrels` — one call site only (sim_world.gd:977), so the campaign/arcade `else:` branch is the sole caller; endless was already given `_step_mines()` explicitly at :957 for exactly this class of omission ("every mine a Sapper armed here just sat forever, inert"), so the pattern has bitten once already and boss_rush was not swept with
-
-### [major] One 10px BULLET_HIT_RADIUS serves 13 differently-sized enemy sprites — the elite and the four armoured kinds carry 15-55% dead surface
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/sim/sim_world.gd:196 (const), :2552 + :2556 (the ONLY enemy hit test)`
-- **Rate:** ELITE: `elite_every = maxi(3, 7 - opened)` (sim_world.gd:3648) — 1-in-7 falling to 1-in-3 of the ~80% of spawns that are not specials, i.e. roughly 11-27% of every enemy in the campaign, every run. mg_nest: rostered in SECTOR_SPECIALS[3] and [6] (sim_world.gd:338,341); specials are a 1-in-5 roll (1-in-4 NG+) at :3639 and mg_nest is 1 of 2 entries in sector 3 => ~10% of all sector-3 spawns, and sector 3 is the 43%-of-the-clock sector per the banked cycle-8 finding. broadcast: 1 of 3 entries in sector 5 => ~6.7% of sector-5 spawns. technical: 1 of 2 in sector 4 => ~10% of sector-4 spawns. observ
-- **Fix:** Two options, pick one. (a) sim-side, in-idiom: the sim already has BOSS_HIT_RADIUS (:609) and COLOSSUS_HIT_RADIUS (:562), so add a `const KIND_HIT_RADIUS := {"mg_nest": 20, "broadcast": 20, "technical": 15, "elite"/… }` beside BULLET_HIT_RADIUS:196 and read it once at :2552/:2556 with BULLET_HIT_RADIUS as the default. Costs a golden re-record (state hashing does not change, but hit outcomes do). (b) view-only, zero golden movement: pull the four call scales down so the drawn body fits the 10px circle — mg_stand 1.0 -> ~0.55 (main.gd:8653), radio_tower 0.9 -> ~0.5 (:8632), m_radar_tank 0.5 -> ~0.3 (:8774), m_technical 0.55 -> ~0.4 (:8550), enemy_assault 0.62 -> 0.5 (:8744) — but that reverses
-- **Class check:** grepped BULLET_HIT_RADIUS: exactly 4 call sites — sim_world.gd:2552, :2556 (enemies), :2600 (barrels), :2615 (observer). There is NO per-kind hit radius in the sim, so this is one constant serving the whole roster; a fix at the constant reaches every kind at once. On the test side: tests/test_hitbox_fairness.gd:31 CALL_SCALE lists 13 sprites, but t
-
-### [major] The parked tank blocks a 32x24 axis-aligned box while drawing a 30x46 hull — 34% of visible steel stops nothing, in both directions
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/sim/sim_world.gd:399-400 (HULK_HALF_W/H) vs /Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.gd:8156`
-- **Rate:** Every run, campaign and Endless. sim_world.gd:4713 `while _next_tank_y > horizon: tanks.append(...)` streams one parked tank per GATE_SPACING (1000px, :277) from y=-750 (:755) forever, and main.gd:8117 notes 'one parked tank streams per gate and is never despawned'. The blocking predicate at :2523 covers `(alive and occupant < 0) or (not alive and burn_ticks > 0)` — i.e. every parked tank for its whole life plus every burning wreck. The manned case at :6065 additionally applies while the player is driving, which the banked cycle-1 work measured at 38.7% of the campaign.
-- **Fix:** HULK_HALF_H 12 -> 23 makes the box match the parked (hull = 0.0, north-facing) silhouette, and 23 is also within ~1px of half the drawn width once the tank turns 90 degrees, so the rotating-AABB problem mostly folds into the same number. Sim change => golden re-record. Before shipping, walk the two _slide_aabb callers (:1143, :2938): the neighbouring SANDBAG_HALF_W comment at :402 says that box was tuned so 'rushers must flank in under ~2s', so a near-doubled tank box will lengthen enemy flank paths around every parked tank — measure that, do not assume it. Then add a tank row to tests/test_hitbox_fairness.gd next to test_the_bunker_wall_that_eats_rounds_is_the_wall_you_can_see (:150), asser
-- **Class check:** grepped HULK_HALF_W / HULK_HALF_H: 5 read sites, all through the one pair of constants — sim_world.gd:1142-1143 (player slide), :2523 (player bullets), :2937-2938 (enemy slide), :6065 (enemy bullets), plus :499 `const HULL_W := 2 * HULK_HALF_W` which feeds HULL_CLEARANCE. One fix at :399-400 reaches all of them. On the draw side, grepped `_spr("tan
-
-### [minor] The observer's own 'shoot here' reticle is drawn 30-60% wider than the circle that kills it
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.gd:8788 vs /Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/sim/sim_world.gd:2615`
-- **Rate:** 100% of observer encounters. sim_world.gd:6143-6151 spawns the observer on `stall_ticks >= OBSERVER_STALL_TICKS` (the campaign anti-camp valve), and the comment at :6160 records that in Endless it is exempt from despawn and 'living until it is shot is the documented, intended pressure' — so in Endless the reticle is the game's instruction for the only removal path there is.
-- **Fix:** `var tr := SimWorld.BULLET_HIT_RADIUS * PX + tp * 2.0` (PX is `1.0 / Fixed.ONE`, main.gd:14), which lands the brackets at 10-12px on the circle that actually kills. Then extend test_no_lethal_radius_is_invisible_to_the_view (test_hitbox_fairness.gd:295) with a `view.contains("SimWorld.BULLET_HIT_RADIUS * PX")` assertion so the next eyeballed number cannot drift back in.
-- **Class check:** grepped every hardcoded world-space telegraph radius in main.gd. Two more read the sim constant correctly (`SimWorld.GRENADE_RADIUS * PX`, `SimWorld.VENT_HURT_RADIUS`) and two more are correct by construction (`SimWorld.TANK_BOARD_RADIUS * PX` at main.gd:8132 and `SimWorld.TANK_CRUSH_RADIUS * PX` at :8137 — both already read the sim). The two hardc
-
-### [minor] The colossus CORE EXPOSED ring is drawn at 16-19px and animates a 45% shrink, while the bullet window is a flat 34px that never shrinks
-
-- **Where:** `/Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/main.gd:9152-9153 vs /Users/shoemoney/Projects/commander-in-chief/.claude/worktrees/aaa-drain/src/sim/sim_world.gd:2610`
-- **Rate:** Every core window of every colossus fight, i.e. every campaign completion and every Last Stand. The window repeats on COLOSSUS_CORE_CYCLE_TICKS for the whole finale, and the shrink branch (`sealf > 0.0`) arms in the last 15 ticks of each one — so a fixed slice of every window is drawn wrong, every time.
-- **Fix:** `Art.arc(self, cpos, SimWorld.COLOSSUS_HIT_RADIUS * PX + pulse * 3.0, ...)` and drop `cshrink` from both the ring and the core disc (keep the red `seal_strobe` colour ramp — the strobe is a truthful 'window closing' cue; the size animation is not). If a shrinking target is wanted as a mechanic, that is a sim change: ramp COLOSSUS_HIT_RADIUS with `core_open` and re-record goldens — do not fake it in the view.
-- **Class check:** Same class as the observer reticle above — grepped both together; those two are the complete set of hardcoded world-space aim telegraphs left in main.gd (the mortar ring, vent ring, tank board ring and tank crush ring all read their sim constants). The colossus CRUSH ring at main.gd:9106 is correct (`SimWorld.COLOSSUS_CRUSH_RADIUS * PX`) and is pin
-
-### [major] Four sprites are drawn as BOTH solid/concealing sim cover and walk-through decor — and for two of them the decorative copy is drawn LARGER than the functional one
-
-- **Where:** `src/main.gd:7331 + 7336 (cover) vs src/main.gd:6941, 6951-6952, 6858-6861, 6902, 7007 (decor); invariant comment at src/main.gd:26`
-- **Rate:** Every campaign run, every sector. Cover: rocks stream every ROCK_SPACING=260px (sim_world.gd:524) with kind forced to 0 in segs 0-1 and weighted 3:2:1 classic:grass:wall after (sim_world.gd:4386-4389), and 1 in 3 classic rocks picks cactus_dead2 → roughly a third of all hard cover in the run. Decor: the cactus grid runs on a 48px row pitch across the whole field (main.gd:6907+), 1-in-11 dead before the ash midpoint and 100% dead once `ash > 0.33` (main.gd:6934) — dozens on screen at once. Exact per-run counts are UNKNOWN without running Godot.
-- **Fix:** Root-cause, one symbol: make the dual-use names disjoint rather than patching each draw site (the main.gd:26 comment is proof that per-site fixes leak). Cheapest: `const _CACTUS_DEAD := ["cactus_dead1", "cactus_dead3"]` at main.gd:6031 — that reserves cactus_dead2 for cover and fixes all four decor call sites (6858, 6861, 6902, 6941, 6951) in one edit. Then drop `"dry_shrub"` from _LITTER_EARLY (main.gd:24) / _LITTER_MID_A (main.gd:26) and from `ug_species` (main.gd:6780-6781), drop `"wreck_halftrack"` from _LITTER_LATE/_LITTER_FOUNDRY (main.gd:50-54), and drop `"trench"` from _LITTER_LATE — or, if the decor is wanted, swap `_draw_trenches` (main.gd:7066) to stamp the `trench` sprite at the 
-- **Class check:** Grepped `ROCK_KIND_COVER`, `_CACTUS_DEAD`, `cactus_dead`, `dry_shrub`, `wreck_halftrack`, `trench`, `_LITTER_*` across src/main.gd — the four listed above are the complete overlap set. `rock1`/`rock2` appear only as cover; the other litter keys appear only as decor.
-
-### [major] The grenade landing marker + blast ring ignore the marsh current the sim applies to the grenade — up to a full blast radius of un-previewed drift
-
-- **Where:** `src/main.gd:9214-9223 vs src/sim/sim_world.gd:2645-2665`
-- **Rate:** The marker+ring is drawn for 100% of airborne grenades and shells (main.gd:9211-9223, inside the per-grenade loop). The drift lie is active for every grenade whose flight crosses seg-2 water outside the ford — 80px of the 1000px GATE_SPACING marsh segment, one segment of the campaign's six. Exact throws-over-marsh-water per run: UNKNOWN without running Godot. The 3px discrete/continuous error is 100% of throws.
-- **Fix:** Do it once, in the predictor, not by adding a marsh-only special case to the draw: extend main.gd:9214-9215 to step the same integrator the sim runs (it is ~8 lines and rng-free — position, then gravity, then the `_in_water`/breakwater drift via the existing `sim._in_water` / `SimWorld._mix` accessors the view already calls in `_draw_trenches` and `_in_wbands`). That fixes the drift AND the 3px discretisation in one change and cannot drift from the sim again. Cheaper stopgap if a per-tick loop is unwanted: add `+ drift * ticks_over_water` and drop the analytic `tt` in favour of the closed-form discrete root. Either way pin it with a test that throws across a MARSH_SEG water row and asserts t
-- **Class check:** Grepped `land`, `GRENADE_RADIUS`, `MARSH_DRIFT`, `_ford_current` across src/main.gd, src/view/art.gd, src/view/hud.gd — main.gd:9215 is the only grenade landing predictor in the view; there is no second copy to fix. (Related but ALREADY BANKED, cycle 7: the same marker keeps showing full-range landing while `hold` is true and the sim airbursts at a
-
-### [major] The game's single, once-per-profile teach for the concealment rule names SMOKE — but the event that fires it is emitted by grass and trench too, which is what almost every player will trigger it with
-
-- **Where:** `src/main.gd:2886 vs src/sim/sim_world.gd:1436-1438`
-- **Rate:** Exactly once per player profile, forever (`_seen` persisted). It is the ONLY string in the game that explains why aimed fire stopped and shells kept coming — grepped `conceal`, `grass`, `GRASS`, `CONCEAL` across src/main.gd, src/view/hud.gd, src/view/menu.gd: no other surface mentions grass or trench concealment at all.
-- **Fix:** Make the cue name the source the sim actually used. The event already carries x/y; add the source to it — `events.append({"t": "blind_shell", "x": …, "y": …, "src": "smoke"/"grass"/"trench"})` at sim_world.gd:1438 (events are checksum-excluded, so this is golden-safe and needs no re-record — same precedent as `_explode`'s existing `src` tag, sim_world.gd:2670-2672). Then key the hint text off `ev["src"]` at main.gd:2886 with three variants, or use one source-agnostic line ("YOU'RE HIDDEN — THEIR AIM IS BLIND, BUT SHELLS STILL FALL. MOVE OFF THE RING") which is a one-line diff and correct for all three tiers. Prefer the second unless per-tier teaching is wanted.
-- **Class check:** Grepped `blind_shell` (one emitter sim_world.gd:1438, one consumer main.gd:2886) and `_concealed` (14 sim call sites, all routed through the same predicate). The sibling risk is the reverse one: main.gd:2177 `_hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")` fires on the capsule pickup and is correctly smoke-specific
-
-### [minor] The spend wheel's revive-guard recomputes the cost it was explicitly refactored to stop recomputing — so the Commendation socket, which spends no coin at all, warns that your buy will price out your partner's revive
-
-- **Where:** `src/main.gd:10861-10866`
-- **Rate:** 2P only and only with a teammate down (main.gd:10858 gates on `sel >= 0 and not sim.last_stand`; solo can't reach it — the wheel returns early on a dead player at main.gd:10778). Within that: 100% false on the NE/token socket, and false on the other five sockets whenever `war_chest < revive_cost(dq)` was already true. Frames-per-run UNKNOWN without running Godot; the draw runs every frame the wheel is held open.
-- **Fix:** Delete main.gd:10861 and use the already-correct `sel_cost` (which is 1 token, not coins), plus skip the guard entirely when `sel_is_token` since a token buy can never move the chest: `if sel >= 0 and not sim.last_stand and not sel_is_token:` at main.gd:10858, then `sim.war_chest - sel_cost` at 10865. While there, make the warning causal — add `and sim.war_chest >= sim.revive_cost(dq)` to the 10865 predicate so it only fires when the buy is what breaks the revive. Two-line diff, kills both falsehoods, and it restores the single-source-of-truth the comment at 10849-10852 already promises.
-- **Class check:** Grepped `revive_cost` across src/main.gd, src/view/hud.gd, src/view/menu.gd — the other four view sites are correct: main.gd:9464 and 9757 read the cost straight for display, main.gd:10510 gates the off-screen partner chevron on `war_chest < revive_cost`, hud.gd:2391 displays it. Grepped `_supply_cost` — main.gd:10814 and 10855 both guard the token
-
-### [major] A muted SFX/MUSIC row prints a fused, nonsense footer line — and the word UNMUTE, the only recovery instruction in the game, is the part that gets eaten
-
-- **Where:** `src/view/menu.gd:5996 (compose) + 5925 (draw) + 5511 (the ellipsizer branch that mangles it)`
-- **Rate:** Every frame the OPTIONS → AUDIO screen is drawn with a muted SFX or MUSIC row focused — 2 of the 2 volume rows, and 100% of the one player state the string was written for ("I stepped it to 0, how do I get sound back"). Muting is reachable by stepping the level down to 0 (_step_vol), so this is the normal, non-exotic path.
-- **Fix:** _ellipsize guesses the string's structure from a literal `": "`. It already has an explicit `keep_tail` parameter (the mechanism the destructive-row path uses); make the ': ' branch opt-in through it instead of a find(). _row_fit passes the row's own NAME/VALUE tail; menu.gd:5925 passes "" so a composed sentence gets a plain right-trim ending in '…' rather than a fused one. Lazy interim: shorten the composed string to fit 616px (drop the redundant "SAVED AUTOMATICALLY." when the unmute prefix is present) — but that leaves the trap armed for the next long/localized help string.
-- **Class check:** grepped `_ellipsize(` — exactly 2 call sites: menu.gd:5541 (_row_fit, raw row labels where the first ": " IS the separator) and menu.gd:5925 (this one). grepped `row_help = |row_help +` — menu.gd:5996 is the only place prose is prepended in front of a "NAME: VALUE" string, so this is the single composed caller, but the defect is in the shared heuri
-
-### [major] VETERAN PERKS: 2 of the 3 rows truncate away the VP price — the one number the screen exists to show
-
-- **Where:** `src/view/menu.gd:1023 (label build) → 4125 (draw) → 5511 (ellipsizer)`
-- **Rate:** 2 of 3 rows, on every draw of the VETERAN PERKS screen, in every purchasable state: HEAD START at lvl 0/1/2 (3 of its 4 states) and SIGNAL FLARE at lvl 0/1 (2 of its 3) all measure the identical 240.6 / 257.1px. Only the MAX states ('HEAD START — LVL 3/3' 174.6, 'SIGNAL FLARE — MAX' 165.0) fit — i.e. the row is only readable once it is no longer buyable. True from a fresh save, not a late-game edge case.
-- **Fix:** Same root as finding #1: drive the tail-preservation from the caller, not from find(": "). _rebuild_menu_items can hand PERKS' `val` in as keep_tail so the NAME truncates ('HEAD S… — LVL 0/3 — 30 VP') and the price rides whole. If the tier+cost genuinely cannot fit 184px, move the cost to the right-edge `badge` slot the rows already support (menu.gd:3996 reserves badge_w before fitting the label) — the DAILY RUN 'COMPLETED' / RESET 'AT DEFAULTS' rows already use exactly that path.
-- **Class check:** grepped `"label":.*—` across src/view/menu.gd — menu.gd:1023 is the only row label built with an em-dash separator; every other row uses "NAME: VALUE" and is rescued by the ': ' branch. Same shared ellipsizer as the finding above, so one fix covers both.
-
-### [minor] HALL of Fame's latest-run highlight band is 55px wider than the content interior and paints over the frame's right rail — it borrowed the frame's WIDTH but the column's ORIGIN
-
-- **Where:** `src/view/menu.gd:4737`
-- **Rate:** Every draw of the HALL page that contains the just-banked run (`is_latest`, menu.gd:4735) — i.e. every visit to HALL OF FAME immediately after finishing a run, which is the screen's primary entry path. One row per draw. Alpha 0.15, so it reads as a wash over the ornament rather than a hard block.
-- **Fix:** Derive both from the frame: band `Rect2(FRAME_INNER_L - 7.0, y - 12.0, (FRAME_INNER_R + 7.0) - (FRAME_INNER_L - 7.0), 20.0)` (or just width 473 from x=100), and change the menu.gd:4727 guard from the literal 628.0 to FRAME_INNER_R so the *DAILY/*ASSIST abbreviation actually arms on a 2-digit streak. Both constants should read the same source.
-- **Class check:** grepped 628 / 612 / 620 / 584.0 in src/view/menu.gd — the only other stale right-bound is menu.gd:4727, the STREAK cell's `> 628.0` abbreviate guard, which is 55px past the same real interior and is therefore dead code: the widest possible streak cell measures 572.25px and a 2-digit streak ('x12  *DAILY  *ASSIST') reaches 581.9px, 8.9px past the in
-
-### [major] The broke-respawn timer is surfaced as an incoming free rescue in three places; in solo Endless the exact same timer is the run's death clock
-
-- **Where:** `src/view/hud.gd:2384, src/main.gd:9740, src/view/menu.gd:5046 vs src/sim/sim_world.gd:1685-1695`
-- **Rate:** 100% of solo-Endless run endings (the wipe path can only be reached through this timer), plus every open of the HOW TO PLAY WAR CHEST tab from an Endless pause. Campaign and 2P-Endless-with-a-partner-up are unaffected — the copy is correct there.
-- **Fix:** One sim-side predicate next to the branch that already knows — e.g. `func rally_is_free() -> bool: return not (mode == "endless" and _all_players_down())` — read by all three view sites (same single-predicate discipline as `_exposed()`). hud.gd:2384 → "LAST BREATH %ds" in warn-red when false; main.gd:9740 → drop "REINFORCEMENTS" for a wipe countdown; menu.gd:5046 → add the Endless clause to the sentence. Extend test_view_honesty.gd:907 with an `"endless"` sim so the corpus assertion covers both modes.
-- **Class check:** grepped `broke_timer|BROKE_RESPAWN` across src/ — exactly these three view sites (hud.gd:2379/2384, main.gd:9739/9740, menu.gd:5044-5047); none is mode-aware. tests/test_view_honesty.gd:907 `test_the_rules_page_states_every_continue_the_campaign_actually_grants` pins this sentence, but builds all three sims as "campaign", so the suite is green on i
-
-### [major] Seven of the nine campaign special archetypes are filed under a HOW TO PLAY tab labelled ENDLESS, headed "ENDLESS WAR — RANGED THREATS"
-
-- **Where:** `src/view/menu.gd:104, 5155-5165, 5187 vs src/sim/sim_world.gd:335-342`
-- **Rate:** 7 of the 9 campaign special archetypes; 1 of 5 HOW TO PLAY tabs. Fires from sector 2 of every campaign run (sector 1's roster is deliberately empty). The drone sub-case: every campaign run reaching sector 6 — the Backlog's own spawn census measured 12 drones across 4 full campaigns.
-- **Fix:** Rename the tab/header off the mode and onto the role — "SPECIALISTS" / "THE SPECIALISTS — RANGED & ARMORED" — and drop the "(wave 3+)" framing to a per-row note on the ones that really are endless-gated (none of these seven are). Fix the `_spawn_special` docstring at sim_world.gd:3772 in the same pass. Add `"drone": "RECON DRONE — SHOOT IT DOWN"` to `_KIND_TEACH`. Cheap ratchet: a test asserting every kind in the union of `SECTOR_SPECIALS` has a `_KIND_TEACH` entry — that is the whole class in one assertion.
-- **Class check:** grepped `SECTOR_SPECIALS` (5 sites, all sim) and `_endless_threats|ENDLESS WAR|_KIND_TEACH` across src/ — the mislabel lives at menu.gd:104 (tab name), :5156 (comment), :5187 (page header); the stale sim docstring at sim_world.gd:3772. `grep -rn DRONE src/` outside src/sim returns only menu.gd:5163 and sfx.gd:83's `[DRONE LOCKED ON YOU]` caption.
-
-### [minor] Both grenadier teaching strings give it the drone's dodge; the sim's own comment says the two dodges are opposite axes
-
-- **Where:** `src/view/menu.gd:5158 and src/main.gd:336 vs src/sim/sim_world.gd:3199-3217`
-- **Rate:** Campaign sectors 2 and 6 of every run (grenadier is in `SECTOR_SPECIALS[1]` and `[5]`, drawn 1-in-5 of field spawns from each roster); Endless roll 0 from wave 3 (sim_world.gd:5182), and ~50% of elite spawns under the BOMBARDMENT mutator (`has_mod(8)`, :5181). The `_KIND_TEACH` banner fires once per run on first sighting.
-- **Fix:** Name the axis in both: menu.gd:5158 → "GRENADIER — three blasts in a line across your spot. Run at him or straight away, never sideways." main.gd:336 → "GRENADIER — RUN THE LINE, NOT ACROSS IT". Both are one-line string edits; the constants (`GRENADIER_CLUSTER_SPREAD`, `GRENADE_RADIUS`) are already public if the copy should derive the count.
-- **Class check:** grepped `grenadier` across src/view/ and src/main.gd — exactly two player-facing strings (menu.gd:5158, main.gd:336) plus sfx.gd:86's `[GRENADE INBOUND]` caption, which carries no direction either. No third site.
-
-### [minor] All six ZONE_INFO blurbs are dead data — nothing in the view reads them, and a test guards their existence
-
-- **Where:** `src/sim/sim_world.gd:317-326; src/view/menu.gd:1003; tests/test_biomes.gd:220`
-- **Rate:** CHAPTER SELECT screen, 6 of 6 rows, every visit — the screen renders a bare numbered name list where the design intended name + blurb.
-- **Fix:** Either draw it or delete it. Drawing is ~3 lines: menu.gd's `_draw` for `Mode.CHAPTERS` already has the row rect — add a `_body_block(zi["blurb"], …)` sub-line under the selected row only (keeps the list scannable, matches the MODES tab's amber-NAME/muted-tip grammar at menu.gd:5083-5097). If it draws, fix zone 1's count to three first. Deleting means dropping the field and test_biomes.gd:220 with it.
-- **Class check:** grepped `blurb` and `ZONE_INFO` across src/ and tests/ — one producer (sim_world.gd), zero view consumers, one existence-only test (test_biomes.gd:220) and one count test (test_biomes.gd:217).
-
-### [cosmetic] The smoke hint was reworded in main.gd and no .po was updated — it is the only live translated string with no msgid in any locale
-
-- **Where:** `src/main.gd:2177 vs locale/strings.es.po:138, locale/strings.fr.po:138, locale/strings.ja.po:139`
-- **Rate:** 1 of 14 translated `_hint` strings. Fires on every smoke-capsule pickup (supply kind 9) in a non-English locale — kind 9 sits in the rare-drop table at sim_world.gd:2861, ~1-in-6 elite kills × 1-in-10 weight ≈ 1.7% of elite kills.
-- **Fix:** Update the msgid in all three .po files to the current English and re-translate the changed clause ("SHELLS STILL FALL BLIND" replaces "NOT THEIR CHARGE" — a different claim, so the existing translations can't just be re-pointed). While in there, drop the 6 dead COMMANDER bark rows. Ratchet worth adding to test_localization.gd: scrape every `_hint(` literal from main.gd and assert each has a msgid — the same source-scraping pattern test_view_honesty.gd already uses.
-- **Class check:** scripted diff of every msgid in strings.es.po against the concatenated view sources (main.gd, hud.gd, menu.gd, sfx.gd, art.gd), and the reverse pass over every `_hint("…", "…")` literal in main.gd. This is the only live-string orphan; nothing else drifted.
+- 📍 **Where** — `src/main.gd:8250-8256 (`if pk.get("cost", 0) > 0 and sim.mode == "endless":` → hazard-striped plate), :8278-8283 (the coin icon + price text, drawn w…`
+- 📈 **Rate** — Campaign + arcade only, at `_stamp_stretch_setpieces` slots where `sp_kind == (sph2 / 3) % 4 == 1` — 1 of 4 setpiece kinds, one setpiece per gate stretch, bands >= 2 (the cost formula subtracts 2 from the band index). So roughly 1-in-4 of the ~4 post-band-2 stretch setpieces per campaign run; exact…
+- 🔧 **Fix** — Drop `and sim.mode == "endless"` at main.gd:8250 so the plate follows the cost field, exactly as the price label at :8278 already does. Pure view, no sim read added, no checksum impact. If the plate's 72x28 footprint is unwanted in the tighter campaign corridor, the alternative is to make the label…
+- 🧬 **Class** — Grepped all 11 `pickups.append` sites in the sim: only :5287 (campaign/arcade stretch setpiece) and :5554 (endless shop) pass a nonzero `cost`; every other site passes `cost: 0` o…
+
+### ⚪ The engine-loop comment promises the growl pitches up when you board — `engine_at` has no pitch path at all…
+
+- 📍 **Where** — `src/main.gd:5404-5405 (`# Engine idle (3-vote): persistent positional growl for alive on-screen tanks; pitch lifts when crewed so boarding audibly ch…`
+- 📈 **Rate** — Every tank boarding in every run — tanks are a core verb and one is parked per gate row (sim_world.gd:5002-5006), campaign fields 2-3 (sfx.gd:821). The comment itself is read 100% of the time by anyone touching this code, which is how it earns its severity: it is load-bearing misinformation in the …
+- 🔧 **Fix** — Two lines, or delete half a comment. Wire it: `_sfx.engine_at(ti, tk_pos, tk_on, int(tk["occupant"]) >= 0)` at main.gd:5408, and in sfx.gd:819 take `crewed := false`, then in the `if on:` branch at :837-838 add `voice.pitch_scale = 1.12 if crewed else 1.0`. That is the whole feature — `_engine_wav`…
+- 🧬 **Class** — Grepped `engine_at` across src/, tests/, tools/ — three hits total (main.gd:5408, sfx.gd:819, and the docstring reference at sfx.gd:850), so there is no second call site with the …
+
+---
+
+## 📌 Survived re-triage — 43
+
+Banked earlier, re-verified against current line numbers, restated where the original had
+gone stale. Overwhelmingly minor and cosmetic — the majors were drained first.
+
+<details><summary><b>Open the list</b> — 43 entries by severity</summary>
+
+
+#### 🔴 Critical — 2
+
+| Finding | Where | Rate |
+|---|---|---|
+| DAILY's stated "one attempt" contract is bypassed by restarting — the lock only arms at t… | `src/main.gd:76 (`_daily_done_seed`), :1446 (`seed_v = _daily_seed…` | Every daily run the player restarts or abandons before the debrief — deterministic, one k… |
+| The DAILY row only locks on a completed run, so restarting before the debrief gives unlim… | `src/main.gd:4739-4745 — `_daily_done_seed = _current_seed` lives …` | Every daily run the player abandons (R / pad START / pause->RESTART). How often that happ… |
+
+#### 🟠 Major — 2
+
+| Finding | Where | Rate |
+|---|---|---|
+| Ghillie anti-stall re-reveal fires a cue every 27 ticks forever (entry 7, half 2 of 2) | `src/sim/sim_world.gd:5568-5591 (endless anti-stall: sets submerge…` | Endless only, and only in the anti-stall `else` arm (src/sim/sim_world.gd:5567) — wave no… |
+| OUT OF STRICT SLICE (Section A, not a lens finding) but re-verified because it is the eco… | `src/sim/sim_world.gd:223-225 (`COIN_RUSHER := 10`, `COIN_MG_NEST …` | Every campaign run, from the first gate opened onward, widening monotonically. `_econ_dep… |
+
+#### 🟡 Minor — 26
+
+| Finding | Where | Rate |
+|---|---|---|
+| Commendation cap refusal is silent — the mint at cap drops the milestone with no event, n… | `src/sim/sim_world.gd:2236-2244 (`_mint_token` — `if tokens < 2:` …` | Bounded and low. Fires ONLY at a mint moment while `tokens == 2`. Campaign has 6 flawless… |
+| Campaign rooted spawns still land above the reachable band and the MG nest fires with no … | `src/sim/sim_world.gd:3904 `_spawn_mg_nest(x, camera_top - 24 * F_…` | Campaign/arcade only. mg_nest is in SECTOR_SPECIALS sectors 3 and 6, broadcast in sector … |
+| The airburst grenade verb is still taught nowhere (entry 11, 1 of 3 sub-claims surviving) | `Mechanic is live: src/sim/sim_world.gd:2903 `_explode(..., "airbu…` | 100% of HOW TO PLAY opens (CONTROLS is the default tab, reachable from title and from PAU… |
+| Loadout-loss readout has a top clamp but no bottom clamp, so it sinks out of frame (entry… | `src/main.gd:3699-3705 `_loss_sting` spawns world-space floattext …` | Every revive that strips a loadout key with the body in the bottom of the band. Structura… |
+| REBIND's fixed-input footnote is drawn at a hand-typed y=324 and the row column paints ov… | `src/view/menu.gd:4415 `_center_text(note, 324, 7, ...)` inside `_…` | All 4 REBIND tabs, every frame the screen is displayed, resting state — 100% of visits to… |
+| The HOWTO/HALL content well is a solid fill drawn 26 px OUTSIDE the frame keyline it hide… | `src/view/menu.gd:3559-3562 (`_content_well_rect()` returns `Rect2…` | Every open of HOW TO PLAY or HALL OF FAME — 2 of the 12 framed modes, gated by `_content_… |
+| The colossus CORE EXPOSED ring is drawn at 16-19 px and animates a 45% shrink, while the … | `src/main.gd:9334-9335 — `Art.circle(self, cpos, (9.0 + pulse * 4.…` | Every core window of every colossus fight — i.e. every campaign completion and every Last… |
+| dry_shrub (and trench) are still drawn as BOTH functional cover and walk-through decor — … | `Cover: src/main.gd:6188 `1: {"sprite": "dry_shrub", "blocking": f…` | Cover kind 1 is a piece in 3 of the 4 COVER_ROOMS templates (sim_world.gd:521, 523, 524);… |
+| The concealment hints drifted further out of the .po files — the reworded smoke line stil… | `src/main.gd:2207 `_hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELL…` | 4 live translated hint strings x 3 locales = 12 missing/stale msgids. Each hint fires onc… |
+| The pause branch still never quiets the tank engine loop — it growls under the PAUSED ove… | `src/main.gd:2044-2063 (the pause `else` branch: _sfx.set_concussi…` | Every pause taken while a live tank is in the engine-on band, in campaign/arcade. Band is… |
+| Two of the per-player edge-detect 'prev' buffers still survive _reset() and fire a false … | `Declarations src/main.gd:327 (`_smoke_prev`) and src/main.gd:95 (…` | _reset() is 100% of run teardowns (R, pad START, pause->RESTART, pause->QUIT TO TITLE, F2… |
+| Enemy slot-reuse still stamps KIND, not identity — a same-kind remove_at shift makes the … | `src/main.gd:2998 `if _enemy_slot_kind.get(eidx, "") != ekind:` (t…` | Every enemy removal whose array neighbour is the same kind — the campaign sweeps units of… |
+| Spend-wheel revive guard recomputes the cost it was handed, reads 0 for the Commendation … | `src/main.gd:11054-11064 — the guard; the value it duplicates is `…` | 2P only. `_draw_wheel` skips a dead opener (`if not p["alive"]: continue`, src/main.gd:10… |
+| The HOWTO/HALL content well is a solid dark fill that sticks ~25px past the frame's ink o… | `src/view/menu.gd:3559-3562 (`_content_well_rect()` returns the ha…` | 2 of the 12 framed modes (HOWTO, HALL — `_content_well()`), on every open, every frame. H… |
+| Both grenadier teaching strings still hand the player the DRONE's dodge — the sim's own c… | `src/main.gd:337 `"grenadier": "GRENADIER — MOVE OFF YOUR GROUND"`…` | Campaign sectors 2 and 6 of EVERY run — grenadier is in `SECTOR_SPECIALS[1]` (sim_world.g… |
+| All six ZONE_INFO blurbs are still dead data — zero view consumers, and a test still guar… | `src/sim/sim_world.gd:355-361 (the six `blurb` strings) — the only…` | CHAPTER SELECT, 6 of 6 rows, every visit — the screen renders a bare numbered name list w… |
+| BONUS (this is a Section-A backlog finding, not a lens one — flagged because it is square… | `src/view/menu.gd:4413-4415 — `_center_text(note, 324, 7, …)`, dra…` | 4 of 4 REBIND tabs, every frame the screen is displayed, in the resting state — 100% of v… |
+| tests/run_tests.gd loads all 38 suites with no null guard — a parse error in any suite cr… | `/Users/shoemoney/Projects/commander-in-chief/tests/run_tests.gd:1…` | 38 `load()` calls per full-suite run — every local run of the blocking gate and every CI … |
+| tools/lint_sim.gd `_collect` still fails OPEN — an unopenable src/sim prints "OK — 0 file… | `/Users/shoemoney/Projects/commander-in-chief/tools/lint_sim.gd:90…` | The lint job runs on every CI push (.github/workflows/ci.yml:66). The fail-open branch it… |
+| Four of the five cooldown floors still have zero ratchet test — including the bunker spaw… | `clamps at /Users/shoemoney/Projects/commander-in-chief/src/sim/si…` | Defect rate TODAY is 0% — all five floors are in place, so nothing is currently mismeasur… |
+| The barricade can never be solid anywhere a player can stand — the whole 'encounter midpo… | `src/sim/sim_world.gd:1598-1620 (_barricade_solid, camera gate at …` | 100% — it never fires, in every campaign and arcade run, for the whole run. Derived arith… |
+| tests/run_tests.gd still loads every suite fail-open — a parse error in any test file han… | `tests/run_tests.gd:165-167 — `for path in scripts:` / `var script…` | The load path runs once per TEST_SCRIPTS entry — 40 entries in the file, ~39 per default … |
+| _god_restore's docstring still claims god mode lets you run dry — the arithmetic makes th… | `src/sim/sim_world.gd:1863-1865 ('Ammo is topped up on the same he…` | Every tick of every god-mode run — 4 in-tree probes set god_mode (tools/probe_cd_clamp.gd… |
+| lint_sim.gd's directory scan is fail-OPEN: an unopenable src/sim prints 'OK — 0 files sca… | `tools/lint_sim.gd:90-93 — `func _collect(dir_path, out) -> void:`…` | Every CI push — .github/workflows/ci.yml runs the lint job on every commit, and it is the… |
+| Four cap-gated cooldown clamps, one ratchet — the regression probe_cd_clamp.gd was writte… | `src/sim/sim_world.gd:3761 (bunker spawn_cd), :5433 (wave_spawn_cd…` | The bunker one is the visible path: src/main.gd draws the hatch-charge glow as `1 - spawn… |
+| The gate-3 gunship's share of the campaign clock — unchanged, still an owner decision, no… | `src/sim/sim_world.gd:649 BOSS_GATE_EVERY = 3, :650 BOSS_HP = 40, …` | Structural exposure unchanged: EVERY campaign run, exactly once (1 of 5 non-final gates, … |
+
+#### ⚪ Cosmetic — 13
+
+| Finding | Where | Rate |
+|---|---|---|
+| Debrief knockdown ledger counts the fatal down as a revive (entry 14, 1 of 3 sub-claims s… | `src/main.gd:3331-3339 `_continue_ledger_rows` — suppresses only `…` | 100% of K.I.A. debriefs, always overcounting the 'got back up' tally by >=1. The degenera… |
+| RESIDUAL of entry 9: the HUD flawless chip prints the raw streak, the payout caps at x3 | `src/view/hud.gd:1260 `var fltxt := "x%d" % sim.flawless_streak` (…` | Campaign only, from the 4th consecutive clean gate onward. FINAL_GATE_INDEX = 6 (src/sim/… |
+| All six ZONE_INFO blurbs are still dead data — CHAPTER SELECT renders a bare numbered nam… | `src/sim/sim_world.gd:355-361 (six `{"name": …, "blurb": …}` entri…` | 6 of 6 rows on the CHAPTER SELECT screen, every visit. The blurb field has zero draws in … |
+| `"BEST %d"` still prints the score ungrouped at all three siblings while every other scor… | `src/view/hud.gd:1289 `var btxt := "BEST %d" % main.best_score`; s…` | hud.gd:1289 — every frame of every run that has any prior best (every run after the first… |
+| enemy_shotgun — 1 of the 4 fodder-rusher skins — appears nowhere in tests/test_hitbox_fai… | `src/main.gd:60 `const _RUSHER_SKINS := ["enemy_smg", "enemy_assau…` | `e["skin"] = (x / F_ONE + y / F_ONE) & 3` (src/sim/sim_world.gd:3942) spreads rushers ~un… |
+| Priced TRIPLE / CLAYMORE shop crates draw their coin icon and price straight through thei… | `src/main.gd:8272 (`_world_label(_CAPSULE_LABEL[cap_i], ppos + Vec…` | Endless only, but 100% of priced capsule crates — no probabilistic escape. `CRATE_POOL = … |
+| `"BEST %d"` prints the score without thousands separators at 3 sites while every other sc… | `src/view/hud.gd:1289 (`var btxt := "BEST %d" % main.best_score`),…` | hud.gd:1289 — every frame of every run that has a prior best AND has not yet beaten it. N… |
+| The smoke-capsule hint is still the only live translated string with no msgid in any loca… | `src/main.gd:2207 `9: _hint("smoke", "SMOKE — BLINDS THEIR AIM. SH…` | 1 of 14 translated `_hint` strings. Fires on every smoke-capsule pickup (supply kind 9) i… |
+| enemy_shotgun is in the hitbox tool's scale table but not the test's — the two instrument… | `/Users/shoemoney/Projects/commander-in-chief/tests/test_hitbox_fa…` | `e["skin"] = (x + y) & 3` spreads rushers ~uniformly, so 1 of 4 rusher skins (~25%) is th… |
+| The FRAME_INNER guard's tolerance was never narrowed — it allows 8px of drift where the r… | `/Users/shoemoney/Projects/commander-in-chief/tests/test_menu_layo…` | One test, guarding the 4 constants that clamp all 7 content-well screens enumerated by `_… |
+| The airburst verb (hold grenade to pop it at the arc's apex) is taught nowhere in the game | `src/view/menu.gd:5002-5025 `_howto_page_controls()` — six _verb_l…` | 100% of players, permanently — grepping every `_hint(` literal in src/main.gd (25 call si… |
+| The smoke-capsule hint was reworded in main.gd and no .po followed — still the only live … | `src/main.gd:2207 `_hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELL…` | 1 of ~14 translated hints (25 `_hint(` sites in main.gd, of which the static ones route t… |
+| The K.I.A. debrief counts the fatal knockdown among the ones you paid to get back up from… | `src/main.gd:2603 `_run_knockdowns += 1` on every `player_down` ev…` | 100% of K.I.A. cards — the card cannot exist without at least one death, and that last de… |
+
+</details>
+
+---
+
+## 🧭 How to use this file
+
+| | |
+|---|---|
+| 1️⃣ | **Re-check before planning.** 62 of 115 died on their own last time. Open the code first |
+| 2️⃣ | **`already_fixed` beats `not_real`.** A wrong *not real* buries a live defect forever; a wrong *fixed* costs one re-check |
+| 3️⃣ | **Severity is consequence × RATE.** A row with an `UNKNOWN` rate is un-triaged, not absent |
+| 4️⃣ | **Fix the class.** This repo shipped one revert-both-axes bug three times by patching one call site each time |
+
+Owner decisions live in [`DECISIONS.md`](DECISIONS.md) · asset provenance in [`ASSETS.md`](ASSETS.md) · contributor guide in [`CLAUDE.md`](CLAUDE.md).
+
+---
+
+<div align="center">
+
+*A findings file nobody re-checks is a to-do list for bugs that already died.* 🪦
+
+</div>
