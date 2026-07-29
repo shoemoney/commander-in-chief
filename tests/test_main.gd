@@ -1291,3 +1291,126 @@ func test_water_push_key_notices_a_ford_that_moved_on_the_same_band() -> void:
 	rect.free()
 	m._sfx.free()
 	m.free()
+
+
+# --- World-space text may not stack into a clump ------------------------------
+#
+# There WAS a stacking arbiter for in-world text — and it arbitrated floattext against
+# floattext and nothing else, off a list local to the _fx loop. Eleven other producers
+# (the route-fork signposts, the capsule name, MAXED, the crate price, LOW FUEL,
+# ESCAPING!/RESCUE, SILENCE THE SPOTTER, HOLD FIRE, the downed clock, the threat-overflow
+# +N) printed wherever they liked. The reviewer photographed one cell of that matrix
+# (MAXED/REND over "BOUNTY >"), and it is structurally guaranteed, not bad luck: the sim
+# spawns the fork cache crate at _next_gate_y + (60 + rng 0..240) in the same lane
+# _draw_gates lays the signpost out in, at fork.y + 180.
+
+func _shipped_world_labels() -> Array[String]:
+	## Every string that reaches a world-space label, scraped from the shipped call
+	## sites — new copy is covered the day it lands.
+	var out: Array[String] = []
+	for line in FileAccess.get_file_as_string("res://src/main.gd").split("\n"):
+		var at := line.find("_world_label(\"")
+		if at == -1:
+			continue
+		var rest := line.substr(at + 14)
+		var end := rest.find("\"")
+		if end > 0 and not out.has(rest.substr(0, end)):
+			out.append(rest.substr(0, end))
+	var caps: Array = load("res://src/main.gd").get_script_constant_map()["_CAPSULE_LABEL"]
+	for cap in caps:
+		if not out.has(cap):
+			out.append(String(cap))
+	# MAXED and the crate price are drawn by _draw_pickups from non-literal args, so
+	# they cannot be scraped — they are the two rows the reviewer actually photographed.
+	for extra in ["MAXED", "FRAG x4", "STREAK x10"]:
+		if not out.has(extra):
+			out.append(extra)
+	return out
+
+
+func test_world_labels_never_share_pixels() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var labels := _shipped_world_labels()
+	Runner.T.ok(labels.size() >= 10,
+		"scraped the shipped in-world callout copy (%d strings) — a dead scrape must not pass silently"
+			% labels.size())
+	var sim := SimWorld.new(0, 1)
+	var was_scale: float = Art.text_scale
+	var hits := 0
+	var escapes := 0
+	var reported := 0
+	var sign_collide_offsets := {}
+	var capture: Array = []
+	var li := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var cw: float = Art.tw("< CACHE", 24)
+		var bw: float = Art.tw("BOUNTY >", 24)
+		var sz: int = Art.fs(8)
+		for cache_left in [true, false]:
+			var sxs: Vector2 = ms.fork_sign_xs(cache_left, cw, bw)
+			for gate in [2, 4]:
+				# The cache crate's lane x, from the sim's own mirror+clamp helper.
+				for lane_raw in [90, 130, 170, 210]:
+					var px := float(sim._fork_lane_x(gate, lane_raw))
+					# Sweep the sim's whole spawn range for that crate (sim_world.gd:
+					# _next_gate_y + 60 + rng 0..240) against the sign at fork.y + 180.
+					for off in range(60, 301):
+						var fy := 200.0
+						var py := fy + float(off) - 180.0
+						var frame: Array[Rect2] = []
+						var boxes: Array = []
+						# _draw_gates first: anchored signage RESERVES, never moves.
+						for s in [[sxs.x, cw, "< CACHE"], [sxs.y, bw, "BOUNTY >"]]:
+							var sr := Rect2(float(s[0]) - 4.0, fy - 22.0, float(s[1]) + 8.0, 28.0)
+							frame.append(sr)
+							boxes.append({"k": "fork sign", "id": s[2], "box": sr})
+						# _draw_pickups: the price row (coin icon + digits as ONE rect, so the
+						# icon travels with its number), then the crate's identity label.
+						var pr: Rect2 = ms.claim_label_slot(
+							Rect2(px - 15.0, py - 34.0, 11.0 + Art.tw("999", 9), 13.0), frame)
+						frame.append(pr)
+						boxes.append({"k": "crate price", "id": "999", "box": pr})
+						var txt: String = labels[li % labels.size()]
+						var lr: Rect2 = ms.claim_label_slot(
+							ms._label_plate_rect(px - 15.0, py - 25.0, Art.tw(txt, sz), sz), frame)
+						frame.append(lr)
+						boxes.append({"k": "crate label", "id": txt, "box": lr})
+						# _draw_fx last: a kill toast in the air over the same crate.
+						var toast: String = labels[(li + 5) % labels.size()]
+						li += 1
+						var tw: float = Art.tw(toast, 9)
+						var tr: Rect2 = ms.claim_label_slot(
+							Rect2(px - tw / 2.0, py - 45.5, tw, 11.0), frame)
+						frame.append(tr)
+						boxes.append({"k": "toast", "id": toast, "box": tr})
+						var frame_hit := false
+						for i in boxes.size():
+							for j in range(i + 1, boxes.size()):
+								if not boxes[i]["box"].grow(-0.5).intersects(boxes[j]["box"].grow(-0.5)):
+									continue
+								hits += 1
+								frame_hit = true
+								if String(boxes[i]["k"]) == "fork sign" or String(boxes[j]["k"]) == "fork sign":
+									sign_collide_offsets[off] = true
+								if reported < 3:
+									reported += 1
+									Runner.T.ok(false,
+										"world labels overlap (scale %.2f, gate %d, cache_left %s, crate +%d): %s '%s' %s vs %s '%s' %s"
+											% [scale, gate, str(cache_left), off, boxes[i]["k"], boxes[i]["id"],
+												str(boxes[i]["box"]), boxes[j]["k"], boxes[j]["id"], str(boxes[j]["box"])])
+						for r in frame:
+							if r.position.x < -0.5 or r.end.x > 640.5 or r.position.y < -0.5 or r.end.y > 360.5:
+								escapes += 1
+						if capture.is_empty() or (frame_hit and capture.size() == boxes.size() and hits == 1):
+							capture = boxes
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(hits, 0,
+		"no two in-world labels ever share pixels (%d colliding pairs; %d of the 241 fork crate offsets put a label inside a signpost)"
+			% [hits, sign_collide_offsets.size()])
+	Runner.T.eq(escapes, 0, "dodging never means shoving a label off the 640x360 frame")
+	# Route one representative frame through the suite's shared 2D comparator rather
+	# than trusting only the counter above.
+	Runner.T.no_overlap(capture, "in-world labels")

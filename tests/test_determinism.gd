@@ -654,13 +654,23 @@ const SEED := 0xDEADBEEF
 ## nothing here is byte-identical, which is what a fork at tick 97 has to look like.
 ## Solo campaign is unaffected by (2) by construction: CAMERA_LEAD 260 sits inside the 344
 ## band, so a lone player's own leash term can never exceed their own focus term.
+## RE-RECORDED (2026-07-28, downed-field freeze): enemy MOVEMENT no longer stops when
+## every player is down. _step_enemies / _step_frogman / _step_colossus now take
+## _hunt_target (nearest player, alive or not) instead of _nearest_alive_player, whose
+## empty return had every consumer `continue` past the entire tick — measured on this
+## torture: 1,207 of 3,600 ticks (33.5%) had BOTH players down, and across them 52,718
+## enemy-ticks produced zero movement. The corpse is still never shot at: _concealed()
+## gained a `not alive` clause and the mg_nest (the one shooter with no concealment gate
+## by design) will not OPEN a burst on one. First all-down tick is 237, i.e. before
+## sample 0, so ALL SIX campaign samples move — measured with tools/probe_down_window.gd,
+## not assumed. See the ENDLESS note for why that golden moves only from sample 3.
 const GOLDEN: Array[int] = [
-	4317574284479865013,
-	1892489906158965715,
-	7974478638996505609,
-	7827033405154250166,
-	5674018418519301982,
-	3093745513736041259,
+	2853010540308134462,
+	5504487071080583783,
+	6389286658685913461,
+	5848415029183823743,
+	7847731113801769580,
+	2496665953045981236,
 ]
 
 
@@ -837,13 +847,19 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## rather than left to be re-quoted: this torture reaches WAVE 5, not wave 2, and wipes
 ## at TICK 3132, not 1393. Those numbers were true when they were written and the sim
 ## has moved since. Re-drive the probe; do not trust the prose.
+## RE-RECORDED (2026-07-28, downed-field freeze — see the GOLDEN note). The endless
+## torture's first ALL-down tick is 2078, between sample 2 (t=1800) and sample 3
+## (t=2400), so samples 0-2 are BYTE-IDENTICAL and only 3-5 move. That split is the
+## proof the change is confined to the down window: had samples 0-2 moved too,
+## something other than the downed-field seam had shifted and this would be a bug,
+## not a re-record. 939 all-down ticks / 10,210 previously-frozen enemy-ticks.
 const ENDLESS_GOLDEN: Array[int] = [
 	8610209561549742921,
 	4307715087271070947,
 	2392889603967106672,
-	2697056323710043292,
-	3080589168965590143,
-	706117180998451249,
+	390397376843286043,
+	1825047908363764441,
+	6729374942503115633,
 ]
 
 

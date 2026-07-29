@@ -1516,9 +1516,14 @@ func _in_grass(t: Dictionary) -> bool:
 
 
 func _concealed(t: Dictionary) -> bool:
-	## The unified fire-acquisition gate: smoke OR tall grass. Segs 0-1 stream
-	## no grass, so in the torture window this is exactly the old smoke gate.
-	return t["smoke_ticks"] > 0 or _in_grass(t) or _in_trench(t["x"], t["y"])
+	## The unified fire-acquisition gate: DOWN or smoke OR tall grass. Segs 0-1
+	## stream no grass, so in the torture window this is exactly the old smoke gate.
+	##
+	## `not alive` is the same seam the smoke fix already cut: once _hunt_target
+	## lets the field keep advancing on a corpse, this one clause is the whole
+	## "nothing shoots a corpse" half of the split. On HEAD it was a no-op —
+	## every caller fed it a _nearest_alive_player result.
+	return not t["alive"] or t["smoke_ticks"] > 0 or _in_grass(t) or _in_trench(t["x"], t["y"])
 
 
 func _blind_scatter(t: Dictionary) -> Array:
@@ -1545,10 +1550,14 @@ func _blind_scatter(t: Dictionary) -> Array:
 	# Smoke first: it is the only player-INITIATED source, so it is what the player
 	# will attribute the moment to. The else is safe — _concealed() already returned
 	# true above, so if it is neither smoke nor grass it is the trench by construction.
-	var src := "smoke"
-	if t["smoke_ticks"] <= 0:
-		src = "grass" if _in_grass(t) else "trench"
-	events.append({"t": "blind_shell", "x": t["x"], "y": t["y"], "src": src})
+	# ...but never off a DOWNED player: the cue is a one-shot rule-teach, and firing
+	# it while you are on your back would teach the concealment rule with a moment
+	# that has nothing to do with concealment.
+	if t["alive"]:
+		var src := "smoke"
+		if t["smoke_ticks"] <= 0:
+			src = "grass" if _in_grass(t) else "trench"
+		events.append({"t": "blind_shell", "x": t["x"], "y": t["y"], "src": src})
 	return [rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE,
 		rng.range_i(-BLIND_SCATTER_RAW, BLIND_SCATTER_RAW) * F_ONE]
 
@@ -3278,7 +3287,7 @@ func _step_enemies() -> void:
 		if e["kind"] == "frogman":
 			_step_frogman(e)
 			continue
-		var target := _nearest_alive_player(e["x"], e["y"])
+		var target := _hunt_target(e["x"], e["y"])
 		if target.is_empty():
 			continue
 		var dx: int = target["x"] - e["x"]
@@ -3592,7 +3601,7 @@ func _step_frogman(e: Dictionary) -> void:
 	## Lurks submerged (grenades only), telegraphs by surfacing (rooted and
 	## harmless for FROGMAN_SURFACE_TICKS, but shootable), then lunges;
 	## re-submerges when the water calms.
-	var target := _nearest_alive_player(e["x"], e["y"])
+	var target := _hunt_target(e["x"], e["y"])
 	if target.is_empty():
 		return
 	var dx: int = target["x"] - e["x"]
@@ -3725,6 +3734,27 @@ func _nearest_alive_player(x: int, y: int) -> Dictionary:
 		# paint/strike starts) via smoke_ticks checks at each shooter.
 		if not p["alive"]:
 			continue
+		var d := Fixed.mul(p["x"] - x, p["x"] - x) + Fixed.mul(p["y"] - y, p["y"] - y)
+		if best.is_empty() or d < best_d:
+			best = p
+			best_d = d
+	return best
+
+
+func _hunt_target(x: int, y: int) -> Dictionary:
+	## MOVEMENT target. Down is a STATE, not a pause: when nobody is up, the field
+	## keeps advancing on where you fell instead of standing to attention around
+	## your body for the whole down window (measured pre-fix: 12,514 enemy-ticks,
+	## 0 moved, and the rich-chest death arms no clock so there was no ceiling).
+	## _concealed() holds every AIMED trigger off a corpse, so this widens movement
+	## only. Deliberately NOT folded into _nearest_alive_player — that has 17 call
+	## sites, several of them pure view reads (boss aim, shield arc, HUD).
+	var t := _nearest_alive_player(x, y)
+	if not t.is_empty():
+		return t
+	var best := {}
+	var best_d := 0
+	for p in players:
 		var d := Fixed.mul(p["x"] - x, p["x"] - x) + Fixed.mul(p["y"] - y, p["y"] - y)
 		if best.is_empty() or d < best_d:
 			best = p
@@ -4074,7 +4104,7 @@ func _spawn_broadcast(x: int, y: int) -> void:
 
 
 
-func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+func _step_mg_nest(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
 	## Break LOS, flank, or grenade it. windup = inter-round spacing, lunge_ticks =
 	## rounds left, aim_lx/ly = the LOCKED burst vector, fire_cd = reload.
 	if e["windup"] > 0:
@@ -4104,7 +4134,10 @@ func _step_mg_nest(e: Dictionary, _target: Dictionary, dx: int, dy: int, dlen: i
 				e["fire_cd"] = MG_NEST_BURST_CD_TICKS
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
-	if e["fire_cd"] == 0 and dlen > F_ONE:
+	# `alive` and not _concealed: the nest is the one shooter with NO concealment
+	# gate (suppressing through smoke is its whole identity), so the corpse rule has
+	# to be said here explicitly. A burst already committed still finishes.
+	if e["fire_cd"] == 0 and dlen > F_ONE and target["alive"]:
 		# Lock the aim on the target NOW and open a 3-round burst down that line.
 		e["aim_lx"] = dx
 		e["aim_ly"] = dy
@@ -5954,7 +5987,7 @@ func _step_colossus() -> void:
 		return
 	if not colossus["alive"]:
 		return
-	var target := _nearest_alive_player(colossus["x"], colossus["y"])
+	var target := _hunt_target(colossus["x"], colossus["y"])
 	if target.is_empty():
 		return
 	var phase := colossus_phase()
