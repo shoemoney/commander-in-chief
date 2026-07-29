@@ -383,9 +383,9 @@ src/sim/             🔒 Deterministic core — int-only, no engine RNG, no Tim
 src/main.gd|.tscn    🖼️ The view + input quantization boundary
 src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · sfx.gd
 src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketch, no callers)
-tests/               Headless runner + 33 suites (SUITE=<name> filter, golden checksums)
+tests/               Headless runner + 38 suites (SUITE=<name> filter, golden checksums)
 tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_assets.gd (CI gates)
-                     screenshots.gd · smoke.gd · validate_replay.gd · purge_history.sh
+                     screenshots.gd · smoke.gd · validate_replay.gd
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
 
@@ -424,7 +424,7 @@ of which source it came from.
 > ✅ **Every asset is cleared, and the history is clean.** All 266 PNGs under `assets/` are owned
 > procedural art (`tools/gen_*.py`), owned generative-AI pieces, or CC0, and the 174 voice mp3
 > were synthesized in-house and are owned by the project. The old
-> proprietary art was **purged from every commit** on 2026-07-27 (`tools/purge_history.sh`) —
+> third-party art was **purged from every commit** on 2026-07-27 —
 > that was the last blocker, and clearing it is what let this repo go public. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
 > was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the synthesized VO
 > already ship in-game. 📋 Full asset-licensing map + the open-source audit trail:
