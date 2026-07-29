@@ -6427,6 +6427,14 @@ static func _grade_breather_target(mode: String, intermission_ticks: int) -> flo
 	return 1.0 if (mode == "endless" and intermission_ticks > 0) else 0.0
 
 
+static func _wheel_scrim_alpha(mode: String, intermission_ticks: int, open: bool) -> float:
+	# The wheel is world-anchored over LIVE combat — a scrim there hides the threats
+	# the sim is still simulating. Only the endless intermission shop is threat-free,
+	# and that is exactly the frame the breather grade lightens: dim it back down so
+	# the wheel reads as a shop, not as a HUD fragment over bright terrain.
+	return 0.45 if (open and mode == "endless" and intermission_ticks > 0) else 0.0
+
+
 static func _boss_rim_base(march: float) -> Color:
 	# a3-01: the boss separator rim, keyed to the biome march. Warm-dark over the
 	# green bridge (low march, where the gunship was tuned) -> cool steel-BLUE on the
@@ -8198,6 +8206,11 @@ func _draw_gates() -> void:
 		var sign_xs := fork_sign_xs(cache_left, cw2, bw2)
 		var cx := sign_xs.x
 		var bx := sign_xs.y
+		# Anchored signage RESERVES its pixels in the world-text arbiter and never
+		# moves — transient labels dodge around it (the geometry ratchet has modelled
+		# exactly this all along; the draws used to bypass it).
+		_label_slots.append(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0))
+		_label_slots.append(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0))
 		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
 		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
 		Art.text(self, cache_txt, Vector2(cx, fy), 24, Art.safe(Color(0.5, 1.0, 0.7)))
@@ -8283,13 +8296,21 @@ func _draw_pickups() -> void:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
-			Art.text(self, "MAXED", ppos + Vector2(-15, -25), 9, Color(0.6, 0.6, 0.6))
+			_world_label("MAXED", ppos + Vector2(-15, -25), Color(0.6, 0.6, 0.6))
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= pk["cost"]
 			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
-			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33), Vector2(9, 9)), false)
-			Art.text(self, str(pk["cost"]), ppos + Vector2(-4, -25), 9, pcol)
+			# Coin + digits claim ONE slot through the world-text arbiter (the icon
+			# travels with its number) — the bare draws printed the price over fork
+			# signposts, plated labels and floattext toasts.
+			var pdigits := str(pk["cost"])
+			var pwant := Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(pdigits, 9), 13.0)
+			var pgot := claim_label_slot(pwant, _label_slots)
+			_label_slots.append(pgot)
+			var poff := pgot.position - pwant.position
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33) + poff, Vector2(9, 9)), false)
+			Art.text(self, pdigits, ppos + Vector2(-4, -25) + poff, 9, pcol)
 
 
 func _draw_tanks() -> void:
@@ -9041,14 +9062,16 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 var _label_slots: Array[Rect2] = []
 
 
-static func claim_label_slot(rect: Rect2, taken: Array[Rect2]) -> Rect2:
+static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0) -> Rect2:
 	## The in-world counterpart to band_rows(): one arbiter for every world-space
 	## string, instead of one arbiter for floattext and eleven producers printing
 	## wherever they liked. A transient label drops one 11px row at a time until it
 	## owns its pixels — same stride and same 6-row bound the floattext stacking
 	## block used, this is a MOVE of that logic, not a second system. Rows that would
 	## leave the 640x360 frame are skipped, and a label with nowhere to go keeps its
-	## place rather than being shoved off-screen.
+	## place rather than being shoved off-screen. min_y floors the search: floattext
+	## passes the top band's bottom edge, because the toast stack it replaced went
+	## DOWN-only precisely so a toast pinned under the band can't climb back into it.
 	var w: float = rect.size.x
 	var h: float = rect.size.y
 	# X is clamped first and always: a label wider than its anchor can start off-frame
@@ -9063,8 +9086,8 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2]) -> Rect2:
 		rows.append(-float(k + 1) * 11.0)
 	for dy in rows:
 		var y: float = rect.position.y + dy
-		if y < 0.0 or y + h > 360.0:
-			continue                      # off-frame rows are skipped, never occupied
+		if y < min_y or y + h > 360.0:
+			continue                      # off-frame / under-the-band rows are never occupied
 		var cand := Rect2(x, y, w, h)
 		var clash := false
 		for t in taken:
@@ -9076,7 +9099,7 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2]) -> Rect2:
 		if not clash:
 			return cand
 	# Nowhere to go: keep the place, x-clamped, rather than shoving it off-screen.
-	return Rect2(x, clampf(rect.position.y, 0.0, maxf(0.0, 360.0 - h)), w, h)
+	return Rect2(x, clampf(rect.position.y, min_y, maxf(min_y, 360.0 - h)), w, h)
 
 
 ## a11y: the alpha floor an in-world callout's INK is held at. Same shape as
@@ -9117,20 +9140,23 @@ static func _callout_ink_alpha(a: float) -> float:
 ##
 ## Plate alpha is FLAT (as the boss label draws it) rather than tracking the ink — a plate
 ## that fades with a pulsing label puts the trough right back under AA.
-func _world_label(txt: String, pos: Vector2, col: Color) -> void:
+func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 	var a := _callout_ink_alpha(col.a)
 	if a <= 0.0:
-		return
+		return Vector2.ZERO
 	var sz := Art.fs(8)
 	# Every world-space string goes through the arbiter, so a callout drops a row rather
 	# than printing on top of a signpost or another callout. The plate and the ink move
 	# together — drawing the plate at the claimed rect and the text at the old baseline
-	# is how you get a label sitting beside its own background.
+	# is how you get a label sitting beside its own background. The claim offset is
+	# returned so a companion glyph (the REVIVE keycap) rides the same dodge.
 	var want := _label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)
 	var got := claim_label_slot(want, _label_slots)
 	_label_slots.append(got)
 	draw_rect(got, LABEL_PLATE_FILL)
-	Art.text(self, txt, pos + (got.position - want.position), sz, Color(col.r, col.g, col.b, a))
+	var off := got.position - want.position
+	Art.text(self, txt, pos + off, sz, Color(col.r, col.g, col.b, a))
+	return off
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
@@ -9710,14 +9736,12 @@ func _draw_players() -> void:
 					# hidden exactly when you're short of it, so "feed the war
 					# chest" had no answer to "with how much?". Warm red, no
 					# pay-from-here dashes (you can't).
-					draw_string(Art.font(), pos + Vector2(-18, -16), "REVIVE %d" % cost,
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(1.0, 0.5, 0.4)))
+					_world_label("REVIVE %d" % cost, pos + Vector2(-18, -16), Art.safe(Color(1.0, 0.5, 0.4)))
 					continue
 				Art.dashed_line(self, pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
-				draw_string(Art.font(), pos + Vector2(-18, -16), rtxt,
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph(self, "revive", pos + Vector2(24, -19), 10.0, Color.WHITE, i == 1, bind("revive"))
+				var roff := _world_label(rtxt, pos + Vector2(-18, -16), Art.safe(Color(0.5, 1.0, 0.6)))
+				Art.draw_glyph(self, "revive", pos + Vector2(24, -19) + roff, 10.0, Color.WHITE, i == 1, bind("revive"))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
 			# responsive while arrow-key 45° pops still glide instead of snapping.
@@ -10283,6 +10307,21 @@ func _draw_fx() -> void:
 				if not hit:
 					break
 				fpivot.y += 11.0
+			# Toast-vs-toast stacking alone left toasts printing over plated labels and
+			# the fork signposts (and them over the toasts) — the "three-deep stack
+			# across the center". Claim the PUNCHED footprint (text width x 11px,
+			# inflated by the 1.5 spawn punch about the pivot — the same idiom as the
+			# banner plate's BANNER_PUNCH_MAX banking) through the one arbiter, then
+			# re-anchor the pivot so text and claim move together. min_y keeps an
+			# up-dodge from climbing back into the top band, the invariant the old
+			# DOWN-only stacking existed to keep.
+			var frect := Rect2(fpivot.x - fhw, fpivot.y - 11.0, fw, 11.0)
+			var prect := Rect2(fpivot.x + (frect.position.x - fpivot.x) * 1.5,
+				fpivot.y + (frect.position.y - fpivot.y) * 1.5,
+				frect.size.x * 1.5, frect.size.y * 1.5)
+			var fgot := claim_label_slot(prect, _label_slots, band_floor + float(fsz) - 16.5)
+			_label_slots.append(fgot)
+			fpivot += fgot.position - prect.position
 			floattext_anchors.append(Vector3(fpivot.x, fpivot.y, fhw))
 			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
@@ -11026,6 +11065,20 @@ func _wheel_row_plate(cx: float, row_y: float, w: float, size: int) -> void:
 
 
 func _draw_wheel() -> void:
+	# Intermission-shop scrim, drawn ONCE per frame (not per player — two open wheels
+	# would double-dim) and before any wheel content. Screen-anchored like the NIGHT
+	# OPS dim: trauma from the wave's final kills decays 0.03/frame, so up to ~0.5s
+	# of shake rides INTO the shop — a scrim under the world transform would jitter
+	# bright slivers onto the frame edges exactly as the shop opens.
+	var scrim := 0.0
+	for i in sim.players.size():
+		if i < _wheel.size() and _wheel[i]["open"] and sim.players[i]["alive"]:
+			scrim = _wheel_scrim_alpha(sim.mode, sim.intermission_ticks, true)
+			break
+	if scrim > 0.0:
+		draw_set_transform_matrix(get_transform().affine_inverse())
+		draw_rect(Rect2(0, 0, 640, 360), Color(0, 0, 0, scrim))
+		draw_set_transform_matrix(Transform2D())
 	for i in sim.players.size():
 		if i >= _wheel.size() or not _wheel[i]["open"]:
 			continue

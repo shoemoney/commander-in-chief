@@ -1414,3 +1414,71 @@ func test_world_labels_never_share_pixels() -> void:
 	# Route one representative frame through the suite's shared 2D comparator rather
 	# than trusting only the counter above.
 	Runner.T.no_overlap(capture, "in-world labels")
+
+
+func test_world_text_routes_through_the_arbiter() -> void:
+	# The geometry ratchet above MODELS routed draws — and it passed on the HEAD where
+	# only _world_label's call sites were routed, while 5 of 6 world-text producer
+	# families (fork signposts, MAXED, the crate price row, floattext toasts, REVIVE)
+	# printed wherever they liked. The screen stacked three-deep while the model stayed
+	# green: the exact green-but-wrong trap. This scrape is the wiring ratchet the
+	# geometry test cannot be — it reads the SOURCE, not the model.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.count("_label_slots.append") >= 3,
+		"labels + signpost reserves + floattext all append to the one arbiter (%d append sites)"
+			% src.count("_label_slots.append"))
+	Runner.T.ok(src.count("claim_label_slot(") >= 4,
+		"def + _world_label + price row + floattext all claim through the one arbiter (%d sites)"
+			% src.count("claim_label_slot("))
+	Runner.T.eq(src.count("Art.text(self, \"MAXED\""), 0,
+		"MAXED routes through the arbiter, not a bare Art.text")
+	Runner.T.eq(src.count("draw_string(Art.font(), pos + Vector2(-18, -16)"), 0,
+		"REVIVE routes through _world_label, not a bare draw_string")
+	var fstart := src.find("fx[\"kind\"] == \"floattext\"")
+	Runner.T.ok(fstart >= 0, "found the floattext draw block")
+	if fstart >= 0:
+		var fend := src.find("elif fx[\"kind\"]", fstart + 1)
+		Runner.T.ok(fend > fstart, "the floattext block is delimited by the next fx-kind branch")
+		if fend > fstart:
+			Runner.T.ok(src.substr(fstart, fend - fstart).contains("claim_label_slot"),
+				"floattext toasts claim through the world-text arbiter, not only toast-vs-toast anchors")
+
+
+func test_wheel_scrim_only_in_safe_shop() -> void:
+	# The radial wheel is world-anchored over LIVE combat, where a scrim would hide the
+	# threats the sim is still simulating — so combat wheels correctly get none. The ONE
+	# threat-free wheel context is the endless intermission shop, and that is exactly the
+	# frame the a4-15 breather grade LIFTS (x1.05 exposure): the shop read brighter than
+	# combat. The scrim dims only that frame back down.
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("_wheel_scrim_alpha"),
+		"the wheel scrim decision is a named, testable helper")
+	if not ms.has_method("_wheel_scrim_alpha"):
+		return
+	var shop_a: float = ms._wheel_scrim_alpha("endless", 240, true)
+	Runner.T.ok(shop_a >= 0.35,
+		"the intermission shop dims the frame behind the wheel (got %.2f)" % shop_a)
+	# Guard rails: every combat context stays scrim-free, so a future "dim everything"
+	# edit goes red here instead of shipping a scrim over live threats.
+	Runner.T.eq(ms._wheel_scrim_alpha("campaign", 0, true), 0.0,
+		"the campaign wheel is over live combat — no scrim")
+	Runner.T.eq(ms._wheel_scrim_alpha("endless", 0, true), 0.0,
+		"the endless MID-WAVE wheel is over live combat — no scrim")
+	# Wiring: defined AND called from _draw_wheel (a def-only helper is the same
+	# green-but-wrong trap as claim_label_slot was).
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.count("_wheel_scrim_alpha(") >= 2,
+		"_wheel_scrim_alpha is wired into _draw_wheel, not just defined")
+	# The scrim must be SCREEN-anchored: trauma from the wave's final kills decays
+	# 0.03/frame, so up to ~0.5s of residual shake rides into the shop — a scrim
+	# drawn under the world transform jitters bright slivers onto the frame edges
+	# exactly as the shop opens (the NIGHT OPS dim cancels the transform for the
+	# same reason).
+	var wstart := src.find("func _draw_wheel()")
+	Runner.T.ok(wstart >= 0, "found _draw_wheel")
+	if wstart >= 0:
+		var wslice := src.substr(wstart, 1400)
+		var scrim_at := wslice.find("Color(0, 0, 0, scrim)")
+		var anchor_at := wslice.find("affine_inverse")
+		Runner.T.ok(scrim_at > 0 and anchor_at > 0 and anchor_at < scrim_at,
+			"the shop scrim cancels the world transform before drawing (screen-anchored)")
