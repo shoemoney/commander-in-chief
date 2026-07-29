@@ -1123,8 +1123,14 @@ func test_every_field_death_strips_is_named_on_a_loss_payload() -> void:
 
 	# View half: a key with no noun prints nothing, which is the same silence in a new costume.
 	var vsrc := _view_src()
-	var nouns := vsrc.substr(vsrc.find("const LOSS_NOUN"))
-	nouns = nouns.substr(0, maxi(0, nouns.find("\n\n")))
+	# Normalise line endings before slicing: a Windows checkout without .gitattributes
+	# delivers "\r\n\r\n", which contains no "\n\n", so find() returned -1, the slice
+	# collapsed to "" and every lookup below failed — Windows-only, 9 assertions, while
+	# macOS and Linux stayed green. .gitattributes now pins eol=lf; this is the second lock.
+	var vnorm := vsrc.replace("\r\n", "\n")
+	var nouns := vnorm.substr(vnorm.find("const LOSS_NOUN"))
+	var blank := nouns.find("\n\n")
+	nouns = nouns.substr(0, blank) if blank > 0 else nouns
 	Runner.T.ok(vsrc.find("const LOSS_NOUN") >= 0,
 		"src/main.gd has no LOSS_NOUN table — the sim can name a loss the view has no word for")
 	for k in (strips + ["token", "streak"]):

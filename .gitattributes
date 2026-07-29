@@ -1,0 +1,49 @@
+# Line endings — LF everywhere, including on Windows checkouts.
+#
+# WHY THIS FILE EXISTS, and it is not hypothetical: several tests read the game's
+# own source as TEXT and parse it (the view/sim honesty ratchets, the stub-parity
+# check, the menu-copy corpus). With Git's default autocrlf on windows-latest,
+# those files arrive as CRLF and every `find("\n\n")` / `split("\n")` in a test
+# either misses or splits wrong. Symptom seen in CI: tests/test_view_honesty.gd
+# sliced the LOSS_NOUN table with `find("\n\n")`, which cannot match inside
+# "\r\n\r\n", so the slice came back EMPTY and 9 assertions failed on Windows
+# only while macOS and Linux were green. 23 such text parses live in tests/.
+#
+# Normalising here fixes the whole class in one place instead of hardening each
+# parse. Godot's own project files are LF by convention anyway.
+* text=auto eol=lf
+
+# Explicitly text, so a stray CRLF can never sneak back in via a contributor's editor.
+*.gd        text eol=lf
+*.gdshader  text eol=lf
+*.tscn      text eol=lf
+*.tres      text eol=lf
+*.godot     text eol=lf
+*.cfg       text eol=lf
+*.import    text eol=lf
+*.uid       text eol=lf
+*.md        text eol=lf
+*.py        text eol=lf
+*.sh        text eol=lf eof=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.po        text eol=lf
+*.vdf       text eol=lf
+
+# Binary — never touched, never diffed as text, never line-ending mangled.
+*.png       binary
+*.jpg       binary
+*.ico       binary
+*.mp3       binary
+*.ogg       binary
+*.wav       binary
+*.ttf       binary
+*.otf       binary
+*.zip       binary
+*.pck       binary
+*.exe       binary
+*.bundle    binary
+
+# Keep generated/vendored noise out of language stats and diff review.
+assets/**   linguist-vendored
+locale/**   linguist-detectable=false

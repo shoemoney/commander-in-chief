@@ -510,9 +510,17 @@ hard-won list of gotchas that will otherwise each cost you an hour. 🕳️
 
 ## 📜 License
 
-**MIT** for the code — see [`LICENSE`](LICENSE). Assets are owned by the project or CC0;
-the per-folder provenance map is [`ASSETS.md`](ASSETS.md), and the `LICENSE` file states
-plainly which grant covers what. 🪪
+**MIT** for the code — see [`LICENSE`](LICENSE). It does **not** cover the bundled assets.
+
+| 📄 | Covers |
+|---|---|
+| [`LICENSE`](LICENSE) | Source code — plain MIT, nothing else in the file |
+| [`NOTICE.md`](NOTICE.md) | What MIT does **not** grant, third-party components, and the `assets/vo/` likeness position |
+| [`ASSETS.md`](ASSETS.md) | Per-directory provenance map for every shipped asset |
+
+> 🎭 **If you redistribute this repo, read [`NOTICE.md`](NOTICE.md) first.** The commander VO
+> imitates an identifiable public figure. The project owns the recordings; right of publicity
+> does not belong to it, and that question travels with the audio. 🪪
 
 ---
 
