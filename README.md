@@ -16,7 +16,7 @@
 
 ![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-961%20methods%20%C2%B7%2021.9k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-971%20methods%20%C2%B7%2022.5k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
@@ -55,7 +55,7 @@ Endless War shop.</sub>
 > replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
-> golden-checksum suite (**961 methods / 21.9k assertions** — the runner prints the exact
+> golden-checksum suite (**971 methods / 22.5k assertions** — the runner prints the exact
 > pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
 > `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
 > Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
@@ -283,7 +283,7 @@ SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter
 SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
 ```
 
-**961 test methods / 21,936 assertions** (the `PASS —` line prints the exact pair) — fixed-point
+**971 test methods / 22,495 assertions** (the `PASS —` line prints the exact pair) — fixed-point
 math, seeded RNG streams, the 1986 mechanic grammar, the War Chest economy,
 tank/observer/gates/water/gunship/colossus, every archetype's behavior contract (nest armor,
 technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop, lockstep loopback,
