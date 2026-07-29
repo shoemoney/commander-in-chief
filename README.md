@@ -111,8 +111,9 @@ gitGraph
 |---|---|---|
 | [🏗️ Architecture](#%EF%B8%8F-architecture--the-simview-split) | [🎮 Controls](#-controls) | [🕹️ Modes](#%EF%B8%8F-modes) |
 | [👹 The Roster](#-the-roster) | [🎁 Drops & the Wheel](#-drops--the-supply-wheel) | [🧪 Testing](#-headless-test-suite) |
-| [📻 The Radio](#-the-radio) | [🌐 Netcode](#-netcode-deterministic-lockstep) | [🚀 Quick Start](#-quick-start-macos--apple-silicon) |
-| [🎨 Art](#-art) | [📥 **Download**](#-download--play) | |
+| [📻 The Radio](#-the-radio) | [🌐 Netcode](#-netcode-deterministic-lockstep--a-design-sketch-not-shipped-online-play) | [🚀 Quick Start](#-quick-start-macos--apple-silicon) |
+| [🎨 Art](#-art) | [📥 **Download**](#-download--play) | [🗺️ Roadmap](#%EF%B8%8F-roadmap) |
+| [🤝 Contributing](#-contributing) | [📜 License](#-license) | |
 
 ---
 
@@ -183,10 +184,31 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 |---|---|
 | 🏔️ **Campaign** | 6 gated sectors (`SimWorld.FINAL_GATE_INDEX`) → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**). Gates 2 & 4 **fork**: `< CACHE` (free crate ringed by mines) vs `BOUNTY >` (two elites, one marked) — walking a side IS the choice 🛣️ |
 | ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, minibosses that **fly in** over 7s and **escalate by tier** (tighter spray, extra mortars by w15), contested **parachute supply drops** rushers try to steal 🪂, and the wave-7+ **Broadcast Tower** debut |
-| 👥 **Local 2P co-op** | Shared War Chest, revive tether, per-device input glyphs |
+| 🎯 **Arcade / Chapter Select** | Jump straight to any of the **6 chapters** (`jump_to_chapter`) — the same authored world, entered mid-way by priming every streaming cursor forward. Every streamed pick is a pure function of absolute world position, so chapter 4 looks like chapter 4 always does 🗺️ |
+| 🥊 **Boss Rush** | `BOSS_RUSH_COUNT` = **3 gunships back-to-back**, then the Colossus caps the run. Non-linear HP escalation (`BOSS_RUSH_HP_STEPS = [0, 14, 32]`) — the ladder steepens, it does not just scale 📈 |
+| 👥 **Local 2P co-op** | Shared War Chest, revive tether, per-device input glyphs. The field **keeps advancing on a downed player** — being down is a state, not a pause ⏱️ |
 | 📅 **Daily Run** | Seed-of-the-day challenge run (Hall entries wear a `*DAILY` tag) |
 | 🎞️ **Watch Last Run** | Every run records inputs → `user://last_run.replay`, replayable from the menu |
 | 💀 **NG+ HARD** / 🛟 **ASSIST (2-hit)** | Difficulty toggles, both checksum-honest |
+
+```mermaid
+flowchart LR
+    T([🎮 TITLE]) --> C[🏔️ Campaign]
+    T --> M{{🕹️ MODES}}
+    T --> D[📅 Daily Run]
+    T --> W[🎞️ Watch Last Run]
+    M --> A[🎯 Arcade]
+    M --> B[🥊 Boss Rush]
+    M --> E[♾️ Endless War]
+    A --> CS[🗺️ Chapter Select 1-6]
+    C --> F([🏭 Foundry Colossus])
+    B --> F
+    CS --> F
+    E --> WV[🌊 Waves + 🛒 Shop]
+```
+
+All four sim modes — `campaign` · `arcade` · `endless` · `boss_rush` — share one
+`SimWorld`, one checksum, and one golden-checksum suite. 🔒
 
 Persistent carrots 🥕: top-8 **Hall of Fame**, career totals, and best score/wave/distance
 survive across runs (`user://ikari_best.cfg`, atomic tmp+bak writes).
@@ -423,6 +445,70 @@ of which source it came from.
 Accessibility baked into the view 🧏: colorblind-safe palette routing (`Art.safe`),
 reduce-motion mode (steady lights instead of strobes/pulses), photosensitivity
 discipline (no kill-flash spam), SFX/music/rumble toggles, device-adaptive glyphs.
+
+---
+
+## 🗺️ Roadmap
+
+Three states, and the wording is deliberately unflattering where it has to be:
+**✅ done · 🔨 in progress · ⬜ planned**.
+
+```mermaid
+flowchart LR
+    A[✅ Deterministic core] --> B[✅ Playable start→finish]
+    B --> C[✅ Owned art + public release]
+    C --> D[🔨 AAA polish pass]
+    D --> E[⬜ Online netplay]
+    D --> F[⬜ Steam release]
+    E --> G[⬜ 1.0]
+    F --> G
+```
+
+| | Milestone | Where it actually stands |
+|---|---|---|
+| ✅ | **Deterministic core** | 16.16 fixed-point, seeded xoshiro128\*\*, no floats/RNG/wall-clock/scene-tree in `src/sim` — enforced by `tools/lint_sim.gd` in CI, not by convention. Golden-checksum suite proves bit-identical x86_64 ⇄ arm64 |
+| ✅ | **Playable start→finish** | 6 gated sectors → Foundry Colossus, plus Arcade/Chapter Select, Endless War, Boss Rush, Daily Run, replay, local 2P |
+| ✅ | **Owned art + audio** | Every sprite owned-procedural, owned generative-AI, or CC0; voice lines synthesized in-house. Provenance map in [`ASSETS.md`](ASSETS.md) |
+| ✅ | **Public release** | Clean git history, MIT on the code, **v0.3.0** binaries for macOS (arm64 + universal) · Linux · Windows |
+| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame, sectors reuse one desert tileset despite distinct names |
+| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **108 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
+| ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
+| ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
+| ⬜ | **Human-in-the-loop production** | No external playtests, no hired artist or art director, no external QA or compat matrix. Built by one owner plus agents — see the caveat at the top of [`docs/PLAN.md`](docs/PLAN.md) |
+
+> 📌 **"P3" in this repo means _playable start→finish with all modes in_** — not that
+> `docs/PLAN.md`'s P3 exit criteria were met. The plan is costed for a 4-person team that
+> does not exist here. **The sim code is the source of truth for what ships.**
+
+---
+
+## 🤝 Contributing
+
+Small, well-tested changes are very welcome. Two things this codebase cares about more than most:
+
+| 🎯 | Rule | Why |
+|---|---|---|
+| 🔒 | **Nothing non-deterministic in `src/sim`** | No floats, no `randi()`, no `Time.*`, no scene-tree access. `tools/lint_sim.gd` fails CI on any of them |
+| 📏 | **A sim change moves the golden checksums — by design** | Re-record deliberately: set `GOLDEN = []`, run, paste back, and write *why* with the arithmetic. Never re-record to turn a red green |
+| 🧪 | **New behaviour brings a check that fails first** | Watch it go red for the stated reason before the fix, or it is pinning the wrong thing |
+| 📐 | **Route through the arbiters** | `main.band_rows()` owns stacked HUD bands; `main.claim_label_slot()` owns world-space labels. Drawing directly bypasses their ratchets silently |
+
+```sh
+godot --headless --path . --import        # once after cloning
+tools/run_tests.sh                        # full suite under a private user://
+tools/run_tests.sh -s res://tools/lint_sim.gd
+```
+
+`CLAUDE.md` is the long-form contributor guide — architecture, conventions, and a
+hard-won list of gotchas that will otherwise each cost you an hour. 🕳️
+
+---
+
+## 📜 License
+
+**MIT** for the code — see [`LICENSE`](LICENSE). Assets are owned by the project or CC0;
+the per-folder provenance map is [`ASSETS.md`](ASSETS.md), and the `LICENSE` file states
+plainly which grant covers what. 🪪
 
 ---
 
