@@ -3509,3 +3509,148 @@ func test_mg_nest_leads_a_moving_target_instead_of_shooting_where_it_was() -> vo
 	var lead_len: int = Fixed.length(d[0] - 0, d[1] - (-120 * F))
 	Runner.T.ok(lead_len <= SimWorld.MG_NEST_LEAD_CAP + F,
 		"a teleporting target cannot swing the lane past MG_NEST_LEAD_CAP (got %d px)" % (lead_len / F))
+
+# --- The field must not turn to stone while you are down -----------------------
+#
+# Measured on this tree before the fix: solo campaign, seed 0xC0FFEE, one enemy of
+# every kind the sim's own dispatch names, player alive=false, war_chest=9999 (the
+# RICH death arms no clock at all, so the freeze had no upper bound) -> 600 ticks,
+# 0 of 13 kinds changed a single state field. The window is 600 because the longest
+# BOUNDED freeze is BROKE_RESPAWN_TICKS = 300; 2x that, and the rich-chest case
+# measured past it with no ceiling.
+
+func _step_enemies_kinds() -> Array[String]:
+	## Roster scraped from the sim's OWN dispatch (same idiom as test_main.gd's band
+	## copy scrape), so a kind added tomorrow is covered the day it lands.
+	var out: Array[String] = []
+	var inside := false
+	for line in FileAccess.get_file_as_string("res://src/sim/sim_world.gd").split("\n"):
+		if line.begins_with("func _step_enemies("):
+			inside = true
+			continue
+		if not inside:
+			continue
+		if line.begins_with("func "):
+			break
+		var at := line.find("[\"kind\"] == \"")
+		if at == -1:
+			continue
+		var rest := line.substr(at + 13)
+		var end := rest.find("\"")
+		if end > 0 and not out.has(rest.substr(0, end)):
+			out.append(rest.substr(0, end))
+	# The elite branch dispatches off e["elite"], not a kind literal — it is still an
+	# enemy that must keep fighting, so it is named explicitly rather than scraped.
+	if not out.has("elite"):
+		out.append("elite")
+	return out
+
+
+func _spawn_downed_field_kind(sim: SimWorld, kind: String, x: int, y: int) -> Dictionary:
+	## Every unit is built by the SHIPPED spawner for its kind, so the fixture can
+	## never drift into a hand-rolled dict the real game never fields.
+	match kind:
+		"rusher":
+			sim._spawn_enemy(x, y, false)
+		"elite":
+			sim._spawn_enemy(x, y, true)
+		"mg_nest":
+			sim._spawn_mg_nest(x, y)
+		"broadcast":
+			sim._spawn_broadcast(x, y)
+		"frogman":
+			sim._spawn_frogman(x, y)
+		"pilot":
+			sim.enemies.append({"x": x, "y": y, "alive": true, "elite": false,
+				"kind": "pilot", "submerged": false, "surface_ticks": 0})
+		_:
+			sim._spawn_special(x, y, kind)
+	return sim.enemies[-1]
+
+
+func _enemy_state(e: Dictionary) -> String:
+	return "%d,%d,%d,%d,%d,%s,%d" % [e["x"], e["y"], e.get("windup", 0), e.get("fire_cd", 0),
+		e.get("lunge_ticks", 0), str(e.get("submerged", false)), e.get("surface_ticks", 0)]
+
+
+func _downed_field(kinds: Array[String]) -> Array:
+	## Solo campaign, one of each kind ringed around the player, player DOWN and the
+	## chest rich enough that _step_dead_player arms no respawn clock.
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var p: Dictionary = sim.players[0]
+	var refs := {}
+	# Tight ring: every unit sits inside the SMALLEST shipped trigger radius
+	# (FROGMAN_NOTICE_RADIUS, 60px) so no kind can read as "frozen" merely because
+	# the fixture parked it out of its own range.
+	for i in kinds.size():
+		var ex: int = p["x"] + (-36 + (i % 7) * 12) * SimWorld.F_ONE
+		var ey: int = p["y"] - (28 + (i / 7) * 10) * SimWorld.F_ONE
+		refs[kinds[i]] = _spawn_downed_field_kind(sim, kinds[i], ex, ey)
+	p["alive"] = false
+	sim.war_chest = 9999
+	return [sim, refs]
+
+
+func test_downed_field_never_freezes() -> void:
+	var kinds := _step_enemies_kinds()
+	Runner.T.ok(kinds.size() >= 12,
+		"scraped the sim's own enemy dispatch (%d kinds) — a dead scrape must not pass silently"
+			% kinds.size())
+	var fixture := _downed_field(kinds)
+	var sim: SimWorld = fixture[0]
+	var refs: Dictionary = fixture[1]
+	var before := {}
+	for kind in kinds:
+		before[kind] = _enemy_state(refs[kind])
+	for _t in 600:
+		sim.war_chest = 9999
+		sim.step([_idle()])
+	var frozen := PackedStringArray()
+	for kind in kinds:
+		if _enemy_state(refs[kind]) == before[kind]:
+			frozen.append(kind)
+	Runner.T.eq(frozen.size(), 0,
+		"DOWN is a state, not a pause: %d of %d enemy kinds were byte-identical after 600 down ticks (%s)"
+			% [frozen.size(), kinds.size(), ", ".join(frozen)])
+
+
+func test_downed_player_is_never_shot() -> void:
+	## The anti-over-fix guard for the test above: the field keeps ADVANCING on a
+	## corpse, but no aimed shooter opens fire on one. (Area fire — grenadier lobs,
+	## drone paints — is deliberately still allowed; it scatters and lands harmlessly.)
+	var kinds := _step_enemies_kinds()
+	var fixture := _downed_field(kinds)
+	var sim: SimWorld = fixture[0]
+	var first_shot := -1
+	for t in 600:
+		sim.war_chest = 9999
+		sim.step([_idle()])
+		if first_shot < 0 and not sim.enemy_bullets.is_empty():
+			first_shot = t
+	Runner.T.eq(first_shot, -1,
+		"nothing shoots a corpse: first enemy bullet during the down window was tick %d" % first_shot)
+
+
+func test_downed_colossus_keeps_advancing() -> void:
+	## The third seam _hunt_target covers. The finale fortress used to stop dead the
+	## instant the last player went down — the one fight where "dead is dead"
+	## (last_stand) means the freeze lasts until the run is manually restarted.
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var p: Dictionary = sim.players[0]
+	sim.colossus = {
+		"alive": true, "hp": 400, "max_hp": 400,
+		"x": SimWorld.SCREEN_CX, "y": sim.camera_top + 40 * SimWorld.F_ONE,
+		"spray_cd": SimWorld.COLOSSUS_SPRAY_CD_TICKS,
+		"volley_cd": SimWorld.COLOSSUS_VOLLEY_CD_TICKS,
+		"spawn_cd": SimWorld.COLOSSUS_SPAWN_CD_TICKS,
+		"core_cd": SimWorld.COLOSSUS_CORE_CYCLE_TICKS, "core_open": 0,
+		"sweep_cd": SimWorld.COLOSSUS_SWEEP_CD_TICKS,
+	}
+	sim.last_stand = true
+	var before := "%d,%d" % [sim.colossus["x"], sim.colossus["y"]]
+	p["alive"] = false
+	for _t in 600:
+		sim.step([_idle()])
+	Runner.T.ok("%d,%d" % [sim.colossus["x"], sim.colossus["y"]] != before,
+		"the colossus keeps driving at where you fell instead of parking for the whole down window (%s -> %d,%d)"
+			% [before, sim.colossus["x"], sim.colossus["y"]])

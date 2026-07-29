@@ -654,13 +654,23 @@ const SEED := 0xDEADBEEF
 ## nothing here is byte-identical, which is what a fork at tick 97 has to look like.
 ## Solo campaign is unaffected by (2) by construction: CAMERA_LEAD 260 sits inside the 344
 ## band, so a lone player's own leash term can never exceed their own focus term.
+## RE-RECORDED (2026-07-28, downed-field freeze): enemy MOVEMENT no longer stops when
+## every player is down. _step_enemies / _step_frogman / _step_colossus now take
+## _hunt_target (nearest player, alive or not) instead of _nearest_alive_player, whose
+## empty return had every consumer `continue` past the entire tick — measured on this
+## torture: 1,207 of 3,600 ticks (33.5%) had BOTH players down, and across them 52,718
+## enemy-ticks produced zero movement. The corpse is still never shot at: _concealed()
+## gained a `not alive` clause and the mg_nest (the one shooter with no concealment gate
+## by design) will not OPEN a burst on one. First all-down tick is 237, i.e. before
+## sample 0, so ALL SIX campaign samples move — measured with tools/probe_down_window.gd,
+## not assumed. See the ENDLESS note for why that golden moves only from sample 3.
 const GOLDEN: Array[int] = [
-	4317574284479865013,
-	1892489906158965715,
-	7974478638996505609,
-	7827033405154250166,
-	5674018418519301982,
-	3093745513736041259,
+	2853010540308134462,
+	5504487071080583783,
+	6389286658685913461,
+	5848415029183823743,
+	7847731113801769580,
+	2496665953045981236,
 ]
 
 
@@ -855,13 +865,36 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## fixes in this commit still in the tree, SUITE=determinism passes on the committed values.
 ## So the mortar-lead refactor, the Arcade _author_lz arm and the SFX read are all golden-inert
 ## by measurement. GOLDEN (campaign) verified unchanged for the same reason.
+##
+## RE-RECORDED (2026-07-28, downed-field freeze — see the GOLDEN note). The endless
+## torture's first ALL-down tick is 2078, between sample 2 (t=1800) and sample 3
+## (t=2400), so samples 0-2 are BYTE-IDENTICAL and only 3-5 move. That split is the
+## proof the change is confined to the down window: had samples 0-2 moved too,
+## something other than the downed-field seam had shifted and this would be a bug,
+## not a re-record. 939 all-down ticks / 10,210 previously-frozen enemy-ticks.
+##
+## RE-RECORD 2026-07-28 (MERGE of two same-day endless changes): the two notes above were
+## recorded on SEPARATE branches — the rooted-spawn row move (samples 4-5) and the
+## downed-field freeze fix (samples 3-5) — so neither array was correct here and neither side
+## was picked. Re-derived once on the combined tree: samples 0-2 byte-identical, 3-5 move,
+## which is the earlier of the two seams (first all-down tick 2078, landing in sample 3).
+##
+## ⚠️ THE COMBINED VALUES CAME BACK IDENTICAL TO THE FREEZE-FIX-ONLY SIDE, and that is not a
+## coincidence to wave through — it means this golden NO LONGER COVERS THE ROOTED-SPAWN PATH.
+## Verified by isolation and then explained by measurement: reverting rooted_y to +40 on the
+## merged tree yields byte-identical samples, and re-driving the torture shows why — with the
+## field advancing on a downed player the run now wipes at TICK 2938 (was 3132) and reaches
+## NO rooted spawn at all inside 3600 ticks (first-rooted = none; it was tick 2857 before).
+## The rooted +52 fix is still correct and still tested by tests/test_endless.gd; it is simply
+## invisible to THIS stream now. If a future change makes the endless torture survive past
+## ~2900 ticks again, expect these samples to move for that reason alone.
 const ENDLESS_GOLDEN: Array[int] = [
 	8610209561549742921,
 	4307715087271070947,
 	2392889603967106672,
-	2697056323710043292,
-	5372114510800755839,
-	8096841052034072625,
+	390397376843286043,
+	1825047908363764441,
+	6729374942503115633,
 ]
 
 

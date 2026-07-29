@@ -66,6 +66,14 @@ func test_broke_respawn_uses_checkpoint() -> void:
 	sim.step([revive])
 	Runner.T.ok(p["broke_timer"] > 0, "broke timer armed")
 	for i in SimWorld.BROKE_RESPAWN_TICKS:
+		# STAY broke for the whole window — that is this test's premise, and it is no
+		# longer free. Now that the field keeps advancing on a downed player, enemies
+		# walk onto the streamed mines and bank coin with nobody shooting: measured
+		# chest 0 -> 40 by tick 187, which is >= the 25 solo revive cost, so
+		# _step_dead_player's (correct, deliberate) re-affordability check DISARMED the
+		# fallback and the player waited for a self-revive press that this test never
+		# sends. Pinning the chest keeps the assertion about the fallback.
+		sim.war_chest = 0
 		sim.step([_idle()])
 		if p["alive"]:
 			break

@@ -6464,6 +6464,7 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 
 
 
 func _draw() -> void:
+	_label_slots.clear()   # in-world label arbiter: one frame, one set of claimed rects
 	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
@@ -9034,6 +9035,50 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 	return Rect2(origin_x - 3.0, baseline_y - float(size) - 1.0, w + 6.0, float(size) + 5.0)
 
 
+## Every in-world label rect ALREADY placed this frame. Cleared at the top of _draw().
+## Anchored objective signage (the route-fork signposts) RESERVES its pixels without ever
+## moving; transient combat text yields to whatever is already there.
+var _label_slots: Array[Rect2] = []
+
+
+static func claim_label_slot(rect: Rect2, taken: Array[Rect2]) -> Rect2:
+	## The in-world counterpart to band_rows(): one arbiter for every world-space
+	## string, instead of one arbiter for floattext and eleven producers printing
+	## wherever they liked. A transient label drops one 11px row at a time until it
+	## owns its pixels — same stride and same 6-row bound the floattext stacking
+	## block used, this is a MOVE of that logic, not a second system. Rows that would
+	## leave the 640x360 frame are skipped, and a label with nowhere to go keeps its
+	## place rather than being shoved off-screen.
+	var w: float = rect.size.x
+	var h: float = rect.size.y
+	# X is clamped first and always: a label wider than its anchor can start off-frame
+	# before any dodging happens, and no amount of vertical travel fixes that.
+	var x: float = clampf(rect.position.x, 0.0, maxf(0.0, 640.0 - w))
+	# Candidate rows: where it wanted to sit, then alternating down/up in the same 11px
+	# stride the floattext block used, 6 each way. Down first — a callout belongs under
+	# the thing it names, and dropping keeps it out of the sprite it is labelling.
+	var rows: Array[float] = [0.0]
+	for k in 6:
+		rows.append(float(k + 1) * 11.0)
+		rows.append(-float(k + 1) * 11.0)
+	for dy in rows:
+		var y: float = rect.position.y + dy
+		if y < 0.0 or y + h > 360.0:
+			continue                      # off-frame rows are skipped, never occupied
+		var cand := Rect2(x, y, w, h)
+		var clash := false
+		for t in taken:
+			# grow(-0.5) so labels that merely touch at the seam are not called a collision,
+			# matching how the ratchet measures overlap.
+			if cand.grow(-0.5).intersects(t.grow(-0.5)):
+				clash = true
+				break
+		if not clash:
+			return cand
+	# Nowhere to go: keep the place, x-clamped, rather than shoving it off-screen.
+	return Rect2(x, clampf(rect.position.y, 0.0, maxf(0.0, 360.0 - h)), w, h)
+
+
 ## a11y: the alpha floor an in-world callout's INK is held at. Same shape as
 ## _banner_plate_alpha (a fully-faded label still disappears), but the floor is set by
 ## WCAG rather than by taste: at 0.88 the DIMMEST shipped callout ink — the violet REND
@@ -9077,8 +9122,15 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> void:
 	if a <= 0.0:
 		return
 	var sz := Art.fs(8)
-	draw_rect(_label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz), LABEL_PLATE_FILL)
-	Art.text(self, txt, pos, sz, Color(col.r, col.g, col.b, a))
+	# Every world-space string goes through the arbiter, so a callout drops a row rather
+	# than printing on top of a signpost or another callout. The plate and the ink move
+	# together — drawing the plate at the claimed rect and the text at the old baseline
+	# is how you get a label sitting beside its own background.
+	var want := _label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)
+	var got := claim_label_slot(want, _label_slots)
+	_label_slots.append(got)
+	draw_rect(got, LABEL_PLATE_FILL)
+	Art.text(self, txt, pos + (got.position - want.position), sz, Color(col.r, col.g, col.b, a))
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
