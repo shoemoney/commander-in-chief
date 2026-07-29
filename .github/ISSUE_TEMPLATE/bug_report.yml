@@ -1,0 +1,149 @@
+name: "🐛 Bug Report"
+description: "Something in Commander In Chief broke, crashed, or lied to you — tell us what, where, and how to make it happen again."
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🐛 Thanks for taking the time to file this!
+
+        Commander In Chief is a **deterministic** game — same seed, same inputs, same
+        tick-for-tick outcome on every machine. That makes your bug report unusually
+        powerful: if you can tell us **what you did**, we can usually replay **exactly
+        what the sim did**. 🎯
+
+        A few things that make a report go from "huh" to "fixed":
+
+        | 🎁 Include | 🚀 Why it helps |
+        |---|---|
+        | 🔁 Exact repro steps | The sim is deterministic — your steps ARE the replay script |
+        | 🕹️ Mode + player count | Campaign, Endless War, 1P vs local 2P are different sim configs |
+        | 📸 Screenshot or clip | The view is the only non-deterministic layer — show us what you saw |
+        | 📋 The log file | Godot's own `ERROR:` lines often name the culprit directly |
+
+        > 💡 **Not a bug?** Balance opinions, feature ideas, and "wouldn't it be cool if…"
+        > are welcome too — but please file those as a 💡 *Feature Request* instead so
+        > this queue stays focused on broken things.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 🖥️ Platform
+      description: Where were you playing when it broke?
+      options:
+        - 🍎 macOS (Apple Silicon / arm64)
+        - 🐧 Linux (x86_64)
+        - 🪟 Windows (x86_64)
+        - 🎮 Steam Deck (Proton)
+        - ❓ Other (tell us in the logs section)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 🎮 Game version
+      description: The release you downloaded (e.g. v0.3.0). If you built from source, give the commit hash instead (git rev-parse --short HEAD).
+      placeholder: "v0.3.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 🕹️ Mode
+      description: Which mode was running? (F2 toggles local 2P, F3 toggles Endless War, R restarts.)
+      options:
+        - 🎖️ Campaign — 1P
+        - 👥 Campaign — 2P (local co-op)
+        - ♾️ Endless War — 1P
+        - 👥♾️ Endless War — 2P (local co-op)
+        - 🏟️ Boss Rush / Arcade / Chapter Select / Daily Run
+        - 🚪 Main menu / before a run started
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 🔁 Steps to reproduce
+      description: |
+        Numbered steps, as precise as you can make them. The sim is seeded and
+        deterministic — the default run uses seed `0xC0FFEE`, so "from a fresh
+        campaign start, do X" is a genuinely replayable script for us.
+      placeholder: |
+        1. Launch the game (fresh campaign, seed 0xC0FFEE)
+        2. Walk north past the first bunker
+        3. Throw a grenade at the fuel drums
+        4. 💥 …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: ✅ What you expected to happen
+      placeholder: "The drums explode, the bunker opens, the run continues…"
+    validations:
+      required: false
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 💥 What actually happened
+      description: Crash, freeze, wrong art, weird physics, silent softlock — spell it out.
+      placeholder: "The grenade passed through the drums and the game froze on a black screen…"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 📋 Logs
+      description: |
+        Godot writes `godot.log` under the game's `user://logs/` folder (note the
+        **space** in `Commander In Chief`):
+
+        | 🖥️ OS | 📂 Path |
+        |---|---|
+        | 🍎 macOS | `~/Library/Application Support/Godot/app_userdata/Commander In Chief/logs/` |
+        | 🐧 Linux | `~/.local/share/godot/app_userdata/Commander In Chief/logs/` |
+        | 🪟 Windows | `%APPDATA%\Godot\app_userdata\Commander In Chief\logs\` |
+
+        Paste any `ERROR:` / `SCRIPT ERROR:` lines here. (Logs are written by the
+        editor and debug builds — if your release build has no log, no worries,
+        just say so.)
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 📸 Screenshots / video
+      description: Drag images or clips straight into this box — GitHub will upload them inline.
+      placeholder: "Drop a screenshot of the moment it went wrong…"
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        ### 🧪 Feeling adventurous? Reproduce it headless
+
+        If you can build from source, the whole game runs headless — no window needed:
+
+        ```sh
+        godot --headless --path . --import   # once after cloning
+        tools/run_tests.sh                   # full suite under a private user://
+        ```
+
+        If the bug shows up in the **sim** (gameplay logic, not rendering), a failing
+        headless repro is the gold-standard bug report — it becomes a regression test
+        the moment we fix it. 🏆
+
+        > ⚖️ By submitting you agree your report may be referenced in commit messages
+        > and test comments. Commander In Chief is MIT-licensed and public.

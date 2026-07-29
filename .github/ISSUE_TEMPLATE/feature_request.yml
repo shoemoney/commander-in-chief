@@ -1,0 +1,98 @@
+name: "✨ Feature Request"
+description: "💡 Pitch an idea for Commander In Chief — the sim is truth, the plan is aspirational 🗺️"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ✨ Got an idea, Commander?
+
+        Love it. Before you write it up, one honest heads-up from the trenches: 🫡
+
+        - 🗺️ **[`docs/PLAN.md`](https://github.com/shoemoney/commander-in-chief/blob/main/docs/PLAN.md) is the aspirational P0–P7 production plan** — much of it describes a future that does not exist yet.
+        - 🔍 **The sim code is the source of truth for what actually exists.** If the plan already "describes" your idea, check the code — it may be a planned feature, not a shipped one. Pitching a planned-but-unbuilt feature is still useful (it votes it up! 🗳️); just say which it is.
+        - 🔎 **[`FINDINGS.md`](https://github.com/shoemoney/commander-in-chief/blob/main/FINDINGS.md) is the live, verified list of what's actually open** — skim it so we don't double-file. 📋 (`Backlog.md` is its stale predecessor, kept for measurements only.)
+
+        Keep it small, keep it testable, and tell us the *problem* before the *solution*. 🎯
+
+  - type: textarea
+    id: pitch
+    attributes:
+      label: "💡 The pitch"
+      description: "🎤 What do you want, in one or two sentences? Imagine you're selling it to a player, not a compiler."
+      placeholder: "e.g. A co-op revive that lets the living player drag the downed one out of the lane before bleeding out…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "🎯 What problem does it solve?"
+      description: "🩹 What hurts today? A missing mechanic, an unfair-feeling moment, a dead spot in the loop? Concrete beats clever."
+      placeholder: "e.g. In 2P, a downed partner in a tank lane is a guaranteed run-ender — there's no counterplay…"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 🧠 Sim or view? (the split that matters)
+
+        Commander In Chief is split in two, and *where* your feature lives decides how hard it is:
+
+        ```mermaid
+        flowchart LR
+            S["🧠 src/sim/<br/>decides — 60 Hz,<br/>deterministic,<br/>no floats/RNG/Time"]
+            E["📨 events"]
+            V["🎨 src/main.gd + view/<br/>displays — floats,<br/>juice, particles"]
+            S --> E --> V
+        ```
+
+        | 🧭 Side | 🏠 Lives in | ⚠️ The catch |
+        |---|---|---|
+        | 🧠 **Sim** | `src/sim/` — gameplay, state, rules | Must stay deterministic: no floats, no `randi()`, no `Time.*`, no scene-tree. **Any change moves the golden checksums** — we re-record deliberately, with a why |
+        | 🎨 **View** | `src/main.gd` + `src/view/art.gd` — render, feel, juice | Free to be floaty and pretty — but the sim never knows juice exists ✨ |
+
+        One-liner: **the sim decides, the view displays.** Not sure which? "No idea" is a perfectly good answer. 🤷
+
+  - type: dropdown
+    id: sim_or_view
+    attributes:
+      label: "🧠 Sim or view?"
+      description: "🧭 Best guess is fine — see the explainer above."
+      options:
+        - "🧠 Sim (deterministic core — gameplay/state)"
+        - "🎨 View (render/feel — main.gd/art.gd)"
+        - "⚔️ Both"
+        - "🤷 No idea"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "🎨 Alternatives considered"
+      description: "🔀 What else could fix it? Tuning an existing mechanic, a different mode, a HUD cue? Or is it genuinely new?"
+      placeholder: "e.g. Could be a cheaper grenade revive instead, but dragging feels more Ikari…"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: "📎 Extra context"
+      description: "🖼️ Mockups, links to games that nail it, a replay timestamp, your wildest 3am sketch — anything goes."
+      placeholder: "Links, screenshots, videos, napkins…"
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        <div align="center">
+
+        **⚔️ Thanks for pitching — feed the War Chest, and may your idea survive review. ⚔️**
+
+        </div>

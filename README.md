@@ -503,8 +503,10 @@ Looking for something to fix? [`FINDINGS.md`](FINDINGS.md) is the open defect in
 every entry adversarially verified, each with a measured rate. Read its header first: **62 of
 115 findings died on their own** last time anyone re-checked. 🔎
 
-`CLAUDE.md` is the long-form contributor guide — architecture, conventions, and a
-hard-won list of gotchas that will otherwise each cost you an hour. 🕳️
+[`CONTRIBUTING.md`](CONTRIBUTING.md) is the long-form guide — dev setup, the determinism
+commandments, golden re-recording, and the PR checklist. [`CLAUDE.md`](CLAUDE.md) carries the
+hard-won gotcha ledger it points at — each entry once cost someone an hour. 🕳️
+Found a security issue? **[SECURITY.md](SECURITY.md)** — please don't file those publicly. 🛡️
 
 ---
 

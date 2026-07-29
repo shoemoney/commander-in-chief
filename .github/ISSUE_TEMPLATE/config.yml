@@ -1,0 +1,8 @@
+# 🎫 Issue chooser config — Commander In Chief
+# blank_issues_enabled: the escape hatch stays open 🚪
+blank_issues_enabled: true
+
+contact_links:
+  - name: 📖 Read the field manual first
+    url: https://github.com/shoemoney/commander-in-chief/blob/main/CLAUDE.md
+    about: Architecture, test-suite gotchas and the determinism commandments — most questions are answered there.

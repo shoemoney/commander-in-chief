@@ -1,0 +1,124 @@
+name: "🧬 Determinism / Golden Checksum"
+description: "test_determinism.gd red, lint_sim violations, cross-arch checksum mismatch"
+title: "[Determinism]: "
+labels: [determinism]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🧬 What "determinism" means here
+
+        Commander In Chief is a **sim/view split**: everything the game *is* lives in
+        `src/sim/` — a render-free core where `SimWorld.step(inputs)` advances exactly
+        one 60 Hz tick using only **16.16 fixed-point ints** and a seeded
+        **xoshiro128\*\*** (`SimRng`). No floats, no engine RNG, no `Time.*`, no
+        scene-tree access. Same seed + same inputs ⇒ **bit-identical state on x86_64
+        and Apple Silicon arm64**, every tick.
+
+        ```mermaid
+        flowchart LR
+            S["🔒 src/sim/<br/>SimWorld.step()"] --> C["#️⃣ checksum()<br/>FNV-1a over full state"]
+            C --> G["🥇 GOLDEN values<br/>tests/test_determinism.gd"]
+            L["🧹 tools/lint_sim.gd<br/>no floats · no randi · no Time · no tree"] -.->|"static gate"| S
+            G --> CI["🤖 CI matrix<br/>🐧 linux-x86_64 · 🍎 macos-arm64 · 🪟 windows-x86_64"]
+        ```
+
+        | 🛡️ Gate | 🔍 What it catches | 🏃 How to run it |
+        |---|---|---|
+        | 🥇 `tests/test_determinism.gd` | A scripted 60 s torture input whose sampled `GOLDEN` / `ENDLESS_GOLDEN` FNV-1a checksums drifted | `SUITE=determinism tools/run_tests.sh` |
+        | 🧹 `tools/lint_sim.gd` | Floats / `randi()` / `Time.*` / scene-tree access inside `src/sim/` | `tools/run_tests.sh -s res://tools/lint_sim.gd` |
+        | 🌍 3-OS CI matrix | A checksum that matches on your machine but **not** on another architecture | `.github/workflows/ci.yml` on push / PR |
+        | 🥾 Boot smoke | `SCRIPT ERROR` at parse/boot — a green-looking run that never executed | `tools/run_tests.sh -s res://tools/smoke.gd` |
+
+        > ⚠️ **Before you file:** if the suite "hangs", it is almost never slow tests —
+        > it is CPU contention from parallel Godot processes or a cold `.godot/` import.
+        > Run `godot --headless --path . --import` once after cloning, run **one**
+        > Godot at a time, and use `tools/run_tests.sh` (it gives the run a private
+        > `user://`). The engine version is pinned in `tools/versions.lock`
+        > (**4.7.1-stable**) — check you are on it.
+
+        <details><summary>🧪 <b>Reproduce locally — exact commands</b></summary>
+
+        ```sh
+        godot --headless --path . --import        # once after cloning / after art merges
+        SUITE=determinism tools/run_tests.sh      # the golden-checksum suite, private user://
+        tools/run_tests.sh -s res://tools/lint_sim.gd   # the static src/sim gate
+        ```
+
+        </details>
+
+  - type: dropdown
+    id: gate
+    attributes:
+      label: "💥 Which gate failed?"
+      description: "Pick the gate that went red first — each one points at a different layer of the problem."
+      options:
+        - "🥇 test_determinism.gd — golden checksum mismatch"
+        - "🧹 lint_sim.gd — non-deterministic construct in src/sim/"
+        - "🌍 Cross-arch CI mismatch — passes locally, fails on another OS/arch"
+        - "🥾 Boot smoke — SCRIPT ERROR"
+        - "❓ Other / not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: "🖥️ Where does it fail?"
+      description: "Select every place you have seen it fail — a mismatch that only appears on one arch is the signature bug we care most about."
+      multiple: true
+      options:
+        - "🍎 Local — macOS arm64"
+        - "🐧 Local — Linux"
+        - "🪟 Local — Windows"
+        - "🤖 CI — linux-x86_64"
+        - "🤖 CI — macos-arm64"
+        - "🤖 CI — windows-x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: mismatch
+    attributes:
+      label: "📋 First mismatched tick + checksums"
+      description: "The FIRST tick where the checksum diverges is everything — a drift at tick 7 and a drift at tick 3,400 are completely different bugs. Copy the runner's printed values."
+      placeholder: "tick N: got 0x..., GOLDEN wants 0x... (campaign / endless?)"
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: simchange
+    attributes:
+      label: "🔧 What sim code changed?"
+      description: |
+        **This is the fork in the road.** A golden checksum moving is the intended
+        consequence of *any* sim logic, state-field, or step-order change — the gate is
+        doing its job, not reporting a bug.
+
+        - ✅ **Intentional behavior change?** This is not an issue — re-record instead:
+          set `GOLDEN = []` (and `ENDLESS_GOLDEN` if the endless stream moved), run the
+          suite, paste the printed values back, and write *why* in the comment above
+          them. Never re-record just to turn a red green.
+        - 🚨 **No intentional sim change, or the drift appears on only one arch?**
+          That is unintentional drift — file it here. List every file you touched,
+          especially anything under `src/sim/` and anything that feeds it inputs.
+      placeholder: "Files touched, what the change was meant to do, and whether you expected the goldens to move"
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: "📄 Full test output"
+      description: "Paste the complete output of the failing run (or a link to the CI log). The engine-error gate and the PASS line both matter — please don't trim."
+      placeholder: "SUITE=determinism tools/run_tests.sh  →  ..."
+      render: shell
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        🎖️ *Bit-identical or bust — thanks for guarding the golden path. The sim thanks you for your service.* 🫡
