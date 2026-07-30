@@ -404,7 +404,7 @@ const SHOP_AMMO_COST := 30
 const SHOP_GRENADE_COST := 30
 const SHOP_VEST_COST := 60
 const SHOP_AIRSTRIKE_COST := 100
-const SHOP_TRIPLE_COST := 120        # crate-only big ticket: a permanent 3-round fan, above the airstrike
+const SHOP_TRIPLE_COST := 120        # crate-only big ticket: a run-long 3-round fan, stripped on respawn, above the airstrike
 const SHOP_CLAYMORE_COST := 50       # crate-only: one carried charge (grenade 30 < claymore < vest 60)
 # Endless shop crate pool, as PICKUP kinds + their pre-scale base prices. The
 # three slots draw 3 OF THESE (Fisher-Yates on the seeded rng), so the offer is
@@ -1343,7 +1343,7 @@ func _step_players(inputs: Array) -> void:
 			var fay: int = p["aim_y"]
 			_spawn_mg_bullet(p, i, fax, fay)
 			# Charge for the fan. A Triple/Trench burst spawned 3 (or 5 with both)
-			# pellets for a SINGLE ammo decrement, so the permanent Triple mod was a
+			# pellets for a SINGLE ammo decrement, so the Triple mod was a
 			# free 3-5x DPS multiplier and ammo stopped being a resource at all —
 			# the softest sink in the game. One extra round per pellet PAIR keeps the
 			# upgrade clearly worth taking while making it cost something.
@@ -1353,7 +1353,7 @@ func _step_players(inputs: Array) -> void:
 			if p["spread_ticks"] > 0 or p["triple"]:
 				var fan_cost := 2 if (p["spread_ticks"] > 0 and p["triple"]) else 1
 				p["mg_ammo"] = maxi(0, p["mg_ammo"] - fan_cost)
-				# Trench Gun (timed) / Triple Shot (permanent mod) both spray this one
+				# Trench Gun (timed) / Triple Shot (held until death) both spray this one
 				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
 					Fixed.mul(fax, SPREAD_SIN) + Fixed.mul(fay, SPREAD_COS))
@@ -1992,7 +1992,7 @@ func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	p["rend_ticks"] = 0               # ...and Rend Rounds
 	p["smoke_ticks"] = 0              # ...and the smoke concealment
 	p["claymores"] = 0                # ...and any carried claymore charges
-	p["triple"] = false               # ...and the Triple Shot permanent mod
+	p["triple"] = false               # ...and the Triple Shot mod (held until death)
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -2089,7 +2089,7 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 		5:
 			p["spread_ticks"] = SPREAD_TICKS   # Trench Gun spread capsule (drop-only)
 		6:
-			p["triple"] = true                 # Triple Shot: a permanent 3-round fan mod
+			p["triple"] = true                 # Triple Shot: a 3-round fan mod held until death
 		7:
 			p["rend_ticks"] = REND_TICKS       # Rend Rounds capsule (drop-only)
 		8:

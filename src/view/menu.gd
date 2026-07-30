@@ -5055,9 +5055,9 @@ func _howto_page_warchest() -> void:
 	var y := CONTENT_BODY_Y
 	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(ICON_X, y), 13, Color(1.0, 0.9, 0.6))
 	y += 22.0
-	y = _body_block("No health bar. Use cover and keep moving.",
+	y = _body_block("No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again.",
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
-	y += 26.0
+	y += 16.0   # was 26 — the death-strip sentence grew this block a line; 16 keeps the BACK-plate clearance the frame-bounds ratchet measures
 	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(ICON_X, y), 11, Color(1.0, 0.9, 0.6))
 	y += 22.0
 	# aaa-c6: the page used to say "no second chance" and offer the chest only for a PARTNER,

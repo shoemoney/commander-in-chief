@@ -130,8 +130,8 @@ msgstr "貫通弾—弾丸が貫通する。列の延長上を狙え"
 msgid "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN"
 msgstr "トレンチガン—続く限り3発の扇形。トリプル中は5方向扇形に"
 
-msgid "TRIPLE SHOT — PERMANENT 3-ROUND FAN. STACK SPREAD FOR A 5-WAY FAN"
-msgstr "トリプルショット—恒久的3発扇形。スプレッドと重ねれば5方向扇形に"
+msgid "TRIPLE SHOT — 3-ROUND FAN UNTIL DEATH. STACK SPREAD FOR A 5-WAY FAN"
+msgstr "トリプルショット—死亡まで有効な3発扇形。スプレッドと重ねれば5方向扇形に"
 
 msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
 msgstr "引裂弾—重機銃が機動隊の盾を貫通する"

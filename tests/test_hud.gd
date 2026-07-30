@@ -3250,7 +3250,8 @@ func test_bottom_overlays_never_occlude_the_colossus_label() -> void:
 
 
 # --- the reserved-zone band contract ---------------------------------------------------------
-# main.gd's `_draw` is a Node2D at z=0; `$HUD` is a CanvasLayer at layer 1. main.gd can therefore
+# main.gd's `_draw` is a Node2D at z=0; `$HUD` is a CanvasLayer at layer 2 (1 is the concussion
+# low-pass, which must read a world-only backbuffer). main.gd can therefore
 # NEVER paint above the HUD chrome — an overlay that overlaps the corner plate or the boss bars
 # doesn't win the z-fight, it silently disappears under it. So every transient main.gd overlay
 # ducks through HudIcons.band_top() / band_bottom() instead of its own literal, and this test

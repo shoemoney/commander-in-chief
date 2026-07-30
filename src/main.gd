@@ -812,9 +812,15 @@ func _draw_splash_hero(ht: float, veil: float) -> void:
 
 
 func _setup_screen_fx() -> void:
-	# Full-screen concussion warp on its own high CanvasLayer so it rides ABOVE
-	# the world + HUD and is immune to the Node2D shake/zoom applied to `self`.
-	# The rect stays hidden (a true no-op — no backbuffer copy) until concussed.
+	# Full-screen concussion warp on its OWN CanvasLayer BETWEEN world (0) and HUD
+	# (2): its hint_screen_texture read then captures the world canvas only, so the
+	# radial blur/wobble/chroma smears the world while the HUD draws crisp on top.
+	# (It used to ride ABOVE the world + HUD on fx_layer — one knockdown blurred
+	# boss bars, objective chips and control prompts with the terrain.) The rect
+	# stays hidden (a true no-op — no backbuffer copy) until concussed.
+	var concussion_layer := CanvasLayer.new()
+	concussion_layer.layer = 1
+	add_child(concussion_layer)
 	var fx_layer := CanvasLayer.new()
 	fx_layer.layer = 100
 	add_child(fx_layer)
@@ -851,7 +857,7 @@ func _setup_screen_fx() -> void:
 	_screen_fx_mat = ShaderMaterial.new()
 	_screen_fx_mat.shader = load("res://src/view/screen_fx.gdshader")
 	_screen_fx_rect.material = _screen_fx_mat
-	fx_layer.add_child(_screen_fx_rect)
+	concussion_layer.add_child(_screen_fx_rect)
 	# Warm the pipeline at boot: one visible identity-branch frame (concussion 0
 	# is a bit-exact pass-through) so the FIRST marquee blast doesn't pay the
 	# shader-compile hitch mid-impact. _process hides it again next frame.
@@ -2200,7 +2206,7 @@ func _consume_events() -> void:
 				match int(ev["kind"]):
 					4: _hint("pierce", "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN")
 					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN")
-					6: _hint("triple", "TRIPLE SHOT — PERMANENT 3-ROUND FAN. STACK SPREAD FOR A 5-WAY FAN")
+					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN UNTIL DEATH. STACK SPREAD FOR A 5-WAY FAN")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_label("interact") if Art.use_pad else "F"))

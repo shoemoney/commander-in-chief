@@ -2147,3 +2147,65 @@ func test_grenade_landing_marker_is_where_the_grenade_detonates() -> void:
 	Runner.T.ok(absi(int(g["x"]) - x0) >= SimWorld.GRENADE_RADIUS,
 		"this throw really does drift %.0fpx — a full %.0fpx blast radius the old marker never showed"
 		% [absi(int(g["x"]) - x0) * PX, SimWorld.GRENADE_RADIUS * PX])
+
+
+# --- 7. Copy honesty: "PERMANENT" must never name something death strips ------
+
+func _stripped_loss_nouns() -> Array[String]:
+	## Both halves derived from source, so a noun or a stripped key added tomorrow
+	## is covered the day it lands: the noun table scraped out of main.gd's
+	## LOSS_NOUN, the strip list read off SimWorld.DEATH_LOSS_KEYS itself.
+	var src := _view_src()
+	var start := src.find("const LOSS_NOUN")
+	Runner.T.ok(start >= 0, "LOSS_NOUN const not found in main.gd — the scrape anchor moved")
+	var body := src.substr(start)
+	body = body.substr(0, body.find("\n}\n") + 3)
+	var re := RegEx.create_from_string('"([a-z_]+)":\\s*"([^"]+)"')
+	var nouns: Array[String] = []
+	for m in re.search_all(body):
+		if m.get_string(1) in SimWorld.DEATH_LOSS_KEYS:
+			nouns.append(m.get_string(2))
+	return nouns
+
+
+func _contains_word(haystack: String, needle: String) -> bool:
+	var re := RegEx.create_from_string("(?<![A-Z0-9])" + needle + "(?![A-Z0-9])")
+	return re.search(haystack) != null
+
+
+func test_no_player_facing_string_calls_a_death_stripped_mod_permanent() -> void:
+	## The Triple Shot hint shipped "PERMANENT 3-ROUND FAN" — but `triple` is in
+	## DEATH_LOSS_KEYS and _respawn strips it (the 1986 rule, pinned by
+	## test_gameplay.gd's test_triple_pickup_grants_and_death_strips). One word
+	## promised the player the one thing the sim never does. The sim strip is
+	## deliberate; the copy was the lie. This scans every player-facing string
+	## (view sources + locale msgids, which are keyed on the English literal) for
+	## "PERMANENT" standing next to the name of anything death takes.
+	var nouns := _stripped_loss_nouns()
+	Runner.T.ok(nouns.size() >= 5,
+		"only %d stripped nouns parsed — the LOSS_NOUN/DEATH_LOSS_KEYS scrape is broken, not the copy" % nouns.size())
+	var offenders: Array[String] = []
+	var lit_re := RegEx.create_from_string('"([^"\\n]*)"')
+	for path in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd"]:
+		for m in lit_re.search_all(FileAccess.get_file_as_string(path)):
+			var s: String = m.get_string(1)
+			if not s.contains("PERMANENT"):
+				continue
+			for noun in nouns:
+				if _contains_word(s, noun):
+					offenders.append("%s: \"%s\" calls %s PERMANENT, but death strips it" % [path, s, noun])
+	var dir := DirAccess.open("res://locale")
+	Runner.T.ok(dir != null, "res://locale unreadable — the msgid scan is not running")
+	for f in dir.get_files():
+		if not f.ends_with(".po"):
+			continue
+		var path := "res://locale/" + f
+		for line in FileAccess.get_file_as_string(path).split("\n"):
+			if not line.begins_with('msgid "') or not line.contains("PERMANENT"):
+				continue
+			var s := line.substr(7, line.length() - 8)
+			for noun in nouns:
+				if _contains_word(s, noun):
+					offenders.append("%s: msgid \"%s\" calls %s PERMANENT, but death strips it" % [path, s, noun])
+	Runner.T.ok(offenders.is_empty(),
+		"player-facing copy calls a death-stripped mod PERMANENT:\n" + "\n".join(offenders))
