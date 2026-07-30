@@ -603,6 +603,58 @@ func test_tank_treads_rescue_not_crush_the_pilot() -> void:
 	Runner.T.eq(sim.war_chest - chest0, SimWorld.PILOT_RANSOM, "treads grab the ransom, not a corpse")
 
 
+func test_endless_pilot_is_catchable_from_the_band_bottom() -> void:
+	## Endless pins camera_top at -VIEW_H forever, so the pilot's capture line
+	## (camera_top - 30) never recedes — unlike campaign, whose ratchet camera
+	## buys the chase. The eject floor of 120px was tuned against that receding
+	## camera: under the pinned one, a player parked at the BOTTOM of the
+	## camera band (screen-y 344, the worst legal position) starts 224px behind
+	## a pilot who reaches the line in ~143 ticks while the closing speed is
+	## 1.0px/t (2.4 vs 1.4) — mathematically locked out (measured on 2ca130c:
+	## no rescue, pilot_lost at ~tick 144). The endless-only floor
+	## (PILOT_FLOOR_ENDLESS) buys the reach. This drives the REAL eject seam:
+	## _start_wave fields the wave-5 miniboss, _damage_boss runs the shipped
+	## death path. Worst case is monotone in start-y, so pinning the band
+	## bottom pins the whole dead zone.
+	var sim := SimWorld.new(28, 1, "endless")
+	sim.god_mode = true   # probe precedent (sector_probe.gd) — the stage is a footrace, not a firefight
+	sim.wave = 4
+	sim._start_wave()     # wave 5: fields the milestone miniboss (gate_y = camera_top + 90)
+	var boss := sim.endless_boss
+	Runner.T.ok(not boss.is_empty(), "wave 5 fields the endless miniboss")
+	sim._damage_boss(boss, boss["hp"])
+	var pilot := {}
+	for e in sim.enemies:
+		if e["kind"] == "pilot":
+			pilot = e
+	Runner.T.ok(not pilot.is_empty(), "the downed miniboss ejects its pilot")
+	var p := sim.players[0]
+	p["x"] = pilot["x"]   # same-x: a perfect north chase, the fairest possible run
+	p["y"] = sim.camera_top + SimWorld.CAMERA_BAND_BOTTOM
+	var rescued := false
+	var rescue_tick := -1
+	for t in 300:
+		var inp := SimInput.new()
+		inp.move_y = -256   # verified north (main.gd:5675)
+		sim.step([inp])
+		# Endless keeps fielding the wave behind the footrace — strip the
+		# fodder and its fire so only the pilot chase is being measured.
+		for e in sim.enemies:
+			if e["kind"] != "pilot":
+				e["alive"] = false
+		sim.enemy_bullets.clear()
+		for ev in sim.events:
+			if ev["t"] == "pilot_rescued":
+				rescued = true
+				rescue_tick = t
+		if rescued:
+			break
+	Runner.T.ok(rescued,
+		"a band-bottom player catches the endless pilot before the pinned capture line")
+	if rescued:
+		print("    pilot rescued at tick ", rescue_tick)
+
+
 func test_airstrike_spares_the_pilot() -> void:
 	var sim := SimWorld.new(27, 1)
 	sim.enemies.append({"x": 100 * Fixed.ONE, "y": sim.camera_top + 100 * Fixed.ONE,

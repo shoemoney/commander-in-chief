@@ -137,12 +137,14 @@ class Pad:
     def text(self, cx, cy, s, size, fill, weight=0.20):
         draw_text(self.d, cx * self.W, cy * self.H, s, size * self.W, fill, weight)
 
-    def keyline(self, strength: float = 0.024):
+    def keyline(self, strength: float = 0.024, color=INK):
         """Ink rim around whatever is already drawn -- keeps icons readable on
-        both the sand ground and the dark menu plate."""
+        both the sand ground and the dark menu plate. `color` defaults to INK;
+        the sandbag wall bakes pass a dark burlap instead so a tiled run does
+        not read as stickers with stark black outlines."""
         a = self.im.getchannel("A")
         grown = a.filter(ImageFilter.MaxFilter(max(3, int(self.W * strength) | 1)))
-        rim = Image.new("RGBA", (self.W, self.H), INK + (0,))
+        rim = Image.new("RGBA", (self.W, self.H), color + (0,))
         rim.putalpha(grown)
         rim.alpha_composite(self.im)
         self.im = rim

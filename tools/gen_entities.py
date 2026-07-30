@@ -537,12 +537,24 @@ def _bag(p, cx, cy, hw, hh, tilt, base):
             _rot_pt(cx, cy, hw * 0.55, -hh * 0.08, tilt)], dark, hh * 0.09)
 
 
-def _sandbag_wall(p, n: int, seed: int, y_top: float, y_bot: float) -> None:
+# Dark burlap rim for the wall kit instead of the icons' near-black INK: a
+# gate wall tiles these segments end-to-end, and the ink keyline is what made
+# the run read as identical stickers with stark black outlines. Keeps edge
+# readability over scorched ground without the sticker border.
+WALL_RIM = (64, 54, 36)
+
+
+def _sandbag_wall(p, n: int, seed: int, y_top: float, y_bot: float,
+                  chipped: int = -1, spill: bool = False, rim=WALL_RIM) -> None:
     """Brick-staggered two-course sandbag run: a shaded back course (n-1 bags,
     half-pitch offset) drawn first, a lit front course (n bags) on top. Every
     bag gets its own hashed width/height/tilt/dy/shade off (seed, i) -- no two
     bags in the run are identical, and the brick offset kills the ruled grid.
     A hashed spoil-berm skirt along the bottom blends the run into the ground.
+    `chipped` squashes front bag i into a torn, settled remnant (a worn
+    segment); `spill` bursts two lone bags off the foot inside the berm band
+    (a shelled segment). Both stay inside the y in [64,181] alpha footprint
+    test_sandbag_bakes_are_not_a_mechanical_grid pins.
     """
     front_pitch = 1.0 / n
     back_n = max(1, n - 1)
@@ -564,6 +576,14 @@ def _sandbag_wall(p, n: int, seed: int, y_top: float, y_bot: float) -> None:
         tilt = (_j(seed, i, 8) - 0.5) * 0.24
         dy = (_j(seed, i, 9) - 0.5) * course_h * 0.4
         shade = 0.93 + _j(seed, i, 10) * 0.15
+        if i == chipped:
+            # a torn, settled bag: most of it is GONE — a real gap in the
+            # front course, not a slightly smaller stamp — with the remnant
+            # squashed flat and sunk into the berm
+            w *= 0.38
+            h *= 0.30
+            dy += course_h * 0.24
+            tilt += 0.14
         base = tuple(max(0, min(255, int(c * shade))) for c in (190, 166, 116))
         _bag(p, x, y_bot + dy, w, h, tilt, base)
     for i in range(n + 1):
@@ -571,11 +591,32 @@ def _sandbag_wall(p, n: int, seed: int, y_top: float, y_bot: float) -> None:
         by = y_bot + course_h * 0.14 + _j(seed, i, 12) * course_h * 0.06
         br = front_pitch * (0.20 + _j(seed, i, 13) * 0.10)
         p.ell(bx, by, br, br * 0.36, fill=(150, 128, 86))
-    p.keyline(0.016)
+    if spill:
+        # shelled segment: two lone bags burst wide off the foot, kept inside
+        # the berm band so the run's committed footprint does not grow.
+        for k in range(2):
+            sx = 0.24 + 0.30 * k + (_j(seed, 20 + k, 1) - 0.5) * 0.06
+            sy = y_bot + course_h * 0.16 + (_j(seed, 20 + k, 2) - 0.5) * course_h * 0.05
+            sw = front_pitch * (0.34 + _j(seed, 20 + k, 3) * 0.10)
+            sh = course_h * (0.16 + _j(seed, 20 + k, 4) * 0.05)
+            stilt = (0.30 + _j(seed, 20 + k, 5) * 0.25) * (1 if k == 0 else -1)
+            sshade = 0.86 + _j(seed, 20 + k, 6) * 0.10
+            sbase = tuple(max(0, min(255, int(c * sshade))) for c in (170, 148, 102))
+            _bag(p, sx, sy, sw, sh, stilt, sbase)
+    p.keyline(0.016, rim)
 
 
 def o_wall_sandbag(p, end: bool, seed: int = 0):
-    _sandbag_wall(p, 2 if end else 4, seed, 0.40, 0.62)
+    if end:
+        _sandbag_wall(p, 2, seed, 0.40, 0.62)
+    elif seed == 1:
+        # worn segment: a THINNED 3+2 course with one front bag torn flat —
+        # a genuinely different silhouette, not the same stamp re-jittered
+        _sandbag_wall(p, 3, seed, 0.40, 0.62, chipped=1)
+    elif seed == 2:
+        _sandbag_wall(p, 5, seed, 0.40, 0.62, spill=True)  # shelled segment
+    else:
+        _sandbag_wall(p, 4, seed, 0.40, 0.62)
 
 
 # --- terrain -----------------------------------------------------------------
@@ -735,7 +776,10 @@ def o_flag_marker(p):
 
 
 def o_sandbag(p):
-    _sandbag_wall(p, 3, 10, 0.38, 0.62)
+    # the lone mound keeps the INK rim: it is never tiled end-to-end, so the
+    # sticker-outline tell does not apply — and its committed PNG stays
+    # byte-identical on a full regeneration.
+    _sandbag_wall(p, 3, 10, 0.38, 0.62, rim=gen_ui_icons.INK)
 
 
 def o_tree(p, big: bool):

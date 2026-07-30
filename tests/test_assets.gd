@@ -1977,6 +1977,75 @@ func test_sandbag_bakes_are_not_a_mechanical_grid() -> void:
 	Runner.T.eq(wall_body_hashes.size(), 3, "all 3 wall_sandbag body variants are distinct bakes")
 
 
+func test_sandbag_wall_variants_differ_at_drawn_size() -> void:
+	## The reviewer's tell was "identical tiled sprites with stark black
+	## outlines": the three wall_sandbag "variants" were the same 4+3-bag
+	## layout differing only in per-bag jitter (invisible at the 0.28 draw
+	## scale) and every bag wore a near-black ink rim (INK = 12,14,10).
+	## Two pixel pins, both measured on 2ca130c BEFORE the re-bake:
+	##   1. rim warmth: edge-pixel mean max(r,g,b) was 17.0-19.3/255 -> pin >= 40.
+	##   2. silhouette divergence at the size the player sees (240px * 0.28 =
+	##      67px): pairwise mean |alpha| diff was 20.9 / 24.3 / 25.6 per 255
+	##      (GDScript-measured). Post-bake this test measures 40.8 / 43.8 /
+	##      44.4; the pin is post-bake-min - 4 = 36 (required floor was 32).
+	##      If a future bake can't clear it, strengthen the BAKE, never lower
+	##      the pin.
+	var bodies: Array[Image] = []
+	for path in ["res://assets/art/p2/wall_sandbag.png", "res://assets/art/p2/wall_sandbag_b.png",
+			"res://assets/art/p2/wall_sandbag_c.png", "res://assets/art/p2/wall_sandbag_end.png"]:
+		var t: Texture2D = load(path)
+		Runner.T.ok(t != null, "%s imports" % path)
+		if t == null:
+			continue
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var w := img.get_width()
+		var h := img.get_height()
+		# 1. rim warmth over the edge ring (opaque px touching transparency)
+		var warm := 0.0
+		var n_edge := 0
+		for x in w:
+			for y in h:
+				if img.get_pixel(x, y).a <= 12.0 / 255.0:
+					continue
+				var edge := false
+				for nb in [Vector2i(x - 1, y), Vector2i(x + 1, y), Vector2i(x, y - 1), Vector2i(x, y + 1)]:
+					if nb.x < 0 or nb.y < 0 or nb.x >= w or nb.y >= h \
+							or img.get_pixel(nb.x, nb.y).a <= 12.0 / 255.0:
+						edge = true
+						break
+				if edge:
+					var c := img.get_pixel(x, y)
+					warm += maxf(c.r, maxf(c.g, c.b)) * 255.0
+					n_edge += 1
+		Runner.T.ok(n_edge > 0, "%s has an edge ring to measure" % path)
+		if n_edge > 0:
+			Runner.T.ok(warm / n_edge >= 40.0,
+				"%s rim is burlap-dark not ink-black (edge mean max-channel %.1f >= 40)" %
+					[path, warm / n_edge])
+		if not path.contains("_end"):
+			bodies.append(img)
+	# 2. pairwise silhouette divergence at drawn size (67px = 240 * 0.28)
+	Runner.T.eq(bodies.size(), 3, "all three wall body variants loaded")
+	var diffs: Array[float] = []
+	for pair in [[0, 1], [1, 2], [0, 2]]:
+		var a: Image = bodies[pair[0]].duplicate()
+		var b: Image = bodies[pair[1]].duplicate()
+		a.resize(67, 67, Image.INTERPOLATE_BILINEAR)
+		b.resize(67, 67, Image.INTERPOLATE_BILINEAR)
+		var d := 0.0
+		for x in 67:
+			for y in 67:
+				d += absf(a.get_pixel(x, y).a - b.get_pixel(x, y).a)
+		diffs.append(d / (67.0 * 67.0) * 255.0)
+	print("    wall pair alpha diffs: %.1f / %.1f / %.1f per 255" % [diffs[0], diffs[1], diffs[2]])
+	for i in diffs.size():
+		Runner.T.ok(diffs[i] > 36.0,
+			"wall variant pair %d reads as different segments at drawn size (mean alpha diff %.1f > 36/255)" %
+				[i, diffs[i]])
+
+
 # --- event banner scrims never span the playfield ---
 
 func test_event_banners_never_span_the_playfield() -> void:

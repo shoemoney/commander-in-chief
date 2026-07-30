@@ -101,6 +101,18 @@ const TECHNICAL_HP := 3                       # a truck is not a paper target (n
 # should land 50-70% — at ~100% raise again, below 50% drop toward 1.1.
 const PILOT_SPEED := (F_ONE * 7) / 5
 const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same "worth the chase")
+# Eject floor: the pilot never spawns closer to the top edge than this, so the
+# rescue chase is winnable. Campaign's 120 was tuned against the RATCHET camera
+# (the capture line recedes as the player pushes north). Endless pins
+# camera_top at -VIEW_H forever — the line never recedes — and under it floor
+# 120 left a ~38px dead zone at the band bottom (measured on 2ca130c: rescued
+# from screen-y 305, LOST from 308, pilot_lost at ~tick 144). Each +1px of
+# floor moves the catchable boundary ~1.7px south (1px closer spawn + ~0.71t
+# of extra fuse), so 148 puts it at ~354 — past the 344 band bottom with ~10px
+# equivalent margin — while a mid-band rescue still demands a chase (fuse
+# grows to ~163t ≈ 2.7s).
+const PILOT_FLOOR := 120
+const PILOT_FLOOR_ENDLESS := 148
 # Punch-out grace: the pilot spawns unshootable (and unrescuable) for one
 # reaction window, because he appears ON the boss the player is still firing
 # at — trigger inertia gunned him down before the RESCUE banner even existed.
@@ -6352,7 +6364,9 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		# advertised ransom at capped waves (one transient non-combatant just
 		# delays the next gated spawn), and a top-edge gunship kill ejected a
 		# pilot with a ~1s unavoidable fail (120px floor -> 50-70% catch target).
-		var pilot_y: int = maxi(by, camera_top + 120 * F_ONE)
+		# Endless gets the deeper floor: its camera never recedes (see
+		# PILOT_FLOOR_ENDLESS), campaign keeps its receding-camera tuning.
+		var pilot_y: int = maxi(by, camera_top + (PILOT_FLOOR_ENDLESS if mode == "endless" else PILOT_FLOOR) * F_ONE)
 		enemies.append({"x": boss["x"], "y": pilot_y, "alive": true, "elite": false, "kind": "pilot",
 			"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
 		events.append({"t": "pilot_down", "x": boss["x"], "y": pilot_y})
