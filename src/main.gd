@@ -2465,7 +2465,7 @@ func _consume_events() -> void:
 				_ev_kill(ev)
 			"bounty_kill":
 				# Marked target down — a gold coin fountain + a distinct sting.
-				_coin_pop(ev["x"], ev["y"], "BOUNTY +%d¢" % ev["coin"], 5, Color(1.0, 0.85, 0.3), 0.02)
+				_coin_pop(ev["x"], ev["y"], "BOUNTY +%d¢" % ev["coin"], 5, FLOAT_INK_BOUNTY, 0.02)
 				_sfx.play("buy_fanfare", -3.0, 1.3)   # a2-16: marked-target-down = a distinct milestone sting, not the buy chime
 			"frag_bonus":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
@@ -2699,7 +2699,7 @@ func _consume_events() -> void:
 				_hint("pilot", TranslationServer.translate("RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM") % sim.PILOT_RANSOM, true)
 			"pilot_rescued":
 				_run_rescues += 1
-				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(Color(0.5, 1.0, 0.7)), 0.02)
+				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(FLOAT_INK_RANSOM), 0.02)
 				_sfx.play("buy_fanfare", -2.0, 1.2)   # a2-16: RANSOM milestone
 			"pilot_lost":
 				_fx.append({"x": ev["x"], "y": ev["y"] + 20, "t": 0.0, "kind": "floattext",
@@ -3505,7 +3505,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_sfx.play("buy_fanfare", -8.0, 0.9 + sstreak * 0.015)   # a2-16: kill-streak milestone
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
-		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, Color(1.0, 0.9, 0.45), 0.025)
+		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, FLOAT_INK_COIN, 0.025)
 	# A downed gunship is a finale, not a kill blip — ripple it apart.
 	if kkind == "boss":
 		_boss_death_finale(ev["x"], ev["y"])
@@ -3562,7 +3562,7 @@ func _ev_bunker_break(ev: Dictionary) -> void:
 	_burst(ev["x"], ev["y"], "dust", 6, 1.2, 2.6, 0.3)
 	_blast_debris(ev["x"], ev["y"])
 	_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(12.0, 17.0)})
-	_coin_pop(ev["x"], ev["y"], "+%d¢" % ev.get("coin", 0), 4, Color(1.0, 0.9, 0.45), 0.025)
+	_coin_pop(ev["x"], ev["y"], "+%d¢" % ev.get("coin", 0), 4, FLOAT_INK_COIN, 0.025)
 
 
 func _blast_debris(x: int, y: int, wet: bool = false) -> void:
@@ -8217,10 +8217,16 @@ func _draw_gates() -> void:
 		# exactly this all along; the draws used to bypass it).
 		_label_slots.append(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0))
 		_label_slots.append(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0))
-		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
-		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), Color(0, 0, 0, 0.55))
-		Art.text(self, cache_txt, Vector2(cx, fy), 24, Art.safe(Color(0.5, 1.0, 0.7)))
-		Art.text(self, bounty_txt, Vector2(bx, fy), 24, Color(1.0, 0.75, 0.3))
+		# The ONE plate language (LABEL_PLATE_FILL via SIGN_PLATE_FILL), lane-tinted
+		# 1px keyline — the old hand-rolled 0.55-alpha fill read as a faint tint over
+		# the brightest scorched dirt, not a panel. Rects stay byte-identical to the
+		# arbiter-reserved slots above (plate and ink move with the claim, always).
+		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), SIGN_PLATE_FILL)
+		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), SIGN_PLATE_FILL)
+		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), SIGN_PLATE_EDGE_CACHE, false, 1.0)
+		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), SIGN_PLATE_EDGE_BOUNTY, false, 1.0)
+		Art.text(self, cache_txt, Vector2(cx, fy), 24, Art.safe(SIGN_INK_CACHE))
+		Art.text(self, bounty_txt, Vector2(bx, fy), 24, SIGN_INK_BOUNTY)
 
 
 func _draw_pickups() -> void:
@@ -9041,6 +9047,35 @@ func _draw_gunships() -> void:
 
 
 const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.92)   # a2-17: shared boss-label plate fill
+
+# a11y-signage: the route-fork signposts ("< CACHE" / "BOUNTY >") and the floattext
+# payoff toasts ("BOUNTY +N¢", "RANSOM +N¢", "+N¢") are world-space text too — they now
+# wear the SAME near-opaque plate the boss/phase/objective labels wear, instead of a
+# hand-rolled Color(0,0,0,0.55) (half the standard's alpha, no keyline — a faint tint
+# over the brightest scorched dirt, not a panel) or no plate at all (the toasts: bare
+# yellow pixel font + a 4-dir outline over the dirt). The inks are hoisted to consts so
+# the contrast ratchet measures the exact shipped colors (the CALLOUT_* discipline).
+# MEASURED: full-alpha these inks sit at 4.2..5.5:1 bare on the brightest sand — the
+# plate's job is the FADE (at half-life every one reads ~2.2..2.6:1 bare).
+const SIGN_PLATE_FILL := LABEL_PLATE_FILL
+const SIGN_INK_CACHE := Color(0.5, 1.0, 0.7)
+const SIGN_INK_BOUNTY := Color(1.0, 0.75, 0.3)
+const SIGN_PLATE_EDGE_CACHE := Color(0.5, 1.0, 0.7, 0.45)
+const SIGN_PLATE_EDGE_BOUNTY := Color(1.0, 0.75, 0.3, 0.45)
+const FLOAT_INK_BOUNTY := Color(1.0, 0.85, 0.3)
+const FLOAT_INK_RANSOM := Color(0.5, 1.0, 0.7)
+const FLOAT_INK_COIN := Color(1.0, 0.9, 0.45)
+
+## The floattext toast's backing-plate rect: the PUNCHED text box (the ~3-frame spawn
+## punch scales the glyphs up to 1.5x about the pivot, so an unpunched plate would lag
+## the ink it backs) padded 3px left/right and 1px top/bottom. Drawn with
+## LABEL_PLATE_FILL at an alpha that tracks the ink fade — the toasts fade
+## monotonically to zero, so a flat-alpha plate would leave a dark box hanging over
+## nothing (the _world_label FLAT-alpha rule is about PULSING labels and does not
+## apply). Static + view-free so the layout test measures the exact shipped geometry.
+static func floattext_plate_rect(pivot: Vector2, w: float, size: int, punch: float) -> Rect2:
+	return Rect2(pivot.x - w * punch / 2.0 - 3.0, pivot.y - float(size) * punch - 1.0,
+		w * punch + 6.0, float(size) * punch + float(size + 2) * punch + 2.0)
 
 ## Shop-wheel plate tint. 2026-07-26: overturns the c2 2v cut (0.92 -> 0.55, "so
 ## the mast, scars, drops and hazards read THROUGH it during the buy") — the
@@ -10330,6 +10365,14 @@ func _draw_fx() -> void:
 			fpivot += fgot.position - prect.position
 			floattext_anchors.append(Vector3(fpivot.x, fpivot.y, fhw))
 			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
+			# Backing plate — the SAME near-opaque LABEL_PLATE_FILL every plated world
+			# label wears; these toasts used to float bare over the dirt with only a
+			# 4-dir outline. Alpha tracks the ink fade (fc.a) so the plate never
+			# outlives its text. Drawn untransformed at the PUNCHED rect so the spawn
+			# punch can't hang glyphs off the plate's edge.
+			var pcol := LABEL_PLATE_FILL
+			pcol.a *= fc.a
+			draw_rect(floattext_plate_rect(fpivot, fw, fsz, fpunch), pcol)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)

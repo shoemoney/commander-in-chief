@@ -558,10 +558,13 @@ func _dress_chapters(m: Node2D) -> void:
 func _dress_hall(m: Node2D) -> void:
 	# main.gd's `hall` is typed Array[Dictionary]; assign() converts the untyped
 	# literal (a bare `=` throws "Invalid assignment ... value of type 'Array'").
+	# The "grade" keys are load-bearing: without them _draw_hall draws NO medal/letter,
+	# so captures hid the RANK column entirely (and with it a real score×medal
+	# overprint that shipped precisely because no staged shot ever showed it).
 	m.hall.assign([
-		{"score": 264500, "mode": "campaign", "wave": 0, "sector": 5, "dist": 512, "streak": 14, "won": true},
-		{"score": 88900, "mode": "endless", "wave": 12, "sector": 1, "dist": 40, "streak": 9, "won": false},
-		{"score": 41200, "mode": "campaign", "wave": 0, "sector": 3, "dist": 210, "streak": 6, "won": false},
+		{"score": 264500, "mode": "campaign", "wave": 0, "sector": 5, "dist": 512, "streak": 14, "won": true, "grade": "S"},
+		{"score": 88900, "mode": "endless", "wave": 12, "sector": 1, "dist": 40, "streak": 9, "won": false, "grade": "A"},
+		{"score": 41200, "mode": "campaign", "wave": 0, "sector": 3, "dist": 210, "streak": 6, "won": false, "grade": "B"},
 	])
 	m._menu.open(GameMenu.Mode.HALL)
 	m._menu._open_t = 1.0

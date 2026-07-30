@@ -7379,8 +7379,200 @@ func test_hall_latest_run_band_stays_inside_the_content_frame() -> void:
 	# calls) — a hand-copied re-derivation of that formula goes quietly vacuous the day
 	# the font or the gutters move, which is the failure mode this whole test exists over.
 	var f := Art.font()
-	var streak_x: float = Menu.hall_col_x()[4]
+	var col_x := Menu.hall_col_x()
+	Runner.T.ok(col_x.size() == 6, "hall_col_x owns all six columns (#/RANK/SCORE-r/MODE/REACHED/STREAK), got %d" % col_x.size())
+	if col_x.size() != 6:
+		return
+	var streak_x: float = col_x[5]
 	var widest := f.get_string_size("x99  *D  *A", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 	Runner.T.ok(streak_x + widest <= Menu.HALL_CELL_R,
 		"abbreviated STREAK cell (x%.1f + %.1f) fits inside the cell right edge %.1f"
 			% [streak_x, widest, Menu.HALL_CELL_R])
+
+
+# --- Hall-of-Fame column alignment (review tell: "#→RANK 8px, RANK→SCORE 5px, SCORE→MODE
+# 14px, MODE→REACHED 59px" — the header gutters were whatever the literals happened to
+# measure, and col_x[1] (148.0) was a DEAD value no call site read: the left three columns
+# bypassed hall_col_x as literals (RANK header 130.0, SCORE right-edge 214.0, grade letter
+# 132.0, medal 142.0). The unreported sibling the staged screenshot hid — _dress_hall posed
+# rows with no "grade" key, so no medal/letter drew: a graded run's score cell OVERPRINTS
+# the RANK column's medal on real runs ("264,500" at x149..214 over a medal at x142..154;
+# "9,999,999" spans x133..214, overprinting the medal AND the grade letter at x132).
+# The fix makes hall_col_x own ALL SIX columns, sized so even an 8M score cannot reach the
+# medal, and gives the header row the one plate language. Every check below drives the REAL
+# _draw_hall headless through the _CaptureMenu seams with Art.text_capture armed. ---
+func test_hall_columns_aligned_and_plated() -> void:
+	var stub := _StubMain.new()
+	stub.hall = [
+		{"score": 9999999, "mode": "endless", "wave": 99, "streak": 99, "won": false, "grade": "S", "daily": true, "assist": true},
+		{"score": 264500, "mode": "campaign", "sector": 5, "streak": 14, "won": true, "grade": "A"},
+		{"score": 88900, "mode": "boss_rush", "bosses": 2, "streak": 9, "won": false, "grade": "B"},
+		{"score": 41200, "mode": "campaign", "sector": 3, "streak": 6, "won": false, "grade": "C"},
+	]
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	m.mode = Menu.Mode.HALL
+	m._hall_filter = 0
+	m._hall_page = 0
+	# No stub.hall_latest — the recency band's raw draw_rect/polygon are the one _draw_hall
+	# path with no capture seam, and they are not what this test measures.
+	var prev = Art.text_capture
+	Art.text_capture = m.ops
+	m._draw_hall()
+	Art.text_capture = prev
+	Runner.T.ok(m.ops.size() > 20, "the real _draw_hall emitted ink to inspect (%d ops)" % m.ops.size())
+
+	# --- 1a: uniform gutter — adjacent header boxes (sorted by x) all clear HALL_GUTTER.
+	# MEASURED AT HEAD: #→RANK 8px, RANK→SCORE 5px, SCORE→MODE 14px, MODE→REACHED 59px.
+	# (load() typed as Script, not the preloaded class — the _consts() idiom from
+	# test_main.gd: get_script_constant_map is an instance method on Script.)
+	var ms2: Script = load("res://src/view/menu.gd")
+	var gutter: float = ms2.get_script_constant_map().get("HALL_GUTTER", 14.0)
+	var heads: Array = []
+	for op in m.ops:
+		if op["k"] == "text" and str(op["id"]) in ["#", "RANK", "SCORE", "MODE", "REACHED", "STREAK"]:
+			heads.append(op)
+	heads.sort_custom(func(a, b): return (a["box"] as Rect2).position.x < (b["box"] as Rect2).position.x)
+	Runner.T.eq(heads.size(), 6, "all six column headers drew (got %d)" % heads.size())
+	for i in range(1, heads.size()):
+		var pb: Rect2 = heads[i - 1]["box"]
+		var nb: Rect2 = heads[i]["box"]
+		var gap: float = nb.position.x - pb.end.x
+		Runner.T.ok(gap >= gutter - 0.01,
+			"header gutter %s→%s is %.1fpx (>= %.0f)" % [heads[i - 1]["id"], heads[i]["id"], gap, gutter])
+
+	# --- 1b: class pin — NO pairwise collision among the ROW-band ink (text + tex ops at
+	# or below the first row baseline). HEAD: medal (142..154) × score (149..214) intersect
+	# on the "264,500" row — 5px of medal overprinted by numerals. Any future column edit
+	# that collides any pair goes red the day it lands. (grow(-0.5) idiom from the
+	# world-label ratchet: touching edges are not a collision.)
+	var row_ops: Array = []
+	for op in m.ops:
+		if op["k"] in ["text", "tex"] and (op["box"] as Rect2).end.y > Menu.HALL_ROW0_Y - 11.0:
+			row_ops.append(op)
+	var medal_ops := 0
+	for op in row_ops:
+		if op["k"] == "tex" and str(op["id"]).begins_with("mi_medal_"):
+			medal_ops += 1
+	Runner.T.ok(medal_ops >= 4, "row medals draw through the _emit_tex capture seam (%d seen)" % medal_ops)
+	var worst_pair := ""
+	for i in row_ops.size():
+		for j in range(i + 1, row_ops.size()):
+			var a: Rect2 = (row_ops[i]["box"] as Rect2).grow(-0.5)
+			var b: Rect2 = (row_ops[j]["box"] as Rect2).grow(-0.5)
+			if a.intersects(b):
+				worst_pair = "%s '%s' [%.0f..%.0f] × %s '%s' [%.0f..%.0f]" % [
+					row_ops[i]["k"], str(row_ops[i]["id"]).substr(0, 20), (row_ops[i]["box"] as Rect2).position.x, (row_ops[i]["box"] as Rect2).end.x,
+					row_ops[j]["k"], str(row_ops[j]["id"]).substr(0, 20), (row_ops[j]["box"] as Rect2).position.x, (row_ops[j]["box"] as Rect2).end.x]
+				break
+		if worst_pair != "":
+			break
+	Runner.T.ok(worst_pair == "", "no two row-band ink ops collide%s" % ["" if worst_pair == "" else " — " + worst_pair])
+
+	# --- 1c: the header row wears a plate — some captured rect encloses ALL six header
+	# boxes (the row used to float bare between the tab plates and the rows; tab plates
+	# live at y64..80, headers at y98..109, so HEAD has no such rect).
+	var enclosing := false
+	for op in m.ops:
+		if op["k"] != "rect":
+			continue
+		var all_in := true
+		for h in heads:
+			if not (op["box"] as Rect2).encloses(h["box"]):
+				all_in = false
+				break
+		if all_in:
+			enclosing = true
+			break
+	Runner.T.ok(enclosing, "a header plate rect encloses all six column-header boxes")
+
+	# --- 1d: pure geometric belt — the score column is sized so the widest bankable
+	# score can never reach the RANK column's grade block (letter +2 / medal +14..+26).
+	Runner.T.ok(col_x_static_guard(), "hall_col_x six-column guard (see test above)")
+	var col_x := Menu.hall_col_x()
+	if col_x.size() == 6:
+		var f := Art.font()
+		var widest_score := f.get_string_size("9,999,999", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		Runner.T.ok(col_x[2] - widest_score >= col_x[1] + 28.0,
+			"an 8M score (%.0fpx left of %.0f) cannot reach the grade block ending at %.0f"
+				% [widest_score, col_x[2], col_x[1] + 28.0])
+	m.free()
+	stub.free()
+
+
+# Tiny helper so 1d's size guard is a named assertion, not a silent skip.
+func col_x_static_guard() -> bool:
+	return Menu.hall_col_x().size() == 6
+
+
+# --- Raw world signage (review tell: 'BOUNTY'/'CACHE' signposts and the yellow payoff
+# toasts draw with no backing plate — or a hand-rolled half-strength one — over the
+# brightest scorched dirt). The house plate language already exists and is WCAG-pinned
+# (LABEL_PLATE_FILL 0.92 + _label_plate_rect + CALLOUT_INK_FLOOR, exercised by
+# test_world_callout_contrast); these two families bypassed it:
+#   (a) fork signposts — Color(0,0,0,0.55) literal, half the standard's alpha, no keyline;
+#   (b) floattext payoff toasts — NO plate at all, only a 4-dir outline.
+# This is the const/geometry half of the pin (the draw-level half for the Hall lives in
+# the test above): the consts must exist, the signpost plate must BE the house plate, and
+# every ink must genuinely need its plate on sand (<4.5 bare) and clear AA on it (>=4.5).
+# Ground derived exactly like test_world_callout_contrast: _ground_stops("campaign")[0][0]
+# × GROUND_SHADE — the brightest sand the campaign paints. ---
+func test_world_signage_uses_the_one_plate_language() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var c := ms.get_script_constant_map()
+	# HEAD: every one of these is absent — clean assertion reds, no engine error.
+	Runner.T.ok(c.has("SIGN_PLATE_FILL"), "SIGN_PLATE_FILL exists (the signposts read the ONE plate fill)")
+	Runner.T.ok(c.has("SIGN_INK_CACHE") and c.has("SIGN_INK_BOUNTY"), "SIGN_INK_CACHE/BOUNTY hoist the two sign inks")
+	Runner.T.ok(ms.has_method("floattext_plate_rect"), "floattext_plate_rect exists (the toast plate geometry)")
+	for k in ["FLOAT_INK_BOUNTY", "FLOAT_INK_RANSOM", "FLOAT_INK_COIN"]:
+		Runner.T.ok(c.has(k), "%s hoists the payoff toast ink" % k)
+	if not (c.has("SIGN_PLATE_FILL") and c.has("SIGN_INK_CACHE") and c.has("SIGN_INK_BOUNTY")):
+		return
+
+	var fill: Color = MainScript.LABEL_PLATE_FILL
+	Runner.T.ok(c["SIGN_PLATE_FILL"] == fill,
+		"the signpost plate IS the house plate fill (not a hand-rolled weaker literal)")
+
+	var stop: Color = MainScript._ground_stops("campaign")[0][0]
+	var ground := Color(stop.r * MainScript.GROUND_SHADE, stop.g * MainScript.GROUND_SHADE,
+		stop.b * MainScript.GROUND_SHADE)
+	var plate := _blend(_opaque(fill), ground, fill.a)
+
+	# The plates are load-bearing, not decoration. MEASURED: at FULL alpha five of the
+	# six inks actually clear 4.5 bare on the brightest sand (the greens/yellows sit at
+	# 5.0..5.5:1 — only the BOUNTY amber, 4.19:1, fails) — so "bare fails AA" is NOT the
+	# pin. The pin is the FADE: every toast fades to zero over its life, and at half-life
+	# (alpha 0.5) over bare sand EVERY one of these inks reads ~2.2..2.6:1 — that is the
+	# regression a dropped draw_rect ships. On the 0.92 plate at full alpha all clear AA.
+	var inks := []
+	if c.has("SIGN_INK_CACHE"):
+		inks.append([c["SIGN_INK_CACHE"], "CACHE signpost"])
+	if c.has("SIGN_INK_BOUNTY"):
+		inks.append([c["SIGN_INK_BOUNTY"], "BOUNTY signpost"])
+	for k in ["FLOAT_INK_BOUNTY", "FLOAT_INK_RANSOM", "FLOAT_INK_COIN"]:
+		if c.has(k):
+			inks.append([c[k], k])
+	for pair in inks:
+		var ratio := _wcag_contrast(_blend(_opaque(pair[0]), plate, 1.0), plate)
+		Runner.T.ok(ratio >= 4.5, "%s on the plate clears AA-normal (%.2f >= 4.5)" % [pair[1], ratio])
+		var faded := _wcag_contrast(_blend(_opaque(pair[0]), ground, 0.5), ground)
+		Runner.T.ok(faded < 4.5,
+			"%s half-faded on bare sand fails AA (%.2f) — the plate is load-bearing" % [pair[1], faded])
+
+	# The toast plate geometry: covers the punched text box at both punch extremes and
+	# both draw sizes the spawners use — the plate must never lag the glyphs it backs.
+	# (Call via .call so the file still PARSES pre-fix — a direct static call of a
+	# not-yet-existing function is a parse error, and the pin must be a clean RED
+	# assertion, not a file that fails to load.)
+	if ms.has_method("floattext_plate_rect"):
+		var f := Art.font()
+		for size in [9, 11]:
+			var w: float = f.get_string_size("BOUNTY +9,999¢", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+			for punch in [1.0, 1.5]:
+				var plate_r: Rect2 = ms.call("floattext_plate_rect", Vector2(200, 100), w, size, punch)
+				var text_box := Rect2(200.0 - w * punch / 2.0, 100.0 - float(size) * punch,
+					w * punch, float(size + 2) * punch)
+				Runner.T.ok(plate_r.encloses(text_box),
+					"floattext plate encloses the %dpx text at punch %.1f" % [size, punch])

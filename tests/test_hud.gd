@@ -3640,3 +3640,49 @@ func test_downed_row_calls_the_solo_endless_death_clock_what_it_is() -> void:
 				"solo ENDLESS: the row names the run ending (got '%s')" % ink)
 		h.main.free()
 		h.free()
+
+
+# --- Caption scrim firming (review tell, perception-hardening NOT a contrast fix: the
+# "[ROUNDS BOUNCING OFF ARMOR]" strip already ships a scrim + softspot + keyline + shadow
+# at ~10:1 over the brightest terrain — the raw-signage claim is stale for this element;
+# the real un-plated signage lives in the floattext toasts and fork signposts, pinned in
+# test_menu_layout.gd). What was genuinely weak: the flat core at 0.5 alpha reads as a
+# glow at 640x360. The fill and the two role inks are hoisted to named consts so this
+# pin measures the exact shipped colors (the CALLOUT_* discipline). WCAG helpers copied
+# from test_main.gd (12 lines, noted there) — test_hud.gd has no other contrast pins. ---
+func test_caption_scrim_consts_hold_the_contrast_floor() -> void:
+	# load() typed as Script (not the preloaded Hud class) so get_script_constant_map
+	# resolves — the _consts() idiom from test_main.gd.
+	var hs: Script = load("res://src/view/hud.gd")
+	var c := hs.get_script_constant_map()
+	# HEAD: all three absent — clean assertion reds, no engine error.
+	Runner.T.ok(c.has("CAPTION_SCRIM_FILL"), "CAPTION_SCRIM_FILL hoists the flat scrim fill")
+	Runner.T.ok(c.has("CAPTION_INK_RADIO") and c.has("CAPTION_INK_DRY"), "CAPTION_INK_RADIO/DRY hoist the role inks")
+	if not (c.has("CAPTION_SCRIM_FILL") and c.has("CAPTION_INK_RADIO") and c.has("CAPTION_INK_DRY")):
+		return
+	var fill: Color = c["CAPTION_SCRIM_FILL"]
+	Runner.T.ok(fill.a >= 0.75, "the caption scrim core is firmed to alpha %.2f (>= 0.75, was 0.5)" % fill.a)
+
+	var ms: Script = load("res://src/main.gd")
+	var stop: Color = ms._ground_stops("campaign")[0][0]
+	var shade: float = ms.get_script_constant_map()["GROUND_SHADE"]
+	var ground := Color(stop.r * shade, stop.g * shade, stop.b * shade)
+	# The strip composites scrim-over-ground at full text alpha (a=1), then ink over that.
+	var scrim := _cap_blend(Color(fill.r, fill.g, fill.b), ground, fill.a)
+	for pair in [[c["CAPTION_INK_RADIO"], "radio"], [c["CAPTION_INK_DRY"], "dry"]]:
+		var ratio := _cap_wcag(pair[0], scrim)
+		Runner.T.ok(ratio >= 4.5, "caption %s ink on the composited scrim clears AA-normal (%.2f >= 4.5)" % [pair[1], ratio])
+
+
+static func _cap_blend(src: Color, dst: Color, a: float) -> Color:
+	return Color(src.r * a + dst.r * (1.0 - a), src.g * a + dst.g * (1.0 - a), src.b * a + dst.b * (1.0 - a))
+
+
+static func _cap_lin(ch: float) -> float:
+	return ch / 12.92 if ch <= 0.03928 else pow((ch + 0.055) / 1.055, 2.4)
+
+
+static func _cap_wcag(a: Color, b: Color) -> float:
+	var la := 0.2126 * _cap_lin(a.r) + 0.7152 * _cap_lin(a.g) + 0.0722 * _cap_lin(a.b)
+	var lb := 0.2126 * _cap_lin(b.r) + 0.7152 * _cap_lin(b.g) + 0.0722 * _cap_lin(b.b)
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)

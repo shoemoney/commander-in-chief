@@ -1645,6 +1645,14 @@ func _result_card_up() -> bool:
 	return main.get("_debrief") == true or (s != null and s.victory)
 
 
+# Perception-hardening (not a contrast fix — the strip already measured ~10:1 over the
+# brightest terrain): the flat scrim core was 0.5 alpha, weak enough to read as a glow
+# at 640x360. Hoisted to named consts (the CALLOUT_* discipline) so the ratchet in
+# test_hud.gd measures the exact shipped colors, and firmed 0.5 -> 0.75.
+const CAPTION_SCRIM_FILL := Color(0.02, 0.03, 0.02, 0.75)
+const CAPTION_INK_RADIO := Color(0.75, 0.95, 1.0)
+const CAPTION_INK_DRY := Color(0.95, 0.9, 0.75)
+
 func _draw_caption() -> void:
 	if main == null:
 		return
@@ -1671,7 +1679,7 @@ func _draw_caption() -> void:
 	# with no translation loaded translate() returns the source unchanged, so English is the
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
 	var txt := caption_line(raw)
-	var col: Color = Color(0.75, 0.95, 1.0) if cap.get("radio", false) else Color(0.95, 0.9, 0.75)
+	var col: Color = CAPTION_INK_RADIO if cap.get("radio", false) else CAPTION_INK_DRY
 	# triple-A: dissolve the strip over its last 0.4s instead of snapping off. REDUCE MOTION
 	# snaps (same contract as _verb_alpha), so a motion-sensitive player gets no cross-fade.
 	var a := 1.0 if main._motion < 0.5 else float(cap.get("fade", 1.0))
@@ -1709,7 +1717,7 @@ func _draw_caption() -> void:
 	# faded out — a lingering dark bar under nothing. The role-tinted keyline is the
 	# other half of the pre-existing contrast fix and is kept as the bottom edge.
 	var soft := bg.grow_individual(26.0, 3.0, 26.0, 3.0)
-	_emit_bg_rect(bg, Color(0.02, 0.03, 0.02, 0.5 * a))
+	_emit_bg_rect(bg, Color(CAPTION_SCRIM_FILL.r, CAPTION_SCRIM_FILL.g, CAPTION_SCRIM_FILL.b, CAPTION_SCRIM_FILL.a * a))
 	draw_texture_rect(Art.tex("fx_softspot"), soft, false, Color(0.02, 0.03, 0.02, 0.9 * a))
 	draw_texture_rect(Art.tex("fx_softspot"), Rect2(soft.position.x, soft.end.y - 1.0, soft.size.x, 2.0),
 		false, Color(col.r, col.g, col.b, 0.45 * a))

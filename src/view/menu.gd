@@ -90,19 +90,37 @@ const HALL_BAND_L := 100.0    # left edge of the band and its ribbon; clears FRA
 # ONE source for the latest-run highlight band, shared by _draw_hall and the layout test.
 static func hall_highlight_band(y: float) -> Rect2:
 	return Rect2(HALL_BAND_L, y - 12.0, HALL_CELL_R - HALL_BAND_L, 20.0)
-# ...and ONE source for the board's measured column x-starts (#, SCORE-right-edge, MODE,
-# REACHED, STREAK). Art.font() is proportional, so each column starts after the widest
-# possible header/cell at its draw size plus a 14px gutter; hardcoded offsets drifted on
-# every font change. Shared with the layout test for the same reason HALL_CELL_R is: a
-# test that re-derives streak_x by hand goes quietly vacuous the day the columns move.
+# ...and ONE source for the board's measured column x-starts (#, RANK, SCORE-right-edge,
+# MODE, REACHED, STREAK). Art.font() is proportional, so each column starts after the widest
+# possible header/cell at its draw size plus one named gutter; hardcoded offsets drifted on
+# every font change — and the left three columns used to bypass this entirely as literals
+# (RANK header 130.0, SCORE right-edge 214.0, grade letter 132.0, medal 142.0, col_x[1] a
+# dead value), which is how a graded run's score cell came to overprint its own medal
+# ("264,500" at x149..214 over a medal at x142..154). Shared with the layout test for the
+# same reason HALL_CELL_R is: a test that re-derives the columns by hand goes quietly
+# vacuous the day they move.
+const HALL_GUTTER := 14.0
 static func hall_col_x() -> Array:
 	var f := Art.font()
+	var num_w := maxf(f.get_string_size("#", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x,
+		maxf(f.get_string_size("40", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x,
+			f.get_string_size("--", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x))
+	var rank_x := 112.0 + num_w + HALL_GUTTER
+	# The RANK column's cell is a grade letter at +2 (10px) with a 12px tier medal at
+	# +14 — a 26px block; the "RANK" header (10px) is wider and owns the column.
+	var rank_w := maxf(f.get_string_size("RANK", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x, 26.0)
+	# SCORE right-aligns its numerals; the column is sized off the widest bankable score
+	# so even "9,999,999" cannot reach the medal (the literal 214.0 sat 5px INSIDE it).
+	var score_r := rank_x + rank_w + HALL_GUTTER + f.get_string_size(
+		"9,999,999", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	var mode_x := score_r + HALL_GUTTER
 	var mode_w := maxf(f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x,
 		f.get_string_size("BOSS RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	var reached_x := mode_x + mode_w + HALL_GUTTER
 	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 	for s in ["SECTOR 9", "VICTORY", "WAVE 99", "BOSS 3/3"]:
 		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
-	return [112.0, 148.0, 228.0, 228.0 + mode_w + 14.0, 228.0 + mode_w + 14.0 + reach_w + 14.0]
+	return [112.0, rank_x, score_r, mode_x, reached_x, reached_x + reach_w + HALL_GUTTER]
 const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint under colorblind mode so the white-alpha sprite keeps body
 
 # c4-07: the two shared center-banner status tints. Single-sourced HERE (the class main already
@@ -4635,23 +4653,28 @@ func _draw_hall() -> void:
 		_emit_tex("mi_arrow", Rect2(right + 8.0, TAB_ARROW_Y, 11.0, 11.0), acol)
 	# Filter to the selected mode (ALL shows everything), keeping score order.
 	var rows := _hall_rows()
-	# Measured column layout (see hall_col_x): the SCORE column right-aligns to 214,
-	# MODE/REACHED/STREAK follow at measured widths + 14px gutters.
+	# Measured column layout (see hall_col_x): ALL SIX columns come from the one
+	# measurement — # left-anchored, RANK holding the grade-letter+medal block, SCORE
+	# right-aligned to col_x[2], MODE/REACHED/STREAK left-anchored at col_x[3..5].
 	var col_x := hall_col_x()
-	var streak_x: float = col_x[4]
-	var headers := ["#", "SCORE", "MODE", "REACHED", "STREAK"]
+	var streak_x: float = col_x[5]
+	var headers := ["#", "RANK", "SCORE", "MODE", "REACHED", "STREAK"]
+	# Header plate: the one dim band behind the header row + a 1px gold-dim rule under
+	# it — the headers used to float bare between the tab plates and the rows. Drawn
+	# first so the header ink lands on it; no column dividers (the complaint was
+	# spacing, and the board already carries tab plates, the glow band and medals).
+	var hhead := Rect2(HALL_BAND_L, HALL_HEADER_Y - 11.0, HALL_CELL_R - HALL_BAND_L, 15.0)
+	_emit_rect(hhead, Color(0.05, 0.06, 0.04, 0.55))
+	_emit_rect(Rect2(hhead.position.x, hhead.end.y, hhead.size.x, 1.0), Color(1.0, 0.82, 0.4, 0.3))
 	# Headers ride HALL_HEADER_Y, derived one line under the recency band, which is
 	# itself derived off the tab row — so the whole column stack moves together when
 	# the content well shifts (see HALL_RECENCY_Y for what a typed copy cost us).
 	for c in headers.size():
-		if c == 1:
+		if c == 2:
 			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			Art.text(self, headers[c], Vector2(214.0 - hw, HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
+			Art.text(self, headers[c], Vector2(col_x[2] - hw, HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
 		else:
 			Art.text(self, headers[c], Vector2(col_x[c], HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
-	# RANK header sits in the gap between the # and the right-aligned SCORE — drawn
-	# outside the parallel header/col_x arrays so it doesn't reshuffle the columns.
-	Art.text(self, "RANK", Vector2(130.0, HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
 	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. Switching the filter
 	# tab resets _hall_page to 0 (see the nav + click handlers); c4-13: this clamp runs EVERY draw,
 	# so even if the filter or row count shrinks the board underneath a stale page index (from any
@@ -4767,18 +4790,23 @@ func _draw_hall() -> void:
 			var cells := [rank_s, Art.group_digits(int(run.get("score", 0))), mode_s, reached, streak_s]
 			for c in cells.size():
 				if c == 1:
-					# Right-aligned numerals: a 6-digit endless score can't crowd MODE.
+					# Right-aligned numerals against the measured SCORE column right
+					# edge — sized off "9,999,999" so no bankable score reaches the medal.
 					var sw := Art.font().get_string_size(cells[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-					Art.text(self, cells[c], Vector2(214.0 - sw, y), 11, col)
+					Art.text(self, cells[c], Vector2(col_x[2] - sw, y), 11, col)
 				else:
-					Art.text(self, cells[c], Vector2(col_x[c], y), 11, col)
-			# Earned run grade (S/A/B/C/D), colored by tier. Old saves predate the key —
+					# Cells past SCORE sit one slot up in col_x (there is no cell for
+					# col_x[1] — the RANK column's content is the grade block below).
+					Art.text(self, cells[c], Vector2(col_x[0] if c == 0 else col_x[c + 1], y), 11, col)
+			# Earned run grade (S/A/B/C/D), colored by tier, in the RANK column the
+			# header names: letter at +2, tier medal at +14 (the measured 26px grade
+			# block hall_col_x sizes the column from). Old saves predate the key —
 			# guard with .get and only draw when present so the board never crashes.
 			var gr: String = run.get("grade", "")
 			if gr != "":
 				var gcol: Color = {"S": Color(1.0, 0.85, 0.3), "A": Color(0.55, 0.9, 1.0),
 					"B": Color(0.6, 0.9, 0.5), "C": Color(0.85, 0.85, 0.8)}.get(gr, Color(0.7, 0.7, 0.7))
-				Art.text(self, gr, Vector2(132.0, y), 11, gcol)
+				Art.text(self, gr, Vector2(col_x[1] + 2.0, y), 11, gcol)
 				# Tier medal beside the letter (D=1 … S=5) — sprite is white-with-alpha,
 				# tinted to the tier color so medal and letter read as one badge.
 				# c4-08: under colorblind mode the tier hues flatten onto one axis, so a white-with-alpha
@@ -4789,8 +4817,10 @@ func _draw_hall() -> void:
 				var med: int = {"D": 1, "C": 2, "B": 3, "A": 4, "S": 5}.get(gr, 0)
 				if med > 0:
 					var mcol := gcol.darkened(MEDAL_CB_DARKEN) if Art.colorblind else gcol
-					draw_texture_rect(Art.tex("mi_medal_%d" % med),
-						Rect2(142.0, y - 10.0, 12.0, 12.0), false, mcol)
+					# Routed through _emit_tex (not a raw draw_texture_rect) so the
+					# medal is headless-auditable through the capture seam — the
+					# score×medal collision ratchet in test_menu_layout reads it.
+					_emit_tex("mi_medal_%d" % med, Rect2(col_x[1] + 14.0, y - 10.0, 12.0, 12.0), mcol)
 		# Footer: a single compact counter row framed by the PREV/NEXT buttons when the
 		# board spills past one page. The whole line sits on ONE row at y306 — clear of the
 		# BACK plate (top y310) below it. The old second "UP/DOWN TO TURN THE PAGE" hint line
