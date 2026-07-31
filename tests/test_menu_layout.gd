@@ -618,6 +618,93 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 		DirAccess.rename_absolute(stashb, bak)
 
 
+# DAILY MULLIGAN: a mode labeled "one attempt" must SPEND the attempt when the
+# daily board is DEALT — not at the debrief. On HEAD every pre-death exit path
+# (R, pad restart, pause RESTART, QUIT TO TITLE, F2-F4, ALT-F4) routes through
+# _reset(), which re-derives seed_v = _daily_seed() with _daily untouched and
+# _daily_done_seed still -1: the identical board, re-dealt, still bankable as
+# *DAILY. Same hole after a COMPLETED daily: R from the debrief re-deals the
+# same seed and _record_run banks a SECOND daily:true Hall entry (best-of-N
+# even after the row locks). The fix lives at the one seam every exit shares —
+# _reset(): dealing a daily board arms the attempt on disk immediately, and any
+# reset while today's daily is spent re-deals the SAME board demoted to
+# unranked practice.
+func test_daily_attempt_spent_on_any_abandon_path() -> void:
+	# Same save-stash dance as the c2-13 integration test above.
+	var path: String = MainScript.SAVE_PATH
+	var bak: String = MainScript.SAVE_BAK
+	var stash := path + ".dspend"
+	var stashb := bak + ".dspend"
+	if FileAccess.file_exists(stash) and not FileAccess.file_exists(path):
+		DirAccess.rename_absolute(stash, path)
+	if FileAccess.file_exists(stashb) and not FileAccess.file_exists(bak):
+		DirAccess.rename_absolute(stashb, bak)
+	if FileAccess.file_exists(path):
+		DirAccess.rename_absolute(path, stash)
+	if FileAccess.file_exists(bak):
+		DirAccess.rename_absolute(bak, stashb)
+
+	var main: Node2D = MainScript.new()   # not tree-parented: _ready never fires
+	main._sfx = _NullSfx.new()
+	# 1. DEALING the daily board spends the attempt — in memory and on disk,
+	#    before any death, quit, or crash can refund it.
+	main._daily = true
+	main._reset()
+	Runner.T.ok(main.daily_done(),
+		"dealing a daily board spends the day's one attempt immediately (no debrief needed)")
+	var cf := ConfigFile.new()
+	Runner.T.eq(cf.load(path), OK, "the save file exists right after the daily deal")
+	Runner.T.eq(int(cf.get_value("daily", "done_seed", -1)), main._daily_seed(),
+		"the armed attempt is ON DISK at deal time (ALT-F4 / crash cannot refund it)")
+	# 2. The R path (every abandon path routes through _reset): re-deals the SAME
+	#    board, demoted to unranked practice — never a fresh bankable attempt.
+	main._reset()
+	Runner.T.ok(not main._daily,
+		"a reset while today's daily is spent demotes the re-deal to unranked practice")
+	Runner.T.eq(main._current_seed, main._daily_seed(),
+		"...re-dealing the SAME daily board, not a silent re-seed")
+	# The player must be TOLD the re-deal no longer banks as the daily — and the
+	# banner must survive _reset()'s own _banners.clear() (queued before the
+	# clear it never draws: the notice dies silently and the demote reads as a bug).
+	var _banner_found := false
+	for b in main._banners:
+		if String(b["text"]).contains("UNRANKED PRACTICE"):
+			_banner_found = true
+	Runner.T.ok(_banner_found,
+		"the demote tells the player: DAILY ATTEMPT SPENT — UNRANKED PRACTICE")
+	# 3. A run banked from that re-deal must NOT carry the daily flag (HEAD banks
+	#    it as *DAILY — the mulligan).
+	main._record_run(main.sim.score)
+	Runner.T.ok(not main.hall_latest.get("daily", true),
+		"a run banked after an abandon-reset is not tagged daily in the Hall")
+	# 4. A fresh instance reloads the armed attempt off disk and the REAL Menu
+	#    locks the DAILY RUN row — reached WITHOUT any death.
+	var main2: Node2D = MainScript.new()
+	main2._sfx = _NullSfx.new()
+	main2._load_bests()
+	Runner.T.ok(main2.daily_done(),
+		"the spent attempt survives a relaunch (loaded from disk, not session state)")
+	var m: Control = Menu.new()
+	m.main = main2
+	m.mode = Menu.Mode.TITLE
+	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
+	Runner.T.ok(row.get("disabled", false), "the spent daily locks the TITLE row")
+	Runner.T.eq(String(row.get("badge", "")), "COMPLETED", "...and shows the COMPLETED badge")
+	m.free()
+	main.free()
+	main2.free()
+
+	# Restore the dev's real save.
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+	if FileAccess.file_exists(bak):
+		DirAccess.remove_absolute(bak)
+	if FileAccess.file_exists(stash):
+		DirAccess.rename_absolute(stash, path)
+	if FileAccess.file_exists(stashb):
+		DirAccess.rename_absolute(stashb, bak)
+
+
 # The 2px inter-row inset must leave a real gap between plates at the fullest
 # 6-row state so group dividers stay legible (not fused into one slab).
 func test_title_fullest_state_keeps_a_visible_inter_row_gap() -> void:

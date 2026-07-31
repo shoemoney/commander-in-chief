@@ -60,6 +60,22 @@ const _LITTER_LATE := ["wreck", "watchtower", "barbedwire", "wreck_apc", "wreck_
 const _RUSHER_SKINS := ["enemy_smg", "enemy_assault", "enemy_shotgun", "enemy_lmg"]
 # Dead hulks that slump beside a parked tank (convoy-graveyard set-dressing).
 const _TANK_HULKS := ["wreck_apc", "wreck_technical", "wreck_light_tank"]
+# The heavy-unit set, single-sourced: call-site _spr scale + ground-contact
+# hover offset live HERE so body and shadow can never drift apart again (the
+# hand-tuned shadow radii they replace had every heavy unit's ellipse buried
+# under its own sprite — 0px visible on colossus/heli/tank/technical).
+# _vehicle_shadow_spec derives the actual ellipse from the MEASURED opaque
+# footprint, so a re-bake rescales the shadow instead of re-burying it.
+const VEHICLE_CONTACT := {
+	"tank_body": {"call_scale": 0.62, "hover": 0.0},
+	"m_technical": {"call_scale": 0.55, "hover": 0.0},
+	"gunship_body": {"call_scale": 1.3, "hover": 30.0, "widen": 0.75},
+	"m_heli_attack2": {"call_scale": 1.3, "hover": 30.0, "widen": 0.75},
+	"colossus_body": {"call_scale": 1.9, "hover": 0.0},
+	"wreck_apc": {"call_scale": 1.0, "hover": 0.0},
+	"wreck_technical": {"call_scale": 1.0, "hover": 0.0},
+	"wreck_light_tank": {"call_scale": 1.0, "hover": 0.0},
+}
 
 var sim: SimWorld
 var _recorder: Replay             # captures this run's inputs → user://last_run.replay (view-only)
@@ -91,7 +107,6 @@ var _fx_glow_idx: Array[int] = []
 # 400-entry) array every ~3rd physics frame just to enforce the ambient cap.
 var _mote_count := 0
 var _shadow_tex: Texture2D        # opt-loop: cached Art.tex("fx_shadow") — see _ground_shadow()
-var _shadow_tex_size: Vector2     # opt-loop: cached _shadow_tex.get_size()
 var _trench_prev: Array[bool] = []   # c3: per-player last-tick in-trench, for the drop-in cue (view-only)
 var _rear_wedge_t := 0.0              # c4: rear-warn bottom-edge wedge timer (seconds)
 var _rear_wedge_x := 320.0            # c4: screen-x of the pending rear spawn
@@ -1311,10 +1326,12 @@ func daily_done() -> bool:
 
 static func _daily_locked(done_seed: int, today_seed: int) -> bool:
 	# c2-13: the lock rule, pure + static so it is unit-testable without a live sim.
-	# The row locks ONLY when the seed ACTUALLY COMPLETED (banked at the run's debrief
-	# from _current_seed) equals TODAY's seed. The midnight case falls out for free: a
-	# run started yesterday banks yesterday's seed, so today's daily stays UNLOCKED.
-	# done_seed defaults to -1 (never played); today_seed is always >= 0, so no match.
+	# The row locks when the SPENT seed equals TODAY's seed. The attempt is spent
+	# the moment the daily board is DEALT (_reset arms it on disk) — a mode labeled
+	# one-attempt may not refund on R / RESTART / QUIT / crash; _record_run's
+	# debrief stamp just re-writes the same value. The midnight case falls out for
+	# free: a run started yesterday spent yesterday's seed, so today's daily stays
+	# UNLOCKED. done_seed defaults to -1 (never played); today_seed >= 0, no match.
 	return done_seed == today_seed
 
 
@@ -1442,6 +1459,15 @@ func _reset() -> void:
 	for wi in _water_pushed.size():
 		_water_pushed[wi] = _water_pushed_row()
 	_flush_bests()   # a run torn down without a debrief still banks its records
+	# One attempt: any reset while today's daily is spent re-deals the SAME board
+	# as unranked practice — never a fresh bankable attempt on the daily seed.
+	# Covers every abandon path at the one seam they share (R / pad restart /
+	# pause RESTART / QUIT TO TITLE / F2-F4 all land here), including the
+	# post-completion R that used to bank a second daily:true Hall entry.
+	var _spent_daily := -1
+	if _daily and daily_done():
+		_spent_daily = _current_seed
+		_daily = false
 	# Per-run seed variety: the arcade skeleton is fixed (gate/boss/finale
 	# positions), but spawn geometry, fords and drop luck differ each run —
 	# a real 'run it again' hook. The trailer keeps the audited fixed seed.
@@ -1451,9 +1477,20 @@ func _reset() -> void:
 		_seed_override = -1   # one-shot: consumed for this run only
 	elif OS.has_feature("movie"):
 		seed_v = 0xC0FFEE
+	elif _spent_daily >= 0:
+		seed_v = _spent_daily
 	else:
 		seed_v = _daily_seed() if _daily else randi()
 	_current_seed = seed_v   # surfaced on pause so runs can be compared/shared
+	# daily-mulligan: dealing a daily board SPENDS the day's one attempt,
+	# immediately and on disk — before any death, quit, or crash can refund it.
+	# (Overturns c2-13's deliberate "banked at the run's debrief": a mode labeled
+	# one-attempt may not refund on abandon.) The seed guard keeps movie-mode
+	# (0xC0FFEE) and CHALLENGE SEED runs from burning the daily; _record_run's
+	# stamp stays — it re-writes the same value and owns the midnight comment.
+	if _daily and seed_v == _daily_seed() and _daily_done_seed != seed_v:
+		_daily_done_seed = seed_v
+		_persist({"daily": {"done_seed": _daily_done_seed}})
 	var _mode_str := "endless" if _endless else ("boss_rush" if _boss_rush \
 		else ("arcade" if _arcade_chapter >= 1 else "campaign"))
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, _mode_str)
@@ -1536,6 +1573,11 @@ func _reset() -> void:
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
 	_banners.clear()
+	# AFTER the clear above — queued earlier in _reset() it would be wiped before
+	# ever drawing. This is the one notice that the re-dealt daily board no longer
+	# banks as the daily.
+	if _spent_daily >= 0:
+		show_banner("DAILY ATTEMPT SPENT — UNRANKED PRACTICE", GameMenu.BANNER_COL_FAIL)
 	_armor_announced = 0   # the next run re-announces wave 13's armor from zero
 	_fork_sign_fade.clear()
 	_mud_told = false
@@ -6520,6 +6562,15 @@ static func _boss_rim_base(march: float) -> Color:
 	return Color(0.4, 0.1, 0.06).lerp(Color(0.16, 0.32, 0.48), smoothstep(0.6, 1.0, march))
 
 
+static func _shadow_ellipse(pos: Vector2, r: float) -> Rect2:
+	# The ONE ellipse every ground shadow draws, hoisted so the draw sites and
+	# the test_ground_anchors ratchet share the geometry byte-for-byte.
+	# fx_shadow is a SQUARE card, so the old tex.x*ss / tex.y*ss*0.45 pair
+	# collapses to these two literals — draw output is identical.
+	var sz := Vector2(r * 2.3, r * 1.035)
+	return Rect2(pos + Vector2(0, r * 0.32) - sz * 0.5, sz)
+
+
 func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 0.0)) -> void:
 	# Soft flattened drop-shadow so units/vehicles sit ON the ground instead of
 	# floating over it — a soft-dark card (fx_shadow) with baked falloff.
@@ -6536,13 +6587,57 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 
 	# — cached once in _ready() instead.
 	if _shadow_tex == null:
 		_shadow_tex = Art.tex("fx_shadow")
-		_shadow_tex_size = _shadow_tex.get_size()
-	var sh := _shadow_tex
-	var ss := (r * 1.15) / (_shadow_tex_size.x * 0.5)
-	var draw_size := Vector2(_shadow_tex_size.x * ss, _shadow_tex_size.y * ss * 0.45)
-	var center := pos + Vector2(0, r * 0.32)
-	draw_texture_rect(sh, Rect2(center - draw_size / 2.0, draw_size), false,
+	draw_texture_rect(_shadow_tex, _shadow_ellipse(pos, r), false,
 		Color(tint.r, tint.g, tint.b, a))
+
+
+static var _vehicle_spec_cache := {}
+
+
+static func _vehicle_shadow_spec(tex_name: String) -> Dictionary:
+	# {"r", "y_off", "foot", "hover"} derived from the MEASURED opaque footprint
+	# (alpha bbox x Art.draw_scale x VEHICLE_CONTACT call_scale — the same
+	# measure test_hitbox_fairness uses), cached once per process. A sprite
+	# re-bake or re-tint rescales the shadow automatically — no hand-tuned
+	# radius to go stale (the same lesson as the bunker size_limit sweep
+	# recorded in Art.SCALE's own comment).
+	#   r     = foot.x * widen      (the ellipse's 2.3x body then spills ~1.25x
+	#                              past the hull's flanks — the side skirts)
+	#   y_off = hover + foot.y*0.34 (blob tucks under the hull and skirts south)
+	if _vehicle_spec_cache.has(tex_name):
+		return _vehicle_spec_cache[tex_name]
+	var row: Dictionary = VEHICLE_CONTACT[tex_name]
+	var t: Texture2D = Art.tex(tex_name)
+	var img := t.get_image()
+	var sz := img.get_size()
+	var x0 := sz.x
+	var y0 := sz.y
+	var x1 := -1
+	var y1 := -1
+	for y in sz.y:
+		for x in sz.x:
+			if img.get_pixel(x, y).a > 0.35:
+				x0 = mini(x0, x)
+				y0 = mini(y0, y)
+				x1 = maxi(x1, x)
+				y1 = maxi(y1, y)
+	var s := float(row["call_scale"]) * Art.draw_scale(tex_name)
+	var foot := Vector2(float(x1 - x0 + 1) * s, float(y1 - y0 + 1) * s)
+	var spec := {
+		"r": foot.x * float(row.get("widen", 0.55)),
+		"y_off": float(row["hover"]) + foot.y * 0.34,
+		"foot": foot,
+		"hover": float(row["hover"]),
+	}
+	_vehicle_spec_cache[tex_name] = spec
+	return spec
+
+
+func _vehicle_contact_shadow(pos: Vector2, tex_name: String, tint: Color, a := 0.42) -> void:
+	# The ONE heavy-unit contact shadow — footprint-derived, so a heavy unit's
+	# shadow can never silently re-bury itself under its own sprite again.
+	var spec: Dictionary = _vehicle_shadow_spec(tex_name)
+	_ground_shadow(pos + Vector2(0.0, spec["y_off"]), spec["r"], a, tint)
 
 
 func _draw() -> void:
@@ -8476,14 +8571,20 @@ func _draw_tanks() -> void:
 		# glyph off-screen. An occupied tank is always with its player.
 		if t["occupant"] < 0 and (c.y < -60.0 or c.y > 420.0):
 			continue
+		# Contact shadow FIRST (footprint-derived — the old hand-tuned r=15.0
+		# ellipse ended 10px ABOVE the hull base, fully buried): it must sit
+		# under the board/crush rings below, not wash over them.
+		_vehicle_contact_shadow(c, "tank_body", Color(0.0, 0.03, 0.0))
 		# Convoy graveyard: a dead hulk slumps beside a PARKED tank (position is
 		# stable only while unoccupied), so the boardable reads as the last
 		# runner of a wiped-out column. Deterministic hulk + side from position.
 		if t["occupant"] < 0:
 			var wh := Art.cell_hash(t["x"], t["y"])
 			var wside := 32.0 if (wh / 3) % 2 == 0 else -32.0
-			_spr(_TANK_HULKS[wh % _TANK_HULKS.size()], c + Vector2(wside, 9.0),
-				float(wh % 628) / 100.0, 1.0)
+			var hulk_tex: String = _TANK_HULKS[wh % _TANK_HULKS.size()]
+			_vehicle_contact_shadow(c + Vector2(wside, 9.0), hulk_tex, Color(0.0, 0.03, 0.0))
+			_spr(hulk_tex, c + Vector2(wside, 9.0),
+				float(wh % 628) / 100.0, VEHICLE_CONTACT[hulk_tex]["call_scale"])
 		# Board-range ring on a parked tank; tread-crush footprint under an
 		# occupied one (mirrors the colossus crush grammar players already know).
 		if t["occupant"] < 0 and not t["burning"]:
@@ -8498,7 +8599,6 @@ func _draw_tanks() -> void:
 			burn_mod = Color(1.3, 0.6, 0.45) if _safe_strobe(t["burn_ticks"]) else Color(0.9, 0.5, 0.4)   # 3 Hz (was 5 Hz)
 		if t["occupant"] >= 0 and not t["burning"] and not sim._in_water(t["x"], t["y"]):
 			_kick_dust(t["occupant"], t["x"], t["y"], _tank_dust_prev, true)
-		_ground_shadow(c, 15.0, 0.42)
 		# Hull turns toward travel (eased with lerp_angle, so it swings like treads,
 		# not a swivel chair) — a sideways-driving tank no longer slides like a
 		# hovercraft with a detached barrel. Parked tanks keep their last heading.
@@ -8510,7 +8610,7 @@ func _draw_tanks() -> void:
 				hull = lerp_angle(hull, dv.angle() + PI / 2, 0.10)
 				_tank_hull[ti] = hull
 			_tank_prev[ti] = Vector2(t["x"], t["y"])
-		_spr("tank_body", c, hull, 0.62, burn_mod)
+		_spr("tank_body", c, hull, VEHICLE_CONTACT["tank_body"]["call_scale"], burn_mod)
 		# Barrel follows the driver's aim, eased like everything else that turns
 		# (player 0.35, enemies 0.18, hull 0.10) — raw _aim_angle snapped the
 		# turret in 45° pops on 8-way aim and slewed park→aim in one frame.
@@ -8850,11 +8950,13 @@ func _draw_enemies() -> void:
 			_tech_lunge_prev[eidx] = t_lunge
 			var t_wu: int = e.get("windup", 0)
 			var t_face := face
-			# Vehicle-width shadow (the generic 6.0 infantry disc made the truck
-			# read as floating on a man's shadow — the tank uses 15.0). Drawn
-			# BEFORE the rev shake mutates epos: the shadow staying put while the
-			# body vibrates above it is what sells the revving.
-			_ground_shadow(epos, 11.0, 0.42)
+			# Vehicle-width contact shadow (footprint-derived; the generic 6.0
+			# infantry disc made the truck read as floating on a man's shadow,
+			# and the hand-tuned r=11.0 ellipse that replaced it ended above
+			# the hull base — fully buried). Drawn BEFORE the rev shake mutates
+			# epos: the shadow staying put while the body vibrates above it is
+			# what sells the revving.
+			_vehicle_contact_shadow(epos, "m_technical", Color(0.0, 0.03, 0.0))
 			if t_lunge > 0:
 				t_face = telegraph_dir(sim, e).angle()
 				# Hold the smoothed-facing lerp at the locked line — otherwise it
@@ -8910,7 +9012,7 @@ func _draw_enemies() -> void:
 				# neutral grey washed out on bright sand.
 				Art.circle(self, epos + Vector2(0, -26), 7.0, Color(0.08, 0.09, 0.07, 0.6))
 				Art.text(self, "?", epos + Vector2(-3, -22), 12, Color(1.0, 0.75, 0.4, 0.5 + qp * 0.4))
-			_spr("m_technical", epos, t_face, 0.55, Art.HOSTILE_VEH, 1.1 if t_lunge > 0 else 1.0)   # a2-02: warm-hostile vehicle tint
+			_spr("m_technical", epos, t_face, VEHICLE_CONTACT["m_technical"]["call_scale"], Art.HOSTILE_VEH, 1.1 if t_lunge > 0 else 1.0)   # a2-02: warm-hostile vehicle tint
 		elif e["kind"] == "pilot":
 			# Downed pilot: the one green thing among hostiles — objective ring +
 			# RESCUE label so "touch, don't shoot" reads across a firefight.
@@ -9444,6 +9546,15 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# FIRST (before shadow/hull/rotor) so every gunship element renders on top of
 	# it; a faint sway sells cloth in the wind without a sim/state change.
 	_spr("flag_iran", bpos + Vector2(0, -6), sin(_bf * 0.02 + slot) * 0.03 * _motion, 1.0)
+	# Ground shadow: the heli was the one unit floating untethered (drone and
+	# technical are grounded). Footprint-derived, offset down-screen for altitude
+	# (VEHICLE_CONTACT hover) so the airborne read holds; bpos carries the hover
+	# bob, so the shadow breathes with it. Drawn BEFORE the spray/mortar
+	# telegraph block below, which it would otherwise paint over.
+	# a3-01: march-gate the tint — green-black over the bridge, cooling to blue-black
+	# only if the gunship is ever fought at the hot end (matches the colossus rule).
+	_vehicle_contact_shadow(bpos, body_tex,
+		Color(0.0, 0.03, 0.0).lerp(Color(0.02, 0.02, 0.05), smoothstep(0.6, 1.0, _sector_march())))
 	# Mortar-phase warning: the hull flashes red while volleys are near
 	# (act two runs phase_t 120..299 of the 300-tick cycle; see BOSS_STRAFE_TICKS).
 	var pt: int = boss["phase_t"]
@@ -9484,20 +9595,13 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 			and (_motion < 0.5 or (Engine.get_physics_frames() / 6) % 2 == 0):
 		hull_mod = Color(1.5, 0.6, 0.5)
 	hull_mod = hull_mod.lerp(Color(2.2, 2.2, 2.2), _boss_flash)
-	# Ground shadow: the heli was the one unit floating untethered (drone and
-	# technical are grounded). Offset down-screen for altitude; bpos carries the
-	# hover bob, so the shadow breathes with it and the airborne read holds.
-	# a3-01: march-gate the tint — green-black over the bridge, cooling to blue-black
-	# only if the gunship is ever fought at the hot end (matches the colossus rule).
-	_ground_shadow(bpos + Vector2(0, 30), 26.0, 0.42,
-		Color(0.0, 0.03, 0.0).lerp(Color(0.02, 0.02, 0.05), smoothstep(0.6, 1.0, _sector_march())))
 	# a1-01 rotor DOWNWASH: a dust ring pulses outward under the hull, selling
 	# rotor wash + altitude/mass the small hull alone never conveyed.
 	var _dwt := float(Engine.get_physics_frames()) * 0.9
 	var dw := fposmod(_dwt * 0.12, 1.0)
 	Art.arc(self, bpos + Vector2(0, 30), 12.0 + dw * 40.0, 0, TAU, 26,
 		Color(0.80, 0.78, 0.60, (1.0 - dw) * 0.22 * _motion), 2.0)
-	_spr(body_tex, bpos, PI, 1.3, hull_mod)
+	_spr(body_tex, bpos, PI, VEHICLE_CONTACT[body_tex]["call_scale"], hull_mod)
 	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
 	# muzzle points down-screen at the players, same convention as the colossus.
 	_spr("gunship_barrel", bpos + Vector2(0, 18), PI, 1.3, hull_mod)
@@ -9613,6 +9717,13 @@ func _draw_colossus() -> void:
 		return
 	var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 	var phase := sim.colossus_phase()
+	# Contact shadow FIRST (footprint-derived — the old hand-tuned r=30.0
+	# ellipse ended 47px ABOVE the hull base and was 100% painted over by the
+	# fully-opaque body: the finale boss floated). Drawn before the crush
+	# telegraph so the ring stays crisp over the shadow bed.
+	# a3-01: cool the tint to a blue-black — the colossus ONLY fights on the
+	# hot foundry floor, where the default green-black reads as a wrong-hue smear.
+	_vehicle_contact_shadow(cpos, "colossus_body", Color(0.02, 0.02, 0.05))
 	# Crush footprint: the true instant-death contact radius, drawn on the
 	# ground like a mortar telegraph — 'do not enter' in the no-revive finale.
 	var crush := SimWorld.COLOSSUS_CRUSH_RADIUS * PX
@@ -9631,10 +9742,7 @@ func _draw_colossus() -> void:
 	# colossus's mass, hung high so it frames the body without hiding the crush
 	# telegraph at its feet. Drawn before the shadow/body so they render on top.
 	_spr("flag_iran", cbody + Vector2(0, -22), sin(float(Engine.get_physics_frames()) * 0.02) * 0.025, 1.6)
-	# a3-01: cool the contact shadow to a blue-black — the colossus ONLY fights on the
-	# hot foundry floor, where the default green-black shadow reads as a wrong-hue smear.
-	_ground_shadow(cpos, 30.0, 0.42, Color(0.02, 0.02, 0.05))
-	_spr("colossus_body", cbody, PI, 1.9, mod, csquash)
+	_spr("colossus_body", cbody, PI, VEHICLE_CONTACT["colossus_body"]["call_scale"], mod, csquash)
 	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
 	# a3-11: hp-keyed hull damage — drawn HERE in world space, before the HUD bar's

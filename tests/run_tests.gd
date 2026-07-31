@@ -12,6 +12,7 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_combat.gd",
 	"res://tests/test_controls.gd",
 	"res://tests/test_hitbox_fairness.gd",
+	"res://tests/test_ground_anchors.gd",
 	"res://tests/test_war_chest.gd",
 	"res://tests/test_shop.gd",
 	"res://tests/test_tank.gd",
