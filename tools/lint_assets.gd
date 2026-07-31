@@ -23,6 +23,11 @@ func _init() -> void:
 	var hits := 0
 	if not scan_ok:
 		hits += 1
+	# Fail closed on a zero-file scan: a wiped assets dir (or an all-PNGs-deleted
+	# commit) must never print "OK — 0 PNGs". Same guard lint_sim grew 2026-07-31.
+	if pngs.is_empty() and imports.is_empty():
+		print("lint_assets: scanned 0 PNGs and 0 sidecars under %s — refusing to report a false OK" % ASSETS_DIR)
+		hits += 1
 	for path in pngs:
 		if not FileAccess.file_exists(path + ".import"):
 			print("missing .import sidecar: %s" % path)
