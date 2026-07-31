@@ -3003,7 +3003,13 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
 				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
+	# The fly-in guard mirrors _bullet_hits_boss: EVERY explosive (grenades,
+	# airbursts, barrels, mines/claymores, tank-death blasts) routes through this
+	# one branch, so this one conjunct makes "Endless fly-in: unhittable until
+	# arrival" true for the whole family. Kept at the hit seam, not in
+	# _damage_boss — tests drive that primitive directly on a mid-fly-in boss.
 	if not endless_boss.is_empty() and endless_boss["alive"] \
+			and endless_boss["phase_t"] >= 0 \
 			and _dist_lte(x, y, endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
 		_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
 	# The Colossus is pure armor: grenades are the only thing it respects.

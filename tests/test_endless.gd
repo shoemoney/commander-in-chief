@@ -130,6 +130,44 @@ func test_endless_miniboss_spawns_holds_wave_and_pays() -> void:
 	Runner.T.ok(sim.intermission_ticks > 0, "boss down + field clear opens the shop")
 
 
+func test_endless_miniboss_fly_in_is_explosion_proof() -> void:
+	# The fly-in guard on bullets (sim_world.gd:_bullet_hits_boss, phase_t >= 0) used
+	# to be the ONLY hit seam that respected the 420-tick arrival — every explosive
+	# (grenades, airbursts, barrels, mines/claymores, tank-death blasts) routes
+	# through _explode's ONE endless branch, which was unguarded: a lobbed grenade
+	# killed the gunship mid-fly-in, paid the bounty, and ejected the pilot before
+	# the fight began. The whole family now whiffs exactly like bullets do.
+	var sim := SimWorld.new(7, 1, "endless")
+	sim.wave = 4
+	sim._start_wave()   # -> wave 5, spawns the miniboss
+	sim.enemies.clear()   # so blast splash can't mint incidental coin
+	var boss: Dictionary = sim.endless_boss
+	Runner.T.ok(not boss.is_empty() and boss["alive"], "wave 5 spawns the miniboss")
+	Runner.T.ok(boss["phase_t"] < 0, "staged mid-fly-in (phase_t = %d)" % boss["phase_t"])
+	var hp0: int = boss["hp"]
+	var chest0 := sim.war_chest
+	var score0 := sim.score
+	# 8 x BOSS_GRENADE_DAMAGE = 64 > 40 HP: overkill, so a pass pins "ZERO damage",
+	# not "not quite dead". The boss dict is held across _explode (no sim.step, so
+	# no sweep hazard).
+	for i in 8:
+		sim._explode(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+	Runner.T.eq(boss["hp"], hp0, "fly-in boss takes ZERO explosive damage from 8 point-blank blasts")
+	Runner.T.ok(boss["alive"], "fly-in boss is still alive")
+	Runner.T.eq(sim.war_chest, chest0, "no bounty paid during fly-in")
+	Runner.T.eq(sim.score, score0, "no score paid during fly-in")
+	var pilots := 0
+	for e in sim.enemies:
+		if e["kind"] == "pilot":
+			pilots += 1
+	Runner.T.eq(pilots, 0, "no pilot ejects from a boss that was never hittable")
+	# Arrival-GATED, not a permanent immunity: the SAME blast lands once phase_t hits 0.
+	boss["phase_t"] = 0
+	sim._explode(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
+	Runner.T.eq(boss["hp"], hp0 - SimWorld.BOSS_GRENADE_DAMAGE,
+		"the same blast lands the moment the boss arrives")
+
+
 func test_clean_wave_and_payday_bonus() -> void:
 	# PAYDAY doubles coin; a deathless wave clear pays the Clean Wave bonus.
 	var sim := SimWorld.new(21, 1, "endless")

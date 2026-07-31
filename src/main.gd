@@ -1533,6 +1533,7 @@ func _reset() -> void:
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
 	_banners.clear()
+	_fork_sign_fade.clear()
 	_mud_told = false
 	_mud_prev = [false, false]
 	_seen_bosses = {}
@@ -8068,6 +8069,22 @@ static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> V
 	return Vector2(cx, bx)
 
 
+static func fork_sign_alpha(sign_rect: Rect2, band: Array) -> float:
+	## Pure half of the signpost/band yield (view-only float math, same shape as
+	## _wheel_scrim_alpha). The route-fork signposts are the ONLY anchored world
+	## text — they reserve their _label_slots and never move — so when a top-center
+	## band row crosses one, it yields the only other way: by DISSOLVING. 0.0 while
+	## any band row's rect overlaps the sign, 1.0 otherwise; the draw lerps toward
+	## this target, so a transient banner fades the sign out and its draining fades
+	## it back in. Band row rects already bank BANNER_PUNCH_MAX, so the pop-in can't
+	## reach past the measured footprint. grow(-0.5) on both: edge-kissing is not a
+	## collision (mirrors the arbiter's own overlap test).
+	for r in band:
+		if sign_rect.grow(-0.5).intersects((r["rect"] as Rect2).grow(-0.5)):
+			return 0.0
+	return 1.0
+
+
 func _draw_gates() -> void:
 	# Fortified sandbag wall: baked wall segments + end caps (was 14 identical
 	# sandbag-pile stamps). Alternate flips keyed off a per-gate hash so no two
@@ -8214,19 +8231,54 @@ func _draw_gates() -> void:
 		var bx := sign_xs.y
 		# Anchored signage RESERVES its pixels in the world-text arbiter and never
 		# moves — transient labels dodge around it (the geometry ratchet has modelled
-		# exactly this all along; the draws used to bypass it).
-		_label_slots.append(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0))
-		_label_slots.append(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0))
+		# exactly this all along; the draws used to bypass it). The reservation is
+		# UNCONDITIONAL: an invisible-but-returning sign still owns its pixels, so a
+		# toast can't dodge into it mid-fade.
+		var crect := Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0)
+		var brect := Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0)
+		_label_slots.append(crect)
+		_label_slots.append(brect)
+		# ...but it YIELDS the screen-space top-center band the only way an anchored
+		# sign can: by dissolving (every signpost crosses the band rail on its way
+		# down-screen — the SAPPER x BOUNTY clump was the photographed instance; the
+		# class is {any band row} x {any fork signpost}). Reads LAST frame's _band:
+		# the band is dealt after _draw_gates because its rail is measured from the
+		# boss-bar count _draw_gunships publishes, and banners live for seconds, so
+		# the one-frame lag is invisible (frame 0's empty band = full alpha = correct).
+		var ck := str(fk["y"]) + "|c"
+		var bk := str(fk["y"]) + "|b"
+		var cf: float = lerpf(float(_fork_sign_fade.get(ck, 1.0)), fork_sign_alpha(crect, _band), 0.12)
+		var bf: float = lerpf(float(_fork_sign_fade.get(bk, 1.0)), fork_sign_alpha(brect, _band), 0.12)
+		_fork_sign_fade[ck] = cf
+		_fork_sign_fade[bk] = bf
 		# The ONE plate language (LABEL_PLATE_FILL via SIGN_PLATE_FILL), lane-tinted
 		# 1px keyline — the old hand-rolled 0.55-alpha fill read as a faint tint over
 		# the brightest scorched dirt, not a panel. Rects stay byte-identical to the
 		# arbiter-reserved slots above (plate and ink move with the claim, always).
-		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), SIGN_PLATE_FILL)
-		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), SIGN_PLATE_FILL)
-		draw_rect(Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0), SIGN_PLATE_EDGE_CACHE, false, 1.0)
-		draw_rect(Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0), SIGN_PLATE_EDGE_BOUNTY, false, 1.0)
-		Art.text(self, cache_txt, Vector2(cx, fy), 24, Art.safe(SIGN_INK_CACHE))
-		Art.text(self, bounty_txt, Vector2(bx, fy), 24, SIGN_INK_BOUNTY)
+		# The 2px drop shadow seats the plate ON the terrain (depth cue, not a flat
+		# sticker); fade multiplies fill, edge, shadow and ink alike.
+		if cf > 0.05:
+			draw_rect(Rect2(crect.position + Vector2(2, 2), crect.size), Color(0, 0, 0, 0.35 * cf))
+			var cfill := SIGN_PLATE_FILL
+			cfill.a *= cf
+			draw_rect(crect, cfill)
+			var cedge := SIGN_PLATE_EDGE_CACHE
+			cedge.a *= cf
+			draw_rect(crect, cedge, false, 1.0)
+			var cink: Color = Art.safe(SIGN_INK_CACHE)
+			cink.a *= cf
+			Art.text(self, cache_txt, Vector2(cx, fy), 24, cink)
+		if bf > 0.05:
+			draw_rect(Rect2(brect.position + Vector2(2, 2), brect.size), Color(0, 0, 0, 0.35 * bf))
+			var bfill := SIGN_PLATE_FILL
+			bfill.a *= bf
+			draw_rect(brect, bfill)
+			var bedge := SIGN_PLATE_EDGE_BOUNTY
+			bedge.a *= bf
+			draw_rect(brect, bedge, false, 1.0)
+			var bink := SIGN_INK_BOUNTY
+			bink.a *= bf
+			Art.text(self, bounty_txt, Vector2(bx, fy), 24, bink)
 
 
 func _draw_pickups() -> void:
@@ -9101,6 +9153,10 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 ## Anchored objective signage (the route-fork signposts) RESERVES its pixels without ever
 ## moving; transient combat text yields to whatever is already there.
 var _label_slots: Array[Rect2] = []
+
+## Per-signpost dissolve state, keyed on fork world-y + side (forks are fixed per run).
+## Lerps toward fork_sign_alpha() each frame — view-only feel state, cleared in _reset().
+var _fork_sign_fade := {}
 
 
 static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0) -> Rect2:

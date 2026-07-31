@@ -1444,6 +1444,106 @@ func test_world_text_routes_through_the_arbiter() -> void:
 				"floattext toasts claim through the world-text arbiter, not only toast-vs-toast anchors")
 
 
+func test_fork_signs_dissolve_under_the_band() -> void:
+	# The route-fork signposts are the ONLY anchored world text: they reserve their
+	# _label_slots and never move (the geometry ratchet above pins exactly that). But
+	# nothing checked them against the SCREEN-space top-center band — they draw for
+	# fy in (-20, 380) and the band rail spans y 40..132, so every signpost crosses
+	# the band on its way down-screen and painted full-alpha ink through it (the
+	# SAPPER x BOUNTY clump was the photographed instance; the class is
+	# {any band row} x {any fork signpost}). Anchored and immobile, the sign yields
+	# the only other way: it DISSOLVES while a band row overlaps it, and fades back
+	# as the transient rows drain. This pins the pure half of that yield.
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("fork_sign_alpha"),
+		"the signpost/band yield is a named, testable helper")
+	if not ms.has_method("fork_sign_alpha"):
+		return
+	var alerts := _shipped_band_strings("show_banner(")
+	var hints := _shipped_band_strings("_hint(")
+	Runner.T.ok(alerts.size() >= 10 and hints.size() >= 10,
+		"scraped the shipped band copy (%d alerts / %d hints) — the scrape itself must not silently find nothing"
+			% [alerts.size(), hints.size()])
+	var cache_txt := "< CACHE"
+	var bounty_txt := "BOUNTY >"
+	var was_scale: float = Art.text_scale
+	var mismatches := 0
+	var colliding := 0
+	var clear := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var cw: float = Art.tw(cache_txt, 24)
+		var bw: float = Art.tw(bounty_txt, 24)
+		for cache_left in [true, false]:
+			var sxs: Vector2 = ms.fork_sign_xs(cache_left, cw, bw)
+			for s in [[sxs.x, cw], [sxs.y, bw]]:
+				var sx: float = s[0]
+				var sw: float = s[1]
+				for top in alerts:
+					for hint in hints:
+						var y := _BAND_RAIL_MIN
+						while y <= _BAND_RAIL_MAX:
+							var rows: Array = ms.band_rows(y, top, 16, false, hint)
+							# The sign's y-window is piecewise-constant in fy with breaks
+							# only where the sign rect's edges cross a band row's edges, so
+							# probing every break (±2px around it, covering the helper's
+							# grow(-0.5) shrink) plus the window extremes is EXACTLY the
+							# dense (-20, 380) sweep, at a fraction of the cost.
+							var fys := [-20.0, 380.0]
+							for r in rows:
+								var rr: Rect2 = r["rect"]
+								for fy0 in [rr.position.y - 6.0, rr.end.y + 22.0]:
+									for d in [-2.0, -1.0, 0.0, 1.0, 2.0]:
+										fys.append(fy0 + d)
+							for fy in fys:
+								var sr := Rect2(sx - 4.0, fy - 22.0, sw + 8.0, 28.0)
+								var overlap := false
+								for r in rows:
+									if sr.grow(-0.5).intersects((r["rect"] as Rect2).grow(-0.5)):
+										overlap = true
+										break
+								var want := 0.0 if overlap else 1.0
+								var got: float = ms.fork_sign_alpha(sr, rows)
+								if overlap:
+									colliding += 1
+								else:
+									clear += 1
+								if got != want:
+									mismatches += 1
+									if mismatches <= 3:
+										Runner.T.ok(false,
+											"fork_sign_alpha=%.2f, want %.2f (scale %.2f, cache_left %s, sign x=%.0f, fy=%.1f, rail y=%.0f, '%s')"
+												% [got, want, scale, str(cache_left), sx, fy, y, top])
+							y += 2.0
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(mismatches, 0,
+		"fork_sign_alpha is 0.0 exactly when the sign shares pixels with a band row, 1.0 otherwise")
+	Runner.T.ok(colliding > 0,
+		"the sweep actually REACHES sign x band collisions (%d colliding / %d clear configs)"
+			% [colliding, clear])
+	# Wiring ratchet (the _wheel_scrim_alpha precedent): a def-only helper is the same
+	# green-but-wrong trap claim_label_slot shipped. The signpost block — delimited
+	# from the fork_sign_xs call to the bounty ink — must carry the fade AND the
+	# plate drop-shadow (the depth cue half of the "flat sticker" complaint).
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.count("fork_sign_alpha(") >= 2,
+		"fork_sign_alpha is wired into the signpost draw, not just defined (%d sites)"
+			% src.count("fork_sign_alpha("))
+	var gstart := src.find("fork_sign_xs(cache_left")
+	Runner.T.ok(gstart >= 0, "found the signpost draw block")
+	if gstart >= 0:
+		var gend := src.find("Art.text(self, bounty_txt", gstart)
+		Runner.T.ok(gend > gstart, "the signpost block is delimited by the bounty ink")
+		if gend > gstart:
+			var block := src.substr(gstart, gend - gstart)
+			Runner.T.ok(block.contains("_fork_sign_fade"),
+				"the signpost draw lerps a per-sign fade from fork_sign_alpha")
+			Runner.T.ok(block.contains("Vector2(2, 2)"),
+				"each sign plate carries a drop shadow (depth cue, not a flat sticker)")
+
+
 func test_wheel_scrim_only_in_safe_shop() -> void:
 	# The radial wheel is world-anchored over LIVE combat, where a scrim would hide the
 	# threats the sim is still simulating — so combat wheels correctly get none. The ONE
