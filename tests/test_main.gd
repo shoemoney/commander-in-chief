@@ -1588,3 +1588,43 @@ func test_wheel_scrim_only_in_safe_shop() -> void:
 		var anchor_at := wslice.find("affine_inverse")
 		Runner.T.ok(scrim_at > 0 and anchor_at > 0 and anchor_at < scrim_at,
 			"the shop scrim cancels the world transform before drawing (screen-anchored)")
+
+
+func test_floattext_cap_keeps_headlines_drops_old_pennies() -> void:
+	## The toast wall: every one of the ~30 floattext producers (+Nc, BOUNTY,
+	## +25%!, x5 STREAK, ...) routes through the ONE renderer in _draw_fx, which
+	## drew ALL of them — stacking arbitrated overlap but nothing bounded
+	## COUNT, so a busy kill painted 5+ near-opaque plates down center screen.
+	## The fix is a renderer-side cap with a priority order (headline sizes
+	## outrank small coin pops; fresher outranks older) — one decision
+	## function, so the class invariant (bounded count + priority) holds over
+	## any producer set, present or future. Pins the pure half headless.
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("_floattext_keep"),
+		"the toast wall is capped by a named, testable decision function on the renderer")
+	if not ms.has_method("_floattext_keep"):
+		return
+	var max_n: int = ms.get_script_constant_map()["FLOATTEXT_MAX_ONSCREEN"]
+	var fx_list := []
+	# One non-floattext entry up front — the cap must only count toasts.
+	fx_list.append({"kind": "spark", "t": 0.0})
+	# Six size-9 coin pops, oldest -> freshest by t (t grows with age).
+	for i in 6:
+		fx_list.append({"kind": "floattext", "size": 9, "t": 0.1 + i * 0.1, "text": "+%dc" % (i + 1)})
+	# Two headline callouts: a size-11 (mid-age) and a size-13 (oldest of all).
+	fx_list.append({"kind": "floattext", "size": 11, "t": 0.35, "text": "+25%!"})
+	fx_list.append({"kind": "floattext", "size": 13, "t": 0.8, "text": "x5 STREAK"})
+	var keep: Dictionary = ms._floattext_keep(fx_list)
+	Runner.T.eq(keep.size(), max_n,
+		"9 toasts on one frame must collapse to the cap (kept %d)" % keep.size())
+	Runner.T.eq(max_n, 4, "the cap itself moved — the photographed wall was 5 deep; 4 plates is the budget")
+	Runner.T.ok(keep.has(8), "the size-13 headline is kept even though it is the OLDEST toast")
+	Runner.T.ok(keep.has(7), "the size-11 headline outranks every size-9 pop")
+	Runner.T.ok(keep.has(1) and keep.has(2),
+		"within one size class the FRESHEST pops survive (t=0.1/0.2 kept)")
+	Runner.T.ok(not keep.has(5) and not keep.has(6),
+		"the two oldest size-9 pops (t=0.5/0.6) are the first dropped")
+	Runner.T.ok(not keep.has(0), "non-floattext fx are not in the keep set (and never counted)")
+	# Under the cap the set is identity — no reordering, no dropping.
+	var small: Dictionary = ms._floattext_keep(fx_list.slice(0, 3))
+	Runner.T.eq(small.size(), 2, "at or under the cap every toast draws (kept %d of 2)" % small.size())

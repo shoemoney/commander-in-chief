@@ -317,6 +317,8 @@ var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
 var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
 var _nest_ping_frame := -100      # rate-limits the MG-nest crack ping (own clock — sharing
                                   # _deflect_frame let each mute the other within 10 frames)
+var _vet_ping_frame := -100       # rate-limits the veteran-armor chip thud (own clock, same reason)
+var _armor_announced := 0         # highest _wave_armor() level the wave banner has named
 var _pilot_alarm_frame := -999    # one-shot for the pilot's ESCAPING warning tone
 var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
 var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
@@ -1533,6 +1535,7 @@ func _reset() -> void:
 	_wheel = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 	_damage_vignette = 0.0
 	_banners.clear()
+	_armor_announced = 0   # the next run re-announces wave 13's armor from zero
 	_fork_sign_fade.clear()
 	_mud_told = false
 	_mud_prev = [false, false]
@@ -2300,14 +2303,47 @@ func _consume_events() -> void:
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
 				if not nest_hit:
-					# The hint that fires on the ONE wall bullets can't solve must NAME the
-					# button — same device-aware [%s] pattern the revive/supply hints use
-					# (pad label off the live brand, else the keyboard default).
-					# ...and the keyboard half now reads the LIVE bind instead of a hardcoded
-					# stamp: grenade moved SHIFT->E, and a stamped key would have lied about it
-					# (and about every rebind) exactly like the old one did.
-					_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
-						% (Art.pad_label("grenade") if Art.use_pad else GameMenu.key_label(bind("grenade"))))
+					# Veteran-armor chip: wave-13+ endless infantry. The split is the
+					# sim's own seam — _wave_armor() > 0 (endless-only, wave 13+)
+					# AND hp set near the block. hp alone is NOT the tell: mg_nest
+					# (intercepted above), technical (TECHNICAL_HP) and broadcast
+					# (BROADCAST_HP) carry hp at every wave of both modes, and
+					# without the _wave_armor gate a wave-5 truck plink drew the
+					# VETERAN banner's chip and taught "VETERAN ARMOR" two modes
+					# and eight waves before any veteran exists. These bullets
+					# still DAMAGE the target — the wall ping + bunker
+					# lecture below taught the exact opposite ("give up, nothing
+					# happens"), which is how the curve's one unbounded term shipped
+					# silent. Same special-case grammar as the nest: amber chip,
+					# distinct LOWER thud (wall 1.0 / veteran 0.8 / shield 1.3), own
+					# teach, and armor_pinged so the generic wall ping is suppressed.
+					var vet_hit := false
+					if sim._wave_armor() > 0:
+						for ve in sim.enemies:
+							if ve["alive"] and ve.get("kind", "") != "shield" \
+									and ve.get("hp", 0) >= 1 \
+									and absi(ve["x"] - ev["x"]) < 14 * Fixed.ONE \
+									and absi(ve["y"] - ev["y"]) < 14 * Fixed.ONE:
+								vet_hit = true
+								armor_pinged = true
+								_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+									"tex": "fx_sparkle", "sz": 6.0, "fade": 2.0, "rate": 0.16,
+									"col": VET_CHIP_COL})
+								if Engine.get_physics_frames() - _vet_ping_frame >= 10:
+									_vet_ping_frame = Engine.get_physics_frames()
+									_sfx.play_at("ping_armor", _to_screen(ev["x"], ev["y"]), -14.0, 0.8)
+								break
+					if vet_hit:
+						_hint("veteran_armor", "VETERAN ARMOR — BULLETS CHIP IT. GRENADES STILL ONE-SHOT")
+					else:
+						# The hint that fires on the ONE wall bullets can't solve must NAME the
+						# button — same device-aware [%s] pattern the revive/supply hints use
+						# (pad label off the live brand, else the keyboard default).
+						# ...and the keyboard half now reads the LIVE bind instead of a hardcoded
+						# stamp: grenade moved SHIFT->E, and a stamped key would have lied about it
+						# (and about every rebind) exactly like the old one did.
+						_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
+							% (Art.pad_label("grenade") if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 				if not armor_pinged:
 					armor_pinged = true
 					# juice pass: the ricochet threw sparks but cast no light — a
@@ -2879,6 +2915,21 @@ func _consume_events() -> void:
 				# extra pressure lands with no tell.
 				var mod_name: String = mod_names[ev.get("mod", 0)] + mod_names[ev.get("mod2", 0)]
 				show_banner("WAVE %d%s" % [sim.wave, mod_name])
+				# Veteran armor is the curve's only UNBOUNDED term (endless wave 13+,
+				# +1 bullet per body every 6 waves) and shipped with no tell — the
+				# wave your gun stopped killing read identical to every other wave.
+				# Name each thickening ONCE, with the counter-rule in the same
+				# breath (grenades/mines/airstrikes still one-shot — the sim's own
+				# design note says the term exists to redirect the War Chest into
+				# spending; it can't redirect what the player can't see). Amber so
+				# it cross-references the chip flash (VET_CHIP_COL), not the plain
+				# wave white. _wave_armor() is 0 in campaign and waves 1-12, so
+				# this fires exactly at 13, 19, 25, ...
+				var arm: int = sim._wave_armor()
+				if arm > _armor_announced:
+					_armor_announced = arm
+					show_banner("VETERAN ARMOR +%d — BULLETS CHIP, GRENADES CRACK" % arm,
+						Color(1.0, 0.72, 0.35))
 				_music_hold = maxi(_music_hold, 36)   # the inhale before the wave
 				# Horde dust-bank: a wide low roll of dust at the top edge before the
 				# spawns arrive — see the horde coming, tinted by the wave's mutator.
@@ -9119,6 +9170,41 @@ const SIGN_INK_CACHE := Color(0.5, 1.0, 0.7)
 const SIGN_INK_BOUNTY := Color(1.0, 0.75, 0.3)
 const SIGN_PLATE_EDGE_CACHE := Color(0.5, 1.0, 0.7, 0.45)
 const SIGN_PLATE_EDGE_BOUNTY := Color(1.0, 0.75, 0.3, 0.45)
+# Veteran-armor chip flash — the SAME amber family the wave banner wears so the two
+# veteran cues cross-reference, and distinct from the nest's sand chip
+# (0.85, 0.78, 0.5) and the shield's cyan (0.55, 0.85, 1.0).
+const VET_CHIP_COL := Color(1.0, 0.72, 0.35, 0.9)
+# Toast wall cap: every floattext producer (~30 call sites) routes through the one
+# renderer in _draw_fx, which stacked overlapping toasts but bounded nothing on
+# COUNT — a busy kill painted 5+ near-opaque plates down center screen. 4 plates x
+# 11px = a 44px column, band-clamped, vs. today's unbounded stack. Dropped toasts
+# still pay out through the coin-trail particles _coin_pop pairs with.
+const FLOATTEXT_MAX_ONSCREEN := 4
+
+## {index: true} for the floattext entries of fx_list that may draw this frame.
+## Headline sizes (streak/bonus callouts) outrank small coin pops; within a size,
+## fresher outranks older (t grows with age, so the t: -0.14 delayed "+25%!"
+## correctly ranks newest). The one decision point the renderer consults, so the
+## count bound holds over ANY producer set, present or future.
+static func _floattext_keep(fx_list: Array, max_n := FLOATTEXT_MAX_ONSCREEN) -> Dictionary:
+	var idxs := []
+	for i in fx_list.size():
+		if fx_list[i].get("kind", "") == "floattext":
+			idxs.append(i)
+	var keep := {}
+	if idxs.size() <= max_n:
+		for i in idxs:
+			keep[i] = true
+		return keep
+	idxs.sort_custom(func(a: int, b: int) -> bool:
+		var sa: int = fx_list[a].get("size", 9)
+		var sb: int = fx_list[b].get("size", 9)
+		if sa != sb:
+			return sa > sb
+		return fx_list[a].get("t", 0.0) < fx_list[b].get("t", 0.0))
+	for i in idxs.slice(0, max_n):
+		keep[i] = true
+	return keep
 const FLOAT_INK_BOUNTY := Color(1.0, 0.85, 0.3)
 const FLOAT_INK_RANSOM := Color(0.5, 1.0, 0.7)
 const FLOAT_INK_COIN := Color(1.0, 0.9, 0.45)
@@ -10297,6 +10383,7 @@ func _draw_fx() -> void:
 	# anchors — see the stacking block below; the old anchor-proximity test let toasts that
 	# started >24px apart drift into each other and overprint.
 	var floattext_anchors: Array[Vector3] = []
+	var toast_keep := _floattext_keep(_fx)   # the toast-wall cap: which floattext indices draw at all
 	var band_floor := _band_floor()   # hoisted: constant for the frame, walked per toast otherwise
 	for idx in _fx_alpha_idx:
 		var fx := _fx[idx]
@@ -10374,6 +10461,8 @@ func _draw_fx() -> void:
 				Color(1, 1, 1, 1.0 - t))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "floattext":
+			if not toast_keep.has(idx):
+				continue   # over the on-screen cap — stacking arbitrates overlap, this bounds COUNT
 			# Stack same-tick texts (e.g. streak + bounty on one kill) so they
 			# don't overprint into a smear, and outline each so it reads over
 			# bright terrain, not just the 1px shadow used to give.

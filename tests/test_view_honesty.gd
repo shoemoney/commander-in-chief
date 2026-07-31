@@ -2310,3 +2310,163 @@ func test_no_player_facing_string_calls_a_death_stripped_mod_permanent() -> void
 					offenders.append("%s: msgid \"%s\" calls %s PERMANENT, but death strips it" % [path, s, noun])
 	Runner.T.ok(offenders.is_empty(),
 		"player-facing copy calls a death-stripped mod PERMANENT:\n" + "\n".join(offenders))
+
+
+func test_wave_13_banner_names_the_armor() -> void:
+	## The endless difficulty curve's ONLY unbounded term — _wave_armor, live
+	## from wave 13, +1 bullet per body every 6 waves — shipped with ZERO view
+	## tell: the wave banner named the mutator but never the armor, so the
+	## moment your gun stopped killing was indistinguishable from every other
+	## wave. The sim term is deliberate (the _wave_armor docstring explains it
+	## redirects the War Chest into grenades) — the SILENCE was the defect. The
+	## banner must name each thickening once, with the counter-rule in the same
+	## breath. Driven through the REAL _consume_events, not a re-implementation.
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	var stub := Main.new()
+	stub._menu.mode = GameMenu.Mode.HIDDEN   # _hint/banners early-return under the title
+	stub.sim = sim
+	var armor_banners := func() -> Array:
+		var out := []
+		for b in stub._banners:
+			if String(b["text"]).contains("ARMOR"):
+				out.append(b["text"])
+		return out
+	# Wave 12 (and every earlier wave): armor is 0 — no armor banner may fire.
+	sim.wave = 12
+	sim.events = [{"t": "wave_start", "mod": 0}]
+	stub._consume_events()
+	Runner.T.eq(armor_banners.call().size(), 0,
+		"wave 12 has no veteran armor — an armor banner here is a false positive (got %s)" % str(armor_banners.call()))
+	# Wave 13: the term goes live (armor 1) — the banner must NAME it.
+	sim.wave = 13
+	sim.events = [{"t": "wave_start", "mod": 0}]
+	stub._consume_events()
+	var got13: Array = armor_banners.call()
+	Runner.T.eq(got13.size(), 1,
+		"wave 13 turns veteran armor ON and the view said nothing about it (banners: %s)" % str(stub._banners))
+	if got13.size() == 1:
+		Runner.T.ok(String(got13[0]).contains("GRENADE"),
+			"the armor banner must carry the counter-rule in the same breath (got '%s')" % got13[0])
+	# Wave 14: same armor level — the banner must NOT re-fire every wave.
+	stub._banners.clear()
+	sim.wave = 14
+	sim.events = [{"t": "wave_start", "mod": 0}]
+	stub._consume_events()
+	Runner.T.eq(armor_banners.call().size(), 0,
+		"armor did not thicken at wave 14 — re-announcing an unchanged level is banner spam")
+	# Wave 19: armor thickens to 2 — the thickening is re-announced, once.
+	stub._banners.clear()
+	sim.wave = 19
+	sim.events = [{"t": "wave_start", "mod": 0}]
+	stub._consume_events()
+	var got19: Array = armor_banners.call()
+	Runner.T.eq(got19.size(), 1,
+		"the wave-19 thickening (armor 2) landed silently (banners: %s)" % str(stub._banners))
+	if got19.size() == 1:
+		Runner.T.ok(String(got19[0]).contains("2"),
+			"the re-announce must name the NEW level (got '%s')" % got19[0])
+	stub.free()
+
+
+func test_veteran_armor_block_is_not_the_wall_plink() -> void:
+	## The armor_block view handler knew two targets: walls/bunkers (flat ping +
+	## once-ever "BUNKERS TAKE NO BULLETS" hint) and two special cases (mg_nest,
+	## shield). Wave-13+ veteran infantry — the third target — fell into the
+	## WALL path: a fresh profile shooting a wave-13 soldier got a bunker
+	## lecture and a ping that says "give up", when the truth is "bullets still
+	## chip it, just slower". The split is the sim's own seam: hp is only ever
+	## SET on the enemy dict when _wave_armor applied it (sim_world.gd
+	## _spawn_enemy/_spawn_special: "Only SET when it applies"), absent on every
+	## unarmored spawn — and the GATE is _wave_armor() > 0, because hp alone
+	## leaks: technical (TECHNICAL_HP) and broadcast (BROADCAST_HP) carry hp at
+	## EVERY wave of both modes, so a wave-5 truck plink must keep the wall
+	## grammar, not draw the veteran chip. Driven through the REAL
+	## _consume_events.
+	var ms: Script = load("res://src/main.gd")
+	var cmap: Dictionary = ms.get_script_constant_map()
+	Runner.T.ok(cmap.has("VET_CHIP_COL"),
+		"the veteran chip wears its own named ink (same amber family as the armor banner)")
+	if not cmap.has("VET_CHIP_COL"):
+		return
+	var vet_col: Color = cmap["VET_CHIP_COL"]
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim.wave = 13
+	var stub := Main.new()
+	stub._menu.mode = GameMenu.Mode.HIDDEN
+	stub.sim = sim
+	var ex: int = 100 * Fixed.ONE
+	var ey: int = sim.camera_top + 200 * Fixed.ONE
+	# A wave-13 rusher: hp SET by the sim's own spawn path (2 = 1 base + 1 armor).
+	sim.enemies.append({"x": ex, "y": ey, "alive": true, "kind": "rusher", "hp": 2})
+	sim.events = [{"t": "armor_block", "x": ex, "y": ey}]
+	stub._consume_events()
+	var chip := false
+	for fx in stub._fx:
+		if fx.get("tex", "") == "fx_sparkle" and fx.get("col", Color()) == vet_col:
+			chip = true
+			break
+	Runner.T.ok(chip,
+		"bullets chipping veteran armor drew NOTHING distinct — same spark + wall ping as a bunker")
+	var vet_hint := false
+	var bunker_hint := false
+	for line in stub._hint_queue:
+		if String(line).contains("VETERAN ARMOR"):
+			vet_hint = true
+		if String(line).contains("BUNKERS TAKE NO BULLETS"):
+			bunker_hint = true
+	Runner.T.ok(vet_hint,
+		"the first veteran chip must teach the counter-rule (bullets chip, grenades one-shot)")
+	Runner.T.ok(not bunker_hint,
+		"a soldier is not a bunker — the BUNKERS TAKE NO BULLETS lecture is the wall grammar leaking")
+	# Companion, pinning the seam the other way: a wave-<=12 enemy (hp ABSENT —
+	# the sim never sets it) blocking a bullet is NOT a veteran — no amber
+	# chip, and the wall hint still fires.
+	var stub2 := Main.new()
+	stub2._menu.mode = GameMenu.Mode.HIDDEN
+	var sim2 := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim2.wave = 5
+	stub2.sim = sim2
+	sim2.enemies.append({"x": ex, "y": ey, "alive": true, "kind": "rusher"})
+	sim2.events = [{"t": "armor_block", "x": ex, "y": ey}]
+	stub2._consume_events()
+	var chip2 := false
+	for fx in stub2._fx:
+		if fx.get("tex", "") == "fx_sparkle" and fx.get("col", Color()) == vet_col:
+			chip2 = true
+			break
+	Runner.T.ok(not chip2,
+		"the veteran chip leaked onto UNARMORED infantry — hp >= 1 is the split, nothing else")
+	var bunker_hint2 := false
+	for line in stub2._hint_queue:
+		if String(line).contains("BUNKERS TAKE NO BULLETS"):
+			bunker_hint2 = true
+	Runner.T.ok(bunker_hint2,
+		"an unarmored-target block keeps the wall teach — the split must not swallow it")
+	# Third pin, the leak the hp-only split shipped: a TECHNICAL at wave 5
+	# carries hp=TECHNICAL_HP at every wave of both modes — hp >= 1 alone
+	# matched it and taught "VETERAN ARMOR" eight waves before any veteran
+	# exists. The _wave_armor() gate must keep it on the wall grammar.
+	var stub3 := Main.new()
+	stub3._menu.mode = GameMenu.Mode.HIDDEN
+	var sim3 := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim3.wave = 5
+	stub3.sim = sim3
+	sim3.enemies.append({"x": ex, "y": ey, "alive": true, "kind": "technical", "hp": 2})
+	sim3.events = [{"t": "armor_block", "x": ex, "y": ey}]
+	stub3._consume_events()
+	var chip3 := false
+	for fx in stub3._fx:
+		if fx.get("tex", "") == "fx_sparkle" and fx.get("col", Color()) == vet_col:
+			chip3 = true
+			break
+	Runner.T.ok(not chip3,
+		"a wave-5 technical is not a veteran — hp is set on trucks/broadcasts at EVERY wave")
+	var vet_hint3 := false
+	for line in stub3._hint_queue:
+		if String(line).contains("VETERAN ARMOR"):
+			vet_hint3 = true
+	Runner.T.ok(not vet_hint3,
+		"the VETERAN ARMOR teach fired before veteran armor exists (wave 5) — a lie about the mechanic")
+	stub.free()
+	stub2.free()
+	stub3.free()
