@@ -14,9 +14,9 @@
 
 <img src="docs/media/keyart_hero.png" width="82%" alt="Commander In Chief — key art"/>
 
-![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white)
+![Godot 4.7.1](https://img.shields.io/badge/Godot-4.7.1-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-971%20methods%20%C2%B7%2022.5k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1000%20methods%20%C2%B7%2022.9k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
@@ -55,7 +55,7 @@ Endless War shop.</sub>
 > replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
-> golden-checksum suite (**971 methods / 22.5k assertions** — the runner prints the exact
+> golden-checksum suite (**1000 methods / 22.9k assertions** — the runner prints the exact
 > pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
 > `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
 > Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
@@ -210,7 +210,7 @@ flowchart LR
 All four sim modes — `campaign` · `arcade` · `endless` · `boss_rush` — share one
 `SimWorld`, one checksum, and one golden-checksum suite. 🔒
 
-Persistent carrots 🥕: top-8 **Hall of Fame**, career totals, and best score/wave/distance
+Persistent carrots 🥕: top-40 **Hall of Fame**, career totals, and best score/wave/distance
 survive across runs (`user://ikari_best.cfg`, atomic tmp+bak writes).
 
 ---
@@ -305,7 +305,8 @@ SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter
 SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
 ```
 
-**971 test methods / 22,495 assertions** (the `PASS —` line prints the exact pair) — fixed-point
+**1000 test methods / 22,850 assertions** as of 2026-07-31 (the `PASS —` line prints the exact
+pair) — fixed-point
 math, seeded RNG streams, the 1986 mechanic grammar, the War Chest economy,
 tank/observer/gates/water/gunship/colossus, every archetype's behavior contract (nest armor,
 technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop, lockstep loopback,
@@ -313,7 +314,7 @@ replay integrity, checksum coverage classification, and the campaign+endless **g
 determinism** runs.
 
 `test_perf.gd` asserts wall-clock microseconds, so it sits in `run_tests.gd`'s `OPT_IN_SUITES`:
-the default full run **skips** it (that's why the method count above is 693, not 695), and CI
+the default full run **skips** it (that's why the method count above is 1000, not 1002), and CI
 runs it in an advisory `continue-on-error` job. A shared runner is a noisy neighbour and a
 randomly-red gate stops being read.
 
@@ -327,7 +328,7 @@ randomly-red gate stops being read.
 
 > ⚠️ **Read this before believing the diagram.** `src/net/lockstep.gd` has **zero production
 > callers** — nothing in `src/main.gd` or the menus constructs a `LockstepSession`, and no
-> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a 108-line
+> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a 237-line
 > loop plus `tests/test_lockstep.gd`, whose `FakeWire` is a deterministic **in-memory** wire with
 > latency jitter only: it never drops, duplicates, corrupts-by-network, disconnects, or times out
 > a packet (the one corruption test flips a payload byte by hand to prove the checksum exchange
@@ -359,8 +360,8 @@ Remote Play Together are the co-op that actually ships.
 
 ## 🚀 Quick Start (macOS / Apple Silicon)
 
-1. Grab **Godot 4.7 (stable)** `macos.universal.zip` from
-   <https://godotengine.org/download/archive/4.7-stable/> — native on M1–M4. 🍎
+1. Grab **Godot 4.7.1 (stable)** `macos.universal.zip` from
+   <https://godotengine.org/download/archive/4.7.1-stable/> — native on M1–M4. 🍎
 2. Run it:
    ```sh
    /Applications/Godot.app/Contents/MacOS/Godot --path /path/to/commander-in-chief
@@ -471,7 +472,7 @@ flowchart LR
 | ✅ | **Owned art + audio** | Every sprite owned-procedural, owned generative-AI, or CC0; voice lines synthesized in-house. Provenance map in [`ASSETS.md`](ASSETS.md) |
 | ✅ | **Public release** | Clean git history, MIT on the code, **v0.3.0** binaries for macOS (arm64 + universal) · Linux · Windows |
 | 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame, sectors reuse one desert tileset despite distinct names |
-| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **108 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
+| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **237 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
 | ⬜ | **Human-in-the-loop production** | No external playtests, no hired artist or art director, no external QA or compat matrix. Built by one owner plus agents — see the caveat at the top of [`docs/PLAN.md`](docs/PLAN.md) |
