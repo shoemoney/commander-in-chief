@@ -296,5 +296,5 @@ func test_spending_stays_dominant() -> void:
 	Runner.T.ok(SimWorld.WIPE_SCORE_MULT < SimWorld.SPEND_SCORE_MULT,
 		"salvage (%dx) stays strictly under spend (%dx)"
 			% [SimWorld.WIPE_SCORE_MULT, SimWorld.SPEND_SCORE_MULT])
-	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < 10,
-		"spend stays under the victory bank rate (10x) — winning is still the best exit")
+	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < SimWorld.VICTORY_SCORE_MULT,
+		"spend stays under the victory bank rate — winning is still the best exit")

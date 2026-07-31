@@ -624,7 +624,15 @@ const OUTLINE := {
 	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
 	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
 	"m_pilot": true,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
-	# sie-01: m_bombsuit/m_soldier2 dropped from OUTLINE -- the re-baked authored art carries its
+	# review tell 2 (overturns sol-11/sie-01's "baked keyline, no double rim" for these keys):
+	# the sol-08 red-team swap never added the enemy_* keys here, so the _spr rim gate drew
+	# the shooting infantry with NO rim at all — and their measured fill (82,74,55) olive-tan,
+	# ~(129,92,54) after the warm tint, sits dead between the desert ground stops
+	# (209,132,71)/(132,76,61). The near-black baked keyline is not separation on rust (the
+	# exact finding a1-02 built the warm _LIGHT_RIM for); the light rim carries it now.
+	"enemy_assault": true, "enemy_smg": true, "enemy_shotgun": true, "enemy_lmg": true,
+	"enemy_sniper": true, "m_soldier2": true,
+	# sie-01: m_bombsuit dropped from OUTLINE -- the re-baked authored art carries its
 	# own black keyline, matching the enemy_* red-team convention (no double rim).
 	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,

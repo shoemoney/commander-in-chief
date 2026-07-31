@@ -440,6 +440,10 @@ const SPEND_SCORE_MULT := 6
 # silently binned whatever coin was in your hand, with no screen saying so. Half of
 # spend keeps spending strictly dominant — hoarding can never out-earn the shop.
 const WIPE_SCORE_MULT := 3
+# A WIN banks the unspent chest at the richest rate in the economy — the conversion
+# the 6x spend discount and 3x salvage are both priced against (see SPEND_SCORE_MULT).
+const VICTORY_SCORE_MULT := 10
+const VICTORY_SCORE_BONUS := 5000
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
 const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
@@ -6182,10 +6186,10 @@ func _damage_colossus(amount: int) -> void:
 		# so the card said "0¢ WAR CHEST BANKED" on every win ever. Ship the
 		# pre-zero chest and what it converted to on the victory event.
 		var banked: int = war_chest
-		score += war_chest * 10 + 5000
+		score += war_chest * VICTORY_SCORE_MULT + VICTORY_SCORE_BONUS
 		war_chest = 0
 		vic_ev["banked"] = banked
-		vic_ev["banked_score"] = banked * 10
+		vic_ev["banked_score"] = banked * VICTORY_SCORE_MULT
 		for g in gates:
 			if g.get("final", false):
 				g["open"] = true

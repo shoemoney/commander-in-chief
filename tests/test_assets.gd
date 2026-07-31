@@ -1078,7 +1078,7 @@ func test_sol_enemy_red_team() -> void:
 		Runner.T.ok(t.r > t.g and t.g > t.b, "%s tint is warm vermilion (r>g>b), hostile not friendly (sol-09)" % k)
 		Runner.T.ok(t.r > 1.0 and t.g > 0.6,
 			"%s tint is value-lifted, NOT a saturated pure-red (stays off the tracer/orb danger family, sol-09)" % k)
-		Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sol-11)" % k)
+		Runner.T.ok(outline.has(k), "%s is rimmed — the baked keyline alone vanished on rust (review tell 2 overturns sol-11)" % k)
 	Runner.T.eq(skins.size(), 4, "rusher rotation covers all 4 sim skins (skin = (x+y)&3, sol-08)")
 	for s in skins:
 		Runner.T.ok(keys.has(s), "rusher skin '%s' is a pack red sprite — single authorship, no strobe (sol-08)" % s)
@@ -1129,7 +1129,12 @@ func test_sie_endless_infantry_family() -> void:
 		# family-standard footprint: same SCALE the enemy_assault/enemy_smg/enemy_shotgun/enemy_lmg/
 		# enemy_sniper siblings use on their own 128px-limited canvas (sie-01), not a one-off number.
 		Runner.T.eq(scale[k], 0.5, "%s SCALE matches the enemy_* family standard, no accidental footprint drift (sie-01)" % k)
-		Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sie-01)" % k)
+		# review tell 2 carved m_soldier2 back IN: the amber-tinted grenadier on sand was the
+		# muddiest unit in the game with its separator disabled behind the OUTLINE gate.
+		if k == "m_soldier2":
+			Runner.T.ok(outline.has(k), "%s is rimmed again — its separator was dead config since sie-01 (review tell 2)" % k)
+		else:
+			Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sie-01)" % k)
 	Runner.T.ok(outline.has("courier"), "courier is untouched — still the native entity bake, still needs its runtime rim (sie-01)")
 	# footprint cross-check (data, not just the constant): the 4 re-baked keys must land on the exact
 	# same imported-canvas x SCALE footprint as an established red-team sibling, not merely "some" 0.5.
@@ -1196,6 +1201,29 @@ func test_sie_endless_infantry_family() -> void:
 				"%s is not a vram_texture (lossless canvas sprite, sie-01)" % path)
 		else:
 			Runner.T.ok(false, "%s.import is readable" % path)
+
+
+func test_hostile_infantry_separator_rim() -> void:
+	# review tell 2: sol-08 swapped the shooting infantry onto the enemy_* pack sprites and sie-01
+	# re-baked the grenadier — but none of those keys ever entered OUTLINE, so the _spr rim gate
+	# (main.gd, `Art.outlined(tex_name)`) drew them with ZERO rim, and the _LIGHT_RIM entries
+	# m_soldier2 still carried were dead config behind that gate. Measured: enemy fill averages
+	# (82,74,55) olive-tan, landing ~(129,92,54) after the warm tint — dead between desert ground
+	# stops (209,132,71)/(132,76,61). No tint fixes that (more red = more rust = more camouflage);
+	# the warm-light separator rim a1-02 built for exactly this failure is the only view lever.
+	# This test pins the CLASS from source: _RUSHER_SKINS plus the keyed specialist draws — a 5th
+	# rusher skin added tomorrow must rim or go red.
+	var ms: Dictionary = load("res://src/main.gd").get_script_constant_map()
+	var art: Dictionary = load("res://src/view/art.gd").get_script_constant_map()
+	var keys: Array = ms["_RUSHER_SKINS"] + ["enemy_sniper", "m_soldier2"]
+	for k in keys:
+		Runner.T.ok(art["OUTLINE"].has(k), "%s is rimmed — the _spr rim gate reads OUTLINE (review tell 2)" % k)
+		Runner.T.ok(ms["_LIGHT_RIM"].has(k),
+			"%s wears the warm-LIGHT separator, not the near-black rim that vanished on rust (a1-02)" % k)
+		Runner.T.ok(ms["_UNIT_RIM"].has(k),
+			"%s is in the unit rim class — the tiny-decor guard can never strip it" % k)
+	Runner.T.ok(not ms["_LIGHT_RIM"].has("frogman") and not ms["_LIGHT_RIM"].has("frogman_speargun"),
+		"the diver keeps its sol-12 water read — no land-infantry light rim")
 
 
 func test_sol_walk_frames_not_wired() -> void:

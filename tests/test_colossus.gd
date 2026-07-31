@@ -97,7 +97,8 @@ func test_death_pays_out_and_wins() -> void:
 	Runner.T.ok(not col["alive"], "colossus down")
 	Runner.T.ok(sim.victory, "VICTOLY")
 	Runner.T.eq(sim.war_chest, 0, "Last Stand: remaining chest converted")
-	Runner.T.ok(sim.score >= score_before + 300 * 10 + 5000, "chest paid out as score + victory bonus")
+	Runner.T.ok(sim.score >= score_before + 300 * SimWorld.VICTORY_SCORE_MULT + SimWorld.VICTORY_SCORE_BONUS,
+		"chest paid out as score + victory bonus")
 	var final_open := false
 	for g in sim.gates:
 		if g.get("final", false) and g["open"]:

@@ -6210,12 +6210,21 @@ const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
 # soup): 1.6px vs the fleet's 1.1px; bosses keep their warm 2.2px above both.
 const _UNIT_RIM := {"player1": true, "player2": true, "rusher": true, "elite": true,
 	"frogman": true, "observer": true, "m_soldier2": true, "m_bombsuit": true,
-	"m_pilot": true, "ghillie": true, "courier": true, "sapper": true}
+	"m_pilot": true, "ghillie": true, "courier": true, "sapper": true,
+	# review tell 2: the sol-08 red-team swap moved fodder/elite/sniper onto these keys,
+	# which were in NO rim registry — the shooting infantry drew rimless on rust.
+	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true, "enemy_lmg": true,
+	"enemy_sniper": true}
 # a1-02 figure-ground: small dark-clad HOSTILES wore the near-black rim and
 # merged into dark litter/craters. These get a warm-LIGHT separator rim in _spr
 # instead (heroes/frogman/observer/bombsuit keep the neutral rim — they read fine).
 const _LIGHT_RIM := {"rusher": true, "elite": true, "m_soldier2": true,
 	"sapper": true, "courier": true, "ghillie": true,
+	# review tell 2: the a1-02 warm-light separator was built for exactly the failure the
+	# sol-08 red-team sprites reintroduced — small dark hostiles merging into dark litter.
+	# frogman/frogman_speargun stay OUT (sol-12 water read, pinned by the assets suite).
+	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true, "enemy_lmg": true,
+	"enemy_sniper": true,
 	"m_pilot": true}   # sol-08: dropped m_insurgent3-5/m_contractor2 (retired with the enemy_* swap)
 # a1-07: craters read as blasted DEPRESSIONS via a soft dark pit under the decal
 # (they are holes, so they get no drop-shadow — this is a centered inner-shadow).
@@ -11971,8 +11980,8 @@ func _draw_banners(top_msg: String) -> void:
 				"icon_col": vrr.col},
 			{"text": "SCORE  %s" % Art.group_digits(sim.score), "color": Color(0.95, 0.96, 0.9), "size": 13,
 				"icon": "icon_medal", "icon_size": 16.0},
-			# The chest is CONVERTED at 10x and zeroed on the victory tick, so a live
-			# `sim.war_chest` read here was 0 on every win. Say what it turned into.
+			# The chest is CONVERTED at SimWorld.VICTORY_SCORE_MULT and zeroed on the victory
+			# tick, so a live `sim.war_chest` read here was 0 on every win. Say what it turned into.
 			{"text": "%d¢ WAR CHEST BANKED  → +%s" % [_victory_banked,
 				Art.group_digits(_victory_banked_score)],
 				"color": Color(1.0, 0.92, 0.55), "icon": "icon_coin", "icon_size": 14.0},

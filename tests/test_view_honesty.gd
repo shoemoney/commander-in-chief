@@ -606,8 +606,8 @@ func test_crate_and_wheel_credit_the_same_score() -> void:
 		"the same item costs the same and scores the same however it was bought")
 	Runner.T.eq(a.score - a_score, cost * SimWorld.SPEND_SCORE_MULT,
 		"and both pay the single-sourced SPEND_SCORE_MULT rate")
-	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < 10,
-		"spending stays DISCOUNTED against the 10x an unspent chest converts at on victory — "
+	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < SimWorld.VICTORY_SCORE_MULT,
+		"spending stays DISCOUNTED against the VICTORY_SCORE_MULT an unspent chest converts at on victory — "
 		+ "at parity, buying everything on sight costs nothing and hoarding is never a choice")
 
 
@@ -863,6 +863,16 @@ func test_debrief_states_the_chest_conversion() -> void:
 	var msrc := FileAccess.get_file_as_string("res://src/view/menu.gd")
 	Runner.T.ok(msrc.contains("SimWorld.SPEND_SCORE_MULT") and msrc.contains("SimWorld.WIPE_SCORE_MULT"),
 		"the HOW-TO WAR CHEST page builds both multipliers from the sim consts")
+	# review tell 1: the same page never mentioned the WIN conversion at all — and closed with
+	# "That's the choice.", presenting spend-vs-salvage as the complete decision while the
+	# richest rate in the economy (10x + 5000 on a win) went untaught. It must teach it,
+	# const-derived like the other two rates, so a retune updates the copy for free.
+	Runner.T.ok(msrc.contains("SimWorld.VICTORY_SCORE_MULT") and msrc.contains("SimWorld.VICTORY_SCORE_BONUS"),
+		"the HOW-TO WAR CHEST page teaches the WIN conversion from the sim consts")
+	var corpus := _menu_text_corpus()
+	Runner.T.ok(corpus.contains("%d×" % SimWorld.VICTORY_SCORE_MULT), "the drawn page states the win bank rate")
+	Runner.T.ok(corpus.contains(Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)), "the drawn page states the flat win bonus")
+	Runner.T.ok(not corpus.contains("That's the choice"), "no copy presents spend-vs-salvage as the complete decision")
 
 
 # --- 8. The COPY is a view assertion too: a rules page that names the run's contract ---

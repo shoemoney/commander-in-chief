@@ -5139,7 +5139,7 @@ func _howto_page_warchest() -> void:
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 16.0   # was 26 — the death-strip sentence grew this block a line; 16 keeps the BACK-plate clearance the frame-bounds ratchet measures
 	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(ICON_X, y), 11, Color(1.0, 0.9, 0.6))
-	y += 22.0
+	y += 18.0
 	# aaa-c6: the page used to say "no second chance" and offer the chest only for a PARTNER,
 	# while the sim grants three continues it never mentioned — self-revive, a free rally at
 	# the last gate once you are broke, and the LAST STAND finale where revives really do stop.
@@ -5151,13 +5151,18 @@ func _howto_page_warchest() -> void:
 	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all."
 			% (SimWorld.BROKE_RESPAWN_TICKS / 60),
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
-	y += 18.0
-	# Both rates come off the sim consts so this sentence can never drift from the payout.
-	y = _body_block("Spend it — %d× score. What's left when you fall salvages at only %d×."
-			% [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT],
+	y += 10.0
+	# All THREE rates come off the sim consts so this sentence can never drift from the payout.
+	# review tell 1: the WIN conversion — the richest rate in the economy, the one the 6x spend
+	# discount and 3x salvage are both priced against — went untaught here, and the old closer
+	# ("That's the choice.") presented spend-vs-salvage as the complete decision. It isn't.
+	# One wrapping paragraph, not two blocks: the BACK-plate ratchet leaves the page ~0 slack.
+	y = _body_block("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home."
+			% [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT,
+				SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)],
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
-	y += 18.0
-	_verb_line(["Hold ", "@wheel", " to open the supply wheel. That's the choice."],
+	y += 10.0
+	_verb_line(["Hold ", "@wheel", " to open the supply wheel."],
 		y, Color(0.85, 0.9, 0.8))
 
 
