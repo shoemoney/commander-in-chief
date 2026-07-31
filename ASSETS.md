@@ -11,7 +11,7 @@ git history.
 
 | Path | Files | Source | License |
 |---|---|---|---|
-| `assets/art/ui/` `hud/` `icons/` | 128 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
+| `assets/art/ui/` `hud/` `icons/` | 106 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
 | `assets/art/fx/` | 21 | Procedurally generated — `tools/gen_fx_cards.py` | Project-owned |
 | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 87 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | `assets/troops/` | 9 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
@@ -34,7 +34,7 @@ canvas sizes and `.import` `size_limit`s are preserved so no draw site moves.
 
 | Path | Files | Source | Status |
 |---|---|---|---|
-| `assets/vo/cmd/` | 56 mp3 | Synthesized speech — commander barks + intro narration | ✅ owned |
+| `assets/vo/` (`cmd/` + top level) | 56 mp3 | Synthesized speech — commander barks + intro narration | ✅ owned |
 | `assets/audio/{enemy_death,enemy_spawn}/` | 88 mp3 | Synthesized speech (see each folder's `README.md`) | ✅ owned |
 | `assets/audio/ya_chants/` | 30 mp3 | The **audition reel** the death bank was cast from — 15 voices, multilingual model, no delivery direction. `enemy_death/` re-cut the 6 approved voices with agony tags, so these are source material, not spare content. `.gdignore`d: kept for provenance, **excluded from the build** | ✅ owned |
 

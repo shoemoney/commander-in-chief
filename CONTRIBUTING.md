@@ -47,7 +47,7 @@ More on that in the [stall table](#-the-three-stalls--a-hanging-suite-is-never-a
 | `F3` | Toggle Endless War mode |
 | `R` | Restart |
 
-`main.gd` hard-codes the seed `0xC0FFEE`; modes are `"campaign"` and `"endless"`.
+`main.gd` hard-codes the seed `0xC0FFEE`; modes are `"campaign"`, `"arcade"`, `"endless"` and `"boss_rush"`.
 
 </details>
 
@@ -99,9 +99,9 @@ flowchart LR
 
 ## 🧪 Testing
 
-The suite is ~971 methods (excluding the opt-in `test_perf.gd`) / ~22,495 assertions
-*(as of 2026-07-28 — it grows constantly; count live with
-`grep -hcE '^func test_' tests/test_*.gd`, which prints 973 because it includes perf's 2)* and runs in ~23 s. Suites are
+The suite is ~1,000 methods (excluding the opt-in `test_perf.gd`) / ~22,850 assertions
+*(as of 2026-07-31 — it grows constantly; count live with
+`grep -hcE '^func test_' tests/test_*.gd`, which prints 1002 because it includes perf's 2)* and runs in ~23 s. Suites are
 plain `RefCounted` classes whose `test_*` methods assert via the runner's `T.ok`/`T.eq` —
 no GUT addon.
 

@@ -1,11 +1,12 @@
 # 🔎 FINDINGS — open defect inventory
 
-![Open](https://img.shields.io/badge/open-56-orange) ![Resolved](https://img.shields.io/badge/resolved-66-2ea44f) ![Verified](https://img.shields.io/badge/every%20entry-adversarially%20verified-blue)
+![Open](https://img.shields.io/badge/open-54-orange) ![Resolved](https://img.shields.io/badge/resolved-68-2ea44f) ![Verified](https://img.shields.io/badge/every%20entry-adversarially%20verified-blue)
 
 > ⚠️ **A findings file rots faster than the code it describes.** Re-triaged **2026-07-28**
 > against a `main` that had moved 46 commits: **62 of 115 banked findings were already fixed**,
 > most from a different angle than the one proposed. Four more were fixed the same day this
-> file was regenerated. **Re-check before you plan — no row here is a work order.**
+> file was regenerated, and two more — both 🔴 DAILY rows — died **2026-07-31** (`d45132a`).
+> **Re-check before you plan — no row here is a work order.**
 
 ## 📊 Where the numbers went
 
@@ -15,7 +16,8 @@ flowchart LR
     B --> C[115 re-triaged]
     C --> D[✅ 62 already fixed]
     C --> E[🚫 10 never real]
-    C --> F[📌 43 still real]
+    C --> F[📌 41 still real]
+    C --> M[✅ 2 fixed since]
     G[8 fresh lenses] --> H[23 findings]
     H --> I[🚫 6 refuted]
     H --> J[17 confirmed]
@@ -26,19 +28,20 @@ flowchart LR
 | | Count | Meaning |
 |---|---|---|
 | ✅ | **62** | Fixed before the re-triage. Gone, not listed |
-| ✅ | **4** | Fixed *after* the sweep — see the resolved table below |
+| ✅ | **6** | Fixed *after* the sweep (4 fresh + 2 banked DAILY rows) — see the resolved table below |
 | 🚫 | **10** | Never reproduced. Deliberately not re-opened |
 | 🚫 | **6** | Fresh findings the skeptics refuted |
-| 📌 | **43** | Survived re-triage against current code |
+| 📌 | **41** | Survived re-triage against current code |
 | 📌 | **13** | Fresh and still open |
 
-**Open by severity** — 🟡 minor **11** · ⚪ cosmetic **2**
+**Open by severity** (all **54** open rows) — 🟠 major **2** · 🟡 minor **37** · ⚪ cosmetic **15** · 🔴 critical **0** — both DAILY criticals were fixed **2026-07-31** (see ✅ below). The 13 fresh findings are 🟡 **11** · ⚪ **2** of the 54.
 
 ---
 
 ## ✅ Fixed since the sweep
 
-Kept visible on purpose: these were the sweep's four majors, and a reader who saw them
+Kept visible on purpose: these were the sweep's four majors (plus the two 🔴 DAILY rows,
+fixed 2026-07-31), and a reader who saw them
 cited elsewhere should be able to confirm they are closed without re-deriving anything.
 
 | Finding | Landed as |
@@ -47,6 +50,7 @@ cited elsewhere should be able to confirm they are closed without re-deriving an
 | `_init` is the one mode dispatch with no Arcade arm — ARCADE quick-play (chapter 1) starts on … | `is_campaign_world() arm in _init` |
 | The persisted SFX volume is read back off the live audio bus, which the VO duck is holding 6 d… | `_bus_vol reads _sfx_base_db` |
 | Endless roots ghillie/nest/mast at y=-320 — the exact y of the constant arena rock at (210,-32… | `rooted_y +52, off the rock row` |
+| DAILY's "one attempt" lock only armed at the debrief, so R / RESTART / QUIT refunded the day's one try (closes BOTH 🔴 Critical survived rows) | `spend-on-deal: dealing the daily banks the seed on disk; a spent daily re-deals the same board as unranked practice` |
 
 ---
 
@@ -150,20 +154,13 @@ adjective standing in for a denominator.
 
 ---
 
-## 📌 Survived re-triage — 43
+## 📌 Survived re-triage — 41
 
 Banked earlier, re-verified against current line numbers, restated where the original had
 gone stale. Overwhelmingly minor and cosmetic — the majors were drained first.
 
-<details><summary><b>Open the list</b> — 43 entries by severity</summary>
+<details><summary><b>Open the list</b> — 41 entries by severity</summary>
 
-
-#### 🔴 Critical — 2
-
-| Finding | Where | Rate |
-|---|---|---|
-| DAILY's stated "one attempt" contract is bypassed by restarting — the lock only arms at t… | `src/main.gd:76 (`_daily_done_seed`), :1446 (`seed_v = _daily_seed…` | Every daily run the player restarts or abandons before the debrief — deterministic, one k… |
-| The DAILY row only locks on a completed run, so restarting before the debrief gives unlim… | `src/main.gd:4739-4745 — `_daily_done_seed = _current_seed` lives …` | Every daily run the player abandons (R / pad START / pause->RESTART). How often that happ… |
 
 #### 🟠 Major — 2
 
@@ -193,11 +190,11 @@ gone stale. Overwhelmingly minor and cosmetic — the majors were drained first.
 | Both grenadier teaching strings still hand the player the DRONE's dodge — the sim's own c… | `src/main.gd:337 `"grenadier": "GRENADIER — MOVE OFF YOUR GROUND"`…` | Campaign sectors 2 and 6 of EVERY run — grenadier is in `SECTOR_SPECIALS[1]` (sim_world.g… |
 | All six ZONE_INFO blurbs are still dead data — zero view consumers, and a test still guar… | `src/sim/sim_world.gd:355-361 (the six `blurb` strings) — the only…` | CHAPTER SELECT, 6 of 6 rows, every visit — the screen renders a bare numbered name list w… |
 | BONUS (this is a Section-A backlog finding, not a lens one — flagged because it is square… | `src/view/menu.gd:4413-4415 — `_center_text(note, 324, 7, …)`, dra…` | 4 of 4 REBIND tabs, every frame the screen is displayed, in the resting state — 100% of v… |
-| tests/run_tests.gd loads all 38 suites with no null guard — a parse error in any suite cr… | `/Users/shoemoney/Projects/commander-in-chief/tests/run_tests.gd:1…` | 38 `load()` calls per full-suite run — every local run of the blocking gate and every CI … |
+| tests/run_tests.gd loads all 39 suites with no null guard — a parse error in any suite cr… | `/Users/shoemoney/Projects/commander-in-chief/tests/run_tests.gd:1…` | 38 `load()` calls per full-suite run — every local run of the blocking gate and every CI … |
 | tools/lint_sim.gd `_collect` still fails OPEN — an unopenable src/sim prints "OK — 0 file… | `/Users/shoemoney/Projects/commander-in-chief/tools/lint_sim.gd:90…` | The lint job runs on every CI push (.github/workflows/ci.yml:66). The fail-open branch it… |
 | Four of the five cooldown floors still have zero ratchet test — including the bunker spaw… | `clamps at /Users/shoemoney/Projects/commander-in-chief/src/sim/si…` | Defect rate TODAY is 0% — all five floors are in place, so nothing is currently mismeasur… |
 | The barricade can never be solid anywhere a player can stand — the whole 'encounter midpo… | `src/sim/sim_world.gd:1598-1620 (_barricade_solid, camera gate at …` | 100% — it never fires, in every campaign and arcade run, for the whole run. Derived arith… |
-| tests/run_tests.gd still loads every suite fail-open — a parse error in any test file han… | `tests/run_tests.gd:165-167 — `for path in scripts:` / `var script…` | The load path runs once per TEST_SCRIPTS entry — 40 entries in the file, ~39 per default … |
+| tests/run_tests.gd still loads every suite fail-open — a parse error in any test file han… | `tests/run_tests.gd:165-167 — `for path in scripts:` / `var script…` | The load path runs once per TEST_SCRIPTS entry — 39 entries in the file, 38 per default … |
 | _god_restore's docstring still claims god mode lets you run dry — the arithmetic makes th… | `src/sim/sim_world.gd:1863-1865 ('Ammo is topped up on the same he…` | Every tick of every god-mode run — 4 in-tree probes set god_mode (tools/probe_cd_clamp.gd… |
 | lint_sim.gd's directory scan is fail-OPEN: an unopenable src/sim prints 'OK — 0 files sca… | `tools/lint_sim.gd:90-93 — `func _collect(dir_path, out) -> void:`…` | Every CI push — .github/workflows/ci.yml runs the lint job on every commit, and it is the… |
 | Four cap-gated cooldown clamps, one ratchet — the regression probe_cd_clamp.gd was writte… | `src/sim/sim_world.gd:3761 (bunker spawn_cd), :5433 (wave_spawn_cd…` | The bunker one is the visible path: src/main.gd draws the hatch-charge glow as `1 - spawn… |
