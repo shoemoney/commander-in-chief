@@ -2421,7 +2421,8 @@ func _consume_events() -> void:
 					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})
 			"deny":
 				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK", "board": "TOO FAR TO BOARD",
-					"token": "NO COMMENDATION", "full": "ALREADY STOCKED"}.get(
+					"token": "NO COMMENDATION", "full": "ALREADY STOCKED",
+					"no_targets": "HOLD FIRE — SKIES EMPTY"}.get(
 						ev.get("why", "coins"), "NEED COINS")
 				if ev.get("why", "") == "full" and int(ev.get("kind", -1)) == 3:
 					deny_txt = "STRIKE ALREADY INBOUND"   # nothing was stocked; one is in the air
@@ -6537,6 +6538,20 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 
 
 func _draw() -> void:
 	_label_slots.clear()   # in-world label arbiter: one frame, one set of claimed rects
+	# The soldiers' pixels are RESERVED before anything claims a slot: deny toasts
+	# and ADRENALINE-style callouts anchor at the player's exact position, so the
+	# worst case is structural. Alive or downed (a body on the floor still draws);
+	# a boarded player renders AS the tank and takes no reservation.
+	_player_label_rects.clear()
+	for i in sim.players.size():
+		var pp: Dictionary = sim.players[i]
+		if pp["in_tank"] >= 0:
+			continue
+		var prect := player_label_exclusion(_to_screen(pp["x"], pp["y"])
+			+ (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
+			+ (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO))
+		_player_label_rects.append(prect)
+		_label_slots.append(prect)
 	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
@@ -8126,7 +8141,7 @@ static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> V
 	return Vector2(cx, bx)
 
 
-static func fork_sign_alpha(sign_rect: Rect2, band: Array) -> float:
+static func fork_sign_alpha(sign_rect: Rect2, band: Array, players := []) -> float:
 	## Pure half of the signpost/band yield (view-only float math, same shape as
 	## _wheel_scrim_alpha). The route-fork signposts are the ONLY anchored world
 	## text — they reserve their _label_slots and never move — so when a top-center
@@ -8134,10 +8149,16 @@ static func fork_sign_alpha(sign_rect: Rect2, band: Array) -> float:
 	## any band row's rect overlaps the sign, 1.0 otherwise; the draw lerps toward
 	## this target, so a transient banner fades the sign out and its draining fades
 	## it back in. Band row rects already bank BANNER_PUNCH_MAX, so the pop-in can't
-	## reach past the measured footprint. grow(-0.5) on both: edge-kissing is not a
-	## collision (mirrors the arbiter's own overlap test).
+	## reach past the measured footprint. The player exclusion rects get the same
+	## yield: a sign under the soldier dissolves rather than ink over the sprite
+	## (the transient labels dodge the player; the anchored signs can't, so they
+	## fade — the same idiom, a second overlord). grow(-0.5) on both: edge-kissing
+	## is not a collision (mirrors the arbiter's own overlap test).
 	for r in band:
 		if sign_rect.grow(-0.5).intersects((r["rect"] as Rect2).grow(-0.5)):
+			return 0.0
+	for pr in players:
+		if sign_rect.grow(-0.5).intersects((pr as Rect2).grow(-0.5)):
 			return 0.0
 	return 1.0
 
@@ -8304,8 +8325,8 @@ func _draw_gates() -> void:
 		# the one-frame lag is invisible (frame 0's empty band = full alpha = correct).
 		var ck := str(fk["y"]) + "|c"
 		var bk := str(fk["y"]) + "|b"
-		var cf: float = lerpf(float(_fork_sign_fade.get(ck, 1.0)), fork_sign_alpha(crect, _band), 0.12)
-		var bf: float = lerpf(float(_fork_sign_fade.get(bk, 1.0)), fork_sign_alpha(brect, _band), 0.12)
+		var cf: float = lerpf(float(_fork_sign_fade.get(ck, 1.0)), fork_sign_alpha(crect, _band, _player_label_rects), 0.12)
+		var bf: float = lerpf(float(_fork_sign_fade.get(bk, 1.0)), fork_sign_alpha(brect, _band, _player_label_rects), 0.12)
 		_fork_sign_fade[ck] = cf
 		_fork_sign_fade[bk] = bf
 		# The ONE plate language (LABEL_PLATE_FILL via SIGN_PLATE_FILL), lane-tinted
@@ -9221,6 +9242,14 @@ static func floattext_plate_rect(pivot: Vector2, w: float, size: int, punch: flo
 	return Rect2(pivot.x - w * punch / 2.0 - 3.0, pivot.y - float(size) * punch - 1.0,
 		w * punch + 6.0, float(size) * punch + float(size + 2) * punch + 2.0)
 
+## The pixels no in-world label may take: the soldier's opaque footprint (~18px,
+## art.gd:379) plus the identity ring (r=10 at +(0,5)) — deny toasts and pick-up
+## callouts anchor AT the player's exact position, so without reserving this the
+## label-over-player clump is structural, not unlucky. Static + view-free so the
+## layout test measures the exact shipped geometry.
+static func player_label_exclusion(pos: Vector2) -> Rect2:
+	return Rect2(pos + Vector2(-12.0, -16.0), Vector2(24.0, 28.0))
+
 ## The floattext band-floor clamp WITH the spawn punch banked in. The old clamp pinned
 ## the BASELINE at band_floor + size, but the punch (up to FLOAT_PUNCH_MAX) scales the
 ## plate, the 4-dir outline and the ink ABOUT that baseline — so for the frames punch
@@ -9257,6 +9286,12 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 ## Anchored objective signage (the route-fork signposts) RESERVES its pixels without ever
 ## moving; transient combat text yields to whatever is already there.
 var _label_slots: Array[Rect2] = []
+
+## This frame's player exclusion rects (player_label_exclusion per on-foot player),
+## filled at the top of _draw() alongside the _label_slots reservations — the
+## anchored fork signposts read them to YIELD the player by dissolving (they can't
+## dodge; see fork_sign_alpha).
+var _player_label_rects: Array[Rect2] = []
 
 ## Per-signpost dissolve state, keyed on fork world-y + side (forks are fixed per run).
 ## Lerps toward fork_sign_alpha() each frame — view-only feel state, cleared in _reset().
@@ -11421,7 +11456,7 @@ func _draw_wheel() -> void:
 				0: stock_txt = "%d/%d" % [p["mg_ammo"], SimWorld.MG_AMMO_MAX]
 				1: stock_txt = "%d/%d" % [p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX]
 				2: stock_txt = "VEST ON" if p["vest"] else "NO VEST"
-				3: stock_txt = "INBOUND" if sim.pending_airstrike > 0 else "READY"
+				3: stock_txt = "INBOUND" if sim.pending_airstrike > 0 else ("HOLD" if sim.mode == "endless" and sim.intermission_ticks > 0 else "READY")
 				4: stock_txt = "%d/%d UP" % [sim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP]
 				5: stock_txt = "%d* HELD" % sim.tokens
 			var stock_empty := stock_txt.begins_with("0/") or stock_txt == "NO VEST"

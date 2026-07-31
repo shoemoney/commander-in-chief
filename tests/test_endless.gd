@@ -1108,3 +1108,51 @@ func test_no_hostile_stalls_an_endless_wave() -> void:
 			worst_kind = te["kind"]
 	Runner.T.ok(worst < 300,
 		"no rusher/shield sits stationary for 300+ ticks (worst: %s streak %d ticks)" % [worst_kind, worst])
+
+
+func test_airstrike_buy_denied_during_intermission() -> void:
+	# The endless intermission is the ONE window where `enemies` is provably empty
+	# for the strike's whole 45-tick telegraph: _step_waves early-returns while
+	# intermission_ticks > 0, and the strike resolves BEFORE the next wave starts.
+	# Selling a strike into it billed full price for a guaranteed whiff.
+	var sim := SimWorld.new(51, 1, "endless")
+	sim.intermission_ticks = 200
+	sim.war_chest = 5000
+	var score0: int = sim.score
+	sim._try_buy(sim.players[0], 3)
+	Runner.T.eq(sim.war_chest, 5000, "a strike called into an empty sky is not sold")
+	Runner.T.eq(sim.score, score0, "...and credits no score")
+	Runner.T.eq(sim.pending_airstrike, 0, "no fire mission is queued")
+	Runner.T.eq(sim.events[-1]["t"], "deny", "the whiff-window buy denies loudly")
+	Runner.T.eq(sim.events[-1]["why"], "no_targets",
+		"...and says WHY (not an ALREADY STOCKED / STRIKE INBOUND lie)")
+
+
+func test_token_roll_never_burns_on_intermission_airstrike() -> void:
+	# Same window through the token path: with the player capped on everything else
+	# the basic table sells, kind 3 was the ONLY candidate left — so a Commendation
+	# spent during the intermission deterministically bought the whiff.
+	var sim := SimWorld.new(51, 1, "endless")
+	sim.intermission_ticks = 200
+	sim.tokens = 1
+	var p := sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	p["vest"] = true
+	sim._try_token_drop(p)
+	Runner.T.eq(sim.tokens, 1, "the token is not burned on a strike that can only whiff")
+	Runner.T.eq(sim.pending_airstrike, 0, "no fire mission is queued")
+	Runner.T.eq(sim.events[-1]["t"], "deny", "the empty candidate pool denies loudly")
+	Runner.T.eq(sim.events[-1]["why"], "full", "...with the keep-your-token deny")
+
+
+func test_intermission_airstrike_gate_lifts_with_the_wave() -> void:
+	# The gate is the intermission, not the mode: once the wave is live the same
+	# buy goes through, so the guard is not a blanket airstrike denial.
+	var sim := SimWorld.new(51, 1, "endless")
+	sim.war_chest = 5000
+	sim.intermission_ticks = 0
+	sim._try_buy(sim.players[0], 3)
+	Runner.T.eq(sim.pending_airstrike, SimWorld.STRIKE_TELEGRAPH_TICKS,
+		"a strike with a live wave is still sold")
+	Runner.T.ok(sim.war_chest < 5000, "...and is paid for")

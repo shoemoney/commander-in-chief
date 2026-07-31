@@ -2251,7 +2251,13 @@ func _supply_full(p: Dictionary, kind: int) -> bool:
 		3:
 			# One strike is in the air; a second call re-stamps the same timer
 			# and delivers no extra fire mission (see _apply_supply kind 3).
-			return pending_airstrike > 0
+			# ...or the field is provably empty for the strike's whole 45t
+			# telegraph: the endless intermission spawns nothing (_step_waves
+			# early-returns while intermission_ticks > 0) and the strike resolves
+			# BEFORE the next wave starts, so a strike called now is a guaranteed
+			# whiff. One guard covers the wheel buy AND the token roll, which both
+			# route through this predicate.
+			return pending_airstrike > 0 or (mode == "endless" and intermission_ticks > 0)
 		6:
 			return p["triple"]
 		8:
@@ -2310,6 +2316,13 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		# "NEED COINS" at a full field with 400 in the chest was a HUD lie.
 		events.append({"t": "deny", "x": p["x"], "y": p["y"],
 			"why": "cap" if player_bags >= SANDBAG_FIELD_CAP else "tank"})
+		return
+	if kind == 3 and mode == "endless" and intermission_ticks > 0:
+		# A strike bought into the intermission lands on a provably empty field
+		# (see _supply_full kind 3) — refuse it with the TRUTHFUL reason, ahead
+		# of the generic "full" deny, so the HUD never says ALREADY STOCKED or
+		# STRIKE ALREADY INBOUND about a strike that was simply refused.
+		events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "no_targets", "kind": kind})
 		return
 	if _supply_full(p, kind):
 		# Buying a vest you're already wearing, or ammo at the cap, used to

@@ -1744,3 +1744,117 @@ func test_floattext_cap_keeps_headlines_drops_old_pennies() -> void:
 	# Under the cap the set is identity — no reordering, no dropping.
 	var small: Dictionary = ms._floattext_keep(fx_list.slice(0, 3))
 	Runner.T.eq(small.size(), 2, "at or under the cap every toast draws (kept %d of 2)" % small.size())
+
+
+func test_intermission_airstrike_deny_is_truthful() -> void:
+	# The view half of the intermission airstrike gate: the new deny reason has
+	# its own toast (the old grammar would have lied ALREADY STOCKED or STRIKE
+	# ALREADY INBOUND about a strike that was simply refused), and the spend-wheel
+	# stock row stops reading READY while the buy is gated.
+	var msrc := FileAccess.get_file_as_string("res://src/main.gd")
+	var ssrc := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	Runner.T.ok(ssrc.contains("\"why\": \"no_targets\""),
+		"the sim denies an intermission airstrike with its own reason")
+	Runner.T.ok(msrc.contains("\"no_targets\": \"HOLD FIRE — SKIES EMPTY\""),
+		"the deny toast names the empty sky instead of an ALREADY STOCKED lie")
+	# The stock-row line itself must gate READY on the intermission — a bare
+	# "intermission_ticks appears somewhere in main.gd" scrape passes on HEAD
+	# (the airstrike hint already reads it at :4971), pinning nothing.
+	var stock_line := ""
+	for line in msrc.split("\n"):
+		if line.contains("stock_txt = \"INBOUND\""):
+			stock_line = line
+			break
+	Runner.T.ok(stock_line != "", "found the wheel's airstrike stock row")
+	Runner.T.ok(stock_line.contains("intermission_ticks") and stock_line.contains("HOLD"),
+		"the wheel stock row reads HOLD, not READY, while the intermission gates the buy")
+
+
+func test_world_labels_never_cover_the_player() -> void:
+	# Deny toasts and pick-up callouts anchor AT the player's exact position, so
+	# without reserving the soldier's pixels in _label_slots the label-over-player
+	# clump is structural, not unlucky. Two halves, same shape as the arbiter's own
+	# ratchets: a WIRING scrape (claim_label_slot once shipped as a signature that
+	# returned its argument — a geometry model alone passes on that), then a
+	# GEOMETRY sweep that keeps the invariant true for copy added tomorrow.
+	var ms: Script = load("res://src/main.gd")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(ms.has_method("player_label_exclusion"),
+		"the player-pixel reservation is a named, testable helper")
+	if not ms.has_method("player_label_exclusion"):
+		return
+	Runner.T.ok(src.count("player_label_exclusion(") >= 2,
+		"the reservation is WIRED into _draw (def + call site), not just a signature (%d sites)"
+			% src.count("player_label_exclusion("))
+	# ...and the call must FEED THE ARBITER, not a side list: scrape the _draw
+	# body and pin the _label_slots.append of the player rect (a mutation that
+	# keeps the exclusion call but drops the arbiter append must fail here).
+	var dstart := src.find("func _draw() -> void:")
+	Runner.T.ok(dstart >= 0, "found _draw")
+	var dbody := ""
+	if dstart >= 0:
+		var dend := src.find("\nfunc ", dstart + 1)
+		dbody = src.substr(dstart, (dend if dend > dstart else src.length()) - dstart)
+	Runner.T.ok(dbody.contains("player_label_exclusion("),
+		"_draw builds the player exclusion rects")
+	# Per-line, comment-stripped: a line that merely mentions the append inside a
+	# comment must NOT satisfy this (that is exactly what the mutation does).
+	var reserves := false
+	for line in dbody.split("\n"):
+		var code := line.strip_edges()
+		if not code.begins_with("#") and code.contains("_label_slots.append") and code.contains("prect"):
+			reserves = true
+			break
+	Runner.T.ok(reserves,
+		"_draw reserves the player rect IN the arbiter's _label_slots, not only in a side list")
+	# Geometry half: every shipped label + a toast + the crate price row, anchored
+	# at the player's own position (the deny/ADRENALINE worst case), must claim a
+	# slot clear of the soldier at both text scales.
+	var labels := _shipped_world_labels()
+	var was_scale: float = Art.text_scale
+	var hits := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz: int = Art.fs(8)
+		for gx in range(60, 581, 40):
+			for gy in range(60, 341, 40):
+				var ppos := Vector2(gx, gy)
+				var pr: Rect2 = ms.player_label_exclusion(ppos)
+				var taken: Array[Rect2] = [pr]
+				var claims: Array[Rect2] = []
+				for txt in labels:
+					claims.append(ms.claim_label_slot(
+						ms._label_plate_rect(ppos.x - 15.0, ppos.y, Art.tw(txt, sz), sz), taken))
+					var tw9: float = Art.tw(txt, 9)
+					claims.append(ms.claim_label_slot(
+						Rect2(ppos.x - tw9 / 2.0, ppos.y, tw9, 11.0), taken))
+				claims.append(ms.claim_label_slot(
+					Rect2(ppos.x - 15.0, ppos.y - 9.0, 11.0 + Art.tw("999", 9), 13.0), taken))
+				for c in claims:
+					if c.grow(-0.5).intersects(pr.grow(-0.5)):
+						hits += 1
+						if hits <= 3:
+							Runner.T.ok(false,
+								"a label anchored at the player covers the soldier: %s vs player %s (scale %.2f)"
+									% [str(c), str(pr), scale])
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(hits, 0,
+		"no arbitrated world label ever covers the player sprite (%d overlaps)" % hits)
+	# Signpost half: the anchored fork signs cannot dodge, so they yield the player
+	# the way they already yield the top band — by dissolving.
+	var fsa := src.find("static func fork_sign_alpha")
+	Runner.T.ok(fsa >= 0, "found fork_sign_alpha")
+	if fsa < 0:
+		return
+	var sig: String = src.substr(fsa, src.find("\n", fsa) - fsa)
+	Runner.T.ok(sig.contains("players"),
+		"fork_sign_alpha takes the frame's player rects so the anchored signs can yield them")
+	if not sig.contains("players"):
+		return
+	var sign := Rect2(100, 100, 80, 28)
+	Runner.T.eq(ms.fork_sign_alpha(sign, [], [Rect2(110, 110, 24, 28)]), 0.0,
+		"a signpost under the player dissolves")
+	Runner.T.eq(ms.fork_sign_alpha(sign, [], [Rect2(400, 300, 24, 28)]), 1.0,
+		"a signpost clear of the player stays put")
