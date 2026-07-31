@@ -28,8 +28,18 @@ extends SceneTree
 ##
 ## Prints each offending file:line:kind:text and exits 1 if any are found, else
 ## prints OK and exits 0. Exit is via SceneTree.quit(code) — no OS.exit() in G4.
+## Fails CLOSED: an unscannable sim dir, a zero-file scan, or a missing core
+## sim file is a loud non-zero exit, never a false OK scanning nothing.
+## Renaming or merging a core sim file means updating REQUIRED below, or the
+## lint goes red on a determinism-clean tree — deliberate fail-closed coupling.
 
 const SIM_DIR := "res://src/sim"
+const REQUIRED: Array[String] = [
+	"res://src/sim/sim_world.gd",
+	"res://src/sim/fixed.gd",
+	"res://src/sim/sim_rng.gd",
+	"res://src/sim/sim_input.gd",
+]
 const FORBIDDEN: Array = [
 	["float literal", r"(?<![\w.])\d*\.\d"],
 	["float type", r"\bfloat\b"],
@@ -54,10 +64,19 @@ func _init() -> void:
 		rules.append([rule[0], re])
 
 	var files: Array[String] = []
-	_collect(SIM_DIR, files)
+	var scan_ok := _collect(SIM_DIR, files)
 	files.sort()
 
 	var hits := 0
+	if not scan_ok:
+		hits += 1
+	if files.is_empty():
+		print("lint_sim: scanned 0 files under %s — refusing to report a false OK" % SIM_DIR)
+		hits += 1
+	for req in REQUIRED:
+		if not files.has(req):
+			print("lint_sim: required sim file missing from scan: %s" % req)
+			hits += 1
 	for path in files:
 		var f := FileAccess.open(path, FileAccess.READ)
 		if f == null:
@@ -80,25 +99,37 @@ func _init() -> void:
 					hits += 1
 
 	if hits > 0:
-		print("lint_sim: FAIL — %d forbidden-token hit(s) in src/sim" % hits)
+		print("lint_sim: FAIL — %d forbidden-token/scan issue(s) in src/sim" % hits)
 		quit(1)
 	else:
 		print("lint_sim: OK — %d files scanned, src/sim is determinism-clean" % files.size())
 		quit(0)
 
 
-func _collect(dir_path: String, out: Array[String]) -> void:
+## Returns false (and prints why) if a directory could not be opened or
+## scanned -- a silent skip there would let this lint report a false OK.
+func _collect(dir_path: String, out: Array[String]) -> bool:
 	var d := DirAccess.open(dir_path)
 	if d == null:
-		return
-	d.list_dir_begin()
+		print("lint_sim: could not open dir %s: %s" % [dir_path, error_string(DirAccess.get_open_error())])
+		return false
+	var err := d.list_dir_begin()
+	if err != OK:
+		print("lint_sim: could not scan dir %s: %s" % [dir_path, error_string(err)])
+		return false
+	var ok := true
+	# ponytail: get_next() returns "" at end-of-listing AND on a mid-scan read
+	# error, so a directory that errors midway after yielding all REQUIRED files
+	# still reports a complete clean scan — engine API limitation, shared with
+	# lint_assets. Fix would be a native binding; not worth it here.
 	var name := d.get_next()
 	while name != "":
 		if name != "." and name != "..":
 			var full := dir_path.path_join(name)
 			if d.current_is_dir():
-				_collect(full, out)
+				ok = _collect(full, out) and ok
 			elif name.ends_with(".gd"):
 				out.append(full)
 		name = d.get_next()
 	d.list_dir_end()
+	return ok
