@@ -24,7 +24,7 @@ func _initialize() -> void:
 	# FRAME_SCALE). This probe used to re-derive it from the retired uniform-stretch quad,
 	# which reported the hole 3.44px too tall per side (hiding real vertical overflow) and
 	# 2.20px too narrow per side (inventing horizontal overflow). Never re-derive it here.
-	_interior = Layout._measured_frame_interior()
+	_interior = Layout._measured_frame_interior(Menu.content_frame_rect(Menu.Mode.HOWTO))
 	print("[PROBE] frame rect %s  FRAME_SCALE %.6f (9-slice, corner-anchored)"
 		% [Menu.content_frame_rect(Menu.Mode.HOWTO), Menu.FRAME_SCALE])
 	print("[PROBE] MEASURED INTERIOR x %.2f..%.2f   y %.2f..%.2f"

@@ -1192,6 +1192,122 @@ func test_result_panel_fits_the_screen_at_its_maximum_row_count() -> void:
 		"...and feeds it the doc reserve, so the 13-row card's form line can't fall off the bottom")
 
 
+func test_victory_trophy_never_covers_a_result_row() -> void:
+	## The victory card's trophy is the one post-panel decoration (the K.I.A. card has
+	## none), drawn at fixed center (196, 182) — x170..222, y156..208 at full pulse —
+	## on the stale comment "Trophy overlaps blank panel space only (no row text under
+	## it)". MEASURED at HEAD through the real row math: the widest row ("%d¢ WAR CHEST
+	## BANKED  → +%s", icon_coin 14 + gap 6 + text at 11) is 315..360px wide, so its
+	## left end sits at x140..185 — ALWAYS under the trophy's right edge. Vertically
+	## (real result_row_pitch): the 8-row card (typical win) buries 3..4px of the
+	## row's glyph tops plus 4px of the coin icon; the 9-row card (win with
+	## knockdowns) buries 7..8px of the 12px glyph box — at banked 58850 the icon
+	## (x152..166) and the "588" digits (x172..188) are both under gold. The fix seats
+	## the trophy's bottom flush with the panel top (RESULT_PANEL_TOP).
+	var ms: Script = load("res://src/main.gd")
+	var has_trophy_rect: bool = ms.has_method("victory_trophy_rect")
+	Runner.T.ok(has_trophy_rect, "victory_trophy_rect() is the trophy's one geometry source")
+	# Fallback to the SHIPPED rect so an unfixed tree reports the REAL overlap numbers
+	# (the same "report real overflow on HEAD" idiom as the result_row_pitch fallback).
+	var trophy: Rect2 = ms.call("victory_trophy_rect", 1.0) if has_trophy_rect \
+		else Rect2(170, 156, 52, 52)
+	var f := Art.font()
+	var reserve: float = _consts().get("RESULT_DOC_RESERVE", 20.0)
+	var titles := ["GRUNT", "GUNSHIP KILLER", "ONE-MAN ARMY", "IRON NERVES",
+		"EXTERMINATOR", "TRAILBLAZER", "SHARPSHOOTER"]
+	var worst := 0.0
+	var worst_id := ""
+	# The full win-card configuration set: rescues x knockdowns x banked x mode x rank
+	# title, with the card rows built by the REAL static builders the draw uses.
+	for rtitle in titles:
+		for rescues in [0, 2]:
+			for knockdowns in [0, 3]:
+				for banked in [0, 1240, 58850, 999999]:
+					for vmode in ["campaign", "boss_rush"]:
+						var vrows: Array = [
+							{"text": "RANK  S — %s" % rtitle, "size": 13,
+								"icon": "mi_medal_5", "icon_size": 15.0},
+							{"text": "SCORE  %s" % Art.group_digits(72540), "size": 13,
+								"icon": "icon_medal", "icon_size": 16.0},
+							{"text": "%d¢ WAR CHEST BANKED  → +%s" % [banked, Art.group_digits(banked * 10)],
+								"icon": "icon_coin", "icon_size": 14.0},
+						]
+						if vmode == "boss_rush":
+							vrows.append({"text": "%d GUNSHIPS DOWNED — RUSH CLEARED" % SimWorld.BOSS_RUSH_COUNT})
+						else:
+							vrows.append({"text": "%dm OF JUNGLE PUSHED" % 361})
+						if rescues > 0:
+							vrows.insert(2, {"text": "PILOTS RESCUED  %d" % rescues})
+						for cr in ms._continue_ledger_rows(knockdowns, 700):
+							vrows.append(cr)
+						for sr in ms._victory_story_rows(213, 17, {"rusher": 37}):
+							vrows.append(sr)
+						for vr in ms._victory_extra_rows(72540, 60000, 1.0):
+							vrows.append(vr)
+						# The REAL panel geometry: pitch off result_row_pitch, panel
+						# width off the same widest-row formula the draw uses.
+						var n := vrows.size()
+						var row_h: float = ms.result_row_pitch(n, reserve)
+						var max_w: float = f.get_string_size("V I C T O R Y !", HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
+						for row in vrows:
+							var rw: float = Art.tw(String(row["text"]), int(row.get("size", 11)))
+							if not String(row.get("icon", "")).is_empty():
+								rw += float(row.get("icon_size", 14.0)) + 6.0
+							max_w = maxf(max_w, rw)
+						var panel_w := clampf(max_w + 44.0, 300.0, 620.0)
+						var panel_x := 320.0 - panel_w / 2.0
+						var boxes: Array = []
+						var title_sz := f.get_string_size("V I C T O R Y !", HORIZONTAL_ALIGNMENT_LEFT, -1, 24)
+						boxes.append(["TITLE", Rect2(320.0 - title_sz.x / 2.0,
+							150.0 - f.get_ascent(24), title_sz.x, title_sz.y)])
+						boxes.append(["DOC BAND", Rect2(panel_x + 4.0, 112.0 + 4.0, panel_w - 8.0, 15.0)])
+						for i in n:
+							var row: Dictionary = vrows[i]
+							var row_text: String = row["text"]
+							var row_size: int = row.get("size", 11)
+							var icon: String = row.get("icon", "")
+							var icon_size: float = row.get("icon_size", 14.0)
+							var y := 178.0 + i * row_h
+							var text_w := Art.tw(row_text, row_size)
+							var total_w := text_w + (icon_size + 6.0 if not icon.is_empty() else 0.0)
+							var x := 320.0 - total_w / 2.0
+							if not icon.is_empty():
+								boxes.append(["row %d ICON" % i, Rect2(x, y - icon_size + 3.0, icon_size, icon_size)])
+								x += icon_size + 6.0
+							var sz := f.get_string_size(row_text, HORIZONTAL_ALIGNMENT_LEFT, -1, row_size)
+							boxes.append(["row %d '%s'" % [i, row_text.substr(0, 32)],
+								Rect2(x, y - f.get_ascent(row_size), sz.x, sz.y)])
+						for pair in boxes:
+							# grow(-0.5) — the arbiter's seam rule: touching edges are
+							# adjacent, not overlapping.
+							var overlap: Rect2 = trophy.intersection(pair[1].grow(-0.5))
+							var area := overlap.size.x * overlap.size.y
+							if area > worst:
+								worst = area
+								worst_id = "%s rescues%d knockdowns%d banked%d %s: %s %s ∩ trophy %s" % [
+									rtitle, rescues, knockdowns, banked, vmode,
+									pair[0], str(pair[1]), str(trophy)]
+	Runner.T.ok(worst <= 0.0,
+		"the trophy covers no row/icon/title/doc-band pixel in any win-card configuration%s"
+			% ["" if worst <= 0.0 else " — worst overlap %.1fpx²: %s" % [worst, worst_id]])
+	# Routing pin: the victory block must draw through the helper and the panel must
+	# read the hoisted top const, so neither can drift into decoration.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var vstart := src.find('_draw_result_panel("V I C T O R Y !"')
+	Runner.T.ok(vstart >= 0, "the victory card still files its AFTER-ACTION REPORT")
+	if vstart >= 0:
+		var vend := src.find("\n\telif _debrief:", vstart)
+		var vbody := src.substr(vstart, vend - vstart)
+		Runner.T.ok(vbody.contains("victory_trophy_rect("),
+			"the victory block draws its trophy through victory_trophy_rect()")
+	var pstart := src.find("func _draw_result_panel(")
+	Runner.T.ok(pstart >= 0, "_draw_result_panel() still exists")
+	if pstart >= 0:
+		var pbody := src.substr(pstart, src.find("\nfunc ", pstart) - pstart)
+		Runner.T.ok(pbody.contains("RESULT_PANEL_TOP"),
+			"_draw_result_panel() reads its top from RESULT_PANEL_TOP")
+
+
 # --- drain-view: RUN-TEARDOWN LEAKS. These are view-side caches that _reset() forgot, so run 2
 # booted holding run 1's state. Same class as the _esort_order crash (ff99b12): a view-side cache
 # keyed on something the sim re-binds under it. The full sweep of index-keyed view caches is

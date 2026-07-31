@@ -298,6 +298,7 @@ var _banners: Array[Dictionary] = []          # FIFO of center-screen splashes {
 const BANNER_LIFETIME_FRAMES := 125           # c4-07: a lone banner's on-screen life in physics-frames (~2s at 60Hz); show_banner starts t=1.0 and _update_feel drains 1.0/this each frame. The seed-paste status lines lean on this read time; a FIFO backlog drains proportionally faster (see _update_feel).
 const BANNER_MAX_W := 420.0                   # splash banner scrim width cap (66% of SCREEN_W) — never spans the playfield
 const BANNER_PUNCH_MAX := 1.28                # the splash banner's peak pop-in scale (1.0 + 0.28), named so the row allocator's headroom can be asserted against it
+const FLOAT_PUNCH_MAX := 1.5                  # the floattext toast's peak spawn-punch scale — named so the band-floor clamp can bank the WHOLE punched footprint (the unpunched baseline clamp let the plate/outline poke 5.0..7.5px into the band)
 ## THE top-center message band, rebuilt once per `_draw` by `_band_rows()` and read by every
 ## consumer (the four banner draws, the hint tooltip, the world-toast floor). See band_rows().
 var _band: Array[Dictionary] = []
@@ -9220,6 +9221,18 @@ static func floattext_plate_rect(pivot: Vector2, w: float, size: int, punch: flo
 	return Rect2(pivot.x - w * punch / 2.0 - 3.0, pivot.y - float(size) * punch - 1.0,
 		w * punch + 6.0, float(size) * punch + float(size + 2) * punch + 2.0)
 
+## The floattext band-floor clamp WITH the spawn punch banked in. The old clamp pinned
+## the BASELINE at band_floor + size, but the punch (up to FLOAT_PUNCH_MAX) scales the
+## plate, the 4-dir outline and the ink ABOUT that baseline — so for the frames punch
+## > 1.0 the toast's punched top poked 5.0..7.5px (plate) / 2.5..5.0px (ink) above the
+## floor and the band, drawn after _draw_fx, guillotined the pop-in. The margin
+## FLOAT_PUNCH_MAX * (size + 1) + 1 covers the LARGEST drawn extent — the plate top at
+## pivot - size*punch - 1 — and the outline (ascent+1 < size+1 at every shipped size),
+## so at full punch the plate sits 1.5px BELOW the floor and the ink >= 2.5px. Static +
+## view-free so the layout test measures the exact shipped geometry.
+static func floattext_floor_pinned_y(pivot_y: float, band_floor: float, size: int) -> float:
+	return maxf(pivot_y, band_floor + FLOAT_PUNCH_MAX * (float(size) + 1.0) + 1.0)
+
 ## Shop-wheel plate tint. 2026-07-26: overturns the c2 2v cut (0.92 -> 0.55, "so
 ## the mast, scars, drops and hazards read THROUGH it during the buy") — the
 ## plate art (SPR_Apocalypse_WeaponWheel.png cell 0,0) is opaque out to ~0.9
@@ -10482,7 +10495,7 @@ func _draw_fx() -> void:
 			# either over-painted by the $HUD corner plate (main.gd draws at z=0, under it) or
 			# smears the band text — which is exactly what a "PIERCING ROUNDS" grab callout did
 			# to its own teach line. Same rail every other main.gd overlay dodges.
-			fpivot.y = maxf(fpivot.y, band_floor + float(fsz))
+			fpivot.y = floattext_floor_pinned_y(fpivot.y, band_floor, fsz)
 			# Stack against where toasts are actually DRAWN and how WIDE they are, not against
 			# their anchors: the anchor test missed every pair whose rise/drop (or the band
 			# clamp above) carried them into each other from more than 24px apart — the
@@ -10510,11 +10523,12 @@ func _draw_fx() -> void:
 			var prect := Rect2(fpivot.x + (frect.position.x - fpivot.x) * 1.5,
 				fpivot.y + (frect.position.y - fpivot.y) * 1.5,
 				frect.size.x * 1.5, frect.size.y * 1.5)
-			var fgot := claim_label_slot(prect, _label_slots, band_floor + float(fsz) - 16.5)
+			var fgot := claim_label_slot(prect, _label_slots,
+				band_floor + FLOAT_PUNCH_MAX * (float(fsz) + 1.0) + 1.0 - 16.5)
 			_label_slots.append(fgot)
 			fpivot += fgot.position - prect.position
 			floattext_anchors.append(Vector3(fpivot.x, fpivot.y, fhw))
-			var fpunch := 1.0 + maxf(0.0, 0.5 - t * 4.0)
+			var fpunch := 1.0 + maxf(0.0, (FLOAT_PUNCH_MAX - 1.0) - t * 4.0)
 			# Backing plate — the SAME near-opaque LABEL_PLATE_FILL every plated world
 			# label wears; these toasts used to float bare over the dirt with only a
 			# 4-dir outline. Alpha tracks the ink fade (fc.a) so the plate never
@@ -11962,11 +11976,10 @@ func _draw_banners(top_msg: String) -> void:
 			Color(1, 1, 1, 0.96), true,   # a1-11: gold shine sweep
 			{"band": "AFTER-ACTION REPORT", "band_col": Color(1.0, 0.85, 0.3),
 				"form": "FORM AAR-7 // EYES ONLY"})
-		# Trophy overlaps blank panel space only (no row text under it), so it's
-		# safe to draw after the shared panel/title/rows without reordering.
-		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
-		draw_texture_rect(Art.tex("trophy"),
-			Rect2(Vector2(196.0 - tsz / 2.0, 182.0 - tsz / 2.0), Vector2(tsz, tsz)), false)
+		# The trophy seats flush ABOVE the panel top (see victory_trophy_rect — the old
+		# "blank panel space only" seat covered the WAR CHEST BANKED row's left end), so
+		# it's safe to draw after the shared panel/title/rows without reordering.
+		draw_texture_rect(Art.tex("trophy"), victory_trophy_rect(vpulse), false)
 	elif _debrief:
 		# Defeat debrief: the death bookend the victory tally always had —
 		# tells the story of the run and points at 'one more'.
@@ -12132,8 +12145,23 @@ func _metal_plate(r: Rect2, a: float) -> void:
 ## document's header band + form microline) — the compression must absorb it, or
 ## the 13-row card's form line lands at y 373, off the same 360px bottom.
 const RESULT_DOC_RESERVE := 20.0
+const RESULT_PANEL_TOP := 112.0   # the end-card plate's top edge — hoisted so the victory trophy can seat flush ABOVE it instead of guessing at "blank panel space"
 static func result_row_pitch(n: int, reserve := 0.0) -> float:
 	return minf(19.0, (SCREEN_H - 178.0 - 14.0 - reserve) / float(maxi(n, 1)))
+
+## The victory trophy's draw rect. It used to sit at fixed center (196, 182) — x170..222,
+## y156..208 at full pulse — on the comment's claim that only blank panel space lay under
+## it. FALSE for the card's widest row: "%d¢ WAR CHEST BANKED  → +%s" (icon 14 + gap 6 +
+## text at 11) is 315..360px wide, so its left end lands at x140..185, always under the
+## trophy's right edge; the 8..9-row cards put the row's baseline at y210.9..215, so the
+## trophy covered 3..8px of glyph tops and up to 4px of the coin icon (measured: 343.8px²
+## worst, at banked 999999). Now the trophy seats its BOTTOM flush with the panel top
+## (y60..112 at full pulse) — a wax seal above the document's top-left corner, clear of
+## the top alert band (~y40) and the cinematic letterbox (y0..16). Static + view-free so
+## the layout test measures the exact shipped geometry.
+static func victory_trophy_rect(vpulse: float) -> Rect2:
+	var tsz := 52.0 * (0.94 + 0.06 * vpulse)
+	return Rect2(Vector2(196.0 - tsz / 2.0, RESULT_PANEL_TOP - tsz), Vector2(tsz, tsz))
 
 
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false,
@@ -12143,7 +12171,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 	## plate's top (doc["band"]), one rule under it, and a form-number microline
 	## at the plate's bottom edge (doc["form"]). Victory files an AFTER-ACTION
 	## REPORT, K.I.A. a CASUALTY REPORT — the two cards can never read as one box.
-	var panel_top := 112.0
+	var panel_top := RESULT_PANEL_TOP
 	var title_y := 150.0
 	var row_start_y := 178.0
 	var doc_h: float = RESULT_DOC_RESERVE if not doc.is_empty() else 0.0

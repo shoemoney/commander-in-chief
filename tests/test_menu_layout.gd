@@ -6775,7 +6775,7 @@ func _rect_inside(outer: Rect2, inner: Rect2) -> bool:
 ## x 558..565 against a FRAME_INNER_R of 566. The 10%/90% rows are inside the
 ## 64-texel corner tiles, which the 9-slice maps at a fixed 1:1 FRAME_SCALE from
 ## the nearest corner — the same projection the middle band uses on its own axis.
-static func _measured_frame_interior() -> Rect2:
+static func _measured_frame_interior(fr: Rect2) -> Rect2:
 	var img := Art.tex("ui_frame_lrg").get_image()
 	var tw := img.get_width()
 	var th := img.get_height()
@@ -6805,7 +6805,6 @@ static func _measured_frame_interior() -> Rect2:
 	# ones in the tiles anchored to its bottom-right, both at a fixed 1:1 FRAME_SCALE.
 	# (Under the old single stretched quad the two axes scaled differently — which is
 	# exactly what made every corner bracket 1.74:1 squashed.)
-	var fr: Rect2 = Menu.content_frame_rect(Menu.Mode.HOWTO)
 	var s: float = Menu.FRAME_SCALE
 	var l := fr.position.x + ix * s
 	var t := fr.position.y + ity * s
@@ -6824,7 +6823,7 @@ func test_frame_inner_constants_match_the_frame_art() -> void:
 	## This is the "record the canvas the constant was tuned against" guard: re-bake
 	## the frame with a thicker border and this goes red instead of silently
 	## re-sizing every content screen.
-	var m := _measured_frame_interior()
+	var m := _measured_frame_interior(Menu.content_frame_rect(Menu.Mode.HOWTO))
 	var pad := 8.0   # constants may sit up to this far INSIDE the hole, never outside
 	for row in [["L", Menu.FRAME_INNER_L, m.position.x, 1.0],
 			["T", Menu.FRAME_INNER_T, m.position.y, 1.0],
@@ -7619,3 +7618,165 @@ func test_world_signage_uses_the_one_plate_language() -> void:
 					w * punch, float(size + 2) * punch)
 				Runner.T.ok(plate_r.encloses(text_box),
 					"floattext plate encloses the %dpx text at punch %.1f" % [size, punch])
+
+
+func test_floattext_punch_never_crosses_the_band_floor() -> void:
+	## The floattext band-floor clamp (main.gd's `fpivot.y = maxf(fpivot.y, band_floor +
+	## float(fsz))`) pins the text BASELINE; the ~3-frame spawn punch then scales ink,
+	## 4-dir outline and backing plate ABOUT that baseline, so for the frames punch > 1.0
+	## the toast's punched top pokes ABOVE the band floor and the band plate/text (drawn
+	## after _draw_fx) guillotines it. MEASURED at HEAD off PixelOperator8 (ascent
+	## 7/8/10/11/12 at sizes 8/9/11/12/13), worst poke above band_floor at full punch:
+	##   plate top (pivot.y - fsz*punch - 1):  5.0..7.5 px (5.5 at the default fsz 9)
+	##   outline top row:                      4.0..6.5 px
+	##   bare ink:                             2.5..5.5 px
+	## The fix banks the punch peak INTO the clamp: pivot >= band_floor +
+	## FLOAT_PUNCH_MAX * (fsz + 1) + 1 puts the worst-case plate 1.5px BELOW the floor.
+	## All 31 floattext producers route through the one _draw_fx branch, so clamping
+	## there covers every size a producer ships.
+	var ms: Script = load("res://src/main.gd")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	# The size set is DERIVED from source: every "kind": "floattext" dict's "size": N
+	# (dicts span up to 3 lines, so scan to the closing "})"), plus the branch's 9
+	# default. A size added tomorrow is covered the day it lands.
+	var sizes := {9: true}
+	var from := 0
+	var size_re := RegEx.new()
+	size_re.compile('"size":\\s*(\\d+)')
+	while true:
+		var at := src.find('"kind": "floattext"', from)
+		if at < 0:
+			break
+		var close := src.find("})", at)
+		var m := size_re.search(src, at, close if close > at else at + 400)
+		if m != null:
+			sizes[int(m.get_string(1))] = true
+		from = at + 1
+	Runner.T.ok(sizes.size() >= 4,
+		"floattext sizes derived from source (%s) — expect at least the shipped 4" % [sizes.keys()])
+	var punch_max: float = ms.get_script_constant_map().get("FLOAT_PUNCH_MAX", 1.5)
+	var has_pin: bool = ms.has_method("floattext_floor_pinned_y")
+	Runner.T.ok(has_pin, "floattext_floor_pinned_y() banks the punch peak into the band-floor clamp")
+	var f := Art.font()
+	const BF := 100.0   # any band floor; the poke is floor-relative
+	for size in sizes.keys():
+		var pivot: float = ms.call("floattext_floor_pinned_y", 0.0, BF, size) if has_pin \
+			else BF + float(size)   # the legacy clamp — reports the REAL poke on HEAD
+		var plate_r: Rect2 = ms.call("floattext_plate_rect", Vector2(200.0, pivot), 80.0, size, punch_max)
+		Runner.T.ok(plate_r.position.y >= BF,
+			"fsz %d: punched plate top %.1f clears the band floor %.0f (pokes %.1fpx)"
+				% [size, plate_r.position.y, BF, BF - plate_r.position.y])
+		var outline_top := pivot - punch_max * (f.get_ascent(size) + 1.0)
+		Runner.T.ok(outline_top >= BF,
+			"fsz %d: punched outline top %.1f clears the band floor %.0f (pokes %.1fpx)"
+				% [size, outline_top, BF, BF - outline_top])
+		var ink_top := pivot - punch_max * f.get_ascent(size)
+		Runner.T.ok(ink_top >= BF,
+			"fsz %d: punched ink top %.1f clears the band floor %.0f (pokes %.1fpx)"
+				% [size, ink_top, BF, BF - ink_top])
+	# Routing pin (the "helper can't drift into decoration" idiom): the floattext branch
+	# of _draw_fx must actually go through the pinned clamp and the named peak.
+	var bstart := src.find('elif fx["kind"] == "floattext":')
+	Runner.T.ok(bstart >= 0, "_draw_fx keeps a floattext branch")
+	if bstart >= 0:
+		var bend := src.find("\n\t\telif ", bstart)
+		var body := src.substr(bstart, bend - bstart)
+		Runner.T.ok(body.contains("floattext_floor_pinned_y("),
+			"the floattext branch pins its pivot through floattext_floor_pinned_y()")
+		Runner.T.ok(body.contains("FLOAT_PUNCH_MAX"),
+			"the floattext branch derives its punch peak from FLOAT_PUNCH_MAX")
+
+
+func test_list_screen_ink_stays_clear_of_frame_and_rows() -> void:
+	## The list-screen sibling of test_content_well_ink_never_touches_the_frame_border.
+	## The content-well screens (HALL/HOWTO) have a containment ratchet; the 10 framed
+	## LIST screens had none — which is how the REBIND fixed-input footnote shipped
+	## drawn at baseline 324: its ink box (y317..325, +1px shadow) sits ON the frame's
+	## 11px bottom keyline (measured interior floor 324.98) AND under the BACK row
+	## plate (x209..431, y309..329 on tabs 0/3, y304..329 on tabs 1/2), which is drawn
+	## AFTER _draw_mode_header and paints over the note's middle 222px — the player saw
+	## the string amputated mid-word by the BACK button. MEASURED at HEAD: note bottom
+	## 326.0 > 324.98 → (a) red; note box ∩ BACK plate → (b) red on all 4 tabs; the
+	## REBIND footer is one-line → (c) red. The fix moves the note into the footer's
+	## two-line help machinery (the strip below the frame, already proven on OPTS).
+	var was_pad: bool = Art.use_pad
+	var strip_top: float = Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
+	var strip_bottom: float = Menu.FOOTER_Y + Menu.FOOTER_H
+	# The screen set is DERIVED from the Mode enum (HIDDEN/TITLE have no list frame,
+	# HALL/HOWTO are owned by the content-well test): PAUSE, OPTS, SETUP, DISP, INFO,
+	# MODES, CHAPTERS, AUDIO, PERKS — plus REBIND x its 4 tabs. A new framed mode is
+	# covered on landing.
+	var list_modes: Array = []
+	for mv in Menu.Mode.values():
+		if mv in [Menu.Mode.HIDDEN, Menu.Mode.TITLE, Menu.Mode.HALL, Menu.Mode.HOWTO]:
+			continue
+		list_modes.append(mv)
+	Runner.T.ok(list_modes.size() >= 10,
+		"list screen set derived from Menu.Mode (%d screens)" % list_modes.size())
+	for mv in list_modes:
+		var tabs: int = Menu.REBIND_TABS.size() if mv == Menu.Mode.REBIND else 1
+		for tab in range(tabs):
+			for pad in [false, true]:
+				Art.use_pad = pad
+				var tag := "%s%s/%s" % [Menu.Mode.keys()[mv],
+					(" tab%d" % tab) if mv == Menu.Mode.REBIND else "", "pad" if pad else "kb"]
+				var stub := _StubMain.new()
+				var m := _CaptureMenu.new()
+				m.main = stub
+				m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+				m._open_t = 1.0
+				m.mode = mv
+				m._rebind_tab = tab
+				m.ops.clear()
+				var prev = Art.text_capture
+				Art.text_capture = m.ops
+				m._draw_mode_header()
+				m._footer_legend()
+				Art.text_capture = prev
+				var interior := _measured_frame_interior(Menu.content_frame_rect(mv))
+				var border_bottom: float = Menu.content_frame_border(mv).end.y
+				var g: Dictionary = m._row_geometry()
+				var worst := 0.0
+				var worst_id := ""
+				var hit := ""
+				var footnote_y := -1.0
+				for op in m.ops:
+					if not op.has("size"):
+						continue   # plates/glyphs are chrome or shadow-less; text is the ink
+					var box: Rect2 = op["box"]
+					if mv == Menu.Mode.REBIND and "ALWAYS ON" in str(op["id"]) \
+							and box.position.y >= strip_top and box.end.y <= strip_bottom:
+						footnote_y = box.position.y
+					# The footer strip is drawn BELOW the frame by design (pinned by
+					# test_footer_draw_commands_captured_both_devices) — out of scope here.
+					if box.position.y >= border_bottom:
+						continue
+					# Grow 1px right/down for the Art.text drop shadow.
+					var grown := Rect2(box.position, box.size + Vector2(1.0, 1.0))
+					var over: float = maxf(maxf(interior.position.x - grown.position.x,
+							grown.end.x - interior.end.x),
+						maxf(interior.position.y - grown.position.y, grown.end.y - interior.end.y))
+					if over > worst:
+						worst = over
+						worst_id = "'%s' x%.0f..%.0f y%.0f..%.0f vs interior x%.0f..%.0f y%.0f..%.2f" % [
+							str(op["id"]).substr(0, 46), grown.position.x, grown.end.x,
+							grown.position.y, grown.end.y,
+							interior.position.x, interior.end.x, interior.position.y, interior.end.y]
+					for k in int(g["n"]):
+						var rr: Rect2 = Menu.row_rect(g, k)
+						if box.intersects(rr):
+							hit = "'%s' y%.0f..%.0f intersects row %d %s" % [
+								str(op["id"]).substr(0, 46), box.position.y, box.end.y, k, str(rr)]
+							break
+				Runner.T.ok(worst <= 0.0,
+					"%s: every in-dialog string clears the measured frame interior (worst overhang %.2fpx%s)"
+						% [tag, worst, "" if worst <= 0.0 else " — " + worst_id])
+				Runner.T.ok(hit == "",
+					"%s: no header/footer string intersects a row plate%s" % [tag, "" if hit == "" else " — " + hit])
+				if mv == Menu.Mode.REBIND:
+					Runner.T.ok(footnote_y >= 0.0,
+						"%s: the ALWAYS-ON footnote lives in the footer help strip (y %.0f..%.0f)"
+							% [tag, strip_top, strip_bottom])
+				m.free()
+				stub.free()
+	Art.use_pad = was_pad

@@ -4415,6 +4415,18 @@ func _rebind_pad_dev_rect(d: int) -> Rect2:
 	return Rect2(x0 + float(d) * (w + gap), 88.0, w, 12.0)
 
 
+# c1-18: the fixed-input footnote — clarifies that the always-on mouse (kb) /
+# stick+trigger (pad) inputs are NOT rebindable here, so an UNBOUND row means "no
+# key/button on this device", NOT that the action is switched off. Drawn as the
+# REBIND footer's help line (see _footer_legend), NOT in the dialog: drawn in-dialog
+# at y324 it collided with the BACK row plate (drawn after the header) and sat on the
+# frame's bottom keyline — the footer strip keeps the stated intent (a footnote at
+# the SELECT/BACK legend) while leaving the dialog interior.
+func _rebind_footnote() -> String:
+	return "STICKS MOVE/AIM + RT FIRES (ALWAYS ON) - LEFT-HANDED? USE THE SWAP STICKS ROW" if not _rebind_is_kb() \
+		else "MOUSE ALSO AIMS + FIRES (ALWAYS ON) - 'UNBOUND' DROPS ONLY THAT KEY, NOT THE ACTION"
+
+
 func _draw_rebind_header() -> void:
 	var pad := not _rebind_is_kb()
 	# Category tabs: the active one is a lit plate, the others dim — TAB/shoulders cycle them,
@@ -4465,12 +4477,10 @@ func _draw_rebind_header() -> void:
 			_emit_rect_outline(pr, Color(0.6, 0.9, 0.95, 0.9) if pon else Color(0.36, 0.42, 0.45, 0.6), 1.0)
 			_center_text_at("PLAYER %d" % (pd + 1), pr.get_center().x, pr.position.y + 9.0, 7,
 				Color(0.95, 1.0, 1.0) if pon else Color(0.55, 0.62, 0.65), pr.size.x - 8.0)
-	# c1-18: a fixed-input footnote just above the SELECT/BACK legend — clarifies that the
-	# always-on mouse (kb) / stick+trigger (pad) inputs are NOT rebindable here, so an
-	# UNBOUND row means "no key/button on this device", NOT that the action is switched off.
-	var note := "STICKS MOVE/AIM + RT FIRES (ALWAYS ON) - LEFT-HANDED? USE THE SWAP STICKS ROW BELOW" if pad \
-		else "MOUSE ALSO AIMS + FIRES (ALWAYS ON) - 'UNBOUND' DROPS ONLY THAT KEY, NOT THE ACTION"
-	_center_text(note, 324, 7, Color(0.62, 0.68, 0.55, 0.9))
+	# (The c1-18 fixed-input footnote used to draw HERE at baseline 324 — it moved to the
+	# footer's two-line help strip: the BACK row plate, drawn after this header, painted
+	# over its middle 222px, and its ink sat on the frame's bottom keyline. See
+	# _rebind_footnote + _footer_legend.)
 
 
 func _draw_back_button() -> void:
@@ -6139,6 +6149,11 @@ func _footer_legend() -> void:
 	var items: Array[Dictionary] = _menu_items() if main != null else ([] as Array[Dictionary])
 	var focused := items[sel] if sel >= 0 and sel < items.size() else {}
 	var row_help: String = setting_help(focused.get("id", ""))
+	# c1-18 follow-up: the REBIND footnote rides the SAME two-line help machinery the
+	# settings rows use (strip below the frame, ellipsized to CANVAS_WIDTH - 24). Rebind
+	# row ids have no SETTING_HELP entry, so this never competes with a row description.
+	if mode == Mode.REBIND and row_help == "":
+		row_help = _rebind_footnote()
 	# c4-01: when the focused volume row is MUTED, front-load the RECOVERY ACTION as prose (not a
 	# second copy of the word "MUTED" — that already reads on the row label, the muted-speaker icon
 	# and the slashed bar). The helper text is the only channel that spells out HOW to bring the bus
