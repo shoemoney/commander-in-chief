@@ -1,7 +1,7 @@
 # Backlog
 
-Open defects, design calls and debt for Commander In Chief, as of **2026-07-29** (branch
-`main` @ `2bedaf1`).
+Open defects, design calls and debt for Commander In Chief, as of **2026-07-31** (branch
+`main` @ `390c12d`).
 
 > ⚠️ **Read the severities sceptically — that is a rule this project paid for.** Handed-down
 > reports here have repeatedly named a real smell and got the consequence wrong by a whole
@@ -15,23 +15,24 @@ screenshots while a second lens reads `src/sim/` and *drives it headlessly to me
 Measured numbers are copied **verbatim**; a paraphrased measurement is just an opinion. Where
 an entry was only reasoned about, the entry says so. This file MERGES: entries that shipped
 are marked RESOLVED with their commit sha, not deleted — a decision and its outcome belong
-next to each other. Several 2026-07-29 lens findings re-flag ground a commit this same run
-already touched; those carry the sha inline so the next reader starts from the remainder, not
-the original complaint.
+next to each other. Several lens findings re-flag ground a commit the same run already
+touched; those carry the sha inline so the next reader starts from the remainder, not the
+original complaint.
 
-**Counts this snapshot:** 17 new open (2026-07-29) · 1 new owner decision · 20 shipped this
-run · older carried entries marked per-section.
+**Counts this snapshot:** 31 new open (2026-07-31) · 6 new owner decisions · 10 shipped in
+the 2026-07-31 window (5 clean, 5 with flagged remainders) · older carried entries marked
+per-section.
 
 ---
 
 ## 1. Owner decisions — these need a human, not a fix
 
-1. **NEW 2026-07-29 — `tools/probe_concussion_hud.gd` runs in NO automated gate.** The plan
-   said to wire it into "the CI step that already runs gl_compatibility pixel smoke", but no
-   such CI step exists (verified `.github/workflows/ci.yml` — every job is `--headless`). The
-   CI-gated coverage is `smoke.gd`'s structural layer pin (mutation-proven); the pixel probe
-   is local-only. Adding a GL-capable CI job (macOS runner, Xvfb+gl_compatibility on Linux) is
-   a cost/flakiness tradeoff only the owner can call.
+1. **`tools/probe_concussion_hud.gd` runs in NO automated gate.** The plan said to wire it
+   into "the CI step that already runs gl_compatibility pixel smoke", but no such CI step
+   exists (verified `.github/workflows/ci.yml` — every job is `--headless`). The CI-gated
+   coverage is `smoke.gd`'s structural layer pin (mutation-proven); the pixel probe is
+   local-only. Adding a GL-capable CI job (macOS runner, Xvfb+gl_compatibility on Linux) is
+   a cost/flakiness tradeoff only the owner can call. *(Re-flagged 2026-07-31, unchanged.)*
 2. **Shop-wheel plate alpha overturns a deliberate design.** The c2 author cut the plate to
    0.55 *on purpose* so mast, scars, drops and hazards read through during a buy; a later cycle
    raised it. Measured cost: a ~100px donut of ground around a stationary soldier is masked for
@@ -62,34 +63,261 @@ run · older carried entries marked per-section.
    only through `Art.fs()`, which no HOWTO call site uses. Honouring it would overflow every
    band the `FRAME_INNER_*` constants just tightened — a real scope decision, not an oversight.
 8. ~~duplicate of #6~~ **RESOLVED**.
+9. **NEW 2026-07-31 — Hulk salvage at grenade cap is a cover-destroying no-op.** The untracked
+   `tools/probe_salvage.gd` in this tree measures that a player at `GRENADE_AMMO_MAX` salvaging
+   a smoldering hulk gets `_try_salvage_hulk` returning true, event n=0 (+0 grenades), and the
+   hulk's `burn_ticks` stripped **100 → 0** — the cover is destroyed for zero gain. The sim
+   docstring (`sim_world.gd:2392-2395`) frames strip-vs-keep as a deliberate trade ("keep the
+   wall or take the ammo"), and the shop's own `_supply_full` rule refuses no-op purchases
+   everywhere else ("none of them can bill for a no-op", `tests/test_shop.gd:249`) — so either
+   salvage should refuse at cap (keep the wall) or the docstring's trade framing should be
+   narrowed. A +0 "trade" is not a decision the player can read, but reversing the documented
+   choice is the owner's call. The defect entry lives in §2. *(`probe_colossus.gd`, the other
+   orphan probe, runs clean: seed 0xC0FFEE engage_t=288 fight_ticks=683 downs=3 victory=true.)*
+10. **NEW 2026-07-31 — The flat airstrike deny removes the skilled "pre-call".** Buying in the
+    last ~44 intermission ticks so the strike lands mid-trickle clips ~4 enemies; `8425bd7`'s
+    deny kills that line. The plan weighed freezing `pending_airstrike` instead and rejected it
+    (view countdown + lead-prediction + checksum ordering). If the owner considers the pre-call
+    a feature worth keeping, the freeze alternative is the only honest route back — the deny
+    makes that trade-off permanent.
+11. **NEW 2026-07-31 — ghillie and sapper still have no working separator rim.** Their
+    `_LIGHT_RIM` entries remain dead behind the OUTLINE gate, same root cause as the
+    `m_soldier2` defect this cycle fixed. The plan deliberately deferred them: ghillie's cloak
+    subtlety is the mechanic and sapper is a non-shooter with a satchel pip. If a future pass
+    rims them, the same three-registry pattern (OUTLINE + `_UNIT_RIM` + `_LIGHT_RIM`) and the
+    same source-derived test shape apply.
+12. **NEW 2026-07-31 — The warm-light rim visibly enlarges/brightens the infantry silhouette
+    slightly** (measured **~120 changed px per ~18px sprite**). This is the a1-02 separator
+    class working as designed, but it is an aesthetic call: the rim reads as a soft glow
+    outline rather than a hard keyline. If the owner prefers subtler separation, `_LIGHT_RIM`'s
+    **2.2px width** is the single knob.
+13. **NEW 2026-07-31 — An abandoned daily now leaves NO Hall/leaderboard trace of the
+    attempt.** `d45132a` deliberately chose arm+demote over the finding's alternative of
+    banking the quit with its standing score — the daily board only ever shows the one
+    completed run. If the owner wants "attempted, abandoned" visible on the daily leaderboard,
+    that is a product call, not a defect.
+14. **NEW 2026-07-31 — A spent-daily re-deal keeps the SAME board as unranked practice**
+    rather than re-seeding a fresh layout — `d45132a`'s chosen behavior; a fresh-seed practice
+    would play differently and is equally defensible.
 
 ---
 
 ## 2. Sim / gameplay defects — player-facing
 
-### New this run (2026-07-29), measured
+### New this run (2026-07-31), measured unless noted
 
-- **Downed-pilot ransom is geometry-locked: he walks AWAY from every reachable position, and
-  the game's own camera anchor puts him out of reach.** Where: `src/sim/sim_world.gd:6355-6357`
-  (eject, floored at `camera_top+120`), `:3287-3290` (walks north at `PILOT_SPEED` 1.4px/t,
-  captured at `camera_top-30`), `:1428-1435` (rescue = touch within 14px, only after the 36t
-  punch-out grace); comments at `:95-109`. Measured: staged the post-gunship beat headlessly
-  (real `_step_gates` open path, pilot injected exactly as `_damage_boss` does) and ran **120
-  strategy/offset/seed combinations** stepping the sim directly. The pilot always ejects at or
-  NORTH of `camera_top+120` and always walks NORTH — away from every position the player can
-  legally stand (the gate is a hard wall, so the player is always south of him). The capture
-  fuse after grace is **~107 ticks**; a chasing… *(report text truncated at source)*
-- **The grenade landing telegraph lies on held throws: marker + kill circle draw the 99px full
-  lob while a >=0.27s press airbursts at 51px — a 48px lie, bigger than the blast ring, taught
-  nowhere.** Where: `src/sim/sim_world.gd:2903-2918` (the hold/apex airburst), `:2869-2893`
-  (`predict_grenade_landing` — "Airburst is deliberately NOT modelled: the marker answers where
-  does it land if I let it fly"), `src/main.gd:9453-9469` (the view draws the marker + 28px
-  blast circle from that prediction), `src/main.gd:5771-5777` (the dev demo bot encoding the
-  rule: "TAP ... 96 px / HOLD ... ~48 px"). Measured by stepping the sim: a tapped grenade lobs
-  **99px, every time**; a HELD grenade button pops the airburst at **51px** — and throws
-  exactly once in 400 ticks (the buffer is edge-triggered, so holding never re-arms), while
-  **6 taps** landed in the same window. The apex trips at **~16 ticks (0.27s)**, so this is…
-  *(report text truncated at source)*
+- **2P ready-up is a unanimous party vote with no tally — holding E alone does nothing,
+  forever, with zero on-screen explanation.** Where: rule at `src/sim/sim_world.gd:5405-5418`
+  (`_ready_up` — "True while EVERY living player holds REVIVE and nobody is down"), counter at
+  `:5439-5445` (`ready_hold` resets to 0 any tick the unanimity breaks; 20 ticks to deploy,
+  `READY_HOLD_TICKS` at `:402`), hint at `src/main.gd:4913-4915` (`HOLD [%s] TO DEPLOY EARLY`).
+  MEASURED: headless 2P endless probe — reached a real intermission (300t window), had P1 hold
+  revive alone for 180 ticks: intermission ran 300→120, `ready_hold` never left 0 (P1's entire
+  3-second hold was discarded every tick). Both players then holding: deployed in exactly 20
+  ticks. And `ready_hold` has ZERO view reads (grep over `src/main.gd` + `src/view/hud.gd` —
+  none). *(Report text truncated at source.)*
+- **Daily Run teaches "one attempt" — but the lock only arms at the debrief, so QUIT TO TITLE /
+  RESTART makes today's seed infinitely scoutable.** Where: taught rule at
+  `src/view/menu.gd:5136` ("One shared seed a day, one attempt."); the lock's only write at
+  `src/main.gd:4753-4758` (`_daily_done_seed = _current_seed` inside `_record_run`); the only
+  caller chain is `_apply_score_verdict` (`src/main.gd:4709`) ← the debrief trigger at
+  `src/main.gd:4928-4943`, which fires on `sim.victory or sim.wiped or last-stand-all-down`.
+  The exit paths — pause menu "QUIT TO TITLE" (`src/view/menu.gd:3185-3188`) and "RESTART"
+  (`:3183-3184`) — call `main._reset()` directly, which runs `_flush_bests()`
+  (`src/main.gd:1855`) that touches only best/hint sections, never the daily lock.
+  *(`d45132a` shipped the arm+demote behavior this run — owner decisions #13/#14. The lens
+  still flags the scouting remainder; the open item is what survived `d45132a`.)*
+- **DAILY RUN's "one attempt" is only enforced at the debrief — R/RESTART before the wipe
+  retries the same seed, unlocked, forever.** Where: copy at `src/view/menu.gd:5136`; the lock
+  write at `src/main.gd:4753-4759` (`_daily_done_seed` written ONLY in `_record_run`); the
+  restart path at `src/main.gd:1434-1452` (`_reset()` → `_flush_bests()` persists only
+  `best`/`seen` — the daily seed is untouched) and `:1770-1776` (R key → `_reset()`).
+  MEASURED live against the real main scene headlessly: `start_daily()` → seed 1017050458,
+  `daily_done()==false`; play 240 real ticks; call `_reset()` (the R-key path) → same seed
+  1017050458, `daily_done()==false`, `_daily` still true — unlimited retries. *(Near-duplicate
+  of the entry above from a second lens — kept because its measurement is independent.
+  `d45132a` shipped; this is the flagged remainder.)*
+- **NG+ HARD scores ~1.58x a normal campaign and lands on the same Hall of Fame and Steam
+  leaderboard with no marker — the board flags *ASSIST and *DAILY but not the toggle that
+  inflates score.** Where: `src/main.gd:1459` (`sim.hard = _hard and not _endless and ...` —
+  campaign only, and `_hard` is a free RUN SETUP toggle at `src/view/menu.gd:3090-3092` with no
+  unlock gate); the board entry at `src/main.gd:4726-4733` (`_record_run` tags `assist` and
+  `daily` — no `hard` key); the Steam upload at `:4787+` (`_steam.upload_score(sim.mode,
+  score)` — 'campaign' for both rulesets). MEASURED: same scripted bot, same 4 seeds, god mode,
+  12,000 ticks each: normal campaign scores [131775, 104669, 142093, 151981] (mean ~132.6k,
+  1136 kills) vs hard [265621, 172361, 206247, 194341] (mean ~209.6k, 1934 kills) — **+58%
+  score, +70% kills**, because harder spawning is more income (elites pay 25c vs 10c).
+  *(Report text truncated at source.)*
+- **Grenade-family hits on bosses emit no `boss_hit` feedback event (bullets do).**
+  `_explode`'s campaign-gate branch (`sim_world.gd:3002-3005`) and endless branch (`:3012-3016`)
+  call `_damage_boss` without emitting `boss_hit`, while `_bullet_hits_boss` (~`:6300`) emits
+  it — so grenade/barrel/mine hits on a boss produce none of the hit-flash/hit-stop feedback
+  bullets get. Confirmed pre-existing by reading HEAD: the fly-in fix only added the `phase_t`
+  conjunct and left the event asymmetry untouched (the plan's brief explicitly named it out of
+  scope). Fix shape: emit the same `boss_hit` event from `_damage_boss`'s non-lethal arm, or
+  from both `_explode` boss branches, and extend the fly-in test's post-arrival arm to assert
+  the event. *(Reasoned from code, not driven.)*
+- **A salvaged or expired tank hulk keeps burning and drawing as cover while bullets fly
+  straight through it.** Where: sim cover predicate `src/sim/sim_world.gd:2750-2756` (player
+  bullets) and `:6443-6449` (enemy bullets) — both `not hk["alive"] and hk["burn_ticks"] > 0`,
+  lifetime `HULK_TICKS=1050` (17.5s) at `:445`, instant-strip at `:2405` (salvage sets
+  `burn_ticks=0`). View: `_hulks` pool `src/main.gd:5409-5416` (appended on death, persists to
+  an 8-cap eviction at `:5435`), wreck sprite + scorch drawn unconditionally at
+  `:10702-10715`, and the big flame envelope at `:10531-10539` keyed on view-time `h["t"]`
+  (~8s fade), which NOTHING in the sim touches. What happens: the game teaches "dead tanks are
+  cover while they smolder" — but the visible fire runs on a view-side 8s clock, the sim's
+  cover runs on a 17.5s sim clock, and … *(report text truncated at source)*
+- **Salvaging a hulk at full grenades strips your cover for +0 ammo — the one supply path that
+  still bills for a no-op.** Where: `src/sim/sim_world.gd:2397-2408` — `_try_salvage_hulk`
+  clamps `p["grenade_ammo"]` to `GRENADE_AMMO_MAX` and unconditionally sets
+  `tank["burn_ticks"] = 0` (ends the cover), even when the clamp grants +0; the view receipt at
+  `src/main.gd:2793-2795` ("FULL UP — COVER STRIPPED"). The rule it breaks is written in the
+  sim's own `_supply_full` docstring at `:2239-2241`: "shared by every path that hands out a
+  supply so none of them can bill for a no-op". MEASURED: headless probe
+  (`tools/probe_salvage.gd`) — player at 12/12 grenades interacts with a smoldering hulk:
+  salvage returns true, grenades **12 → 12** (event grants n=0), hulk `burn_ticks` **100 → 0**.
+  The cover cost is real: dead hulks block bullets both ways. *(Fix direction is owner decision
+  #9.)*
+- **The Colossus siege restocks grenades in total silence — the one fight balanced on grenade
+  income never announces the drop.** Where: `src/sim/sim_world.gd:6131-6136` — the siege drop
+  block in `_step_colossus` does a bare `pickups.append` (kind 1, no event, no `drop` field);
+  compare the endless wave drop at `:5857-5861` which fires `supply_drop` → cargo chime
+  (`src/main.gd:462`), "SUPPLY DROP — HOLD IT" toast + ground light (`:2845-2849`) and the
+  parachute/TTL drawing (`:8315+`, keyed on the `drop` field the siege pack lacks). MEASURED
+  headlessly (`tools/probe_colossus.gd`, 4 seeds, god_mode, arcade jump to `FINAL_GATE_INDEX`):
+  the finale runs **663-899 ticks** with **3-5 downs** and **2 core windows** (healthy pressure
+  — no tuning claim), and spawns **3-4 grenade packs per fight with ZERO announce**; the sim
+  comment at `:6131` says these drops "keep the g…" *(report text truncated at source)*
+- **The shop bills full price for air it partially delivers: a "+30 AMMO" buy at 90/99 grants 9
+  rounds for the full 30 coins, "+4 GRENADES" at 10/12 grants 2 — and the label, the receipt
+  floattext, and the token-drop callout all still print the full amount.** Where:
+  `src/sim/sim_world.gd:2093-2095` (`_apply_supply` caps with `mini(MG_AMMO_MAX, +30)` /
+  `mini(GRENADE_AMMO_MAX, +4)`), `:2239-2247` (`_supply_full` — the no-op guard shipped in
+  `e57191b` — only returns true AT the cap, never near it), `:2300-2342` (`_try_buy` debits the
+  full `_supply_cost` regardless of headroom), `:2262-2298` (`_try_token_drop` filters on the
+  same hard-cap-only test); view side: static labels "AMMO +30" / "GRENADES +4" at
+  `src/main.gd:419-421`, full-amount receipts `BUY_FLOAT` "+30 AMMO" / "+4 GRENADES" at
+  `src/main.gd:426` printed on every buy (`:2384`) and token drop (`:2792`). MEASURED by
+  stepping the sim headlessly: ammo buy at 90/99 → now 99 (delivered 9), charged 30; grenade
+  buy at 10/12 → del… *(report text truncated at source)*
+- **The revive's whole go-to-the-body grammar — body beacon, dashed tether, off-screen chevron
+  "so the revive has a spatial target" — signposts a dangerous rescue run the sim does not
+  require: E revives from ANY distance and teleports the partner to your row.** Where:
+  `src/sim/sim_world.gd:1928-1962` (`_try_revive` — loops all dead players, checks only
+  `war_chest >= cost`; no distance test anywhere; the revived player lands at `reviver["y"]`)
+  vs the view's spatial rescue kit at `src/main.gd:10139-10148` (rising beacon "pulls their eye
+  to the body"), `:10899-10915` (off-screen chevron whose comment says the cue exists "so the
+  revive has a spatial target"), `:9815-9818` (off-screen partner chevron). MEASURED: 2P sim,
+  killed P2, walked P1 300px north, called `_try_revive(0, p1)` — P2 `alive:true`, teleported
+  **~284px** to P1's row, chest debited 50. The game invests three separate rendering systems
+  in telling the player WHERE the body is and building the fi… *(report text truncated at
+  source)*
+- **A tank parked directly on a free supply crate collects nothing and says nothing — the
+  biggest object on the field rolls over a glowing pickup with zero effect or feedback.**
+  Where: `src/sim/sim_world.gd:1107-1109` (`_step_players`: the `in_tank` branch calls
+  `_drive_tank` and `continue`s before `_collect_pickups` at `:1454-1456`, so riders and
+  gunners can never collect), vs the gate-cache crate the sim plants dead-center in the only
+  path north at `:4246-4248` (x = `SCREEN_CX`). MEASURED: boarded a tank directly onto a free
+  grenade crate at 0 grenades, stepped 10 ticks — grenades still 0, crate still on the ground,
+  no deny event, no cue. The tank's tread grammar already touches everything else it rolls over
+  — it crushes infantry, flattens sandbags, detonates barrels, and even RESCUES the pilot on
+  contact — so "drove over the crate, nothing happened" reads as a bu… *(report text truncated
+  at source)*
+- **Closed gates pin the camera — and the spawner keeps planting rooted MG nests 24px above
+  the viewport, so 4-6 invisible, unflankable turrets fire lead-computed bursts into the game's
+  longest fights (including the no-revive finale).** Where: `src/sim/sim_world.gd:3969-3971` —
+  `_step_spawner` plants rooted units at `camera_top - 24 * F_ONE` (`_spawn_mg_nest` for
+  `SECTOR_SPECIALS` sectors 3 and 6, `_spawn_broadcast` for sector 5). The player's northern
+  clamp is `camera_top + 16` (`_clamp_actor`, `:1784`) and a closed gate pins the camera at
+  `g["y"] - GATE_CAMERA_PAD` (`:4624`), so while any gate fight lasts, a rooted spawn sits 24px
+  above the top edge and 40px above the furthest point the player can ever stand — for the
+  whole fight. MEASURED (6 campaign seeds via `.aaa/probe_offscreen_nests.gd` +
+  `.aaa/probe_offscreen_attr.gd`): peaks of **4-6 rooted nests/broadcasts** piled up above the
+  pinned edge during stage-3 (gunship) gate … *(report text truncated at source)*
+- **Endless 2P: a broke death respawns FREE after 5s whenever a partner is up — the mode's
+  only death brake (the compounding revive price) is waived exactly when you can't pay, so
+  spend-to-zero is the dominant strategy.** Where: `src/sim/sim_world.gd:1863-1870` —
+  `_step_dead_player`'s broke-timer expiry calls `_respawn(p, _checkpoint_y())` (free) whenever
+  `rally_is_free()` (`:1913-1921`), which is true in endless the moment any partner is alive;
+  only a full-party down latches the wipe. MEASURED (`.aaa/probe_broke_respawn.gd`): endless
+  2P, wave 10, `revive_cost` 900 vs chest 10 — the downed player respawns at exactly **tick
+  300** with cost=0, a fresh 49-round clip and 4 grenades. Dying solvent costs the full
+  compounding price (50 × deaths × (1+wave/5), uncapped — **4600 by wave 16** in the economy
+  probe); dying broke costs 5 seconds and pays a partial restock worth **~45+ coins** at
+  wave-10 shop prices. *(Report text truncated at source.)*
+- **"WAVE CLEARED — SHOP OPEN" fires while a live Spotter is still shelling the shop window.**
+  Where: `src/sim/sim_world.gd` — `_wave_hostiles_cleared` (`:5670`) iterates only `enemies`;
+  the Mortar Observer is a separate top-level dict spawned on SPOTTER waves (`:5836`) and
+  exempted from every despawn in endless ("the observer living until it is shot is the
+  documented, intended pressure", `:6562-6566`); its strike loop (`:6575-6585`) runs every tick
+  regardless of intermission; the wave-clear + Clean Wave bonus evaluate at `:5583-5600`;
+  `deaths_this_wave` resets at `_start_wave` (`:5712`). View: "WAVE CLEARED — SHOP OPEN" banner
+  (`src/main.gd:2946`). MEASURED (`.aaa/probe_c6_spotter.gd`, seed 7): wave 3 rolls SPOTTER,
+  observer up; wave-clear fired with `observer_alive=true`; 276 shop ticks followed … *(report
+  text truncated at source. `390c12d` shipped "the endless milestone shop window is a kill zone
+  the game itself calls threat-free" this run — the lens still flags the Spotter remainder; the
+  open item is what survived `390c12d`.)*
+- **Miniboss fly-in airstrike window remains a partial whiff.** The endless intermission is now
+  gated because `enemies` is provably empty for the whole 45t telegraph (`_step_waves`
+  early-returns; strike resolves before `_start_wave`) — that half shipped in `8425bd7`. The
+  wave-5+ miniboss fly-in is a second window where `_fire_mission` (`:2071`) spares bosses, but
+  the trickle keeps spawning so it is NOT provably empty — the plan explicitly banked it. A
+  strike bought during the fly-in still kills only trickle infantry. *(Reasoned, not driven —
+  banked by the plan.)*
+- **A tank driver's (or gunner's) revive key is a fully swallowed input the HUD is actively
+  prompting — the arbitration mutes the cannon for a rescue the sim never performs.** Where:
+  `src/sim/sim_world.gd:1114-1117` (`if p["in_tank"] >= 0: _drive_tank(...); continue`) — the
+  `continue` skips the only alive-player revive read at `:1402` (`if inp.revive:
+  _try_revive(i, p)`), and neither `_drive_tank` (`:2446`) nor `_ride_as_gunner` (`:2549`) ever
+  reads `inp.revive`. The arbitration that sends the key there is `main.gd:5897-5909`
+  (`revive_context` rule 3: "YOU ARE UP AND A PARTNER IS DOWN -> revive") and `main.gd:5983-5993`
+  (`shared_e` mutes the grenade route when the context is live). MEASURED
+  (`tools/probe_tank_revive.gd`, headless, steps the sim directly): 2P campaign, P1 boarded in
+  a live tank, P2 downed, chest 500 vs cost 50 — `revive_…` *(report text truncated at source)*
+- **Grenades and every blast kill the cloaked, bullet-immune ghillie — the sim's own "only the
+  reveal window can kill it" rule, its HOWTO card, and the airstrike's submerged exemption all
+  say otherwise.** Where: `src/sim/sim_world.gd:2961-2974` (`_explode`'s enemy scan: `if
+  e["alive"] and e["kind"] != "pilot" and _dist_lte(..., BLAST_KILL_RADIUS)` — no `submerged`
+  exemption), vs the same file's `_fire_mission` at `:2071-2087` which deliberately spares
+  `e.get("submerged", false)` ("Spares the submerged (1986 rule)"), vs the archetype's own
+  contract at `:3717-3722` ("Killing it during the reveal/paint window defuses the shot — and
+  that window is the only time it can be killed at all"), vs the HOWTO card
+  `src/view/menu.gd:5262` ("GHILLIE — hidden sniper; only its laser gives it away. Close in.").
+  MEASURED (`tools/probe_ghillie_blast.gd`, headless): a cloaked (`submerged=true`) ghillie
+  20px from the … *(report text truncated at source)*
+- **The supply receipt lies on partial stocks: wheel buy and SUPPLY CALL print "+30 AMMO" /
+  "+4 GRENADES" while the sim clamps the grant to as little as +1 — at full price.** Where:
+  `src/sim/sim_world.gd:2098-2101` (`_apply_supply` clamps: `mg_ammo = mini(99, +30)`,
+  `grenade_ammo = mini(12, +4)`), `:2310-2360` (`_try_buy` charges the FULL `_supply_cost` and
+  emits `{"t":"buy","kind":kind}` with no granted amount), `:2283-2309` (`_try_token_drop`
+  spends the Commendation and emits the same amount-less `token_drop` event), `src/main.gd:429`
+  (`BUY_FLOAT = ["+30 AMMO", "+4 GRENADES", ...]`), `src/main.gd:2419-2421` (the buy floattext
+  prints `BUY_FLOAT[kind]` verbatim), `src/main.gd:2828-2830` (SUPPLY CALL prints
+  `"SUPPLY CALL — " + BUY_FLOAT[kind]`). The `_supply_full` guard only denies at the hard cap
+  (99 / 12), so the whole partial window is live: ammo 70-98, gre… *(report text truncated at
+  source. Near-duplicate of the full-price-partial-delivery entry above from a second lens —
+  kept because it pins the receipt-lie half, the other pins the charge half.)*
+- **Deep-endless veteran armor silently kills the empty-clip bash — the game's only free
+  defense — exactly in the depth band that needs it.** Where: `src/sim/sim_world.gd:1335-1339`
+  (the bash routes through `e["hp"]` exactly like a bullet: hp>1 bodies eat the swing as an
+  `armor_block` chip) × `:5427-5436` (`_wave_armor` gives EVERY rusher/elite/special +1 hp from
+  wave 13, +1 more every 6 waves) × `:1298-1299` (the bash's own contract: "running dry is a
+  beat of danger, not pure helplessness"). MEASURED (controlled ring, tools probe stepping the
+  sim: 12 identical rushers closing on a dry player holding fire, god mode, only hp varied):
+  **hp=1 → 8 kills / 8 swings / 3 downs in 2400t; hp=2 → 8 kills / 16 swings / 5 downs; hp=3 →
+  8 kills / 24 swings / 8 downs.** Swings-per-kill scales 1:1 with hp — the melee's lethality
+  is 1/hp, i.e. a bullet's. *(`f6666b8` shipped the invisibility half this run — banner/chip
+  for the armor term. The bash-consequence above is the open remainder.)*
+- **Colossus closed core: MG tracers phase through the final boss with zero contact feedback
+  for ~73% of the fight.** Where: `src/sim/sim_world.gd:2862-2867` — a player bullet only dies
+  on the colossus while `core_open > 0`; the conjunct failing leaves `dead=false`, so the round
+  flies on THROUGH the boss body and dies at range. Core timing (`:639-640`): 240t closed /
+  90t open per 330t cycle = closed **~73%** of the finale. MEASURED (colossus stood up
+  directly, player parked south firing north, god mode): closed core — **72 rounds fired, 0
+  boss_hit, 0 armor_block, 59 rounds observed PAST the boss's position, hp unmoved**; open
+  core — 27 fired, 18 boss_hit, hp 60 → 6 (the chip path itself works). The run-long grammar
+  for armor is a VISIBLE ricochet — bunkers ping `armor_block`, shields ping it, wave-13
+  veterans ping it … *(report text truncated at source)*
 - **Endless miniboss is drawn and shootable for a 7s fly-in while bullets pass through it
   unanswered.** Where: sim guard at `src/sim/sim_world.gd:6446` (`endless_boss["phase_t"] >= 0`
   required for a bullet to register) + the visible presence kit at `src/main.gd:9176-9196` (the
@@ -99,7 +327,33 @@ run · older carried entries marked per-section.
   simply isn't dead). The sim comment says "unhittable and silent until arrival"; the view
   comment says the haze is meant to read "high-alt / not here yet". A visible target that eats
   a mag with zero feedback is the classic "my hits aren't regis…" *(report text truncated at
-  source)*
+  source. `a512bee` shipped the grenade half this run — "fly-in is bullet-proof but
+  grenade-soft". The bullet pass-through above is the open remainder.)*
+
+### Carried from the 2026-07-29 snapshot — re-flagged 2026-07-31, still open
+
+- **Five teaching hints stamp hardcoded key letters (E/F/Q) into verbs the rebind system can
+  move — including the one that fires while you're bleeding out.** Where: `src/main.gd:2625`
+  (`FEED THE WAR CHEST TO REVIVE — [E]`), `:2206` (claymore plant, `[F]`), `:4904` (`HOLD [Q]
+  FOR THE SUPPLY WHEEL`), `:4909` (`HOLD [E] TO DEPLOY EARLY`), `:4914` (airstrike wheel,
+  `[Q]`). All five read `Art.pad_label(...) if Art.use_pad else "<hardcoded letter>"`. The
+  project ships a full keyboard-rebind system (`BIND_DEFAULTS` at main.gd:4020-4040, c1-18),
+  and two sibling hints in the SAME file already read the live bind for exactly this reason —
+  `:2303` uses `GameMenu.key_label(bind("grenade"))` and `:2888` uses
+  `OS.get_keycode_string(bind("revive"))`, with the comment "a stamped key would have lied
+  about it (and about every rebind) exactly like the old one did." *(Reasoned from code, not
+  measured — the rebind path was read, not driven. Teaching entry; filed here in 2026-07-29,
+  belongs in §3 — moved there this pass.)* → **see §3.**
+- ~~**Downed-pilot ransom is geometry-locked: he walks AWAY from every reachable position, and
+  the game's own camera anchor puts him out of reach.**~~ **RESOLVED 2026-07-31** — `66e57e5`.
+  (Was: eject floored at `camera_top+120`, walks north at `PILOT_SPEED` 1.4px/t, captured at
+  `camera_top-30`; rescue = touch within 14px after the 36t grace; 120 strategy/offset/seed
+  combinations measured; capture fuse after grace ~107 ticks.)
+- ~~**The grenade landing telegraph lies on held throws: marker + kill circle draw the 99px
+  full lob while a >=0.27s press airbursts at 51px — a 48px lie, bigger than the blast ring,
+  taught nowhere.**~~ **RESOLVED 2026-07-31** — `1ea8d25` ("telegraph now tracks the real
+  release trajectory"). (Was: tapped lob 99px every time; held pops airburst at 51px and throws
+  exactly once in 400 ticks while 6 taps landed; apex trips at ~16 ticks (0.27s).)
 
 ### Carried from the 2026-07-26 snapshot — not re-verified this run
 
@@ -112,7 +366,8 @@ run · older carried entries marked per-section.
 - **A frogman that beaches on dry land can never re-submerge**, and is stuck in that state.
 - ~~**Unspent War Chest scores zero in Endless.**~~ **RESOLVED** — `d6c2aa9` ("Unspent War
   Chest worth zero score in Endless mode"). *(The 2026-07-29 lens still flags a related
-  teaching gap — the HOWTO hides the 10x victory conversion; see §3.)*
+  teaching gap — the HOWTO hides the 10x victory conversion; that half shipped 2026-07-31 as
+  `7e3d174`.)*
 - **The Riot Shield's advertised counterplay is impossible.** It says FLANK OR GRENADE;
   flanking is geometrically impossible solo because the shield re-aims at you on every hit
   test. **5,040 trials, 774 rounds reached the body, 774 blocked, zero kills.** 2P or the REND
@@ -127,9 +382,8 @@ run · older carried entries marked per-section.
   range sits above the top grade. *(Note: `254b2a9` made the graded kill streak the simulated
   one — a different defect. The constant-grade curve above was not touched by it.)*
 - ~~**Death silently deletes your Commendation token and Claymores** with no event or cue~~
-  **RESOLVED this run** — shipped 2026-07-29 ("dying silently deletes an earned commendation
-  and every carried claymore; the loss beat fires for the other three things it takes"); the
-  loss beat now covers them. *(sha not located in this pass — find it and inline it.)*
+  **RESOLVED 2026-07-29** — the loss beat now covers them. *(sha still not located — find it
+  and inline it.)*
 - **Crate-chasing rusher can move TWICE in one tick** — introduced by the wedge slide fix.
 - **Two movement rules revert your step with no persistent visual at all**; the one-way ledge
   has literally zero lines of view code. *(Suspicion only partly held — frequency of player
@@ -137,40 +391,57 @@ run · older carried entries marked per-section.
 - **The airstrike is the one supply the shared no-op guard forgot.** Buy it twice inside its
   own telegraph and you pay 200 coins for one strike — and the second purchase pushes the first
   later. *(Note: `254b2a9` measured the airstrike's net score by screen density — break-even
-  ~10-11 bodies — and left the double-buy untouched.)*
+  ~10-11 bodies — and left the double-buy untouched. `8425bd7` (2026-07-31) gated the
+  intermission whiff window; the double-buy-during-telegraph above is a different window —
+  re-verify against HEAD.)*
 - **CHAPTER SELECT / ARCADE plays a de-fanged campaign**: three movement hazards, the whole
   rear-pressure system, and every price increase are silently switched off.
 - **A quarter of all enemy gunfire in the campaign is fired by a shooter drawn off the top of
-  the screen**, and one telegraph in six is drawn where the player cannot see it.
+  the screen**, and one telegraph in six is drawn where the player cannot see it. *(Related:
+  the 2026-07-31 camera-pin nests finding above adds measured peaks of 4-6 rooted turrets piled
+  above the pinned edge during gate fights.)*
 - **The Recon Drone is the only lethal archetype with no telegraph.**
-- **The Colossus finale is the one stage no pacing table has ever covered.**
+- **The Colossus finale is the one stage no pacing table has ever covered.** *(2026-07-31:
+  `probe_colossus.gd` now runs clean — seed 0xC0FFEE engage_t=288 fight_ticks=683 downs=3
+  victory=true — so the finale is at least observable headlessly now.)*
 
 ---
 
 ## 3. Teaching / content honesty — the game says one thing, the sim does another
 
-### New this run (2026-07-29), measured
+### New this run (2026-07-31)
 
-- **WAR CHEST howto teaches spend-6x vs salvage-3x — and hides the 10x victory conversion the
-  whole economy is built around.** Where: `src/view/menu.gd` — `_howto_page_warchest()`:
-  `"Spend it — %d× score. What's left when you fall salvages at only %d×." %
-  [SPEND_SCORE_MULT, WIPE_SCORE_MULT]` (6x / 3x), followed by "That's the choice." Rule:
-  `src/sim/sim_world.gd:6147-6151` — a WIN converts the unspent chest at **10x plus 5000**
-  (`score += war_chest * 10 + 5000`). Verified live: headless probe — 137-coin chest at
-  Colossus death produced `banked=137 banked_score=1370`. The sim's own constants explain the
-  design — `SPEND_SCORE_MULT` is "a discount against the 10x the victory payout gives an
-  UNSPENT chest" (sim:421-424) and the 40% haircut exists precisely to make spend-vs-hoard a
-  real trade. The teaching page pre… *(report text truncated at source)*
-- **A duplicate TRIPLE SHOT capsule prints "CLAYMORES FULL" — the honest-receipt fix hardcoded
-  the wrong item's name.** Where: `src/main.gd:2185-2192` — `if ev.get("kind", 0) >= 4 and
-  ev.get("full", false): ... "text": "CLAYMORES FULL"`, one hardcoded string for every
-  full-capsule pickup. Sim side: `src/sim/sim_world.gd:2232-2247` — `_supply_full` returns true
-  for kind 6 (triple, already owned) and kind 8 (claymores at cap); `_collect_pickups`
-  (:1794-1821) consumes a FREE duplicate capsule with `full: true` on the event (priced ones
-  are left standing, so only free elite drops reach this). Verified live: headless probe —
-  triple-owning player + kind-6 pickup produced `pickup event: kind=6 full=true cost=0`, i.e.
-  the exact event that draws CLAYMORES FULL over a Triple Shot capsule. Reachable in BOTH
-  modes: the elite… *(report text truncated at source)*
+- **HOW TO PLAY says "Bullets don't" crack "bosses" — measured real gunship kills get 20-87%
+  of their damage from bullets, the weapon the page just told you to stop using.** Where:
+  `src/view/menu.gd:5045` (`_howto_page_controls` verb line: "GRENADES crack armor — bunkers,
+  bosses, the Colossus. Bullets don't."); sim truth at `src/sim/sim_world.gd:6280-6299`
+  (`_bullet_hits_boss` — every MG round does 1 damage with a `boss_hit` event; the gunship has
+  40 HP base). MEASURED on REAL campaigns (demo bot, god mode, 3 seeds): the gate-3 gunship
+  died at 34.0s/40.8s/66.6s with bullets contributing **32/40, 8/40 and 35/40** of the kill
+  damage (**20-87%**) — and the bot doesn't even deliberately aim at bosses. A human holding
+  aim on the boss does **7.5 dmg/s** (1 dmg per 8-tick cadence), i.e. the MG is the gunship's
+  PRIMARY weapon; grenades (8 dmg each, 12 carried = 96 max) are th… *(report text truncated at
+  source)*
+- **Rolling in water prints "NEED COINS" — a duplicate match arm silently kills the honest
+  teaching branch.** Where: `src/main.gd:2256` (the single `match kind:` in `_consume_events`)
+  contains TWO `"deny":` cases — the live one at `src/main.gd:2384` and a second, unreachable
+  one at `src/main.gd:2771`. Sim side: `src/sim/sim_world.gd:1129` emits `{"t": "deny", "why":
+  "water", ...}` when a wading player presses roll, with the comment "Refuse it out loud … so
+  the player learns the RULE (no rolling in water), not just that it failed." Verified:
+  GDScript silently accepts duplicate match patterns and the FIRST arm wins (ran a
+  duplicate-pattern script: prints "FIRST branch wins", no error, no warning). So every deny
+  event routes through `:2384`, whose reason table `{"cap","tank","board","token","fu…`
+  *(report text truncated at source)*
+- **Airstrike hint gates on the 100c base price, not the depth-creeped price.**
+  `src/main.gd:4977` still gates the teaching hint on `sim.war_chest >=
+  SimWorld.SHOP_AIRSTRIKE_COST` (base 100c), but the wheel charges the depth-creeped price —
+  measured **150c at wave 6** in this cycle's own capture (c6-wheel-hold.png reads "AIRSTRIKE
+  150 HOLD"), **125c at wave 3** per the goal's numbers. From wave 3 up the hint can fire while
+  the strike is not actually affordable. Verified the line is unchanged by reading it after the
+  diff. *(Reasoned from code + capture, not driven.)*
+
+### Carried from the 2026-07-29 snapshot — re-flagged 2026-07-31, still open
+
 - **Five teaching hints stamp hardcoded key letters (E/F/Q) into verbs the rebind system can
   move — including the one that fires while you're bleeding out.** Where: `src/main.gd:2625`
   (`FEED THE WAR CHEST TO REVIVE — [E]`), `:2206` (claymore plant, `[F]`), `:4904` (`HOLD [Q]
@@ -225,23 +496,83 @@ run · older carried entries marked per-section.
   release ("SUPPLY CALL — +30 AMMO", `src/main.gd:2791`). The roll only filters at the hard
   cap, so a p… *(report text truncated at source)*
 
+### Resolved from this section
+
+- ~~**WAR CHEST howto teaches spend-6x vs salvage-3x — and hides the 10x victory conversion
+  the whole economy is built around.**~~ **RESOLVED 2026-07-31** — `7e3d174`. (Was: HOWTO
+  printed 6x/3x and "That's the choice."; a WIN converts the unspent chest at **10x plus
+  5000** — verified live: 137-coin chest at Colossus death produced `banked=137
+  banked_score=1370`.)
+- ~~**A duplicate TRIPLE SHOT capsule prints "CLAYMORES FULL" — the honest-receipt fix
+  hardcoded the wrong item's name.**~~ **RESOLVED 2026-07-31** — `c957313`. (Was:
+  `src/main.gd:2185-2192` one hardcoded string for every full-capsule pickup; verified live —
+  triple-owning player + kind-6 pickup produced `pickup event: kind=6 full=true cost=0`.)
+- ~~**TRIPLE SHOT hint says "PERMANENT" — the sim strips it on your very next death**~~
+  **RESOLVED 2026-07-29** — `96d8928`.
+
 ### Carried from the 2026-07-26 snapshot — not re-verified this run
 
 - **HOW TO PLAY mis-sells the Flak Vest** — says armor never stops a bullet; it stops one
   completely. That is a 60-coin purchase decision made on false information.
 - **HOW TO PLAY names grenades as the thing that cracks the Colossus.** A full grenade carry
-  delivers **40%** of its health, and the MG out-damages grenades **5.6×**.
+  delivers **40%** of its health, and the MG out-damages grenades **5.6×**. *(Compounded by
+  this run's "Bullets don't crack bosses" entry above — same page, same shape of lie.)*
 - **The taught threat model is wrong.** The campaign is **68% melee**, and the endless Mast
   pulse — taught nowhere — is **27% of every hit** on the waves it is armed.
 - **Raw token string shown on world pickup UI.**
-- ~~**TRIPLE SHOT hint says "PERMANENT" — the sim strips it on your very next death**~~
-  **RESOLVED 2026-07-29** — `96d8928`.
 
 ---
 
 ## 4. UI / visual polish
 
-### New this run (2026-07-29)
+### New this run (2026-07-31)
+
+- **Repetitive Grid-Based Ground Tile Seams.** Where: Sector 1 and river crossing stretches
+  (Screens 1, 4, 6, 20). The desert ground exhibits obvious repeating grid patterns, featuring
+  harsh rectangular transitions where land tiles meet water channels or road strips without
+  visual edge smoothing, foliage overhangs, or organic blending. Visible tile repetition and
+  abrupt straight-line terrain boundaries give the environment an unpolished tilemap-editor
+  look rather than an immersive battlefield feel. AAA version: rich autotiling transition sets,
+  layered foliage fringes, ground decals, and subtle noise variation to mask the grid.
+  *(Visual-lens entry — reasoned from screenshots, not measured.)*
+- **Floattext down-stack can overprint the commander bark row at the bottom rail**
+  (pre-existing, not from this diff). Visible in both HEAD (6-plate) and fixed (4-plate)
+  captures: the floattext stacking block bumps toasts DOWN from the anchor, and at the bottom
+  rail the lowest plate overprints the COMMANDER bark row. Verified by capture
+  (`/tmp/cic_shots/shot1_BEFORE.png` vs `shot1_AFTER.png`: HEAD stacks 6 plates into the bark,
+  the fix stacks 4 and the top edge of the lowest still touches the bark plate). The cap
+  strictly reduces the pile but the downward-bump rule has no rail guard against the bark zone.
+  Right answer is a bottom-rail reservation the way `_band_floor()` reserves the top; measured:
+  **4 plates × 11px** can still reach the bark row when the anchor is the player standing …
+  *(report text truncated at source)*
+- **Intrusive Knockdown Screen Smear Obscuring Gameplay.** Where: knockdown and revive
+  sequence transitions (Screenshots 5, 13, 14). When the player is knocked down, a violent
+  horizontal motion-blur glitch filter and heavy crimson tint flood 100% of the viewable
+  screen; enemy positions, incoming bullets, and terrain obstacles blur into near-complete
+  illegibility. Sacrificing gameplay clarity during critical rescue/revival moments for heavy
+  post-processing undermines player feedback and co-op tactical awareness. AAA version:
+  localized feedback — peripheral vignette darkening, subtle screen shake, distinct audio
+  ducking — while … *(report text truncated at source. Visual-lens entry.)*
+- **Unmasked Overlay UI Clipping.** Where: end-of-run Victory report screen (Image 23).
+  Targeting reticle icons and UI crosshairs on the bottom-left render directly over and under
+  the border of the modal Victory card popup, clipping through the frame instead of being
+  hidden or properly layered behind a full-screen menu mask. Modal report cards should cleanly
+  freeze and isolate world-space UI; active targeting cursors bleeding through modal menu cards
+  reads as an unpolished camera/UI rendering pass. AAA version: isolate modal report screens
+  onto a clean UI render pass that suppresses, hides, or darkens all active world-spa… *(report
+  text truncated at source. Visual-lens entry.)*
+- **Vertical-only label dodge + deck gunner has no player exclusion.** `claim_label_slot`
+  dodges vertically only (x is clamped, never moved), and the player-label reservation added
+  this cycle skips any player with `in_tank >= 0` — but a non-driver tank occupant (deck
+  gunner) is drawn standing on the field at `_to_screen + (0,-7)` (`main.gd:9866-9868`) and
+  gets no exclusion rect, so labels can still ink over the deck gunner. Both limitations are
+  named in the plan as banked; verified the gunner draw path is unchanged.
+- **Four entity-anchored world marks bypass the label arbiter.** The "!" mark (`:7850`), ford
+  label (`:8048`), gate numeral (`:8169`), and "?" (`:8882`) remain drawn outside the
+  `claim_label_slot` arbiter. Small entity-anchored marks, none part of this cycle's tell;
+  banked by the plan and still unarbitrated in the diff.
+
+### Carried from the 2026-07-29 snapshot — still open
 
 - **Unmasked Radial Shop Menu Overlay.** Screenshot 12 (Wave Cleared shop screen): the circular
   shop icon wheel drops directly onto the active map terrain without a background dark scrim,
@@ -257,16 +588,15 @@ run · older carried entries marked per-section.
   elements reveals a flat single-pass camera setup rather than rendering UI on a dedicated
   overlay camera buffer. Best-in-class titles restrict high-impact combat VFX to the game-world
   layer while keeping HUD bars, scores, and text crisp on an un-distorted top pass. *(A related
-  fix shipped this run — "full screen low pass distortion blurring the hud" is on the shipped
-  list, sha not located (`5cfea32` covered menus only). As above: the open item is the
-  remainder.)*
+  fix shipped — "full screen low pass distortion blurring the hud" is on the shipped list, sha
+  not located (`5cfea32` covered menus only). As above: the open item is the remainder.)*
 - **Unaligned Leaderboard Column Formatting.** Hall of Fame table screen (Screenshot 16): the
   leaderboard table header ('# RANK SCORE MODE REACHED STREAK') features uneven horizontal
   spacing where column titles crowd together irregularly, above plain, unadorned sub-panel
   framing. AAA arcade menus use pixel-precise grid alignments, crisp column dividers, distinct
-  visual hierarchy between headers and entries, and glowing selector states. *(`2bedaf1` — the
-  current HEAD — shipped a fix titled exactly this; the lens still flags a remainder. Verify
-  against HEAD before acting.)*
+  visual hierarchy between headers and entries, and glowing selector states. *(`2bedaf1`
+  shipped a fix titled exactly this; the lens still flags a remainder. Verify against HEAD
+  before acting.)*
 - **Raw Blocky Text World Signage.** Images 3, 15, and 17 (Bounty and Cache screen markers):
   huge, flat cyan and yellow pixel-font text strings reading 'BOUNTY >' and '< CACHE' sit drawn
   flat across the lower playfield directly over rocks, sandbags, and active combat sprites
@@ -274,53 +604,73 @@ run · older carried entries marked per-section.
   environmental art looks like developer debug flags rather than polished UI navigational
   signposting. AAA version: anchor directional markers to screen edges or render them as
   diegetic, styled UI badges with subtle floating animations and drop shadows. *(A fix titled
-  "raw blocky text world signage" shipped this run — sha not located. The open item is the
-  remainder.)*
+  "raw blocky text world signage" shipped — sha not located. The open item is the remainder.)*
 - **Static Scanline Overlay Obscuring Menu Typography.** Options menu and Control Rebind
   sub-menus (Images 18, 19): a heavy, dark horizontal scanline filter is drawn over the entire
   menu container, cutting directly across fine pixel letters and rendering small button
   callouts and option labels dim and grainy. AAA version: top-tier retro-styled titles place UI
   text overlays on an unfiltered canvas or fine-tune scanline strength so interface typography
-  remains sharp, bright, and effortlessly readable.
-- **Floattext spawn punch can poke ~4.5px above `band_floor` for ~2 frames** (pre-existing, not
-  from this diff). `src/main.gd` floattext: `fpivot.y` is clamped to `band_floor + fsz` (10294)
-  but the 1.5x spawn punch scales the ascent about the pivot, so the text top reaches
-  `fpivot.y - 1.5*ascent ≈ band_floor - 4.5px` for fsz=9 during the first ~2 frames — up to
-  4.5px of a punched toast intrudes into the bottom edge of the top message band when pinned at
-  the floor. The new arbiter claim preserves exactly this pre-existing bound via
-  `min_y = band_floor + fsz - 16.5` (10322). Self-correcting and minor: the band draws AFTER
-  `_draw_fx` in the screen-anchored pass (`_draw_banners` at 6608 vs `_draw_fx` at 6593), so
-  the band plate over-paints the intrusion; it lasts ~2 frames at 60fps. Verified pre-existing
-  by reading HEAD's… *(report text truncated at source)*
+  remains sharp, bright, and effortlessly readable. *(Re-flagged 2026-07-31, unchanged.)*
 
-### Carried from the 2026-07-26 snapshot — not re-verified this run
+### Resolved from this section
 
-- Inconsistent pixel typography and menu padding (How To Play, Options).
-- Generic box-border menu framing — reads as prototype chrome.
-- WARN and LABEL wheel plates overlap by 2px, leaving a double-blended dark band.
-- HALL recency band collides with the filter tab row *(introduced by the cycle-1 diff)*.
-- MODES tab row pitch is too tight for the new 2-line tips.
-- HOWTO "N / 5" tab counter crowds the ENDLESS tab label.
-- Wheel text is the only view text that ignores the accessibility text scale (pre-existing).
+- ~~**Floattext spawn punch can poke ~4.5px above `band_floor` for ~2 frames**~~ **RESOLVED
+  2026-07-31** — `1ea6508`. (Was: `fpivot.y` clamped to `band_floor + fsz` but the 1.5x spawn
+  punch scales the ascent about the pivot, reaching `band_floor - 4.5px` for fsz=9 during the
+  first ~2 frames; self-correcting because the band draws after `_draw_fx`. The down-stack bark
+  overprint above is the remaining floattext-rail gap.)
 - ~~**Screen-cluttering world-space text overlays**~~ **RESOLVED** — `f255cab` part 2
   (`claim_label_slot()` body written to spec AND wired: `_draw()` clears the claim list each
   frame, `_world_label` routes every world-space string through the arbiter, plate and ink move
   together; ratchet: **15,320 colliding pairs and 361 off-frame escapes → 0 and 0**).
 
+### Carried from the 2026-07-26 snapshot — not re-verified this run
+
+- Inconsistent pixel typography and menu padding (How To Play, Options).
+- Generic box-border menu framing — reads as prototype chrome. *(`6ecbf0d` "programmer-style UI
+  modals and plain menu framing" is on this run's shipped list — likely this entry; verify
+  before striking.)*
+- WARN and LABEL wheel plates overlap by 2px, leaving a double-blended dark band.
+- HALL recency band collides with the filter tab row *(introduced by the cycle-1 diff)*.
+- MODES tab row pitch is too tight for the new 2-line tips.
+- HOWTO "N / 5" tab counter crowds the ENDLESS tab label.
+- Wheel text is the only view text that ignores the accessibility text scale (pre-existing).
+
 ---
 
 ## 5. Test & tooling debt
 
-- **NEW 2026-07-29 — Engine shutdown leak ERRORs on every suite run** (pre-existing, identical
-  on HEAD). Every suite run prints `ERROR: 3 resources still in use at exit` plus `WARNING:
-  4383 ObjectDB instances leaked at exit`, after the PASS line. Verified pre-existing: stashed
-  the entire diff (tracked + untracked), re-ran the suite on HEAD, and got the identical leak
-  counts (4383 ObjectDB, 3 resources). Not from the new CanvasLayer. These fall outside the
-  engine-error gate's window (the gate reads the log mid-run; these print at shutdown), so they
-  never fail anything — but they are ERROR lines every run trains people to ignore, which is
-  exactly how a real one gets missed.
-- **NEW 2026-07-29 — `tools/probe_concussion_hud.gd` is gated nowhere** — see Owner decision
-  #1; the tooling half is that the probe exists and nothing runs it.
+- **Engine shutdown leak ERRORs on every suite run** (pre-existing, identical on HEAD;
+  re-flagged 2026-07-31). Every suite run prints `ERROR: 3 resources still in use at exit`
+  plus `WARNING: 4383 ObjectDB instances leaked at exit`, after the PASS line. Verified
+  pre-existing: stashed the entire diff (tracked + untracked), re-ran the suite on HEAD, and
+  got the identical leak counts (4383 ObjectDB, 3 resources). Not from the new CanvasLayer.
+  These fall outside the engine-error gate's window (the gate reads the log up to its own
+  marker; these print at shutdown), so they never fail anything — but they are ERROR lines
+  every run trains people to ignore, which is exactly how a real one gets missed.
+- **NEW 2026-07-31 — `tools/screenshots.gd` victory pose fakes the WAR CHEST row.**
+  `_shot_victoly`/`_dress_victoly` never sets `_victory_banked`/`_victory_banked_score`, so the
+  harness's `06-victoly.png` renders "0¢ WAR CHEST BANKED → +0" — the narrowest possible
+  version of the card's widest row. Confirmed in this cycle's own capture
+  (`/tmp/cic-cycle5/06-victoly.png`). This is the exact "harness lying about the game" pattern
+  `_dress_victoly`'s own comment guards against for kills/streak, and it means the signature
+  victory shot can never exercise the row the trophy used to cover. The plan listed this as
+  optional hardening ("take it or leave it") and the implementer left it. Pre-existing,
+  verified by capture. Two lines in `_dress_victoly` would fix it.
+- **NEW 2026-07-31 — Toast-string scrape's `_coin_pop` branch is dead code — coin toasts
+  (BOUNTY/RANSOM/+¢) never captured.** `tests/test_main.gd::_shipped_floattext_strings`: for
+  lines containing `_coin_pop(`, `line.find("\"", at)` lands on the quote in `ev["x"]` (the
+  first argument), producing `fmt="x"`, which the `fmt.length() < 2` filter then drops — so
+  the line is consumed without ever reaching the actual text literal. Verified by simulating
+  the scrape in Python against `src/main.gd`: **21 strings captured, all from the "rate"
+  branch; BOUNTY +%d¢, RANSOM +%d¢, +%d¢ absent.** The helper's docstring ("the _coin_pop text
+  arg") overclaims. Not blocking: coverage is still wide (21 shipped strings incl. wider ones
+  than BOUNTY's 94.5px — "PILOT DOWN — REACH HIM" is 247.5px at scale 1.0) and the size>=4
+  guard plus the drops>0 a… *(report text truncated at source)*
+- **`tools/probe_concussion_hud.gd` is gated nowhere** — see Owner decision #1; the tooling
+  half is that the probe exists and nothing runs it. *(Also: `tools/probe_salvage.gd` and
+  `tools/probe_colossus.gd` are untracked orphans in the tree — they produced this run's
+  measurements, so either commit them or delete them; don't leave them to rot.)*
 - **`tools/probe_frame_bounds.gd` reports 44 false `[OVER]` lines** — every one the footer
   legend strip, which the real test correctly excludes and the probe does not. **Its output
   contradicts a green test**, so it will mislead whoever runs it next. Fix or delete.
@@ -347,7 +697,8 @@ run · older carried entries marked per-section.
 - **Backlog grows faster than it drains.** One cycle drains ~1 item while the reviewers bank
   several; this is a triage queue, not a work queue, and it will not converge on its own. A
   dedicated drain mode (skip the visual reviewer, spend every slot on banked findings) is the
-  obvious answer and is not built.
+  obvious answer and is not built. *(2026-07-31 was a drain-flavoured run: 10 shipped, 31 new
+  banked — the ratio moved the wrong way anyway.)*
 
 ---
 
@@ -390,10 +741,46 @@ the reasoning and nobody mistakes them for oversights.
 - **A 20-cycle run now costs ~40-50 hours** at all-Opus/high (measured: cycle 1 = 2h29m, cycle
   2 > 2h25m and still going). The skill's own 12-20h estimate predates the model change.
   **Blocked on: deciding whether that is the right trade.**
+- **Miniboss fly-in airstrike window is a partial whiff — banked by the plan.** The
+  intermission half is provably empty and shipped in `8425bd7`; the fly-in half is not provably
+  empty (the trickle keeps spawning) and `_fire_mission` spares bosses, so a strike bought
+  during the fly-in still kills only trickle infantry. **Blocked on: a design call on whether
+  fly-in strikes should hit the boss.** (Mirrored in §2 because the lens keeps re-flagging it.)
 
 ---
 
-## 8. Shipped this run (2026-07-29) — resolved, kept for the record
+## 8. Shipped — resolved, kept for the record
+
+### Shipped in the 2026-07-31 window (`2bedaf1..390c12d`)
+
+| Finding | Commit |
+|---|---|
+| Downed-pilot ransom is geometry-locked | `66e57e5` |
+| Endless miniboss's 7s fly-in — grenade-soft half | `a512bee` — bullet pass-through remainder open (§2) |
+| Grenade landing telegraph lies on held throws | `1ea8d25` — telegraph now tracks the real release trajectory |
+| Endless's unbounded difficulty term invisible from wave 13 | `f6666b8` — banner/chip shipped; empty-clip-bash consequence open (§2) |
+| Floattext spawn punch pokes ~4.5px above band_floor | `1ea6508` — down-stack bark overprint remainder open (§4) |
+| Endless shop sells a 100¢ airstrike in the window it cannot hit + token-roll whiff | `8425bd7` — fly-in whiff (§2/§7) and hint-gate (§3) remainders open; pre-call trade is owner decision #10 |
+| WAR CHEST howto hides the 10x victory conversion | `7e3d174` |
+| DAILY RUN one-attempt refunded by R / RESTART / QUIT TO TITLE | `d45132a` — scouting remainders still flagged (§2); banked-quit and same-board calls are owner decisions #13/#14 |
+| Duplicate TRIPLE SHOT capsule prints "CLAYMORES FULL" | `c957313` |
+| Endless milestone shop window is a kill zone | `390c12d` — Spotter-shelling remainder open (§2) |
+
+Also on this run's shipped list — titled fixes whose commits predate the 2026-07-29 snapshot
+(the run's diff window was wider than the last backlog's):
+
+| Finding | Commit |
+|---|---|
+| Copy-pasted barricade tiling | `5bbfff1` ("vary barricade tile stacking to kill repetitive sandbag look") |
+| Generic modal frames for menus and victory cards | `6ecbf0d` ("programmer-style UI modals and plain menu framing") |
+| UI text banner stacking / UI label stacking / overlapping HUD text popups | `f255cab` + `b439779` (label arbiter + band arbiter) |
+| Menu UI bounds truncation and clipping | `82373e7` (likely — "the price, the recovery word and the recency band all stayed in the box") |
+| Unlit and floating heavy equipment sprites | `f29d7ca` (likely — gunship ground shadow + technical deny pip) |
+| Muddy low-contrast unit silhouette readability | this run's `m_soldier2` rim fix — sha not located this pass (see owner decision #11 for the ghillie/sapper deferral) |
+| Flat unintegrated world UI banners | sha not located this pass (`b18c889` "back the in-world callouts" is adjacent) |
+| Overbearing in-world objective UI labels | sha not located this pass |
+
+### Shipped 2026-07-29 (previous snapshot)
 
 | Finding | Commit |
 |---|---|
@@ -410,7 +797,7 @@ the reasoning and nobody mistakes them for oversights.
 | 40-coin sandbag plants on your firing axis and eats 100 of your own outgoing rounds | `170c8d9` |
 | Buying the same item off the ground pays 67% more score than the wheel | `254b2a9` (crate `cost*10` vs wheel `cost*6` → both now `SPEND_SCORE_MULT`; measured: 30-coin ammo crate +300 / wheel +180 → both +180) |
 | Endless unspent War Chest worth exactly zero score | `d6c2aa9` |
-| Dying silently deletes an earned Commendation and every carried claymore | sha not located this pass |
+| Dying silently deletes an earned Commendation and every carried claymore | sha not located — still not located 2026-07-31 |
 | Screen-cluttering world-space text overlays | `f255cab` |
 | Severe UI layering clutter during boss battles | `f255cab` *(likely — verify on next pass)* |
 | Full-screen low-pass distortion blurring the HUD | sha not located this pass — lens still flags a remainder (§4) |
@@ -433,16 +820,28 @@ claymore self-kill (`2fe8b00`).
 - **The loop writes this file itself** at the end of each run and MERGES rather than
   overwrites. Hand-edits are safe, but expect it to reorganise entries into the same section
   headings.
-- **The backlog grows faster than it drains** (~4 banked vs ~1 fixed per cycle). That is what
-  an honest audit of a real codebase looks like — but it means this file is a **triage queue,
-  not a work queue**, and it will not converge on its own.
+- **The backlog grows faster than it drains** (~4 banked vs ~1 fixed per cycle; the 2026-07-31
+  drain-flavoured run shipped 10 and banked 31). That is what an honest audit of a real
+  codebase looks like — but it means this file is a **triage queue, not a work queue**, and it
+  will not converge on its own.
 - **Where an entry has no measured number, it says so.** Treat those as suspicions, not
   findings — this project has repeatedly had a real smell reported with the consequence wrong
   by a whole severity class.
-- **Three report bodies arrived truncated at source** (marked "report text truncated at
+- **Several report bodies arrived truncated at source** (marked "report text truncated at
   source"). The surviving measurements are verbatim; the missing tails were reasoning, not
   numbers.
-- The 2026-07-26 snapshot this file replaces was already marked STALE against
+- **Held, checked, no finding (2026-07-31):** a full pass over the remaining roster —
+  `src/sim/sim_world.gd` steppers (elite/sniper/ghillie/drone/technical/mg_nest/grenadier/
+  observer/colossus/gunship) plus the view telegraph paths (`src/main.gd:8708` telegraph_dir,
+  `:11920-11981` off-screen threat pips and strike wedges) — found **no concealed-difficulty or
+  telegraph lies**: every lethal windup is >= the 24t reaction floor, aim-locked shooters fire
+  down the drawn vector (the elite's re-aim cheat is already fixed at
+  `src/sim/sim_world.gd:3474-3479`), the mg_nest's drawn lane is computed through the sim's own
+  lead function so the painted lane is the lane the round takes, `predict_grenade_landing`
+  (`:2898-2928`) replays `_step_grenades`' exact integrator including the marsh drift and
+  fuse-hand airburst, and off-… *(report text truncated at source)*. Recorded so the next lens
+  doesn't re-audit the same roster cold.
+- The 2026-07-26 snapshot this file's ancestor replaced was already marked STALE against
   [`FINDINGS.md`](FINDINGS.md) (62 of 115 entries already fixed at re-triage on 2026-07-28).
   Carried entries above are marked "not re-verified this run" for the same reason: trust the
   measurement, re-verify the predicate before fixing.
