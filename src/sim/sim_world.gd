@@ -2881,10 +2881,14 @@ func grenade_drift(x: int, y: int, shell: bool) -> int:
 func predict_grenade_landing(g: Dictionary) -> Array:
 	## Where this airborne grenade ACTUALLY detonates, in FIXED world coords.
 	## Runs the exact integrator _step_grenades runs — position, then gravity,
-	## then grenade_drift — so the view's landing marker cannot lie about the
-	## parabola or the marsh current. Pure read: writes nothing, draws no rng,
-	## touches no hashed state. Airburst is deliberately NOT modelled: the
-	## marker answers "where does it land if I let it fly".
+	## then the fuse-hand airburst check, then grenade_drift (the sim's own
+	## order: it checks airburst BEFORE drift and continues past it) — so the
+	## view's landing marker cannot lie about the parabola, the apex pop, or
+	## the marsh current. Pure read: writes nothing, draws no rng, touches no
+	## hashed state. The contract is "where it detonates if nothing changes":
+	## tap flies the full lob, hold pops at the arc, and a mid-flight release
+	## (hold flipped false that tick) re-predicts the full lob next frame —
+	## truthful per-tick. Shells never airburst (no fuse hand).
 	## ponytail: _in_water is sampled at the CURRENT tick_count, so a
 	## collapsing-ford phase flip mid-flight (FORD_CYCLE_TICKS >> 33) can be
 	## off by a px or two. Thread a tick offset only if that ever shows.
@@ -2899,6 +2903,8 @@ func predict_grenade_landing(g: Dictionary) -> Array:
 		y += g["vy"]
 		z += zv
 		zv -= GRENADE_GRAV
+		if not g["shell"] and g.get("hold", false) and zv < 0 and zv + GRENADE_GRAV >= 0:
+			break   # fuse-hand airburst: pops at the apex, before that tick's drift
 		x += grenade_drift(x, y, g["shell"])
 		if z <= 0 and zv < 0:
 			break

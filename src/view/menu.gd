@@ -512,6 +512,27 @@ const CAREER_COL := Color(0.6, 0.72, 0.62, 0.7)      # TITLE career/record footn
 # Large content-frame chrome tints (multiplied by _open_t at draw).
 const FRAME_UNDER_TINT := Color(1, 1, 1, 0.9)        # ui_frame_lrg_under backing
 const FRAME_TINT := Color(0.85, 0.9, 0.75)           # ui_frame_lrg overlay
+# Per-mode chrome IDENTITY: one grey frame for 12 screens read as ONE screen.
+# The shared 9-slice GEOMETRY stays (that uniformity is the shipped bezel fix —
+# test_every_framed_screen_wears_a_bezel_not_a_stretched_box still measures it);
+# what differs is the tint multiplied into both frame layers + the ambience, and
+# a codename tab stamped on the frame's top edge. Uniformity of construction,
+# distinctness of identity. A Mode added without a row here fails
+# test_every_framed_screen_has_its_own_chrome_signature the day it lands.
+const MODE_CHROME := {
+	Mode.PAUSE:    {"tint": Color(0.95, 0.85, 0.60), "tag": "FIELD HOLD"},
+	Mode.HALL:     {"tint": Color(1.00, 0.90, 0.55), "tag": "SERVICE RECORD"},
+	Mode.HOWTO:    {"tint": Color(0.75, 0.95, 0.70), "tag": "FIELD MANUAL"},
+	Mode.OPTS:     {"tint": Color(0.70, 0.90, 1.00), "tag": "RIG OPTICS"},
+	Mode.SETUP:    {"tint": Color(1.00, 0.80, 0.55), "tag": "OPERATION BRIEF"},
+	Mode.INFO:     {"tint": Color(0.85, 0.95, 0.75), "tag": "INTEL DOSSIER"},
+	Mode.REBIND:   {"tint": Color(0.95, 0.80, 0.70), "tag": "ORDNANCE RIG"},
+	Mode.DISP:     {"tint": Color(0.70, 0.85, 1.00), "tag": "DISPLAY OPTICS"},
+	Mode.MODES:    {"tint": Color(1.00, 0.75, 0.60), "tag": "THEATER SELECT"},
+	Mode.CHAPTERS: {"tint": Color(0.90, 0.85, 0.65), "tag": "CAMPAIGN MAP"},
+	Mode.AUDIO:    {"tint": Color(0.80, 0.85, 1.00), "tag": "SIGNALS"},
+	Mode.PERKS:    {"tint": Color(1.00, 0.85, 0.50), "tag": "CITATIONS"},
+}
 const HEADER_COL := Color(0.95, 0.95, 0.85)          # lone screen-header title (INFO/DISP/SETUP/PAUSED/CONTROLS/OPTIONS)
 const TAGLINE_COL := Color(0.85, 0.9, 0.8, 0.85)     # TITLE tagline line
 const BEST_LINE_COL := Color(1.0, 0.92, 0.55, 1.0)   # TITLE best-run line
@@ -3592,10 +3613,26 @@ func _draw_content_frame() -> void:
 		# straight from a headless test, which errors on a bare draw_rect outside a
 		# live NOTIFICATION_DRAW pass.
 		_emit_rect(_content_well_rect(), Color(WELL_BASE, 0.92 * _open_t))
-	_draw_menu_ambience(content_frame_border(mode))
+	var border := content_frame_border(mode)
+	# Per-mode chrome identity (MODE_CHROME): same 9-slice geometry on every
+	# screen, but the tint and the codename tab say WHICH screen. A mode with
+	# no row falls back to the shared grey (the layout test fails first).
+	var chrome: Dictionary = MODE_CHROME.get(mode, {})
+	var tint: Color = chrome.get("tint", Color(1, 1, 1))
+	_draw_menu_ambience(border, tint)
 	_draw_frame_nine("ui_frame_lrg_under", content_frame_under_rect(mode),
-		Color(FRAME_UNDER_TINT, FRAME_UNDER_TINT.a * _open_t))
-	_draw_frame_nine("ui_frame_lrg", content_frame_rect(mode), Color(FRAME_TINT, _open_t))
+		Color(FRAME_UNDER_TINT * tint, FRAME_UNDER_TINT.a * _open_t))
+	_draw_frame_nine("ui_frame_lrg", content_frame_rect(mode), Color(FRAME_TINT * tint, _open_t))
+	# The mode tab: a small dark plate straddling the frame's top keyline,
+	# carrying the screen's codename stencil — the title-plate idiom menus
+	# already speak, so the screen names itself before a word of content reads.
+	var tag: String = chrome.get("tag", "")
+	if tag != "":
+		var tw := Art.tw(tag, 6)
+		var plate := Rect2(320.0 - tw / 2.0 - 5.0, border.position.y - 5.0, tw + 10.0, 13.0)
+		_emit_rect(plate, Color(0.05, 0.06, 0.05, 0.92 * _open_t))
+		_emit_stamp(tag, Vector2(320.0 - tw / 2.0, border.position.y + 4.0),
+			Color(tint, _open_t))
 
 
 func _draw_frame_nine(key: String, r: Rect2, c: Color) -> void:
@@ -3631,22 +3668,25 @@ const AMB_PITCH := 4.0
 const AMB_ALPHA := 0.06
 const AMB_TINT := Color(0.62, 0.92, 0.72)
 
-func _draw_menu_ambience(b: Rect2) -> void:
+func _draw_menu_ambience(b: Rect2, tint := Color(1, 1, 1)) -> void:
 	var inner := b.grow(-2.0)
 	if inner.size.x <= 0.0 or inner.size.y <= 0.0:
 		return
 	var a := AMB_ALPHA * _open_t
+	# Per-mode chrome: the scanlines/sweep take the screen's identity tint too
+	# (multiplied, so a WHITE default reproduces the shipped grey-green exactly).
+	var amb := Color(AMB_TINT.r * tint.r, AMB_TINT.g * tint.g, AMB_TINT.b * tint.b)
 	var y := inner.position.y
 	while y < inner.end.y - 1.0:
 		# ponytail: ~74 thin rects per repaint at menu framerate. One tiled ui/crt_scan
 		# texture if tools/perf_probe.gd ever complains — it has not.
-		_emit_rect(Rect2(inner.position.x, y, inner.size.x, 1.0), Color(AMB_TINT, a))
+		_emit_rect(Rect2(inner.position.x, y, inner.size.x, 1.0), Color(amb, a))
 		y += AMB_PITCH
 	if main != null and main._motion >= 0.5:
 		var sweep := fposmod(_amb_t * 0.16, 1.0)
 		var sh := 10.0
 		_emit_rect(Rect2(inner.position.x, inner.position.y + sweep * (inner.size.y - sh),
-			inner.size.x, sh), Color(AMB_TINT, a * 0.9))
+			inner.size.x, sh), Color(amb, a * 0.9))
 
 
 static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
@@ -5043,7 +5083,7 @@ func _howto_page_controls() -> void:
 	y += VERB_PITCH
 	# Board and plant share the SAME button, so the two lines are parallel imperatives
 	# (BOARD… / PLANT…) that read as complete commands, not fragments.
-	_verb_line(["@grenade", " GRENADES crack armor — bunkers, bosses, the Colossus. Bullets don't."], y, col)
+	_verb_line(["@grenade", " GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."], y, col)
 	y += VERB_PITCH
 	# "armor" here means the ENEMY's (the grenade row above). The player DOES have a
 	# one-hit absorber — p["vest"] — so this row must not deny it.

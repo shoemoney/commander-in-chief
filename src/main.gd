@@ -3194,6 +3194,11 @@ func _ev_explosion(ev: Dictionary) -> void:
 		_fx.append({"x": ev["x"], "y": ev["y"] - 9 * Fixed.ONE, "t": 0.0, "kind": "light",
 			"rate": 0.1, "r": 26.0, "col": Color(1.0, 0.9, 0.6)})
 		_sfx.play_at("ping_armor", _to_screen(ev["x"], ev["y"]), -10.0, 1.6)
+		# The first airburst is the exact moment of surprise ("why did it pop
+		# early?") — convert it into the lesson through the persisted one-shot
+		# hint seam: HOLD pops at the arc, TAP lobs the full throw.
+		_hint("airburst", TranslationServer.translate("HELD THROW — POPS AT THE ARC. TAP [%s] TO LOB IT FAR")
+			% (Art.pad_label("grenade") if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 	if not barrel:
 		var prox := _blast_prox(ev["x"], ev["y"])
 		_trauma = minf(1.0, _trauma + 0.35 * prox)
@@ -5777,10 +5782,10 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 			var spx: int = slen / Fixed.ONE
 			if spx >= 76 and spx <= 116:
 				# TAP: released next tick, so the fuse hand never pops it — the full
-				# 32-tick lob, GRENADE_SPEED 3 -> 96 px.
+				# 32-tick lob, GRENADE_SPEED 3 -> 99 px (measured).
 				inp.grenade = (tick % 20) == 0
 			elif spx >= 30 and spx <= 68:
-				# HOLD: the airburst verb pops it at the arc's apex, ~48 px.
+				# HOLD: the airburst verb pops it at the arc's apex, ~51 px (measured).
 				inp.grenade = true
 			else:
 				inp.move_x = clampi(sdx / (2 * Fixed.ONE), -256, 256)
@@ -11865,7 +11870,9 @@ func _draw_banners(top_msg: String) -> void:
 		for vr in _victory_extra_rows(sim.score, best_score, vrp):
 			vrows.append(vr)
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
-			Color(1, 1, 1, 0.96), true)   # a1-11: gold shine sweep
+			Color(1, 1, 1, 0.96), true,   # a1-11: gold shine sweep
+			{"band": "AFTER-ACTION REPORT", "band_col": Color(1.0, 0.85, 0.3),
+				"form": "FORM AAR-7 // EYES ONLY"})
 		# Trophy overlaps blank panel space only (no row text under it), so it's
 		# safe to draw after the shared panel/title/rows without reordering.
 		var tsz := 52.0 * (0.94 + 0.06 * vpulse)
@@ -11936,7 +11943,9 @@ func _draw_banners(top_msg: String) -> void:
 		# fronts the row via the panel's icon slot.
 		rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp),
 			"icon": Art.glyph_key("start"), "icon_size": 14.0})
-		_draw_result_panel("K.I.A.", Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96))
+		_draw_result_panel("K.I.A.", Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96),
+			false, {"band": "CASUALTY REPORT", "band_col": Color(0.95, 0.4, 0.35),
+				"form": "FORM KIA-1 // EYES ONLY"})
 	elif sim.last_stand:
 		# Shadowed + centered via the shared helper — was the one banner holdout
 		# still drawing raw, unshadowed, hardcoded-position text.
@@ -12026,20 +12035,31 @@ func _metal_plate(r: Rect2, a: float) -> void:
 
 
 ## Row pitch for a result card. 19px as authored, but a long tally has to FIT: the
-## endless K.I.A. card reaches 12 rows (rank · downed-by · progress · score · chest
+## endless K.I.A. card reaches 13 rows (rank · downed-by · progress · score · chest
 ## salvage · streak · prey · rescues · best · waves-short · VP · REDEPLOY) and at a
 ## fixed pitch the last row landed at y 387 with the plate ending at 420 — off the
 ## bottom of a 360px screen, taking the REDEPLOY prompt with it. Rows compress instead.
-static func result_row_pitch(n: int) -> float:
-	return minf(19.0, (SCREEN_H - 178.0 - 14.0) / float(maxi(n, 1)))
+## reserve: vertical space the caller spends on non-row furniture (the debrief
+## document's header band + form microline) — the compression must absorb it, or
+## the 13-row card's form line lands at y 373, off the same 360px bottom.
+const RESULT_DOC_RESERVE := 20.0
+static func result_row_pitch(n: int, reserve := 0.0) -> float:
+	return minf(19.0, (SCREEN_H - 178.0 - 14.0 - reserve) / float(maxi(n, 1)))
 
 
-func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false) -> void:
+func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false,
+		doc := {}) -> void:
+	## doc: optional DOCUMENT identity — {"band", "band_col"?, "form"} turns the
+	## bare stats plate into a debrief document: a colored header band across the
+	## plate's top (doc["band"]), one rule under it, and a form-number microline
+	## at the plate's bottom edge (doc["form"]). Victory files an AFTER-ACTION
+	## REPORT, K.I.A. a CASUALTY REPORT — the two cards can never read as one box.
 	var panel_top := 112.0
 	var title_y := 150.0
 	var row_start_y := 178.0
-	var row_h := result_row_pitch(rows.size())
-	var panel_h := (row_start_y - panel_top) + maxi(rows.size(), 1) * row_h + 14.0
+	var doc_h: float = RESULT_DOC_RESERVE if not doc.is_empty() else 0.0
+	var row_h := result_row_pitch(rows.size(), doc_h)
+	var panel_h := (row_start_y - panel_top) + maxi(rows.size(), 1) * row_h + 14.0 + doc_h
 	# Width adapts to the widest row (icon included) so a long DOWNED-BY line
 	# can't escape the plate; 300 stays the floor so short tallies keep their shape.
 	var max_w := Art.tw(title, 24)
@@ -12061,6 +12081,14 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 			* Transform2D(0.0, Vector2.ONE * rscale, 0.0,
 				Vector2(320.0, panel_top + panel_h / 2.0) * (1.0 - rscale)))
 	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
+	if not doc.is_empty():
+		var band_col: Color = doc.get("band_col", title_col)
+		draw_rect(Rect2(panel_x + 4.0, panel_top + 4.0, panel_w - 8.0, 15.0),
+			Color(band_col, 0.85 * accent.a))
+		Art.text_center(self, doc["band"], 320, panel_top + 15.0, 8,
+			Color(0.06, 0.06, 0.05, accent.a))
+		draw_rect(Rect2(panel_x + 4.0, panel_top + 21.0, panel_w - 8.0, 1.0),
+			Color(band_col, 0.4 * accent.a))
 	Art.text_center(self, title, 320, title_y, 24, title_col)
 	if shine:
 		# a1-11 VFX#10: a soft warm glint sweeps across the title on a slow loop (with
@@ -12090,6 +12118,11 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 				false, row.get("icon_col", Color.WHITE))
 			x += icon_size + gap
 		Art.text(self, row_text, Vector2(x, y), row_size, col)   # shadowed like every other HUD string
+	if not doc.is_empty():
+		# The form number files the card as a document, not a stats dump —
+		# microline seated at the plate's bottom edge, dimmer than the rows.
+		Art.text_center(self, doc["form"], 320, panel_top + panel_h - 7.0, 7,
+			Color(0.75, 0.78, 0.68, 0.55 * accent.a))
 	# Back to the plain shake-cancel matrix for whatever the caller draws next.
 	draw_set_transform_matrix(get_transform().affine_inverse())
 

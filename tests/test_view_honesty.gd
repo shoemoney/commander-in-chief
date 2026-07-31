@@ -2149,6 +2149,107 @@ func test_grenade_landing_marker_is_where_the_grenade_detonates() -> void:
 		% [absi(int(g["x"]) - x0) * PX, SimWorld.GRENADE_RADIUS * PX])
 
 
+func test_grenade_landing_marker_models_the_held_airburst() -> void:
+	## The predictor flew the full 32-tick lob (~99px) even while the fuse hand
+	## was still armed — but _step_grenades pops a HELD frag at the arc's apex
+	## (the zv sign-flip, tick 17, ~51px out). The ring you aimed with sat 48px
+	## past the circle that kills: a lie BIGGER than the 28px GRENADE_RADIUS
+	## kill ring. sim.grenades has exactly three shapes (held frag / tap frag /
+	## tank shell) and one consumer seam, so pin all three through it.
+	var y0: int = -2500 * Fixed.ONE
+	# 1. HELD FRAG: airbursts at the apex, ~51px out — NOT the 99px full lob.
+	var sim := SimWorld.new(31, 1)
+	sim.players[0]["grenade_prev"] = true   # the fuse hand stays armed (no release disarm)
+	var held := {"x": 300 * Fixed.ONE, "y": y0, "vx": 0, "vy": -SimWorld.GRENADE_SPEED,
+		"z": 0, "zv": SimWorld.GRENADE_ZVEL, "owner": 0, "shell": false, "hold": true}
+	sim.grenades.append(held)
+	var hpred: Array = sim.predict_grenade_landing(held)
+	for t in 128:
+		sim._step_grenades()
+		if sim.grenades.is_empty():
+			break
+	var held_dist: int = absi(int(held["y"]) - y0)
+	Runner.T.ok(held_dist < 70 * Fixed.ONE,
+		"this throw really did airburst inside the arc (detonated %.0fpx out, not the 99px lob)"
+		% (held_dist * PX))
+	Runner.T.eq(int(hpred[0]), int(held["x"]),
+		"HELD frag: the previewed X is the airburst X (marker was %.0fpx past the detonation)"
+		% (absi(int(hpred[0]) - int(held["x"])) * PX))
+	Runner.T.eq(int(hpred[1]), int(held["y"]),
+		"HELD frag: the previewed Y is the airburst Y (marker was %.0fpx past the 28px kill ring)"
+		% (absi(int(hpred[1]) - int(held["y"])) * PX))
+	# 2. TAP FRAG (hold: false): flies the full lob — the fix must not shorten it.
+	var sim2 := SimWorld.new(31, 1)
+	var tap := {"x": 300 * Fixed.ONE, "y": y0, "vx": 0, "vy": -SimWorld.GRENADE_SPEED,
+		"z": 0, "zv": SimWorld.GRENADE_ZVEL, "owner": 0, "shell": false, "hold": false}
+	sim2.grenades.append(tap)
+	var tpred: Array = sim2.predict_grenade_landing(tap)
+	for t in 128:
+		sim2._step_grenades()
+		if sim2.grenades.is_empty():
+			break
+	Runner.T.eq(int(tpred[0]), int(tap["x"]), "TAP frag: the previewed X is the landing X")
+	Runner.T.eq(int(tpred[1]), int(tap["y"]), "TAP frag: the previewed Y is the landing Y (full lob)")
+	var tap_dist: int = absi(int(tap["y"]) - y0)
+	Runner.T.ok(tap_dist > held_dist + 40 * Fixed.ONE,
+		"the tap lob (%.0fpx) really outranges the held airburst (%.0fpx) by the ~48px the marker used to hide"
+		% [tap_dist * PX, held_dist * PX])
+	# 3. TANK SHELL (shell: true): the cannon has no fuse hand — full lob even
+	# with hold forced on. Pins the `not g["shell"]` guard, not just the break.
+	var sim3 := SimWorld.new(31, 1)
+	sim3.players[0]["grenade_prev"] = true
+	var shell := {"x": 300 * Fixed.ONE, "y": y0, "vx": 0, "vy": -SimWorld.GRENADE_SPEED,
+		"z": 0, "zv": SimWorld.GRENADE_ZVEL, "owner": 0, "shell": true, "hold": true}
+	sim3.grenades.append(shell)
+	var spred: Array = sim3.predict_grenade_landing(shell)
+	for t in 128:
+		sim3._step_grenades()
+		if sim3.grenades.is_empty():
+			break
+	Runner.T.eq(int(spred[0]), int(shell["x"]), "SHELL: the previewed X is the impact X")
+	Runner.T.eq(int(spred[1]), int(shell["y"]),
+		"SHELL: no airburst even with hold set — the previewed Y is the full-lob impact Y")
+	Runner.T.eq(absi(int(shell["y"]) - y0), tap_dist,
+		"SHELL flies the same full lob as the tap frag (the fuse hand is a frag-only verb)")
+
+
+func test_airburst_verb_is_taught() -> void:
+	## The fuse-hand verb existed only in a sim comment — nothing on screen or
+	## in the manual ever said TAP lobs far / HOLD pops it at the arc, so the
+	## first airburst read as a malfunction. It now teaches at the exact moment
+	## of surprise (the idempotent, persisted _hint seam) and the HOWTO grenade
+	## row names both verbs.
+	Runner.T.ok(_view_src().contains('_hint("airburst"'),
+		"the first airburst fires the one-shot TAP-vs-HOLD hint through _hint")
+	var menu := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	var gpos := menu.find("GRENADES crack armor")
+	Runner.T.ok(gpos >= 0, "the HOWTO grenade verb line is still findable")
+	var gline := menu.substr(gpos, menu.find("\n", gpos) - gpos)
+	Runner.T.ok(gline.contains("TAP") and gline.contains("HOLD"),
+		"the HOWTO grenade line names both verbs (TAP lobs far — HOLD pops it at the arc)")
+
+
+func test_result_cards_are_debrief_documents_not_bare_boxes() -> void:
+	## Victory and K.I.A. both stamped bare stats on the same near-black
+	## ui_panel — one grey box for both debriefs. They are now DOCUMENTS: the
+	## panel body draws a header band (doc["band"]) and a form-number microline
+	## (doc["form"]) fed by each call site's own identity, so the card you get
+	## for winning can never read as the card you get for dying.
+	## Source-shape pin (the suite's established idiom for view furniture):
+	## main.gd draw paths have no _emit_* capture seam and screenshots need a
+	## GL context, so the strongest headless check pins the shipped draw body.
+	var src := _view_src()
+	for s in ["AFTER-ACTION REPORT", "CASUALTY REPORT", "FORM AAR-7", "FORM KIA-1"]:
+		Runner.T.ok(src.contains(s), "the result cards carry the %s document identity" % s)
+	var body_start := src.find("func _draw_result_panel(")
+	Runner.T.ok(body_start >= 0, "_draw_result_panel still exists")
+	var body := src.substr(body_start, src.find("\nfunc ", body_start + 10) - body_start)
+	Runner.T.ok(body.contains("Art.text_center(self, doc[\"band\"]"),
+		"the panel body actually draws the band stencil")
+	Runner.T.ok(body.contains("Art.text_center(self, doc[\"form\"]"),
+		"the panel body actually draws the form-number microline")
+
+
 # --- 7. Copy honesty: "PERMANENT" must never name something death strips ------
 
 func _stripped_loss_nouns() -> Array[String]:

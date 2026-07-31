@@ -1166,9 +1166,13 @@ func test_result_panel_fits_the_screen_at_its_maximum_row_count() -> void:
 	Runner.T.ok(has_pitch, "Main.result_row_pitch() is the result card's one row-pitch source")
 	# Falls back to the un-clamped literal so the geometry below reports the REAL
 	# overflow numbers on an unfixed tree instead of aborting on a missing symbol.
-	var pitch: float = ms.result_row_pitch(RESULT_ROWS_MAX) if has_pitch else 19.0
+	# The debrief document furniture (header band + form microline) spends
+	# RESULT_DOC_RESERVE of the same vertical budget — read the const off the
+	# script so this model and the draw cannot drift (the draw spends exactly it).
+	var reserve: float = _consts().get("RESULT_DOC_RESERVE", 0.0)
+	var pitch: float = ms.result_row_pitch(RESULT_ROWS_MAX, reserve) if has_pitch else 19.0
 	var last_baseline := RESULT_ROW_Y + float(RESULT_ROWS_MAX - 1) * pitch
-	var panel_bottom := RESULT_ROW_Y + float(RESULT_ROWS_MAX) * pitch + RESULT_PAD
+	var panel_bottom := RESULT_ROW_Y + float(RESULT_ROWS_MAX) * pitch + RESULT_PAD + reserve
 	Runner.T.ok(last_baseline <= 356.0,
 		"%d-row result card keeps its last row (REDEPLOY) on screen: baseline %.1f <= 356"
 			% [RESULT_ROWS_MAX, last_baseline])
@@ -1184,6 +1188,8 @@ func test_result_panel_fits_the_screen_at_its_maximum_row_count() -> void:
 	var body := src.substr(src.find("func _draw_result_panel("))
 	Runner.T.ok(body.substr(0, body.find("\nfunc ")).contains("result_row_pitch("),
 		"_draw_result_panel() takes its row pitch from result_row_pitch()")
+	Runner.T.ok(body.substr(0, body.find("\nfunc ")).contains("result_row_pitch(rows.size(), doc_h)"),
+		"...and feeds it the doc reserve, so the 13-row card's form line can't fall off the bottom")
 
 
 # --- drain-view: RUN-TEARDOWN LEAKS. These are view-side caches that _reset() forgot, so run 2

@@ -190,3 +190,6 @@ msgstr "決定"
 msgid "BACK"
 msgstr "戻る"
 
+
+msgid "HELD THROW — POPS AT THE ARC. TAP [%s] TO LOB IT FAR"
+msgstr "長押し投擲 — 弧の頂点で炸裂。[%s]を素早く押すと遠くへ飛ぶ"

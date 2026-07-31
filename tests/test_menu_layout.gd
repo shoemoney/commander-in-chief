@@ -921,7 +921,9 @@ class _CaptureMenu extends GameMenu:
 	func _emit_fit(key: String, r: Rect2, _reg: Rect2, _c: Color) -> void:
 		# `reg` is recorded (not dropped) so a 9-slice draw can be audited: a SQUARE
 		# source region landing in a non-square box is a squashed corner tile.
-		ops.append({"k": "fit", "id": key, "box": r, "reg": _reg})
+		# `col` is recorded too, so a per-mode chrome tint is auditable (the
+		# chrome-signature test reads the ui_frame_lrg tint straight off the op).
+		ops.append({"k": "fit", "id": key, "box": r, "reg": _reg, "col": _c})
 	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
 		ops.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
 	func _emit_stamp(txt: String, pos: Vector2, _c: Color) -> void:
@@ -7053,6 +7055,47 @@ func test_every_framed_screen_wears_a_bezel_not_a_stretched_box() -> void:
 		Runner.T.ok(ambient >= 1,
 			"mode %d paints a terminal-glass ambient layer inside its border" % m)
 	Runner.T.eq(covered, 12, "12 framed screens enumerated from UNFRAMED_MODES, not 4 reported")
+	stub.free()
+
+
+func test_every_framed_screen_has_its_own_chrome_signature() -> void:
+	## One grey frame for 12 screens read as ONE screen: the same 9-slice, the
+	## same FRAME_TINT, zero identity. Each framed mode now wears its own frame
+	## tint plus a codename tab on the frame's top edge — the shared 9-slice
+	## GEOMETRY stays (the bezel ratchet above still measures it), only the
+	## identity differs. Enumerated from Mode.values() - UNFRAMED_MODES — the
+	## exact enumeration the bezel test uses — so a Mode added tomorrow is
+	## covered the day it lands, and fails CLEANLY (the .has() assert, never a
+	## silent abort) if it ships without a MODE_CHROME row.
+	var stub := _StubMain.new()
+	var sigs := {}
+	for m in Menu.Mode.values():
+		if m in Menu.UNFRAMED_MODES:
+			continue
+		Runner.T.ok(Menu.MODE_CHROME.has(m),
+			"mode %d has a MODE_CHROME identity row" % m)
+		if not Menu.MODE_CHROME.has(m):
+			continue
+		var cap := _CaptureMenu.new()
+		cap.main = stub
+		cap.mode = m
+		cap._draw_content_frame()   # the REAL draw — records into ops via the seams
+		var tint := Color(-1, -1, -1)
+		var tabs: Array = []
+		for op in cap.ops:
+			if op["k"] == "fit" and op["id"] == "ui_frame_lrg":
+				tint = op["col"]
+			elif op["k"] == "stamp":
+				tabs.append(String(op["id"]))
+		cap.free()
+		Runner.T.eq(tabs.size(), 1, "mode %d draws exactly one codename tab on its frame" % m)
+		Runner.T.ok(not tabs.is_empty() and tabs[0] != "",
+			"mode %d tab carries a codename" % m)
+		var sig := "%s|%s" % [str(tint), tabs[0] if not tabs.is_empty() else ""]
+		Runner.T.ok(not sigs.has(sig),
+			"mode %d chrome signature is distinct — collides with mode %s" % [m, str(sigs.get(sig, "?"))])
+		sigs[sig] = m
+	Runner.T.eq(sigs.size(), 12, "12 framed screens, 12 distinct chrome signatures")
 	stub.free()
 
 
