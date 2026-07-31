@@ -19,7 +19,9 @@ next to each other. Several lens findings re-flag ground a commit the same run a
 touched; those carry the sha inline so the next reader starts from the remainder, not the
 original complaint.
 
-**Counts this snapshot:** 31 new open (2026-07-31) · 6 new owner decisions · 10 shipped in
+**Counts this snapshot:** 31 new open from the run (2026-07-31) **+ 2 audit-lens findings
+banked the same day** (PERFECT DODGE band, riot-shield drawn plate — §3, adversarially
+CONFIRMED by the parallel audit sweep) · 6 new owner decisions · 10 shipped in
 the 2026-07-31 window (5 clean, 5 with flagged remainders) · older carried entries marked
 per-section.
 
@@ -410,6 +412,27 @@ per-section.
 ## 3. Teaching / content honesty — the game says one thing, the sim does another
 
 ### New this run (2026-07-31)
+
+- **"PERFECT DODGE!" fires for bullets in the 7–11px band that could never have killed.**
+  *(audit-lens finding, adversarially CONFIRMED 2026-07-31 — not from the loop's own lenses.)*
+  Where: `src/main.gd:5192-5207` (`_check_near_miss` dodge scan — `_dist_lte(..., 11 * Fixed.ONE)`
+  at `:5198` fires `show_banner("PERFECT DODGE!")` at `:5200`, pure distance check, no
+  velocity/lethality filter; its own comment at `:5182-5185` claims such a bullet "would have
+  killed them") vs `src/sim/sim_world.gd:709` (`ENEMY_BULLET_HIT_RADIUS := 7 * F_ONE`, the ONLY
+  enemy-bullet kill test, `:6436-6438`). Arithmetic: bullets move 3px/tick, snipers 6px/tick —
+  sampled kill distance ≥ geometric closest approach, so any path missing by >7px can never kill
+  on any tick; the whole (7.6, 11] band during the 18-tick roll window provably credits
+  non-saves. Rate: multiple times per firefight-heavy run. Cosmetic (banner + hitstop + sfx
+  only, no score/currency) — but it hands out skill credit for dodges that never happened.
+- **Riot shield's drawn plate is ~3-4× its sim blocking body — shots at the drawn edge read
+  as blocked but the sim lets them through (or vice versa: the sim blocks air the art claims
+  is open).** *(audit-lens finding, adversarially CONFIRMED 2026-07-31.)* Where:
+  `src/view/art.gd:477` (`riot_shield` SCALE 1.1 — its "~half a p2 specialist's span" comment is
+  false ~2×; the plate draws ~42px on a ~23px carrier) vs the sim's default 10px hit radius —
+  the plate reaches ~32px from a soldier whose block body is 10px. The import-drift class
+  inverted (bunker drew 14px while colliding at 48px; here the art OUTGROWS the body), and no
+  `test_hitbox_fairness` row pins it. Rate: shield specialists field from campaign sector 2 /
+  endless wave 3, so most runs past the early game show it.
 
 - **HOW TO PLAY says "Bullets don't" crack "bosses" — measured real gunship kills get 20-87%
   of their damage from bullets, the weapon the page just told you to stop using.** Where:
