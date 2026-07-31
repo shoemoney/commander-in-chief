@@ -2480,3 +2480,52 @@ func test_veteran_armor_block_is_not_the_wall_plink() -> void:
 	stub.free()
 	stub2.free()
 	stub3.free()
+
+
+# --- A duplicate capsule's receipt names the item it actually is ---
+
+func test_duplicate_pickup_receipt_names_the_item_it_actually_is() -> void:
+	## The "honest receipt" branch in main.gd's pickup consumer fires for ANY
+	## capsule the sim flags `full` — and _supply_full can flag TWO: a Triple Shot
+	## you already own (kind 6 — permanent, so free duplicates ride the
+	## consume-and-flag grammar at 1/30 per elite kill while triple persists) and
+	## claymores at the cap (kind 8). The view printed the hardcoded literal
+	## "CLAYMORES FULL" for BOTH, so a duplicate TRIPLE SHOT announced itself as
+	## the wrong item. Sim-driven pin: make the sim emit the kind-6 full event,
+	## then require the view's receipt text for that kind to name TRIPLE and never
+	## CLAYMORE. Class pin: no capsule kind's receipt may borrow a DIFFERENT
+	## capsule's name, so the day _supply_full grows a branch the wrong-name shape
+	## is unrepresentable, not just unfired.
+	var ms: Script = load("res://src/main.gd")
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var p: Dictionary = sim.players[0]
+	p["triple"] = true
+	sim.pickups = [{"x": p["x"], "y": p["y"], "kind": 6, "cost": 0}]
+	sim._collect_pickups(p, 0)
+	var full6 := false
+	for ev in sim.events:
+		if ev.get("t") == "pickup" and int(ev.get("kind", -1)) == 6 and ev.get("full", false):
+			full6 = true
+	Runner.T.ok(full6,
+		"the sim really does flag a duplicate TRIPLE SHOT pickup full (kind 6)")
+	Runner.T.ok(ms.has_method("pickup_full_text"),
+		"the view derives the full-receipt text from the kind (pickup_full_text), not one hardcoded item name")
+	if ms.has_method("pickup_full_text"):
+		var t6: String = ms.call("pickup_full_text", 6)
+		Runner.T.ok(t6.contains("TRIPLE"),
+			"a duplicate TRIPLE SHOT's receipt names TRIPLE, got '%s'" % t6)
+		Runner.T.ok(not t6.contains("CLAYMORE"),
+			"a duplicate TRIPLE SHOT's receipt never says CLAYMORES FULL, got '%s'" % t6)
+		var labels: Array = ms.get_script_constant_map()["_CAPSULE_LABEL"]
+		for k in range(4, 4 + labels.size()):
+			var tk: String = ms.call("pickup_full_text", k)
+			for li2 in labels.size():
+				if li2 != k - 4 and tk.contains(str(labels[li2])):
+					Runner.T.ok(false,
+						"kind %d's receipt '%s' borrows %s's name" % [k, tk, str(labels[li2])])
+	# Wiring ratchet (the claim_label_slot precedent): a def-only helper is the
+	# same green-but-wrong trap — it must be CALLED by the pickup consumer.
+	var src := _view_src()
+	Runner.T.ok(src.count("pickup_full_text(") >= 2,
+		"pickup_full_text is wired into the pickup consumer, not just defined (%d sites)"
+			% src.count("pickup_full_text("))

@@ -2235,12 +2235,15 @@ func _consume_events() -> void:
 			# celebratory kick so collecting a 1-in-6 drop lands as an event, not a
 			# silent stat bump. floattext + sfx + trauma are all view-only.
 			if ev.get("kind", 0) >= 4 and ev.get("full", false):
-				# Claymore grabbed at the 3-charge cap granted NOTHING but still
-				# paid the gold callout + trauma + jingle — the last reward-shaped
-				# lie in the pickup grammar (same rule that stripped the pilot
-				# kill's hitmarker). Honest grey receipt, dull tone, no trauma.
+				# A capsule grabbed when it would deliver NOTHING still paid the
+				# gold callout + trauma + jingle — the last reward-shaped lie in
+				# the pickup grammar (same rule that stripped the pilot kill's
+				# hitmarker). Honest grey receipt, dull tone, no trauma. The
+				# receipt names the item it actually is: _supply_full flags BOTH
+				# claymores-at-cap (8) and an already-owned TRIPLE SHOT (6), and
+				# the hardcoded "CLAYMORES FULL" literal misnamed the latter.
 				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
-					"rate": 0.013, "size": 11, "text": "CLAYMORES FULL",
+					"rate": 0.013, "size": 11, "text": pickup_full_text(int(ev["kind"])),
 					"col": Color(0.72, 0.7, 0.66)})
 				_sfx.play("buy", -9.0, 0.8)
 			elif ev.get("kind", 0) >= 4:
@@ -8234,6 +8237,19 @@ static func water_shader_params(band_idx: int, ford_x: int, flow_dir: int, close
 	}
 
 
+static func pickup_full_text(kind: int) -> String:
+	## The free duplicate-capsule receipt. _supply_full gates which kinds can ever
+	## arrive here (today: 6 = triple already owned, 8 = claymores at the cap); the
+	## fallback is the deny path's own generic wording so a FUTURE kind can never
+	## inherit another item's name.
+	match kind:
+		6:
+			return "TRIPLE SHOT OWNED"
+		8:
+			return "CLAYMORES FULL"
+	return "ALREADY STOCKED"
+
+
 static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> Vector2:
 	## Pure half of the route-fork signpost placement (view-only float math, so it
 	## lives here rather than in src/sim/ — the sim's fork_cache_is_left decides
@@ -8265,6 +8281,16 @@ static func fork_sign_alpha(sign_rect: Rect2, band: Array, players := []) -> flo
 		if sign_rect.grow(-0.5).intersects((pr as Rect2).grow(-0.5)):
 			return 0.0
 	return 1.0
+
+
+static func fork_sign_relevance(fy: float) -> float:
+	## Full alpha in the top third (the approach read), dissolving to zero before
+	## the combat band the player fights the fork from. The sign's job is
+	## telegraphing the lane choice BEFORE the player commits; once fy passes
+	## SIGN_FADE_GONE the player is alongside/past the sign, the decision is made,
+	## and the wire strips + island wrecks (drawn at sim-true positions) carry the
+	## in-band truth. Pure + static so a test can sweep the whole traverse.
+	return clampf((SIGN_FADE_GONE - fy) / (SIGN_FADE_GONE - SIGN_FADE_FULL), 0.0, 1.0)
 
 
 func _draw_gates() -> void:
@@ -8359,13 +8385,17 @@ func _draw_gates() -> void:
 	# Route-fork lane signposts: the approach band south of gates 2 & 4 reads
 	# CACHE (left, supplies + mines) vs BOUNTY (right, elites + marked pay).
 	# Choice is pure position, so the telegraph must land before the band does.
-	# 4v legibility pass: 24px (integer 3x of the 8px pixel font = crisp), HUD-family
-	# backing plates, Art.text shadow, mirrored 84px margins. Both strings are literals
-	# and 24 is a literal, so the widths are loop-invariant — measured once, above the loop.
+	# 4v legibility pass picked 24px (crisp 3x of the 8px pixel font), HUD-family
+	# backing plates, Art.text shadow, mirrored 84px margins; the de-escalation
+	# pass keeps every one of those invariants at SIGN_FONT 16 (crisp 2x) — the
+	# 24px plates were 3920-4508 px² of near-opaque black scrolling through the
+	# whole fork fight, and the relevance fade below clears them entirely once
+	# the lane choice is behind the player. Both strings are literals and the
+	# size is a const, so the widths are loop-invariant — measured once, above the loop.
 	var cache_txt := "< CACHE"
 	var bounty_txt := "BOUNTY >"
-	var cw2 := Art.tw(cache_txt, 24)
-	var bw2 := Art.tw(bounty_txt, 24)
+	var cw2 := Art.tw(cache_txt, SIGN_FONT)
+	var bw2 := Art.tw(bounty_txt, SIGN_FONT)
 	for fk in _forks:
 		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
 		if fy < -20.0 or fy > 380.0:
@@ -8416,8 +8446,8 @@ func _draw_gates() -> void:
 		# exactly this all along; the draws used to bypass it). The reservation is
 		# UNCONDITIONAL: an invisible-but-returning sign still owns its pixels, so a
 		# toast can't dodge into it mid-fade.
-		var crect := Rect2(cx - 4.0, fy - 22.0, cw2 + 8.0, 28.0)
-		var brect := Rect2(bx - 4.0, fy - 22.0, bw2 + 8.0, 28.0)
+		var crect := Rect2(cx - SIGN_PAD_X, fy - float(SIGN_FONT - 2), cw2 + 2.0 * SIGN_PAD_X, float(SIGN_FONT + 4))
+		var brect := Rect2(bx - SIGN_PAD_X, fy - float(SIGN_FONT - 2), bw2 + 2.0 * SIGN_PAD_X, float(SIGN_FONT + 4))
 		_label_slots.append(crect)
 		_label_slots.append(brect)
 		# ...but it YIELDS the screen-space top-center band the only way an anchored
@@ -8427,10 +8457,16 @@ func _draw_gates() -> void:
 		# the band is dealt after _draw_gates because its rail is measured from the
 		# boss-bar count _draw_gunships publishes, and banners live for seconds, so
 		# the one-frame lag is invisible (frame 0's empty band = full alpha = correct).
+		# A SECOND overlord joins the yield: fork_sign_relevance dissolves the sign
+		# once it scrolls out of the approach read — past SIGN_FADE_GONE the lane
+		# choice is made and the fight is live, so the plate stops overbearing the
+		# combat band. minf: EITHER overlord can dissolve a sign.
 		var ck := str(fk["y"]) + "|c"
 		var bk := str(fk["y"]) + "|b"
-		var cf: float = lerpf(float(_fork_sign_fade.get(ck, 1.0)), fork_sign_alpha(crect, _band, _player_label_rects), 0.12)
-		var bf: float = lerpf(float(_fork_sign_fade.get(bk, 1.0)), fork_sign_alpha(brect, _band, _player_label_rects), 0.12)
+		var cf: float = lerpf(float(_fork_sign_fade.get(ck, 1.0)),
+			minf(fork_sign_alpha(crect, _band, _player_label_rects), fork_sign_relevance(fy)), 0.12)
+		var bf: float = lerpf(float(_fork_sign_fade.get(bk, 1.0)),
+			minf(fork_sign_alpha(brect, _band, _player_label_rects), fork_sign_relevance(fy)), 0.12)
 		_fork_sign_fade[ck] = cf
 		_fork_sign_fade[bk] = bf
 		# The ONE plate language (LABEL_PLATE_FILL via SIGN_PLATE_FILL), lane-tinted
@@ -8449,7 +8485,7 @@ func _draw_gates() -> void:
 			draw_rect(crect, cedge, false, 1.0)
 			var cink: Color = Art.safe(SIGN_INK_CACHE)
 			cink.a *= cf
-			Art.text(self, cache_txt, Vector2(cx, fy), 24, cink)
+			Art.text(self, cache_txt, Vector2(cx, fy), SIGN_FONT, cink)
 		if bf > 0.05:
 			draw_rect(Rect2(brect.position + Vector2(2, 2), brect.size), Color(0, 0, 0, 0.35 * bf))
 			var bfill := SIGN_PLATE_FILL
@@ -8460,7 +8496,7 @@ func _draw_gates() -> void:
 			draw_rect(brect, bedge, false, 1.0)
 			var bink := SIGN_INK_BOUNTY
 			bink.a *= bf
-			Art.text(self, bounty_txt, Vector2(bx, fy), 24, bink)
+			Art.text(self, bounty_txt, Vector2(bx, fy), SIGN_FONT, bink)
 
 
 func _draw_pickups() -> void:
@@ -9303,6 +9339,18 @@ const SIGN_INK_CACHE := Color(0.5, 1.0, 0.7)
 const SIGN_INK_BOUNTY := Color(1.0, 0.75, 0.3)
 const SIGN_PLATE_EDGE_CACHE := Color(0.5, 1.0, 0.7, 0.45)
 const SIGN_PLATE_EDGE_BOUNTY := Color(1.0, 0.75, 0.3, 0.45)
+# Fork-signpost de-escalation: the 4v pass picked 24px (crisp 3x of the 8px pixel
+# font) with 8px of pad — 3920/4508 px² of 0.92-alpha plate scrolling through the
+# whole fork fight. 16px keeps the same integer-multiple crispness at 2x and cuts
+# the footprint ~51% (CACHE 96x20, BOUNTY 110x20). The tests derive their model
+# from these consts, so the next resize can't drift the ratchet.
+const SIGN_FONT := 16
+const SIGN_PAD_X := 4.0
+# Approach-only relevance fade: full alpha in the top third (the approach read),
+# dissolved before the combat band the player fights the fork from — the wire
+# strips and island wrecks carry the in-band truth once the decision is made.
+const SIGN_FADE_FULL := 130.0
+const SIGN_FADE_GONE := 210.0
 # Veteran-armor chip flash — the SAME amber family the wave banner wears so the two
 # veteran cues cross-reference, and distinct from the nest's sand chip
 # (0.85, 0.78, 0.5) and the shield's cyan (0.55, 0.85, 1.0).

@@ -1464,11 +1464,15 @@ func test_world_labels_never_share_pixels() -> void:
 	var sign_collide_offsets := {}
 	var capture: Array = []
 	var li := 0
+	# The signpost model reads the SAME consts the draw does, so a resize follows
+	# the draw forever instead of drifting (was: hardcoded 24 / fy-22 / 28).
+	var sign_font := int(ms.get_script_constant_map()["SIGN_FONT"])
+	var sign_pad := float(ms.get_script_constant_map()["SIGN_PAD_X"])
 	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
 		Art.text_scale = scale
 		Art.flush_tw()
-		var cw: float = Art.tw("< CACHE", 24)
-		var bw: float = Art.tw("BOUNTY >", 24)
+		var cw: float = Art.tw("< CACHE", sign_font)
+		var bw: float = Art.tw("BOUNTY >", sign_font)
 		var sz: int = Art.fs(8)
 		for cache_left in [true, false]:
 			var sxs: Vector2 = ms.fork_sign_xs(cache_left, cw, bw)
@@ -1485,7 +1489,8 @@ func test_world_labels_never_share_pixels() -> void:
 						var boxes: Array = []
 						# _draw_gates first: anchored signage RESERVES, never moves.
 						for s in [[sxs.x, cw, "< CACHE"], [sxs.y, bw, "BOUNTY >"]]:
-							var sr := Rect2(float(s[0]) - 4.0, fy - 22.0, float(s[1]) + 8.0, 28.0)
+							var sr := Rect2(float(s[0]) - sign_pad, fy - float(sign_font - 2),
+								float(s[1]) + 2.0 * sign_pad, float(sign_font + 4))
 							frame.append(sr)
 							boxes.append({"k": "fork sign", "id": s[2], "box": sr})
 						# _draw_pickups: the price row (coin icon + digits as ONE rect, so the
@@ -1592,11 +1597,14 @@ func test_fork_signs_dissolve_under_the_band() -> void:
 	var mismatches := 0
 	var colliding := 0
 	var clear := 0
+	# Same const-derived model as the geometry ratchet above (was: hardcoded 24).
+	var sign_font := int(ms.get_script_constant_map()["SIGN_FONT"])
+	var sign_pad := float(ms.get_script_constant_map()["SIGN_PAD_X"])
 	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
 		Art.text_scale = scale
 		Art.flush_tw()
-		var cw: float = Art.tw(cache_txt, 24)
-		var bw: float = Art.tw(bounty_txt, 24)
+		var cw: float = Art.tw(cache_txt, sign_font)
+		var bw: float = Art.tw(bounty_txt, sign_font)
 		for cache_left in [true, false]:
 			var sxs: Vector2 = ms.fork_sign_xs(cache_left, cw, bw)
 			for s in [[sxs.x, cw], [sxs.y, bw]]:
@@ -1615,11 +1623,15 @@ func test_fork_signs_dissolve_under_the_band() -> void:
 							var fys := [-20.0, 380.0]
 							for r in rows:
 								var rr: Rect2 = r["rect"]
-								for fy0 in [rr.position.y - 6.0, rr.end.y + 22.0]:
+								# Breaks where the sign rect's edges cross a row's edges:
+								# sign bottom is fy + 6 (font-independent), sign top is
+								# fy - (SIGN_FONT - 2).
+								for fy0 in [rr.position.y - 6.0, rr.end.y + float(sign_font - 2)]:
 									for d in [-2.0, -1.0, 0.0, 1.0, 2.0]:
 										fys.append(fy0 + d)
 							for fy in fys:
-								var sr := Rect2(sx - 4.0, fy - 22.0, sw + 8.0, 28.0)
+								var sr := Rect2(sx - sign_pad, fy - float(sign_font - 2),
+									sw + 2.0 * sign_pad, float(sign_font + 4))
 								var overlap := false
 								for r in rows:
 									if sr.grow(-0.5).intersects((r["rect"] as Rect2).grow(-0.5)):
@@ -1664,6 +1676,84 @@ func test_fork_signs_dissolve_under_the_band() -> void:
 				"the signpost draw lerps a per-sign fade from fork_sign_alpha")
 			Runner.T.ok(block.contains("Vector2(2, 2)"),
 				"each sign plate carries a drop shadow (depth cue, not a flat sticker)")
+
+
+func test_fork_sign_plate_footprint() -> void:
+	## The fork signposts are the ONLY anchored world text, and the 4v legibility
+	## pass sized them 24px with 84px margins: CACHE (132+8)x28 = 3920 px² and
+	## BOUNTY (153+8)x28 = 4508 px² of 0.92-alpha black plate — ~3.7% of the
+	## 640x360 frame — scrolling through mid-field for the WHOLE fork fight. The
+	## de-escalation keeps the crispness invariant (integer multiple of the 8px
+	## pixel font) at 16px (2x): CACHE 96x20, BOUNTY 110x20 — a 51% footprint cut.
+	## Pin the CLASS, not one screenshot: both signs x both cache_left layouts,
+	## derived from the consts the draw itself reads, so the model follows the
+	## draw forever instead of drifting next resize.
+	var cm: Dictionary = _consts()
+	Runner.T.ok(cm.has("SIGN_FONT"),
+		"the sign font size is a named const (SIGN_FONT) the draw and this model both read")
+	if not cm.has("SIGN_FONT"):
+		return
+	var sign_font := int(cm["SIGN_FONT"])
+	var pad_x := float(cm["SIGN_PAD_X"])
+	Runner.T.ok(sign_font <= 16,
+		"SIGN_FONT is de-escalated to the crisp 2x size (16), got %d" % sign_font)
+	Runner.T.ok(sign_font % 8 == 0,
+		"SIGN_FONT stays an integer multiple of the 8px pixel font (the crispness invariant)")
+	var ms: Script = load("res://src/main.gd")
+	var was_scale: float = Art.text_scale
+	Art.text_scale = 1.0
+	Art.flush_tw()
+	var cw: float = Art.tw("< CACHE", sign_font)
+	var bw: float = Art.tw("BOUNTY >", sign_font)
+	for cache_left in [true, false]:
+		var sxs: Vector2 = ms.fork_sign_xs(cache_left, cw, bw)
+		for s in [[sxs.x, cw, "CACHE"], [sxs.y, bw, "BOUNTY"]]:
+			var area: float = (float(s[1]) + 2.0 * pad_x) * float(sign_font + 4)
+			Runner.T.ok(area <= 2300.0,
+				"%s sign plate is %.0f px² (was 3920-4508 at 24px), cap 2300" % [s[2], area])
+	Art.text_scale = was_scale
+	Art.flush_tw()
+
+
+func test_fork_signs_yield_the_combat_band() -> void:
+	## The sign's job is telegraphing the lane choice BEFORE the player commits;
+	## the wire strips and island wrecks (drawn at sim-true positions) carry the
+	## in-band truth during the fight. fork_sign_relevance(fy) keeps the signs at
+	## full alpha through the top third (the approach read) and dissolves them to
+	## zero before the combat band the player fights the fork from. ONE helper
+	## covers the whole class (both signs x both cache_left x the full traverse).
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("fork_sign_relevance"),
+		"an approach-only relevance fade exists (fork_sign_relevance)")
+	if not ms.has_method("fork_sign_relevance"):
+		return
+	var prev := 2.0
+	var fy := -40.0
+	while fy <= 400.0:
+		var r: float = ms.call("fork_sign_relevance", fy)
+		if fy <= 130.0:
+			Runner.T.eq(r, 1.0, "full alpha through the approach read (fy=%.0f)" % fy)
+		if fy >= 210.0:
+			Runner.T.eq(r, 0.0, "fully dissolved inside the combat band (fy=%.0f)" % fy)
+		Runner.T.ok(r <= prev,
+			"monotonic non-increasing across the traverse (fy=%.0f, %.2f after %.2f)" % [fy, r, prev])
+		prev = r
+		fy += 5.0
+	# Wiring ratchet (the _wheel_scrim_alpha precedent): the fade must be composed
+	# into BOTH per-sign lerps inside the signpost draw block, not just defined.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.count("fork_sign_relevance(") >= 3,
+		"fork_sign_relevance feeds both signs' fades, not just defined (%d sites)"
+			% src.count("fork_sign_relevance("))
+	var gstart := src.find("fork_sign_xs(cache_left")
+	Runner.T.ok(gstart >= 0, "found the signpost draw block")
+	if gstart >= 0:
+		var gend := src.find("Art.text(self, bounty_txt", gstart)
+		Runner.T.ok(gend > gstart, "the signpost block is delimited by the bounty ink")
+		if gend > gstart:
+			var block := src.substr(gstart, gend - gstart)
+			Runner.T.ok(block.contains("minf("),
+				"the per-sign fade target is minf(band yield, relevance) — either overlord can dissolve a sign")
 
 
 func test_wheel_scrim_only_in_safe_shop() -> void:
