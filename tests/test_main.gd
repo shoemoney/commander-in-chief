@@ -1505,13 +1505,19 @@ func test_world_labels_never_share_pixels() -> void:
 						frame.append(lr)
 						boxes.append({"k": "crate label", "id": txt, "box": lr})
 						# _draw_fx last: a kill toast in the air over the same crate.
+						# The model claims the SHIPPED footprint (the punch-max plate
+						# via floattext_claim_rect) with the SHIPPED droppable flag —
+						# the pre-fix model claimed a hand-rolled 11px box, the exact
+						# under-measure this suite exists to catch. A dropped toast is
+						# simply not placed (that is the fix, not an overlap).
 						var toast: String = labels[(li + 5) % labels.size()]
 						li += 1
 						var tw: float = Art.tw(toast, 9)
 						var tr: Rect2 = ms.claim_label_slot(
-							Rect2(px - tw / 2.0, py - 45.5, tw, 11.0), frame)
-						frame.append(tr)
-						boxes.append({"k": "toast", "id": toast, "box": tr})
+							ms.floattext_claim_rect(Vector2(px, py - 40.0), tw, 9), frame, 0.0, true)
+						if tr.has_area():
+							frame.append(tr)
+							boxes.append({"k": "toast", "id": toast, "box": tr})
 						var frame_hit := false
 						for i in boxes.size():
 							for j in range(i + 1, boxes.size()):
@@ -1569,6 +1575,137 @@ func test_world_text_routes_through_the_arbiter() -> void:
 		if fend > fstart:
 			Runner.T.ok(src.substr(fstart, fend - fstart).contains("claim_label_slot"),
 				"floattext toasts claim through the world-text arbiter, not only toast-vs-toast anchors")
+			Runner.T.ok(src.substr(fstart, fend - fstart).contains("floattext_claim_rect("),
+				"floattext toasts claim their REAL drawn footprint (the punch-max plate), not a hand-rolled 11px box")
+			Runner.T.ok(src.substr(fstart, fend - fstart).contains("\"sup\""),
+				"a saturated toast is suppressed via fx[\"sup\"], never overprinted on a keep-place fallback")
+
+
+func _shipped_floattext_strings() -> Array[String]:
+	## Every floattext toast's text, scraped from the shipped producers (the
+	## _coin_pop text arg and the fx-dict "text": literals) — copy added
+	## tomorrow is covered the day it lands. Formats are instantiated with a
+	## realistic amount so the toast's claimed WIDTH is the shipped one.
+	var out: Array[String] = []
+	for line in FileAccess.get_file_as_string("res://src/main.gd").split("\n"):
+		var q1 := -1
+		var at := line.find("_coin_pop(")
+		if at != -1:
+			q1 = line.find("\"", at)
+		elif line.contains("\"rate\""):
+			# The fx-dict floattext producers all carry a "rate"; a bare "text":
+			# literal without one is a result card / banner, not a toast.
+			at = line.find("\"text\": \"")
+			if at != -1:
+				q1 = at + 8
+		if q1 == -1:
+			continue
+		var q2 := line.find("\"", q1 + 1)
+		if q2 <= q1:
+			continue
+		var fmt := line.substr(q1 + 1, q2 - q1 - 1)
+		if fmt.length() < 2:
+			continue
+		# Instantiate with type-matched args scanned left-to-right (%% escapes
+		# skipped); a string with no specifiers is used as-is, so no format
+		# error path is reachable whatever copy lands tomorrow.
+		var s := fmt
+		var args: Array = []
+		var scan := 0
+		while true:
+			var pct := fmt.find("%", scan)
+			if pct == -1:
+				break
+			match fmt.substr(pct + 1, 1):
+				"d": args.append(75)
+				"s": args.append("x")
+				"f": args.append(1.5)
+			scan = pct + 2
+		if not args.is_empty():
+			s = fmt % args
+		if not out.has(s):
+			out.append(s)
+	return out
+
+
+func test_world_text_saturation_drops_instead_of_overprinting() -> void:
+	## When the arbiter's 13-row ladder saturates, a transient toast must be
+	## SUPPRESSED — never overprinted. The measured HEAD defect: the toast
+	## claim rect (an 11px text box x1.5) under-measured the drawn plate
+	## (floattext_plate_rect at punch 1.5 is ~32px tall and hangs ~12.5px
+	## below the claimed bottom edge), AND when the ladder exhausted the
+	## keep-place fallback printed anyway — a staged congestion frame on HEAD
+	## (player exclusion + SPREAD + MAXED + 4 toasts at one anchor) came back
+	## with 2 pairwise overlaps, the 94.5px BOUNTY +75¢ claim sitting on both
+	## the SPREAD and MAXED plates. Persistent labels keep the keep-place
+	## behavior (they are few per anchor and the geometry ratchet above
+	## proves their frames resolve); only droppable claims may return the
+	## zero-area sentinel. This calls the SHIPPED claim_label_slot, so
+	## deleting the droppable early-return turns the fallback back on and the
+	## pairwise assertion goes red.
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("floattext_claim_rect"),
+		"the floattext toast claims its real drawn footprint via floattext_claim_rect")
+	if not ms.has_method("floattext_claim_rect"):
+		return
+	var toasts := _shipped_floattext_strings()
+	Runner.T.ok(toasts.size() >= 4,
+		"scraped the shipped floattext copy (%d strings) — a dead scrape must not pass silently"
+			% toasts.size())
+	var was_scale: float = Art.text_scale
+	var overlaps := 0
+	var drops := 0
+	var reported := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz: int = Art.fs(8)
+		for anchor in [Vector2(320, 180), Vector2(320, 64), Vector2(320, 336)]:
+			var frame: Array[Rect2] = []
+			var placed: Array = []
+			# The player's own exclusion reserve, claimed at the top of _draw.
+			var excl: Rect2 = ms.player_label_exclusion(anchor)
+			frame.append(excl)
+			placed.append({"id": "player exclusion", "box": excl})
+			# The persistent labels claim first, in draw order, NOT droppable
+			# (the shipped capsule-name / MAXED offsets from _draw_pickups).
+			var cap: Rect2 = ms.claim_label_slot(
+				ms._label_plate_rect(anchor.x - 15.0, anchor.y - 25.0, Art.tw("SPREAD", sz), sz), frame)
+			frame.append(cap)
+			placed.append({"id": "SPREAD", "box": cap})
+			var maxed: Rect2 = ms.claim_label_slot(
+				ms._label_plate_rect(anchor.x - 15.0, anchor.y - 34.0, Art.tw("MAXED", sz), sz), frame)
+			frame.append(maxed)
+			placed.append({"id": "MAXED", "box": maxed})
+			# Then the kill-feed pileup: a same-anchor toast wall. 20 toasts
+			# cannot all fit a 13-row ladder, however the arbiter behaves.
+			for i in 20:
+				var txt: String = toasts[i % toasts.size()]
+				var tw: float = Art.tw(txt, 9)
+				var got: Rect2 = ms.claim_label_slot(
+					ms.floattext_claim_rect(Vector2(anchor.x, anchor.y - 40.0), tw, 9), frame, 40.0, true)
+				if not got.has_area():
+					drops += 1
+					continue
+				frame.append(got)
+				placed.append({"id": txt, "box": got})
+			for i in placed.size():
+				for j in range(i + 1, placed.size()):
+					if not placed[i]["box"].grow(-0.5).intersects(placed[j]["box"].grow(-0.5)):
+						continue
+					overlaps += 1
+					if reported < 3:
+						reported += 1
+						Runner.T.ok(false,
+							"saturation overlap (scale %.2f, anchor %s): '%s' %s vs '%s' %s"
+								% [scale, str(anchor), placed[i]["id"], str(placed[i]["box"]),
+									placed[j]["id"], str(placed[j]["box"])])
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(overlaps, 0, "a saturated frame never overprints (%d colliding pairs)" % overlaps)
+	Runner.T.ok(drops > 0,
+		"the staged worst case actually saturated the ladder (%d drops) — a vacuous frame proves nothing"
+			% drops)
 
 
 func test_fork_signs_dissolve_under_the_band() -> void:

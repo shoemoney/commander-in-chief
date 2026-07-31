@@ -7907,8 +7907,8 @@ func _draw_mast_hazard(mp: Vector2) -> void:
 	## Fixed the way the vent is: re-derive the sim's own phase every frame (no
 	## state, no event, cannot drift), warn ring closes onto the kill radius from
 	## OUTSIDE it, and the jet draws its true edge for its whole lethal window.
-	if sim.wave < 5 or sim.wave % 5 != 0:
-		return   # same guard as _step_mast_hazard — no hazard, no telegraph
+	if sim.wave < 5 or sim.wave % 5 != 0 or sim.intermission_ticks > 0:
+		return   # same guard as _step_mast_hazard — no hazard, no telegraph; the shop is sold threat-free, so a warn ring drawn during the buy would lie in the opposite direction
 	var phase: int = posmod(sim.tick_count - sim.wave_start_tick, SimWorld.MAST_CYCLE_TICKS)
 	var jet_at: int = SimWorld.MAST_CYCLE_TICKS - SimWorld.MAST_JET_TICKS
 	var hr := float(SimWorld.MAST_HAZARD_RADIUS) * PX
@@ -9401,6 +9401,16 @@ static func floattext_plate_rect(pivot: Vector2, w: float, size: int, punch: flo
 	return Rect2(pivot.x - w * punch / 2.0 - 3.0, pivot.y - float(size) * punch - 1.0,
 		w * punch + 6.0, float(size) * punch + float(size + 2) * punch + 2.0)
 
+## What the toast claims from the arbiter: its LARGEST drawn footprint — the
+## backing plate at peak spawn punch. The plate always covers the ink+outline,
+## and at any punch <= FLOAT_PUNCH_MAX the drawn plate sits inside this rect,
+## so a claim that clears every slot is a draw that clears every pixel. (The old
+## claim was the 11px text box x1.5 — ~16.5px tall against a ~32px plate that
+## hangs ~12.5px below the claimed bottom edge, so the arbiter arbitrated a
+## footprint smaller than the ink it placed.)
+static func floattext_claim_rect(pivot: Vector2, w: float, size: int) -> Rect2:
+	return floattext_plate_rect(pivot, w, size, FLOAT_PUNCH_MAX)
+
 ## The pixels no in-world label may take: the soldier's opaque footprint (~18px,
 ## art.gd:379) plus the identity ring (r=10 at +(0,5)) — deny toasts and pick-up
 ## callouts anchor AT the player's exact position, so without reserving this the
@@ -9457,14 +9467,20 @@ var _player_label_rects: Array[Rect2] = []
 var _fork_sign_fade := {}
 
 
-static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0) -> Rect2:
+static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, droppable := false) -> Rect2:
 	## The in-world counterpart to band_rows(): one arbiter for every world-space
 	## string, instead of one arbiter for floattext and eleven producers printing
 	## wherever they liked. A transient label drops one 11px row at a time until it
 	## owns its pixels — same stride and same 6-row bound the floattext stacking
 	## block used, this is a MOVE of that logic, not a second system. Rows that would
-	## leave the 640x360 frame are skipped, and a label with nowhere to go keeps its
-	## place rather than being shoved off-screen. min_y floors the search: floattext
+	## leave the 640x360 frame are skipped. What happens when the ladder exhausts
+	## depends on `droppable`: a PERSISTENT label (crate prices, identity labels)
+	## keeps its place, x-clamped, rather than being shoved off-screen — they are
+	## few per anchor and the geometry ratchet proves their frames resolve; a
+	## DROPPABLE transient (the floattext toast) is SUPPRESSED instead — the
+	## zero-area sentinel — because overflow printed on top of the plates is the
+	## exact pileup this arbiter exists to kill (Vampire Survivors/Gungeon: the
+	## overflow is dropped, never stacked). min_y floors the search: floattext
 	## passes the top band's bottom edge, because the toast stack it replaced went
 	## DOWN-only precisely so a toast pinned under the band can't climb back into it.
 	var w: float = rect.size.x
@@ -9493,7 +9509,11 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0) -> 
 				break
 		if not clash:
 			return cand
-	# Nowhere to go: keep the place, x-clamped, rather than shoving it off-screen.
+	# Nowhere to go: a droppable transient is SUPPRESSED (the zero-area sentinel —
+	# the draw site skips plate, ink, slot and anchor), a persistent label keeps
+	# its place, x-clamped, rather than being shoved off-screen.
+	if droppable:
+		return Rect2()
 	return Rect2(x, clampf(rect.position.y, min_y, maxf(min_y, 360.0 - h)), w, h)
 
 
@@ -10676,6 +10696,8 @@ func _draw_fx() -> void:
 		elif fx["kind"] == "floattext":
 			if not toast_keep.has(idx):
 				continue   # over the on-screen cap — stacking arbitrates overlap, this bounds COUNT
+			if fx.get("sup", false):
+				continue   # suppressed by the arbiter on a congested frame — stays down, no flicker as congestion shifts
 			# Stack same-tick texts (e.g. streak + bounty on one kill) so they
 			# don't overprint into a smear, and outline each so it reads over
 			# bright terrain, not just the 1px shadow used to give.
@@ -10713,18 +10735,21 @@ func _draw_fx() -> void:
 				fpivot.y += 11.0
 			# Toast-vs-toast stacking alone left toasts printing over plated labels and
 			# the fork signposts (and them over the toasts) — the "three-deep stack
-			# across the center". Claim the PUNCHED footprint (text width x 11px,
-			# inflated by the 1.5 spawn punch about the pivot — the same idiom as the
-			# banner plate's BANNER_PUNCH_MAX banking) through the one arbiter, then
-			# re-anchor the pivot so text and claim move together. min_y keeps an
-			# up-dodge from climbing back into the top band, the invariant the old
-			# DOWN-only stacking existed to keep.
-			var frect := Rect2(fpivot.x - fhw, fpivot.y - 11.0, fw, 11.0)
-			var prect := Rect2(fpivot.x + (frect.position.x - fpivot.x) * 1.5,
-				fpivot.y + (frect.position.y - fpivot.y) * 1.5,
-				frect.size.x * 1.5, frect.size.y * 1.5)
-			var fgot := claim_label_slot(prect, _label_slots,
-				band_floor + FLOAT_PUNCH_MAX * (float(fsz) + 1.0) + 1.0 - 16.5)
+			# across the center". Claim the toast's REAL drawn footprint — the backing
+			# plate at peak spawn punch, which always covers the ink+outline — through
+			# the one arbiter, then re-anchor the pivot so text and claim move together.
+			# The claim is DROPPABLE: a saturated ladder suppresses the overflow toast
+			# (no plate, no ink, no slot, no anchor) instead of overprinting the plates
+			# — the old keep-place fallback printed BOUNTY +N¢ straight across SPREAD/
+			# MAXED, and the coin-trail particles still pay out, so the reward is never
+			# swallowed. min_y is just the band floor: floattext_floor_pinned_y already
+			# banked the whole punched plate above it, so the claim's top edge always
+			# clears the band (the old 11px-box claim needed a -16.5 fudge to say that).
+			var prect := floattext_claim_rect(fpivot, fw, fsz)
+			var fgot := claim_label_slot(prect, _label_slots, band_floor, true)
+			if not fgot.has_area():
+				fx["sup"] = true   # dropped for good — no flicker as congestion shifts
+				continue
 			_label_slots.append(fgot)
 			fpivot += fgot.position - prect.position
 			floattext_anchors.append(Vector3(fpivot.x, fpivot.y, fhw))

@@ -356,6 +356,49 @@ func test_c3_mast_hazard_denies_the_orbit() -> void:
 	Runner.T.ok(not p["vest"], "the mast pulse hurts a player hugging the orbit")
 
 
+func test_mast_hazard_sleeps_through_the_shop() -> void:
+	# The intermission shop is sold as threat-free (the breather grade, the wheel
+	# scrim, the airstrike refusal all say so), but the mast kept pulsing through
+	# it: the wave-5 breather is 252t against a 180t cycle, so EVERY wave phase
+	# puts a jet window inside the shop, and the middle crate (350, shop_y) sits
+	# inside the 120px kill radius. Staged on HEAD: parked on the middle crate,
+	# the player DIED at every one of the four phase offsets below. The mast is
+	# the lone self-firing damage source in the breather (all 9 _hurt_player
+	# call sites enumerated — everything else is player-committed). The kite-
+	# denial intent is untouched: the mast pulses through every WAVE; it sleeps
+	# only for the breather, and _start_wave re-stamps wave_start_tick so the
+	# warn-before-jet invariant survives.
+	var idle := SimInput.new()
+	for w in [5, 10]:
+		for off in [0, 37, 90, 150]:
+			var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+			sim.wave = w
+			sim.tick_count = 3600 + off
+			sim.wave_start_tick = 3600
+			sim.intermission_ticks = sim._intermission_len()
+			var full: int = sim.intermission_ticks
+			var mast_events := 0
+			var steps := 0
+			while sim.intermission_ticks > 0 and steps < full + 10:
+				# Stay parked on the middle crate, the spot the reviewer died on.
+				var p: Dictionary = sim.players[0]
+				p["x"] = 350 * Fixed.ONE
+				p["y"] = sim.camera_top + 120 * Fixed.ONE
+				sim.step([idle])
+				if sim.intermission_ticks > 0:
+					for ev in sim.events:
+						if String(ev["t"]).begins_with("mast_"):
+							mast_events += 1
+				steps += 1
+			Runner.T.ok(sim.players[0]["alive"],
+				"wave %d phase-offset %d: the player survives the whole breather parked on the middle crate"
+					% [w, off])
+			Runner.T.eq(mast_events, 0,
+				"wave %d phase-offset %d: zero mast_warn/mast_pulse while the shop is open" % [w, off])
+			Runner.T.eq(sim.wave, w + 1,
+				"wave %d phase-offset %d: the gate does not wedge the wave loop" % [w, off])
+
+
 func test_c3_mast_hazard_spares_the_flank_and_off_cadence() -> void:
 	# A player OUTSIDE the radius is never hurt; and off-cadence waves are inert.
 	var sim := SimWorld.new(9, 1, "endless")

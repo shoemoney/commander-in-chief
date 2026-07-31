@@ -2529,3 +2529,22 @@ func test_duplicate_pickup_receipt_names_the_item_it_actually_is() -> void:
 	Runner.T.ok(src.count("pickup_full_text(") >= 2,
 		"pickup_full_text is wired into the pickup consumer, not just defined (%d sites)"
 			% src.count("pickup_full_text("))
+
+
+func test_mast_telegraph_sleeps_with_the_shop() -> void:
+	## The sim's mast hazard sleeps while the intermission shop is open (the
+	## shop is sold threat-free). The VIEW must mirror that gate: a warn ring
+	## or jet edge drawn during the breather telegraphs a hazard that cannot
+	## hurt — the same lie in the opposite direction. Wiring scrape in this
+	## suite's house style: the _draw_mast_hazard body must read the same
+	## intermission state the sim's _step_mast_hazard now gates on.
+	var src := _view_src()
+	var start := src.find("func _draw_mast_hazard")
+	Runner.T.ok(start >= 0, "found _draw_mast_hazard")
+	if start < 0:
+		return
+	var end := src.find("\nfunc ", start + 1)
+	Runner.T.ok(end > start, "the mast draw body is delimited by the next func")
+	if end > start:
+		Runner.T.ok(src.substr(start, end - start).contains("intermission_ticks"),
+			"the mast telegraph sleeps while the shop is open — same gate as _step_mast_hazard")

@@ -4347,6 +4347,15 @@ func _step_mast_hazard() -> void:
 	## before wave 3 so the wave-2 torture never sees it.
 	if wave < 5 or wave % 5 != 0:
 		return
+	# The intermission shop is sold as threat-free (the breather grade, the wheel
+	# scrim, the airstrike refusal all say so) — the 252t wave-5 breather swallows
+	# the whole 180t cycle at ANY phase, and the middle crate (350, shop_y) sits
+	# 67px inside the 120px kill radius. The mast is the lone self-firing damage
+	# source in the breather, so it sleeps with the shop open; the c3-3v kite
+	# denial is untouched (it pulses through every WAVE), and _start_wave
+	# re-stamps wave_start_tick, so the warn-before-jet invariant survives.
+	if intermission_ticks > 0:
+		return
 	# Wave-LOCAL phase (judge r1): counting from the wave's start guarantees the
 	# 90t warn always precedes the first jet — a global-tick phase could drop a
 	# jet on wave entry with no tell. wave_start_tick is derived, never hashed.
