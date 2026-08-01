@@ -159,10 +159,13 @@ const SNIPER_STANDOFF := 240 * F_ONE
 const SNIPER_FIRE_CD_TICKS := 170
 const SNIPER_WINDUP_TICKS := 55
 const SNIPER_BULLET_SPEED := 6 * F_ONE
-# Shield (both modes — SECTOR_SPECIALS sectors 4/6, Endless wave 3+): slow heavy; the front arc blocks bullets and it re-faces
-# the nearest player EVERY tick (_shield_blocks), so there is no flank to take:
-# explosives and Rend Rounds are the counter.
+# Shield (both modes — SECTOR_SPECIALS sectors 4/6, Endless wave 3+): slow heavy. Its
+# persistent facing turns toward the target at a capped rate, so a committed lateral move can
+# earn the rear arc while explosives and Rend remain the immediate counters.
 const SHIELD_SPEED := F_ONE
+# Starting value: component approach of ~1/32 unit per tick. Test: one tick can never reverse
+# a shield, while a player circling at safe standoff can get outside the 120-degree block cone.
+const SHIELD_TURN_STEP := F_ONE / 32
 # Sapper (both modes — SECTOR_SPECIALS sectors 2/5, Endless wave 3+): advances like a rusher but seeds armed mines behind it,
 # authoring a hazard trail between you and the top edge. Reuses fire_cd as the
 # mine-drop timer — no new hashed field.
@@ -285,6 +288,7 @@ const TANK_CRUSH_RADIUS := 18 * F_ONE
 const TANK_FIRE_COOLDOWN_TICKS := 45
 const TANK_FUEL_TICKS := 1200
 const TANK_BAIL_TICKS := 180
+const TANK_IGNITION_GRACE_TICKS := 36   # starting value: 0.6s to act on BAIL OUT after ordnance lights the hull
 const TANK_KAMIKAZE_PAD := 20 * F_ONE
 # A manned hull EATS enemy rounds (the crew is immune behind armor) — and every
 # round it eats boils a second off the ride. Fuel is already the ride's timer, so
@@ -455,9 +459,10 @@ const HULK_HALF_H := 23 * F_ONE      # 104px canvas x 0.62 call x 0.72 SCALE = 4
                                      # so 23 keeps the box just INSIDE the silhouette (bunker precedent,
                                      # test_hitbox_fairness). Was 12 — 52% of the drawn height, so 11px of
                                      # visible steel at each end of the hull stopped nothing at all.
-const SANDBAG_FIELD_CAP := 6         # starting value: 6 x 36px = 216px can never wall the ~592px lane
+const SANDBAG_FIELD_CAP := 12        # six two-segment nests; shared party cap
 const SANDBAG_HALF_W := 18 * F_ONE   # segment is 36x10 px — rushers must flank in under ~2s
 const SANDBAG_HALF_H := 5 * F_ONE
+const SANDBAG_EMBRASURE := 12 * F_ONE # clear inner-edge gap, independent of cardinalized heading
 # Collidable rocks (9/9 panel: cover-shaped decor with no collision LIED in a
 # one-hit game). Streamed rng-FREE (Knuth-hash of the spacing index) so the
 # shared stream-rng sequence is untouched; campaign-only.
@@ -652,7 +657,10 @@ const FORD_HALF_W := 32 * F_ONE
 const FORD_CYCLE_TICKS := 600        # full open->closed->open period (10s)
 const FORD_OPEN_TICKS := 180         # the dry-foot portion of the cycle (3s)
 const FORD_PHASE_STEP := 150         # per-band phase offset, so bands don't wash out in lockstep
-const FORD_WARN_TICKS := 30          # 0.5s rising-waterline tell before the ford washes out
+# A tank needs ceil(80px / 1.92px per tick) = 42 ticks to clear a river band.
+# Forty-five gives the slowest controllable actor a three-tick commitment margin
+# after the warning starts; infantry has substantially more room.
+const FORD_WARN_TICKS := 45          # 0.75s: measured full tank crossing + 3 ticks
 const FROGMAN_NOTICE_RADIUS := 60 * F_ONE
 const FROGMAN_CALM_RADIUS := 100 * F_ONE
 const FROGMAN_LUNGE_SPEED := 3 * F_ONE
@@ -784,6 +792,14 @@ var tokens: int = 0                # Commendation Orders (9/9 panel: the score->
                                    # cap 2, wiped on death. Spent via the wheel for a free supply call.
 var deaths_this_wave: int = 0      # endless: for the Clean Wave bonus
 var _prev_camera_top: int = 0
+# Transient impact-batch snapshot. A healthy occupied hull at the start of a
+# simulation tick protects that same crew from every impact resolving in the
+# tick, even if the first impact flips `burning` before a sibling strike/barrel
+# scans exposure. Rebuilt every step and deliberately checksum-excluded: it is
+# derived wholly from hashed state at the tick boundary.
+var _same_tick_armored_crew: Dictionary = {}
+var _step_in_progress: bool = false
+var _tanks_stepped_this_tick: bool = false
 
 
 func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -> void:
@@ -983,9 +999,13 @@ func step(inputs: Array) -> void:
 		_god_restore()
 	if wiped:
 		return   # the run is over; the sim is frozen behind the debrief
+	_snapshot_same_tick_tank_armor()
+	_step_in_progress = true
+	_tanks_stepped_this_tick = false
 	_prev_camera_top = camera_top
 	_step_players(inputs)
 	_step_tanks()
+	_tanks_stepped_this_tick = true
 	_step_bullets()
 	_step_enemy_bullets()
 	_step_grenades()
@@ -1065,6 +1085,8 @@ func step(inputs: Array) -> void:
 		_step_observer()
 		_step_grass_flush()   # c3 2v: tall-grass camping draws a flush grenade
 		_resolve_strikes()   # was the tail of _step_observer; same order
+	_step_in_progress = false
+	_tanks_stepped_this_tick = false
 
 
 # --- Players ---
@@ -1235,6 +1257,16 @@ func _step_players(inputs: Array) -> void:
 				if absi(p["x"] - rk["x"]) <= rhw and absi(p["y"] - rk["y"]) <= rhh:
 					_slide_aabb(p, rpx, rpy, rk["x"], rk["y"], rhw, rhh)
 					break
+		# Paid sandbags are physical cover for boots as well as bullets and enemy
+		# pathing. Resolve every touched segment because a nest has two pieces and
+		# authored walls can overlap; the shared escape rule lets a bag planted on
+		# an occupied point be walked out of rather than trapping the player.
+		if not sandbags.is_empty():
+			for sb in sandbags:
+				var sbhw := _sb_hw(sb)
+				var sbhh := _sb_hh(sb)
+				if absi(p["x"] - sb["x"]) <= sbhw and absi(p["y"] - sb["y"]) <= sbhh:
+					_slide_aabb(p, rpx, rpy, sb["x"], sb["y"], sbhw, sbhh)
 		# c4 2v: a SEALED lane-block is solid to boots — revert a step that ENTERS
 		# it (escape-rule: a step started inside can still walk out). The open
 		# opposite flank is the guaranteed bypass, so you reroute, never softlock.
@@ -2028,6 +2060,9 @@ func _hurt_player(p: Dictionary) -> void:
 	## (with a mercy window), otherwise it's the 1986 rule — one hit, done.
 	if p["hurt_iframes"] > 0:
 		return
+	if _same_tick_ignition_armor_holds(p):
+		return   # simultaneous impacts share the healthy hull seen at tick start;
+		         # the next tick snapshots it as burning and restores normal exposure
 	if not _exposed(p):
 		return   # armor eats it. The AUTHORITATIVE copy of the rule: a future
 		         # hazard that forgets its own guard cannot punch through a
@@ -2038,6 +2073,27 @@ func _hurt_player(p: Dictionary) -> void:
 		events.append({"t": "vest_break", "x": p["x"], "y": p["y"], "p": p["idx"]})
 		return
 	_kill_player(p)
+
+
+func _snapshot_same_tick_tank_armor() -> void:
+	_same_tick_armored_crew.clear()
+	for pi in players.size():
+		var ti: int = players[pi].get("in_tank", -1)
+		if ti >= 0 and ti < tanks.size() and tanks[ti]["alive"] and not tanks[ti]["burning"]:
+			_same_tick_armored_crew[pi] = ti
+
+
+func _same_tick_ignition_armor_holds(p: Dictionary) -> bool:
+	if not _step_in_progress:
+		return false
+	var pi: int = p.get("idx", -1)
+	var ti: int = p.get("in_tank", -1)
+	if ti < 0 or _same_tick_armored_crew.get(pi, -1) != ti or ti >= tanks.size():
+		return false
+	var tank := tanks[ti]
+	# Only damage ignition receives this batch guarantee. Fuel-out starts with a
+	# visible gauge warning and deliberately arms no crew ring.
+	return tank["alive"] and tank["burning"] and tank.get("crew_ring_ticks", -1) > 0
 
 
 func _kill_player(p: Dictionary) -> void:
@@ -2124,23 +2180,37 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 					fe["windup"] = maxi(fe["windup"], _windup_for(fe["kind"]))
 			events.append({"t": "flashbang", "x": p["x"], "y": p["y"]})
 		11:
-			# Deployable sandbags (5-vote panel): the wheel buy plants a cover
-			# segment IMMEDIATELY one step along the aim (claymore grammar) —
-			# no carried inventory, no new player field, which is exactly what
-			# keeps the player hash list untouched while unbought. Blocks
-			# bullets AND rusher pathing both ways; one grenade or tank tread
-			# clears it; mortar rings ignore it (strikes never check cover).
+			# A purchase plants a two-segment nest with a real, fixed-width
+			# embrasure. Cardinalizing only the wall axis keeps the opening exactly
+			# SANDBAG_EMBRASURE wide for every aim heading instead of squeezing a
+			# diagonal gap through axis-aligned collision boxes.
 			var sbx: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
 			var sby: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
 			# "player": 1 is what SANDBAG_FIELD_CAP counts. Counting *untagged* bags
 			# instead meant every authored bag on the field billed against the player's
-			# 6-bag allowance: endless plants 16 in _init, so the 40-coin shop bag
+			# allowance: endless plants 16 in _init, so the shop bag
 			# answered deny/"cap" from tick 0 — in the only mode that has a shop, and
 			# the exact loop _init's own comment calls intended. ("world" could not be
 			# reused for this: in endless it marks the TEMPORARY shop barricades that
 			# crumble at intermission end, so tagging permanent cover with it deletes
 			# the arena's cover every wave — tests/test_endless.gd:492 pins that.)
-			sandbags.append({"x": sbx, "y": sby, "player": 1})
+			var off := SANDBAG_HALF_W + SANDBAG_EMBRASURE / 2
+			var vertical: bool = absi(p["aim_x"]) > absi(p["aim_y"])
+			# Both segments are one paid object economically. The stable local tag lets
+			# every damage path remove the pair atomically, so the shared field can
+			# never truthfully display 11/12 while a two-slot purchase is denied.
+			# Derive the next tag from live bags instead of adding a global counter:
+			# same ordered state => same tag, and destroyed high tags may be reused
+			# without colliding with any surviving nest.
+			var nest_tag := 1
+			for old_sb in sandbags:
+				nest_tag = maxi(nest_tag, old_sb.get("nest", 0) + 1)
+			if vertical:
+				sandbags.append({"x": sbx, "y": sby - off, "player": 1, "vertical": 1, "nest": nest_tag})
+				sandbags.append({"x": sbx, "y": sby + off, "player": 1, "vertical": 1, "nest": nest_tag})
+			else:
+				sandbags.append({"x": sbx - off, "y": sby, "player": 1, "nest": nest_tag})
+				sandbags.append({"x": sbx + off, "y": sby, "player": 1, "nest": nest_tag})
 			events.append({"t": "sandbag_plant", "x": sbx, "y": sby})
 		3:
 			# Airstrike is CALLED IN, not instant — it now telegraphs like every
@@ -2204,6 +2274,35 @@ func _econ_scale(base: int) -> int:
 	## 25%/step is the rate the Clean Wave bonus was already authored at
 	## (40 + depth*10 IS 40 scaled by 25%/step), so the two now provably track.
 	return base + base * _econ_depth() / 4
+
+
+static func _sb_hw(sb: Dictionary) -> int:
+	return SANDBAG_HALF_H if sb.get("vertical", 0) == 1 else SANDBAG_HALF_W
+
+
+static func _sb_hh(sb: Dictionary) -> int:
+	return SANDBAG_HALF_W if sb.get("vertical", 0) == 1 else SANDBAG_HALF_H
+
+
+func _break_sandbag_at(index: int, emit_break := true) -> void:
+	## A bought two-piece nest is one economic/clarity object: any attrition that
+	## catches either segment removes both. Authored world bags have no nest tag
+	## and retain their existing per-segment destruction grammar.
+	if index < 0 or index >= sandbags.size():
+		return
+	var nest_tag: int = sandbags[index].get("nest", 0)
+	if nest_tag > 0:
+		for i in range(sandbags.size() - 1, -1, -1):
+			if sandbags[i].get("nest", 0) != nest_tag:
+				continue
+			if emit_break:
+				events.append({"t": "sandbag_break", "x": sandbags[i]["x"], "y": sandbags[i]["y"]})
+			sandbags.remove_at(i)
+		return
+	var sb := sandbags[index]
+	if emit_break:
+		events.append({"t": "sandbag_break", "x": sb["x"], "y": sb["y"]})
+	sandbags.remove_at(index)
 
 
 func player_sandbag_count() -> int:
@@ -2314,12 +2413,12 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		return
 	var cost: int = _supply_cost(kind)
 	var player_bags := player_sandbag_count()
-	if kind == 4 and (player_bags >= SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
+	if kind == 4 and (player_bags + 2 > SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
 		# Sandbag-specific denials: field cap reached, or buying from a tank
 		# (no hands on the deck to dig in). Deny is loud AND says why —
 		# "NEED COINS" at a full field with 400 in the chest was a HUD lie.
 		events.append({"t": "deny", "x": p["x"], "y": p["y"],
-			"why": "cap" if player_bags >= SANDBAG_FIELD_CAP else "tank"})
+			"why": "cap" if player_bags + 2 > SANDBAG_FIELD_CAP else "tank"})
 		return
 	if kind == 3 and mode == "endless" and intermission_ticks > 0:
 		# A strike bought into the intermission lands on a provably empty field
@@ -2538,12 +2637,15 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 				continue
 			_kill_enemy(e)
 	# Treads flatten sandbags — armor does not respect your landscaping.
-	for si in range(sandbags.size() - 1, -1, -1):
+	var si := sandbags.size() - 1
+	while si >= 0:
 		var tsb := sandbags[si]
-		if absi(tank["x"] - tsb["x"]) <= SANDBAG_HALF_W + TANK_CRUSH_RADIUS \
-				and absi(tank["y"] - tsb["y"]) <= SANDBAG_HALF_H + TANK_CRUSH_RADIUS:
-			events.append({"t": "sandbag_break", "x": tsb["x"], "y": tsb["y"]})
-			sandbags.remove_at(si)
+		if absi(tank["x"] - tsb["x"]) <= _sb_hw(tsb) + TANK_CRUSH_RADIUS \
+				and absi(tank["y"] - tsb["y"]) <= _sb_hh(tsb) + TANK_CRUSH_RADIUS:
+			_break_sandbag_at(si)
+			si = mini(si - 1, sandbags.size() - 1)
+		else:
+			si -= 1
 	# ...and roll over fuel barrels to set them off (chains via the fuse in _step_barrels).
 	for bl in barrels:
 		if bl["armed"] and _dist_lte(tank["x"], tank["y"], bl["x"], bl["y"], TANK_CRUSH_RADIUS):
@@ -2624,8 +2726,11 @@ func _step_tanks() -> void:
 				_ignite_tank(tank)
 
 		if tank["burning"]:
-			# Kamikaze verb: a burning tank driven into a bunker detonates it.
-			# The driver is thrown clear (the cinematic leap) with the boost.
+			# A bunker contact was already committed by _step_players this tick. Let
+			# the documented kamikaze ejection resolve before an exact-boundary crew
+			# ring; otherwise ring==1 killed the driver/gunner from a hull that the
+			# same frame then claimed had thrown them clear.
+			var consumed_by_kamikaze := false
 			for bk in bunkers:
 				if bk["alive"] and _point_in_aabb_expanded(tank["x"], tank["y"], bk, TANK_KAMIKAZE_PAD):
 					bk["alive"] = false
@@ -2633,15 +2738,28 @@ func _step_tanks() -> void:
 					score += COIN_BUNKER * 20
 					events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
 						"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER * 2})
-					# The bail window covers the whole crew: driver first (his
-					# dismount promotes the gunner to occupant), then the gunner.
+					# Driver first: their dismount promotes the gunner; the following
+					# pass then ejects that promoted rider without leaving a phantom seat.
 					for ci in players.size():
 						if players[ci]["in_tank"] == ti:
 							_dismount(players[ci], tank)
 					_detonate_tank(tank)
+					consumed_by_kamikaze = true
 					break
-			if not tank["alive"]:
+			if consumed_by_kamikaze:
 				continue
+			# Damage ignition schedules one crew hit after a short, advertised reaction
+			# window. Bail before it expires and the ring finds nobody; ignore the klaxon
+			# and normal vest/one-hit rules apply. Fuel-out ignition never schedules it.
+			var ring_ticks: int = tank.get("crew_ring_ticks", -1)
+			if ring_ticks > 0:
+				ring_ticks -= 1
+				tank["crew_ring_ticks"] = ring_ticks
+				if ring_ticks == 0:
+					for ci in players.size():
+						if players[ci]["alive"] and players[ci]["in_tank"] == ti:
+							_hurt_player(players[ci])
+					tank["crew_ring_ticks"] = -1
 			tank["burn_ticks"] = tank["burn_ticks"] - 1
 			if tank["burn_ticks"] <= 0:
 				# Bail window expired: anyone still inside goes with it —
@@ -2657,35 +2775,24 @@ func _ignite_tank(tank: Dictionary, from_damage := false) -> void:
 	if not tank["burning"]:
 		tank["burning"] = true
 		tank["burn_ticks"] = TANK_BAIL_TICKS
+		# A tread-triggered barrel can ignite during _step_players, before the
+		# rider has seen the warning and before this tick's tank decrement. Seed
+		# one compensating count so the post-step state still exposes all 36
+		# actionable input frames. Later-phase strikes/explosions arm the plain
+		# value because _step_tanks has already run.
+		var pre_tank_step_compensation := 1 if _step_in_progress and not _tanks_stepped_this_tick else 0
+		tank["crew_ring_ticks"] = TANK_IGNITION_GRACE_TICKS + pre_tank_step_compensation if from_damage else -1
 		events.append({"t": "tank_ignite", "x": tank["x"], "y": tank["y"]})
-		if from_damage:
-			# THE TANK COSTS SOMETHING TO HOLD. Ordnance that brews the hull rings
-			# the crew: one hit, vest rules, exactly as if they were standing in it.
-			# Without this, armor was free — bailing is instant and i-framed, so
-			# "the crew is exposed while it burns" costs a bot that bails on the
-			# ignition tick almost nothing. SHIPPED-CONFIG numbers (2026-07-26;
-			# demo_input + god_mode campaign, 8 seeds, 12,000-tick cap, ticks
-			# split mounted vs on foot) — HEAD 1.24 knockdowns/1000t vs 4.93 on
-			# foot (3.97x safer); THIS 1.35 vs 4.69 (3.47x). The ratio barely
-			# moves and structurally cannot: a bot that bails on ignition makes
-			# "mounted ticks" definitionally the ticks the hull is NOT on fire.
-			# What DID move is how long the ride lasts — mount share 31.7%
-			# (28,212/88,859 ticks) -> 16.2% (11,102/68,498), halved.
-			# FUEL STARVATION deliberately does not ring: running dry is your own
-			# clock, the fuel bar telegraphs it, and the free bail is what keeps
-			# the tank a tool instead of a death sentence.
-			# `burning` is set FIRST so this routes through the one authoritative
-			# guard (_exposed) instead of becoming a 9th copy of the rule.
-			for p in players:
-				var ti: int = p["in_tank"]
-				if p["alive"] and ti >= 0 and is_same(tanks[ti], tank):
-					_hurt_player(p)
+		# Ordnance still makes the tank cost something to hold, but the hit now lands
+		# only if the crew ignores the BAIL OUT promise for the grace window. Fuel
+		# starvation deliberately schedules no ring: its own gauge is the warning.
 
 
 func _detonate_tank(tank: Dictionary) -> void:
 	tank["alive"] = false
 	tank["occupant"] = -1
 	tank["burning"] = false   # dead is dead — a hulk carrying burning=true forever was a trap for later readers
+	tank["crew_ring_ticks"] = -1   # no delayed crew hit survives ejection/destruction
 	# Tank Hulk (5-vote panel): the dead hull IS the cover — burn_ticks is
 	# hashed but dead-unused after death, so it becomes the hulk lifetime.
 	# Zero new fields, zero new entities; behavior change -> golden re-record.
@@ -2739,27 +2846,10 @@ func _step_bullets() -> void:
 					dead = true
 					break
 		if not dead and not sandbags.is_empty():
-			# Cover eats rounds both ways — EXCEPT a bag this party planted itself, which
-			# you fire over. The wheel plants at CLAYMORE_PLANT_OFFSET (20px) ALONG the aim
-			# and the segment is 36x10, so its near face lands ~2px from the muzzle, square
-			# across the firing line. Arithmetic, not opinion: aiming north the bag spans
-			# y-25..y-15 and a 6px/tick round steps to -6/-12/-18, dying on tick 3; aiming
-			# east it spans x+2..x+38 and dies on tick 1, six pixels out. Effective range
-			# along the plant axis was shorter than ENEMY_TOUCH_RADIUS, so the 40-coin buy
-			# silently disabled your gun in the one direction you were facing.
-			# The exemption is deliberately narrow: only `player`-tagged bags, only the
-			# `bullets` array (player MG rounds — _spawn_mg_bullet is its sole producer).
-			# _step_enemy_bullets still dies on these bags, so cover from incoming fire —
-			# the entire reason to buy one — is untouched; rusher pathing still blocks; one
-			# grenade or tank tread still clears it. Authored/world bags still stop player
-			# rounds, so the level's own cover keeps its tactical meaning.
-			# Mirrors the fix already made on the other side of this exchange (see
-			# _step_enemy_bullets: "cover now protects only what stands BEHIND it"), where a
-			# player standing inside his own bag was immune to everything.
+			# Cover eats rounds both ways. Player nests have a physical embrasure,
+			# so firing through the opening is geometry rather than an ownership cheat.
 			for sb in sandbags:
-				if sb.get("player", 0) == 1:
-					continue
-				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
+				if absi(bx - sb["x"]) <= _sb_hw(sb) and absi(by - sb["y"]) <= _sb_hh(sb):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
@@ -2985,13 +3075,16 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		# Frag bonus: a single blast that catches a pack rewards reading the field.
 		score += frags * 50
 		events.append({"t": "frag_bonus", "x": x, "y": y, "n": frags})
-	for si in range(sandbags.size() - 1, -1, -1):
+	var si := sandbags.size() - 1
+	while si >= 0:
 		# One grenade clears a bag — player-authored cover is real but cheap
 		# to answer, for BOTH sides of it (your own grenade included).
 		var sb := sandbags[si]
 		if _dist_lte(x, y, sb["x"], sb["y"], GRENADE_RADIUS):
-			events.append({"t": "sandbag_break", "x": sb["x"], "y": sb["y"]})
-			sandbags.remove_at(si)
+			_break_sandbag_at(si)
+			si = mini(si - 1, sandbags.size() - 1)
+		else:
+			si -= 1
 	# c4 2v: an explosion instantly BREACHES a kind-2 ruined-wall slab in radius —
 	# a grenade/barrel opens a lane through a wall in one shot (no chip count).
 	for ki in range(rocks.size() - 1, -1, -1):
@@ -3259,7 +3352,9 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 			e["y"] = pvy
 	if not sandbags.is_empty():
 		for sb in sandbags:
-			if absi(e["x"] - sb["x"]) <= SANDBAG_HALF_W and absi(e["y"] - sb["y"]) <= SANDBAG_HALF_H:
+			var sbhw := _sb_hw(sb)
+			var sbhh := _sb_hh(sb)
+			if absi(e["x"] - sb["x"]) <= sbhw and absi(e["y"] - sb["y"]) <= sbhh:
 				# Escape rule: revert only steps ENTERING the bag — a mover the
 				# bag was planted ON walks out instead of freezing bulletproof
 				# forever (re-review: the frozen immortal blocker). No break: the
@@ -3267,7 +3362,7 @@ func _advance_toward(e: Dictionary, dx: int, dy: int, dlen: int, base_spd: int) 
 				# a diagonal approach can land inside more than one bag's AABB in
 				# the same tick — resolve against every bag it's touching, not
 				# just the first found, or the un-checked second bag re-traps it.
-				_slide_aabb(e, pvx, pvy, sb["x"], sb["y"], SANDBAG_HALF_W, SANDBAG_HALF_H)
+				_slide_aabb(e, pvx, pvy, sb["x"], sb["y"], sbhw, sbhh)
 
 
 func _spawn_enemy_bullet(x: int, y: int, dx: int, dy: int, dlen: int, speed: int = ENEMY_BULLET_SPEED) -> void:
@@ -3378,7 +3473,9 @@ func _step_enemies() -> void:
 			continue
 		if e["kind"] == "shield":
 			# Advances slowly behind a frontal shield (bullet block handled in
-			# _step_bullets); touch still kills. No ranged attack.
+			# _step_bullets); touch still kills. No ranged attack. Facing updates
+			# before movement so the plate the player sees is the plate this tick blocks.
+			_turn_shield_toward(e, dx, dy, dlen)
 			if dlen > F_ONE:
 				_advance_toward(e, dx, dy, dlen, SHIELD_SPEED)
 			continue
@@ -3580,12 +3677,15 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	# The raider SMASHES sandbags it drives over (re-review: the fastest ground
 	# vehicle phased through player cover a walking rusher respected).
 	if not sandbags.is_empty():
-		for si in range(sandbags.size() - 1, -1, -1):
+		var si := sandbags.size() - 1
+		while si >= 0:
 			var tsb := sandbags[si]
-			if absi(e["x"] - tsb["x"]) <= SANDBAG_HALF_W + 8 * F_ONE \
-					and absi(e["y"] - tsb["y"]) <= SANDBAG_HALF_H + 8 * F_ONE:
-				events.append({"t": "sandbag_break", "x": tsb["x"], "y": tsb["y"]})
-				sandbags.remove_at(si)
+			if absi(e["x"] - tsb["x"]) <= _sb_hw(tsb) + 8 * F_ONE \
+					and absi(e["y"] - tsb["y"]) <= _sb_hh(tsb) + 8 * F_ONE:
+				_break_sandbag_at(si)
+				si = mini(si - 1, sandbags.size() - 1)
+			else:
+				si -= 1
 	## Technical raider (both modes — SECTOR_SPECIALS sector 4, Endless wave 3+): rev telegraph → LOCK a charge line at
 	## the target's position → barrel down it at TECHNICAL_SPEED. It cannot
 	## steer mid-charge (repositioning off the line is the dodge), water is a
@@ -3844,9 +3944,13 @@ func _step_mines() -> void:
 	# Sandbag sweep (mirrors the enemy off-screen cull): bags the ratchet left
 	# behind are unreachable in campaign but still counted against the global
 	# cap — a silent permanent buy-lockout (re-review). Torture-inert (empty).
-	for si in range(sandbags.size() - 1, -1, -1):
+	var si := sandbags.size() - 1
+	while si >= 0:
 		if sandbags[si]["y"] > camera_top + 420 * F_ONE:
-			sandbags.remove_at(si)
+			_break_sandbag_at(si, false)
+			si = mini(si - 1, sandbags.size() - 1)
+		else:
+			si -= 1
 	for ri in range(rocks.size() - 1, -1, -1):
 		if rocks[ri]["y"] > camera_top + 420 * F_ONE:
 			rocks.remove_at(ri)
@@ -4074,14 +4178,19 @@ func _shields_possible() -> bool:
 
 
 func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
-	## True if bullet b hits the shieldman's front arc. Facing = toward the
-	## nearest player; a head-on bullet travels roughly opposite that, so a
+	## True if bullet b hits the shieldman's persistent front arc. A head-on
+	## bullet travels roughly opposite that facing, so a
 	## strongly-negative dot(bullet_dir, facing) means 'into the shield'.
-	var target := _nearest_alive_player(e["x"], e["y"])
-	if target.is_empty():
-		return false
-	var fx: int = target["x"] - e["x"]
-	var fy: int = target["y"] - e["y"]
+	var fx: int = e.get("face_x", 0)
+	var fy: int = e.get("face_y", 0)
+	# Backward-compatible fallback for hand-authored fixtures and old replay states: derive an
+	# initial facing once when no persistent heading exists yet.
+	if fx == 0 and fy == 0:
+		var target := _nearest_alive_player(e["x"], e["y"])
+		if target.is_empty():
+			return false
+		fx = target["x"] - e["x"]
+		fy = target["y"] - e["y"]
 	var flen := Fixed.length(fx, fy)
 	var blen := Fixed.length(b["vx"], b["vy"])
 	if flen <= 0 or blen <= 0:
@@ -4090,6 +4199,45 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	var dot := Fixed.mul(Fixed.div(fx, flen), Fixed.div(b["vx"], blen)) \
 		+ Fixed.mul(Fixed.div(fy, flen), Fixed.div(b["vy"], blen))
 	return dot < -(F_ONE / 2)
+
+
+func _turn_shield_toward(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## Deterministic capped facing update. Add a short tangent step, then normalize: this is a
+	## fixed-point small-angle rotation without floats/trig. Cross-product sign chooses the
+	## shortest turn; at the exact 180-degree tie, always turn the same way. That explicit tie
+	## matters: component-wise approach changes (0,+1) to (0,+31/32), whose normalization is
+	## (0,+1) again, freezing the shield forever when its target moves directly behind it.
+	## Entry: live shield with a target. Exit: stored unit heading. Target switches preserve the
+	## old heading and turn through the new direction instead of snapping the plate.
+	if dlen <= 0:
+		return
+	var want_x := Fixed.div(dx, dlen)
+	var want_y := Fixed.div(dy, dlen)
+	var face_x: int = e.get("face_x", want_x)
+	var face_y: int = e.get("face_y", want_y)
+	var face_len := Fixed.length(face_x, face_y)
+	if face_len <= 0:
+		e["face_x"] = want_x
+		e["face_y"] = want_y
+		return
+	face_x = Fixed.div(face_x, face_len)
+	face_y = Fixed.div(face_y, face_len)
+	var cross := Fixed.mul(face_x, want_y) - Fixed.mul(face_y, want_x)
+	var dot := Fixed.mul(face_x, want_x) + Fixed.mul(face_y, want_y)
+	# Close enough to the desired heading: land exactly instead of crossing it and
+	# oscillating by one turn step. Restrict this snap to the same hemisphere so the
+	# cross==0, dot<0 antipode always takes the stable positive-turn tie-break.
+	if dot >= 0 and absi(cross) <= SHIELD_TURN_STEP:
+		e["face_x"] = want_x
+		e["face_y"] = want_y
+		return
+	var turn_sign := 1 if cross >= 0 else -1
+	var next_x := face_x + turn_sign * Fixed.mul(-face_y, SHIELD_TURN_STEP)
+	var next_y := face_y + turn_sign * Fixed.mul(face_x, SHIELD_TURN_STEP)
+	face_len = Fixed.length(next_x, next_y)
+	if face_len > 0:
+		e["face_x"] = Fixed.div(next_x, face_len)
+		e["face_y"] = Fixed.div(next_y, face_len)
 
 
 func _spawn_mg_bullet(p: Dictionary, i: int, ax: int, ay: int) -> void:
@@ -4114,6 +4262,13 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 	## new hashed enemy field is introduced.
 	var e := {"x": x, "y": y, "alive": true, "elite": true,
 		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0}
+	if kind == "shield":
+		var st := _nearest_alive_player(x, y)
+		var sdx: int = st["x"] - x if not st.is_empty() else 0
+		var sdy: int = st["y"] - y if not st.is_empty() else F_ONE
+		var sdlen := Fixed.length(sdx, sdy)
+		e["face_x"] = Fixed.div(sdx, sdlen) if sdlen > 0 else 0
+		e["face_y"] = Fixed.div(sdy, sdlen) if sdlen > 0 else F_ONE
 	if kind == "ghillie":
 		e["submerged"] = true   # dug in, cloaked until you close the distance
 		e["surface_ticks"] = 0
@@ -5090,7 +5245,7 @@ func _step_camera() -> void:
 		tanks.append({
 			"x": SCREEN_CX, "y": _next_tank_y,
 			"alive": true, "burning": false,
-			"fuel": TANK_FUEL_TICKS, "burn_ticks": 0,
+			"fuel": TANK_FUEL_TICKS, "burn_ticks": 0, "crew_ring_ticks": -1,
 			"fire_cd": 0, "occupant": -1,
 		})
 		# c2-authored-campaign: this pocket had no calm-band guard at all (the
@@ -6453,7 +6608,7 @@ func _step_enemy_bullets() -> void:
 		# cover now protects only what stands BEHIND it).
 		if not dead and not sandbags.is_empty():
 			for sb in sandbags:
-				if absi(bx - sb["x"]) <= SANDBAG_HALF_W and absi(by - sb["y"]) <= SANDBAG_HALF_H:
+				if absi(bx - sb["x"]) <= _sb_hw(sb) and absi(by - sb["y"]) <= _sb_hh(sb):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
 					break
@@ -6757,6 +6912,9 @@ func checksum() -> int:
 		for sb in sandbags:
 			h = feed.call(sb["x"], h)
 			h = feed.call(sb["y"], h)
+			h = feed.call(sb.get("player", 0), h)
+			h = feed.call(sb.get("vertical", 0), h)
+			h = feed.call(sb.get("nest", 0), h)
 	if not vents.is_empty():
 		# Conditional feed (sandbags precedent): vents exist only past seg 4 —
 		# neither torture window ever streams one, so goldens hold.
@@ -6790,6 +6948,8 @@ func checksum() -> int:
 		h = feed.call(e.get("windup", 0), h)
 		h = feed.call(e.get("aim_lx", 0), h)
 		h = feed.call(e.get("aim_ly", 0), h)
+		h = feed.call(e.get("face_x", 0), h)
+		h = feed.call(e.get("face_y", 0), h)
 		h = feed.call(int(e.get("marked", false)), h)
 		h = feed.call(e.get("hp", 0), h)   # MG Nest armor (other kinds have none)
 	for pk in pickups:
@@ -6811,7 +6971,8 @@ func checksum() -> int:
 		h = feed.call(bl.get("fuse_ticks", 0), h)   # chain-fuse countdown
 	h = feed.call(tanks.size(), h)
 	for t in tanks:
-		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"], t["occupant"]]:
+		for v in [t["x"], t["y"], int(t["alive"]), int(t["burning"]), t["fuel"], t["burn_ticks"],
+				t.get("crew_ring_ticks", -1), t["occupant"]]:
 			h = feed.call(v, h)
 	h = feed.call(gates.size(), h)
 	for g in gates:

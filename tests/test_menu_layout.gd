@@ -6428,7 +6428,7 @@ func test_default_binds_match_the_original_hardcoded_gameplay_keys() -> void:
 	Runner.T.eq(int(d["grenade_alt"]), KEY_SHIFT, "GRENADE (ALT) default is still Shift")
 	Runner.T.eq(int(d["roll"]), KEY_C, "ROLL default is still C")
 	Runner.T.eq(int(d["interact"]), KEY_F, "INTERACT default is still F")
-	Runner.T.eq(int(d["revive"]), KEY_E, "REVIVE default is still E")
+	Runner.T.eq(int(d["revive"]), KEY_SPACE, "REVIVE default is the dedicated SPACE key")
 	Runner.T.eq(int(d["buy"]), KEY_Q, "SUPPLY WHEEL default is still Q")
 	var p := MainScript.PAD_DEFAULTS
 	Runner.T.ok(not p.has("fire"), "no pad FIRE button either — the right shoulder is free")
@@ -7033,6 +7033,92 @@ func test_content_well_ink_never_touches_the_frame_border() -> void:
 			"%s: no two content strings overlap%s" % [scr["tag"], _overlap_msg(_worst_text_overlap(m.ops, f))])
 	m.free()
 	stub.free()
+
+
+# accessibility: every enlarged TEXT SIZE uses the measured HOWTO leaf pager.
+# Inspect every reachable leaf, rather than only leaf zero, so pagination cannot
+# hide the tail of a tab while keeping the first screen superficially clean.
+func test_howto_large_text_every_scale_reflows_without_clipping_or_unreachable_rows() -> void:
+	var prior_scale := Art.text_scale
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var f := Art.font()
+	for pct in [100, 125, 150, 175, 200]:
+		Art.text_scale = float(pct) / 100.0
+		if pct == 100:
+			Runner.T.ok(not m._howto_large_text(), "100% retains the authored default manual presentation")
+			continue
+		Runner.T.ok(m._howto_large_text(), "%d%% enables measured large-text pagination" % pct)
+		for tab in Menu.HOWTO_TABS.size():
+			m._howto_page = tab
+			m._howto_endless_page = 0
+			var expected_rows: int = m._howto_large_rows(tab).size()
+			var pages: int = m._howto_subpages()
+			Runner.T.ok(pages >= 1, "%d%%/%s exposes at least one reachable leaf" % [pct, Menu.HOWTO_TABS[tab]])
+			var seen_rows := 0
+			for leaf in pages:
+				m._howto_endless_page = leaf
+				m.ops.clear()
+				m.centered.clear()
+				var prev = Art.text_capture
+				Art.text_capture = m.ops
+				m._draw_howto()
+				Art.text_capture = prev
+				var tag := "%d%%/%s %d/%d" % [pct, Menu.HOWTO_TABS[tab], leaf + 1, pages]
+				for op in m.ops:
+					if op["k"] != "text":
+						continue
+					var box: Rect2 = op["box"]
+					# Large instructional rows start exactly at CONTENT_BODY_Y;
+					# title/tabs sit above and the leaf controls sit below.
+					if box.position.y < Menu.CONTENT_BODY_Y - 0.5 or box.end.y > m._howto_nav_y() - 15.5:
+						continue
+					seen_rows += 1
+					Runner.T.ok(int(op["size"]) >= Art.fs(10),
+						"%s: instructional text honors the requested scale (size %d)" % [tag, int(op["size"])])
+					var natural_w := f.get_string_size(str(op["id"]), HORIZONTAL_ALIGNMENT_LEFT, -1, int(op["size"])).x
+					Runner.T.ok(box.position.x >= Menu.FRAME_INNER_L - 0.5 and box.position.x + natural_w <= Menu.FRAME_INNER_R + 0.5,
+						"%s: '%s' fits the 640x360 frame without clipping" % [tag, str(op["id"]).substr(0, 36)])
+				Runner.T.ok(_worst_text_overlap(m.ops, f) == null,
+					"%s: scaled text, glyphs, sprites, and navigation do not overlap%s" % [tag, _overlap_msg(_worst_text_overlap(m.ops, f))])
+			Runner.T.eq(seen_rows, expected_rows,
+				"%d%%/%s: every measured row is reachable across %d leaves" % [pct, Menu.HOWTO_TABS[tab], pages])
+	Art.text_scale = 1.0
+	# Specialist paging remains the original two-leaf model at the ship scale.
+	m._howto_page = Menu.HOWTO_ENDLESS_TAB
+	m._howto_endless_page = 0
+	Runner.T.eq(m._howto_subpages(), m._endless_pages(), "100% preserves specialist paging")
+	m.free()
+	stub.free()
+	Art.text_scale = prior_scale
+
+
+func test_howto_large_text_leaf_controls_keep_keyboard_controller_and_mouse_parity() -> void:
+	var prior_scale := Art.text_scale
+	Art.text_scale = 2.0
+	var stub := _StubMain.new()
+	var m := Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m._howto_page = 0
+	m._howto_endless_page = 0
+	Runner.T.ok(m._howto_subpages() > 1, "200% CONTROLS has multiple leaves for navigation coverage")
+	m._nav(0, 1)
+	Runner.T.eq(m._howto_endless_page, 1, "controller horizontal navigation reaches the next large-text leaf")
+	m._howto_endless_page = 0
+	var next_rect: Rect2 = m._howto_endless_nav_rects()[1]
+	m._unhandled_input(_click_ev(next_rect.get_center()))
+	Runner.T.eq(m._howto_endless_page, 1, "mouse NEXT target reaches the same large-text leaf")
+	m._howto_endless_page = 0
+	m._unhandled_input(_key_ev(KEY_RIGHT, true))
+	Runner.T.eq(m._howto_endless_page, 1, "keyboard RIGHT reaches the same large-text leaf")
+	m.free()
+	stub.free()
+	Art.text_scale = prior_scale
 
 
 ## Worst pairwise intersection among the captured FOREGROUND ink ops (strings, fitted

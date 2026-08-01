@@ -20,12 +20,14 @@ func test_replay_load_rejects_corrupt_input() -> void:
 	Runner.T.ok(Replay.load_from(bad_magic) == null, "wrong magic header rejected")
 
 	var missing_frames := "user://tmp_test_missing_frames.json"
-	_write_json(missing_frames, {"magic": Replay.MAGIC, "seed": 0, "mode": "campaign",
+	_write_json(missing_frames, {"magic": Replay.MAGIC, "ruleset": Replay.CURRENT_RULESET_VERSION,
+		"seed": 0, "mode": "campaign",
 		"players": 1})
 	Runner.T.ok(Replay.load_from(missing_frames) == null, "missing 'frames' field rejected")
 
 	var bad_frames_type := "user://tmp_test_bad_frames_type.json"
-	_write_json(bad_frames_type, {"magic": Replay.MAGIC, "seed": 0, "mode": "campaign",
+	_write_json(bad_frames_type, {"magic": Replay.MAGIC, "ruleset": Replay.CURRENT_RULESET_VERSION,
+		"seed": 0, "mode": "campaign",
 		"players": 1, "frames": "nope"})
 	Runner.T.ok(Replay.load_from(bad_frames_type) == null, "non-array 'frames' field rejected")
 
@@ -37,18 +39,43 @@ func test_replay_load_rejects_corrupt_input() -> void:
 
 
 func test_replay_load_rejects_version_mismatch() -> void:
-	# Replay has no separate format_version field — MAGIC itself encodes the
-	# format version (bumped to a new string on a breaking change). A file
-	# stamped with a different version's magic, or with no magic at all,
-	# must be rejected the same as a fully bogus file.
+	# Format and deterministic ruleset are separate compatibility boundaries.
+	# Recognizable legacy/future data must be UNSUPPORTED, never run under the
+	# wrong rules and then accused of score tampering.
 	var future := "user://tmp_test_future_version.json"
-	_write_json(future, {"magic": "IKARI_REPLAY_2", "seed": 0, "mode": "campaign",
-		"players": 1, "frames": []})
+	_write_json(future, {"magic": "DETERMINISTIC_REPLAY_99", "ruleset": 99,
+		"seed": 0, "mode": "campaign", "players": 1, "frames": [], "score": 999})
 	Runner.T.ok(Replay.load_from(future) == null, "mismatched format-version magic rejected")
+	Runner.T.eq(Replay.validate_file(future)["code"], Replay.VALIDATION_UNSUPPORTED_VERSION,
+		"future replay is unsupported, not cheating/tampering")
+
+	var legacy := "user://tmp_test_legacy_ikari_replay.json"
+	_write_json(legacy, {"magic": Replay.LEGACY_MAGIC, "seed": 0, "mode": "campaign",
+		"players": 1, "frames": [], "score": 999})
+	Runner.T.ok(Replay.load_from(legacy) == null, "IKARI_REPLAY_1 is explicitly rejected")
+	Runner.T.eq(Replay.validate_file(legacy)["code"], Replay.VALIDATION_UNSUPPORTED_VERSION,
+		"legacy codename replay is unsupported, never score tampering")
+
+	var missing_ruleset := "user://tmp_test_missing_ruleset.json"
+	_write_json(missing_ruleset, {"magic": Replay.MAGIC, "seed": 0, "mode": "campaign",
+		"players": 1, "frames": [], "score": 999})
+	Runner.T.ok(Replay.load_from(missing_ruleset) == null, "missing ruleset rejected")
+	Runner.T.eq(Replay.validate_file(missing_ruleset)["code"], Replay.VALIDATION_UNSUPPORTED_VERSION,
+		"missing ruleset is unsupported, never score tampering")
+
+	var wrong_ruleset := "user://tmp_test_wrong_ruleset.json"
+	_write_json(wrong_ruleset, {"magic": Replay.MAGIC,
+		"ruleset": Replay.CURRENT_RULESET_VERSION + 1, "seed": 0, "mode": "campaign",
+		"players": 1, "frames": [], "score": 999})
+	Runner.T.ok(Replay.load_from(wrong_ruleset) == null, "wrong ruleset rejected")
+	Runner.T.eq(Replay.validate_file(wrong_ruleset)["code"], Replay.VALIDATION_UNSUPPORTED_VERSION,
+		"wrong ruleset is unsupported, never score tampering")
 
 	var no_magic := "user://tmp_test_no_magic.json"
 	_write_json(no_magic, {"seed": 0, "mode": "campaign", "players": 1, "frames": []})
 	Runner.T.ok(Replay.load_from(no_magic) == null, "missing magic key entirely rejected")
+	Runner.T.eq(Replay.validate_file(no_magic)["code"], Replay.VALIDATION_MALFORMED,
+		"missing envelope magic remains malformed, not a cheating verdict")
 
 
 func test_checksum_excludes_events_but_hashes_state() -> void:
@@ -370,6 +397,8 @@ func test_corrupt_scalar_values_never_abort_the_loader() -> void:
 	Runner.T.eq(main.vet_points, 0, "an Array VP value falls back to the default")
 	Runner.T.ok(main._perk_levels.is_empty(), "a String perk-levels value falls back to an empty map")
 	Runner.T.ok(main._seen.is_empty(), "an int seen-hints value falls back to an empty map")
+	Runner.T.ok(MainScript.levelstart_should_arm(main._seen),
+		"a corrupt seen map safely falls back to new-profile onboarding semantics")
 	Runner.T.eq(main._life_kills, 0, "a Dictionary kills value falls back to the default")
 	Runner.T.eq(main.best_wave, 12, "the loader kept going — the good neighbouring field still loaded")
 	Runner.T.ok(not main._captions, "_apply_settings still ran, so settings were NOT silently reverted to defaults")

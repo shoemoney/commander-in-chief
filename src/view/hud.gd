@@ -178,9 +178,6 @@ const VERB_WINDOW := 1800.0  # c-onboard: UPPER BOUND (ticks) on the verb chip, 
                           # now retire on USE (verb_used), so this is only the backstop for a player
                           # who never presses one at all: 30s, then the chip leaves regardless so it
                           # can't become a permanent playfield overlay.
-                          # c-onboard2: the countdown is GATED on ENGAGEMENT (see verb_step) — it
-                          # does not start until the player has pressed one of these verbs, so it
-                          # can't expire on the player who is still working out the controls.
 var _verb_show := VERB_WINDOW   # c1-04: ticks-worth of the BRIGHT gameplay-verb reminder
                           # left; armed at run start only. After it runs out the transient
                           # chip fades FULLY out — the permanent ROLL/WHEEL/REVIVE
@@ -190,7 +187,10 @@ var _verb_used := {}      # c-onboard: act -> true for every verb whose input ha
                           # did its job); the rest stay up. Cleared on a fresh SimWorld alongside
                           # _verb_sim_id, so a restart re-teaches all three.
 var _verb_sim_id := 0     # instance id of the SimWorld the window was armed for — a new
-                          # SimWorld (every start_game/_reset) rearms, independent of ticks
+						  # SimWorld (every start_game/_reset) rearms, independent of ticks
+var _verb_device_key := "keyboard" # P1's current teaching skin; P2 never owns the global chip
+var _verb_device_used := {}         # device key -> retired segment map for this run
+var _verb_device_show := {}         # device key -> remaining bounded display time
 var _dirty := true        # c2-09: a VIEW field changed since the last _draw — the sole trigger
                           # for the self-invalidating repaint in _process, cleared in _draw. Set
                           # at each mutation site below, and only when the DRAWN pixels actually
@@ -315,14 +315,14 @@ func _process(delta: float) -> void:
 	# over the final ~1.5s, so mark dirty on a change in the DRAWN alpha — not the raw countdown,
 	# which would needlessly repaint the whole static bright phase.
 	var paused: bool = main._menu != null and main._menu.is_active()
-	if sim.get_instance_id() != _verb_sim_id and not _verb_used.is_empty():
-		_verb_used.clear()   # c-onboard: a fresh run re-teaches every segment (verb_step rearms below)
-		_dirty = true
+	if sim.get_instance_id() != _verb_sim_id:
+		verb_begin_run(sim.get_instance_id(), verb_device_key(Art.use_pad, Art.pad_brand))
 	var verb_a := _verb_alpha(_verb_show, main._motion)
 	var res := verb_step(_verb_show, _verb_sim_id, sim.get_instance_id(),
-		paused, false, delta, not _verb_used.is_empty())
+		paused, false, delta)
 	_verb_show = res[0]
 	_verb_sim_id = int(res[1])
+	_verb_device_show[_verb_device_key] = _verb_show
 	if _verb_alpha(_verb_show, main._motion) != verb_a:
 		_dirty = true
 	# c4-02: HUD self-redraw. main._update_hud repaints on each sim step, but this Control must
@@ -433,18 +433,11 @@ static func _verb_alpha(show: float, motion: float) -> float:
 ## might keep high. triple-A: no longer re-arms on unpause — a hint that keeps coming
 ## back every time you open a menu is a hint that never went away. The bindings stay
 ## recoverable via the pause menu's permanent footer reference and HOW TO PLAY.
-## c-onboard2: `engaged` == the player has pressed AT LEAST ONE of the chip's verbs this run.
-## The 30s backstop does not start running until they have. Playtest that found this: a fresh
-## campaign, eight deaths in sector 1, and the chip — the only in-run control hint there is — had
-## already timed out on its wall clock while the player was still reading the landing zone. A
-## clock started at run-open measures READING time, not learning; the first verb press is the
-## real proof that the player has connected chip to button, so that is what starts it. Once one
-## verb lands the old 30s runs out for the rest, so the chip still can't become a permanent
-## playfield overlay, and it can't wedge on a player who never opens the supply wheel (used
-## segments retire individually regardless — see verb_active_segs). Defaults true (= the old
-## unconditional countdown) so existing callers/tests keep the previous behaviour.
+## The idle lifetime is deliberately bounded too: action retirement helps an engaged player,
+## while this clock guarantees that a player who never presses any highlighted verb does not
+## inherit a permanent billboard. Pause and How to Play remain the permanent reference.
 static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
-		_was_paused: bool, delta: float, engaged := true) -> Array:
+		_was_paused: bool, delta: float, _engaged := true) -> Array:
 	if paused:
 		return [show, sim_id]   # frozen while any menu is up (the sim isn't ticking either)
 	var s := show
@@ -452,9 +445,45 @@ static func verb_step(show: float, sim_id: int, cur_sim_id: int, paused: bool,
 	if cur_sim_id != sim_id:
 		s = VERB_WINDOW         # bright window (upper bound) on a brand-new run/restart
 		sid = cur_sim_id
-	if not engaged:
-		return [s, sid]         # backstop held until the player has actually used a verb
 	return [maxf(0.0, s - delta * 60.0), sid]
+
+
+## Stable per-run teaching identity. Keyboard is one family; pad brands are separate because
+## their face-button glyphs materially differ. Unknown brands still get one stable bucket.
+static func verb_device_key(use_pad: bool, pad_brand: String) -> String:
+	return "pad:%s" % pad_brand.to_lower() if use_pad else "keyboard"
+
+
+## Start a new run with fresh mastery for the device currently in P1's hands. This state is
+## intentionally run-local: persisted teaching lives in _seen, while successful verb inputs
+## should be rehearsed again in a fresh campaign without becoming a permanent overlay.
+func verb_begin_run(sim_id: int, device_key: String) -> void:
+	_verb_sim_id = sim_id
+	_verb_device_used.clear()
+	_verb_device_show.clear()
+	_verb_device_key = device_key
+	_verb_used = {}
+	_verb_show = VERB_WINDOW
+	_verb_device_used[device_key] = {}
+	_verb_device_show[device_key] = VERB_WINDOW
+	_dirty = true
+
+
+## Switch the global P1 chip to the glyph family now in use. A family first encountered this
+## run gets one full teaching window; switching back restores exactly the retirement set and
+## remaining lifetime it had before, so device toggling cannot repeatedly re-arm the chip.
+func verb_device_changed(device_key: String) -> void:
+	if device_key == _verb_device_key:
+		return
+	_verb_device_used[_verb_device_key] = _verb_used.duplicate()
+	_verb_device_show[_verb_device_key] = _verb_show
+	_verb_device_key = device_key
+	if not _verb_device_used.has(device_key):
+		_verb_device_used[device_key] = {}
+		_verb_device_show[device_key] = VERB_WINDOW
+	_verb_used = Dictionary(_verb_device_used[device_key]).duplicate()
+	_verb_show = float(_verb_device_show.get(device_key, VERB_WINDOW))
+	_dirty = true
 
 
 ## c-onboard: record that `act`'s input actually fired — its chip segment retires immediately.
@@ -464,6 +493,7 @@ func verb_used(act: String) -> void:
 	if _verb_used.has(act):
 		return
 	_verb_used[act] = true
+	_verb_device_used[_verb_device_key] = _verb_used.duplicate()
 	_dirty = true
 
 
@@ -1653,6 +1683,12 @@ const CAPTION_SCRIM_FILL := Color(0.02, 0.03, 0.02, 0.75)
 const CAPTION_INK_RADIO := Color(0.75, 0.95, 1.0)
 const CAPTION_INK_DRY := Color(0.95, 0.9, 0.75)
 
+static func caption_survives_tier(caption_tier: int, screen_tier: int) -> bool:
+	## The subtitle strip participates in the same named presentation ladder as the
+	## top rail. Accessibility warnings survive because their lethal tier ties danger;
+	## flavor cannot speak over a more important state.
+	return caption_tier >= screen_tier
+
 func _draw_caption() -> void:
 	if main == null:
 		return
@@ -1675,6 +1711,10 @@ func _draw_caption() -> void:
 	var raw: String = cap.get("text", "")
 	if raw == "":
 		return
+	if main.has_method("presentation_active_tier"):
+		var screen_tier: int = int(main.call("presentation_active_tier"))
+		if not caption_survives_tier(int(cap.get("tier", 0)), screen_tier):
+			return
 	# Localize via the English source string as the key — same contract as Menu.setting_help:
 	# with no translation loaded translate() returns the source unchanged, so English is the
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
@@ -1739,9 +1779,9 @@ func _draw_caption() -> void:
 ## belong here. GRENADE is ON the chip: it is the ONLY armor-cracker (the landing zone
 ## is a bunker you must grenade) and the TITLE legend that once named it is long gone —
 ## it is now SELECT + HOW TO only, so nothing else states the button in-run.
-## c-onboard2: MOVE/AIM are deliberately NOT segments — they are taught on HOW TO PLAY's
-## CONTROLS page (which now leads with them, off the live binds). What changed here is the
-## backstop: it no longer starts ticking until the player has actually used a verb (verb_step).
+## MOVE/AIM are deliberately NOT segments — they are taught on HOW TO PLAY's CONTROLS page
+## (which now leads with them, off the live binds). The idle backstop is bounded even if the
+## player uses none of these verbs, so this strip can never become permanent playfield chrome.
 func _verb_legend() -> void:
 	if main._menu != null and main._menu.is_active():
 		return

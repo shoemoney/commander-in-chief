@@ -72,7 +72,8 @@ func test_pre_existing_replay_defaults_score_zero() -> void:
 	# key. load_from must not crash, and must not silently claim a nonzero score.
 	var path := "user://tmp_test_leaderboard_legacy.json"
 	_cleanup(path)
-	var legacy := {"magic": Replay.MAGIC, "seed": 1, "mode": "campaign", "players": 1, "frames": []}
+	var legacy := {"magic": Replay.MAGIC, "ruleset": Replay.CURRENT_RULESET_VERSION,
+		"seed": 1, "mode": "campaign", "players": 1, "frames": []}
 	Runner.T.eq(Replay.save_dict(legacy, path), OK, "legacy (score-less) replay written")
 	var loaded := Replay.load_from(path)
 	Runner.T.ok(loaded != null, "legacy replay still loads")
@@ -163,7 +164,7 @@ class _StubMainGate extends MainScript:
 	func _record_run(score: int) -> void:
 		record_run_calls += 1   # never touches sim/hall/Steam -- the gate is what's under test, not the bank itself
 		last_recorded_score = score
-	func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, _icon := "") -> void:
+	func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, _icon := "", _tier := -1) -> void:
 		banners.append(text)
 		banner_cols.append(col)
 

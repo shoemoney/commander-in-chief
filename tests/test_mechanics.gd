@@ -603,6 +603,162 @@ func test_tank_treads_rescue_not_crush_the_pilot() -> void:
 	Runner.T.eq(sim.war_chest - chest0, SimWorld.PILOT_RANSOM, "treads grab the ransom, not a corpse")
 
 
+func _authored_sandbag_route_fixture(game_mode: String, player_count: int) -> SimWorld:
+	## Materialize the complete authored sandbag route, then remove unrelated
+	## combat/hazard blockers. Sandbags deliberately remain byte-for-byte intact:
+	## this probe is about the traversal contract introduced by boot collision.
+	var sim := SimWorld.new(0x5A6DBA6, player_count, game_mode)
+	if game_mode == "arcade":
+		sim.jump_to_chapter(3)
+	if game_mode != "endless":
+		# The normal camera streams one route-height at a time. Advance that same
+		# deterministic authoring machinery through the finale without running
+		# combat, opening already-created gates between horizon advances.
+		for band in 8:
+			for gate in sim.gates:
+				gate["open"] = true
+			sim.camera_top = -((band + 1) * SimWorld.GATE_SPACING)
+			for p in sim.players:
+				p["y"] = sim.camera_top + 160 * SimWorld.F_ONE
+			sim._step_camera()
+			if sim._world_ended:
+				break
+	for gate in sim.gates:
+		gate["open"] = true
+	# Keep only the thing under test. In particular, do NOT clear/cull sandbags.
+	sim.enemies.clear()
+	sim.enemy_bullets.clear()
+	sim.bullets.clear()
+	sim.grenades.clear()
+	sim.bunkers.clear()
+	sim.tanks.clear()
+	sim.rocks.clear()
+	sim.waters.clear()
+	sim.mines.clear()
+	sim.barrels.clear()
+	sim.gates.clear()
+	return sim
+
+
+func _walk_authored_sandbag_route(sim: SimWorld) -> Array[int]:
+	var south_y := -0x7FFFFFFFFFFFFFFF
+	var north_y := 0x7FFFFFFFFFFFFFFF
+	for sb in sim.sandbags:
+		south_y = maxi(south_y, sb["y"] + SimWorld._sb_hh(sb))
+		north_y = mini(north_y, sb["y"] - SimWorld._sb_hh(sb))
+	var start_y: int = south_y + 48 * SimWorld.F_ONE
+	var goal_y: int = north_y - 48 * SimWorld.F_ONE
+	for i in sim.players.size():
+		var p := sim.players[i]
+		p["alive"] = true
+		p["y"] = start_y
+		p["x"] = (SimWorld.WORLD_LEFT + 28 * SimWorld.F_ONE) if i % 2 == 0 \
+			else (SimWorld.WORLD_RIGHT - 28 * SimWorld.F_ONE)
+	# Real movement through the real sandbag collision loop. Each player hugs
+	# their current authored corridor edge; _choke_bounds carries the campaign's
+	# doglegs, so this is not a hard-coded straight line through a hollow map.
+	for tick in 6000:
+		var lead_y: int = sim.players[0]["y"]
+		for p in sim.players:
+			lead_y = mini(lead_y, p["y"])
+		sim.camera_top = lead_y - 160 * SimWorld.F_ONE
+		var inputs: Array = []
+		for i in sim.players.size():
+			var p := sim.players[i]
+			var cb: Array = sim._choke_bounds(p["y"])
+			var target_x: int = cb[0] + 28 * SimWorld.F_ONE if i % 2 == 0 \
+				else cb[1] - 28 * SimWorld.F_ONE
+			var inp := SimInput.new()
+			inp.move_y = -256
+			if p["x"] < target_x - SimWorld.F_ONE:
+				inp.move_x = 256
+			elif p["x"] > target_x + SimWorld.F_ONE:
+				inp.move_x = -256
+			inputs.append(inp)
+		sim._step_players(inputs)
+		var all_through := true
+		for p in sim.players:
+			if p["y"] > goal_y:
+				all_through = false
+				break
+		if all_through:
+			break
+	var result: Array[int] = [start_y, goal_y]
+	for p in sim.players:
+		result.append(p["y"])
+	return result
+
+
+func test_authored_sandbags_keep_every_mode_and_roster_traversable() -> void:
+	## Regression for the all-sandbag boot-collision expansion: campaign, Arcade
+	## and Endless retain a complete player route with authored bags present for
+	## both solo and local co-op. The assertions measure route progress and keep
+	## the bag population pinned, rather than merely checking an isolated AABB.
+	for game_mode in ["campaign", "arcade", "endless"]:
+		for player_count in [1, 2]:
+			var sim := _authored_sandbag_route_fixture(game_mode, player_count)
+			var bag_count: int = sim.sandbags.size()
+			Runner.T.ok(bag_count > 0, "%s %dP materializes authored sandbags" % [game_mode, player_count])
+			var route := _walk_authored_sandbag_route(sim)
+			for i in player_count:
+				Runner.T.ok(route[2 + i] <= route[1],
+					"%s %dP player %d traverses south-to-north past every authored bag row" % [game_mode, player_count, i + 1])
+			Runner.T.eq(sim.sandbags.size(), bag_count,
+				"%s %dP traversal leaves authored cover intact" % [game_mode, player_count])
+			# Respawn/forced placement directly inside REAL authored cover. _respawn
+			# preserves x, so this recreates the checkpoint-overlap edge; movement
+			# must make northward progress out under the shared escape rule.
+			var anchor := sim.sandbags[sim.sandbags.size() / 2]
+			for i in player_count:
+				var p := sim.players[i]
+				p["x"] = anchor["x"]
+				p["y"] = anchor["y"]
+				p["alive"] = false
+				sim.camera_top = anchor["y"] - 120 * SimWorld.F_ONE
+				sim._respawn(p, anchor["y"])
+				var north := SimInput.new()
+				north.move_y = -256
+				for step in 24:
+					sim._step_players([north] if player_count == 1 or i == 0 else [SimInput.new(), north])
+				Runner.T.ok(p["y"] < anchor["y"] - SimWorld._sb_hh(anchor),
+					"%s %dP player %d respawn-overlap escapes and resumes northward progress" % [game_mode, player_count, i + 1])
+			# A roll committed into an authored segment must resolve through the same
+			# collision and leave enough follow-through for real route progress.
+			var roller := sim.players[0]
+			roller["x"] = anchor["x"]
+			roller["y"] = anchor["y"] + SimWorld._sb_hh(anchor) + 8 * SimWorld.F_ONE
+			roller["roll_ticks"] = 0
+			roller["roll_cd"] = 0
+			roller["roll_prev"] = false
+			sim.camera_top = anchor["y"] - 120 * SimWorld.F_ONE
+			var roll_north := SimInput.new()
+			roll_north.move_y = -256
+			roll_north.move_x = -256 if anchor["x"] > SimWorld.SCREEN_CX else 256
+			roll_north.roll = true
+			sim._step_players([roll_north] if player_count == 1 else [roll_north, SimInput.new()])
+			var follow := SimInput.new()
+			follow.move_y = -256
+			follow.move_x = roll_north.move_x
+			for step in 30:
+				sim._step_players([follow] if player_count == 1 else [follow, SimInput.new()])
+			Runner.T.ok(roller["y"] < anchor["y"] - SimWorld._sb_hh(anchor),
+				"%s %dP roll-entry clears authored cover and continues north" % [game_mode, player_count])
+			# Ratchet-top overlap: a forced body at the north camera edge can walk
+			# south out of the bag; the clamp must not re-trap it in the footprint.
+			roller["x"] = anchor["x"]
+			roller["y"] = anchor["y"]
+			roller["roll_ticks"] = 0
+			sim.camera_top = anchor["y"] - 16 * SimWorld.F_ONE
+			var retreat := SimInput.new()
+			retreat.move_y = 256
+			for step in 24:
+				sim._step_players([retreat] if player_count == 1 else [retreat, SimInput.new()])
+			Runner.T.ok(roller["y"] > anchor["y"] + SimWorld._sb_hh(anchor),
+				"%s %dP ratchet-edge overlap escapes south with measurable progress" % [game_mode, player_count])
+			Runner.T.eq(sim.sandbags.size(), bag_count,
+				"%s %dP escape/respawn/roll probes never clear authored bags" % [game_mode, player_count])
+
+
 func test_endless_pilot_is_catchable_from_the_band_bottom() -> void:
 	## Endless pins camera_top at -VIEW_H forever, so the pilot's capture line
 	## (camera_top - 30) never recedes — unlike campaign, whose ratchet camera
@@ -623,6 +779,10 @@ func test_endless_pilot_is_catchable_from_the_band_bottom() -> void:
 	var boss := sim.endless_boss
 	Runner.T.ok(not boss.is_empty(), "wave 5 fields the endless miniboss")
 	sim._damage_boss(boss, boss["hp"])
+	# This is a pure pilot-speed footrace. Purchased/world sandbags are now
+	# truthful player collision, so remove the authored arena maze just as the
+	# loop below removes fodder and enemy fire.
+	sim.sandbags.clear()
 	var pilot := {}
 	for e in sim.enemies:
 		if e["kind"] == "pilot":
@@ -927,6 +1087,7 @@ func test_tank_crew_gunner_seat() -> void:
 
 func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 	var sim := SimWorld.new(13, 1)
+	sim.enemies.clear()
 	var p := sim.players[0]
 	p["x"] = 300 * SimWorld.F_ONE
 	p["y"] = sim.camera_top + 200 * SimWorld.F_ONE
@@ -934,33 +1095,41 @@ func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 	p["aim_y"] = 0
 	sim.war_chest = 500
 	sim._try_buy(p, 4)
-	Runner.T.eq(sim.sandbags.size(), 1, "wheel slot 4 plants a sandbag segment")
+	Runner.T.eq(sim.sandbags.size(), 2, "wheel slot 4 plants a two-segment nest")
 	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_SANDBAG_COST, "bag costs SHOP_SANDBAG_COST")
 	var sb := sim.sandbags[0]
-	Runner.T.ok(sb["x"] > p["x"], "bag plants ALONG the aim, not underfoot")
-	# ASYMMETRIC BY DESIGN, and this assertion used to say the opposite. A bag YOU planted
-	# does not eat YOUR rounds — you fire over your own parapet — while it still stops
-	# everything incoming. The old "player bullet dies in the bag" pinned a defect: the wheel
-	# plants 20px ALONG the aim and the segment is 36x10, so its near face sat ~2px from the
-	# muzzle. Aiming north the bag spans y-25..y-15 and a 6px/tick round dies on tick 3;
-	# aiming east it dies on tick 1, six pixels out — shorter than ENEMY_TOUCH_RADIUS. The
-	# 40-coin buy disabled your own gun in the direction you were facing.
+	var sb2 := sim.sandbags[1]
+	Runner.T.ok(sb["x"] > p["x"] and sb2["x"] > p["x"], "nest plants ALONG the aim, not underfoot")
+	Runner.T.ok(sb.get("vertical", 0) == 1 and sb2.get("vertical", 0) == 1,
+		"eastward placement builds a north-south wall facing the threat")
+	var inner_gap: int = absi(sb2["y"] - sb["y"]) - SimWorld._sb_hh(sb) - SimWorld._sb_hh(sb2)
+	Runner.T.eq(inner_gap, SimWorld.SANDBAG_EMBRASURE, "the nest owns a real fixed-width embrasure")
+	# Both sides use the same physical geometry: rounds through the opening survive;
+	# rounds into either segment stop regardless of ownership.
+	var gap_x: int = sb["x"]
+	var gap_y: int = (sb["y"] + sb2["y"]) / 2
+	sim.bullets.append({"x": gap_x, "y": gap_y, "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
+	sim.enemy_bullets.append({"x": gap_x, "y": gap_y, "vx": 0, "vy": 0, "ttl": 10})
+	sim._step_bullets()
+	sim._step_enemy_bullets()
+	Runner.T.eq(sim.bullets.size(), 1, "player fire passes through the physical opening")
+	Runner.T.eq(sim.enemy_bullets.size(), 1, "incoming fire can use that same opening")
+	sim.bullets.clear()
+	sim.enemy_bullets.clear()
 	sim.bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
 	sim.enemy_bullets.append({"x": sb["x"], "y": sb["y"], "vx": 0, "vy": 0, "ttl": 10})
 	sim._step_bullets()
 	sim._step_enemy_bullets()
-	Runner.T.eq(sim.bullets.size(), 1, "your own bag does NOT eat your rounds (you fire over it)")
-	Runner.T.eq(sim.enemy_bullets.size(), 0, "but it still stops incoming fire — the reason to buy it")
-	# The exemption is scoped to player-planted bags: the level's own cover still blocks you,
-	# or authored emplacements would stop mattering the moment you bought one bag.
-	sim.bullets.clear()
-	var world_bag := {"x": sb["x"] + 200 * SimWorld.F_ONE, "y": sb["y"], "world": 1}
-	sim.sandbags.append(world_bag)
-	sim.bullets.append({"x": world_bag["x"], "y": world_bag["y"], "vx": 0, "vy": 0, "ttl": 10, "owner": 0})
-	sim._step_bullets()
-	Runner.T.eq(sim.bullets.size(), 0, "an AUTHORED bag still eats player rounds")
-	sim.sandbags.erase(world_bag)
-	sim.bullets.clear()
+	Runner.T.eq(sim.bullets.size(), 0, "a purchased segment stops outgoing fire outside its opening")
+	Runner.T.eq(sim.enemy_bullets.size(), 0, "the same segment stops incoming fire")
+	# Players cannot phase through the paid collision shape.
+	p["x"] = sb["x"] - 28 * SimWorld.F_ONE
+	p["y"] = sb["y"]
+	var walk := SimInput.new()
+	walk.move_x = 256
+	for step in 40:
+		sim._step_players([walk])
+	Runner.T.ok(p["x"] < sb["x"], "player boots cannot cross a purchased segment")
 	# A rusher walking the bag line stalls (move-revert), then a grenade clears it.
 	sim._spawn_enemy(sb["x"] + 24 * SimWorld.F_ONE, sb["y"], false)
 	var r := sim.enemies[sim.enemies.size() - 1]
@@ -972,17 +1141,73 @@ func test_sandbags_wheel_buy_plants_blocks_and_dies_to_grenade() -> void:
 		var dx: int = p["x"] - r["x"]
 		sim._advance_toward(r, dx, 0, Fixed.length(dx, 0), SimWorld.ENEMY_SPEED)
 	Runner.T.ok(r["x"] > sb["x"], "rusher never phases through the bag line (at %d vs bag %d)" % [r["x"], sb["x"]])
-	sim._explode(sb["x"], sb["y"])
+	sim._explode(gap_x, gap_y)
 	Runner.T.eq(sim.sandbags.size(), 0, "one grenade clears the bag")
-	# Field cap denies the 7th bag, loudly. These stand in for bags the PLAYER planted,
-	# so they carry "player": 1 — the cap counts player-tagged bags now, not untagged
-	# ones (authored cover used to bill against the player's allowance; see _try_buy).
-	for n in SimWorld.SANDBAG_FIELD_CAP:
-		sim.sandbags.append({"x": n * 40 * SimWorld.F_ONE, "y": p["y"], "player": 1})
-	var chest0: int = sim.war_chest
-	sim._try_buy(p, 4)
-	Runner.T.eq(sim.sandbags.size(), SimWorld.SANDBAG_FIELD_CAP, "field cap holds at 6")
-	Runner.T.eq(sim.war_chest, chest0, "capped buy denies without charging")
+	# The shared cap fits six complete nests (12 segments), including co-op buyers.
+	var csim := SimWorld.new(14, 2)
+	csim.enemies.clear()
+	csim.war_chest = 1000
+	for n in 6:
+		var buyer := csim.players[n % 2]
+		buyer["x"] = (100 + n * 70) * SimWorld.F_ONE
+		buyer["aim_x"] = 0
+		buyer["aim_y"] = -SimWorld.F_ONE
+		csim._try_buy(buyer, 4)
+	Runner.T.eq(csim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP,
+		"six two-segment purchases fit the shared 12-segment field cap")
+	Runner.T.eq(csim.war_chest, 1000 - 6 * SimWorld.SHOP_SANDBAG_COST,
+		"six nests charge exactly six purchases")
+	var chest0: int = csim.war_chest
+	csim._try_buy(csim.players[1], 4)
+	Runner.T.eq(csim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP, "seventh complete nest is denied")
+	Runner.T.eq(csim.war_chest, chest0, "capped co-op buy denies without charging")
+	# Attrition is atomic at the paid-nest boundary. Hit only one outer segment
+	# (the mate is 48px away, outside the 28px grenade radius): both leave, so
+	# the shared meter moves 12 -> 10 and never enters the lying 11/12 state.
+	var clipped := csim.sandbags[0]
+	var clipped_tag: int = clipped.get("nest", 0)
+	Runner.T.ok(clipped_tag > 0, "paid nest segments carry a deterministic pair tag")
+	csim._explode(clipped["x"], clipped["y"])
+	Runner.T.eq(csim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP - 2,
+		"single-segment blast removes its paid mate atomically (12 -> 10, never 11)")
+	for live_sb in csim.sandbags:
+		Runner.T.ok(live_sb.get("nest", 0) != clipped_tag, "no orphan from the clipped paid nest survives")
+	# Both players press the fifth wheel slot in the same simulation step at
+	# 10/12. Ordered deterministic input resolution admits exactly one complete
+	# purchase, denies the sibling, and charges the shared chest once.
+	var chest10: int = csim.war_chest
+	csim.events.clear()
+	var buy_bag_0 := SimInput.new()
+	var buy_bag_1 := SimInput.new()
+	buy_bag_0.buy = 5
+	buy_bag_1.buy = 5
+	csim._step_players([buy_bag_0, buy_bag_1])
+	Runner.T.eq(csim.player_sandbag_count(), SimWorld.SANDBAG_FIELD_CAP,
+		"simultaneous co-op buys at 10/12 admit one complete nest")
+	Runner.T.eq(csim.war_chest, chest10 - csim._supply_cost(4),
+		"simultaneous co-op buys charge the shared chest exactly once")
+	var co_buys := 0
+	var co_caps := 0
+	for ev in csim.events:
+		if ev.get("t", "") == "buy" and ev.get("kind", -1) == 4:
+			co_buys += 1
+		elif ev.get("t", "") == "deny" and ev.get("why", "") == "cap":
+			co_caps += 1
+	Runner.T.eq(co_buys, 1, "one simultaneous co-op sandbag buy succeeds")
+	Runner.T.eq(co_caps, 1, "the other simultaneous buyer receives the truthful cap denial")
+	# A diagonal aim cardinalizes the wall axis, preserving the exact same opening.
+	var dsim := SimWorld.new(15, 1)
+	dsim.enemies.clear()
+	dsim.war_chest = 100
+	var dp := dsim.players[0]
+	dp["aim_x"] = 46340
+	dp["aim_y"] = -46340
+	dsim._try_buy(dp, 4)
+	var da := dsim.sandbags[0]
+	var db := dsim.sandbags[1]
+	var diagonal_gap: int = absi(db["x"] - da["x"]) - SimWorld._sb_hw(da) - SimWorld._sb_hw(db)
+	Runner.T.eq(diagonal_gap, SimWorld.SANDBAG_EMBRASURE,
+		"diagonal placement keeps the same effective firing gap")
 
 
 func test_commendation_tokens_mint_cap_wipe_and_spend() -> void:
@@ -1406,7 +1631,7 @@ func test_kimk_round2_pins() -> void:
 	p2["aim_x"] = SimWorld.F_ONE
 	var bags0: int = sim2.sandbags.size()
 	sim2._try_buy(p2, 4)
-	Runner.T.eq(sim2.sandbags.size(), bags0 + 1, "40 world bags never eat the player's own cap")
+	Runner.T.eq(sim2.sandbags.size(), bags0 + 2, "40 world bags never eat the player's two-segment nest cap")
 	# L10: decorrelation — two seeds produce non-rotational chunk orders.
 	var seq_a: Array = []
 	var seq_b: Array = []

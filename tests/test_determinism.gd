@@ -664,13 +664,23 @@ const SEED := 0xDEADBEEF
 ## by design) will not OPEN a burst on one. First all-down tick is 237, i.e. before
 ## sample 0, so ALL SIX campaign samples move — measured with tools/probe_down_window.gd,
 ## not assumed. See the ENDLESS note for why that golden moves only from sample 3.
+## RE-RECORDED (2026-07-31, repair-game-clarity-response): one intentional ruleset
+## boundary combines persistent/capped riot-shield facing, a 36-tick occupied-tank
+## ignition grace, truthful two-segment sandbag nests (player collision, fixed
+## embrasure, orientation, atomic pair attrition), and a measured 45-tick ford
+## washout warning. New authoritative fields face_x/face_y, crew_ring_ticks, and
+## sandbag player/vertical/nest are checksum-classified and fed. The structural
+## enemy/tank/bag feeds plus changed collision/timing move all samples in both
+## tortures. Before recording, focused mechanics, checksum-delta, replay, and
+## lockstep scenarios passed; the empty-array capture below was then repeated
+## against these committed values to prove idempotency.
 const GOLDEN: Array[int] = [
-	2853010540308134462,
-	5504487071080583783,
-	6389286658685913461,
-	5848415029183823743,
-	7847731113801769580,
-	2496665953045981236,
+	1184643001884483351,
+	5371506924864910807,
+	8381930895297767709,
+	5631023729472081759,
+	6911989025763595544,
+	1767628530633902072,
 ]
 
 
@@ -889,12 +899,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## invisible to THIS stream now. If a future change makes the endless torture survive past
 ## ~2900 ticks again, expect these samples to move for that reason alone.
 const ENDLESS_GOLDEN: Array[int] = [
-	8610209561549742921,
-	4307715087271070947,
-	2392889603967106672,
-	390397376843286043,
-	1825047908363764441,
-	6729374942503115633,
+	693152613480616205,
+	7765365808198943925,
+	8094705230952988829,
+	5232181903059069125,
+	3596566719002625837,
+	71081753830061653,
 ]
 
 

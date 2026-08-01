@@ -14,14 +14,17 @@ git history.
 | `assets/art/ui/` `hud/` `icons/` | 106 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
 | `assets/art/fx/` | 21 | Procedurally generated — `tools/gen_fx_cards.py` | Project-owned |
 | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 87 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
-| `assets/troops/` | 9 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
+| `assets/troops/` — player + five enemy soldiers and action frames | 58 | Generative AI — OpenAI built-in image generation, locally chroma-keyed, sliced and normalized; prompts/provenance in `assets/troops/GENERATED_ASSET_SOURCE.md` | Project-owned (verify service output-ownership terms) |
+| `assets/projectiles/` — friendly, piercing, hostile, sniper rounds | 4 | Generative AI — OpenAI built-in image generation, locally chroma-keyed, sliced and normalized; prompts/provenance in `assets/troops/GENERATED_ASSET_SOURCE.md` | Project-owned (verify service output-ownership terms) |
+| `assets/troops/` — frogmen + muzzle flash | 3 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | Bosses, player tank, desert flora (14 files) | 14 | Generative AI — fal.ai · Replicate · `nano-banana`. Pipeline: `tools/generate_desert_assets.py`, provenance: `assets/art/desert_assets_source.md` | Project-owned (verify each service's output-ownership terms) |
 | `assets/ui/intro/` | 2 | Generative AI (intro cinematic key art) | Project-owned |
 | `assets/cc0/` | 27 | Kenney game assets | **CC0** — `assets/cc0/LICENSE-CC0.txt` |
 
 Every procedurally generated sprite is reproducible: each generator's `SIZES`
-dict is its manifest, and re-running the tool overwrites the PNGs. Original
-canvas sizes and `.import` `size_limit`s are preserved so no draw site moves.
+dict is its manifest, and re-running the tool overwrites those PNGs. AI-assisted
+sprites carry a separate source note and final prompt. Original canvas sizes and
+`.import` `size_limit`s are preserved so no draw site moves.
 
 
 ## ✅ Fonts
@@ -64,6 +67,8 @@ MIT/CC0 grant may sublicense them onward to everyone who clones the repo.
 ## Reproducing the art
 
 Every procedurally generated sprite is reproducible: each generator's `SIZES`
-dict is its manifest, and re-running the tool overwrites the PNGs. Original
-canvas sizes and `.import` `size_limit`s are preserved so no draw site moves —
-edit the generator and re-run it rather than hand-painting a PNG.
+dict is its manifest, and re-running the tool overwrites those PNGs. Original
+canvas sizes and `.import` `size_limit`s are preserved so no draw site moves.
+For the six AI-assisted soldier sprites, use the prompt and normalization record
+in `assets/troops/GENERATED_ASSET_SOURCE.md`; do not regenerate them through
+`tools/gen_entities.py`.

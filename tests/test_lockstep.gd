@@ -231,9 +231,9 @@ func test_handshake_catches_config_mismatch() -> void:
 	var a := LockstepSession.new(SimWorld.new(SEED, 2), 0, 3)
 	var b := LockstepSession.new(SimWorld.new(SEED, 2), 1, 3)
 	var c := LockstepSession.new(SimWorld.new(SEED, 2), 1, 5)
-	Runner.T.ok(a.handshake_matches(b.session_hash), "identical config handshakes clean")
+	Runner.T.ok(a.handshake_matches(b.handshake_payload()), "identical config handshakes clean")
 	Runner.T.ok(not a.handshake_mismatch, "a clean handshake leaves no flag")
-	Runner.T.ok(not a.handshake_matches(c.session_hash), "mismatched input_delay is refused")
+	Runner.T.ok(not a.handshake_matches(c.handshake_payload()), "mismatched input_delay is refused")
 	Runner.T.ok(a.handshake_mismatch, "the mismatch is flagged instead of deadlocking silently")
 	# Every field replay.gd persists must move the hash, or a mismatched run
 	# config sails through the handshake and desyncs on tick 1.
@@ -246,11 +246,31 @@ func test_handshake_catches_config_mismatch() -> void:
 		"assist": LockstepSession.compute_session_hash(SEED, "campaign", 2, 3, true, false, 1),
 		"hard": LockstepSession.compute_session_hash(SEED, "campaign", 2, 3, false, true, 1),
 		"chapter": LockstepSession.compute_session_hash(SEED, "campaign", 2, 3, false, false, 2),
+		"ruleset": LockstepSession.compute_session_hash(SEED, "campaign", 2, 3, false, false, 1,
+			LockstepSession.CURRENT_RULESET_VERSION + 1),
 	}
 	for field in variants:
 		Runner.T.ok(variants[field] != ref, "%s changes the session hash" % field)
 	Runner.T.eq(LockstepSession.compute_session_hash(SEED, "campaign", 2, 3, false, false, 1), ref,
 		"the same config always hashes the same")
+
+
+func test_handshake_rejects_missing_or_wrong_ruleset_as_unsupported() -> void:
+	var sess := LockstepSession.new(SimWorld.new(SEED, 2), 0)
+	var current := sess.handshake_payload()
+	Runner.T.eq(current["ruleset"], Replay.CURRENT_RULESET_VERSION,
+		"lockstep advertises the same current ruleset as replay")
+	var missing := current.duplicate()
+	missing.erase("ruleset")
+	Runner.T.ok(not sess.handshake_matches(missing), "missing ruleset is refused")
+	Runner.T.ok(sess.unsupported_ruleset, "missing ruleset is classified unsupported")
+	Runner.T.ok(not sess.handshake_mismatch, "unsupported rules are not mislabeled config mismatch")
+	var other := LockstepSession.new(SimWorld.new(SEED, 2), 0)
+	var wrong := current.duplicate()
+	wrong["ruleset"] = Replay.CURRENT_RULESET_VERSION + 1
+	Runner.T.ok(not other.handshake_matches(wrong), "foreign ruleset is refused")
+	Runner.T.ok(other.unsupported_ruleset, "foreign ruleset is classified unsupported")
+	Runner.T.ok(not other.desynced, "unsupported ruleset is rejected before it can become a desync")
 
 
 func test_handshake_reads_the_live_sim_config() -> void:
@@ -366,6 +386,22 @@ func test_encode_decode_roundtrip() -> void:
 	Runner.T.eq(back.hash_ints(), inp.hash_ints(), "encode/decode roundtrip preserves every field")
 
 
+func test_grenade_and_revive_wire_bits_are_independent() -> void:
+	for case in [
+		{"grenade": true, "revive": false, "name": "grenade only"},
+		{"grenade": false, "revive": true, "name": "revive only"},
+		{"grenade": true, "revive": true, "name": "both"},
+	]:
+		var inp := SimInput.new()
+		inp.grenade = case["grenade"]
+		inp.revive = case["revive"]
+		var sess := LockstepSession.new(SimWorld.new(SEED, 2), 0)
+		var sent := sess.submit_local_input(inp)
+		var decoded := SimInput.decode(sent["payload"])
+		Runner.T.eq(decoded.grenade, case["grenade"], "%s keeps grenade on the lockstep wire" % case["name"])
+		Runner.T.eq(decoded.revive, case["revive"], "%s keeps revive on the lockstep wire" % case["name"])
+
+
 func test_on_send_dispatches_redundancy_window() -> void:
 	# The on_send transport seam is how a real transport (Steam Networking) ships local input.
 	# No other test assigns on_send, so submit_local_input's dispatch path was fully uncovered —
@@ -393,3 +429,70 @@ func test_on_send_dispatches_redundancy_window() -> void:
 	Runner.T.eq(sent[4]["payloads"].size(), 5, "the window fills up one input at a time")
 	Runner.T.eq(sent[-1]["payloads"].size(), LockstepSession.REDUNDANCY, "and then caps at REDUNDANCY")
 	Runner.T.eq(sent[-1]["tick"], sess._next_local_tick - 1, "the window's tick names its newest slot")
+
+
+func _repair_lockstep_fixture() -> Dictionary:
+	var sim := SimWorld.new(0x51A7E, 2, "campaign")
+	sim.war_chest = 100
+	sim.enemies.clear()
+	sim.tanks.clear()
+	sim.sandbags.clear()
+	var y: int = sim.camera_top + 220 * SimWorld.F_ONE
+	var driver := sim.players[0]
+	var builder := sim.players[1]
+	driver["x"] = 100 * SimWorld.F_ONE
+	driver["y"] = y
+	builder["x"] = 520 * SimWorld.F_ONE
+	builder["y"] = y
+	builder["aim_x"] = SimWorld.F_ONE
+	builder["aim_y"] = 0
+	sim._spawn_special(320 * SimWorld.F_ONE, y, "shield")
+	var initial_face_x: int = sim.enemies[0]["face_x"]
+	builder["x"] = 250 * SimWorld.F_ONE
+	var tank := {
+		"x": driver["x"], "y": driver["y"], "alive": true, "burning": true,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": SimWorld.TANK_BAIL_TICKS,
+		"crew_ring_ticks": SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"fire_cd": 0, "occupant": 0,
+	}
+	sim.tanks.append(tank)
+	driver["in_tank"] = 0
+	return {"sim": sim, "face_x": initial_face_x, "ring": tank["crew_ring_ticks"]}
+
+
+func test_two_peer_lockstep_matches_through_repaired_scenario() -> void:
+	var fixture_a := _repair_lockstep_fixture()
+	var fixture_b := _repair_lockstep_fixture()
+	var a := LockstepSession.new(fixture_a["sim"], 0)
+	var b := LockstepSession.new(fixture_b["sim"], 1)
+	Runner.T.ok(a.handshake_matches(b.handshake_payload()) and b.handshake_matches(a.handshake_payload()),
+		"repaired-scenario peers accept the same current ruleset")
+	for frame in 16:
+		var driver := SimInput.new()
+		var builder := SimInput.new()
+		if frame == 0:
+			builder.buy = 5
+		var msg_a := a.submit_local_input(driver)
+		var msg_b := b.submit_local_input(builder)
+		a.receive_remote_input(msg_b["tick"], msg_b["payloads"])
+		b.receive_remote_input(msg_a["tick"], msg_a["payloads"])
+		while a.try_advance():
+			pass
+		while b.try_advance():
+			pass
+	Runner.T.eq(a.sim.tick_count, b.sim.tick_count, "both repaired-scenario peers advanced equally")
+	Runner.T.eq(a.sim.checksum(), b.sim.checksum(), "two peers finished repaired scenario bit-identical")
+	Runner.T.eq(a.sim.sandbags, b.sim.sandbags, "two peers agree on player-owned vertical sandbags")
+	Runner.T.eq(a.sim.tanks[0]["crew_ring_ticks"], b.sim.tanks[0]["crew_ring_ticks"],
+		"two peers agree on occupied tank ignition grace")
+	Runner.T.eq(a.sim.enemies[0]["face_x"], b.sim.enemies[0]["face_x"],
+		"two peers agree on persistent shield facing")
+	Runner.T.eq(a.sim.sandbags.size(), 2, "lockstep scenario bought a complete nest")
+	Runner.T.ok(a.sim.sandbags.all(func(sb): return sb.get("player", 0) == 1 and sb.get("vertical", 0) == 1),
+		"lockstep scenario's nest is player-owned and vertical")
+	Runner.T.ok(a.sim.enemies[0]["face_x"] != fixture_a["face_x"], "lockstep scenario turned the shield")
+	Runner.T.ok(a.sim.tanks[0]["crew_ring_ticks"] < fixture_a["ring"]
+		and a.sim.players[0]["in_tank"] == 0,
+		"lockstep scenario advanced the occupied tank's crew deadline")
+	Runner.T.eq(Replay.CURRENT_RULESET_VERSION, LockstepSession.CURRENT_RULESET_VERSION,
+		"replay and lockstep still share one ruleset version")

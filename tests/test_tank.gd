@@ -27,6 +27,19 @@ func _board(sim: SimWorld, tank: Dictionary) -> void:
 	sim.step([inp])
 
 
+func _board_two(sim: SimWorld, tank: Dictionary) -> void:
+	for p in sim.players:
+		p["x"] = tank["x"]
+		p["y"] = tank["y"]
+	var driver_press := SimInput.new()
+	driver_press.interact = true
+	var gunner_press := SimInput.new()
+	gunner_press.interact = true
+	sim.step([driver_press, gunner_press])
+	# Release both edges so a later interact is an intentional bailout press.
+	sim.step([_idle(), _idle()])
+
+
 func test_board_and_exit() -> void:
 	var sim := SimWorld.new(3, 1)
 	var p := sim.players[0]
@@ -252,7 +265,7 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	# --- CONTROL 1: a HEALTHY hull is still armor, and the brew-up is the bill.
 	# Pins BOTH edges of the rule with no dead clauses: every round up to the
 	# ignition tick is eaten by the armor (crew untouched, vest intact), and the
-	# ignition itself spends exactly ONE hit. Given a vest so the difference
+	# scheduled ignition ring spends exactly ONE hit after the escape grace. Given a vest so the difference
 	# between "rung once" and "killed" is observable rather than collapsing into
 	# `alive == false`.
 	var hsim := SimWorld.new(3, 1)
@@ -272,8 +285,12 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	hsim.strikes.append({"x": htank["x"], "y": htank["y"], "ticks": 1, "obs": false})
 	hsim.step([_idle()])
 	Runner.T.ok(htank["burning"], "the hull ignites under a shell")
+	Runner.T.ok(hp["alive"] and hp["vest"],
+		"the brew-up starts the reaction window without an unavoidable hit")
+	for i in SimWorld.TANK_IGNITION_GRACE_TICKS:
+		hsim.step([_idle()])
 	Runner.T.ok(hp["alive"] and not hp["vest"],
-		"THE BILL: the brew-up rings the crew for exactly one hit — vest spent, rider alive")
+		"THE BILL: staying aboard through the grace rings the crew once — vest spent, rider alive")
 
 	# --- CONTROL 2: what the bail window is WORTH, pinned on both sides of
 	# assist_mode. The first version of this control staged the ignition with
@@ -282,12 +299,9 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	# ringing the crew. It was a dead control for ordnance and is re-staged here
 	# with a real shell.
 	#
-	# 2a — SHIPPED DEFAULT (assist off, no vest): the shell that lights the hull
-	# rings the crew for its one hit, and one hit is the 1986 rule. There is NO
-	# race — the driver dies on the tick the shell lands, and TANK_BAIL_TICKS is
-	# dead content for that player. That is INTENDED: it is exactly what the same
-	# shell does to a man on foot (measured on foot: dead at tick 44 of the same
-	# continuous shelling; mounted: dead on the ignition tick itself).
+	# 2a — SHIPPED DEFAULT (assist off, no vest): the shell lights the hull and
+	# schedules its crew hit after the advertised reaction window. A prompt bail
+	# wins; ignoring the klaxon still applies the ordinary one-hit rule.
 	var nsim := SimWorld.new(3, 1)
 	nsim.enemies.clear()
 	var np := nsim.players[0]
@@ -297,11 +311,31 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	nsim.strikes.append({"x": ntank["x"], "y": ntank["y"], "ticks": 1, "obs": false})
 	nsim.step([_idle()])
 	Runner.T.ok(ntank["burning"], "the shell brews the hull")
-	Runner.T.ok(not np["alive"],
-		"ASSIST OFF: the shell that lights the hull kills the vestless crew on that same tick — no race, no bail")
+	Runner.T.ok(np["alive"], "ASSIST OFF: ignition leaves a real reaction window")
+	Runner.T.eq(ntank["crew_ring_ticks"], SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"damage ignition arms the measured crew-ring grace")
+	for i in SimWorld.TANK_IGNITION_GRACE_TICKS:
+		nsim.step([_idle()])
+	Runner.T.ok(not np["alive"], "ignoring BAIL OUT through the grace still kills a vestless rider")
 
-	# 2b — ASSIST ON: the vest eats the ignition hit, and only THEN is the escape
-	# real. Real strike (not a fuel-out), driver bails, walks the whole window out.
+	var qsim := SimWorld.new(3, 1)
+	qsim.enemies.clear()
+	var qp := qsim.players[0]
+	var qtank := _park_tank(qsim, qp["x"], qp["y"])
+	_board(qsim, qtank)
+	qsim.step([_idle()])
+	qsim.strikes.append({"x": qtank["x"], "y": qtank["y"], "ticks": 1, "obs": false})
+	qsim.step([_idle()])
+	var quick_bail := SimInput.new()
+	quick_bail.interact = true
+	qsim.step([quick_bail])
+	for i in SimWorld.TANK_IGNITION_GRACE_TICKS:
+		qsim.step([_idle()])
+	Runner.T.ok(qp["alive"] and qp["in_tank"] == -1,
+		"a prompt normal-difficulty bail survives the scheduled ignition hit")
+
+	# 2b — ASSIST ON: the same grace applies. A prompt bail preserves the vest;
+	# assistance is insurance for ignoring the warning, not a mandatory tax.
 	var esim := SimWorld.new(3, 1)
 	esim.assist_mode = true      # every life is issued a vest (_kill_player:1769)
 	esim.enemies.clear()
@@ -312,20 +346,19 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	esim.step([_idle()])   # release the boarding press — interact is edge-triggered
 	esim.strikes.append({"x": etank["x"], "y": etank["y"], "ticks": 1, "obs": false})
 	esim.step([_idle()])
-	Runner.T.ok(etank["burning"] and ep["alive"] and not ep["vest"],
-		"ASSIST ON: the vest eats the ignition hit and the hull burns")
+	Runner.T.ok(etank["burning"] and ep["alive"] and ep["vest"],
+		"ASSIST ON: ignition still grants a fair reaction window")
 	var bail := SimInput.new()
 	bail.interact = true
 	esim.step([bail])
 	Runner.T.eq(ep["in_tank"], -1, "driver bails off a hull lit by a REAL shell")
 	for i in window:
 		esim.step([_idle()])
-	Runner.T.ok(ep["alive"],
-		"...and walks the full %d-tick window out — the race is winnable, not a dead constant" % window)
+	Runner.T.ok(ep["alive"] and ep["vest"],
+		"...and walks the full %d-tick window out without paying an unavoidable vest" % window)
 
 	# 2c — the OTHER ordnance ignition, same funnel: a barrel under the treads
-	# (_detonate_barrel -> _explode -> _ignite_tank(..., true)). Pinned so the two
-	# sources cannot drift apart: a vestless driver who rolls one dies outright too.
+	# (_detonate_barrel -> _explode -> _ignite_tank(..., true)). It arms the same grace.
 	var lsim := SimWorld.new(3, 1)
 	lsim.enemies.clear()
 	var lp := lsim.players[0]
@@ -334,8 +367,239 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	var barrel := {"x": ltank["x"], "y": ltank["y"], "armed": true, "fuse_ticks": 0}
 	lsim.barrels.append(barrel)
 	lsim._detonate_barrel(barrel)
-	Runner.T.ok(ltank["burning"] and not lp["alive"],
-		"a barrel under the treads brews the hull and kills the vestless driver the same way")
+	Runner.T.ok(ltank["burning"] and lp["alive"],
+		"a barrel under the treads brews the hull without deleting the bailout")
+	Runner.T.eq(ltank["crew_ring_ticks"], SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"barrel and artillery share the same grace")
+
+
+func test_damage_ignition_last_safe_bail_tick_is_exact() -> void:
+	# step() handles rider input before _step_tanks decrements the crew ring.
+	# Therefore ring==1 is the final actionable frame: an interact edge escapes;
+	# waiting through that same frame resolves the hit before any later press.
+	var safe_sim := SimWorld.new(3, 1)
+	safe_sim.enemies.clear()
+	var safe_p := safe_sim.players[0]
+	var safe_tank := _park_tank(safe_sim, safe_p["x"], safe_p["y"])
+	_board(safe_sim, safe_tank)
+	safe_sim.step([_idle()])
+	safe_sim._ignite_tank(safe_tank, true)
+	for _i in SimWorld.TANK_IGNITION_GRACE_TICKS - 1:
+		safe_sim.step([_idle()])
+	Runner.T.eq(safe_tank["crew_ring_ticks"], 1,
+		"the final safe bailout frame begins with exactly one crew-ring tick")
+	var last_safe_press := SimInput.new()
+	last_safe_press.interact = true
+	safe_sim.step([last_safe_press])
+	Runner.T.ok(safe_p["alive"] and safe_p["in_tank"] == -1,
+		"an interact edge on the exact last safe tick clears the rider before the ring")
+	Runner.T.eq(safe_tank["crew_ring_ticks"], -1,
+		"the ring resolves once and disarms after finding the last-tick bail clear")
+
+	var late_sim := SimWorld.new(3, 1)
+	late_sim.enemies.clear()
+	var late_p := late_sim.players[0]
+	var late_tank := _park_tank(late_sim, late_p["x"], late_p["y"])
+	_board(late_sim, late_tank)
+	late_sim.step([_idle()])
+	late_sim._ignite_tank(late_tank, true)
+	for _i in SimWorld.TANK_IGNITION_GRACE_TICKS - 1:
+		late_sim.step([_idle()])
+	Runner.T.eq(late_tank["crew_ring_ticks"], 1,
+		"late control reaches the same one-tick boundary")
+	late_sim.step([_idle()])
+	Runner.T.ok(not late_p["alive"],
+		"waiting through the final actionable tick resolves the promised crew hit")
+	var too_late_press := SimInput.new()
+	too_late_press.interact = true
+	late_sim.step([too_late_press])
+	Runner.T.ok(not late_p["alive"] and late_p["in_tank"] == -1,
+		"an interact press one tick after the boundary cannot retroactively bail")
+
+
+func test_damage_ignition_covers_both_tank_seats_and_independent_bails() -> void:
+	# Both players may occupy one hull: occupant is the driver, while the gunner
+	# is derived from their shared in_tank assignment. Ignition must preserve that
+	# identity until each rider chooses to leave.
+	var prompt_sim := SimWorld.new(3, 2)
+	prompt_sim.enemies.clear()
+	var prompt_tank := _park_tank(prompt_sim, prompt_sim.players[0]["x"], prompt_sim.players[0]["y"])
+	_board_two(prompt_sim, prompt_tank)
+	Runner.T.eq(prompt_tank["occupant"], 0, "first rider owns the driver seat")
+	Runner.T.eq(prompt_sim._tank_gunner(0), 1, "second rider owns the derived gunner seat")
+	prompt_sim._ignite_tank(prompt_tank, true)
+	Runner.T.eq(prompt_tank["crew_ring_ticks"], SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"one ignition warning covers the shared two-seat hull")
+	Runner.T.ok(prompt_sim.players[0]["in_tank"] == 0 and prompt_sim.players[1]["in_tank"] == 0,
+		"ignition itself neither ejects nor silently reassigns either crew member")
+	var driver_bail := SimInput.new()
+	driver_bail.interact = true
+	var gunner_bail := SimInput.new()
+	gunner_bail.interact = true
+	prompt_sim.step([driver_bail, gunner_bail])
+	Runner.T.ok(prompt_sim.players[0]["in_tank"] == -1 and prompt_sim.players[1]["in_tank"] == -1,
+		"same-tick prompt exits clear both driver and gunner")
+	Runner.T.eq(prompt_tank["occupant"], -1,
+		"driver promotion followed by the gunner's own bail leaves no phantom occupant")
+
+	# Independent decision at the deadline: gunner bails, driver ignores it. The
+	# ring scans authoritative assignments and hits only the rider still aboard.
+	var split_sim := SimWorld.new(3, 2)
+	split_sim.enemies.clear()
+	var split_tank := _park_tank(split_sim, split_sim.players[0]["x"], split_sim.players[0]["y"])
+	_board_two(split_sim, split_tank)
+	split_sim._ignite_tank(split_tank, true)
+	for _i in SimWorld.TANK_IGNITION_GRACE_TICKS - 1:
+		split_sim.step([_idle(), _idle()])
+	var gunner_last_safe := SimInput.new()
+	gunner_last_safe.interact = true
+	split_sim.step([_idle(), gunner_last_safe])
+	Runner.T.ok(not split_sim.players[0]["alive"],
+		"driver who remains aboard at zero receives the scheduled hit")
+	Runner.T.ok(split_sim.players[1]["alive"] and split_sim.players[1]["in_tank"] == -1,
+		"gunner who bails on the last safe tick survives independently")
+	Runner.T.eq(split_tank["occupant"], -1,
+		"a killed driver cannot leave a departed gunner promoted into the hull")
+
+
+func test_repeated_damage_ignition_does_not_reset_or_duplicate_the_ring() -> void:
+	# Multiple damage sources converge on _ignite_tank(..., true). Exercise that
+	# authoritative seam twice on the same tick after part of the grace is spent:
+	# an already-burning hull must not extend the deadline or queue another hit.
+	var sim := SimWorld.new(3, 1)
+	sim.enemies.clear()
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	sim.step([_idle()])
+	p["vest"] = true
+	sim._ignite_tank(tank, true)
+	for _i in 11:
+		sim.step([_idle()])
+	var spent_deadline: int = tank["crew_ring_ticks"]
+	Runner.T.ok(spent_deadline > 0 and spent_deadline < SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"fixture spends part of the original ignition deadline")
+	sim._ignite_tank(tank, true)
+	sim._ignite_tank(tank, true)
+	Runner.T.eq(tank["crew_ring_ticks"], spent_deadline,
+		"two same-tick damage ignitions neither reset nor extend the active deadline")
+	for _i in spent_deadline:
+		sim.step([_idle()])
+	Runner.T.ok(p["alive"] and not p["vest"],
+		"the unchanged deadline resolves exactly one ordinary hit")
+	Runner.T.eq(tank["crew_ring_ticks"], -1, "the single ring disarms after resolution")
+	# Remove the vest mercy interval while leaving enough hull lifetime to expose
+	# an accidentally queued follow-up hit immediately.
+	p["hurt_iframes"] = 0
+	for _i in 2:
+		sim.step([_idle()])
+	Runner.T.ok(p["alive"] and tank["crew_ring_ticks"] == -1,
+		"simultaneous re-ignition queued no delayed duplicate crew hit")
+
+
+func test_simultaneous_strikes_share_preimpact_armor_for_one_and_two_crew() -> void:
+	# Strike iteration is sequential, but impacts expiring in one simulation tick
+	# are one ordnance batch. The first may ignite the hull; the second must still
+	# see the healthy armor that both impacts arrived against.
+	var solo := SimWorld.new(3, 1)
+	solo.enemies.clear()
+	var solo_tank := _park_tank(solo, solo.players[0]["x"], solo.players[0]["y"])
+	_board(solo, solo_tank)
+	_shell_the_hull(solo, solo_tank)
+	_shell_the_hull(solo, solo_tank)
+	solo.step([_idle()])
+	Runner.T.ok(solo_tank["burning"] and solo.players[0]["alive"],
+		"1P: two same-tick strikes ignite once without erasing the reaction window")
+	Runner.T.eq(solo_tank["crew_ring_ticks"], SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"1P: the full promised deadline survives the impact batch")
+	_shell_the_hull(solo, solo_tank)
+	solo.step([_idle()])
+	Runner.T.ok(not solo.players[0]["alive"],
+		"1P: an ordinary strike on the following tick reaches the burning-hull rider")
+
+	var crewed := SimWorld.new(3, 2)
+	crewed.enemies.clear()
+	var crewed_tank := _park_tank(crewed, crewed.players[0]["x"], crewed.players[0]["y"])
+	_board_two(crewed, crewed_tank)
+	_shell_the_hull(crewed, crewed_tank)
+	_shell_the_hull(crewed, crewed_tank)
+	crewed.step([_idle(), _idle()])
+	Runner.T.ok(crewed.players[0]["alive"] and crewed.players[1]["alive"],
+		"2P: driver and gunner both retain the simultaneous-impact grace")
+	Runner.T.eq(crewed_tank["crew_ring_ticks"], SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"2P: one shared hull carries one unchanged full deadline")
+	_shell_the_hull(crewed, crewed_tank)
+	crewed.step([_idle(), _idle()])
+	Runner.T.ok(not crewed.players[0]["alive"] and not crewed.players[1]["alive"],
+		"2P: both assigned riders are ordinarily exposed after the impact batch")
+
+
+func test_simultaneous_barrels_share_preimpact_armor_for_one_and_two_crew() -> void:
+	# Fuse-resolved barrels are another sequential loop with the same concurrency
+	# promise. Pin both party sizes so driver/gunner ordering cannot reopen it.
+	for crew_size in [1, 2]:
+		var sim := SimWorld.new(3, crew_size)
+		sim.enemies.clear()
+		sim.barrels.clear()
+		var tank := _park_tank(sim, sim.players[0]["x"], sim.players[0]["y"])
+		if crew_size == 1:
+			_board(sim, tank)
+		else:
+			_board_two(sim, tank)
+		for _barrel_i in 2:
+			sim.barrels.append({"x": tank["x"], "y": tank["y"],
+				"armed": true, "fuse_ticks": 1})
+		var inputs: Array = [_idle()] if crew_size == 1 else [_idle(), _idle()]
+		sim.step(inputs)
+		Runner.T.ok(tank["burning"], "%dP: overlapping fuse barrels ignite the hull" % crew_size)
+		for pi in crew_size:
+			Runner.T.ok(sim.players[pi]["alive"],
+				"%dP rider %d survives both impacts in the ignition batch" % [crew_size, pi + 1])
+		Runner.T.eq(tank["crew_ring_ticks"], SimWorld.TANK_IGNITION_GRACE_TICKS,
+			"%dP: barrel batch preserves the full deadline" % crew_size)
+		_shell_the_hull(sim, tank)
+		sim.step(inputs)
+		for pi in crew_size:
+			Runner.T.ok(not sim.players[pi]["alive"],
+				"%dP rider %d is exposed to next-tick ordnance" % [crew_size, pi + 1])
+
+
+func _boundary_kamikaze_bunker(tank: Dictionary) -> Dictionary:
+	# Expanded bunker contact begins exactly one northward tank step away.
+	return {"x": tank["x"] - SimWorld.BUNKER_W / 2,
+		"y": tank["y"] - SimWorld.TANK_SPEED - SimWorld.BUNKER_H - SimWorld.TANK_KAMIKAZE_PAD,
+		"alive": true, "spawn_cd": 999999}
+
+
+func test_grace_one_committed_kamikaze_ejects_driver_and_gunner_before_ring() -> void:
+	for crew_size in [1, 2]:
+		var sim := SimWorld.new(3, crew_size)
+		sim.enemies.clear()
+		var tank := _park_tank(sim, sim.players[0]["x"], sim.players[0]["y"])
+		if crew_size == 1:
+			_board(sim, tank)
+		else:
+			_board_two(sim, tank)
+		sim._ignite_tank(tank, true)
+		tank["crew_ring_ticks"] = 1
+		var bunker := _boundary_kamikaze_bunker(tank)
+		sim.bunkers.append(bunker)
+		Runner.T.ok(not sim._point_in_aabb_expanded(tank["x"], tank["y"], bunker,
+			SimWorld.TANK_KAMIKAZE_PAD),
+			"%dP fixture starts outside bunker contact" % crew_size)
+		var drive := SimInput.new()
+		drive.move_y = -256
+		var inputs: Array = [drive] if crew_size == 1 else [drive, _idle()]
+		sim.step(inputs)
+		Runner.T.ok(not bunker["alive"] and not tank["alive"],
+			"%dP: the committed boundary contact completes the kamikaze" % crew_size)
+		Runner.T.eq(tank["crew_ring_ticks"], -1,
+			"%dP: tank destruction disarms the superseded crew ring" % crew_size)
+		for pi in crew_size:
+			Runner.T.ok(sim.players[pi]["alive"] and sim.players[pi]["in_tank"] == -1,
+				"%dP rider %d is cinematically ejected before the ring" % [crew_size, pi + 1])
+			Runner.T.ok(sim.players[pi]["boost_ticks"] > 0,
+				"%dP rider %d receives the documented escape boost" % [crew_size, pi + 1])
 
 
 func test_no_damage_predicate_gates_on_merely_being_in_a_tank() -> void:
@@ -461,12 +725,11 @@ func test_manned_hull_eats_enemy_rounds_and_the_ride_pays_for_them() -> void:
 	Runner.T.ok(not bp["alive"], "a BURNING hull is not cover — the round reaches the crew")
 
 
-func test_ordnance_that_brews_the_hull_rings_the_crew_but_running_dry_does_not() -> void:
+func test_ordnance_that_brews_the_hull_schedules_a_crew_ring_but_running_dry_does_not() -> void:
 	## The two ignition causes are deliberately NOT symmetric, and both halves
 	## are pinned here so neither can drift:
-	##   ordnance -> one hit on the crew (vest rules). The bail is instant, free
-	##     and i-framed, so without this the "crew is exposed while it burns"
-	##     rule cost a competent operator literally nothing.
+	##   ordnance -> one hit on crew who stay aboard through the warning grace
+	##     (vest rules). A prompt bail avoids it.
 	##   fuel-out -> nothing. Running dry is your own clock, the fuel bar
 	##     telegraphs it, and the free bail is what keeps the tank a tool rather
 	##     than a death sentence.
@@ -482,7 +745,10 @@ func test_ordnance_that_brews_the_hull_rings_the_crew_but_running_dry_does_not()
 		if tank["burning"]:
 			break
 	Runner.T.ok(tank["burning"], "the shell brewed the hull")
-	Runner.T.ok(p["alive"] and not p["vest"], "ordnance ignition rings the crew for one hit")
+	Runner.T.ok(p["alive"] and p["vest"], "ordnance ignition first grants the measured escape grace")
+	for i in SimWorld.TANK_IGNITION_GRACE_TICKS:
+		sim.step([_idle()])
+	Runner.T.ok(p["alive"] and not p["vest"], "remaining aboard through the grace rings the crew once")
 
 	var fsim := SimWorld.new(3, 1)
 	fsim.enemies.clear()

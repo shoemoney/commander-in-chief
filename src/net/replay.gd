@@ -13,7 +13,17 @@ extends RefCounted
 ## have earned and can be checked against its own recorded inputs.
 ## View-only tooling — the sim is never touched, so it's determinism-safe.
 
-const MAGIC := "IKARI_REPLAY_1"
+## File-format and simulation compatibility are deliberately separate. The
+## envelope may grow without changing game rules, while a ruleset bump means
+## recorded inputs can no longer be trusted to produce the same run.
+const MAGIC := "DETERMINISTIC_REPLAY_2"
+const LEGACY_MAGIC := "IKARI_REPLAY_1"
+const CURRENT_RULESET_VERSION := 1
+
+const VALIDATION_OK := 0
+const VALIDATION_MALFORMED := 1
+const VALIDATION_SCORE_MISMATCH := 2
+const VALIDATION_UNSUPPORTED_VERSION := 3
 
 var seed_value: int = 0
 var mode: String = "campaign"
@@ -49,7 +59,8 @@ func record_tick(inputs: Array) -> void:
 
 
 func to_dict() -> Dictionary:
-	return {"magic": MAGIC, "seed": seed_value, "mode": mode,
+	return {"magic": MAGIC, "ruleset": CURRENT_RULESET_VERSION,
+		"seed": seed_value, "mode": mode,
 		"players": player_count, "assist": assist, "hard": hard, "chapter": chapter,
 		"start_vest": start_vest, "start_chest": start_chest, "start_tokens": start_tokens,
 		"frames": frames, "score": claimed_score, "verified": verified}
@@ -98,12 +109,35 @@ static func save_and_verify(d: Dictionary, path: String) -> Error:
 
 
 static func load_from(path: String) -> Replay:
+	var envelope := _read_envelope(path)
+	if envelope["status"] != "ok":
+		return null
+	return _from_data(envelope["data"])
+
+
+static func _read_envelope(path: String) -> Dictionary:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
-		return null
+		return {"status": "malformed"}
 	var data = JSON.parse_string(f.get_as_text())
-	if typeof(data) != TYPE_DICTIONARY or data.get("magic", "") != MAGIC:
-		return null
+	if typeof(data) != TYPE_DICTIONARY:
+		return {"status": "malformed"}
+	var magic := str(data.get("magic", ""))
+	# A recognizable legacy/future envelope is not corrupt and is certainly not
+	# evidence of cheating: this executable simply cannot simulate its rules.
+	if magic == LEGACY_MAGIC or (magic.begins_with("DETERMINISTIC_REPLAY_") and magic != MAGIC):
+		return {"status": "unsupported_version"}
+	if magic != MAGIC:
+		return {"status": "malformed"}
+	# Missing ruleset is legacy-by-definition. Reject it explicitly instead of
+	# replaying under today's rules and mislabeling the resulting score mismatch.
+	if not data.has("ruleset") or typeof(data["ruleset"]) not in [TYPE_INT, TYPE_FLOAT] \
+			or int(data["ruleset"]) != CURRENT_RULESET_VERSION:
+		return {"status": "unsupported_version"}
+	return {"status": "ok", "data": data}
+
+
+static func _from_data(data: Dictionary) -> Replay:
 	# These files arrive from other machines (bug reports) — a trust boundary.
 	# Validate every field rather than relying on error-abort behavior.
 	if not (data.has("seed") and data.has("mode") and data.has("players") and data.has("frames")):
@@ -209,11 +243,17 @@ func verify_score(claimed: int) -> bool:
 ##   {"code": 0, "mode": ..., "score": ..., "frames": ...}  -- verified
 ##   {"code": 1}                                            -- missing/malformed file
 ##   {"code": 2, "claimed": ..., "actual": ...}              -- CHEAT DETECTED
+##   {"code": 3, "reason": "unsupported_version"}             -- valid envelope, foreign rules
 static func validate_file(path: String) -> Dictionary:
-	var r := load_from(path)
+	var envelope := _read_envelope(path)
+	if envelope["status"] == "unsupported_version":
+		return {"code": VALIDATION_UNSUPPORTED_VERSION, "reason": "unsupported_version"}
+	if envelope["status"] != "ok":
+		return {"code": VALIDATION_MALFORMED}
+	var r := _from_data(envelope["data"])
 	if r == null:
-		return {"code": 1}
+		return {"code": VALIDATION_MALFORMED}
 	var actual := r.replay_final_score()
 	if actual == r.claimed_score:
-		return {"code": 0, "mode": r.mode, "score": actual, "frames": r.frames.size()}
-	return {"code": 2, "claimed": r.claimed_score, "actual": actual}
+		return {"code": VALIDATION_OK, "mode": r.mode, "score": actual, "frames": r.frames.size()}
+	return {"code": VALIDATION_SCORE_MISMATCH, "claimed": r.claimed_score, "actual": actual}

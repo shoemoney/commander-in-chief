@@ -98,6 +98,28 @@ func _half(tex_name: String) -> float:
 	return (d.x + d.y) / 4.0
 
 
+func _anim_silhouette(t: Texture2D, scale: float, x_stretch := 1.0) -> Vector2:
+	var img := t.get_image()
+	if img.is_compressed():
+		img.decompress()
+	var sz := img.get_size()
+	var x0 := sz.x
+	var y0 := sz.y
+	var x1 := -1
+	var y1 := -1
+	for y in sz.y:
+		for x in sz.x:
+			if img.get_pixel(x, y).a > 0.35:
+				x0 = mini(x0, x)
+				y0 = mini(y0, y)
+				x1 = maxi(x1, x)
+				y1 = maxi(y1, y)
+	if x1 < 0:
+		return Vector2.ZERO
+	return Vector2(float(x1 - x0 + 1) * scale * x_stretch,
+		float(y1 - y0 + 1) * scale)
+
+
 func _band(label: String, ratio: float, lo: float, hi: float) -> void:
 	Runner.T.ok(ratio >= lo and ratio <= hi,
 		"%s: collision is %.0f%% of the drawn silhouette (band %.0f-%.0f%%)"
@@ -121,6 +143,27 @@ func test_enemy_bullet_is_smaller_than_the_soldier_it_kills() -> void:
 	_band("enemy bullet vs player", r / inscribed, 0.60, 0.80)
 	Runner.T.ok(r < inscribed,
 		"an enemy round must land visibly INSIDE the soldier, never on his outline")
+
+
+func test_enemy_bullet_stays_inside_every_vulnerable_player_pose() -> void:
+	# Animation used to be able to invalidate a fair static sprite: a narrow step
+	# could put the same lethal circle outside the newly drawn body. Measure every
+	# hittable pose with the live horizontal correction; downed is not targetable
+	# and roll is invulnerable, so those intentionally different silhouettes skip.
+	var ms: Dictionary = load("res://src/main.gd").get_script_constant_map()
+	var x_stretch: float = ms["PLAYER_POSE_X_STRETCH"]
+	var scale := float(CALL_SCALE["player1"]) * Art.draw_scale("player1")
+	var r := _px(SimWorld.ENEMY_BULLET_HIT_RADIUS)
+	for state in ["idle", "move_forward_0", "move_forward_1", "move_backward_0",
+			"move_backward_1", "crouch", "shoot", "throw", "interact", "bash"]:
+		var d := _anim_silhouette(Art.player_anim(state), scale, x_stretch)
+		Runner.T.ok(d != Vector2.ZERO, "%s player pose has an opaque silhouette" % state)
+		if d == Vector2.ZERO:
+			continue
+		var inscribed := minf(d.x, d.y) / 2.0
+		Runner.T.ok(r < inscribed,
+			"enemy round (%.1fpx) stays visibly inside player/%s (%.1fpx inscribed radius)"
+				% [r, state, inscribed])
 
 
 func test_contact_death_demands_deep_visual_overlap() -> void:

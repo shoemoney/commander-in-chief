@@ -34,10 +34,11 @@ const KNOWN := {
 	# torture-unreachable, so it never enters either golden window.
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
 		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin", "hp",
-		"hold_y", "flank_x"],
+		"hold_y", "flank_x", "face_x", "face_y"],
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost", "drop"],
-	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "fire_cd", "occupant", "salvage_tick"],
+	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "crew_ring_ticks",
+		"fire_cd", "occupant", "salvage_tick"],
 	# breach_cd is the c2 staggered-flank countdown (conditionally hashed when
 	# live); breach_first_left is EFFECT-HASHED-ONLY (judge r1): it is derived
 	# from which bunker fell, and its entire effect is the wall each squad
@@ -54,7 +55,10 @@ const KNOWN := {
 	# `grace` = planter-immunity countdown on a player-planted claymore. HASHED: it decides
 	# whether a player takes the hit, so it is gameplay, not presentation.
 	"mine": ["x", "y", "armed", "friendly", "grace"],
-	"sandbag": ["x", "y", "world"],
+	# player marks segments that consume the shared purchase cap; vertical swaps
+	# collision axes for cardinalized nests; nest makes paid pairs break atomically.
+	# All three affect gameplay and are hashed.
+	"sandbag": ["x", "y", "world", "player", "vertical", "nest"],
 	# "kind" is the cover TIER (c2 3v) — DERIVED from position at spawn, never
 	# fed to the checksum (position already is); variety is gated past the
 	# torture window so it can't perturb goldens. Classified excluded, hashed
@@ -141,6 +145,21 @@ func test_all_entity_fields_are_classified() -> void:
 			_check("boss", sim.endless_boss)
 	for k in ["rusher", "elite", "frogman", "grenadier", "sniper", "shield", "sapper", "ghillie", "drone", "mg_nest", "technical", "pilot"]:
 		Runner.T.ok(seen.has(k), "coverage staged enemy kind '%s'" % k)
+
+
+func test_paid_sandbag_pair_tag_is_deterministic_and_hashed() -> void:
+	var a := SimWorld.new(0x51A6, 2)
+	var b := SimWorld.new(0x51A6, 2)
+	for sim in [a, b]:
+		sim.war_chest = 100
+		sim.players[0]["aim_x"] = Fixed.ONE
+		sim.players[0]["aim_y"] = 0
+		sim._try_buy(sim.players[0], 4)
+	Runner.T.eq(a.sandbags[0].get("nest", 0), b.sandbags[0].get("nest", 0),
+		"identical ordered worlds derive the same paid-nest tag")
+	Runner.T.eq(a.checksum(), b.checksum(), "identical tagged nests hash identically")
+	b.sandbags[0]["nest"] = b.sandbags[0]["nest"] + 1
+	Runner.T.ok(a.checksum() != b.checksum(), "paid-nest pair tag changes the checksum")
 
 
 func _stage(kind: String) -> SimWorld:

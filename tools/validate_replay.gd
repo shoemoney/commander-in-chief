@@ -17,6 +17,7 @@ extends SceneTree
 ##   1 = missing or malformed replay file (can't even attempt verification)
 ##   2 = loaded fine but CHEAT DETECTED -- the recorded inputs do not earn
 ##       the score the file claims
+##   3 = replay format/ruleset is recognized but unsupported by this build
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -33,8 +34,14 @@ func _initialize() -> void:
 		2:
 			printerr("CHEAT DETECTED: claimed=%d actual=%d -- replay's recorded inputs do not earn the claimed score"
 				% [result["claimed"], result["actual"]])
+		3:
+			# A replay from another simulation ruleset cannot be judged by this
+			# executable. This is a compatibility result, never evidence of tampering.
+			printerr("UNSUPPORTED REPLAY VERSION/RULESET: this build cannot validate '%s'; use a compatible game build"
+				% args[0])
 		_:
-			# Replay.validate_file() only ever returns 0/1/2 today -- this branch exists
+			# Replay.validate_file() only returns the documented codes above today. This
+			# branch exists
 			# so an unrecognized future code fails LOUD (exit 1, "can't verify") instead
 			# of silently falling through to the success-printing path.
 			printerr("VALIDATION FAILED: unrecognized result code %s from Replay.validate_file()" % [result.get("code", "?")])

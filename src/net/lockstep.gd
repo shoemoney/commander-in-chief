@@ -39,6 +39,11 @@ const CHECKSUM_UNKNOWN := -1
 const CMP_MISMATCH := -1
 const CMP_UNKNOWN := 0
 const CMP_MATCH := 1
+## Increment whenever deterministic simulation rules change incompatibly.
+## Replays and lockstep share this exact value so both trust boundaries reject
+## an input stream authored for a different simulation before stepping it.
+const CURRENT_RULESET_VERSION := Replay.CURRENT_RULESET_VERSION
+const HANDSHAKE_PROTOCOL := "DETERMINISTIC_LOCKSTEP_1"
 
 var sim: SimWorld
 var local_player: int
@@ -54,6 +59,9 @@ var stalled_ticks: int = 0
 ## session can never converge. Without this a mismatched input_delay just
 ## deadlocks with no explanation.
 var handshake_mismatch: bool = false
+## Separate from a same-ruleset config mismatch: an absent/foreign ruleset is
+## unsupported, not a desync and never evidence of tampering.
+var unsupported_ruleset: bool = false
 ## Snapshot of this run's config, taken at construction — build the sim,
 ## configure it (assist/hard/chapter), THEN wrap it in a session.
 var session_hash: int = 0
@@ -72,7 +80,7 @@ func _init(sim_world: SimWorld, local_player_index: int, delay: int = 3) -> void
 	input_delay = delay
 	_next_local_tick = delay + 1
 	session_hash = compute_session_hash(sim._world_seed, sim.mode, sim.players.size(),
-		delay, sim.assist_mode, sim.hard, sim._gate_counter + 1)
+		delay, sim.assist_mode, sim.hard, sim._gate_counter + 1, CURRENT_RULESET_VERSION)
 	# Convention both peers share: the first `delay` ticks run on empty inputs,
 	# so neither side waits on the wire to start.
 	var empty := SimInput.new().encode()
@@ -87,12 +95,31 @@ func _init(sim_world: SimWorld, local_player_index: int, delay: int = 3) -> void
 ## diverge or (for input_delay) deadlock, so it is cheaper to refuse the
 ## connection than to debug it later.
 static func compute_session_hash(seed_value: int, mode: String, player_count: int,
-		delay: int, assist: bool, hard: bool, chapter: int) -> int:
-	return [seed_value, mode, player_count, delay, int(assist), int(hard), chapter].hash()
+		delay: int, assist: bool, hard: bool, chapter: int,
+		ruleset_version: int = CURRENT_RULESET_VERSION) -> int:
+	return [ruleset_version, seed_value, mode, player_count, delay, int(assist), int(hard), chapter].hash()
 
 
-func handshake_matches(remote_hash: int) -> bool:
-	if remote_hash == session_hash:
+func handshake_payload() -> Dictionary:
+	return {"protocol": HANDSHAKE_PROTOCOL, "ruleset": CURRENT_RULESET_VERSION,
+		"session_hash": session_hash}
+
+
+func handshake_matches(remote: Variant) -> bool:
+	# The handshake is an envelope, not a bare hash: hashing the ruleset prevents
+	# accidental equality, while this explicit field lets us report the real
+	# cause instead of calling an incompatible peer a desync or cheater.
+	if typeof(remote) != TYPE_DICTIONARY or not remote.has("ruleset") \
+			or typeof(remote.get("ruleset")) not in [TYPE_INT, TYPE_FLOAT] \
+			or int(remote.get("ruleset")) != CURRENT_RULESET_VERSION:
+		unsupported_ruleset = true
+		push_warning("LockstepSession: peer uses a missing or unsupported simulation ruleset. Refuse the connection before stepping inputs.")
+		return false
+	if remote.get("protocol", "") != HANDSHAKE_PROTOCOL:
+		handshake_mismatch = true
+		push_warning("LockstepSession: unsupported handshake protocol. Refuse the connection.")
+		return false
+	if int(remote.get("session_hash", -1)) == session_hash:
 		return true
 	handshake_mismatch = true
 	push_warning("LockstepSession: handshake mismatch — peer's run config differs (seed/mode/players/input_delay/assist/hard/chapter). Refuse the connection; it can only deadlock or desync.")

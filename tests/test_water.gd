@@ -131,13 +131,13 @@ func test_frogman_surfaces_and_is_shootable() -> void:
 	Runner.T.ok(not frog["alive"], "surfaced frogman is bullet-vulnerable")
 
 func test_deep_bands_earn_second_fords_and_islands() -> void:
-	# LVL-4 (8v): every 3rd band gets a second ford (240px-wrapped), every 4th
+	# LVL-4 (8v): every 3rd band gets a permanent second ford, every 4th
 	# deep band a dry mid-river island with 20px wet lips. Band 1 (torture)
 	# hits neither — byte-identical by construction.
 	var sim := SimWorld.new(31, 1)
 	var w2 := {"y": -2500 * Fixed.ONE, "ford_x": 200 * Fixed.ONE}   # idx 2 -> second ford
 	sim.waters.append(w2)
-	var ford2_x: int = 80 * Fixed.ONE + ((w2["ford_x"] - 80 * Fixed.ONE) + 240 * Fixed.ONE) % (480 * Fixed.ONE)
+	var ford2_x: int = SimWorld.ford2_x(w2["ford_x"], 2)
 	Runner.T.ok(not sim._in_water(ford2_x, w2["y"] + 40 * Fixed.ONE), "second ford center is dry")
 	Runner.T.ok(sim._in_water(ford2_x + 40 * Fixed.ONE, w2["y"] + 40 * Fixed.ONE), "33px past the second ford is wet")
 	var w4 := {"y": -4000 * Fixed.ONE, "ford_x": 200 * Fixed.ONE}   # idx 4 -> island
@@ -148,6 +148,75 @@ func test_deep_bands_earn_second_fords_and_islands() -> void:
 	var w1 := {"y": -1500 * Fixed.ONE, "ford_x": 200 * Fixed.ONE}   # torture band: untouched
 	sim.waters.append(w1)
 	Runner.T.ok(sim._in_water(500 * Fixed.ONE, w1["y"] + 40 * Fixed.ONE), "band 1 behavior unchanged")
+
+
+func _tick_for_ford_phase(band_idx: int, phase: int) -> int:
+	return posmod(phase - band_idx * SimWorld.FORD_PHASE_STEP, SimWorld.FORD_CYCLE_TICKS)
+
+
+func test_foot_reads_main_and_permanent_fords_truthfully_at_every_phase_edge() -> void:
+	var sim := SimWorld.new(31, 1)
+	var band_idx := 2
+	var band_y := -(band_idx * SimWorld.GATE_SPACING)
+	var ford_x := 210 * Fixed.ONE
+	var second_x := SimWorld.ford2_x(ford_x, band_idx)
+	sim.waters.append({"y": band_y, "ford_x": ford_x})
+	var edges := [
+		SimWorld.FORD_OPEN_TICKS - SimWorld.FORD_WARN_TICKS,
+		SimWorld.FORD_OPEN_TICKS - 1,
+		SimWorld.FORD_OPEN_TICKS,
+		SimWorld.FORD_CYCLE_TICKS - 1,
+		0,
+	]
+	for phase: int in edges:
+		sim.tick_count = _tick_for_ford_phase(band_idx, phase)
+		var main_is_dry: bool = not sim._in_water(ford_x, band_y + SimWorld.WATER_H / 2)
+		Runner.T.eq(main_is_dry, phase < SimWorld.FORD_OPEN_TICKS,
+			"foot: main ford phase %d matches its open/closed edge" % phase)
+		Runner.T.ok(not sim._in_water(second_x, band_y + SimWorld.WATER_H / 2),
+			"foot: permanent second ford stays dry at phase %d" % phase)
+
+
+func _tank_clears_band_at(sim: SimWorld, x: int, band_y: int, start_tick: int) -> bool:
+	var p := sim.players[0]
+	var tank := {"x": x, "y": band_y, "alive": true, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": 0, "crew_ring_ticks": -1,
+		"fire_cd": 0, "occupant": 0}
+	sim.tanks.clear()
+	sim.tanks.append(tank)
+	p["x"] = x
+	p["y"] = band_y
+	p["in_tank"] = 0
+	sim.camera_top = band_y - 100 * Fixed.ONE
+	sim.tick_count = start_tick
+	var drive := SimInput.new()
+	drive.move_y = 256
+	for i in SimWorld.FORD_WARN_TICKS:
+		sim._drive_tank(0, p, drive, false, false)
+		sim.tick_count += 1
+	return tank["y"] > band_y + SimWorld.WATER_H
+
+
+func test_tank_can_commit_on_warning_and_permanent_ford_survives_closed_phase() -> void:
+	# Measured contract: ceil(80 / 1.92) = 42 movement ticks. The 45-tick
+	# warning leaves three ticks of input/edge margin for the game's slowest actor.
+	var crossing_ticks := ceili(float(SimWorld.WATER_H) / float(SimWorld.TANK_SPEED))
+	Runner.T.eq(crossing_ticks, 42, "tank's full river-band crossing is measured at 42 ticks")
+	Runner.T.ok(SimWorld.FORD_WARN_TICKS >= crossing_ticks + 3,
+		"warning covers one full tank crossing plus three ticks of commitment margin")
+	var sim := SimWorld.new(31, 1)
+	var band_idx := 2
+	var band_y := -(band_idx * SimWorld.GATE_SPACING)
+	var ford_x := 210 * Fixed.ONE
+	sim.waters.append({"y": band_y, "ford_x": ford_x})
+	var warn_phase := SimWorld.FORD_OPEN_TICKS - SimWorld.FORD_WARN_TICKS
+	Runner.T.ok(_tank_clears_band_at(sim, ford_x, band_y,
+		_tick_for_ford_phase(band_idx, warn_phase)),
+		"tank committing when the warning starts clears the main ford before washout")
+	var second_x := SimWorld.ford2_x(ford_x, band_idx)
+	Runner.T.ok(_tank_clears_band_at(sim, second_x, band_y,
+		_tick_for_ford_phase(band_idx, SimWorld.FORD_OPEN_TICKS)),
+		"tank crosses the permanent second ford while the main ford is washed out")
 
 
 # --- THE DRAWN RIVER vs THE SIMULATED RIVER --------------------------------
@@ -369,6 +438,41 @@ func test_tank_ford_label_never_says_FORD_over_water_armour_cannot_cross() -> vo
 		"the WASHED OUT flag contrasts %.2f against the sand it sits on (>=3.0 large-text AA)" % ratio)
 	Runner.T.ok(ratio > open_ratio,
 		"...and out-reads the FORD flag it replaces (%.2f vs %.2f)" % [ratio, open_ratio])
+
+
+func test_permanent_ford_is_named_and_reopening_has_a_short_truthful_settle() -> void:
+	var band_idx := 2
+	var ford_x := 300 * Fixed.ONE
+	var closed_tick := _tick_for_ford_phase(band_idx, SimWorld.FORD_OPEN_TICKS)
+	var closed := Main.ford_visual(band_idx, ford_x, closed_tick)
+	Runner.T.eq(closed["second_label"], "PERMANENT FORD",
+		"the always-open alternative uses explicit reliability language")
+	Runner.T.ok(float(closed["second_x"]) >= 0.0,
+		"the view exposes the permanent crossing's exact marked center")
+	Runner.T.eq(float(closed["deck_alpha"]), 0.0,
+		"main deck is absent on the first closed tick")
+	Runner.T.eq(float(closed["reopen"]), 1.0,
+		"closed state does not pretend a reopen transition is active")
+	var open0 := Main.ford_visual(band_idx, ford_x, _tick_for_ford_phase(band_idx, 0))
+	var open_last := Main.ford_visual(band_idx, ford_x,
+		_tick_for_ford_phase(band_idx, Main.FORD_REOPEN_VIEW_TICKS - 1))
+	var settled := Main.ford_visual(band_idx, ford_x,
+		_tick_for_ford_phase(band_idx, Main.FORD_REOPEN_VIEW_TICKS))
+	Runner.T.eq(float(open0["deck_alpha"]), 1.0,
+		"sim-open ford is drawn dry immediately; transition never lies about collision")
+	Runner.T.ok(float(open0["reopen"]) > 0.0 and float(open0["reopen"]) < 1.0,
+		"first reopened frame begins the view-only wash recession")
+	Runner.T.eq(float(open_last["reopen"]), 1.0,
+		"reopen transition reaches full clarity on its last configured tick")
+	Runner.T.eq(float(settled["reopen"]), 1.0,
+		"reopened ford remains settled after the short transition")
+	# The reduced-motion contract is structural: the renderer's legibility cues are
+	# static text + frame, while only the translucent receding fill is motion-scaled.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('Art.text(self, "FORD OPEN"'),
+		"reopen state has a static text cue, independent of movement")
+	Runner.T.ok(src.contains('fv["second_label"]'),
+		"permanent reliability label is actually consumed by the renderer")
 
 
 func _contrast(a: Color, b: Color) -> float:

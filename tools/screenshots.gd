@@ -207,6 +207,7 @@ func _pose(idx: int) -> void:
 	for w in main._wheel:
 		w["open"] = false
 		w["sel"] = -1
+	main._set_text_scale(100)   # each pose starts from the shipped baseline; a shot may opt up
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
 	main._update_hud()
@@ -358,6 +359,9 @@ func _shot_tank() -> SimWorld:
 
 func _shot_river() -> SimWorld:
 	var sim := SimWorld.new(7, 2)
+	# Stage a deep band that owns the permanent second ford so the presentation
+	# set audits the new reliability marking rather than only the band-1 bridge.
+	sim.camera_top = -2120 * F
 	var w := {"y": _cam(sim, 120), "ford_x": 430 * F}
 	sim.waters.append(w)
 	var p := sim.players[0]
@@ -521,6 +525,9 @@ func _dress_pause(m: Node2D) -> void:
 
 
 func _dress_howto(m: Node2D) -> void:
+	# The release capture must exercise the accessibility case this workflow
+	# repaired, not merely repeat the already-safe 100% manual.
+	m._set_text_scale(200)
 	m._menu.open(GameMenu.Mode.HOWTO)
 	m._menu._open_t = 1.0
 	m._hud_icons.visible = false

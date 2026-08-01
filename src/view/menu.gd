@@ -2116,11 +2116,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 				# c4-06: hover cue for the ENDLESS PREV/NEXT chevrons — only a LIVE side
 				# lights (a boundary chevron can't page, so it never previews as clickable).
 				var nh := -1
-				if _howto_page == HOWTO_ENDLESS_TAB and _endless_pages() > 1:
+				if _howto_subpages() > 1:
 					var nvr := _howto_endless_nav_rects()
-					var ep := _endless_page()
+					var ep := _howto_subpage()
 					for side in range(2):
-						var live_side := ep > 0 if side == 0 else ep < _endless_pages() - 1
+						var live_side := ep > 0 if side == 0 else ep < _howto_subpages() - 1
 						if live_side and nvr[side].has_point(ev.position):
 							nh = side
 				if nh != _howto_nav_hover:
@@ -2188,12 +2188,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 				# control for its two halves now that ENDLESS is a single tab (was a
 				# confusing overlap of two ENDLESS tabs AND these chevrons). Live only on
 				# the ENDLESS tab; mouse parity with left/right.
-				if _howto_page == HOWTO_ENDLESS_TAB and _endless_pages() > 1:
+				if _howto_subpages() > 1:
 					var nav := _howto_endless_nav_rects()
 					for side in range(2):
 						if nav[side].has_point(ev.position):
 							var step := 1 if side == 1 else -1
-							var np := clampi(_endless_page() + step, 0, _endless_pages() - 1)
+							var np := clampi(_howto_subpage() + step, 0, _howto_subpages() - 1)
 							# Only a LIVE chevron (one that actually pages) consumes the
 							# click; a disabled boundary chevron falls through so it can't
 							# swallow input meant for whatever sits under it.
@@ -2327,13 +2327,12 @@ func _nav(move: int, hmove: int) -> void:
 	# focus on the always-selected BACK row (footer already binds SELECT/BACK), so
 	# the paging axis and the nav axis never fight over the same press.
 	if mode == Mode.HOWTO and hmove != 0:
-		# c4-06: on the ENDLESS tab, left/right first pages the roster's sub-pages (mouse
-		# parity with the chevrons) — only a sub-page boundary spills over to the next tab,
-		# so left/right walks the whole help linearly (CONTROLS..ENEMIES..ENDLESS 1/2..2/2)
-		# without a redundant second ENDLESS tab.
-		if _howto_page == HOWTO_ENDLESS_TAB:
+		# Large text can paginate every tab; at 100%, this remains the specialist-only
+		# subpager. A boundary spills to the adjacent tab, preserving the manual's
+		# existing linear keyboard/controller navigation.
+		if _howto_subpages() > 1:
 			var ep := _howto_endless_page + hmove
-			if ep >= 0 and ep < _endless_pages():
+			if ep >= 0 and ep < _howto_subpages():
 				_howto_endless_page = ep
 				main._sfx.play("ui_tick", -13.0)
 				_mark_dirty()
@@ -2341,8 +2340,7 @@ func _nav(move: int, hmove: int) -> void:
 		var np := clampi(_howto_page + hmove, 0, HOWTO_TABS.size() - 1)
 		if np != _howto_page:
 			_howto_page = np
-			if np == HOWTO_ENDLESS_TAB:
-				_howto_endless_page = 0   # entering ENDLESS from ENEMIES lands on its first roster page
+			_howto_endless_page = 0
 			_howto_nav_hover = -1   # left the ENDLESS tab (or arrived) — drop any stale chevron hover
 			main._sfx.play("ui_tick", -13.0)
 			_mark_dirty()
@@ -5019,6 +5017,16 @@ func _draw_howto() -> void:
 	# not the old confusing ENDLESS I/II tabs layered on top of the same chevrons. Left/right
 	# (or wheel) turns tabs, and pages the ENDLESS roster before spilling to the next tab.
 	_draw_howto_tabs()
+	# accessibility: at any enlarged TEXT SIZE the manual switches to a measured,
+	# translated line pager. The legacy pages below are deliberately retained for
+	# 100% so the default presentation stays pixel-identical; the large-text path
+	# never shrinks a requested font to preserve that presentation.
+	if _howto_large_text():
+		var page := _howto_subpage()
+		var pages := _howto_large_pages(_howto_page)
+		_draw_howto_large_page(pages[page])
+		_draw_howto_page_nav(page, pages.size())
+		return
 	match _howto_page:
 		0: _howto_page_controls()
 		1: _howto_page_warchest()
@@ -5026,6 +5034,178 @@ func _draw_howto() -> void:
 		3: _howto_page_enemies()
 		4: _howto_page_endless(_endless_page())   # ENDLESS — one tab, paged by chevrons/left-right
 		_: _howto_page_endless(_endless_page())   # safety fallback (tab is clamped 0..4)
+
+
+# The tab strip and page controls are navigation chrome. They remain at their
+# authored 10/12px sizes so five tabs and both mouse targets continue to fit the
+# 640px canvas. Every instructional string below the strip uses Art.fs(), which
+# is the player's requested 100..200% size with no fit-time reduction.
+func _howto_large_text() -> bool:
+	return Art.fs(10) > 10
+
+
+func _howto_tr(source: String) -> String:
+	return TranslationServer.translate(source)
+
+
+# Locale-safe wrapping for the large-text manual. Space-delimited languages wrap
+# on words; an individual over-wide token (including an entire CJK sentence) is
+# split on Unicode character boundaries. No ellipsis or hard clipping is used.
+static func howto_wrap_lines(source: String, size: int, max_w: float) -> Array[String]:
+	var txt := TranslationServer.translate(source)
+	var f := Art.font()
+	var out: Array[String] = []
+	var line := ""
+	for word in txt.split(" ", false):
+		var probe := word if line == "" else line + " " + word
+		if line != "" and f.get_string_size(probe, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+			out.append(line)
+			line = ""
+		if f.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+			line = word if line == "" else line + " " + word
+			continue
+		# One token is wider than the well (the normal case for Japanese).
+		var chunk := ""
+		for i in word.length():
+			var ch := word.substr(i, 1)
+			if chunk != "" and f.get_string_size(chunk + ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+				out.append(chunk)
+				chunk = ch
+			else:
+				chunk += ch
+		line = chunk
+	if line != "":
+		out.append(line)
+	if out.is_empty():
+		out.append("")
+	return out
+
+
+# Content model for the accessible pager. Copy stays single-sourced with the
+# default pages above; dynamic bindings and sim constants are resolved before
+# measuring so the exact text drawn is the exact text paginated.
+func _howto_large_entries(tab: int) -> Array:
+	match tab:
+		0:
+			return [
+				{"kind": "heading", "text": "MOVE AND AIM FIRST — THE REST IS EXTRA:", "size": 10},
+				{"kind": "action", "action": "move", "text": _howto_tr("MOVE with %s.") % _dir_devices("move")},
+				{"kind": "action", "action": "aim", "text": _howto_tr("AIM with %s. The gun fires on its own — just point it.") % _dir_devices("aim")},
+				{"kind": "action", "action": "grenade", "text": "GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."},
+				{"kind": "action", "action": "roll", "text": "ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit."},
+				{"kind": "action", "action": "interact", "text": "BOARD a tank for its crush weight and its shells."},
+				{"kind": "action", "action": "interact", "text": "PLANT a claymore clear of any tank — it hurts BOTH sides."}]
+		1:
+			return [
+				{"kind": "heading", "text": "ONE HIT AND YOU DROP.", "size": 13},
+				{"kind": "body", "text": "No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again."},
+				{"kind": "heading", "text": "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", "size": 11},
+				{"kind": "body", "text": _howto_tr("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all.") % (SimWorld.BROKE_RESPAWN_TICKS / 60)},
+				{"kind": "body", "text": _howto_tr("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
+				{"kind": "action", "action": "wheel", "text": "Hold to open the supply wheel."}]
+		2:
+			return [
+				{"kind": "heading", "text": "MODES + ASSIST:", "size": 10},
+				{"kind": "sprite", "icon": "hud_flag", "text": "CAMPAIGN — Fight up six sectors to the Foundry finale. The main run."},
+				{"kind": "sprite", "icon": "hud_skull", "text": "ENDLESS WAR — Hold out against escalating waves for score. Ranged threats join wave 3+."},
+				{"kind": "sprite", "icon": "mi_timer", "text": "DAILY RUN — One shared seed a day, one attempt. Everyone races the same board."},
+				{"kind": "sprite", "icon": "icon_vest", "text": "ASSIST (2-HIT) — Each life takes TWO hits, not one. Runs are tagged *ASSIST."}]
+		3:
+			return [
+				{"kind": "heading", "text": "THE RED TEAM — WHO'S SHOOTING BACK:", "size": 10},
+				{"kind": "sprite", "icon": "enemy_smg", "text": "RUSHER — charges, touch kills"},
+				{"kind": "sprite", "icon": "enemy_assault", "text": "ELITE — keeps range, telegraphs one shot"},
+				{"kind": "sprite", "icon": "frogman", "text": "FROGMAN — submerged: bullets pass over, GRENADES ONLY"},
+				{"kind": "sprite", "icon": "m_pilot", "text": "DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him."}]
+		_:
+			var out: Array = [{"kind": "heading", "text": "THE SPECIALISTS — RANGED & ARMORED:", "size": 10}]
+			for row in _endless_threats():
+				out.append({"kind": "sprite", "icon": row[0], "tint": row[1], "text": row[2]})
+			return out
+
+
+# Flatten semantic entries into individually paginatable visual lines. Long
+# localized paragraphs may break across leaves, which guarantees every glyph is
+# reachable even when a locale expands substantially at 200%.
+func _howto_large_rows(tab: int) -> Array:
+	var rows: Array = []
+	var f := Art.font()
+	for entry in _howto_large_entries(tab):
+		var kind: String = entry["kind"]
+		var design_size: int = int(entry.get("size", 11))
+		var size := Art.fs(design_size)
+		var x := ICON_X
+		var max_w := FRAME_INNER_R - x
+		var marker := ""
+		var marker_kind := ""
+		var marker_tint: Color = Color.WHITE
+		if kind == "action":
+			marker = entry["action"]
+			marker_kind = "action"
+			x = TEXT_X
+			max_w = BODY_W
+		elif kind == "sprite":
+			marker = entry["icon"]
+			marker_kind = "sprite"
+			marker_tint = entry.get("tint", Art.tint(marker) if Art.TEX.has(marker) else Color.WHITE)
+			x = TEXT_X
+			max_w = BODY_W
+		var lines := howto_wrap_lines(entry["text"], size, max_w)
+		var line_h := ceilf(f.get_height(size)) + 2.0
+		for i in lines.size():
+			rows.append({"text": lines[i], "size": size, "x": x,
+				"height": line_h + (6.0 if i == lines.size() - 1 else 0.0),
+				"col": Color(1.0, 0.72, 0.42) if kind == "heading" else Color(0.9, 0.92, 0.82),
+				"marker": marker if i == 0 else "", "marker_kind": marker_kind,
+				"marker_tint": marker_tint})
+	return rows
+
+
+func _howto_large_pages(tab: int) -> Array:
+	var top := CONTENT_BODY_Y
+	# The pager's 20px mouse targets and baseline occupy the strip immediately
+	# above BACK. Content clears it by four pixels at every supported scale.
+	var capacity := (_howto_nav_y() - 16.0) - top
+	var pages: Array = []
+	var page: Array = []
+	var used := 0.0
+	for row in _howto_large_rows(tab):
+		var h: float = row["height"]
+		if not page.is_empty() and used + h > capacity:
+			pages.append(page)
+			page = []
+			used = 0.0
+		page.append(row)
+		used += h
+	if not page.is_empty():
+		pages.append(page)
+	if pages.is_empty():
+		pages.append([])
+	return pages
+
+
+func _draw_howto_large_page(rows: Array) -> void:
+	var f := Art.font()
+	var y := CONTENT_BODY_Y
+	for row in rows:
+		var size: int = row["size"]
+		var baseline := y + f.get_ascent(size)
+		var marker: String = row["marker"]
+		if marker != "":
+			var marker_size := minf(30.0, float(size) + 4.0)
+			if row["marker_kind"] == "sprite":
+				if Art.TEX.has(marker):
+					_draw_sprite_fit(marker, Rect2(ICON_X, y, marker_size, marker_size), row["marker_tint"])
+			else:
+				if marker in ["move", "aim"]:
+					var key := Art.glyph_key(marker)
+					var t := Art.tex(key)
+					var gw := marker_size * float(t.get_width()) / float(t.get_height())
+					_emit_tex(key, Rect2(ICON_X, y, gw, marker_size), Color.WHITE)
+				else:
+					_emit_glyph(marker, Vector2(ICON_X + marker_size / 2.0, y + marker_size / 2.0), marker_size, Color.WHITE)
+		Art.text(self, row["text"], Vector2(row["x"], baseline), size, row["col"])
+		y += row["height"]
 
 
 # c3-05/c4-06/c4-09: the CONTROLS/WAR CHEST/MODES/ENEMIES/ENDLESS tab row — same centered
@@ -5271,7 +5451,7 @@ func _endless_threats() -> Array[Array]:
 			["enemy_sniper", Art.tint("enemy_sniper"), "SNIPER — paints a laser line, then fires. Sidestep it."],   # sol-08: live red marksman
 			["ghillie", Art.tint("ghillie"), "GHILLIE — hidden sniper; only its laser gives it away. Close in."],
 			["sapper", Art.tint("sapper"), "SAPPER — seeds mines behind it. Don't chase over its trail."],
-			["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front eats bullets. Blow it open with a blast."],
+			["m_bombsuit", Color(0.85, 0.9, 1.0), "SHIELD — front eats bullets. Flank it, blast it, or use Rend."],
 			["m_drone", Art.tint("m_drone"), "DRONE — flying spotter, calls mortars on your spot. Shoot it down."],
 			["m_technical", Art.tint("m_technical"), "TECHNICAL — revs, then charges a LOCKED line. Step off it."]]
 	return _endless_cache
@@ -5286,6 +5466,19 @@ func _endless_pages() -> int:
 # stale index can't point past a shrunk roster).
 func _endless_page() -> int:
 	return clampi(_howto_endless_page, 0, _endless_pages() - 1)
+
+
+# Current leaf count/index for the HOWTO tab. At 100% only SPECIALS has leaves;
+# enlarged text uses the measured pager on every tab. The existing state field is
+# retained so specialist paging, saved input paths, and mouse focus keep one model.
+func _howto_subpages() -> int:
+	if _howto_large_text():
+		return _howto_large_pages(_howto_page).size()
+	return _endless_pages() if _howto_page == HOWTO_ENDLESS_TAB else 1
+
+
+func _howto_subpage() -> int:
+	return clampi(_howto_endless_page, 0, _howto_subpages() - 1)
 
 
 func _howto_page_endless(page: int = 0) -> void:
@@ -5361,6 +5554,10 @@ func _howto_page_endless(page: int = 0) -> void:
 # reads as a real button. Geometry is single-sourced through _howto_endless_nav_rects so
 # the draw and the click targets always agree.
 func _draw_howto_endless_nav(page: int, pages: int) -> void:
+	_draw_howto_page_nav(page, pages)
+
+
+func _draw_howto_page_nav(page: int, pages: int) -> void:
 	if pages <= 1:
 		return
 	var rects := _howto_endless_nav_rects()
@@ -5383,7 +5580,7 @@ func _draw_howto_endless_nav(page: int, pages: int) -> void:
 	# Draw the SAME padded string the geometry measures (see _howto_endless_counter), so the
 	# < / > sit exactly against the counter's footprint instead of drifting off a width the
 	# counter never actually occupied. text_center centers it, so the pad stays symmetric.
-	Art.text_center(self, _howto_endless_counter(), CENTER_X, ny, 12, Color(0.8, 0.82, 0.75))
+	Art.text_center(self, _howto_page_counter(page, pages), CENTER_X, ny, 12, Color(0.8, 0.82, 0.75))
 
 
 # Shared geometry for the ENDLESS PREV/NEXT chevrons — a "<" rect left of the counter and
@@ -5395,9 +5592,13 @@ func _howto_endless_counter() -> String:
 	return "  %d / %d  " % [_endless_page() + 1, _endless_pages()]
 
 
+func _howto_page_counter(page: int, pages: int) -> String:
+	return "  %d / %d  " % [clampi(page, 0, pages - 1) + 1, pages]
+
+
 func _howto_endless_nav_rects() -> Array[Rect2]:
 	var f := Art.font()
-	var mid := _howto_endless_counter()
+	var mid := _howto_page_counter(_howto_subpage(), _howto_subpages())
 	var mw := f.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 	var cw := f.get_string_size("<", HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 	var x0 := CENTER_X - (cw + mw + cw) / 2.0

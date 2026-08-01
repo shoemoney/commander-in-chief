@@ -309,12 +309,10 @@ func test_sfx_captions_only_cover_reachable_warning_cues() -> void:
 		"the captioned set stays a small subset of the cue table (%d of %d)" % [Sfx.SFX_CAPTIONS.size(), event_sound.size()])
 
 
-# The gating, which is the whole design: an unlisted cue is silent on screen, a listed one arms,
-# and NOTHING can stomp a caption that is still inside its stable pre-fade window — not another
-# warning, not a Spotter line, not a bark. Once a line starts dissolving the strip is free again,
-# and a cue that repeats every tick (the armour plink) is held off by its own per-key cooldown so
-# it can't pin the strip open for as long as the player keeps firing.
-func test_sfx_caption_gating_never_stomps_a_line_still_being_read() -> void:
+# Semantic caption arbitration: critical warning > player state > objective > teaching > flavor.
+# Higher copy preempts through the ONE strip; displaced/stateful copy remains queued, equal warning
+# tiers never flicker-stomp, and per-key cooldown still prevents a repeated cue pinning the strip.
+func test_sfx_caption_gating_preempts_semantically_and_preserves_queued_state() -> void:
 	var sfx := Sfx.new()
 	var f := Engine.get_physics_frames()
 
@@ -322,22 +320,30 @@ func test_sfx_caption_gating_never_stomps_a_line_still_being_read() -> void:
 	sfx.caption_sfx("shot")
 	Runner.T.eq(sfx.active_caption()["text"], "", "an un-captioned cue leaves the strip empty")
 
-	# A listed warning arms, dry (not radio-tinted — it is the world making noise, not the radio).
+	# Start with Commander flavor, then prove lethal warning copy can interrupt it.
+	sfx._arm_caption("COMMANDER: \"Move out!\"", null, false, false, Sfx.CaptionTier.FLAVOR)
 	sfx.caption_sfx("strike_warn")
 	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["strike_warn"], "a listed warning cue arms the strip")
 	Runner.T.eq(sfx.active_caption()["radio"], false, "a warning caption is dry-tinted, not a radio line")
 	Runner.T.ok(not sfx._cap_is_vo, "a warning caption is not flagged VO, so stop_vo can never clear it")
+	Runner.T.eq(sfx._cap_queue.size(), 1, "preempted flavor is retained instead of silently discarded")
 
-	# A DIFFERENT warning arriving while that one is still stable does not stomp it.
+	# A DIFFERENT equal-tier warning queues; it cannot flicker-stomp the active warning.
 	sfx.caption_sfx("sniper_paint")
 	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["strike_warn"],
-		"a second warning cannot stomp a caption still inside its readable window")
+		"an equal-tier warning cannot stomp a caption still inside its readable window")
 
-	# Once the line is inside its fade ramp, the strip is available again.
-	sfx._cap_until = Engine.get_physics_frames() + 1
-	sfx.caption_sfx("sniper_paint")
+	# Stateful accessibility VO queues behind warnings but ahead of preserved flavor.
+	sfx._arm_caption("SPOTTER: \"Pilot down!\"", null, true, true, Sfx.CaptionTier.PLAYER_STATE)
+	sfx._cap_until = Engine.get_physics_frames()
 	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["sniper_paint"],
-		"a warning takes over once the previous line has started dissolving")
+		"the already-queued lethal warning resumes first")
+	sfx._cap_until = Engine.get_physics_frames()
+	Runner.T.eq(sfx.active_caption()["text"], "SPOTTER: \"Pilot down!\"",
+		"stateful accessibility VO resumes before displaced flavor")
+	sfx._cap_until = Engine.get_physics_frames()
+	Runner.T.eq(sfx.active_caption()["text"], "COMMANDER: \"Move out!\"",
+		"preempted flavor resumes through the same caption slot after higher tiers clear")
 
 	# The SAME cue can't re-arm inside its cooldown, even with the strip completely free — this is
 	# what stops a per-bullet cue from pinning the strip open.
@@ -351,13 +357,6 @@ func test_sfx_caption_gating_never_stomps_a_line_still_being_read() -> void:
 	sfx._sfx_cap_next["sniper_paint"] = 0
 	sfx.caption_sfx("sniper_paint")
 	Runner.T.eq(sfx.active_caption()["text"], Sfx.SFX_CAPTIONS["sniper_paint"], "past its cooldown the cue captions again")
-
-	# A live Spotter VO line outranks a warning for the same reason a warning outranks a warning:
-	# whatever is on screen gets read to the end.
-	sfx._arm_caption("SPOTTER: \"Enemy observer spotted!\"", null, true, true)
-	sfx.caption_sfx("elite_windup")
-	Runner.T.eq(sfx.active_caption()["text"], "SPOTTER: \"Enemy observer spotted!\"",
-		"a warning never interrupts a VO line mid-read")
 	sfx.free()
 
 
@@ -1226,19 +1225,77 @@ func test_hostile_infantry_separator_rim() -> void:
 		"the diver keeps its sol-12 water read — no land-infantry light rim")
 
 
-func test_sol_walk_frames_not_wired() -> void:
-	# sol-13 (resolved by ground-truth): the pack's walk/*.png frames are a 3/4 running pose (888-922px
-	# tall, 41px inter-frame centroid jitter) vs the top-down IDLE hero (684px). Wiring them would pop the
-	# hero to a different projection than the top-down enemies/frogman AND jitter frame-to-frame — worse
-	# than the smooth, golden-safe walk_bob. Per the consensus "stay inside ONE set" caution + PLAYER's
-	# dissent, the bob is kept and the frames were removed. Guard against a future accidental re-wire.
+func test_character_animation_registry_is_complete_and_godot_ready() -> void:
+	# The replacement set is authored in one strict overhead projection, one native
+	# canvas per frame. Explicit registries make every gameplay pose import eagerly.
+	var art: Dictionary = load("res://src/view/art.gd").get_script_constant_map()
+	var player: Dictionary = art["PLAYER_ANIM"]
+	var player_states := ["idle", "move_forward_0", "move_forward_1",
+		"move_backward_0", "move_backward_1", "crouch", "shoot", "throw",
+		"roll", "downed", "interact", "bash"]
+	Runner.T.eq(player.size(), player_states.size(), "player registry contains exactly the 12 shipped poses")
+	var paths := {}
+	for state in player_states:
+		Runner.T.ok(player.has(state), "player pose '%s' is registered" % state)
+		if not player.has(state):
+			continue
+		var tex: Texture2D = player[state]
+		Runner.T.eq(tex.get_size(), Vector2(256, 256), "player/%s is a native 256px Godot texture" % state)
+		paths[tex.resource_path] = true
+		var img := tex.get_image()
+		if img.is_compressed():
+			img.decompress()
+		for corner in [Vector2i(0, 0), Vector2i(255, 0), Vector2i(0, 255), Vector2i(255, 255)]:
+			Runner.T.ok(img.get_pixelv(corner).a < 0.05,
+				"player/%s corner %s is transparent" % [state, str(corner)])
+	Runner.T.eq(paths.size(), player_states.size(), "every player pose uses its own frame")
+
+	var enemies: Dictionary = art["ENEMY_ANIM"]
+	var enemy_states := ["idle", "move_0", "move_1", "crouch", "windup", "shoot", "stunned", "downed"]
+	var enemy_keys := ["enemy_assault", "enemy_smg", "enemy_shotgun", "enemy_lmg", "enemy_sniper"]
+	Runner.T.eq(enemies.size(), enemy_keys.size(), "all five weapon classes have animation sets")
+	for key in enemy_keys:
+		Runner.T.ok(enemies.has(key), "%s animation set is registered" % key)
+		if not enemies.has(key):
+			continue
+		var poses: Dictionary = enemies[key]
+		Runner.T.eq(poses.size(), enemy_states.size(), "%s has exactly eight poses" % key)
+		for enemy_state in enemy_states:
+			Runner.T.ok(poses.has(enemy_state), "%s/%s is registered" % [key, enemy_state])
+			if not poses.has(enemy_state):
+				continue
+			var enemy_tex: Texture2D = poses[enemy_state]
+			Runner.T.eq(enemy_tex.get_size(), Vector2(128, 128), "%s/%s is a native 128px Godot texture" % [key, enemy_state])
+			var enemy_img := enemy_tex.get_image()
+			if enemy_img.is_compressed():
+				enemy_img.decompress()
+			Runner.T.ok(enemy_img.get_pixel(0, 0).a < 0.05 and enemy_img.get_pixel(127, 127).a < 0.05,
+				"%s/%s has a clean transparent canvas" % [key, enemy_state])
+
+	var main_src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(main_src.contains("Art.player_anim(anim_state)"), "player pose registry is wired into the live draw")
+	Runner.T.ok(main_src.contains("Art.enemy_anim(rusher_key, rusher_pose)"), "rusher pose registry is wired into the live draw")
+	Runner.T.ok(main_src.contains("Art.enemy_anim(corpse_key, \"downed\")"), "enemy downed poses are wired into corpses")
+
+
+func test_projectile_cards_are_complete_and_velocity_aligned() -> void:
 	var tex: Dictionary = load("res://src/view/art.gd").get_script_constant_map()["TEX"]
-	for k in tex:
-		Runner.T.ok(not String(k).contains("walk"),
-			"no walk-frame key '%s' is registered — the golden-safe walk_bob animates the hero (sol-13)" % k)
-	# The frames aren't even in the project anymore (no dead import for pixels nothing draws).
-	Runner.T.ok(not ResourceLoader.exists("res://assets/troops/walk/assault_walk1.png"),
-		"the inconsistent 3/4 walk frames were removed from the project (sol-13)")
+	for key in ["bullet_player", "bullet_piercing", "bullet_enemy", "bullet_sniper"]:
+		Runner.T.ok(tex.has(key), "%s is registered" % key)
+		if not tex.has(key):
+			continue
+		var card: Texture2D = tex[key]
+		Runner.T.eq(card.get_size(), Vector2(128, 32), "%s uses the shared 4:1 projectile canvas" % key)
+		var img := card.get_image()
+		if img.is_compressed():
+			img.decompress()
+		Runner.T.ok(img.get_pixel(0, 0).a < 0.05 and img.get_pixel(127, 31).a < 0.05,
+			"%s corners are transparent" % key)
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("bullet_piercing\" if piercing else \"bullet_player"),
+		"player ammo switches to the cyan AP card when piercing is live")
+	Runner.T.ok(src.contains("bullet_sniper\" if fast else \"bullet_enemy"),
+		"hostile ammo switches to the long sniper card from actual projectile speed")
 
 
 func test_sol_muzzle_pop() -> void:

@@ -30,6 +30,123 @@ func test_shield_blocks_front_arc_but_dies_from_behind() -> void:
 	Runner.T.ok(not e["alive"], "a bullet into the shieldman's back kills him")
 
 
+func test_shield_facing_cannot_snap_and_a_safe_flank_opens() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	sim.enemies.clear()
+	p["x"] = 320 * Fixed.ONE
+	p["y"] = 50 * Fixed.ONE
+	sim._spawn_special(320 * Fixed.ONE, 0, "shield")
+	var e: Dictionary = sim.enemies[0]
+	Runner.T.ok(e["face_y"] > 0, "spawned shield initially faces the player below")
+	# Teleport the target to the opposite side to stress the turn cap. One update must not
+	# reverse the plate; this is the old every-tick snap failure in its strongest form.
+	p["y"] = -50 * Fixed.ONE
+	sim._turn_shield_toward(e, 0, -50 * Fixed.ONE, 50 * Fixed.ONE)
+	Runner.T.ok(e["face_y"] > 0, "one tick cannot snap the shield through 180 degrees")
+	# Move to a safe lateral standoff. The facing starts down and only begins turning right;
+	# a shot from the player's new side therefore reaches the exposed arc.
+	p["x"] = 360 * Fixed.ONE
+	p["y"] = 0
+	sim._turn_shield_toward(e, 40 * Fixed.ONE, 0, 40 * Fixed.ONE)
+	Runner.T.ok(e["face_x"] < Fixed.ONE / 2, "capped turn leaves a flank outside the front cone")
+	sim.bullets.append({"x": e["x"], "y": e["y"], "vx": -SimWorld.BULLET_SPEED,
+		"vy": 0, "ttl": 60})
+	sim._step_bullets()
+	Runner.T.ok(not e["alive"], "a lateral shot earned at 40px standoff kills the shieldman")
+
+
+func test_shield_exact_opposite_turn_has_stable_tie_break_and_converges() -> void:
+	var sim := SimWorld.new(1, 1)
+	var e := {"face_x": 0, "face_y": Fixed.ONE}
+	# Exact antipodes have no cross-product sign. The old component approach reduced +Y,
+	# normalized it straight back to +Y, and repeated forever. The first tick must retain
+	# forward continuity while also choosing a deterministic side out of that tie.
+	sim._turn_shield_toward(e, 0, -50 * Fixed.ONE, 50 * Fixed.ONE)
+	Runner.T.ok(e["face_y"] > 0, "an exact-opposite request still cannot reverse in one tick")
+	Runner.T.ok(e["face_x"] < 0, "the 180-degree tie deterministically starts through -X")
+	for _tick in 110:
+		sim._turn_shield_toward(e, 0, -50 * Fixed.ONE, 50 * Fixed.ONE)
+	Runner.T.eq(e["face_x"], 0, "the capped turn settles exactly on the antipodal X heading")
+	Runner.T.eq(e["face_y"], -Fixed.ONE, "the capped turn reaches the target behind it")
+
+
+func test_shield_ordinary_enemy_steps_leave_a_flank_for_safe_standoff_circle() -> void:
+	var sim := SimWorld.new(1, 1)
+	var p := sim.players[0]
+	sim.enemies.clear()
+	sim.sandbags.clear()
+	sim.rocks.clear()
+	var cx := 320 * Fixed.ONE
+	var cy := -160 * Fixed.ONE
+	p["x"] = cx
+	p["y"] = cy + 40 * Fixed.ONE
+	sim._spawn_special(cx, cy, "shield")
+	var e: Dictionary = sim.enemies[0]
+	var orbit_x := 0
+	var orbit_y := Fixed.ONE
+	# Twice the plate's angular step at a 40px radius is about 2.5px/tick: ordinary
+	# player running speed, safely four touch-radii away. Keep the shield centered after
+	# each ordinary enemy-AI step so this isolates the promised circling contest from its
+	# unrelated forward translation and holds the measured standoff constant.
+	for _tick in 40:
+		var next_x := orbit_x + Fixed.mul(-orbit_y, SimWorld.SHIELD_TURN_STEP * 2)
+		var next_y := orbit_y + Fixed.mul(orbit_x, SimWorld.SHIELD_TURN_STEP * 2)
+		var next_len := Fixed.length(next_x, next_y)
+		orbit_x = Fixed.div(next_x, next_len)
+		orbit_y = Fixed.div(next_y, next_len)
+		p["x"] = cx + Fixed.mul(orbit_x, 40 * Fixed.ONE)
+		p["y"] = cy + Fixed.mul(orbit_y, 40 * Fixed.ONE)
+		sim._step_enemies()
+		e["x"] = cx
+		e["y"] = cy
+	var shot_vx := -Fixed.mul(orbit_x, SimWorld.BULLET_SPEED)
+	var shot_vy := -Fixed.mul(orbit_y, SimWorld.BULLET_SPEED)
+	Runner.T.ok(not sim._shield_blocks(e, {"vx": shot_vx, "vy": shot_vy}),
+		"a normal-speed 40px circle outruns the plate far enough to expose its flank")
+	sim.bullets.append({"x": e["x"], "y": e["y"], "vx": shot_vx, "vy": shot_vy,
+		"ttl": 60})
+	sim._step_bullets()
+	Runner.T.ok(not e["alive"], "the earned circling flank is lethal during ordinary bullet resolution")
+
+
+func test_shield_two_player_nearest_target_swap_turns_continuously_then_reblocks() -> void:
+	var sim := SimWorld.new(1, 2)
+	var p0 := sim.players[0]
+	var p1 := sim.players[1]
+	sim.enemies.clear()
+	sim.sandbags.clear()
+	sim.rocks.clear()
+	var ex := 320 * Fixed.ONE
+	var ey := -200 * Fixed.ONE
+	p0["x"] = ex
+	p0["y"] = -120 * Fixed.ONE   # initially nearest, directly below
+	p1["x"] = ex
+	p1["y"] = -450 * Fixed.ONE   # initially farther, directly above
+	sim._spawn_special(ex, ey, "shield")
+	var e: Dictionary = sim.enemies[0]
+	Runner.T.eq(e["face_y"], Fixed.ONE, "spawn faces the initially nearest teammate")
+	# Hand nearest status to the teammate on the exact opposite side. The live enemy step
+	# must use that new target without teleporting its already-visible plate.
+	p0["x"] = 620 * Fixed.ONE
+	p0["y"] = 100 * Fixed.ONE
+	sim._step_enemies()
+	Runner.T.ok(e["face_y"] > 0 and e["face_x"] < 0,
+		"nearest-target swap starts a continuous deterministic turn, not a 180 snap")
+	Runner.T.ok(sim._shield_blocks(e, {"vx": 0, "vy": -SimWorld.BULLET_SPEED}),
+		"the old teammate's head-on lane remains blocked during the first swap tick")
+	Runner.T.ok(not sim._shield_blocks(e, {"vx": 0, "vy": SimWorld.BULLET_SPEED}),
+		"the new teammate behind the plate has a temporary firing window")
+	for _tick in 110:
+		sim._step_enemies()
+	Runner.T.eq(e["face_x"], 0, "continued ordinary steps settle on the new nearest target's axis")
+	Runner.T.eq(e["face_y"], -Fixed.ONE, "continued ordinary steps face the new nearest target")
+	Runner.T.ok(sim._shield_blocks(e, {"vx": 0, "vy": SimWorld.BULLET_SPEED}),
+		"the plate re-blocks the new teammate after completing its capped turn")
+	Runner.T.ok(not sim._shield_blocks(e, {"vx": 0, "vy": -SimWorld.BULLET_SPEED}),
+		"the old teammate is now on the exposed rear arc")
+
+
 func test_sniper_shot_follows_locked_paint_vector_not_new_player_pos() -> void:
 	var sim := SimWorld.new(1, 1)
 	var p := sim.players[0]

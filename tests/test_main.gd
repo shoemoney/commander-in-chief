@@ -14,6 +14,58 @@ func _consts() -> Dictionary:
 	return ms.get_script_constant_map()
 
 
+func test_player_animation_selector_covers_every_real_action() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var p := {"alive": true, "roll_ticks": 0, "grenade_cd": 0, "fire_cd": 0,
+		"interact_prev": false, "aim_x": 0, "aim_y": -Fixed.ONE}
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "idle", "standing player idles")
+	Runner.T.eq(ms.player_anim_state(p, Vector2(0, -1), false, 0), "move_forward_0",
+		"travel with aim selects forward step A")
+	Runner.T.eq(ms.player_anim_state(p, Vector2(0, -1), false, 1), "move_forward_1",
+		"locomotion phase advances to forward step B")
+	Runner.T.eq(ms.player_anim_state(p, Vector2(0, 1), false, 0), "move_backward_0",
+		"travel against aim selects backward step")
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, true, 0), "crouch",
+		"stationary concealment is the crouch state (there is no fake crouch control)")
+	p["interact_prev"] = true
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "interact", "held interaction uses the reach pose")
+	p["interact_prev"] = false
+	p["fire_cd"] = SimWorld.FIRE_COOLDOWN_TICKS
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "shoot", "fresh automatic fire shows recoil")
+	p["fire_cd"] = SimWorld.BASH_COOLDOWN_TICKS
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "bash", "empty-mag cooldown shows the bash")
+	p["fire_cd"] = 0
+	p["grenade_cd"] = SimWorld.GRENADE_COOLDOWN_TICKS
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "throw", "fresh grenade cooldown shows the throw")
+	p["grenade_cd"] = 0
+	p["roll_ticks"] = SimWorld.ROLL_TICKS
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "roll", "dodge timer shows the roll")
+	p["roll_ticks"] = 0
+	p["alive"] = false
+	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "downed", "dead/revivable player uses the downed pose")
+
+
+func test_enemy_animation_selector_covers_combat_states() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var e := {"kind": "rusher", "elite": false, "windup": 0, "fire_cd": 0,
+		"submerged": false}
+	Runner.T.eq(ms.enemy_anim_state(e, false, 0, false), "idle", "paused rusher idles")
+	Runner.T.eq(ms.enemy_anim_state(e, true, 0, false), "move_0", "moving rusher uses step A")
+	Runner.T.eq(ms.enemy_anim_state(e, true, 1, false), "move_1", "moving rusher uses step B")
+	e["windup"] = 8
+	Runner.T.eq(ms.enemy_anim_state(e, false, 0, false), "windup", "rooted attack preparation braces")
+	e["windup"] = 0
+	Runner.T.eq(ms.enemy_anim_state(e, false, 0, true), "stunned", "flashbang state uses the stunned pose")
+	e["kind"] = "elite"
+	e["elite"] = true
+	e["fire_cd"] = SimWorld.ELITE_FIRE_CD_TICKS
+	Runner.T.eq(ms.enemy_anim_state(e, false, 0, false), "shoot", "elite post-windup frame shows recoil")
+	e["kind"] = "sniper"
+	e["elite"] = false
+	e["fire_cd"] = 0
+	Runner.T.eq(ms.enemy_anim_state(e, false, 0, false), "crouch", "stationary sniper uses its crouched brace")
+
+
 # --- preserve-concealment-semantics: _draw_rocks() kind==1 cover ("hedge" pre-reskin)
 # is pass-through tall-grass concealment, not a hard wall — a cactus reskin would falsely
 # imply blocking cover. ROCK_KIND_COVER (main.gd) is the single source of truth the draw
@@ -567,6 +619,118 @@ func test_band_reserves_row_zero_so_a_live_hint_never_jumps() -> void:
 	Runner.T.eq(under.size(), 2, "alert + hint -> two rows")
 	Runner.T.eq(alone[0]["baseline"], under[1]["baseline"],
 		"row 0 is RESERVED: a live hint must not jump 22px when a banner arrives or decays above it")
+
+
+func test_presentation_policy_resolves_simultaneous_states_by_named_tier() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var tiers: Dictionary = ms.get_script_constant_map()["PresentationTier"]
+	Runner.T.ok(int(tiers["LETHAL"]) > int(tiers["PLAYER_STATE"])
+		and int(tiers["PLAYER_STATE"]) > int(tiers["OBJECTIVE"])
+		and int(tiers["OBJECTIVE"]) > int(tiers["TEACHING"])
+		and int(tiers["TEACHING"]) > int(tiers["FLAVOR"]),
+		"one named policy orders lethal > player state > objective > teaching > flavor")
+	var m: Node2D = ms.new()
+	m.sim = SimWorld.new(0x51A7E, 1)
+	m.sim.gates.clear()
+	var gate_y: int = m.sim.camera_top + SimWorld.GATE_CAMERA_PAD
+	m.sim.gates.append({"y": gate_y, "open": false, "final": false,
+		"b1": {}, "b2": {}, "boss": {}})
+	m._hint_text = "TEACHING"
+	m._hint_t = 1.0
+	m._hint_tier = tiers["TEACHING"]
+	m.show_banner("FLAVOR", Color.WHITE, "", tiers["FLAVOR"])
+	m.show_banner("OBJECTIVE BANNER", Color.WHITE, "", tiers["OBJECTIVE"])
+	m.sim.pending_airstrike = 60
+	Runner.T.eq(m._top_center_priority(), "airstrike",
+		"lethal airstrike beats a closed gate, objective banner, teaching and flavor")
+	m._hud_icons.main = m
+	Runner.T.ok(ms.band_row(m._band_rows("airstrike"), "hint").is_empty(),
+		"the lethal winner suppresses the teaching row instead of drawing both")
+	# Player-state teaching can take the rail once danger clears, ahead of the closed gate.
+	m.sim.pending_airstrike = 0
+	m._hint_tier = tiers["PLAYER_STATE"]
+	Runner.T.eq(m._top_center_priority(), "hint", "player state beats the closed-gate objective")
+	# Ordinary teaching yields to the objective.
+	m._hint_tier = tiers["TEACHING"]
+	Runner.T.eq(m._top_center_priority(), "boss",
+		"the closed gate wins the stable tie with an objective banner; both beat teaching and flavor")
+	m.sim.gates[0]["open"] = true
+	Runner.T.eq(m._top_center_priority(), "splash",
+		"the queued objective banner surfaces when the anchored objective clears")
+	m._banners.pop_front()
+	Runner.T.eq(m._top_center_priority(), "hint", "teaching beats flavor when higher tiers clear")
+	m.free()
+
+
+func test_suppressed_banner_and_hint_keep_full_readable_lifetimes() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var tiers: Dictionary = ms.get_script_constant_map()["PresentationTier"]
+	var m: Node2D = ms.new()
+	m.sim = SimWorld.new(0x71A3, 1)
+	m._hint_text = "READ ME LATER"
+	m._hint_t = 1.0
+	m._hint_tier = tiers["TEACHING"]
+	m.show_banner("OBJECTIVE WAITS", Color.WHITE, "", tiers["OBJECTIVE"])
+	var banner_t: float = m._banners[0]["t"]
+	for _i in int(ms.get_script_constant_map()["BANNER_LIFETIME_FRAMES"]) * 3:
+		m._step_banner_readable_time("airstrike")
+		m._step_hint_readable_time("airstrike")
+	Runner.T.eq(m._banners.size(), 1, "a suppressed banner cannot expire invisibly")
+	Runner.T.eq(float(m._banners[0]["t"]), banner_t,
+		"suppression does not consume any banner readable time")
+	Runner.T.eq(m._hint_t, 1.0, "suppression does not consume any hint readable time")
+	m._step_banner_readable_time("splash")
+	Runner.T.ok(float(m._banners[0]["t"]) < banner_t,
+		"the banner timer starts only when its row is actually readable")
+	var hint_t: float = m._hint_t
+	m._step_hint_readable_time("hint")
+	Runner.T.ok(m._hint_t < hint_t, "the hint timer starts only when its row is actually readable")
+	m.free()
+
+
+func test_onboarding_seen_is_delivery_based_and_empty_profile_rearms_opening() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.levelstart_should_arm({}), "an empty/new profile receives the opening line")
+	Runner.T.ok(not ms.levelstart_should_arm({"levelstart": true}),
+		"a returning profile does not repeat the opening line")
+	var m: Node2D = ms.new()
+	m._menu.mode = GameMenu.Mode.HIDDEN
+	m._hint("delivery_test", "READABLE TEACHING")
+	Runner.T.ok(m._hint_pending.has("delivery_test"), "enqueue dedupes a pending hint in memory")
+	Runner.T.ok(not m._seen.has("delivery_test"),
+		"queued-but-never-displayed teaching is not persisted as seen")
+	m._start_next_hint()
+	Runner.T.ok(not m._hint_pending.has("delivery_test"), "readable delivery clears pending dedupe")
+	Runner.T.eq(m._seen.get("delivery_test", false), true,
+		"the hint is persisted exactly when its readable display begins")
+	m.free()
+
+
+func test_local_coop_p2_cannot_retire_p1_global_verb_chip() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var p1 := SimInput.new()
+	var p2 := SimInput.new()
+	p2.roll = true
+	p2.grenade = true
+	Runner.T.ok(ms.p1_verb_completions([p1, p2], false).is_empty(),
+		"P2 roll/grenade do not retire P1's device-skinned global chip")
+	p1.roll = true
+	p1.grenade = true
+	Runner.T.eq(ms.p1_verb_completions([p1, p2], true), ["roll", "grenade", "wheel"],
+		"P1 actions retire exactly their own three global teaching segments")
+	Runner.T.ok(ms.p1_verb_completions([], true).is_empty(),
+		"an empty/no-player input frame retires no teaching")
+
+
+func test_levelstart_bark_has_no_per_gate_reuse() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.eq(src.count('_cmd_bark("levelstart"'), 1,
+		"Move out is delivered only by the first-profile opening path, never once per gate")
+	var reset_at := src.find("func _reset_settings()")
+	var reset_end := src.find("\nfunc ", reset_at + 1)
+	var reset_body := src.substr(reset_at, reset_end - reset_at)
+	Runner.T.ok(not reset_body.contains("_seen"),
+		"RESET DEFAULTS preserves tutorial history; an empty/new profile is the explicit reset path")
 
 
 func test_band_hint_shrinks_to_fit_the_frame() -> void:
@@ -1931,6 +2095,51 @@ func test_wheel_scrim_only_in_safe_shop() -> void:
 		var anchor_at := wslice.find("affine_inverse")
 		Runner.T.ok(scrim_at > 0 and anchor_at > 0 and anchor_at < scrim_at,
 			"the shop scrim cancels the world transform before drawing (screen-anchored)")
+
+
+func test_wheel_center_stays_on_screen_and_off_the_player() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("wheel_safe_center"),
+		"the wheel placement rule is a named, headless-testable helper")
+	if not ms.has_method("wheel_safe_center"):
+		return
+	for anchor in [Vector2(320, 180), Vector2(8, 8), Vector2(632, 352),
+			Vector2(16, 180), Vector2(624, 180)]:
+		var c: Vector2 = ms.wheel_safe_center(anchor, [])
+		Runner.T.ok(c.x >= 78.0 and c.x <= 562.0 and c.y >= 96.0 and c.y <= 296.0,
+			"wheel hub and all fixed rows stay in the 640x360 safe bounds (anchor %s -> %s)" % [anchor, c])
+		Runner.T.ok(c.distance_to(anchor) >= 60.0,
+			"wheel is beside the player, not over their ground read (anchor %s -> %s)" % [anchor, c])
+
+
+func test_wheel_center_avoids_visible_hazards_without_jitter_or_enemy_leaks() -> void:
+	var ms: Script = load("res://src/main.gd")
+	if not ms.has_method("wheel_safe_center"):
+		Runner.T.ok(false, "wheel_safe_center is missing")
+		return
+	var anchor := Vector2(320, 180)
+	var default_c: Vector2 = ms.wheel_safe_center(anchor, [])
+	var moved_c: Vector2 = ms.wheel_safe_center(anchor,
+		[{"pos": default_c, "radius": 34.0}])
+	Runner.T.ok(moved_c.distance_to(default_c) >= 80.0,
+		"a visible lethal footprint displaces the hub to another stable socket (%s -> %s)" % [default_c, moved_c])
+	Runner.T.eq(ms.wheel_safe_center(anchor, [{"pos": default_c, "radius": 34.0}]), moved_c,
+		"identical visible state produces identical wheel placement")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var hstart := src.find("func _visible_wheel_hazards()")
+	var hend := src.find("\nfunc ", hstart + 6)
+	Runner.T.ok(hstart >= 0 and hend > hstart, "visible-hazard gatherer is delimited")
+	if hstart >= 0 and hend > hstart:
+		var hbody := src.substr(hstart, hend - hstart)
+		Runner.T.ok(not hbody.contains("for e in sim.enemies"),
+			"wheel placement cannot reveal concealed enemies through its position")
+		for visible_source in ["sim.strikes", "sim.mines", "sim.grenades", "sim.enemy_bullets"]:
+			Runner.T.ok(hbody.contains(visible_source),
+				"wheel avoids the already-rendered hazard source %s" % visible_source)
+	var open_at := src.find('w["center"] = wheel_safe_center')
+	var draw_at := src.find('_wheel[i].get("center"')
+	Runner.T.ok(open_at >= 0 and draw_at >= 0,
+		"the hub is latched on open and reused while drawing instead of chasing moving fire")
 
 
 func test_floattext_cap_keeps_headlines_drops_old_pennies() -> void:

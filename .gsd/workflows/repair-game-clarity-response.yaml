@@ -1,0 +1,318 @@
+version: 1
+name: repair-game-clarity-response
+mode: yaml-step
+description: "Repair Commander In Chief's response, clarity, onboarding, visual truth, death feedback, and accessibility issues before adding more content."
+params:
+  bail_grace_ticks: "36"
+  sandbag_field_cap: "12"
+  live_playtest_frames: "1800"
+steps:
+  - id: baseline
+    name: Establish acceptance baseline
+    prompt: |
+      Audit the current implementation against DECISIONS.md, FINDINGS.md, README.md,
+      src/sim/sim_world.gd, src/main.gd, src/view/hud.gd, src/view/menu.gd, and the
+      relevant tests. Run the existing targeted suites and a live autoplay capture.
+      Create baseline.md containing an acceptance matrix for these ten repairs:
+      contextual grenade/revive input, shield flanking, tank bailout grace, information
+      priority, retiring onboarding, truthful sandbags, truthful fords, unobscured supply
+      wheel, death causality, and 200% How to Play text. For every repair record the
+      current rule, player-visible failure, affected files, required tests, deterministic
+      checksum impact, and a concrete pass/fail condition. Do not change game code in
+      this step and do not invent balance values beyond the supplied starting values.
+    produces:
+      - baseline.md
+    verify:
+      policy: content-heuristic
+      minSize: 1800
+      pattern: "## Acceptance Matrix"
+
+  - id: repair-controls
+    name: Remove grenade and revive ambiguity
+    prompt: |
+      Using the baseline, make grenade and revive input unambiguous. Prefer a dedicated,
+      rebindable revive action with device-aware glyphs; if the current input budget makes
+      that materially worse, implement a deliberate hold-to-revive interaction with visible
+      progress while grenade remains immediate. The pending action must be predictable before
+      the input resolves. Update gameplay input, controller mappings, rebind UI, How to Play,
+      README controls, localization corpus, replay compatibility, and tests together. Preserve
+      deterministic input serialization and explicitly define entry, exit, interruption,
+      chaining, resource cost, and edge cases for both actions. Write controls-report.md with
+      the chosen interaction and verification evidence.
+    requires:
+      - baseline
+    produces:
+      - controls-report.md
+    context_from:
+      - baseline
+    verify:
+      policy: shell-command
+      command: "SUITE=controls godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-shield
+    name: Make shield flanking real
+    prompt: |
+      Implement a deterministic capped facing turn for riot-shield enemies so sustained
+      lateral movement can reach an exposed side at a safe standoff. Preserve explosives and
+      Rend as faster counters. Add the heading/state data to checksum coverage, define state
+      entry/exit and interruption rules, update teaching copy to match the actual counter, and
+      add tests proving frontal shots block, immediate rear shots do not, the shield cannot
+      snap 180 degrees in one tick, and skilled strafing can earn a bullet kill without entering
+      contact-death range. Do not re-record golden checksums yet. Write shield-report.md.
+    requires:
+      - repair-controls
+    produces:
+      - shield-report.md
+    context_from:
+      - baseline
+      - repair-controls
+    verify:
+      policy: shell-command
+      command: "SUITE=archetypes godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-tank-bail
+    name: Restore the promised tank bailout
+    prompt: |
+      Implement a normal-difficulty grace period before an occupied burning tank can kill its
+      vestless rider from the ignition hazard. Use {{ bail_grace_ticks }} ticks as a starting
+      value, not a final balance claim. The HUD warning must appear early enough to act on; a
+      prompt exit must preserve the existing bailout boost and invulnerability, while ignoring
+      the warning must remain lethal. Cover artillery, barrel/tread ignition, fuel exhaustion,
+      assist mode, two-player seats, disconnection, and simultaneous damage. Add focused tests
+      and a micro-test plan: repeated occupied-tank ignitions should let a reacting player
+      understand and execute the bailout, while an idle player still dies. Do not re-record
+      golden checksums yet. Write tank-bail-report.md.
+    requires:
+      - repair-shield
+    produces:
+      - tank-bail-report.md
+    context_from:
+      - baseline
+      - repair-shield
+    verify:
+      policy: shell-command
+      command: "SUITE=tank godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-sandbags
+    name: Make purchased cover physically truthful
+    prompt: |
+      Repair sandbag cover so players and rushers cannot pass through the paid barrier, the
+      embrasure has a constant effective width at every placement heading, and two-way fire
+      through the opening remains intentional. Use {{ sandbag_field_cap }} as the starting
+      internal bag cap so the field again supports six two-bag purchases. Add collision,
+      diagonal-placement, pathing, grenade/tread destruction, field-cap, economy, and two-player
+      abuse tests. Validate whether six nests trivialize a closed gate; if they do, document the
+      evidence and adjust price before shrinking the spatial possibility set. Do not re-record
+      golden checksums yet. Write sandbag-report.md.
+    requires:
+      - repair-tank-bail
+    produces:
+      - sandbag-report.md
+    context_from:
+      - baseline
+      - repair-tank-bail
+    verify:
+      policy: shell-command
+      command: "SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-fords
+    name: Make ford visuals and timing honest
+    prompt: |
+      Align the ford's visuals, telegraph, and simulation contract. Put the strongest bridge
+      marking on the permanent reliable crossing or give both crossings unmistakably different
+      reliability language. Make the washout warning long enough for a tank that commits when
+      warned to clear the lethal band, based on measured crossing time rather than a guessed
+      convention. Add a short view-side reappearance transition so reopening does not pop in a
+      single frame. Test foot and tank crossings, both authored ford bands, every phase edge,
+      warning honesty, reduced motion, and chapter copy. Do not re-record golden checksums yet.
+      Write ford-report.md with the measured timing and acceptance evidence.
+    requires:
+      - repair-sandbags
+    produces:
+      - ford-report.md
+    context_from:
+      - baseline
+      - repair-sandbags
+    verify:
+      policy: shell-command
+      command: "SUITE=water godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: verify-sim
+    name: Reconcile deterministic simulation changes
+    prompt: |
+      Review all simulation changes from controls, shield, tank, sandbags, and fords as one
+      intentional deterministic change set. Run the sim lint, checksum coverage, replay,
+      lockstep, and full default suite. Diagnose failures instead of blindly recording over
+      them. Only after idempotency and cross-run determinism pass, update golden checksums once,
+      with comments explaining which intentional rules changed and why. Write sim-verification.md
+      containing commands, results, changed checksum scope, and any unresolved risk.
+    requires:
+      - repair-controls
+      - repair-shield
+      - repair-tank-bail
+      - repair-sandbags
+      - repair-fords
+    produces:
+      - sim-verification.md
+    context_from:
+      - repair-controls
+      - repair-shield
+      - repair-tank-bail
+      - repair-sandbags
+      - repair-fords
+    verify:
+      policy: shell-command
+      command: "godot --headless --path . -s res://tools/lint_sim.gd && godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-information-priority
+    name: Stop the screen from shouting
+    prompt: |
+      Implement a single presentation-priority policy for simultaneous messages. Lethal threat
+      telegraphs outrank player-state warnings; player-state warnings outrank objectives;
+      objectives outrank teaching; teaching outranks flavor dialogue. Queue lower-priority
+      messages, suppress nonessential Commander subtitles during immediate danger, prevent major
+      banners from overlapping boss bars or each other, and preserve accessibility captions for
+      information not otherwise visible. Add stress tests that inject overlapping gate, enemy,
+      death, tutorial, subtitle, and boss events and assert a readable result. Keep this in the
+      view layer; do not alter deterministic simulation order. Write information-priority-report.md.
+    requires:
+      - verify-sim
+    produces:
+      - information-priority-report.md
+    context_from:
+      - baseline
+      - verify-sim
+    verify:
+      policy: shell-command
+      command: "SUITE=hud godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-onboarding
+    name: Retire onboarding after demonstrated mastery
+    prompt: |
+      Replace the permanent bottom control strip and repetitive default Commander prompt with
+      contextual onboarding that retires each instruction after the player successfully performs
+      the corresponding action. Persist only appropriate first-seen flags, reset any run-specific
+      teaching state correctly, and keep the complete controls reference available through pause
+      and the help shortcut. Re-arm prompts when the last-used device changes only when the new
+      glyph is genuinely needed. Test new profile, returning profile, keyboard/gamepad swap,
+      local co-op, reset-data, and reduced-motion paths. Write onboarding-report.md.
+    requires:
+      - repair-information-priority
+    produces:
+      - onboarding-report.md
+    context_from:
+      - baseline
+      - repair-information-priority
+    verify:
+      policy: shell-command
+      command: "SUITE=main godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-wheel-and-death
+    name: Preserve hazard visibility and explain deaths
+    prompt: |
+      Offset the supply wheel away from the player and active ground hazards while keeping its
+      selection geometry, glyphs, cancellation, and two-player ownership predictable. Do not use
+      transparency as the primary fix. Then strengthen death causality: briefly preserve or mark
+      the killing source, name the cause, collapse mid-combat inventory loss to one summary line,
+      and identify Last Stand explicitly on the debrief. Respect reduce-motion and colorblind
+      modes, avoid revealing hidden enemies unfairly, and add layout plus view-honesty tests for
+      crowded combat. Write wheel-death-report.md.
+    requires:
+      - repair-onboarding
+    produces:
+      - wheel-death-report.md
+    context_from:
+      - baseline
+      - repair-onboarding
+    verify:
+      policy: shell-command
+      command: "SUITE=view_honesty godot --headless --path . -s res://tests/run_tests.gd && SUITE=hud godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: repair-howto-accessibility
+    name: Make How to Play honor large text
+    prompt: |
+      Reflow or paginate every How to Play tab so the existing 200% text-size option applies to
+      the screen that teaches the game. Do not shrink large text back down to fit. Preserve tab
+      navigation, specialist paging, device glyphs, localization, mouse hit targets, keyboard and
+      controller focus, and 640x360 safe bounds. Add layout tests at every supported text scale
+      and with the longest localized corpus, asserting no clipping, overlap, or unreachable rows.
+      Write howto-accessibility-report.md.
+    requires:
+      - repair-wheel-and-death
+    produces:
+      - howto-accessibility-report.md
+    context_from:
+      - baseline
+      - repair-wheel-and-death
+    verify:
+      policy: shell-command
+      command: "SUITE=menu_layout godot --headless --path . -s res://tests/run_tests.gd && SUITE=localization godot --headless --path . -s res://tests/run_tests.gd"
+
+  - id: automated-release-gate
+    name: Run the complete automated gate
+    prompt: |
+      Run import, deterministic lint, asset lint, the full default test suite, and the real menu
+      E2E playthrough. Capture a fresh 14-shot presentation set and a real autoplay sequence of
+      at least {{ live_playtest_frames }} frames. Inspect every image for message collisions,
+      covered hazards, incorrect glyphs, clipped large text, unclear death causes, dishonest ford
+      marking, persistent obsolete teaching, and visual regressions. Fix failures within scope and
+      rerun the affected gate. Write automated-gate.md with exact commands, results, image paths,
+      and any issue that requires human feel judgment.
+    requires:
+      - verify-sim
+      - repair-information-priority
+      - repair-onboarding
+      - repair-wheel-and-death
+      - repair-howto-accessibility
+    produces:
+      - automated-gate.md
+    context_from:
+      - verify-sim
+      - repair-information-priority
+      - repair-onboarding
+      - repair-wheel-and-death
+      - repair-howto-accessibility
+    verify:
+      policy: shell-command
+      command: "godot --headless --path . --import && godot --headless --path . -s res://tools/lint_sim.gd && godot --headless --path . -s res://tools/lint_assets.gd && godot --headless --path . -s res://tests/run_tests.gd && godot --headless --path . -s res://tools/e2e_playthrough.gd"
+
+  - id: human-playtest
+    name: Run the new-player and feel gate
+    prompt: |
+      Create playtest-script.md for a short uncoached sector-one session followed by targeted
+      shield, tank ignition, sandbag, ford, supply-wheel, death, large-text, stress, skill, and
+      abuse scenarios. The observer must record whether the player can predict each action,
+      identify every death cause, execute the intended counter, and distinguish urgent from
+      nonurgent information. Include a results table and explicit pass/fail thresholds derived
+      from baseline.md. Do not claim that human feel has been validated merely because automated
+      tests pass. Pause for human review of the build and script.
+    requires:
+      - automated-release-gate
+    produces:
+      - playtest-script.md
+    context_from:
+      - baseline
+      - automated-release-gate
+    verify:
+      policy: human-review
+
+  - id: closeout
+    name: Close the repair milestone
+    prompt: |
+      Reconcile the human playtest decision with every acceptance condition in baseline.md.
+      Fix any rejected in-scope item, rerun the relevant focused suite and the full automated
+      gate, then write closeout.md. The closeout must map all five disliked qualities and all ten
+      immediate repairs to code, tests, visual evidence, and human observations; list remaining
+      risks without disguising them as completed work; and explicitly state whether the project
+      is ready for new content. Do not make unrelated balance or feature changes.
+    requires:
+      - human-playtest
+    produces:
+      - closeout.md
+    context_from:
+      - baseline
+      - automated-release-gate
+      - human-playtest
+    verify:
+      policy: prompt-verify
+      prompt: "Verify that closeout.md accounts for all five critique themes and all ten immediate repairs, includes automated and human evidence, discloses unresolved risks, and makes no unsupported completion claim. Return PASS or FAIL with concrete omissions."

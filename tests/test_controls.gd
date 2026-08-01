@@ -2,8 +2,8 @@ extends RefCounted
 ## The owner-requested control scheme, pinned:
 ##   1. ALWAYS FIRE — the MG has no button. It must fire wherever the game allows firing and
 ##      stay silent everywhere the game already forbade it.
-##   2. E IS SHARED — grenade in normal play, revive when a rescue is really on the table.
-##      Solo is trivial; the 2P rule is the one that needed writing down (main.revive_context).
+##   2. GRENADE AND REVIVE SHIP ON DISTINCT INPUTS. Custom layouts may still bind them
+##      together, in which case main.revive_context provides deterministic arbitration.
 ##      SHIFT stays a secondary, PURE throw.
 
 const Runner := preload("res://tests/run_tests.gd")
@@ -28,13 +28,16 @@ func _shots(sim: SimWorld) -> int:
 
 # --- 1. ALWAYS FIRE -----------------------------------------------------------------
 
-func test_there_is_no_fire_binding_and_space_is_free() -> void:
+func test_there_is_no_fire_binding_and_space_is_the_dedicated_revive() -> void:
 	Runner.T.ok(not MainScript.BIND_DEFAULTS.has("fire"),
 		"no keyboard FIRE binding exists — aiming is the whole weapon verb")
 	Runner.T.ok(not MainScript.PAD_DEFAULTS.has("fire"), "no pad FIRE button either")
 	for a in MainScript.BIND_DEFAULTS:
-		Runner.T.ok(int(MainScript.BIND_DEFAULTS[a]) != KEY_SPACE,
-			"SPACE stays unclaimed — '%s' must not take it" % a)
+		if a != "revive":
+			Runner.T.ok(int(MainScript.BIND_DEFAULTS[a]) != KEY_SPACE,
+				"SPACE belongs only to REVIVE — '%s' must not take it" % a)
+	Runner.T.eq(int(MainScript.BIND_DEFAULTS["revive"]), KEY_SPACE,
+		"REVIVE owns the freed always-fire key")
 
 
 func test_held_fire_keeps_shooting_on_the_cooldown_cadence() -> void:
@@ -132,11 +135,13 @@ func test_bash_is_still_rationed_by_its_cooldown_not_by_the_button() -> void:
 	Runner.T.eq(kills, 1, "one bash per BASH_COOLDOWN_TICKS even with fire permanently held")
 
 
-# --- 2. THE SHARED E ----------------------------------------------------------------
+# --- 2. DISTINCT DEFAULTS + CUSTOM SHARED-KEY FALLBACK ------------------------------
 
-func test_e_defaults_to_grenade_and_shares_the_key_with_revive() -> void:
+func test_grenade_and_revive_ship_on_distinct_keyboard_inputs() -> void:
 	Runner.T.eq(int(MainScript.BIND_DEFAULTS["grenade"]), KEY_E, "GRENADE ships on E")
-	Runner.T.eq(int(MainScript.BIND_DEFAULTS["revive"]), KEY_E, "REVIVE ships on the same E")
+	Runner.T.eq(int(MainScript.BIND_DEFAULTS["revive"]), KEY_SPACE, "REVIVE ships on SPACE")
+	Runner.T.ok(MainScript.BIND_DEFAULTS["grenade"] != MainScript.BIND_DEFAULTS["revive"],
+		"the ship defaults never change a grenade press into a rescue")
 	Runner.T.eq(int(MainScript.BIND_DEFAULTS["grenade_alt"]), KEY_SHIFT,
 		"SHIFT survives as the secondary throw")
 

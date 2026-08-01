@@ -14,6 +14,19 @@ const Hud := preload("res://src/view/hud.gd")
 const DT := 1.0 / 60.0   # one 60 Hz frame
 
 
+func test_caption_tier_preserves_accessibility_warning_over_screen_danger() -> void:
+	# Same numeric ladder used by main/sfx: lethal=4, player-state=3, objective=2,
+	# teaching=1, flavor=0. Equal lethal copy survives; lower speech yields.
+	Runner.T.ok(Hud.caption_survives_tier(4, 4),
+		"a lethal accessibility warning remains visible alongside lethal screen danger")
+	Runner.T.ok(not Hud.caption_survives_tier(0, 4),
+		"Commander flavor cannot speak over a lethal warning")
+	Runner.T.ok(not Hud.caption_survives_tier(1, 2),
+		"teaching captions yield to an active objective")
+	Runner.T.ok(Hud.caption_survives_tier(3, 2),
+		"player-state accessibility copy survives a lower objective tier")
+
+
 # A brand-new SimWorld (different instance id) rearms the full ~6s window and
 # adopts the new id — this is what makes the reminder re-show on start AND restart
 # without leaning on tick_count decreasing.
@@ -48,31 +61,19 @@ func test_unpause_does_not_refresh_window() -> void:
 	Runner.T.ok(r2[0] < 300.0, "unpause continues decaying, not bumping (show=%.1f)" % r2[0])
 
 
-# c-onboard2: the 30s backstop is GATED on ENGAGEMENT — it does not start until the player has
-# pressed one of the chip's own verbs. The bug this pins: a first-run player who is still working
-# out the controls watched the ONLY in-run control hint time out on a wall clock started at run
-# open (eight deaths in sector 1, chip long gone). A clock that measures reading time teaches
-# nobody. Production passes `not _verb_used.is_empty()` from _process, so the first verb press —
-# whatever it is, on whatever device — is what releases it.
-func test_verb_chip_backstop_held_until_the_player_engages() -> void:
-	# Two full minutes of wall clock with no verb pressed: the chip has not decayed a single frame.
+# The bottom chip is transient even when a player never presses one of its verbs. Action-based
+# segment retirement still wins earlier, while Pause and How to Play remain the permanent lookup.
+func test_verb_chip_has_a_bounded_idle_lifetime() -> void:
 	var show := Hud.VERB_WINDOW
-	for _i in 7200:
-		show = Hud.verb_step(show, 7, 7, false, false, DT, false)[0]
-	Runner.T.eq(show, Hud.VERB_WINDOW,
-		"an un-engaged player never loses the chip to the clock (show=%.1f)" % show)
-	# The first verb press releases it, and from there it runs out exactly as before, so the chip
-	# still can't become a permanent playfield overlay.
-	var after := Hud.verb_step(show, 7, 7, false, false, DT, true)
-	Runner.T.ok(absf(after[0] - (Hud.VERB_WINDOW - 1.0)) < 0.001,
-		"the first verb press starts the backstop (show=%.3f)" % after[0])
-	var run := Hud.VERB_WINDOW
 	for _i in int(Hud.VERB_WINDOW) + 60:
-		run = Hud.verb_step(run, 7, 7, false, false, DT, true)[0]
-	Runner.T.eq(run, 0.0, "an engaged player's backstop still expires to zero")
-	# A rearm (fresh SimWorld) is orthogonal to the gate — a restart re-arms even un-engaged.
-	Runner.T.eq(Hud.verb_step(0.0, 1, 2, false, false, DT, false)[0], Hud.VERB_WINDOW,
-		"a restart rearms the full window even before the player has touched a verb")
+		show = Hud.verb_step(show, 7, 7, false, false, DT, false)[0]
+	Runner.T.eq(show, 0.0, "an idle player's chip expires instead of becoming permanent")
+	# A fresh run still re-arms before beginning its own bounded countdown.
+	Runner.T.eq(Hud.verb_step(0.0, 1, 2, false, false, DT, false)[0], Hud.VERB_WINDOW - 1.0,
+		"a restart rearms the full window and begins its bounded first frame immediately")
+	# Reduced motion keeps the same state transition but snaps visibility rather than fading.
+	Runner.T.eq(Hud._verb_alpha(1.0, 0.0), 1.0, "reduced motion keeps the chip steady until expiry")
+	Runner.T.eq(Hud._verb_alpha(0.0, 0.0), 0.0, "reduced motion snaps the expired chip off")
 
 
 # Normal play (same run, no pause) decays one frame's worth and never underflows.
@@ -3372,6 +3373,36 @@ func test_verb_used_marks_dirty_once_and_drops_that_segment() -> void:
 	Runner.T.eq(live.size(), Hud.VERB_SEGS.size() - 1, "the used verb is dropped from the live chip")
 	for s in live:
 		Runner.T.ok(s[0] != "grenade", "grenade no longer appears in the live segment list")
+	h.free()
+
+
+func test_verb_mastery_restores_per_device_family_and_rearms_each_once() -> void:
+	var h := HudIcons.new()
+	h.verb_begin_run(101, Hud.verb_device_key(false, "xbox"))
+	Runner.T.eq(h._verb_device_key, "keyboard", "keyboard owns a fresh P1 chip")
+	h.verb_used("roll")
+	h._verb_show = 321.0
+	h.verb_device_changed(Hud.verb_device_key(true, "xbox"))
+	Runner.T.eq(h._verb_show, Hud.VERB_WINDOW, "a first Xbox-family input gets one full window")
+	Runner.T.ok(h._verb_used.is_empty(), "Xbox starts with unresolved glyph mastery")
+	h.verb_used("grenade")
+	h._verb_show = 654.0
+	h.verb_device_changed(Hud.verb_device_key(true, "playstation"))
+	Runner.T.eq(h._verb_show, Hud.VERB_WINDOW, "a materially different pad brand teaches once")
+	h.verb_used("wheel")
+	h._verb_show = 777.0
+	h.verb_device_changed("pad:xbox")
+	Runner.T.eq(h._verb_show, 654.0, "switching back restores Xbox's prior lifetime")
+	Runner.T.ok(h._verb_used.has("grenade") and not h._verb_used.has("roll"),
+		"switching back restores Xbox retirement, not keyboard or PlayStation state")
+	h.verb_device_changed("keyboard")
+	Runner.T.eq(h._verb_show, 321.0, "switching back restores keyboard without rearming it")
+	Runner.T.ok(h._verb_used.has("roll") and not h._verb_used.has("grenade"),
+		"keyboard restores exactly its own retired segment set")
+	h.verb_device_changed("pad:playstation")
+	Runner.T.eq(h._verb_show, 777.0, "PlayStation also restores its prior state on return")
+	h.verb_device_changed("pad:playstation")
+	Runner.T.eq(h._verb_show, 777.0, "repeated events from the same family cannot rearm it")
 	h.free()
 
 

@@ -3,13 +3,14 @@
 <div align="center">
 
 ```
- ██▓ ██ ▄█▀ ▄▄▄       ██▀███   ██▓
-▓██▒ ██▄█▒ ▒████▄    ▓██ ▒ ██▒▓██▒
-▒██▒▓███▄░ ▒██  ▀█▄  ▓██ ░▄█ ▒▒██▒
-░██░▓██ █▄ ░██▄▄▄▄██ ▒██▀▀█▄  ░██░
-░██░▒██▒ █▄ ▓█   ▓██▒░██▓ ▒██▒░██░
-░▓  ▒ ▒▒ ▓▒ ▒▒   ▓▒█░░ ▒▓ ░▒▓░░▓
- ▒ ░░ ░▒ ▒░  ▒   ▒▒ ░  ░▒ ░ ▒░ ▒ ░
+  ___ ___  __  __ __  __   _   _  _ ___  ___ ___
+ / __/ _ \|  \/  |  \/  | /_\ | \| |   \| __| _ \
+| (_| (_) | |\/| | |\/| |/ _ \| .` | |) | _||   /
+ \___\___/|_|  |_|_|  |_/_/ \_\_|\_|___/|___|_|_\
+       ___ _  _    ___ _  _ ___ ___ ___
+      |_ _| \| |  / __| || |_ _| __| __|
+       | || .` | | (__| __ || || _|| _|
+      |___|_|\_|  \___|_||_|___|___|_|
 ```
 
 <img src="docs/media/keyart_hero.png" width="82%" alt="Commander In Chief — key art"/>
@@ -170,7 +171,7 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 | Grenade 💣 — **hold through the apex = AIRBURST** 🎈 | E (Shift = alt) / RMB | L1 |
 | Dodge roll (i-frames) 🤸 | C | B |
 | Interact 🚜 (board/exit tank · **gunner seat** on an occupied hull · **salvage hulks** · plant claymores) | F | X |
-| Revive (spend War Chest) 💸 — **shares E with grenade**: E revives when a rescue is on the table (you're down, or a downed partner the chest can afford), otherwise it throws | E | Y |
+| Revive (spend War Chest) 💸 — dedicated input; works for yourself or a downed partner | Space | Y |
 | **Supply wheel** (hold, flick, release) 🎡 | Q | BACK |
 | Toggle local 2P 👥 | F2 | — |
 | Toggle Endless War ♾️ | F3 | — |
@@ -410,7 +411,7 @@ The art is a **hybrid pipeline**, not one source:
 | Layer | Source | Where |
 |---|---|---|
 | Units · structures · props | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level |
-| Player + enemy soldier sprites | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/troops/` |
+| Player + enemy soldier sprites, action poses, and projectile cards | **Bespoke generative-AI art** (OpenAI built-in image generation; prompt/provenance record included) | `assets/troops/`, `assets/projectiles/` |
 | Menus · HUD · icons · FX cards | ✅ **Owned procedural art** (`tools/gen_ui_chrome.py` · `gen_ui_icons.py` · `gen_ui_glyphs.py` · `gen_fx_cards.py`) | `assets/art/{ui,hud,icons,fx}` |
 | Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
 | Ground · projectiles · FX | **Kenney CC0** | `assets/cc0/` |

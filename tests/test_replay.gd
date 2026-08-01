@@ -90,7 +90,8 @@ func test_replay_load_rejects_malformed_frame() -> void:
 	# Trust boundary: a well-typed but malformed frame (short encoded input) must be rejected
 	# at load, not crash later in SimInput.decode.
 	var path := "user://tmp_test_replay_bad.json"
-	var bad := {"magic": Replay.MAGIC, "seed": 1, "mode": "campaign", "players": 1,
+	var bad := {"magic": Replay.MAGIC, "ruleset": Replay.CURRENT_RULESET_VERSION,
+		"seed": 1, "mode": "campaign", "players": 1,
 		"frames": [[[0, 0, 0]]]}   # 3-element enc, decode indexes [4]
 	Runner.T.eq(Replay.save_dict(bad, path), OK, "bad replay written")
 	Runner.T.ok(Replay.load_from(path) == null, "malformed-frame replay rejected at load")
@@ -137,3 +138,138 @@ func test_decode_clamps_hostile_axes_and_survives_short_payload() -> void:
 	Runner.T.eq(rt.move_y, -128, "in-range move_y survives")
 	Runner.T.eq(rt.aim_x, -256, "in-range aim_x survives")
 	Runner.T.ok(rt.fire and rt.buy == 5, "flags and buy survive the clamp path")
+
+
+func test_grenade_and_revive_bits_are_independent_on_replay_wire() -> void:
+	# These actions once shared a physical key, but they are distinct protocol
+	# bits. Prove every combination so a future mask edit cannot couple them.
+	for case in [
+		{"grenade": true, "revive": false, "name": "grenade only"},
+		{"grenade": false, "revive": true, "name": "revive only"},
+		{"grenade": true, "revive": true, "name": "grenade and revive"},
+	]:
+		var inp := SimInput.new()
+		inp.grenade = case["grenade"]
+		inp.revive = case["revive"]
+		var decoded := SimInput.decode(inp.encode())
+		Runner.T.eq(decoded.grenade, case["grenade"], "%s preserves grenade bit" % case["name"])
+		Runner.T.eq(decoded.revive, case["revive"], "%s preserves revive bit" % case["name"])
+
+
+func _repair_scenario_fixture(sim: SimWorld) -> Dictionary:
+	## A compact deterministic battlefield containing all three repaired state
+	## families. The fixture itself is rebuilt on both sides; only player input
+	## crosses the replay wire below.
+	sim.enemies.clear()
+	sim.tanks.clear()
+	sim.sandbags.clear()
+	var y: int = sim.camera_top + 220 * SimWorld.F_ONE
+	var driver := sim.players[0]
+	var builder := sim.players[1]
+	driver["x"] = 100 * SimWorld.F_ONE
+	driver["y"] = y
+	builder["x"] = 520 * SimWorld.F_ONE
+	builder["y"] = y
+	builder["aim_x"] = SimWorld.F_ONE
+	builder["aim_y"] = 0
+	# Creation derives a rightward facing from the then-nearest builder.
+	sim._spawn_special(320 * SimWorld.F_ONE, y, "shield")
+	var initial_face_x: int = sim.enemies[0]["face_x"]
+	# Move the builder behind the shield. Both players are now left of it, so
+	# normal enemy stepping must turn the persistent plate instead of snapping.
+	builder["x"] = 250 * SimWorld.F_ONE
+	var tank := {
+		"x": driver["x"], "y": driver["y"], "alive": true, "burning": true,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": SimWorld.TANK_BAIL_TICKS,
+		"crew_ring_ticks": SimWorld.TANK_IGNITION_GRACE_TICKS,
+		"fire_cd": 0, "occupant": 0,
+	}
+	sim.tanks.append(tank)
+	driver["in_tank"] = 0
+	return {"face_x": initial_face_x, "ring": tank["crew_ring_ticks"]}
+
+
+func _play_repair_scenario(rep: Replay) -> Dictionary:
+	var sim := SimWorld.new(rep.seed_value, rep.player_count, rep.mode)
+	rep.apply_config(sim)
+	var initial := _repair_scenario_fixture(sim)
+	for frame in rep.frames:
+		var inputs: Array = []
+		for enc in frame:
+			inputs.append(SimInput.decode(enc))
+		sim.step(inputs)
+	return {"sim": sim, "initial": initial}
+
+
+func test_repaired_state_fields_each_move_checksum() -> void:
+	# Direct state-delta sentinels: each new field must independently perturb the
+	# hash, or replay/lockstep can agree while silently ignoring divergent rules.
+	var shield_a := SimWorld.new(0xC1A217, 1)
+	var shield_b := SimWorld.new(0xC1A217, 1)
+	shield_a._spawn_special(320 * SimWorld.F_ONE, -200 * SimWorld.F_ONE, "shield")
+	shield_b._spawn_special(320 * SimWorld.F_ONE, -200 * SimWorld.F_ONE, "shield")
+	Runner.T.eq(shield_a.checksum(), shield_b.checksum(), "matching shield fixtures begin checksum-identical")
+	shield_b.enemies[0]["face_x"] += 1
+	Runner.T.ok(shield_a.checksum() != shield_b.checksum(), "shield face_x changes checksum")
+	shield_b.enemies[0]["face_x"] = shield_a.enemies[0]["face_x"]
+	shield_b.enemies[0]["face_y"] += 1
+	Runner.T.ok(shield_a.checksum() != shield_b.checksum(), "shield face_y changes checksum")
+
+	var tank_a := SimWorld.new(0xC1A217, 1)
+	var tank_b := SimWorld.new(0xC1A217, 1)
+	var hull := {"x": 100, "y": 200, "alive": true, "burning": true,
+		"fuel": 300, "burn_ticks": 60, "crew_ring_ticks": 12, "fire_cd": 0, "occupant": 0}
+	tank_a.tanks.append(hull.duplicate())
+	tank_b.tanks.append(hull.duplicate())
+	Runner.T.eq(tank_a.checksum(), tank_b.checksum(), "matching tank fixtures begin checksum-identical")
+	tank_b.tanks[0]["crew_ring_ticks"] = 11
+	Runner.T.ok(tank_a.checksum() != tank_b.checksum(), "tank crew_ring_ticks changes checksum")
+
+	var bags_a := SimWorld.new(0xC1A217, 1)
+	var bags_b := SimWorld.new(0xC1A217, 1)
+	bags_a.sandbags.append({"x": 100, "y": 200, "player": 1, "vertical": 1})
+	bags_b.sandbags.append({"x": 100, "y": 200, "player": 0, "vertical": 1})
+	Runner.T.ok(bags_a.checksum() != bags_b.checksum(), "sandbag player ownership changes checksum")
+	bags_b.sandbags[0]["player"] = 1
+	bags_b.sandbags[0]["vertical"] = 0
+	Runner.T.ok(bags_a.checksum() != bags_b.checksum(), "sandbag vertical orientation changes checksum")
+
+
+func test_repaired_scenario_survives_same_ruleset_replay_roundtrip() -> void:
+	var rep := Replay.new()
+	rep.seed_value = 0x51A7E
+	rep.mode = "campaign"
+	rep.player_count = 2
+	rep.start_chest = 100
+	for tick in 16:
+		var driver := SimInput.new()
+		var builder := SimInput.new()
+		if tick == 0:
+			builder.buy = 5   # wheel slot 5 -> two-segment sandbag nest
+		rep.record_tick([driver, builder])
+	var live := _play_repair_scenario(rep)
+	var live_sim: SimWorld = live["sim"]
+	Runner.T.eq(live_sim.sandbags.size(), 2, "scenario bought one complete sandbag nest")
+	Runner.T.ok(live_sim.sandbags.all(func(sb): return sb.get("player", 0) == 1 and sb.get("vertical", 0) == 1),
+		"eastward wheel purchase created two player-owned vertical segments")
+	Runner.T.ok(live_sim.enemies[0]["face_x"] != live["initial"]["face_x"],
+		"scenario advanced the shield's capped turn")
+	Runner.T.ok(live_sim.tanks[0]["crew_ring_ticks"] < live["initial"]["ring"]
+		and live_sim.players[0]["in_tank"] == 0,
+		"scenario advanced an occupied tank's ignition grace")
+
+	var path := "user://tmp_repair_scenario_replay.json"
+	Runner.T.eq(rep.save(path), OK, "repair scenario replay saved")
+	var loaded := Replay.load_from(path)
+	Runner.T.ok(loaded != null, "repair scenario replay loaded under the current ruleset")
+	Runner.T.eq(loaded.to_dict()["ruleset"], Replay.CURRENT_RULESET_VERSION,
+		"round-trip retained the shared current ruleset")
+	var replayed := _play_repair_scenario(loaded)
+	var replayed_sim: SimWorld = replayed["sim"]
+	Runner.T.eq(replayed_sim.checksum(), live_sim.checksum(),
+		"same-build replay reproduced the repaired scenario bit-for-bit")
+	Runner.T.eq(replayed_sim.enemies[0]["face_x"], live_sim.enemies[0]["face_x"],
+		"replay reproduced shield facing")
+	Runner.T.eq(replayed_sim.tanks[0]["crew_ring_ticks"], live_sim.tanks[0]["crew_ring_ticks"],
+		"replay reproduced the tank crew deadline")
+	Runner.T.eq(replayed_sim.sandbags, live_sim.sandbags, "replay reproduced vertical player sandbags")

@@ -196,6 +196,12 @@ const TEX := {
 	"explosion3": preload(KN + "explosion3.png"),
 	# --- low-poly 3D Particle FX (2D textures, assets/art/fx/) ---
 	"fx_bullettrail": preload(ART + "fx/fx_bullettrail.png"),
+	# Authored velocity-aligned projectile cards. Each points right; main.gd
+	# rotates the card onto the deterministic bullet velocity.
+	"bullet_player": preload("res://assets/projectiles/bullet_player.png"),
+	"bullet_piercing": preload("res://assets/projectiles/bullet_piercing.png"),
+	"bullet_enemy": preload("res://assets/projectiles/bullet_enemy.png"),
+	"bullet_sniper": preload("res://assets/projectiles/bullet_sniper.png"),
 	"fx_smoke": preload(ART + "fx/fx_smoke_01.png"),
 	"fx_fumes": preload(ART + "fx/fx_fumes_02.png"),
 	"fx_ring": preload(ART + "fx/fx_ring_02.png"),
@@ -355,6 +361,78 @@ const TEX := {
 	"plate_metal_r": preload(ART + "ui/plate_metal_r.png"),
 }
 
+# View-only pose atlases. Every frame is a separate, native-size Godot texture
+# (256px player / 128px enemy), so animation never touches the deterministic sim.
+# The registry is explicit to make missing action art fail at import/test time
+# instead of hitching on a dynamic load during combat.
+const PLAYER_ANIM := {
+	"idle": preload(SOL + "anim/player/idle.png"),
+	"move_forward_0": preload(SOL + "anim/player/move_forward_0.png"),
+	"move_forward_1": preload(SOL + "anim/player/move_forward_1.png"),
+	"move_backward_0": preload(SOL + "anim/player/move_backward_0.png"),
+	"move_backward_1": preload(SOL + "anim/player/move_backward_1.png"),
+	"crouch": preload(SOL + "anim/player/crouch.png"),
+	"shoot": preload(SOL + "anim/player/shoot.png"),
+	"throw": preload(SOL + "anim/player/throw.png"),
+	"roll": preload(SOL + "anim/player/roll.png"),
+	"downed": preload(SOL + "anim/player/downed.png"),
+	"interact": preload(SOL + "anim/player/interact.png"),
+	"bash": preload(SOL + "anim/player/bash.png"),
+}
+
+const ENEMY_ANIM := {
+	"enemy_assault": {
+		"idle": preload(SOL + "anim/enemy_assault/idle.png"),
+		"move_0": preload(SOL + "anim/enemy_assault/move_0.png"),
+		"move_1": preload(SOL + "anim/enemy_assault/move_1.png"),
+		"crouch": preload(SOL + "anim/enemy_assault/crouch.png"),
+		"windup": preload(SOL + "anim/enemy_assault/windup.png"),
+		"shoot": preload(SOL + "anim/enemy_assault/shoot.png"),
+		"stunned": preload(SOL + "anim/enemy_assault/stunned.png"),
+		"downed": preload(SOL + "anim/enemy_assault/downed.png"),
+	},
+	"enemy_smg": {
+		"idle": preload(SOL + "anim/enemy_smg/idle.png"),
+		"move_0": preload(SOL + "anim/enemy_smg/move_0.png"),
+		"move_1": preload(SOL + "anim/enemy_smg/move_1.png"),
+		"crouch": preload(SOL + "anim/enemy_smg/crouch.png"),
+		"windup": preload(SOL + "anim/enemy_smg/windup.png"),
+		"shoot": preload(SOL + "anim/enemy_smg/shoot.png"),
+		"stunned": preload(SOL + "anim/enemy_smg/stunned.png"),
+		"downed": preload(SOL + "anim/enemy_smg/downed.png"),
+	},
+	"enemy_shotgun": {
+		"idle": preload(SOL + "anim/enemy_shotgun/idle.png"),
+		"move_0": preload(SOL + "anim/enemy_shotgun/move_0.png"),
+		"move_1": preload(SOL + "anim/enemy_shotgun/move_1.png"),
+		"crouch": preload(SOL + "anim/enemy_shotgun/crouch.png"),
+		"windup": preload(SOL + "anim/enemy_shotgun/windup.png"),
+		"shoot": preload(SOL + "anim/enemy_shotgun/shoot.png"),
+		"stunned": preload(SOL + "anim/enemy_shotgun/stunned.png"),
+		"downed": preload(SOL + "anim/enemy_shotgun/downed.png"),
+	},
+	"enemy_lmg": {
+		"idle": preload(SOL + "anim/enemy_lmg/idle.png"),
+		"move_0": preload(SOL + "anim/enemy_lmg/move_0.png"),
+		"move_1": preload(SOL + "anim/enemy_lmg/move_1.png"),
+		"crouch": preload(SOL + "anim/enemy_lmg/crouch.png"),
+		"windup": preload(SOL + "anim/enemy_lmg/windup.png"),
+		"shoot": preload(SOL + "anim/enemy_lmg/shoot.png"),
+		"stunned": preload(SOL + "anim/enemy_lmg/stunned.png"),
+		"downed": preload(SOL + "anim/enemy_lmg/downed.png"),
+	},
+	"enemy_sniper": {
+		"idle": preload(SOL + "anim/enemy_sniper/idle.png"),
+		"move_0": preload(SOL + "anim/enemy_sniper/move_0.png"),
+		"move_1": preload(SOL + "anim/enemy_sniper/move_1.png"),
+		"crouch": preload(SOL + "anim/enemy_sniper/crouch.png"),
+		"windup": preload(SOL + "anim/enemy_sniper/windup.png"),
+		"shoot": preload(SOL + "anim/enemy_sniper/shoot.png"),
+		"stunned": preload(SOL + "anim/enemy_sniper/stunned.png"),
+		"downed": preload(SOL + "anim/enemy_sniper/downed.png"),
+	},
+}
+
 ## Per-sprite draw multiplier so a entity bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
 const SCALE := {
@@ -376,7 +454,7 @@ const SCALE := {
 	# or is that a bullet?" — straight from playtest.
 	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
 	# elites largest infantry (they shoot), sprites ≥3× bullet size.
-	"player1": 0.25, "player2": 0.25, "rusher": 0.53, "elite": 0.58,   # sol-04: hero folds the 256px pack canvas to the ~18px on-screen footprint (was 0.56/0.47 for the 300px entity bake)
+	"player1": 0.26, "player2": 0.26, "rusher": 0.53, "elite": 0.58,   # Asset-redesign: the slimmer authored hero needs 0.26 so enemy rounds stay visibly inside the body; hitbox-fairness pins the margin.
 	# sol-08: enemy pack sprites fold the 128px canvas to the ~18-20px infantry footprint (call-scale 0.5 × 0.5 × 128 ≈ 32px canvas).
 	"enemy_assault": 0.5, "enemy_smg": 0.5, "enemy_shotgun": 0.5, "enemy_lmg": 0.5, "enemy_sniper": 0.5,
 	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the entity bake)
@@ -697,6 +775,15 @@ static func group_digits(n: int) -> String:
 
 static func tex(name: String) -> Texture2D:
 	return TEX[name]
+
+
+static func player_anim(state: String) -> Texture2D:
+	return PLAYER_ANIM.get(state, PLAYER_ANIM["idle"])
+
+
+static func enemy_anim(tex_name: String, state: String) -> Texture2D:
+	var poses: Dictionary = ENEMY_ANIM.get(tex_name, {})
+	return poses.get(state, TEX.get(tex_name, TEX["enemy_assault"]))
 
 
 static func draw_scale(name: String) -> float:

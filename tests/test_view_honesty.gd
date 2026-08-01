@@ -1041,6 +1041,45 @@ func test_the_debrief_reports_the_continues_the_run_actually_used() -> void:
 		"the ledger is built once and called from BOTH end cards (victory + K.I.A.), not just the loss")
 
 
+func test_death_feedback_is_concise_causal_and_last_stand_explicit() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("_loss_summary"), "revive loss has one summary formatter")
+	if ms.has_method("_loss_summary"):
+		var summary: String = ms._loss_summary({"vest": true, "triple": true,
+			"pierce_ticks": 300, "claymores": 3})
+		Runner.T.ok(summary.begins_with("LOADOUT LOST — 4 ITEMS"),
+			"one compact receipt reports the full stripped-field count (got %s)" % summary)
+		Runner.T.ok(summary.contains("3 CLAYMORES"),
+			"countable mine stock remains explicit in the compact receipt (got %s)" % summary)
+		Runner.T.ok(not summary.contains("\n"), "inventory loss stays on one battlefield line")
+		Runner.T.eq(ms._loss_summary({}), "", "no stripped loadout emits no loss noise")
+	Runner.T.ok(ms.has_method("_down_loss_summary"), "global down losses share one summary line")
+	if ms.has_method("_down_loss_summary"):
+		var down_summary: String = ms._down_loss_summary(1, 3)
+		Runner.T.ok(down_summary.contains("COMMENDATION") and down_summary.contains("FLAWLESS STREAK"),
+			"the combined down receipt still names both global losses")
+		Runner.T.ok(not down_summary.contains("\n"), "global down losses stay on one battlefield line")
+	Runner.T.ok(ms.has_method("_defeat_title"), "defeat title has a Last Stand-aware source")
+	if ms.has_method("_defeat_title"):
+		Runner.T.eq(ms._defeat_title(false), "K.I.A.", "ordinary defeats keep the established title")
+		Runner.T.ok(String(ms._defeat_title(true)).contains("LAST STAND")
+			and String(ms._defeat_title(true)).contains("DEFEAT"),
+			"the finale debrief explicitly identifies a Last Stand defeat")
+	var src := _view_src()
+	Runner.T.ok(src.contains('_loss_sting(ev, "DOWNED — %s" % death_cause)'),
+		"the fatal beat names its inferred cause at the body, before the debrief")
+	Runner.T.ok(src.contains("_draw_result_panel(_defeat_title(sim.last_stand)"),
+		"the Last Stand-aware title is wired into the actual casualty card")
+	# Exactly one loadout receipt call in _ev_revive: complete event payload, one visual line.
+	var rev_start := src.find("func _ev_revive(")
+	var rev_end := src.find("\nfunc ", rev_start + 6)
+	Runner.T.ok(rev_start >= 0 and rev_end > rev_start, "revive feedback block is delimited")
+	if rev_start >= 0 and rev_end > rev_start:
+		var rev_body := src.substr(rev_start, rev_end - rev_start)
+		Runner.T.eq(rev_body.count("_loss_sting("), 1,
+			"any-size loadout loss emits exactly one battlefield receipt")
+
+
 # --- What death DELETES vs what the screen SAYS it deleted (cycle 7) --------
 #
 # The loss payload used to be three literals typed by hand into _kill_player's

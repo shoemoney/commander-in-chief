@@ -78,6 +78,28 @@ func test_cjk_caption_wrap_never_overflows_caption_max_w() -> void:
 	Runner.T.eq(short_lines[0], short_ja, "a short CJK caption is returned verbatim")
 
 
+# HOW TO PLAY's large-text pager uses its own locale-safe wrapper because its
+# instructional copy is much wider and more varied than the caption strip. A
+# deliberately extreme no-space translation proves the longest corpus cannot be
+# hard-clipped: every character survives, in order, at the requested 200% size.
+func test_howto_large_text_wrap_preserves_extreme_localized_corpus() -> void:
+	var source := "ACCESSIBILITY LONG-CORPUS FIXTURE"
+	var translated := "大型文字対応確認文章".repeat(36)
+	var tr := Translation.new()
+	tr.locale = "ja"
+	tr.add_message(source, translated)
+	TranslationServer.add_translation(tr)
+	TranslationServer.set_locale("ja")
+	var size := 22   # the manual's 11px body at 200%
+	var lines := GameMenu.howto_wrap_lines(source, size, GameMenu.BODY_W)
+	Runner.T.ok(lines.size() > 2, "the extreme Japanese fixture reflows across many manual lines")
+	for line in lines:
+		var w := Art.font().get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		Runner.T.ok(w <= GameMenu.BODY_W + 0.5, "large-text localized line fits the manual content well")
+	Runner.T.eq("".join(lines), translated, "large-text wrapping drops, clips, or reorders no localized character")
+	self._reset_locale([tr])
+
+
 # main.gd's _hint() choke point, exercised through the REAL method (not a re-implementation
 # of the translate() call) -- MainScript.new() alone is safe headless (same pattern as
 # test_leaderboard.gd's _StubMainGate: field initializers run, _ready() never fires since

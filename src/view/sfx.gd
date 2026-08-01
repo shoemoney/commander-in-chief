@@ -142,6 +142,9 @@ var _cap_text := ""      # AUD#4: active subtitle caption (hud.gd reads via acti
 var _cap_radio := false  # true = radio-filtered Spotter line, false = dry Commander/pilot voice
 var _cap_until := 0      # physics frame the caption stays legible until
 var _cap_is_vo := false  # true if the CURRENT caption came from play_vo (not a Commander bark) —
+var _cap_tier := 0
+var _cap_queue: Array[Dictionary] = []
+enum CaptionTier { FLAVOR, TEACHING, OBJECTIVE, PLAYER_STATE, LETHAL }
                          # lets stop_vo() clear only its own line, never a bark it didn't arm
 var _sfx_cap_next: Dictionary = {}   # SFX_CAPTIONS key -> earliest physics frame it may re-arm
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
@@ -391,7 +394,9 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	ply.stream = _vo_streams[key]
 	ply.play()
 	if _VO_CAPTIONS.has(key):
-		_arm_caption(_VO_CAPTIONS[key], ply.stream, not dry, true)
+		var cap_tier := CaptionTier.PLAYER_STATE if priority >= 2 else \
+			(CaptionTier.OBJECTIVE if priority == 1 else CaptionTier.FLAVOR)
+		_arm_caption(_VO_CAPTIONS[key], ply.stream, not dry, true, cap_tier)
 
 
 func _fade_then_stop(ply: AudioStreamPlayer, is_dry: bool) -> void:
@@ -431,6 +436,11 @@ func stop_vo() -> void:
 	if _cap_is_vo:
 		_cap_text = ""
 		_cap_until = 0
+	var keep: Array[Dictionary] = []
+	for entry in _cap_queue:
+		if not bool(entry.get("is_vo", false)):
+			keep.append(entry)
+	_cap_queue = keep
 
 
 func _load_cmd_barks() -> void:
@@ -449,7 +459,7 @@ func _load_cmd_barks() -> void:
 			_cmd_barks[ev] = arr
 
 
-func play_cmd_bark(event: String, min_gap := 48, force := false) -> void:
+func play_cmd_bark(event: String, min_gap := 48, force := false) -> bool:
 	## Fire a random Commander bark for `event` (view-only, dry UI bus). A global
 	## cooldown (min_gap physics-frames) keeps combat from becoming a monologue and
 	## one bark plays at a time. `force` (used for the down/victory beats) bypasses
@@ -457,13 +467,13 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> void:
 	## randi() is fine here: the whole VO layer is view-side, excluded from the
 	## determinism checksum (same as the spawn-shout / death-yell pools).
 	if not _cmd_barks.has(event):
-		return
+		return false
 	var f := Engine.get_physics_frames()
 	if not force:
 		if f < _cmd_next_frame or _cmd.playing:
-			return
+			return false
 		if (_vo.playing or _vo_dry.playing) and _vo_priority >= 2:
-			return
+			return false
 	elif _cmd.playing:
 		_cmd.stop()
 	var pool: Array = _cmd_barks[event]
@@ -471,7 +481,9 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> void:
 	_cmd.play()
 	_cmd_next_frame = f + min_gap
 	if _BARK_CAPTIONS.has(event):
-		_arm_caption(_BARK_CAPTIONS[event], _cmd.stream, false, false)
+		_arm_caption(_BARK_CAPTIONS[event], _cmd.stream, false, false,
+			CaptionTier.PLAYER_STATE if force else CaptionTier.FLAVOR)
+	return true
 
 
 # AUD#4: arm the on-screen subtitle for a line that's actually about to play (VO/bark
@@ -484,15 +496,59 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> void:
 # drops or an uncapped fps. This is a VIEW-only read (active_caption is never consulted by
 # src/sim), so borrowing the sim's tick counter costs no determinism.
 # A stream that fails to report a length (rare, e.g. a null load) still gets a readable 1s floor.
-func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool) -> void:
+func _caption_duration(stream: AudioStream) -> int:
 	var len := stream.get_length() if stream != null else 0.0
-	_cap_text = text
-	_cap_radio = radio
-	_cap_is_vo = is_vo
 	# get_physics_frames() ticks at Engine.physics_ticks_per_second (not a hardcoded 60) --
 	# stays correct if that project setting is ever changed from its current 60 default.
 	var pfps := Engine.physics_ticks_per_second
-	_cap_until = Engine.get_physics_frames() + int(ceil(maxf(len, 1.0) * pfps)) + pfps / 2
+	return int(ceil(maxf(len, 1.0) * pfps)) + pfps / 2
+
+
+func _set_caption(entry: Dictionary) -> void:
+	_cap_text = String(entry.get("text", ""))
+	_cap_radio = bool(entry.get("radio", false))
+	_cap_is_vo = bool(entry.get("is_vo", false))
+	_cap_tier = int(entry.get("tier", CaptionTier.FLAVOR))
+	_cap_until = Engine.get_physics_frames() + int(entry.get("frames", Engine.physics_ticks_per_second))
+
+
+func _queue_caption(entry: Dictionary) -> void:
+	# Adjacent duplicates add no accessibility information and can otherwise pin the strip.
+	if not _cap_queue.is_empty() and String(_cap_queue.back().get("text", "")) == String(entry["text"]):
+		return
+	# Same stable tier insertion as the top banner queue: important queued state resumes
+	# before flavor, equal tiers keep arrival order.
+	var at := _cap_queue.size()
+	for i in _cap_queue.size():
+		if int(entry.get("tier", CaptionTier.FLAVOR)) > int(_cap_queue[i].get("tier", CaptionTier.FLAVOR)):
+			at = i
+			break
+	_cap_queue.insert(at, entry)
+
+
+func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool,
+		tier := CaptionTier.FLAVOR) -> void:
+	var entry := {"text": text, "radio": radio, "is_vo": is_vo,
+		"tier": clampi(tier, CaptionTier.FLAVOR, CaptionTier.LETHAL),
+		"frames": _caption_duration(stream)}
+	var now := Engine.get_physics_frames()
+	if not _cap_text.is_empty() and _cap_until > now:
+		if int(entry["tier"]) > _cap_tier:
+			# A critical warning may preempt flavor/state copy. Preserve the displaced
+			# caption's remaining readable time and resume it through this same slot.
+			_queue_caption({"text": _cap_text, "radio": _cap_radio, "is_vo": _cap_is_vo,
+				"tier": _cap_tier, "frames": _cap_until - now})
+			_set_caption(entry)
+		else:
+			_queue_caption(entry)
+		return
+	_set_caption(entry)
+
+
+func _promote_caption() -> void:
+	if _cap_until > Engine.get_physics_frames() or _cap_queue.is_empty():
+		return
+	_set_caption(_cap_queue.pop_front())
 
 
 const CAPTION_FADE_FRAMES := 24.0   # 0.4s alpha ramp so the strip DISSOLVES rather than snapping
@@ -503,24 +559,17 @@ func caption_sfx(key: String) -> void:
 	## A no-op for every key that isn't in that table, so main.gd can call it blindly from its
 	## one sim-event → sound choke point without a second whitelist to keep in sync.
 	##
-	## Two gates, and both are about READABILITY rather than audio:
-	##  1. A caption still inside its stable (pre-fade) window is never stomped. Whatever is on
-	##     screen — a Spotter line, a Commander bark, an earlier warning — gets read to the end.
-	##     A warning that flickers past under the next one warns nobody, and the threats these
-	##     cover all carry a visual too (edge threat pips, ground telegraphs, the paint vignette),
-	##     so text is the redundant channel here, not the only one.
-	##  2. The same cue can't re-arm for SFX_CAPTION_GAP frames.
+	## Semantic gate: lethal warning captions may preempt lower-tier speech, while equal/lower
+	## copy waits in the same slot's queue. The same cue still cannot re-arm inside its gap.
 	## Arms with a null stream, which _arm_caption's no-length floor turns into a fixed ~1.5s —
 	## right for a short bracketed line, and there's no clip whose length could speak for it.
 	if not SFX_CAPTIONS.has(key):
 		return
 	var f := Engine.get_physics_frames()
-	if _cap_until - f > int(CAPTION_FADE_FRAMES):
-		return
 	if f < int(_sfx_cap_next.get(key, 0)):
 		return
 	_sfx_cap_next[key] = f + SFX_CAPTION_GAP
-	_arm_caption(SFX_CAPTIONS[key], null, false, false)
+	_arm_caption(SFX_CAPTIONS[key], null, false, false, CaptionTier.LETHAL)
 
 
 func active_caption() -> Dictionary:
@@ -528,10 +577,11 @@ func active_caption() -> Dictionary:
 	## means nothing to show. `radio` picks the Spotter (radio-filtered) vs Commander/pilot
 	## (dry) tint. `fade` ramps 1.0 -> 0.0 over the caption's final CAPTION_FADE_FRAMES so it
 	## dissolves instead of hard-snapping off.
+	_promote_caption()
 	var left := _cap_until - Engine.get_physics_frames()
 	if left <= 0:
 		return {"text": "", "radio": false, "fade": 0.0}
-	return {"text": _cap_text, "radio": _cap_radio,
+	return {"text": _cap_text, "radio": _cap_radio, "tier": _cap_tier,
 		"fade": minf(float(left) / CAPTION_FADE_FRAMES, 1.0)}
 
 
