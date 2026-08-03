@@ -166,6 +166,34 @@ func test_boot_audio_stays_silent_until_the_commanders_opening_line_finishes() -
 	sfx.free()
 
 
+func test_a_radio_line_never_starts_on_top_of_a_commander_bark() -> void:
+	# The two voice channels were mutually UNAWARE in one direction only. play_cmd_bark yields
+	# to a VO of priority >= 2 (sfx.gd, the `_vo_priority >= 2` arm), but play_vo never checked
+	# `_cmd.playing` — and they sit on different buses (_cmd on UI, _vo on VO), so nothing in
+	# the mix masked the collision. The player heard the Commander get talked over mid-word.
+	# The one-directional courtesy is what marks it an oversight rather than a mix decision.
+	# SOURCE SCAN, deliberately, and this is the one case where it is the honest instrument:
+	# the guard reads AudioStreamPlayer.playing, and headless Godot never reports it true.
+	# Measured — a probe that added Sfx to the real tree, called play_cmd_bark and printed the
+	# flag got `play_cmd_bark returned: true` / `_cmd.playing headless: false`, plus an engine
+	# "Playback can only happen when a node is inside the scene tree". So a behavioural
+	# assertion here would be vacuous: it would pass whether or not the guard exists. Pin the
+	# guard's presence instead, and say so rather than dressing a source grep up as behaviour.
+	var src := FileAccess.get_file_as_string("res://src/view/sfx.gd")
+	var vo_body := src.substr(src.find("func play_vo("))
+	vo_body = vo_body.substr(0, vo_body.find("\nfunc "))
+	Runner.T.ok(vo_body.contains("if _cmd.playing:"),
+		"play_vo yields while a Commander bark is on air")
+	Runner.T.ok(vo_body.find("if _cmd.playing:") < vo_body.find("ply.play()"),
+		"...and it yields BEFORE starting a stream, not after")
+	# The mirror courtesy the bark side has always had — pinned so a future edit cannot quietly
+	# make the pair one-directional again, which is the asymmetry that caused this bug.
+	var bark_body := src.substr(src.find("func play_cmd_bark("))
+	bark_body = bark_body.substr(0, bark_body.find("\nfunc "))
+	Runner.T.ok(bark_body.contains("_vo_priority >= 2"),
+		"play_cmd_bark still yields to a high-priority radio line — the courtesy runs both ways")
+
+
 func test_a_skip_mid_sentence_still_lets_the_commander_finish() -> void:
 	# The other half of the contract: the splash coming down early must not drop music on top
 	# of a line still on air. Skip arms at SPLASH_SKIP_ARM (1.0 s); he starts at

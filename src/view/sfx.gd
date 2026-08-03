@@ -449,6 +449,16 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	## caller's job (main.gd keys throttles per trigger).
 	if _startup_audio_locked or not _vo_streams.has(key):
 		return
+	# THE COMMANDER IS NEVER TALKED OVER. play_cmd_bark already yields to a VO line of
+	# priority >= 2 (below), but the VO side never had the twin check — so a radio line
+	# started straight on top of one of his barks, mid-word, on separate buses (_cmd is UI,
+	# _vo is VO) so nothing masked it. The asymmetry is what gives it away as an oversight
+	# rather than a mix decision. Both channels are single-voice, so mirroring the courtesy
+	# here makes the pair genuinely one-voice-at-a-time. His barks are short shouts and every
+	# _vo caller is already throttled, so the dropped line is a rare flavor/warning repeat —
+	# cheaper than two voices at once, which reads as a bug to anyone listening.
+	if _cmd.playing:
+		return
 	var ply := _vo_dry if dry else _vo
 	if _vo.playing or _vo_dry.playing:
 		if priority <= _vo_priority:
@@ -464,7 +474,13 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 			_vo_dry.stop()
 	_vo_priority = priority
 	ply.stream = _vo_streams[key]
-	ply.play()
+	# Same in-tree guard play_startup_line has carried since boot: AudioStreamPlayer.play()
+	# on a detached node logs an engine error and does nothing. The siblings lacked it, which
+	# is pure error-log noise in a headless/tooling context and nothing in-game (main adds
+	# _sfx as a child during _ready) — but the run_tests engine-error gate fails on any
+	# un-allowlisted ERROR, so an unguarded play() here reds the suite from a test harness.
+	if is_inside_tree():
+		ply.play()
 	if _VO_CAPTIONS.has(key):
 		var cap_tier := CaptionTier.PLAYER_STATE if priority >= 2 else \
 			(CaptionTier.OBJECTIVE if priority == 1 else CaptionTier.FLAVOR)
@@ -550,7 +566,8 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> bool:
 		_cmd.stop()
 	var pool: Array = _cmd_barks[event]
 	_cmd.stream = pool[randi() % pool.size()]
-	_cmd.play()
+	if is_inside_tree():
+		_cmd.play()   # see play_vo: detached-node play() is an engine error, not a sound
 	_cmd_next_frame = f + min_gap
 	if _BARK_CAPTIONS.has(event):
 		_arm_caption(_BARK_CAPTIONS[event], _cmd.stream, false, false,
