@@ -129,6 +129,15 @@ var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / A
 # just silently skips that one yell (_play_bank_at already no-ops on an empty bank) —
 # a far smaller miss than the stall it replaces.
 var _death_yells_pending: Array[String] = []
+# r4: the 14 non-crawl VO lines + all 41 Commander bark clips used to load() synchronously
+# inside _ready(), before the splash node even exists — the same stall this file already
+# fixed for the death-yell/spawn-shout banks (comment above), just left for these two.
+# Threaded exactly like those banks, but keyed (path -> key/event) since the targets
+# (_vo_streams, _cmd_barks[event]) are dicts, not one flat array. intro_crawl alone stays
+# synchronous in _ready() — play_startup_line can fire it before _finish_boot_audio's
+# deferred call has even run.
+var _vo_load_pending: Dictionary = {}   # path -> vo key
+var _bark_load_pending: Dictionary = {} # path -> bark event
 var _spawn_shouts_pending: Array[String] = []
 var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to _music
 # audio-identity (judge follow-up) MusicDirector: a tonal riff layer over the drums — the
@@ -353,13 +362,13 @@ func _ready() -> void:
 	_cmd.bus = "UI"
 	_cmd.volume_db = 0.0
 	add_child(_cmd)
-	_load_cmd_barks()
-	for k in ["vo_chest_empty", "vo_wiped", "vo_last_stand", "vo_observer", "vo_surge",
-			"vo_core", "vo_flawless", "vo_ransom_lost", "vo_victoly", "vo_airstrike",
-			"vo_pilot_down", "vo_shop_locked", "vo_clip_dry", "vo_pilot_plea", "intro_crawl"]:
-		var res := load("res://assets/vo/%s.mp3" % k)
-		if res != null:
-			_vo_streams[k] = res
+	# intro_crawl is the ONE VO line that can be wanted before _finish_boot_audio's
+	# deferred call has even run (play_startup_line fires it a beat into the splash) —
+	# stays synchronous so that path can never silently no-op on a missing stream. The
+	# other 14 VO keys and all 41 Commander barks load threaded from _finish_boot_audio.
+	var crawl_res := load("res://assets/vo/intro_crawl.mp3")
+	if crawl_res != null:
+		_vo_streams["intro_crawl"] = crawl_res
 	# opt-loop: death-yell/spawn-shout banks (178 of 234 total boot-time MP3
 	# loads) aren't touched until an enemy actually exists in combat — lazy-
 	# loaded on first use instead (see play_death_yell/play_spawn_shout).
@@ -380,6 +389,8 @@ func _finish_boot_audio() -> void:
 	# than lazily on first play — ResourceLoader.load_threaded_request runs on Godot's own
 	# background thread (doesn't block this or any rendered frame), and _process's
 	# _poll_mp3_banks sweeps finished loads in as they land, well before combat needs them.
+	_load_vo_async()
+	_load_cmd_barks_async()
 	_load_death_yells()
 	_load_spawn_shouts()
 	var poly := AudioStreamPolyphonic.new()
@@ -590,20 +601,32 @@ func _drop_vo_captions() -> void:
 	_cap_queue = keep
 
 
-func _load_cmd_barks() -> void:
-	## Load the Commander's voiced bark pools from assets/vo/cmd/. Keyed by
-	## event; each event has N numbered clips (cmd_<event>_<n>.mp3) fired at random.
+func _load_vo_async() -> void:
+	## Threaded twin of the old synchronous loop this used to be in _ready() (intro_crawl
+	## stays synchronous there — see the comment on that call). Kicks off a threaded load
+	## per key; _poll_mp3_banks lands each into _vo_streams as it finishes.
+	for k in ["vo_chest_empty", "vo_wiped", "vo_last_stand", "vo_observer", "vo_surge",
+			"vo_core", "vo_flawless", "vo_ransom_lost", "vo_victoly", "vo_airstrike",
+			"vo_pilot_down", "vo_shop_locked", "vo_clip_dry", "vo_pilot_plea"]:
+		var path := "res://assets/vo/%s.mp3" % k
+		if ResourceLoader.load_threaded_request(path) == OK:
+			_vo_load_pending[path] = k
+
+
+func _load_cmd_barks_async() -> void:
+	## Threaded twin of the old synchronous _load_cmd_barks(). The Commander's voiced bark
+	## pools from assets/vo/cmd/, keyed by event; each event has N numbered clips
+	## (cmd_<event>_<n>.mp3) fired at random by play_cmd_bark. play_cmd_bark already no-ops
+	## on `not _cmd_barks.has(event)`, so an event whose clips haven't landed yet is silence,
+	## not a crash — the same tradeoff the death-yell bank already accepted.
 	var groups := {"levelstart": 6, "rally": 3, "streak": 4, "shoot": 4,
 			"grenade": 3, "boom": 3, "pickup": 3, "down": 3, "hit": 6,
 			"victory": 3, "revive": 3}
 	for ev in groups:
-		var arr: Array = []
 		for i in range(1, int(groups[ev]) + 1):
-			var res := load("res://assets/vo/cmd/cmd_%s_%d.mp3" % [ev, i])
-			if res != null:
-				arr.append(res)
-		if not arr.is_empty():
-			_cmd_barks[ev] = arr
+			var path := "res://assets/vo/cmd/cmd_%s_%d.mp3" % [ev, i]
+			if ResourceLoader.load_threaded_request(path) == OK:
+				_bark_load_pending[path] = ev
 
 
 func play_cmd_bark(event: String, min_gap := 48, force := false) -> bool:
@@ -670,6 +693,15 @@ func _queue_caption(entry: Dictionary) -> void:
 	# Adjacent duplicates add no accessibility information and can otherwise pin the strip.
 	if not _cap_queue.is_empty() and String(_cap_queue.back().get("text", "")) == String(entry["text"]):
 		return
+	# Stamp when this entry was queued so _promote_caption can drop it once its moment has
+	# passed instead of reading it out seconds late (a burst of LETHAL warnings used to
+	# serialize at ~1.5s each with nothing to stop the strip lagging real danger by 6-7s).
+	entry["armed"] = Engine.get_physics_frames()
+	# A four-deep strip is already ~6s of reading; drop the lowest-priority entry (the
+	# insert loop below keeps the queue tier-sorted, so that's the back) rather than let
+	# it grow unbounded under a burst.
+	if _cap_queue.size() >= 4:
+		_cap_queue.pop_back()
 	# Same stable tier insertion as the top banner queue: important queued state resumes
 	# before flavor, equal tiers keep arrival order.
 	var at := _cap_queue.size()
@@ -690,8 +722,10 @@ func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool,
 		if int(entry["tier"]) > _cap_tier:
 			# A critical warning may preempt flavor/state copy. Preserve the displaced
 			# caption's remaining readable time and resume it through this same slot.
+			# "resume": true exempts it from the staleness drop in _promote_caption below —
+			# this is resuming already-displayed state, not reporting a moment that can go stale.
 			_queue_caption({"text": _cap_text, "radio": _cap_radio, "is_vo": _cap_is_vo,
-				"tier": _cap_tier, "frames": _cap_until - now})
+				"tier": _cap_tier, "frames": _cap_until - now, "resume": true})
 			_set_caption(entry)
 		else:
 			_queue_caption(entry)
@@ -701,6 +735,17 @@ func _arm_caption(text: String, stream: AudioStream, radio: bool, is_vo: bool,
 
 func _promote_caption() -> void:
 	if _cap_until > Engine.get_physics_frames() or _cap_queue.is_empty():
+		return
+	# Drop entries whose moment has passed rather than read them out stale: a resumed
+	# (preempted) caption is exempt — it's finishing already-displayed state, not
+	# reporting news that can go out of date.
+	var now := Engine.get_physics_frames()
+	while not _cap_queue.is_empty():
+		var front: Dictionary = _cap_queue[0]
+		if bool(front.get("resume", false)) or now - int(front.get("armed", now)) <= SFX_CAPTION_GAP:
+			break
+		_cap_queue.pop_front()
+	if _cap_queue.is_empty():
 		return
 	_set_caption(_cap_queue.pop_front())
 
@@ -800,6 +845,13 @@ func _poll_mp3_banks() -> void:
 		_poll_mp3_bank(_death_yells_pending, _death_yells)
 	if not _spawn_shouts_pending.is_empty():
 		_poll_mp3_bank(_spawn_shouts_pending, _spawn_shouts)
+	if not _vo_load_pending.is_empty():
+		_poll_keyed_mp3(_vo_load_pending, func(key: String, res: Resource): _vo_streams[key] = res)
+	if not _bark_load_pending.is_empty():
+		_poll_keyed_mp3(_bark_load_pending, func(ev: String, res: Resource):
+			if not _cmd_barks.has(ev):
+				_cmd_barks[ev] = []
+			_cmd_barks[ev].append(res))
 
 
 func _poll_mp3_bank(pending: Array[String], into: Array) -> void:
@@ -815,6 +867,25 @@ func _poll_mp3_bank(pending: Array[String], into: Array) -> void:
 		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
 			pending.remove_at(i)   # skip a bad file rather than poll it forever
 		i -= 1
+
+
+func _poll_keyed_mp3(pending: Dictionary, apply: Callable) -> void:
+	## Keyed twin of _poll_mp3_bank: `pending` maps path -> key/event rather than being a flat
+	## array, because the landing spots (_vo_streams, _cmd_barks[event]) are keyed too.
+	## `apply(key_or_event, res)` does the landing; callers pass a lambda so this one sweep
+	## serves both the VO-stream dict and the per-event bark-pool dict.
+	var done: Array[String] = []
+	for path in pending:
+		var status: int = ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_LOADED:
+			var res := ResourceLoader.load_threaded_get(path)
+			if res != null:
+				apply.call(pending[path], res)
+			done.append(path)
+		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+			done.append(path)   # skip a bad file rather than poll it forever
+	for path in done:
+		pending.erase(path)
 
 
 func _load_death_yells() -> void:

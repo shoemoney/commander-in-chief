@@ -515,6 +515,45 @@ func test_sfx_caption_gating_preempts_semantically_and_preserves_queued_state() 
 	sfx.free()
 
 
+func test_sfx_caption_queue_caps_at_four_and_drops_stale_entries() -> void:
+	var sfx := Sfx.new()
+	# Fill the strip, then push a burst of same-tier LETHAL warnings straight into the
+	# queue (bypassing the active slot, which _arm_caption already occupies).
+	sfx._arm_caption("[BURST 0]", null, false, false, Sfx.CaptionTier.LETHAL)
+	for i in range(1, 8):
+		sfx._queue_caption({"text": "[BURST %d]" % i, "radio": false, "is_vo": false,
+			"tier": Sfx.CaptionTier.LETHAL, "frames": 90})
+	Runner.T.eq(sfx._cap_queue.size(), 4, "a bursty queue caps at 4 entries instead of growing unbounded")
+	# The queue should have kept the MOST RECENT (highest-priority-by-arrival) entries, not
+	# the oldest — pop_back() drops from the tier-sorted tail on every insert past the cap.
+	Runner.T.eq(sfx._cap_queue.back()["text"], "[BURST 7]", "the newest burst entry survives the cap")
+
+	# Back-date the front entry past the staleness budget (SFX_CAPTION_GAP) and prove it
+	# never reaches the screen -- a warning whose moment has passed is dropped, not read
+	# out seconds late.
+	sfx._cap_until = Engine.get_physics_frames()   # expire the active slot so promote runs
+	var stale_text: String = sfx._cap_queue[0]["text"]
+	sfx._cap_queue[0]["armed"] = Engine.get_physics_frames() - Sfx.SFX_CAPTION_GAP - 1
+	var shown: String = sfx.active_caption()["text"]
+	Runner.T.ok(shown != stale_text, "a queued entry older than SFX_CAPTION_GAP is discarded, never shown")
+	sfx.free()
+
+
+func test_sfx_caption_resumed_entry_is_exempt_from_staleness_drop() -> void:
+	var sfx := Sfx.new()
+	# A preempted caption is re-queued with resume=true (see _arm_caption) and must survive
+	# past the staleness budget -- it's resuming already-displayed state, not stale news.
+	sfx._arm_caption("COMMANDER: \"Move out!\"", null, false, false, Sfx.CaptionTier.FLAVOR)
+	sfx._arm_caption("[MORTAR INCOMING]", null, false, false, Sfx.CaptionTier.LETHAL)
+	Runner.T.eq(sfx._cap_queue.size(), 1, "the displaced flavor line is preserved in the queue")
+	Runner.T.ok(bool(sfx._cap_queue[0].get("resume", false)), "the preempted entry is marked resume")
+	sfx._cap_queue[0]["armed"] = Engine.get_physics_frames() - Sfx.SFX_CAPTION_GAP - 1
+	sfx._cap_until = Engine.get_physics_frames()
+	Runner.T.eq(sfx.active_caption()["text"], "COMMANDER: \"Move out!\"",
+		"a resume-flagged entry is never dropped for staleness")
+	sfx.free()
+
+
 func test_audio_identity_stop_vo_clears_only_its_own_vo_caption() -> void:
 	var sfx := Sfx.new()
 	# Arm a VO caption, then a bark caption on top (they use separate players/buses and can
@@ -2004,6 +2043,33 @@ func test_mp3_banks_load_threaded_and_land_in_the_bank() -> void:
 	Runner.T.ok(sfx._spawn_shouts.size() > 0, "spawn-shout bank has streams after the load completes (%d)" % sfx._spawn_shouts.size())
 	for s in sfx._death_yells:
 		Runner.T.ok(s is AudioStream, "every landed death-yell entry is a real AudioStream")
+	sfx.free()
+
+
+# r4: the 14 non-crawl VO lines + all 41 Commander bark clips moved off a synchronous
+# _ready() load() loop onto the same threaded request/poll cycle as the death-yell/
+# spawn-shout banks above, just keyed (path -> key/event) instead of flat-array. Proves
+# the keyed sweep actually lands streams into _vo_streams / _cmd_barks, not just that it
+# compiles.
+func test_vo_and_bark_banks_load_threaded_and_land_keyed() -> void:
+	var sfx := Sfx.new()
+	sfx._load_vo_async()
+	sfx._load_cmd_barks_async()
+	Runner.T.ok(not sfx._vo_load_pending.is_empty(), "VO bank has pending threaded loads")
+	Runner.T.ok(not sfx._bark_load_pending.is_empty(), "bark bank has pending threaded loads")
+	var waited_ms := 0
+	while (not sfx._vo_load_pending.is_empty() or not sfx._bark_load_pending.is_empty()) and waited_ms < 5000:
+		sfx._poll_mp3_banks()
+		OS.delay_msec(10)
+		waited_ms += 10
+	Runner.T.ok(sfx._vo_load_pending.is_empty(), "VO bank finished loading within 5s")
+	Runner.T.ok(sfx._bark_load_pending.is_empty(), "bark bank finished loading within 5s")
+	Runner.T.ok(sfx._vo_streams.has("vo_chest_empty"), "a non-crawl VO key landed keyed in _vo_streams")
+	Runner.T.ok(sfx._vo_streams["vo_chest_empty"] is AudioStream, "the landed VO stream is a real AudioStream")
+	Runner.T.ok(sfx._cmd_barks.has("levelstart"), "a bark event landed keyed in _cmd_barks")
+	Runner.T.ok(sfx._cmd_barks["levelstart"].size() > 0, "the bark event's pool has at least one clip")
+	for s in sfx._cmd_barks["levelstart"]:
+		Runner.T.ok(s is AudioStream, "every landed bark entry is a real AudioStream")
 	sfx.free()
 
 
