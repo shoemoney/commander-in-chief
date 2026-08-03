@@ -1657,13 +1657,14 @@ func _shipped_world_labels() -> Array[String]:
 	## sites — new copy is covered the day it lands.
 	var out: Array[String] = []
 	for line in FileAccess.get_file_as_string("res://src/main.gd").split("\n"):
-		var at := line.find("_world_label(\"")
-		if at == -1:
-			continue
-		var rest := line.substr(at + 14)
-		var end := rest.find("\"")
-		if end > 0 and not out.has(rest.substr(0, end)):
-			out.append(rest.substr(0, end))
+		for pfx in ["_world_label(\"", "_world_label_centered(\""]:
+			var at := line.find(pfx)
+			if at == -1:
+				continue
+			var rest := line.substr(at + pfx.length())
+			var end := rest.find("\"")
+			if end > 0 and not out.has(rest.substr(0, end)):
+				out.append(rest.substr(0, end))
 	var caps: Array = load("res://src/main.gd").get_script_constant_map()["_CAPSULE_LABEL"]
 	for cap in caps:
 		if not out.has(cap):
@@ -1726,8 +1727,11 @@ func test_world_labels_never_share_pixels() -> void:
 						frame.append(pr)
 						boxes.append({"k": "crate price", "id": "999", "box": pr})
 						var txt: String = labels[li % labels.size()]
+						# The identity label is CENTERED on the crate (_world_label_centered),
+						# so the model measures the same half-width the draw does — a baked
+						# -15.0 modelled a left origin the game no longer uses.
 						var lr: Rect2 = ms.claim_label_slot(
-							ms._label_plate_rect(px - 15.0, py - 25.0, Art.tw(txt, sz), sz), frame)
+							ms._label_plate_rect(px - Art.tw(txt, sz) / 2.0, py - 25.0, Art.tw(txt, sz), sz), frame)
 						frame.append(lr)
 						boxes.append({"k": "crate label", "id": txt, "box": lr})
 						# _draw_fx last: a kill toast in the air over the same crate.
@@ -1805,6 +1809,99 @@ func test_world_text_routes_through_the_arbiter() -> void:
 				"floattext toasts claim their REAL drawn footprint (the punch-max plate), not a hand-rolled 11px box")
 			Runner.T.ok(src.substr(fstart, fend - fstart).contains("\"sup\""),
 				"a saturated toast is suppressed via fx[\"sup\"], never overprinted on a keep-place fallback")
+
+
+# accessibility: a world callout that means "centered on this thing" must be centered on it
+# at EVERY shipped TEXT SIZE. _world_label takes a LEFT origin, so the call sites used to
+# bake a half-width guess (-13/-15/-16/-20/-26/-38) measured at the 8px design size; Art.fs
+# doubles the glyphs at 200% and the baked number does not, so the accessibility setting
+# pushed the label further off its own anchor the more the player needed it.
+func test_world_labels_center_on_their_anchor_at_every_text_scale() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var labels := _shipped_world_labels()
+	Runner.T.ok(labels.size() >= 10,
+		"scraped the shipped in-world callout copy (%d strings) — a dead scrape must not pass silently"
+			% labels.size())
+	var was_scale: float = Art.text_scale
+	var scale_max := float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0
+	var off_anchor := 0
+	var worst := 0.0
+	for scale in [1.0, scale_max]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz: int = Art.fs(8)
+		for txt in labels:
+			var w: float = Art.tw(txt, sz)
+			# The SHIPPED want-rect: what _world_label_centered hands the arbiter. An EMPTY
+			# taken list means the arbiter cannot dodge, so the claim IS the want and the
+			# assertion measures the layout, not the dodge.
+			var got: Rect2 = ms.claim_label_slot(
+				ms._label_plate_rect(320.0 - w / 2.0, 180.0, w, sz), [] as Array[Rect2])
+			var dev: float = absf(got.get_center().x - 320.0)
+			worst = maxf(worst, dev)
+			if dev > 0.51:
+				off_anchor += 1
+				if off_anchor <= 3:
+					Runner.T.ok(false,
+						"'%s' sits %.1fpx off its anchor at %d%% TEXT SIZE (plate %s)"
+							% [txt, dev, int(scale * 100.0), str(got)])
+	Runner.T.eq(off_anchor, 0,
+		"every centered world callout lands on its anchor at 100%% and %d%% (worst drift %.2fpx)"
+			% [int(scale_max * 100.0), worst])
+	# Negative control: the RETIRED model (a baked -15.0 half-width) must FAIL the same
+	# predicate at the top text scale, or the assertion above is vacuous.
+	Art.text_scale = scale_max
+	Art.flush_tw()
+	var sz_max: int = Art.fs(8)
+	var retired_worst := 0.0
+	for txt in labels:
+		var rr: Rect2 = ms.claim_label_slot(
+			ms._label_plate_rect(320.0 - 15.0, 180.0, Art.tw(txt, sz_max), sz_max), [] as Array[Rect2])
+		retired_worst = maxf(retired_worst, absf(rr.get_center().x - 320.0))
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.ok(retired_worst > 0.51,
+		"the retired baked-half-width model IS off-anchor at %d%% (%.1fpx) — the check above is not vacuous"
+			% [int(scale_max * 100.0), retired_worst])
+
+
+# The wiring half of the ratchet above, in the shape that caught claim_label_slot shipping as
+# a signature and a docstring: the geometry test models a CENTERED layout, so it stays green
+# even if the helper is never called. This one reads the source. It also pins the second half
+# of the truth sweep — a hint must name the key the player actually has bound, never a stamped
+# QWERTY letter (main.gd taught "F"/"Q" while BIND_DEFAULTS made both rebindable).
+func test_world_labels_and_hints_never_hand_guess_the_players_reality() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.count("_world_label_centered(") >= 9,
+		"the centering helper is WIRED, not just defined (%d occurrences: def + call sites)"
+			% src.count("_world_label_centered("))
+	# The defect shape: a raw _world_label() call passing a LITERAL negative x offset, i.e. a
+	# hand-guessed half width. Measured expressions (Vector2(-rw / 2.0, ...)) are the fix and
+	# are deliberately still allowed — they are the label+glyph pairs that must share one claim.
+	var baked := 0
+	var line_no := 0
+	for line in src.split("\n"):
+		line_no += 1
+		var code := line.strip_edges()
+		if code.begins_with("#") or not code.contains("_world_label("):
+			continue
+		for d in "0123456789":
+			if code.contains("Vector2(-%s" % d):
+				baked += 1
+				Runner.T.ok(false,
+					"main.gd:%d bakes a literal half-width into a world label: %s" % [line_no, code])
+				break
+	Runner.T.eq(baked, 0, "no world label hand-guesses its own half width")
+	# Binding truth: key_label maps the physical code through the player's CURRENT layout
+	# (and falls back to OS.get_keycode_string headless), so the raw physical name is never
+	# what a hint should print.
+	Runner.T.eq(src.count("OS.get_keycode_string(bind("), 0,
+		"hints read the layout-aware GameMenu.key_label, never the raw physical key name")
+	# One survivor: the REPLAY exit cap at _draw's watch overlay. WATCH_HOTKEY is `const KEY_R`
+	# matched against a logical keycode, so "R" is true on every layout and every rebind.
+	# Any NEW hardcoded gameplay key literal pushes this count and goes red.
+	Runner.T.eq(src.count("Art.use_pad else \""), 1,
+		"the only stamped keyboard cap left is the non-rebindable WATCH_HOTKEY replay-exit key")
 
 
 func _shipped_floattext_strings() -> Array[String]:
@@ -1896,11 +1993,11 @@ func test_world_text_saturation_drops_instead_of_overprinting() -> void:
 			# The persistent labels claim first, in draw order, NOT droppable
 			# (the shipped capsule-name / MAXED offsets from _draw_pickups).
 			var cap: Rect2 = ms.claim_label_slot(
-				ms._label_plate_rect(anchor.x - 15.0, anchor.y - 25.0, Art.tw("SPREAD", sz), sz), frame)
+				ms._label_plate_rect(anchor.x - Art.tw("SPREAD", sz) / 2.0, anchor.y - 25.0, Art.tw("SPREAD", sz), sz), frame)
 			frame.append(cap)
 			placed.append({"id": "SPREAD", "box": cap})
 			var maxed: Rect2 = ms.claim_label_slot(
-				ms._label_plate_rect(anchor.x - 15.0, anchor.y - 34.0, Art.tw("MAXED", sz), sz), frame)
+				ms._label_plate_rect(anchor.x - Art.tw("MAXED", sz) / 2.0, anchor.y - 34.0, Art.tw("MAXED", sz), sz), frame)
 			frame.append(maxed)
 			placed.append({"id": "MAXED", "box": maxed})
 			# Then the kill-feed pileup: a same-anchor toast wall. 20 toasts
@@ -2323,7 +2420,7 @@ func test_world_labels_never_cover_the_player() -> void:
 				var claims: Array[Rect2] = []
 				for txt in labels:
 					claims.append(ms.claim_label_slot(
-						ms._label_plate_rect(ppos.x - 15.0, ppos.y, Art.tw(txt, sz), sz), taken))
+						ms._label_plate_rect(ppos.x - Art.tw(txt, sz) / 2.0, ppos.y, Art.tw(txt, sz), sz), taken))
 					var tw9: float = Art.tw(txt, 9)
 					claims.append(ms.claim_label_slot(
 						Rect2(ppos.x - tw9 / 2.0, ppos.y, tw9, 11.0), taken))

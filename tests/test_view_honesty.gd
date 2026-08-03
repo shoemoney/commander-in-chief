@@ -2573,6 +2573,51 @@ func test_duplicate_pickup_receipt_names_the_item_it_actually_is() -> void:
 			% src.count("pickup_full_text("))
 
 
+func test_every_deny_reason_the_sim_emits_has_view_wording() -> void:
+	## A refusal that states the wrong cause is the loudest kind of view lie. The
+	## view had TWO `"deny":` arms in one `match kind:` — the second was dead, so
+	## the water-roll refusal fell through to the live arm's default and told the
+	## player "NEED COINS" about a rule that has nothing to do with money. Pin the
+	## shape (one arm) and the coverage (every `why` the sim can emit is worded).
+	var view := _view_src()
+	Runner.T.eq(view.count("\n\t\t\t\"deny\":\n"), 1,
+		"exactly one \"deny\" arm in the event match — a second one is unreachable and its wording never runs")
+	var sim_src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var re := RegEx.create_from_string("\"t\": \"deny\"[^}]*?\"why\": \"([a-z_]+)\"")
+	var reasons := re.search_all(sim_src)
+	Runner.T.ok(reasons.size() >= 6,
+		"found the sim's deny reasons to check against (%d)" % reasons.size())
+	for m in reasons:
+		var why: String = m.get_string(1)
+		Runner.T.ok(view.contains("\"%s\"" % why),
+			"the view has wording for deny reason '%s' instead of falling through to NEED COINS" % why)
+
+
+func test_supply_float_prints_the_delivered_quantity() -> void:
+	## Same shape as the pickup_full_text ratchet above, for the buy/token_drop
+	## float. BUY_FLOAT hardcoded "+30 AMMO" / "+4 GRENADES" — the CATALOGUE
+	## quantity — while the sim clamps at the cap, so a +1 top-up at 11/12
+	## grenades announced "+4 GRENADES". The literals must be gone, the formatter
+	## must exist, and it must be CALLED (a def-only helper is the claim_label_slot
+	## trap: green check, unchanged screen).
+	var src := _view_src()
+	Runner.T.ok(not src.contains("+30 AMMO"),
+		"the catalogue ammo literal is gone from the view — the clamped count is printed instead")
+	Runner.T.ok(not src.contains("+4 GRENADES"),
+		"the catalogue grenade literal is gone from the view")
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("buy_float_text"),
+		"the supply float text is derived by buy_float_text(kind, n), not indexed straight out of BUY_FLOAT")
+	if ms.has_method("buy_float_text"):
+		Runner.T.eq(ms.call("buy_float_text", 0, 30), "+30 AMMO", "a full ammo delivery still reads +30")
+		Runner.T.eq(ms.call("buy_float_text", 1, 1), "+1 GRENADES", "a clamped top-up reads what it delivered")
+		Runner.T.eq(ms.call("buy_float_text", 3, 1), "AIRSTRIKE INBOUND",
+			"a quantity-less kind ignores n rather than printing a number at it")
+	Runner.T.ok(src.count("buy_float_text(") >= 3,
+		"buy_float_text is wired into both float consumers, not just defined (%d sites)"
+			% src.count("buy_float_text("))
+
+
 func test_mast_telegraph_sleeps_with_the_shop() -> void:
 	## The sim's mast hazard sleeps while the intermission shop is open (the
 	## shop is sold threat-free). The VIEW must mirror that gate: a warn ring

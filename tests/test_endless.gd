@@ -399,6 +399,56 @@ func test_mast_hazard_sleeps_through_the_shop() -> void:
 				"wave %d phase-offset %d: the gate does not wedge the wave loop" % [w, off])
 
 
+func test_no_mortar_telegraphs_or_lands_while_the_shop_is_open() -> void:
+	# The mast test above claims the mast is "the lone self-firing damage source in
+	# the breather". It was not: the Spotter is not a member of enemies[], so
+	# _wave_hostiles_cleared() cleared the wave around it, and endless reaches
+	# neither despawn branch in _step_observer — so a Spotter nobody shot walked
+	# mortars across "WAVE CLEARED — SHOP OPEN" every 90t, every wave, forever.
+	# Two shells, two paths, one contract: while intermission_ticks > 0, NOTHING
+	# telegraphs and NOTHING detonates.
+	#   - the Spotter is primed to fire on the clearing tick itself (strike_cd 1)
+	#   - a 3-tick lob from the wave that just died is already in the air, UNTAGGED
+	#     (obs=false), so defusing only the observer's own strikes does not cover it
+	# Asserts the OUTCOME, not the mechanism: sleep or withdraw both satisfy it.
+	var idle := SimInput.new()
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim.wave = 6                      # not a %5 mast wave; past the mutator gate
+	sim.wave_pending = 0
+	sim.enemies.clear()
+	sim.observer = {"x": 320 * Fixed.ONE, "strike_cd": 1, "spawn_cam": sim.camera_top}
+	var p: Dictionary = sim.players[0]
+	p["x"] = 350 * Fixed.ONE          # parked on the middle shop crate
+	p["y"] = sim.camera_top + 120 * Fixed.ONE
+	sim.strikes.append({"x": p["x"], "y": p["y"], "ticks": 3, "obs": false})
+	var warns := 0
+	var booms := 0
+	var in_air := 0
+	var steps := 0
+	sim.step([idle])                  # the wave clears -> the shop opens
+	Runner.T.ok(sim.intermission_ticks > 0, "the wave cleared and the shop opened")
+	var full: int = sim.intermission_ticks + 1
+	while true:
+		for ev in sim.events:
+			if ev["t"] == "strike_warn":
+				warns += 1
+			elif ev["t"] == "explosion":
+				booms += 1
+		in_air = maxi(in_air, sim.strikes.size())
+		if sim.intermission_ticks == 0 or steps >= full:
+			break
+		p["x"] = 350 * Fixed.ONE
+		p["y"] = sim.camera_top + 120 * Fixed.ONE
+		sim.step([idle])
+		steps += 1
+	Runner.T.eq(warns, 0, "zero mortars telegraph while the shop is open")
+	Runner.T.eq(booms, 0, "zero mortars detonate while the shop is open")
+	Runner.T.eq(in_air, 0, "no shell is left in the air once WAVE CLEARED goes up")
+	Runner.T.ok(sim.players[0]["alive"],
+		"the player survives the whole breather parked on the middle crate")
+	Runner.T.eq(sim.wave, 7, "the stand-down does not wedge the wave loop")
+
+
 func test_c3_mast_hazard_spares_the_flank_and_off_cadence() -> void:
 	# A player OUTSIDE the radius is never hurt; and off-cadence waves are inert.
 	var sim := SimWorld.new(9, 1, "endless")

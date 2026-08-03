@@ -411,6 +411,45 @@ func test_field_spawner_only_fields_the_current_sectors_roster() -> void:
 				"sector %d never fielded its own '%s' in 600 spawns" % [sector + 1, k])
 
 
+func test_campaign_never_roots_a_shooter_above_the_reachable_band() -> void:
+	## Campaign twin of test_endless.gd's
+	## test_rooted_wave_spawns_land_where_the_player_can_reach_them.
+	## Sectors 3/5/6 field mg_nest/ghillie/broadcast, and _step_camera PINS the camera
+	## for the whole closed-gate arena fight — so a rooted unit born at camera_top-24
+	## sits above the drawn viewport and above _clamp_actor's camera_top+16 ceiling
+	## until the gate opens: invisible, unwalkable-to, and still firing aimed bursts.
+	## Assert at the SPAWN MOMENT only — the campaign camera ratchets, so a
+	## legitimately-placed unit later drifts south before the sweep takes it.
+	## ROOTED_KINDS is the ratchet: a new never-moves archetype that isn't listed
+	## there inherits the walker spawn y and this test stays green (which is how
+	## the ghillie shipped broken in endless).
+	var lo_off := 16 * SimWorld.F_ONE
+	for sector in [2, 4, 5]:   # 0-based: BRIDGE GUNSHIP / CRASHED CONVOY / FOUNDRY CORE
+		var sim := SimWorld.new(0xBEEF + sector, 1)
+		sim._gate_counter = sector + 1
+		var rooted := 0
+		for i in 600:
+			sim.tick_count = 0
+			sim._spawn_grace = 0
+			sim.enemies.clear()
+			sim._step_spawner()
+			for e in sim.enemies:
+				if SimWorld.ROOTED_KINDS.has(e["kind"]):
+					rooted += 1
+					Runner.T.ok(e["y"] >= sim.camera_top + lo_off \
+						and e["y"] <= sim.camera_top + SimWorld.CAMERA_BAND_BOTTOM,
+						"sector %d rooted '%s' spawns inside the player's reachable band"
+							% [sector + 1, e["kind"]])
+		Runner.T.ok(rooted > 0,
+			"sector %d actually fielded a rooted archetype in 600 spawns" % (sector + 1))
+	# A closed gate is a wall for the spawner too, exactly as it is for _clamp_actor.
+	var gsim := SimWorld.new(7, 1)
+	gsim.gates.append({"y": gsim.camera_top + 60 * SimWorld.F_ONE, "open": false,
+		"b1": {}, "b2": {}, "boss": {}})
+	Runner.T.ok(gsim._rooted_spawn_y() >= gsim.camera_top + 60 * SimWorld.F_ONE + SimWorld.GATE_BLOCK_PAD,
+		"a rooted spawn never lands north of a closed gate's wall")
+
+
 func test_rend_unlocks_exactly_where_shieldmen_can_exist() -> void:
 	# Rend is the shield counter; offering it in a sector that fields no shields
 	# is a dead draw (and withholding it where they DO spawn is worse).

@@ -411,6 +411,12 @@ const SECTOR_SPECIALS: Array[Array] = [
 	["ghillie", "broadcast", "sapper"],    # 5 CRASHED CONVOY — dug in among the wreckage
 	["drone", "grenadier", "mg_nest", "shield"],   # 6 THE FOUNDRY CORE — the throne bombards
 ]
+## Archetypes whose step function never writes x or y: they keep their spawn
+## position for life, so they may only be born inside the reachable band.
+## Adding a rooted kind to the sim without adding it HERE is the bug — that is
+## exactly how the ghillie inherited the walker spawn y (see test_endless.gd's
+## test_rooted_wave_spawns_land_where_the_player_can_reach_them).
+const ROOTED_KINDS: Array[String] = ["mg_nest", "broadcast", "ghillie"]
 const GATE_CAMERA_PAD := 60 * F_ONE
 # Flak Vest: absorbs exactly one hit, then a mercy window.
 const VEST_IFRAME_TICKS := 90
@@ -1159,6 +1165,19 @@ func _step_players(inputs: Array) -> void:
 				_try_buy(p, inp.buy - 1)
 
 		if p["in_tank"] >= 0:
+			# Crew still work the coin reader. main.revive_context() hands the key to the
+			# rescue from EITHER seat (test_controls: "the rescue wins the key", and
+			# _drive_tank's own comment below says the cannon holds fire for it) — but
+			# neither _drive_tank nor _ride_as_gunner has a revive branch, so the routed
+			# press used to die on this `continue`: no revive, no revive_deny, a dead key
+			# under the SHIPPED binds (main.gd assigns p1.revive with no in_tank gate).
+			# BEFORE the delegate on purpose, so the rescue resolves ahead of the
+			# cannon/dismount exactly as the arbitration promises. The cost is that the
+			# partner stands up at the hull's PREVIOUS-tick position (_drive_tank is what
+			# syncs p["x"]/p["y"] to the tank) — one tick of TANK_SPEED, cosmetic. Don't
+			# "tidy" it below _drive_tank.
+			if inp.revive:
+				_try_revive(i, p)
 			_drive_tank(i, p, inp, interact_edge, grenade_edge)
 			continue
 
@@ -2171,8 +2190,14 @@ func _fire_mission() -> void:
 			_kill_enemy(e, true, false, WIPE_SCORE_PCT)
 
 
-func _apply_supply(p: Dictionary, kind: int) -> void:
+func _apply_supply(p: Dictionary, kind: int) -> int:
 	## One supply grammar shared by ground pickups, shop crates and buys.
+	## Returns HOW MANY landed for the three counted kinds (0 mg ammo, 1 grenades,
+	## 8 claymores) — the caps clamp, so a top-up at 11/12 grenades delivers 1 and
+	## the view has to be told that instead of printing the catalogue "+4". Every
+	## other kind is a one-shot grant with no quantity and returns 1.
+	var key: String = {0: "mg_ammo", 1: "grenade_ammo", 8: "claymores"}.get(kind, "")
+	var before: int = p[key] if key != "" else 0
 	match kind:
 		0:
 			p["mg_ammo"] = mini(MG_AMMO_MAX, p["mg_ammo"] + 30)
@@ -2242,6 +2267,7 @@ func _apply_supply(p: Dictionary, kind: int) -> void:
 			# giving a commit-then-wait beat instead of a silent screen-wipe.
 			pending_airstrike = STRIKE_TELEGRAPH_TICKS
 			events.append({"t": "airstrike_called", "x": SCREEN_CX, "y": camera_top + 180 * F_ONE})
+	return (p[key] - before) if key != "" else 1
 
 
 func is_campaign_world() -> bool:
@@ -2426,8 +2452,8 @@ func _try_token_drop(p: Dictionary) -> void:
 		return
 	tokens -= 1
 	var kind: int = cands[rng.range_i(0, cands.size() - 1)]
-	_apply_supply(p, kind)
-	events.append({"t": "token_drop", "x": p["x"], "y": p["y"], "kind": kind})
+	var got_tok := _apply_supply(p, kind)
+	events.append({"t": "token_drop", "x": p["x"], "y": p["y"], "kind": kind, "n": got_tok})
 
 
 func _try_buy(p: Dictionary, kind: int) -> void:
@@ -2475,8 +2501,8 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	score += cost * SPEND_SCORE_MULT
 	# Wheel slot 4 is the sandbag: supply-kind 11 (pickup kinds 4-10 are the
 	# rare capsules — a priced crate can never carry 11, so no collision).
-	_apply_supply(p, 11 if kind == 4 else kind)
-	events.append({"t": "buy", "x": p["x"], "y": p["y"], "kind": kind})
+	var got_buy := _apply_supply(p, 11 if kind == 4 else kind)
+	events.append({"t": "buy", "x": p["x"], "y": p["y"], "kind": kind, "n": got_buy})
 
 
 # --- Tank ---
@@ -4135,12 +4161,16 @@ func _step_spawner() -> void:
 	var roster: Array = SECTOR_SPECIALS[_sector_index(opened)]
 	if not roster.is_empty() and rng.range_i(0, 3 if hard else 4) == 0:  # NG+: 1-in-4 specials
 		var kind: String = roster[rng.range_i(0, roster.size() - 1)]
+		# Rooted kinds never move, so the walk-in-from-the-top y is where they
+		# STAY while the camera is held — a lethal gun above the reachable field.
+		# Endless already roots in-band (_step_waves); campaign shares the rule.
+		var sy: int = _rooted_spawn_y() if ROOTED_KINDS.has(kind) else camera_top - 24 * F_ONE
 		if kind == "mg_nest":
-			_spawn_mg_nest(x, camera_top - 24 * F_ONE)
+			_spawn_mg_nest(x, sy)
 		elif kind == "broadcast":
-			_spawn_broadcast(x, camera_top - 24 * F_ONE)
+			_spawn_broadcast(x, sy)
 		else:
-			_spawn_special(x, camera_top - 24 * F_ONE, kind)
+			_spawn_special(x, sy, kind)
 	else:
 		# Elite ratio tightens with each opened gate (every 7th → every 3rd by
 		# gate 4) so late campaign escalates composition, not just cadence.
@@ -4320,6 +4350,25 @@ func _spawn_courier() -> void:
 	# anchored player; +300 keeps it a chase from behind.
 	enemies.append({"x": rng.range_i(80, 560) * F_ONE, "y": camera_top + 300 * F_ONE,
 		"alive": true, "elite": false, "kind": "courier"})
+
+
+func _rooted_spawn_y() -> int:
+	## Spawn y for ROOTED_KINDS, shared by BOTH spawners. The walkers'
+	## camera_top-24 sits 24px above the drawn viewport and 40px above
+	## _clamp_actor's ceiling (camera_top+16), so a rooted unit born there is
+	## invisible AND un-walkable-to for every tick camera_held() is true — over
+	## half of a campaign run by the stall guard's own measurement, and 100% of a
+	## closed-gate arena fight, during which _step_camera pins camera_top and the
+	## nest keeps firing aimed bursts from off-screen. Root it in the band, south
+	## of any closed gate wall — the same clamp _clamp_actor puts on the player.
+	## Bound: _step_camera guarantees camera_top >= g["y"] - GATE_CAMERA_PAD for
+	## every closed gate, so the loop can raise y to at most camera_top + 74,
+	## well inside CAMERA_BAND_BOTTOM.
+	var y := camera_top + 52 * F_ONE
+	for g in gates:
+		if not g["open"] and y < g["y"] + GATE_BLOCK_PAD:
+			y = g["y"] + GATE_BLOCK_PAD
+	return y
 
 
 func _spawn_special(x: int, y: int, kind: String) -> void:
@@ -5771,7 +5820,11 @@ func _step_waves(inputs: Array = []) -> void:
 			# unreachable — blind-fire only — yet it counts in _wave_hostiles_cleared
 			# and holds the wave open indefinitely. Root them inside the reachable
 			# band instead (16..344 below camera_top).
-			var rooted_y: int = camera_top + 52 * F_ONE
+			# Shared with the campaign field spawner — see _rooted_spawn_y().
+			# Value-identical here: endless never runs _step_camera, and every
+			# gates.append site lives inside it (or boss_rush's _init), so
+			# `gates` is empty for the whole endless run.
+			var rooted_y: int = _rooted_spawn_y()
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = has_mod(2) or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
@@ -5832,6 +5885,14 @@ func _step_waves(inputs: Array = []) -> void:
 	elif _wave_hostiles_cleared() and (endless_boss.is_empty() or not endless_boss["alive"]):
 		# Wave cleared: open the shop for the intermission (a live miniboss holds it).
 		intermission_ticks = _intermission_len()
+		# ...and every shell ALREADY in the air is called off. Sleeping the Spotter
+		# (_step_observer) stops new mortars but not old ones: STRIKE_TELEGRAPH_TICKS
+		# is 45, so a lob fired on the wave's last tick still detonates most of a
+		# second into "WAVE CLEARED — SHOP OPEN". Blanket, not _clear_observer_strikes():
+		# the obs tag exists to spare lobs with a LIVING owner, and by the time this
+		# branch runs every enemy left is a walking pilot (_wave_hostiles_cleared) and
+		# the miniboss is dead, so nothing airborne here has an owner to spare.
+		strikes.clear()
 		events.append({"t": "wave_clear", "x": 320 * F_ONE, "y": camera_top + 180 * F_ONE})
 		# Clean Wave: endless's answer to the campaign's Flawless Gate — no deaths
 		# this wave pays a bonus, so cautious and reckless play stop earning alike.
@@ -6765,6 +6826,18 @@ func _add_strike(x: int, y: int, obs := false) -> void:
 # --- Mortar Observer ---
 
 func _step_observer() -> void:
+	# The Spotter SLEEPS through the endless shop, exactly like _step_mast_hazard.
+	# The breather is sold as threat-free (the breather grade, the wheel scrim, the
+	# airstrike refusal at kind 3 all say so) — but `observer` is not a member of
+	# enemies[], so _wave_hostiles_cleared() cleared the wave around it, and endless
+	# reaches NEITHER despawn branch below (both are mode-gated or need a camera that
+	# never moves). So a Spotter nobody shot kept walking mortars across the shop
+	# every 90t, every wave. It STANDS DOWN, it does not withdraw: the entity, its
+	# 2x-elite bounty and the "lives until it is shot" pressure below all survive,
+	# and strike_cd resumes where it stopped. Campaign never sets intermission_ticks,
+	# so this is inert there.
+	if intermission_ticks > 0:
+		return
 	# Stall detection runs after the camera step: no advance this tick = stall.
 	var any_alive := false
 	for p in players:

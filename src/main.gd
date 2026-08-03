@@ -453,7 +453,7 @@ const WHEEL_ITEMS := [
 	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS"},
 	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "SUPPLY CALL"},   # Commendation spend — costs a token, never coins
 ]
-const BUY_FLOAT := ["+30 AMMO", "+4 GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
+const BUY_FLOAT := ["+%d AMMO", "+%d GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
 # 8-way wheel: compass = the classic four, SW diagonal = sandbags, other
 # diagonals empty (-1) so a sloppy flick can never buy something unnamed.
 const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, 5]   # E,SE,S,SW,W,NW,N,NE(token)
@@ -2301,7 +2301,7 @@ func _consume_events() -> void:
 					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN UNTIL DEATH. STACK SPREAD FOR A 5-WAY FAN")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
-						% (Art.pad_label("interact") if Art.use_pad else "F"))
+						% (Art.pad_label("interact") if Art.use_pad else GameMenu.key_label(bind("interact"))))
 					9: _hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
@@ -2505,10 +2505,16 @@ func _consume_events() -> void:
 					"rot": Vector2(bp["aim_x"], bp["aim_y"]).angle(), "col": Color(1, 1, 1, 0.85)})
 			"buy":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.02, "text": BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.95, 0.6)})
+					"rate": 0.02, "text": buy_float_text(int(ev["kind"]), int(ev.get("n", 1))),
+						"col": Color(1.0, 0.95, 0.6)})
 			"deny":
 				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK", "board": "TOO FAR TO BOARD",
 					"token": "NO COMMENDATION", "full": "ALREADY STOCKED",
+					# A roll pressed while wading. The rule ("no rolling in water") has to be
+					# stated or the press just reads as dropped input — and it used to print
+					# NEED COINS, because the arm that said this lived in a SECOND, unreachable
+					# "deny": case of this same match.
+					"water": "NO ROLL IN WATER",
 					"no_targets": "HOLD FIRE — SKIES EMPTY"}.get(
 						ev.get("why", "coins"), "NEED COINS")
 				if ev.get("why", "") == "full" and int(ev.get("kind", -1)) == 3:
@@ -2759,7 +2765,7 @@ func _consume_events() -> void:
 				if not death_cause.is_empty():
 					_loss_sting(ev, "DOWNED — %s" % death_cause)
 				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
-				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_label("revive") if Art.use_pad else OS.get_keycode_string(bind("revive"))), true)
+				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_label("revive") if Art.use_pad else GameMenu.key_label(bind("revive"))), true)
 				# The two GLOBAL costs of a body — one burned Commendation and the broken clean-gate
 				# streak — used to be taken in total silence, and the token chip simply popped out of
 				# the head bar. Sting them HERE, at the body, which is where the sim takes them. (The
@@ -2897,18 +2903,6 @@ func _consume_events() -> void:
 				_forks.append({"y": ev["y"], "x": ev["x"], "bait": true})
 			"revive_deny":
 				_vo("vo_chest_empty", 2, 600)
-			"deny":
-				# A refused verb that the sim itself rejected. Today the only source is
-				# a roll pressed while wading: previously the press either vanished or
-				# sat in the buffer and fired itself the moment you reached dry land.
-				# Two channels — the shared deny tick plus a floating reason — so the
-				# player learns the RULE ("no rolling in water"), not just that it failed.
-				if ev.get("why", "") == "water":
-					_sfx.play_at("deny", _to_screen(ev["x"], ev["y"]), -10.0)
-					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-						"rate": 0.05, "text": "NO ROLL IN WATER", "col": Color(0.6, 0.8, 1.0)})
-				else:
-					_sfx.play("deny", -10.0)
 			"gate_open":
 				_ev_gate_open(ev)
 			"token_mint":
@@ -2916,7 +2910,8 @@ func _consume_events() -> void:
 					"rate": 0.012, "text": "COMMENDATION *%d" % ev.get("n", 1), "col": Color(1.0, 0.85, 0.3)})
 			"token_drop":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.014, "text": "SUPPLY CALL — " + BUY_FLOAT[ev["kind"]], "col": Color(1.0, 0.9, 0.5)})
+					"rate": 0.014, "col": Color(1.0, 0.9, 0.5),
+						"text": "SUPPLY CALL — " + buy_float_text(int(ev["kind"]), int(ev.get("n", 1)))})
 			"hulk_salvage":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.016, "text": ("+%d GRENADES — COVER STRIPPED" % ev.get("n", 2)) if ev.get("n", 2) > 0 else "FULL UP — COVER STRIPPED", "col": Color(1.0, 0.8, 0.45)})
@@ -3034,7 +3029,7 @@ func _consume_events() -> void:
 				# The ready-up is only a mechanic if it's discoverable: the banner that
 				# already announces the shop teaches the skip on the same breath.
 				show_banner(TranslationServer.translate("WAVE CLEARED — SHOP OPEN · HOLD [%s] TO DEPLOY")
-					% (Art.pad_label("revive") if Art.use_pad else OS.get_keycode_string(bind("revive"))))
+					% (Art.pad_label("revive") if Art.use_pad else GameMenu.key_label(bind("revive"))))
 			"wave_ready":
 				show_banner("READY UP — DEPLOYING")
 				_sfx.play("wave_clear", -4.0, 1.3)
@@ -5112,17 +5107,17 @@ func _track_bests() -> void:
 	# Supply-wheel discoverability: the first time the chest can afford the
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
-		_hint("supply", TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % (Art.pad_label("wheel") if Art.use_pad else "Q"))
+		_hint("supply", TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % (Art.pad_label("wheel") if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
 	# The intermission can be called early — teach the ready-up hold the first
 	# time a shop window is actually open (the only place it does anything).
 	if sim.mode == "endless" and sim.intermission_ticks > 0:
 		_hint("wave_ready", TranslationServer.translate("HOLD [%s] TO DEPLOY EARLY")
-			% (Art.pad_label("revive") if Art.use_pad else OS.get_keycode_string(bind("revive"))))
+			% (Art.pad_label("revive") if Art.use_pad else GameMenu.key_label(bind("revive"))))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
 	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
 		_hint("airstrike_wheel", TranslationServer.translate("AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]")
-			% (Art.pad_label("wheel") if Art.use_pad else "Q"))
+			% (Art.pad_label("wheel") if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).
 	if not sim._all_players_down():
@@ -5920,7 +5915,7 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	inp.fire = (tick % 8) != 7                          # MG never sleeps
 	inp.grenade = (tick % 90) == 70                     # crack armor often
 	inp.roll = (tick % 150) == 90
-	inp.buy = 2 if tick == 880 else 0   # "+4 GRENADES" moment
+	inp.buy = 2 if tick == 880 else 0   # the grenade-buy float moment
 	inp.revive = (tick % 90) == 0       # downed: feed the coin reader
 	var p := dsim.players[0]
 	# LOCK ON to whatever is actually holding the run. The open-loop sweep above
@@ -8602,6 +8597,15 @@ static func water_shader_params(band_idx: int, ford_x: int, flow_dir: int, close
 	}
 
 
+static func buy_float_text(kind: int, n: int) -> String:
+	## Print the quantity the SIM delivered, not the catalogue quantity: the caps
+	## clamp, so a top-up at 11/12 grenades delivers 1 and used to be announced with
+	## the catalogue 4. `n` rides the buy/token_drop events (checksum-excluded).
+	## Kinds with no quantity keep their flat wording and ignore n.
+	var s: String = BUY_FLOAT[clampi(kind, 0, BUY_FLOAT.size() - 1)]
+	return (s % maxi(n, 0)) if s.contains("%d") else s
+
+
 static func pickup_full_text(kind: int) -> String:
 	## The free duplicate-capsule receipt. _supply_full gates which kinds can ever
 	## arrive here (today: 6 = triple already owned, 8 = claymores at the cap); the
@@ -8945,13 +8949,13 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			_world_label(_CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), pcol)
+			_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
-			_world_label("MAXED", ppos + Vector2(-15, -25), Color(0.6, 0.6, 0.6))
+			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6))
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= pk["cost"]
@@ -9043,7 +9047,7 @@ func _draw_tanks() -> void:
 				_spr("fx_smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
 					Color(0.5, 0.5, 0.5, 0.5))
 			if (Engine.get_physics_frames() / 14) % 2 == 0:
-				_world_label("LOW FUEL", c + Vector2(-16, -26), CALLOUT_FUEL)
+				_world_label_centered("LOW FUEL", c.x, c.y - 26.0, CALLOUT_FUEL)
 		if t["burning"]:
 			# Vehicle fires burn dirty: dark oily smoke, not the pale dust puff.
 			_spr("fx_smoke", c + Vector2(4, -14), 0.0, 0.5, Color(0.3, 0.28, 0.26, 0.8))
@@ -9470,11 +9474,11 @@ func _draw_enemies() -> void:
 				# on-screen instead of letting it draw above the viewport. The floor is the
 				# label PLATE's top now, not the glyph's: the backing rises above the
 				# baseline, so a bare 10.0 hung it off the top edge.
-				_world_label("ESCAPING!", Vector2(epos.x - 20.0, maxf(epos.y - 18.0, float(Art.fs(8)) + 2.0)), pi_col)
+				_world_label_centered("ESCAPING!", epos.x, maxf(epos.y - 18.0, float(Art.fs(8)) + 2.0), pi_col)
 			else:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
-				_world_label("RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos + Vector2(-26, -18), pi_col)
+				_world_label_centered("RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos.x, epos.y - 18.0, pi_col)
 			Art.arc(self, epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
@@ -9722,7 +9726,7 @@ func _draw_observer() -> void:
 	# _world_label's AA floor clipped the survivable part of the range to a 2% wobble nobody
 	# could see. The "look at me" motion is still there — it just lives entirely in the
 	# reticle above (tr/tcol, which pulse on `tp`), where it costs no legibility.
-	_world_label("SILENCE THE SPOTTER", op + Vector2(-38, -20), CALLOUT_SPOTTER)
+	_world_label_centered("SILENCE THE SPOTTER", op.x, op.y - 20.0, CALLOUT_SPOTTER)
 
 
 func _draw_gunships() -> void:
@@ -9999,6 +10003,17 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 	var off := got.position - want.position
 	Art.text(self, txt, pos + off, sz, Color(col.r, col.g, col.b, a))
 	return off
+
+
+## Centered counterpart to _world_label: `cx` is the CENTER x, not the left origin.
+## Measured at the SAME resolved size the ink draws at (Art.fs(8)) — the callers used to
+## hand-guess a half width baked at the 8px DESIGN size, so every "centered" callout sat
+## off-anchor, and the error GREW with the accessibility TEXT SIZE (Art.fs doubles the
+## glyphs at 200%; a baked -13/-38 does not). Same measure the already-correct downed-timer
+## pair at _draw_players uses. Delegates — the claim still happens once, in _world_label —
+## and returns its claim offset so a companion glyph can ride the same dodge.
+func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color) -> Vector2:
+	return _world_label(txt, Vector2(cx - Art.tw(txt, Art.fs(8)) / 2.0, baseline_y), col)
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
@@ -10613,12 +10628,18 @@ func _draw_players() -> void:
 					# hidden exactly when you're short of it, so "feed the war
 					# chest" had no answer to "with how much?". Warm red, no
 					# pay-from-here dashes (you can't).
-					_world_label("REVIVE %d" % cost, pos + Vector2(-18, -16), Art.safe(Color(1.0, 0.5, 0.4)))
+					_world_label_centered("REVIVE %d" % cost, pos.x, pos.y - 16.0, Art.safe(Color(1.0, 0.5, 0.4)))
 					continue
 				Art.dashed_line(self, pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
-				var roff := _world_label(rtxt, pos + Vector2(-18, -16), Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph(self, "revive", pos + Vector2(24, -19) + roff, 10.0, Color.WHITE, i == 1, bind("revive"))
+				# Label + keycap are ONE centered unit, so the pair is laid out by hand
+				# rather than through _world_label_centered: the glyph has to ride the
+				# label's claim offset (roff), which means it has to be measured off the
+				# same width. Same grammar as the GET UP pair below, with the gap derived
+				# for THIS glyph's 10px size (unit width = rw + 3 gap + 10 glyph).
+				var rw := Art.tw(rtxt, Art.fs(8))
+				var roff := _world_label(rtxt, pos + Vector2(-rw / 2.0 - 6.5, -16), Art.safe(Color(0.5, 1.0, 0.6)))
+				Art.draw_glyph(self, "revive", pos + Vector2(rw / 2.0 + 1.5, -19) + roff, 10.0, Color.WHITE, i == 1, bind("revive"))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
 			# responsive while arrow-key 45° pops still glide instead of snapping.
@@ -10756,7 +10777,8 @@ func _draw_players() -> void:
 					var pi_rel := _to_screen(pe2["x"], pe2["y"]) - pos
 					var pi_along := pi_rel.dot(aim)
 					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
-						_world_label("HOLD FIRE", pos + aim * 27.0 + Vector2(-22, -14), CALLOUT_ALERT)
+						var hfp := pos + aim * 27.0
+						_world_label_centered("HOLD FIRE", hfp.x, hfp.y - 14.0, CALLOUT_ALERT)
 						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
 			# will land if INTERACT fires now — ghost sprite + the 9px trigger
@@ -11826,7 +11848,11 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 		# band_bottom() is SCREEN_BOTTOM in every other frame, so the default y is unchanged.
 		var oy := 40.0 if is_top else minf(350.0, HudIcons.band_bottom(sim))
 		# (The old 0.75 ink alpha is dropped, not floored: it sat under CALLOUT_INK_FLOOR.)
-		_world_label("+%d" % (threats.size() - 6), Vector2(606.0, oy), CALLOUT_OVERFLOW)
+		# Right-flush signage, not centered: the old x=606.0 baked the 8px width of "+N",
+		# so at 200% TEXT SIZE the label ran off the right edge (and got clamped back by
+		# the arbiter onto the chevrons). Measured flush against the 6px margin instead.
+		var otxt := "+%d" % (threats.size() - 6)
+		_world_label(otxt, Vector2(640.0 - 6.0 - Art.tw(otxt, Art.fs(8)), oy), CALLOUT_OVERFLOW)
 
 
 func _draw_objective_markers() -> void:

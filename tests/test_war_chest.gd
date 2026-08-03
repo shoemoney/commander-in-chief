@@ -92,6 +92,30 @@ func test_buy_is_edge_triggered() -> void:
 	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_GRENADE_COST, "held buy purchased once")
 
 
+func test_partial_buy_announces_what_it_delivered() -> void:
+	# The caps clamp, so a grenade buy at 11/12 delivers ONE — and the float text
+	# announced the catalogue "+4 GRENADES" over it. The sim now rides the
+	# delivered count on the buy event (checksum-excluded) and the view formats
+	# from that. One assertion chain binding the sim's number to the printed one.
+	var sim := SimWorld.new(7, 1)
+	sim.war_chest = 500
+	sim.players[0]["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX - 1
+	var buy := SimInput.new()
+	buy.buy = 2   # kind 1 = grenades
+	sim.step([buy])
+	var got := -1
+	for ev in sim.events:
+		if ev.get("t") == "buy":
+			got = int(ev.get("n", -1))
+	Runner.T.eq(got, 1, "the buy event carries the quantity actually delivered, not the catalogue 4")
+	Runner.T.eq(sim.players[0]["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX, "the top-up still landed")
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.eq(ms.call("buy_float_text", 1, got), "+1 GRENADES",
+		"the view prints the delivered count")
+	Runner.T.eq(ms.call("buy_float_text", 2, 1), "FLAK VEST ON",
+		"a kind with no quantity keeps its flat wording")
+
+
 func test_buy_survives_input_wire_roundtrip() -> void:
 	var inp := SimInput.new()
 	inp.buy = 4

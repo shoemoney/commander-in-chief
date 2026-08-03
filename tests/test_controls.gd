@@ -230,6 +230,41 @@ func test_e_aboard_a_tank_is_the_cannon_unless_a_rescue_is_on_the_table() -> voi
 	Runner.T.ok(shift[0], "SHIFT still fires the cannon through a live rescue prompt")
 
 
+func test_the_rescue_a_tank_seat_routes_actually_fires_in_the_sim() -> void:
+	# The sibling above proves ROUTING only and never steps the sim — which is how a
+	# swallowed press shipped green. This is the one-tick execution proof.
+	var sim := SimWorld.new(7, 2, "campaign")
+	sim.step([SimInput.new(), SimInput.new()])
+	var p1: Dictionary = sim.players[0]
+	var p2: Dictionary = sim.players[1]
+	sim.tanks.append({"x": p1["x"], "y": p1["y"], "alive": true, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": 0, "crew_ring_ticks": -1,
+		"fire_cd": 0, "occupant": -1})
+	var board := SimInput.new()
+	board.interact = true
+	sim.step([board, SimInput.new()])
+	Runner.T.ok(p1["in_tank"] >= 0, "setup: P1 is crewing the hull")
+	sim.war_chest = 500
+	sim._kill_player(p2)
+	var cost: int = sim.revive_cost(p2)
+	var chest0: int = sim.war_chest
+	Runner.T.ok(MainScript.revive_context(sim, 0), "setup: the key IS routed to the rescue")
+	var press := SimInput.new()
+	press.revive = true
+	sim.step([press, SimInput.new()])
+	Runner.T.ok(p2["alive"], "an affordable revive from the driver's seat stands the partner up in ONE tick")
+	Runner.T.eq(chest0 - sim.war_chest, cost, "...and the chest paid exactly revive_cost")
+	# ...and a BROKE crew press is loud, not silent.
+	sim._kill_player(p2)
+	sim.war_chest = 0
+	sim.step([press, SimInput.new()])
+	var denied := false
+	for ev in sim.events:
+		if ev.get("t", "") == "revive_deny":
+			denied = true
+	Runner.T.ok(denied, "a broke revive from the tank emits revive_deny instead of a dead key")
+
+
 func test_endless_intermission_gives_e_to_the_ready_up_hold() -> void:
 	# SimWorld._ready_up reads `revive` as HOLD TO DEPLOY EARLY, and the hint already names E.
 	var sim := SimWorld.new(7, 1, "endless")

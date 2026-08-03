@@ -4461,7 +4461,10 @@ func _draw_rebind_header() -> void:
 		sub = "REBIND MENU KEYS - ARROWS/ENTER/ESC ALWAYS WORK TOO (EMERGENCY FALLBACK)"
 		scol = SUBTITLE_COL
 	else:
-		sub = "ENTER: REBIND   TAB: SWITCH TAB   -   MENUS ALWAYS USE ARROWS/ENTER/ESC"
+		# The section key is rebindable (menu_next_tab) — stamp the live cap via
+		# _tab_keycap, the way the rest of this screen already does. ENTER/ARROWS/ESC
+		# stay literal: those are the immutable emergency keys and always work.
+		sub = "ENTER: REBIND   %s: SWITCH TAB   -   MENUS ALWAYS USE ARROWS/ENTER/ESC" % _tab_keycap()
 		scol = SUBTITLE_COL
 	_center_text(sub, 78, 8, scol)
 	# c1-18: on the GAMEPAD tab, the P1|P2 sub-selector — each player has an INDEPENDENT pad
