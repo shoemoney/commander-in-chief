@@ -643,6 +643,18 @@ func _promote_caption() -> void:
 const CAPTION_FADE_FRAMES := 24.0   # 0.4s alpha ramp so the strip DISSOLVES rather than snapping
 
 
+func clear_captions() -> void:
+	## Drop the live caption and the whole pending queue. Called from main._reset() so a run can
+	## never inherit the previous one's backlog. The queue only drains through the DRAW path
+	## (_promote_caption <- active_caption <- hud._draw_caption), and that path returns early
+	## whenever a menu is up or the CAPTIONS setting is off — so with captions disabled the
+	## queue otherwise grows unbounded for the whole session, and toggling them on mid-run
+	## flushes every stale entry one at a time.
+	_cap_text = ""
+	_cap_until = 0
+	_cap_queue.clear()
+
+
 func caption_sfx(key: String) -> void:
 	## accessibility: arm the subtitle strip for a non-speech WARNING cue (see SFX_CAPTIONS).
 	## A no-op for every key that isn't in that table, so main.gd can call it blindly from its

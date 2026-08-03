@@ -1485,6 +1485,7 @@ func start_watch() -> void:
 func _reset() -> void:
 	Art.foliage_march = 0.0   # a1-05 r2: neutral until a gameplay frame feeds the march (no stale leak)
 	_sfx.stop_engines()   # tank-index-keyed loops: the next SimWorld re-binds that index (see Sfx.stop_engines)
+	_sfx.clear_captions()   # a new run never inherits the last one's pending subtitle backlog
 	# Re-arm the water pool's shader push key IN PLACE (it is indexed by pool slot, which outlives
 	# the run — clearing it would index past the end of the pool on the next _sync_water).
 	for wi in _water_pushed.size():
@@ -2273,6 +2274,17 @@ func _consume_events() -> void:
 	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
 	var barrel_pinged := false      # one cook-off boom per tick — a fuse chain emits several
 	var dirt_puffs := 0             # spent-round dust cap per tick — MG spam guard
+	# A Last Stand wipe emits player_down AND wiped into the SAME array on the SAME tick
+	# (sim_world.gd:2167 then :1018 via _latch_wipe), and this loop walks them in emission
+	# order — so the forced "Man down!" bark would fire first and, now that play_vo yields to a
+	# live bark, silently eat "Squad's wiped. Run's over.", the campaign's closing line, 100% of
+	# the time. Resolve it by NOT STARTING the smaller line rather than by interrupting it:
+	# scan ahead one frame's worth of events, and let the run-ender own the beat alone.
+	var wiping_now := false
+	for ev in sim.events:
+		if ev["t"] == "wiped":
+			wiping_now = true
+			break
 	for ev in sim.events:
 		var kind: String = ev["t"]
 		if kind == "pickup":
@@ -2358,8 +2370,16 @@ func _consume_events() -> void:
 			# drone paint, a windup — are the only WARNING the game gives before something hits
 			# you, and the pan that says WHERE is lost on a player who can't hear it at all. Sfx
 			# owns the small caption whitelist and ignores every other kind, so this stays one
-			# unconditional call at the same choke point that decided the sound.
-			_sfx.caption_sfx(kind)
+			# call at the same choke point that decided the sound.
+			# MENU-GATED like its siblings _vo (3369) and _cmd_bark (3383). This was the one
+			# audio-layer path without that gate, and the title screen runs a LIVE attract
+			# firefight — so real strike_warn/sniper_paint/windup events armed LETHAL-tier
+			# captions behind the menu, where the only thing that drains the queue
+			# (Sfx._promote_caption, reached solely from hud._draw_caption) returns early. The
+			# backlog then emptied into the player's real run as phantom warnings for threats
+			# that had already happened to a demo bot.
+			if _menu.mode == GameMenu.Mode.HIDDEN:
+				_sfx.caption_sfx(kind)
 		match kind:
 			"bullet_dirt":
 				# Spent rounds kick dirt (or a splash) where they land — bullets
@@ -2795,7 +2815,11 @@ func _consume_events() -> void:
 				# not wait for the debrief to explain a one-hit loss.
 				if not death_cause.is_empty():
 					_loss_sting(ev, "DOWNED — %s" % death_cause)
-				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
+				# force: the death beat interrupts any "hit" bark just fired above — but NOT when
+				# the run is ending this same tick. "Man down!" is the small line; the wipe call
+				# is the big one, and it loses the channel if this starts first.
+				if not wiping_now:
+					_cmd_bark("down", 0, true)
 				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_button_label(pad_bind_for_glyph("revive")) if Art.use_pad else GameMenu.key_label(bind("revive"))), true)
 				# The two GLOBAL costs of a body — one burned Commendation and the broken clean-gate
 				# streak — used to be taken in total silence, and the token chip simply popped out of
@@ -3163,9 +3187,16 @@ func _consume_events() -> void:
 				show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
 			"victory":
-				_vo("vo_victoly", 3, 6000)
 				_ev_victory(ev)
-				_cmd_bark("victory", 0, true)   # force: the win beat always lands
+				# ONE voice on the win. These two lines are the same sentence — the Spotter's
+				# "Total victoly! Believe me!" (radio-filtered, _vo bus) and the Commander's
+				# "Total victory. Believe me." (dry, UI bus) — and firing both played them
+				# ~0.2s apart on separate buses, so nothing masked the doubling at the biggest
+				# moment in the game. The captions then printed the same words twice, in
+				# sequence, after the audio had finished. The Commander gets it; the Spotter is
+				# the fallback for when the bark pool is missing (a dropped assets/vo/cmd/).
+				if not _cmd_bark("victory", 0, true):
+					_vo("vo_victoly", 3, 6000)
 	_check_enemy_hits()
 
 

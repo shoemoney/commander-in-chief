@@ -166,6 +166,55 @@ func test_boot_audio_stays_silent_until_the_commanders_opening_line_finishes() -
 	sfx.free()
 
 
+func test_the_run_ending_lines_own_their_beat_alone() -> void:
+	# Regression on a regression. Making play_vo yield to a live Commander bark silently ate
+	# the campaign's closing line: a Last Stand wipe emits player_down AND wiped into the same
+	# events array on the same tick, _consume_events walks them in emission order, so the
+	# forced "Man down!" bark started first and vo_wiped (priority 3, the TOP of the ladder)
+	# hit the new yield and was dropped 100% of the time. Fixed by not starting the SMALLER
+	# line — never by interrupting one that is already speaking.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("var wiping_now := false"),
+		"the event loop looks ahead for a wipe latched in this same frame")
+	var down_at := src.find('_cmd_bark("down"')
+	Runner.T.ok(down_at > 0, "the death bark site still exists")
+	Runner.T.ok(src.substr(maxi(down_at - 260, 0), 260).contains("if not wiping_now:"),
+		"the death bark is suppressed on the tick the run ends, so the wipe call is heard")
+	# ONE voice on the win. vo_victoly and the "victory" bark are the same sentence on two
+	# buses; firing both doubled them ~0.2s apart at the biggest moment in the game.
+	# Anchor on the CALL, not on `"victory":` — that string's first hit is the _EVENT_SOUND
+	# table at main.gd:557, which is nowhere near the match arm.
+	var bark_at := src.find('if not _cmd_bark("victory", 0, true):')
+	Runner.T.ok(bark_at > 0,
+		"the win beat fires the Commander, and the Spotter only as a fallback")
+	var vo_at := src.find('_vo("vo_victoly"')
+	Runner.T.ok(vo_at > bark_at,
+		"...with the Spotter line INSIDE that fallback, so the two can never both play")
+
+
+func test_attract_mode_captions_cannot_leak_into_a_real_run() -> void:
+	# caption_sfx was the ONE main->Sfx audio path with no menu gate, while the title screen
+	# runs a live attract firefight. Real strike_warn/sniper_paint/windup events armed
+	# LETHAL-tier captions behind the menu, and the only thing that drains the queue lives in
+	# the draw path, which returns early while a menu is up — so the backlog emptied into the
+	# player's real run as warnings for threats that happened to a demo bot.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var at := src.find("_sfx.caption_sfx(kind)")
+	Runner.T.ok(at > 0, "the caption choke point still exists")
+	Runner.T.ok(src.substr(maxi(at - 200, 0), 200).contains("if _menu.mode == GameMenu.Mode.HIDDEN:"),
+		"caption_sfx is menu-gated like its _vo / _cmd_bark siblings")
+	# ...and a run can never inherit a backlog even if something else queues one.
+	var sfx := Sfx.new()
+	sfx._cap_text = "STALE WARNING"
+	sfx._cap_until = 999999
+	sfx._cap_queue.append({"text": "ALSO STALE", "is_vo": false})
+	sfx.clear_captions()
+	Runner.T.eq(sfx._cap_text, "", "clear_captions drops the live caption")
+	Runner.T.eq(sfx._cap_queue.size(), 0, "...and the whole pending queue")
+	sfx.free()
+	Runner.T.ok(src.contains("_sfx.clear_captions()"), "main._reset() actually calls it")
+
+
 func test_a_radio_line_never_starts_on_top_of_a_commander_bark() -> void:
 	# The two voice channels were mutually UNAWARE in one direction only. play_cmd_bark yields
 	# to a VO of priority >= 2 (sfx.gd, the `_vo_priority >= 2` arm), but play_vo never checked
