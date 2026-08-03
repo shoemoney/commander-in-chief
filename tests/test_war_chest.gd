@@ -171,6 +171,70 @@ func test_self_revive_lands_at_the_checkpoint_partner_revive_at_the_partner() ->
 	Runner.T.ok(p2["y"] > p1["y"], "paying from the floor drops you back at the checkpoint")
 
 
+func test_partner_rescue_lands_on_both_axes_not_just_the_row() -> void:
+	# "At their side" was only ever half true: _try_revive passed Y and _respawn
+	# merely re-clamped X in place, so the rescued partner surfaced on the
+	# reviver's ROW but at the x where they died — up to the full 608px arena
+	# away, which is where whatever killed them still is. The old test pinned Y
+	# only, which is exactly why this stayed green.
+	var sim := SimWorld.new(7, 2)
+	sim.war_chest = 500
+	var p1 := sim.players[0]
+	var p2 := sim.players[1]
+	p1["x"] = SimWorld.WORLD_LEFT + 40 * Fixed.ONE     # rescuer hard against the west wall
+	p2["x"] = SimWorld.WORLD_RIGHT - 40 * Fixed.ONE    # body dies hard against the east wall
+	var apart: int = absi(p2["x"] - p1["x"])
+	Runner.T.ok(apart > 400 * Fixed.ONE, "setup: the corpse really is most of an arena away")
+	sim._kill_player(p2)
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([revive, _idle()])                        # P1 performs the rescue
+	Runner.T.ok(p2["alive"], "setup: the rescue was actually affordable")
+	Runner.T.eq(p2["y"], p1["y"], "a partner rescue puts you back on their row")
+	Runner.T.eq(p2["x"], p1["x"], "...and in their COLUMN — 'at their side' is both axes")
+
+
+func test_solo_self_revive_buys_the_ground_you_died_on() -> void:
+	# Solo, the paid self-revive used to land at _checkpoint_y() — the exact spot
+	# the FREE broke timer delivers you to. The coin bought 5 seconds and nothing
+	# else, and you could not even elect the free path: _step_dead_player arms
+	# that timer only while war_chest < revive_cost, so having money DISABLED it.
+	# Paying must now buy the yardage back.
+	var sim := SimWorld.new(7, 1)
+	sim.war_chest = 500
+	var p := sim.players[0]
+	p["y"] = sim.camera_top + 60 * Fixed.ONE      # died pushed well north of the checkpoint
+	var fell_at_y: int = p["y"]
+	var fell_at_x: int = p["x"]
+	sim._kill_player(p)
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([revive])
+	Runner.T.ok(p["alive"], "the solo body pays its own way back up")
+	Runner.T.eq(p["y"], fell_at_y, "a PAID solo revive stands you up where you fell")
+	Runner.T.eq(p["x"], fell_at_x, "...on the same column too — the corpse never slides")
+	Runner.T.ok(p["y"] < sim._checkpoint_y(),
+		"...which is strictly north of the checkpoint the FREE broke timer gives you")
+
+
+func test_two_players_both_down_still_pay_the_checkpoint_penalty() -> void:
+	# The solo carve-out above must NOT leak into 2P: the checkpoint penalty is
+	# what keeps "wait for the rescue" the better play, and with a partner alive
+	# or merely revivable there is still a rescue to wait for.
+	var sim := SimWorld.new(7, 2)
+	sim.war_chest = 500
+	var p2 := sim.players[1]
+	p2["y"] = sim.camera_top + 60 * Fixed.ONE
+	sim._kill_player(sim.players[0])
+	sim._kill_player(p2)
+	var revive := SimInput.new()
+	revive.revive = true
+	sim.step([_idle(), revive])                   # P2 pays from the floor, P1 also down
+	Runner.T.ok(p2["alive"], "the downed 2P player can still buy their own stand-up")
+	Runner.T.ok(p2["y"] > sim.camera_top + 60 * Fixed.ONE,
+		"2P self-revive still eats the checkpoint penalty — solo's carve-out did not leak")
+
+
 func test_partner_draining_the_chest_arms_the_downed_players_fallback() -> void:
 	# Hard strand: a RICH death arms no timer. The partner then spends the shared
 	# chest, and the body is left with no timer, no affordable revive and nobody

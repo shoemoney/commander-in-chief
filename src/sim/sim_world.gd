@@ -625,6 +625,10 @@ const ROCK_SPACING := 260 * F_ONE
 #   2 ruined wall   40x10  blocks all            (wide mass, narrow lanes)
 #   3 hero wreck    32x24  blocks all, drawn 2x  (a focal silhouette)
 const ROCK_KIND_EXT := [[16, 12, 1], [28, 20, 0], [40, 10, 1], [32, 24, 1]]
+## max(ROCK_KIND_EXT[*][0]) * F_ONE — the bound the bullet scans axis-pre-reject on
+## before paying _rk_solid/_rk_hw. test_combat.gd pins it against the table so a new
+## wider tier can never silently make the reject unsound.
+const ROCK_HALF_W_MAX := 40 * F_ONE
 const COVER_VARIETY_SEG := 2
 # Foundry escape corridor (c2 3v): the crush-radius-26 colossus corners a
 # player against wall-hugging debris. Guarantee a debris-free margin at BOTH
@@ -1484,8 +1488,13 @@ func _step_players(inputs: Array) -> void:
 		# NOTE: _try_board_tank / _try_salvage_hulk MUTATE — they must be evaluated
 		# exactly once, in this order, hence the nested `if` rather than a second
 		# short-circuit chain.
-		if interact_edge and not _try_board_tank(i, p) and not _try_salvage_hulk(p) \
-				and p["claymores"] > 0:
+		if interact_edge and not _try_board_tank(i, p) and not _try_salvage_hulk(p):
+			# The deny used to live INSIDE `and p["claymores"] > 0`, so the loudest
+			# near-miss in the game only spoke to a player carrying the rarest item:
+			# claymores start at 0, drop only from the elite capsule, and are stripped
+			# on every death — i.e. the common case stayed exactly as silent as before
+			# the fix. Golden-safe: the new arm only appends an EXCLUDED event, and
+			# claymores/mines are untouched when the pouch is empty.
 			if _boardable_tank_near(p):
 				# The near-miss board guard was the ONLY refusal on INTERACT that stayed
 				# silent — it reads as "my key randomly did nothing". Say it out loud.
@@ -1494,7 +1503,7 @@ func _step_players(inputs: Array) -> void:
 				# TANK. Reusing it here told the player the opposite of the truth — this
 				# branch is only reachable with in_tank == -1, which the test asserts.
 				events.append({"t": "deny", "why": "board", "x": p["x"], "y": p["y"], "i": i})
-			else:
+			elif p["claymores"] > 0:
 				# Claymore: no tank in reach, so INTERACT plants a carried charge one
 				# step ALONG the aim — into the enemy lane you're already shooting,
 				# clear of your own kiting path (planting behind the aim dropped it
@@ -2029,7 +2038,32 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 		var cost := revive_cost(target)
 		if war_chest >= cost:
 			war_chest -= cost
-			var at_y: int = reviver["y"] if reviver["alive"] else _checkpoint_y()
+			var at_y: int = _checkpoint_y()
+			if reviver["alive"]:
+				# "At their side" is BOTH axes. _respawn only re-clamps x in place, so
+				# passing y alone stood the partner up on the reviver's row but at the
+				# x where they DIED — up to the full 608px arena away (WORLD_LEFT 16 ..
+				# WORLD_RIGHT 624), which in practice is the flank squad or the bunker
+				# that killed them. The chest paid 50-150 for a stripped, vestless body
+				# dropped back into its own killer, on the wrong side of the rescuer.
+				# Written here rather than threaded through _respawn as a parameter so
+				# the broke fallback and the god-mode rally keep the corpse's x
+				# untouched — this is the only path that promises a SIDE.
+				at_y = reviver["y"]
+				target["x"] = reviver["x"]
+			elif is_solo():
+				# Solo self-revive used to land at _checkpoint_y() — the SAME place the
+				# FREE broke timer drops you. So the coin bought exactly one thing over
+				# the free path: skipping BROKE_RESPAWN_TICKS (5 s). And it was not even
+				# a choice: _step_dead_player only arms that timer while
+				# war_chest < revive_cost, so having the money is what DISABLES the free
+				# option. Standing up where you fell gives the purchase the same
+				# "same price, different place" trade 2P already ships — pay to hold the
+				# yardage, or take the free ride and re-walk the sector. The 2P
+				# checkpoint penalty above exists to protect the PARTNER rescue, and
+				# solo has no partner to protect. _kill_player never moves the body, and
+				# _respawn's VEST_IFRAME_TICKS already covers the mercy window.
+				at_y = target["y"]
 			_respawn(target, at_y, cost)
 		else:
 			# The broke fallback is armed by _step_dead_player (one place, re-checked
@@ -2899,6 +2933,14 @@ func _step_bullets() -> void:
 			# Cover eats rounds both ways. Player nests have a physical embrasure,
 			# so firing through the opening is geometry rather than an ownership cheat.
 			for sb in sandbags:
+				# Cheap axis pre-reject, same shape and same warrant as the enemy
+				# scan below: SANDBAG_HALF_W (18) >= SANDBAG_HALF_H (5), so it is an
+				# upper bound on whichever extent _sb_hw returns for either
+				# orientation. Every pair skipped here already failed
+				# `absi(bx - sb["x"]) <= _sb_hw(sb)` — no armor_block is suppressed,
+				# so this is checksum-neutral by construction.
+				if absi(bx - sb["x"]) > SANDBAG_HALF_W:
+					continue
 				if absi(bx - sb["x"]) <= _sb_hw(sb) and absi(by - sb["y"]) <= _sb_hh(sb):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true
@@ -2915,6 +2957,14 @@ func _step_bullets() -> void:
 		if not dead and not rocks.is_empty():
 			for ri in rocks.size():
 				var rk: Dictionary = rocks[ri]
+				# Cheap axis pre-reject BEFORE the two static-func lookups below —
+				# ROCK_HALF_W_MAX is max(ROCK_KIND_EXT[*][0]), so it bounds _rk_hw for
+				# every kind. A pair skipped here already failed
+				# `absi(bx - rk["x"]) <= _rk_hw(rk)`, so no armor_block, no kind-2
+				# crack accrual and no rocks.remove_at is suppressed: checksum-neutral
+				# by construction.
+				if absi(bx - rk["x"]) > ROCK_HALF_W_MAX:
+					continue
 				if not _rk_solid(rk):
 					continue   # bullets pass through grass — it hides, doesn't save
 				if absi(bx - rk["x"]) <= _rk_hw(rk) and absi(by - rk["y"]) <= _rk_hh(rk):
@@ -2948,11 +2998,16 @@ func _step_bullets() -> void:
 				# Bullets pass clean over submerged frogmen — grenades only.
 				if e["alive"] and not e.get("submerged", false) \
 						and _dist_lte(bx, by, e["x"], e["y"], ehr):
-					# Shield: a bullet arriving into the front arc (roughly
+					# Shield: a bullet arriving into the front ~120° arc (roughly
 					# opposite the shieldman's facing-toward-you) is deflected.
-					# The facing is recomputed toward you every tick, so the
-					# answer is explosives or Rend Rounds, never a flank.
-					# Front cone ~120°.
+					# The facing turns toward you at a CAPPED rate
+					# (_turn_shield_toward / SHIELD_TURN_STEP ≈ 1.8°/tick), NOT
+					# instantly — so a committed close-range lateral move really can
+					# earn the rear arc, which is what the view's green rear-safe arc
+					# and the "FLANK OR BLOW IT OPEN" teach card promise. Explosives
+					# and Rend Rounds are the answers at standoff, where you cannot
+					# out-turn him. Do NOT "simplify" this to a snapped facing: that
+					# deletes the archetype's flank verb and makes both cues lie.
 					if e["kind"] == "shield" and _shield_blocks(e, b):
 						# Rend Rounds: the shooter's active buff punches clean through
 						# the front-arc block — otherwise the shield eats the round.
@@ -4137,13 +4192,22 @@ func _step_barrels() -> void:
 
 func _step_spawner() -> void:
 	# Field spawner: pressure from above the screen edge; every 7th is a red
-	# elite. Each opened gate tightens the interval — the campaign's
-	# difficulty ratchet (45 → 24 ticks by gate 4; the final gate only opens
-	# on Colossus death, so gate 4 is the last one the ramp can see).
-	var opened := 0
-	for g in gates:
-		if g["open"]:
-			opened += 1
+	# elite. Each depth step tightens the interval — the campaign's difficulty
+	# ratchet (45 → 24 ticks, floored at depth 4 of the 5 openable gates; the
+	# final gate only opens on Colossus death). Sectors 5-6 therefore escalate
+	# by ROSTER and boss, not by cadence — the old "gate 4 is the last one the
+	# ramp can see" note dates from FINAL_GATE_INDEX == 5 (see :377).
+	#
+	# THIRD CONSUMER of the depth cursor, and the last to get the fix: prices
+	# (_econ_depth) and the roster (_sector_index) both read
+	# maxi(gates_open, _gate_counter - 1) because an Arcade chapter jump primes
+	# _gate_counter WITHOUT opening a gate. Counting only `open` gates here meant
+	# a chapter-6 Arcade start fought the FOUNDRY CORE roster at +125% prices on
+	# the STAGING GROUND curve — 45-tick cadence, 1-in-7 elites — i.e. the mode's
+	# headline feature inverted its own ramp. _step_spawner only runs on the
+	# non-endless branch of step(), so _econ_depth() always takes its gate arm
+	# and returns exactly the number _sector_index already wanted.
+	var opened := _econ_depth()
 	if _spawn_grace > 0:
 		_spawn_grace -= 1
 	var in_opening_lesson := opened == 0 and camera_top > -GATE_SPACING and not hard
@@ -6737,6 +6801,8 @@ func _step_enemy_bullets() -> void:
 		# cover now protects only what stands BEHIND it).
 		if not dead and not sandbags.is_empty():
 			for sb in sandbags:
+				if absi(bx - sb["x"]) > SANDBAG_HALF_W:
+					continue   # same checksum-neutral axis pre-reject as _step_bullets
 				if absi(bx - sb["x"]) <= _sb_hw(sb) and absi(by - sb["y"]) <= _sb_hh(sb):
 					events.append({"t": "armor_block", "x": bx, "y": by})
 					dead = true

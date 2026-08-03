@@ -94,6 +94,9 @@ msgstr "観測兵：「弾切れだ、リロード！」"
 msgid "PILOT: \"Don't leave me out here!\""
 msgstr "パイロット：「こんなところに置いていかないでくれ！」"
 
+msgid "COMMANDER: \"One man can go in and win the war for the USA.\""
+msgstr "指揮官：「たった一人で乗り込んで、アメリカのために戦争に勝てる。」"
+
 msgid "COMMANDER: \"Move out!\""
 msgstr "指揮官：「出発するぞ！」"
 

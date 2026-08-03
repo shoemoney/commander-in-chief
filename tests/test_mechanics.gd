@@ -365,6 +365,38 @@ func test_near_miss_board_tap_denies_out_loud_instead_of_eating_the_key() -> voi
 	Runner.T.ok(denied, "the refusal SAYS so (deny/tank) instead of silently eating the press")
 
 
+func test_near_miss_board_tap_denies_with_an_EMPTY_claymore_pouch() -> void:
+	# The COMMON case, and the one the original fix missed: the deny used to live
+	# inside `and p["claymores"] > 0`, so it only ever spoke to a player carrying
+	# the rarest item in the game. Claymores start at 0, drop only from the elite
+	# capsule, and are stripped on every death — so for most of every run a
+	# near-miss board tap on the strongest pickup in the game was silent. The
+	# sibling test above hands itself a charge on its second line, which is
+	# precisely why the suite never noticed.
+	var sim := SimWorld.new(12, 1)
+	var p := sim.players[0]
+	Runner.T.eq(p["claymores"], 0, "setup: the pouch starts empty, as every run does")
+	sim.step([SimInput.new()])   # let the initial world-stream settle
+	var tx: int = p["x"] + 36 * SimWorld.F_ONE   # > TANK_BOARD_RADIUS (24), < 2x (48)
+	sim.tanks.clear()
+	sim.tanks.append({"x": tx, "y": p["y"], "alive": true, "burning": false,
+		"fuel": 100000, "burn_ticks": 0, "fire_cd": 0, "occupant": -1})
+	var mines0 := sim.mines.size()
+	var inp := SimInput.new()
+	inp.interact = true
+	sim.step([inp])
+	var denied := false
+	for ev in sim.events:
+		if ev.get("t", "") == "deny" and ev.get("why", "") == "board":
+			denied = true
+	Runner.T.ok(denied, "an empty-handed near-miss board tap denies out loud too")
+	Runner.T.eq(p["in_tank"], -1, "sanity: the tank really was out of board reach")
+	# Golden-safe by construction: nothing but an EXCLUDED event was added on this
+	# path — an empty pouch plants nothing and spends nothing.
+	Runner.T.eq(sim.mines.size(), mines0, "and plants nothing it does not have")
+	Runner.T.eq(p["claymores"], 0, "and still costs nothing")
+
+
 func test_smoke_blinds_ranged_fire_but_not_pathing() -> void:
 	# Design-loop iter1: smoke denies the FIRE-COMMIT (windup/paint starts),
 	# never the pathing — blinding _nearest_alive_player wholesale froze the

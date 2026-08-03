@@ -184,10 +184,18 @@ func test_empty_clip_out_of_bash_range_only_dry_fires() -> void:
 	Runner.T.eq(p["fire_cd"], 0, "a whiffed dry-fire does not arm the bash cooldown")
 
 
-func test_ally_revive_snaps_y_to_reviver_keeps_x_and_restores_ammo() -> void:
-	# _try_revive spends the shared War Chest, restores the 1986-rule ammo
-	# reset, and repositions the downed ally onto the reviver's Y line —
-	# but leaves their X exactly where they fell.
+func test_ally_revive_lands_the_partner_at_the_reviver_and_restores_ammo() -> void:
+	# WAS test_ally_revive_snaps_y_to_reviver_keeps_x..., and the old name stated the
+	# defect as if it were the design: "repositions onto the reviver's Y line — but leaves
+	# their X exactly where they fell". "At their side" is BOTH axes. Snapping y alone stood
+	# the partner up on the rescuer's ROW at the x where they DIED — up to the full 608px
+	# arena away (WORLD_LEFT 16 .. WORLD_RIGHT 624), which in practice is the flank squad or
+	# the bunker that just killed them. The chest paid 50-150 to drop a stripped, vestless
+	# body back into its own killer.
+	# Found twice, independently: a round-1 audit lens filed it as a defect, and a skeptic
+	# reviewing an external report used the SAME fact to REJECT a proposed HUD string
+	# ("RALLY P2 TO YOU") as a lie the sim could not honour. Fixing the sim is what makes
+	# that string honest — so this assertion flipping is the point, not a casualty.
 	var sim := SimWorld.new(3, 2, "campaign")
 	var p1 := sim.players[0]
 	var p2 := sim.players[1]
@@ -203,7 +211,9 @@ func test_ally_revive_snaps_y_to_reviver_keeps_x_and_restores_ammo() -> void:
 	Runner.T.ok(p1["alive"], "ally revive brings the partner back")
 	Runner.T.eq(chest0 - sim.war_chest, cost, "revive spent exactly revive_cost from the shared chest")
 	Runner.T.eq(p1["y"], p2["y"], "revived player snaps to the reviver's Y line")
-	Runner.T.eq(p1["x"], x1_before, "revived player's X stays where they fell — only Y snaps")
+	Runner.T.eq(p1["x"], p2["x"], "...and to their X — a rescue puts you at their SIDE, not just their row")
+	Runner.T.ok(p1["x"] != x1_before or p2["x"] == x1_before,
+		"the corpse's x is genuinely abandoned (guards against a vacuous pass when both happen to match)")
 	Runner.T.eq(p1["grenade_ammo"], 4, "death/revive restores a PARTIAL 4 grenades")
 	Runner.T.ok(p1["hurt_iframes"] > 0, "revive grants a post-spawn mercy window")
 
@@ -257,3 +267,40 @@ func test_post_respawn_mercy_window_blocks_immediate_recontact() -> void:
 		if not p["alive"]:
 			break
 	Runner.T.ok(not p["alive"], "contact damage resumes once the mercy window lapses")
+
+
+func test_rock_pre_reject_bound_actually_bounds_every_rock_kind() -> void:
+	# _step_bullets axis-pre-rejects rocks on ROCK_HALF_W_MAX before paying the
+	# two per-pair static-func lookups (_rk_solid + _rk_hw). That is checksum-
+	# neutral ONLY while the constant really is an upper bound on _rk_hw for every
+	# kind — add a wider tier to ROCK_KIND_EXT without bumping it and the scan
+	# starts silently eating armor_blocks and kind-2 crack accrual, with no test
+	# and no engine error to say so. Derived from the table, never restated.
+	var widest := 0
+	for ext in SimWorld.ROCK_KIND_EXT:
+		widest = maxi(widest, int(ext[0]))
+	Runner.T.eq(SimWorld.ROCK_HALF_W_MAX, widest * SimWorld.F_ONE,
+		"ROCK_HALF_W_MAX bounds the widest ROCK_KIND_EXT half-width")
+	Runner.T.ok(SimWorld.SANDBAG_HALF_W >= SimWorld.SANDBAG_HALF_H,
+		"the sandbag scans pre-reject on HALF_W, so it must dominate both orientations")
+	# And the widest tier still blocks at its own edge — the bound is not off by one.
+	var sim := SimWorld.new(3, 1, "campaign")
+	sim.rocks.clear()
+	sim.bullets.clear()
+	var rx: int = sim.players[0]["x"] + 200 * SimWorld.F_ONE
+	var ry: int = sim.players[0]["y"] - 40 * SimWorld.F_ONE
+	sim.rocks.append({"x": rx, "y": ry, "kind": 2})
+	# Stage a REAL bullet: _step_bullets reads b["ttl"] unconditionally (it decrements
+	# before the off-band check), so a hand-rolled dict missing that key aborts the whole
+	# stepper on a bad-key access and every later assertion in this method silently stops
+	# running — which is exactly how this test first "failed" against a correct fix.
+	# Schema mirrors the real fire path at sim_world.gd:4405. `pierce`/`rend` are not
+	# bullet fields at all.
+	sim.bullets.append({"x": rx + widest * SimWorld.F_ONE, "y": ry,
+		"vx": 0, "vy": 0, "ttl": SimWorld.BULLET_TTL_TICKS, "owner": 0})
+	sim._step_bullets()
+	var blocked := false
+	for ev in sim.events:
+		if ev.get("t", "") == "armor_block":
+			blocked = true
+	Runner.T.ok(blocked, "a round exactly on the widest rock's edge is still blocked")

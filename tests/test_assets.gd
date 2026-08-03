@@ -201,8 +201,18 @@ func test_attract_mode_captions_cannot_leak_into_a_real_run() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
 	var at := src.find("_sfx.caption_sfx(kind)")
 	Runner.T.ok(at > 0, "the caption choke point still exists")
-	Runner.T.ok(src.substr(maxi(at - 200, 0), 200).contains("if _menu.mode == GameMenu.Mode.HIDDEN:"),
+	# Pin the PROPERTY, not the exact line. v1 of this required the literal
+	# "if _menu.mode == GameMenu.Mode.HIDDEN:" including the colon, and went red the moment
+	# the gate was correctly STRENGTHENED to also exclude the splash — a ratchet that fights
+	# an improvement is a bad ratchet.
+	var gate := src.substr(maxi(at - 220, 0), 220)
+	Runner.T.ok(gate.contains("_menu.mode == GameMenu.Mode.HIDDEN"),
 		"caption_sfx is menu-gated like its _vo / _cmd_bark siblings")
+	# The splash is the SECOND cover the leak hid behind: _setup_splash sets the menu mode to
+	# HIDDEN so the title does not draw under the opaque overlay, which means a HIDDEN-only
+	# gate passes for all 16 seconds of boot while the sim steps a run nobody can see.
+	Runner.T.ok(gate.contains("_splash_t <= 0.0"),
+		"...and excludes the boot splash, where the menu mode is ALSO HIDDEN")
 	# ...and a run can never inherit a backlog even if something else queues one.
 	var sfx := Sfx.new()
 	sfx._cap_text = "STALE WARNING"

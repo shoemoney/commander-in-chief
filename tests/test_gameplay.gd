@@ -35,6 +35,40 @@ func test_ammo_floor_no_fire_at_zero() -> void:
 	Runner.T.eq(sim.bullets.size(), 0, "no bullets at zero MG ammo")
 
 
+func test_arcade_chapter_jump_ramps_the_spawner_not_just_the_roster_and_prices() -> void:
+	# _step_spawner was the THIRD consumer of the campaign depth cursor and the
+	# last one still counting only OPEN gates. An Arcade chapter jump primes
+	# _gate_counter WITHOUT opening a gate — which prices (_econ_depth) and the
+	# roster (_sector_index) both already account for — so a chapter-6 start
+	# fielded the FOUNDRY CORE roster at +125% prices on the STAGING GROUND
+	# curve: 45-tick cadence, 1-in-7 elites. CHAPTER SELECT inverted its own
+	# ramp: the deeper you picked, the emptier the field and the pricier the shop.
+	var sim := SimWorld.new(5, 1, "arcade")
+	sim.jump_to_chapter(6)
+	# jump_to_chapter(6) primes `_gate_counter = target_gate - 1` = 5, and both depth cursors
+	# read `maxi(opened, _gate_counter - 1)` — _econ_depth here and _sector_index at
+	# sim_world.gd:4319, deliberately the same expression — so chapter 6 lands on depth 4.
+	Runner.T.eq(sim._econ_depth(), 4, "setup: the jump primed depth 4 without opening a gate")
+	var elites := 0
+	# Drain the field every tick so MAX_ENEMIES can never mask the cadence, and
+	# tally elites off the spawns before they go.
+	for _i in 240:
+		sim.step(_inputs(_idle()))
+		for e in sim.enemies:
+			if e["elite"]:
+				elites += 1
+		sim.enemies.clear()
+	# Depth 4 => interval maxi(24, 45 - 4*6) = maxi(24, 21) = 24, so ~10 spawns in 240 ticks.
+	# The bug's depth 0 => interval 45, so ~5. 8 sits cleanly between the two. (The floor of
+	# 24 is why depth 4 and depth 5 give the same cadence — this assertion separates FIXED
+	# from BROKEN, not depth 4 from depth 5.)
+	Runner.T.ok(sim._spawn_counter >= 8,
+		"a chapter-6 Arcade start fights on the DEEP cadence, not the tutorial's 45 ticks")
+	# Depth 4 => elite_every maxi(3, 7 - 4) = 3; the bug's depth 0 => every 7th.
+	Runner.T.ok(elites >= sim._spawn_counter / 4,
+		"...and on the deep elite ratio, not 1-in-7")
+
+
 func test_bullet_kills_rusher() -> void:
 	var sim := SimWorld.new(1, 1)
 	var p := sim.players[0]

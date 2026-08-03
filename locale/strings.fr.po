@@ -93,6 +93,9 @@ msgstr "OBSERVATEUR : « Chargeur vide, rechargez ! »"
 msgid "PILOT: \"Don't leave me out here!\""
 msgstr "PILOTE : « Ne me laissez pas ici ! »"
 
+msgid "COMMANDER: \"One man can go in and win the war for the USA.\""
+msgstr "COMMANDANT : « Un seul homme peut y aller et gagner la guerre pour les USA. »"
+
 msgid "COMMANDER: \"Move out!\""
 msgstr "COMMANDANT : « En avant ! »"
 

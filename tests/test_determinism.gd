@@ -686,13 +686,26 @@ const SEED := 0xDEADBEEF
 ## tutorial bunker's first body, and position-staggers riflemen's initial fire
 ## cooldown. All are intentional hashed timing/state changes; focused mechanics,
 ## Main/attract and menu suites passed before this capture.
+## RE-RECORDED 2026-08-03 (all-loops round 3). Cause: _try_revive now stands a rescued partner
+## up at the reviver's X as well as their Y (sim_world.gd, "at their side is BOTH axes") — the
+## 2P torture presses revive on (t % 53) == 0, so player x genuinely differs from tick ~53 on.
+## Sample 0 is UNCHANGED because it is sampled before the first revive lands; samples 1-5 move.
+## ENDLESS_GOLDEN VERIFIED UNCHANGED: endless never runs _try_revive's alive-reviver path in
+## the scripted stream, and its samples passed untouched in the same run that reddened these.
+## NO RNG DRAW WAS ADDED, REMOVED OR REORDERED — `git diff src/sim/sim_world.gd | grep 'rng\.'`
+## is empty — so this is a state delta at a known tick, not a stream shift, which is why only
+## the later samples moved rather than everything after tick 0. The round's other sim edits are
+## checksum-neutral by construction and the evidence agrees: the two bullet-scan axis
+## pre-rejects are bounded by ROCK_HALF_W_MAX = max(ROCK_KIND_EXT[*][0]) and SANDBAG_HALF_W
+## (both pinned by test_combat.gd), the claymore deny restructure only appends an EXCLUDED
+## event, and _econ_depth's new cursor equals `opened` in continuous play.
 const GOLDEN: Array[int] = [
 	7078001587521190610,
-	8335992288627051147,
-	710253148765224518,
-	2046355779594091142,
-	1182719714934996183,
-	8084572535203066938,
+	7962800053750474964,
+	1395014386491861923,
+	6067163319820255349,
+	4865881766286063995,
+	6591063370946865525,
 ]
 
 

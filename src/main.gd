@@ -156,6 +156,8 @@ var _kick := Vector2.ZERO         # directional screen nudge from firing
 var _blip_streak := 0             # decaying combo counter for kill-blip pitch (audio only)
 var _last_kill_frame := -100
 var _streak_popped := 0           # last sim streak tier the milestone FX fired for (no double-pop)
+var _kill_blip_pitch := 0.0       # per-tick kill-blip gate: pitch of the tick's LAST kill, 0 = none pending
+var _kill_yells := 0              # per-tick death-yell budget (a 20-kill airstrike must not eat all 12 voices)
 var _rumble: Array[float] = [0.0, 0.0]   # pending gamepad vibration this frame, PER PLAYER (device 0/1)
 var _rumble_sharp: Array[bool] = [false, false]   # true = punchy crack (gunfire/melee), false = boomy rumble (blasts)
 var _rumble_on := true            # accessibility: gamepad vibration on/off
@@ -2162,6 +2164,16 @@ func _physics_process(_delta: float) -> void:
 			# _drive_audio stops on pause, so the drums would stay frozen at combat
 			# level behind the menu — ease them to the lull instead.
 			_sfx.set_music_intensity(0.0, 0.0)
+			# The tank engine loops are the LAST continuous voice this branch didn't handle.
+			# They're persistent AudioStreamPlayer2Ds deliberately kept out of the steal pool,
+			# and _update_feel (the only caller of engine_at) never runs on this branch — so a
+			# pause taken next to a tank left it idling at full volume, panned to wherever it was
+			# on the frame you paused, while this same branch squared the camera out from under
+			# it. engine_at's own off-path does the 0.15s fade-and-free (no click), and it is
+			# idempotent once the key is gone; _update_feel re-arms the voice on the first
+			# resumed frame. Position is ignored when `on` is false.
+			for ti in sim.tanks.size():
+				_sfx.engine_at(ti, Vector2.ZERO, false)
 			position = Vector2.ZERO
 			scale = Vector2.ONE
 			rotation = 0.0
@@ -2201,7 +2213,21 @@ func _physics_process(_delta: float) -> void:
 		return
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
-	else:
+	elif not _debrief:
+		# THE RUN-ENDER FREEZE. SimWorld.step() has exactly one of these — `if wiped: return` —
+		# and `victory` never got a counterpart, so killing the Colossus stopped nothing: the
+		# campaign spawner kept trickling fresh rushers in off the top edge, they kept shooting,
+		# mortars already in the air kept whistling and detonating, and the player's always-fire
+		# MG kept hammering, all of it underneath the victory card and the extraction flyover,
+		# indefinitely, until R. Worse, a leftover could still knock you down post-win, and
+		# `player_down`'s FORCED bark stops whatever is on air — cutting the Commander's victory
+		# line off mid-syllable. `_debrief` is the honest predicate: it is the one flag set for
+		# ALL THREE run-enders (victory, wipe, and the last-stand all-down card, which the sim
+		# does not freeze either), and _update_hud sets it at the END of the ending tick, so that
+		# tick still steps and still consumes its own events. The flyover is pure view (_fx +
+		# _cinematic, driven by _update_feel below), so it plays on over a still world — exactly
+		# what a wipe already looks like. The sim-side `if wiped or victory: return` is still the
+		# better home for half of this; it is not this slice's file.
 		var inputs := _gather_inputs()
 		_check_dry_throw(inputs)
 		_check_dry_roll(inputs)
@@ -2274,6 +2300,15 @@ func _consume_events() -> void:
 	var explosion_pinged := false   # one boom per tick — cluster detonations emit up to 5
 	var barrel_pinged := false      # one cook-off boom per tick — a fuse chain emits several
 	var dirt_puffs := 0             # spent-round dust cap per tick — MG spam guard
+	var bag_broke := false          # one burlap crack per tick — the shop barricade drops 12 bags at once
+	# `kill` was the last bulk event with NO gate. _blast() kills every enemy in radius on ONE
+	# tick and a bought airstrike kills EVERY surfaced enemy, so a grenade into a pack fired 5
+	# blips at 5 different pitches in the same millisecond (the streak ladder collapsing into a
+	# chord) plus 5 agony screams, and an airstrike filled all 12 positional voices with
+	# half-clipped yells. Blip is DEFERRED to after the loop so the one that plays carries the
+	# FINAL streak — same "the cluster gets one beat" idiom as explosion_pinged.
+	_kill_blip_pitch = 0.0
+	_kill_yells = 0
 	# A Last Stand wipe emits player_down AND wiped into the SAME array on the SAME tick
 	# (sim_world.gd:2167 then :1018 via _latch_wipe), and this loop walks them in emission
 	# order — so the forced "Man down!" bark would fire first and, now that play_vo yields to a
@@ -2362,10 +2397,17 @@ func _consume_events() -> void:
 			# Any world event that carries coordinates pans/attenuates from where
 			# it happened (a flank alarm tells you WHICH flank); coordinate-less
 			# screen-global beats stay centered on the flat polyphonic player.
-			if ev.has("x") and ev.has("y"):
-				_sfx.play_at(snd[0], _to_screen(ev["x"], ev["y"]), snd[1], snd[2])
-			else:
-				_sfx.play(snd[0], snd[1], snd[2])
+			# The endless shop barricade is TWELVE world sandbags and the sim drops the whole
+			# wall on one tick, so this fired 12 copies of one clip inside a millisecond: not a
+			# crumble, one flat ~21dB-hot crack — and it claimed all 12 positional voices, so the
+			# incoming wave's first shots got their tails stolen. One crack per tick; the dust
+			# puffs in the match block below still run per bag, and 12 puffs DO read as a wall.
+			if kind != "sandbag_break" or not bag_broke:
+				if ev.has("x") and ev.has("y"):
+					_sfx.play_at(snd[0], _to_screen(ev["x"], ev["y"]), snd[1], snd[2])
+				else:
+					_sfx.play(snd[0], snd[1], snd[2])
+			bag_broke = bag_broke or kind == "sandbag_break"
 			# accessibility (deaf/HoH): a handful of these cues — the mortar whistle, the sniper/
 			# drone paint, a windup — are the only WARNING the game gives before something hits
 			# you, and the pan that says WHERE is lost on a player who can't hear it at all. Sfx
@@ -2378,7 +2420,12 @@ func _consume_events() -> void:
 			# (Sfx._promote_caption, reached solely from hud._draw_caption) returns early. The
 			# backlog then emptied into the player's real run as phantom warnings for threats
 			# that had already happened to a demo bot.
-			if _menu.mode == GameMenu.Mode.HIDDEN:
+			# HIDDEN alone is NOT "a real run is on screen": _setup_splash() sets the menu to
+			# HIDDEN to suspend the title under the OPAQUE boot splash (main.gd:688), and nothing
+			# in _physics_process skips the live branch while the splash is up — so for 16 seconds
+			# the sim steps a run the player cannot see, and the old HIDDEN-only gate happily armed
+			# lethal-tier captions for it. Same backlog leak as the attract fix, different cover.
+			if _menu.mode == GameMenu.Mode.HIDDEN and _splash_t <= 0.0:
 				_sfx.caption_sfx(kind)
 		match kind:
 			"bullet_dirt":
@@ -3197,6 +3244,8 @@ func _consume_events() -> void:
 				# the fallback for when the bark pool is missing (a dropped assets/vo/cmd/).
 				if not _cmd_bark("victory", 0, true):
 					_vo("vo_victoly", 3, 6000)
+	if _kill_blip_pitch > 0.0:
+		_sfx.play("kill", -7.0, _kill_blip_pitch)
 	_check_enemy_hits()
 
 
@@ -3747,10 +3796,15 @@ func _ev_kill(ev: Dictionary) -> void:
 	var kill_pitch := 1.0 + minf(0.9, _blip_streak * 0.06)
 	if _blip_streak > 15:
 		kill_pitch = (kill_pitch + minf(0.30, float(_blip_streak - 15) * 0.01)) * randf_range(0.97, 1.03)
-	_sfx.play("kill", -7.0, kill_pitch)
+	# Deferred to the end of _consume_events (see the gate block there): every kill still
+	# advances the streak, but a multi-kill tick gets ONE blip, at the tick's final pitch.
+	_kill_blip_pitch = kill_pitch
 	# Infantry agony yell (Ya Zahra / Ya Hossein bank) — flesh only. Machines
 	# already boom via their own branch; pilots skip the reward path entirely.
-	if not _METAL_KINDS.has(kkind) and kkind != "colossus" and kkind != "broadcast":
+	# Two per tick: a wipe should sound like several men dying, not like the whole
+	# 12-voice positional pool stealing itself into a garbled cough.
+	if not _METAL_KINDS.has(kkind) and kkind != "colossus" and kkind != "broadcast" and _kill_yells < 2:
+		_kill_yells += 1
 		_sfx.play_death_yell(_to_screen(ev["x"], ev["y"]), -6.0)
 	if big:
 		_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
@@ -5742,7 +5796,10 @@ func _update_feel() -> void:
 		# Engine idle (3-vote): persistent positional growl for alive on-screen
 		# tanks; pitch lifts when crewed so boarding audibly changes the engine.
 		var tk_pos := _to_screen(tk["x"], tk["y"])
-		var tk_on: bool = tk["alive"] and tk_pos.y > -40.0 and tk_pos.y < 400.0
+		# `not _debrief`: with the run frozen behind the After-Action card the hull never moves
+		# and never dies, so the growl would idle under the card forever — the same "the audio
+		# never resolves" failure the music/heartbeat fixes in _drive_audio close.
+		var tk_on: bool = tk["alive"] and tk_pos.y > -40.0 and tk_pos.y < 400.0 and not _debrief
 		_sfx.engine_at(ti, tk_pos, tk_on)
 	for h in _hulks:
 		h["t"] = minf(1.0, h["t"] + 0.002)   # ~8s of flame/smolder, then a cold wreck
@@ -5854,6 +5911,15 @@ func _drive_audio() -> void:
 	# so the heartbeat plays alone.
 	if _music_hold > 0:
 		intensity = 0.0
+	# THE RUN IS OVER — the score has to resolve. _drive_audio keeps running behind the
+	# After-Action card (it is `_debrief`, not a GameMenu mode, so _physics_process never takes
+	# the menu branch), and neither run-ender lets `intensity` fall on its own: a wipe FREEZES
+	# the enemy array with everyone who killed you still alive (>=12 in endless pins it at
+	# exactly 0.6 forever), and a victory does the opposite — the campaign spawner keeps
+	# feeding, so the drums SWELL under the win card. Drop to the lull loop + wind and let the
+	# equal-power crossfade do the rest; no player is stopped or restarted, so phase is safe.
+	if sim.wiped or sim.victory or _debrief:
+		intensity = 0.0
 	if _tension > 0.4:
 		intensity = minf(intensity, 0.15)
 	# Last Stand engage: the flag flips once; the radio marks the moment.
@@ -5878,7 +5944,12 @@ func _drive_audio() -> void:
 	_sfx.set_ambience_march(_sector_march(), near_water, in_shop)   # a1-15 + a3-15: biome wind + place beds
 	_sfx.set_concussion(_concussion)
 	# Last-stand dread: desat overlay + lub-dub heartbeat on a ~1s loop.
-	var want := 1.0 if sim.last_stand and not sim.victory else 0.0
+	# `last_stand` is a LATCH (set at colossus engage, never cleared by _latch_wipe), so the
+	# old victory-only carve-out left the campaign's normal LOSING ending thumping a dread
+	# heartbeat — plus a matching pad buzz — once a second, forever, for a character who is
+	# already dead. Excluding the wipe/debrief lets _tension lerp down over ~1.5s, which also
+	# releases the `_tension > 0.4` clamp above so the drums can actually reach the lull.
+	var want := 1.0 if sim.last_stand and not sim.victory and not sim.wiped and not _debrief else 0.0
 	_tension = lerpf(_tension, want, 0.03)
 	if _tension > 0.3 and Engine.get_physics_frames() - _heart_frame > 55:
 		_heart_frame = Engine.get_physics_frames()
@@ -7792,7 +7863,12 @@ func _draw_terrain() -> void:
 			# fallen body reads as floating art.
 			if key != "crater" and key != "corpse_soldier1" and key != "corpse_soldier2":
 				_ground_shadow(Vector2(lx, ly_px), 5.0)
-			_spr(key, Vector2(lx, ly_px), float(hl % 628) / 100.0, 1.0)
+			# Knocked a notch off full white: the scatter props were painting at the same
+			# luminance as the combatants standing on top of them, which is the read problem
+			# the rim-light comments upstream already concede. A flat 0.80 desaturating tint
+			# pushes the litter back a layer without a conditional full-frame wash (which is
+			# exactly what WASH_CAP / centre-clear exist to forbid).
+			_spr(key, Vector2(lx, ly_px), float(hl % 628) / 100.0, 1.0, Color(0.80, 0.80, 0.82))
 
 
 func _in_wbands(wbands: Array, wx: int, wy: int) -> bool:
@@ -10123,20 +10199,20 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# Candidate rows: where it wanted to sit, then alternating down/up in the same 11px
 	# stride the floattext block used, 6 each way. Down first — a callout belongs under
 	# the thing it names, and dropping keeps it out of the sprite it is labelling.
-	var rows: Array[float] = [0.0]
-	for k in 6:
-		rows.append(float(k + 1) * 11.0)
-		rows.append(-float(k + 1) * 11.0)
-	for dy in rows:
+	# (LABEL_ROWS is that ladder, hoisted to a const: it is the same 13 values every call and
+	# was being rebuilt element-by-element on each one, then thrown away on the first iteration
+	# in the common case where row 0 is free.)
+	for dy in LABEL_ROWS:
 		var y: float = rect.position.y + dy
 		if y < min_y or y + h > 360.0:
 			continue                      # off-frame / under-the-band rows are never occupied
 		var cand := Rect2(x, y, w, h)
+		var cg := cand.grow(-0.5)         # invariant across `taken` — was recomputed per rect
 		var clash := false
 		for t in taken:
 			# grow(-0.5) so labels that merely touch at the seam are not called a collision,
 			# matching how the ratchet measures overlap.
-			if cand.grow(-0.5).intersects(t.grow(-0.5)):
+			if cg.intersects(t.grow(-0.5)):
 				clash = true
 				break
 		if not clash:
@@ -10156,6 +10232,13 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 ## backing over the brightest desert row, and below ~0.85 it drops under AA's 4.5:1.
 ## SILENCE THE SPOTTER used to throb down to 0.5, i.e. below legible at the trough.
 const CALLOUT_INK_FLOOR := 0.88
+
+## claim_label_slot's dodge ladder: where the label wanted to sit, then alternating down/up in
+## the 11px stride the floattext stacking block used, 6 rows each way. Down first — a callout
+## belongs UNDER the thing it names, and dropping keeps it out of the sprite it is labelling.
+## Order is load-bearing (the ladder-cap ratchet measures it), so keep it byte-identical.
+const LABEL_ROWS: Array[float] = [0.0, 11.0, -11.0, 22.0, -22.0, 33.0, -33.0,
+	44.0, -44.0, 55.0, -55.0, 66.0, -66.0]
 
 ## The named in-world callout inks, centralized so tests/test_menu_layout.gd's WCAG fixture
 ## measures the EXACT colors _draw uses and can never drift from them. Every one is checked

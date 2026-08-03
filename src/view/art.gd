@@ -5,10 +5,9 @@ extends RefCounted
 ## table, which is the one place kept current. (The tools/bake_sprites*.gd that
 ## once produced the third-party-derived ones are retired to git history: they needed
 ## a scratch bake project that is not in this tree.) Ground tiles, projectiles and FX remain Kenney CC0
-## (kenney.nl). POLYGON_Nature DOES ship tiling terrain PNGs (vendor
-## Ground_Textures/: Grass, Mud, Sand + normals) — swapping the ground is
-## parked on an art-direction call: painterly terrain vs the pixel-integer
-## look. View-layer only; the sim never touches textures.
+## (kenney.nl). Standing rule: no vendored/licensed art may ship in this public repo — owned
+## procedural art (tools/gen_*.py) and the CC0 Kenney base are the only sources. View-layer
+## only; the sim never touches textures.
 ##
 ## VERIFIED non-fits (asset loops: skip): City/Nightclubs/Heist/Gang_Warfare/
 ## Spy_Kit/Racer are off-theme (urban/neon) for this jungle war; War_Map is WWI

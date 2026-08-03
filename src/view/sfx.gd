@@ -26,9 +26,13 @@ const _UI_BUS := {"ui_tick": true, "menu_open": true, "menu_close": true}
 # AUD#4 (audio-identity item): subtitle captions for the VO/bark accessibility strip hud.gd
 # draws. These are descriptive lines, not verbatim transcripts — the mp3s are one-off radio
 # reads / randomized Trump-voiced bark pools with no stored script, so a caption speaks the
-# INTENT of the line, keyed the same way the audio itself is. intro_crawl is deliberately
-# absent: the title-screen crawl already renders its own on-screen scroll text.
+# INTENT of the line, keyed the same way the audio itself is. intro_crawl WAS deliberately
+# absent ("the splash crawl already renders its own scroll text") — true only while _end_splash
+# cut his read with stop_vo(). It doesn't any more: a skip now takes the crawl text away and
+# lets the ~7.4 s read finish over the title screen, so without this entry the one line the
+# whole mix locks down to protect is the one line a caption-dependent player cannot read.
 const _VO_CAPTIONS := {
+	"intro_crawl": "COMMANDER: \"One man can go in and win the war for the USA.\"",
 	"vo_chest_empty": "SPOTTER: \"War chest's empty, no revives!\"",
 	"vo_wiped": "SPOTTER: \"Squad's wiped. Run's over.\"",
 	"vo_last_stand": "SPOTTER: \"This is it, LAST STAND!\"",
@@ -110,6 +114,10 @@ var _vo_priority := -1                  # priority of the line currently on air
 var _cmd := AudioStreamPlayer.new()     # the player Commander's own voice (dry, close-mic — NOT radio)
 var _cmd_barks: Dictionary = {}         # event -> Array[AudioStream]: random Commander bark pool per trigger
 var _cmd_next_frame := 0                # global bark cooldown (physics frames) so combat isn't a monologue
+var _vo_pending: Dictionary = {}        # one-shot priority>=2 line parked behind a live bark (see play_vo)
+const _VO_DEFER_FRAMES := 120           # ~2s: past this a parked state callout is stale, not late
+var _yell_next_frame := 0               # death-bank choke, mirrors main's spawn-shout cooldown
+const _YELL_GAP := 14                   # ~0.23s: one scream per cluster kill, not a chorus
 var _death_yells: Array = []            # infantry agony yells (Ya Zahra / Ya Hossein, MP3 bank)
 var _spawn_shouts: Array = []           # infantry spawn taunts (Marg bar… / Allahu Akbar)
 # opt-loop pass 2: the lazy-load guard cut boot-time synchronous loads, but the first
@@ -219,6 +227,16 @@ func play_startup_line(key: String) -> bool:
 	_vo_dry.stream = _vo_streams[key]
 	if is_inside_tree():
 		_vo_dry.play()
+	# No visual regression while the splash is up: the strip lives on $HUD and the splash is a
+	# CanvasLayer above it. Nothing can preempt it either — every other voice path is still
+	# behind _startup_audio_locked.
+	# ⚠️ HALF A FIX, deliberately: hud._draw_caption returns early on main._menu.is_active()
+	# (hud.gd:1755) and _end_splash opens the TITLE menu, so on a skip this caption is armed
+	# and correct but still not PAINTED. Arming it is the half only Sfx can own — the strip
+	# needs a matching exception in hud.gd for a startup-line caption on the title screen.
+	# Until that lands this is inert, not wrong; do not "clean it up" as unused.
+	if _VO_CAPTIONS.has(key):
+		_arm_caption(_VO_CAPTIONS[key], _vo_dry.stream, false, true, CaptionTier.OBJECTIVE)
 	return true
 
 
@@ -230,6 +248,18 @@ func _on_startup_line_finished() -> void:
 
 func _process(_delta: float) -> void:
 	_poll_mp3_banks()
+	_drain_pending_vo()
+
+
+func _drain_pending_vo() -> void:
+	## Fire the line play_vo parked behind a Commander bark, the moment he stops. Re-entry is
+	## safe: _cmd.playing is false here, so play_vo can't park it a second time.
+	if _vo_pending.is_empty() or _cmd.playing:
+		return
+	var p := _vo_pending
+	_vo_pending = {}
+	if Engine.get_physics_frames() <= int(p["until"]):
+		play_vo(String(p["key"]), int(p["priority"]), bool(p["dry"]))
 
 
 func _ready() -> void:
@@ -458,6 +488,17 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	# _vo caller is already throttled, so the dropped line is a rare flavor/warning repeat —
 	# cheaper than two voices at once, which reads as a bug to anyone listening.
 	if _cmd.playing:
+		# ...but a dropped line is only cheap when the caller will say it again. The three
+		# priority>=2 beats (defeat / Last Stand / the pilot's plea) are one-shot edges —
+		# main.gd latches the edge flag on the very next line, and the throttle stamp is
+		# burned before the call — so a drop loses that line for the whole run, silently.
+		# PARK it instead of interrupting him: the Commander still finishes uninterrupted,
+		# and the beat lands a beat late rather than never. Bounded by _VO_DEFER_FRAMES —
+		# a state callout that can't land within ~2 s is stale, not late, and arriving out
+		# of context is worse than not arriving. Flavor/warning traffic (0-1) still drops.
+		if priority >= 2:
+			_vo_pending = {"key": key, "priority": priority, "dry": dry,
+				"until": Engine.get_physics_frames() + _VO_DEFER_FRAMES}
 		return
 	var ply := _vo_dry if dry else _vo
 	if _vo.playing or _vo_dry.playing:
@@ -472,6 +513,12 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 		else:
 			_fade_then_stop(_vo, false)
 			_vo_dry.stop()
+		# We just STOPPED that line's audio, so its subtitle is now captioning a sentence
+		# nobody will finish hearing. _arm_caption's preempt rule preserves and re-queues a
+		# displaced caption, which is right for caption_sfx (the displaced line is still
+		# playing) and wrong here — it would pop the dead line back on screen seconds later,
+		# after the line that killed it. stop_vo() already purges on the same reasoning.
+		_drop_vo_captions()
 	_vo_priority = priority
 	ply.stream = _vo_streams[key]
 	# Same in-tree guard play_startup_line has carried since boot: AudioStreamPlayer.play()
@@ -482,8 +529,13 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	if is_inside_tree():
 		ply.play()
 	if _VO_CAPTIONS.has(key):
-		var cap_tier := CaptionTier.PLAYER_STATE if priority >= 2 else \
-			(CaptionTier.OBJECTIVE if priority == 1 else CaptionTier.FLAVOR)
+		# The audio ladder has four rungs; the caption tiers collapsed 3 and 2 into one, so a
+		# run-ending line (3) could only QUEUE behind a pilot/denial line (2) whose clip had
+		# already finished — the game's biggest state change arriving after the smaller one.
+		# Give priority 3 its own rung so the caption ladder matches the audio ladder.
+		var cap_tier := CaptionTier.LETHAL if priority >= 3 else \
+			(CaptionTier.PLAYER_STATE if priority == 2 else \
+			(CaptionTier.OBJECTIVE if priority == 1 else CaptionTier.FLAVOR))
 		_arm_caption(_VO_CAPTIONS[key], ply.stream, not dry, true, cap_tier)
 
 
@@ -521,6 +573,13 @@ func stop_vo() -> void:
 	# Gated on _cap_is_vo: a Commander bark can be legitimately playing (and captioned)
 	# AT THE SAME TIME as a VO line (they're separate players/buses) — this must only
 	# blank OUR OWN line, never hide a concurrent bark's caption out from under it.
+	_drop_vo_captions()
+
+
+func _drop_vo_captions() -> void:
+	## Retire every subtitle belonging to a VO line whose audio we just cut (see stop_vo).
+	## Gated on _cap_is_vo: a Commander bark can be legitimately playing (and captioned) AT
+	## THE SAME TIME as a VO line — this must only blank OUR OWN line.
 	if _cap_is_vo:
 		_cap_text = ""
 		_cap_until = 0
@@ -564,6 +623,12 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> bool:
 			return false
 	elif _cmd.playing:
 		_cmd.stop()
+		# Same rule as play_vo's interrupt: the bark we just cut mid-word must not have its
+		# subtitle preserved and re-queued by _arm_caption below, or "COMMANDER: Back in it!"
+		# scrolls past AFTER "Man down!" — captioning a sentence the player never heard.
+		if not _cap_is_vo:
+			_cap_text = ""
+			_cap_until = 0
 	var pool: Array = _cmd_barks[event]
 	_cmd.stream = pool[randi() % pool.size()]
 	if is_inside_tree():
@@ -793,6 +858,18 @@ func play_death_yell(screen_pos: Vector2, vol_db := -5.0) -> void:
 	## Positional agony yell on an infantry kill. The bank loads threaded from boot
 	## (_finish_boot_audio) — this just plays whatever's landed so far; _play_bank_at
 	## no-ops silently on an empty bank (first kill before the load finishes).
+	##
+	## Choked like its sibling: main.gd gates play_spawn_shout behind a ~0.37s cooldown so a
+	## dense cluster gets ONE shout, but the death bank — same full-length human vocals, 2 dB
+	## louder — had no rate gate anywhere. One grenade over five infantry emitted five kill
+	## events in a single _consume_events() pass, so five men screamed the same take in unison,
+	## phase-stacked into one smeared wail, and the 12-voice positional pool they share with
+	## every combat sound stole the tail off the explosion that killed them. The gate lives
+	## HERE rather than at the call site so it holds for any future caller.
+	var f := Engine.get_physics_frames()
+	if f < _yell_next_frame:
+		return
+	_yell_next_frame = f + _YELL_GAP
 	_play_bank_at(_death_yells, screen_pos, vol_db)
 
 
