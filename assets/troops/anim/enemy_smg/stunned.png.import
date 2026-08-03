@@ -3,21 +3,19 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dkhu50fashmq4"
-path.s3tc="res://.godot/imported/stunned.png-9bc330bd5c15589d6c00f910fe24f51e.s3tc.ctex"
-path.etc2="res://.godot/imported/stunned.png-9bc330bd5c15589d6c00f910fe24f51e.etc2.ctex"
+path="res://.godot/imported/stunned.png-9bc330bd5c15589d6c00f910fe24f51e.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc", "etc2_astc"],
-"vram_texture": true
+"vram_texture": false
 }
 
 [deps]
 
 source_file="res://assets/troops/anim/enemy_smg/stunned.png"
-dest_files=["res://.godot/imported/stunned.png-9bc330bd5c15589d6c00f910fe24f51e.s3tc.ctex", "res://.godot/imported/stunned.png-9bc330bd5c15589d6c00f910fe24f51e.etc2.ctex"]
+dest_files=["res://.godot/imported/stunned.png-9bc330bd5c15589d6c00f910fe24f51e.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,4 +37,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

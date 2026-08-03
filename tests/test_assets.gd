@@ -1139,6 +1139,53 @@ func test_sol_import_discipline_and_corner_alpha() -> void:
 			Runner.T.ok(false, "%s.import is readable" % path)
 
 
+func test_anim_and_bullet_sprites_are_lossless() -> void:
+	# Regression guard: all animation frames (player + 5 enemy types) and the 4 bullet cards must import
+	# lossless (compress/mode=0) to preserve cel-edge sharpness. This test enforces the policy across the
+	# entire Art.PLAYER_ANIM and Art.ENEMY_ANIM registries plus the bullet sprites, so a future pose
+	# folder can't land outside the lossless policy silently.
+	var art: Script = load("res://src/view/art.gd")
+	var c: Dictionary = art.get_script_constant_map()
+	var player_anim: Dictionary = c["PLAYER_ANIM"]
+	var enemy_anim: Dictionary = c["ENEMY_ANIM"]
+
+	# Collect all animation sprite paths
+	var anim_paths: Array[String] = []
+	for pose_name in player_anim:
+		var tex: Texture2D = player_anim[pose_name]
+		if tex and tex.resource_path:
+			anim_paths.append(tex.resource_path)
+
+	for enemy_type in enemy_anim:
+		var poses: Dictionary = enemy_anim[enemy_type]
+		for pose_name in poses:
+			var tex: Texture2D = poses[pose_name]
+			if tex and tex.resource_path:
+				anim_paths.append(tex.resource_path)
+
+	# Add the 4 bullet sprites
+	var bullet_paths := [
+		"res://assets/projectiles/bullet_player.png",
+		"res://assets/projectiles/bullet_enemy.png",
+		"res://assets/projectiles/bullet_piercing.png",
+		"res://assets/projectiles/bullet_sniper.png",
+	]
+	anim_paths.append_array(bullet_paths)
+
+	# Check each sprite imports lossless
+	var cf := ConfigFile.new()
+	for path in anim_paths:
+		var import_path := path + ".import"
+		if cf.load(import_path) == OK:
+			var mode: int = int(cf.get_value("params", "compress/mode", -1))
+			Runner.T.eq(mode, 0, "%s imports lossless (compress/mode=0, sol-anim-policy)" % path)
+			var meta: Dictionary = cf.get_value("remap", "metadata", {})
+			Runner.T.ok(not meta.get("vram_texture", false),
+				"%s is not a vram_texture (lossless cel sprites, sol-anim-policy)" % path)
+		else:
+			Runner.T.ok(false, "%s.import is readable" % path)
+
+
 func test_sol_hero_swap_scale_tint_outline() -> void:
 	# sol-03..06: the pale placeholder blob is swapped for the authored infantry set hero (one canonical
 	# class), folded to the ~18px footprint, tinted to POP off green grass (never olive), and stripped
