@@ -2635,3 +2635,109 @@ func test_mast_telegraph_sleeps_with_the_shop() -> void:
 	if end > start:
 		Runner.T.ok(src.substr(start, end - start).contains("intermission_ticks"),
 			"the mast telegraph sleeps while the shop is open — same gate as _step_mast_hazard")
+
+
+# --- R4: the fan's ammo tax is sold as pure upside ---------------------------
+
+func test_fan_ammo_tax_is_disclosed_in_the_hint_copy() -> void:
+	## sim_world.gd charges 1 ammo for the base shot, then an extra fan_cost
+	## on top (1 for a LONE 3-round fan — Trench Gun or Triple alone — 2 for
+	## the STACKED 5-round fan) — so 2 ammo/pull and 3 ammo/pull respectively,
+	## not the "free extra pellets" the old hint copy implied. Prove the
+	## sim's real drain first, then hold the pickup copy to it.
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p := sim.players[0]
+	p["spread_ticks"] = 200
+	var ammo0: int = p["mg_ammo"]
+	var inp := SimInput.new()
+	inp.aim_y = -256
+	inp.fire = true
+	sim.step([inp])
+	Runner.T.eq(ammo0 - p["mg_ammo"], 2, "a lone 3-round fan (Trench Gun or Triple) costs 2 ammo/pull")
+
+	var sim2 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var p2 := sim2.players[0]
+	p2["spread_ticks"] = 200
+	p2["triple"] = true
+	var ammo1: int = p2["mg_ammo"]
+	var inp2 := SimInput.new()
+	inp2.aim_y = -256
+	inp2.fire = true
+	sim2.step([inp2])
+	Runner.T.eq(ammo1 - p2["mg_ammo"], 3, "the stacked 5-round fan costs 3 ammo/pull")
+
+	var src := _view_src()
+	Runner.T.ok(src.contains("2 AMMO A PULL"),
+		"the Trench Gun / Triple Shot hint copy must state the real per-pull ammo cost")
+	Runner.T.ok(src.contains("5 FOR 3"),
+		"the stacked-fan hint copy must state the real 3-ammo cost for the 5-way fan")
+
+
+# --- R4: getting shot boils a second off the tank, and the only feedback said "safe" ---
+
+func test_manned_tank_hit_gets_its_own_cue_not_the_wall_plink() -> void:
+	## Enemy fire hitting a MANNED tank hull is cover too, and the ride PAYS
+	## for it: TANK_HIT_FUEL_COST comes off hk["fuel"] (sim_world.gd
+	## _step_enemy_bullets), but the event fired was the SAME bare
+	## {"t":"armor_block"} every other deflection uses — captioned "[ROUNDS
+	## BOUNCING OFF ARMOR]" at the exact moment the ride is being spent. Same
+	## Main.new()/_consume_events() idiom as the veteran-armor sibling test.
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var stub := Main.new()
+	stub._menu.mode = GameMenu.Mode.HIDDEN
+	stub.sim = sim
+	var tx: int = 100 * Fixed.ONE
+	var ty: int = sim.camera_top + 200 * Fixed.ONE
+	sim.tanks.append({"x": tx, "y": ty, "alive": true, "occupant": 0, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "fire_cd": 0})
+	sim.events = [{"t": "armor_block", "x": tx, "y": ty}]
+	stub._consume_events()
+	var cue := false
+	for fx in stub._fx:
+		if fx.get("kind", "") == "floattext" and String(fx.get("text", "")).contains("-1S"):
+			cue = true
+			break
+	Runner.T.ok(cue, "a manned-hull block must float the -1s fuel cost, not just spark silently")
+	# Negative: an UNMANNED hulk-as-cover block is the ordinary wall grammar —
+	# no crew is paying anything, so no fuel-loss cue should fire.
+	var stub2 := Main.new()
+	stub2._menu.mode = GameMenu.Mode.HIDDEN
+	var sim2 := SimWorld.new(0xC0FFEE, 1, "campaign")
+	stub2.sim = sim2
+	sim2.tanks.append({"x": tx, "y": ty, "alive": true, "occupant": -1, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "fire_cd": 0})
+	sim2.events = [{"t": "armor_block", "x": tx, "y": ty}]
+	stub2._consume_events()
+	var cue2 := false
+	for fx in stub2._fx:
+		if fx.get("kind", "") == "floattext" and String(fx.get("text", "")).contains("-1S"):
+			cue2 = true
+			break
+	Runner.T.ok(not cue2, "an unmanned hulk taking cover fire pays no fuel — it must not get the fuel cue")
+
+
+# --- R4: arena_crack has no visual card -----------------------------------
+
+func test_arena_crack_gets_a_visual_card() -> void:
+	## _crack_bridge_span (sim_world.gd) fires on each gunship HP-third
+	## crossing: a bridge slab the player may be hiding behind disappears and
+	## a new one pops in nearby. The view's response used to be sound-only
+	## (_EVENT_SOUND's "arena_crack" row) — no fx, no decal, no shake, unlike
+	## every sibling geometry-mutation event (rock_crater, lane_seal,
+	## supply_pod, cover_crack all get a full card).
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var stub := Main.new()
+	stub._menu.mode = GameMenu.Mode.HIDDEN
+	stub.sim = sim
+	var cx: int = 150 * Fixed.ONE
+	var cy: int = sim.camera_top + 300 * Fixed.ONE
+	var scorch0: int = stub._scorch.size()
+	sim.events = [{"t": "arena_crack", "x": cx, "y": cy}]
+	stub._consume_events()
+	var tex_card := false
+	for fx in stub._fx:
+		if fx.get("kind", "") == "tex" and fx.get("tex", "") == "fx_groundbreak":
+			tex_card = true
+			break
+	Runner.T.ok(tex_card, "arena_crack must draw the fx_groundbreak card, not fire silently")
+	Runner.T.ok(stub._scorch.size() > scorch0, "arena_crack must leave a permanent scorch like its siblings")
