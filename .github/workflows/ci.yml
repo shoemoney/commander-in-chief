@@ -69,6 +69,10 @@ jobs:
         shell: bash
         run: godot --headless --path . -s res://tools/lint_assets.gd
 
+      - name: Lint i18n string extraction (locale .po sync)
+        shell: bash
+        run: python3 tools/i18n_check.py
+
   # Cross-platform + cross-arch test gate: the deterministic core must produce
   # bit-identical golden checksums on every OS/arch combo the game ships on
   # (test_determinism.gd asserts this). SCRIPT ERROR in the log is a hard fail
