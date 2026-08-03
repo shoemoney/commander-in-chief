@@ -25,7 +25,7 @@ jobs:
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # `shell: bash` is load-bearing: it turns on pipefail. Without it a failed
       # grep here yields an EMPTY version that the setup-godot action then chokes
       # on much later -- exactly how the last CI break went unnoticed for 6 pushes.
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Godot
         uses: chickensoft-games/setup-godot@v2
@@ -88,7 +88,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Godot
         uses: chickensoft-games/setup-godot@v2
@@ -146,7 +146,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Godot (with export templates)
         uses: chickensoft-games/setup-godot@v2
@@ -188,7 +188,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Godot (with export templates)
         uses: chickensoft-games/setup-godot@v2
@@ -237,7 +237,7 @@ jobs:
     timeout-minutes: 20
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Godot
         uses: chickensoft-games/setup-godot@v2
         with:
@@ -262,7 +262,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Godot
         uses: chickensoft-games/setup-godot@v2
         with:
