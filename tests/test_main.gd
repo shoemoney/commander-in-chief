@@ -2453,3 +2453,192 @@ func test_world_labels_never_cover_the_player() -> void:
 		"a signpost under the player dissolves")
 	Runner.T.eq(ms.fork_sign_alpha(sign, [], [Rect2(400, 300, 24, 28)]), 1.0,
 		"a signpost clear of the player stays put")
+
+
+# --- c2 RATCHETS for the round-1 view fixes. Each one guards a bug that shipped GREEN:
+# the suite could not see it because nothing read the real predicate, the real gate, or the
+# real draw order. All three are read out of src/main.gd rather than re-modelled here — a
+# model would have passed on the broken HEAD too. ---
+
+func test_victory_chopper_is_exempt_from_the_offscreen_fx_cull() -> void:
+	# The opt-loop band-cull added to _draw_fx applies an off-screen test to `pos`. `chopper`
+	# does not HAVE a world position: its draw ignores `pos` entirely and re-derives a
+	# left->right sweep, so both spawn sites pass the placeholder anchor (0,0). Under
+	# campaign's receding camera_top that anchor projects ~1000px below the frame after the
+	# first gate, so the victory extraction flyover — the game's final authored beat — was
+	# culled on every single run, with no test able to notice.
+	# The condition is EXECUTED, not grepped: a scrape for the word "chopper" would pass on
+	# a comment, and this file already carries one explaining the exemption.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var fstart := src.find("func _draw_fx()")
+	Runner.T.ok(fstart >= 0, "found _draw_fx()")
+	var anchor := src.find("var pos := _to_screen(fx[\"x\"], fx[\"y\"])", fstart)
+	Runner.T.ok(anchor >= 0, "found the per-entry screen projection the cull tests")
+	if anchor < 0:
+		return
+	var istart := src.find("\n\t\tif ", anchor)
+	var iend := src.find(":\n", istart)
+	Runner.T.ok(istart > anchor and iend > istart, "the cull `if` is the first statement after the projection")
+	if istart < 0 or iend <= istart:
+		return
+	# +6 skips "\n\t\tif "; join the backslash continuation into one expression.
+	var cond := src.substr(istart + 6, iend - istart - 6).replace("\\\n", " ").replace("\t", " ")
+	# Any script CONSTANT the condition leans on (the exempt-kind table is one) is handed in
+	# as a named input — Expression has no instance to resolve them against, and hard-coding
+	# the table here would re-model the very thing under test.
+	var names: Array = ["fx", "pos"]
+	var values: Array = [null, null]
+	var consts := _consts()
+	var idre := RegEx.new()
+	idre.compile("\\b(_?[A-Z][A-Z0-9_]+)\\b")
+	for mm in idre.search_all(cond):
+		var id: String = mm.get_string(1)
+		if consts.has(id) and not names.has(id):
+			names.append(id)
+			values.append(consts[id])
+	var ex := Expression.new()
+	Runner.T.eq(ex.parse(cond, names), OK, "the cull condition parses standalone: %s" % cond)
+	# Reproduce _to_screen exactly for the placeholder anchor under a deep-negative
+	# camera_top (three gates north of the origin — an ordinary mid-campaign camera).
+	var px: float = consts["PX"]
+	var deep_top := -SimWorld.GATE_SPACING * 3
+	var pos := Vector2(roundf(0.0 * px), roundf(float(0 - deep_top) * px))
+	Runner.T.ok(pos.y > 440.0,
+		"the placeholder anchor really does project off the bottom of the frame (y %.0f) — a passing cull here would be vacuous" % pos.y)
+	values[1] = pos
+	values[0] = {"kind": "chopper"}
+	Runner.T.eq(ex.execute(values, null, false), false,
+		"the extraction chopper survives the off-screen fx cull — it is screen-anchored and its world anchor is a placeholder")
+	values[0] = {"kind": "smoke"}
+	Runner.T.eq(ex.execute(values, null, false), true,
+		"...and a genuinely world-anchored kind at the same anchor is still culled — the exemption is narrow, the cull still works")
+
+
+func test_radio_vo_never_fires_over_a_menu() -> void:
+	# The title screen runs a LIVE attract firefight (sim.step + _consume_events), so the
+	# Spotter was calling "LAST STAND!" and "Squad's wiped" over a player who had not pressed
+	# a button — and uncaptioned, because hud.gd suppresses the subtitle strip on any menu.
+	# _cmd_bark had this gate; _vo did not. The gate sits BEFORE the throttle stamp so a
+	# suppressed line does not burn its own cooldown, which is what _vo_last measures here.
+	var m := _fresh_main()
+	m._menu.mode = GameMenu.Mode.TITLE
+	m._vo("last_stand", 3, 240)
+	Runner.T.ok(m._vo_last.is_empty(),
+		"a radio line requested with the title menu up plays nothing and leaves the throttle untouched")
+	m._menu.mode = GameMenu.Mode.HIDDEN
+	m._vo("last_stand", 3, 240)
+	Runner.T.ok(m._vo_last.has("last_stand"),
+		"...and in live play the same call goes through and stamps its throttle — the gate is the menu, not a dead _vo()")
+	m._menu.free()
+	m._sfx.free()
+	m.free()
+
+
+func test_screen_anchored_pass_never_draws_on_a_clobbered_matrix() -> void:
+	# _draw()'s overlay pass installs the shake-cancel matrix once and every callee inherits
+	# it. Two sites silently dropped it: _draw_airstrike_telegraph's `_spr` (which signs off
+	# with draw_set_transform(ZERO, 0, ONE) — a RESET to identity, not a restore) and
+	# _draw_result_panel's gold shine (same bare reset instead of the entrance matrix). So the
+	# plume, the band text, the full-screen vignette and every wash card drew in WORLD space
+	# under a live shake: Rect2(0, 0, SCREEN_W, SCREEN_H) stopped covering the screen and an
+	# unwashed strip opened at the frame edge during the one beat guaranteed to be shaking.
+	# Nothing could see it — the geometry is right, only the matrix under it is wrong — so
+	# this walks the source: after a matrix CLOBBER (a bare identity reset, or a `_spr` call,
+	# which resets on the way out), a screen-anchored function may not draw again until it
+	# re-installs a matrix.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var bodies := _func_bodies(src)
+	Runner.T.ok(bodies.has("_draw"), "found _draw()")
+	# The callee list is DERIVED, not typed, so a new overlay function is covered the day it
+	# is added. One level deep picks up _draw_result_panel through _draw_banners.
+	var region: String = bodies["_draw"]
+	var install := region.rfind("draw_set_transform_matrix(get_transform().affine_inverse())")
+	Runner.T.ok(install >= 0, "_draw() still installs the shake-cancel matrix for its overlay pass")
+	if install < 0:
+		return
+	var names := _callee_names(region.substr(install))
+	for n in names.duplicate():
+		if bodies.has(n):
+			for n2 in _callee_names(bodies[n]):
+				if not names.has(n2):
+					names.append(n2)
+	Runner.T.ok(names.size() >= 7,
+		"scraped the screen-anchored callee set (%d functions) — an empty scrape must not pass silently" % names.size())
+	# The two functions that actually shipped the bug must be IN the scraped set, or the
+	# derivation above has quietly stopped reaching them.
+	Runner.T.ok(names.has("_draw_airstrike_telegraph"), "the airstrike telegraph is in the screen-anchored set")
+	Runner.T.ok(names.has("_draw_result_panel"), "the result panel is in the screen-anchored set (reached via _draw_banners)")
+	var ambient := ["draw_rect(", "draw_texture_rect(", "draw_texture(", "draw_string(",
+		"draw_circle(", "draw_line(", "draw_colored_polygon(", "draw_polyline(", "draw_arc(",
+		"draw_multiline(", "draw_char(", "draw_dashed_line("]
+	var clobbers := 0
+	var draws := 0
+	var bad := 0
+	for n in names:
+		if not bodies.has(n):
+			continue
+		var dirty := ""
+		for raw in bodies[n].split("\n"):
+			var line: String = raw.split("#")[0]
+			if line.contains("draw_set_transform_matrix("):
+				dirty = ""
+			if line.contains("draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)") or _calls_spr(line):
+				dirty = line.strip_edges()
+				clobbers += 1
+				continue
+			for a in ambient:
+				if line.contains(a):
+					draws += 1
+					if dirty != "":
+						bad += 1
+						if bad <= 3:
+							Runner.T.ok(false,
+								"%s draws on a clobbered matrix: `%s` after `%s` with no draw_set_transform_matrix() between"
+									% [n, line.strip_edges(), dirty])
+					break
+	Runner.T.ok(clobbers >= 1 and draws >= 10,
+		"the walk actually saw the overlay pass (%d matrix clobbers, %d ambient draws) — a dead scan must not pass silently"
+			% [clobbers, draws])
+	Runner.T.eq(bad, 0, "every screen-anchored draw runs under the pass's own matrix (%d violations)" % bad)
+
+
+func _func_bodies(src: String) -> Dictionary:
+	## name -> body text, for every top-level `func` in the file. Top-level only: nothing in
+	## main.gd nests one, and a flat split is all the matrix walk needs.
+	var out: Dictionary = {}
+	var cur := ""
+	for line in src.split("\n"):
+		if line.begins_with("func "):
+			var close := line.find("(")
+			cur = line.substr(5, close - 5) if close > 5 else ""
+			if cur != "":
+				out[cur] = ""
+		elif line.begins_with("static func ") or (not line.is_empty() and not line[0] in [" ", "\t", "#"]):
+			cur = ""
+		if cur != "":
+			out[cur] = String(out[cur]) + line + "\n"
+	return out
+
+
+func _callee_names(body: String) -> Array:
+	var out: Array = []
+	var re := RegEx.new()
+	re.compile("\\b(_draw_[a-z_0-9]+)\\(")
+	for mm in re.search_all(body):
+		if not out.has(mm.get_string(1)):
+			out.append(mm.get_string(1))
+	return out
+
+
+func _calls_spr(line: String) -> bool:
+	## `_spr` / `_spr_texture` end in draw_set_transform(ZERO, 0, ONE), so calling one is a
+	## matrix clobber even though the call site never names a transform.
+	var i := line.find("_spr")
+	while i >= 0:
+		var before := line[i - 1] if i > 0 else " "
+		if not (before == "." or before == "_" or before.is_valid_identifier()):
+			var rest := line.substr(i)
+			if rest.begins_with("_spr(") or rest.begins_with("_spr_texture("):
+				return true
+		i = line.find("_spr", i + 1)
+	return false

@@ -57,6 +57,11 @@ class _StubMain extends Node2D:
 	func start_arcade(gate: int) -> void: _starts.append(["arcade", gate])
 	func start_watch() -> void: _starts.append(["watch"])
 	func bind_for_glyph(a: String) -> int: return bind(a)
+	# Pad twin of the above — menu.gd's _emit_glyph now reads the LIVE pad binding so a
+	# rebound face button shows the button the player actually bound. Mirrors main.gd:4391
+	# including the wheel->buy alias; _pad_binds is the per-device fixture below.
+	func pad_bind_for_glyph(a: String, device := 0) -> int:
+		return pad_bind("buy" if a == "wheel" else a, device)
 	var _life_runs := 0
 	var _two_players := false
 	var _hard := false
@@ -1975,6 +1980,43 @@ func test_hall_tab_click_selects_each_rect() -> void:
 	stub.free()
 
 
+# c2 RATCHET for the round-1 tab fix: the hit rect must CONTAIN the plate it looks like.
+# _tab_rects_for shipped a hand-typed `Rect2(x - 4.0, 52.0, tw + 8.0, 20.0)` left behind when
+# the tab row dropped to TAB_PLATE_Y 64 — hit box y52..72 against a plate drawn at y64..80, so
+# the bottom half of every tab plate, its ink and its underline were dead while 12px of air
+# over the screen title was live. The click test ABOVE was green through all of it, because it
+# clicks each rect's OWN centre, which is inside the rect by construction whatever the rect is.
+# Containment against the DRAWN geometry is the only assertion that can see it, so it is
+# measured off the same constants _draw_hall/_draw_howto paint from: plate at TAB_PLATE_Y,
+# 16px tall, plus the 2px selected underline directly under it.
+func test_tab_hit_rect_contains_its_drawn_plate() -> void:
+	var stub := _StubMain.new()
+	var m := _hall_menu_headless(stub)
+	var plate_top: float = Menu.TAB_PLATE_Y
+	var plate_bottom: float = Menu.TAB_PLATE_Y + 18.0   # 16px plate + the 2px live underline
+	# Both content screens route through _tab_rects_for, so both are pinned — a future
+	# divergence between them is exactly the kind of drift this guards.
+	for pair in [["HALL", m._hall_tab_rects()], ["HOWTO", m._howto_tab_rects()]]:
+		var which: String = pair[0]
+		var rects: Array = pair[1]
+		Runner.T.ok(rects.size() >= 2,
+			"%s has a real tab row (%d tabs) — an empty rect list must not pass silently" % [which, rects.size()])
+		for i in rects.size():
+			var r: Rect2 = rects[i]
+			Runner.T.ok(r.position.y <= plate_top,
+				"%s tab %d: hit top %.0f covers the drawn plate top %.0f" % [which, i, r.position.y, plate_top])
+			Runner.T.ok(r.end.y >= plate_bottom,
+				"%s tab %d: hit bottom %.0f covers the plate + underline bottom %.0f"
+					% [which, i, r.end.y, plate_bottom])
+			# ...and the other end: the rect must not swallow the screen title's line. A live
+			# click strip over "HALL OF FAME" is what the stale 52.0 actually shipped.
+			Runner.T.ok(r.position.y > Menu.CONTENT_TITLE_Y,
+				"%s tab %d: hit top %.0f stays below the content title baseline %.0f"
+					% [which, i, r.position.y, Menu.CONTENT_TITLE_Y])
+	m.free()
+	stub.free()
+
+
 # c1-05: hover feedback fed END-TO-END through _unhandled_input's mouse-motion path.
 # Real motion over a non-selected tab sets _tab_hover; motion clear of the tab row
 # drops it so no stale highlight lingers.
@@ -2351,6 +2393,66 @@ func test_hall_footer_layout_and_latest_visibility() -> void:
 	Runner.T.eq(Menu.hall_latest_dir(idx, m._hall_page, Menu.HALL_PAGE_ROWS), 1, "the off-page marker points NEXT toward the latest run's later page")
 	m.free()
 	stub.free()
+
+
+# c2 RATCHET for the round-1 PREV/NEXT fix: a button's label has to be INSIDE the button.
+# The test above pins where the page BUTTONS sit; the ink drawn in them was on a separate
+# hand-typed baseline (`var ay := 302.0`) that survived the BOTTOM_BOUND 310 -> 300 move.
+# The rects went to y278..294 and the words stayed at baseline 302, so both labels drew
+# entirely OUTSIDE the plates they name and the BACK plate painted over their bottom rows —
+# with every footer-geometry assertion still green, because none of them looked at the ink.
+# Measured off the same constants _draw_hall draws from (arrow apex..base at ay-6..ay-1,
+# word on baseline ay at size 9), so a future baseline edit that leaves the plate behind
+# fails here instead of shipping.
+func test_hall_page_button_label_ink_sits_inside_its_button() -> void:
+	var f := Art.font()
+	# Read the baseline OUT OF THE DRAW, not off the constant. Asserting against
+	# HALL_PAGE_LABEL_Y passes on the broken HEAD — the constant was correct, the draw simply
+	# didn't use it — which is the whole shape of the bug and of the green-but-wrong trap.
+	var src := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	var block := src.find("var plbl := [\"PREV\", \"NEXT\"]")
+	Runner.T.ok(block >= 0, "found the PREV/NEXT draw block")
+	if block < 0:
+		return
+	var astart := src.find("var ay := ", block)
+	var aend := src.find("\n", astart)
+	Runner.T.ok(astart > block and aend > astart, "the label block still names its baseline `var ay`")
+	if astart < 0 or aend <= astart:
+		return
+	var aexpr := src.substr(astart + 10, aend - astart - 10).split("#")[0].strip_edges()
+	# Constants the baseline is derived from are handed in as named inputs (Expression has no
+	# instance to resolve them against).
+	var consts: Dictionary = load("res://src/view/menu.gd").get_script_constant_map()
+	var inames: Array = []
+	var ivals: Array = []
+	var idre := RegEx.new()
+	idre.compile("\\b(_?[A-Z][A-Z0-9_]+)\\b")
+	for mm in idre.search_all(aexpr):
+		var id: String = mm.get_string(1)
+		if consts.has(id) and not inames.has(id):
+			inames.append(id)
+			ivals.append(consts[id])
+	var ex := Expression.new()
+	Runner.T.eq(ex.parse(aexpr, inames), OK, "the drawn baseline parses standalone: %s" % aexpr)
+	var ay := float(ex.execute(ivals, null, false))
+	Runner.T.ok(not ex.has_execute_failed(), "the drawn baseline evaluates: %s" % aexpr)
+	var rects: Array[Rect2] = Menu.hall_page_rects()
+	Runner.T.eq(rects.size(), 2, "PREV and NEXT are the two paging buttons")
+	var labels := ["PREV", "NEXT"]
+	for i in rects.size():
+		var r: Rect2 = rects[i]
+		# The word: Art.text takes a BASELINE, and its own capture box is pos - (0, ascent)
+		# by get_string_size().y — measure the ink the same way it does.
+		var ink_top := ay - f.get_ascent(9)
+		var ink_bottom := ink_top + f.get_string_size(labels[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 9).y
+		Runner.T.ok(ink_top >= r.position.y,
+			"%s ink top %.0f is inside its button (top %.0f)" % [labels[i], ink_top, r.position.y])
+		Runner.T.ok(ink_bottom <= r.end.y,
+			"%s ink bottom %.0f is inside its button (bottom %.0f)" % [labels[i], ink_bottom, r.end.y])
+		# ...and the triangle that shares the baseline — the primary axis cue.
+		Runner.T.ok(ay - 6.0 >= r.position.y and ay - 1.0 <= r.end.y,
+			"%s arrow glyph (%.0f..%.0f) is inside its button (%.0f..%.0f)"
+				% [labels[i], ay - 6.0, ay - 1.0, r.position.y, r.end.y])
 
 
 # c1-13 (attempt 3): the paged-away marker direction — once the player pages off the

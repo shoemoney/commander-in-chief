@@ -39,6 +39,9 @@ msgstr "フルスクリーン：ウィンドウではなく画面全体を使用
 msgid "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY."
 msgstr "ウィンドウスケール：フルスクリーン以外のウィンドウサイズ。自動保存されます。"
 
+msgid "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVED AUTOMATICALLY."
+msgstr "文字サイズ：画面上の小さなラベルと字幕を拡大します。自動保存されます。"
+
 msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
 msgstr "協力プレイ：2人目のローカルプレイヤーを追加。次回プレイから適用。"
 
@@ -97,26 +100,8 @@ msgstr "指揮官：「出発するぞ！」"
 msgid "COMMANDER: \"Rally to me!\""
 msgstr "指揮官：「集合だ！」"
 
-msgid "COMMANDER: \"That's how it's done!\""
-msgstr "指揮官：「よくやった！」"
-
-msgid "COMMANDER: \"Take 'em out!\""
-msgstr "指揮官：「やっちまえ！」"
-
-msgid "COMMANDER: \"Frag out!\""
-msgstr "指揮官：「手榴弾、投下！」"
-
-msgid "COMMANDER: \"Fire and fury!\""
-msgstr "指揮官：「炎と怒りだ！」"
-
-msgid "COMMANDER: \"Good, good.\""
-msgstr "指揮官：「よし、よし。」"
-
 msgid "COMMANDER: \"Man down!\""
 msgstr "指揮官：「味方が倒れた！」"
-
-msgid "COMMANDER: \"Ugh!\""
-msgstr "指揮官：「うげっ！」"
 
 msgid "COMMANDER: \"Total victory. Believe me.\""
 msgstr "指揮官：「完全勝利。信じてくれ。」"
@@ -136,8 +121,8 @@ msgstr "トリプルショット—死亡まで有効な3発扇形。スプレ�
 msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
 msgstr "引裂弾—重機銃が機動隊の盾を貫通する"
 
-msgid "SMOKE — BLOCKS THEIR AIM, NOT THEIR CHARGE. KEEP MOVING"
-msgstr "スモーク—照準を遮るが突進は止めない。動き続けろ"
+msgid "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING"
+msgstr "スモーク — 敵の照準を封じる。砲弾は盲撃ちで落ちてくる。動き続けろ"
 
 msgid "FLASHBANG — INFANTRY STUNNED. PUSH!"
 msgstr "フラッシュバング—歩兵をしびれさせた。進め！"
@@ -172,6 +157,9 @@ msgstr "戦死"
 msgid "BAIL OUT! %ds"
 msgstr "脱出せよ！残り%d秒"
 
+msgid "CREW HIT! %ds"
+msgstr "乗員被弾！%ds"
+
 msgid "ROLL"
 msgstr "ロール"
 
@@ -180,9 +168,6 @@ msgstr "手榴弾"
 
 msgid "SUPPLY WHEEL"
 msgstr "補給ホイール"
-
-msgid "REVIVE"
-msgstr "蘇生"
 
 msgid "SELECT"
 msgstr "決定"
@@ -193,3 +178,15 @@ msgstr "戻る"
 
 msgid "HELD THROW — POPS AT THE ARC. TAP [%s] TO LOB IT FAR"
 msgstr "長押し投擲 — 弧の頂点で炸裂。[%s]を素早く押すと遠くへ飛ぶ"
+
+msgid "FORD WASHING OUT"
+msgstr "渡河点が流されていく"
+
+msgid "HOLD [%s] TO DEPLOY EARLY"
+msgstr "[%s]長押しで早期展開"
+
+msgid "VETERAN ARMOR — BULLETS CHIP IT. GRENADES STILL ONE-SHOT"
+msgstr "ベテラン装甲 — 銃弾では削るだけ。手榴弾なら今も一撃"
+
+msgid "YOU'RE STALLING — PUSH NORTH OR MORTARS ZERO IN"
+msgstr "足が止まっている — 北へ押せ、さもなくば迫撃砲に狙われる"

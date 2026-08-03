@@ -2308,7 +2308,7 @@ func _consume_events() -> void:
 					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN UNTIL DEATH. STACK SPREAD FOR A 5-WAY FAN")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
-						% (Art.pad_label("interact") if Art.use_pad else GameMenu.key_label(bind("interact"))))
+						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
 					9: _hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")
 					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
 				_trauma = minf(1.0, _trauma + 0.12)
@@ -2438,7 +2438,7 @@ func _consume_events() -> void:
 						# stamp: grenade moved SHIFT->E, and a stamped key would have lied about it
 						# (and about every rebind) exactly like the old one did.
 						_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
-							% (Art.pad_label("grenade") if Art.use_pad else GameMenu.key_label(bind("grenade"))))
+							% (Art.pad_button_label(pad_bind_for_glyph("grenade")) if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 				if not armor_pinged:
 					armor_pinged = true
 					# juice pass: the ricochet threw sparks but cast no light — a
@@ -2675,6 +2675,22 @@ func _consume_events() -> void:
 			"ford_open":
 				# It settles back — a light spray so the reopen reads without a klaxon.
 				_burst(ev["x"], ev["y"], "splash", 4, 0.7, 1.6, 0.3)
+			"frogman_surface":
+				# "A hidden one-hit-kill unit just became real, next to you" shipped
+				# AUDIO-ONLY: the sound pick below plus a swapped sprite key, nothing
+				# else. A round hitting sand (bullet_dirt) gets two motes and a light
+				# pool. It isn't in sfx.gd's caption whitelist either, so a deaf player
+				# got a few different pixels. Same wet/dry predicate _surface_cue uses
+				# for the timbre, so the picture and the sound finally agree — three of
+				# the five emitting sites are dry ground.
+				var fs_wet: bool = sim._in_water(ev["x"], ev["y"])
+				_burst(ev["x"], ev["y"], "splash" if fs_wet else "dust", 6, 0.9, 2.2, 0.4, 0.0, -0.5)
+				if fs_wet:
+					_water_splash = {"x": ev["x"], "y": ev["y"], "t": 1.0}
+			"technical_stall":
+				# Sibling of the above: it plays the splash VOICE (_EVENT_SOUND) at a
+				# bank with no splash on screen. Wheels don't swim — show the water.
+				_burst(ev["x"], ev["y"], "splash", 5, 0.8, 1.8, 0.4)
 			"cover_burn":
 				# c3 5v: grass burns off under a vent jet — a puff of ash + a scorch.
 				_burst(ev["x"], ev["y"], "ember", 6, 0.8, 2.0, 0.5, 0.05, 1.0, false,
@@ -2772,7 +2788,7 @@ func _consume_events() -> void:
 				if not death_cause.is_empty():
 					_loss_sting(ev, "DOWNED — %s" % death_cause)
 				_cmd_bark("down", 0, true)   # force: the death beat interrupts any "hit" bark just fired above
-				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_label("revive") if Art.use_pad else GameMenu.key_label(bind("revive"))), true)
+				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_button_label(pad_bind_for_glyph("revive")) if Art.use_pad else GameMenu.key_label(bind("revive"))), true)
 				# The two GLOBAL costs of a body — one burned Commendation and the broken clean-gate
 				# streak — used to be taken in total silence, and the token chip simply popped out of
 				# the head bar. Sting them HERE, at the body, which is where the sim takes them. (The
@@ -2930,6 +2946,21 @@ func _consume_events() -> void:
 				# sound (main.gd:398) but no visual. Reuse the burst/scorch pattern.
 				_burst(ev["x"], ev["y"], "dust", 7, 1.2, 2.4, 0.5)
 				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(9.0, 13.0)})
+			"tank_board":
+				# Boarding is the biggest power-state flip a player can make on foot —
+				# it turns _exposed() off and hands over crush kills and the main gun —
+				# and it shipped with ONE channel (the mount clunk in _EVENT_SOUND).
+				# The PASSENGER got two (sound + "GUNNER UP" below), as did the +2-grenade
+				# hulk salvage. Same mount grammar as sandbag_plant/tank_crew: tread dust,
+				# the tank-blue callout, and a short punch so the hull has weight.
+				_burst(ev["x"], ev["y"], "dust", 6, 0.8, 1.8, 0.4)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "ARMOR UP", "col": Color(0.7, 0.9, 1.0)})
+				_trauma = minf(1.0, _trauma + 0.14)
+				_hitstop_frames = maxi(_hitstop_frames, 2)
+				# -1 (both pads): the sim event carries no player index, so the buzz can't
+				# be aimed at the driver's seat alone. Rounder rumble = a mount, not a hit.
+				_buzz(0.5, -1, false)
 			"tank_crew":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "GUNNER UP", "col": Color(0.7, 0.9, 1.0)})
@@ -3008,6 +3039,23 @@ func _consume_events() -> void:
 				# extra pressure lands with no tell.
 				var mod_name: String = mod_names[ev.get("mod", 0)] + mod_names[ev.get("mod2", 0)]
 				show_banner("WAVE %d%s" % [sim.wave, mod_name])
+				# A codename is not a rule. BLITZ and FRENZY look identical to the eye
+				# (more pressure, arriving) and demand OPPOSITE play — kill faster vs
+				# stop kiting, you cannot outrun +40% — and nothing on screen or in the
+				# field manual ever converted a name into its rule. Each active mutator
+				# now gets its own follow-up banner stating what it actually does; a
+				# separate banner per mod (rather than one fat string) is what keeps
+				# wave 15+'s STACKED pair inside BANNER_MAX_W without shrinking to 8px.
+				# The HUD chip stays at the bare codename — the chip is the reminder,
+				# this is the teach. Copy only; the rules themselves are sim-side.
+				var mod_rules: Array[String] = ["",
+					"BLITZ — SPAWNS TWICE AS FAST", "ELITE GUARD — EVERY SPAWN IS ELITE",
+					"SPOTTER — MORTAR OBSERVER ON FIELD", "PAYDAY — DOUBLE BOUNTY",
+					"NIGHT OPS — LOW LIGHT", "FRENZY — SWARM MOVES 40% FASTER",
+					"MARKSMEN — RANGED SPECIALISTS", "BOMBARDMENT — GRENADIERS AND SAPPERS"]
+				for mi in [int(ev.get("mod", 0)), int(ev.get("mod2", 0))]:
+					if mi > 0:
+						show_banner(mod_rules[mi], GameMenu.BANNER_COL_ALERT)
 				# Veteran armor is the curve's only UNBOUNDED term (endless wave 13+,
 				# +1 bullet per body every 6 waves) and shipped with no tell — the
 				# wave your gun stopped killing read identical to every other wave.
@@ -3036,7 +3084,7 @@ func _consume_events() -> void:
 				# The ready-up is only a mechanic if it's discoverable: the banner that
 				# already announces the shop teaches the skip on the same breath.
 				show_banner(TranslationServer.translate("WAVE CLEARED — SHOP OPEN · HOLD [%s] TO DEPLOY")
-					% (Art.pad_label("revive") if Art.use_pad else GameMenu.key_label(bind("revive"))))
+					% (Art.pad_button_label(pad_bind_for_glyph("revive")) if Art.use_pad else GameMenu.key_label(bind("revive"))))
 			"wave_ready":
 				show_banner("READY UP — DEPLOYING")
 				_sfx.play("wave_clear", -4.0, 1.3)
@@ -3350,7 +3398,7 @@ func _ev_explosion(ev: Dictionary) -> void:
 		# early?") — convert it into the lesson through the persisted one-shot
 		# hint seam: HOLD pops at the arc, TAP lobs the full throw.
 		_hint("airburst", TranslationServer.translate("HELD THROW — POPS AT THE ARC. TAP [%s] TO LOB IT FAR")
-			% (Art.pad_label("grenade") if Art.use_pad else GameMenu.key_label(bind("grenade"))))
+			% (Art.pad_button_label(pad_bind_for_glyph("grenade")) if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 	if not barrel:
 		var prox := _blast_prox(ev["x"], ev["y"])
 		_trauma = minf(1.0, _trauma + 0.35 * prox)
@@ -4338,6 +4386,12 @@ func pad_bind(action: String, device := 0) -> int:
 	return int(_pad_binds[device].get(action, PAD_DEFAULTS.get(action, -1)))
 
 
+# The pad sibling of bind_for_glyph — same "wheel" -> "buy" alias, so a glyph/hint drawn
+# from a dynamic action string shows the live PAD binding instead of the ship default.
+func pad_bind_for_glyph(action: String, device := 0) -> int:
+	return pad_bind("buy" if action == "wheel" else action, device)
+
+
 # c1-18: the physical keycode a rebindable MENU-navigation action is bound to (the menu
 # reads this ADDITIVELY over its immutable hardcoded keys). 0 == UNBOUND.
 func menu_bind(action: String) -> int:
@@ -5122,17 +5176,17 @@ func _track_bests() -> void:
 	# Supply-wheel discoverability: the first time the chest can afford the
 	# cheapest buy, nudge the player toward the hold-to-open wheel.
 	if sim.war_chest >= SimWorld.SHOP_AMMO_COST:
-		_hint("supply", TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % (Art.pad_label("wheel") if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
+		_hint("supply", TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % (Art.pad_button_label(pad_bind_for_glyph("wheel")) if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
 	# The intermission can be called early — teach the ready-up hold the first
 	# time a shop window is actually open (the only place it does anything).
 	if sim.mode == "endless" and sim.intermission_ticks > 0:
 		_hint("wave_ready", TranslationServer.translate("HOLD [%s] TO DEPLOY EARLY")
-			% (Art.pad_label("revive") if Art.use_pad else GameMenu.key_label(bind("revive"))))
+			% (Art.pad_button_label(pad_bind_for_glyph("revive")) if Art.use_pad else GameMenu.key_label(bind("revive"))))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
 	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
 		_hint("airstrike_wheel", TranslationServer.translate("AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]")
-			% (Art.pad_label("wheel") if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
+			% (Art.pad_button_label(pad_bind_for_glyph("wheel")) if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
 	# with no rescue coming (last stand, or broke with no chest).
 	if not sim._all_players_down():
@@ -6134,7 +6188,17 @@ func _gather_inputs() -> Array[SimInput]:
 		ky = pad_move.y
 	# Aim priority: pad stick > arrow keys > mouse. The mouse always has a
 	# position, so it's the fallback that makes keyboard play feel twin-stick.
-	if ax == 0.0 and ay == 0.0 and sim.players[0]["alive"]:
+	# ...and that "always has a position" is exactly why it must be DEVICE-GATED.
+	# pad_aim has a 0.25 deadzone, so the instant a pad player's right thumb
+	# relaxed, this filled ax/ay from an absolute screen point nothing pins or
+	# warps — and with the MG on always-fire the gun whipped off-target and kept
+	# shooting at wherever the OS cursor was parked, swinging as the player walked.
+	# Art.use_pad is the last-used-device flag _unhandled_input already maintains,
+	# so a hybrid player gets mouse aim back the moment they touch the mouse.
+	# With the fallback skipped the view sends aim 0 and the sim HOLDS the last aim
+	# (it only writes aim_x/aim_y above a quarter-unit input) — which is what P2,
+	# pad-only with no mouse arm, has always done.
+	if ax == 0.0 and ay == 0.0 and not Art.use_pad and sim.players[0]["alive"]:
 		var to_mouse := get_local_mouse_position() \
 			- _to_screen(sim.players[0]["x"], sim.players[0]["y"])
 		if to_mouse.length() > 4.0:
@@ -6473,6 +6537,12 @@ const EXPLO_WHITE_R_OUT := 12.0
 const EXPLO_WHITE_R_IN := 6.0
 const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 	"light": true, "ember": true, "flash": true}
+
+# Drawn at a SCREEN-anchored position, not at _to_screen(x, y) — the world cull in
+# _draw_fx would discard them for most or all of their life. chopper ignores `pos`
+# entirely (a left->right sweep it re-derives); coin migrates to the HUD War Chest
+# at (16, 13). Only _draw_fx consults this; every _draw_glow kind is world-anchored.
+const _SCREEN_ANCHORED_FX := {"chopper": true, "coin": true}
 
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 # sol-08: rusher/elite/sniper corpses follow their new live RED-team sprites (a fallen body must match
@@ -7175,6 +7245,8 @@ func _draw_field_dim() -> void:
 	# flashes and threat markers become your eyes. No hit-radius change — the
 	# challenge is visibility, not fairness.
 	if sim.mode == "endless" and sim.has_mod(5):
+		# wash-exempt: NIGHT OPS is a LIGHTING state, not a transient wash — dimming the whole
+		# field (centre included) IS the mutator, and it darkens rather than veils.
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.02, 0.03, 0.09, 0.34))
 		draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 			Color(0.0, 0.02, 0.12, 0.55))
@@ -7183,6 +7255,7 @@ func _draw_field_dim() -> void:
 		# reduce-motion scales it to nothing.
 		var lt := Engine.get_physics_frames() % 431
 		if lt < 3:
+			# wash-exempt: 3-frame sheet-lightning inside NIGHT OPS — a sky flash is full-frame by nature.
 			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
 
 
@@ -8059,10 +8132,22 @@ func _draw_rocks() -> void:
 						Color(0.18, 0.16, 0.15, fade))
 			3:
 				# Hero wreck: the focal ~2x silhouette anchoring each hardpoint.
-				# Scale 1.7 reads clearly 1.5-2x a classic rock (judge r1) while
-				# still matching the 32x24 collision (art==collision pin).
+				# The art==collision pin was claimed, not measured. wreck_halftrack's
+				# alpha bbox is 157x192 on its 240px canvas, so at SCALE 0.3 the old
+				# call scale 1.7 drew 80x98px over a 64x48px blocker (ROCK_KIND_EXT[3]
+				# is HALF extents) — 2x too tall, and spun through a full 0..TAU, so a
+				# 1.2:1 portrait wreck landed broadside as often as not while the box
+				# stayed axis-aligned. You took cover behind the visibly lower half of
+				# the steel and northbound rounds went straight through it (rocks block
+				# player/enemy bullets, movement and tanks). Pinned BROADSIDE with the
+				# same +-0.15 rad jitter _wall_seg uses for sandbag_beige's off-round
+				# bbox, at call scale 1.1: 192*0.3*1.1 = 63px wide x 157*0.3*1.1 = 52px
+				# tall against 64x48 — under 5% on both axes, still ~2x a classic rock,
+				# and it now reads as a halftrack lying ACROSS the lane. Extents are
+				# sim-side and deliberately untouched (golden re-record for zero gain).
 				_ground_shadow(pos + Vector2(0, 8), 26.0, 0.5 * fade)
-				_spr(ROCK_KIND_COVER[3]["sprite"], pos, float(rh3 % 628) / 100.0, 1.7, Color(0.62, 0.56, 0.5, fade))
+				_spr(ROCK_KIND_COVER[3]["sprite"], pos, PI / 2.0 + (float(rh3 % 30) - 15.0) / 100.0,
+					1.1, Color(0.62, 0.56, 0.5, fade))
 			_:
 				_ground_shadow(pos, 12.0, 0.42 * fade)
 				var rtex: String = ["rock1", "rock2", "cactus_dead2"][rh3 % 3]   # dead cactus is REAL cover too
@@ -9101,12 +9186,28 @@ func _draw_tanks() -> void:
 		if t["burning"]:
 			# Vehicle fires burn dirty: dark oily smoke, not the pale dust puff.
 			_spr("fx_smoke", c + Vector2(4, -14), 0.0, 0.5, Color(0.3, 0.28, 0.26, 0.8))
-			# Bail-out countdown: the hidden ~3s lethal timer, made visible.
-			var bail := float(t["burn_ticks"]) / float(SimWorld.TANK_BAIL_TICKS)
-			var bc := Color(1.0, 0.35, 0.2) if bail > 0.35 else Color(1.0, 0.85, 0.2)
+			# Bail-out countdown, and TWO CLOCKS RUN HERE — the ring has to sweep the
+			# one that actually kills, or it contradicts the HUD prompt beside it.
+			# Ordnance ignition arms crew_ring_ticks = TANK_IGNITION_GRACE_TICKS (36t
+			# = 0.6s) and _step_tanks hurts every rider the tick it hits 0, five times
+			# sooner than the TANK_BAIL_TICKS (180t = 3s) hull fuse. So while the ring
+			# is armed it owns the arc: its own clock (visibly faster) and hud.gd's
+			# magenta, deliberately NOT the amber hull tint, so the ring and the words
+			# say one thing. Fuel starvation never arms it (crew_ring_ticks = -1), so
+			# that fire keeps the honest slow 3s sweep.
+			var ring_t: int = t.get("crew_ring_ticks", -1)
+			var bail: float
+			var bc: Color
+			if ring_t > 0:
+				bail = float(ring_t) / float(SimWorld.TANK_IGNITION_GRACE_TICKS)
+				bc = Art.warn(Color(1.0, 0.15, 0.45))
+			else:
+				bail = float(t["burn_ticks"]) / float(SimWorld.TANK_BAIL_TICKS)
+				bc = Color(1.0, 0.35, 0.2) if bail > 0.35 else Color(1.0, 0.85, 0.2)
 			Art.arc(self, c, 20.0, -PI / 2, -PI / 2 + TAU * bail, 28, bc, 2.5)
 		elif t["occupant"] < 0:
-			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0, Color.WHITE, false, bind("interact"))
+			Art.draw_glyph(self, "interact", c + Vector2(0, -30), 11.0, Color.WHITE, false, bind("interact"),
+				pad_bind_for_glyph("interact"))
 		else:
 			# Fuel gauge: the ~20s tank clock was invisible until the 300t LOW FUEL
 			# sputter (last 25%). Same ring radius the bail countdown uses, so the
@@ -9207,12 +9308,7 @@ func _draw_enemies() -> void:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			continue
-		# First-sighting teaching card: name the archetype + its counter the first
-		# time it appears this run (these debut at sector 4 with no introduction).
 		var ekind: String = e["kind"]
-		if not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
-			_seen_kinds[ekind] = true
-			show_banner(_KIND_TEACH[ekind], GameMenu.BANNER_COL_ALERT)
 		var epos := _to_screen(e["x"], e["y"])
 		# a2-11 VFX#1: hit-flash + micro-flinch on a NON-LETHAL hit — the spark/light
 		# fx and the state itself are spawned/decayed in _check_enemy_hits(); this is
@@ -9231,6 +9327,22 @@ func _draw_enemies() -> void:
 		# encounters (multiple enemies abreast) can sit fully off-screen horizontally.
 		if epos.x < -80.0 or epos.x > 720.0:
 			continue
+		# First-sighting teaching card: name the archetype + its counter the first
+		# time it appears this run (these debut at sector 4 with no introduction).
+		# BELOW the two cull guards ON PURPOSE — latched at the top of the loop it
+		# fired on first EXISTENCE, not first sighting, and the sim streams units far
+		# off-screen: _spawn_frogman puts divers 360-720px above the viewport, so the
+		# once-per-run "FROGMAN — KILL IT ON THE SURFACE" card burned over empty desert
+		# ~10s before the river ever scrolled in, and never came back (_seen_kinds only
+		# resets in _reset). The card is the ONLY place this game states counterplay.
+		# Its own y band is TIGHTER than the -60/420 draw margin: a unit hovering just
+		# past the edge is drawn but not yet READ, and must not burn the card either.
+		# A submerged frogman/ghillie still draws its ripple/shimmer, so an on-screen
+		# cloaked unit IS a valid referent and does count.
+		if epos.y >= 0.0 and epos.y <= 360.0 \
+				and not _seen_kinds.has(ekind) and _KIND_TEACH.has(ekind):
+			_seen_kinds[ekind] = true
+			show_banner(_KIND_TEACH[ekind], GameMenu.BANNER_COL_ALERT)
 		# No shadow for water frogmen, nor for a still-cloaked ghillie (the shadow
 		# would give the ambush away — the laser paint is the only warning).
 		# Drone excluded: it draws its own OFFSET altitude shadow — a second
@@ -10670,7 +10782,8 @@ func _draw_players() -> void:
 					# force_pad on i (the REVIVER's seat), not a flat false: P2 is
 					# hardwired to pad 1 and never sets Art.use_pad, so a P2 reviver
 					# was being taught P1's keycap for a button they don't have.
-					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0, Color.WHITE, i == 1, bind("revive"))
+					Art.draw_glyph(self, "revive", edge - bdir * 10.0, 9.0, Color.WHITE, i == 1, bind("revive"),
+					pad_bind_for_glyph("revive", i))
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				var cost := sim.revive_cost(dp)
 				if sim.war_chest < cost:
@@ -10689,7 +10802,8 @@ func _draw_players() -> void:
 				# for THIS glyph's 10px size (unit width = rw + 3 gap + 10 glyph).
 				var rw := Art.tw(rtxt, Art.fs(8))
 				var roff := _world_label(rtxt, pos + Vector2(-rw / 2.0 - 6.5, -16), Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph(self, "revive", pos + Vector2(rw / 2.0 + 1.5, -19) + roff, 10.0, Color.WHITE, i == 1, bind("revive"))
+				Art.draw_glyph(self, "revive", pos + Vector2(rw / 2.0 + 1.5, -19) + roff, 10.0, Color.WHITE, i == 1,
+					bind("revive"), pad_bind_for_glyph("revive", i))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
 			# responsive while arrow-key 45° pops still glide instead of snapping.
@@ -10984,7 +11098,7 @@ func _draw_players() -> void:
 				var grw := Art.tw(gtxt, Art.fs(8))
 				_world_label(gtxt, pos + Vector2(-grw / 2.0 - 6.0, -26), Art.safe(Color(0.6, 1.0, 0.7)))
 				Art.draw_glyph(self, "revive", pos + Vector2(grw / 2.0 + 2.0, -29),
-					9.0, Color.WHITE, i == 1, bind("revive"))
+					9.0, Color.WHITE, i == 1, bind("revive"), pad_bind_for_glyph("revive", i))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
@@ -11166,7 +11280,12 @@ func _draw_fx() -> void:
 		# beat — was culled every single run. Don't "fix" it by giving the kind a
 		# live world anchor; that would be a second source of truth for a draw
 		# that deliberately has none.
-		if fx["kind"] != "chopper" \
+		# `coin` is the same class with a smaller blast radius: it migrates from its
+		# world origin to the HUD War Chest at (16, 13), so the back half of its
+		# ~35-frame flight is drawn nowhere near the anchor this cull tests. At
+		# MAX_CAM_STEP the origin can cross 440 mid-arc and pop the bounty coin out
+		# right as it reaches the chest — the one frame the payout has to land.
+		if not _SCREEN_ANCHORED_FX.has(fx["kind"]) \
 				and (pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0):
 			continue
 		var t: float = fx["t"]
@@ -12152,14 +12271,26 @@ func _draw_wheel() -> void:
 			if not afford:
 				# Non-color "can't buy" cue beside the socket (colorblind-safe).
 				Art.text(self, "×", ipos + Vector2(12.0, -8.0), 9, Color(1.0, 0.5, 0.4))
-			# a1-16 HUD#1/LEG#6: the selected socket's cost+stock now rides the
-			# hub label row (one horizontal line below the hub) instead of
-			# stacking under the socket, where it collided with the cue/
-			# countdown rows. Unselected AFFORDABLE sockets still get a
-			# compact green "can-buy" dot; the × already carries the
-			# not-afford read (colorblind-safe).
-			if _wheel_socket_display(selected, afford) == "dot":
-				Art.circle(self, ipos + Vector2(0.0, 11.0), 2.0, Art.safe(Color(0.45, 1.0, 0.55)))
+			# a1-16 HUD#1/LEG#6: the selected socket's cost+stock rides the hub label
+			# row (one horizontal line below the hub) instead of stacking under the
+			# socket, where it collided with the cue/countdown rows.
+			# Every UNSELECTED socket now shows its PRICE in the slot the can-buy dot
+			# used to occupy. `acost` is already computed above for the afford test and
+			# was being thrown away, so the wheel knew all five numbers and showed one.
+			# 'Which do I buy' is the War Chest's core choice, and prices are not
+			# memorisable — _econ_scale multiplies every base by 1 + depth/4 per gate
+			# and the vest creeps 60→120 on top, so by gate 4 it's a ~4:1 spread the
+			# player had to discover one socket at a time while the sim kept running
+			# (the wheel is hold-to-open, not a pause). The one all-prices surface,
+			# hud.gd's shop strip, is endless-only, so campaign/arcade/boss_rush could
+			# never see two prices at once.
+			# The afford colour and the × both survive, so the cue stays colourblind-safe.
+			# Baseline sits at +11 (the dot's own offset): glyphs run ~+3..+12, clearing
+			# the WHEEL_ROW_CUE plate at +52 even for the south socket (+31).
+			var disp := _wheel_socket_display(selected, afford)
+			if disp != "full":
+				Art.text_center(self, str(acost), ipos.x, ipos.y + 11.0, 8,
+					Art.safe(Color(0.45, 1.0, 0.55)) if disp == "dot" else Art.warn(Color(1.0, 0.5, 0.4)))
 		# Device-aware verb cue under the hub: the wheel states its own controls,
 		# and the cancel button is the real glyph (pad B / keycap C), not a letter.
 		# Selected item's cost/afford, computed once and reused by the revive
@@ -12203,7 +12334,7 @@ func _draw_wheel() -> void:
 			Art.text(self, cue_l, Vector2(cx0, c.y + WHEEL_ROW_CUE), 8,
 				Color(0.9, 0.92, 0.8, 0.85) if sel_afford else Color(1.0, 0.55, 0.45, 0.9))
 			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + WHEEL_ROW_CUE - 3.5), 10.0,
-				Color.WHITE, i == 1, bind("roll"))   # P2's wheel is pad-driven — show pad B, not the C keycap
+				Color.WHITE, i == 1, bind("roll"), pad_bind_for_glyph("roll", i))   # P2's wheel is pad-driven — show pad B, not the C keycap
 			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + WHEEL_ROW_CUE), 8, Color(0.9, 0.92, 0.8, 0.85))
 		else:
 			var cue_txt := "FLICK TO PICK · RELEASE TO CLOSE"
@@ -12634,6 +12765,7 @@ func _draw_god_badge() -> void:
 func _draw_banners(top_msg: String) -> void:
 	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
 	# (static, so it stays even under reduce-motion).
+	# wash-exempt: always-on corner vignette — edge-only by the card's own alpha, centre is untouched.
 	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
 		Color(0.0, 0.0, 0.0, 0.12))   # a1-12 VFX#5: eased 0.16->0.12 so corners keep dark-enemy contrast
 	# Damage vignette: pulses on hits, sustains through the mercy window.
@@ -12667,13 +12799,19 @@ func _draw_banners(top_msg: String) -> void:
 			Color(1.0, 0.55, 0.4, 0.4 + 0.45 * paint))
 	if _flash_alpha > 0.01:
 		# Radial flash: hottest at screen center, falling off toward the edges
-		# (oversized softspot card) over a faint flat base — punchier than a
-		# uniform white sheet at the same energy.
+		# (oversized softspot card). The flat white sheet that used to sit under
+		# it is GONE: this is the one full-frame channel outside the _wash budget
+		# (and the only centre-HOT one — every budgeted card is centre-clear by
+		# construction), so at vest-break it composited ~0.45 white over the play
+		# centre, ~7x what the arbiter spends there. The sheet was a uniform veil
+		# with no falloff and no shape; the softspot carries the whole flash read
+		# on its own, at 0.35 instead of 0.45.
 		# maxf floor (6/9 panel): zeroing the wash under reduce-motion erased the
 		# whole-field-stun gestalt entirely; siblings (damage vignette, airstrike
 		# wash) keep a dimmed floor. The decay is a fade, not a strobe — RM-safe.
 		var fla := _flash_alpha * maxf(_motion, 0.4)
-		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(1, 1, 1, fla * 0.45))
+		# wash-exempt: impact flash is deliberately centre-HOT (a radial punch, not a
+		# budgeted wash card) — a WASH_KINDS entry would rightly fail the centre-clear ratchet.
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
 			false, Color(1, 1, 1, fla))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale

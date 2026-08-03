@@ -131,6 +131,11 @@ class _MainStub extends Node2D:
 	# so the comparison the chip used to make was already destroyed by the time _draw ran.
 	var _record_fired := false
 	func bind_for_glyph(_a: String) -> int: return 0
+	# Pad twin — hud.gd's _emit_glyph/_emit_act_glyph now read the LIVE pad binding (main.gd:4391)
+	# so a rebound face button shows what the player actually bound. -1 is "unbound", which is
+	# draw_glyph's own default for the pad_button arg, so the stub stays neutral: these suites
+	# measure ROW GEOMETRY, and a real button index here would change glyph widths.
+	func pad_bind_for_glyph(_a: String, _device := 0) -> int: return -1
 
 
 class _VerbMain extends _MainStub:

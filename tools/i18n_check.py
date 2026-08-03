@@ -80,7 +80,12 @@ def extract_source_keys() -> set[str]:
     keys |= _dict_string_values(sfx_src, "_BARK_CAPTIONS")
     keys |= _hint_literals(main_src)
     keys |= _verb_seg_labels(hud_src)
-    keys |= {"K.I.A.", "BAIL OUT! %ds", "SELECT", "BACK"}  # hand-wired choke points, not dict/array literals
+    # Hand-wired choke points -- one-off translate() calls, not dict/array literals, so no
+    # extractor above can see them. ⚠️ This list is the check's blind spot: a NEW one-off
+    # translate("...") in a view script is invisible to i18n_check until someone adds it here,
+    # so the .po drift it would have caught goes unreported (that is exactly how "CREW HIT! %ds"
+    # shipped untranslated). Add the literal here in the same commit that adds the call.
+    keys |= {"K.I.A.", "BAIL OUT! %ds", "CREW HIT! %ds", "SELECT", "BACK"}
     return keys
 
 

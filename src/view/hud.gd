@@ -1876,7 +1876,11 @@ func _verb_legend() -> void:
 func _emit_rect(r: Rect2, c: Color) -> void:
 	draw_rect(r, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
-	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act))
+	# Both live binds, keyboard AND pad: the keycode arm shipped first, so a pad player who
+	# rebound a verb still read the frozen _GLYPH_PAD ship default. This strip is P1's, hence
+	# device 0.
+	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
+		main.pad_bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 	Art.text(self, txt, pos, 8, c)
 
@@ -2824,7 +2828,10 @@ func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := 
 # supply-wheel) — like every other HUD draw seam, a one-line indirection so a headless capture
 # subclass can record them and the full _draw frame is exercisable without a live draw context.
 func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt: bool) -> void:
-	Art.draw_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act))
+	# `alt` IS the per-player device flag every caller passes (`i == 1`, P2 being hardwired to
+	# pad 1), so it doubles as the pad_bind device index — P2's chip shows P2's own rebinds.
+	Art.draw_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act),
+		main.pad_bind_for_glyph(act, 1 if alt else 0))
 
 
 ## c4-03: reserved pixel width of the "+N" clip — sized off the WIDER of "+N"/"!N" so the alert

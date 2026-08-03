@@ -10,6 +10,8 @@ Played when an **infantry** unit first enters the viewport (not machines).
 
 **Voices:** bill, daniel, brian, callum, harry, roger  
 **Takes:** 3–4 per voice × phrase  
-**Pipeline:** in-house text-to-speech synthesis
+**Pipeline:** commissioned through a hosted TTS service — the stock voice roster above is
+ElevenLabs', so that is the inferred source. Inferred from the recorded parameters, not from
+a logged API call; see `ASSETS.md` for what that means for downstream licensing.
 
 Wired in `Sfx.play_spawn_shout()` ← `main._tick_spawn_yells()` (55% chance + 0.37s cooldown).

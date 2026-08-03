@@ -6200,7 +6200,10 @@ func _emit_fit(_key: String, r: Rect2, reg: Rect2, c: Color) -> void:
 func _emit_tex(key: String, r: Rect2, c: Color) -> void:
 	draw_texture_rect(Art.tex(key), r, false, c)
 func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
-	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act))
+	# Live binds on BOTH devices — the keycode arm shipped first, leaving a pad player who
+	# rebound a verb staring at the frozen _GLYPH_PAD ship default. Menus are P1's (device 0).
+	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
+		main.pad_bind_for_glyph(act))
 func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
 	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
