@@ -107,6 +107,30 @@ func _act_glyph_resolves(act: String) -> bool:
 	return Art._GLYPH_KEY.has(act) and Art.tex("ui_key_blank") != null
 
 
+# r4: mirrors Art.draw_glyph's keyboard-letter branch (art.gd, inside draw_glyph) rather than
+# invoking the real function — calling Art.draw_glyph with a bare CanvasItem outside a real
+# _draw() pass trips Godot's "Drawing is only allowed inside _draw()" engine error, which the
+# run's engine-error gate fails on (the same tradeoff _act_glyph_resolves above already takes).
+# keycode == 0 is a LEGITIMATE cleared bind (menu.gd _apply_kb_bind(action, 0)), not the -1
+# "caller didn't pass one" sentinel — GameMenu.key_label(0) returns the literal "UNBOUND",
+# which must never reach the glyph.
+func _glyph_letter_for(action: String, keycode: int) -> String:
+	if keycode > 0:
+		return GameMenu.key_label(keycode)
+	elif keycode == -1:
+		return Art._GLYPH_KEY[action]
+	return ""
+
+
+func test_cleared_bind_glyph_never_shows_the_literal_unbound_string() -> void:
+	Runner.T.eq(GameMenu.key_label(0), "UNBOUND",
+		"sanity: key_label(0) really does return the literal string being kept off the glyph")
+	Runner.T.eq(_glyph_letter_for("interact", 0), "",
+		"a cleared bind (keycode 0) draws a blank keycap, never the word UNBOUND")
+	Runner.T.eq(_glyph_letter_for("interact", -1), Art._GLYPH_KEY["interact"],
+		"the -1 'caller didn't pass one' sentinel still falls back to the ship-default letter")
+
+
 # Every `main` stub the HUD gets handed answers the FULL set of names hud.gd reads off main —
 # pinned by tests/test_stub_parity.gd. A stub that answers only what its own test happens to hit is
 # how a missing field hides: the read aborts the call and the row measures as absent, green.
