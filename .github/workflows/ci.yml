@@ -171,7 +171,7 @@ jobs:
           ! grep -q "SCRIPT ERROR" export_smoke.log
 
       - name: Upload exported Linux build (binary + .pck)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CommanderInChief-linux-x86_64
           path: build/CommanderInChief-linux*
@@ -215,7 +215,7 @@ jobs:
           ! grep -q "SCRIPT ERROR" export_smoke_windows.log
 
       - name: Upload exported Windows build (binary + .pck)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CommanderInChief-windows-x86_64
           path: build/CommanderInChief-windows*
