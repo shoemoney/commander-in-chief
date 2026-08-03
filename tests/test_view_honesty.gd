@@ -700,6 +700,9 @@ func _spawn_shooter(sim: SimWorld, kind: String, x: int, y: int) -> Dictionary:
 	elif kind == "elite":
 		sim.enemies.append({"x": x, "y": y, "alive": true, "elite": true,
 			"kind": "elite", "fire_cd": 0, "windup": 0})
+	elif kind == "rifleman":
+		sim.enemies.append({"x": x, "y": y, "alive": true, "elite": false,
+			"kind": "rusher", "fire_cd": 0, "windup": 0, "skin": 1})
 	else:
 		sim._spawn_special(x, y, kind)
 	return sim.enemies[-1]
@@ -740,7 +743,7 @@ func test_every_painted_telegraph_lane_fires_down_itself() -> void:
 	const MAX_ANGLE_DEG := 3.0
 	var hit_r: float = float(SimWorld.BULLET_HIT_RADIUS) * PX
 	var kinds := _aim_locking_kinds()
-	Runner.T.eq(kinds, ["elite", "ghillie", "mg_nest", "sniper", "technical"],
+	Runner.T.eq(kinds, ["elite", "ghillie", "mg_nest", "rifleman", "sniper", "technical"],
 		"the aim-locked shooter roster derived from src/sim/sim_world.gd is the set this test drives")
 	for kind in kinds:
 		var commits := 0
@@ -812,8 +815,8 @@ func test_the_enemy_draw_path_reads_one_telegraph_source() -> void:
 	## helper the test above measures — otherwise a future site can re-open the gap
 	## while test_every_painted_telegraph_lane_fires_down_itself stays green.
 	var view := _view_src()
-	Runner.T.eq(view.count("telegraph_dir(sim, e)"), 5,
-		"all five enemy telegraph draw sites (sniper/technical/mg_nest/ghillie/elite) read Main.telegraph_dir()")
+	Runner.T.eq(view.count("telegraph_dir(sim, e)"), 6,
+		"all six enemy telegraph draw sites (rifleman/sniper/technical/mg_nest/ghillie/elite) read Main.telegraph_dir()")
 	Runner.T.eq(view.count("e.get(\"aim_lx\""), 1,
 		"main.gd reads the raw aim vector in exactly ONE place — inside telegraph_dir() — so no draw site can restate it")
 

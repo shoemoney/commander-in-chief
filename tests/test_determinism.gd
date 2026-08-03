@@ -674,13 +674,25 @@ const SEED := 0xDEADBEEF
 ## tortures. Before recording, focused mechanics, checksum-delta, replay, and
 ## lockstep scenarios passed; the empty-array capture below was then repeated
 ## against these committed values to prove idempotency.
+## RE-RECORDED (2026-08-01, armed infantry behave as armed infantry): the base
+## red-team troops now establish a 100px firing lane, telegraph for 20 ticks,
+## and fire a locked shot rather than pursuing body contact. Their existing
+## checksum-classified fire_cd/windup/aim fields are initialized at spawn and
+## their positions/projectiles necessarily diverge from tick 0. Both A/B runs
+## produced the values below twice; focused mechanics and painted-lane lockstep
+## coverage passed before accepting the intentional ruleset change.
+## RE-RECORDED (2026-08-01, opening readability follow-up): campaign now holds
+## its field stream for 120 ticks, uses a 75-tick pre-gate cadence, delays the
+## tutorial bunker's first body, and position-staggers riflemen's initial fire
+## cooldown. All are intentional hashed timing/state changes; focused mechanics,
+## Main/attract and menu suites passed before this capture.
 const GOLDEN: Array[int] = [
-	1184643001884483351,
-	5371506924864910807,
-	8381930895297767709,
-	5631023729472081759,
-	6911989025763595544,
-	1767628530633902072,
+	7078001587521190610,
+	8335992288627051147,
+	710253148765224518,
+	2046355779594091142,
+	1182719714934996183,
+	8084572535203066938,
 ]
 
 
@@ -898,13 +910,19 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## The rooted +52 fix is still correct and still tested by tests/test_endless.gd; it is simply
 ## invisible to THIS stream now. If a future change makes the endless torture survive past
 ## ~2900 ticks again, expect these samples to move for that reason alone.
+## RE-RECORDED (2026-08-01, base rifleman firing line): same intentional base-
+## infantry ruleset change documented above GOLDEN. Endless fields those troops
+## from tick 0, so all six samples move; repeated A/B lockstep remained exact.
+## RE-RECORDED (2026-08-01, rifleman volley staggering): the opening tutorial
+## timings are campaign-only; Endless moves because every base rifleman's
+## position-derived initial fire_cd now prevents synchronized first volleys.
 const ENDLESS_GOLDEN: Array[int] = [
-	693152613480616205,
-	7765365808198943925,
-	8094705230952988829,
-	5232181903059069125,
-	3596566719002625837,
-	71081753830061653,
+	7922144188542694123,
+	5909248948896047801,
+	7326014981678731879,
+	1054444601338894271,
+	5913232406481005175,
+	2301360741397169935,
 ]
 
 

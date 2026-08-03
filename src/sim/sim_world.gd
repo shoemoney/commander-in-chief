@@ -145,6 +145,18 @@ const ELITE_SPEED := 2 * F_ONE
 const ELITE_STANDOFF := 120 * F_ONE
 const ELITE_FIRE_CD_TICKS := 150
 const ELITE_WINDUP_TICKS := 24
+# Ordinary red-team infantry visibly carry firearms, so their base behavior is a
+# firing line rather than a body-charge. Starting values: 100px standoff keeps
+# them inside the player's 360px battle read; 132t cadence + 20t tell yields one
+# shot about every 2.5s once settled. Playtest target: the opening field should
+# contain visible incoming fire without producing an unavoidable bullet curtain.
+const RIFLEMAN_STANDOFF := 100 * F_ONE
+const RIFLEMAN_FIRE_CD_TICKS := 132
+const RIFLEMAN_WINDUP_TICKS := 20
+# Starting value: spread first-shot phases across 0.6s by spawn X. Test:
+# place a three-rifle line and verify no two painted lanes resolve on one tick;
+# if the opening feels too sparse, reduce in 6-tick steps, never to zero.
+const RIFLEMAN_SPAWN_STAGGER_TICKS := 36
 # Grenadier: mid-range zoner that lobs a telegraphed area strike. The lob is a
 # CLUSTER of three walked ACROSS the firing line — that is the whole difference
 # between him and the drone, who calls one precise circle from the same
@@ -230,6 +242,14 @@ const PICKUP_RADIUS := 12 * F_ONE
 const MG_AMMO_MAX := 99
 const GRENADE_AMMO_MAX := 12
 const SPAWN_INTERVAL_TICKS := 45
+# Starting values for the literal landing-zone tutorial. The first field unit
+# waits 2s and the pre-gate stream runs at 1.25s instead of 0.75s while the
+# player learns movement/cover; the authored bunker waits 3s before its first
+# infantryman. Test: a fresh player should reach the seawall before facing more
+# than one firing lane. Tighten only after that succeeds 8/10 times.
+const OPENING_FIELD_GRACE_TICKS := 120
+const OPENING_SPAWN_INTERVAL_TICKS := 75
+const OPENING_BUNKER_FIRST_SPAWN_TICKS := 180
 const BUNKER_SPAWN_INTERVAL_TICKS := 120
 const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
@@ -830,6 +850,7 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 		# unaffected only by luck of ordering — _author_lz runs in _init, jump_to_chapter runs
 		# after, so the props land and are then streamed past.
 		_author_lz()
+		_spawn_grace = OPENING_FIELD_GRACE_TICKS
 	_next_bunker_y = -(500 * F_ONE)
 	_next_gate_y = -GATE_SPACING
 	_next_tank_y = -(750 * F_ONE)
@@ -919,6 +940,9 @@ func jump_to_chapter(target_gate: int) -> void:
 	var skip: int = (target_gate - 1) * GATE_SPACING
 	if skip <= 0:
 		return
+	# A chapter jump is practice at the selected zone, not the landing-zone
+	# tutorial. Do not carry its opening delay into a deep Arcade start.
+	_spawn_grace = 0
 	camera_top -= skip
 	_prev_camera_top = camera_top
 	for p in players:
@@ -3520,8 +3544,37 @@ func _step_enemies() -> void:
 						continue
 					# Blocked (sandbag wall around the crate) — fall through to
 					# the player chase instead of pinning here forever.
+			_step_rifleman(e, target, dx, dy, dlen)
+			continue
 		if dlen > F_ONE:
 			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
+
+
+func _step_rifleman(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
+	## The base infantry art carries a real gun. Close to a readable firing lane,
+	## root during a short aim tell, then fire the vector that was shown. Contact
+	## can still hurt if the player deliberately closes, but the AI never seeks it.
+	var windup: int = e.get("windup", 0)
+	if windup > 0:
+		windup -= 1
+		e["windup"] = windup
+		if windup == 0:
+			var lx: int = e.get("aim_lx", dx)
+			var ly: int = e.get("aim_ly", dy)
+			var llen := Fixed.length(lx, ly)
+			if llen > F_ONE:
+				events.append({"t": "enemy_shot", "x": e["x"], "y": e["y"]})
+				_spawn_enemy_bullet(e["x"], e["y"], lx, ly, llen)
+		return
+	e["fire_cd"] = maxi(0, int(e.get("fire_cd", 0)) - 1)
+	if dlen > RIFLEMAN_STANDOFF:
+		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
+	elif e["fire_cd"] == 0 and not _concealed(target):
+		e["fire_cd"] = RIFLEMAN_FIRE_CD_TICKS
+		e["windup"] = RIFLEMAN_WINDUP_TICKS
+		e["aim_lx"] = dx
+		e["aim_ly"] = dy
+		events.append({"t": "rifleman_windup", "x": e["x"], "y": e["y"]})
 
 
 func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int) -> void:
@@ -4067,7 +4120,9 @@ func _step_spawner() -> void:
 			opened += 1
 	if _spawn_grace > 0:
 		_spawn_grace -= 1
-	var interval := maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
+	var in_opening_lesson := opened == 0 and camera_top > -GATE_SPACING and not hard
+	var interval := OPENING_SPAWN_INTERVAL_TICKS if in_opening_lesson \
+		else maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
@@ -4113,13 +4168,15 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 		if rng.range_i(0, 6) == 0:
 			e["marked"] = true
 	else:
-		# Cosmetic sprite variant so a rusher wave reads as varied troops, not one
+		# Cosmetic sprite variant so a rifle line reads as varied troops, not one
 		# silhouette cloned N times. Derived from spawn position (NO rng draw) and
 		# excluded from checksum() -> golden-safe (see KNOWN["enemy"] in coverage).
 		# Bare `/ F_ONE` truncates toward 0, and y here is negative — deliberate, see
 		# the "`x / ONE` vs `to_int(x)`" contract in fixed.gd. Checksum-excluded, so
 		# the floor/truncate choice cannot move a golden either way.
 		e["skin"] = (x / F_ONE + y / F_ONE) & 3
+		e["fire_cd"] = rifleman_spawn_fire_cd(x)
+		e["windup"] = 0
 	# Deep-endless veteran armor (wave 13+): the bulk roster takes an extra
 	# bullet. Only SET when it applies, so the (already hashed) hp feed stays
 	# absent — and both goldens byte-identical — everywhere else.
@@ -4127,6 +4184,14 @@ func _spawn_enemy(x: int, y: int, elite: bool) -> void:
 	if arm > 0:
 		e["hp"] = e.get("hp", 1) + arm
 	enemies.append(e)
+
+
+static func rifleman_spawn_fire_cd(x: int) -> int:
+	## Position-derived phase: deterministic, consumes no shared RNG draw, and
+	## keeps neighboring riflemen from resolving their first painted lanes as a
+	## synchronized bullet wall. Their common recurring cadence preserves this
+	## offset after the first shot.
+	return RIFLEMAN_FIRE_CD_TICKS / 2 + posmod(x / F_ONE, RIFLEMAN_SPAWN_STAGGER_TICKS)
 
 
 func _spawn_frogman(x: int, y: int) -> void:
@@ -4138,6 +4203,8 @@ func _windup_for(kind: String) -> int:
 	## The archetype's full telegraph length (the flashbang re-arm restores a
 	## frozen shot to its own tell, keeping every telegraph a truthful promise).
 	match kind:
+		"rusher":
+			return RIFLEMAN_WINDUP_TICKS
 		"sniper", "ghillie":
 			return SNIPER_WINDUP_TICKS
 		"grenadier":
@@ -5549,7 +5616,8 @@ func _author_lz() -> void:
 	#    rounds spark off it (armor_block -> the view's existing ricochet), one
 	#    grenade seals it for 50 coins. Gate 1 then repeats the lesson as a hard
 	#    wall. Corner-origin like every streamed bunker.
-	bunkers.append(_make_bunker(SCREEN_CX - BUNKER_W / 2, -(420 * F_ONE)))
+	bunkers.append(_make_bunker(SCREEN_CX - BUNKER_W / 2, -(420 * F_ONE),
+		OPENING_BUNKER_FIRST_SPAWN_TICKS))
 	# 3. The conspicuous grenade box, dead center in the lane, free -- 60px PAST
 	#    the bunker's north face. Players spawn at GRENADE_AMMO_MAX, so a crate
 	#    placed BEFORE the bunker granted mini(MAX, ammo+4) = nothing and taught
@@ -5559,8 +5627,8 @@ func _author_lz() -> void:
 	pickups.append({"x": SCREEN_CX, "y": -(480 * F_ONE), "kind": 1, "cost": 0})
 
 
-func _make_bunker(x: int, y: int) -> Dictionary:
-	return {"x": x, "y": y, "alive": true, "spawn_cd": BUNKER_SPAWN_INTERVAL_TICKS}
+func _make_bunker(x: int, y: int, first_spawn_ticks: int = BUNKER_SPAWN_INTERVAL_TICKS) -> Dictionary:
+	return {"x": x, "y": y, "alive": true, "spawn_cd": first_spawn_ticks}
 
 
 # --- Endless War (roguelite survival mode) ---

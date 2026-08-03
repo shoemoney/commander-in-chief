@@ -503,6 +503,7 @@ const _EVENT_SOUND := {
 	"observer_spawn": ["alarm", -3.0, 1.0],
 	"strike_warn": ["whistle", -6.0, 1.0],
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
+	"rifleman_windup": ["click_dry", -18.0, 1.4],   # subtle weapon-ready tick; the painted lane carries the warning
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
 	"grenadier_windup": ["throw", -8.0, 0.7],
 	"drone_windup": ["alarm_air", -12.0, 1.0],   # a1-13: dedicated aerial paint-whine timbre
@@ -609,6 +610,8 @@ func _ready() -> void:
 	# WINDOW SCALE label to that fitted integer, so the OPTIONS control and the real window stay in
 	# sync. min_size keeps the floor at a clean 1x. The OPTIONS WINDOW SCALE row remains the way to
 	# jump to an exact centered multiple; dragging is just the other, equally valid, path.
+	if not OS.has_feature("movie"):
+		_sfx.lock_startup_audio()
 	add_child(_sfx)
 	Input.joy_connection_changed.connect(_on_pad_count_changed)
 	_hud_icons.main = self
@@ -696,6 +699,7 @@ func _end_splash() -> void:
 	# run, which in Endless mode can be hours. _draw_splash_hero already null-guards it.
 	_splash_keyart = null
 	_sfx.stop_vo()   # cut the crawl narration if the player skipped the intro
+	_sfx.unlock_startup_audio()   # an explicit skip ends the opening-audio gate too
 	if _menu.mode == GameMenu.Mode.HIDDEN:
 		_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
 
@@ -1208,7 +1212,7 @@ func _process(_delta: float) -> void:
 		# Fire the Commander narration once as the crawl beat begins (dry cinematic VO).
 		if not _splash_vo_fired and (SPLASH_DUR - _splash_t) >= SPLASH_STUDIO_END:
 			_splash_vo_fired = true
-			_sfx.play_vo("intro_crawl", 3, true)
+			_sfx.play_startup_line("intro_crawl")
 		_splash_root.queue_redraw()
 		if _splash_t <= 0.0:
 			_end_splash()
@@ -3429,7 +3433,7 @@ static func _death_pop_fx(x: int, y: int, kkind: String) -> Dictionary:
 
 
 static func _top_prey_text(kind_kills: Dictionary) -> String:
-	# a4-16: the run's most-fought foe — "TOP PREY  RUSHER x37", or "" if nothing died.
+	# a4-16: the run's most-fought foe — "TOP PREY  RIFLEMAN x37", or "" if nothing died.
 	# Shared by the K.I.A. debrief AND the VICTORY card (run-story parity).
 	if kind_kills.is_empty():
 		return ""
@@ -3444,7 +3448,8 @@ static func _top_prey_text(kind_kills: Dictionary) -> String:
 		# independent of dictionary insertion order (a4-16 r2).
 		if c > tc or (c == tc and String(kk) < String(top)):
 			top = kk
-	return "TOP PREY  %s x%d" % [String(top).to_upper(), int(kind_kills[top])]
+	var display_kind := "RIFLEMAN" if String(top) == "rusher" else String(top).to_upper()
+	return "TOP PREY  %s x%d" % [display_kind, int(kind_kills[top])]
 
 
 static func _victory_story_rows(kills: int, streak: int, kind_kills: Dictionary) -> Array:
@@ -5825,6 +5830,26 @@ static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
 		if g["y"] < dsim.camera_top or g["y"] > dsim.camera_top + SimWorld.VIEW_H:
 			continue
 		return {"x": g["boss"]["x"], "y": g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET}
+	# Base infantry used to body-rush into the open-loop sweep, so campaign
+	# deliberately ignored loose bodies while the bot sapped objectives. Riflemen
+	# now hold a firing line; left entirely untargeted they accumulate to the
+	# roster cap and freeze the attract run. Only lock when six or more are live:
+	# below that threshold the existing demolition duty cycle still owns the aim.
+	var riflemen := 0
+	var near_rifle := {}
+	var near_rifle_d := 1 << 62
+	for e in dsim.enemies:
+		if not e["alive"] or e.get("kind", "") != "rusher":
+			continue
+		riflemen += 1
+		var rex: int = e["x"] - p["x"]
+		var rey: int = e["y"] - p["y"]
+		var rd2: int = (rex / 256) * (rex / 256) + (rey / 256) * (rey / 256)
+		if rd2 < near_rifle_d:
+			near_rifle_d = rd2
+			near_rifle = {"x": e["x"], "y": e["y"]}
+	if riflemen >= 6:
+		return near_rifle
 	# Deliberately NOT extended to bunkers. Both variants were measured across 8
 	# seeds: aiming at every bunker in range cost two seeds their finish (the bot
 	# stops answering the enemies shooting it), and aiming only at a closed gate's
@@ -6326,6 +6351,39 @@ func _bottom_fade(screen_y: float) -> float:
 	return lerpf(1.0, 0.45, clampf((screen_y - 324.0) / 36.0, 0.0, 1.0))
 
 
+static func opening_route_alpha(tick_count: int, camera_top: int, opened_gates: int) -> float:
+	## A brief orientation aid, not a permanent lane overlay. It exists only in
+	## the untouched landing zone and fades through the back half of six seconds.
+	if tick_count < 0 or tick_count >= OPENING_ROUTE_TICKS or opened_gates > 0 \
+			or camera_top <= -SimWorld.GATE_SPACING:
+		return 0.0
+	return clampf(1.0 - float(tick_count) / float(OPENING_ROUTE_TICKS), 0.0, 1.0)
+
+
+func _draw_opening_route() -> void:
+	if not sim.is_campaign_world():
+		return
+	var opened := 0
+	for g in sim.gates:
+		if g["open"]:
+			opened += 1
+	var a := opening_route_alpha(sim.tick_count, sim.camera_top, opened)
+	if a <= 0.0:
+		return
+	# Three north-pointing chevrons make the empty landing field read as a route.
+	# The black under-stroke keeps the safe-cyan guide visible on sand and water;
+	# low alpha and the short lifetime keep it below every threat telegraph.
+	var col := Art.safe(Color(0.55, 0.95, 0.78, 0.62 * a))
+	for y in [282.0, 232.0, 182.0]:
+		var l := Vector2(310.0, y + 5.0)
+		var m := Vector2(320.0, y - 3.0)
+		var r := Vector2(330.0, y + 5.0)
+		Art.line(self, l + Vector2(1, 1), m + Vector2(1, 1), Color(0, 0, 0, 0.48 * a), 3.2)
+		Art.line(self, m + Vector2(1, 1), r + Vector2(1, 1), Color(0, 0, 0, 0.48 * a), 3.2)
+		Art.line(self, l, m, col, 1.8)
+		Art.line(self, m, r, col, 1.8)
+
+
 func _draw_hazard_telegraphs() -> void:
 	# Telegraph aprons (c2 2v, both reviewers' #1): a hazard about to scroll in
 	# from the top edge gets a trampled-ground scuff + warning chevron 80px
@@ -6445,6 +6503,13 @@ const HERO_APEX := Color(0.86, 0.93, 1.0)   # a4-03: cool crown catch-light — 
 const HERO_APEX_A := 0.44   # sol-07: crown alpha bumped from 0.32 so the cool catch-light reads on the infantry set DARK helmet dome
 const HERO_APEX_DY := 3.0   # sol-07: crown sits this many px above pos (the helmet dome is just north of the sprite center)
 const HERO_APEX_SZ := Vector2(11.0, 9.0)   # sol-07: crown spot size. DY < SZ.y/2 → the spot always covers the sprite center, so it stays on the dome at EVERY aim angle (screen-fixed, dome at the rotation center)
+# Live-build readability pass: the first five seconds and each mercy-window
+# respawn get an explicit hero locator; the landing-zone route lasts six seconds.
+# Both are view-only and fade away before they can become permanent combat UI.
+const HERO_LOCATOR_TICKS := 300
+const OPENING_ROUTE_TICKS := 360
+const LIVE_RIFLEMAN_SCALE := 0.52
+const PRIMARY_MARKER_RADIUS := 8.0
 # The overhead frames are truthfully narrow (rifle aligned with the torso), but
 # the one-hit enemy bullet is a 14px-wide lethal circle. Widen only the rendered
 # player poses so that circle stays visibly inside every standing silhouette;
@@ -6474,12 +6539,13 @@ static func _tiny_decor_no_rim(tex_name: String, screen_w: float) -> bool:
 
 
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
-		stretch := 1.0) -> void:
-	_spr_texture(Art.tex(tex_name), tex_name, pos, angle, spr_scale, mod, stretch)
+		stretch := 1.0, with_rim := true) -> void:
+	_spr_texture(Art.tex(tex_name), tex_name, pos, angle, spr_scale, mod, stretch, 1.0, with_rim)
 
 
 func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
-		spr_scale := 1.0, mod := Color.WHITE, stretch := 1.0, x_stretch := 1.0) -> void:
+		spr_scale := 1.0, mod := Color.WHITE, stretch := 1.0, x_stretch := 1.0,
+		with_rim := true) -> void:
 	# Animation frames borrow their base unit's scale/tint/rim contract. Keeping
 	# style separate from texture lets pose art remain a view-only substitution.
 	var s := spr_scale * Art.draw_scale(style_key)
@@ -6492,7 +6558,7 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 	var tint := mod * Art.tint(style_key)
 	draw_set_transform(pos.round(), angle, Vector2(s * x_stretch, s * stretch))
 	var origin := -t.get_size() / 2.0
-	if Art.outlined(style_key):
+	if with_rim and Art.outlined(style_key):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
 		# Boss authority (7v): boss-class sprites wear a thicker WARM rim that
 		# lerps white with the shipped hit-flash — the fleet rim stays neutral.
@@ -6573,9 +6639,10 @@ static func enemy_anim_state(e: Dictionary, moved: bool, phase: int,
 		return "windup"
 	var kind: String = e.get("kind", "rusher")
 	var fire_cd: int = e.get("fire_cd", 0)
-	# Elite/sniper cooldowns remain at their maximum through the rooted wind-up;
+	# Shooter cooldowns remain at their maximum through the rooted wind-up;
 	# the first frames after it reaches zero are therefore the honest recoil window.
-	if (e.get("elite", false) and fire_cd > SimWorld.ELITE_FIRE_CD_TICKS - 4) \
+	if (kind == "rusher" and fire_cd > SimWorld.RIFLEMAN_FIRE_CD_TICKS - 4) \
+			or (e.get("elite", false) and fire_cd > SimWorld.ELITE_FIRE_CD_TICKS - 4) \
 			or (kind == "sniper" and fire_cd > SimWorld.SNIPER_FIRE_CD_TICKS - 4):
 		return "shoot"
 	if moved:
@@ -6943,6 +7010,7 @@ func _draw() -> void:
 	# body itself is a shader quad on _bg_root (z=-2), so it stays below anyway.
 	_draw_water()
 	_draw_scorch()
+	_draw_opening_route()
 	_draw_foundry_arena()
 	_draw_vents()
 	_draw_hazard_telegraphs()
@@ -8856,7 +8924,14 @@ func _draw_pickups() -> void:
 				draw_rect(Rect2(ppos.x - 36 + hz * 12, ppos.y + 11, 6, 3), Color(0.8, 0.7, 0.2, 0.5))
 		if pk["kind"] <= 3 and not maxed:
 			var crring := Art.safe(Color(0.5, 1.0, 0.5))
-			Art.arc(self, ppos, 11.0, 0, TAU, 20, Color(crring.r, crring.g, crring.b, 0.14 + cpg * 0.14), 1.0)
+			# Common supplies now inherit a restrained version of the rare-capsule
+			# plinth/beam grammar. Grey crates no longer masquerade as nearby rocks.
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(ppos - Vector2(13, 8), Vector2(26, 16)),
+				false, Color(crring.r, crring.g, crring.b, 0.08 + cpg * 0.06))
+			Art.arc(self, ppos, 13.0, 0, TAU, 22,
+				Color(crring.r, crring.g, crring.b, 0.24 + cpg * 0.16), 1.3)
+			Art.line(self, ppos + Vector2(0, -8), ppos + Vector2(0, -17 - cpg * 2.0),
+				Color(crring.r, crring.g, crring.b, 0.28 + cpg * 0.18), 1.4)
 		_spr(tex_name, ppos + (Vector2(0, -2.0 * cpg) if pk["kind"] <= 3 else Vector2.ZERO), 0.0, 0.55, mod)
 		# Identity glyph floats above every crate (the vest crate reuses the
 		# ammo sprite, so it's ambiguous without this).
@@ -8873,6 +8948,7 @@ func _draw_pickups() -> void:
 			_world_label(_CAPSULE_LABEL[cap_i], ppos + Vector2(-13, -24), pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
+			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
 			_world_label("MAXED", ppos + Vector2(-15, -25), Color(0.6, 0.6, 0.6))
@@ -9017,6 +9093,26 @@ static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
 			var led: Array = SimWorld.mg_nest_led_aim(e, tgt["x"] - e["x"], tgt["y"] - e["y"])
 			return Vector2(float(led[0]), float(led[1]))
 	return Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
+
+
+func _draw_live_rifleman_marker(pos: Vector2, windup: int) -> void:
+	## Ordinary infantry and their corpses share uniforms; only a living rifleman
+	## gets this warm footprint and downward chevron. Shape, not hue alone, carries
+	## the alive/dead read. Windup brightens it without turning every unit elite-loud.
+	var charge := 0.0 if windup <= 0 else \
+		1.0 - float(windup) / float(SimWorld.RIFLEMAN_WINDUP_TICKS)
+	draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-11.0, -4.0), Vector2(22.0, 14.0)),
+		false, Color(0.42, 0.08, 0.035, 0.12 + charge * 0.08))
+	var tip := pos + Vector2(0, -11.0)
+	var col := Color(1.0, 0.78 + charge * 0.14, 0.42 + charge * 0.35, 0.62 + charge * 0.28)
+	Art.line(self, tip + Vector2(-4, -4) + Vector2(1, 1), tip + Vector2(1, 1),
+		Color(0, 0, 0, 0.6), 3.0)
+	Art.line(self, tip + Vector2(1, 1), tip + Vector2(4, -4) + Vector2(1, 1),
+		Color(0, 0, 0, 0.6), 3.0)
+	Art.line(self, tip + Vector2(-4, -4), tip, col, 1.4)
+	Art.line(self, tip, tip + Vector2(4, -4), col, 1.4)
+	if windup > 0 and windup <= 5:
+		Art.circle(self, tip + Vector2(0, -6), 1.6, Color(1, 1, 1, 0.95))
 
 
 func _draw_enemies() -> void:
@@ -9552,8 +9648,30 @@ func _draw_enemies() -> void:
 				epos, face, 0.62 * esw)
 		else:
 			var rusher_key: String = _RUSHER_SKINS[e.get("skin", 0)]
+			# The ordinary gunman's short aim tell is quieter/smaller than the elite
+			# alarm, but it paints the exact locked lane the upcoming round will use.
+			var rwu: int = e.get("windup", 0)
+			_draw_live_rifleman_marker(epos, rwu)
+			if rwu > 0:
+				var rfrac := 1.0 - float(rwu) / float(SimWorld.RIFLEMAN_WINDUP_TICKS)
+				var raim := telegraph_dir(sim, e)
+				var rdir := raim.normalized() if raim.length() > 0.001 else Vector2.from_angle(face)
+				var rstart := epos + rdir * 8.0
+				var rend := epos + rdir * (31.0 + rfrac * 9.0)
+				# Dark under-stroke survives sand, water and orange blast clutter.
+				Art.line(self, rstart + Vector2(1, 1), rend + Vector2(1, 1),
+					Color(0, 0, 0, 0.48 + rfrac * 0.2), 3.0)
+				Art.line(self, rstart, rend,
+					Color(1.0, 0.55, 0.28, 0.3 + rfrac * 0.55), 1.2)
+				# Last five ticks flip the lane's muzzle end white: an unambiguous lock
+				# beat that is still present when ambient motion is reduced.
+				if rwu <= 5:
+					Art.line(self, rend - rdir * 7.0, rend, Color(1, 1, 1, 0.92), 1.8)
+				Art.circle(self, epos + rdir * 7.0, 1.0 + rfrac * 1.4,
+					Color(1.0, 0.72, 0.32, 0.4 + rfrac * 0.4))
 			var rusher_pose := enemy_anim_state(e, e_moved, enemy_phase, sim.flash_ticks > 0)
-			_spr_texture(Art.enemy_anim(rusher_key, rusher_pose), rusher_key, epos, face, 0.5)
+			_spr_texture(Art.enemy_anim(rusher_key, rusher_pose), rusher_key, epos, face,
+				LIVE_RIFLEMAN_SCALE)
 		# Flashbang stun state ON the body: the wash decays in ~0.2s but the
 		# freeze lasts 1.5s — and reduce-motion zeroes the wash entirely, so
 		# frozen enemies with no mark read as a bug. Steady ring + orbit dots
@@ -10299,19 +10417,24 @@ func _draw_projectiles() -> void:
 		# visibly reads 2× the standard round (speed 3): ~5px → ~11px tail.
 		var espd := evel.length() / float(SimWorld.ENEMY_BULLET_SPEED)   # 1.0 standard, ~2.0 fast
 		var fast: bool = espd > 1.4
+		var etlen := 5.0 + maxf(0.0, espd - 1.0) * 6.0
+		# Glow is a BACKLIGHT, not a veil over the projectile card. Draw it first
+		# so the dark travel keyline and white nose remain crisp over corpse pools.
+		var egr := 4.8 if fast else 4.2
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
+			false, Color(1.0, 0.22, 0.12, 0.48 if fast else 0.4))
 		if edir.length() > 0.5:
 			# Standard and sniper cards share the hostile crimson/white vocabulary;
 			# the fast sniper penetrator is materially longer and slimmer.
-			var etlen := 5.0 + maxf(0.0, espd - 1.0) * 6.0
+			Art.line(self, bpos - edir * (etlen + 2.0) + Vector2(1, 1), bpos + Vector2(1, 1),
+				Color(0.01, 0.005, 0.005, 0.68), 3.0 if fast else 2.4)
 			draw_set_transform(bpos, edir.angle(), Vector2.ONE)
 			draw_texture_rect(Art.tex("bullet_sniper" if fast else "bullet_enemy"),
 				Rect2(-etlen, -2.0, etlen, 4.0), false, Color.WHITE)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		# Hostile fire: small glowing red orb — ordnance, not infantry. Fast rounds
-		# burn a white-hot core so their speed reads before they reach you.
-		var egr := 4.4
-		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
-			false, Color(1.0, 0.3, 0.15, 0.55))
+		# White-hot nose is the motion-direction read and keeps hostile ordnance
+		# distinct from red ground splats and stationary impact sparks.
+		Art.circle(self, bpos, 1.25 if fast else 1.0, Color(1.0, 1.0, 0.94, 0.95))
 
 
 static func _player_ident_color(slot: int, a := 1.0) -> Color:
@@ -10320,6 +10443,15 @@ static func _player_ident_color(slot: int, a := 1.0) -> Color:
 	# off-screen partner chevron, and the downed body so identity reads consistently.
 	var base := Art.safe(Color(0.4, 1.0, 0.4)) if slot == 0 else Color(1.0, 0.85, 0.3)
 	return Color(base.r, base.g, base.b, a)
+
+
+static func hero_locator_alpha(tick_count: int, hurt_iframes: int) -> float:
+	## Strong on a respawn mercy window; otherwise a five-second onboarding fade.
+	if hurt_iframes > 0:
+		return 0.92
+	if tick_count < 0 or tick_count >= HERO_LOCATOR_TICKS:
+		return 0.0
+	return 0.25 + 0.67 * (1.0 - float(tick_count) / float(HERO_LOCATOR_TICKS))
 
 
 static func _body_ident_lean(slot: int) -> Color:
@@ -10423,12 +10555,33 @@ func _draw_players() -> void:
 			# so it never reads as danger-red), and P1/P2 are SHAPE-distinct — P1 a SOLID
 			# ring, P2 a DASHED ring — so identity survives without the green-vs-gold hue.
 			var idc := _player_ident_color(i, 0.6)
+			# Neutral seat + soft cool footprint: the colored identity ring used to
+			# disappear on pale sand and water. The backing carries no team meaning;
+			# it only guarantees the ring's silhouette on every biome.
+			draw_texture_rect(Art.tex("fx_softspot"),
+				Rect2(pos + Vector2(-13.0, -4.0), Vector2(26.0, 18.0)), false,
+				Color(0.02, 0.025, 0.03, 0.16))
+			Art.arc(self, pos + Vector2(0, 5), 11.5, 0, TAU, 22,
+				Color(0.01, 0.015, 0.02, 0.58), 3.0)
 			if _player_ring_dashed(i):
 				for ds in 8:
 					var da := ds * TAU / 8.0
 					Art.arc(self, pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
 			else:
 				Art.arc(self, pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+			# The opening/respawn command chevron answers "where am I?" during the
+			# exact beats where a small overhead sprite is easiest to lose, then fades.
+			var locator_a := hero_locator_alpha(sim.tick_count, p.get("hurt_iframes", 0))
+			if locator_a > 0.0:
+				var la := pos + Vector2(0, -17.0)
+				var lcol := _player_ident_color(i, locator_a)
+				Art.line(self, la + Vector2(-4, -4) + Vector2(1, 1), la + Vector2(1, 1),
+					Color(0, 0, 0, locator_a * 0.65), 3.0)
+				Art.line(self, la + Vector2(1, 1), la + Vector2(4, -4) + Vector2(1, 1),
+					Color(0, 0, 0, locator_a * 0.65), 3.0)
+				Art.line(self, la + Vector2(-4, -4), la, lcol, 1.5)
+				Art.line(self, la, la + Vector2(4, -4), lcol, 1.5)
+				Art.line(self, la + Vector2(0, -9), la + Vector2(0, -5), lcol, 1.5)
 			# Revive-from-here affordance: revive has NO range check (the buddy
 			# teleports to you), but the beacon on the body implies you must run
 			# to it. Tell the reviver they can pay from where they stand.
@@ -11311,6 +11464,18 @@ static func _scorch_age(tt: float) -> float:
 	return minf(tt + 0.003, 0.82)
 
 
+static func corpse_visual(age: float) -> Dictionary:
+	## Corpses are ground information, not target silhouettes. Living infantry
+	## own the warm separator rim and upright 0.5 scale; a corpse loses that rim,
+	## settles smaller, flattens harder, and desaturates into the blood-pool layer.
+	## Keeping this pure lets the readability contract stay headless-testable.
+	var t := clampf(age, 0.0, 1.0)
+	var pop := 1.0 + maxf(0.0, 0.35 - t * 3.0)
+	var settle := maxf(0.0, 1.0 - t * 4.0)
+	return {"scale": 0.37 * pop, "stretch": 0.42 + 0.12 * settle,
+		"tint": Color(0.22, 0.225, 0.21, 0.58 * (1.0 - t)), "with_rim": false}
+
+
 func _draw_scorch() -> void:
 	# Lingering ground scorch under everything — battlefield keeps its scars.
 	for s in _scorch:
@@ -11370,21 +11535,24 @@ func _draw_scorch() -> void:
 		# owned Apocalypse-HUD blood-splat card (organic edge) instead of a flat disc.
 		# (skipped for water kills — a puddle in a river reads wrong)
 		if not c.get("wet", false):
-			var bpr := (3.0 + minf(ct, 0.2) * 20.0) * 2.1   # splat radius ≈ the old disc footprint
+			# Keep blood as a low-value ground scar, not another saturated live-threat
+			# cluster. Smaller pools also stop overlapping bodies from forming one
+			# formation-sized red snake.
+			var bpr := (3.0 + minf(ct, 0.18) * 18.0) * 1.65
 			draw_texture_rect(Art.tex("hudfx_blood"),
 				Rect2(cp + Vector2(0, 2) - Vector2.ONE * bpr, Vector2.ONE * bpr * 2.0),
-				false, Color(0.34, 0.04, 0.04, 0.45 * fade))
-		# Death squash-pop: a quick scale bump on impact that settles into a
-		# flattened corpse (via _spr's stretch param).
-		var pop := 1.0 + maxf(0.0, 0.35 - ct * 3.0)
-		var squash := 1.0 - minf(ct * 2.5, 1.0) * 0.2
+				false, Color(0.18, 0.025, 0.02, 0.28 * fade))
+		# Death squash-pop settles into a smaller, flatter, rimless silhouette.
+		# The warm rim is reserved for living threats, so a pile of bodies cannot
+		# masquerade as another active formation.
+		var cv := corpse_visual(ct)
 		var corpse_key: String = c["kind"]
 		if Art.ENEMY_ANIM.has(corpse_key):
 			_spr_texture(Art.enemy_anim(corpse_key, "downed"), corpse_key, cp, c["spin"],
-				0.5 * pop, Color(0.45, 0.42, 0.4, 0.85 * fade), squash)
+				cv["scale"], cv["tint"], cv["stretch"], 1.0, cv["with_rim"])
 		else:
-			_spr(corpse_key, cp, c["spin"], 0.5 * pop,
-				Color(0.45, 0.42, 0.4, 0.85 * fade), squash)
+			_spr(corpse_key, cp, c["spin"], cv["scale"], cv["tint"],
+				cv["stretch"], cv["with_rim"])
 
 
 func _draw_telegraphs() -> void:
@@ -11751,9 +11919,21 @@ func _draw_objective_markers() -> void:
 			placed.append(ep)
 			# Priority reads at a glance: objectives (gate/boss) get a bigger
 			# diamond than loot pointers — no need to parse the 8px icon first.
-			var pr: float = 6.5 if int(m["pr"]) == 0 else 4.5
+			var critical := int(m["pr"]) == 0
+			var pr: float = PRIMARY_MARKER_RADIUS if critical else 4.5
+			if critical:
+				# Mission-critical marks get a neutral backing and four short rays.
+				# This turns the old second-tiny-diamond read into a flag beacon while
+				# preserving the smaller un-rayed loot language beside it.
+				_marker_diamond(ep, pr + 2.0, Color(0.015, 0.012, 0.01, 0.88))
 			_marker_diamond(ep, pr, m["col"])
-			draw_texture_rect(Art.tex(m["icon"]), Rect2(ep - Vector2(4, 4), Vector2(8, 8)), false, m["col"])
+			if critical:
+				for rv in [Vector2.UP, Vector2.RIGHT, Vector2.DOWN, Vector2.LEFT]:
+					Art.line(self, ep + rv * (pr + 2.0), ep + rv * (pr + 5.0),
+						Color(m["col"].r, m["col"].g, m["col"].b, 0.9), 1.5)
+			var icon_sz := 10.0 if critical else 8.0
+			draw_texture_rect(Art.tex(m["icon"]),
+				Rect2(ep - Vector2.ONE * icon_sz / 2.0, Vector2.ONE * icon_sz), false, m["col"])
 
 
 static func _marker_icon(cls: String) -> String:

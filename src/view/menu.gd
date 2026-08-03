@@ -5048,6 +5048,19 @@ func _howto_tr(source: String) -> String:
 	return TranslationServer.translate(source)
 
 
+func _howto_mode_entries() -> Array:
+	## One source for the default compact list and the accessible large-text
+	## pager. Every selectable run mode is named here; ASSIST follows because it
+	## changes the same run contract.
+	return [
+		["hud_flag", "CAMPAIGN", "Six sectors to the Foundry finale."],
+		["mi_play", "ARCADE", "Choose a starting zone; play to the finale."],
+		["mi_combat", "BOSS RUSH", "Three escalating gunships, then the Colossus."],
+		["hud_skull", "ENDLESS WAR", "Escalating survival waves for score."],
+		["mi_timer", "DAILY RUN", "Shared daily seed; one ranked attempt."],
+		["icon_vest", "ASSIST (2-HIT)", "Two hits per life; tagged *ASSIST."]]
+
+
 # Locale-safe wrapping for the large-text manual. Space-delimited languages wrap
 # on words; an individual over-wide token (including an entire CJK sentence) is
 # split on Unicode character boundaries. No ellipsis or hard clipping is used.
@@ -5104,16 +5117,15 @@ func _howto_large_entries(tab: int) -> Array:
 				{"kind": "body", "text": _howto_tr("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
 				{"kind": "action", "action": "wheel", "text": "Hold to open the supply wheel."}]
 		2:
-			return [
-				{"kind": "heading", "text": "MODES + ASSIST:", "size": 10},
-				{"kind": "sprite", "icon": "hud_flag", "text": "CAMPAIGN — Fight up six sectors to the Foundry finale. The main run."},
-				{"kind": "sprite", "icon": "hud_skull", "text": "ENDLESS WAR — Hold out against escalating waves for score. Ranged threats join wave 3+."},
-				{"kind": "sprite", "icon": "mi_timer", "text": "DAILY RUN — One shared seed a day, one attempt. Everyone races the same board."},
-				{"kind": "sprite", "icon": "icon_vest", "text": "ASSIST (2-HIT) — Each life takes TWO hits, not one. Runs are tagged *ASSIST."}]
+			var out: Array = [{"kind": "heading", "text": "MODES + ASSIST:", "size": 10}]
+			for row in _howto_mode_entries():
+				out.append({"kind": "sprite", "icon": row[0],
+					"text": "%s — %s" % [row[1], row[2]]})
+			return out
 		3:
 			return [
 				{"kind": "heading", "text": "THE RED TEAM — WHO'S SHOOTING BACK:", "size": 10},
-				{"kind": "sprite", "icon": "enemy_smg", "text": "RUSHER — charges, touch kills"},
+				{"kind": "sprite", "icon": "enemy_smg", "text": "RIFLEMAN — holds range, telegraphs and fires; contact still kills"},
 				{"kind": "sprite", "icon": "enemy_assault", "text": "ELITE — keeps range, telegraphs one shot"},
 				{"kind": "sprite", "icon": "frogman", "text": "FROGMAN — submerged: bullets pass over, GRENADES ONLY"},
 				{"kind": "sprite", "icon": "m_pilot", "text": "DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him."}]
@@ -5353,40 +5365,22 @@ func _howto_page_warchest() -> void:
 func _howto_page_modes() -> void:
 	var y := CONTENT_BODY_Y
 	Art.text(self, "MODES + ASSIST:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
-	# 22 put the first 26px icon box at y100..126 — its TOP EDGE exactly on this size-10
-	# header's baseline (box [91,102]), so the flag sprite read as sitting on the copy.
-	# 30 gives the box top y108, 6px under the header's descender.
-	y += 30.0
+	y += 25.0
 	var name_col := Color(1.0, 0.85, 0.45)
 	var body_col := Color(0.9, 0.92, 0.82)
-	# [icon, NAME, tip] — each mode leads with a glyph so the page shares the sprite-led row
-	# grammar of the ENEMIES / ENDLESS rosters instead of reading as a bare text column: flag =
-	# the campaign advance, skull = the endless swarm, timer = the once-a-day run, vest = the
-	# extra hit of armor ASSIST grants. NAMES mirror the RUN SETUP menu rows verbatim
-	# ("CAMPAIGN" / "ENDLESS WAR" / "DAILY RUN") — that is the label the player actually clicks, so
-	# the page teaches the exact word on the button, not the "SPECIALS" the roster TAB uses.
-	var modes := [
-		["hud_flag", "CAMPAIGN", "Fight up six sectors to the Foundry finale. The main run."],
-		["hud_skull", "ENDLESS WAR", "Hold out against escalating waves for score. Ranged threats join wave 3+."],
-		["mi_timer", "DAILY RUN", "One shared seed a day, one attempt. Everyone races the same board."],
-		["icon_vest", "ASSIST (2-HIT)", "Each life takes TWO hits, not one. Runs are tagged *ASSIST."]]
-	for m in modes:
+	# Six compact rows fit above BACK at the default 100% text size. Enlarged
+	# text uses _howto_large_entries() and paginates instead of compressing.
+	for m in _howto_mode_entries():
 		# c4-09: guard the glyph key BEFORE Art.tint()/_draw_sprite_fit so a renamed or
 		# missing icon never reaches Art.tex()'s hard TEX[key] index — the row falls back
 		# to its amber NAME + tip (the load-bearing copy) instead of crashing the screen.
 		if Art.TEX.has(m[0]):
-			_draw_sprite_fit(m[0], Rect2(ICON_X, y - 22, 28, 26), Art.tint(m[0]))
+			_draw_sprite_fit(m[0], Rect2(ICON_X + 2.0, y - 17.0, 20.0, 20.0), Art.tint(m[0]))
 		var nm: String = m[1]
-		Art.text(self, nm, Vector2(TEXT_X, y - 6), 11, name_col)
-		# The tip drops to its OWN line under the amber NAME (it used to trail it on
-		# one line and run to x862 — 291px past the border, hard-clipped mid-word).
-		# ...which made the fixed 36px pitch too tight: a tip that WRAPS puts its second
-		# baseline at y+19 (box [y+9, y+21]) while the next row's amber NAME cap top sat
-		# at y+20 — a 1px strike-through, so "run." and "ENDLESS WAR" read as one line.
-		# Advance off the block's OWN returned end instead of a constant, so a wrapped
-		# row takes the room it needs and a single-line row keeps the tighter pitch.
-		var after := _body_block(m[2], TEXT_X, y + 7, 11, body_col, BODY_W)
-		y = maxf(after + 8.0, y + 32.0)
+		Art.text(self, nm, Vector2(TEXT_X, y - 5.0), 10, name_col)
+		var nx := TEXT_X + Art.tw(nm, 10) + 8.0
+		Art.text(self, "— " + String(m[2]), Vector2(nx, y - 5.0), 9, body_col)
+		y += 29.0
 
 
 # c3-05 ENEMIES tab — the standard red-team roster with live sprites, at a roomy pitch
@@ -5399,7 +5393,7 @@ func _howto_page_enemies() -> void:
 	# c4-09: the FROGMAN line now names its bullet-IMMUNITY outright — while submerged, bullets pass
 	# clean over it (grenades only), so "GRENADES ONLY" reads as a rule, not a preference, and ammo
 	# isn't emptied into a bullet-proof target. The HUD posts the same immunity beside the counter.
-	var roster := [["enemy_smg", "RUSHER — charges, touch kills"],
+	var roster := [["enemy_smg", "RIFLEMAN — holds range, telegraphs and fires; contact still kills"],
 		["enemy_assault", "ELITE — keeps range, telegraphs one shot"],
 		["frogman", "FROGMAN — submerged: bullets pass over, GRENADES ONLY"]]
 	for r in roster:

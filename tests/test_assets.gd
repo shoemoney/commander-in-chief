@@ -139,6 +139,26 @@ func test_a1_enemy_muzzle_targets_nearest_alive_player() -> void:
 	Runner.T.eq(np2["x"], 500 * Fixed.ONE, "a dead nearer player is skipped; aims at the live one")
 
 
+func test_boot_audio_stays_silent_until_the_commanders_opening_line_finishes() -> void:
+	var sfx := Sfx.new()
+	var line := AudioStreamWAV.new()
+	sfx._vo_streams["intro_crawl"] = line
+	sfx._vo_streams["vo_observer"] = AudioStreamWAV.new()
+	sfx.lock_startup_audio()
+	Runner.T.ok(sfx.is_startup_audio_locked(), "boot begins behind an explicit audio lock")
+
+	# No incidental VO is allowed to become the first audible event.
+	sfx.play_vo("vo_observer", 3)
+	Runner.T.eq(sfx._vo.stream, null, "ordinary VO is suppressed before the opening line")
+
+	Runner.T.ok(sfx.play_startup_line("intro_crawl"), "the Commander opening line bypasses the lock")
+	Runner.T.eq(sfx._vo_dry.stream, line, "the opening line is routed as the first dry voice")
+	Runner.T.ok(sfx.is_startup_audio_locked(), "music/SFX remain locked while the Commander is speaking")
+	sfx._vo_dry.finished.emit()
+	Runner.T.ok(not sfx.is_startup_audio_locked(), "the rest of the mix unlocks only after the line finishes")
+	sfx.free()
+
+
 # --- a1-13: no SFX event maps to a nonexistent (silent) synth voice ---
 
 func test_a1_every_event_sound_resolves_to_a_synth_voice() -> void:
@@ -881,7 +901,8 @@ func test_a4_top_prey_shared_by_both_cards() -> void:
 	# a4-16: the run-story TOP PREY row — shared by the victory + K.I.A. cards (parity + DRY).
 	var ms = load("res://src/main.gd")
 	Runner.T.eq(ms._top_prey_text({}), "", "no kills -> no TOP PREY row")
-	Runner.T.eq(ms._top_prey_text({"rusher": 37, "elite": 4}), "TOP PREY  RUSHER x37", "the most-killed kind + count, upper-cased")
+	Runner.T.eq(ms._top_prey_text({"rusher": 37, "elite": 4}), "TOP PREY  RIFLEMAN x37",
+		"the legacy sim key is presented as the armed troop the player actually fights")
 	Runner.T.eq(ms._top_prey_text({"elite": 9}), "TOP PREY  ELITE x9", "a single kind")
 	# Stable tie-break: equal counts -> alphabetically first, regardless of insertion order.
 	Runner.T.eq(ms._top_prey_text({"rusher": 5, "elite": 5}), "TOP PREY  ELITE x5", "a tie breaks alphabetically (stable)")

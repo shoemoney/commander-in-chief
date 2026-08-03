@@ -306,6 +306,59 @@ func test_splash_skip_prompt_only_appears_once_skip_is_armed() -> void:
 	# And it is drawn inside the 360px canvas, low-center, clear of the crawl/wordmark rows.
 	Runner.T.ok(float(ms.SPLASH_SKIP_Y) < 360.0 and float(ms.SPLASH_SKIP_Y) > 300.0,
 		"the skip prompt sits low-center inside the canvas (y=%d)" % int(ms.SPLASH_SKIP_Y))
+
+
+func test_splash_skip_press_is_consumed_before_title_menu_activation() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var begin := src.find("func _input(event: InputEvent) -> void:")
+	var after := src.find("\nfunc ", begin + 5)
+	var body := src.substr(begin, after - begin)
+	var branch := body.find("if _splash_t > 0.0 and _splash_is_skip(event):")
+	var dismiss := body.find("_end_splash()", branch)
+	var consume := body.find("get_viewport().set_input_as_handled()", dismiss)
+	var stop := body.find("\n\t\treturn", consume)
+	var next_handler := body.find("# Fullscreen:", branch)
+	Runner.T.ok(branch >= 0 and dismiss > branch,
+		"the splash press dismisses the splash inside Main._input")
+	Runner.T.ok(consume > dismiss and stop > consume and stop < next_handler,
+		"the exact skip press is marked handled and returns before any title/menu action can see it")
+
+
+func test_corpses_drop_the_living_threat_silhouette() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var fresh: Dictionary = ms.corpse_visual(0.0)
+	var settled: Dictionary = ms.corpse_visual(0.25)
+	Runner.T.ok(not settled["with_rim"],
+		"a corpse loses the warm separator rim reserved for living threats")
+	Runner.T.ok(float(fresh["scale"]) < float(ms.LIVE_RIFLEMAN_SCALE),
+		"even a fresh death occupies less silhouette area than a living rifleman")
+	Runner.T.ok(float(settled["scale"]) < 0.4,
+		"a settled corpse is smaller than an upright living infantry sprite")
+	Runner.T.ok(float(settled["stretch"]) <= 0.43,
+		"a settled corpse is visibly flattened into the ground layer")
+	var col: Color = settled["tint"]
+	Runner.T.ok(maxf(col.r, maxf(col.g, col.b)) - minf(col.r, minf(col.g, col.b)) < 0.05,
+		"corpse tint is desaturated instead of repeating the living red-team palette")
+	Runner.T.ok(col.a < 0.5,
+		"a settled body has already ceded value priority to living units")
+
+
+func test_battlefield_locators_are_strong_when_needed_then_leave() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.hero_locator_alpha(0, 0) > 0.8,
+		"the hero command chevron is strong on the first frame")
+	Runner.T.eq(ms.hero_locator_alpha(ms.HERO_LOCATOR_TICKS, 0), 0.0,
+		"the onboarding chevron leaves after its authored window")
+	Runner.T.ok(ms.hero_locator_alpha(ms.HERO_LOCATOR_TICKS + 100, 12) > 0.8,
+		"a later respawn mercy window restores the locator")
+	Runner.T.ok(ms.opening_route_alpha(0, 0, 0) > 0.9,
+		"the untouched landing zone starts with a readable northbound route")
+	Runner.T.eq(ms.opening_route_alpha(ms.OPENING_ROUTE_TICKS, 0, 0), 0.0,
+		"the route fades out instead of becoming permanent field clutter")
+	Runner.T.eq(ms.opening_route_alpha(0, 0, 1), 0.0,
+		"an opened gate permanently retires the landing-zone teaching arrows")
+	Runner.T.ok(float(ms.PRIMARY_MARKER_RADIUS) > 6.5,
+		"mission-critical edge markers visibly outrank the old tiny diamond")
 # --- 2P co-op pad-assignment gate ---
 
 func test_p2_pad_gate_asks_for_device_1_not_a_pad_count() -> void:
@@ -1032,12 +1085,21 @@ func test_scripted_bot_locks_a_target_in_endless_where_every_campaign_branch_is_
 	lock = ms._demo_boss_target(sim, p)
 	Runner.T.eq(lock["y"], p["y"] - 30 * Fixed.ONE, "the nearer body wins the lock")
 
-	# Campaign must be untouched by the endless branch — it returns {} with no gates.
+	# A lone campaign rifleman does not distract the bot from its demolition duty.
 	var csim := SimWorld.new(7, 1, "campaign")
 	csim.enemies.clear()
-	csim.enemies.append({"x": 40 * Fixed.ONE, "y": 0, "alive": true, "kind": 0, "hp": 1})
+	csim.enemies.append({"x": 40 * Fixed.ONE, "y": 0, "alive": true,
+		"kind": "rusher", "hp": 1})
 	Runner.T.ok(ms._demo_boss_target(csim, csim.players[0]).is_empty(),
-		"campaign still ignores loose infantry — the boss-only policy that measured best on 8 seeds")
+		"campaign ignores a small rifle line so objective demolition keeps its aim window")
+	# Six stationary riflemen are no longer background pressure: unlike old
+	# rushers they will never walk into the sweep, so the demo must actively thin
+	# the line before it fills all 64 slots and freezes the attract run.
+	for i in 5:
+		csim.enemies.append({"x": (80 + i * 20) * Fixed.ONE, "y": -80 * Fixed.ONE,
+			"alive": true, "kind": "rusher", "hp": 1})
+	Runner.T.ok(not ms._demo_boss_target(csim, csim.players[0]).is_empty(),
+		"campaign locks a six-rifle formation before it can saturate the roster")
 
 
 func test_attract_bot_still_finishes_the_campaign_on_the_shipped_seed() -> void:

@@ -6566,6 +6566,23 @@ func test_modes_and_chapter_select_screens() -> void:
 	stub.free()
 
 
+func test_field_manual_documents_arcade_and_boss_rush() -> void:
+	var m := Menu.new()
+	var labels: Array[String] = []
+	for row in m._howto_mode_entries():
+		labels.append(String(row[1]))
+	Runner.T.ok("ARCADE" in labels, "the MODES manual names Arcade")
+	Runner.T.ok("BOSS RUSH" in labels, "the MODES manual names Boss Rush")
+	Runner.T.eq(labels.size(), 6,
+		"the manual covers all five run modes plus the Assist rules toggle exactly once")
+	var large_copy := ""
+	for entry in m._howto_large_entries(2):
+		large_copy += String(entry.get("text", "")) + "\n"
+	Runner.T.ok("ARCADE" in large_copy and "BOSS RUSH" in large_copy,
+		"the accessible large-text pager carries the same complete mode roster")
+	m.free()
+
+
 # endless-meta-retention: SETUP -> VETERAN PERKS -> BACK, proving the SETUP row
 # actually opens the real Mode.PERKS screen (not just that back_dest() maps it,
 # which test_modes_and_chapter_select_screens-style unit checks already cover

@@ -150,6 +150,54 @@ var _sfx_cap_next: Dictionary = {}   # SFX_CAPTIONS key -> earliest physics fram
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
 var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
 var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
+var _startup_audio_locked := false
+var _boot_audio_ready := false
+var _bed_loops_started := false
+
+
+func lock_startup_audio() -> void:
+	## Main calls this before Sfx enters the tree. Synth/loading may proceed behind
+	## the splash, but no audible channel may start before the opening line.
+	_startup_audio_locked = true
+
+
+func is_startup_audio_locked() -> bool:
+	return _startup_audio_locked
+
+
+func unlock_startup_audio() -> void:
+	_startup_audio_locked = false
+	_start_bed_loops_if_ready()
+
+
+func _start_bed_loops_if_ready() -> void:
+	if _startup_audio_locked or not _boot_audio_ready or _bed_loops_started:
+		return
+	_bed_loops_started = true
+	for pl in [_music, _music_lull, _music_riff, _music_riff_lull, _amb,
+			_river, _foundry, _shop]:
+		(pl as AudioStreamPlayer).play()
+
+
+func play_startup_line(key: String) -> bool:
+	## The one sound allowed through the boot lock. The rest of the mix unlocks
+	## from the line's finished signal, leaving the Commander an uncontested read.
+	if not _vo_streams.has(key):
+		unlock_startup_audio()   # missing/corrupt VO must never strand permanent silence
+		return false
+	var done := Callable(self, "_on_startup_line_finished")
+	if not _vo_dry.finished.is_connected(done):
+		_vo_dry.finished.connect(done, CONNECT_ONE_SHOT)
+	_vo_priority = 3
+	_vo_dry.stream = _vo_streams[key]
+	if is_inside_tree():
+		_vo_dry.play()
+	return true
+
+
+func _on_startup_line_finished() -> void:
+	_vo_priority = -1
+	unlock_startup_audio()
 
 
 func _process(_delta: float) -> void:
@@ -335,10 +383,6 @@ func _finish_boot_audio() -> void:
 	_music_riff_lull.bus = "Music"
 	_music_riff_lull.volume_db = -60.0
 	add_child(_music_riff_lull)
-	_music.play()
-	_music_lull.play()
-	_music_riff.play()
-	_music_riff_lull.play()
 	# Ambience bed (6-vote: dead air between fights): one baked 14.3s wind
 	# loop — lowpassed hash noise, 0.07 Hz swell LFO baked in (integer cycle =
 	# seamless). Rides the Music bus so the concussion LPF muffles it for free.
@@ -356,7 +400,6 @@ func _finish_boot_audio() -> void:
 	_amb.bus = "Music"
 	_amb.volume_db = -30.0
 	add_child(_amb)
-	_amb.play()
 	# a3-15 (AUD#7/8/10): three place-defining ambience beds crossfade over the wind so each
 	# sector sounds like SOMEWHERE — a river burble near water, a foundry-machinery hum deep
 	# in the march, a calm pad in the intermission shop. All start silent and ride the Music
@@ -367,7 +410,8 @@ func _finish_boot_audio() -> void:
 		pl.bus = "Music"
 		pl.volume_db = -60.0
 		add_child(pl)
-		pl.play()
+	_boot_audio_ready = true
+	_start_bed_loops_if_ready()
 
 
 func play_vo(key: String, priority := 1, dry := false) -> void:
@@ -375,7 +419,7 @@ func play_vo(key: String, priority := 1, dry := false) -> void:
 	## > denials/pilot (2) > warnings (1) > flavor (0). Higher interrupts,
 	## equal-or-lower drops while a line is on air. Rate limiting is the
 	## caller's job (main.gd keys throttles per trigger).
-	if not _vo_streams.has(key):
+	if _startup_audio_locked or not _vo_streams.has(key):
 		return
 	var ply := _vo_dry if dry else _vo
 	if _vo.playing or _vo_dry.playing:
@@ -466,7 +510,7 @@ func play_cmd_bark(event: String, min_gap := 48, force := false) -> bool:
 	## the cooldown and interrupts an in-flight flavor bark so the big moment lands.
 	## randi() is fine here: the whole VO layer is view-side, excluded from the
 	## determinism checksum (same as the spawn-shout / death-yell pools).
-	if not _cmd_barks.has(event):
+	if _startup_audio_locked or not _cmd_barks.has(event):
 		return false
 	var f := Engine.get_physics_frames()
 	if not force:
@@ -663,6 +707,8 @@ func _load_spawn_shouts() -> void:
 
 
 func _play_bank_at(bank: Array, screen_pos: Vector2, vol_db: float) -> void:
+	if _startup_audio_locked:
+		return
 	## Steal a 2D pool voice and fire a random clip from `bank` at screen_pos.
 	if bank.is_empty() or _pool.is_empty():
 		return
@@ -712,6 +758,8 @@ func _rr_shot(sound: String) -> String:
 
 
 func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
+	if _startup_audio_locked:
+		return
 	sound = _rr_shot(sound)
 	if _pb == null or not _sounds.has(sound):
 		return
@@ -725,6 +773,8 @@ func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
 
 
 func play_at(sound: String, screen_pos: Vector2, vol_db := 0.0, pitch := 1.0) -> void:
+	if _startup_audio_locked:
+		return
 	sound = _rr_shot(sound)
 	if _pool.is_empty() or not _sounds.has(sound):
 		return
@@ -869,6 +919,8 @@ func _to_wav_loop(samples: PackedFloat32Array) -> AudioStreamWAV:
 func engine_at(key: int, screen_pos: Vector2, on: bool) -> void:
 	## Persistent positional engine voices (NOT the steal-pool — the steal
 	## policy would cut a loop mid-growl). Cap 4; campaign fields 2-3 tanks.
+	if _startup_audio_locked:
+		return
 	if on and not _engines.has(key):
 		if _engines.size() >= 4 or _engine_wav == null:
 			return

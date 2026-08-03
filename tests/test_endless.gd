@@ -1098,9 +1098,10 @@ func test_no_hostile_stalls_an_endless_wave() -> void:
 	## elsewhere) so the wave march keeps progressing without a working combat
 	## bot. 800 > the 300-tick pin, so any wedge in a cycle's first 800 ticks
 	## still trips it before that cycle's fiat clear erases it.
-	## Track every rusher/shield by REFERENCE (dicts are swept from enemies[]
+	## Track every shieldman by REFERENCE (dicts are swept from enemies[]
 	## on death, so a stashed ref would go stale silently otherwise), failing
-	## if any of them sits at the exact same position for 300+ ticks running.
+	## if one sits at the exact same position for 300+ ticks while still short of
+	## its target. Base riflemen are intentionally stationary at their firing line.
 	var sim := SimWorld.new(2, 1, "endless")
 	var tracked: Array = []   # [{ref, x, y, streak, max_streak, kind}]
 	for t in 6000:
@@ -1116,7 +1117,7 @@ func test_no_hostile_stalls_an_endless_wave() -> void:
 				any_alive = true
 				break
 		for e in sim.enemies:
-			if not e["alive"] or (e["kind"] != "rusher" and e["kind"] != "shield"):
+			if not e["alive"] or e["kind"] != "shield":
 				continue
 			# Sitting adjacent to a stationary player it has actually REACHED is
 			# a legitimate stop (touch range), not a wedge -- only count a hold
@@ -1150,7 +1151,7 @@ func test_no_hostile_stalls_an_endless_wave() -> void:
 			worst = te["max_streak"]
 			worst_kind = te["kind"]
 	Runner.T.ok(worst < 300,
-		"no rusher/shield sits stationary for 300+ ticks (worst: %s streak %d ticks)" % [worst_kind, worst])
+		"no advancing shieldman sits stationary for 300+ ticks (worst streak %d ticks)" % worst)
 
 
 func test_airstrike_buy_denied_during_intermission() -> void:

@@ -10,6 +10,70 @@ func _idle() -> SimInput:
 	return SimInput.new()
 
 
+func test_ordinary_gunmen_hold_range_and_shoot_instead_of_body_rushing() -> void:
+	## The base red-team sprites visibly carry SMGs/rifles/shotguns/LMGs. They must
+	## behave like gunmen: close to a firing lane, stop, telegraph, and shoot.
+	var sim := SimWorld.new(17, 1, "campaign")
+	sim.camera_top = 0
+	sim.enemies.clear()
+	sim.pickups.clear()
+	sim.rocks.clear()
+	var p := sim.players[0]
+	p["x"] = 320 * Fixed.ONE
+	p["y"] = 260 * Fixed.ONE
+	var gunman := {"x": p["x"], "y": p["y"] - 180 * Fixed.ONE,
+		"alive": true, "elite": false, "kind": "rusher", "skin": 1,
+		"fire_cd": 0, "windup": 0}
+	sim.enemies.append(gunman)
+	var closest := 999 * Fixed.ONE
+	var fired := false
+	for _tick in 220:
+		sim._step_enemies()
+		closest = mini(closest, Fixed.length(p["x"] - gunman["x"], p["y"] - gunman["y"]))
+		if not sim.enemy_bullets.is_empty():
+			fired = true
+	Runner.T.ok(closest >= 80 * Fixed.ONE,
+		"an armed ordinary troop establishes a firing lane instead of closing to body-contact")
+	Runner.T.ok(fired, "an armed ordinary troop actually fires from that lane")
+
+
+func test_neighboring_riflemen_stagger_their_first_volley() -> void:
+	var phases: Dictionary = {}
+	for px in [72, 84, 96]:
+		var cd := SimWorld.rifleman_spawn_fire_cd(px * Fixed.ONE)
+		Runner.T.ok(cd >= SimWorld.RIFLEMAN_FIRE_CD_TICKS / 2,
+			"first-shot phase never fires before the half-cadence setup window")
+		Runner.T.ok(cd < SimWorld.RIFLEMAN_FIRE_CD_TICKS / 2 + SimWorld.RIFLEMAN_SPAWN_STAGGER_TICKS,
+			"first-shot phase stays inside the authored stagger window")
+		phases[cd] = true
+	Runner.T.eq(phases.size(), 3,
+		"three neighboring riflemen receive three distinct first-shot phases, not one bullet wall")
+
+
+func test_landing_zone_delays_and_thins_the_first_field_pressure() -> void:
+	var sim := SimWorld.new(23, 1, "campaign")
+	sim.enemies.clear()
+	Runner.T.eq(sim._spawn_grace, SimWorld.OPENING_FIELD_GRACE_TICKS,
+		"the landing zone starts with an explicit field-spawn grace window")
+	Runner.T.eq(sim.bunkers[0]["spawn_cd"], SimWorld.OPENING_BUNKER_FIRST_SPAWN_TICKS,
+		"the tutorial bunker waits longer than its recurring two-second cadence")
+	# With a stationary camera the opening interval is 75 ticks. Grace reaches
+	# zero at tick 120; the first eligible cadence edge is tick 150.
+	for tick in range(1, 150):
+		sim.tick_count = tick
+		sim._step_spawner()
+	Runner.T.eq(sim.enemies.size(), 0,
+		"no field rifleman arrives during the first 149 tutorial ticks")
+	sim.tick_count = 150
+	sim._step_spawner()
+	Runner.T.eq(sim.enemies.size(), 1,
+		"the first field rifleman arrives alone on the opening cadence")
+	var arcade := SimWorld.new(23, 1, "arcade")
+	arcade.jump_to_chapter(3)
+	Runner.T.eq(arcade._spawn_grace, 0,
+		"a deep Arcade chapter start does not inherit landing-zone training delay")
+
+
 func test_revive_cost_scales_with_deaths_and_caps_at_three() -> void:
 	var sim := SimWorld.new(1, 2)   # 2P campaign: no solo halving, no endless surcharge
 	var p := sim.players[0]

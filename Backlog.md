@@ -27,6 +27,27 @@ per-section.
 
 ---
 
+## TODO — opening combat and readability follow-up (2026-08-01)
+
+- [x] Stagger ordinary riflemen's first-shot phases so a formation cannot resolve as one
+  synchronized bullet wall.
+- [x] Separate living troops from corpse piles: living threats keep the warm separator rim;
+  bodies settle smaller, flatter, darker and desaturated.
+- [x] Keep rifleman contact lethal only as a deliberate close-range risk. Riflemen stop at a
+  firing line and never seek body contact; the field manual now states the remaining rule.
+- [x] Add ARCADE and BOSS RUSH to both normal and large-text versions of the MODES manual.
+- [x] Reduce opening clutter with a 2-second field-spawn grace, a slower pre-gate cadence,
+  and a delayed first spawn from the landing-zone bunker.
+- [ ] If a suicide bomber is added later, require a unique silhouette, visible fuse tell,
+  dedicated approach behavior and an explosion payoff. Ordinary riflemen are not bombers.
+- [x] Pin splash skipping with a regression test: the skip press is marked handled and
+  returns before the title menu can activate its default row.
+- [ ] Run the opening with a genuinely new player. Pass target: 8/10 first encounters reach
+  the seawall, identify the rifleman's painted lane, and can explain any death without help.
+  If fewer pass, lengthen the grace by 30 ticks before reducing enemy damage or cadence.
+
+---
+
 ## 1. Owner decisions — these need a human, not a fix
 
 1. **`tools/probe_concussion_hud.gd` runs in NO automated gate.** The plan said to wire it
