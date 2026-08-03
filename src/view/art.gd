@@ -1116,7 +1116,14 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		ci.draw_texture_rect(tex(pk if pk != "" else _brand(_GLYPH_PAD[action])),
 			rect, false, mod)
 	else:
-		var letter: String = GameMenu.key_label(keycode) if keycode >= 0 else _GLYPH_KEY[action]
+		# keycode == 0 is a LEGITIMATE cleared bind (menu.gd _apply_kb_bind(action, 0)),
+		# not the "caller didn't pass one" sentinel (-1) — key_label(0) returns the
+		# literal 7-char "UNBOUND", which used to get stamped across a ~12px keycap.
+		var letter: String = ""
+		if keycode > 0:
+			letter = GameMenu.key_label(keycode)
+		elif keycode == -1:
+			letter = _GLYPH_KEY[action]
 		var f := font()
 		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
 		# whole strokes below native scale (a 6px 'E' loses horizontals).

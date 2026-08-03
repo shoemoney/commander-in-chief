@@ -1416,10 +1416,15 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				# post a "GRENADES ONLY" chip beside the counter where the mismatch is felt.
 				if e["alive"] and e["kind"] == "frogman" and e.get("submerged", false):
 					immune_lurker = true
-			var remaining: int = alive + sim.wave_pending
+			# Waves 5/10/15/... spawn an endless_boss dict OUTSIDE sim.enemies[] (the
+			# sim's own wave-advance gate at _wave_hostiles_cleared() and(...) requires
+			# it dead too) -- without this the chip reads HOSTILES 0 / clear-bar 100%
+			# while a live Bridge Gunship still holds the wave open.
+			var boss_up := not sim.endless_boss.is_empty() and bool(sim.endless_boss.get("alive", false))
+			var remaining: int = alive + sim.wave_pending + (1 if boss_up else 0)
 			# The wave's starting budget (same formula _start_wave uses).
 			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
-				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1))
+				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1) + (1 if boss_up else 0))
 			var htxt := "HOSTILES %d" % remaining
 			# Highest optional priority: the push-or-hold combat dashboard survives a crowded
 			# row while vanity records/streak drop — the stated failure was the reverse.
