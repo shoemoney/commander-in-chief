@@ -28,7 +28,6 @@ CONVENTIONS
   * each sprite keeps its ORIGINAL canvas size, so Art.SCALE and every draw
     site are untouched.
 
-    python3 tools/gen_entities.py --family human
     python3 tools/gen_entities.py --outdir /tmp/x --only cast2/hero1
 """
 from __future__ import annotations
@@ -64,7 +63,6 @@ def _pad(n: int, m: int | None = None) -> Pad:
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ART = PROJECT_ROOT / "assets/art"
-SOLDIERS = PROJECT_ROOT / "assets/troops"
 
 # --- palettes ----------------------------------------------------------------
 # art.gd multiplies most of these by an olive Art.tint at draw time, so the
@@ -1055,7 +1053,7 @@ def build(key: str) -> Image.Image:
 
 def dest_for(key: str, outdir: Path) -> Path:
     if key.startswith("SOL:"):
-        return outdir / "soldiers" / (key[4:] + ".png")
+        return outdir / "troops" / (key[4:] + ".png")
     return outdir / "art" / (key + ".png")
 
 
@@ -1065,16 +1063,27 @@ for _k, _v in {**HUMANS, **CORPSES}.items():
 for _k, (_c, _f) in OBJECTS.items():
     SIZES[_k] = _c if isinstance(_c, tuple) else (_c, _c)
 
+# Generative-AI replacements (ASSETS.md: "do not regenerate them through
+# tools/gen_entities.py") -- excluded from the default sweep, still reachable
+# via --only.
+SUPERSEDED = frozenset({
+    "SOL:soldier_assault_rifle",
+    "SOL:enemy/enemy_assault_rifle",
+    "SOL:enemy/enemy_smg",
+    "SOL:enemy/enemy_shotgun",
+    "SOL:enemy/enemy_lmg",
+    "SOL:enemy/enemy_sniper",
+})
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--outdir", type=Path, default=PROJECT_ROOT / "assets")
     ap.add_argument("--only")
-    ap.add_argument("--family", default="all")
     args = ap.parse_args()
 
-    keys = [args.only] if args.only else sorted(SIZES)
+    keys = [args.only] if args.only else [k for k in sorted(SIZES) if k not in SUPERSEDED]
     for key in keys:
         im = build(key)
         n = SIZES[key]
