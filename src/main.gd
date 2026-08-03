@@ -2389,8 +2389,8 @@ func _consume_events() -> void:
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
 					4: _hint("pierce", "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN")
-					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN")
-					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN UNTIL DEATH. STACK SPREAD FOR A 5-WAY FAN")
+					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 3")
+					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 3")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
@@ -2502,7 +2502,29 @@ func _consume_events() -> void:
 								1.0 + float(3 - nh) * 0.3)
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
+				# Manned-tank cover: a MANNED hull blocking enemy fire pays
+				# TANK_HIT_FUEL_COST off the clock (sim_world.gd
+				# _step_enemy_bullets) but fired the SAME bare armor_block
+				# every other deflection uses — captioned "[ROUNDS BOUNCING
+				# OFF ARMOR]" at the exact moment the ride is being spent.
+				# Exact-match the sim's own hitbox (HULK_HALF_W/H) rather than
+				# the nest/veteran's approximate 14px radius: ev.x/ev.y ARE
+				# the bx/by the sim already tested against those bounds.
+				var tank_hit := false
 				if not nest_hit:
+					for hk in sim.tanks:
+						if hk["alive"] and hk["occupant"] >= 0 and not hk["burning"] \
+								and absi(hk["x"] - ev["x"]) <= SimWorld.HULK_HALF_W \
+								and absi(hk["y"] - ev["y"]) <= SimWorld.HULK_HALF_H:
+							tank_hit = true
+							armor_pinged = true
+							_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+								"tex": "fx_sparkle", "sz": 6.0, "fade": 2.0, "rate": 0.16,
+								"col": Color(1.0, 0.6, 0.25, 0.9)})
+							_fx.append({"x": ev["x"], "y": ev["y"] - 10, "t": 0.0, "kind": "floattext",
+								"rate": 0.02, "text": "-1S", "col": Color(1.0, 0.6, 0.25)})
+							break
+				if not nest_hit and not tank_hit:
 					# Veteran-armor chip: wave-13+ endless infantry. The split is the
 					# sim's own seam — _wave_armor() > 0 (endless-only, wave 13+)
 					# AND hp set near the block. hp alone is NOT the tell: mg_nest
@@ -2806,6 +2828,20 @@ func _consume_events() -> void:
 				_blast_debris(ev["x"], ev["y"])
 				_burst(ev["x"], ev["y"], "dust", 6, 1.0, 2.4, 0.3, 0.06, 0.0, false,
 					Color(0.4, 0.36, 0.32))
+			"arena_crack":
+				# c4: _crack_bridge_span fires on each gunship HP-third crossing —
+				# a bridge slab the player may be hiding behind disappears and a
+				# new one pops in nearby. Used to be sound-only; the same slab-
+				# breaking grammar as cover_crack, plus a permanent scorch and
+				# the fx_groundbreak card that already exists for exactly this.
+				_trauma = minf(1.0, _trauma + 0.35)
+				_buzz(0.5)
+				_blast_debris(ev["x"], ev["y"])
+				_burst(ev["x"], ev["y"], "dust", 8, 1.0, 2.4, 0.3, 0.06, 0.0, false,
+					Color(0.4, 0.36, 0.32))
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_groundbreak",
+					"sz": 34.0, "grow": 0.3, "fade": 2.2, "rate": 0.006, "col": Color(0.18, 0.15, 0.12, 0.9)})
+				_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(16.0, 22.0)})
 			"rear_warn":
 				# c4 2v: the 1.5s LEAD warn before a rear spawn — a pulsing wedge at
 				# the rear edge (below the 72%-down player) so a behind-you rusher is
