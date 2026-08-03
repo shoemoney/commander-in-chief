@@ -145,8 +145,8 @@ msgstr "クレイモア—戦車から離れた[%s]で設置せよ（両陣営�
 msgid "FEED THE WAR CHEST TO REVIVE — [%s]"
 msgstr "戦費を消費して蘇生させろ—[%s]"
 
-msgid "RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM"
-msgstr "撃墜されたパイロットを救出しろ—撃つな、触れろ。身代金%d¢"
+msgid "RESCUE THE DOWNED PILOT — TOUCH HIM, AIM AWAY — %d¢ RANSOM"
+msgstr "撃墜されたパイロットを救出しろ—照準を外して触れろ。身代金%d¢"
 
 msgid "HOLD [%s] FOR THE SUPPLY WHEEL"
 msgstr "[%s]を長押しで補給ホイール"

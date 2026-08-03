@@ -134,7 +134,7 @@ func test_templated_hint_translates_and_still_formats_the_placeholder() -> void:
 	var got: String = TranslationServer.translate("HOLD [%s] FOR THE SUPPLY WHEEL") % "Q"
 	Runner.T.ok(got.contains("Q"), "es: the %s glyph placeholder survives translate()+format")
 	Runner.T.ok(not got.contains("HOLD"), "es: the template itself is translated, not left in English")
-	var ransom: String = TranslationServer.translate("RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM") % 250
+	var ransom: String = TranslationServer.translate("RESCUE THE DOWNED PILOT — TOUCH HIM, AIM AWAY — %d¢ RANSOM") % 250
 	Runner.T.ok(ransom.contains("250"), "es: the %d ransom amount survives translate()+format")
 	self._reset_locale([tr])
 
