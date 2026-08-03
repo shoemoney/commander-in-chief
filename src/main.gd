@@ -694,12 +694,20 @@ func _end_splash() -> void:
 		return   # already dismissed (idempotent — skip and timeout can both fire)
 	_splash_t = 0.0
 	_splash_layer.visible = false
+	# The mix stays locked until the overlay is actually GONE — not merely until the Commander
+	# stops talking. Sfx holds the other half of the condition (his line still on air), so a
+	# skip mid-sentence lets him finish rather than dropping music on top of him.
+	_sfx.splash_finished()
 	# opt-loop: the splash never plays again this session, but _splash_keyart (a 6.5MB RGBA8
 	# poster, loaded once at boot) was never released — pinned in VRAM for the rest of the
 	# run, which in Endless mode can be hours. _draw_splash_hero already null-guards it.
 	_splash_keyart = null
-	_sfx.stop_vo()   # cut the crawl narration if the player skipped the intro
-	_sfx.unlock_startup_audio()   # an explicit skip ends the opening-audio gate too
+	# The Commander is NEVER cut off. This used to be `stop_vo()` + an unconditional
+	# `unlock_startup_audio()`, which meant a skip chopped him mid-word and then dropped the
+	# whole mix on the title screen. Skipping the splash skips the VISUALS; his read finishes,
+	# and `splash_finished()` above already armed the other half of the unlock so the mix comes
+	# up the moment he lands. Do NOT reintroduce a force-unlock here — it bypasses the
+	# still-on-air check and is exactly the bypass that made this bug survive its own fix.
 	if _menu.mode == GameMenu.Mode.HIDDEN:
 		_menu.open(GameMenu.Mode.TITLE)   # reveal the title the splash was covering
 

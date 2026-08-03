@@ -154,9 +154,57 @@ func test_boot_audio_stays_silent_until_the_commanders_opening_line_finishes() -
 	Runner.T.ok(sfx.play_startup_line("intro_crawl"), "the Commander opening line bypasses the lock")
 	Runner.T.eq(sfx._vo_dry.stream, line, "the opening line is routed as the first dry voice")
 	Runner.T.ok(sfx.is_startup_audio_locked(), "music/SFX remain locked while the Commander is speaking")
+	# His line ends at ~10.4 s but the splash runs to 16.0 s (title stamp 13.0, hero, dissolve
+	# 15.5). Unlocking here — which is what shipped — put music and every SFX over the last
+	# 5.6 s of the intro.
 	sfx._vo_dry.finished.emit()
-	Runner.T.ok(not sfx.is_startup_audio_locked(), "the rest of the mix unlocks only after the line finishes")
+	Runner.T.ok(sfx.is_startup_audio_locked(),
+		"the line ending is NOT enough: the splash is still on screen")
+	sfx.splash_finished()
+	Runner.T.ok(not sfx.is_startup_audio_locked(),
+		"the mix unlocks once the splash is down AND the Commander has finished")
 	sfx.free()
+
+
+func test_a_skip_mid_sentence_still_lets_the_commander_finish() -> void:
+	# The other half of the contract: the splash coming down early must not drop music on top
+	# of a line still on air. Skip arms at SPLASH_SKIP_ARM (1.0 s); he starts at
+	# SPLASH_STUDIO_END (3.0 s) and reads for 7.36 s, so most of his read is skippable.
+	var sfx := Sfx.new()
+	sfx._vo_streams["intro_crawl"] = AudioStreamWAV.new()
+	sfx.lock_startup_audio()
+	Runner.T.ok(sfx.play_startup_line("intro_crawl"), "the opening line is on air")
+	sfx.splash_finished()   # player skips mid-sentence
+	Runner.T.ok(sfx.is_startup_audio_locked(),
+		"splash down mid-read does not unlock — he is not talked over")
+	sfx._vo_dry.finished.emit()
+	Runner.T.ok(not sfx.is_startup_audio_locked(), "...and the mix unlocks the moment he lands")
+	sfx.free()
+
+
+func test_boot_audio_can_never_be_stranded_in_permanent_silence() -> void:
+	# The failure mode a naive "wait for the line to finish" fix would introduce. Gating on a
+	# POSITIVE "line finished" fact deadlocks on any path where the line never starts, and
+	# there are two such paths — both reachable in a normal session.
+	# (a) Skipped between SPLASH_SKIP_ARM (1.0 s) and SPLASH_STUDIO_END (3.0 s): never fired.
+	var early := Sfx.new()
+	early._vo_streams["intro_crawl"] = AudioStreamWAV.new()
+	early.lock_startup_audio()
+	early.splash_finished()   # skipped before the line was ever triggered
+	Runner.T.ok(not early.is_startup_audio_locked(),
+		"a splash skipped before the line starts still unlocks the mix")
+	early.free()
+	# (b) The VO asset is missing or corrupt — NOTICE.md tells redistributors they may delete
+	# assets/vo/ outright, so this is a shipping configuration, not a hypothetical.
+	var mute := Sfx.new()
+	mute.lock_startup_audio()
+	Runner.T.ok(not mute.play_startup_line("intro_crawl"), "a missing opening line reports false")
+	Runner.T.ok(mute.is_startup_audio_locked(),
+		"...and still holds the lock while the splash is up (no audio over the intro)")
+	mute.splash_finished()
+	Runner.T.ok(not mute.is_startup_audio_locked(),
+		"...but a dropped assets/vo/ can never strand the game in permanent silence")
+	mute.free()
 
 
 # --- a1-13: no SFX event maps to a nonexistent (silent) synth voice ---

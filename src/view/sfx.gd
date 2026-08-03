@@ -153,6 +153,14 @@ var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re
 var _startup_audio_locked := false
 var _boot_audio_ready := false
 var _bed_loops_started := false
+## The boot lock lifts on TWO conditions, not one: the splash must be off screen AND the
+## Commander must have finished. Gating on the line alone (what shipped) unlocked the mix the
+## instant his 7.36 s read ended at ~10.4 s, while the splash still had the title stamp, the
+## hero poster and the dissolve to run to 16.0 s — so music beds and every SFX played over the
+## last 5.6 s of the intro. Gating on the splash alone would talk over him whenever a player
+## skips mid-sentence (skip arms at 1.0 s, he starts at 3.0 s).
+var _splash_over := false
+var _startup_line_playing := false
 
 
 func lock_startup_audio() -> void:
@@ -179,16 +187,35 @@ func _start_bed_loops_if_ready() -> void:
 		(pl as AudioStreamPlayer).play()
 
 
+func splash_finished() -> void:
+	## Main calls this from _end_splash() — the ONE place the overlay comes down, on both the
+	## 16 s timeout and the player skip. Half of the unlock condition; see _try_unlock_startup.
+	_splash_over = true
+	_try_unlock_startup()
+
+
+func _try_unlock_startup() -> void:
+	## Unlock only once the splash is gone AND no opening line is still on air. Never gate on
+	## "the line finished" as a positive fact: skip arms at 1.0 s and the line does not start
+	## until 3.0 s, so a player who skips in that window never fires it — waiting for a signal
+	## that can never arrive would strand the whole mix in permanent silence. Asking instead
+	## whether a line is CURRENTLY PLAYING is true-by-default-safe: it is false when the line
+	## never started, false when it already ended, and false when the VO was missing entirely.
+	if not _splash_over or _startup_line_playing:
+		return
+	unlock_startup_audio()
+
+
 func play_startup_line(key: String) -> bool:
-	## The one sound allowed through the boot lock. The rest of the mix unlocks
-	## from the line's finished signal, leaving the Commander an uncontested read.
+	## The one sound allowed through the boot lock, so the Commander gets an uncontested read.
 	if not _vo_streams.has(key):
-		unlock_startup_audio()   # missing/corrupt VO must never strand permanent silence
+		_try_unlock_startup()   # missing/corrupt VO must never strand permanent silence
 		return false
 	var done := Callable(self, "_on_startup_line_finished")
 	if not _vo_dry.finished.is_connected(done):
 		_vo_dry.finished.connect(done, CONNECT_ONE_SHOT)
 	_vo_priority = 3
+	_startup_line_playing = true
 	_vo_dry.stream = _vo_streams[key]
 	if is_inside_tree():
 		_vo_dry.play()
@@ -197,7 +224,8 @@ func play_startup_line(key: String) -> bool:
 
 func _on_startup_line_finished() -> void:
 	_vo_priority = -1
-	unlock_startup_audio()
+	_startup_line_playing = false
+	_try_unlock_startup()
 
 
 func _process(_delta: float) -> void:
