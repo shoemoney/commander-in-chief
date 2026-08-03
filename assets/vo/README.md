@@ -5,24 +5,22 @@ generation manifest — none exists for this directory).
 
 ## Radio VO — `vo_*.mp3` (14 files)
 
-| File | Voice | Role |
-|---|---|---|
-| vo_chest_empty | Adam | Radio Commander |
-| vo_wiped | Matilda | Spotter |
-| vo_last_stand | Matilda | Spotter |
-| vo_observer | Matilda | Spotter |
-| vo_surge | Matilda | Spotter |
-| vo_core | Matilda | Spotter |
-| vo_flawless | Matilda | Spotter |
-| vo_ransom_lost | Matilda | Spotter |
-| vo_victoly | Adam | Radio Commander |
-| vo_airstrike | Matilda | Spotter |
-| vo_pilot_down | Matilda | Spotter |
-| vo_shop_locked | Matilda | Spotter |
-| vo_clip_dry | Matilda | Spotter |
-| vo_pilot_plea | Harry | Downed Pilot |
+Per commit `b4f12b6`, three roles split the 14 lines by voice:
 
-**Voices (per commit `b4f12b6`):** Radio Commander — Adam; Spotter — Matilda; Downed Pilot — Harry.  
+- **Radio Commander — Adam** — owns the "big beats": War Chest empty / Overlord out / Last
+  Stand / VICTOLY!
+- **Spotter — Matilda** — works the tactical channel: pilot down, shop locked, clip dry.
+- **Downed Pilot — Harry.**
+
+The commit message gives the role split and the big-beat examples verbatim; it does not enumerate
+a per-file table, so which of the 14 filenames maps to which role beyond those examples is
+**unrecorded**.
+
+⚠️ **Unresolved discrepancy:** `src/view/sfx.gd:35-50`'s `_VO_CAPTIONS` labels all 14 lines
+`SPOTTER:`/`PILOT:` — none `COMMANDER:` — which conflicts with the three-role split above (e.g.
+`vo_last_stand` is captioned `SPOTTER:` despite being named a Radio Commander "big beat"). Not
+resolved here; a caption is a display label, not proof of which voice recorded the line.
+
 **Format (measured):** mono, 44.1kHz, 128kbps mp3.  
 **Pipeline:** commissioned through a hosted TTS service — the three voice names above match
 ElevenLabs' stock premade-voice roster, and the measured format matches the `mp3_44100_128`
@@ -57,8 +55,8 @@ restate a service. The format match to `cmd/` (added the same day) makes the fle
 pipeline plausible, but that is this file's own inference, not a repeated record — call it
 **unconfirmed**, weaker than the `cmd/` entry above.
 
-Wired in `src/view/sfx.gd::play_vo("intro_crawl")`, fired once from `main._process` on the intro
-crawl beat.
+Wired via `Sfx.play_startup_line("intro_crawl")` (sfx.gd:217), called from `main._process` at
+src/main.gd:1232 — sfx.gd:3449 states this explicitly, not `play_vo()`.
 
 ## Note on `ASSETS.md`
 
