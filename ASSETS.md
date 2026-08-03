@@ -11,7 +11,8 @@ git history.
 
 | Path | Files | Source | License |
 |---|---|---|---|
-| `assets/art/ui/` `hud/` `icons/` | 106 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
+| `assets/art/ui/` `hud/` `icons/` | 105 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
+| `assets/art/ui/title_logo.png` | 1 | Generative AI, **service/model/date unrecorded** | Project-owned **unverified** |
 | `assets/art/fx/` | 21 | Procedurally generated — `tools/gen_fx_cards.py` | Project-owned |
 | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 87 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
 | `assets/troops/` — player + five enemy soldiers and action frames | 58 | Generative AI — OpenAI built-in image generation, locally chroma-keyed, sliced and normalized; prompts/provenance in `assets/troops/GENERATED_ASSET_SOURCE.md` | Project-owned (verify service output-ownership terms) |
