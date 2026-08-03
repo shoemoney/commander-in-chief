@@ -412,9 +412,23 @@ const COLUMN_BOTTOM := FOOTER_Y - GLOW_CLEAR   # 333 — last non-TITLE plate bo
 const LEGEND_MARGIN := 4.0         # clearance the TITLE column keeps above LEGEND_Y
 const FOOTER_H := 17.0             # height of the shared SELECT/BACK footer-legend plate
 # c3-09: the two-line footer rises its top by this much for the extra description line; the bottom
-# stays at FOOTER_Y + FOOTER_H. On the fullest OPTS list the last-row glow ends at y333.5, so the
-# strip top (337) clears it by 3.5px. test_opts_footer_describes_focused_setting pins the clearance.
-const FOOTER_HELP_RISE := 4.0
+# stays at FOOTER_Y + FOOTER_H. On the fullest OPTS list the last-row glow ends at y333.5.
+# r4-menu #1: the description line used to be hardcoded at 8px no matter Art.text_scale — this
+# 1.0px over the original 4.0 is reserved so the description can grow to FOOTER_HELP_MAX_SIZE (see
+# _draw_footer_help) at 112.5%+ text scale without its ascent poking above the strip or the legend
+# keycaps below it overrunning the fixed strip bottom (FOOTER_Y + FOOTER_H, unaffected by this
+# const). Capped by content_frame_border's list-screen bottom (336, see its comment) too — this
+# strip's top must stay AT OR BELOW that, or it overlaps the dialog frame it sits under; that's
+# the tighter of the two ceilings and the one that pins FOOTER_HELP_MAX_SIZE at 9, not further.
+# That leaves 2.5px real clearance over the glow on the fullest OPTS/SETUP list (was 3.5px at the
+# old 4.0) — test_opts_footer_describes_focused_setting and
+# test_help_footer_shared_across_settings_screens pin the (now smaller, still real) clearance.
+const FOOTER_HELP_RISE := 5.0
+# The description font cannot grow past this: bigger and either the legend keycaps below it (packed
+# from the FIXED strip bottom) run off the 360px canvas, or the strip top rises far enough to overlap
+# the list-screen dialog frame's border (content_frame_border's 336) — measured empirically, see the
+# #1 note above. mini(Art.fs(8), FOOTER_HELP_MAX_SIZE) is the whole scaling story for _draw_footer_help.
+const FOOTER_HELP_MAX_SIZE := 9
 const BACK_H_RATIO := 0.7          # BACK plate is BTN scaled to this fraction of full row height
 const REBIND_TAB_W := 96.0         # REBIND category-tab plate width
 const REBIND_DEV_W := 52.0         # REBIND P1|P2 device sub-selector plate width
@@ -689,7 +703,11 @@ func _process(delta: float) -> void:
 		_page_press = 0.0 if main._motion < 0.5 else maxf(0.0, _page_press - delta * 3.5)
 		if _page_press <= 0.0:
 			_page_press_side = -1
-		_rail_pulse = 0.0 if main._motion < 0.5 else maxf(0.0, _rail_pulse - delta * 3.5)
+		# Rail bounce is FEEDBACK (a railed press at 0/MUTED or 10 would otherwise be silent+
+		# invisible under Reduce Motion — SFX is muted there too), so unlike the tab/page
+		# flashes above it decays in both modes instead of snapping to 0; _draw holds its grow
+		# static under RM (same treatment as _set_pulse) so it never animates, only fades.
+		_rail_pulse = maxf(0.0, _rail_pulse - delta * 3.5)
 		# c1-17: the settings-change confirm pulse decays even under Reduce Motion — it's
 		# FEEDBACK, not decoration, so it can't snap off like the rail/tab flashes above;
 		# reduce-motion just renders it as a static border (no grow) in _draw.
@@ -1206,7 +1224,7 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 				val = key_label(_kb_code(action))   # localized keycap for the player's layout
 			else:
 				var pb: int = main.pad_bind(action, _rebind_pad_dev)   # the row shows the ACTIVE player's bind
-				val = pad_button_name(pb) if pb >= 0 else "UNBOUND"
+				val = Art.pad_button_label(pb)   # brand-aware (xbox/ps/switch); handles pb<0 as UNBOUND
 			ritems.append({"id": action, "label": "%s: %s" % [rebind_label(action), val],
 				"destructive": false, "grp": 0})
 		# c1-18: the sticks aren't per-button rebindable, so the GAMEPAD tab carries SWAP STICKS
@@ -1350,9 +1368,11 @@ static func rebind_label(action: String) -> String:
 	return action.to_upper()
 
 
-# c1-18: readable name for a JOY_BUTTON_* index — the GAMEPAD-tab row value. Pure + static
-# so the screen wording is single-sourced (and headless-assertable). Uses generic
-# face-button letters (portable across pads); the rebind screen's header names the layout.
+# c1-18: readable name for a JOY_BUTTON_* index. Pure + static so the wording is
+# single-sourced (and headless-assertable). Generic face-button letters (portable across
+# pads) — this is now only the brand-agnostic FALLBACK Art.pad_button_label() reaches for
+# on buttons with no per-brand name (sticks/dpad/back/start); the CONTROLS row itself goes
+# through Art.pad_button_label() for the brand-aware short form (A/B/X/Y vs CROSS/CIRCLE/... vs Switch's crossed A/B).
 static func pad_button_name(button: int) -> String:
 	match button:
 		JOY_BUTTON_A: return "A / CROSS"
@@ -2543,7 +2563,7 @@ const SETTING_HELP := {
 	"sfx": "SFX: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS. SAVED AUTOMATICALLY.",
 	"music": "MUSIC: LOUDNESS OF THE BACKGROUND SOUNDTRACK. SAVED AUTOMATICALLY.",
 	"rumble": "RUMBLE: CONTROLLER VIBRATION ON HITS AND EXPLOSIONS. SAVED AUTOMATICALLY.",
-	"motion": "REDUCE MOTION: HOLDS THE SCREEN STEADY - NO SHAKE, FLASH, OR SCROLL FX. SAVED AUTOMATICALLY.",
+	"motion": "REDUCE MOTION: NO SHAKE OR SCROLL, DAMPED FLASH/WARP. SAVED AUTOMATICALLY.",
 	"colorblind": "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVED AUTOMATICALLY.",
 	"assist": "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVED AUTOMATICALLY.",
 	"captions": "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVED AUTOMATICALLY.",
@@ -2874,7 +2894,7 @@ func _step_vol(bus: String, delta: int) -> void:
 		# visual bounce is the reliable feedback — the top rail keeps its audible cue.
 		_rail_dir = -1 if delta < 0 else 1
 		_rail_row = sel
-		_rail_pulse = 0.0 if main._motion < 0.5 else 1.0
+		_rail_pulse = 1.0   # feedback, not decoration — held (not zeroed) under Reduce Motion; _draw keeps the grow static, _process still decays it
 		if delta > 0:
 			main._sfx.play("deny", -16.0)   # top rail: SFX is audible, so a soft tick lands
 		_mark_dirty()
@@ -2961,7 +2981,7 @@ func _step_text_size(dir: int) -> void:
 func _display_rail(rail_dir: int) -> void:
 	_rail_dir = rail_dir
 	_rail_row = sel
-	_rail_pulse = 0.0 if main._motion < 0.5 else 1.0
+	_rail_pulse = 1.0   # feedback, not decoration — see _step_vol's rail bounce for why this doesn't zero under Reduce Motion
 	main._sfx.play("deny", -16.0)
 
 
@@ -4281,7 +4301,10 @@ func _draw() -> void:
 			# rail," not dropped. Decays in _process; reduce-motion snaps it off.
 			if selected and k == _rail_row and _rail_pulse > 0.0:
 				var rx := vlast if _rail_dir > 0 else vbx   # ceiling = last cell, floor = first
-				var rr := Rect2(rx, cy - 3.0, SEG_W, 6.0).grow(_rail_pulse * 1.5)
+				# Reduce Motion holds the grow static (no swelling) same as the confirm halo below;
+				# alpha still rides _rail_pulse so the flash fades instead of hard-snapping off.
+				var rgrow: float = 0.0 if main._motion < 0.5 else _rail_pulse * 1.5
+				var rr := Rect2(rx, cy - 3.0, SEG_W, 6.0).grow(rgrow)
 				draw_rect(rr, Color(1.0, 0.72, 0.3, 0.85 * _rail_pulse), false, 1.0)
 			# STATIC rail cap: whenever the selected row SITS at a limit (MUTED or 10),
 			# bracket the pinned end segment. Non-animated, so it reads even with
@@ -6306,28 +6329,29 @@ static func muted_row_help(row_help: String) -> String:
 # a safety net so an edited/localized string can never overrun the canvas. Returns the y the
 # SELECT/BACK legend sits at, one line below.
 func _draw_footer_help(row_help: String, strip_top: float) -> float:
-	# The three lines are packed BOTTOM-UP inside the 21px strip (strip_top y337 .. y358), because
-	# FOOTER_HELP_RISE cannot grow — the strip top already clears the fullest OPTS list's last-row glow
-	# (y333.5) by only 3.5px. Working up from the floor:
-	#   legend baseline strip_top+15 (y352): the legend's _LEG_H=11 KEYCAP is drawn CENTERED on this
-	#     baseline, so it spans y346.5..357.5 — inside the strip. Its label (drawn at +3 inside
-	#     _legend_row) sits at y348..356.
-	#   the 1px rule at strip_top+8 (y345), in the clear gap above the keycaps.
-	#   description baseline strip_top+7 (y344): 8px glyphs spanning y337..345, flush to the strip top.
-	# These offsets used to be +10 / +12 / +17, which were reasoned about from the legend LABEL box
-	# (y350..358) and forgot the keycap sprite is 5.5px TALLER on top: the hairline rule was drawn
-	# straight through the top pixel row of every keycap and the caps hung 1.5px off the strip's
-	# bottom edge. Both are pure vertical misses, so the layout suite's x-sorted overlap check could
-	# not see either — pinned now by test_two_line_footer_help_never_collides_with_the_legend.
+	# The three lines are packed BOTTOM-UP inside the strip (strip_top .. FOOTER_Y+FOOTER_H, the
+	# latter FIXED regardless of FOOTER_HELP_RISE). r4-menu #1: the description size now rides
+	# Art.text_scale (capped at FOOTER_HELP_MAX_SIZE — see the const's comment for why it can't go
+	# higher), so its offsets are DERIVED from its own ascent rather than the old hardcoded 7/8/15:
+	#   description baseline strip_top + ascent (flush: text top lands exactly on strip_top, same
+	#     as the original design's 8px/ascent-7 case — at 100% scale this is byte-identical to before).
+	#   the 1px rule one px below that baseline.
+	#   legend baseline 8px below that: the legend's _LEG_H=11 KEYCAP is drawn CENTERED on this
+	#     baseline, so at the FOOTER_HELP_MAX_SIZE ceiling it spans down to within 0.5px of the
+	#     strip bottom — the same tight-but-fitting margin the original 8px design had (see the
+	#     FOOTER_HELP_RISE const comment). Both anchors are pinned by
+	#     test_two_line_footer_help_never_collides_with_the_legend across the text_scale sweep.
 	# drain-menu: this is PROSE, not a "NAME: VALUE" row label, so it takes the plain
 	# end-of-string trim. It used to call _ellipsize, whose keep-the-value-tail path fired
 	# on the ": " inside "SFX: LOUDNESS OF ..." and fused a trimmed head onto that clause —
 	# eating the UNMUTE recovery instruction the muted-row prefix front-loads. Every
 	# destructive-row label routes through _row_fit/_ellipsize above, so the cue-preserving
 	# path still covers all destructive truncation; nothing here needs keep_tail/warn.
-	_center_text(_trim_tail(row_help, 8, CANVAS_WIDTH - 24.0), strip_top + 7.0, 8, FOOTER_HELP_COL)
-	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + 8.0, BTN.x, 1.0), DIVIDER_DIM)
-	return strip_top + 15.0
+	var hs: int = mini(Art.fs(8), FOOTER_HELP_MAX_SIZE)
+	var base_off: float = Art.font().get_ascent(hs)
+	_center_text(_trim_tail(row_help, hs, CANVAS_WIDTH - 24.0), strip_top + base_off, hs, FOOTER_HELP_COL)
+	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + base_off + 1.0, BTN.x, 1.0), DIVIDER_DIM)
+	return strip_top + base_off + 8.0
 
 
 # c3-09: dedupes the missing-copy dev warning so it fires once per id, not every frame.
