@@ -4983,6 +4983,7 @@ func test_display_integer_stretch_configured() -> void:
 	Runner.T.eq(int(ProjectSettings.get_setting("display/window/size/viewport_height")), 360, "base canvas height is 360")
 	Runner.T.eq(str(ProjectSettings.get_setting("display/window/stretch/mode")), "viewport", "stretch mode is viewport (renders at 640x360, scales up)")
 	Runner.T.eq(str(ProjectSettings.get_setting("display/window/stretch/scale_mode")), "integer", "stretch scale_mode is integer (clean pixels + letterbox in fullscreen, no fractional scaling)")
+	Runner.T.eq(str(ProjectSettings.get_setting("display/window/stretch/aspect")), "keep", "stretch aspect is keep — the whole view is authored against a literal 640x360 rect")
 
 
 # c1-09: when focus is on RESET DEFAULTS, the header summary line is REPLACED with an
