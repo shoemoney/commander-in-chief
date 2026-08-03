@@ -1105,51 +1105,60 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 # collision-free in 2D — not just left-to-right.
 func test_two_line_footer_help_never_collides_with_the_legend() -> void:
 	var was_pad: bool = Art.use_pad
+	var was_scale: float = Art.text_scale
 	var stub := _StubMain.new()
 	# Each entry: the mode and a focused row id that HOLDS a value, so setting_help is non-empty and
 	# _footer_legend takes its two-line branch.
 	var cases := [[Menu.Mode.OPTS, "motion"], [Menu.Mode.AUDIO, "sfx"], [Menu.Mode.DISP, "winscale"],
 		[Menu.Mode.DISP, "fullscreen"], [Menu.Mode.SETUP, "coop"]]
-	for pad in [false, true]:
-		Art.use_pad = pad
-		var dev := "pad" if pad else "kb"
-		for case in cases:
-			var cap := _CaptureMenu.new()
-			cap.main = stub
-			cap.mode = case[0]
-			cap.sel = _row_index(cap, case[1])
-			cap._footer_legend()
-			var tag := "%s %s/%s two-line footer" % [dev, case[0], case[1]]
-			# The help line really is in this capture — otherwise the sweep below proves nothing.
-			var help := Rect2()
-			for op in cap.ops:
-				if op["k"] == "text":
-					help = op["box"]
-			Runner.T.ok(help.size.x > 0.0, "%s: the row-description banner is captured with real geometry" % tag)
-			# The strip grew for it: the help line sits ABOVE the SELECT/BACK legend, both inside the
-			# raised strip, nothing off the canvas floor.
-			var strip_top: float = Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
-			var strip_bottom: float = strip_top + Menu.FOOTER_H + Menu.FOOTER_HELP_RISE
-			Runner.T.ok(strip_bottom <= 360.0, "%s: the raised strip stays inside the viewport" % tag)
-			for op in cap.ops:
-				var box: Rect2 = op["box"]
-				if box.size.x <= 0.0 and box.size.y <= 0.0:
-					continue
-				Runner.T.ok(box.position.x >= 0.0 and box.end.x <= Menu.CANVAS_WIDTH,
-					"%s: %s '%s' %s within the canvas width" % [tag, op["k"], op["id"], str(box)])
-				# On the PLATE, not merely on the canvas — an 11px keycap centered on the legend
-				# baseline used to hang 1.5px past the strip's bottom edge onto bare terrain.
-				Runner.T.ok(box.position.y >= strip_top - 0.01 and box.end.y <= strip_bottom + 0.01,
-					"%s: %s '%s' %s stays on the footer plate [%d,%d]"
-					% [tag, op["k"], op["id"], str(box), int(strip_top), int(strip_bottom)])
-			for op in cap.ops:
-				if op["k"] == "label":
-					Runner.T.ok(op["box"].position.y >= help.end.y - 0.01,
-						"%s: the '%s' legend prompt reads BELOW the description, never through it" % [tag, op["id"]])
-			Runner.T.no_overlap(cap.ops, tag)
-			cap.free()
+	# r4-menu #1: the description line now scales with Art.text_scale (capped at
+	# FOOTER_HELP_MAX_SIZE) instead of a hardcoded 8px — sweep the whole rung ladder so a future
+	# ceiling change can't quietly reopen the collision this test exists to prevent.
+	for text_scale in [1.0, 1.25, 1.5, 1.75, 2.0]:
+		Art.text_scale = text_scale
+		for pad in [false, true]:
+			Art.use_pad = pad
+			var dev := "pad" if pad else "kb"
+			for case in cases:
+				var cap := _CaptureMenu.new()
+				cap.main = stub
+				cap.mode = case[0]
+				cap.sel = _row_index(cap, case[1])
+				cap._footer_legend()
+				var tag := "scale%s %s %s/%s two-line footer" % [text_scale, dev, case[0], case[1]]
+				# The help line really is in this capture — otherwise the sweep below proves nothing.
+				var help := Rect2()
+				for op in cap.ops:
+					if op["k"] == "text":
+						help = op["box"]
+				Runner.T.ok(help.size.x > 0.0, "%s: the row-description banner is captured with real geometry" % tag)
+				# The strip grew for it: the help line sits ABOVE the SELECT/BACK legend, both inside the
+				# raised strip, nothing off the canvas floor. FOOTER_HELP_RISE is a fixed const (already
+				# sized to fit the capped description font at any scale), so strip_top/bottom don't move
+				# with text_scale — only the description's own size and offsets inside the strip do.
+				var strip_top: float = Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
+				var strip_bottom: float = strip_top + Menu.FOOTER_H + Menu.FOOTER_HELP_RISE
+				Runner.T.ok(strip_bottom <= 360.0, "%s: the raised strip stays inside the viewport" % tag)
+				for op in cap.ops:
+					var box: Rect2 = op["box"]
+					if box.size.x <= 0.0 and box.size.y <= 0.0:
+						continue
+					Runner.T.ok(box.position.x >= 0.0 and box.end.x <= Menu.CANVAS_WIDTH,
+						"%s: %s '%s' %s within the canvas width" % [tag, op["k"], op["id"], str(box)])
+					# On the PLATE, not merely on the canvas — an 11px keycap centered on the legend
+					# baseline used to hang 1.5px past the strip's bottom edge onto bare terrain.
+					Runner.T.ok(box.position.y >= strip_top - 0.01 and box.end.y <= strip_bottom + 0.01,
+						"%s: %s '%s' %s stays on the footer plate [%d,%d]"
+						% [tag, op["k"], op["id"], str(box), int(strip_top), int(strip_bottom)])
+				for op in cap.ops:
+					if op["k"] == "label":
+						Runner.T.ok(op["box"].position.y >= help.end.y - 0.01,
+							"%s: the '%s' legend prompt reads BELOW the description, never through it" % [tag, op["id"]])
+				Runner.T.no_overlap(cap.ops, tag)
+				cap.free()
 	stub.free()
-	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
+	Art.use_pad = was_pad     # restore globals so device/scale state can't leak to other suites
+	Art.text_scale = was_scale
 
 
 # c4-05: the footer legend must keep EVERY binding on-screen even when the set is at its
@@ -1459,6 +1468,28 @@ func test_step_vol_routes_through_shared_setter() -> void:
 	m._exit_opts(true)         # SAVE commits the staged changes
 	Runner.T.eq(stub._saved, 1, "SAVE persists the staged settings exactly once")
 	Runner.T.ok(not m._opts_dirty, "SAVE clears the dirty flag")
+	m.free()
+	stub.free()
+
+
+# r4-menu #3: a railed press (already at MUTED/10) used to zero _rail_pulse under Reduce
+# Motion — with SFX also muted at that floor, that made the "held at the limit" bounce both
+# silent AND invisible. It must now SET the pulse (RM only holds the grow static, per the
+# same rail-bounce/decay convention _set_pulse's confirm halo already uses) and DECAY it in
+# both modes rather than snapping to 0.
+func test_rail_pulse_fires_and_decays_under_reduce_motion() -> void:
+	var m: Control = Menu.new()
+	var stub := _StubMain.new()
+	m.main = stub
+	stub._motion = 0.0   # Reduce Motion ON
+	m.mode = Menu.Mode.OPTS
+	stub._levels["SFX"] = 10   # already at the ceiling
+	m._step_vol("SFX", 1)      # nv == cur -> rail hit, not a real step
+	Runner.T.ok(m._rail_pulse > 0.0, "a railed press sets _rail_pulse even under Reduce Motion")
+	var before: float = m._rail_pulse
+	m._process(0.1)
+	Runner.T.ok(m._rail_pulse > 0.0 and m._rail_pulse < before,
+		"the pulse decays under Reduce Motion instead of being snapped to 0")
 	m.free()
 	stub.free()
 
@@ -4045,10 +4076,13 @@ func test_opts_footer_describes_focused_setting() -> void:
 	m.mode = Menu.Mode.OPTS
 
 	# The footer must sit wholly below the list — its top clears the last-row glow with real margin
-	# (>= 3px, not a fragile hairline), and the whole two-line strip stays inside the 360px canvas.
+	# (>= 2px, not a fragile hairline), and the whole two-line strip stays inside the 360px canvas.
+	# r4-menu #1: was >= 3px at FOOTER_HELP_RISE 4.0; the rise grew to 5.0 so the description can
+	# scale (see the const's comment), which trades 1px of that budget away — 2.5px real margin
+	# remains, so the floor drops to 2.0 (same "real, not exact" slack the old threshold kept).
 	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false), -1.0)
 	var strip_top := Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
-	Runner.T.ok(strip_top - Menu.max_glow_bottom(g) >= 3.0, "the two-line footer top clears the last-row glow by >=3px")
+	Runner.T.ok(strip_top - Menu.max_glow_bottom(g) >= 2.0, "the two-line footer top clears the last-row glow by >=2px")
 	Runner.T.ok(Menu.FOOTER_Y + Menu.FOOTER_H <= 360.0, "the footer strip stays inside the canvas")
 
 	# ASSIST focus: the footer draws the description line AND still draws SELECT/BACK below it.
@@ -4114,9 +4148,11 @@ func test_help_footer_shared_across_settings_screens() -> void:
 		m.main = stub
 		m.mode = c[0]
 		# The footer top must clear the last-row glow on THIS screen's own geometry.
+		# r4-menu #1: floor dropped 3px -> 2px alongside FOOTER_HELP_RISE's growth — see the sibling
+		# assertion in test_opts_footer_describes_focused_setting for the full accounting.
 		var g: Dictionary = Menu.compute_geometry(c[0], _row_count(c[0], false), -1.0)
-		Runner.T.ok((Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE) - Menu.max_glow_bottom(g) >= 3.0,
-			"mode %d two-line footer clears the last-row glow by >=3px" % c[0])
+		Runner.T.ok((Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE) - Menu.max_glow_bottom(g) >= 2.0,
+			"mode %d two-line footer clears the last-row glow by >=2px" % c[0])
 		m.sel = _row_index(m, c[1])
 		m._footer_legend()
 		var desc := {}
@@ -5999,6 +6035,30 @@ func test_gamepad_dpad_binds_and_start_cancels_and_press_clears() -> void:
 	m._rebind_action = "roll"
 	m._rebind_capture(_padev(JOY_BUTTON_A))
 	Runner.T.eq(stub.pad_bind("roll"), JOY_BUTTON_A, "a different button (re)binds the verb")
+	m.free()
+	stub.free()
+
+
+# r4-menu #4: the GAMEPAD tab's current-binding label must be BRAND-AWARE (Art.pad_button_label),
+# not the generic dual "A / CROSS" string — a Switch player rebinding ROLL to the bottom face
+# button should see "B" (that brand's letter for JOY_BUTTON_A), matching every other in-game
+# pad hint (main.gd already routes through Art.pad_button_label everywhere else).
+func test_controls_row_shows_brand_correct_pad_button_label() -> void:
+	var was_brand: String = Art.pad_brand
+	var mm := _rebind_menu(2)
+	var m: Control = mm[0]
+	var stub = mm[1]
+	stub._pad_binds[0]["roll"] = JOY_BUTTON_A
+	Art.pad_brand = "switch"
+	var found := false
+	for row in m._menu_items():
+		if row.get("id", "") == "roll":
+			found = true
+			var label: String = row["label"]
+			Runner.T.ok("B" in label, "Switch CONTROLS row names the bottom face button B (%s)" % label)
+			Runner.T.ok(not ("A / CROSS" in label), "Switch CONTROLS row drops the xbox/ps dual string (%s)" % label)
+	Runner.T.ok(found, "the roll row is present on the GAMEPAD tab")
+	Art.pad_brand = was_brand
 	m.free()
 	stub.free()
 
