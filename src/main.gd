@@ -97,6 +97,12 @@ var _seed_override := -1         # CHALLENGE SEED: one-shot forced seed (-1 = no
 # Feel stack (view-only; the sim never sees any of this).
 var _trauma := 0.0
 var _hitstop_frames := 0
+# #13: a grenade/roll press that starts AND ends entirely inside a hit-stop freeze used
+# to be discarded outright — _gather_inputs() (and therefore sim.step()) never runs while
+# frozen, so the sim's own ROLL_BUFFER_TICKS/GRENADE_BUFFER_TICKS never saw it. Latched
+# here during the freeze (see the _hitstop_frames > 0 branch) and re-injected into the
+# very next _gather_inputs() call, then cleared.
+var _hs_latch := [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 # opt-loop: reused per-frame classification of _fx by glow/non-glow kind — see
@@ -343,7 +349,8 @@ const BAND_GOD_SIZE := 12
 var _shop_lock_told := false     # SHOP LOCKED banner latch — once per boss, not per frame
 var _no_target_cd := 0.0         # NO TARGET receipt cooldown (endless dead-interact cue)
 var _no_target_prev: Array[bool] = [false, false]   # per-player interact edge, view-side
-var _dry_frame := -100            # rate-limits the dry-FIRE (MG) click
+var _dry_frame := [-100, -100]    # rate-limits the dry-FIRE (MG) click, per player (was one
+                                  # shared clock — P1 always won it, so P1P2 both dry never cued P2)
 var _deflect_frame := -100        # rate-limits the riot-shield deflect ping
 var _nest_ping_frame := -100      # rate-limits the MG-nest crack ping (own clock — sharing
                                   # _deflect_frame let each mute the other within 10 frames)
@@ -351,9 +358,10 @@ var _vet_ping_frame := -100       # rate-limits the veteran-armor chip thud (own
 var _armor_announced := 0         # highest _wave_armor() level the wave banner has named
 var _pilot_alarm_frame := -999    # one-shot for the pilot's ESCAPING warning tone
 var _pilot_deny_frame := -100     # rate-limits the punch-out-grace deny chirp
-var _dry_grenade_frame := -100    # separate clock for the dry-THROW (grenade) click
+var _dry_grenade_frame := [-100, -100]   # per-player clock for the dry-THROW (grenade) click
 var _deny_frame := -100           # rate-limits revive_deny, which the sim emits EVERY tick
-var _dry_roll_frame := -100       # separate clock for the cooldown-blocked ROLL click
+var _dry_roll_frame := [-100, -100]      # per-player clock for the cooldown-blocked ROLL click
+var _roll_intent := [false, false]       # #20: raw roll press latched BEFORE the wheel zeroes it
 var _roll_dry := [0, 0]           # per-player frames left on the blocked-roll arc flash
 var _grenade_dry: Array[int] = [0, 0]   # HUD grenade-pip red flash on empty throw (per-player)
 var _smoke_prev: Array[int] = [0, 0]    # last tick's smoke_ticks (per-player) — expiry-edge cue
@@ -507,7 +515,7 @@ const _EVENT_SOUND := {
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"rifleman_windup": ["click_dry", -18.0, 1.4],   # subtle weapon-ready tick; the painted lane carries the warning
 	"elite_windup": ["alarm", -13.0, 0.7],   # incoming attack: a threat cue, not the friendly pickup jingle
-	"grenadier_windup": ["throw", -8.0, 0.7],
+	"grenadier_windup": ["alarm", -13.0, 0.55],
 	"drone_windup": ["alarm_air", -12.0, 1.0],   # a1-13: dedicated aerial paint-whine timbre
 	"flashbang": ["flash", -8.0, 1.0],   # noise snap + 3.2 kHz ring — the ring's fade IS the stun window
 	"flash_recover": ["alarm", -16.0, 2.4],  # stun window closing — the wake-up tick
@@ -1568,6 +1576,7 @@ func _reset() -> void:
 	_watch_frame = 0
 	_trauma = 0.0
 	_hitstop_frames = 0
+	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 	_flash_alpha = 0.0
 	_fx.clear()
 	_mote_count = 0
@@ -1612,6 +1621,8 @@ func _reset() -> void:
 	# banks as the daily.
 	if _spent_daily >= 0:
 		show_banner("DAILY ATTEMPT SPENT — UNRANKED PRACTICE", GameMenu.BANNER_COL_FAIL)
+	if _hard and not sim.hard:
+		show_banner("NG+ HARD OFF — CAMPAIGN ONLY", GameMenu.BANNER_COL_FAIL)
 	_armor_announced = 0   # the next run re-announces wave 13's armor from zero
 	_fork_sign_fade.clear()
 	_mud_told = false
@@ -2146,6 +2157,7 @@ func _physics_process(_delta: float) -> void:
 			# _consume_events can SET it (near demo blasts) — a stuck freeze would
 			# wedge every feel gate (particles/envelopes/camera) forever. Clear it.
 			_hitstop_frames = 0
+			_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 			_update_feel()
 		else:
 			# Pause: clear the underwater LPF/duck so the menu sounds clean, and
@@ -2207,12 +2219,30 @@ func _physics_process(_delta: float) -> void:
 		# hit-stop set by _consume_events would never decrement — clear it or the
 		# feel gates wedge frozen while the replayed world keeps moving.
 		_hitstop_frames = 0
+		_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 		_update_feel()
 		queue_redraw()
 		_update_hud()
 		return
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
+		# #13: _gather_inputs()/sim.step() are both skipped while frozen, so a grenade/roll
+		# TAP that starts and ends entirely inside the freeze would otherwise never reach the
+		# sim's own input buffers. Sample the same raw reads _gather_inputs uses for those two
+		# verbs and OR them into a latch that the next _gather_inputs() call re-injects.
+		_hs_latch[0]["grenade"] = _hs_latch[0]["grenade"] \
+			or Input.is_physical_key_pressed(bind("grenade")) \
+			or Input.is_physical_key_pressed(bind("grenade_alt")) \
+			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+			or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade")
+		_hs_latch[0]["roll"] = _hs_latch[0]["roll"] \
+			or Input.is_physical_key_pressed(bind("roll")) \
+			or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll")
+		if _two_players:
+			_hs_latch[1]["grenade"] = _hs_latch[1]["grenade"] \
+				or pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
+			_hs_latch[1]["roll"] = _hs_latch[1]["roll"] \
+				or pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
 	elif not _debrief:
 		# THE RUN-ENDER FREEZE. SimWorld.step() has exactly one of these — `if wiped: return` —
 		# and `victory` never got a counterpart, so killing the Colossus stopped nothing: the
@@ -2559,8 +2589,8 @@ func _consume_events() -> void:
 						"rate": 0.28, "r": 14.0, "col": Color(1.0, 0.8, 0.45)})
 					_sfx.play("ping_shell", -10.0, 1.2)
 			"dry_fire":
-				if Engine.get_physics_frames() - _dry_frame >= 14:
-					_dry_frame = Engine.get_physics_frames()
+				if Engine.get_physics_frames() - _dry_frame[ev["i"]] >= 14:
+					_dry_frame[ev["i"]] = Engine.get_physics_frames()
 					_sfx.play("click_dry", -8.0, 1.0)
 					_vo("vo_clip_dry", 0, 720)
 					# Empty-mag tell: a weak grey puff + a red "CLICK" at the muzzle — unmistakable
@@ -2654,8 +2684,8 @@ func _consume_events() -> void:
 						"sz": 24.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.75, 0.4, 0.85)})
 					for si in 2:
 						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
-							"sz": 16.0 + si * 7.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
-							"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+							"sz": 16.0 + si * 7.0, "grow": 0.9, "fade": 2.6, "rate": 0.008,
+							"dx": randf_range(-8.0, 8.0), "dy": -34.0 - si * 12.0,
 							"col": Color(0.25, 0.22, 0.2, 0.7)})
 					_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(14.0, 20.0)})
 			"parapet_collapse":
@@ -2667,8 +2697,8 @@ func _consume_events() -> void:
 				for di in 3:
 					_fx.append({"x": ev["x"], "y": ev["y"] - di * 8.0, "t": 0.0, "kind": "tex",
 						"tex": "fx_smoke", "sz": 18.0 + di * 6.0, "grow": 1.0, "fade": 2.4,
-						"rate": 0.007, "move": true, "vx": randf_range(-0.5, 0.5),
-						"vy": -0.35 - di * 0.15, "col": Color(0.34, 0.31, 0.28, 0.75)})
+						"rate": 0.007, "dx": randf_range(-8.0, 8.0),
+						"dy": -34.0 - di * 12.0, "col": Color(0.34, 0.31, 0.28, 0.75)})
 				for _ci in 5:
 					_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
 						"sz": randf_range(4.0, 8.0), "grow": -0.2, "fade": 1.4, "rate": 0.05,
@@ -2933,7 +2963,7 @@ func _consume_events() -> void:
 				# The banner carries the stakes BEFORE the player commits to the
 				# chase: the payout number, and the friendly-fire trap (a stray
 				# round pays nothing — sim rule the green ring alone can't teach).
-				_hint("pilot", TranslationServer.translate("RESCUE THE DOWNED PILOT — TOUCH, DON'T SHOOT — %d¢ RANSOM") % sim.PILOT_RANSOM, true)
+				_hint("pilot", TranslationServer.translate("RESCUE THE DOWNED PILOT — TOUCH HIM, AIM AWAY — %d¢ RANSOM") % sim.PILOT_RANSOM, true)
 			"pilot_rescued":
 				_run_rescues += 1
 				_coin_pop(ev["x"], ev["y"], "RANSOM +%d¢" % ev["coin"], 5, Art.safe(FLOAT_INK_RANSOM), 0.02)
@@ -3524,11 +3554,11 @@ func _ev_explosion(ev: Dictionary) -> void:
 			_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "r": randf_range(11.0, 16.0)})
 			# Lingering smoke drifts up after the flash — a blast site used to clear to
 			# bare scorch in ~0.3s while wave/gate spawns billow. Reuses the proven
-			# long-life fx_smoke card + a gentle rise (move) so it reads as air.
+			# long-life fx_smoke card + a real rise (dx/dy, age-driven) so it reads as air.
 			for si in 2:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
-					"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008, "move": true,
-					"vx": randf_range(-0.4, 0.4), "vy": -0.5 - si * 0.2,
+					"sz": 20.0 + si * 8.0, "grow": 0.9, "fade": 2.6, "rate": 0.008,
+					"dx": randf_range(-8.0, 8.0), "dy": -34.0 - si * 12.0,
 					"col": Color(0.25, 0.22, 0.2, 0.7)})
 	else:
 		# Wet blast: the aftermath is steam, not soot — pale spray columns rising
@@ -5413,29 +5443,36 @@ func _step_hint_readable_time(presentation_winner: String) -> void:
 func _check_dry_throw(inputs: Array[SimInput]) -> void:
 	# Empty-grenade click: pressing grenade at 0 ammo on foot does nothing in
 	# the sim (grenades are the ONLY armor-cracker, so silent = maximally
-	# confusing). View-side click keeps it golden-safe. Throttled like dry-fire.
-	if Engine.get_physics_frames() - _dry_grenade_frame < 14:
-		return
+	# confusing). View-side click keeps it golden-safe. Throttled like dry-fire,
+	# per player — a shared clock let P0 always win the window and P1 never cued.
 	for pi in mini(inputs.size(), sim.players.size()):
+		if Engine.get_physics_frames() - _dry_grenade_frame[pi] < 14:
+			continue
 		var p := sim.players[pi]
 		if not (inputs[pi].grenade and p["alive"] and p["in_tank"] < 0):
 			continue
 		# Two distinct denials, both previously handled only in the first case:
 		#   ammo == 0            -> "you have none"      (was already covered)
-		#   ammo > 0, cd > 0     -> "not yet"            (was FULLY silent)
+		#   ammo > 0, cd > GRENADE_BUFFER_TICKS -> "not yet" (was FULLY silent)
 		# The cooldown denial is the worse of the two — grenade in hand, button
 		# pressed, nothing happens, no channel fires. Same click + pip, pitched
 		# lower so "not yet" is audibly distinct from "none left".
-		if p["grenade_ammo"] == 0 and p["grenade_cd"] == 0:
-			_dry_grenade_frame = Engine.get_physics_frames()
+		# `> GRENADE_BUFFER_TICKS` instead of `> 0`: cd read here is PRE-step, so a
+		# press with cd <= the buffer window lands in grenade_buf and WILL fire —
+		# refusing it would be a lie. `not p["grenade_prev"]` (also pre-step, so it
+		# reflects LAST tick) skips a HELD button: the sim is edge-triggered and
+		# never re-evaluates a hold, so re-firing the cue every 14 frames for it
+		# was cueing a press the sim was never going to look at again.
+		if p["grenade_ammo"] == 0 and p["grenade_cd"] == 0 and not p["grenade_prev"]:
+			_dry_grenade_frame[pi] = Engine.get_physics_frames()
 			_sfx.play("tank_board", -12.0, 2.4)
 			_grenade_dry[pi] = 12   # HUD grenade pip flashes red
-			return
-		if p["grenade_ammo"] > 0 and p["grenade_cd"] > 0:
-			_dry_grenade_frame = Engine.get_physics_frames()
+			continue
+		if p["grenade_ammo"] > 0 and p["grenade_cd"] > SimWorld.GRENADE_BUFFER_TICKS \
+				and not p["grenade_prev"]:
+			_dry_grenade_frame[pi] = Engine.get_physics_frames()
 			_sfx.play("tank_board", -16.0, 1.6)
 			_grenade_dry[pi] = 8
-			return
 
 
 func _check_dry_roll(inputs: Array[SimInput]) -> void:
@@ -5444,18 +5481,27 @@ func _check_dry_roll(inputs: Array[SimInput]) -> void:
 	# mid-fight. Two channels, view-side: a quiet click + a white flash on that
 	# player's own recharge arc. (Starting value 14f gate / 6f flash, matching the
 	# shipped dry-fire grammar; test: mash roll on cooldown and assert exactly one
-	# click per ~14 frames rather than silence.)
-	if Engine.get_physics_frames() - _dry_roll_frame < 14:
-		return
+	# click per ~14 frames rather than silence.) Per-player clock, same reason as
+	# dry-throw above. Wading is a real refusal too (sim_world.gd's own `deny/water`
+	# event carries it, not this one — this check covers cooldown only).
 	for pi in mini(inputs.size(), sim.players.size()):
+		if Engine.get_physics_frames() - _dry_roll_frame[pi] < 14:
+			continue
 		var p := sim.players[pi]
-		if inputs[pi].roll and p["alive"] and p["in_tank"] < 0 \
-				and p["roll_ticks"] <= 0 and p["roll_cd"] > 0:
-			_dry_roll_frame = Engine.get_physics_frames()
+		# `> ROLL_BUFFER_TICKS` instead of `> 0` and `not p["roll_prev"]`: same
+		# buffer-lie / hold-lie fix as dry-throw above — both read pre-step state.
+		if (inputs[pi].roll and p["alive"] and p["in_tank"] < 0 \
+				and p["roll_ticks"] <= 0 and p["roll_cd"] > SimWorld.ROLL_BUFFER_TICKS \
+				and not p["roll_prev"]) \
+				or (_roll_intent[pi] and _wheel[pi]["open"]):
+			# #20: the supply wheel silently zeroes `roll` before it ever reaches this
+			# check (it's the wheel's own CANCEL action) — `_roll_intent` is the raw
+			# press latched before that zeroing, so a panic roll pressed while shopping
+			# still gets the same refusal cue instead of vanishing with no tell at all.
+			_dry_roll_frame[pi] = Engine.get_physics_frames()
 			_sfx.play("click_dry", -16.0, 1.5)
 			_roll_dry[pi] = 6
 			_buzz(0.08, pi)
-			return
 
 
 func _check_near_miss() -> void:
@@ -5724,7 +5770,7 @@ func _update_feel() -> void:
 		while fi < _fx.size():
 			var fx := _fx[fi]
 			fx["t"] += fx.get("rate", 0.09)
-			if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust" or fx.get("move", false):
+			if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust" or fx["kind"] == "splash" or fx["kind"] == "ember" or fx.get("move", false):
 				fx["x"] += int(fx["vx"] * Fixed.ONE)
 				fx["y"] += int(fx["vy"] * Fixed.ONE)
 				fx["vx"] *= 0.86
@@ -6363,6 +6409,9 @@ func _gather_inputs() -> Array[SimInput]:
 		wheel_dir, Vector2(kx, ky))
 	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
 	# not a dodge) and sector flicks steer the wheel, not the gun.
+	# #20: latch the raw press BEFORE it's zeroed below — the wheel silently ate
+	# the dodge with no tell at all; _check_dry_roll reads this to still cue it.
+	_roll_intent[0] = p1.roll
 	if _wheel[0]["open"]:
 		p1.roll = false
 		# Always-fire's ONE new refusal: the wheel steers the aim vector, and the gun fires
@@ -6373,6 +6422,13 @@ func _gather_inputs() -> Array[SimInput]:
 		p1.aim_y = _quantize_axis(_wheel_aim[0].y)
 	else:
 		_wheel_aim[0] = Vector2(ax, ay)
+	# #13: re-inject a grenade/roll press latched during a hit-stop freeze — AFTER the
+	# wheel-open overrides above, so a latched roll can't fire while the wheel owns roll
+	# as its own CANCEL action.
+	p1.grenade = p1.grenade or _hs_latch[0]["grenade"]
+	p1.roll = p1.roll or (_hs_latch[0]["roll"] and not _wheel[0]["open"])
+	_hs_latch[0]["grenade"] = false
+	_hs_latch[0]["roll"] = false
 	inputs.append(p1)
 
 	if _two_players:
@@ -6399,6 +6455,8 @@ func _gather_inputs() -> Array[SimInput]:
 		p2.revive = pad_pressed(1, "revive") or _steam.button_pressed(1, "revive")
 		p2.buy = _update_wheel(1, pad_pressed(1, "buy") or _steam.button_pressed(1, "buy"),
 			p2_aim, p2_move)
+		# #20: same raw-press latch as P1, above.
+		_roll_intent[1] = p2.roll
 		if _wheel[1]["open"]:
 			p2.roll = false
 			p2.fire = false   # same wheel refusal as P1
@@ -6406,6 +6464,11 @@ func _gather_inputs() -> Array[SimInput]:
 			p2.aim_y = _quantize_axis(_wheel_aim[1].y)
 		else:
 			_wheel_aim[1] = p2_aim
+		# #13: same latch re-injection as P1, above.
+		p2.grenade = p2.grenade or _hs_latch[1]["grenade"]
+		p2.roll = p2.roll or (_hs_latch[1]["roll"] and not _wheel[1]["open"])
+		_hs_latch[1]["grenade"] = false
+		_hs_latch[1]["roll"] = false
 		inputs.append(p2)
 	# The global bottom chip is P1-owned: P2 already receives seat-correct contextual prompts,
 	# and must never retire the keyboard/pad instruction currently being shown to P1.
@@ -9484,7 +9547,10 @@ func _draw_enemies() -> void:
 		# breathes instead of jogging in place.
 		var e_now := Vector2i(e["x"], e["y"])
 		var e_moved: bool = _enemy_pos_prev.has(eidx) and _enemy_pos_prev[eidx] != e_now
-		_enemy_pos_prev[eidx] = e_now
+		# #11: same freeze guard as the player _dust_prev cache above — don't let a
+		# frozen frame's redraw zero e_moved and collapse a running enemy to idle.
+		if _hitstop_frames == 0:
+			_enemy_pos_prev[eidx] = e_now
 		var enemy_phase := 0 if _motion < 0.5 else (int(Engine.get_physics_frames() / 7) + eidx) & 1
 		if e["kind"] != "frogman":
 			if e.get("windup", 0) == 0 and e_moved:
@@ -10805,10 +10871,14 @@ func _draw_players() -> void:
 		var idle_bob := sin(Engine.get_physics_frames() * 0.045 + i * PI) * 0.25 * _motion \
 			if anim_state == "idle" else 0.0
 		var tex_name := "player1" if i == 0 else "player2"
-		if p["alive"] and not sim._in_water(p["x"], p["y"]):
-			_kick_dust(i, p["x"], p["y"], _dust_prev, false)
-		else:
-			_dust_prev[i] = Vector2i(p["x"], p["y"])
+		# #11: freeze the pre-hitstop pose, don't advance it. _dust_prev is the cache
+		# move_delta reads above — rewriting it while frozen zeroes move_delta on the very
+		# next drawn (still-frozen) frame, so a running unit visibly collapsed to idle mid-freeze.
+		if _hitstop_frames == 0:
+			if p["alive"] and not sim._in_water(p["x"], p["y"]):
+				_kick_dust(i, p["x"], p["y"], _dust_prev, false)
+			else:
+				_dust_prev[i] = Vector2i(p["x"], p["y"])
 		if sim._in_water(p["x"], p["y"]):
 			_ground_shadow(pos, 7.0, 0.18, Color(0.0, 0.04, 0.10))
 		else:
@@ -11065,7 +11135,7 @@ func _draw_players() -> void:
 					var pi_along := pi_rel.dot(aim)
 					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
 						var hfp := pos + aim * 27.0
-						_world_label_centered("HOLD FIRE", hfp.x, hfp.y - 14.0, CALLOUT_ALERT)
+						_world_label_centered("AIM AWAY", hfp.x, hfp.y - 14.0, CALLOUT_ALERT)
 						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
 			# will land if INTERACT fires now — ghost sprite + the 9px trigger
@@ -11607,12 +11677,16 @@ func _draw_fx() -> void:
 		elif fx["kind"] == "tex":
 			# Generic textured particle (the earlier art Particle_FX): grows + fades over its
 			# lifetime t; optional spin. Drives the beefier muzzle/blast/impact FX.
+			# dx/dy is an age-driven drift offset (same idiom the "mote" kind uses) so
+			# long-lived smoke plumes actually rise instead of stamping in place; short-
+			# lived tex particles simply never set dx/dy and are unaffected.
+			var tpos: Vector2 = pos + Vector2(fx.get("dx", 0.0), fx.get("dy", 0.0)) * t
 			var tx: Texture2D = Art.tex(fx["tex"])
 			var gsz: float = float(fx["sz"]) * (1.0 + t * float(fx.get("grow", 0.0)))
 			var tcol: Color = fx.get("col", Color.WHITE)
 			var ta: float = tcol.a * pow(1.0 - t, float(fx.get("fade", 1.0)))
 			var tsc: float = gsz / maxf(1.0, tx.get_size().x)
-			draw_set_transform(pos, float(fx.get("rot", 0.0)) + t * float(fx.get("spin", 0.0)), Vector2(tsc, tsc))
+			draw_set_transform(tpos, float(fx.get("rot", 0.0)) + t * float(fx.get("spin", 0.0)), Vector2(tsc, tsc))
 			draw_texture(tx, -tx.get_size() / 2.0, Color(tcol.r, tcol.g, tcol.b, ta))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -12437,17 +12511,23 @@ func _draw_wheel() -> void:
 		# Revive-guard (5-vote panel item): with a teammate down, a buy that
 		# would price their revive out of the shared chest is a silent trap —
 		# name it BEFORE the release commits the coin.
-		if sel >= 0 and not sim.last_stand:
-			var gcost: int = sim._supply_cost(sel_item["kind"])
-			if sim.war_chest >= gcost:
-				for q in sim.players.size():
-					var dq := sim.players[q]
-					if not dq["alive"] and sim.war_chest - gcost < sim.revive_cost(dq):
-						var warn_txt := "BUY LEAVES NO REVIVE FOR P%d" % (q + 1)
-						_wheel_row_plate(c.x, c.y + WHEEL_ROW_WARN, Art.tw(warn_txt, 8), 8)
-						Art.text_center(self, warn_txt,
-							c.x, c.y + WHEEL_ROW_WARN, 8, Color(1.0, 0.7, 0.3))
-						break
+		# #25: `not sel_is_token` — a Commendation token (kind 5) never touches the war
+		# chest (`_supply_cost` returns 0 for it, sim_world.gd), so the guard used to
+		# accuse a FREE spend of pricing out a revive. `sim.war_chest >= revive_cost`
+		# makes the warning CAUSAL — it only fires when the buy is what breaks a revive
+		# that was affordable a moment ago, not when the chest was already short.
+		# `sel_cost` (computed once above) is `_supply_cost(sel_item["kind"])` on this
+		# branch — reused here instead of a third re-derivation, same value.
+		if not sel_is_token and sel >= 0 and not sim.last_stand and sim.war_chest >= sel_cost:
+			for q in sim.players.size():
+				var dq := sim.players[q]
+				if not dq["alive"] and sim.war_chest >= sim.revive_cost(dq) \
+						and sim.war_chest - sel_cost < sim.revive_cost(dq):
+					var warn_txt := "BUY LEAVES NO REVIVE FOR P%d" % (q + 1)
+					_wheel_row_plate(c.x, c.y + WHEEL_ROW_WARN, Art.tw(warn_txt, 8), 8)
+					Art.text_center(self, warn_txt,
+						c.x, c.y + WHEEL_ROW_WARN, 8, Color(1.0, 0.7, 0.3))
+					break
 		if sel >= 0:
 			# The verb line must not promise a purchase the sim will deny — an
 			# unaffordable pick tints its socket red, so the cue says so too
@@ -13313,7 +13393,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		draw_rect(Rect2(panel_x + 4.0, panel_top + 21.0, panel_w - 8.0, 1.0),
 			Color(band_col, 0.4 * accent.a))
 	Art.text_center(self, title, 320, title_y, 24, title_col)
-	if shine:
+	if shine and _motion >= 0.5:
 		# a1-11 VFX#10: a soft warm glint sweeps across the title on a slow loop (with
 		# a pause) so the run's payoff title catches the light like polished metal.
 		var sw := fposmod(float(Engine.get_physics_frames()) * 0.012, 1.5) - 0.2

@@ -5,6 +5,7 @@ extends RefCounted
 ## reskin can silently change art without silently changing what the art communicates.
 
 const Runner := preload("res://tests/run_tests.gd")
+const Main := preload("res://src/main.gd")   # main.gd has no class_name — same local alias test_view_honesty.gd uses
 
 
 func _consts() -> Dictionary:
@@ -2642,3 +2643,104 @@ func _calls_spr(line: String) -> bool:
 				return true
 		i = line.find("_spr", i + 1)
 	return false
+
+
+# --- r4-main Group 4: per-player dry-cues + supply-wheel roll latch + revive-guard ---
+# (findings #20/#22/#23/#25 — none of these four had test coverage before this pass;
+# a shared clock or a mis-indexed per-player array is exactly the "green but wrong"
+# failure this suite exists to catch.)
+
+func _dry_cue_player(alive := true) -> Dictionary:
+	return {"alive": alive, "in_tank": -1, "grenade_ammo": 0, "grenade_cd": 0,
+		"grenade_prev": false, "roll_ticks": 0, "roll_cd": 0, "roll_prev": false}
+
+
+func test_dry_cues_are_per_player_not_a_shared_clock() -> void:
+	# Both players out of grenades and both pressing the button in the SAME tick used to
+	# share one clock (_dry_grenade_frame) with a function-level early return: P0 always
+	# won the window and P1's own per-player state (_grenade_dry[1]) stayed dead.
+	var m := Main.new()
+	m.sim = SimWorld.new(0xC0FFEE, 2)
+	m.sim.players[0].merge(_dry_cue_player(), true)
+	m.sim.players[1].merge(_dry_cue_player(), true)
+	var i0 := SimInput.new(); i0.grenade = true
+	var i1 := SimInput.new(); i1.grenade = true
+	var inputs: Array[SimInput] = [i0, i1]
+	m._check_dry_throw(inputs)
+	Runner.T.ok(m._grenade_dry[0] > 0, "P0 gets its empty-mag pip flash")
+	Runner.T.ok(m._grenade_dry[1] > 0, "P1 ALSO gets its own pip flash in the same tick — not silently eaten by P0's clock")
+	m.free()
+
+
+func test_dry_throw_respects_the_grenade_buffer_window() -> void:
+	# A press with grenade_cd <= GRENADE_BUFFER_TICKS is already queued in the sim's own
+	# grenade_buf and WILL fire on the next step — cueing "not yet" for it is a lie.
+	var m := Main.new()
+	m.sim = SimWorld.new(0xC0FFEE, 1)
+	var p := _dry_cue_player()
+	p["grenade_ammo"] = 1
+	p["grenade_cd"] = SimWorld.GRENADE_BUFFER_TICKS   # inside the buffer window
+	m.sim.players[0].merge(p, true)
+	var inputs: Array[SimInput] = [SimInput.new()]
+	inputs[0].grenade = true
+	m._check_dry_throw(inputs)
+	Runner.T.eq(m._grenade_dry[0], 0, "a cd inside the buffer window is honored by the sim — no dry cue")
+	m.sim.players[0]["grenade_cd"] = SimWorld.GRENADE_BUFFER_TICKS + 1   # just outside it
+	m._check_dry_throw(inputs)
+	Runner.T.ok(m._grenade_dry[0] > 0, "a cd past the buffer window really is refused — the cue fires")
+	m.free()
+
+
+func test_dry_cue_does_not_refire_on_a_held_button() -> void:
+	# The sim is edge-triggered (grenade_edge = inp.grenade and not grenade_prev); a HELD
+	# button re-checked every frame used to re-fire the refusal click every 14 frames for
+	# an input the sim was never going to look at again.
+	var m := Main.new()
+	m.sim = SimWorld.new(0xC0FFEE, 1)
+	var p := _dry_cue_player()
+	p["grenade_prev"] = true   # already held as of last tick (pre-step state)
+	m.sim.players[0].merge(p, true)
+	var inputs: Array[SimInput] = [SimInput.new()]
+	inputs[0].grenade = true
+	m._check_dry_throw(inputs)
+	Runner.T.eq(m._grenade_dry[0], 0, "a held button (grenade_prev true) does not re-fire the dry cue")
+	m.sim.players[0]["grenade_prev"] = false   # a fresh press
+	m._check_dry_throw(inputs)
+	Runner.T.ok(m._grenade_dry[0] > 0, "...but a genuinely fresh press still cues")
+	m.free()
+
+
+func test_wheel_open_with_roll_held_produces_a_dry_roll_cue() -> void:
+	# The wheel zeroes p.roll before _check_dry_roll ever sees it (roll is the wheel's own
+	# CANCEL action) — _roll_intent is the raw press latched before that zeroing, so a
+	# panic roll pressed while shopping still gets a refusal cue instead of vanishing.
+	var m := Main.new()
+	m.sim = SimWorld.new(0xC0FFEE, 1)
+	m.sim.players[0].merge(_dry_cue_player(), true)
+	m._wheel = [{"open": true, "sel": -1}, {"open": false, "sel": -1}]
+	m._roll_intent = [true, false]
+	var inputs: Array[SimInput] = [SimInput.new()]   # inputs[0].roll already false, as the wheel left it
+	m._check_dry_roll(inputs)
+	Runner.T.ok(m._roll_dry[0] > 0, "opening the wheel with roll held produces the same dry-roll cue as a cooldown refusal")
+	m.free()
+
+
+func test_revive_guard_skips_token_buys_and_requires_the_chest_currently_covers() -> void:
+	# Source-scraped (the guard lives inline in _draw_wheel, not a standalone testable
+	# helper — same idiom test_partner_ko_ducks_only_the_self_directed_channels uses
+	# above). Pins the two conditions the fix adds: token buys are exempt, and the
+	# warning is CAUSAL (only fires when the chest currently covers the revive).
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.find("if not sel_is_token and sel >= 0 and not sim.last_stand and sim.war_chest >= sel_cost:") != -1,
+		"the revive-guard is skipped for a free Commendation token buy (sel_is_token) and gated on affording the selected item")
+	Runner.T.ok(src.find("sim.war_chest >= sim.revive_cost(dq)") != -1,
+		"...and the warning only fires when the buy is what breaks a revive that was affordable a moment before it — not one already out of reach")
+
+
+func test_victory_glint_is_gated_by_reduce_motion() -> void:
+	# #17: the shine sweep was the one victory-card effect left ungated — every sibling
+	# effect (entrance scale, title pulse, trophy breathe, redeploy prompt) already reads
+	# _motion; the sweep kept translating a sprite across the title regardless.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.find("if shine and _motion >= 0.5:") != -1,
+		"the gold-shine sweep is gated on _motion like every other victory-card effect")
