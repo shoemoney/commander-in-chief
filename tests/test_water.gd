@@ -469,7 +469,14 @@ func test_permanent_ford_is_named_and_reopening_has_a_short_truthful_settle() ->
 	# The reduced-motion contract is structural: the renderer's legibility cues are
 	# static text + frame, while only the translucent receding fill is motion-scaled.
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	Runner.T.ok(src.contains('Art.text(self, "FORD OPEN"'),
+	# The cue must be STATIC TEXT — that is the invariant. It used to be pinned to the raw
+	# `Art.text(self, "FORD OPEN"` call form, which made this a ratchet on the MECHANISM
+	# rather than the contract: the river labels were the last raw-Art.text holdouts in the
+	# renderer, drawing with no claim_label_slot at all, so a RESCUE/ESCAPING callout printed
+	# straight through "PERMANENT FORD". Routing them through _world_label_centered (which
+	# delegates to _world_label -> claim_label_slot) fixed that and tripped this string.
+	# Pin the helper instead: still static text, now arbitrated like every other world label.
+	Runner.T.ok(src.contains('_world_label_centered("FORD OPEN"'),
 		"reopen state has a static text cue, independent of movement")
 	Runner.T.ok(src.contains('fv["second_label"]'),
 		"permanent reliability label is actually consumed by the renderer")

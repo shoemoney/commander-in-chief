@@ -818,8 +818,15 @@ const _BRAND_MAP := {
 		"glyph_pad_start": "glyph_ps_start", "glyph_rt": "glyph_ps_rt",
 		"glyph_lb": "glyph_ps_lb", "ui_pad_back": "glyph_ps_back",
 		"glyph_dpad_lr": "glyph_ps_dpad_lr"},
-	"switch": {"glyph_pad_a": "glyph_sw_a", "ui_pad_b": "glyph_sw_b",
-		"ui_pad_x": "glyph_sw_x", "ui_pad_y": "glyph_sw_y",
+	# The face row is CROSSED on purpose. Godot/SDL name face buttons POSITIONALLY with
+	# Xbox letters — JOY_BUTTON_A is always the BOTTOM button, X always the LEFT one — and
+	# a Switch pad prints B on the bottom, A on the right, Y on the left, X on the top.
+	# The sw_* sprites are captioned with their PRINTED letters (gen_ui_glyphs CAPTIONS),
+	# so a name-for-name map would draw "A" for the button the player sees labelled B and
+	# put the glyph at odds with _PAD_LABELS["switch"] below, which is already positional.
+	# PS needs no crossing: cross/circle/square/triangle sit in the Xbox positions.
+	"switch": {"glyph_pad_a": "glyph_sw_b", "ui_pad_b": "glyph_sw_a",
+		"ui_pad_x": "glyph_sw_y", "ui_pad_y": "glyph_sw_x",
 		"glyph_pad_start": "glyph_sw_start", "glyph_rt": "glyph_sw_rt",
 		"glyph_lb": "glyph_sw_lb", "ui_pad_back": "glyph_sw_back",
 		"glyph_dpad_lr": "glyph_sw_dpad_lr"},
@@ -842,6 +849,51 @@ const _PAD_LABELS := {
 
 static func pad_label(verb: String) -> String:
 	return _PAD_LABELS.get(pad_brand, _PAD_LABELS["xbox"]).get(verb, verb.to_upper())
+
+
+## LIVE-bind twins of _GLYPH_PAD / _PAD_LABELS: keyed on the POSITIONAL button id a caller
+## got from main.pad_bind(verb), not on the verb itself. The verb tables above are frozen
+## ship defaults, so a player who moves INTERACT off X keeps being shown X for the rest of
+## the run — same lie the keyboard `keycode` param removed. Both rows are indexed by Godot's
+## positional ids (JOY_BUTTON_A == BOTTOM face button), hence the crossed switch letters.
+const _PAD_BUTTON_TEX := {
+	JOY_BUTTON_A: "glyph_pad_a", JOY_BUTTON_B: "ui_pad_b",
+	JOY_BUTTON_X: "ui_pad_x", JOY_BUTTON_Y: "ui_pad_y",
+	JOY_BUTTON_BACK: "ui_pad_back", JOY_BUTTON_START: "glyph_pad_start",
+	JOY_BUTTON_LEFT_SHOULDER: "glyph_lb", JOY_BUTTON_RIGHT_SHOULDER: "glyph_rt",
+	JOY_BUTTON_DPAD_LEFT: "glyph_dpad_lr", JOY_BUTTON_DPAD_RIGHT: "glyph_dpad_lr",
+}
+const _PAD_BUTTON_LABELS := {
+	"xbox": {JOY_BUTTON_A: "A", JOY_BUTTON_B: "B", JOY_BUTTON_X: "X", JOY_BUTTON_Y: "Y",
+		JOY_BUTTON_BACK: "BACK", JOY_BUTTON_START: "START",
+		JOY_BUTTON_LEFT_SHOULDER: "LB", JOY_BUTTON_RIGHT_SHOULDER: "RB"},
+	"ps": {JOY_BUTTON_A: "CROSS", JOY_BUTTON_B: "CIRCLE", JOY_BUTTON_X: "SQUARE",
+		JOY_BUTTON_Y: "TRIANGLE", JOY_BUTTON_BACK: "SHARE", JOY_BUTTON_START: "OPTIONS",
+		JOY_BUTTON_LEFT_SHOULDER: "L1", JOY_BUTTON_RIGHT_SHOULDER: "R1"},
+	"switch": {JOY_BUTTON_A: "B", JOY_BUTTON_B: "A", JOY_BUTTON_X: "Y", JOY_BUTTON_Y: "X",
+		JOY_BUTTON_BACK: "MINUS", JOY_BUTTON_START: "PLUS",
+		JOY_BUTTON_LEFT_SHOULDER: "L", JOY_BUTTON_RIGHT_SHOULDER: "R"},
+}
+
+
+## Brand-corrected sprite for a positional pad button, or "" when the pack has no art for
+## it (RB, the sticks, dpad up/down) — callers fall back to the verb table rather than
+## drawing a wrong button.
+static func pad_button_tex(button: int) -> String:
+	var key: String = _PAD_BUTTON_TEX.get(button, "")
+	return _brand(key) if key != "" else ""
+
+
+## Brand-correct short NAME for a positional pad button. -1 is main.pad_bind's UNBOUND,
+## matching GameMenu.key_label(0); anything without a short name falls back to the rebind
+## screen's long form so the string is never empty.
+static func pad_button_label(button: int) -> String:
+	if button < 0:
+		return "UNBOUND"
+	var row: Dictionary = _PAD_BUTTON_LABELS.get(pad_brand, _PAD_BUTTON_LABELS["xbox"])
+	return row.get(button, GameMenu.pad_button_name(button))
+
+
 ## Deuteran-safe remap: 'affordable/safe/open' greens become cyan-blue when
 ## colorblind mode is on (red↔blue is distinguishable where red↔green isn't).
 ## Reds are left alone. Driven from main.
@@ -1046,7 +1098,7 @@ static func focus_ring(ci: CanvasItem, r: Rect2, col: Color, thick := 1.0) -> vo
 		ci.draw_rect(Rect2(b.end.x - ch + i, b.end.y - 1.0 - i, thick, thick), col)
 
 
-static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1) -> void:
+static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1, pad_button := -1) -> void:
 	# force_pad: P2 is hardwired to pad 1 (main._gather_inputs), so P2's OWN
 	# prompts must show pad buttons even while P1's mouse aim keeps the global
 	# use_pad false — per-player call sites pass `i == 1`.
@@ -1056,17 +1108,31 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 	# screen itself shows the live key via GameMenu.key_label() — only in-game
 	# prompts didn't). `keycode` (a physical keycode from main.bind(action), -1 ==
 	# "caller didn't pass one") lets callers route the live bind through here.
+	# `pad_button` is the pad twin of `keycode`: a positional JOY_BUTTON_* from
+	# main.pad_bind(action, device), -1 == "caller didn't pass one" so the frozen
+	# _GLYPH_PAD ship default stands in.
 	var rect := Rect2(pos - Vector2(size, size) / 2.0, Vector2(size, size))
 	if use_pad or force_pad:
-		ci.draw_texture_rect(tex(_brand(_GLYPH_PAD[action])), rect, false, mod)
+		var pk := pad_button_tex(pad_button) if pad_button >= 0 else ""
+		ci.draw_texture_rect(tex(pk if pk != "" else _brand(_GLYPH_PAD[action])),
+			rect, false, mod)
 	else:
-		ci.draw_texture_rect(tex("ui_key_blank"), rect, false, Color(0.96, 0.95, 0.88) * mod)
 		var letter: String = GameMenu.key_label(keycode) if keycode >= 0 else _GLYPH_KEY[action]
 		var f := font()
 		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
 		# whole strokes below native scale (a 6px 'E' loses horizontals).
 		var fs := maxi(8, int(size * 0.62))
 		var w := tw(letter, fs)
+		# The square cap only ever fit the single-letter ship defaults. Now that callers
+		# pass the LIVE bind, key_label can hand back "Space"/"Shift"/"Escape" — 3x wider
+		# than a size-9..11 cap, smearing over the world with no art under it. Measure and
+		# widen instead of shrinking every glyph, swapping in the blank wide keycap the
+		# generator already ships. Plate and ink are both centered on `pos`, so they can't
+		# drift apart.
+		var cap_w := maxf(size, w + size * 0.35)
+		var cap := Rect2(pos - Vector2(cap_w, size) / 2.0, Vector2(cap_w, size))
+		ci.draw_texture_rect(tex("glyph_key_wide" if cap_w > size else "ui_key_blank"),
+			cap, false, Color(0.96, 0.95, 0.88) * mod)
 		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
 

@@ -1705,6 +1705,13 @@ func _rebind_capture(ev: InputEvent) -> bool:
 			_end_capture()
 			main._sfx.play("deny", -8.0)
 			_notice("%s IS A FIXED MENU KEY - PICK ANOTHER" % key_label(pk))
+		elif not (_rebind_action in REBIND_MENUNAV) and pk in RESERVED_GAME_KEYS:
+			# REJECT, same shape: this key is a HARDCODED gameplay hotkey, so the verb and the
+			# hotkey would both fire on one press — and most of that list calls _reset(). See
+			# RESERVED_GAME_KEYS.
+			_end_capture()
+			main._sfx.play("deny", -8.0)
+			_notice("%s IS A RESERVED GAME KEY - PICK ANOTHER" % key_label(pk))
 		else:
 			var swapped: String = _apply_kb_bind(_rebind_action, pk)
 			# A menu-nav rebind never needs the "also a menu key" heads-up (that IS the point).
@@ -1761,6 +1768,20 @@ func _commit_capture(swapped: String, reserved: String) -> void:
 func _notice(msg: String) -> void:
 	_rebind_msg = msg
 	_rebind_msg_t = 2.5
+
+
+# Keys main acts on DIRECTLY off the InputEvent during play, whatever the bind map says:
+# R / F2 / F3 / F4 call _reset() (main._unhandled_key_input), F8 flips god mode in debug
+# builds, F11 toggles fullscreen (main._input, which runs even with a menu open). Gameplay
+# verbs are read by POLLING the physical keycode, so a verb bound to one of these fires the
+# verb AND the hotkey — bind ROLL to R (the most natural key a player picks for it) and the
+# next roll silently throws away the score, wave, perks and recording, with no confirm and
+# no undo. So this is a hard REJECT, not a _reserved_key_note heads-up.
+# Menu-nav actions are exempt: main returns early while a menu is open, so they never
+# collide. Deliberately NOT here: C / ENTER / SPACE, which only act on the debrief card and
+# one of which (SPACE) is a ship-default verb bind.
+# ⚠️ Mirrors the hotkey block in main.gd — a new hardcoded gameplay key goes in both.
+const RESERVED_GAME_KEYS := [KEY_R, KEY_F2, KEY_F3, KEY_F4, KEY_F8, KEY_F11]
 
 
 # c1-18: keys the menus themselves use (confirm / nav) get a non-blocking heads-up when
@@ -4550,6 +4571,13 @@ static func hall_page_window(page: int, total: int) -> Vector2i:
 
 
 const HALL_PAGE_ROW_Y := BOTTOM_BOUND - 6.0   # baseline of the "1-8 OF N" counter / bottom of its PREV+NEXT targets
+# ...and the baseline of the PREV/NEXT arrow+word INK, seated 4px up from the button's
+# bottom edge so the 9px glyphs sit centered in the 16px plate. Derived from the same
+# constant hall_page_rects() is, because this shipped as a bare `302.0` that survived the
+# BOTTOM_BOUND 310 -> 300 move the comment below records: the rect moved to y278..294, the
+# ink stayed at baseline 302, so the words drew entirely OUTSIDE the plate they label and
+# the BACK plate (drawn after _draw_hall, top y297) painted over their bottom rows.
+const HALL_PAGE_LABEL_Y := HALL_PAGE_ROW_Y - 4.0
 
 
 static func hall_page_rects() -> Array[Rect2]:
@@ -4630,8 +4658,16 @@ func _howto_tab_rects() -> Array[Rect2]:
 
 
 func _tab_rects_for(names: Array) -> Array[Rect2]:
-	# Shared centered tab-row geometry (10px labels, 22px gutters, plate at y52) —
-	# HALL filters and HOW-TO pages both measure through here so draw + click agree.
+	# Shared centered tab-row geometry (10px labels, 22px gutters) — HALL filters and
+	# HOW-TO pages both measure through here so draw + click agree.
+	# The y DERIVES from TAB_PLATE_Y for the same reason HALL_RECENCY_Y does: this was a
+	# hand-typed `52.0, ..., 20.0` left behind when the tab row dropped (TAB_PLATE_Y/
+	# TAB_BASELINE_Y were re-derived, the hit literal was not). It left the hit box at
+	# y52..72 against a plate at y64..80 — the bottom half of every tab plate, its ink and
+	# its underline were dead, while 12px of air over the screen title was live. The tests
+	# were green because they click the rect's OWN centre. Span the plate (64..80) plus the
+	# 2px underline and 2px of aim forgiveness above; y62 still clears the CONTENT_TITLE
+	# ink, which ends at its y58 baseline.
 	var f := Art.font()
 	var tw: Array[float] = []
 	var total := -22.0
@@ -4642,7 +4678,7 @@ func _tab_rects_for(names: Array) -> Array[Rect2]:
 	var x := CENTER_X - total / 2.0
 	var out: Array[Rect2] = []
 	for i in names.size():
-		out.append(Rect2(x - 4.0, 52.0, tw[i] + 8.0, 20.0))
+		out.append(Rect2(x - 4.0, TAB_PLATE_Y - 2.0, tw[i] + 8.0, 22.0))
 		x += tw[i] + 22.0
 	return out
 
@@ -4912,7 +4948,7 @@ func _draw_hall() -> void:
 				var lw := f.get_string_size(plbl[pi], HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
 				var gw := 7.0
 				var bx := pr[pi].position.x + (pr[pi].size.x - lw - gw - 2.0) / 2.0
-				var ay := 302.0
+				var ay := HALL_PAGE_LABEL_Y
 				var pts := PackedVector2Array()
 				if pi == 0:   # up-triangle: apex at top
 					pts = PackedVector2Array([Vector2(bx + gw / 2.0, ay - 6.0),

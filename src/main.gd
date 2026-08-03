@@ -784,9 +784,14 @@ func _draw_splash() -> void:
 
 func _draw_splash_studio(el: float, veil: float) -> void:
 	# BEAT 1: the animated Big IT medallion (6×6 sheet, 31 frames @200px) + "presents".
+	# REDUCE MOTION reaches the splash: _load_bests() (which resolves _motion) runs BEFORE
+	# _setup_splash() in _ready, so a player who turned it on last session no longer boots
+	# straight into the one 16 s sequence that respected nothing. The four beats keep their
+	# trapezoidal _splash_seg alpha fades — a cross-fade is not motion — and lose the
+	# flipbook, the crawl scroll, the overshoot stamp, the white flash and the push-in.
 	var a := _splash_seg(el, 0.0, 0.6, SPLASH_STUDIO_END - 0.5, SPLASH_STUDIO_END) * veil
 	if _splash_bigit != null:
-		var fr := int(el * 12.0) % 31
+		var fr := 0 if _motion < 0.5 else int(el * 12.0) % 31
 		var src := Rect2(200.0 * (fr % 6), 200.0 * (fr / 6), 200.0, 200.0)
 		var w := 150.0
 		_splash_root.draw_texture_rect_region(_splash_bigit,
@@ -804,7 +809,9 @@ func _draw_splash_crawl(ct: float, veil: float) -> void:
 		return
 	var lines := ["When tragedy strikes the", "United States fighting force…",
 		"", "there is only one man who can", "go in and WIN THE WAR", "for the USA."]
-	var top := 236.0 - ct * 12.0   # drifts up ~90px over the beat
+	# Reduce motion freezes the crawl at its mid-beat position — static and readable for
+	# the whole beat instead of a 90px scroll.
+	var top := 191.0 if _motion < 0.5 else 236.0 - ct * 12.0   # drifts up ~90px over the beat
 	for i in lines.size():
 		var line: String = lines[i]
 		if line == "":
@@ -818,13 +825,13 @@ func _draw_splash_title(et: float, veil: float) -> void:
 	# BEAT 3: the shield emblem stamps in (back-ease overshoot), white impact flash,
 	# then the wordmark rises in — the folded-in shield beat.
 	var cy := 140.0
-	var scl := _splash_back(clampf(et / 0.45, 0.0, 1.0))
+	var scl := 1.0 if _motion < 0.5 else _splash_back(clampf(et / 0.45, 0.0, 1.0))
 	var ia := clampf(et / 0.28, 0.0, 1.0) * veil
 	if _splash_icon != null and ia > 0.001:
 		var w := 156.0 * scl
 		_splash_root.draw_texture_rect(_splash_icon, Rect2(320.0 - w / 2.0, cy - w / 2.0, w, w), false, Color(1, 1, 1, ia))
 	var flash := clampf(1.0 - absf(et - 0.45) / 0.12, 0.0, 1.0) * 0.4 * veil
-	if flash > 0.01:
+	if flash > 0.01 and _motion >= 0.5:   # skipped entirely under reduce motion, like the letterbox
 		_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(1.0, 1.0, 1.0, flash))
 	var ta := clampf((et - 0.55) / 0.5, 0.0, 1.0)
 	if ta > 0.001:
@@ -840,7 +847,7 @@ func _draw_splash_hero(ht: float, veil: float) -> void:
 	if _splash_keyart == null:
 		return
 	var a := clampf(ht / 0.7, 0.0, 1.0) * veil
-	var h := 360.0 * (1.0 + clampf(ht / 3.0, 0.0, 1.0) * 0.06)   # slow 6% push-in
+	var h := 360.0 if _motion < 0.5 else 360.0 * (1.0 + clampf(ht / 3.0, 0.0, 1.0) * 0.06)   # slow 6% push-in
 	_splash_root.draw_texture_rect(_splash_keyart,
 		Rect2(320.0 - h / 2.0, 180.0 - h / 2.0, h, h), false, Color(1, 1, 1, a))
 
@@ -3298,6 +3305,14 @@ func _vo(key: String, priority := 1, throttle_frames := 240, dry := false) -> vo
 	## Radio bark with per-line throttle (voices panel: barks must not wear out
 	## on the hundredth replay — banner-driven lines fire once per lifecycle,
 	## mashable denials get seconds-long gaps).
+	# Same gate as _cmd_bark, and for the same reason: the title screen runs a LIVE attract
+	# firefight (sim.step + _consume_events + _update_feel), so the Spotter was calling
+	# "LAST STAND!" and "Squad's wiped. Run's over." over a player who had not pressed a
+	# button — uncaptioned, because hud.gd suppresses the subtitle strip on any menu.
+	# BEFORE the _vo_last stamp, so a suppressed line does not burn its own throttle.
+	# (Boot narration is unaffected: intro_crawl goes through Sfx.play_startup_line.)
+	if _menu.mode != GameMenu.Mode.HIDDEN:
+		return
 	var now := int(Engine.get_physics_frames())
 	if now - int(_vo_last.get(key, -100000)) < throttle_frames:
 		return
@@ -6613,14 +6628,23 @@ static func player_anim_state(p: Dictionary, move_delta: Vector2, concealed: boo
 	var fire_cd: int = p.get("fire_cd", 0)
 	if fire_cd > SimWorld.FIRE_COOLDOWN_TICKS:
 		return "bash"
-	if fire_cd > SimWorld.FIRE_COOLDOWN_TICKS - 3:
-		return "shoot"
 	if p.get("interact_prev", false):
 		return "interact"
+	# LOCOMOTION OUTRANKS THE RECOIL POSE. The trigger is not optional — _gather_inputs
+	# sets p1.fire unconditionally ("always-fire retired the trigger"), so with ammo the
+	# sim runs a permanent 8-tick fire loop and fire_cd sits in the "shoot" window for 3
+	# of every 8 ticks, forever. Testing shoot first therefore strobed the static planted
+	# brace against the walk cycle at 7.5 Hz for the whole game — a vibrating soldier, and
+	# a run-and-gun that never showed a clean stride. `bash` stays above: the empty-mag
+	# swing is a committed action that really does own the silhouette. A STATIONARY firing
+	# player still gets the shoot pose, and the recoil read never depended on it anyway
+	# (muzzle flash, tracer, SFX and the _recoil kick all still fire).
 	if move_delta.length_squared() > 0.01:
 		var aim := Vector2(float(p.get("aim_x", 0)), float(p.get("aim_y", -Fixed.ONE)))
 		var forward := aim.length_squared() < 0.01 or move_delta.normalized().dot(aim.normalized()) >= 0.0
 		return ("move_forward_" if forward else "move_backward_") + str(phase & 1)
+	if fire_cd > SimWorld.FIRE_COOLDOWN_TICKS - 3:
+		return "shoot"
 	if concealed:
 		return "crouch"
 	return "idle"
@@ -6971,6 +6995,22 @@ func _draw() -> void:
 			+ (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO))
 		_player_label_rects.append(prect)
 		_label_slots.append(prect)
+	# The HUD CHROME is reserved too. The corner plate lives on the $HUD CanvasLayer and
+	# main.gd draws at z=0, so anything claimed inside its footprint is painted over — the
+	# chevrons and threat pips each carry their own plate_right()/band_top() dodge, but the
+	# arbiter itself had no idea the panel existed, so all eleven _world_label producers
+	# could still land under it. ESCAPING! was the worst case: it is deliberately clamped
+	# to the top of the frame (the capture line sits above the camera), so for essentially
+	# its whole window the only cue for a losable timed objective printed under the plate.
+	# One reservation here retires every per-producer dodge for world labels.
+	_label_slots.append(Rect2(0.0, 0.0, _hud_icons.plate_right() + 2.0, _hud_icons.panel_bottom()))
+	# ...and the top-center message band. `_band` is LAST frame's — the same read the fork
+	# signposts already take (see fork_sign_alpha's caller) — because the band cannot be
+	# dealt any earlier than _draw_gunships, which publishes the boss-bar count its rail is
+	# measured from, and most world-label producers draw before that. Band rows persist for
+	# seconds, so a one-frame-stale rect is the right trade against printing into the band.
+	for r in _band:
+		_label_slots.append(r["rect"])
 	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
@@ -7096,6 +7136,17 @@ func _draw() -> void:
 	# shake/zoom/roll so bars, markers and banners stay rock-steady while the world
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
 	draw_set_transform_matrix(get_transform().affine_inverse())
+	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
+	# Gated by reduce-motion like every sibling effect — this was the one holdout.
+	# FIRST on this pass, not last: the bottom bar occupies y 344..360 and the rear
+	# threat chevrons draw at y 353..361, so painting the bars afterwards blacked out
+	# the ONLY "something is behind you" cue in a forward-locked camera for the first
+	# ~1.5-2.5 s of every boss intro — exactly when the player commits north. Over the
+	# world, under every warning/HUD element; _draw_god_badge still lands last.
+	if _cinematic > 0.01 and _motion >= 0.5:
+		var ch := 16.0 * clampf(_cinematic * 4.0, 0.0, 1.0)
+		draw_rect(Rect2(0, 0, SCREEN_W, ch), Color(0, 0, 0, 0.9))
+		draw_rect(Rect2(0, SCREEN_H - ch, SCREEN_W, ch), Color(0, 0, 0, 0.9))
 	_draw_threat_edges()
 	# Edge-clamped windup arrows live with their sibling edge indicators: drawn in
 	# the world block they rode the shake, sat UNDER the NIGHT OPS dim (whose own
@@ -7107,12 +7158,6 @@ func _draw() -> void:
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
 	_draw_god_badge()   # DEBUG-ONLY; LAST on the screen-anchored pass so nothing can paint over it
-	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
-	# Gated by reduce-motion like every sibling effect — this was the one holdout.
-	if _cinematic > 0.01 and _motion >= 0.5:
-		var ch := 16.0 * clampf(_cinematic * 4.0, 0.0, 1.0)
-		draw_rect(Rect2(0, 0, SCREEN_W, ch), Color(0, 0, 0, 0.9))
-		draw_rect(Rect2(0, SCREEN_H - ch, SCREEN_W, ch), Color(0, 0, 0, 0.9))
 	# c4 2v: rear-warn bottom-edge wedge — a pulsing strip + an up-pointing wedge
 	# at the pending rear spawn x, readable in the forward-locked camera.
 	if _rear_wedge_t > 0.0:
@@ -8448,7 +8493,13 @@ func _draw_water() -> void:
 					Color(0.18, 0.52, 0.58, remain * (0.12 if _motion < 0.5 else 0.30)))
 				draw_rect(Rect2(ford_left - 1.0, wy - 1.0, ford_w + 2.0, wh + 2.0),
 					Art.safe(Color(0.35, 0.95, 0.88, 0.88)), false, 2.0)
-				Art.text(self, "FORD OPEN", Vector2(bx - 27.0, wy + 10.0), 7,
+				# Routed through the arbiter like every other world-space string. These three
+				# river labels were the last raw Art.text holdouts: no claim_label_slot (so a
+				# RESCUE/ESCAPING callout printed straight through "PERMANENT FORD"), no plate,
+				# no Art.fs (7px — the smallest type in the game — ignored the TEXT SIZE
+				# setting), and the hand-guessed length()*3.0 half-width the centered helper's
+				# docstring says was removed from every other caller.
+				_world_label_centered("FORD OPEN", bx, wy + 10.0,
 					Art.safe(Color(0.72, 1.0, 0.92)))
 		# Deep bands periodically earn a second crossing which NEVER washes out.
 		# Mark that reliability explicitly instead of leaving an anonymous sand slit
@@ -8464,8 +8515,7 @@ func _draw_water() -> void:
 				Art.line(self, Vector2(second_x - 6.0, sy - 3.0), Vector2(second_x, sy), reliable, 2.0)
 				Art.line(self, Vector2(second_x, sy), Vector2(second_x + 6.0, sy - 3.0), reliable, 2.0)
 			var permanent_label: String = fv["second_label"]
-			Art.text(self, permanent_label,
-				Vector2(second_x - float(permanent_label.length()) * 3.0, wy - 8.0), 7, reliable)
+			_world_label_centered(permanent_label, second_x, wy - 8.0, reliable)
 		# A few deterministic rocks break up the deep water (never in the ford).
 		var wseed := Art.cell_hash(int(w["y"] / 4096) * 13, 7)
 		for r in 3:
@@ -8516,8 +8566,8 @@ func _draw_water() -> void:
 			# this green — raw unshadowed green over red-hatched sand was the
 			# worst-case read for the tank driver it guides.
 			var flabel: String = fv["label"]
-			Art.text(self, flabel, Vector2(ford_left + ford_w / 2.0 - float(flabel.length()) * 3.0, wy - 8),
-				8, Art.safe(fv["label_col"]))
+			_world_label_centered(flabel, ford_left + ford_w / 2.0, wy - 8.0,
+				Art.safe(fv["label_col"]))
 
 
 static func ford_visual(band_idx: int, ford_x: int, tick: int) -> Dictionary:
@@ -11108,7 +11158,16 @@ func _draw_fx() -> void:
 		# walked twice per frame across this loop + _draw_glow) was the one
 		# array left out, so long-lived kinds (mote/smoke) drifting off-screen
 		# behind the ratchet camera still paid full draw cost until they expired.
-		if pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0:
+		# `chopper` is EXEMPT: it is screen-anchored by design (its draw ignores
+		# `pos` entirely and re-derives a left->right sweep), so both spawn sites
+		# pass the placeholder world anchor (0,0). Under campaign's receding
+		# camera_top that anchor tests ~1000px below the frame after the first
+		# gate, so the victory extraction flyover — the game's final authored
+		# beat — was culled every single run. Don't "fix" it by giving the kind a
+		# live world anchor; that would be a second source of truth for a draw
+		# that deliberately has none.
+		if fx["kind"] != "chopper" \
+				and (pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0):
 			continue
 		var t: float = fx["t"]
 		if fx["kind"] == "explosion":
@@ -12456,6 +12515,15 @@ func _draw_airstrike_telegraph(top_msg: String) -> void:
 	# (PI) so the nose leads; rides the already-checksummed pending_airstrike int.
 	var jy := lerpf(-30.0, SCREEN_H + 30.0, frac)
 	_spr("m_jet", Vector2(SCREEN_W * 0.5, jy), PI, 0.6)
+	# _spr_texture signs off with draw_set_transform(ZERO, 0, ONE) — that RESETS the matrix
+	# to identity, it does not restore the shake-cancel one this pass installed. Everything
+	# after it was drawing in world space: the plume below, the band text, then the whole of
+	# _draw_banners (the always-on full-screen vignette + every wash card) and the rear-warn
+	# wedge — so under the live shake/zoom a Rect2(0,0,SCREEN_W,SCREEN_H) stopped covering
+	# the screen and an unwashed strip opened at the edge, during the one beat guaranteed to
+	# be shaking. _draw_banners only repaired it later, and only when a punch happened to be
+	# >1.0.
+	draw_set_transform_matrix(get_transform().affine_inverse())
 	# Ground-zero marker: a billowing smoke column at the strike center for the
 	# whole telegraph (scale pulse = billow) — the red wash finally points somewhere.
 	# Real plume card (Particle_FX fumes), not the wep_smoke grenade-canister
@@ -12959,12 +13027,17 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 	# teleporting onto the screen. Composes WITH the shake-cancel matrix the
 	# caller set (plain draw_set_transform would clobber it). Pivot sits at the
 	# PANEL's center, not screen center — the card used to slide while scaling.
+	# Held in `base_x` because the gold shine below has to RESTORE this, not reset to
+	# identity: on the VICTORY card (the only caller passing shine) every score row, icon
+	# and the form microline drew at full scale in world space while the plate and title
+	# behind them were still scaling in from 0.92 — the rows visibly detached from the card.
+	var base_x := get_transform().affine_inverse()
 	if _motion >= 0.5 and _result_t < 1.0:
 		var re := 1.0 - pow(1.0 - _result_t, 3.0)
 		var rscale := 0.92 + 0.08 * re
-		draw_set_transform_matrix(get_transform().affine_inverse()
-			* Transform2D(0.0, Vector2.ONE * rscale, 0.0,
-				Vector2(320.0, panel_top + panel_h / 2.0) * (1.0 - rscale)))
+		base_x = base_x * Transform2D(0.0, Vector2.ONE * rscale, 0.0,
+			Vector2(320.0, panel_top + panel_h / 2.0) * (1.0 - rscale))
+	draw_set_transform_matrix(base_x)
 	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
 	if not doc.is_empty():
 		var band_col: Color = doc.get("band_col", title_col)
@@ -12983,7 +13056,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 			draw_set_transform(Vector2(panel_x + 20.0 + sw * (panel_w - 40.0), title_y), -0.35, Vector2.ONE)
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(-13.0, -22.0, 26.0, 44.0),
 				false, Color(1.0, 0.95, 0.7, 0.5 * sin(sw * PI)))
-			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			draw_set_transform_matrix(base_x)   # RESTORE the entrance matrix, not identity
 	for i in rows.size():
 		var row: Dictionary = rows[i]
 		var row_text: String = row["text"]

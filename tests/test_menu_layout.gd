@@ -6503,7 +6503,16 @@ func test_c3_08_armed_confirm_glyph_is_device_correct() -> void:
 	Art.pad_brand = "ps"
 	Runner.T.eq(Art.glyph_key("confirm"), "glyph_ps_a", "PlayStation pad armed-confirm is the cross button")
 	Art.pad_brand = "switch"
-	Runner.T.eq(Art.glyph_key("confirm"), "glyph_sw_a", "Switch pad armed-confirm is the A button")
+	# NOT "Switch A" — this assertion used to defend a lie. Godot's JOY_BUTTON_A is POSITIONAL
+	# (it means the BOTTOM face button), and menu.gd:2051 binds confirm to it with no per-brand
+	# remap. On a Switch pad the bottom button is physically labelled B, so printing "A" told a
+	# Switch player to press the RIGHT button — which does not confirm. Nintendo's convention is
+	# indeed confirm=A, but conventions are implemented in the BINDING, and this game does not
+	# implement one; until it does, the glyph's job is to name the button that actually works.
+	# (Adopting the convention properly means remapping confirm to JOY_BUTTON_B for brand
+	# "switch" AND swapping back/cancel with it — a real input-layer change, not a glyph edit.)
+	Runner.T.eq(Art.glyph_key("confirm"), "glyph_sw_b",
+		"Switch pad armed-confirm is the BOTTOM face button, which that brand letters B")
 	# The resolved key must be a real, drawable texture (not a missing-registry crash).
 	Runner.T.ok(Art.tex(Art.glyph_key("confirm")) != null, "armed-confirm glyph resolves to a texture")
 	Art.use_pad = was_pad   # restore globals so device state can't leak to other suites

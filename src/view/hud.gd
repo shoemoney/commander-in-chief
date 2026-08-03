@@ -122,6 +122,17 @@ const STREAK_RING_SLOT := 14.0 # horizontal slot the centered ring lives in (adv
 const SHOP_ANIM_EPS := 0.01    # c2-09: the shop cross-fade is "settled" within this of its target —
                                # ONE const shared by the _process snap-to-target and the redraw-live
                                # gate so the fade stops easing and stops requesting redraws together.
+# MG ammo escalation tiers, in ABSOLUTE rounds. The numeral and the segmented mag bar sit side by
+# side on the same row showing the same value, and they used to tier on different scales: the
+# numeral on these counts, the bar on a fraction of MG_AMMO_MAX. At 99 max that put the bar's amber
+# at <= 44 while a respawn hands back MG_AMMO_MAX/2 == 49 — five shots into every life the bar (and
+# its dark warning tray) went permanently cautionary while the numeral beside it stayed plain white.
+# Both readouts now share these, so they escalate together and the amber still means something.
+const MG_AMMO_CAUTION := 20    # amber at or below
+const MG_AMMO_CRITICAL := 10   # red at or below
+const MAG_ADV := 8.0 * 3.6 + 4.0  # _mag_bar's x-advance (8 segments * 3.6 + trailing gap). Hoisted
+                               # out of _onfoot_chips's local copy so the coax-gunner row reserves
+                               # the same width from the same source.
 
 var main: Node2D
 var _prev_chest := 0
@@ -773,64 +784,103 @@ func _draw() -> void:
 		px = _text("P%d" % (i + 1), px, ry + ROW_TEXT_BASELINE, pcol) + ROW_LABEL_GAP
 		if not p["alive"]:
 			px = _dead_chips(p, px, ry, i, sim)
-		elif p["in_tank"] >= 0 and sim.tanks[p["in_tank"]]["occupant"] == i:
+		elif p["in_tank"] >= 0:
 			var t: Dictionary = sim.tanks[p["in_tank"]]
+			# BOTH SEATS, not just the driver. This branch used to be gated on `occupant == i`, so a
+			# coax gunner (in_tank >= 0 but occupant != i — the seat is derived, sim_world.gd's
+			# _tank_gunner) fell through to the on-foot chips: no fuel gauge, no BAIL OUT, no interact
+			# glyph. The sim treats the seats identically — _step_tanks rings AND kills every rider
+			# with in_tank == ti — so in 2P the gunner watched a silent row while the hull cooked off
+			# and was never told which key leaves it. Tank STATUS (fuel + bail) is therefore shared;
+			# only the driver gets the cannon readouts, because the gunner fires the on-foot MG
+			# (_ride_as_gunner spends mg_ammo) and never touches the shell pool.
+			var driver: bool = t["occupant"] == i
 			var fuel_c := Vector2(px + ICON / 2.0, ry + ICON / 2.0)   # cannon cooldown ring anchors on the fuel dial (tank status), not the grenade chip
 			px = _fuel_gauge(t, px, ry)
-			var gcol_tank := Color(0.95, 0.96, 0.9)
-			var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
-			if p["grenade_ammo"] == 0:
-				# 0 shells = the cannon is dead — same proactive dry escalation as
-				# MG ammo (the old dry-flash only fired AFTER a wasted attempt).
-				gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
-			elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
-				gcol_tank = Color(0.6, 0.85, 1.0)
 			if t["burning"]:
-				# c3-01: SURVIVAL PROMPT FIRST. A cooking-off tank is a lethal window, so the BAIL
-				# OUT prompt is the ONE readout the player must act on — draw it directly after the
+				# c3-01: SURVIVAL PROMPT FIRST. A cooking-off tank is a lethal window, so the bail
+				# prompt is the ONE readout the player must act on — draw it directly after the
 				# fuel dial, never behind (and never dropped by) the optional shell-count clip. Its
 				# own fit guard surfaces a "+N" only when even the bare prompt won't fit; the dead
 				# cannon's shell count is suppressed while burning (moot — you're leaving the tank).
-				# The 3s fuse gets a number, like every other lethal window on this HUD
-				# (RALLYING/fuel/SHOP OPEN) — ceil grammar from the fuel dial (3s → 2s → 1s → boom).
+				# The fuse gets a number, like every other lethal window on this HUD (RALLYING/fuel/
+				# SHOP OPEN) — ceil grammar from the fuel dial (3s → 2s → 1s → boom).
+				# TWO CLOCKS RUN HERE, and the prompt has to name the one that actually kills.
+				# Ordnance ignition arms crew_ring_ticks = TANK_IGNITION_GRACE_TICKS (36t = 0.6s) and
+				# _step_tanks hurts every rider the tick it reaches 0 — normal vest rules, so an
+				# unvested rider DIES there, five times sooner than the TANK_BAIL_TICKS (180t = 3s)
+				# hull fuse this used to count down for both fires. The player was promised three
+				# seconds and killed at six tenths with the counter still reading "3". So while the
+				# ring is armed it OWNS the prompt — its own words, its own clock, a hotter tint and
+				# a faster blink — and the honest hull fuse takes back over once the ring resolves to
+				# -1. Fuel starvation never arms the ring (its gauge is the warning), so that path is
+				# unchanged and the two fires finally read as the two different deadlines they are.
 				# localization-text-pipeline: translate the template BEFORE formatting
 				# in the countdown number, so the _tw()/_row_fits() measurement below
 				# and the _warn_text() draw both see the same (translated) string.
-				var bailtxt: String = TranslationServer.translate("BAIL OUT! %ds") % ((t["burn_ticks"] + 59) / 60)
+				var ring: int = t.get("crew_ring_ticks", -1)
+				var bailtxt: String
+				var bailcol: Color
+				var bailblink := 8
+				if ring > 0:
+					bailtxt = TranslationServer.translate("CREW HIT! %ds") % ((ring + 59) / 60)
+					bailcol = Art.warn(Color(1.0, 0.15, 0.45))   # magenta-hot: deliberately NOT the amber-red hull fuse
+					bailblink = 4
+				else:
+					bailtxt = TranslationServer.translate("BAIL OUT! %ds") % ((t["burn_ticks"] + 59) / 60)
+					bailcol = Color(1.0, 0.3, 0.2)
 				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
 					px = _row_ovf(px, ry)
 				else:
 					# Draw the prompt on-blink, but ALWAYS advance px past its reserved width so the
-					# shared buff chips (now drawn after this block) start PAST the BAIL OUT readout
+					# shared buff chips (now drawn after this block) start PAST the bail readout
 					# instead of painting over it — the burning branch used to leave px unmoved.
-					if _mblink(8):
-						var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, Color(1.0, 0.3, 0.2))
+					if _mblink(bailblink):
+						var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, bailcol)
 						_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
 							Color.WHITE, i == 1)
 					px += _tw(bailtxt) + REVIVE_GLYPH_ADV
-			# c3-01: the cannon-shell count is a direct-draw tank chip — fit-guard it against the
-			# usable edge like every other player-row readout so a starved viewport surfaces a "+N"
-			# clip rather than clipping the shell count past RIGHT. A no-op at every supported width
-			# (the fuel dial + two-digit shell count start near x=8).
-			elif not _row_fits(px, ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])):
-				px = _row_ovf(px, ry)
-			else:
-				px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank) if twarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
-				# Cannon cooldown (45t — longer than bash or grenade): the same draining
-				# ring every other fire cooldown got, so a mid-cooldown shot reads as
-				# "wait a beat", not dropped input. The cannon is a tank system, so the
-				# ring frames the fuel dial (tank status) rather than the player grenade
-				# chip — the shells only ride the grenade pool as ammo, not as a cooldown.
-				if t["fire_cd"] > 0:
-					var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
-					Art.arc(self, fuel_c, ICON * 0.55,
-						0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-					Art.arc(self, fuel_c, ICON * 0.55,
-						-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			elif driver:
+				var gcol_tank := Color(0.95, 0.96, 0.9)
+				var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
+				if p["grenade_ammo"] == 0:
+					# 0 shells = the cannon is dead — same proactive dry escalation as
+					# MG ammo (the old dry-flash only fired AFTER a wasted attempt).
+					gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
+				elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
+					gcol_tank = Color(0.6, 0.85, 1.0)
+				# c3-01: the cannon-shell count is a direct-draw tank chip — fit-guard it against the
+				# usable edge like every other player-row readout so a starved viewport surfaces a "+N"
+				# clip rather than clipping the shell count past RIGHT. A no-op at every supported width
+				# (the fuel dial + two-digit shell count start near x=8).
+				if not _row_fits(px, ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])):
+					px = _row_ovf(px, ry)
+				else:
+					px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank) if twarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol_tank)
+					# Cannon cooldown (45t — longer than bash or grenade): the same draining
+					# ring every other fire cooldown got, so a mid-cooldown shot reads as
+					# "wait a beat", not dropped input. The cannon is a tank system, so the
+					# ring frames the fuel dial (tank status) rather than the player grenade
+					# chip — the shells only ride the grenade pool as ammo, not as a cooldown.
+					if t["fire_cd"] > 0:
+						var tfrac := clampf(float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS), 0.0, 1.0)
+						Art.arc(self, fuel_c, ICON * 0.55,
+							0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
+						Art.arc(self, fuel_c, ICON * 0.55,
+							-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
+			if not driver and _row_fits(px, ICON + 13.0 + _tw("%02d" % p["mg_ammo"]) + MAG_ADV):
+				# The gunner's trigger IS the on-foot MG, so their row carries the ammo numeral + mag
+				# bar where the driver carries the shell count — through the SAME _mg_ammo_stat tint
+				# helper the on-foot row uses, so the two seats can never drift apart. No grenade or
+				# roll chips: neither verb exists in the gunner seat (_ride_as_gunner handles only
+				# aim/fire/bail), and drawing a ready roll glyph would be a fresh lie on the very row
+				# this block exists to stop lying.
+				px = _mg_ammo_stat(p, px, ry)
+				px = _mag_bar(px, ry + 4.0, p["mg_ammo"], SimWorld.MG_AMMO_MAX)
 			# c4-fix: buff chips draw in ALL tank sub-states (burning / shell-overflow / normal), not
-			# just this normal else. The sim decrements pierce/spread/rend/smoke unconditionally while
-			# riding, so a Trench Gun could expire invisibly during the ~3s cook-off (burning) window —
-			# the very moment its 2s red expiry warning matters. BAIL OUT still draws first above
+			# just the normal one. The sim decrements pierce/spread/rend/smoke unconditionally while
+			# riding, so a Trench Gun could expire invisibly during the ~3s cook-off (burning) window --
+			# the very moment its 2s red expiry warning matters. The bail prompt still draws first above
 			# (survival prompt); this only guarantees the buff timers stay visible in a tank.
 			px = _buff_chips(p, px, ry, i)
 		else:
@@ -845,7 +895,7 @@ func _draw() -> void:
 	_draw_plate(panel_h)
 
 	# c3-11 / c3-15: the pips' dark contrast SCRIMS dock onto the persistent plate cluster (z:-1) HERE,
-	# now that _draw_plate has (re)built the panel -- so each scrim sits ATOP the panel texture and
+	# now that _draw_plate has (re)built the panel — so each scrim sits ATOP the panel texture and
 	# unconditionally BEHIND every player row. The glyphs themselves were already painted on `self`
 	# just before the rows (see _pip_glyphs above), so the c3-11 order is intact; the scrim and glyph
 	# live on different canvas items (z:-1 plate vs `self`), so the plate always composites behind the
@@ -1286,8 +1336,11 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				x = _text(shint, x, y + ICON - 3.0, Color(0.85, 0.85, 0.8, 0.65)) + 6.0
 	# Flawless Gate streak: the compounding clean-checkpoint multiplier, shown as
 	# a gold star chip so the discipline reward is visible before the payoff.
+	# The number is clamped to the sim's own cap: the payout is `mini(flawless_streak, 3)`
+	# (sim_world.gd's gate-clear and Colossus payouts both), so a chip counting on to x6 was
+	# advertising a multiplier that stopped compounding three gates earlier.
 	if sim.is_campaign_world() and sim.flawless_streak >= 1:
-		var fltxt := "x%d" % sim.flawless_streak
+		var fltxt := "x%d" % mini(sim.flawless_streak, 3)
 		# Demotable (prio 60): normally always shown, but on a width-starved row it drops
 		# into +N rather than overrunning the telegraph — its footprint is the star icon
 		# (ICON), a 1px gap, the text, and the 8px trailing gap.
@@ -1454,7 +1507,14 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			# Boss Rush: gunships downed, not a sector count -- see the debrief.
 			sectxt = "GUNSHIPS %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
 		else:
-			sectxt = "SECTOR %d/%d  %dm" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
+			# Which sector you are FIGHTING, not how many gates you happened to open: an Arcade
+			# chapter jump primes _gate_counter without opening a gate, so the raw `opened + 1`
+			# cursor reported SECTOR 1/6 for an entire chapter-6 run — while the progress rail on
+			# the same frame correctly drew the you-dot near the top. Same cursor pair the sim's
+			# own _sector_index / price scale take (max of the two, sim_world.gd), and in a
+			# continuous campaign the two are always equal, so no shipped campaign string moves.
+			var sector: int = maxi(opened, sim._gate_counter - 1) + 1
+			sectxt = "SECTOR %d/%d  %dm" % [mini(sector, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
 				-Fixed.to_int(sim.camera_top) / 10]
 		if _fits2("sector", _tw(sectxt) + 10.0):
 			x = _text(sectxt, x, y + ICON - 3.0) + 10.0
@@ -2379,22 +2439,59 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	var segs := 8
 	var frac := clampf(float(ammo) / float(maxa), 0.0, 1.0)
 	var filled := int(ceil(frac * segs))
+	# Tiers are ABSOLUTE rounds — the same MG_AMMO_CAUTION/CRITICAL the ammo numeral drawn right
+	# beside this bar uses. They used to be fractions of `maxa` (0.45 / 0.2), which at
+	# MG_AMMO_MAX == 99 put the amber tier at <= 44 while a respawn hands back MG_AMMO_MAX/2 == 49:
+	# five shots into every life the bar cried wolf for the rest of that life while the numeral
+	# next to it was still plain white. `maxa` still sets the FILL (that is a real proportion);
+	# only the urgency is absolute, so the two readouts escalate together.
 	var lit := Art.safe(Color(0.5, 0.85, 0.45))
-	if frac <= 0.2:
+	var warn := ammo <= MG_AMMO_CAUTION
+	if ammo <= MG_AMMO_CRITICAL:
 		lit = Art.warn(Color(1.0, 0.25, 0.2))
-	elif frac <= 0.45:
+	elif warn:
 		lit = Art.warn(Color(1.0, 0.72, 0.32), Art.WARN_CAUTION)
 	# c2-07: the on-foot row draws over the live battlefield with no panel under it, so a
 	# low-ammo WARNING bar washed out on bright snow/desert. Only the amber/red warning tiers
-	# (frac <= 0.45) get the near-opaque backing tray (the same PIP_SCRIM the corner pips use) so
+	# get the near-opaque backing tray (the same PIP_SCRIM the corner pips use) so
 	# a healthy green bar keeps its clean look while a critical one holds contrast over any
 	# background. Routed through the _emit_bg_rect seam so a headless capture subclass records it
 	# (like the pip/telegraph scrims) rather than raw-drawing.
-	if frac <= 0.45:
+	if warn:
 		_emit_bg_rect(Rect2(x - 1.0, y - 1.0, segs * 3.6 + 1.0, 7.0), PIP_SCRIM)
+	# At zero NO segment is lit, so the neutral unlit grey drained the bar's colour channel at the
+	# one moment it should be screaming — the computed critical red was never drawn. An empty clip
+	# now paints its empty segments in that same red at low alpha: still visibly empty, still red.
+	var unlit := Color(lit.r, lit.g, lit.b, 0.4) if ammo <= 0 else Color(0.22, 0.2, 0.18)
 	for s in segs:
-		_emit_mag_seg(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else Color(0.22, 0.2, 0.18))
+		_emit_mag_seg(Rect2(x + s * 3.6, y, 2.8, 5.0), lit if s < filled else unlit)
 	return x + segs * 3.6 + 4.0
+
+
+## MG ammo numeral + its low-ammo escalation, shared by the on-foot row and the coax gunner's tank
+## row so the two seats firing the SAME pool can never drift apart. c2-07: the warning-tint flag is
+## set in the SAME branch that assigns the warn color (never from a separate `ammo <= 20` test that
+## could drift out of step with the color tiers), so the numeral routes through the coupled
+## _warn_stat backing exactly when its tint is a warning. The glyph reflects what's actually
+## chambered: shotgun shells during the Trench Gun window, AP rounds during Piercing, else MG.
+func _mg_ammo_stat(p: Dictionary, x: float, y: float) -> float:
+	var ammo: int = p["mg_ammo"]
+	var acol := Color(0.95, 0.96, 0.9)
+	var awarn := false
+	if ammo == 0:
+		acol = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
+		awarn = true
+	elif ammo <= MG_AMMO_CAUTION:
+		acol = Art.warn(Color(1.0, 0.75, 0.35), Art.WARN_CAUTION)
+		awarn = true
+	elif ammo == SimWorld.MG_AMMO_MAX:
+		acol = Color(0.6, 0.85, 1.0)
+	var acon := "icon_ammo"
+	if p["spread_ticks"] > 0:
+		acon = "item_bullet_shotgun"
+	elif p["pierce_ticks"] > 0:
+		acon = "item_bullet"
+	return _warn_stat(acon, "%02d" % ammo, x, y, acol) if awarn else _stat(acon, "%02d" % ammo, x, y, acol)
 
 
 ## One magazine segment. A seam like every other HUD primitive, so a headless capture subclass can
@@ -2497,28 +2594,9 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 ## pinned by test_onfoot_equipment_clips_when_starved. Extracted from _draw so that test can drive
 ## the exact path with a tight `_fit_full`, mirroring the _buff_chips capture test.
 func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> float:
-	# Low-ammo escalation: amber under 20, blinking red when dry.
+	# Low-ammo escalation: amber under 20, blinking red when dry — see _mg_ammo_stat, shared with
+	# the coax gunner's tank row (same pool, same trigger, so the same tiers).
 	var ammo: int = p["mg_ammo"]
-	var acol := Color(0.95, 0.96, 0.9)
-	# c2-07: the warning-tint flag is set in the SAME branch that assigns the warn color (never from
-	# a separate `ammo <= 20` test that could drift out of step with the color tiers), so the numeral
-	# routes through the coupled _warn_stat backing exactly when its tint is a warning.
-	var awarn := false
-	if ammo == 0:
-		acol = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
-		awarn = true
-	elif ammo <= 20:
-		acol = Art.warn(Color(1.0, 0.75, 0.35), Art.WARN_CAUTION)
-		awarn = true
-	elif ammo == SimWorld.MG_AMMO_MAX:
-		acol = Color(0.6, 0.85, 1.0)
-	# The ammo glyph reflects what's actually chambered: shotgun shells during the Trench Gun
-	# window, AP rounds during Piercing, else MG.
-	var acon := "icon_ammo"
-	if p["spread_ticks"] > 0:
-		acon = "item_bullet_shotgun"
-	elif p["pierce_ticks"] > 0:
-		acon = "item_bullet"
 	# Grenade pip flashes red on an empty-throw attempt (dry-throw cue).
 	var gcol := Color(0.95, 0.96, 0.9)
 	# c2-07: warning tint flag for the grenade numeral's contrast drop-shadow.
@@ -2538,14 +2616,13 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# edge, reserving the worst-case +N slot ONLY on real overflow — the SAME plan_chips planner the
 	# under-fit status row uses. `MAG_ADV` mirrors _mag_bar's advance (segments + trailing gap); a
 	# timed/ammo _stat advance is ICON + 13 + text; roll is a glyph + 2px gap.
-	var mag_adv := 8.0 * 3.6 + 4.0   # == _mag_bar(...) advance (8 segs * 3.6 + 4)
-	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + mag_adv
+	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + MAG_ADV
 	var gren_w := ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])
 	var eq_plan := plan_chips([ammo_w, gren_w, ICON + 2.0], px, _fit_full, _ovf_slot_w(3))
 	var eq_shown: int = eq_plan["shown"]
 	if eq_shown >= 1:
 		var ammo_x := px
-		px = _warn_stat(acon, "%02d" % ammo, px, ry, acol) if awarn else _stat(acon, "%02d" % ammo, px, ry, acol)
+		px = _mg_ammo_stat(p, px, ry)
 		# Empty-clip bash on cooldown: a draining ring on the dry ammo icon so "melee not ready"
 		# reads distinctly from "input ignored".
 		if ammo == 0 and p["fire_cd"] > 0:

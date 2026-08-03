@@ -413,10 +413,11 @@ The art is a **hybrid pipeline**, not one source:
 | Units · structures · props | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level |
 | Player + enemy soldier sprites, action poses, and projectile cards | **Bespoke generative-AI art** (OpenAI built-in image generation; prompt/provenance record included) | `assets/troops/`, `assets/projectiles/` |
 | Menus · HUD · icons · FX cards | ✅ **Owned procedural art** (`tools/gen_ui_chrome.py` · `gen_ui_icons.py` · `gen_ui_glyphs.py` · `gen_fx_cards.py`) | `assets/art/{ui,hud,icons,fx}` |
-| Bosses · player tank · desert flora | **Bespoke generative-AI art** (fal.ai + Replicate; `nano-banana` for the desert cactus) — the gunship/colossus/tank silhouettes and painterly props | `assets/art/` (owned, gen-AI) |
+| Desert flora | **Bespoke generative-AI art** (`nano-banana`; pipeline + prompts recorded in `assets/art/desert_assets_source.md`) — the painterly cacti, scrub and tumbleweed | `assets/art/` (owned, gen-AI) |
+| Bosses · player tank | **Bespoke generative-AI art**, service unrecorded — the gunship/colossus/tank silhouettes. See [`ASSETS.md`](ASSETS.md) | `assets/art/` (owned, gen-AI, unverified) |
 | Ground · projectiles · FX | **Kenney CC0** | `assets/cc0/` |
-| Radio VO (56 mp3) | **Synthesized in-house** — owned by the project | `assets/vo/` |
-| Combat shouts (118 mp3) | **Synthesized in-house** (ar/fa lines) | `assets/audio/` |
+| Radio VO (56 mp3) | **Commissioned TTS** (ElevenLabs) — owned by the project | `assets/vo/` |
+| Combat shouts (118 mp3) | **Commissioned TTS** (ElevenLabs, ar/fa lines) | `assets/audio/` |
 | Text | **PixelOperator8** — CC0, Jayvee Enaguas | `assets/fonts/` |
 
 The desert→jungle look is a per-sprite olive tint + 1px readability outline applied in the
@@ -519,12 +520,13 @@ Found a security issue? **[SECURITY.md](SECURITY.md)** — please don't file tho
 | 📄 | Covers |
 |---|---|
 | [`LICENSE`](LICENSE) | Source code — plain MIT, nothing else in the file |
-| [`NOTICE.md`](NOTICE.md) | What MIT does **not** grant, third-party components, and the `assets/vo/` likeness position |
+| [`NOTICE.md`](NOTICE.md) | What MIT does **not** grant, third-party components, and the likeness position on `assets/vo/` + `assets/ui/intro/keyart.png` |
 | [`ASSETS.md`](ASSETS.md) | Per-directory provenance map for every shipped asset |
 
 > 🎭 **If you redistribute this repo, read [`NOTICE.md`](NOTICE.md) first.** The commander VO
-> imitates an identifiable public figure. The project owns the recordings; right of publicity
-> does not belong to it, and that question travels with the audio. 🪪
+> imitates an identifiable public figure **and the boot-splash key art depicts them** —
+> `assets/vo/` and `assets/ui/intro/keyart.png` both. The project owns the recordings and the
+> image; right of publicity does not belong to it, and that question travels with both. 🪪
 
 ---
 

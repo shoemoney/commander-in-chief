@@ -1,0 +1,12 @@
+6fa0aaa fix: 🎯 fairness, honesty and a swallowed key — gptfeedback adversarial pass
+fd5e0bf Merge pull request #3 from shoemoney/renovate/major-github-artifact-actions
+fb214d2 Merge pull request #2 from shoemoney/renovate/actions-checkout-7.x
+b0e45f5 chore(deps): update actions/upload-artifact action to v7
+52079d4 chore(deps): update actions/checkout action to v7
+4f53a7f Merge pull request #1 from shoemoney/renovate/configure
+ee11598 feat: improve opening combat readability
+9700cc3 feat: improve game clarity and animated combat assets
+3036f10 docs: 🎒 Backlog.md banks the 2 audit-lens findings the run's own lenses missed
+90159c4 merge: 🩹 18 doc lies surgically removed (from cic-docs worktree)
+e05bd16 merge: 🛡️ lint_sim + lint_assets fail closed on empty scans (from cic-lintfix worktree)
+cfb55c4 docs: 🎒 Backlog.md merged for the 2026-07-31 run — 6 new owner decisions, 31 new open findings, 10 shipped
