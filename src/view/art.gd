@@ -1139,8 +1139,9 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		var cap := Rect2(pos - Vector2(cap_w, size) / 2.0, Vector2(cap_w, size))
 		ci.draw_texture_rect(tex("glyph_key_wide" if cap_w > size else "ui_key_blank"),
 			cap, false, Color(0.96, 0.95, 0.88) * mod)
-		ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
+		if letter != "":
+			ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
 
 
 ## Device-aware prompt lookup: semantic action hint ('confirm', 'back',
