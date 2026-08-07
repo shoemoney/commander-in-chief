@@ -4108,11 +4108,12 @@ func _step_mines() -> void:
 		var grace: int = m.get("grace", 0)
 		if grace > 0:
 			m["grace"] = grace - 1
-		# A player on foot (not rolling) stepping on it takes the hit + detonates.
+		# A player on foot (not rolling) stepping on it detonates — the blast
+		# loop below hurts all in radius, like a barrel, so the fireball is
+		# honest about "IT HURTS BOTH SIDES".
 		for p in players:
 			if grace <= 0 and p["alive"] and _exposed(p) and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], m["x"], m["y"], MINE_TRIGGER_RADIUS):
-				_hurt_player(p)
 				triggered = true
 		# Or an enemy walks onto it — herd rushers into the minefield.
 		if not triggered:
@@ -4131,6 +4132,13 @@ func _step_mines() -> void:
 					break
 		if triggered:
 			m["armed"] = false
+			# Claymore blast hurts all exposed players in radius, like a barrel —
+			# "IT HURTS BOTH SIDES" must be true for the whole fireball, not just
+			# the trigger step. Grace still spares the planter for 20 ticks.
+			for p in players:
+				if p["alive"] and _exposed(p) and not p["roll_iframe"] \
+						and _dist_lte(p["x"], p["y"], m["x"], m["y"], GRENADE_RADIUS):
+					_hurt_player(p)
 			_explode(m["x"], m["y"])
 	# Foundry vents: phase is DERIVED from the global tick (no per-vent timer,
 	# no new state) — the 7*x term staggers neighbors so a chunk never jets in
