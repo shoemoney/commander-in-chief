@@ -416,7 +416,7 @@ func _blink_chip_present(sim: SimWorld) -> bool:
 		elif p["mg_ammo"] == 0 or p["grenade_ammo"] == 0:
 			return true
 		if (p["pierce_ticks"] > 0 and p["pierce_ticks"] < 120) \
-				or (p["spread_ticks"] > 0 and p["spread_ticks"] < 120 and not p["triple"]) \
+				or (p["spread_ticks"] > 0 and p["spread_ticks"] < 120) \
 				or (p["rend_ticks"] > 0 and p["rend_ticks"] < 120) \
 				or (p["smoke_ticks"] > 0 and p["smoke_ticks"] < 120):
 			return true
@@ -2180,7 +2180,7 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 		# icon is the non-color channel (pierce+rend both active = twin rifles
 		# under colorblind). item_bullet echoes pierce's ammo-slot glyph.
 		chips.append({"icon": "item_bullet", "txt": "%ds" % ((p["pierce_ticks"] + 59) / 60), "col": _buff_col(p["pierce_ticks"], Color(0.6, 0.95, 1.0)), "prio": _buff_prio(p["pierce_ticks"])})
-	if p["spread_ticks"] > 0 and not p["triple"]:   # redundant once Triple is owned (same fan) — no false countdown
+	if p["spread_ticks"] > 0:   # 5-fan when Triple is also owned (3→5), so the countdown matters even with Triple
 		chips.append({"icon": "wep_shotgun", "txt": "%ds" % ((p["spread_ticks"] + 59) / 60), "col": _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)), "prio": _buff_prio(p["spread_ticks"])})
 	if p["triple"]:
 		chips.append({"icon": "wep_mg", "txt": "x3", "col": Color(1.0, 0.6, 0.9), "prio": BUFF_PRIO_PERSIST})
