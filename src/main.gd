@@ -10032,6 +10032,7 @@ func _draw_gunships() -> void:
 
 
 const LABEL_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.92)   # a2-17: shared boss-label plate fill
+const FLOAT_PLATE_FILL := Color(0.04, 0.05, 0.03, 0.65)   # streak popups semi-transparent so they don't blind the fight — boss plates stay opaque for AA
 
 # a11y-signage: the route-fork signposts ("< CACHE" / "BOUNTY >") and the floattext
 # payoff toasts ("BOUNTY +N¢", "RANSOM +N¢", "+N¢") are world-space text too — they now
@@ -11541,7 +11542,7 @@ func _draw_fx() -> void:
 			# 4-dir outline. Alpha tracks the ink fade (fc.a) so the plate never
 			# outlives its text. Drawn untransformed at the PUNCHED rect so the spawn
 			# punch can't hang glyphs off the plate's edge.
-			var pcol := LABEL_PLATE_FILL
+			var pcol := FLOAT_PLATE_FILL
 			pcol.a *= fc.a
 			draw_rect(floattext_plate_rect(fpivot, fw, fsz, fpunch), pcol)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
