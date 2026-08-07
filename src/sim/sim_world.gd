@@ -1411,7 +1411,12 @@ func _step_players(inputs: Array) -> void:
 						# the shield arc is absolute here.
 						var blocked: bool = e["kind"] == "shield" \
 								and _shield_blocks(e, {"vx": e["x"] - p["x"], "vy": e["y"] - p["y"]})
-						if not blocked and e.get("hp", 1) > 1:
+						# Veteran armor (_wave_armor) is the bulk roster's extra bullet of
+						# soak — it must not also kill the empty-clip bash, the game's
+						# only free defense, exactly in the deep band that needs it.
+						# Inherent heavies (broadcast/mg_nest/technical) keep their hp.
+						var is_veteran_bulk = e["kind"] in ["rusher", "elite", "sapper", "grenadier", "sniper", "drone", "shield", "frogman"]
+						if not blocked and e.get("hp", 1) > 1 and not (is_veteran_bulk and e.get("hp", 1) <= 1 + _wave_armor()):
 							e["hp"] = e["hp"] - 1
 							blocked = e["hp"] > 0
 						if blocked:
