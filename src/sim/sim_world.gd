@@ -3059,11 +3059,14 @@ func _step_bullets() -> void:
 			dead = _bullet_hits_boss(b, boss_gates)
 		# Colossus core window: while the plating is retracted, bullets chip it
 		# too (otherwise grenades-only). A timing/aggression path for the finale.
+		# Closed-core hits give feedback instead of phasing through silently.
 		if not dead and not colossus.is_empty() and colossus["alive"] \
-				and colossus.get("core_open", 0) > 0 \
 				and _dist_lte(bx, by, colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": bx, "y": by})
-			_damage_colossus(COLOSSUS_BULLET_DAMAGE)
+			if colossus.get("core_open", 0) > 0:
+				events.append({"t": "boss_hit", "x": bx, "y": by})
+				_damage_colossus(COLOSSUS_BULLET_DAMAGE)
+			else:
+				events.append({"t": "armor_block", "x": bx, "y": by})
 			dead = true
 		if not dead and not observer.is_empty():
 			if _dist_lte(bx, by, observer["x"], camera_top + OBSERVER_Y_OFFSET, OBSERVER_HIT_RADIUS):
