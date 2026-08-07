@@ -3173,7 +3173,7 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		# tanks, bosses — keeps the 28 the arena keep-out distances are pinned to,
 		# and the player-lethal strike/barrel checks keep it too, so incoming
 		# never grew.
-		if e["alive"] and e["kind"] != "pilot" and _dist_lte(x, y, e["x"], e["y"], BLAST_KILL_RADIUS):
+		if e["alive"] and e["kind"] != "pilot" and not (e["kind"] == "ghillie" and e.get("submerged", false)) and _dist_lte(x, y, e["x"], e["y"], BLAST_KILL_RADIUS):
 			_kill_enemy(e, no_coin)
 			frags += 1
 	if frags >= 3:
