@@ -11542,9 +11542,13 @@ func _draw_fx() -> void:
 			# 4-dir outline. Alpha tracks the ink fade (fc.a) so the plate never
 			# outlives its text. Drawn untransformed at the PUNCHED rect so the spawn
 			# punch can't hang glyphs off the plate's edge.
-			var pcol := FLOAT_PLATE_FILL
-			pcol.a *= fc.a
-			draw_rect(floattext_plate_rect(fpivot, fw, fsz, fpunch), pcol)
+			# Streak callouts ("x5 STREAK", "+25%!") are vector text with drop shadow only —
+			# dark backing cards over combat read as debug popups. Other toasts keep the plate.
+			var is_streak := String(fx["text"]).contains("STREAK") or String(fx["text"]).contains("%")
+			if not is_streak:
+				var pcol := FLOAT_PLATE_FILL
+				pcol.a *= fc.a
+				draw_rect(floattext_plate_rect(fpivot, fw, fsz, fpunch), pcol)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
