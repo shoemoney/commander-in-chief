@@ -13225,7 +13225,7 @@ func _metal_plate(r: Rect2, a: float) -> void:
 	# a4-02: both greys below are named Art constants (PRINT_INK / PLATE_STEEL),
 	# not independently-chosen HUD literals — see assets_src/style_bible.md.
 	draw_texture_rect(Art.tex("fx_softspot"), r.grow_individual(30.0, 6.0, 30.0, 6.0), false,
-		Color(Art.PRINT_INK, 0.62 * a))
+		Color(Art.PRINT_INK, 0.82 * a))
 	var rule_col := Color(Art.PLATE_STEEL, 0.5 * a)
 	draw_texture_rect(Art.tex("fx_softspot"), Rect2(r.position.x - 30.0, r.position.y, r.size.x + 60.0, 2.0),
 		false, rule_col)
