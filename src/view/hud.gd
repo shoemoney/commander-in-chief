@@ -728,7 +728,7 @@ func _draw() -> void:
 	# dropped by _plan_row0 if a pathological head left it no room). Candidate chips already
 	# stopped short of it, so it no longer overpaints (and silently swallows) chips the +N
 	# count didn't know about.
-	if tele["kind"] != "":
+	if tele["kind"] != "" and not _result_card_up():
 		row_r = maxf(row_r, _draw_telegraph(sim, tele, tele_left, y))
 
 	# c1-06 / c4-03: +N overflow affordance — when the fit pass suppressed optional readouts

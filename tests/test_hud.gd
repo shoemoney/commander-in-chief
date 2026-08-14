@@ -3438,6 +3438,16 @@ func test_result_card_suppresses_the_bottom_overlays() -> void:
 	h.free()
 
 
+func test_gate_telegraph_opts_out_under_the_result_card() -> void:
+	## Same live last-stand frame: CLEAR THE GATE stays lit on the top rail while
+	## the casualty card is up. The telegraph is the one leftover combat objective
+	## on a screen that already decided the run is over.
+	var src := FileAccess.get_file_as_string("res://src/view/hud.gd")
+	var i := src.find("if tele[\"kind\"] != \"\" and not _result_card_up():")
+	Runner.T.ok(i >= 0,
+		"CLEAR THE GATE / PRESSURE must not paint over a result card")
+
+
 # The caption TABLES in sfx.gd already author the speaker ("COMMANDER: …", "SPOTTER: …",
 # "PILOT: …") or deliberately omit it for bracketed non-speech cues ("[MORTAR INCOMING]").
 # caption_line() is the ONE place a caption becomes display text — it must never invent a

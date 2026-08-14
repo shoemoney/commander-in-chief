@@ -1960,6 +1960,35 @@ func test_the_blind_shell_cue_names_the_cover_that_actually_hid_you() -> void:
 	stub.free()
 
 
+func test_smoke_hint_names_the_nest_that_still_aims() -> void:
+	## First-grab kind-9 teach: "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND."
+	## Measured 2026-08-14: _step_mg_nest fired aims=3 shots=9 in 400 ticks at a
+	## smoked player AND at a clear one — identical. The nest has no _concealed
+	## gate (sim_world.gd:_step_mg_nest, "suppressing through smoke is its whole
+	## identity"). Shells are the exception the hint already names; the nest is
+	## the exception it doesn't. A player who trusts the teach dies to the rake.
+	var src := _view_src()
+	var arm := src.find('9: _hint("smoke"')
+	Runner.T.ok(arm >= 0, "the first-grab smoke teach is still the kind-9 _hint arm")
+	var line := src.substr(arm, src.find("\n", arm) - arm)
+	Runner.T.ok(line.contains("NEST") or line.contains("MG"),
+		"the smoke hint must name the nest that still aims through it (got '%s')" % line)
+	Runner.T.ok(not (line.contains("BLINDS THEIR AIM") and not (line.contains("NEST") or line.contains("MG"))),
+		"it cannot claim universal aim-blind without the nest exception")
+
+
+func test_colossus_screen_bar_opts_out_under_the_result_card() -> void:
+	## Live last-stand (15-live-t18000) painted FOUNDRY COLOSSUS — ADVANCE through
+	## the CASUALTY REPORT. Captions/verbs already opt out via _result_card_up;
+	## the screen-space bar in _draw_colossus never did.
+	var src := _view_src()
+	var mark := src.find('var clabel := "FOUNDRY COLOSSUS')
+	Runner.T.ok(mark >= 0, "the colossus HUD label is still authored here")
+	var chunk := src.substr(maxi(0, mark - 1200), 1600)
+	Runner.T.ok(chunk.contains("if _debrief or sim.victory"),
+		"the colossus screen-space bar must hide while a result card owns the frame")
+
+
 func test_the_specialist_roster_is_not_filed_under_a_mode_it_outlives() -> void:
 	## Seven of the nine CAMPAIGN special archetypes are the HOW TO PLAY roster —
 	## filed under a tab labelled ENDLESS, headed "ENDLESS WAR". They start

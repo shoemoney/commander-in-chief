@@ -2418,7 +2418,7 @@ func _consume_events() -> void:
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
-					9: _hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")
+					9: _hint("smoke", "SMOKE — BLINDS RIFLE AIM. NESTS STILL TRACK. SHELLS STILL FALL")
 					10: _hint("flashbang", "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY.")
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
@@ -10727,6 +10727,11 @@ func _draw_colossus() -> void:
 	# does NOT use that boundary; the two never share the band. Shake-immune: fixed HUD slot,
 	# cancel the node transform for the bar block.
 	draw_set_transform_matrix(get_transform().affine_inverse())
+	# Result card owns the frame: the bar used to paint through the K.I.A. plate
+	# (live last-stand, 2026-08-14). World-space hull stays; this is HUD chrome.
+	if _debrief or sim.victory:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 	# c4-fix r2: divide by the stored scaled max (96 in 2P, 90 hard), not the unscaled constant —
 	# else the bar reads full and frozen for the first third of any scaled fight (matches colossus_phase).
 	var cfrac := float(sim.colossus["hp"]) / float(sim.colossus.get("max_hp", SimWorld.COLOSSUS_HP))
