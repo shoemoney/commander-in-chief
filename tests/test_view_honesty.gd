@@ -887,27 +887,35 @@ const TML := preload("res://tests/test_menu_layout.gd")
 ## Every string the menu DRAWS, joined into one corpus: HOWTO_TABS x _endless_pages()
 ## (the rules pages) plus every Mode's row labels. Derived from source, so a rules page
 ## added tomorrow is audited the day it lands.
-func _menu_text_corpus() -> String:
+func _menu_text_corpus(scales: Array = [1.0, 2.0]) -> String:
 	var stub := TML._StubMain.new()
 	var m = TML._CaptureMenu.new()
 	m.main = stub
 	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
 	m._open_t = 1.0
 	var parts: PackedStringArray = []
-	for tab in Menu.HOWTO_TABS.size():
-		var pages := m._endless_pages() if tab == Menu.HOWTO_ENDLESS_TAB else 1
-		for ep in pages:
+	# BOTH presentations: at 100% the authored legacy pages draw, at 200% the measured
+	# line pager does — two DIFFERENT string sites for the same rule. Sampling only 100%
+	# left every pager literal unguarded, so a rule fixed in one site and not the other
+	# read as green. Page count comes off _howto_subpages() (not _endless_pages()) so the
+	# pager's own paged leaves are captured instead of just page 0.
+	var was_scale: float = Art.text_scale
+	for scale in scales:
+		Art.text_scale = scale
+		for tab in Menu.HOWTO_TABS.size():
 			m.mode = Menu.Mode.HOWTO
 			m._howto_page = tab
-			m._howto_endless_page = ep
-			m.ops.clear()
-			var prev = Art.text_capture
-			Art.text_capture = m.ops
-			m._draw_howto()
-			Art.text_capture = prev
-			for op in m.ops:
-				if op["k"] == "text":
-					parts.append(String(op["id"]))
+			for ep in m._howto_subpages():
+				m._howto_endless_page = ep
+				m.ops.clear()
+				var prev = Art.text_capture
+				Art.text_capture = m.ops
+				m._draw_howto()
+				Art.text_capture = prev
+				for op in m.ops:
+					if op["k"] == "text":
+						parts.append(String(op["id"]))
+	Art.text_scale = was_scale
 	for mode_id in Menu.Mode.values():
 		m.mode = mode_id
 		for it in m._menu_items():
@@ -915,6 +923,81 @@ func _menu_text_corpus() -> String:
 	m.free()
 	stub.free()
 	return " ".join(parts)
+
+
+## MEASURED rate for one chest exit: coins out of the chest vs score in, from a live sim.
+## -1.0 means the exit did not actually debit (the staging is wrong, not the copy).
+func _chest_exit_rate(exit: String) -> float:
+	var s := SimWorld.new(0xC0FFEE, 1, "campaign")
+	s.war_chest = 5000
+	var p: Dictionary = s.players[0]
+	var c0: int = s.war_chest
+	var q0: int = s.score
+	match exit:
+		"_try_buy":
+			s._try_buy(p, 2)                                  # VEST off the spend wheel
+		"_collect_pickups":
+			p["mg_ammo"] = 0          # a capped supply is left STANDING, uncharged
+			s.pickups.append({"x": p["x"], "y": p["y"], "kind": 0, "cost": 30})
+			s._collect_pickups(p, 0)
+		"_try_revive":
+			p["alive"] = false
+			p["deaths"] = 1
+			s._try_revive(-1, p)
+	var spent: int = c0 - s.war_chest
+	if spent <= 0:
+		return -1.0
+	return float(s.score - q0) / float(spent)
+
+
+func test_the_war_chest_page_prices_every_way_a_coin_leaves_the_chest() -> void:
+	## SPEND_SCORE_MULT's docstring promises "ONE spend->score rate for EVERY way a coin
+	## leaves the chest" and the HOW-TO page prices the chest with one verb, "spend".
+	## The sim has THREE exits at TWO rates: the wheel and priced ground crates both pay
+	## 6x per coin, and _try_revive debits and pays NOTHING. Census the exits out of the
+	## sim source so a fourth fails the day it lands, measure what each really pays, then
+	## demand the DRAWN page state that measured rate beside the verb that spends it.
+	var ssrc := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var fn := ""
+	var exits: Array[String] = []
+	for line in ssrc.split("\n"):
+		if line.begins_with("func "):
+			fn = line.substr(5, line.find("(") - 5)
+		if line.strip_edges().begins_with("war_chest -=") and not exits.has(fn):
+			exits.append(fn)
+	exits.sort()
+	Runner.T.eq(" ".join(exits), "_collect_pickups _try_buy _try_revive",
+		"the chest still has exactly the three known exits (got %s) — a new one prices itself here AND on the WAR CHEST page" % str(exits))
+
+	# PER SCALE, not the joined corpus: 100% draws the authored page and 200% the measured
+	# pager — two separate literals. Joined, either one alone satisfied the assertion and
+	# fixing only one site read as green (verified by mutation).
+	for scale in [1.0, 2.0]:
+		# Split on CLAUSE boundaries, not just periods. The rule is one sentence with an
+		# em dash — "BUYING scores 6× per coin — REVIVING scores nothing" — so a period
+		# split hands both keys one segment, and the REVIVING lookup was satisfied by the
+		# BUYING clause's own token. Measured: crediting revives at SPEND_SCORE_MULT in
+		# the sim left this test PASSing while the drawn page still said "nothing".
+		var sentences := _menu_text_corpus([scale]).replace("—", ".").split(".")
+		for exit in exits:
+			var rate := _chest_exit_rate(exit)
+			Runner.T.ok(rate >= 0.0, "%s actually debited the chest in the fixture (rate %.1f)" % [exit, rate])
+			if rate < 0.0:
+				continue
+			# The demanded token is derived from the MEASURED rate: credit revives at
+			# SPEND_SCORE_MULT in the sim and this demands "6×" in the REVIVING clause,
+			# which the shipped "scores nothing" copy does not carry — verified red by
+			# that exact sim mutation. The ratchet tracks the sim, not this wording.
+			var want :=("%d×" % int(rate)) if rate > 0.0 else "nothing"
+			var key := "REVIVING" if exit == "_try_revive" else "BUYING"
+			var found := false
+			for sen in sentences:
+				if sen.contains(key) and sen.contains(want):
+					found = true
+					break
+			Runner.T.ok(found,
+				"at %d%% TEXT SIZE the drawn WAR CHEST page states %s's measured rate (%s) in the sentence that names %s"
+					% [int(scale * 100.0), exit, want, key])
 
 
 func test_the_rules_page_states_every_continue_the_campaign_actually_grants() -> void:

@@ -6,6 +6,7 @@ extends RefCounted
 
 const Runner := preload("res://tests/run_tests.gd")
 const Main := preload("res://src/main.gd")   # main.gd has no class_name — same local alias test_view_honesty.gd uses
+const Hud := preload("res://src/view/hud.gd")
 
 
 func _consts() -> Dictionary:
@@ -2795,6 +2796,119 @@ func test_pickup_labels_never_overprint_in_a_real_run() -> void:
 		"the run actually got congested (%d simultaneous tag REQUESTS) — a vacuous drive must not pass" % max_labels)
 
 
+## The 640x360 frame, and the HUD corner plate every frame reserves before any world
+## label claims a slot (mirrors main._draw()'s seeding — hud.gd is THE source of the
+## panel geometry, so no literal here can drift from it).
+const _HUD_PLATE_W := 264.0    # hud._plate_r floor (262) + the 2px main.gd pads it by
+const _FRAME_H := 360.0
+
+
+func test_pickup_tags_are_never_drawn_for_an_off_frame_anchor() -> void:
+	## claim_label_slot's ladder reaches +-66px and SKIPS rows that leave the frame, so a
+	## tag whose plate wants to sit above the top edge had no near rung and got hunted DOWN
+	## to the first legal one — printing a crate's price up to 66px from the crate, in a
+	## column along the top edge over the player. pickup_label_requests band-culls on the
+	## CRATE's screen y ([-40, 400]) while the thing culled is the PLATE, ~25px higher and
+	## 13px tall; the two bands disagree by ~38px and that gap is the whole defect.
+	##
+	## Measured by THIS sweep on 7d26648 (the shipped request builder, demo_input driving all
+	## four modes x {supplies uncapped, force-capped} x TEXT SIZE 100%/200%, 3,700 ticks each,
+	## 100,713 off-frame wants): HEAD drew 29,278 of them, and 31.8% / 30.8% of all drawn tags
+	## landed >22px (two rungs) from their anchor. Max travel is 66px BEFORE AND AFTER — the
+	## guard does not improve it, because a plate clipping the frame by 1px is kept by design.
+	## First offence at tick 53, so the 3,700-tick window over-samples the onset ~70x.
+	var ms: Script = load("res://src/main.gd")
+	var was_scale: float = Art.text_scale
+	var off_frame_drawn := 0
+	var off_frame_seen := 0
+	var max_travel := 0.0
+	var max_reqs := 0
+	var worst := ""
+	var far_pct: Array[float] = []
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		var drawn := 0
+		var far := 0
+		for mode in ["campaign", "arcade", "endless", "boss_rush"]:
+			for capped in [false, true]:
+				var sim := SimWorld.new(7, 1, mode)
+				for t in 3700:
+					if sim.wiped:
+						break
+					sim.step([ms.demo_input(t, sim)])
+					if capped:
+						# Force the MAXED population into existence: those tags anchor 25px
+						# above the crate and are the worst off-frame offenders.
+						for p in sim.players:
+							p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+							p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+							p["vest"] = true
+					var slots: Array[Rect2] = []
+					for p in sim.players:
+						if p["in_tank"] >= 0:
+							continue
+						slots.append(ms.player_label_exclusion(Vector2(
+							roundf(p["x"] * ms.PX), roundf((p["y"] - sim.camera_top) * ms.PX))))
+					slots.append(Rect2(0.0, 0.0, _HUD_PLATE_W,
+						2.0 + Hud.HEAD_H + sim.players.size() * Hud.ROW_H))
+					var reqs: Array = ms.pickup_label_requests(sim)
+					var got: Array[Rect2] = ms.claim_pickup_labels(reqs, slots)
+					max_reqs = maxi(max_reqs, reqs.size())
+					for i in reqs.size():
+						var want: Rect2 = reqs[i]["want"]
+						var off: bool = want.end.y <= 0.0 or want.position.y >= _FRAME_H
+						if off:
+							off_frame_seen += 1
+						if not got[i].has_area():
+							continue
+						drawn += 1
+						if off:
+							off_frame_drawn += 1
+						var trav: float = absf(got[i].position.y - want.position.y)
+						if trav > 22.0:
+							far += 1
+						if trav > max_travel:
+							max_travel = trav
+							worst = "%s%s t%d '%s' wanted y=%.0f, drawn y=%.0f" % [mode,
+								" capped" if capped else "", t, reqs[i]["txt"],
+								want.position.y, got[i].position.y]
+		far_pct.append(100.0 * float(far) / maxf(1.0, float(drawn)))
+	Art.text_scale = was_scale
+	# A: the causal invariant. A tag whose plate cannot sit on the frame at its own anchor
+	# is SUPPRESSED, not relocated — it names something the player cannot see.
+	Runner.T.eq(off_frame_drawn, 0,
+		"no pickup tag is drawn for an entirely off-frame anchor (%d drawn of %d off-frame wants)"
+			% [off_frame_drawn, off_frame_seen])
+	# B: the player-visible symptom — a price printed far from the crate it prices. Measured
+	# over this exact sweep: 31.8% / 30.8% of drawn tags landed >22px (two rungs) from their
+	# anchor at 100% / 200% TEXT SIZE; with the guard, 6.8% / 12.9%. The residual is pure
+	# LADDER CONGESTION on anchors that really are on-frame (a plate clipped 1px by the top
+	# edge survives the guard by design), so max travel stays 66px at 200% and is REPORTED,
+	# not asserted — asserting it would pin behaviour this guard does not govern.
+	for si in far_pct.size():
+		Runner.T.ok(far_pct[si] <= 15.0,
+			"at %d%% TEXT SIZE, far-travelled tags stay a minority (%.1f%% >22px from anchor; HEAD 31.8/30.8%%; max travel %.0fpx, worst %s)"
+				% [100 * (si + 1), far_pct[si], max_travel, worst])
+	# C: non-vacuity — a drive that never generated crates must not pass silently.
+	Runner.T.ok(max_reqs >= 5,
+		"the drive really got congested (%d simultaneous tag REQUESTS)" % max_reqs)
+	Runner.T.ok(off_frame_seen > 0,
+		"…and really produced off-frame anchors (%d) — otherwise assert A is vacuous" % off_frame_seen)
+
+
+func test_claim_label_slot_suppresses_a_droppable_off_frame_label() -> void:
+	## The seam-level unit for the same rule, with no drive: it pins the ARBITER, so the
+	## floattext family at main.gd:11871 — the other droppable producer — is covered too.
+	## HEAD returned Rect2(300, 0, 40, 13) — a label drawn 40px below where it asked,
+	## on-screen, for an off-screen subject.
+	var ms: Script = load("res://src/main.gd")
+	var empty: Array[Rect2] = []
+	Runner.T.ok(not ms.claim_label_slot(Rect2(300.0, -40.0, 40.0, 13.0), empty, 0.0, true).has_area(),
+		"a droppable label whose plate is entirely above the frame is suppressed, not hunted downward")
+	Runner.T.ok(ms.claim_label_slot(Rect2(300.0, -40.0, 40.0, 13.0), empty, 0.0, false).has_area(),
+		"…while a PERSISTENT label keeps the clamp (ESCAPING! pre-clamps its own baseline and stays pinned)")
+
+
 func test_pickup_label_cluster_drops_instead_of_stacking() -> void:
 	## Staged saturation, at 100% and at the largest shipped TEXT SIZE: 12 pickups stacked
 	## in one column, at the bottom-left anchor and again at the top edge where rows are
@@ -2813,7 +2927,11 @@ func test_pickup_label_cluster_drops_instead_of_stacking() -> void:
 			var reqs: Array = []
 			for i in 12:
 				var txt: String = texts[i % texts.size()] if i % 2 == 0 else String(caps[i % caps.size()])
-				var pos := Vector2(anchor.x, anchor.y - float(i) * 3.0)
+				# Walk AWAY from whichever edge the anchor hugs: the top-edge cluster used to
+				# march upward, putting the nearest request's plate entirely off-frame, where
+				# the droppable off-frame guard now (correctly) suppresses it. The top-edge
+				# case this fixture exists for — rows skipped near y=0 — is unchanged.
+				var pos := Vector2(anchor.x, anchor.y + float(i) * (3.0 if anchor.y < 180.0 else -3.0))
 				# Input order is FARTHEST-first, so a claimer that skips the sort fails here.
 				reqs.append({"d": float(12 - i), "txt": txt, "col": Color(1, 1, 1), "coin": false,
 					"pos": pos, "want": ms._label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)})

@@ -5179,8 +5179,8 @@ func _howto_large_entries(tab: int) -> Array:
 				{"kind": "heading", "text": "ONE HIT AND YOU DROP.", "size": 13},
 				{"kind": "body", "text": "No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again."},
 				{"kind": "heading", "text": "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", "size": 11},
-				{"kind": "body", "text": _howto_tr("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all.") % (SimWorld.BROKE_RESPAWN_TICKS / 60)},
-				{"kind": "body", "text": _howto_tr("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
+				{"kind": "body", "text": _howto_tr("BUY supplies with it, or REVIVE yourself or a partner. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all.") % (SimWorld.BROKE_RESPAWN_TICKS / 60)},
+				{"kind": "body", "text": _howto_tr("BUYING scores %d× per coin — REVIVING scores nothing. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
 				{"kind": "action", "action": "wheel", "text": "Hold to open the supply wheel."}]
 		2:
 			var out: Array = [{"kind": "heading", "text": "MODES + ASSIST:", "size": 10}]
@@ -5416,7 +5416,7 @@ func _howto_page_warchest() -> void:
 	# ...and the rally is NOT always a rescue: in ENDLESS with nobody left standing the
 	# same clock latches the wipe (SimWorld.rally_is_free()). Static copy, not
 	# mode-conditional — the stub main the corpus test drives has a null sim.
-	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all."
+	y = _body_block("BUY supplies with it, or REVIVE yourself or a partner. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all."
 			% (SimWorld.BROKE_RESPAWN_TICKS / 60),
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 10.0
@@ -5425,7 +5425,7 @@ func _howto_page_warchest() -> void:
 	# discount and 3x salvage are both priced against — went untaught here, and the old closer
 	# ("That's the choice.") presented spend-vs-salvage as the complete decision. It isn't.
 	# One wrapping paragraph, not two blocks: the BACK-plate ratchet leaves the page ~0 slack.
-	y = _body_block("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home."
+	y = _body_block("BUYING scores %d× per coin — REVIVING scores nothing. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus."
 			% [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT,
 				SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)],
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)

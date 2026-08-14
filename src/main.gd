@@ -10490,6 +10490,24 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# X is clamped first and always: a label wider than its anchor can start off-frame
 	# before any dodging happens, and no amount of vertical travel fixes that.
 	var x: float = clampf(rect.position.x, 0.0, maxf(0.0, 640.0 - w))
+	# A DROPPABLE label whose plate cannot sit on the 640x360 frame at its own anchor is
+	# SUPPRESSED, not relocated. The ladder reaches +-66px and skips off-frame rows, so an
+	# anchor above the top edge used to be hunted DOWN to the first legal rung — printing a
+	# crate's price up to 66px from the crate, in a column along the top edge over the player.
+	# pickup_label_requests band-culls on the CRATE's screen y while the thing culled is the
+	# PLATE ~25px higher, so the two bands disagree by ~38px; that gap is the defect, and the
+	# predicate has to be the label's OWN rect (culling by the crate still left 13,476 far
+	# tags). Measured by test_pickup_tags_are_never_drawn_for_an_off_frame_anchor's own sweep
+	# (8 configs x 3,700 ticks x TEXT SIZE 100%/200%, 100,713 off-frame wants): HEAD drew
+	# 29,278 of them, and 31.8% / 30.8% of all drawn tags landed >22px from what they named.
+	# After this guard: 0 drawn off-frame, 6.8% / 12.9% far-travelled. Max travel is UNCHANGED
+	# at 66px — a plate clipping the frame by 1px is deliberately kept, and it can still be
+	# hunted the full ladder (worst: campaign capped t850, 'MAXED' wanted y=-20, drawn y=46).
+	# That residual is ladder congestion on genuinely on-frame anchors, not this predicate.
+	# Persistent labels keep the clamp below — ESCAPING! deliberately
+	# pre-clamps its own baseline on-frame and must stay pinned to the top edge.
+	if droppable and (rect.end.y <= 0.0 or rect.position.y >= 360.0):
+		return Rect2()
 	# Candidate rows: where it wanted to sit, then alternating down/up in the same 11px
 	# stride the floattext block used, 6 each way. Down first — a callout belongs under
 	# the thing it names, and dropping keeps it out of the sprite it is labelling.

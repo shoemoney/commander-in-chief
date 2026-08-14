@@ -465,10 +465,13 @@ const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8]
 const CRATE_POOL_BASE: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST,
 	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST]
 const WIPE_SCORE_PCT := 25           # airstrike screen-clear kills score at a quarter rate (see _fire_mission)
-# ONE spend->score rate for EVERY way a coin leaves the chest (spend-wheel and priced
-# ground crates both). It used to be two literals, 6 in _try_buy and 10 in
-# _collect_pickups, each commented as matching the other. See _try_buy for why it is
-# a discount against the 10x the victory payout gives an UNSPENT chest.
+# The spend->score rate for the two PURCHASE exits — the spend-wheel (_try_buy) and
+# priced ground crates (_collect_pickups). It used to be two literals, 6 in _try_buy and
+# 10 in _collect_pickups, each commented as matching the other. See _try_buy for why it
+# is a discount against the 10x the victory payout gives an UNSPENT chest.
+# The THIRD exit, _try_revive, debits the chest and writes NO score: a revive buys a
+# body, not points. Any fourth exit must state its rate here AND on menu.gd's WAR CHEST
+# page — test_view_honesty's chest-exit census fails otherwise.
 const SPEND_SCORE_MULT := 6
 # A LOST run salvages the unspent chest at HALF the 6x spend rate. Before this the
 # losing end converted nothing at all: a win banked 10x + 5000 and both wipe paths
