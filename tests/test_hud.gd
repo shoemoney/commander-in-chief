@@ -2447,6 +2447,36 @@ func test_status_chips_full_words_fit_at_narrowest_supported_width() -> void:
 	h.free()
 
 
+func test_status_chips_names_grass_concealment_hidden() -> void:
+	## Smoke already has a countdown chip. Grass/trench only crouched the sprite.
+	var p := {"boost_ticks": 0, "x": 0, "y": 0, "alive": true, "smoke_ticks": 0,
+		"vest": false, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
+		"rend_ticks": 0, "claymores": 0}
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h._measure = false
+	h._fit_full = 614.0
+	var end_px: float = h._status_chips(p, 8.0, 20.0, 0, _HiddenSim.new())
+	var texts: Array = []
+	for b in h.boxes:
+		if b["k"] == "text":
+			texts.append(b["id"])
+	Runner.T.ok("HIDDEN" in texts or "HIDE" in texts,
+		"grass concealment paints a HIDDEN/HIDE pip, not an idle HUD: %s" % str(texts))
+	Runner.T.ok(end_px > 8.0, "the hidden pip advances the cursor")
+
+
+class _HiddenSim extends SimWorld:
+	func _init() -> void:
+		super._init(0, 1, "campaign")
+	func _in_water(_x, _y) -> bool:
+		return false
+	func _in_grass(_t: Dictionary) -> bool:
+		return true
+	func _in_trench(_x, _y) -> bool:
+		return false
+
+
 # c1-10 COMBINED compact-group + buff-overflow (the judge's case): on a row too tight for the full
 # words, the reserve falls back to the COMPACT width so the status group STILL fits even while the
 # buffs also shed into their own +N. Assert both compact statuses render, a buff +N is emitted,

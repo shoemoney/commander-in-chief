@@ -2252,8 +2252,10 @@ func test_river_shore_is_curved_and_shader_shares_the_params() -> void:
 	Runner.T.ok(absf(hi) <= m.BANK_AMP.x + m.BANK_AMP.y + 0.01, "bank offset stays bounded by its amplitudes")
 	Runner.T.ok(m.BANK_AMP.x + m.BANK_AMP.y < m.BANK_BASE, "bank polygon can never self-intersect its dry edge")
 	var src := FileAccess.get_file_as_string("res://src/view/water.gdshader")
-	for u in ["bank_amp", "bank_freq", "pad_px", "band_px"]:
+	for u in ["bank_amp", "bank_freq", "pad_px", "band_px", "clock"]:
 		Runner.T.ok(u in src, "water.gdshader still consumes uniform " + u)
+	Runner.T.ok(not src.contains("(TIME + phase)"),
+		"the river clock is the view clock, not GPU TIME")
 # --- kill-the-copy-pasted-sandbag-wall-tiling: the BAKE must not be a mechanical
 # grid of identical stamps -- per-segment placement jitter (wall_variant/cap_flags,
 # tests/test_main.gd) cannot rescue a source PNG that is N identical flat-fill

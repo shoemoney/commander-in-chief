@@ -30,6 +30,8 @@ func test_player_animation_selector_covers_every_real_action() -> void:
 		"stationary concealment is the crouch state (there is no fake crouch control)")
 	p["interact_prev"] = true
 	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "interact", "held interaction uses the reach pose")
+	Runner.T.eq(ms.player_anim_state(p, Vector2(0, -1), false, 0), "move_forward_0",
+		"held interact while walking yields to the stride — TAP-HOLD must not ice-skate")
 	p["interact_prev"] = false
 	p["fire_cd"] = SimWorld.FIRE_COOLDOWN_TICKS
 	Runner.T.eq(ms.player_anim_state(p, Vector2.ZERO, false, 0), "shoot", "fresh automatic fire shows recoil")

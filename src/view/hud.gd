@@ -1865,7 +1865,7 @@ func _verb_legend() -> void:
 	# Plate sized to the content (centered), not full width — a chip reads as a
 	# reminder where a full-width bar reads as a letterbox. Fades with the glyphs.
 	_emit_rect(Rect2(x - 8.0, y - 8.0, total + 16.0, 16.0),
-		Color(0.03, 0.05, 0.03, 0.55 * a))
+		Color(0.03, 0.05, 0.03, 0.75 * a))
 	# Emit straight off the primitive list (through the seams below), so pixels land
 	# exactly where the test measures and the capture test sees the real commands.
 	for p in verb_legend_primitives(y, segs):
@@ -2694,6 +2694,11 @@ func _status_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		# "WADING" names the slowed-in-water state; its fallback "WATER" is also a plain word
 		# (never the cryptic "WADE") — both forms read at a glance without a legend.
 		pips.append({"full": "WADING", "short": "WATER", "col": Color(0.5, 0.8, 1.0)})
+	elif int(p.get("smoke_ticks", 0)) <= 0 and p["alive"] \
+			and (sim._in_grass(p) or sim._in_trench(p["x"], p["y"])):
+		# Smoke already has its own countdown chip. Grass/trench concealment
+		# only changed the crouch pose — HUD looked idle while aimed fire missed.
+		pips.append({"full": "HIDDEN", "short": "HIDE", "col": Color(0.55, 0.75, 0.45)})
 	if pips.is_empty():
 		return _buff_chips(p, px, ry, i)
 	var edge := _fit_full   # the row's real usable edge (CB/RM-reserved), NOT global RIGHT

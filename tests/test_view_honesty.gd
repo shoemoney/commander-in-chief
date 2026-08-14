@@ -2762,3 +2762,36 @@ func test_arena_crack_gets_a_visual_card() -> void:
 			break
 	Runner.T.ok(tex_card, "arena_crack must draw the fx_groundbreak card, not fire silently")
 	Runner.T.ok(stub._scorch.size() > scorch0, "arena_crack must leave a permanent scorch like its siblings")
+
+
+# --- R5: teach cards must not sell verbs the sim no longer honours -----------
+
+func test_ghillie_card_does_not_sell_a_grenade_flush() -> void:
+	## Cloaked ghillies skip blast (sim_world._explode). "FLUSH IT OUT" was a lie.
+	var card: String = String(Main._KIND_TEACH["ghillie"]).to_upper()
+	Runner.T.ok(not card.contains("FLUSH"),
+		"ghillie first-sighting must not say FLUSH after cloak blast-immunity: %s" % card)
+	Runner.T.ok(card.contains("LASER") or card.contains("CLOSE"),
+		"ghillie card still names the real window: %s" % card)
+
+
+func test_last_stand_banner_is_plated() -> void:
+	## Foundry floor is orange-red; unplated LAST STAND ink washed out.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var at := src.find("LAST STAND — NO REVIVES")
+	Runner.T.ok(at > 0, "the last-stand banner string still exists")
+	var window := src.substr(maxi(0, at - 280), 360)
+	Runner.T.ok(window.contains("_banner_plate"),
+		"LAST STAND goes through _banner_plate, not raw Art.text_center:\n%s" % window)
+
+
+func test_river_clock_is_view_owned_not_gpu_time() -> void:
+	var sh := FileAccess.get_file_as_string("res://src/view/water.gdshader")
+	Runner.T.ok(sh.contains("uniform float clock"), "water.gdshader exposes a view clock")
+	Runner.T.ok(not sh.contains("(TIME + phase)"),
+		"no remaining TIME+phase river animation")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("set_shader_parameter(\"clock\""),
+		"_sync_water pushes the view clock")
+	Runner.T.ok(src.contains("_water_clock"),
+		"main owns _water_clock and advances it only off hit-stop")

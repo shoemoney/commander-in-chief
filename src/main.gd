@@ -274,6 +274,8 @@ var _tank_turret := {}           # per-tank-index eased turret heading (kills th
 var _water_prev: Array[bool] = [false, false]   # per-player prev in-water state (edge-triggers entry droplets)
 var _mud_prev: Array[bool] = [false, false]     # per-player prev in-mud state (edge-triggers the mud splash)
 var _mud_told := false                          # once-per-run MUD teach banner latch
+var _rubble_told := false                       # once-per-run rubble (ruins mud-twin) teach banner
+var _water_clock := 0.0                         # shader river clock — frozen in hit-stop, damped by Reduce Motion
 var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
                                                  # death mid-array can misalign one slot for a frame — cosmetic only)
 var _hit_dir := Vector2.ZERO     # screen-edge damage wedge direction
@@ -373,7 +375,7 @@ var _seen_kinds := {}             # enemy kind → true once its first-encounter
 # in a one-hit game — named + told how to answer, once per run. View-only.
 const _KIND_TEACH := {
 	"sniper": "LASER SNIPER — BREAK THE LINE",
-	"ghillie": "GHILLIE SNIPER — FLUSH IT OUT",
+	"ghillie": "GHILLIE — CLOSE IN. CLOAK BEATS BLASTS",
 	"grenadier": "GRENADIER — MOVE OFF YOUR GROUND",
 	"shield": "RIOT SHIELD — FLANK OR BLOW IT OPEN",
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
@@ -1071,11 +1073,26 @@ func _sync_water() -> void:
 				wk[wn] = Vector3((pp["x"] * PX) / 640.0,
 					float(pp["y"] - w["y"]) / float(SimWorld.WATER_H), 1.0)
 				wn += 1
+		# Occupied hulls get a bow wake too — dust is already suppressed in
+		# water, so without this a manned tank is a dry box on a living river.
+		if wn < 2:
+			for tk in sim.tanks:
+				if wn >= 2:
+					break
+				if tk.get("alive", false) and int(tk.get("occupant", -1)) >= 0 \
+						and not tk.get("burning", false) \
+						and tk["y"] >= w["y"] and tk["y"] < w["y"] + SimWorld.WATER_H \
+						and sim._in_water(tk["x"], tk["y"]):
+					wk[wn] = Vector3((tk["x"] * PX) / 640.0,
+						float(tk["y"] - w["y"]) / float(SimWorld.WATER_H), 1.4)
+					wn += 1
 		for wi in 2:
 			if wk[wi].distance_to(pushed[3 + wi]) > 0.002:
 				pushed[3 + wi] = wk[wi]
 				var wmat: ShaderMaterial = rect.material
 				wmat.set_shader_parameter("wake0" if wi == 0 else "wake1", wk[wi])
+		# Always push the view clock — it changes every unfrozen tick.
+		(rect.material as ShaderMaterial).set_shader_parameter("clock", _water_clock)
 		# Wet-blast splash ring: only the band containing the blast animates it.
 		# Guarded like the uniforms above — pushes only while a ring is live.
 		var in_band: bool = _water_splash["t"] > 0.0 and _water_splash["y"] >= w["y"] \
@@ -1626,6 +1643,8 @@ func _reset() -> void:
 	_armor_announced = 0   # the next run re-announces wave 13's armor from zero
 	_fork_sign_fade.clear()
 	_mud_told = false
+	_rubble_told = false
+	_water_clock = 0.0
 	_mud_prev = [false, false]
 	_seen_bosses = {}
 	_seen_kinds = {}
@@ -3147,6 +3166,7 @@ func _consume_events() -> void:
 				# deliberate EVENT at the mast, not a fade-in from nowhere.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
 					"rate": 0.25, "r": 16.0, "col": Color(1.0, 0.5, 0.4)})
+				_hint("broadcast", "BROADCAST TOWER — ENEMIES IN THE RING RUN FASTER. KILL THE MAST", true)
 			"supply_drop":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.012, "text": "SUPPLY DROP — HOLD IT", "col": Color(0.6, 0.9, 1.0)})
@@ -5729,6 +5749,9 @@ func _update_feel() -> void:
 		_concussion = _concussion * 0.9 if _concussion > 0.01 else 0.0   # match the multiplicative grammar above
 		_blast_warp = _blast_warp * 0.86 if _blast_warp > 0.01 else 0.0
 		_water_splash["t"] = maxf(0.0, _water_splash["t"] - 0.03)
+		# River clock: GPU TIME kept rippling through hit-stop and ignored
+		# Reduce Motion. Advance only here, damped, then push from _sync_water.
+		_water_clock += (1.0 / 60.0) * maxf(_motion, 0.15)
 	_cinematic = maxf(0.0, _cinematic - 0.004)
 	# Debrief/victory card entrance clock: eases 0→1 while a result is showing,
 	# snaps back to 0 the moment it isn't (so a restart re-plays the entrance).
@@ -6907,7 +6930,9 @@ static func player_anim_state(p: Dictionary, move_delta: Vector2, concealed: boo
 	var fire_cd: int = p.get("fire_cd", 0)
 	if fire_cd > SimWorld.FIRE_COOLDOWN_TICKS:
 		return "bash"
-	if p.get("interact_prev", false):
+	# TAP-HOLD interact (revive/board/plant) is often held WHILE strafing.
+	# Yield to locomotion unless planted — same class as the retired shoot-vs-walk strobe.
+	if p.get("interact_prev", false) and move_delta.length_squared() <= 0.01:
 		return "interact"
 	# LOCOMOTION OUTRANKS THE RECOIL POSE. The trigger is not optional — _gather_inputs
 	# sets p1.fire unconditionally ("always-fire retired the trigger"), so with ammo the
@@ -11420,6 +11445,17 @@ func _check_water_entry() -> void:
 					_mud_told = true
 					show_banner("MUD — HALF SPEED, ROLLS LEGAL", Color(0.75, 0.6, 0.4))
 			_mud_prev[i] = muddy
+		# Ruins rubble is mud's twin (same half-speed, rolls legal) and never
+		# got the teach banner — a first step read as dropped input.
+		var rubble: bool = p["alive"] and not wet and sim._in_rubble(p["x"], p["y"])
+		if rubble and not _rubble_told:
+			_rubble_told = true
+			show_banner("RUBBLE — HALF SPEED", Color(0.7, 0.55, 0.4))
+		# Grass flush is a 10s silent fuse. Halfway sentence, same class as
+		# the observer stall halfway tell — the punishment arriving first is too late.
+		if p["alive"] and int(p.get("flush_cd", 0)) > 0 \
+				and int(p.get("flush_cd", 0)) <= SimWorld.FLUSH_CD_TICKS / 2:
+			_hint("grass_flush", "TALL GRASS HIDES YOU — CAMPING DRAWS A FLUSH MORTAR. KEEP MOVING", true)
 	_enemy_water_prev.resize(sim.enemies.size())
 	for i in sim.enemies.size():
 		var e := sim.enemies[i]
@@ -13266,8 +13302,9 @@ func _draw_banners(top_msg: String) -> void:
 			false, {"band": "CASUALTY REPORT", "band_col": Color(0.95, 0.4, 0.35),
 				"form": "FORM KIA-1 // EYES ONLY"})
 	elif sim.last_stand:
-		# Shadowed + centered via the shared helper — was the one banner holdout
-		# still drawing raw, unshadowed, hardcoded-position text.
+		# Every other alert plates first. Foundry floor is already orange-red;
+		# drop-shadow alone does not clear the AA. Same helper as boss/hold banners.
+		_banner_plate("LAST STAND — NO REVIVES, 2× KILL SCORE", HudIcons.LAST_STAND_Y, 10, 1.0)
 		Art.text_center(self, "LAST STAND — NO REVIVES, 2× KILL SCORE", 320.0, HudIcons.LAST_STAND_Y, 10, Color(0.95, 0.4, 0.3))
 	# Black fade covering the title→combat cut.
 	if _fade > 0.01:

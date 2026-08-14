@@ -33,6 +33,9 @@ uniform vec4 shallow_col : source_color = vec4(0.21, 0.44, 0.47, 1.0);
 uniform vec4 deep_col : source_color = vec4(0.08, 0.19, 0.31, 1.0);
 uniform float speed : hint_range(0.0, 2.0) = 0.32;
 uniform float phase = 0.0;   // per-band time offset so two visible bands never ripple in lockstep
+// View clock — NOT GPU TIME. main.gd advances this only when hit-stop is off
+// and scales it by Reduce Motion, so a freeze-frame river stays frozen.
+uniform float clock = 0.0;
 // One expanding splash ring (wet explosion): center in band-relative UV (0..1
 // across the true water band, NOT the padded quad), t 1→0 as it spreads.
 uniform vec2 splash_uv = vec2(-10.0, 0.5);
@@ -91,7 +94,7 @@ void fragment() {
 	// Aspect-correct sample coords (~36px per noise cell) so ripples read square
 	// on the wide, short band instead of horizontally smeared.
 	vec2 p = uv * (rect_size / 36.0);
-	float t = (TIME + phase) * speed;
+	float t = (clock + phase) * speed;
 
 	// Two layers drifting in different directions -> a churning surface.
 	float n1 = fbm(p + vec2(t * 1.3, t * 0.6));
@@ -134,7 +137,7 @@ void fragment() {
 	col += vec3(0.18, 0.22, 0.22) * streak * 0.5 * abs(sign(flow_dir));
 
 	// Animated sun-glint: a broad specular band drifting across, broken by ripple.
-	float glintband = 0.5 + 0.5 * sin(uv.x * 3.2 + uv.y * 6.0 - (TIME + phase) * 1.4);
+	float glintband = 0.5 + 0.5 * sin(uv.x * 3.2 + uv.y * 6.0 - (clock + phase) * 1.4);
 	float glint = smoothstep(0.70, 1.0, glintband * (0.55 + 0.5 * ripple));
 	col += vec3(0.58, 0.64, 0.55) * glint * 0.40;
 
