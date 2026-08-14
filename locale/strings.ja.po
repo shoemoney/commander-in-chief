@@ -45,8 +45,8 @@ msgstr "文字サイズ：画面上の小さなラベルと字幕を拡大しま
 msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
 msgstr "協力プレイ：2人目のローカルプレイヤーを追加。次回プレイから適用。"
 
-msgid "NG+ HARD: A TOUGHER CAMPAIGN SPAWN CURVE. APPLIES TO YOUR NEXT RUN."
-msgstr "NG+ハード：キャンペーンの出現曲線がより厳しくなります。次回プレイから適用。"
+msgid "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY — APPLIES TO YOUR NEXT RUN."
+msgstr "NG+ハード：出現曲線がより厳しくなります。キャンペーン限定—次回プレイから適用。"
 
 msgid "SPOTTER: \"War chest's empty, no revives!\""
 msgstr "観測兵：「戦費が尽きた、もう蘇生できない！」"
@@ -79,8 +79,8 @@ msgstr "観測兵：「身代金を失い、パイロットは消えた。」"
 msgid "SPOTTER: \"Total victoly! Believe me!\""
 msgstr "観測兵：「完全勝利！信じてくれ。」"
 
-msgid "SPOTTER: \"Airstrike inbound, clear the area!\""
-msgstr "観測兵：「空襲が迫る、エリアを離れろ！」"
+msgid "SPOTTER: \"Friendly strike inbound — keep firing!\""
+msgstr "観測兵：「友軍の攻撃が来る—撃ち続けろ！」"
 
 msgid "SPOTTER: \"Pilot down, get to him!\""
 msgstr "観測兵：「パイロット撃墜、彼のもとへ！」"
@@ -127,8 +127,14 @@ msgstr "引裂弾—重機銃が機動隊の盾を貫通する"
 msgid "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING"
 msgstr "スモーク — 敵の照準を封じる。砲弾は盲撃ちで落ちてくる。動き続けろ"
 
-msgid "FLASHBANG — INFANTRY STUNNED. PUSH!"
-msgstr "フラッシュバング—歩兵をしびれさせた。進め！"
+msgid "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY."
+msgstr "フラッシュバング—拾うと起爆。歩兵のみ。"
+
+msgid "BROADCAST TOWER — ENEMIES IN THE RING RUN FASTER. KILL THE MAST"
+msgstr "放送塔—リング内の敵が速くなる。マストを破壊しろ"
+
+msgid "TALL GRASS HIDES YOU — CAMPING DRAWS A FLUSH MORTAR. KEEP MOVING"
+msgstr "高い草に隠れられる—居座ると追い出しの迫撃砲が来る。動き続けろ"
 
 msgid "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT"
 msgstr "巣は銃撃でひび割れていく—撃ち続けるか、手榴弾を投げろ"

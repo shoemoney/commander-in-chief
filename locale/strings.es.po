@@ -45,8 +45,8 @@ msgstr "TAMAÑO DE TEXTO: AGRANDA LAS ETIQUETAS PEQUEÑAS Y LOS SUBTÍTULOS. SE 
 msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
 msgstr "COOPERATIVO: AÑADE UN SEGUNDO JUGADOR LOCAL. SE APLICA EN TU PRÓXIMA PARTIDA."
 
-msgid "NG+ HARD: A TOUGHER CAMPAIGN SPAWN CURVE. APPLIES TO YOUR NEXT RUN."
-msgstr "NG+ DIFÍCIL: UNA CURVA DE APARICIÓN MÁS DURA EN LA CAMPAÑA. SE APLICA EN TU PRÓXIMA PARTIDA."
+msgid "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY — APPLIES TO YOUR NEXT RUN."
+msgstr "NG+ DIFÍCIL: UNA CURVA DE APARICIÓN MÁS DURA. SOLO EN CAMPAÑA — SE APLICA EN TU PRÓXIMA PARTIDA."
 
 msgid "SPOTTER: \"War chest's empty, no revives!\""
 msgstr "OBSERVADOR: \"¡El fondo de guerra está vacío, sin reanimaciones!\""
@@ -78,8 +78,8 @@ msgstr "OBSERVADOR: \"¡Rescate perdido, el piloto se ha ido!\""
 msgid "SPOTTER: \"Total victoly! Believe me!\""
 msgstr "OBSERVADOR: \"¡Victolia total! Créanme.\""
 
-msgid "SPOTTER: \"Airstrike inbound, clear the area!\""
-msgstr "OBSERVADOR: \"¡Ataque aéreo entrante, despejen la zona!\""
+msgid "SPOTTER: \"Friendly strike inbound — keep firing!\""
+msgstr "OBSERVADOR: \"¡Ataque aliado entrante, seguid disparando!\""
 
 msgid "SPOTTER: \"Pilot down, get to him!\""
 msgstr "OBSERVADOR: \"¡Piloto derribado, id a por él!\""
@@ -94,7 +94,7 @@ msgid "PILOT: \"Don't leave me out here!\""
 msgstr "PILOTO: \"¡No me dejéis aquí afuera!\""
 
 msgid "COMMANDER: \"One man can go in and win the war for the USA.\""
-msgstr "COMANDANTE: "Un solo hombre puede entrar y ganar la guerra por los EE. UU.""
+msgstr "COMANDANTE: \"Un solo hombre puede entrar y ganar la guerra por los EE. UU.\""
 
 msgid "COMMANDER: \"Move out!\""
 msgstr "COMANDANTE: \"¡En marcha!\""
@@ -126,8 +126,14 @@ msgstr "MUNICIÓN DESGARRADORA — TU AMETRALLADORA ATRAVIESA ESCUDOS ANTIDISTUR
 msgid "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING"
 msgstr "HUMO — LES CIEGA LA PUNTERÍA. LOS PROYECTILES SIGUEN CAYENDO A CIEGAS. SIGUE MOVIÉNDOTE"
 
-msgid "FLASHBANG — INFANTRY STUNNED. PUSH!"
-msgstr "CEGADORA — INFANTERÍA ATURDIDA. ¡AVANZA!"
+msgid "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY."
+msgstr "CEGADORA — DETONA AL RECOGERLA. SOLO INFANTERÍA."
+
+msgid "BROADCAST TOWER — ENEMIES IN THE RING RUN FASTER. KILL THE MAST"
+msgstr "TORRE DE RADIO — LOS ENEMIGOS DENTRO DEL ANILLO CORREN MÁS RÁPIDO. DESTRUYE EL MÁSTIL"
+
+msgid "TALL GRASS HIDES YOU — CAMPING DRAWS A FLUSH MORTAR. KEEP MOVING"
+msgstr "LA HIERBA ALTA TE OCULTA — ACAMPAR ATRAE UN MORTERO DE DESALOJO. SIGUE MOVIÉNDOTE"
 
 msgid "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT"
 msgstr "EL NIDO SE AGRIETA BAJO FUEGO — SIGUE DISPARANDO O LANZA UNA GRANADA"

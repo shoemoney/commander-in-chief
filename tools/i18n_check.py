@@ -94,6 +94,25 @@ def parse_po(path: Path) -> set[str]:
     return {_unescape(m) for m in re.findall(r'^msgid "((?:[^"\\]|\\.)*)"', src, re.MULTILINE) if m}
 
 
+def malformed_lines(path: Path) -> list[tuple[int, str]]:
+    """msgid/msgstr lines whose quoted body carries an unescaped `"`.
+
+    parse_po only ever reads the msgid side, so a broken msgstr was invisible to
+    this check -- which is how strings.es.po shipped
+    `msgstr "COMANDANTE: "Un solo hombre..."` with the inner quotes unescaped.
+    Godot's .po reader ends the string at that second quote, so the line lands
+    truncated in-game and nothing here said a word.
+    """
+    out = []
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.startswith(("msgid ", "msgstr ")):
+            continue
+        body = line.split(" ", 1)[1]
+        if not re.fullmatch(r'"(?:[^"\\]|\\.)*"', body):
+            out.append((n, line))
+    return out
+
+
 def main() -> int:
     source_keys = extract_source_keys()
     if not source_keys:
@@ -105,6 +124,12 @@ def main() -> int:
         return 1
     drift = False
     for po in pos:
+        bad = malformed_lines(po)
+        if bad:
+            drift = True
+            print("%s: MALFORMED %d line(s) with an unescaped quote:" % (po.name, len(bad)))
+            for n, line in bad:
+                print("   %d: %s" % (n, line))
         po_keys = parse_po(po)
         missing = source_keys - po_keys
         stale = po_keys - source_keys
@@ -118,7 +143,7 @@ def main() -> int:
             print("%s: STALE %d key(s) in this .po no longer used in source:" % (po.name, len(stale)))
             for k in sorted(stale):
                 print("   - %r" % k)
-        if not missing and not stale:
+        if not missing and not stale and not bad:
             print("%s: in sync (%d keys)" % (po.name, len(po_keys)))
     return 1 if drift else 0
 
