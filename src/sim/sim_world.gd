@@ -113,6 +113,11 @@ const PILOT_RANSOM := COIN_ELITE * 4          # courier-bounty parity (the same 
 # grows to ~163t ≈ 2.7s).
 const PILOT_FLOOR := 120
 const PILOT_FLOOR_ENDLESS := 148
+## Kinds whose departure from the field is a LOSS the view already has copy and a
+## sting for. ONE source for the north-edge escape test AND the off-screen sweep,
+## so no exit is silent — the sweep used to delete a live courier/pilot that fell
+## behind the camera with no event at all, and the player was told nothing.
+const ESCAPE_EVENT := {"courier": "courier_escape", "pilot": "pilot_lost"}
 # Punch-out grace: the pilot spawns unshootable (and unrescuable) for one
 # reaction window, because he appears ON the boss the player is still firing
 # at — trigger inertia gunned him down before the RESCUE banner even existed.
@@ -3516,6 +3521,14 @@ func _step_enemies() -> void:
 		# the sweep or every mast walked past lives forever in enemies[] and in the per-tick
 		# _broadcasts aura scan. One rule beats a mode-conditional special case.
 		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
+			if e["alive"] and ESCAPE_EVENT.has(e["kind"]):
+				# A live objective entity falling off the bottom is a LOSS, not a
+				# deletion. Emit where the player can READ it: this sweep line sits
+				# 60px below the drawn viewport, and _fx floattext is a WORLD toast
+				# with only a top pin (main.gd floattext_floor_pinned_y) — an
+				# unclamped y plays the sting over an invisible float.
+				events.append({"t": ESCAPE_EVENT[e["kind"]], "x": e["x"],
+					"y": mini(e["y"], camera_top + 330 * F_ONE)})
 			enemies.remove_at(i)
 			continue
 		if flash_ticks > 0:
@@ -3536,7 +3549,7 @@ func _step_enemies() -> void:
 			e["y"] = e["y"] - PILOT_SPEED
 			if e["y"] < camera_top - 30 * F_ONE:
 				e["alive"] = false
-				events.append({"t": "pilot_lost", "x": e["x"], "y": e["y"]})
+				events.append({"t": ESCAPE_EVENT[e["kind"]], "x": e["x"], "y": e["y"]})
 			continue
 		if e["kind"] == "frogman":
 			_step_frogman(e)
@@ -3551,14 +3564,19 @@ func _step_enemies() -> void:
 			# Flee AWAY from the nearest player, biased up toward the top edge;
 			# crossing above the view means it escaped (and forfeits its bounty).
 			var fx: int = -dx
-			var fy: int = -dy - 40 * F_ONE
+			# ALWAYS north. The old -dy - 40 flipped SOUTH whenever the player stood
+			# >40px above the courier — 31 of the 42 legal band positions — so the
+			# runner fled off the BOTTOM (28 ticks of screen time) instead of "crossing
+			# the arena on its way to the top edge" the way _spawn_courier's own
+			# docstring promises. The player steers it sideways; it never gets to reverse.
+			var fy: int = -400 * F_ONE
 			var flen := Fixed.length(fx, fy)
 			if flen > F_ONE:
 				e["x"] = e["x"] + Fixed.mul(Fixed.div(fx, flen), COURIER_SPEED)
 				e["y"] = e["y"] + Fixed.mul(Fixed.div(fy, flen), COURIER_SPEED)
 			if e["y"] < camera_top - 30 * F_ONE:
 				e["alive"] = false
-				events.append({"t": "courier_escape", "x": e["x"], "y": e["y"]})
+				events.append({"t": ESCAPE_EVENT[e["kind"]], "x": e["x"], "y": e["y"]})
 			continue
 		if e["kind"] == "grenadier":
 			_step_grenadier(e, target, dx, dy, dlen)
@@ -4425,9 +4443,14 @@ func _spawn_mg_bullet(p: Dictionary, i: int, ax: int, ay: int) -> void:
 
 func _spawn_courier() -> void:
 	# A fleeing supply runner, dropped into the lower-middle so it has to cross
-	# the arena on its way to the top edge — a window to catch it. +300 (was
-	# +240): with the c2 camera lead at 260, +240 would pop it IN FRONT of the
-	# anchored player; +300 keeps it a chase from behind.
+	# the arena on its way to the top edge — a window to catch it. +300 in a
+	# 360-tall view IS that window: born just inside the bottom of the drawn
+	# screen and running north at COURIER_SPEED, it stays on-screen for 90-218
+	# ticks (measured, 6 endless seeds), which is the whole chase.
+	# (The old note justified +300 against "the c2 camera lead at 260" — dead:
+	# CAMERA_LEAD is campaign-only and _start_wave, the one caller, is gated on
+	# mode == "endless". The 260 was arithmetic left over from the -40 north bias
+	# the flee vector no longer has.)
 	enemies.append({"x": rng.range_i(80, 560) * F_ONE, "y": camera_top + 300 * F_ONE,
 		"alive": true, "elite": false, "kind": "courier"})
 

@@ -5087,7 +5087,7 @@ func _draw_howto() -> void:
 	# translated line pager. The legacy pages below are deliberately retained for
 	# 100% so the default presentation stays pixel-identical; the large-text path
 	# never shrinks a requested font to preserve that presentation.
-	if _howto_large_text():
+	if _howto_pager_tab(_howto_page):
 		var page := _howto_subpage()
 		var pages := _howto_large_pages(_howto_page)
 		_draw_howto_large_page(pages[page])
@@ -5337,29 +5337,39 @@ func _draw_howto_tabs() -> void:
 #
 # Both new lines read the LIVE binds (main.bind via _bind_cluster / key_label) — never a
 # hardcoded WASD — so a rebound or non-QWERTY player is told the keys they actually have.
-func _howto_page_controls() -> void:
+## Next verb baseline: the fixed VERB_PITCH march UNLESS the row that just drew
+## consumed more than that, in which case the page flows down to clear it.
+## The +1.0 is the authored clearance, not a new margin: VERB_PITCH is 27 and
+## VERB_LEAD is 13, so a 2-line row's _body_block returns base+26 and the march
+## already budgets exactly 1px over it. Anything larger PADS every wrapped row
+## and compounds (+4.0 measured: default page 285 -> 294, lowest ink 274 -> 283,
+## drift 0/0/+3/+6/+9/+9 px because AIM, GRENADES and ROLL each wrap at 100%).
+## A 3-line row returns base+39, so this yields base+40 against the march's
+## base+27 — 13px of relief, which is what clears the 343x11px AIM/GRENADES
+## overprint the longest legal rebind produced.
+func _next_verb_y(y: float, bottom: float) -> float:
+	return maxf(y + VERB_PITCH, bottom + 1.0)
+
+
+func _howto_page_controls(draw := true) -> float:
 	var col := Color(0.9, 0.92, 0.8)
 	var y := CONTENT_BODY_Y
-	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	if draw:
+		Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
 	y += 24.0
 	# Each text token after a glyph leads with a space so the word never glues to the device art.
-	_verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col)
-	y += VERB_PITCH
+	y = _next_verb_y(y, _verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col, draw))
 	# The weapon has no trigger — it fires on its own, so AIM is the whole weapon verb and is
 	# the single most important thing a first-run player has to be told.
-	_verb_line(["@aim", " AIM with %s. The gun fires on its own — just point it." % _dir_devices("aim")], y, col)
-	y += VERB_PITCH
+	y = _next_verb_y(y, _verb_line(["@aim", " AIM with %s. The gun fires on its own — just point it." % _dir_devices("aim")], y, col, draw))
 	# Board and plant share the SAME button, so the two lines are parallel imperatives
 	# (BOARD… / PLANT…) that read as complete commands, not fragments.
-	_verb_line(["@grenade", " GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."], y, col)
-	y += VERB_PITCH
+	y = _next_verb_y(y, _verb_line(["@grenade", " GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."], y, col, draw))
 	# "armor" here means the ENEMY's (the grenade row above). The player DOES have a
 	# one-hit absorber — p["vest"] — so this row must not deny it.
-	_verb_line(["@roll", " ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit."], y, col)
-	y += VERB_PITCH
-	_verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col)
-	y += VERB_PITCH
-	_verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col)
+	y = _next_verb_y(y, _verb_line(["@roll", " ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit."], y, col, draw))
+	y = _next_verb_y(y, _verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col, draw))
+	return _verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col, draw)
 
 
 # c-onboard2: the LIVE key cluster behind a directional verb — "W/A/S/D" built from
@@ -5531,8 +5541,26 @@ func _endless_page() -> int:
 # Current leaf count/index for the HOWTO tab. At 100% only SPECIALS has leaves;
 # enlarged text uses the measured pager on every tab. The existing state field is
 # retained so specialist paging, saved input paths, and mouse focus keep one model.
-func _howto_subpages() -> int:
+## True when a tab must be served by the MEASURED line pager instead of its authored
+## 100% page. Enlarged text always is; CONTROLS also is when its runtime-assembled copy
+## (the live key clusters _dir_devices splices into MOVE/AIM) has grown the page into the
+## BACK plate. _howto_page_controls returns the y AFTER its last row (that row's baseline
+## + VERB_LEAD) and the drawn ink ends ~2px below the baseline, so ink = ret - (LEAD - 2).
+## Measured on this tree: defaults 285 -> ink 274 against a BACK plate top of 297, IDENTICAL
+## to the pre-flow 27px march, so the 100% default presentation is untouched. The longest
+## legal keyboard rebind wraps AIM to three lines -> 298 -> ink 287, which still FITS (the
+## flow bought it 13px), so no measured bind state trips this today — it is the guard for the
+## next line of copy or the next longer key name, and the overprint itself is fixed upstream.
+func _howto_pager_tab(tab: int) -> bool:
 	if _howto_large_text():
+		return true
+	if tab != 0:
+		return false
+	return _howto_page_controls(false) - (VERB_LEAD - 2.0) > _back_rect().grow(3.0).position.y
+
+
+func _howto_subpages() -> int:
+	if _howto_pager_tab(_howto_page):
 		return _howto_large_pages(_howto_page).size()
 	return _endless_pages() if _howto_page == HOWTO_ENDLESS_TAB else 1
 
@@ -6032,24 +6060,34 @@ func _overflow_chip_rect(label_r: float, cy: float) -> Rect2:
 # max_w, which is draw_string's `width` — a HARD clip with no ellipsis and no wrap, so a
 # long line was amputated mid-word ("The gun fires on i"). Every line here is emitted
 # separately, so tests/test_menu_layout.gd sees (and bounds-checks) each one.
-func _body_block(txt: String, x: float, y: float, size: int, col: Color, max_w: float, lead := 12.0) -> float:
+## `draw = false` MEASURES the block (same wrap, same leading) without emitting ink,
+## so a page can be sized before it is committed to. Nothing else differs.
+func _body_block(txt: String, x: float, y: float, size: int, col: Color, max_w: float, lead := 12.0, draw := true) -> float:
 	var f := Art.font()
 	var line := ""
 	for word in txt.split(" ", false):
 		var probe: String = word if line == "" else line + " " + word
 		if line != "" and f.get_string_size(probe, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
-			Art.text(self, line, Vector2(x, y), size, col)
+			if draw:
+				Art.text(self, line, Vector2(x, y), size, col)
 			y += lead
 			line = word
 		else:
 			line = probe
 	if line != "":
-		Art.text(self, line, Vector2(x, y), size, col)
+		if draw:
+			Art.text(self, line, Vector2(x, y), size, col)
 		y += lead
 	return y
 
 
-func _verb_line(segs: Array, base_y: float, col: Color) -> void:
+## Returns the y AFTER the row — same contract as _body_block — so the caller can
+## FLOW instead of marching on a fixed pitch. It used to return nothing, and
+## _howto_page_controls advanced by VERB_PITCH regardless: a sentence that wrapped
+## to three lines (reachable today, since _dir_devices splices the LIVE key cluster
+## into MOVE/AIM) drew its tail straight through the next row.
+func _verb_line(segs: Array, base_y: float, col: Color, draw := true) -> float:
+	var bottom := base_y + VERB_LEAD
 	var f := Art.font()
 	var x := ICON_X
 	for seg: String in segs:
@@ -6063,10 +6101,12 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 			if action in ["fire", "move", "aim"]:
 				var t := Art.tex(Art.glyph_key(action))
 				var gw := 12.0 * float(t.get_width()) / float(t.get_height())
-				_emit_tex(Art.glyph_key(action), Rect2(x, base_y - 10.0, gw, 12.0), Color.WHITE)
+				if draw:
+					_emit_tex(Art.glyph_key(action), Rect2(x, base_y - 10.0, gw, 12.0), Color.WHITE)
 				x += gw + 4.0
 			else:
-				_emit_glyph(action, Vector2(x + 6.0, base_y - 4.0), 12.0, Color.WHITE)
+				if draw:
+					_emit_glyph(action, Vector2(x + 6.0, base_y - 4.0), 12.0, Color.WHITE)
 				x += 16.0
 		else:
 			# The verb sentence WRAPS at the frame interior instead of being clipped
@@ -6075,11 +6115,13 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 			# text column, clear of the device glyph.
 			var seg_w := f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 			if x + seg_w <= FRAME_INNER_R:
-				Art.text(self, seg, Vector2(x, base_y), 11, col)
+				if draw:
+					Art.text(self, seg, Vector2(x, base_y), 11, col)
 				x += seg_w
 			else:
-				_body_block(seg, x, base_y, 11, col, FRAME_INNER_R - x, VERB_LEAD)
+				bottom = maxf(bottom, _body_block(seg, x, base_y, 11, col, FRAME_INNER_R - x, VERB_LEAD, draw))
 				x = FRAME_INNER_R
+	return bottom
 
 
 const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)

@@ -4027,3 +4027,192 @@ func test_downed_colossus_keeps_advancing() -> void:
 	Runner.T.ok("%d,%d" % [sim.colossus["x"], sim.colossus["y"]] != before,
 		"the colossus keeps driving at where you fell instead of parking for the whole down window (%s -> %d,%d)"
 			% [before, sim.colossus["x"], sim.colossus["y"]])
+
+
+# ---------------------------------------------------------------------------
+# Objective entities that LEAVE the field alive.
+#
+# `_step_enemies`' off-screen sweep (sim_world.gd) is the only place an entry can
+# be deleted from enemies[] while still `alive`, and it deleted SILENTLY. Two of
+# the kinds `_draw_objective_markers` points at can reach it: the courier (whose
+# flee vector ran SOUTH whenever the player stood north of it — 31 of the 42
+# legal band positions) and the pilot (whom campaign's ratchet camera drags over
+# the sweep line when the player pushes north). Both are losses the view already
+# has copy and a sting for; neither was ever reached. Measured on 34a4037:
+# 17 couriers spawned / 1 killed / 0 escaped / 16 swept silent, and a campaign
+# pilot removed at t=291 with alive:true, y_rel +422, events=[].
+#
+# NOT covered, deliberately: `marked` bounty elites/drones also leave south, but
+# an unclaimed bounty you walked past is not a modeled loss — it has no copy, and
+# its marker leaves with it, so nothing on screen lies.
+# ---------------------------------------------------------------------------
+
+func _find_by_ref(arr: Array, want) -> bool:
+	for a in arr:
+		if is_same(a, want):
+			return true
+	return false
+
+
+func _drive_until_gone(sim: SimWorld, ent: Dictionary, inp: SimInput, want_ev: String, budget: int) -> Dictionary:
+	## Steps until `ent` is no longer in sim.enemies (tracked BY REFERENCE, so the
+	## removal tick is attributable), collecting every `want_ev` and the tick each
+	## fired on. Returns {"gone": tick or -1, "evs": [screen-y…], "ev_ticks": […]}.
+	var out := {"gone": -1, "evs": [], "ev_ticks": []}
+	for t in budget:
+		sim.step([inp])
+		for ev in sim.events:
+			if ev["t"] == want_ev:
+				out["evs"].append((ev["y"] - sim.camera_top) / SimWorld.F_ONE)
+				out["ev_ticks"].append(t)
+		if not _find_by_ref(sim.enemies, ent):
+			out["gone"] = t
+			break
+	return out
+
+
+func _north_input() -> SimInput:
+	var inp := SimInput.new()
+	inp.move_y = -256   # verified north (main.gd:5675)
+	return inp
+
+
+func test_no_objective_entity_leaves_the_field_without_an_on_screen_resolution() -> void:
+	## Every kind in SimWorld.ESCAPE_EVENT, at BOTH exits it can reach. Source-derived
+	## from the registry, so a third kind is covered the day it is registered.
+	## 600-tick window vs the longest instance measured on this tree (pilot removed
+	## at t=117 pushing north; longest courier life 278t in a live endless run) —
+	## 2.2x the worst case.
+	Runner.T.eq(SimWorld.ESCAPE_EVENT.size(), 2, "the escape registry still names courier and pilot")
+
+	# --- courier, player parked NORTH of it: HEAD flees SOUTH into the sweep ---
+	for band_y in [16, SimWorld.CAMERA_BAND_BOTTOM / SimWorld.F_ONE]:
+		var sim := SimWorld.new(31, 1, "endless")   # couriers are endless-only
+		sim.god_mode = true
+		sim._spawn_courier()
+		var courier: Dictionary = sim.enemies[-1]
+		Runner.T.eq(String(courier["kind"]), "courier", "the spawn under test is the courier")
+		var p := sim.players[0]
+		p["x"] = courier["x"]
+		p["y"] = sim.camera_top + int(band_y) * SimWorld.F_ONE
+		var r := _drive_until_gone(sim, courier, _idle(), "courier_escape", 600)
+		Runner.T.ok(r["gone"] >= 0, "the courier leaves the field within 600 ticks (player at band y %d)" % band_y)
+		Runner.T.eq(r["evs"].size(), 1,
+			"exactly one courier_escape when the courier leaves (player at band y %d, gone t=%s)"
+				% [band_y, r["gone"]])
+		if r["evs"].size() == 1:
+			# The north escape flags alive=false and the NEXT tick's sweep removes the
+			# entry, so the event lands on the removal tick or the one before it.
+			Runner.T.ok(r["ev_ticks"][0] >= int(r["gone"]) - 1,
+				"the resolution fires on the removal tick, not long before it (band y %d, ev t=%s, gone t=%s)"
+					% [band_y, r["ev_ticks"][0], r["gone"]])
+			# The view has a TOP pin (floattext_floor_pinned_y) and no bottom one, so
+			# only the south edge needs the sim to clamp: a float below VIEW_H is a
+			# sting played over nothing.
+			Runner.T.ok(r["evs"][0] <= 354,
+				"the GOT AWAY! float lands inside the drawn viewport, not below it (band y %d, screen y %s)"
+					% [band_y, r["evs"][0]])
+
+	# --- pilot: no input (north escape, already worked) and pushed north
+	#     (campaign's ratchet camera drags the sweep line over him) ---
+	for push in [false, true]:
+		var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+		sim.god_mode = true
+		var p := sim.players[0]
+		# 200px east of the player so idle proximity can't RESCUE him instead
+		# (that is what this cell measured on the first run: gone t=0), and at the
+		# band bottom so the ratchet camera has something to drag over.
+		var pilot := {"x": p["x"] + 200 * SimWorld.F_ONE,
+			"y": sim.camera_top + SimWorld.CAMERA_BAND_BOTTOM, "alive": true, "elite": false,
+			"kind": "pilot", "fire_cd": 0, "windup": 0, "submerged": false, "surface_ticks": 0}
+		sim.enemies.append(pilot)
+		var r := _drive_until_gone(sim, pilot, _north_input() if push else _idle(), "pilot_lost", 600)
+		Runner.T.ok(r["gone"] >= 0, "the pilot leaves the field within 600 ticks (push_north=%s)" % push)
+		Runner.T.eq(r["evs"].size(), 1,
+			"exactly one pilot_lost when the pilot leaves (push_north=%s, gone t=%s)" % [push, r["gone"]])
+		if r["evs"].size() == 1:
+			Runner.T.ok(r["ev_ticks"][0] >= int(r["gone"]) - 1,
+				"the resolution fires on the removal tick, not long before it (push_north=%s, ev t=%s, gone t=%s)"
+					% [push, r["ev_ticks"][0], r["gone"]])
+			Runner.T.ok(r["evs"][0] <= 354,
+				"the PILOT CAPTURED float lands inside the drawn viewport (push_north=%s, screen y %s)"
+					% [push, r["evs"][0]])
+
+
+func test_courier_always_flees_toward_the_top_edge() -> void:
+	## _spawn_courier's own docstring promises "has to cross the arena on its way to
+	## the top edge — a window to catch it". The flee vector (-dy - 40) delivered the
+	## opposite whenever the player stood >40px north of it. Pinned over the WHOLE
+	## legal player band derived from _clamp_actor, not one lucky pair of coordinates:
+	## HEAD exits south at 31 of 42 positions and gives 28 ticks (0.47s) of screen time.
+	var south := 0
+	var worst_screen := 99999
+	var band_bottom: int = SimWorld.CAMERA_BAND_BOTTOM / SimWorld.F_ONE
+	var y := 16
+	var positions := 0
+	while y <= band_bottom:
+		positions += 1
+		var sim := SimWorld.new(31, 1, "endless")
+		sim.god_mode = true
+		sim._spawn_courier()
+		var courier: Dictionary = sim.enemies[-1]
+		var p := sim.players[0]
+		p["x"] = courier["x"]
+		p["y"] = sim.camera_top + y * SimWorld.F_ONE
+		var on_screen := 0
+		var exit_rel := 0
+		for t in 600:
+			sim.step([_idle()])
+			if not _find_by_ref(sim.enemies, courier):
+				break
+			exit_rel = (courier["y"] - sim.camera_top) / SimWorld.F_ONE
+			if exit_rel >= 0 and exit_rel <= 360:
+				on_screen += 1
+		if exit_rel > 0:
+			south += 1
+		worst_screen = mini(worst_screen, on_screen)
+		y += 8
+	Runner.T.eq(positions, 42, "the sweep covers the whole legal band at 8px steps")
+	Runner.T.eq(south, 0, "the courier runs for the TOP edge from every legal player position (%d/42 went south)" % south)
+	Runner.T.ok(worst_screen >= 90,
+		"the chase window is at least 1.5s of on-screen courier at every position (worst %d ticks)" % worst_screen)
+
+
+func test_every_courier_in_a_live_endless_run_resolves() -> void:
+	## The anti-posed cell: the REAL main.gd::demo_input bot playing endless, not a
+	## hand-placed courier. HEAD: 5 spawned, 1 killed, 0 escaped -> 4 vanished with
+	## no resolution at all.
+	## Post-fix sweep, seeds [0xC0FFEE, 1, 2, 3, 4, 5] x 12,000 ticks, god_mode,
+	## couriers tracked by reference: 3/1/3/1/3/2 spawned = 13 total, 0 killed,
+	## 13 escaped, 0 unresolved, longest single-courier life 218 ticks — so the
+	## 12,000-tick window is 55x the worst instance.
+	## INSTRUMENT LIMIT, not a bug: the bot kills ZERO of the 13 post-fix (it killed
+	## 1 of 5 at HEAD) because the courier now runs north, away from where a scripted
+	## bot happens to stand. demo_input advances and shoots; it does not chase. The
+	## courier IS nominally catchable — COURIER_SPEED 2.160 px/tick vs PLAYER_SPEED
+	## 2.400 — with 90-218 ticks of on-screen time. Do not read 0 kills as unwinnable.
+	var ms: Script = load("res://src/main.gd")
+	var sim := SimWorld.new(0xC0FFEE, 1, "endless")
+	sim.god_mode = true   # the run must not END, or the sample truncates
+	var seen := []
+	var spawned := 0
+	var resolved := 0
+	for t in 12000:
+		sim.step([ms.demo_input(t, sim)] as Array[SimInput])
+		for e in sim.enemies:
+			if e["kind"] == "courier" and not _find_by_ref(seen, e):
+				seen.append(e)
+				spawned += 1
+		for ev in sim.events:
+			if ev["t"] == "courier_escape" or (ev["t"] == "kill" and ev.get("kind", "") == "courier"):
+				resolved += 1
+		for i in range(seen.size() - 1, -1, -1):
+			if not _find_by_ref(sim.enemies, seen[i]):
+				seen.remove_at(i)
+	Runner.T.ok(spawned >= 2, "the window fields at least two couriers, so this cell cannot pass vacuously (%d)" % spawned)
+	# == not >=: a >= would also pass if a courier ever DOUBLE-resolved. No such path
+	# exists today (the north escape sets alive=false before the sweep's alive-guarded
+	# emit), so this is hygiene that keeps it that way.
+	Runner.T.eq(resolved, spawned - seen.size(),
+		"every courier that left the field resolved (%d spawned, %d resolved, %d still in flight)"
+			% [spawned, resolved, seen.size()])

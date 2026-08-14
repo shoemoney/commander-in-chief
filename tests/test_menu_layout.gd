@@ -1300,8 +1300,9 @@ func test_device_glyph_change_triggers_menu_repaint() -> void:
 # other ink is Art.text, which Art.text_capture intercepts.)
 class _HowtoCaptureMenu extends GameMenu:
 	var lines: Array = []
-	func _verb_line(segs: Array, _base_y: float, _col: Color) -> void:
+	func _verb_line(segs: Array, base_y: float, _col: Color, _draw := true) -> float:
 		lines.append(segs)
+		return base_y + Menu.VERB_LEAD
 
 
 # c-onboard2: THE CONTROLS PAGE MUST TEACH MOVE AND AIM, FIRST, OFF THE LIVE BINDS.
@@ -8152,3 +8153,112 @@ func test_list_screen_ink_stays_clear_of_frame_and_rows() -> void:
 				m.free()
 				stub.free()
 	Art.use_pad = was_pad
+
+
+# ---------------------------------------------------------------------------
+# CONTROLS is the ONLY manual page whose copy is assembled at runtime:
+# _dir_devices() splices the device name and the LIVE key cluster from
+# main.bind(...) into the MOVE and AIM sentences, while _howto_page_controls()
+# marched its six rows on a fixed 27px VERB_PITCH and _verb_line() threw the
+# wrapped height away. Every other ratchet in this file measures exactly ONE
+# string (BIND_DEFAULTS, keyboard), which at 100% has 38px of horizontal slack
+# on the AIM row — one added word, or one long rebind, and the AIM tail draws
+# straight through the GRENADES row (measured on 34a4037 with legal rebinds:
+# 11px x 343px of overprint, "The gun fires on its own — just point it." at
+# y167..179 over "GRENADES crack armor…" at y168..180).
+#
+# The worst-case bind is DERIVED from OS.get_keycode_string, not typed, so a
+# Godot version that ships a longer key name is covered automatically.
+# ---------------------------------------------------------------------------
+
+static func _longest_key_labels(n: int) -> Array:
+	var codes: Array = []
+	for k in range(32, 256):
+		codes.append(k)
+	# KEY_SPECIAL is 1<<22. (1<<26 is KEY_MASK_ALT — scanning THERE yields
+	# "OPTION+BRACKETRIGHT" pseudo-codes the REBIND screen can never store, which
+	# is an unwrappable 225px token and a fake failure. Ask for legal keys only.)
+	for k in range(KEY_SPECIAL + 1, KEY_SPECIAL + 0x120):
+		codes.append(k)
+	codes = codes.filter(func(k: int) -> bool: return OS.get_keycode_string(k) != "")
+	codes.sort_custom(func(a: int, b: int) -> bool:
+		return OS.get_keycode_string(a).length() > OS.get_keycode_string(b).length())
+	return codes.slice(0, n)
+
+
+func test_controls_page_survives_every_device_and_the_longest_legal_rebind() -> void:
+	var prior_pad := Art.use_pad
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m._howto_page = 0
+	m._howto_endless_page = 0
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var f := Art.font()
+	var inner := Rect2(Menu.FRAME_INNER_L, Menu.FRAME_INNER_T,
+		Menu.FRAME_INNER_R - Menu.FRAME_INNER_L, Menu.FRAME_INNER_B - Menu.FRAME_INNER_T)
+	var back_plate: Rect2 = m._back_rect().grow(3.0)
+	var dirs := ["up", "left", "down", "right"]
+	var long_keys := _longest_key_labels(4)
+	Runner.T.eq(long_keys.size(), 4, "the worst-case bind set is derived from the live keycode table")
+	for pad in [false, true]:
+		for worst_bind in [false, true]:
+			Art.use_pad = pad
+			stub._binds = MainScript.BIND_DEFAULTS.duplicate()
+			if worst_bind:
+				for i in 4:
+					stub._binds["move_%s" % dirs[i]] = long_keys[i]
+					stub._binds["aim_%s" % dirs[i]] = long_keys[i]
+			var tag := "CONTROLS %s/%s" % ["pad" if pad else "keyboard",
+				"longest-legal-rebind" if worst_bind else "defaults"]
+			m.ops.clear()
+			m.centered.clear()
+			var prev = Art.text_capture
+			Art.text_capture = m.ops
+			m._draw_howto()
+			Art.text_capture = prev
+			Runner.T.ok(m.ops.size() > 4, "%s: the real draw emitted ink to inspect" % tag)
+			var worst := 0.0
+			var worst_id := ""
+			var lowest := 0.0
+			for op in m.ops:
+				var box: Rect2 = op["box"]
+				if box.position.y > 340.0:
+					continue   # footer legend, drawn on the scrim below the frame
+				if op["k"] in ["rect", "rect_outline"] and back_plate.encloses(box):
+					continue   # BACK chrome seats on the bottom rail by design
+				if op.has("size"):
+					# NATURAL width, so "it fits" and "it was amputated to fit" differ.
+					box = Rect2(box.position, Vector2(f.get_string_size(str(op["id"]),
+						HORIZONTAL_ALIGNMENT_LEFT, -1, int(op["size"])).x, box.size.y))
+				var over: float = maxf(maxf(inner.position.x - box.position.x, box.end.x - inner.end.x),
+					maxf(inner.position.y - box.position.y, box.end.y - inner.end.y))
+				if over > worst:
+					worst = over
+					worst_id = "%s '%s'" % [op["k"], str(op["id"]).substr(0, 46)]
+				lowest = maxf(lowest, box.end.y)
+			Runner.T.ok(_worst_text_overlap(m.ops, f) == null,
+				"%s: no two content strings overlap%s" % [tag, _overlap_msg(_worst_text_overlap(m.ops, f))])
+			Runner.T.ok(worst <= 0.5,
+				"%s: every drawn op fits the frame interior (worst overhang %.1f px%s)"
+					% [tag, worst, "" if worst <= 0.5 else " — " + worst_id])
+			# ...OR the page has overflowed into the pager that already exists, in which
+			# case what was measured above is the pager's own (already-ratcheted) layout.
+			Runner.T.ok(lowest <= back_plate.position.y or m._howto_pager_tab(0),
+				"%s: the lowest content ink (%.0f) clears the drawn BACK plate top (%.0f)"
+					% [tag, lowest, back_plate.position.y])
+			# The 100% DEFAULT presentation is an explicit contract (menu.gd:5088), so the
+			# flow must be a no-op there: HEAD's fixed 27px march returns 285 at defaults
+			# (baselines 124/151/178/205/232/259, lowest ink 274), and AIM, GRENADES and
+			# ROLL all already wrap to 2 lines, so any per-row padding above 1px compounds
+			# down the page (+4.0 measured 285 -> 294, ink 274 -> 283).
+			if not worst_bind and not pad:
+				Runner.T.eq(m._howto_page_controls(false), 285.0,
+					"%s: the flowed page is byte-identical to the authored 27px march" % tag)
+				Runner.T.ok(not m._howto_pager_tab(0),
+					"%s: the default page fits, so the measured pager stays off" % tag)
+	Art.use_pad = prior_pad
+	m.free()
+	stub.free()
