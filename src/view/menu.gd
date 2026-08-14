@@ -4465,7 +4465,7 @@ func _rebind_pad_dev_rect(d: int) -> Rect2:
 # frame's bottom keyline — the footer strip keeps the stated intent (a footnote at
 # the SELECT/BACK legend) while leaving the dialog interior.
 func _rebind_footnote() -> String:
-	return "STICKS MOVE/AIM + RT FIRES (ALWAYS ON) - LEFT-HANDED? USE THE SWAP STICKS ROW" if not _rebind_is_kb() \
+	return "STICKS MOVE/AIM (ALWAYS ON) - LEFT-HANDED? USE THE SWAP STICKS ROW" if not _rebind_is_kb() \
 		else "MOUSE ALSO AIMS + FIRES (ALWAYS ON) - 'UNBOUND' DROPS ONLY THAT KEY, NOT THE ACTION"
 
 
@@ -4500,7 +4500,10 @@ func _draw_rebind_header() -> void:
 		sub = _rebind_msg
 		scol = NOTICE_COL
 	elif pad:
-		sub = "A/ENTER: REBIND   D-PAD L/R: PICK PLAYER   LB/RB: TAB   -   STICKS: USE SWAP STICKS"
+		sub = "%s/ENTER: REBIND   D-PAD L/R: PICK PLAYER   %s/%s: TAB   -   STICKS: USE SWAP STICKS" % [
+			Art.pad_button_label(JOY_BUTTON_A),
+			Art.pad_button_label(JOY_BUTTON_LEFT_SHOULDER),
+			Art.pad_button_label(JOY_BUTTON_RIGHT_SHOULDER)]
 		scol = SUBTITLE_COL
 	elif _rebind_tab == 3:
 		sub = "REBIND MENU KEYS - ARROWS/ENTER/ESC ALWAYS WORK TOO (EMERGENCY FALLBACK)"

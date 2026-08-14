@@ -728,7 +728,7 @@ const OUTLINE := {
 	"bunker2": true, "tank_hulk": true, "pickup_vest": true,
 	"wall_sandbag": true, "wall_sandbag_b": true, "wall_sandbag_c": true, "wall_sandbag_end": true,
 	"tank_trap": true, "barricade": true, "flak_gun": true, "trench": true,
-	"flag_marker": true, "radio_tower": true, "dry_shrub": true, "tumbleweed": true,
+	"flag_marker": true, "radio_tower": true,
 	"wreck_halftrack": true, "crater_field": true, "crater_water": true, "mg_tripod": true,
 	"dropped_shield": true, "fallen_merc": true,
 	"cap_pierce": true, "cap_spread": true, "cap_triple": true, "cap_rend": true,

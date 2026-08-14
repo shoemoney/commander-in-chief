@@ -16,6 +16,8 @@ shader_type canvas_item;
 // just forced a full backbuffer mip chain to be generated every visible frame.
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float concussion : hint_range(0.0, 1.0) = 0.0;
+// Same contract as water.gdshader: GPU TIME kept wobbling through hit-stop.
+uniform float clock = 0.0;
 
 void fragment() {
 	// NOTE: Godot forbids `return` inside fragment() — the identity path is the
@@ -30,7 +32,7 @@ void fragment() {
 		float dist = length(to_center);
 
 		// Slow underwater wobble on the sample UV, scaled by concussion.
-		float wob = sin(TIME * 2.3 + uv.y * 12.0) + cos(TIME * 1.7 + uv.x * 10.0);
+		float wob = sin(clock * 2.3 + uv.y * 12.0) + cos(clock * 1.7 + uv.x * 10.0);
 		vec2 wob_uv = uv + vec2(wob) * 0.0022 * amt;
 
 		// Radial blur: a few taps marching toward screen center.
@@ -56,7 +58,7 @@ void fragment() {
 
 		// Subtle dark vignette with a slow pulse.
 		float vig = 1.0 - smoothstep(0.3, 0.75, dist);   // 1 center -> 0 edge
-		float pulse = 0.9 + 0.1 * sin(TIME * 3.0);
+		float pulse = 0.9 + 0.1 * sin(clock * 3.0);
 		col *= mix(1.0, vig * pulse, 0.55);
 
 		// Master blend: whole effect intensity rides `concussion`, so it eases in

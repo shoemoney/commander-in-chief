@@ -42,7 +42,7 @@ const _VO_CAPTIONS := {
 	"vo_flawless": "SPOTTER: \"Flawless gate clear!\"",
 	"vo_ransom_lost": "SPOTTER: \"Ransom lost, pilot's gone!\"",
 	"vo_victoly": "SPOTTER: \"Total victoly! Believe me!\"",
-	"vo_airstrike": "SPOTTER: \"Airstrike inbound, clear the area!\"",
+	"vo_airstrike": "SPOTTER: \"Friendly strike inbound — keep firing!\"",
 	"vo_pilot_down": "SPOTTER: \"Pilot down, get to him!\"",
 	"vo_shop_locked": "SPOTTER: \"Shop's locked, boss incoming!\"",
 	"vo_clip_dry": "SPOTTER: \"You're dry, reload!\"",

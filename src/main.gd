@@ -275,6 +275,7 @@ var _water_prev: Array[bool] = [false, false]   # per-player prev in-water state
 var _mud_prev: Array[bool] = [false, false]     # per-player prev in-mud state (edge-triggers the mud splash)
 var _mud_told := false                          # once-per-run MUD teach banner latch
 var _rubble_told := false                       # once-per-run rubble (ruins mud-twin) teach banner
+var _wire_told := false                         # once-per-run CACHE wire (same half-speed as mud)
 var _water_clock := 0.0                         # shader river clock — frozen in hit-stop, damped by Reduce Motion
 var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
                                                  # death mid-array can misalign one slot for a frame — cosmetic only)
@@ -1291,6 +1292,7 @@ func _process(_delta: float) -> void:
 	_screen_fx_rect.visible = on
 	if on:
 		_screen_fx_mat.set_shader_parameter("concussion", amt)
+		_screen_fx_mat.set_shader_parameter("clock", _water_clock)
 	# CRT scanlines surge darker on a big hit and ease back as the freeze decays —
 	# reuses the already-drawn scan quad (zero added fillrate). Baseline 0.08 = the
 	# shader default, so at rest the look is unchanged. Null when the scan quad is
@@ -1644,6 +1646,7 @@ func _reset() -> void:
 	_fork_sign_fade.clear()
 	_mud_told = false
 	_rubble_told = false
+	_wire_told = false
 	_water_clock = 0.0
 	_mud_prev = [false, false]
 	_seen_bosses = {}
@@ -2414,7 +2417,7 @@ func _consume_events() -> void:
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
 					9: _hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")
-					10: _hint("flashbang", "FLASHBANG — INFANTRY STUNNED. PUSH!")
+					10: _hint("flashbang", "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY.")
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
 				# REND sounded identical to grabbing FLASHBANG. kind 7..10 -> 1.2..1.56.
@@ -3273,6 +3276,12 @@ func _consume_events() -> void:
 				_hitstop_frames = maxi(_hitstop_frames, 8)
 				_punch = maxf(_punch, 0.08)
 				_music_hold = 48   # held breath before the finale
+				show_banner("FOUNDRY COLOSSUS", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
+				_sfx.play("alarm", -4.0, 0.85)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave",
+					"sz": 16.0, "grow_px": 80.0, "rate": 0.03, "col": Color(1.0, 0.35, 0.2, 0.55)})
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+					"rate": 0.12, "r": 28.0, "col": Color(1.0, 0.45, 0.25)})
 			"endless_boss":
 				_vo("vo_shop_locked", 1, 900)
 				_trauma = minf(1.0, _trauma + 0.4)
@@ -3306,7 +3315,7 @@ func _consume_events() -> void:
 				_vo("vo_airstrike", 1, 300)
 				_cmd_bark("boom", 90)   # "fire and fury" as the strike goes in
 				# Commit beat: the strike is inbound, not instant — announce it.
-				show_banner("AIRSTRIKE INBOUND")
+				show_banner("AIRSTRIKE INBOUND — KEEP FIRING")
 				_sfx.play("whistle", -3.0, 0.85)
 			"wiped":
 				_vo("vo_wiped", 3, 600)
@@ -9912,7 +9921,8 @@ func _draw_enemies() -> void:
 			# Fleeing supply runner: real courier bake (the loot pack is in the
 			# sprite now); the pulsing gold ring stays — "catch this one" must
 			# still read across a chaotic field. Forward lean = closing momentum.
-			_spr("courier", epos, face, 0.5, Color.WHITE, 1.12)
+			_spr("courier", epos, face, 0.5, Color.WHITE,
+				(1.04 if (enemy_phase & 1) == 0 else 1.20) if e_moved else 1.12)
 			var lb: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)   # steady-bright under reduce-motion
 			Art.arc(self, epos, 9.0 + lb * 1.5, 0, TAU, 16, Color(1.0, 0.85, 0.3, 0.4 + lb * 0.25), 1.3)
 		elif e["kind"] == "shield":
@@ -9931,7 +9941,8 @@ func _draw_enemies() -> void:
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
 			# "he's seeding the ground behind him" is a gameplay telegraph.
-			_spr("sapper", epos, face, 0.5, Color.WHITE, 1.12)
+			_spr("sapper", epos, face, 0.5, Color.WHITE,
+				(1.04 if (enemy_phase & 1) == 0 else 1.20) if e_moved else 1.12)
 			var spp: float = 1.0 if _motion < 0.5 else Art.pulse(0.25)   # steady-bright under reduce-motion
 			Art.circle(self, epos + Vector2(0, 3), 1.8 + spp * 0.8, Color(1.0, 0.5, 0.15, 0.7 + spp * 0.3))
 		elif e["kind"] == "broadcast":
@@ -10663,13 +10674,13 @@ func _draw_colossus() -> void:
 	# Foundry-stomp: a slow settle-squash gives the heaviest thing on the field weight,
 	# so it lands with each stride instead of gliding in flat. Pure per-frame visual
 	# (no fx spawn from _draw — that would be frame-rate-dependent).
-	var stomp := sin(float(Engine.get_physics_frames()) * 0.12) * 0.5 + 0.5
+	var stomp := 0.0 if _motion < 0.5 else (sin(float(sim.tick_count) * 0.12) * 0.5 + 0.5) * _motion
 	var cbody := cpos + Vector2(0, stomp * 2.0)
 	var csquash := 1.0 - stomp * 0.06
 	# iran-flag: faction banner behind the finale boss — bigger (1.6x) for the
 	# colossus's mass, hung high so it frames the body without hiding the crush
 	# telegraph at its feet. Drawn before the shadow/body so they render on top.
-	_spr("flag_iran", cbody + Vector2(0, -22), sin(float(Engine.get_physics_frames()) * 0.02) * 0.025, 1.6)
+	_spr("flag_iran", cbody + Vector2(0, -22), sin(float(sim.tick_count) * 0.02) * 0.025 * _motion, 1.6)
 	_spr("colossus_body", cbody, PI, VEHICLE_CONTACT["colossus_body"]["call_scale"], mod, csquash)
 	_spr("colossus_barrel", cbody + Vector2(-24, 26), PI - 0.5, 1.3, mod)
 	_spr("colossus_barrel", cbody + Vector2(24, 26), PI + 0.5, 1.3, mod)
@@ -11457,6 +11468,11 @@ func _check_water_entry() -> void:
 		if rubble and not _rubble_told:
 			_rubble_told = true
 			show_banner("RUBBLE — HALF SPEED", Color(0.7, 0.55, 0.4))
+		# CACHE barbed wire is mud's other twin — same /2, rolls legal, no teach.
+		var wired: bool = p["alive"] and not wet and sim._in_fork_wire(p["x"], p["y"])
+		if wired and not _wire_told:
+			_wire_told = true
+			show_banner("WIRE — HALF SPEED, ROLLS LEGAL", Color(0.7, 0.55, 0.4))
 		# Grass flush is a 10s silent fuse. Halfway sentence, same class as
 		# the observer stall halfway tell — the punishment arriving first is too late.
 		if p["alive"] and int(p.get("flush_cd", 0)) > 0 \
@@ -12819,7 +12835,7 @@ func _band_floor() -> float:
 func _band_top_text(top_msg: String) -> Dictionary:
 	match top_msg:
 		"airstrike":
-			return {"text": "AIRSTRIKE INBOUND  %.1fs" % (sim.pending_airstrike / 60.0), "size": 12}
+			return {"text": "KEEP FIRING  %.1fs" % (sim.pending_airstrike / 60.0), "size": 12}
 		"boss":
 			for g in sim.gates:
 				if g["open"] or g.get("final", false):

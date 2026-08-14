@@ -1758,7 +1758,12 @@ func _draw_caption() -> void:
 	if main == null:
 		return
 	if main._menu != null and main._menu.is_active():
-		return
+		# TITLE after splash-skip still has the startup VO on air — paint that
+		# one caption. Pause/opts/rebind stay silent.
+		var sfx0 = main.get("_sfx")
+		if main._menu.mode != GameMenu.Mode.TITLE \
+				or sfx0 == null or not bool(sfx0.get("_startup_line_playing")):
+			return
 	if _result_card_up():
 		return
 	# main.get(...) (not main._sfx) — the headless HUD test doubles are plain Node2D mocks that

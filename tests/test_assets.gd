@@ -2408,7 +2408,8 @@ func test_event_banners_never_span_the_playfield() -> void:
 	var ms = load("res://src/main.gd")
 	var strs: Array = ms._KIND_TEACH.values()
 	strs.append_array(["BRIDGE GUNSHIP", "MORTAR OBSERVER — SHOOT IT DOWN",
-		"GUNSHIP INBOUND", "CORE EXPOSED — OPEN FIRE", "AIRSTRIKE INBOUND",
+		"GUNSHIP INBOUND", "CORE EXPOSED — OPEN FIRE", "AIRSTRIKE INBOUND — KEEP FIRING",
+		"FOUNDRY COLOSSUS",
 		"COLOSSUS ENRAGED — MORTAR VOLLEYS", "DESTROY THE GUNSHIP TO ADVANCE",
 		"HOLD THE ARENA — CLEAR THE WAVE", "MORTARS RANGING — ADVANCE!"])
 	for s in strs:

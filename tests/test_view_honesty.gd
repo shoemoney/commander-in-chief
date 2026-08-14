@@ -2808,3 +2808,26 @@ func test_priced_crate_plate_follows_the_cost_not_the_mode() -> void:
 		"the supply plate follows cost, not mode:\n%s" % window)
 	Runner.T.ok(src.contains("Art.warn(Color(1.0, 0.45, 0.35))"),
 		"unaffordable crate prices go through Art.warn, not a raw red")
+
+
+func test_friendly_airstrike_does_not_tell_you_to_run() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("AIRSTRIKE INBOUND — KEEP FIRING"),
+		"the inbound banner tells you to keep firing, not to flee")
+	Runner.T.ok(src.contains("KEEP FIRING  %.1fs"),
+		"the countdown rail says KEEP FIRING")
+	var sfx := FileAccess.get_file_as_string("res://src/view/sfx.gd")
+	Runner.T.ok(not sfx.contains("clear the area"),
+		"spotter VO no longer teaches the player to flee their own strike")
+
+
+func test_concussion_shader_uses_the_view_clock() -> void:
+	var sh := FileAccess.get_file_as_string("res://src/view/screen_fx.gdshader")
+	Runner.T.ok(sh.contains("uniform float clock"), "concussion overlay has a view clock")
+	Runner.T.ok(not sh.contains("sin(TIME") and not sh.contains("cos(TIME"),
+		"concussion overlay does not animate off GPU TIME")
+
+
+func test_dry_shrub_and_tumbleweed_are_not_outlined() -> void:
+	Runner.T.ok(not Art.outlined("dry_shrub"), "dry_shrub is a tuft, not a 3-pass rim")
+	Runner.T.ok(not Art.outlined("tumbleweed"), "tumbleweed is a tuft, not a 3-pass rim")
