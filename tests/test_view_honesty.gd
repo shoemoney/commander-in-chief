@@ -2831,3 +2831,38 @@ func test_concussion_shader_uses_the_view_clock() -> void:
 func test_dry_shrub_and_tumbleweed_are_not_outlined() -> void:
 	Runner.T.ok(not Art.outlined("dry_shrub"), "dry_shrub is a tuft, not a 3-pass rim")
 	Runner.T.ok(not Art.outlined("tumbleweed"), "tumbleweed is a tuft, not a 3-pass rim")
+
+
+func test_r8_first_mint_teaches_how_to_spend_a_commendation() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('_hint("commendation", "COMMENDATION — SPEND IT FROM THE SUPPLY WHEEL")'),
+		"first mint queues a spend teach on the supply wheel")
+
+
+func test_r8_deep_ford_current_gets_a_named_banner() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("_current_told"), "once-per-run CURRENT latch exists")
+	Runner.T.ok(src.contains("CURRENT — THE RIVER SHOVES YOU"),
+		"first contact with a deep-ford shove is named")
+	Runner.T.ok(src.contains("sim._ford_current(p[\"y\"])"),
+		"the teach keys off the same helper the sim uses to shove")
+
+
+func test_r8_mast_warn_names_the_overheat() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('_hint("mast_overheat", "MAST OVERHEAT — VACATE THE ORBIT", true)'),
+		"first mast warn names the threat and the vacate")
+
+
+func test_r8_reduce_motion_gates_wedge_mine_lane_observer() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("rpulse := 1.0 if _motion < 0.5 else (0.35 + 0.35 * sin(_rear_wedge_t * 12.0))"),
+		"rear-warn wedge is steady under reduce-motion")
+	Runner.T.ok(src.contains("mb := 0.0 if _motion < 0.5 else Art.pulse(0.1)"),
+		"mine telegraph pins radius/alpha under reduce-motion")
+	Runner.T.ok(src.contains("pulse := 0.22 if _motion < 0.5 else (0.10 + 0.20 * absf(sin(float(Engine.get_physics_frames()) * 0.35)))"),
+		"lane-seal warn is a steady fill under reduce-motion, not a 3.3 Hz strobe")
+	Runner.T.ok(src.contains("sweep := 0.0 if _motion < 0.5 else float(Engine.get_physics_frames()) * 0.09"),
+		"observer radar sweep holds still under reduce-motion")
+	Runner.T.ok(src.contains("if _motion >= 0.5:\n\t\top.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8"),
+		"observer bob is gated, not an always-on sine")

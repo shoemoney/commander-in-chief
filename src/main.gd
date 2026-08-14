@@ -276,6 +276,7 @@ var _mud_prev: Array[bool] = [false, false]     # per-player prev in-mud state (
 var _mud_told := false                          # once-per-run MUD teach banner latch
 var _rubble_told := false                       # once-per-run rubble (ruins mud-twin) teach banner
 var _wire_told := false                         # once-per-run CACHE wire (same half-speed as mud)
+var _current_told := false                      # once-per-run deep-ford CURRENT shove teach
 var _water_clock := 0.0                         # shader river clock — frozen in hit-stop, damped by Reduce Motion
 var _enemy_water_prev: Array[bool] = []         # per-enemy-slot prev in-water state (index-keyed; ponytail: a
                                                  # death mid-array can misalign one slot for a frame — cosmetic only)
@@ -1647,6 +1648,7 @@ func _reset() -> void:
 	_mud_told = false
 	_rubble_told = false
 	_wire_told = false
+	_current_told = false
 	_water_clock = 0.0
 	_mud_prev = [false, false]
 	_seen_bosses = {}
@@ -2884,6 +2886,9 @@ func _consume_events() -> void:
 				# over the 120px hazard radius so the player reads it and vacates.
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_softspot",
 					"sz": 240.0, "grow": -0.3, "fade": 1.5, "rate": 0.02, "col": Color(1.0, 0.5, 0.15, 0.3)})
+				# The ring is unnamed. First-ever banner names the threat; later
+				# cycles keep the ring (and the alarm SFX) as the repeat tell.
+				_hint("mast_overheat", "MAST OVERHEAT — VACATE THE ORBIT", true)
 			"mast_pulse":
 				# c3 3v: the core vents — a wide radial shockwave + shake denies the orbit.
 				_trauma = minf(1.0, _trauma + 0.35)
@@ -3098,6 +3103,9 @@ func _consume_events() -> void:
 			"token_mint":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext", "size": 12,
 					"rate": 0.012, "text": "COMMENDATION *%d" % ev.get("n", 1), "col": Color(1.0, 0.85, 0.3)})
+				# First mint only: the chip names the currency, not how to spend it.
+				# Supply Call is wheel kind 5 — same hold as the coin sockets.
+				_hint("commendation", "COMMENDATION — SPEND IT FROM THE SUPPLY WHEEL")
 			"token_drop":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "col": Color(1.0, 0.9, 0.5),
@@ -7479,7 +7487,7 @@ func _draw() -> void:
 	# c4 2v: rear-warn bottom-edge wedge — a pulsing strip + an up-pointing wedge
 	# at the pending rear spawn x, readable in the forward-locked camera.
 	if _rear_wedge_t > 0.0:
-		var rpulse := 0.35 + 0.35 * sin(_rear_wedge_t * 12.0)
+		var rpulse := 1.0 if _motion < 0.5 else (0.35 + 0.35 * sin(_rear_wedge_t * 12.0))
 		var ra := clampf(_rear_wedge_t / 1.5, 0.0, 1.0) * rpulse
 		draw_rect(Rect2(0, SCREEN_H - 20.0, SCREEN_W, 20.0), Color(0.8, 0.35, 0.12, ra * 0.4))
 		var rwx := clampf(_rear_wedge_x, 20.0, SCREEN_W - 20.0)
@@ -8050,7 +8058,7 @@ func _draw_lane_seals() -> void:
 					y_n + float((dh / 5) % maxi(int(y_s - y_n) - 4, 1))),
 					Vector2(4.0 + float(dh % 5), 3.0 + float(dh % 4))), Color(0.26, 0.23, 0.19, 0.9))
 		elif SimWorld.lane_warning(sim.tick_count, band):
-			var pulse := 0.10 + 0.20 * absf(sin(float(Engine.get_physics_frames()) * 0.35))
+			var pulse := 0.22 if _motion < 0.5 else (0.10 + 0.20 * absf(sin(float(Engine.get_physics_frames()) * 0.35)))
 			draw_rect(r, Color(0.85, 0.55, 0.15, pulse))
 			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(3.0, y_s - y_n)), Color(0.95, 0.62, 0.20, 0.85))
 		else:
@@ -8530,7 +8538,7 @@ func _draw_mines() -> void:
 		# around it yourself). YOUR planted claymore rings cyan instead of the
 		# hostile red — same blast, but "my trap" vs "their trap" must read
 		# (both sides still trip both; the color is identity, not safety).
-		var mb := Art.pulse(0.1)
+		var mb := 0.0 if _motion < 0.5 else Art.pulse(0.1)
 		var mc := Art.safe(Color(0.3, 0.9, 0.75)) if m.get("friendly", false) else Color(1.0, 0.35, 0.2)
 		# Footprint honesty: the soft fill used to breathe 8..11px while the lethal
 		# radius is a flat 9 — in a game where a touch is a death, the drawn edge
@@ -10120,7 +10128,8 @@ func _draw_observer() -> void:
 	if sim.observer.is_empty():
 		return
 	var op := _to_screen(sim.observer["x"], sim.camera_top + SimWorld.OBSERVER_Y_OFFSET)
-	op.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8   # engine-idle breath — not a statue
+	if _motion >= 0.5:
+		op.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8   # engine-idle breath — not a statue
 	# The rocket battery the spotter paints for sits alongside — the pair reads
 	# as one artillery unit, not a lone jeep with magic mortars.
 	_spr("m_rocket_truck", op + Vector2(40, 5), PI / 2, 0.5, Art.HOSTILE_VEH)   # a2-02: warm-hostile
@@ -10130,7 +10139,7 @@ func _draw_observer() -> void:
 	_spr("hud_flag", op + Vector2(11.5, -9.5), 0.0, 0.04, Color(0.9, 0.25, 0.2))
 	# Radar sweep: a rotating scan beam off the antenna sells the spotter's whole job
 	# (actively painting you for artillery) instead of a static flag.
-	var sweep := float(Engine.get_physics_frames()) * 0.09
+	var sweep := 0.0 if _motion < 0.5 else float(Engine.get_physics_frames()) * 0.09
 	var atop := op + Vector2(8, -12)
 	var sdir := Vector2(cos(sweep), sin(sweep) * 0.5)
 	Art.line(self, atop, atop + sdir * 9.0, Color(0.4, 1.0, 0.5, 0.7), 1.5)
@@ -11450,6 +11459,11 @@ func _check_water_entry() -> void:
 			if wet and not _water_prev[i]:
 				_burst(p["x"], p["y"], "splash", 5, 1.0, 2.4, 0.5, 0.1, 1.4, true)
 			_water_prev[i] = wet
+		# Deep-ford CURRENT (band>=2) shoves even a dry crossing. First contact
+		# names the shove — later crossings keep the visual flow as the tell.
+		if p["alive"] and not _current_told and sim._ford_current(p["y"]) != 0:
+			_current_told = true
+			show_banner("CURRENT — THE RIVER SHOVES YOU", Color(0.45, 0.75, 0.85))
 		# Mud edge-trigger (c2 3v): a brown kick-up on entry, and a once-per-
 		# run teach banner — the text matches sim truth (water bans the roll,
 		# mud does not; the speed halving is sim_world.gd's _in_mud).

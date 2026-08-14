@@ -2411,7 +2411,9 @@ func test_event_banners_never_span_the_playfield() -> void:
 		"GUNSHIP INBOUND", "CORE EXPOSED — OPEN FIRE", "AIRSTRIKE INBOUND — KEEP FIRING",
 		"FOUNDRY COLOSSUS",
 		"COLOSSUS ENRAGED — MORTAR VOLLEYS", "DESTROY THE GUNSHIP TO ADVANCE",
-		"HOLD THE ARENA — CLEAR THE WAVE", "MORTARS RANGING — ADVANCE!"])
+		"HOLD THE ARENA — CLEAR THE WAVE", "MORTARS RANGING — ADVANCE!",
+		"CURRENT — THE RIVER SHOVES YOU", "MUD — HALF SPEED, ROLLS LEGAL",
+		"RUBBLE — HALF SPEED", "WIRE — HALF SPEED, ROLLS LEGAL"])
 	for s in strs:
 		var sz: int = ms.banner_fit_size(s, 16)
 		var r: Rect2 = ms.banner_plate_rect(s, 70.0, sz, 24.0)   # 24 = worst-case badge pad
