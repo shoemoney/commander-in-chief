@@ -1506,7 +1506,7 @@ func start_watch() -> void:
 	_watch_replay = r
 	_watch_frame = 0
 	_watching = true
-	show_banner("REPLAY — PRESS R TO EXIT", Color(0.55, 0.9, 1.0))
+	show_banner("REPLAY — %s TO EXIT" % _replay_exit_cap(), Color(0.55, 0.9, 1.0))
 
 
 func _reset() -> void:
@@ -5453,6 +5453,11 @@ func _track_bests() -> void:
 	# _record_run() at the debrief and _flush_bests() on reset/exit.
 
 
+func _replay_exit_cap() -> String:
+	# WATCH_HOTKEY is KEY_R (logical, not rebindable). Pad uses START.
+	return Art.pad_button_label(JOY_BUTTON_START) if Art.use_pad else "R"
+
+
 func show_banner(text: String, col := GameMenu.BANNER_COL_DEFAULT, icon := "", tier := -1) -> void:
 	# Public: the ONE center-status channel. GameMenu.seed-paste feedback calls it too, so it stays
 	# public (not underscore-private) and its default tint is the shared GameMenu.BANNER_COL_DEFAULT.
@@ -9294,9 +9299,9 @@ func _draw_pickups() -> void:
 		# intensity — a soft safe-green ring + 2px bob (reduce-motion pins the
 		# bob at its raised pose, matching the capsule pulse-freeze).
 		var cpg := 1.0 if _motion < 0.5 else Art.pulse(0.15)
-		if pk.get("cost", 0) > 0 and sim.mode == "endless":
-			# Shop pad: priced crates sit on a hazard-striped supply plate —
-			# commerce has a PLACE in the arena now.
+		if pk.get("cost", 0) > 0:
+			# Shop pad follows the cost field, not the mode — campaign/arcade
+			# stamp priced crates too (FINDINGS: the plate was endless-only).
 			draw_rect(Rect2(ppos + Vector2(-36, -14), Vector2(72, 28)), Color(0.08, 0.07, 0.06, 0.55))
 			for hz in 6:
 				draw_rect(Rect2(ppos.x - 36 + hz * 12, ppos.y + 11, 6, 3), Color(0.8, 0.7, 0.2, 0.5))
@@ -9333,14 +9338,15 @@ func _draw_pickups() -> void:
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= pk["cost"]
-			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Color(1.0, 0.45, 0.35)
+			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.35))
 			# Coin + digits claim ONE slot through the world-text arbiter (the icon
 			# travels with its number) — the bare draws printed the price over fork
 			# signposts, plated labels and floattext toasts.
-			var pdigits := str(pk["cost"])
+			var pdigits := str(pk["cost"]) if afford else (str(pk["cost"]) + "×")
 			var pwant := Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(pdigits, 9), 13.0)
 			var pgot := claim_label_slot(pwant, _label_slots)
 			_label_slots.append(pgot)
+			draw_rect(pgot, LABEL_PLATE_FILL)
 			var poff := pgot.position - pwant.position
 			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33) + poff, Vector2(9, 9)), false)
 			Art.text(self, pdigits, ppos + Vector2(-4, -25) + poff, 9, pcol)
@@ -13317,7 +13323,7 @@ func _draw_banners(top_msg: String) -> void:
 		# The ribbon is PERSISTENT, so it owns the first slot of the reserved top band and the
 		# transient banners stack one row under it (_banner_band_y passes stacked_rows=1 while
 		# _watching). Its old y=30 was above panel_bottom — i.e. under the HUD, which draws over us.
-		Art.text_center(self, "— REPLAY — %s TO EXIT —" % ("START" if Art.use_pad else "R"),
+		Art.text_center(self, "— REPLAY — %s TO EXIT —" % _replay_exit_cap(),
 			320, _hud_icons.band_top(_boss_bar_slots), 9, Color(0.55, 0.9, 1.0, wpul))
 	# Just-in-time onboarding cue — band row 1, allocated by band_rows() off the same rail as
 	# the alert above it (it used to compute its own y and could land under the objective line).

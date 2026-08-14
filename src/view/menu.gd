@@ -4490,8 +4490,9 @@ func _draw_rebind_header() -> void:
 	var scol: Color
 	if _rebind_action != "":
 		if pad:
-			sub = "PRESS A BUTTON FOR %s (%s)   -   START CANCELS   -   PRESS IT AGAIN TO CLEAR" \
-				% [rebind_label(_rebind_action), "P1" if _rebind_pad_dev == 0 else "P2"]
+			sub = "PRESS A BUTTON FOR %s (%s)   -   %s CANCELS   -   PRESS IT AGAIN TO CLEAR" \
+				% [rebind_label(_rebind_action), "P1" if _rebind_pad_dev == 0 else "P2",
+					Art.pad_button_label(JOY_BUTTON_START)]
 		else:
 			sub = "PRESS A KEY FOR %s   -   ESC CANCEL   -   DEL CLEAR" % rebind_label(_rebind_action)
 		scol = PLATE_SEL
@@ -5744,7 +5745,7 @@ func _best_chip_suffix() -> String:
 	# mouse-only one.
 	if not _best_is_replayable():
 		return ""
-	var cap := "Y" if Art.use_pad else "R"   # keyboard cap tracks WATCH_HOTKEY (KEY_R)
+	var cap := Art.pad_button_label(JOY_BUTTON_Y) if Art.use_pad else "R"
 	return "   > WATCH [%s]" % cap
 
 

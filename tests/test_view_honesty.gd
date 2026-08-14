@@ -2795,3 +2795,16 @@ func test_river_clock_is_view_owned_not_gpu_time() -> void:
 		"_sync_water pushes the view clock")
 	Runner.T.ok(src.contains("_water_clock"),
 		"main owns _water_clock and advances it only off hit-stop")
+
+
+func test_priced_crate_plate_follows_the_cost_not_the_mode() -> void:
+	## Campaign/arcade stamp priced crates too. Gating the hazard plate on
+	## endless left those sitting as unlabelled boxes.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var at := src.find("pk.get(\"cost\", 0) > 0")
+	Runner.T.ok(at > 0, "the crate-cost gate still exists")
+	var window := src.substr(at, 180)
+	Runner.T.ok(not window.contains("sim.mode == \"endless\""),
+		"the supply plate follows cost, not mode:\n%s" % window)
+	Runner.T.ok(src.contains("Art.warn(Color(1.0, 0.45, 0.35))"),
+		"unaffordable crate prices go through Art.warn, not a raw red")
