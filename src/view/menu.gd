@@ -5135,7 +5135,7 @@ static func howto_wrap_lines(source: String, size: int, max_w: float) -> Array[S
 	var f := Art.font()
 	var out: Array[String] = []
 	var line := ""
-	for word in txt.split(" ", false):
+	for word in Art.wrap_words(txt):
 		var probe := word if line == "" else line + " " + word
 		if line != "" and f.get_string_size(probe, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
 			out.append(line)
@@ -6065,7 +6065,7 @@ func _overflow_chip_rect(label_r: float, cy: float) -> Rect2:
 func _body_block(txt: String, x: float, y: float, size: int, col: Color, max_w: float, lead := 12.0, draw := true) -> float:
 	var f := Art.font()
 	var line := ""
-	for word in txt.split(" ", false):
+	for word in Art.wrap_words(txt):
 		var probe: String = word if line == "" else line + " " + word
 		if line != "" and f.get_string_size(probe, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
 			if draw:

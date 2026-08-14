@@ -194,3 +194,41 @@ func test_shipped_font_has_real_cjk_glyph_coverage() -> void:
 		var ch := sample.substr(i, 1)
 		var w: float = font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, Hud.FONT_SIZE).x
 		Runner.T.ok(w > 1.0, "font renders a real (non-tofu) glyph for CJK character '%s' (advance=%.2f)" % [ch, w])
+
+
+# Sibling of test_menu_layout.gd::test_no_manual_line_ends_on_a_dangling_dash —
+# the HUD half of the same class. hud._wrap_caption is the third of this repo's
+# three greedy `split(" ")` wrappers, so a caption whose copy uses an em dash as
+# a sentence break can strand it as the last token on a line, reading as cut-off
+# subtitle. MEASURED at HEAD: 2 hits, both `vo_airstrike`
+# ('SPOTTER: "Friendly strike inbound —') at cs 18 and cs 20 — both reachable,
+# since cs = Art.fs(Hud.FONT_SIZE=10) spans 10..20 over the TEXT SIZE range.
+func test_no_caption_line_ends_on_a_dangling_dash() -> void:
+	var font := Art.font()
+	var cells := 0
+	var dangling := 0
+	var worst := ""
+	for tbl in [Sfx._VO_CAPTIONS, Sfx._BARK_CAPTIONS, Sfx.SFX_CAPTIONS]:
+		for key in tbl:
+			var txt := String(tbl[key])
+			for cs in range(10, 21):
+				cells += 1
+				for ln in Hud._wrap_caption(txt, font, cs, Hud.CAPTION_MAX_W):
+					var s := String(ln).strip_edges()
+					if s.is_empty() or not (s.substr(s.length() - 1, 1) in Art.WRAP_DASHES):
+						continue
+					dangling += 1
+					worst = "%s cs%d: '%s'" % [key, cs, s]
+	Runner.T.ok(cells >= 300,
+		"the caption corpus is the three shipped tables x every reachable size (%d cells)" % cells)
+	Runner.T.eq(dangling, 0,
+		"no caption line may end on a bare dash — %d found, e.g. %s" % [dangling, worst])
+
+	# The second, quieter half of routing _wrap_caption through Art.wrap_words:
+	# hud's old `txt.split(" ")` kept empty tokens, so doubled spaces in caption
+	# copy emitted zero-width words that consumed a separator's width each and
+	# could break a line early. wrap_words splits with allow_empty = false. Pin
+	# it so the swallow is a stated rule and not a silent ride-along.
+	Runner.T.eq(Art.wrap_words("a  b").size(), 2, "a doubled space yields no empty word")
+	Runner.T.eq(String(Art.wrap_words("hold —  fire")[1]), "— fire",
+		"the dash still glues forward across a doubled space")

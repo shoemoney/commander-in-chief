@@ -2837,3 +2837,242 @@ func test_concussion_shader_uses_the_view_clock() -> void:
 func test_dry_shrub_and_tumbleweed_are_not_outlined() -> void:
 	Runner.T.ok(not Art.outlined("dry_shrub"), "dry_shrub is a tuft, not a 3-pass rim")
 	Runner.T.ok(not Art.outlined("tumbleweed"), "tumbleweed is a tuft, not a 3-pass rim")
+
+
+# ---- Anchored world-space signage: one band, one signpost, finite life ----
+#
+# TELL: "intrusive blocky world-space directional banners". The reviewer named
+# the smaller half. MEASURED on this branch at 4d493b7 with the production
+# _consume_events() driven by the shipped demo_input bot in god-mode campaign:
+# SimWorld emits route_fork AND route_bait at the SAME _next_gate_y on the SAME
+# TICK (seed 0xC0FFEE 1P: t=597 for band y=-2000px, t=4528 for band y=-4000px),
+# and _consume_events appended BOTH — 4 _forks entries for 2 bands. Because
+# fork_cache_is_left is literally `fork_x < 320`, the bait entry carries the TRAP
+# lane's x and comes out MIRRORED: pass A draws "< CACHE" at x80..176 while pass B
+# draws "BOUNTY >" at x80..190 on the same baseline. Two 96x20px overprints per
+# band saying opposite things. THAT is the unreadable boxy clump.
+class _NullSfx extends Sfx:
+	func play(_s: String, _v := 0.0, _p := 1.0) -> void: pass
+
+
+func _drive(seed_v: int, players: int, ticks: int) -> Node2D:
+	var main: Node2D = Main.new()
+	main._sfx = _NullSfx.new()
+	main.sim = SimWorld.new(seed_v, players, "campaign")
+	main.god_mode = true
+	main.sim.god_mode = true
+	for t in ticks:
+		var inputs: Array[SimInput] = []
+		for pi in players:
+			inputs.append(Main.demo_input(t + pi * 53, main.sim))
+		main.sim.step(inputs)
+		main._consume_events()
+	return main
+
+
+func _sign_rects(fk: Dictionary, fy: float) -> Array[Rect2]:
+	## The SHIPPED layout, derived from the shipped consts — not a model of it.
+	var cw := Art.tw("< CACHE", Main.SIGN_FONT)
+	var bw := Art.tw("BOUNTY >", Main.SIGN_FONT)
+	var isl_x := float(fk.get("x", 260 * Fixed.ONE)) * PX
+	var xs := Main.fork_sign_xs(SimWorld.fork_cache_is_left(int(isl_x)), cw, bw)
+	var h := float(Main.SIGN_FONT + 4)
+	var top := fy - float(Main.SIGN_FONT - 2)
+	return [Rect2(xs.x - Main.SIGN_PAD_X, top, cw + 2.0 * Main.SIGN_PAD_X, h),
+		Rect2(xs.y - Main.SIGN_PAD_X, top, bw + 2.0 * Main.SIGN_PAD_X, h)]
+
+
+func test_one_fork_band_draws_one_lane_orientation() -> void:
+	## A1. Grouped by band y off the LIVE production _forks, so any future
+	## producer that appends a second entry for a band goes red too — this is
+	## the class check, not a route_bait check.
+	for cell in [[0xC0FFEE, 1, 5000], [0xC0FFEE, 2, 4200], [42, 1, 700]]:
+		var main := _drive(cell[0], cell[1], cell[2])
+		var bands := {}
+		for fk in main._forks:
+			var k := str(fk["y"])
+			if not bands.has(k):
+				bands[k] = []
+			bands[k].append(fk)
+		Runner.T.ok(bands.size() >= 1,
+			"seed %x/%dP/%d ticks streamed at least one fork band" % [cell[0], cell[1], cell[2]])
+		for k in bands:
+			var entries: Array = bands[k]
+			Runner.T.eq(entries.size(), 1,
+				"seed %x/%dP band y=%s produced %d _forks entries — a band is ONE signpost"
+					% [cell[0], cell[1], k, entries.size()])
+			var orients := {}
+			for fk in entries:
+				orients[SimWorld.fork_cache_is_left(int(float(fk.get("x", 0)) * PX))] = true
+			Runner.T.eq(orients.size(), 1,
+				"seed %x/%dP band y=%s signposts %d contradictory lane orientations"
+					% [cell[0], cell[1], k, orients.size()])
+		main.free()
+
+
+func test_no_two_fork_signposts_overlap() -> void:
+	## A2. The visible half of A1, in pixels: build every entry's two plates from
+	## the SHIPPED fork_sign_xs + SIGN_FONT/SIGN_PAD_X at one common baseline and
+	## cross-product them. HEAD overprints 2 pairs per baited band (CACHE 80..176
+	## vs BOUNTY 80..190; CACHE 464..560 vs BOUNTY 450..560), 96x20px each.
+	var main := _drive(0xC0FFEE, 1, 5000)
+	var bands := {}
+	for fk in main._forks:
+		var k := str(fk["y"])
+		if not bands.has(k):
+			bands[k] = []
+		bands[k].append(fk)
+	Runner.T.ok(bands.size() >= 2, "the drive reached both campaign fork bands (%d)" % bands.size())
+	var overlaps := 0
+	var worst := ""
+	for k in bands:
+		var rects: Array[Rect2] = []
+		for fk in bands[k]:
+			for r in _sign_rects(fk, 150.0):
+				rects.append(r)
+		for i in rects.size():
+			for j in range(i + 1, rects.size()):
+				if rects[i].grow(-0.5).intersects(rects[j].grow(-0.5)):
+					overlaps += 1
+					worst = "band %s: %s vs %s" % [k, str(rects[i]), str(rects[j])]
+	Runner.T.eq(overlaps, 0,
+		"anchored fork signposts overprint each other %d times (%s)" % [overlaps, worst])
+	main.free()
+
+
+func test_anchored_world_signs_have_a_finite_life() -> void:
+	## A3. fork_sign_relevance keys the fade to SCREEN POSITION, and _step_camera
+	## only ever moves north — so a player who stops at a fork holds a >=0.46-alpha
+	## plate indefinitely (reviewer-measured 13-20 s; 19.80 s >=0.5 at seed 1/1P)
+	## against ~1.6 s for an uninterrupted march. A time cap costs the marching
+	## player nothing and truncates only the degenerate case.
+	##
+	## The sweep window is 1500 ticks = 25.0 s, deliberately longer than the
+	## 19.80 s worst case measured, per the sampling-interval rule.
+	Runner.T.eq(Main.anchored_sign_life(0), 1.0, "a sign is fully alive the frame it appears")
+	var prev := 1.0
+	for t in 1501:
+		var v: float = Main.anchored_sign_life(t)
+		Runner.T.ok(v <= prev + 0.0001, "anchored_sign_life is monotone non-increasing at t=%d" % t)
+		prev = v
+		if t >= 180:
+			Runner.T.eq(v, 0.0, "anchored_sign_life is gone by 180 ticks (t=%d gave %f)" % [t, v])
+
+	# The behavioural half: PIN the camera (zero input) with a fork sign on
+	# screen and confirm the composed target still dies. Same functions, same
+	# order, as the draw -- _view_src() below pins that the draw composes them.
+	var main := _drive(0xC0FFEE, 1, 400)
+	var band: Dictionary = {}
+	var t2 := 400
+	while t2 < 4000:
+		var inputs: Array[SimInput] = []
+		inputs.append(Main.demo_input(t2, main.sim))
+		main.sim.step(inputs)
+		main._consume_events()
+		t2 += 1
+		for fk in main._forks:
+			var fyv: float = main._to_screen(0, int(fk["y"]) + 180 * Fixed.ONE).y
+			if fyv > -20.0 and fyv < 200.0:
+				band = fk
+				break
+		if not band.is_empty():
+			break
+	Runner.T.ok(not band.is_empty(), "the bot walked a fork signpost into the approach read")
+	var born := {}
+	var died_at := -1
+	var pos_only_floor := 1.0
+	var settle := 0
+	var cam_prev: int = main.sim.camera_top
+	for hold in 1500:
+		main.sim.step([SimInput.new()])
+		main._consume_events()
+		if main.sim.camera_top != cam_prev:
+			settle = hold + 1     # MAX_CAM_STEP catch-up lag, then the ratchet stops
+			cam_prev = main.sim.camera_top
+		var fy: float = main._to_screen(0, int(band["y"]) + 180 * Fixed.ONE).y
+		var rects := _sign_rects(band, fy)
+		var seen: int = Main.anchored_sign_seen(born, band["y"], main.sim.tick_count)
+		# What HEAD composes: overlap yield x position fade. Both are unbounded in
+		# time once the camera stops, which is the whole defect.
+		var pos_only: float = minf(Main.fork_sign_alpha(rects[0], [], []),
+			Main.fork_sign_relevance(fy))
+		if hold >= settle:
+			pos_only_floor = minf(pos_only_floor, pos_only)
+		if minf(pos_only, Main.anchored_sign_life(seen)) < 0.05 and died_at < 0:
+			died_at = seen
+	Runner.T.ok(settle < 1500,
+		"zero input pins the camera once MAX_CAM_STEP catches up (settled at tick %d)" % settle)
+	# THE defect, measured: with the camera pinned the position fade alone holds
+	# the plate at full strength for the entire 1500-tick (25.0 s) window --
+	# deliberately longer than the 19.80 s worst case the reviewer measured.
+	Runner.T.ok(pos_only_floor >= 0.5,
+		"a pinned camera really does hold the plate on position alone (floor %f over 25.0 s)" % pos_only_floor)
+	Runner.T.ok(died_at >= 0 and died_at <= 180,
+		"a pinned-camera fork signpost must dissolve within 180 ticks of first visibility (got %d)" % died_at)
+	main.free()
+
+	# The behavioural half above composes the cap in the TEST, so it cannot notice
+	# the DRAW dropping it — and `src.contains("anchored_sign_life(")` is satisfied
+	# by the func's own declaration line, i.e. a tautology. Pin the two statements
+	# that actually matter instead: both fork_sign_fade targets must carry `life`
+	# inside the minf chain, the way A4 pins the PERMANENT FORD gate.
+	var lines := _view_src().split("\n")
+	var composed := 0
+	var life_assigned := false
+	for i in lines.size():
+		var ln := String(lines[i])
+		if ln.contains("var life :=") and ln.contains("anchored_sign_life(anchored_sign_seen("):
+			life_assigned = true
+		if not (ln.contains("_fork_sign_fade.get(ck, 1.0)") or ln.contains("_fork_sign_fade.get(bk, 1.0)")):
+			continue
+		var stmt := ""
+		for j in range(i, mini(lines.size(), i + 4)):
+			stmt += String(lines[j])
+		Runner.T.ok(stmt.contains("fork_sign_relevance(fy)), life)"),
+			"the fork signpost target at main.gd:%d composes the TIME cap, not just the two position fades" % (i + 1))
+		composed += 1
+	Runner.T.ok(life_assigned, "_draw_gates reads the sign's life off anchored_sign_life(anchored_sign_seen(...))")
+	Runner.T.eq(composed, 2, "BOTH the CACHE and BOUNTY targets are pinned (found %d)" % composed)
+
+
+func test_band_anchored_signage_speaks_only_on_approach() -> void:
+	## A4. The anchored, BAND-attached label class is exactly {CACHE, BOUNTY,
+	## PERMANENT FORD}. Its two siblings in the same water block are already
+	## gated -- FORD OPEN on deck_open, the tank flag on tank_near -- and every
+	## other _world_label* in main.gd is entity-attached and dies with its entity.
+	## PERMANENT FORD alone drew a 103x13 0.92-alpha plate for the whole time its
+	## band was on screen. The rails and bank chevrons keep drawing unconditionally:
+	## only the PLATE acquires a lifecycle.
+	## The sweep asserts against a LITERAL 120.0, never against BAND_SIGN_REACH
+	## itself: widening the const to 450 would rewrite every expectation to true
+	## and leave the test green while PERMANENT FORD drew for its whole band again.
+	Runner.T.eq(Main.BAND_SIGN_REACH, 120.0, "BAND_SIGN_REACH is pinned at 120 px of approach")
+	for off in range(-400, 401, 10):
+		var pys := PackedInt64Array([off * Fixed.ONE])
+		Runner.T.eq(Main.band_sign_visible(pys, 0), absf(float(off)) < 120.0,
+			"band_sign_visible at %d px of approach" % off)
+	Runner.T.ok(Main.band_sign_visible(PackedInt64Array([9000 * Fixed.ONE, 0]), 0),
+		"a two-player squad speaks if EITHER soldier is on the approach")
+
+	# The reach is symmetric, so WHICH EDGE the call site hands it decides how much
+	# of the budget lands on the approach. A northbound player meets the water
+	# band's SOUTH bank (w.y + WATER_H) first: anchored there all 120 px of reach
+	# are pre-bank; anchored to w.y (the NORTH edge, WATER_H = 80 px further on)
+	# only 120-80 = 40 px are -- 0.28 s at PLAYER_SPEED 144 -- and the other 80
+	# px of the label's life run behind the player, after the crossing is over.
+	# The sweep above cannot see that (it supplies its own anchor), so pin the
+	# call site's expression, the same way the gate itself is pinned below.
+
+	var lines := _view_src().split("\n")
+	var idx := -1
+	for i in lines.size():
+		if String(lines[i]).contains("_world_label_centered(permanent_label"):
+			idx = i
+	Runner.T.ok(idx > 0, "the PERMANENT FORD draw is still findable in main.gd")
+	var ctx := ""
+	for i in range(maxi(0, idx - 4), idx + 1):
+		ctx += String(lines[i])
+	Runner.T.ok(ctx.contains("band_sign_visible("),
+		"the PERMANENT FORD plate draws unconditionally — it needs the gate its two siblings have")
+	Runner.T.ok(ctx.contains("band_sign_visible(band_pys, w[\"y\"] + SimWorld.WATER_H)"),
+		"the reach must hang off the band's NEAR (south) bank, not its far edge — see above")

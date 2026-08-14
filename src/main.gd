@@ -1644,6 +1644,7 @@ func _reset() -> void:
 		show_banner("NG+ HARD OFF — CAMPAIGN ONLY", GameMenu.BANNER_COL_FAIL)
 	_armor_announced = 0   # the next run re-announces wave 13's armor from zero
 	_fork_sign_fade.clear()
+	_fork_sign_born.clear()
 	_mud_told = false
 	_rubble_told = false
 	_wire_told = false
@@ -3082,15 +3083,14 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.014, "text": "ADRENALINE", "col": Color(1.0, 0.6, 0.25)})
 				_sfx.play("gate_open", -3.0, 1.3)
-			"route_fork":
-				# Fires at STREAM time (~2 screens ahead) — no sound/banner here;
-				# store the band and let _draw_gates signpost it when it scrolls in.
-				_forks.append({"y": ev["y"], "x": ev["x"]})
-			"route_bait":
-				# c2 2v: a bait fork's trap lane. Deliberately NO honest signpost
-				# or sound (reading the bait IS the skill) — the marker is stored
-				# so the deeper wreck/sandbag dressing can render the richer cover.
-				_forks.append({"y": ev["y"], "x": ev["x"], "bait": true})
+			"route_fork", "route_bait":
+				# Both fire at STREAM time (~2 screens ahead), at the SAME band y
+				# and on the SAME tick — no sound/banner here; store ONE band and
+				# let _draw_gates signpost it when it scrolls in. route_bait only
+				# flags the band; it must never open a second one (see
+				# fork_band_absorb: two entries drew a mirrored, contradictory
+				# signpost pair over the real one).
+				fork_band_absorb(_forks, ev)
 			"revive_deny":
 				_vo("vo_chest_empty", 2, 600)
 			"gate_open":
@@ -8860,8 +8860,21 @@ func _draw_water() -> void:
 			for sy in [wy + 7.0, wy + wh - 7.0]:
 				Art.line(self, Vector2(second_x - 6.0, sy - 3.0), Vector2(second_x, sy), reliable, 2.0)
 				Art.line(self, Vector2(second_x, sy), Vector2(second_x + 6.0, sy - 3.0), reliable, 2.0)
-			var permanent_label: String = fv["second_label"]
-			_world_label_centered(permanent_label, second_x, wy - 8.0, reliable)
+			# The plate speaks only on approach — the rails and chevrons above are
+			# unconditional, so the SHAPE cue never goes away; this is the same
+			# lifecycle its two siblings in this block already have (FORD OPEN on
+			# deck_open, the tank flag on tank_near). It was the one band-anchored
+			# label in the file that drew for as long as its band was on screen.
+			var band_pys := PackedInt64Array()
+			for bp in sim.players:
+				band_pys.append(bp["y"])
+			# Anchored to the band's NEAR (south) bank, not w["y"]: a northbound
+			# player meets that edge first, so all 120 px of reach are approach.
+			# Off w["y"] the label would open 40 px (0.28 s at PLAYER_SPEED 144)
+			# before the bank and spend its other 80 px behind the crossing.
+			if band_sign_visible(band_pys, w["y"] + SimWorld.WATER_H):
+				var permanent_label: String = fv["second_label"]
+				_world_label_centered(permanent_label, second_x, wy - 8.0, reliable)
 		# A few deterministic rocks break up the deep water (never in the ford).
 		var wseed := Art.cell_hash(int(w["y"] / 4096) * 13, 7)
 		for r in 3:
@@ -9024,6 +9037,58 @@ static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> V
 	var cx := 84.0 if cache_left else 556.0 - cache_w
 	var bx := 556.0 - bounty_w if cache_left else 84.0
 	return Vector2(cx, bx)
+
+
+static func fork_band_absorb(bands: Array, ev: Dictionary) -> void:
+	## ONE band, ONE entry, ONE lane orientation. SimWorld emits route_bait at the
+	## SAME _next_gate_y and on the SAME TICK as route_fork (measured: seed
+	## 0xC0FFEE t=597 and t=4528), so appending a second entry gave _draw_gates'
+	## loop two contradictory passes over one band: a mirrored signpost pair
+	## overprinting the real one (fork_cache_is_left is `fork_x < 320`, and the
+	## bait entry carries the TRAP lane's x) plus a phantom wreck island at a lane
+	## the sim has no collision for. route_bait now only SUPPRESSES its duplicate:
+	## nothing reads a bait flag any more (its one consumer was the offset _wall_seg
+	## dressing this replaced — the real bags come from sim.sandbags), and an orphan
+	## route_bait is dropped, since with no band there is nothing to dress.
+	for b in bands:
+		if b["y"] == ev["y"]:
+			return
+	if ev["t"] == "route_fork":
+		bands.append({"y": ev["y"], "x": ev["x"]})
+
+
+static func anchored_sign_seen(born: Dictionary, key, tick: int) -> int:
+	## Ticks an anchored band sign has been on screen. Stamps the first frame it
+	## passed the cull and counts from there. Pure + static so the test measures
+	## the same clock the draw does.
+	if not born.has(key):
+		born[key] = tick
+	return tick - int(born[key])
+
+
+static func anchored_sign_life(seen_ticks: int) -> float:
+	## The third overlord on the fork signpost, and the one the other two cannot
+	## supply: TIME. fork_sign_alpha keys off overlaps and fork_sign_relevance off
+	## SCREEN POSITION, but _step_camera is a player-driven ratchet that only ever
+	## moves north — a player who stops at a fork freezes fy and holds a >=0.46
+	## alpha plate for as long as they like (13-20 s measured). 180 ticks = 3.0 s,
+	## against ~1.6 s for the position fade on an uninterrupted march, so the cap
+	## never fires first for a player who is actually walking.
+	return clampf(float(SIGN_LIFE_HOLD_TICKS + SIGN_LIFE_DECAY_TICKS - seen_ticks)
+		/ float(SIGN_LIFE_DECAY_TICKS), 0.0, 1.0)
+
+
+static func band_sign_visible(player_ys: PackedInt64Array, band_y: int) -> bool:
+	## The gate PERMANENT FORD never had. Its two siblings in the same water block
+	## are already conditional (FORD OPEN on deck_open, the tank flag on tank_near)
+	## and every other _world_label* in this file is entity-attached and dies with
+	## its entity — so the band-anchored plate was the one world label with no
+	## lifecycle at all. The twin rails and bank chevrons still draw
+	## unconditionally: the shape cue stays, only the plate learns to shut up.
+	for py in player_ys:
+		if absf(float(py - band_y) * PX) < BAND_SIGN_REACH:
+			return true
+	return false
 
 
 static func fork_sign_alpha(sign_rect: Rect2, band: Array, players := []) -> float:
@@ -9192,17 +9257,10 @@ func _draw_gates() -> void:
 				continue
 			for wseg2 in 3:
 				_spr("barbedwire", Vector2(wire_x0 + 30.0 + wseg2 * 55.0, cy2), 0.0, 0.8, Color(0.55, 0.5, 0.45))
-		# Bait dressing (c2 2v): the trap lane gets EXTRA sandbag cover so it
-		# reads as the better-defended reward lane — deliberately NO warning
-		# glyph (reading the bait is the skill). Matches the sim's +490/+530 bags.
-		if fk.get("bait", false):
-			var bait_x := (isl_x + 120.0) if cache_left else (isl_x - 120.0)
-			for bd in 2:
-				var bdy := _to_screen(0, fk["y"] + (490 + bd * 40) * Fixed.ONE).y
-				if bdy < -20.0 or bdy > 380.0:
-					continue
-				_wall_seg(Vector2(bait_x + bd * 20.0, bdy), 0.62, Color(1.02, 0.98, 0.74),
-					int(bait_x) + bd, fk["y"] / 65536 + 490 + bd * 40, 0)
+		# (The bait lane's extra cover is drawn by _draw_sandbags off sim.sandbags,
+		# which is where the sim actually appends it. This block used to stamp a
+		# SECOND, offset copy at isl_x +/- 120 — 380/400 at gate 2 while the real
+		# bags sit at 420/465 — blocky world clutter that lied about where cover is.)
 		var sign_xs := fork_sign_xs(cache_left, cw2, bw2)
 		var cx := sign_xs.x
 		var bx := sign_xs.y
@@ -9228,10 +9286,18 @@ func _draw_gates() -> void:
 		# combat band. minf: EITHER overlord can dissolve a sign.
 		var ck := str(fk["y"]) + "|c"
 		var bk := str(fk["y"]) + "|b"
+		# A THIRD overlord, and the one neither of the other two can supply: TIME.
+		# Both of them are functions of screen position, and _step_camera is a
+		# player-driven ratchet — a player who stops at a fork freezes fy and holds
+		# a near-half-alpha plate indefinitely (13-20 s measured). Same minf idiom,
+		# same 0.12/frame lerp: ANY overlord may dissolve a sign.
+		var life := anchored_sign_life(anchored_sign_seen(_fork_sign_born, fk["y"], sim.tick_count))
 		var cf: float = lerpf(float(_fork_sign_fade.get(ck, 1.0)),
-			minf(fork_sign_alpha(crect, _band, _player_label_rects), fork_sign_relevance(fy)), 0.12)
+			minf(minf(fork_sign_alpha(crect, _band, _player_label_rects),
+				fork_sign_relevance(fy)), life), 0.12)
 		var bf: float = lerpf(float(_fork_sign_fade.get(bk, 1.0)),
-			minf(fork_sign_alpha(brect, _band, _player_label_rects), fork_sign_relevance(fy)), 0.12)
+			minf(minf(fork_sign_alpha(brect, _band, _player_label_rects),
+				fork_sign_relevance(fy)), life), 0.12)
 		_fork_sign_fade[ck] = cf
 		_fork_sign_fade[bk] = bf
 		# The ONE plate language (LABEL_PLATE_FILL via SIGN_PLATE_FILL), lane-tinted
@@ -10276,6 +10342,16 @@ const SIGN_PAD_X := 4.0
 # strips and island wrecks carry the in-band truth once the decision is made.
 const SIGN_FADE_FULL := 130.0
 const SIGN_FADE_GONE := 210.0
+# Time cap on the anchored-sign class (see anchored_sign_life). The position fade
+# above is a function of fy, and the camera is a player-driven ratchet that only
+# moves north — so a player who parks at a fork freezes the fade mid-way and the
+# plate never leaves. 120 ticks of hold + 60 of decay = gone at 180 (3.0 s);
+# an uninterrupted march at PLAYER_SPEED clears the sign on position in ~1.6 s,
+# so this cap only ever truncates the degenerate case.
+const SIGN_LIFE_HOLD_TICKS := 120
+const SIGN_LIFE_DECAY_TICKS := 60
+# How much approach a band-anchored sign speaks for, in px either side of its band.
+const BAND_SIGN_REACH := 120.0
 # Veteran-armor chip flash — the SAME amber family the wave banner wears so the two
 # veteran cues cross-reference, and distinct from the nest's sand chip
 # (0.85, 0.78, 0.5) and the shield's cyan (0.55, 0.85, 1.0).
@@ -10390,6 +10466,7 @@ var _player_label_rects: Array[Rect2] = []
 ## Per-signpost dissolve state, keyed on fork world-y + side (forks are fixed per run).
 ## Lerps toward fork_sign_alpha() each frame — view-only feel state, cleared in _reset().
 var _fork_sign_fade := {}
+var _fork_sign_born := {}   # band y -> sim tick the sign first passed the cull (anchored_sign_life)
 
 
 static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, droppable := false) -> Rect2:

@@ -8262,3 +8262,65 @@ func test_controls_page_survives_every_device_and_the_longest_legal_rebind() -> 
 	Art.use_pad = prior_pad
 	m.free()
 	stub.free()
+
+
+# A line that ends on a bare dash reads as amputated copy, not as a sentence
+# break — the em dash sits 35px from the panel border with nothing after it, so
+# the eye reports "the text got cut off". A consumer reviewer filed exactly that
+# against the manual ("truncated tutorial body text"), and the literal claim was
+# wrong: the copy DOES reflow. It was the dangling dash on the pad-device
+# CONTROLS row at 100%.
+#
+# CLASS, not instance. The set is derived from the draw (HOWTO_TABS x every
+# reachable leaf x both devices x every TEXT SIZE step), not from a list of
+# known-bad strings, so copy added tomorrow is covered the day it lands.
+# MEASURED on this branch at 4d493b7: 20 dangling-dash line ends across 283 leaf
+# renders (2 devices x 11 TEXT SIZE steps x 5 tabs x every reachable leaf), e.g.
+# kbm/pad 100% CONTROLS 'AIM with the RIGHT STICK. The gun fires on its own —'
+# and pad 200% WAR CHEST 'puts you back in the fight —'. Required: 0.
+# Lines ending on a comma are normal typography and deliberately not asserted on.
+func test_no_manual_line_ends_on_a_dangling_dash() -> void:
+	var prior_scale: float = Art.text_scale
+	var prior_pad: bool = Art.use_pad
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var renders := 0
+	var dangling := 0
+	var worst := ""
+	for pad in [false, true]:
+		Art.use_pad = pad
+		for pct in range(100, 201, 10):
+			Art.text_scale = float(pct) / 100.0
+			for tab in Menu.HOWTO_TABS.size():
+				m._howto_page = tab
+				m._howto_endless_page = 0
+				for leaf in m._howto_subpages():
+					m._howto_endless_page = leaf
+					m.ops.clear()
+					m.centered.clear()
+					var prev = Art.text_capture
+					Art.text_capture = m.ops
+					m._draw_howto()
+					Art.text_capture = prev
+					renders += 1
+					for op in m.ops:
+						if op["k"] != "text":
+							continue
+						var s := String(op["id"]).strip_edges()
+						if s.is_empty() or not (s.substr(s.length() - 1, 1) in Art.WRAP_DASHES):
+							continue
+						dangling += 1
+						worst = "%s %d%% %s leaf%d: '%s'" % [
+							"pad" if pad else "kbm", pct, Menu.HOWTO_TABS[tab], leaf, s]
+	Art.text_scale = prior_scale
+	Art.use_pad = prior_pad
+	Runner.T.ok(renders >= 275,
+		"the leaf set is derived from the real draw (%d renders, need >=275)" % renders)
+	Runner.T.eq(dangling, 0,
+		"no manual line may end on a bare dash — %d found, e.g. %s" % [dangling, worst])
+	m.free()
+	stub.free()

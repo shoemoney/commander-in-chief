@@ -967,6 +967,25 @@ static func fs(size: int) -> int:
 	return maxi(size, int(round(float(size) * text_scale)))
 
 
+## A bare dash is never a word. All three of this game's greedy wrappers
+## (menu._body_block, menu.howto_wrap_lines, hud._wrap_caption) split on " ",
+## so an em dash used as a sentence break could land as the LAST token on a
+## line — "…the gun fires on its own —" flush against the manual's border reads
+## as amputated copy, which is exactly what a consumer reviewer filed. Glue the
+## dash to the word AFTER it so it travels down as a leading continuation mark.
+const WRAP_DASHES := ["—", "–", "-"]
+
+
+static func wrap_words(txt: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	for w in txt.split(" ", false):
+		if not out.is_empty() and out[out.size() - 1] in WRAP_DASHES:
+			out[out.size() - 1] = out[out.size() - 1] + " " + w
+		else:
+			out.append(w)
+	return out
+
+
 static func font() -> Font:
 	if _font == null:
 		var f: FontFile = preload("res://assets/fonts/PixelOperator8.ttf")

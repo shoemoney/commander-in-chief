@@ -1694,7 +1694,7 @@ static func caption_bg_rect(line_count: int, widest: float, y_bottom: float,
 static func _wrap_caption(txt: String, font: Font, size: int, max_w: float) -> Array[String]:
 	var lines: Array[String] = []
 	var cur := ""
-	for w in txt.split(" "):
+	for w in Art.wrap_words(txt):
 		var cand := w if cur == "" else "%s %s" % [cur, w]
 		if cur == "" or font.get_string_size(cand, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
 			cur = cand
