@@ -2411,8 +2411,8 @@ func _consume_events() -> void:
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
 					4: _hint("pierce", "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN")
-					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 3")
-					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 3")
+					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN ON ONE ROUND. THE WINGS ONLY BITE UP CLOSE")
+					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN ON ONE ROUND. STACK SPREAD FOR FIVE")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
@@ -3736,23 +3736,31 @@ static func _continue_ledger_rows(knockdowns: int, coin: int) -> Array:
 
 
 static func _loss_summary(lost: Dictionary) -> String:
-	## A revive can strip seven accrued fields. Seven simultaneous red receipts
-	## hid the revived player and nearby fire, so the battlefield gets one concise
-	## bill; the event still carries every named field for the detailed honesty
+	## A revive can strip seven accrued fields. Seven simultaneous red receipts hid the
+	## revived player and nearby fire, so the battlefield gets one concise bill — but
+	## "LOADOUT LOST — 4 ITEMS" named nothing, so the mod the player actually mourns went
+	## anonymously. Now it NAMES up to three (claymores keep their stock, as before) and
+	## tails the rest as +N: still ONE floater, still one line, which is what the count
+	## was protecting. The event still carries every named field for the detailed honesty
 	## contract and future debrief/telemetry use.
-	var count := 0
+	var names: Array[String] = []
 	var claymores := 0
 	for k in lost:
-		if not LOSS_NOUN.get(k, "").is_empty():
-			count += 1
-			if k == "claymores":
-				claymores = int(lost[k])
-	if count == 0:
+		var noun: String = LOSS_NOUN.get(k, "")
+		if noun.is_empty():
+			continue
+		if k == "claymores":
+			claymores = int(lost[k])
+			continue
+		names.append(noun)
+	if names.is_empty() and claymores <= 0:
 		return ""
-	var stock := ""
+	# Three segments total. The claymore stock is one of them when there is any.
+	var shown: Array[String] = names.slice(0, 3 if claymores <= 0 else 2)
+	var hidden := names.size() - shown.size()
 	if claymores > 0:
-		stock = " · %d CLAYMORE%s" % [claymores, "" if claymores == 1 else "S"]
-	return "LOADOUT LOST — %d ITEM%s%s" % [count, "" if count == 1 else "S", stock]
+		shown.append("%d CLAYMORE%s" % [claymores, "" if claymores == 1 else "S"])
+	return "LOADOUT LOST — %s%s" % [" · ".join(shown), "" if hidden <= 0 else " +%d" % hidden]
 
 
 static func _down_loss_summary(token: int, streak: int) -> String:
@@ -9337,28 +9345,92 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
-		if maxed:
-			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6))
-		elif pk.get("cost", 0) > 0:
-			# Price tinted by affordability (matches the spend-wheel language).
-			var afford: bool = sim.war_chest >= pk["cost"]
-			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.35))
+	# Every pickup TAG (capsule name / MAXED / price) claims AFTER the sprite pass, in one
+	# batch — see pickup_label_requests / claim_pickup_labels.
+	var lreqs := pickup_label_requests(sim)
+	var lgot := claim_pickup_labels(lreqs, _label_slots)
+	for li in lreqs.size():
+		var got: Rect2 = lgot[li]
+		if not got.has_area():
+			continue                      # saturated: suppressed, never overprinted
+		var rq: Dictionary = lreqs[li]
+		if rq["coin"]:
 			# Coin + digits claim ONE slot through the world-text arbiter (the icon
 			# travels with its number) — the bare draws printed the price over fork
 			# signposts, plated labels and floattext toasts.
-			var pdigits := str(pk["cost"]) if afford else (str(pk["cost"]) + "×")
-			var pwant := Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(pdigits, 9), 13.0)
-			var pgot := claim_label_slot(pwant, _label_slots)
-			_label_slots.append(pgot)
-			draw_rect(pgot, LABEL_PLATE_FILL)
-			var poff := pgot.position - pwant.position
-			draw_texture_rect(Art.tex("icon_coin"), Rect2(ppos + Vector2(-15, -33) + poff, Vector2(9, 9)), false)
-			Art.text(self, pdigits, ppos + Vector2(-4, -25) + poff, 9, pcol)
+			var poff: Vector2 = got.position - (rq["want"] as Rect2).position
+			draw_rect(got, LABEL_PLATE_FILL)
+			draw_texture_rect(Art.tex("icon_coin"), Rect2(rq["pos"] + Vector2(-15, -33) + poff, Vector2(9, 9)), false)
+			Art.text(self, rq["txt"], rq["pos"] + Vector2(-4, -25) + poff, 9, rq["col"])
+		else:
+			_paint_world_label(rq["txt"], rq["pos"], rq["col"], rq["want"], got)
+
+
+## Every world-space pickup TAG this frame — the capsule name, MAXED, and the priced-crate
+## coin+digits — as {want, pos, txt, col, coin, d}, where `d` is the squared distance from
+## the pickup to the nearest alive player. Static and view-free on purpose: the ratchet in
+## tests/test_main.gd claims the EXACT rects the draw claims instead of re-deriving them,
+## which is how the world-label pile shipped past claim_label_slot the first time.
+static func pickup_label_requests(psim: SimWorld) -> Array:
+	var out: Array = []
+	var sz := Art.fs(8)
+	for pk in psim.pickups:
+		var ppos := Vector2(roundf(pk["x"] * PX), roundf((pk["y"] - psim.camera_top) * PX))
+		if ppos.y < -40.0 or ppos.y > 400.0:
+			continue                      # same band cull the sprite pass uses
+		var buyer := psim._nearest_alive_player(pk["x"], pk["y"])
+		var d := 1.0e30
+		if not buyer.is_empty():
+			var dx := float(pk["x"] - buyer["x"])
+			var dy := float(pk["y"] - buyer["y"])
+			d = dx * dx + dy * dy
+		if int(pk["kind"]) >= 4:
+			var ci: int = clampi(int(pk["kind"]) - 4, 0, _CAPSULE_LABEL.size() - 1)
+			var ctxt: String = _CAPSULE_LABEL[ci]
+			var cpos := Vector2(ppos.x - Art.tw(ctxt, sz) / 2.0, ppos.y - 24.0)
+			out.append({"d": d, "txt": ctxt, "col": _CAPSULE_COL[ci], "coin": false, "pos": cpos,
+				"want": _label_plate_rect(cpos.x, cpos.y, Art.tw(ctxt, sz), sz)})
+		var maxed: bool = int(pk["kind"]) <= 3 and not buyer.is_empty() and psim._supply_full(buyer, int(pk["kind"]))
+		if maxed:
+			var mpos := Vector2(ppos.x - Art.tw("MAXED", sz) / 2.0, ppos.y - 25.0)
+			out.append({"d": d, "txt": "MAXED", "col": Color(0.6, 0.6, 0.6), "coin": false, "pos": mpos,
+				"want": _label_plate_rect(mpos.x, mpos.y, Art.tw("MAXED", sz), sz)})
+		elif int(pk.get("cost", 0)) > 0:
+			# Price tinted by affordability (matches the spend-wheel language).
+			var afford: bool = psim.war_chest >= int(pk["cost"])
+			var digits := str(pk["cost"]) if afford else (str(pk["cost"]) + "×")
+			out.append({"d": d, "txt": digits, "coin": true, "pos": ppos,
+				"col": Art.safe(Color(0.5, 1.0, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.35)),
+				"want": Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(digits, 9), 13.0)})
+	return out
+
+
+## Claims a frame's pickup tags against `taken` (the shared _label_slots) and returns one
+## rect per request, PARALLEL to `reqs` — which this sorts IN PLACE, nearest pickup first.
+##
+## Both halves are load-bearing. claim_label_slot's 13-rung ladder strides 11px while every
+## label plate is 13px tall, so adjacent rungs overlap and the ladder really offers ~7 usable
+## rows; a loot cluster saturates it. Persistent labels used to be claimed non-droppable, so
+## on saturation the arbiter KEPT ITS PLACE and printed anyway — an exact pile (measured:
+## campaign seed 7, 1768 of 5400 ticks carried at least one overlapping pair). Dropping is
+## only honest because of the sort: PICKUP_RADIUS is 12px and a priced crate auto-debits on
+## proximity, so the crate that can actually charge you is always rank 0 and always keeps its
+## price; what gets suppressed is the far tag, exactly as the floattext family already behaves.
+static func claim_pickup_labels(reqs: Array, taken: Array[Rect2]) -> Array[Rect2]:
+	# sort_custom is NOT stable, so equal-distance tags would swap rank between frames and
+	# flicker which one is suppressed — the plate's own y breaks the tie deterministically.
+	reqs.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]) if float(a["d"]) != float(b["d"]) else a["want"].position.y < b["want"].position.y)
+	var out: Array[Rect2] = []
+	for rq in reqs:
+		var got: Rect2 = claim_label_slot(rq["want"], taken, 0.0, true)
+		if got.has_area():
+			taken.append(got)
+		out.append(got)
+	return out
 
 
 func _draw_tanks() -> void:
@@ -10428,9 +10500,17 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 	var want := _label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)
 	var got := claim_label_slot(want, _label_slots)
 	_label_slots.append(got)
+	return _paint_world_label(txt, pos, col, want, got)
+
+
+## The plate + ink half of _world_label, for a slot that was ALREADY claimed. Split out
+## for _draw_pickups, which has to claim every pickup tag TOGETHER (nearest-first) before
+## it can know which ones survive — see claim_pickup_labels.
+func _paint_world_label(txt: String, pos: Vector2, col: Color, want: Rect2, got: Rect2) -> Vector2:
+	var sz := Art.fs(8)
 	draw_rect(got, LABEL_PLATE_FILL)
 	var off := got.position - want.position
-	Art.text(self, txt, pos + off, sz, Color(col.r, col.g, col.b, a))
+	Art.text(self, txt, pos + off, sz, Color(col.r, col.g, col.b, _callout_ink_alpha(col.a)))
 	return off
 
 

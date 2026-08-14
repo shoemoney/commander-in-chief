@@ -1993,8 +1993,9 @@ func test_world_text_saturation_drops_instead_of_overprinting() -> void:
 			var excl: Rect2 = ms.player_label_exclusion(anchor)
 			frame.append(excl)
 			placed.append({"id": "player exclusion", "box": excl})
-			# The persistent labels claim first, in draw order, NOT droppable
-			# (the shipped capsule-name / MAXED offsets from _draw_pickups).
+			# Two generic PERSISTENT claimers (non-droppable) staged ahead of the toasts —
+			# this is not mirroring _draw_pickups, which no longer claims that way; it is
+			# pinning the arbiter's behaviour for any caller that keeps its place.
 			var cap: Rect2 = ms.claim_label_slot(
 				ms._label_plate_rect(anchor.x - Art.tw("SPREAD", sz) / 2.0, anchor.y - 25.0, Art.tw("SPREAD", sz), sz), frame)
 			frame.append(cap)
@@ -2746,3 +2747,135 @@ func test_victory_glint_is_gated_by_reduce_motion() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
 	Runner.T.ok(src.find("if shine and _motion >= 0.5:") != -1,
 		"the gold-shine sweep is gated on _motion like every other victory-card effect")
+
+
+# --- the pickup-tag pile: claim_label_slot was SATURATING, not being bypassed -------
+# Every world label plate is `size + 5` = 13px tall, but LABEL_ROWS strides 11px, so
+# adjacent rungs overlap and the 13-rung ladder really offers ~7 usable rows. Pickup tags
+# used to be claimed NON-droppable, so on exhaustion the arbiter kept its place and printed
+# anyway. Measured with the shipped request builder (tools/probe_maxed_pile.gd): campaign
+# seed 7 carried an overlapping pair on 1768 of 5400 ticks, 3145 colliding pairs, first
+# offence at tick 3633 — six capsule tags in one column, TRIPLE clamped to y=0 on PIERCE.
+
+func test_pickup_labels_never_overprint_in_a_real_run() -> void:
+	## Real play, EVERY tick — no sampling. The window (3700) is past the measured onset
+	## (3633) with margin; both numbers ride in the commit body.
+	var ms: Script = load("res://src/main.gd")
+	var sim := SimWorld.new(7, 1, "campaign")
+	var overlaps := 0
+	var frames := 0
+	var max_labels := 0
+	var first := ""
+	for t in 3700:
+		if sim.wiped:
+			break
+		sim.step([ms.demo_input(t, sim)])
+		var slots: Array[Rect2] = []
+		var reqs: Array = ms.pickup_label_requests(sim)
+		var got: Array[Rect2] = ms.claim_pickup_labels(reqs, slots)
+		var live: Array[Rect2] = []
+		for r in got:
+			if r.has_area():
+				live.append(r)
+		max_labels = maxi(max_labels, reqs.size())
+		var over := 0
+		for i in live.size():
+			for j in range(i + 1, live.size()):
+				if live[i].grow(-0.5).intersects(live[j].grow(-0.5)):
+					over += 1
+		if over > 0:
+			frames += 1
+			overlaps += over
+			if first == "":
+				first = "tick %d, %d drawn tags" % [t, live.size()]
+	Runner.T.eq(overlaps, 0,
+		"no two pickup tags share pixels in 3700 ticks of real campaign play (%d pairs over %d frames; first %s)"
+			% [overlaps, frames, first])
+	Runner.T.ok(max_labels >= 6,
+		"the run actually got congested (%d simultaneous tag REQUESTS) — a vacuous drive must not pass" % max_labels)
+
+
+func test_pickup_label_cluster_drops_instead_of_stacking() -> void:
+	## Staged saturation, at 100% and at the largest shipped TEXT SIZE: 12 pickups stacked
+	## in one column, at the bottom-left anchor and again at the top edge where rows are
+	## skipped. Drops must happen (proving the ladder really saturated) and the NEAREST
+	## request must never be one of them — a priced crate auto-debits inside PICKUP_RADIUS,
+	## so the tag that can charge you keeps its pixels.
+	var ms: Script = load("res://src/main.gd")
+	var was_scale: float = Art.text_scale
+	var scale_max := float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0
+	var caps: Array = ms.get_script_constant_map()["_CAPSULE_LABEL"]
+	var texts := _shipped_world_labels()
+	for scale in [1.0, scale_max]:
+		Art.text_scale = scale
+		for anchor in [Vector2(40.0, 340.0), Vector2(40.0, 14.0)]:
+			var sz := Art.fs(8)
+			var reqs: Array = []
+			for i in 12:
+				var txt: String = texts[i % texts.size()] if i % 2 == 0 else String(caps[i % caps.size()])
+				var pos := Vector2(anchor.x, anchor.y - float(i) * 3.0)
+				# Input order is FARTHEST-first, so a claimer that skips the sort fails here.
+				reqs.append({"d": float(12 - i), "txt": txt, "col": Color(1, 1, 1), "coin": false,
+					"pos": pos, "want": ms._label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)})
+			var slots: Array[Rect2] = []
+			var got: Array[Rect2] = ms.claim_pickup_labels(reqs, slots)
+			var drops := 0
+			var live: Array[Rect2] = []
+			for r in got:
+				if r.has_area():
+					live.append(r)
+				else:
+					drops += 1
+			var over := 0
+			for i in live.size():
+				for j in range(i + 1, live.size()):
+					if live[i].grow(-0.5).intersects(live[j].grow(-0.5)):
+						over += 1
+			Runner.T.eq(over, 0, "saturated cluster at %s scale %.2f draws no overlapping tag" % [str(anchor), scale])
+			Runner.T.ok(drops > 0, "…and the ladder really saturated (%d dropped of 12)" % drops)
+			Runner.T.ok(got[0].has_area(),
+				"…the NEAREST pickup's tag is never the one dropped (its crate can debit you)")
+			Runner.T.eq(float(reqs[0]["d"]), 1.0, "claim_pickup_labels sorts nearest-first, in place")
+	Art.text_scale = was_scale
+
+
+func test_pickup_label_rank_is_stable_at_equal_distance() -> void:
+	## sort_custom is NOT stable in Godot, so two pickups at the same squared distance can
+	## swap rank between frames — which flips WHICH tag gets suppressed and makes it flicker.
+	## Same set, two input permutations: the claimed order must be identical.
+	var ms: Script = load("res://src/main.gd")
+	var sz := Art.fs(8)
+	var orders: Array = []
+	for reversed_in in [false, true]:
+		var reqs: Array = []
+		for i in 12:
+			var k := (11 - i) if reversed_in else i
+			var pos := Vector2(40.0, 40.0 + float(k) * 3.0)
+			reqs.append({"d": 5.0, "txt": "MAXED", "col": Color(1, 1, 1), "coin": false,
+				"pos": pos, "want": ms._label_plate_rect(pos.x, pos.y, Art.tw("MAXED", sz), sz)})
+		var slots: Array[Rect2] = []
+		ms.claim_pickup_labels(reqs, slots)
+		var ys: Array = []
+		for rq in reqs:
+			ys.append(rq["want"].position.y)
+		orders.append(ys)
+	Runner.T.eq(str(orders[0]), str(orders[1]),
+		"equal-distance pickup tags rank the same whatever order they arrive in (%s vs %s)"
+			% [str(orders[0]), str(orders[1])])
+
+
+func test_pickup_tags_are_wired_through_the_batch_claim() -> void:
+	## The wiring ratchet the geometry tests cannot be: a future edit must not quietly
+	## draw a pickup tag straight to Art.text again.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var start := src.find("func _draw_pickups()")
+	Runner.T.ok(start > 0, "found _draw_pickups")
+	var stop := src.find("\n\n\n", start)   # top-level defs are separated by two blank lines
+	Runner.T.ok(stop > start, "delimited the _draw_pickups body")
+	var body := src.substr(start, stop - start)
+	Runner.T.ok(body.contains("claim_pickup_labels("),
+		"_draw_pickups emits its tags through the one batch claim")
+	Runner.T.eq(body.count("_world_label_centered("), 0,
+		"…and no pickup tag claims on its own any more (the per-tag claim is what saturated)")
+	Runner.T.eq(body.count("claim_label_slot("), 0,
+		"…nor claims a slot outside the batch, which is what let a saturated tag keep its place")

@@ -1050,10 +1050,16 @@ func test_death_feedback_is_concise_causal_and_last_stand_explicit() -> void:
 	if ms.has_method("_loss_summary"):
 		var summary: String = ms._loss_summary({"vest": true, "triple": true,
 			"pierce_ticks": 300, "claymores": 3})
-		Runner.T.ok(summary.begins_with("LOADOUT LOST — 4 ITEMS"),
-			"one compact receipt reports the full stripped-field count (got %s)" % summary)
+		Runner.T.ok(summary.begins_with("LOADOUT LOST — "),
+			"one compact receipt reports the stripped loadout (got %s)" % summary)
+		Runner.T.ok(summary.contains("TRIPLE SHOT"),
+			"the receipt NAMES what death took — LOSS_NOUN already had the word, the count hid it (got %s)" % summary)
 		Runner.T.ok(summary.contains("3 CLAYMORES"),
 			"countable mine stock remains explicit in the compact receipt (got %s)" % summary)
+		Runner.T.ok(summary.contains("+1"),
+			"a 4-item loss still caps the named list at 3 and tails the rest (got %s)" % summary)
+		Runner.T.ok(ms._loss_summary({"vest": true}) == "LOADOUT LOST — FLAK VEST",
+			"a single loss is just named (got %s)" % ms._loss_summary({"vest": true}))
 		Runner.T.ok(not summary.contains("\n"), "inventory loss stays on one battlefield line")
 		Runner.T.eq(ms._loss_summary({}), "", "no stripped loadout emits no loss noise")
 	Runner.T.ok(ms.has_method("_down_loss_summary"), "global down losses share one summary line")
@@ -2658,14 +2664,14 @@ func test_reduce_motion_copy_does_not_overclaim_past_its_own_floors() -> void:
 		"REDUCE MOTION copy says the flash/warp are damped, not removed (%s)" % help)
 
 
-# --- R4: the fan's ammo tax is sold as pure upside ---------------------------
+# --- R4: the fan bills ONE round, and the copy says what it actually buys -----
 
-func test_fan_ammo_tax_is_disclosed_in_the_hint_copy() -> void:
-	## sim_world.gd charges 1 ammo for the base shot, then an extra fan_cost
-	## on top (1 for a LONE 3-round fan — Trench Gun or Triple alone — 2 for
-	## the STACKED 5-round fan) — so 2 ammo/pull and 3 ammo/pull respectively,
-	## not the "free extra pellets" the old hint copy implied. Prove the
-	## sim's real drain first, then hold the pickup copy to it.
+func test_fan_costs_one_round_and_the_copy_says_so() -> void:
+	## The extra fan_cost is gone (see tests/test_gameplay.gd's per-round value
+	## ratchet: the 3x/5x multiplier it was priced against only exists inside
+	## ~45px, so from 80px out the tax made the fan strictly worse than the bare
+	## gun). Prove the sim's real drain first, then hold the pickup copy to it —
+	## the old copy spelled out "2 AMMO A PULL" and would now be a lie.
 	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
 	var p := sim.players[0]
 	p["spread_ticks"] = 200
@@ -2674,7 +2680,7 @@ func test_fan_ammo_tax_is_disclosed_in_the_hint_copy() -> void:
 	inp.aim_y = -256
 	inp.fire = true
 	sim.step([inp])
-	Runner.T.eq(ammo0 - p["mg_ammo"], 2, "a lone 3-round fan (Trench Gun or Triple) costs 2 ammo/pull")
+	Runner.T.eq(ammo0 - p["mg_ammo"], 1, "a lone 3-round fan (Trench Gun or Triple) bills one round")
 
 	var sim2 := SimWorld.new(0xC0FFEE, 1, "campaign")
 	var p2 := sim2.players[0]
@@ -2685,13 +2691,13 @@ func test_fan_ammo_tax_is_disclosed_in_the_hint_copy() -> void:
 	inp2.aim_y = -256
 	inp2.fire = true
 	sim2.step([inp2])
-	Runner.T.eq(ammo1 - p2["mg_ammo"], 3, "the stacked 5-round fan costs 3 ammo/pull")
+	Runner.T.eq(ammo1 - p2["mg_ammo"], 1, "the stacked 5-round fan also bills one round")
 
 	var src := _view_src()
-	Runner.T.ok(src.contains("2 AMMO A PULL"),
-		"the Trench Gun / Triple Shot hint copy must state the real per-pull ammo cost")
-	Runner.T.ok(src.contains("5 FOR 3"),
-		"the stacked-fan hint copy must state the real 3-ammo cost for the 5-way fan")
+	Runner.T.eq(src.count("ON ONE ROUND"), 2,
+		"both fan hints state what a pull actually bills")
+	Runner.T.ok(not src.contains("AMMO A PULL"),
+		"the retired ammo-tax copy is gone — the fan no longer charges extra")
 
 
 # --- R4: getting shot boils a second off the tank, and the only feedback said "safe" ---

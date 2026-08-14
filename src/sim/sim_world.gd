@@ -1447,17 +1447,17 @@ func _step_players(inputs: Array) -> void:
 			var fax: int = p["aim_x"]
 			var fay: int = p["aim_y"]
 			_spawn_mg_bullet(p, i, fax, fay)
-			# Charge for the fan. A Triple/Trench burst spawned 3 (or 5 with both)
-			# pellets for a SINGLE ammo decrement, so the Triple mod was a
-			# free 3-5x DPS multiplier and ammo stopped being a resource at all —
-			# the softest sink in the game. One extra round per pellet PAIR keeps the
-			# upgrade clearly worth taking while making it cost something.
-			# Starting values (+1 for a 3-fan, +2 for a 5-fan); test: time-to-empty
-			# from 99 should fall to roughly half the base gun's, not stay identical.
-			# If Triple then feels punitive rather than powerful, drop the 5-fan to +1.
+			# The fan bills the ONE round the base shot already took. It used to cost an
+			# extra 1 (3-fan) / 2 (5-fan) on the premise that the pellets were a "free
+			# 3-5x DPS multiplier" (2026-07-24, design-loop phase 3 item 2). That premise
+			# was never measured and is false: the +/-12 deg wings miss a 10px fodder
+			# hitbox past ~47px and the widest 17px body past ~80px, so from 80px out the
+			# taxed fan delivered 0.50 hits/round (0.33 stacked) against the bare gun's
+			# 1.00 — a permanent, undeclinable DOWNGRADE sold as the top of the upgrade
+			# ladder. Any fan_cost >= 1 is strictly worse at range, so the only price that
+			# holds the invariant is 0. tests/test_gameplay.gd::
+			# test_fan_never_costs_more_per_round_than_the_bare_gun pins it per range/body.
 			if p["spread_ticks"] > 0 or p["triple"]:
-				var fan_cost := 2 if (p["spread_ticks"] > 0 and p["triple"]) else 1
-				p["mg_ammo"] = maxi(0, p["mg_ammo"] - fan_cost)
 				# Trench Gun (timed) / Triple Shot (held until death) both spray this one
 				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),

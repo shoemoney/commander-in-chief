@@ -381,8 +381,9 @@ func test_spread_shot_fires_three_bullets() -> void:
 	inp.fire = true
 	sim.step(_inputs(inp))
 	Runner.T.eq(sim.bullets.size(), 3, "spread shot spawns a 3-bullet fan")
-	# The fan is charged for now — 3 pellets on one round made ammo a fake sink.
-	Runner.T.eq(p["mg_ammo"], ammo0 - 2, "the 3-pellet spread fan costs two rounds")
+	# One round buys the whole fan: the extra charge made the fan strictly worse per
+	# round than the bare gun past ~47px (test_fan_never_costs_more_per_round_than_the_bare_gun).
+	Runner.T.eq(p["mg_ammo"], ammo0 - 1, "the 3-pellet spread fan bills one round")
 
 
 func test_assist_mode_gives_a_two_hit_vest_each_life() -> void:
@@ -496,7 +497,7 @@ func test_triple_shot_sprays_three_bullets() -> void:
 	inp.fire = true
 	sim.step(_inputs(inp))
 	Runner.T.eq(sim.bullets.size(), 3, "triple shot fires three bullets on one trigger pull")
-	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX - 2, "the 3-round fan costs two rounds")
+	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX - 1, "the 3-round fan bills one round")
 	var vmin := 1 << 40
 	var vmax := -(1 << 40)
 	for b in sim.bullets:
@@ -512,3 +513,86 @@ func test_triple_pickup_grants_and_death_strips() -> void:
 	Runner.T.ok(p["triple"], "the triple-shot supply kind grants the mod")
 	sim._respawn(p, p["y"])   # revive path = the 1986 upgrade strip
 	Runner.T.ok(not p["triple"], "death/respawn strips the Triple Shot mod")
+
+
+# --- the fan's price vs the damage it can actually deliver --------------------
+# The extra fan_cost (2026-07-24, design-loop phase 3 item 2) was priced against a
+# "free 3-5x DPS multiplier". Measured through the shipped fire path, that multiplier
+# only exists inside ~45px: the +/-12 deg wing pellets miss a 10px fodder hitbox past
+# ~47px and a 17px one past ~80px, so a lone fan billed 2 rounds delivered 0.50
+# hits/round and the stacked 5-fan billed 3 delivered 0.33 — strictly WORSE than the
+# bare MG on a mod the player can neither decline nor drop.
+
+func _fan_fire(triple: bool, spread: int) -> Dictionary:
+	## One trigger pull through the REAL sim.step, so the bill is read off mg_ammo
+	## and can never drift from a mirrored constant.
+	var sim := SimWorld.new(0, 1, "campaign")
+	var p: Dictionary = sim.players[0]
+	p["triple"] = triple
+	p["spread_ticks"] = spread
+	p["mg_ammo"] = 99
+	p["fire_cd"] = 0
+	var before: int = p["mg_ammo"]
+	sim.bullets.clear()
+	var inp := SimInput.new()
+	inp.aim_x = 0
+	inp.aim_y = -256
+	inp.fire = true
+	var px: int = p["x"]
+	var py: int = p["y"]
+	sim.step(_inputs(inp))
+	var out: Array = []
+	for b in sim.bullets:
+		out.append({"vx": b["vx"], "vy": b["vy"], "x": px, "y": py})
+	return {"billed": before - int(sim.players[0]["mg_ammo"]), "bullets": out}
+
+
+func _fan_hits(res: Dictionary, dist: int, r: int) -> int:
+	## March each pellet the sim's own way (one vx/vy add per tick, hit test at the
+	## post-move position) against a body `dist` px north of the muzzle.
+	var hits := 0
+	for b in res["bullets"]:
+		var tx: int = b["x"]
+		var ty: int = b["y"] - dist
+		var x: int = b["x"]
+		var y: int = b["y"]
+		for _t in SimWorld.BULLET_TTL_TICKS:
+			x += b["vx"]
+			y += b["vy"]
+			if absi(x - tx) <= r and Fixed.mul(x - tx, x - tx) + Fixed.mul(y - ty, y - ty) <= Fixed.mul(r, r):
+				hits += 1
+				break
+	return hits
+
+
+func test_fan_never_costs_more_per_round_than_the_bare_gun() -> void:
+	## Radii come from the sim's OWN consts, so a new enemy body is covered the day it
+	## lands; ranges run to 260px, past what BULLET_TTL_TICKS can carry a pellet.
+	var radii := {"fodder": SimWorld.BULLET_HIT_RADIUS, "colossus": 34 * Fixed.ONE}
+	for k in SimWorld.KIND_HIT_RADIUS:
+		radii[k] = SimWorld.KIND_HIT_RADIUS[k]
+	var combos := {"triple": [true, 0], "trench": [false, 480], "stacked": [true, 480]}
+	var base := _fan_fire(false, 0)
+	Runner.T.eq(base["billed"], 1, "the bare MG bills one round per pull")
+	var worse := 0
+	var first := ""
+	var close_upside := false
+	for dist in [40, 60, 80, 100, 140, 180, 220, 260]:
+		for cname in combos:
+			var res := _fan_fire(combos[cname][0], combos[cname][1])
+			Runner.T.ok(res["billed"] > 0, "%s bills at least the base round" % cname)
+			for rk in radii:
+				var r: int = radii[rk]
+				var fan_rate := float(_fan_hits(res, dist * Fixed.ONE, r)) / float(res["billed"])
+				var base_rate := float(_fan_hits(base, dist * Fixed.ONE, r)) / float(base["billed"])
+				if fan_rate < base_rate - 0.001:
+					worse += 1
+					if first == "":
+						first = "%s vs %s at %dpx: %.2f hits/round vs base %.2f" % [cname, rk, dist, fan_rate, base_rate]
+				if dist == 40 and fan_rate > base_rate + 0.001:
+					close_upside = true
+	Runner.T.eq(worse, 0,
+		"a fan is never worse per round billed than the bare gun at any range or body size (%d cells; first: %s)"
+			% [worse, first])
+	Runner.T.ok(close_upside,
+		"and the fan is still strictly BETTER up close — deleting the pellets must not pass this")
