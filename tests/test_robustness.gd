@@ -404,3 +404,45 @@ func test_corrupt_scalar_values_never_abort_the_loader() -> void:
 	Runner.T.ok(not main._captions, "_apply_settings still ran, so settings were NOT silently reverted to defaults")
 	main.free()
 	_restore_save(s)
+
+
+func test_corrupt_settings_types_never_abort_the_loader() -> void:
+	# A String in a bool [settings] key used to throw on the typed assignment
+	# (colorblind's setter is `v: bool`) and abort _load_bests mid-apply — or,
+	# for keys that only truth-test, install a non-bool. Each bad value must
+	# cost only its own field and fall back to SETTINGS_DEFAULTS.
+	var s := _stash_save(".savetest5")
+	var cf := ConfigFile.new()
+	cf.set_value("settings", "colorblind", "yes")
+	cf.set_value("settings", "assist", true)
+	cf.set_value("settings", "reduce_motion", "true")
+	cf.set_value("settings", "rumble", "off")
+	cf.set_value("settings", "swap_sticks", "1")
+	cf.set_value("settings", "swap_sticks_p2", "1")
+	cf.set_value("settings", "sfx_vol", "loud")
+	cf.set_value("settings", "music_vol", "quiet")
+	cf.set_value("settings", "fullscreen", "full")
+	cf.set_value("settings", "window_scale", "huge")
+	cf.set_value("settings", "captions", "no")
+	cf.set_value("settings", "text_scale", "big")
+	cf.set_value("best", "wave", 12)
+	Runner.T.eq(cf.save(MainScript.SAVE_PATH), OK, "sanity: the type-corrupt settings save wrote")
+
+	var main := MainScript.new()
+	main._load_bests()
+	var d: Dictionary = MainScript.SETTINGS_DEFAULTS
+	Runner.T.eq(main.colorblind, d["colorblind"], "a String colorblind falls back to the default bool, not a truthy string")
+	Runner.T.eq(main._assist, true, "a well-typed neighbouring bool still loads")
+	Runner.T.eq(main._motion < 0.5, d["reduce_motion"], "a String reduce_motion falls back to the default bool")
+	Runner.T.eq(main._rumble_on, d["rumble"], "a String rumble falls back to the default bool")
+	Runner.T.eq(main._swap_sticks[0], d["swap_sticks"], "a String swap_sticks falls back to the default bool")
+	Runner.T.eq(main._swap_sticks[1], d["swap_sticks_p2"], "a String swap_sticks_p2 falls back to the default bool")
+	Runner.T.eq(main._cfg_int(cf, "settings", "sfx_vol", d["sfx_vol"]), d["sfx_vol"], "a String sfx_vol falls back to the default int")
+	Runner.T.eq(main._cfg_int(cf, "settings", "music_vol", d["music_vol"]), d["music_vol"], "a String music_vol falls back to the default int")
+	Runner.T.eq(main._fullscreen, d["fullscreen"], "a String fullscreen falls back to the default bool")
+	Runner.T.eq(main._win_scale, d["window_scale"], "a String window_scale falls back to the default int")
+	Runner.T.eq(main._captions, d["captions"], "a String captions falls back to the default bool")
+	Runner.T.eq(main._text_scale, d["text_scale"], "a String text_scale falls back to the default int")
+	Runner.T.eq(main.best_wave, 12, "the loader kept going — the good neighbouring field still loaded")
+	main.free()
+	_restore_save(s)

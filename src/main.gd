@@ -4324,6 +4324,11 @@ func _cfg_int(cf: ConfigFile, section: String, key: String, def: int) -> int:
 	return int(v) if (v is int or v is float) else def
 
 
+func _cfg_bool(cf: ConfigFile, section: String, key: String, def: bool) -> bool:
+	var v: Variant = cf.get_value(section, key, def)
+	return v if v is bool else def
+
+
 func _cfg_dict(cf: ConfigFile, section: String, key: String) -> Dictionary:
 	var v: Variant = cf.get_value(section, key, {})
 	return v if v is Dictionary else {}
@@ -4401,24 +4406,24 @@ func _load_bests() -> void:
 		# no field-by-field mapping to drift, and fullscreen=false explicitly restores
 		# windowed mode (the old branch only handled the true case).
 		_apply_settings({
-			"colorblind": cf.get_value("settings", "colorblind", SETTINGS_DEFAULTS["colorblind"]),
-			"assist": cf.get_value("settings", "assist", SETTINGS_DEFAULTS["assist"]),
-			"reduce_motion": cf.get_value("settings", "reduce_motion", SETTINGS_DEFAULTS["reduce_motion"]),
-			"rumble": cf.get_value("settings", "rumble", SETTINGS_DEFAULTS["rumble"]),
-			"swap_sticks": cf.get_value("settings", "swap_sticks", SETTINGS_DEFAULTS["swap_sticks"]),
-			"swap_sticks_p2": cf.get_value("settings", "swap_sticks_p2", SETTINGS_DEFAULTS["swap_sticks_p2"]),
-			"sfx_vol": cf.get_value("settings", "sfx_vol",
-				0 if cf.get_value("settings", "sfx_muted", false) else SETTINGS_DEFAULTS["sfx_vol"]),
-			"music_vol": cf.get_value("settings", "music_vol",
-				0 if cf.get_value("settings", "music_muted", false) else SETTINGS_DEFAULTS["music_vol"]),
-			"fullscreen": cf.get_value("settings", "fullscreen", SETTINGS_DEFAULTS["fullscreen"]),
+			"colorblind": _cfg_bool(cf, "settings", "colorblind", SETTINGS_DEFAULTS["colorblind"]),
+			"assist": _cfg_bool(cf, "settings", "assist", SETTINGS_DEFAULTS["assist"]),
+			"reduce_motion": _cfg_bool(cf, "settings", "reduce_motion", SETTINGS_DEFAULTS["reduce_motion"]),
+			"rumble": _cfg_bool(cf, "settings", "rumble", SETTINGS_DEFAULTS["rumble"]),
+			"swap_sticks": _cfg_bool(cf, "settings", "swap_sticks", SETTINGS_DEFAULTS["swap_sticks"]),
+			"swap_sticks_p2": _cfg_bool(cf, "settings", "swap_sticks_p2", SETTINGS_DEFAULTS["swap_sticks_p2"]),
+			"sfx_vol": _cfg_int(cf, "settings", "sfx_vol",
+				0 if _cfg_bool(cf, "settings", "sfx_muted", false) else SETTINGS_DEFAULTS["sfx_vol"]),
+			"music_vol": _cfg_int(cf, "settings", "music_vol",
+				0 if _cfg_bool(cf, "settings", "music_muted", false) else SETTINGS_DEFAULTS["music_vol"]),
+			"fullscreen": _cfg_bool(cf, "settings", "fullscreen", SETTINGS_DEFAULTS["fullscreen"]),
 			# c1-19: read the saved windowed scale back (missing this dropped it on every load,
 			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
-			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
+			"window_scale": _cfg_int(cf, "settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
 			# audio-identity: captions default ON; a save predating the toggle lands there too.
-			"captions": cf.get_value("settings", "captions", SETTINGS_DEFAULTS["captions"]),
+			"captions": _cfg_bool(cf, "settings", "captions", SETTINGS_DEFAULTS["captions"]),
 			# accessibility: a save predating TEXT SIZE lands at 100% (the shipped sizes).
-			"text_scale": cf.get_value("settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
+			"text_scale": _cfg_int(cf, "settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
 		})
 	else:
 		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
