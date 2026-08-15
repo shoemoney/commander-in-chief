@@ -2571,7 +2571,7 @@ const SETTING_HELP := {
 	"winscale": "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY.",
 	"textscale": "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVED AUTOMATICALLY.",
 	"coop": "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN.",
-	"hard": "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY — APPLIES TO YOUR NEXT RUN.",
+	"hard": "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY. RUNS ARE TAGGED *HARD. APPLIES TO YOUR NEXT RUN.",
 }
 static func setting_help(id: String) -> String:
 	var src: String = SETTING_HELP.get(id, "")
@@ -4879,12 +4879,16 @@ func _draw_hall() -> void:
 			var tag: String = "  *DAILY" if run.get("daily", false) else ""
 			if run.get("assist", false):
 				tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
+			if run.get("hard", false):
+				tag += "  *HARD"   # NG+ inflates score; same board as normal — say so
 			var streak_s := "x%d%s" % [run.get("streak", 0), tag]
 			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > HALL_CELL_R:
 				# Cell would run off the frame — abbreviate the tags for this row.
 				tag = ("  *D" if run.get("daily", false) else "")
 				if run.get("assist", false):
 					tag += "  *A"
+				if run.get("hard", false):
+					tag += "  *H"
 				streak_s = "x%d%s" % [run.get("streak", 0), tag]
 			var y := HALL_ROW0_Y + row * HALL_ROW_PITCH   # derived off HALL_HEADER_Y; the pitch is what keeps row 7's glow band clear of the page buttons
 			if is_latest:

@@ -103,6 +103,7 @@ var _hitstop_frames := 0
 # here during the freeze (see the _hitstop_frames > 0 branch) and re-injected into the
 # very next _gather_inputs() call, then cleared.
 var _hs_latch := [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
+var _last_inputs: Array[SimInput] = []   # last tick's sim inputs — ready-up tally (view-only)
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 # opt-loop: reused per-frame classification of _fx by glow/non-glow kind — see
@@ -460,12 +461,12 @@ func perks_maxed() -> bool:
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 var _wheel_aim := [Vector2.ZERO, Vector2.ZERO]   # aim latched while the wheel is open (sector flicks must not whip the sim aim)
 const WHEEL_ITEMS := [
-	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST, "label": "AMMO +30"},
-	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES +4"},
+	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST, "label": "AMMO"},
+	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES"},
 	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST"},
 	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE"},
 	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS"},
-	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "SUPPLY CALL"},   # Commendation spend — costs a token, never coins
+	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "CALL: AMMO/NADES/VEST/STRIKE"},
 ]
 const BUY_FLOAT := ["+%d AMMO", "+%d GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
 # 8-way wheel: compass = the classic four, SW diagonal = sandbags, other
@@ -2283,6 +2284,7 @@ func _physics_process(_delta: float) -> void:
 		# what a wipe already looks like. The sim-side `if wiped or victory: return` is still the
 		# better home for half of this; it is not this slice's file.
 		var inputs := _gather_inputs()
+		_last_inputs = inputs
 		_check_dry_throw(inputs)
 		_check_dry_roll(inputs)
 		_recorder.record_tick(inputs)   # same inputs the sim gets → bit-exact replay
@@ -5165,6 +5167,7 @@ func _record_run(score: int) -> void:
 		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
 		"bosses": mini(opened, SimWorld.BOSS_RUSH_COUNT),
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
+		"hard": sim.hard,
 		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
 		"hid": _hall_seq}
 	_hall_seq += 1
@@ -5380,7 +5383,7 @@ func _track_bests() -> void:
 			% (Art.pad_button_label(pad_bind_for_glyph("revive")) if Art.use_pad else GameMenu.key_label(bind("revive"))))
 	# Airstrike went wheel-only this patch — veterans who knew the ground-drop
 	# path get one teaching line the first time the chest can afford it.
-	if sim.war_chest >= SimWorld.SHOP_AIRSTRIKE_COST:
+	if sim.war_chest >= sim._supply_cost(3):
 		_hint("airstrike_wheel", TranslationServer.translate("AIRSTRIKES NOW LIVE IN THE SUPPLY WHEEL — HOLD [%s]")
 			% (Art.pad_button_label(pad_bind_for_glyph("wheel")) if Art.use_pad else GameMenu.key_label(bind_for_glyph("wheel"))))
 	# After-Action Debrief trigger: victory, or all players down for ~2.5s
@@ -7305,6 +7308,39 @@ func _vehicle_contact_shadow(pos: Vector2, tex_name: String, tint: Color, a := 0
 	_ground_shadow(pos + Vector2(0.0, spec["y_off"]), spec["r"], a, tint)
 
 
+func _hulk_sim_cover(h: Dictionary) -> bool:
+	## The view wreck pool fades on its own clock. Cover is sim burn_ticks.
+	for hk in sim.tanks:
+		if hk["alive"] or hk["burn_ticks"] <= 0:
+			continue
+		if absi(int(hk["x"]) - int(h["x"])) < 8 * Fixed.ONE \
+				and absi(int(hk["y"]) - int(h["y"])) < 8 * Fixed.ONE:
+			return true
+	return false
+
+
+func _draw_ready_tally() -> void:
+	## 2P shop skip is unanimous. Holding alone used to look like a dead bind.
+	if sim.mode != "endless" or sim.intermission_ticks <= 0 or sim.players.size() < 2:
+		return
+	if _last_inputs.size() < sim.players.size():
+		return
+	var living := 0
+	var holding := 0
+	for i in sim.players.size():
+		if not sim.players[i]["alive"]:
+			continue
+		living += 1
+		if i < _last_inputs.size() and (_last_inputs[i] as SimInput).revive:
+			holding += 1
+	if living < 2 or holding <= 0:
+		return
+	var txt := "READY %d/%d — BOTH HOLD TO DEPLOY" % [holding, living]
+	if holding >= living:
+		txt = "READY %d/%d — DEPLOYING" % [holding, living]
+	Art.text_center(self, txt, 320, 54, 9, Color(1.0, 0.92, 0.55))
+
+
 func _draw() -> void:
 	_label_slots.clear()   # in-world label arbiter: one frame, one set of claimed rects
 	# The soldiers' pixels are RESERVED before anything claims a slot: deny toasts
@@ -7462,6 +7498,7 @@ func _draw() -> void:
 	# shake/zoom/roll so bars, markers and banners stay rock-steady while the world
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
 	draw_set_transform_matrix(get_transform().affine_inverse())
+	_draw_ready_tally()
 	# Cinematic letterbox: bars snap in on boss-intro/victory beats, hold, then melt.
 	# Gated by reduce-motion like every sibling effect — this was the one holdout.
 	# FIRST on this pass, not last: the bottom bar occupies y 344..360 and the rear
@@ -11836,6 +11873,10 @@ func _draw_glow() -> void:
 		if t["alive"] and t["burning"]:
 			_draw_flame(g, _to_screen(t["x"], t["y"]), 1.0, flick)
 	for h in _hulks:
+		# View-time fade used to keep drawing fire after salvage/expiry stripped
+		# sim cover (burn_ticks==0). Only smolder while the hull is still cover.
+		if not _hulk_sim_cover(h):
+			continue
 		var hstr: float = 1.0 - h["t"]
 		if hstr > 0.05:
 			var hpos := _to_screen(h["x"], h["y"])

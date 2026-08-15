@@ -45,8 +45,8 @@ msgstr "文字サイズ：画面上の小さなラベルと字幕を拡大しま
 msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
 msgstr "協力プレイ：2人目のローカルプレイヤーを追加。次回プレイから適用。"
 
-msgid "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY — APPLIES TO YOUR NEXT RUN."
-msgstr "NG+ハード：出現曲線がより厳しくなります。キャンペーン限定—次回プレイから適用。"
+msgid "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY. RUNS ARE TAGGED *HARD. APPLIES TO YOUR NEXT RUN."
+msgstr "NG+ハード：出現曲線がより厳しくなります。キャンペーン限定。記録は*HARD付き。次回プレイから適用。"
 
 msgid "SPOTTER: \"War chest's empty, no revives!\""
 msgstr "観測兵：「戦費が尽きた、もう蘇生できない！」"
@@ -124,8 +124,8 @@ msgstr "トリプルショット—3発の扇形、1発撃つごとに弾薬2消
 msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
 msgstr "引裂弾—重機銃が機動隊の盾を貫通する"
 
-msgid "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING"
-msgstr "スモーク — 敵の照準を封じる。砲弾は盲撃ちで落ちてくる。動き続けろ"
+msgid "SMOKE — BLINDS RIFLE AIM. NESTS STILL TRACK. SHELLS STILL FALL"
+msgstr "スモーク — 小銃の照準を封じる。  機関銃座は追尾を続ける。砲弾は落ちてくる"
 
 msgid "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY."
 msgstr "フラッシュバング—拾うと起爆。歩兵のみ。"

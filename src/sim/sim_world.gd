@@ -1183,6 +1183,9 @@ func _step_players(inputs: Array) -> void:
 			if inp.revive:
 				_try_revive(i, p)
 			_drive_tank(i, p, inp, interact_edge, grenade_edge)
+			# After the hull pose syncs — a boarded tank used to roll over free
+			# crates with zero collect (this continue skipped _collect_pickups).
+			_collect_pickups(p, i)
 			continue
 
 		# Movement: quantized stick [-256,256] -> fixed direction, normalized.
@@ -1886,7 +1889,8 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 	## in range of an affordable (or free) pickup collects it immediately.
 	for k in range(pickups.size() - 1, -1, -1):
 		var pk := pickups[k]
-		if not _dist_lte(p["x"], p["y"], pk["x"], pk["y"], PICKUP_RADIUS):
+		if not _dist_lte(p["x"], p["y"], pk["x"], pk["y"],
+				TANK_CRUSH_RADIUS if p["in_tank"] >= 0 else PICKUP_RADIUS):
 			continue
 		var cost: int = pk.get("cost", 0)
 		if cost > 0 and war_chest < cost:
@@ -3231,6 +3235,7 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
 				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": g["boss"]["gate_y"] - BOSS_Y_OFFSET})
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
 	# The fly-in guard mirrors _bullet_hits_boss: EVERY explosive (grenades,
 	# airbursts, barrels, mines/claymores, tank-death blasts) routes through this
@@ -3240,6 +3245,7 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 	if not endless_boss.is_empty() and endless_boss["alive"] \
 			and endless_boss["phase_t"] >= 0 \
 			and _dist_lte(x, y, endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
+		events.append({"t": "boss_hit", "x": endless_boss["x"], "y": endless_boss["gate_y"] - BOSS_Y_OFFSET})
 		_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
 	# The Colossus is pure armor: grenades are the only thing it respects.
 	if not colossus.is_empty() and colossus["alive"] \
@@ -6530,6 +6536,8 @@ func _step_colossus() -> void:
 	if _supply_cd <= 0:
 		_supply_cd = SUPPLY_DROP_INTERVAL_TICKS
 		pickups.append({"x": _off_center_px(rng.range_i(60, 580)) * F_ONE, "y": camera_top + rng.range_i(200, 320) * F_ONE, "kind": 1})   # c3 3v: siege drop pulls to a flank
+		events.append({"t": "supply_drop", "x": pickups[pickups.size() - 1]["x"],
+			"y": pickups[pickups.size() - 1]["y"]})
 
 
 func _damage_colossus(amount: int) -> void:

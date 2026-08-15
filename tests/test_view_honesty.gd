@@ -1989,6 +1989,54 @@ func test_colossus_screen_bar_opts_out_under_the_result_card() -> void:
 		"the colossus screen-space bar must hide while a result card owns the frame")
 
 
+func test_hall_tags_the_score_inflating_hard_toggle() -> void:
+	## *ASSIST and *DAILY already stamp the board. NG+ HARD was the one toggle
+	## that moved score (~1.58x) with no marker.
+	var menu_src := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	Runner.T.ok(menu_src.contains("tag += \"  *HARD\""),
+		"the Hall stamps *HARD on NG+ runs the same way it stamps *ASSIST")
+	var rec := _view_src()
+	var arm := rec.find("func _record_run(")
+	Runner.T.ok(arm >= 0, "_record_run still exists")
+	var body := rec.substr(arm, rec.find("\nfunc ", arm + 10) - arm)
+	Runner.T.ok(body.contains("\"hard\": sim.hard"),
+		"_record_run banks the hard flag the Hall reads")
+
+
+func test_supply_call_label_names_the_table() -> void:
+	## Commendation spend rolled ammo/nades/vest/strike with a label that said
+	## only SUPPLY CALL.
+	var src := _view_src()
+	Runner.T.ok(src.contains("CALL: AMMO/NADES/VEST/STRIKE"),
+		"the wheel names what a Commendation can roll")
+	Runner.T.ok(not src.contains("\"label\": \"AMMO +30\""),
+		"ammo socket no longer promises the catalogue +30 on a partial fill")
+
+
+func test_airstrike_hint_gates_on_the_live_price() -> void:
+	var src := _view_src()
+	Runner.T.ok(src.contains("sim.war_chest >= sim._supply_cost(3)"),
+		"the airstrike teach uses the depth-creeped price, not the 100c base")
+	Runner.T.ok(not src.contains("war_chest >= SimWorld.SHOP_AIRSTRIKE_COST"),
+		"the base constant is not the live gate")
+
+
+func test_ready_up_tally_exists_for_split_votes() -> void:
+	var src := _view_src()
+	Runner.T.ok(src.contains("func _draw_ready_tally"),
+		"2P ready-up has a visible tally")
+	Runner.T.ok(src.contains("BOTH HOLD TO DEPLOY"),
+		"a split vote says both must hold")
+
+
+func test_hulk_flame_dies_with_sim_cover() -> void:
+	var src := _view_src()
+	Runner.T.ok(src.contains("func _hulk_sim_cover"),
+		"view wreck fire asks the sim cover clock")
+	Runner.T.ok(src.contains("if not _hulk_sim_cover(h):"),
+		"the view-time hulk flame pool is gated on that clock")
+
+
 func test_the_specialist_roster_is_not_filed_under_a_mode_it_outlives() -> void:
 	## Seven of the nine CAMPAIGN special archetypes are the HOW TO PLAY roster —
 	## filed under a tab labelled ENDLESS, headed "ENDLESS WAR". They start

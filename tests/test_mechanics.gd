@@ -226,6 +226,24 @@ func test_boss_and_observer_kills_carry_their_kind() -> void:
 	Runner.T.eq(observer_kind, "observer", "observer kill event carries kind == observer")
 
 
+func test_grenade_on_a_boss_emits_boss_hit() -> void:
+	## Bullets emit boss_hit; grenades called _damage_boss with no event, so the
+	## hit-flash/hit-stop never fired on the weapon the gunship is balanced around.
+	var sim := SimWorld.new(26, 1)
+	var p := sim.players[0]
+	var boss := {"hp": 40, "alive": true, "x": p["x"], "gate_y": p["y"] + SimWorld.BOSS_Y_OFFSET,
+		"max_hp": 40}
+	sim.gates.append({"y": p["y"], "open": false, "b1": {}, "b2": {}, "boss": boss, "final": false})
+	sim.events.clear()
+	sim._explode(p["x"], p["y"])
+	var hits := 0
+	for e in sim.events:
+		if e["t"] == "boss_hit":
+			hits += 1
+	Runner.T.ok(hits >= 1, "a grenade that chips a boss emits boss_hit")
+	Runner.T.ok(boss["hp"] < 40, "and the blast actually damaged it")
+
+
 func test_rend_rounds_punch_through_the_shield_block() -> void:
 	var sim := SimWorld.new(11, 1)
 	var p := sim.players[0]

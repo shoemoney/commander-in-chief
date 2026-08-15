@@ -761,3 +761,19 @@ func test_ordnance_that_brews_the_hull_schedules_a_crew_ring_but_running_dry_doe
 	Runner.T.ok(ftank["burning"], "running dry still brews the hull")
 	Runner.T.ok(fp["alive"] and fp["vest"],
 		"...but running dry does NOT ring the crew — the bail window stays a real escape")
+
+
+func test_a_boarded_tank_collects_a_free_crate_under_the_hull() -> void:
+	## Soldier pickup radius is 12px; the hull is the size of TANK_CRUSH_RADIUS.
+	## A free crate under the treads used to sit there forever.
+	var sim := SimWorld.new(4, 1)
+	var p := sim.players[0]
+	p["mg_ammo"] = 10
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	Runner.T.ok(p["in_tank"] >= 0, "boarded")
+	var standing := sim.pickups.size()
+	sim.pickups.append({"x": p["x"] + 16 * Fixed.ONE, "y": p["y"], "kind": 0, "cost": 0})
+	sim.step([_idle()])
+	Runner.T.ok(p["mg_ammo"] > 10, "the hull scoops a free crate the boot radius missed")
+	Runner.T.ok(sim.pickups.size() <= standing, "the hull crate is gone")

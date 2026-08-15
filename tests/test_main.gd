@@ -1917,7 +1917,10 @@ func _shipped_floattext_strings() -> Array[String]:
 		var q1 := -1
 		var at := line.find("_coin_pop(")
 		if at != -1:
-			q1 = line.find("\"", at)
+			# Third argument is the toast. A naive find("\"", at) hits ev["x"].
+			var c1 := line.find(",", at)
+			var c2 := line.find(",", c1 + 1) if c1 != -1 else -1
+			q1 = line.find("\"", c2) if c2 != -1 else -1
 		elif line.contains("\"rate\""):
 			# The fx-dict floattext producers all carry a "rate"; a bare "text":
 			# literal without one is a result card / banner, not a toast.
