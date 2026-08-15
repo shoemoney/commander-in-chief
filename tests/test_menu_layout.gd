@@ -1531,6 +1531,71 @@ func test_options_discard_reverts_staged_changes_without_persisting() -> void:
 	stub.free()
 
 
+# c4-fix: _save_settings no-ops while OPTIONS is dirty so F11/Alt+Enter persist=true cannot
+# snapshot staged unsaved edits. A clean (or absent) OPTIONS still writes — bare F11 persists.
+func test_save_settings_noops_while_options_dirty() -> void:
+	_ensure_audio_buses()
+	var saved := _snapshot_buses()
+	var path: String = MainScript.SAVE_PATH
+	var backup: PackedByteArray = FileAccess.get_file_as_bytes(path) if FileAccess.file_exists(path) else PackedByteArray()
+	var had_backup := not backup.is_empty()
+
+	var mn: Node2D = MainScript.new()
+	mn._sfx = _NullSfx.new()
+	mn._assist = false
+	mn._fullscreen = false
+	mn._menu._opts_dirty = false
+	mn._save_settings()
+
+	mn._assist = true
+	mn._menu._opts_dirty = true
+	mn._save_settings()
+	var blocked: Node2D = MainScript.new()
+	blocked._sfx = _NullSfx.new()
+	blocked._load_bests()
+	Runner.T.ok(not blocked._assist, "dirty OPTIONS blocks _save_settings from snapshotting staged edits")
+	blocked.free()
+
+	var was_fs: bool = mn._fullscreen
+	mn._toggle_fullscreen(true)
+	Runner.T.eq(mn._fullscreen, not was_fs, "F11 still flips live while OPTIONS is dirty")
+	var after_f11: Node2D = MainScript.new()
+	after_f11._sfx = _NullSfx.new()
+	after_f11._load_bests()
+	Runner.T.ok(not after_f11._assist, "F11 persist=true does not commit staged assist")
+	Runner.T.eq(after_f11._fullscreen, false, "F11 persist=true does not snapshot fullscreen over dirty OPTIONS")
+	after_f11.free()
+
+	mn._menu._opts_dirty = false
+	mn._save_settings()
+	var clean: Node2D = MainScript.new()
+	clean._sfx = _NullSfx.new()
+	clean._load_bests()
+	Runner.T.ok(clean._assist, "a clean OPTIONS still persists")
+	Runner.T.eq(clean._fullscreen, mn._fullscreen, "bare F11 with no dirty OPTIONS persists fullscreen")
+	clean.free()
+
+	var held: GameMenu = mn._menu
+	mn._menu = null
+	mn._assist = false
+	mn._save_settings()
+	var bare: Node2D = MainScript.new()
+	bare._sfx = _NullSfx.new()
+	bare._load_bests()
+	Runner.T.ok(not bare._assist, "no menu still persists (bare F11 path)")
+	bare.free()
+	mn._menu = held
+
+	mn.free()
+	if had_backup:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_buffer(backup)
+		f.close()
+	else:
+		DirAccess.remove_absolute(path)
+	_restore_buses(saved)
+
+
 # c4-11: RESET DEFAULTS is one confirmed action that reverts EVERY misconfigured setting to its
 # factory value and re-saves. Off-default state -> two-press confirm -> live fields reset + disk
 # write; the row then flips to the DISABLED "AT DEFAULTS" readout so it cannot fire on a no-op.

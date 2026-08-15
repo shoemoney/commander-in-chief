@@ -3037,6 +3037,7 @@ func _stage_opts() -> void:
 # screen climbs to whichever opener _parent resolves (TITLE/SETUP or PAUSE).
 func _exit_opts(save: bool) -> void:
 	if save:
+		_opts_dirty = false
 		main._save_settings()
 	elif _opts_dirty:
 		# main._apply_settings re-applies the REAL state, not just the fields: it re-mutes/levels the
@@ -3224,6 +3225,7 @@ func _activate() -> void:
 				# Snapshot reduce-motion BEFORE the reset (which re-enables motion): a
 				# motion-sensitive player still gets a snapped, non-animated banner.
 				_reset_flash_anim = main._motion >= 0.5
+				_opts_dirty = false
 				main._reset_settings()   # applies SETTINGS_DEFAULTS to the live fields AND persists (it calls _save_settings)
 				# c3-18: RESET DEFAULTS is a deliberate two-press COMMIT — main._reset_settings already
 				# wrote the defaults to disk, so they ARE the new baseline. Re-capture that baseline and

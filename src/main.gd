@@ -4705,6 +4705,11 @@ func _settings_at_defaults() -> bool:
 func _save_settings() -> void:
 	# Persist only the [settings] keys; load-then-set so we never clobber
 	# [best]/[hall]/[seen]. Called from the OPTIONS SAVE commit and the rebind toggles.
+	# c4-fix: F11/Alt+Enter persist=true used to snapshot live preview values while OPTIONS
+	# had staged edits. Resize flush and close/focus-out already refuse; this is the same
+	# gate at the write itself. Bare F11 with no dirty OPTIONS still persists.
+	if _menu != null and _menu._opts_dirty:
+		return
 	_persist({"settings": _settings_snapshot()})
 
 
