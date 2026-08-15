@@ -1515,6 +1515,7 @@ func start_watch() -> void:
 func _reset() -> void:
 	Art.foliage_march = 0.0   # a1-05 r2: neutral until a gameplay frame feeds the march (no stale leak)
 	_sfx.stop_engines()   # tank-index-keyed loops: the next SimWorld re-binds that index (see Sfx.stop_engines)
+	_sfx.stop_voices()    # run-voice only: cut VO/commander/bark so the dead run cannot narrate the next one
 	_sfx.clear_captions()   # a new run never inherits the last one's pending subtitle backlog
 	# Re-arm the water pool's shader push key IN PLACE (it is indexed by pool slot, which outlives
 	# the run — clearing it would index past the end of the pool on the next _sync_water).

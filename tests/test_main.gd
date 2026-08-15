@@ -1550,6 +1550,28 @@ func _fresh_main() -> Node2D:
 	return ms.new()
 
 
+func test_reset_stops_run_voices() -> void:
+	# Source ratchet + behaviour: _reset must call the voice teardown funnel so a
+	# priority-3 wipe/victory line cannot keep talking (or gate the next run's first bark).
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var i := src.find("func _reset")
+	var j := src.find("\nfunc ", i + 1)
+	var body := src.substr(i, j - i)
+	Runner.T.ok(body.contains("stop_vo") or body.contains("stop_voices"),
+		"_reset tears down run voices via stop_vo/stop_voices")
+	var m := _fresh_main()
+	m._sfx._vo_priority = 3
+	m._sfx._cap_text = "SPOTTER: leftover from the last wipe"
+	m._sfx._cap_until = 999999
+	m._reset()
+	Runner.T.eq(m._sfx._vo_priority, -1,
+		"_reset clears _vo_priority so the next run's first bark is not gated")
+	Runner.T.eq(m._sfx._cap_text, "",
+		"_reset drops the dead run's live caption with the voice")
+	m._sfx.free()
+	m.free()
+
+
 func test_reset_stops_the_persistent_tank_engine_loops() -> void:
 	# Sfx._engines is keyed on the SIM TANK INDEX, and engine_at() only ever fades a voice on a
 	# frame that VISITS that key. _reset() builds a whole new SimWorld, so index 2 now names a

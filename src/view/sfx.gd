@@ -587,6 +587,15 @@ func stop_vo() -> void:
 	_drop_vo_captions()
 
 
+func stop_voices() -> void:
+	## RUN TEARDOWN — same contract as stop_engines(): the ending run's line must not
+	## narrate the next one, and _vo_priority must not gate its first bark. Boot-splash
+	## skip is a different seam (_end_splash) and must never call this — never cut him off.
+	stop_vo()
+	_cmd.stop()
+	clear_captions()
+
+
 func _drop_vo_captions() -> void:
 	## Retire every subtitle belonging to a VO line whose audio we just cut (see stop_vo).
 	## Gated on _cap_is_vo: a Commander bark can be legitimately playing (and captioned) AT
