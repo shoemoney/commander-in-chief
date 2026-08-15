@@ -329,13 +329,13 @@ randomly-red gate stops being read.
 
 > ⚠️ **Read this before believing the diagram.** `src/net/lockstep.gd` has **zero production
 > callers** — nothing in `src/main.gd` or the menus constructs a `LockstepSession`, and no
-> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a 237-line
+> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a 264-line
 > loop plus `tests/test_lockstep.gd`, whose `FakeWire` is a deterministic **in-memory** wire with
-> latency jitter only: it never drops, duplicates, corrupts-by-network, disconnects, or times out
-> a packet (the one corruption test flips a payload byte by hand to prove the checksum exchange
-> notices). So the test proves the *sim* is deterministic enough for lockstep and that the loop's
-> stall/catch-up/desync-flag logic is self-consistent — it proves **nothing** about behavior on a
-> real lossy network. Treat the section below as the intended design. 🎯
+> latency jitter plus scheduled `drop_every` / `dup_every` packet loss and duplication. It still
+> has no disconnect/timeout path (the one corruption test flips a payload byte by hand to prove
+> the checksum exchange notices). So the test proves the *sim* is deterministic enough for lockstep
+> and that the loop's stall/catch-up/desync-flag logic is self-consistent — it proves **nothing**
+> about behavior on a real lossy network. Treat the section below as the intended design. 🎯
 
 `src/net/lockstep.gd` — transport-agnostic; only encoded inputs cross the wire. 📡
 
@@ -474,7 +474,7 @@ flowchart LR
 | ✅ | **Owned art + audio** | Every sprite owned-procedural, owned generative-AI, or CC0; voice lines synthesized in-house. Provenance map in [`ASSETS.md`](ASSETS.md) |
 | ✅ | **Public release** | Clean git history, MIT on the code, **v0.3.0** binaries for macOS (arm64 + universal) · Linux · Windows |
 | 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame, sectors reuse one desert tileset despite distinct names |
-| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **237 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
+| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **264 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
 | ⬜ | **Human-in-the-loop production** | No external playtests, no hired artist or art director, no external QA or compat matrix. Built by one owner plus agents — see the caveat at the top of [`docs/PLAN.md`](docs/PLAN.md) |
