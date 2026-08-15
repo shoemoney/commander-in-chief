@@ -1121,7 +1121,7 @@ func _to_wav_loop(samples: PackedFloat32Array) -> AudioStreamWAV:
 	return s
 
 
-func engine_at(key: int, screen_pos: Vector2, on: bool) -> void:
+func engine_at(key: int, screen_pos: Vector2, on: bool, crewed: bool = false) -> void:
 	## Persistent positional engine voices (NOT the steal-pool — the steal
 	## policy would cut a loop mid-growl). Cap 4; campaign fields 2-3 tanks.
 	if _startup_audio_locked:
@@ -1143,6 +1143,7 @@ func engine_at(key: int, screen_pos: Vector2, on: bool) -> void:
 	var voice: AudioStreamPlayer2D = _engines[key]
 	if on:
 		voice.position = screen_pos
+		voice.pitch_scale = 1.12 if crewed else 1.0
 	else:
 		# gfx-loop: every other continuous bed (music/wind/river/foundry/shop) fades
 		# via volume_db lerp toward silence — the engine loop was the one place that

@@ -5927,7 +5927,7 @@ func _update_feel() -> void:
 		# and never dies, so the growl would idle under the card forever — the same "the audio
 		# never resolves" failure the music/heartbeat fixes in _drive_audio close.
 		var tk_on: bool = tk["alive"] and tk_pos.y > -40.0 and tk_pos.y < 400.0 and not _debrief
-		_sfx.engine_at(ti, tk_pos, tk_on)
+		_sfx.engine_at(ti, tk_pos, tk_on, int(tk["occupant"]) >= 0)
 	for h in _hulks:
 		h["t"] = minf(1.0, h["t"] + 0.002)   # ~8s of flame/smolder, then a cold wreck
 	# Smoke wisps drift off any hull still holding cover (burn_ticks > 0).
