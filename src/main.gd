@@ -5585,8 +5585,9 @@ func _check_dry_roll(inputs: Array[SimInput]) -> void:
 func _check_near_miss() -> void:
 	# A crack past the ear when an enemy round barely misses a live player —
 	# rewards the dodge, amplifies one-hit tension. Throttled so it can't spam.
-	# Perfect Dodge: a bullet passing through a player DURING roll i-frames would
-	# have killed them — the most skill-expressive save, and it was fully silent.
+	# Perfect Dodge: only a roll that would have been a hit THIS tick — same disc
+	# as the sim kill test (SimWorld.ENEMY_BULLET_HIT_RADIUS). A graze outside
+	# that radius never would have killed; it is a whiz, not a save.
 	# Own throttle, checked before the whiz gate so a recent whiz can't swallow it.
 	# The dodge scan is dead work outside a roll window (roll_ticks > 0 for
 	# only 18 of every ~78 ticks per player) — skip the O(bullets × players)
@@ -5601,7 +5602,7 @@ func _check_near_miss() -> void:
 			for p in sim.players:
 				if not p["alive"] or p["roll_ticks"] == 0:
 					continue
-				if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], 11 * Fixed.ONE):
+				if sim._dist_lte(b["x"], b["y"], p["x"], p["y"], SimWorld.ENEMY_BULLET_HIT_RADIUS):  # 7 * Fixed.ONE
 					_dodge_frame = Engine.get_physics_frames()
 					show_banner("PERFECT DODGE!", Color(0.5, 0.95, 1.0))
 					_hitstop_frames = maxi(_hitstop_frames, 3)

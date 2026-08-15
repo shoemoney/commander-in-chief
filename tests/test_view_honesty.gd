@@ -2895,3 +2895,18 @@ func test_r8_reduce_motion_gates_wedge_mine_lane_observer() -> void:
 		"observer radar sweep holds still under reduce-motion")
 	Runner.T.ok(src.contains("if _motion >= 0.5:\n\t\top.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8"),
 		"observer bob is gated, not an always-on sine")
+
+
+func test_perfect_dodge_uses_the_sim_kill_radius() -> void:
+	## PERFECT DODGE used to fire at 11px while ENEMY_BULLET_HIT_RADIUS is 7px —
+	## credit for a graze that could never have killed. The dodge scan must read
+	## the sim constant, not restated magic.
+	var src := _view_src()
+	var start := src.find("func _check_near_miss")
+	Runner.T.ok(start >= 0, "_check_near_miss still exists")
+	var end := src.find("\nfunc ", start + 1)
+	var body := src.substr(start, end - start) if end > start else src.substr(start)
+	Runner.T.ok(body.contains("SimWorld.ENEMY_BULLET_HIT_RADIUS"),
+		"PERFECT DODGE scans at the sim kill radius, not a restated disc")
+	Runner.T.ok(not body.contains("11 * Fixed.ONE"),
+		"the 11px overcredit disc is gone from the dodge scan")
