@@ -99,9 +99,9 @@ flowchart LR
 
 ## 🧪 Testing
 
-The suite is ~1,000 methods (excluding the opt-in `test_perf.gd`) / ~22,850 assertions
-*(as of 2026-07-31 — it grows constantly; count live with
-`grep -hcE '^func test_' tests/test_*.gd`, which prints 1002 because it includes perf's 2)* and runs in ~23 s. Suites are
+The suite is **1109** methods as of 2026-08-14 (excluding the opt-in `test_perf.gd`;
+count live with `grep -hcE '^func test_' tests/test_*.gd` and subtract that file).
+Assertion count is on the runner's `PASS —` line — don't pin it here. Runs in ~23 s. Suites are
 plain `RefCounted` classes whose `test_*` methods assert via the runner's `T.ok`/`T.eq` —
 no GUT addon.
 

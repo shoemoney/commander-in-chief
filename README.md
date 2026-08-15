@@ -56,8 +56,8 @@ Endless War shop.</sub>
 > replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
-> golden-checksum suite (**1000 methods / 22.9k assertions** — the runner prints the exact
-> pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
+> golden-checksum suite (**1109 methods** as of 2026-08-14 — the runner's `PASS —`
+> line prints the live method + assertion pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
 > `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
 > Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
 > The engine version is pinned in `tools/versions.lock`, the one source CI reads, so the
@@ -306,8 +306,8 @@ SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter
 SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
 ```
 
-**1000 test methods / 22,850 assertions** as of 2026-07-31 (the `PASS —` line prints the exact
-pair) — fixed-point
+**1109 test methods** as of 2026-08-14 (the `PASS —` line prints the exact method +
+assertion pair; don't pin assertions here) — fixed-point
 math, seeded RNG streams, the 1986 mechanic grammar, the War Chest economy,
 tank/observer/gates/water/gunship/colossus, every archetype's behavior contract (nest armor,
 technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop, lockstep loopback,
