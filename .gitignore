@@ -45,3 +45,8 @@ ASSETS.md
 tools/purge_history.sh
 Backlog-raw-ledger.md
 .opencode/ralph-loop.local.md
+
+# Scratch worktrees from /todo-cycle. NOT ignored until 2026-08-14, which put 316MB
+# and 7 unmerged branches one `git clean -fd` away from deletion — and the triple-a-game
+# loop runs exactly that on a rejected cycle.
+.todo-worktrees/
