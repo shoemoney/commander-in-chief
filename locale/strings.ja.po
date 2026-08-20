@@ -124,6 +124,12 @@ msgstr "トリプルショット—3発の扇形、1発撃つごとに弾薬2消
 msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
 msgstr "引裂弾—重機銃が機動隊の盾を貫通する"
 
+msgid "COMMENDATION — SPEND IT FROM THE SUPPLY WHEEL"
+msgstr "勲章 — 補給ホイールから使用せよ"
+
+msgid "MAST OVERHEAT — VACATE THE ORBIT"
+msgstr "マスト過熱 — 軌道から退避せよ"
+
 msgid "SMOKE — BLINDS RIFLE AIM. NESTS STILL TRACK. SHELLS STILL FALL"
 msgstr "スモーク — 小銃の照準を封じる。  機関銃座は追尾を続ける。砲弾は落ちてくる"
 
