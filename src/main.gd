@@ -9388,7 +9388,14 @@ func _draw_pickups() -> void:
 			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
-			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6))
+			# DROPPABLE: "MAXED" is the same word on every spent crate, and a capped player
+			# sees several at once — the sim deliberately LEAVES a crate standing when it
+			# would deliver nothing (sim_world.gd:1911), so they accumulate. The Nth plate
+			# carries no information the first one didn't, and the crate already reads as
+			# spent without it: greyed sprite (mod above) plus the suppressed lootable ring.
+			# So the overflow is dropped rather than stacked, which is the arbiter's own
+			# stated policy for repeated copy.
+			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6), true)
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= pk["cost"]
@@ -10461,7 +10468,14 @@ static func _callout_ink_alpha(a: float) -> float:
 ##
 ## Plate alpha is FLAT (as the boss label draws it) rather than tracking the ink — a plate
 ## that fades with a pulsing label puts the trough right back under AA.
-func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
+## `droppable` is claim_label_slot's overflow policy, exposed because it is a property of the
+## COPY, not of the callout family. A callout whose text is unique to its anchor (a capsule name,
+## LOW FUEL on one tank) must keep its place if the ladder exhausts — suppressing it deletes
+## information nothing else carries. A callout that is the SAME WORD on every anchor may be
+## dropped, because the Nth copy tells the player nothing the first one didn't. MAXED is the
+## second kind: measured on a real seed-99 campaign run with a capped player, 8 crates were on
+## screen at once and 3 of their MAXED plates overprinted through the keep-place fallback.
+func _world_label(txt: String, pos: Vector2, col: Color, droppable := false) -> Vector2:
 	var a := _callout_ink_alpha(col.a)
 	if a <= 0.0:
 		return Vector2.ZERO
@@ -10472,7 +10486,12 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 	# is how you get a label sitting beside its own background. The claim offset is
 	# returned so a companion glyph (the REVIVE keycap) rides the same dodge.
 	var want := _label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)
-	var got := claim_label_slot(want, _label_slots)
+	var got := claim_label_slot(want, _label_slots, 0.0, droppable)
+	if not got.has_area():
+		# Suppressed: the arbiter's zero-area sentinel. Skip plate, ink AND the slot claim —
+		# appending an empty rect would let the next label think a row was taken. Same
+		# Vector2.ZERO "nothing was drawn" return as the faded-out branch above.
+		return Vector2.ZERO
 	_label_slots.append(got)
 	draw_rect(got, LABEL_PLATE_FILL)
 	var off := got.position - want.position
@@ -10487,8 +10506,9 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 ## glyphs at 200%; a baked -13/-38 does not). Same measure the already-correct downed-timer
 ## pair at _draw_players uses. Delegates — the claim still happens once, in _world_label —
 ## and returns its claim offset so a companion glyph can ride the same dodge.
-func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color) -> Vector2:
-	return _world_label(txt, Vector2(cx - Art.tw(txt, Art.fs(8)) / 2.0, baseline_y), col)
+func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color,
+		droppable := false) -> Vector2:
+	return _world_label(txt, Vector2(cx - Art.tw(txt, Art.fs(8)) / 2.0, baseline_y), col, droppable)
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]

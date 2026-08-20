@@ -1996,14 +1996,18 @@ func test_world_text_saturation_drops_instead_of_overprinting() -> void:
 			var excl: Rect2 = ms.player_label_exclusion(anchor)
 			frame.append(excl)
 			placed.append({"id": "player exclusion", "box": excl})
-			# The persistent labels claim first, in draw order, NOT droppable
-			# (the shipped capsule-name / MAXED offsets from _draw_pickups).
+			# The capsule NAME claims first, in draw order, NOT droppable: PIERCE/SPREAD/REND
+			# is unique to its anchor, so suppressing it deletes information nothing else
+			# carries. MAXED claims DROPPABLE — it is the same word on every spent crate, and
+			# a capped player sees several at once (see the cluster test below).
 			var cap: Rect2 = ms.claim_label_slot(
 				ms._label_plate_rect(anchor.x - Art.tw("SPREAD", sz) / 2.0, anchor.y - 25.0, Art.tw("SPREAD", sz), sz), frame)
 			frame.append(cap)
 			placed.append({"id": "SPREAD", "box": cap})
 			var maxed: Rect2 = ms.claim_label_slot(
-				ms._label_plate_rect(anchor.x - Art.tw("MAXED", sz) / 2.0, anchor.y - 34.0, Art.tw("MAXED", sz), sz), frame)
+				ms._label_plate_rect(anchor.x - Art.tw("MAXED", sz) / 2.0, anchor.y - 34.0, Art.tw("MAXED", sz), sz),
+				frame, 0.0, true)
+			Runner.T.ok(maxed.has_area(), "MAXED still places at an uncontested anchor")
 			frame.append(maxed)
 			placed.append({"id": "MAXED", "box": maxed})
 			# Then the kill-feed pileup: a same-anchor toast wall. 20 toasts
@@ -2035,6 +2039,85 @@ func test_world_text_saturation_drops_instead_of_overprinting() -> void:
 	Runner.T.ok(drops > 0,
 		"the staged worst case actually saturated the ladder (%d drops) — a vacuous frame proves nothing"
 			% drops)
+
+
+# aaa-textfit/#3: the MAXED plates on spent crates piled into an unreadable clump. Real, and the
+# arbiter was doing exactly what it was told: _world_label claimed every callout as PERSISTENT, and
+# a persistent claim that exhausts the 13-row ladder KEEPS ITS PLACE — the fallback documented as
+# safe because persistent labels "are few per anchor". MAXED is not few. The sim deliberately
+# LEAVES a crate standing when it would deliver nothing (sim_world.gd:1911), so a capped player
+# accumulates them, and `maxed` is a PLAYER-state predicate — every ammo crate on screen flips to
+# MAXED in the same frame. The reviewer said "dozens"; measured, it is 8 on screen with 3 plates
+# overprinting, which is smaller than reported and still a clump.
+#
+# CLUSTER is that measured frame: the on-screen x/baseline-y of all 8 crates from a real
+# deterministic campaign run (seed 99, tick 3692, 1P, player held at cap). Not invented spacing —
+# note the two crates sharing (274, 48), which is what a real elite-drop pile looks like.
+const _MAXED_CLUSTER := [[335.0, -24.0], [282.0, -2.0], [270.0, -24.0], [274.0, 48.0],
+	[274.0, 48.0], [287.0, 14.0], [288.0, 6.0], [358.0, 33.0]]
+
+
+func test_repeated_crate_labels_drop_instead_of_clumping() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var sz: int = Art.fs(8)
+	var w: float = Art.tw("MAXED", sz)
+	# --- THE SHIPPED MODEL: droppable, exactly as _draw_pickups claims it.
+	var kept: Array[Rect2] = []
+	var shown := 0
+	var collided := 0
+	for c in _MAXED_CLUSTER:
+		var got: Rect2 = ms.claim_label_slot(
+			ms._label_plate_rect(float(c[0]) - w / 2.0, float(c[1]) - 25.0, w, sz), kept, 0.0, true)
+		if not got.has_area():
+			continue   # suppressed — the Nth copy of the same word tells the player nothing
+		shown += 1
+		for r in kept:
+			if got.grow(-0.5).intersects(r.grow(-0.5)):
+				collided += 1
+				if collided <= 3:
+					Runner.T.ok(false, "MAXED plate %s overprints %s" % [str(got), str(r)])
+		kept.append(got)
+	Runner.T.eq(collided, 0, "no two MAXED plates share pixels in the measured cluster")
+	# The drop must not swallow the whole readout — a crate the player is standing near still
+	# has to say why it is grey.
+	Runner.T.ok(shown >= 4,
+		"%d of %d MAXED plates still place (a fix that hides them all is not a fix)"
+			% [shown, _MAXED_CLUSTER.size()])
+	# --- NEGATIVE CONTROL: the RETIRED persistent claim overprints on this SAME cluster, or
+	# everything above is vacuous and would pass with the flag deleted.
+	var persistent: Array[Rect2] = []
+	var retired_overlaps := 0
+	for c in _MAXED_CLUSTER:
+		var got2: Rect2 = ms.claim_label_slot(
+			ms._label_plate_rect(float(c[0]) - w / 2.0, float(c[1]) - 25.0, w, sz), persistent)
+		for r in persistent:
+			if got2.grow(-0.5).intersects(r.grow(-0.5)):
+				retired_overlaps += 1
+				break
+		persistent.append(got2)
+	Runner.T.ok(retired_overlaps > 0,
+		"the retired keep-place model DOES clump on this cluster (%d overprinting plates) — the check above is not vacuous"
+			% retired_overlaps)
+	# --- WIRING. The geometry above models the claim; this reads the source, in the shape that
+	# caught claim_label_slot shipping as a signature and a docstring.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6), true)'),
+		"the MAXED draw site actually passes the droppable flag")
+	Runner.T.ok(src.contains("claim_label_slot(want, _label_slots, 0.0, droppable)"),
+		"_world_label forwards droppable to the arbiter instead of hardcoding persistent")
+	# A suppressed label must claim NOTHING: appending the zero-area sentinel would let the next
+	# label believe a row was taken, and drawing the plate would put a bare box on the terrain.
+	var wstart := src.find("func _world_label(txt: String")
+	Runner.T.ok(wstart >= 0, "found _world_label")
+	if wstart >= 0:
+		var wend := src.find("func _world_label_centered", wstart + 1)
+		Runner.T.ok(wend > wstart, "the _world_label body is delimited by its centered sibling")
+		var body := src.substr(wstart, wend - wstart)
+		var sentinel := body.find("if not got.has_area():")
+		var claim := body.find("_label_slots.append(got)")
+		Runner.T.ok(sentinel >= 0 and claim > sentinel,
+			"a suppressed claim returns BEFORE the slot append (sentinel @%d, append @%d)"
+				% [sentinel, claim])
 
 
 func test_fork_signs_dissolve_under_the_band() -> void:
