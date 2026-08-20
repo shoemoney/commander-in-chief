@@ -100,11 +100,16 @@ const COMPACT_BAR := 20.0  # c1-06 (attempt-4 judge polish): width of the tiny s
                        # in a starved slot, so the most perishable campaign readout never loses
                        # its urgency/progress the moment the row is most crowded. No text = no
                        # awkward "PRESS!" abbreviation and nothing to localize.
-const REVIVE_GLYPH_ADV := 15.0  # c3-01: x-reserve for the trailing revive / BAIL-OUT prompt glyph
-                       # on the direct-draw player rows (drawn at label_end + 9 with radius ~5.5, so
-                       # its right edge sits ~14.5px past the label). Folded into the row fit guard
-                       # so the glyph can't be the one thing that spills past RIGHT once the label
-                       # itself fit.
+const GLYPH_GAP := 3.5  # c3-01/aaa-textfit: clear air between a direct-draw row readout and the
+                       # trailing prompt cap that belongs to it. The cap's WIDTH is no longer baked
+                       # here: REVIVE_GLYPH_ADV was a flat 15.0 and the cap was centred on
+                       # label_end + 9, both sized for the square single-letter cap. The SHIPPED
+                       # revive bind is KEY_SPACE, whose cap Art.draw_glyph measures at 38.9px —
+                       # centred on label_end + 9 that starts 10.4px LEFT of the label, so the
+                       # downed row printed "REVIVE 78Space" with the keycap over the cost digits,
+                       # and the row fit guard under-reserved by 13.4px on top of it. Both the
+                       # reserve and the draw position now come off Art.glyph_cap_w — the same
+                       # measure draw_glyph paints — via _act_glyph_adv below.
 # c1-04: glyph-center y of the transient bottom-center verb reminder. The stat
 # panel and player rows live in the top ~90px, so this low band can't collide with
 # them; a layout test pins it clear of both the top HUD and the 360px viewport.
@@ -829,7 +834,8 @@ func _draw() -> void:
 				else:
 					bailtxt = TranslationServer.translate("BAIL OUT! %ds") % ((t["burn_ticks"] + 59) / 60)
 					bailcol = Color(1.0, 0.3, 0.2)
-				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
+				var bail_adv := _act_glyph_adv("interact", 11.0, i == 1)
+				if not _row_fits(px, _tw(bailtxt) + bail_adv):
 					px = _row_ovf(px, ry)
 				else:
 					# Draw the prompt on-blink, but ALWAYS advance px past its reserved width so the
@@ -837,9 +843,8 @@ func _draw() -> void:
 					# instead of painting over it — the burning branch used to leave px unmoved.
 					if _mblink(bailblink):
 						var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, bailcol)
-						_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
-							Color.WHITE, i == 1)
-					px += _tw(bailtxt) + REVIVE_GLYPH_ADV
+						_emit_trailing_glyph("interact", bx, bail_adv, ry, 11.0, i == 1)
+					px += _tw(bailtxt) + bail_adv
 			elif driver:
 				var gcol_tank := Color(0.95, 0.96, 0.9)
 				var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
@@ -2586,13 +2591,15 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 	# players even with colorblind mode on) — one dialect with the shop strip and the spend
 	# wheel's socket mark.
 	var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
-	# The prompt is the label plus a trailing revive glyph (drawn at tx+9, radius ~5.5).
-	if not _row_fits(px, _tw(rlabel) + REVIVE_GLYPH_ADV):
+	# The prompt is the label plus a trailing revive keycap, measured off the LIVE bind — the
+	# ship default is KEY_SPACE, a 38.9px cap, not the 11px square this row used to assume.
+	var rev_adv := _act_glyph_adv("revive", 11.0, i == 1)
+	if not _row_fits(px, _tw(rlabel) + rev_adv):
 		return _row_ovf(px, ry)
 	# c2-07: the unaffordable (warning-red) label gets the contrast drop-shadow so it reads over
 	# a bright field; the affordable (safe) label needs none.
 	var tx := _text(rlabel, px, ty, col, not afford)
-	_emit_act_glyph("revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0, Color.WHITE, i == 1)
+	_emit_trailing_glyph("revive", tx, rev_adv, ry, 11.0, i == 1)
 	return px
 
 
@@ -2842,6 +2849,22 @@ func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := 
 # c1-10: seam for the inline gameplay-verb glyphs the chip rows plant (roll / revive / interact /
 # supply-wheel) — like every other HUD draw seam, a one-line indirection so a headless capture
 # subclass can record them and the full _draw frame is exercisable without a live draw context.
+## GLYPH_GAP + the width Art.draw_glyph will ACTUALLY paint for this act's live bind. Every
+## direct-draw row that trails a prompt reserves this and positions the cap inside it, so the
+## reserve and the pixels can never disagree — see GLYPH_GAP. A pad cap and a single-letter
+## keyboard cap both measure `size`, so the shipped default rows are byte-identical to before.
+func _act_glyph_adv(act: String, size: float, alt: bool) -> float:
+	return GLYPH_GAP + Art.glyph_cap_w(act, size, main.bind_for_glyph(act),
+		main.pad_bind_for_glyph(act, 1 if alt else 0), alt)
+
+
+## Draw a trailing prompt cap whose LEFT edge sits GLYPH_GAP past `label_end`, given the advance
+## _act_glyph_adv already reserved. Centring is draw_glyph's contract, so the caller must hand it
+## the centre — computing that from the advance is what keeps the two in step.
+func _emit_trailing_glyph(act: String, label_end: float, adv: float, ry: float, size: float, alt: bool) -> void:
+	_emit_act_glyph(act, Vector2(label_end + (adv + GLYPH_GAP) / 2.0, ry + ICON / 2.0), size, Color.WHITE, alt)
+
+
 func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt: bool) -> void:
 	# `alt` IS the per-player device flag every caller passes (`i == 1`, P2 being hardwired to
 	# pad 1), so it doubles as the pad_bind device index — P2's chip shows P2's own rebinds.

@@ -1679,6 +1679,63 @@ func test_downed_row_prompt_glyph_follows_the_seat_that_presses_it() -> void:
 		h.free()
 
 
+# aaa-textfit/#4: the downed row read "REVIVE 78Space" — a key NAME smashed into the cost digits.
+# Not a missing keycap (Art.draw_glyph has widened its cap for multi-character binds for a while):
+# the cap is 38.9px for the SHIPPED `"revive": KEY_SPACE` default, and hud.gd centred it on a baked
+# label_end + 9 while reserving a baked REVIVE_GLYPH_ADV of 15.0 — both sized for the 11px square
+# cap. The cap therefore STARTED 10.4px left of where the label ended. Every existing capture test
+# missed it twice over: the stubs return bind 0 (an empty, square cap) and _FrameCaptureHud recorded
+# a square `size` box regardless. Both are fixed above; this drives the REAL ship bind.
+class _SpaceBindMain extends _MainStub:
+	# The shipped default (main.gd PAD/KEY_DEFAULTS: "revive": KEY_SPACE, "interact": KEY_F).
+	func bind_for_glyph(a: String) -> int:
+		return KEY_SPACE if a == "revive" else KEY_F
+
+
+func test_downed_row_prompt_cap_clears_the_cost_digits_on_the_ship_bind() -> void:
+	var was_pad: bool = Art.use_pad
+	Art.use_pad = false   # the keycap branch — a pad cap is square and was never the bug
+	var wide: float = Art.glyph_cap_w("revive", 11.0, KEY_SPACE, -1, false)
+	Runner.T.ok(wide > 11.0 + 0.5,
+		"the shipped KEY_SPACE revive bind really does need a wide cap (%.1fpx > 11px square)" % wide)
+	for afford in [true, false]:
+		var sim := SimWorld.new(0, 1, "endless")
+		var p: Dictionary = sim.players[0]
+		p["deaths"] = 1          # a real REVIVE cost, past the free-rescue / K.I.A. paths
+		p["broke_timer"] = 0
+		sim.last_stand = false
+		sim.war_chest = 999999 if afford else 0
+		var h := _FrameCaptureHud.new()
+		h.main = _SpaceBindMain.new()
+		h.main.sim = sim
+		h._fit_full = HudIcons.RIGHT
+		h._measure = false
+		var end_px: float = h._dead_chips(p, 8.0, 20.0, 0, sim)
+		var label := Rect2()
+		var cap := Rect2()
+		for b in h.boxes:
+			if b["k"] == "text" and str(b["id"]).begins_with("REVIVE"):
+				label = b["box"]
+			elif b["k"] == "glyph" and b["id"] == "revive":
+				cap = b["box"]
+		Runner.T.ok(label.size.x > 0.0, "afford=%s: the row drew its REVIVE label" % afford)
+		Runner.T.ok(cap.size.x > 0.0, "afford=%s: the row drew its revive prompt cap" % afford)
+		# THE bug: the keycap must start to the RIGHT of the last cost digit, with air between.
+		var gap: float = cap.position.x - label.end.x
+		Runner.T.ok(gap >= HudIcons.GLYPH_GAP - 0.01,
+			"afford=%s: the SPACE cap starts %.1fpx past the label end (need >= %.1f, cap x %.1f..%.1f vs label end %.1f)"
+				% [afford, gap, HudIcons.GLYPH_GAP, cap.position.x, cap.end.x, label.end.x])
+		# ...and the row's fit guard must have RESERVED the cap it actually drew, or the next
+		# chip is planned on top of it and the +N clip under-counts.
+		Runner.T.ok(cap.end.x <= h._fit_full + 0.01,
+			"afford=%s: the wide cap stays inside the usable edge (%.1f <= %.1f)"
+				% [afford, cap.end.x, h._fit_full])
+		Runner.T.ok(end_px <= h._fit_full + 0.01, "afford=%s: row cursor ends within the usable edge" % afford)
+		h.main.free()
+		h.free()
+	Art.use_pad = was_pad
+
+
 # c3-01: the DOWNED player row (skull + REVIVE cost + prompt glyph) was a direct-draw branch with
 # NO fit check — under width pressure the revive prompt could clip past RIGHT uncounted. It now
 # routes through the SAME shared "+N" clip as every other player-row branch: at a roomy edge the
@@ -3001,8 +3058,14 @@ class _FrameCaptureHud extends _ChipCaptureHud:
 	func _emit_act_glyph(act: String, center: Vector2, size: float, _col: Color, _alt: bool) -> void:
 		# `alt` == Art.draw_glyph's force_pad. Captured so the co-op tests can pin WHICH
 		# seat a contextual prompt is teaching (P2 is pad-only and never sets use_pad).
+		# The box is the cap Art.draw_glyph will ACTUALLY paint, not a square `size` — a
+		# keyboard cap grows to fit a multi-character bind label ("Space"), and recording a
+		# square here is what let the downed row's 38.9px SPACE cap overlap the cost digits
+		# while every capture test measured an 11px box that fit fine.
+		var cap_w: float = Art.glyph_cap_w(act, size, main.bind_for_glyph(act),
+			main.pad_bind_for_glyph(act, 1 if _alt else 0), _alt)
 		boxes.append({"k": "glyph", "id": act, "alt": _alt,
-			"box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
+			"box": Rect2(center - Vector2(cap_w, size) / 2.0, Vector2(cap_w, size))})
 	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate", "box": r})
