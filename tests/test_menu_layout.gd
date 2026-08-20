@@ -1368,6 +1368,71 @@ func test_howto_controls_teaches_move_and_aim_off_the_live_binds() -> void:
 	stub.free()
 
 
+# aaa-textfit/#2: a screenshot reviewer read the CONTROLS page as truncated — "The gun fires on
+# its own —" running to the panel border with, they said, "no overflow handling, word wrapping,
+# or continuation". It IS wrapped (menu.gd `_verb_line`'s else-branch hands the sentence to
+# _body_block at FRAME_INNER_R - x); the em dash simply lands at the break, and on a pad
+# "AIM with the RIGHT STICK. The gun fires on its own —" / "just point it." is what ships.
+# What was NOT covered: the test above drives _HowtoCaptureMenu, which overrides _verb_line
+# WHOLESALE — so the real wrap never ran in the suite, and the frame-bounds probe that would
+# have caught an unwrapped line is a tools/ script CI runs, not a suite method. Delete the wrap
+# and every menu_layout method stayed green with the sentences hanging off the frame. This drives
+# the REAL _verb_line through _CaptureMenu's seams on both devices and asserts two things the
+# reviewer's complaint names: every authored sentence survives the wrap WORD FOR WORD, and every
+# drawn line's natural extent stays inside the measured frame interior.
+func test_howto_controls_verb_sentences_wrap_whole_inside_the_frame() -> void:
+	var was_pad: bool = Art.use_pad
+	for pad in [false, true]:
+		Art.use_pad = pad
+		var dev := "pad" if pad else "kb"
+		var stub := _StubMain.new()
+		var cap := _CaptureMenu.new()
+		cap.main = stub
+		var prev = Art.text_capture
+		Art.text_capture = cap.ops
+		cap._howto_page_controls()   # the REAL page draw, real _verb_line, real wrap
+		Art.text_capture = prev
+		# Body ink only: the page header sits above CONTENT_BODY_Y and is not a verb sentence.
+		var flat := ""
+		var body := 0
+		for op in cap.ops:
+			if op["k"] != "text":
+				continue
+			var box: Rect2 = op["box"]
+			if box.position.y < Menu.CONTENT_BODY_Y + 8.0:
+				continue
+			body += 1
+			# Measure the NATURAL width of the string, never the recorded box — a draw that
+			# clips would otherwise report a box that fits while losing glyphs.
+			var nat: float = Art.font().get_string_size(str(op["id"]),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, int(op.get("size", 11))).x
+			Runner.T.ok(box.position.x >= Menu.FRAME_INNER_L - 0.5,
+				"%s: '%s' starts inside the frame (x %.1f >= %.1f)"
+					% [dev, op["id"], box.position.x, Menu.FRAME_INNER_L])
+			Runner.T.ok(box.position.x + nat <= Menu.FRAME_INNER_R + 0.5,
+				"%s: '%s' ends inside the frame (x %.1f <= %.1f)"
+					% [dev, op["id"], box.position.x + nat, Menu.FRAME_INNER_R])
+			flat += " " + str(op["id"])
+		Runner.T.ok(body >= 6, "%s: the CONTROLS page drew %d body lines (need >= 6 verbs)" % [dev, body])
+		# Collapse the wrap back to one stream: wrapping only ever breaks AT a space, so a
+		# whole sentence must reappear verbatim. A dropped tail word fails right here.
+		while "  " in flat:
+			flat = flat.replace("  ", " ")
+		flat = flat.strip_edges()
+		# Built from the SAME live-bind helper the page uses, so a rebind moves both together.
+		for want in ["MOVE with %s." % cap._dir_devices("move"),
+				"AIM with %s. The gun fires on its own — just point it." % cap._dir_devices("aim"),
+				"GRENADES crack armor. TAP lobs far — HOLD pops it at the arc.",
+				"ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit.",
+				"BOARD a tank for its crush weight and its shells.",
+				"PLANT a claymore clear of any tank — it hurts BOTH sides."]:
+			Runner.T.ok(want in flat,
+				"%s: the wrap keeps '%s' whole (page reads '%s')" % [dev, want, flat])
+		cap.free()
+		stub.free()
+	Art.use_pad = was_pad
+
+
 # HOW TO PLAY is where the verbs are taught, and PAUSE is the only menu reachable mid-run —
 # so PAUSE must host a "howto" row,
 # (The claim this comment used to make — "the ONLY place FIRE is named" — was never true: the
