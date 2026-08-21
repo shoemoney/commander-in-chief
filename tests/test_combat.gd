@@ -304,3 +304,143 @@ func test_rock_pre_reject_bound_actually_bounds_every_rock_kind() -> void:
 		if ev.get("t", "") == "armor_block":
 			blocked = true
 	Runner.T.ok(blocked, "a round exactly on the widest rock's edge is still blocked")
+
+
+# ---------------------------------------------------------------------------
+# SPEND-WHEEL HAZARD PAUSE (owner call, backlog 1.2)
+# ---------------------------------------------------------------------------
+
+func _wheel_held() -> SimInput:
+	## The HOLD state, not a purchase: SimInput.buy carries BUY_WHEEL_OPEN for
+	## every tick the plate is up (see SimWorld.BUY_WHEEL_OPEN for why it rides
+	## the existing 3-bit `buy` field instead of a new input bit).
+	var inp := SimInput.new()
+	inp.buy = SimWorld.BUY_WHEEL_OPEN
+	return inp
+
+
+func _bare(players: int = 1) -> SimWorld:
+	## A campaign world with every OTHER damage source swept out, so the only
+	## thing that can reach the player is the hazard under test.
+	var sim := SimWorld.new(11, players)
+	sim.enemies.clear()
+	sim.bunkers.clear()
+	sim.mines.clear()
+	sim.barrels.clear()
+	sim.strikes.clear()
+	sim.enemy_bullets.clear()
+	return sim
+
+
+func test_the_spend_wheel_pauses_the_mortar_its_plate_is_sitting_on() -> void:
+	## The plate is deliberately readable (alpha 0.55) but still drops terrain
+	## contrast inside its ~100px donut, and hazards kept resolving behind it for
+	## the whole ~1s buy. The owner's call was to keep the plate and pause the
+	## hazard. A telegraphed strike is the case that matters most: the ring IS the
+	## dodge window, so a shell landing under the plate is undodgeable by
+	## construction. Both halves asserted — pausing nothing and pausing always are
+	## the two ways this "passes" without doing anything.
+	for holding in [false, true]:
+		var sim := _bare()
+		var p := sim.players[0]
+		sim.strikes.append({"x": p["x"], "y": p["y"], "ticks": 1, "obs": false})
+		sim.step([_wheel_held() if holding else _idle()])
+		Runner.T.ok(sim.players[0]["alive"] == holding,
+			"strike under the plate: holding=%s leaves the shopper alive=%s" % [holding, holding])
+		Runner.T.eq(sim.strikes.size(), 0, "the shell still detonates and is still spent either way")
+
+
+func test_the_mast_pulse_sleeps_for_the_shopper_like_it_does_for_the_breather() -> void:
+	## _step_mast_hazard already stands down for the endless intermission with a
+	## one-line guard; the wheel is the same argument scoped to one player. Its
+	## 90t warn is longer than the buy, so a pulse that arrives mid-buy ate its
+	## own tell.
+	for holding in [false, true]:
+		var sim := SimWorld.new(11, 1, "endless")
+		sim.enemies.clear()
+		sim.intermission_ticks = 0
+		sim.wave = 5
+		# Keep the wave LIVE: an empty field clears the wave on the first step and
+		# the 252t breather starts, which is the OTHER thing the mast sleeps for.
+		sim.wave_pending = 9
+		sim.wave_spawn_cd = 999
+		var p := sim.players[0]
+		p["x"] = SimWorld.MAST_X
+		p["y"] = SimWorld.MAST_Y
+		# Land the very first stepped tick exactly on the jet's opening frame.
+		# step() increments tick_count first, so aim the phase at tick_count + 1.
+		sim.wave_start_tick = sim.tick_count + 1 \
+			- (SimWorld.MAST_CYCLE_TICKS - SimWorld.MAST_JET_TICKS)
+		sim.step([_wheel_held() if holding else _idle()])
+		Runner.T.ok(sim.players[0]["alive"] == holding,
+			"mast jet: holding=%s leaves the shopper alive=%s" % [holding, holding])
+
+
+func test_only_the_shopper_is_covered_and_the_hazard_is_not_deferred() -> void:
+	## Per-PLAYER, not a global freeze. A 2P partner who is not shopping has no
+	## plate over their soldier and must still take the hit — otherwise one
+	## player's shopping habit is a screen-wide shield.
+	var sim := _bare(2)
+	var p1 := sim.players[0]
+	sim.players[1]["x"] = p1["x"]
+	sim.players[1]["y"] = p1["y"]
+	sim.strikes.append({"x": p1["x"], "y": p1["y"], "ticks": 1, "obs": false})
+	sim.step([_wheel_held(), _idle()])
+	Runner.T.ok(sim.players[0]["alive"], "the shopper is not there for it")
+	Runner.T.ok(not sim.players[1]["alive"], "the partner who is not shopping still eats it")
+
+
+func test_the_wheel_pause_is_budgeted_so_camping_it_is_not_invulnerability() -> void:
+	## main.gd holds the wheel open for as long as the button is down, so an
+	## unbudgeted pause would make parking on it permanent mortar immunity — a
+	## fairness bug traded for an exploit. The budget drains while open and only
+	## refills while shut.
+	var sim := _bare()
+	var held := _wheel_held()
+	for i in 30:
+		sim.step([held])
+	Runner.T.eq(sim.wheel_pause_spent[0], 30, "every held tick burns a tick of shield")
+	# Closing it refills at 1 per WHEEL_PAUSE_REFILL_EVERY ticks — 4x slower than
+	# it drains, so the shield can never pay for its own camping.
+	for i in 4 * SimWorld.WHEEL_PAUSE_REFILL_EVERY:
+		sim.step([_idle()])
+	Runner.T.eq(sim.wheel_pause_spent[0], 26, "a shut wheel refills, and refills slowly")
+	# Budget spent: the wheel is still open and the shell lands anyway.
+	sim.wheel_pause_spent[0] = SimWorld.WHEEL_PAUSE_MAX_TICKS
+	var p := sim.players[0]
+	sim.strikes.append({"x": p["x"], "y": p["y"], "ticks": 1, "obs": false})
+	sim.step([held])
+	Runner.T.ok(not sim.players[0]["alive"],
+		"past the budget the mortar lands with the wheel still open — no free safe spot")
+
+
+func test_the_wheel_pause_does_not_cover_what_you_walked_onto() -> void:
+	## Deliberately NOT paused: mines, claymores and barrels only go off because
+	## the player moved or shot, and pausing them would turn the hold key into a
+	## minesweeper. The plate hides timers, not your own boots.
+	var sim := _bare()
+	var p := sim.players[0]
+	sim.mines.append({"x": p["x"], "y": p["y"], "armed": true, "friendly": false, "grace": 0})
+	sim.step([_wheel_held()])
+	Runner.T.ok(not sim.players[0]["alive"], "a mine under your boots still goes off mid-buy")
+
+
+func test_a_wheel_hold_still_delivers_the_buy_on_release() -> void:
+	## BUY_WHEEL_OPEN rides the same `buy` field a purchase does, so it has to be
+	## normalized away before the buy EDGE test — left in, buy_prev sits at 7
+	## forever and the release (which arrives as kind+1) never registers an edge
+	## at all: every purchase in the game silently stops working.
+	var sim := _bare()
+	var p := sim.players[0]
+	p["mg_ammo"] = 0
+	sim.war_chest = 999
+	var held := _wheel_held()
+	for i in 5:
+		sim.step([held])
+	Runner.T.eq(sim.players[0]["mg_ammo"], 0, "holding the wheel buys nothing on its own")
+	var buy := SimInput.new()
+	buy.buy = 1   # kind 0 + 1 = ammo
+	sim.step([buy])
+	Runner.T.ok(sim.players[0]["mg_ammo"] > 0,
+		"the release after a hold still delivers the purchase")
+	Runner.T.ok(sim.war_chest < 999, "...and is still paid for")

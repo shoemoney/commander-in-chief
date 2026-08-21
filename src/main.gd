@@ -2847,6 +2847,16 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": buy_float_text(int(ev["kind"]), int(ev.get("n", 1))),
 						"col": Color(1.0, 0.95, 0.6)})
+			"hazard_hold":
+				# The plate is opaque, so the sim holds the hazards it hides while the
+				# wheel is open (see SimWorld.BUY_WHEEL_OPEN). SAY SO — an unannounced
+				# hold is an invisible rule, and the budget is finite: a player who
+				# thinks the wheel is a bunker will still be standing there when it
+				# runs out. Named per source so "HELD" over a mast pulse and over a
+				# mortar read as the same mechanic, not two coincidences.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.02, "text": "HELD — WHEEL UP", "col": Color(0.62, 0.86, 1.0)})
+				_sfx.play("armor_block", -12.0, 1.25)
 			"deny":
 				var deny_txt: String = {"cap": "FIELD FULL", "tank": "NOT FROM THE TANK", "board": "TOO FAR TO BOARD",
 					"token": "NO COMMENDATION", "full": "ALREADY STOCKED",
@@ -2855,6 +2865,12 @@ func _consume_events() -> void:
 					# NEED COINS, because the arm that said this lived in a SECOND, unreachable
 					# "deny": case of this same match.
 					"water": "NO ROLL IN WATER",
+					# Salvaging a burning hulk with grenades already at the cap. NOT the
+					# generic "ALREADY STOCKED": the sim swallows the press so INTERACT
+					# cannot reach the claymore, so this is the only feedback there is, and
+					# it has to name the thing that is full — a player spawns AT the cap and
+					# has to SPEND one before the hull will give him anything.
+					"salvage_full": "GRENADES FULL",
 					"no_targets": "HOLD FIRE — SKIES EMPTY"}.get(
 						ev.get("why", "coins"), "NEED COINS")
 				if ev.get("why", "") == "full" and int(ev.get("kind", -1)) == 3:
@@ -6841,7 +6857,16 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 			w["pop_sel"] = w["sel"]
 			w["pop"] = 0.0
 		w["pop"] = 1.0 if _motion < 0.5 else minf(1.0, float(w.get("pop", 0.0)) + 0.18)
-		return 0
+		# THE HOLD ITSELF IS AN INPUT. The plate is opaque and masks a ~100px donut of
+		# ground around a stationary soldier (terrain contrast through the disc measured
+		# at ±24.3 → ±3.8 luma), so the sim pauses the hazards it hides — but it can only
+		# do that if it is TOLD the wheel is open, and `buy` was the only channel that
+		# crosses the float→int boundary here. BUY_WHEEL_OPEN is a sentinel VALUE on that
+		# existing 3-bit field (0..6 were taken), so the lockstep/replay wire format is
+		# unchanged. The sim normalizes it away from the buy edge, so it can never read as
+		# a purchase. Without this line the whole pause is dead code: the guard exists, is
+		# correct, is tested, and nothing ever reaches it.
+		return SimWorld.BUY_WHEEL_OPEN
 	if w["open"]:
 		w["open"] = false
 		var sel: int = w["sel"]
@@ -9660,10 +9685,14 @@ func _draw_pickups() -> void:
 			# signposts, plated labels and floattext toasts.
 			var pdigits := str(pk["cost"]) if afford else (str(pk["cost"]) + "×")
 			var pwant := Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(pdigits, 9), 13.0)
-			# Same SUBJECT gate as _world_label: no price without its crate. Gating on
-			# `pwant` instead dropped the price off a VISIBLE crate in the top 21px of
-			# the frame, where the plate (34px above the crate) is entirely above y=0.
-			if not WORLD_LABEL_FRAME.has_point(ppos):
+			# Same SUBJECT gate as _world_label, on the SAME constant: no price without its
+			# crate. Gating on `pwant` instead dropped the price off a VISIBLE crate in the
+			# top 21px of the frame, where the plate (34px above the crate) is entirely
+			# above y=0. The frame carries WORLD_LABEL_TOP_TOL of slack above the top edge,
+			# so a crate a pixel or two off the top keeps its price rather than losing it on
+			# an exact-edge test — the crate's identity glyph still paints 23px above its
+			# anchor, so it is on screen for the whole tolerance.
+			if not WORLD_LABEL_SUBJECT_FRAME.has_point(ppos):
 				continue
 			var pgot := claim_label_slot(pwant, _label_slots)
 			_label_slots.append(pgot)
@@ -10654,6 +10683,43 @@ var _label_slots: Array[Rect2] = []
 ## SUPPRESSED rather than relocated (see _world_label).
 const WORLD_LABEL_FRAME := Rect2(0.0, 0.0, 640.0, 360.0)
 
+## How far ABOVE the top edge a label's SUBJECT may sit and still be labelled.
+## The gate below is deliberately a suppression, not a relocation — that is what took
+## label-on-label and label-on-player overlap from 46.32%/47.01% of sampled bot frames
+## to 0. But it was knife-edged on y: a subject ONE PIXEL above the frame lost its label
+## outright, where the old keep-place clamp still printed one. A downed partner drifting
+## off the top edge kept only the threat chevron, no "REVIVE <cost>" / "GET UP" at all,
+## and the same cliff hit all ~15 world-label producers (LOW FUEL, RESCUE +N, ESCAPING!,
+## SILENCE THE SPOTTER, the rally countdown, the crate prices).
+##
+## 12.0 is MEASURED, not chosen: it is the smallest above-anchor extent of any labelled
+## subject's own art, so at exactly this tolerance every subject the gate now admits is
+## still painting pixels inside the frame. The two tightest are the ones the complaint is
+## about — the downed body's KO ring (`Art.arc(self, pos, 12.0, ...)`, _draw_players) and
+## the downed pilot's objective ring (`10.0 + pulse * 2.0`, _draw_enemies), both centred
+## ON the subject point. Every other labelled subject reaches further up and so is covered
+## with room to spare: the crate's identity glyph plate tops out 23px above its anchor,
+## the spotter's antenna arc 21px, the tank hull ~37px (104px canvas x 0.72 draw scale, /2),
+## the soldier sprite ~32px. One pixel more and a downed pilot would be labelled with
+## nothing of him on screen, which is the exact lie the gate exists to stop — so do NOT
+## widen this without re-measuring those extents AND re-running the overlap census in
+## tools/probe_droplabels.gd. A wider gate lets labels back in.
+##
+## The label itself always lands: claim_label_slot only ever returns rows with
+## `y >= 0 and y + h <= 360`, so a tolerated subject's plate is clamped INTO the frame
+## (the tallest plate is 21px — Art.fs(8) = 16 at the 200% TEXT SIZE cap, plus the
+## label_plate_rect +5 — which fits every row of the ladder).
+const WORLD_LABEL_TOP_TOL := 12.0
+
+## WORLD_LABEL_FRAME grown upward by that tolerance, and ONLY upward: the bottom and
+## side edges keep the hard cull, because nothing below or beside the frame has the
+## one-pixel-drift problem (the camera scrolls north, so subjects leave through the top).
+## This is the rect BOTH subject gates test — _world_label and the crate price in
+## _draw_pickups. Keep them on the same constant or the two drift apart again.
+const WORLD_LABEL_SUBJECT_FRAME := Rect2(
+	WORLD_LABEL_FRAME.position.x, WORLD_LABEL_FRAME.position.y - WORLD_LABEL_TOP_TOL,
+	WORLD_LABEL_FRAME.size.x, WORLD_LABEL_FRAME.size.y + WORLD_LABEL_TOP_TOL)
+
 ## Did the last _world_label call actually draw? The offset it returns is
 ## Vector2.ZERO both for "placed exactly where it wanted" and for "suppressed",
 ## so the companion-keycap sites (REVIVE / GET UP) read this instead, or they
@@ -10841,7 +10907,14 @@ func _world_label(txt: String, pos: Vector2, col: Color, subject := Vector2.INF)
 	# tail below. `_world_label_placed` lets the two companion-keycap call sites
 	# (REVIVE, GET UP) tell "placed at offset zero" from "suppressed", since the
 	# returned offset is Vector2.ZERO either way.
-	if not WORLD_LABEL_FRAME.has_point(pos if subject == Vector2.INF else subject):
+	#
+	# The rect is WORLD_LABEL_SUBJECT_FRAME, not WORLD_LABEL_FRAME: the gate carries a
+	# 12px tolerance above the TOP edge so a subject that has drifted a pixel or two off
+	# the top — a downed partner, a pilot, a burning tank — keeps a clamped label instead
+	# of losing it to an exact-edge test. See WORLD_LABEL_TOP_TOL for where 12 comes from;
+	# it is a measured bound (the smallest labelled subject's own art extent), not a taste
+	# knob, and it is what keeps a downed partner 1px above the frame showing REVIVE.
+	if not WORLD_LABEL_SUBJECT_FRAME.has_point(pos if subject == Vector2.INF else subject):
 		_world_label_placed = false
 		return Vector2.ZERO
 	_world_label_placed = true

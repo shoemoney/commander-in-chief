@@ -30,8 +30,17 @@ func _init() -> void:
 	var ms: Script = MS
 	var panel := Rect2(HudIcons.PLATE_ORIGIN, HudIcons.PLATE_ORIGIN, HudIcons.PLATE_MIN_W,
 		HudIcons.PLATE_ORIGIN + HudIcons.HEAD_H + HudIcons.ROW_H)
-	var frame_r := Rect2(0.0, 0.0, 640.0, 360.0)
-	var gate: bool = "WORLD_LABEL_FRAME" in ms.get_script_constant_map()
+	# READ THE SHIPPED RECT, never restate it. This probe used to hardcode
+	# Rect2(0,0,640,360) and detect the gate by the presence of WORLD_LABEL_FRAME —
+	# so when the subject gate gained a top-edge tolerance (WORLD_LABEL_SUBJECT_FRAME,
+	# WORLD_LABEL_FRAME grown upward by WORLD_LABEL_TOP_TOL), the probe kept measuring
+	# the STRICT rect while the game used the tolerant one, and its `gate` flag stayed
+	# true because the old constant still exists. A measuring rig whose numbers describe
+	# code the game no longer runs is worse than no rig: it reports failures against
+	# behaviour the suite calls correct.
+	var consts: Dictionary = ms.get_script_constant_map()
+	var frame_r: Rect2 = consts.get("WORLD_LABEL_SUBJECT_FRAME", Rect2(0.0, 0.0, 640.0, 360.0))
+	var gate: bool = consts.has("WORLD_LABEL_SUBJECT_FRAME")
 	for scale in [1.0, 2.0]:
 		Art.text_scale = scale
 		Art.flush_tw()

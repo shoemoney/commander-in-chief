@@ -326,3 +326,43 @@ func test_an_arcade_chapter_jump_prices_the_sector_it_actually_drops_you_into() 
 	# And it must ride the SAME cursor the roster does, not merely be nonzero.
 	Runner.T.eq(sim._econ_depth(), sim._sector_index(opened),
 		"price depth and roster depth read one cursor")
+
+
+func test_salvage_refuses_the_strip_when_it_would_deliver_zero_grenades() -> void:
+	## _try_salvage_hulk used to return true at GRENADE_AMMO_MAX: +0 grenades, and
+	## the hulk's burn_ticks 100 -> 0 regardless — two-way cover traded for nothing,
+	## the exact no-op every other supply path already refuses through _supply_full
+	## (test_supply_full_covers_every_capped_kind, above). It now asks the same
+	## predicate. The refusal has to be AUDIBLE with its own reason: players spawn AT
+	## the cap and a hulk is solid to boots, so a fresh soldier really can meet a hull
+	## he cannot clear until he spends a grenade, and a silent no-press reads as a
+	## broken button rather than a rule.
+	var sim := SimWorld.new(19, 1)
+	var p := sim.players[0]
+	sim.tanks.clear()
+	var ty: int = sim.camera_top + 200 * SimWorld.F_ONE
+	sim.tanks.append({"x": 300 * SimWorld.F_ONE, "y": ty, "alive": true,
+		"burning": true, "fuel": 0, "burn_ticks": 1, "fire_cd": 0, "occupant": -1})
+	sim._detonate_tank(sim.tanks[0])
+	p["x"] = 300 * SimWorld.F_ONE
+	p["y"] = ty
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	sim.events.clear()
+	Runner.T.ok(sim._try_salvage_hulk(p),
+		"the refusal still SWALLOWS interact — falling through arms a claymore underfoot")
+	Runner.T.eq(sim.tanks[0]["burn_ticks"], SimWorld.HULK_TICKS,
+		"a refused salvage keeps the cover standing")
+	Runner.T.eq(p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX, "...and pays nothing")
+	Runner.T.eq(sim.tanks[0].get("salvage_tick", -1), -1,
+		"...and never stamps the hulk as stripped this tick")
+	var why := ""
+	for ev in sim.events:
+		if ev["t"] == "deny":
+			why = ev["why"]
+	Runner.T.eq(why, "salvage_full",
+		"the refusal is loud and carries its OWN reason, not the generic full")
+	# One grenade short of the cap the trade is real again, and still clamps.
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX - 1
+	Runner.T.ok(sim._try_salvage_hulk(p), "one below the cap still strips")
+	Runner.T.eq(p["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX, "...clamped to the cap, never over")
+	Runner.T.eq(sim.tanks[0]["burn_ticks"], 0, "...and the cover is what paid for it")

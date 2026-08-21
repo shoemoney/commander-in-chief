@@ -60,6 +60,18 @@ open in their sections.** Older carried entries are marked per-section.
 
 ## 1. Owner decisions — these need a human, not a fix
 
+> ### ✅ OWNER RULINGS — 2026-08-21
+> Four decisions answered by the owner directly. Do NOT re-open these in a later cycle; a
+> reviewer re-reporting one of them should be dismissed with a pointer here.
+>
+> | # | Question | Ruling |
+> |---|---|---|
+> | §1.2 | Shop-wheel plate alpha vs. hazards reading through | **Keep the readable plate; PAUSE the hazards during the buy.** The lower alpha was the wrong lever — this is the fix the entry itself named. |
+> | §1.9 | Hulk salvage at grenade cap | **Refuse when the strip would deliver 0; allow at >= 1.** ⚠️ Accepted consequence: players spawn AT `GRENADE_AMMO_MAX`, so a fresh player meets a hulk wall they cannot clear until they spend a grenade. The refusal is therefore required to be AUDIBLE (`deny{why:"salvage_full"}`) so the rule is readable rather than inferred. |
+> | AAA-run | Off-frame world-label suppression | **Add a small negative-y tolerance** (~`Rect2(0,-24,640,384)`), so a subject just above the viewport keeps a clamped label. The 0%-overlap result (from 46.32%/47.01% across 14,400 frames) must NOT regress — measure it after. |
+> | §1.10 | Flat airstrike deny removing the skilled pre-call | **Keep the deny.** The `pending_airstrike` freeze route is explicitly declined; the trade-off is now permanent by decision, not by omission. |
+
+
 1. **`tools/probe_concussion_hud.gd` runs in NO automated gate.** The plan said to wire it
    into "the CI step that already runs gl_compatibility pixel smoke", but no such CI step
    exists (verified `.github/workflows/ci.yml` — every job is `--headless`). The CI-gated

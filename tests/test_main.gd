@@ -2869,9 +2869,15 @@ func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
 	if wstart >= 0:
 		var wend := src.find("\nfunc ", wstart + 1)
 		var body := src.substr(wstart, wend - wstart)
-		Runner.T.ok(body.contains("WORLD_LABEL_FRAME"),
+		# The CALL, not the name: the body's own comment mentions both constants, so a bare
+		# `contains("WORLD_LABEL_SUBJECT_FRAME")` stayed green with the gate unwired back to
+		# the untolerant rect. Verified by reverting — this form goes red, that one did not.
+		Runner.T.ok(body.contains("WORLD_LABEL_SUBJECT_FRAME.has_point("),
 			"_world_label suppresses a label whose subject is outside the frame instead of "
 			+ "relocating it onto the player (no off-frame gate found)")
+		Runner.T.ok(not body.contains("WORLD_LABEL_FRAME.has_point("),
+			"...and it tests the TOLERANT rect, so a subject a pixel off the top edge keeps "
+			+ "its label (see WORLD_LABEL_TOP_TOL)")
 		# ...and the gate is on the SUBJECT, not on the plate. The two look
 		# equivalent and are not: a plate sits ~34px above the thing it names, so a
 		# want-rect test silently drops the label off a subject the player can SEE
@@ -2879,15 +2885,15 @@ func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
 		# Placing the plate is the arbiter's job; it searches the whole frame now.
 		Runner.T.ok(body.contains("has_point("),
 			"_world_label gates on the SUBJECT POINT, not on the label's own plate rect")
-		Runner.T.ok(not body.contains("WORLD_LABEL_FRAME.intersects(want)"),
+		Runner.T.ok(not body.contains("WORLD_LABEL_SUBJECT_FRAME.intersects(want)"),
 			"_world_label does not gate on `want` — a visible subject whose plate is above y=0 must still be labelled")
 	var dstart := src.find("func _draw_pickups(")
 	Runner.T.ok(dstart >= 0, "found the _draw_pickups body")
 	if dstart >= 0:
 		var dbody := src.substr(dstart, src.find("\nfunc ", dstart + 1) - dstart)
-		Runner.T.ok(dbody.contains("WORLD_LABEL_FRAME.has_point(ppos)"),
+		Runner.T.ok(dbody.contains("WORLD_LABEL_SUBJECT_FRAME.has_point(ppos)"),
 			"the crate price gates on the CRATE's screen position, not on the price plate")
-		Runner.T.ok(not dbody.contains("WORLD_LABEL_FRAME.intersects(pwant)"),
+		Runner.T.ok(not dbody.contains("WORLD_LABEL_SUBJECT_FRAME.intersects(pwant)"),
 			"a visible priced crate in the top 21px of the frame still shows its price")
 
 	# ------------------------------------------------------------------------
@@ -2901,14 +2907,17 @@ func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
 	# and all 15 always drew, so that is a regression the gate introduced.
 	#
 	# Each site's SHIPPED anchor offset is scraped from source and pushed through
-	# the SHIPPED WORLD_LABEL_FRAME.has_point predicate — no copy of the gate, and
+	# the SHIPPED WORLD_LABEL_SUBJECT_FRAME.has_point predicate — no copy of the gate, and
 	# a producer added tomorrow joins the sweep automatically. A caller that
 	# clamps its own baseline into the frame (ESCAPING!, main.gd:10215) is safe by
 	# construction and exempt.
 	var sites := _wl_call_sites(src)
 	Runner.T.ok(sites.size() >= 14,
 		"scraped %d _world_label* call sites to sweep" % sites.size())
-	var frame_rect: Rect2 = ms.get_script_constant_map()["WORLD_LABEL_FRAME"]
+	# The SHIPPED gate rect, tolerance included — WORLD_LABEL_SUBJECT_FRAME, not the bare
+	# WORLD_LABEL_FRAME the gate used to test. Reading the constant (rather than restating
+	# 640x360) is what keeps this sweep measuring the game after the tolerance moved.
+	var frame_rect: Rect2 = ms.get_script_constant_map()["WORLD_LABEL_SUBJECT_FRAME"]
 	var wrong_suppress := 0
 	var wrong_place := 0
 	var swept := 0
@@ -2928,8 +2937,15 @@ func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
 					if first_s == "":
 						first_s = "%s at main.gd:%d drops a VISIBLE subject at %s (anchor %+.0fpx, passes `subject`: %s)" \
 							% [site[0], site[1], str(subj), dy, str(bool(site[2]))]
-		for out_subj in [Vector2(320.0, -6.0), Vector2(320.0, 366.0),
-				Vector2(-6.0, 180.0), Vector2(646.0, 180.0)]:
+		# Off-frame probes are derived from the gate rect, not frozen at -6/366: the top
+		# edge now carries WORLD_LABEL_TOP_TOL of deliberate slack, so a frozen -6 would
+		# measure the TOLERANCE as a bug. 6px past each real edge, on every side.
+		# (The tolerance itself is bounded and probed exactly, one pixel either side of
+		# the cliff, by test_world_label_top_edge_keeps_a_barely_offscreen_subject.)
+		for out_subj in [Vector2(320.0, frame_rect.position.y - 6.0),
+				Vector2(320.0, frame_rect.end.y + 6.0),
+				Vector2(frame_rect.position.x - 6.0, 180.0),
+				Vector2(frame_rect.end.x + 6.0, 180.0)]:
 			swept += 1
 			if frame_rect.has_point(out_subj + Vector2(0.0, gate_dy)):
 				wrong_place += 1
@@ -2943,6 +2959,98 @@ func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
 	Runner.T.eq(wrong_place, 0,
 		"...and every label about a subject OUTSIDE it is suppressed (%d placed; first: %s)"
 			% [wrong_place, first_p])
+
+
+# The off-frame SUBJECT gate is a suppression (the sweep above pins that), and it shipped
+# knife-edged on y: a subject ONE PIXEL above the top edge lost its label outright. A downed
+# partner drifting off the top showed the threat chevron and no "REVIVE <cost>" at all, where
+# the pre-gate keep-place clamp still printed one — and the same cliff hit all ~15 producers
+# (LOW FUEL, RESCUE +N, ESCAPING!, SILENCE THE SPOTTER, the rally countdown, crate prices).
+# WORLD_LABEL_TOP_TOL is the tolerance that fixes it. Three things need pinning, because
+# each one alone is passable while the feature is broken:
+#   1. the cliff, one pixel either side, measured on the SHIPPED gate rect;
+#   2. the tolerance's UPPER bound and its one-sided shape — a wider gate lets suppressed
+#      labels back in, which is how the 0%-overlap census gets quietly regressed;
+#   3. that a tolerated label actually LANDS, fully inside the visible frame, rather than
+#      being admitted by the gate and then drawn above the viewport.
+func test_world_label_top_edge_keeps_a_barely_offscreen_subject() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var cm := ms.get_script_constant_map()
+	var frame: Rect2 = cm["WORLD_LABEL_FRAME"]
+	var tol: float = cm["WORLD_LABEL_TOP_TOL"]
+	var gate: Rect2 = cm["WORLD_LABEL_SUBJECT_FRAME"]
+
+	Runner.T.ok(tol > 0.0,
+		"the subject gate carries a top-edge tolerance, so a subject a pixel off the top "
+		+ "keeps its label instead of losing it to an exact-edge test (tol=%.1f)" % tol)
+	# The bound is MEASURED, not stylistic: 12px is the SMALLEST above-anchor extent of any
+	# labelled subject's own art — the downed body's KO ring (Art.arc(self, pos, 12.0, ...),
+	# _draw_players) and the downed pilot's objective ring (10.0 + pulse * 2.0, _draw_enemies),
+	# both centred ON the subject point. At 12 every admitted subject still paints pixels
+	# inside the frame; at 13 a pilot can be labelled with none of him on screen, which is
+	# the exact lie the gate exists to stop. Re-measure those two rings before raising this.
+	Runner.T.ok(tol <= 12.0,
+		("the tolerance stays within the smallest labelled subject's own art extent (12px, "
+		+ "the downed-body / downed-pilot rings) — got %.1f, which would label a subject "
+		+ "with nothing of it on screen") % tol)
+
+	# ...and it grows the gate UPWARD ONLY. The camera scrolls north, so the top edge is the
+	# only one a subject drifts across a pixel at a time; a tolerance on the other three
+	# would just be the suppression getting weaker for nothing.
+	Runner.T.eq(gate.position.y, frame.position.y - tol, "the gate is the frame grown up by the tolerance")
+	Runner.T.eq(gate.end.y, frame.end.y, "the BOTTOM edge keeps the hard cull")
+	Runner.T.eq(gate.position.x, frame.position.x, "the LEFT edge keeps the hard cull")
+	Runner.T.eq(gate.end.x, frame.end.x, "the RIGHT edge keeps the hard cull")
+
+	# The cliff, on the shipped predicate, one pixel either side.
+	Runner.T.ok(gate.has_point(Vector2(320.0, -1.0)),
+		"a subject 1px above the frame — the downed partner — is still labelled")
+	Runner.T.ok(gate.has_point(Vector2(320.0, -tol)),
+		"...and so is one sitting at the full tolerance (%.1fpx up)" % tol)
+	Runner.T.ok(not gate.has_point(Vector2(320.0, -tol - 1.0)),
+		"...while one pixel PAST the tolerance is still suppressed (the chevron's job)")
+	# Non-vacuity: without the tolerance this test's headline case is a suppression, so the
+	# assertions above are measuring the tolerance and nothing else.
+	Runner.T.ok(not frame.has_point(Vector2(320.0, -1.0)),
+		"non-vacuity: the untolerant frame really would have dropped that subject")
+
+	# 3. It has to LAND. Push the widest anchor rise any producer uses (-26px: the GET UP /
+	# rally-countdown pair at main.gd:11842/11858) through the SHIPPED plate + arbiter math
+	# for a subject at the tolerance limit, at both TEXT SIZE ends. The want-rect is entirely
+	# above y=0 there; claim_label_slot has to clamp it into the frame, not hand it back.
+	var was_scale: float = Art.text_scale
+	var frame_slack := frame.grow(0.5)          # inclusive compare — a row at y=0 touches the edge
+	for scale in [1.0, float(cm["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz: int = Art.fs(8)
+		var txt := "REVIVE 250"
+		var w: float = Art.tw(txt, sz)
+		for sy in [-1.0, -tol]:
+			var want: Rect2 = ms._label_plate_rect(320.0 - w / 2.0, sy - 26.0, w, sz)
+			Runner.T.ok(want.end.y < 0.0,
+				"the want-rect for a tolerated subject really is off the top at %d%% (bottom %.1f)"
+					% [int(scale * 100.0), want.end.y])
+			# Empty frame, and a frame crowded by the HUD corner panel + a soldier: the
+			# clamp must survive both, since the tolerated cases are exactly the ones that
+			# fall off the 13-row ladder and into the extended search.
+			var panel := Rect2(HudIcons.PLATE_ORIGIN, HudIcons.PLATE_ORIGIN, HudIcons.PLATE_MIN_W,
+				HudIcons.PLATE_ORIGIN + HudIcons.HEAD_H + HudIcons.ROW_H)
+			var busy: Array[Rect2] = [panel, ms.player_label_exclusion(Vector2(320.0, 40.0))]
+			for taken in [[] as Array[Rect2], busy]:
+				var got: Rect2 = ms.claim_label_slot(want, taken)
+				Runner.T.ok(got.get_area() > 0.0,
+					"a tolerated label is placed, not dropped (%d%%, subject y=%.1f)"
+						% [int(scale * 100.0), sy])
+				Runner.T.ok(frame_slack.encloses(got),
+					"a tolerated label is clamped fully INTO the frame, not drawn above the "
+					+ "viewport (%d%%, subject y=%.1f, got %s)" % [int(scale * 100.0), sy, str(got)])
+				for t in taken:
+					Runner.T.ok(not got.grow(-0.5).intersects((t as Rect2).grow(-0.5)),
+						"...and it still does not land on occupied pixels (%s vs %s)"
+							% [str(got), str(t)])
+	Art.text_scale = was_scale
+	Art.flush_tw()
 
 
 # Splits a call's argument text on TOP-LEVEL commas (nesting- and quote-aware).

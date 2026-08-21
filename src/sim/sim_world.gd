@@ -474,6 +474,35 @@ const WIPE_SCORE_MULT := 3
 # the 6x spend discount and 3x salvage are both priced against (see SPEND_SCORE_MULT).
 const VICTORY_SCORE_MULT := 10
 const VICTORY_SCORE_BONUS := 5000
+# SPEND-WHEEL HAZARD PAUSE (owner call, backlog 1.2). The wheel plate is
+# deliberately READABLE, not opaque — measured, an opaque disc drops terrain
+# contrast under it from +/-24.3 to +/-3.8 luma, masking a ~100px donut around a
+# stationary soldier for the ~1s buy. The owner kept the readable plate and paused
+# the hazards instead: while the wheel is HELD OPEN, the self-firing AREA hazards
+# whose whole tell (mast warn, vent warn, strike ring) lands inside that donut stop
+# resolving ON THE SHOPPER. Precedent: _step_mast_hazard/_step_observer already sleep
+# for the endless breather with a one-line intermission guard; this is the same idea
+# scoped to one player instead of the whole field, so a 2P partner who is NOT
+# shopping keeps eating everything.
+#
+# What is NOT paused, and why: enemy movement, ordinary bullets and melee (owner:
+# out of scope — the plate does not hide a rusher), mines/claymores/barrels (they
+# only go off because the player WALKED or SHOT — pausing them turns the wheel
+# into a minesweeper), and tank shells. Only the three timer-fired area hazards.
+#
+# BUY_WHEEL_OPEN is a sentinel VALUE on the existing `buy` field, not a new input
+# bit: buy already rides 3 bits (SimInput.encode packs `(buy & 7) << 5`), values
+# 0..6 are taken and 7 was free — so lockstep/replay wire format is untouched.
+const BUY_WHEEL_OPEN := 7
+# The pause is BUDGETED, because the wheel can be held open forever (main.gd's
+# _update_wheel keeps `open` true for as long as the button is down). Unbudgeted,
+# parking on the hold key would be permanent immunity to every mortar in the game —
+# a fairness bug traded for an exploit. 90t = 1.5s covers the ~1s buy with slack;
+# the budget only refills while the wheel is CLOSED, at 1 tick per 4, so buying back
+# a full 90t shield costs 360t (6s) of shopping with the plate down. Camping the
+# wheel is strictly worse than fighting.
+const WHEEL_PAUSE_MAX_TICKS := 90
+const WHEEL_PAUSE_REFILL_EVERY := 4
 # Spend-wheel prices by supply kind (0 ammo, 1 grenade, 2 vest, 3 airstrike).
 const SHOP_SANDBAG_COST := 40        # starting value (grenade 30 < bag < vest 60); test: a scripted endless bot should buy 1-3/run
 const HULK_TICKS := 1050             # starting value, mid of the panel's 900-1200 band; test: block flips off at exactly 0
@@ -802,6 +831,15 @@ var pressure_side: int = -1        # c3 7v: endless spawn pressure quadrant (0 l
 var intermission_ticks: int = 0
 var ready_hold: int = 0            # ticks the whole living party has held REVIVE to deploy early
 var pending_airstrike: int = 0     # ticks until a called airstrike resolves (0 = none)
+# Spend-wheel hazard pause, per player index. `wheel_pause_spent` is the only real
+# state: ticks of shield already burned this hold, refilled while closed. It is
+# CONDITIONALLY fed to checksum() (the flush_cd/vest_buys precedent) — a run that
+# never opens the wheel leaves it 0 and the hash stream byte-identical.
+# `_wheel_open` is NOT state: it is this tick's input re-read, rewritten in
+# _step_players before any hazard stepper runs (players step first), so it is
+# derived exactly like _prev_camera_top and is never hashed.
+var wheel_pause_spent: Array[int] = []
+var _wheel_open: Array[bool] = []
 var flash_ticks: int = 0           # flashbang stun: field enemies skip their step while > 0
 var colossus: Dictionary = {}
 var endless_boss: Dictionary = {}   # endless-only miniboss (reuses the gunship schema)
@@ -886,6 +924,10 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 	_next_barrel_y = -(900 * F_ONE)
 	_next_rock_y = -(700 * F_ONE)
 	_world_seed = seed_value
+	wheel_pause_spent.resize(player_count)
+	wheel_pause_spent.fill(0)
+	_wheel_open.resize(player_count)
+	_wheel_open.fill(false)
 	for i in player_count:
 		players.append({
 			"idx": i,
@@ -1168,8 +1210,20 @@ func _step_players(inputs: Array) -> void:
 		p["roll_iframe"] = false
 		var interact_edge: bool = inp.interact and not p["interact_prev"]
 		p["interact_prev"] = inp.interact
-		var buy_edge: bool = inp.buy > 0 and p["buy_prev"] == 0
-		p["buy_prev"] = inp.buy
+		# BUY_WHEEL_OPEN is a HOLD state, never a purchase: normalize it away before
+		# the edge test or the release (which arrives as kind+1) would find buy_prev
+		# still 7 and never fire the buy at all. Every buy value the sim already
+		# understood (0..6) flows exactly as before, so this is golden-inert unless
+		# a run actually holds the wheel.
+		var wheel_held: bool = inp.buy == BUY_WHEEL_OPEN and p["alive"]
+		_wheel_open[i] = wheel_held
+		if wheel_held:
+			wheel_pause_spent[i] = mini(WHEEL_PAUSE_MAX_TICKS, wheel_pause_spent[i] + 1)
+		elif wheel_pause_spent[i] > 0 and tick_count % WHEEL_PAUSE_REFILL_EVERY == 0:
+			wheel_pause_spent[i] -= 1
+		var buy_cmd: int = 0 if inp.buy == BUY_WHEEL_OPEN else inp.buy
+		var buy_edge: bool = buy_cmd > 0 and p["buy_prev"] == 0
+		p["buy_prev"] = buy_cmd
 		var grenade_edge: bool = inp.grenade and not p["grenade_prev"]
 		p["grenade_prev"] = inp.grenade
 
@@ -2604,6 +2658,24 @@ func _exposed(p: Dictionary) -> bool:
 	return t < 0 or tanks[t]["burning"]
 
 
+func _hazard_paused(p: Dictionary) -> bool:
+	## True while this player's spend wheel is open AND their pause budget still
+	## holds — the sibling of _exposed(), and asked by exactly the three
+	## timer-fired area hazards whose telegraph the wheel plate covers: the endless
+	## mast pulse, the foundry vent jet, and any in-flight strike detonation
+	## (grenadier lob, observer barrage, gunship/colossus mortar — they all land
+	## through _resolve_strikes). Bullets, mines, barrels and bodies are NOT asked:
+	## see BUY_WHEEL_OPEN for what is deliberately left live and why.
+	##
+	## Per-PLAYER, not global: the hazard's own timer keeps running, so a 2P
+	## partner who is not shopping still takes the hit, and nothing is deferred
+	## onto anyone. The shopper simply is not there for it.
+	var i: int = p["idx"]
+	if i < 0 or i >= _wheel_open.size():
+		return false
+	return _wheel_open[i] and wheel_pause_spent[i] < WHEEL_PAUSE_MAX_TICKS
+
+
 func _tank_gunner(t: int) -> int:
 	## Index of the player riding tank t as gunner (in_tank == t but not the
 	## occupant), or -1. Always derived, never stored.
@@ -2616,11 +2688,28 @@ func _tank_gunner(t: int) -> int:
 func _try_salvage_hulk(p: Dictionary) -> bool:
 	## Interact on a smoldering hulk strips it: +2 grenades (the cannon draws
 	## from the grenade pool — same logistics), and the strip ENDS the cover
-	## (burn_ticks = 0). That is the decision: keep the wall or take the ammo.
-	## +2 = starting value; test: salvage at cap clamps, second tap is a no-op.
+	## (burn_ticks = 0). That is the decision: keep the wall or take the ammo —
+	## but ONLY while there is ammo to take. At GRENADE_AMMO_MAX the strip used to
+	## succeed, grant +0, and still burn the hulk's burn_ticks 100 -> 0, trading
+	## two-way cover for literally nothing; every other supply path already refuses
+	## its own no-op through _supply_full (test_shop pins it), and this one now asks
+	## the same predicate. +2 = starting value; test: salvage at cap REFUSES, a
+	## salvage at cap-1 still clamps to the cap, second tap is a no-op.
 	for tank in tanks:
 		if not tank["alive"] and tank["burn_ticks"] > 0 \
 				and _dist_lte(p["x"], p["y"], tank["x"], tank["y"], TANK_BOARD_RADIUS):
+			if _supply_full(p, 1):
+				# KNOWN COST, accepted: players spawn AT the cap and hulks are solid to
+				# boots, so a fresh soldier can meet a hull he cannot clear until he
+				# spends a grenade. That is exactly why the refusal has to be AUDIBLE —
+				# a silent no-press reads as a broken button. Events are checksum-
+				# excluded, so saying so is free.
+				events.append({"t": "deny", "why": "salvage_full",
+					"x": tank["x"], "y": tank["y"], "i": p["idx"]})
+				# TRUE, not false: the same swallow the same-tick partner guard below
+				# does. Falling through would let INTERACT reach the claymore arm and
+				# plant one under the player's own boots on a refused press.
+				return true
 			# Event reports what was actually GRANTED (a capped player got +1/+0
 			# while the toast promised +2 — a HUD lie, re-review).
 			var before: int = p["grenade_ammo"]
@@ -4184,6 +4273,13 @@ func _step_mines() -> void:
 			for p in players:
 				if p["alive"] and _exposed(p) and not p["roll_iframe"] \
 						and _dist_lte(p["x"], p["y"], v["x"], v["y"], VENT_HURT_RADIUS):
+					if _hazard_paused(p):
+						# The vent's tell is a 30t warn — shorter than the buy itself, and
+						# entirely inside the plate's donut. Opening tick only (mast rule).
+						if v_phase == VENT_CYCLE_TICKS - VENT_JET_TICKS:
+							events.append({"t": "hazard_hold", "why": "vent",
+								"x": p["x"], "y": p["y"], "i": p["idx"]})
+						continue
 					_hurt_player(p)
 			# c3 5v: the jet also BURNS soft cover — grass (kind 1) burns off,
 			# wall slabs (kind 2) crack; stone (0) and hero wrecks (3) are immune
@@ -4831,6 +4927,14 @@ func _step_mast_hazard() -> void:
 		for p in players:
 			if p["alive"] and _exposed(p) and not p["roll_iframe"] \
 					and _dist_lte(p["x"], p["y"], MAST_X, MAST_Y, MAST_HAZARD_RADIUS):
+				if _hazard_paused(p):
+					# Wheel plate up: the whole 90t warn happened under it. Announce the
+					# hold on the jet's OPENING tick only — the jet holds 60t and this
+					# loop runs every one of them; events become sounds.
+					if phase == MAST_CYCLE_TICKS - MAST_JET_TICKS:
+						events.append({"t": "hazard_hold", "why": "mast",
+							"x": p["x"], "y": p["y"], "i": p["idx"]})
+					continue
 				_hurt_player(p)
 
 
@@ -7168,6 +7272,13 @@ func _resolve_strikes() -> void:
 		for p in players:
 			if p["alive"] and not p["roll_iframe"] and _exposed(p) \
 					and _dist_lte(s["x"], s["y"], p["x"], p["y"], GRENADE_RADIUS):
+				if _hazard_paused(p):
+					# Every telegraphed area shell lands here — grenadier lob, observer
+					# barrage, gunship volley, colossus sweep. The ring IS the dodge
+					# window and the plate was sitting on it. One tick, so no rate guard.
+					events.append({"t": "hazard_hold", "why": "strike",
+						"x": p["x"], "y": p["y"], "i": p["idx"]})
+					continue
 				_hurt_player(p)
 		for tank in tanks:
 			if tank["alive"] and _dist_lte(s["x"], s["y"], tank["x"], tank["y"], GRENADE_RADIUS):
@@ -7272,6 +7383,9 @@ func checksum() -> int:
 		h = feed.call(0x60DB0DE, h)
 	if vest_buys > 0:
 		h = feed.call(vest_buys, h)   # conditional: 0 buys = untouched stream (torture never buys)
+	for wp in wheel_pause_spent:
+		if wp > 0:
+			h = feed.call(wp, h)   # conditional (flush_cd precedent): 0 while the wheel is shut, so a run that never shops leaves the stream byte-identical
 	for p in players:
 		if p["flush_cd"] > 0:
 			h = feed.call(p["flush_cd"], h)   # c3 2v: conditional — flush_cd is 0 unless camping grass near a threat (never in either torture window)
