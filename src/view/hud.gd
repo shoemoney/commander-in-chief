@@ -9,14 +9,24 @@ const FONT_SIZE := 10
 const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
 const ROW_H := 16.0   # one HUD row — a player row AND the shop-preview strip are this tall
 const HEAD_H := 26.0  # row-0 header block (coin/score/tokens + gap) above the player rows
-const BOSS_BAR_TOP := 64.0  # c1-15: THE shared HUD-layout boundary — the y the top-center boss/mini
+const BOSS_LABEL_SIZE := 10                              # the size BOTH phase labels draw at
+const LABEL_PLATE_RISE := float(BOSS_LABEL_SIZE) + 1.0   # 11: px label_plate_rect rises above its baseline
+const MIN_HUD_CHANNEL := 6.0   # clear pixels any two STACKED pieces of chrome must keep between them.
+                       # 3 true px between two dark slabs overlapping 225px horizontally still reads
+                       # as one clump at 640x360 upscaled.
+const BOSS_BAR_TOP := 77.0  # c1-15: THE shared HUD-layout boundary — the y the top-center boss/mini
                        # HP bars dock at. main.gd imports it directly (HudIcons.BOSS_BAR_TOP) for its
                        # bar renderers, so the corner panel and the bars share one source, no mirror.
 const BOSS_BAR_STRIDE := 22.0  # vertical stride between stacked top-center boss/mini HP bars. Was a
                        # bare 22.0 in THREE places in main.gd (the bar renderer itself, the splash
                        # banner's duck, the hint tooltip's duck) — hoisted so they can't drift.
+# The TRUE top of the boss block: main.gd plates the phase label ABOVE the bar line, so the block
+# starts LABEL_PLATE_RISE px higher than BOSS_BAR_TOP. Treating the bar line as the block top is
+# what let the corner plate bury the top 7px of the boss name in 3 of 4 configs. Written as the
+# folded arithmetic (a const cannot call a static func); test_hud pins it == label_plate_top().
+const BOSS_BLOCK_TOP := BOSS_BAR_TOP - LABEL_PLATE_RISE
 const SHOP_STRIP_CLEARANCE := 4.0  # c1-15: breathing gap the corner panel keeps below the bar line.
-const SHOP_SAFE_H := BOSS_BAR_TOP - SHOP_STRIP_CLEARANCE  # c1-15: corner-panel content-height cap,
+const SHOP_SAFE_H := BOSS_BLOCK_TOP - SHOP_STRIP_CLEARANCE  # c1-15: corner-panel content-height cap,
                        # derived at parse time. Header + rows + strip must fit or the strip drops (2P).
 const PIP_MIN_X := 4.0  # left safety floor (inset) for the accessibility corner pips — a narrow/
                        # letterboxed viewport can't push the CB/RM scrim plate off the left edge
@@ -1582,14 +1592,32 @@ const CAPTION_LINE_H := 11.0
 # paint straight over it — the strip's centered scrim ate the right half of "FOUNDRY COLOSSUS",
 # and the chip sat on the HP bar. The block's y's live HERE (not as literals in main.gd) so the
 # only file that draws over them can see them.
+## THE boss/colossus phase-label plate. main.gd DRAWS it (_label_plate_rect forwards here);
+## every band constant below DERIVES its reserve from it, so a reserve can no longer be a
+## hand-typed ascent mirror of a plate computed by different arithmetic. The plate rises
+## `size + 1` above its anchor baseline -- 11px at the shipped boss label size, NOT the 9px
+## font ascent the old constants assumed.
+static func label_plate_rect(origin_x: float, baseline_y: float, w: float,
+		size := BOSS_LABEL_SIZE) -> Rect2:
+	return Rect2(origin_x - 3.0, baseline_y - float(size) - 1.0, w + 6.0, float(size) + 5.0)
+
+
+static func label_plate_top(baseline_y: float, size := BOSS_LABEL_SIZE) -> float:
+	return baseline_y - float(size) - 1.0
+
+
 const COLOSSUS_LABEL_X := 172.0
 # 316, moved UP from 326 together with the bar (330 -> 320): LAST STAND at y350 was printing
 # straight through the HP bar. Raising the whole block is what buys the clearance — test_hud
 # pins both the >=4px LAST STAND gap and the bar-clears-label-baseline pair, and neither holds
 # if only one of the two moves.
 const COLOSSUS_LABEL_Y := 316.0                      # text baseline of the phase label
-const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - 9.0   # 317: label glyph top (Art.font() ascent @ FONT_SIZE)
-const BOTTOM_RESERVE_GAP := 3.0                      # breathing gap an overlay keeps above the reserve
+const COLOSSUS_BLOCK_TOP := COLOSSUS_LABEL_Y - LABEL_PLATE_RISE   # 305: the label PLATE top.
+                       # Was `- 9.0` (the font ASCENT) and commented "317" — wrong rect AND wrong value.
+                       # main.gd plates the label with label_plate_rect, which rises 11px, not 9.
+const BOTTOM_RESERVE_GAP := MIN_HUD_CHANNEL + 2.0    # breathing gap an overlay keeps above the reserve.
+                       # Was 3.0 — and because COLOSSUS_BLOCK_TOP was 2px optimistic, the TRUE channel
+                       # between the verb-chip plate and the colossus label plate was 1px.
 const CAPTION_BG_ABOVE := 9.0   # caption scrim extent above the LAST line's baseline (was inline -9.0)
 const CAPTION_BG_BELOW := 5.0   # ...and below it (was inline: height 14 = 9 + 5)
 const VERB_PLATE_BELOW := 8.0   # verb chip plate extent below VERB_LEGEND_Y (Rect2(..., y-8, ..., 16))
@@ -1607,8 +1635,11 @@ const COLOSSUS_BAR_H := 13.0
 # without four separate reads. Scalars stay the origin; this derives.
 const COLOSSUS_BAR_RECT := Rect2(COLOSSUS_BAR_X, COLOSSUS_BAR_Y, COLOSSUS_BAR_W, COLOSSUS_BAR_H)
 const COLOSSUS_BLOCK_BOTTOM := 335.0   # bar end + 2.0: the core-countdown tick's reach
-const LAST_STAND_Y := 350.0
-const LAST_STAND_TOP := LAST_STAND_Y - 9.0   # same -9 ascent idiom as COLOSSUS_BLOCK_TOP
+# 353, not 350: the banner PLATE (banner_plate_rect) starts size+2 above this baseline, and the
+# block below it now reaches COLOSSUS_BLOCK_BOTTOM=335, so 350 left a 3px channel. 353 puts the
+# plate at 341..358 — exactly MIN_HUD_CHANNEL clear of the block, still on the viewport floor.
+const LAST_STAND_Y := 353.0
+const LAST_STAND_TOP := LAST_STAND_Y - float(BOSS_LABEL_SIZE) - 2.0   # banner_plate_rect's OWN top
 const COLOSSUS_DODGE_PAD := 5.0
 const COLOSSUS_DODGE_L := COLOSSUS_BAR_X - COLOSSUS_DODGE_PAD                    # 165
 const COLOSSUS_DODGE_R := COLOSSUS_BAR_X + COLOSSUS_BAR_W + COLOSSUS_DODGE_PAD   # 475
@@ -1672,7 +1703,9 @@ static func colossus_bar_visible(sim) -> bool:
 ## cluster's internal spacing is unchanged and the two can't collide with each other. Returns 0.0
 ## in every other frame in the game — the default layout is byte-identical to before.
 static func bottom_band_lift(sim) -> float:
-	return maxf(0.0, VERB_LEGEND_Y + VERB_PLATE_BELOW - band_bottom(sim))   # 38.0 in the finale
+	# No literal here on purpose: the finale value is whatever band_bottom() says it is.
+	# (A hand-typed one was already stale by 17 px before this line was last touched.)
+	return maxf(0.0, VERB_LEGEND_Y + VERB_PLATE_BELOW - band_bottom(sim))
 
 
 ## The caption scrim's exact rect — the one measurement both the draw and the layout test read,

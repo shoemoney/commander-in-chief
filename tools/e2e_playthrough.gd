@@ -10,6 +10,8 @@ extends SceneTree
 # confirm, the pause→resume "stays live" regression, and a 240-frame gameplay drive.
 # Reports [E2E] lines; any [E2E FAIL] is a bug. SCRIPT ERRORs surface on stderr (grep them).
 
+const Quiesce := preload("res://tools/quiesce.gd")
+
 var GM: Script
 var fails: Array[String] = []
 var main
@@ -179,7 +181,7 @@ func _init() -> void:
 	print("[E2E] === %d checks, %d FAIL ===" % [_total(), fails.size()])
 	for f in fails:
 		print("[E2E FAIL] " + f)
-	main.free()
+	await Quiesce.teardown(self, main)
 	quit(1 if fails.size() > 0 else 0)
 
 var _oks := 0

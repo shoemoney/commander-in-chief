@@ -12,6 +12,7 @@ extends SceneTree
 ## caller greps for that; exit code is 1 if the frame check fails.
 
 const Shots := preload("res://tools/screenshots.gd")   # shared liveness predicate
+const Quiesce := preload("res://tools/quiesce.gd")     # quiet audio-graph shutdown
 
 const FRAMES := 200
 
@@ -37,6 +38,7 @@ func _run() -> void:
 	# and FRAGCOORD passes (crt.gdshader) are exempt — they cannot smear.
 	if not _check_screen_distortion_layers():
 		print("SMOKE FAILED — a screen-distorting shader draws at/above the HUD canvas layer")
+		await Quiesce.teardown(self, _main)
 		quit(1)
 		return
 	# The boot splash is an opaque near-monochrome cinematic that legitimately
@@ -52,6 +54,7 @@ func _run() -> void:
 	# letting a skipped check read as a passed one.
 	if DisplayServer.get_name() == "headless":
 		print("SMOKE OK (boot only — headless has no framebuffer, pixel check SKIPPED)")
+		await Quiesce.teardown(self, _main)
 		quit(0)
 		return
 	await RenderingServer.frame_post_draw
@@ -60,10 +63,12 @@ func _run() -> void:
 		var st := {"colors": 0, "stddev": 0.0} if img == null or img.is_empty() else Shots.frame_stats(img)
 		push_error("smoke: the game booted but rendered nothing — %d distinct colours, luma stddev %.2f" % [st["colors"], st["stddev"]])
 		print("SMOKE FAILED — blank frame (colors=%d stddev=%.2f)" % [st["colors"], st["stddev"]])
+		await Quiesce.teardown(self, _main)
 		quit(1)
 		return
 	var s := Shots.frame_stats(img)
 	print("SMOKE OK (live frame: colors=%d stddev=%.2f)" % [s["colors"], s["stddev"]])
+	await Quiesce.teardown(self, _main)
 	quit(0)
 
 

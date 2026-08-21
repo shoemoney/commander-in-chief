@@ -10,6 +10,8 @@ extends SceneTree
 ## (no flag) matches the shipped desktop build's forward_plus backend.
 ## PROBE_FRAME (default 150) picks the sample window start (150..270). Dev tool only — never shipped.
 
+const Quiesce := preload("res://tools/quiesce.gd")
+
 var main: Node2D
 var probe_frame := 150
 var samples: Array[Dictionary] = []
@@ -41,7 +43,9 @@ func _on_frame() -> void:
 	if f < probe_frame:
 		return
 	if f > probe_frame + 120:
+		process_frame.disconnect(_on_frame)   # teardown awaits; do not re-enter
 		_report()
+		await Quiesce.teardown(self, main)
 		quit()
 		return
 	var vp_rid := root.get_viewport_rid()

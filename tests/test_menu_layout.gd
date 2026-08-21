@@ -581,6 +581,7 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 		DirAccess.rename_absolute(bak, stashb)
 
 	var main: Node2D = MainScript.new()   # not tree-parented: _ready never fires, no audio/sim boot
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	# The daily start path: _reset() with _daily set assigns _current_seed = _daily_seed().
 	main._daily = true
@@ -594,6 +595,7 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 
 	# Fresh instance reloads straight off disk, exactly as a relaunch does.
 	var main2: Node2D = MainScript.new()
+	main2._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main2._sfx = _NullSfx.new()
 	main2._load_bests()
 	Runner.T.eq(main2._daily_done_seed, main._current_seed,
@@ -650,6 +652,7 @@ func test_daily_attempt_spent_on_any_abandon_path() -> void:
 		DirAccess.rename_absolute(bak, stashb)
 
 	var main: Node2D = MainScript.new()   # not tree-parented: _ready never fires
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	# 1. DEALING the daily board spends the attempt — in memory and on disk,
 	#    before any death, quit, or crash can refund it.
@@ -685,6 +688,7 @@ func test_daily_attempt_spent_on_any_abandon_path() -> void:
 	# 4. A fresh instance reloads the armed attempt off disk and the REAL Menu
 	#    locks the DAILY RUN row — reached WITHOUT any death.
 	var main2: Node2D = MainScript.new()
+	main2._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main2._sfx = _NullSfx.new()
 	main2._load_bests()
 	Runner.T.ok(main2.daily_done(),
@@ -2761,6 +2765,7 @@ func test_externally_muted_bus_shows_muted_and_step_unmutes_to_one() -> void:
 	var floor_db := AudioServer.get_bus_volume_db(sfx_i)   # as the bus stored it (float32)
 
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()   # inject the no-op cue so _step_vol needs no audio graph
 	var m: Control = Menu.new()
 	m.main = mn
@@ -3635,6 +3640,7 @@ func test_enter_on_externally_muted_row_unmutes_via_activate() -> void:
 	AudioServer.set_bus_mute(sfx_i, true)
 
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	var m: Control = Menu.new()
 	m.main = mn
@@ -3744,6 +3750,7 @@ func test_options_reset_defaults_row_is_two_press_and_restores() -> void:
 	_ensure_audio_buses()
 	var saved := _snapshot_buses()
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	mn.colorblind = true
 	mn._assist = true
@@ -3890,6 +3897,7 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 	var had_backup := not backup.is_empty()
 
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	mn.colorblind = true
 	mn._assist = true
@@ -3904,6 +3912,7 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 
 	# Reload from disk into a SECOND fresh main — proves the write round-trips.
 	var mn2: Node2D = MainScript.new()
+	mn2._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn2._sfx = _NullSfx.new()
 	mn2._load_bests()
 	Runner.T.eq(mn2.colorblind, MainScript.SETTINGS_DEFAULTS["colorblind"], "colorblind reloads at default")
@@ -4341,6 +4350,7 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	Runner.T.eq(Menu.disp_subtitle(true, 2, 2), "WINDOW SCALE APPLIES IN WINDOWED MODE", "fullscreen subtitle notes the windowed-only application when the preference fits")
 	Runner.T.eq(Menu.disp_subtitle(true, 7, 3), "LIMITED TO 3x ON THIS DISPLAY", "fullscreen subtitle states the limit in words when the preference can't fit this display")
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	mn._fullscreen = false
 	mn._win_scale = 2
@@ -4540,6 +4550,7 @@ func test_display_winscale_arrow_clicks_step_by_side() -> void:
 # and overwrite the saved scale. A genuine drag arrives with the flag clear and is honored.
 func test_display_programmatic_resize_guard_ignores_transition_events() -> void:
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	mn._fullscreen = false
 	mn._win_scale = MainScript.WIN_SCALE_MAX
@@ -4609,6 +4620,7 @@ func test_display_scale_persistence_migration_and_reset() -> void:
 	_ensure_audio_buses()
 	var snap := _snapshot_buses()
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	var mx: int = mn._max_win_scale()   # headless -> full 3x ladder
 
@@ -4667,6 +4679,7 @@ func test_text_scale_persistence_migration_and_reset() -> void:
 	_ensure_audio_buses()
 	var snap := _snapshot_buses()
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 
 	# (a) legacy save with no text_scale key -> the ship default, at 1.0x fonts.
@@ -4771,6 +4784,7 @@ func test_display_text_size_row_steps_and_rails() -> void:
 # real DisplayServer.window_set_size path headless (no-op but must not error).
 func test_display_f11_restores_selected_scale() -> void:
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	var mx: int = mn._max_win_scale()
 	var pick: int = mini(3, mx)
@@ -4865,6 +4879,7 @@ func test_display_fullscreen_transition_preserves_scale_across_resize_events() -
 	# End to end through the real MainScript: leaving fullscreen with an over-ceiling preference
 	# applies the monitor-fit window but preserves the stored preference (F11 round-trip parity).
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	mn._win_scale = MainScript.WIN_SCALE_MAX   # an over-ceiling preference that must survive the transition
 	mn._fullscreen = true
@@ -4885,6 +4900,7 @@ func test_display_fullscreen_transition_preserves_scale_across_resize_events() -
 # per-frame screen poll and re-clamped/resized to fit.
 func test_display_decoration_reserve_and_monitor_change() -> void:
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 
 	# Zero-decoration (borderless / headless) is VALID: _measure_decorations stores a
@@ -4945,6 +4961,7 @@ func test_display_decoration_reserve_and_monitor_change() -> void:
 # flushes an in-flight debounce so a drag-then-quit can't drop the choice.
 func test_display_free_resize_save_is_debounced() -> void:
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	# Arm the debounce as _on_window_resized would after a boundary crossing.
 	mn._resize_save_t = MainScript.RESIZE_SAVE_DELAY
@@ -4969,6 +4986,7 @@ func test_display_free_resize_save_is_debounced() -> void:
 # through the real MainScript (window ops are headless no-ops but the generation bookkeeping is real).
 func test_display_settle_generation_drops_stale_jobs() -> void:
 	var mn: Node2D = MainScript.new()
+	mn._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	mn._sfx = _NullSfx.new()
 	mn._fullscreen = false
 	mn._apply_windowed_scale()
@@ -6399,6 +6417,8 @@ func test_rebound_menu_key_release_clears_repeat_latch() -> void:
 	Runner.T.eq(m._key_move, 1, "pressing the rebound menu-down key arms the repeat latch")
 	m._unhandled_input(_keyup(KEY_J))
 	Runner.T.eq(m._key_move, 0, "releasing the rebound key clears the latch (no runaway repeat)")
+	m.free()
+	stub.free()
 
 
 # Horizontal menu nav is rebindable too: a custom menu_right key arms the ◄/► latch and its
@@ -6412,6 +6432,8 @@ func test_rebindable_horizontal_menu_nav_press_release() -> void:
 	Runner.T.eq(m._key_hmove, 1, "the rebound menu-right key arms the horizontal latch")
 	m._unhandled_input(_keyup(KEY_L))
 	Runner.T.eq(m._key_hmove, 0, "releasing it clears the horizontal latch")
+	m.free()
+	stub.free()
 
 
 # End-to-end: activating the CONTROLS row on the OPTIONS screen opens the rebind screen.

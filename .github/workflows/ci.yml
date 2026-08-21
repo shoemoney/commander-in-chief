@@ -125,6 +125,26 @@ jobs:
             echo "::error::SCRIPT ERROR during boot smoke -- main.gd/view failed to parse or threw at runtime (smoke.gd still reaches SMOKE OK in this case, so the sentinel alone can't catch it)"
             exit 1
           fi
+          # Shutdown leak gate. Godot prints these AFTER the file logger is torn
+          # down, so they live ONLY on the process's stdout -- no widening of
+          # run_tests.gd's engine-error gate (which reads user://logs) can reach
+          # them. tools/run_tests.sh carries the same gate for local runs; CI
+          # calls godot directly, so it needs its own copy.
+          #
+          # ZERO, with no floor and no exemption. Booting the real scene DOES
+          # leave audio mid-playback at quit() -- the AudioServer is torn down
+          # after ObjectDB::cleanup, so live streams are counted as leaks (smoke
+          # sat at 2 AudioStreamPlaybackPolyphonic, e2e_playthrough at 30 objects
+          # plus a retained cmd_levelstart_6.mp3). That is a teardown artifact,
+          # not a defect -- so the tools that boot src/main.tscn quiesce their own
+          # audio graph (tools/quiesce.gd) rather than this gate carrying a floor
+          # that would also hide two genuinely orphaned Nodes. Each of smoke,
+          # e2e_playthrough and perf_probe measures 0 on 6-of-6 runs.
+          if grep -qE "were leaked|resources still in use at exit|leaked [0-9]+ bytes" smoke.log; then
+            echo "::error::shutdown leak diagnostics during boot smoke -- objects outlived the run. --verbose names the classes: only AudioStream* means a tool booted src/main.tscn without 'await Quiesce.teardown(self, main)' (tools/quiesce.gd); anything else means view code is orphaning Nodes."
+            grep -E "were leaked|resources still in use at exit|leaked [0-9]+ bytes" smoke.log
+            exit 1
+          fi
 
       - name: Full deterministic test suite
         shell: bash
@@ -141,6 +161,19 @@ jobs:
       - name: Fail unless PASS line present
         shell: bash
         run: grep -qE "^PASS —" test_output.log
+
+      # Same stdout-only gate as the boot smoke above, against the suite log.
+      # Baseline before the Sfx/main PREDELETE fix was 265 RIDs / 5192 ObjectDB
+      # / 8 resources; required value is 0 matches. The grep covers the whole
+      # ~1300-line run and the defect prints its 3 lines once, at exit.
+      - name: Fail on shutdown leak diagnostics
+        shell: bash
+        run: |
+          if grep -qE "were leaked|resources still in use at exit|leaked [0-9]+ bytes" test_output.log; then
+            echo "::error::shutdown leak diagnostics in test output -- Nodes/Objects allocated by the suite or by view code were never freed"
+            grep -E "were leaked|resources still in use at exit|leaked [0-9]+ bytes" test_output.log
+            exit 1
+          fi
 
   # Export smoke: prove the real shippable Linux binary boots and survives a
   # few seconds under the actual export pipeline (export_presets.cfg), not

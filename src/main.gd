@@ -2016,6 +2016,15 @@ func _notification(what: int) -> void:
 	# alongside its own _tw_cache flush).
 	if what == NOTIFICATION_TRANSLATION_CHANGED:
 		Art.flush_tw()
+	# These three are allocated at DECLARATION and only add_child()'d in _ready().
+	# A headless main (tests, tools) never runs _ready, so freeing it orphaned them
+	# -- and _sfx drags its own 13 unparented players along, 590 ObjectDB entries per
+	# instance in the suite. PREDELETE fires BEFORE ~Node frees its children, so in
+	# the shipped game they are still parented and every branch here no-ops.
+	if what == NOTIFICATION_PREDELETE:
+		for n in [_sfx, _hud_icons, _menu]:
+			if is_instance_valid(n) and n.get_parent() == null:
+				n.free()
 	# One-death sim: alt-tabbing away keeps sim.step() ticking blind and hands the
 	# player a death that reads as a bug, not a loss. Auto-open pause the instant the
 	# window loses focus during live play. sim.step() is already gated behind
@@ -10347,7 +10356,9 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 	# `size` is the RESOLVED draw size: the height was hard-coded to the 10px boss label,
 	# which under-covered an accessibility-scaled label (Art.fs). 10 reproduces the
 	# original -11/15 exactly, so the boss/colossus plates are byte-identical.
-	return Rect2(origin_x - 3.0, baseline_y - float(size) - 1.0, w + 6.0, float(size) + 5.0)
+	# The band constants in hud.gd DERIVE their reserves from this rect, so there is exactly one
+	# copy of the arithmetic: this is a forwarder, not a second implementation.
+	return HudIcons.label_plate_rect(origin_x, baseline_y, w, size)
 
 
 ## Every in-world label rect ALREADY placed this frame. Cleared at the top of _draw().
@@ -10618,7 +10629,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
-	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * 22.0
+	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# Same act boundary the sim uses to pick behavior in _step_one_boss
 	# (t < BOSS_STRAFE_TICKS), surfaced the way the colossus bar labels
 	# its phase.
@@ -12376,10 +12387,11 @@ func _draw_edge_chevrons(threats: Array, is_top: bool) -> void:
 	if threats.size() > 6:
 		# The cap hides the tail — say so, so a drowned edge still reads as "many"
 		# instead of "exactly six".
-		# Bottom copy honours the reserved-band contract: 350 is LAST_STAND_Y, so in the
-		# colossus finale the plated label would paint into the bottom-docked block.
-		# band_bottom() is SCREEN_BOTTOM in every other frame, so the default y is unchanged.
-		var oy := 40.0 if is_top else minf(350.0, HudIcons.band_bottom(sim))
+		# Bottom copy honours the reserved-band contract: the floor is derived from
+		# HudIcons.LAST_STAND_Y (NOT a hand-typed mirror of it), so in the colossus finale
+		# the plated label cannot paint into the bottom-docked block. band_bottom() is
+		# SCREEN_BOTTOM in every other frame, so the default y is unchanged.
+		var oy := 40.0 if is_top else minf(HudIcons.LAST_STAND_Y - 3.0, HudIcons.band_bottom(sim))
 		# (The old 0.75 ink alpha is dropped, not floored: it sat under CALLOUT_INK_FLOOR.)
 		# Right-flush signage, not centered: the old x=606.0 baked the 8px width of "+N",
 		# so at 200% TEXT SIZE the label ran off the right edge (and got clamped back by

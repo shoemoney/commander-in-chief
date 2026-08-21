@@ -10,6 +10,7 @@ extends RefCounted
 
 const Runner := preload("res://tests/run_tests.gd")
 const Hud := preload("res://src/view/hud.gd")
+const MainScript := preload("res://src/main.gd")
 
 const DT := 1.0 / 60.0   # one 60 Hz frame
 
@@ -827,6 +828,7 @@ func test_accessibility_pip_alignment_guard() -> void:
 # edges instead of returning the hardcoded design width/left, which the injected-band tests can't cover.
 func test_pip_edge_viewport_to_hud_conversion() -> void:
 	var I := Transform2D.IDENTITY
+	var probe := HudIcons.new()   # one instance, freed below: HudIcons.new()._pip_fits(...) inline orphans it
 	var none := Rect2()   # size 0 -> no safe-area
 	# Design-space viewport, no insets: right == RIGHT (640 less the 8px HUD inset), left == PIP_MIN_X.
 	var full := HudIcons._resolve_pip_bounds(Rect2(0, 0, 640, 360), none, I, I)
@@ -845,13 +847,14 @@ func test_pip_edge_viewport_to_hud_conversion() -> void:
 	# display DisplayServer quirk, not a real notch) is IGNORED rather than clamped to an empty band --
 	# so it can never fail closed and silently hide the accessibility pips. The full design band is kept.
 	var offscreen := HudIcons._resolve_pip_bounds(Rect2(0, 0, 640, 360), Rect2(-200, 0, 100, 360), I, I)
-	Runner.T.ok(absf(offscreen.y - HudIcons.RIGHT) < 0.01 and HudIcons.new()._pip_fits("CB", offscreen), "off-view safe area is ignored (pips stay visible, not hidden)")
+	Runner.T.ok(absf(offscreen.y - HudIcons.RIGHT) < 0.01 and probe._pip_fits("CB", offscreen), "off-view safe area is ignored (pips stay visible, not hidden)")
 	# FAIL CLOSED: a horizontally MIRRORED canvas transform (scale.x = -1) resolves an inverted local
 	# band; the resolver must NOT hand back an inverted band that would place pips arbitrarily -> it
 	# returns the zero-width suppress sentinel instead, which _pip_fits rejects.
 	var mirror := Transform2D(Vector2(-1, 0), Vector2(0, 1), Vector2.ZERO)
 	var flipped := HudIcons._resolve_pip_bounds(Rect2(0, 0, 640, 360), none, I, mirror)
-	Runner.T.ok(flipped.y - flipped.x <= 0.01 and not HudIcons.new()._pip_fits("CB", flipped), "inverted/mirrored transform fails closed (pips suppressed)")
+	Runner.T.ok(flipped.y - flipped.x <= 0.01 and not probe._pip_fits("CB", flipped), "inverted/mirrored transform fails closed (pips suppressed)")
+	probe.free()
 
 
 # c1-11 (attempt-4 judge): the LIVE safe-area conversion under a WINDOWED / NON-PRIMARY-DISPLAY
@@ -863,6 +866,7 @@ func test_pip_edge_viewport_to_hud_conversion() -> void:
 # stay visible) while a genuine overlapping notch still insets, so we didn't mute the safe area wholesale.
 func test_pip_safe_area_windowed_non_primary_display() -> void:
 	var I := Transform2D.IDENTITY
+	var probe := HudIcons.new()   # freed at the end: an inline HudIcons.new() orphans one per call
 	var vis := Rect2(0, 0, 640, 360)
 	# Window on a SECOND display: its viewport content occupies screen x [0,640] (identity screen
 	# transform), but the OS reports the safe area for the desktop-space monitor rect far to the right.
@@ -870,16 +874,17 @@ func test_pip_safe_area_windowed_non_primary_display() -> void:
 	var b := HudIcons._resolve_pip_bounds(vis, second_display_safe, I, I)
 	Runner.T.ok(absf(b.y - HudIcons.RIGHT) < 0.01 and absf(b.x - HudIcons.PIP_MIN_X) < 0.01,
 		"off-view (second-display) safe area is ignored, full band kept")
-	Runner.T.ok(HudIcons.new()._pip_fits("CB", b), "the CB pip is NOT hidden by a non-primary-display safe area")
+	Runner.T.ok(probe._pip_fits("CB", b), "the CB pip is NOT hidden by a non-primary-display safe area")
 	# A safe area far to the LEFT (offset window whose reported rect lands left of the content) is
 	# likewise off-view -> ignored, pips kept. This is the exact case the old empty-intersection path
 	# would have suppressed.
 	var left_off := HudIcons._resolve_pip_bounds(vis, Rect2(-4000, 0, 1920, 1080), I, I)
-	Runner.T.ok(HudIcons.new()._pip_fits("CB", left_off), "a left-offset off-view safe area does not hide the pips either")
+	Runner.T.ok(probe._pip_fits("CB", left_off), "a left-offset off-view safe area does not hide the pips either")
 	# CONTROL: a genuine notch that DOES overlap the view still pulls the right edge in (600px notch ->
 	# RIGHT-capped 592), proving fail-open only suppresses the safe area when it truly doesn't touch us.
 	Runner.T.ok(absf(HudIcons._resolve_pip_bounds(vis, Rect2(0, 0, 600, 360), I, I).y - 592.0) < 0.01,
 		"a real overlapping notch still insets the right edge (not muted wholesale)")
+	probe.free()
 
 
 # a11y: the colossus arena's SAFE BELT vs its inner DANGER ring is a live boss mechanic, so it
@@ -925,6 +930,8 @@ func test_accessibility_pips_stay_on_canvas_at_narrow_widths() -> void:
 		hud.boxes.clear()
 		hud._accessibility_pips()               # the REAL method, both pips
 		runs.append({"band": band, "boxes": hud.boxes.duplicate()})
+		hud.main.free()                         # boxes were duplicated above; nothing else holds these
+		hud.free()
 	Art.colorblind = was_cb                     # restore global before any assertion runs
 
 	var probe := _PipCaptureHud.new()   # measures real glyph widths so the predicate mirrors production
@@ -972,6 +979,7 @@ func test_accessibility_pips_stay_on_canvas_at_narrow_widths() -> void:
 			# The _pip_fits gate guarantees a SHOWN pip keeps its full PIP_PAD_L left overhang (the scrim
 			# padding never collapses to 0 at the minimum supported width).
 			Runner.T.ok(gr.position.x - mate.position.x >= HudIcons.PIP_PAD_L - 0.01, "%s: %s plate keeps its full left padding" % [tag, g["id"]])
+	probe.free()
 
 
 # c1-06: the +N chip is right-anchored with its MEASURED width, so its border stays fully
@@ -2464,6 +2472,8 @@ func test_status_chips_names_grass_concealment_hidden() -> void:
 	Runner.T.ok("HIDDEN" in texts or "HIDE" in texts,
 		"grass concealment paints a HIDDEN/HIDE pip, not an idle HUD: %s" % str(texts))
 	Runner.T.ok(end_px > 8.0, "the hidden pip advances the cursor")
+	h.main.free()
+	h.free()
 
 
 class _HiddenSim extends SimWorld:
@@ -3029,8 +3039,9 @@ func test_c1_15_layout_invariant_across_intermission() -> void:
 # panel + lowest player row provably never cross the boss-bar dock line — so the strip and rows can
 # never overlap a boss/mini bar for any supported player count.
 func test_c1_15_panel_stays_clear_of_boss_bar() -> void:
-	Runner.T.eq(HudIcons.SHOP_SAFE_H, HudIcons.BOSS_BAR_TOP - HudIcons.SHOP_STRIP_CLEARANCE,
-		"the shop safe height derives from the shared HudIcons.BOSS_BAR_TOP")
+	Runner.T.eq(HudIcons.SHOP_SAFE_H, HudIcons.BOSS_BLOCK_TOP - HudIcons.SHOP_STRIP_CLEARANCE,
+		"the shop safe height derives from the boss BLOCK top, not the bar LINE (the bar line let\n"
+		+ "\t\tthe corner plate bury the top 7px of the boss name)")
 	for pc in [1, 2]:
 		var m := _ShopMain.new()
 		var h := HudIcons.new()
@@ -3038,11 +3049,12 @@ func test_c1_15_panel_stays_clear_of_boss_bar() -> void:
 		var sim := SimWorld.new(0, pc, "endless")
 		m.sim = sim
 		sim.intermission_ticks = 300
-		Runner.T.ok(h.panel_bottom() <= HudIcons.BOSS_BAR_TOP + 0.01,
-			"%dP: the reserved HUD panel stays above the boss-bar dock line" % pc)
+		Runner.T.ok(h.panel_bottom() <= HudIcons.BOSS_BLOCK_TOP + 0.01,
+			"%dP: the reserved HUD panel stays above the boss BLOCK top (panel_bottom %d vs %d)"
+				% [pc, int(h.panel_bottom()), int(HudIcons.BOSS_BLOCK_TOP)])
 		var last_row_bottom := h.player_rows_top(sim) + sim.players.size() * HudIcons.ROW_H
-		Runner.T.ok(last_row_bottom <= HudIcons.BOSS_BAR_TOP + 0.01,
-			"%dP: the player rows clear the boss-bar dock line" % pc)
+		Runner.T.ok(last_row_bottom <= HudIcons.BOSS_BLOCK_TOP + 0.01,
+			"%dP: the player rows clear the boss BLOCK top" % pc)
 		m.free()
 		h.free()
 
@@ -3418,6 +3430,173 @@ func test_reserved_zone_band_contract() -> void:
 		"the dodge window opens left of the colossus bar")
 	Runner.T.ok(HudIcons.COLOSSUS_DODGE_R > HudIcons.COLOSSUS_BAR_X + HudIcons.COLOSSUS_BAR_W,
 		"the dodge window closes right of the colossus bar")
+
+
+# --- THE class ratchet: every boss/colossus plate owns its reserved band ---------------------
+# The two band constants that guard main.gd's boss plates were hand-typed ASCENT mirrors
+# (`anchor - 9.0`) of a plate main.gd computes with a DIFFERENT formula — `_label_plate_rect`
+# rises `size + 1` = 11px above its baseline, not 9. Two consequences shipped:
+#   * COLOSSUS_BLOCK_TOP read 307 while the plate really starts at 305, so the 3px channel
+#     BOTTOM_RESERVE_GAP promised between the verb chip and the colossus label was really 1px —
+#     two dark slabs overlapping 225px horizontally, 1px apart. That is the REPORTED tell.
+#   * BOSS_BAR_TOP (64) was treated as the TOP of the boss block by band_top() and by
+#     SHOP_SAFE_H, but the slot-0 gunship plate starts at 53 — SEVEN pixels ABOVE
+#     panel_bottom()'s max of 60. main.gd draws at z=0, $HUD at layer 2, so the corner plate
+#     BURIED the top 7px x 183px of the boss name in 1P-endless, 2P-campaign and 2P-endless.
+#     That one was never reported and is the worse of the two.
+# So the reserves are DERIVED from the drawing function now, and this pins it: the producer set
+# is scraped from src/main.gd, so a label added tomorrow is measured the day it lands.
+func test_every_boss_plate_owns_its_reserved_band() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.length() > 0, "main.gd is readable (the producer set is scraped from it)")
+	# Every _draw_one_gunship call site donates its label literal.
+	var call_re := RegEx.create_from_string('_draw_one_gunship\\(\\s*[^,]+,\\s*"([^"]+)"')
+	var gun_names: Array[String] = []
+	for m in call_re.search_all(src):
+		if not gun_names.has(m.get_string(1)):
+			gun_names.append(m.get_string(1))
+	Runner.T.ok(gun_names.size() >= 2,
+		"scraped every _draw_one_gunship label from source (got %s)" % str(gun_names))
+	var gun_labels: Array[String] = []
+	for n in gun_names:
+		for ph in MainScript.GUNSHIP_PHASE_NAMES:
+			gun_labels.append("%s — %s" % [n, ph])
+	var col_labels: Array[String] = []
+	for ph in MainScript.COLOSSUS_PHASE_NAMES:
+		col_labels.append("FOUNDRY COLOSSUS — %s" % ph)
+
+	# --- constant honesty: each reserve equals the rect its producer actually draws ---
+	Runner.T.eq(HudIcons.COLOSSUS_BLOCK_TOP, HudIcons.label_plate_top(HudIcons.COLOSSUS_LABEL_Y),
+		"COLOSSUS_BLOCK_TOP is the colossus label PLATE top, not the glyph ascent")
+	Runner.T.eq(HudIcons.BOSS_BLOCK_TOP, HudIcons.label_plate_top(HudIcons.BOSS_BAR_TOP),
+		"BOSS_BLOCK_TOP is the gunship label PLATE top, not the bar line")
+	Runner.T.eq(HudIcons.LAST_STAND_TOP,
+		MainScript.banner_plate_rect(_LAST_STAND_TEXT, HudIcons.LAST_STAND_Y, 10, 0.0).position.y,
+		"LAST_STAND_TOP is banner_plate_rect's own top, not an ascent mirror")
+	Runner.T.eq(HudIcons.SHOP_SAFE_H, HudIcons.BOSS_BLOCK_TOP - HudIcons.SHOP_STRIP_CLEARANCE,
+		"the shop safe height is capped by the boss BLOCK top, not the bar line")
+	# The drawing function and the derivation must be the same arithmetic, not two copies.
+	Runner.T.eq(MainScript._label_plate_rect(10.0, 200.0, 50.0),
+		HudIcons.label_plate_rect(10.0, 200.0, 50.0),
+		"main._label_plate_rect forwards to HudIcons.label_plate_rect (one formula, not a mirror)")
+
+	# --- the full chrome matrix -------------------------------------------------------------
+	var font := Art.font()
+	var worst := "SPOTTER: \"War chest's empty, no revives left for the rest of this desperate last stand!\""
+	# NO TEXT-SIZE ARM, on purpose, and this pins WHY: neither boss phase label goes through
+	# Art.fs(), so the accessibility TEXT SIZE setting does not scale the two highest-stakes
+	# reads on screen. A `for ts in [1.0, 2.0]` loop here measured byte-identical rects at both
+	# scales -- a check that cannot fail. Assert the gap instead of hiding it in a vacuous loop;
+	# when the labels are moved onto Art.fs() this assertion is what tells you to add the arm.
+	var was_scale: float = Art.text_scale
+	Art.text_scale = 1.0
+	var label_w1 := Art.tw("FOUNDRY COLOSSUS", HudIcons.BOSS_LABEL_SIZE)
+	Art.text_scale = 2.0
+	var label_w2 := Art.tw("FOUNDRY COLOSSUS", HudIcons.BOSS_LABEL_SIZE)
+	var scaled_size := Art.fs(HudIcons.BOSS_LABEL_SIZE)
+	Art.text_scale = was_scale   # restore BEFORE asserting, so a failure cannot leak the arm
+	Runner.T.eq(label_w2, label_w1,
+		"boss labels measure at a FIXED size across TEXT SIZE 1.0 -> 2.0 (known gap)")
+	Runner.T.eq(scaled_size, 20,
+		"...while Art.fs() DOES scale — the labels simply never call it")
+
+	var pairs := 0
+	for pc in [1, 2]:
+		for mode in ["campaign", "endless"]:
+			for colossus in [false, true]:
+				var m := _BandMain.new()
+				var h := HudIcons.new()
+				h.main = m
+				var sim := SimWorld.new(7, pc, mode)
+				m.sim = sim
+				sim.colossus = {"alive": true, "hp": 14, "x": 0, "y": 0} if colossus else {}
+				for gl in gun_labels:
+					for cl in col_labels:
+						var tag := "%dP/%s/%s/%s" % [pc, mode,
+							"colossus" if colossus else "bare", gl]
+						pairs += _assert_chrome_disjoint(h, sim, font, worst, gl, cl, tag)
+				m.free()
+				h.free()
+	Runner.T.ok(pairs >= 1000,
+		"the matrix compared %d chrome pairs (no sampling — every config x every label)" % pairs)
+
+	# --- forward closure: a new producer cannot anchor off a bare literal --------------------
+	# Every _label_plate_rect call must take its baseline from a HudIcons symbol (or a value
+	# derived from one), so the reserve above can never be computed against a number no
+	# constant knows about. Passes today; it is the forward half of the rail.
+	var lit_re := RegEx.create_from_string('_label_plate_rect\\(\\s*[^,]+,\\s*[0-9]+(\\.[0-9]+)?\\s*[,)]')
+	var offenders: Array[String] = []
+	for line in src.split("\n"):
+		if line.strip_edges().begins_with("#"):
+			continue
+		if lit_re.search(line) != null:
+			offenders.append(line.strip_edges())
+	Runner.T.eq(offenders.size(), 0,
+		"no _label_plate_rect anchors off a bare numeric baseline: %s" % str(offenders))
+
+
+const _LAST_STAND_TEXT := "LAST STAND — NO REVIVES, 2× KILL SCORE"
+
+
+## Builds the frame's chrome as GROUPED rects and asserts every cross-group pair is disjoint,
+## and that any pair whose x-spans overlap keeps MIN_HUD_CHANNEL of clear pixels. Intra-group
+## pairs are skipped on purpose: a label plate and the HP bar it labels are one widget, and the
+## stacked boss slots are one docked stack on a deliberate BOSS_BAR_STRIDE.
+## Returns the number of pairs it compared, so the caller can prove the matrix isn't sampling.
+func _assert_chrome_disjoint(h: HudIcons, sim: SimWorld, font: Font, worst: String,
+		gun_label: String, col_label: String, tag: String) -> int:
+	var groups: Array = []          # [group_name, Rect2]
+	# 1. corner panel (drawn by _draw_plate on the HUD layer — main.gd can never win over it)
+	groups.append(["panel", Rect2(HudIcons.PLATE_ORIGIN, HudIcons.PLATE_ORIGIN,
+		h.plate_right() - HudIcons.PLATE_ORIGIN, h.panel_bottom() - HudIcons.PLATE_ORIGIN)])
+	# 2. the three stacked gunship slots: label plate + its HP bar, exactly as _draw_one_gunship
+	var bar_w := 160.0
+	var bar_x := 320.0 - bar_w / 2.0
+	for slot in [0, 1, 2]:
+		var bar_y: float = HudIcons.BOSS_BAR_TOP + HudIcons.BOSS_BAR_STRIDE * float(slot)
+		groups.append(["gunship", MainScript._label_plate_rect(bar_x, bar_y,
+			Art.tw(gun_label, 10))])
+		groups.append(["gunship", Rect2(bar_x, bar_y + 4.0, bar_w, 8.0)])
+	# 3. the colossus block: phase-label plate + floor-docked HP bar + the countdown tick's reach
+	if HudIcons.colossus_bar_visible(sim):
+		groups.append(["colossus", MainScript._label_plate_rect(HudIcons.COLOSSUS_LABEL_X,
+			HudIcons.COLOSSUS_LABEL_Y, Art.tw(col_label, 10))])
+		groups.append(["colossus", Rect2(HudIcons.COLOSSUS_BAR_X, HudIcons.COLOSSUS_BAR_Y,
+			HudIcons.COLOSSUS_BAR_W, HudIcons.COLOSSUS_BLOCK_BOTTOM - HudIcons.COLOSSUS_BAR_Y)])
+		groups.append(["laststand", MainScript.banner_plate_rect(_LAST_STAND_TEXT,
+			HudIcons.LAST_STAND_Y, 10, 0.0)])
+	# 4. the two transient bottom overlays, at the lift the finale applies to them
+	var lift: float = HudIcons.bottom_band_lift(sim)
+	var verb_y: float = HudIcons.VERB_LEGEND_Y - lift
+	groups.append(["verb", Rect2(199.0, verb_y - HudIcons.VERB_PLATE_BELOW, 242.0, 16.0)])
+	var lines := HudIcons._wrap_caption(worst, font, HudIcons.FONT_SIZE, HudIcons.CAPTION_MAX_W)
+	var cw := 0.0
+	for ln in lines:
+		cw = maxf(cw, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.FONT_SIZE).x)
+	groups.append(["caption", HudIcons.caption_bg_rect(lines.size(), cw,
+		HudIcons.VERB_LEGEND_Y - 20.0 - lift)])
+
+	var n := 0
+	for i in groups.size():
+		for j in range(i + 1, groups.size()):
+			if groups[i][0] == groups[j][0]:
+				continue
+			n += 1
+			var a: Rect2 = groups[i][1]
+			var b: Rect2 = groups[j][1]
+			var what := "%s vs %s" % [groups[i][0], groups[j][0]]
+			# grow(-0.5): a shared edge is legal, a real bite of pixels is not.
+			Runner.T.ok(not a.grow(-0.5).intersects(b.grow(-0.5)),
+				"%s: %s overlap — %s vs %s" % [tag, what, str(a), str(b)])
+			# Only stacked chrome needs a channel; side-by-side chrome does not.
+			var x_overlap: bool = a.position.x < b.end.x - 0.5 and b.position.x < a.end.x - 0.5
+			if x_overlap:
+				var gap: float = (b.position.y - a.end.y) if a.position.y < b.position.y \
+					else (a.position.y - b.end.y)
+				Runner.T.ok(gap >= HudIcons.MIN_HUD_CHANNEL - 0.01,
+					"%s: %s stacked with a %.0fpx channel (need >= %.0f) — %s vs %s"
+						% [tag, what, gap, HudIcons.MIN_HUD_CHANNEL, str(a), str(b)])
+	return n
 
 
 # The caption strip and verb chip must OPT OUT while main.gd paints a result card: the card is

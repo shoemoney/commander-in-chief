@@ -25,7 +25,7 @@ extends SceneTree
 ## at peak; decay is x0.9/frame from 0.7 (~47 frames to 0.01), the capture is 2.
 
 const LOGICAL_H := 360.0
-const HUD_TOP_LOGICAL := 64.0      # HudIcons.BOSS_BAR_TOP — the top HUD band
+const HUD_TOP_LOGICAL := HudIcons.BOSS_BLOCK_TOP   # the top HUD band (was a mirrored 64.0)
 const HUD_BOTTOM_LOGICAL := 30.0   # bottom control-prompt strip (VERB_LEGEND_Y 344)
 const WORLD_Y0_LOGICAL := 180.0    # mid-screen world band, clear of both HUD strips
 const WORLD_Y1_LOGICAL := 260.0

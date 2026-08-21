@@ -49,6 +49,7 @@ func _restore_save(s: Dictionary) -> void:
 # so _flush_bests() writes nothing) -- no stash needed for this one.
 func test_owned_perks_apply_to_a_fresh_endless_run() -> void:
 	var main: Node2D = MainScript.new()   # not tree-parented: _ready never fires, no audio/sim boot
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 2, MainScript.PERK_TOKEN: 1}
 	main._endless = true
@@ -64,6 +65,7 @@ func test_owned_perks_apply_to_a_fresh_endless_run() -> void:
 
 func test_unowned_perks_leave_a_fresh_endless_run_untouched() -> void:
 	var main: Node2D = MainScript.new()
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	main._endless = true
 	main._reset()   # _perk_levels defaults to {} -- nothing bought yet
@@ -78,6 +80,7 @@ func test_perk_levels_never_touch_a_non_endless_run() -> void:
 	# The bitmask-turned-tier system must stay Endless-only -- Campaign/Arcade/
 	# Boss Rush must never see a perk-boosted vest/chest/token.
 	var main: Node2D = MainScript.new()
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 3, MainScript.PERK_TOKEN: 2}
 	main._endless = false
@@ -199,6 +202,7 @@ func test_unverified_endless_run_awards_zero_vp() -> void:
 # player out of ever buying another.
 func test_a_perked_endless_run_replays_from_the_same_starting_loadout() -> void:
 	var main: Node2D = MainScript.new()
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 2, MainScript.PERK_TOKEN: 1}
 	main._endless = true
@@ -222,6 +226,7 @@ func test_watching_a_replay_uses_the_recorded_loadout_not_the_perks_owned_now() 
 	rep.mode = "endless"
 	rep.player_count = 1          # start_vest/chest/tokens left at their vanilla defaults
 	var main: Node2D = MainScript.new()
+	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
 	main._sfx = _NullSfx.new()
 	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 2, MainScript.PERK_TOKEN: 1}
 	main._endless = true

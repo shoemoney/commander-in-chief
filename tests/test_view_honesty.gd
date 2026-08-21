@@ -2812,6 +2812,8 @@ func test_manned_tank_hit_gets_its_own_cue_not_the_wall_plink() -> void:
 			cue2 = true
 			break
 	Runner.T.ok(not cue2, "an unmanned hulk taking cover fire pays no fuel — it must not get the fuel cue")
+	stub.free()
+	stub2.free()
 
 
 # --- R4: arena_crack has no visual card -----------------------------------
@@ -2839,6 +2841,7 @@ func test_arena_crack_gets_a_visual_card() -> void:
 			break
 	Runner.T.ok(tex_card, "arena_crack must draw the fx_groundbreak card, not fire silently")
 	Runner.T.ok(stub._scorch.size() > scorch0, "arena_crack must leave a permanent scorch like its siblings")
+	stub.free()
 
 
 # --- R5: teach cards must not sell verbs the sim no longer honours -----------

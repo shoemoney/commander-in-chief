@@ -271,6 +271,24 @@ func _drain_pending_vo() -> void:
 		play_vo(String(p["key"]), int(p["priority"]), bool(p["dry"]))
 
 
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_PREDELETE:
+		return
+	# The 13 players below are allocated at DECLARATION and only add_child()'d in
+	# _ready(). An Sfx built headless (tests, tools) never runs _ready, so freeing it
+	# orphaned 13 Nodes + 13 internals per instance -- 4,414 of the suite's 5,192
+	# leaked ObjectDB entries. In the shipped game they ARE parented by the time this
+	# fires (NOTIFICATION_PREDELETE precedes ~Node freeing its children), so every
+	# branch below is a no-op there -- confirmed by the boot smoke staying flat.
+	var owned: Array = [_player, _ui_player, _music, _music_lull, _music_riff,
+		_music_riff_lull, _amb, _vo, _vo_dry, _cmd, _river, _foundry, _shop]
+	owned.append_array(_pool)
+	owned.append_array(_engines.values())
+	for n in owned:
+		if is_instance_valid(n) and n.get_parent() == null:
+			n.free()
+
+
 func _ready() -> void:
 	# Reverb bus — created FIRST, so its index stays BELOW the SFX bus. AudioServer
 	# mixes buses from the highest index down, so a send only reaches a bus with a
