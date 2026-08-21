@@ -1966,10 +1966,11 @@ func test_world_text_saturation_drops_instead_of_overprinting() -> void:
 	## keep-place fallback printed anyway — a staged congestion frame on HEAD
 	## (player exclusion + SPREAD + MAXED + 4 toasts at one anchor) came back
 	## with 2 pairwise overlaps, the 94.5px BOUNTY +75¢ claim sitting on both
-	## the SPREAD and MAXED plates. Persistent labels keep the keep-place
-	## behavior (they are few per anchor and the geometry ratchet above
-	## proves their frames resolve); only droppable claims may return the
-	## zero-area sentinel. This calls the SHIPPED claim_label_slot, so
+	## the SPREAD and MAXED plates. Persistent labels no longer keep-place
+	## either — they keep SEARCHING the remaining in-frame rows (see
+	## test_world_label_arbiter_never_returns_occupied_pixels, which pins that)
+	## — but only a DROPPABLE claim may return the zero-area sentinel, and
+	## suppression is what THIS test pins. It calls the SHIPPED claim_label_slot, so
 	## deleting the droppable early-return turns the fallback back on and the
 	## pairwise assertion goes red.
 	var ms: Script = load("res://src/main.gd")
@@ -2749,3 +2750,280 @@ func test_victory_glint_is_gated_by_reduce_motion() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
 	Runner.T.ok(src.find("if shine and _motion >= 0.5:") != -1,
 		"the gold-shine sweep is gated on _motion like every other victory-card effect")
+
+
+# ---------------------------------------------------------------------------
+# THE WORLD-LABEL ARBITER'S CONTRACT, pinned as a CLASS invariant.
+#
+# claim_label_slot exists to say "never hand back occupied pixels". Its
+# non-droppable exhaustion path did the opposite BY CONSTRUCTION:
+#
+#     return Rect2(x, clampf(rect.position.y, min_y, maxf(min_y, 360.0 - h)), w, h)
+#
+# — a return that ignores `taken` entirely. And because every ladder row that
+# falls outside the 640x360 frame is SKIPPED, an anchor above the top of the
+# screen has all 13 rows rejected and lands on that clamp: pinned at y = 0, on
+# top of the HUD corner panel, the player sprite, and every sibling label that
+# clamped to the same row. That is the photographed "floating PIERCE stacked on
+# SPREAD over the soldier", and it is a defect of the ARBITER, not of any one of
+# its 16 producers (one of which, ESCAPING! at main.gd:10002, already carries a
+# hand-rolled per-producer clamp working around exactly this).
+#
+# The sweep below is EXHAUSTIVE over the anchor band _draw_pickups' own cull
+# admits (ppos.y -40..400, main.gd:9361), not a sample, and replays the SHIPPED
+# pickup-label claim math (capsule name / MAXED / priced-crate coin row) into one
+# accumulating frame per anchor, against the shipped player exclusion and the
+# shipped HUD corner-panel rect. 4,551 anchors x 3 labels = 13,653 claims, run at
+# 100% and at TEXT_SCALE_MAX.
+#
+# MEASURED BY MUTATION on this tree (this fix, with the old keep-place clamp
+# restored into claim_label_slot and nothing else changed): 1,506 violations
+# at 100% TEXT SIZE, 1,742 at 200%. MUST BE 0 / 0.
+# (The plan that commissioned this ratchet modelled 1,260/1,534 from a
+# re-implementation of the claim math. The numbers above came out of the
+# SHIPPED function; those are the ones to trust.)
+# ---------------------------------------------------------------------------
+func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var was_scale: float = Art.text_scale
+	# The 1P HUD corner panel at its minimum width, derived from hud.gd's own
+	# constants so it cannot drift from the plate the player actually sees.
+	var panel := Rect2(HudIcons.PLATE_ORIGIN, HudIcons.PLATE_ORIGIN, HudIcons.PLATE_MIN_W,
+		HudIcons.PLATE_ORIGIN + HudIcons.HEAD_H + HudIcons.ROW_H)
+	# A soldier standing mid-field: the reserve _draw() claims before any label.
+	var excl: Rect2 = ms.player_label_exclusion(Vector2(320.0, 300.0))
+	var reported := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz: int = Art.fs(8)
+		var claims := 0
+		var violations := 0
+		var worst := ""
+		for iy in range(-40, 401, 4):
+			for ix in range(0, 641, 16):
+				var ppos := Vector2(float(ix), float(iy))
+				var frame: Array[Rect2] = [excl, panel]
+				# The three shipped pickup-label producers, in draw order, with
+				# their shipped offsets (main.gd:9434 / 9440 / 9448-9450).
+				var wants: Array = []
+				var cw: float = Art.tw("SPREAD", sz)
+				wants.append(["SPREAD", ms._label_plate_rect(ppos.x - cw / 2.0, ppos.y - 24.0, cw, sz)])
+				var mw: float = Art.tw("MAXED", sz)
+				wants.append(["MAXED", ms._label_plate_rect(ppos.x - mw / 2.0, ppos.y - 25.0, mw, sz)])
+				wants.append(["price", Rect2(ppos.x - 15.0, ppos.y - 34.0,
+					11.0 + Art.tw("250", 9), 13.0)])
+				for entry in wants:
+					claims += 1
+					var got: Rect2 = ms.claim_label_slot(entry[1] as Rect2, frame)
+					if got.get_area() <= 0.0:
+						continue          # the droppable sentinel; not used on this path
+					var g := got.grow(-0.5)
+					for ti in frame.size():
+						if g.intersects((frame[ti] as Rect2).grow(-0.5)):
+							violations += 1
+							if worst == "":
+								worst = "%s claimed %s over %s (anchor %s)" \
+									% [entry[0], str(got), str(frame[ti]), str(ppos)]
+							break
+					frame.append(got)
+		Runner.T.eq(claims, 13653,
+			"the sweep is exhaustive over the pickup cull band, not a sample (%d claims @ %d%%)"
+				% [claims, int(scale * 100.0)])
+		if violations > 0 and reported < 2:
+			reported += 1
+			Runner.T.ok(false, "first of %d: %s" % [violations, worst])
+		Runner.T.eq(violations, 0,
+			"claim_label_slot never returns occupied pixels @ %d%% TEXT SIZE (%d/%d claims collided)"
+				% [int(scale * 100.0), violations, claims])
+	Art.text_scale = was_scale
+	Art.flush_tw()
+
+	# Non-vacuity #1: widening the search must NOT have deleted the droppable
+	# sentinel. Saturate one anchor with toasts and prove suppression still fires.
+	var sat: Array[Rect2] = [excl, panel]
+	var drops := 0
+	var sz1: int = Art.fs(8)
+	for i in 40:
+		var w1: float = Art.tw("BOUNTY +75¢", sz1)
+		var g1: Rect2 = ms.claim_label_slot(
+			ms._label_plate_rect(320.0 - w1 / 2.0, 180.0, w1, sz1), sat, 0.0, true)
+		if g1.get_area() <= 0.0:
+			drops += 1
+		else:
+			sat.append(g1)
+	Runner.T.ok(drops > 0,
+		"a saturated DROPPABLE claim is still suppressed, not relocated (%d of 40 dropped)" % drops)
+
+	# Non-vacuity #2 + wiring: the invariant above covers claim_label_slot, but it
+	# only protects the SCREEN if every world-space string still routes through it,
+	# and if a label whose subject is off-frame is suppressed rather than dragged
+	# into the frame on top of the player. Scrape the source, the same way
+	# test_world_text_routes_through_the_arbiter does.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var producers := src.count("_world_label(") + src.count("_world_label_centered(")
+	Runner.T.ok(producers >= 14,
+		"the arbiter covers every in-world string producer (%d _world_label* sites scraped)" % producers)
+	var wstart := src.find("func _world_label(txt: String")
+	Runner.T.ok(wstart >= 0, "found the _world_label body")
+	if wstart >= 0:
+		var wend := src.find("\nfunc ", wstart + 1)
+		var body := src.substr(wstart, wend - wstart)
+		Runner.T.ok(body.contains("WORLD_LABEL_FRAME"),
+			"_world_label suppresses a label whose subject is outside the frame instead of "
+			+ "relocating it onto the player (no off-frame gate found)")
+		# ...and the gate is on the SUBJECT, not on the plate. The two look
+		# equivalent and are not: a plate sits ~34px above the thing it names, so a
+		# want-rect test silently drops the label off a subject the player can SEE
+		# in the top ~21px of the frame — bare playfield right of the HUD panel.
+		# Placing the plate is the arbiter's job; it searches the whole frame now.
+		Runner.T.ok(body.contains("has_point("),
+			"_world_label gates on the SUBJECT POINT, not on the label's own plate rect")
+		Runner.T.ok(not body.contains("WORLD_LABEL_FRAME.intersects(want)"),
+			"_world_label does not gate on `want` — a visible subject whose plate is above y=0 must still be labelled")
+	var dstart := src.find("func _draw_pickups(")
+	Runner.T.ok(dstart >= 0, "found the _draw_pickups body")
+	if dstart >= 0:
+		var dbody := src.substr(dstart, src.find("\nfunc ", dstart + 1) - dstart)
+		Runner.T.ok(dbody.contains("WORLD_LABEL_FRAME.has_point(ppos)"),
+			"the crate price gates on the CRATE's screen position, not on the price plate")
+		Runner.T.ok(not dbody.contains("WORLD_LABEL_FRAME.intersects(pwant)"),
+			"a visible priced crate in the top 21px of the frame still shows its price")
+
+	# ------------------------------------------------------------------------
+	# THE INVERSE INVARIANT, measured on the SHIPPED gate predicate rather than
+	# grepped. Suppressing a label whose SUBJECT is off-frame is only correct if
+	# every producer tells the gate what its subject IS. 12 of the 15 call sites
+	# did not: they hand an anchor 8-26px ABOVE their subject and let `subject`
+	# default to it, so the gate suppressed labels about tanks and bodies the
+	# player can plainly see in the top 26px of the frame (a tank sits there in
+	# 2.0% of 10,800 bot-driven sampled frames). At HEAD there was no gate at all
+	# and all 15 always drew, so that is a regression the gate introduced.
+	#
+	# Each site's SHIPPED anchor offset is scraped from source and pushed through
+	# the SHIPPED WORLD_LABEL_FRAME.has_point predicate — no copy of the gate, and
+	# a producer added tomorrow joins the sweep automatically. A caller that
+	# clamps its own baseline into the frame (ESCAPING!, main.gd:10215) is safe by
+	# construction and exempt.
+	var sites := _wl_call_sites(src)
+	Runner.T.ok(sites.size() >= 14,
+		"scraped %d _world_label* call sites to sweep" % sites.size())
+	var frame_rect: Rect2 = ms.get_script_constant_map()["WORLD_LABEL_FRAME"]
+	var wrong_suppress := 0
+	var wrong_place := 0
+	var swept := 0
+	var first_s := ""
+	var first_p := ""
+	for site in sites:
+		var dy: float = site[3]
+		if is_inf(dy):
+			continue
+		var gate_dy: float = 0.0 if bool(site[2]) else dy
+		for sy in range(0, 360, 2):
+			for sx in range(0, 640, 20):
+				var subj := Vector2(float(sx), float(sy))
+				swept += 1
+				if not frame_rect.has_point(subj + Vector2(0.0, gate_dy)):
+					wrong_suppress += 1
+					if first_s == "":
+						first_s = "%s at main.gd:%d drops a VISIBLE subject at %s (anchor %+.0fpx, passes `subject`: %s)" \
+							% [site[0], site[1], str(subj), dy, str(bool(site[2]))]
+		for out_subj in [Vector2(320.0, -6.0), Vector2(320.0, 366.0),
+				Vector2(-6.0, 180.0), Vector2(646.0, 180.0)]:
+			swept += 1
+			if frame_rect.has_point(out_subj + Vector2(0.0, gate_dy)):
+				wrong_place += 1
+				if first_p == "":
+					first_p = "%s at main.gd:%d labels an OFF-FRAME subject at %s" \
+						% [site[0], site[1], str(out_subj)]
+	Runner.T.ok(swept > 20000, "the inverse sweep is not vacuous (%d subject points)" % swept)
+	Runner.T.eq(wrong_suppress, 0,
+		"every world label about a subject INSIDE the frame is placed (%d suppressed; first: %s)"
+			% [wrong_suppress, first_s])
+	Runner.T.eq(wrong_place, 0,
+		"...and every label about a subject OUTSIDE it is suppressed (%d placed; first: %s)"
+			% [wrong_place, first_p])
+
+
+# Splits a call's argument text on TOP-LEVEL commas (nesting- and quote-aware).
+func _wl_split_args(s: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var depth := 0
+	var inq := false
+	var start := 0
+	for i in s.length():
+		var ch := s[i]
+		if inq:
+			if ch == "\"":
+				inq = false
+		elif ch == "\"":
+			inq = true
+		elif ch == "(" or ch == "[":
+			depth += 1
+		elif ch == ")" or ch == "]":
+			depth -= 1
+		elif ch == "," and depth == 0:
+			out.append(s.substr(start, i - start).strip_edges())
+			start = i + 1
+	out.append(s.substr(start).strip_edges())
+	return out
+
+
+# How far a call site's ANCHOR sits above (negative) or below its subject.
+# INF means the caller clamps its own baseline into the frame and is exempt.
+func _wl_anchor_dy(arg: String) -> float:
+	if arg.contains("maxf(") or arg.contains("clampf("):
+		return INF
+	if arg.contains("Vector2("):
+		var vy := arg.substr(arg.rfind(",") + 1).replace(")", "").strip_edges()
+		return float(vy) if vy.is_valid_float() else 0.0
+	var i: int = maxi(arg.rfind(" - "), arg.rfind(" + "))
+	if i < 0:
+		return 0.0
+	var num := arg.substr(i + 3).strip_edges()
+	if not num.is_valid_float():
+		return 0.0
+	return -float(num) if arg[i + 1] == "-" else float(num)
+
+
+# Every shipped _world_label / _world_label_centered CALL SITE, as
+# [name, line, passes_subject, anchor_dy]. Source-derived so the sweep above
+# measures what ships, not a list that goes stale.
+func _wl_call_sites(src: String) -> Array:
+	var out: Array = []
+	for name: String in ["_world_label(", "_world_label_centered("]:
+		var at := 0
+		while true:
+			at = src.find(name, at)
+			if at < 0:
+				break
+			var head: int = at + name.length()
+			var ls: int = src.rfind("\n", at) + 1
+			var pre := src.substr(ls, at - ls)
+			var call_at := at
+			at = head
+			if pre.contains("func ") or pre.contains("#"):
+				continue
+			var depth := 1
+			var inq := false
+			var j := head
+			while j < src.length() and depth > 0:
+				var ch := src[j]
+				if inq:
+					if ch == "\"":
+						inq = false
+				elif ch == "\"":
+					inq = true
+				elif ch == "(":
+					depth += 1
+				elif ch == ")":
+					depth -= 1
+				j += 1
+			var args := _wl_split_args(src.substr(head, j - 1 - head))
+			if args.size() < 3:
+				continue
+			var centered: bool = name.contains("_centered")
+			var need: int = 5 if centered else 4
+			out.append([name, src.substr(0, call_at).count("\n") + 1,
+				args.size() >= need, _wl_anchor_dy(args[2] if centered else args[1])])
+	return out

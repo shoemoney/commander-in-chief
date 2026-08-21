@@ -2613,3 +2613,440 @@ func test_menu_chrome_is_a_bezel_not_a_flat_stroke() -> void:
 			rgba[img.get_pixel(x, y).to_rgba32()] = true
 	Runner.T.ok(rgba.size() >= 64,
 		"%d distinct RGBA in the frame art (was 16)" % rgba.size())
+
+
+# ---------------------------------------------------------------------------
+# The ground dressing must not be PHASE-LOCKED to the 64px base tile.
+#
+# This is the one genuine lattice on the ground plane. There is no tilemap here
+# and no autotile seam (the shoreline is a sine curve, no road is drawn) — but
+# main.gd placed every bare-earth card at
+#     pos + Vector2(16.0 + dh % 33, 14.0 + (dh / 5) % 33)
+# inside a 64px cell, i.e. a 33px jitter window inside a 64px stride. So the only
+# high-contrast ground-variation layer landed in a fixed 33-of-64 phase band in
+# BOTH axes, at BOTH ends of the biome march: a regular grid of dressing sitting
+# exactly on the grid of the tile underneath it.
+#
+# MEASURED BY MUTATION, 800 rows through the SHIPPED generator with the 33px
+# jitter window and the 96px pass restored and nothing else changed:
+#   desert (march 0.0):  3,224 cards, 31/64 dead x bins, 31/64 dead y bins,
+#                        period-64 fundamental 0.617 (x) / 0.620 (y)
+#   foundry (march 1.0): 7,548 cards, 31/64 dead, 31/64 dead, 0.623 / 0.613
+# MUST BE 0 dead bins and fundamental <= 0.15 in every axis at both ends.
+# The fix measures 0.030/0.008 (desert) and 0.008/0.005 (foundry).
+# (The plan that commissioned this ratchet modelled 0.795/0.798 and 0.819/0.792
+# from a re-implementation; those were never true of this code. The numbers above
+# came out of the shipped function.)
+#
+# Render-free by construction: this reads the generator, not pixels, so it runs in
+# the headless suite. That is a property of the SUITE, not of the machine — GL is
+# available here (14 signature shots rendered in under 3 minutes via
+# `--rendering-method gl_compatibility`, OpenGL API 4.1 Metal, Apple M4 Max), and
+# the rendered-composite autocorrelation this finding also cites WAS measured that
+# way: see tools/ground_lag.py and the base-pitch ratchet below. What is banked is
+# only the CI half — the Linux runner has no display, so wiring a rendered pixel
+# gate into ci.yml needs xvfb. Look at the screen before you believe a generator.
+#
+# The count guards stop the two cheap ways to fake a pass: deleting dressing
+# (desert must gain cards) and carpet-bombing the frame (the already well-dressed
+# foundry must not grow more than 15%).
+# ---------------------------------------------------------------------------
+const _HEAD_DESERT_CARDS := 3224    # measured on 7c16776, 800 rows, march 0.0
+const _HEAD_FOUNDRY_CARDS := 7548   # measured on 7c16776, 800 rows, march 1.0
+const _DRESSING_CARDS_PER_SCREEN_CAP := 120   # worst single call today is 104 (foundry)
+
+
+func _phase_hist(cards: Array, axis: int) -> PackedInt32Array:
+	var hist := PackedInt32Array()
+	hist.resize(64)
+	for c in cards:
+		var p: Vector2 = c[0]
+		var v: float = p.x if axis == 0 else p.y
+		hist[int(fposmod(v, 64.0))] += 1
+	return hist
+
+
+func _dead_bins(hist: PackedInt32Array) -> int:
+	var n := 0
+	for b in hist:
+		if b == 0:
+			n += 1
+	return n
+
+
+func _period64_power(hist: PackedInt32Array) -> float:
+	# Normalized power of the period-64 fundamental (k = 1 over a 64-bin phase
+	# histogram): |sum h[i] * e^(-2*pi*i/64)| / sum h[i]. A layer with no
+	# preference for any phase measures ~0; one confined to a contiguous band of
+	# the cell measures near 1. This is the whole defect in one number.
+	var total := 0.0
+	var re := 0.0
+	var im := 0.0
+	for i in 64:
+		var v := float(hist[i])
+		total += v
+		var ang := TAU * float(i) / 64.0
+		re += v * cos(ang)
+		im += v * sin(ang)
+	if total <= 0.0:
+		return 1.0
+	return sqrt(re * re + im * im) / total
+
+
+func _dressing_over_rows(ms: Script, march: float) -> Array:
+	var all: Array = []
+	for base_iy in range(0, 800, 8):   # the generator emits 8 rows per call
+		all.append_array(ms.ground_dressing_cards(base_iy, march))
+	return all
+
+
+func test_ground_dressing_is_not_locked_to_the_64px_cell() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("ground_dressing_cards"),
+		"the ground dressing comes from one shipped generator the ratchet can measure")
+	if not ms.has_method("ground_dressing_cards"):
+		return
+	var counts := {}
+	for entry in [["desert", 0.0], ["foundry", 1.0]]:
+		var name: String = entry[0]
+		var cards := _dressing_over_rows(ms, entry[1] as float)
+		counts[name] = cards.size()
+		Runner.T.ok(cards.size() > 100,
+			"%s dressing sweep is not vacuous (%d cards over 800 rows)" % [name, cards.size()])
+		for axis in 2:
+			var ax := "x" if axis == 0 else "y"
+			var hist := _phase_hist(cards, axis)
+			var dead := _dead_bins(hist)
+			var pw := _period64_power(hist)
+			Runner.T.eq(dead, 0,
+				"%s dressing occupies every %s-phase of the 64px cell (%d/64 bins never used)"
+					% [name, ax, dead])
+			Runner.T.ok(pw <= 0.15,
+				"%s dressing is not phase-locked to the 64px tile in %s (period-64 power %.3f, bar 0.15)"
+					% [name, ax, pw])
+	# Guard #1 — "fixed" by deleting dressing. The desert end is the sparse one the
+	# finding is about; it must gain coverage, not lose it.
+	Runner.T.ok(int(counts["desert"]) > _HEAD_DESERT_CARDS,
+		"the desert end gained ground variation (%d cards vs %d on HEAD)"
+			% [int(counts["desert"]), _HEAD_DESERT_CARDS])
+	# Guard #2 — "fixed" by carpet-bombing. The foundry is already well dressed and
+	# the march gradient (main.gd's a1-06 density ramp) must survive.
+	Runner.T.ok(int(counts["foundry"]) <= int(round(float(_HEAD_FOUNDRY_CARDS) * 1.15)),
+		"the already-dressed foundry end is not over-dressed (%d cards vs %d on HEAD, cap %d)"
+			% [int(counts["foundry"]), _HEAD_FOUNDRY_CARDS, int(round(float(_HEAD_FOUNDRY_CARDS) * 1.15))])
+	Runner.T.ok(int(counts["foundry"]) > int(counts["desert"]),
+		"the desert->foundry density gradient is preserved (%d desert vs %d foundry)"
+			% [int(counts["desert"]), int(counts["foundry"])])
+	# Guard #2b — RENDER COST. The two guards above bound the sweep TOTAL, which a
+	# density bump can hold flat while spiking one screen. One ground_dressing_cards
+	# call is the 8 rows that cover the frame, so its card count IS cards-per-screen,
+	# and each card costs three rects (outer halo, inner halo, fill). Measured on
+	# this tree: worst 104 at the foundry (mean 80.8), 75 at the desert (mean 53.5),
+	# against tools/perf_probe.gd draw_calls_avg 402.6 (HEAD) -> 406.4 (here). The
+	# cap exists so the next dressing bump is red in the suite instead of only in a
+	# profiler nobody reruns.
+	var worst_screen := 0
+	for march in [0.0, 0.25, 0.5, 0.75, 1.0]:
+		for base_iy in range(0, 800, 8):
+			worst_screen = maxi(worst_screen, (ms.ground_dressing_cards(base_iy, march) as Array).size())
+	Runner.T.ok(worst_screen <= _DRESSING_CARDS_PER_SCREEN_CAP,
+		"the worst single screen of dressing stays inside its render budget (%d cards x3 rects, cap %d) — measured 104 on this tree"
+			% [worst_screen, _DRESSING_CARDS_PER_SCREEN_CAP])
+	Runner.T.ok(worst_screen >= 60,
+		"the cards-per-screen probe is not vacuous (%d cards on the worst screen)" % worst_screen)
+	# Guard #3 — the second dressing lattice rides a pitch that is NOT a multiple
+	# of 64, so the dressing layer itself carries no single period. (It does NOT
+	# break the base tile's verbatim repeat — measured, that costs ~5% of lag-64
+	# autocorrelation on a rendered frame; the base pitch does, and is pinned by
+	# test_ground_base_tile_pitch_is_not_a_multiple_of_64.) Pin the dressing pitch
+	# explicitly so deleting that pass is red on its own, not just via the count
+	# guard.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var gstart := src.find("static func ground_dressing_cards(")
+	Runner.T.ok(gstart >= 0, "found the ground_dressing_cards body")
+	if gstart >= 0:
+		var gend := src.find("\nfunc ", gstart + 1)
+		var body := src.substr(gstart, gend - gstart)
+		Runner.T.ok(body.contains("96.0"),
+			"a second dressing pass rides a 96px pitch — a NON-multiple of the 64px base tile")
+	# Wiring: _paint_bg must actually call the generator this test measures
+	# (the claim_label_slot def-only-signature precedent).
+	var pstart := src.find("func _paint_bg(")
+	Runner.T.ok(pstart >= 0, "found the _paint_bg body")
+	if pstart >= 0:
+		var pend := src.find("\nfunc ", pstart + 1)
+		Runner.T.ok(src.substr(pstart, pend - pstart).contains("ground_dressing_cards("),
+			"_paint_bg draws the cards this ratchet measures, not a private copy")
+
+
+# ---------------------------------------------------------------------------
+# The opaque sand BASE must not repeat on the same 64px pitch as the dressing.
+#
+# The dressing ratchet above fixes the dressing's PHASE. It does not touch the
+# layer underneath it, and the reviewer measured that on real rendered frames:
+# the second 96px dressing pass moved ground-masked, 32px-high-passed lag-64
+# autocorrelation by only -5% median (0.648->0.617 on 01-jungle-firefight),
+# because low-alpha soft feather cards barely mask sand.png's grain no matter
+# how many of them there are. The verbatim repeat lives in the base strip:
+# _paint_bg painted it as eight 64px-tall rows of sand.png at 0.5 scale, i.e. a
+# 64x64 tile lattice in BOTH axes, exactly co-phased with the dressing cells.
+#
+# The fix repaints the base in world-anchored GROUND_TILE_PX bands at
+# GROUND_TILE_PX/128 scale, so the tile pitch is 96 in both axes and shares no
+# period with the 64px dressing cell (lcm 192). It is seamless — sand.png tiles
+# seamlessly, so band edges still meet invisibly, unlike the per-row mirror
+# variants main.gd already tried and rejected.
+#
+# MEASURED, rendered (tools/screenshots.gd, --rendering-method gl_compatibility,
+# tools/ground_lag.py: 32px high-pass, robust sprite mask, lag-64 autocorrelation
+# minus the mean of the neighbouring 52/56/72/76 lags, which is the verbatim
+# repeat with the broad correlation floor removed):
+#   01-jungle-firefight  x +0.148 / y +0.144  -> -0.001 / -0.003
+#   02-tank-assault      x +0.155 / y +0.151  -> -0.002 / +0.001
+#   04-bridge-gunship    x +0.094 / y +0.098  -> -0.005 / -0.001
+# with frame mean luma and stdev unchanged (99.26 -> 99.46, 16.59 -> 16.63 on 01).
+# NOT claimed BY THIS TEST: the pitch alone leaves the base one tiled texture, so
+# it still repeated verbatim, at 96 instead of 64 (lag-96 excess +0.128/+0.117).
+# The peak MOVED at unchanged amplitude; it did not vanish. Killing it needs more
+# than one source card, which is the sibling test below. This one pins the pitch.
+# The suite cannot render (headless has no framebuffer), so this test pins the
+# GENERATOR the render measures: the pitch, the world anchoring, the coverage
+# and the wiring. Mutating GROUND_TILE_PX back to 64 turns it red.
+# ---------------------------------------------------------------------------
+func test_ground_base_tile_pitch_is_not_a_multiple_of_64() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var consts := ms.get_script_constant_map()
+	Runner.T.ok(consts.has("GROUND_TILE_PX"),
+		"the base sand pitch is a named shipped constant the ratchet can read")
+	Runner.T.ok(ms.has_method("ground_base_bands"),
+		"the base bands come from one shipped generator, not a private loop")
+	if not consts.has("GROUND_TILE_PX") or not ms.has_method("ground_base_bands"):
+		return
+	var pitch: int = consts["GROUND_TILE_PX"]
+	Runner.T.ok(pitch % 64 != 0,
+		"the base sand pitch (%d) is NOT a multiple of the 64px dressing cell — a base that repeats verbatim every 64px is the lattice, and no amount of dressing masks it"
+			% pitch)
+	Runner.T.ok(pitch >= 80 and pitch <= 192,
+		"the base pitch (%d) stays in a sane band — not 'fixed' by a pitch so large the tile is visible or so small it shimmers" % pitch)
+	# World-anchored, contiguous, and covering the frame at every scroll phase.
+	# A band lattice that slides with the camera shimmers; one with gaps shows
+	# the void the old flush-edge column used to.
+	var worst_gap := 0.0
+	var worst_drift := 0.0
+	for step in 97:
+		var cam_y := float(step) * 3.7 - 120.0
+		var bands: Array = ms.ground_base_bands(cam_y)
+		Runner.T.ok(bands.size() >= 4, "cam_y %.1f emits %d bands" % [cam_y, bands.size()])
+		var top: float = bands[0][0]
+		var bottom: float = bands[bands.size() - 1][0] + float(pitch)
+		worst_gap = maxf(worst_gap, top)                    # must be <= 0
+		worst_gap = maxf(worst_gap, 360.0 - bottom)         # must be <= 0
+		var prev: float = bands[0][0]
+		for i in range(1, bands.size()):
+			var sy: float = bands[i][0]
+			Runner.T.eq(sy, prev + float(pitch),
+				"bands are contiguous at cam_y %.1f (band %d)" % [cam_y, i])
+			prev = sy
+		for b in bands:
+			var wy: float = b[1]
+			Runner.T.eq(int(fposmod(wy, float(pitch))), 0,
+				"band world y %.1f sits on the %dpx world lattice" % [wy, pitch])
+			worst_drift = maxf(worst_drift, absf(b[0] - (wy - cam_y)))
+	Runner.T.ok(worst_gap <= 0.0,
+		"the bands cover the whole 640x360 frame at every scroll phase (worst uncovered edge %.1fpx)"
+			% worst_gap)
+	Runner.T.ok(worst_drift <= 1.0,
+		"bands are world-anchored, not camera-relative (worst screen drift %.2fpx — >1px means the ground slides under the scroll)"
+			% worst_drift)
+	# ...and the bottom edge needs OVERSCAN, not just contact. `_bg_root` is a child
+	# of `main` (main.gd:965) and `main.position` carries the shake/kick/roll
+	# (main.gd:6224), so the whole band lattice rides the camera judder: max trauma
+	# alone reaches -11px (main.gd:6207-6211), a downed-player kick adds -4
+	# (main.gd:3259) and the 0.035rad dutch roll costs ~11px at a corner, ~-37px in
+	# total. Coverage that merely REACHES y=360 at the worst 1-in-96 phase therefore
+	# uncovers the bottom rows onto the flat grey backdrop — measured at HEAD's
+	# `+ 1` band: last warm-ground row 335 at dy=-120 and 255 at dy=-200, against
+	# 359 / 287 before the pitch change. 40px is the same margin _draw_pickups' own
+	# cull already treats as reachable (main.gd:9361).
+	var worst_over := 1.0e9
+	var worst_phase := 0.0
+	for step in 193:
+		var cam_y := float(step) * 0.5            # one full 96px period at 0.5px
+		var bands: Array = ms.ground_base_bands(cam_y)
+		var over: float = bands[bands.size() - 1][0] + float(pitch) - 360.0
+		if over < worst_over:
+			worst_over = over
+			worst_phase = cam_y
+	Runner.T.ok(worst_over >= 40.0,
+		"the ground overhangs the BOTTOM edge by >=40px at every scroll phase (worst %.1fpx at cam_y %.1f) — the camera shake/kick/roll swings the lattice up to ~37px up and the backdrop shows through"
+			% [worst_over, worst_phase])
+	# Wiring + scale: _paint_bg must paint from these bands, and the texture
+	# scale must be DERIVED from the pitch, or the two silently drift apart and
+	# the tile gets re-cut every band (the trap the 0.5-scale comment names).
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var pstart := src.find("func _paint_bg(")
+	Runner.T.ok(pstart >= 0, "found the _paint_bg body")
+	if pstart >= 0:
+		var body := src.substr(pstart, src.find("\nfunc ", pstart + 1) - pstart)
+		Runner.T.ok(body.contains("ground_base_bands("),
+			"_paint_bg paints the bands this ratchet measures, not a private copy")
+		Runner.T.ok(body.contains("float(GROUND_TILE_PX) / 128.0"),
+			"the sand strip's scale is derived from GROUND_TILE_PX / the 128px native tile, so pitch and scale cannot drift apart")
+
+
+# ---------------------------------------------------------------------------
+# The base sand must be painted from MORE THAN ONE source card.
+#
+# The pitch ratchet above moved the base repeat off the dressing cell (64 -> 96)
+# and honestly refused to claim it had removed it. It had not: measured on
+# rendered frames (tools/ground_lag.py, my own renders, HEAD = 7c16776 vs the
+# 96px-pitch tree), the peak simply MOVED at essentially unchanged amplitude —
+#   01-jungle-firefight  lag-64 +0.148/+0.144 -> -0.001/-0.003
+#                        lag-96 -0.002/-0.010 -> +0.128/+0.117
+#   02-tank-assault      lag-64 +0.155/+0.151 -> -0.002/+0.001
+#                        lag-96 -0.007/-0.001 -> +0.136/+0.138
+# — because one tiled texture repeats verbatim whatever its pitch is.
+#
+# The only way out is more than one source card. The base now paints from N
+# 1024x128 STRIPS, each built by laying 8 dihedral transforms of sand.png side
+# by side, hash-selected per WORLD BAND. That kills the repeat in both axes at
+# once and costs no extra draw calls:
+#   x — a strip is 1024px native == 768px on screen at GROUND_TILE_PX/128, i.e.
+#       exactly the drawn width, so the frame contains ONE strip and adjacent
+#       96px columns are different dihedral variants. There is no x period.
+#   y — consecutive bands draw different strips, so the 96px vertical pitch
+#       carries different pixels each time.
+# Dihedral variants are safe here in a way the per-CELL mirrors main.gd rejected
+# were not: a band is exactly one whole tile tall, and sand.png is pure grain
+# (128x128, std 8.46/255, only 2.4% of its power below |k|=2), so a variant
+# boundary is a decorrelation, not a luminance step — there is nothing to see.
+#
+# This test cannot render (the suite is --headless), so it pins the GENERATOR
+# and the actual STRIP PIXELS the render measures. Mutation: collapse the strip
+# shuffle to one repeated dihedral id, or the band variant to a constant, and it
+# goes red on the adjacent-slot / distinct-strip / diversity asserts.
+# ---------------------------------------------------------------------------
+func test_ground_base_paints_more_than_one_source_variant() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("ground_base_variant"),
+		"the per-band source variant comes from one shipped selector the ratchet can measure")
+	Runner.T.ok(ms.has_method("ground_base_strip_image"),
+		"the base strips come from one shipped builder, so this test measures the pixels the player sees")
+	if not ms.has_method("ground_base_variant") or not ms.has_method("ground_base_strip_image"):
+		return
+	var consts := ms.get_script_constant_map()
+	Runner.T.ok(consts.has("GROUND_BASE_VARIANTS"), "the variant count is a named shipped constant")
+	if not consts.has("GROUND_BASE_VARIANTS"):
+		return
+	var nvar: int = consts["GROUND_BASE_VARIANTS"]
+	Runner.T.ok(nvar >= 2,
+		"the base paints from more than one source card (%d variants) — one tiled texture repeats verbatim at whatever pitch it rides" % nvar)
+
+	# 1. Diversity over the world: every variant is actually reached, and none of
+	#    them owns the ground. A selector that returns 0 for 99% of bands is a
+	#    single tile with extra steps.
+	var seen := {}
+	var runs := 0
+	var prev := -1
+	for j in range(-200, 400):
+		var v: int = ms.ground_base_variant(j)
+		Runner.T.ok(v >= 0 and v < nvar, "variant %d for band %d is in range" % [v, j])
+		seen[v] = int(seen.get(v, 0)) + 1
+		if v != prev:
+			runs += 1
+		prev = v
+	Runner.T.eq(seen.size(), nvar,
+		"every one of the %d source variants is reached over 600 world bands (%d distinct)"
+			% [nvar, seen.size()])
+	var worst_share := 0.0
+	for v in seen:
+		worst_share = maxf(worst_share, float(seen[v]) / 600.0)
+	Runner.T.ok(worst_share <= 0.55,
+		"no single variant owns the ground (worst share %.2f of 600 bands, bar 0.55)" % worst_share)
+	Runner.T.ok(float(runs) / 600.0 >= 0.5,
+		"consecutive bands usually change variant (%d changes over 600 bands) — a long run of one strip is a vertical repeat at the band pitch"
+			% runs)
+
+	# 2. Scroll stability. The variant must be a function of the WORLD band index
+	#    alone: anything camera-derived reshuffles the ground under the scroll,
+	#    which is a shimmer, not a fix.
+	var pitch: int = consts["GROUND_TILE_PX"]
+	var by_world := {}
+	var conflicts := 0
+	for step in 97:
+		var cam_y := float(step) * 3.7 - 120.0
+		for b in ms.ground_base_bands(cam_y):
+			Runner.T.ok((b as Array).size() >= 3,
+				"each band carries its source variant, so _paint_bg cannot pick one privately")
+			if (b as Array).size() < 3:
+				return
+			var wy: float = b[1]
+			var v: int = b[2]
+			Runner.T.eq(v, ms.ground_base_variant(int(wy) / pitch),
+				"the band's variant is the shipped selector's, not a local guess")
+			if by_world.has(wy) and by_world[wy] != v:
+				conflicts += 1
+			by_world[wy] = v
+	Runner.T.eq(conflicts, 0,
+		"a given world band draws the same variant at every scroll phase (%d conflicts over 97 phases) — variant selection is world-anchored, not camera-derived"
+			% conflicts)
+
+	# 3. The strips themselves. This is the x-axis invariant: no two ADJACENT
+	#    128px slots inside a strip may be identical, or the strip repeats at the
+	#    band pitch horizontally and nothing above has helped.
+	var strips: Array[Image] = []
+	for v in nvar:
+		var img: Image = ms.ground_base_strip_image(v)
+		Runner.T.ok(img != null, "strip %d builds" % v)
+		if img == null:
+			return
+		Runner.T.eq(img.get_height(), 128, "strip %d is one native tile tall" % v)
+		Runner.T.eq(img.get_width(), 1024,
+			"strip %d is 1024px == 768px on screen at the shipped scale, i.e. the whole drawn width in ONE repeat" % v)
+		strips.append(img)
+	var slot_dupes := 0
+	for v in nvar:
+		for s in 7:
+			if _img_slice_hash(strips[v], s) == _img_slice_hash(strips[v], s + 1):
+				slot_dupes += 1
+	Runner.T.eq(slot_dupes, 0,
+		"no two adjacent 128px slots of a strip are the same card (%d duplicate pairs) — identical neighbours put the base back on a 96px x-period"
+			% slot_dupes)
+	var strip_dupes := 0
+	for a in nvar:
+		for b in range(a + 1, nvar):
+			if strips[a].get_data() == strips[b].get_data():
+				strip_dupes += 1
+	Runner.T.eq(strip_dupes, 0,
+		"the %d strips are pixel-distinct (%d identical pairs) — identical strips make the per-band choice a no-op"
+			% [nvar, strip_dupes])
+	# Same histogram: variants must decorrelate the ground, not re-expose it.
+	# A variant with different statistics is a visible patch, which is worse.
+	var base_mean := _img_mean(strips[0])
+	for v in nvar:
+		Runner.T.ok(absf(_img_mean(strips[v]) - base_mean) <= 1.0,
+			"strip %d carries the same exposure as strip 0 (%.2f vs %.2f) — a variant that is not a pure rearrangement is a visible patch"
+				% [v, _img_mean(strips[v]), base_mean])
+
+	# 4. Wiring: _paint_bg must paint the strip the band names.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var pstart := src.find("func _paint_bg(")
+	Runner.T.ok(pstart >= 0, "found the _paint_bg body")
+	if pstart >= 0:
+		var body := src.substr(pstart, src.find("\nfunc ", pstart + 1) - pstart)
+		Runner.T.ok(body.contains("_ground_base_strip("),
+			"_paint_bg paints the per-band strip this ratchet measures, not a private copy")
+		Runner.T.ok(not body.contains("Art.tex(\"sand\")"),
+			"_paint_bg no longer paints the bare single sand tile — that IS the verbatim repeat")
+
+
+func _img_slice_hash(img: Image, slot: int) -> PackedByteArray:
+	return img.get_region(Rect2i(slot * 128, 0, 128, 128)).get_data()
+
+
+func _img_mean(img: Image) -> float:
+	var acc := 0.0
+	for y in range(0, img.get_height(), 4):
+		for x in range(0, img.get_width(), 4):
+			acc += img.get_pixel(x, y).get_luminance()
+	return acc / float((img.get_height() / 4) * (img.get_width() / 4)) * 255.0

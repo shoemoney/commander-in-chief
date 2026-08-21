@@ -1123,6 +1123,149 @@ func _sync_water() -> void:
 		_water_rects[i].visible = false
 
 
+## THE base-sand lattice: the world-anchored bands the opaque ground strip is
+## painted in, as [screen_y, world_y] pairs. Split out of _paint_bg for the same
+## reason as ground_dressing_cards — tests/test_assets.gd's pitch ratchet has to
+## measure the SHIPPED lattice, not a copy of it.
+##
+## World-anchored (band tops sit on the GROUND_TILE_PX world grid, not on the
+## camera), so the ground does not slide or shimmer under the scroll. Bands are
+## contiguous and always overhang both edges of the 640x360 frame.
+static func ground_base_bands(cam_y: float) -> Array:
+	var p := float(GROUND_TILE_PX)
+	var base_jy := int(floor(cam_y / p))
+	var oy := -fposmod(cam_y, p)                 # in (-p, 0]: band 0 always overhangs the top
+	var out: Array = []
+	# +2, not +1: one band for the partial the phase pushes past 360, and one of
+	# OVERSCAN. _bg_root rides main.position (shake + kick + dutch roll, ~-37px at
+	# a corner), so bands that merely REACH 360 at the worst 1-in-96 phase uncover
+	# the bottom rows onto the backdrop. +1 leaves 24px there; +2 leaves >=120.
+	for b in int(ceil(360.0 / p)) + 2:
+		out.append([floor(oy) + float(b) * p, float(base_jy + b) * p,
+			ground_base_variant(base_jy + b)])
+	return out
+
+
+## Which of the GROUND_BASE_VARIANTS sand strips band `band_index` paints.
+## A function of the WORLD band index and nothing else — anything camera-derived
+## reshuffles the ground under the scroll, which is a shimmer, not a fix.
+static func ground_base_variant(band_index: int) -> int:
+	return Art.cell_hash(911, band_index) % GROUND_BASE_VARIANTS
+
+
+## Builds one 1024x128 base strip: eight 128px slots, each a different dihedral
+## transform of sand.png (see GROUND_BASE_SLOT_DIHEDRAL). Static and pure so
+## tests/test_assets.gd measures the PIXELS the player sees, not a description
+## of them. Cached by _ground_base_strip; never called per frame.
+static func ground_base_strip_image(v: int) -> Image:
+	var src: Image = Art.tex("sand").get_image()
+	if src.is_compressed():
+		src.decompress()   # a VRAM-compressed import has no raw pixels to blit
+	src.convert(Image.FORMAT_RGBA8)
+	var w := src.get_width()
+	var strip := Image.create_empty(w * GROUND_BASE_SLOTS, w, false, Image.FORMAT_RGBA8)
+	for s in GROUND_BASE_SLOTS:
+		var card := Image.create_from_data(w, w, false, Image.FORMAT_RGBA8, src.get_data())
+		var d: int = (int(GROUND_BASE_SLOT_DIHEDRAL[s]) + v) % 8
+		if d >= 4:
+			card.flip_x()
+		match d % 4:
+			1: card.rotate_90(CLOCKWISE)
+			2: card.rotate_180()
+			3: card.rotate_90(COUNTERCLOCKWISE)
+		strip.blit_rect(card, Rect2i(0, 0, w, w), Vector2i(s * w, 0))
+	return strip
+
+
+## Cached texture for one base strip. Built lazily on the first ground paint
+## (8 variants x 8 slots = 64 blits; measured 11.71 ms once per process for
+## 4.00 MB of raw pixels) and kept in a static so a restart does not rebuild them.
+func _ground_base_strip(v: int) -> Texture2D:
+	if _sand_strips.is_empty():
+		for i in GROUND_BASE_VARIANTS:
+			_sand_strips.append(ImageTexture.create_from_image(ground_base_strip_image(i)))
+	return _sand_strips[v % GROUND_BASE_VARIANTS]
+
+
+## THE ground-dressing generator: the bare-earth cards scattered over the base sand
+## tile, as pure geometry — [local_pos, rot, size, row_index], no colour, no camera,
+## no draw. Split out of _paint_bg so tests/test_assets.gd's anti-lattice ratchet
+## measures the SHIPPED placement instead of a copy of it (the claim_label_slot
+## def-only-signature trap). `local_pos.y` is the offset WITHIN its tile row; the
+## caller adds that row's screen y and attaches that row's biome stop.
+##
+## Deterministic in (base_iy, march) via Art.cell_hash — view-only, never the sim RNG.
+static func ground_dressing_cards(base_iy: int, march: float) -> Array:
+	var out: Array = []
+	for ty in 8:
+		for tx in 11:
+			# gfx-loop: -32 gives a half-tile of horizontal overscan on each edge
+			# (mirrors oy's implicit vertical margin) — screen shake/kick/roll can
+			# swing the camera transform ~20-24px sideways at a corner, which used
+			# to reveal an undrawn void past the ground's flush-edge column.
+			var pos := Vector2(tx * 64.0 - 32.0, 0.0)
+			var h := Art.cell_hash(tx, base_iy + ty)
+			if h % maxi(3, 7 - int(march * 4.0)) == 0:   # a1-06: bare-earth density climbs toward the foundry
+				for dc in 2 + (h % 2):
+					var dh := Art.cell_hash(tx * 3 + dc + 1, base_iy + ty)
+					# The jitter window is the FULL cell (was `16.0 + dh % 33` /
+					# `14.0 + (dh / 5) % 33` — a 33px window inside a 64px stride,
+					# which left 31 of 64 phase bins in BOTH axes permanently empty
+					# and put the only high-contrast ground layer in lockstep with
+					# the tile grid beneath it, period-64 power 0.617/0.620).
+					out.append([pos + Vector2(float(dh % 64), float((dh / 5) % 64)),
+						float(dh % 628) / 100.0,
+						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0), ty])
+	# SECOND dressing lattice, on a 96px pitch, carrying its own hash seed. What it
+	# is for, stated as what it MEASURES and nothing more: it raises desert dressing
+	# coverage by 66% (3,224 -> 5,352 cards over 800 rows) and puts that extra cover
+	# on a pitch that is not a multiple of the 64px cell, so more of the ground is
+	# dressed and the dressing itself carries no single period.
+	#
+	# What it does NOT do — measured, not assumed: it does not break the base sand
+	# tile's verbatim repeat. On rendered frames (gl_compatibility + tools/
+	# ground_lag.py) adding this pass moved lag-64 autocorrelation by about -5%
+	# median, because these are low-alpha soft feather cards and 66% more of them
+	# barely masks sand.png's grain. The base repeat is fixed where it lives, in the
+	# base: see GROUND_TILE_PX and the band paint in _paint_bg.
+	#
+	# Cards go into the SAME array and ride the same three grouped halo/fill passes
+	# — no new draw code, batching untouched. Density is gated on `march` so the
+	# already well-dressed foundry end is not over-dressed: 1-in-2 cells at the
+	# desert stop, 1-in-8 at the foundry (+8.3% foundry cards, 7,548 -> 8,079).
+	#
+	# BUDGET — this is the cheap layer, and the next bump has to stay cheap.
+	# tools/perf_probe.gd, gl_compatibility, --write-movie --fixed-fps 15
+	# --quit-after 300 --resolution 1280x720, PROBE_FRAME 150, 121 sampled frames:
+	#   HEAD 7c16776          draw_calls_avg 402.6  cpu_ms_avg 1.114  vram 62.6 MB
+	#   + this second pass    draw_calls_avg 402.8  cpu_ms_avg 1.176  vram 62.6 MB
+	#   + the base strips     draw_calls_avg 406.4  cpu_ms_avg 1.197  vram 68.2 MB
+	#                         (median of 3 runs; the +3.8 draws are the 5 bands no
+	#                          longer sharing one texture, the +5.6 MB is 8 strips)
+	# One card costs THREE rects (outer halo, inner halo, fill). The worst single
+	# call emits 104 cards at the foundry (mean 80.8) and 75 at the desert (mean
+	# 53.5) — one call is the 8 rows that cover the frame, so that IS cards per
+	# screen. tests/test_assets.gd caps it at 120, so a future density tweak that
+	# doubles the layer is red before anyone has to re-run a profiler.
+	var wy0 := base_iy * 64
+	var j0 := int(floor(float(wy0) / 96.0))
+	var j1 := int(floor(float(wy0 + 8 * 64 - 1) / 96.0))
+	for j in range(j0, j1 + 1):
+		for gx in 8:                                     # 8 * 96 = 768 covers 640 + the -32 overscan
+			var eh := Art.cell_hash(gx * 7 + 101, j * 3 + 977)
+			if eh % (2 + int(march * 6.0)) != 0:
+				continue
+			var ewy := float(j) * 96.0 + float((eh / 11) % 96)
+			var ety := int(floor((ewy - float(wy0)) / 64.0))
+			if ety < 0 or ety > 7:
+				continue                                 # lands outside the 8 rows this call emits
+			out.append([Vector2(float(gx) * 96.0 - 32.0 + float(eh % 96),
+					ewy - float(wy0) - float(ety) * 64.0),
+				float((eh / 3) % 628) / 100.0,
+				Vector2(26.0 + float(eh % 6) * 4.0, 22.0 + float((eh / 7) % 5) * 4.0), ety])
+	return out
+
+
 func _paint_bg(canvas: Node2D) -> void:
 	# The opaque grass/dirt base, relocated verbatim from _draw_terrain so it can
 	# render on _bg_root (below the water). Drawn onto `canvas` (== _bg_root); the
@@ -1146,6 +1289,8 @@ func _paint_bg(canvas: Node2D) -> void:
 	# (d) dirt becomes 2-3 hash-ROTATED overlapping cards per cell instead of
 	# one axis-aligned rect. All starting values — judged by screenshot.
 	var dirt_cards: Array = []   # [center, rot, size, dirt_col] tuples
+	var row_ys := PackedFloat32Array(); row_ys.resize(8)     # per-row screen y, filled below
+	var row_cols: Array[Color] = []; row_cols.resize(8)      # per-row biome stop (c2 3v)
 	# 5-stop biome ramp (5v: one biome with a linear scorch felt like a dimmer
 	# switch, not a JOURNEY): jungle -> scorched -> marsh -> ruins -> foundry
 	# ash. c2 3v: sample PER TILE ROW, not per frame — the new sector's flat
@@ -1156,39 +1301,53 @@ func _paint_bg(canvas: Node2D) -> void:
 	var stops := _ground_stops(sim.mode)
 	var desert_stops: Array = stops[0]
 	var dirt_stops: Array = stops[1]
-	for ty in 8:
-		# Per-row march: rows south of the last march-step snap keep the old
+	# a-seam: ONE seamless tiled strip per band, ONE flat colour. The old per-cell
+	# `shade` hash + %3 row stripe were a CONSTANT tint across a 64px block, i.e. a
+	# hard luminance step on every cell edge — that WAS the grid. The mirror
+	# variants also broke sand.png's own tiling on Y-flipped edges. Value variation
+	# comes entirely from the soft 256px macro mottle, the dirt cards and the cloud
+	# shadows below — none grid-aligned.
+	#
+	# The strip used to be painted per 64px DRESSING ROW at 0.5 scale, which made
+	# the base a 64x64 lattice co-phased with the dressing cell above it: the ground
+	# repeated verbatim every 64px in both axes, and no amount of dressing hides
+	# that (rendered lag-64 autocorrelation moved ~5% when the dressing coverage
+	# went up 66%). It is now painted on the GROUND_TILE_PX (96px) WORLD lattice
+	# instead — a pitch that shares no period with the 64px dressing cell — which
+	# costs FEWER draws (5 bands, not 8 rows) and stays seamless because a band is
+	# exactly one whole sand.png tile tall. The scale is derived from the pitch and
+	# the 128px native tile for that reason: any other scale re-cuts the card mid-
+	# tile and puts a hard edge on every band seam.
+	var band_scale := float(GROUND_TILE_PX) / 128.0
+	for band in ground_base_bands(cam_y):
+		# Per-band march: ground south of the last march-step snap keeps the old
 		# stop (same comparison the litter freeze uses at row_wy >= snap).
-		var row_wy_fp := int(float(base_iy + ty) * 64.0 * Fixed.ONE)
-		var row_march := _litter_march_prev if row_wy_fp >= _litter_cam_snap else march
-		var dirt_col := _biome_ramp(row_march, dirt_stops)
-		var gt := _biome_ramp(row_march, desert_stops)
-		var row_y: float = floor(oy + ty * 64.0)   # floor(): fractional origins shimmer the seam while scrolling
-		# a-seam: ONE seamless tiled strip per row, ONE flat colour. The old per-cell
-		# `shade` hash + %3 row stripe were a CONSTANT tint across a 64px block,
-		# i.e. a hard luminance step on every cell edge — that WAS the grid. The
-		# mirror variants also broke sand.png's own tiling on Y-flipped edges.
-		# Value variation now comes entirely from the soft 256px macro mottle,
-		# the dirt cards and the cloud shadows below — none grid-aligned.
-		# 0.5 scale is required: tile=true repeats at NATIVE 128px, which would
-		# show only the top half of the card and re-cut it every row.
-		canvas.draw_set_transform(Vector2(-32.0, row_y), 0.0, Vector2(0.5, 0.5))
-		canvas.draw_texture_rect(Art.tex("sand"), Rect2(Vector2.ZERO, Vector2(1408, 128)), true,
+		var band_wy: float = band[1]
+		var band_march := _litter_march_prev if int(band_wy * Fixed.ONE) >= _litter_cam_snap else march
+		var gt := _biome_ramp(band_march, desert_stops)
+		canvas.draw_set_transform(Vector2(-32.0, band[0] as float), 0.0,
+			Vector2(band_scale, band_scale))
+		canvas.draw_texture_rect(_ground_base_strip(band[2] as int),
+			Rect2(Vector2.ZERO, Vector2(1024, 128)), true,
 			Color(GROUND_SHADE * gt.r, GROUND_SHADE * gt.g, GROUND_SHADE * gt.b))
 		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		for tx in 11:
-			# gfx-loop: -32 gives a half-tile of horizontal overscan on each edge
-			# (mirrors oy's implicit vertical margin) — screen shake/kick/roll can
-			# swing the camera transform ~20-24px sideways at a corner, which used
-			# to reveal an undrawn void past the ground's flush-edge column.
-			var pos := Vector2(tx * 64.0 - 32.0, row_y)
-			var h := Art.cell_hash(tx, base_iy + ty)
-			if h % maxi(3, 7 - int(march * 4.0)) == 0:   # a1-06: bare-earth density climbs toward the foundry
-				for dc in 2 + (h % 2):
-					var dh := Art.cell_hash(tx * 3 + dc + 1, base_iy + ty)
-					dirt_cards.append([pos + Vector2(16.0 + float(dh % 33), 14.0 + float((dh / 5) % 33)),
-						float(dh % 628) / 100.0,
-						Vector2(30.0 + float(dh % 5) * 5.0, 26.0 + float(dh % 4) * 5.0), dirt_col])
+	# The dressing still rides 64px rows (the cards' own cell), so the per-row
+	# bookkeeping the dirt pass reads is unchanged — only the paint moved.
+	for ty in 8:
+		var row_wy_fp := int(float(base_iy + ty) * 64.0 * Fixed.ONE)
+		var row_march := _litter_march_prev if row_wy_fp >= _litter_cam_snap else march
+		row_ys[ty] = floor(oy + ty * 64.0)   # floor(): fractional origins shimmer the seam while scrolling
+		row_cols[ty] = _biome_ramp(row_march, dirt_stops)
+	# The dressing GEOMETRY comes from one shipped generator (ground_dressing_cards),
+	# so the anti-lattice ratchet in tests/test_assets.gd measures the placement the
+	# player actually sees instead of a re-implementation of it. Here we only bind
+	# each card to its row's screen y and that row's biome stop. Order is unchanged
+	# (row-major, then tx, then card index), so the three grouped draw passes below
+	# batch exactly as before.
+	for c in ground_dressing_cards(base_iy, march):
+		var cry: int = c[3]
+		dirt_cards.append([Vector2((c[0] as Vector2).x, row_ys[cry] + (c[0] as Vector2).y),
+			c[1], c[2], row_cols[cry]])
 	# opt-loop: THREE passes over the same cards (all outer halos, then all inner halos, then
 	# all fills) instead of one interleaved pass — same idiom the sand/grass tile loop above
 	# already uses (see its comment on the batching trap this exact interleave falls into).
@@ -7092,6 +7251,59 @@ const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a":
 # changes the grid, not the exposure — every alpha tuned against this ground
 # (mottle 0.16, feathers, scorch) keeps its contrast.
 const GROUND_SHADE := 0.522
+# The pitch of the opaque sand BASE, in screen px — deliberately NOT 64 and not
+# any multiple of it. The base used to be painted as eight 64px rows of the
+# 128px sand tile at 0.5 scale: a 64x64 lattice in both axes, co-phased with the
+# 64px dressing cell above it, i.e. the ground repeated VERBATIM every 64px.
+# De-latticing the dressing (below) fixes the dressing's phase and measurably
+# does NOT fix that: on rendered frames the extra cards moved lag-64
+# autocorrelation by ~5%, because low-alpha soft feather barely masks grain.
+# At 96 the base shares no period with the dressing cell (lcm 192) and sand.png
+# still tiles seamlessly, so no band edge becomes visible — unlike the per-row
+# mirror variants this file already tried and rejected (see _paint_bg).
+# Rendered, tools/ground_lag.py on 01-jungle-firefight: lag-64 excess over the
+# neighbouring-lag floor +0.148 (x) / +0.144 (y) -> -0.001 / -0.003.
+# WHAT THIS IS NOT, ON ITS OWN: the pitch alone leaves the base ONE tiled
+# texture, so it still repeated verbatim — at 96 instead of 64, lag-96 excess
+# +0.128 / +0.117, i.e. the peak MOVED at essentially unchanged amplitude. That
+# is why the pitch is only half the fix; the other half is below.
+const GROUND_TILE_PX := 96
+# ...and the other half: the base paints from MORE THAN ONE source card. Each
+# variant is a 1024x128 STRIP of eight 128px slots, every slot a different
+# dihedral transform of sand.png, hash-selected per WORLD BAND
+# (ground_base_variant). This kills the repeat in both axes for zero extra draw
+# calls — the band count and the per-band draw are unchanged:
+#   x  a strip is 1024px native == 768px on screen at GROUND_TILE_PX/128, which
+#      is exactly the drawn width (-32..736), so the frame holds ONE strip and
+#      neighbouring 96px columns are different cards. There is no x period left.
+#   y  consecutive bands draw different strips, so the 96px vertical pitch
+#      carries different pixels each time.
+# Dihedral variants are safe HERE in a way the per-CELL mirrors this file tried
+# and rejected were not: a band is exactly one whole tile tall (the old failure
+# was a 64px cut of a 128px tile, which broke sand.png's own Y-wrap), and
+# sand.png is pure grain — 128x128, std 8.46/255, only 2.4% of its power below
+# |k|=2 — so a variant boundary is a decorrelation, not a luminance step.
+# Rendered, tools/ground_lag.py, HEAD -> pitch only -> pitch + strips:
+#   01-jungle-firefight  lag-96 x -0.002 -> +0.128 -> +0.004
+#                        lag-96 y -0.010 -> +0.117 -> +0.002
+#   02-tank-assault      lag-96 x -0.007 -> +0.136 -> +0.005
+#                        lag-96 y -0.001 -> +0.138 -> +0.007
+# with lag-64 staying flat and frame mean luma/stdev within 0.3%.
+const GROUND_BASE_VARIANTS := 8
+const GROUND_BASE_SLOTS := 8        # 128px dihedral slots per 1024px strip
+# Slot s of strip v gets dihedral transform (SLOT_DIHEDRAL[s] + v) % 8, where
+# 0-3 = rot 0/90/180/270 and +4 = mirrored first. Two properties matter and the
+# offset gives both for free: SLOT_DIHEDRAL is a permutation whose ADJACENT
+# entries differ (identical neighbours put the base straight back on a 96px
+# x-period), and every strip differs from every other in EVERY slot (equal
+# strips make the per-band choice a no-op). 8 variants, not 4, because the
+# residual is a birthday problem: with N strips two bands one pitch apart draw
+# the same one 1/N of the time, and that fraction IS the surviving lag-96 y
+# excess — measured +0.041 at N=4 on 02-tank-assault, +0.007 at N=8. It is
+# attenuated uniformly at every lag, not moved to a new one.
+# tests/test_assets.gd asserts all of this on the built pixels, not on the table.
+const GROUND_BASE_SLOT_DIHEDRAL := [0, 3, 6, 1, 4, 7, 2, 5]
+static var _sand_strips: Array[Texture2D] = []
 
 
 # --- Modular cover set (view-only). A wall is an EMPLACEMENT, not a tilemap
@@ -8932,7 +9144,7 @@ func _draw_water() -> void:
 				# setting), and the hand-guessed length()*3.0 half-width the centered helper's
 				# docstring says was removed from every other caller.
 				_world_label_centered("FORD OPEN", bx, wy + 10.0,
-					Art.safe(Color(0.72, 1.0, 0.92)))
+					Art.safe(Color(0.72, 1.0, 0.92)), Vector2(bx, wy))
 		# Deep bands periodically earn a second crossing which NEVER washes out.
 		# Mark that reliability explicitly instead of leaving an anonymous sand slit
 		# beside the elaborate cyclic bridge. Twin rails + bank chevrons remain a
@@ -8947,7 +9159,8 @@ func _draw_water() -> void:
 				Art.line(self, Vector2(second_x - 6.0, sy - 3.0), Vector2(second_x, sy), reliable, 2.0)
 				Art.line(self, Vector2(second_x, sy), Vector2(second_x + 6.0, sy - 3.0), reliable, 2.0)
 			var permanent_label: String = fv["second_label"]
-			_world_label_centered(permanent_label, second_x, wy - 8.0, reliable)
+			_world_label_centered(permanent_label, second_x, wy - 8.0, reliable,
+				Vector2(second_x, wy))
 		# A few deterministic rocks break up the deep water (never in the ford).
 		var wseed := Art.cell_hash(int(w["y"] / 4096) * 13, 7)
 		for r in 3:
@@ -8999,7 +9212,7 @@ func _draw_water() -> void:
 			# worst-case read for the tank driver it guides.
 			var flabel: String = fv["label"]
 			_world_label_centered(flabel, ford_left + ford_w / 2.0, wy - 8.0,
-				Art.safe(fv["label_col"]))
+				Art.safe(fv["label_col"]), Vector2(ford_left + ford_w / 2.0, wy))
 
 
 static func ford_visual(band_idx: int, ford_x: int, tick: int) -> Dictionary:
@@ -9431,13 +9644,13 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol)
+			_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol, ppos)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
-			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6))
+			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6), ppos)
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= pk["cost"]
@@ -9447,6 +9660,11 @@ func _draw_pickups() -> void:
 			# signposts, plated labels and floattext toasts.
 			var pdigits := str(pk["cost"]) if afford else (str(pk["cost"]) + "×")
 			var pwant := Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(pdigits, 9), 13.0)
+			# Same SUBJECT gate as _world_label: no price without its crate. Gating on
+			# `pwant` instead dropped the price off a VISIBLE crate in the top 21px of
+			# the frame, where the plate (34px above the crate) is entirely above y=0.
+			if not WORLD_LABEL_FRAME.has_point(ppos):
+				continue
 			var pgot := claim_label_slot(pwant, _label_slots)
 			_label_slots.append(pgot)
 			draw_rect(pgot, LABEL_PLATE_FILL)
@@ -9530,7 +9748,7 @@ func _draw_tanks() -> void:
 				_spr("fx_smoke", c + Vector2(randf_range(-4, 4), -12), 0.0, 0.3,
 					Color(0.5, 0.5, 0.5, 0.5))
 			if (Engine.get_physics_frames() / 14) % 2 == 0:
-				_world_label_centered("LOW FUEL", c.x, c.y - 26.0, CALLOUT_FUEL)
+				_world_label_centered("LOW FUEL", c.x, c.y - 26.0, CALLOUT_FUEL, c)
 		if t["burning"]:
 			# Vehicle fires burn dirty: dark oily smoke, not the pale dust puff.
 			_spr("fx_smoke", c + Vector2(4, -14), 0.0, 0.5, Color(0.3, 0.28, 0.26, 0.8))
@@ -10003,7 +10221,8 @@ func _draw_enemies() -> void:
 			else:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
-				_world_label_centered("RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos.x, epos.y - 18.0, pi_col)
+				_world_label_centered("RESCUE +%d¢" % SimWorld.PILOT_RANSOM, epos.x, epos.y - 18.0,
+					pi_col, epos)
 			Art.arc(self, epos, 10.0 + pi_pulse * 2.0, 0, TAU, 18,
 				Color(pi_col.r, pi_col.g, pi_col.b, 0.55 + pi_pulse * 0.3), 1.5)
 			if e.get("submerged", false):
@@ -10266,7 +10485,7 @@ func _draw_observer() -> void:
 	# _world_label's AA floor clipped the survivable part of the range to a 2% wobble nobody
 	# could see. The "look at me" motion is still there — it just lives entirely in the
 	# reticle above (tr/tcol, which pulse on `tp`), where it costs no legibility.
-	_world_label_centered("SILENCE THE SPOTTER", op.x, op.y - 20.0, CALLOUT_SPOTTER)
+	_world_label_centered("SILENCE THE SPOTTER", op.x, op.y - 20.0, CALLOUT_SPOTTER, op)
 
 
 func _draw_gunships() -> void:
@@ -10430,6 +10649,17 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 ## moving; transient combat text yields to whatever is already there.
 var _label_slots: Array[Rect2] = []
 
+## The visible playfield every world-space label must land inside. A label whose
+## want-rect misses this entirely names something the player cannot see, and is
+## SUPPRESSED rather than relocated (see _world_label).
+const WORLD_LABEL_FRAME := Rect2(0.0, 0.0, 640.0, 360.0)
+
+## Did the last _world_label call actually draw? The offset it returns is
+## Vector2.ZERO both for "placed exactly where it wanted" and for "suppressed",
+## so the companion-keycap sites (REVIVE / GET UP) read this instead, or they
+## draw an orphaned keycap beside a label that was never printed.
+var _world_label_placed := false
+
 ## This frame's player exclusion rects (player_label_exclusion per on-foot player),
 ## filled at the top of _draw() alongside the _label_slots reservations — the
 ## anchored fork signposts read them to YIELD the player by dissolving (they can't
@@ -10449,9 +10679,13 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	## block used, this is a MOVE of that logic, not a second system. Rows that would
 	## leave the 640x360 frame are skipped. What happens when the ladder exhausts
 	## depends on `droppable`: a PERSISTENT label (crate prices, identity labels)
-	## keeps its place, x-clamped, rather than being shoved off-screen — they are
-	## few per anchor and the geometry ratchet proves their frames resolve; a
-	## DROPPABLE transient (the floattext toast) is SUPPRESSED instead — the
+	## keeps SEARCHING — the same 11px lattice, nearest-first, across every
+	## remaining in-frame row, and only if the whole frame is genuinely full does it
+	## settle for the row of LEAST total overlap. It no longer "keeps its place,
+	## x-clamped": that clamp ignored `taken` outright and was the arbiter handing
+	## back occupied pixels 1,506 times in a 13,653-claim sweep (see the block at
+	## the tail of this function). A DROPPABLE transient (the floattext toast) is
+	## SUPPRESSED instead of relocated at all — the
 	## zero-area sentinel — because overflow printed on top of the plates is the
 	## exact pileup this arbiter exists to kill (Vampire Survivors/Gungeon: the
 	## overflow is dropped, never stacked). min_y floors the search: floattext
@@ -10483,12 +10717,49 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 				break
 		if not clash:
 			return cand
-	# Nowhere to go: a droppable transient is SUPPRESSED (the zero-area sentinel —
-	# the draw site skips plate, ink, slot and anchor), a persistent label keeps
-	# its place, x-clamped, rather than being shoved off-screen.
+	# Nowhere on the 13-row ladder: a droppable transient is SUPPRESSED (the
+	# zero-area sentinel — the draw site skips plate, ink, slot and anchor).
 	if droppable:
 		return Rect2()
-	return Rect2(x, clampf(rect.position.y, min_y, maxf(min_y, 360.0 - h)), w, h)
+	# A persistent label used to "keep its place, x-clamped" here:
+	#     return Rect2(x, clampf(rect.position.y, min_y, ...), w, h)
+	# — a return that ignores `taken` outright, i.e. THE ARBITER HANDING BACK
+	# OCCUPIED PIXELS, which is the one thing it exists not to do. It was not a
+	# rare corner either: the ladder above SKIPS every row that falls outside the
+	# 640x360 frame, so an anchor above the top of the screen has all 13 rows
+	# rejected and lands here, pinned at y = 0 on top of the HUD corner panel, the
+	# player sprite, and every sibling label that clamped to the same row. Measured
+	# over the 13,653-claim staged sweep in test_world_label_arbiter_never_returns_
+	# occupied_pixels: 1,506 collisions at 100% TEXT SIZE, 1,742 at 200%.
+	# So keep searching the SAME 11px lattice across every remaining in-frame row,
+	# nearest-first (the ladder's own ordering, just unbounded), and only if the
+	# whole frame really is full fall back to the row with the LEAST total overlap
+	# — never worse than the old clamp, and free in every case measured so far.
+	var py: float = rect.position.y
+	var k_lo := int(ceil((min_y - py) / 11.0))
+	var k_hi := int(floor((360.0 - h - py) / 11.0))
+	if k_lo > k_hi:
+		# Taller than the whole usable band — no in-frame row exists at any offset.
+		return Rect2(x, clampf(py, min_y, maxf(min_y, 360.0 - h)), w, h)
+	var best_y: float = clampf(py, min_y, maxf(min_y, 360.0 - h))
+	var best_ov := INF
+	var maxd: int = maxi(absi(k_lo), absi(k_hi))
+	for d in range(0, maxd + 1):
+		for k in ([0] if d == 0 else [d, -d]):
+			if k < k_lo or k > k_hi:
+				continue
+			var y2: float = py + float(k) * 11.0
+			var cand2 := Rect2(x, y2, w, h)
+			var cg2 := cand2.grow(-0.5)
+			var ov := 0.0
+			for t in taken:
+				ov += cg2.intersection(t.grow(-0.5)).get_area()
+			if ov <= 0.0:
+				return cand2
+			if ov < best_ov:
+				best_ov = ov
+				best_y = y2
+	return Rect2(x, best_y, w, h)
 
 
 ## a11y: the alpha floor an in-world callout's INK is held at. Same shape as
@@ -10536,9 +10807,10 @@ static func _callout_ink_alpha(a: float) -> float:
 ##
 ## Plate alpha is FLAT (as the boss label draws it) rather than tracking the ink — a plate
 ## that fades with a pulsing label puts the trough right back under AA.
-func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
+func _world_label(txt: String, pos: Vector2, col: Color, subject := Vector2.INF) -> Vector2:
 	var a := _callout_ink_alpha(col.a)
 	if a <= 0.0:
+		_world_label_placed = false
 		return Vector2.ZERO
 	var sz := Art.fs(8)
 	# Every world-space string goes through the arbiter, so a callout drops a row rather
@@ -10547,6 +10819,32 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 	# is how you get a label sitting beside its own background. The claim offset is
 	# returned so a companion glyph (the REVIVE keycap) rides the same dodge.
 	var want := _label_plate_rect(pos.x, pos.y, Art.tw(txt, sz), sz)
+	# A label about a subject the player CANNOT SEE must not be relocated into the
+	# frame. _draw_pickups' band cull (main.gd:9361) admits anchors up to 40px above
+	# the top edge, so a crate that is off-screen still emitted a capsule name; with
+	# the arbiter now searching the whole frame that name would be placed somewhere
+	# legible and WRONG — a floating PIERCE sitting on the soldier with no crate
+	# under it. Suppress instead. This deliberately overturns the keep-place-for-
+	# persistent-labels choice documented on claim_label_slot's exhaustion path, for
+	# the one case where the SUBJECT is off-frame.
+	#
+	# The gate is on the SUBJECT, never on the plate. Gating on the want-rect looks
+	# equivalent and is not: a priced crate sitting in the top ~21px of the frame is
+	# VISIBLE, but its plate (baseline 34px above the crate, 13px tall) is entirely
+	# above y=0 — so a plate gate silently dropped the price off a crate the player
+	# is looking at, and on the right half of that band there is not even a HUD panel
+	# over it. Callers whose anchor is offset from their subject pass `subject`;
+	# everyone whose anchor IS their subject lets it default to `pos`. Placing the
+	# plate is the arbiter's job, and it now searches the whole frame.
+	#
+	# Off-screen subjects already have a cue — the threat chevron / CALLOUT_OVERFLOW
+	# tail below. `_world_label_placed` lets the two companion-keycap call sites
+	# (REVIVE, GET UP) tell "placed at offset zero" from "suppressed", since the
+	# returned offset is Vector2.ZERO either way.
+	if not WORLD_LABEL_FRAME.has_point(pos if subject == Vector2.INF else subject):
+		_world_label_placed = false
+		return Vector2.ZERO
+	_world_label_placed = true
 	var got := claim_label_slot(want, _label_slots)
 	_label_slots.append(got)
 	draw_rect(got, LABEL_PLATE_FILL)
@@ -10562,8 +10860,9 @@ func _world_label(txt: String, pos: Vector2, col: Color) -> Vector2:
 ## glyphs at 200%; a baked -13/-38 does not). Same measure the already-correct downed-timer
 ## pair at _draw_players uses. Delegates — the claim still happens once, in _world_label —
 ## and returns its claim offset so a companion glyph can ride the same dodge.
-func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color) -> Vector2:
-	return _world_label(txt, Vector2(cx - Art.tw(txt, Art.fs(8)) / 2.0, baseline_y), col)
+func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color,
+		subject := Vector2.INF) -> Vector2:
+	return _world_label(txt, Vector2(cx - Art.tw(txt, Art.fs(8)) / 2.0, baseline_y), col, subject)
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
@@ -11235,7 +11534,8 @@ func _draw_players() -> void:
 					# hidden exactly when you're short of it, so "feed the war
 					# chest" had no answer to "with how much?". Warm red, no
 					# pay-from-here dashes (you can't).
-					_world_label_centered("REVIVE %d" % cost, pos.x, pos.y - 16.0, Art.safe(Color(1.0, 0.5, 0.4)))
+					_world_label_centered("REVIVE %d" % cost, pos.x, pos.y - 16.0,
+						Art.safe(Color(1.0, 0.5, 0.4)), pos)
 					continue
 				Art.dashed_line(self, pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
 				var rtxt := "REVIVE %d" % cost
@@ -11252,10 +11552,12 @@ func _draw_players() -> void:
 				var rcw := Art.glyph_cap_w("revive", 10.0, bind("revive"),
 					pad_bind_for_glyph("revive", i), i == 1)
 				var runit := rw + HudIcons.GLYPH_GAP + rcw
-				var roff := _world_label(rtxt, pos + Vector2(-runit / 2.0, -16), Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph_left(self, "revive", pos.x - runit / 2.0 + rw + HudIcons.GLYPH_GAP + roff.x,
-					pos.y - 19 + roff.y, 10.0, Color.WHITE, i == 1,
-					bind("revive"), pad_bind_for_glyph("revive", i))
+				var roff := _world_label(rtxt, pos + Vector2(-runit / 2.0, -16),
+					Art.safe(Color(0.5, 1.0, 0.6)), pos)
+				if _world_label_placed:
+					Art.draw_glyph_left(self, "revive", pos.x - runit / 2.0 + rw + HudIcons.GLYPH_GAP + roff.x,
+						pos.y - 19 + roff.y, 10.0, Color.WHITE, i == 1,
+						bind("revive"), pad_bind_for_glyph("revive", i))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
 			# responsive while arrow-key 45° pops still glide instead of snapping.
@@ -11394,7 +11696,7 @@ func _draw_players() -> void:
 					var pi_along := pi_rel.dot(aim)
 					if pi_along > 0.0 and pi_along < 160.0 and absf(pi_rel.cross(aim)) < 12.0:
 						var hfp := pos + aim * 27.0
-						_world_label_centered("AIM AWAY", hfp.x, hfp.y - 14.0, CALLOUT_ALERT)
+						_world_label_centered("AIM AWAY", hfp.x, hfp.y - 14.0, CALLOUT_ALERT, hfp)
 						break
 			# Claymore pre-plant ghost (9/9 panel consensus): WHERE the charge
 			# will land if INTERACT fires now — ghost sprite + the 9px trigger
@@ -11537,7 +11839,7 @@ func _draw_players() -> void:
 				var bcol := Color(0.6, 0.9, 1.0).lerp(Color(1.0, 0.8, 0.35), burg)
 				if not free_rally:
 					bcol = Art.warn(Color(1.0, 0.35, 0.3))
-				_world_label(btxt, pos + Vector2(-brw / 2.0, -26), bcol)
+				_world_label(btxt, pos + Vector2(-brw / 2.0, -26), bcol, pos)
 			elif not sim.last_stand:
 				# No countdown means the chest CAN cover this body — and the sim now
 				# lets a downed player pay from the floor themselves instead of
@@ -11553,10 +11855,12 @@ func _draw_players() -> void:
 				var gcw := Art.glyph_cap_w("revive", 9.0, bind("revive"),
 					pad_bind_for_glyph("revive", i), i == 1)
 				var gunit := grw + HudIcons.GLYPH_GAP + gcw
-				var goff := _world_label(gtxt, pos + Vector2(-gunit / 2.0, -26), Art.safe(Color(0.6, 1.0, 0.7)))
-				Art.draw_glyph_left(self, "revive", pos.x - gunit / 2.0 + grw + HudIcons.GLYPH_GAP + goff.x,
-					pos.y - 29 + goff.y, 9.0, Color.WHITE, i == 1,
-					bind("revive"), pad_bind_for_glyph("revive", i))
+				var goff := _world_label(gtxt, pos + Vector2(-gunit / 2.0, -26),
+					Art.safe(Color(0.6, 1.0, 0.7)), pos)
+				if _world_label_placed:
+					Art.draw_glyph_left(self, "revive", pos.x - gunit / 2.0 + grw + HudIcons.GLYPH_GAP + goff.x,
+						pos.y - 29 + goff.y, 9.0, Color.WHITE, i == 1,
+						bind("revive"), pad_bind_for_glyph("revive", i))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
