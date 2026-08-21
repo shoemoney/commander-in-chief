@@ -5219,7 +5219,9 @@ func _howto_large_entries(tab: int) -> Array:
 func _howto_large_rows(tab: int) -> Array:
 	var rows: Array = []
 	var f := Art.font()
-	for entry in _howto_large_entries(tab):
+	var entries := _howto_large_entries(tab)
+	for ei in entries.size():
+		var entry: Dictionary = entries[ei]
 		var kind: String = entry["kind"]
 		var design_size: int = int(entry.get("size", 11))
 		var size := Art.fs(design_size)
@@ -5246,8 +5248,22 @@ func _howto_large_rows(tab: int) -> Array:
 				"height": line_h + (6.0 if i == lines.size() - 1 else 0.0),
 				"col": Color(1.0, 0.72, 0.42) if kind == "heading" else Color(0.9, 0.92, 0.82),
 				"marker": marker if i == 0 else "", "marker_kind": marker_kind,
-				"marker_tint": marker_tint})
+				"marker_tint": marker_tint,
+				# Provenance for the pager: which semantic entry this visual line came
+				# from, and whether the line closes a sentence. A leaf that ends inside
+				# an entry is only readable if it ends on a sentence boundary.
+				"entry": ei, "ends_sentence": _ends_sentence(lines[i])})
 	return rows
+
+
+## True when a drawn line closes a sentence (or a heading's colon). The pager uses
+## this to pick leaf breaks; trailing closing punctuation is stepped over so
+## `...that shape."` still reads as a finished sentence.
+static func _ends_sentence(s: String) -> bool:
+	var t := s.strip_edges()
+	while t.length() > 0 and t.substr(t.length() - 1, 1) in [")", "\"", "'", "\u2019", "\u201d", "*"]:
+		t = t.substr(0, t.length() - 1)
+	return t != "" and t.substr(t.length() - 1, 1) in [".", "!", "?", ":", "\u2026"]
 
 
 func _howto_large_pages(tab: int) -> Array:
@@ -5255,17 +5271,52 @@ func _howto_large_pages(tab: int) -> Array:
 	# The pager's 20px mouse targets and baseline occupy the strip immediately
 	# above BACK. Content clears it by four pixels at every supported scale.
 	var capacity := (_howto_nav_y() - 16.0) - top
+	# c4-19: pack by SEMANTIC ENTRY, not by visual line. The line-greedy packer this
+	# replaces cut wherever a leaf happened to fill, so at 200% the CONTROLS tab ended
+	# leaf 1/4 on "gun fires on its own \u2014" and 26 leaves across 16 of the 20 (tab x
+	# enlarged scale) combos stopped mid-sentence (measured by restoring the greedy
+	# packer under tests/test_menu_layout.gd). An entry is placed whole when it fits; an entry
+	# taller than a whole leaf is cut at the LAST line that closes a sentence, and only
+	# falls back to a line cut when no sentence boundary fits at all (one sentence longer
+	# than a leaf \u2014 unavoidable, and it still loses nothing).
+	var rows := _howto_large_rows(tab)
 	var pages: Array = []
 	var page: Array = []
 	var used := 0.0
-	for row in _howto_large_rows(tab):
-		var h: float = row["height"]
-		if not page.is_empty() and used + h > capacity:
+	var i := 0
+	while i < rows.size():
+		var j := i
+		var group_h := 0.0
+		while j < rows.size() and int(rows[j]["entry"]) == int(rows[i]["entry"]):
+			group_h += float(rows[j]["height"])
+			j += 1
+		if not page.is_empty() and used + group_h > capacity:
 			pages.append(page)
 			page = []
 			used = 0.0
-		page.append(row)
-		used += h
+		if used + group_h <= capacity or j - i == 1:
+			for k in range(i, j):
+				page.append(rows[k])
+			used += group_h
+			i = j
+			continue
+		var fit := 0
+		var cut := 0
+		var h := 0.0
+		for k in range(i, j):
+			h += float(rows[k]["height"])
+			if used + h > capacity:
+				break
+			fit = k - i + 1
+			if bool(rows[k]["ends_sentence"]):
+				cut = fit
+		var take: int = cut if cut > 0 else maxi(fit, 1)
+		for k in range(i, i + take):
+			page.append(rows[k])
+		pages.append(page)
+		page = []
+		used = 0.0
+		i += take
 	if not page.is_empty():
 		pages.append(page)
 	if pages.is_empty():

@@ -446,8 +446,140 @@ func test_campaign_never_roots_a_shooter_above_the_reachable_band() -> void:
 	var gsim := SimWorld.new(7, 1)
 	gsim.gates.append({"y": gsim.camera_top + 60 * SimWorld.F_ONE, "open": false,
 		"b1": {}, "b2": {}, "boss": {}})
-	Runner.T.ok(gsim._rooted_spawn_y() >= gsim.camera_top + 60 * SimWorld.F_ONE + SimWorld.GATE_BLOCK_PAD,
-		"a rooted spawn never lands north of a closed gate's wall")
+	# c4-19: the row is now x-derived, so one call proves nothing. Sweep every x the
+	# spawners can draw (rng.range_i(24, 616)) and assert the clamp holds for all of
+	# them — strictly stronger than the single call this replaces.
+	var wall: int = gsim.camera_top + 60 * SimWorld.F_ONE + SimWorld.GATE_BLOCK_PAD
+	var breaches := 0
+	var spread := {}
+	for px in range(24, 617):
+		var ry: int = gsim._rooted_spawn_y(px * SimWorld.F_ONE)
+		if ry < wall:
+			breaches += 1
+		spread[(ry - gsim.camera_top) / SimWorld.F_ONE] = 1
+	Runner.T.eq(breaches, 0, "no rooted spawn x lands north of a closed gate's wall (593 x values)")
+	# ...and the same sweep with NO gate must stay inside the reachable band.
+	var osim := SimWorld.new(7, 1)
+	var out := 0
+	for px in range(24, 617):
+		var oy: int = osim._rooted_spawn_y(px * SimWorld.F_ONE)
+		if oy < osim.camera_top + 16 * SimWorld.F_ONE or oy > osim.camera_top + SimWorld.CAMERA_BAND_BOTTOM:
+			out += 1
+	Runner.T.eq(out, 0, "every rooted spawn row sits inside the reachable band (593 x values)")
+
+
+# c4-19: ROOTED UNITS MAY NOT ALL BE BORN ON ONE PIXEL ROW.
+# _rooted_spawn_y() returned a CONSTANT camera_top + 52, and it is the single seam
+# every rooted birth in the game routes through — the campaign field spawner and the
+# endless wave spawner, for all three of ROOTED_KINDS. Measured at HEAD over 8 seeds
+# x 3000 ticks pinned to wave 12: 316 births, ONE distinct row, 100% of them on it,
+# and 33.9% landing under the 1P HUD corner plate. The set comes from ROOTED_KINDS,
+# so a fourth rooted archetype is covered the day it lands.
+#
+# This does NOT overturn 36dcff1's reason for +52 (in-band, reachable, clear of the
+# authored kind-0 rock) — only its CONSTANCY. test_rooted_spawns_land_where_the_player
+# _can_reach_them above still pins the band; this pins the spread inside it.
+func test_rooted_spawns_do_not_share_one_row() -> void:
+	var idle := SimInput.new()
+	var rows := {}
+	var per_kind := {}
+	var kind_births := {}
+	var total := 0
+	var in_plate := 0
+	for s in [7, 23, 0xC0FFEE, 101, 5, 88, 1234, 31337]:
+		var sim := SimWorld.new(s, 1, "endless")
+		sim.step([idle])
+		var seen := {}
+		for t in 3000:
+			# Pin the wave so composition stays on the band that fields all three
+			# rooted kinds; a drifting wave under-samples them badly (30 births).
+			sim.wave = 12
+			sim.wave_pending = maxi(sim.wave_pending, 1)
+			sim.step([idle])
+			for e in sim.enemies:
+				if not SimWorld.ROOTED_KINDS.has(e["kind"]):
+					continue
+				var key := "%d,%d,%s" % [e["x"], e["y"], e["kind"]]
+				if seen.has(key):
+					continue
+				seen[key] = true
+				total += 1
+				var row: int = (e["y"] - sim.camera_top) / SimWorld.F_ONE
+				rows[row] = int(rows.get(row, 0)) + 1
+				var k: String = e["kind"]
+				if not per_kind.has(k):
+					per_kind[k] = {}
+				per_kind[k][row] = 1
+				kind_births[k] = int(kind_births.get(k, 0)) + 1
+				# The 1P HUD corner plate. Derived from hud.gd, never from literals.
+				# panel_bottom() needs a live main+sim, so recompose the value it
+				# returns for a 1P ENDLESS run from the SAME hud.gd constants it sums:
+				# header + one player row + the shop-preview strip, which endless is
+				# always eligible for and which reserves its row for the whole run.
+				# Never a literal — a chrome resize moves this band with it.
+				var plate_bottom: float = HudIcons.PLATE_ORIGIN + HudIcons.HEAD_H + HudIcons.ROW_H * 2.0
+				if float(row) < plate_bottom and (e["x"] / SimWorld.F_ONE) < HudIcons.PLATE_ORIGIN + HudIcons.PLATE_MIN_W:
+					in_plate += 1
+	# Anti-under-sampling: a ratchet whose window is thinner than the defect is not a
+	# ratchet. HEAD's own window produced 316 births with all three kinds present.
+	Runner.T.ok(total >= 40, "the harvest is large enough to measure a spread (%d rooted births)" % total)
+	for k in SimWorld.ROOTED_KINDS:
+		Runner.T.ok(int(kind_births.get(k, 0)) >= 5,
+			"'%s' is actually represented in the harvest (%d births)" % [k, int(kind_births.get(k, 0))])
+		Runner.T.ok(int(per_kind.get(k, {}).size()) >= 3,
+			"'%s' is born on at least 3 distinct rows (got %d)" % [k, int(per_kind.get(k, {}).size())])
+	Runner.T.ok(rows.size() >= 8,
+		"rooted units do not materialise on one row (%d distinct rows over %d births)" % [rows.size(), total])
+	var worst := 0
+	for r in rows:
+		worst = maxi(worst, int(rows[r]))
+	Runner.T.ok(float(worst) <= 0.35 * float(total),
+		"no single row owns the spawn (busiest row holds %d of %d = %.1f%%)"
+			% [worst, total, 100.0 * float(worst) / float(maxi(total, 1))])
+	Runner.T.ok(float(in_plate) <= 0.10 * float(total),
+		"rooted units rarely materialise under the 1P HUD plate (%d of %d = %.1f%%)"
+			% [in_plate, total, 100.0 * float(in_plate) / float(maxi(total, 1))])
+
+
+# c4-19: EVERY ROOTED KIND ANNOUNCES ITS ARRIVAL.
+# The sim already carries three arrival beats with full view treatment
+# (observer_spawn, flank_breach, endless_boss). No rooted spawn site emitted one, so
+# a nest, mast or ghillie simply existed on the next frame with no trigger the view
+# could hang a fade-in on. Events are rebuilt every step() and excluded from
+# checksum(), so this is golden-safe by construction.
+func test_every_rooted_kind_announces_its_arrival() -> void:
+	var idle := SimInput.new()
+	for k in SimWorld.ROOTED_KINDS:
+		var sim := SimWorld.new(9, 1, "endless")
+		sim.step([idle])
+		var before: int = sim.enemies.size()
+		var x := 300 * SimWorld.F_ONE
+		var y := sim.camera_top + 120 * SimWorld.F_ONE
+		match k:
+			"mg_nest": sim._spawn_mg_nest(x, y)
+			"broadcast": sim._spawn_broadcast(x, y)
+			_: sim._spawn_special(x, y, k)
+		Runner.T.eq(sim.enemies.size(), before + 1, "'%s' spawner produced exactly one unit" % k)
+		var born: Dictionary = sim.enemies[sim.enemies.size() - 1]
+		var hit := {}
+		for ev in sim.events:
+			if ev.get("t", "") == "rooted_spawn" and ev.get("kind", "") == k:
+				hit = ev
+		Runner.T.ok(not hit.is_empty(), "'%s' emits a rooted_spawn arrival event" % k)
+		if hit.is_empty():
+			continue
+		Runner.T.eq(int(hit["x"]), int(born["x"]), "'%s' arrival event carries the born x" % k)
+		Runner.T.eq(int(hit["y"]), int(born["y"]), "'%s' arrival event carries the born y" % k)
+	# ...and a WALKER does not. The beat means "a gun just appeared where you are",
+	# not "an enemy spawned"; firing it for the roster would make it noise.
+	var w := SimWorld.new(9, 1, "endless")
+	w.step([SimInput.new()])
+	w._spawn_special(300 * SimWorld.F_ONE, w.camera_top + 120 * SimWorld.F_ONE, "sniper")
+	var walker := false
+	for ev in w.events:
+		if ev.get("t", "") == "rooted_spawn":
+			walker = true
+	Runner.T.ok(not walker, "a non-rooted special does not claim a rooted arrival")
 
 
 func test_rend_unlocks_exactly_where_shieldmen_can_exist() -> void:

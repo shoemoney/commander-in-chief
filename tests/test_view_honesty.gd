@@ -34,6 +34,28 @@ func _view_src() -> String:
 	return FileAccess.get_file_as_string("res://src/main.gd")
 
 
+func _call_src(src: String, at: int) -> String:
+	## The exact text of the call that starts at `at`, paren-balanced. A source-grep
+	## over a WIDE WINDOW around a neighbouring call is how a half-applied effect
+	## passes its own ratchet (c4-19: the nest's gun ramped, its sandbag base did
+	## not, and a 1400-char window around `_spr("mg_stand"` never noticed).
+	var i := src.find("(", at)
+	if i < 0:
+		return ""
+	var depth := 0
+	var j := i
+	while j < src.length():
+		var c := src[j]
+		if c == "(":
+			depth += 1
+		elif c == ")":
+			depth -= 1
+			if depth == 0:
+				return src.substr(at, j - at + 1)
+		j += 1
+	return src.substr(at, 240)
+
+
 func _idle() -> Array[SimInput]:
 	var inputs: Array[SimInput] = []
 	inputs.append(SimInput.new())
@@ -1958,6 +1980,89 @@ func test_the_blind_shell_cue_names_the_cover_that_actually_hid_you() -> void:
 		"the concealment teach fired by GRASS must not tell the player it was smoke (got '%s')" % line)
 	Runner.T.ok(line.contains("GRASS"), "it names the cover that actually hid them (got '%s')" % line)
 	stub.free()
+
+
+# c4-19: A ROOTED UNIT FADES IN INSTEAD OF POPPING.
+# mg_nest / broadcast / ghillie never move, so before this they simply EXISTED on
+# the next frame at full opacity, mid-screen, with no arrival beat — the sim emitted
+# nothing the view could hang one on. The sim now emits `rooted_spawn`; this pins the
+# VIEW half, which the event-coverage gate cannot reach (that gate only sees event
+# types the determinism torture emits, and the torture produces ZERO rooted births
+# in either mode — measured).
+#
+# Fairness: the ramp must never eat into the player's warning. Measured on this tree,
+# a nest's birth -> aim-lock is 30 ticks and birth -> first round is 60, with the last
+# 30 drawing the amber telegraph lane. The bound below is read off the SIM constant,
+# not off a literal, so a shortened reload drags the ramp down with it.
+func test_a_rooted_unit_fades_in_instead_of_popping() -> void:
+	Runner.T.ok(Main.ROOTED_ARRIVE_FRAMES <= SimWorld.MG_NEST_AIM_TICKS,
+		"the arrival ramp (%d frames) finishes inside the nest's pre-telegraph reload (%d ticks)"
+			% [Main.ROOTED_ARRIVE_FRAMES, SimWorld.MG_NEST_AIM_TICKS])
+	Runner.T.ok(Main.rooted_arrival_alpha(0.0) < 0.35,
+		"a rooted unit's first drawn frame is faint, not solid (alpha %.2f)" % Main.rooted_arrival_alpha(0.0))
+	Runner.T.eq(Main.rooted_arrival_alpha(float(Main.ROOTED_ARRIVE_FRAMES)), 1.0,
+		"the ramp reaches full opacity exactly at the window")
+	Runner.T.eq(Main.rooted_arrival_alpha(999.0), 1.0,
+		"a unit with no recorded arrival (missed event, loaded mid-run) draws normally")
+
+	for k in SimWorld.ROOTED_KINDS:
+		var sim := SimWorld.new(11, 1, "endless")
+		sim.step([SimInput.new()])
+		var stub := Main.new()
+		stub._menu.mode = GameMenu.Mode.HIDDEN
+		stub.sim = sim
+		var fx_before: int = stub._fx.size()
+		sim.events = [{"t": "rooted_spawn", "x": 300 * SimWorld.F_ONE,
+			"y": sim.camera_top + 150 * SimWorld.F_ONE, "kind": k}]
+		stub._consume_events()
+		Runner.T.ok(stub._fx.size() > fx_before,
+			"'%s' arrival spawns view FX (%d -> %d)" % [k, fx_before, stub._fx.size()])
+		var key := "%d,%d" % [300 * SimWorld.F_ONE, sim.camera_top + 150 * SimWorld.F_ONE]
+		if k == "broadcast":
+			# The mast is deliberately NOT ramped: it already announces itself on its
+			# first stepped tick (fire_cd == 0 at birth -> `broadcast_pulse`), and its
+			# draw branch reads no ramp. A key registered for it would be state nothing
+			# consumes — which is worse than none, because THIS test would then report
+			# "broadcast registers its dig-in ramp" while the mast never faded a pixel.
+			Runner.T.ok(not stub._rooted_arrive.has(key),
+				"'broadcast' registers NO ramp key — its arrival beat is the tick-1 broadcast_pulse, and its draw branch reads no ramp")
+		else:
+			Runner.T.ok(stub._rooted_arrive.has(key),
+				"'%s' arrival registers its dig-in ramp under the unit's stable x,y key" % k)
+		stub.free()
+
+	# ...and the draw branches must actually CONSULT the ramp. A registered age that
+	# nothing reads is the `claim_label_slot` failure: green signature, unchanged screen.
+	var src := _view_src()
+	for branch in ["mg_stand", "ghillie"]:
+		var at := src.find('_spr("%s"' % branch)
+		Runner.T.ok(at >= 0, "the %s draw branch is still findable" % branch)
+		if at < 0:
+			continue
+		var lo := maxi(0, at - 1400)
+		Runner.T.ok(src.substr(lo, at - lo + 400).contains("rooted_arrival_alpha"),
+			"the %s draw branch fades its sprite in through rooted_arrival_alpha" % branch)
+
+	# ...and EVERY element of the emplacement, at the CALL SITE. The nest is two
+	# sprites: measured off the source PNGs through tools/measure_hitbox.gd's formula
+	# (imported px x art SCALE x call-site spr_scale, opaque-alpha bbox), the sandbag
+	# ring draws 33.2 x 16.6 px / 325 px^2 and mg_stand 24.0 x 35.4 px / 477 px^2 — so
+	# the bags are 41% of the emplacement's opaque pixels and its WIDEST element. A
+	# ramp on the gun alone still materialises the nest, and the window grep above
+	# passes anyway, because the sandbag call is INSIDE the same 1400 chars.
+	# Anchored INSIDE the mg_nest branch: three other `sandbag_beige` calls draw wreck
+	# debris earlier in the file, and a bare find() pins one of those instead.
+	var nest_at := src.find('elif e["kind"] == "mg_nest":')
+	Runner.T.ok(nest_at >= 0, "the mg_nest draw branch is still findable")
+	var sb := src.find('_spr("sandbag_beige"', nest_at) if nest_at >= 0 else -1
+	Runner.T.ok(sb >= 0, "the mg_nest sandbag draw call is still findable")
+	if sb >= 0:
+		var sb_call := _call_src(src, sb)
+		Runner.T.ok(sb_call.contains("n_arr"),
+			"the sandbag base rides the SAME dig-in ramp as the gun, at its own call site: %s" % sb_call)
+		var ramp_at := src.find("var n_arr := rooted_arrival_alpha(", nest_at)
+		Runner.T.ok(ramp_at >= 0 and ramp_at < sb,
+			"the nest's ramp is computed from rooted_arrival_alpha BEFORE the sandbag call (ramp at %d, call at %d)" % [ramp_at, sb])
 
 
 func test_smoke_hint_names_the_nest_that_still_aims() -> void:

@@ -7426,6 +7426,140 @@ func test_howto_large_text_every_scale_reflows_without_clipping_or_unreachable_r
 	Art.text_scale = prior_scale
 
 
+# c4-19: THE FIELD MANUAL MAY NOT END A LEAF MID-SENTENCE.
+# Reported instance: at 200% TEXT SIZE, tab 0 leaf 1 of 4 ended on
+#   "gun fires on its own \u2014"
+# and stopped at the bottom panel margin. The CLASS is `_howto_large_pages`,
+# which packed leaves by VISUAL LINE, so ANY wrapped entry was cut at whatever
+# word the leaf happened to fill on. Measured by restoring the line-greedy packer
+# and running this test: 26 offending leaves across 16 of the 20 (tab x enlarged
+# scale) combos — 125%: 3 tabs, 150%: 3, 175%: 5, 200%: 5. CONTROLS and SPECIALS
+# are clean at 125%, so it is NOT every tab at every rung; the reported instance
+# is the 200%/CONTROLS leaf 1/4 line above, which that run reproduces verbatim.
+#
+# A leaf may end in exactly three places, and this is the whole rule:
+#   (a) on a sentence boundary;
+#   (b) at the END of a semantic entry \u2014 the ENEMIES bullets carry no terminal
+#       period ("...contact still kills"), and breaking between bullets reads fine;
+#   (c) inside an entry that is ITSELF taller than a whole leaf, where SOME cut is
+#       forced. That exemption is not a rubber stamp: such a leaf must still be cut
+#       at the LAST sentence boundary available inside it, so no row of the split
+#       entry before the cut may close a sentence.
+# The loops derive their sets from GameMenu.HOWTO_TABS and main.gd's TEXT_SCALE_*,
+# so a sixth tab, new copy, or a new size rung is covered the day it lands.
+func test_manual_never_ends_a_leaf_mid_sentence() -> void:
+	var prior_scale := Art.text_scale
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var bad: Array = []
+	var early: Array = []
+	var combos := 0
+	var leaves := 0
+	var forced := 0
+	for pct in range(MainScript.TEXT_SCALE_MIN + MainScript.TEXT_SCALE_STEP, MainScript.TEXT_SCALE_MAX + 1, MainScript.TEXT_SCALE_STEP):
+		Art.text_scale = float(pct) / 100.0
+		for tab in Menu.HOWTO_TABS.size():
+			m._howto_page = tab
+			m._howto_endless_page = 0
+			combos += 1
+			var capacity: float = (m._howto_nav_y() - 16.0) - Menu.CONTENT_BODY_Y
+			# Per-entry total height, measured off the SAME rows the pager consumes.
+			var entry_h := {}
+			var entry_last := {}
+			var rows: Array = m._howto_large_rows(tab)
+			for r in rows:
+				var e: int = int(r["entry"])
+				entry_h[e] = float(entry_h.get(e, 0.0)) + float(r["height"])
+			for ri in rows.size():
+				entry_last[int(rows[ri]["entry"])] = ri
+			var pages: Array = m._howto_large_pages(tab)
+			leaves += pages.size()
+			var consumed := 0
+			for i in pages.size():
+				var leaf: Array = pages[i]
+				var last: Dictionary = leaf[leaf.size() - 1] if not leaf.is_empty() else {}
+				consumed += leaf.size()
+				if i == pages.size() - 1 or leaf.is_empty():
+					continue                       # the final leaf ends where the copy ends
+				var tag := "%d%%/%s leaf %d/%d" % [pct, Menu.HOWTO_TABS[tab], i + 1, pages.size()]
+				var le: int = int(last["entry"])
+				if bool(last["ends_sentence"]):
+					continue                       # (a) sentence boundary
+				if consumed - 1 == int(entry_last[le]):
+					continue                       # (b) the entry ended here
+				if float(entry_h[le]) <= capacity:
+					bad.append("%s ends on '%s' (entry %.0fpx fits the %.0fpx leaf)"
+						% [tag, str(last["text"]), float(entry_h[le]), capacity])
+					continue
+				# (c) forced split \u2014 but it must be the LAST boundary that fitted.
+				forced += 1
+				for k in range(leaf.size() - 1):
+					var r2: Dictionary = leaf[k]
+					if int(r2["entry"]) == le and bool(r2["ends_sentence"]):
+						early.append("%s cut after '%s' though '%s' closed a sentence earlier in the leaf"
+							% [tag, str(last["text"]), str(r2["text"])])
+						break
+	Art.text_scale = prior_scale
+	Runner.T.ok(combos == Menu.HOWTO_TABS.size() * 4,
+		"the sweep covers every tab at every enlarged rung (%d combos, %d leaves, %d forced splits)"
+			% [combos, leaves, forced])
+	Runner.T.ok(bad.is_empty(),
+		"no manual leaf ends mid-sentence inside an entry that would have fit (%d offenders)%s"
+			% [bad.size(), "" if bad.is_empty() else ": " + "; ".join(bad)])
+	Runner.T.ok(early.is_empty(),
+		"every forced split lands on the last sentence boundary that fitted (%d offenders)%s"
+			% [early.size(), "" if early.is_empty() else ": " + "; ".join(early)])
+	m.free()
+	stub.free()
+
+
+# c4-19 companion: the entry-granular pager must not "fix" a truncated leaf by
+# DROPPING the overflow. Concatenating every leaf must reproduce _howto_large_rows
+# exactly \u2014 same rows, same order, same count \u2014 and no leaf may exceed the
+# measured capacity unless it holds a single over-tall row.
+func test_manual_pagination_loses_no_glyph() -> void:
+	var prior_scale := Art.text_scale
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	for pct in range(MainScript.TEXT_SCALE_MIN + MainScript.TEXT_SCALE_STEP, MainScript.TEXT_SCALE_MAX + 1, MainScript.TEXT_SCALE_STEP):
+		Art.text_scale = float(pct) / 100.0
+		for tab in Menu.HOWTO_TABS.size():
+			m._howto_page = tab
+			m._howto_endless_page = 0
+			var tag := "%d%%/%s" % [pct, Menu.HOWTO_TABS[tab]]
+			var rows: Array = m._howto_large_rows(tab)
+			var pages: Array = m._howto_large_pages(tab)
+			var capacity: float = (m._howto_nav_y() - 16.0) - Menu.CONTENT_BODY_Y
+			Runner.T.ok(pages.size() >= 1, "%s: at least one leaf" % tag)
+			var flat: Array = []
+			for i in pages.size():
+				var leaf: Array = pages[i]
+				var used := 0.0
+				for row in leaf:
+					flat.append(row)
+					used += float(row["height"])
+				Runner.T.ok(used <= capacity + 0.5 or leaf.size() <= 1,
+					"%s leaf %d/%d fits the content well (%.1f <= %.1f)" % [tag, i + 1, pages.size(), used, capacity])
+			Runner.T.eq(flat.size(), rows.size(), "%s: pagination keeps every measured row" % tag)
+			var mismatch := -1
+			for i in mini(flat.size(), rows.size()):
+				if str(flat[i]["text"]) != str(rows[i]["text"]):
+					mismatch = i
+					break
+			Runner.T.eq(mismatch, -1, "%s: leaves replay the rows in source order" % tag)
+	Art.text_scale = prior_scale
+	m.free()
+	stub.free()
+
+
 func test_howto_large_text_leaf_controls_keep_keyboard_controller_and_mouse_parity() -> void:
 	var prior_scale := Art.text_scale
 	Art.text_scale = 2.0

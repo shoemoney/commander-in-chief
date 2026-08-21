@@ -106,6 +106,14 @@ var _hs_latch := [{"grenade": false, "roll": false}, {"grenade": false, "roll": 
 var _last_inputs: Array[SimInput] = []   # last tick's sim inputs — ready-up tally (view-only)
 var _flash_alpha := 0.0
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
+# c4-19: rooted units (mg_nest / broadcast / ghillie) never move, so before this they
+# simply EXISTED at full opacity on the frame after their birth, mid-screen, with no
+# arrival beat at all. `rooted_spawn` gives the view a trigger; this maps a unit's
+# stable "x,y" sim key (rooted kinds never write x or y after birth — the same keying
+# _endless_boss_key uses) to the age in frames of its dig-in ramp. VIEW-ONLY: no sim
+# state, no checksum exposure, and a unit with no entry just draws normally.
+var _rooted_arrive := {}
+const ROOTED_ARRIVE_FRAMES := 24   # < MG_NEST_AIM_TICKS (30): the ramp finishes before the amber telegraph even starts
 # opt-loop: reused per-frame classification of _fx by glow/non-glow kind — see
 # _draw_fx() header comment. Rebuilt once per _draw() call, consumed by
 # _draw_fx (alpha) and _draw_glow (glow, a separate draw callback that always
@@ -516,6 +524,9 @@ const _EVENT_SOUND := {
 	"tank_crew": ["tank_board", -5.0, 1.5],   # same clunk a fifth up: mounting, but not YOUR controls
 	"tank_ignite": ["alarm", -4.0, 1.1],
 	"observer_spawn": ["alarm", -3.0, 1.0],
+	# c4-19: a rooted unit digging in. Deliberately quiet and low — three of these can
+	# land in one endless wave, and the nest is not a boss. No banner, for the same reason.
+	"rooted_spawn": ["alarm_low", -15.0, 0.55],
 	"strike_warn": ["whistle", -6.0, 1.0],
 	"enemy_shot": ["enemy_shot", -12.0, 1.0],
 	"rifleman_windup": ["click_dry", -18.0, 1.4],   # subtle weapon-ready tick; the painted lane carries the warning
@@ -1600,6 +1611,7 @@ func _reset() -> void:
 	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 	_flash_alpha = 0.0
 	_fx.clear()
+	_rooted_arrive.clear()   # c4-19: a restart mid-ramp must not inherit the old run's dig-in ages
 	_mote_count = 0
 	_pending_blasts.clear()
 	_scorch.clear()
@@ -3286,6 +3298,20 @@ func _consume_events() -> void:
 			"courier_escape":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.03, "text": "GOT AWAY!", "col": Color(0.85, 0.78, 0.5)})
+			"rooted_spawn":
+				# Dust kicks where it dug in, and a brief low light. No banner and no
+				# VO: this fires up to three times a wave, and a persistent bark for a
+				# grunt-tier emplacement is noise, not a beat.
+				# The BROADCAST mast gets the dust but no ramp key: nothing in its draw
+				# branch reads one (the mast, its base rings and its hp pips all draw
+				# solid), and its arrival beat is already the `broadcast_pulse` it fires
+				# on its first stepped tick (fire_cd == 0 at birth). Registering a key
+				# nothing consumes is dead state that reads as coverage.
+				if String(ev.get("kind", "")) != "broadcast":
+					_rooted_arrive["%d,%d" % [int(ev["x"]), int(ev["y"])]] = 0.0
+				_burst(ev["x"], ev["y"], "dust", 7, 0.8, 2.0, 0.3)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light",
+					"rate": 0.16, "r": 14.0, "col": Color(0.85, 0.72, 0.45)})
 			"observer_spawn":
 				_vo("vo_observer", 1, 600)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "alert", "rate": 0.025})
@@ -5859,6 +5885,17 @@ func _update_feel() -> void:
 		# pass with swap-pop-without-incrementing-on-removal is both correct
 		# (the newly-swapped entry gets its own turn before i advances) and O(1)
 		# amortized per removal.
+		# c4-19: age each rooted unit's dig-in ramp and evict it once solid, so the
+		# dict can never accrete across a long endless run. Gated with the rest of the
+		# FX pass on _hitstop_frames == 0, so a hit-stop freezes the fade-in too — the
+		# same freeze every other view animation already honours.
+		if not _rooted_arrive.is_empty():
+			for rk in _rooted_arrive.keys():
+				var ra: float = float(_rooted_arrive[rk]) + 1.0
+				if ra >= float(ROOTED_ARRIVE_FRAMES):
+					_rooted_arrive.erase(rk)
+				else:
+					_rooted_arrive[rk] = ra
 		var fi := 0
 		while fi < _fx.size():
 			var fx := _fx[fi]
@@ -9544,6 +9581,18 @@ func _draw_tanks() -> void:
 ## nearest player at the top of every round (sim_world.gd `_step_mg_nest`, the
 ## "tracking rake"), so a lane drawn off the stale stored vector promises a lane
 ## the burst does not use. Return value is NOT normalised (callers normalise).
+## c4-19: opacity of a rooted unit `age` frames into its dig-in. Starts faint so the
+## unit READS as arriving rather than as having always been there, and is fully solid
+## by ROOTED_ARRIVE_FRAMES — measured 24 frames against a 30-tick pre-telegraph reload,
+## so the ramp is over before the nest paints its first amber lane. An unknown age
+## (missed event, unit alive before the view started tracking) returns 1.0: the fade is
+## a garnish, never a way for a lethal unit to be hard to see.
+static func rooted_arrival_alpha(age: float) -> float:
+	if age < 0.0 or age >= float(ROOTED_ARRIVE_FRAMES):
+		return 1.0
+	return 0.15 + 0.85 * (age / float(ROOTED_ARRIVE_FRAMES))
+
+
 static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
 	if e.get("kind", "") == "mg_nest" and (e.get("windup", 0) > 0 or e.get("lunge_ticks", 0) > 0):
 		# Mid-burst / winding up: the nest is tracking, so the lane must track.
@@ -10027,19 +10076,28 @@ func _draw_enemies() -> void:
 			# (5/7 lens consensus). Static reads, no reduce-motion gate needed.
 			var n_hp: int = e.get("hp", 3)
 			var n_dmg := float(clampi(3 - n_hp, 0, 2))
+			# c4-19: dig-in ramp. The nest used to POP into existence at full opacity
+			# mid-screen; this fades the WHOLE emplacement in over ROOTED_ARRIVE_FRAMES,
+			# which finishes before its first amber telegraph lane is painted.
+			# The bags ramp with the gun: measured through tools/measure_hitbox.gd's
+			# formula they draw 33.2 x 16.6 px / 325 px^2 opaque against mg_stand's
+			# 24.0 x 35.4 / 477 px^2 — 41% of the nest's opaque pixels and its widest
+			# element, so ramping the gun alone still materialised the emplacement.
+			var n_arr := rooted_arrival_alpha(float(_rooted_arrive.get("%d,%d" % [int(e["x"]), int(e["y"])], -1.0)))
 			_spr("sandbag_beige", epos, 0.0, 0.5,
-				Color(0.82 - n_dmg * 0.13, 0.8 - n_dmg * 0.15, 0.62 - n_dmg * 0.12))
+				Color(0.82 - n_dmg * 0.13, 0.8 - n_dmg * 0.15, 0.62 - n_dmg * 0.12, n_arr))
 			# Baked tripod MG on the sandbag ring (was a shrunken red elite gunner).
 			# Image-up = muzzle, so the emplacement swivels with the live aim lane;
 			# it darkens with the bags as the nest cracks.
 			var nlv := telegraph_dir(sim, e)
 			var nang: float = nlv.angle() if nlv.length() > 1.0 else face
 			_spr("mg_stand", epos + Vector2(0, -2), nang + PI / 2, 1.0,
-				Color(1.0 - n_dmg * 0.15, 1.0 - n_dmg * 0.17, 1.0 - n_dmg * 0.15))
+				Color(1.0 - n_dmg * 0.15, 1.0 - n_dmg * 0.17, 1.0 - n_dmg * 0.15, n_arr))
 			# Armor pips (gate lock-pip grammar): filled = hits still to crack.
 			for npi in 3:
-				Art.circle(self, epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8,
-					Color(1.0, 0.78, 0.35, 0.9) if npi < n_hp else Color(0.22, 0.2, 0.18, 0.75))
+				var npc: Color = Color(1.0, 0.78, 0.35, 0.9) if npi < n_hp else Color(0.22, 0.2, 0.18, 0.75)
+				npc.a *= n_arr
+				Art.circle(self, epos + Vector2(-6.0 + npi * 6.0, -14.0), 1.8, npc)
 			# Lane band-cull (7/9 panel): an off-band nest drew its full 640px lane
 			# every aim frame. Sandbags + pips above still draw — only the lane skips.
 			if nlv.length() > 1.0 and epos.y > -80.0 and epos.y < 420.0:
@@ -10073,7 +10131,10 @@ func _draw_enemies() -> void:
 				# Dug in and cloaked: only a faint foliage shimmer betrays it —
 				# the laser paint on reveal is the real warning. Kept very subtle.
 				var gcp := Art.pulse(0.08)
-				Art.circle(self, epos, 5.0, Color(0.34, 0.5, 0.24, 0.10 + gcp * 0.06))
+				# c4-19: even the shimmer ramps in, so a ghillie READS as digging in
+				# rather than as cover that was always there.
+				var g_arr := rooted_arrival_alpha(float(_rooted_arrive.get("%d,%d" % [int(e["x"]), int(e["y"])], -1.0)))
+				Art.circle(self, epos, 5.0, Color(0.34, 0.5, 0.24, (0.10 + gcp * 0.06) * g_arr))
 			elif gst > 0:
 				# Rising out of cover: a bold leaf/dust burst as it reveals.
 				var rf := 1.0 - float(gst) / float(SimWorld.GHILLIE_REVEAL_TICKS)

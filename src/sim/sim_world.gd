@@ -4268,7 +4268,7 @@ func _step_spawner() -> void:
 		# Rooted kinds never move, so the walk-in-from-the-top y is where they
 		# STAY while the camera is held — a lethal gun above the reachable field.
 		# Endless already roots in-band (_step_waves); campaign shares the rule.
-		var sy: int = _rooted_spawn_y() if ROOTED_KINDS.has(kind) else camera_top - 24 * F_ONE
+		var sy: int = _rooted_spawn_y(x) if ROOTED_KINDS.has(kind) else camera_top - 24 * F_ONE
 		if kind == "mg_nest":
 			_spawn_mg_nest(x, sy)
 		elif kind == "broadcast":
@@ -4511,7 +4511,12 @@ func _spawn_courier() -> void:
 		"alive": true, "elite": false, "kind": "courier"})
 
 
-func _rooted_spawn_y() -> int:
+# c4-19: the rooted spawn ROW is a range, not a pixel. See _rooted_spawn_y().
+const ROOTED_SPAWN_Y_MIN := 56    # >= 36dcff1's camera_top+40 plus the kind-0 rock's 12px half-height
+const ROOTED_SPAWN_Y_SPAN := 232  # 56..287, wholly inside _clamp_actor's 16 .. CAMERA_BAND_BOTTOM 344
+
+
+func _rooted_spawn_y(x: int) -> int:
 	## Spawn y for ROOTED_KINDS, shared by BOTH spawners. The walkers'
 	## camera_top-24 sits 24px above the drawn viewport and 40px above
 	## _clamp_actor's ceiling (camera_top+16), so a rooted unit born there is
@@ -4523,7 +4528,24 @@ func _rooted_spawn_y() -> int:
 	## Bound: _step_camera guarantees camera_top >= g["y"] - GATE_CAMERA_PAD for
 	## every closed gate, so the loop can raise y to at most camera_top + 74,
 	## well inside CAMERA_BAND_BOTTOM.
-	var y := camera_top + 52 * F_ONE
+	##
+	## c4-19: the ROW is no longer a CONSTANT. At a flat +52 every rooted unit in
+	## the game was born on the same pixel row — measured 292/292 births over 8
+	## seeds x 3000 ticks, with 36% of them materialising under the 1P HUD corner
+	## plate. 36dcff1 moved this from +40 to +52 to clear the authored kind-0 rock
+	## at (210, -320); that commit's INTENT (in-band, reachable, clear of cover,
+	## south of any closed gate) is kept in full — only its constancy is overturned,
+	## since a single row was the by-product of a scalar fix, never the goal. Cover
+	## is now guaranteed by _spawn_clear_x at each spawner, and ROOTED_SPAWN_Y_MIN
+	## is >= the rock's half-height by construction.
+	##
+	## Derived from x + tick_count with integer math, NEVER from rng: the endless
+	## caller computes this on every wave-spawn tick BEFORE the archetype roll, so
+	## an rng draw here would perturb the endless stream from wave 1 and move
+	## ENDLESS_GOLDEN. Same house pattern as the checksum-excluded `skin` field.
+	var h: int = ((x / F_ONE) & 1023) * 1103515245 + tick_count * 12345
+	h = (h >> 7) & 0x7FFFFFFF
+	var y := camera_top + (ROOTED_SPAWN_Y_MIN + h % ROOTED_SPAWN_Y_SPAN) * F_ONE
 	for g in gates:
 		if not g["open"] and y < g["y"] + GATE_BLOCK_PAD:
 			y = g["y"] + GATE_BLOCK_PAD
@@ -4562,6 +4584,12 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 	if arm > 0:
 		e["hp"] = e.get("hp", 1) + arm
 	enemies.append(e)
+	# c4-19: a unit that never moves simply EXISTS on the next frame with no
+	# trigger the view can hang an arrival on. Gated on ROOTED_KINDS, not on
+	# "ghillie", so a future rooted special fielded here is covered too. Events
+	# are rebuilt every step() and excluded from checksum() — golden-safe.
+	if ROOTED_KINDS.has(kind):
+		events.append({"t": "rooted_spawn", "x": x, "y": y, "kind": kind})
 
 
 func _spawn_mg_nest(x: int, y: int) -> void:
@@ -4571,6 +4599,7 @@ func _spawn_mg_nest(x: int, y: int) -> void:
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
 		"kind": "mg_nest", "hp": 3, "fire_cd": MG_NEST_AIM_TICKS, "windup": 0,
 		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0})
+	events.append({"t": "rooted_spawn", "x": x, "y": y, "kind": "mg_nest"})
 
 
 func _spawn_broadcast(x: int, y: int) -> void:
@@ -4580,6 +4609,7 @@ func _spawn_broadcast(x: int, y: int) -> void:
 	x = _spawn_clear_x(x, y)   # spawn seam: never born inside bullet cover
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
 		"kind": "broadcast", "hp": BROADCAST_HP, "fire_cd": 0, "windup": 0})
+	events.append({"t": "rooted_spawn", "x": x, "y": y, "kind": "broadcast"})
 
 
 
@@ -5986,7 +6016,7 @@ func _step_waves(inputs: Array = []) -> void:
 			# Value-identical here: endless never runs _step_camera, and every
 			# gates.append site lives inside it (or boss_rush's _init), so
 			# `gates` is empty for the whole endless run.
-			var rooted_y: int = _rooted_spawn_y()
+			var rooted_y: int = _rooted_spawn_y(x)
 			var elite_every: int = maxi(2, 4 - wave / 5)
 			var is_elite: bool = has_mod(2) or (wave_pending % elite_every) == 0
 			# From wave 3, some ranged spawns become grenadiers/snipers so the
