@@ -550,6 +550,12 @@ func test_technical_charge_follows_the_locked_line_not_the_player() -> void:
 	# Inside TECHNICAL_CHARGE_RANGE — outside it the truck refuses to rev (below).
 	sim._spawn_special(p["x"], p["y"] - 120 * Fixed.ONE, "technical")
 	var e := sim.enemies[0]
+	# The spawn SEAM (SimWorld._spawn_clear_x) legitimately shoves a birth out of cover,
+	# and this scenario asked for one: seed 21's endless arena has a world sandbag at
+	# (288,-180), so the requested x=280 was 8px INSIDE it and the unit came out 16px west.
+	# That is the fix working, not a regression — but this test is about the CHARGE LOCK,
+	# and its last assertion needs a straight-down geometry. Snap it back on purpose.
+	e["x"] = p["x"]
 	e["fire_cd"] = 0
 	sim._step_enemies()   # rev starts (windup armed)
 	Runner.T.ok(e["windup"] > 0, "technical revs before charging")

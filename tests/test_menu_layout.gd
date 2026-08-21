@@ -1304,8 +1304,116 @@ func test_device_glyph_change_triggers_menu_repaint() -> void:
 # other ink is Art.text, which Art.text_capture intercepts.)
 class _HowtoCaptureMenu extends GameMenu:
 	var lines: Array = []
-	func _verb_line(segs: Array, _base_y: float, _col: Color) -> void:
+	func _verb_line(segs: Array, base_y: float, _col: Color) -> float:
 		lines.append(segs)
+		return base_y + VERB_LEAD
+
+
+# THE REAL PAGE, LAID OUT FOR REAL. _HowtoCaptureMenu above stubs out _verb_line —
+# the very function that positions the rows — which is why a page whose wrapped
+# continuation lines sat 1px apart while whole verb rows sat 2px apart shipped with a
+# green suite. This subclass stubs ONLY the two raw draw primitives (draw_texture_rect /
+# Art.draw_glyph, hard engine ERRORs outside _draw()) and keeps every pixel of the
+# layout math. It also RECORDS each glyph at its base_y, which is what makes row
+# membership derivable from the draw itself instead of from hardcoded copy: _verb_line
+# emits exactly one glyph per verb row, so a glyph in the op stream IS a row boundary.
+class _CtrlLayoutMenu extends GameMenu:
+	var rows: Array = []      # base_y of each verb row, in draw order
+	func _emit_tex(_key: String, r: Rect2, _c: Color) -> void:
+		rows.append(r.position.y + 10.0)   # _verb_line draws the hint at base_y - 10
+	func _emit_glyph(_act: String, center: Vector2, _size: float, _c: Color) -> void:
+		rows.append(center.y + 4.0)        # ...and the square prompt at base_y - 4
+	func _emit_stamp(_txt: String, _pos: Vector2, _c: Color) -> void:
+		pass
+
+
+static func _controls_rows(pad: bool) -> Array:
+	## Draw HOWTO page 0 for real and return it as rows of measured text boxes:
+	## [[Rect2, ...], [Rect2, ...], ...], one inner array per verb row. Nothing
+	## here knows a single string or a single y — copy added tomorrow is covered
+	## the day it lands.
+	var was_pad: bool = Art.use_pad
+	var stub := _StubMain.new()
+	var m := _CtrlLayoutMenu.new()
+	m.main = stub
+	Art.use_pad = pad
+	var prev = Art.text_capture
+	var ops: Array = []
+	Art.text_capture = ops
+	m._howto_page_controls()
+	Art.text_capture = prev
+	Art.use_pad = was_pad
+	var starts: Array = m.rows.duplicate()
+	m.free()
+	stub.free()
+
+	# The verb sentences are the size-11 ink; the orange 10px page header is not a row.
+	var lines: Array = []
+	for op in ops:
+		if int(op.get("size", 0)) == 11:
+			lines.append(op["box"] as Rect2)
+	lines.sort_custom(func(a, b): return a.position.y < b.position.y)
+	starts.sort()
+	var out: Array = []
+	for box in lines:
+		var baseline: float = box.position.y + Art.font().get_ascent(11)
+		# A line opens a new row when a recorded glyph base_y sits at (or above) it
+		# and has not been consumed yet.
+		if out.is_empty() or (not starts.is_empty() and baseline >= starts[0] - 1.0):
+			if not starts.is_empty():
+				starts.remove_at(0)
+			out.append([box])
+		else:
+			out[-1].append(box)
+	return out
+
+
+# THE CLASS: a wrapped continuation line must sit CLOSER to its own first line than
+# two different verb rows sit to each other. It shipped inverted — 1.0px inside a
+# wrapped row against 2.0px between rows — so four of the six rows read as a complete
+# instruction that stops dead, which is exactly how "the AIM line is truncated" gets
+# reported against a source string that is complete. The cause is structural, not
+# copy: _verb_line THREW AWAY _body_block's returned y and returned void, so
+# _howto_page_controls could only advance by a constant VERB_PITCH whose own comment
+# said "one may wrap to 2 lines" while four did.
+func test_controls_verb_rows_group_their_own_wrapped_lines() -> void:
+	for pad in [false, true]:
+		var rows := _controls_rows(pad)
+		Runner.T.ok(rows.size() >= 6, "pad=%s: the six verb rows were laid out (got %d)"
+			% [pad, rows.size()])
+		var within := -1.0
+		var between := -1.0
+		for i in rows.size():
+			var row: Array = rows[i]
+			for j in range(1, row.size()):
+				var g: float = (row[j] as Rect2).position.y - (row[j - 1] as Rect2).end.y
+				if within < 0.0 or g > within:
+					within = g
+			if i > 0:
+				var prev_row: Array = rows[i - 1]
+				var gb: float = (row[0] as Rect2).position.y - (prev_row[-1] as Rect2).end.y
+				if between < 0.0 or gb < between:
+					between = gb
+		Runner.T.ok(within >= 0.0, "pad=%s: at least one verb row wraps (the case under test)" % pad)
+		Runner.T.ok(between >= within + 4.0,
+			"pad=%s: rows are separated more than their own wrapped lines (between %.1f, within %.1f)"
+				% [pad, between, within])
+
+
+# ...and the other side of the bracket: separating the rows must not be paid for by
+# shoving the page under the BACK plate. Without this, VERB_ROW_GAP could satisfy the
+# grouping ratchet by growing without bound.
+func test_controls_page_body_clears_the_back_plate() -> void:
+	for pad in [false, true]:
+		var rows := _controls_rows(pad)
+		var bottom := 0.0
+		for row in rows:
+			for box in row:
+				bottom = maxf(bottom, (box as Rect2).end.y)
+		# BOTTOM_BOUND is _back_rect().position.y — the top of the shared BACK plate.
+		var limit: float = Menu.BOTTOM_BOUND - 2.0
+		Runner.T.ok(bottom <= limit,
+			"pad=%s: CONTROLS body bottom %.1f clears the BACK plate at %.1f" % [pad, bottom, limit])
 
 
 # c-onboard2: THE CONTROLS PAGE MUST TEACH MOVE AND AIM, FIRST, OFF THE LIVE BINDS.

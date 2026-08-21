@@ -468,8 +468,15 @@ const FRAME_INNER_L := 74.0        # 67.02 + 6.98 pad
 const FRAME_INNER_R := 566.0       # 572.98 - 6.98 — content clamps/right-aligns here
 const FRAME_INNER_T := 41.0        # 39.66 + 1.34 pad (tight: the 9-slice hole is 3.44px shorter per side than the retired stretch)
 const FRAME_INNER_B := 319.0       # 320.34 - 1.34
-const VERB_PITCH := 27.0           # baseline-to-baseline of the CONTROLS verb rows (one may wrap to 2 lines)
 const VERB_LEAD := 13.0            # leading between wrapped continuation lines of a CONTROLS verb sentence
+# ...and the AIR BETWEEN two different verb rows, which must stay visibly larger than
+# VERB_LEAD or a continuation line reads as a new bullet and its first line reads as an
+# instruction that stops dead. It replaces a constant VERB_PITCH := 27.0 whose own
+# comment said "one may wrap to 2 lines" while FOUR of the six did: at 27px pitch a
+# wrapped row left 2px to the next row against 1px inside itself, a 2:1 inversion.
+# The rows now FLOW off _verb_line's returned bottom, so a row that wraps to three
+# lines pushes the page instead of overlapping the next verb.
+const VERB_ROW_GAP := 8.0          # air between two CONTROLS verb rows (> VERB_LEAD's continuation gap)
 const ICON_X := FRAME_INNER_L      # left edge of every content-well sprite/glyph column
 const TEXT_X := FRAME_INNER_L + 36.0   # ...and the text column beside it (36 = icon box + gutter)
 const BODY_W := FRAME_INNER_R - TEXT_X # 456px of usable body width (the old figure was a fictional 552)
@@ -5347,23 +5354,18 @@ func _howto_page_controls() -> void:
 	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
 	y += 24.0
 	# Each text token after a glyph leads with a space so the word never glues to the device art.
-	_verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col)
-	y += VERB_PITCH
+	y = _verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col) + VERB_ROW_GAP
 	# The weapon has no trigger — it fires on its own, so AIM is the whole weapon verb and is
 	# the single most important thing a first-run player has to be told.
-	_verb_line(["@aim", " AIM with %s. The gun fires on its own — just point it." % _dir_devices("aim")], y, col)
-	y += VERB_PITCH
+	y = _verb_line(["@aim", " AIM with %s. The gun fires on its own — just point it." % _dir_devices("aim")], y, col) + VERB_ROW_GAP
 	# Board and plant share the SAME button, so the two lines are parallel imperatives
 	# (BOARD… / PLANT…) that read as complete commands, not fragments.
-	_verb_line(["@grenade", " GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."], y, col)
-	y += VERB_PITCH
+	y = _verb_line(["@grenade", " GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."], y, col) + VERB_ROW_GAP
 	# "armor" here means the ENEMY's (the grenade row above). The player DOES have a
 	# one-hit absorber — p["vest"] — so this row must not deny it.
-	_verb_line(["@roll", " ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit."], y, col)
-	y += VERB_PITCH
-	_verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col)
-	y += VERB_PITCH
-	_verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col)
+	y = _verb_line(["@roll", " ROLL to dodge — you can't be hit mid-roll. A FLAK VEST eats ONE hit."], y, col) + VERB_ROW_GAP
+	y = _verb_line(["@interact", " BOARD a tank for its crush weight and its shells."], y, col) + VERB_ROW_GAP
+	y = _verb_line(["@interact", " PLANT a claymore clear of any tank — it hurts BOTH sides."], y, col)
 
 
 # c-onboard2: the LIVE key cluster behind a directional verb — "W/A/S/D" built from
@@ -5424,7 +5426,7 @@ func _howto_page_warchest() -> void:
 				SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)],
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 10.0
-	_verb_line(["Hold ", "@wheel", " to open the supply wheel."],
+	y = _verb_line(["Hold ", "@wheel", " to open the supply wheel."],
 		y, Color(0.85, 0.9, 0.8))
 
 
@@ -6053,9 +6055,13 @@ func _body_block(txt: String, x: float, y: float, size: int, col: Color, max_w: 
 	return y
 
 
-func _verb_line(segs: Array, base_y: float, col: Color) -> void:
+func _verb_line(segs: Array, base_y: float, col: Color) -> float:
+	## Returns the y this row CONSUMED (past its last line), so the caller can flow
+	## the next row off it. It used to return void and throw _body_block's y away,
+	## which left _howto_page_controls no way to know a row had wrapped.
 	var f := Art.font()
 	var x := ICON_X
+	var bottom := base_y + VERB_LEAD
 	for seg: String in segs:
 		if seg.begins_with("@"):
 			var action := seg.substr(1)
@@ -6082,8 +6088,10 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> void:
 				Art.text(self, seg, Vector2(x, base_y), 11, col)
 				x += seg_w
 			else:
-				_body_block(seg, x, base_y, 11, col, FRAME_INNER_R - x, VERB_LEAD)
+				bottom = maxf(bottom,
+					_body_block(seg, x, base_y, 11, col, FRAME_INNER_R - x, VERB_LEAD))
 				x = FRAME_INNER_R
+	return bottom
 
 
 const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)

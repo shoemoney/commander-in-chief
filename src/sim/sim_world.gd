@@ -629,6 +629,10 @@ const ROCK_KIND_EXT := [[16, 12, 1], [28, 20, 0], [40, 10, 1], [32, 24, 1]]
 ## before paying _rk_solid/_rk_hw. test_combat.gd pins it against the table so a new
 ## wider tier can never silently make the reject unsound.
 const ROCK_HALF_W_MAX := 40 * F_ONE
+## Breathing room the spawn seam adds to every armor AABB before it calls a
+## birth position clear. Inherited verbatim from the retired _spawn_enemy nudge,
+## whose own tolerance was `_rk_hw(rk) + 4 * F_ONE`.
+const SPAWN_CLEAR_SLACK := 4 * F_ONE
 const COVER_VARIETY_SEG := 2
 # Foundry escape corridor (c2 3v): the crush-radius-26 colossus corners a
 # player against wall-hugging debris. Guarantee a debris-free margin at BOTH
@@ -4266,14 +4270,69 @@ func _step_spawner() -> void:
 		_spawn_enemy(x, camera_top - 24 * F_ONE, _spawn_counter % elite_every == 0)
 
 
-func _spawn_enemy(x: int, y: int, elite: bool) -> void:
-	# Spawn-path nudge (fork-mine precedent): never birth a unit inside a rock.
+func _spawn_cover_at(x: int, y: int) -> bool:
+	## True when (x, y) sits inside anything _step_projectiles treats as ARMOR,
+	## expanded by SPAWN_CLEAR_SLACK. The four families and their predicates are
+	## copied verbatim from that scan (bunkers -> sandbags -> hulks -> solid
+	## rocks) so the shot-blocking rule and the spawn rule cannot drift apart.
+	##
+	## Why this matters: ROOTED_KINDS never write x or y after birth, so a unit
+	## born inside cover is un-shootable from the arc that cover faces. The
+	## ghillie's 10px BULLET_HIT_RADIUS is smaller than a kind-0 rock's 16px
+	## half-width, so a round dies on the rock before it is ever close enough to
+	## count — and a revealed ghillie keeps `all_cloaked` false, so the
+	## force-reveal anti-stall is inert against it and the wave never closes.
+	for bk in bunkers:
+		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, SPAWN_CLEAR_SLACK):
+			return true
+	for sb in sandbags:
+		# Player-built nests count: they are player-buildable armor, 18px wide,
+		# and NOTHING checked them before.
+		if absi(x - sb["x"]) <= _sb_hw(sb) + SPAWN_CLEAR_SLACK \
+				and absi(y - sb["y"]) <= _sb_hh(sb) + SPAWN_CLEAR_SLACK:
+			return true
+	for hk in tanks:
+		if ((hk["alive"] and hk["occupant"] < 0) or (not hk["alive"] and hk["burn_ticks"] > 0)) \
+				and absi(x - hk["x"]) <= HULK_HALF_W + SPAWN_CLEAR_SLACK \
+				and absi(y - hk["y"]) <= HULK_HALF_H + SPAWN_CLEAR_SLACK:
+			return true
 	for rk in rocks:
 		if not _rk_solid(rk):
-			continue   # birthing in grass is fine — it doesn't block
-		if absi(x - rk["x"]) <= _rk_hw(rk) + 4 * F_ONE and absi(y - rk["y"]) <= _rk_hh(rk) + 4 * F_ONE:
-			x += 24 * F_ONE
-			break
+			continue   # bullets pass through grass — it hides, it doesn't save
+		if absi(x - rk["x"]) <= _rk_hw(rk) + SPAWN_CLEAR_SLACK \
+				and absi(y - rk["y"]) <= _rk_hh(rk) + SPAWN_CLEAR_SLACK:
+			return true
+	return false
+
+
+func _spawn_clear_x(x: int, y: int) -> int:
+	## THE SPAWN SEAM. Returns x when the birth position is clear, otherwise the
+	## nearest clear x on the same row, probing outward WEST then EAST in 4px
+	## steps across the playfield. Nearest-first, so wave composition barely
+	## moves; alternating, so a unit shoved off one shoulder of a wall does not
+	## pile up on the same side every time.
+	##
+	## Replaces the old per-caller `x += 24 * F_ONE; break` nudge, which checked
+	## one of four families, could not clear a kind-2 ruined wall (half-width 40)
+	## at all, and — living at a CALLER — was bypassed by all nine rooted call
+	## sites. Terminates by construction: 148 bounded probes, then it gives up
+	## and hands back its input rather than spin.
+	if not _spawn_cover_at(x, y):
+		return x
+	for i in 148:
+		var d: int = (i + 1) * 4 * F_ONE
+		var wx: int = x - d
+		if wx >= 24 * F_ONE and not _spawn_cover_at(wx, y):
+			return wx
+		var ex: int = x + d
+		if ex <= 616 * F_ONE and not _spawn_cover_at(ex, y):
+			return ex
+	return x   # the whole row is walled: birth where asked beats looping
+
+
+func _spawn_enemy(x: int, y: int, elite: bool) -> void:
+	# Never birth a unit inside armor — all four blocking families, at the seam.
+	x = _spawn_clear_x(x, y)
 	var e := {"x": x, "y": y, "alive": true, "elite": elite,
 		"kind": "elite" if elite else "rusher"}
 	if elite:
@@ -4462,6 +4521,7 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 	## from SECTOR_SPECIALS (sector 2 onward), Endless from wave 3 (grenadier/sniper/
 	## shield/sapper/ghillie/drone/technical). Coin-worthy like an elite; reuse fire_cd/windup/submerged so no
 	## new hashed enemy field is introduced.
+	x = _spawn_clear_x(x, y)   # spawn seam: never born inside bullet cover
 	var e := {"x": x, "y": y, "alive": true, "elite": true,
 		"kind": kind, "fire_cd": SNIPER_FIRE_CD_TICKS / 2, "windup": 0}
 	if kind == "shield":
@@ -4493,6 +4553,7 @@ func _spawn_special(x: int, y: int, kind: String) -> void:
 func _spawn_mg_nest(x: int, y: int) -> void:
 	## Rooted fixed turret: rakes its lane with aimed 3-round bursts, never moves.
 	## Reuses fire_cd/windup/lunge_ticks/aim_lx/aim_ly — all already hashed.
+	x = _spawn_clear_x(x, y)   # spawn seam: never born inside bullet cover
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
 		"kind": "mg_nest", "hp": 3, "fire_cd": MG_NEST_AIM_TICKS, "windup": 0,
 		"lunge_ticks": 0, "aim_lx": 0, "aim_ly": 0})
@@ -4502,6 +4563,7 @@ func _spawn_broadcast(x: int, y: int) -> void:
 	## Rooted rally mast (campaign sector 5 via SECTOR_SPECIALS; endless wave-7+ debut — panel 4-vote): fires nothing,
 	## moves nothing; every ground mover in its aura runs +25%. Killing the mast
 	## breaks the rally. Reuses hashed hp/fire_cd/windup — zero new fields.
+	x = _spawn_clear_x(x, y)   # spawn seam: never born inside bullet cover
 	enemies.append({"x": x, "y": y, "alive": true, "elite": true,
 		"kind": "broadcast", "hp": BROADCAST_HP, "fire_cd": 0, "windup": 0})
 

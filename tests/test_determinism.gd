@@ -699,13 +699,31 @@ const SEED := 0xDEADBEEF
 ## pre-rejects are bounded by ROCK_HALF_W_MAX = max(ROCK_KIND_EXT[*][0]) and SANDBAG_HALF_W
 ## (both pinned by test_combat.gd), the claymore deny restructure only appends an EXCLUDED
 ## event, and _econ_depth's new cursor equals `opened` in continuous play.
+## RE-RECORDED (2026-08-20, spawn-seam cover de-confliction). Every spawner now routes
+## its birth x through SimWorld._spawn_clear_x, which tests ALL FOUR families the
+## projectile scan treats as armor (bunkers, sandbags, hulks, solid rocks) instead of
+## the one family the old _spawn_enemy nudge tested, and probes outward in 4px steps
+## instead of a single +24px that could not clear a kind-2 ruined wall at all.
+##
+## SPLIT: samples 0 and 1 are BYTE-IDENTICAL to the retired values; only 2-5 move. That
+## split is the proof the change is confined to spawns whose old position was inside
+## cover — had 0-1 moved too, something else had shifted and this would be a bug, not a
+## re-record. Re-derived twice; identical both times.
+##
+## ATTRIBUTION ISOLATED, not assumed: with ONLY _spawn_enemy's call reverted to the old
+## rock-only +24 nudge (the three ROOTED spawner calls still in the tree), SUITE=determinism
+## PASSES on the retired values. So 100% of this movement is the WALKER seam — walkers whose
+## old +24 landed them back inside the same rock, or who were born in a sandbag/hulk/bunker
+## nothing ever checked. The rooted-spawner calls are golden-inert on BOTH tortures.
+## ENDLESS_GOLDEN is unchanged for the reason its own note already records: with the field
+## advancing on a downed player this stream wipes at ~2938 ticks and reaches NO rooted spawn.
 const GOLDEN: Array[int] = [
 	7078001587521190610,
 	7962800053750474964,
-	1395014386491861923,
-	6067163319820255349,
-	4865881766286063995,
-	6591063370946865525,
+	7733568343444710833,
+	2287477609721275325,
+	7057671264080347804,
+	6467031749323431841,
 ]
 
 
