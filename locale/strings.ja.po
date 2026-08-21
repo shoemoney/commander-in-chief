@@ -115,11 +115,11 @@ msgstr "指揮官：「戦線復帰！」"
 msgid "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN"
 msgstr "貫通弾—弾丸が貫通する。列の延長上を狙え"
 
-msgid "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 3"
-msgstr "トレンチガン—3発の扇形、1発撃つごとに弾薬2消費。トリプル中は弾薬3で5発に"
+msgid "TRENCH GUN — 3-ROUND FAN WHILE IT LASTS. ON TRIPLE IT'S A 5-WAY FAN"
+msgstr "トレンチガン—続く限り3発の扇形。トリプル中は5方向扇形に"
 
-msgid "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 3"
-msgstr "トリプルショット—3発の扇形、1発撃つごとに弾薬2消費。スプレッドと重ねれば弾薬3で5発に"
+msgid "TRIPLE SHOT — 3-ROUND FAN UNTIL DEATH. STACK SPREAD FOR A 5-WAY FAN"
+msgstr "トリプルショット—死亡まで有効な3発扇形。スプレッドと重ねれば5方向扇形に"
 
 msgid "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS"
 msgstr "引裂弾—重機銃が機動隊の盾を貫通する"
