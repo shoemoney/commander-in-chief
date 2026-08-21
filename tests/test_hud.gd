@@ -116,11 +116,9 @@ func _act_glyph_resolves(act: String) -> bool:
 # "caller didn't pass one" sentinel — GameMenu.key_label(0) returns the literal "UNBOUND",
 # which must never reach the glyph.
 func _glyph_letter_for(action: String, keycode: int) -> String:
-	if keycode > 0:
-		return GameMenu.key_label(keycode)
-	elif keycode == -1:
-		return Art._GLYPH_KEY[action]
-	return ""
+	# Was a hand-mirrored copy of draw_glyph's branch; the real decision is a pure
+	# static now, so call it instead of maintaining a second copy that can drift.
+	return Art._glyph_letter(action, keycode)
 
 
 func test_cleared_bind_glyph_never_shows_the_literal_unbound_string() -> void:
@@ -153,16 +151,23 @@ func test_art_source_keeps_the_cleared_bind_split_in_draw_glyph() -> void:
 	var code := "\n".join(code_lines)
 	var fn_start := code.find("static func draw_glyph(")
 	Runner.T.ok(fn_start >= 0, "draw_glyph is still defined in art.gd")
-	var fn_end := code.find("static func glyph_key(", fn_start)
+	var fn_end := code.find("static func draw_glyph_left(", fn_start)
 	Runner.T.ok(fn_end > fn_start, "found the next function to bound the draw_glyph body")
 	var body := code.substr(fn_start, fn_end - fn_start)
 	var kb_start := body.find("else:")
 	Runner.T.ok(kb_start >= 0, "draw_glyph still branches on use_pad/force_pad")
-	var kb_branch := body.substr(kb_start)
+	# The keycode->label decision was hoisted into Art._glyph_letter so glyph_cap_w and
+	# draw_glyph measure and draw the SAME string (one copy, no drift). The invariant
+	# pinned here is unchanged; only its address moved, so scan it where it now lives.
+	Runner.T.ok(body.contains("_glyph_letter(action, keycode)"),
+		"the keyboard branch resolves its label through the shared Art._glyph_letter")
+	var lf_start := code.find("static func _glyph_letter(")
+	Runner.T.ok(lf_start >= 0, "Art._glyph_letter is defined")
+	var kb_branch := code.substr(lf_start, code.find("static func glyph_cap_w(", lf_start) - lf_start)
 	Runner.T.ok(kb_branch.contains("keycode > 0"),
-		"the keyboard branch still special-cases a real keycode (> 0)")
+		"the label lookup still special-cases a real keycode (> 0)")
 	Runner.T.ok(kb_branch.contains("keycode == -1"),
-		"the keyboard branch still special-cases the 'no keycode passed' sentinel (-1)")
+		"the label lookup still special-cases the 'no keycode passed' sentinel (-1)")
 	Runner.T.ok(not kb_branch.contains("key_label(keycode) if keycode >= 0"),
 		"the collapsed keycode>=0 ternary (which stamps UNBOUND on a cleared bind) has not returned")
 
@@ -1003,7 +1008,10 @@ func test_chip_width_matches_stat_advance() -> void:
 	var w := h._chip_w({"icon": "wep_smoke", "txt": "5s", "col": Color.WHITE})
 	Runner.T.eq(w, HudIcons.ICON + 13.0 + h._tw("5s"), "timed-buff chip width == _stat advance")
 	var wg := h._chip_w({"icon": "wep_claymore", "txt": "x2", "col": Color.WHITE, "glyph": true})
-	Runner.T.eq(wg, HudIcons.ICON + 13.0 + h._tw("x2") + 12.0, "claymore chip adds the interact glyph")
+	# The glyph term is the REAL advance (gap + live cap width), not a frozen 12.0 sized
+	# off a size x size square — that constant under-reserved every multi-character bind.
+	Runner.T.eq(wg, HudIcons.ICON + 13.0 + h._tw("x2") + h._act_glyph_adv("interact", 10.0, 0),
+		"claymore chip adds the interact glyph at its true advance")
 	h.free()
 
 
@@ -2232,6 +2240,25 @@ class _ChipCaptureHud extends HudIcons:
 			"alert": alert, "border": pal["border"], "ink": pal["ink"]})
 	func _emit_bg_rect(r: Rect2, _c: Color) -> void:
 		boxes.append({"k": "bg", "id": "bg", "box": r})
+	func _emit_act_glyph(act: String, center: Vector2, size: float, _col: Color, _alt: bool) -> void:
+		# `alt` == Art.draw_glyph's force_pad. Captured so the co-op tests can pin WHICH
+		# seat a contextual prompt is teaching (P2 is pad-only and never sets use_pad).
+		#
+		# The recorded rect is the cap Art.draw_glyph ACTUALLY paints, via the published
+		# Art.glyph_cap_w — it used to record `size x size`, i.e. the frozen square that
+		# caused the defect. An overlap sweep over a square lie cannot see a 38.9px "Space"
+		# keycap reaching 10.43px back over the label it trails, which is exactly how that
+		# shipped green. Fixing this capture is load-bearing, not cosmetic.
+		boxes.append({"k": "glyph", "id": act, "alt": _alt,
+			"box": _glyph_rect(act, center.x - _cap_w(act, size, _alt) / 2.0, center.y, size, _alt)})
+	func _emit_act_glyph_at(act: String, left_x: float, mid_y: float, size: float, _col: Color, _alt: bool) -> void:
+		boxes.append({"k": "glyph", "id": act, "alt": _alt,
+			"box": _glyph_rect(act, left_x, mid_y, size, _alt)})
+	func _cap_w(act: String, size: float, alt: bool) -> float:
+		return Art.glyph_cap_w(act, size, main.bind_for_glyph(act),
+			main.pad_bind_for_glyph(act, 1 if alt else 0), alt)
+	func _glyph_rect(act: String, left_x: float, mid_y: float, size: float, alt: bool) -> Rect2:
+		return Rect2(left_x, mid_y - size / 2.0, _cap_w(act, size, alt), size)
 	# c2-16: the strip's centered NAME line lands in its OWN list, never `boxes` — the strip/frame
 	# band scans treat every box in `boxes` as a left-advancing chip, and the names are centered
 	# UNDER those chips (deliberately overlapping them in x).
@@ -2972,11 +2999,6 @@ class _FrameMain extends _MainStub:
 # still records a box (for bounds checking) and preserves the exact cursor advance the real draw
 # produces, so the frame's layout is unchanged.
 class _FrameCaptureHud extends _ChipCaptureHud:
-	func _emit_act_glyph(act: String, center: Vector2, size: float, _col: Color, _alt: bool) -> void:
-		# `alt` == Art.draw_glyph's force_pad. Captured so the co-op tests can pin WHICH
-		# seat a contextual prompt is teaching (P2 is pad-only and never sets use_pad).
-		boxes.append({"k": "glyph", "id": act, "alt": _alt,
-			"box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
 	func _pip_plate(txt: String, py: float, b: Vector2, _docked := true) -> float:
 		var r: Rect2 = HudIcons._pip_plate_rect(b.y, _tw(txt), py, b.x)
 		boxes.append({"k": "bg", "id": "pip_plate", "box": r})
@@ -4000,3 +4022,224 @@ static func _cap_wcag(a: Color, b: Color) -> float:
 	var la := 0.2126 * _cap_lin(a.r) + 0.7152 * _cap_lin(a.g) + 0.0722 * _cap_lin(a.b)
 	var lb := 0.2126 * _cap_lin(b.r) + 0.7152 * _cap_lin(b.g) + 0.0722 * _cap_lin(b.b)
 	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
+
+
+# --- Trailing keycaps must not paint over the text they trail --------------------
+#
+# Art.draw_glyph grows its keycap SYMMETRICALLY about a caller-supplied centre, but
+# every caller computed that centre — and its width reserve — from a `size x size`
+# SQUARE. A multi-character bind ("Space", the ship default for `revive`, is 38.9px
+# at size 11 against an 11px square) therefore ate leftward into whatever preceded
+# it, and the cap texture is drawn AFTER the text, so it painted over it. The
+# reported instance: "REVIVE 75" rendered as "REVIVE 7" welded to a Space keycap.
+#
+# Measured on this tree at size 11 (PixelOperator8, fs = max(8, int(size*0.62)) = 8):
+#   F/C/Q/E 7.0 -> cap 11.0 | Space 35.0 -> 38.9 | Shift 31.0 -> 34.9
+#   Enter 34.0 -> 37.9 | Delete 39.0 -> 42.9 | Escape 42.0 -> 45.9
+#   Control 46.0 -> 49.9 | Backspace 63.0 -> 66.8
+
+## The widest labels the REBIND screen can actually produce, plus a single-letter control.
+const WIDE_BINDS := [KEY_BACKSPACE, KEY_CTRL, KEY_ESCAPE, KEY_DELETE, KEY_ENTER, KEY_SPACE,
+	KEY_SHIFT, KEY_F]
+
+
+class _BindMain extends _MainStub:
+	## A stub whose binds are REAL keycodes — the default _MainStub returns 0 (a cleared
+	## bind), which draws a blank cap at exactly `size` and therefore cannot reproduce
+	## the defect at all.
+	var kc := KEY_SPACE
+	func bind_for_glyph(_a: String) -> int: return kc
+	func pad_bind_for_glyph(_a: String, _device := 0) -> int: return -1
+
+
+func _glyph_overlaps_boxes(boxes: Array, fit: float) -> Array:
+	## [worst_overlap_px, worst_past_fit_px] across the frame's captured boxes.
+	## A glyph is compared only against boxes sharing its row band, and never
+	## against another glyph.
+	var worst := 0.0
+	var past := 0.0
+	for g in boxes:
+		if g["k"] != "glyph":
+			continue
+		var gb: Rect2 = g["box"]
+		past = maxf(past, gb.end.x - fit)
+		for b in boxes:
+			if b["k"] == "glyph" or b["k"] == "bg":
+				continue
+			var bb: Rect2 = b["box"]
+			if not gb.intersects(bb):
+				continue
+			var ov := gb.intersection(bb)
+			worst = maxf(worst, minf(ov.size.x, ov.size.y) if ov.size.y > 0.0 else 0.0)
+			worst = maxf(worst, ov.size.x)
+	return [worst, past]
+
+
+func _revive_row(kc: int, dev_alt: bool, cost_deaths: int, fit := 0.0) -> Array:
+	## Drive the REAL _dead_chips revive branch and return its captured boxes.
+	## `fit` overrides the usable edge so the row-fit guard — the guard the frozen
+	## REVIVE_GLYPH_ADV fed — is exercised, not just the unconstrained layout.
+	var sim := SimWorld.new(0, 2, "endless")
+	sim.war_chest = 100000
+	var p: Dictionary = sim.players[0]
+	p["alive"] = false
+	p["broke_timer"] = 0
+	p["deaths"] = cost_deaths
+	var m := _BindMain.new()
+	m.kc = kc
+	m.sim = sim
+	var h := _ChipCaptureHud.new()
+	h.main = m
+	h._fit_full = fit if fit > 0.0 else HudIcons.RIGHT
+	h._dead_chips(p, 8.0, 40.0, 1 if dev_alt else 0, sim)
+	var out := [h.boxes.duplicate(true), sim.revive_cost(p), h._fit_full]
+	h.free()
+	m.free()
+	return out
+
+
+func test_act_glyph_keycaps_never_touch_their_label() -> void:
+	## The CLASS, swept across every rebindable width the REBIND screen can produce,
+	## both seats, and both of the text scales this suite already sweeps (100%/200%).
+	## HEAD produced 10.43px of overlap on the revive row at the SHIP DEFAULT bind
+	## ("Space"), plus 13.43px past _fit_full, and 1.25px on the row-0 interact chip
+	## at its single-letter default.
+	var was_scale := Art.text_scale
+	var was_pad := Art.use_pad
+	var worst_ov := 0.0
+	var worst_past := 0.0
+	var cells := 0
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		for pad in [false, true]:
+			Art.use_pad = pad
+			for kc in WIDE_BINDS:
+				for alt in [false, true]:
+					var res := _revive_row(kc, alt, 1)
+					var m := _glyph_overlaps_boxes(res[0], res[2])
+					worst_ov = maxf(worst_ov, m[0])
+					worst_past = maxf(worst_past, m[1])
+					cells += 1
+					# ...and again with the usable edge pulled in to exactly what the OLD
+					# frozen 15.0 reserve claimed the row costs. HEAD let the row through
+					# this guard and then painted the cap 13.43px past the edge; the fix
+					# either fits honestly or takes the shared "+N" clip.
+					var tight := 8.0 + Art.tw("REVIVE 50", HudIcons.FONT_SIZE) + 15.0
+					var res2 := _revive_row(kc, alt, 1, tight)
+					var m2 := _glyph_overlaps_boxes(res2[0], res2[2])
+					worst_ov = maxf(worst_ov, m2[0])
+					worst_past = maxf(worst_past, m2[1])
+					cells += 1
+	Art.text_scale = was_scale
+	Art.use_pad = was_pad
+	Runner.T.ok(cells >= 60, "the sweep really covered the cross-product (%d cells)" % cells)
+	Runner.T.ok(worst_ov <= 0.01,
+		"no keycap paints over the text it trails (worst %.2f px across %d cells)" % [worst_ov, cells])
+	Runner.T.ok(worst_past <= 0.01,
+		"no keycap spills past the usable edge (worst %.2f px past _fit_full)" % worst_past)
+
+
+func test_revive_cost_digits_are_never_occluded() -> void:
+	## The reviewer's screenshot, as a number. sim.revive_cost scales with deaths, so
+	## sweep the digit counts a real run produces. HEAD: the cap intersected the
+	## "REVIVE <cost>" text box by 10.43px at EVERY cost — and one price digit is
+	## 9.00px at FONT_SIZE 10, so at least one digit was fully hidden every time.
+	var worst := 0.0
+	var costs: Array = []
+	for deaths in [0, 1, 2, 4, 8]:
+		var res := _revive_row(KEY_SPACE, false, deaths)
+		var rboxes: Array = res[0]
+		costs.append(res[1])
+		var gb := Rect2()
+		for b in rboxes:
+			if b["k"] == "glyph":
+				gb = b["box"]
+		Runner.T.ok(gb.size.x > 0.0, "the revive row really planted a keycap (deaths %d)" % deaths)
+		for b in rboxes:
+			if b["k"] != "text" or not str(b["id"]).begins_with("REVIVE"):
+				continue
+			if gb.intersects(b["box"]):
+				worst = maxf(worst, gb.intersection(b["box"]).size.x)
+	Runner.T.ok(worst <= 0.01,
+		"the revive price is never painted over (worst %.2f px; costs %s; one digit is %.2f px)"
+			% [worst, str(costs), Art.tw("5", HudIcons.FONT_SIZE)])
+
+
+const GLYPH_CALL_SITES := {
+	# Every glyph placement in the in-game view, and how it is anchored. Recorded so a
+	# site added tomorrow trips this count on the day it lands, the way
+	# test_view_honesty's _aim_locking_kinds() roster does.
+	# hud.gd: 4 left-anchored calls (bail-out prompt, SUPPLIES wheel cue, row-0 interact
+	# chip, revive prompt), 1 genuinely slot-centred call (roll), and the pip/act seams
+	# that reach Art directly. Counts exclude comment lines.
+	"src/view/hud.gd": {"_emit_act_glyph_at(\"": 4, "_emit_act_glyph(\"": 1,
+		"Art.draw_glyph(self": 2, "Art.draw_glyph_left(self": 1},
+	# main.gd: 2 world label pairs + the wheel cue are left-anchored; the world interact
+	# prompt and the downed-buddy chevron are genuinely centred on their own point.
+	"src/main.gd": {"Art.draw_glyph_left(self": 3, "Art.draw_glyph(self": 2},
+}
+
+
+func test_every_glyph_site_is_accounted_for() -> void:
+	for path in GLYPH_CALL_SITES:
+		var src := FileAccess.get_file_as_string("res://" + path)
+		var body := ""
+		for line in src.split("\n"):
+			if not line.strip_edges().begins_with("#"):
+				body += line + "\n"
+		for needle in GLYPH_CALL_SITES[path]:
+			Runner.T.eq(body.count(needle), int(GLYPH_CALL_SITES[path][needle]),
+				"%s: %d call(s) of `%s`" % [path, int(GLYPH_CALL_SITES[path][needle]), needle])
+
+
+func test_keycap_width_is_single_sourced() -> void:
+	## Kills the frozen constants that caused the defect. The cap-padding literal lives
+	## in exactly ONE place (Art.glyph_cap_w); nothing downstream carries a frozen
+	## glyph advance. HEAD carried REVIVE_GLYPH_ADV := 15.0 plus three frozen advances
+	## (+13.0 SUPPLIES, +12.0 row-0 chip, +10 world pair) — a 13.43px under-reserve on
+	## the revive row alone.
+	var art := FileAccess.get_file_as_string("res://src/view/art.gd")
+	Runner.T.eq(art.count("size * 0.35"), 1,
+		"the keycap padding formula exists exactly once, inside Art.glyph_cap_w")
+	for path in ["src/view/hud.gd", "src/main.gd"]:
+		var src := FileAccess.get_file_as_string("res://" + path)
+		var code := ""
+		for line in src.split("\n"):
+			if not line.strip_edges().begins_with("#"):
+				code += line + "\n"
+		Runner.T.eq(code.count("REVIVE_GLYPH_ADV"), 0,
+			"%s carries no frozen square-derived glyph advance" % path)
+	var hud := FileAccess.get_file_as_string("res://src/view/hud.gd")
+	Runner.T.ok(hud.contains("Art.glyph_cap_w("),
+		"hud.gd reserves from the published cap width")
+	var mn := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(mn.contains("Art.glyph_cap_w("),
+		"main.gd's world-space label/keycap pairs measure from the published cap width")
+
+
+func test_published_keycap_width_matches_the_font() -> void:
+	## An INDEPENDENT pin on Art.glyph_cap_w itself, against widths measured off the
+	## shipped PixelOperator8 at size 11 (fs = max(8, int(11*0.62)) = 8).
+	##
+	## Why this exists separately from the overlap sweep: that sweep's capture reads
+	## glyph_cap_w to record the rect, so a regression INSIDE glyph_cap_w moves the
+	## instrument and the subject together and the sweep stays green. (Verified by
+	## mutation: making glyph_cap_w return `size` unconditionally left the sweep
+	## green and was caught only by the single-source grep.) These are hard numbers
+	## from the font, so they cannot move with it.
+	var was_pad := Art.use_pad
+	Art.use_pad = false
+	var expect := {KEY_F: 11.0, KEY_SPACE: 38.85, KEY_SHIFT: 34.85, KEY_ENTER: 37.85,
+		KEY_DELETE: 42.85, KEY_ESCAPE: 45.85, KEY_CTRL: 28.85, KEY_BACKSPACE: 66.85}
+	# NB: key_label(KEY_CTRL) is "Ctrl" (28.85px), not "Control" (49.85px) — the wider
+	# figure is for a string the REBIND screen never produces. Measured, not assumed.
+	for kc in expect:
+		var got := Art.glyph_cap_w("revive", 11.0, int(kc))
+		Runner.T.ok(absf(got - float(expect[kc])) <= 0.05,
+			"cap for '%s' is %.2f px (want %.2f)" % [GameMenu.key_label(int(kc)), got, float(expect[kc])])
+	Runner.T.ok(Art.glyph_cap_w("revive", 11.0, KEY_BACKSPACE) > 11.0 * 3.0,
+		"a wide bind really is multiples of the square the callers used to reserve")
+	# The pad path is a fixed-size button sprite — always exactly `size`.
+	Runner.T.eq(Art.glyph_cap_w("revive", 11.0, KEY_BACKSPACE, 0, true), 11.0,
+		"the pad path stays square regardless of the keyboard bind")
+	Art.use_pad = was_pad

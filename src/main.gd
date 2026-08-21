@@ -6121,8 +6121,11 @@ static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
 		# Nearest-hostile is safe here in a way it was NOT in campaign (see the
 		# bunker note below): there is no objective to be distracted FROM.
 		if not dsim.endless_boss.is_empty() and dsim.endless_boss["alive"]:
-			return {"x": dsim.endless_boss["x"],
-				"y": dsim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET}
+			# Track the approach: the miniboss is shootable from its first drawn
+			# tick, and boss_flyin_offset is where it actually is (0,0 once landed).
+			var boff: Array = SimWorld.boss_flyin_offset(dsim.endless_boss["phase_t"])
+			return {"x": dsim.endless_boss["x"] + int(boff[0]),
+				"y": dsim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(boff[1])}
 		var near := {}
 		var neard := 1 << 62
 		for e in dsim.enemies:
@@ -10503,6 +10506,13 @@ func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
+# Not a phase — the 420-tick approach, which has no act at all: _step_one_boss
+# returns before any firing while phase_t < 0 ("the gunship holds its fire during
+# the approach"). The bar is now drawn for that whole window, so it needs a name
+# of its own; borrowing GUNSHIP_PHASE_NAMES[0] made the top-center plate assert a
+# strafing run the sim refuses to perform, for 7.00 s. Same word as the spawn
+# banner ("GUNSHIP INBOUND") — one vocabulary, two surfaces.
+const GUNSHIP_INBOUND_NAME := "INBOUND"
 # honesty: phase 3 was named "SAPPERS OUT" — the persistent label under the boss
 # bar for the whole final phase of the final fight. The sim spawns _spawn_enemy(...,
 # false) there, which builds kind "rusher"; NO sapper reaches the Foundry at all
@@ -10517,20 +10527,38 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		# 16/0.42 values as it lands, the REAL bake under a clearing high-alt
 		# haze (cool, translucent -> full), the warm boss rim (via _BOSS_RIM),
 		# and a scaled rotor blur so it reads "helicopter", not "texture bug".
-		var eta_f := 1.0 + float(boss["phase_t"]) / 420.0   # 0 -> 1 across the approach
+		var eta_f := 1.0 + float(boss["phase_t"]) / float(SimWorld.BOSS_FLYIN_TICKS)   # 0 -> 1 across the approach
 		var ground := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 		_ground_shadow(ground + Vector2(0, 30), 8.0 + eta_f * 18.0, 0.12 + eta_f * 0.30)
-		# Diagonal slide-in from the top-right: a straight vertical drop hid the
-		# whole approach behind the HUD strip (arrival hovers at screen y~50).
-		var apos := ground + Vector2((1.0 - eta_f) * 150.0, -(1.0 - eta_f) * 55.0)
+		# Diagonal slide-in from the top-right (a straight vertical drop hid the
+		# whole approach behind the HUD strip; arrival hovers at screen y~50) —
+		# and the RAMP IS THE SIM'S. This branch used to restate it as float
+		# literals, so the hull was drawn up to 159.8 px from the disc the sim
+		# tested and the approach was unhittable on top of that.
+		var foff: Array = SimWorld.boss_flyin_offset(boss["phase_t"])
+		var apos := _to_screen(boss["x"] + int(foff[0]),
+			boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(foff[1]))
 		var asc := 0.5 + eta_f * 0.8   # a1-01: lands at boss-scale (1.3), out-reads a tank
-		_spr(body_tex, apos, PI, asc, Color(0.92, 0.94, 1.05, 0.35 + eta_f * 0.65))
+		# The approach is shootable now, so the body has to REACT to being shot —
+		# _boss_flash is raised on every boss_hit ("the big body reacts, not just a
+		# spark") but the engaged hull's flash lerp lives past this branch's return,
+		# so the one window this fix opened was the one window the hull stayed inert
+		# while the player emptied a magazine into it. Alpha stays on the haze ramp;
+		# only the tint goes white-hot, to the same value the engaged hull uses.
+		var ahz := Color(0.92, 0.94, 1.05, 0.35 + eta_f * 0.65)
+		ahz = ahz.lerp(Color(2.2, 2.2, 2.2, ahz.a), _boss_flash)
+		_spr(body_tex, apos, PI, asc, ahz)
 		var frr := float(Engine.get_physics_frames()) * 0.9 * maxf(_motion, 0.3)
 		var rlen := 42.0 * (asc / 1.3)
 		for fri in 2:
 			var fra := frr + fri * PI / 2
 			Art.line(self, apos - Vector2.from_angle(fra) * rlen, apos + Vector2.from_angle(fra) * rlen,
 				Color(0.85, 0.9, 0.95, 0.20 + eta_f * 0.15), 1.5)
+		# _draw_gunships already CLAIMED a bar slot for this boss (and the banners
+		# duck below the claimed band) — the fly-in used to return without drawing
+		# it, so the top strip held a hole for 7 s. Now the bar is up for the whole
+		# approach, which is also when the boss first becomes shootable.
+		_boss_bar(boss, label, slot, boss["phase_t"])
 		return
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 	# Idle hover: a slow vertical bob + faint sway so the gunship reads as airborne,
@@ -10626,17 +10654,33 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# Shake-immune: the bar is a fixed HUD slot, so cancel the node's shake/zoom
 	# for the rest of this function (restored by the caller's next world draw
 	# via the reset at the bottom).
+	_boss_bar(boss, label, slot, pt)
+
+
+static func gunship_phase_label(label: String, pt: int) -> String:
+	## The plate under the top-center boss bar. Same act boundary the sim uses to
+	## pick behavior in _step_one_boss (t < BOSS_STRAFE_TICKS).
+	if pt < 0:
+		return "%s — %s" % [label, GUNSHIP_INBOUND_NAME]
+	var gphase := 1 if pt < SimWorld.BOSS_STRAFE_TICKS else 2
+	return "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
+
+
+func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
+	## The fixed top-center boss HP/phase bar. Extracted from _draw_one_gunship so
+	## the endless fly-in branch — which claims a slot in _draw_gunships and then
+	## returned early — can draw the bar it reserved instead of leaving a hole.
+	var bkey := "boss%d" % boss["gate_y"]
+	_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
+	var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
+	var mticks: Array = SimWorld.boss_mortar_ticks(sim.wave / 5)
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	var bar_w := 160.0
 	var bar_x := 320.0 - bar_w / 2.0
 	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
-	# Same act boundary the sim uses to pick behavior in _step_one_boss
-	# (t < BOSS_STRAFE_TICKS), surfaced the way the colossus bar labels
-	# its phase.
-	var gphase := 1 if pt < SimWorld.BOSS_STRAFE_TICKS else 2
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
-	var gplabel := "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
+	var gplabel := gunship_phase_label(label, pt)
 	var gpw := Art.tw(gplabel, 10)
 	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
@@ -11104,7 +11148,13 @@ func _draw_players() -> void:
 				# to the body — shown regardless of affordability so you can FIND a
 				# far-south downed buddy even before the chest covers the revive.
 				if dpos.x < 8 or dpos.x > 632 or dpos.y < 30 or dpos.y > 352:
-					var edge := Vector2(clampf(dpos.x, 12, 628), clampf(dpos.y, 34, 348))
+					# Clamp by the CAP's half-width, not a frozen 12: a "Space"-bound
+					# revive puts the cap half 19.1px out, so the old clamp let it reach
+					# x = -7 — entirely off-screen, taking the prompt with it.
+					var ecw := Art.glyph_cap_w("revive", 9.0, bind("revive"),
+						pad_bind_for_glyph("revive", i), i == 1)
+					var epad := maxf(12.0, ecw / 2.0 + 10.0)
+					var edge := Vector2(clampf(dpos.x, epad, 640.0 - epad), clampf(dpos.y, 34, 348))
 					var pcol := _player_ident_color(q)   # a1-18 LEG#2
 					var bdir := (dpos - edge).normalized()
 					# Shake-immune like every other screen-edge indicator (the
@@ -11132,10 +11182,18 @@ func _draw_players() -> void:
 				# rather than through _world_label_centered: the glyph has to ride the
 				# label's claim offset (roff), which means it has to be measured off the
 				# same width. Same grammar as the GET UP pair below, with the gap derived
-				# for THIS glyph's 10px size (unit width = rw + 3 gap + 10 glyph).
+				# for THIS glyph's size. The unit width used to be `rw + 3 + 10` — the
+				# keycap counted as a 10px SQUARE — but the cap is as wide as the LIVE
+				# bind's label ("Space" is 34.4px at size 10), so the pair measured ~28px
+				# too narrow and the cap grew back over the price it trails. Width and
+				# placement both read Art.glyph_cap_w now, so they cannot disagree.
 				var rw := Art.tw(rtxt, Art.fs(8))
-				var roff := _world_label(rtxt, pos + Vector2(-rw / 2.0 - 6.5, -16), Art.safe(Color(0.5, 1.0, 0.6)))
-				Art.draw_glyph(self, "revive", pos + Vector2(rw / 2.0 + 1.5, -19) + roff, 10.0, Color.WHITE, i == 1,
+				var rcw := Art.glyph_cap_w("revive", 10.0, bind("revive"),
+					pad_bind_for_glyph("revive", i), i == 1)
+				var runit := rw + HudIcons.GLYPH_GAP + rcw
+				var roff := _world_label(rtxt, pos + Vector2(-runit / 2.0, -16), Art.safe(Color(0.5, 1.0, 0.6)))
+				Art.draw_glyph_left(self, "revive", pos.x - runit / 2.0 + rw + HudIcons.GLYPH_GAP + roff.x,
+					pos.y - 19 + roff.y, 10.0, Color.WHITE, i == 1,
 					bind("revive"), pad_bind_for_glyph("revive", i))
 		if p["alive"]:
 			# 0.35 lerp: faster than the enemies' 0.18 so pad/mouse flicks stay
@@ -11429,9 +11487,15 @@ func _draw_players() -> void:
 				# knows they still have a move.
 				var gtxt := "GET UP  %d" % sim.revive_cost(p)
 				var grw := Art.tw(gtxt, Art.fs(8))
-				_world_label(gtxt, pos + Vector2(-grw / 2.0 - 6.0, -26), Art.safe(Color(0.6, 1.0, 0.7)))
-				Art.draw_glyph(self, "revive", pos + Vector2(grw / 2.0 + 2.0, -29),
-					9.0, Color.WHITE, i == 1, bind("revive"), pad_bind_for_glyph("revive", i))
+				# Label + keycap are ONE centred unit, measured off the cap's REAL width
+				# (same fix as the REVIVE pair above — this one shared the frozen square).
+				var gcw := Art.glyph_cap_w("revive", 9.0, bind("revive"),
+					pad_bind_for_glyph("revive", i), i == 1)
+				var gunit := grw + HudIcons.GLYPH_GAP + gcw
+				var goff := _world_label(gtxt, pos + Vector2(-gunit / 2.0, -26), Art.safe(Color(0.6, 1.0, 0.7)))
+				Art.draw_glyph_left(self, "revive", pos.x - gunit / 2.0 + grw + HudIcons.GLYPH_GAP + goff.x,
+					pos.y - 29 + goff.y, 9.0, Color.WHITE, i == 1,
+					bind("revive"), pad_bind_for_glyph("revive", i))
 			# Downed beacon: when a partner is up, a rising pulse pulls their
 			# eye to the body so the revive has a spatial target.
 			if _two_players and not sim.last_stand:
@@ -12249,10 +12313,13 @@ func _draw_threat_edges() -> void:
 			near_x = clampf(g["boss"]["x"] * PX, 8.0, 632.0)
 			near_found = true
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
-		var esy: float = (sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET - sim.camera_top) * PX
+		# Point at where it IS, not where it will land — during the fly-in those
+		# are up to 159.8 px apart (SimWorld.boss_flyin_offset).
+		var eoff: Array = SimWorld.boss_flyin_offset(sim.endless_boss["phase_t"])
+		var esy: float = (sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(eoff[1]) - sim.camera_top) * PX
 		if esy < 0.0 and esy > near_sy:
 			near_sy = esy
-			near_x = clampf(sim.endless_boss["x"] * PX, 8.0, 632.0)
+			near_x = clampf((sim.endless_boss["x"] + int(eoff[0])) * PX, 8.0, 632.0)
 			near_found = true
 	# The Colossus spawns at final_gate.y - 120 while that (never-opening) gate
 	# pins camera_top to final_gate.y - 60, so it opens the finale from ~60px
@@ -12415,8 +12482,9 @@ func _draw_objective_markers() -> void:
 				"icon": "hud_flag", "col": Color(1.0, 0.9, 0.4), "pr": 0})
 			break
 	if not sim.endless_boss.is_empty() and sim.endless_boss.get("alive", false):
-		marks.append({"sx": sim.endless_boss["x"] * PX,
-			"sy": (sim.endless_boss.get("gate_y", sim.camera_top) - sim.camera_top) * PX,
+		var moff: Array = SimWorld.boss_flyin_offset(sim.endless_boss.get("phase_t", 0))
+		marks.append({"sx": (sim.endless_boss["x"] + int(moff[0])) * PX,
+			"sy": (sim.endless_boss.get("gate_y", sim.camera_top) + int(moff[1]) - sim.camera_top) * PX,
 			"icon": "hud_skull", "col": Color(1.0, 0.5, 0.35), "pr": 0})
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		marks.append({"sx": sim.colossus["x"] * PX, "sy": (sim.colossus["y"] - sim.camera_top) * PX,
@@ -12702,13 +12770,19 @@ func _draw_wheel() -> void:
 			var cue_r := " CANCEL"
 			var wl := Art.tw(cue_l, 8)
 			var wr := Art.tw(cue_r, 8)
-			var cx0 := c.x - (wl + 10.0 + wr) / 2.0
-			_wheel_row_plate(c.x, c.y + WHEEL_ROW_CUE, wl + 10.0 + wr, 8)
+			# The keycap sits in a gap BETWEEN two strings, so the gap has to be the cap's
+			# real width (+2px each side) — a frozen 10.0 fit only the single-letter default
+			# and a "roll" rebound to Backspace (66.8px) would bury both halves of the cue.
+			var wcap := Art.glyph_cap_w("roll", 10.0, bind("roll"),
+				pad_bind_for_glyph("roll", i), i == 1)
+			var wgap := wcap + 4.0
+			var cx0 := c.x - (wl + wgap + wr) / 2.0
+			_wheel_row_plate(c.x, c.y + WHEEL_ROW_CUE, wl + wgap + wr, 8)
 			Art.text(self, cue_l, Vector2(cx0, c.y + WHEEL_ROW_CUE), 8,
 				Color(0.9, 0.92, 0.8, 0.85) if sel_afford else Color(1.0, 0.55, 0.45, 0.9))
-			Art.draw_glyph(self, "roll", Vector2(cx0 + wl + 5.0, c.y + WHEEL_ROW_CUE - 3.5), 10.0,
+			Art.draw_glyph_left(self, "roll", cx0 + wl + 2.0, c.y + WHEEL_ROW_CUE - 3.5, 10.0,
 				Color.WHITE, i == 1, bind("roll"), pad_bind_for_glyph("roll", i))   # P2's wheel is pad-driven — show pad B, not the C keycap
-			Art.text(self, cue_r, Vector2(cx0 + wl + 10.0, c.y + WHEEL_ROW_CUE), 8, Color(0.9, 0.92, 0.8, 0.85))
+			Art.text(self, cue_r, Vector2(cx0 + wl + wgap, c.y + WHEEL_ROW_CUE), 8, Color(0.9, 0.92, 0.8, 0.85))
 		else:
 			var cue_txt := "FLICK TO PICK · RELEASE TO CLOSE"
 			_wheel_row_plate(c.x, c.y + WHEEL_ROW_CUE, Art.tw(cue_txt, 8), 8)

@@ -110,11 +110,18 @@ const COMPACT_BAR := 20.0  # c1-06 (attempt-4 judge polish): width of the tiny s
                        # in a starved slot, so the most perishable campaign readout never loses
                        # its urgency/progress the moment the row is most crowded. No text = no
                        # awkward "PRESS!" abbreviation and nothing to localize.
-const REVIVE_GLYPH_ADV := 15.0  # c3-01: x-reserve for the trailing revive / BAIL-OUT prompt glyph
-                       # on the direct-draw player rows (drawn at label_end + 9 with radius ~5.5, so
-                       # its right edge sits ~14.5px past the label). Folded into the row fit guard
-                       # so the glyph can't be the one thing that spills past RIGHT once the label
-                       # itself fit.
+const GLYPH_GAP := 3.5  # gap between a label's right edge and the LEFT edge of its trailing
+                       # keycap. Replaces REVIVE_GLYPH_ADV, which was a frozen 15.0 "advance"
+                       # measured off a size x size SQUARE cap — true only for the single-letter
+                       # ship defaults. A "Space" bind makes that cap 38.9px wide at size 11, so
+                       # the reserve under-counted by 13.43px AND the cap, being centred on a
+                       # square-derived centre and drawn after the text, painted 10.43px back over
+                       # the label ("REVIVE 75" -> "REVIVE 7" welded to the keycap; a price digit
+                       # is 9.0px). Reserve now comes from _act_glyph_adv, which reads the real
+                       # width off Art.glyph_cap_w — one formula, no frozen copy to drift.
+                       # 3.5 == the old single-letter geometry exactly (centre at label_end + 9,
+                       # cap 11 wide -> left edge at label_end + 3.5), so default binds lay out
+                       # byte-identically and only wide binds move.
 # c1-04: glyph-center y of the transient bottom-center verb reminder. The stat
 # panel and player rows live in the top ~90px, so this low band can't collide with
 # them; a layout test pins it clear of both the top HUD and the 360px viewport.
@@ -839,7 +846,8 @@ func _draw() -> void:
 				else:
 					bailtxt = TranslationServer.translate("BAIL OUT! %ds") % ((t["burn_ticks"] + 59) / 60)
 					bailcol = Color(1.0, 0.3, 0.2)
-				if not _row_fits(px, _tw(bailtxt) + REVIVE_GLYPH_ADV):
+				var bail_adv := _act_glyph_adv("interact", 11.0, 1 if i == 1 else 0)
+				if not _row_fits(px, _tw(bailtxt) + bail_adv):
 					px = _row_ovf(px, ry)
 				else:
 					# Draw the prompt on-blink, but ALWAYS advance px past its reserved width so the
@@ -847,9 +855,9 @@ func _draw() -> void:
 					# instead of painting over it — the burning branch used to leave px unmoved.
 					if _mblink(bailblink):
 						var bx := _warn_text(bailtxt, px, ry + ROW_TEXT_BASELINE, bailcol)
-						_emit_act_glyph("interact", Vector2(bx + 9.0, ry + ICON / 2.0), 11.0,
+						_emit_act_glyph_at("interact", bx + GLYPH_GAP, ry + ICON / 2.0, 11.0,
 							Color.WHITE, i == 1)
-					px += _tw(bailtxt) + REVIVE_GLYPH_ADV
+					px += _tw(bailtxt) + bail_adv
 			elif driver:
 				var gcol_tank := Color(0.95, 0.96, 0.9)
 				var twarn: bool = p["grenade_ammo"] == 0   # c2-07: drives the dry-cannon numeral's contrast shadow
@@ -1538,10 +1546,13 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# strip and the wheel cue are two views of the same buy surface, so showing both (even the cue over
 	# the closed dim icon peek) reads as conflicting instructions. Strictly one-or-the-other: the strip
 	# owns endless, and when it drops for height (2P) the wheel cue is the buy affordance instead.
-	if not shop_row and _fits2("supplies", _tw("SUPPLIES") + 25.0):
+	var wheel_adv := _act_glyph_adv("wheel", 11.0, 0)
+	if not shop_row and _fits2("supplies", _tw("SUPPLIES") + wheel_adv + 12.0):
 		if not _measure:
-			_emit_act_glyph("wheel", Vector2(x + 5.0, y + ICON / 2.0), 11.0, Color.WHITE, false)
-		x = _text("SUPPLIES", x + 13.0, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+			_emit_act_glyph_at("wheel", x + GLYPH_GAP, y + ICON / 2.0, 11.0, Color.WHITE, false)
+		# Text starts past the REAL cap, not a frozen +13.0 that assumed a square: a "Q"
+		# rebound to Backspace made the cap 66.8px and buried the word it labels.
+		x = _text("SUPPLIES", x + wheel_adv, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
 	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
 	# zero HUD read — the countdown says how long the free-fire window lasts.
 	if sim.flash_ticks > 0:
@@ -2243,7 +2254,7 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	# overflow (same reserve grammar the old prefix planner used, now priority-ordered).
 	var cands: Array = []
 	for i in chips.size():
-		cands.append({"id": i, "prio": chips[i]["prio"], "w": _chip_w(chips[i])})
+		cands.append({"id": i, "prio": chips[i]["prio"], "w": _chip_w(chips[i], 1 if pi == 1 else 0)})
 	var budget := _fit_full - px
 	# c3-01: the buff tail reserves the EXACT +N slot via the SHARED _ovf_fit fixpoint (same as row 0),
 	# not the crude worst-case "+chips.size()" it used to — which subtracted too much width and could
@@ -2265,9 +2276,12 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 		else:
 			px = _stat(c["icon"], c["txt"], px, ry, c["col"])
 			if c.has("glyph"):
-				_emit_act_glyph("interact", Vector2(px + 4.0, ry + ICON / 2.0), 10.0,
+				# Left-anchored + true advance: the frozen `+4.0 / += 12.0` pair centred a
+				# 10.5px cap on px+4, so even the SINGLE-LETTER default already painted 1.25px
+				# back over the chip it trails, and the next chip started inside the cap.
+				_emit_act_glyph_at("interact", px + GLYPH_GAP, ry + ICON / 2.0, 10.0,
 					Color.WHITE, pi == 1)
-				px += 12.0
+				px += _act_glyph_adv("interact", 10.0, 1 if pi == 1 else 0)
 	if hidden > 0:
 		# c4-03: same shared "+N" chip as row 0, clamped within the usable edge. Red ("!N") when the
 		# dropped chip is a TIMED buff (prio above BUFF_PRIO_PERSIST — an expiring countdown to re-up
@@ -2282,10 +2296,14 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 ## chip mirrors _stat's advance (icon + 3 + text + 10 == icon + 13 + text), a claymore
 ## adds its trailing interact glyph. Shared by the fit measure so a width can never
 ## disagree with the drawn footprint.
-func _chip_w(c: Dictionary) -> float:
+func _chip_w(c: Dictionary, dev := 0) -> float:
 	if c.has("vest"):
 		return ICON + 2.0
-	return ICON + 13.0 + _tw(c["txt"]) + (12.0 if c.has("glyph") else 0.0)
+	# The trailing interact keycap costs its REAL advance (gap + live cap width), not a
+	# frozen 12.0 sized off a square — the planner budget and the drawn footprint have to
+	# agree for a wide rebind too, and they are measured for the SAME seat that draws.
+	return ICON + 13.0 + _tw(c["txt"]) \
+		+ (_act_glyph_adv("interact", 10.0, dev) if c.has("glyph") else 0.0)
 
 
 ## Exponential catch-up toward `target`, snapping once close — a big jump
@@ -2619,13 +2637,18 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 	# players even with colorblind mode on) — one dialect with the shop strip and the spend
 	# wheel's socket mark.
 	var rlabel := ("REVIVE %d" if afford else "REVIVE %d ×") % cost
-	# The prompt is the label plus a trailing revive glyph (drawn at tx+9, radius ~5.5).
-	if not _row_fits(px, _tw(rlabel) + REVIVE_GLYPH_ADV):
+	# The prompt is the label plus a trailing revive keycap, LEFT-anchored at the label's right
+	# edge: the cap's width depends on the live bind ("Space", the ship default, is 38.9px at
+	# size 11 — 3.5x a square) and only the left edge is known before it is measured. Centring
+	# it on tx+9 grew it 10.43px BACK over the label, and the cap is drawn after the text, so it
+	# hid the last digit of the price: "REVIVE 75" read as "REVIVE 7" welded to the keycap.
+	var rev_adv := _act_glyph_adv("revive", 11.0, 1 if i == 1 else 0)
+	if not _row_fits(px, _tw(rlabel) + rev_adv):
 		return _row_ovf(px, ry)
 	# c2-07: the unaffordable (warning-red) label gets the contrast drop-shadow so it reads over
 	# a bright field; the affordable (safe) label needs none.
 	var tx := _text(rlabel, px, ty, col, not afford)
-	_emit_act_glyph("revive", Vector2(tx + 9.0, ry + ICON / 2.0), 11.0, Color.WHITE, i == 1)
+	_emit_act_glyph_at("revive", tx + GLYPH_GAP, ry + ICON / 2.0, 11.0, Color.WHITE, i == 1)
 	return px
 
 
@@ -2665,7 +2688,10 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# timed/ammo _stat advance is ICON + 13 + text; roll is a glyph + 2px gap.
 	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + MAG_ADV
 	var gren_w := ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])
-	var eq_plan := plan_chips([ammo_w, gren_w, ICON + 2.0], px, _fit_full, _ovf_slot_w(3))
+	# The roll chip's slot is the keycap's REAL advance, not ICON + 2.0 — that budget is
+	# 11.9px short of a "Space"-bound roll and the glyph overran the chip after it.
+	var roll_adv := _act_glyph_adv("roll", 11.0, 1 if i == 1 else 0)
+	var eq_plan := plan_chips([ammo_w, gren_w, roll_adv], px, _fit_full, _ovf_slot_w(3))
 	var eq_shown: int = eq_plan["shown"]
 	if eq_shown >= 1:
 		var ammo_x := px
@@ -2696,14 +2722,19 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		# feet — a mashing player couldn't tell recharging from unbound. Bright glyph when ready,
 		# dimmed + draining ring while recharging (same grammar as the grenade/bash rings above).
 		var roll_x := px
-		_emit_act_glyph("roll", Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), 11.0,
+		# Genuinely slot-centred (nothing trails it), so it keeps the centred call — but the
+		# SLOT is now roll_adv wide instead of a frozen ICON + 2.0, so a wide bind widens the
+		# budget instead of spilling into the chip after it. The cooldown ring rides the same
+		# centre, so glyph and ring can never drift apart.
+		var roll_cx := roll_x + roll_adv / 2.0
+		_emit_act_glyph("roll", Vector2(roll_cx, ry + ICON / 2.0), 11.0,
 			Color.WHITE if roll_ready else Color(0.55, 0.6, 0.65, 0.6), i == 1)
-		px = roll_x + ICON + 2.0
+		px = roll_x + roll_adv
 		if p["roll_cd"] > 0:
 			var rfrac := clampf(float(p["roll_cd"]) / float(SimWorld.ROLL_CD_TICKS), 0.0, 1.0)
-			Art.arc(self, Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(roll_cx, ry + ICON / 2.0), ICON * 0.55,
 				0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
-			Art.arc(self, Vector2(roll_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
+			Art.arc(self, Vector2(roll_cx, ry + ICON / 2.0), ICON * 0.55,
 				-PI / 2, -PI / 2 + TAU * rfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
 	# c2-01: any equipment unit that missed the edge (only reachable below the supported width)
 	# surfaces in the shared +N clip and the buff/status tail is skipped — nothing off-panel would
@@ -2880,6 +2911,27 @@ func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt:
 	# pad 1), so it doubles as the pad_bind device index — P2's chip shows P2's own rebinds.
 	Art.draw_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act, 1 if alt else 0))
+
+
+## LEFT-anchored twin of _emit_act_glyph — the correct seam for every glyph that trails a piece
+## of text, because at placement time the caller knows the label's right edge, not the cap's
+## width. Centring a variable-width cap on a fixed offset is what welded the keycap onto the
+## revive price; here the cap can only ever grow RIGHTWARDS, into space _act_glyph_adv reserved.
+func _emit_act_glyph_at(act: String, left_x: float, mid_y: float, size: float, col: Color, alt: bool) -> void:
+	Art.draw_glyph_left(self, act, left_x, mid_y, size, col, alt, main.bind_for_glyph(act),
+		main.pad_bind_for_glyph(act, 1 if alt else 0))
+
+
+## The x-advance a trailing act glyph really costs: the gap plus the cap width the LIVE bind
+## produces. Every reserve and every fit guard reads this, so a wide rebind widens the budget
+## instead of silently overrunning it.
+func _act_glyph_adv(act: String, size: float, dev: int) -> float:
+	# Tolerates a null `main` (a bare HudIcons used as a pure measure — _chip_w's own
+	# test does exactly that) by falling back to draw_glyph's own ship-default sentinels,
+	# which is what such a HUD would draw anyway.
+	var kc: int = main.bind_for_glyph(act) if main != null else -1
+	var pb: int = main.pad_bind_for_glyph(act, dev) if main != null else -1
+	return GLYPH_GAP + Art.glyph_cap_w(act, size, kc, pb, dev == 1)
 
 
 ## c4-03: reserved pixel width of the "+N" clip — sized off the WIDER of "+N"/"!N" so the alert

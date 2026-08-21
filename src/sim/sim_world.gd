@@ -720,6 +720,18 @@ const BOSS_CYCLE_TICKS := 300
 # 120: even the theoretical fastest kill crosses it, and the mortar act keeps
 # its full 180-tick shape, so the fight is not one tick longer.
 const BOSS_STRAFE_TICKS := 120
+# Endless miniboss approach: the wave-5 gunship spawns with phase_t NEGATIVE and
+# flies in over this many ticks (7.0 s) before its cycle starts at 0. Named
+# because BOTH sides need it — the sim to place the hitbox, the view to ramp the
+# haze/scale/rotor — and it shipped as a bare `-420` here and a bare `/ 420.0` in
+# main.gd, which is exactly the duplicated-literal seam test_view_honesty exists
+# to kill.
+const BOSS_FLYIN_TICKS := 420
+# Where the approach STARTS, as an offset from the arrival point: in from the
+# top-right. A straight vertical drop hid the whole approach behind the HUD strip
+# (arrival hovers at screen y ~50).
+const BOSS_FLYIN_DX := 150 * F_ONE
+const BOSS_FLYIN_DY := 55 * F_ONE
 # The four gunship-arena cover bags as [x, y_off_from_gate] pairs — the ONE
 # source of truth shared by the arena authoring AND the rotating-denial
 # invalidator, so a denied spot can never drift off a real bag.
@@ -3241,16 +3253,18 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
 			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": g["boss"]["gate_y"] - BOSS_Y_OFFSET})
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
-	# The fly-in guard mirrors _bullet_hits_boss: EVERY explosive (grenades,
-	# airbursts, barrels, mines/claymores, tank-death blasts) routes through this
-	# one branch, so this one conjunct makes "Endless fly-in: unhittable until
-	# arrival" true for the whole family. Kept at the hit seam, not in
-	# _damage_boss — tests drive that primitive directly on a mid-fly-in boss.
-	if not endless_boss.is_empty() and endless_boss["alive"] \
-			and endless_boss["phase_t"] >= 0 \
-			and _dist_lte(x, y, endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
-		events.append({"t": "boss_hit", "x": endless_boss["x"], "y": endless_boss["gate_y"] - BOSS_Y_OFFSET})
-		_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
+	# EVERY explosive (grenades, airbursts, barrels, mines/claymores, tank-death
+	# blasts) routes through this one branch, so tracking the approach here makes
+	# the whole family honest at once — the mirror of _bullet_hits_boss. This
+	# branch used to carry a `phase_t >= 0` conjunct that made the miniboss
+	# immune to all of them for its 7 s fly-in without so much as an armor_block.
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		var gbx: int = endless_boss["x"] + int(goff[0])
+		var gby: int = endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1])
+		if _dist_lte(x, y, gbx, gby, GRENADE_RADIUS + BOSS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": gbx, "y": gby})
+			_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
 	# The Colossus is pure armor: grenades are the only thing it respects.
 	if not colossus.is_empty() and colossus["alive"] \
 			and _dist_lte(x, y, colossus["x"], colossus["y"], GRENADE_RADIUS + COLOSSUS_HIT_RADIUS):
@@ -6305,7 +6319,12 @@ func _start_wave() -> void:
 		# zero new state; the arrival emits the endless_boss event instead.
 		endless_boss = {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
 			"max_hp": _scaled_boss_hp(BOSS_HP + (wave / 5 - 1) * (BOSS_HP / 2)),
-			"x": SCREEN_CX, "dir": 1, "phase_t": -420, "gate_y": camera_top + 90 * F_ONE}
+			"x": SCREEN_CX, "dir": 1, "phase_t": -BOSS_FLYIN_TICKS, "gate_y": camera_top + 90 * F_ONE}
+		# Warn on the SPAWN tick, with the whole approach still to come — the
+		# point of a telegraph. (Events are checksum-excluded, so moving it
+		# cannot touch either golden.)
+		events.append({"t": "endless_boss", "x": endless_boss["x"],
+			"y": endless_boss["gate_y"] - BOSS_Y_OFFSET})
 	if wave >= 4 and not _live_drop() and rng.range_i(0, 2) == 0:
 		# Mid-wave optional objective (5-vote panel, trimmed to the drop beat):
 		# a parachuted free crate lands down-screen and rushers magnet to it —
@@ -6662,6 +6681,22 @@ static func boss_mortar_ticks(tier: int) -> Array:
 	return BOSS_MORTAR_TICKS
 
 
+static func boss_flyin_offset(phase_t: int) -> Array:
+	## [dx, dy] in FIXED units: where the endless miniboss actually IS, relative
+	## to its arrival point, `phase_t` ticks into its approach. [0, 0] the moment
+	## it lands and for its whole engaged cycle.
+	##
+	## Shared pure helper (boss_mortar_ticks / boss_spray_interval precedent):
+	## the hull used to be DRAWN along this diagonal in main.gd while the sim
+	## tested the arrival point, so the sprite sat up to 159.8 px — 8x
+	## BOSS_HIT_RADIUS — off its own hitbox. One formula, both sides.
+	## Pure integer maths, so it stays clean under tools/lint_sim.gd.
+	if phase_t >= 0:
+		return [0, 0]
+	var eta: int = (BOSS_FLYIN_TICKS + phase_t) * F_ONE / BOSS_FLYIN_TICKS
+	return [Fixed.mul(F_ONE - eta, BOSS_FLYIN_DX), -Fixed.mul(F_ONE - eta, BOSS_FLYIN_DY)]
+
+
 static func boss_spray_interval(tier: int) -> int:
 	## Ticks between strafe-act chin-turret rounds at `tier` (= wave / 5). The
 	## cadence tightens 12 -> 6 with depth. Extracted (boss_mortar_ticks
@@ -6674,11 +6709,12 @@ static func boss_spray_interval(tier: int) -> int:
 
 func _step_one_boss(boss: Dictionary) -> void:
 	if boss["phase_t"] < 0:
-		# Endless fly-in: unhittable and silent until arrival (campaign bosses
-		# start at 0 and never enter this branch).
+		# Endless fly-in: the gunship holds its fire during the approach (campaign
+		# bosses start at 0 and never enter this branch). It is NOT invulnerable —
+		# see boss_flyin_offset and the two damage seams. The `endless_boss`
+		# warning is emitted at the SPAWN, in _start_wave: firing it here on
+		# arrival meant the "incoming" card landed 7 s after the thing appeared.
 		boss["phase_t"] = boss["phase_t"] + 1
-		if boss["phase_t"] == 0:
-			events.append({"t": "endless_boss", "x": boss["x"], "y": boss["gate_y"] - BOSS_Y_OFFSET})
 		return
 	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 	var t: int = boss["phase_t"]
@@ -6763,11 +6799,18 @@ func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
 			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
 			return true
-	if not endless_boss.is_empty() and endless_boss["alive"] and endless_boss["phase_t"] >= 0 \
-			and _dist_lte(b["x"], b["y"], endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
-		events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
-		_damage_boss(endless_boss, 1)
-		return true
+	# The miniboss is engageable from the first tick it is DRAWN, at the point it
+	# is drawn: boss_flyin_offset slides the disc down the approach ramp with the
+	# sprite ([0,0] once it lands). It used to refuse every round for the whole
+	# 420-tick fly-in, silently — the last silent damage refusal in this file,
+	# while the screen showed a helicopter absorbing 53 rounds.
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var eoff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		if _dist_lte(b["x"], b["y"], endless_boss["x"] + int(eoff[0]),
+				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(eoff[1]), BOSS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+			_damage_boss(endless_boss, 1)
+			return true
 	return false
 
 
@@ -6827,9 +6870,19 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 			bounty *= 2   # PAYDAY wave: every bounty doubles (same rule as _kill_enemy)
 		war_chest += bounty
 		score += bounty * 10
-		var by: int = boss["gate_y"] - BOSS_Y_OFFSET
-		events.append({"t": "explosion", "x": boss["x"], "y": by})
-		events.append({"t": "kill", "x": boss["x"], "y": by, "coin": bounty, "kind": "boss"})
+		# The wreck is where the HULL is, not where it was headed. Before the
+		# endless approach became damageable this block could only run at
+		# phase_t == 0, so it emitted at the arrival pad unconditionally; a
+		# mid-approach kill then threw the fireball, the coin toast and the
+		# ejecting pilot up to 159.8 px (8.0 boss-radii) off the helicopter the
+		# player had just shot down. Same offset the hitbox and the sprite use.
+		# .get, for the same reason max_hp above is a .get: test callers stage bare
+		# boss dicts. A boss with no phase field is an arrived one — offset [0, 0].
+		var doff: Array = boss_flyin_offset(boss.get("phase_t", 0))
+		var bx: int = boss["x"] + int(doff[0])
+		var by: int = boss["gate_y"] - BOSS_Y_OFFSET + int(doff[1])
+		events.append({"t": "explosion", "x": bx, "y": by})
+		events.append({"t": "kill", "x": bx, "y": by, "coin": bounty, "kind": "boss"})
 		# The gunship's pilot punches out at the crash site and staggers for the
 		# enemy line — reach him before the top edge for the ransom.
 		# Unconditional + floor-clamped: the MAX_ENEMIES gate silently voided the
@@ -6839,9 +6892,9 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		# Endless gets the deeper floor: its camera never recedes (see
 		# PILOT_FLOOR_ENDLESS), campaign keeps its receding-camera tuning.
 		var pilot_y: int = maxi(by, camera_top + (PILOT_FLOOR_ENDLESS if mode == "endless" else PILOT_FLOOR) * F_ONE)
-		enemies.append({"x": boss["x"], "y": pilot_y, "alive": true, "elite": false, "kind": "pilot",
+		enemies.append({"x": bx, "y": pilot_y, "alive": true, "elite": false, "kind": "pilot",
 			"submerged": true, "surface_ticks": PILOT_PUNCHOUT_TICKS})
-		events.append({"t": "pilot_down", "x": boss["x"], "y": pilot_y})
+		events.append({"t": "pilot_down", "x": bx, "y": pilot_y})
 
 
 func _step_enemy_bullets() -> void:

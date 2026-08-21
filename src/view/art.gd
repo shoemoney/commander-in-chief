@@ -1097,6 +1097,32 @@ static func focus_ring(ci: CanvasItem, r: Rect2, col: Color, thick := 1.0) -> vo
 		ci.draw_rect(Rect2(b.end.x - ch + i, b.end.y - 1.0 - i, thick, thick), col)
 
 
+static func _glyph_letter(action: String, keycode: int) -> String:
+	## The keyboard label a glyph shows for `action` under `keycode`.
+	## keycode == 0 is a LEGITIMATE cleared bind (menu.gd _apply_kb_bind(action, 0)),
+	## not the "caller didn't pass one" sentinel (-1) — key_label(0) returns the
+	## literal 7-char "UNBOUND", which used to get stamped across a ~12px keycap.
+	if keycode > 0:
+		return GameMenu.key_label(keycode)
+	if keycode == -1:
+		return _GLYPH_KEY[action]
+	return ""
+
+
+static func glyph_cap_w(action: String, size: float, keycode := -1, pad_button := -1, force_pad := false) -> float:
+	## The width draw_glyph will actually paint the keycap at — PUBLISHED, because
+	## every caller used to reserve a `size x size` square and centre the cap on a
+	## centre computed from that square. A multi-character bind ("Space" is 38.9px
+	## at size 11, "Backspace" 66.8px) then grew symmetrically about that centre and
+	## ate leftward into whatever preceded it — and the cap is drawn AFTER the text,
+	## so it painted over it. The shipped instance: the revive prompt's cap covered
+	## 10.43px of "REVIVE 75", hiding a 9.0px price digit.
+	if use_pad or force_pad:
+		return size
+	var _pb := pad_button   # keyboard path ignores it; kept so callers pass one arg set
+	return maxf(size, tw(_glyph_letter(action, keycode), maxi(8, int(size * 0.62))) + size * 0.35)
+
+
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1, pad_button := -1) -> void:
 	# force_pad: P2 is hardwired to pad 1 (main._gather_inputs), so P2's OWN
 	# prompts must show pad buttons even while P1's mouse aim keeps the global
@@ -1119,11 +1145,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		# keycode == 0 is a LEGITIMATE cleared bind (menu.gd _apply_kb_bind(action, 0)),
 		# not the "caller didn't pass one" sentinel (-1) — key_label(0) returns the
 		# literal 7-char "UNBOUND", which used to get stamped across a ~12px keycap.
-		var letter: String = ""
-		if keycode > 0:
-			letter = GameMenu.key_label(keycode)
-		elif keycode == -1:
-			letter = _GLYPH_KEY[action]
+		var letter := _glyph_letter(action, keycode)
 		var f := font()
 		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
 		# whole strokes below native scale (a 6px 'E' loses horizontals).
@@ -1135,13 +1157,22 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		# widen instead of shrinking every glyph, swapping in the blank wide keycap the
 		# generator already ships. Plate and ink are both centered on `pos`, so they can't
 		# drift apart.
-		var cap_w := maxf(size, w + size * 0.35)
+		var cap_w := glyph_cap_w(action, size, keycode, pad_button, force_pad)
 		var cap := Rect2(pos - Vector2(cap_w, size) / 2.0, Vector2(cap_w, size))
 		ci.draw_texture_rect(tex("glyph_key_wide" if cap_w > size else "ui_key_blank"),
 			cap, false, Color(0.96, 0.95, 0.88) * mod)
 		if letter != "":
 			ci.draw_string(f, pos + Vector2(-w / 2.0, size * 0.24), letter,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.15, 0.16, 0.12))
+
+
+static func draw_glyph_left(ci: CanvasItem, action: String, left_x: float, mid_y: float, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1, pad_button := -1) -> void:
+	## draw_glyph anchored by its LEFT edge instead of its centre — the correct
+	## call for every glyph that trails a piece of text, because only the left
+	## edge is known before the cap width is. Callers that genuinely own a centred
+	## slot keep using draw_glyph, provided the slot is reserved from glyph_cap_w.
+	var cw := glyph_cap_w(action, size, keycode, pad_button, force_pad)
+	draw_glyph(ci, action, Vector2(left_x + cw / 2.0, mid_y), size, mod, force_pad, keycode, pad_button)
 
 
 ## Device-aware prompt lookup: semantic action hint ('confirm', 'back',

@@ -2946,3 +2946,364 @@ func test_r8_reduce_motion_gates_wedge_mine_lane_observer() -> void:
 		"observer radar sweep holds still under reduce-motion")
 	Runner.T.ok(src.contains("if _motion >= 0.5:\n\t\top.y += sin(float(Engine.get_physics_frames()) * 0.07) * 0.8"),
 		"observer bob is gated, not an always-on sine")
+
+
+# --- Endless miniboss fly-in: the drawn hull vs the damageable hitbox ----------
+#
+# `_draw_one_gunship` paints the approaching miniboss along an authored diagonal
+# ramp (top-right -> arrival) while `_bullet_hits_boss` / `_explode` tested the
+# ARRIVAL point and refused damage outright for the whole 420-tick approach. Two
+# separate lies on one entity: the sprite is not where the hitbox is, and the
+# hitbox is not live. Every ratchet below samples a 720-tick window against a
+# 420-tick defect, so the sample can never sit entirely inside the healthy part.
+
+# The approach ramp, DERIVED from the sim's published constants rather than
+# restated. Hard-coding 150.0 / -55.0 here made this file a second copy of the
+# curve: re-tune BOSS_FLYIN_DX and the ratchet would have kept measuring the old
+# one. (Sign: boss_flyin_offset returns -DY, the hull comes in from ABOVE.)
+const FLYIN_VIEW_DX := float(SimWorld.BOSS_FLYIN_DX) * PX
+const FLYIN_VIEW_DY := -float(SimWorld.BOSS_FLYIN_DY) * PX
+
+
+func _flyin_boss_sim(pt: int) -> SimWorld:
+	## A fresh endless world whose wave-5 miniboss is pinned at `phase_t == pt`.
+	var sim := SimWorld.new(7, 1, "endless")
+	sim.wave = 4
+	sim._start_wave()
+	Runner.T.ok(not sim.endless_boss.is_empty(), "wave 5 fields an endless miniboss")
+	sim.endless_boss["phase_t"] = pt
+	sim.events.clear()
+	return sim
+
+
+func _flyin_drawn_px(sim: SimWorld) -> Vector2:
+	## Screen-space centre the VIEW paints the hull at, in px.
+	var pt: int = sim.endless_boss["phase_t"]
+	var eta: float = 1.0 + float(pt) / float(SimWorld.BOSS_FLYIN_TICKS) if pt < 0 else 1.0
+	var gx: float = sim.endless_boss["x"] * PX
+	var gy: float = (sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET) * PX
+	return Vector2(gx + (1.0 - eta) * FLYIN_VIEW_DX, gy + (1.0 - eta) * FLYIN_VIEW_DY)
+
+
+func _flyin_samples() -> Array[int]:
+	## Every 10th tick across the whole approach AND a full engaged cycle:
+	## 720 ticks of window against a 420-tick defect.
+	var out: Array[int] = []
+	var t := -SimWorld.BOSS_FLYIN_TICKS
+	while t < SimWorld.BOSS_CYCLE_TICKS:
+		out.append(t)
+		t += 10
+	return out
+
+
+func test_endless_boss_is_hittable_wherever_it_is_drawn() -> void:
+	## HEAD: 42/42 fly-in samples returned hit=false with an empty event list and
+	## hp unchanged, while the view drew a helicopter the player was emptying a
+	## magazine into. Every OTHER damage refusal in the sim (bunkers, sandbags,
+	## tank hulks, rocks, shield front-arc, enemy armour, closed colossus core)
+	## already emits `armor_block`; this was the last silent one in the file.
+	var bullet_ok := 0
+	var blast_ok := 0
+	var samples := _flyin_samples()
+	for pt in samples:
+		# --- bullet ---
+		var sim := _flyin_boss_sim(pt)
+		var hp0: int = sim.endless_boss["hp"]
+		var at := _flyin_drawn_px(sim)
+		var b := {"x": int(at.x * Fixed.ONE), "y": int(at.y * Fixed.ONE)}
+		var hit: bool = sim._bullet_hits_boss(b)
+		var got_ev := false
+		for e in sim.events:
+			if e["t"] == "boss_hit":
+				got_ev = true
+		if hit and got_ev and sim.endless_boss["hp"] == hp0 - 1:
+			bullet_ok += 1
+		# --- explosive family (grenade / airburst / barrel / mine) ---
+		var sim2 := _flyin_boss_sim(pt)
+		var hp2: int = sim2.endless_boss["hp"]
+		var at2 := _flyin_drawn_px(sim2)
+		sim2._explode(int(at2.x * Fixed.ONE), int(at2.y * Fixed.ONE))
+		var got2 := false
+		for e in sim2.events:
+			if e["t"] == "boss_hit":
+				got2 = true
+		if got2 and sim2.endless_boss["hp"] < hp2:
+			blast_ok += 1
+	Runner.T.eq(bullet_ok, samples.size(),
+		"a round on the drawn hull damages the miniboss at every sampled tick (%d/%d)"
+			% [bullet_ok, samples.size()])
+	Runner.T.eq(blast_ok, samples.size(),
+		"a blast on the drawn hull damages the miniboss at every sampled tick (%d/%d)"
+			% [blast_ok, samples.size()])
+
+
+func test_flyin_sprite_sits_on_its_own_hitbox() -> void:
+	## The disc must MOVE with the sprite, not merely grow to swallow both. HEAD
+	## drew the hull up to 159.8 px from the arrival point it tested — 8.0x
+	## BOSS_HIT_RADIUS — so a fix that inflated the radius instead of relocating
+	## the disc would still be a lie. Assert both edges: a round ON the drawn hull
+	## registers (test_endless_boss_is_hittable_wherever_it_is_drawn), and a round
+	## 1.5 radii PAST it, back along the approach ramp, does not.
+	var divorce := 0.0
+	var sep := 0.0
+	var far_misses := 0
+	var samples := _flyin_samples()
+	for pt in samples:
+		var sim := _flyin_boss_sim(pt)
+		var arrival := Vector2(sim.endless_boss["x"] * PX,
+			(sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET) * PX)
+		var drawn := _flyin_drawn_px(sim)
+		divorce = maxf(divorce, drawn.distance_to(arrival))
+		# The sim's live hit-disc centre, straight off the shared helper.
+		var hoff: Array = SimWorld.boss_flyin_offset(pt)
+		var disc := Vector2(float(sim.endless_boss["x"] + int(hoff[0])) * PX,
+			float(sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(hoff[1])) * PX)
+		sep = maxf(sep, drawn.distance_to(disc))
+		# 1.5 radii further UP the ramp than the hull — empty sky at every tick.
+		var ramp := Vector2(FLYIN_VIEW_DX, FLYIN_VIEW_DY).normalized()
+		var off_hull := drawn + ramp * (SimWorld.BOSS_HIT_RADIUS * PX * 1.5)
+		var hp0: int = sim.endless_boss["hp"]
+		var hit: bool = sim._bullet_hits_boss({"x": int(off_hull.x * Fixed.ONE),
+			"y": int(off_hull.y * Fixed.ONE)})
+		if not hit and sim.endless_boss["hp"] == hp0:
+			far_misses += 1
+	Runner.T.eq(far_misses, samples.size(),
+		"empty sky 1.5 radii off the drawn hull stays a miss (%d/%d) — the disc MOVED, it did not grow"
+			% [far_misses, samples.size()])
+	Runner.T.ok(divorce > SimWorld.BOSS_HIT_RADIUS * PX,
+		"sanity: the approach really does travel far from the arrival point (%.1f px vs a %.1f px radius)"
+			% [divorce, SimWorld.BOSS_HIT_RADIUS * PX])
+	# --- Source half ---------------------------------------------------------
+	# Everything above measures a DERIVATION of the ramp, not main.gd's own draw
+	# call, so on its own it cannot see the view drifting off the helper it reads:
+	# `int(foff[0]) * 2` re-creates the full 159.8 px divorce, carries none of the
+	# banned literals, and sails past a name-only grep. So pin the whole placement
+	# EXPRESSION, character for character — the offset is consumed as-is or this
+	# goes red.
+	var view := _view_src()
+	var branch := view.substr(view.find("func _draw_one_gunship"))
+	branch = branch.substr(0, branch.find("\tvar bpos := _to_screen"))
+	Runner.T.ok(branch.contains("boss_flyin_offset"),
+		"the fly-in draw branch positions the hull from SimWorld.boss_flyin_offset")
+	Runner.T.ok(branch.contains("var apos := _to_screen(boss[\"x\"] + int(foff[0]),\n"
+			+ "\t\t\tboss[\"gate_y\"] - SimWorld.BOSS_Y_OFFSET + int(foff[1]))"),
+		"the hull is drawn at EXACTLY the sim's offset hull point — no arithmetic on foff beyond int()")
+	var span := branch.substr(branch.find("var foff:"))
+	span = span.substr(0, span.find("_spr(body_tex, apos"))
+	for bad in ["foff[0] *", "foff[0] +", "foff[0] -", "foff[0] /",
+			"foff[1] *", "foff[1] +", "foff[1] -", "foff[1] /"]:
+		Runner.T.ok(not span.contains(bad),
+			"no arithmetic ('%s') is applied to the sim's fly-in offset before drawing" % bad)
+	for lit in ["150.0", "55.0", "420.0", "420"]:
+		Runner.T.ok(not branch.contains(lit),
+			"the fly-in draw branch carries no restated '%s' ramp literal" % lit)
+	# Numeric half of R2: the point the view is pinned to and the point the sim
+	# tests are the SAME point at every sampled tick (0.0 px, vs 159.8 px on HEAD).
+	Runner.T.ok(sep <= SimWorld.BOSS_HIT_RADIUS * PX,
+		"worst drawn-hull vs hit-disc separation is %.1f px, inside the %.1f px hit radius"
+			% [sep, SimWorld.BOSS_HIT_RADIUS * PX])
+
+
+func test_flyin_bar_does_not_name_an_act_the_sim_refuses() -> void:
+	## The fly-in now draws the top-center boss bar for the whole 420-tick approach
+	## (it used to leave the slot it claimed empty). That bar names the boss's ACT,
+	## and `_step_one_boss` returns before any firing while `phase_t < 0` — "the
+	## gunship holds its fire during the approach". So borrowing act one's name
+	## ("STRAFING RUN") for the approach puts a lie in the highest-stakes read on
+	## screen for 7.00 s. Sampled across the same 720-tick window as its siblings.
+	var strafe: String = Main.GUNSHIP_PHASE_NAMES[0]
+	var bad := 0
+	var good := 0
+	var approach := 0
+	var engaged := 0
+	for pt in _flyin_samples():
+		var lbl: String = Main.gunship_phase_label("GUNSHIP", pt)
+		if pt < 0:
+			approach += 1
+			if not lbl.contains(strafe):
+				bad += 0
+			else:
+				bad += 1
+		elif pt < SimWorld.BOSS_STRAFE_TICKS:
+			engaged += 1
+			if lbl.contains(strafe):
+				good += 1
+	Runner.T.eq(bad, 0,
+		"the approach bar never names the strafing run the sim refuses to perform (%d/%d samples did)"
+			% [bad, approach])
+	Runner.T.eq(good, engaged,
+		"once engaged, the bar DOES name act one (%d/%d samples)" % [good, engaged])
+	# One vocabulary, two surfaces: the spawn banner says GUNSHIP INBOUND, so the
+	# bar under it must not say something else about the same 7 s.
+	var inbound: String = Main.gunship_phase_label("GUNSHIP", -SimWorld.BOSS_FLYIN_TICKS)
+	Runner.T.ok(inbound.contains("INBOUND"),
+		"the approach bar reads INBOUND, matching the spawn banner (got '%s')" % inbound)
+	Runner.T.ok(_view_src().contains("show_banner(\"GUNSHIP INBOUND\""),
+		"the spawn banner this shares its vocabulary with is still worded GUNSHIP INBOUND")
+
+
+func test_gunship_warning_precedes_its_approach() -> void:
+	## HEAD: the `endless_boss` warning fired on the tick the gunship ARRIVED —
+	## 420 ticks (7.0 s) after it entered the screen, i.e. the "incoming" card
+	## landed once the thing was already overhead.
+	var sim := SimWorld.new(7, 1, "endless")
+	sim.wave = 4
+	sim.events.clear()
+	sim._start_wave()
+	var found := false
+	for e in sim.events:
+		if e["t"] == "endless_boss":
+			found = true
+	Runner.T.ok(found, "the endless_boss warning is emitted on the SPAWN tick")
+	Runner.T.ok(sim.endless_boss["phase_t"] <= -SimWorld.BOSS_FLYIN_TICKS + 1,
+		"...with the whole approach still ahead (phase_t %d)" % int(sim.endless_boss["phase_t"]))
+	# ...and never a second time at arrival.
+	var late := 0
+	for i in SimWorld.BOSS_FLYIN_TICKS + 5:
+		sim.events.clear()
+		sim._step_one_boss(sim.endless_boss)
+		for e in sim.events:
+			if e["t"] == "endless_boss":
+				late += 1
+	Runner.T.eq(late, 0, "the warning is not re-emitted at arrival")
+
+
+func test_no_damage_path_gates_on_flyin_phase() -> void:
+	## Pins the CLASS in source so it cannot be satisfied cosmetically: neither
+	## damage seam may branch on the fly-in phase again. HEAD: 2 occurrences.
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	for fn in ["_bullet_hits_boss", "_explode"]:
+		var body := src.substr(src.find("func %s(" % fn))
+		body = body.substr(0, body.find("\n\nfunc "))
+		var bad := 0
+		for line in body.split("\n"):
+			var code: String = line.strip_edges()
+			if code.begins_with("#"):
+				continue
+			if not code.contains("phase_t"):
+				continue
+			for op in [">=", "<=", "==", "!=", ">", "<"]:
+				if code.contains("phase_t\"] %s" % op) or code.contains("phase_t %s" % op):
+					bad += 1
+					break
+		Runner.T.eq(bad, 0, "%s carries no fly-in phase gate (%d found)" % [fn, bad])
+
+
+func test_flyin_rewards_tracking_not_the_arrival_point() -> void:
+	## The balance the fix creates, pinned — and it is NOT "the approach survives".
+	## MEASURED on this tree, driving `main.demo_input` on a real
+	## `SimWorld.new(seed, 1, "endless")` from tick 0 to the wave-5 miniboss,
+	## 7 seeds (`hp_max` 40 in all of them):
+	##   seed  7  fielded t=2098  hp@arrival  8/40   (32 landed during the approach)
+	##   seed 11  fielded t=2387  DESTROYED mid-approach at phase_t = -95
+	##   seed 23  never fields a miniboss inside 8 minutes
+	##   seed 42  fielded t=2209  hp@arrival 31/40
+	##   seed 55  fielded t=1835  hp@arrival 38/40
+	##   seed  3  fielded t=2217  hp@arrival 15/40
+	##   seed 99  fielded t=1986  DESTROYED mid-approach at phase_t = -16
+	## So: 6 seeds field it, 2 of those 6 kill it before it lands, and the median
+	## hp@arrival across the 4 that do land is 23/40. The approach is genuinely
+	## deletable — that is the intended skill payoff, and it is why the death block
+	## in `_damage_boss` now has to place its wreck FX by `boss_flyin_offset`
+	## (see test_flyin_death_fx_land_on_the_wreck_not_the_pad). What must stay
+	## true is that the damage costs TRACKING.
+	## (Instrument limit: those are the SHIPPED BOT's numbers, open-loop aim — read
+	## them as "a competent lane, not a human's best", per sector_probe.gd:12-20.)
+	##
+	## A shooter who keeps holding the arrival point — which is exactly what the
+	## pre-fix hitbox rewarded, and what a "just widen the radius" fix would keep
+	## rewarding — must land nothing while the hull is more than one radius away
+	## from it.
+	var tracked := 0
+	var arrival_missed := 0
+	var arrival_eligible := 0
+	var samples := _flyin_samples()
+	for pt in samples:
+		var sim := _flyin_boss_sim(pt)
+		var arrival := Vector2(sim.endless_boss["x"] * PX,
+			(sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET) * PX)
+		var drawn := _flyin_drawn_px(sim)
+		if sim._bullet_hits_boss({"x": int(drawn.x * Fixed.ONE), "y": int(drawn.y * Fixed.ONE)}):
+			tracked += 1
+		if drawn.distance_to(arrival) > SimWorld.BOSS_HIT_RADIUS * PX:
+			arrival_eligible += 1
+			var sim2 := _flyin_boss_sim(pt)
+			if not sim2._bullet_hits_boss({"x": int(arrival.x * Fixed.ONE),
+					"y": int(arrival.y * Fixed.ONE)}):
+				arrival_missed += 1
+	Runner.T.eq(tracked, samples.size(),
+		"a tracking shooter connects at every sampled tick (%d/%d)" % [tracked, samples.size()])
+	Runner.T.ok(arrival_eligible >= 30,
+		"sanity: the hull spends most of the approach off the arrival point (%d of %d samples)"
+			% [arrival_eligible, samples.size()])
+	Runner.T.eq(arrival_missed, arrival_eligible,
+		"holding the arrival point lands nothing while the hull is elsewhere (%d/%d) — the fly-in costs tracking"
+			% [arrival_missed, arrival_eligible])
+
+
+func test_flyin_death_fx_land_on_the_wreck_not_the_pad() -> void:
+	## The SIBLING SEAM the hitbox fix opened. Making the approach damageable made
+	## `_damage_boss`'s death block reachable at negative `phase_t` for the first
+	## time — and that block was written when the boss could only ever die at its
+	## arrival point, so it emitted `explosion` / `kill` (the coin toast) /
+	## `pilot_down` at `boss["x"], gate_y - BOSS_Y_OFFSET` with no fly-in offset.
+	##
+	## MEASURED on this tree before the fix, killing the boss at each sampled tick:
+	##   phase_t=-420  hull=(470.0,-365.0)  explosion@(320.0,-310.0)  d=159.8 px
+	##   phase_t=-300  d=114.1 px    phase_t=-160  d=61.0 px    phase_t=0  d=0.0 px
+	## i.e. the wreck ball, the coin toast and the ejecting pilot all fired up to
+	## 8.0 boss-radii from the helicopter the player had just shot down.
+	var samples := _flyin_samples()
+	var fx_off := 0
+	var worst := 0.0
+	var pilot_off := 0
+	for pt in samples:
+		var sim := _flyin_boss_sim(pt)
+		var boss: Dictionary = sim.endless_boss
+		var off: Array = SimWorld.boss_flyin_offset(pt)
+		var hull := Vector2(float(boss["x"] + int(off[0])) * PX,
+			float(boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(off[1])) * PX)
+		boss["hp"] = 1
+		sim._damage_boss(boss, 1)
+		Runner.T.ok(not boss["alive"], "the sampled hit kills the miniboss (phase_t %d)" % pt)
+		var seen := 0
+		for ev in sim.events:
+			if ev["t"] == "explosion" or ev["t"] == "kill":
+				seen += 1
+				var d: float = Vector2(float(ev["x"]) * PX, float(ev["y"]) * PX).distance_to(hull)
+				worst = maxf(worst, d)
+				if d > SimWorld.BOSS_HIT_RADIUS * PX:
+					fx_off += 1
+			elif ev["t"] == "pilot_down":
+				seen += 1
+				# The pilot's Y is deliberately floor-clamped off the top edge
+				# (PILOT_FLOOR_ENDLESS) — pin the clamp, not a raw distance.
+				var floor_y: int = sim.camera_top + SimWorld.PILOT_FLOOR_ENDLESS * SimWorld.F_ONE
+				var want_y: int = maxi(boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(off[1]), floor_y)
+				if ev["x"] != boss["x"] + int(off[0]) or ev["y"] != want_y:
+					pilot_off += 1
+		Runner.T.eq(seen, 3, "the death emits explosion + kill + pilot_down (phase_t %d)" % pt)
+	Runner.T.eq(fx_off, 0,
+		"the wreck ball and the coin toast fire ON the hull at every sampled tick (%d/%d off, worst %.1f px)"
+			% [fx_off, samples.size(), worst])
+	Runner.T.eq(pilot_off, 0,
+		"the pilot punches out at the crash site, floor-clamped (%d/%d misplaced)"
+			% [pilot_off, samples.size()])
+
+
+func test_flyin_hull_reacts_to_being_shot() -> void:
+	## `_boss_flash` is set on EVERY `boss_hit` (main.gd, "the big body reacts, not
+	## just a spark") — but the arrived path's `hull_mod.lerp(Color(2.2, 2.2, 2.2),
+	## _boss_flash)` sits PAST the fly-in branch's `return`, so before this fix the
+	## one window this cycle exists to open was also the one window where the body
+	## never reacted to a round landing on it. Source-pinned, same idiom as
+	## test_flyin_sprite_sits_on_its_own_hitbox's grep half.
+	var view := _view_src()
+	var body := view.substr(view.find("func _draw_one_gunship("))
+	var flyin := body.substr(0, body.find("\n\tvar bpos := _to_screen("))
+	Runner.T.ok(flyin.length() > 200 and flyin.contains("boss_flyin_offset"),
+		"scraped the fly-in branch of _draw_one_gunship (%d chars)" % flyin.length())
+	Runner.T.ok(flyin.contains("_boss_flash"),
+		"the fly-in hull colour reacts to _boss_flash — a round landing during the approach flashes the body")
+	Runner.T.ok(flyin.contains("2.2, 2.2, 2.2"),
+		"it flashes toward the SAME white-hot the engaged hull uses, not a second authored value")
