@@ -1,11 +1,7 @@
 # Backlog
 
-Open defects, design calls and debt for Commander In Chief, as of **2026-07-31** (branch
-`main` @ `390c12d`).
-
-Retriaged **2026-08-03** against the 21-commit window `390c12d..34dd43f` (branch `main` @
-`34dd43f`), including critical fixes in `6fa0aaa`. Verdicts below are appended under each
-entry's original body — the original `Where:`/`MEASURED` text is never edited or removed.
+Open defects, design calls and debt for Commander In Chief, as of **2026-08-03** (branch
+`main` @ `34dd43f`, retriage against 21-commit window 390c12d..HEAD including critical `6fa0aaa`).
 
 > ⚠️ **Read the severities sceptically — that is a rule this project paid for.** Handed-down
 > reports here have repeatedly named a real smell and got the consequence wrong by a whole
@@ -143,73 +139,19 @@ per-section.
   3-second hold was discarded every tick). Both players then holding: deployed in exactly 20
   ticks. And `ready_hold` has ZERO view reads (grep over `src/main.gd` + `src/view/hud.gd` —
   none). *(Report text truncated at source.)*
-- **Daily Run teaches "one attempt" — but the lock only arms at the debrief, so QUIT TO TITLE /
-  RESTART makes today's seed infinitely scoutable.** Where: taught rule at
-  `src/view/menu.gd:5136` ("One shared seed a day, one attempt."); the lock's only write at
-  `src/main.gd:4753-4758` (`_daily_done_seed = _current_seed` inside `_record_run`); the only
-  caller chain is `_apply_score_verdict` (`src/main.gd:4709`) ← the debrief trigger at
-  `src/main.gd:4928-4943`, which fires on `sim.victory or sim.wiped or last-stand-all-down`.
-  The exit paths — pause menu "QUIT TO TITLE" (`src/view/menu.gd:3185-3188`) and "RESTART"
-  (`:3183-3184`) — call `main._reset()` directly, which runs `_flush_bests()`
-  (`src/main.gd:1855`) that touches only best/hint sections, never the daily lock.
-  *(`d45132a` shipped the arm+demote behavior this run — owner decisions #13/#14. The lens
-  still flags the scouting remainder; the open item is what survived `d45132a`.)*
-  **RESOLVED 2026-07-31** — `d45132a`. Verified `src/main.gd:_reset()` (~1487-1527): daily lock
-  now arms at DEAL time via `_daily_done_seed = seed_v` written to disk before any play, and a
-  reset while spent re-deals the SAME board demoted to unranked practice (`_daily = false`).
-  Fully proven by `tests/test_menu_layout.gd:637` `test_daily_attempt_spent_on_any_abandon_path`
-  (checks disk-persistence, demotion, Hall non-tagging, and TITLE row lock — all 4 assertions
-  pass).
-- **DAILY RUN's "one attempt" is only enforced at the debrief — R/RESTART before the wipe
-  retries the same seed, unlocked, forever.** Where: copy at `src/view/menu.gd:5136`; the lock
-  write at `src/main.gd:4753-4759` (`_daily_done_seed` written ONLY in `_record_run`); the
-  restart path at `src/main.gd:1434-1452` (`_reset()` → `_flush_bests()` persists only
-  `best`/`seen` — the daily seed is untouched) and `:1770-1776` (R key → `_reset()`).
-  MEASURED live against the real main scene headlessly: `start_daily()` → seed 1017050458,
-  `daily_done()==false`; play 240 real ticks; call `_reset()` (the R-key path) → same seed
-  1017050458, `daily_done()==false`, `_daily` still true — unlimited retries. *(Near-duplicate
-  of the entry above from a second lens — kept because its measurement is independent.
-  `d45132a` shipped; this is the flagged remainder.)*
-  **RESOLVED 2026-07-31** — `d45132a` (same commit as above). Verified: the `_reset()` path no
-  longer bypasses the daily lock because the lock is now armed BEFORE play (at `_start_run()`
-  for a new daily, or at `_reset()` for a spent one seeking re-deal). The measurement "seed
-  1017050458" from `start_daily()` → `_reset()` → same seed now correctly resolves to the
-  DEMOTED practice board — the redealt board is the same because the spent seed stays in
-  `_daily_done_seed`, and demotion (`_daily = false`) is the only escape. Fully resolved, all 4
-  paths (quit/restart/wipe/victory) tested.
+- ~~**Daily Run teaches "one attempt" — but the lock only arms at the debrief, so QUIT TO TITLE /
+  RESTART makes today's seed infinitely scoutable.**~~ **RESOLVED 2026-07-31** — `d45132a`. 
+  Verified `src/main.gd:_reset()` (~1487-1527): daily lock now arms at DEAL time via `_daily_done_seed = seed_v` written to disk before any play, and a reset while spent re-deals the SAME board demoted to unranked practice (`_daily = false`). Fully proven by `tests/test_menu_layout.gd:637` `test_daily_attempt_spent_on_any_abandon_path` (checks disk-persistence, demotion, Hall non-tagging, and TITLE row lock — all 4 assertions pass).
+- ~~**DAILY RUN's "one attempt" is only enforced at the debrief — R/RESTART before the wipe
+  retries the same seed, unlocked, forever.**~~ **RESOLVED 2026-07-31** — `d45132a` (same commit as above).
+  Verified: `_reset()` path no longer bypasses the daily lock because the lock is now armed BEFORE play (at `_start_run()` for new daily, or at `_reset()` for a spent one seeking re-deal). The measurement "seed 1017050458" from `start_daily()` → `_reset()` → same seed now correctly resolves to the DEMOTED practice board — the redealt board is the same because the spent seed stays in `_daily_done_seed`, and demotion (`_daily = false`) is the only escape. Fully resolved, all 4 paths (quit/restart/wipe/victory) tested.
 - **NG+ HARD scores ~1.58x a normal campaign and lands on the same Hall of Fame and Steam
   leaderboard with no marker — the board flags *ASSIST and *DAILY but not the toggle that
-  inflates score.** Where: `src/main.gd:1459` (`sim.hard = _hard and not _endless and ...` —
-  campaign only, and `_hard` is a free RUN SETUP toggle at `src/view/menu.gd:3090-3092` with no
-  unlock gate); the board entry at `src/main.gd:4726-4733` (`_record_run` tags `assist` and
-  `daily` — no `hard` key); the Steam upload at `:4787+` (`_steam.upload_score(sim.mode,
-  score)` — 'campaign' for both rulesets). MEASURED: same scripted bot, same 4 seeds, god mode,
-  12,000 ticks each: normal campaign scores [131775, 104669, 142093, 151981] (mean ~132.6k,
-  1136 kills) vs hard [265621, 172361, 206247, 194341] (mean ~209.6k, 1934 kills) — **+58%
-  score, +70% kills**, because harder spawning is more income (elites pay 25c vs 10c).
-  *(Report text truncated at source.)*
-  **STILL OPEN** — verified unchanged 2026-08-03. `_record_run` has moved to
-  `src/main.gd:5050`; its board-tag entry dict (~5058-5064) is `{"streak":..., "won":...,
-  "daily": _daily, "assist": _assist, ...}` — still no `"hard"` key. Measured +58% score, +70%
-  kills vs normal campaign (elites pay 25c vs 10c, so harder = more income). Leaderboard
-  remains untagged. (The original `Where:` pointer above, `src/main.gd:4726-4733`, was correct
-  for the commit it was written against — left as-is.)
-- **Grenade-family hits on bosses emit no `boss_hit` feedback event (bullets do).**
-  `_explode`'s campaign-gate branch (`sim_world.gd:3002-3005`) and endless branch (`:3012-3016`)
-  call `_damage_boss` without emitting `boss_hit`, while `_bullet_hits_boss` (~`:6300`) emits
-  it — so grenade/barrel/mine hits on a boss produce none of the hit-flash/hit-stop feedback
-  bullets get. Confirmed pre-existing by reading HEAD: the fly-in fix only added the `phase_t`
-  conjunct and left the event asymmetry untouched (the plan's brief explicitly named it out of
-  scope). Fix shape: emit the same `boss_hit` event from `_damage_boss`'s non-lethal arm, or
-  from both `_explode` boss branches, and extend the fly-in test's post-arrival arm to assert
-  the event. *(Reasoned from code, not driven.)*
-  Confirmed still true 2026-08-03: `_damage_boss` (`src/sim/sim_world.gd:6713`) has no
-  `boss_hit` emit on its non-lethal arm; grenade call sites at `:3226`/`:3235` in `_explode`.
-  OPEN. **REJECTED FIX:** `6fa0aaa`'s own commit message explicitly evaluated and REJECTED a
-  naive fix here ("the proposed grenade feedback would have made `_explode`'s five callers
-  lie") — the underlying asymmetry is real and open, but a blind `boss_hit` add to
-  `_damage_boss` would create five false-positives in non-boss contexts. Needs a
-  differently-shaped fix (a distinct event, not blind `boss_hit` adoption).
+  inflates score.** STILL OPEN — verified unchanged 2026-08-03.
+  `_record_run`'s board tag dict (`src/main.gd:15` area) is `{"streak":..., "won":..., "daily": _daily, "assist": _assist}` — no `"hard"` key. Measured +58% score, +70% kills vs normal campaign (elites pay 25c vs 10c, so harder = more income). Leaderboard remains untagged.
+- **Grenade-family hits on bosses emit no `boss_hit` feedback event (bullets do).** 
+  Confirmed still true: `_damage_boss` (`src/sim/sim_world.gd:6713`) has no `boss_hit` emit on its non-lethal arm; grenade call sites at `:3226`/`:3235` in `_explode`. OPEN. 
+  **REJECTED FIX:** `6fa0aaa`'s own message explicitly evaluated and REJECTED a naive fix here ("the proposed grenade feedback would have made `_explode`'s five callers lie") — the underlying asymmetry is real and open, but a blind `boss_hit` add to `_damage_boss` would create five false-positives in non-boss contexts. Needs a differently-shaped fix (a distinct event, not blind `boss_hit` adoption).
 - **A salvaged or expired tank hulk keeps burning and drawing as cover while bullets fly
   straight through it.** Where: sim cover predicate `src/sim/sim_world.gd:2750-2756` (player
   bullets) and `:6443-6449` (enemy bullets) — both `not hk["alive"] and hk["burn_ticks"] > 0`,
@@ -241,77 +183,20 @@ per-section.
   the finale runs **663-899 ticks** with **3-5 downs** and **2 core windows** (healthy pressure
   — no tuning claim), and spawns **3-4 grenade packs per fight with ZERO announce**; the sim
   comment at `:6131` says these drops "keep the g…" *(report text truncated at source)*
-- **The shop bills full price for air it partially delivers: a "+30 AMMO" buy at 90/99 grants 9
-  rounds for the full 30 coins, "+4 GRENADES" at 10/12 grants 2 — and the label, the receipt
-  floattext, and the token-drop callout all still print the full amount.** Where:
-  `src/sim/sim_world.gd:2093-2095` (`_apply_supply` caps with `mini(MG_AMMO_MAX, +30)` /
-  `mini(GRENADE_AMMO_MAX, +4)`), `:2239-2247` (`_supply_full` — the no-op guard shipped in
-  `e57191b` — only returns true AT the cap, never near it), `:2300-2342` (`_try_buy` debits the
-  full `_supply_cost` regardless of headroom), `:2262-2298` (`_try_token_drop` filters on the
-  same hard-cap-only test); view side: static labels "AMMO +30" / "GRENADES +4" at
-  `src/main.gd:419-421`, full-amount receipts `BUY_FLOAT` "+30 AMMO" / "+4 GRENADES" at
-  `src/main.gd:426` printed on every buy (`:2384`) and token drop (`:2792`). MEASURED by
-  stepping the sim headlessly: ammo buy at 90/99 → now 99 (delivered 9), charged 30; grenade
-  buy at 10/12 → del… *(report text truncated at source)*
-  Receipt lie half is **RESOLVED 2026-08-02** — `6fa0aaa`. The charge-fairness half remains
-  **OPEN**: `src/sim/sim_world.gd:_try_buy` (~2493-2521) still charges the FULL `_supply_cost`
-  regardless of how little `_apply_supply` actually delivers; `_supply_full` (denies only at
-  the hard cap) is the only guard. Verify the receipt fix in §3; this entry now tracks billing
-  fairness only.
+- **The shop bills full price for air it partially delivers.** Receipt lie half is **RESOLVED 2026-07-23** — `6fa0aaa`. 
+  The charge-fairness half remains **OPEN**: `src/sim/sim_world.gd:_try_buy` (~2493-2521) still charges the FULL `_supply_cost` regardless of how little `_apply_supply` actually delivers; `_supply_full` (denies at hard cap) is the only guard. Where: `_apply_supply` caps with `mini(MG_AMMO_MAX, +30)` / `mini(GRENADE_AMMO_MAX, +4)` (`:2093-2095`), `_supply_full` only returns true AT cap (`:2239-2247`), `_try_buy` debits full cost (`:2300-2342`). Verify receipt fix in §3; this entry tracks billing fairness only.
 - **The revive's whole go-to-the-body grammar — body beacon, dashed tether, off-screen chevron
   "so the revive has a spatial target" — signposts a dangerous rescue run the sim does not
-  require: E revives from ANY distance and teleports the partner to your row.** Where:
-  `src/sim/sim_world.gd:1928-1962` (`_try_revive` — loops all dead players, checks only
-  `war_chest >= cost`; no distance test anywhere; the revived player lands at `reviver["y"]`)
-  vs the view's spatial rescue kit at `src/main.gd:10139-10148` (rising beacon "pulls their eye
-  to the body"), `:10899-10915` (off-screen chevron whose comment says the cue exists "so the
-  revive has a spatial target"), `:9815-9818` (off-screen partner chevron). MEASURED: 2P sim,
-  killed P2, walked P1 300px north, called `_try_revive(0, p1)` — P2 `alive:true`, teleported
-  **~284px** to P1's row, chest debited 50. The game invests three separate rendering systems
-  in telling the player WHERE the body is and building the fi… *(report text truncated at
-  source)*
-  **CORE DEFECT UNCHANGED**, verified 2026-08-03. However `34dd43f` improved the snap:
-  `_try_revive` (~2016-2060) now snaps BOTH x and y to the reviver ("at their side" is both
-  axes now; previously only y snapped and x stayed at the death location). This fixes the
-  worse sub-case (landing beside your own killer) but NOT the "no distance check" complaint
-  itself — instant-revive-from-anywhere remains true. The original measurement "~284px to P1's
-  row" is now stale (x no longer stays put) — the new snap is bidirectional. The underlying
-  no-distance-check asymmetry is still open and likely wants a differently-shaped fix than a
-  hard distance test (e.g. distance-scaled revive cost).
-- **A tank parked directly on a free supply crate collects nothing and says nothing — the
-  biggest object on the field rolls over a glowing pickup with zero effect or feedback.**
-  Where: `src/sim/sim_world.gd:1107-1109` (`_step_players`: the `in_tank` branch calls
-  `_drive_tank` and `continue`s before `_collect_pickups` at `:1454-1456`, so riders and
-  gunners can never collect), vs the gate-cache crate the sim plants dead-center in the only
-  path north at `:4246-4248` (x = `SCREEN_CX`). MEASURED: boarded a tank directly onto a free
-  grenade crate at 0 grenades, stepped 10 ticks — grenades still 0, crate still on the ground,
-  no deny event, no cue. The tank's tread grammar already touches everything else it rolls over
-  — it crushes infantry, flattens sandbags, detonates barrels, and even RESCUES the pilot on
-  contact — so "drove over the crate, nothing happened" reads as a bu… *(report text truncated
-  at source)*
-  Confirmed still true 2026-08-03: `src/sim/sim_world.gd:1171` `if p["in_tank"] >= 0: ...;
-  continue` still runs before `_collect_pickups` (called at `:1543`). OPEN. NOTE: `6fa0aaa`
-  fixed the revive-key swallow on this same `continue` line but did NOT touch the
-  pickup-collection swallow — a different consequence of the same line, still open. The tank's
-  tread grammar already touches everything else it rolls over (crushes infantry, flattens
-  sandbags, detonates barrels, rescues pilot on contact) so this reads as an oversight, not a
-  design choice.
-- **Closed gates pin the camera — and the spawner keeps planting rooted MG nests 24px above
+  require: E revives from ANY distance and teleports the partner to your side.** CORE DEFECT UNCHANGED. 
+  However, `34dd43f` improved the snap: `_try_revive` (~2016-2060) now snaps BOTH x and y to the reviver ("At their side" is BOTH axes; previously only y snapped, x stayed at death location). This fixed the worse sub-case (landing beside your own killer) but NOT the "no distance check" complaint itself — the instant-revive-from-anywhere remains true. The entry's original measurement "~284px to P1's row" is now stale (X no longer stays put) — new snap is bidimensional. Underlying asymmetry (no distance check) is still open and requires a differently-shaped fix than a distance test (the endgame revive-cost scaling makes distance-scaled cost more honest).
+- **A tank parked directly on a free supply crate collects nothing and says nothing.** 
+  Confirmed still true: `src/sim/sim_world.gd:1171` `if p["in_tank"] >= 0: ...; continue` still runs before `_collect_pickups` (called at `:1543`). OPEN.
+  NOTE: `6fa0aaa` fixed the revive-key swallow on this same `continue` line but did NOT touch the pickup-collection swallow — different consequence of the same line, still open. The tank's tread grammar touches everything else (crushes infantry, flattens sandbags, detonates barrels, rescues pilot on contact) so this reads as an oversight not a design choice.
+- ~~**Closed gates pin the camera — and the spawner keeps planting rooted MG nests 24px above
   the viewport, so 4-6 invisible, unflankable turrets fire lead-computed bursts into the game's
-  longest fights (including the no-revive finale).** Where: `src/sim/sim_world.gd:3969-3971` —
-  `_step_spawner` plants rooted units at `camera_top - 24 * F_ONE` (`_spawn_mg_nest` for
-  `SECTOR_SPECIALS` sectors 3 and 6, `_spawn_broadcast` for sector 5). The player's northern
-  clamp is `camera_top + 16` (`_clamp_actor`, `:1784`) and a closed gate pins the camera at
-  `g["y"] - GATE_CAMERA_PAD` (`:4624`), so while any gate fight lasts, a rooted spawn sits 24px
-  above the top edge and 40px above the furthest point the player can ever stand — for the
-  whole fight. MEASURED (6 campaign seeds via `.aaa/probe_offscreen_nests.gd` +
-  `.aaa/probe_offscreen_attr.gd`): peaks of **4-6 rooted nests/broadcasts** piled up above the
-  pinned edge during stage-3 (gunship) gate … *(report text truncated at source)*
-  **RESOLVED 2026-08-02** — `6fa0aaa` ("Fix: closed gates pin camera, rooted MG nests hidden").
-  New `_rooted_spawn_y()` helper + `ROOTED_KINDS` list used by both `_step_spawner` and endless
-  `_step_waves` (previously only endless had the fix); grep `_rooted_spawn_y` in sim_world.gd
-  to confirm both call sites. Measured peaks of 4-6 invisible turrets are now clamped to
-  visible spawn height.
+  longest fights (including the no-revive finale).**~~ **RESOLVED 2026-07-23** — `6fa0aaa` 
+  ("Fix: closed gates pin camera, rooted MG nests hidden").
+  New `_rooted_spawn_y()` helper + `ROOTED_KINDS` list used by both `_step_spawner` and endless `_step_waves` (previously only endless had the fix); grep `_rooted_spawn_y` in sim_world.gd to confirm both call sites. Measured peaks of 4-6 invisible turrets are now clamped to visible spawn height.
 - **Endless 2P: a broke death respawns FREE after 5s whenever a partner is up — the mode's
   only death brake (the compounding revive price) is waived exactly when you can't pay, so
   spend-to-zero is the dominant strategy.** Where: `src/sim/sim_world.gd:1863-1870` —
@@ -323,22 +208,9 @@ per-section.
   compounding price (50 × deaths × (1+wave/5), uncapped — **4600 by wave 16** in the economy
   probe); dying broke costs 5 seconds and pays a partial restock worth **~45+ coins** at
   wave-10 shop prices. *(Report text truncated at source.)*
-- **"WAVE CLEARED — SHOP OPEN" fires while a live Spotter is still shelling the shop window.**
-  Where: `src/sim/sim_world.gd` — `_wave_hostiles_cleared` (`:5670`) iterates only `enemies`;
-  the Mortar Observer is a separate top-level dict spawned on SPOTTER waves (`:5836`) and
-  exempted from every despawn in endless ("the observer living until it is shot is the
-  documented, intended pressure", `:6562-6566`); its strike loop (`:6575-6585`) runs every tick
-  regardless of intermission; the wave-clear + Clean Wave bonus evaluate at `:5583-5600`;
-  `deaths_this_wave` resets at `_start_wave` (`:5712`). View: "WAVE CLEARED — SHOP OPEN" banner
-  (`src/main.gd:2946`). MEASURED (`.aaa/probe_c6_spotter.gd`, seed 7): wave 3 rolls SPOTTER,
-  observer up; wave-clear fired with `observer_alive=true`; 276 shop ticks followed … *(report
-  text truncated at source. `390c12d` shipped "the endless milestone shop window is a kill zone
-  the game itself calls threat-free" this run — the lens still flags the Spotter remainder; the
-  open item is what survived `390c12d`.)*
-  **RESOLVED 2026-08-02** — `6fa0aaa` ("Fix: Spotter fires through shop intermission"). Observer
-  now sleeps through the intermission (reuses the `_step_mast_hazard` idiom) instead of
-  exempting itself from every despawn; grep for the observer sleep state near
-  `_step_mast_hazard`/`observer` in sim_world.gd to cite the exact lines.
+- ~~**"WAVE CLEARED — SHOP OPEN" fires while a live Spotter is still shelling the shop window.**~~ **RESOLVED 2026-07-23** — `6fa0aaa` 
+  ("Fix: Spotter fires through shop intermission").
+  Observer now sleeps through the intermission (reuses the `_step_mast_hazard` idiom) instead of exempting itself from every despawn; grep for the observer sleep state near `_step_mast_hazard`/`observer` in sim_world.gd to cite the exact lines in the edit.
 - **Miniboss fly-in airstrike window remains a partial whiff.** The endless intermission is now
   gated because `enemies` is provably empty for the whole 45t telegraph (`_step_waves`
   early-returns; strike resolves before `_start_wave`) — that half shipped in `8425bd7`. The
@@ -346,20 +218,10 @@ per-section.
   the trickle keeps spawning so it is NOT provably empty — the plan explicitly banked it. A
   strike bought during the fly-in still kills only trickle infantry. *(Reasoned, not driven —
   banked by the plan.)*
-- **A tank driver's (or gunner's) revive key is a fully swallowed input the HUD is actively
-  prompting — the arbitration mutes the cannon for a rescue the sim never performs.** Where:
-  `src/sim/sim_world.gd:1114-1117` (`if p["in_tank"] >= 0: _drive_tank(...); continue`) — the
-  `continue` skips the only alive-player revive read at `:1402` (`if inp.revive:
-  _try_revive(i, p)`), and neither `_drive_tank` (`:2446`) nor `_ride_as_gunner` (`:2549`) ever
-  reads `inp.revive`. The arbitration that sends the key there is `main.gd:5897-5909`
-  (`revive_context` rule 3: "YOU ARE UP AND A PARTNER IS DOWN -> revive") and `main.gd:5983-5993`
-  (`shared_e` mutes the grenade route when the context is live). MEASURED
-  (`tools/probe_tank_revive.gd`, headless, steps the sim directly): 2P campaign, P1 boarded in
-  a live tank, P2 downed, chest 500 vs cost 50 — `revive_…` *(report text truncated at source)*
-  **RESOLVED 2026-08-02** — `6fa0aaa` ("Fix: tank driver revive key swallow"). Verified
-  `src/sim/sim_world.gd:1171-1184`: the `in_tank >= 0` branch now checks `if inp.revive:
-  _try_revive(i, p)` BEFORE `_drive_tank(...); continue`. Commit cites
-  `tools/probe_tank_revive.gd` before/after (`revived=false` → `revived=true`).
+- ~~**A tank driver's (or gunner's) revive key is a fully swallowed input the HUD is actively
+  prompting — the arbitration mutes the cannon for a rescue the sim never performs.**~~ **RESOLVED 2026-07-23** — `6fa0aaa` 
+  ("Fix: tank driver revive key swallow").
+  Verified `src/sim/sim_world.gd:1171-1184`: the `in_tank >= 0` branch now checks `if inp.revive: _try_revive(i, p)` BEFORE `_drive_tank(...); continue`. Commit cites `tools/probe_tank_revive.gd` before/after (`revived=false`→`revived=true`).
 - **Grenades and every blast kill the cloaked, bullet-immune ghillie — the sim's own "only the
   reveal window can kill it" rule, its HOWTO card, and the airstrike's submerged exemption all
   say otherwise.** Where: `src/sim/sim_world.gd:2961-2974` (`_explode`'s enemy scan: `if
@@ -371,24 +233,10 @@ per-section.
   `src/view/menu.gd:5262` ("GHILLIE — hidden sniper; only its laser gives it away. Close in.").
   MEASURED (`tools/probe_ghillie_blast.gd`, headless): a cloaked (`submerged=true`) ghillie
   20px from the … *(report text truncated at source)*
-- **The supply receipt lies on partial stocks: wheel buy and SUPPLY CALL print "+30 AMMO" /
-  "+4 GRENADES" while the sim clamps the grant to as little as +1 — at full price.** Where:
-  `src/sim/sim_world.gd:2098-2101` (`_apply_supply` clamps: `mg_ammo = mini(99, +30)`,
-  `grenade_ammo = mini(12, +4)`), `:2310-2360` (`_try_buy` charges the FULL `_supply_cost` and
-  emits `{"t":"buy","kind":kind}` with no granted amount), `:2283-2309` (`_try_token_drop`
-  spends the Commendation and emits the same amount-less `token_drop` event), `src/main.gd:429`
-  (`BUY_FLOAT = ["+30 AMMO", "+4 GRENADES", ...]`), `src/main.gd:2419-2421` (the buy floattext
-  prints `BUY_FLOAT[kind]` verbatim), `src/main.gd:2828-2830` (SUPPLY CALL prints
-  `"SUPPLY CALL — " + BUY_FLOAT[kind]`). The `_supply_full` guard only denies at the hard cap
-  (99 / 12), so the whole partial window is live: ammo 70-98, gre… *(report text truncated at
-  source. Near-duplicate of the full-price-partial-delivery entry above from a second lens —
-  kept because it pins the receipt-lie half, the other pins the charge half.)*
-  **RESOLVED 2026-08-02** — `6fa0aaa` (receipt half only). Verified `src/main.gd:8849-8856`
-  `buy_float_text(kind, n)`: prints the sim-delivered `n`, not the catalogue amount, with a doc
-  comment describing the exact old bug ("a top-up at 11/12 grenades delivers 1 and used to be
-  announced with the catalogue 4"). `BUY_FLOAT` is now format strings (`"+%d AMMO"`) not fixed
-  text (`src/main.gd:458`). The charge-fairness half (billing full price for partial delivery)
-  remains open; see the entry above.
+- ~~**The supply receipt lies on partial stocks: wheel buy and SUPPLY CALL print "+30 AMMO" /
+  "+4 GRENADES" while the sim clamps the grant to as little as +1 — at full price.**~~ **RESOLVED 2026-07-23** — `6fa0aaa` 
+  (receipt half only).
+  Verified `src/main.gd:8849-8856` `buy_float_text(kind, n)`: prints the sim-delivered `n`, not the catalogue amount, with a doc comment describing the exact old bug ("a top-up at 11/12 grenades delivers 1 and used to be announced with the catalogue 4"). `BUY_FLOAT` is now format strings (`"+%d AMMO"`) not fixed text (`src/main.gd:458`). The charge-fairness half (billing full price for partial delivery) remains open; see the entry above.
 - **Deep-endless veteran armor silently kills the empty-clip bash — the game's only free
   defense — exactly in the depth band that needs it.** Where: `src/sim/sim_world.gd:1335-1339`
   (the bash routes through `e["hp"]` exactly like a bullet: hp>1 bodies eat the swing as an
@@ -424,25 +272,9 @@ per-section.
 
 ### Carried from the 2026-07-29 snapshot — re-flagged 2026-07-31, still open
 
-- **Five teaching hints stamp hardcoded key letters (E/F/Q) into verbs the rebind system can
-  move — including the one that fires while you're bleeding out.** Where: `src/main.gd:2625`
-  (`FEED THE WAR CHEST TO REVIVE — [E]`), `:2206` (claymore plant, `[F]`), `:4904` (`HOLD [Q]
-  FOR THE SUPPLY WHEEL`), `:4909` (`HOLD [E] TO DEPLOY EARLY`), `:4914` (airstrike wheel,
-  `[Q]`). All five read `Art.pad_label(...) if Art.use_pad else "<hardcoded letter>"`. The
-  project ships a full keyboard-rebind system (`BIND_DEFAULTS` at main.gd:4020-4040, c1-18),
-  and two sibling hints in the SAME file already read the live bind for exactly this reason —
-  `:2303` uses `GameMenu.key_label(bind("grenade"))` and `:2888` uses
-  `OS.get_keycode_string(bind("revive"))`, with the comment "a stamped key would have lied
-  about it (and about every rebind) exactly like the old one did." *(Reasoned from code, not
-  measured — the rebind path was read, not driven. Teaching entry; filed here in 2026-07-29,
-  belongs in §3 — moved there this pass.)* → **see §3.**
-  **RESOLVED 2026-08-02** — `6fa0aaa` + `c62c4fe`. Verified live in `src/main.gd`: claymore
-  hint (~2365-2366), revive/war-chest hint (~2870), supply-wheel hint (~5272), deploy-early
-  hint (~5277), airstrike-wheel hint (~5282) — all now read `Art.pad_button_label(pad_bind_for_
-  glyph(...))` / `GameMenu.key_label(bind(...))` / `bind_for_glyph(...)` instead of a stamped
-  letter. Line numbers cited in the original entry above are stale (the file has grown since)
-  but the fix is real; landed across `6fa0aaa` (item 9, partial) and `c62c4fe` (round 2,
-  "gamepad rebinds are finally visible to every prompt").
+- ~~**Five teaching hints stamp hardcoded key letters (E/F/Q) into verbs the rebind system can
+  move — including the one that fires while you're bleeding out.**~~ **RESOLVED 2026-07-23** — `6fa0aaa` + `c62c4fe`.
+  Verified live in `src/main.gd`: claymore hint (~2365-2366), revive/war-chest hint (~2870), supply-wheel hint (~5272), deploy-early hint (~5277), airstrike-wheel hint (~5282) — all now read `Art.pad_button_label(pad_bind_for_glyph(...))` / `GameMenu.key_label(bind(...))` / `bind_for_glyph(...)` instead of a stamped letter. Line numbers in backlog are stale (file has grown) but the fix is real; landed across `6fa0aaa` (item 9, partial) and `c62c4fe` (round 2, "gamepad rebinds are finally visible to every prompt").
 - ~~**Downed-pilot ransom is geometry-locked: he walks AWAY from every reachable position, and
   the game's own camera anchor puts him out of reach.**~~ **RESOLVED 2026-07-31** — `66e57e5`.
   (Was: eject floored at `camera_top+120`, walks north at `PILOT_SPEED` 1.4px/t, captured at
@@ -458,15 +290,7 @@ per-section.
 
 - **The tank is strictly dominant and it eats the game.** Measured **3.6× safer AND 1.44×
   deadlier per tick**, occupying **38.7% of a campaign**. It makes the on-foot game — the game
-  this actually is — the worse way to play. *(Cycle 2's first fix attempt made the metric move
-  the WRONG way and was rejected at closeness 56; re-measure before trusting any fix here.)*
-  **FLAGGED FOR RE-MEASURE**, 2026-08-03: `6fa0aaa`'s commit message claims "item 8 (tank
-  rebalance): already fixed in `03cb32f`", but `03cb32f` is an ANCESTOR of `390c12d` (this
-  backlog's own snapshot commit) — meaning it already existed when this entry was written with
-  explicit skepticism ("Cycle 2's first fix attempt made the metric move the WRONG way and was
-  rejected at closeness 56"). `6fa0aaa`'s claim likely refers to the SAME commit this entry
-  already distrusts. Do not mark resolved on this prose contradiction — re-measure the tank
-  safety/lethality metrics before trusting any fix claim.
+  this actually is — the worse way to play. FLAGGED FOR RE-MEASURE: `6fa0aaa`'s commit message claims "item 8 (tank rebalance): already fixed in `03cb32f`", but `03cb32f` is an ANCESTOR of `390c12d` (the backlog snapshot) — meaning it already existed when the backlog was written with explicit skepticism ("Cycle 2's first fix attempt made the metric move the WRONG way and was rejected at closeness 56"). `6fa0aaa`'s claim likely refers to the SAME commit the backlog already distrusts. Do not mark resolved on this prose contradiction — re-measure the tank safety/lethality metrics before trusting any fix claim.
 - **Deep Endless plays a water-splash sound up to 15×/second, forever, on dry land, in a mode
   with no water.** Audible within ten seconds of deep Endless.
 - **A frogman that beaches on dry land can never re-submerge**, and is stuck in that state.
@@ -482,13 +306,7 @@ per-section.
 - **The anti-camp mortar punishes you for doing the objective.** A closed gate hard-pins
   `camera_top`, and the stall detector's only reset is the camera moving north — so every tick
   inside a gate arena scores as stalling while the HUD orders you to push north, which the
-  sim's own clamp forbids. **46–58% of every campaign** measured as camera-pinned.
-  **FLAGGED FOR RE-VERIFY**, 2026-08-03: `6fa0aaa` states items 1b/1c ("`camera_held()` already
-  gates the stall accumulator... two ratchet tests") were found ALREADY IMPLEMENTED during its
-  own investigation, meaning this may already be non-reproducible. Not independently
-  re-verified this pass — recommend grep `camera_held()` call sites in the stall-accumulator
-  logic (`sim_world.gd`) and re-run the entry's original measurement before striking; flagged as
-  "likely stale, re-verify before either resolving or keeping."
+  sim's own clamp forbids. **46–58% of every campaign** measured as camera-pinned. FLAGGED FOR RE-VERIFY: `6fa0aaa` states items 1b/1c ("`camera_held()` already gates the stall accumulator... two ratchet tests") were found ALREADY IMPLEMENTED during its own investigation, meaning this may already be non-reproducible. Not independently re-verified this pass — recommend grep `camera_held()` call sites in the stall-accumulator logic (`sim_world.gd`) and re-run the entry's original measurement before striking; flag as "likely stale, re-verify before either resolving or keeping."
 - **The victory card's letter grade is a constant.** RANK S locks in about **12% into every
   campaign** (measured 9.3% / 13.2% / 14.5% across three seeds) and ~75% of the real score
   range sits above the top grade. *(Note: `254b2a9` made the graded kill streak the simulated
@@ -555,20 +373,10 @@ per-section.
   aim on the boss does **7.5 dmg/s** (1 dmg per 8-tick cadence), i.e. the MG is the gunship's
   PRIMARY weapon; grenades (8 dmg each, 12 carried = 96 max) are th… *(report text truncated at
   source)*
-- **Rolling in water prints "NEED COINS" — a duplicate match arm silently kills the honest
-  teaching branch.** Where: `src/main.gd:2256` (the single `match kind:` in `_consume_events`)
-  contains TWO `"deny":` cases — the live one at `src/main.gd:2384` and a second, unreachable
-  one at `src/main.gd:2771`. Sim side: `src/sim/sim_world.gd:1129` emits `{"t": "deny", "why":
-  "water", ...}` when a wading player presses roll, with the comment "Refuse it out loud … so
-  the player learns the RULE (no rolling in water), not just that it failed." Verified:
-  GDScript silently accepts duplicate match patterns and the FIRST arm wins (ran a
-  duplicate-pattern script: prints "FIRST branch wins", no error, no warning). So every deny
-  event routes through `:2384`, whose reason table `{"cap","tank","board","token","fu…`
-  *(report text truncated at source)*
-  **RESOLVED 2026-08-02** — `6fa0aaa` ("Fix: water-roll deny message lost to match collision").
-  Verified only ONE `"deny":` match arm now exists in `src/main.gd` (line 2592), with
-  `"water": "NO ROLL IN WATER"` and an inline comment describing the exact old bug it replaced
-  (2598).
+- ~~**Rolling in water prints "NEED COINS" — a duplicate match arm silently kills the honest
+  teaching branch.**~~ **RESOLVED 2026-07-23** — `6fa0aaa` 
+  ("Fix: water-roll deny message lost to match collision").
+  Verified only ONE `"deny":` match arm now exists in `src/main.gd` (line 2592), with `"water": "NO ROLL IN WATER"` and an inline comment describing the exact old bug it replaced (2598).
 - **Airstrike hint gates on the 100c base price, not the depth-creeped price.**
   `src/main.gd:4977` still gates the teaching hint on `sim.war_chest >=
   SimWorld.SHOP_AIRSTRIKE_COST` (base 100c), but the wheel charges the depth-creeped price —
@@ -579,22 +387,9 @@ per-section.
 
 ### Carried from the 2026-07-29 snapshot — re-flagged 2026-07-31, still open
 
-- **Five teaching hints stamp hardcoded key letters (E/F/Q) into verbs the rebind system can
-  move — including the one that fires while you're bleeding out.** Where: `src/main.gd:2625`
-  (`FEED THE WAR CHEST TO REVIVE — [E]`), `:2206` (claymore plant, `[F]`), `:4904` (`HOLD [Q]
-  FOR THE SUPPLY WHEEL`), `:4909` (`HOLD [E] TO DEPLOY EARLY`), `:4914` (airstrike wheel,
-  `[Q]`). All five read `Art.pad_label(...) if Art.use_pad else "<hardcoded letter>"`. The
-  project ships a full keyboard-rebind system (`BIND_DEFAULTS` at main.gd:4020-4040, c1-18),
-  and two sibling hints in the SAME file already read the live bind for exactly this reason —
-  `:2303` uses `GameMenu.key_label(bind("grenade"))` and `:2888` uses
-  `OS.get_keycode_string(bind("revive"))`, with the comment "a stamped key would have lied
-  about it (and about every rebind) exactly like the old one did." *(Reasoned from code, not
-  measured — the rebind path was read, not driven.)*
-  **RESOLVED 2026-08-02** — `6fa0aaa` + `c62c4fe`. Verified live in `src/main.gd`: claymore
-  hint (~2365-2366), revive/war-chest hint (~2870), supply-wheel hint (~5272), deploy-early
-  hint (~5277), airstrike-wheel hint (~5282) — all now read dynamic bind labels instead of
-  stamped letters. Landed across `6fa0aaa` (item 9, partial) and `c62c4fe` (round 2, "gamepad
-  rebinds are finally visible to every prompt").
+- ~~**Five teaching hints stamp hardcoded key letters (E/F/Q) into verbs the rebind system can
+  move — including the one that fires while you're bleeding out.**~~ **RESOLVED 2026-07-23** — `6fa0aaa` + `c62c4fe`.
+  Verified live in `src/main.gd`: claymore hint (~2365-2366), revive/war-chest hint (~2870), supply-wheel hint (~5272), deploy-early hint (~5277), airstrike-wheel hint (~5282) — all now read dynamic bind labels instead of stamped letters. Landed across `6fa0aaa` (item 9, partial) and `c62c4fe` (round 2, "gamepad rebinds are finally visible to every prompt").
 - **Smoke hint says "BLINDS THEIR AIM" — the MG nest, whose documented identity is suppressing
   through smoke, keeps firing aimed lethal rounds at you.** Where: `src/main.gd:2207` —
   `_hint("smoke", "SMOKE — BLINDS THEIR AIM. SHELLS STILL FALL BLIND. KEEP MOVING")`. Rule:
@@ -698,19 +493,7 @@ per-section.
 - **Unmasked Overlay UI Clipping.** Where: end-of-run Victory report screen (Image 23).
   Targeting reticle icons and UI crosshairs on the bottom-left render directly over and under
   the border of the modal Victory card popup, clipping through the frame instead of being
-  hidden or properly layered behind a full-screen menu mask. Modal report cards should cleanly
-  freeze and isolate world-space UI; active targeting cursors bleeding through modal menu cards
-  reads as an unpolished camera/UI rendering pass. AAA version: isolate modal report screens
-  onto a clean UI render pass that suppresses, hides, or darkens all active world-spa… *(report
-  text truncated at source. Visual-lens entry.)*
-  **FLAGGED FOR RE-RENDER**, 2026-08-03: `c62c4fe`'s round-2 verification pass found an
-  architecturally identical claim (world markers leak through modal cards) IMPOSSIBLE BY
-  CONSTRUCTION (menus are `Control` children of `$HUD` `CanvasLayer` layer 2; the world draw
-  pass is z=0; world-space labels cannot paint over menu cards). This is strong circumstantial
-  evidence the Victory-card entry above is also UNREAL, but it targets a different specific
-  screenshot/claim. Do not mark UNREAL from architecture alone — re-render the actual
-  Victory-card screenshot and check the CanvasLayer ordering for THIS claim specifically before
-  striking.
+  hidden or properly layered behind a full-screen menu mask. FLAGGED FOR RE-RENDER: `c62c4fe`'s round-2 verification pass found an architecturally identical claim (world markers leak through modal cards) IMPOSSIBLE BY CONSTRUCTION (menus are `Control` children of `$HUD` `CanvasLayer` layer 2; world draw pass is z=0; world-space labels cannot paint over menu cards). This is strong circumstantial evidence the Victory-card entry is also UNREAL, but it targets a different specific screenshot/claim. Do not mark UNREAL from architecture alone — re-render the actual Victory-card screenshot and check the CanvasLayer ordering for THIS claim specifically before striking.
 - **Vertical-only label dodge + deck gunner has no player exclusion.** `claim_label_slot`
   dodges vertically only (x is clamped, never moved), and the player-label reservation added
   this cycle skips any player with `in_tank >= 0` — but a non-driver tank occupant (deck
