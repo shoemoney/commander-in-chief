@@ -2355,6 +2355,44 @@ func test_verb_legend_draw_commands_captured_both_devices() -> void:
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
 
 
+# aaa-textfit/#1: the lift the arbiter computes must reach the PIXELS. test_reserved_zone_band_
+# contract proves `bottom_band_lift()` returns the right number and then re-does the subtraction
+# ITSELF (`VERB_LEGEND_Y - lift`) — so it stays green with the `- bottom_band_lift(...)` deleted
+# from _verb_legend's own y. Measured on THIS tree 2026-08-21: with that subtraction removed from
+# BOTH sites in hud.gd, the whole suite still reported `PASS — 118 test methods, 8962 assertions,
+# 0 failures` with the verb chip nailed back over the colossus block. This drives the REAL draw
+# through the capture seams with a live colossus on the floor and reads the emitted boxes, which
+# is the only thing the player actually sees.
+func test_verb_chip_draw_lifts_off_the_live_colossus_block() -> void:
+	var sim := SimWorld.new(11, 1)
+	sim.colossus = {"alive": true, "hp": 14, "x": 0, "y": 0}
+	var reserve: float = HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP
+	for boss in [false, true]:
+		var cap := _CaptureHud.new()
+		var m := _VerbMain.new()
+		m.sim = sim if boss else null
+		cap.main = m
+		cap._verb_show = 300.0   # bright window armed so the chip actually draws
+		cap._verb_legend()
+		Runner.T.ok(not cap.ops.is_empty(), "the chip emitted draw commands (boss=%s)" % boss)
+		for op in cap.ops:
+			var box: Rect2 = op["box"]
+			if boss:
+				# Every emitted primitive — plate, glyphs AND their ink — clears the phase
+				# label. The bug this pins drew "Q SUPPLY WHEEL" straight over "FOUNDRY
+				# COLOSSUS — TROOP DROPS".
+				Runner.T.ok(box.end.y <= reserve,
+					"%s '%s' bottom %d clears the colossus block top %d"
+						% [op["k"], op["id"], int(box.end.y), int(reserve)])
+			else:
+				# ...and the lift is EXACTLY zero otherwise: no colossus, no layout change.
+				Runner.T.ok(box.end.y > reserve,
+					"%s '%s' keeps its unlifted floor slot when no block is docked"
+						% [op["k"], op["id"]])
+		cap.main.free()
+		cap.free()
+
+
 # c1-10: the REAL _pip render — now a pure "paint this decided label" primitive (the full-vs-
 # compact choice is the _status_chips group's job). It sizes the plate to the WORD, stays on
 # screen, and advances by exactly _tw + 7 so the group's fit math is exact.
