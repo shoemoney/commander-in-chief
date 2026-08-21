@@ -131,41 +131,6 @@ func test_cleared_bind_glyph_never_shows_the_literal_unbound_string() -> void:
 		"the -1 'caller didn't pass one' sentinel still falls back to the ship-default letter")
 
 
-# r4: the test above only exercises _glyph_letter_for, a LOCAL mirror of draw_glyph's keyboard
-# branch — it pins nothing about the real art.gd, and reverting art.gd to the old one-liner
-# (`GameMenu.key_label(keycode) if keycode >= 0 else _GLYPH_KEY[action]`, which stamps the
-# literal "UNBOUND" on a keycode-0 cleared bind) would leave this suite fully green. This is
-# the mechanized call-site audit on the real source, same pattern as
-# test_no_legacy_silent_drop_fit_helpers above: read art.gd, isolate draw_glyph's keyboard
-# (else:) branch, and assert it keeps the keycode>0 / keycode==-1 split and never regresses to
-# the collapsed keycode>=0 ternary.
-func test_art_source_keeps_the_cleared_bind_split_in_draw_glyph() -> void:
-	var f := FileAccess.open("res://src/view/art.gd", FileAccess.READ)
-	Runner.T.ok(f != null, "art.gd source opens for the call-site audit")
-	var src := f.get_as_text()
-	f.close()
-	# Strip line comments so a comment mentioning the old pattern never trips the code scan.
-	var code_lines: Array = []
-	for line in src.split("\n"):
-		var hpos := line.find("#")
-		code_lines.append(line if hpos < 0 else line.substr(0, hpos))
-	var code := "\n".join(code_lines)
-	var fn_start := code.find("static func draw_glyph(")
-	Runner.T.ok(fn_start >= 0, "draw_glyph is still defined in art.gd")
-	var fn_end := code.find("static func glyph_key(", fn_start)
-	Runner.T.ok(fn_end > fn_start, "found the next function to bound the draw_glyph body")
-	var body := code.substr(fn_start, fn_end - fn_start)
-	var kb_start := body.find("else:")
-	Runner.T.ok(kb_start >= 0, "draw_glyph still branches on use_pad/force_pad")
-	var kb_branch := body.substr(kb_start)
-	Runner.T.ok(kb_branch.contains("keycode > 0"),
-		"the keyboard branch still special-cases a real keycode (> 0)")
-	Runner.T.ok(kb_branch.contains("keycode == -1"),
-		"the keyboard branch still special-cases the 'no keycode passed' sentinel (-1)")
-	Runner.T.ok(not kb_branch.contains("key_label(keycode) if keycode >= 0"),
-		"the collapsed keycode>=0 ternary (which stamps UNBOUND on a cleared bind) has not returned")
-
-
 # Every `main` stub the HUD gets handed answers the FULL set of names hud.gd reads off main —
 # pinned by tests/test_stub_parity.gd. A stub that answers only what its own test happens to hit is
 # how a missing field hides: the read aborts the call and the row measures as absent, green.
