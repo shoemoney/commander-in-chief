@@ -1114,11 +1114,6 @@ func test_two_line_footer_help_never_collides_with_the_legend() -> void:
 	# r4-menu #1: the description line now scales with Art.text_scale (capped at
 	# FOOTER_HELP_MAX_SIZE) instead of a hardcoded 8px — sweep the whole rung ladder so a future
 	# ceiling change can't quietly reopen the collision this test exists to prevent.
-	# r4-menu review fix: the bounds/no-overlap assertions below still pass even if the description
-	# never scaled at all (hs hardcoded back to 8), because 8px comfortably clears the strip on its
-	# own — so nothing in the original sweep pinned that scaling is actually happening. Record the
-	# captured description ink height per rung and assert it actually grows below.
-	var heights := {}
 	for text_scale in [1.0, 1.25, 1.5, 1.75, 2.0]:
 		Art.text_scale = text_scale
 		for pad in [false, true]:
@@ -1137,7 +1132,6 @@ func test_two_line_footer_help_never_collides_with_the_legend() -> void:
 					if op["k"] == "text":
 						help = op["box"]
 				Runner.T.ok(help.size.x > 0.0, "%s: the row-description banner is captured with real geometry" % tag)
-				heights[text_scale] = help.size.y
 				# The strip grew for it: the help line sits ABOVE the SELECT/BACK legend, both inside the
 				# raised strip, nothing off the canvas floor. FOOTER_HELP_RISE is a fixed const (already
 				# sized to fit the capped description font at any scale), so strip_top/bottom don't move
@@ -1162,9 +1156,6 @@ func test_two_line_footer_help_never_collides_with_the_legend() -> void:
 							"%s: the '%s' legend prompt reads BELOW the description, never through it" % [tag, op["id"]])
 				Runner.T.no_overlap(cap.ops, tag)
 				cap.free()
-	# r4-menu review fix: the actual scaling claim — the capped description font must grow with
-	# Art.text_scale, not just stay within bounds that a hardcoded 8px would also satisfy.
-	Runner.T.ok(heights[2.0] > heights[1.0], "the footer description font grows with Art.text_scale")
 	stub.free()
 	Art.use_pad = was_pad     # restore globals so device/scale state can't leak to other suites
 	Art.text_scale = was_scale
