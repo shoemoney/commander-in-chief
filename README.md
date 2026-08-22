@@ -32,19 +32,26 @@ a shared coin economy where every kill mints and every revive spends.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Desert firefight — threat callouts and the corner War Chest"/></td>
-<td width="50%"><img src="docs/media/gameplay_tank.png" alt="Tank assault — board a hull, spend grenade ammo as shells"/></td>
+<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — opening firefight, rounds bouncing off armor"/></td>
+<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — boss strafing run under a sniper lock"/></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/gameplay_colossus.png" alt="Foundry Colossus — the campaign's last stand"/></td>
-<td width="50%"><img src="docs/media/gameplay_shop.png" alt="Endless War shop — coin prices off the shared War Chest"/></td>
+<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — ten-kill streak, elite winding up"/></td>
+<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — minefield telegraphs on the run to the Colossus"/></td>
 </tr>
 </table>
 
-<sub>☝️ **Real in-engine frames**, captured by `tools/screenshots.gd` and gated for motion and
-colour before shipping — not mockups, not concept art. Clockwise: a desert firefight with threat
-callouts and the corner War Chest · boarding a tank · the Foundry Colossus last stand · the
-Endless War shop.</sub>
+<sub>☝️ **Four sectors, four real runs.** Clockwise: **1/6 Staging Ground** — the opening push,
+rounds bouncing off armor · **3/6 Bridge Gunship** — a boss strafing run while a sniper paints you
+· **5/6 Crashed Convoy** — a ×10 streak with an elite winding up · **6/6 The Foundry Core** — the
+minefield on the way to the Colossus.<br/>
+Captured by <code>tools/gif_capture.gd</code> straight off the scripted bot playing the real game
+(<code>start_arcade()</code> jumps to each zone), so every number on those HUDs was earned — no
+posed sim states, no mockups, no concept art.</sub>
+
+<sub>Stills: <a href="docs/media/gameplay_tank.png">boarding a tank</a> ·
+<a href="docs/media/gameplay_colossus.png">the Colossus last stand</a> ·
+<a href="docs/media/gameplay_shop.png">the Endless War shop</a>.</sub>
 
 </div>
 
