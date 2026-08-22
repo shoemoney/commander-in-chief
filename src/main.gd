@@ -10987,6 +10987,16 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 			var fra := frr + fri * PI / 2
 			Art.line(self, apos - Vector2.from_angle(fra) * rlen, apos + Vector2.from_angle(fra) * rlen,
 				Color(0.85, 0.9, 0.95, 0.20 + eta_f * 0.15), 1.5)
+		# flyin-boss-hull-damage: the approach is shootable (see _boss_flash above),
+		# so a boss shot to near-death DURING the fly-in used to carry zero scars and
+		# zero smoke -- only the bar (below) drained. Same hp-keyed overlay the arrived
+		# hull gets further down this file, keyed off apos/asc (the fly-in's OWN
+		# position/scale, not the arrived-path bpos) so the scars ride the hull instead
+		# of floating off it.
+		var bkey := "boss%d" % boss["gate_y"]
+		_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
+		var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
+		_boss_wounds(apos, 1.0 - bfrac, 34.0 * (asc / 1.3))
 		# _draw_gunships already CLAIMED a bar slot for this boss (and the banners
 		# duck below the claimed band) — the fly-in used to return without drawing
 		# it, so the top strip held a hole for 7 s. Now the bar is up for the whole
