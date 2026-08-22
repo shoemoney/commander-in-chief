@@ -17,7 +17,7 @@
 
 ![Godot 4.7.1](https://img.shields.io/badge/Godot-4.7.1-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-1000%20methods%20%C2%B7%2022.9k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1154%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
@@ -62,10 +62,10 @@ posed sim states, no mockups, no concept art.</sub>
 > FX base — no longer greybox, and no longer third-party-derived (every encumbered sprite was
 > replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
-> determinism gate + `tools/lint_assets.gd`), then import + boot-smoke + the full
-> golden-checksum suite (**1000 methods / 22.9k assertions** — the runner prints the exact
-> pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing on any
-> `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
+> determinism gate + `tools/lint_assets.gd` + `python3 tools/i18n_check.py` string extraction gate),
+> then import + boot-smoke + the full golden-checksum suite (**1154 methods / 37,418 assertions** —
+> the runner prints the exact pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing
+> on any `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
 > Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
 > The engine version is pinned in `tools/versions.lock`, the one source CI reads, so the
 > build can't drift from what the determinism goldens were recorded against.
@@ -313,13 +313,11 @@ SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter
 SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
 ```
 
-**1000 test methods / 22,850 assertions** as of 2026-07-31 (the `PASS —` line prints the exact
-pair) — fixed-point
-math, seeded RNG streams, the 1986 mechanic grammar, the War Chest economy,
-tank/observer/gates/water/gunship/colossus, every archetype's behavior contract (nest armor,
-technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop, lockstep loopback,
-replay integrity, checksum coverage classification, and the campaign+endless **golden
-determinism** runs.
+**1154 test methods / 37,418 assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
+grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus, every archetype's behavior
+contract (nest armor, technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop,
+lockstep loopback, replay integrity, checksum coverage classification, and the campaign+endless **golden
+determinism** runs. (The `PASS —` line prints the exact pair.)
 
 `test_perf.gd` asserts wall-clock microseconds, so it sits in `run_tests.gd`'s `OPT_IN_SUITES`:
 the default full run **skips** it (that's why the method count above is 1000, not 1002), and CI
@@ -393,7 +391,7 @@ src/main.gd|.tscn    🖼️ The view + input quantization boundary
 src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · sfx.gd
 src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketch, no callers)
 tests/               Headless runner + 38 suites (SUITE=<name> filter, golden checksums)
-tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_assets.gd (CI gates)
+tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_assets.gd · i18n_check.py (CI gates)
                      screenshots.gd · smoke.gd · validate_replay.gd
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
