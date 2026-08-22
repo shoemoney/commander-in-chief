@@ -2908,12 +2908,32 @@ func test_world_label_arbiter_never_returns_occupied_pixels() -> void:
 	#
 	# Each site's SHIPPED anchor offset is scraped from source and pushed through
 	# the SHIPPED WORLD_LABEL_SUBJECT_FRAME.has_point predicate — no copy of the gate, and
-	# a producer added tomorrow joins the sweep automatically. A caller that
-	# clamps its own baseline into the frame (ESCAPING!, main.gd:10215) is safe by
-	# construction and exempt.
+	# a producer added tomorrow joins the sweep automatically. A caller that clamps its own
+	# baseline into the frame (ESCAPING!, main.gd:10249) is exempt from the numeric-offset
+	# model below — a maxf/clampf clamp is not a constant dy, so there is no fixed offset to
+	# push through the predicate.
 	var sites := _wl_call_sites(src)
 	Runner.T.ok(sites.size() >= 14,
 		"scraped %d _world_label* call sites to sweep" % sites.size())
+	# ...but that exemption is only sound paired with an explicit `subject`: without one,
+	# _world_label's gate falls back to testing `pos` (the label's own left edge, offset by
+	# half the text width from the actual subject), which is exactly the X-axis failure a
+	# Y-axis clamp cannot hide from the eye but CAN hide from this Y-only sweep — ESCAPING!
+	# shipped clamped and subject-less, so the gate suppressed the escape warning whenever
+	# the pilot's x sat left of half the text width, and this very exemption is what kept
+	# the sweep above from ever seeing it. So: every self-clamped-baseline site must pass
+	# `subject` explicitly, or it is not "safe by construction" — it is just unmeasured.
+	var unexempt_without_subject := 0
+	var first_u := ""
+	for site in sites:
+		if is_inf(site[3] as float) and not bool(site[2]):
+			unexempt_without_subject += 1
+			if first_u == "":
+				first_u = "%s at main.gd:%d clamps its own baseline but passes no `subject`" \
+					% [site[0], site[1]]
+	Runner.T.eq(unexempt_without_subject, 0,
+		"every self-clamped-baseline call site also passes an explicit subject (%d did not; first: %s)"
+			% [unexempt_without_subject, first_u])
 	# The SHIPPED gate rect, tolerance included — WORLD_LABEL_SUBJECT_FRAME, not the bare
 	# WORLD_LABEL_FRAME the gate used to test. Reading the constant (rather than restating
 	# 640x360) is what keeps this sweep measuring the game after the tolerance moved.

@@ -10246,7 +10246,7 @@ func _draw_enemies() -> void:
 				# on-screen instead of letting it draw above the viewport. The floor is the
 				# label PLATE's top now, not the glyph's: the backing rises above the
 				# baseline, so a bare 10.0 hung it off the top edge.
-				_world_label_centered("ESCAPING!", epos.x, maxf(epos.y - 18.0, float(Art.fs(8)) + 2.0), pi_col)
+				_world_label_centered("ESCAPING!", epos.x, maxf(epos.y - 18.0, float(Art.fs(8)) + 2.0), pi_col, epos)
 			else:
 				# Ransom on the label (their gfx panel 6/9 + our panel — two loops,
 				# same gap): "is this dive worth it" needs the number up front.
