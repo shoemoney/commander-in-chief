@@ -1512,12 +1512,11 @@ all of them; where an entry was reasoned from code instead, it says so.
   .github/workflows/ci.yml` returns nothing.** Both are honest instruments whose numbers reproduced,
   but the repo now has **two uncalled rendered-pixel measuring tapes and no xvfb job to run
   either.** *(Owner decision #32.)*
-- **`tools/probe_mg_lane.gd` is still committed and still broken** *(pre-existing; re-verified
-  present on `9bb1cdb` via `git ls-files`)*. Its own header notes it measures drawn-telegraph vs
-  bullet via `enemy_bullets[-1]`, **the exact misattribution `tests/test_view_honesty.gd:775-782`
-  documents as producing fake drift** — a committed measuring rig whose output is refuted by a
-  green test. It sits directly adjacent to the mg_nest work, so it is the next person's most
-  likely wrong turn. **Either fix it or delete it.**
+- ~~`tools/probe_mg_lane.gd` is still committed and still broken~~ **RESOLVED**: deleted (with its
+  `.gd.uid` sidecar). `tests/test_view_honesty.gd` already carries the correct, position-based
+  attribution this probe was trying (and failing) to do via `enemy_bullets[-1]`, so it was a
+  redundant instrument whose numbers a green test refuted — nothing referenced it outside its own
+  history comment.
 - **Three GL-only capture tools still print leak diagnostics and no gate sees them**
   *(PRE-EXISTING; CLAUDE.md's updated `run_tests.sh` bullet names it as a known gap rather than
   claiming it fixed — this is a bank, not a lie)*. Measured: `godot --path . --rendering-method
