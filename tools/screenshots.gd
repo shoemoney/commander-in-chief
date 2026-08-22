@@ -231,6 +231,14 @@ func _dress_victoly(m: Node2D) -> void:
 	# game. A reviewer judging the shot correctly calls that a broken results screen.
 	m._run_kills = 214
 	m._run_best_streak = 17
+	# The card's widest row ("%d¢ WAR CHEST BANKED -> +%s") reads _victory_banked /
+	# _victory_banked_score, not sim.war_chest (the sim zeroes that on the same tick —
+	# see sim_world.gd's victory payout). Unposed both stay 0, rendering the narrowest
+	# possible version of that row. Derive the pose from the shot's own war chest
+	# (posed in _shot_victoly) instead of inventing a second number, so the HUD
+	# economy head and the card agree in the same frame.
+	m._victory_banked = m.sim.war_chest
+	m._victory_banked_score = m._victory_banked * SimWorld.VICTORY_SCORE_MULT
 	# a1-11: pose gold confetti casings mid-arc so the GOLD col path is captured
 	# (the real confetti is event-spawned by _ev_victory, absent in a static pose).
 	var cx := 320 * F
@@ -459,7 +467,8 @@ func _shot_victoly() -> SimWorld:
 	var sim := SimWorld.new(7, 2)
 	sim.victory = true
 	sim.last_stand = true
-	sim.war_chest = 1240   # banked, not zero — the card prints this as WAR CHEST BANKED
+	sim.war_chest = 1240   # banked, not zero — _dress_victoly copies this into
+	# _victory_banked, which is what the card actually prints as WAR CHEST BANKED
 	sim.score = 264500
 	var p := sim.players[0]
 	p["x"] = 290 * F
