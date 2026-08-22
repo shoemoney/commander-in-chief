@@ -99,9 +99,11 @@ flowchart LR
 
 ## 🧪 Testing
 
-The suite is ~1,000 methods (excluding the opt-in `test_perf.gd`) / ~22,850 assertions
-*(as of 2026-07-31 — it grows constantly; count live with
-`grep -hcE '^func test_' tests/test_*.gd`, which prints 1002 because it includes perf's 2)* and runs in ~23 s. Suites are
+The suite runs in ~23 s. **Do not trust any method/assertion count written down here** — it grows
+constantly, and this line has already gone stale twice. `tools/run_tests.sh` prints the exact pair
+on its `PASS —` line; that is the only number worth quoting. To count methods without launching
+Godot: `grep -hcE '^func test_' tests/test_*.gd`, then subtract `test_perf.gd`'s methods, since perf
+is opt-in and excluded from the default run. Suites are
 plain `RefCounted` classes whose `test_*` methods assert via the runner's `T.ok`/`T.eq` —
 no GUT addon.
 

@@ -32,6 +32,7 @@
 
 # Binary — never touched, never diffed as text, never line-ending mangled.
 *.png       binary
+*.gif       binary
 *.jpg       binary
 *.ico       binary
 *.mp3       binary
