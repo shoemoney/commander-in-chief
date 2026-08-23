@@ -1,7 +1,7 @@
 # Backlog
 
-Open defects, design calls and debt for Commander In Chief, as of **2026-08-21** (branch
-`main` @ `9bb1cdb`).
+Open defects, design calls and debt for Commander In Chief, as of **2026-08-22** (branch
+`main` @ `f1601b7`).
 
 > ⚠️ **Read the severities sceptically — that is a rule this project paid for.** Handed-down
 > reports here have repeatedly named a real smell and got the consequence wrong by a whole
@@ -19,7 +19,14 @@ next to each other. Several lens findings re-flag ground a commit the same run a
 touched; those carry the sha inline so the next reader starts from the remainder, not the
 original complaint.
 
-**Counts this snapshot:** **96 open findings** and **37 owner-decision reports** handed over from
+**Latest merge (2026-08-22, `9bb1cdb..f1601b7`, 21 commits).** A short follow-up window, mostly
+drain: **three of the four owner rulings shipped as code in `0f3f480`**, eight banked findings closed
+with shas (§8), **one previously "not corroborated" title finally located** (the `screenshots.gd`
+victory pose — `8005b80` + `042a3c7`), and **two new owner decisions (#35, #36)** plus **five new
+findings** banked. Every new finding below was re-verified against `f1601b7` by reading the cited
+line, and says which line.
+
+**Counts as of the 2026-08-21 merge:** **96 open findings** and **37 owner-decision reports** handed over from
 the 2026-08-01 → 2026-08-21 window (`390c12d..9bb1cdb`, 60 commits). The 37 reports consolidate
 into **20 numbered decisions (#15–#34)** — five lenses filed the HUD-channel call and three filed
 the deletable-miniboss call, so those entries keep **every** lens's measurement rather than
@@ -60,9 +67,37 @@ open in their sections.** Older carried entries are marked per-section.
 
 ## 1. Owner decisions — these need a human, not a fix
 
-> ### ✅ OWNER RULINGS — 2026-08-21
+> ### ✅ OWNER RULINGS — 2026-08-21, **three of them SHIPPED as code in `0f3f480` on 2026-08-22**
 > Four decisions answered by the owner directly. Do NOT re-open these in a later cycle; a
 > reviewer re-reporting one of them should be dismissed with a pointer here.
+>
+> **Implementation status (`0f3f480`, "three owner rulings"):**
+> - **§1.2 hazards — SHIPPED.** Held **per-PLAYER** (a 2P partner who is not shopping still eats
+>   it): the endless mast pulse, the foundry vent jet and every in-flight telegraphed strike.
+>   Deliberately NOT held, with reasons inline: enemy movement and ordinary bullets,
+>   mines/claymores/barrels (those only fire because you WALKED or SHOT — pausing them makes the
+>   hold key a minesweeper), tank shells, enemy windups. The exploit was real and is bounded:
+>   `_update_wheel` holds the wheel open with no timeout, so `WHEEL_PAUSE_MAX_TICKS = 90` (1.5 s,
+>   covers the ~1 s buy) drains while open and refills **1 per 4 ticks only while CLOSED** — a full
+>   90 t shield costs **360 t** of shopping with the plate down. ⚠️ **The sim guard shipped correct,
+>   tested and UNREACHABLE:** `BUY_WHEEL_OPEN` existed only in `sim_world.gd` because the slice that
+>   wrote it did not own `main.gd`, and `_update_wheel`'s held-open path returned a bare `0`. One
+>   line now returns the sentinel. *A guard nothing can reach is not a guard* — add that to the
+>   read-sceptically list at the top of this file.
+> - **§1.9 salvage — SHIPPED**, routed through the existing `_supply_full` predicate rather than a
+>   second copy of the rule. The refusal is loud (`deny{why:"salvage_full"}` → "GRENADES FULL") and
+>   **returns true so INTERACT is swallowed** rather than falling through to arm a claymore underfoot.
+> - **Off-frame label tolerance — SHIPPED at 12px, NOT the 24 the ruling suggested**, and the number
+>   is measured rather than picked: **12.0 is the smallest above-anchor extent of any labelled
+>   subject's own art** (the downed body's KO ring); 24 would admit labels for subjects with **zero
+>   pixels on screen**. `WORLD_LABEL_SUBJECT_FRAME` derives from `WORLD_LABEL_FRAME` so the two
+>   cannot drift. The 0% result was **re-measured after the change and HOLDS: 0 overlaps across
+>   7,200 frames at 100% AND 200% text scale.**
+> - **§1.10 airstrike deny — no code; now explicitly DECLINED** in this file rather than sitting open.
+>
+> Goldens did **not** move, verified rather than hoped: `git diff src/sim/ | grep 'rng\.'` is empty
+> (no draw added, removed or reordered) and `test_determinism.gd` is untouched. Suite **1146 → 1154
+> methods, 37,356 → 37,416 assertions, 0 failures.**
 >
 > | # | Question | Ruling |
 > |---|---|---|
@@ -401,6 +436,30 @@ of the same number are the only evidence that the number is real.
     Driving it out means picking a second non-commensurate dressing pitch or accepting it. The
     current choice trades a **4x reduction** for a surviving **192px** period; whether that is the
     right stopping point is the owner's.
+
+### New 2026-08-22 — from the `9bb1cdb..f1601b7` window
+
+35. **NEW 2026-08-22 — The OPTS "DEFAULTS RESTORED" banner was demoted from font 9 to font 8 to
+    buy the focused-row halo its 2px channel.** `src/view/menu.gd`, `_draw_opts_header` — the draw
+    is at `menu.gd:5945` on `f1601b7` (`_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 8, ...)`).
+    Measured: **at 9 its ink reached y96 against a ring top of 97 — a 1px overrun; at 8 it clears.**
+    The in-code note explains why the alternative was rejected: raising `HEADER_CLEAR_COMPACT`
+    (`menu.gd:324`, currently **8.0**) to 9 costs the DIRTY 11-row OPTS column a plate row
+    (**bh 18→17**) and **halves its icons (16→8)**. Trading a confirmation banner's emphasis for a
+    layout row is a taste call and the owner may prefer the other side of it — the green is
+    arguably carrying the emphasis either way. *(Reasoned + measured by the implementing lens; the
+    font-8 call site is verified on `f1601b7`, the y96/y97 overrun is the lens's measurement.)*
+36. **NEW 2026-08-22 — `tools/versions.lock` pins CI to Godot 4.7.1-stable while local dev now
+    runs 4.7.2, and the lock's own justification is therefore false.** Surfaced by `a39c1f3` and
+    **deliberately NOT executed there**, because it is policy rather than chore. Verified on
+    `f1601b7`: `tools/versions.lock` still reads `godot_version=4.7.1-stable`, and its comment
+    still claims *"4.7.1 is what local dev already runs, so this aligns CI with the toolchain the
+    suite is actually verified on"* — which is now the opposite of true. **The suite, goldens and
+    both lints pass on 4.7.2 locally.** But the lock states upgrades happen *"only at phase
+    boundaries after the replay regression suite passes on all platforms"*, and a bump changes
+    **the engine the determinism goldens are verified against**. Owner call: bump the lock (and
+    re-verify goldens on all three CI OSes), or correct the comment so it stops asserting
+    something false.
 
 ---
 
@@ -1100,6 +1159,30 @@ all of them; where an entry was reasoned from code instead, it says so.
 
 ## 4. UI / visual polish
 
+### New 2026-08-22 — from the `9bb1cdb..f1601b7` window
+
+- **Anchored fork signage bypasses the label arbiter entirely, so it is not rail-bounded and the
+  new ratchet does not scrape it — banked because the CLASS is unpinned, not because it currently
+  misbehaves.** `src/main.gd:9582-9583` append `crect`/`brect` straight into `_label_slots` without
+  ever calling `claim_label_slot` (verified on `f1601b7`: both `_label_slots.append(crect)` and
+  `_label_slots.append(brect)` are there, and neither goes through the arbiter). That is **by
+  design** — anchored signage reserves its pixels first and never moves — but the new ratchet's
+  producer scrape only covers `_world_label*`, floattext `"text":` literals and `BUY_FLOAT`, so
+  signage sits **outside the swept class**. Verified NOT a live defect today: `fork_sign_relevance`
+  (`main.gd:9417`) reaches **alpha 0 at screen y = SIGN_FADE_GONE 210** (`main.gd:10615`),
+  **102px above the caption scrim top at y 312**, and `_fork_sign_fade` lerps toward it at
+  **0.12/frame** — so the sign is invisible long before the rail. Fix the scrape's coverage, not
+  the sign.
+- **Three simultaneous toasts in the bottom 15px now yields 2 legible + 1 suppressed, where before
+  it was 3 drawn with 2 illegible.** A visible behaviour change worth knowing about, not a defect.
+  Measured on a posed capture (**REVIVE 40¢ @ screen y348, CLICK @ y352, AIM AWAY @ y344, all three
+  at once**): **BEFORE**, all three drew — REVIVE and CLICK smothered under the scrim, AIM AWAY
+  clear. **AFTER**, REVIVE and CLICK are lifted clear and legible and AIM AWAY is dropped by the
+  droppable-suppression path (`fx["sup"] = true`). That is the codebase's own blessed outcome for a
+  saturated ladder and it is a net win. Note the scope: **this affects floattext toasts only** — the
+  actionable persistent labels (REVIVE cost, AIM AWAY as drawn by `_world_label` in production)
+  **clamp above the rail rather than drop**.
+
 ### New this run (2026-08-21)
 
 **Regressions introduced by this window's own commits — fix these first.**
@@ -1400,6 +1483,27 @@ all of them; where an entry was reasoned from code instead, it says so.
 ---
 
 ## 5. Test & tooling debt
+
+### New 2026-08-22 — from the `9bb1cdb..f1601b7` window
+
+- **The final `clampf` in `claim_label_slot`'s least-overlap return is DEAD CODE, and its comment
+  overstates it.** `src/main.gd:10893` on `f1601b7`:
+  `return Rect2(x, clampf(best_y, min_y, maxf(min_y, max_y - h)), w, h)`. MEASURED by mutation:
+  reverting **ONLY** that clamp back to `Rect2(x, best_y, w, h)` leaves the rail ratchet reporting
+  **0 collisions** (`SUITE=view_honesty` PASS). The bound is already enforced twice over — by
+  `k_hi := floor((max_y - h - py) / 11.0)` and by `best_y`'s initialiser, which is itself clamped to
+  `max_y - h`. **Only when ALL FOUR `max_y` uses are removed does the ratchet go red (343).** The
+  eight-line comment above that return claims the clamp is *"what makes the reservation stick"*,
+  which is **not what the measurement says**. Harmless belt-and-braces — fix the comment, or drop
+  the clamp and keep the comment on whichever bound actually carries the load.
+- **Stale collision number inside the rail ratchet's own comment (116,564 vs the measured
+  113,839).** `tests/test_view_honesty.gd:3605` on `f1601b7`, in
+  `test_no_world_label_ever_lands_on_the_bottom_hud_rail`: the comment above the counter-factual
+  block reads *"116,564 / 343 collisions is ample proof of detectability"*. The test itself prints
+  **A_no_reservation = 113,839** (read out by forcing the assertion red: *"COUNTER-FACTUAL A: with
+  no rail reserved the sweep still sees the defect (113839 collisions)"*). **343 is right.**
+  Comment-only — the assertion is `> 0`, so nothing depends on the literal. Pre-existing only in the
+  sense that it arrived with the diff that added the ratchet.
 
 ### New this run (2026-08-21)
 
@@ -1716,6 +1820,16 @@ all of them; where an entry was reasoned from code instead, it says so.
   contention, cold import, aborted `_init`). See §5 for the full measurement. CLAUDE.md's stall
   triage paragraph should grow a fourth bullet, because the wrong remedy (`pkill -f Godot`) is the
   documented answer to a different one.
+- **NEW 2026-08-22 — Three hung headless Godot probes from a previous session were still spinning
+  when this run's gate started.** Hygiene note, not a diff defect, but it is the **third** time the
+  parallel-session failure modes in CLAUDE.md have bitten. `ps` showed PIDs **72354 / 73917**
+  running `-s res://tools/probe_bottomrail…` for **67 and 65 minutes**, and **90405** running
+  `-s res://tools/_probe_geo.gd` for **50 minutes**, all at **0.6-0.7% CPU** — the aborted-`_init`
+  signature CLAUDE.md documents, **not** slowness. The probe scripts themselves are no longer in the
+  tree (`git status` clean), so these were **orphaned by a delete**. All three were killed before
+  anything was measured; leaving them would have starved the suite **and rotated the engine log out
+  from under the error gate**. Standing lesson: `ps aux | grep -c '[G]odot'` before a measuring run,
+  and deleting a probe script does not reap the process running it.
 - **NEW 2026-08-21 — 96 findings banked against ~20 shipped in this window. The ratio is still
   going the wrong way**, and this snapshot is the largest single merge the file has taken. The
   drain-mode proposal below is now three snapshots old and still not built.
@@ -1794,6 +1908,26 @@ the reasoning and nobody mistakes them for oversights.
 
 ## 8. Shipped — resolved, kept for the record
 
+### Shipped in the 2026-08-22 window (`9bb1cdb..f1601b7`, 21 commits)
+
+A short drain window. Every sha below was read directly out of `git log 9bb1cdb..f1601b7`.
+
+| Finding | Commit |
+|---|---|
+| **Owner rulings §1.2 (hazards pause under the wheel), §1.9 (salvage refuses a no-op) and the off-frame label tolerance** | `0f3f480` — tolerance landed at **12px, not 24**, because 12.0 is the smallest above-anchor extent of any labelled subject's own art; 0-overlap result **re-measured and HOLDS across 7,200 frames at 100% and 200% text scale**. See the ruling box in §1 for the wired-to-nothing `BUY_WHEEL_OPEN` catch |
+| `screenshots.gd` victory pose fakes the WAR CHEST row | `8005b80` ("stuffs the war chest before the screenshot") + `042a3c7` ("derives the chest instead of inventing a second number") — **this is the row the 2026-08-21 merge listed as NOT corroborated; it is now located.** Moved out of that table below |
+| Boss flash never reaches the fly-in hull — the body does not react to 32 HP of damage | `43de2f2` ("gunship fly-in hull finally shows its own damage") |
+| `tools/probe_mg_lane.gd` is still committed and still broken | `40ada89` ("retire the mg-lane probe that shot the wrong shooter") — retired rather than repaired |
+| `tools/run_tests.sh` hangs forever (>10 min, no output, low CPU) on an incompatible method-override return type — the FOURTH stall class, missing from CLAUDE.md | `0d4b243` + `208da7b` — the second commit corrects the first: the parse error **does** shout, it just gets skimmed past |
+| CLAUDE.md not updated for the new leak-floor lever / still advertises the ungated raw suite invocation | `0d4b243` ("prioritize leak-gated test command") |
+| ESCAPING! is the one world label whose off-frame gate reads the TEXT's left edge, not its SUBJECT — and the ratchet exempts exactly that site | `63dddf8` ("finally names the pilot instead of its own left margin") / merge `30f17fe`, whose subject notes the ratchet **stops hiding it** |
+| Floattext down-stack can overprint the commander bark row at the bottom rail (2026-07-31 remainder under `1ea6508`) | `f1601b7` — **HEAD** |
+| CONTROLS page sentence-integrity ratchet (owner decision #26's "should get a ratchet") | `9538eca` ("has to keep its sentences whole, not just in bounds") — pins one side of #26; the density side is still unpinned |
+| Verb-chip lift ratchet reaching real pixels (guards owner decision #15's `MIN_HUD_CHANNEL`) | `2f0b3bc` |
+| Tests badge lying by **154 methods and 14.5k assertions**; CONTRIBUTING.md stale twice over | `6f8770c`, then `a39c1f3` — CONTRIBUTING.md was **rewritten to pin no figure at all** ("a date stamp does not stop a number rotting; removing the number does"). Measured at that point: **1154 methods / 37,418 assertions**, and `test_perf.gd` has **3** methods, not the 2 the old parenthetical claimed |
+| CLAUDE.md's un-gated `main.tscn` bootstrap count was a closed-form claim that went false | `a39c1f3` — `d743f4a` added a **fourth** (`tools/gif_capture.gd`, same no-`Quiesce.teardown` class) three hours after the "exactly THREE" line shipped. Now four, and named. **Gating them is still banked as owner-decision territory** (§1.1 / §1 #32) |
+| `.gitattributes` never declared `gif` binary, so `d743f4a`'s four promo GIFs rode git's NUL-byte heuristic | `a39c1f3` — latent hole, not damage: `git check-attr binary docs/media/gifs/staging.gif` goes **"binary: unspecified" → "binary: set"**, verified both sides, no re-normalisation churn |
+
 ### Shipped in the 2026-08-21 window (`390c12d..9bb1cdb`, 60 commits)
 
 Shas below were located by `git log -S<identifier> 390c12d..HEAD` against the symbol each fix had
@@ -1844,7 +1978,7 @@ unchanged since `390c12d` (`git log -S… 390c12d..HEAD` returns only the two do
 | A salvaged or expired tank hulk keeps burning and drawing as cover | `HULK_TICKS` unchanged since `390c12d` |
 | "WAVE CLEARED — SHOP OPEN" fires while a live Spotter is still shelling | `observer_alive` unchanged since `390c12d` |
 | Endless 2P: a broke death respawns FREE after 5s | `rally_is_free` unchanged since `390c12d` |
-| `screenshots.gd` victory pose fakes the WAR CHEST row | `_victory_banked_score` unchanged since `390c12d` |
+| ~~`screenshots.gd` victory pose fakes the WAR CHEST row~~ | **RESOLVED 2026-08-22 — `8005b80` + `042a3c7`.** The 2026-08-21 pass was right that nothing had moved *in that window*; the fix landed in the next one. See the table above |
 | Toast-string scrape's `_coin_pop` branch is dead code | `_coin_pop` unchanged since `390c12d` |
 | The Colossus siege restocks grenades in total silence | sha not located |
 | Five teaching hints stamp hardcoded key letters (E/F/Q) | sha not located — `40087f6` ("rebind labels now show TAP vs HOLD for shared E key") is adjacent but is not this |
@@ -1937,6 +2071,18 @@ claymore self-kill (`2fe8b00`).
   AND grenades to cap every 60 ticks against an 8-tick fire loop (§6), so any attrition or economy
   claim in this file taken under god mode is measuring a world where you never run dry. Prefer
   `god_mode OFF` drives for those.
+- **A guard nothing can reach is not a guard — new to this list 2026-08-22.** `0f3f480` found its
+  own §1.2 hazard-pause sim guard shipped **correct, tested and unreachable**: `BUY_WHEEL_OPEN`
+  appeared only in `sim_world.gd` because the slice that wrote it did not own `main.gd`, so
+  `_update_wheel`'s held-open path returned a bare `0` and the tested rule could never fire. Same
+  failure shape as the `claim_label_slot` signature-and-`return rect` stub CLAUDE.md already
+  documents. When a fix spans the sim/view seam, prove it **end to end** — the test passing on the
+  sim half is not evidence the view ever calls it.
+- **A number in a comment rots faster than a number in an assertion.** Two entries this merge are
+  stale comments beside correct code (the rail ratchet's 116,564 vs the printed 113,839; the
+  `clampf` comment claiming load it does not carry), and `a39c1f3` fixed a third by **deleting the
+  number rather than re-stamping it**. Prefer printing the measurement from the test over restating
+  it in prose.
 - **Entries marked RESOLVED stay in place** so a decision and its outcome stay adjacent. Keep
   doing that.
 - **The loop writes this file itself** at the end of each run and MERGES rather than
