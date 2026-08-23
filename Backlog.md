@@ -449,8 +449,15 @@ of the same number are the only evidence that the number is real.
     layout row is a taste call and the owner may prefer the other side of it — the green is
     arguably carrying the emphasis either way. *(Reasoned + measured by the implementing lens; the
     font-8 call site is verified on `f1601b7`, the y96/y97 overrun is the lens's measurement.)*
-36. **NEW 2026-08-22 — `tools/versions.lock` pins CI to Godot 4.7.1-stable while local dev now
-    runs 4.7.2, and the lock's own justification is therefore false.** Surfaced by `a39c1f3` and
+36. ~~**NEW 2026-08-22 — `tools/versions.lock` pins CI to Godot 4.7.1-stable while local dev now
+    runs 4.7.2, and the lock's own justification is therefore false.**~~ **RESOLVED 2026-08-23** —
+    `cebc3b7` bumped the pin to 4.7.2-stable (owner call: "bump godo"). Both goldens reproduce
+    UNCHANGED on 4.7.2, so no re-record; the new sha256 was authenticated against the release's
+    published SHA512-SUMS.txt before being hashed, and the docs/badges follow the lock rather than
+    being "corrected" independently. The all-platforms half of the lock's own upgrade rule is
+    CI's 3-OS matrix, and the commit message commits to reverting rather than re-recording if any
+    platform disagrees. Original entry follows.
+ Surfaced by `a39c1f3` and
     **deliberately NOT executed there**, because it is policy rather than chore. Verified on
     `f1601b7`: `tools/versions.lock` still reads `godot_version=4.7.1-stable`, and its comment
     still claims *"4.7.1 is what local dev already runs, so this aligns CI with the toolchain the
