@@ -17,7 +17,7 @@
 
 ![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-1154%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1159%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
@@ -63,8 +63,8 @@ posed sim states, no mockups, no concept art.</sub>
 > replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd` + `python3 tools/i18n_check.py` string extraction gate),
-> then import + boot-smoke + the full golden-checksum suite (**1154 methods / 37,418 assertions** —
-> the runner prints the exact pair) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing
+> then import + boot-smoke + the full golden-checksum suite (the runner prints the exact
+> method/assertion pair; the pinned figure lives in [🧪 Headless test suite](#-headless-test-suite)) across **Linux-x86_64 · macOS-arm64 · Windows-x86_64**, failing
 > on any `SCRIPT ERROR` or a missing `PASS` line — plus packaged-export smoke tests on Linux and
 > Windows, an advisory (`continue-on-error`) perf job, and a nightly 3-hour soak run.
 > The engine version is pinned in `tools/versions.lock`, the one source CI reads, so the
@@ -307,17 +307,48 @@ Concussion muffles the radio too — by intent. A stunned soldier hears underwat
 ## 🧪 Headless test suite
 
 ```sh
-godot --headless --path . --import                      # once after cloning / new class_name scripts
-godot --headless --path . -s res://tests/run_tests.gd   # full suite
-SUITE=mechanics godot --headless --path . -s res://tests/run_tests.gd   # filter by suite name 🎯
-SUITE=perf godot --headless --path . -s res://tests/run_tests.gd        # opt-in timing suite ⏱️
+godot --headless --path . --import           # 📦 once after cloning, and after ANY new class_name script
+tools/run_tests.sh                           # 🧪 full suite, private user://
+SUITE=mechanics tools/run_tests.sh           # 🔍 one suite (substring of the filename)
+SUITE=perf tools/run_tests.sh                # ⏱️ opt-in timing suite (excluded from the default run)
+tools/run_tests.sh -s res://tools/lint_sim.gd   # 🧹 determinism lint — run it yourself after sim edits
 ```
 
-**1154 test methods / 37,418 assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
+> 🏠 **Use `tools/run_tests.sh`, not raw `godot`, whenever anything else might be running.**
+> `user://` is keyed on the **project name, not the checkout path**, so every worktree and every
+> concurrent session shares one `ikari_best.cfg` and one `godot.log`. The wrapper hands the run a
+> private `HOME` so siblings can't clobber each other — and it owns the **shutdown-leak gate**,
+> which the in-engine gate structurally cannot see (Godot prints leak diagnostics on stdout, after
+> its file logger is already gone). 🕳️
+
+<details><summary>🔧 <b>The raw invocation still works — here's when it doesn't</b></summary>
+
+```sh
+godot --headless --path . -s res://tests/run_tests.gd   # ⚠️ no leak gate, shared user://
+```
+
+The wrapper is a wrapper, not a runner change, so this is still a valid way to run the suite when
+you are *definitely alone on the machine*. What you give up: the shutdown-leak gate, and the
+private `user://`. The save/settings tests stash and restore your **real** config, so two
+concurrent raw runs corrupt each other's fixtures — and a sibling Godot rotating the log away makes
+the engine-error gate fail a perfectly clean diff with *"no log carried this run's marker"*. 🌀
+
+</details>
+
+**1,159 test methods / 37,400+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
 grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus, every archetype's behavior
 contract (nest armor, technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop,
 lockstep loopback, replay integrity, checksum coverage classification, and the campaign+endless **golden
 determinism** runs. (The `PASS —` line prints the exact pair.)
+
+> 📐 **Why the method count is exact and the assertion count is a floor.** The method count is
+> **identical on every platform**, so it can be pinned — and it *is* pinned, by
+> `test_assets.gd::test_readme_test_method_count_matches_the_suite`: that test recounts the suite
+> and fails if this line drifts, so adding a test without updating this number turns the build red.
+> Assertion totals genuinely **vary by platform and environment** — on commit `4c7ae78` the same
+> code measured **37,436** on Linux and macOS but **37,451** on Windows — so *no single exact
+> assertion number is correct everywhere*. Pinning one wouldn't just go stale, it would be
+> unfalsifiable; a floor is the honest form. 🎯
 
 `test_perf.gd` asserts wall-clock microseconds, so it sits in `run_tests.gd`'s `OPT_IN_SUITES`:
 the default full run **skips** it (that's why the method count above is 1000, not 1002), and CI
@@ -334,7 +365,7 @@ randomly-red gate stops being read.
 
 > ⚠️ **Read this before believing the diagram.** `src/net/lockstep.gd` has **zero production
 > callers** — nothing in `src/main.gd` or the menus constructs a `LockstepSession`, and no
-> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a 237-line
+> transport is wired to `on_send`. Online co-op is **not playable**. What exists is a ~260-line
 > loop plus `tests/test_lockstep.gd`, whose `FakeWire` is a deterministic **in-memory** wire with
 > latency jitter only: it never drops, duplicates, corrupts-by-network, disconnects, or times out
 > a packet (the one corruption test flips a payload byte by hand to prove the checksum exchange
@@ -479,7 +510,7 @@ flowchart LR
 | ✅ | **Owned art + audio** | Every sprite owned-procedural, owned generative-AI, or CC0; voice lines synthesized in-house. Provenance map in [`ASSETS.md`](ASSETS.md) |
 | ✅ | **Public release** | Clean git history, MIT on the code, **v0.3.0** binaries for macOS (arm64 + universal) · Linux · Windows |
 | 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame, sectors reuse one desert tileset despite distinct names |
-| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **237 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
+| ⬜ | **Online netplay** | `src/net/lockstep.gd` is **~260 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
 | ⬜ | **Human-in-the-loop production** | No external playtests, no hired artist or art director, no external QA or compat matrix. Built by one owner plus agents — see the caveat at the top of [`docs/PLAN.md`](docs/PLAN.md) |
