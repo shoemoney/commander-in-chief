@@ -3050,3 +3050,81 @@ func _img_mean(img: Image) -> float:
 		for x in range(0, img.get_width(), 4):
 			acc += img.get_pixel(x, y).get_luminance()
 	return acc / float((img.get_height() / 4) * (img.get_width() / 4)) * 255.0
+
+
+func test_readme_test_method_count_matches_the_suite() -> void:
+	# The README quotes a method count, and an unverified number in a doc drifts at the rate
+	# nobody is checking — that line has already gone stale THREE times (1154 -> 1157 while
+	# CONTRIBUTING.md's copy of it went stale twice before being de-pinned entirely).
+	# So the claim gets a test instead of a promise: recount the suite the same way CLAUDE.md
+	# documents (every `func test_` in tests/test_*.gd, minus the opt-in perf suite) and require
+	# the README to agree. Add a test without updating the README and this fails, by design.
+	#
+	# Only the METHOD count is pinned. Assertion totals vary by platform (measured on one commit:
+	# 37,436 Linux and macOS, 37,451 Windows), so no exact assertion number is correct everywhere
+	# and the README states that one as a floor.
+	var dir := DirAccess.open("res://tests")
+	Runner.T.ok(dir != null, "tests/ is readable for the recount")
+	if dir == null:
+		return
+	var actual := 0
+	var files := 0
+	for f in dir.get_files():
+		if not f.begins_with("test_") or not f.ends_with(".gd"):
+			continue
+		if f == "test_perf.gd":
+			continue   # OPT_IN_SUITES — excluded from the default run the README describes
+		files += 1
+		for line in FileAccess.get_file_as_string("res://tests/" + f).split("\n"):
+			if line.begins_with("func test_"):
+				actual += 1
+	Runner.T.ok(files >= 30, "the recount actually walked the suite (%d files)" % files)
+	Runner.T.ok(actual > 900, "the recount found real methods (%d)" % actual)
+
+	var readme := FileAccess.get_file_as_string("res://README.md")
+	Runner.T.ok(not readme.is_empty(), "README.md is readable")
+	var want := "%d,%03d test methods" % [actual / 1000, actual % 1000]
+	Runner.T.ok(readme.contains(want),
+		"README quotes the live method count (\"%s\") — recount says %d across %d suites; update README.md when you add tests"
+			% [want, actual, files])
+
+	# The shields.io badge carries the SAME number URL-encoded, which is exactly why it rotted
+	# undetected while the prose next to it was being corrected: a `grep` for "methods" does not
+	# match "1154%20methods". Gate the encoded form too, or this line silently drifts alone.
+	var badge_want := "tests-%d%%20methods" % actual
+	Runner.T.ok(readme.contains(badge_want),
+		"the README test badge carries the live count (\"%s\") — recount says %d" % [badge_want, actual])
+
+
+func _gd_files_under(root: String, out: Array) -> void:
+	var dir := DirAccess.open(root)
+	if dir == null:
+		return
+	for f in dir.get_files():
+		if f.ends_with(".gd"):
+			out.append(root + "/" + f)
+	for d in dir.get_directories():
+		_gd_files_under(root + "/" + d, out)
+
+
+func test_netplay_still_has_zero_production_callers() -> void:
+	# README.md, CLAUDE.md and docs/PLAN.md all tell the reader that online co-op is NOT
+	# playable, and the single load-bearing fact behind that is "src/net/lockstep.gd has zero
+	# production callers". Until now that rested on prose alone — the honest claim in the repo
+	# most likely to quietly become a lie, because the day someone wires a transport is exactly
+	# the day nobody thinks to grep the README.
+	#
+	# This is NOT a rule against shipping netplay. If it fails, the code may be perfectly good
+	# and the DOCS are what went stale.
+	var files: Array = []
+	_gd_files_under("res://src", files)
+	Runner.T.ok(files.size() > 5, "walked src/ (%d .gd files)" % files.size())
+	var callers: Array = []
+	for f in files:
+		if f.begins_with("res://src/net/"):
+			continue   # the sketch itself, and its own module, are allowed to name it
+		if "LockstepSession" in FileAccess.get_file_as_string(f):
+			callers.append(f)
+	Runner.T.eq(callers.size(), 0,
+		"docs say online co-op is not playable because lockstep has ZERO production callers — found %s. If netplay is now real, update README.md, CLAUDE.md and docs/PLAN.md instead of deleting this test"
+			% str(callers))
