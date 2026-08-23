@@ -35,7 +35,7 @@ body:
         > Run `godot --headless --path . --import` once after cloning, run **one**
         > Godot at a time, and use `tools/run_tests.sh` (it gives the run a private
         > `user://`). The engine version is pinned in `tools/versions.lock`
-        > (**4.7.1-stable**) — check you are on it.
+        > (**4.7.2-stable**) — check you are on it.
 
         <details><summary>🧪 <b>Reproduce locally — exact commands</b></summary>
 

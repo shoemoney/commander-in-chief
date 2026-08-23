@@ -7,7 +7,7 @@ make this game do something it shouldn't, we want to hear about it.
 
 ![CI](https://github.com/shoemoney/commander-in-chief/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Godot](https://img.shields.io/badge/Godot-4.7.1-478CBF?logo=godot-engine&logoColor=white)
+![Godot](https://img.shields.io/badge/Godot-4.7.2-478CBF?logo=godot-engine&logoColor=white)
 ![Release](https://img.shields.io/github/v/release/shoemoney/commander-in-chief)
 
 ---

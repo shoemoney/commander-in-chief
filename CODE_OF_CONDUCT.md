@@ -5,7 +5,7 @@
 
 [![CI](https://github.com/shoemoney/commander-in-chief/actions/workflows/ci.yml/badge.svg)](https://github.com/shoemoney/commander-in-chief/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Godot 4.7.1](https://img.shields.io/badge/Godot-4.7.1-478CBF?logo=godot-engine&logoColor=white)
+![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478CBF?logo=godot-engine&logoColor=white)
 [![Release](https://img.shields.io/github/v/release/shoemoney/commander-in-chief)](https://github.com/shoemoney/commander-in-chief/releases/latest)
 
 This project follows the spirit and substance of the **Contributor Covenant v2.1** —

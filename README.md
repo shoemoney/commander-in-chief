@@ -15,7 +15,7 @@
 
 <img src="docs/media/keyart_hero.png" width="82%" alt="Commander In Chief — key art"/>
 
-![Godot 4.7.1](https://img.shields.io/badge/Godot-4.7.1-478cbf?logo=godotengine&logoColor=white)
+![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
 ![Tests](https://img.shields.io/badge/tests-1154%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
@@ -366,8 +366,8 @@ Remote Play Together are the co-op that actually ships.
 
 ## 🚀 Quick Start (macOS / Apple Silicon)
 
-1. Grab **Godot 4.7.1 (stable)** `macos.universal.zip` from
-   <https://godotengine.org/download/archive/4.7.1-stable/> — native on M1–M4. 🍎
+1. Grab **Godot 4.7.2 (stable)** `macos.universal.zip` from
+   <https://godotengine.org/download/archive/4.7.2-stable/> — native on M1–M4. 🍎
 2. Run it:
    ```sh
    /Applications/Godot.app/Contents/MacOS/Godot --path /path/to/commander-in-chief

@@ -6,7 +6,16 @@
 # two-component version ("⛔️ Invalid version: 4.7") and every run since has died at
 # the Set up Godot step, before importing anything. 4.7.1 is what local dev already
 # runs, so this aligns CI with the toolchain the suite is actually verified on.
+# 4.7.1 → 4.7.2 (2026-08-23): patch-level ALIGNMENT, same reason as the line above and
+# not a feature bump — local dev had drifted to 4.7.2 (4.7.2.stable.official.ed1daf0bf),
+# so the 4.7.1 pin had stopped describing the toolchain the suite is verified on and its
+# own justification above had become false. Full suite incl. determinism goldens, plus
+# lint_sim and lint_assets, pass on 4.7.2 with the committed checksums UNCHANGED — the
+# pure-int sim reproduces them, so no golden re-record. CI's 3-OS matrix is what confirms
+# that on Linux and Windows; if any platform's goldens move, revert this bump rather than
+# re-recording — a checksum that moves on an engine patch means the sim touched the engine.
 # Hash is sha256 of the official GitHub release zip, verified against 4.6.3's.
-godot_version=4.7.1-stable
-godot_linux_x86_64_zip_sha256=c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba
+# 4.7.2's zip was additionally checked against the release's published SHA512-SUMS.txt.
+godot_version=4.7.2-stable
+godot_linux_x86_64_zip_sha256=cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
 godot_download_base=https://github.com/godotengine/godot/releases/download/

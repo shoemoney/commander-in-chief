@@ -5,7 +5,7 @@
 
 ![CI](https://github.com/shoemoney/commander-in-chief/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Godot 4.7.1](https://img.shields.io/badge/Godot-4.7.1-478CBF?logo=godot-engine&logoColor=white)
+![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478CBF?logo=godot-engine&logoColor=white)
 ![Release](https://img.shields.io/github/v/release/shoemoney/commander-in-chief)
 
 ---
@@ -29,7 +29,7 @@
 
 | # | 🪜 Step | 💻 Command |
 |---|---|---|
-| 1️⃣ | **Install Godot 4.7.1-stable** (standard, not .NET) — pinned in [`tools/versions.lock`](tools/versions.lock) | <https://godotengine.org/download> |
+| 1️⃣ | **Install Godot 4.7.2-stable** (standard, not .NET) — pinned in [`tools/versions.lock`](tools/versions.lock) | <https://godotengine.org/download> |
 | 2️⃣ | Clone | `git clone https://github.com/shoemoney/commander-in-chief.git` |
 | 3️⃣ | **Import assets — once, mandatory** (also after pulling any new `class_name` script) | `godot --headless --path . --import` |
 | 4️⃣ | Play it | `godot --path .` — or open the editor |

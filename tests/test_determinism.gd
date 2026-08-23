@@ -12,7 +12,9 @@ const SAMPLE_EVERY := 600     # checksum every 10 seconds
 const SEED := 0xDEADBEEF
 
 ## Golden checksums recorded on first green run (Linux x86_64, Godot 4.6.3;
-## re-verified unchanged on Godot 4.7 and Apple Silicon arm64).
+## re-verified unchanged on Godot 4.7, 4.7.1, 4.7.2 and Apple Silicon arm64 —
+## engine patch bumps do not move them, and if one ever does, that is the sim
+## having grown an engine dependency, not a golden that needs re-recording).
 ## If these ever change, determinism broke — do NOT re-record without
 ## understanding why. An empty array prints values to record.
 ## RE-RECORDED at the P3 session boundary (2026-07-08): the hurt pipeline
