@@ -2792,7 +2792,10 @@ func test_supply_float_prints_the_delivered_quantity() -> void:
 		"the supply float text is derived by buy_float_text(kind, n), not indexed straight out of BUY_FLOAT")
 	if ms.has_method("buy_float_text"):
 		Runner.T.eq(ms.call("buy_float_text", 0, 30), "+30 AMMO", "a full ammo delivery still reads +30")
-		Runner.T.eq(ms.call("buy_float_text", 1, 1), "+1 GRENADES", "a clamped top-up reads what it delivered")
+		# The COUNT was already honest here; the NOUN was not. A clamped top-up of one
+		# printed "+1 GRENADES" (see test_no_shipped_string_says_one_of_a_plural).
+		Runner.T.eq(ms.call("buy_float_text", 1, 1), "+1 GRENADE", "a clamped top-up reads what it delivered, singular")
+		Runner.T.eq(ms.call("buy_float_text", 1, 4), "+4 GRENADES", "a full delivery still reads the plural")
 		Runner.T.eq(ms.call("buy_float_text", 3, 1), "AIRSTRIKE INBOUND",
 			"a quantity-less kind ignores n rather than printing a number at it")
 	Runner.T.ok(src.count("buy_float_text(") >= 3,
@@ -3412,3 +3415,321 @@ func test_flyin_hull_reacts_to_being_shot() -> void:
 		"the fly-in hull colour reacts to _boss_flash — a round landing during the approach flashes the body")
 	Runner.T.ok(flyin.contains("2.2, 2.2, 2.2"),
 		"it flashes toward the SAME white-hot the engaged hull uses, not a second authored value")
+
+
+# ---------------------------------------------------------------------------
+# "CAREER — 1 RUNS · 4 KILLS · 0% WON".
+#
+# Not one string: FIVE count-noun literals across menu.gd and main.gd printed a
+# hardcoded plural against a live count, and FOUR of them are reachable at n = 1 —
+# a first run, a one-kill run, the grenade top-up the SIM CLAMPS ("a top-up at
+# 11/12 grenades delivers 1", buy_float_text's own docstring), and the same clamp
+# on the hulk-salvage receipt. Two halves, so this pins the class and not the four
+# instances:
+#
+#   SCRAPE — every `%d <PLURAL>` literal in the three view files must be listed
+#            below against the PURE producer that emits it. A `%d TANKS` added
+#            tomorrow is unlisted and reds the day it lands.
+#   BEHAVIOUR — call each listed producer at n = 1 and assert it says the singular;
+#            call it at 0 and 2 and assert the plural comes back, so nobody
+#            "fixes" a failure by singularising unconditionally.
+const PLURAL_SITES := {
+	"+%d GRENADES": {"noun": "GRENADE", "who": "main.buy_float_text"},
+	"+%d GRENADES — COVER STRIPPED": {"noun": "GRENADE", "who": "main.hulk_salvage_text"},
+	"%d KILLS  ·  LONGEST STREAK  x%d": {"noun": "KILL", "who": "main._victory_story_rows"},
+	"%d GUNSHIPS DOWNED — RUSH CLEARED": {"noun": "GUNSHIP", "who": "main.boss_rush_cleared_text"},
+	"CAREER — %d RUNS · %d KILLS · %d%% WON": {"noun": "RUN", "who": "Menu.career_line"},
+	"BOARD KEEPS YOUR TOP %d RUNS": {"noun": "RUN", "who": "Menu (HALL_KEEP is a const 40 — unreachable at 1)"},
+}
+
+
+func _plural_producer(who: String, n: int) -> String:
+	match who:
+		"main.buy_float_text": return Main.buy_float_text(1, n)          # kind 1 == grenades
+		"main.hulk_salvage_text": return Main.hulk_salvage_text(n)
+		"main._victory_story_rows": return String(Main._victory_story_rows(n, n, {})[0]["text"])
+		"main.boss_rush_cleared_text": return Main.boss_rush_cleared_text(n)
+		"Menu.career_line": return Menu.career_line(n, n, 0)
+	return ""
+
+
+func test_no_shipped_string_says_one_of_a_plural() -> void:
+	var re := RegEx.new()
+	re.compile('"[^"]*%d[ \\t]+[A-Z][A-Z]+S\\b[^"]*"')
+	var found := 0
+	for path in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd"]:
+		for m in re.search_all(FileAccess.get_file_as_string(path)):
+			var lit: String = m.get_string().substr(1, m.get_string().length() - 2)
+			found += 1
+			Runner.T.ok(PLURAL_SITES.has(lit),
+				"%s: count-noun literal %s is listed against its pure producer" % [path.get_file(), lit])
+	# Two literals SURVIVE the fix and are meant to: BUY_FLOAT's readable catalogue wording
+	# (resolved through BUY_FLOAT_NOUN at draw time) and the Hall's const-40 board line. The
+	# guard against a refactor that quietly empties this ratchet is the TABLE, not the scrape.
+	Runner.T.ok(found >= 2, "scraped the count-noun literals out of the view layer (%d found)" % found)
+	Runner.T.ok(PLURAL_SITES.size() >= 6, "the count-noun site table still names every known producer (%d)" % PLURAL_SITES.size())
+	var wrong := 0
+	var detail := ""
+	for lit in PLURAL_SITES.keys():
+		var who: String = PLURAL_SITES[lit]["who"]
+		var noun: String = PLURAL_SITES[lit]["noun"]
+		if not who.begins_with("main.") and not who.begins_with("Menu."):
+			continue   # count is a const that can never be 1 — recorded, not exercised
+		var one := _plural_producer(who, 1)
+		Runner.T.ok(one != "", "%s answers at n = 1 (%s)" % [who, one])
+		if one.contains("1 %sS" % noun):
+			wrong += 1
+			detail += "  %s -> %s\n" % [who, one]
+		Runner.T.ok(one.contains("1 %s" % noun),
+			"%s names the noun it counts at n = 1 (%s)" % [who, one])
+		for many in [0, 2, 7]:
+			var s := _plural_producer(who, many)
+			if not s.contains(str(many)):
+				# A producer may swap to a COUNT-FREE line at that quantity (hulk salvage
+				# says "FULL UP — COVER STRIPPED" when it delivers none). Nothing to
+				# pluralise, so nothing to assert — but the n = 1 arm above still runs.
+				continue
+			Runner.T.ok(s.contains("%d %sS" % [many, noun]),
+				"%s still pluralises at n = %d (%s)" % [who, many, s])
+	Runner.T.eq(wrong, 0, "no shipped line says \"1 <PLURAL>\" (%d producers do:\n%s)" % [wrong, detail])
+
+
+# ---------------------------------------------------------------------------
+# NO WORLD LABEL LANDS ON THE BOTTOM HUD RAIL.
+#
+# Reported as one floattext toast ("CLICK") printing under the caption strip. It is
+# not one toast: main.gd::_draw seeds `_label_slots` with THREE families — the
+# per-player exclusion boxes, the top-left HUD corner plate and last frame's message
+# band — and claim_label_slot then accepts any row satisfying `y + h <= 360`. There
+# is no bottom-rail rect in `taken` and there is no max_y. Meanwhile $HUD is a
+# CanvasLayer at layer 2 and every world label draws at z=0, so the overprint
+# direction is HUD-OVER-LABEL: the label is smothered under the 0.75-alpha caption
+# scrim and the bark text prints across its own plate. Nineteen producers feed that
+# arbiter; REVIVE <cost> over a partner downed near the viewport floor and AIM AWAY
+# are both worse than the reported toast, because both are actionable and captions
+# are ON by default for the full length of every bark clip.
+#
+# The sweep is exhaustive over the arbiter's whole input domain in the bottom 70px —
+# there is no sampling window to under-shoot — and it runs THREE counter-factuals so
+# the ratchet proves it can still see the defect it pins:
+#     A. no rail reserved at all           (HEAD's behaviour)
+#     B. rail reserved, no max_y bound     (reservation alone is not enough: an
+#                                           exhausted PERSISTENT ladder deliberately
+#                                           settles for LEAST OVERLAP, i.e. hands
+#                                           rail pixels back by design)
+#     C. rail reserved + max_y bound       (shipped — must be 0)
+# A and B are asserted NON-ZERO. A ratchet whose counter-factual is also clean is
+# pinning nothing, and would read green forever.
+func test_no_world_label_ever_lands_on_the_bottom_hud_rail() -> void:
+	var producers := _world_label_producers()
+	Runner.T.ok(producers.size() >= 16,
+		"scraped the world-label / floattext / supply-receipt producers out of main.gd (%d)" % producers.size())
+	# --- the rail, seeded through the PRODUCTION path (hud.gd::bottom_rail_rects), not
+	# --- a hand-typed rect list: the draw's own resolved caption box and verb chip.
+	var stub := _RailMain.new()
+	stub._sfx = Sfx.new()
+	stub._sfx._arm_caption("SPOTTER: \"Gunship inbound, break left and keep moving!\"", null, true, false)
+	var hud := HudIcons.new()
+	hud.main = stub
+	var frames := {}
+	frames["default"] = hud.bottom_rail_rects()
+	var csim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	csim.colossus = {"alive": true, "hp": 100}
+	stub.sim = csim
+	frames["colossus"] = hud.bottom_rail_rects()
+	for tag in frames.keys():
+		var rr: Array[Rect2] = frames[tag]
+		Runner.T.eq(rr.size(), 2, "%s frame reserves BOTH rail members (caption scrim + verb chip)" % tag)
+	Runner.T.ok(HudIcons.bottom_band_lift(csim) > 0.0,
+		"the colossus frame really does lift the bottom cluster (%.0fpx)" % HudIcons.bottom_band_lift(csim))
+	# --- the sweep ---
+	var was_scale: float = Art.text_scale
+	var counts := {"A_no_reservation": 0, "B_no_max_y": 0, "C_shipped": 0}
+	var claims := 0
+	var worst := ""
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		var sz := Art.fs(8)
+		# The arbiter sees a rect, not a string: reduce the scraped producers to the
+		# distinct WIDTHS they measure at this size, which is the whole of what varies.
+		var widths := {}
+		for t in producers:
+			widths[Art.tw(t, sz)] = true
+		for tag in frames.keys():
+			var rail: Array[Rect2] = frames[tag]
+			# Everything else the frame has already claimed. TWO regimes, because the
+			# max_y bound is only load-bearing in the second, and a sweep that ran the
+			# first alone would report the bound as dead code:
+			#   clean      — a couple of reservations. The 13-row ladder virtually always
+			#                finds a free row, so the RESERVATION alone is sufficient here
+			#                (measured: 0 collisions survive it).
+			#   congested  — 20 more labels already placed, each one GRANTED BY THE ARBITER
+			#                and appended to `taken` exactly the way _draw does
+			#                (`_label_slots.append(got)`). Now the ladder exhausts, the
+			#                PERSISTENT path falls through to least-overlap, and without the
+			#                bound it settles onto the rail by design.
+			for regime in ["clean", "congested"]:
+				var base: Array[Rect2] = [Main.player_label_exclusion(Vector2(320.0, 300.0)),
+					Rect2(0.0, 0.0, 120.0, 60.0)]
+				if regime == "congested":
+					# A SATURATED frame, built the way _draw builds one: every rect here was
+					# granted by the arbiter and then appended to `taken`. Three anchor
+					# columns across the full width x 20 rows, because a wall confined to
+					# screen-centre leaves the x40 and x600 ladders free and the
+					# least-overlap fallback never fires (measured: 0).
+					for cx in [60.0, 230.0, 400.0]:
+						for i in 20:
+							var cr := Main._label_plate_rect(cx, 40.0 + float(i) * 13.0, 180.0, sz)
+							base.append(Main.claim_label_slot(cr, base))
+				var with_rail: Array[Rect2] = base.duplicate()
+				for r in rail:
+					with_rail.append(r)
+				var ceil_y: float = Main.label_rail_ceiling(rail)
+				var where := "%s/%s scale %.1f" % [tag, regime, scale]
+				# The congested regime costs ~20x per claim (its `taken` is 60+ rects and the
+				# least-overlap fallback is O(rows x rects)), so it runs on a coarser x/width
+				# grid: its job is to FIRE the fallback, while the clean regime is the one
+				# that has to be exhaustive over the arbiter's whole bottom-70px domain.
+				var xs := (range(40, 601, 20) if regime == "clean" else range(40, 601, 80))
+				var ws := (widths.keys() if regime == "clean" else _width_spread(widths.keys(), 12))
+				for wv in ws:
+					var w: float = wv
+					for xi in xs:
+						for yi in range(290, 361):
+							var pw := Main._label_plate_rect(float(xi), float(yi), w, sz)
+							var fw := Main.floattext_claim_rect(Vector2(xi, yi), w, sz)
+							claims += 2
+							# The two counter-factuals exist to prove this sweep can still SEE the
+							# defect. B only ever fires in the congested regime (the least-overlap
+							# fallback needs an exhausted ladder). They run on every third x —
+							# 116,564 / 343 collisions is ample proof of detectability, and the
+							# exhaustive arm is C, the shipped behaviour, on every x.
+							if xi % 60 == 40:
+								claims += 4
+								if _hits_rail(Main.claim_label_slot(pw, base), rail):
+									counts["A_no_reservation"] += 1
+								if _hits_rail(Main.claim_label_slot(fw, base, 0.0, true), rail):
+									counts["A_no_reservation"] += 1
+								if _hits_rail(Main.claim_label_slot(pw, with_rail), rail):
+									counts["B_no_max_y"] += 1
+								if _hits_rail(Main.claim_label_slot(fw, with_rail, 0.0, true), rail):
+									counts["B_no_max_y"] += 1
+							var pgot := Main.claim_label_slot(pw, with_rail, 0.0, false, ceil_y)
+							if _hits_rail(pgot, rail):
+								counts["C_shipped"] += 1
+								if worst == "":
+									worst = "persistent w%.0f @%d,%d %s -> %s" % [w, xi, yi, where, str(pgot)]
+							var fgot := Main.claim_label_slot(fw, with_rail, 0.0, true, ceil_y)
+							if _hits_rail(fgot, rail):
+								counts["C_shipped"] += 1
+								if worst == "":
+									worst = "toast w%.0f @%d,%d %s -> %s" % [w, xi, yi, where, str(fgot)]
+	Art.text_scale = was_scale
+	Runner.T.ok(claims >= 90000, "swept the arbiter's whole input domain in the bottom 70px (%d claims)" % claims)
+	Runner.T.ok(counts["A_no_reservation"] > 0,
+		"COUNTER-FACTUAL A: with no rail reserved the sweep still sees the defect (%d collisions) — a clean A means this ratchet pins nothing"
+			% counts["A_no_reservation"])
+	Runner.T.ok(counts["B_no_max_y"] > 0,
+		"COUNTER-FACTUAL B: reserving the rail alone is NOT enough (%d collisions survive the least-overlap fallback)"
+			% counts["B_no_max_y"])
+	Runner.T.eq(counts["C_shipped"], 0,
+		"no world label or toast lands on the caption scrim / verb chip (%d collisions%s)"
+			% [counts["C_shipped"], "" if worst == "" else " — first: " + worst])
+	# The arbiter that is COMPUTED AND NEVER SEEDED is this codebase's own documented
+	# failure mode (claim_label_slot shipped once as a signature, a docstring and
+	# `return rect`, called only from its own test). Geometry alone would pass forever.
+	var src := _view_src()
+	var draw_body := src.substr(src.find("func _draw() -> void:"))
+	draw_body = draw_body.substr(0, draw_body.find("\nfunc "))
+	Runner.T.ok(draw_body.length() > 4000, "scraped _draw()'s body (%d chars)" % draw_body.length())
+	var rail_at := draw_body.find("bottom_rail_rects(")
+	Runner.T.ok(rail_at >= 0, "_draw() asks the HUD for the bottom rail")
+	# CALLING it is not SEEDING it. A first cut of this assertion checked only that the call
+	# was present, and a mutation that replaced the append loop's body with `pass` — the
+	# arbiter's rects computed and thrown away, which is this codebase's own documented
+	# failure mode — sailed straight through it green. Read the loop that follows.
+	var seed_block := draw_body.substr(rail_at, 260) if rail_at >= 0 else ""
+	Runner.T.ok(seed_block.contains("_label_slots.append("),
+		"_draw() APPENDS the rail rects into _label_slots, not merely computes them")
+	Runner.T.ok(seed_block.contains("_label_rail_ceiling = label_rail_ceiling("),
+		"_draw() caches the rail ceiling off the SAME rects it seeded")
+	var sites := 0
+	var unbounded := 0
+	var at := src.find("claim_label_slot(")
+	while at >= 0:
+		var call := _call_src(src, at)
+		if not src.substr(maxi(0, at - 12), 12).contains("func "):
+			sites += 1
+			if not call.contains("_label_rail_ceiling"):
+				unbounded += 1
+		at = src.find("claim_label_slot(", at + 1)
+	Runner.T.ok(sites >= 3, "found the production claim sites (%d)" % sites)
+	Runner.T.eq(unbounded, 0, "every production claim passes the rail ceiling as max_y (%d unbounded)" % unbounded)
+	hud.free()
+	stub._sfx.free()
+	stub.free()
+
+
+## An evenly-spaced sample of `all`, always including its narrowest and widest member —
+## the width spectrum is what the arbiter actually sees, and the ends are where the x-clamp
+## and the rail intersection behave differently.
+func _width_spread(all: Array, n: int) -> Array:
+	var sorted := all.duplicate()
+	sorted.sort()
+	if sorted.size() <= n:
+		return sorted
+	var out: Array = []
+	for i in n:
+		out.append(sorted[int(round(float(i) * float(sorted.size() - 1) / float(n - 1)))])
+	return out
+
+
+func _hits_rail(got: Rect2, rail: Array[Rect2]) -> bool:
+	if not got.has_area():
+		return false   # the blessed droppable-suppression sentinel
+	for r in rail:
+		if got.grow(-0.5).intersects(r.grow(-0.5)):
+			return true
+	return false
+
+
+## Every string main.gd hands to the in-world label arbiter, scraped from source so a
+## producer added tomorrow enters the sweep the day it lands: the string-literal arguments
+## of _world_label / _world_label_centered, the floattext `"text":` literals, and the
+## supply-receipt catalogue. Format conversions are substituted with a WIDE token so the
+## swept width spectrum bounds the real one rather than under-measuring it.
+func _world_label_producers() -> Array:
+	var src := _view_src()
+	var seen := {}
+	var re := RegEx.new()
+	re.compile('_world_label(_centered)?\\(\\s*"([^"]*)"')
+	for m in re.search_all(src):
+		seen[m.get_string(2)] = true
+	var re2 := RegEx.new()
+	re2.compile('"text": "([^"]*)"')
+	for m in re2.search_all(src):
+		seen[m.get_string(1)] = true
+	for b in Main.BUY_FLOAT:
+		seen[b] = true
+	var out: Array = []
+	for k in seen.keys():
+		out.append(String(k).replace("%d", "8888").replace("%s", "WWWWWWWW").replace("%.1f", "88.8"))
+	return out
+
+
+## The narrowest `main` hud.gd's bottom-rail reservation can read: the caption gates gate on
+## _menu / _debrief / _captions / _sfx / _motion, the verb chip on the same plus main._menu.
+class _RailMain extends Node2D:
+	var sim: SimWorld = null
+	var _debrief := false
+	var _menu = null
+	var _motion := 1.0
+	var _captions := true
+	var _sfx = null
+	var _grenade_dry: Array = [0, 0]
+	var _token_loss_t := 0.0
+	var best_score := 0
+	var best_wave := 0
+	var _record_fired := false
+	func bind_for_glyph(_a: String) -> int: return 0
+	func pad_bind_for_glyph(_a: String, _device := 0) -> int: return -1

@@ -477,6 +477,12 @@ const WHEEL_ITEMS := [
 	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "CALL: AMMO/NADES/VEST/STRIKE"},
 ]
 const BUY_FLOAT := ["+%d AMMO", "+%d GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
+## The SINGULAR count noun behind each quantity-bearing BUY_FLOAT entry, so buy_float_text can
+## build the line through Art.count_noun instead of printing the frozen plural above. Kinds
+## absent here take no quantity, or take a MASS noun ("+%d AMMO" reads correctly at 1 and is
+## deliberately left on the plain format). The catalogue keeps its readable plural wording —
+## the noun map is what the draw actually resolves for the kinds listed.
+const BUY_FLOAT_NOUN := {1: "GRENADE"}
 # 8-way wheel: compass = the classic four, SW diagonal = sandbags, other
 # diagonals empty (-1) so a sloppy flick can never buy something unnamed.
 const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, 5]   # E,SE,S,SW,W,NW,N,NE(token)
@@ -3310,7 +3316,7 @@ func _consume_events() -> void:
 						"text": "SUPPLY CALL — " + buy_float_text(int(ev["kind"]), int(ev.get("n", 1)))})
 			"hulk_salvage":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.016, "text": ("+%d GRENADES — COVER STRIPPED" % ev.get("n", 2)) if ev.get("n", 2) > 0 else "FULL UP — COVER STRIPPED", "col": Color(1.0, 0.8, 0.45)})
+					"rate": 0.016, "text": hulk_salvage_text(int(ev.get("n", 2))), "col": Color(1.0, 0.8, 0.45)})
 			"sandbag_plant":
 				# One-beat dig-in puff: planted cover kicks real dust (9/9 panel).
 				_burst(ev["x"], ev["y"], "dust", 5, 0.8, 1.8, 0.35)
@@ -3916,7 +3922,7 @@ static func _top_prey_text(kind_kills: Dictionary) -> String:
 static func _victory_story_rows(kills: int, streak: int, kind_kills: Dictionary) -> Array:
 	# a4-16: the run-STORY rows the victory card shares with the K.I.A. debrief — a
 	# KILLS + LONGEST STREAK line, plus a TOP PREY line when anything died.
-	var rows: Array = [{"text": "%d KILLS  ·  LONGEST STREAK  x%d" % [kills, streak],
+	var rows: Array = [{"text": "%s  ·  LONGEST STREAK  x%d" % [Art.count_noun(kills, "KILL"), streak],
 		"color": Color(0.9, 0.92, 0.85)}]
 	var prey := _top_prey_text(kind_kills)
 	if prey != "":
@@ -7659,6 +7665,20 @@ func _draw() -> void:
 	# seconds, so a one-frame-stale rect is the right trade against printing into the band.
 	for r in _band:
 		_label_slots.append(r["rect"])
+	# ...and THE BOTTOM RAIL. The three reservations above all sit at the TOP of the frame,
+	# and claim_label_slot's only bound was `y + h <= 360` — so the arbiter knew nothing
+	# about the caption strip or the verb chip, which $HUD paints from layer 2 straight over
+	# main.gd's layer-0 world labels. A REVIVE <cost> over a partner downed near the viewport
+	# floor, an AIM AWAY, a crate price: all nineteen producers could be smothered under the
+	# 0.75-alpha caption scrim with the bark text printed across their own plate. Same seam
+	# as the corner plate two lines up — _hud_icons owns the rail, so _hud_icons measures it.
+	# _label_rail_ceiling is the second half: reserving the rail is not enough on a congested
+	# frame, where an exhausted PERSISTENT ladder deliberately settles for LEAST OVERLAP and
+	# hands the rail's pixels back (217 of the ratchet's swept claims did exactly that).
+	var rail := _hud_icons.bottom_rail_rects()
+	for r in rail:
+		_label_slots.append(r)
+	_label_rail_ceiling = label_rail_ceiling(rail)
 	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
@@ -9317,13 +9337,35 @@ static func water_shader_params(band_idx: int, ford_x: int, flow_dir: int, close
 	}
 
 
+## The hulk-salvage receipt. Pure + static (like buy_float_text beside it) so the plural
+## ratchet can call the REAL producer at n = 1 — the sim CLAMPS the salvage to the grenade
+## cap, so a one-grenade payout is the ordinary near-full case, not an edge.
+static func hulk_salvage_text(n: int) -> String:
+	if n <= 0:
+		return "FULL UP — COVER STRIPPED"
+	return "+%s — COVER STRIPPED" % Art.count_noun(n, "GRENADE")
+
+
+## The BOSS RUSH victory row. Its count is a const today (SimWorld.BOSS_RUSH_COUNT == 4),
+## so it can never read "1 GUNSHIPS" — it is a pure producer anyway so the ratchet needs no
+## allowlist entry that can rot the day the mode gains a shorter variant.
+static func boss_rush_cleared_text(n: int) -> String:
+	return "%s DOWNED — RUSH CLEARED" % Art.count_noun(n, "GUNSHIP")
+
+
 static func buy_float_text(kind: int, n: int) -> String:
 	## Print the quantity the SIM delivered, not the catalogue quantity: the caps
 	## clamp, so a top-up at 11/12 grenades delivers 1 and used to be announced with
 	## the catalogue 4. `n` rides the buy/token_drop events (checksum-excluded).
 	## Kinds with no quantity keep their flat wording and ignore n.
-	var s: String = BUY_FLOAT[clampi(kind, 0, BUY_FLOAT.size() - 1)]
-	return (s % maxi(n, 0)) if s.contains("%d") else s
+	var k := clampi(kind, 0, BUY_FLOAT.size() - 1)
+	var s: String = BUY_FLOAT[k]
+	if not s.contains("%d"):
+		return s
+	var q := maxi(n, 0)
+	if BUY_FLOAT_NOUN.has(k):
+		return s.substr(0, s.find("%d")) + Art.count_noun(q, String(BUY_FLOAT_NOUN[k]))
+	return s % q
 
 
 static func pickup_full_text(kind: int) -> String:
@@ -9694,7 +9736,7 @@ func _draw_pickups() -> void:
 			# anchor, so it is on screen for the whole tolerance.
 			if not WORLD_LABEL_SUBJECT_FRAME.has_point(ppos):
 				continue
-			var pgot := claim_label_slot(pwant, _label_slots)
+			var pgot := claim_label_slot(pwant, _label_slots, 0.0, false, _label_rail_ceiling)
 			_label_slots.append(pgot)
 			draw_rect(pgot, LABEL_PLATE_FILL)
 			var poff := pgot.position - pwant.position
@@ -10673,6 +10715,21 @@ static func _label_plate_rect(origin_x: float, baseline_y: float, w: float, size
 	return HudIcons.label_plate_rect(origin_x, baseline_y, w, size)
 
 
+## The first screen y the BOTTOM HUD RAIL owns — the max_y every world-label claim is
+## bounded by, or 360.0 when the rail paints nothing this frame. Pure + static so the bound
+## and the reservation are read off ONE seam by both _draw and the ratchet.
+static func label_rail_ceiling(rail: Array[Rect2]) -> float:
+	var y := 360.0
+	for r in rail:
+		y = minf(y, r.position.y)
+	return y
+
+
+## This frame's value of the above, recomputed in _draw from the SAME rects it seeds into
+## _label_slots — so the bound and the reservation can never name different pixels.
+var _label_rail_ceiling := 360.0
+
+
 ## Every in-world label rect ALREADY placed this frame. Cleared at the top of _draw().
 ## Anchored objective signage (the route-fork signposts) RESERVES its pixels without ever
 ## moving; transient combat text yields to whatever is already there.
@@ -10737,7 +10794,8 @@ var _player_label_rects: Array[Rect2] = []
 var _fork_sign_fade := {}
 
 
-static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, droppable := false) -> Rect2:
+static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, droppable := false,
+		max_y := 360.0) -> Rect2:
 	## The in-world counterpart to band_rows(): one arbiter for every world-space
 	## string, instead of one arbiter for floattext and eleven producers printing
 	## wherever they liked. A transient label drops one 11px row at a time until it
@@ -10770,8 +10828,8 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# in the common case where row 0 is free.)
 	for dy in LABEL_ROWS:
 		var y: float = rect.position.y + dy
-		if y < min_y or y + h > 360.0:
-			continue                      # off-frame / under-the-band rows are never occupied
+		if y < min_y or y + h > max_y:
+			continue                      # off-frame / under-the-band / on-the-rail rows are never occupied
 		var cand := Rect2(x, y, w, h)
 		var cg := cand.grow(-0.5)         # invariant across `taken` — was recomputed per rect
 		var clash := false
@@ -10803,11 +10861,11 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# — never worse than the old clamp, and free in every case measured so far.
 	var py: float = rect.position.y
 	var k_lo := int(ceil((min_y - py) / 11.0))
-	var k_hi := int(floor((360.0 - h - py) / 11.0))
+	var k_hi := int(floor((max_y - h - py) / 11.0))
 	if k_lo > k_hi:
 		# Taller than the whole usable band — no in-frame row exists at any offset.
-		return Rect2(x, clampf(py, min_y, maxf(min_y, 360.0 - h)), w, h)
-	var best_y: float = clampf(py, min_y, maxf(min_y, 360.0 - h))
+		return Rect2(x, clampf(py, min_y, maxf(min_y, max_y - h)), w, h)
+	var best_y: float = clampf(py, min_y, maxf(min_y, max_y - h))
 	var best_ov := INF
 	var maxd: int = maxi(absi(k_lo), absi(k_hi))
 	for d in range(0, maxd + 1):
@@ -10825,7 +10883,14 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 			if ov < best_ov:
 				best_ov = ov
 				best_y = y2
-	return Rect2(x, best_y, w, h)
+	# The least-overlap fallback is the ONE return that knowingly hands back occupied
+	# pixels, and with the bottom rail now in `taken` that is exactly where it handed
+	# them back on a congested frame: 217 of the rail ratchet's swept claims settled onto
+	# the caption scrim with the rail reserved but the search unbounded. Bounding it is
+	# what makes the reservation stick — a persistent label pinned at max_y - h sits
+	# ABOVE the rail instead of on it. (On a SPARSE frame this arm never fires: the 13-row
+	# ladder finds a free row, and the reservation alone measures clean.)
+	return Rect2(x, clampf(best_y, min_y, maxf(min_y, max_y - h)), w, h)
 
 
 ## a11y: the alpha floor an in-world callout's INK is held at. Same shape as
@@ -10918,7 +10983,7 @@ func _world_label(txt: String, pos: Vector2, col: Color, subject := Vector2.INF)
 		_world_label_placed = false
 		return Vector2.ZERO
 	_world_label_placed = true
-	var got := claim_label_slot(want, _label_slots)
+	var got := claim_label_slot(want, _label_slots, 0.0, false, _label_rail_ceiling)
 	_label_slots.append(got)
 	draw_rect(got, LABEL_PLATE_FILL)
 	var off := got.position - want.position
@@ -12272,7 +12337,7 @@ func _draw_fx() -> void:
 			# banked the whole punched plate above it, so the claim's top edge always
 			# clears the band (the old 11px-box claim needed a -16.5 fudge to say that).
 			var prect := floattext_claim_rect(fpivot, fw, fsz)
-			var fgot := claim_label_slot(prect, _label_slots, band_floor, true)
+			var fgot := claim_label_slot(prect, _label_slots, band_floor, true, _label_rail_ceiling)
 			if not fgot.has_area():
 				fx["sup"] = true   # dropped for good — no flicker as congestion shifts
 				continue
@@ -13815,7 +13880,7 @@ func _draw_banners(top_msg: String) -> void:
 			# authored-campaign-and-modes: a distance-pushed line is meaningless
 			# here (the camera barely moves) -- say what the mode is actually
 			# about instead: every gunship downed, back to back.
-			vrows.append({"text": "%d GUNSHIPS DOWNED — RUSH CLEARED" % SimWorld.BOSS_RUSH_COUNT,
+			vrows.append({"text": boss_rush_cleared_text(SimWorld.BOSS_RUSH_COUNT),
 				"color": Color(0.8, 0.84, 0.74)})
 		else:
 			# The terrain word comes from the SAME band that picks the ground color

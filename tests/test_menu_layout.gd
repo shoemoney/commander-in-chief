@@ -8484,3 +8484,133 @@ func test_list_screen_ink_stays_clear_of_frame_and_rows() -> void:
 				m.free()
 				stub.free()
 	Art.use_pad = was_pad
+
+
+# ---------------------------------------------------------------------------
+# The FOCUSED-ROW HALO vs. HEADER INK class.
+#
+# Reported as "the CAREER line is cut off by the CAMPAIGN button's frame" on the
+# TITLE screen. It is not the frame and it is not clipping: the amber breathing
+# halo `Art.focus_ring` paints AROUND the focused row's plate, grown by
+# focus_ring_grow(mp) = roundf(3 + mp*1.5) — 3px at the breath's trough, 5px at its
+# peak. Every header-clearance constant in menu.gd (TITLE_HEAD_MARGIN,
+# HEADER_CLEAR, HEADER_CLEAR_COMPACT) was tuned against the row PLATE, so on TITLE
+# the halo's top edge reached y141/140 while the CAREER glyphs' own bottom ink row
+# is 141 — the halo ate the bottom row of chunky pixel caps, which reads exactly as
+# "cut off". Measured on a real 640x360 GL capture: canvas row 141 carried 226 of
+# 232 pixels above luminance 140 (a solid bright bar) where the genuine glyph rows
+# 135-140 carry 38-57.
+#
+# This pins the CLASS, not the instance: every Mode that draws a row column, every
+# reachable header state of that mode, every breath phase. The header ink boxes are
+# CAPTURED from the real header draw methods through the _center_text seam, never
+# re-typed — a lengthened subtitle or a new header line enters the sweep the day it
+# lands. Art.text_scale is deliberately NOT swept, and that is a measured claim, not
+# an omission: _center_text -> Art.text_center passes `size` straight through with no
+# Art.fs(), so menu header type is provably unscaled (the world-label ratchet in
+# test_view_honesty.gd DOES sweep it, because those sites really do call Art.fs(8)).
+func test_focused_row_halo_never_touches_header_ink() -> void:
+	var modes := [Menu.Mode.TITLE, Menu.Mode.PAUSE, Menu.Mode.OPTS, Menu.Mode.SETUP,
+		Menu.Mode.INFO, Menu.Mode.REBIND, Menu.Mode.DISP, Menu.Mode.MODES,
+		Menu.Mode.CHAPTERS, Menu.Mode.AUDIO, Menu.Mode.PERKS]
+	var bad := 0
+	var worst := INF
+	var worst_desc := ""
+	var phases := 0
+	var ink_boxes := 0
+	for mode_id in modes:
+		for st in _header_states(mode_id):
+			var stub := _StubMain.new()
+			for k in st.keys():
+				if k != "tag":
+					stub.set(k, st[k])
+			var m := _CaptureMenu.new()
+			m.main = stub
+			m.mode = mode_id
+			m._open_t = 1.0      # at rest: settle_offset only ever pushes rows DOWN, so this is
+			                     # the HIGHEST row 0 ever sits — the worst case for the header.
+			if mode_id == Menu.Mode.OPTS:
+				m._opts_dirty = bool(st.get("_opts_dirty", false))
+				m._reset_flash = float(st.get("_reset_flash", 0.0))
+				if bool(st.get("_reset_focus", false)):
+					m.sel = _row_index(m, "reset_defaults")
+					if bool(st.get("_reset_armed", false)):
+						m._confirm = m.sel
+			if mode_id == Menu.Mode.TITLE:
+				m._draw_title_header()
+			else:
+				m._draw_mode_header()
+			var ink: Array[Rect2] = []
+			for op in m.ops:
+				if op["k"] == "text" and String(op["id"]) != "":
+					ink.append(op["box"])
+			ink_boxes += ink.size()
+			Runner.T.ok(not ink.is_empty(),
+				"%s: the real header draw emitted measurable ink (%d boxes)" % [String(st["tag"]), ink.size()])
+			var g := m._row_geometry()
+			var r0: Rect2 = Menu.row_rect(g, 0)
+			for i in 21:
+				var mp := float(i) * 0.05
+				phases += 1
+				var decor: Array[Rect2] = [r0.grow(Menu.focus_ring_grow(mp))]
+				if mode_id == Menu.Mode.TITLE:
+					var plast := 0
+					var mi := m._menu_items()
+					for k in mi.size():
+						if int(mi[k].get("grp", 0)) == 0:
+							plast = k
+					decor.append(Menu.title_deploy_panel(g, plast,
+						Menu.title_head_bottom(stub.best_score > 0, stub._life_runs > 0)))
+				for d in decor:
+					for b in ink:
+						if b.end.y > r0.position.y:
+							continue   # not a header line above the column (footers, in-row text)
+						var gap: float = d.position.y - b.end.y
+						if gap < worst:
+							worst = gap
+							worst_desc = "%s mp %.2f: decoration top %.0f vs ink bottom %.0f (gap %.0f)" % [
+								String(st["tag"]), mp, d.position.y, b.end.y, gap]
+						if gap < Menu.HEADER_INK_CHANNEL:
+							bad += 1
+			m.free()
+			stub.free()
+	Runner.T.ok(ink_boxes >= 20, "captured header ink across every mode/state (%d boxes)" % ink_boxes)
+	Runner.T.ok(phases >= 200, "swept the halo's whole breath range (%d mode x state x phase samples)" % phases)
+	Runner.T.eq(bad, 0,
+		"no focused-row halo or DEPLOY panel comes within HEADER_INK_CHANNEL of header ink (%d violations; tightest %s)"
+			% [bad, worst_desc])
+
+
+# The reachable header states per mode — TITLE's record stack varies with which
+# record lines exist (and whether the BEST chip is replayable, which lengthens it);
+# OPTIONS' subline is one of four strings depending on dirty / armed / flash. Every
+# other mode draws one fixed header, so it gets one state.
+func _header_states(mode_id: int) -> Array:
+	if mode_id == Menu.Mode.TITLE:
+		var out: Array = []
+		for has_best in [false, true]:
+			for has_career in [false, true]:
+				for replayable in [false, true]:
+					if replayable and not has_best:
+						continue   # the WATCH tail only exists on a drawn BEST chip
+					out.append({
+						"tag": "TITLE best=%s career=%s replay=%s" % [has_best, has_career, replayable],
+						"best_score": 4200 if has_best else 0,
+						"best_wave": 3 if has_best else 0,
+						"best_dist": 900 if has_best else 0,
+						"_life_runs": 1 if has_career else 0,
+						"_life_kills": 4 if has_career else 0,
+						"_life_wins": 0,
+						"last_run_score": 4200 if replayable else -1,
+						"replay_watched_score": -999,
+					})
+		return out
+	if mode_id == Menu.Mode.OPTS:
+		return [
+			{"tag": "OPTS clean"},
+			{"tag": "OPTS dirty", "_opts_dirty": true},
+			{"tag": "OPTS reset focused", "_opts_dirty": true, "_reset_focus": true},
+			{"tag": "OPTS reset armed", "_opts_dirty": true, "_reset_focus": true, "_reset_armed": true},
+			{"tag": "OPTS reset flash", "_reset_flash": 1.0},
+		]
+	return [{"tag": "mode %d" % mode_id}]

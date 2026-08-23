@@ -990,6 +990,19 @@ static var _tw_cache := {}
 const TW_CACHE_CAP := 512   # distinct strings per size before that size's memo resets
 
 
+## A count and its noun, pluralised only when the count is not exactly one.
+##
+## "CAREER — 1 RUNS · 4 KILLS · 0% WON" is the tell this exists to kill, and it was not one
+## string: four separate producers across menu.gd and main.gd printed a hardcoded plural
+## against a live count that is reachable at 1 (a first run, a one-kill run, and the grenade
+## top-up the sim CLAMPS to a delivery of 1). The default plural is the singular plus "S";
+## `plural` is for the nouns that do not take one. Lives beside tw()/fs() because art.gd is
+## the one file main.gd, menu.gd and hud.gd all already import, so the whole view layer
+## shares exactly one copy of the rule.
+static func count_noun(n: int, singular: String, plural := "") -> String:
+	return "%d %s" % [n, singular if absi(n) == 1 else (plural if plural != "" else singular + "S")]
+
+
 static func tw(txt: String, size: int) -> float:
 	var by_size: Dictionary = _tw_cache.get(size, {})
 	if by_size.is_empty():

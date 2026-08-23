@@ -317,6 +317,10 @@ const CENTER_X := CANVAS_WIDTH / 2.0   # horizontal centre (button column + cent
 # there would push their 10th plate below the >=20px readable floor (bounded by the
 # plate floor, not taste).
 const HEADER_CLEAR := 16.0         # gap a sparse column keeps below the header block it seats under
+# NOT raised to 9 to buy the halo its channel on OPTS: measured, that costs the DIRTY
+# 11-row OPTS column a plate (bh 18 -> 17) and halves its icon (16 -> 8). The 1px OPTS
+# overrun came from the post-reset banner being the only subline drawn at font 9 on a
+# baseline whose clearance was budgeted for font 8 — fixed at the banner, not here.
 const HEADER_CLEAR_COMPACT := 8.0  # tighter clear for the dense <=10-row OPTS/REBIND pages
 # c4-04: the per-mode first-row top is no longer a table of named offsets — every non-TITLE mode
 # shares ONE formula, first_row_top(mode): the baseline of the lowest header line that mode draws
@@ -327,7 +331,29 @@ const HEADER_CLEAR_COMPACT := 8.0  # tighter clear for the dense <=10-row OPTS/R
 # so nudging a header line reflows its column and no screen carries a bare top offset. TITLE is the
 # outlier (derives its top from title_head_bottom). See mode_header_bottom / mode_is_compact /
 # first_row_top near compute_geometry.
-const TITLE_HEAD_MARGIN := 2.0     # TITLE seats its column this far below the drawn header block
+# The FOCUSED ROW'S HALO, hoisted out of the draw call so the header-clearance constants
+# below and the ratchet that pins them read the SAME expression the paint uses.
+# This is the seam the "CAREER line is cut off" report was really about: every header
+# clearance in this file was tuned against the row PLATE rect, while the widest thing
+# painted at the top of row 0 is Art.focus_ring around that plate, grown by a BREATHING
+# amount. On TITLE that put the amber ring's top edge at y141/140 against career ink whose
+# bottom row is 141 — so at every pulse phase >= 0.33 the halo ate the bottom row of the
+# glyphs, which on chunky pixel caps reads as text clipped by the frame below it.
+const FOCUS_RING_GROW := 3.0        # Art.focus_ring's base grow around the focused plate
+const FOCUS_RING_PULSE := 1.5       # ...and how far the breath pushes it
+const FOCUS_RING_GROW_MAX := 5.0    # roundf(FOCUS_RING_GROW + FOCUS_RING_PULSE) — the widest painted halo
+# Clear pixels any row decoration keeps off header INK (not off the header's plate). One
+# channel constant for every screen, so TITLE's fix is the other twelve modes' guard rail.
+const HEADER_INK_CHANNEL := 2.0
+# c4-04 seated the column 2px below the header BLOCK, which was correct against the row
+# plate and wrong against what the row PAINTS. Measured at HEAD, every TITLE header state
+# collided — not just the reported career one: ring top 140/129/117 against ink bottoms
+# 143 (CAREER) / 132 (BEST) / 119 (tagline). FOCUS_RING_GROW_MAX + HEADER_INK_CHANNEL = 7
+# clears all three at every breath phase and still decompresses the column (bh 25 -> 24,
+# over the TITLE_MIN_PLATE 22 floor; col_cap 7 > 6 rows so cols stays 1 and every row rect
+# and hit-test box is unchanged in shape). Pinned by test_focused_row_halo_never_touches_
+# header_ink across 11 modes x every reachable header state x 21 breath phases.
+const TITLE_HEAD_MARGIN := FOCUS_RING_GROW_MAX + HEADER_INK_CHANNEL   # TITLE seats its column this far below the drawn header block
 # c4-04: TITLE record-header stack — ONE anchor (TITLE_WORDMARK_TOP) plus font-derived plate heights.
 # Each plate HEIGHT is its drawn font size plus a single shared vertical pad, and each plate TOP below
 # the wordmark is the previous plate's BOTTOM — so the whole stack chains from one number and one pad.
@@ -2532,10 +2558,22 @@ const TITLE_PANEL_PAD := 5.0
 static func title_deploy_panel(g: Dictionary, plast: int, head_b: float) -> Rect2:
 	var ptop_r := row_rect(g, 0)
 	var pbot_r := row_rect(g, plast)
-	var pytop := maxf(ptop_r.position.y - TITLE_PANEL_PAD, head_b + 1.0)
+	# head_b is the header PLATE bottom; the record ink sits flush inside it, so the panel's
+	# bright 1px top border needs the same ink channel the focus ring does. (With the
+	# corrected TITLE_HEAD_MARGIN the -TITLE_PANEL_PAD arm wins in every shipped header
+	# state, so this clamp is the structural guard, not the active term.)
+	var pytop := maxf(ptop_r.position.y - TITLE_PANEL_PAD, head_b + HEADER_INK_CHANNEL)
 	return Rect2(ptop_r.position.x - TITLE_PANEL_PAD, pytop,
 		ptop_r.size.x + TITLE_PANEL_PAD * 2.0,
 		(pbot_r.position.y + pbot_r.size.y + TITLE_PANEL_PAD) - pytop)
+
+
+## The TITLE career whisper — pure + static so the plural ratchet can call the REAL producer
+## at n = 1 instead of re-typing its format string.
+static func career_line(runs: int, kills: int, wins: int) -> String:
+	var wpct: int = (wins * 100 / runs) if runs > 0 else 0
+	return "CAREER — %s · %s · %d%% WON" % [Art.count_noun(runs, "RUN"),
+		Art.count_noun(kills, "KILL"), wpct]
 
 
 # c1-09 / c4-12: the single settings-state readout for the OPTIONS screen — DISPLAY mode
@@ -2613,6 +2651,13 @@ static func first_row_top(mode_id: int) -> float:
 # baseline with it and the glyph tail always lands just inside the plate bottom.
 static func title_baseline(plate_top: float, plate_h: float, font_size: int) -> float:
 	return plate_top + plate_h - Art.font().get_descent(font_size)
+
+
+# The focus ring's grow at a given breath phase — ONE expression, read by the draw AND by
+# test_focused_row_halo_never_touches_header_ink. Inlined in the draw call, the ratchet had
+# to re-type `roundf(3.0 + mp * 1.5)` and could drift off the thing it pins.
+static func focus_ring_grow(mp: float) -> float:
+	return roundf(FOCUS_RING_GROW + mp * FOCUS_RING_PULSE)
 
 
 # Pure, view-free layout math for the button column — extracted so a headless
@@ -3775,12 +3820,85 @@ static func _legend_plate_col(scrim_mode: int, motion: float) -> Color:
 	return Color(LEGEND_PLATE_RGB.r, LEGEND_PLATE_RGB.g, LEGEND_PLATE_RGB.b, a)
 
 
+## The TITLE record-header stack — wordmark, byline, tagline, BEST chip, CAREER whisper.
+## Extracted verbatim out of _draw (it was the `if mode == Mode.TITLE:` arm opposite
+## _draw_mode_header) for ONE reason: it is the only header block in this file a headless
+## test could not invoke, so the clearance between it and the focused row's halo could only
+## ever be asserted against RE-TYPED geometry. Through the _center_text capture seam a test
+## now measures the ink boxes this method actually paints. Pure move — no logic changed.
+## Its six backing plates go through the _emit_rect seam (not raw draw_rect) for the same
+## reason the footer legend's do: a Control that is not in a SceneTree cannot draw, so an
+## inline draw_rect here would ERROR under the headless capture — and the engine-error gate
+## would fail the run without a single assertion going red.
+func _draw_title_header() -> void:
+	# c4-17: ONE motion-aware plate hue shared by the whole title stack so the lines
+	# can't drift to mismatched hardcoded alphas — darker than the old 0.55 over the
+	# bright attract fight, rising with the scrim under REDUCE MOTION.
+	var tplate := _title_plate_col(mode, main._motion)
+	# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
+	# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
+	var ttw := Art.font().get_string_size("COMMANDER IN CHIEF", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
+	_emit_rect(Rect2(CENTER_X - ttw / 2.0 - TITLE_WORDMARK_PAD_H, TITLE_WORDMARK_TOP, ttw + TITLE_WORDMARK_PAD_H * 2.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
+	_center_text("COMMANDER IN CHIEF", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
+	# Studio byline, plated like the tagline below it (small text loses to the live
+	# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
+	var byl := "by BIG IT GAME STUDIOS · a SHOEMONEY company"   # ui-loop taste: middot separator matches the house style (RECORDS · HOW TO PLAY, CAREER — N RUNS · M KILLS), not a lone hyphen
+	var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BYLINE_FONT).x
+	_emit_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), tplate)
+	_center_text(byl, title_baseline(TITLE_BYLINE_TOP, TITLE_BYLINE_H, TITLE_BYLINE_FONT), TITLE_BYLINE_FONT, BYLINE_COL)
+	# Tagline + BEST get the same measured dark plate as their CAREER/legend/
+	# seed-hint siblings — small text straight on the live attract firefight
+	# loses to bright terrain no matter the alpha (the codebase's own thrice-
+	# cited lesson; a white explosion drops the gold line under 2:1 contrast).
+	var tagline := "ONE HIT. ONE WAR CHEST. NO MERCY."
+	var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_TAGLINE_FONT).x
+	# The tagline plate abuts the BEST plate below it (BEST top == tagline bottom),
+	# derived from the shared TITLE_RECORD_PLATE_H so the seam can't double-darken.
+	_emit_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, TITLE_TAGLINE_TOP, tgw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
+		tplate)
+	_center_text(tagline, title_baseline(TITLE_TAGLINE_TOP, TITLE_RECORD_PLATE_H, TITLE_TAGLINE_FONT), TITLE_TAGLINE_FONT, TAGLINE_COL)
+	# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
+	# c1-02: the record block is a tight two-line stack (BEST then CAREER) abutting the
+	# tagline, freeing height so the button column starts higher and every TITLE state clears
+	# a >=20px plate instead of the old crush. _row_geometry's TITLE top tracks title_head_bottom,
+	# which derives from these same plate tops+heights, so the column follows the record stack.
+	if main.best_score > 0:
+		# a2-04 HUD#8: only show the record fields that are non-zero (via a testable
+		# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
+		# c4-18: when the best IS this session's last run, the chip gains a "> WATCH" tail and
+		# turns into a click-to-replay shortcut (mouse hit-test shares _best_chip_rect). A cyan
+		# keyline pulses under the plate to flag it interactive; the record text stays gold.
+		var replayable := _best_is_replayable()
+		var best_line := _best_line(main.best_score, main.best_wave, main.best_dist) + _best_chip_suffix()
+		var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BEST_FONT).x
+		_emit_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP, bw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
+			tplate)
+		if replayable:
+			var cp := 0.0 if main._motion < 0.5 else Art.pulse(0.4)
+			# Hover firms the keyline (brighter + 2px) so the mouse cue reads as "clickable now".
+			var kh := 2.0 if _best_hover else 1.0
+			var ka := (0.85 if _best_hover else 0.55) + 0.35 * cp
+			_emit_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP + TITLE_RECORD_PLATE_H - kh,
+				bw + PLATE_PAD_SM * 2.0, kh), Art.safe(Color(0.5, 0.9, 1.0, ka)))
+		_center_text(best_line, title_baseline(TITLE_BEST_TOP, TITLE_RECORD_PLATE_H, TITLE_BEST_FONT), TITLE_BEST_FONT, BEST_LINE_COL)
+	if main._life_runs > 0:
+		var career := career_line(main._life_runs, main._life_kills, main._life_wins)
+		# Plated like the input legend: 8px dim text straight on the live
+		# attract firefight loses to bright terrain no matter the alpha.
+		var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_CAREER_FONT).x
+		_emit_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, TITLE_CAREER_TOP, cpw + PLATE_PAD_SM * 2.0, TITLE_CAREER_PLATE_H),
+			tplate)
+		_center_text(career, title_baseline(TITLE_CAREER_TOP, TITLE_CAREER_PLATE_H, TITLE_CAREER_FONT), TITLE_CAREER_FONT, CAREER_COL)
+
+
+
 # fork-gate-bunker: the OPTS/REBIND/INFO/DISP/AUDIO/SETUP/MODES/CHAPTERS/PERKS/PAUSE
 # header chain, pulled out of _draw() verbatim (pure move, zero pixel change) so a
 # headless capture test can invoke the REAL header draw and measure the ACTUAL header
 # strings' ink boxes against content_frame_border() — a formula guess about label
-# lengths would miss the day someone lengthens a subtitle. TITLE stays inline in
-# _draw() (unframed, raw draw_rect — the attract stage, not a modal).
+# lengths would miss the day someone lengthens a subtitle. TITLE's own header block is
+# the sibling _draw_title_header above (unframed, raw draw_rect — the attract stage, not
+# a modal); both arms of _draw's header branch are now headlessly invocable.
 func _draw_mode_header() -> void:
 	if mode == Mode.OPTS:
 		_draw_opts_header()
@@ -3873,66 +3991,7 @@ func _draw() -> void:
 		_footer_legend()   # c4-05: HALL / HOWTO carry the same device-aware bindings strip
 		return
 	if mode == Mode.TITLE:
-		# c4-17: ONE motion-aware plate hue shared by the whole title stack so the lines
-		# can't drift to mismatched hardcoded alphas — darker than the old 0.55 over the
-		# bright attract fight, rising with the scrim under REDUCE MOTION.
-		var tplate := _title_plate_col(mode, main._motion)
-		# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
-		# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
-		var ttw := Art.font().get_string_size("COMMANDER IN CHIEF", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
-		draw_rect(Rect2(CENTER_X - ttw / 2.0 - TITLE_WORDMARK_PAD_H, TITLE_WORDMARK_TOP, ttw + TITLE_WORDMARK_PAD_H * 2.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
-		_center_text("COMMANDER IN CHIEF", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
-		# Studio byline, plated like the tagline below it (small text loses to the live
-		# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
-		var byl := "by BIG IT GAME STUDIOS · a SHOEMONEY company"   # ui-loop taste: middot separator matches the house style (RECORDS · HOW TO PLAY, CAREER — N RUNS · M KILLS), not a lone hyphen
-		var bylw := Art.font().get_string_size(byl, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BYLINE_FONT).x
-		draw_rect(Rect2(CENTER_X - bylw / 2.0 - PLATE_PAD_SM, TITLE_BYLINE_TOP, bylw + PLATE_PAD_SM * 2.0, TITLE_BYLINE_H), tplate)
-		_center_text(byl, title_baseline(TITLE_BYLINE_TOP, TITLE_BYLINE_H, TITLE_BYLINE_FONT), TITLE_BYLINE_FONT, BYLINE_COL)
-		# Tagline + BEST get the same measured dark plate as their CAREER/legend/
-		# seed-hint siblings — small text straight on the live attract firefight
-		# loses to bright terrain no matter the alpha (the codebase's own thrice-
-		# cited lesson; a white explosion drops the gold line under 2:1 contrast).
-		var tagline := "ONE HIT. ONE WAR CHEST. NO MERCY."
-		var tgw := Art.font().get_string_size(tagline, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_TAGLINE_FONT).x
-		# The tagline plate abuts the BEST plate below it (BEST top == tagline bottom),
-		# derived from the shared TITLE_RECORD_PLATE_H so the seam can't double-darken.
-		draw_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, TITLE_TAGLINE_TOP, tgw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
-			tplate)
-		_center_text(tagline, title_baseline(TITLE_TAGLINE_TOP, TITLE_RECORD_PLATE_H, TITLE_TAGLINE_FONT), TITLE_TAGLINE_FONT, TAGLINE_COL)
-		# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
-		# c1-02: the record block is a tight two-line stack (BEST then CAREER) abutting the
-		# tagline, freeing height so the button column starts higher and every TITLE state clears
-		# a >=20px plate instead of the old crush. _row_geometry's TITLE top tracks title_head_bottom,
-		# which derives from these same plate tops+heights, so the column follows the record stack.
-		if main.best_score > 0:
-			# a2-04 HUD#8: only show the record fields that are non-zero (via a testable
-			# helper) — a fresh best reads as a real record, not "WAVE 0 · 0m" debug dump.
-			# c4-18: when the best IS this session's last run, the chip gains a "> WATCH" tail and
-			# turns into a click-to-replay shortcut (mouse hit-test shares _best_chip_rect). A cyan
-			# keyline pulses under the plate to flag it interactive; the record text stays gold.
-			var replayable := _best_is_replayable()
-			var best_line := _best_line(main.best_score, main.best_wave, main.best_dist) + _best_chip_suffix()
-			var bw := Art.font().get_string_size(best_line, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_BEST_FONT).x
-			draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP, bw + PLATE_PAD_SM * 2.0, TITLE_RECORD_PLATE_H),
-				tplate)
-			if replayable:
-				var cp := 0.0 if main._motion < 0.5 else Art.pulse(0.4)
-				# Hover firms the keyline (brighter + 2px) so the mouse cue reads as "clickable now".
-				var kh := 2.0 if _best_hover else 1.0
-				var ka := (0.85 if _best_hover else 0.55) + 0.35 * cp
-				draw_rect(Rect2(CENTER_X - bw / 2.0 - PLATE_PAD_SM, TITLE_BEST_TOP + TITLE_RECORD_PLATE_H - kh,
-					bw + PLATE_PAD_SM * 2.0, kh), Art.safe(Color(0.5, 0.9, 1.0, ka)))
-			_center_text(best_line, title_baseline(TITLE_BEST_TOP, TITLE_RECORD_PLATE_H, TITLE_BEST_FONT), TITLE_BEST_FONT, BEST_LINE_COL)
-		if main._life_runs > 0:
-			var wpct: int = main._life_wins * 100 / main._life_runs
-			var career := "CAREER — %d RUNS · %d KILLS · %d%% WON" % [main._life_runs,
-				main._life_kills, wpct]
-			# Plated like the input legend: 8px dim text straight on the live
-			# attract firefight loses to bright terrain no matter the alpha.
-			var cpw := Art.font().get_string_size(career, HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_CAREER_FONT).x
-			draw_rect(Rect2(CENTER_X - cpw / 2.0 - PLATE_PAD_SM, TITLE_CAREER_TOP, cpw + PLATE_PAD_SM * 2.0, TITLE_CAREER_PLATE_H),
-				tplate)
-			_center_text(career, title_baseline(TITLE_CAREER_TOP, TITLE_CAREER_PLATE_H, TITLE_CAREER_FONT), TITLE_CAREER_FONT, CAREER_COL)
+		_draw_title_header()
 	else:
 		_draw_mode_header()
 	var mitems := _menu_items()   # dicts: label + destructive flag for pre-press tinting
@@ -4114,7 +4173,7 @@ func _draw() -> void:
 			# c2-13: no amber "actionable" glow on a locked row — the crisp focus ring
 			# (drawn below) still shows WHERE focus is without implying the row will act.
 			if not armed and not disabled:
-				Art.focus_ring(self, gr.grow(roundf(3.0 + mp * 1.5)),
+				Art.focus_ring(self, gr.grow(focus_ring_grow(mp)),
 					Color(1.0, 0.9, 0.4, (0.7 + mp * 0.3) * (1.0 - 0.5 * lag)))
 		var col := ROW_TEXT_SEL if selected else ROW_TEXT_UNSEL
 		if disabled:
@@ -5879,7 +5938,11 @@ func _draw_opts_header() -> void:
 		# full alpha (no fade ramp) — captured pre-reset, since the reset itself turns
 		# motion back on. It still clears on its timer; only the animation is snapped.
 		var ba := clampf(_reset_flash / 0.6, 0.0, 1.0) if _reset_flash_anim else 1.0
-		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 9, Art.safe(Color(0.55, 0.95, 0.5, ba)))
+		# Font 8, like every one of its four sibling sublines on this baseline. At 9 it was the
+		# only line on OPTS_SUBLINE_Y whose ink reached y96, one pixel into the channel the
+		# focused row's halo needs (ring top 97) — the same plate-vs-ink mistake TITLE_HEAD_MARGIN
+		# made, one pixel instead of three. The emphasis is the GREEN, not the extra pixel.
+		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 8, Art.safe(Color(0.55, 0.95, 0.5, ba)))
 	elif _menu_items()[sel]["id"] == "reset_defaults":
 		# When focus is on RESET DEFAULTS, the summary line names EXACTLY what the
 		# two-press confirm will wipe — every settings group at once — so the player

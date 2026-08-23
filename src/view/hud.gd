@@ -1719,6 +1719,44 @@ static func bottom_band_lift(sim) -> float:
 	return maxf(0.0, VERB_LEGEND_Y + VERB_PLATE_BELOW - band_bottom(sim))
 
 
+## THE BOTTOM RAIL, as claimed rects for main.gd's in-world label arbiter.
+##
+## `_label_slots` reserved the top of the frame and NOTHING at the bottom: the player
+## exclusion boxes, the top-left corner plate and last frame's message band — then
+## claim_label_slot accepted any row with `y + h <= 360`. Meanwhile $HUD is a CanvasLayer
+## at layer 2 and main.gd draws its world labels at z=0, so the overprint direction is
+## HUD-OVER-LABEL: a REVIVE <cost> over a partner downed near the viewport floor, an
+## AIM AWAY, a crate price — every one of the 58 scraped label/toast producers could be
+## smothered under the 0.75-alpha caption scrim with the bark text printed across it.
+## Measured by test_view_honesty.gd::test_no_world_label_ever_lands_on_the_bottom_hud_rail,
+## which sweeps the arbiter's whole input domain in the bottom 70px: with no rail reserved,
+## 113,839 collisions. Reserving them here is the fix; the max_y bound in claim_label_slot
+## is the other half — on a CONGESTED frame the reservation alone still left 217, because an
+## exhausted persistent ladder deliberately settles for LEAST OVERLAP, i.e. hands rail
+## pixels back. Both counter-factuals are asserted NON-ZERO by that test, so the ratchet
+## cannot quietly stop seeing the defect it pins.
+##
+## Both members come from the DRAW's own resolved geometry (caption_layout / verb_chip_rect),
+## never a re-derivation — the same discipline band_rows() already follows. Returns [] when
+## neither is on screen, so the default frame is byte-identical to before.
+func bottom_rail_rects() -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	if main == null:
+		return out
+	var lay := caption_layout()
+	if not lay.is_empty():
+		# The scrim CORE plus the role keyline: bg grown 3px up (the soft ellipse's
+		# vertical reach) and 4px down (soft.end + the 2px keyline drawn on its edge).
+		# The 26px HORIZONTAL feather is deliberately NOT reserved — it is a gradient,
+		# not ink, and reserving it would suppress toasts that are perfectly legible
+		# beside the strip.
+		out.append((lay["bg"] as Rect2).grow_individual(0.0, 3.0, 0.0, 4.0))
+	var chip := verb_chip_rect()
+	if chip.has_area():
+		out.append(chip)
+	return out
+
+
 ## The caption scrim's exact rect — the one measurement both the draw and the layout test read,
 ## so a test can't pass against arithmetic the draw doesn't actually use.
 ## `line_h` / `above` default to the ship values, so an unscaled caption measures exactly as it
@@ -1798,37 +1836,45 @@ static func caption_survives_tier(caption_tier: int, screen_tier: int) -> bool:
 	## flavor cannot speak over a more important state.
 	return caption_tier >= screen_tier
 
-func _draw_caption() -> void:
+## The caption strip's resolved layout for THIS frame, or {} when the strip is suppressed.
+##
+## Extracted from _draw_caption so the bottom-rail RESERVATION (bottom_rail_rects, read by
+## main.gd's in-world label arbiter) and the DRAW read one set of gates and one scrim rect.
+## A second copy of either would be the drift this codebase keeps paying for: the arbiter
+## would reserve pixels the strip no longer paints, or — the failure that shipped — reserve
+## nothing while the strip painted over every world label that landed in the bottom 45px.
+## Keys: lines / cs / line_h / y0 / bg / col / a. `sim`/`main` reads are unchanged.
+func caption_layout() -> Dictionary:
 	if main == null:
-		return
+		return {}
 	if main._menu != null and main._menu.is_active():
 		# TITLE after splash-skip still has the startup VO on air — paint that
 		# one caption. Pause/opts/rebind stay silent.
 		var sfx0 = main.get("_sfx")
 		if main._menu.mode != GameMenu.Mode.TITLE \
 				or sfx0 == null or not bool(sfx0.get("_startup_line_playing")):
-			return
+			return {}
 	if _result_card_up():
-		return
+		return {}
 	# main.get(...) (not main._sfx) — the headless HUD test doubles are plain Node2D mocks that
 	# don't declare _sfx, and a direct property access would SCRIPT ERROR on them; get() returns
 	# null for an absent property instead of erroring, which the real main.gd's _sfx never is.
 	var sfx = main.get("_sfx")
 	if sfx == null:
-		return
+		return {}
 	# audio-identity (judge follow-up): the OPTIONS CAPTIONS toggle. get() defaults an absent
 	# field to null (never false), so a hypothetical mock lacking `_captions` still shows captions
 	# — only an explicit false (the real main.gd's off state) suppresses the strip.
 	if main.get("_captions") == false:
-		return
+		return {}
 	var cap: Dictionary = sfx.active_caption()
 	var raw: String = cap.get("text", "")
 	if raw == "":
-		return
+		return {}
 	if main.has_method("presentation_active_tier"):
 		var screen_tier: int = int(main.call("presentation_active_tier"))
 		if not caption_survives_tier(int(cap.get("tier", 0)), screen_tier):
-			return
+			return {}
 	# Localize via the English source string as the key — same contract as Menu.setting_help:
 	# with no translation loaded translate() returns the source unchanged, so English is the
 	# default and a .po/.csv keyed on these exact strings localizes the strip with no code change.
@@ -1838,7 +1884,7 @@ func _draw_caption() -> void:
 	# snaps (same contract as _verb_alpha), so a motion-sensitive player gets no cross-fade.
 	var a := 1.0 if main._motion < 0.5 else float(cap.get("fade", 1.0))
 	if a <= 0.0:
-		return
+		return {}
 	var font := Art.font()
 	# accessibility: subtitles are the one HUD element a player may be reading INSTEAD of hearing
 	# the game, so TEXT SIZE scales them. Wrap, measure, leading, scrim and draw all key off this
@@ -1854,6 +1900,20 @@ func _draw_caption() -> void:
 		w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, cs).x)
 	var bg := caption_bg_rect(lines.size(), w, y_bottom, line_h,
 		CAPTION_BG_ABOVE * float(cs) / float(FONT_SIZE))
+	return {"lines": lines, "cs": cs, "line_h": line_h, "y0": y0, "bg": bg, "col": col, "a": a}
+
+
+func _draw_caption() -> void:
+	var lay := caption_layout()
+	if lay.is_empty():
+		return
+	var lines: Array[String] = lay["lines"]
+	var cs: int = lay["cs"]
+	var line_h: float = lay["line_h"]
+	var y0: float = lay["y0"]
+	var bg: Rect2 = lay["bg"]
+	var col: Color = lay["col"]
+	var a: float = lay["a"]
 	# audio-identity (judge follow-up): a higher-contrast scrim than the old flat 0.7-alpha fill —
 	# a near-opaque near-black backing plus a thin keyline tinted to the line's own role color
 	# (radio-blue / dry-amber) so the strip stays readable over bright, busy gameplay (particles,
@@ -1896,25 +1956,38 @@ func _draw_caption() -> void:
 ## MOVE/AIM are deliberately NOT segments — they are taught on HOW TO PLAY's CONTROLS page
 ## (which now leads with them, off the live binds). The idle backstop is bounded even if the
 ## player uses none of these verbs, so this strip can never become permanent playfield chrome.
-func _verb_legend() -> void:
+## The verb chip's PLATE rect for this frame, or a zero-area Rect2 when the chip is not
+## drawn. Same extraction (and same reason) as caption_layout: main.gd's in-world label
+## arbiter reserves these pixels through bottom_rail_rects, and a second copy of the gates
+## or the arithmetic is how the reservation drifts off the thing it reserves.
+## Plate sized to the content (centered), not full width — a chip reads as a reminder
+## where a full-width bar reads as a letterbox.
+func verb_chip_rect() -> Rect2:
+	if main == null:
+		return Rect2()
 	if main._menu != null and main._menu.is_active():
-		return
+		return Rect2()
 	if _result_card_up():
-		return
+		return Rect2()
 	if _verb_show <= 0.0:
-		return   # upper bound elapsed — fully gone, no persistent playfield overlay
+		return Rect2()   # upper bound elapsed — fully gone, no persistent playfield overlay
 	var segs := verb_active_segs(_verb_used)
 	if segs.is_empty():
-		return   # every verb has been used — the reminder taught what it had to teach
-	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
+		return Rect2()   # every verb has been used — the reminder taught what it had to teach
 	var ext := verb_legend_extent(segs)
-	var x: float = float(ext[0])
-	var total: float = float(ext[1])
 	var y := VERB_LEGEND_Y - bottom_band_lift(main.get("sim"))
-	# Plate sized to the content (centered), not full width — a chip reads as a
-	# reminder where a full-width bar reads as a letterbox. Fades with the glyphs.
-	_emit_rect(Rect2(x - 8.0, y - 8.0, total + 16.0, 16.0),
-		Color(0.03, 0.05, 0.03, 0.75 * a))
+	return Rect2(float(ext[0]) - 8.0, y - 8.0, float(ext[1]) + 16.0, 16.0)
+
+
+func _verb_legend() -> void:
+	var plate := verb_chip_rect()
+	if not plate.has_area():
+		return
+	var segs := verb_active_segs(_verb_used)
+	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
+	var y: float = plate.position.y + 8.0            # the chip rect IS the geometry source
+	# Fades with the glyphs.
+	_emit_rect(plate, Color(0.03, 0.05, 0.03, 0.75 * a))
 	# Emit straight off the primitive list (through the seams below), so pixels land
 	# exactly where the test measures and the capture test sees the real commands.
 	for p in verb_legend_primitives(y, segs):

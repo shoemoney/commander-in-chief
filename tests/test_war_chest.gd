@@ -110,7 +110,9 @@ func test_partial_buy_announces_what_it_delivered() -> void:
 	Runner.T.eq(got, 1, "the buy event carries the quantity actually delivered, not the catalogue 4")
 	Runner.T.eq(sim.players[0]["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX, "the top-up still landed")
 	var ms: Script = load("res://src/main.gd")
-	Runner.T.eq(ms.call("buy_float_text", 1, got), "+1 GRENADES",
+	# Singular: the COUNT was already honest here, the NOUN was not — a clamped top-up of one
+	# printed "+1 GRENADES" (see test_view_honesty.gd::test_no_shipped_string_says_one_of_a_plural).
+	Runner.T.eq(ms.call("buy_float_text", 1, got), "+1 GRENADE",
 		"the view prints the delivered count")
 	Runner.T.eq(ms.call("buy_float_text", 2, 1), "FLAK VEST ON",
 		"a kind with no quantity keeps its flat wording")
