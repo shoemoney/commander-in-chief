@@ -241,8 +241,13 @@ func _ready() -> void:
 	# fixed on main/_bg_root/_splash_root/_glow_root, just missed on the one
 	# surface that's always on screen during gameplay.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	if not is_inside_tree():
+		return
+	var _ci := get_canvas_item()
+	if not _ci.is_valid():
+		return
 	_plate_ci = RenderingServer.canvas_item_create()
-	RenderingServer.canvas_item_set_parent(_plate_ci, get_canvas_item())
+	RenderingServer.canvas_item_set_parent(_plate_ci, _ci)
 	RenderingServer.canvas_item_set_z_index(_plate_ci, -1)
 	RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
 
@@ -254,6 +259,15 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED or what == NOTIFICATION_TRANSLATION_CHANGED:
 		_tw_cache.clear()
 		Art.flush_tw()   # the shared main.gd/art.gd memo has the same fixed-font assumption
+	if what == NOTIFICATION_ENTER_TREE and not _plate_ci.is_valid():
+		if is_inside_tree():
+			var _ci2 := get_canvas_item()
+			if _ci2.is_valid():
+				_plate_ci = RenderingServer.canvas_item_create()
+				RenderingServer.canvas_item_set_parent(_plate_ci, _ci2)
+				RenderingServer.canvas_item_set_z_index(_plate_ci, -1)
+				RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
+		return
 	if not _plate_ci.is_valid():
 		return
 	match what:
@@ -766,7 +780,8 @@ func _draw() -> void:
 	# rollover digits never overhang the backing for a frame. c2-09: the plate is
 	# immediate-mode (re-cleared + re-emitted every _draw), NOT a self-drawing child,
 	# so the Control's own queue_redraw fully repaints it — no separate invalidation.
-	RenderingServer.canvas_item_clear(_plate_ci)
+	if _plate_ci.is_valid():
+		RenderingServer.canvas_item_clear(_plate_ci)
 	# Shop strip: the 4 buyables at a glance. c1-15: when eligible its ROW is reserved for the whole
 	# run (rows start at player_rows_top regardless of the intermission); the band cross-fades from a
 	# dim named icon preview when closed to full named, priced chips when open (see _draw_shop_strip).
@@ -1026,7 +1041,7 @@ func _draw_plate(panel_h: float) -> void:
 	# Subtle seam shadow under the header's exposed overhang — the full-width header reads as a
 	# deliberate raised shelf casting onto the field below, not a clipped panel. Only where the header
 	# actually overhangs the narrower body.
-	if head_r > body_r + PLATE_SEAM_MIN:
+	if head_r > body_r + PLATE_SEAM_MIN and _plate_ci.is_valid():
 		RenderingServer.canvas_item_add_line(_plate_ci,
 			Vector2(body_r, 2.0 + hb), Vector2(head_r, 2.0 + hb), Color(0, 0, 0, 0.28), 1.0)
 
@@ -1036,8 +1051,12 @@ func _draw_plate(panel_h: float) -> void:
 ## width, coverage of the docked pip stack) without a live GL context. `id` tags the rect ("header"/
 ## "body") for the capture. Production routes straight to the z:-1 plate canvas item.
 func _emit_plate_rect(_id: String, dest: Rect2, tex: RID, src: Rect2, col: Color) -> void:
+	if not _plate_ci.is_valid():
+		return
 	RenderingServer.canvas_item_add_texture_rect_region(_plate_ci, dest, tex, src, col)
 func _emit_plate_border(points: PackedVector2Array, col: PackedColorArray) -> void:
+	if not _plate_ci.is_valid():
+		return
 	RenderingServer.canvas_item_add_polyline(_plate_ci, points, col, 1.0)
 
 
@@ -2222,7 +2241,8 @@ func _pip_plate(txt: String, py: float, band: Vector2, docked := true) -> float:
 	# reject a corner PAST _fit_full) so the backing is part of the ONE persistent HUD panel and sits
 	# strictly BEHIND the player rows -- a chip can never overpaint it. Geometry is verified by
 	# _PipCaptureHud's own _pip_plate override.
-	RenderingServer.canvas_item_add_rect(_plate_ci, r, PIP_SCRIM)
+	if _plate_ci.is_valid():
+		RenderingServer.canvas_item_add_rect(_plate_ci, r, PIP_SCRIM)
 	if _pip_hairline_shown(docked):
 		# The 1px hairline is stroked CENTERED on its rect edge, so tracing `r` would push half a pixel
 		# past the band; inset by 0.5 so the whole stroke stays inside [band.x, band.y] too.
@@ -2235,6 +2255,8 @@ func _pip_plate(txt: String, py: float, band: Vector2, docked := true) -> float:
 ## _pip_plate body stays focused. The stroke is CENTERED on each edge, so a caller needing the whole
 ## stroke to stay inside a band must inset `rect` before calling (the pip hairline grows -0.5).
 func _draw_plate_rect_outline(rect: Rect2, col: Color) -> void:
+	if not _plate_ci.is_valid():
+		return
 	RenderingServer.canvas_item_add_polyline(_plate_ci, PackedVector2Array([
 		rect.position, Vector2(rect.end.x, rect.position.y), rect.end,
 		Vector2(rect.position.x, rect.end.y), rect.position,
