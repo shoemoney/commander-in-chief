@@ -175,6 +175,72 @@ jobs:
             exit 1
           fi
 
+  # GL capture gate — prevents shader regressions that silently smear
+  # the soldier/HUD under concussion (the warp must ramp toward the
+  # periphery of the player's view, not a fixed screen disc). Runs the
+  # real view through gl_compatibility (the only renderer that can read
+  # back the framebuffer in CI) and asserts centre-retention >0.9 via
+  # the swept probe (probe_concussion_hud.gd). If the warp hits the
+  # soldier at full strength, this job goes red. Blocks merge — no
+  # continue-on-error, runs on push/PR (not just nightly).
+  gl-capture:
+    needs: resolve-godot-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ needs.resolve-godot-version.outputs.version }}
+          use-dotnet: false
+
+      - name: Import assets
+        shell: bash
+        run: godot --headless --path . --import
+
+      - name: Install xvfb (GL framebuffer)
+        shell: bash
+        run: |
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+
+      - name: GL concussion HUD probe (centre-retention >0.9)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xvfb-run -a godot --path . --rendering-method gl_compatibility -s res://tools/probe_concussion_hud.gd 2>&1 | tee probe.log
+          if ! grep -q "PROBE OK" probe.log; then
+            echo "::error::probe_concussion_hud did not report PROBE OK — see probe.log"
+            cat probe.log
+            exit 1
+          fi
+          if grep -q "SCRIPT ERROR" probe.log; then
+            echo "::error::SCRIPT ERROR during GL probe"
+            cat probe.log
+            exit 1
+          fi
+          # Centre-retention >0.9: the probe's own floor is 0.70, but the
+          # shipped worst-sample is 0.98, so 0.9 is the regression signal.
+          # Parse the first 'keep' after 'centre' on each pose line.
+          python3 - << 'PY'
+          import re, sys
+          text = open("probe.log").read()
+          keeps = re.findall(r"centre \d+->\d+ \(keep ([0-9.]+)", text)
+          if not keeps:
+              print("::error::no centre keep ratios found in probe.log")
+              sys.exit(1)
+          for k in keeps:
+              v = float(k)
+              if v <= 0.9:
+                  print(f"::error::centre-retention {v} <= 0.9 — concussion warp smeared the player")
+                  sys.exit(1)
+          print(f"centre-retention ok: {keeps}")
+          PY
+
   # Export smoke: prove the real shippable Linux binary boots and survives a
   # few seconds under the actual export pipeline (export_presets.cfg), not
   # just the editor/headless test harness above.
