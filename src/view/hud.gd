@@ -233,6 +233,147 @@ var _dirty := true        # c2-09: a VIEW field changed since the last _draw —
 var _tw_cache: Dictionary[String, float] = {}
 const TW_CACHE_CAP := 512   # c3-16: upper bound on distinct measured strings before the memo resets
 
+# --- Container HUD scaffolding (responsive-ui / hud-system) ------------------
+# Keep pixel look (TEXTURE_FILTER_NEAREST, 640x360 min_size, integer stretch) but
+# route layout through real Containers so 1920x1080 / letterbox / CJK widths
+# re-flow instead of overflowing past the fixed RIGHT=632 math. Structure:
+#   HudIcons (Control, Full Rect)
+#     -> MarginContainer (outer PLATE_ORIGIN inset)
+#       -> VBoxContainer (HEAD_H + ROW_H rows + strip)
+#         -> HBoxContainer per row (head / strip / P1 / P2) with SizeFlags EXPAND/FILL
+# The plate's scavenged-metal backing is a PanelContainer with StyleBoxTexture
+# (ui_panel) + StyleBoxFlat hairline, sized by the VBox rather than manual rects.
+# _container_right() replaces the fixed RIGHT math: container get_rect().size.x
+# minus the CB/RM corner reserve, clamped to PLATE_MIN_RIGHT. _tw remains only
+# for overflow-chip reservation; _row_fits delegates to the container edge.
+var _hud_outer: MarginContainer = null
+var _hud_vbox: VBoxContainer = null
+var _hud_head_row: HBoxContainer = null
+var _hud_strip_row: HBoxContainer = null
+var _hud_player_rows: Array[HBoxContainer] = []
+var _hud_plate_panel: PanelContainer = null
+var _hud_theme: Theme = null
+var _hud_containers_ready := false
+
+
+func _ensure_hud_containers() -> void:
+	if _hud_containers_ready:
+		return
+	if not is_inside_tree():
+		return
+	# Theme drives FONT_SIZE/color so Art.font().get_string_size matches layout.
+	if _hud_theme == null:
+		_hud_theme = Theme.new()
+		_hud_theme.set_font_size("font_size", "Label", FONT_SIZE)
+		_hud_theme.set_color("font_color", "Label", Color(0.95, 0.96, 0.9))
+		# Keep pixel look — no override of font itself (Art.font() stays source).
+	theme = _hud_theme
+	_hud_outer = MarginContainer.new()
+	_hud_outer.name = "HudOuter"
+	_hud_outer.add_theme_constant_override("margin_left", int(PLATE_ORIGIN))
+	_hud_outer.add_theme_constant_override("margin_right", int(PLATE_ORIGIN))
+	_hud_outer.add_theme_constant_override("margin_top", int(PLATE_ORIGIN))
+	_hud_outer.add_theme_constant_override("margin_bottom", int(PLATE_ORIGIN))
+	_hud_outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hud_outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_hud_outer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_hud_outer)
+	# Plate backing behind the VBox — StyleBoxTexture (ui_panel @ 0.65) + hairline.
+	# It is a sibling of the VBox inside the MarginContainer so it fills the
+	# container's rect; we keep _plate_ci for draw-order parity but the Panel
+	# now owns the visual plate.
+	_hud_plate_panel = PanelContainer.new()
+	_hud_plate_panel.name = "HudPlate"
+	_hud_plate_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb_tex := StyleBoxTexture.new()
+	sb_tex.texture = Art.tex("ui_panel")
+	sb_tex.modulate_color = Color(1, 1, 1, 0.65)
+	var sb_flat := StyleBoxFlat.new()
+	sb_flat.bg_color = Color(0, 0, 0, 0)
+	sb_flat.border_color = Color(0.5, 0.55, 0.5, 0.35)
+	sb_flat.set_border_width_all(1)
+	# PanelContainer only takes one stylebox — use texture as panel, flat as
+	# focus is not needed; border comes from the flat's border. Keep tex.
+	_hud_plate_panel.add_theme_stylebox_override("panel", sb_tex)
+	_hud_outer.add_child(_hud_plate_panel)
+	_hud_plate_panel.add_theme_stylebox_override("panel", sb_tex)
+	# VBox owns the rows; Plate panel is sent behind it via move_child order.
+	_hud_vbox = VBoxContainer.new()
+	_hud_vbox.name = "HudVBox"
+	_hud_vbox.add_theme_constant_override("separation", 0)
+	_hud_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hud_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_hud_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_outer.add_child(_hud_vbox)
+	_hud_outer.move_child(_hud_plate_panel, 0)
+	_hud_head_row = HBoxContainer.new()
+	_hud_head_row.name = "HeadRow"
+	_hud_head_row.custom_minimum_size = Vector2(0, HEAD_H)
+	_hud_head_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hud_head_row.add_theme_constant_override("separation", 8)
+	_hud_head_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_vbox.add_child(_hud_head_row)
+	_hud_strip_row = HBoxContainer.new()
+	_hud_strip_row.name = "StripRow"
+	_hud_strip_row.custom_minimum_size = Vector2(0, ROW_H)
+	_hud_strip_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hud_strip_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_vbox.add_child(_hud_strip_row)
+	for idx in 2:
+		var prow := HBoxContainer.new()
+		prow.name = "PlayerRow%d" % (idx + 1)
+		prow.custom_minimum_size = Vector2(0, ROW_H)
+		prow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		prow.add_theme_constant_override("separation", 4)
+		prow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_hud_vbox.add_child(prow)
+		_hud_player_rows.append(prow)
+	# Seed each row with a TextureRect governed by the container (106 draws as
+	# TextureRect children with size_flags). They are placeholders — _draw still
+	# drives visuals, but layout is now container-owned.
+	for row in [_hud_head_row, _hud_strip_row] + _hud_player_rows:
+		var tr := TextureRect.new()
+		tr.expand_mode = TextureRect.EXPAND_KEEP_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP
+		tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tr.size_flags_vertical = Control.SIZE_FILL
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(tr)
+	_hud_containers_ready = true
+
+
+func _sync_hud_containers_for_draw() -> void:
+	if not _hud_containers_ready:
+		_ensure_hud_containers()
+	if _hud_plate_panel != null and _hud_plate_panel.is_inside_tree():
+		_hud_plate_panel.visible = is_visible_in_tree()
+
+
+func container_right() -> float:
+	return _container_right()
+
+
+func _container_right() -> float:
+	# Responsive usable right edge: container width minus CB/RM corner reserve,
+	# clamped to PLATE_MIN_RIGHT. Falls back to fixed RIGHT when not in tree
+	# (headless/tests) so existing _fit_full assertions stay byte-identical.
+	var reserve := 0.0
+	var pip_w := 0.0
+	for pip in _pips:
+		pip_w = maxf(pip_w, _tw(pip[0]))
+	# _corner_reserve reads live toggles; supply measured pip width when available.
+	if _pips.is_empty():
+		reserve = _corner_reserve(Art.colorblind if main != null else false,
+			main._motion if main != null else 1.0, PIP_W_UNMEASURED)
+	else:
+		reserve = _corner_reserve(Art.colorblind if main != null else false,
+			main._motion if main != null else 1.0, pip_w)
+	if is_inside_tree() and get_rect().size.x > 10.0:
+		var usable := get_rect().size.x - (640.0 - RIGHT) - reserve
+		return maxf(usable, PLATE_MIN_RIGHT)
+	return maxf(RIGHT - reserve, PLATE_MIN_RIGHT)
+
 
 func _ready() -> void:
 	# opt-loop: a CanvasLayer boundary breaks texture_filter inheritance — HUD/menu
@@ -241,6 +382,8 @@ func _ready() -> void:
 	# fixed on main/_bg_root/_splash_root/_glow_root, just missed on the one
 	# surface that's always on screen during gameplay.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_ensure_hud_containers()
+	_sync_hud_containers_for_draw()
 	if not is_inside_tree():
 		return
 	var _ci := get_canvas_item()
@@ -259,8 +402,11 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED or what == NOTIFICATION_TRANSLATION_CHANGED:
 		_tw_cache.clear()
 		Art.flush_tw()   # the shared main.gd/art.gd memo has the same fixed-font assumption
+	if what == NOTIFICATION_RESIZED:
+		_sync_hud_containers_for_draw()
 	if what == NOTIFICATION_ENTER_TREE and not _plate_ci.is_valid():
 		if is_inside_tree():
+			_ensure_hud_containers()
 			var _ci2 := get_canvas_item()
 			if _ci2.is_valid():
 				_plate_ci = RenderingServer.canvas_item_create()
@@ -720,7 +866,8 @@ func _draw() -> void:
 	var pip_w := 0.0
 	for pip in _pips:
 		pip_w = maxf(pip_w, _tw(pip[0]))
-	_fit_full = maxf(RIGHT - _corner_reserve(Art.colorblind, main._motion, pip_w), PLATE_MIN_RIGHT)
+	_sync_hud_containers_for_draw()
+	_fit_full = _container_right()
 	_ovf = 0
 	# Row 0: the shared economy — the twist the whole game hangs on.
 	var x := 8.0
