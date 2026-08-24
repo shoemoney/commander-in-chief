@@ -137,11 +137,18 @@ func _push_north() -> SimInput:
 
 
 func test_stall_never_accrues_while_the_sim_holds_the_camera() -> void:
+	# 1.3: a closed gate held 93.8% of ticks with zero whip — the old `and not held`
+	# guard gated stall increment while camera_held, so the drip farmed for free.
+	# Stall now accrues at half-rate while held (tick parity => 0.5/tick), so
+	# OBSERVER_STALL_TICKS (480) fires at ~960 held ticks instead of never. Endless
+	# stays exempt (always held by design, its Spotter lives until shot).
+	# Isolated from the earlier "hold is not loitering" leg (1845/3691 held ticks
+	# during the 60s torture reached the observer fusion, peaks at 924 stalls with 1 observer) now
+	# 3691 held ticks accumulate ~1600 stall counts, 3 observers spawn while held at half rate — measured values.
 	for mode in ["campaign", "boss_rush", "endless"]:
 		var sim := SimWorld.new(3, 1, mode)
-		sim.god_mode = true   # DEBUG-ONLY: keeps any_alive true so the counter's guard stays open
+		sim.god_mode = true
 		if mode == "endless":
-			# Endless only steps the observer when the Spotter mutator has dropped one.
 			sim.observer = {"x": 300 * Fixed.ONE, "strike_cd": 120, "spawn_cam": sim.camera_top}
 		var inp := _push_north()
 		var held_ticks := 0
@@ -161,33 +168,49 @@ func test_stall_never_accrues_while_the_sim_holds_the_camera() -> void:
 			longest = maxi(longest, run)
 			if sim.stall_ticks > before:
 				bad += 1
-		Runner.T.eq(bad, 0,
-			"%s: stall_ticks incremented on %d of %d ticks where camera_held() was true — the sim is scoring its own wall as the player loitering" \
-				% [mode, bad, held_ticks])
-		# Vacuity guard: a leg that never observed a hold longer than the fuse proved nothing.
+		if mode == "endless":
+			Runner.T.eq(bad, 0,
+				"%s: stall_ticks incremented on %d of %d ticks where camera_held() was true — endless must stay frozen" \
+					% [mode, bad, held_ticks])
+		else:
+			# Half-rate while held: expect ~50% of held ticks increment stall
+			var expect_min: int = int(float(held_ticks) * 0.35)
+			var expect_max: int = int(float(held_ticks) * 0.65)
+			Runner.T.ok(bad >= expect_min and bad <= expect_max,
+				"%s: stall_ticks incremented on %d of %d held ticks — expected ~50%% half-rate (range %d..%d) while held, 0 is the old farm" \
+					% [mode, bad, held_ticks, expect_min, expect_max])
 		Runner.T.ok(longest >= SimWorld.OBSERVER_STALL_TICKS,
 			"%s: longest contiguous held run was only %d ticks (< the %d-tick observer fuse) — this leg ran on nothing" \
 				% [mode, longest, SimWorld.OBSERVER_STALL_TICKS])
 
 
 func test_no_observer_spawns_or_persists_while_the_camera_is_held() -> void:
-	# (a) nothing new may arrive while the player is walled in...
+	# (a) While held, the drip is throttled and the whip accrues at half-rate —
+	# observers CAN spawn (the gate farm fix), but only at the throttled cadence
+	# (~1 per 960 held ticks). Before 1.3 this was 0 while held and the gate was a
+	# farm; endless stays at 0 by exemption.
 	for mode in ["campaign", "boss_rush"]:
 		var sim := SimWorld.new(3, 1, mode)
 		sim.god_mode = true
 		var inp := _push_north()
 		var spawns := 0
+		var held_ticks := 0
 		for t in 4000:
 			inp.fire = (t % 8) != 0
 			var held: bool = sim.camera_held()
 			sim.step([inp])
 			if not held:
 				continue
+			held_ticks += 1
 			for ev in sim.events:
 				if ev["t"] == "observer_spawn":
 					spawns += 1
-		Runner.T.eq(spawns, 0,
-			"%s: %d observer(s) spawned on a tick where the sim itself was holding the camera" % [mode, spawns])
+		# Half-rate stall: at most ceil(held/960) observers in this window
+		var max_expected: int = int(ceil(float(held_ticks) / float(SimWorld.OBSERVER_STALL_TICKS * 2))) + 1
+		Runner.T.ok(spawns <= max_expected,
+			"%s: %d observer(s) spawned while held (%d held ticks) — expected at most %d at half-rate, unlimited spawn is the farm" % [mode, spawns, held_ticks, max_expected])
+		Runner.T.ok(spawns >= 1,
+			"%s: %d observer(s) while held — expected at least 1 at half-rate (held %d ticks, 0 was the pre-1.3 farm)" % [mode, spawns, held_ticks])
 
 	# ...(b) and one that was ALREADY up when you hit the wall must stand down.
 	# OBSERVER_DESPAWN_ADVANCE is 150px of northward advance the clamp forbids, so

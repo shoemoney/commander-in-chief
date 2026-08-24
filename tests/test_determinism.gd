@@ -727,13 +727,27 @@ const SEED := 0xDEADBEEF
 ## the 2.1x effective gain with knockdown avoidance. Player x/y are hashed,
 ## so every sample moves from tick 0 in both tortures (both press roll at t%41==0). No RNG draw added/removed, no new hashed field, pure trajectory
 ## delta — verified by re-deriving twice, A==B holds.
+## RE-RECORDED (2026-08-24, 1.3 gate farm + vignette). Campaign farm fix:
+## closed gates held 93.8% (4692/5000 north-push ticks) with stall 0 and
+## observer never spawned, so bunker (120t) + field spawner (45t) dripped
+## ~24 bodies/600t for free. Three sim changes, none endless-visible: (1)
+## stall now accrues at 0.5/tick while held (tick parity, no new field) so
+## OBSERVER_STALL_TICKS (480) fires at ~960 held ticks instead of never;
+## endless exempt (always held by design, its Spotter lives until shot);
+## (2) _step_bunkers spawn_cd half-rate while held (skip odd ticks) and
+## _step_spawner interval doubles while held, throttling the drip; (3) held
+## kills grant 0 war_chest/score (farm prints no coin). All six campaign
+## samples move from tick 0 (hashed cadence + held drips). ENDLESS_GOLDEN
+## VERIFIED UNCHANGED in the same run (mode!=endless gates, + endless
+## observer frozen before Spotter) — run, not assumed. View vignette
+## 0.12->0.04 is checksum-excluded and does not move goldens.
 const GOLDEN: Array[int] = [
-	6044423000615395277,
-	5100615744244822346,
-	3615625611271201610,
-	6313509943363623719,
-	4914979495626228452,
-	2538892228083404284,
+	1963582014827421260,
+	2183849494948759482,
+	8521974218452015254,
+	8924343296901165195,
+	4911682125191700127,
+	4773638892736216189,
 ]
 
 

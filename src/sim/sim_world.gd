@@ -3495,6 +3495,12 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 		coin = 0
 		no_coin = true
 		no_score = true
+	# 1.3: closed-gate farm — a bunker/spawner drip while camera_held pays war_chest
+	# and score at the normal rate, so parking at the gate prints coin. While held
+	# (campaign/arcade/boss_rush) kills grant 0 chest/score; endless is exempt.
+	if camera_held() and mode != "endless":
+		no_coin = true
+		no_score = true
 	if has_mod(4):
 		coin *= 2   # PAYDAY wave: every bounty doubles
 	if e.get("marked", false):
@@ -4275,7 +4281,14 @@ func _step_bunkers() -> void:
 		# 6 campaign seeds): 3 of 6 saturated the roster, worst seed reached -332 and drew
 		# the lying telegraph for 1,758 ticks (29 s). At 0 the glow tells the truth — the
 		# hatch IS loaded and opens the instant a slot frees.
-		bk["spawn_cd"] = maxi(bk["spawn_cd"] - 1, 0)
+		# 1.3: throttle drip while camera is held at a closed gate — half-rate
+		# spawn_cd countdown so the bunker pays ~1 per 240t held instead of 1 per
+		# 120t, starving the gate farm without touching endless (which never holds
+		# via gates) or the open-field cadence.
+		if camera_held() and mode != "endless" and (tick_count & 1) == 1:
+			pass   # skip this tick's decrement — 0.5x rate while held
+		else:
+			bk["spawn_cd"] = maxi(bk["spawn_cd"] - 1, 0)
 		if bk["spawn_cd"] <= 0 and enemies.size() < MAX_ENEMIES:
 			bk["spawn_cd"] = BUNKER_SPAWN_INTERVAL_TICKS
 			_spawn_enemy(bk["x"] + BUNKER_W / 2, bk["y"] + BUNKER_H + 8 * F_ONE, false)
@@ -4437,6 +4450,12 @@ func _step_spawner() -> void:
 		else maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
+	# 1.3: throttle drip while camera is held at a closed gate — double the
+	# interval so the field pays ~1 per 90t held instead of 1 per 45t, matching
+	# the bunker half-rate above. Endless never hits this branch (step() gates
+	# _step_spawner on mode), so no effect there.
+	if camera_held() and mode != "endless":
+		interval *= 2
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
@@ -7285,6 +7304,15 @@ func _step_observer() -> void:
 		stall_ticks = 0
 	elif any_alive and not held:
 		stall_ticks += 1
+	elif any_alive and held and mode != "endless":
+		# 1.3: a closed gate held 93.8% of ticks with zero whip — the `not held`
+		# guard above gated the observer entirely while camera_held, so the drip
+		# (bunker+spawner) farmed for free. Accrue at half rate while held so
+		# OBSERVER_STALL_TICKS (480) fires at ~960t held instead of never; endless
+		# keeps its existing exemption (camera_held is always true there by design).
+		# No new state: tick parity gives 0.5/tick average without a field.
+		if tick_count & 1 == 0:
+			stall_ticks += 1
 
 	# c3 3v CHOKE-CAMP breach: camping a seg-2+ choke for REAR_CAMP_TICKS (the
 	# earlier, softer, rear-only nudge before the 480t front Observer) spawns a
