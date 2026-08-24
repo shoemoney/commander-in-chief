@@ -1,14 +1,23 @@
 # Backlog
 
-Open defects, design calls and debt for Commander In Chief, as of **2026-08-22** (branch
-`main` @ `f1601b7`).
+Open defects, design calls and debt for Commander In Chief, as of **2026-08-23** (branch
+`main` @ `3be8149`).
 
 > ⚠️ **Read the severities sceptically — that is a rule this project paid for.** Handed-down
 > reports here have repeatedly named a real smell and got the consequence wrong by a whole
 > class: a "softlock" that was minor legibility, a "sector 4 wall" that was a bot that could
-> not aim, a hitbox complaint that was rotor blades. Before designing a fix, enumerate every
-> call site of the predicate you are about to touch and the actual damage/progress path. See
+> not aim, a hitbox complaint that was rotor blades. Before designing a fix, **enumerate every
+> call site of the predicate you are about to touch and the actual damage/progress path.** See
 > `docs/` history and the `/triple-a-game` skill notes for the worked examples.
+>
+> ⚠️ **Line numbers in this file drift; symbols do not.** Entries were measured against several
+> different trees across a run, and `3be8149` alone moved `sim_world.gd` by **~+130 lines** below
+> the revive block and `main.gd` by **~+450** below the HUD block. Spot-checked on `3be8149`:
+> `_draw_threat_pips` is cited at `main.gd:13195` and lives at **13647**; `rifleman_windup` is
+> cited at `sim_world.gd:3689` and lives at **3819**; `_detonate_tank` is cited at `:2900` and
+> lives at **3029**. **Grep the symbol, do not trust the line.** Every citation below was written
+> by the lens that measured it and is kept verbatim; where this merge re-located a symbol on
+> `3be8149` the HEAD line is given alongside.
 
 **Provenance.** Entries come from `/triple-a-game` runs — a multimodal reviewer judges
 screenshots while a second lens reads `src/sim/` and *drives it headlessly to measure*.
@@ -19,12 +28,34 @@ next to each other. Several lens findings re-flag ground a commit the same run a
 touched; those carry the sha inline so the next reader starts from the remainder, not the
 original complaint.
 
-**Latest merge (2026-08-22, `9bb1cdb..f1601b7`, 21 commits).** A short follow-up window, mostly
+**Latest merge (2026-08-23, `f1601b7..3be8149`, 6 commits).** A tiny window by commit count and a
+large one by finding count — the run spent its budget on a **behaviour lens driving the sim
+headlessly with `god_mode` OFF**, which is the first pass to do so since §6 discovered that
+`_god_restore` had been hiding the ammo economy from every previous measurement. That single
+change of instrument produced most of what is new below: the riot shield's impossible flank
+(re-measured independently, **confirming a brief filed a day earlier and still unfixed**), the MG
+nest's non-existent facing, the Triple Shot's inverted surcharge, and the Veteran-Point
+confiscation on quit. **Three new owner decisions (#37–#39)**, all from `3be8149`. Also new: a
+**negative-results record** (§9) — four suspicions chased and refuted, banked so nobody re-spends
+the cycle on them — and the first entry in this file whose *counter-evidence* is the point (the
+README assertion badge, §5, which `bf27b52` proved is **unfalsifiable**, not stale).
+
+**Prior merge (2026-08-22, `9bb1cdb..f1601b7`, 21 commits).** A short follow-up window, mostly
 drain: **three of the four owner rulings shipped as code in `0f3f480`**, eight banked findings closed
 with shas (§8), **one previously "not corroborated" title finally located** (the `screenshots.gd`
 victory pose — `8005b80` + `042a3c7`), and **two new owner decisions (#35, #36)** plus **five new
 findings** banked. Every new finding below was re-verified against `f1601b7` by reading the cited
 line, and says which line.
+
+**Counts as of the 2026-08-23 merge:** **39 numbered owner decisions** (`#1`–`#39`, of which `#6`,
+`#8` and `#36` are RESOLVED) and **~100 open findings** across §2–§7. This run handed over **80
+open findings and 48 owner-decision reports**; the 48 consolidate into the 39 numbered decisions
+because **many lenses re-filed decisions #15, #23, #30 and #31 verbatim** — those entries keep
+every lens's measurement rather than picking one. **Most of the 80 were already banked** and are
+merged in place, not duplicated; **19 are new** (6 sim defects, 1 teaching, 7 visual, 3 tooling,
+2 process). **Five titled fixes mapped to shas in this window** (§8). ⚠️ The ratio moved the
+wrong way again: **~19 banked against 5 shipped**, which is §6's standing complaint and the reason
+this remains a **triage queue, not a work queue**.
 
 **Counts as of the 2026-08-21 merge:** **96 open findings** and **37 owner-decision reports** handed over from
 the 2026-08-01 → 2026-08-21 window (`390c12d..9bb1cdb`, 60 commits). The 37 reports consolidate
@@ -468,9 +499,128 @@ of the same number are the only evidence that the number is real.
     re-verify goldens on all three CI OSes), or correct the comment so it stops asserting
     something false.
 
+### New 2026-08-23 — from the `f1601b7..3be8149` window
+
+All three come out of `3be8149` (the compounding broke rally). The fix is landed and green; these
+are the three balance questions it *deliberately did not answer*, and each one is a knob the
+implementer set by judgement rather than by measurement.
+
+37. **NEW 2026-08-23 — `BROKE_WAIT_MAX_MULT = 4` freezes the brake at exactly the depth where the
+    price accelerates hardest.** `sim_world.gd:257` on `3be8149`
+    (`const BROKE_WAIT_MAX_MULT := 4`), consumed by `broke_wait_ticks()` at `:2117`
+    (`return BROKE_RESPAWN_TICKS * clampi(p["deaths"], 1, BROKE_WAIT_MAX_MULT)`). The free-rally
+    wait tops out at **1200t (20.0 s)** from the **FOURTH death on**, while `revive_cost` keeps
+    compounding **uncapped** (wave 60 / deaths 12 = **7800 coin**). MEASURED post-fix, deaths
+    1..6 → **300 / 600 / 900 / 1200 / 1200 / 1200 t**. Assertion (a) in the new ratchet only
+    requires monotone `>=`, so **the flat ceiling is deliberately permitted** by the test.
+    Whether the cap should be higher, or removed so the wait tracks the price all the way up, is
+    a balance call.
+38. **NEW 2026-08-23 — The 2P paid self-revive still buys ONLY time; the plan declined to change
+    that, so the reviewer's complaint is answered on the time axis only.** The coin revive lands
+    at `_checkpoint_y()` with the **same stripped body** as the free rally — MEASURED **dx 0 px,
+    dy 0 px, vest/triple/claymores all stripped on both paths**. The fix widened what the coin
+    buys from **299 saved ticks to 1199 saved ticks at deaths 6**, and nothing else. The plan
+    deliberately declined to move it to `target["y"]` the way the **SOLO** self-revive already
+    does (`sim_world.gd:2174-2179` on `3be8149`, whose own comment records the change), on the
+    grounds that the checkpoint penalty is what makes **waiting for the partner rescue** — which
+    lands you at the partner's x AND y, a jump of up to the full **608 px** arena — the better
+    play. That is an intent call, not a defect. But the original finding's second sentence ("the
+    paid revive buys only 5 seconds, nothing ELSE") remains true about everything except the
+    clock.
+39. **NEW 2026-08-23 — Early endless waves are still a free rally by default, and the fix does not
+    touch them.** MEASURED, zero-spend run, per-wave income for waves 1-6: **55 / 130 / 260 / 385
+    / 380 / 525** against a `revive_cost` of **50-100** — so the chest naturally sits at or under
+    the price there, `rally_is_free()` holds, and a first death costs the **unchanged 5.0 s**.
+    Wave duration under the demo bot in that same range measures **~470t (7.8 s) median**, so a
+    first death in waves 1-3 is **~64% of a wave** and the compounding never starts. Whether the
+    early game should carry any coin brake at all — or whether the loadout strip, the burned
+    Commendation and (from wave 2 on only) the **40-coin Clean Wave forfeit** are the intended
+    entire bill — is unaddressed by this fix and is a difficulty call.
+
 ---
 
 ## 2. Sim / gameplay defects — player-facing
+
+### New 2026-08-23 — from the `f1601b7..3be8149` window
+
+The behaviour lens drove the sim headlessly with **`god_mode` OFF** for all of these — the first
+pass to do so since §6 established that `_god_restore` refills the magazine every 60 ticks against
+an 8-tick fire loop. Cited lines are the lens's; where the symbol moved on `3be8149` the HEAD line
+is given too.
+
+- **The Riot Shield's advertised flank is kinematically impossible at every range the game fights
+  at — and a green "safe" arc is drawn on his back promising otherwise.** ⚠️ **This is the second
+  independent filing.** A brief (`docs/riot-shield-*`, filed a day earlier) had already measured
+  it; the behaviour lens **re-measured from scratch rather than trusting the doc** and confirmed
+  it, and it is **still unfixed on `bf27b52`/`3be8149`**. Three live promises, all present on
+  HEAD: the first-contact banner `"shield": "RIOT SHIELD — FLANK OR BLOW IT OPEN"`
+  (`src/main.gd:391`, verified); the Field Manual line `SHIELD — front eats bullets. Flank it,
+  blast it, or use Rend.` (`src/view/menu.gd:5636`, verified — cited as `:5630`); and a
+  **PERSISTENT green rear SAFE-arc drawn on his back every frame** at `src/main.gd:10331-10335`
+  (verified — the comment there reads "Rear SAFE-arc: the shield only eats the front cone, so its
+  back is the…", i.e. the art is explicitly teaching "get around him"). The behaviour is
+  `_turn_shield_toward` (`sim_world.gd:4596` on HEAD, cited as `:4556`) with
+  `SHIELD_TURN_STEP = F_ONE / 32` (`:180`, verified), whose own comment at `:178-179` claims *"a
+  player circling at safe standoff can get outside the 120-degree block cone"*. `_shield_blocks`
+  is `sim_world.gd:4572` on HEAD (cited `:4532-4553`), a front 120° cone at `dot < -0.5`; the
+  turn is `≈1.8°/tick` (the sim says so itself at `:3158`). The flank **never opens at
+  ELITE_STANDOFF or GRENADIER_STANDOFF**. The sim's own comment at `:3117-3121` asserting that "a
+  committed close-range lateral…" gets around him is part of the same false claim. *(Fix scope
+  note before anyone reaches for it: the honest levers are lowering `SHIELD_TURN_STEP`, adding a
+  turn deadzone, or **deleting all three promises** — but the green arc is the loudest of them and
+  the cheapest to make honest.)*
+- **Quitting an Endless run silently confiscates every Veteran Point it earned — while the same
+  code path banks the wave count the VP is computed from.** `src/main.gd:5424` on HEAD (cited
+  `:5418`) — `vet_points += sim.wave` is the **ONLY** line in the codebase that ever increases the
+  currency (verified: `grep -n 'vet_points +=' src/main.gd` returns exactly one hit). It lives
+  inside `_record_run()` (`main.gd:5371` on HEAD, cited `:5365`), called from exactly one place,
+  `_apply_score_verdict()` (`main.gd:5353` on HEAD, cited `:5347/:5357`), itself called from
+  exactly one place: the debrief transition, guarded by `if sim.victory or sim.wiped or
+  (_down_fr…` *(report text truncated at source)*. **Quit-to-title never reaches it.** So a player
+  who quits a deep endless run keeps the leaderboard row and loses the meta-progression currency.
+- **The airborne Recon Drone is shot down by knee-high rocks — the view sells altitude the sim
+  does not have.** `_step_bullets` (`sim_world.gd:3043` on HEAD, cited `:3003-3145`) resolves in
+  the order bunkers → sandbags → tank hulks → **ROCKS** → enemies, and a bullet that dies on cover
+  never reaches the enemy scan. `_step_drone` (`sim_world.gd:3948` on HEAD, cited `:3908-3930`)
+  moves by writing `e["x"] += …` directly and **never calls `_advance_toward`**, so unlike every
+  ground mover it is *not* stopped by cover — it flies over rocks it can then be blocked behind.
+  The sim is inconsistent with itself in both directions at once: the drone ignores cover for
+  movement and respects it for damage.
+- **A maxed Veteran-Perk save posts to the shared Endless leaderboard with no marker, in a game
+  that already tags ASSIST and NG-HARD.** `src/main.gd:1737-1744` applies owned perk tiers
+  post-construction in `_reset()`: `perk_level(PERK_VEST) > 0` forces `pl["vest"] = true`,
+  `sim.war_chest += PERK_CHEST_BONUS * perk_level(PERK_CHEST)` (**60 per tier, 3 tiers**), and
+  `sim.tokens += perk_level(PERK_TOKEN)` (**1 per tier, 2 tiers**). `src/main.gd:5375-5382` builds
+  the Hall-of-Fame / Steam entry and records `"daily"`, `"assist"`, `"hard"`, `"gr…"` *(report
+  text truncated at source)* — **but nothing for perks.** The board therefore flags the two
+  toggles that *lower or raise difficulty by choice* and stays silent on the one that hands a run
+  a free vest, up to **180 coin** and **2 tokens** at tick zero.
+- **A quarter of the MG nest's rounds are fired from outside the drawn viewport, telegraph
+  included.** The sweep is `sim_world.gd:3671` on HEAD (cited `:3631`) — `if not e["alive"] or
+  e["y"] > camera_top + 420 * F_ONE` — while the drawn viewport ends at `camera_top + 360`
+  (`project.godot:27-28`, viewport **640x360**; `_to_screen` maps screen y = world y −
+  `camera_top`). **That leaves a 60 px band below the bottom edge where rooted shooters stay
+  alive, keep stepping, and keep firing.** The nest's own tell, `mg_nest_aim` (cited `:4750`), is
+  emitted at the nest's position, so **it plays off-screen too**, and its **30-tick**
+  `MG_NEST_AIM_TICKS` telegraph is drawn where nobody can see it. MEASURED by attributing every
+  `enemy_shot` / `sniper_fire` event to the enemy standing at that exact position, **4 campaign
+  seeds** *(report text truncated at source — the headline "a quarter" is the lens's own
+  summary of that attribution)*. Note this is the same 60 px band §1 #29 measured as "identical to
+  HEAD" for *rooted spawn position*; this entry is about **firing**, which nothing bounds.
+- **The 120-coin Triple Shot triples your no-weapon time, and the surcharge that pays for it
+  assumes a trigger the game deleted.** The fan ammo surcharge is `sim_world.gd:1528` on HEAD
+  (cited `:1527`, verified byte-for-byte:
+  `var fan_cost := 2 if (p["spread_ticks"] > 0 and p["triple"]) else 1`), justified in the comment
+  at `:1519-1525`. The missing trigger is `src/main.gd:6701` `p1.fire = true` (verified; `:6765`
+  for P2), whose own comment at `main.gd:6685` reads *"ALWAYS FIRE. There is no fire key, no fire
+  trigger and no fire pad button"* (verified verbatim). `SHOP_TRIPLE_COST` is **120**
+  (`sim_world.gd:450`, verified) — **above the 100-coin airstrike, the most expensive thing in
+  the economy**. MEASURED in isolation, one player, always-fire, no pickups, from a full 99:
+  **base 785 ticks (13.08 s, 7.57 rounds/s); Trench Gun alone OR Triple alone 393 ticks
+  (6.55 s); both stacked 257 ticks (4.28 s)**. The surcharge is priced as if a player could
+  *choose* not to spend the fan — and there is no such choice. *(Cross-ref: `4d493b7` earlier
+  stopped TRIPLE charging 2x ammo for zero extra damage; this is the remaining half — the charge
+  is real now, and so is the fact that you cannot decline it.)*
 
 ### New this run (2026-08-21), measured unless noted
 
@@ -970,6 +1120,27 @@ all of them; where an entry was reasoned from code instead, it says so.
 
 ## 3. Teaching / content honesty — the game says one thing, the sim does another
 
+### New 2026-08-23 — from the `f1601b7..3be8149` window
+
+- **"MG NEST — BREAK ITS LINE OR FLANK": the nest has no facing, no arc, no LOS gate and no
+  maximum range — bearing changes literally nothing.** The promise is a **full-screen banner**,
+  `_KIND_TEACH["mg_nest"]` at `src/main.gd:394` (verified verbatim on `3be8149`:
+  `"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK"`), fired once per enemy kind by
+  `show_banner(_KIND_TEACH[ekind], …)` (cited `main.gd:9994`). The behaviour is
+  `sim_world.gd:4785` on HEAD (cited `:4745`, verified verbatim): **the entire engagement gate is**
+  `if e["fire_cd"] == 0 and dlen > F_ONE and target["alive"]` — i.e. **the only range condition is
+  "more than one pixel away"**. `_spawn_mg_nest` (`sim_world.gd:4731` on HEAD, cited `:4691`)
+  **stores no `face_x`/`face_y` at all**, and `mg_nest_led_aim` (`sim_world.gd:7155` on HEAD,
+  cited `:7115`) **re-acquires the NEAREST player with velocity lead on every round of the burst**
+  (cited `:4720-4726`). MEASURED: a player stood at **12 bearings, 30° apart, at 140 px** from a
+  nest on a scrubbed field (no rocks, sandbags, bunkers or other cover) *(report text truncated at
+  source)*. "Flank" is not a partial truth here — there is no quantity in the code that bearing
+  could change. ⚠️ **Before fixing:** §1 #5 is a standing owner decision that the nest
+  *deliberately* teaches a second lane grammar ("this line follows you") and that locking it to
+  match the other archetypes deletes the tracking rake and moves `test_determinism` GOLDEN. **The
+  cheap honest fix is the banner text, not the sim.** This entry is filed as a *copy* defect for
+  that reason.
+
 ### New this run (2026-08-21)
 
 - **The one card that teaches MG-nest counterplay promises a flank the nest has no facing to be
@@ -1165,6 +1336,65 @@ all of them; where an entry was reasoned from code instead, it says so.
 ---
 
 ## 4. UI / visual polish
+
+### New 2026-08-23 — from the `f1601b7..3be8149` window
+
+⚠️ **All seven below are from the multimodal screenshot reviewer and are UNMEASURED — they name
+what a frame looks like, not what the code does.** That is exactly the class the standing warning
+at the top of this file is about; several of them (the banner stacking especially) re-flag ground
+the label-arbiter and band-arbiter work already moved, so **enumerate the arbiter's call sites
+before believing the frame**. Kept because the reviewer photographed real frames.
+
+- **Overlapping text banner stack during combat.** WHERE: mid-combat during boss phases and downed
+  states (screenshots 8 & 9). Multiple banners — `BRIDGE GUNSHIP - MORTAR VOLLEY`, `DESTROY THE
+  GUNSHIP TO ADVANCE`, `DOWNED - PUSHER`, `[MORTAR INCOMING]` — print **directly on top of each
+  other across the center third of the screen**, "creating a tangled, unreadable block of
+  overlapping pixels". Wanted: a prioritised event notification stack that offsets active banners,
+  pins boss health to dedicated screen edges, and queues secondary warnings without collision.
+  ⚠️ `main.band_rows()` is the existing arbiter for stacked HUD message bands and boss bars are
+  outside it — **that seam is the likely locus, not a new queue.**
+- **Mid-screen UI text stacking and boss-bar clipping.** WHERE: Sector 3 & Sector 6 combat HUD
+  (frames 10, 15). In frame 10 the boss health bar (`BRIDGE GUNSHIP - MORTAR VOLLEY`), white
+  muzzle flashes, floating `MAXED` crate labels and a `[MORTAR INCOMING]` caption are **stacked
+  directly over one another, with the flash physically obscuring the boss text**. In frame 15,
+  **five separate text plates** clutter the bottom-center playfield. *(Same class as the entry
+  above, different frames; both kept because they are independent captures of it.)*
+- **Monochromatic visual hierarchy and muddy sprites.** WHERE: in-game combat across desert and
+  trench sectors (screenshots 2, 3, 12, 14). Player soldiers, hostile riflemen, sandbags, crates
+  and desert scrub **share almost identical desaturated tan/olive/brown tones with flat top-down
+  silhouettes**, so active combat units blend into ground cover. Wanted: high-contrast unit
+  sprites with dynamic drop shadows, distinct directional silhouettes, and saturated uniform
+  accents. ⚠️ Cross-ref §1 #12 — the warm-light separator rim already exists and is an **open
+  owner decision on its width (2.2 px)**; and §1 #11 records that **ghillie and sapper have no
+  working rim at all**. This is the same problem the rim was built for, reported from the screen
+  rather than the code.
+- **Unmasked tile-stamp boundaries and geometry artifacts.** WHERE: trench walls and fort ground
+  tiles in Sectors 3 and 4 (screenshots 3, 12, 14). Dark grey rectangular tiles and hard ground
+  blocks sit on the desert sand with **harsh, unblended rectangular edges and floating tile stamps
+  along trench perimeters**, exposing the tile grid. Wanted: seamless auto-tiling with organic dirt
+  transitions and edge-smoothing tiles. ⚠️ Cross-ref §1 #30/#34 — the ground *base* lattice was
+  measured at only **~4.4% luminance amplitude** and two lenses agreed the original tell was
+  over-claimed. This report is about **structure tiles, not the sand base**, so it is a different
+  surface; do not close it against the ground-repeat measurements.
+- **Draft-quality screen layout in the Field Manual.** WHERE: Field Manual / How To Play (frame
+  17). Page 1 of 4 shows "a massive empty dark green modal containing a single sparse bullet point
+  (`MOVE with W/A/S/D.`) surrounded by vast unused black space" — **over 85% of a full-screen menu
+  panel blank**. ⚠️ **This is the known cost of the entry-granular pager, already measured**: §5
+  records the sparse leaves at **125% WAR CHEST 73%/99%/14%** and **200% WAR CHEST
+  85/34/90/49/90/52**, and §1 #26 is the standing owner decision on page-count vs page-density.
+  **Do not fix this without ruling #26** — the blank space is the price of never breaking a
+  sentence, and `9538eca` ratcheted the sentence-integrity half.
+- **Inconsistent UI frame colour schemes across sub-menus.** WHERE: Pause, Field Manual, Chapter
+  Select and Options (frames 16, 17, 19, 20). Each submenu has a different frame palette — **Pause
+  olive-tan, How To Play bright toxic green, Chapter Select pale greenish-tan, Options cool
+  blue-grey**. Reads as sub-menus built by different hands. Wanted: one chrome palette with
+  intentional per-tab accents rather than four independent frames.
+- **Stark text-only Chapter Select menu.** WHERE: Main Menu → Campaign → Chapter Select
+  (screenshot 17). A **plain vertical text list of six zone names** inside a green CRT frame — no
+  thumbnails, biome artwork, sector stats or completion badges. Wanted: a tactical map or carousel
+  with sector previews, objective briefings, high-score badges and biome art. **Scope warning:**
+  this is a feature request, not a defect — it is the largest single piece of new art/UI work
+  anywhere in this file.
 
 ### New 2026-08-22 — from the `9bb1cdb..f1601b7` window
 
@@ -1491,6 +1721,52 @@ all of them; where an entry was reasoned from code instead, it says so.
 
 ## 5. Test & tooling debt
 
+### New 2026-08-23 — from the `f1601b7..3be8149` window
+
+- **The R2b ratchet false-reds on an innocent COMMENT that happens to contain a draw-call token —
+  and the failure message accuses the parser.**
+  `tests/test_view_honesty.gd::test_no_string_is_drawn_under_a_scaled_canvas_transform`
+  (`:3848` on `3be8149`) builds `expected` from the **RAW** file (`raw.count(tok)` over
+  `Art.text(` / `Art.text_center(` / `draw_string(` / `draw_string_outline(`) but builds the walk
+  from a **comment-BLANKED** copy, then asserts `checked == expected`. **REPRODUCED by mutation:**
+  inserting the single whole-line comment `# NOTE: prose mentioning Art.text(self, ...)` above
+  `_update_hud()` in `src/main.gd` turns the suite red with *"the transform/text walk reached every
+  string draw in the view (77 of 78) (got 77, want 78)"*. Restored, verified green. **The message
+  points at `_xform_args`, so the next person will go hunting in the parser instead of deleting a
+  comment.** Worse than a nuisance: it is a gate that goes red on a **correct** tree for a
+  **documentation** edit, which is precisely the shape CLAUDE.md warns turns a gate into something
+  nobody reads (`test_perf.gd` → `OPT_IN_SUITES`). Fix: count `expected` off the same blanked copy
+  the walk uses.
+- **`tools/screenshots.gd` still leaks at exit — and this window's diff touches that file.**
+  MEASURED on this run's real-GL capture (**14 live / 14 unique shots, all SAVED**):
+  `ERROR: Texture with GL ID of 329: leaked 5460 bytes` and `ERROR: 1 RID allocations of type
+  N5GLES37TextureE were leaked at exit`. It **never frees its main and never calls
+  `await Quiesce.teardown(self, main)`**, unlike the three gated tools. **PRE-EXISTING and NOT
+  caused by the `m._result_t = 1.0` line this diff adds** — verified by capturing the same shot on
+  the stashed (unmodified) tree and finding the leak lines **identical**. Banked because this is
+  the first thing in a while to touch that file. Re-verified on `3be8149`:
+  `grep -ln 'main.tscn' tools/*.gd` lists **eight** files and `grep -n 'Quiesce.teardown'
+  tools/*.gd` covers only `e2e_playthrough`, `perf_probe` and `smoke` — so **four** GL/manual
+  tools (`screenshots.gd`, `biome_capture.gd`, `gif_capture.gd`, `probe_concussion_hud.gd`) are
+  outside the gate, not the three CLAUDE.md's older text names. Cross-ref §1 #32 and the §8 row
+  for `a39c1f3`.
+- **README's assertion badge reads low — and the correct fix is NOT to retype it, because the
+  number is unfalsifiable.** The badge reads `tests-1162 methods · 37.4k asserts`
+  (`README.md:20`), and the prose at `README.md:338` says **"1,162 test methods / 37,400+
+  assertions"**. Re-verified on `3be8149`: the **method** half is exact and gated —
+  `grep -hE '^func test_' tests/test_*.gd | wc -l` = **1165**, minus `test_perf.gd`'s **3**
+  opt-in methods = **1162**, matching the badge, and `d3bc2a1` added a `test_assets.gd` gate that
+  recounts it (including **the URL-encoded copy inside the shields.io URL**, which is exactly why
+  it rotted unnoticed while the prose beside it was being corrected). The **assertion** half is
+  ungated **on purpose**: `bf27b52`'s build log records that one commit (`4c7ae78`) measured
+  **37,436 assertions on Linux and macOS, 37,451 on Windows, and 37,473 on a local macOS run of
+  the same tree** — so **no single figure is correct everywhere**, and `d3bc2a1` deliberately made
+  assertion counts a **FLOOR** rather than a pin. `37,400+` therefore remains **true**; only the
+  badge's flat `37.4k` reads as a stale pin. ⚠️ **File this as "make the badge say `37.4k+`", and
+  do NOT re-open it as a stale number** — two previous passes "fixed" it by retyping, which is the
+  failure this entry exists to prevent. *(This is the first entry in this file whose
+  counter-evidence is the finding.)*
+
 ### New 2026-08-22 — from the `9bb1cdb..f1601b7` window
 
 - **The final `clampf` in `claim_label_slot`'s least-overlap return is DEAD CODE, and its comment
@@ -1808,6 +2084,22 @@ all of them; where an entry was reasoned from code instead, it says so.
 
 ## 6. Process / infrastructure
 
+- **NEW 2026-08-23 — Turning `god_mode` OFF was the single highest-yield change this run made, and
+  it should be the default for any behaviour lens from here on.** The 2026-08-21 snapshot
+  *discovered* that `_god_restore` refills the magazine every 60 ticks against an 8-tick fire loop
+  (entry below) but did not re-run anything under the corrected instrument. This window did, and
+  the ammo-economy findings that fell out — the Triple Shot surcharge pricing a choice the game
+  deleted, the riot shield's flank, the MG nest's off-screen quarter — **were invisible to every
+  previous pass, not missed by them.** Standing instruction: an economy, attrition or
+  weapon-pressure claim measured under `god_mode` is measuring a different game. State the flag's
+  value in the entry.
+- **NEW 2026-08-23 — Cite symbols, not line numbers.** `3be8149` alone moved `sim_world.gd` by
+  **~+130 lines** below the revive block and `main.gd` by **~+450** below the HUD block, so a
+  meaningful fraction of the citations merged this run were already stale **on the day they were
+  written**. Three spot-checks are in the header warning. The cost is not cosmetic: a line-number
+  citation that lands on plausible-looking neighbouring code is the same failure mode as reading
+  the wrong worktree, and it is silent. Prefer `grep -n '<symbol>'` output in an entry over a bare
+  `file:line`.
 - **NEW 2026-08-21 — The debug auto-restore refills ammo AND grenades to cap every 60 ticks, so
   every review pass this project has run has been blind to its most common failure state.**
   WHERE: `src/sim/sim_world.gd:1988-2004` (`_god_restore`: on every `tick_count %
@@ -1914,6 +2206,19 @@ the reasoning and nobody mistakes them for oversights.
 ---
 
 ## 8. Shipped — resolved, kept for the record
+
+### Shipped in the 2026-08-23 window (`f1601b7..3be8149`, 6 commits)
+
+Every sha below was read directly out of `git log f1601b7..3be8149` in
+`/Users/shoemoney/Projects/commander-in-chief` on branch `main`.
+
+| Finding | Commit |
+|---|---|
+| **Endless 2P: a broke death respawns FREE after 5 s whenever a partner is up — the mode's only death brake (the compounding revive price) is waived exactly when you can't pay, so spend-to-zero is the dominant strategy** | `3be8149` — the WAIT now compounds instead: `broke_wait_ticks()` rides the same `deaths` curve the price does, capped at `BROKE_WAIT_MAX_MULT` (**20.0 s**). Measured pre-fix, 2P endless, chest 0: **the free rally took 300 ticks and the paid self-revive took 1**, both landing at `_checkpoint_y()` with the same stripped body — **the coin bought 299 ticks and nothing else**, at wave 1 and wave 60 alike, while the bill it dodged climbed **50 → 7800**. Keyed on `deaths` only, **never on wave**. The rally itself stays (a downed player is never a spectator with zero actions) and the WIPE clock is re-checked live and never compounds. **CAMPAIGN untouched**, which is also what keeps GOLDEN still: the 60 s campaign torture arms this **11 times at deaths 4..12** and every one stays at `BROKE_RESPAWN_TICKS`. Both how-to surfaces derive both ends of the clock off the consts. **Three balance questions it deliberately left open are §1 #37–#39** |
+| ~~`tools/versions.lock` pins CI to 4.7.1 while local dev runs 4.7.2 — the lock's own justification is false~~ (owner decision **#36**) | `cebc3b7` (bump) + `4c7ae78` (close the backlog item). Verified **before** moving the pin: full suite **PASS — 1157 methods, 37473 assertions, 0 failures**; determinism **7 methods, GOLDEN and ENDLESS_GOLDEN reproduce UNCHANGED**; `lint_sim` OK; `lint_assets` OK (**322 PNGs**); `i18n_check` in sync (**63 keys, fr + ja**). The sha256 was **authenticated against the release's published SHA512-SUMS.txt before being hashed**. Commit body commits to **reverting rather than re-recording** if any of the three CI OSes moves a golden |
+| README/CONTRIBUTING test-count line had gone stale a **THIRD** time (1154 → 1159) and two prior passes "fixed" it by retyping | `d3bc2a1` — three gates added to `test_assets.gd`, **each verified to FAIL on a planted wrong value**: README's method count recounted from `tests/`; **the shields.io badge's URL-encoded copy** (`1159%20methods`) — the reason it rotted unnoticed, since `grep "methods"` never matched it; and **lockstep still has ZERO production callers**, the single load-bearing fact behind "online co-op is not playable" in three docs. Assertion counts became a **FLOOR, not a pin**. Also corrected two claims **against code rather than against the previous doc**: CLAUDE.md's "latency jitter only: no packet loss, no duplication" was **false** (`FakeWire` schedules `drop_every` and `dup_every`, and `test_survives_packet_loss` carries a **CONTROL proving it can fail**), and `lockstep.gd` is **~260 lines, not the 237 pinned in three files**. README now teaches `tools/run_tests.sh` over raw `godot`. Suite green at **1159 methods** |
+| **A doc that UNDERSELLS its own tests** — the finding nobody audits for | `d3bc2a1` + `bf27b52`. CLAUDE.md claimed the netcode harness had no packet-loss coverage while `docs/PLAN.md` said it did; **the code sided with PLAN.md**. A pessimistic doc invites an agent to rebuild coverage that already exists, **and it fails silently** — there is no gate anywhere for "this doc is too modest". Now recorded as a class in the build log |
+| A README number that could not be stated correctly at all | `bf27b52` — first entry in `blog/`, and the reason §5's badge entry is filed as **counter-evidence rather than as a stale number**. Reading the `PASS` line out of all three CI jobs for ONE commit (`4c7ae78`) gave **37,436 assertions on Linux and macOS, 37,451 on Windows, 37,473 on a local macOS run of the same tree**. The number was never stale — **it was unfalsifiable, and no edit to that line could have been correct.** Method count IS platform-stable, so it is pinned by a test. Also banked there, because the wrong turns are the substance: **zsh `noclobber` silently refusing a heredoc** so a "bump" nearly shipped with the pin untouched; a `git push -q` chained to a self-authored `&& echo "pushed $(git rev-parse HEAD)"` that **printed a real sha for a push which moved nothing**; and **CI verified green against the previous commit's run** because `gh run list --limit 1` had not caught up |
 
 ### Shipped in the 2026-08-22 window (`9bb1cdb..f1601b7`, 21 commits)
 
@@ -2105,6 +2410,36 @@ claymore self-kill (`2fe8b00`).
 - **Several report bodies arrived truncated at source** (marked "report text truncated at
   source"). The surviving measurements are verbatim; the missing tails were reasoning, not
   numbers.
+- **A number can be STALE or it can be UNFALSIFIABLE, and the fixes are opposites — new
+  2026-08-23.** `bf27b52` established the distinction by reading one commit's `PASS` line out of
+  all three CI jobs: **37,436 assertions on Linux and macOS, 37,451 on Windows, 37,473 on a local
+  macOS run of the same tree.** Two previous passes had "fixed" that line by **retyping** it, which
+  could not have been correct at any value. The test is cheap: **measure the claim on more than one
+  machine before deciding it is stale.** If it varies, the fix is to stop stating it (or state a
+  floor), not to restate it — `d3bc2a1` made assertion counts a FLOOR and pinned only the
+  platform-stable method count. §5's README-badge entry is filed under this rule and should **not**
+  be re-opened as a drift.
+- **A doc that UNDERSELLS its own tests fails silently — new 2026-08-23.** CLAUDE.md claimed the
+  lockstep harness had "latency jitter only: no packet loss, no duplication"; `FakeWire` in fact
+  schedules both, and `test_survives_packet_loss` ships a **control proving it can fail**. Nothing
+  gates a pessimistic doc, and the cost is an agent rebuilding coverage that already exists.
+  **Audit docs in both directions.**
+- **Held, checked, no finding (2026-08-23) — four suspicions chased and REFUTED.** Recorded so
+  nobody re-spends the cycle. All measured in the same worktree at `bf27b52`, with probes that step
+  the sim directly (never awaiting frames), **4 campaign seeds × 12,000 ticks** unless noted:
+  1. **NO BLIND DEATHS.** Instrumented every `player_down` and asked whether anything on screen
+     explained it: **133 knockdowns, and ZERO had no visible cause** within **200 px** (a live
+     enemy inside the viewport), **90 px** (an enemy bullet inside the viewport), **60 px** (an
+     active strike telegraph) or **40 px** (an armed mine). The hit-resolution order in `step()`
+     (offense before contact death, contact death before enemies move, cited
+     `sim_world.gd:1105-1110`) is doing exactly what its comment claims.
+  2. **THE CAMERA NEVER SCROLLS BACKWARD.** **0 backward ticks** *(report text truncated at
+     source)*.
+  3. *(and 4.)* *(report text truncated at source — the surviving measurements above are
+     verbatim; the missing tail was reasoning, not numbers.)*
+  ⚠️ Note the instrument caveat that makes these trustworthy in one direction only: these were
+  taken **before** the `god_mode`-OFF discipline in §6 was applied everywhere, so treat #1's
+  "nothing was invisible" as a claim about **telegraphing**, not about attrition.
 - **Held, checked, no finding (2026-07-31):** a full pass over the remaining roster —
   `src/sim/sim_world.gd` steppers (elite/sniper/ghillie/drone/technical/mg_nest/grenadier/
   observer/colossus/gunship) plus the view telegraph paths (`src/main.gd:8708` telegraph_dir,
