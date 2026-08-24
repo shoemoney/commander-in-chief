@@ -1884,6 +1884,52 @@ func _choke_bounds(y: int) -> Array:
 	return [WORLD_LEFT, WORLD_RIGHT]
 
 
+static func choke_band_span(y: int) -> Array:
+	## [off_lo, off_hi] of the SAME-FLANK contiguous choking run containing world y —
+	## in the band-offset units _choke_bounds already reads — or [] if y is not in a
+	## choke at all. Every value here is one _choke_bounds computes and THROWS AWAY:
+	## the view needs the run's EXTENT to draw the wall at, had no way to ask for it,
+	## and so the choke slab shipped as a hard-coded 240x240 quad anchored on the
+	## band's SOUTH edge and drawn 240px further south. Enumerated over segments
+	## CHOKE_START_SEG..12 at 10-unit offsets: 285 choking rows, of which that slab
+	## marked 10 (3.5% — one boundary row per segment) and was drawn SOUTH of the
+	## other 275, painting near-opaque dark over open walkable ground
+	## (test_world_ground_tints_are_soft_masked_not_raw_quads, arm 3).
+	##
+	## Pure static integer math — same hash, same branches, same order as _choke_bounds
+	## — so it adds NO sim field, touches no stepper, is not in checksum(), and cannot
+	## move a golden.
+	var seg: int = absi(y) / GATE_SPACING
+	if seg == CALM_BAND_SEG:
+		return []
+	var off: int = absi(y) % GATE_SPACING
+	if seg == RUINS_SEG:
+		var lo3: int = CHOKE_OFF_LO
+		var leg: int = 140 * F_ONE
+		# The dog-leg's two legs bite OPPOSITE flanks, so they are two runs, not one:
+		# a single slab spanning both would paint across the open lane between them.
+		# The first ends one fixed unit (1/65536 px, invisible) short of the second's
+		# start so the runs are disjoint and every offset in a run has ONE flank.
+		if off >= lo3 and off < lo3 + leg:
+			return [lo3, lo3 + leg - 1]
+		if off >= lo3 + leg and off <= lo3 + 2 * leg:
+			return [lo3 + leg, lo3 + 2 * leg]
+		return []
+	if seg >= CHOKE_START_SEG:
+		var sh: int = (seg * 2654435761) & 0x7FFFFFFF
+		var b_len: int = (200 + sh % 80) * F_ONE
+		var lo: int = CHOKE_OFF_LO
+		if off >= lo and off <= lo + b_len:
+			return [lo, lo + b_len]
+		if seg >= 4 and sh % 3 == 0:
+			# The double band's second squeeze — its own run (opposite flank), past
+			# the 80px gap.
+			var lo2: int = lo + b_len + 80 * F_ONE
+			if off >= lo2 and off <= lo2 + b_len / 2:
+				return [lo2, lo2 + b_len / 2]
+	return []
+
+
 func _in_choke_apron(y: int) -> bool:
 	## The BREATHER (KIMK round-2): a guaranteed hazard-free full-width apron
 	## right after every choke — width modulates in both directions because

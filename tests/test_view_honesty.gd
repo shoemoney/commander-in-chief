@@ -3049,6 +3049,204 @@ func test_concussion_shader_uses_the_view_clock() -> void:
 		"concussion overlay does not animate off GPU TIME")
 
 
+func test_concussion_warp_spares_the_downed_soldier() -> void:
+	# The radial blur taps are distance-scaled by construction (`to_center * i`),
+	# so they are 0 px at the exact screen centre and grow outward. The other warp
+	# channels were NOT. `normalize()` throws distance away, so the chroma split had
+	# a fixed UV magnitude of 0.0045 * amt at EVERY pixel (at the shipped SOLO
+	# knockdown peak — down_self_scale(partner_standing=false) returns 1.0, main.gd,
+	# NOT the 0.7 of a flak-vest break — and the 640x360 logical frame, that is
+	# 5.76 px of R/B separation, nonzero even at the exact centre); the wobble was a
+	# fixed whole-image shove (2.82 px x / 1.58 px y at amt 1.0, |wob| <= 2); the
+	# green channel was taken from the blur unconditionally; and the fold pulled all
+	# of it into the final colour at a flat 50% everywhere. Net effect: the fallen
+	# soldier came out doubled and smeared at the exact moment the player is
+	# squinting at him to see whether he got back up.
+	#
+	# The ramp must be anchored on HIM, not on the middle of the frame — this is the
+	# FOCUS-ANCHORED ramp, NOT the earlier screen-centred revision (Backlog #44),
+	# which measured 0.04 edge retention at x=60. There is no horizontal camera in
+	# this game — main._to_screen() has no x term at all — so his world x IS his
+	# screen x over the 16..624 play field and he is routinely 200+ px off centre.
+	# Measured on this tree: a 5-seed player_down census logged 135 events spanning
+	# screen-UV x 0.025..0.975, with 43% (58/135) within 0.1 of centre — a
+	# screen-centred ramp is a coin flip. test_concussion_focus_is_pushed_from_the_player()
+	# pins the main.gd half; this one pins the shader half.
+	#
+	# Source-text ratchet by necessity: the shader only exists on the GPU, and the
+	# pixel-level proof lives in tools/probe_concussion_hud.gd (GL-only — it fails
+	# closed under --headless with "PROBE UNUSABLE", and `grep -rln` finds it
+	# referenced by nothing in .github/workflows/, tools/run_tests.sh or
+	# tests/run_tests.gd, so it CANNOT be gated in CI; that is a banked gap, and it
+	# is why the numeric arms in the sibling test below exist). MEASURED there at
+	# concussion 1.0 — exposure-matched strong edges in the box around the LIVE
+	# soldier, swept across the play field. Shipped column quoted as a
+	# median of 3 runs (Apple M4 Max / OpenGL 4.1 Metal); unlike the controls it
+	# does NOT reproduce cell-for-cell, it spreads ~0.98..1.12:
+	#           no ramp   ramp @ vec2(0.5)   ramp @ focus
+	#   x=40     0.00          0.01             1.01
+	#   x=320    0.09          0.98             1.07
+	#   x=600    0.00          0.04             1.03
+	# Across all 9 shipped-column samples the worst single sample 0.98 — that, not
+	# the median, is what the probe's 0.85 floor has to clear.
+	# Both left-hand columns are CONTROLS that were actually run and actually
+	# failed. This gate is what makes a silent revert impossible; the probe is what
+	# proves the pixels.
+	var sh := FileAccess.get_file_as_string("res://src/view/screen_fx.gdshader")
+	Runner.T.ok(sh.contains("uniform vec2 focus"),
+		"the concussion pass takes a focus point rather than assuming screen centre")
+	Runner.T.ok(sh.contains("float dist = length(focus - uv);"),
+		"the ramp's distance is measured from the focus point")
+	Runner.T.ok(not sh.contains("float dist = length(to_center);"),
+		"no screen-centred distance survives as the ramp's input")
+	Runner.T.ok(sh.contains("float ramp = smoothstep("),
+		"the concussion pass derives a peripheral ramp")
+	var ramp_line := ""
+	for line in sh.split("\n"):
+		if line.contains("float ramp = smoothstep("):
+			ramp_line = line
+	Runner.T.ok(ramp_line.contains("dist"),
+		"the peripheral ramp is a function of the distance from the focus (got \"%s\")"
+			% ramp_line.strip_edges())
+	# TWO consumers, opposite intents: _blast_warp rides this same shader and WANTS
+	# its punch centred on the detonation, so the ramp is gated rather than silently
+	# rebalancing the heat-shock. `spare` is that gate; at 0 the maths is bit-for-bit
+	# the pre-ramp path. Without this the fix quietly changes a second effect.
+	Runner.T.ok(sh.contains("uniform float spare"),
+		"the peripheral ramp is gated, so the blast heat-shock keeps its centred punch")
+	Runner.T.ok(sh.contains("float periph = mix(1.0, ramp, spare);"),
+		"spare crossfades between the flat whole-frame warp and the focus ramp")
+
+	Runner.T.ok(sh.contains("0.0045 * amt * periph"),
+		"the chromatic split is ramped, not applied at full strength on the soldier")
+	Runner.T.ok(not sh.contains("(0.0045 * amt)"),
+		"no distance-independent chroma magnitude survives")
+	Runner.T.ok(sh.contains("0.0022 * amt * periph"),
+		"the underwater wobble is ramped, not a whole-image displacement")
+	Runner.T.ok(not sh.contains("vec2(wob) * 0.0022 * amt;"),
+		"no distance-independent wobble amplitude survives")
+	Runner.T.ok(sh.contains("mix(col, blur, 0.5 * periph)"),
+		"the soft-blur fold weight is ramped")
+	Runner.T.ok(not sh.contains("mix(col, blur, 0.5)"),
+		"no flat 50% blur fold survives to carry the smear onto the soldier")
+	# The fold has two halves: the mix() above, and the green channel, which is
+	# read straight OUT of `blur`. Ramping only the mix leaves the taps' vertical
+	# reach landing on the soldier at full strength in G — a soldier "spared" in
+	# R and B only, which looks fixed in a diff and is still smeared on screen.
+	Runner.T.ok(sh.contains("mix(texture(screen_tex, wob_uv).g, blur.g, periph)"),
+		"the green channel is ramped toward the unblurred sample, not taken from the blur outright")
+	Runner.T.ok(not sh.contains("\t\t\tblur.g,"),
+		"no unconditional blur.g survives as the green channel")
+	# The VIGNETTE deliberately does NOT follow the focus. A darkening that chased
+	# the soldier around the frame reads as a wandering black blob; the warp is
+	# aimed at the player, the grade frames the screen. Measured: luma is
+	# byte-comparable before and after this change in every region sampled (left
+	# edge 53.46 -> 53.39, top strip 62.69 -> 62.69 of 255).
+	Runner.T.ok(sh.contains("float vig = 1.0 - smoothstep(0.3, 0.75, length(to_center));"),
+		"the vignette stays screen-centred instead of chasing the focus point")
+	Runner.T.ok(not sh.contains("float vig = 1.0 - periph;"),
+		"the vignette is not coupled to the moving ramp")
+
+	# Guard the parts that were already correct, so a later 'simplification' of the
+	# ramp cannot take the safety paths with it.
+	Runner.T.ok(sh.contains("if (concussion < 0.001)"),
+		"the bit-exact pass-through below 0.001 is intact")
+	Runner.T.ok(sh.contains("mix(clean, col, amt)"),
+		"the master blend on concussion amount is intact")
+	Runner.T.ok(sh.contains("to_center * (float(i) * 0.018 * amt)"),
+		"the radial blur taps still march toward the true screen centre — that is the disorientation, and it was never the defect")
+
+
+func test_concussion_focus_is_pushed_from_the_player() -> void:
+	# The shader half of the fix is inert unless main.gd actually pushes a focus.
+	# Left unwired, `focus` sits at its vec2(0.5) default and the ramp degrades to
+	# exactly the screen-centred version the probe measured at keep 0.01 / 0.04 at
+	# the edge poses — green diff, unchanged screen. So pin the wiring too.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('_screen_fx_mat.set_shader_parameter("focus", _concussion_focus_uv())'),
+		"the per-frame uniform push feeds the shader a focus point")
+	Runner.T.ok(src.contains('_screen_fx_mat.set_shader_parameter("spare",'),
+		"the per-frame uniform push also sets the ramp gate")
+	# The focus must come from the SHIPPED world->screen seam. A second copy of the
+	# camera maths here is how the focus drifts off the soldier the first time
+	# _to_screen changes.
+	Runner.T.ok(src.contains("func _concussion_focus_uv() -> Vector2:"),
+		"the focus resolver exists")
+	var body := src.get_slice("func _concussion_focus_uv() -> Vector2:", 1).get_slice("\nfunc ", 0)
+	Runner.T.ok(body.contains("_to_screen(p[\"x\"], p[\"y\"])"),
+		"the focus routes through main._to_screen, not a private copy of the camera maths")
+	Runner.T.ok(body.contains("concussion_focus_uv("),
+		"the resolver delegates the arithmetic to the pure static helper the numeric arm can call")
+	Runner.T.ok(body.contains("sim.players[_concussion_p]"),
+		"the focus is the player named by _concussion_p, not a hardcoded index")
+	# Both beats that raise _concussion must also say WHOSE it is, or 2P aims the
+	# ramp at the wrong soldier. down_self_scale already distinguishes them.
+	Runner.T.ok(src.contains("_concussion_p = int(ev.get(\"p\", 0))"),
+		"the concussion triggers record which player the beat belongs to")
+	var trigger_count := src.count("_concussion_p = int(ev.get(\"p\", 0))")
+	Runner.T.eq(trigger_count, 2,
+		"both concussion sources (player_down and vest_break) name their player")
+	# The BLAST channel is the other consumer of this shader and must not have been
+	# silently rebalanced: it needs spare -> 0 when it is the louder one.
+	Runner.T.ok(src.contains("var warp := _blast_warp * motion_gate"),
+		"the blast heat-shock is scaled separately so the ramp gate can tell the two channels apart")
+	Runner.T.ok(src.contains("clampf((conc - warp) / amt, 0.0, 1.0)"),
+		"spare falls to 0 as the blast heat-shock takes over, restoring its un-ramped whole-frame punch")
+
+	# --- NUMERIC ARMS. Everything above is a grep; a grep cannot tell a focus that
+	# tracks the soldier from one that returns vec2(0.5) with the right spelling.
+	# Both helpers below are pure statics precisely so this headless suite can call
+	# them (the pixel claim needs GL and is banked in the sibling test's header).
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("concussion_focus_uv"),
+		"the focus arithmetic is a pure static, callable without a scene tree")
+	Runner.T.ok(ms.has_method("concussion_spare"),
+		"the ramp gate is a pure static, callable without a scene tree")
+	if not ms.has_method("concussion_focus_uv") or not ms.has_method("concussion_spare"):
+		return
+	# EXHAUSTIVE 1px sweep of the play field. The measured player_down census that
+	# motivates this spanned screen-UV x 0.025..0.975 over 135 events on 5 seeds;
+	# WORLD_LEFT..WORLD_RIGHT is 16..624 px, so this window strictly CONTAINS the
+	# measured one — the ratchet is wider than the defect, not narrower. The helper
+	# takes the SCREEN point on purpose (see its docstring: _to_screen stays the one
+	# copy of the camera maths), and _to_screen has no x term, so a player's world x
+	# IS the sx swept here.
+	var u_min := 2.0
+	var u_max := -1.0
+	var uv_err := 0
+	for sx in range(int(SimWorld.WORLD_LEFT / Fixed.ONE), int(SimWorld.WORLD_RIGHT / Fixed.ONE) + 1):
+		var uv: Vector2 = ms.concussion_focus_uv(Vector2(float(sx), 180.0))
+		if absf(uv.x - clampf(float(sx) / 640.0, 0.0, 1.0)) > 0.0001:
+			uv_err += 1
+		if absf(uv.y - 0.5) > 0.0001:
+			uv_err += 1
+		u_min = minf(u_min, uv.x)
+		u_max = maxf(u_max, uv.x)
+	Runner.T.eq(uv_err, 0,
+		"the focus UV is the player's own screen x over the whole play field (%d mismatches)" % uv_err)
+	Runner.T.ok(maxf(absf(u_min - 0.5), absf(u_max - 0.5)) >= 0.45,
+		("the focus actually TRACKS the soldier across the field — it is not vec2(0.5)"
+			+ " wearing a new name (u spans %.3f..%.3f, max offset from centre %.3f)")
+			% [u_min, u_max, maxf(absf(u_min - 0.5), absf(u_max - 0.5))])
+	# spare: 1.0 = pure concussion (full focus ramp), 0.0 = blast owns the frame.
+	Runner.T.ok(absf(float(ms.concussion_spare(1.0, 0.0)) - 1.0) < 0.0001,
+		"with no blast, the ramp is fully open (spare 1.0)")
+	Runner.T.ok(absf(float(ms.concussion_spare(1.0, 1.0))) < 0.0001,
+		"a blast at the concussion level restores the flat whole-frame punch (spare 0.0)")
+	Runner.T.ok(absf(float(ms.concussion_spare(0.4, 0.9))) < 0.0001,
+		"a blast LOUDER than the concussion also yields spare 0.0, never a negative")
+	var prev := 2.0
+	var mono_err := 0
+	for i in 21:
+		var w := float(i) / 20.0
+		var s := float(ms.concussion_spare(1.0, w))
+		if s > prev + 0.0001:
+			mono_err += 1
+		prev = s
+	Runner.T.eq(mono_err, 0,
+		"spare is monotone non-increasing as the blast grows louder (%d inversions)" % mono_err)
+
+
 func test_dry_shrub_and_tumbleweed_are_not_outlined() -> void:
 	Runner.T.ok(not Art.outlined("dry_shrub"), "dry_shrub is a tuft, not a 3-pass rim")
 	Runner.T.ok(not Art.outlined("tumbleweed"), "tumbleweed is a tuft, not a 3-pass rim")
@@ -3933,3 +4131,514 @@ func test_no_string_is_drawn_under_a_scaled_canvas_transform() -> void:
 		"...and still finds the two allowlisted pop-in sites (%d scaled text blocks), so a green"
 			% scaled_text_blocks
 			+ " here means the scrape ran, not that it matched nothing")
+
+
+# --- WORLD-GROUND TINTS: the "unmasked shadow quad" class ---------------------
+#
+# SIX producers in the world-ground layer painted a FLAT, UNTEXTURED, HARD-EDGED
+# draw_rect as a ground tint, on top of already-drawn terrain, litter and cacti
+# (_draw_terrain tails into _draw_band_signatures/_draw_ruins_rubble/_draw_trenches/
+# _draw_lane_seals/_draw_ledges AFTER the cactus/scrub/litter pass). The review that
+# started this saw exactly ONE of the six — the choke wall, which lands at x 0 or
+# x 400 on a 640-wide frame and so reads as "a dark rectangle slicing vertically down
+# the middle". Measured on this tree at 22efd37: 30 world-ground functions derived
+# from _draw's own body, 47 filled draw_rect calls, of which 6 are ground-tint PLANES
+# (min dimension >= 24px); the rest are lips, chunks and debris at min dim <= 9px,
+# which are authored signage and correctly stay crisp.
+#
+# The choke slab was ALSO in the wrong place. `band_top` resolves to the choke run's
+# SOUTH edge and the rect then extends 240px further SOUTH, while the run itself
+# extends NORTH — the `- 240.0 * PX * 0.0` term is a dead expression (multiplied by
+# 0.0) that was clearly meant to shift it north and was neutered. Enumerated against
+# the real sim over segments CHOKE_START_SEG..12 at 10-unit offsets:
+#   choking rows enumerated              = 285
+#   rows the shipped 240x240 slab COVERS =  10   (3.5% — one boundary row per segment)
+#   rows it MISSES                       = 275
+#     ...of which it is drawn SOUTH of   = 275
+# So it marks 3.5% of the wall and paints 240px of near-opaque dark over open,
+# walkable ground on the rest. That is why it reads as a lighting artifact rather
+# than as geography: it IS unattached to any geometry.
+#
+# THE FIX IS A PLATEAU, NOT A BLOB, and this deliberately overturns the earlier
+# soft-card attempt. assets/art/fx/fx_soft_spot.png is a RADIAL falloff card —
+# measured here: alpha 255 at the exact centre, 63 at quarter-x, 0 at every edge,
+# mean alpha 0.1293, only 7.05% of pixels above half. Stretched across a 216x120 rect
+# it deposits 0.1798 of the ink the caller asked for, which fails the ink arm below
+# (floor 0.4675) and is bit-identical to that arm's control B. The cap the same
+# attempt applied (GROUND_SLAB_MAX_ALPHA 0.55) was the wrong theory of the defect too:
+# the reviewer complained about the EDGE, not the DENSITY, and capping density cost
+# the lane seal 88% of its contrast (Backlog:1473) and the trench floor 61%
+# (Backlog:1476) while a 1px stroke got capped for no reason (Backlog:1912). So:
+# full-alpha core, an inward feather ramp, and an UNCAPPED boundary stroke. Feather
+# INWARD, never outward — nothing may be painted outside the collided rect, because
+# in this repo terrain art == collision.
+#
+# Three arms, and the SET of functions arm 1 walks is derived from _draw's own body,
+# so a 31st world-ground function joins the ratchet the day it lands.
+
+func _world_ground_funcs(src: String) -> Array:
+	## Every function in the world-ground layer: the ordered _draw_* calls _draw()
+	## makes between _draw_terrain() and _draw_players(), plus the ones _draw_terrain
+	## itself tails into. Derived, never typed — the point of the ratchet.
+	var out: Array = []
+	var ds := src.find("func _draw() -> void:")
+	if ds < 0:
+		return out
+	var de := src.find("\nfunc ", ds + 1)
+	var dbody := src.substr(ds, (de if de > ds else src.length()) - ds)
+	var started := false
+	for m in RegEx.create_from_string("(?m)^\\s*(?:_draw_[a-z0-9_]+)\\(").search_all(dbody):
+		var nm := m.get_string().strip_edges().trim_suffix("(")
+		if nm == "_draw_terrain":
+			started = true
+		if not started:
+			continue
+		if nm == "_draw_players":
+			break
+		if not out.has(nm):
+			out.append(nm)
+	var ts := src.find("func _draw_terrain() -> void:")
+	if ts >= 0:
+		var te := src.find("\nfunc ", ts + 1)
+		var tbody := src.substr(ts, (te if te > ts else src.length()) - ts)
+		for m in RegEx.create_from_string("_draw_[a-z0-9_]+\\(").search_all(tbody):
+			var nm := m.get_string().trim_suffix("(")
+			if not out.has(nm):
+				out.append(nm)
+	return out
+
+
+func _filled_rects_in(src: String, fn: String) -> int:
+	## Comment-stripped count of FILLED draw_rect lines in one function. A line
+	## carrying `, false,` is a STROKE (draw_rect's `filled` arg) and does not count:
+	## a boundary LINE is authored signage, a filled PLANE is a debug volume.
+	var s := src.find("func %s(" % fn)
+	if s < 0:
+		return -1
+	var e := src.find("\nfunc ", s + 1)
+	var body := src.substr(s, (e if e > s else src.length()) - s)
+	var n := 0
+	for line in body.split("\n"):
+		var code := line.strip_edges()
+		if code.begins_with("#") or not code.contains("draw_rect("):
+			continue
+		if code.contains(", false,"):
+			continue
+		n += 1
+	return n
+
+
+func _slab_ink(ops: Array, sample: Rect2) -> Color:
+	## RASTERIZE a planned ground slab for real and return the ink it deposits over
+	## `sample`: `.a` is the mean coverage, `.rgb` the mean PREMULTIPLIED colour — i.e.
+	## exactly the two terms a GL capture's `dR = 255 * (premult_r - a * ground_r)`
+	## needs, with no assumption about what colour the ground under it happens to be.
+	##
+	## Soft ops are sampled through the ACTUAL fx_softspot image, so a RADIAL card can
+	## never be scored as if it were a body. That is the whole point: the retired
+	## version of this seam masked every zone with fx_softspot stretched across the
+	## rect, and since that card is a radial falloff (measured on this tree: mean alpha
+	## 33/255 = 12.9% of nominal, only 7.05% of its pixels above half) it deposited
+	## 0.1798 of a licensed 0.55. The lane seal's three-state cycle collapsed and every
+	## geometric arm stayed green through it, because "is it soft" and "can you still
+	## see it" are different questions.
+	var soft_img: Image = Art.tex("fx_softspot").get_image()
+	var sw := soft_img.get_width()
+	var sh := soft_img.get_height()
+	var acc_a := 0.0
+	var acc_r := 0.0
+	var acc_g := 0.0
+	var acc_b := 0.0
+	var n := 0
+	for py in range(int(sample.position.y), int(sample.position.y + sample.size.y)):
+		for pxx in range(int(sample.position.x), int(sample.position.x + sample.size.x)):
+			var p := Vector2(float(pxx) + 0.5, float(py) + 0.5)
+			var a := 0.0
+			var cr := 0.0
+			var cg := 0.0
+			var cb := 0.0
+			for op in ops:
+				var box: Rect2 = op["box"]
+				var col: Color = op["col"]
+				var src_a := 0.0
+				match String(op["k"]):
+					"soft":
+						if box.has_point(p):
+							var u := int(clampf((p.x - box.position.x) / maxf(box.size.x, 0.001), 0.0, 0.999) * float(sw))
+							var v := int(clampf((p.y - box.position.y) / maxf(box.size.y, 0.001), 0.0, 0.999) * float(sh))
+							src_a = col.a * soft_img.get_pixel(u, v).a
+					"stroke", "feather":
+						var half := maxf(float(op["w"]), 1.0) * 0.5
+						if box.grow(half).has_point(p) and not box.grow(-half).has_point(p):
+							src_a = col.a
+					_:
+						if box.has_point(p):
+							src_a = col.a
+				if src_a <= 0.0:
+					continue
+				cr = col.r * src_a + cr * (1.0 - src_a)
+				cg = col.g * src_a + cg * (1.0 - src_a)
+				cb = col.b * src_a + cb * (1.0 - src_a)
+				a = src_a + a * (1.0 - src_a)
+			acc_a += a
+			acc_r += cr
+			acc_g += cg
+			acc_b += cb
+			n += 1
+	var f := 1.0 / maxf(float(n), 1.0)
+	return Color(acc_r * f, acc_g * f, acc_b * f, acc_a * f)
+
+
+func _lane_seal_plans(ms: Script) -> Dictionary:
+	## The THREE shipped lane-seal states, planned through the shipped seam at the
+	## widest real seal geometry (216x120 — SimWorld.LANE_SEAL_DEPTH against the left
+	## flank). Colours and alphas copied from _draw_lane_seals' own call sites. All
+	## three states are planned DIRECTLY, so this arm is state-exhaustive: there is no
+	## tick sampling and therefore no window to compare against the defect's length.
+	var r := Rect2(0.0, 0.0, 216.0, 120.0)
+	return {
+		"rect": r,
+		"sealed": ms.ground_slab_ops(r, Color(0.17, 0.15, 0.13, 0.92), Color(0.42, 0.40, 0.34, 0.9)),
+		"warn": ms.ground_slab_ops(r, Color(0.85, 0.55, 0.15, 0.22), Color(0.95, 0.62, 0.20, 0.85)),
+		"scar": ms.ground_slab_ops(r, Color(0.20, 0.18, 0.16, 0.16), Color(0.35, 0.32, 0.27, 0.35)),
+	}
+
+
+func test_ground_zone_tints_keep_their_read_after_soft_masking() -> void:
+	# The soft-mask seam (test_world_ground_tints_are_soft_masked_not_raw_quads) is
+	# free to take the LID off a ground tint. It is not free to take the ZONE off the
+	# screen, and the geometric arms over there structurally cannot tell the two apart.
+	#
+	# Measured, GL capture at 640x360, mean R over a 140x80 sample inside the seal rect
+	# vs an equal sample of adjacent open ground on the same rows:
+	#
+	#            HEAD    radial-card seam    this seam
+	#   SEALED   -50           -6              -50
+	#   WARN     +30          +12              +30
+	#   SCAR      -3           +2               -3
+	#
+	# SEALED and SCAR 8 R-points apart is not a learnable three-state cycle; it is the
+	# "reverted your step with nothing on screen" bug _draw_lane_seals was written to
+	# fix, shipped again under a nicer docstring. This arm is deliberately stated in
+	# COVERAGE, not in dR: coverage is a property of the plan alone, so it needs no
+	# assumption about the colour of the sand underneath and cannot rot when the
+	# terrain palette moves.
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("ground_slab_ops"), "the soft-mask planner is a named, testable helper")
+	if not ms.has_method("ground_slab_ops"):
+		return
+	var consts: Dictionary = ms.get_script_constant_map()
+	Runner.T.ok(not consts.has("GROUND_SLAB_MAX_ALPHA"),
+		("no blanket alpha CAP survives: the defect was the razor EDGE, not the density,"
+			+ " and capping density cost the lane seal 88% of its contrast (dR -50 -> -6)"
+			+ " and the trench floor 61% (dR -36 -> -14) for nothing"))
+	var bleed: float = float(consts["GROUND_SLAB_BLEED"])
+	var plans := _lane_seal_plans(ms)
+	var r: Rect2 = plans["rect"]
+	# The reviewer's window: 140x80 centred, which sits wholly inside the collided rect.
+	var core := Rect2(r.get_center() - Vector2(70.0, 40.0), Vector2(140.0, 80.0))
+	var sealed_ink := _slab_ink(plans["sealed"], core)
+	var warn_ink := _slab_ink(plans["warn"], core)
+	var scar_ink := _slab_ink(plans["scar"], core)
+	# 1. The seam must not EAT the caller's ink. The plateau's whole point is that the
+	#    body arrives at exactly the alpha asked for and only the outer bleed ramps.
+	for st in [["sealed", sealed_ink, 0.92], ["warn", warn_ink, 0.22], ["scar", scar_ink, 0.16]]:
+		var want: float = float(st[2])
+		var got: float = (st[1] as Color).a
+		Runner.T.ok(got >= want * 0.85,
+			("%s: the plan DEPOSITS the ink it was asked for over the zone body"
+				+ " — %.4f of an asked %.2f (floor %.4f)") % [st[0], got, want, want * 0.85])
+	# 2. ...and the three states stay separated, which is the property the cycle's
+	#    learnability actually rests on. HEAD's spread was 0.92 / 0.22 / 0.16.
+	Runner.T.ok(sealed_ink.a - scar_ink.a >= 0.30,
+		("SEALED vs SCAR: blocked and walkable are separated by coverage"
+			+ " (%.4f vs %.4f, gap %.4f)") % [sealed_ink.a, scar_ink.a, sealed_ink.a - scar_ink.a])
+	Runner.T.ok(sealed_ink.a - warn_ink.a >= 0.20,
+		"SEALED vs WARN: the 45-tick tell is not the seal (%.4f vs %.4f)" % [sealed_ink.a, warn_ink.a])
+	Runner.T.ok(warn_ink.r - warn_ink.b >= 0.06,
+		("WARN reads AMBER, not grey — the pulse's hue survives the mask"
+			+ " (premultiplied r %.4f vs b %.4f)") % [warn_ink.r, warn_ink.b])
+	# SEALED must READ darker than SCAR on the ground it actually lands on. Stated as
+	# the rasterizer's own dR = 255 * (premult_r - a * ground_r), against a nominal
+	# sand reference — NOT as a bare premultiplied-r comparison. Over a black
+	# accumulator premult r rises with COVERAGE, so `sealed.r < scar.r` is true only
+	# while sealed's alpha is being crushed (it held under the retired cap, and
+	# inverts the moment the plateau delivers the density the caller asked for). It
+	# was measuring the cap, not the darkness.
+	var sand_r := 0.75
+	var d_sealed := 255.0 * (sealed_ink.r - sealed_ink.a * sand_r)
+	var d_scar := 255.0 * (scar_ink.r - scar_ink.a * sand_r)
+	Runner.T.ok(d_sealed < d_scar - 40.0,
+		("SEALED darkens the sand under it far harder than SCAR does"
+			+ " (dR %.1f vs %.1f against ground r %.2f)") % [d_sealed, d_scar, sand_r])
+	# 3. GRADIENT ARM — the reported defect itself. Sample 1px bands ENTIRELY INSIDE
+	#    r's north edge, never straddling it: a band that straddles a perfect step edge
+	#    averages to exactly half the interior (0.460 of 0.920 — measured), which sails
+	#    through any "edge < inside * 0.85" threshold. That measures straddle-averaging,
+	#    not gradient, and it is why the earlier attempt's feather arm could not detect
+	#    the defect it was written for (and why its own control A asserted 0.460 >= 0.782
+	#    and failed).
+	#
+	#    Measured, sealed 0.92 over 216x120, bleed 8:
+	#      j       0      1      2      3      4      5      6      7      8+
+	#      plateau 0.102  0.204  0.307  0.409  0.511  0.612  0.713  0.812  0.910
+	#      HEAD    0.920  0.920  0.920  0.920  0.920  0.920  0.920  0.920  0.920
+	var bands: Array = []
+	for j in range(0, int(bleed) + 3):
+		var band := Rect2(r.position + Vector2(4.0, float(j)), Vector2(r.size.x - 8.0, 1.0))
+		bands.append(_slab_ink(plans["sealed"], band).a)
+	Runner.T.ok(float(bands[0]) <= 0.92 * 0.25,
+		("the tint enters SOFT at the collided boundary instead of at full alpha"
+			+ " (first inside row %.4f, ceiling %.4f)") % [float(bands[0]), 0.92 * 0.25])
+	var rise_err := 0
+	for j in range(1, int(bleed)):
+		if float(bands[j]) <= float(bands[j - 1]) + 0.0001:
+			rise_err += 1
+	Runner.T.eq(rise_err, 0,
+		("...and it RAMPS strictly inward across the whole bleed rather than stepping"
+			+ " (%d non-rising rows of %d)") % [rise_err, int(bleed) - 1])
+	Runner.T.ok(float(bands[int(bleed)]) >= 0.92 * 0.95,
+		"...reaching the full asked density by the time it clears the %.0fpx bleed (%.4f)"
+			% [bleed, float(bands[int(bleed)])])
+	# Non-vacuity controls, both scored through the SAME rasterizer. The raw quad
+	# passes the ink arm and fails the gradient arm; the radial card does the exact
+	# opposite. A ratchet with only one of the two would have shipped one of the two bugs.
+	var legacy: Array = [{"k": "body", "box": r, "col": Color(0.17, 0.15, 0.13, 0.92), "w": 0.0}]
+	var legacy_ink := _slab_ink(legacy, core)
+	var legacy_first := _slab_ink(legacy,
+		Rect2(r.position + Vector2(4.0, 0.0), Vector2(r.size.x - 8.0, 1.0))).a
+	Runner.T.ok(legacy_ink.a > 0.9 and legacy_first > 0.92 * 0.25,
+		("control A: HEAD's raw 0.92 quad passes the INK arm (%.4f) and fails the GRADIENT"
+			+ " arm — its first inside row is already at full alpha (%.4f > %.4f)")
+			% [legacy_ink.a, legacy_first, 0.92 * 0.25])
+	var radial: Array = [{"k": "soft", "box": r.grow(bleed),
+		"col": Color(0.17, 0.15, 0.13, 0.55), "w": 0.0}]
+	var radial_ink := _slab_ink(radial, core)
+	Runner.T.ok(radial_ink.a < 0.55 * 0.85,
+		("control B: an fx_softspot card stretched across the zone deposits only %.4f"
+			+ " of a licensed %.4f — a radial falloff is a shadow, not a zone body, and"
+			+ " it fails the ink arm above") % [radial_ink.a, 0.55])
+
+
+func test_world_ground_tints_are_soft_masked_not_raw_quads() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var src := _view_src()
+	# --- ARM 1: no raw ground-tint fill anywhere in the world-ground layer.
+	var fns := _world_ground_funcs(src)
+	Runner.T.ok(fns.size() >= 30,
+		"the world-ground function set is derived from _draw's own body (%d functions)" % fns.size())
+	var total := 0
+	for f in fns:
+		total += maxi(_filled_rects_in(src, f), 0)
+	# 47 before the fix; 6 raw ground-tint PLANES retired (1 choke slab, 3 lane-seal
+	# slabs, 1 rubble tint, 1 trench floor). Not a floor — an EQUALITY, so a new raw
+	# quad in any of the 30 functions fails here even if someone deletes an old one.
+	Runner.T.eq(total, 41,
+		"filled draw_rect count across the whole world-ground layer (%d)" % total)
+	# Per-function, so those exact fills cannot creep back one at a time. _draw_ledges
+	# is UNTOUCHED at 3 and asserted at 3 — proof this arm is not just "everything went
+	# to zero": its three rects are a 7px lip shadow, a 3px lit lip and a 2px underline,
+	# which are small crisp OBJECTS and correctly stay raw.
+	for pair in [["_draw_terrain", 0], ["_draw_lane_seals", 4], ["_draw_ruins_rubble", 1],
+			["_draw_trenches", 3], ["_draw_ledges", 3]]:
+		Runner.T.eq(_filled_rects_in(src, pair[0]), pair[1],
+			"%s filled draw_rect count" % pair[0])
+	Runner.T.ok(src.count("_ground_slab(") >= 7,
+		"the soft-mask seam is WIRED (def + executor + 6 call sites), not just a signature (%d)"
+			% src.count("_ground_slab("))
+	# --- ARM 2: the seam's own geometry, measured without a draw context.
+	Runner.T.ok(ms.has_method("ground_slab_ops"), "the soft-mask planner is a named, testable helper")
+	if not ms.has_method("ground_slab_ops"):
+		return
+	var consts: Dictionary = ms.get_script_constant_map()
+	var bleed_c: float = float(consts["GROUND_SLAB_BLEED"])
+	var min_dim: float = float(consts["GROUND_SLAB_MIN_DIM"])
+	var bad := 0
+	var strokes := 0
+	var planes := 0
+	var crisp := 0
+	for w in [8.0, 40.0, 80.0, 120.0, 216.0, 296.0]:
+		for h in [4.0, 20.0, 48.0, 120.0, 240.0]:
+			for a in [0.10, 0.16, 0.30, 0.5, 0.55, 0.85, 0.92, 1.0]:
+				var r := Rect2(30.0, 40.0, w, h)
+				var m := minf(w, h)
+				for edge in [Color(0, 0, 0, 0), Color(0.42, 0.40, 0.34, 0.9)]:
+					var ops: Array = ms.ground_slab_ops(r, Color(0.17, 0.15, 0.13, a), edge)
+					var n_soft := 0
+					var n_fill := 0
+					var n_plane := 0
+					var prev_a := -1.0
+					for op in ops:
+						var k := String(op["k"])
+						if k == "soft":
+							n_soft += 1      # the retired radial card must never come back
+						elif k == "fill":
+							n_fill += 1
+							# a raw plane is licensed ONLY for a LINE/CHUNK, never a plane
+							if m >= min_dim:
+								bad += 1
+							if not (op["box"] as Rect2).is_equal_approx(r):
+								bad += 1
+						elif k == "plane":
+							n_plane += 1
+							# the full-alpha core must arrive UNCAPPED and strictly INSIDE r
+							if absf(float(op["col"].a) - a) > 0.0001:
+								bad += 1
+							if not r.encloses(op["box"]) or (op["box"] as Rect2).is_equal_approx(r):
+								bad += 1
+						elif k == "feather":
+							# rings rise strictly inward and never leave the collided rect
+							if not r.encloses((op["box"] as Rect2).grow(0.5)):
+								bad += 1
+							if float(op["col"].a) <= prev_a + 0.000001:
+								bad += 1
+							prev_a = float(op["col"].a)
+							if float(op["col"].a) > a + 0.0001:
+								bad += 1
+						elif k == "stroke":
+							strokes += 1
+							# UNCAPPED: the boundary line is authored signage
+							if absf(float(op["col"].a) - edge.a) > 0.0001:
+								bad += 1
+							if not (op["box"] as Rect2).is_equal_approx(r) \
+									or absf(float(op["w"]) - 1.0) > 0.0001:
+								bad += 1
+					if n_soft != 0:
+						bad += 1
+					if m < min_dim:
+						crisp += 1
+						if n_fill != 1 or n_plane != 0:
+							bad += 1     # a LINE/CHUNK stays crisp and is the sole body op
+					else:
+						planes += 1
+						if n_plane != 1 or n_fill != 0:
+							bad += 1     # a PLANE gets exactly one core, no raw fill
+					if edge.a > 0.0 and strokes == 0:
+						bad += 1
+	Runner.T.eq(bad, 0,
+		"every planned ground slab is a plateau: uncapped core, inward feather, crisp signage (%d violations)" % bad)
+	Runner.T.ok(strokes > 0 and planes > 0 and crisp > 0,
+		"...and the sweep exercised all three paths (%d strokes, %d planes, %d crisp lines)"
+			% [strokes, planes, crisp])
+	# Non-vacuity control: run the RETIRED models — HEAD's raw fill at 0.92 whose
+	# boundary IS the collision edge, and the radial card — through the same predicate
+	# and assert both are rejected.
+	var legacy_bad := 0
+	var big := Rect2(30.0, 40.0, 216.0, 120.0)
+	for op in [{"k": "fill", "box": big, "col": Color(0.17, 0.15, 0.13, 0.92), "w": 0.0},
+			{"k": "soft", "box": big.grow(bleed_c), "col": Color(0.17, 0.15, 0.13, 0.55), "w": 0.0}]:
+		var k := String(op["k"])
+		if k == "fill" and minf(big.size.x, big.size.y) >= min_dim:
+			legacy_bad += 1
+		if k == "soft":
+			legacy_bad += 1
+	Runner.T.eq(legacy_bad, 2,
+		("control: HEAD's raw 0.92 lane-seal quad AND the retired radial card are both"
+			+ " rejected by the arm above — so a green there means the predicate ran,"
+			+ " not that it matched nothing"))
+	# --- ARM 3: the choke wall's extent is DERIVED, and it is culled off-frame.
+	Runner.T.ok(ms.has_method("choke_slab_rect"), "the choke slab's extent is a named, testable helper")
+	# Loaded as a Script, not called as `SimWorld.x`: a direct static call to a method
+	# that does not exist yet is a PARSE error, which would take the whole suite down
+	# instead of failing this one assertion.
+	var sws: Script = load("res://src/sim/sim_world.gd")
+	Runner.T.ok(sws.has_method("choke_band_span"), "...and its band span comes from the sim")
+	if not ms.has_method("choke_slab_rect") or not sws.has_method("choke_band_span"):
+		return
+	var sim := SimWorld.new(0xC0FFEE, 1)
+	var px: float = float(consts["PX"])
+	var rows := 0
+	var derived_err := 0
+	var covered := 0
+	var head_covered := 0
+	var head_south := 0
+	var head_dy := 0.0
+	var offscreen_culled := 0
+	var bites := {}
+	var lens := {}
+	for seg in range(SimWorld.CHOKE_START_SEG, 13):
+		for off_u in range(0, 1000, 10):
+			var wy: int = -(seg * SimWorld.GATE_SPACING + off_u * Fixed.ONE)
+			var cb: Array = sim._choke_bounds(wy)
+			if cb[0] == SimWorld.WORLD_LEFT and cb[1] == SimWorld.WORLD_RIGHT:
+				continue
+			rows += 1
+			var span: Array = sws.choke_band_span(wy)
+			if span.is_empty():
+				derived_err += 1
+				continue
+			# The span must CONTAIN this row and be same-flank throughout.
+			var off: int = absi(wy) % SimWorld.GATE_SPACING
+			if off < span[0] or off > span[1]:
+				derived_err += 1
+			var left_bite: bool = cb[0] != SimWorld.WORLD_LEFT
+			for probe in [span[0], (int(span[0]) + int(span[1])) / 2, span[1]]:
+				var pb: Array = sim._choke_bounds(-(seg * SimWorld.GATE_SPACING + int(probe)))
+				if (pb[0] != SimWorld.WORLD_LEFT) != left_bite:
+					derived_err += 1
+				if pb[0] == SimWorld.WORLD_LEFT and pb[1] == SimWorld.WORLD_RIGHT:
+					derived_err += 1
+			# Camera placed so THIS row sits at screen y 180 — the same sample point
+			# _draw_terrain's scan=2 hits, so the pose is one the shipped loop reaches.
+			var cam_on: int = wy - 180 * Fixed.ONE
+			var r: Rect2 = ms.choke_slab_rect(cb, span, seg, cam_on)
+			var want_h: float = float(int(span[1]) - int(span[0])) * px
+			if absf(r.size.y - want_h) > 1.5:
+				derived_err += 1
+			if left_bite and absf(r.position.x) > 0.001:
+				derived_err += 1
+			if not left_bite and absf(r.position.x + r.size.x - 640.0) > 1.0:
+				derived_err += 1
+			var bite_px: float = float(cb[0] - SimWorld.WORLD_LEFT) * px if left_bite \
+				else float(SimWorld.WORLD_RIGHT - cb[1]) * px
+			bites[int(bite_px)] = true
+			lens[int(want_h)] = true
+			# Does the DERIVED slab actually mark the wall at THIS row? Probe the
+			# midpoint of the walled-off strip on the row's own screen line.
+			var mid_x: float = (float(SimWorld.WORLD_LEFT + cb[0]) * 0.5) * px if left_bite \
+				else (float(int(cb[1]) + SimWorld.WORLD_RIGHT) * 0.5) * px
+			var probe_pt := Vector2(mid_x, 180.0)
+			if r.grow(1.0).has_point(probe_pt):
+				covered += 1
+			# HEAD's model for the same row: a fixed 240x240 anchored on the band's
+			# SOUTH edge (`_to_screen(0, wy3 + (seg_off - CHOKE_OFF_LO))`, which resolves
+			# to off == lo) and drawn 240px further SOUTH, at x 0 or 400, with no y cull.
+			var seg_off: int = absi(wy) % SimWorld.GATE_SPACING
+			var band_top := roundf(float(wy + (seg_off - SimWorld.CHOKE_OFF_LO) - cam_on) * px)
+			var head := Rect2(0.0 if left_bite else 400.0, band_top, 240.0, 240.0)
+			if head.has_point(probe_pt):
+				head_covered += 1
+			elif head.position.y > 180.0:
+				head_south += 1
+			head_dy = maxf(head_dy, absf(240.0 - want_h))
+			# ...and the cull: park the camera a whole band south of the slab.
+			var cam_off: int = -(seg * SimWorld.GATE_SPACING + int(span[1])) + 900 * Fixed.ONE
+			var r_off: Rect2 = ms.choke_slab_rect(cb, span, seg, cam_off)
+			if r_off == Rect2():
+				offscreen_culled += 1
+			else:
+				derived_err += 1
+	# WINDOW: exhaustive over segments CHOKE_START_SEG..12 at 10-unit offsets, which is
+	# the full hashed variety the predicate produces (285 rows on this tree). Not a
+	# sample — there is no longer instance of the defect to under-reach.
+	Runner.T.ok(rows >= 250, "arm 3 enumerates the choking rows, it does not sample (%d rows)" % rows)
+	Runner.T.ok(bites.size() >= 5 and lens.size() >= 5,
+		"...and the enumeration covers the hashed variety it exists to catch (%d bites, %d band lengths)"
+			% [bites.size(), lens.size()])
+	Runner.T.eq(derived_err, 0, "the choke slab is derived from the sim's own bounds (%d mismatches)" % derived_err)
+	Runner.T.eq(covered, rows,
+		"the derived slab MARKS the wall on every choking row (%d of %d)" % [covered, rows])
+	Runner.T.eq(offscreen_culled, rows, "every fully-off-frame band yields an empty rect (%d of %d)"
+		% [offscreen_culled, rows])
+	# Control: the retired hard-coded 240x240 marks 10 of 285 rows (3.5% — only each
+	# segment's boundary row) and is drawn SOUTH of the other 275, i.e. onto the open
+	# side of the squeeze. If this control ever goes green, arm 3 has stopped being
+	# able to see the defect.
+	Runner.T.ok(head_covered * 20 < rows,
+		("control: the retired fixed 240x240 slab marks only %d of %d choking rows (%.1f%%)"
+			+ " — it was anchored on the band's SOUTH edge and drawn 240px further south")
+			% [head_covered, rows, 100.0 * float(head_covered) / maxf(float(rows), 1.0)])
+	Runner.T.ok(head_south > 0 and head_dy > 0.0,
+		("control: ...and on %d of them it lands entirely SOUTH of the row, missing the real"
+			+ " run by up to %.0fpx tall — so a green above means arm 3 can still see the defect")
+			% [head_south, head_dy])
