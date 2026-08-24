@@ -20,9 +20,9 @@
 ![Tests](https://img.shields.io/badge/tests-1166%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
-![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
+![Milestone](https://img.shields.io/badge/milestone-1.0%20%C2%B7%20launch-gold)
 ![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
-![Release](https://img.shields.io/badge/release-v0.3.0%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
+![Release](https://img.shields.io/badge/release-v1.0.0%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -55,7 +55,7 @@ posed sim states, no mockups, no concept art.</sub>
 
 </div>
 
-> ⚠️ **Status: P3, playable start→finish.** Campaign runs studio splash → Foundry
+> ⚠️ **Status: 1.0 — launch.** Campaign runs studio splash → Foundry
 > Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
 > Select · Daily Run), and the feel stack is real. Art is **owned procedural art
 > (`tools/gen_*.py`) + bespoke generated boss/vehicle/desert pieces** over a Kenney-CC0
@@ -76,7 +76,7 @@ posed sim states, no mockups, no concept art.</sub>
 
 ## 📥 Download & Play
 
-**[⬇️ Latest release — v0.3.0](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
+**[⬇️ Latest release — v1.0.0](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
 
 | 🖥️ Platform | 📦 File | 📏 | 📝 |
 |---|---|---|---|
@@ -100,6 +100,7 @@ gitGraph
    commit id: "v0.2.5 · rebrand"
    commit id: "history purge"
    commit id: "v0.3.0 · public" tag: "v0.3.0"
+   commit id: "v1.0.0 · launch" tag: "v1.0.0"
 ```
 
 | 🏷️ | 📅 | 🎯 What it marks |
@@ -108,6 +109,7 @@ gitGraph
 | `v0.2.0` | 2026-07-16 | **P3 declared** — the README stops describing a prototype and starts describing the game |
 | `v0.2.5` | 2026-07-21 | **Commander In Chief** — the rebrand + animated boot splash |
 | `v0.3.0` | 2026-07-27 | **First public release** — clean history, binaries for three platforms |
+| `v1.0.0` | 2026-08-24 | **1.0 launch** — safe-area docs + HUD/menu 1.0 sweep, ultrawide pillarbox verified |
 
 </details>
 
@@ -426,6 +428,27 @@ tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_a
                      screenshots.gd · smoke.gd · validate_replay.gd
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
+
+---
+
+## 🖥️ Viewport & Safe Area
+
+Design viewport is **640x360** (`project.godot:31` `window/size/viewport_width|height` = 640×360, `window/stretch/mode="viewport"` `scale_mode="integer"` `aspect="keep"`). The engine **keeps integer letterbox** — the playfield stays pixel-perfect; only chrome reflows.
+
+| Viewport | How it presents | Bars |
+|---|---|---|
+| 16:9 — **640x360**, 1280×720, 1920×1080 | Native — full window, no bars | None |
+| 21:9 — **3440x1440** | Centered 640x360 viewport at integer scale, pillarboxed | Black bars left/right |
+| 32:9 — **5120x1440** | Same — wider pillarbox, same centered playfield | Black bars left/right |
+| Portrait / ultrawide mismatch | Letterboxed top/bottom | Black bars top/bottom |
+
+**Safe-area rule (responsive-ui):** HUD and menu chrome never sit on black bars or under a notch. Both resolve the **safe-area** as `get_visible_rect()` ∩ `DisplayServer.get_display_safe_area()` and apply it as `MarginContainer` safe insets:
+
+- `src/view/hud.gd:_hud_safe_band()` / `_resolve_hud_safe_band()` → `_safe_rect()` → `_update_safe_margins()` — band the HUD may occupy, then `HudOuter` `margin_left/right/top/bottom = safe inset + PLATE_ORIGIN (2px)`, so `band_rows()` and the plate stay centered in visible pixels.
+- `src/main.gd:_safe_viewport_rect()` / `_refresh_safe_rect()` / `_safe_band_rect()` — centered viewport rect (pillarbox excluded) and the rebake on `size_changed`, delegating to `HudIcons._safe_rect()` so the HUD's pip resolver stays the single source for notch + pillarbox. `_hud_icons._update_safe_margins()` is called on every resize.
+- `src/view/menu.gd` — `PRESET_FULL_RECT` + `size_changed → _on_menu_viewport_changed → queue_redraw()`, so the menu stays centered in visible pixels on ultrawide (21:9, 32:9).
+
+`get_visible_rect()` excludes the pillarbox bars; `get_display_safe_area()` insets for the OS notch / Dynamic Island (zero rect = no notch, no-op). `MarginContainer` insets keep every band, label plate, and world-space `claim_label_slot()` rect off the bars and off the notch — 16:9 is byte-identical (band 0..640, 2px inset), ultrawide and notched devices narrow the band and the insets grow.
 
 ---
 
