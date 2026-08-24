@@ -234,6 +234,7 @@ var _punch := 0.0                # camera zoom-punch on heavy impacts
 var _fade := 0.0                 # black fade-in on boot-into-combat
 var _duck := 0.0                 # music-duck under heavy hits
 var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
+var _concussion_p := 0           # WHOSE ringing ears — index into sim.players; see _concussion_focus_uv
 var _blast_warp := 0.0           # brief heat-shock screen warp on marquee detonations
 var _cinematic := 0.0            # letterbox envelope for boss intro / victory beats
 var _boss_bar_slots := 0         # top-center bars drawn this frame (banner ducks below them)
@@ -1465,12 +1466,25 @@ func _process(_delta: float) -> void:
 	# REDUCE MOTION: the strongest motion effect in the game (wobble + radial blur
 	# + chroma) was the one screen-feel channel that missed the _motion pass. The
 	# 0.25 floor mirrors the flash-alpha floor — a faint 'hurt' read, no warp.
-	var amt := maxf(_concussion, _blast_warp) * maxf(_motion, 0.25)
+	var motion_gate := maxf(_motion, 0.25)
+	var conc := _concussion * motion_gate
+	var warp := _blast_warp * motion_gate
+	var amt := maxf(conc, warp)
 	var on := amt > 0.001
 	_screen_fx_rect.visible = on
 	if on:
 		_screen_fx_mat.set_shader_parameter("concussion", amt)
 		_screen_fx_mat.set_shader_parameter("clock", _water_clock)
+		# TWO consumers, ONE shader, OPPOSITE intents. The concussion channel wants
+		# the warp to OPEN UP around the fallen soldier — he is what the player is
+		# squinting at to see whether he got back up — so it ships a focus point and
+		# a peripheral ramp. The blast heat-shock wants the exact opposite: a marquee
+		# detonation should punch hardest where it went off, and softening its middle
+		# would just make it mush. `spare` crossfades between them so the louder
+		# channel owns the look: 1.0 = full ramp (pure concussion), 0.0 = the flat,
+		# pre-ramp whole-frame warp (blast at or above the concussion level).
+		_screen_fx_mat.set_shader_parameter("focus", _concussion_focus_uv())
+		_screen_fx_mat.set_shader_parameter("spare", clampf((conc - warp) / amt, 0.0, 1.0))
 	# CRT scanlines surge darker on a big hit and ease back as the freeze decays —
 	# reuses the already-drawn scan quad (zero added fillrate). Baseline 0.08 = the
 	# shader default, so at rest the look is unchanged. Null when the scan quad is
@@ -1846,6 +1860,7 @@ func _reset() -> void:
 	_fade = 0.0
 	_duck = 0.0
 	_concussion = 0.0
+	_concussion_p = 0
 	_music_hold = 0
 	_tension = 0.0
 	_heat = [0.0, 0.0]
@@ -3152,7 +3167,12 @@ func _consume_events() -> void:
 				_punch = maxf(_punch, 0.14)
 				_buzz(1.0, ev.get("p", 0), true)   # the fallen player's OWN pad, not their squadmate's
 				_duck = 1.0
-				_concussion = maxf(_concussion, down_scale)   # the world goes underwater for a beat
+				# The world goes underwater for a beat — around HIM. Whoever's
+				# knockdown wins the maxf also owns the warp's focus point, so in
+				# 2P a P2 knockdown opens the ramp over P2, not over P1.
+				if down_scale >= _concussion:
+					_concussion_p = int(ev.get("p", 0))
+				_concussion = maxf(_concussion, down_scale)
 				var death_cause := _mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 				# Name the cause at the body while the directional wedge preserves
 				# where it came from. One compact line survives muted audio and does
@@ -3733,6 +3753,31 @@ static func down_self_scale(partner_standing: bool) -> float:
 	## screen mislabels it as their own wound while stealing the frames they need
 	## to go get the body. Pure + static so the co-op tests can pin it with no sim.
 	return 0.35 if partner_standing else 1.0
+
+
+func _concussion_focus_uv() -> Vector2:
+	## Screen-UV point the concussion warp opens up around: the soldier whose ears
+	## are ringing, NOT the geometric middle of the frame.
+	##
+	## There is no horizontal camera in this game. _to_screen() is
+	## `Vector2(round(fx * PX), round((fy - sim.camera_top) * PX))` — no x term at
+	## all — so a player's world x IS his screen x across the whole 16..624 play
+	## field (SimWorld.WORLD_LEFT/WORLD_RIGHT). "Near the middle of the screen" is
+	## therefore false about him: he is wherever he walked, routinely 200+ px off
+	## centre, and a ramp anchored at vec2(0.5) would spare a fixed disc of SCREEN
+	## while leaving the actual soldier smeared everywhere else. Measured at
+	## concussion 1.0 by tools/probe_concussion_hud.gd, screen-centred ramp: he
+	## keeps 0.72 of his strong edges at x=280 and 0.04 at x=60.
+	##
+	## In 2P this deliberately follows ONE player — whoever's knockdown owns the
+	## current concussion (_concussion_p, set at the trigger) — rather than the
+	## midpoint of both: two soldiers 400 px apart have a midpoint that is bare
+	## ground, and sparing bare ground spares neither of them.
+	if sim == null or _concussion_p < 0 or _concussion_p >= sim.players.size():
+		return Vector2(0.5, 0.5)
+	var p: Dictionary = sim.players[_concussion_p]
+	var s := _to_screen(p["x"], p["y"])
+	return Vector2(clampf(s.x / SCREEN_W, 0.0, 1.0), clampf(s.y / SCREEN_H, 0.0, 1.0))
 
 
 static func _rumble_merge(cur: float, amt: float) -> float:
@@ -4369,6 +4414,12 @@ func _ev_vest_break(ev: Dictionary) -> void:
 	_buzz(0.55, ev.get("p", 0), true)
 	_flash_alpha = maxf(_flash_alpha, 0.35)
 	_damage_vignette = maxf(_damage_vignette, 0.75)
+	# Same focus contract as the knockdown beat: the ramp opens around the player
+	# who took the hit. 0.7 here is the VEST-BREAK level, below the 1.0 a solo
+	# knockdown reaches — so a vest break during a live knockdown loses the maxf
+	# and must not steal the focus either.
+	if 0.7 >= _concussion:
+		_concussion_p = int(ev.get("p", 0))
 	_concussion = maxf(_concussion, 0.7)
 	_mark_hit_dir(ev["x"], ev["y"], ev.get("p", 0))
 	# The flak vest shatters — blue armor shards burst outward.
@@ -7638,11 +7689,26 @@ func _draw() -> void:
 	# The soldiers' pixels are RESERVED before anything claims a slot: deny toasts
 	# and ADRENALINE-style callouts anchor at the player's exact position, so the
 	# worst case is structural. Alive or downed (a body on the floor still draws);
-	# a boarded player renders AS the tank and takes no reservation.
+	# a boarded player renders AS the tank, so the HULL is reserved in his place —
+	# dropping the reservation on boarding (the bare `continue` this replaced) left the
+	# arbiter believing the tank's pixels were free, and LOW FUEL is anchored ON that
+	# hull. One rect per crewed hull, not one per rider: the gunner's in_tank names the
+	# same tank as the driver's, and the deck gunner sprite is contained in the hull
+	# footprint anyway (see vehicle_label_exclusion). Off-frame hulls are culled so the
+	# reserve list stays short. _player_label_rects stays ON-FOOT-ONLY: a fork signpost
+	# dissolving for a soldier it would bury is right; dissolving for a tank is not.
 	_player_label_rects.clear()
+	var crewed_hulls := {}
 	for i in sim.players.size():
 		var pp: Dictionary = sim.players[i]
 		if pp["in_tank"] >= 0:
+			var hti: int = pp["in_tank"]
+			if not crewed_hulls.has(hti) and hti < sim.tanks.size():
+				crewed_hulls[hti] = true
+				var hc := _to_screen(sim.tanks[hti]["x"], sim.tanks[hti]["y"])
+				var hrect := vehicle_label_exclusion(hc)
+				if hrect.intersects(Rect2(0.0, 0.0, 640.0, 360.0)):
+					_label_slots.append(hrect)
 			continue
 		var prect := player_label_exclusion(_to_screen(pp["x"], pp["y"])
 			+ (_recoil[i] if i < _recoil.size() else Vector2.ZERO)
@@ -7998,6 +8064,71 @@ func _compute_sector_march() -> float:
 	return clampf(float(sim.wave) / 12.0, 0.0, 1.0)
 
 
+## Softest ground tint the world layer is allowed to paint, and how far the soft card
+## overhangs the extent it marks. A flat, untextured, hard-edged draw_rect at ground
+## SIZES is the "unmasked shadow quad" read: a razor rectangle of near-opaque fill
+## sitting on top of terrain, litter and cacti (the ground tints all draw AFTER the
+## cactus/scrub/litter pass). Above this ceiling the plane stops reading as ground and
+## starts reading as a lid — the worst offender before this seam landed was the sealed
+## lane at alpha 0.92 over 216x120px, 9.4% of the frame.
+const GROUND_SLAB_MAX_ALPHA := 0.55
+const GROUND_SLAB_BLEED := 8.0
+
+
+## Pure PLANNER, so the ratchet can measure the shipped geometry with no draw context
+## (test_view_honesty::test_world_ground_tints_are_soft_masked_not_raw_quads). Returns
+## the ops _ground_slab executes: one SOFT card on fx_softspot — the repo's own baked
+## falloff, already the idiom for ridge mounds and the endless haze — grown past the
+## collided rect so the tint DIES outside it instead of ending on its border, plus an
+## optional 1px STROKE at the exact collided rect. This deliberately overturns the
+## opacity and the hard edge of choices that were intentional ("so the cycle is
+## learnable", "art == collision"): the ZONES stay exactly where the sim collides them,
+## marked by a boundary LINE, which is authored signage. A filled PLANE is a debug volume.
+static func ground_slab_ops(r: Rect2, fill: Color, edge := Color(0, 0, 0, 0)) -> Array:
+	var ops: Array = [{"k": "soft", "box": r.grow(GROUND_SLAB_BLEED),
+		"col": Color(fill.r, fill.g, fill.b, minf(fill.a, GROUND_SLAB_MAX_ALPHA)), "w": 0.0}]
+	if edge.a > 0.0:
+		ops.append({"k": "stroke", "box": r,
+			"col": Color(edge.r, edge.g, edge.b, minf(edge.a, GROUND_SLAB_MAX_ALPHA)), "w": 1.0})
+	return ops
+
+
+func _ground_slab(r: Rect2, fill: Color, edge := Color(0, 0, 0, 0)) -> void:
+	if r.size.x <= 0.0 or r.size.y <= 0.0:
+		return
+	for op in ground_slab_ops(r, fill, edge):
+		if op["k"] == "soft":
+			draw_texture_rect(Art.tex("fx_softspot"), op["box"], false, op["col"])
+		else:
+			draw_rect(op["box"], op["col"], false, float(op["w"]))
+
+
+## The choke wall's slab, DERIVED. What shipped here was a hard-coded 240x240 quad —
+## 25.0% of the 640x360 frame — carrying a dead `- 240.0 * PX * 0.0` offset, anchored on
+## the band's SOUTH edge and drawn 240px further SOUTH, i.e. entirely on the open side of
+## the squeeze. Measured over all 115 enumerated choking rows of segments 2-12: it
+## covered ZERO of the wall it marks on 115/115, left up to 69,660 px2 of wall unmarked,
+## missed the real bite by up to 24px wide and the real run by up to 129px tall, and with
+## no y cull at all drew 35 of those rows fully off screen. Both edges now come from the
+## sim's own predicate: the flank bite out of _choke_bounds, the run out of
+## choke_band_span. Returns the empty rect when the run is entirely off frame.
+static func choke_slab_rect(cb: Array, span: Array, seg: int, cam_top: int) -> Rect2:
+	if span.is_empty():
+		return Rect2()
+	var left_bite: bool = int(cb[0]) != SimWorld.WORLD_LEFT
+	var x0 := 0.0
+	var x1 := 640.0
+	if left_bite:
+		x1 = float(cb[0]) * PX
+	else:
+		x0 = float(cb[1]) * PX
+	var y_n := roundf(float(-(seg * SimWorld.GATE_SPACING + int(span[1])) - cam_top) * PX)
+	var y_s := roundf(float(-(seg * SimWorld.GATE_SPACING + int(span[0])) - cam_top) * PX)
+	if y_s < 0.0 or y_n > 360.0:
+		return Rect2()
+	return Rect2(x0, y_n, x1 - x0, y_s - y_n)
+
+
 func _draw_terrain() -> void:
 # Choke walls (7v corridor modulation): the biting flank renders as rubble
 	# over a dark base with a hatched read — the lane narrowing is authored
@@ -8008,15 +8139,19 @@ func _draw_terrain() -> void:
 			var cb: Array = sim._choke_bounds(wy3)
 			if cb[0] == SimWorld.WORLD_LEFT and cb[1] == SimWorld.WORLD_RIGHT:
 				continue
-			var left_bite: bool = cb[0] != SimWorld.WORLD_LEFT
-			var seg_off: int = absi(wy3) % SimWorld.GATE_SPACING
-			var band_top := _to_screen(0, wy3 + (seg_off - SimWorld.CHOKE_OFF_LO)).y
-			var wall_x := 0.0 if left_bite else 400.0
-			draw_rect(Rect2(wall_x, band_top - 240.0 * PX * 0.0, 240.0, 240.0), Color(0.12, 0.11, 0.09, 0.85))
+			var seg3: int = absi(wy3) / SimWorld.GATE_SPACING
+			var slab := choke_slab_rect(cb, SimWorld.choke_band_span(wy3), seg3, sim.camera_top)
+			if slab.size.x <= 0.0 or slab.size.y <= 0.0:
+				continue   # run entirely off frame (the cull HEAD had none of) — keep scanning,
+				           # a later scan row may sit in a different run that IS on screen
+			_ground_slab(slab, Color(0.12, 0.11, 0.09, 0.85))
+			# The rubble rides the DERIVED slab too. Anchoring it off the old south-edge
+			# baseline while the wall moved would strew the rocks across the open lane.
 			for rb in 12:
-				var rh4 := Art.cell_hash(int(wall_x) + rb * 31, absi(wy3) / SimWorld.GATE_SPACING + rb)
+				var rh4 := Art.cell_hash(int(slab.position.x) + rb * 31, seg3 + rb)
 				_spr("rock1" if rh4 % 2 == 0 else "rock2",
-					Vector2(wall_x + 20.0 + float(rh4 % 200), band_top + 10.0 + float((rh4 / 7) % 220)),
+					slab.position + Vector2(20.0 + float(rh4 % maxi(int(slab.size.x) - 24, 1)),
+						10.0 + float((rh4 / 7) % maxi(int(slab.size.y) - 14, 1))),
 					float(rh4 % 628) / 100.0, 2.0, Color(0.5, 0.5, 0.48))
 			break
 	# Ridge mounds (2v elevation, view-only): 2-tone dirt swells break the
@@ -8393,7 +8528,11 @@ func _draw_lane_seals() -> void:
 		var r := Rect2(Vector2(x0, y_n), Vector2(x1 - x0, y_s - y_n))
 		var lip_x := edge - 3.0 if left else edge
 		if SimWorld.lane_sealed(sim.tick_count, band):
-			draw_rect(r, Color(0.17, 0.15, 0.13, 0.92))
+			# The sealed slab was the class's worst quad: a near-opaque 0.92 fill over up
+			# to 216x120px, hard-edged, painted on top of the terrain and litter already
+			# there. Soft card + a 1px boundary at the exact AABB _lane_blocked collides
+			# — the zone does not move, only the lid comes off.
+			_ground_slab(r, Color(0.17, 0.15, 0.13, 0.92), Color(0.42, 0.40, 0.34, 0.9))
 			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(3.0, y_s - y_n)), Color(0.42, 0.40, 0.34, 0.9))
 			for db in 6:   # same debris idiom as _draw_ruins_rubble
 				var dh := Art.cell_hash(band * 911 + db * 29, db)
@@ -8402,10 +8541,10 @@ func _draw_lane_seals() -> void:
 					Vector2(4.0 + float(dh % 5), 3.0 + float(dh % 4))), Color(0.26, 0.23, 0.19, 0.9))
 		elif SimWorld.lane_warning(sim.tick_count, band):
 			var pulse := 0.22 if _motion < 0.5 else (0.10 + 0.20 * absf(sin(float(Engine.get_physics_frames()) * 0.35)))
-			draw_rect(r, Color(0.85, 0.55, 0.15, pulse))
+			_ground_slab(r, Color(0.85, 0.55, 0.15, pulse), Color(0.95, 0.62, 0.20, 0.5))
 			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(3.0, y_s - y_n)), Color(0.95, 0.62, 0.20, 0.85))
 		else:
-			draw_rect(r, Color(0.20, 0.18, 0.16, 0.16))
+			_ground_slab(r, Color(0.20, 0.18, 0.16, 0.16), Color(0.35, 0.32, 0.27, 0.35))
 			draw_rect(Rect2(Vector2(lip_x, y_n), Vector2(2.0, y_s - y_n)), Color(0.35, 0.32, 0.27, 0.35))
 
 
@@ -8452,7 +8591,8 @@ func _draw_ruins_rubble() -> void:
 			if pc.y < -40.0 or pc.y > 400.0:
 				continue
 			# Slow-zone floor tint (80x40 to match the AABB) + scattered chunks.
-			draw_rect(Rect2(pc + Vector2(-40.0, -20.0), Vector2(80.0, 40.0)), Color(0.28, 0.24, 0.2, 0.5))
+			_ground_slab(Rect2(pc + Vector2(-40.0, -20.0), Vector2(80.0, 40.0)),
+				Color(0.28, 0.24, 0.2, 0.5), Color(0.36, 0.31, 0.26, 0.45))
 			for db in 6:
 				var dh := Art.cell_hash(rh + db * 29, db)
 				draw_rect(Rect2(pc + Vector2(float(dh % 72) - 36.0, float((dh / 5) % 36) - 18.0),
@@ -8479,7 +8619,8 @@ func _draw_trenches() -> void:
 		# a darker bottom shadow to sell depth on a flat top-down view.
 		var w := 120.0
 		var h := 48.0
-		draw_rect(Rect2(pc + Vector2(-w / 2.0, -h / 2.0), Vector2(w, h)), Color(0.14, 0.15, 0.13, 0.55))
+		_ground_slab(Rect2(pc + Vector2(-w / 2.0, -h / 2.0), Vector2(w, h)),
+			Color(0.14, 0.15, 0.13, 0.55))
 		draw_rect(Rect2(pc + Vector2(-w / 2.0, -h / 2.0), Vector2(w, 4.0)), Color(0.34, 0.35, 0.3, 0.6))
 		draw_rect(Rect2(pc + Vector2(-w / 2.0, h / 2.0 - 4.0), Vector2(w, 4.0)), Color(0.05, 0.05, 0.05, 0.5))
 		for st in 3:
@@ -10680,6 +10821,24 @@ static func floattext_claim_rect(pivot: Vector2, w: float, size: int) -> Rect2:
 ## layout test measures the exact shipped geometry.
 static func player_label_exclusion(pos: Vector2) -> Rect2:
 	return Rect2(pos + Vector2(-12.0, -16.0), Vector2(24.0, 28.0))
+
+## The pixels a CREWED HULL denies to in-world labels. player_label_exclusion above
+## covers the soldier — and the moment he boards, _draw's `in_tank >= 0` skip dropped
+## that reservation and put NOTHING in its place, so the arbiter believed the tank's
+## pixels were free for the whole time a player was crewing it. Measured on the tree
+## before this landed: LOW FUEL (main.gd:9873, the one callout anchored ON the hull)
+## overlapped the tank it names on every sampled crewed-tank frame at both text scales.
+## Derived from the SAME measured footprint the contact shadow uses
+## (_vehicle_shadow_spec's alpha bbox x Art.draw_scale x VEHICLE_CONTACT call_scale), so
+## a sprite re-bake rescales the reservation instead of leaving it behind — the bunker
+## size_limit lesson. UNROTATED on purpose: the hull is a free lerped rotation
+## (main.gd:9846) and an AABB that swelled and shrank with the heading would make every
+## nearby label jitter. The 17.43x20.75 deck gunner (main.gd:11597) draws unrotated at
+## the same centre and is CONTAINED in this rect on both axes, so one reservation
+## retires both crew seats — test_a_boarded_player_keeps_his_reservation pins that.
+static func vehicle_label_exclusion(pos: Vector2, tex_name := "tank_body") -> Rect2:
+	var foot: Vector2 = _vehicle_shadow_spec(tex_name)["foot"]
+	return Rect2(pos - foot / 2.0, foot)
 
 ## The floattext band-floor clamp WITH the spawn punch banked in. The old clamp pinned
 ## the BASELINE at band_floor + size, but the punch (up to FLOAT_PUNCH_MAX) scales the

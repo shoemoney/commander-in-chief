@@ -2462,6 +2462,138 @@ func test_world_labels_never_cover_the_player() -> void:
 		"a signpost clear of the player stays put")
 
 
+func test_a_boarded_player_keeps_his_reservation() -> void:
+	# The sibling above reserves the ON-FOOT soldier. The moment he boards, _draw's
+	# `if pp["in_tank"] >= 0: continue` dropped that reservation and put NOTHING in its
+	# place — so for the whole time a player is crewing a tank the arbiter believes the
+	# hull's pixels are empty. Measured on HEAD before the fix: the LOW FUEL plate (the
+	# one callout anchored ON the hull, main.gd:9873) landed on the tank it names on
+	# 320/320 sampled crewed-tank frames at BOTH text scales, and the arbiter had no
+	# reason to move it. Same two-half shape as the sibling — a WIRING scrape (this is
+	# the exact shape claim_label_slot shipped in: a signature, a docstring and
+	# `return rect`) plus a GEOMETRY sweep — with two extra halves this defect needs:
+	# CONTAINMENT (one hull rect must retire BOTH crew seats) and a LIVE SIM (no tool in
+	# the tree has ever rendered a deck gunner; screenshots.gd and probe_tank_revive.gd
+	# both seat a lone driver, so the second seat has never been on a screen we looked at).
+	var ms: Script = load("res://src/main.gd")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(ms.has_method("vehicle_label_exclusion"),
+		"the crewed-hull reservation is a named, testable helper")
+	if not ms.has_method("vehicle_label_exclusion"):
+		return
+	Runner.T.ok(src.count("vehicle_label_exclusion(") >= 2,
+		"the hull reservation is WIRED into _draw (def + call site), not just a signature (%d sites)"
+			% src.count("vehicle_label_exclusion("))
+	var dstart := src.find("func _draw() -> void:")
+	Runner.T.ok(dstart >= 0, "found _draw")
+	var dbody := ""
+	if dstart >= 0:
+		var dend := src.find("\nfunc ", dstart + 1)
+		dbody = src.substr(dstart, (dend if dend > dstart else src.length()) - dstart)
+	# Per-line, comment-stripped, and LINKED: the rect built from vehicle_label_exclusion
+	# must be the one that reaches the ARBITER's list. A mutation that keeps the call but
+	# appends it to a side list (or appends some other rect) has to fail here — that is
+	# exactly the shape claim_label_slot shipped in. Bind the name the helper's result is
+	# assigned to, then demand THAT name is what _label_slots.append receives.
+	var hull_var := ""
+	for line in dbody.split("\n"):
+		var code := line.strip_edges()
+		if code.begins_with("#") or not code.contains("vehicle_label_exclusion("):
+			continue
+		var eq := code.find(" := ")
+		if eq > 0 and code.find("vehicle_label_exclusion(") > eq:
+			hull_var = code.substr(0, eq).strip_edges().trim_prefix("var ")
+			break
+		if code.contains("_label_slots.append(vehicle_label_exclusion("):
+			hull_var = "vehicle_label_exclusion("   # inlined at the append — also fine
+			break
+	Runner.T.ok(hull_var != "", "_draw builds a rect from vehicle_label_exclusion")
+	var reserves := false
+	for line in dbody.split("\n"):
+		var code := line.strip_edges()
+		if not code.begins_with("#") and hull_var != "" \
+				and code.contains("_label_slots.append(" + hull_var):
+			reserves = true
+			break
+	Runner.T.ok(reserves,
+		"_draw reserves the crewed hull IN the arbiter's _label_slots, not only in a side list")
+	# --- CONTAINMENT: one rect, both seats. The deck gunner (main.gd:11597) draws
+	# UNROTATED at tank centre + (0,-7) at spr_scale 0.42; the hull reservation is the
+	# measured contact-shadow footprint. Both rebuilt from ART here, so a re-bake that
+	# grows the crewman past the hull fails loudly instead of silently un-covering him.
+	var c := Vector2(300.0, 200.0)
+	var hull_rect: Rect2 = ms.vehicle_label_exclusion(c)
+	var used := Art.player_anim("idle").get_image().get_used_rect()
+	var gs: float = 0.42 * Art.draw_scale("player1")
+	var gsz := Vector2(float(used.size.x) * gs * float(ms.get_script_constant_map()["PLAYER_POSE_X_STRETCH"]),
+		float(used.size.y) * gs)
+	var gunner_rect := Rect2(c + Vector2(0.0, -7.0) - gsz / 2.0, gsz)
+	Runner.T.ok(hull_rect.encloses(gunner_rect),
+		"the hull reservation encloses the deck gunner at every heading — hull %s vs gunner %s"
+			% [str(hull_rect), str(gunner_rect)])
+	# --- GEOMETRY: the class, over every shipped world-label string, both text scales,
+	# a hull centre swept across the frame. Control arm (taken == []) is HEAD's behaviour
+	# and is asserted NON-ZERO so the sweep proves it can still see the defect.
+	var labels := _shipped_world_labels()
+	var was_scale: float = Art.text_scale
+	var hits := 0
+	var control := 0
+	for scale in [1.0, float(ms.get_script_constant_map()["TEXT_SCALE_MAX"]) / 100.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz: int = Art.fs(8)
+		for gx in range(60, 581, 40):
+			for gy in range(60, 341, 40):
+				var tc := Vector2(gx, gy)
+				var hr: Rect2 = ms.vehicle_label_exclusion(tc)
+				var taken: Array[Rect2] = [hr]
+				var none: Array[Rect2] = []
+				for txt in labels:
+					var tw: float = Art.tw(txt, sz)
+					# LOW FUEL's own anchor: centred, baseline 26px above the hull centre.
+					var want: Rect2 = ms._label_plate_rect(tc.x - tw / 2.0, tc.y - 26.0, tw, sz)
+					if ms.claim_label_slot(want, taken).grow(-0.5).intersects(hr.grow(-0.5)):
+						hits += 1
+						if hits <= 3:
+							Runner.T.ok(false,
+								"a callout lands on the hull it names: %s vs %s (scale %.2f, '%s')"
+									% [str(ms.claim_label_slot(want, taken)), str(hr), scale, txt])
+					if ms.claim_label_slot(want, none).grow(-0.5).intersects(hr.grow(-0.5)):
+						control += 1
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.eq(hits, 0,
+		"no arbitrated world label lands on a crewed hull (%d overlaps)" % hits)
+	Runner.T.ok(control > 0,
+		"control: with the hull UNreserved (HEAD's behaviour) the sweep still sees the defect (%d)"
+			% control)
+	# --- LIVE SIM: stage the two-seat crew the tooling has never drawn, and claim
+	# against the real boarded state rather than a posed rect.
+	var sim := SimWorld.new(0xC0FFEE, 2)
+	sim.tanks.append({
+		"x": 300 * Fixed.ONE, "y": -100 * Fixed.ONE,
+		"alive": true, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": 0, "crew_ring_ticks": -1,
+		"fire_cd": 0, "occupant": -1,
+	})
+	var ti := sim.tanks.size() - 1
+	for pi in 2:
+		sim.players[pi]["x"] = sim.tanks[ti]["x"]
+		sim.players[pi]["y"] = sim.tanks[ti]["y"]
+		Runner.T.ok(sim._try_board_tank(pi, sim.players[pi]), "player %d boards" % pi)
+	Runner.T.eq(sim.tanks[ti]["occupant"], 0, "player 0 drives")
+	Runner.T.eq(sim._tank_gunner(ti), 1, "player 1 rides as gunner")
+	var lc := Vector2(float(sim.tanks[ti]["x"]) / float(Fixed.ONE), 180.0)
+	var lhr: Rect2 = ms.vehicle_label_exclusion(lc)
+	var ltaken: Array[Rect2] = [lhr]
+	var lsz: int = Art.fs(8)
+	var ltw: float = Art.tw("LOW FUEL", lsz)
+	var lclaim: Rect2 = ms.claim_label_slot(
+		ms._label_plate_rect(lc.x - ltw / 2.0, lc.y - 26.0, ltw, lsz), ltaken)
+	Runner.T.ok(not lclaim.grow(-0.5).intersects(lhr.grow(-0.5)),
+		"LOW FUEL over a live two-seat crew clears the hull: %s vs %s" % [str(lclaim), str(lhr)])
+
+
 # --- c2 RATCHETS for the round-1 view fixes. Each one guards a bug that shipped GREEN:
 # the suite could not see it because nothing read the real predicate, the real gate, or the
 # real draw order. All three are read out of src/main.gd rather than re-modelled here — a
