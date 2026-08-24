@@ -2238,6 +2238,39 @@ func test_every_view_that_draws_the_broke_timer_asks_whether_the_rally_is_free()
 	Runner.T.ok(page.contains("ENDLESS"),
 		"the WAR CHEST page names the mode where the rally clock is the run ending (got '%s')" % page)
 
+	# ...and it must not sell the rally as a FLAT clock. In endless the free wait
+	# compounds on the same deaths curve the price does (SimWorld.broke_wait_ticks),
+	# so "A 5s rally puts you back in the fight" became a lie from the second death
+	# on. Both numbers come off the sim consts — the floor and the ceiling — so a
+	# retune of either can never strand the sentence.
+	var sim_consts: Dictionary = (SimWorld as Script).get_script_constant_map()
+	Runner.T.ok(sim_consts.has("BROKE_WAIT_MAX_MULT"),
+		"SimWorld exposes BROKE_WAIT_MAX_MULT — the ceiling the HOW-TO has to be able to quote")
+	var rally_lo: int = int(sim_consts["BROKE_RESPAWN_TICKS"]) / 60
+	var rally_hi: int = rally_lo * int(sim_consts.get("BROKE_WAIT_MAX_MULT", 1))
+	Runner.T.ok(page.contains("%ds" % rally_lo),
+		"the WAR CHEST page still quotes the %ds floor the rally starts on (got '%s')" % [rally_lo, page])
+	Runner.T.ok(rally_hi != rally_lo and page.contains("%ds" % rally_hi),
+		"...and the %ds ceiling it slows to in ENDLESS, so the clock is not sold as flat (got '%s')"
+			% [rally_hi, page])
+	# Derived, not typed — at BOTH copy sites. menu.gd ships the sentence twice
+	# (_howto_large_entries' list row and _howto_page_warchest's body block); a
+	# hand-typed "5s to 20s" in either one is exactly the drift this suite exists for.
+	var menu_src := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	var rally_sites := 0
+	var at := menu_src.find("rally puts you back")
+	while at >= 0:
+		rally_sites += 1
+		# The format args sit within a few lines of the sentence at both sites; a
+		# 400-char window is wide enough to reach them and far too narrow to catch
+		# an unrelated const mention elsewhere on the page.
+		var stmt := menu_src.substr(at, 400)
+		Runner.T.ok(stmt.contains("BROKE_RESPAWN_TICKS") and stmt.contains("BROKE_WAIT_MAX_MULT"),
+			"menu.gd rally-copy site #%d builds BOTH seconds from the sim consts, not from typed digits"
+				% rally_sites)
+		at = menu_src.find("rally puts you back", at + 1)
+	Runner.T.eq(rally_sites, 2, "both shipped rally-copy sites were found by the scrape")
+
 
 func test_the_controls_page_never_denies_the_flak_vest() -> void:
 	## menu.gd's CONTROLS row said "armor never stops them" of bullets. Measure the
@@ -3733,3 +3766,170 @@ class _RailMain extends Node2D:
 	var _record_fired := false
 	func bind_for_glyph(_a: String) -> int: return 0
 	func pad_bind_for_glyph(_a: String, _device := 0) -> int: return -1
+
+
+# ---------------------------------------------------------------------------
+# NO STRING IS DRAWN UNDER A SHRINKING CANVAS
+# ---------------------------------------------------------------------------
+# The seam ratchet behind test_main.gd's whole-pixel check. That test pins the
+# ONE producer's geometry; this one pins the CLASS, derived from source, so
+# tomorrow's producer is covered the day it lands.
+#
+# Art.text floors its position to whole pixels in LOCAL space (art.gd). A canvas
+# transform then maps those whole pixels to DEVICE pixels. At a scale below 1.0
+# the mapping is fractional, and PixelOperator8 is a bitmap face: a half-pixel
+# baseline splits the glyph's bottom scanline across two device rows at ~50% each.
+# E loses its bottom bar and reads as F; B loses its bowl and reads as F or R.
+# Shipped, and captured: the victory card's "BEST 143095   NEW BEST!" rendered as
+# "FFST 143Ø95  NEW BEST!" in tools/screenshots.gd's 06-victoly.png.
+#
+# Scale-UP is a different animal and is NOT banned: rasterised through a GL probe,
+# 1.28 turned 10 ink rows into 12 and 1.5 turned them into 15 — strokes thicken
+# unevenly, but no bar is ever removed and no letter changes identity. Only
+# scale-DOWN deletes a scanline. The two pop-in sites below are clamped at or
+# above 1.0 by construction, so they are allowlisted BY EXPRESSION — same
+# near-empty, written-justification discipline as run_tests.gd's ERROR_ALLOW.
+# Fix the cause; only add an entry with a measurement behind it.
+const TEXT_XFORM_SCALE_ALLOW := {
+	"Vector2.ONE * punch":
+		"main.gd _draw_banners splash pop-in. `punch = 1.0 + (BANNER_PUNCH_MAX - 1.0) * clampf(...)`"
+		+ " and the block is gated on `if punch > 1.0`, so it is 1.0..1.28 — scale-UP only"
+		+ " (measured: 10 ink rows -> 12 at 1.28, letter identity intact).",
+	"Vector2.ONE * fpunch":
+		"main.gd _draw_fx floattext toast. `fpunch = 1.0 + maxf(0.0, (FLOAT_PUNCH_MAX - 1.0) - t * 4.0)`,"
+		+ " so it is 1.0..1.5 — scale-UP only (same measurement: 15 ink rows at 1.5).",
+}
+const _TEXT_DRAW_CALLS := ["Art.text(", "Art.text_center(", "draw_string(", "draw_string_outline("]
+
+
+func _xform_args(src: String, open_paren: int) -> Array[String]:
+	## Top-level comma split of one call's argument list. Handles the multi-line
+	## calls both producers use — a line-based scrape misses those entirely.
+	var out: Array[String] = []
+	var depth := 0
+	var cur := ""
+	var i := open_paren
+	while i < src.length():
+		var ch := src[i]
+		if ch == "(" or ch == "[":
+			depth += 1
+		elif ch == ")" or ch == "]":
+			if depth == 0:
+				out.append(cur.strip_edges())
+				break
+			depth -= 1
+		if ch == "," and depth == 0:
+			out.append(cur.strip_edges())
+			cur = ""
+			i += 1
+			continue
+		cur += ch
+		i += 1
+	for j in out.size():
+		out[j] = out[j].replace("\n", " ").replace("\t", "")
+		while out[j].contains("  "):
+			out[j] = out[j].replace("  ", " ")
+	return out
+
+
+func _t2d_scale(expr: String) -> String:
+	## Transform2D(rotation, SCALE, skew, origin) — the scale is argument 2. Only the
+	## FIRST is read: no shipped site composes two scaled matrices in one expression,
+	## and `.scaled(` is flagged separately so that route can't sneak past either.
+	if expr.contains(".scaled("):
+		return "<matrix .scaled()>"
+	var at := expr.find("Transform2D(")
+	if at < 0:
+		return "Vector2.ONE"
+	var args := _xform_args(expr, at + "Transform2D(".length())
+	return args[1] if args.size() >= 2 else "Vector2.ONE"
+
+
+func test_no_string_is_drawn_under_a_scaled_canvas_transform() -> void:
+	var checked := 0
+	var expected := 0
+	var scaled_text_blocks := 0
+	for path in ["res://src/main.gd", "res://src/view/menu.gd", "res://src/view/hud.gd",
+			"res://src/view/art.gd"]:
+		var raw := FileAccess.get_file_as_string(path)
+		for tok in _TEXT_DRAW_CALLS:
+			expected += raw.count(tok)
+		# Blank out whole-line comments — the prose in this repo is full of
+		# draw_set_transform talk — but blank them to the SAME LENGTH. The assignment
+		# scan below indexes by character offset, and collapsing a comment to "" slides
+		# every later offset left, which silently reorders the event walk and lets a
+		# real violation resolve against the wrong matrix. (Inline `#` is left alone: it
+		# can live inside a string literal, and eating the rest of the line would eat code.)
+		var lines := raw.split("\n")
+		var body := ""
+		for ln in lines:
+			var s0 := String(ln)
+			body += (" ".repeat(s0.length()) if s0.strip_edges().begins_with("#") else s0) + "\n"
+
+		# Ordered event walk. A block is "whatever is in force when a string is drawn",
+		# which is the granularity the defect lives at — _draw_fx sets three different
+		# scales and only ONE of its blocks contains text.
+		var events: Array = []
+		var mark := func(tok: String, kind: String) -> void:
+			var at := body.find(tok)
+			while at >= 0:
+				events.append([at, kind, at + tok.length()])
+				at = body.find(tok, at + 1)
+		mark.call("draw_set_transform_matrix(", "xform_matrix")
+		mark.call("draw_set_transform(", "xform")
+		for tok in _TEXT_DRAW_CALLS:
+			mark.call(tok, "text")
+		# Matrix variables: every assignment whose RHS builds or scales a Transform2D.
+		var off := 0
+		for ln in lines:
+			var s := String(ln)
+			var stripped := s.strip_edges()
+			if not stripped.begins_with("#") and (stripped.contains("Transform2D(") or stripped.contains(".scaled(")):
+				var eq := s.find(":=")
+				if eq < 0:
+					eq = s.find("=")
+				if eq > 0 and not s.substr(0, eq).contains("draw_set_transform"):
+					var name := s.substr(0, eq).strip_edges().trim_prefix("var ").split(":")[0].strip_edges()
+					if name.is_valid_identifier():
+						# The RHS can wrap; take the rest of the file and let the paren
+						# walk inside _t2d_scale find the end of the Transform2D call.
+						events.append([off + eq, "assign", name, _t2d_scale(body.substr(off + eq, 400))])
+			off += s.length() + 1
+		events.sort_custom(func(a, b): return int(a[0]) < int(b[0]))
+
+		var cur := "Vector2.ONE"
+		var mat := {}
+		for ev in events:
+			match String(ev[1]):
+				"assign":
+					mat[String(ev[2])] = String(ev[3])
+				"xform":
+					var args := _xform_args(body, int(ev[2]))
+					cur = args[2] if args.size() >= 3 else "Vector2.ONE"
+				"xform_matrix":
+					var args2 := _xform_args(body, int(ev[2]))
+					var expr := args2[0] if args2.size() >= 1 else ""
+					if expr.contains("Transform2D(") or expr.contains(".scaled("):
+						cur = _t2d_scale(expr)
+					else:
+						cur = String(mat.get(expr.strip_edges(), "Vector2.ONE"))
+				"text":
+					checked += 1
+					if cur == "Vector2.ONE":
+						continue
+					scaled_text_blocks += 1
+					Runner.T.ok(TEXT_XFORM_SCALE_ALLOW.has(cur),
+						("%s draws a string under canvas scale `%s` — a scale below 1.0 maps"
+							+ " floored LOCAL pixels onto fractional DEVICE rows and deletes the"
+							+ " glyph's bottom scanline (BEST -> FFST). Animate on whole-pixel"
+							+ " offsets and alpha, or justify the expression in TEXT_XFORM_SCALE_ALLOW.")
+							% [path, cur])
+	# Not a guessed floor: the walk must reach EVERY text call a plain token count finds,
+	# so a parser that silently drops half the file can't launder this suite green.
+	Runner.T.eq(checked, expected,
+		"the transform/text walk reached every string draw in the view (%d of %d)"
+			% [checked, expected])
+	Runner.T.ok(scaled_text_blocks >= 2,
+		"...and still finds the two allowlisted pop-in sites (%d scaled text blocks), so a green"
+			% scaled_text_blocks
+			+ " here means the scrape ran, not that it matched nothing")

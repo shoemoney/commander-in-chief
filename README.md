@@ -17,7 +17,7 @@
 
 ![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-1159%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1162%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-P3%20%C2%B7%20playable%20start%E2%86%92finish-orange)
@@ -335,7 +335,7 @@ the engine-error gate fail a perfectly clean diff with *"no log carried this run
 
 </details>
 
-**1,159 test methods / 37,400+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
+**1,162 test methods / 37,400+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
 grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus, every archetype's behavior
 contract (nest armor, technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop,
 lockstep loopback, replay integrity, checksum coverage classification, and the campaign+endless **golden

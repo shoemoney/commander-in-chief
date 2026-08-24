@@ -14084,6 +14084,32 @@ const RESULT_PANEL_TOP := 112.0   # the end-card plate's top edge — hoisted so
 static func result_row_pitch(n: int, reserve := 0.0) -> float:
 	return minf(19.0, (SCREEN_H - 178.0 - 14.0 - reserve) / float(maxi(n, 1)))
 
+const RESULT_ENTRANCE_RISE := 12.0   # px the end card travels in. The round() in result_entrance_offset — NOT this value being whole — is what guarantees a whole-pixel offset.
+
+## The end card's entrance offset, in whole device pixels.
+##
+## This used to be a 0.92 -> 1.0 canvas SCALE ("the run's final beat scales in over
+## ~12 frames instead of teleporting"). Art.text floors its position to whole pixels
+## in LOCAL space (art.gd); a fractional scale then maps those whole pixels onto
+## fractional DEVICE rows. PixelOperator8 is a bitmap face, so a half-pixel baseline
+## splits a glyph's bottom scanline across two device rows at ~50% each: E loses its
+## bottom bar and reads as F, B loses its bowl and reads as F or R. MEASURED in the
+## shipped capture harness (tools/screenshots.gd, 06-victoly.png): "BEST 143095   NEW
+## BEST!" rendered as "FFST 143Ø95  NEW BEST!", and the row above it the same way.
+## It was not one line — across the 13-frame ramp the 7-row victory card put 127 of
+## its 130 drawn strings off the pixel grid, and the 13-row K.I.A. card 205 of 208.
+##
+## Pixel-art UI animates on whole-pixel offsets and alpha. Both are grid-safe; a
+## sub-1.0 scale is not, and it is the only direction that DELETES a scanline (scale-UP
+## duplicates one instead, which is why the banner and floattext pop-ins are untouched).
+## Rounded, so the title, rows, icons and form line all move together and always land
+## on a pixel — and static, so the ratchet can measure the exact shipped geometry.
+static func result_entrance_offset(t: float, motion: float) -> Vector2:
+	if motion < 0.5 or t >= 1.0:
+		return Vector2.ZERO
+	var re := 1.0 - pow(1.0 - t, 3.0)
+	return Vector2(0.0, round((1.0 - re) * RESULT_ENTRANCE_RISE))
+
 ## The victory trophy's draw rect. It used to sit at fixed center (196, 182) — x170..222,
 ## y156..208 at full pulse — on the comment's claim that only blank panel space lay under
 ## it. FALSE for the card's widest row: "%d¢ WAR CHEST BANKED  → +%s" (icon 14 + gap 6 +
@@ -14122,20 +14148,27 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		max_w = maxf(max_w, rw)
 	var panel_w := clampf(max_w + 44.0, 300.0, 620.0)
 	var panel_x := 320.0 - panel_w / 2.0
-	# Entrance: the run's final beat scales in over ~12 frames instead of
-	# teleporting onto the screen. Composes WITH the shake-cancel matrix the
-	# caller set (plain draw_set_transform would clobber it). Pivot sits at the
-	# PANEL's center, not screen center — the card used to slide while scaling.
-	# Held in `base_x` because the gold shine below has to RESTORE this, not reset to
-	# identity: on the VICTORY card (the only caller passing shine) every score row, icon
-	# and the form microline drew at full scale in world space while the plate and title
-	# behind them were still scaling in from 0.92 — the rows visibly detached from the card.
+	# Entrance: the run's final beat RISES into place over ~12 frames and fades up,
+	# instead of teleporting onto the screen. It used to SCALE in from 0.92 — see
+	# result_entrance_offset() for the measurement that killed that (a fractional scale
+	# put 127 of the 7-row card's 130 strings on half-pixel baselines and rendered BEST
+	# as FFST). A whole-pixel translate and an alpha ramp carry the same beat without
+	# ever moving ink off the grid.
+	# Composes WITH the shake-cancel matrix the caller set (plain draw_set_transform
+	# would clobber it). Held in `base_x` because the gold shine below has to RESTORE
+	# this, not reset to identity: on the VICTORY card (the only caller passing shine)
+	# every score row, icon and the form microline drew unmoved in world space while the
+	# plate and title behind them were still animating in — the rows visibly detached
+	# from the card.
 	var base_x := get_transform().affine_inverse()
+	base_x = base_x.translated_local(result_entrance_offset(_result_t, _motion))
+	# Alpha carries the "arrival" the scale used to. Unlike a transform, it cannot
+	# move a glyph off the pixel grid.
+	var ea := 1.0
 	if _motion >= 0.5 and _result_t < 1.0:
-		var re := 1.0 - pow(1.0 - _result_t, 3.0)
-		var rscale := 0.92 + 0.08 * re
-		base_x = base_x * Transform2D(0.0, Vector2.ONE * rscale, 0.0,
-			Vector2(320.0, panel_top + panel_h / 2.0) * (1.0 - rscale))
+		ea = 1.0 - pow(1.0 - _result_t, 3.0)
+	accent = Color(accent.r, accent.g, accent.b, accent.a * ea)
+	title_col = Color(title_col.r, title_col.g, title_col.b, title_col.a * ea)
 	draw_set_transform_matrix(base_x)
 	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
 	if not doc.is_empty():
@@ -14154,12 +14187,13 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		if sw >= 0.0 and sw <= 1.0:
 			draw_set_transform(Vector2(panel_x + 20.0 + sw * (panel_w - 40.0), title_y), -0.35, Vector2.ONE)
 			draw_texture_rect(Art.tex("fx_softspot"), Rect2(-13.0, -22.0, 26.0, 44.0),
-				false, Color(1.0, 0.95, 0.7, 0.5 * sin(sw * PI)))
+				false, Color(1.0, 0.95, 0.7, 0.5 * sin(sw * PI) * ea))
 			draw_set_transform_matrix(base_x)   # RESTORE the entrance matrix, not identity
 	for i in rows.size():
 		var row: Dictionary = rows[i]
 		var row_text: String = row["text"]
 		var col: Color = row["color"]
+		col.a *= ea                      # rows arrive with the plate, not ahead of it
 		var row_size: int = row.get("size", 11)
 		var icon: String = row.get("icon", "")
 		var icon_size: float = row.get("icon_size", 14.0)
@@ -14171,8 +14205,10 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		if not icon.is_empty():
 			# icon_col tints white-with-alpha menu-icon art (mi_medal_* grades);
 			# untinted rows keep drawing as-authored.
+			var icon_col: Color = row.get("icon_col", Color.WHITE)
+			icon_col.a *= ea
 			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size),
-				false, row.get("icon_col", Color.WHITE))
+				false, icon_col)
 			x += icon_size + gap
 		Art.text(self, row_text, Vector2(x, y), row_size, col)   # shadowed like every other HUD string
 	if not doc.is_empty():

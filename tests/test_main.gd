@@ -3155,3 +3155,105 @@ func _wl_call_sites(src: String) -> Array:
 			out.append([name, src.substr(0, call_at).count("\n") + 1,
 				args.size() >= need, _wl_anchor_dy(args[2] if centered else args[1])])
 	return out
+
+
+# ---------------------------------------------------------------------------
+# THE END-CARD ENTRANCE MUST NOT PUT INK ON A HALF PIXEL
+# ---------------------------------------------------------------------------
+# _draw_result_panel's entrance used to be a 0.92 -> 1.0 canvas SCALE. Art.text
+# floors its position to whole pixels — in LOCAL space — and the scale then maps
+# those whole pixels onto fractional DEVICE rows. PixelOperator8 is a bitmap face:
+# a half-pixel baseline splits a glyph's bottom scanline across two device rows at
+# ~50% each, so E loses its bottom bar and reads as F, B loses its bowl and reads
+# as F or R. MEASURED in the shipped capture harness's 06-victoly.png: the source
+# string "BEST 143095   NEW BEST!" rendered as "FFST 143Ø95  NEW BEST!", and the row
+# above it the same way. Rows whose device baseline landed on an integer were crisp;
+# rows that landed on .48 / .44 were the corrupted ones.
+#
+# Pixel-art UI animates on WHOLE-pixel offsets and alpha. Both are grid-safe. A
+# sub-1.0 scale is not, and it is the only direction that DELETES a scanline
+# (scale-UP duplicates one: 10 ink rows -> 12 at 1.28, -> 15 at 1.5, letter identity
+# intact — which is why the two pop-in sites are allowlisted rather than banned).
+const RESULT_ENTRANCE_FRAME_STEP := 0.08   # cross-checked against main.gd's own literal below
+
+
+func test_result_card_ink_lands_on_whole_pixels_through_the_entrance() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var c := _consts()
+	var screen_h: float = c["SCREEN_H"]
+	var panel_top: float = c["RESULT_PANEL_TOP"]
+	var reserve: float = c["RESULT_DOC_RESERVE"]
+
+	# The frame step is scraped from the shipped ramp, so this samples the ENTIRE
+	# defect window rather than a guessed slice of it.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("_result_t = minf(1.0, _result_t + %s)" % RESULT_ENTRANCE_FRAME_STEP),
+		"main.gd still advances the end-card entrance at %s/frame" % RESULT_ENTRANCE_FRAME_STEP)
+
+	var has_offset := false
+	for m in ms.get_script_method_list():
+		if String(m["name"]) == "result_entrance_offset":
+			has_offset = true
+	# Same has-method fallback idiom the row-pitch test uses: on an UNFIXED tree we
+	# model the shipped 0.92 scale instead of aborting on a missing symbol, so the
+	# failure reports the REAL fractional baselines rather than "no such method".
+	Runner.T.ok(has_offset,
+		"Main.result_entrance_offset() is the end-card entrance's one source of motion")
+
+	var frames: Array[float] = []
+	var t := 0.0
+	while t < 1.0:
+		frames.append(t)
+		t += RESULT_ENTRANCE_FRAME_STEP
+	Runner.T.eq(frames.size(), 13, "the entrance is a 13-frame window (0.0 .. 0.96)")
+
+	var totals := {}
+	var worst := 0.0
+	var worst_desc := ""
+	for n in range(4, RESULT_ROWS_MAX + 1):
+		var pitch: float = ms.result_row_pitch(n, reserve)
+		var panel_h := (RESULT_ROW_Y - panel_top) + float(maxi(n, 1)) * pitch + RESULT_PAD + reserve
+		# Every string _draw_result_panel puts inside the entrance matrix: the doc
+		# header band, the title, each tally row, and the form microline.
+		var locals: Array[float] = [panel_top + 15.0, 150.0]
+		for i in n:
+			locals.append(RESULT_ROW_Y + float(i) * pitch)
+		locals.append(panel_top + panel_h - 7.0)
+		var off_grid := 0
+		for ft in frames:
+			var re := 1.0 - pow(1.0 - ft, 3.0)
+			for ly in locals:
+				# Art.text floors in LOCAL space (art.gd: `pos = pos.floor()`), so the
+				# grid question is always about where that whole pixel LANDS.
+				var base: float = floorf(ly)
+				var dy: float
+				if has_offset:
+					dy = base + ms.result_entrance_offset(ft, 1.0).y
+				else:
+					var rscale := 0.92 + 0.08 * re
+					dy = base * rscale + (panel_top + panel_h / 2.0) * (1.0 - rscale)
+				var frac: float = absf(dy - round(dy))
+				if frac > 1e-4:
+					off_grid += 1
+					if frac > worst:
+						worst = frac
+						worst_desc = "%d-row card, t=%.2f, local y=%.0f -> device y=%.3f" % [n, ft, base, dy]
+		totals[n] = [off_grid, frames.size() * locals.size()]
+		Runner.T.eq(off_grid, 0,
+			"%d-row end card keeps every string on a whole device pixel through the entrance (%d of %d off-grid)"
+				% [n, off_grid, frames.size() * locals.size()])
+	Runner.T.ok(worst <= 1e-4,
+		"no end-card string ever lands mid-pixel (worst: %s)"
+			% ("none" if worst_desc.is_empty() else "%.3fpx — %s" % [worst, worst_desc]))
+	# The card must also still fit: an entrance that RISES has to start inside the screen.
+	if has_offset:
+		var rise: float = ms.result_entrance_offset(0.0, 1.0).y
+		Runner.T.ok(rise == round(rise) and absf(rise) <= 24.0,
+			"the entrance travels a whole, modest number of pixels (%.1f)" % rise)
+		Runner.T.eq(ms.result_entrance_offset(1.0, 1.0), Vector2.ZERO,
+			"a settled card sits exactly where the layout tests measure it")
+		Runner.T.eq(ms.result_entrance_offset(0.4, 0.0), Vector2.ZERO,
+			"REDUCED MOTION holds the card still, same gate the scale entrance used")
+		var below: float = RESULT_ROW_Y + float(RESULT_ROWS_MAX - 1) * ms.result_row_pitch(RESULT_ROWS_MAX, reserve)
+		Runner.T.ok(below + rise <= screen_h,
+			"...and the 13-row card's last row is on screen on the entrance's first frame")

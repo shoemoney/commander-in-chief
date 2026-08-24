@@ -231,6 +231,12 @@ func _dress_victoly(m: Node2D) -> void:
 	# game. A reviewer judging the shot correctly calls that a broken results screen.
 	m._run_kills = 214
 	m._run_best_streak = 17
+	# The harness freezes physics and never advances _result_t, so the card was captured
+	# permanently mid-ENTRANCE. Under the old 0.92 scale that shipped every promo/README
+	# end-card image with corrupted text (BEST -> FFST); under the whole-pixel rise + alpha
+	# fade a t=0 pose would render the card near-invisible instead. Every other shot in
+	# this harness poses a SETTLED state — this one never did. It does now.
+	m._result_t = 1.0
 	# The card's widest row ("%d¢ WAR CHEST BANKED -> +%s") reads _victory_banked /
 	# _victory_banked_score, not sim.war_chest (the sim zeroes that on the same tick —
 	# see sim_world.gd's victory payout). Unposed both stay 0, rendering the narrowest

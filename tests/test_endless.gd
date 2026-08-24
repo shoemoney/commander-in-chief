@@ -1250,3 +1250,143 @@ func test_intermission_airstrike_gate_lifts_with_the_wave() -> void:
 	Runner.T.eq(sim.pending_airstrike, SimWorld.STRIKE_TELEGRAPH_TICKS,
 		"a strike with a live wave is still sold")
 	Runner.T.ok(sim.war_chest < 5000, "...and is paid for")
+
+
+# ---------------------------------------------------------------------------
+# THE FREE RALLY'S WAIT vs THE COMPOUNDING REVIVE PRICE
+# ---------------------------------------------------------------------------
+# Endless prices a body on a compounding curve (revive_cost(): deaths UNCAPPED x
+# wave-multiplied) because, per its own comment, "the ONLY brake on a run is what
+# a body costs". The broke fallback WAIVES that price — the one affordability gate
+# in the sim that does (pickup purchase and _try_buy both DENY) — and it waived it
+# on a FLAT clock: 5.0 s at every depth while the bill it dodged went 50 -> 7800.
+# MEASURED at HEAD, 2P endless, partner standing, chest 0:
+#   free rally  = 300 ticks (5.0 s), lands at _checkpoint_y(), stripped loadout
+#   PAID 2P self-revive = 1 tick, lands at _checkpoint_y(), stripped loadout
+# Byte-identical placement and body: the 50-coin bill bought 299 ticks and nothing
+# else, and unlike the wait, the bill compounds. So the WAIT compounds too.
+const RALLY_STEP_BUDGET := 2000   # 1.67x the longest wait this can produce (1200t at the mult cap)
+
+
+func _rally_2p_inputs(revive := false) -> Array[SimInput]:
+	var a := SimInput.new()
+	a.revive = revive
+	return [a, SimInput.new()] as Array[SimInput]
+
+
+func _rally_walk(deaths: int, wave: int, mode: String, pin_partner: bool, pay := false) -> Dictionary:
+	## Drives a REAL down->stand cycle and reports the ticks it took. Not a read of
+	## the helper: the thing under test is how long the player is actually on the
+	## floor, so this steps the shipped sim until they stand (or the run wipes).
+	var sim := SimWorld.new(77, 2, mode)
+	sim.wave = wave
+	var p: Dictionary = sim.players[0]
+	var partner: Dictionary = sim.players[1]
+	p["deaths"] = deaths - 1          # _kill_player bumps it to exactly `deaths`
+	sim._kill_player(p)
+	var cost := sim.revive_cost(p)
+	var ticks := 0
+	var armed := -1
+	while ticks < RALLY_STEP_BUDGET:
+		if pin_partner:
+			# The partner is the INSTRUMENT, not the subject: pinned standing and
+			# untouchable so rally_is_free() stays true for the whole window and a
+			# stray spawn can't silently convert a rescue into a wipe mid-measurement.
+			partner["alive"] = true
+			partner["hurt_iframes"] = 9999
+		else:
+			partner["alive"] = false
+		# Re-asserted every tick: partner kills bank coin, and a chest that climbs
+		# over the price DISARMS the fallback (_step_dead_player re-checks live).
+		sim.war_chest = cost if pay else 0
+		sim.step(_rally_2p_inputs(pay))
+		ticks += 1
+		if armed < 0 and p["broke_timer"] > 0:
+			armed = p["broke_timer"] + 1   # arm and decrement land in the same tick
+		if p["alive"] or sim.wiped:
+			break
+	return {"ticks": ticks, "armed": armed, "stood": p["alive"], "wiped": sim.wiped,
+		"cost": cost}
+
+
+func test_free_rally_wait_tracks_the_compounding_revive_price() -> void:
+	var waves := [1, 15, 60]
+	var depths := [1, 2, 3, 4, 5, 6]
+	var wait := {}       # [wave][deaths] -> ticks on the floor
+	var price := {}
+	for w in waves:
+		for d in depths:
+			var r := _rally_walk(d, w, "endless", true)
+			Runner.T.ok(r["stood"],
+				"2P endless w%d d%d: the broke rally still stands the player up inside %d ticks (got %d)"
+					% [w, d, RALLY_STEP_BUDGET, r["ticks"]])
+			wait[[w, d]] = r["ticks"]
+			price[[w, d]] = r["cost"]
+
+	# (a) MONOTONE IN THE AXIS THE WAIT ACTUALLY RIDES — and NOT in the other one.
+	#
+	# revive_cost() compounds on TWO axes: deaths (uncapped) and wave (multiplied).
+	# The wait compounds on ONE — deaths — and that is deliberate, not an oversight.
+	# The defect being fixed is the DEATH SPIRAL the price comment describes ("keep
+	# clean and the surcharge never touches you, chain deaths and the run ends"); the
+	# wave axis of the price tracks income scaling, not death-chaining. Wave-keying the
+	# wait as well would put a player's FIRST death at wave 60 on the floor for 20 s for
+	# no fault of their own, and would move ENDLESS_GOLDEN (the endless torture arms this
+	# timer twice, both at deaths 1 — at wave 1 today, but nothing pins the wave).
+	# So: within a wave the wait tracks the price, and across waves it deliberately
+	# does not move at all. Both halves are asserted, so neither the flatness nor the
+	# scope can drift silently.
+	for w in waves:
+		for d in depths:
+			for d2 in depths:
+				if price[[w, d2]] > price[[w, d]]:
+					Runner.T.ok(wait[[w, d2]] >= wait[[w, d]],
+						"w%d: a %d-coin body waits >= a %d-coin body (%dt vs %dt, d%d vs d%d)"
+							% [w, price[[w, d2]], price[[w, d]], wait[[w, d2]], wait[[w, d]], d2, d])
+	for d in depths:
+		for w in waves:
+			Runner.T.eq(wait[[w, d]], wait[[waves[0], d]],
+				"d%d waits the same at wave %d as at wave %d — the rally is keyed on DEATHS CHAINED, not on depth reached (%dt vs %dt, price %d vs %d)"
+					% [d, w, waves[0], wait[[w, d]], wait[[waves[0], d]],
+						price[[w, d]], price[[waves[0], d]]])
+
+	# (b) NOT FLAT — the defect itself. HEAD: 300 vs 300.
+	Runner.T.ok(wait[[15, 6]] > wait[[15, 1]],
+		"the free rally is not FLAT across a 6x price climb: d6 waits %dt vs d1 %dt (price %d vs %d)"
+			% [wait[[15, 6]], wait[[15, 1]], price[[15, 6]], price[[15, 1]]])
+
+	# (c) THE BILL BUYS SOMETHING THAT GROWS — the 2P self-revive lands at the SAME
+	# _checkpoint_y() with the SAME stripped body as the free rally, so the only thing
+	# the coin can buy is time. HEAD: 299 saved ticks at d1, 299 at d6 — identical.
+	var paid1 := _rally_walk(1, 15, "endless", true, true)
+	var paid6 := _rally_walk(6, 15, "endless", true, true)
+	Runner.T.ok(paid1["stood"] and paid6["stood"], "the paid 2P self-revive stands the player up")
+	var saved1: int = wait[[15, 1]] - int(paid1["ticks"])
+	var saved6: int = wait[[15, 6]] - int(paid6["ticks"])
+	Runner.T.ok(saved6 > saved1,
+		"paying skips MORE floor time the deeper the run gets: %dt saved at d6 vs %dt at d1"
+			% [saved6, saved1])
+
+	# (d) FIRST DEATH UNCHANGED — the fix must not degenerate into "always the cap".
+	Runner.T.eq(wait[[15, 1]], SimWorld.BROKE_RESPAWN_TICKS,
+		"a first death still rallies on the authored %d-tick clock"
+			% SimWorld.BROKE_RESPAWN_TICKS)
+
+	# (e) THE WIPE CLOCK IS NOT A BRAKE — with nobody standing this IS the run ending,
+	# and a dead party must not sit through a compounded RESCUE wait to be told so.
+	# This is also what keeps ENDLESS_GOLDEN's justification honest.
+	for d in depths:
+		var wipe := _rally_walk(d, 15, "endless", false)
+		Runner.T.eq(int(wipe["armed"]), SimWorld.BROKE_RESPAWN_TICKS,
+			"endless wipe clock at d%d stays the flat %d ticks (got %s)"
+				% [d, SimWorld.BROKE_RESPAWN_TICKS, wipe["armed"]])
+		Runner.T.ok(wipe["wiped"], "...and it ends the run rather than rescuing")
+
+	# (f) CAMPAIGN IS GATED OUT — campaign's price caps at 3 deaths and it has a finish
+	# line, so its flat rally is the designed safety net, not a loophole. Leaking the
+	# compounding here would silently move GOLDEN (measured: 11 campaign arms in the
+	# 60s torture, at deaths 4..12).
+	for d in depths:
+		var camp := _rally_walk(d, 15, "campaign", true)
+		Runner.T.eq(int(camp["ticks"]), SimWorld.BROKE_RESPAWN_TICKS,
+			"campaign d%d keeps the flat %d-tick rally" % [d, SimWorld.BROKE_RESPAWN_TICKS])

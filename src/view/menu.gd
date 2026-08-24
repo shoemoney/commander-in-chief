@@ -5249,7 +5249,7 @@ func _howto_large_entries(tab: int) -> Array:
 				{"kind": "heading", "text": "ONE HIT AND YOU DROP.", "size": 13},
 				{"kind": "body", "text": "No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again."},
 				{"kind": "heading", "text": "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", "size": 11},
-				{"kind": "body", "text": _howto_tr("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all.") % (SimWorld.BROKE_RESPAWN_TICKS / 60)},
+				{"kind": "body", "text": _howto_tr("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back up — in ENDLESS chained deaths slow it to %ds, and with nobody up that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives.") % [SimWorld.BROKE_RESPAWN_TICKS / 60, SimWorld.BROKE_RESPAWN_TICKS * SimWorld.BROKE_WAIT_MAX_MULT / 60]},
 				{"kind": "body", "text": _howto_tr("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
 				{"kind": "action", "action": "wheel", "text": "Hold to open the supply wheel."}]
 		2:
@@ -5522,8 +5522,14 @@ func _howto_page_warchest() -> void:
 	# ...and the rally is NOT always a rescue: in ENDLESS with nobody left standing the
 	# same clock latches the wipe (SimWorld.rally_is_free()). Static copy, not
 	# mode-conditional — the stub main the corpus test drives has a null sim.
-	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back in the fight — but in ENDLESS, with nobody standing, that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives at all."
-			% (SimWorld.BROKE_RESPAWN_TICKS / 60),
+	# The rally is also not FLAT: in endless it compounds on the deaths curve the revive
+	# price rides (SimWorld.broke_wait_ticks), so the sentence quotes BOTH ends of the
+	# clock — the floor and BROKE_WAIT_MAX_MULT's ceiling — and derives both, because a
+	# page that promises a 5s rally while the sim hands you 20 is the exact drift this
+	# whole discipline exists to stop.
+	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back up — in ENDLESS chained deaths slow it to %ds, and with nobody up that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives."
+			% [SimWorld.BROKE_RESPAWN_TICKS / 60,
+				SimWorld.BROKE_RESPAWN_TICKS * SimWorld.BROKE_WAIT_MAX_MULT / 60],
 		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 10.0
 	# All THREE rates come off the sim consts so this sentence can never drift from the payout.

@@ -254,6 +254,7 @@ const BUNKER_SPAWN_INTERVAL_TICKS := 120
 const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
 const BROKE_RESPAWN_TICKS := 300
+const BROKE_WAIT_MAX_MULT := 4      # ...and in ENDLESS it compounds to at most 4x that (20.0 s). See broke_wait_ticks().
 const GOD_RESTORE_TICKS := 60      # DEBUG-ONLY god mode's heartbeat: once a second the downed get put back on their feet. See _god_restore().
 const COIN_RUSHER := 10
 const COIN_MG_NEST := 15   # stationary/telegraphed: pays less than a mobile elite
@@ -2016,9 +2017,16 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 	# strictly cheaper than dying rich.
 	if p["broke_timer"] == 0:
 		if war_chest < revive_cost(p):
-			p["broke_timer"] = BROKE_RESPAWN_TICKS
+			p["broke_timer"] = broke_wait_ticks(p)
 	elif war_chest >= revive_cost(p):
 		p["broke_timer"] = 0
+	# The WIPE clock is not a brake. With nobody left standing this timer is not a
+	# rescue at all — it is the run ending — and a dead party must not sit through the
+	# compounded RESCUE wait just to be told so. Live and re-checked every tick, exactly
+	# like the arm/disarm loop above it, because the partner can drop (or be revived)
+	# while this player is already down.
+	if p["broke_timer"] > BROKE_RESPAWN_TICKS and not rally_is_free():
+		p["broke_timer"] = BROKE_RESPAWN_TICKS
 	if p["broke_timer"] > 0:
 		p["broke_timer"] = p["broke_timer"] - 1
 		if p["broke_timer"] == 0:
@@ -2075,6 +2083,38 @@ func _all_players_down() -> bool:
 		if p["alive"]:
 			return false
 	return true
+
+
+func broke_wait_ticks(p: Dictionary) -> int:
+	## The free rally's WAIT compounds on the same deaths curve the PRICE does.
+	##
+	## revive_cost()'s own comment calls the compounding price "the ONLY brake on a
+	## run" — and the broke fallback waived it at exactly the moment the chest could
+	## not pay. That made it the one affordability gate in the sim that waives instead
+	## of denying (the pickup purchase and shop _try_buy both DENY), and it waived on a
+	## FLAT clock: a broke death cost 5.0 s at wave 1 and 5.0 s at wave 60, while the
+	## bill it dodged went 50 -> 7800 coin. MEASURED, 2P endless, chest 0: the free
+	## rally took 300 ticks and the PAID 2P self-revive took 1, both landing at
+	## _checkpoint_y() with the same stripped body (dx 0, dy 0) — so the coin bought
+	## 299 ticks and nothing else, at every depth.
+	##
+	## Time is the currency a broke player still has, so the wait is what compounds.
+	## The rally itself stays: it exists so a downed player is never a spectator with
+	## zero actions (the same reasoning that removed the old "self-revive blocked while
+	## a partner stands" strand in _try_revive).
+	##
+	## Keyed on DEATHS ONLY, not on wave. The defect is the death spiral revive_cost
+	## describes ("chain deaths and the run ends"); the price's wave axis tracks income
+	## scaling, not death-chaining, and wave-keying this too would put a clean player's
+	## FIRST death at wave 60 on the floor for 20 s for no fault of their own.
+	##
+	## CAMPAIGN is untouched: its price caps at 3 deaths and it has a finish line, so
+	## the flat rally there is the designed safety net, not a loophole. That gate is
+	## also what keeps GOLDEN still — the 60 s campaign torture arms this 11 times at
+	## deaths 4..12, and every one of them stays at BROKE_RESPAWN_TICKS.
+	if mode != "endless":
+		return BROKE_RESPAWN_TICKS
+	return BROKE_RESPAWN_TICKS * clampi(p["deaths"], 1, BROKE_WAIT_MAX_MULT)
 
 
 func rally_is_free() -> bool:
