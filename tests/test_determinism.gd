@@ -719,13 +719,21 @@ const SEED := 0xDEADBEEF
 ## nothing ever checked. The rooted-spawner calls are golden-inert on BOTH tortures.
 ## ENDLESS_GOLDEN is unchanged for the reason its own note already records: with the field
 ## advancing on a downed player this stream wipes at ~2938 ticks and reaches NO rooted spawn.
+## RE-RECORDED (2026-08-24, free roll 2.1x traversal gate). Intentional
+## balance fix: ROLL_CD_TICKS 72->120 (1.2s->2.0s) and roll burst kept at 2.0x
+## (PLAYER_SPEED*2 -> (PLAYER_SPEED*3)/2). The free roll gave 1.25x
+## traversal (86.4px per 72-tick window) and 25% i-frame uptime; the gated
+## roll gives 1.15x (86.4px per 120-tick window) and 15% uptime, removing
+## the 2.1x effective gain with knockdown avoidance. Player x/y are hashed,
+## so every sample moves from tick 0 in both tortures (both press roll at t%41==0). No RNG draw added/removed, no new hashed field, pure trajectory
+## delta — verified by re-deriving twice, A==B holds.
 const GOLDEN: Array[int] = [
-	7078001587521190610,
-	7962800053750474964,
-	7733568343444710833,
-	2287477609721275325,
-	7057671264080347804,
-	6467031749323431841,
+	6044423000615395277,
+	5100615744244822346,
+	3615625611271201610,
+	6313509943363623719,
+	4914979495626228452,
+	2538892228083404284,
 ]
 
 
@@ -949,13 +957,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-08-01, rifleman volley staggering): the opening tutorial
 ## timings are campaign-only; Endless moves because every base rifleman's
 ## position-derived initial fire_cd now prevents synchronized first volleys.
+## RE-RECORDED (2026-08-24, free roll gate — same reason as GOLDEN
+## above). Endless torture also presses roll, so all six samples move from
+## the same 1.25->1.105 trajectory delta; no new field.
 const ENDLESS_GOLDEN: Array[int] = [
-	7922144188542694123,
-	5909248948896047801,
-	7326014981678731879,
-	1054444601338894271,
-	5913232406481005175,
-	2301360741397169935,
+	7401991113274299542,
+	1983442463399721855,
+	8142144403442108663,
+	8999974687396709673,
+	1517746335345395172,
+	3109521952156665276,
 ]
 
 

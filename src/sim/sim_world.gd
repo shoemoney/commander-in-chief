@@ -286,10 +286,10 @@ const CAMERA_BAND_BOTTOM := 344 * F_ONE
 const MAX_CAM_STEP := PLAYER_SPEED * 2
 const BUNKER_W := 48 * F_ONE
 const BUNKER_H := 32 * F_ONE
-# Dodge roll: 0.3 s i-frames, 1.2 s cooldown, 2× speed in the move direction.
+# Dodge roll: 0.3 s i-frames, 1.5 s cooldown, 1.5× speed in the move direction.
 # A press up to ROLL_BUFFER_TICKS early is queued and fires when the roll is ready.
 const ROLL_TICKS := 18
-const ROLL_CD_TICKS := 72
+const ROLL_CD_TICKS := 120
 const ROLL_BUFFER_TICKS := 8
 const GRENADE_BUFFER_TICKS := 8   # parity with the roll buffer — see _step_players
 # Tank: 0.8× player speed, cannon draws from grenade ammo, ~20 s of fuel,
@@ -1272,7 +1272,7 @@ func _step_players(inputs: Array) -> void:
 		# ROLL_BUFFER_TICKS so a slightly-early press still rolls on cd end.
 		# Rising edge only. This used to be a level read, so HOLDING roll re-armed
 		# the buffer every tick and auto-rolled the instant the cd expired — a free
-		# perpetual i-frame chain (18 i-frames per 72 ticks) off one held button,
+		# perpetual i-frame chain (18 i-frames per 120 ticks) off one held button,
 		# which also made the buffer meaningless (it only ever mattered for held
 		# input). Tapping still buffers exactly as before.
 		var roll_edge: bool = inp.roll and not p["roll_prev"]

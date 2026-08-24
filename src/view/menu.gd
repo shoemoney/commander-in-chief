@@ -626,9 +626,20 @@ func _ready() -> void:
 	# always-visible pause/HUD/legend text and icons were the one major render
 	# surface left on LINEAR_MIPMAP after main/_bg_root/_splash_root/_glow_root.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Responsive-ui: fill the CanvasLayer and honor pillarbox / notch safe area
+	# so the menu stays centered in visible pixels on ultrawide (21:9, 32:9).
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_KEEP_SIZE)
 	# Pad yanked mid-run = pause. The sim only steps while no menu is visible,
 	# so opening PAUSE from here is the whole fix — no main.gd surgery.
 	Input.joy_connection_changed.connect(_on_joy_changed)
+	if is_inside_tree():
+		get_viewport().size_changed.connect(_on_menu_viewport_changed)
+
+
+func _on_menu_viewport_changed() -> void:
+	# Rebake safe insets on window resize — get_visible_rect() moves under
+	# viewport keep integer as the window is dragged onto an ultrawide.
+	queue_redraw()
 
 
 func _notification(what: int) -> void:

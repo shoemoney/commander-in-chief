@@ -237,6 +237,16 @@ var _concussion := 0.0           # low-pass 'ears ringing' after a near-death
 var _concussion_p := 0           # WHOSE ringing ears — index into sim.players; see _concussion_focus_uv
 var _blast_warp := 0.0           # brief heat-shock screen warp on marquee detonations
 var _cinematic := 0.0            # letterbox envelope for boss intro / victory beats
+# --- Ultrawide pillarbox safe area (responsive-ui) ----------------------
+# Viewport 640x360 with stretch viewport keep integer letterboxes on ultrawide
+# (21:9 3440x1440, 32:9 5120x1440). get_viewport().get_visible_rect() is the
+# centered viewport rect inside the window (black pillarbox bars excluded).
+# DisplayServer.get_display_safe_area() is the OS notch inset. Both are
+# resolved into HUD-local safe margins so band_rows and claim_label_slot stay
+# in visible pixels. The playfield keeps integer letterbox (pixel-perfect);
+# only chrome reflows. Supported: 16:9 (640x360, 1280x720, 1920x1080) and
+# 21:9/32:9 pillarbox; portrait letterboxes.
+var _safe_rect: Rect2 = Rect2(0, 0, 640, 360)
 var _boss_bar_slots := 0         # top-center bars drawn this frame (banner ducks below them)
 var _result_t := 0.0             # debrief/victory card entrance ease (0→1)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
@@ -676,6 +686,8 @@ func _ready() -> void:
 	# this frame, and the cursor bake reads the window size for its scale.
 	call_deferred("_bake_cursor")
 	get_viewport().size_changed.connect(_on_window_resized)   # re-bake cursor on scale-crossing resize
+	get_viewport().size_changed.connect(_on_viewport_size_changed)   # pillarbox safe-area rebake (ultrawide)
+	_refresh_safe_rect()
 	_reset()
 	_setup_splash()
 	if OS.has_feature("movie"):
@@ -5322,6 +5334,31 @@ func _set_win_scale_pref(s: int, persist := true) -> bool:
 	if persist:   # c3-18: the OPTIONS dirty-state defers the write to SAVE
 		_save_settings()
 	return true
+
+
+# --- Ultrawide safe area: viewport rect centering (responsive-ui) -----------
+func _safe_viewport_rect() -> Rect2:
+	# Centered viewport rect in window space — pillarbox bars excluded. Falls
+	# back to design rect headless/off-tree so tests stay byte-identical.
+	if is_inside_tree():
+		return get_viewport().get_visible_rect()
+	return Rect2(0, 0, 640, 360)
+
+func _refresh_safe_rect() -> void:
+	_safe_rect = _safe_viewport_rect()
+	# Rebake HUD safe margins so band_rows / plate track the new insets.
+	if _hud_icons != null and _hud_icons.has_method("_update_safe_margins"):
+		_hud_icons._update_safe_margins()
+
+func _on_viewport_size_changed() -> void:
+	_refresh_safe_rect()
+
+func _safe_band_rect() -> Rect2:
+	# HUD-local safe band (visible ∩ OS safe area). Delegates to HudIcons so
+	# the HUD's own pip resolver remains the single source for notch/pillarbox.
+	if _hud_icons != null and _hud_icons.has_method("_safe_rect"):
+		return _hud_icons._safe_rect()
+	return Rect2(0, 0, 640, 360)
 
 
 func _center_window() -> void:
@@ -10966,7 +11003,7 @@ var _fork_sign_fade := {}
 
 
 static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, droppable := false,
-		max_y := 360.0) -> Rect2:
+		max_y := 360.0, safe_left := 0.0, safe_right := 640.0) -> Rect2:
 	## The in-world counterpart to band_rows(): one arbiter for every world-space
 	## string, instead of one arbiter for floattext and eleven producers printing
 	## wherever they liked. A transient label drops one 11px row at a time until it
@@ -10986,11 +11023,16 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	## overflow is dropped, never stacked). min_y floors the search: floattext
 	## passes the top band's bottom edge, because the toast stack it replaced went
 	## DOWN-only precisely so a toast pinned under the band can't climb back into it.
+	## Ultrawide safe area: safe_left/safe_right clamp the usable horizontal band
+	## (visible_rect ∩ OS safe area via _safe_band_rect). Default 0..640 preserves
+	## all existing tests byte-identically; live call sites pass the safe band so
+	## world labels never drift into pillarbox black bars on 21:9/32:9.
 	var w: float = rect.size.x
 	var h: float = rect.size.y
 	# X is clamped first and always: a label wider than its anchor can start off-frame
 	# before any dodging happens, and no amount of vertical travel fixes that.
-	var x: float = clampf(rect.position.x, 0.0, maxf(0.0, 640.0 - w))
+	# Clamp to safe band on ultrawide so labels stay in visible pixels, not black bars.
+	var x: float = clampf(rect.position.x, safe_left, maxf(safe_left, safe_right - w))
 	# Candidate rows: where it wanted to sit, then alternating down/up in the same 11px
 	# stride the floattext block used, 6 each way. Down first — a callout belongs under
 	# the thing it names, and dropping keeps it out of the sprite it is labelling.
@@ -14216,9 +14258,11 @@ static func banner_fit_size(txt: String, base: int) -> int:
 ## a layout test read, so a test can't pass against arithmetic the draw
 ## doesn't actually use. pad_left extends the plate leftward under a fronting
 ## badge; the text stays centered on 320, so only the left edge grows.
-static func banner_plate_rect(txt: String, y: float, size: int, pad_left: float) -> Rect2:
+## Ultrawide safe area: safe_cx is the visible center (pillarbox-aware via
+## _safe_band_rect). Default 320 preserves every test byte-identically.
+static func banner_plate_rect(txt: String, y: float, size: int, pad_left: float, safe_cx := 320.0) -> Rect2:
 	var w := Art.tw(txt, size)
-	return Rect2(320.0 - w / 2.0 - 5.0 - pad_left, y - size - 2.0, w + 10.0 + pad_left, size + 7.0)
+	return Rect2(safe_cx - w / 2.0 - 5.0 - pad_left, y - size - 2.0, w + 10.0 + pad_left, size + 7.0)
 
 
 func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:

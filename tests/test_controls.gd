@@ -226,7 +226,7 @@ func test_e_aboard_a_tank_is_the_cannon_unless_a_rescue_is_on_the_table() -> voi
 		"riding with a downed, affordable partner: E is the rescue and the cannon holds fire")
 	# ...and SHIFT (grenade_alt) is the escape hatch: a pure throw OUTSIDE the arbitration,
 	# so a driver can always shell something even while a partner bleeds out.
-	var shift := MainScript.shared_e(false, true, false, true, true)
+	var shift: Array = MainScript.shared_e(false, true, false, true, true)
 	Runner.T.ok(shift[0], "SHIFT still fires the cannon through a live rescue prompt")
 
 

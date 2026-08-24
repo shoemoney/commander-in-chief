@@ -261,6 +261,11 @@ func _ensure_hud_containers() -> void:
 		return
 	if not is_inside_tree():
 		return
+	# Responsive-ui: HUD root fills the CanvasLayer (Full Rect) so it tracks the
+	# window's visible_rect, not just the 640x360 design rect. Pillarbox and
+	# notch are handled via the outer MarginContainer's safe insets (see
+	# _update_safe_margins), keeping integer letterbox for the playfield.
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_KEEP_SIZE)
 	# Theme drives FONT_SIZE/color so Art.font().get_string_size matches layout.
 	if _hud_theme == null:
 		_hud_theme = Theme.new()
@@ -346,6 +351,7 @@ func _ensure_hud_containers() -> void:
 func _sync_hud_containers_for_draw() -> void:
 	if not _hud_containers_ready:
 		_ensure_hud_containers()
+	_update_safe_margins()
 	if _hud_plate_panel != null and _hud_plate_panel.is_inside_tree():
 		_hud_plate_panel.visible = is_visible_in_tree()
 
@@ -375,6 +381,73 @@ func _container_right() -> float:
 	return maxf(RIGHT - reserve, PLATE_MIN_RIGHT)
 
 
+# --- Ultrawide pillarbox + notch safe area (responsive-ui) ---------------
+# The viewport is 640x360 with stretch mode viewport keep integer. On ultrawide
+# (21:9 3440x1440, 32:9 5120x1440) the engine letterboxes: the viewport is
+# centered at integer scale with black pillarbox bars on the sides. The HUD must
+# stay in VISIBLE pixels, not pinned to the bar edges, and must also dodge the
+# OS notch (DisplayServer.get_display_safe_area) on mobile. Both are resolved
+# into HUD-local insets that the outer MarginContainer honors, so band_rows and
+# the plate stay centered in the visible portion. Keep integer letterbox — the
+# playfield stays pixel-perfect; only the HUD chrome reflows. 16:9 (640x360,
+# 1280x720, 1920x1080) and 21:9/32:9 are supported; portrait is letterboxed.
+func _hud_safe_band() -> Vector2:
+	# Band the whole HUD may occupy — visible_rect ∩ OS safe area → HUD-local.
+	# Unlike _pip_bounds (which insets by PIP_MIN_X and caps at RIGHT for the
+	# corner pips), the band for HUD chrome is the raw visible viewport band so
+	# at 16:9 (no pillarbox/notch) it is 0..640 and MarginContainer stays at the
+	# shipped 2px PLATE_ORIGIN inset. Pillarbox (ultrawide) or notch insets still
+	# narrow the band, so bars never sit on black bars.
+	if not is_inside_tree():
+		return Vector2(0, 640)
+	var vp := get_viewport()
+	return _resolve_hud_safe_band(vp.get_visible_rect(), Rect2(DisplayServer.get_display_safe_area()), vp.get_screen_transform().affine_inverse(), get_global_transform_with_canvas().affine_inverse())
+
+static func _resolve_hud_safe_band(vis: Rect2, safe: Rect2, screen_inv: Transform2D, canvas_inv: Transform2D) -> Vector2:
+	var vl := vis.position.x
+	var vr := vis.end.x
+	if safe.size.x > 0.0:
+		var sl := (screen_inv * safe.position).x
+		var sr := (screen_inv * safe.end).x
+		if sr > vl and sl < vr:
+			vl = maxf(vl, sl)
+			vr = minf(vr, sr)
+	if vr <= vl:
+		return Vector2(0, 640)
+	var ll := (canvas_inv * Vector2(vl, vis.position.y)).x
+	var lr := (canvas_inv * Vector2(vr, vis.position.y)).x
+	return Vector2(ll, lr)
+
+func _safe_rect() -> Rect2:
+	# Viewport-visible rect in HUD-local space (for band_rows / claim_label_slot clamping).
+	var band := _hud_safe_band()
+	var vis := band.y - band.x
+	if vis <= 0.0:
+		return Rect2(0, 0, 640, 360)
+	return Rect2(band.x, 0, vis, 360)
+
+func _update_safe_margins() -> void:
+	if not _hud_containers_ready or _hud_outer == null:
+		return
+	if not is_inside_tree():
+		return
+	var band := _hud_safe_band()
+	# _pip_bounds already maps visible_rect ∩ safe area to HUD-local. The
+	# MarginContainer's outer inset is PLATE_ORIGIN plus any pillarbox/notch
+	# inset on each side: left = band.x, right = 640 - band.y.
+	var left_inset := int(band.x)
+	var right_inset := int(640.0 - band.y)
+	_hud_outer.add_theme_constant_override("margin_left", left_inset + int(PLATE_ORIGIN))
+	_hud_outer.add_theme_constant_override("margin_right", right_inset + int(PLATE_ORIGIN))
+	_hud_outer.add_theme_constant_override("margin_top", int(PLATE_ORIGIN))
+	_hud_outer.add_theme_constant_override("margin_bottom", int(PLATE_ORIGIN))
+
+func safe_margins_for_test() -> Vector2:
+	# Exposed for headless viewport-resize probe: returns (left,right) safe insets.
+	var band := _hud_safe_band()
+	return Vector2(band.x, 640.0 - band.y)
+
+
 func _ready() -> void:
 	# opt-loop: a CanvasLayer boundary breaks texture_filter inheritance — HUD/menu
 	# Controls sit under the $HUD CanvasLayer, so they fell back to the project's
@@ -383,6 +456,7 @@ func _ready() -> void:
 	# surface that's always on screen during gameplay.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_ensure_hud_containers()
+	_update_safe_margins()
 	_sync_hud_containers_for_draw()
 	if not is_inside_tree():
 		return
@@ -403,6 +477,7 @@ func _notification(what: int) -> void:
 		_tw_cache.clear()
 		Art.flush_tw()   # the shared main.gd/art.gd memo has the same fixed-font assumption
 	if what == NOTIFICATION_RESIZED:
+		_update_safe_margins()
 		_sync_hud_containers_for_draw()
 	if what == NOTIFICATION_ENTER_TREE and not _plate_ci.is_valid():
 		if is_inside_tree():
