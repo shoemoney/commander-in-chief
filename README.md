@@ -20,9 +20,9 @@
 ![Tests](https://img.shields.io/badge/tests-1166%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
-![Milestone](https://img.shields.io/badge/milestone-1.1%20%C2%B7%20polish-gold)
+![Milestone](https://img.shields.io/badge/milestone-1.2%20%C2%B7%20gold-gold)
 ![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
-![Release](https://img.shields.io/badge/release-v1.1.0%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
+![Release](https://img.shields.io/badge/release-v1.2.0%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -55,7 +55,7 @@ posed sim states, no mockups, no concept art.</sub>
 
 </div>
 
-> ⚠️ **Status: 1.1 — polish.** Campaign runs studio splash → Foundry
+> ⚠️ **Status: 1.2 — gold.** Campaign runs studio splash → Foundry
 > Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
 > Select · Daily Run), and the feel stack is real. Art is **owned procedural art
 > (`tools/gen_*.py`) + bespoke generated boss/vehicle/desert pieces** over a Kenney-CC0
@@ -76,7 +76,7 @@ posed sim states, no mockups, no concept art.</sub>
 
 ## 📥 Download & Play
 
-**[⬇️ Latest release — v1.1.0](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
+**[⬇️ Latest release — v1.2.0](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
 
 | 🖥️ Platform | 📦 File | 📏 | 📝 |
 |---|---|---|---|
@@ -102,6 +102,7 @@ gitGraph
    commit id: "v0.3.0 · public" tag: "v0.3.0"
    commit id: "v1.0.0 · launch" tag: "v1.0.0"
    commit id: "v1.1.0 · polish" tag: "v1.1.0"
+   commit id: "v1.2.0 · gold" tag: "v1.2.0"
 ```
 
 | 🏷️ | 📅 | 🎯 What it marks |
@@ -111,7 +112,8 @@ gitGraph
 | `v0.2.5` | 2026-07-21 | **Commander In Chief** — the rebrand + animated boot splash |
 | `v0.3.0` | 2026-07-27 | **First public release** — clean history, binaries for three platforms |
 | `v1.0.0` | 2026-08-24 | **1.0 launch** — safe-area docs + HUD/menu 1.0 sweep, ultrawide pillarbox verified |
-| `v1.1.0` | 2026-08-24 | **1.1 polish** — HUD Container, GL gate, roll gate, filter NEAREST, safe-area
+| `v1.1.0` | 2026-08-24 | **1.1 polish** — HUD Container, GL gate, roll gate, filter NEAREST, safe-area |
+| `v1.2.0` | 2026-08-24 | **1.2 gold** — final AAA sweep, all 5 tells closed, store-ready |
 
 </details>
 
