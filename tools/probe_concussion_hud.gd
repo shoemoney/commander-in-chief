@@ -43,8 +43,20 @@ extends SceneTree
 ## tell "the warp spares the PLAYER" from "the warp spares a fixed disc of
 ## SCREEN". Those are different fixes and only one of them is the one asked for.
 ##
-## Needs a GL context (the screen-reading shader is a no-op without one):
-##   godot --path . --rendering-method gl_compatibility -s res://tools/probe_concussion_hud.gd
+## Needs a GL context (the screen-reading shader is a no-op without one), and
+## --fixed-fps 60 -- REQUIRED under a slow/software renderer (xvfb's llvmpipe in
+## CI), same reason tools/screenshots.gd pairs it with its own capture: without it,
+## `delta` reports the real (inflated) per-frame render time, which (1) makes
+## Godot's physics catch-up run extra ticks per rendered frame, landing the
+## "150-frame settle" far later/busier than intended, and (2) makes every
+## delta-eased HUD polish (odometer rollup, chest/score pulse decay, shop-strip
+## ease, verb-legend fade) take one huge step per real frame instead of many small
+## ones -- both read as "baseline HUD motion" and fail check 1 as INCONCLUSIVE even
+## though concussion never ran. Reproduced locally 2026-09-05 via `--fixed-fps 5`
+## (forces the same oversized delta): baseline motion jumped from ~150px to
+## 700-2300px and the run went PROBE FAILED, matching CI's ~1000px top-band
+## signature; `--fixed-fps 60` restores ~150px and PROBE OK on the same tree.
+##   godot --path . --rendering-method gl_compatibility --fixed-fps 60 -s res://tools/probe_concussion_hud.gd
 ## No sampling-window hazard: the probe sets _concussion directly and captures
 ## at peak; decay is x0.9/frame from 1.0 (~50 frames to 0.01), the capture is 2.
 

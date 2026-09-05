@@ -212,7 +212,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          xvfb-run -a godot --path . --rendering-method gl_compatibility -s res://tools/probe_concussion_hud.gd 2>&1 | tee probe.log
+          # --fixed-fps 60 is load-bearing, not a nicety: xvfb's software (llvmpipe)
+          # GL means real per-frame render time balloons versus a native GPU, and
+          # without this flag `delta` in every _process() call reports that real,
+          # inflated time. Two things key off delta while the probe's capture window
+          # is supposedly frozen: (1) Godot's own physics catch-up runs EXTRA fixed
+          # 60Hz ticks per rendered frame to keep sim-time matched to wall-clock time,
+          # so the "150-frame settle" the probe waits out before freezing physics
+          # lands at a far busier, later point in the run than intended; (2) HUD
+          # polish that eases on wall-clock delta (hud.gd's odometer rollup, the
+          # chest/score pulse decay, the shop-strip ease, the verb-legend fade) takes
+          # one huge visible step per real frame instead of many small ones. Both
+          # inflate the "baseline motion between two concussion-0 frames" this probe
+          # measures, without concussion doing anything at all. --fixed-fps 60 pins
+          # delta to exactly 1/60s regardless of how long xvfb actually took to draw,
+          # which is the same fix tools/screenshots.gd already documents for this
+          # exact failure mode ("so the time-driven pulses land on the same phase").
+          xvfb-run -a godot --path . --rendering-method gl_compatibility --fixed-fps 60 -s res://tools/probe_concussion_hud.gd 2>&1 | tee probe.log
           if ! grep -q "PROBE OK" probe.log; then
             echo "::error::probe_concussion_hud did not report PROBE OK — see probe.log"
             cat probe.log
