@@ -3608,3 +3608,287 @@ func test_the_toast_backdrop_never_branches_on_its_own_copy() -> void:
 				Runner.T.ok(union.encloses(r),
 					"fsz %d punch %.1f: core+caps enclose the plate rect (union %s vs plate %s)"
 						% [size, punch, str(union), str(r)])
+
+
+## The southmost world row (in whole px south of the gate) at which the fork's wreck island
+## still divides the lanes — measured off the SIM'S OWN blocker predicate, never a literal.
+## That row IS the commitment line: past it lateral lane-swap is illegal, so the lane label
+## has to be readable at or before it or it is naming a choice already made.
+func _fork_commitment_row(sim: SimWorld) -> int:
+	var fork_x := 260
+	var south := -1
+	for d in range(0, 1200):
+		if sim._in_fork_divider(fork_x * Fixed.ONE, d * Fixed.ONE, 0, fork_x):
+			south = d
+	return south
+
+
+## The world-y offset south of the gate that _draw_gates ACTUALLY plants the lane signposts at.
+## Read from the draw itself so this check measures the PLANTED anchor rather than a helper the
+## draw might never call. Returns -1.0 if the draw line can't be found.
+func _fork_sign_planted_row(ms: Script) -> float:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var i := src.find("var fy := _to_screen(0, fk[\"y\"] + ")
+	Runner.T.ok(i >= 0, "found the lane-signpost row in _draw_gates")
+	if i < 0:
+		return -1.0
+	var line := src.substr(i, src.find("\n", i) - i)
+	if line.contains("fork_sign_row()"):
+		Runner.T.ok(ms.has_method("fork_sign_row"),
+			"the draw calls fork_sign_row() and main.gd defines it")
+		if not ms.has_method("fork_sign_row"):
+			return -1.0
+		return float(ms.call("fork_sign_row"))
+	var lit := RegEx.create_from_string("\\+ (\\d+) \\* Fixed\\.ONE")
+	var m := lit.search(line)
+	Runner.T.ok(m != null, "the signpost row is either derived or a readable literal: %s" % line.strip_edges())
+	return float(m.get_string(1).to_int()) if m != null else -1.0
+
+
+func test_fork_signs_are_readable_at_the_commitment_tick() -> void:
+	## The fork is dressed by FOUR anchored world elements; three derive their offsets from the
+	## sim geometry they represent (island wrecks +70..+610 <- _in_fork_divider +40..+620, CACHE
+	## wire +100/+220/+340/+460 <- _in_fork_wire, bait sandbags +490/+530 <- the sim's own bags).
+	## The lane SIGNPOSTS — the only one of the four that NAMES the choice — were a hand-typed
+	## +180, and _draw_gates' own comment ("the telegraph must land before the band does") asserted
+	## the opposite of what shipped: at the commitment tick the sign sat at fy -180, outside the
+	## draw's own cull, i.e. not drawn AT ALL. Pin the DERIVATION, not the y: every term below is
+	## read live from the sim's blocker predicate, SimWorld.CAMERA_LEAD and main.gd's own SIGN_*
+	## consts, so deepening the island, retuning the camera lead or resizing the font all recompute.
+	## Nothing here samples a tick window, so there is no window to be out-run.
+	var ms: Script = load("res://src/main.gd")
+	var cm: Dictionary = _consts()
+	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
+	var south := _fork_commitment_row(sim)
+	Runner.T.ok(south > 0, "the sim's fork blocker has a measurable south edge (got %d)" % south)
+	var lead := float(SimWorld.CAMERA_LEAD) / float(Fixed.ONE)
+	Runner.T.ok(lead > 0.0, "CAMERA_LEAD is the sim's own approach lead (%.0f px)" % lead)
+	var row := _fork_sign_planted_row(ms)
+	if row < 0.0 or south <= 0:
+		return
+	# camera_top == player_y - CAMERA_LEAD on the approach, so a sign planted at gate+row sits at
+	# fy = row - south + lead on the tick the island first spans the player.
+	var fy_commit := row - float(south) + lead
+	Runner.T.ok(fy_commit > -20.0 and fy_commit < 380.0,
+		"the lane label is INSIDE the draw's own cull (-20..380) on the commitment tick: fy=%.1f (planted +%.0f, island south +%d, lead %.0f)"
+			% [fy_commit, row, south, lead])
+	Runner.T.ok(ms.has_method("fork_sign_relevance"), "the approach-only relevance fade exists")
+	if ms.has_method("fork_sign_relevance"):
+		var rel: float = ms.call("fork_sign_relevance", fy_commit)
+		Runner.T.ok(rel >= 0.95,
+			"the label is at FULL alpha on the commitment tick (relevance %.2f at fy=%.1f)" % [rel, fy_commit])
+	# The plate the draw builds from that fy must be wholly on screen — both signs, both lane
+	# layouts. (Measured, not assumed: the signposts pass SIGN_FONT to Art.text RAW, so unlike
+	# the world callouts they are deliberately NOT routed through Art.text_scale — art.gd:955
+	# exempts hand-fitted plate geometry. Sweeping text_scale here would be a vacuous arm.)
+	var sign_font := int(cm["SIGN_FONT"])
+	var pad_x := float(cm["SIGN_PAD_X"])
+	var cw: float = Art.tw("< CACHE", sign_font)
+	var bw: float = Art.tw("BOUNTY >", sign_font)
+	for cache_left in [true, false]:
+		var sxs: Vector2 = ms.fork_sign_xs(cache_left, cw, bw)
+		for s in [[sxs.x, cw, "CACHE"], [sxs.y, bw, "BOUNTY"]]:
+			var plate := Rect2(float(s[0]) - pad_x, fy_commit - float(sign_font - 2),
+				float(s[1]) + 2.0 * pad_x, float(sign_font + 4))
+			Runner.T.ok(Rect2(0, 0, 640, 360).encloses(plate),
+				"%s plate is wholly on screen (cache_left %s): %s" % [s[2], cache_left, plate])
+	# Source guard: the anchor must stay DERIVED. A re-typed literal is the whole defect.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(not src.contains("fk[\"y\"] + 180 * Fixed.ONE"),
+		"the hand-typed +180 signpost anchor is gone")
+	Runner.T.ok(ms.has_method("fork_sign_row"),
+		"the signpost row is a named derivation (fork_sign_row), not a literal in the draw")
+
+
+## Every world row (in whole px south of the gate) that the fork loop's PROLOGUE — everything
+## above the island-wreck loop — culls on, resolved to real numbers. The draw's outer `continue`
+## is modelled as a SPAN cull over [min, max] of those rows, which reduces exactly to a point
+## cull when the prologue guards on a single row (that is what HEAD does). Read from the source
+## so the model tracks whatever the draw actually gates the whole fork on.
+func _fork_prologue_cull_rows(ms: Script) -> Array:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var i := src.find("for fk in _forks:")
+	Runner.T.ok(i >= 0, "found the fork dressing loop in _draw_gates")
+	if i < 0:
+		return []
+	var wreck := src.find("for wi in 7:", i)
+	Runner.T.ok(wreck > i, "found the island-wreck loop that the prologue sits above")
+	if wreck < i:
+		return []
+	var prologue := src.substr(i, wreck - i)
+	var cut := prologue.find("continue")
+	if cut < 0:
+		return []          # no outer cull at all: nothing can short-circuit the dressing
+	prologue = prologue.substr(0, cut)
+	var rows: Array = []
+	var re := RegEx.create_from_string("_to_screen\\(0, fk\\[\"y\"\\] \\+ (.*?)\\)\\.y")
+	for m in re.search_all(prologue):
+		var expr: String = m.get_string(1).strip_edges()
+		if expr.contains("fork_sign_row()"):
+			rows.append(float(int(ms.call("fork_sign_row"))))
+		elif expr.contains("FORK_DIVIDER_N"):
+			rows.append(float(SimWorld.FORK_DIVIDER_N) / float(Fixed.ONE))
+		elif expr.contains("FORK_DIVIDER_S"):
+			rows.append(float(SimWorld.FORK_DIVIDER_S) / float(Fixed.ONE))
+		else:
+			var lit := RegEx.create_from_string("^(\\d+) \\* Fixed\\.ONE$")
+			var lm := lit.search(expr)
+			Runner.T.ok(lm != null, "the fork prologue's cull row is resolvable: %s" % expr)
+			if lm != null:
+				rows.append(float(lm.get_string(1).to_int()))
+	return rows
+
+
+## The dressing rows the draw plants, read off the SAME literals the draw uses (count and
+## stride both), so retuning either recomputes here instead of drifting.
+func _fork_dressing_rows(pat: String, count_pat: String) -> Array:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var i := src.find("for fk in _forks:")
+	if i < 0:
+		return []
+	var blk := src.substr(i, 2600)
+	var cm := RegEx.create_from_string(count_pat).search(blk)
+	var rm := RegEx.create_from_string(pat).search(blk)
+	Runner.T.ok(cm != null and rm != null, "found the dressing row literals for %s" % count_pat)
+	if cm == null or rm == null:
+		return []
+	var out: Array = []
+	for k in cm.get_string(1).to_int():
+		out.append(float(rm.get_string(1).to_int() + k * rm.get_string(2).to_int()))
+	return out
+
+
+func test_fork_island_art_is_drawn_while_its_collision_is_live() -> void:
+	## c4-19 regression pin. The fork's ENTIRE dressing block (wreck island, CACHE barbed wire,
+	## bait sandbags) sat under ONE `continue` computed from the SIGNPOST row, so moving the sign
+	## anchor moved the island art off the island: at player gate+200 the frame went from 3 wrecks
+	## + 2 wire strips to bare dirt, across the whole 300px stretch where _in_fork_divider is
+	## actively blocking lateral movement. The three dressing loops each carry their own cull;
+	## the outer one must be the ISLAND'S span, and the signpost's cull must be local to the
+	## signpost. Pinned as the CLASS: the traverse band is read from SimWorld.FORK_DIVIDER_N/S,
+	## the dressing rows off the draw's own literals, the cull window off the draw's own bounds.
+	## Nothing samples a tick window, so there is no window to be out-run.
+	var ms: Script = load("res://src/main.gd")
+	var lead := float(SimWorld.CAMERA_LEAD) / float(Fixed.ONE)
+	var isl_n := float(SimWorld.FORK_DIVIDER_N) / float(Fixed.ONE)
+	var isl_s := float(SimWorld.FORK_DIVIDER_S) / float(Fixed.ONE)
+	Runner.T.ok(isl_s > isl_n, "the sim's fork blocker spans a real band (+%.0f..+%.0f)" % [isl_n, isl_s])
+	# The draw's own cull window, read from the draw rather than retyped.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var wm := RegEx.create_from_string("if wy2 < (-?[0-9.]+) or wy2 > ([0-9.]+):").search(src)
+	Runner.T.ok(wm != null, "found the island-wreck cull bounds in the draw")
+	if wm == null:
+		return
+	var lo := float(wm.get_string(1).to_float())
+	var hi := float(wm.get_string(2).to_float())
+	var cull_rows := _fork_prologue_cull_rows(ms)
+	var wrecks := _fork_dressing_rows("\\((\\d+) \\+ wi \\* (\\d+)\\) \\* Fixed\\.ONE", "for wi in (\\d+):")
+	var wires := _fork_dressing_rows("\\((\\d+) \\+ ci \\* (\\d+)\\) \\* Fixed\\.ONE", "for ci in (\\d+):")
+	Runner.T.ok(wrecks.size() > 0 and wires.size() > 0,
+		"resolved the island wreck (%d) and CACHE wire (%d) rows" % [wrecks.size(), wires.size()])
+	if wrecks.is_empty() or wires.is_empty():
+		return
+	var cull_lo: float = 0.0
+	var cull_hi: float = 0.0
+	if not cull_rows.is_empty():
+		cull_lo = cull_rows.min()
+		cull_hi = cull_rows.max()
+	# Sweep the whole traverse. Every tick the player is INSIDE the blocker, the art that
+	# represents it has to be on screen — that is the frame where a bare-dirt lane divider is
+	# a lie about the collision the player is bouncing off.
+	var skipped: Array = []
+	var no_wreck: Array = []
+	var no_wire: Array = []
+	for step in range(0, int(isl_s - isl_n) + 1, 5):
+		var p := isl_n + float(step)
+		# camera_top == player_y - CAMERA_LEAD, so screen y of a row R south of the gate is
+		# R - p + lead.
+		if not cull_rows.is_empty():
+			var top := cull_lo - p + lead
+			var bot := cull_hi - p + lead
+			if bot < lo or top > hi:
+				skipped.append(p)
+				continue
+		var seen_w := false
+		for r in wrecks:
+			var sy: float = float(r) - p + lead
+			if sy >= lo and sy <= hi:
+				seen_w = true
+		var seen_c := false
+		for r in wires:
+			var sy2: float = float(r) - p + lead
+			if sy2 >= lo and sy2 <= hi:
+				seen_c = true
+		if not seen_w:
+			no_wreck.append(p)
+		if not seen_c:
+			no_wire.append(p)
+	Runner.T.eq(skipped.size(), 0,
+		"the fork dressing loop is never short-circuited while the player is inside the blocker (skipped at player offsets %s; outer cull spans +%.0f..+%.0f)"
+			% [str(skipped.slice(0, 6)), cull_lo, cull_hi])
+	Runner.T.eq(no_wreck.size(), 0,
+		"an island wreck row survives the draw's cull on every such tick (missing at %s)" % str(no_wreck.slice(0, 6)))
+	Runner.T.eq(no_wire.size(), 0,
+		"a CACHE wire row survives the draw's cull on every such tick (missing at %s)" % str(no_wire.slice(0, 6)))
+	# Shape guard: the whole-fork cull must be derived from the island's own span, never from a
+	# label's row. A sign is a caption; it cannot decide whether the terrain exists.
+	Runner.T.ok(not cull_rows.is_empty(), "the fork loop still culls SOMETHING at the top (perf)")
+	for r in cull_rows:
+		Runner.T.ok(r == isl_n or r == isl_s,
+			"the outer cull row +%.0f is one of the island's own edges (+%.0f/+%.0f), not a caption's row"
+				% [r, isl_n, isl_s])
+
+
+func test_verb_mastery_is_written_to_the_save() -> void:
+	## c4-19: the bottom verb chip's mastery was RUN-LOCAL by deliberate design (hud.gd:721) —
+	## "successful verb inputs should be rehearsed again in a fresh campaign". That intent is
+	## invisible to a player who has rolled ten thousand times and still gets the keybind
+	## billboard on run 400. Teaching now goes once-ever through the store that already exists
+	## for exactly this (_seen, the same one _hint() uses), including the TITLE guard that keeps
+	## the attract-mode bot from burning mastery to disk.
+	var m := Main.new()
+	Runner.T.ok(m.has_method("record_verb_mastery"),
+		"main.gd records verb mastery through a named seam (record_verb_mastery) so the persistence path is testable without a live input device")
+	Runner.T.ok(m.has_method("verb_taught_set"),
+		"main.gd publishes the taught set for the HUD to seed from (verb_taught_set)")
+	if not (m.has_method("record_verb_mastery") and m.has_method("verb_taught_set")):
+		m.free()
+		return
+	m._menu.mode = GameMenu.Mode.TITLE
+	m.record_verb_mastery(["roll"])
+	Runner.T.ok(m._seen.is_empty(),
+		"attract mode burns nothing to disk (same guard _hint() carries)")
+	m._menu.mode = GameMenu.Mode.HIDDEN
+	m.record_verb_mastery(["roll"])
+	Runner.T.eq(m._seen.get("verb:roll", false), true, "a fired verb lands in the persisted [seen] store")
+	Runner.T.eq(m._seen_dirty, true, "and marks the save dirty so _flush_bests actually writes it")
+	m._seen_dirty = false
+	m.record_verb_mastery(["roll"])
+	Runner.T.eq(m._seen_dirty, false, "a repeat is idempotent — no needless save churn")
+	Runner.T.eq(m.verb_taught_set().get("roll", false), true, "the published set reports the taught verb")
+	Runner.T.ok(not m.verb_taught_set().has("grenade"), "and reports nothing the player has not fired")
+	# Round-trip through the REAL load helper (_cfg_dict on the [seen] hints section), so the
+	# flag is proven to survive the same seam _hint()'s flags already ride.
+	var cf := ConfigFile.new()
+	cf.set_value("seen", "hints", m._seen)
+	var m2 := Main.new()
+	m2._seen = m2._cfg_dict(cf, "seen", "hints")
+	Runner.T.eq(m2.verb_taught_set().get("roll", false), true,
+		"the flag survives the real [seen] hints save/load path")
+	# Wiring ratchet: the ONE place every player's verb input resolves must drive it.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var gi := src.find("func _gather_inputs()")
+	Runner.T.ok(gi >= 0, "found _gather_inputs")
+	if gi >= 0:
+		# Cut at _gather_inputs' OWN `return inputs`, not at the next top-level func: the seam's
+		# DEFINITION lives immediately below it, and a block that swallowed the definition matched
+		# its own name — the check stayed green with the call deleted (verified by mutation).
+		var ge := src.find("\n\treturn inputs", gi)
+		Runner.T.ok(ge > gi and ge - gi > 200, "the _gather_inputs body is delimited by its own return")
+		var blk := src.substr(gi, ge - gi)
+		Runner.T.ok(not blk.contains("func record_verb_mastery"),
+			"the block under test is the CALL SITE, not the definition")
+		Runner.T.ok(blk.contains("record_verb_mastery("),
+			"_gather_inputs persists mastery alongside the run-local _hud_icons.verb_used() call")
+	m2.free()
+	m.free()

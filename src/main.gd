@@ -6909,7 +6909,50 @@ func _gather_inputs() -> Array[SimInput]:
 	var p1_completed := p1_verb_completions(inputs, not _wheel.is_empty() and _wheel[0]["open"])
 	for act in p1_completed:
 		_hud_icons.verb_used(act)
+	record_verb_mastery(p1_completed)
 	return inputs
+
+
+## c4-19: verb teaching is ONCE EVER — the same contract _hint()/_seen already hold for every
+## other onboarding cue in the game. The bottom verb chip retired a segment on real use and
+## capped itself at VERB_WINDOW, but that mastery was RUN-LOCAL by deliberate design
+## (hud.gd's verb_begin_run note), so a player on their 400th run got the identical keybind
+## billboard, and the row-0 SUPPLIES cue never retired at all. Both now ride this one flag.
+## Extracted from _gather_inputs so a test can drive the real persistence seam without a live
+## input device.
+## Persist "the player has demonstrably fired this verb" into the ONE teaching store this game
+## already has (_seen, the same one _hint() writes), so the bottom verb chip and the row-0
+## SUPPLIES cue teach once-EVER instead of re-arming every run forever.
+##
+## DELIBERATELY NOT CLEARED BY RESET DEFAULTS (_reset_settings, above). Teaching is not a
+## setting: _reset_settings reverts SETTINGS_DEFAULTS and has never touched _seen, so every
+## _hint() flag already survives a reset. Clearing only the verb: keys would make the two
+## halves of one store behave differently — a player who hits RESET DEFAULTS would get the
+## keybind billboard back but none of the band cues. If that is ever revisited, it is a
+## decision about the WHOLE _seen store (a separate "restore first-run tutorials" action),
+## not about these keys. Recorded here so the next pass does not re-derive it.
+func record_verb_mastery(acts: Array) -> void:
+	# Never during attract mode — the same guard _hint() carries, or the demo bot burns every
+	# verb to disk before the player ever plays.
+	if _menu != null and _menu.mode == GameMenu.Mode.TITLE:
+		return
+	for act in acts:
+		var key := "verb:" + str(act)
+		if not _seen.get(key, false):
+			_seen[key] = true
+			_seen_dirty = true
+
+
+## The verbs this save has already taught. Seeds the HUD's run-local mastery at verb_begin_run
+## so a returning player never gets the keybind billboard back, and gates the row-0 SUPPLIES
+## cue. Keyed off HudIcons.VERB_SEGS rather than a literal list, so a fourth verb is covered
+## the day it lands.
+func verb_taught_set() -> Dictionary:
+	var out := {}
+	for s in HudIcons.VERB_SEGS:
+		if _seen.get("verb:" + str(s[0]), false):
+			out[s[0]] = true
+	return out
 
 
 ## Pure local-co-op seam: the global teaching chip follows P1's active glyph family, therefore
@@ -9639,6 +9682,22 @@ static func fork_sign_xs(cache_left: bool, cache_w: float, bounty_w: float) -> V
 	return Vector2(cx, bx)
 
 
+## The signpost row south of the gate, DERIVED — never typed. The fork is dressed by four
+## anchored world elements and three of them already read their offsets off the sim geometry
+## they represent (island wrecks <- _in_fork_divider, CACHE wire <- _in_fork_wire, bait bags
+## <- the sim's own sandbag rows). The signposts — the only one of the four that NAMES the
+## lane choice — were a hand-typed +180, which put them at screen y -180 on the tick the
+## choice locks: outside the draw's own cull, i.e. not drawn at all, sliding in at full alpha
+## only once the decision was already behind the player.
+##
+## camera_top == player_y - CAMERA_LEAD on the approach, so a sign planted at gate+S sits at
+## fy = S - FORK_DIVIDER_S + CAMERA_LEAD on the tick the island first spans the player. Solve
+## for S: 620 - 260 + 120 = 480.
+static func fork_sign_row() -> float:
+	return float(SimWorld.FORK_DIVIDER_S / Fixed.ONE) \
+		- float(SimWorld.CAMERA_LEAD / Fixed.ONE) + SIGN_COMMIT_FY
+
+
 static func fork_sign_alpha(sign_rect: Rect2, band: Array, players := []) -> float:
 	## Pure half of the signpost/band yield (view-only float math, same shape as
 	## _wheel_scrim_alpha). The route-fork signposts are the ONLY anchored world
@@ -9800,8 +9859,16 @@ func _draw_gates() -> void:
 	var cw2 := Art.tw(cache_txt, SIGN_FONT)
 	var bw2 := Art.tw(bounty_txt, SIGN_FONT)
 	for fk in _forks:
-		var fy := _to_screen(0, fk["y"] + 180 * Fixed.ONE).y
-		if fy < -20.0 or fy > 380.0:
+		# Cull the WHOLE fork on the ISLAND'S own screen span, never on a caption's row.
+		# c4-19: this guard used to be computed from the signpost row, so the three dressing
+		# loops below (wrecks / CACHE wire / bait bags) — each of which already carries its
+		# own cull — never got the chance to run, and moving the sign anchor moved the island
+		# ART off the island: bare dirt for the entire stretch where _in_fork_divider is
+		# actively blocking lateral movement. A label is a caption; it cannot decide whether
+		# the terrain exists. The signpost's own cull now lives with the signpost, below.
+		var isl_top := _to_screen(0, fk["y"] + SimWorld.FORK_DIVIDER_N).y
+		var isl_bot := _to_screen(0, fk["y"] + SimWorld.FORK_DIVIDER_S).y
+		if isl_bot < -20.0 or isl_top > 380.0:
 			continue
 		# Physical fork island (7v): stacked wrecks divide the lanes at x=260 —
 		# CACHE reads narrow/fortified, BOUNTY reads open killbox. c2 2v: SEVEN
@@ -9841,6 +9908,12 @@ func _draw_gates() -> void:
 					continue
 				_wall_seg(Vector2(bait_x + bd * 20.0, bdy), 0.62, Color(1.02, 0.98, 0.74),
 					int(bait_x) + bd, fk["y"] / 65536 + 490 + bd * 40, 0)
+		# Signpost row + ITS OWN cull. Kept below the dressing (which has already drawn) and
+		# above the arbiter reservation and the fade lerp, so an off-screen sign still reserves
+		# nothing and still does not lerp — HEAD's behaviour, which the arbiter tests depend on.
+		var fy := _to_screen(0, fk["y"] + int(fork_sign_row()) * Fixed.ONE).y
+		if fy < -20.0 or fy > 380.0:
+			continue
 		var sign_xs := fork_sign_xs(cache_left, cw2, bw2)
 		var cx := sign_xs.x
 		var bx := sign_xs.y
@@ -10897,6 +10970,10 @@ const SIGN_PAD_X := 4.0
 # strips and island wrecks carry the in-band truth once the decision is made.
 const SIGN_FADE_FULL := 130.0
 const SIGN_FADE_GONE := 210.0
+# The screen y the lane labels hold on the COMMITMENT tick. 120 is inside the draw's own
+# cull (fy > -20, see _draw_gates) and inside the SIGN_FADE_FULL plateau (<= 130) with 10px
+# of margin on the plateau edge.
+const SIGN_COMMIT_FY := 120.0
 # Veteran-armor chip flash — the SAME amber family the wave banner wears so the two
 # veteran cues cross-reference, and distinct from the nest's sand chip
 # (0.85, 0.78, 0.5) and the shield's cyan (0.55, 0.85, 1.0).

@@ -211,6 +211,7 @@ var _verb_show := VERB_WINDOW   # c1-04: ticks-worth of the BRIGHT gameplay-verb
                           # chip fades FULLY out — the permanent ROLL/WHEEL/REVIVE
                           # reference lives on the PAUSE footer instead.
 var _verb_used := {}      # c-onboard: act -> true for every verb whose input has actually FIRED
+var _verb_taught := {}    # c4-19: act -> true for every verb the SAVE has already taught (main.verb_taught_set)
                           # this run. A used segment drops off the chip immediately (the reminder
                           # did its job); the rest stay up. Cleared on a fresh SimWorld alongside
                           # _verb_sim_id, so a restart re-teaches all three.
@@ -579,7 +580,8 @@ func _process(delta: float) -> void:
 	# which would needlessly repaint the whole static bright phase.
 	var paused: bool = main._menu != null and main._menu.is_active()
 	if sim.get_instance_id() != _verb_sim_id:
-		verb_begin_run(sim.get_instance_id(), verb_device_key(Art.use_pad, Art.pad_brand))
+		verb_begin_run(sim.get_instance_id(), verb_device_key(Art.use_pad, Art.pad_brand),
+			main.verb_taught_set())
 	var verb_a := _verb_alpha(_verb_show, main._motion)
 	var res := verb_step(_verb_show, _verb_sim_id, sim.get_instance_id(),
 		paused, false, delta)
@@ -717,17 +719,21 @@ static func verb_device_key(use_pad: bool, pad_brand: String) -> String:
 	return "pad:%s" % pad_brand.to_lower() if use_pad else "keyboard"
 
 
-## Start a new run with fresh mastery for the device currently in P1's hands. This state is
-## intentionally run-local: persisted teaching lives in _seen, while successful verb inputs
-## should be rehearsed again in a fresh campaign without becoming a permanent overlay.
-func verb_begin_run(sim_id: int, device_key: String) -> void:
+## Start a new run, SEEDED from the save's taught set (main.verb_taught_set). c4-19: this
+## state used to be reset to {} on every run — deliberately, so verbs would be "rehearsed
+## again in a fresh campaign". That intent is invisible to a player who has rolled ten
+## thousand times and still gets a re-armed keybind billboard on run 400, which reads as an
+## unfinished UI. Teaching is now once-ever, riding the same persisted _seen store as _hint().
+## A first-time player is unaffected: an empty `taught` reproduces the old behaviour exactly.
+func verb_begin_run(sim_id: int, device_key: String, taught := {}) -> void:
 	_verb_sim_id = sim_id
 	_verb_device_used.clear()
 	_verb_device_show.clear()
 	_verb_device_key = device_key
-	_verb_used = {}
+	_verb_taught = taught.duplicate()
+	_verb_used = taught.duplicate()
 	_verb_show = VERB_WINDOW
-	_verb_device_used[device_key] = {}
+	_verb_device_used[device_key] = taught.duplicate()
 	_verb_device_show[device_key] = VERB_WINDOW
 	_dirty = true
 
@@ -1816,7 +1822,11 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# the closed dim icon peek) reads as conflicting instructions. Strictly one-or-the-other: the strip
 	# owns endless, and when it drops for height (2P) the wheel cue is the buy affordance instead.
 	var wheel_adv := _act_glyph_adv("wheel", 11.0, 0)
-	if not shop_row and _fits2("supplies", _tw("SUPPLIES") + wheel_adv + 12.0):
+	# c4-19: ...and suppressed FOREVER once the player has actually opened the wheel. The
+	# bottom verb chip and this cue teach the same verb; retiring only the chip would have left
+	# the wheel advertised permanently 20px away on the corner plate. One persisted predicate.
+	if not shop_row and not _verb_taught.get("wheel", false) \
+			and _fits2("supplies", _tw("SUPPLIES") + wheel_adv + 12.0):
 		if not _measure:
 			_emit_act_glyph_at("wheel", x + GLYPH_GAP, y + ICON / 2.0, 11.0, Color.WHITE, false)
 		# Text starts past the REAL cap, not a frozen +13.0 that assumed a square: a "Q"

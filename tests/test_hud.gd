@@ -201,6 +201,10 @@ class _MainStub extends Node2D:
 	# draw_glyph's own default for the pad_button arg, so the stub stays neutral: these suites
 	# measure ROW GEOMETRY, and a real button index here would change glyph widths.
 	func pad_bind_for_glyph(_a: String, _device := 0) -> int: return -1
+	# c4-19: the persisted verb-teaching set the HUD seeds run-local mastery from. Default is a
+	# fresh save that has taught nothing, so every existing row test keeps the first-run frame.
+	var taught_set := {}
+	func verb_taught_set() -> Dictionary: return taught_set
 
 
 class _VerbMain extends _MainStub:
@@ -4281,3 +4285,86 @@ func test_published_keycap_width_matches_the_font() -> void:
 	Runner.T.eq(Art.glyph_cap_w("revive", 11.0, KEY_BACKSPACE, 0, true), 11.0,
 		"the pad path stays square regardless of the keyboard bind")
 	Art.use_pad = was_pad
+
+
+# c4-19: teaching that has been LEARNED must leave the screen — through BOTH seams that
+# advertise the same verb. The bottom chip already retires a segment on real use and caps
+# itself at VERB_WINDOW, but its lifecycle was RUN-LOCAL: a veteran's 400th run re-armed the
+# full 1800-tick billboard from scratch. And fixing only the bottom chip would have retired the
+# supply-wheel prompt from the playfield while leaving it advertised permanently 20px away on
+# the row-0 corner plate ("SUPPLIES" + wheel glyph, hud.gd:1819) — the patch-the-instance trap.
+# One persisted predicate, both surfaces.
+#
+# This capture records BOTH seams: _emit_act_glyph_at (row-0 cue, inherited from
+# _ChipCaptureHud) and _emit_glyph (bottom verb chip).
+class _TaughtCaptureHud extends _ChipCaptureHud:
+	func _emit_rect(r: Rect2, _c: Color) -> void:
+		boxes.append({"k": "rect", "id": "verb_plate", "box": r})
+	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
+		boxes.append({"k": "glyph", "id": act,
+			"box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
+	func _emit_label(txt: String, pos: Vector2, _c: Color) -> void:
+		boxes.append({"k": "label", "id": txt, "box": Rect2(pos, Vector2.ZERO)})
+
+
+## One QUIET non-endless frame for the two surfaces that advertise a keybind with no contextual
+## trigger at all: the row-0 SUPPLIES cue and the bottom verb chip. Nobody downed, no crate in
+## range, wheel closed, shop strip ineligible. Returns [captured glyph acts, verb_chip_rect()].
+func _taught_frame(taught: Dictionary) -> Array:
+	var sim := SimWorld.new(0, 1, "campaign")
+	var main := _VerbMain.new()
+	main.sim = sim
+	main.taught_set = taught
+	var h := _TaughtCaptureHud.new()
+	h.main = main
+	h._ready()
+	h.verb_begin_run(sim.get_instance_id(), Hud.verb_device_key(false, ""), main.verb_taught_set())
+	h._verb_show = 300.0
+	h._measure = false
+	h._opt_keep = {"supplies": true}   # the row-0 planner kept the cue; only the taught gate can drop it
+	h._row0_opt(sim, 8.0, 6.0, false)
+	h._verb_legend()
+	var acts := {}
+	for b in h.boxes:
+		if b["k"] == "glyph":
+			acts[b["id"]] = true
+	var chip: Rect2 = h.verb_chip_rect()
+	h.free()
+	main.free()
+	return [acts, chip]
+
+
+func test_taught_verbs_leave_both_the_playfield_and_the_plate() -> void:
+	# The act set is read LIVE off VERB_SEGS, and the capture is over the EMISSION SEAMS rather
+	# than one rect at one y — a fourth verb, or a fifth glyph call site on either seam, is
+	# covered the day it lands (paired with the GLYPH_CALL_SITES roster, which counts the sites).
+	var hs: Script = load("res://src/view/hud.gd")
+	var arity := -1
+	for m in hs.get_script_method_list():
+		if m["name"] == "verb_begin_run":
+			arity = (m["args"] as Array).size()
+	Runner.T.eq(arity, 3,
+		"verb_begin_run seeds run-local mastery from the SAVE (sim_id, device_key, taught) — a run-local reset re-arms the keybind billboard on every run, forever")
+	if arity != 3:
+		return
+	var every := {}
+	for s in Hud.VERB_SEGS:
+		every[s[0]] = true
+	Runner.T.ok(every.size() >= 3, "the taught set is derived from VERB_SEGS, and VERB_SEGS is non-trivial")
+	# CONTROL — a fresh save must still teach everything. A vacuous capture proves nothing, so
+	# this arm is the "the check CAN see them" half of the pin.
+	var fresh: Array = _taught_frame({})
+	var fresh_acts: Dictionary = fresh[0]
+	for a in every:
+		Runner.T.ok(fresh_acts.has(a),
+			"fresh save: '%s' is still taught on a quiet frame (the capture can see this seam)" % a)
+	Runner.T.ok((fresh[1] as Rect2).has_area(), "fresh save: the bottom verb chip is armed")
+	# VETERAN — every verb already fired in an earlier run. Zero unconditional keybind glyphs
+	# through EITHER seam, and the bottom rail reserves nothing.
+	var vet: Array = _taught_frame(every)
+	var vet_acts: Dictionary = vet[0]
+	for a in every:
+		Runner.T.ok(not vet_acts.has(a),
+			"veteran save: '%s' is no longer advertised on a quiet frame (both seams)" % a)
+	Runner.T.eq(vet[1] as Rect2, Rect2(),
+		"veteran save: verb_chip_rect() is empty, so bottom_rail_rects reserves no band for it")

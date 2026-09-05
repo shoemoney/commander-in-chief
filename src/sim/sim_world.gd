@@ -5088,11 +5088,21 @@ func _in_trench(x: int, y: int) -> bool:
 	return off >= ty - 24 * F_ONE and off <= ty + 24 * F_ONE and absi(x - tx) <= 60 * F_ONE
 
 
+## The fork wreck-island AABB depth south of its gate. FORK_DIVIDER_S is the COMMITMENT
+## LINE: south of it the lanes are still joined, at it the island is blocking lateral
+## crossing, so a player past it is locked into the lane they picked. src/main.gd derives
+## the lane-signpost row from this (Main.fork_sign_row) so the label that NAMES the choice
+## can never be planted where the choice is already made — it was a hand-typed +180, which
+## put it at screen y -180 (off-screen, not drawn at all) on the commitment tick.
+const FORK_DIVIDER_N := 40 * F_ONE
+const FORK_DIVIDER_S := 620 * F_ONE
+
+
 func _in_fork_divider(x: int, y: int, gate_y: int, fork_x: int) -> bool:
 	## The fork wreck-island AABB for the gate at `gate_y` — the ONE definition the
 	## move-revert consults for the new position, each candidate axis, and the
 	## started-inside escape rule, so the three can never disagree.
-	return y >= gate_y + 40 * F_ONE and y <= gate_y + 620 * F_ONE \
+	return y >= gate_y + FORK_DIVIDER_N and y <= gate_y + FORK_DIVIDER_S \
 		and absi(x - fork_x * F_ONE) < 44 * F_ONE
 
 
