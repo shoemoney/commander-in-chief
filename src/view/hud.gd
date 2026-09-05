@@ -1315,6 +1315,17 @@ static func _place_prefix(widths: Array, start_x: float, bound: float) -> int:
 const PRESSURE_WARN_TICKS := 12
 const PRESSURE_ARM_TICKS := 30
 
+## The gate telegraph's three degradation tiers, widest first. The FULL tier carries the
+## half of the mechanic that was never taught: while a closed gate pins the camera the
+## economy is switched off — kills bank no coin, no score, no streak (sim_world.gd
+## _kill_enemy). "CLEAR THE GATE" alone only ever said that ADVANCING was blocked, so a
+## player fighting at the wall was watching a silent throttle. MID is the pre-existing
+## label, kept as its own tier so a starved row degrades FULL -> MID -> COMPACT instead of
+## falling straight to "GATE!".
+const GATE_LABEL_FULL := "CLEAR THE GATE — NO PAY"
+const GATE_LABEL_MID := "CLEAR THE GATE"
+const GATE_LABEL_COMPACT := "GATE!"
+
 ## c1-06: does the mandatory campaign telegraph show, and how wide is its footprint?
 ## Returns {kind: ""|"gate"|"pressure", w}. Measured up front so optional chips reserve
 ## room for it (co-layout) instead of it clamping backward over already-placed chips.
@@ -1336,7 +1347,8 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 			# `cw` is the COMPACT presentation width — a short "GATE!" the planner falls back
 			# to when the full label won't fit, so this critical readout is abbreviated, not
 			# dropped, before it ever becomes a +N tally.
-			return {"kind": "gate", "w": _tw("CLEAR THE GATE") + 4.0, "cw": _tw("GATE!") + 4.0}
+			return {"kind": "gate", "w": _tw(GATE_LABEL_FULL) + 4.0,
+				"mw": _tw(GATE_LABEL_MID) + 4.0, "cw": _tw(GATE_LABEL_COMPACT) + 4.0}
 	if sim.stall_ticks <= PRESSURE_WARN_TICKS:
 		return {"kind": "", "w": 0.0}
 	var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
@@ -1397,12 +1409,15 @@ func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float
 	var barcol := Art.warn(Color(1.0, 0.3, 0.2)) if pf > 0.7 else Art.warn(Color(1.0, 0.7, 0.25), Art.WARN_CAUTION)
 	if tele["kind"] == "gate":
 		# Defensive draw-time width clamp: choose the widest gate label whose rendered right edge
-		# (inner_x + tw + 2) stays inside the usable edge, downgrading CLEAR THE GATE -> GATE! ->
+		# (inner_x + tw + 2) stays inside the usable edge, downgrading FULL -> MID -> GATE! ->
 		# nothing. The planner already right-anchors the correct label, but this GUARANTEES no
 		# frame escape even if a sub-design-width viewport hands a slot narrower than "GATE!".
-		var gtxt := "GATE!" if compact else "CLEAR THE GATE"
+		var gtxt := GATE_LABEL_COMPACT if compact \
+			else (GATE_LABEL_MID if tele.get("mid", false) else GATE_LABEL_FULL)
 		if inner_x + _tw(gtxt) + 2.0 > _fit_full + 0.01:
-			gtxt = "GATE!"
+			gtxt = GATE_LABEL_MID
+		if inner_x + _tw(gtxt) + 2.0 > _fit_full + 0.01:
+			gtxt = GATE_LABEL_COMPACT
 		if inner_x + _tw(gtxt) + 2.0 > _fit_full + 0.01:
 			return inner_x   # even the compact label can't fit — draw nothing rather than overflow
 		_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, _tw(gtxt) + 4.0, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
@@ -1478,6 +1493,19 @@ func _plan_row0(sim: SimWorld, opt_start: float, y: float, shop_row: bool) -> Di
 	# silently: (1) if the full telegraph won't fit but its COMPACT form ("GATE!" / lightning+"!")
 	# does, use that; (2) else drop the telegraph and COUNT it as one suppressed readout in +N; (3)
 	# either way, reclaiming the slot re-selects so freed width can re-admit a demoted candidate.
+	if tele_w > 0.0 and _fit_full - res["ovf_reserve"] - tele_w < opt_start:
+		# (0) MID tier first, for the gate label only: "CLEAR THE GATE" without the
+		# economy clause still says the actionable half, and is worth trying before
+		# collapsing to a bare "GATE!". Specs with no "mw" (pressure) skip straight to (1).
+		var mw: float = tele.get("mw", 0.0)
+		if mw > 0.0:
+			var mid_slot: float = mw + 3.0
+			var res_m := _select_with_reserve(opt_start, mandatory_sum, mid_slot, 0)
+			if _fit_full - res_m["ovf_reserve"] - mw >= opt_start:
+				tele = {"kind": tele["kind"], "w": mw, "mid": true}
+				tele_w = mw
+				tele_slot = mid_slot
+				res = res_m
 	if tele_w > 0.0 and _fit_full - res["ovf_reserve"] - tele_w < opt_start:
 		var cw: float = tele.get("cw", 0.0)
 		var compact_slot: float = (cw + 3.0) if cw > 0.0 else 0.0

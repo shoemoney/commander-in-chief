@@ -741,13 +741,31 @@ const SEED := 0xDEADBEEF
 ## VERIFIED UNCHANGED in the same run (mode!=endless gates, + endless
 ## observer frozen before Spotter) — run, not assumed. View vignette
 ## 0.12->0.04 is checksum-excluded and does not move goldens.
+## RE-RECORDED (2026-09-05, 1.3 economy predicate). 067f70a routed the three
+## economy throttles (kill payout, bunker spawn_cd half-rate, field spawn
+## interval) through camera_held(), which has TWO branches: the closed-gate
+## clamp AND the trailing-partner camera leash. Only the gate branch was ever
+## meant — the leash fires whenever any player is pinned at the band bottom,
+## which in solo is backpedalling under pressure, not farming. All three now
+## read the new gate_held() (the gate branch alone; camera_held() ends with
+## `return gate_held()` so every stall/observer consumer is byte-identical).
+## Measured on the pre-fix tree with THIS torture: 569 of 3600 ticks were
+## leash-only holds (first at tick 112) and 12 kills landed in them, paying
+## nothing and throttling both spawners — never the intent of 067f70a. All six
+## campaign samples move from the first such tick onward. ENDLESS_GOLDEN
+## VERIFIED UNCHANGED in the same run — measured, not assumed: the torture
+## records 0 leash-only and 0 gate ticks in endless, and endless was already
+## exempt from all three throttles by the `mode != "endless"` guard.
+## The bounty_kill event now ships the coin actually BANKED (0 when the throttle
+## zeroed it) instead of the gross bounty; events are checksum-EXCLUDED, so that
+## half moves nothing.
 const GOLDEN: Array[int] = [
-	1963582014827421260,
-	2183849494948759482,
-	8521974218452015254,
-	8924343296901165195,
-	4911682125191700127,
-	4773638892736216189,
+	6044423000615395277,
+	2139797004594887183,
+	1608768388581761891,
+	4936081844458363408,
+	4443335141363457582,
+	490832867800499075,
 ]
 
 

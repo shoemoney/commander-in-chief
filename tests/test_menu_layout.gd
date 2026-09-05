@@ -7453,7 +7453,14 @@ func test_howto_large_text_every_scale_reflows_without_clipping_or_unreachable_r
 		for tab in Menu.HOWTO_TABS.size():
 			m._howto_page = tab
 			m._howto_endless_page = 0
-			var expected_rows: int = m._howto_large_rows(tab).size()
+			# Counted off the PAGER's own leaves, not off _howto_large_rows: the flow
+			# packer re-wraps an entry it splits, so a leaf's row count is legitimately
+			# not the dense wrap's row count. What this leg pins is that every row the
+			# pager produced is actually DRAWN and reachable — the pager-vs-copy side
+			# is pinned by test_manual_pagination_loses_no_glyph's text invariant.
+			var expected_rows := 0
+			for leaf in m._howto_large_pages(tab):
+				expected_rows += leaf.size()
 			var pages: int = m._howto_subpages()
 			Runner.T.ok(pages >= 1, "%d%%/%s exposes at least one reachable leaf" % [pct, Menu.HOWTO_TABS[tab]])
 			var seen_rows := 0
@@ -7585,10 +7592,126 @@ func test_manual_never_ends_a_leaf_mid_sentence() -> void:
 	stub.free()
 
 
-# c4-19 companion: the entry-granular pager must not "fix" a truncated leaf by
-# DROPPING the overflow. Concatenating every leaf must reproduce _howto_large_rows
-# exactly \u2014 same rows, same order, same count \u2014 and no leaf may exceed the
-# measured capacity unless it holds a single over-tall row.
+# THE FIELD MANUAL MAY NOT LEAVE A LEAF HALF EMPTY.
+# Sibling of the mid-sentence ratchet above, same derived loop shape (HOWTO_TABS x the
+# four enlarged TEXT_SCALE rungs), so a sixth tab, new copy or a new size rung is covered
+# the day it lands.
+#
+# c4-19's entry-atomic packer broke the leaf BEFORE consulting its own sentence splitter,
+# so an entry that did not fit the remainder was moved wholesale and left the hole behind.
+# Measured on 8cdc17b: 7 non-final leaves under 60% full, worst 27% (175%/WAR CHEST 3/5);
+# the reported instance, 200%/CONTROLS 1/4, sat at exactly 50% — three rows and 83px of
+# dead scanline out of 166px — which is why the floor is 0.55 and not 0.50.
+# After the sentence re-cut: 2 leaves under 60%, worst 57%.
+#
+# ⚠️ The margin above this floor is 2 percentage points. When a copy edit trips this, the
+# fix is to SHORTEN THE SENTENCE that will not fit, not to lower the floor — the floor is
+# the whole assertion.
+const LEAF_FILL_FLOOR := 0.55
+
+
+func test_manual_never_leaves_a_leaf_half_empty() -> void:
+	var prior_scale := Art.text_scale
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var bad: Array = []
+	var combos := 0
+	var leaves := 0
+	var worst := 2.0
+	for pct in range(MainScript.TEXT_SCALE_MIN + MainScript.TEXT_SCALE_STEP, MainScript.TEXT_SCALE_MAX + 1, MainScript.TEXT_SCALE_STEP):
+		Art.text_scale = float(pct) / 100.0
+		for tab in Menu.HOWTO_TABS.size():
+			m._howto_page = tab
+			m._howto_endless_page = 0
+			combos += 1
+			var capacity: float = (m._howto_nav_y() - 16.0) - Menu.CONTENT_BODY_Y
+			var pages: Array = m._howto_large_pages(tab)
+			leaves += pages.size()
+			for i in pages.size():
+				var leaf: Array = pages[i]
+				if i == pages.size() - 1 or leaf.is_empty():
+					continue          # the final leaf ends where the copy ends
+				var used := 0.0
+				for r in leaf:
+					used += float(r["height"])
+				var fill := used / capacity
+				worst = minf(worst, fill)
+				if fill < LEAF_FILL_FLOOR:
+					bad.append("%d%%/%s leaf %d/%d only %.0f%% full (%.0f of %.0fpx, %d rows)"
+						% [pct, Menu.HOWTO_TABS[tab], i + 1, pages.size(), fill * 100.0,
+							used, capacity, leaf.size()])
+	Art.text_scale = prior_scale
+	Runner.T.ok(combos == Menu.HOWTO_TABS.size() * 4,
+		"the sweep covers every tab at every enlarged rung (%d combos, %d leaves)" % [combos, leaves])
+	Runner.T.ok(bad.is_empty(),
+		"no manual leaf is left half empty (floor %.0f%%, worst measured %.0f%%, %d offender(s))%s"
+			% [LEAF_FILL_FLOOR * 100.0, worst * 100.0, bad.size(),
+				"" if bad.is_empty() else ": " + "; ".join(bad)])
+	m.free()
+	stub.free()
+
+
+# A SECTION HEADING MAY NEVER BE THE LAST THING ON A LEAF. A heading is a promise about
+# what follows; stranded at the bottom of a leaf it promises a blank half-screen and the
+# reader has to page forward to find out what it was introducing. Measured on 8cdc17b:
+# 4 violations, the worst being 200%/WAR CHEST leaf 2 of 6 — "THE WAR CHEST — SHARED COIN
+# FROM EVERY KILL:" alone on the leaf with 110px of empty scanline under it.
+# Exact invariant, unbounded margin: this one survives any copy rewrite.
+func test_a_manual_heading_is_never_the_last_thing_on_a_leaf() -> void:
+	var prior_scale := Art.text_scale
+	var stub := _StubMain.new()
+	var m := _CaptureMenu.new()
+	m.main = stub
+	m.mode = Menu.Mode.HOWTO
+	m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+	m._open_t = 1.0
+	var bad: Array = []
+	var headings := 0
+	for pct in range(MainScript.TEXT_SCALE_MIN + MainScript.TEXT_SCALE_STEP, MainScript.TEXT_SCALE_MAX + 1, MainScript.TEXT_SCALE_STEP):
+		Art.text_scale = float(pct) / 100.0
+		for tab in Menu.HOWTO_TABS.size():
+			m._howto_page = tab
+			m._howto_endless_page = 0
+			var entries: Array = m._howto_large_entries(tab)
+			for e in entries:
+				if String(e["kind"]) == "heading":
+					headings += 1
+			var pages: Array = m._howto_large_pages(tab)
+			for i in pages.size():
+				var leaf: Array = pages[i]
+				if i == pages.size() - 1 or leaf.is_empty():
+					continue
+				var le: int = int(leaf[leaf.size() - 1]["entry"])
+				if String(entries[le]["kind"]) == "heading":
+					bad.append("%d%%/%s leaf %d/%d ends on the heading '%s'"
+						% [pct, Menu.HOWTO_TABS[tab], i + 1, pages.size(),
+							str(leaf[leaf.size() - 1]["text"])])
+	Art.text_scale = prior_scale
+	Runner.T.ok(headings > 0, "the sweep saw no heading entries at all (%d) — it ran on nothing" % headings)
+	Runner.T.ok(bad.is_empty(),
+		"no manual leaf ends on a section heading (%d offender(s))%s"
+			% [bad.size(), "" if bad.is_empty() else ": " + "; ".join(bad)])
+	m.free()
+	stub.free()
+
+
+# c4-19 companion: the pager must not "fix" a truncated leaf by DROPPING the overflow,
+# and no leaf may exceed the measured capacity unless it holds a single over-tall row.
+#
+# STRENGTHENED, not weakened. This used to compare leaves ROW-FOR-ROW against
+# _howto_large_rows. That identity is no longer true and SHOULD not be: the flow packer
+# re-wraps an entry it splits at a sentence boundary, so a re-wrapped head ends on a short
+# line and the row count legitimately differs by one. Row identity was also the weaker
+# check — it would pass even if the wrap silently dropped a word from inside a row, since
+# both sides came from the same wrapper. What replaces it is the TEXT-CONTENT invariant:
+# the whitespace-normalised concatenation of every leaf must equal the whitespace-normalised
+# concatenation of the tab's own translated entry copy. That compares the pager against the
+# SOURCE COPY rather than against another view of itself, and it holds on both the old
+# packer and the new one (measured: 0/20 combos lossy on each).
 func test_manual_pagination_loses_no_glyph() -> void:
 	var prior_scale := Art.text_scale
 	var stub := _StubMain.new()
@@ -7603,29 +7726,32 @@ func test_manual_pagination_loses_no_glyph() -> void:
 			m._howto_page = tab
 			m._howto_endless_page = 0
 			var tag := "%d%%/%s" % [pct, Menu.HOWTO_TABS[tab]]
-			var rows: Array = m._howto_large_rows(tab)
 			var pages: Array = m._howto_large_pages(tab)
 			var capacity: float = (m._howto_nav_y() - 16.0) - Menu.CONTENT_BODY_Y
 			Runner.T.ok(pages.size() >= 1, "%s: at least one leaf" % tag)
-			var flat: Array = []
+			var leafed := ""
 			for i in pages.size():
 				var leaf: Array = pages[i]
 				var used := 0.0
 				for row in leaf:
-					flat.append(row)
+					leafed += " " + str(row["text"])
 					used += float(row["height"])
 				Runner.T.ok(used <= capacity + 0.5 or leaf.size() <= 1,
 					"%s leaf %d/%d fits the content well (%.1f <= %.1f)" % [tag, i + 1, pages.size(), used, capacity])
-			Runner.T.eq(flat.size(), rows.size(), "%s: pagination keeps every measured row" % tag)
-			var mismatch := -1
-			for i in mini(flat.size(), rows.size()):
-				if str(flat[i]["text"]) != str(rows[i]["text"]):
-					mismatch = i
-					break
-			Runner.T.eq(mismatch, -1, "%s: leaves replay the rows in source order" % tag)
+			var source := ""
+			for entry in m._howto_large_entries(tab):
+				source += " " + TranslationServer.translate(entry["text"])
+			Runner.T.eq(_squash(leafed), _squash(source),
+				"%s: the leaves reproduce the tab's copy exactly, in order, with nothing dropped" % tag)
 	Art.text_scale = prior_scale
 	m.free()
 	stub.free()
+
+
+## Whitespace-normalised text, so a wrap decision (where a line broke, how many spaces
+## a break collapsed) cannot change the comparison but a lost or reordered WORD can.
+static func _squash(s: String) -> String:
+	return " ".join(s.split(" ", false))
 
 
 func test_howto_large_text_leaf_controls_keep_keyboard_controller_and_mouse_parity() -> void:

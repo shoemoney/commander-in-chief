@@ -1257,7 +1257,13 @@ func test_every_stall_ticks_reader_is_guarded_by_camera_held() -> void:
 			j += 1
 			expr += lines[j]
 		var tail: String = lines[j + 1] if j + 1 < lines.size() else ""
-		if "camera_held()" in expr:
+		# gate_held() counts too: it IS the closed-gate branch of camera_held(), and a
+		# reader whose own loop has already established a closed gate on screen wants the
+		# narrower half (main.gd::_gate_objective_active — camera_held() also fires for
+		# the trailing-partner leash, which armed CLEAR THE GATE for a gate that was not
+		# holding anything). Both names mean "ask the sim whether it is holding", which is
+		# the whole point of the scrape; what it forbids is acting on the raw counter.
+		if "camera_held()" in expr or "gate_held()" in expr:
 			guarded += 1
 		elif STALL_READER_ALLOW.any(func(a: String) -> bool: return '"%s"' % a in tail):
 			allowed += 1
@@ -1268,7 +1274,7 @@ func test_every_stall_ticks_reader_is_guarded_by_camera_held() -> void:
 	Runner.T.ok(readers >= 3,
 		"found only %d sim.stall_ticks readers in main.gd — the scrape is broken, not the view" % readers)
 	Runner.T.eq(guarded + allowed, readers,
-		"every sim.stall_ticks reader must either consult camera_held() or be allowlisted")
+		"every sim.stall_ticks reader must either consult camera_held()/gate_held() or be allowlisted")
 
 
 # --- 8. The CLASS ratchet: every tick-phased hazard has a tell ---------------

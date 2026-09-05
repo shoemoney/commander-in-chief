@@ -3495,10 +3495,14 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 		coin = 0
 		no_coin = true
 		no_score = true
-	# 1.3: closed-gate farm — a bunker/spawner drip while camera_held pays war_chest
-	# and score at the normal rate, so parking at the gate prints coin. While held
-	# (campaign/arcade/boss_rush) kills grant 0 chest/score; endless is exempt.
-	if camera_held() and mode != "endless":
+	# 1.3: closed-gate farm — a bunker/spawner drip while the camera is pinned at a
+	# CLOSED GATE pays war_chest and score at the normal rate, so parking at the gate
+	# prints coin. While a gate holds (campaign/arcade/boss_rush) kills grant 0
+	# chest/score; endless is exempt. Reads gate_held(), NOT camera_held(): the latter
+	# also covers the trailing-partner leash, which fires whenever anyone is pinned at
+	# the band bottom — i.e. backpedalling under pressure, solo included. Measured on
+	# 8cdc17b, 48,000 ticks of a backpedal driver: 26 of 1,008 zeroed kills had no gate.
+	if gate_held() and mode != "endless":
 		no_coin = true
 		no_score = true
 	if has_mod(4):
@@ -3508,7 +3512,10 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 		# Emitted AFTER the PAYDAY doubling (it used to sit between the two, so the
 		# "BOUNTY +N¢" pop under-reported itself by exactly half on every PAYDAY
 		# wave). Multiplication commutes, so the coin actually banked is unchanged.
-		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": coin})
+		# Ships what is actually BANKED, same idiom as the `kill` event two lines below.
+		# It used to ship the gross bounty even when the throttle above had set no_coin,
+		# so main.gd popped "BOUNTY +N¢" and a fanfare sting for a kill worth 0.
+		events.append({"t": "bounty_kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin})
 	# kind rides the (checksum-excluded) kill event so the view can spawn a
 	# per-type death throe + corpse — golden-safe.
 	events.append({"t": "kill", "x": e["x"], "y": e["y"], "coin": 0 if no_coin else coin,
@@ -4281,11 +4288,13 @@ func _step_bunkers() -> void:
 		# 6 campaign seeds): 3 of 6 saturated the roster, worst seed reached -332 and drew
 		# the lying telegraph for 1,758 ticks (29 s). At 0 the glow tells the truth — the
 		# hatch IS loaded and opens the instant a slot frees.
-		# 1.3: throttle drip while camera is held at a closed gate — half-rate
+		# 1.3: throttle drip while the camera is held at a CLOSED GATE — half-rate
 		# spawn_cd countdown so the bunker pays ~1 per 240t held instead of 1 per
 		# 120t, starving the gate farm without touching endless (which never holds
-		# via gates) or the open-field cadence.
-		if camera_held() and mode != "endless" and (tick_count & 1) == 1:
+		# via gates) or the open-field cadence. gate_held(), not camera_held(): the
+		# leash branch of the latter throttled the open field too (measured 300-393
+		# bunker-ticks per 6,000-tick run with no gate anywhere near the camera).
+		if gate_held() and mode != "endless" and (tick_count & 1) == 1:
 			pass   # skip this tick's decrement — 0.5x rate while held
 		else:
 			bk["spawn_cd"] = maxi(bk["spawn_cd"] - 1, 0)
@@ -4450,11 +4459,13 @@ func _step_spawner() -> void:
 		else maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
-	# 1.3: throttle drip while camera is held at a closed gate — double the
+	# 1.3: throttle drip while the camera is held at a CLOSED GATE — double the
 	# interval so the field pays ~1 per 90t held instead of 1 per 45t, matching
 	# the bunker half-rate above. Endless never hits this branch (step() gates
-	# _step_spawner on mode), so no effect there.
-	if camera_held() and mode != "endless":
+	# _step_spawner on mode), so no effect there. gate_held(), not camera_held():
+	# the leash branch of the latter halved the open-field cadence for anyone
+	# pinned at the band bottom, which is what backpedalling looks like.
+	if gate_held() and mode != "endless":
 		interval *= 2
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
@@ -5241,6 +5252,19 @@ func _in_water(x: int, y: int) -> bool:
 
 # --- Camera & world streaming ---
 
+func gate_held() -> bool:
+	## The CLOSED-GATE clamp, ALONE — the only hold that may switch the economy off.
+	## A gate is a wall the player can open by fighting; the leash branch inside
+	## camera_held() below is a wall the player makes by standing still at the band
+	## bottom, which in solo is just backpedalling under pressure. The 1.3 economy
+	## throttles (kill payout, bunker drip, field cadence) all mean THIS predicate.
+	## Pure function of already-hashed state — adds nothing to checksum().
+	for g in gates:
+		if not g["open"] and camera_top == g["y"] - GATE_CAMERA_PAD:
+			return true
+	return false
+
+
 func camera_held() -> bool:
 	## True when the SIM is holding the camera, not the player. One shared definition for the
 	## stall counter and for every view line that reads it, so the two can't drift. Pure
@@ -5266,10 +5290,7 @@ func camera_held() -> bool:
 			leash = maxi(leash, p["y"] - CAMERA_BAND_BOTTOM)
 	if leash > -0x7FFFFFFF and camera_top == leash:
 		return true
-	for g in gates:
-		if not g["open"] and camera_top == g["y"] - GATE_CAMERA_PAD:
-			return true
-	return false
+	return gate_held()
 
 
 func _step_fords() -> void:

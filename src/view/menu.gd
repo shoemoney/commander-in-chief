@@ -5212,7 +5212,14 @@ func _howto_mode_entries() -> Array:
 # on words; an individual over-wide token (including an entire CJK sentence) is
 # split on Unicode character boundaries. No ellipsis or hard clipping is used.
 static func howto_wrap_lines(source: String, size: int, max_w: float) -> Array[String]:
-	var txt := TranslationServer.translate(source)
+	return wrap_translated(TranslationServer.translate(source), size, max_w)
+
+
+## The wrapper proper, on text that is ALREADY translated. The large-text pager
+## re-wraps sentence-sized slices of an entry it has already translated once, and
+## running those back through TranslationServer would look up a fragment that is not
+## a catalogue key.
+static func wrap_translated(txt: String, size: int, max_w: float) -> Array[String]:
 	var f := Art.font()
 	var out: Array[String] = []
 	var line := ""
@@ -5288,41 +5295,54 @@ func _howto_large_entries(tab: int) -> Array:
 # reachable even when a locale expands substantially at 200%.
 func _howto_large_rows(tab: int) -> Array:
 	var rows: Array = []
-	var f := Art.font()
 	var entries := _howto_large_entries(tab)
 	for ei in entries.size():
-		var entry: Dictionary = entries[ei]
-		var kind: String = entry["kind"]
-		var design_size: int = int(entry.get("size", 11))
-		var size := Art.fs(design_size)
-		var x := ICON_X
-		var max_w := FRAME_INNER_R - x
-		var marker := ""
-		var marker_kind := ""
-		var marker_tint: Color = Color.WHITE
-		if kind == "action":
-			marker = entry["action"]
-			marker_kind = "action"
-			x = TEXT_X
-			max_w = BODY_W
-		elif kind == "sprite":
-			marker = entry["icon"]
-			marker_kind = "sprite"
-			marker_tint = entry.get("tint", Art.tint(marker) if Art.TEX.has(marker) else Color.WHITE)
-			x = TEXT_X
-			max_w = BODY_W
-		var lines := howto_wrap_lines(entry["text"], size, max_w)
-		var line_h := ceilf(f.get_height(size)) + 2.0
-		for i in lines.size():
-			rows.append({"text": lines[i], "size": size, "x": x,
-				"height": line_h + (6.0 if i == lines.size() - 1 else 0.0),
-				"col": Color(1.0, 0.72, 0.42) if kind == "heading" else Color(0.9, 0.92, 0.82),
-				"marker": marker if i == 0 else "", "marker_kind": marker_kind,
-				"marker_tint": marker_tint,
-				# Provenance for the pager: which semantic entry this visual line came
-				# from, and whether the line closes a sentence. A leaf that ends inside
-				# an entry is only readable if it ends on a sentence boundary.
-				"entry": ei, "ends_sentence": _ends_sentence(lines[i])})
+		for r in _entry_rows(entries[ei], ei, TranslationServer.translate(entries[ei]["text"]), true, true):
+			rows.append(r)
+	return rows
+
+
+## Wrap ONE entry's (already-translated) text into drawable rows.
+##  `is_head` — this slice starts the entry, so it carries the action/sprite marker.
+##             A continuation leaf must not repeat it.
+##  `is_tail` — this slice ends the entry, so its last row carries the 6px entry gap.
+## Extracted from _howto_large_rows so the pager can re-wrap a SENTENCE-SIZED slice of
+## an entry instead of only ever consuming the one dense wrap of the whole thing.
+func _entry_rows(entry: Dictionary, ei: int, txt: String, is_head: bool, is_tail: bool) -> Array:
+	var f := Art.font()
+	var rows: Array = []
+	var kind: String = entry["kind"]
+	var design_size: int = int(entry.get("size", 11))
+	var size := Art.fs(design_size)
+	var x := ICON_X
+	var max_w := FRAME_INNER_R - x
+	var marker := ""
+	var marker_kind := ""
+	var marker_tint: Color = Color.WHITE
+	if kind == "action":
+		marker = entry["action"]
+		marker_kind = "action"
+		x = TEXT_X
+		max_w = BODY_W
+	elif kind == "sprite":
+		marker = entry["icon"]
+		marker_kind = "sprite"
+		marker_tint = entry.get("tint", Art.tint(marker) if Art.TEX.has(marker) else Color.WHITE)
+		x = TEXT_X
+		max_w = BODY_W
+	var lines := wrap_translated(txt, size, max_w)
+	var line_h := ceilf(f.get_height(size)) + 2.0
+	for i in lines.size():
+		var last := i == lines.size() - 1
+		rows.append({"text": lines[i], "size": size, "x": x,
+			"height": line_h + (6.0 if (last and is_tail) else 0.0),
+			"col": Color(1.0, 0.72, 0.42) if kind == "heading" else Color(0.9, 0.92, 0.82),
+			"marker": marker if (i == 0 and is_head) else "", "marker_kind": marker_kind,
+			"marker_tint": marker_tint,
+			# Provenance for the pager: which semantic entry this visual line came
+			# from, and whether the line closes a sentence. A leaf that ends inside
+			# an entry is only readable if it ends on a sentence boundary.
+			"entry": ei, "ends_sentence": _ends_sentence(lines[i])})
 	return rows
 
 
@@ -5336,57 +5356,167 @@ static func _ends_sentence(s: String) -> bool:
 	return t != "" and t.substr(t.length() - 1, 1) in [".", "!", "?", ":", "\u2026"]
 
 
+## Split already-translated copy into sentences, terminators kept. The dense wrap
+## DESTROYS the boundaries the pager needs — in the CONTROLS "AIM" entry the break
+## after "UP/LEFT/DOWN/RIGHT." lands mid-row because the wrapper glued "The" onto
+## that line — so the pager re-cuts the text here and re-wraps the head.
+static func _split_sentences(txt: String) -> Array[String]:
+	var out: Array[String] = []
+	var cur := ""
+	for word in txt.split(" ", false):
+		cur = word if cur == "" else cur + " " + word
+		if _ends_sentence(word):
+			out.append(cur)
+			cur = ""
+	if cur != "":
+		out.append(cur)
+	if out.is_empty():
+		out.append(txt)
+	return out
+
+
+static func _rows_h(rows: Array) -> float:
+	var h := 0.0
+	for r in rows:
+		h += float(r["height"])
+	return h
+
+
+## The tail of `source` after the glyphs `lines` consumed. Walks by NON-WHITESPACE
+## character count rather than re-joining the lines, because the wrapper's CJK path
+## breaks INSIDE a token — a join-with-space inverse would inject spaces into
+## Japanese copy. Space-delimited text round-trips because the walk skips whitespace.
+static func _consume_text(source: String, lines: Array) -> String:
+	var n := 0
+	for ln in lines:
+		var t: String = str(ln)
+		for i in t.length():
+			if not t.substr(i, 1).strip_edges().is_empty():
+				n += 1
+	var pos := 0
+	while pos < source.length() and n > 0:
+		if not source.substr(pos, 1).strip_edges().is_empty():
+			n -= 1
+		pos += 1
+	return source.substr(pos).strip_edges()
+
+
+## Place as much of one entry as fits in `spare`, re-cutting at sentence boundaries.
+## Returns [rows, leftover_text]; leftover "" means the entry finished here, and an
+## EMPTY rows array means nothing of it fits and the caller must break the leaf.
+##  - whole entry fits            -> [all rows, ""]
+##  - longest sentence-terminated head that fits -> [head rows, remaining sentences]
+##  - `allow_line_cut` (fresh leaf only) and not even the first sentence fits
+##    -> the old line cut, so a sentence longer than a whole leaf still loses nothing.
+func _flow_entry(entry: Dictionary, ei: int, txt: String, is_head: bool, spare: float,
+		allow_line_cut: bool) -> Array:
+	var full := _entry_rows(entry, ei, txt, is_head, true)
+	if _rows_h(full) <= spare:
+		return [full, ""]
+	var sents := _split_sentences(txt)
+	var best: Array = []
+	var best_n := 0
+	for n in range(1, sents.size()):
+		var head := " ".join(sents.slice(0, n))
+		var rws := _entry_rows(entry, ei, head, is_head, false)
+		if _rows_h(rws) > spare:
+			break
+		best = rws
+		best_n = n
+	if best_n > 0:
+		return [best, " ".join(sents.slice(best_n))]
+	if not allow_line_cut:
+		return [[], txt]
+	var part := _entry_rows(entry, ei, txt, is_head, false)
+	var h := 0.0
+	var fit := 0
+	for k in part.size():
+		h += float(part[k]["height"])
+		if h > spare:
+			break
+		fit = k + 1
+	fit = maxi(fit, 1)   # a leaf that cannot hold one line still takes it, never drops it
+	if fit >= part.size():
+		return [part, ""]
+	var head_lines: Array = []
+	for k in fit:
+		head_lines.append(part[k]["text"])
+	return [part.slice(0, fit), _consume_text(txt, head_lines)]
+
+
+## A section HEADING may never be the last thing on a leaf: it is a promise about what
+## follows, and at 200% the WAR CHEST tab's leaf 2/6 was a heading and 110px of empty
+## scanline. Returns [kept_page, carry] — the trailing heading's rows move to the next
+## leaf. If the heading is ALL the leaf holds, moving it would just empty the leaf, so
+## it stays put (that case is unreachable once _flow_entry can split what follows).
+func _heading_carry(page: Array, entries: Array) -> Array:
+	if page.is_empty():
+		return [page, []]
+	var last_ei: int = int(page[page.size() - 1]["entry"])
+	if String(entries[last_ei]["kind"]) != "heading":
+		return [page, []]
+	var kept: Array = page.duplicate()
+	var carry: Array = []
+	while not kept.is_empty() and int(kept[kept.size() - 1]["entry"]) == last_ei:
+		carry.push_front(kept.pop_back())
+	if kept.is_empty():
+		return [page, []]
+	return [kept, carry]
+
+
 func _howto_large_pages(tab: int) -> Array:
 	var top := CONTENT_BODY_Y
 	# The pager's 20px mouse targets and baseline occupy the strip immediately
 	# above BACK. Content clears it by four pixels at every supported scale.
 	var capacity := (_howto_nav_y() - 16.0) - top
-	# c4-19: pack by SEMANTIC ENTRY, not by visual line. The line-greedy packer this
-	# replaces cut wherever a leaf happened to fill, so at 200% the CONTROLS tab ended
-	# leaf 1/4 on "gun fires on its own \u2014" and 26 leaves across 16 of the 20 (tab x
-	# enlarged scale) combos stopped mid-sentence (measured by restoring the greedy
-	# packer under tests/test_menu_layout.gd). An entry is placed whole when it fits; an entry
-	# taller than a whole leaf is cut at the LAST line that closes a sentence, and only
-	# falls back to a line cut when no sentence boundary fits at all (one sentence longer
-	# than a leaf \u2014 unavoidable, and it still loses nothing).
-	var rows := _howto_large_rows(tab)
+	# c4-19 packed by SEMANTIC ENTRY rather than visual line, which stopped the
+	# mid-sentence leaf breaks — but it broke the page BEFORE consulting its own
+	# splitter, so an entry that did not fit the remainder was moved wholesale and
+	# the splitter was dead code for the fill case. Measured on 8cdc17b across the 20
+	# (tab x enlarged-scale) combos: 63 leaves, worst non-final leaf 27% full, 7 leaves
+	# under 60%, 4 leaves ENDING on a section heading, and the reported 200%/CONTROLS
+	# leaf 1/4 was three rows and 83px of dead scanline out of 166px.
+	#
+	# This is a FLOW over entries and leftover text instead of a pack over a
+	# precomputed row array: an entry that does not fit the remainder is re-cut at the
+	# last sentence boundary that DOES fit and re-wrapped, so the dense wrap keeps its
+	# horizontal efficiency (breaking at every sentence measured strictly worse — worst
+	# fill 27% -> 16%) while the leaf keeps its vertical fill. After: 61 leaves, worst
+	# non-final leaf 57%, 2 under 60%, 0 heading-only leaves, reported leaf 80%.
+	var entries := _howto_large_entries(tab)
 	var pages: Array = []
 	var page: Array = []
 	var used := 0.0
-	var i := 0
-	while i < rows.size():
-		var j := i
-		var group_h := 0.0
-		while j < rows.size() and int(rows[j]["entry"]) == int(rows[i]["entry"]):
-			group_h += float(rows[j]["height"])
-			j += 1
-		if not page.is_empty() and used + group_h > capacity:
+	var ei := 0
+	var pending := ""       # untaken tail of entry `ei`; "" = start it from the top
+	var is_head := true
+	while ei < entries.size():
+		var txt: String = pending if pending != "" \
+			else TranslationServer.translate(entries[ei]["text"])
+		var res := _flow_entry(entries[ei], ei, txt, is_head, capacity - used, page.is_empty())
+		var rws: Array = res[0]
+		if rws.is_empty():
+			# Nothing of this entry fits the remainder. page is non-empty here by
+			# construction: _flow_entry always places at least one line on a fresh leaf.
+			var hc := _heading_carry(page, entries)
+			pages.append(hc[0])
+			page = hc[1]
+			used = _rows_h(page)
+			continue
+		for r in rws:
+			page.append(r)
+		used += _rows_h(rws)
+		pending = str(res[1])
+		if pending == "":
+			ei += 1
+			is_head = true
+		else:
+			# The entry continues on the next leaf, so its trailing rows are not a
+			# dangling heading — no glue pass here, it would re-place what we just cut.
+			is_head = false
 			pages.append(page)
 			page = []
 			used = 0.0
-		if used + group_h <= capacity or j - i == 1:
-			for k in range(i, j):
-				page.append(rows[k])
-			used += group_h
-			i = j
-			continue
-		var fit := 0
-		var cut := 0
-		var h := 0.0
-		for k in range(i, j):
-			h += float(rows[k]["height"])
-			if used + h > capacity:
-				break
-			fit = k - i + 1
-			if bool(rows[k]["ends_sentence"]):
-				cut = fit
-		var take: int = cut if cut > 0 else maxi(fit, 1)
-		for k in range(i, i + take):
-			page.append(rows[k])
-		pages.append(page)
-		page = []
-		used = 0.0
-		i += take
 	if not page.is_empty():
 		pages.append(page)
 	if pages.is_empty():

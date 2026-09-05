@@ -2985,9 +2985,14 @@ func _consume_events() -> void:
 			"kill":
 				_ev_kill(ev)
 			"bounty_kill":
-				# Marked target down — a gold coin fountain + a distinct sting.
-				_coin_pop(ev["x"], ev["y"], "BOUNTY +%d¢" % ev["coin"], 5, FLOAT_INK_BOUNTY, 0.02)
-				_sfx.play("buy_fanfare", -3.0, 1.3)   # a2-16: marked-target-down = a distinct milestone sting, not the buy chime
+				# Marked target down — a gold coin fountain + a distinct sting. The sim now
+				# ships 0 when the closed-gate throttle zeroed the payout, and a 0¢ bounty
+				# gets NO pop and NO milestone sting: a receipt is not a compliment, and
+				# congratulating a kill that banked nothing is the one view element that
+				# still lied about the throttle.
+				if int(ev["coin"]) > 0:
+					_coin_pop(ev["x"], ev["y"], "BOUNTY +%d¢" % ev["coin"], 5, FLOAT_INK_BOUNTY, 0.02)
+					_sfx.play("buy_fanfare", -3.0, 1.3)   # a2-16: marked-target-down = a distinct milestone sting, not the buy chime
 			"frag_bonus":
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
 					"rate": 0.02, "text": "FRAG x%d" % ev["n"], "col": Color(1.0, 0.7, 0.35)})
@@ -13666,7 +13671,11 @@ func _gate_objective_active() -> bool:
 			continue
 		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
 			continue
-		return sim.camera_held() or sim.stall_ticks > 90
+		# gate_held(), not camera_held(): the loop above has ALREADY established that a
+		# closed gate is on screen, but camera_held() also returns true for the trailing-
+		# partner leash, so a 2P pair walking apart armed "CLEAR THE GATE" for a gate that
+		# was not holding anything (measured 35 spurious ticks of 4,767 in 2P, 0 in 1P).
+		return sim.gate_held() or sim.stall_ticks > 90
 	return false
 
 
