@@ -7954,7 +7954,7 @@ func _draw() -> void:
 	_draw_god_badge()   # DEBUG-ONLY; LAST on the screen-anchored pass so nothing can paint over it
 	# c4 2v: rear-warn bottom-edge wedge — a pulsing strip + an up-pointing wedge
 	# at the pending rear spawn x, readable in the forward-locked camera.
-	if _rear_wedge_t > 0.0:
+	if rear_wedge_visible(_rear_wedge_t, _debrief, sim.victory):
 		var rpulse := 1.0 if _motion < 0.5 else (0.35 + 0.35 * sin(_rear_wedge_t * 12.0))
 		var ra := clampf(_rear_wedge_t / 1.5, 0.0, 1.0) * rpulse
 		draw_rect(Rect2(0, SCREEN_H - 20.0, SCREEN_W, 20.0), Color(0.8, 0.35, 0.12, ra * 0.4))
@@ -7962,6 +7962,18 @@ func _draw() -> void:
 		draw_colored_polygon(Art.rnd(PackedVector2Array([
 			Vector2(rwx - 16.0, SCREEN_H), Vector2(rwx + 16.0, SCREEN_H), Vector2(rwx, SCREEN_H - 22.0)])),
 			Color(1.0, 0.45, 0.15, ra))
+
+
+## The rear-warn wedge is bottom-edge chrome and the K.I.A. card's plate reaches y=360.
+## _update_feel() (and therefore this timer) runs past the run-ender freeze — main.gd calls
+## it unconditionally, outside the `elif not _debrief:` gate that stops sim.step() — so a
+## death taken mid-advance kept the wedge painting a full-width y340..360 strip across the
+## card's last 20px (MEASURED: 9,120 px² over the live 456px-wide 13-row card, whose FORM
+## KIA-1 microline sits at y~353) for up to 90 frames. Not victory-only, and not decorative:
+## a rear breach is not actionable once the run is over. Static so the ratchet can pin the
+## exact shipped predicate instead of a transcription of it.
+static func rear_wedge_visible(t: float, debrief: bool, victory: bool) -> bool:
+	return t > 0.0 and not debrief and not victory
 
 
 func _draw_field_dim() -> void:
@@ -10935,6 +10947,25 @@ static func floattext_plate_rect(pivot: Vector2, w: float, size: int, punch: flo
 	return Rect2(pivot.x - w * punch / 2.0 - 3.0, pivot.y - float(size) * punch - 1.0,
 		w * punch + 6.0, float(size) * punch + float(size + 2) * punch + 2.0)
 
+## The toast's backdrop, as a PILL — a centre rect capped by two half-round ends. Nothing
+## about the toast's COPY may decide whether it is drawn: f53074c branched on
+## `contains("STREAK") or contains("%")` to answer a reviewer who called the hard rect
+## "blocky dark cards over combat", and the NEXT reviewer called the bare result "raw text
+## without background pill frames". The SHAPE was the problem; the backdrop was load-bearing.
+## MEASURED over the brightest campaign sand at peak ink alpha: bare, "x5 STREAK" reads
+## 3.55:1 and "+25%!" 4.78:1; on the shipped plate the same two read 8.65:1 and 11.66:1.
+## The core keeps FLOAT_PLATE_FILL unchanged, so every already-plated ink composites
+## byte-identically at the glyph centre and its existing assertions do not move.
+## The union of core+caps encloses floattext_plate_rect at every shipped size and punch, so
+## the claim the arbiter already reserved (floattext_claim_rect, at FLOAT_PUNCH_MAX) still
+## encloses everything drawn — no change to claim_label_slot or the band-floor clamp.
+static func floattext_pill_parts(r: Rect2) -> Dictionary:
+	var rad := minf(r.size.y / 2.0, r.size.x / 2.0)
+	return {"core": Rect2(r.position.x + rad, r.position.y, maxf(0.0, r.size.x - rad * 2.0), r.size.y),
+		"radius": rad,
+		"caps": [Vector2(r.position.x + rad, r.position.y + r.size.y / 2.0),
+			Vector2(r.end.x - rad, r.position.y + r.size.y / 2.0)]}
+
 ## What the toast claims from the arbiter: its LARGEST drawn footprint — the
 ## backing plate at peak spawn punch. The plate always covers the ink+outline,
 ## and at any punch <= FLOAT_PUNCH_MAX the drawn plate sits inside this rect,
@@ -12665,13 +12696,23 @@ func _draw_fx() -> void:
 			# 4-dir outline. Alpha tracks the ink fade (fc.a) so the plate never
 			# outlives its text. Drawn untransformed at the PUNCHED rect so the spawn
 			# punch can't hang glyphs off the plate's edge.
-			# Streak callouts ("x5 STREAK", "+25%!") are vector text with drop shadow only —
-			# dark backing cards over combat read as debug popups. Other toasts keep the plate.
-			var is_streak := String(fx["text"]).contains("STREAK") or String(fx["text"]).contains("%")
-			if not is_streak:
-				var pcol := FLOAT_PLATE_FILL
-				pcol.a *= fc.a
-				draw_rect(floattext_plate_rect(fpivot, fw, fsz, fpunch), pcol)
+			# UNCONDITIONAL, and shaped as a PILL: a soft fx_softspot halo feathers the
+			# silhouette away, then a rect capped by two half-round ends. f53074c stripped the
+			# backdrop from streak callouts on a substring match over the FINISHED STRING —
+			# a display-copy predicate, so any future toast carrying "%" or "STREAK" lost its
+			# plate the day it landed. The reviewer f53074c answered was right that a hard dark
+			# rect reads as a debug popup; the answer is the shape, not a missing backdrop.
+			var pcol := FLOAT_PLATE_FILL
+			pcol.a *= fc.a
+			var prr := floattext_plate_rect(fpivot, fw, fsz, fpunch)
+			draw_texture_rect(Art.tex("fx_softspot"), prr.grow_individual(10.0, 4.0, 10.0, 4.0),
+				false, Color(pcol, pcol.a * 0.55))
+			var pill := floattext_pill_parts(prr)
+			draw_rect(pill["core"], pcol)
+			var prad: float = pill["radius"]
+			for pcap_v in pill["caps"]:
+				var pcap: Vector2 = pcap_v
+				Art.circle(self, pcap, prad, pcol)
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
@@ -14416,6 +14457,33 @@ func _metal_plate(r: Rect2, a: float) -> void:
 ## the 13-row card's form line lands at y 373, off the same 360px bottom.
 const RESULT_DOC_RESERVE := 20.0
 const RESULT_PANEL_TOP := 112.0   # the end-card plate's top edge — hoisted so the victory trophy can seat flush ABOVE it instead of guessing at "blank panel space"
+
+## The end card's modal SCRIM. The run is OVER — the only live inputs are REDEPLOY and
+## TITLE — so the card is at least as modal as the PAUSE menu, and it wears the SAME
+## backdrop language: GameMenu.SCRIM_BASE at GameMenu._scrim_alpha(Mode.PAUSE). One
+## doctrine, read off menu.gd rather than re-typed here.
+##
+## Why it was needed: sim.step() is gated behind `elif not _debrief:`, so the battlefield
+## under a result card is a FROZEN, FULLY LIT still image, and the card covers only 36.3%
+## (7-row victory, 359x233) / 49.1% (13-row K.I.A., 456x248) of the frame — 51..64% of the
+## screen was undimmed playfield under a report. Nothing else reduced it: the always-on
+## vignette is alpha 0.04 and edge-only, and every _wash card is centre-clear by contract.
+## MEASURED: brightest campaign sand (relative luminance 0.13091) -> 0.01596, a 0.122x
+## factor. The field stays readable at 12% — the same tradeoff _scrim_alpha already makes
+## for PAUSE, deliberately, so you can still study your run behind the card.
+##
+## wash-exempt: a modal STATE, not a transient threat wash. It is deliberately centre-
+## COVERING, which is exactly what WASH_KINDS' centre-clear contract forbids, so it must
+## NOT be a _wash() card (see WASH_CAP). It is bounded instead by being drawn once, only
+## while a result card is up, and only under it.
+const RESULT_SCRIM_BASE := GameMenu.SCRIM_BASE
+
+static func result_scrim_alpha(t: float, motion: float) -> float:
+	var a := GameMenu._scrim_alpha(GameMenu.Mode.PAUSE, motion)
+	if motion < 0.5 or t >= 1.0:
+		return a
+	return a * (1.0 - pow(1.0 - t, 3.0))   # rides the card's own entrance ease (`ea`)
+
 static func result_row_pitch(n: int, reserve := 0.0) -> float:
 	return minf(19.0, (SCREEN_H - 178.0 - 14.0 - reserve) / float(maxi(n, 1)))
 
@@ -14467,6 +14535,13 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 	## plate's top (doc["band"]), one rule under it, and a form-number microline
 	## at the plate's bottom edge (doc["form"]). Victory files an AFTER-ACTION
 	## REPORT, K.I.A. a CASUALTY REPORT — the two cards can never read as one box.
+	# The modal scrim FIRST — before the entrance translate below, so the card's 12px rise
+	# cannot drag the backdrop with it, and before the plate so the card sits ON it. Drawn
+	# in the shake-cancel screen matrix _draw() already installed (the same one _fade and the
+	# letterbox use), so (0,0,640,360) lands exactly on screen. Lives in the HELPER, not at
+	# the two call sites, so a third end card inherits it by construction.
+	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H),
+		Color(RESULT_SCRIM_BASE, result_scrim_alpha(_result_t, _motion)))
 	var panel_top := RESULT_PANEL_TOP
 	var title_y := 150.0
 	var row_start_y := 178.0

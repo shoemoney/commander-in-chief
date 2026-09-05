@@ -3410,3 +3410,201 @@ func test_boss_hp_dock_is_painted_after_every_world_pass() -> void:
 	Runner.T.ok(tail.contains("draw_set_transform_matrix(get_transform().affine_inverse())"),
 		("_draw_boss_chrome must re-cancel the node transform after draining — both painters "
 			+ "restore to world space, and _draw_god_badge draws after this pass"))
+
+
+# --- c3 tell [1]: the end-of-run result card is a MODAL surface with no scrim. ------------
+# Every other modal in the game darkens its backdrop through one doctrine
+# (GameMenu._scrim_alpha: TITLE 0.55, PAUSE 0.74, HALL/HOWTO 0.90, drawn full-frame at
+# menu.gd:3984 and pinned by test_assets.gd::test_a3_meta_screen_scrim_seals_content_screens).
+# The victory / K.I.A. card bypasses it: sim.step() is gated behind `elif not _debrief:`
+# so the battlefield behind the card is a FROZEN, FULLY LIT still image, and the card
+# itself only covers 36.3% (7-row victory, 359x233) / 49.1% (13-row K.I.A., 456x248) of
+# the frame — 51..64% of the screen is undimmed playfield under a report. Nothing else
+# reduces it: the always-on vignette is alpha 0.04 and edge-only, and every _wash card is
+# centre-clear by contract.
+# MEASURED at HEAD: brightest campaign sand = _ground_stops("campaign")[0][0] * GROUND_SHADE
+# = Color(0.4959, 0.3758, 0.2192), relative luminance 0.13091 — and the scrimmed/bare
+# luminance ratio is exactly 1.000, because nothing darkens the centre.
+# The fix goes INSIDE _draw_result_panel, not at its two call sites, so a third card added
+# tomorrow inherits the scrim by construction.
+func test_the_result_card_scrims_its_backdrop() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var c := _consts()
+
+	var has := ms.has_method("result_scrim_alpha")
+	Runner.T.ok(has, "result_scrim_alpha() exists — the end card reads the ONE scrim doctrine")
+
+	# Parity, read off menu.gd rather than re-typed: the run is OVER (the only live inputs
+	# are REDEPLOY and TITLE), so the card is at least as modal as PAUSE.
+	var settled := 0.0
+	for motion in [0.0, 1.0]:
+		var want: float = GameMenu._scrim_alpha(GameMenu.Mode.PAUSE, motion)
+		var got := 0.0
+		if has:
+			got = float(ms.call("result_scrim_alpha", 1.0, motion))
+		if motion > 0.5:
+			settled = got
+		Runner.T.ok(got >= want,
+			"settled result scrim at motion %.1f is at least PAUSE-opaque (%.3f >= %.3f)"
+				% [motion, got, want])
+
+	# The measurement the class exists for: how much of the frozen, fully lit field
+	# actually survives under the card.
+	var stop: Color = Main._ground_stops("campaign")[0][0]
+	var shade: float = c["GROUND_SHADE"]
+	var sand := Color(stop.r * shade, stop.g * shade, stop.b * shade)
+	var base: Color = c.get("RESULT_SCRIM_BASE", GameMenu.SCRIM_BASE)
+	var over := Color(base.r * settled + sand.r * (1.0 - settled),
+		base.g * settled + sand.g * (1.0 - settled),
+		base.b * settled + sand.b * (1.0 - settled))
+	var lum_bare := 0.2126 * _lin(sand.r) + 0.7152 * _lin(sand.g) + 0.0722 * _lin(sand.b)
+	var lum_over := 0.2126 * _lin(over.r) + 0.7152 * _lin(over.g) + 0.0722 * _lin(over.b)
+	Runner.T.ok(lum_bare > 0.12, "the brightest campaign sand really is bright (lum %.5f)" % lum_bare)
+	Runner.T.ok(lum_over / lum_bare <= 0.30,
+		"the card recedes its frozen field: scrimmed sand is %.1f%% of bare luminance (cap 30%%)"
+			% (100.0 * lum_over / lum_bare))
+
+	# Wiring, class-closed: the scrim is emitted by the shared HELPER, before the plate,
+	# so card #3 inherits it. A signature-and-docstring is exactly the failure mode
+	# claim_label_slot shipped with.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var fstart := src.find("func _draw_result_panel(")
+	Runner.T.ok(fstart >= 0, "_draw_result_panel exists")
+	var fend := src.find("\nfunc ", fstart + 10)
+	var body := src.substr(fstart, (fend if fend > fstart else src.length()) - fstart)
+	var scrim_at := -1
+	var probe := 0
+	while true:
+		var at := body.find("draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H)", probe)
+		if at < 0:
+			break
+		var stmt_end: int = body.find("\n", at)
+		if stmt_end < 0:
+			stmt_end = body.length()
+		if body.substr(at, stmt_end - at + 200).contains("result_scrim_alpha"):
+			scrim_at = at
+			break
+		probe = at + 1
+	var panel_at := body.find('draw_texture_rect(Art.tex("ui_panel")')
+	Runner.T.ok(scrim_at >= 0,
+		"_draw_result_panel itself draws the full-frame scrim through result_scrim_alpha()")
+	Runner.T.ok(panel_at >= 0, "_draw_result_panel draws its ui_panel plate")
+	Runner.T.ok(scrim_at >= 0 and panel_at > scrim_at,
+		"the scrim is drawn BEFORE the card plate (scrim@%d, plate@%d)" % [scrim_at, panel_at])
+
+	# Set closure: both existing call sites live inside _draw_banners, and neither carries
+	# its own scrim — the helper owns it, so a third card cannot ship unscrimmed.
+	Runner.T.eq(src.count("_draw_result_panel(") - 1, 2,
+		"the two shipped end cards (victory + K.I.A.) call the one helper")
+	var bstart := src.find("func _draw_banners(")
+	var bend := src.find("\nfunc ", bstart + 10)
+	var banners := src.substr(bstart, (bend if bend > bstart else src.length()) - bstart)
+	Runner.T.eq(banners.count("_draw_result_panel("), 2,
+		"both call sites are inside _draw_banners (where the review measured them)")
+	Runner.T.eq(banners.count("result_scrim_alpha"), 0,
+		"no CALLER re-implements the scrim — it lives in the helper, so a third card inherits it")
+
+
+# --- c3 tell [1b]: the rear-warn wedge paints over the K.I.A. card. ----------------------
+# _rear_wedge_t is set to 1.5s at main.gd:3112 and decayed in _update_feel(), which
+# main.gd:2511 calls UNCONDITIONALLY — outside the `elif not _debrief:` run-ender freeze.
+# So a death taken mid-advance leaves the wedge painting a full-width y340..360 strip
+# (plus an apex at y=338) over a 13-row K.I.A. card whose plate bottom is exactly y=360
+# and whose FORM KIA-1 microline sits at y~353. This is not victory-only, and it is not
+# decorative: a rear breach is not actionable once the run is over.
+# MEASURED at HEAD: the strip and the real 13-row card rect overlap by 9,120 px².
+func test_nothing_paints_over_the_result_card() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var c := _consts()
+	var has := ms.has_method("rear_wedge_visible")
+	Runner.T.ok(has, "rear_wedge_visible() hoists the wedge's predicate so it can be pinned")
+
+	# t, debrief, victory -> visible
+	var table := [[1.5, false, false, true], [1.5, true, false, false],
+		[1.5, false, true, false], [0.0, false, false, false]]
+	for row in table:
+		var got: bool = row[0] > 0.0   # HEAD's ungated behaviour, so the red reports the real gap
+		if has:
+			got = bool(ms.call("rear_wedge_visible", row[0], row[1], row[2]))
+		Runner.T.eq(got, row[3],
+			"rear_wedge_visible(t=%.1f, debrief=%s, victory=%s) == %s"
+				% [row[0], row[1], row[2], row[3]])
+
+	# Not decorative: the gate is load-bearing because the two rects genuinely overlap.
+	# Card geometry from the REAL shipped formula, not a transcription.
+	var reserve: float = c["RESULT_DOC_RESERVE"]
+	var top: float = c["RESULT_PANEL_TOP"]
+	var pitch: float = Main.result_row_pitch(13, reserve)
+	var panel_h := (178.0 - top) + 13.0 * pitch + 14.0 + reserve
+	# 412px = the widest row the live 13-row K.I.A. card ships; +44 padding, clamped.
+	var panel_w := clampf(412.0 + 44.0, 300.0, 620.0)
+	var card := Rect2(320.0 - panel_w / 2.0, top, panel_w, panel_h)
+	var strip := Rect2(0.0, float(c["SCREEN_H"]) - 20.0, float(c["SCREEN_W"]), 20.0)
+	var lap := card.intersection(strip)
+	Runner.T.ok(lap.has_area(),
+		"the wedge strip really does reach the K.I.A. card (%.0f px² overlap, card bottom y%.0f)"
+			% [lap.get_area(), card.end.y])
+
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("if rear_wedge_visible("),
+		"_draw gates the rear-warn wedge through rear_wedge_visible() (not a bare timer test)")
+	Runner.T.eq(src.count("if _rear_wedge_t > 0.0:"), 0,
+		"the ungated `if _rear_wedge_t > 0.0:` wedge draw is gone")
+
+
+# --- c3 tell [2]: the toast backdrop branches on the toast's own display COPY. -----------
+# main.gd's floattext renderer is the ONE draw site for 33 producers, and at HEAD a
+# substring match on the finished string decides whether the toast gets a plate:
+#     var is_streak := String(fx["text"]).contains("STREAK") or String(fx["text"]).contains("%")
+#     if not is_streak: ...draw_rect(floattext_plate_rect(...))
+# Scraped from source the set it strips today is exactly two ("x%d STREAK", "+%d%%!" —
+# everything else formats its %d/%s away before the predicate runs), but the predicate is
+# on COPY, so any future toast carrying a percent sign or the word STREAK silently loses
+# its backdrop the day it lands with no test noticing. That is the seam.
+# This overturns f53074c ("streak callouts now drop-shadow only — no dark backing boxes
+# over combat") on MECHANISM, not intent: that reviewer was right that a hard dark rect
+# reads as a debug popup; the answer is a pill + soft halo, not a missing backdrop.
+func test_the_toast_backdrop_never_branches_on_its_own_copy() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var bstart := src.find('elif fx["kind"] == "floattext":')
+	Runner.T.ok(bstart >= 0, "_draw_fx keeps a floattext branch")
+	var bend := src.find("\n\t\telif ", bstart)
+	var arm := src.substr(bstart, (bend if bend > bstart else src.length()) - bstart)
+	var arm_line := src.substr(0, bstart).count("\n") + 1
+
+	# (a) No conditional inside the arm may read the toast's own text.
+	var offenders: Array[String] = []
+	var al := arm.split("\n")
+	for i in al.size():
+		var ln: String = al[i]
+		if not (ln.contains('fx["text"]') or ln.contains('fx.get("text"')):
+			continue
+		if ln.contains(".contains(") or ln.contains(".begins_with(") or ln.contains(".ends_with(") \
+				or ln.contains(".match(") or ln.contains("if ") or ln.contains("elif "):
+			offenders.append("main.gd:%d  %s" % [arm_line + i, ln.strip_edges()])
+	Runner.T.eq(offenders.size(), 0,
+		"the toast backdrop never branches on its own copy — offenders: %s" % str(offenders))
+
+	# (b) The pill exists, and it is WIRED (not a signature and a docstring — the exact
+	#     failure mode claim_label_slot shipped with).
+	var has := ms.has_method("floattext_pill_parts")
+	Runner.T.ok(has, "floattext_pill_parts() exists — a pill, not a blocky card")
+	Runner.T.ok(arm.contains("floattext_pill_parts("),
+		"the floattext arm actually draws through floattext_pill_parts()")
+
+	# (c) The pill encloses the plate it replaces, at every shipped size and both punch
+	#     extremes — the punched text box is never wider than its own backdrop.
+	if has:
+		for size in [8, 9, 11, 12, 13]:
+			for punch in [1.0, 1.5]:
+				var r: Rect2 = Main.floattext_plate_rect(Vector2(200.0, 100.0), 80.0, size, punch)
+				var parts: Dictionary = ms.call("floattext_pill_parts", r)
+				var union: Rect2 = parts["core"]
+				var rad: float = parts["radius"]
+				for cap in parts["caps"]:
+					var cv: Vector2 = cap
+					union = union.merge(Rect2(cv - Vector2.ONE * rad, Vector2.ONE * rad * 2.0))
+				Runner.T.ok(union.encloses(r),
+					"fsz %d punch %.1f: core+caps enclose the plate rect (union %s vs plate %s)"
+						% [size, punch, str(union), str(r)])

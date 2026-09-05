@@ -8740,3 +8740,215 @@ func _header_states(mode_id: int) -> Array:
 			{"tag": "OPTS reset flash", "_reset_flash": 1.0},
 		]
 	return [{"tag": "mode %d" % mode_id}]
+
+
+# --- c3 tell [2]: every floattext toast must wear a backdrop, and NOTHING about its
+# display copy may decide that. Sibling of test_world_signage_uses_the_one_plate_language
+# above, reusing its _blend/_opaque/_wcag_contrast and the identical ground derivation
+# (_ground_stops("campaign")[0][0] * GROUND_SHADE — the brightest sand the campaign paints).
+#
+# The set is DERIVED FROM SOURCE, not listed: every `"kind": "floattext"` dict in main.gd,
+# its `"col":` expression resolved through Color(...) literals, FLOAT_INK_* consts,
+# Art.safe(...) and _CAPSULE_COL[...], plus the _coin_pop() helper's `col` parameter
+# resolved from its own call sites. An UNRESOLVABLE expression fails this test BY NAME
+# rather than being skipped, so copy added tomorrow forces a decision instead of slipping
+# through.
+#
+# MEASURED at HEAD (33 producers, 37 distinct inks): the arm strips the backdrop from
+# "x%d STREAK" (ink 1.0/0.75/0.3) and "+%d%%!" (1.0/0.92/0.4) via a substring match on
+# the finished string. Bare on the brightest sand at PEAK ink alpha they read 3.55:1 and
+# 4.78:1; on the shipped FLOAT_PLATE_FILL backdrop the same two read 8.65:1 and 11.66:1.
+#
+# NEGATIVE RESULT, banked rather than asserted: an ABSOLUTE floor of 7.0:1 on the plate —
+# proposed on the belief that "every plated sibling reads 8.65..11.66" — is FALSE. Measured
+# across the whole scraped set, 14 already-shipped plated inks sit under 7.0 on the plate,
+# the weakest being _loss_sting's Color(0.95,0.25,0.2) at 3.75:1 and "RANSOM LOST" at 4.90.
+# So this test pins the thing that is actually true of the family and actually regressed:
+# the backdrop is UNCONDITIONAL, and it is load-bearing for every ink in the set (it buys
+# a >=2x contrast gain over bare sand for all 37). Bare-ink AA on this family is a real
+# open finding, not something this fix touches.
+func test_every_floattext_ink_wears_a_backdrop() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var consts := ms.get_script_constant_map()
+
+	# --- scrape ---
+	var producers: Array = []        # [line, col_expr]
+	var pos := 0
+	while true:
+		var at := src.find('"kind": "floattext"', pos)
+		if at < 0:
+			break
+		var close := src.find("})", at)
+		if close < 0:
+			close = at + 400
+		var stmt := src.substr(at, close - at + 2)
+		var line := src.substr(0, at).count("\n") + 1
+		var ck := stmt.find('"col":')
+		producers.append([line, _arg_expr(stmt, ck + 6) if ck >= 0 else ""])
+		pos = at + 1
+	Runner.T.ok(producers.size() >= 25,
+		"the scrape actually found the floattext family (%d producers)" % producers.size())
+
+	# _coin_pop(x, y, txt, trail_n, col, rate) forwards its `col` param — resolve the
+	# helper's producer from the helper's own call sites.
+	var coin_inks: Array[Color] = []
+	var cp := 0
+	while true:
+		var at := src.find("_coin_pop(", cp)
+		if at < 0:
+			break
+		cp = at + 1
+		if src.substr(at - 5, 5).contains("func "):
+			continue
+		var args := _split_args(src.substr(at + 10, src.find("\n", at) - at))
+		if args.size() >= 5:
+			for col in _resolve_ink(args[4], consts):
+				coin_inks.append(col)
+	Runner.T.ok(coin_inks.size() >= 3,
+		"_coin_pop's forwarded ink resolved from its call sites (%d)" % coin_inks.size())
+
+	var inks: Array = []             # [Color, label]
+	var unresolved: Array[String] = []
+	for p in producers:
+		var expr: String = String(p[1])
+		if expr == "col":
+			for col in coin_inks:
+				inks.append([col, "main.gd:%d (_coin_pop)" % int(p[0])])
+			continue
+		var got := _resolve_ink(expr, consts)
+		if got.is_empty():
+			unresolved.append("main.gd:%d  \"col\": %s" % [int(p[0]), expr if not expr.is_empty() else "<absent>"])
+			continue
+		for col in got:
+			inks.append([col, "main.gd:%d %s" % [int(p[0]), expr]])
+	Runner.T.eq(unresolved.size(), 0,
+		"every floattext \"col\" expression resolves — a new one must be taught to this test, not skipped: %s"
+			% str(unresolved))
+	Runner.T.ok(inks.size() >= 30, "resolved %d distinct floattext inks" % inks.size())
+
+	# --- (a) THE RED ARM: no predicate over the toast's own copy may exist in the renderer.
+	var bstart := src.find('elif fx["kind"] == "floattext":')
+	Runner.T.ok(bstart >= 0, "_draw_fx keeps a floattext branch")
+	var bend := src.find("\n\t\telif ", bstart)
+	var arm := src.substr(bstart, (bend if bend > bstart else src.length()) - bstart)
+	var tokens: Array[String] = []
+	for probe_v in [".contains(\"", ".begins_with(\"", ".ends_with(\"", ".match(\""]:
+		var probe: String = probe_v
+		var q := 0
+		while true:
+			var at := arm.find(probe, q)
+			if at < 0:
+				break
+			var lit_start := at + probe.length()
+			var lit_end := arm.find("\"", lit_start)
+			tokens.append(arm.substr(lit_start, lit_end - lit_start))
+			q = at + 1
+	Runner.T.eq(tokens.size(), 0,
+		("no copy predicate decides a toast's backdrop — the renderer matched %s on the "
+			+ "finished string, so any future toast carrying one of those loses its plate silently")
+			% str(tokens))
+
+	# --- (b) the backdrop is load-bearing for EVERY ink in the family, not just the loud ones.
+	var stop: Color = MainScript._ground_stops("campaign")[0][0]
+	var ground := Color(stop.r * MainScript.GROUND_SHADE, stop.g * MainScript.GROUND_SHADE,
+		stop.b * MainScript.GROUND_SHADE)
+	var fill: Color = MainScript.FLOAT_PLATE_FILL
+	var plate := _blend(_opaque(fill), ground, fill.a)
+	var worst := 99.0
+	var worst_name := ""
+	for pair in inks:
+		var ink: Color = _opaque(pair[0])
+		var gain := _wcag_contrast(ink, plate) / _wcag_contrast(ink, ground)
+		if gain < worst:
+			worst = gain
+			worst_name = String(pair[1])
+	Runner.T.ok(worst >= 2.0,
+		"the toast backdrop buys every scraped ink at least a 2x contrast gain over bare sand (worst %.2fx: %s)"
+			% [worst, worst_name])
+
+	# --- (c) the two inks HEAD strips, named and measured, so the regression is legible.
+	for spec in [[Color(1.0, 0.75, 0.3), "x%d STREAK"], [Color(1.0, 0.92, 0.4), "+%d%%!"]]:
+		var ink: Color = spec[0]
+		var on_plate := _wcag_contrast(ink, plate)
+		var bare := _wcag_contrast(ink, ground)
+		Runner.T.ok(on_plate >= 8.0,
+			"'%s' on the shipped backdrop reads %.2f:1 (bare on sand it is %.2f:1)"
+				% [spec[1], on_plate, bare])
+
+
+# Split a top-level argument list (the text AFTER the opening paren, up to its match).
+func _split_args(s: String) -> Array[String]:
+	var out: Array[String] = []
+	var d := 0
+	var cur := ""
+	var in_str := false
+	for i in s.length():
+		var ch := s[i]
+		if ch == "\"":
+			in_str = not in_str
+		if not in_str:
+			if ch == "(" or ch == "[" or ch == "{":
+				d += 1
+			elif ch == ")" or ch == "]" or ch == "}":
+				if d == 0:
+					out.append(cur.strip_edges())
+					return out
+				d -= 1
+			elif ch == "," and d == 0:
+				out.append(cur.strip_edges())
+				cur = ""
+				continue
+		cur += ch
+	if not cur.strip_edges().is_empty():
+		out.append(cur.strip_edges())
+	return out
+
+
+# The expression that follows a dict key, up to the top-level ',' or '}'.
+func _arg_expr(s: String, from: int) -> String:
+	var d := 0
+	var out := ""
+	var in_str := false
+	for i in range(from, s.length()):
+		var ch := s[i]
+		if ch == "\"":
+			in_str = not in_str
+		if not in_str:
+			if ch == "(" or ch == "[":
+				d += 1
+			elif ch == ")" or ch == "]":
+				d -= 1
+			elif d == 0 and (ch == "," or ch == "}"):
+				break
+		out += ch
+	return " ".join(out.strip_edges().split("\n", false))
+
+
+# Colors an ink expression can produce. [] means UNRESOLVABLE — the caller fails by name.
+func _resolve_ink(expr: String, consts: Dictionary) -> Array[Color]:
+	var out: Array[Color] = []
+	var e := " ".join(expr.strip_edges().split("\t", false)).strip_edges()
+	while e.contains("  "):
+		e = e.replace("  ", " ")
+	if e.begins_with("Art.safe(") and e.ends_with(")"):
+		# Art.safe is the colourblind remap; the shipped default (colorblind off) is identity.
+		return _resolve_ink(e.substr(9, e.length() - 10), consts)
+	if e.begins_with("Color(") and e.ends_with(")"):
+		var parts := _split_args(e.substr(6))
+		if parts.size() < 3:
+			return out
+		var v := PackedFloat32Array()
+		for i in 3:
+			if not parts[i].is_valid_float():
+				return out
+			v.append(parts[i].to_float())
+		out.append(Color(v[0], v[1], v[2]))
+		return out
+	if e.begins_with("_CAPSULE_COL["):
+		for col in consts.get("_CAPSULE_COL", []):
+			out.append(col)
+		return out
+	if consts.has(e) and consts[e] is Color:
+		out.append(consts[e])
+	return out
