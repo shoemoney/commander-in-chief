@@ -2086,12 +2086,24 @@ func test_colossus_screen_bar_opts_out_under_the_result_card() -> void:
 	## Live last-stand (15-live-t18000) painted FOUNDRY COLOSSUS — ADVANCE through
 	## the CASUALTY REPORT. Captions/verbs already opt out via _result_card_up;
 	## the screen-space bar in _draw_colossus never did.
+	## Re-anchored 2026-09-05: this used to be a +-1200-char window around `var clabel`, which
+	## is a PROXIMITY heuristic, not a claim about the code. Splitting the dock out of the world
+	## pass (_draw_colossus queues, _colossus_chrome paints) pushed the guard 1,308 chars away
+	## and the window went red while the guard was completely intact. The window is now the
+	## colossus dock PATH itself — both halves — so the assertion survives any further split and
+	## still fails the day the guard is deleted.
 	var src := _view_src()
-	var mark := src.find('var clabel := "FOUNDRY COLOSSUS')
-	Runner.T.ok(mark >= 0, "the colossus HUD label is still authored here")
-	var chunk := src.substr(maxi(0, mark - 1200), 1600)
+	var ds := src.find("func _draw_colossus() -> void:")
+	Runner.T.ok(ds >= 0, "the colossus pass is still findable")
+	var de := src.find("func _draw_boss_chrome() -> void:", ds)
+	Runner.T.ok(de > ds, "the colossus dock path runs from _draw_colossus to the chrome painter")
+	var chunk := src.substr(ds, maxi(de - ds, 0))
+	Runner.T.ok(chunk.contains('var clabel := "FOUNDRY COLOSSUS'),
+		"the colossus HUD label is still authored on that path")
 	Runner.T.ok(chunk.contains("if _debrief or sim.victory"),
 		"the colossus screen-space bar must hide while a result card owns the frame")
+	Runner.T.ok(chunk.contains("HudIcons.colossus_bar_visible(sim)"),
+		"...and it still opts out entirely when the finale is not up")
 
 
 func test_hall_tags_the_score_inflating_hard_toggle() -> void:
@@ -4433,7 +4445,11 @@ func test_world_ground_tints_are_soft_masked_not_raw_quads() -> void:
 	# 47 before the fix; 6 raw ground-tint PLANES retired (1 choke slab, 3 lane-seal
 	# slabs, 1 rubble tint, 1 trench floor). Not a floor — an EQUALITY, so a new raw
 	# quad in any of the 30 functions fails here even if someone deletes an old one.
-	Runner.T.eq(total, 41,
+	# 41 -> 40 on 2026-09-05: the colossus phase-label PLATE was the one filled rect in this
+	# layer that was never world-ground at all — screen-anchored boss chrome emitted from
+	# inside a world pass, which is what let seven later world passes paint across it. It now
+	# lives in _colossus_chrome, off this layer entirely. Nothing was deleted; one rect moved.
+	Runner.T.eq(total, 40,
 		"filled draw_rect count across the whole world-ground layer (%d)" % total)
 	# Per-function, so those exact fills cannot creep back one at a time. _draw_ledges
 	# is UNTOUCHED at 3 and asserted at 3 — proof this arm is not just "everything went
@@ -4642,3 +4658,360 @@ func test_world_ground_tints_are_soft_masked_not_raw_quads() -> void:
 		("control: ...and on %d of them it lands entirely SOUTH of the row, missing the real"
 			+ " run by up to %.0fpx tall — so a green above means arm 3 can still see the defect")
 			% [head_south, head_dy])
+
+
+# --- 34. Every WORLD-ANCHORED string is arbitrated, or exempted in writing --------------
+#
+# `claim_label_slot` / `_label_slots` is THE arbiter for world-space text — but it only
+# arbitrates the producers that call it, and the wiring ratchet next door
+# (test_main.gd::test_world_text_routes_through_the_arbiter) is a set of COUNT THRESHOLDS
+# (">= 3 append sites", ">= 4 claim sites"). A threshold cannot notice a *new* bare draw:
+# 13 of the 23 world-anchored strings in main.gd printed wherever they liked while that
+# test stayed green. This is the missing half — a DERIVED-SET inventory, the same shape as
+# SPRITE_CANVAS above: the scrape must equal the table, so a string added tomorrow is red
+# the day it lands and a deleted one must be pruned.
+#
+# Keyed on `<enclosing _draw pass>|<the text expression>` rather than a line number, so it
+# survives renumbering and colour/position tweaks but NOT a new producer.
+
+const WHEEL_WHY := \
+	"the supply wheel is a MODAL radial widget that deliberately owns the screen while " + \
+	"open (it paints its own near-opaque scrim + plate, and nothing else is actionable). " + \
+	"Dodging is the wrong verb for it — the correct follow-up is RESERVE, so transient " + \
+	"toasts under an open wheel yield. Banked, not done: that is a separate change."
+
+const BANNER_WHY := \
+	"screen-anchored, not world-anchored: _draw_banners runs inside _draw()'s " + \
+	"transform-cancelled block and every row here is centred on x=320 at a HudIcons " + \
+	"band/row baseline. It only reaches _to_screen for the airstrike/objective marks it " + \
+	"places, which is what puts its pass in this scrape at all."
+
+## mode:
+##   "reserve" — pinned to the thing it names. Moving it would LIE about where the hazard
+##               is, so it reserves its pixels unconditionally and transients dodge it.
+##   "claim"   — transient and free to move: routes through claim_label_slot and draws at
+##               the rect it was GRANTED (plate AND ink, at the returned position).
+##   "exempt-modal" / "screen" — not arbitrated, with a written reason.
+## needs_body — a substring that must appear in the enclosing pass (the WIRING half: a rect
+##              computed and thrown away is this codebase's own documented failure mode).
+## needs_line — a substring that must appear in the site's own source line (the claim
+##              offset, so the ink travels with the rect the arbiter handed back).
+const WORLD_TEXT_SITES := {
+	"_draw_barrels|\"!\"":
+		{"mode": "reserve", "needs_body": "_label_slots.append(bprect)", "needs_rect": "barrel_pip_rect("},
+	"_draw_enemies|\"?\"":
+		{"mode": "reserve", "needs_body": "_label_slots.append(tqrect)", "needs_rect": "technical_pip_rect("},
+	"_draw_gates|gnum_txt":
+		{"mode": "reserve", "needs_body": "_label_slots.append(gnrect)", "needs_rect": "gate_numeral_rect(",
+			"needs_dissolve": "fork_sign_alpha(gnrect"},
+	"_draw_gates|cache_txt":
+		{"mode": "reserve", "needs_body": "_label_slots.append(crect)"},
+	"_draw_gates|bounty_txt":
+		{"mode": "reserve", "needs_body": "_label_slots.append(brect)"},
+	"_draw_pickups|pdigits":
+		{"mode": "claim", "needs_body": "claim_label_slot(", "needs_line": "poff"},
+	"_draw_threat_edges|\"REVIVE\"":
+		{"mode": "claim", "needs_body": "claim_label_slot(", "needs_line": "roff"},
+	"_draw_wheel|chest": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|\"×\"": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|str(acost)": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|warn_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|cue_l": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|cue_r": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|cue_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|lbl": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|cost_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_wheel|stock_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	"_draw_banners|trow[\"text\"]": {"mode": "screen", "why": BANNER_WHY},
+	"_draw_banners|btext": {"mode": "screen", "why": BANNER_WHY},
+	"_draw_banners|hrow[\"text\"]": {"mode": "screen", "why": BANNER_WHY},
+	"_draw_banners|\"LAST STAND — NO REVIVES, 2× KILL SCORE\"": {"mode": "screen", "why": BANNER_WHY},
+	"_draw_banners|\"— REPLAY — %s TO EXIT —\" % _replay_exit_cap()": {"mode": "screen", "why": BANNER_WHY},
+}
+
+
+func _main_func_bodies() -> Dictionary:
+	## name -> body, comment-only lines stripped, for every top-level func (static or not).
+	var out: Dictionary = {}
+	var cur := ""
+	for line in _view_src().split("\n"):
+		var head := line
+		if head.begins_with("static func "):
+			head = head.substr(7)
+		if head.begins_with("func "):
+			var close := head.find("(")
+			cur = head.substr(5, close - 5) if close > 5 else ""
+			if cur != "":
+				out[cur] = ""
+		elif not line.is_empty() and not (line[0] == " " or line[0] == "\t" or line[0] == "#"):
+			cur = ""
+		if cur != "" and not line.strip_edges().begins_with("#"):
+			out[cur] = String(out[cur]) + line + "\n"
+	return out
+
+
+func _first_text_arg(line: String) -> String:
+	## The text expression a draw site prints, paren/bracket/quote aware — the stable half
+	## of the key (a colour or position tweak must not churn the table).
+	var i := line.find("Art.text_center(self, ")
+	if i >= 0:
+		i += "Art.text_center(self, ".length()
+	else:
+		i = line.find("Art.text(self, ")
+		if i < 0:
+			return ""
+		i += "Art.text(self, ".length()
+	var depth := 0
+	var quoted := false
+	var out := ""
+	while i < line.length():
+		var ch := line[i]
+		if quoted:
+			out += ch
+			if ch == "\"":
+				quoted = false
+		elif ch == "\"":
+			quoted = true
+			out += ch
+		elif ch == "(" or ch == "[" or ch == "{":
+			depth += 1
+			out += ch
+		elif ch == ")" or ch == "]" or ch == "}":
+			if depth == 0:
+				break
+			depth -= 1
+			out += ch
+		elif ch == "," and depth == 0:
+			break
+		else:
+			out += ch
+		i += 1
+	return out.strip_edges()
+
+
+func _world_text_sites() -> Dictionary:
+	## key -> {"func", "lines": [n...]}, for every Art.text/Art.text_center call whose
+	## enclosing function is a `_draw()` pass that draws in WORLD space — it calls
+	## _to_screen, or (like _draw_threat_edges) computes its screen y off camera_top by hand.
+	var bodies := _main_func_bodies()
+	var passes: Array[String] = []
+	var pre := RegEx.new()
+	pre.compile("\\b(_draw_[a-z_0-9]+)\\(")
+	for mm in pre.search_all(String(bodies.get("_draw", ""))):
+		if not passes.has(mm.get_string(1)):
+			passes.append(mm.get_string(1))
+	var out: Dictionary = {}
+	var cur := ""
+	var ln := 0
+	for line in _view_src().split("\n"):
+		ln += 1
+		var head := line
+		if head.begins_with("static func "):
+			head = head.substr(7)
+		if head.begins_with("func "):
+			var close := head.find("(")
+			cur = head.substr(5, close - 5) if close > 5 else ""
+		elif not line.is_empty() and not (line[0] == " " or line[0] == "\t" or line[0] == "#"):
+			cur = ""
+		if cur == "" or line.strip_edges().begins_with("#"):
+			continue
+		if not (line.contains("Art.text(self, ") or line.contains("Art.text_center(self, ")):
+			continue
+		if not passes.has(cur):
+			continue
+		var body := String(bodies[cur])
+		if not (body.contains("_to_screen(") or body.contains("camera_top")):
+			continue
+		var key := "%s|%s" % [cur, _first_text_arg(line)]
+		if not out.has(key):
+			out[key] = {"func": cur, "lines": []}
+		(out[key]["lines"] as Array).append(ln)
+	return out
+
+
+func test_every_world_anchored_string_is_arbitrated_or_exempted() -> void:
+	var sites := _world_text_sites()
+	Runner.T.ok(sites.size() >= 20,
+		"scraped the world-anchored text sites out of main.gd (%d) — a dead scrape must not pass silently"
+			% sites.size())
+	var missing: Array[String] = []
+	var extra: Array[String] = []
+	for k in sites:
+		if not WORLD_TEXT_SITES.has(k):
+			missing.append("%s (main.gd:%s)" % [k, str(sites[k]["lines"])])
+	for k in WORLD_TEXT_SITES:
+		if not sites.has(k):
+			extra.append(String(k))
+	Runner.T.eq(missing.size(), 0,
+		("a new world-space string must declare how it shares the screen — add it to "
+			+ "WORLD_TEXT_SITES with mode reserve/claim, or an exemption WITH A REASON. "
+			+ "Unclassified: %s") % "; ".join(missing))
+	Runner.T.eq(extra.size(), 0,
+		("WORLD_TEXT_SITES still lists sites main.gd no longer draws — a ratchet nobody "
+			+ "prunes stops being read. Stale: %s") % "; ".join(extra))
+	# --- the wiring half: a classification is a claim about the CODE, so check the code.
+	var bodies := _main_func_bodies()
+	var unwired := 0
+	for k in sites:
+		if not WORLD_TEXT_SITES.has(k):
+			continue
+		var row: Dictionary = WORLD_TEXT_SITES[k]
+		var fname: String = sites[k]["func"]
+		var body := String(bodies.get(fname, ""))
+		var mode: String = row["mode"]
+		if mode == "reserve" or mode == "claim":
+			var need: String = row["needs_body"]
+			if not body.contains(need):
+				unwired += 1
+				Runner.T.ok(false,
+					"%s is classified '%s' but %s() never runs `%s` — the arbiter is not wired to it"
+						% [k, mode, fname, need])
+			# The rect must come from the SHARED static, not a second hand-rolled copy of the
+			# arithmetic — that is the whole point of hoisting it (the sweep below measures the
+			# static; a draw that measures something else is not the thing that was measured).
+			if row.has("needs_rect") and not body.contains(String(row["needs_rect"])):
+				unwired += 1
+				Runner.T.ok(false,
+					"%s reserves a hand-rolled rect — it must reserve `%s`, the same measurement the ratchet reads"
+						% [k, String(row["needs_rect"])])
+			# Anchored signage that CANNOT dodge has to yield the other way: by dissolving.
+			# Reserving alone does not save the sector numeral — its dominant overlord is the
+			# top-center objective banner, opaque chrome that never routes through the arbiter.
+			if row.has("needs_dissolve") and not body.contains(String(row["needs_dissolve"])):
+				unwired += 1
+				Runner.T.ok(false,
+					"%s is anchored signage and must DISSOLVE under a band row (`%s`), not just reserve"
+						% [k, String(row["needs_dissolve"])])
+			if row.has("needs_line"):
+				var li: String = row["needs_line"]
+				var src_lines := _view_src().split("\n")
+				var ok_line := false
+				for n in (sites[k]["lines"] as Array):
+					if String(src_lines[int(n) - 1]).contains(li):
+						ok_line = true
+				if not ok_line:
+					unwired += 1
+					Runner.T.ok(false,
+						("%s claims a slot but draws at its ORIGINAL anchor — the ink must "
+							+ "carry the arbiter's offset `%s`, or the plate moves and the text does not")
+							% [k, li])
+		else:
+			Runner.T.ok(String(row.get("why", "")).length() >= 40,
+				"%s is exempt ('%s') and must say WHY in writing" % [k, mode])
+	Runner.T.eq(unwired, 0, "every arbitrated world string is actually wired to the arbiter")
+
+
+func test_hazard_pips_reserve_pixels_no_toast_can_take() -> void:
+	## The GEOMETRIC half of the inventory above. That test proves the three marks are WIRED
+	## to the arbiter; this one proves the wiring is sufficient — that a transient label or
+	## toast, swept across the arbiter's whole anchor domain, can never be handed a rect that
+	## overlaps them. It is not vacuous: `claim_label_slot`'s PERSISTENT path deliberately
+	## falls through to LEAST TOTAL OVERLAP once its 13-row ladder exhausts (that fallback
+	## handed back occupied pixels 1,506 times in a 13,653-claim sweep before the max_y bound
+	## landed), so a reservation on a congested frame is a claim that has to be measured.
+	##
+	## Run at BOTH shipped text scales. The three marks are fixed-size today, so 200% only
+	## moves the LABELS — pinning both is what keeps this true if someone ever routes the
+	## marks through Art.fs (the banked drift item).
+	var was_scale: float = Art.text_scale
+	var producers := _world_label_producers()
+	Runner.T.ok(producers.size() >= 16,
+		"scraped the world-label producers for realistic widths (%d)" % producers.size())
+	var claims := 0
+	var unreserved := {"clean": 0, "congested": 0}   # counter-factual: WITHOUT the reservation
+	var shipped := {"clean": 0, "congested": 0}      # WITH it
+	var worst := ""
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		Art.flush_tw()
+		var sz := Art.fs(8)
+		# The marks, off the SHARED statics the draw sites call — measuring anything else here
+		# would assert about a rect the game never reserves.
+		var marks: Array[Rect2] = [
+			Main.barrel_pip_rect(Vector2(300.0, 210.0)),
+			Main.gate_numeral_rect(190.0, "3"),
+			Main.technical_pip_rect(Vector2(150.0, 250.0)),
+		]
+		Runner.T.ok(marks[0].has_area() and marks[1].has_area() and marks[2].has_area(),
+			"the three marks measure real pixels at scale %.1f: %s" % [scale, str(marks)])
+		var widths := {}
+		for t in producers:
+			widths[Art.tw(t, sz)] = true
+		for regime in ["clean", "congested"]:
+			var base: Array[Rect2] = [Main.player_label_exclusion(Vector2(320.0, 300.0)),
+				Rect2(0.0, 0.0, 120.0, 60.0)]
+			if regime == "congested":
+				# Saturate the frame the way _draw does — every rect here was GRANTED by the
+				# arbiter and then appended to `taken`, so the ladder really does exhaust and
+				# the least-overlap fallback really does fire.
+				for cx in [60.0, 230.0, 400.0]:
+					for i in 18:
+						var cr := Main._label_plate_rect(cx, 60.0 + float(i) * 13.0, 180.0, sz)
+						base.append(Main.claim_label_slot(cr, base))
+			var with_marks: Array[Rect2] = base.duplicate()
+			for mr in marks:
+				with_marks.append(mr)
+			var xs := (range(40, 601, 20) if regime == "clean" else range(40, 601, 80))
+			var ws := (_width_spread(widths.keys(), 8) if regime == "clean"
+				else _width_spread(widths.keys(), 4))
+			for wv in ws:
+				var w: float = wv
+				for xi in xs:
+					for yi in range(150, 331, 4):
+						var want := Main._label_plate_rect(float(xi), float(yi), w, sz)
+						claims += 2
+						if _hits_any(Main.claim_label_slot(want, base), marks):
+							unreserved[regime] += 1
+						var got := Main.claim_label_slot(want, with_marks)
+						if _hits_any(got, marks):
+							shipped[regime] += 1
+							if worst == "":
+								worst = "persistent w%.0f @%d,%d %s/scale %.1f -> %s" \
+									% [w, xi, yi, regime, scale, str(got)]
+						var tgot := Main.claim_label_slot(
+							Main.floattext_claim_rect(Vector2(xi, yi), w, sz), with_marks, 0.0, true)
+						if _hits_any(tgot, marks):
+							shipped[regime] += 1
+							if worst == "":
+								worst = "toast w%.0f @%d,%d %s/scale %.1f -> %s" \
+									% [w, xi, yi, regime, scale, str(tgot)]
+	Art.text_scale = was_scale
+	Art.flush_tw()
+	Runner.T.ok(claims >= 20000,
+		"swept the arbiter's anchor domain at both text scales (%d claims)" % claims)
+	# CLEAN — a realistic frame. The reservation is sufficient here, and the counter-factual
+	# proves the sweep can see the defect: 3,736 collisions without it, 0 with it (measured
+	# 2026-09-05, both text scales).
+	Runner.T.ok(int(unreserved["clean"]) > 0,
+		("COUNTER-FACTUAL: with the three marks NOT reserved the sweep lands on them %d times "
+			+ "on a clean frame — a clean counter-factual would mean this ratchet pins nothing")
+			% int(unreserved["clean"]))
+	Runner.T.eq(int(shipped["clean"]), 0,
+		("no label or toast is granted pixels the barrel \"!\", the sector numeral or the "
+			+ "technical \"?\" already own (%d collisions%s)")
+			% [int(shipped["clean"]), "" if worst == "" else " — first: " + worst])
+	# CONGESTED — a deliberately SATURATED synthetic (56 arbiter-granted rects, built to fire
+	# the fallback), and it CANNOT be zero: once the 13-row ladder exhausts, claim_label_slot's
+	# PERSISTENT path settles for LEAST TOTAL OVERLAP by design, and a reservation is an input
+	# to that score, not a veto. The bottom-rail sibling escapes this with a hard `max_y` bound;
+	# a mid-screen hazard mark has no analogue. So the honest assertion is the one that is true:
+	# the reservation STRICTLY REDUCES the overlap even in the pathological case. Measured
+	# 2026-09-05: 598 -> 295, a 50.7% reduction. Zeroing it needs an INVIOLABLE reservation
+	# class in the arbiter — real blast radius, banked, not smuggled in here.
+	Runner.T.ok(int(unreserved["congested"]) > 0,
+		"the saturated regime really does exercise the least-overlap fallback (%d unreserved collisions)"
+			% int(unreserved["congested"]))
+	Runner.T.ok(int(shipped["congested"]) < int(unreserved["congested"]),
+		("on a SATURATED frame the reservation must still strictly reduce overlap with the "
+			+ "hazard marks (%d collisions with it vs %d without — see the note above for why "
+			+ "this arm is an inequality and not a zero)")
+			% [int(shipped["congested"]), int(unreserved["congested"])])
+
+
+func _hits_any(got: Rect2, marks: Array[Rect2]) -> bool:
+	if not got.has_area():
+		return false           # suppressed: the arbiter granted nothing, so nothing collides
+	for m in marks:
+		if got.grow(-0.5).intersects(m.grow(-0.5)):
+			return true
+	return false

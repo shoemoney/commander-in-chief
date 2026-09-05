@@ -3257,3 +3257,156 @@ func test_result_card_ink_lands_on_whole_pixels_through_the_entrance() -> void:
 		var below: float = RESULT_ROW_Y + float(RESULT_ROWS_MAX - 1) * ms.result_row_pitch(RESULT_ROWS_MAX, reserve)
 		Runner.T.ok(below + rise <= screen_h,
 			"...and the 13-row card's last row is on screen on the entrance's first frame")
+
+
+# --- Boss HP dock draw-order ratchet ------------------------------------------------
+# The bottom-center FOUNDRY COLOSSUS dock and the top-center gunship/mini bars are
+# SCREEN-ANCHORED chrome that was emitted from inside a WORLD pass (_draw_colossus was
+# pass 21 of 35, _draw_gunships pass 20), so seven and eight later world passes painted
+# straight over them: a grenade sprite, its blast-radius ring and its landing marker cut
+# `FOUNDRY COLOSSUS — TROOP DROPS` in half and crossed the HP bar (measured off
+# tools/screenshots.gd's 05-foundry-colossus-last-stand.png).
+#
+# _draw_god_badge already carries the rule in its own comment — "LAST on the
+# screen-anchored pass so nothing can paint over it". The boss chrome never got it.
+#
+# This pins ORDER, not geometry, because the fix is order: a world actor may still
+# geometrically overlap the dock rects after the fix (a grenade can be anywhere), so a
+# rect-intersection census could never go green and would be a ratchet that cannot pass.
+
+## The constants the boss HP chrome lays itself out from. Membership is DERIVED from
+## them, not from a hand-listed pass name, so a fourth boss dock added tomorrow off the
+## same constants is covered the day it lands.
+const BOSS_DOCK_MARKERS := ["HudIcons.BOSS_BAR_TOP", "HudIcons.BOSS_BAR_STRIDE",
+	"HudIcons.COLOSSUS_BAR_", "HudIcons.COLOSSUS_LABEL_"]
+
+## Engine callbacks are never CALL EDGES. Load-bearing: without the exclusion a stray
+## `_ready(` reference makes `_draw_rocks -> _ground_shadow -> _ready -> _draw ->
+## _draw_gunships -> _boss_bar` an edge and EVERY pass classifies as boss chrome.
+const CALLGRAPH_NON_EDGES := ["_ready", "_draw", "_process", "_physics_process",
+	"_init", "_input", "_unhandled_input", "_notification"]
+
+
+func _all_func_bodies(src: String) -> Dictionary:
+	## name -> body, comment-only lines stripped, for every top-level `func` AND
+	## `static func`. _func_bodies above deliberately drops the statics (the matrix walk
+	## has no use for them); a call graph does — `_boss_bar`'s pure helpers live there.
+	## Comment stripping is load-bearing too: _draw_colossus's own docstring NAMES
+	## HudIcons.BOSS_BAR_TOP while deliberately docking opposite it.
+	var out: Dictionary = {}
+	var cur := ""
+	for line in src.split("\n"):
+		var head := line
+		if head.begins_with("static func "):
+			head = head.substr(7)
+		if head.begins_with("func "):
+			var close := head.find("(")
+			cur = head.substr(5, close - 5) if close > 5 else ""
+			if cur != "":
+				out[cur] = ""
+		elif not line.is_empty() and not (line[0] == " " or line[0] == "\t" or line[0] == "#"):
+			cur = ""
+		if cur != "" and not line.strip_edges().begins_with("#"):
+			out[cur] = String(out[cur]) + line + "\n"
+	return out
+
+
+func _call_edges(bodies: Dictionary) -> Dictionary:
+	var re := RegEx.new()
+	re.compile("\\b(_[a-z_0-9]+)\\(")
+	var out: Dictionary = {}
+	for n in bodies:
+		var seen: Array[String] = []
+		for mm in re.search_all(String(bodies[n])):
+			var c := mm.get_string(1)
+			if c == n or CALLGRAPH_NON_EDGES.has(c) or not bodies.has(c) or seen.has(c):
+				continue
+			seen.append(c)
+		out[n] = seen
+	return out
+
+
+func _reaches(start: String, edges: Dictionary) -> Dictionary:
+	var seen := {start: true}
+	var stack: Array[String] = [start]
+	while not stack.is_empty():
+		var n: String = stack.pop_back()
+		for c in edges.get(n, []):
+			if not seen.has(c):
+				seen[c] = true
+				stack.append(c)
+	return seen
+
+
+func test_boss_hp_dock_is_painted_after_every_world_pass() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var bodies := _all_func_bodies(src)
+	Runner.T.ok(bodies.has("_draw") and bodies.has("_boss_bar"),
+		"scraped main.gd's top-level functions (%d)" % bodies.size())
+	var edges := _call_edges(bodies)
+	# The ordered pass list, straight off _draw()'s own body.
+	var passes: Array[String] = []
+	var pre := RegEx.new()
+	pre.compile("\\b(_draw_[a-z_0-9]+)\\(")
+	for mm in pre.search_all(String(bodies["_draw"])):
+		if not passes.has(mm.get_string(1)):
+			passes.append(mm.get_string(1))
+	Runner.T.ok(passes.size() >= 30,
+		"_draw() dispatches its passes in a fixed order (%d passes) — a dead scan must not pass silently"
+			% passes.size())
+	var dock_funcs: Array[String] = []
+	var world_funcs: Array[String] = []
+	for n in bodies:
+		var b := String(bodies[n])
+		for mkr in BOSS_DOCK_MARKERS:
+			if b.contains(mkr):
+				dock_funcs.append(n)
+				break
+		if b.contains("_to_screen("):
+			world_funcs.append(n)
+	Runner.T.ok(not dock_funcs.is_empty(),
+		"found the boss-dock painters off the dock's OWN constants: %s" % str(dock_funcs))
+	Runner.T.ok(world_funcs.size() >= 10,
+		"found the world-space painters (%d functions call _to_screen)" % world_funcs.size())
+	var dock_ord: Dictionary = {}
+	var world_ord: Dictionary = {}
+	for i in passes.size():
+		var r := _reaches(passes[i], edges)
+		for f in dock_funcs:
+			if r.has(f):
+				dock_ord[passes[i]] = i
+				break
+		for f in world_funcs:
+			if r.has(f):
+				world_ord[passes[i]] = i
+				break
+	Runner.T.ok(not dock_ord.is_empty(),
+		"at least one _draw() pass reaches the boss dock — otherwise this ratchet pins nothing")
+	Runner.T.ok(world_ord.size() >= 10,
+		"the scan sees the world passes (%d of %d)" % [world_ord.size(), passes.size()])
+	var violations := 0
+	var detail: Array[String] = []
+	for d in dock_ord:
+		var later: Array[String] = []
+		for w in world_ord:
+			if int(world_ord[w]) > int(dock_ord[d]):
+				later.append(String(w))
+		if not later.is_empty():
+			violations += later.size()
+			detail.append("%s (ordinal %d) is overpainted by %d later world pass(es): %s"
+				% [d, int(dock_ord[d]), later.size(), ", ".join(later)])
+	Runner.T.eq(violations, 0,
+		"boss HP chrome must be emitted on the LAST screen-anchored pass, never mid-order — %s"
+			% ("clean" if detail.is_empty() else "; ".join(detail)))
+	# ...and the drain must RE-CANCEL the node transform on its way out. Both dock painters end
+	# by restoring to WORLD space (correct when they ran mid-order, wrong now), and this pass
+	# runs INSIDE _draw's screen-anchored block — so without the re-cancel _draw_god_badge would
+	# ride the shake the block exists to escape. The matrix walker next door cannot see this:
+	# it only recognises `_spr` and literal draw_set_transform lines inside _draw() itself, so a
+	# clobber that happens one call deep is invisible to it. Deleting the line is silent.
+	var drain := String(bodies.get("_draw_boss_chrome", ""))
+	Runner.T.ok(drain.length() > 0, "the deferred dock painter exists")
+	var tail := drain.substr(drain.rfind("_boss_chrome.clear()"))
+	Runner.T.ok(tail.contains("draw_set_transform_matrix(get_transform().affine_inverse())"),
+		("_draw_boss_chrome must re-cancel the node transform after draining — both painters "
+			+ "restore to world space, and _draw_god_badge draws after this pass"))

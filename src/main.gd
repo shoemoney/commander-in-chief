@@ -7750,6 +7750,7 @@ func _draw_ready_tally() -> void:
 
 func _draw() -> void:
 	_label_slots.clear()   # in-world label arbiter: one frame, one set of claimed rects
+	_boss_chrome.clear()   # boss HP docks: queued by the world passes, painted last (see _draw_boss_chrome)
 	# The soldiers' pixels are RESERVED before anything claims a slot: deny toasts
 	# and ADRENALINE-style callouts anchor at the player's exact position, so the
 	# worst case is structural. Alive or downed (a body on the floor still draws);
@@ -7941,6 +7942,10 @@ func _draw() -> void:
 	_draw_progress_rail()
 	_draw_airstrike_telegraph(top_msg)
 	_draw_banners(top_msg)
+	# The boss HP docks, LAST — same reason _draw_god_badge is last. They are queued by the
+	# world passes that own the boss (which keep every world draw and all their slot
+	# accounting) and painted only here, so no world actor can paint across them.
+	_draw_boss_chrome()
 	_draw_god_badge()   # DEBUG-ONLY; LAST on the screen-anchored pass so nothing can paint over it
 	# c4 2v: rear-warn bottom-edge wedge — a pulsing strip + an up-pointing wedge
 	# at the pending rear spawn x, readable in the forward-locked camera.
@@ -9187,6 +9192,15 @@ func _draw_mast_hazard(mp: Vector2) -> void:
 			Color(1.0, 0.5, 0.15, 0.28 + 0.42 * wt), 1.8)
 
 
+## The pixels the barrel's "!" live-ordnance pip actually inks, as ONE measurement both the
+## draw and the ratchet read (the repo's banner_plate_rect / label_plate_rect idiom). Built
+## at the size the site DRAWS at — a raw 8, not Art.fs(8), because the pip is a fixed-size
+## mark today; if it is ever routed through Art.fs this must move with it (see the note on
+## the Art.fs drift in tests/test_view_honesty.gd's WORLD_TEXT_SITES).
+static func barrel_pip_rect(bp: Vector2) -> Rect2:
+	return _label_plate_rect(bp.x - 2.0, bp.y - 10.0, Art.tw("!", 8), 8)
+
+
 func _draw_barrels() -> void:
 	for bl in sim.barrels:
 		if not bl["armed"]:
@@ -9231,6 +9245,14 @@ func _draw_barrels() -> void:
 			Art.arc(self, bp, br, a0, a0 + TAU / 20.0, 3, brc, 1.4)
 		# Non-color danger cue: hue-blind players got only orange — the "!" pip
 		# carries "live ordnance" on the shape channel (destructive-row grammar).
+		# It RESERVES its pixels in the world-text arbiter and never moves: the pip is
+		# pinned to the hazard, so relocating it would lie about where the danger IS.
+		# Before the reservation a FLOAT_PLATE_FILL score toast (alpha 0.65, and falling)
+		# could land straight on top of the one non-colour channel a hue-blind player has.
+		# Gated on the frame so off-screen barrels never enter the arbiter's per-claim loop.
+		var bprect := barrel_pip_rect(bp)
+		if WORLD_LABEL_FRAME.intersects(bprect):
+			_label_slots.append(bprect)
 		Art.text(self, "!", bp + Vector2(-2, -10), 8, Color(1.0, 0.9, 0.5, 0.7 + wb * 0.3))
 
 
@@ -9632,6 +9654,13 @@ static func fork_sign_relevance(fy: float) -> float:
 	return clampf((SIGN_FADE_GONE - fy) / (SIGN_FADE_GONE - SIGN_FADE_FULL), 0.0, 1.0)
 
 
+## The sector numeral's inked pixels. Takes the numeral TEXT, not just the row: gate 10 in a
+## long endless run is twice the width of gate 1, and a rect measured off a single digit
+## would under-reserve exactly when the corridor is most crowded.
+static func gate_numeral_rect(gy: float, txt: String) -> Rect2:
+	return _label_plate_rect(320.0 - 4.0, gy - 8.0, Art.tw(txt, 24), 24)
+
+
 func _draw_gates() -> void:
 	# Fortified sandbag wall: baked wall segments + end caps (was 14 identical
 	# sandbag-pile stamps). Alternate flips keyed off a per-gate hash so no two
@@ -9656,7 +9685,25 @@ func _draw_gates() -> void:
 			if og["y"] > g["y"]:
 				g_idx += 1
 		var gnum_col := Color(0.30, 0.27, 0.22, 0.85) if not g["open"] else Color(0.5, 0.46, 0.4, 0.6)
-		Art.text(self, str(g_idx), Vector2(320.0 - 4.0, gy - 8.0), 24, gnum_col)
+		# ANCHORED SIGNAGE, exactly like the route-fork signposts 100 lines up: the numeral
+		# names its OWN wall, so it reserves its pixels unconditionally and never moves...
+		var gnum_txt := str(g_idx)
+		var gnrect := gate_numeral_rect(gy, gnum_txt)
+		if WORLD_LABEL_FRAME.intersects(gnrect):
+			_label_slots.append(gnrect)
+		# ...and it YIELDS the only way an anchored sign can — by DISSOLVING (fork_sign_alpha,
+		# the same overlord, the same lerp bag). Reserving alone does not save it: its dominant
+		# collision is the top-center objective banner, which is opaque chrome that never routes
+		# through claim_label_slot, so nothing was ever going to dodge out of the numeral's way.
+		# Reads LAST frame's _band for the same reason the signposts do (the band cannot be
+		# dealt before _draw_gunships, and banners live for seconds).
+		var gnk := "gate%d" % g["y"]
+		var gnf: float = lerpf(float(_fork_sign_fade.get(gnk, 1.0)),
+			fork_sign_alpha(gnrect, _band, _player_label_rects), 0.12)
+		_fork_sign_fade[gnk] = gnf
+		gnum_col.a *= gnf
+		if gnf > 0.05:
+			Art.text(self, gnum_txt, Vector2(320.0 - 4.0, gy - 8.0), 24, gnum_col)
 		if g["open"]:
 			# Blown-open remnants: a lone end cap survives at each flank, plus a
 			# scorch + crater at the blown centre — open/shut now read as two
@@ -10127,6 +10174,12 @@ func _draw_live_rifleman_marker(pos: Vector2, windup: int) -> void:
 		Art.circle(self, tip + Vector2(0, -6), 1.6, Color(1, 1, 1, 0.95))
 
 
+## The technical's "?" smoke-deny pip. Same contract as barrel_pip_rect: a shape-channel
+## cue pinned to its subject, so it reserves and never dodges.
+static func technical_pip_rect(epos: Vector2) -> Rect2:
+	return _label_plate_rect(epos.x - 3.0, epos.y - 22.0, Art.tw("?", 12), 12)
+
+
 func _draw_enemies() -> void:
 	# ≤2 alive players, cached once — replaces an O(players) sim scan per enemy
 	# per frame that existed purely to pick a facing/laser target.
@@ -10473,6 +10526,12 @@ func _draw_enemies() -> void:
 				var qp: float = 1.0 if _motion < 0.5 else Art.pulse(0.2)
 				# Threat-family amber on a dark disc (the _pip idiom) — the old 10px
 				# neutral grey washed out on bright sand.
+				# Reserves its pixels and never moves (same rule as the barrel "!" pip):
+				# the glyph is pinned to the truck it explains, so a toast that lands on
+				# it must dodge, not the other way round.
+				var tqrect := technical_pip_rect(epos)
+				if WORLD_LABEL_FRAME.intersects(tqrect):
+					_label_slots.append(tqrect)
 				Art.circle(self, epos + Vector2(0, -26), 7.0, Color(0.08, 0.09, 0.07, 0.6))
 				Art.text(self, "?", epos + Vector2(-3, -22), 12, Color(1.0, 0.75, 0.4, 0.5 + qp * 0.4))
 			_spr("m_technical", epos, t_face, VEHICLE_CONTACT["m_technical"]["call_scale"], Art.HOSTILE_VEH, 1.1 if t_lunge > 0 else 1.0)   # a2-02: warm-hostile vehicle tint
@@ -10938,6 +10997,17 @@ static func label_rail_ceiling(rail: Array[Rect2]) -> float:
 var _label_rail_ceiling := 360.0
 
 
+## This frame's boss HP docks, QUEUED by the world passes that own the boss and painted by
+## _draw_boss_chrome() as the last screen-anchored pass. The docks are screen-anchored chrome
+## (a fixed top-center bar band, a fixed bottom-center colossus block) that used to be emitted
+## from inside _draw_gunships / _draw_colossus — passes 20 and 21 of 35 — so seven and eight
+## later WORLD passes painted over them: a grenade sprite, its blast-radius ring and its
+## landing marker cut "FOUNDRY COLOSSUS — TROOP DROPS" in half and crossed the HP bar.
+## _draw_god_badge's own comment has stated the rule all along ("LAST on the screen-anchored
+## pass so nothing can paint over it"); the boss chrome never got it. Cleared at the top of
+## _draw(), drained (and cleared again) by _draw_boss_chrome.
+var _boss_chrome: Array[Dictionary] = []
+
 ## Every in-world label rect ALREADY placed this frame. Cleared at the top of _draw().
 ## Anchored objective signage (the route-fork signposts) RESERVES its pixels without ever
 ## moving; transient combat text yields to whatever is already there.
@@ -11279,7 +11349,8 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 		# duck below the claimed band) — the fly-in used to return without drawing
 		# it, so the top strip held a hole for 7 s. Now the bar is up for the whole
 		# approach, which is also when the boss first becomes shootable.
-		_boss_bar(boss, label, slot, boss["phase_t"])
+		_boss_chrome.append({"kind": "gunship", "boss": boss, "label": label,
+			"slot": slot, "pt": boss["phase_t"]})
 		return
 	var bpos := _to_screen(boss["x"], boss["gate_y"] - SimWorld.BOSS_Y_OFFSET)
 	# Idle hover: a slow vertical bob + faint sway so the gunship reads as airborne,
@@ -11372,10 +11443,10 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# off-screen, and a world-anchored bar would go with it. Stacked by
 	# slot so two simultaneous bosses don't overlap each other, and started
 	# below the corner HUD panel's max height (~60px) so they never clash.
-	# Shake-immune: the bar is a fixed HUD slot, so cancel the node's shake/zoom
-	# for the rest of this function (restored by the caller's next world draw
-	# via the reset at the bottom).
-	_boss_bar(boss, label, slot, pt)
+	# QUEUED, not drawn: the bar is screen-anchored chrome and this is a world pass, so
+	# painting it here put it under eight later world passes. _draw_boss_chrome drains the
+	# queue last (it still cancels the shake — _boss_bar is unchanged, only its timing is).
+	_boss_chrome.append({"kind": "gunship", "boss": boss, "label": label, "slot": slot, "pt": pt})
 
 
 static func gunship_phase_label(label: String, pt: int) -> String:
@@ -11535,16 +11606,24 @@ func _draw_colossus() -> void:
 		Art.arc(self, cpos, (16.0 + pulse * 3.0) * cshrink, 0, TAU, 28, cring, 2.5)
 	else:
 		Art.circle(self, cpos, 7.0 + pulse * 2.0, Color(0.95, 0.25, 0.15, 0.85))
+	# Result card owns the frame: the bar used to paint through the K.I.A. plate
+	# (live last-stand, 2026-08-14). World-space hull stays; this is HUD chrome. Evaluated
+	# HERE rather than in the deferred painter so nothing between the queue and the drain can
+	# change the answer — neither _debrief nor sim.victory is written during _draw().
+	if _debrief or sim.victory:
+		return
+	# The dock is SCREEN-anchored chrome. Queue it; _draw_boss_chrome paints it as the last
+	# screen-anchored pass. Everything above this line is the world-space hull and stays put.
+	_boss_chrome.append({"kind": "colossus", "phase": phase})
+
+
+func _colossus_chrome(phase: int) -> void:
 	# Bottom-center (y=330) so the fill never hides under the top-left HUD panel — this boss bar
 	# deliberately docks OPPOSITE the top-center gunship/mini bars (HudIcons.BOSS_BAR_TOP), so it
-	# does NOT use that boundary; the two never share the band. Shake-immune: fixed HUD slot,
-	# cancel the node transform for the bar block.
+	# does NOT use that boundary; the two never share the band. That placement is deliberate and
+	# unchanged; what moved is WHEN it is emitted. Shake-immune: fixed HUD slot, cancel the node
+	# transform for the bar block.
 	draw_set_transform_matrix(get_transform().affine_inverse())
-	# Result card owns the frame: the bar used to paint through the K.I.A. plate
-	# (live last-stand, 2026-08-14). World-space hull stays; this is HUD chrome.
-	if _debrief or sim.victory:
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		return
 	# c4-fix r2: divide by the stored scaled max (96 in 2P, 90 hard), not the unscaled constant —
 	# else the bar reads full and frozen for the first third of any scaled fight (matches colossus_phase).
 	var cfrac := float(sim.colossus["hp"]) / float(sim.colossus.get("max_hp", SimWorld.COLOSSUS_HP))
@@ -11568,6 +11647,24 @@ func _draw_colossus() -> void:
 			Vector2(cvx, HudIcons.COLOSSUS_BAR_RECT.end.y + 2.0), Color(1.0, 0.85, 0.3, 0.9), 2.0)
 		Art.arc(self, Vector2(cvx, HudIcons.COLOSSUS_BAR_RECT.position.y - 3.0), 3.0, 0, TAU, 10, Color(1.0, 0.85, 0.3, 0.9))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # back to world space
+
+
+func _draw_boss_chrome() -> void:
+	## Drains the boss HP docks queued by _draw_gunships / _draw_colossus, as the LAST
+	## screen-anchored pass before _draw_god_badge — the slot whose own comment already
+	## states the rule. The arithmetic, the placement and the guards are untouched; only the
+	## POINT IN THE PASS ORDER moved. That is the whole fix: intent is invisible to a player,
+	## and what the screen showed was a grenade ring cutting the boss's name in half.
+	for c in _boss_chrome:
+		if c["kind"] == "gunship":
+			_boss_bar(c["boss"], c["label"], c["slot"], c["pt"])
+		else:
+			_colossus_chrome(int(c["phase"]))
+	_boss_chrome.clear()
+	# Both painters END by restoring the node transform (back to WORLD space) — correct when
+	# they ran mid-order, wrong here: this pass runs INSIDE _draw's screen-anchored block, so
+	# without the re-cancel _draw_god_badge below would ride the shake the block exists to escape.
+	draw_set_transform_matrix(get_transform().affine_inverse())
 
 
 func _draw_projectiles() -> void:
@@ -13089,17 +13186,29 @@ func _draw_threat_edges() -> void:
 			# Label clamps by its own width (rx pins to 8/632 at the corners, and
 			# rx-18 used to start the text off-screen there).
 			var rlx := clampf(rx - 18.0, 4.0, 596.0)
+			# The beacon is TRANSIENT world-subject text (it names an off-screen partner),
+			# so it goes through the one arbiter like every other transient. It used to
+			# carry a bespoke one-case dodge instead —
+			#     var rly := 62.0 if _top_center_priority() != "" and absf(rx - 320.0) < 90.0 else 50.0
+			# — which knew about exactly ONE of the things that can own those pixels (a live
+			# top-center banner, near centre) and nothing about the corner HUD plate, the
+			# bottom caption rail, crate prices, fork signage or another world label. The
+			# chevron travels with `roff` so the arrow and its word never separate — drawing
+			# the plate at the claimed rect and the ink at the old baseline is precisely how
+			# a label ends up sitting beside its own background.
+			var rbase := 332.0 if rsy > 360.0 else 50.0
+			var rwant := _label_plate_rect(rlx, rbase, Art.tw("REVIVE", 9), 9)
+			var rgot := claim_label_slot(rwant, _label_slots, 0.0, false, _label_rail_ceiling)
+			var roff := rgot.position - rwant.position
+			_label_slots.append(rgot)
 			if rsy > 360.0:
-				Art.line(self, Vector2(rx - 6, 336), Vector2(rx, 345), rcol, 2.5)
-				Art.line(self, Vector2(rx, 345), Vector2(rx + 6, 336), rcol, 2.5)
-				Art.text(self, "REVIVE", Vector2(rlx, 332), 9, rcol)
+				Art.line(self, Vector2(rx - 6, 336) + roff, Vector2(rx, 345) + roff, rcol, 2.5)
+				Art.line(self, Vector2(rx, 345) + roff, Vector2(rx + 6, 336) + roff, rcol, 2.5)
+				Art.text(self, "REVIVE", Vector2(rlx, rbase) + roff, 9, rcol)
 			else:
-				Art.line(self, Vector2(rx - 6, 40), Vector2(rx, 31), rcol, 2.5)
-				Art.line(self, Vector2(rx, 31), Vector2(rx + 6, 40), rcol, 2.5)
-				# Slot bump: the top-center strip owns y46 when a banner/directive
-				# is live — drop the label a slot so the two never overprint.
-				var rly := 62.0 if _top_center_priority() != "" and absf(rx - 320.0) < 90.0 else 50.0
-				Art.text(self, "REVIVE", Vector2(rlx, rly), 9, rcol)
+				Art.line(self, Vector2(rx - 6, 40) + roff, Vector2(rx, 31) + roff, rcol, 2.5)
+				Art.line(self, Vector2(rx, 31) + roff, Vector2(rx + 6, 40) + roff, rcol, 2.5)
+				Art.text(self, "REVIVE", Vector2(rlx, rbase) + roff, 9, rcol)
 
 
 static func _cmp_threat_top(a: Dictionary, b: Dictionary) -> bool:

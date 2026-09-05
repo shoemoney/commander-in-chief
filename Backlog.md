@@ -1786,10 +1786,21 @@ before believing the frame**. Kept because the reviewer photographed real frames
   gunner) is drawn standing on the field at `_to_screen + (0,-7)` (`main.gd:9866-9868`) and
   gets no exclusion rect, so labels can still ink over the deck gunner. Both limitations are
   named in the plan as banked; verified the gunner draw path is unchanged.
-- **Four entity-anchored world marks bypass the label arbiter.** The "!" mark (`:7850`), ford
-  label (`:8048`), gate numeral (`:8169`), and "?" (`:8882`) remain drawn outside the
-  `claim_label_slot` arbiter. Small entity-anchored marks, none part of this cycle's tell;
-  banked by the plan and still unarbitrated in the diff.
+- ~~**Four entity-anchored world marks bypass the label arbiter.**~~ **RESOLVED 2026-09-05.**
+  The entry was wrong twice over: the ford label was already fixed by `505a048` (2026-08-02),
+  leaving **three**, and all four line numbers (`:7850` `:8048` `:8169` `:8882`) were stale by
+  thousands of lines. The three real marks — the barrel `"!"` live-ordnance pip, the gate
+  sector numeral and the technical `"?"` smoke-deny pip — now RESERVE their pixels through
+  `claim_label_slot`'s `_label_slots` (they are pinned to the hazard they name, so transients
+  dodge them rather than the other way round), and the numeral additionally DISSOLVES under a
+  band row the way the fork signposts do. Two unnamed siblings in the same class were found and
+  fixed with them: the off-screen partner `REVIVE` beacon in `_draw_threat_edges`, which carried
+  a bespoke one-case dodge, now CLAIMS. Inventory ratchet:
+  `test_view_honesty.gd::test_every_world_anchored_string_is_arbitrated_or_exempted`.
+  Still banked from this pass: the 10 supply-wheel strings (classified `exempt-modal` — the
+  right verb there is *reserve*, not dodge), and an INVIOLABLE reservation class in the arbiter
+  (on a saturated frame the least-overlap fallback still overlaps a reserved mark: measured
+  598 -> 295 collisions, not 0).
 
 ### Carried from the 2026-07-29 snapshot — still open
 
