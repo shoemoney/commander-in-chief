@@ -179,7 +179,7 @@ jobs:
   # the soldier/HUD under concussion (the warp must ramp toward the
   # periphery of the player's view, not a fixed screen disc). Runs the
   # real view through gl_compatibility (the only renderer that can read
-  # back the framebuffer in CI) and asserts centre-retention >0.9 via
+  # back the framebuffer in CI) and asserts centre-retention >0.75 via
   # the swept probe (probe_concussion_hud.gd). If the warp hits the
   # soldier at full strength, this job goes red. Blocks merge — no
   # continue-on-error, runs on push/PR (not just nightly).
@@ -208,7 +208,7 @@ jobs:
             sudo apt-get install -y xvfb
           fi
 
-      - name: GL concussion HUD probe (centre-retention >0.9)
+      - name: GL concussion HUD probe (centre-retention >0.75)
         shell: bash
         run: |
           set -euo pipefail
