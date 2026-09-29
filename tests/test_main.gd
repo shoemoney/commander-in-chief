@@ -4347,3 +4347,75 @@ func test_a_body_leaves_blood_under_it() -> void:
 			Runner.T.ok(bblock.contains("0.26, 0.045, 0.035"),
 				"the pool uses the blood colour family (0.26, 0.045, 0.035) — the scorch greys would "
 				+ "make this another identical dark crater, which is the defect")
+
+
+# ---------------------------------------------------------------------------
+# A screen-anchored overlay must be drawn through the IDENTITY transform.
+#
+# The ground's whole sky-light pass (1.4) shipped INVISIBLE for three
+# iterations, through every ratchet in this repo. Its curve test passed, its
+# wiring test passed, the constants were right, and the ground was measured flat
+# in a render — because the two light cards were drawn through the macro-mottle
+# loop's leftover `draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + ...))`:
+# a rotation, a non-uniform scale, and an origin up to 768px away. The card
+# landed off-frame. Proved by forcing the sky card opaque green and the floor
+# opaque magenta: 136 green pixels, 0 magenta, frame mean unchanged.
+#
+# The comment at the draw said "the reset below is not needed — it is already
+# identity here". It was not identity. This is the sixth time this loop has
+# caught a check that was structurally sound and insufficient, and the first
+# time the false claim was in the fix's own comment rather than in a test.
+#
+# So the gate is deliberately narrow and mechanical: the identity reset must
+# IMMEDIATELY precede the screen-anchored ramp. Every structural check that
+# already existed (curve, wiring, constants, wiring-by-name) passed while the
+# feature was invisible, because none of them can see where a draw LANDS.
+#
+# Mutation table: delete the reset (fails — the exact 2.4 regression); move the
+# reset above the ramp with a transform set in between (fails).
+# ---------------------------------------------------------------------------
+func test_screen_anchored_ground_light_draws_through_identity() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var p := src.find("func _paint_bg(")
+	Runner.T.ok(p >= 0, "found _paint_bg")
+	if p < 0:
+		return
+	var body := src.substr(p, src.find("\nfunc ", p + 1) - p)
+	# The ramp is the only screen-anchored full-frame draw in this function.
+	var draws: Array[int] = []
+	var at := 0
+	while true:
+		at = body.find("draw_texture_rect_region(glt, GROUND_LIGHT_RECT", at)
+		if at < 0:
+			break
+		draws.append(at)
+		at += 1
+	Runner.T.eq(draws.size(), 2,
+		"the ground light is two region draws (sky lift, depth shade) — %d found, and a count "
+			% draws.size() + "change means one of them silently stopped being drawn")
+	Runner.T.ok(draws.size() == 2, "both light cards are present")
+	if draws.size() != 2:
+		return
+	# The LAST transform set before the first ramp draw must be the identity
+	# reset. Anything else (a rotation, a scale, an offset origin) moves the
+	# card off-frame while every other gate stays green.
+	var pre := body.substr(0, draws[0])
+	var reset_at := pre.rfind("canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)")
+	# The LAST draw_set_transform of ANY kind before the ramp, not just resets:
+	var last_set_at := -1
+	var scan := 0
+	while true:
+		scan = pre.find("draw_set_transform(", scan)
+		if scan < 0:
+			break
+		last_set_at = scan
+		scan += 1
+	Runner.T.ok(reset_at >= 0,
+		"an identity reset precedes the screen-anchored ramp — without it the cards inherit the "
+		+ "macro-mottle loop's rotation/scale/offset and land off-frame (this is the 2.4 bug)")
+	Runner.T.ok(reset_at > last_set_at - len("canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)"),
+		"the identity reset is the LAST transform set before the ramp, not an earlier one")
+	Runner.T.ok(draws[1] - draws[0] < 200 and not body.substr(draws[0], draws[1] - draws[0])
+			.contains("draw_set_transform("),
+		"nothing re-sets the transform BETWEEN the two light cards — a transform there would send "
+		+ "the depth shade somewhere the sky lift is not")
