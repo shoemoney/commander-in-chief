@@ -8169,8 +8169,27 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.46, tint := Color(0.0, 0.03, 
 	# — cached once in _ready() instead.
 	if _shadow_tex == null:
 		_shadow_tex = Art.tex("fx_shadow")
+	# a3-22: A SHADOW HAS TWO PARTS, AND ONLY ONE OF THEM WAS HERE.
+	#
+	# Two independent vision models (gemini-3-flash and grok-4.7, different labs)
+	# reviewed the same rendered frames and both said the field has no shadows and
+	# every object is a sticker. They were both wrong about the GEOMETRY — this
+	# function draws one, and a3-20 had just fixed its bearing — and both right
+	# about the READ. That is the same lesson this project has now paid for three
+	# times (a tint that moved 337 pixels of 230,400; a shadow that pointed the
+	# wrong way; a "dirt card" that measured nothing): correct is not visible.
+	#
+	# The missing half is CONTACT. A soft wide cast alone says "there is ambient
+	# darkness here"; it does not say "this object touches this ground". What
+	# sells contact is a small, tight, much darker core right at the base —
+	# ambient occlusion, not another soft blob. So the cast stays exactly as a3-20
+	# left it, and a second, half-size, near-opaque core goes down on top of it.
+	# One extra draw per shadow across ~25 sites is the cost.
 	draw_texture_rect(_shadow_tex, _shadow_ellipse(pos, r), false,
 		Color(tint.r, tint.g, tint.b, a))
+	var core := _shadow_ellipse(pos, r * 0.52)
+	draw_texture_rect(_shadow_tex, core, false,
+		Color(tint.r * 0.6, tint.g * 0.6, tint.b * 0.6, minf(1.0, a * 1.9)))
 
 
 static var _vehicle_spec_cache := {}

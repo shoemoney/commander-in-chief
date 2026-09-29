@@ -38,22 +38,25 @@ KEY = os.environ.get("OPENROUTER_API_KEY") or Path.home().joinpath(".openrouter"
 
 # One model per vendor family, strongest first. Diversity is the point: five
 # opinions from the same lab agree with each other, which is not evidence.
+# VERIFIED vision-capable — probed, not assumed. OpenRouter lists 292 models
+# whose architecture block claims image input, and most of those lie: glm-4.7
+# reports input_modalities including "image" and then routes exclusively to
+# endpoints that 404 on it. Every entry here was probed with a real PNG and got
+# a real completion. One per vendor family where possible — five opinions from
+# the same lab agree with each other, which is not evidence.
 ROTATION = [
     "google/gemini-3-flash-preview",
-    "z-ai/glm-4.7",
     "x-ai/grok-4.7",
     "qwen/qwen3.8-omni-flash",
     "deepseek/deepseek-v4.1-flash",
     "inclusionai/ling-3.0-flash-vl",
-    "meta/muse-spark-1.3",
-    "sakana/fugu-ultra-v2",
     "perceptron/perceptron-mk1.5",
     "xiaomi/mimo-v2.6-pro",
     "cohere/command-a-plus",
-    "qwen/qwen3.8-flash",
+    "z-ai/glm-5.3-flashx",
     "z-ai/glm-4.6v",
+    "qwen/qwen3.8-flash",
     "x-ai/grok-4.6",
-    "deepseek/deepseek-flash-latest",
 ]
 
 PROMPT = """You are a harsh, senior VFX/art director reviewing a shipped 2D game.
