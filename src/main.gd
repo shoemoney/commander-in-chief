@@ -105,6 +105,14 @@ var _hitstop_frames := 0
 var _hs_latch := [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 var _last_inputs: Array[SimInput] = []   # last tick's sim inputs — ready-up tally (view-only)
 var _flash_alpha := 0.0
+# a2-17: the TINT of that full-frame impact flash. It was implicitly pure white at
+# the draw site, which is right for a photographic pop (vest-break, a boss phase,
+# the victory card) and wrong for fire: a fireball that flashes the whole screen
+# WHITE contradicts its own fireball card and fights the golden sun 1.4 hung over
+# the top of the frame. Lives as a state (not a parameter) so the six existing
+# white producers need no change — they simply never write it, and the decay
+# walks it back to white.
+var _flash_col := Color(1, 1, 1)
 var _fx: Array[Dictionary] = []   # explosion/smoke animations from sim events
 # c4-19: rooted units (mg_nest / broadcast / ghillie) never move, so before this they
 # simply EXISTED at full opacity on the frame after their birth, mid-screen, with no
@@ -1822,6 +1830,7 @@ func _reset() -> void:
 	_hitstop_frames = 0
 	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 	_flash_alpha = 0.0
+	_flash_col = Color(1, 1, 1)
 	_fx.clear()
 	_rooted_arrive.clear()   # c4-19: a restart mid-ramp must not inherit the old run's dig-in ages
 	_mote_count = 0
@@ -3949,6 +3958,12 @@ func _cmd_bark(event: String, gap := 48, force := false) -> bool:
 	return _sfx.play_cmd_bark(event, gap, force)
 
 
+# a2-17: firelight, not a photographic strobe. Sits above the fireball's own
+# card and below the golden sky ramp from 1.4 — the whole warm family agrees, so
+# a blast reads as part of the scene's light instead of a UI event laid over it.
+const EXPLOSION_FLASH_COL := Color(1.0, 0.72, 0.38)
+
+
 func _ev_explosion(ev: Dictionary) -> void:
 	# Proximity-scaled impact: a blast under your feet hits the camera at full
 	# force; one in the far corner registers without shaking the whole frame.
@@ -3984,6 +3999,24 @@ func _ev_explosion(ev: Dictionary) -> void:
 			_buzz(0.7 * _blast_prox_for(ev["x"], ev["y"], pidx), pidx)
 		_punch = maxf(_punch, 0.05 * prox)
 		_duck = maxf(_duck, 0.7 * prox)
+		# a2-17: the ONE axis a blast had no answer for. Measured on HEAD: a grenade
+		# already moved the camera (trauma), froze the world (4 frames), buzzed each
+		# pad by its OWN distance, punched and ducked — and the SCREEN never flashed,
+		# while a vest-break, a boss phase, the wipe and the victory card all do. So
+		# the single most violent thing in the game was the one event with no light
+		# in the room. Proximity-scaled on the same `prox` the rest of the block
+		# uses, so a far-corner pop registers and a point-blank one doubles.
+		#
+		# FIRELIGHT, not a white photographic flash: warm, and warm on purpose. It
+		# agrees with the fireball card it sits over, and with the golden sun 1.4
+		# hangs over the top of the frame — a white blast punched a hole in the one
+		# light direction the game had. `maxf` for the alpha and the tint together,
+		# so the loudest thing on screen owns the flash and a fainter pop arriving
+		# in the same tick cannot repaint a bigger blast.
+		var efa := 0.26 * prox + (0.10 if prox > 0.55 else 0.0)
+		if efa > _flash_alpha:
+			_flash_alpha = efa
+			_flash_col = EXPLOSION_FLASH_COL
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
 	if not barrel:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
@@ -6252,6 +6285,11 @@ func _update_feel() -> void:
 	# Impact envelopes decay multiplicatively (fast drop, long tail) so hits snap;
 	# linear release reads flat. Floors avoid a lingering near-zero tail.
 	_flash_alpha = _flash_alpha * 0.7 if _flash_alpha > 0.01 else 0.0
+	# ...and the tint walks back to white on the same decay, so a warm blast never
+	# leaves the NEXT (white) flash orange. Faster than the alpha because colour
+	# reads at lower alpha than luminance.
+	if _flash_alpha > 0.01:
+		_flash_col = _flash_col.lerp(Color(1, 1, 1), 0.4)
 	_damage_vignette = maxf(0.0, _damage_vignette - 0.02)
 	var presentation_winner := _top_center_priority()
 	_step_banner_readable_time(presentation_winner)
@@ -14599,7 +14637,7 @@ func _draw_banners(top_msg: String) -> void:
 		# wash-exempt: impact flash is deliberately centre-HOT (a radial punch, not a
 		# budgeted wash card) — a WASH_KINDS entry would rightly fail the centre-clear ratchet.
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
-			false, Color(1, 1, 1, fla))
+			false, Color(_flash_col.r, _flash_col.g, _flash_col.b, fla))
 	# Last-stand dread: darken the edges + a slow red pulse as the finale
 	# closes in (heartbeat plays under it). Scaled by the reduce-motion toggle.
 	if _tension > 0.02:

@@ -4168,3 +4168,98 @@ func test_a_landed_hit_stops_the_world() -> void:
 	Runner.T.ok(src.contains("if _hitstop_frames <= 0 or ecount_changed:"),
 		"the painter still re-sorts on a changed enemy count during hitstop — arming far more "
 		+ "freezes makes that guard load-bearing, so it may not be optimised away")
+
+
+# ---------------------------------------------------------------------------
+# A grenade should put light in the room.
+#
+# Measured on HEAD: `_ev_explosion` set trauma, 4 frames of hitstop, a per-pad
+# buzz scaled by each player's OWN distance, a punch and a duck — and never
+# touched `_flash_alpha`. So the most violent event in the game was the one
+# event with no screen flash, while a vest-break, a boss phase, the squad wipe
+# and the victory card all had one. Every other axis of a blast was already
+# built; this was the single missing one.
+#
+# It is FIRELIGHT and not a white strobe, which makes the ratchet stricter than
+# "does it set the alpha": `_flash_col` is state the six pre-existing white
+# producers never write, so if the draw site still hardcodes Color(1,1,1,...) the
+# tint is a perfectly green, perfectly dead field — written on every blast,
+# read by nothing. That is the claim_label_slot def-only-signature trap in a
+# new costume, and it is the arm most likely to rot.
+#
+# Mutation table: delete the explosion's `_flash_alpha` write (fails 1); put the
+# write back as a bare `_flash_alpha = 0.3` with no tint (fails 2); leave the
+# tint written but revert the draw site to hardcoded white (fails 3 — the dead
+# field); remove the decay (fails 4 — a warm flash poisons the next white one).
+# ---------------------------------------------------------------------------
+func test_an_explosion_puts_light_in_the_room() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+
+	# 1. The explosion handler arms the screen flash at all.
+	var estart := src.find("func _ev_explosion(")
+	Runner.T.ok(estart >= 0, "found _ev_explosion")
+	if estart >= 0:
+		var eend := src.find("\nfunc ", estart + 1)
+		var ebody := src.substr(estart, eend - estart)
+		Runner.T.ok(ebody.contains("_flash_alpha"),
+			"a blast arms the full-frame impact flash — trauma, hitstop, per-pad buzz, punch and "
+			+ "duck were all already there, and the screen was the one axis missing")
+		# ...and it must be INSIDE the non-barrel branch, since the barrel branch
+		# explicitly owns its own feel stack (double-firing a drum would be a
+		# regression, not a fix).
+		Runner.T.ok(ebody.contains("if not barrel:"),
+			"the barrel-origin branch still owns its own feel stack (it skips the duplicates here)")
+	# 2. The tint is FIRELIGHT, and it is a real constant rather than an inline
+	#    literal nobody can find again.
+	Runner.T.ok(src.contains("const EXPLOSION_FLASH_COL"),
+		"the blast tint is a named shipped constant, not an inline literal")
+	if src.contains("const EXPLOSION_FLASH_COL"):
+		var decl := src.substr(src.find("const EXPLOSION_FLASH_COL"),
+			src.find("\n", src.find("const EXPLOSION_FLASH_COL")) - src.find("const EXPLOSION_FLASH_COL"))
+		Runner.T.ok(decl.contains("1.0, 0.72, 0.38"),
+			"the blast tint is the warm firelight value (%s) — white would fight the golden sun 1.4 "
+				% decl.strip_edges() + "hung over the top of the frame")
+		# Warm means RED-dominant and BLUE-suppressed; a "warm" flash that is not
+		# red-dominant is a white flash with a comment.
+		var c := decl.substr(decl.find("Color(") + 6, decl.find(")") - decl.find("Color(") - 6)
+		var parts := c.split(",")
+		if parts.size() >= 3:
+			Runner.T.ok(float(parts[0].strip_edges()) > float(parts[2].strip_edges()),
+				"the firelight tint is red-dominant (r %.2f > b %.2f), so it reads as fire"
+					% [float(parts[0].strip_edges()), float(parts[2].strip_edges())])
+	if estart >= 0:
+		var eend2 := src.find("\nfunc ", estart + 1)
+		Runner.T.ok(src.substr(estart, eend2 - estart).contains("_flash_col = EXPLOSION_FLASH_COL"),
+			"the blast writes the tint, not just the alpha")
+	# 3. THE DEAD-FIELD ARM: the draw site must consume _flash_col.
+	#    Anchored on the draw's OWN local (`fla`), not on a search for
+	#    "if _flash_alpha > 0.01:" — that token now appears TWICE (the decay
+	#    guard and the draw), and find() took the first, so this block was
+	#    reading the decay and reporting the draw as untinted. Same class as the
+	#    prose-match bug: agreeing with a description while measuring nothing.
+	var fla_at := src.find("var fla :=")
+	Runner.T.ok(fla_at > 0, "found the full-frame flash draw site")
+	if fla_at > 0:
+		var dstart := src.rfind("\n", fla_at)
+		var dblock := src.substr(dstart, src.find("\n\t#", fla_at) - dstart)
+		Runner.T.ok(dblock.contains("_flash_col.r"),
+			"the impact flash is drawn IN _flash_col — a tint written on every blast and read by "
+			+ "nothing is a dead field, and the draw site would still be hardcoded white")
+		Runner.T.ok(not dblock.contains("Color(1, 1, 1, fla)"),
+			"the draw site no longer hardcodes white — this is the exact line the dead-field "
+			+ "mutation reverts")
+		# 5. Reduce-motion floor: a full-frame flash is the most photosensitive
+		#    thing in the game and the floor is what makes it safe.
+		Runner.T.ok(dblock.contains("maxf(_motion, 0.4)"),
+			"the flash keeps its reduce-motion floor — a full-frame radial is the one channel that "
+			+ "must never go to full brightness unchecked")
+	# 4. The tint walks back to white, so a warm blast cannot leave the NEXT
+	#    (white) flash orange.
+	Runner.T.ok(src.contains("_flash_col = _flash_col.lerp(Color(1, 1, 1), 0.4)"),
+		"the flash tint decays back to white — otherwise a blast permanently warms every later "
+		+ "vest-break and boss flash")
+	var rstart := src.find("func _reset(")
+	if rstart > 0:
+		var rbody := src.substr(rstart, src.find("\nfunc ", rstart + 1) - rstart)
+		Runner.T.ok(rbody.contains("_flash_col = Color(1, 1, 1)"),
+			"_reset clears the tint — a new run must not inherit the last blast's colour")
