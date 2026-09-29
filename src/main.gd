@@ -4265,7 +4265,21 @@ func _ev_kill(ev: Dictionary) -> void:
 	_run_kills += 1
 	_run_kind_kills[kkind] = int(_run_kind_kills.get(kkind, 0)) + 1
 	# Kill-streak: rising blip pitch + milestone combo pop.
+	#
+	# a2-16 TWO DIFFERENT QUESTIONS WERE BEING ASKED BY ONE FLAG.
+	#   big   — is this bounty worth a coin moment? A CURRENCY question, and 25c
+	#           is the right answer for it: rusher pennies would be spam. Unchanged.
+	#   heavy — was this a thing that MATTERED? A WEIGHT question, and _kill_tier
+	#           is the sim's own answer to it, already computed above and already
+	#           scaling this kill's gib volume and death-pop radius.
+	# They were the same expression, so the impact block was answering a currency
+	# question: a ghillie (weight 1, small bounty) died with no more weight than a
+	# rusher, while a player sitting on a coin streak silently upgraded every
+	# piece of trash into a heavy event. Weighting a kill by what it was WORTH
+	# rather than what it WAS is the one thing an impact ramp must not do.
+	# `heavy` is what the impact block asks now; the coin pop keeps asking `big`.
 	var big: bool = ev.get("coin", 0) >= 25
+	var heavy: bool = ktier > 0
 	if Engine.get_physics_frames() - _last_kill_frame < 90:
 		_blip_streak += 1
 	else:
@@ -4304,8 +4318,8 @@ func _ev_kill(ev: Dictionary) -> void:
 	# ONE frame, and `big` keeps its 2 — this adds the floor, it takes nothing away.
 	_hitstop_frames = maxi(_hitstop_frames, 1)
 	_punch = maxf(_punch, 0.012)
-	if big:
-		_hitstop_frames = maxi(_hitstop_frames, 2)   # coin-tiered kills still out-hit
+	if heavy:
+		_hitstop_frames = maxi(_hitstop_frames, 2)   # a weighted kill out-hits a trooper's
 		_buzz(0.35, -1, true)   # kill confirm: sharp, no single shooter attributed
 		_punch = maxf(_punch, 0.03)
 	# The milestone pop advertises the sim's +25/50/100% bonus, so it reads the

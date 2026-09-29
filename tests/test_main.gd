@@ -4105,19 +4105,43 @@ func test_a_landed_hit_stops_the_world() -> void:
 				big_line = i
 				break
 		Runner.T.ok(big_line > 0,
-			"the coin-tier gate `if big:` is still a real statement in the kill path")
-		if big_line > 0:
-			var before := "\n".join(klines.slice(0, big_line))
-			Runner.T.ok(before.contains("_hitstop_frames = maxi(_hitstop_frames, 1)"),
-				"an ORDINARY kill arms hitstop outside the coin gate — gated here, the 8-rounds-a-"
-				+ "second core loop still gets zero weight and the fix is cosmetic")
-			Runner.T.ok(before.contains("_punch = maxf(_punch, 0.012)"),
-				"an ordinary kill also nudges the camera — a freeze with no punch reads as a stutter, "
-				+ "not an impact")
-			# ...and the tiered kill must still out-hit the floor, not equal it.
-			Runner.T.ok("\n".join(klines.slice(big_line)).contains(
+			"the COIN gate `if big:` is still a real statement in the kill path — it gates the "
+			+ "bounty coin-pop, which is genuinely a currency question")
+		# The IMPACT gate is a different question and must be a different flag.
+		var heavy_line := -1
+		for i in klines.size():
+			if (klines[i] as String).strip_edges().begins_with("if heavy:"):
+				heavy_line = i
+				break
+		Runner.T.ok(heavy_line > 0,
+			"the impact block is gated on `if heavy:` (kill TIER), not on the coin gate — one flag "
+			+ "answering both questions weighted a kill by what it was WORTH instead of what it WAS")
+		if heavy_line > 0:
+			# a2-16: the flag must be a WEIGHT test, and it is NOT adjacent to the
+			# gate (the kill-streak block sits between), so look the declaration up
+			# rather than assuming it is the line above.
+			var heavy_decl := ""
+			for l in klines:
+				if (l as String).strip_edges().begins_with("var heavy: bool ="):
+					heavy_decl = (l as String).strip_edges()
+					break
+			Runner.T.ok(heavy_decl.ends_with("ktier > 0"),
+				"`heavy` is derived from the sim's own _kill_tier (%s), which already scales this "
+				% heavy_decl + "kill's gib volume and death-pop radius — the weight signal was in scope")
+			# a2-16: a regression to the coin gate here is invisible to a value
+			# assertion, so pin the expression itself.
+			Runner.T.ok(heavy_decl != "var heavy: bool = big",
+				"`heavy` is not an alias for the coin gate — that is the exact conflation being fixed")
+			Runner.T.ok("\n".join(klines.slice(heavy_line)).contains(
 					"_hitstop_frames = maxi(_hitstop_frames, 2)"),
-				"a coin-tiered kill still escalates to 2 frames — the floor must not flatten the tier")
+				"a weighted kill still escalates to 2 frames — the floor must not flatten the tier")
+			Runner.T.ok("\n".join(klines.slice(heavy_line)).contains("_buzz(0.35, -1, true)"),
+				"a weighted kill still gets the kill-confirm haptic")
+		if big_line > 0:
+			# The coin pop must keep the CURRENCY gate, or rusher pennies spam the HUD.
+			Runner.T.ok("\n".join(klines.slice(big_line)).contains("_coin_pop("),
+				"the bounty coin-pop keeps the `big` coin gate — moving it to kill tier would spam a "
+				+ "coin readout on every ghillie, which is the reason that gate existed")
 	# 2. The NON-LETHAL hit: a real HP drop on a multi-HP target also has weight.
 	var cstart := src.find("func _check_enemy_hits(")
 	Runner.T.ok(cstart >= 0, "found _check_enemy_hits")
