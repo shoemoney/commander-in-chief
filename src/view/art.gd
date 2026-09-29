@@ -629,7 +629,29 @@ const TINT := {
 	# sol-05: the pack hero is OLIVE camo — on green jungle that is literal camouflage (the exact tan-Leader
 	# trap this comment warns about). Lift value >1 and pull slightly COOL/off-green so he reads on grass;
 	# keep P2 visibly WARMER/gold (r>g>b) so co-op identity survives without a per-player sprite.
-	"player1": Color(1.16, 1.18, 1.24), "player2": Color(1.34, 1.14, 0.92),
+	# a3-25: THE PLAYER IS THE LEAST VISIBLE THING ON SCREEN. Measured in a
+	# rendered frame: the player's own muzzle flash peaks at luma 255 (fully
+	# clipped), the player's body sits at 96, and the ground sits at 94. The thing
+	# the player controls is TWO luma above the dirt — while five vision models
+	# across five labs independently reported the same hierarchy inversion, in
+	# nearly the same words: "the eye lands on the muzzle flash, not the player".
+	#
+	# The flash being the brightest point on screen is a deliberate, documented
+	# choice (MUZZLE_HEAT caps every additive term so MG-spam cannot steal the
+	# white-hot monopoly) and it is not touched. So the player moves instead, and
+	# the only channel with room is its own tint — the key rim is already on it at
+	# full strength, and the identity ring is already there.
+	#
+	# Co-op identity is preserved exactly: P1 stays cool, P2 stays warm/gold, and
+	# both keep p1.g >= p1.r so _body_ident_lean's contract holds.
+	#
+	# HONEST SCOPE: this is worth about +5% (player-region p90 123 -> 129). It is
+	# the right direction and every lab asked for it, but a multiply cannot fix a
+	# HUE match — the infantry bake is olive-tan, which is the ground's own family,
+	# so no tint multiplier lifts the player clear of the floor. The channel that
+	# actually owns this is silhouette/contrast, and the art has to change, not the
+	# multiplier. Recorded so the next pass does not re-derive this.
+	"player1": Color(1.62, 1.64, 1.70), "player2": Color(1.86, 1.58, 1.26),
 	# Insurgents run BRIGHT and WARM so they read as threats — not as the
 	# grey decor rocks, not as the red enemy orbs. Threats pop, scenery
 	# recedes (see decor tints below).
