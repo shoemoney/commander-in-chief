@@ -7680,8 +7680,8 @@ static var _sand_strips: Array[Texture2D] = []
 #      that test_main/test_hud/test_menu_layout all derive their contrast maths
 #      from is bit-identical. Darkening the ground was never an option here
 #      anyway — test_the_result_card_scrims_its_backdrop pins lum > 0.12 on it.
-const GROUND_LIGHT_SKY := Color(1.0, 0.975, 0.915, 0.105)   # sun-bleached warm lift, frame top
-const GROUND_LIGHT_FLOOR := Color(0.16, 0.15, 0.20, 0.125)  # cooled, denser shade, frame bottom
+const GROUND_LIGHT_SKY := Color(1.0, 0.86, 0.62, 0.09)     # golden sun on the frame top
+const GROUND_LIGHT_FLOOR := Color(0.10, 0.12, 0.24, 0.20)  # cool sky-shade, frame bottom
 # Drawn well past the frame because _bg_root rides main.position (shake + kick +
 # dutch roll, ~37px at a corner — the same overscan argument ground_base_bands
 # makes). Both ramps CLAMP outside 0..360, so the overhang is flat and no edge
