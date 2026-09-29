@@ -8134,9 +8134,23 @@ static func _shadow_ellipse(pos: Vector2, r: float) -> Rect2:
 	# The ONE ellipse every ground shadow draws, hoisted so the draw sites and
 	# the test_ground_anchors ratchet share the geometry byte-for-byte.
 	# fx_shadow is a SQUARE card, so the old tex.x*ss / tex.y*ss*0.45 pair
-	# collapses to these two literals — draw output is identical.
-	var sz := Vector2(r * 2.3, r * 1.035)
-	return Rect2(pos + Vector2(0, r * 0.32) - sz * 0.5, sz)
+	# collapses to these two literals.
+	#
+	# a3-20: THE SHADOW WASN'T CAST BY THE SUN. The key rim says the light comes
+	# from screen north-west (_KEY_RIM_DIR), but this offset it STRAIGHT SOUTH by
+	# 0.32r on a card 2.3r wide and barely 1.0r tall. That is not a cast shadow at
+	# all — it is a wide flat puddle under the object, which is why a reviewer's
+	# "nothing casts a shadow, every object is a sticker on wallpaper" was correct
+	# even though ~25 draw sites have been putting a shadow there all along.
+	#
+	# A shadow cast by a north-west sun falls SOUTH-EAST and elongates along that
+	# bearing. The card is drawn rotation 0 so the ~25 sites keep batching, so the
+	# diagonal is approximated by offsetting BOTH axes and standing the card up
+	# rather than laying it down. The width is deliberately unchanged: the fairness
+	# ratchet wants >=110% of the hull (side skirts) and that is a real invariant
+	# about where a player can stand, not a taste knob.
+	var sz := Vector2(r * 2.3, r * 1.5)
+	return Rect2(pos + Vector2(r * 0.55, r * 0.5) - sz * 0.5, sz)
 
 
 func _ground_shadow(pos: Vector2, r: float, a := 0.46, tint := Color(0.0, 0.03, 0.0)) -> void:

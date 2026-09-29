@@ -131,3 +131,48 @@ func test_heavy_units_cast_visible_contact_shadows() -> void:
 		Runner.T.ok(rect.position.y < base,
 			"%s: tucked — shadow top +%.1f starts under the hull (base +%.1f), not a detached disc" % [
 				tex, rect.position.y, base])
+
+
+func test_every_shadow_falls_away_from_the_key_light() -> void:
+	# a3-20: a cast shadow and a key rim have to agree, or the scene has two suns.
+	# The key rim is drawn at _KEY_RIM_DIR (screen north-west, counter-rotated so
+	# the highlight does not spin with the unit); the shadow offset lived in
+	# _shadow_ellipse as a literal. Nothing connected them, so the shadow drifted
+	# to due-south while the rim said north-west, and the floor stopped reading as
+	# lit by anything at all — ~25 draw sites faithfully drawing a shadow cast by a
+	# light that was not in the scene.
+	#
+	# The invariant is the SIGN, not the magnitude: the shadow must fall on the
+	# opposite side of the object from the key. Magnitudes are free — how far a
+	# shadow travels is a look, which side it falls on is physics.
+	var methods := _statics()
+	if not methods.has("_shadow_ellipse"):
+		return
+	var ellipse_fn := Callable(MainScript, "_shadow_ellipse")
+	var cmap: Dictionary = (MainScript as Script).get_script_constant_map()
+	var key: Vector2 = cmap["_KEY_RIM_DIR"]
+	Runner.T.ok(key.x < 0.0 and key.y < 0.0, "the key comes from screen north-west (%s)" % key)
+
+	# A shadow directly under the object tells you nothing about where the light
+	# is. Probe three radii and require the rect's centre to move the same way
+	# every time — a constant offset, scaled by r, is what "cast" means.
+	var prev := Vector2.ZERO
+	for r in [6.0, 11.0, 20.0]:
+		var rect: Rect2 = ellipse_fn.call(Vector2.ZERO, r)
+		var centre: Vector2 = rect.position + rect.size * 0.5
+		if r == 6.0:
+			Runner.T.ok(centre.x > 1.0, "the shadow falls EAST of the object (+%.2fpx at r=6)" % centre.x)
+			Runner.T.ok(centre.y > 1.0, "and SOUTH (+%.2fpx at r=6)" % centre.y)
+			# Directly opposite the key on BOTH axes is the whole point.
+			Runner.T.ok(signf(centre.x) == -signf(key.x) and signf(centre.y) == -signf(key.y),
+				"the shadow falls opposite the key on both axes")
+		else:
+			Runner.T.ok(centre.normalized().is_equal_approx(prev.normalized()),
+				"the cast bearing is constant across radii (r=%.0f)" % r)
+		prev = centre
+	# A shadow must be a shadow: it has to be at least as tall as it is a puddle,
+	# and long enough to read as cast rather than as a soft contact dot.
+	var rect: Rect2 = ellipse_fn.call(Vector2.ZERO, 10.0)
+	Runner.T.ok(rect.size.y >= rect.size.x * 0.5,
+		"the shadow is elongated, not a flat puddle (%.1f x %.1f)" % [rect.size.x, rect.size.y])
+	Runner.T.ok(rect.size.y > 10.0, "and long enough to read as cast at r=10 (%.1fpx)" % rect.size.y)
