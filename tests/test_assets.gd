@@ -3055,6 +3055,155 @@ func _img_slice_hash(img: Image, slot: int) -> PackedByteArray:
 	return img.get_region(Rect2i(slot * 128, 0, 128, 128)).get_data()
 
 
+# ---------------------------------------------------------------------------
+# The ground must have a LIGHT DIRECTION, not just a de-latticed surface.
+#
+# The ratchets above all fix REPEAT. None of them adds LIGHT: the base strip
+# modulates to one flat constant per 96px band (GROUND_SHADE * the band stop),
+# sand.png has no macro structure to read as shading (128x128, std 8.46/255), and
+# the project ships no Light2D/CanvasModulate/normal-map. Measured, the only
+# value structure on the whole floor was three drifting DARKENING cloud blobs
+# (alpha 0.09/0.08) plus 1-in-19 ridge mounds — which is why it reads as flat
+# brown mud however de-latticed it gets.
+#
+# ground_light_cards() is the shipped curve. What it must satisfy, and why each
+# one is load-bearing:
+#   1. Direction.  The top is lifted, the floor is shaded.
+#   2. A NEUTRAL CENTRE.  Both alphas reach 0 at mid-frame. This is the arm that
+#      fails if anyone collapses the two cards back into one lerp: a single
+#      warm-to-dark ramp passes through a ~0.11-alpha neutral grey at mid-frame,
+#      which desaturates and flattens the exact middle of the play area — the
+#      same defect, one band higher.
+#   3. NO PERIOD.  Monotonic in y, so the ramp cannot add power at lag 64 or
+#      lag 96 and cannot re-introduce a grid. This is the structural proof that
+#      it is compatible with the two ratchets above; a periodic value is
+#      non-monotonic, so the monotonicity assert IS the anti-lattice guarantee.
+#   4. CONSTANT IN X.  A lateral falloff would re-open the centre-lane tonal
+#      seam that tools/ground_profile.py (4.75% column-mean) and
+#      test_ground_has_no_persistent_center_lane exist to keep shut.
+#   5. OVERSCAN.  Both ramps clamp outside 0..360 and the drawn rect reaches -64..
+#      424, so the ~37px camera judder can never walk the frame off a flat edge.
+#   6. NOT THE ARITHMETIC.  GROUND_SHADE and _ground_stops must be byte-identical
+#      — four other test files derive their contrast maths from that product, so
+#      a retheme here would silently re-roll world-label readability.
+#
+# Mutation table: swap either constant for a 0-alpha no-op (fails 1 and 2), merge
+# the two cards into one lerp (fails 2), add any x dependence (fails 4), shrink
+# the rect to the frame (fails 5), or fold the ramp into GROUND_SHADE (fails 6).
+# ---------------------------------------------------------------------------
+func test_ground_carries_a_light_direction() -> void:
+	var ms: Script = load("res://src/main.gd")
+	Runner.T.ok(ms.has_method("ground_light_cards"),
+		"the sky-light curve is one shipped function the ratchet can measure, not a re-derivation")
+	Runner.T.ok(ms.has_method("ground_light_image"),
+		"the gradient is one shipped builder, so this test measures the pixels the player sees")
+	if not ms.has_method("ground_light_cards"):
+		return
+	var consts := ms.get_script_constant_map()
+	for k in ["GROUND_LIGHT_SKY", "GROUND_LIGHT_FLOOR", "GROUND_LIGHT_RECT"]:
+		Runner.T.ok(consts.has(k), "%s is a named shipped constant" % k)
+
+	# 1. Direction — the top lifts, the floor shades.
+	var top: Color = (ms.ground_light_cards(0.0) as Array)[0]
+	var mid: Array = ms.ground_light_cards(180.0)
+	var bot: Color = (ms.ground_light_cards(360.0) as Array)[1]
+	Runner.T.ok(top.a >= 0.05, "the frame top carries a real sky lift (alpha %.3f, floor 0.05)"
+		% top.a)
+	Runner.T.ok(bot.a >= 0.05, "the frame floor carries a real depth shade (alpha %.3f, floor 0.05)"
+		% bot.a)
+	# 2. A neutral centre — the arm that dies if the two cards are collapsed.
+	Runner.T.ok(absf((mid[0] as Color).a) <= 0.004,
+		"the sky lift is fully transparent at mid-frame (alpha %.4f) — a non-zero value here is the "
+		% (mid[0] as Color).a + "grey wash that flattens the centre of the play area")
+	Runner.T.ok(absf((mid[1] as Color).a) <= 0.004,
+		"the depth shade is fully transparent at mid-frame (alpha %.4f)" % (mid[1] as Color).a)
+	# 3. No period — monotonic in y, so it carries no lag-64/96 power.
+	var sky_a := PackedFloat32Array()
+	var floor_a := PackedFloat32Array()
+	var prev_sky := 1.0e9
+	var prev_floor := -1.0e9
+	for i in 41:
+		var c: Array = ms.ground_light_cards(float(i) * 9.0)
+		sky_a.append((c[0] as Color).a)
+		floor_a.append((c[1] as Color).a)
+		Runner.T.ok((c[0] as Color).a <= prev_sky + 0.0001,
+			"the sky lift never rises as y increases at y=%.0f (a periodic value fails here)" % (i * 9.0))
+		Runner.T.ok((c[1] as Color).a >= prev_floor - 0.0001,
+			"the depth shade never falls as y increases at y=%.0f" % (i * 9.0))
+		prev_sky = (c[0] as Color).a
+		prev_floor = (c[1] as Color).a
+	# ...and it is a real ramp, not a token one: measure the luma it actually
+	# writes over the brightest campaign sand, so "significant" is a number.
+	var stop: Color = (ms._ground_stops("campaign") as Array)[0][0]
+	var shade: float = consts["GROUND_SHADE"]
+	var sand := Color(stop.r * shade, stop.g * shade, stop.b * shade)
+	var over_top := sand.lerp(Color(top.r, top.g, top.b), top.a)
+	var over_bot := sand.lerp(Color(bot.r, bot.g, bot.b), bot.a)
+	var spread := (over_top.get_luminance() - over_bot.get_luminance()) / maxf(sand.get_luminance(), 1e-6)
+	Runner.T.ok(spread >= 0.10,
+		"the ramp moves the sand's luma by %.1f%% top-to-bottom (floor 10%%) — below that the eye "
+		% (spread * 100.0) + "reads no light direction at all and the mud is unchanged")
+	Runner.T.ok(over_top.get_luminance() > sand.get_luminance(),
+		"the top of the frame is LIGHTER than bare sand (%.4f > %.4f) — a shade-only ramp is not sky light"
+			% [over_top.get_luminance(), sand.get_luminance()])
+	# 4. Constant in x — a lateral falloff re-opens the centre-lane seam gate.
+	Runner.T.ok(is_equal_approx((ms.ground_light_cards(0.0) as Array)[0].a, top.a),
+		"the sky lift depends on y alone (no lateral falloff — ground_profile.py's 4.75% column gate)")
+	# 5. Overscan on every edge, so camera judder can never expose an edge.
+	var rect: Rect2 = consts["GROUND_LIGHT_RECT"]
+	Runner.T.ok(rect.position.y <= -32.0 and rect.end.y >= 392.0,
+		"the light rect overscans the frame top and bottom (%.0f..%.0f vs 0..360) — _bg_root rides "
+			% [rect.position.y, rect.end.y] + "main.position, ~37px of shake/kick/roll at a corner")
+	Runner.T.ok(rect.position.x <= -32.0 and rect.end.x >= 672.0,
+		"the light rect overscans left and right (%.0f..%.0f vs 0..640)" % [rect.position.x, rect.end.x])
+	# ...and both ramps CLAMP beyond the frame, so the overscan is flat, not a ramp
+	# that keeps falling off screen.
+	Runner.T.ok((ms.ground_light_cards(-400.0) as Array)[0].a <= top.a + 0.0001
+			and (ms.ground_light_cards(900.0) as Array)[1].a <= bot.a + 0.0001,
+		"both ramps clamp outside 0..360 — a ramp that kept falling off screen would put a visible "
+		+ "edge in the overscan the moment the camera judders")
+	# 6. The shared arithmetic is untouched.
+	Runner.T.ok(is_equal_approx(float(consts["GROUND_SHADE"]), 0.522),
+		"GROUND_SHADE is unchanged — four test files derive world-label contrast from stop * GROUND_SHADE")
+	var stops_now: Array = ms._ground_stops("campaign")
+	Runner.T.ok((stops_now[0] as Array).size() == 5 and (stops_now[1] as Array).size() == 5,
+		"both ground ramps still have 5 stops (the sky light is additive, not a retheme)")
+
+	# The built pixels: 2 columns, sky then shade, both hitting zero mid-frame.
+	var img: Image = ms.ground_light_image()
+	Runner.T.eq(img.get_width(), 2, "the gradient is 2 columns — sky lift, then depth shade")
+	Runner.T.eq(img.get_height(), 512, "the gradient is 512 rows (~1:1 over the 488px draw rect)")
+	Runner.T.ok(absf(img.get_pixel(0, 256).a) <= 1.0 / 255.0,
+		"the built sky column really is transparent at its middle row (a %.4f)"
+			% (img.get_pixel(0, 256).a))
+	Runner.T.ok(absf(img.get_pixel(1, 256).a) <= 1.0 / 255.0,
+		"the built shade column really is transparent at its middle row (a %.4f)"
+			% (img.get_pixel(1, 256).a))
+	Runner.T.ok(img.get_pixel(0, 0).a > 0.0 and img.get_pixel(1, 511).a > 0.0,
+		"the built gradient has ink at the top of column 0 and the bottom of column 1")
+	# Non-vacuity: the texture must not be a flat wash.
+	Runner.T.ok(absf(img.get_pixel(0, 0).a - img.get_pixel(0, 511).a) >= 0.05,
+		"the built sky column is a real ramp, not a constant (top a%.3f vs bottom a%.3f)"
+			% [img.get_pixel(0, 0).a, img.get_pixel(0, 511).a])
+
+	# WIRING — the claim_label_slot def-only-signature trap. ground_light_cards
+	# existing proves nothing; _paint_bg has to actually lay the cards down.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var pstart := src.find("func _paint_bg(")
+	Runner.T.ok(pstart >= 0, "found the _paint_bg body")
+	if pstart >= 0:
+		var body := src.substr(pstart, src.find("\nfunc ", pstart + 1) - pstart)
+		Runner.T.ok(body.contains("draw_texture_rect_region"),
+			"_paint_bg draws the sky light this ratchet measures, not a private copy")
+		Runner.T.ok(body.contains("GROUND_LIGHT_RECT"),
+			"_paint_bg draws the ramp over the shipped overscan rect")
+		# ...and it must land on _bg_root (z=-2), i.e. UNDER the water and the
+		# units. A ground lit on top of the units is a full-screen wash.
+		Runner.T.ok(src.contains("_bg_root.z_index = -2"),
+			"the sky light still rides _bg_root at z=-2 — above the water quads and every unit it "
+			+ "would be a screen wash, not ground lighting")
+
+
 func _img_mean(img: Image) -> float:
 	var acc := 0.0
 	for y in range(0, img.get_height(), 4):

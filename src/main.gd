@@ -1446,6 +1446,18 @@ func _paint_bg(canvas: Node2D) -> void:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
 						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
+	# a1-14 SKY LIGHT — last thing the ground pass lays down, so it grades the
+	# base strips, the dirt cards and the mottle as ONE surface (grading them
+	# separately is what makes composited ground read as layers). Two region
+	# draws off one 2-column gradient: column 0 lifts the top of the frame,
+	# column 1 shades the floor, and BOTH are fully transparent at mid-frame.
+	# Identity transform (the reset below is not needed — it is already identity
+	# here, and this card is deliberately screen-anchored: the sun stays put, the
+	# ground moves under it, and a static smooth ramp has no temporal content to
+	# shimmer even while _bg_root judders with the camera).
+	var glt := _ground_light()
+	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(0, 0, 1, GROUND_LIGHT_TEX_H))
+	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(1, 0, 1, GROUND_LIGHT_TEX_H))
 
 
 func _process(_delta: float) -> void:
@@ -7634,6 +7646,94 @@ const GROUND_BASE_SLOTS := 8        # 128px dihedral slots per 1024px strip
 # tests/test_assets.gd asserts all of this on the built pixels, not on the table.
 const GROUND_BASE_SLOT_DIHEDRAL := [0, 3, 6, 1, 4, 7, 2, 5]
 static var _sand_strips: Array[Texture2D] = []
+
+
+# a1-14 THE GROUND'S LIGHT DIRECTION. Everything above de-LATTICED the floor and
+# nothing gave it a LIGHT. Measured: the base strip modulates to one flat
+# constant per 96px band (GROUND_SHADE * the band stop, see _paint_bg), sand.png
+# carries no macro structure to speak of (128x128, std 8.46/255 — a near-uniform
+# grain field, so the texture is invisible at this scale), and the project has
+# no Light2D/CanvasModulate/normal-map at all. Every value the eye could have read
+# as "this ground is lit" was coming from three drifting DARKENING cloud blobs
+# (alpha 0.09/0.08) and 1-in-19 ridge mounds. Net effect: flat brown mud.
+#
+# This is the missing term, and it is deliberately the cheapest possible one: a
+# vertical sky-light ramp on _bg_root, so it lands UNDER the water quads and
+# under every unit. Two overlay cards, not one, because a single lerp from a
+# warm top to a dark bottom passes through a ~0.11-alpha neutral grey at
+# MID-FRAME — which would desaturate and flatten the exact centre of the play
+# area, i.e. re-create the defect one band higher. Each ramp below crosses
+# alpha 0 at mid-frame, so the centre of the screen is untouched and only the
+# top is lifted and the floor is shaded.
+#
+# What this is NOT, and the three ratchets it must not disturb:
+#   x  It is CONSTANT IN X. A lateral falloff would re-open the centre-lane
+#      tonal seam (tools/ground_profile.py's 4.75% column-mean gate, and
+#      test_ground_has_no_persistent_center_lane). Sky light, not a spotlight.
+#   y  It is MONOTONIC in y, so it carries NO period — it cannot add power at
+#      lag 64 or lag 96. The a-seam rule (one flat colour per band, no grid-
+#      aligned luminance step) is satisfied by construction: a continuous
+#      screen-space ramp cannot step at a band edge, which is exactly the
+#      artifact the per-cell tint hash was deleted for.
+#   arithmetic  GROUND_SHADE and _ground_stops are UNTOUCHED. This multiplies
+#      on top of the existing product, so the "brightest campaign sand" value
+#      that test_main/test_hud/test_menu_layout all derive their contrast maths
+#      from is bit-identical. Darkening the ground was never an option here
+#      anyway — test_the_result_card_scrims_its_backdrop pins lum > 0.12 on it.
+const GROUND_LIGHT_SKY := Color(1.0, 0.975, 0.915, 0.105)   # sun-bleached warm lift, frame top
+const GROUND_LIGHT_FLOOR := Color(0.16, 0.15, 0.20, 0.125)  # cooled, denser shade, frame bottom
+# Drawn well past the frame because _bg_root rides main.position (shake + kick +
+# dutch roll, ~37px at a corner — the same overscan argument ground_base_bands
+# makes). Both ramps CLAMP outside 0..360, so the overhang is flat and no edge
+# can ever appear under judder.
+const GROUND_LIGHT_RECT := Rect2(-32.0, -64.0, 704.0, 488.0)
+const GROUND_LIGHT_TEX_H := 512
+
+
+## [sky_lift, depth_shade] overlay cards for a given FRAME y, as pure values —
+## split out (and NOT a raw draw) so tests/test_assets.gd measures the shipped
+## curve instead of re-deriving it, the same discipline ground_base_bands and
+## ground_dressing_cards exist for.
+##
+## TENT, not a full-frame lerp: the sky ramp falls to EXACTLY zero by mid-frame
+## and the floor ramp leaves zero until mid-frame, so the horizontal centre of
+## the play area carries the authored ground colour untouched. That is stronger
+## than "subtle" — unit/ground contrast at the centre of the screen is provably
+## identical to before this existed, which is the property that makes this safe
+## to add to a floor whose readability maths four other test files derive from
+## the ground colour. A single warm-to-dark lerp instead leaves both cards at
+## half their alpha at mid-frame, which is a ~0.06-alpha neutral grey wash over
+## exactly the region the player is looking at — the same flatness, higher up.
+static func ground_light_cards(y: float) -> Array:
+	var t := clampf(y / SCREEN_H, 0.0, 1.0)
+	return [
+		Color(GROUND_LIGHT_SKY.r, GROUND_LIGHT_SKY.g, GROUND_LIGHT_SKY.b,
+			GROUND_LIGHT_SKY.a * clampf(1.0 - t * 2.0, 0.0, 1.0)),
+		Color(GROUND_LIGHT_FLOOR.r, GROUND_LIGHT_FLOOR.g, GROUND_LIGHT_FLOOR.b,
+			GROUND_LIGHT_FLOOR.a * clampf(t * 2.0 - 1.0, 0.0, 1.0)),
+	]
+
+
+## 2 x GROUND_LIGHT_TEX_H: column 0 is the sky lift, column 1 the floor shade.
+## One image, two draw_texture_rect_region calls. 512 rows over 488px is ~1:1,
+## so _bg_root's NEAREST filter (which the 1:1 pixel ground needs) steps this
+## too coarsely to see — the per-texel alpha delta is ~0.0002.
+static func ground_light_image() -> Image:
+	var img := Image.create_empty(2, GROUND_LIGHT_TEX_H, false, Image.FORMAT_RGBA8)
+	for i in GROUND_LIGHT_TEX_H:
+		var y := GROUND_LIGHT_RECT.position.y \
+			+ (float(i) + 0.5) / float(GROUND_LIGHT_TEX_H) * GROUND_LIGHT_RECT.size.y
+		var c := ground_light_cards(y)
+		img.set_pixel(0, i, c[0])
+		img.set_pixel(1, i, c[1])
+	return img
+
+
+static var _ground_light_tex: Texture2D = null
+static func _ground_light() -> Texture2D:
+	if _ground_light_tex == null:
+		_ground_light_tex = ImageTexture.create_from_image(ground_light_image())
+	return _ground_light_tex
 
 
 # --- Modular cover set (view-only). A wall is an EMPLACEMENT, not a tilemap
