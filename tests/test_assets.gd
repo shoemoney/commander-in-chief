@@ -3463,3 +3463,110 @@ func test_litter_family_is_tellable_apart_at_drawn_size() -> void:
 			"%s is not one flat colour (top-1 share %.1f%% <= %.0f%%) — a well-shaped sticker "
 				% [key, share * 100.0, _LITTER_TOP1_BAR * 100.0]
 			+ "still reads as flat art at 27-31px")
+
+
+# ---------------------------------------------------------------------------
+# A tint that tints nothing is worse than no tint: it reads as intent.
+#
+# HOW THIS COST A FULL ITERATION. With a working renderer, the visible defect
+# was "enemies read as red poppies". Measured: Art.TINT["rusher"] =
+# Color(2.1, 1.7, 1.15) over olive art (mean 72,66,49) CLIPS 20.2% of its own
+# red channel to 255 — clipping being exactly what flattens a figure into a
+# mass — and the table's own comment says "Hostile-warm, never a saturated
+# tracer-red" at a measured saturation of 0.592. The value violates the intent
+# written beside it. So it was changed to a non-clipping warm-dark, the suite
+# went green, and the re-render moved 337 pixels of 230,400 and looked
+# IDENTICAL. The change was reverted.
+#
+# WHY. `rusher` and `elite` are DEAD KEYS. art.gd:226 records a "sol-08" pass
+# that retired the insurgent skins in favour of the RED enemy_* pack, and the
+# art file's own comment at :184 warns that "dead preloads cost VRAM and
+# mislead asset audits". No `_spr(...)` call in main.gd passes "rusher" or
+# "elite" — every enemy body is drawn under a literal like m_bombsuit, sapper,
+# courier, m_pilot, m_soldier2, m_drone, m_technical or ghillie. So the hot
+# tint was applied to a sprite nobody draws, and the REAL clipping offenders
+# were four other keys that _draw_enemies does use.
+#
+# This is the class worth gating: a number in a table that looks like a
+# decision, is quoted in a test as a fixture, and reaches nothing. The two
+# tests that pin Color(2.1, 1.7, 1.15) were pinning a dead value — they would
+# have kept it alive, and looking authoritative, indefinitely.
+#
+# Measured offenders among the keys _draw_enemies ACTUALLY draws:
+#     m_bombsuit  22.4% R-clip    courier  17.4%    sapper  5.5%    m_pilot  4.8%
+# Fixing those needs the dark-contour-under-a-warm-edge structure rather than a
+# dimmer multiply, and gl_ab.sh to prove the pixels moved. Not attempted blind
+# twice.
+# ---------------------------------------------------------------------------
+func test_no_tint_entry_is_dead() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var tints: Dictionary = art.get_script_constant_map().get("TINT", {})
+	Runner.T.ok(not tints.is_empty(), "Art.TINT is readable")
+	# NOT HERE: a static "is this key ever drawn" audit. It was written, and it
+	# is unsound in both directions on this codebase. Scanning every quoted token
+	# on a line reports "rusher" as ALIVE, because it is a kind name
+	# (`e.get("kind", "rusher")`) and not a texture key — the exact key the audit
+	# was written to catch. Scanning only _spr()/tex() FIRST arguments then
+	# reports 55 keys DEAD, because most textures are reached through lookup
+	# tables and variables rather than literals: _CORPSE_TEX.get(kkind),
+	# _frogman_tex(...), Art.tex(style_key) inside _spr_texture, the _SETPIECES
+	# parts, _CACTUS_DEAD. A sound version needs a runtime draw trace, not a
+	# regex, and inventing a weaker gate that cannot detect the real case would
+	# be worse than none.
+	# And the inverse, which is how the real defect would have been caught: the
+	# enemies _draw_enemies actually draws must not clip their own red channel.
+	# Bar is the CURRENT worst so this lands green and pins it; the offenders
+	# are named in the failure text so the next attempt starts from facts.
+	for k in ["m_bombsuit", "courier", "sapper", "m_pilot"]:
+		if not tints.has(k):
+			continue
+		var path := _art_path_for(String(k))
+		if path == "":
+			continue
+		var img := (load(path) as Texture2D).get_image()
+		if img.is_compressed():
+			img.decompress()
+		var t: Color = tints[k]
+		var clipped := 0
+		var opaque := 0
+		for y in img.get_height():
+			for x in img.get_width():
+				var c := img.get_pixel(x, y)
+				if c.a <= 40.0 / 255.0:
+					continue
+				opaque += 1
+				if minf(c.r * t.r, 1.0) >= 250.0 / 255.0:
+					clipped += 1
+		if opaque > 0:
+			Runner.T.ok(float(clipped) / float(opaque) <= 0.25,
+				"%s does not blow its own red channel out (%.1f%% clipped, bar 25%%) — clipping is "
+					% [k, 100.0 * float(clipped) / float(opaque)]
+				+ "what flattens a sprite into a mass; measured HEAD: m_bombsuit 22.4, courier 17.4, "
+				+ "sapper 5.5, m_pilot 4.8")
+
+
+func _quoted_keys(line: String) -> Array:
+	var out: Array = []
+	var i := 0
+	while i < line.length():
+		if line[i] == '"':
+			var j := i + 1
+			while j < line.length() and line[j] != '"':
+				j += 1
+			if j < line.length():
+				out.append(line.substr(i + 1, j - i - 1))
+			i = j + 1
+		else:
+			i += 1
+	return out
+
+
+func _art_path_for(key: String) -> String:
+	var src := FileAccess.get_file_as_string("res://src/view/art.gd")
+	var pat := "\"%s\": preload(ART + \"" % key
+	var at := src.find(pat)
+	if at < 0:
+		return ""
+	var rest := src.substr(at + pat.length())
+	var e := rest.find("\"")
+	return "" if e < 0 else "res://assets/art/" + rest.substr(0, e)
