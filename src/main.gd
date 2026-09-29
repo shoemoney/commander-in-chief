@@ -1427,7 +1427,15 @@ func _paint_bg(canvas: Node2D) -> void:
 				continue
 			var mpos := Vector2(float(mx) * 256.0 + float(mh % 128), floor(moy + float(my) * 256.0 + float((mh / 7) % 128)))
 			var mrot := float(mh % 628) / 100.0
-			var msz := 192.0 + float(mh % 97)
+			# a3-14: bigger and STRONGER zones, same draw count. At 192-289px on a
+			# 256px pitch with only 1-in-3 cells firing, no two cards ever overlapped
+			# — so the largest-scale value variation on the entire floor read as a few
+			# separate soft blobs at 0.16 alpha rather than as terrain. Growing the card
+			# past the pitch makes neighbouring zones BLEED into continuous fields, and
+			# 0.16 -> 0.26 is the difference between a hint and a place. Both numbers are
+			# low-frequency and non-commensurate with the 64/96 lattices, so neither the
+			# anti-lattice ratchets nor the a-seam rule can see them.
+			var msz := 264.0 + float(mh % 131)
 			if mh % 6 == 0:
 				# Wheel tracks: scattered surface decals — hashed rotation and x,
 				# same as every other mottle cell, so they read as scuffs rather
@@ -1444,8 +1452,8 @@ func _paint_bg(canvas: Node2D) -> void:
 				# algorithmic dark stamp.
 				var m_bright := (mh / 11) % 3 == 0
 				var m_warm := (mh / 5) % 10 < (3 + int(march * 6.0))   # a1-06: warm lean climbs desert(3/10)->foundry(9/10)
-				var mcol := Color(0.55, 0.5, 0.28, 0.16) if m_bright else \
-					(Color(0.10, 0.07, 0.0, 0.16) if m_warm else Color(0.03, 0.03, 0.06, 0.16))   # retune: cool lean was G-dominant (swampy); now a neutral cool slate-blue
+				var mcol := Color(0.55, 0.5, 0.28, 0.26) if m_bright else \
+					(Color(0.10, 0.07, 0.0, 0.26) if m_warm else Color(0.03, 0.03, 0.06, 0.26))   # retune: cool lean was G-dominant (swampy); now a neutral cool slate-blue
 				canvas.draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + float(mh % 5) * 0.16))
 				canvas.draw_texture_rect(Art.tex("fx_softspot"),
 					Rect2(-Vector2.ONE * msz / 2.0, Vector2.ONE * msz), false, mcol)
