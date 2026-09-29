@@ -1,0 +1,1679 @@
+{
+ "schema": 1,
+ "generator": "tools/fetch_cc0.py",
+ "retrieved": "2026-09-29",
+ "note": "Machine-readable claim set for assets/cc0_extra/. --check verifies every file here against sha256+size and requires an ASSETS.md row. Regenerate deliberately with --accept-drift; a plain run that does not match is a FAILURE, not a reason to rewrite this file.",
+ "tile_px": 128,
+ "seam_ratio_max": 1.5,
+ "quarantined": [
+  {
+   "archive": "source/downloads/oga_16-toon-muzzle-flash.zip",
+   "contents": "17 PNGs (muzzle_flashs/m_1.png .. m_16.png), 1.13 MB total",
+   "reason": "No licence of any kind in the archive",
+   "evidence": "unzip -Z1 lists exactly 17 entries: 16 PNGs plus the 'muzzle_flashs/' directory entry. A grep for licen|readme|.txt|.md|.pdf|credit across the central directory returns ZERO matches. The submitting OGA page's licence is not reproduced anywhere in the artefact, so it cannot be verified from the artefact."
+  },
+  {
+   "archive": "source/downloads/oga_stone-tower-game-assets.zip",
+   "contents": "4 .fla sources + 63 PNGs + TXT/readme.txt, 2.86 MB total",
+   "reason": "The only text file is a font attribution link, not a licence",
+   "evidence": "The archive's sole non-artwork file is TXT/readme.txt, 52 bytes, whose entire content is: 'Chisel Mark\\r\\nhttps://www.dafont.com/chisel-mark-font'. That is a dafont.com attribution for the FL authoring font, granting nothing. No CC0, CC-BY or any other licence statement exists in the artefact."
+  }
+ ],
+ "licences": {
+  "railgun": "RailGun_Fire1 by BaggoNotes, Creative Commons Zero (CC0). Source page: https://freesound.org/people/BaggoNotes/sounds/785380/ . License verified September 28, 2026: https://creativecommons.org/publicdomain/zero/1.0/ . Downloaded the publicly served HQ MP3 preview.\n"
+ },
+ "ground_tiles": {
+  "ground/ground-079l-fine-pale-sand.png": {
+   "assetId": "Ground079L",
+   "displayName": "Ground 079 L",
+   "why": "Finest, palest sand of the set -- lowest high-frequency energy, so it survives a 1024->128 downsample as grain rather than dissolving into flat colour. Closest match to the live sand.png's std ~0.036 character.",
+   "seam_ratio_x": 1.34,
+   "seam_ratio_y": 1.155,
+   "seam_ratio_worst": 1.34,
+   "bar": 1.5,
+   "luma_steps_0_255": {
+    "wrap_step_x": 6.839,
+    "wrap_step_y": 5.832,
+    "interior_step_x": 5.103,
+    "interior_step_y": 5.05
+   },
+   "mean_luma": 0.6154,
+   "std_luma": 0.0223
+  },
+  "ground/ground-062l-warm-tan-sand.png": {
+   "assetId": "Ground062L",
+   "displayName": "Ground 062 L",
+   "why": "Warm mid-tan fine sand with only sparse grit. The best candidate for a second base-floor card, where the dihedral-variant scheme (GROUND_BASE_VARIANTS) needs a sibling that is visibly different in hue but identical in grain scale.",
+   "seam_ratio_x": 1.32,
+   "seam_ratio_y": 1.217,
+   "seam_ratio_worst": 1.32,
+   "bar": 1.5,
+   "luma_steps_0_255": {
+    "wrap_step_x": 9.026,
+    "wrap_step_y": 8.352,
+    "interior_step_x": 6.839,
+    "interior_step_y": 6.863
+   },
+   "mean_luma": 0.5627,
+   "std_luma": 0.0304
+  },
+  "ground/ground-098-dune-ripple-sand.png": {
+   "assetId": "Ground098",
+   "displayName": "Ground 098",
+   "why": "Soft wind-ripple relief in warm tan. The ripple is low enough in spatial frequency to still read as directional texture at 128px instead of aliasing into a crosshatch.",
+   "seam_ratio_x": 1.349,
+   "seam_ratio_y": 1.433,
+   "seam_ratio_worst": 1.433,
+   "bar": 1.5,
+   "luma_steps_0_255": {
+    "wrap_step_x": 0.96,
+    "wrap_step_y": 1.887,
+    "interior_step_x": 0.712,
+    "interior_step_y": 1.317
+   },
+   "mean_luma": 0.6429,
+   "std_luma": 0.0088
+  },
+  "ground/ground-062s-gritty-dirt-track.png": {
+   "assetId": "Ground062S",
+   "displayName": "Ground 062 S",
+   "why": "The coarse sibling of Ground062L -- visibly peppered with grit. Reads as a trafficked dirt track rather than open desert, which is what the desert biome's vehicle lanes want.",
+   "seam_ratio_x": 1.127,
+   "seam_ratio_y": 1.382,
+   "seam_ratio_worst": 1.382,
+   "bar": 1.5,
+   "luma_steps_0_255": {
+    "wrap_step_x": 9.701,
+    "wrap_step_y": 12.267,
+    "interior_step_x": 8.606,
+    "interior_step_y": 8.879
+   },
+   "mean_luma": 0.5639,
+   "std_luma": 0.0403
+  },
+  "ground/ground-095a-dry-cracked-earth.png": {
+   "assetId": "Ground095A",
+   "displayName": "Ground 095 A",
+   "why": "Dark brown desiccation polygons. The only genuinely 'dry cracked' material in the shortlist; the polygon scale is a few hundred pixels in the 1K source, so 2-3 cracks survive the downsample intact.",
+   "seam_ratio_x": 1.254,
+   "seam_ratio_y": 1.233,
+   "seam_ratio_worst": 1.254,
+   "bar": 1.5,
+   "luma_steps_0_255": {
+    "wrap_step_x": 1.292,
+    "wrap_step_y": 1.584,
+    "interior_step_x": 1.03,
+    "interior_step_y": 1.285
+   },
+   "mean_luma": 0.4707,
+   "std_luma": 0.0085
+  },
+  "ground/ground-039-scorched-ash.png": {
+   "assetId": "Ground039",
+   "displayName": "Ground 039",
+   "why": "The scorched/ash candidate: near-neutral dark grey with no vegetation. Reads as a burnt-out blast zone and is the tonal floor of the set, so it can carry scorched-earth decals under a light ground ramp.",
+   "seam_ratio_x": 1.231,
+   "seam_ratio_y": 1.305,
+   "seam_ratio_worst": 1.305,
+   "bar": 1.5,
+   "luma_steps_0_255": {
+    "wrap_step_x": 4.606,
+    "wrap_step_y": 4.868,
+    "interior_step_x": 3.742,
+    "interior_step_y": 3.73
+   },
+   "mean_luma": 0.49,
+   "std_luma": 0.0196
+  }
+ },
+ "files": {
+  "crosshair/crosshair-006.png": {
+   "sha256": "991ed93bc8fb62fd3a1e587b4907323d1c2c64ac82ad2a3dd842948fc8dedeeb",
+   "bytes": 1003,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-006.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-009.png": {
+   "sha256": "40828d06a86949da363a197b4835f75b9519d525cea965ecc81c5382360de570",
+   "bytes": 1198,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-009.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-026.png": {
+   "sha256": "e37509f7cc3f49b9a209885f7dd32ff37af066512774450fc9176e3aa587bbf6",
+   "bytes": 1003,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-026.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-033.png": {
+   "sha256": "4de189a8b629d12c7566370265eb304cc83bda68274163e0530443ddef8b4381",
+   "bytes": 1281,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-033.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-038.png": {
+   "sha256": "46852b54068cb0cee74dc465d6a8ef367e59783fcb6b35598fd39e5d050a6395",
+   "bytes": 470,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-038.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-046.png": {
+   "sha256": "f0f5643bd53c46bec7a90739d78c67bb78afad48cecd777f550d98d651d2f8a3",
+   "bytes": 983,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-046.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-066.png": {
+   "sha256": "ab675848b4f29051b8162be4fd650f0661ba64387becbd83efd7bb3ed77048ef",
+   "bytes": 1005,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-066.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-080.png": {
+   "sha256": "fa61908e3b13475ce94c33cd7d3e5165546eaedddd1f0cd78cca238ff08d986d",
+   "bytes": 360,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-080.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-081.png": {
+   "sha256": "b277a082564875a205cea1cd5bef9666a2620d2053c5a5e8f50a1f3d40ebaf90",
+   "bytes": 360,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-081.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-082.png": {
+   "sha256": "ec0d3a074faff22f2c494ed9f3a866f3612baee82bb53dacea508d6336dc04f4",
+   "bytes": 395,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-082.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-092.png": {
+   "sha256": "18267c0b4b8933737f02aad6ef59a7eec076c7fe00495bd6229a448e59d83858",
+   "bytes": 798,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-092.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-100.png": {
+   "sha256": "b97e628ba88bdadf922987cc52f8cabe5cdad4d68e2c78e5cfef1b08a493325e",
+   "bytes": 450,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-100.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-102.png": {
+   "sha256": "8c7065def12bae48dabb30fe40c2d2b4081dfa1cfbc7613b78d8e3b95b54b176",
+   "bytes": 421,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-102.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-105.png": {
+   "sha256": "e4c5188b032f20b55544e690027ed0cd7f5eba31919a6f895cf2909eab5efde8",
+   "bytes": 671,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-105.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-134.png": {
+   "sha256": "0c39a706a7ec962a2f10923f1540089c981137a01a39d2896608b1a0311be64c",
+   "bytes": 221,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-134.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "crosshair/crosshair-146.png": {
+   "sha256": "b081bca96f0909acbf5925a335b523179bfa660d8538d5d37cfad002dc4f2997",
+   "bytes": 471,
+   "kind": "png",
+   "source_pack": "crosshair",
+   "source_member": "PNG/Outline/crosshair-146.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ground/ground-039-scorched-ash.png": {
+   "sha256": "ad637f283e38f3839a8ebfe3e2939dedfca20c396c8c020cd4dfadb287dc52df",
+   "bytes": 26700,
+   "kind": "png",
+   "source_pack": "ambientCG",
+   "source_member": "Ground039_1K-JPG_Color.jpg",
+   "source_archive": "https://ambientcg.com/get?file=Ground039_1K-JPG.zip",
+   "source_url": "https://ambientcg.com/view?id=Ground039",
+   "licence": "CC0-1.0",
+   "licence_evidence": "ambientCG licensing FAQ: All assets are released under the Creative Commons CC0 license, making them free to use without attribution - even in commercial circumstances.",
+   "derived": "centre-crop -> half-offset wrap-blend at 512px -> LANCZOS 128px -> PNG (tools/fetch_cc0.py)"
+  },
+  "ground/ground-062l-warm-tan-sand.png": {
+   "sha256": "c0fb3cc253f952d6ff79003c5fa3f09a987a60f4e634412d2aa2eea2d119c8a1",
+   "bytes": 31187,
+   "kind": "png",
+   "source_pack": "ambientCG",
+   "source_member": "Ground062L_1K-JPG_Color.jpg",
+   "source_archive": "https://ambientcg.com/get?file=Ground062L_1K-JPG.zip",
+   "source_url": "https://ambientcg.com/view?id=Ground062L",
+   "licence": "CC0-1.0",
+   "licence_evidence": "ambientCG licensing FAQ: All assets are released under the Creative Commons CC0 license, making them free to use without attribution - even in commercial circumstances.",
+   "derived": "centre-crop -> half-offset wrap-blend at 512px -> LANCZOS 128px -> PNG (tools/fetch_cc0.py)"
+  },
+  "ground/ground-062s-gritty-dirt-track.png": {
+   "sha256": "fff8cb3994c333b241e725ac771d907803ce2c8adfc3e034cd16afed507b7b34",
+   "bytes": 33604,
+   "kind": "png",
+   "source_pack": "ambientCG",
+   "source_member": "Ground062S_1K-JPG_Color.jpg",
+   "source_archive": "https://ambientcg.com/get?file=Ground062S_1K-JPG.zip",
+   "source_url": "https://ambientcg.com/view?id=Ground062S",
+   "licence": "CC0-1.0",
+   "licence_evidence": "ambientCG licensing FAQ: All assets are released under the Creative Commons CC0 license, making them free to use without attribution - even in commercial circumstances.",
+   "derived": "centre-crop -> half-offset wrap-blend at 512px -> LANCZOS 128px -> PNG (tools/fetch_cc0.py)"
+  },
+  "ground/ground-079l-fine-pale-sand.png": {
+   "sha256": "4b56b4231508e6defeb6d7fa3b093cc49253bab5392198318868e59f9a02042e",
+   "bytes": 28326,
+   "kind": "png",
+   "source_pack": "ambientCG",
+   "source_member": "Ground079L_1K-JPG_Color.jpg",
+   "source_archive": "https://ambientcg.com/get?file=Ground079L_1K-JPG.zip",
+   "source_url": "https://ambientcg.com/view?id=Ground079L",
+   "licence": "CC0-1.0",
+   "licence_evidence": "ambientCG licensing FAQ: All assets are released under the Creative Commons CC0 license, making them free to use without attribution - even in commercial circumstances.",
+   "derived": "centre-crop -> half-offset wrap-blend at 512px -> LANCZOS 128px -> PNG (tools/fetch_cc0.py)"
+  },
+  "ground/ground-095a-dry-cracked-earth.png": {
+   "sha256": "63ca8b3921e9befeae9eab857e319d9c2f41892d580e625bfcd3967410ad7a46",
+   "bytes": 15066,
+   "kind": "png",
+   "source_pack": "ambientCG",
+   "source_member": "Ground095A_1K-JPG_Color.jpg",
+   "source_archive": "https://ambientcg.com/get?file=Ground095A_1K-JPG.zip",
+   "source_url": "https://ambientcg.com/view?id=Ground095A",
+   "licence": "CC0-1.0",
+   "licence_evidence": "ambientCG licensing FAQ: All assets are released under the Creative Commons CC0 license, making them free to use without attribution - even in commercial circumstances.",
+   "derived": "centre-crop -> half-offset wrap-blend at 512px -> LANCZOS 128px -> PNG (tools/fetch_cc0.py)"
+  },
+  "ground/ground-098-dune-ripple-sand.png": {
+   "sha256": "4870d5774b2c38bda9b5530c4af135851dfd77010f7af5ccaed78207c1fb677a",
+   "bytes": 14111,
+   "kind": "png",
+   "source_pack": "ambientCG",
+   "source_member": "Ground098_1K-JPG_Color.jpg",
+   "source_archive": "https://ambientcg.com/get?file=Ground098_1K-JPG.zip",
+   "source_url": "https://ambientcg.com/view?id=Ground098",
+   "licence": "CC0-1.0",
+   "licence_evidence": "ambientCG licensing FAQ: All assets are released under the Creative Commons CC0 license, making them free to use without attribution - even in commercial circumstances.",
+   "derived": "centre-crop -> half-offset wrap-blend at 512px -> LANCZOS 128px -> PNG (tools/fetch_cc0.py)"
+  },
+  "sfx_impact/footstep_concrete_000.ogg": {
+   "sha256": "d7267e183067757c92c169de2a379abea592cfca6b39bb2e8feea15221ad79fe",
+   "bytes": 5808,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/footstep_concrete_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactBell_heavy_000.ogg": {
+   "sha256": "94b8bb5f2d43ab65e4bcc32b28562416e9bc2c51d9fd4be1e333660ee52f977f",
+   "bytes": 13915,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactBell_heavy_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactGlass_heavy_000.ogg": {
+   "sha256": "b44b39a940e8948e74b9bd3776bff980df43cf220abdaf0d467dc4c43c0244a5",
+   "bytes": 7403,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactGlass_heavy_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactMetal_medium_000.ogg": {
+   "sha256": "a96f879fec0864a8938e0c745b6996a6c5679c16a234ce31a01cc995e8401003",
+   "bytes": 7117,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactMetal_medium_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactMetal_medium_002.ogg": {
+   "sha256": "7e89ce2ca0dbda95ea2b78d4b50791cab35c10d20e9f5ccd45dd0b00e99ff548",
+   "bytes": 5857,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactMetal_medium_002.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactMining_000.ogg": {
+   "sha256": "36b4ea107222d073c67ca64dde26944975609202d5090b2f2021213c1a7e35cd",
+   "bytes": 12035,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactMining_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactPlate_heavy_000.ogg": {
+   "sha256": "112d4f93ddcc370b410630f971c0f5d991856102da9c76bc5c5540d388e75aaa",
+   "bytes": 10032,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactPlate_heavy_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactPlate_medium_000.ogg": {
+   "sha256": "b670d30452983369771081319c268475edaaafe782bf4e8d70bd7eef09d8823c",
+   "bytes": 10921,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactPlate_medium_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactPunch_heavy_000.ogg": {
+   "sha256": "b33a8f14068aec24ec69ba85e5e87fdc41228975f6a1a3e44a6e7d6fc3d9f8d8",
+   "bytes": 11617,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactPunch_heavy_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactSoft_heavy_000.ogg": {
+   "sha256": "49e7ca88743fca974bb8676ea138b751cfd8f9033b5e7af8736c2a215d6edbc1",
+   "bytes": 6570,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactSoft_heavy_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactTin_medium_000.ogg": {
+   "sha256": "f4bbee66ca191ec744b84fc07ac9ed2a6fda955d51cfed8360f12b62815d3cbd",
+   "bytes": 6509,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactTin_medium_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_impact/impactWood_heavy_000.ogg": {
+   "sha256": "15ff82332f342c30e469215539e1cc57e11b221aa2cf7e11e811d313a9927f3d",
+   "bytes": 6233,
+   "kind": "ogg",
+   "source_pack": "sfx_impact",
+   "source_member": "Audio/impactWood_heavy_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_railgun/railgun_fire_baggonotes.mp3": {
+   "sha256": "d811f8bb25d4c4c7f0726c304b08d741555aaeee9c695335b1f7a0e0e9c3be3d",
+   "bytes": 22021,
+   "kind": "mp3",
+   "source_pack": "freesound-baggo-notes-railgun",
+   "source_member": "railgun-baggonotes-hq.mp3",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/railgun-baggonotes-hq.mp3",
+   "source_url": "https://freesound.org/people/BaggoNotes/sounds/785380/",
+   "licence": "CC0-1.0",
+   "licence_evidence": "kenney-audio/railgun-LICENSE.txt: 'RailGun_Fire1 by BaggoNotes, Creative Commons Zero (CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/computerNoise_000.ogg": {
+   "sha256": "1527944e16eb14b48ee03fe3e7ce6aae94262833a4e1f83928d451a7414fe4e1",
+   "bytes": 119024,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/computerNoise_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/engineCircular_000.ogg": {
+   "sha256": "8ab85f9fa85e9e692287f98acb36b9ac3ba15313b007c039055e286b736f4e3a",
+   "bytes": 177470,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/engineCircular_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/explosionCrunch_000.ogg": {
+   "sha256": "4b597d658d0ae101f0a030fbeea5fc3a4292ab85f017470a8254a8e7959cbd69",
+   "bytes": 28274,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/explosionCrunch_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/explosionCrunch_003.ogg": {
+   "sha256": "8c7197bb3a1c504690319c3abe0e62a5423ee246dd70caab57963d0b7aa8144f",
+   "bytes": 54824,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/explosionCrunch_003.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/forceField_000.ogg": {
+   "sha256": "c2916f2a062c8ddd1aca2826d134fe90847037db31342726ffb0f9097afe339c",
+   "bytes": 25672,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/forceField_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/impactMetal_000.ogg": {
+   "sha256": "956c6612a256aa1a67a2327fffe2454f6b1d82e4c1c2be28fd66916335d5b1d6",
+   "bytes": 15491,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/impactMetal_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/laserLarge_000.ogg": {
+   "sha256": "a56d95794cd732d6c2d66ce488c14cf557fe526c282897c9a77675c2bd9b77e6",
+   "bytes": 25566,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/laserLarge_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/laserRetro_000.ogg": {
+   "sha256": "2a203a007d24cc7e607eb8bec1d86bedba7f551911217ce2c4c1f31393aed32c",
+   "bytes": 12588,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/laserRetro_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/laserSmall_000.ogg": {
+   "sha256": "72b589eadd41781257ac859e4f4d030222e623390e4a1a83f6d05329a6e026f1",
+   "bytes": 7286,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/laserSmall_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/laserSmall_003.ogg": {
+   "sha256": "cfa4391ca280933f567ce81c646b16f7cb2a090866eae674159a20f07641833c",
+   "bytes": 8179,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/laserSmall_003.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/lowFrequency_explosion_000.ogg": {
+   "sha256": "3cb48d86dab63140cfb9aaeea4d4a6846abaca5831d157d8adbec0490da26343",
+   "bytes": 14317,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/lowFrequency_explosion_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/spaceEngineSmall_000.ogg": {
+   "sha256": "2bec8ff75d81f0c37a6b78bd63beea6c70375e49ee30b0bbe7f38d654d576831",
+   "bytes": 116880,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/spaceEngineSmall_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_scifi/thrusterFire_000.ogg": {
+   "sha256": "0fdc474d93f209debf1fc4ea77765a669dcb7676db31b4d8a0a509685bccf374",
+   "bytes": 201216,
+   "kind": "ogg",
+   "source_pack": "sfx_scifi",
+   "source_member": "Audio/thrusterFire_000.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/click1.ogg": {
+   "sha256": "59175ac17cd49a68dd736285738441287636112a84a6f7ce0d89921bda5a5360",
+   "bytes": 4983,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/click1.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/click2.ogg": {
+   "sha256": "c394b46bc6737f7f7edfbfa3031ce621b7a43d498d456d6198364eee9cd3e306",
+   "bytes": 4656,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/click2.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/click3.ogg": {
+   "sha256": "e3e7fc7ccd9c5cfdf77bffa05aee10d4973812076c76dc889ba2b16ea434127f",
+   "bytes": 4880,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/click3.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/click5.ogg": {
+   "sha256": "52d41e0bb012731bf2a391d53ffb52265ef21589c7701e66b391d5e36a65b293",
+   "bytes": 4532,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/click5.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/mouseclick1.ogg": {
+   "sha256": "ece1210c62ccae6c9ea4f4c59466d9d453d6b357c7d4b1a6c31196e5e6fea1bf",
+   "bytes": 4686,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/mouseclick1.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/rollover3.ogg": {
+   "sha256": "641df2c95468f1f035ff0ae964129da10543b4ea8ff6c13f66bcbd899dcfc113",
+   "bytes": 4778,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/rollover3.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/switch1.ogg": {
+   "sha256": "efdd1d1e2904fb2d81259cd96bb80101caceae94be02baa4b5310714a6708b19",
+   "bytes": 6104,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/switch1.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/switch10.ogg": {
+   "sha256": "bf61b3f3af39b2c680e70ee2f791786edd2bca2016ea683947059f079849bbf3",
+   "bytes": 6456,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/switch10.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/switch17.ogg": {
+   "sha256": "d09974d4cf5ccb2d75647e2464cd424e7e3c7a0374e73e8a22577662031a3677",
+   "bytes": 6686,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/switch17.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/switch25.ogg": {
+   "sha256": "ba31fc9a780a6908809154e0108e8d2728b5b9a6e769c8f56d61d920fba100ae",
+   "bytes": 7130,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/switch25.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "sfx_ui/switch5.ogg": {
+   "sha256": "8a5c85c0009cfd985634e8fdb4e0350690be5d85fd49f43a90b35c7de0bef7c0",
+   "bytes": 6181,
+   "kind": "ogg",
+   "source_pack": "sfx_ui",
+   "source_member": "Audio/switch5.ogg",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_emplacement_065.png": {
+   "sha256": "0f219f0bb6a3122906d320ca1442eb10bd2cb99eabe3218a108cac26d8e05fad",
+   "bytes": 2840,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile065.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_emplacement_cross_067.png": {
+   "sha256": "a377414d1742e914b90c9c8719fe29689d717902a513f9abcdecbf512d3a199e",
+   "bytes": 3030,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile067.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_emplacement_target_068.png": {
+   "sha256": "03e72efdc5d2ed5b8b2ecf9588ff3eb809a1def54c459f7f7a608ad77ac6dbc5",
+   "bytes": 3334,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile068.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_emplacement_wrench_066.png": {
+   "sha256": "2c9927e972b0ac39d904e1a4b4b0c75815b370585d2f2c373a4b635a127a97e0",
+   "bytes": 3233,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile066.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_flat_005.png": {
+   "sha256": "b06cfe4d80a13acadf2ae9f5ed91f6eeffd60bf0f0c600ce88d2b608992f81e4",
+   "bytes": 1495,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile005.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_flat_047.png": {
+   "sha256": "a2e4048226448d8f833baa28a4f746c9586daa48ea87e9c231f1404cf2136585",
+   "bytes": 2251,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile047.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_flat_055.png": {
+   "sha256": "1c802133b5bb85e475b6079b743caa4cf33aea7cf5e2c31e95c4e3debb24a645",
+   "bytes": 1056,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile055.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_flat_060.png": {
+   "sha256": "7f5b93cfe7a6baa503fa74a71236e6ba2e3341c87914a1a89e25de6676712002",
+   "bytes": 1056,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile060.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_stone_092.png": {
+   "sha256": "43680ca19f2ba84e59528a04e2e33f4f6b6e8b2fbb8b06cc3af5cd6b24c30ad8",
+   "bytes": 2405,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile092.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_stone_097.png": {
+   "sha256": "3db79d294076109e6ce4645e42a5b64cb8106f2c28b0fda1e045b80c15b9f5d7",
+   "bytes": 2535,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile097.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_stone_150.png": {
+   "sha256": "5fe92765cafafa082c149ec19332130e0b47e828a70068b67c93933ccd304301",
+   "bytes": 1614,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile150.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/dirt_stone_158.png": {
+   "sha256": "cdb7f7ad39624578648dd7804aae46e0adc6a0e117503ec799621322ec9a95ec",
+   "bytes": 3065,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile158.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/sand_dirt_edge_144.png": {
+   "sha256": "cf331f668b5a11827ddd563a6def819a669dd9f2c789cc52eba36ff89b36c7f5",
+   "bytes": 2179,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile144.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/sand_dirt_edge_146.png": {
+   "sha256": "e20aa4181b16d0edb035aa2ea477d156a62060f56641d8bfe1e0721d8ae66edd",
+   "bytes": 3095,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile146.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "td_ground/sand_dirt_edge_147.png": {
+   "sha256": "53d1f3af423cb54d66d4adda76b316a1cd04200b56949fc66031d8b02832d48b",
+   "bytes": 3402,
+   "kind": "png",
+   "source_pack": "td_ground",
+   "source_member": "PNG/Default size/towerDefense_tile147.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/button_rectangle_depth_border.png": {
+   "sha256": "2b53f7a8b9527fa66dd995736f94b11fa39e69ca390a7e17539f32919a9cb521",
+   "bytes": 408,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/button_rectangle_depth_border.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/button_rectangle_line.png": {
+   "sha256": "c50095610f59b002c45d169f4cb6c58dd6dac5ad62d18b0b0669627e776d9d7a",
+   "bytes": 335,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/button_rectangle_line.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/button_round_depth_border.png": {
+   "sha256": "cb67196b98421db56783cb06b5741c1517b8317219febebc3ee1303da0b7630d",
+   "bytes": 1580,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/button_round_depth_border.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/button_square_depth_border.png": {
+   "sha256": "89b718275e0adf6e0cbdd3fb5594e8b6fd91755c336b0c877b52381f8aec8a03",
+   "bytes": 373,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/button_square_depth_border.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/check_round_grey.png": {
+   "sha256": "daac46633c475f983c34a37c8e2230dd20a32a8bbef7aea5d5462be2c30b16d3",
+   "bytes": 579,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/check_round_grey.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/check_square_grey.png": {
+   "sha256": "e11648f1188535916da8645cde5532f90c806ff0d678a03b668957f0aea431df",
+   "bytes": 280,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/check_square_grey.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/check_square_grey_checkmark.png": {
+   "sha256": "365956f4131fd759b3fec4d58948c778906d97a4530a2e452ff1359ab87973f8",
+   "bytes": 556,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/check_square_grey_checkmark.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/divider.png": {
+   "sha256": "234015ec6516217532d413751953d08482ee9ce0b95c0fc14d5ec55716f9feec",
+   "bytes": 89,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Extra/Default/divider.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/divider_edges.png": {
+   "sha256": "6f3b2337ac3e320503bb97f1670ac54a780c8a91997332902ce557cc7cc269a1",
+   "bytes": 121,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Extra/Default/divider_edges.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/icon_outline_checkmark.png": {
+   "sha256": "eb8ac4cb70dbbb53c121d8e01b9fbc637b10517e2500b9c0cb71d44f1c0be8e3",
+   "bytes": 377,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/icon_outline_checkmark.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/icon_outline_circle.png": {
+   "sha256": "69612cb89689bb9fe89c4505e3e13b42f12089ae19aa7f9580362c77c5aae84d",
+   "bytes": 313,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/icon_outline_circle.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/icon_outline_cross.png": {
+   "sha256": "36db4cf4cc72db2d02fdae505aa743ca24b65c6e9196a3148473dbd0a13a5dbe",
+   "bytes": 350,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/icon_outline_cross.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/icon_outline_square.png": {
+   "sha256": "9a065d6a03e3687ce27dbb2e58030f49aa3269abcd2fff7744a16621e850a06d",
+   "bytes": 135,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/icon_outline_square.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/input_outline_rectangle.png": {
+   "sha256": "72db24a4670c56699ce58cc29c30abbef984e744803881db61cbacda9625d051",
+   "bytes": 344,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Extra/Default/input_outline_rectangle.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/input_outline_square.png": {
+   "sha256": "643537f1bedf5963c8277670e5eac0f144e45d6f190c322336f32b00a6a8aed8",
+   "bytes": 316,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Extra/Default/input_outline_square.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/input_rectangle.png": {
+   "sha256": "8d8a2c63a9cfe3bcd45fbf11a9ea1e6b046df74455631f635dafd0012193a75e",
+   "bytes": 355,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Extra/Default/input_rectangle.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/input_square.png": {
+   "sha256": "71eba3550fc4d630930fd0b0dd99b8bef2d7ff7a4df842ee25b668d36dc1f4b7",
+   "bytes": 319,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Extra/Default/input_square.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/slide_horizontal_grey.png": {
+   "sha256": "a80f54d81912dcac6827b8b71bb81f6b8b8a0c190573006aee9612d6bbd91618",
+   "bytes": 383,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/slide_horizontal_grey.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/slide_horizontal_grey_section.png": {
+   "sha256": "3c81558440a149a467057e4932bedb3c541cb6ca67e222a2742cca04a7f1823a",
+   "bytes": 321,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/slide_horizontal_grey_section.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/slide_horizontal_grey_section_wide.png": {
+   "sha256": "d6ed93a8c182a64c7e62732fc7e02029fc7d5452380e900678d8d0fff0ba4dbf",
+   "bytes": 336,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/slide_horizontal_grey_section_wide.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "ui/slide_vertical_grey.png": {
+   "sha256": "43395d2de831de9f8d25f2351a3d06cb6ca340781bc9051edaa2406c1dede70d",
+   "bytes": 379,
+   "kind": "png",
+   "source_pack": "ui",
+   "source_member": "PNG/Grey/Default/slide_vertical_grey.png",
+   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "licenses/source-licence-sfx_scifi.txt": {
+   "sha256": "a9767b25c3533f69d03af136480efad08efba19a9f0d89616992b34c79fd6186",
+   "bytes": 571,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-sfx_scifi.txt",
+   "source_archive": "",
+   "source_url": "https://kenney.nl/assets/sci-fi-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/LICENSE-CC0-kenney.txt": {
+   "sha256": "6ec136004bba9cb75815e0182822f5ad1c7574cb86c613c0a03ca555e8db920e",
+   "bytes": 1657,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "LICENSE-CC0-kenney.txt",
+   "source_archive": "",
+   "source_url": "",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/source-licence-td_ground.txt": {
+   "sha256": "8ef6d013cca76e9bba95c2a508df31001b51c0e4116d7ffeb7b02bf7b36d4bf5",
+   "bytes": 498,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-td_ground.txt",
+   "source_archive": "",
+   "source_url": "https://kenney.nl/assets/tower-defense-top-down",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/source-licence-railgun.txt": {
+   "sha256": "116de57e87e163f618abbabc5630e1e3c54b2a458dd03ab9503200ac55cfed04",
+   "bytes": 265,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-railgun.txt",
+   "source_archive": "",
+   "source_url": "",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/source-licence-ui.txt": {
+   "sha256": "69f7eaa5e05913b4d09cf5848f75390b5c3c9a409ef8555777803d9ca0c171fb",
+   "bytes": 565,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-ui.txt",
+   "source_archive": "",
+   "source_url": "https://kenney.nl/assets/ui-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/LICENSE-CC0-ambientcg.txt": {
+   "sha256": "5d9a68154acc244ba636a5333c515285cba43cd896e67a443162fcee4071cdc9",
+   "bytes": 1451,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "LICENSE-CC0-ambientcg.txt",
+   "source_archive": "",
+   "source_url": "",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/source-licence-crosshair.txt": {
+   "sha256": "7488be7a0dcd96de0c5435e37248750fa753224786e3b6fb518751c0d0ccb78e",
+   "bytes": 571,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-crosshair.txt",
+   "source_archive": "",
+   "source_url": "https://kenney.nl/assets/crosshair-pack",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/source-licence-sfx_impact.txt": {
+   "sha256": "b49aa9c56b04528b95913de13e506a0f7c5e807b9925db9bfef86af1f91120db",
+   "bytes": 608,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-sfx_impact.txt",
+   "source_archive": "",
+   "source_url": "https://kenney.nl/assets/impact-sounds",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  },
+  "licenses/source-licence-sfx_ui.txt": {
+   "sha256": "4f88ab3c885c87874834441a0d009cea8942f57461d7b870be65cf4e31362073",
+   "bytes": 479,
+   "kind": "txt",
+   "source_pack": "licence-text",
+   "source_member": "source-licence-sfx_ui.txt",
+   "source_archive": "",
+   "source_url": "https://kenney.nl/assets/ui-audio",
+   "licence": "CC0-1.0",
+   "licence_evidence": "verbatim licence text captured from the source artefact"
+  }
+ },
+ "total_bytes": 1205485,
+ "total_files": 104,
+ "licence_files": [
+  "licenses/LICENSE-CC0-ambientcg.txt",
+  "licenses/LICENSE-CC0-kenney.txt",
+  "licenses/source-licence-crosshair.txt",
+  "licenses/source-licence-railgun.txt",
+  "licenses/source-licence-sfx_impact.txt",
+  "licenses/source-licence-sfx_scifi.txt",
+  "licenses/source-licence-sfx_ui.txt",
+  "licenses/source-licence-td_ground.txt",
+  "licenses/source-licence-ui.txt"
+ ],
+ "asset_files": 95,
+ "licence_text_files": 9,
+ "asset_bytes": 1198820,
+ "sidecars": {
+  "crosshair/crosshair-006.png.import": {
+   "source": "crosshair/crosshair-006.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-006.png"
+  },
+  "crosshair/crosshair-009.png.import": {
+   "source": "crosshair/crosshair-009.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-009.png"
+  },
+  "crosshair/crosshair-026.png.import": {
+   "source": "crosshair/crosshair-026.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-026.png"
+  },
+  "crosshair/crosshair-033.png.import": {
+   "source": "crosshair/crosshair-033.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-033.png"
+  },
+  "crosshair/crosshair-038.png.import": {
+   "source": "crosshair/crosshair-038.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-038.png"
+  },
+  "crosshair/crosshair-046.png.import": {
+   "source": "crosshair/crosshair-046.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-046.png"
+  },
+  "crosshair/crosshair-066.png.import": {
+   "source": "crosshair/crosshair-066.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-066.png"
+  },
+  "crosshair/crosshair-080.png.import": {
+   "source": "crosshair/crosshair-080.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-080.png"
+  },
+  "crosshair/crosshair-081.png.import": {
+   "source": "crosshair/crosshair-081.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-081.png"
+  },
+  "crosshair/crosshair-082.png.import": {
+   "source": "crosshair/crosshair-082.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-082.png"
+  },
+  "crosshair/crosshair-092.png.import": {
+   "source": "crosshair/crosshair-092.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-092.png"
+  },
+  "crosshair/crosshair-100.png.import": {
+   "source": "crosshair/crosshair-100.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-100.png"
+  },
+  "crosshair/crosshair-102.png.import": {
+   "source": "crosshair/crosshair-102.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-102.png"
+  },
+  "crosshair/crosshair-105.png.import": {
+   "source": "crosshair/crosshair-105.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-105.png"
+  },
+  "crosshair/crosshair-134.png.import": {
+   "source": "crosshair/crosshair-134.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-134.png"
+  },
+  "crosshair/crosshair-146.png.import": {
+   "source": "crosshair/crosshair-146.png",
+   "source_file": "res://assets/cc0_extra/crosshair/crosshair-146.png"
+  },
+  "ground/ground-039-scorched-ash.png.import": {
+   "source": "ground/ground-039-scorched-ash.png",
+   "source_file": "res://assets/cc0_extra/ground/ground-039-scorched-ash.png"
+  },
+  "ground/ground-062l-warm-tan-sand.png.import": {
+   "source": "ground/ground-062l-warm-tan-sand.png",
+   "source_file": "res://assets/cc0_extra/ground/ground-062l-warm-tan-sand.png"
+  },
+  "ground/ground-062s-gritty-dirt-track.png.import": {
+   "source": "ground/ground-062s-gritty-dirt-track.png",
+   "source_file": "res://assets/cc0_extra/ground/ground-062s-gritty-dirt-track.png"
+  },
+  "ground/ground-079l-fine-pale-sand.png.import": {
+   "source": "ground/ground-079l-fine-pale-sand.png",
+   "source_file": "res://assets/cc0_extra/ground/ground-079l-fine-pale-sand.png"
+  },
+  "ground/ground-095a-dry-cracked-earth.png.import": {
+   "source": "ground/ground-095a-dry-cracked-earth.png",
+   "source_file": "res://assets/cc0_extra/ground/ground-095a-dry-cracked-earth.png"
+  },
+  "ground/ground-098-dune-ripple-sand.png.import": {
+   "source": "ground/ground-098-dune-ripple-sand.png",
+   "source_file": "res://assets/cc0_extra/ground/ground-098-dune-ripple-sand.png"
+  },
+  "sfx_impact/footstep_concrete_000.ogg.import": {
+   "source": "sfx_impact/footstep_concrete_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/footstep_concrete_000.ogg"
+  },
+  "sfx_impact/impactBell_heavy_000.ogg.import": {
+   "source": "sfx_impact/impactBell_heavy_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactBell_heavy_000.ogg"
+  },
+  "sfx_impact/impactGlass_heavy_000.ogg.import": {
+   "source": "sfx_impact/impactGlass_heavy_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactGlass_heavy_000.ogg"
+  },
+  "sfx_impact/impactMetal_medium_000.ogg.import": {
+   "source": "sfx_impact/impactMetal_medium_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactMetal_medium_000.ogg"
+  },
+  "sfx_impact/impactMetal_medium_002.ogg.import": {
+   "source": "sfx_impact/impactMetal_medium_002.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactMetal_medium_002.ogg"
+  },
+  "sfx_impact/impactMining_000.ogg.import": {
+   "source": "sfx_impact/impactMining_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactMining_000.ogg"
+  },
+  "sfx_impact/impactPlate_heavy_000.ogg.import": {
+   "source": "sfx_impact/impactPlate_heavy_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactPlate_heavy_000.ogg"
+  },
+  "sfx_impact/impactPlate_medium_000.ogg.import": {
+   "source": "sfx_impact/impactPlate_medium_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactPlate_medium_000.ogg"
+  },
+  "sfx_impact/impactPunch_heavy_000.ogg.import": {
+   "source": "sfx_impact/impactPunch_heavy_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactPunch_heavy_000.ogg"
+  },
+  "sfx_impact/impactSoft_heavy_000.ogg.import": {
+   "source": "sfx_impact/impactSoft_heavy_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactSoft_heavy_000.ogg"
+  },
+  "sfx_impact/impactTin_medium_000.ogg.import": {
+   "source": "sfx_impact/impactTin_medium_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactTin_medium_000.ogg"
+  },
+  "sfx_impact/impactWood_heavy_000.ogg.import": {
+   "source": "sfx_impact/impactWood_heavy_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_impact/impactWood_heavy_000.ogg"
+  },
+  "sfx_railgun/railgun_fire_baggonotes.mp3.import": {
+   "source": "sfx_railgun/railgun_fire_baggonotes.mp3",
+   "source_file": "res://assets/cc0_extra/sfx_railgun/railgun_fire_baggonotes.mp3"
+  },
+  "sfx_scifi/computerNoise_000.ogg.import": {
+   "source": "sfx_scifi/computerNoise_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/computerNoise_000.ogg"
+  },
+  "sfx_scifi/engineCircular_000.ogg.import": {
+   "source": "sfx_scifi/engineCircular_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/engineCircular_000.ogg"
+  },
+  "sfx_scifi/explosionCrunch_000.ogg.import": {
+   "source": "sfx_scifi/explosionCrunch_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/explosionCrunch_000.ogg"
+  },
+  "sfx_scifi/explosionCrunch_003.ogg.import": {
+   "source": "sfx_scifi/explosionCrunch_003.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/explosionCrunch_003.ogg"
+  },
+  "sfx_scifi/forceField_000.ogg.import": {
+   "source": "sfx_scifi/forceField_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/forceField_000.ogg"
+  },
+  "sfx_scifi/impactMetal_000.ogg.import": {
+   "source": "sfx_scifi/impactMetal_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/impactMetal_000.ogg"
+  },
+  "sfx_scifi/laserLarge_000.ogg.import": {
+   "source": "sfx_scifi/laserLarge_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/laserLarge_000.ogg"
+  },
+  "sfx_scifi/laserRetro_000.ogg.import": {
+   "source": "sfx_scifi/laserRetro_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/laserRetro_000.ogg"
+  },
+  "sfx_scifi/laserSmall_000.ogg.import": {
+   "source": "sfx_scifi/laserSmall_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/laserSmall_000.ogg"
+  },
+  "sfx_scifi/laserSmall_003.ogg.import": {
+   "source": "sfx_scifi/laserSmall_003.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/laserSmall_003.ogg"
+  },
+  "sfx_scifi/lowFrequency_explosion_000.ogg.import": {
+   "source": "sfx_scifi/lowFrequency_explosion_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/lowFrequency_explosion_000.ogg"
+  },
+  "sfx_scifi/spaceEngineSmall_000.ogg.import": {
+   "source": "sfx_scifi/spaceEngineSmall_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/spaceEngineSmall_000.ogg"
+  },
+  "sfx_scifi/thrusterFire_000.ogg.import": {
+   "source": "sfx_scifi/thrusterFire_000.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_scifi/thrusterFire_000.ogg"
+  },
+  "sfx_ui/click1.ogg.import": {
+   "source": "sfx_ui/click1.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/click1.ogg"
+  },
+  "sfx_ui/click2.ogg.import": {
+   "source": "sfx_ui/click2.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/click2.ogg"
+  },
+  "sfx_ui/click3.ogg.import": {
+   "source": "sfx_ui/click3.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/click3.ogg"
+  },
+  "sfx_ui/click5.ogg.import": {
+   "source": "sfx_ui/click5.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/click5.ogg"
+  },
+  "sfx_ui/mouseclick1.ogg.import": {
+   "source": "sfx_ui/mouseclick1.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/mouseclick1.ogg"
+  },
+  "sfx_ui/rollover3.ogg.import": {
+   "source": "sfx_ui/rollover3.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/rollover3.ogg"
+  },
+  "sfx_ui/switch1.ogg.import": {
+   "source": "sfx_ui/switch1.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/switch1.ogg"
+  },
+  "sfx_ui/switch10.ogg.import": {
+   "source": "sfx_ui/switch10.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/switch10.ogg"
+  },
+  "sfx_ui/switch17.ogg.import": {
+   "source": "sfx_ui/switch17.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/switch17.ogg"
+  },
+  "sfx_ui/switch25.ogg.import": {
+   "source": "sfx_ui/switch25.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/switch25.ogg"
+  },
+  "sfx_ui/switch5.ogg.import": {
+   "source": "sfx_ui/switch5.ogg",
+   "source_file": "res://assets/cc0_extra/sfx_ui/switch5.ogg"
+  },
+  "td_ground/dirt_emplacement_065.png.import": {
+   "source": "td_ground/dirt_emplacement_065.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_emplacement_065.png"
+  },
+  "td_ground/dirt_emplacement_cross_067.png.import": {
+   "source": "td_ground/dirt_emplacement_cross_067.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_emplacement_cross_067.png"
+  },
+  "td_ground/dirt_emplacement_target_068.png.import": {
+   "source": "td_ground/dirt_emplacement_target_068.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_emplacement_target_068.png"
+  },
+  "td_ground/dirt_emplacement_wrench_066.png.import": {
+   "source": "td_ground/dirt_emplacement_wrench_066.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_emplacement_wrench_066.png"
+  },
+  "td_ground/dirt_flat_005.png.import": {
+   "source": "td_ground/dirt_flat_005.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_flat_005.png"
+  },
+  "td_ground/dirt_flat_047.png.import": {
+   "source": "td_ground/dirt_flat_047.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_flat_047.png"
+  },
+  "td_ground/dirt_flat_055.png.import": {
+   "source": "td_ground/dirt_flat_055.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_flat_055.png"
+  },
+  "td_ground/dirt_flat_060.png.import": {
+   "source": "td_ground/dirt_flat_060.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_flat_060.png"
+  },
+  "td_ground/dirt_stone_092.png.import": {
+   "source": "td_ground/dirt_stone_092.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_stone_092.png"
+  },
+  "td_ground/dirt_stone_097.png.import": {
+   "source": "td_ground/dirt_stone_097.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_stone_097.png"
+  },
+  "td_ground/dirt_stone_150.png.import": {
+   "source": "td_ground/dirt_stone_150.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_stone_150.png"
+  },
+  "td_ground/dirt_stone_158.png.import": {
+   "source": "td_ground/dirt_stone_158.png",
+   "source_file": "res://assets/cc0_extra/td_ground/dirt_stone_158.png"
+  },
+  "td_ground/sand_dirt_edge_144.png.import": {
+   "source": "td_ground/sand_dirt_edge_144.png",
+   "source_file": "res://assets/cc0_extra/td_ground/sand_dirt_edge_144.png"
+  },
+  "td_ground/sand_dirt_edge_146.png.import": {
+   "source": "td_ground/sand_dirt_edge_146.png",
+   "source_file": "res://assets/cc0_extra/td_ground/sand_dirt_edge_146.png"
+  },
+  "td_ground/sand_dirt_edge_147.png.import": {
+   "source": "td_ground/sand_dirt_edge_147.png",
+   "source_file": "res://assets/cc0_extra/td_ground/sand_dirt_edge_147.png"
+  },
+  "ui/button_rectangle_depth_border.png.import": {
+   "source": "ui/button_rectangle_depth_border.png",
+   "source_file": "res://assets/cc0_extra/ui/button_rectangle_depth_border.png"
+  },
+  "ui/button_rectangle_line.png.import": {
+   "source": "ui/button_rectangle_line.png",
+   "source_file": "res://assets/cc0_extra/ui/button_rectangle_line.png"
+  },
+  "ui/button_round_depth_border.png.import": {
+   "source": "ui/button_round_depth_border.png",
+   "source_file": "res://assets/cc0_extra/ui/button_round_depth_border.png"
+  },
+  "ui/button_square_depth_border.png.import": {
+   "source": "ui/button_square_depth_border.png",
+   "source_file": "res://assets/cc0_extra/ui/button_square_depth_border.png"
+  },
+  "ui/check_round_grey.png.import": {
+   "source": "ui/check_round_grey.png",
+   "source_file": "res://assets/cc0_extra/ui/check_round_grey.png"
+  },
+  "ui/check_square_grey.png.import": {
+   "source": "ui/check_square_grey.png",
+   "source_file": "res://assets/cc0_extra/ui/check_square_grey.png"
+  },
+  "ui/check_square_grey_checkmark.png.import": {
+   "source": "ui/check_square_grey_checkmark.png",
+   "source_file": "res://assets/cc0_extra/ui/check_square_grey_checkmark.png"
+  },
+  "ui/divider.png.import": {
+   "source": "ui/divider.png",
+   "source_file": "res://assets/cc0_extra/ui/divider.png"
+  },
+  "ui/divider_edges.png.import": {
+   "source": "ui/divider_edges.png",
+   "source_file": "res://assets/cc0_extra/ui/divider_edges.png"
+  },
+  "ui/icon_outline_checkmark.png.import": {
+   "source": "ui/icon_outline_checkmark.png",
+   "source_file": "res://assets/cc0_extra/ui/icon_outline_checkmark.png"
+  },
+  "ui/icon_outline_circle.png.import": {
+   "source": "ui/icon_outline_circle.png",
+   "source_file": "res://assets/cc0_extra/ui/icon_outline_circle.png"
+  },
+  "ui/icon_outline_cross.png.import": {
+   "source": "ui/icon_outline_cross.png",
+   "source_file": "res://assets/cc0_extra/ui/icon_outline_cross.png"
+  },
+  "ui/icon_outline_square.png.import": {
+   "source": "ui/icon_outline_square.png",
+   "source_file": "res://assets/cc0_extra/ui/icon_outline_square.png"
+  },
+  "ui/input_outline_rectangle.png.import": {
+   "source": "ui/input_outline_rectangle.png",
+   "source_file": "res://assets/cc0_extra/ui/input_outline_rectangle.png"
+  },
+  "ui/input_outline_square.png.import": {
+   "source": "ui/input_outline_square.png",
+   "source_file": "res://assets/cc0_extra/ui/input_outline_square.png"
+  },
+  "ui/input_rectangle.png.import": {
+   "source": "ui/input_rectangle.png",
+   "source_file": "res://assets/cc0_extra/ui/input_rectangle.png"
+  },
+  "ui/input_square.png.import": {
+   "source": "ui/input_square.png",
+   "source_file": "res://assets/cc0_extra/ui/input_square.png"
+  },
+  "ui/slide_horizontal_grey.png.import": {
+   "source": "ui/slide_horizontal_grey.png",
+   "source_file": "res://assets/cc0_extra/ui/slide_horizontal_grey.png"
+  },
+  "ui/slide_horizontal_grey_section.png.import": {
+   "source": "ui/slide_horizontal_grey_section.png",
+   "source_file": "res://assets/cc0_extra/ui/slide_horizontal_grey_section.png"
+  },
+  "ui/slide_horizontal_grey_section_wide.png.import": {
+   "source": "ui/slide_horizontal_grey_section_wide.png",
+   "source_file": "res://assets/cc0_extra/ui/slide_horizontal_grey_section_wide.png"
+  },
+  "ui/slide_vertical_grey.png.import": {
+   "source": "ui/slide_vertical_grey.png",
+   "source_file": "res://assets/cc0_extra/ui/slide_vertical_grey.png"
+  }
+ }
+}

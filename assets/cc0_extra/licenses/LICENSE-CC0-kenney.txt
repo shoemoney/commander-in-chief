@@ -1,0 +1,34 @@
+Kenney game assets -- Creative Commons Zero (CC0 1.0 Universal)
+==============================================================
+
+This directory holds CC0 assets by Kenney Vleugels (kenney.nl), copied out of
+his published packs on 2026-09-29.
+
+Full licence text, as shipped inside each source archive's License.txt
+------------------------------------------------------------------
+Kenney's own wording is reproduced in full in the per-pack sections of
+ASSETS.md, and the marker this project asserts against is:
+
+    License: (Creative Commons Zero, CC0)
+    http://creativecommons.org/publicdomain/zero/1.0/
+
+Canonical deed:  https://creativecommons.org/publicdomain/zero/1.0/
+Canonical legal: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Attribution is optional ("Support us by crediting Kenney or www.kenney.nl
+(this is not mandatory)"). It is credited here anyway.
+
+Packs represented
+-----------------
+  Kenney Crosshair Pack (1.1)        https://kenney.nl/assets/crosshair-pack
+  Kenney UI Pack (2.0)               https://kenney.nl/assets/ui-pack
+  Kenney Tower Defense (top-down)    https://kenney.nl/assets/tower-defense-top-down
+  Kenney UI SFX Set                  https://kenney.nl/assets/ui-audio
+  Kenney Impact Sounds (1.0)         https://kenney.nl/assets/impact-sounds
+  Kenney Sci-Fi Sounds (1.0)         https://kenney.nl/assets/sci-fi-sounds
+
+Railgun preview
+---------------
+  RailGun_Fire1 by BaggoNotes        https://freesound.org/people/BaggoNotes/sounds/785380/
+  "Creative Commons Zero (CC0)"      https://creativecommons.org/publicdomain/zero/1.0/
+  The author's own licence note is reproduced verbatim in ASSETS.md.

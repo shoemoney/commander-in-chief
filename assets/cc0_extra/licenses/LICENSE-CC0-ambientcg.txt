@@ -1,0 +1,35 @@
+ambientCG -- Creative Commons Zero (CC0 1.0 Universal)
+======================================================
+
+Every material in assets/cc0_extra/ground/ is derived from an ambientCG 1K
+colour map, retrieved 2026-09-29.
+
+Verbatim, from ambientCG's own licensing FAQ
+--------------------------------------------
+    "Yes. All assets are released under the Creative Commons CC0 license,
+     making them free to use without attribution - even in commercial
+     circumstances."
+
+and from the site's own meta description:
+
+    "Free 3D Assets Never Looked This Good! Get 2000+ PBR Materials, HDRIs
+     and more for free under the CC0 Public Domain license."
+
+Licence page:  https://ambientcg.com/index.php?language=en
+Credits page:  https://ambientcg.com/credits
+
+Canonical deed:  https://creativecommons.org/publicdomain/zero/1.0/
+Canonical legal: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Derivation
+----------
+Each output tile is a local, lossless re-derivation, produced by
+tools/fetch_cc0.py and reproducible from the public JSON API:
+
+    1K-JPG archive -> extract <assetId>_1K-JPG_Color.jpg only
+    -> centre-crop to 512x512 -> half-offset wrap-blend (makes both axes tile)
+    -> LANCZOS downsample to 128x128 -> PNG
+
+No normal, roughness, displacement, AO, HDRI or .usdc/.blend/.tres data was
+downloaded or kept, and no ambientCG byte other than the colour map of the
+six listed assetIds exists anywhere in this repository.
